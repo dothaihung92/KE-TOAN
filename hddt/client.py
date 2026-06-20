@@ -27,9 +27,9 @@ import requests
 
 
 BASE_URL = "https://hoadondientu.gdt.gov.vn"
-# Các endpoint xác thực và tra cứu. Mặc định dùng cổng HTTPS chuẩn (443).
-# Có thể ghi đè bằng biến môi trường HDDT_API_URL nếu Tổng cục Thuế đổi địa chỉ.
-API_URL = os.environ.get("HDDT_API_URL", "https://hoadondientu.gdt.gov.vn")
+# API xác thực và tra cứu của Tổng cục Thuế chạy ở cổng :30000.
+# Có thể ghi đè bằng biến môi trường HDDT_API_URL nếu cần.
+API_URL = os.environ.get("HDDT_API_URL", "https://hoadondientu.gdt.gov.vn:30000")
 
 DEFAULT_TIMEOUT = 60
 
