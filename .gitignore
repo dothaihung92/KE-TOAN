@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# File dữ liệu xuất ra
+*.xlsx
+*.csv
+hoadon*.json
+
+# Captcha tạm
+captcha_*.svg
+captcha_*.png
+
+# Token đã lưu
+token.json
+.env
