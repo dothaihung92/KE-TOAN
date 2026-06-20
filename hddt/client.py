@@ -18,6 +18,7 @@ Các endpoint tra cứu:
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any, Dict, Iterator, List, Optional
@@ -26,8 +27,9 @@ import requests
 
 
 BASE_URL = "https://hoadondientu.gdt.gov.vn"
-# Các endpoint xác thực và tra cứu dùng cổng :30000
-API_URL = "https://hoadondientu.gdt.gov.vn:30000"
+# Các endpoint xác thực và tra cứu. Mặc định dùng cổng HTTPS chuẩn (443).
+# Có thể ghi đè bằng biến môi trường HDDT_API_URL nếu Tổng cục Thuế đổi địa chỉ.
+API_URL = os.environ.get("HDDT_API_URL", "https://hoadondientu.gdt.gov.vn")
 
 DEFAULT_TIMEOUT = 60
 

@@ -126,7 +126,7 @@ run_web.py            # Khởi chạy web
 
 ## Ghi chú kỹ thuật
 
-- API gốc: `https://hoadondientu.gdt.gov.vn:30000`
+- API gốc: `https://hoadondientu.gdt.gov.vn` (có thể đổi qua biến môi trường `HDDT_API_URL`)
 - Token (JWT) có thời hạn; khi hết hạn cần đăng nhập lại.
 - Các mã trường chính: `nbmst` (MST bán), `nmmst` (MST mua), `shdon` (số HĐ),
   `tdlap` (ngày lập), `tgtttbso` (tổng tiền thanh toán)...
