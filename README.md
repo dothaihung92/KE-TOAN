@@ -84,14 +84,44 @@ chi_tiet = client.get_invoice_detail(
 )
 ```
 
+## Giao diện web (cho dịch vụ kế toán)
+
+Nếu bạn quản lý nhiều công ty, dùng giao diện web để **lưu tài khoản từng công ty**
+và tra cứu nhanh:
+
+```bash
+# Nên đặt chuỗi bí mật cố định để mã hoá mật khẩu công ty
+export HDDT_SECRET="mot_chuoi_bi_mat_dai_va_ngau_nhien"
+python run_web.py
+# Mở trình duyệt: http://127.0.0.1:5000
+```
+
+Chức năng web:
+
+- **Quản lý công ty**: thêm / sửa / xoá danh sách công ty (tên, MST, mật khẩu).
+  Mật khẩu được **mã hoá** (Fernet) trước khi lưu vào SQLite — không lưu văn bản thường.
+- **Đăng nhập trên web**: bấm *Tra cứu* ở một công ty → hiển thị **captcha trực tiếp**
+  trên trình duyệt, MST/mật khẩu tự điền, bạn chỉ cần gõ captcha.
+- **Tra cứu** hoá đơn mua vào / bán ra (kể cả máy tính tiền) theo khoảng thời gian,
+  xem bảng kết quả ngay.
+- **Tải xuống** Excel hoặc CSV.
+
+> 🔐 Thư mục `instance/` chứa CSDL công ty và khoá mã hoá — đã được `.gitignore`,
+> **không commit** lên git. Hãy sao lưu và bảo vệ thư mục này.
+
 ## Cấu trúc dự án
 
 ```
-hddt/
-  client.py     # Giao tiếp API: captcha, đăng nhập, tra cứu hoá đơn
-  captcha.py    # Lưu / hiển thị / (tuỳ chọn) OCR captcha
-  exporter.py   # Xuất JSON / CSV / Excel
-  cli.py        # Giao diện dòng lệnh
+hddt/                 # Thư viện lõi
+  client.py           # Giao tiếp API: captcha, đăng nhập, tra cứu hoá đơn
+  captcha.py          # Lưu / hiển thị / (tuỳ chọn) OCR captcha
+  exporter.py         # Xuất JSON / CSV / Excel
+  cli.py              # Giao diện dòng lệnh
+webapp/               # Giao diện web
+  app.py              # Các route Flask
+  db.py               # Quản lý công ty + mã hoá mật khẩu (SQLite)
+  templates/          # Giao diện HTML
+run_web.py            # Khởi chạy web
 ```
 
 ## Ghi chú kỹ thuật

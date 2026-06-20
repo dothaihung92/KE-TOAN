@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:480px">
+  <h1>Đăng nhập HĐĐT</h1>
+  <p class="muted">Công ty: <b>{{ company['ten'] }}</b> — MST: {{ company['mst'] }}</p>
+  <form method="post">
+    <input type="hidden" name="captcha_key" value="{{ captcha_key }}">
+    <label>Mã captcha (nhìn ảnh bên dưới)</label>
+    <div style="background:#fff;border:1px solid var(--vien);border-radius:8px;
+                padding:8px;text-align:center;margin-bottom:8px">
+      {{ captcha_svg | safe }}
+    </div>
+    <a class="muted" href="{{ url_for('company_login', cid=company['id']) }}">↻ Lấy captcha khác</a>
+    <input name="captcha_value" autocomplete="off" autofocus
+           placeholder="Nhập mã captcha" style="margin-top:8px">
+    <div style="margin-top:18px" class="actions">
+      <button class="btn" type="submit">Đăng nhập</button>
+      <a class="btn sec" href="{{ url_for('index') }}">Quay lại</a>
+    </div>
+  </form>
+  <p class="muted" style="margin-top:14px">
+    MST và mật khẩu đã lưu sẽ tự dùng để đăng nhập; bạn chỉ cần nhập captcha.
+  </p>
+</div>
+{% endblock %}

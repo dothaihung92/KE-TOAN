@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>Danh sách công ty</h1>
+  <p class="muted">Quản lý tài khoản HĐĐT của các công ty (khách hàng). Mật khẩu được mã hoá khi lưu.</p>
+  {% if companies %}
+  <div class="tablebox">
+    <table>
+      <thead>
+        <tr><th>Tên công ty</th><th>MST</th><th>Ghi chú</th><th>Thao tác</th></tr>
+      </thead>
+      <tbody>
+        {% for c in companies %}
+        <tr>
+          <td>
+            {{ c['ten'] }}
+            {% if active_id == c['id'] %}<span class="pill">đang đăng nhập</span>{% endif %}
+          </td>
+          <td>{{ c['mst'] }}</td>
+          <td>{{ c['ghi_chu'] }}</td>
+          <td>
+            <div class="actions">
+              <a class="btn sm" href="{{ url_for('company_login', cid=c['id']) }}">Tra cứu</a>
+              <a class="btn sm sec" href="{{ url_for('company_edit', cid=c['id']) }}">Sửa</a>
+              <form method="post" action="{{ url_for('company_delete', cid=c['id']) }}"
+                    onsubmit="return confirm('Xoá công ty {{ c['ten'] }}?');" style="display:inline">
+                <button class="btn sm danger" type="submit">Xoá</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>Chưa có công ty nào. <a href="{{ url_for('company_add') }}">Thêm công ty đầu tiên →</a></p>
+  {% endif %}
+</div>
+{% endblock %}

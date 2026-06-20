@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:560px">
+  <h1>{{ "Thêm công ty" if action == "add" else "Sửa thông tin công ty" }}</h1>
+  <form method="post">
+    <label>Tên công ty *</label>
+    <input name="ten" required value="{{ company['ten'] if company else '' }}">
+
+    <label>MST / Tài khoản đăng nhập HĐĐT *</label>
+    <input name="mst" required value="{{ company['mst'] if company else '' }}">
+
+    <label>Mật khẩu {{ "*" if action == "add" else "(để trống nếu không đổi)" }}</label>
+    <input name="password" type="password" {{ "required" if action == "add" else "" }}
+           autocomplete="new-password">
+
+    <label>Ghi chú</label>
+    <input name="ghi_chu" value="{{ company['ghi_chu'] if company else '' }}">
+
+    <div style="margin-top:18px" class="actions">
+      <button class="btn" type="submit">Lưu</button>
+      <a class="btn sec" href="{{ url_for('index') }}">Huỷ</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
