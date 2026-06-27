@@ -1849,25 +1849,25 @@ async function dmXuat(){
 async function nlDanhMucVTHH(){
   document.getElementById('dmTitle').textContent='📦 Danh Mục VTHH';
   document.getElementById('dmLuuBtn').style.display='none';
-  document.getElementById('dmInfo').textContent='Đang lấy mã hàng mới...';
+  document.getElementById('dmInfo').textContent='Đang lọc dữ liệu đang xử lý...';
   document.getElementById('dmTableWrap').innerHTML='';
   document.getElementById('dmModal').style.display='block';
   try{
-    const r=await fetch(`/api/danh-muc-vthh/${current}`,{method:'POST'});
+    const r=await fetch(`/api/danh-muc-vthh/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Lỗi');
     const d=await r.json();
     dmVeBang(d.headers.slice(0,4),d.rows);
-    document.getElementById('dmInfo').innerHTML=`<b style="color:#2e5c8a">${d.so_dong} mã hàng MỚI</b> (chưa import VTHH) từ DM Hàng hóa + NVL đã lưu. Bấm <b>Xuất Excel</b> để kết xuất (sẽ đánh dấu đã import).`;
+    document.getElementById('dmInfo').innerHTML=`<b style="color:#2e5c8a">${d.so_dong} mã hàng</b> từ bảng kê đầu vào đang mở (Nợ 1561/156 và 152), đã lọc trùng. Bấm <b>Xuất Excel</b> để kết xuất.`;
     document.getElementById('dmXuatBtn').onclick=dmXuatVTHH;
   }catch(e){document.getElementById('dmInfo').textContent='Lỗi: '+e.message;}
 }
 async function dmXuatVTHH(){
   try{
-    const r=await fetch(`/api/danh-muc-vthh/${current}?export=1`,{method:'POST'});
+    const r=await fetch(`/api/danh-muc-vthh/${current}?export=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
-    const sm=r.headers.get('X-So-Moi')||'';
+    const sm=r.headers.get('X-So-Dong')||'';
     dl(await r.blob(),`DanhMuc_VTHH.xlsx`);
-    toast(`📦 Đã xuất VTHH (${sm} mã mới) & đánh dấu đã import`,'ok');
+    toast(`📦 Đã xuất VTHH (${sm} mã hàng)`,'ok');
     dmDong();
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }

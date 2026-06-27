@@ -2585,28 +2585,56 @@ VTHH_HEADERS = [
     "Theo dõi vật tư hàng hóa theo mã quy cách", "Mã quy cách", "Tên quy cách",
     "Cho phép trùng"]
 
-def _gen_vthh(cid):
-    """Lấy các MÃ HÀNG MỚI (chưa import VTHH) từ DM Hàng hóa + DM NVL."""
+def _gen_vthh_from_grid(cid, header, rows):
+    """Danh mục VTHH từ lưới Nhập Liệu ĐANG MỞ: lấy mọi dòng Nợ 1561/156
+    (Hàng hóa) và 152 (NVL), gán mã theo bảng đã học (nhất quán với DM Hàng
+    hóa/NVL), lọc trùng theo mã. Trả [Mã, Tên, Tính chất=0, ĐVT]."""
     data = _doc_du_lieu_cty(cid)
-    exported = set(data.get("vthh_exported", []))
-    out, new_codes = [], []
-    for loai in ("hh", "nvl"):
-        store = data.get("dm_" + loai, {}) or {}
-        items = store.get("items", {})
-        for ma in sorted(items.keys()):
-            if ma in exported:
-                continue
-            info = items[ma]
-            out.append([ma, info.get("ten", ""), "0", info.get("dvt", "")])
-            new_codes.append(ma)
-    return out, new_codes
+    maps = {"hh": dict(data.get("dm_hh", {}).get("map", {})),
+            "nvl": dict(data.get("dm_nvl", {}).get("map", {}))}
+    nexts = {"hh": int(data.get("dm_hh", {}).get("next", 1)),
+             "nvl": int(data.get("dm_nvl", {}).get("next", 1))}
+    prefixes = {"hh": "HH", "nvl": "NVL"}
+    col = _dm_cols(header)
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    seen_ma = set()
+    out = []
+    for r in rows:
+        no = str(gv(r, col["no"]) or "").strip()
+        if no in ("1561", "156"):
+            grp = "hh"
+        elif no == "152":
+            grp = "nvl"
+        else:
+            continue
+        ten = str(gv(r, col["ten"]) or "").strip()
+        dvt = str(gv(r, col["dvt"]) or "").strip()
+        if not ten:
+            continue
+        ky = "".join(ten.split()) + dvt
+        if ky in maps[grp]:
+            ma = maps[grp][ky]
+        else:
+            ma = prefixes[grp] + str(nexts[grp]).zfill(5)
+            maps[grp][ky] = ma
+            nexts[grp] += 1
+        if ma in seen_ma:
+            continue                       # lọc trùng theo mã
+        seen_ma.add(ma)
+        out.append([ma, ten, "0", dvt])
+    out.sort(key=lambda x: x[0])
+    return out
 
 
 @app.post("/api/danh-muc-vthh/{cid}")
-async def danh_muc_vthh(cid: int, export: int = 0):
-    """Danh mục VTHH: chỉ các mã hàng MỚI lưu (HH+NVL) chưa import.
-    export=1 -> trả file Excel + đánh dấu đã import."""
-    out, new_codes = _gen_vthh(cid)
+async def danh_muc_vthh(cid: int, request: Request, export: int = 0):
+    """Danh mục VTHH từ dữ liệu đang xử lý trên lưới (Nợ 1561/156/152).
+    export=1 -> trả file Excel."""
+    body = await request.json()
+    out = _gen_vthh_from_grid(cid, body.get("header", []), body.get("rows", []))
     if not export:
         return {"headers": VTHH_HEADERS, "rows": out, "so_dong": len(out)}
     import openpyxl
@@ -2635,10 +2663,6 @@ async def danh_muc_vthh(cid: int, export: int = 0):
     fname = f"DanhMuc_VTHH_{mst}.xlsx"
     path = os.path.join(DOWNLOAD_DIR, fname)
     wb.save(path)
-    # đánh dấu đã import
-    data = _doc_du_lieu_cty(cid)
-    data["vthh_exported"] = sorted(set(data.get("vthh_exported", [])) | set(new_codes))
-    _ghi_du_lieu_cty(cid, data)
     import shutil
     for d in (_get_desktop_dir(),
               (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
@@ -2647,7 +2671,7 @@ async def danh_muc_vthh(cid: int, export: int = 0):
                 shutil.copy(path, os.path.join(d, fname))
             except Exception:
                 pass
-    return FileResponse(path, filename=fname, headers={"X-So-Moi": str(len(new_codes))})
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
 
 
 @app.get("/api/danh-muc-ncc/{cid}")
