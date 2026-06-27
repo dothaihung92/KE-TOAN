@@ -711,15 +711,18 @@ def login(cid: int, body: dict = Body(...)):
 
 # ---------- TỰ ĐỘNG GIẢI CAPTCHA + LOGIN (retry 3 lần) ----------
 _DDDDOCR_INSTANCE = None
+_DDDDOCR_ERR = ""
 
 def _get_ddddocr():
-    global _DDDDOCR_INSTANCE
+    global _DDDDOCR_INSTANCE, _DDDDOCR_ERR
     if _DDDDOCR_INSTANCE is None:
         try:
             import ddddocr
             _DDDDOCR_INSTANCE = ddddocr.DdddOcr(show_ad=False)
-        except Exception:
+            _DDDDOCR_ERR = ""
+        except Exception as e:
             _DDDDOCR_INSTANCE = False
+            _DDDDOCR_ERR = f"{type(e).__name__}: {e}"
     return _DDDDOCR_INSTANCE or None
 
 def _svg_to_png(svg_text: str) -> bytes:
@@ -869,6 +872,74 @@ def auto_login(cid: int):
             last_err = str(e)
             continue
     raise HTTPException(401, f"Tự đăng nhập thất bại sau 5 lần. Mã đã thử: {tried}. Lỗi cuối: {last_err}")
+
+
+@app.get("/api/captcha-debug/{cid}")
+def captcha_debug(cid: int):
+    """Chẩn đoán vì sao không tự giải được captcha.
+    Mở trong trình duyệt: http://127.0.0.1:8686/api/captcha-debug/<id-công-ty>
+    """
+    import re as _re_dbg
+    info = {}
+
+    # 1) Trạng thái thư viện
+    info["ddddocr_loaded"] = _get_ddddocr() is not None
+    info["ddddocr_error"] = _DDDDOCR_ERR
+    try:
+        import svglib  # noqa
+        info["svglib_loaded"] = True
+    except Exception as e:
+        info["svglib_loaded"] = False
+        info["svglib_error"] = f"{type(e).__name__}: {e}"
+    try:
+        import reportlab  # noqa
+        info["reportlab_loaded"] = True
+    except Exception as e:
+        info["reportlab_loaded"] = False
+        info["reportlab_error"] = f"{type(e).__name__}: {e}"
+    try:
+        import PIL  # noqa
+        info["pillow_loaded"] = True
+    except Exception as e:
+        info["pillow_loaded"] = False
+        info["pillow_error"] = f"{type(e).__name__}: {e}"
+
+    # 2) Lấy 1 captcha thật và phân tích
+    try:
+        client = get_client(cid)
+        cap = client.get_captcha()
+    except Exception as e:
+        info["captcha_fetch_error"] = f"{type(e).__name__}: {e}"
+        return info
+
+    content = cap.get("content") or ""
+    info["has_key"] = bool(cap.get("key"))
+    info["content_len"] = len(content)
+    info["content_head_120"] = content[:120]
+    s = content.strip()
+    if s.startswith("data:"):
+        info["content_type"] = "data-uri: " + s[:40]
+    elif "<svg" in s.lower():
+        info["content_type"] = "raw-svg"
+    else:
+        info["content_type"] = "khác (có thể base64 trần)"
+
+    # 3) Có <text> trong SVG không?
+    svg_for_check = ""
+    if s.startswith("data:") and "svg" in s[:40].lower():
+        try:
+            svg_for_check = base64.b64decode(s.split(",", 1)[1]).decode("utf-8", "replace")
+        except Exception:
+            svg_for_check = ""
+    elif "<svg" in s.lower():
+        svg_for_check = s
+    info["co_the_text"] = ("<text" in svg_for_check.lower()) if svg_for_check else None
+    info["co_the_path"] = ("<path" in svg_for_check.lower()) if svg_for_check else None
+    info["co_the_image"] = ("<image" in svg_for_check.lower()) if svg_for_check else None
+
+    # 4) Thử giải thật
+    info["ket_qua_giai"] = _solve_captcha(content) or "(rỗng)"
+    return info
 
 
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
