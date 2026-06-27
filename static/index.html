@@ -1248,6 +1248,7 @@ function moBangKe(loai){
           <button class="btn ghost sm" onclick="nlCoDinhCot()" id="nlFreezeBtn">📌 Cố định cột</button>
           <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
           <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
+          ${loai==='in'?`<button class="btn sm" onclick="nlMuaHangDV(this)" style="background:#5a3e8a" title="Lọc các dòng Nợ là TK chi phí 6xx và kết xuất form MISA Chứng từ mua dịch vụ">📑 Mua Hàng Dịch Vụ</button>`:''}
           <button class="btn ghost sm" onclick="xoaNhapLieu()" style="color:#c00">🗑 Xóa bộ</button>
         </div>
       </div>
@@ -1698,6 +1699,18 @@ async function nlXuatExcel(){
     if(!r.ok)throw new Error('Xuất thất bại');
     dl(await r.blob(),`NhapLieu_${nhapLieuLoaiHienTai}.xlsx`);toast('Đã xuất Excel','ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
+}
+async function nlMuaHangDV(btn){
+  const old=btn?btn.innerHTML:'';
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang lọc...';}
+  try{
+    const r=await fetch(`/api/mua-hang-dv/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const sd=r.headers.get('X-So-Dong')||'';
+    dl(await r.blob(),`MuaHangDichVu.xlsx`);
+    toast(sd&&sd!=='0'?`📑 Đã kết xuất ${sd} dòng mua dịch vụ (Nợ 6xx)`:'⚠ Không có dòng nào Nợ là TK 6xx','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  if(btn){btn.disabled=false;btn.innerHTML=old;}
 }
 async function xoaNhapLieu(){
   if(!confirm('Xóa bộ dữ liệu này (cho công ty hiện tại)?'))return;

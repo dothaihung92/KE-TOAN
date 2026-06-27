@@ -1955,6 +1955,13 @@ def _chuan_mst(s):
     """Chuẩn hóa MST: bỏ khoảng trắng, gạch, chấm."""
     return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
 
+def _dinh_dang_mst(s):
+    """MST 13 số (đơn vị trực thuộc) -> 10 số + '-' + 3 số. Khác giữ nguyên."""
+    s = _chuan_mst(s)
+    if len(s) == 13 and s.isdigit():
+        return s[:10] + "-" + s[10:]
+    return s
+
 def _co_theo_tong(tong):
     """Cột Có: >= 5 triệu -> 331 (phải trả NB), còn lại -> 1111 (tiền mặt)."""
     t = _to_num(tong)
@@ -2275,6 +2282,148 @@ async def nhap_lieu_export(cid: int, request: Request, loai: str = "in"):
         except Exception:
             pass
     return FileResponse(path, filename=fname)
+
+
+@app.post("/api/mua-hang-dv/{cid}")
+async def mua_hang_dich_vu(cid: int, request: Request):
+    """Lọc Bảng kê Mua vào (đã hạch toán) -> kết xuất 'Chứng từ mua dịch vụ'
+    theo form MISA. Chỉ lấy dòng có Nợ bắt đầu bằng '6' (chi phí dịch vụ).
+    Nhận {header, rows} của lưới Nhập Liệu đầu vào."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    body = await request.json()
+    header = body.get("header", [])
+    rows = body.get("rows", [])
+    hlow = [str(h or "").strip().lower() for h in header]
+
+    def tim(eqs=(), contains=()):
+        for i, h in enumerate(hlow):
+            if h in eqs:
+                return i
+        for i, h in enumerate(hlow):
+            if any(k in h for k in contains):
+                return i
+        return -1
+
+    i_kh = tim(("ký hiệu",), ("ký hiệu",))
+    i_so = tim(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn"))
+    i_ngay = tim(("ngày",), ("ngày",))
+    i_nb = tim(("người bán",), ("người bán",))
+    i_mst = tim(("mst bán", "mst"), ("mst",))
+    i_ten = tim(("tên hàng hóa/dịch vụ",), ("tên hàng",))
+    i_dvt = tim(("đvt",), ("đvt", "đơn vị tính"))
+    i_sl = tim(("số lượng",), ("số lượng",))
+    i_dg = tim(("đơn giá",), ("đơn giá",))
+    i_tt = tim(("thành tiền",), ("thành tiền",))
+    i_ts = tim(("thuế suất",), ("thuế suất",))   # tránh 'thuế suất nk' nhờ ưu tiên ==
+    i_tthue = tim(("tiền thuế gtgt",), ("tiền thuế",))
+    i_no = tim(("nợ",), ())
+    i_co = tim(("có",), ())
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    def ts_num(v):
+        s = str(v or "").strip().upper().replace("%", "").replace(",", ".")
+        if s in ("", "KCT", "KKKNT", "KHTKKNT", "KHÔNG", "KHONG", "KO"):
+            return 0
+        try:
+            f = float(s)
+            return int(f) if f == int(f) else f
+        except Exception:
+            return 0
+
+    def so_chung_tu(sohd, mst_disp, ngay):
+        sd = "".join(ch for ch in str(sohd or "") if ch.isdigit())
+        return "DV" + sd[-2:] + str(mst_disp)[-6:] + str(ngay or "")
+
+    # form headers (cột A..AN) + cột 'Lọc'
+    out_headers = [
+        "Hiển thị trên sổ", "Phương thức thanh toán", "Nhận kèm hóa đơn",
+        "Là CP mua hàng", "Ngày hạch toán (*)", "Ngày chứng từ (*)",
+        "Số chứng từ (*)", "Mã nhà cung cấp", "Tên nhà cung cấp", "Địa chỉ",
+        "Diễn giải/Lý do chi/Nội dung thanh toán", "NV mua hàng", "Loại tiền",
+        "Tỷ giá", "Mã dịch vụ (*)", "Tên dịch vụ", "TK chi phí/TK kho (*)",
+        "TK công nợ/TK tiền (*)", "Đối tượng", "ĐVT", "Số lượng", "Đơn giá",
+        "Thành tiền", "Thành tiền quy đổi", "Tỷ lệ CK (%)", "Tiền chiết khấu",
+        "Tiền chiết khấu quy đổi", "% thuế GTGT", "Tiền thuế GTGT",
+        "Tiền thuế GTGT quy đổi", "TK thuế GTGT", "Mẫu số HĐ", "Ký hiệu HĐ",
+        "Số hóa đơn", "Ngày hóa đơn", "Nhóm HHDV mua vào", "Mã NCC", "Tên NCC",
+        "Mã số thuế NCC", "Địa chỉ NCC"]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Chứng từ mua dịch vụ"
+    for c, h in enumerate(out_headers, 1):
+        ws.cell(1, c).value = h
+    ws.cell(1, 42).value = "Lọc"      # cột AP
+    for c in range(1, 43):
+        if ws.cell(1, c).value:
+            ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+            ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+
+    cot_thapphan = {21, 22}            # U,V số lượng/đơn giá (giữ phần thập phân)
+    cot_tien = {23, 29}                # W,AC thành tiền/tiền thuế (số nguyên)
+    cot_text = {7, 8, 19, 34, 37, 39, 42, 43}  # G,H,S,AH,AK,AM,AP,AQ giữ dạng chữ
+    r_out = 1
+    so_dong = 0
+    for r in rows:
+        no = str(gv(r, i_no) or "").strip()
+        if not no.startswith("6"):    # chỉ lấy Nợ là TK chi phí 6xx
+            continue
+        co = str(gv(r, i_co) or "").strip()
+        mst_disp = _dinh_dang_mst(gv(r, i_mst))
+        ngay = str(gv(r, i_ngay) or "")
+        sohd = gv(r, i_so)
+        ten = gv(r, i_ten)
+        soct = so_chung_tu(sohd, mst_disp, ngay)
+        r_out += 1
+        row_vals = {
+            1: 0, 2: 1, 3: 1,                       # A,B,C
+            5: ngay, 6: ngay, 7: soct,              # E,F,G
+            8: mst_disp, 9: gv(r, i_nb),            # H,I
+            11: ten,                                 # K Diễn giải
+            15: "MHDV", 16: ten,                    # O,P
+            17: no, 18: co, 19: mst_disp,           # Q,R,S
+            20: gv(r, i_dvt), 21: _to_num(gv(r, i_sl)),
+            22: _to_num(gv(r, i_dg)), 23: _to_num(gv(r, i_tt)),
+            28: ts_num(gv(r, i_ts)), 29: _to_num(gv(r, i_tthue)),
+            31: "1331",                              # AE TK thuế GTGT
+            34: sohd, 35: ngay, 36: "1",            # AH,AI,AJ
+            37: mst_disp, 38: gv(r, i_nb), 39: mst_disp,  # AK,AL,AM
+            42: sohd, 43: soct,                      # AP Lọc, AQ
+        }
+        for c, v in row_vals.items():
+            cell = ws.cell(r_out, c)
+            cell.value = v
+            if c in cot_text:
+                cell.number_format = "@"
+            elif c in cot_thapphan:
+                cell.number_format = "#,##0.####"
+            elif c in cot_tien:
+                cell.number_format = "#,##0"
+        so_dong += 1
+
+    for c in range(1, 44):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst_cty = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"MuaHangDichVu_{mst_cty}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(), (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(so_dong)})
 
 
 @app.get("/api/danh-muc-ncc/{cid}")
