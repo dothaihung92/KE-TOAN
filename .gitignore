@@ -18,7 +18,10 @@ captcha_*.png
 token.json
 .env
 
-# Dữ liệu cục bộ của web app (DB công ty, khoá mã hoá) - KHÔNG commit
+# Dữ liệu cục bộ - KHÔNG commit (chứa tài khoản/mật khẩu công ty, hoá đơn thật)
 instance/
 *.db
 secret.key
+data/
+downloads/
+.installed

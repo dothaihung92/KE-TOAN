@@ -1,12 +1,5 @@
-# Bắt buộc
-requests>=2.28
-openpyxl>=3.1
-
-# Giao diện web + mã hoá mật khẩu công ty
-Flask>=3.0
-cryptography>=41.0
-
-# Tuỳ chọn: dùng để hiển thị/giải captcha tự động (--auto-ocr)
-# cairosvg>=2.7
-# pytesseract>=0.3
-# Pillow>=10.0
+fastapi
+uvicorn
+requests
+openpyxl
+python-multipart

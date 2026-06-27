@@ -1,135 +1,94 @@
-# Phần mềm lấy dữ liệu hoá đơn điện tử (HĐĐT)
+# Phần mềm Quản lý Hóa đơn điện tử — Đa công ty
 
-Công cụ tải dữ liệu hoá đơn điện tử của **chính doanh nghiệp** từ cổng tra cứu
-chính thức của Tổng cục Thuế: <https://hoadondientu.gdt.gov.vn>.
+Kết nối trang **hoadondientu.gdt.gov.vn** của Tổng cục Thuế để tra cứu và tải hóa
+đơn (XML, Excel tổng hợp, HTML) cho **nhiều công ty**, mỗi công ty một tài khoản
+thuế riêng. Phù hợp cho **dịch vụ kế toán** quản lý nhiều khách hàng.
 
-Sử dụng đúng API mà trang web của Tổng cục Thuế dùng (đăng nhập bằng tài khoản
-HĐĐT + captcha), sau đó tải hoá đơn **mua vào / bán ra** (kể cả hoá đơn máy tính
-tiền) và xuất ra **Excel / CSV / JSON**.
+Backend: **FastAPI + SQLite**. Giao diện: 1 trang web (`static/index.html`).
 
 > ⚠️ Chỉ dùng để truy xuất dữ liệu hoá đơn mà bạn có quyền truy cập hợp pháp
-> (tài khoản của doanh nghiệp bạn hoặc khách hàng đã uỷ quyền). Hãy tuân thủ
-> điều khoản sử dụng của Tổng cục Thuế.
+> (tài khoản của doanh nghiệp bạn hoặc khách hàng đã uỷ quyền). Đăng nhập bằng
+> chính tài khoản thật của bạn → hợp pháp, đúng quyền.
 
-## Tính năng
+---
 
-- Đăng nhập bằng tài khoản HĐĐT, hỗ trợ nhập captcha thủ công (an toàn nhất)
-  hoặc thử giải tự động bằng OCR.
-- Tải hoá đơn theo khoảng thời gian, tự động phân trang để lấy **toàn bộ**.
-- 4 loại hoá đơn: `purchase` (mua vào), `sold` (bán ra),
-  `sco-purchase` / `sco-sold` (hoá đơn máy tính tiền).
-- Xuất Excel nhiều sheet, hoặc CSV / JSON.
-- Dùng được như thư viện Python hoặc công cụ dòng lệnh.
+## 🚀 Cách chạy
 
-## Cài đặt
+### Bước 1: Cài Python (chỉ làm 1 lần)
+- Tải tại: <https://www.python.org/downloads/>
+- **Quan trọng:** khi cài, tick vào ô **"Add Python to PATH"**
+
+### Bước 2: Chạy phần mềm
+- **Windows:** bấm đúp vào file **`start.bat`**
+- **Mac/Linux:** chạy `./start.sh` trong Terminal
+
+Lần đầu sẽ tự cài thư viện (hơi chậm ~1-2 phút). Các lần sau mở nhanh.
+Trình duyệt tự mở tại `http://127.0.0.1:8686`. Để tắt: đóng cửa sổ đen / Ctrl+C.
+
+Hoặc chạy thủ công:
 
 ```bash
 pip install -r requirements.txt
+python server.py
 ```
 
-(Tuỳ chọn để dùng `--auto-ocr`: bỏ comment các dòng `cairosvg`, `pytesseract`,
-`Pillow` trong `requirements.txt` và cài thêm `tesseract-ocr` của hệ điều hành.)
+---
 
-## Dùng nhanh (dòng lệnh)
+## 📋 Cách sử dụng
 
-```bash
-# Đặt tài khoản qua biến môi trường để không lộ trên dòng lệnh
-export HDDT_USERNAME="0312345678"        # MST / tài khoản
-export HDDT_PASSWORD="mat_khau_cua_ban"
+1. **Thêm công ty** (nút "+ Thêm công ty"): nhập tên, MST, tài khoản + mật khẩu
+   trang Thuế của công ty đó.
+2. **Chọn công ty** → **1. Đăng nhập**: bấm "Lấy mã", nhập captcha, Đăng nhập.
+3. **2. Tra cứu**: chọn khoảng ngày, chọn mua vào / bán ra → "Tra cứu hóa đơn".
+4. **3. Tải dữ liệu**: xem bảng, rồi tải **XML (.zip)** hoặc **Xuất Excel tổng hợp**.
 
-python -m hddt.cli \
-  --tu-ngay 01/01/2024 --den-ngay 31/03/2024 \
-  --loai purchase sold \
-  --xuat hoadon_Q1.xlsx
-```
+### Tra cứu nhiều công ty cùng lúc (batch)
 
-Chương trình sẽ lấy captcha, lưu thành file ảnh và mở ra; bạn nhìn rồi gõ captcha
-để đăng nhập. Sau đó nó tải hoá đơn và xuất ra file.
+Sau khi đã đăng nhập cho từng công ty, dùng khu **"Tra cứu hàng loạt"** để chọn
+nhiều công ty và lấy hóa đơn cho tất cả trong một lần — chạy lần lượt từng công
+ty (an toàn, tránh bị Tổng cục Thuế chặn tạm 429).
 
-### Các tham số chính
+Dữ liệu được lưu lại trong `data/hddt.db` nên lần sau mở vẫn còn.
 
-| Tham số | Ý nghĩa |
-|---|---|
-| `--tu-ngay`, `--den-ngay` | Khoảng thời gian (dd/mm/yyyy hoặc yyyy-mm-dd) |
-| `--loai` | `purchase`, `sold`, `sco-purchase`, `sco-sold` |
-| `--ttxly` | Lọc theo trạng thái xử lý (vd `5`); bỏ trống = tất cả |
-| `--xuat` | File xuất `.xlsx`, `.csv` hoặc `.json` |
-| `--auto-ocr` | Thử giải captcha tự động (cần cài thêm thư viện) |
-| `--token` | Dùng token có sẵn thay vì đăng nhập |
+---
 
-## Dùng như thư viện
+## 🔒 Bảo mật & dữ liệu
+- Toàn bộ thông tin (kể cả mật khẩu) lưu **cục bộ** trên máy bạn trong `data/hddt.db`.
+- Phần mềm chỉ kết nối tới trang Tổng cục Thuế, không gửi dữ liệu đi đâu khác.
+- Thư mục `data/` và `downloads/` đã được `.gitignore` — **không commit** lên git.
 
-```python
-from hddt import HoaDonDienTuClient
+---
 
-client = HoaDonDienTuClient()
+## ⚠️ Lưu ý kỹ thuật
 
-# 1. Lấy captcha
-captcha = client.get_captcha()
-# captcha["content"] là ảnh SVG -> hiển thị cho người dùng giải
-cvalue = input("Nhập captcha: ")
+Tổng cục Thuế **không công bố API chính thức**. Phần mềm dùng các endpoint nội bộ
+mà trình duyệt gọi khi thao tác trên web. Các đường dẫn nằm gọn trong class
+`GDTClient` ở đầu `server.py`:
 
-# 2. Đăng nhập
-client.authenticate("0312345678", "mat_khau", captcha["key"], cvalue)
+- `/api/captcha` — lấy captcha
+- `/api/security-taxpayer/authenticate` — đăng nhập
+- `/api/query/invoices/{purchase,sold}` (và `/api/sco-query/...` cho hóa đơn
+  máy tính tiền) — tra cứu
+- `/api/query/invoices/export-xml` — tải XML
+- `/api/query/invoices/detail` — chi tiết hóa đơn
 
-# 3. Tra cứu (tự phân trang)
-hoa_don = client.query_invoices(
-    "purchase", "01/01/2024", "31/03/2024"
-)
-print(len(hoa_don), "hoá đơn")
+**Nếu Tổng cục Thuế đổi cấu trúc** (lỗi 404, login fail dù mật khẩu đúng, captcha
+không hiện): mở Chrome → F12 → tab **Network** → đăng nhập + tra cứu → xem các
+request (lọc `Fetch/XHR`) để lấy URL/payload/header thật, rồi sửa trong `GDTClient`.
 
-# 4. Chi tiết một hoá đơn
-chi_tiet = client.get_invoice_detail(
-    nbmst="0312345678", khhdon="C24TAA", khmshdon=1, shdon=123
-)
-```
+---
 
-## Giao diện web (cho dịch vụ kế toán)
-
-Nếu bạn quản lý nhiều công ty, dùng giao diện web để **lưu tài khoản từng công ty**
-và tra cứu nhanh:
-
-```bash
-# Nên đặt chuỗi bí mật cố định để mã hoá mật khẩu công ty
-export HDDT_SECRET="mot_chuoi_bi_mat_dai_va_ngau_nhien"
-python run_web.py
-# Mở trình duyệt: http://127.0.0.1:5000
-```
-
-Chức năng web:
-
-- **Quản lý công ty**: thêm / sửa / xoá danh sách công ty (tên, MST, mật khẩu).
-  Mật khẩu được **mã hoá** (Fernet) trước khi lưu vào SQLite — không lưu văn bản thường.
-- **Đăng nhập trên web**: bấm *Tra cứu* ở một công ty → hiển thị **captcha trực tiếp**
-  trên trình duyệt, MST/mật khẩu tự điền, bạn chỉ cần gõ captcha.
-- **Tra cứu** hoá đơn mua vào / bán ra (kể cả máy tính tiền) theo khoảng thời gian,
-  xem bảng kết quả ngay.
-- **Tải xuống** Excel hoặc CSV.
-
-> 🔐 Thư mục `instance/` chứa CSDL công ty và khoá mã hoá — đã được `.gitignore`,
-> **không commit** lên git. Hãy sao lưu và bảo vệ thư mục này.
-
-## Cấu trúc dự án
+## 🛠️ Cấu trúc
 
 ```
-hddt/                 # Thư viện lõi
-  client.py           # Giao tiếp API: captcha, đăng nhập, tra cứu hoá đơn
-  captcha.py          # Lưu / hiển thị / (tuỳ chọn) OCR captcha
-  exporter.py         # Xuất JSON / CSV / Excel
-  cli.py              # Giao diện dòng lệnh
-webapp/               # Giao diện web
-  app.py              # Các route Flask
-  db.py               # Quản lý công ty + mã hoá mật khẩu (SQLite)
-  templates/          # Giao diện HTML
-run_web.py            # Khởi chạy web
+server.py                       # Backend FastAPI + GDTClient gọi API Thuế
+static/index.html               # Toàn bộ giao diện
+templates/htkk_01gtgt_template.xml  # Mẫu tờ khai HTKK 01/GTGT
+start.bat / start.sh            # Chạy nhanh trên Windows / Mac-Linux
+requirements.txt                # Thư viện cần cài
+data/hddt.db                    # CSDL (tự tạo — KHÔNG commit)
+downloads/                      # File tải về (tự tạo — KHÔNG commit)
 ```
-
-## Ghi chú kỹ thuật
-
-- API gốc: `https://hoadondientu.gdt.gov.vn` (có thể đổi qua biến môi trường `HDDT_API_URL`)
-- Token (JWT) có thời hạn; khi hết hạn cần đăng nhập lại.
-- Các mã trường chính: `nbmst` (MST bán), `nmmst` (MST mua), `shdon` (số HĐ),
-  `tdlap` (ngày lập), `tgtttbso` (tổng tiền thanh toán)...
 
 ## Miễn trừ trách nhiệm
 
