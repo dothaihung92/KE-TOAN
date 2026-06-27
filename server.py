@@ -2863,12 +2863,14 @@ def export_excel(cid: int):
                 return True
             return False
 
-        out = []
+        import re as _re_hkd
+
+        # --- Pass 1: Phát hiện dòng ghi chú HKD NQ204 (tchat=4, thtien=0) ---
+        # Dạng: "Đã giảm X đồng theo 20% tỷ lệ % để tính thuế GTGT NQ204/2025"
+        so_giam_hkd = 0
         for it in items:
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
-            # ghi chú thuần (tchat=4) không có thành tiền → bỏ qua
-            # Ngoại lệ: dòng "Đã giảm X đồng ... 20% ... tỷ lệ % GTGT ... NQ204" của HKD
             if tchat == "4" and (not tt or tt == 0):
                 ten_gc = str(it.get("ten_hang", "") or "")
                 ten_l = ten_gc.lower()
@@ -2879,31 +2881,81 @@ def export_excel(cid: int):
                          or "204" in ten_l or "gtgt" in ten_l)
                 )
                 if la_giam_hkd:
-                    import re as _re_hkd
-                    # Trích số tiền: VN dùng dấu chấm/phẩy phân cách nghìn
-                    m_s = _re_hkd.search(
-                        r'(\d[\d.,]*)\s*đồng', ten_gc, _re_hkd.IGNORECASE)
+                    m_s = _re_hkd.search(r'(\d[\d.,]*)\s*đồng', ten_gc, _re_hkd.IGNORECASE)
                     if not m_s:
                         m_s = _re_hkd.search(r'(\d[\d.,]+)', ten_gc)
-                    so_giam = 0
                     if m_s:
                         try:
-                            so_giam = round(float(
+                            so_giam_hkd = round(float(
                                 m_s.group(1).replace('.', '').replace(',', '')))
                         except Exception:
                             pass
-                    if so_giam > 0:
-                        h_hkd = dict(it)
-                        h_hkd["thtien"] = 0
-                        h_hkd["tien_thue"] = -so_giam
-                        h_hkd["tsuat"] = "HKD (-20%)"
-                        h_hkd["_la_nq204_hkd"] = True
-                        out.append(h_hkd)
-                continue
+                    break  # chỉ có 1 dòng ghi chú NQ204
+
+        # --- Pass 2: Xây dựng output ---
+        # Nếu có NQ204 HKD: phân bổ VAT = so_giam_hkd × 4 đều theo thành tiền
+        vat_sau_giam = so_giam_hkd * 4 if so_giam_hkd > 0 else 0
+
+        # Lấy danh sách dòng hàng thực (bỏ tchat=4 không có thtien)
+        hang_thuong = []
+        for it in items:
+            tchat = str(it.get("tchat", "") or "")
+            tt = _to_num(it.get("thtien")) or 0
+            if tchat == "4" and (not tt or tt == 0):
+                continue  # bỏ mọi dòng ghi chú thuần (kể cả NQ204 HKD)
+            hang_thuong.append(it)
+
+        if so_giam_hkd > 0 and vat_sau_giam > 0:
+            # Tính tổng thành tiền của các dòng hàng thường (không phải dòng giảm)
+            tong_tt = sum(
+                abs(_to_num(it.get("thtien")) or 0)
+                for it in hang_thuong
+                if not la_dong_giam(it)
+            )
+            out = []
+            allocated = 0
+            hang_chinh = [it for it in hang_thuong if not la_dong_giam(it)]
+            for idx, it in enumerate(hang_chinh):
+                h = dict(it)
+                tt_item = abs(_to_num(h.get("thtien")) or 0)
+                if idx == len(hang_chinh) - 1:
+                    # dòng cuối nhận phần còn lại để tránh sai lệch do làm tròn
+                    item_vat = vat_sau_giam - allocated
+                else:
+                    item_vat = round(tt_item / tong_tt * vat_sau_giam) if tong_tt else 0
+                    allocated += item_vat
+                h["tien_thue"] = item_vat
+                h["tsuat"] = "HKD 2.4%"
+                out.append(h)
+            # Thêm các dòng chiết khấu/giảm giá khác (nếu có)
+            for it in hang_thuong:
+                if la_dong_giam(it):
+                    h = dict(it)
+                    tt2 = _to_num(h.get("thtien")) or 0
+                    h["thtien"] = -abs(tt2)
+                    dg = _to_num(h.get("dgia")) or 0
+                    if isinstance(dg, (int, float)):
+                        h["dgia"] = -abs(dg)
+                    thue_goc = _to_num(h.get("tien_thue"))
+                    ts_raw = str(h.get("tsuat", "") or "").strip()
+                    rate = _parse_thue_suat(ts_raw)
+                    if thue_goc is not None and str(thue_goc).strip() != "" and _to_num(thue_goc) != 0:
+                        h["tien_thue"] = -abs(_to_num(thue_goc))
+                    elif rate is not None and rate > 0:
+                        h["tien_thue"] = -round(abs(tt2) * rate)
+                    else:
+                        h["tien_thue"] = 0
+                    h["_la_ck"] = True
+                    out.append(h)
+            return out
+
+        # Không có NQ204 HKD → xử lý bình thường
+        out = []
+        for it in hang_thuong:
             h = dict(it)
             if la_dong_giam(it):
-                # dòng giảm → đảm bảo âm + tính thuế âm
-                h["thtien"] = -abs(tt)
+                tt2 = _to_num(h.get("thtien")) or 0
+                h["thtien"] = -abs(tt2)
                 dg = _to_num(h.get("dgia")) or 0
                 if isinstance(dg, (int, float)):
                     h["dgia"] = -abs(dg)
@@ -2913,7 +2965,7 @@ def export_excel(cid: int):
                 if thue_goc is not None and str(thue_goc).strip() != "" and _to_num(thue_goc) != 0:
                     h["tien_thue"] = -abs(_to_num(thue_goc))
                 elif rate is not None and rate > 0:
-                    h["tien_thue"] = -round(abs(tt) * rate)
+                    h["tien_thue"] = -round(abs(tt2) * rate)
                 else:
                     h["tien_thue"] = 0
                 ten = str(h.get("ten_hang", "") or "")
@@ -3051,8 +3103,6 @@ def export_excel(cid: int):
                     ten += " (Giảm NQ204 - ghi âm)"
                 elif it.get("_la_ck"):
                     ten += " (Chiết khấu TM - ghi âm)"
-                elif it.get("_la_nq204_hkd"):
-                    ten = "[Giảm 20% VAT HKD - NQ204] " + ten
                 # cột người: purchase -> người bán; sold -> người mua
                 if loai == "purchase":
                     nguoi = it.get("ten_nban", "") or r["nbten"]
