@@ -2868,7 +2868,37 @@ def export_excel(cid: int):
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
             # ghi chú thuần (tchat=4) không có thành tiền → bỏ qua
+            # Ngoại lệ: dòng "Đã giảm X đồng ... 20% ... tỷ lệ % GTGT ... NQ204" của HKD
             if tchat == "4" and (not tt or tt == 0):
+                ten_gc = str(it.get("ten_hang", "") or "")
+                ten_l = ten_gc.lower()
+                la_giam_hkd = (
+                    ("giảm" in ten_l or "giam" in ten_l)
+                    and "20" in ten_l
+                    and ("tỷ lệ" in ten_l or "ty le" in ten_l
+                         or "204" in ten_l or "gtgt" in ten_l)
+                )
+                if la_giam_hkd:
+                    import re as _re_hkd
+                    # Trích số tiền: VN dùng dấu chấm/phẩy phân cách nghìn
+                    m_s = _re_hkd.search(
+                        r'(\d[\d.,]*)\s*đồng', ten_gc, _re_hkd.IGNORECASE)
+                    if not m_s:
+                        m_s = _re_hkd.search(r'(\d[\d.,]+)', ten_gc)
+                    so_giam = 0
+                    if m_s:
+                        try:
+                            so_giam = round(float(
+                                m_s.group(1).replace('.', '').replace(',', '')))
+                        except Exception:
+                            pass
+                    if so_giam > 0:
+                        h_hkd = dict(it)
+                        h_hkd["thtien"] = 0
+                        h_hkd["tien_thue"] = -so_giam
+                        h_hkd["tsuat"] = "HKD (-20%)"
+                        h_hkd["_la_nq204_hkd"] = True
+                        out.append(h_hkd)
                 continue
             h = dict(it)
             if la_dong_giam(it):
@@ -3021,6 +3051,8 @@ def export_excel(cid: int):
                     ten += " (Giảm NQ204 - ghi âm)"
                 elif it.get("_la_ck"):
                     ten += " (Chiết khấu TM - ghi âm)"
+                elif it.get("_la_nq204_hkd"):
+                    ten = "[Giảm 20% VAT HKD - NQ204] " + ten
                 # cột người: purchase -> người bán; sold -> người mua
                 if loai == "purchase":
                     nguoi = it.get("ten_nban", "") or r["nbten"]
