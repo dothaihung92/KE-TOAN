@@ -1138,6 +1138,9 @@ let nlChung={in:null,out:null};
 let nhapLieuLoaiHienTai='in';
 let nlHeader=[], nlRows=[], nlFilters={}, nlFreezeCol=0;
 let nlChon=null, nlDangKeo=false;
+let nlMapNoHoc={};        // {mst: tk_no} đã học từ server
+let nlCanhBaoNo={};       // {rowIdx: tk_ky_vong} các dòng hạch toán Nợ lệch
+let nlIdxCotNo=-1, nlChiHienCanhBao=false;
 let nlFormulas={};    // lưu công thức: key "r_c" -> "=K5/J5"
 let nlUndoStack=[];   // stack undo: [{header, rows, formulas}]
 function nlLuuUndo(){
@@ -1253,6 +1256,7 @@ function moBangKe(loai){
         </div>
       </div>
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
+      <div id="nlCanhBao" style="margin-bottom:6px"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm ô để sửa. Gõ <b>=</b> rồi công thức, có thể tham chiếu ô (vd <b>=K5/J5</b> hoặc <b>=L3*1.08</b>). <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo | <b>Ctrl+Shift+L</b> Filter | <b>Esc</b> Quay về.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:62vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
@@ -1268,7 +1272,8 @@ async function taiNhapLieu(){
     nlBoCotKhongCan();
     nlDamBaoNoCo();
     if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
-    nlFilters={};nlChon=null;nlFormulas={};nlUndoStack=[];
+    nlFilters={};nlChon=null;nlFormulas={};nlUndoStack=[];nlChiHienCanhBao=false;
+    nlTinhCanhBaoNo();
     veGridNhapLieu();
     const info=document.getElementById('nlInfo');
     if(info){
@@ -1306,6 +1311,7 @@ async function nlTuDienNoCo(){
   // 1) Nợ: lấy bảng đã học
   let mapNo={};
   try{const d=await api(`/api/hach-toan-no/${current}`);mapNo=d.map||{};}catch{}
+  nlMapNoHoc=mapNo;
   const chuanMst=s=>String(s||'').replace(/[-.\s]/g,'').trim();
   if(iNo>=0&&iMst>=0){
     nlRows.forEach(r=>{
@@ -1330,6 +1336,47 @@ async function nlTuDienNoCo(){
       }
     });
   }
+}
+// Cảnh báo hạch toán Nợ lệch: 1 MST bình thường ghi TK X nhưng có dòng ghi khác
+function nlTinhCanhBaoNo(){
+  nlCanhBaoNo={}; nlIdxCotNo=-1;
+  if(nhapLieuLoaiHienTai!=='in')return;
+  const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
+  const iMst=hLow.findIndex(h=>h.includes('mst bán')||h.includes('mst ban')||h==='mst');
+  const iNo=hLow.findIndex(h=>h==='nợ'||h==='no');
+  if(iMst<0||iNo<0)return;
+  nlIdxCotNo=iNo;
+  const chuanMst=s=>String(s||'').replace(/[-.\s]/g,'').trim();
+  // tần suất TK Nợ theo từng MST trong lưới hiện tại
+  const freq={};
+  nlRows.forEach(r=>{
+    const mst=chuanMst(r[iMst]); const no=String(r[iNo]||'').trim();
+    if(!mst||!no)return;
+    (freq[mst]=freq[mst]||{})[no]=(freq[mst][no]||0)+1;
+  });
+  // TK kỳ vọng theo MST: ưu tiên TK đã học (lịch sử), nếu không có thì lấy TK xuất hiện nhiều nhất
+  const kyVong={};
+  Object.keys(freq).forEach(mst=>{
+    let best='',bn=-1;
+    for(const acc in freq[mst]) if(freq[mst][acc]>bn){bn=freq[mst][acc];best=acc;}
+    kyVong[mst]=nlMapNoHoc[mst]||best;
+  });
+  // gắn cờ dòng có TK Nợ khác kỳ vọng (có cơ sở: MST có >1 TK khác nhau, hoặc lệch TK đã học)
+  nlRows.forEach((r,idx)=>{
+    const mst=chuanMst(r[iMst]); const no=String(r[iNo]||'').trim();
+    if(!mst||!no)return;
+    const exp=kyVong[mst];
+    if(exp&&no!==exp){
+      const soTk=Object.keys(freq[mst]||{}).length;
+      const lechHoc=nlMapNoHoc[mst]&&nlMapNoHoc[mst]!==no;
+      if(soTk>1||lechHoc)nlCanhBaoNo[idx]=exp;
+    }
+  });
+}
+function nlSoCanhBao(){return Object.keys(nlCanhBaoNo).length;}
+function nlLocChiCanhBao(){
+  nlChiHienCanhBao=!nlChiHienCanhBao;
+  veGridNhapLieu();
 }
 function nlLaCotTien(idx){
   const t=String(nlHeader[idx]||'').toLowerCase();
@@ -1389,7 +1436,18 @@ function veGridNhapLieu(){
   const wrap=document.getElementById('nlTableWrap');
   if(!wrap)return;
   if(!nlHeader.length){wrap.innerHTML='<div style="padding:20px;text-align:center;color:var(--muted)">Chưa có dữ liệu.</div>';nlVeTong();return;}
-  const rowsHienThi=nlLocDong();
+  // banner cảnh báo hạch toán Nợ lệch
+  const cbBox=document.getElementById('nlCanhBao');
+  if(cbBox){
+    const n=nlSoCanhBao();
+    if(n>0){
+      cbBox.innerHTML=`<div style="background:#fff3cd;border:1px solid #ffce5a;border-radius:8px;padding:8px 12px;font-size:13px;color:#8a5d00;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>⚠ <b>${n} dòng</b> có hạch toán Nợ <b>khác thường</b> so với các hóa đơn khác cùng MST — hãy kiểm tra lại.</span>
+        <button class="btn ghost sm" onclick="nlLocChiCanhBao()" style="padding:2px 8px">${nlChiHienCanhBao?'↩ Hiện tất cả':'🔎 Chỉ xem dòng cảnh báo'}</button></div>`;
+    }else cbBox.innerHTML='';
+  }
+  let rowsHienThi=nlLocDong();
+  if(nlChiHienCanhBao)rowsHienThi=rowsHienThi.filter(({idx})=>nlCanhBaoNo[idx]);
   const filterOn=document.getElementById('nlFilterBtn')&&document.getElementById('nlFilterBtn').dataset.on==='1';
   const FW=120;
   let html='<table id="nlTable" style="border-collapse:collapse;font-size:12px;width:max-content;min-width:100%;user-select:none"><thead>';
@@ -1424,10 +1482,13 @@ function veGridNhapLieu(){
       const disp=tien&&cell!==''&&!isNaN(nlParseSo(cell))?nlParseSo(cell).toLocaleString('vi-VN'):(cell||'');
       const fr=ci<nlFreezeCol;
       const chon=nlTrongVungChon(idx,ci);
-      let bg=fr?'#f1f5fa':'#fff',extra='';
+      let bg=fr?'#f1f5fa':'#fff',extra='',title='';
       if(chon){bg='#cfe0f5';extra='box-shadow:inset 0 0 0 1px #2e5c8a;'}
+      // cảnh báo hạch toán Nợ lệch (cột Nợ của dòng được gắn cờ)
+      const canhBao=(ci===nlIdxCotNo&&nlCanhBaoNo[idx]);
+      if(canhBao){bg='#ffe08a';extra='box-shadow:inset 0 0 0 2px #e8a200;';title=`title="⚠ MST này thường hạch toán Nợ ${nlCanhBaoNo[idx]} — dòng này ghi ${cell}. Kiểm tra lại hóa đơn."`;}
       const sticky=fr?`position:sticky;left:${nlLeftOffset(ci)}px;z-index:1;min-width:${FW}px;max-width:${FW}px;`:'';
-      html+=`<td contenteditable="true" data-r="${idx}" data-c="${ci}"
+      html+=`<td contenteditable="true" data-r="${idx}" data-c="${ci}" ${title}
         onmousedown="nlMouseDown(event,${idx},${ci})" onmouseenter="nlMouseEnter(${idx},${ci})"
         onblur="nlSuaO(this)" onkeydown="nlPhimO(event,this)"
         style="${sticky}padding:2px 8px;border:1px solid #ddd;${tien?'text-align:right':''};white-space:nowrap;min-width:50px;outline:none;background:${bg};${extra}">${disp}</td>`;
@@ -1495,6 +1556,11 @@ function nlSuaO(td){
     nlRows[r][c]=val;
   }
   nlVeTong();
+  // nếu sửa cột Nợ hoặc MST -> tính lại cảnh báo & vẽ lại lưới
+  const hc=String(nlHeader[c]||'').trim().toLowerCase();
+  if(hc==='nợ'||hc==='no'||hc.includes('mst')){
+    nlTinhCanhBaoNo();veGridNhapLieu();
+  }
 }
 function nlPhimO(e,td){
   if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')){e.preventDefault();nlUndo();return;}
