@@ -197,6 +197,7 @@
     </div>
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
+    <div class="field"><label>Thư mục lưu DỮ LIỆU công ty <span style="font-weight:400;color:var(--muted)">(hạch toán, danh mục... — để trống = dùng thư mục XML/PDF ở trên)</span></label><input id="m_datadir" placeholder="VD: D:\\DuLieuKeToan\\CongTyABC"></div>
     <p class="hint">🔒 Thông tin lưu cục bộ trên máy bạn (SQLite), không gửi đi đâu khác ngoài trang Tổng cục Thuế khi đăng nhập.</p>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
@@ -383,6 +384,7 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_user').value=edit?.username||'';
   document.getElementById('m_note').value=edit?.ghichu||'';
   document.getElementById('m_dir').value=edit?.save_dir||'';
+  document.getElementById('m_datadir').value=edit?.data_dir||'';
   // lấy mật khẩu thật để điền sẵn (để sửa cho đúng)
   let pass='';
   if(edit?.id){
@@ -399,7 +401,8 @@ function togglePass(){
 }
 async function saveCompany(){
   const body={ten:m_ten.value.trim(),mst:m_mst.value.trim(),username:m_user.value.trim(),
-    password:m_pass.value,ghichu:m_note.value.trim(),save_dir:m_dir.value.trim()};
+    password:m_pass.value,ghichu:m_note.value.trim(),save_dir:m_dir.value.trim(),
+    data_dir:document.getElementById('m_datadir').value.trim()};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

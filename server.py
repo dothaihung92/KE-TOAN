@@ -556,6 +556,8 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN save_dir TEXT")
     if "nguoi_ky" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN nguoi_ky TEXT")
+    if "data_dir" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN data_dir TEXT")
     conn.commit()
     conn.close()
 
@@ -632,9 +634,10 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, created_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, created_at) VALUES (?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
+         data.get("data_dir", ""),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -658,9 +661,10 @@ def update_company(cid: int, data: dict = Body(...)):
     if not pw:
         pw = cur["password"] if cur else ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
-         pw, data.get("ghichu", ""), data.get("save_dir", ""), cid)
+         pw, data.get("ghichu", ""), data.get("save_dir", ""),
+         data.get("data_dir", ""), cid)
     )
     conn.commit()
     conn.close()
@@ -1960,21 +1964,30 @@ def _co_theo_tong(tong):
 
 def _du_lieu_cty_path(cid):
     """File dữ liệu riêng của công ty (hạch toán, sau này thêm hàng hóa...).
-    Lưu vào save_dir nếu có cấu hình, không thì data/cong_ty/."""
+    Ưu tiên thư mục data_dir (riêng cho dữ liệu); nếu trống thì dùng save_dir;
+    cuối cùng là data/cong_ty/."""
     conn = db()
-    comp = conn.execute("SELECT mst, save_dir FROM companies WHERE id=?", (cid,)).fetchone()
+    comp = conn.execute(
+        "SELECT mst, save_dir, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     if not comp:
         return None
+    # data_dir do người dùng chỉ định riêng -> tạo nếu chưa có
+    dd = (comp["data_dir"] or "").strip() if "data_dir" in comp.keys() else ""
     sd = (comp["save_dir"] or "").strip()
-    if not (sd and os.path.isdir(sd)):
-        sd = os.path.join(DATA_DIR, "cong_ty")
+    thu_muc = ""
+    if dd:
+        thu_muc = dd
+    elif sd and os.path.isdir(sd):
+        thu_muc = sd
+    else:
+        thu_muc = os.path.join(DATA_DIR, "cong_ty")
     try:
-        os.makedirs(sd, exist_ok=True)
+        os.makedirs(thu_muc, exist_ok=True)
     except Exception:
         return None
     mst = _chuan_mst(comp["mst"]) or str(cid)
-    return os.path.join(sd, f"DuLieu_{mst}.json")
+    return os.path.join(thu_muc, f"DuLieu_{mst}.json")
 
 def _doc_du_lieu_cty(cid):
     p = _du_lieu_cty_path(cid)
@@ -2031,10 +2044,13 @@ def _hoc_map_no(cid, mapping):
                 tk_no=excluded.tk_no, updated_at=excluded.updated_at""",
             (cid, mst, tk, now))
     conn.commit()
+    # ghi TOÀN BỘ map từ DB ra file (đổi thư mục lưu vẫn đầy đủ lịch sử)
+    full = {r["mst_ncc"]: r["tk_no"] for r in conn.execute(
+        "SELECT mst_ncc, tk_no FROM hach_toan_no WHERE company_id=?", (cid,)).fetchall()
+        if (r["tk_no"] or "").strip()}
     conn.close()
     data = _doc_du_lieu_cty(cid)
-    data.setdefault("hach_toan_no", {})
-    data["hach_toan_no"].update(mapping)
+    data["hach_toan_no"] = full
     _ghi_du_lieu_cty(cid, data)
 
 
