@@ -837,9 +837,62 @@ def _solve_captcha(content: str) -> str:
                     pass
     return ""
 
+def _ocr_png(png_bytes: bytes) -> str:
+    """OCR 1 ảnh PNG bằng ddddocr, thử cả ảnh gốc và ảnh đã làm sạch. '' nếu fail."""
+    import re as _re_o
+    ocr = _get_ddddocr()
+    if not ocr or not png_bytes:
+        return ""
+    for buf in (png_bytes, _preprocess_png(png_bytes)):
+        try:
+            ans = (ocr.classification(buf) or "").strip()
+            ans = _re_o.sub(r'[^A-Za-z0-9]', '', ans)
+            if 4 <= len(ans) <= 10:
+                return ans
+        except Exception:
+            pass
+    return ""
+
+
+@app.post("/api/solve-login/{cid}")
+def solve_login(cid: int, body: dict = Body(...)):
+    """Nhận ảnh PNG (do trình duyệt vẽ từ SVG) → OCR → đăng nhập.
+    body: { ckey: str, image: "data:image/png;base64,..." }
+    Trình duyệt lặp gọi endpoint này (mỗi lần 1 captcha mới) tới khi thành công.
+    """
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    ckey = body.get("ckey") or ""
+    image = body.get("image") or ""
+    if image.startswith("data:"):
+        image = image.split(",", 1)[1] if "," in image else ""
+    try:
+        png = base64.b64decode(image)
+    except Exception:
+        png = b""
+    guess = _ocr_png(png)
+    if not guess:
+        raise HTTPException(422, "OCR không đọc được mã (rỗng)")
+    client = get_client(cid)
+    try:
+        token = client.login(
+            username=comp["username"] or comp["mst"],
+            password=comp["password"],
+            cvalue=guess,
+            ckey=ckey,
+        )
+        return {"ok": True, "token": token[:20] + "...", "guess": guess}
+    except Exception as e:
+        # sai mã / lỗi đăng nhập → trả 401 kèm mã đã đoán để client thử captcha khác
+        raise HTTPException(401, f"Sai mã '{guess}': {e}")
+
+
 @app.post("/api/auto-login/{cid}")
 def auto_login(cid: int):
-    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần."""
+    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần (server-side, fallback)."""
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()

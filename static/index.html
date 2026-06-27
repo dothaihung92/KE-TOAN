@@ -447,7 +447,7 @@ function renderWorkspace(c,online){
   <!-- STEP 1: LOGIN -->
   <div class="card" id="loginCard" ${online?'style="display:none"':''}>
     <h3><span class="n">1</span> Đăng nhập tài khoản Thuế</h3>
-    <p class="hint" style="margin-bottom:14px">Bấm "🤖 Tự đăng nhập" để máy tự giải captcha (thử tối đa 3 lần). Hoặc bấm "Lấy mã" để nhập tay.</p>
+    <p class="hint" style="margin-bottom:14px">Bấm "🤖 Tự đăng nhập" để máy tự giải captcha (thử tối đa 6 lần). Hoặc bấm "Lấy mã" để nhập tay.</p>
     <div class="captcha-box">
       <div class="captcha-img" id="captchaImg">Bấm "Lấy mã" →</div>
       <button class="btn ghost sm" onclick="loadCaptcha()">🔄 Lấy mã</button>
@@ -614,17 +614,59 @@ async function doLogin(){
   }catch(e){toast('Đăng nhập lỗi: '+e.message,'err');loadCaptcha();}
   btn.innerHTML='Đăng nhập';btn.disabled=false;
 }
+/* Vẽ SVG captcha ra PNG (trình duyệt render SVG chuẩn) để gửi cho server OCR */
+function svgCaptchaToPng(content){
+  return new Promise((resolve,reject)=>{
+    let src;
+    const c=(content||'').trim();
+    if(c.startsWith('data:')) src=c;
+    else if(c.includes('<svg')) src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(c)));
+    else { reject(new Error('captcha không phải SVG')); return; }
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const scale=4;
+        const w=(img.naturalWidth||img.width||200), h=(img.naturalHeight||img.height||40);
+        const cv=document.createElement('canvas');
+        cv.width=w*scale; cv.height=h*scale;
+        const ctx=cv.getContext('2d');
+        ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+        ctx.imageSmoothingEnabled=true;
+        ctx.drawImage(img,0,0,cv.width,cv.height);
+        resolve(cv.toDataURL('image/png'));
+      }catch(err){reject(err)}
+    };
+    img.onerror=()=>reject(new Error('không vẽ được SVG'));
+    img.src=src;
+  });
+}
 async function doAutoLogin(){
   const btn=document.getElementById('autoLoginBtn');
   const btn2=document.getElementById('loginBtn');
-  btn.innerHTML='<span class="spin"></span> Đang giải...';btn.disabled=true;btn2.disabled=true;
-  try{
-    const r=await api(`/api/auto-login/${current}`,{method:'POST'});
-    clientState[current]=true;
-    toast(`Tự đăng nhập thành công (thử ${r.so_lan_thu} lần)`,'ok');
-    await loadCompanies();
-    selectCompany(current);
-  }catch(e){toast('Tự đăng nhập lỗi: '+e.message,'err');loadCaptcha();}
+  btn2.disabled=true;
+  const MAX=6;
+  let done=false, lastErr='';
+  for(let i=1;i<=MAX && !done;i++){
+    btn.innerHTML=`<span class="spin"></span> Lần ${i}/${MAX}...`;btn.disabled=true;
+    try{
+      const d=await api(`/api/captcha/${current}`);  // lấy captcha mới
+      // hiển thị cho người dùng thấy đang xử lý captcha nào
+      const imgBox=document.getElementById('captchaImg');
+      const cc=d.content||'';
+      if(cc.startsWith('data:')) imgBox.innerHTML=`<img src="${cc}" style="max-height:42px">`;
+      else if(cc.includes('<svg')) imgBox.innerHTML=cc;
+      const png=await svgCaptchaToPng(d.content);
+      const r=await api(`/api/solve-login/${current}`,{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ckey:d.key,image:png})});
+      clientState[current]=true;
+      toast(`Tự đăng nhập thành công (lần ${i}, mã: ${r.guess})`,'ok');
+      await loadCompanies();
+      selectCompany(current);
+      done=true;
+    }catch(e){lastErr=e.message;}
+  }
+  if(!done){toast('Tự đăng nhập thất bại sau '+MAX+' lần. '+lastErr,'err');loadCaptcha();}
   btn.innerHTML='🤖 Tự đăng nhập';btn.disabled=false;btn2.disabled=false;
 }
 
