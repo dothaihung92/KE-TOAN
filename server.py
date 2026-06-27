@@ -2152,7 +2152,18 @@ async def nhap_lieu_save(cid: int, request: Request, loai: str = "in"):
         if mapping:
             _hoc_map_no(cid, mapping)
             da_hoc = len(mapping)
-    return {"ok": True, "so_dong": len(rows), "da_hoc_no": da_hoc}
+
+    # Ghi dữ liệu nhập liệu vào FILE riêng của công ty để dễ tìm/xử lý sau này
+    data_cty = _doc_du_lieu_cty(cid)
+    data_cty[f"nhap_lieu_{loai}"] = {
+        "header": header, "rows": rows,
+        "updated_at": datetime.datetime.now().isoformat()}
+    _ghi_du_lieu_cty(cid, data_cty)
+
+    file_du_lieu = _du_lieu_cty_path(cid) or ""
+    return {"ok": True, "so_dong": len(rows), "da_hoc_no": da_hoc,
+            "file_du_lieu": os.path.abspath(file_du_lieu) if file_du_lieu else "",
+            "db_path": os.path.abspath(DB_PATH)}
 
 
 @app.get("/api/nhap-lieu/{cid}")
@@ -2269,6 +2280,14 @@ def danh_muc_ncc(cid: int):
         s = str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
         return s
 
+    def dinh_dang_mst(s):
+        """MST 13 số (đơn vị trực thuộc) -> 10 số + '-' + 3 số: 0312320573003
+        -> 0312320573-003. MST khác giữ nguyên."""
+        s = chuan_hoa_mst(s)
+        if len(s) == 13 and s.isdigit():
+            return s[:10] + "-" + s[10:]
+        return s
+
     # thu thập MST + tên (unique, lọc trùng)
     ds = {}  # {mst_chuan: ten}
     for r in rows:
@@ -2349,12 +2368,15 @@ def danh_muc_ncc(cid: int):
         cell.fill = PatternFill("solid", fgColor="2E5C8A")
 
     for i, (mst, ten) in enumerate(items, 2):
+        mst_hien = dinh_dang_mst(mst)              # 13 số -> 0312320573-003
         ws.cell(i, 1).value = 0                    # A: Là tổ chức/cá nhân = 0
         ws.cell(i, 2).value = 1                    # B: Là khách hàng = 1
-        ws.cell(i, 3).value = mst                  # C: Mã NCC = MST
+        ws.cell(i, 3).value = mst_hien             # C: Mã NCC = MST (có gạch nếu 13 số)
+        ws.cell(i, 3).number_format = "@"          # ép kiểu chữ để giữ số 0 đầu + dấu '-'
         ws.cell(i, 4).value = ten                  # D: Tên NCC
-        # F: Mã số thuế = công thức Excel
-        ws.cell(i, 6).value = f'=IF(AND(ISNUMBER(VALUE(LEFT(C{i},1))),LEN(C{i})<>12),C{i},"")'
+        # F: Mã số thuế = MST nếu là số hợp lệ và KHÔNG phải CCCD 12 số
+        ws.cell(i, 6).value = mst_hien if (mst.isdigit() and len(mst) != 12) else ""
+        ws.cell(i, 6).number_format = "@"
 
     # format
     from openpyxl.utils import get_column_letter

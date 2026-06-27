@@ -569,7 +569,7 @@ function renderWorkspace(c,online){
       <tbody id="invBody"><tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">Chưa có dữ liệu</td></tr></tbody>
     </table></div>
     <div class="row" style="margin-top:16px">
-      <button class="btn ghost" onclick="exportExcel()">📊 Xuất Excel tổng hợp</button>
+      <button class="btn ghost" onclick="exportExcel(this)">📊 Xuất Excel tổng hợp</button>
       <button class="btn gold" onclick="exportHTKK()">📑 Kết xuất XML cho HTKK (01/GTGT)</button>
       <button class="btn" onclick="openVatModal()">🧮 Tạm tính thuế VAT</button>
       <button class="btn ghost" onclick="document.getElementById('importFile').click()">📥 Import dữ liệu đã kiểm tra</button>
@@ -1676,8 +1676,17 @@ async function nlLuu(){
   try{
     const r=await fetch(`/api/nhap-lieu/save/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Lưu thất bại');
-    const d=await r.json();toast(`💾 Đã lưu ${d.so_dong} dòng`,'ok');
-    document.getElementById('nlInfo').textContent=`${nlRows.length} dòng — vừa lưu`;
+    const d=await r.json();
+    let msg=`💾 Đã lưu ${d.so_dong} dòng`;
+    if(d.da_hoc_no)msg+=` • đã nhớ TK Nợ cho ${d.da_hoc_no} nhà cung cấp`;
+    toast(msg,'ok');
+    const info=document.getElementById('nlInfo');
+    if(info){
+      info.innerHTML=`${nlRows.length} dòng — vừa lưu. `
+        +`<span style="color:#2e5c8a">📁 Dữ liệu công ty lưu tại:</span> `
+        +`<b style="word-break:break-all">${d.file_du_lieu||'(chưa đặt đường dẫn lưu)'}</b>`
+        +`<br><span style="color:#888;font-size:11px">CSDL: ${d.db_path||''}</span>`;
+    }
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
 }
 async function nlXuatExcel(){
@@ -1815,10 +1824,9 @@ async function saveVat(){
     toast('Đã lưu số dư kỳ '+ky+'. Kỳ sau sẽ tự lấy số dư đầu kỳ này.','ok');
   }catch(e){toast(e.message,'err')}
 }
-async function exportExcel(){
-  const btns=document.querySelectorAll('button');
-  let btn=null;
-  btns.forEach(b=>{if(b.textContent.includes('Xuất Excel'))btn=b;});
+async function exportExcel(btn){
+  // btn = đúng nút vừa bấm (truyền this) để hiện trạng thái xử lý ngay trên nút đó
+  if(!btn&&window.event)btn=window.event.currentTarget||window.event.target;
   const old=btn?btn.innerHTML:'';
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang xử lý, vui lòng đợi...';}
   toast('Đang kết xuất Excel — có thể mất 1-2 phút nếu nhiều hóa đơn','');
