@@ -709,6 +709,105 @@ def login(cid: int, body: dict = Body(...)):
         raise HTTPException(401, f"{e}")
 
 
+# ---------- TỰ ĐỘNG GIẢI CAPTCHA + LOGIN (retry 3 lần) ----------
+_DDDDOCR_INSTANCE = None
+
+def _get_ddddocr():
+    global _DDDDOCR_INSTANCE
+    if _DDDDOCR_INSTANCE is None:
+        try:
+            import ddddocr
+            _DDDDOCR_INSTANCE = ddddocr.DdddOcr(show_ad=False)
+        except Exception:
+            _DDDDOCR_INSTANCE = False
+    return _DDDDOCR_INSTANCE or None
+
+def _solve_captcha(content: str) -> str:
+    """Trả về mã đoán được từ content (data URI / SVG / PNG base64). '' nếu không giải nổi."""
+    import re as _re_cap
+    if not content:
+        return ""
+    svg_text = ""
+    png_bytes = None
+    s = content.strip()
+    if s.startswith("data:"):
+        try:
+            head, b64 = s.split(",", 1)
+            raw = base64.b64decode(b64)
+            if "svg" in head.lower():
+                svg_text = raw.decode("utf-8", errors="replace")
+            else:
+                png_bytes = raw
+        except Exception:
+            pass
+    elif "<svg" in s:
+        svg_text = s
+    else:
+        try:
+            png_bytes = base64.b64decode(s)
+        except Exception:
+            pass
+
+    # 1) Ưu tiên: trích ký tự trực tiếp từ <text> của SVG (nhanh, chính xác)
+    if svg_text:
+        chars = _re_cap.findall(r'<text\b[^>]*>\s*([^<\s])\s*</text>', svg_text)
+        if chars and 4 <= len(chars) <= 10:
+            return "".join(chars).strip()
+        # Bản dự phòng: lấy chuỗi text nối liền
+        joined = _re_cap.findall(r'<text\b[^>]*>([^<]+)</text>', svg_text)
+        if joined:
+            cand = "".join(joined).strip()
+            cand = _re_cap.sub(r'\s+', '', cand)
+            if 4 <= len(cand) <= 10:
+                return cand
+
+    # 2) Fallback: dùng ddddocr trên PNG (nếu server trả PNG)
+    if png_bytes:
+        ocr = _get_ddddocr()
+        if ocr:
+            try:
+                return (ocr.classification(png_bytes) or "").strip()
+            except Exception:
+                pass
+    return ""
+
+@app.post("/api/auto-login/{cid}")
+def auto_login(cid: int):
+    """Tự lấy captcha → giải → đăng nhập, retry tối đa 3 lần."""
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    client = get_client(cid)
+    last_err = ""
+    tried = []
+    for lan in range(1, 4):
+        try:
+            cap = client.get_captcha()
+        except Exception as e:
+            raise HTTPException(500, f"Lỗi lấy captcha: {e}")
+        ckey = cap.get("key") or ""
+        cval = _solve_captcha(cap.get("content") or "")
+        tried.append(cval or "(không giải được)")
+        if not cval:
+            last_err = "Không giải được captcha"
+            continue
+        try:
+            token = client.login(
+                username=comp["username"] or comp["mst"],
+                password=comp["password"],
+                cvalue=cval,
+                ckey=ckey,
+            )
+            return {"ok": True, "token": token[:20] + "...",
+                    "so_lan_thu": lan, "ma_da_thu": tried}
+        except Exception as e:
+            last_err = str(e)
+            continue
+    raise HTTPException(401, f"Tự đăng nhập thất bại sau 3 lần. Mã đã thử: {tried}. Lỗi cuối: {last_err}")
+
+
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
 def _run_fetch_job(cid: int, body: dict):
     """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
