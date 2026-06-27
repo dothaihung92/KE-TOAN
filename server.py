@@ -3125,132 +3125,115 @@ def export_excel(cid: int):
     ct_totals = {"purchase": {}, "sold": {}}
 
     def phan_bo_chiet_khau(items):
-        """Xử lý hóa đơn MUA VÀO:
-        - TChat=4 (ghi chú) KHÔNG có thành tiền: BỎ QUA.
-        - TChat=4 (ghi chú) CÓ thành tiền âm (vd NQ204 ghi giảm): xử lý như CK.
-        - TChat=3 (chiết khấu) hoặc tên chứa 'chiết khấu'/'NQ204': ghi ÂM tt + thuế.
-        - Dòng hàng: giữ nguyên đúng số trên hóa đơn."""
-
-        def la_dong_giam(it):
-            """Nhận dạng dòng giảm giá / chiết khấu / NQ204 có giá trị âm."""
-            tchat = str(it.get("tchat", "") or "")
-            ten = str(it.get("ten_hang", "") or "").lower()
-            tt = _to_num(it.get("thtien")) or 0
-            # tchat=3 → CK rõ ràng
-            if tchat == "3":
-                return True
-            # tchat=4 có thành tiền âm → dòng giảm (NQ204, giảm giá dạng ghi chú)
-            if tchat == "4" and isinstance(tt, (int, float)) and tt < 0:
-                return True
-            # tên chứa từ khóa giảm + thành tiền âm
-            keywords = ["chiết khấu", "chiet khau", "giảm giá", "nq204", "nq 204",
-                        "204/2025", "nghị quyết 204", "nghi quyet 204"]
-            if any(kw in ten for kw in keywords) and isinstance(tt, (int, float)) and tt < 0:
-                return True
-            return False
+        """Xử lý dòng hàng hóa đơn MUA VÀO:
+        - Dòng có chiết khấu dòng (STCKhau>0): TRỪ chiết khấu vào THÀNH TIỀN của
+          chính dòng đó (net = thành tiền gộp - chiết khấu), giữ DƯƠNG, KHÔNG
+          tách thành dòng âm riêng. (vd HĐ 116058 - H&M)
+        - Ghi chú HKD NQ204 (TChat=4, thtien=0, 'Đã giảm X ... 20% ... tỷ lệ %'):
+          phân bổ X đều vào THÀNH TIỀN các dòng hàng theo tỷ lệ. (vd HĐ 91)
+        - Dòng thành tiền ÂM (điều chỉnh giảm thực sự): giữ ÂM.
+        - Ghi chú thuần (TChat=4, thtien=0) khác: BỎ QUA."""
 
         import re as _re_hkd
 
-        # --- Pass 1: Phát hiện dòng ghi chú HKD NQ204 (tchat=4, thtien=0) ---
-        # Dạng: "Đã giảm X đồng theo 20% tỷ lệ % để tính thuế GTGT NQ204/2025"
+        def _vn_money(s):
+            """Parse số tiền dạng chữ VN trong ghi chú:
+            '7.200,00'->7200, '2.970'->2970, '1.192.800'->1192800.
+            (chấm = phân cách nghìn, phẩy = thập phân)"""
+            m = _re_hkd.search(r'\d[\d.,]*', str(s or ""))
+            if not m:
+                return 0
+            t = m.group(0)
+            if ',' in t:                       # có phẩy -> phẩy là thập phân
+                t = t.replace('.', '').replace(',', '.')
+            else:                              # chỉ có chấm -> phân cách nghìn
+                t = t.replace('.', '')
+            try:
+                return round(float(t))
+            except Exception:
+                return 0
+
+        def _net_sau_ck(it):
+            """Thành tiền sau khi trừ chiết khấu dòng (STCKhau). Tự nhận biết
+            thành tiền XML là gộp hay đã net để không trừ 2 lần."""
+            tt = _to_num(it.get("thtien")) or 0
+            ck = _to_num(it.get("stckhau")) or 0
+            if not isinstance(tt, (int, float)):
+                return tt
+            if not isinstance(ck, (int, float)) or ck <= 0:
+                return tt
+            sl = _to_num(it.get("sluong")) or 0
+            dg = _to_num(it.get("dgia")) or 0
+            gross = sl * dg if (isinstance(sl, (int, float)) and isinstance(dg, (int, float))
+                                and sl and dg) else None
+            if gross is not None:
+                if abs(tt - gross) <= 1:               # thtien = gộp -> trừ CK
+                    return round(tt - ck)
+                if abs(tt - (gross - ck)) <= 1:         # thtien đã = net -> giữ
+                    return round(tt)
+            return round(tt - ck)                       # mặc định: coi là gộp
+
+        # --- Pass 1: phát hiện ghi chú HKD NQ204 (TChat=4, thtien=0) ---
         so_giam_hkd = 0
         for it in items:
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
             if tchat == "4" and (not tt or tt == 0):
-                ten_gc = str(it.get("ten_hang", "") or "")
-                ten_l = ten_gc.lower()
-                la_giam_hkd = (
-                    ("giảm" in ten_l or "giam" in ten_l)
-                    and "20" in ten_l
-                    and ("tỷ lệ" in ten_l or "ty le" in ten_l
-                         or "204" in ten_l or "gtgt" in ten_l)
-                )
-                if la_giam_hkd:
-                    m_s = _re_hkd.search(r'(\d[\d.,]*)\s*đồng', ten_gc, _re_hkd.IGNORECASE)
-                    if not m_s:
-                        m_s = _re_hkd.search(r'(\d[\d.,]+)', ten_gc)
-                    if m_s:
-                        try:
-                            so_giam_hkd = round(float(
-                                m_s.group(1).replace('.', '').replace(',', '')))
-                        except Exception:
-                            pass
-                    break  # chỉ có 1 dòng ghi chú NQ204
+                ten_l = str(it.get("ten_hang", "") or "").lower()
+                if (("giảm" in ten_l or "giam" in ten_l) and "20" in ten_l
+                        and ("tỷ lệ" in ten_l or "ty le" in ten_l
+                             or "204" in ten_l or "gtgt" in ten_l)):
+                    so_giam_hkd = _vn_money(it.get("ten_hang"))
+                    break
 
-        # --- Pass 2: Xây dựng output ---
-        # Lấy danh sách dòng hàng thực (bỏ tchat=4 không có thtien — kể cả ghi chú NQ204)
-        hang_thuong = []
+        # --- Pass 2: dựng các dòng hàng (đã trừ CK dòng), bỏ ghi chú thuần ---
+        out = []
         for it in items:
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
+            # ghi chú thuần không có thành tiền -> bỏ (kể cả NQ204 đã xử lý ở Pass 1)
             if tchat == "4" and (not tt or tt == 0):
                 continue
-            hang_thuong.append(it)
-
-        if so_giam_hkd > 0:
-            # Phân bổ so_giam_hkd vào THÀNH TIỀN từng dòng hàng (không đụng vào tiền thuế)
-            hang_chinh = [it for it in hang_thuong if not la_dong_giam(it)]
-            tong_tt = sum(abs(_to_num(it.get("thtien")) or 0) for it in hang_chinh)
-            out = []
-            allocated = 0
-            for idx, it in enumerate(hang_chinh):
-                h = dict(it)
-                tt_item = abs(_to_num(h.get("thtien")) or 0)
-                if idx == len(hang_chinh) - 1:
-                    giam_item = so_giam_hkd - allocated
-                else:
-                    giam_item = round(tt_item / tong_tt * so_giam_hkd) if tong_tt else 0
-                    allocated += giam_item
-                h["thtien"] = tt_item - giam_item
-                out.append(h)
-            # Các dòng chiết khấu/giảm giá khác (nếu có)
-            for it in hang_thuong:
-                if la_dong_giam(it):
-                    h = dict(it)
-                    tt2 = _to_num(h.get("thtien")) or 0
-                    h["thtien"] = -abs(tt2)
-                    dg = _to_num(h.get("dgia")) or 0
-                    if isinstance(dg, (int, float)):
-                        h["dgia"] = -abs(dg)
-                    thue_goc = _to_num(h.get("tien_thue"))
-                    ts_raw = str(h.get("tsuat", "") or "").strip()
-                    rate = _parse_thue_suat(ts_raw)
-                    if thue_goc is not None and str(thue_goc).strip() != "" and _to_num(thue_goc) != 0:
-                        h["tien_thue"] = -abs(_to_num(thue_goc))
-                    elif rate is not None and rate > 0:
-                        h["tien_thue"] = -round(abs(tt2) * rate)
-                    else:
-                        h["tien_thue"] = 0
-                    h["_la_ck"] = True
-                    out.append(h)
-            return out
-
-        # Không có NQ204 HKD → xử lý bình thường
-        out = []
-        for it in hang_thuong:
             h = dict(it)
-            if la_dong_giam(it):
-                tt2 = _to_num(h.get("thtien")) or 0
-                h["thtien"] = -abs(tt2)
+            if isinstance(tt, (int, float)) and tt < 0:
+                # dòng điều chỉnh giảm thực sự -> giữ ÂM cả thành tiền + thuế
+                h["thtien"] = -abs(tt)
                 dg = _to_num(h.get("dgia")) or 0
                 if isinstance(dg, (int, float)):
                     h["dgia"] = -abs(dg)
                 thue_goc = _to_num(h.get("tien_thue"))
-                ts_raw = str(h.get("tsuat", "") or "").strip()
-                rate = _parse_thue_suat(ts_raw)
-                if thue_goc is not None and str(thue_goc).strip() != "" and _to_num(thue_goc) != 0:
+                if (thue_goc is not None and str(h.get("tien_thue")).strip() != ""
+                        and _to_num(thue_goc) != 0):
                     h["tien_thue"] = -abs(_to_num(thue_goc))
-                elif rate is not None and rate > 0:
-                    h["tien_thue"] = -round(abs(tt2) * rate)
-                else:
-                    h["tien_thue"] = 0
                 ten = str(h.get("ten_hang", "") or "")
                 if "204" in ten or "nq" in ten.lower():
                     h["_la_nq204"] = True
                 else:
                     h["_la_ck"] = True
+            else:
+                # dòng hàng dương -> trừ chiết khấu dòng (nếu có) vào thành tiền
+                ck = _to_num(it.get("stckhau")) or 0
+                if isinstance(ck, (int, float)) and ck > 0:
+                    h["thtien"] = _net_sau_ck(it)
+                    h["_co_ck_dong"] = True
             out.append(h)
+
+        # --- Pass 3: phân bổ giảm HKD NQ204 vào thành tiền các dòng dương ---
+        if so_giam_hkd > 0:
+            idxs = [i for i, h in enumerate(out)
+                    if isinstance(_to_num(h.get("thtien")), (int, float))
+                    and (_to_num(h.get("thtien")) or 0) > 0]
+            tong = sum((_to_num(out[i].get("thtien")) or 0) for i in idxs)
+            if tong > 0:
+                allocated = 0
+                for k, i in enumerate(idxs):
+                    tt_i = _to_num(out[i].get("thtien")) or 0
+                    if k == len(idxs) - 1:
+                        giam = so_giam_hkd - allocated
+                    else:
+                        giam = round(tt_i / tong * so_giam_hkd)
+                        allocated += giam
+                    out[i]["thtien"] = round(tt_i - giam)
         return out
 
     def _fmt_ngay(s):
