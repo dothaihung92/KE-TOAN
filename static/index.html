@@ -1263,6 +1263,7 @@ async function taiNhapLieu(){
     nlRows=(d.rows||[]).map(r=>r.slice());
     nlBoCotKhongCan();
     nlDamBaoNoCo();
+    if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
     nlFilters={};nlChon=null;nlFormulas={};nlUndoStack=[];
     veGridNhapLieu();
     const info=document.getElementById('nlInfo');
@@ -1286,6 +1287,45 @@ function nlDamBaoNoCo(){
   if(!hLow.includes('nợ')){nlHeader.push('Nợ');nlRows.forEach(r=>r.push(''));}
   if(!hLow.includes('có')){nlHeader.push('Có');nlRows.forEach(r=>r.push(''));}
   nlRows.forEach(r=>{while(r.length<nlHeader.length)r.push('');r.length=nlHeader.length;});
+}
+// Tự điền Nợ (theo MST đã học) + Có (>=5tr->331, <5tr->1111) cho ô còn TRỐNG
+async function nlTuDienNoCo(){
+  const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
+  const idx=(pred)=>hLow.findIndex(pred);
+  const iMst=idx(h=>h.includes('mst bán')||h.includes('mst ban')||h==='mst');
+  const iNo=hLow.findIndex(h=>h==='nợ'||h==='no');
+  const iCo=hLow.findIndex(h=>h==='có'||h==='co');
+  const iKH=idx(h=>h.includes('ký hiệu')||h.includes('ky hieu'));
+  const iSo=idx(h=>h.includes('số hđ')||h.includes('so hd'));
+  const iTT=idx(h=>h.includes('thành tiền')||h.includes('thanh tien'));
+  const iThue=idx(h=>h.includes('tiền thuế')||h.includes('thuế gtgt'));
+  // 1) Nợ: lấy bảng đã học
+  let mapNo={};
+  try{const d=await api(`/api/hach-toan-no/${current}`);mapNo=d.map||{};}catch{}
+  const chuanMst=s=>String(s||'').replace(/[-.\s]/g,'').trim();
+  if(iNo>=0&&iMst>=0){
+    nlRows.forEach(r=>{
+      if(!String(r[iNo]||'').trim()){
+        const tk=mapNo[chuanMst(r[iMst])];
+        if(tk)r[iNo]=tk;
+      }
+    });
+  }
+  // 2) Có: tính tổng hoá đơn (gộp theo Ký hiệu+Số HĐ) rồi 5tr -> 331/1111
+  if(iCo>=0&&iTT>=0){
+    const tong={};
+    nlRows.forEach(r=>{
+      const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
+      const tt=nlParseSo(r[iTT])+(iThue>=0?nlParseSo(r[iThue]):0);
+      tong[key]=(tong[key]||0)+tt;
+    });
+    nlRows.forEach(r=>{
+      if(!String(r[iCo]||'').trim()){
+        const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
+        r[iCo]=Math.abs(tong[key]||0)>=5000000?'331':'1111';
+      }
+    });
+  }
 }
 function nlLaCotTien(idx){
   const t=String(nlHeader[idx]||'').toLowerCase();

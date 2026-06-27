@@ -1944,6 +1944,106 @@ def _doc_sheet_nhap_lieu(wb, sheet_ten, header_marker):
     return header, rows
 
 
+# ====== HẠCH TOÁN: nhớ tài khoản Nợ theo MST nhà cung cấp (mỗi cty 1 bộ) ======
+NGUONG_5TR = 5_000_000  # hóa đơn >= 5tr -> Có 331 (chuyển khoản), < 5tr -> Có 1111
+
+def _chuan_mst(s):
+    """Chuẩn hóa MST: bỏ khoảng trắng, gạch, chấm."""
+    return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+
+def _co_theo_tong(tong):
+    """Cột Có: >= 5 triệu -> 331 (phải trả NB), còn lại -> 1111 (tiền mặt)."""
+    t = _to_num(tong)
+    if isinstance(t, (int, float)) and abs(t) >= NGUONG_5TR:
+        return "331"
+    return "1111"
+
+def _du_lieu_cty_path(cid):
+    """File dữ liệu riêng của công ty (hạch toán, sau này thêm hàng hóa...).
+    Lưu vào save_dir nếu có cấu hình, không thì data/cong_ty/."""
+    conn = db()
+    comp = conn.execute("SELECT mst, save_dir FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        return None
+    sd = (comp["save_dir"] or "").strip()
+    if not (sd and os.path.isdir(sd)):
+        sd = os.path.join(DATA_DIR, "cong_ty")
+    try:
+        os.makedirs(sd, exist_ok=True)
+    except Exception:
+        return None
+    mst = _chuan_mst(comp["mst"]) or str(cid)
+    return os.path.join(sd, f"DuLieu_{mst}.json")
+
+def _doc_du_lieu_cty(cid):
+    p = _du_lieu_cty_path(cid)
+    if p and os.path.isfile(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _ghi_du_lieu_cty(cid, data):
+    p = _du_lieu_cty_path(cid)
+    if not p:
+        return
+    try:
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+def _init_hach_toan(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS hach_toan_no(
+        company_id INTEGER, mst_ncc TEXT, tk_no TEXT, updated_at TEXT,
+        UNIQUE(company_id, mst_ncc))""")
+
+def _get_map_no(cid):
+    """Trả về {mst_chuan: tk_no} đã học cho công ty này (DB ưu tiên, fallback file)."""
+    conn = db()
+    _init_hach_toan(conn)
+    rows = conn.execute(
+        "SELECT mst_ncc, tk_no FROM hach_toan_no WHERE company_id=?", (cid,)).fetchall()
+    conn.close()
+    m = {r["mst_ncc"]: r["tk_no"] for r in rows if (r["tk_no"] or "").strip()}
+    if not m:
+        data = _doc_du_lieu_cty(cid)
+        m = {k: v for k, v in (data.get("hach_toan_no", {}) or {}).items() if str(v).strip()}
+    return m
+
+def _hoc_map_no(cid, mapping):
+    """Học/cập nhật {mst_chuan: tk_no} vào DB + ghi ra file dữ liệu công ty."""
+    mapping = {(_chuan_mst(k)): str(v).strip()
+               for k, v in (mapping or {}).items()
+               if _chuan_mst(k) and str(v).strip()}
+    if not mapping:
+        return
+    conn = db()
+    _init_hach_toan(conn)
+    now = datetime.datetime.now().isoformat()
+    for mst, tk in mapping.items():
+        conn.execute("""INSERT INTO hach_toan_no(company_id, mst_ncc, tk_no, updated_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(company_id, mst_ncc) DO UPDATE SET
+                tk_no=excluded.tk_no, updated_at=excluded.updated_at""",
+            (cid, mst, tk, now))
+    conn.commit()
+    conn.close()
+    data = _doc_du_lieu_cty(cid)
+    data.setdefault("hach_toan_no", {})
+    data["hach_toan_no"].update(mapping)
+    _ghi_du_lieu_cty(cid, data)
+
+
+@app.get("/api/hach-toan-no/{cid}")
+def hach_toan_no_get(cid: int):
+    """Lấy bảng tài khoản Nợ đã học theo MST (để tự điền khi nhập liệu)."""
+    return {"map": _get_map_no(cid)}
+
+
 @app.post("/api/nhap-lieu/import/{cid}")
 async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
     """Import nhiều file Excel cho Nhập Liệu, GỘP (nối đuôi) thành 1 bảng.
@@ -2026,7 +2126,33 @@ async def nhap_lieu_save(cid: int, request: Request, loai: str = "in"):
          json.dumps(rows, ensure_ascii=False), datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
-    return {"ok": True, "so_dong": len(rows)}
+
+    # HỌC tài khoản Nợ theo MST nhà cung cấp (chỉ với bảng kê ĐẦU VÀO)
+    da_hoc = 0
+    if loai == "in" and header and rows:
+        hlow = [str(h or "").strip().lower() for h in header]
+        def _tim_cot(*tu_khoa):
+            for i, h in enumerate(hlow):
+                if any(k in h for k in tu_khoa):
+                    return i
+            return -1
+        i_mst = _tim_cot("mst bán", "mst ban", "mst")
+        i_no = -1
+        for i, h in enumerate(hlow):
+            if h == "nợ" or h == "no":
+                i_no = i; break
+        mapping = {}
+        if i_mst >= 0 and i_no >= 0:
+            for r in rows:
+                if i_mst < len(r) and i_no < len(r):
+                    mst = _chuan_mst(r[i_mst])
+                    tk = str(r[i_no] or "").strip()
+                    if mst and tk:
+                        mapping[mst] = tk   # dòng sau ghi đè dòng trước (mới nhất thắng)
+        if mapping:
+            _hoc_map_no(cid, mapping)
+            da_hoc = len(mapping)
+    return {"ok": True, "so_dong": len(rows), "da_hoc_no": da_hoc}
 
 
 @app.get("/api/nhap-lieu/{cid}")
@@ -3319,6 +3445,8 @@ def export_excel(cid: int):
         nd = (r["tdlap"] or "").split("T")[0]
         return nd  # yyyy-mm-dd so sánh chuỗi = đúng thứ tự thời gian
 
+    map_no_ht = _get_map_no(cid)  # {mst: tk_no} đã học -> tự điền cột Nợ
+
     def build_detail_sheet(sheet_name, loai):
         ws = wb.create_sheet(sheet_name)
         # Việc 9: Chi tiết MUA VÀO bỏ Người mua/MST mua; BÁN RA bỏ Người bán/MST bán
@@ -3327,7 +3455,8 @@ def export_excel(cid: int):
                        "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT",
                        "Số lượng", "Đơn giá", "Thành tiền",
                        "Thuế suất", "Tiền thuế GTGT", "Trạng thái", "Kết quả",
-                       "Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK"]
+                       "Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK",
+                       "Nợ", "Có"]   # cột T = Nợ, U = Có
         else:
             headers = ["Ký hiệu", "Số HĐ", "Ngày", "Người mua", "MST mua",
                        "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT",
@@ -3335,6 +3464,16 @@ def export_excel(cid: int):
                        "Thuế suất", "Tiền thuế GTGT", "Trạng thái", "Kết quả"]
         ws.append(headers)
         style_header(ws, len(headers))
+
+        def append_row(vals, no_tk="", co_tk=""):
+            """Append 1 dòng; với MUA VÀO thêm cột Nợ (T) + Có (U)."""
+            vals = list(vals)
+            if loai == "purchase":
+                while len(vals) < 19:   # đệm cho hết cột S (thuế NK)
+                    vals.append("")
+                vals.append(no_tk)      # T = Nợ
+                vals.append(co_tk)      # U = Có
+            ws.append(vals)
 
         # lọc + SORT theo ngày TĂNG DẦN (thấp -> cao)
         loai_rows = [r for r in rows if r["loai"] == loai]
@@ -3387,19 +3526,25 @@ def export_excel(cid: int):
             ikey = (str(r["khhdon"]), str(r["shdon"]).lstrip("0") or "0")
             ngay_fmt = _fmt_ngay(r["tdlap"])
 
+            # Hạch toán MUA VÀO: Có theo tổng HĐ (>=5tr->331, <5tr->1111); Nợ học theo MST
+            no_r = co_r = ""
+            if loai == "purchase":
+                co_r = _co_theo_tong(r["tgtttbso"])
+                no_r = map_no_ht.get(_chuan_mst(r["nbmst"]), "")
+
             if not items:
                 ly_do = "(không lấy được chi tiết — đăng nhập rồi xuất lại)"
                 nmten_raw = raw.get("nmten", "") or raw.get("nmtnmua", "") or ""
                 if loai == "purchase":
-                    ws.append([r["khhdon"], r["shdon"], ngay_fmt,
-                               r["nbten"], r["nbmst"], "", "", ly_do, "",
-                               "", "", "", "", r["tgtttbso"],
-                               tt, kq])
+                    append_row([r["khhdon"], r["shdon"], ngay_fmt,
+                                r["nbten"], r["nbmst"], "", "", ly_do, "",
+                                "", "", "", "", r["tgtttbso"],
+                                tt, kq], no_r, co_r)
                 else:
-                    ws.append([r["khhdon"], r["shdon"], ngay_fmt,
-                               nmten_raw, r["nmmst"], "", "", ly_do, "",
-                               "", "", "", "", r["tgtttbso"],
-                               tt, kq])
+                    append_row([r["khhdon"], r["shdon"], ngay_fmt,
+                                nmten_raw, r["nmmst"], "", "", ly_do, "",
+                                "", "", "", "", r["tgtttbso"],
+                                tt, kq])
                 cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
                 cur["ds"] += _to_num(r["tgtcthue"]) or 0
                 cur["thue"] += _to_num(r["tgtthue"]) or 0
@@ -3448,7 +3593,7 @@ def export_excel(cid: int):
                 else:
                     nguoi = it.get("ten_nmua", "") or raw.get("nmten", "") or ""
                     mst = it.get("mst_nmua", "") or r["nmmst"]
-                ws.append([
+                append_row([
                     r["khhdon"], r["shdon"],
                     ngay_fmt, nguoi, mst,
                     it.get("stt", ""), it.get("ma_vt", ""),
@@ -3456,7 +3601,7 @@ def export_excel(cid: int):
                     sl_num, dgia_out,
                     ds, ts_hien, tien_thue,
                     tt, kq,
-                ])
+                ], no_r, co_r)
                 cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
                 cur["ds"] += ds if isinstance(ds, (int, float)) else 0
                 cur["thue"] += tien_thue if isinstance(tien_thue, (int, float)) else 0
@@ -3481,8 +3626,9 @@ def export_excel(cid: int):
                     sl_tk = it.get("sluong", 0) or 0
                     # đơn giá = thành tiền / số lượng
                     dgia_tk = round(ds_tk / sl_tk) if sl_tk else 0
-                    # A..P: như hóa đơn thường; Q,R,S = thuế NK
-                    ws.append([
+                    # A..P: như hóa đơn thường; Q,R,S = thuế NK; T = Nợ, U = Có
+                    co_tk = _co_theo_tong(round(ds_tk) + round(thue_tk))
+                    append_row([
                         "TKNK", tkr["so_tk"], ngay_tk,
                         tkr["nguoi_xk"], tkr["nguoi_xk"],          # Người bán & MST bán = tên người XK
                         idx, "", it.get("ten", ""), it.get("dvt", ""),
@@ -3492,7 +3638,7 @@ def export_excel(cid: int):
                         round(it.get("tri_gia_nk", 0) or 0),       # Q: trị giá tính thuế NK
                         it.get("ts_nk", ""),                       # R: thuế suất NK
                         round(it.get("tien_thue_nk", 0) or 0),     # S: tiền thuế NK
-                    ])
+                    ], "", co_tk)
                     # cộng vào tổng đối chiếu (theo số tờ khai)
                     ikey = (str("TKNK"), str(tkr["so_tk"]))
                     cur = ct_totals["purchase"].setdefault(ikey, {"ds": 0, "thue": 0})
@@ -3957,6 +4103,16 @@ def export_excel(cid: int):
     ws.freeze_panes = "C1"  # cố định cột tới cột 2 (A,B) để dễ xem
 
     wb.remove(wb["Sheet"])
+    # Sắp xếp lại thứ tự sheet: Đối chiếu; Chi tiết MUA VÀO; BK Mua vào;
+    # Chi tiết BÁN RA; BK Bán ra
+    thu_tu = ["Đối chiếu", "Chi tiết MUA VÀO", "BK Mua vào",
+              "Chi tiết BÁN RA", "BK Bán ra"]
+    try:
+        wb._sheets.sort(key=lambda s: thu_tu.index(s.title)
+                        if s.title in thu_tu else 999)
+        wb.active = 0
+    except Exception:
+        pass
     # tên file kèm kỳ (nếu có) để các kỳ không ghi đè nhau trên Desktop
     ky_fname = ""
     try:
