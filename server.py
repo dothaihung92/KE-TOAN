@@ -2426,6 +2426,230 @@ async def mua_hang_dich_vu(cid: int, request: Request):
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(so_dong)})
 
 
+# ============ DANH MỤC HÀNG HÓA / NVL / VTHH (từ bảng kê mua vào) ============
+def _dm_cols(header):
+    """Tìm chỉ số cột cần dùng trong lưới Nhập Liệu đầu vào."""
+    hlow = [str(h or "").strip().lower() for h in header]
+    def find(eqs, contains):
+        for i, h in enumerate(hlow):
+            if h in eqs:
+                return i
+        for i, h in enumerate(hlow):
+            if any(k in h for k in contains):
+                return i
+        return -1
+    return {
+        "ten": find(("tên hàng hóa/dịch vụ",), ("tên hàng",)),
+        "dvt": find(("đvt",), ("đvt", "đơn vị tính")),
+        "sl": find(("số lượng",), ("số lượng",)),
+        "dgia": find(("đơn giá",), ("đơn giá",)),
+        "tt": find(("thành tiền",), ("thành tiền",)),
+        "sohd": find(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn")),
+        "ngay": find(("ngày",), ("ngày",)),
+        "no": find(("nợ",), ()),
+    }
+
+def _gen_danh_muc(cid, loai, header, rows):
+    """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL (loai='nvl',
+    Nợ 152). Mã hàng nối tiếp + tái sử dụng theo 'Ký tự' (nospaces(Tên)+ĐVT).
+    Trả về (all_rows, so_dong_moi, store_moi)."""
+    prefix = "HH" if loai == "hh" else "NVL"
+    accs = {"1561", "156"} if loai == "hh" else {"152"}
+    data = _doc_du_lieu_cty(cid)
+    store = data.get("dm_" + loai, {}) or {}
+    keymap = dict(store.get("map", {}))
+    items = dict(store.get("items", {}))
+    next_n = int(store.get("next", 1))
+    seen = set(store.get("seen", []))
+    saved_rows = [list(r) for r in store.get("rows", [])]
+    col = _dm_cols(header)
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    new_rows = []
+    for r in rows:
+        no = str(gv(r, col["no"]) or "").strip()
+        if no not in accs:
+            continue
+        ten = str(gv(r, col["ten"]) or "").strip()
+        dvt = str(gv(r, col["dvt"]) or "").strip()
+        if not ten:
+            continue
+        ky_tu = "".join(ten.split()) + dvt        # cột D = nospaces(Tên)+ĐVT
+        if ky_tu in keymap:
+            ma = keymap[ky_tu]
+        else:
+            ma = prefix + str(next_n).zfill(5)
+            keymap[ky_tu] = ma
+            items[ma] = {"ten": ten, "dvt": dvt}
+            next_n += 1
+        j = ky_tu + dvt
+        sl = _to_num(gv(r, col["sl"]))
+        dgia = _to_num(gv(r, col["dgia"]))
+        tt = _to_num(gv(r, col["tt"]))
+        sohd = str(gv(r, col["sohd"]) or "")
+        ngay = str(gv(r, col["ngay"]) or "")
+        rowkey = f"{ma}|{sohd}|{ngay}|{tt}"
+        if rowkey in seen:
+            continue                               # đã có -> không lặp lại
+        seen.add(rowkey)
+        new_rows.append([ma, ten, dvt, ky_tu, sl, dgia, tt, sohd, ngay, j])
+
+    all_rows = saved_rows + new_rows
+    store_moi = {"map": keymap, "items": items, "next": next_n,
+                 "seen": sorted(seen), "rows": all_rows}
+    return all_rows, len(new_rows), store_moi
+
+DM_HH_HEADERS = ["Mã Hàng", "Mặt hàng", "ĐVT", "Ký tự ", "SL", "Đơn giá",
+                 "Thành tiền", "Hoá đơn", "Ngày Hoá Đơn"]
+
+def _xuat_dm_excel(rows, ten_sheet, fname, cid):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = ten_sheet
+    for c, h in enumerate(DM_HH_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    cot_tien = {5, 6, 7}      # SL, Đơn giá, Thành tiền
+    cot_text = {1, 4, 8, 10}  # Mã, Ký tự, Hoá đơn, J
+    for r, row in enumerate(rows, 2):
+        for c, v in enumerate(row, 1):
+            cell = ws.cell(r, c)
+            cell.value = v
+            if c in cot_text:
+                cell.number_format = "@"
+            elif c in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, 11):
+        ws.column_dimensions[get_column_letter(c)].width = 18
+    ws.freeze_panes = "A2"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return path
+
+
+@app.post("/api/danh-muc-hang/{cid}")
+async def danh_muc_hang(cid: int, request: Request, loai: str = "hh", save: int = 0):
+    """Sinh Danh mục Hàng hóa/NVL từ lưới Nhập Liệu. save=1 -> lưu lại."""
+    body = await request.json()
+    rows_in = _gen_danh_muc(cid, loai, body.get("header", []), body.get("rows", []))
+    all_rows, so_moi, store_moi = rows_in
+    if save:
+        data = _doc_du_lieu_cty(cid)
+        data["dm_" + loai] = store_moi
+        _ghi_du_lieu_cty(cid, data)
+    return {"headers": DM_HH_HEADERS, "rows": all_rows,
+            "so_dong": len(all_rows), "so_moi": so_moi}
+
+
+@app.post("/api/danh-muc-hang-export/{cid}")
+async def danh_muc_hang_export(cid: int, request: Request, loai: str = "hh"):
+    """Kết xuất Excel Danh mục Hàng hóa/NVL (đồng thời LƯU lại)."""
+    body = await request.json()
+    all_rows, so_moi, store_moi = _gen_danh_muc(
+        cid, loai, body.get("header", []), body.get("rows", []))
+    data = _doc_du_lieu_cty(cid)
+    data["dm_" + loai] = store_moi
+    _ghi_du_lieu_cty(cid, data)
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    ten = "DMHH" if loai == "hh" else "DMNVL"
+    fname = f"DanhMuc_{ten}_{mst}.xlsx"
+    sheet = "DMHH" if loai == "hh" else "DMNVL"
+    path = _xuat_dm_excel(all_rows, sheet, fname, cid)
+    return FileResponse(path, filename=fname, headers={"X-So-Moi": str(so_moi)})
+
+
+VTHH_HEADERS = [
+    "Mã (*)", "Tên (*)", "Tính chất", "Đơn vị tính chính", "Tồn tối thiểu",
+    "Nhóm VTHH", "Kho ngầm định", "TK kho", "TK doanh thu", "TK chi phí",
+    "Tỷ lệ CKMH (%)", "Đơn giá mua gần nhất", "Đơn giá bán ", "Thuế suất GTGT",
+    "Loại tiền", "Đơn vị tính", "Đơn giá mua cố định", "Đơn vị chuyển đổi",
+    "Tỷ lệ chuyển đổi", "Toán tử", "Mã nguyên vật liệu", "Tên nguyên vật liệu",
+    "Đơn vị tính NVL", "Số lượng", "Đặc tính",
+    "Theo dõi vật tư hàng hóa theo mã quy cách", "Mã quy cách", "Tên quy cách",
+    "Cho phép trùng"]
+
+def _gen_vthh(cid):
+    """Lấy các MÃ HÀNG MỚI (chưa import VTHH) từ DM Hàng hóa + DM NVL."""
+    data = _doc_du_lieu_cty(cid)
+    exported = set(data.get("vthh_exported", []))
+    out, new_codes = [], []
+    for loai in ("hh", "nvl"):
+        store = data.get("dm_" + loai, {}) or {}
+        items = store.get("items", {})
+        for ma in sorted(items.keys()):
+            if ma in exported:
+                continue
+            info = items[ma]
+            out.append([ma, info.get("ten", ""), "0", info.get("dvt", "")])
+            new_codes.append(ma)
+    return out, new_codes
+
+
+@app.post("/api/danh-muc-vthh/{cid}")
+async def danh_muc_vthh(cid: int, export: int = 0):
+    """Danh mục VTHH: chỉ các mã hàng MỚI lưu (HH+NVL) chưa import.
+    export=1 -> trả file Excel + đánh dấu đã import."""
+    out, new_codes = _gen_vthh(cid)
+    if not export:
+        return {"headers": VTHH_HEADERS, "rows": out, "so_dong": len(out)}
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Danh mục VTHH"
+    for c, h in enumerate(VTHH_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    for r, row in enumerate(out, 2):
+        for c, v in enumerate(row, 1):
+            cell = ws.cell(r, c)
+            cell.value = v
+            if c in (1, 3):
+                cell.number_format = "@"
+    for c in range(1, len(VTHH_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 18
+    ws.freeze_panes = "A2"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"DanhMuc_VTHH_{mst}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    # đánh dấu đã import
+    data = _doc_du_lieu_cty(cid)
+    data["vthh_exported"] = sorted(set(data.get("vthh_exported", [])) | set(new_codes))
+    _ghi_du_lieu_cty(cid, data)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return FileResponse(path, filename=fname, headers={"X-So-Moi": str(len(new_codes))})
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.

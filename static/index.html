@@ -287,6 +287,22 @@
 </div>
 
 
+<!-- MODAL DANH MỤC (HÀNG HÓA / NVL / VTHH) -->
+<div id="dmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:600;overflow:auto">
+  <div style="max-width:1100px;margin:24px auto;background:#fff;border-radius:12px;padding:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <h3 id="dmTitle" style="margin:0;color:#1f6b4a"></h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn gold sm" id="dmLuuBtn" onclick="dmLuu()">💾 Lưu</button>
+        <button class="btn sm" id="dmXuatBtn" onclick="dmXuat()" style="background:#2e5c8a">📤 Xuất Excel</button>
+        <button class="btn ghost sm" onclick="dmDong()">✕ Đóng</button>
+      </div>
+    </div>
+    <div id="dmInfo" style="font-size:13px;margin-bottom:8px;color:var(--muted)"></div>
+    <div id="dmTableWrap" style="overflow:auto;max-height:70vh;border:1px solid #ddd;border-radius:8px"></div>
+  </div>
+</div>
+
 <!-- GIAO DIỆN NHẬP LIỆU (màn hình riêng) -->
 <div id="nhapLieuScreen" style="display:none;position:fixed;inset:0;background:var(--bg,#f4f6f3);z-index:500;overflow:auto">
   <div style="max-width:1200px;margin:0 auto;padding:24px">
@@ -1251,7 +1267,10 @@ function moBangKe(loai){
           <button class="btn ghost sm" onclick="nlCoDinhCot()" id="nlFreezeBtn">📌 Cố định cột</button>
           <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
           <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
-          ${loai==='in'?`<button class="btn sm" onclick="nlMuaHangDV(this)" style="background:#5a3e8a" title="Lọc các dòng Nợ là TK chi phí 6xx và kết xuất form MISA Chứng từ mua dịch vụ">📑 Mua Hàng Dịch Vụ</button>`:''}
+          ${loai==='in'?`<button class="btn sm" onclick="nlMuaHangDV(this)" style="background:#5a3e8a" title="Lọc các dòng Nợ là TK chi phí 6xx và kết xuất form MISA Chứng từ mua dịch vụ">📑 Mua Hàng Dịch Vụ</button>
+          <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
+          <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
+          <button class="btn sm" onclick="nlDanhMucVTHH()" style="background:#2e5c8a" title="Danh mục VTHH - chỉ mã hàng mới từ DM Hàng hóa + NVL">📦 DM VTHH</button>`:''}
           <button class="btn ghost sm" onclick="xoaNhapLieu()" style="color:#c00">🗑 Xóa bộ</button>
         </div>
       </div>
@@ -1777,6 +1796,80 @@ async function nlMuaHangDV(btn){
     toast(sd&&sd!=='0'?`📑 Đã kết xuất ${sd} dòng mua dịch vụ (Nợ 6xx)`:'⚠ Không có dòng nào Nợ là TK 6xx','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
+}
+/* ---------- DANH MỤC HÀNG HÓA / NVL / VTHH ---------- */
+let dmLoaiHienTai='hh';
+function dmDong(){document.getElementById('dmModal').style.display='none';}
+function dmVeBang(headers,rows){
+  let h='<table style="border-collapse:collapse;font-size:12px;width:max-content;min-width:100%"><thead><tr>';
+  h+='<th style="position:sticky;top:0;background:#1f3a5a;color:#fff;padding:4px 6px;border:1px solid #ccc">#</th>';
+  headers.forEach(c=>h+=`<th style="position:sticky;top:0;background:#2e5c8a;color:#fff;padding:4px 8px;border:1px solid #ccc;white-space:nowrap">${c}</th>`);
+  h+='</tr></thead><tbody>';
+  rows.forEach((r,i)=>{
+    h+=`<tr><td style="padding:2px 6px;border:1px solid #eee;color:#999;text-align:center">${i+1}</td>`;
+    r.forEach(v=>{const so=typeof v==='number';h+=`<td style="padding:2px 8px;border:1px solid #ddd;white-space:nowrap;${so?'text-align:right':''}">${so?v.toLocaleString('vi-VN'):(v==null?'':v)}</td>`;});
+    h+='</tr>';
+  });
+  h+='</tbody></table>';
+  document.getElementById('dmTableWrap').innerHTML=h;
+}
+async function nlDanhMuc(loai){
+  dmLoaiHienTai=loai;
+  document.getElementById('dmTitle').textContent=loai==='hh'?'🏷 Danh Mục Hàng Hóa':'🧱 Danh Mục NVL';
+  document.getElementById('dmLuuBtn').style.display='';
+  document.getElementById('dmXuatBtn').onclick=dmXuat;
+  document.getElementById('dmInfo').textContent='Đang lọc dữ liệu...';
+  document.getElementById('dmTableWrap').innerHTML='';
+  document.getElementById('dmModal').style.display='block';
+  try{
+    const r=await fetch(`/api/danh-muc-hang/${current}?loai=${loai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    if(!r.ok)throw new Error('Lỗi tạo danh mục');
+    const d=await r.json();
+    dmVeBang(d.headers,d.rows);
+    document.getElementById('dmInfo').innerHTML=`Tổng <b>${d.so_dong}</b> mặt hàng — trong đó <b style="color:#1f6b4a">${d.so_moi} mới</b> (lọc theo Nợ ${loai==='hh'?'1561/156':'152'}). Bấm <b>Lưu</b> để ghi nhớ mã hàng, hoặc <b>Xuất Excel</b>.`;
+  }catch(e){document.getElementById('dmInfo').textContent='Lỗi: '+e.message;}
+}
+async function dmLuu(){
+  try{
+    const r=await fetch(`/api/danh-muc-hang/${current}?loai=${dmLoaiHienTai}&save=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    if(!r.ok)throw new Error('Lưu thất bại');
+    const d=await r.json();
+    toast(`💾 Đã lưu danh mục (${d.so_dong} mặt hàng, ${d.so_moi} mới)`,'ok');
+    document.getElementById('dmInfo').innerHTML=`Đã lưu. Tổng <b>${d.so_dong}</b> mặt hàng.`;
+  }catch(e){toast('Lỗi lưu: '+e.message,'err')}
+}
+async function dmXuat(){
+  try{
+    const r=await fetch(`/api/danh-muc-hang-export/${current}?loai=${dmLoaiHienTai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    if(!r.ok)throw new Error('Xuất thất bại');
+    dl(await r.blob(),`DanhMuc_${dmLoaiHienTai==='hh'?'DMHH':'DMNVL'}.xlsx`);
+    toast('📤 Đã xuất & lưu danh mục','ok');
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
+}
+async function nlDanhMucVTHH(){
+  document.getElementById('dmTitle').textContent='📦 Danh Mục VTHH';
+  document.getElementById('dmLuuBtn').style.display='none';
+  document.getElementById('dmInfo').textContent='Đang lấy mã hàng mới...';
+  document.getElementById('dmTableWrap').innerHTML='';
+  document.getElementById('dmModal').style.display='block';
+  try{
+    const r=await fetch(`/api/danh-muc-vthh/${current}`,{method:'POST'});
+    if(!r.ok)throw new Error('Lỗi');
+    const d=await r.json();
+    dmVeBang(d.headers.slice(0,4),d.rows);
+    document.getElementById('dmInfo').innerHTML=`<b style="color:#2e5c8a">${d.so_dong} mã hàng MỚI</b> (chưa import VTHH) từ DM Hàng hóa + NVL đã lưu. Bấm <b>Xuất Excel</b> để kết xuất (sẽ đánh dấu đã import).`;
+    document.getElementById('dmXuatBtn').onclick=dmXuatVTHH;
+  }catch(e){document.getElementById('dmInfo').textContent='Lỗi: '+e.message;}
+}
+async function dmXuatVTHH(){
+  try{
+    const r=await fetch(`/api/danh-muc-vthh/${current}?export=1`,{method:'POST'});
+    if(!r.ok)throw new Error('Xuất thất bại');
+    const sm=r.headers.get('X-So-Moi')||'';
+    dl(await r.blob(),`DanhMuc_VTHH.xlsx`);
+    toast(`📦 Đã xuất VTHH (${sm} mã mới) & đánh dấu đã import`,'ok');
+    dmDong();
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
 async function xoaNhapLieu(){
   if(!confirm('Xóa bộ dữ liệu này (cho công ty hiện tại)?'))return;
