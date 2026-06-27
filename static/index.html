@@ -161,6 +161,9 @@
       <button class="btn ghost" style="flex:1;font-size:12px;padding:7px" onclick="exportCongTy()">📤 Export DS</button>
       <input type="file" id="impCoFile" accept=".xlsx" style="display:none" onchange="importCongTy(this)">
     </div>
+    <div style="padding:0 12px 8px">
+      <button class="btn" style="width:100%;font-size:13px;padding:9px" onclick="openBatchModal()">🚀 Tra cứu hàng loạt</button>
+    </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:12px;padding:7px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
     </div>
@@ -198,6 +201,59 @@
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
       <button class="btn" id="coSaveBtn" onclick="saveCompany()">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL TRA CỨU HÀNG LOẠT -->
+<div class="modal-bg" id="batchModal">
+  <div class="modal" style="max-width:680px">
+    <h3>🚀 Tra cứu hóa đơn hàng loạt</h3>
+    <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Hệ thống xử lý <b>lần lượt</b> từng công ty (an toàn, tránh bị Tổng cục Thuế chặn tạm). Công ty <b>chưa đăng nhập</b> sẽ bị bỏ qua — hãy đăng nhập trước.</p>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="field" style="flex:1;min-width:140px"><label>Từ ngày</label><input type="date" id="bTuNgay"></div>
+      <div class="field" style="flex:1;min-width:140px"><label>Đến ngày</label><input type="date" id="bDenNgay"></div>
+    </div>
+
+    <div class="field">
+      <label>Loại hóa đơn</label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <label class="chk"><input type="checkbox" id="bBuy" checked> Mua vào</label>
+        <label class="chk"><input type="checkbox" id="bSell" checked> Bán ra</label>
+        <label class="chk"><input type="checkbox" id="bDT" checked> HĐ điện tử thường</label>
+        <label class="chk"><input type="checkbox" id="bMTT" checked> HĐ máy tính tiền</label>
+        <label class="chk"><input type="checkbox" id="bNganHang"> Lấy cả HĐ ngân hàng</label>
+        <label class="chk"><input type="checkbox" id="bDlXml"> Tải file XML về máy</label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label style="display:flex;justify-content:space-between;align-items:center">
+        <span>Chọn công ty</span>
+        <span style="font-weight:400">
+          <a href="#" onclick="batchSelectAll(true);return false" style="font-size:13px">Chọn tất cả</a> ·
+          <a href="#" onclick="batchSelectAll(false);return false" style="font-size:13px">Bỏ chọn</a> ·
+          <a href="#" onclick="batchSelectOnline();return false" style="font-size:13px">Chỉ công ty đã đăng nhập</a>
+        </span>
+      </label>
+      <div id="batchCoList" style="max-height:230px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:8px"></div>
+    </div>
+
+    <div id="batchProgress" style="display:none;margin-top:8px;background:var(--green-l);border-radius:10px;padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span id="batchProgressText" style="font-size:14px;font-weight:600;color:var(--green-d)">Đang xử lý...</span>
+        <button class="btn ghost sm" onclick="cancelBatch()">⏹ Dừng</button>
+      </div>
+      <div style="background:#fff;border-radius:6px;height:8px;overflow:hidden">
+        <div id="batchBar" style="height:100%;width:0%;background:var(--green);transition:width .3s"></div>
+      </div>
+      <div id="batchLog" style="margin-top:10px;font-size:13px;max-height:180px;overflow:auto"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeBatchModal()">Đóng</button>
+      <button class="btn" id="batchStartBtn" onclick="doBatchFetch()">🚀 Bắt đầu tra cứu</button>
     </div>
   </div>
 </div>
@@ -691,6 +747,100 @@ async function doFetch(){
   }
   btn.disabled=false;btn.innerHTML='🔍 Tra cứu hóa đơn';
 }
+/* ---------- TRA CỨU HÀNG LOẠT ---------- */
+let batchId=null, batchPollCancel=false;
+function openBatchModal(){
+  // gợi ý khoảng ngày từ form công ty đang mở (nếu có)
+  const t=document.getElementById('tuNgay'), d=document.getElementById('denNgay');
+  if(t&&t.value)document.getElementById('bTuNgay').value=t.value;
+  if(d&&d.value)document.getElementById('bDenNgay').value=d.value;
+  renderBatchCoList();
+  document.getElementById('batchProgress').style.display='none';
+  document.getElementById('batchLog').innerHTML='';
+  document.getElementById('batchStartBtn').disabled=false;
+  document.getElementById('batchModal').classList.add('show');
+}
+function closeBatchModal(){
+  batchPollCancel=true;
+  document.getElementById('batchModal').classList.remove('show');
+}
+function renderBatchCoList(){
+  const box=document.getElementById('batchCoList');
+  if(!companies.length){box.innerHTML='<div style="color:var(--muted);font-size:13px;padding:8px">Chưa có công ty nào.</div>';return;}
+  box.innerHTML=companies.map(c=>{
+    const on=!!c._online;
+    return `<label class="chk" style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid #f0f0f0">
+      <input type="checkbox" class="batchChk" value="${c.id}" ${on?'checked':''}>
+      <span style="flex:1">${c.ten} <span style="color:var(--muted);font-size:12px">— MST ${c.mst}</span></span>
+      <span style="font-size:12px;font-weight:600;color:${on?'var(--green)':'#c47'}">${on?'● đã đăng nhập':'○ chưa đăng nhập'}</span>
+    </label>`;
+  }).join('');
+}
+function batchSelectAll(v){document.querySelectorAll('.batchChk').forEach(c=>c.checked=v);}
+function batchSelectOnline(){
+  document.querySelectorAll('.batchChk').forEach(c=>{
+    const co=companies.find(x=>String(x.id)===c.value);
+    c.checked=!!(co&&co._online);
+  });
+}
+async function doBatchFetch(){
+  const tu=fmtDate(document.getElementById('bTuNgay').value);
+  const den=fmtDate(document.getElementById('bDenNgay').value);
+  if(!tu||!den){toast('Chọn khoảng ngày','err');return}
+  const cids=[...document.querySelectorAll('.batchChk:checked')].map(c=>parseInt(c.value));
+  if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return}
+  const loai=[];
+  if(document.getElementById('bBuy').checked)loai.push('purchase');
+  if(document.getElementById('bSell').checked)loai.push('sold');
+  if(!loai.length){toast('Chọn ít nhất 1 loại hóa đơn','err');return}
+  const heThong=[];
+  if(document.getElementById('bDT').checked)heThong.push('query');
+  if(document.getElementById('bMTT').checked)heThong.push('sco-query');
+  if(!heThong.length){toast('Chọn ít nhất 1 hệ thống (thường/MTT)','err');return}
+  const dl=document.getElementById('bDlXml').checked?['xml']:[];
+
+  const btn=document.getElementById('batchStartBtn');
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang chạy...';
+  document.getElementById('batchProgress').style.display='block';
+  document.getElementById('batchLog').innerHTML='';
+  document.getElementById('batchBar').style.width='0%';
+  document.getElementById('batchProgressText').textContent='Bắt đầu...';
+
+  try{
+    const r=await api('/api/fetch-batch',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cids,tu_ngay:tu,den_ngay:den,loai_list:loai,he_thong_list:heThong,
+        dl_buy:dl,dl_sell:dl,lay_ngan_hang:document.getElementById('bNganHang').checked})});
+    batchId=r.batch_id;batchPollCancel=false;
+    let running=true;
+    while(running){
+      await new Promise(s=>setTimeout(s,1000));
+      if(batchPollCancel)return;
+      let st;
+      try{st=await api(`/api/fetch-batch-status/${batchId}`);}catch{continue;}
+      running=st.running;
+      document.getElementById('batchBar').style.width=Math.round(st.done/st.total*100)+'%';
+      const cur=st.items.find(i=>i.cid===st.current);
+      document.getElementById('batchProgressText').textContent=
+        running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
+               :`Hoàn tất ${st.done}/${st.total} công ty`;
+      const ic={pending:'⏳',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
+      document.getElementById('batchLog').innerHTML=st.items.map(i=>{
+        const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(i.status==='done'?'#1f6b4a':'#555'));
+        const sl=i.status==='done'?` (${i.total_saved} HĐ)`:'';
+        return `<div style="color:${mau}">${ic[i.status]||'•'} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>`;
+      }).join('');
+    }
+    toast('Tra cứu hàng loạt hoàn tất','ok');
+    await loadCompanies();
+    if(current)await refreshInvoices();
+  }catch(e){toast('Lỗi: '+e.message,'err');}
+  btn.disabled=false;btn.innerHTML='🚀 Bắt đầu tra cứu';
+}
+async function cancelBatch(){
+  if(batchId){try{await api(`/api/fetch-batch-cancel/${batchId}`,{method:'POST'});}catch{}}
+  document.getElementById('batchProgressText').textContent='Đang dừng...';
+}
+
 function hienKetQua(m){
   const box=document.getElementById('ketQuaTraCuu');
   if(!box)return;

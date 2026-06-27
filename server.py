@@ -710,9 +710,13 @@ def login(cid: int, body: dict = Body(...)):
 
 
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
-@app.post("/api/fetch/{cid}")
-def fetch_invoices(cid: int, body: dict = Body(...)):
-    """
+def _run_fetch_job(cid: int, body: dict):
+    """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
+
+    Giả định: FETCH_JOBS[cid] đã được khởi tạo bởi nơi gọi, và token còn hiệu lực.
+    Dùng chung cho tra cứu 1 công ty (/api/fetch) và tra cứu hàng loạt
+    (/api/fetch-batch).
+
     body: {
       tu_ngay, den_ngay,
       loai_list: ["purchase","sold"],
@@ -720,11 +724,8 @@ def fetch_invoices(cid: int, body: dict = Body(...)):
       dl_buy:  ["xml","pdf"]  # định dạng tải cho mua vào (rỗng = không tải)
       dl_sell: ["xml","pdf"]  # định dạng tải cho bán ra
     }
-    Trả về luồng text (mỗi dòng 1 JSON) báo tiến độ.
     """
     client = get_client(cid)
-    if not client.token:
-        raise HTTPException(401, "Chưa đăng nhập tài khoản thuế cho công ty này")
 
     tu = body.get("tu_ngay")
     den = body.get("den_ngay")
@@ -948,12 +949,138 @@ def fetch_invoices(cid: int, body: dict = Body(...)):
             if job is not None:
                 job["running"] = False
 
-    # Khởi tạo job và chạy nền trong thread riêng
-    FETCH_JOBS[cid] = {"messages": [], "last": None, "running": True,
-                       "cursor": 0, "started": time.time(), "cancel": False}
+    # FETCH_JOBS[cid] đã được khởi tạo bởi nơi gọi (endpoint /api/fetch hoặc batch).
+    # Chạy đồng bộ trong thread của nơi gọi.
+    run()
+
+
+def _new_fetch_job():
+    return {"messages": [], "last": None, "running": True,
+            "cursor": 0, "started": time.time(), "cancel": False}
+
+
+@app.post("/api/fetch/{cid}")
+def fetch_invoices(cid: int, body: dict = Body(...)):
+    """Tra cứu + tải hóa đơn cho 1 công ty (chạy nền). Trình duyệt poll
+    /api/fetch-status/{cid} để lấy tiến độ."""
+    client = get_client(cid)
+    if not client.token:
+        raise HTTPException(401, "Chưa đăng nhập tài khoản thuế cho công ty này")
+    FETCH_JOBS[cid] = _new_fetch_job()
     import threading
-    threading.Thread(target=run, daemon=True).start()
+    threading.Thread(target=lambda: _run_fetch_job(cid, body), daemon=True).start()
     return {"ok": True, "started": True}
+
+
+# ---------- TRA CỨU HÀNG LOẠT (nhiều công ty cùng lúc) ----------
+# Mỗi batch lấy lần lượt từng công ty (tuần tự) để tránh bị Tổng cục Thuế
+# chặn tạm (429). Tiến độ từng công ty vẫn ghi vào FETCH_JOBS[cid] như cũ,
+# đồng thời BATCH_JOBS[batch_id] tổng hợp trạng thái toàn batch.
+BATCH_JOBS = {}      # {batch_id: {...}}
+_BATCH_SEQ = {"n": 0}
+
+
+def _run_batch(batch_id: int, cids: list, body: dict):
+    batch = BATCH_JOBS[batch_id]
+    try:
+        for cid in cids:
+            if batch.get("cancel"):
+                break
+            item = batch["items"].get(cid)
+            client = get_client(cid)
+            if not client.token:
+                item["status"] = "skipped"
+                item["note"] = "Chưa đăng nhập — bỏ qua"
+                batch["done"] += 1
+                continue
+            item["status"] = "running"
+            batch["current"] = cid
+            # khởi tạo job cho công ty này (UI từng công ty dùng lại được)
+            FETCH_JOBS[cid] = _new_fetch_job()
+            try:
+                _run_fetch_job(cid, body)   # chạy đồng bộ trong thread batch
+                last = (FETCH_JOBS.get(cid) or {}).get("last") or {}
+                item["total_saved"] = last.get("total_saved", 0)
+                if last.get("stage") == "error":
+                    item["status"] = "error"
+                    item["note"] = last.get("text", "Lỗi")
+                else:
+                    item["status"] = "done"
+                    item["note"] = last.get("text", "Hoàn tất")
+            except Exception as e:
+                item["status"] = "error"
+                item["note"] = str(e)[:160]
+            batch["done"] += 1
+    finally:
+        batch["running"] = False
+        batch["current"] = None
+
+
+@app.post("/api/fetch-batch")
+def fetch_batch(body: dict = Body(...)):
+    """Tra cứu nhiều công ty một lần.
+    body: { cids: [1,2,3], tu_ngay, den_ngay, loai_list, he_thong_list,
+            dl_buy, dl_sell, lay_ngan_hang }
+    Trả về { batch_id }. Poll /api/fetch-batch-status/{batch_id} để theo dõi."""
+    cids = body.get("cids") or []
+    cids = [int(c) for c in cids]
+    if not cids:
+        raise HTTPException(400, "Chưa chọn công ty nào")
+
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, ten, mst FROM companies WHERE id IN (%s)"
+        % ",".join("?" * len(cids)), cids).fetchall()
+    conn.close()
+    ten_map = {r["id"]: (r["ten"] or r["mst"]) for r in rows}
+    # giữ đúng thứ tự người dùng chọn, chỉ lấy công ty có thật
+    cids = [c for c in cids if c in ten_map]
+    if not cids:
+        raise HTTPException(404, "Không tìm thấy công ty đã chọn")
+
+    _BATCH_SEQ["n"] += 1
+    batch_id = _BATCH_SEQ["n"]
+    BATCH_JOBS[batch_id] = {
+        "running": True,
+        "cancel": False,
+        "total": len(cids),
+        "done": 0,
+        "current": None,
+        "started": time.time(),
+        "order": cids,
+        "items": {c: {"cid": c, "ten": ten_map[c], "status": "pending",
+                      "total_saved": 0, "note": ""} for c in cids},
+    }
+    import threading
+    threading.Thread(target=lambda: _run_batch(batch_id, cids, body),
+                     daemon=True).start()
+    return {"ok": True, "batch_id": batch_id}
+
+
+@app.get("/api/fetch-batch-status/{batch_id}")
+def fetch_batch_status(batch_id: int):
+    batch = BATCH_JOBS.get(batch_id)
+    if not batch:
+        return {"running": False, "no_job": True}
+    return {
+        "running": batch["running"],
+        "total": batch["total"],
+        "done": batch["done"],
+        "current": batch["current"],
+        "items": [batch["items"][c] for c in batch["order"]],
+    }
+
+
+@app.post("/api/fetch-batch-cancel/{batch_id}")
+def fetch_batch_cancel(batch_id: int):
+    batch = BATCH_JOBS.get(batch_id)
+    if batch:
+        batch["cancel"] = True
+        # dừng luôn công ty đang chạy
+        cur = batch.get("current")
+        if cur and FETCH_JOBS.get(cur):
+            FETCH_JOBS[cur]["cancel"] = True
+    return {"ok": True}
 
 
 @app.post("/api/fetch-cancel/{cid}")
