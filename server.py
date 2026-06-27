@@ -3133,7 +3133,9 @@ def export_excel(cid: int):
           (vd HĐ 116058 - H&M: dòng TChat=3 vừa là hàng vừa có STCKhau)
 
         LOẠI 2 — Dòng CHIẾT KHẤU THƯƠNG MẠI RIÊNG (TChat=3, KHÔNG có STCKhau,
-          thành tiền là số tiền chiết khấu): GHI ÂM để trừ vào tổng.
+          thành tiền là số tiền chiết khấu): PHÂN BỔ trừ đều vào thành tiền các
+          dòng hàng cùng thuế suất, tính lại tiền thuế; KHÔNG hiện dòng riêng.
+          (vd HĐ 8 - chiết khấu 10%)
 
         LOẠI 3 — Dòng thành tiền ÂM sẵn (điều chỉnh giảm/CK ghi âm): giữ ÂM.
 
@@ -3195,13 +3197,38 @@ def export_excel(cid: int):
                     so_giam_hkd = _vn_money(it.get("ten_hang"))
                     break
 
-        # --- Pass 2: dựng các dòng hàng (đã trừ CK dòng), bỏ ghi chú thuần ---
+        def _norm_rate(ts):
+            """Chuẩn hóa thuế suất để gom nhóm phân bổ chiết khấu."""
+            return str(ts or "").strip().upper()
+
+        # --- Pass 1b: gom dòng CHIẾT KHẤU THƯƠNG MẠI RIÊNG (LOẠI 2) theo thuế suất ---
+        # dòng TChat=3, KHÔNG có STCKhau, thành tiền là số tiền chiết khấu
+        # -> sẽ PHÂN BỔ TRỪ vào thành tiền các dòng hàng (KHÔNG hiện dòng riêng).
+        ck_rieng = {}          # thuế suất -> tổng tiền chiết khấu
+        skip_ck_rieng = set()  # id() các dòng CK riêng để bỏ qua khi dựng
+        for it in items:
+            tchat = str(it.get("tchat", "") or "")
+            tt = _to_num(it.get("thtien")) or 0
+            ck = _to_num(it.get("stckhau")) or 0
+            if tchat == "4" and (not tt or tt == 0):
+                continue
+            if not isinstance(tt, (int, float)) or tt <= 0:
+                continue
+            if tchat == "3" and not (isinstance(ck, (int, float)) and ck > 0):
+                rate = _norm_rate(it.get("tsuat"))
+                ck_rieng[rate] = ck_rieng.get(rate, 0) + abs(tt)
+                skip_ck_rieng.add(id(it))
+
+        # --- Pass 2: dựng các dòng hàng (đã trừ CK dòng), bỏ ghi chú + CK riêng ---
         out = []
         for it in items:
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
             # ghi chú thuần không có thành tiền -> bỏ (kể cả NQ204 đã xử lý ở Pass 1)
             if tchat == "4" and (not tt or tt == 0):
+                continue
+            # dòng chiết khấu thương mại riêng -> đã gom ở Pass 1b, KHÔNG hiện
+            if id(it) in skip_ck_rieng:
                 continue
             ck = _to_num(it.get("stckhau")) or 0
             h = dict(it)
@@ -3220,22 +3247,6 @@ def export_excel(cid: int):
                     h["_la_nq204"] = True
                 else:
                     h["_la_ck"] = True
-            elif tchat == "3" and not (isinstance(ck, (int, float)) and ck > 0):
-                # LOẠI 2: dòng CHIẾT KHẤU THƯƠNG MẠI riêng (TChat=3, không STCKhau)
-                # -> thành tiền chính là số tiền chiết khấu -> GHI ÂM để trừ vào tổng
-                h["thtien"] = -abs(tt)
-                dg = _to_num(h.get("dgia")) or 0
-                if isinstance(dg, (int, float)):
-                    h["dgia"] = -abs(dg)
-                thue_goc = _to_num(h.get("tien_thue"))
-                if (thue_goc is not None and str(h.get("tien_thue")).strip() != ""
-                        and _to_num(thue_goc) != 0):
-                    h["tien_thue"] = -abs(_to_num(thue_goc))
-                else:
-                    rate = _parse_thue_suat(str(h.get("tsuat", "") or ""))
-                    if rate is not None and rate > 0 and isinstance(tt, (int, float)):
-                        h["tien_thue"] = -round(abs(tt) * rate)
-                h["_la_ck"] = True
             else:
                 # LOẠI 1: dòng hàng dương -> trừ chiết khấu dòng (nếu có) vào thành tiền
                 if isinstance(ck, (int, float)) and ck > 0:
@@ -3259,6 +3270,38 @@ def export_excel(cid: int):
                         giam = round(tt_i / tong * so_giam_hkd)
                         allocated += giam
                     out[i]["thtien"] = round(tt_i - giam)
+
+        # --- Pass 4: phân bổ CHIẾT KHẤU THƯƠNG MẠI RIÊNG vào thành tiền (LOẠI 2) ---
+        # Trừ đều vào các dòng hàng DƯƠNG cùng thuế suất (nếu không có thì mọi dòng
+        # dương). Tính lại tiền thuế GTGT của dòng được phân bổ = thành tiền * thuế suất.
+        for rate_key, tong_ck in ck_rieng.items():
+            if not tong_ck or tong_ck <= 0:
+                continue
+            idxs = [i for i, h in enumerate(out)
+                    if (_to_num(h.get("thtien")) or 0) > 0
+                    and _norm_rate(h.get("tsuat")) == rate_key]
+            if not idxs:
+                idxs = [i for i, h in enumerate(out)
+                        if (_to_num(h.get("thtien")) or 0) > 0]
+            tong_tt = sum((_to_num(out[i].get("thtien")) or 0) for i in idxs)
+            if tong_tt <= 0:
+                continue
+            allocated = 0
+            for k, i in enumerate(idxs):
+                tt_i = _to_num(out[i].get("thtien")) or 0
+                if k == len(idxs) - 1:
+                    giam = tong_ck - allocated
+                else:
+                    giam = round(tt_i / tong_tt * tong_ck)
+                    allocated += giam
+                net_i = round(tt_i - giam)
+                out[i]["thtien"] = net_i
+                # tính lại tiền thuế theo thành tiền mới (dòng CK riêng đã bị bỏ)
+                rate = _parse_thue_suat(str(out[i].get("tsuat", "") or ""))
+                if rate is not None and rate > 0:
+                    out[i]["tien_thue"] = round(net_i * rate)
+                elif rate == 0.0:
+                    out[i]["tien_thue"] = 0
         return out
 
     def _fmt_ngay(s):
@@ -3369,15 +3412,18 @@ def export_excel(cid: int):
                 ds = _to_num(it.get("thtien")) or 0
                 ts_raw = str(it.get("tsuat", "") or "").strip()
                 thue_goc_raw = it.get("tien_thue")
-                ts_upper = ts_raw.upper()
-                # 1. KCT → luôn 0
-                if ts_upper in ("KCT", "KO", "KHÔNG"):
+                ts_upper = ts_raw.upper().replace(" ", "")
+                # Thuế suất hiển thị: ô trống / KCT / KKKNT -> "0%"
+                if ts_upper in ("", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG", "KHONG"):
+                    ts_hien = "0%"
                     tien_thue = 0
-                # 2. Có tiền thuế GỐC trên hóa đơn → dùng (kể cả = 0)
+                # Có tiền thuế GỐC trên hóa đơn → dùng (kể cả = 0)
                 elif thue_goc_raw is not None and str(thue_goc_raw).strip() != "":
+                    ts_hien = ts_raw
                     tien_thue = round(_to_num(thue_goc_raw))
-                # 3. Biết thuế suất → tính
+                # Biết thuế suất → tính
                 else:
+                    ts_hien = ts_raw
                     rate = _parse_thue_suat(ts_raw)
                     if rate is not None and rate > 0:
                         tien_thue = round(ds * rate) if isinstance(ds, (int, float)) else 0
@@ -3388,6 +3434,13 @@ def export_excel(cid: int):
                     ten += " (Giảm NQ204 - ghi âm)"
                 elif it.get("_la_ck"):
                     ten += " (Chiết khấu TM - ghi âm)"
+                # Đơn giá = Thành tiền / Số lượng (luôn đồng bộ sau khi trừ chiết khấu)
+                sl_num = _to_num(it.get("sluong"))
+                if isinstance(sl_num, (int, float)) and sl_num and isinstance(ds, (int, float)):
+                    dg_val = ds / sl_num
+                    dgia_out = int(dg_val) if dg_val == int(dg_val) else round(dg_val, 2)
+                else:
+                    dgia_out = _to_num(it.get("dgia"))
                 # cột người: purchase -> người bán; sold -> người mua
                 if loai == "purchase":
                     nguoi = it.get("ten_nban", "") or r["nbten"]
@@ -3400,8 +3453,8 @@ def export_excel(cid: int):
                     ngay_fmt, nguoi, mst,
                     it.get("stt", ""), it.get("ma_vt", ""),
                     ten, it.get("dvt", ""),
-                    _to_num(it.get("sluong")), _to_num(it.get("dgia")),
-                    ds, it.get("tsuat", ""), tien_thue,
+                    sl_num, dgia_out,
+                    ds, ts_hien, tien_thue,
                     tt, kq,
                 ])
                 cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
@@ -3914,7 +3967,8 @@ def export_excel(cid: int):
     except Exception:
         pass
     fname_x = f"BangKe_HoaDon_{comp['mst']}{ky_fname}.xlsx"
-    path = os.path.join(DOWNLOAD_DIR, f"TongHop_{comp['mst']}.xlsx")
+    # chỉ tạo DUY NHẤT 1 file BangKe_HoaDon (không tạo thêm file TongHop)
+    path = os.path.join(DOWNLOAD_DIR, fname_x)
     wb.save(path)
     import shutil
     open_path = path
