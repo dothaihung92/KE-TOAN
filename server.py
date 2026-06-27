@@ -3529,9 +3529,22 @@ def export_excel(cid: int):
         la_ck_hd = False
         if _items:
             def _is_ck(it):
+                """Dòng CHIẾT KHẤU THUẦN (cần ghi âm cả hóa đơn nếu mọi dòng đều vậy).
+                LƯU Ý: dòng TChat=3 NHƯNG có chiết khấu dòng (STCKhau>0) là HÀNG
+                bán có giảm giá (net dương) -> KHÔNG phải dòng CK thuần."""
                 tc = str(it.get("tchat", "") or "")
                 if tc == "4": return False   # ghi chú -> không phải CK
-                if tc == "3": return True
+                tt = _to_num(it.get("thtien")) or 0
+                ck = _to_num(it.get("stckhau")) or 0
+                # có chiết khấu dòng -> là hàng có giảm giá, KHÔNG phải CK thuần
+                if isinstance(ck, (int, float)) and ck > 0:
+                    return False
+                # thành tiền âm -> dòng giảm thực sự
+                if isinstance(tt, (int, float)) and tt < 0:
+                    return True
+                # TChat=3 không có STCKhau -> dòng chiết khấu TM riêng
+                if tc == "3":
+                    return True
                 ten = str(it.get("ten_hang", "") or "").lower()
                 return "chiết khấu" in ten or "chiet khau" in ten
             items_ko_gc = [it for it in _items if str(it.get("tchat","") or "")!="4"]
