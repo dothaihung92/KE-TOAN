@@ -1604,7 +1604,7 @@ def clear_downloads(scope: str = "temp"):
             if sd and os.path.isdir(sd):
                 for root, _dirs, files in os.walk(sd):
                     for ff in files:
-                        if ff.lower().endswith((".xml", ".pdf", ".zip", ".html")):
+                        if ff.lower().endswith((".xml", ".pdf", ".zip", ".html", ".xlsx")):
                             _xoa_file(os.path.join(root, ff))
 
     return {"ok": True, "so_file": xoa, "dung_luong_mb": round(dung_luong / 1024 / 1024, 2)}
@@ -2893,41 +2893,32 @@ def export_excel(cid: int):
                     break  # chỉ có 1 dòng ghi chú NQ204
 
         # --- Pass 2: Xây dựng output ---
-        # Nếu có NQ204 HKD: phân bổ VAT = so_giam_hkd × 4 đều theo thành tiền
-        vat_sau_giam = so_giam_hkd * 4 if so_giam_hkd > 0 else 0
-
-        # Lấy danh sách dòng hàng thực (bỏ tchat=4 không có thtien)
+        # Lấy danh sách dòng hàng thực (bỏ tchat=4 không có thtien — kể cả ghi chú NQ204)
         hang_thuong = []
         for it in items:
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
             if tchat == "4" and (not tt or tt == 0):
-                continue  # bỏ mọi dòng ghi chú thuần (kể cả NQ204 HKD)
+                continue
             hang_thuong.append(it)
 
-        if so_giam_hkd > 0 and vat_sau_giam > 0:
-            # Tính tổng thành tiền của các dòng hàng thường (không phải dòng giảm)
-            tong_tt = sum(
-                abs(_to_num(it.get("thtien")) or 0)
-                for it in hang_thuong
-                if not la_dong_giam(it)
-            )
+        if so_giam_hkd > 0:
+            # Phân bổ so_giam_hkd vào THÀNH TIỀN từng dòng hàng (không đụng vào tiền thuế)
+            hang_chinh = [it for it in hang_thuong if not la_dong_giam(it)]
+            tong_tt = sum(abs(_to_num(it.get("thtien")) or 0) for it in hang_chinh)
             out = []
             allocated = 0
-            hang_chinh = [it for it in hang_thuong if not la_dong_giam(it)]
             for idx, it in enumerate(hang_chinh):
                 h = dict(it)
                 tt_item = abs(_to_num(h.get("thtien")) or 0)
                 if idx == len(hang_chinh) - 1:
-                    # dòng cuối nhận phần còn lại để tránh sai lệch do làm tròn
-                    item_vat = vat_sau_giam - allocated
+                    giam_item = so_giam_hkd - allocated
                 else:
-                    item_vat = round(tt_item / tong_tt * vat_sau_giam) if tong_tt else 0
-                    allocated += item_vat
-                h["tien_thue"] = item_vat
-                h["tsuat"] = "HKD 2.4%"
+                    giam_item = round(tt_item / tong_tt * so_giam_hkd) if tong_tt else 0
+                    allocated += giam_item
+                h["thtien"] = tt_item - giam_item
                 out.append(h)
-            # Thêm các dòng chiết khấu/giảm giá khác (nếu có)
+            # Các dòng chiết khấu/giảm giá khác (nếu có)
             for it in hang_thuong:
                 if la_dong_giam(it):
                     h = dict(it)
