@@ -3125,14 +3125,23 @@ def export_excel(cid: int):
     ct_totals = {"purchase": {}, "sold": {}}
 
     def phan_bo_chiet_khau(items):
-        """Xử lý dòng hàng hóa đơn MUA VÀO:
-        - Dòng có chiết khấu dòng (STCKhau>0): TRỪ chiết khấu vào THÀNH TIỀN của
-          chính dòng đó (net = thành tiền gộp - chiết khấu), giữ DƯƠNG, KHÔNG
-          tách thành dòng âm riêng. (vd HĐ 116058 - H&M)
-        - Ghi chú HKD NQ204 (TChat=4, thtien=0, 'Đã giảm X ... 20% ... tỷ lệ %'):
-          phân bổ X đều vào THÀNH TIỀN các dòng hàng theo tỷ lệ. (vd HĐ 91)
-        - Dòng thành tiền ÂM (điều chỉnh giảm thực sự): giữ ÂM.
-        - Ghi chú thuần (TChat=4, thtien=0) khác: BỎ QUA."""
+        """Xử lý dòng hàng hóa đơn MUA VÀO — gồm CÁC LOẠI CHIẾT KHẤU THƯƠNG MẠI:
+
+        LOẠI 1 — Chiết khấu trên TỪNG DÒNG (STCKhau>0 ngay trên dòng hàng):
+          TRỪ chiết khấu vào THÀNH TIỀN của chính dòng đó
+          (net = thành tiền gộp - chiết khấu), giữ DƯƠNG, KHÔNG tách dòng âm.
+          (vd HĐ 116058 - H&M: dòng TChat=3 vừa là hàng vừa có STCKhau)
+
+        LOẠI 2 — Dòng CHIẾT KHẤU THƯƠNG MẠI RIÊNG (TChat=3, KHÔNG có STCKhau,
+          thành tiền là số tiền chiết khấu): GHI ÂM để trừ vào tổng.
+
+        LOẠI 3 — Dòng thành tiền ÂM sẵn (điều chỉnh giảm/CK ghi âm): giữ ÂM.
+
+        LOẠI 4 — Giảm 20% tỷ lệ % của HKD theo NQ204 (TChat=4, thtien=0,
+          'Đã giảm X ... 20% ... tỷ lệ %'): phân bổ X đều vào THÀNH TIỀN các
+          dòng hàng theo tỷ lệ. (vd HĐ 91)
+
+        Ghi chú thuần khác (TChat=4, thtien=0): BỎ QUA."""
 
         import re as _re_hkd
 
@@ -3194,9 +3203,10 @@ def export_excel(cid: int):
             # ghi chú thuần không có thành tiền -> bỏ (kể cả NQ204 đã xử lý ở Pass 1)
             if tchat == "4" and (not tt or tt == 0):
                 continue
+            ck = _to_num(it.get("stckhau")) or 0
             h = dict(it)
             if isinstance(tt, (int, float)) and tt < 0:
-                # dòng điều chỉnh giảm thực sự -> giữ ÂM cả thành tiền + thuế
+                # LOẠI 3: dòng điều chỉnh giảm sẵn ÂM -> giữ ÂM cả thành tiền + thuế
                 h["thtien"] = -abs(tt)
                 dg = _to_num(h.get("dgia")) or 0
                 if isinstance(dg, (int, float)):
@@ -3210,9 +3220,24 @@ def export_excel(cid: int):
                     h["_la_nq204"] = True
                 else:
                     h["_la_ck"] = True
+            elif tchat == "3" and not (isinstance(ck, (int, float)) and ck > 0):
+                # LOẠI 2: dòng CHIẾT KHẤU THƯƠNG MẠI riêng (TChat=3, không STCKhau)
+                # -> thành tiền chính là số tiền chiết khấu -> GHI ÂM để trừ vào tổng
+                h["thtien"] = -abs(tt)
+                dg = _to_num(h.get("dgia")) or 0
+                if isinstance(dg, (int, float)):
+                    h["dgia"] = -abs(dg)
+                thue_goc = _to_num(h.get("tien_thue"))
+                if (thue_goc is not None and str(h.get("tien_thue")).strip() != ""
+                        and _to_num(thue_goc) != 0):
+                    h["tien_thue"] = -abs(_to_num(thue_goc))
+                else:
+                    rate = _parse_thue_suat(str(h.get("tsuat", "") or ""))
+                    if rate is not None and rate > 0 and isinstance(tt, (int, float)):
+                        h["tien_thue"] = -round(abs(tt) * rate)
+                h["_la_ck"] = True
             else:
-                # dòng hàng dương -> trừ chiết khấu dòng (nếu có) vào thành tiền
-                ck = _to_num(it.get("stckhau")) or 0
+                # LOẠI 1: dòng hàng dương -> trừ chiết khấu dòng (nếu có) vào thành tiền
                 if isinstance(ck, (int, float)) and ck > 0:
                     h["thtien"] = _net_sau_ck(it)
                     h["_co_ck_dong"] = True
