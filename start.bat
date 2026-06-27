@@ -44,6 +44,15 @@ echo [OK] Da tim thay Python: %PYEXE%
 %PYEXE% --version
 echo.
 
+REM ====== Tu dong cai lai neu requirements.txt thay doi ======
+%PYEXE% -c "import os,sys; sys.exit(0 if os.path.exists('.installed') and os.path.getmtime('.installed')>=os.path.getmtime('requirements.txt') else 1)" >nul 2>&1
+if errorlevel 1 (
+    if exist ".installed" (
+        echo [*] requirements.txt da thay doi - dang cap nhat thu vien...
+        del .installed >nul 2>&1
+    )
+)
+
 REM ====== Cai thu vien lan dau ======
 if not exist ".installed" (
     echo [*] Lan dau chay - dang cai thu vien can thiet...

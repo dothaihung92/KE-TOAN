@@ -5,3 +5,5 @@ openpyxl
 python-multipart
 ddddocr
 Pillow
+svglib
+reportlab

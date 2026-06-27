@@ -722,6 +722,47 @@ def _get_ddddocr():
             _DDDDOCR_INSTANCE = False
     return _DDDDOCR_INSTANCE or None
 
+def _svg_to_png(svg_text: str) -> bytes:
+    """Rasterize SVG → PNG bytes (pure-Python qua svglib + reportlab). '' nếu thất bại."""
+    try:
+        from svglib.svglib import svg2rlg
+        from reportlab.graphics import renderPM
+        import io as _io
+        drawing = svg2rlg(_io.StringIO(svg_text))
+        if drawing is None:
+            return b""
+        # phóng to để OCR rõ hơn (mặc định captcha nhỏ ~120x40)
+        scale = 4.0
+        drawing.width = int((drawing.width or 120) * scale)
+        drawing.height = int((drawing.height or 40) * scale)
+        drawing.scale(scale, scale)
+        buf = _io.BytesIO()
+        renderPM.drawToFile(drawing, buf, fmt="PNG", bg=0xFFFFFF)
+        return buf.getvalue()
+    except Exception:
+        return b""
+
+def _preprocess_png(png_bytes: bytes) -> bytes:
+    """Làm sạch PNG để ddddocr đoán chuẩn hơn: grayscale + threshold + phóng to."""
+    try:
+        from PIL import Image, ImageOps, ImageFilter
+        import io as _io
+        im = Image.open(_io.BytesIO(png_bytes)).convert("L")
+        # phóng to nếu nhỏ
+        if im.width < 200:
+            im = im.resize((im.width * 3, im.height * 3), Image.LANCZOS)
+        # tăng tương phản + làm sạch nét nhiễu
+        im = ImageOps.autocontrast(im, cutoff=5)
+        im = im.filter(ImageFilter.MedianFilter(size=3))
+        # nhị phân hóa
+        thr = 140
+        im = im.point(lambda p: 255 if p > thr else 0)
+        buf = _io.BytesIO()
+        im.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return png_bytes
+
 def _solve_captcha(content: str) -> str:
     """Trả về mã đoán được từ content (data URI / SVG / PNG base64). '' nếu không giải nổi."""
     import re as _re_cap
@@ -748,32 +789,54 @@ def _solve_captcha(content: str) -> str:
         except Exception:
             pass
 
-    # 1) Ưu tiên: trích ký tự trực tiếp từ <text> của SVG (nhanh, chính xác)
-    if svg_text:
-        chars = _re_cap.findall(r'<text\b[^>]*>\s*([^<\s])\s*</text>', svg_text)
-        if chars and 4 <= len(chars) <= 10:
-            return "".join(chars).strip()
-        # Bản dự phòng: lấy chuỗi text nối liền
-        joined = _re_cap.findall(r'<text\b[^>]*>([^<]+)</text>', svg_text)
-        if joined:
-            cand = "".join(joined).strip()
-            cand = _re_cap.sub(r'\s+', '', cand)
-            if 4 <= len(cand) <= 10:
-                return cand
+    # 1) Trích <text> trực tiếp từ SVG (chỉ áp dụng khi SVG dùng <text>)
+    if svg_text and "<text" in svg_text.lower():
+        # bỏ comment + whitespace để regex bắt dễ hơn
+        clean = _re_cap.sub(r'<!--.*?-->', '', svg_text, flags=_re_cap.DOTALL)
+        # gom mọi nội dung trong <text>...</text> (kể cả <tspan>)
+        groups = _re_cap.findall(r'<text\b[^>]*>(.*?)</text>',
+                                 clean, flags=_re_cap.DOTALL | _re_cap.IGNORECASE)
+        cand = ""
+        for g in groups:
+            inner = _re_cap.sub(r'<[^>]+>', '', g)  # bỏ tag con
+            inner = _re_cap.sub(r'\s+', '', inner)
+            cand += inner
+        if 4 <= len(cand) <= 10 and cand.isalnum():
+            return cand
 
-    # 2) Fallback: dùng ddddocr trên PNG (nếu server trả PNG)
+    # 2) Nếu là SVG: rasterize → PNG để OCR
+    if svg_text and not png_bytes:
+        # tìm <image href="data:image/...,base64,..."> embed sẵn (đôi khi captcha dạng này)
+        m_emb = _re_cap.search(
+            r'<image\b[^>]*(?:xlink:)?href\s*=\s*["\']data:image/[^;]+;base64,([^"\']+)["\']',
+            svg_text, _re_cap.IGNORECASE)
+        if m_emb:
+            try:
+                png_bytes = base64.b64decode(m_emb.group(1))
+            except Exception:
+                png_bytes = None
+        if not png_bytes:
+            png_bytes = _svg_to_png(svg_text)
+
+    # 3) OCR với ddddocr (preprocess + thử nhiều cách)
     if png_bytes:
         ocr = _get_ddddocr()
         if ocr:
-            try:
-                return (ocr.classification(png_bytes) or "").strip()
-            except Exception:
-                pass
+            tries = [png_bytes, _preprocess_png(png_bytes)]
+            for buf in tries:
+                try:
+                    ans = (ocr.classification(buf) or "").strip()
+                    # giữ alnum, captcha TCT 6 ký tự
+                    ans = _re_cap.sub(r'[^A-Za-z0-9]', '', ans)
+                    if 4 <= len(ans) <= 10:
+                        return ans
+                except Exception:
+                    pass
     return ""
 
 @app.post("/api/auto-login/{cid}")
 def auto_login(cid: int):
-    """Tự lấy captcha → giải → đăng nhập, retry tối đa 3 lần."""
+    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần."""
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
@@ -782,7 +845,7 @@ def auto_login(cid: int):
     client = get_client(cid)
     last_err = ""
     tried = []
-    for lan in range(1, 4):
+    for lan in range(1, 6):
         try:
             cap = client.get_captcha()
         except Exception as e:
@@ -805,7 +868,7 @@ def auto_login(cid: int):
         except Exception as e:
             last_err = str(e)
             continue
-    raise HTTPException(401, f"Tự đăng nhập thất bại sau 3 lần. Mã đã thử: {tried}. Lỗi cuối: {last_err}")
+    raise HTTPException(401, f"Tự đăng nhập thất bại sau 5 lần. Mã đã thử: {tried}. Lỗi cuối: {last_err}")
 
 
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
