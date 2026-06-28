@@ -3169,12 +3169,12 @@ def del_tokhai_nhap(cid: int, so_tk: str = ""):
 @app.post("/api/clear-downloads")
 def clear_downloads(scope: str = "temp"):
     """Xóa file đã tải để nhẹ máy.
-    scope='temp'    -> chỉ xóa file tạm trong thư mục app (downloads/) - AN TOÀN
-    scope='all'     -> xóa thêm file XML/PDF trong tất cả thư mục lưu của các công ty
+    CHỈ xóa file BÊN TRONG 'Thư mục lưu file XML/PDF' (save_dir) của mỗi công ty.
+    TUYỆT ĐỐI KHÔNG đụng tới thư mục dữ liệu (data_dir) hay bất kỳ thư mục nào khác.
     Trả về số file đã xóa và dung lượng giải phóng (MB)."""
-    import shutil
     xoa = 0
     dung_luong = 0
+    EXT = (".xml", ".pdf", ".zip", ".html", ".xlsx", ".json")
 
     def _xoa_file(path):
         nonlocal xoa, dung_luong
@@ -3186,54 +3186,37 @@ def clear_downloads(scope: str = "temp"):
         except Exception:
             pass
 
-    # 1) xóa file tạm trong downloads/ (xlsx, xml, pdf, zip)
-    if os.path.isdir(DOWNLOAD_DIR):
-        for f in os.listdir(DOWNLOAD_DIR):
-            fp = os.path.join(DOWNLOAD_DIR, f)
-            if os.path.isfile(fp) and f.lower().endswith((".xml", ".pdf", ".zip", ".xlsx", ".html")):
-                _xoa_file(fp)
-            elif os.path.isdir(fp):
-                # thư mục con (mua_vào, bán_ra...) -> xóa file bên trong
-                for root, _dirs, files in os.walk(fp):
-                    for ff in files:
-                        if ff.lower().endswith((".xml", ".pdf", ".zip", ".html")):
-                            _xoa_file(os.path.join(root, ff))
+    # Chỉ duyệt save_dir của các công ty. KHÔNG xóa data_dir, KHÔNG xóa thư mục khác.
+    conn = db()
+    rows = conn.execute("SELECT save_dir, data_dir FROM companies").fetchall()
+    conn.close()
+    # tập data_dir để loại trừ tuyệt đối (phòng khi save_dir == data_dir hoặc lồng nhau)
+    data_dirs = set()
+    for d in rows:
+        dd = (d["data_dir"] or "").strip() if "data_dir" in d.keys() else ""
+        if dd:
+            data_dirs.add(os.path.realpath(dd))
 
-    # 2) nếu scope='all' -> xóa file XML/PDF/zip trong thư mục lưu + thư mục dữ liệu
-    #    (gồm cả tờ khai đã tải trong các thư mục con ToKhai_DaNop)
-    if scope == "all":
-        conn = db()
-        rows = conn.execute("SELECT save_dir, data_dir FROM companies").fetchall()
-        conn.close()
-        seen_dirs = set()
-        for d in rows:
-            for key in ("save_dir", "data_dir"):
-                sd = (d[key] or "").strip() if key in d.keys() else ""
-                if sd and os.path.isdir(sd) and sd not in seen_dirs:
-                    seen_dirs.add(sd)
-                    for root, _dirs, files in os.walk(sd):
-                        for ff in files:
-                            if ff.lower().endswith((".xml", ".pdf", ".zip", ".html",
-                                                    ".xlsx", ".json")):
-                                _xoa_file(os.path.join(root, ff))
-
-    # 3) scope='tokhai' -> CHỈ xóa file tờ khai đã tải (các thư mục ToKhai_DaNop)
-    if scope in ("tokhai", "all"):
-        conn = db()
-        rows = conn.execute("SELECT save_dir, data_dir FROM companies").fetchall()
-        conn.close()
-        seen = set()
-        for d in rows:
-            for key in ("save_dir", "data_dir"):
-                sd = (d[key] or "").strip() if key in d.keys() else ""
-                if not sd:
-                    continue
-                tk = os.path.join(sd, "ToKhai_DaNop")
-                if os.path.isdir(tk) and tk not in seen:
-                    seen.add(tk)
-                    for root, _dirs, files in os.walk(tk):
-                        for ff in files:
-                            _xoa_file(os.path.join(root, ff))
+    seen = set()
+    for d in rows:
+        sd = (d["save_dir"] or "").strip()
+        if not sd or not os.path.isdir(sd):
+            continue
+        rsd = os.path.realpath(sd)
+        if rsd in seen:
+            continue
+        seen.add(rsd)
+        # nếu người dùng đặt save_dir trùng data_dir -> bỏ qua để bảo vệ dữ liệu
+        if rsd in data_dirs:
+            continue
+        for root, _dirs, files in os.walk(sd):
+            # không đi vào thư mục data_dir nếu nó nằm lồng trong save_dir
+            if os.path.realpath(root) in data_dirs:
+                _dirs[:] = []
+                continue
+            for ff in files:
+                if ff.lower().endswith(EXT):
+                    _xoa_file(os.path.join(root, ff))
 
     return {"ok": True, "so_file": xoa, "dung_luong_mb": round(dung_luong / 1024 / 1024, 2)}
 

@@ -1403,13 +1403,12 @@ async function exportHTKK(){
 async function xoaFileTai(){
   let info={so_file:0,dung_luong_mb:0};
   try{info=await api('/api/downloads-size');}catch{}
-  const msg=`Xóa toàn bộ file đã tải/đã xuất để nhẹ máy?\n\n`+
-    `Sẽ xóa trong thư mục lưu của TẤT CẢ công ty:\n`+
+  const msg=`Xóa file để nhẹ máy?\n\n`+
+    `CHỈ xóa file bên trong "Thư mục lưu file XML/PDF" (save_dir) của TẤT CẢ công ty:\n`+
     `• File hóa đơn XML/PDF (mua_vào, bán_ra)\n`+
     `• File tờ khai đã tải (ToKhai_DaNop)\n`+
-    `• File Excel đã xuất (BangKe_HoaDon, TraCuuToKhai, SaiMatKhau...)\n`+
-    `• File dữ liệu công ty DuLieu_*.json\n\n`+
-    `⚠ LƯU Ý: file DuLieu_*.json chứa dữ liệu hạch toán & danh mục đã học của công ty — xóa xong phần mềm sẽ học lại từ đầu. Dữ liệu hóa đơn đang lưu trong phần mềm KHÔNG bị ảnh hưởng.\n\nTiếp tục?`;
+    `• File Excel đã xuất (.xlsx) và file .json nằm trong thư mục này\n\n`+
+    `✅ TUYỆT ĐỐI KHÔNG đụng tới "Thư mục lưu DỮ LIỆU" (data_dir) hay bất kỳ thư mục nào khác.\n\nTiếp tục?`;
   if(!confirm(msg))return;
   try{
     const r=await api('/api/clear-downloads?scope=all',{method:'POST'});
