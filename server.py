@@ -2493,6 +2493,10 @@ def _gen_danh_muc_ts(cid, loai, header, rows):
     Ngày ghi tăng, TK Chi phí. Trả (all_rows, so_moi)."""
     prefix = "TSCD" if loai == "tscd" else "CCDC"
     accs = {"2111", "211"} if loai == "tscd" else {"2421", "242"}
+    # Giá trị mặc định theo form mẫu
+    hsd_md = 60 if loai == "tscd" else 24          # Hạn sử dụng (tháng)
+    dtpb_md = "VP"                                  # Đối tượng phân bổ
+    tkcp_md = "6424" if loai == "tscd" else "6422"  # TK Chi phí
     data = _doc_du_lieu_cty(cid)
     store = data.get("dm_" + loai, {}) or {}
     next_n = int(store.get("next", 1))
@@ -2530,7 +2534,7 @@ def _gen_danh_muc_ts(cid, loai, header, rows):
         # [Mã, Tên, ĐVT, SL, Đơn giá, Thành tiền, HĐ, Ngày, Hạn SD,
         #  ĐT phân bổ, Ngày ghi tăng, TK Chi phí]
         new_rows.append([ma, ten, dvt, sl, dgia, tt, sohd, ngay,
-                         "", "", ngay, ""])
+                         hsd_md, dtpb_md, ngay, tkcp_md])
     return saved_rows + new_rows, len(new_rows)
 
 def _gen_danh_muc(cid, loai, header, rows):
