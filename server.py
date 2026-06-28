@@ -1296,6 +1296,68 @@ def dvc_test_login(cid: int, body: dict = Body(...)):
     return {"ok": True, **info, "da_luu_mat_khau": bool(body.get("luu"))}
 
 
+@app.get("/api/dvc/captcha-debug/{cid}", response_class=HTMLResponse)
+def dvc_captcha_debug(cid: int):
+    """Trang xem captcha Dịch vụ công thật + thử OCR, để dò vì sao không giải được.
+    Mở: http://127.0.0.1:8686/api/dvc/captcha-debug/<id-công-ty>"""
+    client = DVCClient()
+    DVC_CLIENTS[cid] = client
+    try:
+        client.prime()
+    except Exception as e:
+        return f"<h3>Lỗi prime: {e}</h3>"
+    ts = int(time.time() * 1000)
+    h = {
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Referer": DVC_BASE + "/login",
+        "Sec-Fetch-Dest": "image", "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    r = client.session.get(f"{DVC_BASE}/getCaptcha?{ts}", headers=h, timeout=30)
+    ct = (r.headers.get("content-type") or "").lower()
+    data = r.content or b""
+    head = data[:400]
+    head_txt = head.decode("utf-8", "replace")
+    is_svg = ("svg" in ct or head.lstrip()[:5].lower().startswith(b"<svg")
+              or b"<svg" in head.lower())
+    # rasterize nếu svg
+    png = _svg_to_png(data.decode("utf-8", "replace")) if is_svg else data
+    import re as _re
+    has_text = ("<text" in head_txt.lower())
+    n_path = data.lower().count(b"<path")
+    # OCR thử
+    ocr = _get_ddddocr()
+    ocr_raw = ""
+    if ocr:
+        try:
+            ocr_raw = (ocr.classification(data) or "").strip()
+        except Exception as e:
+            ocr_raw = f"(lỗi: {e})"
+    ocr_png = _ocr_png(png) if png else ""
+    raw_b64 = base64.b64encode(data).decode()
+    png_b64 = base64.b64encode(png).decode() if png else ""
+    mime = ct.split(";")[0] or ("image/svg+xml" if is_svg else "image/png")
+    html = f"""<html><head><meta charset='utf-8'><title>DVC Captcha Debug</title>
+<style>body{{font-family:system-ui;padding:24px;line-height:1.6}}
+img{{border:2px solid #0d6efd;background:#fff;image-rendering:pixelated;margin:6px 0;display:block}}
+code{{background:#f0f0f0;padding:2px 5px;border-radius:4px}}
+pre{{background:#f6f8fa;padding:10px;border-radius:8px;overflow:auto;max-height:200px}}</style></head><body>
+<h2>🔍 Chẩn đoán captcha Dịch vụ công</h2>
+<p><b>ddddocr cài đặt:</b> {'✅ có' if ocr else '❌ CHƯA CÀI — đây là nguyên nhân!'} {('('+_DDDDOCR_ERR+')') if _DDDDOCR_ERR else ''}</p>
+<p><b>HTTP status:</b> {r.status_code} · <b>Content-Type:</b> <code>{ct or '(trống)'}</code> · <b>Kích thước:</b> {len(data)} bytes</p>
+<p><b>Là SVG:</b> {is_svg} · <b>Có &lt;text&gt;:</b> {has_text} · <b>Số &lt;path&gt;:</b> {n_path}</p>
+<p><b>OCR ảnh gốc:</b> <code>{ocr_raw or '(rỗng)'}</code> · <b>OCR sau rasterize:</b> <code>{ocr_png or '(rỗng)'}</code></p>
+<h3>Ảnh captcha (gốc):</h3>
+<img src="data:{mime};base64,{raw_b64}" width="260">
+<h3>Ảnh sau khi chuyển PNG (đưa vào OCR):</h3>
+{('<img src="data:image/png;base64,'+png_b64+'" width="260">') if png_b64 else '<i>không rasterize được</i>'}
+<h3>400 byte đầu của nội dung:</h3>
+<pre>{head_txt.replace('<','&lt;')}</pre>
+<p style="color:#666">Bấm F5 để lấy captcha khác. Chụp màn hình trang này gửi lại để tinh chỉnh.</p>
+</body></html>"""
+    return html
+
+
 @app.post("/api/dvc/tai-bao-cao/{cid}")
 def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
     """Đăng nhập Dịch vụ công → tra cứu tờ khai/báo cáo ĐÃ NỘP trong khoảng ngày
