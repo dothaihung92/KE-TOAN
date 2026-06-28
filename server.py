@@ -1273,6 +1273,217 @@ def _dvc_login_voi_retry(client, mst, password, so_lan=6):
     return False, {"ma_da_thu": tried, "loi_cuoi": last}
 
 
+# ============================================================
+#  DVC qua TRÌNH DUYỆT THẬT (Selenium + Chrome) — vượt WAF F5
+#  Cổng Thuế chặn HTTP thuần (kể cả curl_cffi) vì WAF cần chạy
+#  JavaScript. Phần mềm Vsign cũng dùng chromedriver. Ta làm tương tự:
+#  mở Chrome (ẩn), để trang tự qua WAF, rồi chạy getCaptcha/loginLDAP/
+#  search/downloadhoso NGAY TRONG ngữ cảnh trang (XHR/$.ajax) nên token
+#  XSRF/_csrf và cookie được xử lý y như trình duyệt thật.
+# ============================================================
+_DVC_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+def _dvc_make_driver(headless=True):
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    opts = Options()
+    if headless:
+        opts.add_argument("--headless=new")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=1366,920")
+    opts.add_argument("--lang=vi-VN")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    # UA chuẩn (tránh chuỗi 'HeadlessChrome' bị WAF nghi ngờ)
+    opts.add_argument(f"--user-agent={_DVC_UA}")
+    try:
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
+    except Exception:
+        pass
+    drv = webdriver.Chrome(options=opts)   # Selenium Manager tự tải chromedriver
+    drv.set_page_load_timeout(70)
+    drv.set_script_timeout(150)
+    try:
+        drv.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument",
+            {"source": "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"})
+    except Exception:
+        pass
+    return drv
+
+# --- Các đoạn JS chạy trong ngữ cảnh trang dichvucong ---
+_JS_GETCAPTCHA = r"""
+var cb = arguments[arguments.length-1];
+try {
+  var x = new XMLHttpRequest();
+  x.open('GET','/tthc/getCaptcha?'+Date.now(),true);
+  x.responseType='arraybuffer';
+  x.onload=function(){
+    if(x.status===200){
+      var b=new Uint8Array(x.response), s='';
+      for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
+      cb({ok:true, ct:(x.getResponseHeader('content-type')||''), b64:btoa(s)});
+    } else cb({ok:false, status:x.status});
+  };
+  x.onerror=function(){ cb({ok:false, err:'neterr'}); };
+  x.send();
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
+_JS_LOGIN = r"""
+var cb = arguments[arguments.length-1];
+var ten = arguments[0], pw = arguments[1], cap = arguments[2];
+try {
+  $.ajax({ type:'POST', url:'/tthc/loginLDAP',
+    data:{ tenDN:ten, matKhau: btoa(unescape(encodeURIComponent(pw))),
+           doiTuong:'DN', captcha:cap },
+    success:function(d){ cb({ok:true, data:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,300)}); }
+  });
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
+_JS_SEARCH = r"""
+var cb = arguments[arguments.length-1];
+var tu=arguments[0], den=arguments[1], cap=arguments[2];
+try {
+  $.ajax({ type:'GET', url:'/tthc/ho-so/search', dataType:'html',
+    data:{ maNghiepVu:'', maTTHC:'', maToKhai:'', maHoSo:'',
+           tuNgay:tu, denNgay:den, scope_tdt1:'SELF', mstUyQuyen_tdt1:'', captcha:cap },
+    success:function(d){ cb({ok:true, html:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,300)}); }
+  });
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
+_JS_DOWNLOAD = r"""
+var cb = arguments[arguments.length-1];
+var ma = arguments[0];
+try {
+  $.ajax({ type:'POST', url:'/tthc/tchs/downloadhoso',
+    contentType:'application/json', data: JSON.stringify({maHoSo:ma}),
+    success:function(d){ cb({ok:true, data:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
+  });
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
+def _dvc_wait_jquery(drv, giay=12):
+    import time as _t
+    for _ in range(int(giay*2)):
+        try:
+            if drv.execute_script(
+                "return (typeof window.jQuery!=='undefined') && (typeof window.$==='function');"):
+                return True
+        except Exception:
+            pass
+        _t.sleep(0.5)
+    return False
+
+def _dvc_cap_from_js(res):
+    """Từ kết quả _JS_GETCAPTCHA → mã captcha (qua ddddocr)."""
+    if not res or not res.get("ok"):
+        return ""
+    try:
+        raw = base64.b64decode(res.get("b64") or "")
+    except Exception:
+        return ""
+    ct = (res.get("ct") or "").lower()
+    is_svg = ("svg" in ct or raw[:200].lstrip().lower().startswith(b"<svg")
+              or b"<svg" in raw[:200].lower())
+    if is_svg:
+        png = _svg_to_png(raw.decode("utf-8", "replace"))
+        return _ocr_png(png or b"")
+    return _ocr_png(raw)
+
+def _dvc_norm_data(d):
+    if isinstance(d, str):
+        try:
+            return json.loads(d)
+        except Exception:
+            return {"_raw": d[:200]}
+    return d
+
+def _dvc_browser_login(drv, mst, password, so_lan=8):
+    """Mở trang, qua WAF, tự giải captcha + đăng nhập. Trả (ok, info)."""
+    import re as _re, time as _t
+    drv.get(DVC_BASE + "/homelogin"); _t.sleep(1.5)
+    drv.get(DVC_BASE + "/login"); _t.sleep(1.0)
+    if not _dvc_wait_jquery(drv, 15):
+        return False, {"loi": "Trang login không nạp được jQuery (có thể WAF chặn cả trình duyệt)"}
+    digits = _re.sub(r"\D", "", mst or "")
+    ten = f"{digits}-QL"
+    tried = []
+    for lan in range(1, so_lan + 1):
+        try:
+            cap = _dvc_cap_from_js(drv.execute_async_script(_JS_GETCAPTCHA))
+        except Exception as e:
+            tried.append(f"(lỗi lấy captcha: {e})"); continue
+        if not cap:
+            tried.append("(captcha rỗng)"); continue
+        try:
+            res = drv.execute_async_script(_JS_LOGIN, ten, password, cap)
+        except Exception as e:
+            tried.append(f"{cap}→lỗi gọi login: {e}"); continue
+        if res and res.get("ok"):
+            d = _dvc_norm_data(res.get("data"))
+            st = str(d.get("status")) if isinstance(d, dict) else ""
+            if st == "200" or (isinstance(d, dict) and d.get("value")):
+                return True, {"so_lan": lan, "ten_dn": ten}
+            desc = (d.get("desc") if isinstance(d, dict) else str(d)) or ""
+            tried.append(f"{cap}→{str(desc)[:70]}")
+        else:
+            tried.append(f"{cap}→{str(res)[:80]}")
+        _t.sleep(0.4)
+    return False, {"ten_dn": ten, "da_thu": tried}
+
+def _dvc_browser_search(drv, tu, den, so_lan=8):
+    """Sau khi đăng nhập: vào trang tra cứu, giải captcha lớp 2, tìm hồ sơ."""
+    import time as _t
+    diag = []
+    drv.get(DVC_BASE + "/tchs"); _t.sleep(1.5)
+    if not _dvc_wait_jquery(drv, 15):
+        return [], ["Trang tra cứu (/tchs) không nạp được — có thể chưa đăng nhập thành công"]
+    for lan in range(1, so_lan + 1):
+        try:
+            cap = _dvc_cap_from_js(drv.execute_async_script(_JS_GETCAPTCHA))
+        except Exception as e:
+            diag.append(f"(lỗi captcha: {e})"); continue
+        if not cap:
+            diag.append("(captcha rỗng)"); continue
+        try:
+            res = drv.execute_async_script(_JS_SEARCH, tu, den, cap)
+        except Exception as e:
+            diag.append(f"{cap}→lỗi search: {e}"); continue
+        if res and res.get("ok"):
+            html = res.get("html") or ""
+            low = html.lower()
+            if ("table-container" in low or "tổng số bản ghi" in low
+                    or "totalpage" in low):
+                ma = _dvc_parse_ma_ho_so(html)
+                diag.append(f"{cap}→OK, {len(ma)} hồ sơ")
+                return ma, diag
+            diag.append(f"{cap}→chưa ra bảng (len={len(html)})")
+        else:
+            diag.append(f"{cap}→{str(res)[:80]}")
+        _t.sleep(0.4)
+    return [], diag
+
+def _dvc_browser_download(drv, ma):
+    res = drv.execute_async_script(_JS_DOWNLOAD, ma)
+    if not res or not res.get("ok"):
+        raise Exception(f"{res}")
+    d = _dvc_norm_data(res.get("data"))
+    if not isinstance(d, dict):
+        raise Exception("phản hồi không hợp lệ")
+    content = d.get("content") or ""
+    fname = d.get("fileName") or f"{ma}.zip"
+    raw = base64.b64decode(content) if content else b""
+    return fname, raw
+
+
 @app.post("/api/dvc/test-login/{cid}")
 def dvc_test_login(cid: int, body: dict = Body(...)):
     """Thử đăng nhập Dịch vụ công (chỉ kiểm tra, không tải gì).
@@ -1287,22 +1498,21 @@ def dvc_test_login(cid: int, body: dict = Body(...)):
         matkhau = (comp["dvc_password"] or "").strip()
     if not matkhau:
         raise HTTPException(400, "Chưa nhập mật khẩu Dịch vụ công")
-    client = DVCClient()           # phiên mới cho mỗi lần test
-    DVC_CLIENTS[cid] = client
     try:
-        client.prime()
+        drv = _dvc_make_driver(headless=True)
     except Exception as e:
-        raise HTTPException(502, f"Không kết nối được trang Dịch vụ công: {type(e).__name__}: {e}")
+        raise HTTPException(500,
+            "Không khởi động được trình duyệt Chrome. Hãy chắc máy đã cài Google "
+            f"Chrome và có mạng để tải chromedriver lần đầu. Chi tiết: {type(e).__name__}: {e}")
     try:
-        ok, info = _dvc_login_voi_retry(client, comp["mst"], matkhau)
-    except HTTPException:
-        raise
+        ok, info = _dvc_browser_login(drv, comp["mst"], matkhau)
     except Exception as e:
         import traceback
         raise HTTPException(500, f"Lỗi khi đăng nhập: {type(e).__name__}: {e} | "
                                  f"{traceback.format_exc()[-400:]}")
-    if isinstance(info, dict):
-        info["prime"] = client.prime_diag
+    finally:
+        try: drv.quit()
+        except Exception: pass
     if ok and body.get("luu"):
         conn = db()
         conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
@@ -1490,71 +1700,51 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
     if not folder:
         raise HTTPException(400, "Chưa cấu hình thư mục lưu cho công ty này")
 
-    client = DVCClient()
-    DVC_CLIENTS[cid] = client
     try:
-        client.prime()
+        drv = _dvc_make_driver(headless=True)
     except Exception as e:
-        raise HTTPException(502, f"Không kết nối được trang Dịch vụ công: {e}")
+        raise HTTPException(500,
+            "Không khởi động được trình duyệt Chrome. Hãy chắc máy đã cài Google "
+            f"Chrome và có mạng để tải chromedriver lần đầu. Chi tiết: {type(e).__name__}: {e}")
 
-    # 1) Đăng nhập
-    ok, info = _dvc_login_voi_retry(client, comp["mst"], matkhau)
-    if not ok:
-        raise HTTPException(401, f"Đăng nhập thất bại. {json.dumps(info, ensure_ascii=False)}")
-    if body.get("luu"):
-        conn = db()
-        conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
-        conn.commit(); conn.close()
+    da_tai, loi_tai, ma_list, search_diag, info = [], [], [], [], {}
+    try:
+        # 1) Đăng nhập (trình duyệt thật → qua WAF)
+        ok, info = _dvc_browser_login(drv, comp["mst"], matkhau)
+        if not ok:
+            raise HTTPException(401, f"Đăng nhập thất bại. {json.dumps(info, ensure_ascii=False)}")
+        if body.get("luu"):
+            conn = db()
+            conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
+            conn.commit(); conn.close()
 
-    # 2) Tra cứu (cần captcha lớp 2) — thử nhiều captcha tới khi ra bảng kết quả
-    ma_list = []
-    search_diag = []
-    for lan in range(1, 7):
-        try:
-            cap = client.solve_captcha("/tchs")
-        except Exception as e:
-            search_diag.append(f"(lỗi captcha: {type(e).__name__}: {e})")
-            continue
-        if not cap:
-            search_diag.append("(không đọc được captcha)")
-            continue
-        try:
-            r = client.search(tu, den, cap)
-        except Exception as e:
-            search_diag.append(f"{cap}→lỗi: {e}")
-            continue
-        html = r.text or ""
-        low = html.lower()
-        if "table-container" in low or "tổng số bản ghi" in low or "totalpage" in low:
-            ma_list = _dvc_parse_ma_ho_so(html)
-            search_diag.append(f"{cap}→OK, tìm thấy {len(ma_list)} hồ sơ")
-            break
-        search_diag.append(f"{cap}→chưa ra bảng (len={len(html)})")
-    if not ma_list:
-        raise HTTPException(422, "Đăng nhập OK nhưng không tra cứu được danh sách hồ sơ. "
-                                 f"Chi tiết: {json.dumps(search_diag, ensure_ascii=False)}")
+        # 2) Tra cứu hồ sơ đã nộp (captcha lớp 2)
+        ma_list, search_diag = _dvc_browser_search(drv, tu, den)
+        if not ma_list:
+            raise HTTPException(422, "Đăng nhập OK nhưng không tra cứu được danh sách hồ sơ. "
+                                     f"Chi tiết: {json.dumps(search_diag, ensure_ascii=False)}")
 
-    # 3) Tải từng hồ sơ
-    da_tai, loi_tai = [], []
-    for ma in ma_list:
-        try:
-            r = client.download_hoso(ma)
-            j = r.json()
-            content = j.get("content") or ""
-            fname = j.get("fileName") or f"{ma}.zip"
-            raw = base64.b64decode(content) if content else b""
-            if not raw:
-                loi_tai.append(f"{ma}: nội dung rỗng")
-                continue
-            # tên file an toàn
-            safe = "".join(ch for ch in fname if ch not in '\\/:*?"<>|') or f"{ma}.zip"
-            path = os.path.join(folder, safe)
-            with open(path, "wb") as f:
-                f.write(raw)
-            da_tai.append({"maHoSo": ma, "file": safe, "kich_thuoc": len(raw)})
-        except Exception as e:
-            loi_tai.append(f"{ma}: {e}")
-        time.sleep(0.4)
+        # 3) Tải từng hồ sơ
+        for ma in ma_list:
+            try:
+                fname, raw = _dvc_browser_download(drv, ma)
+                if not raw:
+                    loi_tai.append(f"{ma}: nội dung rỗng"); continue
+                safe = "".join(ch for ch in fname if ch not in '\\/:*?"<>|') or f"{ma}.zip"
+                with open(os.path.join(folder, safe), "wb") as f:
+                    f.write(raw)
+                da_tai.append({"maHoSo": ma, "file": safe, "kich_thuoc": len(raw)})
+            except Exception as e:
+                loi_tai.append(f"{ma}: {e}")
+            time.sleep(0.4)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(500, f"Lỗi: {type(e).__name__}: {e} | {traceback.format_exc()[-400:]}")
+    finally:
+        try: drv.quit()
+        except Exception: pass
 
     return {
         "ok": True,

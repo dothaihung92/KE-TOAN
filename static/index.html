@@ -210,7 +210,7 @@
 <div class="modal-bg" id="dvcModal">
   <div class="modal" style="max-width:560px">
     <h3>📥 Tải tờ khai / báo cáo đã nộp</h3>
-    <p class="hint" style="margin-top:0">Phần mềm sẽ tự đăng nhập <b>dichvucong.gdt.gov.vn</b> bằng tài khoản thuế điện tử của công ty, tự giải captcha, tra cứu các <b>tờ khai/báo cáo đã nộp</b> theo khoảng ngày rồi tải file về thư mục công ty. <b>Tính năng thử nghiệm</b> — nếu lỗi sẽ hiện chi tiết để tinh chỉnh dần.</p>
+    <p class="hint" style="margin-top:0">Phần mềm mở một trình duyệt Chrome <b>chạy ẩn</b> để tự đăng nhập <b>dichvucong.gdt.gov.vn</b>, tự giải captcha, tra cứu các <b>tờ khai/báo cáo đã nộp</b> theo khoảng ngày rồi tải về thư mục công ty. ⚠️ Máy cần có <b>Google Chrome</b>; lần chạy đầu hơi lâu (tự tải trình điều khiển). <b>Tính năng thử nghiệm</b> — nếu lỗi sẽ hiện chi tiết để tinh chỉnh dần.</p>
     <div class="field"><label>Mật khẩu Dịch vụ công <span style="font-weight:400;color:var(--muted)">(tài khoản …-QL)</span></label>
       <div style="display:flex;gap:6px">
         <input id="dvc_pass" type="password" placeholder="••••••••" style="flex:1">
@@ -487,12 +487,12 @@ async function dvcTestLogin(){
   if(!pass){toast('Nhập mật khẩu Dịch vụ công','err');return;}
   const luu=document.getElementById('dvc_luu').checked;
   const old=btn.textContent;btn.disabled=true;btn.textContent='Đang thử...';
-  dvcShowResult('⏳ Đang đăng nhập, vui lòng đợi (tự giải captcha có thể mất vài giây)...');
+  dvcShowResult('⏳ Đang mở trình duyệt ẩn và đăng nhập... Lần đầu có thể mất 20-40 giây (tải trình điều khiển + giải captcha). Vui lòng đợi.');
   try{
     const r=await api(`/api/dvc/test-login/${current}`,{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({matkhau:pass,luu})});
-    dvcShowResult(`✅ <b>Đăng nhập thành công</b> sau ${r.so_lan_thu||'?'} lần thử captcha.`
+    dvcShowResult(`✅ <b>Đăng nhập thành công</b> sau ${r.so_lan||r.so_lan_thu||'?'} lần thử captcha.`
       +(r.da_luu_mat_khau?'<br>🔒 Đã lưu mật khẩu.':''));
     toast('Đăng nhập Dịch vụ công thành công','ok');
   }catch(e){

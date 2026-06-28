@@ -8,3 +8,4 @@ Pillow
 svglib
 reportlab
 curl_cffi
+selenium
