@@ -1153,6 +1153,7 @@ async function importCongTy(input){
 let nlChung={in:null,out:null};
 let nhapLieuLoaiHienTai='in';
 let nlHeader=[], nlRows=[], nlFilters={}, nlFreezeCol=0;
+let nlSnapTrong={};       // {ci: Set(idx)} - chốt danh sách dòng TRỐNG lúc bật lọc ∅
 let nlChon=null, nlDangKeo=false;
 let nlMapNoHoc={};        // {mst: tk_no} đã học từ server
 let nlCanhBaoNo={};       // {rowIdx: tk_ky_vong} các dòng hạch toán Nợ lệch
@@ -1293,7 +1294,7 @@ async function taiNhapLieu(){
     nlBoCotKhongCan();
     nlDamBaoNoCo();
     if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
-    nlFilters={};nlChon=null;nlFormulas={};nlUndoStack=[];nlChiHienCanhBao=false;
+    nlFilters={};nlSnapTrong={};nlChon=null;nlFormulas={};nlUndoStack=[];nlChiHienCanhBao=false;
     nlTinhCanhBaoNo();
     veGridNhapLieu();
     const info=document.getElementById('nlInfo');
@@ -1528,7 +1529,12 @@ function nlLocDong(){
       const f=nlFilters[ci];
       if(!f)continue;
       const val=String(row[ci]==null?'':row[ci]).trim();
-      if(f==='(trống)'){if(val!==''){ok=false;break;}}
+      if(f==='(trống)'){
+        // dùng danh sách đã CHỐT lúc bật lọc -> dòng đã điền vẫn hiển thị để fill down
+        const snap=nlSnapTrong[ci];
+        if(snap){if(!snap.has(idx)){ok=false;break;}}
+        else if(val!==''){ok=false;break;}
+      }
       else if(!val.toLowerCase().includes(f.trim().toLowerCase())){ok=false;break;}
     }
     if(ok)out.push({row,idx});
@@ -1749,7 +1755,7 @@ function nlMenuCot(e,ci){
 function nlBatFilter(){
   const b=document.getElementById('nlFilterBtn');
   b.dataset.on=b.dataset.on==='1'?'0':'1';b.classList.toggle('gold',b.dataset.on==='1');
-  if(b.dataset.on!=='1')nlFilters={};
+  if(b.dataset.on!=='1'){nlFilters={};nlSnapTrong={};}
   veGridNhapLieu();
 }
 function nlSetFilter(ci,val){
@@ -1760,7 +1766,15 @@ function nlSetFilter(ci,val){
 }
 function nlLocTrong(ci){
   // toggle lọc dòng trống ở cột ci
-  if(nlFilters[ci]==='(trống)')delete nlFilters[ci];else nlFilters[ci]='(trống)';
+  if(nlFilters[ci]==='(trống)'){
+    delete nlFilters[ci]; delete nlSnapTrong[ci];
+  }else{
+    nlFilters[ci]='(trống)';
+    // CHỐT danh sách dòng đang trống -> điền/fill down xong vẫn còn hiển thị
+    const s=new Set();
+    nlRows.forEach((r,idx)=>{if(String(r[ci]==null?'':r[ci]).trim()==='')s.add(idx);});
+    nlSnapTrong[ci]=s;
+  }
   veGridNhapLieu();
 }
 async function nlLuu(){
@@ -1857,7 +1871,7 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
     </div>`;
   nlHeader=headers.slice();
   nlRows=rows.map(r=>{const x=r.slice();while(x.length<nlHeader.length)x.push('');x.length=nlHeader.length;return x;});
-  nlFreezeCol=0;nlChon=null;nlFilters={};nlFormulas={};nlUndoStack=[];
+  nlFreezeCol=0;nlChon=null;nlFilters={};nlSnapTrong={};nlFormulas={};nlUndoStack=[];
   nlChiHienCanhBao=false;nlCanhBaoNo={};nlIdxCotNo=-1;
   veGridNhapLieu();
   document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng${soMoi!=null?` — <b style="color:#1f6b4a">${soMoi} mới</b>`:''} (Nợ ${loai==='hh'?'1561/156':'152'}). Cột Kho mặc định <b>${loai==='hh'?'HH':'NVL'}</b>.`;
