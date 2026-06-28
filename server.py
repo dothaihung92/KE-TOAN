@@ -1316,32 +1316,48 @@ def _dvc_make_driver(headless=True):
 # --- Các đoạn JS chạy trong ngữ cảnh trang dichvucong ---
 _JS_GETCAPTCHA = r"""
 var cb = arguments[arguments.length-1];
-// WAF chặn XHR/fetch tới getCaptcha (Sec-Fetch-Dest: empty) nhưng cho ảnh thật.
-// => nạp captcha bằng <img> (Sec-Fetch-Dest: image, cùng nguồn nên có cookie),
-//    rồi vẽ lên canvas lấy PNG. Cùng nguồn nên canvas không bị 'taint'.
+// Dùng chính thẻ <img> captcha của trang + hàm reload của trang (đúng URL trang
+// dùng, request kiểu ảnh nên qua WAF). Cùng nguồn -> canvas không bị 'taint'.
 try {
-  var done = false;
-  var img = new Image();
-  function grab(){
-    if(done) return; done = true;
-    try{
-      var w = img.naturalWidth||img.width||200;
-      var h = img.naturalHeight||img.height||60;
-      if(w<10) w=200; if(h<10) h=60;
-      var sc = 3;
-      var c = document.createElement('canvas');
-      c.width = w*sc; c.height = h*sc;
-      var g = c.getContext('2d');
-      g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height);
-      g.drawImage(img,0,0,c.width,c.height);
-      cb({ok:true, w:w, h:h, png:c.toDataURL('image/png')});
-    }catch(e){ cb({ok:false, err:'canvas:'+e}); }
+  function findImg(){
+    var ids=['image-capt','image-capt-cbt','imgCaptcha','captcha','imgcaptcha'];
+    for(var i=0;i<ids.length;i++){ var e=document.getElementById(ids[i]);
+      if(e && e.tagName==='IMG') return e; }
+    var imgs=document.getElementsByTagName('img');
+    for(var j=0;j<imgs.length;j++){ if(((imgs[j].src||'').indexOf('getCaptcha'))>=0) return imgs[j]; }
+    return null;
   }
-  img.onload = grab;
-  img.onerror = function(){ if(!done){done=true; cb({ok:false, err:'imgload'});} };
-  img.src = '/tthc/getCaptcha?' + Date.now();
-  setTimeout(function(){ if(!done && img.complete && img.naturalWidth>0) grab();
-                         else if(!done){done=true; cb({ok:false, err:'timeout'});} }, 4000);
+  var img = findImg();
+  if(!img){ cb({ok:false, err:'no-captcha-img'}); return; }
+  var oldsrc = img.src||'';
+  // nạp captcha mới: ưu tiên hàm của trang, nếu không thì đổi timestamp trên src cũ
+  var reloaded=false;
+  try{ if(typeof reloadCaptcha==='function'){ reloadCaptcha(); reloaded=true; } }catch(e){}
+  if(!reloaded){ try{ if(typeof reloadCaptchaCbt==='function'){ reloadCaptchaCbt(); reloaded=true; } }catch(e){} }
+  if(!reloaded){
+    var base=(oldsrc.split('?')[0]) || '/tthc/getCaptcha';
+    img.src = base + '?' + Date.now();
+  }
+  var done=false, tries=0;
+  function check(){
+    if(done) return;
+    tries++;
+    if(img.complete && img.naturalWidth>2){
+      done=true;
+      try{
+        var w=img.naturalWidth, h=img.naturalHeight||60, sc=3;
+        var c=document.createElement('canvas'); c.width=w*sc; c.height=h*sc;
+        var g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height);
+        g.drawImage(img,0,0,c.width,c.height);
+        cb({ok:true, w:w, h:h, src:(img.src||'').slice(0,90), png:c.toDataURL('image/png')});
+      }catch(e){ cb({ok:false, err:'canvas:'+e, src:(img.src||'').slice(0,90)}); }
+      return;
+    }
+    if(tries>50){ done=true; cb({ok:false, err:'wait', src:(img.src||'').slice(0,90),
+                                  complete:img.complete, nw:img.naturalWidth}); return; }
+    setTimeout(check,150);
+  }
+  setTimeout(check, 400);
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
@@ -1424,8 +1440,9 @@ def _dvc_cap_meta(res):
     if not res:
         return "res=None"
     if not res.get("ok"):
-        return f"ok=False status={res.get('status')} err={res.get('err')} ct={res.get('ct')}"
-    return f"ok=True ct={res.get('ct')} w={res.get('w')} h={res.get('h')} ocr=rỗng"
+        return (f"ok=False err={res.get('err')} src={res.get('src')} "
+                f"complete={res.get('complete')} nw={res.get('nw')}")
+    return f"ok=True w={res.get('w')} h={res.get('h')} src={res.get('src')} ocr=rỗng"
 
 def _dvc_norm_data(d):
     if isinstance(d, str):
