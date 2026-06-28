@@ -3269,6 +3269,153 @@ def ghi_tang_tscd(cid: int):
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
 
 
+# ============ BÁN HÀNG (form MISA "Chứng từ bán hàng") ============
+BAN_HANG_HEADERS = [
+    "Hiển thị trên sổ", "Hình thức bán hàng", "Phương thức thanh toán",
+    "Kiêm phiếu xuất kho", "Lập kèm hóa đơn", "Đã lập hóa đơn",
+    "Ngày hạch toán (*)", "Ngày chứng từ (*)", "Số chứng từ (*)",
+    "Số phiếu xuất", "Lý do xuất", "Mẫu số HĐ", "Ký hiệu HĐ", "Số hóa đơn",
+    "Ngày hóa đơn", "Mã khách hàng", "Tên khách hàng", "Địa chỉ", "Mã số thuế",
+    "Diễn giải", "Nộp vào TK", "NV bán hàng", "Loại tiền", "Tỷ giá",
+    "Mã hàng (*)", "Tên hàng", "Hàng khuyến mại", "TK Tiền/Chi phí/Nợ (*)",
+    "TK Doanh thu/Có (*)", "ĐVT", "Số lượng", "Đơn giá sau thuế", "Đơn giá",
+    "Thành tiền", "Thành tiền quy đổi", "Tỷ lệ CK (%)", "Tiền chiết khấu",
+    "Tiền chiết khấu quy đổi", "TK chiết khấu", "Giá tính thuế XK", "% thuế XK",
+    "Tiền thuế XK", "TK thuế XK", "% thuế GTGT", "Tiền thuế GTGT",
+    "Tiền thuế GTGT quy đổi", "TK thuế GTGT", "HH không TH trên tờ khai thuế GTGT",
+    "Kho", "TK giá vốn", "TK Kho", "Đơn giá vốn", "Tiền vốn",
+    "Hàng hóa giữ hộ/bán hộ"]
+
+def _bh_cols(header):
+    hlow = [str(h or "").strip().lower() for h in header]
+    def find(eqs, contains):
+        for i, h in enumerate(hlow):
+            if h in eqs:
+                return i
+        for i, h in enumerate(hlow):
+            if any(k in h for k in contains):
+                return i
+        return -1
+    return {
+        "maus": find(("ký hiệu mẫu", "mẫu số hđ"), ("ký hiệu mẫu", "mẫu số")),
+        "kyhieu": find(("ký hiệu hđ",), ("ký hiệu hđ",)),
+        "sohd": find(("số hóa đơn", "số hđ"), ("số hóa đơn", "số hđ")),
+        "ngay": find(("ngày lập", "ngày"), ("ngày",)),
+        "nguoimua": find(("tên người mua",), ("người mua", "tên người")),
+        "mst": find(("mst người mua", "mst mua"), ("mst",)),
+        "mathang": find(("mặt hàng",), ("mặt hàng", "tên hàng")),
+        "ds": find(("doanh số bán chưa thuế",), ("doanh số", "chưa thuế")),
+        "thue": find(("thuế gtgt",), ("thuế gtgt", "tiền thuế")),
+    }
+
+def _gen_ban_hang(cid, header, rows):
+    """Form MISA 'Chứng từ bán hàng' từ Bảng kê đầu ra. TK Có (doanh thu)=5111;
+    TK Nợ (tiền/công nợ) = 131 nếu tổng HĐ >= 5tr, ngược lại 1111."""
+    col = _bh_cols(header)
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    # tổng theo từng hóa đơn (ký hiệu + số HĐ) để áp ngưỡng 5tr
+    tong = {}
+    for r in rows:
+        key = f"{gv(r,col['kyhieu'])}|{gv(r,col['sohd'])}"
+        t = (_to_num(gv(r, col["ds"])) or 0) + (_to_num(gv(r, col["thue"])) or 0)
+        tong[key] = tong.get(key, 0) + t
+
+    seq_thang = {}
+    out = []
+    for r in rows:
+        sohd = str(gv(r, col["sohd"]) or "").strip()
+        if not sohd:
+            continue
+        ds = round(_to_num(gv(r, col["ds"])) or 0)
+        thue = round(_to_num(gv(r, col["thue"])) or 0)
+        ngay = str(gv(r, col["ngay"]) or "")
+        mathang = str(gv(r, col["mathang"]) or "")
+        nguoimua = str(gv(r, col["nguoimua"]) or "")
+        mst = _dinh_dang_mst(gv(r, col["mst"]))
+        kyhieu = str(gv(r, col["kyhieu"]) or "")
+        maus = str(gv(r, col["maus"]) or "") if col["maus"] >= 0 else ""
+        tong_hd = tong.get(f"{kyhieu}|{sohd}", 0)
+        tk_no = 131 if abs(tong_hd) >= NGUONG_5TR else 1111
+        # Số chứng từ: BH{seq:03d}/T{tháng}/{năm} (seq theo từng tháng)
+        p = ngay.replace("-", "/").split("/")
+        thang = nam = ""
+        if len(p) == 3:
+            thang = str(int(p[1])) if p[1].isdigit() else p[1]
+            nam = p[2]
+        mk = (thang, nam)
+        seq_thang[mk] = seq_thang.get(mk, 0) + 1
+        so_ct = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"
+        rate = round(thue / ds * 100) if ds else 0
+        row = [""] * len(BAN_HANG_HEADERS)
+        row[0] = 0; row[1] = 0
+        row[2] = 1 if abs(tong_hd) < NGUONG_5TR else 0   # PTTT: <5tr=tiền->1
+        row[3] = 0; row[4] = 1; row[5] = 1
+        row[6] = ngay; row[7] = ngay; row[8] = so_ct
+        row[11] = maus; row[12] = kyhieu               # Mẫu số / Ký hiệu HĐ
+        row[13] = sohd; row[14] = ngay
+        row[15] = mst; row[16] = nguoimua; row[18] = mst
+        row[19] = mathang
+        row[24] = "BH"; row[25] = mathang
+        row[27] = tk_no; row[28] = 5111                # AB Nợ / AC Có
+        row[30] = 1                                     # Số lượng
+        row[31] = ds; row[32] = ds; row[33] = ds       # đơn giá / thành tiền
+        row[43] = rate; row[44] = thue                 # % thuế / tiền thuế
+        row[46] = "33311"                              # TK thuế GTGT
+        out.append(row)
+    return out
+
+
+@app.post("/api/ban-hang/{cid}")
+async def ban_hang(cid: int, request: Request, export: int = 0):
+    """Bán hàng từ lưới Bảng kê đầu ra. export=1 -> file MISA."""
+    body = await request.json()
+    out = _gen_ban_hang(cid, body.get("header", []), body.get("rows", []))
+    if not export:
+        return {"headers": BAN_HANG_HEADERS, "rows": out, "so_dong": len(out)}
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Chứng từ bán hàng"
+    for c, h in enumerate(BAN_HANG_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    cot_text = {9, 13, 14, 16, 19, 25, 28, 29, 47}   # số CT, ký hiệu, sốHĐ, MST, mã, TK
+    cot_tien = {32, 33, 34, 45}                       # đơn giá, thành tiền, tiền thuế
+    for ri, row in enumerate(out, 2):
+        for ci, v in enumerate(row, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in cot_text:
+                cell.number_format = "@"
+            elif ci in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, len(BAN_HANG_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"BanHang_{mst}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.

@@ -1308,6 +1308,11 @@ function moBangKe(loai){
         <button class="btn sm" onclick="nlDanhMuc('ccdc')" style="background:#1f6b4a" title="Danh mục CCDC (Nợ 2421/242)">🧰 DM CCDC</button>
         <button class="btn sm" onclick="nlDanhMucVTHH()" style="background:#2e5c8a" title="Danh mục VTHH từ DM Hàng hóa/NVL/TSCĐ/CCDC">📦 DM VTHH</button>
       </div>`:''}
+      ${loai==='out'?`
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🧾 Chứng từ:</span>
+        <button class="btn sm" onclick="nlBanHang(this)" style="background:#1f6b4a" title="Kết xuất form MISA Chứng từ bán hàng (TK Có 5111, Nợ 131/1111 theo 5tr)">🛒 Bán Hàng</button>
+      </div>`:''}
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm ô để sửa. Gõ <b>=</b> rồi công thức, có thể tham chiếu ô (vd <b>=K5/J5</b> hoặc <b>=L3*1.08</b>). <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo | <b>Ctrl+Shift+L</b> Filter | <b>Esc</b> Quay về.</div>
@@ -1325,6 +1330,7 @@ async function taiNhapLieu(){
     nlBoCotKhongCan();
     nlDamBaoNoCo();
     if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
+    else if(nhapLieuLoaiHienTai==='out')nlTuDienNoCoRa();
     nlFilters={};nlSnapTrong={};nlChon=null;nlFormulas={};nlUndoStack=[];nlChiHienCanhBao=false;
     nlTinhCanhBaoNo();
     veGridNhapLieu();
@@ -1349,6 +1355,31 @@ function nlDamBaoNoCo(){
   if(!hLow.includes('nợ')){nlHeader.push('Nợ');nlRows.forEach(r=>r.push(''));}
   if(!hLow.includes('có')){nlHeader.push('Có');nlRows.forEach(r=>r.push(''));}
   nlRows.forEach(r=>{while(r.length<nlHeader.length)r.push('');r.length=nlHeader.length;});
+}
+// Bảng kê ĐẦU RA: Nợ mặc định 5111; Có = 131 nếu tổng HĐ >=5tr, else 1111
+function nlTuDienNoCoRa(){
+  const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
+  const idx=(pred)=>hLow.findIndex(pred);
+  const iNo=hLow.findIndex(h=>h==='nợ'||h==='no');
+  const iCo=hLow.findIndex(h=>h==='có'||h==='co');
+  const iKH=idx(h=>h.includes('ký hiệu hđ'));
+  const iSo=idx(h=>h.includes('số hóa đơn')||h.includes('số hđ'));
+  const iDS=idx(h=>h.includes('doanh số')||h.includes('chưa thuế'));
+  const iThue=idx(h=>h.includes('thuế gtgt')||h.includes('tiền thuế'));
+  if(iNo<0&&iCo<0)return;
+  const tong={};
+  nlRows.forEach(r=>{
+    const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
+    const t=(iDS>=0?nlParseSo(r[iDS]):0)+(iThue>=0?nlParseSo(r[iThue]):0);
+    tong[key]=(tong[key]||0)+t;
+  });
+  nlRows.forEach(r=>{
+    if(iNo>=0&&!String(r[iNo]||'').trim())r[iNo]='5111';
+    if(iCo>=0&&!String(r[iCo]||'').trim()){
+      const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
+      r[iCo]=Math.abs(tong[key]||0)>=5000000?'131':'1111';
+    }
+  });
 }
 // Tự điền Nợ (theo MST đã học) + Có (>=5tr->331, <5tr->1111) cho ô còn TRỐNG
 async function nlTuDienNoCo(){
@@ -1871,6 +1902,18 @@ async function nlMuaHangKQK(btn){
     const sd=r.headers.get('X-So-Dong')||'';
     dl(await r.blob(),`MuaHangKhongQuaKho.xlsx`);
     toast(sd&&sd!=='0'?`🏗 Đã kết xuất ${sd} dòng mua hàng không qua kho (Nợ 2111/211/2421/242)`:'⚠ Không có dòng nào Nợ là TSCĐ/CCDC (2111/211/2421/242)','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  if(btn){btn.disabled=false;btn.innerHTML=old;}
+}
+async function nlBanHang(btn){
+  const old=btn?btn.innerHTML:'';
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang xử lý...';}
+  try{
+    const r=await fetch(`/api/ban-hang/${current}?export=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const sd=r.headers.get('X-So-Dong')||'';
+    dl(await r.blob(),`BanHang.xlsx`);
+    toast(sd&&sd!=='0'?`🛒 Đã kết xuất ${sd} dòng bán hàng`:'⚠ Bảng kê đầu ra chưa có dữ liệu','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
 }
