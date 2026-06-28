@@ -2479,7 +2479,10 @@ def _gen_danh_muc(cid, loai, header, rows):
     store = data.get("dm_" + loai, {}) or {}
     keymap = dict(store.get("map", {}))           # Ký tự -> base (HH00001)
     next_n = int(store.get("next", 1))
-    saved_rows = [list(r) for r in store.get("rows", [])]
+    # Chỉ giữ dòng đã lưu theo ĐỊNH DẠNG MỚI (11 cột). Dòng cũ (10 cột,
+    # chưa có Thuế suất/Kho) bị bỏ để tránh lệch cột; sẽ tự sinh lại từ
+    # bảng kê hiện tại với mã giữ nguyên theo bản đồ đã học.
+    saved_rows = [list(r) for r in store.get("rows", []) if len(r) >= 11]
     col = _dm_cols(header)
 
     def gv(r, i):

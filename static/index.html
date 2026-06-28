@@ -1856,7 +1856,7 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
   nlHeader=headers.slice();
-  nlRows=rows.map(r=>r.slice());
+  nlRows=rows.map(r=>{const x=r.slice();while(x.length<nlHeader.length)x.push('');x.length=nlHeader.length;return x;});
   nlFreezeCol=0;nlChon=null;nlFilters={};nlFormulas={};nlUndoStack=[];
   nlChiHienCanhBao=false;nlCanhBaoNo={};nlIdxCotNo=-1;
   veGridNhapLieu();
