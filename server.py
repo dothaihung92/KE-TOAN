@@ -3213,7 +3213,8 @@ def clear_downloads(scope: str = "temp"):
                     seen_dirs.add(sd)
                     for root, _dirs, files in os.walk(sd):
                         for ff in files:
-                            if ff.lower().endswith((".xml", ".pdf", ".zip", ".html")):
+                            if ff.lower().endswith((".xml", ".pdf", ".zip", ".html",
+                                                    ".xlsx", ".json")):
                                 _xoa_file(os.path.join(root, ff))
 
     # 3) scope='tokhai' -> CHỈ xóa file tờ khai đã tải (các thư mục ToKhai_DaNop)
