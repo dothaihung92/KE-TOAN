@@ -1193,12 +1193,15 @@ def _dvc_parse_ma_ho_so(html):
     """Bóc các mã hồ sơ (maHoSo) từ HTML kết quả tra cứu. Giữ thứ tự, khử trùng."""
     import re as _re
     found, seen = [], set()
-    # Mẫu mã hồ sơ điển hình: G12.18-260424-00039970
+    # Mã hồ sơ có nhiều định dạng:
+    #   quý : G12.18-260424-00039970            (bắt đầu bằng chữ)
+    #   năm : 000.701.18.G12-260330-27012345    (bắt đầu bằng số, nhiều nhóm)
+    # -> mẫu chung: các nhóm chữ-số nối bằng dấu chấm, rồi -6số-(nhiều số)
     pats = [
-        r'[A-Z]{1,3}[0-9]{1,3}\.[0-9]{1,3}-[0-9]{6}-[0-9]{6,12}',
+        r'[A-Z0-9]+(?:\.[A-Z0-9]+)+-\d{6}-\d{3,}',
         r"downloadHoSo\(\s*['\"]([^'\"]+)['\"]",
-        r'(?:files/detail/)([A-Za-z0-9.\-]{10,50})',
-        r'maHoSo["\'=: ]+([A-Za-z0-9.\-]{10,50})',
+        r'(?:files/detail/)([A-Za-z0-9.\-]{8,60})',
+        r'(?:idTKhai|maHoSo)["\'=: ]+([A-Za-z0-9.\-]{8,60})',
     ]
     for i, p in enumerate(pats):
         for m in _re.findall(p, html):
