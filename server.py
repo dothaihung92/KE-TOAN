@@ -1381,18 +1381,33 @@ def dvc_captcha_debug(cid: int):
         ltxt = rl.text or ""
         soi["login"] = [f"status={rl.status_code}", f"len={len(ltxt)}",
                         f"url_cuoi={rl.url}"]
-        # mọi chỗ chứa 'aptcha'
-        for m in _re2.finditer(r'.{40}[Cc]aptcha.{60}', ltxt):
+        # làm phẳng khoảng trắng để regex bắt qua nhiều dòng
+        flat = _re2.sub(r'\s+', ' ', ltxt)
+        for m in _re2.finditer(r'.{0,70}[Cc]aptcha.{0,70}', flat):
             soi["captcha_refs"].append(m.group(0))
-        soi["captcha_refs"] = soi["captcha_refs"][:12]
-        # img src
-        for m in _re2.findall(r'<img[^>]+src=["\']([^"\']+)["\']', ltxt)[:15]:
-            soi["img"].append(m)
-        # form action + input
+        # gộp trùng, giữ tối đa 20
+        seen = set(); uniq = []
+        for s in soi["captcha_refs"]:
+            if s not in seen:
+                seen.add(s); uniq.append(s)
+        soi["captcha_refs"] = uniq[:20]
+        # các lời gọi ajax/fetch/getCaptcha/loginLDAP trong JS
+        for kw in ("getCaptcha", "loginLDAP", "checkCaptcha", "$.ajax", "fetch(",
+                   "XMLHttpRequest", "/tthc/"):
+            for m in _re2.finditer(_re2.escape(kw) + r'.{0,80}', flat):
+                soi["img"].append(m.group(0))  # tái dùng list 'img' để hiện
+        seen = set(); uniq = []
+        for s in soi["img"]:
+            if s not in seen:
+                seen.add(s); uniq.append(s)
+        soi["img"] = uniq[:30]
+        # form action + input + giá trị _csrf
         for m in _re2.findall(r'<form[^>]*action=["\']([^"\']*)["\']', ltxt)[:5]:
             soi["form"].append("action=" + m)
-        for m in _re2.findall(r'<input[^>]+name=["\']([^"\']+)["\']', ltxt)[:20]:
-            soi["form"].append("input=" + m)
+        for m in _re2.findall(r'<input[^>]+name=["\']([^"\']+)["\'][^>]*?(?:value=["\']([^"\']*)["\'])?',
+                              ltxt)[:25]:
+            nm, vl = m
+            soi["form"].append(f"input={nm}" + (f" = {vl[:40]}" if vl else ""))
     except Exception as e:
         soi["login"] = [f"lỗi soi login: {e}"]
 
@@ -1419,8 +1434,8 @@ pre{{background:#f6f8fa;padding:10px;border-radius:8px;overflow:auto;max-height:
 <p><b>Trang login:</b> {' · '.join(soi['login'])}</p>
 <p><b>Các chỗ chứa "captcha":</b></p>
 <pre>{chr(10).join(x.replace('<','&lt;') for x in soi['captcha_refs']) or '(không có — login là SPA/JS render)'}</pre>
-<p><b>img src trên trang:</b></p>
-<pre>{chr(10).join(soi['img']) or '(không có)'}</pre>
+<p><b>Lời gọi JS / URL liên quan (getCaptcha, loginLDAP, ajax...):</b></p>
+<pre>{chr(10).join(x.replace('<','&lt;') for x in soi['img']) or '(không có)'}</pre>
 <p><b>form action / input name:</b></p>
 <pre>{chr(10).join(soi['form']) or '(không có)'}</pre>
 <h3>Ảnh captcha (gốc):</h3>
