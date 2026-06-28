@@ -1675,11 +1675,13 @@ function nlDichCongThuc(formula,dr,dc){
 function nlFillDown(){
   const v=nlVungChonChuan();if(!v){toast('Hãy kéo chọn vùng trước','err');return}
   nlLuuUndo();
+  const hienThi=new Set(nlLocDong().map(o=>o.idx)); // chỉ fill dòng đang HIỂN THỊ
   for(let c=v.c1;c<=v.c2;c++){
     const srcKey=v.r1+'_'+c;
     const srcFormula=nlFormulas[srcKey]; // công thức gốc (nếu có)
     const srcVal=nlRows[v.r1][c];       // giá trị gốc
     for(let r=v.r1+1;r<=v.r2;r++){
+      if(!hienThi.has(r))continue;       // bỏ qua dòng đang bị filter ẩn
       const dr=r-v.r1;
       const tgtKey=r+'_'+c;
       if(srcFormula){
@@ -1700,7 +1702,9 @@ function nlFillDown(){
 function nlFillRight(){
   const v=nlVungChonChuan();if(!v){toast('Hãy kéo chọn vùng trước','err');return}
   nlLuuUndo();
+  const hienThi=new Set(nlLocDong().map(o=>o.idx));
   for(let r=v.r1;r<=v.r2;r++){
+    if(!hienThi.has(r))continue;        // bỏ qua dòng đang bị filter ẩn
     const srcKey=r+'_'+v.c1;
     const srcFormula=nlFormulas[srcKey];
     const srcVal=nlRows[r][v.c1];
