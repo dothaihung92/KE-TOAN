@@ -1016,15 +1016,25 @@ class DVCClient:
     UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
           "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
 
+    SECCH = {
+        "sec-ch-ua": '"Google Chrome";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+    }
+
     def __init__(self):
         self.session = requests.Session()
+        # Bộ header giống hệt trình duyệt Chrome để qua WAF (F5 BIG-IP)
         self.session.headers.update({
             "User-Agent": self.UA,
             "Accept-Language": "vi,en-US;q=0.9,en;q=0.8,vi-VN;q=0.7",
             "Accept": "*/*",
+            "Upgrade-Insecure-Requests": "1",
+            **self.SECCH,
         })
         self.primed = False
         self.logged_in = False
+        self.prime_diag = {}
 
     def _xsrf(self):
         # Spring/Angular: XSRF-TOKEN nằm trong cookie, gửi lại qua header.
@@ -1039,20 +1049,48 @@ class DVCClient:
             return ""
 
     def prime(self):
-        """GET trang login để nhận cookie phiên + XSRF + cookie WAF (TS01...)."""
-        r = self.session.get(DVC_BASE + "/login", timeout=30)
-        # gọi thêm 1 nhịp homelogin để chắc chắn WAF set đủ cookie
-        try:
-            self.session.get(DVC_BASE + "/homelogin", timeout=30)
-        except Exception:
-            pass
+        """Vào trang chủ rồi trang login như trình duyệt để WAF (F5 BIG-IP) cấp
+        cookie TS01.../JSESSIONID/XSRF. Ghi lại chẩn đoán để dò lỗi."""
+        nav = {
+            "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                       "image/avif,image/webp,image/apng,*/*;q=0.8"),
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+        }
+        diag = {"buoc": []}
+        last = None
+        for path in ("/homelogin", "/login"):
+            try:
+                r = self.session.get(DVC_BASE + path, headers=nav, timeout=30,
+                                     allow_redirects=True)
+                last = r
+                diag["buoc"].append({"url": path, "status": r.status_code,
+                                     "len": len(r.content or b"")})
+                nav = dict(nav); nav["Sec-Fetch-Site"] = "same-origin"
+                nav["Referer"] = DVC_BASE + path
+            except Exception as e:
+                diag["buoc"].append({"url": path, "loi": f"{type(e).__name__}: {e}"})
+            time.sleep(0.3)
+        diag["cookies"] = sorted(c.name for c in self.session.cookies)
+        diag["co_waf"] = any(n.startswith("TS") for n in diag["cookies"])
+        diag["co_xsrf"] = bool(self._xsrf())
+        self.prime_diag = diag
         self.primed = True
-        return r
+        return last
 
-    def get_captcha_png(self):
+    def get_captcha_png(self, referer="/login"):
         """Tải 1 ảnh captcha (PNG bytes). Tự rasterize nếu server trả SVG."""
         ts = int(time.time() * 1000)
-        r = self.session.get(f"{DVC_BASE}/getCaptcha?{ts}", timeout=30)
+        h = {
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Referer": DVC_BASE + referer,
+            "Sec-Fetch-Dest": "image",
+            "Sec-Fetch-Mode": "no-cors",
+            "Sec-Fetch-Site": "same-origin",
+        }
+        r = self.session.get(f"{DVC_BASE}/getCaptcha?{ts}", headers=h, timeout=30)
         r.raise_for_status()
         ct = (r.headers.get("content-type") or "").lower()
         data = r.content or b""
@@ -1072,15 +1110,18 @@ class DVCClient:
                 pass
         return data
 
-    def solve_captcha(self):
-        png = self.get_captcha_png()
+    def solve_captcha(self, referer="/login"):
+        png = self.get_captcha_png(referer)
         return _ocr_png(png)
 
-    def _post_headers(self, json_body=False):
+    def _post_headers(self, json_body=False, referer="/login"):
         h = {
             "X-Requested-With": "XMLHttpRequest",
             "Origin": "https://dichvucong.gdt.gov.vn",
-            "Referer": DVC_BASE + "/login",
+            "Referer": DVC_BASE + referer,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
         }
         tok = self._xsrf()
         if tok:
@@ -1108,7 +1149,10 @@ class DVCClient:
         }
         r = self.session.get(DVC_BASE + "/ho-so/search", params=params,
                              headers={"X-Requested-With": "XMLHttpRequest",
-                                      "Referer": DVC_BASE + "/tchs"},
+                                      "Referer": DVC_BASE + "/tchs",
+                                      "Sec-Fetch-Dest": "empty",
+                                      "Sec-Fetch-Mode": "cors",
+                                      "Sec-Fetch-Site": "same-origin"},
                              timeout=60)
         return r
 
@@ -1241,6 +1285,8 @@ def dvc_test_login(cid: int, body: dict = Body(...)):
         import traceback
         raise HTTPException(500, f"Lỗi khi đăng nhập: {type(e).__name__}: {e} | "
                                  f"{traceback.format_exc()[-400:]}")
+    if isinstance(info, dict):
+        info["prime"] = client.prime_diag
     if ok and body.get("luu"):
         conn = db()
         conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
@@ -1294,7 +1340,11 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
     ma_list = []
     search_diag = []
     for lan in range(1, 7):
-        cap = client.solve_captcha()
+        try:
+            cap = client.solve_captcha("/tchs")
+        except Exception as e:
+            search_diag.append(f"(lỗi captcha: {type(e).__name__}: {e})")
+            continue
         if not cap:
             search_diag.append("(không đọc được captcha)")
             continue
