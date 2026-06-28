@@ -3130,6 +3130,145 @@ async def mua_hang_khong_qua_kho(cid: int, request: Request, export: int = 0):
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
 
 
+# ============ GHI TĂNG CCDC / TSCĐ (form MISA, từ DM CCDC/TSCĐ) ============
+GHITANG_CCDC_HEADERS = [
+    "Mã CCDC (*)", "Tên CCDC (*)", "Mã loại CCDC", "Lý do ghi tăng",
+    "Số chứng từ ghi tăng", "Ngày ghi tăng (*)", "TK chờ phân bổ",
+    "Đơn vị tính", "Số lượng", "Đơn giá", "Thành tiền",
+    "Tổng số kỳ PB (tháng)", "Số tiền phân bổ hàng kỳ", "Mã đơn vị sử dụng (*)",
+    "Số lượng đơn vị  sử dụng", "Đối tượng phân bổ", "Tỷ lệ phân bổ",
+    "TK chi phí", "Khoản mục chi phí"]
+
+GHITANG_TSCD_HEADERS = [
+    "Mã tài sản (*)", "Tên tài sản (*)", "Loại tài sản (*)", "Đơn vị sử dụng (*)",
+    "Số chứng từ ghi tăng", "Ngày ghi tăng (*)", "Ngày bắt đầu tính KH",
+    "TK nguyên giá (*)", "TK khấu hao (*)", "Nguyên giá", "Giá trị tính khấu hao",
+    "ĐVT thời gian SD", "Thời gian SD", "Tỷ lệ tính KH tháng (%)",
+    "Giá trị KH tháng", "Hao mòn lũy kế", "Đối tượng phân bổ", "Tỷ lệ phân bổ",
+    "TK chi phí", "Khoản mục chi phí", "Mã thống kê"]
+
+def _doc_nhap_lieu(cid, loai="in"):
+    conn = db()
+    try:
+        r = conn.execute("SELECT header_json, rows_json FROM nhap_lieu "
+                         "WHERE company_id=? AND loai=?", (cid, loai)).fetchone()
+    except Exception:
+        r = None
+    conn.close()
+    if not r:
+        return [], []
+    try:
+        return json.loads(r["header_json"]), json.loads(r["rows_json"])
+    except Exception:
+        return [], []
+
+def _so_ct_ghitang(prefix, ngay):
+    p = str(ngay or "").replace("-", "/").split("/")
+    if len(p) == 3:
+        thang = str(int(p[1])) if p[1].isdigit() else p[1]
+        return f"{prefix}1/{thang}/{p[2]}"
+    return prefix + "1"
+
+def _gen_ghi_tang_ccdc(cid, header, rows):
+    """Ghi tăng CCDC từ DM CCDC. Lý do ghi tăng = số HĐ; TK chờ phân bổ = 242;
+    các cột khác từ DM CCDC. Số tiền PB hàng kỳ = Thành tiền / Tổng số kỳ."""
+    cat, _ = _gen_danh_muc_ts(cid, "ccdc", header, rows)
+    out = []
+    for d in cat:
+        d = (list(d) + [""] * 12)[:12]
+        ma, ten, dvt, sl, dgia, tt, sohd, ngay, hsd, dtpb, ngay_ght, tkcp = d
+        tt_n = _to_num(tt) or 0
+        hsd_n = _to_num(hsd) or 0
+        m_pb = round(tt_n / hsd_n) if hsd_n else ""
+        ngct = ngay_ght or ngay
+        e = _so_ct_ghitang("CCDC", ngct)
+        out.append([ma, ten, "", sohd, e, ngct, 242, dvt, sl, dgia, tt,
+                    hsd, m_pb, dtpb, 1, dtpb, 100, tkcp, ""])
+    return out
+
+def _gen_ghi_tang_tscd(cid, header, rows):
+    """Ghi tăng TSCĐ từ DM TSCĐ. Loại TS=12; TK nguyên giá 2111; TK khấu hao
+    2141; Nguyên giá=Giá trị tính KH=thành tiền; ĐVT thời gian SD=0; Tỷ lệ KH
+    tháng=100; Thời gian SD=Hạn SD; Giá trị KH tháng=Giá trị KH/Thời gian SD."""
+    cat, _ = _gen_danh_muc_ts(cid, "tscd", header, rows)
+    out = []
+    for d in cat:
+        d = (list(d) + [""] * 12)[:12]
+        ma, ten, dvt, sl, dgia, tt, sohd, ngay, hsd, dtpb, ngay_ght, tkcp = d
+        tt_n = _to_num(tt) or 0
+        hsd_n = _to_num(hsd) or 0
+        kh_thang = round(tt_n / hsd_n) if hsd_n else ""
+        ngct = ngay_ght or ngay
+        e = _so_ct_ghitang("TSCD", ngct)
+        out.append([ma, ten, 12, dtpb, e, ngct, ngct, 2111, 2141, tt, tt,
+                    0, hsd, 100, kh_thang, "", dtpb, 100, tkcp, "", ""])
+    return out
+
+def _xuat_ghitang_excel(headers, rows, sheet, fname, cid, cot_tien, cot_text):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet
+    for c, h in enumerate(headers, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    for ri, row in enumerate(rows, 2):
+        for ci, v in enumerate(row, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in cot_text:
+                cell.number_format = "@"
+            elif ci in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return path
+
+
+@app.post("/api/ghi-tang-ccdc/{cid}")
+def ghi_tang_ccdc(cid: int):
+    header, rows = _doc_nhap_lieu(cid, "in")
+    out = _gen_ghi_tang_ccdc(cid, header, rows)
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"GhiTangCCDC_{mst}.xlsx"
+    # cột số: SL(9) Đơn giá(10) Thành tiền(11) Số kỳ PB(12) Tiền PB/kỳ(13)
+    path = _xuat_ghitang_excel(GHITANG_CCDC_HEADERS, out, "Ghi Tăng CCDC", fname,
+                               cid, {9, 10, 11, 12, 13}, {1, 4, 5, 7, 18})
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+
+
+@app.post("/api/ghi-tang-tscd/{cid}")
+def ghi_tang_tscd(cid: int):
+    header, rows = _doc_nhap_lieu(cid, "in")
+    out = _gen_ghi_tang_tscd(cid, header, rows)
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"GhiTangTSCD_{mst}.xlsx"
+    # cột số: Nguyên giá(10) Giá trị KH(11) Thời gian SD(13) Giá trị KH tháng(15)
+    path = _xuat_ghitang_excel(GHITANG_TSCD_HEADERS, out, "Ghi tăng tài sản cố định",
+                               fname, cid, {10, 11, 15}, {1, 5, 6, 8, 9, 19})
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.

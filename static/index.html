@@ -345,6 +345,18 @@
           <div style="font-size:18px;font-weight:700;color:#5a3e8a">Danh mục KH/NCC</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Xuất Excel MST + tên từ mua vào & bán ra</div>
         </div>
+        <div onclick="ghiTang('ccdc')" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b06a00;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#fdf5ec'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">📈</div>
+          <div style="font-size:18px;font-weight:700;color:#b06a00">Ghi Tăng CCDC</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Từ DM CCDC → form MISA ghi tăng</div>
+        </div>
+        <div onclick="ghiTang('tscd')" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b06a00;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#fdf5ec'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">📈</div>
+          <div style="font-size:18px;font-weight:700;color:#b06a00">Ghi Tăng TSCĐ</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Từ DM TSCĐ → form MISA ghi tăng</div>
+        </div>
       </div>
     </div>
     <div id="nhapLieuContent" style="display:none">
@@ -1248,6 +1260,18 @@ async function xuatDanhMucNCC(){
     const blob=await r.blob();
     dl(blob,`DanhMuc_KHNCC.xlsx`);
     toast('✓ Đã xuất Danh mục KH/NCC (cũng lưu ra Desktop)','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function ghiTang(loai){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const ten=loai==='ccdc'?'Ghi Tăng CCDC':'Ghi Tăng TSCĐ';
+  toast('Đang tạo '+ten+'...','');
+  try{
+    const r=await fetch(`/api/ghi-tang-${loai}/${current}`,{method:'POST'});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const sd=r.headers.get('X-So-Dong')||'';
+    dl(await r.blob(),`${loai==='ccdc'?'GhiTangCCDC':'GhiTangTSCD'}.xlsx`);
+    toast(sd&&sd!=='0'?`📈 Đã xuất ${ten} (${sd} dòng)`:`⚠ DM ${loai==='ccdc'?'CCDC':'TSCĐ'} chưa có dữ liệu — hãy tạo & lưu DM trước`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function moBangKe(loai){
