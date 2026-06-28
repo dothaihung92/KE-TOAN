@@ -1319,13 +1319,29 @@ var cb = arguments[arguments.length-1];
 try {
   var x = new XMLHttpRequest();
   x.open('GET','/tthc/getCaptcha?'+Date.now(),true);
-  x.responseType='arraybuffer';
+  x.responseType='blob';
   x.onload=function(){
-    if(x.status===200){
-      var b=new Uint8Array(x.response), s='';
-      for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
-      cb({ok:true, ct:(x.getResponseHeader('content-type')||''), b64:btoa(s)});
-    } else cb({ok:false, status:x.status});
+    if(x.status!==200){ cb({ok:false, status:x.status}); return; }
+    var ct = x.getResponseHeader('content-type')||'';
+    var url = URL.createObjectURL(x.response);
+    var img = new Image();
+    img.onload=function(){
+      try{
+        var w = img.naturalWidth||img.width||200;
+        var h = img.naturalHeight||img.height||60;
+        if(w<10) w=200; if(h<10) h=60;
+        var sc = 3;
+        var c = document.createElement('canvas');
+        c.width = w*sc; c.height = h*sc;
+        var g = c.getContext('2d');
+        g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height);
+        g.drawImage(img,0,0,c.width,c.height);
+        URL.revokeObjectURL(url);
+        cb({ok:true, ct:ct, w:w, h:h, png:c.toDataURL('image/png')});
+      }catch(e){ URL.revokeObjectURL(url); cb({ok:false, ct:ct, err:'canvas:'+e}); }
+    };
+    img.onerror=function(){ URL.revokeObjectURL(url); cb({ok:false, ct:ct, err:'imgload'}); };
+    img.src = url;
   };
   x.onerror=function(){ cb({ok:false, err:'neterr'}); };
   x.send();
@@ -1383,20 +1399,36 @@ def _dvc_wait_jquery(drv, giay=12):
     return False
 
 def _dvc_cap_from_js(res):
-    """Từ kết quả _JS_GETCAPTCHA → mã captcha (qua ddddocr)."""
+    """Từ kết quả _JS_GETCAPTCHA (PNG do trình duyệt vẽ từ canvas) → mã captcha."""
     if not res or not res.get("ok"):
         return ""
-    try:
-        raw = base64.b64decode(res.get("b64") or "")
-    except Exception:
-        return ""
-    ct = (res.get("ct") or "").lower()
-    is_svg = ("svg" in ct or raw[:200].lstrip().lower().startswith(b"<svg")
-              or b"<svg" in raw[:200].lower())
-    if is_svg:
-        png = _svg_to_png(raw.decode("utf-8", "replace"))
-        return _ocr_png(png or b"")
-    return _ocr_png(raw)
+    png_uri = res.get("png") or ""
+    if png_uri.startswith("data:"):
+        try:
+            raw = base64.b64decode(png_uri.split(",", 1)[1])
+        except Exception:
+            return ""
+        return _ocr_png(raw)
+    # phòng hờ phiên bản cũ trả b64 thô
+    b64 = res.get("b64") or ""
+    if b64:
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            return ""
+        ct = (res.get("ct") or "").lower()
+        if "svg" in ct or b"<svg" in raw[:200].lower():
+            raw = _svg_to_png(raw.decode("utf-8", "replace")) or b""
+        return _ocr_png(raw)
+    return ""
+
+def _dvc_cap_meta(res):
+    """Chuỗi chẩn đoán khi captcha rỗng."""
+    if not res:
+        return "res=None"
+    if not res.get("ok"):
+        return f"ok=False status={res.get('status')} err={res.get('err')} ct={res.get('ct')}"
+    return f"ok=True ct={res.get('ct')} w={res.get('w')} h={res.get('h')} ocr=rỗng"
 
 def _dvc_norm_data(d):
     if isinstance(d, str):
@@ -1418,11 +1450,12 @@ def _dvc_browser_login(drv, mst, password, so_lan=8):
     tried = []
     for lan in range(1, so_lan + 1):
         try:
-            cap = _dvc_cap_from_js(drv.execute_async_script(_JS_GETCAPTCHA))
+            capres = drv.execute_async_script(_JS_GETCAPTCHA)
+            cap = _dvc_cap_from_js(capres)
         except Exception as e:
             tried.append(f"(lỗi lấy captcha: {e})"); continue
         if not cap:
-            tried.append("(captcha rỗng)"); continue
+            tried.append(f"(captcha rỗng: {_dvc_cap_meta(capres)})"); continue
         try:
             res = drv.execute_async_script(_JS_LOGIN, ten, password, cap)
         except Exception as e:
