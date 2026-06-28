@@ -2721,6 +2721,183 @@ async def danh_muc_vthh(cid: int, request: Request, export: int = 0):
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
 
 
+# ============ MUA HÀNG NHẬP KHO (form MISA "Mua hàng NK") ============
+MUA_NK_HEADERS = [
+    "Hiển thị trên sổ", "Hình thức mua hàng", "Phương thức thanh toán",
+    "Nhận kèm hóa đơn", "Ngày hạch toán (*)", "Ngày chứng từ (*)",
+    "Số phiếu nhập (*)", "Số chứng từ thanh toán", "Mẫu số HĐ", "Ký hiệu HĐ",
+    "Số hóa đơn", "Ngày hóa đơn", "Mã nhà cung cấp", "Tên nhà cung cấp",
+    "Người giao hàng", "Diễn giải", "NV mua hàng", "Loại tiền", "Tỷ giá",
+    "Mã hàng (*)", "Tên hàng", "Kho", "Hàng hóa giữ hộ/bán hộ", "TK kho (*)",
+    "TK công nợ/TK tiền (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền",
+    "Thành tiền quy đổi", "Tỷ lệ CK", "Tiền chiết khấu", "Tiền chiết khấu quy đổi",
+    "Phí hàng về kho/Chi phí mua hàng", "% thuế GTGT", "Tiền thuế GTGT",
+    "Tiền thuế GTGT quy đổi", "TKĐƯ thuế GTGT", "TK thuế GTGT",
+    "Nhóm HHDV mua vào", "Phí trước hải quan", "Giá tính thuế NK", "% thuế NK",
+    "Tiền thuế NK", "TK thuế NK", "% thuế TTĐB", "Tiền thuế TTĐB", "TK thuế TTĐB"]
+
+def _nk_cols(header):
+    hlow = [str(h or "").strip().lower() for h in header]
+    def find(eqs, contains):
+        for i, h in enumerate(hlow):
+            if h in eqs:
+                return i
+        for i, h in enumerate(hlow):
+            if any(k in h for k in contains):
+                return i
+        return -1
+    return {
+        "kh": find(("ký hiệu",), ("ký hiệu",)),
+        "sohd": find(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn")),
+        "ngay": find(("ngày",), ("ngày",)),
+        "nb": find(("người bán",), ("người bán",)),
+        "mst": find(("mst bán", "mst"), ("mst",)),
+        "ten": find(("tên hàng hóa/dịch vụ",), ("tên hàng",)),
+        "dvt": find(("đvt",), ("đvt", "đơn vị tính")),
+        "sl": find(("số lượng",), ("số lượng",)),
+        "dgia": find(("đơn giá",), ("đơn giá",)),
+        "tt": find(("thành tiền",), ("thành tiền",)),
+        "ts": find(("thuế suất",), ("thuế suất",)),
+        "tthue": find(("tiền thuế gtgt",), ("tiền thuế",)),
+        "no": find(("nợ",), ()),
+        "co": find(("có",), ()),
+        "nk_tg": find(("trị giá tính thuế nk",), ("trị giá tính thuế nk",)),
+        "nk_ts": find(("thuế suất nk",), ("thuế suất nk",)),
+        "nk_thue": find(("tiền thuế nk",), ("tiền thuế nk",)),
+    }
+
+def _gen_mua_hang_nk(cid, header, rows):
+    """Lọc dòng Nợ 1561/156 (Hàng hóa, kho HH) và 152 (NVL, kho NVL) -> form
+    'Mua hàng NK'. Mã hàng lấy theo DM Hàng hóa/NVL (base theo Ký tự + thuế)."""
+    data = _doc_du_lieu_cty(cid)
+    maps = {"hh": dict(data.get("dm_hh", {}).get("map", {})),
+            "nvl": dict(data.get("dm_nvl", {}).get("map", {}))}
+    nexts = {"hh": int(data.get("dm_hh", {}).get("next", 1)),
+             "nvl": int(data.get("dm_nvl", {}).get("next", 1))}
+    prefixes = {"hh": "HH", "nvl": "NVL"}
+    kho_ten = {"hh": "HH", "nvl": "NVL"}
+    col = _nk_cols(header)
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    out = []
+    for r in rows:
+        no = str(gv(r, col["no"]) or "").strip()
+        if no in ("1561", "156"):
+            grp = "hh"
+        elif no == "152":
+            grp = "nvl"
+        else:
+            continue
+        ten = str(gv(r, col["ten"]) or "").strip()
+        dvt = str(gv(r, col["dvt"]) or "").strip()
+        if not ten:
+            continue
+        ky = "".join(ten.split()) + dvt
+        if ky in maps[grp]:
+            base = maps[grp][ky]
+        else:
+            base = prefixes[grp] + str(nexts[grp]).zfill(5)
+            maps[grp][ky] = base
+            nexts[grp] += 1
+        rate = _dm_rate(gv(r, col["ts"]))
+        ma = f"{base}-{rate}"
+        kyhieu = str(gv(r, col["kh"]) or "").strip()
+        la_nk = kyhieu.upper() == "TKNK"        # tờ khai nhập khẩu
+        sohd = str(gv(r, col["sohd"]) or "").strip()
+        mst = _dinh_dang_mst(gv(r, col["mst"])) if not la_nk else str(gv(r, col["mst"]) or "").strip()
+        ngay = str(gv(r, col["ngay"]) or "")
+        so_phieu = ("NK" + sohd + str(gv(r, col["mst"]) or "").strip())[:18]
+        nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
+        nk_ts = _dm_rate(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0  # "3%"->3
+        nk_thue = _to_num(gv(r, col["nk_thue"])) or 0
+        row = [""] * len(MUA_NK_HEADERS)
+        row[0] = 0                               # Hiển thị trên sổ
+        row[1] = 1 if la_nk else 0               # Hình thức mua hàng (1=NK)
+        row[2] = 0                               # Phương thức thanh toán
+        row[3] = 1                               # Nhận kèm hóa đơn
+        row[4] = ngay; row[5] = ngay             # Ngày HT / Ngày CT
+        row[6] = so_phieu                        # Số phiếu nhập
+        row[10] = sohd                           # Số hóa đơn
+        row[11] = ngay                           # Ngày hóa đơn
+        row[12] = mst                            # Mã NCC
+        row[13] = str(gv(r, col["nb"]) or "")    # Tên NCC
+        row[15] = ten                            # Diễn giải
+        row[19] = ma                             # Mã hàng
+        row[20] = ten                            # Tên hàng
+        row[21] = kho_ten[grp]                   # Kho
+        row[23] = no                             # TK kho
+        row[24] = str(gv(r, col["co"]) or "")    # TK công nợ/tiền
+        row[25] = dvt                            # ĐVT
+        row[26] = _to_num(gv(r, col["sl"]))      # Số lượng
+        row[27] = _to_num(gv(r, col["dgia"]))    # Đơn giá
+        row[28] = _to_num(gv(r, col["tt"]))      # Thành tiền
+        row[34] = rate                           # % thuế GTGT
+        row[35] = _to_num(gv(r, col["tthue"]))   # Tiền thuế GTGT
+        if la_nk:
+            row[37] = 1331                        # TKĐƯ thuế GTGT
+            row[38] = 33312                       # TK thuế GTGT (nhập khẩu)
+        else:
+            row[38] = 1331                        # TK thuế GTGT (trong nước)
+        row[39] = 1                              # Nhóm HHDV mua vào
+        row[41] = nk_tg                          # Giá tính thuế NK
+        row[42] = nk_ts                          # % thuế NK (số)
+        if nk_thue:
+            row[43] = round(nk_thue)             # Tiền thuế NK
+            row[44] = "3333"                     # TK thuế NK
+        out.append(row)
+    return out
+
+
+@app.post("/api/mua-hang-nk/{cid}")
+async def mua_hang_nhap_kho(cid: int, request: Request, export: int = 0):
+    """Mua hàng nhập kho từ lưới Nhập Liệu (Nợ 1561/156/152). export=1 -> file."""
+    body = await request.json()
+    out = _gen_mua_hang_nk(cid, body.get("header", []), body.get("rows", []))
+    if not export:
+        return {"headers": MUA_NK_HEADERS, "rows": out, "so_dong": len(out)}
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Mua hàng NK"
+    for c, h in enumerate(MUA_NK_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    cot_text = {7, 9, 10, 11, 13, 20, 22, 24, 25, 38, 39, 45}  # số phiếu, sốHĐ, MST, mã, kho, TK...
+    cot_tien = {27, 28, 29, 36, 42, 44}                        # SL, đơn giá, thành tiền, tiền thuế, NK
+    for ri, row in enumerate(out, 2):
+        for ci, v in enumerate(row, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in cot_text:
+                cell.number_format = "@"
+            elif ci in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, len(MUA_NK_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"MuaHangNhapKho_{mst}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.

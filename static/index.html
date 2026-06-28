@@ -1271,6 +1271,7 @@ function moBangKe(loai){
           <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
           <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
           ${loai==='in'?`<button class="btn sm" onclick="nlMuaHangDV(this)" style="background:#5a3e8a" title="Lọc các dòng Nợ là TK chi phí 6xx và kết xuất form MISA Chứng từ mua dịch vụ">📑 Mua Hàng Dịch Vụ</button>
+          <button class="btn sm" onclick="nlMuaHangNK(this)" style="background:#5a3e8a" title="Lọc Nợ 1561/156/152, lấy mã hàng từ DM, kết xuất form MISA Mua hàng nhập kho">📦 Mua Hàng Nhập Kho</button>
           <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
           <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
           <button class="btn sm" onclick="nlDanhMucVTHH()" style="background:#2e5c8a" title="Danh mục VTHH - chỉ mã hàng mới từ DM Hàng hóa + NVL">📦 DM VTHH</button>`:''}
@@ -1816,6 +1817,18 @@ async function nlMuaHangDV(btn){
     const sd=r.headers.get('X-So-Dong')||'';
     dl(await r.blob(),`MuaHangDichVu.xlsx`);
     toast(sd&&sd!=='0'?`📑 Đã kết xuất ${sd} dòng mua dịch vụ (Nợ 6xx)`:'⚠ Không có dòng nào Nợ là TK 6xx','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  if(btn){btn.disabled=false;btn.innerHTML=old;}
+}
+async function nlMuaHangNK(btn){
+  const old=btn?btn.innerHTML:'';
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang lọc...';}
+  try{
+    const r=await fetch(`/api/mua-hang-nk/${current}?export=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const sd=r.headers.get('X-So-Dong')||'';
+    dl(await r.blob(),`MuaHangNhapKho.xlsx`);
+    toast(sd&&sd!=='0'?`📦 Đã kết xuất ${sd} dòng mua hàng nhập kho (Nợ 1561/156/152)`:'⚠ Không có dòng nào Nợ là TK kho (1561/156/152)','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
 }
