@@ -4035,11 +4035,16 @@ def export_excel(cid: int):
             if loai == "purchase":
                 items = phan_bo_chiet_khau(items)
 
+            _TS_KHONG_THUE = ("", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG",
+                              "KHONG", "0%", "0")
+            # --- Pass 1: tính từng dòng (đánh dấu dòng thuế suất KHAC cần phân bổ) ---
+            dong_list = []
             for it in items:
                 ds = _to_num(it.get("thtien")) or 0
                 ts_raw = str(it.get("tsuat", "") or "").strip()
                 thue_goc_raw = it.get("tien_thue")
                 ts_upper = ts_raw.upper().replace(" ", "")
+                phan_bo = False
                 # Thuế suất hiển thị: ô trống / KCT / KKKNT -> "0%"
                 if ts_upper in ("", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG", "KHONG"):
                     ts_hien = "0%"
@@ -4055,7 +4060,11 @@ def export_excel(cid: int):
                     if rate is not None and rate > 0:
                         tien_thue = round(ds * rate) if isinstance(ds, (int, float)) else 0
                     else:
+                        # Thuế suất KHAC/lẻ không tính được -> sẽ PHÂN BỔ theo tổng
+                        # tiền thuế của hóa đơn (giữ nguyên hiển thị, vd "KHAC")
                         tien_thue = 0
+                        if ts_upper not in _TS_KHONG_THUE:
+                            phan_bo = True
                 ten = it.get("ten_hang", "")
                 if it.get("_la_nq204"):
                     ten += " (Giảm NQ204 - ghi âm)"
@@ -4075,18 +4084,43 @@ def export_excel(cid: int):
                 else:
                     nguoi = it.get("ten_nmua", "") or raw.get("nmten", "") or ""
                     mst = it.get("mst_nmua", "") or r["nmmst"]
+                dong_list.append({
+                    "ds": ds, "ts_hien": ts_hien, "tien_thue": tien_thue,
+                    "phan_bo": phan_bo, "ten": ten, "dgia": dgia_out,
+                    "sl": sl_num, "nguoi": nguoi, "mst": mst, "it": it})
+
+            # --- Phân bổ tiền thuế cho dòng thuế suất KHAC để TỔNG khớp hóa đơn ---
+            idx_pb = [i for i, d in enumerate(dong_list) if d["phan_bo"]]
+            if idx_pb:
+                tong_thue_hd = round(_to_num(r["tgtthue"]) or 0)
+                da_gan = sum(d["tien_thue"] for d in dong_list if not d["phan_bo"])
+                con_lai = tong_thue_hd - da_gan
+                tong_ds = sum((dong_list[i]["ds"] or 0) for i in idx_pb)
+                if con_lai > 0 and tong_ds:
+                    allocated = 0
+                    for k, i in enumerate(idx_pb):
+                        if k == len(idx_pb) - 1:
+                            dong_list[i]["tien_thue"] = con_lai - allocated
+                        else:
+                            t = round(dong_list[i]["ds"] / tong_ds * con_lai)
+                            dong_list[i]["tien_thue"] = t
+                            allocated += t
+
+            # --- Pass 2: ghi ra sheet ---
+            for d in dong_list:
+                it = d["it"]
                 append_row([
                     r["khhdon"], r["shdon"],
-                    ngay_fmt, nguoi, mst,
+                    ngay_fmt, d["nguoi"], d["mst"],
                     it.get("stt", ""), it.get("ma_vt", ""),
-                    ten, it.get("dvt", ""),
-                    sl_num, dgia_out,
-                    ds, ts_hien, tien_thue,
+                    d["ten"], it.get("dvt", ""),
+                    d["sl"], d["dgia"],
+                    d["ds"], d["ts_hien"], d["tien_thue"],
                     tt, kq,
                 ], no_r, co_r)
                 cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
-                cur["ds"] += ds if isinstance(ds, (int, float)) else 0
-                cur["thue"] += tien_thue if isinstance(tien_thue, (int, float)) else 0
+                cur["ds"] += d["ds"] if isinstance(d["ds"], (int, float)) else 0
+                cur["thue"] += d["tien_thue"] if isinstance(d["tien_thue"], (int, float)) else 0
 
         # ===== TỜ KHAI NHẬP KHẨU (chỉ cho MUA VÀO) =====
         if loai == "purchase":
