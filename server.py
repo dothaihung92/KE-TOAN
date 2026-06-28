@@ -2444,29 +2444,51 @@ def _dm_cols(header):
         "sl": find(("số lượng",), ("số lượng",)),
         "dgia": find(("đơn giá",), ("đơn giá",)),
         "tt": find(("thành tiền",), ("thành tiền",)),
+        "ts": find(("thuế suất",), ("thuế suất",)),
         "sohd": find(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn")),
         "ngay": find(("ngày",), ("ngày",)),
         "no": find(("nợ",), ()),
     }
 
+def _dm_rate(v):
+    """Thuế suất -> số: '8%'->8, '5%'->5, '0%'/KCT/trống -> 0."""
+    s = str(v or "").strip().upper().replace("%", "").replace(",", ".")
+    if s in ("", "KCT", "KKKNT", "KHTKKNT", "KHÔNG", "KHONG", "KO"):
+        return 0
+    try:
+        f = float(s)
+        return int(f) if f == int(f) else f
+    except Exception:
+        return 0
+
+# Cột Danh mục Hàng hóa/NVL: bỏ cột phụ (J), thêm Thuế suất + Kho
+DM_HH_HEADERS = ["Mã Hàng", "Mặt hàng", "ĐVT", "Thuế suất", "Ký tự ", "SL",
+                 "Đơn giá", "Thành tiền", "Hoá đơn", "Ngày Hoá Đơn", "Kho"]
+# vị trí cột trong DM_HH_HEADERS
+DM_I_MA, DM_I_TEN, DM_I_DVT, DM_I_TS, DM_I_KY = 0, 1, 2, 3, 4
+DM_I_SL, DM_I_DG, DM_I_TT, DM_I_HD, DM_I_NGAY, DM_I_KHO = 5, 6, 7, 8, 9, 10
+
 def _gen_danh_muc(cid, loai, header, rows):
-    """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL (loai='nvl',
-    Nợ 152). Mã hàng nối tiếp + tái sử dụng theo 'Ký tự' (nospaces(Tên)+ĐVT).
-    Trả về (all_rows, so_dong_moi, store_moi)."""
+    """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL ('nvl', Nợ 152).
+    Mã = base (theo Ký tự=nospaces(Tên)+ĐVT) + '-' + thuế suất (vd HH00001-8).
+    Cột Kho mặc định HH/NVL. Nối tiếp + không lặp dòng. Trả (all_rows, so_moi)."""
     prefix = "HH" if loai == "hh" else "NVL"
     accs = {"1561", "156"} if loai == "hh" else {"152"}
+    kho = "HH" if loai == "hh" else "NVL"
     data = _doc_du_lieu_cty(cid)
     store = data.get("dm_" + loai, {}) or {}
-    keymap = dict(store.get("map", {}))
-    items = dict(store.get("items", {}))
+    keymap = dict(store.get("map", {}))           # Ký tự -> base (HH00001)
     next_n = int(store.get("next", 1))
-    seen = set(store.get("seen", []))
     saved_rows = [list(r) for r in store.get("rows", [])]
     col = _dm_cols(header)
 
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
 
+    def rk(row):
+        return f"{gv(row,DM_I_MA)}|{gv(row,DM_I_HD)}|{gv(row,DM_I_NGAY)}|{gv(row,DM_I_TT)}"
+
+    seen = set(rk(r) for r in saved_rows if len(r) >= 10)
     new_rows = []
     for r in rows:
         no = str(gv(r, col["no"]) or "").strip()
@@ -2476,33 +2498,51 @@ def _gen_danh_muc(cid, loai, header, rows):
         dvt = str(gv(r, col["dvt"]) or "").strip()
         if not ten:
             continue
-        ky_tu = "".join(ten.split()) + dvt        # cột D = nospaces(Tên)+ĐVT
+        ky_tu = "".join(ten.split()) + dvt
         if ky_tu in keymap:
-            ma = keymap[ky_tu]
+            base = keymap[ky_tu]
         else:
-            ma = prefix + str(next_n).zfill(5)
-            keymap[ky_tu] = ma
-            items[ma] = {"ten": ten, "dvt": dvt}
+            base = prefix + str(next_n).zfill(5)
+            keymap[ky_tu] = base
             next_n += 1
-        j = ky_tu + dvt
+        rate = _dm_rate(gv(r, col["ts"]))
+        ma = f"{base}-{rate}"
         sl = _to_num(gv(r, col["sl"]))
         dgia = _to_num(gv(r, col["dgia"]))
         tt = _to_num(gv(r, col["tt"]))
         sohd = str(gv(r, col["sohd"]) or "")
         ngay = str(gv(r, col["ngay"]) or "")
-        rowkey = f"{ma}|{sohd}|{ngay}|{tt}"
-        if rowkey in seen:
-            continue                               # đã có -> không lặp lại
-        seen.add(rowkey)
-        new_rows.append([ma, ten, dvt, ky_tu, sl, dgia, tt, sohd, ngay, j])
+        newrow = [ma, ten, dvt, rate, ky_tu, sl, dgia, tt, sohd, ngay, kho]
+        if rk(newrow) in seen:
+            continue
+        seen.add(rk(newrow))
+        new_rows.append(newrow)
 
     all_rows = saved_rows + new_rows
-    store_moi = {"map": keymap, "items": items, "next": next_n,
-                 "seen": sorted(seen), "rows": all_rows}
-    return all_rows, len(new_rows), store_moi
+    return all_rows, len(new_rows)
 
-DM_HH_HEADERS = ["Mã Hàng", "Mặt hàng", "ĐVT", "Ký tự ", "SL", "Đơn giá",
-                 "Thành tiền", "Hoá đơn", "Ngày Hoá Đơn"]
+
+def _luu_danh_muc(cid, loai, dm_rows):
+    """Lưu danh mục đã chỉnh (lưới DM): ghi rows + dựng lại map(Ký tự->base)
+    và bộ đếm next để các kỳ sau cấp mã nối tiếp."""
+    prefix = "HH" if loai == "hh" else "NVL"
+    rows = [list(r) for r in dm_rows
+            if any(str(x).strip() for x in r)]
+    keymap = {}
+    maxn = 0
+    for r in rows:
+        ma = str(r[DM_I_MA]) if len(r) > DM_I_MA else ""
+        ky = str(r[DM_I_KY]) if len(r) > DM_I_KY else ""
+        base = ma.split("-")[0] if ma else ""
+        if ky and base:
+            keymap[ky] = base
+        if base.startswith(prefix) and base[len(prefix):].isdigit():
+            maxn = max(maxn, int(base[len(prefix):]))
+    data = _doc_du_lieu_cty(cid)
+    data["dm_" + loai] = {"map": keymap, "next": maxn + 1, "rows": rows}
+    _ghi_du_lieu_cty(cid, data)
+    return len(rows)
+
 
 def _xuat_dm_excel(rows, ten_sheet, fname, cid):
     import openpyxl
@@ -2515,8 +2555,8 @@ def _xuat_dm_excel(rows, ten_sheet, fname, cid):
         ws.cell(1, c).value = h
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
         ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
-    cot_tien = {5, 6, 7}      # SL, Đơn giá, Thành tiền
-    cot_text = {1, 4, 8, 10}  # Mã, Ký tự, Hoá đơn, J
+    cot_tien = {DM_I_SL + 1, DM_I_DG + 1, DM_I_TT + 1}     # SL, Đơn giá, Thành tiền
+    cot_text = {DM_I_MA + 1, DM_I_KY + 1, DM_I_HD + 1, DM_I_KHO + 1}
     for r, row in enumerate(rows, 2):
         for c, v in enumerate(row, 1):
             cell = ws.cell(r, c)
@@ -2525,8 +2565,8 @@ def _xuat_dm_excel(rows, ten_sheet, fname, cid):
                 cell.number_format = "@"
             elif c in cot_tien:
                 cell.number_format = "#,##0"
-    for c in range(1, 11):
-        ws.column_dimensions[get_column_letter(c)].width = 18
+    for c in range(1, len(DM_HH_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
     ws.freeze_panes = "A2"
     path = os.path.join(DOWNLOAD_DIR, fname)
     wb.save(path)
@@ -2542,28 +2582,29 @@ def _xuat_dm_excel(rows, ten_sheet, fname, cid):
 
 
 @app.post("/api/danh-muc-hang/{cid}")
-async def danh_muc_hang(cid: int, request: Request, loai: str = "hh", save: int = 0):
-    """Sinh Danh mục Hàng hóa/NVL từ lưới Nhập Liệu. save=1 -> lưu lại."""
+async def danh_muc_hang(cid: int, request: Request, loai: str = "hh"):
+    """Sinh Danh mục Hàng hóa/NVL từ lưới Nhập Liệu (để mở lưới chỉnh sửa)."""
     body = await request.json()
-    rows_in = _gen_danh_muc(cid, loai, body.get("header", []), body.get("rows", []))
-    all_rows, so_moi, store_moi = rows_in
-    if save:
-        data = _doc_du_lieu_cty(cid)
-        data["dm_" + loai] = store_moi
-        _ghi_du_lieu_cty(cid, data)
+    all_rows, so_moi = _gen_danh_muc(cid, loai, body.get("header", []),
+                                     body.get("rows", []))
     return {"headers": DM_HH_HEADERS, "rows": all_rows,
             "so_dong": len(all_rows), "so_moi": so_moi}
 
 
+@app.post("/api/danh-muc-hang/save/{cid}")
+async def danh_muc_hang_save(cid: int, request: Request, loai: str = "hh"):
+    """Lưu danh mục (lưới DM đã chỉnh sửa)."""
+    body = await request.json()
+    n = _luu_danh_muc(cid, loai, body.get("rows", []))
+    return {"ok": True, "so_dong": n}
+
+
 @app.post("/api/danh-muc-hang-export/{cid}")
 async def danh_muc_hang_export(cid: int, request: Request, loai: str = "hh"):
-    """Kết xuất Excel Danh mục Hàng hóa/NVL (đồng thời LƯU lại)."""
+    """Kết xuất Excel Danh mục Hàng hóa/NVL từ lưới DM (đồng thời LƯU lại)."""
     body = await request.json()
-    all_rows, so_moi, store_moi = _gen_danh_muc(
-        cid, loai, body.get("header", []), body.get("rows", []))
-    data = _doc_du_lieu_cty(cid)
-    data["dm_" + loai] = store_moi
-    _ghi_du_lieu_cty(cid, data)
+    dm_rows = body.get("rows", [])
+    _luu_danh_muc(cid, loai, dm_rows)
     conn = db()
     comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
@@ -2571,8 +2612,9 @@ async def danh_muc_hang_export(cid: int, request: Request, loai: str = "hh"):
     ten = "DMHH" if loai == "hh" else "DMNVL"
     fname = f"DanhMuc_{ten}_{mst}.xlsx"
     sheet = "DMHH" if loai == "hh" else "DMNVL"
-    path = _xuat_dm_excel(all_rows, sheet, fname, cid)
-    return FileResponse(path, filename=fname, headers={"X-So-Moi": str(so_moi)})
+    rows_clean = [list(r) for r in dm_rows if any(str(x).strip() for x in r)]
+    path = _xuat_dm_excel(rows_clean, sheet, fname, cid)
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(rows_clean))})
 
 
 VTHH_HEADERS = [
@@ -2616,11 +2658,13 @@ def _gen_vthh_from_grid(cid, header, rows):
             continue
         ky = "".join(ten.split()) + dvt
         if ky in maps[grp]:
-            ma = maps[grp][ky]
+            base = maps[grp][ky]
         else:
-            ma = prefixes[grp] + str(nexts[grp]).zfill(5)
-            maps[grp][ky] = ma
+            base = prefixes[grp] + str(nexts[grp]).zfill(5)
+            maps[grp][ky] = base
             nexts[grp] += 1
+        rate = _dm_rate(gv(r, col["ts"]))
+        ma = f"{base}-{rate}"            # mã đầy đủ kèm thuế suất (vd HH00001-8)
         if ma in seen_ma:
             continue                       # lọc trùng theo mã
         seen_ma.add(ma)

@@ -293,8 +293,8 @@
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
       <h3 id="dmTitle" style="margin:0;color:#1f6b4a"></h3>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn gold sm" id="dmLuuBtn" onclick="dmLuu()">💾 Lưu</button>
-        <button class="btn sm" id="dmXuatBtn" onclick="dmXuat()" style="background:#2e5c8a">📤 Xuất Excel</button>
+        <button class="btn gold sm" id="dmLuuBtn" style="display:none">💾 Lưu</button>
+        <button class="btn sm" id="dmXuatBtn" onclick="dmXuatVTHH()" style="background:#2e5c8a">📤 Xuất Excel</button>
         <button class="btn ghost sm" onclick="dmDong()">✕ Đóng</button>
       </div>
     </div>
@@ -1157,6 +1157,7 @@ let nlChon=null, nlDangKeo=false;
 let nlMapNoHoc={};        // {mst: tk_no} đã học từ server
 let nlCanhBaoNo={};       // {rowIdx: tk_ky_vong} các dòng hạch toán Nợ lệch
 let nlIdxCotNo=-1, nlChiHienCanhBao=false;
+let nlDMMode=null;        // null=bảng kê; 'hh'/'nvl'=đang ở lưới Danh mục
 let nlFormulas={};    // lưu công thức: key "r_c" -> "=K5/J5"
 let nlUndoStack=[];   // stack undo: [{header, rows, formulas}]
 function nlLuuUndo(){
@@ -1249,6 +1250,7 @@ async function xuatDanhMucNCC(){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function moBangKe(loai){
+  nlDMMode=null;
   nhapLieuLoaiHienTai=loai;
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
@@ -1762,6 +1764,7 @@ function nlLocTrong(ci){
   veGridNhapLieu();
 }
 async function nlLuu(){
+  if(nlDMMode)return dmLuuGrid();
   try{
     const r=await fetch(`/api/nhap-lieu/save/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Lưu thất bại');
@@ -1779,6 +1782,7 @@ async function nlLuu(){
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
 }
 async function nlXuatExcel(){
+  if(nlDMMode)return dmXuatGrid();
   try{
     const r=await fetch(`/api/nhap-lieu/export/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
@@ -1813,36 +1817,68 @@ function dmVeBang(headers,rows){
   h+='</tbody></table>';
   document.getElementById('dmTableWrap').innerHTML=h;
 }
+// Mở Danh mục Hàng hóa/NVL trong LƯỚI chỉnh sửa (dùng chung engine với bảng kê)
 async function nlDanhMuc(loai){
   dmLoaiHienTai=loai;
-  document.getElementById('dmTitle').textContent=loai==='hh'?'🏷 Danh Mục Hàng Hóa':'🧱 Danh Mục NVL';
-  document.getElementById('dmLuuBtn').style.display='';
-  document.getElementById('dmXuatBtn').onclick=dmXuat;
-  document.getElementById('dmInfo').textContent='Đang lọc dữ liệu...';
-  document.getElementById('dmTableWrap').innerHTML='';
-  document.getElementById('dmModal').style.display='block';
+  toast('Đang lọc dữ liệu danh mục...','');
   try{
     const r=await fetch(`/api/danh-muc-hang/${current}?loai=${loai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Lỗi tạo danh mục');
     const d=await r.json();
-    dmVeBang(d.headers,d.rows);
-    document.getElementById('dmInfo').innerHTML=`Tổng <b>${d.so_dong}</b> mặt hàng — trong đó <b style="color:#1f6b4a">${d.so_moi} mới</b> (lọc theo Nợ ${loai==='hh'?'1561/156':'152'}). Bấm <b>Lưu</b> để ghi nhớ mã hàng, hoặc <b>Xuất Excel</b>.`;
-  }catch(e){document.getElementById('dmInfo').textContent='Lỗi: '+e.message;}
+    moDanhMucGrid(loai,d.headers,d.rows,d.so_moi);
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
-async function dmLuu(){
+function moDanhMucGrid(loai,headers,rows,soMoi){
+  nlDMMode=loai;                       // đang ở chế độ danh mục
+  const ten=loai==='hh'?'🏷 Danh Mục Hàng Hóa':'🧱 Danh Mục NVL';
+  document.getElementById('nhapLieuHome').style.display='none';
+  document.getElementById('nhapLieuContent').style.display='block';
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <h3 style="margin:0;color:#1f6b4a">${ten}</h3>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn ghost sm" onclick="nlThemDong()">➕ Dòng</button>
+          <button class="btn ghost sm" onclick="nlThemCot()">➕ Cột</button>
+          <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Filter</button>
+          <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
+          <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
+          <button class="btn ghost sm" onclick="nlCoDinhCot()" id="nlFreezeBtn">📌 Cố định cột</button>
+          <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
+          <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
+          <button class="btn ghost sm" onclick="quayLaiBangKeIn()">← Về bảng kê</button>
+        </div>
+      </div>
+      <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
+      <div id="nlCanhBao" style="margin-bottom:6px"></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Sửa trực tiếp như bảng kê. <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo. Bấm <b>Lưu</b> để ghi nhớ mã hàng (kỳ sau nối tiếp).</div>
+      <div id="nlTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
+      <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
+    </div>`;
+  nlHeader=headers.slice();
+  nlRows=rows.map(r=>r.slice());
+  nlFreezeCol=0;nlChon=null;nlFilters={};nlFormulas={};nlUndoStack=[];
+  nlChiHienCanhBao=false;nlCanhBaoNo={};nlIdxCotNo=-1;
+  veGridNhapLieu();
+  document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng${soMoi!=null?` — <b style="color:#1f6b4a">${soMoi} mới</b>`:''} (Nợ ${loai==='hh'?'1561/156':'152'}). Cột Kho mặc định <b>${loai==='hh'?'HH':'NVL'}</b>.`;
+}
+function quayLaiBangKeIn(){
+  nlDMMode=null;
+  moBangKe('in');
+}
+async function dmLuuGrid(){
   try{
-    const r=await fetch(`/api/danh-muc-hang/${current}?loai=${dmLoaiHienTai}&save=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    const r=await fetch(`/api/danh-muc-hang/save/${current}?loai=${nlDMMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Lưu thất bại');
     const d=await r.json();
-    toast(`💾 Đã lưu danh mục (${d.so_dong} mặt hàng, ${d.so_moi} mới)`,'ok');
-    document.getElementById('dmInfo').innerHTML=`Đã lưu. Tổng <b>${d.so_dong}</b> mặt hàng.`;
+    toast(`💾 Đã lưu danh mục (${d.so_dong} mặt hàng)`,'ok');
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
 }
-async function dmXuat(){
+async function dmXuatGrid(){
   try{
-    const r=await fetch(`/api/danh-muc-hang-export/${current}?loai=${dmLoaiHienTai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
+    const r=await fetch(`/api/danh-muc-hang-export/${current}?loai=${nlDMMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
-    dl(await r.blob(),`DanhMuc_${dmLoaiHienTai==='hh'?'DMHH':'DMNVL'}.xlsx`);
+    dl(await r.blob(),`DanhMuc_${nlDMMode==='hh'?'DMHH':'DMNVL'}.xlsx`);
     toast('📤 Đã xuất & lưu danh mục','ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
