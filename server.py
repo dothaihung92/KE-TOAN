@@ -1215,6 +1215,24 @@ def _dvc_parse_ma_ho_so(html):
     return found
 
 
+def _dvc_parse_id_tbao(html):
+    """Bóc idTbao của các thông báo (Tiếp nhận / Xác nhận) trong trang chi tiết hồ sơ.
+    Trả về list (idTbao, loaiTBao_đoán)."""
+    import re as _re
+    ids, seen = [], set()
+    pats = [
+        r'idTbao["\'\s:=]+["\']?(\d{12,22})',
+        r'(?:downloadThongBao|taiThongBao|downloadTB|taiTB|xemThongBao)\(\s*["\']?(\d{12,22})',
+        r'data-id-?tbao=["\'](\d{12,22})',
+        r'data-id=["\'](\d{14,22})',
+    ]
+    for p in pats:
+        for m in _re.findall(p, html, _re.IGNORECASE):
+            if m and m not in seen:
+                seen.add(m); ids.append(m)
+    return ids
+
+
 def _dvc_save_folder(cid):
     """Thư mục lưu tờ khai đã nộp: <save_dir|data_dir>/ToKhai_DaNop/."""
     conn = db()
@@ -1402,6 +1420,20 @@ try {
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
+# Tải 1 thông báo (Tiếp nhận / Xác nhận). body là chuỗi JSON dựng sẵn từ Python
+# để giữ nguyên idTbao (số rất lớn, tránh mất chính xác khi qua JS number).
+_JS_DOWNLOAD_TB = r"""
+var cb = arguments[arguments.length-1];
+var body = arguments[0];
+try {
+  $.ajax({ type:'POST', url:'/tthc/tchs/downloadthongbao',
+    contentType:'application/json', data: body,
+    success:function(d){ cb({ok:true, data:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
+  });
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
 def _dvc_wait_jquery(drv, giay=12):
     import time as _t
     for _ in range(int(giay*2)):
@@ -1532,6 +1564,46 @@ def _dvc_browser_download(drv, ma):
     fname = d.get("fileName") or f"{ma}.zip"
     raw = base64.b64decode(content) if content else b""
     return fname, raw
+
+def _dvc_browser_thongbao(drv, ma):
+    """Vào trang chi tiết hồ sơ, đọc idTbao rồi tải các thông báo (Tiếp nhận/Xác nhận).
+    Trả về (list[(fname, raw)], diag)."""
+    import time as _t
+    out, diag = [], []
+    try:
+        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=")
+        _t.sleep(1.2)
+        _dvc_wait_jquery(drv, 10)
+        html = drv.page_source or ""
+    except Exception as e:
+        return out, [f"lỗi mở chi tiết {ma}: {e}"]
+    ids = _dvc_parse_id_tbao(html)
+    if not ids:
+        # dò manh mối để tinh chỉnh sau
+        import re as _re
+        m = _re.search(r'.{0,40}(?:hongBao|hong báo|Tbao).{0,40}', html)
+        diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
+        return out, diag
+    for idt in ids:
+        body = json.dumps({"idTbao": idt, "loaiTBao": ""})
+        try:
+            res = drv.execute_async_script(_JS_DOWNLOAD_TB, body)
+        except Exception as e:
+            diag.append(f"{idt}: lỗi gọi: {e}"); continue
+        if not res or not res.get("ok"):
+            diag.append(f"{idt}: {str(res)[:80]}"); continue
+        d = _dvc_norm_data(res.get("data"))
+        if not isinstance(d, dict):
+            diag.append(f"{idt}: phản hồi lạ"); continue
+        content = d.get("content") or ""
+        raw = base64.b64decode(content) if content else b""
+        if not raw:
+            diag.append(f"{idt}: rỗng"); continue
+        fname = d.get("fileName") or f"TB_{ma}_{idt}.zip"
+        out.append((fname, raw))
+        _t.sleep(0.3)
+    diag.append(f"{ma}: {len(out)}/{len(ids)} thông báo")
+    return out, diag
 
 
 @app.post("/api/dvc/test-login/{cid}")
@@ -1774,18 +1846,52 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
             raise HTTPException(422, "Đăng nhập OK nhưng không tra cứu được danh sách hồ sơ. "
                                      f"Chi tiết: {json.dumps(search_diag, ensure_ascii=False)}")
 
-        # 3) Tải từng hồ sơ
+        # 3) Tải từng hồ sơ: vào trang chi tiết → tải tờ khai + các thông báo
+        tai_tb = body.get("tai_thong_bao", True)
+        tb_diag = []
+        def _luu(fname, raw, pre=""):
+            safe = "".join(ch for ch in (pre + fname) if ch not in '\\/:*?"<>|')
+            if not safe:
+                safe = "file.zip"
+            path = os.path.join(folder, safe)
+            # tránh ghi đè trùng tên
+            if os.path.exists(path):
+                base, ext = os.path.splitext(safe)
+                k = 2
+                while os.path.exists(os.path.join(folder, f"{base}_{k}{ext}")):
+                    k += 1
+                safe = f"{base}_{k}{ext}"; path = os.path.join(folder, safe)
+            with open(path, "wb") as f:
+                f.write(raw)
+            return safe
+
         for ma in ma_list:
+            # 3a) Mở trang chi tiết hồ sơ (để có ngữ cảnh + đọc idTbao thông báo)
+            tb_files = []
+            if tai_tb:
+                try:
+                    tb_files, d = _dvc_browser_thongbao(drv, ma)
+                    tb_diag += d
+                except Exception as e:
+                    tb_diag.append(f"{ma}: lỗi thông báo: {e}")
+            # 3b) Tải tờ khai (zip hồ sơ)
             try:
                 fname, raw = _dvc_browser_download(drv, ma)
                 if not raw:
-                    loi_tai.append(f"{ma}: nội dung rỗng"); continue
-                safe = "".join(ch for ch in fname if ch not in '\\/:*?"<>|') or f"{ma}.zip"
-                with open(os.path.join(folder, safe), "wb") as f:
-                    f.write(raw)
-                da_tai.append({"maHoSo": ma, "file": safe, "kich_thuoc": len(raw)})
+                    loi_tai.append(f"{ma}: nội dung rỗng")
+                else:
+                    safe = _luu(fname, raw)
+                    da_tai.append({"maHoSo": ma, "file": safe, "kich_thuoc": len(raw)})
             except Exception as e:
                 loi_tai.append(f"{ma}: {e}")
+            # 3c) Lưu các thông báo của hồ sơ này
+            for tb_fname, tb_raw in tb_files:
+                try:
+                    safe = _luu(tb_fname, tb_raw)
+                    da_tai.append({"maHoSo": ma, "file": safe,
+                                   "kich_thuoc": len(tb_raw), "loai": "thông báo"})
+                except Exception as e:
+                    loi_tai.append(f"{ma} (TB): {e}")
             time.sleep(0.4)
     except HTTPException:
         raise
@@ -1804,6 +1910,7 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
         "loi_tai": loi_tai,
         "chan_doan_dang_nhap": info,
         "chan_doan_tra_cuu": search_diag,
+        "chan_doan_thong_bao": tb_diag,
     }
 
 
