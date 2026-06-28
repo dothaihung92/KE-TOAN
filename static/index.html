@@ -1283,28 +1283,31 @@ function moBangKe(loai){
   const mau=loai==='out'?'#1f6b4a':'#8a6d1f';
   document.getElementById('nhapLieuBody').innerHTML=`
     <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        <h3 style="margin:0;color:${mau}">${tieude}</h3>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn ghost sm" onclick="nlThemDong()">➕ Dòng</button>
-          <button class="btn ghost sm" onclick="nlThemCot()">➕ Cột</button>
-          <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Filter</button>
-          <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
-          <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
-          <button class="btn ghost sm" onclick="nlCoDinhCot()" id="nlFreezeBtn">📌 Cố định cột</button>
-          <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
-          <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
-          ${loai==='in'?`<button class="btn sm" onclick="nlMuaHangDV(this)" style="background:#5a3e8a" title="Lọc các dòng Nợ là TK chi phí 6xx và kết xuất form MISA Chứng từ mua dịch vụ">📑 Mua Hàng Dịch Vụ</button>
-          <button class="btn sm" onclick="nlMuaHangNK(this)" style="background:#5a3e8a" title="Lọc Nợ 1561/156/152, lấy mã hàng từ DM, kết xuất form MISA Mua hàng nhập kho">📦 Mua Hàng Nhập Kho</button>
-          <button class="btn sm" onclick="nlMuaHangKQK(this)" style="background:#5a3e8a" title="Lọc Nợ 2111/211/2421/242 (TSCĐ/CCDC), kết xuất form MISA Mua hàng không qua kho">🏗 Mua Hàng Không Qua Kho</button>
-          <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
-          <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
-          <button class="btn sm" onclick="nlDanhMuc('tscd')" style="background:#1f6b4a" title="Danh mục TSCĐ (Nợ 2111/211)">🏢 DM TSCĐ</button>
-          <button class="btn sm" onclick="nlDanhMuc('ccdc')" style="background:#1f6b4a" title="Danh mục CCDC (Nợ 2421/242)">🧰 DM CCDC</button>
-          <button class="btn sm" onclick="nlDanhMucVTHH()" style="background:#2e5c8a" title="Danh mục VTHH từ DM Hàng hóa/NVL/TSCĐ/CCDC">📦 DM VTHH</button>`:''}
-          <button class="btn ghost sm" onclick="xoaNhapLieu()" style="color:#c00">🗑 Xóa bộ</button>
-        </div>
+      <h3 style="margin:0 0 10px;color:${mau}">${tieude}</h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🛠 Công cụ:</span>
+        <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Lọc</button>
+        <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
+        <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
+        <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
+        <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
+        <button class="btn ghost sm" onclick="xoaNhapLieu()" style="color:#c00">🗑 Xóa bộ</button>
       </div>
+      ${loai==='in'?`
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🧾 Chứng từ:</span>
+        <button class="btn sm" onclick="nlMuaHangNK(this)" style="background:#5a3e8a" title="Lọc Nợ 1561/156/152, lấy mã hàng từ DM, kết xuất form MISA Mua hàng nhập kho">📦 Mua Hàng Nhập Kho</button>
+        <button class="btn sm" onclick="nlMuaHangKQK(this)" style="background:#5a3e8a" title="Lọc Nợ 2111/211/2421/242 (TSCĐ/CCDC), kết xuất form MISA Mua hàng không qua kho">🏗 Mua Hàng Không Qua Kho</button>
+        <button class="btn sm" onclick="nlMuaHangDV(this)" style="background:#5a3e8a" title="Lọc các dòng Nợ là TK chi phí 6xx và kết xuất form MISA Chứng từ mua dịch vụ">📑 Mua Hàng Dịch Vụ</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">📚 Danh mục:</span>
+        <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
+        <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
+        <button class="btn sm" onclick="nlDanhMuc('tscd')" style="background:#1f6b4a" title="Danh mục TSCĐ (Nợ 2111/211)">🏢 DM TSCĐ</button>
+        <button class="btn sm" onclick="nlDanhMuc('ccdc')" style="background:#1f6b4a" title="Danh mục CCDC (Nợ 2421/242)">🧰 DM CCDC</button>
+        <button class="btn sm" onclick="nlDanhMucVTHH()" style="background:#2e5c8a" title="Danh mục VTHH từ DM Hàng hóa/NVL/TSCĐ/CCDC">📦 DM VTHH</button>
+      </div>`:''}
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm ô để sửa. Gõ <b>=</b> rồi công thức, có thể tham chiếu ô (vd <b>=K5/J5</b> hoặc <b>=L3*1.08</b>). <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo | <b>Ctrl+Shift+L</b> Filter | <b>Esc</b> Quay về.</div>
@@ -1908,19 +1911,14 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
   document.getElementById('nhapLieuContent').style.display='block';
   document.getElementById('nhapLieuBody').innerHTML=`
     <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        <h3 style="margin:0;color:#1f6b4a">${ten}</h3>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn ghost sm" onclick="nlThemDong()">➕ Dòng</button>
-          <button class="btn ghost sm" onclick="nlThemCot()">➕ Cột</button>
-          <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Filter</button>
-          <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
-          <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
-          <button class="btn ghost sm" onclick="nlCoDinhCot()" id="nlFreezeBtn">📌 Cố định cột</button>
-          <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
-          <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
-          <button class="btn ghost sm" onclick="quayLaiBangKeIn()">← Về bảng kê</button>
-        </div>
+      <h3 style="margin:0 0 10px;color:#1f6b4a">${ten}</h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Lọc</button>
+        <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
+        <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
+        <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
+        <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
+        <button class="btn ghost sm" onclick="quayLaiBangKeIn()">← Về bảng kê</button>
       </div>
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
