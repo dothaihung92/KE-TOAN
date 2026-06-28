@@ -1313,9 +1313,44 @@ def dvc_captcha_debug(cid: int):
         "Sec-Fetch-Dest": "image", "Sec-Fetch-Mode": "no-cors",
         "Sec-Fetch-Site": "same-origin",
     }
-    r = client.session.get(f"{DVC_BASE}/getCaptcha?{ts}", headers=h, timeout=30)
+    # KHÔNG theo redirect để xem server thực sự trả gì
+    r = client.session.get(f"{DVC_BASE}/getCaptcha?{ts}", headers=h, timeout=30,
+                           allow_redirects=False)
+    redir = {"status": r.status_code, "location": r.headers.get("location"),
+             "url_cuoi": r.url}
     ct = (r.headers.get("content-type") or "").lower()
     data = r.content or b""
+
+    # ---- Thử nhiều biến thể request để tìm cái trả về ẢNH ----
+    thi_nghiem = []
+    variants = [
+        ("XHR + referer /login",
+         {**h, "X-Requested-With": "XMLHttpRequest"}),
+        ("referer /homelogin",
+         {**h, "Referer": DVC_BASE + "/homelogin"}),
+        ("referer /tchs (captcha lần 2)",
+         {**h, "Referer": DVC_BASE + "/tchs", "X-Requested-With": "XMLHttpRequest"}),
+        ("không có Sec-Fetch, có XHR",
+         {"Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+          "Referer": DVC_BASE + "/login", "X-Requested-With": "XMLHttpRequest"}),
+    ]
+    for ten, hv in variants:
+        try:
+            ts2 = int(time.time() * 1000)
+            rv = client.session.get(f"{DVC_BASE}/getCaptcha?{ts2}", headers=hv,
+                                    timeout=30, allow_redirects=False)
+            cv = (rv.headers.get("content-type") or "").lower()
+            dv = rv.content or b""
+            la_anh = ("image" in cv or "svg" in cv
+                      or dv[:5].lstrip().lower().startswith(b"<svg")
+                      or dv[:4] in (b"\x89PNG", b"GIF8") or dv[:2] == b"\xff\xd8")
+            thi_nghiem.append({"ten": ten, "status": rv.status_code,
+                               "ct": cv or "(trống)", "len": len(dv),
+                               "la_anh": "✅ ẢNH" if la_anh else "❌ không phải ảnh",
+                               "loc": rv.headers.get("location") or ""})
+        except Exception as e:
+            thi_nghiem.append({"ten": ten, "status": "lỗi", "ct": str(e),
+                               "len": 0, "la_anh": "", "loc": ""})
     head = data[:400]
     head_txt = head.decode("utf-8", "replace")
     is_svg = ("svg" in ct or head.lstrip()[:5].lower().startswith(b"<svg")
@@ -1345,6 +1380,12 @@ pre{{background:#f6f8fa;padding:10px;border-radius:8px;overflow:auto;max-height:
 <h2>🔍 Chẩn đoán captcha Dịch vụ công</h2>
 <p><b>ddddocr cài đặt:</b> {'✅ có' if ocr else '❌ CHƯA CÀI — đây là nguyên nhân!'} {('('+_DDDDOCR_ERR+')') if _DDDDOCR_ERR else ''}</p>
 <p><b>HTTP status:</b> {r.status_code} · <b>Content-Type:</b> <code>{ct or '(trống)'}</code> · <b>Kích thước:</b> {len(data)} bytes</p>
+<p><b>Redirect (Location):</b> <code>{redir.get('location') or '(không)'}</code></p>
+<h3>Thử các biến thể request (tìm cái ra ẢNH):</h3>
+<table border="1" cellpadding="6" style="border-collapse:collapse">
+<tr><th>Cách gọi</th><th>Status</th><th>Content-Type</th><th>Bytes</th><th>Kết quả</th><th>Location</th></tr>
+{''.join(f"<tr><td>{t['ten']}</td><td>{t['status']}</td><td><code>{t['ct']}</code></td><td>{t['len']}</td><td>{t['la_anh']}</td><td>{t['loc']}</td></tr>" for t in thi_nghiem)}
+</table>
 <p><b>Là SVG:</b> {is_svg} · <b>Có &lt;text&gt;:</b> {has_text} · <b>Số &lt;path&gt;:</b> {n_path}</p>
 <p><b>OCR ảnh gốc:</b> <code>{ocr_raw or '(rỗng)'}</code> · <b>OCR sau rasterize:</b> <code>{ocr_png or '(rỗng)'}</code></p>
 <h3>Ảnh captcha (gốc):</h3>
