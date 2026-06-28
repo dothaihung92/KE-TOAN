@@ -1369,6 +1369,33 @@ def dvc_captcha_debug(cid: int):
         except Exception as e:
             ocr_raw = f"(lỗi: {e})"
     ocr_png = _ocr_png(png) if png else ""
+    # ---- Soi trang /login để tìm URL captcha & form thật ----
+    import re as _re2
+    soi = {"login": [], "img": [], "form": [], "captcha_refs": []}
+    try:
+        nav = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+               "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate",
+               "Sec-Fetch-Site": "same-origin", "Referer": DVC_BASE + "/homelogin"}
+        rl = client.session.get(DVC_BASE + "/login", headers=nav, timeout=30,
+                                allow_redirects=True)
+        ltxt = rl.text or ""
+        soi["login"] = [f"status={rl.status_code}", f"len={len(ltxt)}",
+                        f"url_cuoi={rl.url}"]
+        # mọi chỗ chứa 'aptcha'
+        for m in _re2.finditer(r'.{40}[Cc]aptcha.{60}', ltxt):
+            soi["captcha_refs"].append(m.group(0))
+        soi["captcha_refs"] = soi["captcha_refs"][:12]
+        # img src
+        for m in _re2.findall(r'<img[^>]+src=["\']([^"\']+)["\']', ltxt)[:15]:
+            soi["img"].append(m)
+        # form action + input
+        for m in _re2.findall(r'<form[^>]*action=["\']([^"\']*)["\']', ltxt)[:5]:
+            soi["form"].append("action=" + m)
+        for m in _re2.findall(r'<input[^>]+name=["\']([^"\']+)["\']', ltxt)[:20]:
+            soi["form"].append("input=" + m)
+    except Exception as e:
+        soi["login"] = [f"lỗi soi login: {e}"]
+
     raw_b64 = base64.b64encode(data).decode()
     png_b64 = base64.b64encode(png).decode() if png else ""
     mime = ct.split(";")[0] or ("image/svg+xml" if is_svg else "image/png")
@@ -1388,6 +1415,14 @@ pre{{background:#f6f8fa;padding:10px;border-radius:8px;overflow:auto;max-height:
 </table>
 <p><b>Là SVG:</b> {is_svg} · <b>Có &lt;text&gt;:</b> {has_text} · <b>Số &lt;path&gt;:</b> {n_path}</p>
 <p><b>OCR ảnh gốc:</b> <code>{ocr_raw or '(rỗng)'}</code> · <b>OCR sau rasterize:</b> <code>{ocr_png or '(rỗng)'}</code></p>
+<h3>🔎 Soi trang /login (tìm URL captcha & form thật):</h3>
+<p><b>Trang login:</b> {' · '.join(soi['login'])}</p>
+<p><b>Các chỗ chứa "captcha":</b></p>
+<pre>{chr(10).join(x.replace('<','&lt;') for x in soi['captcha_refs']) or '(không có — login là SPA/JS render)'}</pre>
+<p><b>img src trên trang:</b></p>
+<pre>{chr(10).join(soi['img']) or '(không có)'}</pre>
+<p><b>form action / input name:</b></p>
+<pre>{chr(10).join(soi['form']) or '(không có)'}</pre>
 <h3>Ảnh captcha (gốc):</h3>
 <img src="data:{mime};base64,{raw_b64}" width="260">
 <h3>Ảnh sau khi chuyển PNG (đưa vào OCR):</h3>
