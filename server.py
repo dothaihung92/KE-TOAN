@@ -558,6 +558,8 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN nguoi_ky TEXT")
     if "data_dir" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN data_dir TEXT")
+    if "dvc_password" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN dvc_password TEXT")
     conn.commit()
     conn.close()
 
@@ -997,6 +999,339 @@ def captcha_debug(cid: int):
     # 4) Thử giải thật
     info["ket_qua_giai"] = _solve_captcha(content) or "(rỗng)"
     return info
+
+
+# ============================================================
+#  DỊCH VỤ CÔNG (dichvucong.gdt.gov.vn)
+#  Tự đăng nhập + tải tờ khai / báo cáo ĐÃ NỘP về máy.
+#  *** Tính năng thử nghiệm — làm dần, sửa dần ***
+#  Cổng có WAF (F5 BIG-IP) + XSRF token + 2 lớp captcha nên có thể
+#  cần điều chỉnh sau khi chạy thực tế. Mọi hàm đều trả về thông tin
+#  chẩn đoán để dễ dò lỗi.
+# ============================================================
+DVC_BASE = "https://dichvucong.gdt.gov.vn/tthc"
+DVC_CLIENTS = {}   # cid -> DVCClient (giữ phiên đăng nhập)
+
+class DVCClient:
+    UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": self.UA,
+            "Accept-Language": "vi,en-US;q=0.9,en;q=0.8,vi-VN;q=0.7",
+            "Accept": "*/*",
+        })
+        self.primed = False
+        self.logged_in = False
+
+    def _xsrf(self):
+        # Spring/Angular: XSRF-TOKEN nằm trong cookie, gửi lại qua header.
+        # requests.Session tự cập nhật cookie mỗi response nên luôn lấy giá trị mới nhất.
+        try:
+            return self.session.cookies.get("XSRF-TOKEN", "") or ""
+        except Exception:
+            # cookie có thể trùng tên ở nhiều domain/path
+            for c in self.session.cookies:
+                if c.name == "XSRF-TOKEN":
+                    return c.value or ""
+            return ""
+
+    def prime(self):
+        """GET trang login để nhận cookie phiên + XSRF + cookie WAF (TS01...)."""
+        r = self.session.get(DVC_BASE + "/login", timeout=30)
+        # gọi thêm 1 nhịp homelogin để chắc chắn WAF set đủ cookie
+        try:
+            self.session.get(DVC_BASE + "/homelogin", timeout=30)
+        except Exception:
+            pass
+        self.primed = True
+        return r
+
+    def get_captcha_png(self):
+        """Tải 1 ảnh captcha (PNG bytes). Tự rasterize nếu server trả SVG."""
+        ts = int(time.time() * 1000)
+        r = self.session.get(f"{DVC_BASE}/getCaptcha?{ts}", timeout=30)
+        r.raise_for_status()
+        ct = (r.headers.get("content-type") or "").lower()
+        data = r.content or b""
+        head = data[:300].lstrip().lower()
+        if "svg" in ct or head.startswith(b"<svg") or b"<svg" in head:
+            png = _svg_to_png(data.decode("utf-8", "replace"))
+            return png or data
+        # đôi khi trả JSON {content: "data:image..."} như cổng hóa đơn
+        if "json" in ct:
+            try:
+                j = r.json()
+                cont = j.get("content") or j.get("image") or ""
+                if cont.startswith("data:"):
+                    b64 = cont.split(",", 1)[1]
+                    return base64.b64decode(b64)
+            except Exception:
+                pass
+        return data
+
+    def solve_captcha(self):
+        png = self.get_captcha_png()
+        return _ocr_png(png)
+
+    def _post_headers(self, json_body=False):
+        h = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://dichvucong.gdt.gov.vn",
+            "Referer": DVC_BASE + "/login",
+        }
+        tok = self._xsrf()
+        if tok:
+            h["X-XSRF-TOKEN"] = tok
+        h["Content-Type"] = ("application/json"
+                             if json_body
+                             else "application/x-www-form-urlencoded; charset=UTF-8")
+        return h
+
+    def login(self, mst, password, captcha):
+        ten_dn = f"{_chuan_mst(mst) or mst}-QL"
+        mat_khau = base64.b64encode((password or "").encode("utf-8")).decode("ascii")
+        data = {"tenDN": ten_dn, "matKhau": mat_khau,
+                "doiTuong": "DN", "captcha": captcha}
+        r = self.session.post(DVC_BASE + "/loginLDAP", data=data,
+                              headers=self._post_headers(False), timeout=40)
+        return r
+
+    def search(self, tu_ngay, den_ngay, captcha):
+        """tu_ngay/den_ngay định dạng dd/mm/yyyy. Trả response (HTML bảng hồ sơ)."""
+        params = {
+            "maNghiepVu": "", "maTTHC": "", "maToKhai": "", "maHoSo": "",
+            "tuNgay": tu_ngay, "denNgay": den_ngay,
+            "scope_tdt1": "SELF", "mstUyQuyen_tdt1": "", "captcha": captcha,
+        }
+        r = self.session.get(DVC_BASE + "/ho-so/search", params=params,
+                             headers={"X-Requested-With": "XMLHttpRequest",
+                                      "Referer": DVC_BASE + "/tchs"},
+                             timeout=60)
+        return r
+
+    def download_hoso(self, ma_ho_so):
+        h = self._post_headers(True)
+        h["Referer"] = f"{DVC_BASE}/tchs/files/detail/{ma_ho_so}?loai="
+        r = self.session.post(DVC_BASE + "/tchs/downloadhoso",
+                              data=json.dumps({"maHoSo": ma_ho_so}),
+                              headers=h, timeout=180)
+        return r
+
+
+def get_dvc_client(cid):
+    c = DVC_CLIENTS.get(cid)
+    if c is None:
+        c = DVCClient()
+        DVC_CLIENTS[cid] = c
+    return c
+
+
+def _dvc_parse_ma_ho_so(html):
+    """Bóc các mã hồ sơ (maHoSo) từ HTML kết quả tra cứu. Giữ thứ tự, khử trùng."""
+    import re as _re
+    found, seen = [], set()
+    # Mẫu mã hồ sơ điển hình: G12.18-260424-00039970
+    pats = [
+        r'[A-Z]{1,3}[0-9]{1,3}\.[0-9]{1,3}-[0-9]{6}-[0-9]{6,12}',
+        r"downloadHoSo\(\s*['\"]([^'\"]+)['\"]",
+        r'(?:files/detail/)([A-Za-z0-9.\-]{10,50})',
+        r'maHoSo["\'=: ]+([A-Za-z0-9.\-]{10,50})',
+    ]
+    for i, p in enumerate(pats):
+        for m in _re.findall(p, html):
+            val = m if isinstance(m, str) else (m[0] if m else "")
+            val = val.strip().rstrip("?").split("?")[0]
+            if val and val not in seen:
+                seen.add(val)
+                found.append(val)
+        if found and i == 0:
+            break   # mẫu chính đã bắt được thì dùng luôn
+    return found
+
+
+def _dvc_save_folder(cid):
+    """Thư mục lưu tờ khai đã nộp: <save_dir|data_dir>/ToKhai_DaNop/."""
+    conn = db()
+    comp = conn.execute(
+        "SELECT mst, save_dir, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        return None
+    sd = (comp["save_dir"] or "").strip()
+    dd = (comp["data_dir"] or "").strip() if "data_dir" in comp.keys() else ""
+    base = sd or dd or os.path.join(DATA_DIR, "cong_ty")
+    folder = os.path.join(base, "ToKhai_DaNop")
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except Exception:
+        return None
+    return folder
+
+
+_DVC_LOI_DN = ["sai", "không đúng", "khong dung", "thất bại", "that bai",
+               "lỗi", "error", "tài khoản", "mật khẩu", "khóa", "captcha",
+               "mã xác nhận", "ma xac nhan", "chưa đăng nhập"]
+
+def _dvc_login_voi_retry(client, mst, password, so_lan=6):
+    """Tự lấy captcha + giải + đăng nhập, thử nhiều lần. Trả (ok, thong_tin)."""
+    tried = []
+    last = ""
+    for lan in range(1, so_lan + 1):
+        cap = client.solve_captcha()
+        if not cap:
+            tried.append("(không đọc được captcha)")
+            continue
+        try:
+            r = client.login(mst, password, cap)
+        except Exception as e:
+            last = f"Lỗi gọi loginLDAP: {e}"
+            tried.append(f"{cap}→lỗi")
+            continue
+        body = (r.text or "")[:400]
+        low = body.lower()
+        # Heuristic: 200 + không chứa từ khóa lỗi/captcha => coi như thành công.
+        captcha_loi = ("captcha" in low or "mã xác nhận" in low or "ma xac nhan" in low)
+        co_loi = any(k in low for k in _DVC_LOI_DN)
+        if r.status_code == 200 and not co_loi:
+            client.logged_in = True
+            return True, {"so_lan_thu": lan, "ma_da_thu": tried + [cap],
+                          "status": r.status_code, "tra_loi": body}
+        last = f"status={r.status_code}, trả lời: {body}"
+        tried.append(f"{cap}→{'captcha sai' if captcha_loi else 'từ chối'}")
+        if not captcha_loi and not r.ok:
+            # lỗi không phải do captcha (vd sai mật khẩu) -> dừng sớm
+            break
+    return False, {"ma_da_thu": tried, "loi_cuoi": last}
+
+
+@app.post("/api/dvc/test-login/{cid}")
+def dvc_test_login(cid: int, body: dict = Body(...)):
+    """Thử đăng nhập Dịch vụ công (chỉ kiểm tra, không tải gì).
+    body: { matkhau: str, luu: bool }"""
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    matkhau = (body.get("matkhau") or "").strip()
+    if not matkhau and "dvc_password" in comp.keys():
+        matkhau = (comp["dvc_password"] or "").strip()
+    if not matkhau:
+        raise HTTPException(400, "Chưa nhập mật khẩu Dịch vụ công")
+    client = DVCClient()           # phiên mới cho mỗi lần test
+    DVC_CLIENTS[cid] = client
+    try:
+        client.prime()
+    except Exception as e:
+        raise HTTPException(502, f"Không kết nối được trang Dịch vụ công: {e}")
+    ok, info = _dvc_login_voi_retry(client, comp["mst"], matkhau)
+    if ok and body.get("luu"):
+        conn = db()
+        conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
+        conn.commit(); conn.close()
+    if not ok:
+        raise HTTPException(401, f"Đăng nhập thất bại. {json.dumps(info, ensure_ascii=False)}")
+    return {"ok": True, **info, "da_luu_mat_khau": bool(body.get("luu"))}
+
+
+@app.post("/api/dvc/tai-bao-cao/{cid}")
+def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
+    """Đăng nhập Dịch vụ công → tra cứu tờ khai/báo cáo ĐÃ NỘP trong khoảng ngày
+    → tải file zip về thư mục công ty.
+    body: { matkhau, tu_ngay (dd/mm/yyyy), den_ngay (dd/mm/yyyy), luu: bool }"""
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    matkhau = (body.get("matkhau") or "").strip()
+    if not matkhau and "dvc_password" in comp.keys():
+        matkhau = (comp["dvc_password"] or "").strip()
+    if not matkhau:
+        raise HTTPException(400, "Chưa nhập mật khẩu Dịch vụ công")
+    tu = (body.get("tu_ngay") or "").strip()
+    den = (body.get("den_ngay") or "").strip()
+    if not tu or not den:
+        raise HTTPException(400, "Chưa chọn khoảng ngày (Từ ngày / Đến ngày)")
+
+    folder = _dvc_save_folder(cid)
+    if not folder:
+        raise HTTPException(400, "Chưa cấu hình thư mục lưu cho công ty này")
+
+    client = DVCClient()
+    DVC_CLIENTS[cid] = client
+    try:
+        client.prime()
+    except Exception as e:
+        raise HTTPException(502, f"Không kết nối được trang Dịch vụ công: {e}")
+
+    # 1) Đăng nhập
+    ok, info = _dvc_login_voi_retry(client, comp["mst"], matkhau)
+    if not ok:
+        raise HTTPException(401, f"Đăng nhập thất bại. {json.dumps(info, ensure_ascii=False)}")
+    if body.get("luu"):
+        conn = db()
+        conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
+        conn.commit(); conn.close()
+
+    # 2) Tra cứu (cần captcha lớp 2) — thử nhiều captcha tới khi ra bảng kết quả
+    ma_list = []
+    search_diag = []
+    for lan in range(1, 7):
+        cap = client.solve_captcha()
+        if not cap:
+            search_diag.append("(không đọc được captcha)")
+            continue
+        try:
+            r = client.search(tu, den, cap)
+        except Exception as e:
+            search_diag.append(f"{cap}→lỗi: {e}")
+            continue
+        html = r.text or ""
+        low = html.lower()
+        if "table-container" in low or "tổng số bản ghi" in low or "totalpage" in low:
+            ma_list = _dvc_parse_ma_ho_so(html)
+            search_diag.append(f"{cap}→OK, tìm thấy {len(ma_list)} hồ sơ")
+            break
+        search_diag.append(f"{cap}→chưa ra bảng (len={len(html)})")
+    if not ma_list:
+        raise HTTPException(422, "Đăng nhập OK nhưng không tra cứu được danh sách hồ sơ. "
+                                 f"Chi tiết: {json.dumps(search_diag, ensure_ascii=False)}")
+
+    # 3) Tải từng hồ sơ
+    da_tai, loi_tai = [], []
+    for ma in ma_list:
+        try:
+            r = client.download_hoso(ma)
+            j = r.json()
+            content = j.get("content") or ""
+            fname = j.get("fileName") or f"{ma}.zip"
+            raw = base64.b64decode(content) if content else b""
+            if not raw:
+                loi_tai.append(f"{ma}: nội dung rỗng")
+                continue
+            # tên file an toàn
+            safe = "".join(ch for ch in fname if ch not in '\\/:*?"<>|') or f"{ma}.zip"
+            path = os.path.join(folder, safe)
+            with open(path, "wb") as f:
+                f.write(raw)
+            da_tai.append({"maHoSo": ma, "file": safe, "kich_thuoc": len(raw)})
+        except Exception as e:
+            loi_tai.append(f"{ma}: {e}")
+        time.sleep(0.4)
+
+    return {
+        "ok": True,
+        "thu_muc": folder,
+        "so_ho_so": len(ma_list),
+        "da_tai": da_tai,
+        "loi_tai": loi_tai,
+        "chan_doan_dang_nhap": info,
+        "chan_doan_tra_cuu": search_diag,
+    }
 
 
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------

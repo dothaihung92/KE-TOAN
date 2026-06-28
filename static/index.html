@@ -206,6 +206,32 @@
   </div>
 </div>
 
+<!-- MODAL TẢI TỜ KHAI ĐÃ NỘP (Dịch vụ công) -->
+<div class="modal-bg" id="dvcModal">
+  <div class="modal" style="max-width:560px">
+    <h3>📥 Tải tờ khai / báo cáo đã nộp</h3>
+    <p class="hint" style="margin-top:0">Phần mềm sẽ tự đăng nhập <b>dichvucong.gdt.gov.vn</b> bằng tài khoản thuế điện tử của công ty, tự giải captcha, tra cứu các <b>tờ khai/báo cáo đã nộp</b> theo khoảng ngày rồi tải file về thư mục công ty. <b>Tính năng thử nghiệm</b> — nếu lỗi sẽ hiện chi tiết để tinh chỉnh dần.</p>
+    <div class="field"><label>Mật khẩu Dịch vụ công <span style="font-weight:400;color:var(--muted)">(tài khoản …-QL)</span></label>
+      <div style="display:flex;gap:6px">
+        <input id="dvc_pass" type="password" placeholder="••••••••" style="flex:1">
+        <button type="button" class="btn ghost sm" onclick="dvcTogglePass()" id="dvcPassToggle" style="white-space:nowrap">👁 Hiện</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="field" style="flex:1;min-width:140px"><label>Từ ngày</label><input type="date" id="dvc_tu"></div>
+      <div class="field" style="flex:1;min-width:140px"><label>Đến ngày</label><input type="date" id="dvc_den"></div>
+    </div>
+    <label class="chk"><input type="checkbox" id="dvc_luu"> Lưu mật khẩu cho lần sau (lưu cục bộ trên máy)</label>
+    <p class="hint">🔒 Mật khẩu chỉ dùng để đăng nhập trang Tổng cục Thuế, lưu cục bộ (SQLite) nếu bạn tích chọn.</p>
+    <div id="dvcResult" style="display:none;margin-top:8px;max-height:240px;overflow:auto;background:var(--green-l,#eef6f0);border-radius:10px;padding:10px 12px;font-size:13px"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="dongDVCModal()">Đóng</button>
+      <button class="btn ghost" id="dvcTestBtn" onclick="dvcTestLogin()">Thử đăng nhập</button>
+      <button class="btn" id="dvcTaiBtn" onclick="dvcTaiBaoCao()">Tải về máy</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL TRA CỨU HÀNG LOẠT -->
 <div class="modal-bg" id="batchModal">
   <div class="modal" style="max-width:680px">
@@ -427,6 +453,84 @@ function togglePass(){
   if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
   else{inp.type='password';btn.textContent='👁 Hiện';}
 }
+
+/* ---------- DỊCH VỤ CÔNG: tải tờ khai đã nộp ---------- */
+function dvcTogglePass(){
+  const inp=document.getElementById('dvc_pass'),btn=document.getElementById('dvcPassToggle');
+  if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
+  else{inp.type='password';btn.textContent='👁 Hiện';}
+}
+function moDVCModal(){
+  if(!current){toast('Hãy chọn công ty trước','err');return;}
+  // mặc định khoảng ngày = tháng hiện tại
+  const now=new Date();
+  const d1=new Date(now.getFullYear(),now.getMonth(),1);
+  const iso=d=>d.toISOString().slice(0,10);
+  document.getElementById('dvc_tu').value=iso(d1);
+  document.getElementById('dvc_den').value=iso(now);
+  document.getElementById('dvc_pass').value='';
+  document.getElementById('dvc_luu').checked=false;
+  const res=document.getElementById('dvcResult');res.style.display='none';res.innerHTML='';
+  document.getElementById('dvcModal').style.display='flex';
+}
+function dongDVCModal(){document.getElementById('dvcModal').style.display='none';}
+function dvcShowResult(html){
+  const res=document.getElementById('dvcResult');
+  res.style.display='block';res.innerHTML=html;
+}
+function _ddmmyyyy(v){ // input date "yyyy-mm-dd" -> "dd/mm/yyyy"
+  if(!v)return'';const[a,b,c]=v.split('-');return `${c}/${b}/${a}`;
+}
+async function dvcTestLogin(){
+  const btn=document.getElementById('dvcTestBtn');
+  const pass=document.getElementById('dvc_pass').value;
+  if(!pass){toast('Nhập mật khẩu Dịch vụ công','err');return;}
+  const luu=document.getElementById('dvc_luu').checked;
+  const old=btn.textContent;btn.disabled=true;btn.textContent='Đang thử...';
+  dvcShowResult('⏳ Đang đăng nhập, vui lòng đợi (tự giải captcha có thể mất vài giây)...');
+  try{
+    const r=await api(`/api/dvc/test-login/${current}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({matkhau:pass,luu})});
+    dvcShowResult(`✅ <b>Đăng nhập thành công</b> sau ${r.so_lan_thu||'?'} lần thử captcha.`
+      +(r.da_luu_mat_khau?'<br>🔒 Đã lưu mật khẩu.':''));
+    toast('Đăng nhập Dịch vụ công thành công','ok');
+  }catch(e){
+    dvcShowResult('❌ <b>Đăng nhập thất bại.</b><br><span style="color:#b91c1c">'+
+      String(e.message||e).replace(/</g,'&lt;')+'</span>');
+  }finally{btn.disabled=false;btn.textContent=old;}
+}
+async function dvcTaiBaoCao(){
+  const btn=document.getElementById('dvcTaiBtn');
+  const pass=document.getElementById('dvc_pass').value;
+  if(!pass){toast('Nhập mật khẩu Dịch vụ công','err');return;}
+  const tu=_ddmmyyyy(document.getElementById('dvc_tu').value);
+  const den=_ddmmyyyy(document.getElementById('dvc_den').value);
+  if(!tu||!den){toast('Chọn khoảng ngày','err');return;}
+  const luu=document.getElementById('dvc_luu').checked;
+  const old=btn.textContent;btn.disabled=true;btn.textContent='Đang tải...';
+  dvcShowResult('⏳ Đang đăng nhập → tra cứu → tải file. Quá trình có thể mất 1-2 phút...');
+  try{
+    const r=await api(`/api/dvc/tai-bao-cao/${current}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({matkhau:pass,tu_ngay:tu,den_ngay:den,luu})});
+    let html=`✅ <b>Hoàn tất.</b> Tìm thấy ${r.so_ho_so} hồ sơ, tải về ${r.da_tai.length} file.`;
+    html+=`<br>📁 Thư mục: <code>${(r.thu_muc||'').replace(/</g,'&lt;')}</code>`;
+    if(r.da_tai.length){
+      html+='<ul style="margin:6px 0 0 18px;padding:0">'+
+        r.da_tai.map(x=>`<li>${x.file} (${Math.round(x.kich_thuoc/1024)} KB)</li>`).join('')+'</ul>';
+    }
+    if(r.loi_tai&&r.loi_tai.length){
+      html+='<br>⚠️ Lỗi tải:<ul style="margin:4px 0 0 18px;color:#b91c1c">'+
+        r.loi_tai.map(x=>`<li>${String(x).replace(/</g,'&lt;')}</li>`).join('')+'</ul>';
+    }
+    dvcShowResult(html);
+    toast(`Đã tải ${r.da_tai.length} file tờ khai`,'ok');
+  }catch(e){
+    dvcShowResult('❌ <b>Lỗi.</b><br><span style="color:#b91c1c">'+
+      String(e.message||e).replace(/</g,'&lt;')+'</span>');
+  }finally{btn.disabled=false;btn.textContent=old;}
+}
 async function saveCompany(){
   const body={ten:m_ten.value.trim(),mst:m_mst.value.trim(),username:m_user.value.trim(),
     password:m_pass.value,ghichu:m_note.value.trim(),save_dir:m_dir.value.trim(),
@@ -609,6 +713,7 @@ function renderWorkspace(c,online){
       <input type="file" id="importTKNK" accept=".xlsx" multiple style="display:none" onchange="importToKhaiNhap(this)">
       <button class="btn" style="background:#5a3e8a;color:#fff" onclick="moNhapLieu()">✍️ Nhập Liệu</button>
       <button class="btn" style="background:#b91c1c;color:#fff" onclick="window.open('https://dichvucong.gdt.gov.vn/tthc/homelogin','_blank')" title="Mở trang Dịch vụ công Cục Thuế để đăng nhập tra cứu thuế">🔎 Tra cứu thuế</button>
+      <button class="btn" style="background:#0d6efd;color:#fff" onclick="moDVCModal()" title="Tự đăng nhập Dịch vụ công và tải các tờ khai/báo cáo đã nộp về máy">📥 Tải tờ khai đã nộp</button>
     </div>
     <p class="hint">XML là bản gốc có giá trị pháp lý do Tổng cục Thuế cấp. PDF được tạo từ XML để xem/in. Excel tổng hợp gồm 3 sheet: mua vào, bán ra, và chi tiết từng mặt hàng.</p>
   </div>
