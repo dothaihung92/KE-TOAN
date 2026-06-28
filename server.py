@@ -1023,15 +1023,26 @@ class DVCClient:
     }
 
     def __init__(self):
-        self.session = requests.Session()
-        # Bộ header giống hệt trình duyệt Chrome để qua WAF (F5 BIG-IP)
-        self.session.headers.update({
-            "User-Agent": self.UA,
-            "Accept-Language": "vi,en-US;q=0.9,en;q=0.8,vi-VN;q=0.7",
-            "Accept": "*/*",
-            "Upgrade-Insecure-Requests": "1",
-            **self.SECCH,
-        })
+        # WAF F5 chặn theo dấu vân tay TLS/JA3 -> dùng curl_cffi giả lập Chrome thật
+        # nếu có; không thì lùi về requests thường.
+        self.impersonate = False
+        try:
+            from curl_cffi import requests as _cffi
+            self.session = _cffi.Session(impersonate="chrome")
+            self.impersonate = True
+            # curl_cffi đã tự đặt UA + sec-ch-ua khớp vân tay -> chỉ thêm ngôn ngữ
+            self.session.headers.update({
+                "Accept-Language": "vi,en-US;q=0.9,en;q=0.8,vi-VN;q=0.7",
+            })
+        except Exception:
+            self.session = requests.Session()
+            self.session.headers.update({
+                "User-Agent": self.UA,
+                "Accept-Language": "vi,en-US;q=0.9,en;q=0.8,vi-VN;q=0.7",
+                "Accept": "*/*",
+                "Upgrade-Insecure-Requests": "1",
+                **self.SECCH,
+            })
         self.primed = False
         self.logged_in = False
         self.prime_diag = {}
@@ -1073,9 +1084,14 @@ class DVCClient:
             except Exception as e:
                 diag["buoc"].append({"url": path, "loi": f"{type(e).__name__}: {e}"})
             time.sleep(0.3)
-        diag["cookies"] = sorted(c.name for c in self.session.cookies)
-        diag["co_waf"] = any(n.startswith("TS") for n in diag["cookies"])
+        try:
+            names = [getattr(c, "name", c) for c in self.session.cookies]
+            diag["cookies"] = sorted(str(n) for n in names)
+        except Exception:
+            diag["cookies"] = []
+        diag["co_waf"] = any(str(n).startswith("TS") for n in diag["cookies"])
         diag["co_xsrf"] = bool(self._xsrf())
+        diag["tls_chrome"] = self.impersonate
         self.prime_diag = diag
         self.primed = True
         return last
@@ -1421,6 +1437,7 @@ code{{background:#f0f0f0;padding:2px 5px;border-radius:4px}}
 pre{{background:#f6f8fa;padding:10px;border-radius:8px;overflow:auto;max-height:200px}}</style></head><body>
 <h2>🔍 Chẩn đoán captcha Dịch vụ công</h2>
 <p><b>ddddocr cài đặt:</b> {'✅ có' if ocr else '❌ CHƯA CÀI — đây là nguyên nhân!'} {('('+_DDDDOCR_ERR+')') if _DDDDOCR_ERR else ''}</p>
+<p><b>Giả lập TLS Chrome (curl_cffi):</b> {'✅ CÓ — đang vượt vân tay WAF' if client.impersonate else '❌ KHÔNG (chưa cài curl_cffi) — sẽ bị WAF chặn'}</p>
 <p><b>HTTP status:</b> {r.status_code} · <b>Content-Type:</b> <code>{ct or '(trống)'}</code> · <b>Kích thước:</b> {len(data)} bytes</p>
 <p><b>Redirect (Location):</b> <code>{redir.get('location') or '(không)'}</code></p>
 <h3>Thử các biến thể request (tìm cái ra ẢNH):</h3>
