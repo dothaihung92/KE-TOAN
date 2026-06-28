@@ -98,6 +98,8 @@
   .checks{display:flex;gap:18px;flex-wrap:wrap;margin:4px 0 14px}
   .chk{display:flex;align-items:center;gap:7px;font-size:14px;cursor:pointer;user-select:none}
   .chk input{width:17px;height:17px;accent-color:var(--green)}
+  /* checkbox trong .field không bị kéo rộng 100% như input text */
+  .modal .field input[type=checkbox]{width:17px;height:17px;display:inline-block;flex:none;vertical-align:middle}
 
   table{width:100%;border-collapse:collapse;font-size:13px}
   th{text-align:left;padding:11px 12px;background:var(--green);color:#fff;
@@ -614,8 +616,8 @@ function moDVCBatch(){
   // danh sách công ty (mỗi dòng 1 wrapper để lọc)
   const box=document.getElementById('dvcbCoList');
   box.innerHTML=companies.map(c=>
-    `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" style="display:block">`+
-    `<input type="checkbox" class="dvcbChk" value="${c.id}" checked onchange="dvcbCount()"> ${c.ten} <span style="color:#888">(${c.mst})</span></label>`
+    `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" style="display:flex;padding:3px 0">`+
+    `<input type="checkbox" class="dvcbChk" value="${c.id}" checked onchange="dvcbCount()"><span>${c.ten} <span style="color:#888">(${c.mst})</span></span></label>`
   ).join('')||'<div style="color:#888">Chưa có công ty</div>';
   document.getElementById('dvcbSearch').value='';
   dvcbCount();
@@ -649,7 +651,7 @@ function dvcbKyToDates(){
 function dvcbFilter(){
   const q=(document.getElementById('dvcbSearch').value||'').toLowerCase().trim();
   document.querySelectorAll('.dvcbRow').forEach(r=>{
-    r.style.display=(!q||r.dataset.key.includes(q))?'block':'none';
+    r.style.display=(!q||r.dataset.key.includes(q))?'flex':'none';
   });
 }
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}

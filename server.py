@@ -1784,6 +1784,9 @@ def _xuat_tracuu_excel(rows, path):
     for c, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(1, c).column_letter].width = w
     ws.freeze_panes = "A6"
+    # bật filter cho các cột (hàng tiêu đề ở dòng 5)
+    last_row = max(hr, r - 1)
+    ws.auto_filter.ref = f"A{hr}:I{last_row}"
     wb.save(path)
 
 def _xuat_saipass_excel(items, path):
@@ -2228,6 +2231,7 @@ def _dvc_run_batch(batch_id, cids, body):
             p = os.path.join(out_dir, f"TraCuuToKhai_{ts}.xlsx")
             _xuat_tracuu_excel(tracuu_rows, p)
             job["file_tracuu"] = p
+            _open_file_local(p)   # tự mở file Excel trên máy
         if sai_pass:
             p2 = os.path.join(out_dir, f"SaiMatKhau_{ts}.xlsx")
             _xuat_saipass_excel(sai_pass, p2)
