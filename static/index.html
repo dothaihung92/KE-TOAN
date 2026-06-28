@@ -648,6 +648,14 @@ function dvcbKyToDates(){
   if(v==='nam'){return [fmt(1,1,yr),fmt(31,12,yr)];}
   return ['',''];
 }
+function dvcbKyLabel(){
+  const v=document.getElementById('dvcb_loaiky').value;
+  const yr=document.getElementById('dvcb_nam').value;
+  if(v==='thang')return `Tháng ${document.getElementById('dvcb_thang').value}/${yr}`;
+  if(v==='quy')return `Quý ${document.getElementById('dvcb_quy').value}/${yr}`;
+  if(v==='nam')return `Năm ${yr}`;
+  const [tu,den]=dvcbKyToDates();return `${tu} - ${den}`;
+}
 function dvcbFilter(){
   const q=(document.getElementById('dvcbSearch').value||'').toLowerCase().trim();
   document.querySelectorAll('.dvcbRow').forEach(r=>{
@@ -672,7 +680,7 @@ async function dvcbRun(){
   if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return;}
   const [tu,den]=dvcbKyToDates();
   if(!tu||!den){toast('Chọn kỳ tra cứu','err');return;}
-  const body={cids,tu_ngay:tu,den_ngay:den,
+  const body={cids,tu_ngay:tu,den_ngay:den,ky_label:dvcbKyLabel(),
     tai_file:document.getElementById('dvcb_taifile').checked,
     tai_thong_bao:document.getElementById('dvcb_tb').checked};
   const prog=document.getElementById('dvcbProgress');

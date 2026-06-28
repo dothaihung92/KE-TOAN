@@ -1767,18 +1767,23 @@ def _xuat_tracuu_excel(rows, path):
     bd = Border(left=thin, right=thin, top=thin, bottom=thin)
     r = hr + 1
     for rec in rows:
+        tt = _khong_dau(rec.get("trang_thai", ""))
+        chua_nop = "chua nop" in tt
+        do = chua_nop or "khong chap nhan" in tt or "tu choi" in tt
         vals = [rec.get("mst", ""), rec.get("ten", "")] + [rec.get(c, "") for c in TRACUU_COLS]
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v); cell.border = bd
             cell.alignment = Alignment(vertical="center", wrap_text=(c == 2 or c == 3))
-            tt = _khong_dau(rec.get("trang_thai", ""))
-            if c == 9:
-                if "khong chap nhan" in tt or "tu choi" in tt:
-                    cell.font = Font(color="C00000", bold=True)
+            if chua_nop:
+                # cả dòng đỏ để dễ thấy công ty chưa nộp
+                cell.font = Font(color="C00000", bold=True)
+            elif c == 9:
+                if do:
+                    cell.font = Font(color="C00000", bold=True)   # đỏ đậm
                 elif "da chap nhan" in tt:
-                    cell.font = Font(color="008000")
+                    cell.font = Font(color="008000")              # xanh
                 elif tt:
-                    cell.font = Font(color="BF8F00")  # chờ
+                    cell.font = Font(color="BF8F00")              # vàng (chờ)
         r += 1
     widths = [16, 42, 40, 10, 12, 13, 9, 11, 16]
     for c, w in enumerate(widths, 1):
@@ -2135,6 +2140,7 @@ def _dvc_run_batch(batch_id, cids, body):
     job = DVC_BATCH[batch_id]
     tu = (body.get("tu_ngay") or "").strip()
     den = (body.get("den_ngay") or "").strip()
+    ky_label = (body.get("ky_label") or f"{tu} - {den}").strip()
     tai_file = bool(body.get("tai_file"))       # có tải file tờ khai về không
     tai_tb = bool(body.get("tai_thong_bao", True))
     luu_pass = bool(body.get("luu", True))
@@ -2196,6 +2202,20 @@ def _dvc_run_batch(batch_id, cids, body):
                 rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
                 tracuu_rows.append(rec2)
             item["so_dong"] = len(rows)
+            # Nếu tra cứu THÀNH CÔNG nhưng KHÔNG có tờ khai nào trong kỳ
+            # -> ghi chú "CHƯA NỘP TỜ KHAI" (đỏ). Nếu tra cứu lỗi thì không kết luận.
+            if not rows:
+                if raw_html:
+                    tracuu_rows.append({
+                        "mst": mst, "ten": ten,
+                        "to_khai": "(Chưa tìm thấy tờ khai trong kỳ)",
+                        "ky": ky_label, "loai": "", "ngay_nop": "",
+                        "lan_nop": "", "lan_bs": "",
+                        "trang_thai": "CHƯA NỘP TỜ KHAI",
+                    })
+                    item["chua_nop"] = True
+                else:
+                    item["loi_tra_cuu"] = "; ".join(sdiag)[:200]
             # tải file (tùy chọn)
             if tai_file and ma_list:
                 folder = _dvc_save_folder(cid)
