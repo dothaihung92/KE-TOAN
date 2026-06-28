@@ -1316,35 +1316,32 @@ def _dvc_make_driver(headless=True):
 # --- Các đoạn JS chạy trong ngữ cảnh trang dichvucong ---
 _JS_GETCAPTCHA = r"""
 var cb = arguments[arguments.length-1];
+// WAF chặn XHR/fetch tới getCaptcha (Sec-Fetch-Dest: empty) nhưng cho ảnh thật.
+// => nạp captcha bằng <img> (Sec-Fetch-Dest: image, cùng nguồn nên có cookie),
+//    rồi vẽ lên canvas lấy PNG. Cùng nguồn nên canvas không bị 'taint'.
 try {
-  var x = new XMLHttpRequest();
-  x.open('GET','/tthc/getCaptcha?'+Date.now(),true);
-  x.responseType='blob';
-  x.onload=function(){
-    if(x.status!==200){ cb({ok:false, status:x.status}); return; }
-    var ct = x.getResponseHeader('content-type')||'';
-    var url = URL.createObjectURL(x.response);
-    var img = new Image();
-    img.onload=function(){
-      try{
-        var w = img.naturalWidth||img.width||200;
-        var h = img.naturalHeight||img.height||60;
-        if(w<10) w=200; if(h<10) h=60;
-        var sc = 3;
-        var c = document.createElement('canvas');
-        c.width = w*sc; c.height = h*sc;
-        var g = c.getContext('2d');
-        g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height);
-        g.drawImage(img,0,0,c.width,c.height);
-        URL.revokeObjectURL(url);
-        cb({ok:true, ct:ct, w:w, h:h, png:c.toDataURL('image/png')});
-      }catch(e){ URL.revokeObjectURL(url); cb({ok:false, ct:ct, err:'canvas:'+e}); }
-    };
-    img.onerror=function(){ URL.revokeObjectURL(url); cb({ok:false, ct:ct, err:'imgload'}); };
-    img.src = url;
-  };
-  x.onerror=function(){ cb({ok:false, err:'neterr'}); };
-  x.send();
+  var done = false;
+  var img = new Image();
+  function grab(){
+    if(done) return; done = true;
+    try{
+      var w = img.naturalWidth||img.width||200;
+      var h = img.naturalHeight||img.height||60;
+      if(w<10) w=200; if(h<10) h=60;
+      var sc = 3;
+      var c = document.createElement('canvas');
+      c.width = w*sc; c.height = h*sc;
+      var g = c.getContext('2d');
+      g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height);
+      g.drawImage(img,0,0,c.width,c.height);
+      cb({ok:true, w:w, h:h, png:c.toDataURL('image/png')});
+    }catch(e){ cb({ok:false, err:'canvas:'+e}); }
+  }
+  img.onload = grab;
+  img.onerror = function(){ if(!done){done=true; cb({ok:false, err:'imgload'});} };
+  img.src = '/tthc/getCaptcha?' + Date.now();
+  setTimeout(function(){ if(!done && img.complete && img.naturalWidth>0) grab();
+                         else if(!done){done=true; cb({ok:false, err:'timeout'});} }, 4000);
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
