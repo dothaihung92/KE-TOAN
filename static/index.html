@@ -195,6 +195,10 @@
         <button type="button" class="btn ghost sm" onclick="togglePass()" id="passToggle" style="white-space:nowrap">👁 Hiện</button>
       </div>
     </div>
+    <div class="field"><label>Mật khẩu Dịch vụ công 1 <span style="font-weight:400;color:var(--muted)">(dichvucong.gdt.gov.vn — tài khoản …-QL)</span></label>
+      <input id="m_dvc1" type="text" placeholder="Mật khẩu chính để tải tờ khai đã nộp"></div>
+    <div class="field"><label>Mật khẩu Dịch vụ công 2 <span style="font-weight:400;color:var(--muted)">(dự phòng — thử khi mật khẩu 1 sai)</span></label>
+      <input id="m_dvc2" type="text" placeholder="Để trống nếu không có"></div>
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
     <div class="field"><label>Thư mục lưu DỮ LIỆU công ty <span style="font-weight:400;color:var(--muted)">(hạch toán, danh mục... — để trống = dùng thư mục XML/PDF ở trên)</span></label><input id="m_datadir" placeholder="VD: D:\\DuLieuKeToan\\CongTyABC"></div>
@@ -228,6 +232,40 @@
       <button class="btn ghost" onclick="dongDVCModal()">Đóng</button>
       <button class="btn ghost" id="dvcTestBtn" onclick="dvcTestLogin()">Thử đăng nhập</button>
       <button class="btn" id="dvcTaiBtn" onclick="dvcTaiBaoCao()">Tải về máy</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL TRA CỨU / TẢI TỜ KHAI HÀNG LOẠT (Dịch vụ công) -->
+<div class="modal-bg" id="dvcBatchModal">
+  <div class="modal" style="max-width:760px">
+    <h3>📊 Tra cứu / tải tờ khai hàng loạt</h3>
+    <p class="hint" style="margin-top:0">Phần mềm lần lượt đăng nhập từng công ty (thử <b>mật khẩu 1</b> → nếu sai thử <b>mật khẩu 2</b>), tra cứu tờ khai đã nộp theo khoảng ngày, rồi xuất Excel tổng hợp <b>trạng thái</b> (Đã/Không chấp nhận, chờ). Công ty nào sai mật khẩu sẽ liệt kê ra file riêng. Mật khẩu lấy từ thông tin đã lưu của mỗi công ty.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="field" style="flex:1;min-width:140px"><label>Từ ngày</label><input type="date" id="dvcb_tu"></div>
+      <div class="field" style="flex:1;min-width:140px"><label>Đến ngày</label><input type="date" id="dvcb_den"></div>
+    </div>
+    <div class="field">
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <label class="chk"><input type="checkbox" id="dvcb_taifile"> Tải luôn file tờ khai về máy</label>
+        <label class="chk"><input type="checkbox" id="dvcb_tb" checked> Tải kèm thông báo (Tiếp nhận/Xác nhận)</label>
+      </div>
+    </div>
+    <div class="field">
+      <label style="display:flex;justify-content:space-between;align-items:center">
+        <span>Chọn công ty</span>
+        <span style="font-weight:400">
+          <a href="#" onclick="dvcbSelectAll(true);return false" style="font-size:13px">Chọn tất cả</a> ·
+          <a href="#" onclick="dvcbSelectAll(false);return false" style="font-size:13px">Bỏ chọn</a>
+        </span>
+      </label>
+      <div id="dvcbCoList" style="max-height:200px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:8px"></div>
+    </div>
+    <div id="dvcbProgress" style="display:none;margin-top:8px;background:var(--green-l,#eef6f0);border-radius:10px;padding:12px 14px;font-size:13px"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="dongDVCBatch()">Đóng</button>
+      <button class="btn ghost" id="dvcbCancelBtn" style="display:none" onclick="dvcbCancel()">Dừng</button>
+      <button class="btn" id="dvcbRunBtn" onclick="dvcbRun()">▶ Bắt đầu</button>
     </div>
   </div>
 </div>
@@ -440,11 +478,13 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_dir').value=edit?.save_dir||'';
   document.getElementById('m_datadir').value=edit?.data_dir||'';
   // lấy mật khẩu thật để điền sẵn (để sửa cho đúng)
-  let pass='';
+  let pass='',dvc1='',dvc2='';
   if(edit?.id){
-    try{const full=await api(`/api/company/${edit.id}`);pass=full.password||'';}catch{}
+    try{const full=await api(`/api/company/${edit.id}`);pass=full.password||'';dvc1=full.dvc_password||'';dvc2=full.dvc_password2||'';}catch{}
   }
   document.getElementById('m_pass').value=pass;
+  document.getElementById('m_dvc1').value=dvc1;
+  document.getElementById('m_dvc2').value=dvc2;
   document.getElementById('coModal').classList.add('show');
 }
 function closeCompanyModal(){document.getElementById('coModal').classList.remove('show')}
@@ -483,8 +523,7 @@ function _ddmmyyyy(v){ // input date "yyyy-mm-dd" -> "dd/mm/yyyy"
 }
 async function dvcTestLogin(){
   const btn=document.getElementById('dvcTestBtn');
-  const pass=document.getElementById('dvc_pass').value;
-  if(!pass){toast('Nhập mật khẩu Dịch vụ công','err');return;}
+  const pass=document.getElementById('dvc_pass').value;  // để trống = dùng mật khẩu đã lưu
   const luu=document.getElementById('dvc_luu').checked;
   const old=btn.textContent;btn.disabled=true;btn.textContent='Đang thử...';
   dvcShowResult('⏳ Đang mở trình duyệt ẩn và đăng nhập... Lần đầu có thể mất 20-40 giây (tải trình điều khiển + giải captcha). Vui lòng đợi.');
@@ -502,8 +541,7 @@ async function dvcTestLogin(){
 }
 async function dvcTaiBaoCao(){
   const btn=document.getElementById('dvcTaiBtn');
-  const pass=document.getElementById('dvc_pass').value;
-  if(!pass){toast('Nhập mật khẩu Dịch vụ công','err');return;}
+  const pass=document.getElementById('dvc_pass').value;  // để trống = dùng mật khẩu đã lưu
   const tu=_ddmmyyyy(document.getElementById('dvc_tu').value);
   const den=_ddmmyyyy(document.getElementById('dvc_den').value);
   if(!tu||!den){toast('Chọn khoảng ngày','err');return;}
@@ -531,10 +569,81 @@ async function dvcTaiBaoCao(){
       String(e.message||e).replace(/</g,'&lt;')+'</span>');
   }finally{btn.disabled=false;btn.textContent=old;}
 }
+
+/* ---------- DVC HÀNG LOẠT ---------- */
+let dvcbTimer=null;
+function moDVCBatch(){
+  const now=new Date();
+  const iso=d=>d.toISOString().slice(0,10);
+  // mặc định quý hiện tại
+  const q0=new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1);
+  document.getElementById('dvcb_tu').value=iso(q0);
+  document.getElementById('dvcb_den').value=iso(now);
+  const box=document.getElementById('dvcbCoList');
+  box.innerHTML=companies.map(c=>
+    `<label class="chk" style="display:block"><input type="checkbox" class="dvcbChk" value="${c.id}" checked> ${c.ten} <span style="color:#888">(${c.mst})</span></label>`
+  ).join('')||'<div style="color:#888">Chưa có công ty</div>';
+  document.getElementById('dvcbProgress').style.display='none';
+  document.getElementById('dvcbProgress').innerHTML='';
+  document.getElementById('dvcbRunBtn').style.display='';
+  document.getElementById('dvcbCancelBtn').style.display='none';
+  document.getElementById('dvcBatchModal').style.display='flex';
+}
+function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
+function dvcbSelectAll(v){document.querySelectorAll('.dvcbChk').forEach(c=>c.checked=v);}
+let dvcbId=null;
+async function dvcbRun(){
+  const cids=[...document.querySelectorAll('.dvcbChk:checked')].map(c=>+c.value);
+  if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return;}
+  const tu=_ddmmyyyy(document.getElementById('dvcb_tu').value);
+  const den=_ddmmyyyy(document.getElementById('dvcb_den').value);
+  if(!tu||!den){toast('Chọn khoảng ngày','err');return;}
+  const body={cids,tu_ngay:tu,den_ngay:den,
+    tai_file:document.getElementById('dvcb_taifile').checked,
+    tai_thong_bao:document.getElementById('dvcb_tb').checked};
+  const prog=document.getElementById('dvcbProgress');
+  prog.style.display='block';prog.innerHTML='⏳ Đang khởi động trình duyệt ẩn... (lần đầu hơi lâu)';
+  document.getElementById('dvcbRunBtn').style.display='none';
+  document.getElementById('dvcbCancelBtn').style.display='';
+  try{
+    const r=await api('/api/dvc/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    dvcbId=r.batch_id;
+    dvcbTimer=setInterval(dvcbPoll,2000);
+  }catch(e){prog.innerHTML='❌ '+e.message;document.getElementById('dvcbRunBtn').style.display='';document.getElementById('dvcbCancelBtn').style.display='none';}
+}
+async function dvcbPoll(){
+  if(dvcbId==null)return;
+  let j;try{j=await api(`/api/dvc/batch-status/${dvcbId}`);}catch{return;}
+  const prog=document.getElementById('dvcbProgress');
+  let html=`Tiến độ: <b>${j.done}/${j.total}</b>`+(j.current?` · đang: ${j.current}`:'');
+  if(j.items&&j.items.length){
+    html+='<div style="max-height:160px;overflow:auto;margin-top:6px">'+
+      j.items.map(it=>{
+        let c=it.trang_thai==='xong'?'#0a7d4b':(it.trang_thai&&it.trang_thai.indexOf('sai')>=0?'#b91c1c':'#555');
+        return `<div style="color:${c}">• ${it.ten}: ${it.trang_thai}${it.so_dong?` (${it.so_dong} dòng${it.so_file?', '+it.so_file+' file':''})`:''}</div>`;
+      }).join('')+'</div>';
+  }
+  if(!j.running){
+    clearInterval(dvcbTimer);dvcbTimer=null;
+    document.getElementById('dvcbRunBtn').style.display='';
+    document.getElementById('dvcbCancelBtn').style.display='none';
+    html+=`<hr><b>✅ Hoàn tất.</b> Tổng ${j.so_dong_tong||0} dòng tra cứu, ${j.so_sai_pass||0} công ty sai mật khẩu.`;
+    if(j.file_tracuu)html+=`<br>📄 <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_tracuu)}" target="_blank">Tải Excel Tra cứu tờ khai</a>`;
+    if(j.file_saipass)html+=`<br>⚠️ <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_saipass)}" target="_blank">Tải Excel Sai mật khẩu</a>`;
+    if(j.loi)html+=`<br><span style="color:#b91c1c">${j.loi}</span>`;
+    if(j.loi_xuat)html+=`<br><span style="color:#b91c1c">Lỗi xuất Excel: ${j.loi_xuat}</span>`;
+    toast('Tra cứu hàng loạt xong','ok');
+  }
+  prog.innerHTML=html;
+}
+async function dvcbCancel(){if(dvcbId!=null){try{await api(`/api/dvc/batch-cancel/${dvcbId}`,{method:'POST'});}catch{}toast('Đang dừng sau công ty hiện tại...','');}}
+
 async function saveCompany(){
   const body={ten:m_ten.value.trim(),mst:m_mst.value.trim(),username:m_user.value.trim(),
     password:m_pass.value,ghichu:m_note.value.trim(),save_dir:m_dir.value.trim(),
-    data_dir:document.getElementById('m_datadir').value.trim()};
+    data_dir:document.getElementById('m_datadir').value.trim(),
+    dvc_password:document.getElementById('m_dvc1').value.trim(),
+    dvc_password2:document.getElementById('m_dvc2').value.trim()};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -714,6 +823,7 @@ function renderWorkspace(c,online){
       <button class="btn" style="background:#5a3e8a;color:#fff" onclick="moNhapLieu()">✍️ Nhập Liệu</button>
       <button class="btn" style="background:#b91c1c;color:#fff" onclick="window.open('https://dichvucong.gdt.gov.vn/tthc/homelogin','_blank')" title="Mở trang Dịch vụ công Cục Thuế để đăng nhập tra cứu thuế">🔎 Tra cứu thuế</button>
       <button class="btn" style="background:#0d6efd;color:#fff" onclick="moDVCModal()" title="Tự đăng nhập Dịch vụ công và tải các tờ khai/báo cáo đã nộp về máy">📥 Tải tờ khai đã nộp</button>
+      <button class="btn" style="background:#0a7d4b;color:#fff" onclick="moDVCBatch()" title="Đăng nhập hàng loạt, tra cứu trạng thái tờ khai đã nộp của nhiều công ty và xuất Excel">📊 Tra cứu / tải hàng loạt</button>
     </div>
     <p class="hint">XML là bản gốc có giá trị pháp lý do Tổng cục Thuế cấp. PDF được tạo từ XML để xem/in. Excel tổng hợp gồm 3 sheet: mua vào, bán ra, và chi tiết từng mặt hàng.</p>
   </div>
@@ -1224,11 +1334,12 @@ async function exportHTKK(){
 async function xoaFileTai(){
   let info={so_file:0,dung_luong_mb:0};
   try{info=await api('/api/downloads-size');}catch{}
-  const msg=`Xóa toàn bộ file XML/PDF đã tải để nhẹ máy?\n\n`+
+  const msg=`Xóa toàn bộ file đã tải để nhẹ máy?\n\n`+
     `Sẽ xóa file trong:\n`+
     `• Thư mục tạm của phần mềm${info.so_file?` (${info.so_file} file tạm, ${info.dung_luong_mb} MB)`:''}\n`+
-    `• Các thư mục mua_vào, bán_ra trong thư mục lưu của TẤT CẢ công ty\n\n`+
-    `⚠ File hóa đơn đã tải sẽ bị xóa hết. Dữ liệu hóa đơn trong phần mềm (bảng, Excel) KHÔNG bị ảnh hưởng.\n\nTiếp tục?`;
+    `• Các thư mục mua_vào, bán_ra trong thư mục lưu của TẤT CẢ công ty\n`+
+    `• Các thư mục ToKhai_DaNop (tờ khai/báo cáo đã tải về)\n\n`+
+    `⚠ File hóa đơn & tờ khai đã tải sẽ bị xóa hết. Dữ liệu trong phần mềm (bảng, Excel) KHÔNG bị ảnh hưởng.\n\nTiếp tục?`;
   if(!confirm(msg))return;
   try{
     const r=await api('/api/clear-downloads?scope=all',{method:'POST'});

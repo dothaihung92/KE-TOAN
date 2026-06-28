@@ -560,6 +560,8 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN data_dir TEXT")
     if "dvc_password" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password TEXT")
+    if "dvc_password2" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN dvc_password2 TEXT")
     conn.commit()
     conn.close()
 
@@ -636,10 +638,12 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, dvc_password, dvc_password2, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""),
+         (data.get("dvc_password") or "").strip(),
+         (data.get("dvc_password2") or "").strip(),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -658,15 +662,22 @@ def update_company(cid: int, data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     # Nếu password để trống -> GIỮ password cũ (không xóa)
-    cur = conn.execute("SELECT password FROM companies WHERE id=?", (cid,)).fetchone()
+    cur = conn.execute("SELECT password, dvc_password, dvc_password2 FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
+    # mật khẩu DVC: nếu gửi rỗng -> giữ cũ
+    dvc1 = data.get("dvc_password")
+    if dvc1 is None or dvc1 == "":
+        dvc1 = (cur["dvc_password"] if cur and "dvc_password" in cur.keys() else "") or ""
+    dvc2 = data.get("dvc_password2")
+    if dvc2 is None or dvc2 == "":
+        dvc2 = (cur["dvc_password2"] if cur and "dvc_password2" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, dvc_password=?, dvc_password2=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
-         data.get("data_dir", ""), cid)
+         data.get("data_dir", ""), dvc1.strip(), dvc2.strip(), cid)
     )
     conn.commit()
     conn.close()
@@ -1420,6 +1431,23 @@ try {
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
+# Đọc bảng kết quả tra cứu (HTML fragment) thành mảng dòng×ô bằng DOM trình duyệt.
+_JS_PARSE_TABLE = r"""
+var cb = arguments[arguments.length-1];
+var html = arguments[0];
+try {
+  var d = document.createElement('div'); d.innerHTML = html;
+  var out = [];
+  var trs = d.querySelectorAll('table tr');
+  for (var i=0;i<trs.length;i++){
+    var cells=[]; var cs = trs[i].querySelectorAll('th,td');
+    for (var j=0;j<cs.length;j++){ cells.push((cs[j].innerText||cs[j].textContent||'').replace(/\s+/g,' ').trim()); }
+    if (cells.length) out.push(cells);
+  }
+  cb({ok:true, rows:out});
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
 # Tải 1 thông báo (Tiếp nhận / Xác nhận). body là chuỗi JSON dựng sẵn từ Python
 # để giữ nguyên idTbao (số rất lớn, tránh mất chính xác khi qua JS number).
 _JS_DOWNLOAD_TB = r"""
@@ -1606,19 +1634,195 @@ def _dvc_browser_thongbao(drv, ma):
     return out, diag
 
 
+def _khong_dau(s):
+    import unicodedata
+    s = unicodedata.normalize("NFD", str(s or ""))
+    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower().strip()
+
+# Các cột báo cáo Tra cứu tờ khai (theo file mẫu)
+TRACUU_COLS = ["to_khai", "ky", "loai", "ngay_nop", "lan_nop", "lan_bs", "trang_thai"]
+TRACUU_HEADERS = ["Mst", "Tên công ty", "Tờ khai", "Kỳ", "Loại",
+                  "Ngày nộp", "Lần nộp", "Lần bổ sung", "Trạng thái"]
+
+def _dvc_map_bang(rows):
+    """Từ mảng dòng×ô (DOM) → list dict theo TRACUU_COLS. Tự dò cột theo tiêu đề."""
+    if not rows:
+        return []
+    # tìm dòng tiêu đề: dòng chứa 'trang thai' hoặc 'to khai'
+    h_idx = -1
+    for i, r in enumerate(rows[:5]):
+        joined = _khong_dau(" ".join(r))
+        if "trang thai" in joined or "to khai" in joined or "ky tinh" in joined:
+            h_idx = i; break
+    if h_idx < 0:
+        h_idx = 0
+    header = [_khong_dau(c) for c in rows[h_idx]]
+
+    def find(*keys, avoid=()):
+        for j, h in enumerate(header):
+            if any(k in h for k in keys) and not any(a in h for a in avoid):
+                return j
+        return -1
+
+    col = {
+        "trang_thai": find("trang thai"),
+        "ngay_nop":   find("ngay nop", "ngay"),
+        "ky":         find("ky tinh", avoid=()) if find("ky tinh") >= 0 else find("ky", avoid=("ky thuat",)),
+        "lan_bs":     find("bo sung"),
+        "lan_nop":    find("lan nop", avoid=("bo sung",)),
+        "loai":       find("loai"),
+        "to_khai":    find("to khai", "thu tuc", avoid=("loai",)),
+    }
+    out = []
+    for r in rows[h_idx + 1:]:
+        if not r or all(not c for c in r):
+            continue
+        # bỏ dòng phân trang / tổng
+        j = _khong_dau(" ".join(r))
+        if "tong so ban ghi" in j or "trang" == j[:5]:
+            continue
+        rec = {}
+        ok_any = False
+        for c in TRACUU_COLS:
+            idx = col.get(c, -1)
+            v = r[idx] if 0 <= idx < len(r) else ""
+            rec[c] = v
+            if v:
+                ok_any = True
+        if ok_any:
+            out.append(rec)
+    return out
+
+
+def _dvc_browser_login_2pass(drv, mst, pw1, pw2):
+    """Thử pass1 rồi pass2. Trả (ok, dùng_pass(1/2/0), info)."""
+    if pw1:
+        ok, info = _dvc_browser_login(drv, mst, pw1)
+        if ok:
+            return True, 1, info
+        info1 = info
+    else:
+        info1 = {"bo_qua": "pass1 trống"}
+    if pw2:
+        ok, info = _dvc_browser_login(drv, mst, pw2)
+        if ok:
+            return True, 2, info
+        return False, 0, {"pass1": info1, "pass2": info}
+    return False, 0, {"pass1": info1, "pass2": "(không có pass2)"}
+
+
+def _dvc_browser_tracuu(drv, tu, den, so_lan=8):
+    """Tra cứu → trả (rows_struct, ma_list, raw_html, diag)."""
+    import time as _t
+    diag = []
+    drv.get(DVC_BASE + "/tchs"); _t.sleep(1.5)
+    if not _dvc_wait_jquery(drv, 15):
+        return [], [], "", ["Trang /tchs không nạp được"]
+    for lan in range(1, so_lan + 1):
+        try:
+            cap = _dvc_cap_from_js(drv.execute_async_script(_JS_GETCAPTCHA))
+        except Exception as e:
+            diag.append(f"(captcha lỗi: {e})"); continue
+        if not cap:
+            diag.append("(captcha rỗng)"); continue
+        try:
+            res = drv.execute_async_script(_JS_SEARCH, tu, den, cap)
+        except Exception as e:
+            diag.append(f"{cap}→lỗi search: {e}"); continue
+        if res and res.get("ok"):
+            html = res.get("html") or ""
+            low = html.lower()
+            if ("table-container" in low or "tổng số bản ghi" in low or "totalpage" in low):
+                ma = _dvc_parse_ma_ho_so(html)
+                rows = []
+                try:
+                    pr = drv.execute_async_script(_JS_PARSE_TABLE, html)
+                    if pr and pr.get("ok"):
+                        rows = _dvc_map_bang(pr.get("rows") or [])
+                except Exception as e:
+                    diag.append(f"parse bảng lỗi: {e}")
+                diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng")
+                return rows, ma, html, diag
+            diag.append(f"{cap}→chưa ra bảng ({len(html)})")
+        else:
+            diag.append(f"{cap}→{str(res)[:80]}")
+        _t.sleep(0.4)
+    return [], [], "", diag
+
+
+def _xuat_tracuu_excel(rows, path):
+    """rows: list dict có mst, ten, + TRACUU_COLS. Ghi Excel theo mẫu Tracuu.xls."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    wb = Workbook(); ws = wb.active; ws.title = "Tracuutokhai"
+    ws["A3"] = "TRA CỨU TỜ KHAI"
+    ws["A3"].font = Font(bold=True, size=14)
+    hr = 5
+    for c, h in enumerate(TRACUU_HEADERS, 1):
+        cell = ws.cell(hr, c, h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="2F5496")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin = Side(style="thin", color="BBBBBB")
+    bd = Border(left=thin, right=thin, top=thin, bottom=thin)
+    r = hr + 1
+    for rec in rows:
+        vals = [rec.get("mst", ""), rec.get("ten", "")] + [rec.get(c, "") for c in TRACUU_COLS]
+        for c, v in enumerate(vals, 1):
+            cell = ws.cell(r, c, v); cell.border = bd
+            cell.alignment = Alignment(vertical="center", wrap_text=(c == 2 or c == 3))
+            tt = _khong_dau(rec.get("trang_thai", ""))
+            if c == 9:
+                if "khong chap nhan" in tt or "tu choi" in tt:
+                    cell.font = Font(color="C00000", bold=True)
+                elif "da chap nhan" in tt:
+                    cell.font = Font(color="008000")
+                elif tt:
+                    cell.font = Font(color="BF8F00")  # chờ
+        r += 1
+    widths = [16, 42, 40, 10, 12, 13, 9, 11, 16]
+    for c, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(1, c).column_letter].width = w
+    ws.freeze_panes = "A6"
+    wb.save(path)
+
+def _xuat_saipass_excel(items, path):
+    """items: list dict {mst, ten, ly_do}."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook(); ws = wb.active; ws.title = "SaiMatKhau"
+    ws["A1"] = "DANH SÁCH CÔNG TY ĐĂNG NHẬP KHÔNG ĐƯỢC"
+    ws["A1"].font = Font(bold=True, size=13)
+    heads = ["Mã số thuế", "Tên công ty", "Lý do / Lỗi"]
+    for c, h in enumerate(heads, 1):
+        cell = ws.cell(3, c, h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="C00000")
+        cell.alignment = Alignment(horizontal="center")
+    r = 4
+    for it in items:
+        ws.cell(r, 1, it.get("mst", ""))
+        ws.cell(r, 2, it.get("ten", ""))
+        ws.cell(r, 3, str(it.get("ly_do", ""))[:500])
+        r += 1
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 42
+    ws.column_dimensions["C"].width = 70
+    wb.save(path)
+
+
 @app.post("/api/dvc/test-login/{cid}")
 def dvc_test_login(cid: int, body: dict = Body(...)):
     """Thử đăng nhập Dịch vụ công (chỉ kiểm tra, không tải gì).
-    body: { matkhau: str, luu: bool }"""
+    body: { matkhau, matkhau2, luu }"""
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     if not comp:
         raise HTTPException(404, "Không tìm thấy công ty")
-    matkhau = (body.get("matkhau") or "").strip()
-    if not matkhau and "dvc_password" in comp.keys():
-        matkhau = (comp["dvc_password"] or "").strip()
-    if not matkhau:
+    pw1 = (body.get("matkhau") or (comp["dvc_password"] if "dvc_password" in comp.keys() else "") or "").strip()
+    pw2 = (body.get("matkhau2") or (comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or "").strip()
+    if not pw1 and not pw2:
         raise HTTPException(400, "Chưa nhập mật khẩu Dịch vụ công")
     try:
         drv = _dvc_make_driver(headless=True)
@@ -1627,7 +1831,7 @@ def dvc_test_login(cid: int, body: dict = Body(...)):
             "Không khởi động được trình duyệt Chrome. Hãy chắc máy đã cài Google "
             f"Chrome và có mạng để tải chromedriver lần đầu. Chi tiết: {type(e).__name__}: {e}")
     try:
-        ok, info = _dvc_browser_login(drv, comp["mst"], matkhau)
+        ok, dung_pass, info = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
     except Exception as e:
         import traceback
         raise HTTPException(500, f"Lỗi khi đăng nhập: {type(e).__name__}: {e} | "
@@ -1637,11 +1841,13 @@ def dvc_test_login(cid: int, body: dict = Body(...)):
         except Exception: pass
     if ok and body.get("luu"):
         conn = db()
-        conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
+        conn.execute("UPDATE companies SET dvc_password=?, dvc_password2=? WHERE id=?",
+                     (pw1, pw2, cid))
         conn.commit(); conn.close()
     if not ok:
         raise HTTPException(401, f"Đăng nhập thất bại. {json.dumps(info, ensure_ascii=False)}")
-    return {"ok": True, **info, "da_luu_mat_khau": bool(body.get("luu"))}
+    return {"ok": True, "dung_pass": dung_pass, **(info if isinstance(info, dict) else {}),
+            "da_luu_mat_khau": bool(body.get("luu"))}
 
 
 @app.get("/api/dvc/captcha-debug/{cid}", response_class=HTMLResponse)
@@ -1808,10 +2014,9 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
     conn.close()
     if not comp:
         raise HTTPException(404, "Không tìm thấy công ty")
-    matkhau = (body.get("matkhau") or "").strip()
-    if not matkhau and "dvc_password" in comp.keys():
-        matkhau = (comp["dvc_password"] or "").strip()
-    if not matkhau:
+    pw1 = (body.get("matkhau") or (comp["dvc_password"] if "dvc_password" in comp.keys() else "") or "").strip()
+    pw2 = (body.get("matkhau2") or (comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or "").strip()
+    if not pw1 and not pw2:
         raise HTTPException(400, "Chưa nhập mật khẩu Dịch vụ công")
     tu = (body.get("tu_ngay") or "").strip()
     den = (body.get("den_ngay") or "").strip()
@@ -1831,13 +2036,14 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
 
     da_tai, loi_tai, ma_list, search_diag, info = [], [], [], [], {}
     try:
-        # 1) Đăng nhập (trình duyệt thật → qua WAF)
-        ok, info = _dvc_browser_login(drv, comp["mst"], matkhau)
+        # 1) Đăng nhập (trình duyệt thật → qua WAF), thử pass1 rồi pass2
+        ok, dung_pass, info = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
         if not ok:
             raise HTTPException(401, f"Đăng nhập thất bại. {json.dumps(info, ensure_ascii=False)}")
         if body.get("luu"):
             conn = db()
-            conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
+            conn.execute("UPDATE companies SET dvc_password=?, dvc_password2=? WHERE id=?",
+                         (pw1, pw2, cid))
             conn.commit(); conn.close()
 
         # 2) Tra cứu hồ sơ đã nộp (captcha lớp 2)
@@ -1912,6 +2118,200 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
         "chan_doan_tra_cuu": search_diag,
         "chan_doan_thong_bao": tb_diag,
     }
+
+
+# ============================================================
+#  DVC HÀNG LOẠT: đăng nhập + tra cứu + (tùy chọn) tải, cho NHIỀU công ty.
+#  Chạy nền (1 trình duyệt dùng lại cho từng công ty), poll trạng thái.
+#  Xuất 2 Excel: Tra cứu tờ khai (tổng hợp) + Sai mật khẩu.
+# ============================================================
+DVC_BATCH = {}        # batch_id -> {...}
+_DVC_BATCH_SEQ = {"n": 0}
+
+def _dvc_run_batch(batch_id, cids, body):
+    job = DVC_BATCH[batch_id]
+    tu = (body.get("tu_ngay") or "").strip()
+    den = (body.get("den_ngay") or "").strip()
+    tai_file = bool(body.get("tai_file"))       # có tải file tờ khai về không
+    tai_tb = bool(body.get("tai_thong_bao", True))
+    luu_pass = bool(body.get("luu", True))
+    tracuu_rows = []      # gom mọi dòng cho Excel tra cứu
+    sai_pass = []         # công ty đăng nhập không được
+    drv = None
+    try:
+        try:
+            drv = _dvc_make_driver(headless=True)
+        except Exception as e:
+            job["loi"] = f"Không mở được Chrome: {e}"
+            job["running"] = False
+            return
+        for cid in cids:
+            if job.get("cancel"):
+                break
+            conn = db()
+            comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+            conn.close()
+            if not comp:
+                job["done"] += 1; continue
+            ten = comp["ten"]; mst = comp["mst"]
+            job["current"] = ten
+            item = {"cid": cid, "mst": mst, "ten": ten, "trang_thai": "đang xử lý",
+                    "so_dong": 0, "so_file": 0}
+            job["items"].append(item)
+            pw1 = (comp["dvc_password"] if "dvc_password" in comp.keys() else "") or ""
+            pw2 = (comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or ""
+            pw1 = (pw1 or "").strip(); pw2 = (pw2 or "").strip()
+            # mật khẩu chung dự phòng (nếu người dùng nhập ở batch)
+            if body.get("pass_chung"):
+                pw2 = pw2 or (body.get("pass_chung") or "").strip()
+            if not pw1 and not pw2:
+                item["trang_thai"] = "thiếu mật khẩu"
+                sai_pass.append({"mst": mst, "ten": ten, "ly_do": "Chưa lưu mật khẩu Dịch vụ công"})
+                job["done"] += 1; continue
+            # xoá phiên công ty trước để tránh lẫn đăng nhập
+            try:
+                drv.get(DVC_BASE + "/homelogin")
+                drv.delete_all_cookies()
+            except Exception:
+                pass
+            try:
+                ok, dung_pass, info = _dvc_browser_login_2pass(drv, mst, pw1, pw2)
+            except Exception as e:
+                ok, dung_pass, info = False, 0, {"loi": str(e)}
+            if not ok:
+                item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
+                sai_pass.append({"mst": mst, "ten": ten,
+                                 "ly_do": json.dumps(info, ensure_ascii=False)[:480]})
+                job["done"] += 1; continue
+            item["dung_pass"] = dung_pass
+            # tra cứu
+            try:
+                rows, ma_list, raw_html, sdiag = _dvc_browser_tracuu(drv, tu, den)
+            except Exception as e:
+                rows, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+            for rec in rows:
+                rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
+                tracuu_rows.append(rec2)
+            item["so_dong"] = len(rows)
+            # tải file (tùy chọn)
+            if tai_file and ma_list:
+                folder = _dvc_save_folder(cid)
+                if folder:
+                    for ma in ma_list:
+                        if job.get("cancel"):
+                            break
+                        try:
+                            if tai_tb:
+                                tb_files, _ = _dvc_browser_thongbao(drv, ma)
+                                for fn, raw in tb_files:
+                                    if raw:
+                                        _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
+                            fn, raw = _dvc_browser_download(drv, ma)
+                            if raw:
+                                _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
+                        except Exception:
+                            pass
+                        time.sleep(0.3)
+            item["trang_thai"] = "xong"
+            job["done"] += 1
+            time.sleep(0.5)
+    finally:
+        try:
+            if drv: drv.quit()
+        except Exception:
+            pass
+    # xuất Excel
+    try:
+        out_dir = _dvc_batch_out_dir()
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        if tracuu_rows:
+            p = os.path.join(out_dir, f"TraCuuToKhai_{ts}.xlsx")
+            _xuat_tracuu_excel(tracuu_rows, p)
+            job["file_tracuu"] = p
+        if sai_pass:
+            p2 = os.path.join(out_dir, f"SaiMatKhau_{ts}.xlsx")
+            _xuat_saipass_excel(sai_pass, p2)
+            job["file_saipass"] = p2
+    except Exception as e:
+        job["loi_xuat"] = str(e)
+    job["so_dong_tong"] = len(tracuu_rows)
+    job["so_sai_pass"] = len(sai_pass)
+    job["running"] = False
+    job["current"] = None
+
+def _dvc_luu_file(folder, fname, raw):
+    safe = "".join(ch for ch in fname if ch not in '\\/:*?"<>|') or "file.zip"
+    path = os.path.join(folder, safe)
+    if os.path.exists(path):
+        base, ext = os.path.splitext(safe); k = 2
+        while os.path.exists(os.path.join(folder, f"{base}_{k}{ext}")):
+            k += 1
+        path = os.path.join(folder, f"{base}_{k}{ext}")
+    with open(path, "wb") as f:
+        f.write(raw)
+    return path
+
+def _dvc_batch_out_dir():
+    """Thư mục lưu 2 file Excel tổng hợp: ưu tiên save_dir/data_dir đầu tiên có."""
+    conn = db()
+    row = conn.execute("SELECT save_dir, data_dir FROM companies "
+                       "WHERE (save_dir IS NOT NULL AND save_dir<>'') "
+                       "OR (data_dir IS NOT NULL AND data_dir<>'') LIMIT 1").fetchone()
+    conn.close()
+    base = ""
+    if row:
+        base = (row["save_dir"] or row["data_dir"] or "").strip()
+    if not base or not os.path.isdir(base):
+        base = os.path.join(DATA_DIR, "tracuu_thue")
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+@app.post("/api/dvc/batch")
+def dvc_batch_start(body: dict = Body(...)):
+    """Bắt đầu chạy hàng loạt. body: { cids:[...], tu_ngay, den_ngay,
+       tai_file:bool, tai_thong_bao:bool, pass_chung?:str }. Trả { batch_id }."""
+    cids = body.get("cids") or []
+    if not cids:
+        conn = db()
+        cids = [r["id"] for r in conn.execute("SELECT id FROM companies ORDER BY ten").fetchall()]
+        conn.close()
+    if not (body.get("tu_ngay") and body.get("den_ngay")):
+        raise HTTPException(400, "Chưa chọn khoảng ngày")
+    _DVC_BATCH_SEQ["n"] += 1
+    bid = _DVC_BATCH_SEQ["n"]
+    DVC_BATCH[bid] = {"running": True, "total": len(cids), "done": 0,
+                      "current": None, "items": [], "cancel": False}
+    threading.Thread(target=lambda: _dvc_run_batch(bid, cids, body), daemon=True).start()
+    return {"ok": True, "batch_id": bid}
+
+@app.get("/api/dvc/batch-status/{bid}")
+def dvc_batch_status(bid: int):
+    job = DVC_BATCH.get(bid)
+    if not job:
+        raise HTTPException(404, "Không tìm thấy phiên")
+    return job
+
+@app.post("/api/dvc/batch-cancel/{bid}")
+def dvc_batch_cancel(bid: int):
+    job = DVC_BATCH.get(bid)
+    if job:
+        job["cancel"] = True
+    return {"ok": True}
+
+@app.get("/api/dvc/tai-excel")
+def dvc_tai_excel(path: str):
+    """Tải 1 file Excel tổng hợp đã tạo (đường dẫn do batch-status trả về)."""
+    from fastapi.responses import FileResponse
+    out_dir = os.path.realpath(_dvc_batch_out_dir())
+    rp = os.path.realpath(path)
+    # an toàn: chỉ cho tải file .xlsx trong thư mục xuất
+    if not rp.startswith(out_dir) or not rp.endswith(".xlsx") or not os.path.isfile(rp):
+        # cũng cho phép nằm trong DATA_DIR
+        if not (rp.startswith(os.path.realpath(DATA_DIR)) and os.path.isfile(rp)):
+            raise HTTPException(404, "File không hợp lệ")
+    return FileResponse(rp, filename=os.path.basename(rp),
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
@@ -2799,17 +3199,39 @@ def clear_downloads(scope: str = "temp"):
                         if ff.lower().endswith((".xml", ".pdf", ".zip", ".html")):
                             _xoa_file(os.path.join(root, ff))
 
-    # 2) nếu scope='all' -> xóa file XML/PDF trong thư mục lưu của các công ty
+    # 2) nếu scope='all' -> xóa file XML/PDF/zip trong thư mục lưu + thư mục dữ liệu
+    #    (gồm cả tờ khai đã tải trong các thư mục con ToKhai_DaNop)
     if scope == "all":
         conn = db()
-        dirs = conn.execute("SELECT DISTINCT save_dir FROM companies WHERE save_dir IS NOT NULL AND save_dir<>''").fetchall()
+        rows = conn.execute("SELECT save_dir, data_dir FROM companies").fetchall()
         conn.close()
-        for d in dirs:
-            sd = (d["save_dir"] or "").strip()
-            if sd and os.path.isdir(sd):
-                for root, _dirs, files in os.walk(sd):
-                    for ff in files:
-                        if ff.lower().endswith((".xml", ".pdf", ".zip", ".html", ".xlsx")):
+        seen_dirs = set()
+        for d in rows:
+            for key in ("save_dir", "data_dir"):
+                sd = (d[key] or "").strip() if key in d.keys() else ""
+                if sd and os.path.isdir(sd) and sd not in seen_dirs:
+                    seen_dirs.add(sd)
+                    for root, _dirs, files in os.walk(sd):
+                        for ff in files:
+                            if ff.lower().endswith((".xml", ".pdf", ".zip", ".html")):
+                                _xoa_file(os.path.join(root, ff))
+
+    # 3) scope='tokhai' -> CHỈ xóa file tờ khai đã tải (các thư mục ToKhai_DaNop)
+    if scope in ("tokhai", "all"):
+        conn = db()
+        rows = conn.execute("SELECT save_dir, data_dir FROM companies").fetchall()
+        conn.close()
+        seen = set()
+        for d in rows:
+            for key in ("save_dir", "data_dir"):
+                sd = (d[key] or "").strip() if key in d.keys() else ""
+                if not sd:
+                    continue
+                tk = os.path.join(sd, "ToKhai_DaNop")
+                if os.path.isdir(tk) and tk not in seen:
+                    seen.add(tk)
+                    for root, _dirs, files in os.walk(tk):
+                        for ff in files:
                             _xoa_file(os.path.join(root, ff))
 
     return {"ok": True, "so_file": xoa, "dung_luong_mb": round(dung_luong / 1024 / 1024, 2)}
