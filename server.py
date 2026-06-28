@@ -2988,6 +2988,148 @@ async def mua_hang_nhap_kho(cid: int, request: Request, export: int = 0):
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
 
 
+# ============ MUA HÀNG KHÔNG QUA KHO (TSCĐ/CCDC - form MISA) ============
+MUA_KQK_HEADERS = [
+    "Hiển thị trên sổ", "Hình thức mua hàng", "Phương thức thanh toán",
+    "Nhận kèm hóa đơn", "Ngày hạch toán (*)", "Ngày chứng từ (*)",
+    "Số chứng từ (*)", "Mẫu số HĐ", "Ký hiệu HĐ", "Số hóa đơn", "Ngày hóa đơn",
+    "Mã nhà cung cấp", "Tên nhà cung cấp", "Diễn giải", "NV mua hàng",
+    "Loại tiền", "Tỷ giá", "Mã hàng (*)", "Tên hàng", "TK chi phí (*)",
+    "TK công nợ/TK tiền (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền",
+    "Thành tiền quy đổi", "Tỷ lệ CK", "Tiền chiết khấu", "Tiền chiết khấu quy đổi",
+    "Chi phí mua hàng", "% thuế GTGT", "Tiền thuế GTGT", "Tiền thuế GTGT quy đổi",
+    "TKĐƯ thuế GTGT", "TK thuế GTGT", "Nhóm HHDV mua vào", "Giá tính thuế NK",
+    "% thuế NK", "Tiền thuế NK", "TK thuế NK", "% thuế TTĐB", "Tiền thuế TTĐB",
+    "TK thuế TTĐB"]
+
+def _ma_ts_map(cid, loai, header, rows):
+    """Bản đồ rowkey(sốHĐ|ngày|tên|thành tiền) -> mã TSCĐ/CCDC (nhất quán DM)."""
+    cat, _ = _gen_danh_muc_ts(cid, loai, header, rows)
+    m = {}
+    for row in cat:
+        key = f"{row[6]}|{row[7]}|{row[1]}|{row[5]}"
+        m[key] = row[0]
+    return m
+
+def _gen_mua_hang_kqk(cid, header, rows):
+    """Mua hàng KHÔNG qua kho: lọc Nợ 2111/211 (TSCĐ) và 2421/242 (CCDC).
+    Mã hàng lấy từ DM TSCĐ/CCDC. Số chứng từ = MHKQK1/<tháng>/<năm>."""
+    map_ts = _ma_ts_map(cid, "tscd", header, rows)
+    map_cc = _ma_ts_map(cid, "ccdc", header, rows)
+    col = _nk_cols(header)
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    out = []
+    for r in rows:
+        no = str(gv(r, col["no"]) or "").strip()
+        if no in ("2111", "211"):
+            mp = map_ts
+        elif no in ("2421", "242"):
+            mp = map_cc
+        else:
+            continue
+        ten = str(gv(r, col["ten"]) or "").strip()
+        if not ten:
+            continue
+        dvt = str(gv(r, col["dvt"]) or "").strip()
+        sl = _to_num(gv(r, col["sl"]))
+        dgia = _to_num(gv(r, col["dgia"]))
+        tt = _to_num(gv(r, col["tt"]))
+        sohd = str(gv(r, col["sohd"]) or "")
+        ngay = str(gv(r, col["ngay"]) or "")
+        co = str(gv(r, col["co"]) or "").strip()
+        kyhieu = str(gv(r, col["kh"]) or "").strip()
+        la_nk = kyhieu.upper() == "TKNK"
+        mst = _dinh_dang_mst(gv(r, col["mst"])) if not la_nk else str(gv(r, col["mst"]) or "").strip()
+        ma = mp.get(f"{sohd}|{ngay}|{ten}|{tt}", "")
+        # Số chứng từ: MHKQK1/<tháng>/<năm> (lấy từ ngày dd/mm/yyyy)
+        thang = nam = ""
+        p = ngay.replace("-", "/").split("/")
+        if len(p) == 3:
+            thang = str(int(p[1])) if p[1].isdigit() else p[1]
+            nam = p[2]
+        so_ct = f"MHKQK1/{thang}/{nam}"
+        rate = _dm_rate(gv(r, col["ts"]))
+        nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
+        nk_ts = _dm_rate(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0
+        nk_thue = _to_num(gv(r, col["nk_thue"])) or 0
+        row_o = [""] * len(MUA_KQK_HEADERS)
+        row_o[0] = 0
+        row_o[1] = 1 if la_nk else 0                       # Hình thức mua hàng
+        row_o[2] = 1 if co.startswith("11") else 0         # PTTT: tiền (11xx)->1
+        row_o[3] = 1
+        row_o[4] = ngay; row_o[5] = ngay
+        row_o[6] = so_ct
+        row_o[9] = sohd; row_o[10] = ngay
+        row_o[11] = mst; row_o[12] = str(gv(r, col["nb"]) or "")
+        row_o[13] = ten
+        row_o[17] = ma; row_o[18] = ten
+        row_o[19] = no                                      # TK chi phí = Nợ
+        row_o[20] = co                                      # TK công nợ/tiền = Có
+        row_o[21] = dvt; row_o[22] = sl; row_o[23] = dgia; row_o[24] = tt
+        row_o[30] = rate; row_o[31] = _to_num(gv(r, col["tthue"]))
+        if la_nk:
+            row_o[33] = 1331; row_o[34] = 33312
+        else:
+            row_o[34] = 1331
+        row_o[35] = 1
+        row_o[36] = nk_tg; row_o[37] = nk_ts
+        if nk_thue:
+            row_o[38] = round(nk_thue); row_o[39] = "3333"
+        out.append(row_o)
+    return out
+
+
+@app.post("/api/mua-hang-kqk/{cid}")
+async def mua_hang_khong_qua_kho(cid: int, request: Request, export: int = 0):
+    """Mua hàng không qua kho (Nợ 2111/211/2421/242). export=1 -> file."""
+    body = await request.json()
+    out = _gen_mua_hang_kqk(cid, body.get("header", []), body.get("rows", []))
+    if not export:
+        return {"headers": MUA_KQK_HEADERS, "rows": out, "so_dong": len(out)}
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Mua hàng không qua Kho"
+    for c, h in enumerate(MUA_KQK_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    cot_text = {7, 8, 9, 10, 12, 18, 20, 21, 35, 40}   # số CT, sốHĐ, MST, mã, TK
+    cot_tien = {23, 24, 25, 32, 37, 39}                # SL, đơn giá, thành tiền, thuế, NK
+    for ri, row in enumerate(out, 2):
+        for ci, v in enumerate(row, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in cot_text:
+                cell.number_format = "@"
+            elif ci in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, len(MUA_KQK_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"MuaHangKhongQuaKho_{mst}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
