@@ -1180,9 +1180,15 @@ def _dvc_login_voi_retry(client, mst, password, so_lan=6):
     tried = []
     last = ""
     for lan in range(1, so_lan + 1):
-        cap = client.solve_captcha()
+        try:
+            cap = client.solve_captcha()
+        except Exception as e:
+            last = f"Lỗi lấy/giải captcha: {type(e).__name__}: {e}"
+            tried.append("(lỗi captcha)")
+            continue
         if not cap:
             tried.append("(không đọc được captcha)")
+            last = "ddddocr không đọc được mã (rỗng) — có thể chưa cài ddddocr"
             continue
         try:
             r = client.login(mst, password, cap)
@@ -1226,8 +1232,15 @@ def dvc_test_login(cid: int, body: dict = Body(...)):
     try:
         client.prime()
     except Exception as e:
-        raise HTTPException(502, f"Không kết nối được trang Dịch vụ công: {e}")
-    ok, info = _dvc_login_voi_retry(client, comp["mst"], matkhau)
+        raise HTTPException(502, f"Không kết nối được trang Dịch vụ công: {type(e).__name__}: {e}")
+    try:
+        ok, info = _dvc_login_voi_retry(client, comp["mst"], matkhau)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(500, f"Lỗi khi đăng nhập: {type(e).__name__}: {e} | "
+                                 f"{traceback.format_exc()[-400:]}")
     if ok and body.get("luu"):
         conn = db()
         conn.execute("UPDATE companies SET dvc_password=? WHERE id=?", (matkhau, cid))
