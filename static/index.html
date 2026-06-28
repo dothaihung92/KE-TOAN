@@ -1274,7 +1274,9 @@ function moBangKe(loai){
           <button class="btn sm" onclick="nlMuaHangNK(this)" style="background:#5a3e8a" title="Lọc Nợ 1561/156/152, lấy mã hàng từ DM, kết xuất form MISA Mua hàng nhập kho">📦 Mua Hàng Nhập Kho</button>
           <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
           <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
-          <button class="btn sm" onclick="nlDanhMucVTHH()" style="background:#2e5c8a" title="Danh mục VTHH - chỉ mã hàng mới từ DM Hàng hóa + NVL">📦 DM VTHH</button>`:''}
+          <button class="btn sm" onclick="nlDanhMuc('tscd')" style="background:#1f6b4a" title="Danh mục TSCĐ (Nợ 2111/211)">🏢 DM TSCĐ</button>
+          <button class="btn sm" onclick="nlDanhMuc('ccdc')" style="background:#1f6b4a" title="Danh mục CCDC (Nợ 2421/242)">🧰 DM CCDC</button>
+          <button class="btn sm" onclick="nlDanhMucVTHH()" style="background:#2e5c8a" title="Danh mục VTHH từ DM Hàng hóa/NVL/TSCĐ/CCDC">📦 DM VTHH</button>`:''}
           <button class="btn ghost sm" onclick="xoaNhapLieu()" style="color:#c00">🗑 Xóa bộ</button>
         </div>
       </div>
@@ -1859,9 +1861,12 @@ async function nlDanhMuc(loai){
     moDanhMucGrid(loai,d.headers,d.rows,d.so_moi);
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
+const DM_TEN={hh:'🏷 Danh Mục Hàng Hóa',nvl:'🧱 Danh Mục NVL',tscd:'🏢 Danh Mục TSCĐ',ccdc:'🧰 Danh Mục CCDC'};
+const DM_NO={hh:'1561/156',nvl:'152',tscd:'2111/211',ccdc:'2421/242'};
+const DM_FILE={hh:'DMHH',nvl:'DMNVL',tscd:'DMTSCD',ccdc:'DMCCDC'};
 function moDanhMucGrid(loai,headers,rows,soMoi){
   nlDMMode=loai;                       // đang ở chế độ danh mục
-  const ten=loai==='hh'?'🏷 Danh Mục Hàng Hóa':'🧱 Danh Mục NVL';
+  const ten=DM_TEN[loai]||'Danh Mục';
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
   document.getElementById('nhapLieuBody').innerHTML=`
@@ -1891,7 +1896,8 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
   nlFreezeCol=0;nlChon=null;nlFilters={};nlSnapTrong={};nlFormulas={};nlUndoStack=[];
   nlChiHienCanhBao=false;nlCanhBaoNo={};nlIdxCotNo=-1;
   veGridNhapLieu();
-  document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng${soMoi!=null?` — <b style="color:#1f6b4a">${soMoi} mới</b>`:''} (Nợ ${loai==='hh'?'1561/156':'152'}). Cột Kho mặc định <b>${loai==='hh'?'HH':'NVL'}</b>.`;
+  const khoNote=(loai==='hh'||loai==='nvl')?` Cột Kho mặc định <b>${loai==='hh'?'HH':'NVL'}</b>.`:' Mỗi dòng là một mã riêng.';
+  document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng${soMoi!=null?` — <b style="color:#1f6b4a">${soMoi} mới</b>`:''} (Nợ ${DM_NO[loai]||''}).${khoNote}`;
 }
 function quayLaiBangKeIn(){
   nlDMMode=null;
@@ -1909,7 +1915,7 @@ async function dmXuatGrid(){
   try{
     const r=await fetch(`/api/danh-muc-hang-export/${current}?loai=${nlDMMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
-    dl(await r.blob(),`DanhMuc_${nlDMMode==='hh'?'DMHH':'DMNVL'}.xlsx`);
+    dl(await r.blob(),`DanhMuc_${DM_FILE[nlDMMode]||'DM'}.xlsx`);
     toast('📤 Đã xuất & lưu danh mục','ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }

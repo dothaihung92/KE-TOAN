@@ -2468,10 +2468,77 @@ DM_HH_HEADERS = ["Mã Hàng", "Mặt hàng", "ĐVT", "Thuế suất", "Ký tự 
 DM_I_MA, DM_I_TEN, DM_I_DVT, DM_I_TS, DM_I_KY = 0, 1, 2, 3, 4
 DM_I_SL, DM_I_DG, DM_I_TT, DM_I_HD, DM_I_NGAY, DM_I_KHO = 5, 6, 7, 8, 9, 10
 
+# Danh mục TSCĐ / CCDC (mỗi dòng 1 mã, không gộp). 12 cột.
+DM_TSCD_HEADERS = ["Mã TSCĐ", "Tên TSCĐ", "ĐVT", "SL", "Đơn giá", "Thành tiền",
+                   "HĐ", "Ngày HĐ", "Hạn sử dụng", "Đối tượng phân bổ",
+                   "Ngày ghi tăng", "TK Chi phi"]
+DM_CCDC_HEADERS = ["Mã CCDC", "Tên CCDC", "ĐVT", "SL", "Đơn giá", "Thành tiền",
+                   "HĐ", "Ngày", "Hạn sử dụng", "Đối tượng phân bổ",
+                   "Ngày ghi tăng", "TK Chi phi"]
+
+def _dm_la_ts(loai):
+    return loai in ("tscd", "ccdc")
+
+def _dm_headers(loai):
+    if loai == "tscd":
+        return DM_TSCD_HEADERS
+    if loai == "ccdc":
+        return DM_CCDC_HEADERS
+    return DM_HH_HEADERS
+
+def _gen_danh_muc_ts(cid, loai, header, rows):
+    """Danh mục TSCĐ (Nợ 2111/211) hoặc CCDC (Nợ 2421/242). MỖI DÒNG = 1 mã
+    riêng (TSCD00001, CCDC00001...), nối tiếp. Không gộp theo tên.
+    Cột: Mã, Tên, ĐVT, SL, Đơn giá, Thành tiền, HĐ, Ngày, Hạn SD, ĐT phân bổ,
+    Ngày ghi tăng, TK Chi phí. Trả (all_rows, so_moi)."""
+    prefix = "TSCD" if loai == "tscd" else "CCDC"
+    accs = {"2111", "211"} if loai == "tscd" else {"2421", "242"}
+    data = _doc_du_lieu_cty(cid)
+    store = data.get("dm_" + loai, {}) or {}
+    next_n = int(store.get("next", 1))
+    saved_rows = [list(r) for r in store.get("rows", []) if len(r) >= 12]
+    col = _dm_cols(header)
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    def rk(row):
+        # khóa dòng: số HĐ | ngày | tên | thành tiền (để không thêm trùng dòng)
+        return f"{gv(row,6)}|{gv(row,7)}|{gv(row,1)}|{gv(row,5)}"
+
+    seen = set(rk(r) for r in saved_rows)
+    new_rows = []
+    for r in rows:
+        no = str(gv(r, col["no"]) or "").strip()
+        if no not in accs:
+            continue
+        ten = str(gv(r, col["ten"]) or "").strip()
+        if not ten:
+            continue
+        dvt = str(gv(r, col["dvt"]) or "").strip()
+        sl = _to_num(gv(r, col["sl"]))
+        dgia = _to_num(gv(r, col["dgia"]))
+        tt = _to_num(gv(r, col["tt"]))
+        sohd = str(gv(r, col["sohd"]) or "")
+        ngay = str(gv(r, col["ngay"]) or "")
+        key = f"{sohd}|{ngay}|{ten}|{tt}"
+        if key in seen:
+            continue
+        seen.add(key)
+        ma = prefix + str(next_n).zfill(5)
+        next_n += 1
+        # [Mã, Tên, ĐVT, SL, Đơn giá, Thành tiền, HĐ, Ngày, Hạn SD,
+        #  ĐT phân bổ, Ngày ghi tăng, TK Chi phí]
+        new_rows.append([ma, ten, dvt, sl, dgia, tt, sohd, ngay,
+                         "", "", ngay, ""])
+    return saved_rows + new_rows, len(new_rows)
+
 def _gen_danh_muc(cid, loai, header, rows):
     """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL ('nvl', Nợ 152).
     Mã = base (theo Ký tự=nospaces(Tên)+ĐVT) + '-' + thuế suất (vd HH00001-8).
     Cột Kho mặc định HH/NVL. Nối tiếp + không lặp dòng. Trả (all_rows, so_moi)."""
+    if _dm_la_ts(loai):
+        return _gen_danh_muc_ts(cid, loai, header, rows)
     prefix = "HH" if loai == "hh" else "NVL"
     accs = {"1561", "156"} if loai == "hh" else {"152"}
     kho = "HH" if loai == "hh" else "NVL"
@@ -2526,40 +2593,48 @@ def _gen_danh_muc(cid, loai, header, rows):
 
 
 def _luu_danh_muc(cid, loai, dm_rows):
-    """Lưu danh mục đã chỉnh (lưới DM): ghi rows + dựng lại map(Ký tự->base)
-    và bộ đếm next để các kỳ sau cấp mã nối tiếp."""
-    prefix = "HH" if loai == "hh" else "NVL"
-    rows = [list(r) for r in dm_rows
-            if any(str(x).strip() for x in r)]
-    keymap = {}
+    """Lưu danh mục đã chỉnh (lưới DM): ghi rows + bộ đếm next để các kỳ sau
+    cấp mã nối tiếp. HH/NVL: dựng lại map(Ký tự->base)."""
+    prefix = {"hh": "HH", "nvl": "NVL", "tscd": "TSCD", "ccdc": "CCDC"}[loai]
+    rows = [list(r) for r in dm_rows if any(str(x).strip() for x in r)]
     maxn = 0
+    keymap = {}
     for r in rows:
-        ma = str(r[DM_I_MA]) if len(r) > DM_I_MA else ""
-        ky = str(r[DM_I_KY]) if len(r) > DM_I_KY else ""
+        ma = str(r[0]) if r else ""
         base = ma.split("-")[0] if ma else ""
-        if ky and base:
-            keymap[ky] = base
+        if not _dm_la_ts(loai):
+            ky = str(r[DM_I_KY]) if len(r) > DM_I_KY else ""
+            if ky and base:
+                keymap[ky] = base
         if base.startswith(prefix) and base[len(prefix):].isdigit():
             maxn = max(maxn, int(base[len(prefix):]))
+    store = {"next": maxn + 1, "rows": rows}
+    if not _dm_la_ts(loai):
+        store["map"] = keymap
     data = _doc_du_lieu_cty(cid)
-    data["dm_" + loai] = {"map": keymap, "next": maxn + 1, "rows": rows}
+    data["dm_" + loai] = store
     _ghi_du_lieu_cty(cid, data)
     return len(rows)
 
 
-def _xuat_dm_excel(rows, ten_sheet, fname, cid):
+def _xuat_dm_excel(rows, ten_sheet, fname, cid, loai="hh"):
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
+    headers = _dm_headers(loai)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = ten_sheet
-    for c, h in enumerate(DM_HH_HEADERS, 1):
+    for c, h in enumerate(headers, 1):
         ws.cell(1, c).value = h
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
         ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
-    cot_tien = {DM_I_SL + 1, DM_I_DG + 1, DM_I_TT + 1}     # SL, Đơn giá, Thành tiền
-    cot_text = {DM_I_MA + 1, DM_I_KY + 1, DM_I_HD + 1, DM_I_KHO + 1}
+    if _dm_la_ts(loai):
+        cot_tien = {4, 5, 6}          # SL, Đơn giá, Thành tiền
+        cot_text = {1, 7}             # Mã, HĐ
+    else:
+        cot_tien = {DM_I_SL + 1, DM_I_DG + 1, DM_I_TT + 1}
+        cot_text = {DM_I_MA + 1, DM_I_KY + 1, DM_I_HD + 1, DM_I_KHO + 1}
     for r, row in enumerate(rows, 2):
         for c, v in enumerate(row, 1):
             cell = ws.cell(r, c)
@@ -2568,7 +2643,7 @@ def _xuat_dm_excel(rows, ten_sheet, fname, cid):
                 cell.number_format = "@"
             elif c in cot_tien:
                 cell.number_format = "#,##0"
-    for c in range(1, len(DM_HH_HEADERS) + 1):
+    for c in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 16
     ws.freeze_panes = "A2"
     path = os.path.join(DOWNLOAD_DIR, fname)
@@ -2590,7 +2665,7 @@ async def danh_muc_hang(cid: int, request: Request, loai: str = "hh"):
     body = await request.json()
     all_rows, so_moi = _gen_danh_muc(cid, loai, body.get("header", []),
                                      body.get("rows", []))
-    return {"headers": DM_HH_HEADERS, "rows": all_rows,
+    return {"headers": _dm_headers(loai), "rows": all_rows,
             "so_dong": len(all_rows), "so_moi": so_moi}
 
 
@@ -2612,11 +2687,11 @@ async def danh_muc_hang_export(cid: int, request: Request, loai: str = "hh"):
     comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     mst = _chuan_mst(comp["mst"]) if comp else str(cid)
-    ten = "DMHH" if loai == "hh" else "DMNVL"
+    ten = {"hh": "DMHH", "nvl": "DMNVL", "tscd": "DMTSCD", "ccdc": "DMCCDC"}.get(loai, "DM")
+    sheet = {"hh": "DMHH", "nvl": "DMNVL", "tscd": "DMTSCD", "ccdc": "DMCCDC"}.get(loai, "DM")
     fname = f"DanhMuc_{ten}_{mst}.xlsx"
-    sheet = "DMHH" if loai == "hh" else "DMNVL"
     rows_clean = [list(r) for r in dm_rows if any(str(x).strip() for x in r)]
-    path = _xuat_dm_excel(rows_clean, sheet, fname, cid)
+    path = _xuat_dm_excel(rows_clean, sheet, fname, cid, loai)
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(rows_clean))})
 
 
@@ -2672,6 +2747,17 @@ def _gen_vthh_from_grid(cid, header, rows):
             continue                       # lọc trùng theo mã
         seen_ma.add(ma)
         out.append([ma, ten, "0", dvt])
+
+    # Thêm TSCĐ (Nợ 2111/211) và CCDC (Nợ 2421/242): mỗi dòng 1 mã riêng
+    for loai_ts in ("tscd", "ccdc"):
+        ts_rows, _sm = _gen_danh_muc_ts(cid, loai_ts, header, rows)
+        for tr in ts_rows:
+            ma = tr[0]
+            if ma in seen_ma:
+                continue
+            seen_ma.add(ma)
+            out.append([ma, tr[1], "0", tr[2]])   # Mã, Tên, Tính chất=0, ĐVT
+
     out.sort(key=lambda x: x[0])
     return out
 
