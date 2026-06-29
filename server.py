@@ -1858,6 +1858,93 @@ def dvc_test_login(cid: int, body: dict = Body(...)):
             "da_luu_mat_khau": bool(body.get("luu"))}
 
 
+@app.get("/api/etax/explore/{cid}")
+def etax_explore(cid: int):
+    """CÔNG CỤ DÒ (tạm): đăng nhập dichvucong → mở 'Dịch vụ khác' → vào
+    'Thông báo của CQT' (iframe eTax) → ghi lại cấu trúc để xây tự động hóa.
+    Mở thẳng trên trình duyệt: http://127.0.0.1:8686/api/etax/explore/<id>"""
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    pw1 = ((comp["dvc_password"] if "dvc_password" in comp.keys() else "") or "").strip()
+    pw2 = (comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or ""
+    pw2 = pw2.strip()
+    info = {"buoc": []}
+    try:
+        drv = _dvc_make_driver(headless=True)
+    except Exception as e:
+        raise HTTPException(500, f"Không mở được Chrome: {e}")
+    try:
+        ok, dp, li = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
+        info["dang_nhap"] = "OK" if ok else f"THẤT BẠI: {json.dumps(li, ensure_ascii=False)[:200]}"
+        if not ok:
+            return info
+        import time as _t
+        # 1) Mở trang Dịch vụ khác
+        drv.get(DVC_BASE + "/dich-vu-khac"); _t.sleep(3)
+        info["dvk_title"] = drv.title
+        info["dvk_url"] = drv.current_url
+        # các phần tử có chữ liên quan "Thông báo của CQT"
+        try:
+            els = drv.find_elements("xpath",
+                "//*[contains(translate(text(),'CQTHÔNGBÁO','cqthôngbáo'),'thông báo')]")
+            info["el_thongbao"] = [ (e.tag_name + ":" + (e.text or "")[:40]) for e in els[:15] ]
+        except Exception as e:
+            info["el_thongbao_err"] = str(e)
+        # iframe hiện có
+        def dump_iframes(tag):
+            try:
+                fr = drv.find_elements("tag name", "iframe")
+                return [{"src": (f.get_attribute("src") or "")[:160]} for f in fr]
+            except Exception as e:
+                return [f"err: {e}"]
+        info["iframes_truoc"] = dump_iframes("truoc")
+        # 2) Thử bấm phần tử có chữ 'Thông báo của CQT'
+        clicked = False
+        for kw in ("Thông báo của CQT", "Thông báo của cơ quan thuế", "Thông báo của CQ"):
+            try:
+                el = drv.find_element("xpath", f"//*[contains(.,'{kw}')][not(self::script)]")
+                drv.execute_script("arguments[0].scrollIntoView();arguments[0].click();", el)
+                clicked = True; info["da_bam"] = kw; _t.sleep(4); break
+            except Exception:
+                continue
+        info["clicked"] = clicked
+        info["iframes_sau"] = dump_iframes("sau")
+        info["url_sau"] = drv.current_url
+        # 3) Thử vào iframe eTax (nếu có) đọc form/bảng
+        try:
+            frames = drv.find_elements("tag name", "iframe")
+            etax_fr = None
+            for f in frames:
+                s = (f.get_attribute("src") or "")
+                if "thuedientu" in s or "etaxnnt" in s:
+                    etax_fr = f; break
+            if etax_fr is not None:
+                info["etax_iframe_src"] = etax_fr.get_attribute("src")
+                drv.switch_to.frame(etax_fr)
+                _t.sleep(1)
+                src = drv.page_source or ""
+                info["etax_len"] = len(src)
+                import re as _re
+                # tìm input ngày, nút tra cứu, form action
+                info["etax_inputs"] = _re.findall(r'<input[^>]+name=["\']([^"\']+)["\']', src)[:25]
+                info["etax_form"] = _re.findall(r'<form[^>]*action=["\']([^"\']*)["\']', src)[:3]
+                info["etax_has_table"] = ("<table" in src.lower())
+                drv.switch_to.default_content()
+        except Exception as e:
+            info["etax_err"] = str(e)
+        return info
+    except Exception as e:
+        import traceback
+        info["loi"] = f"{e} | {traceback.format_exc()[-300:]}"
+        return info
+    finally:
+        try: drv.quit()
+        except Exception: pass
+
+
 @app.get("/api/dvc/captcha-debug/{cid}", response_class=HTMLResponse)
 def dvc_captcha_debug(cid: int):
     """Trang xem captcha Dịch vụ công thật + thử OCR, để dò vì sao không giải được.
