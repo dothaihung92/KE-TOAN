@@ -1901,15 +1901,43 @@ def etax_explore(cid: int):
             except Exception as e:
                 return [f"err: {e}"]
         info["iframes_truoc"] = dump_iframes("truoc")
-        # 2) Thử bấm phần tử có chữ 'Thông báo của CQT'
+        import re as _re
+        # 1b) DÒ cách 'Thông báo của CQT' được gắn: href, onclick, ngữ cảnh HTML
+        full = drv.page_source or ""
+        flat = _re.sub(r"\s+", " ", full)
+        ctx = []
+        for m in _re.finditer(r".{0,120}Th[ôo]ng b[áa]o c[ủu]a CQT.{0,120}", flat):
+            ctx.append(m.group(0))
+        info["ngu_canh_CQT"] = ctx[:4]
+        # các link/onclick liên quan eTax/thuedientu/thong-bao
+        info["href_lq"] = list({h for h in _re.findall(r'href=["\']([^"\']+)["\']', full)
+                                if any(k in h.lower() for k in ("thuedientu","etaxnnt","thong-bao","tbao","cqt","request"))})[:20]
+        info["onclick_lq"] = list({o[:120] for o in _re.findall(r'onclick=["\']([^"\']+)["\']', full)
+                                   if any(k in o.lower() for k in ("thuedientu","etaxnnt","thong","tbao","cqt","sso","window.open"))})[:20]
+        info["js_open"] = list({o[:140] for o in _re.findall(r'window\.open\([^)]{0,140}', full)})[:15]
+        # 2) Bấm CHÍNH XÁC vào phần tử lá có đúng chữ 'Thông báo của CQT'
         clicked = False
-        for kw in ("Thông báo của CQT", "Thông báo của cơ quan thuế", "Thông báo của CQ"):
-            try:
-                el = drv.find_element("xpath", f"//*[contains(.,'{kw}')][not(self::script)]")
+        try:
+            # phần tử lá (không chứa thẻ con có cùng text) -> leo lên thẻ a/clickable gần nhất
+            el = drv.execute_script(r"""
+              var want='thông báo của cqt';
+              var all=document.querySelectorAll('a,button,div,span,li,td,p');
+              for(var i=0;i<all.length;i++){
+                var t=(all[i].innerText||all[i].textContent||'').trim().toLowerCase();
+                if(t===want || (t.length<40 && t.indexOf(want)>=0)){
+                  var e=all[i];
+                  for(var k=0;k<4 && e;k++){ if(e.tagName==='A'||e.onclick||e.getAttribute('onclick')) break; e=e.parentElement; }
+                  return e||all[i];
+                }
+              }
+              return null;
+            """)
+            if el:
+                info["el_tag"] = drv.execute_script("return arguments[0].outerHTML.slice(0,200)", el)
                 drv.execute_script("arguments[0].scrollIntoView();arguments[0].click();", el)
-                clicked = True; info["da_bam"] = kw; _t.sleep(4); break
-            except Exception:
-                continue
+                clicked = True; _t.sleep(4)
+        except Exception as e:
+            info["click_err"] = str(e)
         info["clicked"] = clicked
         _t.sleep(2)
         info["so_tab"] = len(drv.window_handles)
