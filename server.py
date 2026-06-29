@@ -1981,32 +1981,41 @@ def etax_explore(cid: int):
                         break
             except Exception as e:
                 info["etax_err"] = str(e)
-        # 4) Nếu đang ở trang Thông báo CQT của dichvucong -> điền ngày + tra cứu + dump bảng
+        # 4) Trang Thông báo CQT của dichvucong: dump cấu trúc (bảng sẵn có + nút + tải)
         try:
             if "tra-cuu-thongbao-cqt" in (drv.current_url or ""):
                 _dvc_wait_jquery(drv, 10)
-                # điền ngày rộng (90 ngày gần đây) rồi submit form chứa tuNgay
+                info["cqt_url"] = drv.current_url
+                def cqt_dump(tag):
+                    out = {}
+                    src = drv.page_source or ""
+                    try:
+                        pr = drv.execute_async_script(_JS_PARSE_TABLE, src)
+                        out["bang"] = ((pr or {}).get("rows") or [])[:5]
+                    except Exception as e:
+                        out["bang_err"] = str(e)
+                    # nút tra cứu
+                    out["nut"] = list({b[:120] for b in _re.findall(
+                        r'<button[^>]*>.*?</button>', src, _re.I|_re.S)
+                        if "tra c" in _khong_dau(b)})[:5]
+                    out["taive"] = list({o[:140] for o in _re.findall(
+                        r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|file)[^"\']*)["\']', src, _re.I)})[:20]
+                    # đoạn HTML quanh <table đầu tiên
+                    m = _re.search(r'<table[\s\S]{0,1800}', src)
+                    out["table_html"] = (m.group(0)[:1800] if m else "(không thấy <table)")
+                    return out
+                info["cqt_truoc_submit"] = cqt_dump("truoc")
+                # thử điền ngày + submit để xem bảng có đổi
                 drv.execute_script(r"""
                   function setv(n,v){var e=document.querySelector('[name="'+n+'"]'); if(e){e.value=v;} return !!e;}
                   var d=new Date(); var den=('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();
-                  var d2=new Date(Date.now()-90*864e5); var tu=('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear();
+                  var d2=new Date(Date.now()-120*864e5); var tu=('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear();
                   setv('tuNgay',tu); setv('denNgay',den); setv('size','100'); setv('page','0');
-                  var f=document.querySelector('[name="tuNgay"]'); if(f){while(f && f.tagName!=='FORM') f=f.parentElement; if(f) f.submit();}
+                  var f=document.querySelector('[name="tuNgay"]'); if(f){while(f && f.tagName!=='FORM') f=f.parentElement;}
+                  if(f){ f.submit(); }
                 """)
                 _t.sleep(5)
-                src = drv.page_source or ""
-                info["cqt_url"] = drv.current_url
-                # dump tiêu đề + 2 dòng đầu của bảng
-                try:
-                    pr = drv.execute_async_script(_JS_PARSE_TABLE, src)
-                    rows = (pr or {}).get("rows") or []
-                    info["cqt_bang"] = rows[:4]
-                except Exception as e:
-                    info["cqt_bang_err"] = str(e)
-                # dump link/onclick 'Tải thông báo' + form tải
-                info["cqt_taive"] = list({o[:140] for o in _re.findall(
-                    r'(?:onclick|href)=["\']([^"\']*(?:[Tt]ai|download|idFile|tepDinhKem|ThongBao)[^"\']*)["\']', src)})[:20]
-                info["cqt_ctx_tai"] = [m.group(0) for m in _re.finditer(r'.{0,80}(?:T[ảa]i th[ôo]ng b[áa]o|tepDinhKem|idFile).{0,80}', _re.sub(r'\s+',' ',src))][:6]
+                info["cqt_sau_submit"] = cqt_dump("sau")
         except Exception as e:
             info["cqt_err"] = str(e)
         return info
