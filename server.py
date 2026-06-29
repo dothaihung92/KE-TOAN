@@ -1915,29 +1915,21 @@ def etax_explore(cid: int):
         info["onclick_lq"] = list({o[:120] for o in _re.findall(r'onclick=["\']([^"\']+)["\']', full)
                                    if any(k in o.lower() for k in ("thuedientu","etaxnnt","thong","tbao","cqt","sso","window.open"))})[:20]
         info["js_open"] = list({o[:140] for o in _re.findall(r'window\.open\([^)]{0,140}', full)})[:15]
-        # 2) Bấm CHÍNH XÁC vào phần tử lá có đúng chữ 'Thông báo của CQT'
+        # 2) Vào THẲNG route Thông báo CQT của dichvucong (để SSO tự nạp eTax)
         clicked = False
         try:
-            # phần tử lá (không chứa thẻ con có cùng text) -> leo lên thẻ a/clickable gần nhất
-            el = drv.execute_script(r"""
-              var want='thông báo của cqt';
-              var all=document.querySelectorAll('a,button,div,span,li,td,p');
-              for(var i=0;i<all.length;i++){
-                var t=(all[i].innerText||all[i].textContent||'').trim().toLowerCase();
-                if(t===want || (t.length<40 && t.indexOf(want)>=0)){
-                  var e=all[i];
-                  for(var k=0;k<4 && e;k++){ if(e.tagName==='A'||e.onclick||e.getAttribute('onclick')) break; e=e.parentElement; }
-                  return e||all[i];
-                }
-              }
-              return null;
-            """)
-            if el:
-                info["el_tag"] = drv.execute_script("return arguments[0].outerHTML.slice(0,200)", el)
-                drv.execute_script("arguments[0].scrollIntoView();arguments[0].click();", el)
-                clicked = True; _t.sleep(4)
+            drv.get(DVC_BASE + "/tra-cuu-thongbao-cqt")
+            clicked = True; _t.sleep(6)
         except Exception as e:
-            info["click_err"] = str(e)
+            info["nav_err"] = str(e)
+        # nếu vẫn chưa ra eTax, thử gọi redirectHandler('360109',...)
+        try:
+            if "thuedientu" not in (drv.current_url or "") and len(drv.window_handles) == 1:
+                drv.execute_script(
+                    "try{redirectHandler('360109','','','','Y','');}catch(e){}")
+                _t.sleep(6)
+        except Exception as e:
+            info["rh_err"] = str(e)
         info["clicked"] = clicked
         _t.sleep(2)
         info["so_tab"] = len(drv.window_handles)
