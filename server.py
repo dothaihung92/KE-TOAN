@@ -2021,7 +2021,8 @@ def etax_explore(cid: int):
                     var p=new URLSearchParams();
                     f.querySelectorAll('input[name],select[name],textarea[name]').forEach(function(e){
                       var n=e.name, v=e.value;
-                      if(n==='tuNgay')v=tu; else if(n==='denNgay')v=den;
+                      // bỏ lọc ngày -> lấy TẤT CẢ thông báo (tránh sai định dạng ngày)
+                      if(n==='tuNgay'||n==='denNgay')v='';
                       else if(n==='size')v='100'; else if(n==='page')v='0';
                       p.append(n, v==null?'':v);
                     });
