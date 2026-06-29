@@ -1911,30 +1911,56 @@ def etax_explore(cid: int):
             except Exception:
                 continue
         info["clicked"] = clicked
-        info["iframes_sau"] = dump_iframes("sau")
-        info["url_sau"] = drv.current_url
-        # 3) Thử vào iframe eTax (nếu có) đọc form/bảng
-        try:
-            frames = drv.find_elements("tag name", "iframe")
-            etax_fr = None
-            for f in frames:
-                s = (f.get_attribute("src") or "")
-                if "thuedientu" in s or "etaxnnt" in s:
-                    etax_fr = f; break
-            if etax_fr is not None:
-                info["etax_iframe_src"] = etax_fr.get_attribute("src")
-                drv.switch_to.frame(etax_fr)
-                _t.sleep(1)
+        _t.sleep(2)
+        info["so_tab"] = len(drv.window_handles)
+        import re as _re
+        def dump_current(prefix):
+            d = {}
+            try:
+                d["url"] = drv.current_url
+                d["title"] = drv.title
                 src = drv.page_source or ""
-                info["etax_len"] = len(src)
-                import re as _re
-                # tìm input ngày, nút tra cứu, form action
-                info["etax_inputs"] = _re.findall(r'<input[^>]+name=["\']([^"\']+)["\']', src)[:25]
-                info["etax_form"] = _re.findall(r'<form[^>]*action=["\']([^"\']*)["\']', src)[:3]
-                info["etax_has_table"] = ("<table" in src.lower())
-                drv.switch_to.default_content()
-        except Exception as e:
-            info["etax_err"] = str(e)
+                d["len"] = len(src)
+                d["inputs"] = _re.findall(r'<input[^>]+name=["\']([^"\']+)["\']', src)[:30]
+                d["forms"] = _re.findall(r'<form[^>]*action=["\']([^"\']*)["\']', src)[:5]
+                d["has_table"] = ("<table" in src.lower())
+                ifr = drv.find_elements("tag name", "iframe")
+                d["iframes"] = [ (f.get_attribute("src") or "")[:160] for f in ifr ]
+            except Exception as e:
+                d["err"] = str(e)
+            return d
+        # 3a) nếu mở tab mới -> chuyển sang tab mới nhất
+        if len(drv.window_handles) > 1:
+            drv.switch_to.window(drv.window_handles[-1])
+            _t.sleep(3)
+            info["tab_moi"] = dump_current("tab")
+            # nếu trong tab mới có iframe eTax -> vào đọc
+            try:
+                for f in drv.find_elements("tag name", "iframe"):
+                    s = (f.get_attribute("src") or "")
+                    if "thuedientu" in s or "etaxnnt" in s or "Request" in s:
+                        info["etax_iframe_src"] = s
+                        drv.switch_to.frame(f); _t.sleep(2)
+                        info["etax"] = dump_current("etax")
+                        drv.switch_to.default_content()
+                        break
+            except Exception as e:
+                info["etax_err"] = str(e)
+        else:
+            # không có tab mới -> đọc ngay trang hiện tại + iframe (chờ lâu hơn)
+            _t.sleep(2)
+            info["trang_hien_tai"] = dump_current("now")
+            try:
+                for f in drv.find_elements("tag name", "iframe"):
+                    s = (f.get_attribute("src") or "")
+                    if "thuedientu" in s or "etaxnnt" in s or "Request" in s:
+                        info["etax_iframe_src"] = s
+                        drv.switch_to.frame(f); _t.sleep(2)
+                        info["etax"] = dump_current("etax")
+                        drv.switch_to.default_content()
+                        break
+            except Exception as e:
+                info["etax_err"] = str(e)
         return info
     except Exception as e:
         import traceback
