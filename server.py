@@ -1981,43 +1981,49 @@ def etax_explore(cid: int):
                         break
             except Exception as e:
                 info["etax_err"] = str(e)
-        # 4) Trang Thông báo CQT của dichvucong: dump cấu trúc (bảng sẵn có + nút + tải)
+        # 4) Trang Thông báo CQT của dichvucong: liệt kê mọi bảng/nút/form
         try:
             if "tra-cuu-thongbao-cqt" in (drv.current_url or ""):
                 _dvc_wait_jquery(drv, 10)
                 info["cqt_url"] = drv.current_url
-                def cqt_dump(tag):
-                    out = {}
-                    src = drv.page_source or ""
-                    try:
-                        pr = drv.execute_async_script(_JS_PARSE_TABLE, src)
-                        out["bang"] = ((pr or {}).get("rows") or [])[:5]
-                    except Exception as e:
-                        out["bang_err"] = str(e)
-                    # nút tra cứu
-                    out["nut"] = list({b[:120] for b in _re.findall(
-                        r'<button[^>]*>.*?</button>', src, _re.I|_re.S)
-                        if "tra c" in _khong_dau(b)})[:5]
-                    out["taive"] = list({o[:140] for o in _re.findall(
-                        r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|file)[^"\']*)["\']', src, _re.I)})[:20]
-                    # đoạn HTML quanh <table đầu tiên
-                    m = _re.search(r'<table[\s\S]{0,1800}', src)
-                    out["table_html"] = (m.group(0)[:1800] if m else "(không thấy <table)")
-                    return out
-                info["cqt_truoc_submit"] = cqt_dump("truoc")
-                # thử điền ngày + submit để xem bảng có đổi
-                drv.execute_script(r"""
-                  function setv(n,v){var e=document.querySelector('[name="'+n+'"]'); if(e){e.value=v;} return !!e;}
-                  var d=new Date(); var den=('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();
-                  var d2=new Date(Date.now()-120*864e5); var tu=('0'+d2.getDate()).slice(-2)+'/'+('0'+(d2.getMonth()+1)).slice(-2)+'/'+d2.getFullYear();
-                  setv('tuNgay',tu); setv('denNgay',den); setv('size','100'); setv('page','0');
-                  var f=document.querySelector('[name="tuNgay"]'); if(f){while(f && f.tagName!=='FORM') f=f.parentElement;}
-                  if(f){ f.submit(); }
-                """)
-                _t.sleep(5)
-                info["cqt_sau_submit"] = cqt_dump("sau")
+                _JS_DUMP = r"""
+                  var out={tables:[],buttons:[],forms:[]};
+                  document.querySelectorAll('table').forEach(function(t){
+                    var hdr=[],first=[];
+                    t.querySelectorAll('thead th,thead td').forEach(c=>hdr.push((c.innerText||'').trim()));
+                    var br=t.querySelector('tbody tr');
+                    if(br) br.querySelectorAll('td,th').forEach(c=>first.push((c.innerText||'').trim().slice(0,40)));
+                    out.tables.push({id:t.id||'',cls:(t.className||'').slice(0,40),
+                      rows:t.querySelectorAll('tbody tr').length, header:hdr, first:first});
+                  });
+                  document.querySelectorAll('button,input[type=submit],a.btn').forEach(function(b){
+                    var t=((b.innerText||b.value||'')+'').trim().slice(0,30);
+                    var oc=(b.getAttribute('onclick')||'').slice(0,90);
+                    if(t||oc) out.buttons.push({t:t,oc:oc,tag:b.tagName});
+                  });
+                  document.querySelectorAll('form').forEach(function(f){
+                    var ns=[]; f.querySelectorAll('[name]').forEach(e=>ns.push(e.name));
+                    out.forms.push({action:f.getAttribute('action')||'',method:(f.method||'').toUpperCase(),names:ns.slice(0,20)});
+                  });
+                  return out;
+                """
+                info["cqt_dom"] = drv.execute_script(_JS_DUMP)
+                # thử tra cứu bằng GET query (an toàn, không submit mò)
+                import datetime as _dt
+                den = _dt.date.today().strftime("%d/%m/%Y")
+                tu = (_dt.date.today() - _dt.timedelta(days=120)).strftime("%d/%m/%Y")
+                from urllib.parse import quote
+                url2 = (DVC_BASE + "/tra-cuu-thongbao-cqt?tuNgay=" + quote(tu) +
+                        "&denNgay=" + quote(den) + "&page=0&size=100")
+                drv.get(url2); _t.sleep(4)
+                info["cqt_get_url"] = url2
+                info["cqt_dom_get"] = drv.execute_script(_JS_DUMP)
+                # link/onclick tải file sau khi có kết quả
+                src = drv.page_source or ""
+                info["cqt_taive"] = list({o[:150] for o in _re.findall(
+                    r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|tbao|file)[^"\']*)["\']', src, _re.I)})[:25]
         except Exception as e:
-            info["cqt_err"] = str(e)
+            info["cqt_err"] = f"{e}"
         return info
     except Exception as e:
         import traceback
