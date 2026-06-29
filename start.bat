@@ -44,6 +44,18 @@ echo [OK] Da tim thay Python: %PYEXE%
 %PYEXE% --version
 echo.
 
+REM ====== Tu dong cap nhat phan mem tu GitHub (neu co ban moi) ======
+if exist "update.py" (
+    echo [*] Dang kiem tra cap nhat phan mem...
+    %PYEXE% update.py
+    if errorlevel 10 (
+        echo [*] Da cap nhat trinh khoi dong - khoi dong lai...
+        start "" "%~f0"
+        exit /b
+    )
+    echo.
+)
+
 REM ====== Tu dong cai lai neu requirements.txt thay doi ======
 %PYEXE% -c "import os,sys; sys.exit(0 if os.path.exists('.installed') and os.path.getmtime('.installed')>=os.path.getmtime('requirements.txt') else 1)" >nul 2>&1
 if errorlevel 1 (
