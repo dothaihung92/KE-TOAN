@@ -2008,17 +2008,32 @@ def etax_explore(cid: int):
                   return out;
                 """
                 info["cqt_dom"] = drv.execute_script(_JS_DUMP)
-                # thử tra cứu bằng GET query (an toàn, không submit mò)
+                # Điền ngày vào FORM tìm kiếm (form có btnSearch) rồi bấm 'Tìm kiếm'
                 import datetime as _dt
                 den = _dt.date.today().strftime("%d/%m/%Y")
                 tu = (_dt.date.today() - _dt.timedelta(days=120)).strftime("%d/%m/%Y")
-                from urllib.parse import quote
-                url2 = (DVC_BASE + "/tra-cuu-thongbao-cqt?tuNgay=" + quote(tu) +
-                        "&denNgay=" + quote(den) + "&page=0&size=100")
-                drv.get(url2); _t.sleep(4)
-                info["cqt_get_url"] = url2
+                drv.execute_script(r"""
+                  var tu=arguments[0], den=arguments[1];
+                  var bs=document.querySelector('[name="btnSearch"]');
+                  var f=bs; while(f && f.tagName!=='FORM') f=f.parentElement;
+                  function sv(n,v){var e=f?f.querySelector('[name="'+n+'"]'):document.querySelector('[name="'+n+'"]'); if(e)e.value=v;}
+                  sv('tuNgay',tu); sv('denNgay',den); sv('size','100'); sv('page','0');
+                  // bấm nút Tìm kiếm
+                  var btn=[...document.querySelectorAll('button,input[type=submit]')].find(b=>((b.innerText||b.value||'').trim().toLowerCase()==='tìm kiếm'));
+                  if(btn) btn.click(); else if(bs) bs.click(); else if(f) f.submit();
+                """, tu, den)
+                _t.sleep(5)
+                info["cqt_get_url"] = drv.current_url
                 info["cqt_dom_get"] = drv.execute_script(_JS_DUMP)
-                # link/onclick tải file sau khi có kết quả
+                # outerHTML dòng đầu của bảng KẾT QUẢ (table khác tableHsoDinhKem)
+                try:
+                    info["cqt_row_html"] = drv.execute_script(r"""
+                      var ts=[...document.querySelectorAll('table')].filter(t=>t.id!=='tableHsoDinhKem');
+                      for(var i=0;i<ts.length;i++){var r=ts[i].querySelector('tbody tr'); if(r) return r.outerHTML.slice(0,1200);}
+                      return '(khong co dong ket qua)';
+                    """)
+                except Exception as e:
+                    info["cqt_row_err"] = str(e)
                 src = drv.page_source or ""
                 info["cqt_taive"] = list({o[:150] for o in _re.findall(
                     r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|tbao|file)[^"\']*)["\']', src, _re.I)})[:25]
