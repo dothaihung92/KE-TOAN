@@ -2007,48 +2007,52 @@ def etax_explore(cid: int):
                   });
                   return out;
                 """
-                len_truoc = len(drv.page_source or "")
-                # Điền ngày vào FORM tìm kiếm (form có btnSearch) rồi bấm 'Tìm kiếm'
+                # Gửi THẲNG POST form tra cứu (lấy đúng _csrf + các field từ form)
                 import datetime as _dt
                 den = _dt.date.today().strftime("%d/%m/%Y")
                 tu = (_dt.date.today() - _dt.timedelta(days=365)).strftime("%d/%m/%Y")
                 info["cqt_range"] = f"{tu} - {den}"
-                clicked_search = drv.execute_script(r"""
-                  var tu=arguments[0], den=arguments[1];
-                  var bs=document.querySelector('[name="btnSearch"]');
-                  var f=bs; while(f && f.tagName!=='FORM') f=f.parentElement;
-                  function sv(n,v){var e=f?f.querySelector('[name="'+n+'"]'):document.querySelector('[name="'+n+'"]'); if(e){e.value=v; e.dispatchEvent(new Event('change',{bubbles:true}));}}
-                  sv('tuNgay',tu); sv('denNgay',den); sv('size','100'); sv('page','0');
-                  var btn=[...document.querySelectorAll('button,input[type=submit]')].find(b=>((b.innerText||b.value||'').trim().toLowerCase()==='tìm kiếm'));
-                  if(btn){btn.click(); return 'btn';}
-                  if(f){f.submit(); return 'submit';}
-                  return 'none';
-                """, tu, den)
-                info["cqt_clicked"] = clicked_search
-                _t.sleep(6)
-                src = drv.page_source or ""
-                info["cqt_len_truoc"] = len_truoc
-                info["cqt_len_sau"] = len(src)
-                info["cqt_get_url"] = drv.current_url
-                info["cqt_dom_get"] = drv.execute_script(_JS_DUMP)
-                # thông điệp rỗng / số bản ghi
-                flat = _re.sub(r"\s+", " ", src)
-                info["cqt_thongdiep"] = [m.group(0)[:120] for m in _re.finditer(
-                    r".{0,40}(?:kh[ôo]ng c[óo] d[ữu] li[ệe]u|kh[ôo]ng t[ìi]m th[ấâ]y|b[ảa]n ghi|t[ổô]ng s[ốô]).{0,40}", flat, _re.I)][:6]
-                # outerHTML dòng đầu của MỌI bảng (xem bảng nào là kết quả)
-                try:
-                    info["cqt_rows_html"] = drv.execute_script(r"""
-                      var out=[];
-                      document.querySelectorAll('table').forEach(function(t){
-                        var r=t.querySelector('tbody tr');
-                        out.push({id:t.id||'', html:(r?r.outerHTML:'(rong)').slice(0,700)});
-                      });
-                      return out.slice(0,6);
-                    """)
-                except Exception as e:
-                    info["cqt_rows_err"] = str(e)
-                info["cqt_taive"] = list({o[:150] for o in _re.findall(
-                    r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|tbao|file)[^"\']*)["\']', src, _re.I)})[:25]
+                _JS_POST = r"""
+                  var cb=arguments[arguments.length-1], tu=arguments[0], den=arguments[1];
+                  try{
+                    var bs=document.querySelector('[name="btnSearch"]');
+                    var f=bs; while(f&&f.tagName!=='FORM') f=f.parentElement;
+                    if(!f){cb({ok:false,err:'khong thay form'});return;}
+                    var p=new URLSearchParams();
+                    f.querySelectorAll('input[name],select[name],textarea[name]').forEach(function(e){
+                      var n=e.name, v=e.value;
+                      if(n==='tuNgay')v=tu; else if(n==='denNgay')v=den;
+                      else if(n==='size')v='100'; else if(n==='page')v='0';
+                      p.append(n, v==null?'':v);
+                    });
+                    fetch(f.getAttribute('action'),{method:'POST',
+                      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+                      body:p.toString(), credentials:'same-origin'})
+                      .then(r=>r.text()).then(t=>cb({ok:true, len:t.length, html:t}))
+                      .catch(e=>cb({ok:false, err:''+e}));
+                  }catch(e){cb({ok:false,err:''+e});}
+                """
+                res = drv.execute_async_script(_JS_POST, tu, den)
+                info["cqt_post_ok"] = bool(res and res.get("ok"))
+                html = (res or {}).get("html") or ""
+                info["cqt_post_len"] = len(html)
+                if html:
+                    try:
+                        pr = drv.execute_async_script(_JS_PARSE_TABLE, html)
+                        rows = (pr or {}).get("rows") or []
+                        info["cqt_bang"] = rows[:6]
+                    except Exception as e:
+                        info["cqt_bang_err"] = str(e)
+                    flat = _re.sub(r"\s+", " ", html)
+                    info["cqt_thongdiep"] = [m.group(0)[:110] for m in _re.finditer(
+                        r".{0,30}(?:kh[ôo]ng c[óo] d[ữu] li[ệe]u|t[ổô]ng s[ốô] b[ảa]n ghi|Tr[ạa]ng th[áa]i|S[ốô] th[ôo]ng b[áa]o).{0,30}", flat, _re.I)][:8]
+                    info["cqt_taive"] = list({o[:160] for o in _re.findall(
+                        r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|tbao|tep|file)[^"\']*)["\']', html, _re.I)})[:25]
+                    # đoạn HTML quanh 'Trạng thái' (header bảng kết quả)
+                    m = _re.search(r'<table[^>]*>(?:(?!</table>)[\s\S]){0,2500}', html)
+                    info["cqt_table_html"] = (m.group(0)[:2500] if m else "(khong thay table)")
+                else:
+                    info["cqt_post_err"] = (res or {}).get("err")
         except Exception as e:
             info["cqt_err"] = f"{e}"
         return info
