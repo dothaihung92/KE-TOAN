@@ -1915,147 +1915,58 @@ def etax_explore(cid: int):
         info["onclick_lq"] = list({o[:120] for o in _re.findall(r'onclick=["\']([^"\']+)["\']', full)
                                    if any(k in o.lower() for k in ("thuedientu","etaxnnt","thong","tbao","cqt","sso","window.open"))})[:20]
         info["js_open"] = list({o[:140] for o in _re.findall(r'window\.open\([^)]{0,140}', full)})[:15]
-        # 2) Vào THẲNG route Thông báo CQT của dichvucong (để SSO tự nạp eTax)
-        clicked = False
+        import re as _re
+        # 2) Bấm card "Thông báo của CQT" = redirectHandler('360109',...) -> SSO sang eTax
         try:
-            drv.get(DVC_BASE + "/tra-cuu-thongbao-cqt")
-            clicked = True; _t.sleep(6)
-        except Exception as e:
-            info["nav_err"] = str(e)
-        # nếu vẫn chưa ra eTax, thử gọi redirectHandler('360109',...)
-        try:
-            if "thuedientu" not in (drv.current_url or "") and len(drv.window_handles) == 1:
-                drv.execute_script(
-                    "try{redirectHandler('360109','','','','Y','');}catch(e){}")
-                _t.sleep(6)
+            drv.execute_script("try{redirectHandler('360109','','','','Y','');}catch(e){}")
         except Exception as e:
             info["rh_err"] = str(e)
-        info["clicked"] = clicked
-        _t.sleep(2)
+        _t.sleep(8)
         info["so_tab"] = len(drv.window_handles)
-        import re as _re
-        def dump_current(prefix):
-            d = {}
-            try:
-                d["url"] = drv.current_url
-                d["title"] = drv.title
-                src = drv.page_source or ""
-                d["len"] = len(src)
-                d["inputs"] = _re.findall(r'<input[^>]+name=["\']([^"\']+)["\']', src)[:30]
-                d["forms"] = _re.findall(r'<form[^>]*action=["\']([^"\']*)["\']', src)[:5]
-                d["has_table"] = ("<table" in src.lower())
-                ifr = drv.find_elements("tag name", "iframe")
-                d["iframes"] = [ (f.get_attribute("src") or "")[:160] for f in ifr ]
-            except Exception as e:
-                d["err"] = str(e)
-            return d
-        # 3a) nếu mở tab mới -> chuyển sang tab mới nhất
-        if len(drv.window_handles) > 1:
-            drv.switch_to.window(drv.window_handles[-1])
-            _t.sleep(3)
-            info["tab_moi"] = dump_current("tab")
-            # nếu trong tab mới có iframe eTax -> vào đọc
-            try:
-                for f in drv.find_elements("tag name", "iframe"):
-                    s = (f.get_attribute("src") or "")
-                    if "thuedientu" in s or "etaxnnt" in s or "Request" in s:
-                        info["etax_iframe_src"] = s
-                        drv.switch_to.frame(f); _t.sleep(2)
-                        info["etax"] = dump_current("etax")
-                        drv.switch_to.default_content()
-                        break
-            except Exception as e:
-                info["etax_err"] = str(e)
-        else:
-            # không có tab mới -> đọc ngay trang hiện tại + iframe (chờ lâu hơn)
-            _t.sleep(2)
-            info["trang_hien_tai"] = dump_current("now")
-            try:
-                for f in drv.find_elements("tag name", "iframe"):
-                    s = (f.get_attribute("src") or "")
-                    if "thuedientu" in s or "etaxnnt" in s or "Request" in s:
-                        info["etax_iframe_src"] = s
-                        drv.switch_to.frame(f); _t.sleep(2)
-                        info["etax"] = dump_current("etax")
-                        drv.switch_to.default_content()
-                        break
-            except Exception as e:
-                info["etax_err"] = str(e)
-        # 4) Trang Thông báo CQT của dichvucong: liệt kê mọi bảng/nút/form
+        # nếu mở tab mới -> sang tab mới nhất
         try:
-            if "tra-cuu-thongbao-cqt" in (drv.current_url or ""):
-                _dvc_wait_jquery(drv, 10)
-                info["cqt_url"] = drv.current_url
-                _JS_DUMP = r"""
-                  var out={tables:[],buttons:[],forms:[]};
-                  document.querySelectorAll('table').forEach(function(t){
-                    var hdr=[],first=[];
-                    t.querySelectorAll('thead th,thead td').forEach(c=>hdr.push((c.innerText||'').trim()));
-                    var br=t.querySelector('tbody tr');
-                    if(br) br.querySelectorAll('td,th').forEach(c=>first.push((c.innerText||'').trim().slice(0,40)));
-                    out.tables.push({id:t.id||'',cls:(t.className||'').slice(0,40),
-                      rows:t.querySelectorAll('tbody tr').length, header:hdr, first:first});
-                  });
-                  document.querySelectorAll('button,input[type=submit],a.btn').forEach(function(b){
-                    var t=((b.innerText||b.value||'')+'').trim().slice(0,30);
-                    var oc=(b.getAttribute('onclick')||'').slice(0,90);
-                    if(t||oc) out.buttons.push({t:t,oc:oc,tag:b.tagName});
-                  });
-                  document.querySelectorAll('form').forEach(function(f){
-                    var ns=[]; f.querySelectorAll('[name]').forEach(e=>ns.push(e.name));
-                    out.forms.push({action:f.getAttribute('action')||'',method:(f.method||'').toUpperCase(),names:ns.slice(0,20)});
-                  });
-                  return out;
-                """
-                # Gửi THẲNG POST form tra cứu (lấy đúng _csrf + các field từ form)
-                import datetime as _dt
-                den = _dt.date.today().strftime("%d/%m/%Y")
-                tu = (_dt.date.today() - _dt.timedelta(days=365)).strftime("%d/%m/%Y")
-                info["cqt_range"] = f"{tu} - {den}"
-                _JS_POST = r"""
-                  var cb=arguments[arguments.length-1], tu=arguments[0], den=arguments[1];
-                  try{
-                    var bs=document.querySelector('[name="btnSearch"]');
-                    var f=bs; while(f&&f.tagName!=='FORM') f=f.parentElement;
-                    if(!f){cb({ok:false,err:'khong thay form'});return;}
-                    var p=new URLSearchParams();
-                    f.querySelectorAll('input[name],select[name],textarea[name]').forEach(function(e){
-                      var n=e.name, v=e.value;
-                      // bỏ lọc ngày -> lấy TẤT CẢ thông báo (tránh sai định dạng ngày)
-                      if(n==='tuNgay'||n==='denNgay')v='';
-                      else if(n==='size')v='100'; else if(n==='page')v='0';
-                      p.append(n, v==null?'':v);
-                    });
-                    fetch(f.getAttribute('action'),{method:'POST',
-                      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-                      body:p.toString(), credentials:'same-origin'})
-                      .then(r=>r.text()).then(t=>cb({ok:true, len:t.length, html:t}))
-                      .catch(e=>cb({ok:false, err:''+e}));
-                  }catch(e){cb({ok:false,err:''+e});}
-                """
-                res = drv.execute_async_script(_JS_POST, tu, den)
-                info["cqt_post_ok"] = bool(res and res.get("ok"))
-                html = (res or {}).get("html") or ""
-                info["cqt_post_len"] = len(html)
-                if html:
-                    try:
-                        pr = drv.execute_async_script(_JS_PARSE_TABLE, html)
-                        rows = (pr or {}).get("rows") or []
-                        info["cqt_bang"] = rows[:6]
-                    except Exception as e:
-                        info["cqt_bang_err"] = str(e)
-                    flat = _re.sub(r"\s+", " ", html)
-                    info["cqt_thongdiep"] = [m.group(0)[:110] for m in _re.finditer(
-                        r".{0,30}(?:kh[ôo]ng c[óo] d[ữu] li[ệe]u|t[ổô]ng s[ốô] b[ảa]n ghi|Tr[ạa]ng th[áa]i|S[ốô] th[ôo]ng b[áa]o).{0,30}", flat, _re.I)][:8]
-                    info["cqt_taive"] = list({o[:160] for o in _re.findall(
-                        r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|tbao|tep|file)[^"\']*)["\']', html, _re.I)})[:25]
-                    # đoạn HTML quanh 'Trạng thái' (header bảng kết quả)
-                    m = _re.search(r'<table[^>]*>(?:(?!</table>)[\s\S]){0,2500}', html)
-                    info["cqt_table_html"] = (m.group(0)[:2500] if m else "(khong thay table)")
-                else:
-                    info["cqt_post_err"] = (res or {}).get("err")
+            if len(drv.window_handles) > 1:
+                drv.switch_to.window(drv.window_handles[-1])
+                _t.sleep(3)
+        except Exception:
+            pass
+        info["etax_url"] = drv.current_url
+        info["etax_title"] = drv.title
+        # nếu eTax nằm trong iframe -> vào iframe
+        try:
+            for f in drv.find_elements("tag name", "iframe"):
+                s = (f.get_attribute("src") or "")
+                if "thuedientu" in s or "etaxnnt" in s or "Request" in s:
+                    info["etax_iframe_src"] = s[:160]
+                    drv.switch_to.frame(f); _t.sleep(2)
+                    break
         except Exception as e:
-            info["cqt_err"] = f"{e}"
+            info["etax_fr_err"] = str(e)
+        # đọc trang eTax: bảng + nút Tra Cứu + form + link tải
+        try:
+            _dvc_wait_jquery(drv, 8)
+        except Exception:
+            pass
+        src = drv.page_source or ""
+        info["etax_len"] = len(src)
+        # bảng kết quả (parse DOM hiện tại)
+        try:
+            pr = drv.execute_async_script(_JS_PARSE_TABLE, src)
+            info["etax_bang"] = ((pr or {}).get("rows") or [])[:6]
+        except Exception as e:
+            info["etax_bang_err"] = str(e)
+        flat = _re.sub(r"\s+", " ", src)
+        info["etax_thongdiep"] = [m.group(0)[:120] for m in _re.finditer(
+            r".{0,40}(?:b[ảa]n ghi|kh[ôo]ng c[óo] d[ữu] li[ệe]u|Tr[ạa]ng th[áa]i|S[ốô] th[ôo]ng b[áa]o).{0,40}", flat, _re.I)][:8]
+        # nút Tra Cứu + form (dse_)
+        info["etax_buttons"] = list({(m or "")[:40] for m in _re.findall(r'<(?:button|input)[^>]*value=["\']([^"\']+)["\']', src)})[:20]
+        info["etax_forms"] = _re.findall(r'<form[^>]*action=["\']([^"\']*)["\']', src)[:4]
+        info["etax_inputs"] = list({n for n in _re.findall(r'<input[^>]+name=["\']([^"\']+)["\']', src)})[:30]
+        # link/onclick "Tải thông báo"
+        info["etax_taive"] = list({o[:160] for o in _re.findall(
+            r'(?:onclick|href)=["\']([^"\']*(?:tai|download|getFile|TBao|dse_)[^"\']*)["\']', src, _re.I)})[:25]
+        m = _re.search(r'<table[^>]*>(?:(?!</table>)[\s\S]){0,2600}', src)
+        info["etax_table_html"] = (m.group(0)[:2600] if m else "(khong thay table)")
         return info
     except Exception as e:
         import traceback
