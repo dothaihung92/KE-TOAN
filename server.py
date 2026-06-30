@@ -1316,7 +1316,31 @@ def _dvc_login_voi_retry(client, mst, password, so_lan=6):
 _DVC_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
-def _dvc_make_driver(headless=True):
+_ESIGNER_EXT_ID = "ekaaenaocpheoabajfdnkhiibfmfmloo"   # tiện ích ký số GDT (eSigner)
+
+def _find_chrome_extension(ext_id):
+    """Tìm thư mục tiện ích Chrome đã cài (để nạp vào trình duyệt tự động).
+    Tra trong cac profile Chrome/Chromium tren Windows."""
+    import glob
+    bases = [
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Chromium\User Data"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data"),
+    ]
+    for base in bases:
+        if not os.path.isdir(base):
+            continue
+        profs = ["Default"] + [os.path.basename(p) for p in glob.glob(os.path.join(base, "Profile *"))]
+        for prof in profs:
+            extdir = os.path.join(base, prof, "Extensions", ext_id)
+            if os.path.isdir(extdir):
+                vers = [d for d in glob.glob(os.path.join(extdir, "*")) if os.path.isdir(d)]
+                if vers:
+                    vers.sort()
+                    return vers[-1]
+    return None
+
+def _dvc_make_driver(headless=True, esigner=False):
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     opts = Options()
@@ -1330,12 +1354,18 @@ def _dvc_make_driver(headless=True):
     opts.add_argument("--disable-blink-features=AutomationControlled")
     # UA chuẩn (tránh chuỗi 'HeadlessChrome' bị WAF nghi ngờ)
     opts.add_argument(f"--user-agent={_DVC_UA}")
+    # Nạp tiện ích ký số eSigner đã cài sẵn (để vào được cổng eTax)
+    ext_path = _find_chrome_extension(_ESIGNER_EXT_ID) if esigner else None
+    if ext_path:
+        opts.add_argument(f"--load-extension={ext_path}")
+        opts.add_argument(f"--disable-extensions-except={ext_path}")
     try:
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
     except Exception:
         pass
     drv = webdriver.Chrome(options=opts)   # Selenium Manager tự tải chromedriver
+    drv._esigner_ext = ext_path
     drv.set_page_load_timeout(70)
     drv.set_script_timeout(150)
     try:
@@ -1873,9 +1903,10 @@ def etax_explore(cid: int):
     pw2 = pw2.strip()
     info = {"buoc": []}
     try:
-        drv = _dvc_make_driver(headless=True)
+        drv = _dvc_make_driver(headless=True, esigner=True)
     except Exception as e:
         raise HTTPException(500, f"Không mở được Chrome: {e}")
+    info["esigner_ext"] = getattr(drv, "_esigner_ext", None) or "(KHÔNG tìm thấy tiện ích eSigner đã cài)"
     try:
         ok, dp, li = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
         info["dang_nhap"] = "OK" if ok else f"THẤT BẠI: {json.dumps(li, ensure_ascii=False)[:200]}"
