@@ -420,9 +420,11 @@ class GDTClient:
             return r.content  # bytes của file zip
         return None
 
-    def get_detail(self, nbmst, khhdon, khmshdon, shdon, he_thong="query"):
+    def get_detail(self, nbmst, khhdon, khmshdon, shdon, he_thong="query", max_retry=None):
         """Lấy JSON chi tiết đầy đủ 1 hóa đơn. Có thử lại khi gặp 429/timeout
-        để không bị sót hóa đơn (xử lý triệt để)."""
+        để không bị sót hóa đơn (xử lý triệt để).
+        max_retry: giới hạn số lần thử (khi xuất Excel hàng loạt -> đặt nhỏ để
+        1 hóa đơn lỗi không làm nghẽn cả luồng nhiều phút)."""
         base = f"https://hoadondientu.gdt.gov.vn/api/{he_thong}"
         url = f"{base}/invoices/detail"
         params = {
@@ -436,7 +438,8 @@ class GDTClient:
             "referer": "https://hoadondientu.gdt.gov.vn/tra-cuu/tra-cuu-hoa-don",
         }
         sp = SP()
-        for attempt in range(sp["retry_max"]):
+        so_lan = max_retry if max_retry else sp["retry_max"]
+        for attempt in range(so_lan):
             try:
                 r = self.session.get(url, params=params,
                                      headers=extra_headers, timeout=60)
@@ -5781,15 +5784,16 @@ def export_excel(cid: int):
                 for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
                     try:
                         d = client0.get_detail(rr["nbmst"], rr["khhdon"],
-                                               rr["khmshdon"], rr["shdon"], ht)
+                                               rr["khmshdon"], rr["shdon"], ht,
+                                               max_retry=3)   # cap để không nghẽn
                         if d and (d.get("hdhhdvu") or d.get("nbmst")):
                             return rr["id"], json.dumps(d, ensure_ascii=False)
                     except Exception:
                         pass
                 return rr["id"], None
 
-            # số luồng song song theo tốc độ (nhanh=8, cân bằng=5, an toàn=3)
-            workers = {"fast": 8, "balanced": 5, "safe": 3}.get(CURRENT_SPEED, 5)
+            # số luồng song song theo tốc độ (nhanh=10, cân bằng=6, an toàn=3)
+            workers = {"fast": 10, "balanced": 6, "safe": 3}.get(CURRENT_SPEED, 6)
             with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
                 for inv_id, dj in ex.map(_tai_1, can_nap):
                     if dj:
@@ -5816,9 +5820,17 @@ def export_excel(cid: int):
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
     def autofit(ws):
-        for col in ws.columns:
-            w = max((len(str(c.value)) for c in col if c.value is not None), default=10)
-            ws.column_dimensions[col[0].column_letter].width = min(w + 2, 50)
+        # CHỈ lấy mẫu tiêu đề + ~60 dòng đầu để tính độ rộng cột.
+        # (Quét toàn bộ bằng ws.columns rất chậm với bảng vài nghìn dòng.)
+        widths = {}
+        for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 60)):
+            for c in row:
+                if c.value is not None:
+                    l = len(str(c.value))
+                    if l > widths.get(c.column, 0):
+                        widths[c.column] = l
+        for col_idx, w in widths.items():
+            ws.column_dimensions[get_column_letter(col_idx)].width = min(w + 2, 50)
 
     # Định dạng SỐ cho các cột tiền (có dấu phân cách hàng nghìn)
     NUM_FMT = "#,##0"
@@ -5931,7 +5943,8 @@ def export_excel(cid: int):
             for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
                 try:
                     detail = client.get_detail(
-                        r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], ht)
+                        r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], ht,
+                        max_retry=2)   # đã nạp song song trước -> ở đây chỉ vớt nhanh
                     if detail and (detail.get("hdhhdvu") or detail.get("nbmst")):
                         items = _parse_detail_json(detail)
                         summary = _summary_from_detail_json(detail)
