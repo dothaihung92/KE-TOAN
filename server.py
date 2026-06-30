@@ -1913,6 +1913,44 @@ def etax_explore(cid: int):
         if not ok:
             return info
         import time as _t
+        # 0) TEST trang CQT NATIVE cua dichvucong (khong can eSigner) - POST khong loc ngay
+        try:
+            drv.get(DVC_BASE + "/tra-cuu-thongbao-cqt"); _t.sleep(3)
+            _dvc_wait_jquery(drv, 8)
+            _JS_CQT = r"""
+              var cb=arguments[arguments.length-1];
+              try{
+                var bs=document.querySelector('[name="btnSearch"]');
+                var f=bs; while(f&&f.tagName!=='FORM') f=f.parentElement;
+                if(!f){cb({ok:false,err:'no form'});return;}
+                var p=new URLSearchParams();
+                f.querySelectorAll('input[name],select[name],textarea[name]').forEach(function(e){
+                  var n=e.name,v=e.value;
+                  if(n==='tuNgay'||n==='denNgay')v=''; else if(n==='size')v='100'; else if(n==='page')v='0';
+                  p.append(n,v==null?'':v);
+                });
+                fetch(f.getAttribute('action'),{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString(),credentials:'same-origin'})
+                  .then(r=>r.text()).then(t=>cb({ok:true,html:t})).catch(e=>cb({ok:false,err:''+e}));
+              }catch(e){cb({ok:false,err:''+e});}
+            """
+            res = drv.execute_async_script(_JS_CQT)
+            html = (res or {}).get("html") or ""
+            info["dvc_cqt_len"] = len(html)
+            import re as _re0
+            try:
+                pr = drv.execute_async_script(_JS_PARSE_TABLE, html)
+                info["dvc_cqt_bang"] = ((pr or {}).get("rows") or [])[:8]
+            except Exception as e:
+                info["dvc_cqt_bang_err"] = str(e)
+            flat0 = _re0.sub(r"\s+", " ", html)
+            info["dvc_cqt_msg"] = [m.group(0)[:110] for m in _re0.finditer(
+                r".{0,30}(?:b[ảa]n ghi|kh[ôo]ng c[óo] d[ữu] li[ệe]u|Tr[ạa]ng th[áa]i|S[ốô] th[ôo]ng b[áa]o).{0,30}", flat0, _re0.I)][:8]
+            info["dvc_cqt_taive"] = list({o[:150] for o in _re0.findall(
+                r'(?:onclick|href)=["\']([^"\']*(?:tai|download|idfile|tepdinhkem|thongbao|tbao|file)[^"\']*)["\']', html, _re0.I)})[:20]
+            m0 = _re0.search(r'<table[^>]*>(?:(?!</table>)[\s\S]){0,2200}', html)
+            info["dvc_cqt_table_html"] = (m0.group(0)[:2200] if m0 else "(khong thay table)")
+        except Exception as e:
+            info["dvc_cqt_err"] = str(e)
         # 1) Mở trang Dịch vụ khác
         drv.get(DVC_BASE + "/dich-vu-khac"); _t.sleep(3)
         info["dvk_title"] = drv.title
