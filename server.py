@@ -5739,6 +5739,11 @@ def _thue_theo_cong_thue(it, items, r):
 
 @app.get("/api/export-excel/{cid}")
 def export_excel(cid: int):
+    import time as _tx
+    _t0 = _tx.time()
+    def _tlog(m):
+        try: print(f"[xuat-excel +{_tx.time()-_t0:.1f}s] {m}", flush=True)
+        except Exception: pass
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
@@ -5778,6 +5783,7 @@ def export_excel(cid: int):
             import concurrent.futures as _cf
             lock = __import__("threading").Lock()
             results_map = {}
+            _tlog(f"nap chi tiet {len(can_nap)} hoa don con thieu (tu mang)...")
 
             def _tai_1(rr):
                 ht0 = rr["he_thong"] or "query"
@@ -5807,6 +5813,7 @@ def export_excel(cid: int):
                 "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
                 (cid,)).fetchall()
     conn.close()
+    _tlog(f"xong nap chi tiet ({len(rows)} hoa don) -> bat dau dung sheet")
 
     wb = openpyxl.Workbook()
     hdr_font = Font(bold=True, color="FFFFFF", name="Arial")
@@ -5892,7 +5899,12 @@ def export_excel(cid: int):
                 if len(parts) >= 2:
                     f_khh = parts[0]
                     f_sho = parts[1].lstrip("0") or "0"
-                    _file_index.setdefault((f_khh, f_sho), os.path.join(rootdir, fn))
+                    key = (f_khh, f_sho)
+                    path = os.path.join(rootdir, fn)
+                    prev = _file_index.get(key)
+                    # ƯU TIÊN file .xml (đọc trực tiếp); chỉ giữ .zip khi chưa có .xml
+                    if prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml")):
+                        _file_index[key] = path
 
     def find_invoice_file(r):
         khh = str(r["khhdon"] or "").strip()
@@ -5925,13 +5937,23 @@ def export_excel(cid: int):
             except Exception:
                 items = []; summary = None
 
-        # (1) file đã tải
+        # (1) file đã tải (XML, hoặc giải nén XML từ trong ZIP)
         if not items:
             fpath = find_invoice_file(r)
             if fpath:
                 try:
                     with open(fpath, "rb") as f:
                         data = f.read()
+                    if fpath.lower().endswith(".zip"):
+                        import zipfile as _zf, io as _io2
+                        try:
+                            z = _zf.ZipFile(_io2.BytesIO(data))
+                            xn = next((n for n in z.namelist()
+                                       if n.lower().endswith(".xml")), None)
+                            if xn:
+                                data = z.read(xn)
+                        except Exception:
+                            pass
                     items = _parse_xml_invoice(data)
                     summary = _parse_invoice_summary(data)
                 except Exception:
@@ -6411,6 +6433,7 @@ def export_excel(cid: int):
 
     build_detail_sheet("Chi tiết MUA VÀO", "purchase")
     build_detail_sheet("Chi tiết BÁN RA", "sold")
+    _tlog("xong 2 sheet chi tiet -> dung BK + Doi chieu")
 
     # ===== SHEET BẢNG KÊ CHUẨN (theo mẫu Thông tư) =====
     from openpyxl.styles import Border, Side, Alignment as _Al
@@ -6882,7 +6905,9 @@ def export_excel(cid: int):
     fname_x = f"BangKe_HoaDon_{comp['mst']}{ky_fname}.xlsx"
     # chỉ tạo DUY NHẤT 1 file BangKe_HoaDon (không tạo thêm file TongHop)
     path = os.path.join(DOWNLOAD_DIR, fname_x)
+    _tlog("bat dau ghi file Excel ra dia...")
     wb.save(path)
+    _tlog("DA GHI XONG file Excel")
     import shutil
     open_path = path
     # Mặc định lưu ra DESKTOP cho dễ tìm
