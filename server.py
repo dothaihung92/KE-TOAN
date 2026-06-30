@@ -5411,12 +5411,31 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
             return True
         return False
 
-    # ----- Tổng MUA VÀO -----
+    # ----- Tổng MUA VÀO (PHẢI KHỚP với sheet 'BK Mua vào' trong file Excel) -----
+    # Dùng ĐÚNG cách tính của BK Mua vào:
+    #  - chỉ loại HĐ thay thế (4) / xóa bỏ (6); KHÔNG loại 'không đủ điều kiện'
+    #    (để [23]/[24] khớp bảng kê — vẫn liệt kê đủ HĐ mua vào)
+    #  - loại HĐ lẫn của công ty khác (MST người mua khác MST công ty)
+    #  - HKD: nếu tgtcthue=0 nhưng tgtttbso>0 -> lấy tgtttbso (doanh số)
+    mst_cty = str(comp["mst"] or "").strip()
     mua_ds = mua_thue = 0
     for r in rows:
-        if r["loai"] != "purchase" or status_loai_bo(r):
+        if r["loai"] != "purchase":
             continue
-        mua_ds += _to_num(r["tgtcthue"]) or 0
+        try:
+            _raw = json.loads(r["raw"]) if r["raw"] else {}
+        except Exception:
+            _raw = {}
+        _tt = str(_raw.get("tthai", r["tthai"]) or "").strip()
+        if _tt in ("4", "6"):
+            continue
+        _nm = str(r["nmmst"] or "").strip()
+        if _nm and _nm != mst_cty:
+            continue
+        ds = _to_num(r["tgtcthue"]) or 0
+        if not ds:
+            ds = _to_num(r["tgtttbso"]) or 0
+        mua_ds += ds
         mua_thue += _to_num(r["tgtthue"]) or 0
 
     # ----- BÁN RA: tách theo nhóm thuế suất từ chi tiết -----
