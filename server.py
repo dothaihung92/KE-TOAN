@@ -4168,14 +4168,7 @@ async def mua_hang_dich_vu(cid: int, request: Request):
         return r[i] if 0 <= i < len(r) else ""
 
     def ts_num(v):
-        s = str(v or "").strip().upper().replace("%", "").replace(",", ".")
-        if s in ("", "KCT", "KKKNT", "KHTKKNT", "KHÔNG", "KHONG", "KO"):
-            return 0
-        try:
-            f = float(s)
-            return int(f) if f == int(f) else f
-        except Exception:
-            return 0
+        return _chuan_thue_suat(v)
 
     def so_chung_tu(sohd, mst_disp, ngay):
         sd = "".join(ch for ch in str(sohd or "") if ch.isdigit())
@@ -4295,8 +4288,39 @@ def _dm_cols(header):
         "no": find(("nợ",), ()),
     }
 
+_THUE_HOP_LE = (0, 5, 8, 10)
+
+def _chuan_thue_suat(v):
+    """Chuẩn hoá % thuế GTGT về ĐÚNG 1 trong 7 giá trị hợp lệ:
+    0, 5, 8, 10, 'KCT', 'KHAC', 'KKKNT'. Nhận chuỗi ('8%','KCT'...) hoặc số.
+    Số không khớp đúng 0/5/8/10 (kể cả số lẻ như 0.1, 0.8, 5.26...) -> 'KHAC'."""
+    if isinstance(v, (int, float)):
+        f = v
+    else:
+        s = str(v or "").strip().upper().replace(" ", "")
+        if s in ("", "KCT", "KHÔNG", "KHONG", "KO", "KHTKKNT"):
+            return "KCT"
+        if s == "KKKNT":
+            return "KKKNT"
+        if "KHAC" in s:
+            return "KHAC"
+        s2 = s.replace("%", "").replace(",", ".")
+        try:
+            f = float(s2)
+        except Exception:
+            return "KHAC"
+    fr = round(f)
+    if abs(f - fr) < 1e-6 and fr in _THUE_HOP_LE:
+        return fr
+    return "KHAC"
+
 def _dm_rate(v):
-    """Thuế suất -> số: '8%'->8, '5%'->5, '0%'/KCT/trống -> 0."""
+    """Thuế suất GTGT -> 1 trong 7 giá trị hợp lệ (xem _chuan_thue_suat)."""
+    return _chuan_thue_suat(v)
+
+def _so_pct(v):
+    """Số % thuần (dùng cho thuế NK/TTĐB — KHÔNG giới hạn 0/5/8/10 như VAT).
+    '3%'->3, '20%'->20, trống/KCT... -> 0."""
     s = str(v or "").strip().upper().replace("%", "").replace(",", ".")
     if s in ("", "KCT", "KKKNT", "KHTKKNT", "KHÔNG", "KHONG", "KO"):
         return 0
@@ -4745,7 +4769,7 @@ def _gen_mua_hang_nk(cid, header, rows):
         ngay = str(gv(r, col["ngay"]) or "")
         so_phieu = ("NK" + sohd + str(gv(r, col["mst"]) or "").strip())[:18]
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
-        nk_ts = _dm_rate(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0  # "3%"->3
+        nk_ts = _so_pct(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0  # "3%"->3
         nk_thue = _to_num(gv(r, col["nk_thue"])) or 0
         row = [""] * len(MUA_NK_HEADERS)
         row[0] = 0                               # Hiển thị trên sổ
@@ -4898,7 +4922,7 @@ def _gen_mua_hang_kqk(cid, header, rows):
         so_ct = f"MHKQK1/{thang}/{nam}"[:20]
         rate = _dm_rate(gv(r, col["ts"]))
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
-        nk_ts = _dm_rate(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0
+        nk_ts = _so_pct(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0
         nk_thue = _to_num(gv(r, col["nk_thue"])) or 0
         row_o = [""] * len(MUA_KQK_HEADERS)
         row_o[0] = 0
@@ -5193,7 +5217,7 @@ def _gen_ban_hang(cid, header, rows):
         mk = (thang, nam)
         seq_thang[mk] = seq_thang.get(mk, 0) + 1
         so_ct = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
-        rate = round(thue / ds * 100) if ds else 0
+        rate = _chuan_thue_suat((thue / ds * 100) if ds else 0)
         row = [""] * len(BAN_HANG_HEADERS)
         row[0] = 0; row[1] = 0
         row[2] = 1 if abs(tong_hd) < NGUONG_5TR else 0   # PTTT: <5tr=tiền->1
