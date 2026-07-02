@@ -6813,17 +6813,27 @@ def export_excel(cid: int):
             # --- Pass 2: ghi ra sheet ---
             for d in dong_list:
                 it = d["it"]
+                ds = d["ds"]
+                # MUA VÀO: bỏ hẳn dòng có Thành tiền = 0 (không đưa vào Chi tiết MUA VÀO)
+                if loai == "purchase" and (not isinstance(ds, (int, float)) or ds == 0):
+                    continue
+                dvt_out, sl_out, dgia_out = it.get("dvt", ""), d["sl"], d["dgia"]
+                # HĐ hạch toán Nợ 6427: khi import phần mềm cần ĐVT=MHDV, SL=1,
+                # Đơn giá = Thành tiền/Số lượng (=Thành tiền vì SL=1)
+                if loai == "purchase" and str(no_r or "").strip() == "6427":
+                    dvt_out, sl_out = "MHDV", 1
+                    dgia_out = (ds / sl_out) if isinstance(ds, (int, float)) else ds
                 append_row([
                     r["khhdon"], r["shdon"],
                     ngay_fmt, d["nguoi"], d["mst"],
                     it.get("stt", ""), it.get("ma_vt", ""),
-                    d["ten"], it.get("dvt", ""),
-                    d["sl"], d["dgia"],
-                    d["ds"], d["ts_hien"], d["tien_thue"],
+                    d["ten"], dvt_out,
+                    sl_out, dgia_out,
+                    ds, d["ts_hien"], d["tien_thue"],
                     tt, kq,
                 ], no_r, co_r)
                 cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
-                cur["ds"] += d["ds"] if isinstance(d["ds"], (int, float)) else 0
+                cur["ds"] += ds if isinstance(ds, (int, float)) else 0
                 cur["thue"] += d["tien_thue"] if isinstance(d["tien_thue"], (int, float)) else 0
 
         # ===== TỜ KHAI NHẬP KHẨU (chỉ cho MUA VÀO) =====
