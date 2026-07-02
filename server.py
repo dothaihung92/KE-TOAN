@@ -1547,8 +1547,9 @@ try {
 """
 
 # Đọc bảng kết quả tra cứu (HTML fragment) thành mảng dòng×ô bằng DOM trình duyệt.
-# Mỗi dòng kèm luôn "ma" (mã hồ sơ) lấy từ onclick=downloadHoSo('...') của chính dòng đó,
-# để sau này ghép được tên file thân thiện đúng với dữ liệu (to_khai/ky/lan_bs) của dòng.
+# Mỗi dòng kèm luôn "ma" (mã hồ sơ) dò trong chính HTML của dòng đó — thử theo đúng thứ tự
+# các mẫu mà _dvc_parse_ma_ho_so() dùng trên toàn trang (mẫu ID dạng "A.B.C-260330-0001234"
+# thường nằm trong href/data-*, không nhất thiết trong onclick=downloadHoSo(...)).
 _JS_PARSE_TABLE = r"""
 var cb = arguments[arguments.length-1];
 var html = arguments[0];
@@ -1556,12 +1557,20 @@ try {
   var d = document.createElement('div'); d.innerHTML = html;
   var out = [];
   var trs = d.querySelectorAll('table tr');
+  var pats = [
+    /[A-Z0-9]+(?:\.[A-Z0-9]+)+-\d{6}-\d{3,}/,
+    /downloadHoSo\(\s*['"]([^'"]+)['"]/,
+    /files\/detail\/([A-Za-z0-9.\-]{8,60})/,
+    /(?:idTKhai|maHoSo)["'=: ]+([A-Za-z0-9.\-]{8,60})/
+  ];
   for (var i=0;i<trs.length;i++){
     var cells=[]; var cs = trs[i].querySelectorAll('th,td');
     for (var j=0;j<cs.length;j++){ cells.push((cs[j].innerText||cs[j].textContent||'').replace(/\s+/g,' ').trim()); }
-    var ma='';
-    var m = trs[i].innerHTML.match(/downloadHoSo\(\s*['"]([^'"]+)['"]/);
-    if (m) ma = m[1];
+    var ma='', rowHtml = trs[i].innerHTML;
+    for (var k=0;k<pats.length;k++){
+      var m = rowHtml.match(pats[k]);
+      if (m){ ma = m[1] || m[0]; break; }
+    }
     if (cells.length) out.push({cells:cells, ma:ma});
   }
   cb({ok:true, rows:out});
