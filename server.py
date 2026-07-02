@@ -4221,6 +4221,7 @@ async def mua_hang_dich_vu(cid: int, request: Request):
         sohd = gv(r, i_so)
         ten = gv(r, i_ten)
         soct = so_chung_tu(sohd, mst_disp, ngay)
+        tt_val = _to_num(gv(r, i_tt))
         r_out += 1
         row_vals = {
             1: 0, 2: 1, 3: 1,                       # A,B,C
@@ -4229,8 +4230,9 @@ async def mua_hang_dich_vu(cid: int, request: Request):
             11: ten,                                 # K Diễn giải
             15: "MHDV", 16: ten,                    # O,P
             17: no, 18: co, 19: mst_disp,           # Q,R,S
-            20: gv(r, i_dvt), 21: _to_num(gv(r, i_sl)),
-            22: _to_num(gv(r, i_dg)), 23: _to_num(gv(r, i_tt)),
+            # ĐVT=MHDV, Số lượng=1, Đơn giá=Thành tiền (để import phần mềm tự động)
+            20: "MHDV", 21: 1,
+            22: tt_val, 23: tt_val,
             28: ts_num(gv(r, i_ts)), 29: _to_num(gv(r, i_tthue)),
             31: "1331",                              # AE TK thuế GTGT
             34: sohd, 35: ngay, 36: "1",            # AH,AI,AJ
