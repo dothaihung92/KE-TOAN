@@ -443,10 +443,14 @@ class GDTClient:
 
     # --- Tải file XML của 1 hóa đơn ---
     def download_xml(self, nbmst, khhdon, khmshdon, shdon, loai="purchase",
-                     he_thong="query"):
+                     he_thong="query", max_retry=None):
         """Tải file invoice.zip (chứa XML + invoice.html) của 1 hóa đơn từ TCT.
         Endpoint thật: /api/{he_thong}/invoices/export-xml?nbmst=&khhdon=&shdon=&khmshdon=
-        (không có tham số type)."""
+        (không có tham số type).
+        TRƯỚC ĐÂY hàm này KHÔNG hề thử lại — 1 lần bị 429/rớt mạng là mất file đó
+        vĩnh viễn (không lỗi, không log, chỉ đơn giản không có file). Với hàng
+        nghìn hóa đơn tải liên tiếp, chỉ cần bị chặn tốc độ giữa chừng là MẤT
+        HẲN các file còn lại từ điểm đó. Nay tự thử lại như get_detail."""
         base = f"https://hoadondientu.gdt.gov.vn/api/{he_thong}"
         url = f"{base}/invoices/export-xml"
         params = {
@@ -459,12 +463,31 @@ class GDTClient:
             "end-point": "/tra-cuu/tra-cuu-hoa-don",
             "referer": "https://hoadondientu.gdt.gov.vn/tra-cuu/tra-cuu-hoa-don",
         }
-        try:
-            r = self.session.get(url, params=params, headers=extra_headers, timeout=90)
-        except Exception:
-            return None
-        if r.status_code == 200 and r.content[:5] not in (b'{"mes', b'{"err'):
-            return r.content  # bytes của file zip
+        sp = SP()
+        so_lan = max_retry if max_retry else sp["retry_max"]
+        last_err = None
+        for attempt in range(so_lan):
+            try:
+                r = self.session.get(url, params=params, headers=extra_headers, timeout=90)
+            except Exception as e:
+                last_err = e
+                time.sleep(min(sp["retry_base"] * (attempt + 1), 60))
+                continue
+            if r.status_code == 200 and r.content[:5] not in (b'{"mes', b'{"err'):
+                return r.content  # bytes của file zip
+            if r.status_code == 401:
+                self._token_dead = True
+                return None   # hết phiên, thử lại vô ích
+            if r.status_code == 429:
+                ra = r.headers.get("Retry-After")
+                try:
+                    wait = int(ra) if ra else sp["retry_base"] * (attempt + 1)
+                except Exception:
+                    wait = sp["retry_base"] * (attempt + 1)
+                time.sleep(min(wait, 60))
+                continue
+            last_err = f"status={r.status_code}"
+            time.sleep(sp["retry_base"])
         return None
 
     def get_detail(self, nbmst, khhdon, khmshdon, shdon, he_thong="query",
@@ -2646,6 +2669,7 @@ def _run_fetch_job(cid: int, body: dict):
 
             total_saved = 0
             file_saved = 0
+            file_thieu_tong = 0   # số file XML KHÔNG tải được (sau khi đã thử lại), gộp cả kỳ
             # đếm theo loại để tổng kết: {loai: {"exp": tổng trang Thuế báo, "got": số lấy được}}
             thongke = {"purchase": {"exp": 0, "got": 0}, "sold": {"exp": 0, "got": 0}}
             # Đánh dấu RIÊNG khi 1 loại (mua/bán) bị LỖI THẬT SỰ dù đã thử lại —
@@ -2795,28 +2819,73 @@ def _run_fetch_job(cid: int, body: dict):
                         sub = os.path.join(target_dir, f"{loai_txt}".replace(" ", "_"))
                         os.makedirs(sub, exist_ok=True)
                         n = len(invs)
-                        for i, inv in enumerate(invs, 1):
+
+                        def _tai_1_file(inv):
                             nbmst = inv.get("nbmst", "")
                             khhdon = inv.get("khhdon", "")
                             khmshdon = inv.get("khmshdon", "")
                             shdon = inv.get("shdon", "")
                             base = f"{khhdon}_{shdon}_{nbmst}"
+                            if "xml" not in fmts:
+                                return True   # không yêu cầu tải xml -> coi như "xong"
+                            try:
+                                zdata = client.download_xml(nbmst, khhdon, khmshdon,
+                                                            shdon, loai, he_thong)
+                            except Exception:
+                                zdata = None
+                            if zdata:
+                                try:
+                                    _save_invoice_files(sub, base, zdata)
+                                    return True
+                                except Exception:
+                                    return False
+                            return False
+
+                        loi_file = []   # các hóa đơn tải file KHÔNG thành công (để thử lại)
+                        for i, inv in enumerate(invs, 1):
                             msg(stage="download",
                                 text=f"Đang tải file {loai_txt}: {i}/{n} (còn {n-i})",
                                 cur=i, total=n)
-                            if "xml" in fmts:
-                                try:
-                                    zdata = client.download_xml(nbmst, khhdon, khmshdon,
-                                                                shdon, loai, he_thong)
-                                except Exception:
-                                    zdata = None
-                                if zdata:
-                                    try:
-                                        _save_invoice_files(sub, base, zdata)
-                                        file_saved += 1
-                                    except Exception:
-                                        pass
+                            if getattr(client, "_token_dead", False):
+                                loi_file.append(inv)   # phiên hết hạn -> khỏi thử, để dồn báo cuối
+                            elif _tai_1_file(inv):
+                                file_saved += 1
+                            else:
+                                loi_file.append(inv)
                             time.sleep(SP()["file"])
+
+                        # THỬ LẠI 1 LƯỢT các file bị lỗi (thường do bị chặn tốc độ giữa
+                        # chừng) — trước đây KHÔNG hề thử lại nên 1 lần vấp là mất file
+                        # vĩnh viễn dù dữ liệu hóa đơn (bảng) vẫn tải đủ.
+                        if loi_file and not getattr(client, "_token_dead", False):
+                            msg(stage="warn",
+                                text=f"⚠ {loai_txt}{ht_txt}: {len(loi_file)} file tải chưa được, "
+                                     f"đang thử lại...")
+                            time.sleep(5)
+                            con_loi = []
+                            for j, inv in enumerate(loi_file, 1):
+                                msg(stage="download",
+                                    text=f"Thử lại file {loai_txt}: {j}/{len(loi_file)}",
+                                    cur=j, total=len(loi_file))
+                                if getattr(client, "_token_dead", False):
+                                    con_loi.append(inv)
+                                elif _tai_1_file(inv):
+                                    file_saved += 1
+                                else:
+                                    con_loi.append(inv)
+                                time.sleep(SP()["file"])
+                            loi_file = con_loi
+
+                        if loi_file:
+                            file_thieu_tong += len(loi_file)
+                            msg(stage="warn",
+                                text=f"⚠ {loai_txt}{ht_txt}: KHÔNG tải được {len(loi_file)}/{n} file "
+                                     f"(dữ liệu bảng vẫn lưu đủ) — chạy lại tra cứu kỳ này (chế độ "
+                                     f"'Chậm & an toàn') để tải nốt, hoặc kết xuất Excel sẽ tự lấy "
+                                     f"chi tiết các hóa đơn này qua mạng khi cần.")
+                        elif "xml" in fmts:
+                            msg(stage="info",
+                                text=f"✓ {loai_txt}{ht_txt}: đã tải đủ {n}/{n} file")
                       except Exception as e:
                         msg(stage="warn",
                             text=f"Lỗi tải file {loai_txt} (dữ liệu bảng vẫn lưu): {str(e)[:100]}")
@@ -2869,10 +2938,13 @@ def _run_fetch_job(cid: int, body: dict):
                     done_text += f" (đầu vào: {tk_mua['got']}, đầu ra: {tk_ban['got']})"
                 if file_saved:
                     done_text += f", tải {file_saved} file vào: {target_dir}"
+                if file_thieu_tong:
+                    done_text += f" — ⚠ CÒN {file_thieu_tong} FILE CHƯA TẢI ĐƯỢC (dữ liệu bảng vẫn đủ)"
                 if thieu:
                     done_text += " — ⚠ CÓ THỂ THIẾU, nên tra cứu lại (chế độ Chậm & an toàn)"
             msg(stage=("error" if co_loi else "done"), text=done_text,
                 total_saved=total_saved, file_saved=file_saved,
+                file_thieu=file_thieu_tong,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
                 tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
                 loi_tra_cuu=co_loi)
