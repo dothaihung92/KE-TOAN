@@ -3805,6 +3805,23 @@ def _dinh_dang_mst(s):
         return s[:10] + "-" + s[10:]
     return s
 
+def _nam_cua_ngay(ngay):
+    """Lấy năm (4 số) từ chuỗi ngày dd/mm/yyyy hoặc yyyy-mm-dd."""
+    s = str(ngay or "").strip()
+    if "/" in s:
+        p = s.split("/")
+        if len(p) == 3:
+            return p[2][:4]
+    if "-" in s:
+        p = s.split("-")
+        if len(p) == 3:
+            return p[0][:4] if len(p[0]) == 4 else p[2][:4]
+    return ""
+
+def _so_ct_theo_nam_mst(prefix, ngay, mst):
+    """Số chứng từ/phiếu = prefix + năm hóa đơn + MST, cắt tối đa 20 ký tự."""
+    return (str(prefix) + _nam_cua_ngay(ngay) + str(mst or "").strip())[:20]
+
 def _co_theo_tong(tong):
     """Cột Có: >= 5 triệu -> 331 (phải trả NB), còn lại -> 1111 (tiền mặt)."""
     t = _to_num(tong)
@@ -4170,9 +4187,8 @@ async def mua_hang_dich_vu(cid: int, request: Request):
     def ts_num(v):
         return _chuan_thue_suat(v)
 
-    def so_chung_tu(sohd, mst_disp, ngay):
-        sd = "".join(ch for ch in str(sohd or "") if ch.isdigit())
-        return ("DV" + sd[-2:] + str(mst_disp)[-6:] + str(ngay or ""))[:20]
+    def so_chung_tu(mst_disp, ngay):
+        return _so_ct_theo_nam_mst("DV", ngay, mst_disp)
 
     # form headers (cột A..AN) + cột 'Lọc'
     out_headers = [
@@ -4213,7 +4229,7 @@ async def mua_hang_dich_vu(cid: int, request: Request):
         ngay = str(gv(r, i_ngay) or "")
         sohd = gv(r, i_so)
         ten = gv(r, i_ten)
-        soct = so_chung_tu(sohd, mst_disp, ngay)
+        soct = so_chung_tu(mst_disp, ngay)
         tt_val = _to_num(gv(r, i_tt))
         r_out += 1
         row_vals = {
@@ -4769,7 +4785,7 @@ def _gen_mua_hang_nk(cid, header, rows):
         sohd = str(gv(r, col["sohd"]) or "").strip()
         mst = _dinh_dang_mst(gv(r, col["mst"])) if not la_nk else str(gv(r, col["mst"]) or "").strip()
         ngay = str(gv(r, col["ngay"]) or "")
-        so_phieu = ("NK" + sohd + str(gv(r, col["mst"]) or "").strip())[:20]
+        so_phieu = _so_ct_theo_nam_mst("NK", ngay, gv(r, col["mst"]))
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
         nk_ts = _so_pct(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0  # "3%"->3
         nk_thue = _to_num(gv(r, col["nk_thue"])) or 0
