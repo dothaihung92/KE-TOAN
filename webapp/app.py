@@ -24,6 +24,7 @@ from flask import (
 from hddt.client import INVOICE_ENDPOINTS, HoaDonDienTuClient, HddtError
 from hddt import exporter
 from . import db
+from .fb_app import bp as fb_bp
 
 TYPE_LABELS = {
     "purchase": "Mua vào",
@@ -38,6 +39,9 @@ def create_app() -> Flask:
     # Khoá ký session: ưu tiên biến môi trường, nếu không thì sinh ngẫu nhiên
     app.secret_key = os.environ.get("HDDT_FLASK_SECRET") or secrets.token_hex(32)
     db.init_db()
+    from fbai import db as fbdb
+    fbdb.init_db()
+    app.register_blueprint(fb_bp)
 
     # ------------------------------------------------------------------ #
     # Danh sách & quản lý công ty
