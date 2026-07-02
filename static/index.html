@@ -1482,6 +1482,7 @@ let nlMapNoHoc={};        // {mst: tk_no} đã học từ server
 let nlCanhBaoNo={};       // {rowIdx: tk_ky_vong} các dòng hạch toán Nợ lệch
 let nlIdxCotNo=-1, nlChiHienCanhBao=false;
 let nlDMMode=null;        // null=bảng kê; 'hh'/'nvl'=đang ở lưới Danh mục
+let nlSoMoi=0;             // số dòng MỚI ở cuối lưới Danh mục (tô xanh), 0=không tô
 let nlFormulas={};    // lưu công thức: key "r_c" -> "=K5/J5"
 let nlUndoStack=[];   // stack undo: [{header, rows, formulas}]
 function nlLuuUndo(){
@@ -1587,6 +1588,7 @@ async function ghiTang(loai){
 }
 function moBangKe(loai){
   nlDMMode=null;
+  nlSoMoi=0;
   nhapLieuLoaiHienTai=loai;
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
@@ -1870,14 +1872,20 @@ function veGridNhapLieu(){
     html+='<th style="background:#eef;border:1px solid #ccc"></th></tr>';
   }
   html+='</thead><tbody>';
+  // Trong lưới Danh mục (hh/nvl/tscd/ccdc), các dòng MỚI (chưa có trong danh mục
+  // đã lưu trước đó) luôn được server nối vào CUỐI danh sách -> N dòng có idx
+  // lớn nhất chính là dòng mới. Dùng idx GỐC (không phụ thuộc lọc/sắp xếp hiển
+  // thị) để xác định đúng ngay cả khi đang lọc.
+  const nlMoiTuIdx=nlRows.length-nlSoMoi;
   rowsHienThi.forEach(({row,idx})=>{
-    html+=`<tr><td onclick="nlChonDong(${idx})" style="position:sticky;left:0;z-index:1;background:#f4f6f8;padding:2px 6px;border:1px solid #eee;color:#999;text-align:center;cursor:pointer" title="Bấm chọn cả dòng">${idx+1}</td>`;
+    const laMoi=!!(nlDMMode&&nlSoMoi>0&&idx>=nlMoiTuIdx);
+    html+=`<tr><td onclick="nlChonDong(${idx})" style="position:sticky;left:0;z-index:1;background:${laMoi?'#cdf0da':'#f4f6f8'};padding:2px 6px;border:1px solid #eee;color:#999;text-align:center;cursor:pointer" title="${laMoi?'🆕 Mặt hàng MỚI — ':''}Bấm chọn cả dòng">${idx+1}</td>`;
     row.forEach((cell,ci)=>{
       const tien=nlLaCotTien(ci);
       const disp=tien&&cell!==''&&!isNaN(nlParseSo(cell))?nlParseSo(cell).toLocaleString('vi-VN'):(cell||'');
       const fr=ci<nlFreezeCol;
       const chon=nlTrongVungChon(idx,ci);
-      let bg=fr?'#f1f5fa':'#fff',extra='',title='';
+      let bg=fr?'#f1f5fa':(laMoi?'#eafbf1':'#fff'),extra=(laMoi&&!fr)?'box-shadow:inset 0 0 0 1px #8fd9ac;':'',title='';
       if(chon){bg='#cfe0f5';extra='box-shadow:inset 0 0 0 1px #2e5c8a;'}
       // cảnh báo hạch toán Nợ lệch (cột Nợ của dòng được gắn cờ)
       const canhBao=(ci===nlIdxCotNo&&nlCanhBaoNo[idx]);
@@ -2284,12 +2292,17 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
   nlRows=rows.map(r=>{const x=r.slice();while(x.length<nlHeader.length)x.push('');x.length=nlHeader.length;return x;});
   nlFreezeCol=0;nlChon=null;nlFilters={};nlSnapTrong={};nlFormulas={};nlUndoStack=[];
   nlChiHienCanhBao=false;nlCanhBaoNo={};nlIdxCotNo=-1;
+  // Các dòng MỚI luôn được server nối vào CUỐI (all_rows = saved_rows + new_rows)
+  // -> N dòng cuối cùng của lưới chính là dòng mới, còn lại là dòng đã lưu từ trước.
+  nlSoMoi=soMoi||0;
   veGridNhapLieu();
   const khoNote=(loai==='hh'||loai==='nvl')?` Cột Kho mặc định <b>${loai==='hh'?'HH':'NVL'}</b>.`:' Mỗi dòng là một mã riêng.';
-  document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng${soMoi!=null?` — <b style="color:#1f6b4a">${soMoi} mới</b>`:''} (Nợ ${DM_NO[loai]||''}).${khoNote}`;
+  const moiNote=(soMoi>0)?` — <span style="background:#eafbf1;border:1px solid #8fd9ac;border-radius:4px;padding:0 5px">🆕 dòng tô xanh là mặt hàng mới</span>`:'';
+  document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng${soMoi!=null?` — <b style="color:#1f6b4a">${soMoi} mới</b>`:''} (Nợ ${DM_NO[loai]||''}).${khoNote}${moiNote}`;
 }
 function quayLaiBangKeIn(){
   nlDMMode=null;
+  nlSoMoi=0;
   moBangKe('in');
 }
 async function dmLuuGrid(){
