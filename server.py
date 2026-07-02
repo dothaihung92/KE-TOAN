@@ -155,6 +155,7 @@ class GDTClient:
         self._last_total = 0
         self.last_query_total = 0
         self.last_query_got = 0
+        self._token_dead = False  # bật khi gặp 401 (hết phiên) -> bỏ qua nốt các gọi mạng
 
     # --- Lấy ảnh captcha ---
     def get_captcha(self):
@@ -420,11 +421,15 @@ class GDTClient:
             return r.content  # bytes của file zip
         return None
 
-    def get_detail(self, nbmst, khhdon, khmshdon, shdon, he_thong="query", max_retry=None):
-        """Lấy JSON chi tiết đầy đủ 1 hóa đơn. Có thử lại khi gặp 429/timeout
-        để không bị sót hóa đơn (xử lý triệt để).
+    def get_detail(self, nbmst, khhdon, khmshdon, shdon, he_thong="query",
+                   max_retry=None, cho_khi_429=True):
+        """Lấy JSON chi tiết đầy đủ 1 hóa đơn.
         max_retry: giới hạn số lần thử (khi xuất Excel hàng loạt -> đặt nhỏ để
-        1 hóa đơn lỗi không làm nghẽn cả luồng nhiều phút)."""
+        1 hóa đơn lỗi không làm nghẽn cả luồng nhiều phút).
+        cho_khi_429: True (mặc định) -> gặp 429 thì CHỜ theo Retry-After rồi thử lại
+        (dùng cho tra cứu tương tác, không vội). False -> BỎ QUA NGAY khi bị giới
+        hạn tốc độ, không chờ (dùng cho xuất Excel hàng loạt hàng nghìn hóa đơn,
+        để 1 lượt rớt không kéo cả tiến trình chờ hàng chục phút)."""
         base = f"https://hoadondientu.gdt.gov.vn/api/{he_thong}"
         url = f"{base}/invoices/detail"
         params = {
@@ -446,8 +451,11 @@ class GDTClient:
                 if r.status_code == 200:
                     return r.json()
                 if r.status_code == 401:
+                    self._token_dead = True
                     return None  # token hết hạn, không retry vô ích
                 if r.status_code == 429:
+                    if not cho_khi_429:
+                        return None   # bỏ ngay, không chờ (chế độ nhanh)
                     ra = r.headers.get("Retry-After")
                     try:
                         wait = int(ra) if ra else sp["retry_base"] * (attempt + 1)
@@ -455,9 +463,13 @@ class GDTClient:
                         wait = sp["retry_base"] * (attempt + 1)
                     time.sleep(min(wait, 60))
                     continue
+                if not cho_khi_429:
+                    return None
                 # các lỗi khác (5xx...) -> chờ ngắn rồi thử lại
                 time.sleep(sp["retry_base"])
             except Exception:
+                if not cho_khi_429:
+                    return None
                 time.sleep(sp["retry_base"])
         return None
 
@@ -5112,13 +5124,20 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
     except Exception as e:
         raise HTTPException(400, f"Không đọc được file Excel: {e}")
 
-    def col_idx(ws, ten):
+    def _sach(s):
+        # bỏ khoảng trắng thường + non-breaking space, phòng file bị chỉnh tay
+        return str(s or "").replace("\xa0", " ").strip().lower()
+
+    def col_idx(ws, ten, row=1):
         for c in range(1, ws.max_column + 1):
-            if str(ws.cell(1, c).value or "").strip().lower() == ten.lower():
+            if _sach(ws.cell(row, c).value) == ten.lower():
                 return c
         return None
 
     mua_ds = mua_thue = 0
+    mua_rows = 0
+    mua_sheet_found = "BK Mua vào" in wb.sheetnames
+    ban_sheet_found = "BK Bán ra" in wb.sheetnames
     ban = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
            "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0}}
 
@@ -5135,18 +5154,37 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
         return None
 
     # ===== MUA VÀO: đọc từ sheet 'BK Mua vào' =====
-    if "BK Mua vào" in wb.sheetnames:
+    # Dò dòng tiêu đề ở vài dòng đầu (không giả định luôn ở dòng 1) — cùng cách
+    # làm với BÁN RA bên dưới, để không bỏ sót khi file có thêm dòng tiêu đề/khoảng trắng.
+    if mua_sheet_found:
         ws = wb["BK Mua vào"]
-        c_ds = col_idx(ws, "Doanh số mua chưa thuế")
-        c_thue = col_idx(ws, "Thuế GTGT")
-        for r in range(2, ws.max_row + 1):
-            full = " ".join(str(ws.cell(r, c).value or "") for c in range(1, ws.max_column + 1)).lower()
-            if "tổng" in full:   # bỏ dòng TỔNG CỘNG (ở bất kỳ cột nào)
-                continue
+        c_ds = c_thue = None
+        hdr_row = 1
+        for r in range(1, min(ws.max_row, 15) + 1):
+            for c in range(1, ws.max_column + 1):
+                v = _sach(ws.cell(r, c).value)
+                if v == "doanh số mua chưa thuế":
+                    c_ds = c; hdr_row = r
+                elif v == "thuế gtgt":
+                    c_thue = c; hdr_row = max(hdr_row, r)
             if c_ds:
-                mua_ds += num(ws.cell(r, c_ds).value)
+                break
+        for r in range(hdr_row + 1, ws.max_row + 1):
+            full = " ".join(str(ws.cell(r, c).value or "") for c in range(1, ws.max_column + 1))
+            if not full.strip():
+                continue
+            if "tổng" in full.lower():   # bỏ dòng TỔNG CỘNG (ở bất kỳ cột nào)
+                continue
+            got = False
+            if c_ds:
+                v = num(ws.cell(r, c_ds).value)
+                mua_ds += v
+                got = True
             if c_thue:
                 mua_thue += num(ws.cell(r, c_thue).value)
+                got = True
+            if got:
+                mua_rows += 1
 
     # ===== BÁN RA: đọc từ sheet 'BK Bán ra' (tách nhóm theo dòng tiêu đề) =====
     if "BK Bán ra" in wb.sheetnames:
@@ -5166,6 +5204,7 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                 if c_ds:
                     break
         cur_nhom = None
+        ban_rows = 0
         for r in range(1, ws.max_row + 1):
             # gộp text cả dòng để phát hiện tiêu đề nhóm / dòng tổng
             full = " ".join(str(ws.cell(r, c).value or "") for c in range(1, ws.max_column + 1))
@@ -5187,6 +5226,9 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
             if (ds or th) and cur_nhom in ban:
                 ban[cur_nhom]["ds"] += ds
                 ban[cur_nhom]["thue"] += th
+                ban_rows += 1
+    else:
+        ban_rows = 0
 
     conn = db()
     conn.execute("""
@@ -5208,9 +5250,12 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
     conn.commit()
     conn.close()
     return {
-        "ok": True, "mua_ds": round(mua_ds), "mua_thue": round(mua_thue),
+        "ok": True, "ky": ky,
+        "mua_ds": round(mua_ds), "mua_thue": round(mua_thue), "mua_rows": mua_rows,
+        "mua_sheet_found": mua_sheet_found,
         "ban_thue": round(sum(b["thue"] for b in ban.values())),
-        "ban_8_ds": round(ban["8"]["ds"]),
+        "ban_8_ds": round(ban["8"]["ds"]), "ban_rows": ban_rows,
+        "ban_sheet_found": ban_sheet_found,
     }
 
 
@@ -5318,12 +5363,8 @@ def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
     # số dư đầu kỳ: ưu tiên giá trị truyền vào; nếu None thì lấy du_cuoi_ky kỳ trước
     if du_dau_ky is None:
         prev = None
-        if ky and "/" in ky:
-            mm, yyyy = ky.split("/")
-            m = int(mm); y = int(yyyy)
-            pm = 12 if m == 1 else m - 1
-            py = y - 1 if m == 1 else y
-            prev_ky = f"{pm:02d}/{py}"
+        prev_ky = _ky_lien_truoc(ky)   # hỗ trợ cả 'MM/YYYY' và 'QX/YYYY'
+        if prev_ky:
             prev = conn.execute(
                 "SELECT du_cuoi_ky FROM vat_balance WHERE company_id=? AND ky=?",
                 (cid, prev_ky)).fetchone()
@@ -5512,7 +5553,7 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
             ban_theo_ts[nhom]["ds"] += ds
             ban_theo_ts[nhom]["thue"] += thue
 
-    if not ky:
+    if not ky or "/" not in ky:
         ky = ky_auto or "01/2026"
 
     # ƯU TIÊN dữ liệu đã import từ Excel (nếu có) -> ghi đè số liệu tra cứu
@@ -5528,7 +5569,12 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
             "KCT": {"ds": 0, "thue": 0},
         }
 
-    mm, yyyy = ky.split("/")
+    # ky có thể là 'MM/YYYY' hoặc 'QX/YYYY' (kỳ quý) -> tách an toàn, không crash
+    try:
+        mm, yyyy = _ky_ve_thang(ky)
+    except Exception:
+        ky = ky_auto or "01/2026"
+        mm, yyyy = _ky_ve_thang(ky)
     import calendar
     last_day = calendar.monthrange(int(yyyy), int(mm))[1]
 
@@ -5727,6 +5773,47 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
     return {"ok": True, "fname": fname, "path": open_path}
 
 
+def _ky_ve_thang(ky):
+    """Tách kỳ 'MM/YYYY' hoặc 'QX/YYYY' -> (mm:str 2 số, yyyy:str).
+    Với kỳ quý, lấy THÁNG ĐẦU của quý làm mm (chỉ dùng để tính ngày mặc định
+    của tờ khai; KHÔNG dùng để tra cứu/so khớp dữ liệu đã lưu theo kỳ)."""
+    a, b = ky.split("/", 1)
+    a = a.strip().upper()
+    yyyy = int(b.strip())
+    if a.startswith("Q") and a[1:].isdigit():
+        q = max(1, min(4, int(a[1:])))
+        mm = (q - 1) * 3 + 1
+    else:
+        mm = int(a)
+    return f"{mm:02d}", str(yyyy)
+
+
+def _ky_lien_truoc(ky):
+    """Trả về CHUỖI kỳ liền trước 'ky', GIỮ NGUYÊN kiểu kỳ (tháng hay quý):
+    'MM/YYYY' -> tháng trước; 'QX/YYYY' -> quý trước. '' nếu không hợp lệ."""
+    ky = (ky or "").strip()
+    if not ky or "/" not in ky:
+        return ""
+    a, b = ky.split("/", 1)
+    a = a.strip().upper()
+    try:
+        y = int(b.strip())
+    except Exception:
+        return ""
+    if a.startswith("Q") and a[1:].isdigit():
+        q = int(a[1:])
+        pq = 4 if q <= 1 else q - 1
+        py = y - 1 if q <= 1 else y
+        return f"Q{pq}/{py}"
+    try:
+        m = int(a)
+    except Exception:
+        return ""
+    pm = 12 if m <= 1 else m - 1
+    py = y - 1 if m <= 1 else y
+    return f"{pm:02d}/{py}"
+
+
 def _parse_thue_suat(ts_raw):
     """Trả về tỷ lệ thuế (0.08 cho 8%) từ chuỗi thuế suất.
     Hỗ trợ: '8%', '8', 'KHAC:5.26%', 'KHAC:5.26', '5.26%'.
@@ -5774,63 +5861,77 @@ def export_excel(cid: int):
         (cid,)).fetchall()
 
     # ===== NẠP TRƯỚC CHI TIẾT SONG SONG (tăng tốc xuất Excel) =====
-    # Chỉ nạp hóa đơn CHƯA có detail_json VÀ chưa có file đã tải.
+    # Chỉ nạp hóa đơn CHƯA có detail_json VÀ chưa có file đã tải (ƯU TIÊN TUYỆT ĐỐI
+    # file XML/ZIP đã tải sẵn trên máy — KHÔNG gọi mạng lại cho hóa đơn đã có file).
     client0 = CLIENTS.get(cid)
     save_dir0 = (comp["save_dir"] or "").strip() if comp else ""
-    if client0 and client0.token:
-        # index file đã tải (để bỏ qua hóa đơn đã có file)
-        have_file = set()
-        if save_dir0 and os.path.isdir(save_dir0):
-            for rootdir, _d, files in os.walk(save_dir0):
-                for fn in files:
-                    low = fn.lower()
-                    if low.endswith(".zip") or low.endswith(".xml"):
-                        parts = fn.rsplit(".", 1)[0].split("_")
-                        if len(parts) >= 2:
-                            have_file.add((parts[0], parts[1].lstrip("0") or "0"))
+    have_file = set()
+    if save_dir0 and os.path.isdir(save_dir0):
+        for rootdir, _d, files in os.walk(save_dir0):
+            for fn in files:
+                low = fn.lower()
+                if low.endswith(".zip") or low.endswith(".xml"):
+                    parts = fn.rsplit(".", 1)[0].split("_")
+                    if len(parts) >= 2:
+                        have_file.add((parts[0], parts[1].lstrip("0") or "0"))
+    _tlog(f"tim thay {len(have_file)} file hoa don da tai tren may (thu muc: {save_dir0 or '(chưa đặt)'})")
 
-        can_nap = []
-        for r in rows:
-            if r["detail_json"]:
-                continue
-            khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
-            if (khh, sho) in have_file:
-                continue
-            can_nap.append(dict(r))
+    can_nap = []
+    da_co_file = 0
+    for r in rows:
+        if r["detail_json"]:
+            continue
+        khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
+        if (khh, sho) in have_file:
+            da_co_file += 1
+            continue   # đã có file trên máy -> get_invoice_items sẽ đọc file, KHÔNG cần mạng
+        can_nap.append(dict(r))
+    _tlog(f"{da_co_file} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file")
 
-        if can_nap:
-            import concurrent.futures as _cf
-            lock = __import__("threading").Lock()
-            results_map = {}
-            _tlog(f"nap chi tiet {len(can_nap)} hoa don con thieu (tu mang)...")
+    if can_nap and client0 and client0.token and not client0._token_dead:
+        import concurrent.futures as _cf
+        results_map = {}
+        _tlog(f"thử nạp nhanh (không chờ khi bị giới hạn tốc độ) {len(can_nap)} hóa đơn qua mạng...")
 
-            def _tai_1(rr):
-                ht0 = rr["he_thong"] or "query"
-                for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
-                    try:
-                        d = client0.get_detail(rr["nbmst"], rr["khhdon"],
-                                               rr["khmshdon"], rr["shdon"], ht,
-                                               max_retry=3)   # cap để không nghẽn
-                        if d and (d.get("hdhhdvu") or d.get("nbmst")):
-                            return rr["id"], json.dumps(d, ensure_ascii=False)
-                    except Exception:
-                        pass
-                return rr["id"], None
+        def _tai_1(rr):
+            if client0._token_dead:
+                return rr["id"], None   # phiên đã hết -> khỏi thử, trả nhanh
+            ht0 = rr["he_thong"] or "query"
+            for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
+                try:
+                    d = client0.get_detail(rr["nbmst"], rr["khhdon"],
+                                           rr["khmshdon"], rr["shdon"], ht,
+                                           max_retry=1, cho_khi_429=False)
+                    if d and (d.get("hdhhdvu") or d.get("nbmst")):
+                        return rr["id"], json.dumps(d, ensure_ascii=False)
+                except Exception:
+                    pass
+            return rr["id"], None
 
-            # số luồng song song theo tốc độ (nhanh=10, cân bằng=6, an toàn=3)
-            workers = {"fast": 10, "balanced": 6, "safe": 3}.get(CURRENT_SPEED, 6)
-            with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-                for inv_id, dj in ex.map(_tai_1, can_nap):
-                    if dj:
-                        results_map[inv_id] = dj
-            # lưu hết vào DB 1 lần
-            for inv_id, dj in results_map.items():
-                conn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
-            conn.commit()
-            # đọc lại rows để có detail_json mới
-            rows = conn.execute(
-                "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
-                (cid,)).fetchall()
+        # số luồng song song: KHÔNG chờ (429 bỏ ngay) nên có thể chạy nhiều luồng hơn
+        workers = {"fast": 20, "balanced": 12, "safe": 6}.get(CURRENT_SPEED, 12)
+        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            for inv_id, dj in ex.map(_tai_1, can_nap):
+                if dj:
+                    results_map[inv_id] = dj
+        # lưu hết vào DB 1 lần
+        for inv_id, dj in results_map.items():
+            conn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
+        conn.commit()
+        con_thieu = len(can_nap) - len(results_map)
+        if client0._token_dead:
+            _tlog(f"phiên đăng nhập đã hết hạn giữa chừng — dừng nạp qua mạng, còn {con_thieu} hóa đơn chưa có chi tiết")
+        elif con_thieu:
+            _tlog(f"lấy được {len(results_map)}/{len(can_nap)}; còn {con_thieu} hóa đơn bị giới hạn tốc độ — "
+                 f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)")
+        # đọc lại rows để có detail_json mới
+        rows = conn.execute(
+            "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
+            (cid,)).fetchall()
+    elif can_nap:
+        why = ("chưa đăng nhập/phiên đã hết" if not (client0 and client0.token) else "phiên đã hết hạn")
+        _tlog(f"bỏ qua nạp mạng cho {len(can_nap)} hóa đơn ({why}) — sẽ hiện placeholder, "
+             f"đăng nhập lại rồi xuất lại để lấy nốt")
     conn.close()
     _tlog(f"xong nap chi tiet ({len(rows)} hoa don) -> bat dau dung sheet")
 
@@ -5979,13 +6080,15 @@ def export_excel(cid: int):
                     items = []; summary = None
 
         # (2) gọi detail JSON — thử cả hệ thống đã lưu và hệ thống còn lại
-        if not items and client and client.token:
+        # (đã nạp song song trước -> ở đây chỉ vớt nhanh, KHÔNG chờ nếu bị giới hạn
+        # tốc độ hay phiên đã hết, để không làm chậm cả quá trình dựng sheet)
+        if not items and client and client.token and not client._token_dead:
             ht0 = r["he_thong"] or "query"
             for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
                 try:
                     detail = client.get_detail(
                         r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], ht,
-                        max_retry=2)   # đã nạp song song trước -> ở đây chỉ vớt nhanh
+                        max_retry=1, cho_khi_429=False)
                     if detail and (detail.get("hdhhdvu") or detail.get("nbmst")):
                         items = _parse_detail_json(detail)
                         summary = _summary_from_detail_json(detail)
@@ -6095,6 +6198,7 @@ def export_excel(cid: int):
         # dòng TChat=3, KHÔNG có STCKhau, thành tiền là số tiền chiết khấu
         # -> sẽ PHÂN BỔ TRỪ vào thành tiền các dòng hàng (KHÔNG hiện dòng riêng).
         ck_rieng = {}          # thuế suất -> tổng tiền chiết khấu
+        ck_rieng_items = {}    # thuế suất -> list các dòng CK gốc (dùng khi HĐ chỉ có dòng CK, không có dòng hàng để phân bổ)
         skip_ck_rieng = set()  # id() các dòng CK riêng để bỏ qua khi dựng
         for it in items:
             tchat = str(it.get("tchat", "") or "")
@@ -6107,6 +6211,7 @@ def export_excel(cid: int):
             if tchat == "3" and not (isinstance(ck, (int, float)) and ck > 0):
                 rate = _norm_rate(it.get("tsuat"))
                 ck_rieng[rate] = ck_rieng.get(rate, 0) + abs(tt)
+                ck_rieng_items.setdefault(rate, []).append(it)
                 skip_ck_rieng.add(id(it))
 
         # --- Pass 2: dựng các dòng hàng (đã trừ CK dòng), bỏ ghi chú + CK riêng ---
@@ -6174,7 +6279,24 @@ def export_excel(cid: int):
                 idxs = [i for i, h in enumerate(out)
                         if (_to_num(h.get("thtien")) or 0) > 0]
             tong_tt = sum((_to_num(out[i].get("thtien")) or 0) for i in idxs)
-            if tong_tt <= 0:
+            # HĐ CHỈ CÓ (các) dòng chiết khấu, KHÔNG có dòng hàng nào để phân bổ vào
+            # (vd hóa đơn điều chỉnh giảm doanh số/chiết khấu riêng, 1 dòng duy nhất)
+            # -> ghi nhận TRỰC TIẾP (các) dòng chiết khấu đó dưới dạng ÂM, không bỏ mất.
+            if not idxs or tong_tt <= 0:
+                rate_num = _parse_thue_suat(rate_key)
+                for it_ck in ck_rieng_items.get(rate_key, []):
+                    h = dict(it_ck)
+                    tt_goc = abs(_to_num(h.get("thtien")) or 0)
+                    h["thtien"] = -tt_goc
+                    dg = _to_num(h.get("dgia")) or 0
+                    if isinstance(dg, (int, float)) and dg:
+                        h["dgia"] = -abs(dg)
+                    if rate_num is not None and rate_num > 0:
+                        h["tien_thue"] = round(-tt_goc * rate_num)
+                    else:
+                        h["tien_thue"] = 0
+                    h["_la_ck"] = True
+                    out.append(h)
                 continue
             allocated = 0
             for k, i in enumerate(idxs):
@@ -6297,7 +6419,12 @@ def export_excel(cid: int):
                 no_r = map_no_ht.get(_chuan_mst(r["nbmst"]), "")
 
             if not items:
-                ly_do = "(không lấy được chi tiết — đăng nhập rồi xuất lại)"
+                if client and getattr(client, "_token_dead", False):
+                    ly_do = "(chưa lấy được chi tiết — phiên đăng nhập đã hết, đăng nhập lại rồi xuất lại)"
+                elif not (client and client.token):
+                    ly_do = "(chưa có file XML đã tải — đăng nhập rồi xuất lại để lấy qua mạng)"
+                else:
+                    ly_do = "(chưa lấy được chi tiết — có thể do giới hạn tốc độ, xuất lại sau ít phút)"
                 nmten_raw = raw.get("nmten", "") or raw.get("nmtnmua", "") or ""
                 if loai == "purchase":
                     append_row([r["khhdon"], r["shdon"], ngay_fmt,
