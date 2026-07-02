@@ -3822,6 +3822,29 @@ def _so_ct_theo_nam_mst(prefix, ngay, mst):
     """Số chứng từ/phiếu = prefix + năm hóa đơn + MST, cắt tối đa 20 ký tự."""
     return (str(prefix) + _nam_cua_ngay(ngay) + str(mst or "").strip())[:20]
 
+def _so_ct_unique(prefix, ngay, mst, seen):
+    """Như _so_ct_theo_nam_mst() nhưng LUÔN DUY NHẤT: nếu trùng với dòng
+    trước (cùng NCC, cùng năm) -> cắt bớt để chừa chỗ thêm số thứ tự
+    '-2','-3'... vẫn giữ tổng tối đa 20 ký tự (MISA yêu cầu mỗi chứng từ
+    phải có số duy nhất). 'seen' là dict đếm dùng chung cho cả lượt xuất."""
+    base = _so_ct_theo_nam_mst(prefix, ngay, mst)
+    n = seen.get(base, 0) + 1
+    seen[base] = n
+    if n == 1:
+        return base
+    suf = f"-{n}"
+    return base[: max(0, 20 - len(suf))] + suf
+
+def _so_ct_unique_memo(prefix, ngay, mst, invoice_key, seen, cache):
+    """Như _so_ct_unique() nhưng NHỚ theo invoice_key: các dòng cùng 1 hóa
+    đơn (cùng invoice_key — vd số HĐ+MST+ngày) dùng lại đúng 1 số chứng từ
+    đã cấp, để nhiều dòng hàng của cùng 1 hóa đơn vẫn chung 1 chứng từ."""
+    if invoice_key in cache:
+        return cache[invoice_key]
+    v = _so_ct_unique(prefix, ngay, mst, seen)
+    cache[invoice_key] = v
+    return v
+
 def _co_theo_tong(tong):
     """Cột Có: >= 5 triệu -> 331 (phải trả NB), còn lại -> 1111 (tiền mặt)."""
     t = _to_num(tong)
@@ -4187,8 +4210,11 @@ async def mua_hang_dich_vu(cid: int, request: Request):
     def ts_num(v):
         return _chuan_thue_suat(v)
 
-    def so_chung_tu(mst_disp, ngay):
-        return _so_ct_theo_nam_mst("DV", ngay, mst_disp)
+    soct_seen, soct_cache = {}, {}
+    def so_chung_tu(sohd, mst_disp, ngay):
+        # cùng 1 hóa đơn (số HĐ+MST+ngày) -> dùng lại đúng 1 số chứng từ
+        return _so_ct_unique_memo("DV", ngay, mst_disp, (sohd, mst_disp, ngay),
+                                   soct_seen, soct_cache)
 
     # form headers (cột A..AN) + cột 'Lọc'
     out_headers = [
@@ -4229,7 +4255,7 @@ async def mua_hang_dich_vu(cid: int, request: Request):
         ngay = str(gv(r, i_ngay) or "")
         sohd = gv(r, i_so)
         ten = gv(r, i_ten)
-        soct = so_chung_tu(mst_disp, ngay)
+        soct = so_chung_tu(sohd, mst_disp, ngay)
         tt_val = _to_num(gv(r, i_tt))
         r_out += 1
         row_vals = {
@@ -4758,6 +4784,7 @@ def _gen_mua_hang_nk(cid, header, rows):
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
 
+    so_phieu_seen, so_phieu_cache = {}, {}
     out = []
     for r in rows:
         no = str(gv(r, col["no"]) or "").strip()
@@ -4785,7 +4812,10 @@ def _gen_mua_hang_nk(cid, header, rows):
         sohd = str(gv(r, col["sohd"]) or "").strip()
         mst = _dinh_dang_mst(gv(r, col["mst"])) if not la_nk else str(gv(r, col["mst"]) or "").strip()
         ngay = str(gv(r, col["ngay"]) or "")
-        so_phieu = _so_ct_theo_nam_mst("NK", ngay, gv(r, col["mst"]))
+        mst_raw = gv(r, col["mst"])
+        # cùng 1 hóa đơn (số HĐ+MST+ngày) -> dùng lại đúng 1 số phiếu nhập
+        so_phieu = _so_ct_unique_memo("NK", ngay, mst_raw, (sohd, mst_raw, ngay),
+                                       so_phieu_seen, so_phieu_cache)
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
         nk_ts = _so_pct(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0  # "3%"->3
         nk_thue = _to_num(gv(r, col["nk_thue"])) or 0
