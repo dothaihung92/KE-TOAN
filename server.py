@@ -4769,7 +4769,7 @@ def _gen_mua_hang_nk(cid, header, rows):
         sohd = str(gv(r, col["sohd"]) or "").strip()
         mst = _dinh_dang_mst(gv(r, col["mst"])) if not la_nk else str(gv(r, col["mst"]) or "").strip()
         ngay = str(gv(r, col["ngay"]) or "")
-        so_phieu = ("NK" + sohd + str(gv(r, col["mst"]) or "").strip())[:18]
+        so_phieu = ("NK" + sohd + str(gv(r, col["mst"]) or "").strip())[:20]
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
         nk_ts = _so_pct(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0  # "3%"->3
         nk_thue = _to_num(gv(r, col["nk_thue"])) or 0
@@ -4802,11 +4802,12 @@ def _gen_mua_hang_nk(cid, header, rows):
         else:
             row[38] = 1331                        # TK thuế GTGT (trong nước)
         row[39] = 1                              # Nhóm HHDV mua vào
-        row[41] = nk_tg                          # Giá tính thuế NK
-        row[42] = nk_ts                          # % thuế NK (số)
-        if nk_thue:
-            row[43] = round(nk_thue)             # Tiền thuế NK
-            row[44] = "3333"                     # TK thuế NK
+        if la_nk:                                # chỉ điền thuế NK khi ĐÚNG là tờ khai NK
+            row[41] = nk_tg                      # Giá tính thuế NK
+            row[42] = nk_ts                      # % thuế NK (số)
+            if nk_thue:
+                row[43] = round(nk_thue)         # Tiền thuế NK
+                row[44] = "3333"                 # TK thuế NK
         out.append(row)
     return out
 
@@ -4946,9 +4947,10 @@ def _gen_mua_hang_kqk(cid, header, rows):
         else:
             row_o[34] = 1331
         row_o[35] = 1
-        row_o[36] = nk_tg; row_o[37] = nk_ts
-        if nk_thue:
-            row_o[38] = round(nk_thue); row_o[39] = "3333"
+        if la_nk:                                # chỉ điền thuế NK khi ĐÚNG là tờ khai NK
+            row_o[36] = nk_tg; row_o[37] = nk_ts
+            if nk_thue:
+                row_o[38] = round(nk_thue); row_o[39] = "3333"
         out.append(row_o)
     return out
 
