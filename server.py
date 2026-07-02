@@ -4293,7 +4293,10 @@ _THUE_HOP_LE = (0, 5, 8, 10)
 def _chuan_thue_suat(v):
     """Chuẩn hoá % thuế GTGT về ĐÚNG 1 trong 7 giá trị hợp lệ:
     0, 5, 8, 10, 'KCT', 'KHAC', 'KKKNT'. Nhận chuỗi ('8%','KCT'...) hoặc số.
-    Số không khớp đúng 0/5/8/10 (kể cả số lẻ như 0.1, 0.8, 5.26...) -> 'KHAC'."""
+    Số lẻ (0.1, 0.8, 5.26%, 'KHAC:5.26%'...) được LÀM TRÒN về mức GẦN NHẤT
+    trong 0/5/8/10 (chỉ đổi NHÃN hiển thị — tiền thuế GTGT vẫn giữ nguyên
+    theo file import, KHÔNG tính lại). 'KHAC' chỉ giữ khi nguồn ghi đúng
+    chữ 'KHAC' mà không kèm số, hoặc chuỗi không đọc được thành số."""
     if isinstance(v, (int, float)):
         f = v
     else:
@@ -4302,17 +4305,16 @@ def _chuan_thue_suat(v):
             return "KCT"
         if s == "KKKNT":
             return "KKKNT"
-        if "KHAC" in s:
+        if s == "KHAC":
             return "KHAC"
+        if ":" in s:            # 'KHAC:5.26%' -> lấy phần số sau dấu ':'
+            s = s.split(":", 1)[1]
         s2 = s.replace("%", "").replace(",", ".")
         try:
             f = float(s2)
         except Exception:
             return "KHAC"
-    fr = round(f)
-    if abs(f - fr) < 1e-6 and fr in _THUE_HOP_LE:
-        return fr
-    return "KHAC"
+    return min(_THUE_HOP_LE, key=lambda t: abs(f - t))
 
 def _dm_rate(v):
     """Thuế suất GTGT -> 1 trong 7 giá trị hợp lệ (xem _chuan_thue_suat)."""
