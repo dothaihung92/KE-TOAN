@@ -4179,7 +4179,7 @@ async def mua_hang_dich_vu(cid: int, request: Request):
 
     def so_chung_tu(sohd, mst_disp, ngay):
         sd = "".join(ch for ch in str(sohd or "") if ch.isdigit())
-        return "DV" + sd[-2:] + str(mst_disp)[-6:] + str(ngay or "")
+        return ("DV" + sd[-2:] + str(mst_disp)[-6:] + str(ngay or ""))[:20]
 
     # form headers (cột A..AN) + cột 'Lọc'
     out_headers = [
@@ -4230,8 +4230,8 @@ async def mua_hang_dich_vu(cid: int, request: Request):
             11: ten,                                 # K Diễn giải
             15: "MHDV", 16: ten,                    # O,P
             17: no, 18: co, 19: mst_disp,           # Q,R,S
-            # ĐVT=MHDV, Số lượng=1, Đơn giá=Thành tiền (để import phần mềm tự động)
-            20: "MHDV", 21: 1,
+            # ĐVT để trống; Số lượng=1, Đơn giá=Thành tiền (để import phần mềm tự động)
+            20: "", 21: 1,
             22: tt_val, 23: tt_val,
             28: ts_num(gv(r, i_ts)), 29: _to_num(gv(r, i_tthue)),
             31: "1331",                              # AE TK thuế GTGT
@@ -4895,7 +4895,7 @@ def _gen_mua_hang_kqk(cid, header, rows):
         if len(p) == 3:
             thang = str(int(p[1])) if p[1].isdigit() else p[1]
             nam = p[2]
-        so_ct = f"MHKQK1/{thang}/{nam}"
+        so_ct = f"MHKQK1/{thang}/{nam}"[:20]
         rate = _dm_rate(gv(r, col["ts"]))
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
         nk_ts = _dm_rate(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0
@@ -5192,7 +5192,7 @@ def _gen_ban_hang(cid, header, rows):
             nam = p[2]
         mk = (thang, nam)
         seq_thang[mk] = seq_thang.get(mk, 0) + 1
-        so_ct = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"
+        so_ct = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
         rate = round(thue / ds * 100) if ds else 0
         row = [""] * len(BAN_HANG_HEADERS)
         row[0] = 0; row[1] = 0
