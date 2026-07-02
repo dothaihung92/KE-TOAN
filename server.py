@@ -216,6 +216,7 @@ class GDTClient:
         all_results = []
         seen = set()  # khử trùng lặp hóa đơn ở ranh giới tháng
         total_expected = 0
+        loi_tich_luy = []   # gom LỖI THẬT SỰ (đã thử lại vẫn lỗi) qua các tháng/trạng thái
         cur = d_from
         while cur <= d_to:
             # cuối tháng hiện tại
@@ -231,8 +232,11 @@ class GDTClient:
                 progress(f"đang tải {s_from} → {s_to}...")
 
             self._last_total = 0
+            self._loi_rieng_phan = []
             chunk = self._query_one_range(s_from, s_to, loai, page_size, he_thong)
             total_expected += getattr(self, "_last_total", 0) or 0
+            for loi in (getattr(self, "_loi_rieng_phan", None) or []):
+                loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
             for inv in chunk:
                 key = (inv.get("khmshdon"), inv.get("khhdon"),
                        inv.get("shdon"), inv.get("nbmst"))
@@ -248,6 +252,10 @@ class GDTClient:
         # lưu tổng kỳ vọng để báo "đủ chưa"
         self.last_query_total = total_expected
         self.last_query_got = len(all_results)
+        # LỖI THẬT SỰ ở 1 phần (vd 1 trạng thái mua vào lỗi hẳn dù đã thử lại) —
+        # khác với "0 kết quả" hợp lệ; người gọi (_run_fetch_job) dùng để KHÔNG
+        # báo "Hoàn tất" như bình thường mà cảnh báo rõ có thể thiếu dữ liệu.
+        self.last_query_errors = loi_tich_luy
         return all_results
 
     def _query_one_range(self, tu_ngay, den_ngay, loai="purchase",
@@ -264,6 +272,21 @@ class GDTClient:
         date_filter = (f"tdlap=ge={tu_ngay}T00:00:00;"
                        f"tdlap=le={den_ngay}T23:59:59")
 
+        def _thu_lai(fn, so_lan=2):
+            """Gọi fn() tối đa so_lan lần (nghỉ giữa các lần) trước khi bỏ cuộc.
+            TOKEN_EXPIRED thì raise ngay, không cần thử lại."""
+            last_err = None
+            for i in range(so_lan):
+                try:
+                    return fn()
+                except Exception as e:
+                    if "TOKEN_EXPIRED" in str(e):
+                        raise
+                    last_err = e
+                    if i < so_lan - 1:
+                        time.sleep(SP()["retry_base"])
+            raise last_err
+
         if loai == "purchase":
             url = f"{base}/invoices/purchase"
             action = "Tìm kiếm (hóa đơn %smua vào)" % ("máy tính tiền " if is_mtt else "")
@@ -272,18 +295,21 @@ class GDTClient:
             results = []
             seen = set()
             total_all = 0
+            loi_trang_thai = []   # các trạng thái LỖI THẬT SỰ (không phải rỗng) -> báo cho người dùng biết
             for ttxly in (5, 6, 8):
                 search = f"{date_filter};ttxly=={ttxly}"
                 try:
-                    part, ptotal = self._fetch_paginated(url, search, action,
-                                                         page_size, want_total=True)
+                    part, ptotal = _thu_lai(lambda: self._fetch_paginated(
+                        url, search, action, page_size, want_total=True))
                     if ptotal:
                         total_all += ptotal
                 except Exception as e:
-                    # 1 trạng thái lỗi/không có -> bỏ qua, vẫn lấy các trạng thái khác
+                    # Đã thử lại rồi vẫn lỗi -> GHI NHẬN LÀ LỖI (không coi như "không có"),
+                    # để người gọi biết kết quả có thể THIẾU chứ không phải chắc chắn = 0.
                     if "TOKEN_EXPIRED" in str(e):
                         raise
                     part = []
+                    loi_trang_thai.append(f"ttxly={ttxly}: {str(e)[:120]}")
                 for inv in part:
                     key = (inv.get("khmshdon"), inv.get("khhdon"),
                            inv.get("shdon"), inv.get("nbmst"))
@@ -292,13 +318,18 @@ class GDTClient:
                         results.append(inv)
                 time.sleep(SP()["status"])  # nghỉ giữa các trạng thái
             self._last_total = total_all
+            self._loi_rieng_phan = loi_trang_thai
             return results
         else:
             url = f"{base}/invoices/sold"
             action = "Tìm kiếm (hóa đơn %sbán ra)" % ("máy tính tiền " if is_mtt else "")
-            results, total = self._fetch_paginated(url, date_filter, action,
-                                                   page_size, want_total=True)
+            # Thử lại nội bộ trước khi để lỗi lan ra ngoài (bán ra chỉ gọi 1 lần,
+            # không có nhiều lượt dự phòng như mua vào theo từng trạng thái, nên
+            # dễ bị 1 lần rớt mạng ngẫu nhiên làm mất luôn cả kết quả bán ra).
+            results, total = _thu_lai(lambda: self._fetch_paginated(
+                url, date_filter, action, page_size, want_total=True))
             self._last_total = total  # lưu để báo lên
+            self._loi_rieng_phan = []
             return results
 
     def _fetch_paginated(self, url, search, action, page_size=50, want_total=False):
@@ -321,11 +352,22 @@ class GDTClient:
                 qs += f"&state={quote(str(state), safe='')}"
             full_url = f"{url}?{qs}"
 
-            # Gọi có tự động thử lại khi bị 429 (Too Many Requests)
+            # Gọi có tự động thử lại khi bị 429 (Too Many Requests) HOẶC lỗi mạng
+            # thoáng qua (mất kết nối/timeout) — trước đây CHỈ retry khi 429, nên
+            # 1 lần rớt mạng ngẫu nhiên giữa chừng làm rớt luôn cả lượt tra cứu
+            # (thường gặp nhất ở "bán ra" vì chỉ gọi 1 lần, không có nhiều lượt
+            # dự phòng như "mua vào" theo từng trạng thái).
             r = None
+            last_net_err = None
             sp = SP()
             for attempt in range(sp["retry_max"]):
-                r = self.session.get(full_url, headers=extra_headers, timeout=60)
+                try:
+                    r = self.session.get(full_url, headers=extra_headers, timeout=60)
+                except Exception as e:
+                    last_net_err = e
+                    r = None
+                    time.sleep(min(sp["retry_base"] * (attempt + 1), 60))
+                    continue
                 if r.status_code == 429:
                     ra = r.headers.get("Retry-After")
                     try:
@@ -337,6 +379,10 @@ class GDTClient:
                     continue
                 break
 
+            if r is None:
+                raise Exception(
+                    f"Lỗi kết nối mạng khi tra cứu (đã thử {sp['retry_max']} lần): "
+                    f"{last_net_err}")
             if r.status_code == 401:
                 raise Exception("TOKEN_EXPIRED")
             if r.status_code == 429:
@@ -2602,6 +2648,11 @@ def _run_fetch_job(cid: int, body: dict):
             file_saved = 0
             # đếm theo loại để tổng kết: {loai: {"exp": tổng trang Thuế báo, "got": số lấy được}}
             thongke = {"purchase": {"exp": 0, "got": 0}, "sold": {"exp": 0, "got": 0}}
+            # Đánh dấu RIÊNG khi 1 loại (mua/bán) bị LỖI THẬT SỰ dù đã thử lại —
+            # PHẢI phân biệt với "0 hóa đơn" hợp lệ, để KHÔNG BAO GIỜ báo "Hoàn tất"
+            # sạch sẽ khi thực ra chưa tra cứu được (nguyên nhân gốc của việc phần
+            # mềm "báo xong" dù bán ra bị lỗi/rớt mạng giữa chừng).
+            loai_that_bai = {"purchase": False, "sold": False}
             target_dir = None
             if save_dir:
                 try:
@@ -2624,42 +2675,72 @@ def _run_fetch_job(cid: int, body: dict):
                     ht_txt = " (máy tính tiền)" if he_thong == "sco-query" else ""
                     msg(stage="query",
                         text=f"Đang tra cứu hóa đơn {loai_txt}{ht_txt}...")
-                    try:
-                        invs = client.query_invoices(
-                            tu, den, loai=loai, he_thong=he_thong,
-                            progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"))
-                    except Exception as e:
-                        es = str(e)
-                        if "TOKEN_EXPIRED" in es:
-                            msg(stage="error", text="Token hết hạn, cần đăng nhập lại")
-                            return
-                        if he_thong == "sco-query" and "404" in es:
-                            msg(stage="warn",
-                                text=f"{loai_txt}{ht_txt}: không có (404) — bỏ qua")
-                            continue
-                        # 429 = trang Thuế chặn tạm -> báo RÕ và thử lại nguyên loại này
-                        if "429" in es or "quá nhiều" in es:
-                            msg(stage="warn",
-                                text=f"⚠ {loai_txt}{ht_txt}: Trang Thuế chặn tạm (429). Đang chờ 30s rồi thử lại...")
-                            time.sleep(30)
-                            try:
-                                invs = client.query_invoices(
-                                    tu, den, loai=loai, he_thong=he_thong,
-                                    progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"))
-                            except Exception as e2:
-                                msg(stage="error",
-                                    text=f"✗ {loai_txt}{ht_txt}: vẫn lỗi sau khi thử lại — {str(e2)[:120]}. "
-                                         f"NÊN TRA CỨU LẠI riêng công ty này (hoặc chuyển chế độ Chậm & an toàn).")
-                                continue
-                        else:
-                            msg(stage="error",
-                                text=f"✗ Lỗi {loai_txt}{ht_txt}: {es[:140]} — NÊN TRA CỨU LẠI.")
-                            continue
 
+                    # Thử tối đa 2 LƯỢT cho toàn bộ khoảng ngày (mỗi lượt bên trong
+                    # đã tự thử lại theo tháng/trạng thái) trước khi báo lỗi hẳn.
+                    invs = None
+                    loi_cuoi = None
+                    bo_qua_404 = False
+                    for lan_thu in range(2):
+                        try:
+                            invs = client.query_invoices(
+                                tu, den, loai=loai, he_thong=he_thong,
+                                progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"))
+                            loi_cuoi = None
+                            break
+                        except Exception as e:
+                            es = str(e)
+                            if "TOKEN_EXPIRED" in es:
+                                msg(stage="error", text="Token hết hạn, cần đăng nhập lại")
+                                return
+                            if he_thong == "sco-query" and "404" in es:
+                                bo_qua_404 = True
+                                break
+                            loi_cuoi = es
+                            if lan_thu == 0:
+                                cho = 30 if ("429" in es or "quá nhiều" in es) else 8
+                                msg(stage="warn",
+                                    text=f"⚠ {loai_txt}{ht_txt}: {es[:140]}. Đang chờ {cho}s rồi thử lại...")
+                                time.sleep(cho)
+
+                    if bo_qua_404:
+                        msg(stage="warn", text=f"{loai_txt}{ht_txt}: không có (404) — bỏ qua")
+                        continue
+                    if loi_cuoi is not None:
+                        # Đã thử lại vẫn lỗi -> ĐÂY LÀ LỖI THẬT SỰ, không phải "0 hóa đơn".
+                        # KHÔNG được continue âm thầm mà không đánh dấu — nếu không, phần
+                        # tổng kết cuối cùng không biết loại này đã THẤT BẠI và có thể
+                        # báo "Hoàn tất" sạch sẽ dù trang Thuế thực ra có dữ liệu.
+                        loai_that_bai[loai] = True
+                        msg(stage="error",
+                            text=f"✗ {loai_txt}{ht_txt}: LỖI, CHƯA TRA CỨU ĐƯỢC dù đã thử lại — "
+                                 f"{loi_cuoi[:140]}. KẾT QUẢ {loai_txt.upper()} CÓ THỂ THIẾU — "
+                                 f"NÊN TRA CỨU LẠI riêng kỳ/công ty này.")
+                        continue
+
+                    # Không raise lỗi nhưng vẫn có thể lỗi RIÊNG PHẦN (vd 1 trong 3 trạng
+                    # thái mua vào lỗi dù 2 cái kia OK) — vẫn phải cảnh báo, không im lặng.
+                    loi_rieng = getattr(client, "last_query_errors", None) or []
+                    if loi_rieng:
+                        loai_that_bai[loai] = True
+                        msg(stage="warn",
+                            text=f"⚠ {loai_txt}{ht_txt}: một phần bị lỗi dù đã thử lại "
+                                 f"({len(loi_rieng)} lượt) — KẾT QUẢ CÓ THỂ THIẾU. "
+                                 f"Chi tiết: {'; '.join(loi_rieng[:3])}")
+
+                    exp0 = getattr(client, "last_query_total", 0) or 0
                     if not invs:
-                        msg(stage="found",
-                            text=f"{loai_txt}{ht_txt}: 0 hóa đơn (không có dữ liệu trong kỳ)",
-                            total_saved=total_saved)
+                        if exp0:
+                            # Trang Thuế báo CÓ hóa đơn nhưng ta lấy được 0 -> chắc chắn
+                            # có vấn đề, TUYỆT ĐỐI không được coi là "không có dữ liệu".
+                            loai_that_bai[loai] = True
+                            msg(stage="error",
+                                text=f"✗ {loai_txt}{ht_txt}: Trang Thuế báo có {exp0} hóa đơn "
+                                     f"nhưng KHÔNG lấy được cái nào — LỖI, nên tra cứu LẠI.")
+                        else:
+                            msg(stage="found",
+                                text=f"{loai_txt}{ht_txt}: 0 hóa đơn (không có dữ liệu trong kỳ)",
+                                total_saved=total_saved)
                         continue
 
                     if not lay_ngan_hang:
@@ -2692,7 +2773,7 @@ def _run_fetch_job(cid: int, body: dict):
                     conn.commit()
                     total_saved += len(invs)
                     # so sánh với tổng kỳ vọng từ trang Thuế (trước khi lọc ngân hàng)
-                    exp = getattr(client, "last_query_total", 0) or 0
+                    exp = exp0
                     got_raw = getattr(client, "last_query_got", len(invs)) or len(invs)
                     thongke[loai]["exp"] += exp
                     thongke[loai]["got"] += got_raw
@@ -2745,13 +2826,19 @@ def _run_fetch_job(cid: int, body: dict):
             tk_ban = thongke["sold"]
             dong_tk = []
             if "purchase" in loai_list:
-                if tk_mua["exp"]:
+                if loai_that_bai["purchase"]:
+                    dong_tk.append(f"✗ Đầu vào (mua): LỖI khi tra cứu — CHƯA CHẮC ĐÃ ĐỦ "
+                                   f"(mới lấy được {tk_mua['got']} HĐ) — nên tra cứu LẠI")
+                elif tk_mua["exp"]:
                     dau = "✓" if tk_mua["got"] >= tk_mua["exp"] else "⚠"
                     dong_tk.append(f"{dau} Đầu vào (mua): lấy {tk_mua['got']}/{tk_mua['exp']} HĐ trang Thuế báo")
                 else:
                     dong_tk.append(f"• Đầu vào (mua): lấy {tk_mua['got']} HĐ")
             if "sold" in loai_list:
-                if tk_ban["exp"]:
+                if loai_that_bai["sold"]:
+                    dong_tk.append(f"✗ Đầu ra (bán): LỖI khi tra cứu — CHƯA CHẮC ĐÃ ĐỦ "
+                                   f"(mới lấy được {tk_ban['got']} HĐ) — nên tra cứu LẠI")
+                elif tk_ban["exp"]:
                     dau = "✓" if tk_ban["got"] >= tk_ban["exp"] else "⚠"
                     dong_tk.append(f"{dau} Đầu ra (bán): lấy {tk_ban['got']}/{tk_ban['exp']} HĐ trang Thuế báo")
                 else:
@@ -2759,20 +2846,36 @@ def _run_fetch_job(cid: int, body: dict):
             for d in dong_tk:
                 msg(stage="info", text=d)
 
-            # cảnh báo nếu thiếu
-            thieu = ((tk_mua["exp"] and tk_mua["got"] < tk_mua["exp"]) or
+            # cảnh báo nếu thiếu (LỖI THẬT SỰ luôn tính là thiếu, kể cả khi 'got'
+            # trùng khớp exp một cách tình cờ — vì exp lúc lỗi có thể không đáng tin)
+            co_loi = loai_that_bai["purchase"] or loai_that_bai["sold"]
+            thieu = (co_loi or
+                     (tk_mua["exp"] and tk_mua["got"] < tk_mua["exp"]) or
                      (tk_ban["exp"] and tk_ban["got"] < tk_ban["exp"]))
-            done_text = f"Hoàn tất! Đã lưu {total_saved} hóa đơn"
-            if "purchase" in loai_list or "sold" in loai_list:
-                done_text += f" (đầu vào: {tk_mua['got']}, đầu ra: {tk_ban['got']})"
-            if file_saved:
-                done_text += f", tải {file_saved} file vào: {target_dir}"
-            if thieu:
-                done_text += " — ⚠ CÓ THỂ THIẾU, nên tra cứu lại (chế độ Chậm & an toàn)"
-            msg(stage="done", text=done_text,
+            if co_loi:
+                # KHÔNG BAO GIỜ báo "Hoàn tất" khi có lỗi — phải là trạng thái LỖI rõ ràng
+                loi_ben = []
+                if loai_that_bai["purchase"]:
+                    loi_ben.append("MUA VÀO")
+                if loai_that_bai["sold"]:
+                    loi_ben.append("BÁN RA")
+                done_text = (f"❌ LỖI khi tra cứu {', '.join(loi_ben)} — DỮ LIỆU CHƯA ĐẦY ĐỦ "
+                            f"(đã lưu tạm {total_saved} hóa đơn: đầu vào {tk_mua['got']}, "
+                            f"đầu ra {tk_ban['got']}). BẮT BUỘC tra cứu LẠI công ty này "
+                            f"(nên chuyển chế độ 'Chậm & an toàn' nếu vẫn lỗi).")
+            else:
+                done_text = f"Hoàn tất! Đã lưu {total_saved} hóa đơn"
+                if "purchase" in loai_list or "sold" in loai_list:
+                    done_text += f" (đầu vào: {tk_mua['got']}, đầu ra: {tk_ban['got']})"
+                if file_saved:
+                    done_text += f", tải {file_saved} file vào: {target_dir}"
+                if thieu:
+                    done_text += " — ⚠ CÓ THỂ THIẾU, nên tra cứu lại (chế độ Chậm & an toàn)"
+            msg(stage=("error" if co_loi else "done"), text=done_text,
                 total_saved=total_saved, file_saved=file_saved,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
-                tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"])
+                tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
+                loi_tra_cuu=co_loi)
         except Exception as e:
             msg(stage="error", text=f"Lỗi: {str(e)[:160]}")
         finally:

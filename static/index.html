@@ -1117,8 +1117,8 @@ async function doFetch(){
         }else if(m.stage==='info'){
           // dòng thống kê lấy đủ chưa
           if(plog){
-            const mau=m.text.includes('⚠')?'#c00':(m.text.includes('✓')?'#1f6b4a':'#555');
-            plog.innerHTML+=`<div style="color:${mau}">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;
+            const mau=(m.text.includes('⚠')||m.text.includes('✗'))?'#c00':(m.text.includes('✓')?'#1f6b4a':'#555');
+            plog.innerHTML+=`<div style="color:${mau};font-weight:${m.text.includes('✗')?700:400}">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;
           }
         }else if(m.stage==='warn'){
           if(plog){plog.innerHTML+=`<div style="color:#c47">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
@@ -1127,6 +1127,7 @@ async function doFetch(){
           hienKetQua(m);
         }else if(m.stage==='error'){
           hadError=true;toast(m.text,'err');
+          if(plog){plog.innerHTML+=`<div style="color:#c00;font-weight:700">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
           if(m.text.includes('hết hạn'))clientState[current]=false;
         }
       }
