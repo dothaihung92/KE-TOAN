@@ -659,8 +659,11 @@ function dvcbKyLabel(){
 function dvcbFilter(){
   const q=(document.getElementById('dvcbSearch').value||'').toLowerCase().trim();
   document.querySelectorAll('.dvcbRow').forEach(r=>{
-    r.style.display=(!q||r.dataset.key.includes(q))?'flex':'none';
+    const hien=(!q||r.dataset.key.includes(q));
+    r.style.display=hien?'flex':'none';
+    if(!hien){const c=r.querySelector('.dvcbChk');if(c)c.checked=false;}
   });
+  dvcbCount();
 }
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
 function dvcbSelectAll(v){

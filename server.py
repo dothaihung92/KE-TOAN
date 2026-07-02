@@ -1526,7 +1526,8 @@ var tu=arguments[0], den=arguments[1], cap=arguments[2];
 try {
   $.ajax({ type:'GET', url:'/tthc/ho-so/search', dataType:'html',
     data:{ maNghiepVu:'', maTTHC:'', maToKhai:'', maHoSo:'',
-           tuNgay:tu, denNgay:den, scope_tdt1:'SELF', mstUyQuyen_tdt1:'', captcha:cap },
+           tuNgay:tu, denNgay:den, scope_tdt1:'SELF', mstUyQuyen_tdt1:'', captcha:cap,
+           page:0, size:200 },
     success:function(d){ cb({ok:true, html:d}); },
     error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,300)}); }
   });
@@ -1546,6 +1547,8 @@ try {
 """
 
 # Đọc bảng kết quả tra cứu (HTML fragment) thành mảng dòng×ô bằng DOM trình duyệt.
+# Mỗi dòng kèm luôn "ma" (mã hồ sơ) lấy từ onclick=downloadHoSo('...') của chính dòng đó,
+# để sau này ghép được tên file thân thiện đúng với dữ liệu (to_khai/ky/lan_bs) của dòng.
 _JS_PARSE_TABLE = r"""
 var cb = arguments[arguments.length-1];
 var html = arguments[0];
@@ -1556,7 +1559,10 @@ try {
   for (var i=0;i<trs.length;i++){
     var cells=[]; var cs = trs[i].querySelectorAll('th,td');
     for (var j=0;j<cs.length;j++){ cells.push((cs[j].innerText||cs[j].textContent||'').replace(/\s+/g,' ').trim()); }
-    if (cells.length) out.push(cells);
+    var ma='';
+    var m = trs[i].innerHTML.match(/downloadHoSo\(\s*['"]([^'"]+)['"]/);
+    if (m) ma = m[1];
+    if (cells.length) out.push({cells:cells, ma:ma});
   }
   cb({ok:true, rows:out});
 } catch(e){ cb({ok:false, err:''+e}); }
@@ -1758,19 +1764,92 @@ TRACUU_COLS = ["to_khai", "ky", "loai", "ngay_nop", "lan_nop", "lan_bs", "trang_
 TRACUU_HEADERS = ["Mst", "Tên công ty", "Tờ khai", "Kỳ", "Loại",
                   "Ngày nộp", "Lần nộp", "Lần bổ sung", "Trạng thái"]
 
+# Nhãn gọn cho tên file, theo mã tờ khai (vd '01/GTGT' -> '01GTGT')
+_TEN_TO_KHAI_MAP = {
+    "01/GTGT": "01GTGT",
+    "01/KK-TNCN": "01KK-TNCN",
+    "02/KK-TNCN": "02KK-TNCN",
+    "03/KK-TNCN": "03KK-TNCN",
+    "05/KK-TNCN": "05KK-TNCN",
+    "03/TNDN": "QTTNDN_BCTC",
+    "05/QTT-TNCN": "QTTNCN",
+    "02/TNDN": "TNDN",
+}
+
+def _ma_to_khai_tu_ten(ten_to_khai):
+    """Lấy MÃ tờ khai (vd '05/KK-TNCN') từ chuỗi đầy đủ 'MÃ - Tên đầy đủ' trong cột Tờ khai."""
+    s = str(ten_to_khai or "").strip()
+    if not s:
+        return ""
+    if " - " in s:
+        return s.split(" - ", 1)[0].strip()
+    return s.split(" ")[0].strip()
+
+def _chuan_ky_ten_file(ky):
+    """Chuẩn hoá chuỗi kỳ ('Quý 2/2026','Năm 2025','Tháng 3/2026'...) thành tên gọn để đặt tên file."""
+    import re as _re
+    kd = _khong_dau(ky)   # đã bỏ dấu + viết thường
+    m = _re.search(r'quy\s*(\d)\D+(\d{4})', kd)
+    if m:
+        return f"QUY{m.group(1)}.{m.group(2)}"
+    m = _re.search(r'nam\s*(\d{4})', kd)
+    if m:
+        return f"NAM{m.group(1)}"
+    m = _re.search(r'thang\s*(\d{1,2})\D+(\d{4})', kd)
+    if m:
+        return f"T{int(m.group(1))}.{m.group(2)}"
+    m = _re.match(r'^q\s*(\d)\s*/\s*(\d{4})$', kd)
+    if m:
+        return f"QUY{m.group(1)}.{m.group(2)}"
+    if _re.match(r'^\d{4}$', kd):
+        return f"NAM{kd}"
+    m = _re.match(r'^(\d{1,2})\s*/\s*(\d{4})$', kd)
+    if m:
+        return f"T{int(m.group(1))}.{m.group(2)}"
+    out = _re.sub(r'[^a-z0-9]', '', kd).upper()
+    return out or "KyKhongRo"
+
+def _so_lan_bs(v):
+    """Bóc số lần bổ sung từ ô 'Lần bổ sung' (có thể là '0','1','Lần 2',...). 0 = tờ khai gốc."""
+    import re as _re
+    m = _re.search(r'\d+', str(v or ""))
+    return int(m.group(0)) if m else 0
+
+def _ten_file_than_thien(ten_to_khai_full, ky, mst, lan_bs):
+    """Ghép tên file thân thiện: {MÃ}_{KỲ}-{MST}[_L{lần bổ sung}].
+    Ví dụ: 05KK-TNCN_QUY2.2026-0316429370  hoặc  QTTNDN_BCTC_NAM2025-0316429370_L1"""
+    import re as _re
+    ma = _ma_to_khai_tu_ten(ten_to_khai_full)
+    nhan = _TEN_TO_KHAI_MAP.get(ma.upper()) if ma else None
+    if not nhan:
+        nhan = _re.sub(r'[^A-Za-z0-9]', '', ma) or "ToKhai"
+    ky_s = _chuan_ky_ten_file(ky)
+    mst_s = _re.sub(r'[^A-Za-z0-9]', '', str(mst or ""))
+    ten = f"{nhan}_{ky_s}-{mst_s}"
+    lb = _so_lan_bs(lan_bs)
+    if lb > 0:
+        ten += f"_L{lb}"
+    return ten
+
 def _dvc_map_bang(rows):
-    """Từ mảng dòng×ô (DOM) → list dict theo TRACUU_COLS. Tự dò cột theo tiêu đề."""
+    """Từ mảng dòng {cells, ma} (DOM, xem _JS_PARSE_TABLE) → list dict theo TRACUU_COLS + 'ma'.
+    Tự dò cột theo tiêu đề. Cũng chấp nhận mảng dòng×ô "thô" (list) để tương thích ngược."""
     if not rows:
         return []
+    def _cells_of(r):
+        return r.get("cells") or [] if isinstance(r, dict) else (r or [])
+    def _ma_of(r):
+        return (r.get("ma") or "") if isinstance(r, dict) else ""
+
     # tìm dòng tiêu đề: dòng chứa 'trang thai' hoặc 'to khai'
     h_idx = -1
     for i, r in enumerate(rows[:5]):
-        joined = _khong_dau(" ".join(r))
+        joined = _khong_dau(" ".join(_cells_of(r)))
         if "trang thai" in joined or "to khai" in joined or "ky tinh" in joined:
             h_idx = i; break
     if h_idx < 0:
         h_idx = 0
-    header = [_khong_dau(c) for c in rows[h_idx]]
+    header = [_khong_dau(c) for c in _cells_of(rows[h_idx])]
 
     def find(*keys, avoid=()):
         for j, h in enumerate(header):
@@ -1789,21 +1868,23 @@ def _dvc_map_bang(rows):
     }
     out = []
     for r in rows[h_idx + 1:]:
-        if not r or all(not c for c in r):
+        cells = _cells_of(r)
+        if not cells or all(not c for c in cells):
             continue
         # bỏ dòng phân trang / tổng
-        j = _khong_dau(" ".join(r))
+        j = _khong_dau(" ".join(cells))
         if "tong so ban ghi" in j or "trang" == j[:5]:
             continue
         rec = {}
         ok_any = False
         for c in TRACUU_COLS:
             idx = col.get(c, -1)
-            v = r[idx] if 0 <= idx < len(r) else ""
+            v = cells[idx] if 0 <= idx < len(cells) else ""
             rec[c] = v
             if v:
                 ok_any = True
         if ok_any:
+            rec["ma"] = _ma_of(r)
             out.append(rec)
     return out
 
@@ -2492,7 +2573,37 @@ def _dvc_run_batch(batch_id, cids, body):
             if tai_file and ma_list:
                 folder = _dvc_save_folder(cid)
                 if folder:
+                    seen_ma = set()
+                    # 1) các hồ sơ dò được đủ dữ liệu dòng (to_khai/ky/lan_bs) -> đặt tên thân thiện
+                    for rec in rows:
+                        ma = (rec.get("ma") or "").strip()
+                        if not ma or ma in seen_ma:
+                            continue
+                        seen_ma.add(ma)
+                        if job.get("cancel"):
+                            break
+                        ten_goi = _ten_file_than_thien(rec.get("to_khai"), rec.get("ky"), mst, rec.get("lan_bs"))
+                        try:
+                            if tai_tb:
+                                tb_files, _ = _dvc_browser_thongbao(drv, ma)
+                                so_tb = len(tb_files)
+                                for k, (fn, raw) in enumerate(tb_files, 1):
+                                    if raw:
+                                        ext = os.path.splitext(fn)[1] or ".xml"
+                                        hau_to = f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"
+                                        _dvc_luu_file(folder, f"{ten_goi}{hau_to}{ext}", raw); item["so_file"] += 1
+                            fn, raw = _dvc_browser_download(drv, ma)
+                            if raw:
+                                ext = os.path.splitext(fn)[1] or ".zip"
+                                _dvc_luu_file(folder, f"{ten_goi}{ext}", raw); item["so_file"] += 1
+                        except Exception:
+                            pass
+                        time.sleep(0.3)
+                    # 2) các mã hồ sơ tìm thấy nhưng KHÔNG ghép được dữ liệu dòng -> tải với tên gốc (dự phòng)
                     for ma in ma_list:
+                        if ma in seen_ma:
+                            continue
+                        seen_ma.add(ma)
                         if job.get("cancel"):
                             break
                         try:
