@@ -1862,22 +1862,43 @@ function xkMoGan(idx){
   document.getElementById('xkGanModal').style.display='flex';
 }
 function xkDongGan(){document.getElementById('xkGanModal').style.display='none';xkGanIdx=-1;}
+// tồn CÒN LẠI THẬT SỰ cho mỗi mã tại thời điểm gán dòng idx: tồn gốc trừ đi
+// những gì các dòng KHÁC (mọi dòng trừ dòng đang gán) đã dùng — không phải
+// tồn gốc tĩnh, để không gây hiểu lầm như trường hợp gán mã đã bị dòng khác dùng bớt.
+function xkTonConLaiMap(boQuaIdx){
+  const map={}; xkTon.forEach(t=>{map[t.ma]=t.ton;});
+  xkRows.forEach((r,i)=>{
+    if(i===boQuaIdx)return;
+    const ma=String(r.ma||'').trim();
+    if(ma && (ma in map))map[ma]-=(Number(r.sl)||0);
+  });
+  return map;
+}
 function xkVeDanhSachGan(){
   const box=document.getElementById('xkGanList'); if(!box)return;
   const r=xkRows[xkGanIdx]; if(!r){box.innerHTML='';return}
+  const tonConLai=xkTonConLaiMap(xkGanIdx);
+  const tenChuanBan=xkChuanTen(r.ten_sp);
   const q=(document.getElementById('xkGanSearch').value||'').toLowerCase().trim();
-  const goiY=(r.goi_y||[]).filter(g=>!q||`${g.ten} ${g.ma}`.toLowerCase().includes(q));
+  const goiY=(r.goi_y||[]).filter(g=>!q||`${g.ten} ${g.ma}`.toLowerCase().includes(q))
+    .map(g=>({...g, con_lai: tonConLai[g.ma]??g.con_lai}));
   const goiYma=new Set(goiY.map(g=>g.ma));
-  const khac=xkTon.filter(t=>!goiYma.has(t.ma)&&(!q||`${t.ten} ${t.ma}`.toLowerCase().includes(q))).slice(0,200);
-  const dong=(it,noibat)=>`<div onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
+  const khac=xkTon.filter(t=>!goiYma.has(t.ma)&&(!q||`${t.ten} ${t.ma}`.toLowerCase().includes(q))).slice(0,200)
+    .map(t=>({...t, con_lai: tonConLai[t.ma]??t.ton}));
+  const dong=(it,noibat)=>{
+    const khacXa=!xkManh(tenChuanBan, xkChuanTen(it.ten)) && (it.diem==null || it.diem<0.6);
+    return `<div onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
       style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;${noibat?'background:#fff7e6':''}"
       onmouseover="this.style.background='#eef7f7'" onmouseout="this.style.background='${noibat?'#fff7e6':'#fff'}'">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
         <div style="font-weight:800;font-size:16px">${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
         ${it.diem!=null?`<div style="font-size:13px;font-weight:700;color:${it.diem>=0.9?'#1a7a7a':'#b06a00'};white-space:nowrap">Khớp ${Math.round(it.diem*100)}%</div>`:''}
       </div>
-      <div style="font-size:14px;color:var(--muted);margin-top:2px">ĐVT: ${xkEsc(it.dvt)||'—'} · Đơn giá: ${fmtVND(it.gia)} · Tồn: ${it.con_lai??it.ton??0}</div>
+      <div style="font-size:14px;color:var(--muted);margin-top:2px">ĐVT: ${xkEsc(it.dvt)||'—'} · Đơn giá: ${fmtVND(it.gia)} ·
+        Còn lại: <b style="color:${it.con_lai>0?'#1a7a7a':'#b91c1c'}">${it.con_lai}</b></div>
+      ${khacXa?'<div style="font-size:12px;color:#b91c1c;font-weight:700;margin-top:2px">⚠ Tên khác khá nhiều so với tên bán — kiểm tra kỹ trước khi chọn</div>':''}
     </div>`;
+  };
   let html='';
   if(goiY.length)html+=`<div style="padding:6px 14px;font-size:13px;color:#b06a00;background:#fff7e6;font-weight:800">GỢI Ý PHÙ HỢP</div>`+goiY.map(g=>dong(g,true)).join('');
   html+=khac.map(t=>dong(t,false)).join('');
@@ -1888,6 +1909,10 @@ function xkChonMa(ma){
   const r=xkRows[xkGanIdx];
   const tn=(r.goi_y||[]).find(g=>String(g.ma)===String(ma)) || xkTon.find(t=>String(t.ma)===String(ma));
   if(!tn)return;
+  const tonConLai=xkTonConLaiMap(xkGanIdx)[tn.ma];
+  if(tonConLai!=null && tonConLai<=0){
+    if(!confirm(`Mã ${tn.ma} hiện không còn tồn (đã dùng hết bởi dòng khác). Vẫn gắn mã này (âm kho)?`))return;
+  }
   r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
   xkDongGan();
   xkVeGrid();
