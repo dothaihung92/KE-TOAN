@@ -5362,9 +5362,12 @@ async def ban_hang(cid: int, request: Request, export: int = 0):
 _XK_NGUONG_FUZZY = 0.95
 
 def _chuan_ten_hang_xk(s):
-    """Chuẩn hoá tên hàng để so khớp: bỏ dấu, viết hoa, bỏ mọi ký tự không phải chữ/số."""
+    """Chuẩn hoá tên hàng để so khớp: bỏ dấu, viết hoa, bỏ nội dung trong
+    ngoặc (vd '(N)' — chỉ là ký hiệu phụ/nguồn hàng, không phải tên khác
+    mặt hàng), rồi bỏ mọi ký tự không phải chữ/số."""
     import re as _re_xk
-    return _re_xk.sub(r'[^A-Z0-9]', '', _khong_dau(s).upper())
+    s = _re_xk.sub(r'\([^)]*\)', '', _khong_dau(s).upper())
+    return _re_xk.sub(r'[^A-Z0-9]', '', s)
 
 def _diem_giong_ten_xk(a, b):
     """Điểm giống nhau 2 chuỗi ĐÃ chuẩn hoá (0..1), theo tỉ lệ ký tự khớp."""
@@ -5510,10 +5513,26 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
         })
     items.sort(key=lambda it: _xk_key_ngay(it["ngay"]))
 
+    def goi_y_cho(ten_chuan, manh):
+        manh_ma = {tn["ma"] for tn in manh}
+        scored = sorted(
+            ({"ma": tn["ma"], "ten": tn["ten"], "dvt": tn["dvt"], "gia": tn["gia"],
+              "con_lai": tn["con_lai"], "manh": tn["ma"] in manh_ma,
+              "diem": round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 3)}
+             for tn in ton_list), key=lambda x: (-x["manh"], -x["diem"]))
+        return [s for s in scored[:6] if s["diem"] > 0.3 or s["manh"]]
+
+    def dong_trong(it, sl_thieu, ten_chuan, manh):
+        rec = dict(it, sl=sl_thieu)
+        rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
+                   goi_y=goi_y_cho(ten_chuan, manh))
+        return rec
+
     out = []
     for it in items:
         ten_chuan = _chuan_ten_hang_xk(it["ten_sp"])
         sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
+        tt_goc = it.get("tt")
         candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
         manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])]
         pool = manh
@@ -5525,38 +5544,53 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
                     best, best_diem = tn, d
             if best and best_diem >= _XK_NGUONG_FUZZY:
                 pool = [best]
+        if not pool:                                  # không tìm thấy tên nào khớp
+            out.append(dong_trong(it, sl_can, ten_chuan, manh))
+            continue
         # Nhiều mã trùng/gần trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ có sẵn
         # trong MISA cho cùng sản phẩm) -> LẤY LUÔN mã còn đủ tồn cho số lượng
         # bán, KHÔNG hỏi lại — ưu tiên mã đã HỌC trước đó nếu vẫn đủ tồn, rồi đến
-        # mã còn tồn ÍT NHẤT nhưng vẫn đủ (đỡ lẻ tồn kho). CHỈ để trống khi
-        # KHÔNG mã nào trong nhóm đủ tồn cho số lượng bán (tồn kho không đủ).
-        pick, thieu_ton = None, False
-        if pool:
-            ma_hoc = hoc_ma.get(ten_chuan)
-            hoc_du = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
-            if hoc_du:
-                pick = hoc_du
-            else:
-                du_ton = [tn for tn in pool if tn["con_lai"] >= sl_can]
-                if du_ton:
-                    pick = min(du_ton, key=lambda tn: tn["con_lai"])
-                else:
-                    thieu_ton = True
-        rec = dict(it)
+        # mã còn tồn ÍT NHẤT nhưng vẫn đủ (đỡ lẻ tồn kho).
+        ma_hoc = hoc_ma.get(ten_chuan)
+        pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
+        if not pick:
+            du_ton = [tn for tn in pool if tn["con_lai"] >= sl_can]
+            if du_ton:
+                pick = min(du_ton, key=lambda tn: tn["con_lai"])
         if pick:
             pick["con_lai"] -= sl_can
+            rec = dict(it)
             rec.update(ma=pick["ma"], ten_xk=pick["ten"], dvt_xk=pick["dvt"],
                        gia_xk=pick["gia"], goi_y=[], mo_ho=False, thieu_ton=False)
-        else:
-            manh_ma = {tn["ma"] for tn in manh}
-            scored = sorted(
-                ({"ma": tn["ma"], "ten": tn["ten"], "dvt": tn["dvt"], "gia": tn["gia"],
-                  "con_lai": tn["con_lai"], "manh": tn["ma"] in manh_ma,
-                  "diem": round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 3)}
-                 for tn in ton_list), key=lambda x: (-x["manh"], -x["diem"]))
-            rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=thieu_ton,
-                       goi_y=[s for s in scored[:6] if s["diem"] > 0.3 or s["manh"]])
-        out.append(rec)
+            out.append(rec)
+            continue
+        # KHÔNG mã đơn nào đủ cả số lượng -> TÁCH DÒNG: cộng dồn nhiều mã lại
+        # (mã còn tồn NHIỀU hơn lấy trước) cho đến khi đủ số lượng bán; phần
+        # còn thiếu (nếu tổng tồn cả nhóm vẫn không đủ) tách thành 1 dòng
+        # riêng để trống, kèm gợi ý, cho người dùng tự gắn mã khác.
+        can_lay = sl_can
+        da_dung_tien = 0
+        for tn in sorted(pool, key=lambda t: -t["con_lai"]):
+            if can_lay <= 0 or tn["con_lai"] <= 0:
+                continue
+            lay = min(tn["con_lai"], can_lay)
+            tn["con_lai"] -= lay
+            can_lay -= lay
+            if isinstance(tt_goc, (int, float)) and sl_can:
+                tt_phan = round(tt_goc - da_dung_tien) if can_lay <= 0 else round(tt_goc * lay / sl_can)
+            else:
+                tt_phan = tt_goc
+            da_dung_tien += tt_phan if isinstance(tt_phan, (int, float)) else 0
+            rec = dict(it, sl=lay, tt=tt_phan)
+            rec.update(ma=tn["ma"], ten_xk=tn["ten"], dvt_xk=tn["dvt"], gia_xk=tn["gia"],
+                       goi_y=[], mo_ho=False, thieu_ton=False)
+            out.append(rec)
+        if can_lay > 0:                                # vẫn còn thiếu sau khi gộp cả nhóm
+            tt_thieu = round(tt_goc - da_dung_tien) if isinstance(tt_goc, (int, float)) else tt_goc
+            rec = dict(it, sl=can_lay, tt=tt_thieu)
+            rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
+                       goi_y=goi_y_cho(ten_chuan, manh))
+            out.append(rec)
     return out
 
 def _xk_cuoi_thang(ngay):

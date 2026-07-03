@@ -398,16 +398,16 @@
 
 <!-- MODAL GÁN MÃ HÀNG (Xuất Kho) -->
 <div id="xkGanModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:700;align-items:center;justify-content:center">
-  <div style="width:min(560px,94vw);max-height:86vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:18px">
-    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:8px">
+  <div style="width:min(680px,96vw);max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:10px">
       <div>
-        <div style="font-weight:700;font-size:15px">🏷 Gán mã hàng kho</div>
-        <div id="xkGanTenSp" style="font-size:13px;color:var(--muted);margin-top:2px"></div>
+        <div style="font-weight:800;font-size:19px">🏷 Gán mã hàng kho</div>
+        <div id="xkGanTenSp" style="font-size:18px;font-weight:700;color:#1a1a1a;margin-top:4px"></div>
       </div>
       <button class="btn ghost sm" onclick="xkDongGan()">✕</button>
     </div>
     <input id="xkGanSearch" placeholder="🔎 Tìm theo tên hàng hoặc mã..." oninput="xkVeDanhSachGan()"
-           style="padding:8px 10px;border:1px solid #ccc;border-radius:8px;width:100%;box-sizing:border-box;margin-bottom:8px">
+           style="padding:10px 12px;font-size:15px;border:1px solid #ccc;border-radius:8px;width:100%;box-sizing:border-box;margin-bottom:10px">
     <div id="xkGanList" style="overflow:auto;flex:1;border:1px solid #eee;border-radius:8px"></div>
     <div style="margin-top:10px;text-align:right">
       <button class="btn ghost sm" onclick="xkDongGan()">Đóng</button>
@@ -1595,7 +1595,7 @@ async function luuCaHaiBangKe(){
 
 /* ----- XUẤT KHO ----- */
 let xkTon=[], xkRows=[], xkGanIdx=-1;
-const XK_HEADERS=['Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
+const XK_HEADERS=['Tồn kho','Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
                    'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho'];
 function xkEsc(s){return String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function moXuatKho(){
@@ -1648,7 +1648,8 @@ function xkVeTrangChinh(){
         <button class="btn" style="background:#5a3e8a" onclick="xkDoMa()">🔍 Dò mã hàng tự động</button>
         <button class="btn ghost sm" onclick="xkGanChonDong()">✏ Gán mã cho dòng đã chọn</button>
         <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Lọc</button>
-        <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
+        <button class="btn ghost sm" onclick="xkGomNhom()">🔠 Gom dòng chưa gắn mã</button>
+        <button class="btn ghost sm" onclick="xkFillDown()" title="Ctrl+D">⬇ Fill Down</button>
         <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
         <button class="btn gold sm" onclick="xkLuu()">💾 Lưu tạm</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
@@ -1689,13 +1690,15 @@ async function xkDoMa(){
 // chuyển xkRows (mảng object) -> nlHeader/nlRows để dùng chung lưới Excel của Nhập Liệu
 function xkRowsToNl(){
   nlHeader=XK_HEADERS.slice();
+  const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
   nlRows=xkRows.map(r=>{
     const slKho=(r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl;
     const giaKho=r.gia_xk;
     const slN=typeof slKho==='number'?slKho:parseFloat(slKho);
     const giaN=typeof giaKho==='number'?giaKho:parseFloat(giaKho);
     const ttKho=(!isNaN(slN)&&!isNaN(giaN))?Math.round(slN*giaN):'';
-    return [r.sohd||'', r.ngay||'', r.ten_sp||'', r.dvt||'', r.sl??'', r.dgia??'', r.tt??'',
+    const ton=r.ma?(tonMap[r.ma]??''):'';
+    return [ton, r.sohd||'', r.ngay||'', r.ten_sp||'', r.dvt||'', r.sl??'', r.dgia??'', r.tt??'',
             r.ma||'', r.ten_xk||'', r.dvt_xk||'', slKho??'', giaKho??'', ttKho];
   });
 }
@@ -1704,7 +1707,7 @@ function xkTuNlRows(){
   const cu=xkRows;
   xkRows=nlRows.map((row,i)=>{
     const goc=cu[i]||{};
-    const [sohd,ngay,ten_sp,dvt,sl,dgia,tt,ma,ten_xk,dvt_xk,sl_kho,gia_xk]=row;
+    const [ton,sohd,ngay,ten_sp,dvt,sl,dgia,tt,ma,ten_xk,dvt_xk,sl_kho,gia_xk]=row;
     const maMoi=String(ma||'').trim();
     return {...goc,
       sohd:String(sohd||''), ngay:String(ngay||''), ten_sp:String(ten_sp||''), dvt:String(dvt||''),
@@ -1714,10 +1717,61 @@ function xkTuNlRows(){
       mo_ho: maMoi?false:!!goc.mo_ho};
   });
 }
+// gom các dòng CHƯA gắn mã lên đầu, sắp theo tên sản phẩm để các dòng cùng tên
+// đứng liền nhau (dễ Fill Down 1 mã cho nhiều dòng giống tên)
+function xkGomNhom(){
+  xkTuNlRows();
+  const trong=xkRows.filter(r=>!String(r.ma||'').trim())
+    .sort((a,b)=>String(a.ten_sp||'').localeCompare(String(b.ten_sp||''),'vi'));
+  const daGan=xkRows.filter(r=>String(r.ma||'').trim());
+  xkRows=[...trong, ...daGan];
+  xkVeGrid();
+  toast(`Đã gom ${trong.length} dòng chưa gắn mã lên đầu, sắp theo tên sản phẩm`,'ok');
+}
+// Fill Down riêng cho lưới Xuất Kho: sau khi fill xong, TỰ KIỂM TRA tồn kho —
+// mã nào bị dùng vượt số tồn sẽ tự TÁCH DÒNG (giữ mã cho phần vừa đủ tồn,
+// phần dư để trống) để người dùng gắn mã khác cho phần còn thiếu.
+function xkFillDown(){
+  nlFillDown();
+  xkKiemTraTon();
+}
+function xkKiemTraTon(){
+  xkTuNlRows();
+  const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
+  const daDung={};
+  const ketQua=[];
+  let soCanhBao=0;
+  xkRows.forEach(r=>{
+    const ma=String(r.ma||'').trim();
+    const sl=Number(r.sl)||0;
+    if(!ma || !(ma in tonMap)){ketQua.push(r); return;}
+    const conLai=tonMap[ma]-(daDung[ma]||0);
+    if(conLai<=0){
+      soCanhBao++;
+      ketQua.push({...r, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', mo_ho:true, thieu_ton:true});
+      return;
+    }
+    if(sl<=conLai){
+      daDung[ma]=(daDung[ma]||0)+sl;
+      ketQua.push(r);
+    }else{
+      soCanhBao++;
+      daDung[ma]=(daDung[ma]||0)+conLai;
+      const tt=Number(r.tt)||0;
+      const ttDu=sl?Math.round(tt*conLai/sl):tt;
+      ketQua.push({...r, sl:conLai, tt:ttDu});
+      ketQua.push({...r, sl:sl-conLai, tt:tt-ttDu, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', mo_ho:true, thieu_ton:true});
+    }
+  });
+  xkRows=ketQua;
+  xkVeGrid();
+  if(soCanhBao>0)toast(`⚠ Có ${soCanhBao} chỗ vượt tồn kho — đã tự tách dòng, phần vượt để trống cho bạn gắn mã khác`,'err');
+}
 function xkVeGrid(){
   xkRowsToNl();
   veGridNhapLieu();
   xkToMauThieu();
+  xkToDamTenBan();
   xkTongKet();
 }
 // tô đỏ các dòng CHƯA có mã hàng (để dễ nhận biết cần gán tay)
@@ -1727,19 +1781,28 @@ function xkToMauThieu(){
     document.querySelectorAll(`#nlTableWrap td[data-r="${i}"]`).forEach(td=>{td.style.background='#fde8e8';});
   });
 }
+// cột "Tên Sản Phẩm" (index 3) hiện to đậm hơn cho dễ đọc
+function xkToDamTenBan(){
+  document.querySelectorAll('#nlTableWrap td[data-c="3"]').forEach(td=>{
+    td.style.fontWeight='700'; td.style.fontSize='14px';
+  });
+}
 function xkTongKet(){
   const el=document.getElementById('nlTongCong'); if(!el)return;
   if(!xkRows.length){el.innerHTML='<div class="hint" style="padding:4px 0">Chưa có dữ liệu — import Sheet TON rồi bấm "🔍 Dò mã hàng tự động".</div>';return}
   const khop=xkRows.filter(r=>String(r.ma||'').trim()).length;
-  let tBan=0, tKho=0;
+  let tBan=0, tKho=0, tSl=0, tSlKho=0;
   xkRows.forEach(r=>{
     tBan+=nlParseSo(r.tt);
+    tSl+=nlParseSo(r.sl);
     const sl=nlParseSo((r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl);
+    tSlKho+=sl;
     tKho+=sl*nlParseSo(r.gia_xk);
   });
   el.innerHTML=`<div style="display:flex;gap:22px;flex-wrap:wrap;background:#f0f9f4;border-radius:8px;padding:10px 14px">
     <span>Số dòng: <b>${xkRows.length}</b> — đã gắn mã <b style="color:#1a7a7a">${khop}</b>,
       còn thiếu <b style="color:${xkRows.length-khop?'#b91c1c':'#1a7a7a'}">${xkRows.length-khop}</b></span>
+    <span>Tổng số lượng BÁN: <b>${tSl.toLocaleString('vi-VN')}</b> — XUẤT KHO: <b>${tSlKho.toLocaleString('vi-VN')}</b></span>
     <span>Tổng thành tiền BÁN: <b style="color:#1f6b4a">${Math.round(tBan).toLocaleString('vi-VN')} đ</b></span>
     <span>Tổng thành tiền XUẤT KHO (giá vốn): <b style="color:#8a5d00">${Math.round(tKho).toLocaleString('vi-VN')} đ</b></span>
     <span>Chênh lệch: <b>${Math.round(tBan-tKho).toLocaleString('vi-VN')} đ</b></span></div>`;
@@ -1768,13 +1831,13 @@ function xkVeDanhSachGan(){
   const goiYma=new Set(goiY.map(g=>g.ma));
   const khac=xkTon.filter(t=>!goiYma.has(t.ma)&&(!q||`${t.ten} ${t.ma}`.toLowerCase().includes(q))).slice(0,200);
   const dong=(it,noibat)=>`<div onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
-      style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;${noibat?'background:#fff7e6':''}"
+      style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;${noibat?'background:#fff7e6':''}"
       onmouseover="this.style.background='#eef7f7'" onmouseout="this.style.background='${noibat?'#fff7e6':'#fff'}'">
-      <div style="font-weight:600;font-size:13px">${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
-      <div style="font-size:12px;color:var(--muted)">ĐVT: ${xkEsc(it.dvt)||'—'} · Đơn giá: ${fmtVND(it.gia)} · Tồn: ${it.con_lai??it.ton??0}</div>
+      <div style="font-weight:800;font-size:16px">${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
+      <div style="font-size:14px;color:var(--muted);margin-top:2px">ĐVT: ${xkEsc(it.dvt)||'—'} · Đơn giá: ${fmtVND(it.gia)} · Tồn: ${it.con_lai??it.ton??0}</div>
     </div>`;
   let html='';
-  if(goiY.length)html+=`<div style="padding:4px 10px;font-size:11px;color:#b06a00;background:#fff7e6;font-weight:700">GỢI Ý PHÙ HỢP</div>`+goiY.map(g=>dong(g,true)).join('');
+  if(goiY.length)html+=`<div style="padding:6px 14px;font-size:13px;color:#b06a00;background:#fff7e6;font-weight:800">GỢI Ý PHÙ HỢP</div>`+goiY.map(g=>dong(g,true)).join('');
   html+=khac.map(t=>dong(t,false)).join('');
   box.innerHTML=html||'<div class="hint" style="padding:12px">Không tìm thấy</div>';
 }
