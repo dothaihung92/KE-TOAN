@@ -1650,11 +1650,12 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Lọc</button>
         <button class="btn ghost sm" onclick="xkFillDown()" title="Ctrl+D">⬇ Fill Down</button>
         <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
+        <button class="btn ghost sm" onclick="xkKiemTraTon()" style="color:#8a5d00;border-color:#e8b923">✅ Kiểm tra tồn kho</button>
         <button class="btn gold sm" onclick="xkLuu()">💾 Lưu tạm</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán tay, hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã và tự tách dòng nếu vượt tồn. <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán tay, hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
@@ -1703,7 +1704,7 @@ function xkRowsToNl(){
     let ton='';
     if(ma && (ma in tonMap)){
       daDung[ma]=(daDung[ma]||0)+(nlParseSo(r.sl)||0);
-      ton=tonMap[ma]-daDung[ma];
+      ton=String(tonMap[ma]-daDung[ma]);   // ép chuỗi: tránh số 0 hiện thành ô trống (0 là falsy)
     }
     return [ton, r.sohd||'', r.ngay||'', r.ten_sp||'', r.dvt||'', r.sl??'', r.dgia??'', r.tt??'',
             r.ma||'', r.ten_xk||'', r.dvt_xk||'', slKho??'', giaKho??'', ttKho];
@@ -1731,13 +1732,26 @@ function xkTuNlRows(){
       mo_ho: maMoi?false:!!goc.mo_ho};
   });
 }
-// Fill Down riêng cho lưới Xuất Kho: sau khi fill xong, TỰ KIỂM TRA tồn kho —
-// mã nào bị dùng vượt số tồn sẽ tự TÁCH DÒNG (giữ mã cho phần vừa đủ tồn,
-// phần dư để trống) để người dùng gắn mã khác cho phần còn thiếu.
+// chuẩn hoá tên hàng để so khớp (giống _chuan_ten_hang_xk phía server): bỏ dấu,
+// bỏ nội dung trong ngoặc đơn (vd '(N)'), viết hoa, bỏ ký tự không phải chữ/số.
+function xkChuanTen(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase()
+    .replace(/\([^)]*\)/g,'').replace(/[^A-Z0-9]/g,'');
+}
+function xkManh(a,b){
+  if(!a||!b)return false;
+  return a===b||a.includes(b)||b.includes(a);
+}
+// Fill Down riêng cho lưới Xuất Kho: sau khi fill xong, TỰ KIỂM TRA tồn kho.
 function xkFillDown(){
   nlFillDown();
   xkKiemTraTon();
 }
+// Kiểm tra & tự sửa theo tồn kho: với TỪNG dòng, dùng nốt phần còn lại của mã
+// đang gán (nếu có) trước; nếu KHÔNG đủ (hết tồn hoặc thiếu), tự DÒ các mã
+// KHÁC cùng tên/gần tên trong Tồn kho còn hàng để gắn tiếp (ưu tiên mã còn
+// nhiều tồn hơn) — có thể tách thành nhiều dòng nếu phải dùng nhiều mã.
+// Chỉ để trống (kèm cảnh báo) phần THỰC SỰ không còn mã nào đủ đáp ứng.
 function xkKiemTraTon(){
   xkTuNlRows();
   const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
@@ -1745,30 +1759,52 @@ function xkKiemTraTon(){
   const ketQua=[];
   let soCanhBao=0;
   xkRows.forEach(r=>{
-    const ma=String(r.ma||'').trim();
-    const sl=Number(r.sl)||0;
-    if(!ma || !(ma in tonMap)){ketQua.push(r); return;}
-    const conLai=tonMap[ma]-(daDung[ma]||0);
-    if(conLai<=0){
-      soCanhBao++;
-      ketQua.push({...r, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', mo_ho:true, thieu_ton:true});
+    const maCu=String(r.ma||'').trim();
+    const tongGoc=Number(r.sl)||0, ttGoc=Number(r.tt)||0;
+    let conThieu=tongGoc;
+    const daThu=new Set();
+    const phanBo=[];
+    const layTu=(ma)=>{
+      if(conThieu<=0 || daThu.has(ma) || !(ma in tonMap))return;
+      daThu.add(ma);
+      const conLai=tonMap[ma]-(daDung[ma]||0);
+      if(conLai<=0)return;
+      const lay=Math.min(conLai, conThieu);
+      daDung[ma]=(daDung[ma]||0)+lay;
+      phanBo.push({ma, lay});
+      conThieu-=lay;
+    };
+    layTu(maCu);                          // 1) dùng nốt mã đang gán (nếu còn)
+    if(conThieu>0){                       // 2) dò các mã KHÁC cùng tên, còn tồn nhiều hơn trước
+      const tenChuan=xkChuanTen(r.ten_sp);
+      xkTon.filter(t=>!daThu.has(t.ma) && xkManh(tenChuan, xkChuanTen(t.ten)))
+        .sort((a,b)=>(tonMap[b.ma]-(daDung[b.ma]||0))-(tonMap[a.ma]-(daDung[a.ma]||0)))
+        .forEach(t=>layTu(t.ma));
+    }
+    if(!phanBo.length){
+      if(maCu)soCanhBao++;
+      ketQua.push({...r, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl_kho:'', mo_ho:true, thieu_ton:true});
       return;
     }
-    if(sl<=conLai){
-      daDung[ma]=(daDung[ma]||0)+sl;
-      ketQua.push(r);
-    }else{
-      soCanhBao++;
-      daDung[ma]=(daDung[ma]||0)+conLai;
-      const tt=Number(r.tt)||0;
-      const ttDu=sl?Math.round(tt*conLai/sl):tt;
-      ketQua.push({...r, sl:conLai, tt:ttDu});
-      ketQua.push({...r, sl:sl-conLai, tt:tt-ttDu, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', mo_ho:true, thieu_ton:true});
+    if(phanBo.length>1 || phanBo[0].ma!==maCu || conThieu>0)soCanhBao++;
+    let ttDaDung=0;
+    phanBo.forEach((p,i)=>{
+      const tn=xkTon.find(t=>t.ma===p.ma);
+      const laCuoi=(i===phanBo.length-1 && conThieu<=0);
+      const tt=laCuoi?Math.round(ttGoc-ttDaDung):Math.round(ttGoc*p.lay/(tongGoc||1));
+      ttDaDung+=tt;
+      ketQua.push({...r, ma:p.ma, ten_xk:tn?tn.ten:'', dvt_xk:tn?tn.dvt:'', gia_xk:tn?tn.gia:'',
+        sl:p.lay, sl_kho:p.lay, tt, mo_ho:false, thieu_ton:false});
+    });
+    if(conThieu>0){                       // vẫn còn thiếu dù đã dò hết ứng viên cùng tên
+      ketQua.push({...r, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl:conThieu, sl_kho:'',
+        tt:Math.round(ttGoc-ttDaDung), mo_ho:true, thieu_ton:true});
     }
   });
   xkRows=ketQua;
   xkVeGrid();
-  if(soCanhBao>0)toast(`⚠ Có ${soCanhBao} chỗ vượt tồn kho — đã tự tách dòng, phần vượt để trống cho bạn gắn mã khác`,'err');
+  if(soCanhBao>0)toast(`⚠ Đã dò lại theo tồn kho — ${soCanhBao} dòng phải đổi/tách mã do hết tồn`,'err');
+  else toast('✓ Không có mã nào vượt tồn kho','ok');
 }
 function xkVeGrid(){
   xkRowsToNl();
