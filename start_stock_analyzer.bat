@@ -11,9 +11,19 @@ echo ============================================================
 echo   PHAN MEM PHAN TICH CHUNG KHOAN VIET NAM - Khoi dong
 echo ============================================================
 
+rem Uu tien cac ban Python 3.10-3.13 (co ban cai san/wheel cho numpy, pandas
+rem on dinh). Python qua moi (vd 3.14+) hoac qua cu thuong chua/khong con
+rem duoc cac thu vien nay ho tro bang wheel, phai tu bien dich rat de loi.
 set "PYCMD="
-py -3 --version >nul 2>&1
-if not errorlevel 1 set "PYCMD=py -3"
+for %%V in (3.12 3.11 3.13 3.10) do if not defined PYCMD (
+    py -%%V --version >nul 2>&1
+    if not errorlevel 1 set "PYCMD=py -%%V"
+)
+
+if not defined PYCMD (
+    py -3 --version >nul 2>&1
+    if not errorlevel 1 set "PYCMD=py -3"
+)
 
 if not defined PYCMD (
     python --version >nul 2>&1
@@ -32,6 +42,12 @@ if not defined PYCMD (
 )
 
 echo   Dung: %PYCMD%
+
+%PYCMD% -m pip --version >nul 2>&1
+if errorlevel 1 (
+    echo   Ban Python nay chua co pip, dang thiet lap...
+    %PYCMD% -m ensurepip --upgrade >nul 2>&1
+)
 
 echo.
 echo [1/3] Dang kiem tra cap nhat...
@@ -81,13 +97,13 @@ echo   Dang nang cap pip...
 %PYCMD% -m pip install --prefer-binary --upgrade -r stock_analyzer\requirements.txt
 if errorlevel 1 (
     echo.
-    echo [LOI] Cai dat thu vien that bai.
+    echo [LOI] Cai dat thu vien that bai ^(dung %PYCMD%^).
     echo   Neu thay loi lien quan toi numpy, meson, Unknown compiler: pip
     echo   dang co gang tu bien dich numpy tu ma nguon vi khong tim thay
-    echo   ban cai san ^(wheel^) cho phien ban Python tren may ban.
-    echo   Cach sua - cai lai Python ban 64-bit, phien ban 3.11 hoac 3.12
-    echo   tu python.org ^(Python qua moi nhu 3.14 hoac qua cu deu co the
-    echo   chua co ban cai san^), roi chay lai file nay.
+    echo   ban cai san ^(wheel^) cho phien ban Python nay.
+    echo   Cach sua - cai Python ban 64-bit, phien ban 3.11 hoac 3.12 tu
+    echo   python.org ^(https://www.python.org/downloads/^), nho tick "Add
+    echo   python.exe to PATH" khi cai, roi chay lai file nay.
     echo.
     pause
     exit /b 1
