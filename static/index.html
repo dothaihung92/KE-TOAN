@@ -1655,7 +1655,7 @@ function xkVeTrangChinh(){
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán tay, hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán tay, hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. <b>Alt+G</b> Gán mã cho dòng đã chọn | <b>Alt+L</b> Lọc | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
@@ -2386,6 +2386,19 @@ function nlPhimO(e,td){
   if((e.ctrlKey||e.metaKey)&&(e.key==='r'||e.key==='R')){e.preventDefault();nlFillRight();return;}
   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&(e.key==='l'||e.key==='L')){e.preventDefault();nlBatFilter();return;}
   if(e.key==='Escape'){e.preventDefault();quayLaiChonBangKe();return;}
+  // mũi tên lên/xuống/trái/phải: di chuyển sang ô liền kề như Excel (không
+  // dùng để dịch con trỏ chữ trong ô, vì ô luôn ở chế độ có thể gõ thẳng)
+  if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&
+     (e.key==='ArrowUp'||e.key==='ArrowDown'||e.key==='ArrowLeft'||e.key==='ArrowRight')){
+    e.preventDefault();
+    const r=+td.dataset.r,c=+td.dataset.c;
+    let nr=r,nc=c;
+    if(e.key==='ArrowUp')nr--; else if(e.key==='ArrowDown')nr++;
+    else if(e.key==='ArrowLeft')nc--; else nc++;
+    const next=document.querySelector(`td[data-r="${nr}"][data-c="${nc}"]`);
+    if(next){td.blur();nlChon={r1:nr,c1:nc,r2:nr,c2:nc};nlCapNhatHighlight();next.focus();}
+    return;
+  }
   if(e.key==='Enter'){e.preventDefault();td.blur();
     const r=+td.dataset.r,c=+td.dataset.c;
     const next=document.querySelector(`td[data-r="${r+1}"][data-c="${c}"]`);
@@ -2413,10 +2426,12 @@ document.addEventListener('mouseup',()=>{nlDangKeo=false;});
 document.addEventListener('keydown',(e)=>{
   const nlScreen=document.getElementById('nhapLieuScreen');
   if(!nlScreen||nlScreen.style.display==='none')return;
-  if(!(e.ctrlKey||e.metaKey)&&e.key!=='Escape')return;
+  if(!(e.ctrlKey||e.metaKey||e.altKey)&&e.key!=='Escape')return;
   const k=e.key.toLowerCase();
   if(e.ctrlKey&&e.shiftKey&&k==='l'){e.preventDefault();nlBatFilter();}
   if(e.ctrlKey&&k==='z'){e.preventDefault();nlUndo();}
+  if(e.altKey&&k==='l'){e.preventDefault();nlBatFilter();}                 // Alt+L: Lọc
+  if(e.altKey&&k==='g'&&nhapLieuLoaiHienTai==='xk'){e.preventDefault();xkGanChonDong();} // Alt+G: Gán mã
   if(e.key==='Escape'){
     const content=document.getElementById('nhapLieuContent');
     if(content&&content.style.display!=='none'){quayLaiChonBangKe();}
