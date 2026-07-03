@@ -36,6 +36,12 @@ có thông tin nhạy cảm nào được gửi ra ngoài.
 
 ## Cài đặt & chạy
 
+**Windows**: bấm đúp file **`start_stock_analyzer.bat`** ở thư mục gốc của repo.
+File này tự động cập nhật mã nguồn mới nhất (git pull), cài/nâng cấp thư viện,
+rồi khởi động phần mềm - không cần gõ lệnh.
+
+**macOS/Linux hoặc dòng lệnh**:
+
 ```bash
 pip install -r stock_analyzer/requirements.txt
 python run_stock_analyzer.py

@@ -3,8 +3,13 @@
 Repo này gồm 2 công cụ độc lập, không phụ thuộc lẫn nhau:
 
 - **`hddt/` + `webapp/`** - tải hoá đơn điện tử từ Tổng cục Thuế (chi tiết bên dưới).
+  Trên Windows, chạy nhanh bằng cách bấm đúp file **`start.bat`**.
 - **`stock_analyzer/`** - phần mềm phân tích chứng khoán Việt Nam, gợi ý mua/bán,
   cập nhật tin tức liên tục. Xem [`stock_analyzer/README.md`](stock_analyzer/README.md).
+  Trên Windows, chạy nhanh bằng cách bấm đúp file **`start_stock_analyzer.bat`**.
+
+Mỗi file `.bat` sẽ tự động: cập nhật mã nguồn mới nhất (git pull, nếu có), cài/nâng
+cấp thư viện cần thiết, rồi khởi động phần mềm - không cần gõ lệnh thủ công.
 
 ---
 
