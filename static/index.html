@@ -1654,7 +1654,7 @@ function xkVeTrangChinh(){
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán theo gợi ý — hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng chưa xác định được mã (trùng tên nhiều mã hoặc không tìm thấy). <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán tay, hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel. <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
@@ -1753,7 +1753,8 @@ function xkGanChonDong(){
 function xkMoGan(idx){
   xkGanIdx=idx;
   const r=xkRows[idx];
-  document.getElementById('xkGanTenSp').textContent=`Tên bán: "${r.ten_sp}"${r.sl?` — SL ${r.sl}`:''}`;
+  document.getElementById('xkGanTenSp').innerHTML=`Tên bán: "${xkEsc(r.ten_sp)}"${r.sl?` — SL ${r.sl}`:''}`+
+    (r.thieu_ton?'<br><span style="color:#b91c1c">⚠ Không mã nào còn đủ tồn cho số lượng này — chọn tạm nếu chấp nhận âm kho</span>':'');
   document.getElementById('xkGanSearch').value='';
   xkVeDanhSachGan();
   document.getElementById('xkGanModal').style.display='flex';

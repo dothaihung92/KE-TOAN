@@ -5513,29 +5513,40 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
     out = []
     for it in items:
         ten_chuan = _chuan_ten_hang_xk(it["ten_sp"])
+        sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
         candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
         manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])]
-        pick, mo_ho = None, False
-        if len(manh) == 1:
-            pick = manh[0]
-        elif len(manh) > 1:
-            ma_hoc = hoc_ma.get(ten_chuan)
-            pick = next((tn for tn in manh if tn["ma"] == ma_hoc), None)
-            if not pick:
-                mo_ho = True
-        else:                                       # không có ứng viên 'mạnh' -> fuzzy chặt
+        pool = manh
+        if not pool:                                 # không có ứng viên 'mạnh' -> fuzzy chặt
             best, best_diem = None, 0.0
             for tn in candidates:
                 d = _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"])
                 if d > best_diem:
                     best, best_diem = tn, d
             if best and best_diem >= _XK_NGUONG_FUZZY:
-                pick = best
+                pool = [best]
+        # Nhiều mã trùng/gần trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ có sẵn
+        # trong MISA cho cùng sản phẩm) -> LẤY LUÔN mã còn đủ tồn cho số lượng
+        # bán, KHÔNG hỏi lại — ưu tiên mã đã HỌC trước đó nếu vẫn đủ tồn, rồi đến
+        # mã còn tồn ÍT NHẤT nhưng vẫn đủ (đỡ lẻ tồn kho). CHỈ để trống khi
+        # KHÔNG mã nào trong nhóm đủ tồn cho số lượng bán (tồn kho không đủ).
+        pick, thieu_ton = None, False
+        if pool:
+            ma_hoc = hoc_ma.get(ten_chuan)
+            hoc_du = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
+            if hoc_du:
+                pick = hoc_du
+            else:
+                du_ton = [tn for tn in pool if tn["con_lai"] >= sl_can]
+                if du_ton:
+                    pick = min(du_ton, key=lambda tn: tn["con_lai"])
+                else:
+                    thieu_ton = True
         rec = dict(it)
         if pick:
-            pick["con_lai"] -= (it["sl"] if isinstance(it["sl"], (int, float)) else 0)
+            pick["con_lai"] -= sl_can
             rec.update(ma=pick["ma"], ten_xk=pick["ten"], dvt_xk=pick["dvt"],
-                       gia_xk=pick["gia"], goi_y=[], mo_ho=False)
+                       gia_xk=pick["gia"], goi_y=[], mo_ho=False, thieu_ton=False)
         else:
             manh_ma = {tn["ma"] for tn in manh}
             scored = sorted(
@@ -5543,7 +5554,7 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
                   "con_lai": tn["con_lai"], "manh": tn["ma"] in manh_ma,
                   "diem": round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 3)}
                  for tn in ton_list), key=lambda x: (-x["manh"], -x["diem"]))
-            rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=mo_ho,
+            rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=thieu_ton,
                        goi_y=[s for s in scored[:6] if s["diem"] > 0.3 or s["manh"]])
         out.append(rec)
     return out
