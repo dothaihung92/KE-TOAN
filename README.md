@@ -8,8 +8,13 @@ Repo này gồm 2 công cụ độc lập, không phụ thuộc lẫn nhau:
   cập nhật tin tức liên tục. Xem [`stock_analyzer/README.md`](stock_analyzer/README.md).
   Trên Windows, chạy nhanh bằng cách bấm đúp file **`start_stock_analyzer.bat`**.
 
-Mỗi file `.bat` sẽ tự động: cập nhật mã nguồn mới nhất (git pull, nếu có), cài/nâng
-cấp thư viện cần thiết, rồi khởi động phần mềm - không cần gõ lệnh thủ công.
+Mỗi file `.bat` sẽ tự động: cập nhật mã nguồn mới nhất, cài/nâng cấp thư viện cần
+thiết, rồi khởi động phần mềm - không cần gõ lệnh thủ công. Nếu thư mục **chưa
+từng kết nối Git** (ví dụ bạn tải về dạng file zip), lần chạy đầu tiên sẽ tự kết
+nối tới GitHub; từ lần thứ hai trở đi, mỗi lần mở file `.bat` sẽ **tự động lấy
+bản mới nhất** trước khi chạy. Cần cài [Git](https://git-scm.com/downloads) để
+dùng được tính năng tự cập nhật này (không có Git thì phần mềm vẫn chạy bình
+thường, chỉ là không tự cập nhật).
 
 ---
 
