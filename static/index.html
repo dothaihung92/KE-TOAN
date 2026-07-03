@@ -1501,7 +1501,7 @@ async function importCongTy(input){
 }
 
 /* ========== NHẬP LIỆU ========== */
-let nlChung={in:null,out:null};
+let nlChung={in:null,out:null,ctbr:null};
 let nhapLieuLoaiHienTai='in';
 let nlHeader=[], nlRows=[], nlFilters={}, nlFreezeCol=0;
 let nlSnapTrong={};       // {ci: Set(idx)} - chốt danh sách dòng TRỐNG lúc bật lọc ∅
@@ -1536,7 +1536,7 @@ function moNhapLieu(){
   document.getElementById('nhapLieuHome').style.display='block';
   document.getElementById('nhapLieuContent').style.display='none';
   document.getElementById('nhapLieuScreen').style.display='block';
-  nlChung={in:null,out:null};
+  nlChung={in:null,out:null,ctbr:null};
   document.getElementById('nlChungInfo').textContent='';
   capNhatBadge();
 }
@@ -1568,8 +1568,10 @@ async function nhapLieuImportChung(input){
     const r=await fetch(`/api/nhap-lieu/import/${current}`,{method:'POST',body:fd});
     if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
-    nlChung={in:d.in,out:d.out};
-    let info=`✓ Đã đọc ${d.so_file} file → <b>Đầu vào ${d.in.so_dong} dòng</b>, <b>Đầu ra ${d.out.so_dong} dòng</b>. Bấm 💾 Lưu cả 2 bảng kê.`;
+    nlChung={in:d.in,out:d.out,ctbr:d.ctbr};
+    let info=`✓ Đã đọc ${d.so_file} file → <b>Đầu vào ${d.in.so_dong} dòng</b>, <b>Đầu ra ${d.out.so_dong} dòng</b>`+
+      (d.ctbr&&d.ctbr.so_dong?`, <b>Chi tiết BÁN RA ${d.ctbr.so_dong} dòng</b> (dùng cho Xuất Kho)`:'')+
+      `. Bấm 💾 Lưu cả 2 bảng kê.`;
     if(d.loi&&d.loi.length)info+=`<br><span style="color:#c00">⚠ ${d.loi.join('; ')}</span>`;
     document.getElementById('nlChungInfo').innerHTML=info;
     toast(`Đã tách: vào ${d.in.so_dong}, ra ${d.out.so_dong} dòng. Nhớ Lưu!`,'ok');
@@ -1582,9 +1584,10 @@ async function luuCaHaiBangKe(){
     let tong=0;
     if(nlChung.in){await fetch(`/api/nhap-lieu/save/${current}?loai=in`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.in)});tong+=nlChung.in.so_dong||0;}
     if(nlChung.out){await fetch(`/api/nhap-lieu/save/${current}?loai=out`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.out)});tong+=nlChung.out.so_dong||0;}
+    if(nlChung.ctbr&&nlChung.ctbr.so_dong){await fetch(`/api/nhap-lieu/save/${current}?loai=ctbr`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.ctbr)});}
     const co=companies.find(c=>c.id===current);
     toast(`💾 Đã lưu ${tong} dòng cho ${co?co.ten:'công ty'}`,'ok');
-    nlChung={in:null,out:null};
+    nlChung={in:null,out:null,ctbr:null};
     document.getElementById('nlChungInfo').innerHTML='<span style="color:#1f6b4a">✓ Đã lưu vào bộ dữ liệu của công ty này</span>';
     capNhatBadge();
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
@@ -1609,10 +1612,14 @@ async function xkTaiTrangThai(){
     if(elTon)elTon.innerHTML=xkTon.length?`<b style="color:#1a7a7a">✓ Đã có ${xkTon.length} mã hàng tồn kho</b>`:'Chưa import';
   }catch{}
   try{
+    const b=await api(`/api/xk/banra/${current}`);
+    const elSrc=document.getElementById('xkSrcBadge');
+    if(elSrc)elSrc.innerHTML=b.so_dong?`<b style="color:#1a7a7a">✓ Đã có ${b.so_dong} dòng (lấy từ dữ liệu Nhập Liệu)</b>`:
+      '<span style="color:#b06a00">Chưa có — vào mục Import & tách dữ liệu ở trên, chọn file có sheet "Chi tiết BÁN RA", rồi Lưu cả 2 bảng kê</span>';
+  }catch{}
+  try{
     const g=await api(`/api/xk/giathanh/${current}`);
     xkRows=g.rows||[];
-    const elSrc=document.getElementById('xkSrcBadge');
-    if(elSrc)elSrc.innerHTML=xkRows.length?`<b style="color:#1a7a7a">✓ Đã dò ${xkRows.length} dòng (khớp ${g.so_khop})</b>`:'Chưa dò mã';
   }catch{}
   xkVeGrid();
 }
@@ -1630,9 +1637,7 @@ function xkVeTrangChinh(){
         </div>
         <div style="flex:1;min-width:260px;border:1px solid #e0e0e0;border-radius:10px;padding:12px">
           <div style="font-weight:700;font-size:13px;margin-bottom:4px">2) Sheet GIATHANH — nguồn Chi tiết bán ra</div>
-          <div class="hint" style="margin-bottom:8px">Import file Excel có sheet "Chi tiết BÁN RA" (xuất từ chức năng đối chiếu hóa đơn).</div>
-          <button class="btn sm" style="background:#1a7a7a" onclick="document.getElementById('xkFileBanRa').click()">📥 Import Chi tiết Bán ra</button>
-          <input type="file" id="xkFileBanRa" accept=".xlsx" multiple style="display:none" onchange="xkImportBanRa(this)">
+          <div class="hint" style="margin-bottom:8px">Tự lấy từ dữ liệu Nhập Liệu đã import (sheet "Chi tiết BÁN RA" trong file bạn Import & tách dữ liệu ở màn Nhập Liệu) — không cần import lại.</div>
           <div id="xkSrcBadge" style="font-size:12px;margin-top:8px;color:var(--muted)">Đang tải...</div>
         </div>
       </div>
@@ -1654,18 +1659,6 @@ async function xkImportTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã import ${d.so_dong} mã hàng tồn kho`,'ok');
-    xkTaiTrangThai();
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-  input.value='';
-}
-async function xkImportBanRa(input){
-  const files=input.files; if(!files||!files.length)return;
-  try{
-    const fd=new FormData(); for(const f of files)fd.append('files',f);
-    const r=await fetch(`/api/xk/import-banra/${current}`,{method:'POST',body:fd});
-    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    const d=await r.json();
-    toast(`✓ Đã import ${d.so_dong} dòng bán ra`,'ok');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';

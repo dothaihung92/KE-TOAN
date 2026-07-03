@@ -3955,6 +3955,8 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
     """Import nhiều file Excel cho Nhập Liệu, GỘP (nối đuôi) thành 1 bảng.
     loai='in'  -> đọc sheet 'Chi tiết MUA VÀO'
     loai='out' -> đọc sheet 'BK Bán ra'
+    Đồng thời đọc luôn sheet 'Chi tiết BÁN RA' (nếu có) làm nguồn cho tính
+    năng Xuất Kho (Sheet GIATHANH) — khỏi phải import lại riêng.
     Trả về header + tất cả các dòng dữ liệu đã gộp (bỏ tiêu đề và dòng tổng)."""
     import openpyxl, io as _io
     form = await request.form()
@@ -3964,6 +3966,7 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
 
     header_in, rows_in = [], []
     header_out, rows_out = [], []
+    header_ctbr, rows_ctbr = [], []
     so_file_ok = 0
     loi = []
 
@@ -3993,10 +3996,17 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
                 header_out = h
             rows_out.extend(rs)
             co_du_lieu = True
+        kq_ctbr = _doc_sheet_nhap_lieu(wb, "Chi tiết BÁN RA", "Ký hiệu")
+        if kq_ctbr:
+            h, rs = kq_ctbr
+            if not header_ctbr:
+                header_ctbr = h
+            rows_ctbr.extend(rs)
+            co_du_lieu = True
         if co_du_lieu:
             so_file_ok += 1
         else:
-            loi.append(f"{fn}: không có sheet 'Chi tiết MUA VÀO' hoặc 'BK Bán ra'")
+            loi.append(f"{fn}: không có sheet 'Chi tiết MUA VÀO' / 'BK Bán ra' / 'Chi tiết BÁN RA'")
 
     conn = db()
     conn.execute("""CREATE TABLE IF NOT EXISTS nhap_lieu (
@@ -4009,6 +4019,7 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
     return {"ok": True, "so_file": so_file_ok,
             "in": {"header": header_in, "rows": rows_in, "so_dong": len(rows_in)},
             "out": {"header": header_out, "rows": rows_out, "so_dong": len(rows_out)},
+            "ctbr": {"header": header_ctbr, "rows": rows_ctbr, "so_dong": len(rows_ctbr)},
             "loi": loi[:5]}
 
 
@@ -5636,54 +5647,27 @@ def xk_get_ton(cid: int):
     rows = data.get("xk_ton") or []
     return {"rows": rows, "so_dong": len(rows)}
 
-@app.post("/api/xk/import-banra/{cid}")
-async def xk_import_banra(cid: int, request: Request):
-    """Import (các) file có sheet 'Chi tiết BÁN RA' (xuất từ chức năng đối
-    chiếu hóa đơn) -> lưu làm nguồn cho Sheet GIATHANH."""
-    import openpyxl, io as _io
-    form = await request.form()
-    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
-    if not files:
-        raise HTTPException(400, "Chưa chọn file")
-    header, rows = [], []
-    so_file_ok, loi = 0, []
-    for up in files:
-        if up is None:
-            continue
-        fn = getattr(up, "filename", "file")
-        try:
-            content = await up.read()
-            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
-        except Exception as e:
-            loi.append(f"{fn}: không đọc được ({e})"); continue
-        kq = _doc_sheet_nhap_lieu(wb, "Chi tiết BÁN RA", "Ký hiệu")
-        if not kq:
-            loi.append(f"{fn}: không có sheet 'Chi tiết BÁN RA'"); continue
-        h, rs = kq
-        if not header:
-            header = h
-        rows.extend(rs)
-        so_file_ok += 1
-    if not rows:
-        raise HTTPException(400, "Không đọc được dòng nào từ sheet 'Chi tiết BÁN RA'. " + "; ".join(loi[:3]))
-    data = _doc_du_lieu_cty(cid)
-    data["xk_ct_ban_ra"] = {"header": header, "rows": rows}
-    _ghi_du_lieu_cty(cid, data)
-    return {"ok": True, "so_file": so_file_ok, "so_dong": len(rows), "loi": loi[:5]}
+@app.get("/api/xk/banra/{cid}")
+def xk_get_banra(cid: int):
+    """Số dòng 'Chi tiết BÁN RA' đã có sẵn từ dữ liệu Nhập Liệu (không cần
+    import riêng — chỉ cần import & lưu ở màn Nhập Liệu như bình thường)."""
+    src = nhap_lieu_get(cid, "ctbr")
+    return {"so_dong": len(src.get("rows") or []), "updated_at": src.get("updated_at", "")}
 
 @app.post("/api/xk/tao-giathanh/{cid}")
 def xk_tao_giathanh(cid: int):
-    """Dò mã hàng tự động cho từng dòng bán ra, dựa theo TON đã import.
-    Áp lại các lựa chọn đã HỌC (từ lần người dùng tự gắn tay trước đó) cho
-    những tên hàng có nhiều mã trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ
-    đã có sẵn trong MISA)."""
+    """Dò mã hàng tự động cho từng dòng bán ra, dựa theo TON đã import và
+    dữ liệu 'Chi tiết BÁN RA' đã lưu sẵn từ màn Nhập Liệu (Import & tách dữ
+    liệu -> Lưu cả 2 bảng kê). Áp lại các lựa chọn đã HỌC (từ lần người dùng
+    tự gắn tay trước đó) cho những tên hàng có nhiều mã trùng tên (vd 1 mã do
+    phần mềm sinh + 1 mã cũ đã có sẵn trong MISA)."""
     data = _doc_du_lieu_cty(cid)
     ton_rows = data.get("xk_ton") or []
-    src = data.get("xk_ct_ban_ra") or {}
+    src = nhap_lieu_get(cid, "ctbr")
     if not ton_rows:
         raise HTTPException(400, "Chưa import Sheet TON (Tổng hợp tồn kho)")
     if not src.get("rows"):
-        raise HTTPException(400, "Chưa import dữ liệu 'Chi tiết BÁN RA'")
+        raise HTTPException(400, "Chưa có dữ liệu 'Chi tiết BÁN RA' — vào màn Nhập Liệu, Import & tách dữ liệu rồi Lưu cả 2 bảng kê từ file có sheet 'Chi tiết BÁN RA'")
     hoc_ma = data.get("xk_hoc_ma") or {}
     giathanh = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [], hoc_ma)
     data["xk_giathanh"] = giathanh
