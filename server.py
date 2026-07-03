@@ -5335,6 +5335,454 @@ async def ban_hang(cid: int, request: Request, export: int = 0):
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
 
 
+# ============================================================
+#  XUẤT KHO (form MISA "Xuất kho") — dò mã hàng từ TỒN KHO cho
+#  từng dòng bán ra (Chi tiết BÁN RA), có trừ tồn tuần tự để không
+#  gán quá số hàng thực còn trong kho.
+#
+#  Quy trình: 1) import file "Tổng hợp tồn kho" (MISA) -> Sheet TON
+#             2) import file có sheet "Chi tiết BÁN RA" -> nguồn GIATHANH
+#             3) dò mã tự động (đúng tên / gần đúng tên, có trừ tồn)
+#             4) người dùng sửa tay các dòng chưa dò được (gợi ý mã+tên+giá)
+#             5) xuất file "Xuất kho" (form MISA) từ GIATHANH đã gắn mã
+# ============================================================
+# điểm giống tối thiểu (0..1) để tự động gắn mã khi KHÔNG có ứng viên "mạnh"
+# (trùng y hệt hoặc 1 chuỗi nằm trong chuỗi kia) — trường hợp hiếm, đòi hỏi rất giống.
+_XK_NGUONG_FUZZY = 0.95
+
+def _chuan_ten_hang_xk(s):
+    """Chuẩn hoá tên hàng để so khớp: bỏ dấu, viết hoa, bỏ mọi ký tự không phải chữ/số."""
+    import re as _re_xk
+    return _re_xk.sub(r'[^A-Z0-9]', '', _khong_dau(s).upper())
+
+def _diem_giong_ten_xk(a, b):
+    """Điểm giống nhau 2 chuỗi ĐÃ chuẩn hoá (0..1), theo tỉ lệ ký tự khớp."""
+    import difflib
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+def _manh_xk(a, b):
+    """Ứng viên 'mạnh': tên ĐÃ chuẩn hoá trùng y hệt, hoặc 1 chuỗi nằm trong chuỗi kia
+    (vd chỉ lệch hậu tố 'CM', dấu * hay -... — coi như CÙNG một mặt hàng).
+    KHÔNG dùng cho các mặt hàng chỉ đơn thuần giống nhau về CHỮ (vd khác kích cỡ
+    160/180 ở cùng 1 vị trí) — loại đó phải qua ngưỡng fuzzy riêng, chặt hơn."""
+    if not a or not b:
+        return False
+    return a == b or a in b or b in a
+
+def _kd2(s):
+    """_khong_dau() rồi thay nốt 'đ'->'d' (NFD không tách được chữ Đ ra dấu riêng)."""
+    return _khong_dau(s).replace("đ", "d")
+
+def _doc_file_ton_kho(wb):
+    """Đọc file 'Tổng hợp tồn kho' (báo cáo MISA, tiêu đề gộp ô 2 dòng: nhóm
+    Đầu kỳ/Nhập kho/Xuất kho/Cuối kỳ ở dòng trên, Số lượng/Giá trị ở dòng dưới)
+    -> list {ma,ten,dvt,ton,gia}. Dò tiêu đề theo CHỮ, không phụ thuộc cột."""
+    ws = wb.worksheets[0]
+    hdr_row = None
+    for r in range(1, min(ws.max_row, 10) + 1):
+        vals = [_kd2(ws.cell(r, c).value) for c in range(1, ws.max_column + 1)]
+        if any("ma hang" in v for v in vals) and any("ten hang" in v for v in vals):
+            hdr_row = r
+            break
+    if not hdr_row:
+        return []
+    ncol = ws.max_column
+    top = [_kd2(ws.cell(hdr_row, c).value) for c in range(1, ncol + 1)]
+    sub = [_kd2(ws.cell(hdr_row + 1, c).value) for c in range(1, ncol + 1)]
+    top_ff, last = [], ""
+    for v in top:                 # dò xuôi qua các ô đã gộp (merge) không có giá trị
+        if v:
+            last = v
+        top_ff.append(last)
+
+    def find_combo(*keys):
+        for i in range(ncol):
+            c = f"{top_ff[i]} {sub[i]}"
+            if all(k in c for k in keys):
+                return i
+        return -1
+
+    i_ma = next((i for i, v in enumerate(top) if "ma hang" in v), -1)
+    i_ten = next((i for i, v in enumerate(top) if "ten hang" in v), -1)
+    i_dvt = next((i for i, v in enumerate(top) if v == "dvt" or "don vi tinh" in v), -1)
+    i_sl = find_combo("cuoi ky", "so luong")
+    i_gt = find_combo("cuoi ky", "gia tri")
+    if i_ma < 0 or i_ten < 0:
+        return []
+    gop = {}
+    for r in range(hdr_row + 2, ws.max_row + 1):
+        ma = str(ws.cell(r, i_ma + 1).value or "").strip()
+        if not ma:               # bỏ dòng 'Tên kho : ...' / dòng tổng
+            continue
+        ten = str(ws.cell(r, i_ten + 1).value or "").strip()
+        dvt = str(ws.cell(r, i_dvt + 1).value or "").strip() if i_dvt >= 0 else ""
+        sl = _to_num(ws.cell(r, i_sl + 1).value) if i_sl >= 0 else 0
+        gt = _to_num(ws.cell(r, i_gt + 1).value) if i_gt >= 0 else 0
+        sl = sl if isinstance(sl, (int, float)) else 0
+        gt = gt if isinstance(gt, (int, float)) else 0
+        if ma in gop:
+            gop[ma]["ton"] += sl
+            gop[ma]["gt"] += gt
+        else:
+            gop[ma] = {"ma": ma, "ten": ten, "dvt": dvt, "ton": sl, "gt": gt}
+    out = []
+    for it in gop.values():
+        gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
+        out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
+                    "ton": it["ton"], "gia": gia})
+    return out
+
+def _xk_src_cols(header):
+    """Tìm cột trong sheet nguồn 'Chi tiết BÁN RA'."""
+    hlow = [str(h or "").strip().lower() for h in header]
+    def find(eqs, contains):
+        for i, h in enumerate(hlow):
+            if h in eqs:
+                return i
+        for i, h in enumerate(hlow):
+            if any(k in h for k in contains):
+                return i
+        return -1
+    return {
+        "kh": find(("ký hiệu",), ("ký hiệu",)),
+        "sohd": find(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn")),
+        "ngay": find(("ngày",), ("ngày",)),
+        "ten": find(("tên hàng hóa/dịch vụ",), ("tên hàng",)),
+        "dvt": find(("đvt",), ("đvt", "đơn vị tính")),
+        "sl": find(("số lượng",), ("số lượng",)),
+        "dgia": find(("đơn giá",), ("đơn giá",)),
+        "tt": find(("thành tiền",), ("thành tiền",)),
+    }
+
+def _xk_key_ngay(ngay):
+    """Khoá sắp xếp theo ngày tăng dần, nhận dd/mm/yyyy hoặc yyyy-mm-dd."""
+    s = str(ngay or "").strip().replace("-", "/")
+    p = s.split("/")
+    if len(p) == 3:
+        if len(p[0]) == 4:                       # đã là yyyy/mm/dd
+            return f"{p[0]}-{p[1].zfill(2)}-{p[2].zfill(2)}"
+        return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
+    return s
+
+def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
+    """Ghép mã hàng (từ TON) cho từng dòng bán ra (Chi tiết BÁN RA), TRỪ TỒN
+    tuần tự theo ngày tăng dần — mặt hàng nào hết tồn (<=0) sẽ KHÔNG gán nữa.
+
+    Nhiều mặt hàng trong TON có TÊN TRÙNG NHAU nhưng khác mã (vd 1 mã do phần
+    mềm sinh 'HH00033-8' và 1 mã đã có sẵn trong MISA 'MH90' cho CÙNG 1 sản
+    phẩm) — không thể tự chọn đúng theo tên, nên KHÔNG đoán bừa: nếu có > 1
+    ứng viên "mạnh" (trùng y hệt hoặc chỉ lệch hậu tố nhỏ) cùng thoả, để TRỐNG
+    kèm gợi ý cho người dùng tự chọn — trừ khi đã được HỌC (hoc_ma: tên chuẩn
+    hoá -> mã) từ lần người dùng tự gắn trước đó, sẽ tự áp lại."""
+    col = _xk_src_cols(src_header)
+    hoc_ma = hoc_ma or {}
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    ton_list = [dict(it, con_lai=_to_num(it.get("ton")) or 0,
+                     ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
+                for it in (ton_rows or [])]
+
+    items = []
+    for r in (src_rows or []):
+        ten = str(gv(r, col["ten"]) or "").strip()
+        if not ten:
+            continue
+        items.append({
+            "khhdon": str(gv(r, col["kh"]) or ""), "sohd": str(gv(r, col["sohd"]) or ""),
+            "ngay": str(gv(r, col["ngay"]) or ""), "ten_sp": ten,
+            "dvt": str(gv(r, col["dvt"]) or ""), "sl": _to_num(gv(r, col["sl"])) or 0,
+            "dgia": _to_num(gv(r, col["dgia"])), "tt": _to_num(gv(r, col["tt"])),
+        })
+    items.sort(key=lambda it: _xk_key_ngay(it["ngay"]))
+
+    out = []
+    for it in items:
+        ten_chuan = _chuan_ten_hang_xk(it["ten_sp"])
+        candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
+        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])]
+        pick, mo_ho = None, False
+        if len(manh) == 1:
+            pick = manh[0]
+        elif len(manh) > 1:
+            ma_hoc = hoc_ma.get(ten_chuan)
+            pick = next((tn for tn in manh if tn["ma"] == ma_hoc), None)
+            if not pick:
+                mo_ho = True
+        else:                                       # không có ứng viên 'mạnh' -> fuzzy chặt
+            best, best_diem = None, 0.0
+            for tn in candidates:
+                d = _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"])
+                if d > best_diem:
+                    best, best_diem = tn, d
+            if best and best_diem >= _XK_NGUONG_FUZZY:
+                pick = best
+        rec = dict(it)
+        if pick:
+            pick["con_lai"] -= (it["sl"] if isinstance(it["sl"], (int, float)) else 0)
+            rec.update(ma=pick["ma"], ten_xk=pick["ten"], dvt_xk=pick["dvt"],
+                       gia_xk=pick["gia"], goi_y=[], mo_ho=False)
+        else:
+            manh_ma = {tn["ma"] for tn in manh}
+            scored = sorted(
+                ({"ma": tn["ma"], "ten": tn["ten"], "dvt": tn["dvt"], "gia": tn["gia"],
+                  "con_lai": tn["con_lai"], "manh": tn["ma"] in manh_ma,
+                  "diem": round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 3)}
+                 for tn in ton_list), key=lambda x: (-x["manh"], -x["diem"]))
+            rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=mo_ho,
+                       goi_y=[s for s in scored[:6] if s["diem"] > 0.3 or s["manh"]])
+        out.append(rec)
+    return out
+
+def _xk_cuoi_thang(ngay):
+    """'dd/mm/yyyy' của NGÀY CUỐI THÁNG chứa ngày truyền vào (dd/mm/yyyy hoặc yyyy-mm-dd)."""
+    import calendar
+    s = str(ngay or "").strip()
+    d = m = y = None
+    if "/" in s:
+        p = s.split("/")
+        if len(p) == 3:
+            d, m, y = p
+    elif "-" in s:
+        p = s.split("-")
+        if len(p) == 3:
+            (y, m, d) = p if len(p[0]) == 4 else (p[2], p[1], p[0])
+    if not (m and y):
+        return "", "", ""
+    try:
+        mi, yi = int(m), int(y)
+    except Exception:
+        return "", "", ""
+    last_day = calendar.monthrange(yi, mi)[1]
+    return f"{last_day:02d}/{mi:02d}/{yi}", str(mi), str(yi)
+
+XUAT_KHO_HEADERS = [
+    "Hiển thị trên sổ", "Loại xuất kho", "Ngày hạch toán (*)", "Ngày chứng từ (*)",
+    "Số chứng từ (*)", "Mẫu số HĐ", "Ký hiệu HĐ", "Mã đối tượng", "Tên đối tượng",
+    "Địa chỉ/Bộ phận", "Tên người nhận/Của", "Lý do xuất/Về việc", "Nhân viên bán hàng",
+    "Kèm theo", "Số lệnh điều động", "Ngày lệnh điều động", "Người vận chuyển",
+    "Tên người vận chuyển", "Hợp đồng số", "Phương tiện vận chuyển", "Xuất tại kho",
+    "Địa chỉ kho xuất", "Nhập tại chi nhánh", "Tên chi nhánh", "MST chi nhánh",
+    "Nhập tại kho", "Địa chỉ kho nhập", "Mã hàng (*)", "Tên hàng", "Là hàng khuyến mại",
+    "Kho (*)", "Hàng hóa giữ hộ/bán hộ", "TK Nợ (*)", "TK Có (*)", "ĐVT", "Số lượng",
+    "Đơn giá bán", "Thành tiền", "Đơn giá vốn", "Tiền vốn", "Số lô", "Hạn sử dụng",
+    "Đối tượng", "Khoản mục CP", "Đơn vị", "Đối tượng THCP", "Công trình",
+    "Đơn đặt hàng", "Hợp đồng bán", "CP không hợp lý", "Mã thống kê"]
+
+def _gen_xuat_kho_rows(giathanh_rows):
+    """Từ các dòng GIATHANH đã gắn mã (bỏ dòng chưa gắn) -> mảng dòng form MISA
+    'Xuất kho'. Ngày hạch toán/chứng từ = CUỐI THÁNG của hoá đơn cuối cùng (mới
+    nhất) trong lô; Số chứng từ = 'XK T{tháng}/{năm}' theo tháng đó."""
+    rows = [r for r in (giathanh_rows or []) if str(r.get("ma") or "").strip()]
+    if not rows:
+        return [], ""
+    ngay_cuoi = max(rows, key=lambda r: _xk_key_ngay(r.get("ngay")))["ngay"]
+    ngay_ht, thang, nam = _xk_cuoi_thang(ngay_cuoi)
+    so_ct = f"XK T{thang}/{nam}"
+    out = []
+    for r in rows:
+        row = [""] * len(XUAT_KHO_HEADERS)
+        row[0] = 0
+        row[2] = ngay_ht; row[3] = ngay_ht; row[4] = so_ct
+        row[27] = r.get("ma", "")                 # AB Mã hàng
+        row[28] = r.get("ten_xk") or r.get("ten_sp", "")   # AC Tên hàng
+        row[30] = "HH"                             # AE Kho
+        row[32] = "632"; row[33] = "1561"          # AG Nợ / AH Có
+        row[34] = r.get("dvt_xk") or r.get("dvt", "")      # AI ĐVT
+        row[35] = r.get("sl", "")                  # AJ Số lượng
+        out.append(row)
+    return out, so_ct
+
+@app.post("/api/xk/import-ton/{cid}")
+async def xk_import_ton(cid: int, request: Request):
+    """Import file 'Tổng hợp tồn kho' (báo cáo MISA) -> lưu làm Sheet TON."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    gop = {}
+    so_file_ok, loi = 0, []
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})"); continue
+        rows = _doc_file_ton_kho(wb)
+        if not rows:
+            loi.append(f"{fn}: không thấy cột 'Mã hàng'/'Tên hàng' (không đúng mẫu 'Tổng hợp tồn kho')")
+            continue
+        for it in rows:
+            gop[it["ma"]] = it            # file sau đè file trước (mới nhất thắng)
+        so_file_ok += 1
+    if not gop:
+        raise HTTPException(400, "Không đọc được dữ liệu tồn kho từ file đã chọn. " + "; ".join(loi[:3]))
+    ton_rows = list(gop.values())
+    data = _doc_du_lieu_cty(cid)
+    data["xk_ton"] = ton_rows
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True, "so_file": so_file_ok, "so_dong": len(ton_rows), "loi": loi[:5]}
+
+@app.get("/api/xk/ton/{cid}")
+def xk_get_ton(cid: int):
+    data = _doc_du_lieu_cty(cid)
+    rows = data.get("xk_ton") or []
+    return {"rows": rows, "so_dong": len(rows)}
+
+@app.post("/api/xk/import-banra/{cid}")
+async def xk_import_banra(cid: int, request: Request):
+    """Import (các) file có sheet 'Chi tiết BÁN RA' (xuất từ chức năng đối
+    chiếu hóa đơn) -> lưu làm nguồn cho Sheet GIATHANH."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    header, rows = [], []
+    so_file_ok, loi = 0, []
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})"); continue
+        kq = _doc_sheet_nhap_lieu(wb, "Chi tiết BÁN RA", "Ký hiệu")
+        if not kq:
+            loi.append(f"{fn}: không có sheet 'Chi tiết BÁN RA'"); continue
+        h, rs = kq
+        if not header:
+            header = h
+        rows.extend(rs)
+        so_file_ok += 1
+    if not rows:
+        raise HTTPException(400, "Không đọc được dòng nào từ sheet 'Chi tiết BÁN RA'. " + "; ".join(loi[:3]))
+    data = _doc_du_lieu_cty(cid)
+    data["xk_ct_ban_ra"] = {"header": header, "rows": rows}
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True, "so_file": so_file_ok, "so_dong": len(rows), "loi": loi[:5]}
+
+@app.post("/api/xk/tao-giathanh/{cid}")
+def xk_tao_giathanh(cid: int):
+    """Dò mã hàng tự động cho từng dòng bán ra, dựa theo TON đã import.
+    Áp lại các lựa chọn đã HỌC (từ lần người dùng tự gắn tay trước đó) cho
+    những tên hàng có nhiều mã trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ
+    đã có sẵn trong MISA)."""
+    data = _doc_du_lieu_cty(cid)
+    ton_rows = data.get("xk_ton") or []
+    src = data.get("xk_ct_ban_ra") or {}
+    if not ton_rows:
+        raise HTTPException(400, "Chưa import Sheet TON (Tổng hợp tồn kho)")
+    if not src.get("rows"):
+        raise HTTPException(400, "Chưa import dữ liệu 'Chi tiết BÁN RA'")
+    hoc_ma = data.get("xk_hoc_ma") or {}
+    giathanh = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [], hoc_ma)
+    data["xk_giathanh"] = giathanh
+    _ghi_du_lieu_cty(cid, data)
+    so_khop = sum(1 for r in giathanh if r.get("ma"))
+    return {"rows": giathanh, "so_dong": len(giathanh), "so_khop": so_khop,
+            "so_chua_khop": len(giathanh) - so_khop}
+
+@app.get("/api/xk/giathanh/{cid}")
+def xk_get_giathanh(cid: int):
+    data = _doc_du_lieu_cty(cid)
+    rows = data.get("xk_giathanh") or []
+    so_khop = sum(1 for r in rows if r.get("ma"))
+    return {"rows": rows, "so_dong": len(rows), "so_khop": so_khop,
+            "so_chua_khop": len(rows) - so_khop}
+
+@app.post("/api/xk/giathanh-luu/{cid}")
+async def xk_luu_giathanh(cid: int, request: Request):
+    """Lưu lại GIATHANH sau khi người dùng sửa tay các dòng chưa dò được mã.
+    Đồng thời HỌC lại lựa chọn cho các tên hàng từng bị coi là mơ hồ (nhiều mã
+    trùng tên), để lần dò mã tự động sau tự áp đúng, không phải hỏi lại."""
+    body = await request.json()
+    rows = body.get("rows") or []
+    data = _doc_du_lieu_cty(cid)
+    ton_map = {str(it.get("ma") or "").strip(): it for it in (data.get("xk_ton") or [])}
+    hoc_ma = dict(data.get("xk_hoc_ma") or {})
+    for r in rows:
+        ma = str(r.get("ma") or "").strip()
+        if not ma:
+            continue
+        tn = ton_map.get(ma)
+        if tn:                          # bổ sung tên/đvt/giá nếu người dùng chỉ chọn mã
+            r["ten_xk"] = r.get("ten_xk") or tn.get("ten", "")
+            r["dvt_xk"] = r.get("dvt_xk") or tn.get("dvt", "")
+            r["gia_xk"] = r.get("gia_xk") or tn.get("gia", "")
+        if r.get("mo_ho"):              # đã tự chọn xong -> học lại cho lần dò sau
+            ten_chuan = _chuan_ten_hang_xk(r.get("ten_sp"))
+            if ten_chuan:
+                hoc_ma[ten_chuan] = ma
+        r["mo_ho"] = False
+    data["xk_giathanh"] = rows
+    data["xk_hoc_ma"] = hoc_ma
+    _ghi_du_lieu_cty(cid, data)
+    so_khop = sum(1 for r in rows if r.get("ma"))
+    return {"ok": True, "so_dong": len(rows), "so_khop": so_khop}
+
+@app.post("/api/xk/export/{cid}")
+def xk_export(cid: int):
+    """Xuất file 'Xuất kho' (form MISA) từ GIATHANH đã lưu (chỉ lấy dòng đã gắn mã)."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    data = _doc_du_lieu_cty(cid)
+    giathanh = data.get("xk_giathanh") or []
+    out, so_ct = _gen_xuat_kho_rows(giathanh)
+    if not out:
+        raise HTTPException(400, "Chưa có dòng nào được gắn mã hàng để xuất")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Xuất kho"
+    for c, h in enumerate(XUAT_KHO_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    cot_text = {5, 28, 31, 33, 34, 35}     # số CT, mã hàng, kho, TK nợ/có, ĐVT
+    cot_tien = {36, 37, 38, 39, 40}
+    for ri, row in enumerate(out, 2):
+        for ci, v in enumerate(row, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in cot_text:
+                cell.number_format = "@"
+            elif ci in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, len(XUAT_KHO_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    thang_ten = so_ct.replace("XK T", "T").replace("/", ".")
+    fname = f"XuatKho_{thang_ten}_{mst}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    tong = len(giathanh)
+    so_bo_qua = tong - len(out)
+    return FileResponse(path, filename=fname,
+                         headers={"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua)})
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
