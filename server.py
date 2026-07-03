@@ -5603,7 +5603,8 @@ def _gen_xuat_kho_rows(giathanh_rows):
         row[30] = "HH"                             # AE Kho
         row[32] = "632"; row[33] = "1561"          # AG Nợ / AH Có
         row[34] = r.get("dvt_xk") or r.get("dvt", "")      # AI ĐVT
-        row[35] = r.get("sl", "")                  # AJ Số lượng
+        sl_kho = r.get("sl_kho")
+        row[35] = sl_kho if sl_kho not in (None, "", 0) else r.get("sl", "")  # AJ Số lượng
         out.append(row)
     return out, so_ct
 

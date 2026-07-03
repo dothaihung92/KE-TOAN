@@ -1595,6 +1595,8 @@ async function luuCaHaiBangKe(){
 
 /* ----- XUẤT KHO ----- */
 let xkTon=[], xkRows=[], xkGanIdx=-1;
+const XK_HEADERS=['Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
+                   'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho'];
 function xkEsc(s){return String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function moXuatKho(){
   if(!current){toast('Chọn công ty trước','err');return}
@@ -1641,15 +1643,24 @@ function xkVeTrangChinh(){
           <div id="xkSrcBadge" style="font-size:12px;margin-top:8px;color:var(--muted)">Đang tải...</div>
         </div>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🛠 Công cụ:</span>
         <button class="btn" style="background:#5a3e8a" onclick="xkDoMa()">🔍 Dò mã hàng tự động</button>
+        <button class="btn ghost sm" onclick="xkGanChonDong()">✏ Gán mã cho dòng đã chọn</button>
+        <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Lọc</button>
+        <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
+        <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
         <button class="btn gold sm" onclick="xkLuu()">💾 Lưu tạm</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
-        <span id="xkTongKet" style="font-size:13px;color:var(--muted)"></span>
       </div>
-      <div class="hint" style="margin-bottom:8px">💡 Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng chưa xác định được mã hàng (trùng tên nhiều mã hoặc không tìm thấy) — bấm "Gán mã" để chọn tay. Kỳ sau dò lại, phần mềm sẽ nhớ lựa chọn của bạn.</div>
-      <div id="xkGridWrap" style="overflow:auto;max-height:58vh;border:1px solid #ddd;border-radius:8px"></div>
+      <div id="nlCanhBao" style="margin-bottom:6px"></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán theo gợi ý — hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng chưa xác định được mã (trùng tên nhiều mã hoặc không tìm thấy). <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
+      <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
+      <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
+  nlFreezeCol=0; nlChon=null; nhapLieuLoaiHienTai='xk';
+  nlFilters={}; nlSnapTrong={}; nlFormulas={}; nlUndoStack=[];
+  nlCanhBaoNo={}; nlIdxCotNo=-1; nlChiHienCanhBao=false;
 }
 async function xkImportTon(input){
   const files=input.files; if(!files||!files.length)return;
@@ -1675,39 +1686,69 @@ async function xkDoMa(){
     toast(`Đã dò xong: khớp ${d.so_khop}/${d.so_dong}, cần chọn tay ${d.so_chua_khop}`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
-function xkVeGrid(){
-  const wrap=document.getElementById('xkGridWrap'); if(!wrap)return;
-  const tk=document.getElementById('xkTongKet');
-  if(tk){
-    const khop=xkRows.filter(r=>r.ma).length;
-    tk.textContent=xkRows.length?`Tổng ${xkRows.length} dòng — đã gắn mã ${khop}, còn thiếu ${xkRows.length-khop}`:'';
-  }
-  if(!xkRows.length){wrap.innerHTML='<div class="hint" style="padding:12px">Chưa có dữ liệu — import đủ 2 mục trên rồi bấm "Dò mã hàng tự động".</div>';return}
-  let html=`<table style="border-collapse:collapse;width:100%;font-size:13px">
-    <thead><tr style="background:#1a7a7a;color:#fff">
-      <th style="padding:6px 8px">#</th><th style="padding:6px 8px">Số HĐ</th><th style="padding:6px 8px">Ngày</th>
-      <th style="padding:6px 8px;text-align:left">Tên SP bán</th><th style="padding:6px 8px">SL</th>
-      <th style="padding:6px 8px">Mã hàng kho</th><th style="padding:6px 8px;text-align:left">Tên hàng kho</th>
-      <th style="padding:6px 8px"></th>
-    </tr></thead><tbody>`;
-  xkRows.forEach((r,i)=>{
-    const thieu=!r.ma;
-    const mau=thieu?'background:#fde8e8':(i%2?'background:#fafafa':'');
-    html+=`<tr style="${mau}">
-      <td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:center">${i+1}</td>
-      <td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:center">${xkEsc(r.sohd)}</td>
-      <td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:center;white-space:nowrap">${xkEsc(r.ngay)}</td>
-      <td style="padding:5px 8px;border-bottom:1px solid #eee">${xkEsc(r.ten_sp)}</td>
-      <td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:center">${r.sl??''}</td>
-      <td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:center;font-weight:700;color:${thieu?'#b91c1c':'#1a7a7a'}">${xkEsc(r.ma)||'—'}</td>
-      <td style="padding:5px 8px;border-bottom:1px solid #eee">${xkEsc(r.ten_xk)}</td>
-      <td style="padding:5px 8px;border-bottom:1px solid #eee;text-align:center">
-        <button class="btn ghost sm" style="padding:2px 8px" onclick="xkMoGan(${i})">✏ Gán mã</button>
-      </td>
-    </tr>`;
+// chuyển xkRows (mảng object) -> nlHeader/nlRows để dùng chung lưới Excel của Nhập Liệu
+function xkRowsToNl(){
+  nlHeader=XK_HEADERS.slice();
+  nlRows=xkRows.map(r=>{
+    const slKho=(r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl;
+    const giaKho=r.gia_xk;
+    const slN=typeof slKho==='number'?slKho:parseFloat(slKho);
+    const giaN=typeof giaKho==='number'?giaKho:parseFloat(giaKho);
+    const ttKho=(!isNaN(slN)&&!isNaN(giaN))?Math.round(slN*giaN):'';
+    return [r.sohd||'', r.ngay||'', r.ten_sp||'', r.dvt||'', r.sl??'', r.dgia??'', r.tt??'',
+            r.ma||'', r.ten_xk||'', r.dvt_xk||'', slKho??'', giaKho??'', ttKho];
   });
-  html+='</tbody></table>';
-  wrap.innerHTML=html;
+}
+// gộp thay đổi tay trong lưới (nlRows) trở lại xkRows, giữ goi_y theo vị trí dòng
+function xkTuNlRows(){
+  const cu=xkRows;
+  xkRows=nlRows.map((row,i)=>{
+    const goc=cu[i]||{};
+    const [sohd,ngay,ten_sp,dvt,sl,dgia,tt,ma,ten_xk,dvt_xk,sl_kho,gia_xk]=row;
+    const maMoi=String(ma||'').trim();
+    return {...goc,
+      sohd:String(sohd||''), ngay:String(ngay||''), ten_sp:String(ten_sp||''), dvt:String(dvt||''),
+      sl:nlParseSo(sl), dgia:nlParseSo(dgia), tt:nlParseSo(tt),
+      ma:maMoi, ten_xk:String(ten_xk||''), dvt_xk:String(dvt_xk||''),
+      sl_kho:nlParseSo(sl_kho), gia_xk:nlParseSo(gia_xk),
+      mo_ho: maMoi?false:!!goc.mo_ho};
+  });
+}
+function xkVeGrid(){
+  xkRowsToNl();
+  veGridNhapLieu();
+  xkToMauThieu();
+  xkTongKet();
+}
+// tô đỏ các dòng CHƯA có mã hàng (để dễ nhận biết cần gán tay)
+function xkToMauThieu(){
+  xkRows.forEach((r,i)=>{
+    if(String(r.ma||'').trim())return;
+    document.querySelectorAll(`#nlTableWrap td[data-r="${i}"]`).forEach(td=>{td.style.background='#fde8e8';});
+  });
+}
+function xkTongKet(){
+  const el=document.getElementById('nlTongCong'); if(!el)return;
+  if(!xkRows.length){el.innerHTML='<div class="hint" style="padding:4px 0">Chưa có dữ liệu — import Sheet TON rồi bấm "🔍 Dò mã hàng tự động".</div>';return}
+  const khop=xkRows.filter(r=>String(r.ma||'').trim()).length;
+  let tBan=0, tKho=0;
+  xkRows.forEach(r=>{
+    tBan+=nlParseSo(r.tt);
+    const sl=nlParseSo((r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl);
+    tKho+=sl*nlParseSo(r.gia_xk);
+  });
+  el.innerHTML=`<div style="display:flex;gap:22px;flex-wrap:wrap;background:#f0f9f4;border-radius:8px;padding:10px 14px">
+    <span>Số dòng: <b>${xkRows.length}</b> — đã gắn mã <b style="color:#1a7a7a">${khop}</b>,
+      còn thiếu <b style="color:${xkRows.length-khop?'#b91c1c':'#1a7a7a'}">${xkRows.length-khop}</b></span>
+    <span>Tổng thành tiền BÁN: <b style="color:#1f6b4a">${Math.round(tBan).toLocaleString('vi-VN')} đ</b></span>
+    <span>Tổng thành tiền XUẤT KHO (giá vốn): <b style="color:#8a5d00">${Math.round(tKho).toLocaleString('vi-VN')} đ</b></span>
+    <span>Chênh lệch: <b>${Math.round(tBan-tKho).toLocaleString('vi-VN')} đ</b></span></div>`;
+}
+function xkGanChonDong(){
+  const v=nlVungChonChuan();
+  if(!v||v.r1!==v.r2){toast('Bấm số thứ tự 1 dòng bên trái lưới để chọn dòng cần gán mã','err');return}
+  xkTuNlRows();
+  xkMoGan(v.r1);
 }
 function xkMoGan(idx){
   xkGanIdx=idx;
@@ -1747,9 +1788,11 @@ function xkChonMa(ma){
 }
 async function xkLuu(){
   if(!current)return;
+  xkTuNlRows();
   try{
     const r=await fetch(`/api/xk/giathanh-luu/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:xkRows})});
     const d=await r.json();
+    xkVeGrid();
     toast(`💾 Đã lưu (khớp ${d.so_khop}/${d.so_dong})`,'ok');
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
 }
