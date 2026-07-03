@@ -21,10 +21,12 @@ if not defined PYCMD (
 )
 
 if not defined PYCMD (
+    echo.
     echo [LOI] Khong tim thay Python co the chay duoc tren may nay.
     echo Hay cai Python tai https://www.python.org/downloads/
     echo ^(nho tick vao o "Add python.exe to PATH" khi cai^), sau do
     echo DONG cua so nay va mo lai file start_stock_analyzer.bat.
+    echo.
     pause
     exit /b 1
 )
@@ -33,55 +35,67 @@ echo   Dung: %PYCMD%
 
 echo.
 echo [1/3] Dang kiem tra cap nhat...
+
+set "HAVE_GIT=1"
 where git >nul 2>&1
-if errorlevel 1 (
+if errorlevel 1 set "HAVE_GIT=0"
+
+if "%HAVE_GIT%"=="0" (
     echo   Chua cai Git nen khong the tu dong cap nhat. Cai tai
     echo   https://git-scm.com/downloads de bat tinh nang nay, hoac tai
     echo   thu cong ban moi nhat. Se chay voi ban hien co.
-    goto :after_update
-)
+) else (
+    set "IS_GIT_REPO=1"
+    git rev-parse --is-inside-work-tree >nul 2>&1
+    if errorlevel 1 set "IS_GIT_REPO=0"
 
-git rev-parse --is-inside-work-tree >nul 2>&1
-if not errorlevel 1 (
-    echo   Da ket noi Git, dang tai cap nhat moi nhat...
-    git pull
-    if errorlevel 1 (
-        echo   Khong cap nhat duoc ^(co the do mang hoac co thay doi chua luu^), tiep tuc chay ban hien tai.
+    if "%IS_GIT_REPO%"=="1" (
+        echo   Da ket noi Git, dang tai cap nhat moi nhat...
+        git pull
+        if errorlevel 1 (
+            echo   Khong cap nhat duoc ^(co the do mang hoac co thay doi chua luu^), tiep tuc chay ban hien tai.
+        )
+    ) else (
+        echo   Thu muc nay chua duoc ket noi voi Git ^(vi du ban tai ve dang file zip^).
+        echo   Dang thiet lap ket noi lan dau de tu dong cap nhat tu lan sau...
+        git init -q
+        git remote add origin "%REPO_URL%" >nul 2>&1
+        git fetch --quiet origin %REPO_BRANCH%
+        if errorlevel 1 (
+            echo   Khong ket noi duoc toi may chu cap nhat ^(kiem tra mang, hoac neu
+            echo   repo la private thi can dang nhap Git voi tai khoan co quyen^).
+            echo   Se chay voi ban hien co.
+        ) else (
+            git reset --hard --quiet origin/%REPO_BRANCH%
+            git branch -q -M %REPO_BRANCH%
+            git branch -q --set-upstream-to=origin/%REPO_BRANCH% %REPO_BRANCH% >nul 2>&1
+            echo   Da ket noi thanh cong! Tu lan sau se tu dong cap nhat khi mo file nay.
+        )
     )
-    goto :after_update
 )
-
-echo   Thu muc nay chua duoc ket noi voi Git ^(vi du ban tai ve dang file zip^).
-echo   Dang thiet lap ket noi lan dau de tu dong cap nhat tu lan sau...
-git init -q
-git remote add origin "%REPO_URL%" >nul 2>&1
-git fetch --quiet origin %REPO_BRANCH%
-if errorlevel 1 (
-    echo   Khong ket noi duoc toi may chu cap nhat ^(kiem tra mang, hoac neu
-    echo   repo la private thi can dang nhap Git voi tai khoan co quyen^).
-    echo   Se chay voi ban hien co.
-    goto :after_update
-)
-
-git reset --hard --quiet origin/%REPO_BRANCH%
-git branch -q -M %REPO_BRANCH%
-git branch -q --set-upstream-to=origin/%REPO_BRANCH% %REPO_BRANCH% >nul 2>&1
-echo   Da ket noi thanh cong! Tu lan sau se tu dong cap nhat khi mo file nay.
-
-:after_update
 
 echo.
 echo [2/3] Dang cai dat / cap nhat thu vien can thiet...
 %PYCMD% -m pip install --upgrade -r stock_analyzer\requirements.txt
 if errorlevel 1 (
+    echo.
     echo [LOI] Cai dat thu vien that bai. Kiem tra ket noi mang roi chay lai file nay.
+    echo.
     pause
     exit /b 1
 )
 
 echo.
 echo [3/3] Dang khoi dong phan mem...
+echo   Trinh duyet se tu mo. DUNG dong cua so nay - dong lai se tat phan mem.
 echo ============================================================
 %PYCMD% run_stock_analyzer.py
 
+echo.
+if errorlevel 1 (
+    echo [LOI] Phan mem bi loi va da dung ^(xem thong bao loi phia tren^).
+) else (
+    echo Phan mem da dung.
+)
+echo.
 pause
