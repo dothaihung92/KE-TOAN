@@ -398,7 +398,7 @@
 
 <!-- MODAL GÁN MÃ HÀNG (Xuất Kho) -->
 <div id="xkGanModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:700;align-items:center;justify-content:center">
-  <div style="width:min(680px,96vw);max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
+  <div style="width:min(920px,97vw);max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
     <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:10px">
       <div>
         <div style="font-weight:800;font-size:19px">🏷 Gán mã hàng kho</div>
@@ -1648,18 +1648,17 @@ function xkVeTrangChinh(){
         <button class="btn" style="background:#5a3e8a" onclick="xkDoMa()">🔍 Dò mã hàng tự động</button>
         <button class="btn ghost sm" onclick="xkGanChonDong()">✏ Gán mã cho dòng đã chọn</button>
         <button class="btn ghost sm" onclick="nlBatFilter()" id="nlFilterBtn">🔎 Lọc</button>
-        <button class="btn ghost sm" onclick="xkGomNhom()">🔠 Gom dòng chưa gắn mã</button>
         <button class="btn ghost sm" onclick="xkFillDown()" title="Ctrl+D">⬇ Fill Down</button>
         <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
         <button class="btn gold sm" onclick="xkLuu()">💾 Lưu tạm</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán tay, hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel. <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — bấm số thứ tự bên trái để CHỌN cả dòng rồi bấm "✏ Gán mã cho dòng đã chọn" để tìm & gán tay, hoặc bấm đúp vào ô "Mã hàng kho" để gõ thẳng như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã và tự tách dòng nếu vượt tồn. <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
-  nlFreezeCol=0; nlChon=null; nhapLieuLoaiHienTai='xk';
+  nlFreezeCol=1; nlChon=null; nhapLieuLoaiHienTai='xk';
   nlFilters={}; nlSnapTrong={}; nlFormulas={}; nlUndoStack=[];
   nlCanhBaoNo={}; nlIdxCotNo=-1; nlChiHienCanhBao=false;
 }
@@ -1687,46 +1686,50 @@ async function xkDoMa(){
     toast(`Đã dò xong: khớp ${d.so_khop}/${d.so_dong}, cần chọn tay ${d.so_chua_khop}`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
-// chuyển xkRows (mảng object) -> nlHeader/nlRows để dùng chung lưới Excel của Nhập Liệu
+// chuyển xkRows (mảng object) -> nlHeader/nlRows để dùng chung lưới Excel của Nhập Liệu.
+// Cột "Tồn kho" tính CHẠY DẦN theo thứ tự từ trên xuống: dòng trên dùng mã nào
+// thì trừ luôn vào tồn của mã đó, dòng dưới cùng mã sẽ thấy số đã bị trừ tiếp.
 function xkRowsToNl(){
   nlHeader=XK_HEADERS.slice();
   const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
+  const daDung={};
   nlRows=xkRows.map(r=>{
     const slKho=(r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl;
     const giaKho=r.gia_xk;
     const slN=typeof slKho==='number'?slKho:parseFloat(slKho);
     const giaN=typeof giaKho==='number'?giaKho:parseFloat(giaKho);
     const ttKho=(!isNaN(slN)&&!isNaN(giaN))?Math.round(slN*giaN):'';
-    const ton=r.ma?(tonMap[r.ma]??''):'';
+    const ma=String(r.ma||'').trim();
+    let ton='';
+    if(ma && (ma in tonMap)){
+      daDung[ma]=(daDung[ma]||0)+(nlParseSo(r.sl)||0);
+      ton=tonMap[ma]-daDung[ma];
+    }
     return [ton, r.sohd||'', r.ngay||'', r.ten_sp||'', r.dvt||'', r.sl??'', r.dgia??'', r.tt??'',
             r.ma||'', r.ten_xk||'', r.dvt_xk||'', slKho??'', giaKho??'', ttKho];
   });
 }
-// gộp thay đổi tay trong lưới (nlRows) trở lại xkRows, giữ goi_y theo vị trí dòng
+// gộp thay đổi tay trong lưới (nlRows) trở lại xkRows, giữ goi_y theo vị trí dòng.
+// Mã hàng kho là cột "nguồn": hễ có mã (gõ tay hoặc Fill Down) là TỰ ĐIỀN lại
+// Tên/ĐVT/Đơn giá kho theo đúng dữ liệu Tồn kho (không giữ chữ gõ/copy cũ).
 function xkTuNlRows(){
   const cu=xkRows;
   xkRows=nlRows.map((row,i)=>{
     const goc=cu[i]||{};
     const [ton,sohd,ngay,ten_sp,dvt,sl,dgia,tt,ma,ten_xk,dvt_xk,sl_kho,gia_xk]=row;
     const maMoi=String(ma||'').trim();
+    let tenXkMoi='', dvtXkMoi='', giaXkMoi='';
+    if(maMoi){
+      const tn=xkTon.find(t=>String(t.ma)===maMoi);
+      if(tn){tenXkMoi=tn.ten; dvtXkMoi=tn.dvt; giaXkMoi=tn.gia;}
+    }
     return {...goc,
       sohd:String(sohd||''), ngay:String(ngay||''), ten_sp:String(ten_sp||''), dvt:String(dvt||''),
       sl:nlParseSo(sl), dgia:nlParseSo(dgia), tt:nlParseSo(tt),
-      ma:maMoi, ten_xk:String(ten_xk||''), dvt_xk:String(dvt_xk||''),
-      sl_kho:nlParseSo(sl_kho), gia_xk:nlParseSo(gia_xk),
+      ma:maMoi, ten_xk:tenXkMoi, dvt_xk:dvtXkMoi,
+      sl_kho:nlParseSo(sl_kho), gia_xk:giaXkMoi,
       mo_ho: maMoi?false:!!goc.mo_ho};
   });
-}
-// gom các dòng CHƯA gắn mã lên đầu, sắp theo tên sản phẩm để các dòng cùng tên
-// đứng liền nhau (dễ Fill Down 1 mã cho nhiều dòng giống tên)
-function xkGomNhom(){
-  xkTuNlRows();
-  const trong=xkRows.filter(r=>!String(r.ma||'').trim())
-    .sort((a,b)=>String(a.ten_sp||'').localeCompare(String(b.ten_sp||''),'vi'));
-  const daGan=xkRows.filter(r=>String(r.ma||'').trim());
-  xkRows=[...trong, ...daGan];
-  xkVeGrid();
-  toast(`Đã gom ${trong.length} dòng chưa gắn mã lên đầu, sắp theo tên sản phẩm`,'ok');
 }
 // Fill Down riêng cho lưới Xuất Kho: sau khi fill xong, TỰ KIỂM TRA tồn kho —
 // mã nào bị dùng vượt số tồn sẽ tự TÁCH DÒNG (giữ mã cho phần vừa đủ tồn,
@@ -1833,7 +1836,10 @@ function xkVeDanhSachGan(){
   const dong=(it,noibat)=>`<div onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
       style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;${noibat?'background:#fff7e6':''}"
       onmouseover="this.style.background='#eef7f7'" onmouseout="this.style.background='${noibat?'#fff7e6':'#fff'}'">
-      <div style="font-weight:800;font-size:16px">${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
+        <div style="font-weight:800;font-size:16px">${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
+        ${it.diem!=null?`<div style="font-size:13px;font-weight:700;color:${it.diem>=0.9?'#1a7a7a':'#b06a00'};white-space:nowrap">Khớp ${Math.round(it.diem*100)}%</div>`:''}
+      </div>
       <div style="font-size:14px;color:var(--muted);margin-top:2px">ĐVT: ${xkEsc(it.dvt)||'—'} · Đơn giá: ${fmtVND(it.gia)} · Tồn: ${it.con_lai??it.ton??0}</div>
     </div>`;
   let html='';
@@ -2284,7 +2290,8 @@ function nlSuaO(td){
 }
 function nlPhimO(e,td){
   if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')){e.preventDefault();nlUndo();return;}
-  if((e.ctrlKey||e.metaKey)&&(e.key==='d'||e.key==='D')){e.preventDefault();nlFillDown();return;}
+  if((e.ctrlKey||e.metaKey)&&(e.key==='d'||e.key==='D')){e.preventDefault();
+    if(nhapLieuLoaiHienTai==='xk')xkFillDown();else nlFillDown();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==='r'||e.key==='R')){e.preventDefault();nlFillRight();return;}
   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&(e.key==='l'||e.key==='L')){e.preventDefault();nlBatFilter();return;}
   if(e.key==='Escape'){e.preventDefault();quayLaiChonBangKe();return;}
