@@ -23,6 +23,21 @@ tiền) và xuất ra **Excel / CSV / JSON**.
 
 ## Cài đặt
 
+### Windows (không rành dòng lệnh) — dùng `start.bat`
+
+Nếu máy đã cài [Python](https://www.python.org/downloads/) (nhớ tick **Add
+Python to PATH** lúc cài), chỉ cần **nhấp đúp vào file `start.bat`**:
+
+- Tự kiểm tra Python đã cài chưa.
+- Tự `git pull` để cập nhật phiên bản mới nhất (nếu tải bằng Git).
+- Tự tạo môi trường ảo (`venv`) và cài/cập nhật thư viện cần thiết.
+- Tự khởi chạy phần mềm và mở trình duyệt.
+
+Lần sau chỉ cần chạy lại `start.bat` là phần mềm tự cập nhật rồi mở lên,
+không cần làm lại các bước cài đặt thủ công bên dưới.
+
+### Cài đặt thủ công (mọi hệ điều hành)
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -175,6 +190,7 @@ webapp/               # Giao diện web
   db.py               # Quản lý công ty + mã hoá mật khẩu (SQLite)
   templates/          # Giao diện HTML
 run_web.py            # Khởi chạy web
+start.bat             # (Windows) Tự cập nhật + cài thư viện + khởi chạy web
 ```
 
 ## Ghi chú kỹ thuật
