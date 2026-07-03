@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Trang chủ - Chứng khoán VN{% endblock %}
+{% block content %}
+
+<section class="panel">
+  <div class="panel-header">
+    <h1>Danh sách theo dõi</h1>
+    <form method="post" action="{{ url_for('watchlist_add') }}" class="inline-form">
+      <input type="text" name="symbol" placeholder="Thêm mã (vd FPT)" maxlength="10" required>
+      <button type="submit">+ Thêm</button>
+    </form>
+  </div>
+
+  <table class="data-table" id="watchlist-table">
+    <thead>
+      <tr>
+        <th>Mã</th>
+        <th>Giá</th>
+        <th>% Thay đổi</th>
+        <th>RSI</th>
+        <th>Điểm KT</th>
+        <th>Điểm tin tức</th>
+        <th>Khuyến nghị</th>
+        <th>Cập nhật</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr data-symbol="{{ row.symbol }}">
+        <td><a href="{{ url_for('stock_detail', symbol=row.symbol) }}"><strong>{{ row.symbol }}</strong></a></td>
+        {% if row.quote %}
+        <td class="cell-price">{{ "%.1f"|format(row.quote.close) }}</td>
+        <td class="cell-change {{ 'pos' if row.quote.change_pct >= 0 else 'neg' }}">
+          {{ "%.2f"|format(row.quote.change_pct) }}%
+        </td>
+        {% else %}
+        <td colspan="2" class="muted cell-price cell-change">{{ row.error or "Chưa có dữ liệu" }}</td>
+        {% endif %}
+        {% if row.recommendation and row.recommendation.technical_details and row.recommendation.technical_details.rsi14 is not none %}
+        <td class="cell-rsi">{{ "%.0f"|format(row.recommendation.technical_details.rsi14) }}</td>
+        {% else %}
+        <td class="muted cell-rsi">-</td>
+        {% endif %}
+        {% if row.recommendation %}
+        <td class="cell-tech">{{ row.recommendation.technical_score }}</td>
+        <td class="cell-news">{{ row.recommendation.news_score }}</td>
+        <td class="cell-label"><span class="badge badge-{{ row.recommendation.label|replace(' / ', '-')|replace(' ', '-')|lower }}">{{ row.recommendation.label }}</span></td>
+        {% else %}
+        <td class="muted cell-tech">-</td>
+        <td class="muted cell-news">-</td>
+        <td class="muted cell-label">Đang chờ dữ liệu</td>
+        {% endif %}
+        <td class="muted small cell-updated">{{ row.updated_at or "-" }}</td>
+        <td>
+          <form method="post" action="{{ url_for('watchlist_remove', symbol=row.symbol) }}" onsubmit="return confirm('Bỏ theo dõi {{ row.symbol }}?');">
+            <button type="submit" class="btn-link">Bỏ</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted">Chưa có mã nào trong danh sách theo dõi.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2>Tin tức thị trường mới nhất</h2>
+    <a href="{{ url_for('news_page') }}">Xem tất cả →</a>
+  </div>
+  <ul class="news-list" id="market-news-preview">
+    {% for item in market_news %}
+    <li>
+      <a href="{{ item.link }}" target="_blank" rel="noopener">{{ item.title }}</a>
+      <span class="muted small">{{ item.published }}</span>
+    </li>
+    {% else %}
+    <li class="muted">Chưa có tin tức. Bấm "Làm mới ngay" ở trên để tải.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% endblock %}

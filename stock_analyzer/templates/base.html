@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Phân tích chứng khoán Việt Nam{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('dashboard') }}">📈 Chứng khoán VN</a>
+    <nav>
+      <a href="{{ url_for('dashboard') }}">Trang chủ</a>
+      <a href="{{ url_for('news_page') }}">Tin tức</a>
+      <a href="{{ url_for('portfolio_page') }}">Danh mục của tôi</a>
+      <a href="{{ url_for('search') }}">Tìm mã</a>
+    </nav>
+    <form method="post" action="{{ url_for('refresh_now') }}" class="refresh-form">
+      <button type="submit">🔄 Làm mới ngay</button>
+    </form>
+  </header>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-list">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <p>
+      ⚠️ Công cụ hỗ trợ tham khảo dựa trên chỉ báo kỹ thuật &amp; tin tức tự động,
+      <strong>không phải khuyến nghị đầu tư chuyên nghiệp</strong>. Dữ liệu giá lấy
+      qua vnstock, có thể trễ hoặc gián đoạn. Tự chịu trách nhiệm với quyết định
+      đầu tư của bạn.
+    </p>
+  </footer>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

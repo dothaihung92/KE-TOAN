@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Tin tức - Chứng khoán VN{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Tin tức thị trường</h1>
+  <ul class="news-list" id="market-news-full">
+    {% for item in market_news %}
+    <li>
+      <a href="{{ item.link }}" target="_blank" rel="noopener">{{ item.title }}</a>
+      <span class="muted small">{{ item.published }}</span>
+    </li>
+    {% else %}
+    <li class="muted">Chưa có tin tức. Bấm "Làm mới ngay" ở trên để tải.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

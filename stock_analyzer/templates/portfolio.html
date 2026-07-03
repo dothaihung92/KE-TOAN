@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Danh mục của tôi - Chứng khoán VN{% endblock %}
+{% block content %}
+
+<section class="panel">
+  <h1>Danh mục của tôi</h1>
+  <p class="muted">
+    Phần mềm <strong>không</strong> tự động kết nối tài khoản VCBS (VCBS không cung cấp
+    API công khai cho việc này, và lưu mật khẩu của bạn ở đây sẽ không an toàn).
+    Thay vào đó: đăng nhập <a href="https://www.vcbs.com.vn/" target="_blank" rel="noopener">VCBS Trade</a>,
+    vào mục <em>Danh mục / Sao kê</em>, xuất file Excel hoặc CSV, rồi tải lên tại đây
+    để theo dõi lãi/lỗ và nhận khuyến nghị cho các mã bạn đang nắm giữ.
+  </p>
+
+  <form method="post" action="{{ url_for('portfolio_upload') }}" enctype="multipart/form-data" class="inline-form">
+    <input type="file" name="file" accept=".xlsx,.xls,.csv" required>
+    <button type="submit">Tải lên sao kê</button>
+  </form>
+
+  {% if holdings %}
+  <form method="post" action="{{ url_for('portfolio_clear') }}" onsubmit="return confirm('Xoá toàn bộ danh mục đã nhập?');" style="margin-top:.5rem">
+    <button type="submit" class="btn-link">Xoá danh mục</button>
+  </form>
+  {% endif %}
+</section>
+
+{% if holdings %}
+<section class="panel">
+  <div class="panel-header">
+    <h2>Danh mục hiện tại</h2>
+    {% if summary.total_value %}
+    <span>
+      Tổng giá trị: <strong>{{ "{:,.0f}".format(summary.total_value) }}</strong>
+      &nbsp;|&nbsp;
+      Lãi/lỗ: <strong class="{{ 'pos' if summary.total_pnl >= 0 else 'neg' }}">{{ "{:,.0f}".format(summary.total_pnl) }}</strong>
+    </span>
+    {% endif %}
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Mã</th><th>Số lượng</th><th>Giá vốn</th><th>Giá hiện tại</th>
+        <th>Giá trị TT</th><th>Lãi/lỗ</th><th>% Lãi/lỗ</th><th>Khuyến nghị</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in holdings %}
+      <tr>
+        <td><a href="{{ url_for('stock_detail', symbol=h.symbol) }}"><strong>{{ h.symbol }}</strong></a></td>
+        <td>{{ "{:,.0f}".format(h.quantity) }}</td>
+        <td>{{ "%.1f"|format(h.avg_cost) if h.avg_cost else "-" }}</td>
+        <td>{{ "%.1f"|format(h.current_price) if h.current_price is not none else "-" }}</td>
+        <td>{{ "{:,.0f}".format(h.market_value) if h.market_value is not none else "-" }}</td>
+        {% if h.pnl is not none %}
+        <td class="{{ 'pos' if h.pnl >= 0 else 'neg' }}">{{ "{:,.0f}".format(h.pnl) }}</td>
+        <td class="{{ 'pos' if h.pnl >= 0 else 'neg' }}">{{ "%.1f"|format(h.pnl_pct) }}%</td>
+        {% else %}
+        <td class="muted">-</td><td class="muted">-</td>
+        {% endif %}
+        {% if h.recommendation %}
+        <td><span class="badge badge-{{ h.recommendation.label|replace(' / ', '-')|replace(' ', '-')|lower }}">{{ h.recommendation.label }}</span></td>
+        {% else %}
+        <td class="muted">Đang chờ dữ liệu</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% endblock %}

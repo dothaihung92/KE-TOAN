@@ -1,0 +1,10 @@
+# Ứng dụng phân tích chứng khoán Việt Nam - dependencies riêng,
+# không ảnh hưởng tới phần mềm tra cứu hoá đơn điện tử (hddt/webapp).
+
+Flask>=3.0
+pandas>=2.0
+requests>=2.28
+openpyxl>=3.1
+APScheduler>=3.10
+# Ghim theo nhánh 4.x đã kiểm thử; vnstock hay đổi API giữa các bản lớn.
+vnstock>=4.0,<5.0

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ symbol }} - Chứng khoán VN{% endblock %}
+{% block content %}
+
+<section class="panel">
+  <div class="panel-header">
+    <h1>{{ symbol }}</h1>
+    <form method="post" action="{{ url_for('stock_refresh', symbol=symbol) }}">
+      <button type="submit">🔄 Làm mới mã này</button>
+    </form>
+  </div>
+
+  {% if entry and entry.quote %}
+  <div class="stat-row">
+    <div class="stat"><span class="stat-label">Giá đóng cửa</span><span class="stat-value">{{ "%.1f"|format(entry.quote.close) }}</span></div>
+    <div class="stat"><span class="stat-label">% Thay đổi</span>
+      <span class="stat-value {{ 'pos' if entry.quote.change_pct >= 0 else 'neg' }}">{{ "%.2f"|format(entry.quote.change_pct) }}%</span>
+    </div>
+    <div class="stat"><span class="stat-label">Khối lượng</span><span class="stat-value">{{ "{:,}".format(entry.quote.volume) }}</span></div>
+    <div class="stat"><span class="stat-label">Cập nhật</span><span class="stat-value small">{{ entry.updated_at }}</span></div>
+  </div>
+  {% else %}
+  <p class="muted">{{ (entry.error if entry else None) or "Chưa có dữ liệu, bấm 'Làm mới mã này'." }}</p>
+  {% endif %}
+
+  {% if entry and entry.recommendation %}
+  {% set rec = entry.recommendation %}
+  <div class="recommendation-box badge-{{ rec.label|replace(' / ', '-')|replace(' ', '-')|lower }}">
+    <h2>Khuyến nghị: {{ rec.label }}</h2>
+    <p>Điểm tổng hợp: <strong>{{ rec.combined_score }}</strong>
+      (kỹ thuật: {{ rec.technical_score }}, tin tức: {{ rec.news_score }} / {{ rec.news_count }} tin)</p>
+    <ul>
+      {% for reason in rec.reasons %}
+      <li>{{ reason }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Tin tức liên quan đến {{ symbol }}</h2>
+  <ul class="news-list">
+    {% for item in news %}
+    <li>
+      <a href="{{ item.link }}" target="_blank" rel="noopener">{{ item.title }}</a>
+      <span class="muted small">{{ item.published }}</span>
+    </li>
+    {% else %}
+    <li class="muted">Không có tin tức gần đây cho mã này.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% endblock %}

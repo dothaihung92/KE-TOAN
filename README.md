@@ -1,3 +1,13 @@
+# KE-TOAN
+
+Repo này gồm 2 công cụ độc lập, không phụ thuộc lẫn nhau:
+
+- **`hddt/` + `webapp/`** - tải hoá đơn điện tử từ Tổng cục Thuế (chi tiết bên dưới).
+- **`stock_analyzer/`** - phần mềm phân tích chứng khoán Việt Nam, gợi ý mua/bán,
+  cập nhật tin tức liên tục. Xem [`stock_analyzer/README.md`](stock_analyzer/README.md).
+
+---
+
 # Phần mềm lấy dữ liệu hoá đơn điện tử (HĐĐT)
 
 Công cụ tải dữ liệu hoá đơn điện tử của **chính doanh nghiệp** từ cổng tra cứu
