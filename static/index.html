@@ -1753,7 +1753,18 @@ function xkFillDown(){
 // nhiều tồn hơn) — có thể tách thành nhiều dòng nếu phải dùng nhiều mã.
 // Chỉ để trống (kèm cảnh báo) phần THỰC SỰ không còn mã nào đủ đáp ứng.
 function xkKiemTraTon(){
+  try{
+    xkKiemTraTonLoi();
+  }catch(e){
+    // đảm bảo lưới & tổng kết luôn được vẽ lại đúng bảng XK dù có lỗi bất ngờ,
+    // tránh để lại tổng kết CŨ/SAI (kiểu tổng kết chung của lưới khác) trên màn hình
+    xkVeGrid();
+    toast('Lỗi khi kiểm tra tồn kho: '+e.message,'err');
+  }
+}
+function xkKiemTraTonLoi(){
   xkTuNlRows();
+  const tongGocTruoc=xkRows.reduce((a,r)=>a+(Number(r.sl)||0),0);
   const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
   const daDung={};
   const ketQua=[];
@@ -1802,6 +1813,13 @@ function xkKiemTraTon(){
     }
   });
   xkRows=ketQua;
+  // đối chiếu bảo toàn số lượng: tổng SL trước và sau khi tách dòng theo tồn
+  // kho PHẢI bằng nhau tuyệt đối — tách dòng chỉ chia nhỏ ra chứ không được
+  // làm mất/giảm số lượng cần xuất
+  const tongGocSau=xkRows.reduce((a,r)=>a+(Number(r.sl)||0),0);
+  if(Math.abs(tongGocSau-tongGocTruoc)>0.001){
+    toast(`⚠ CẢNH BÁO: tổng số lượng lệch ${(tongGocTruoc-tongGocSau).toLocaleString('vi-VN')} sau khi kiểm tra tồn kho — báo lại cho người phát triển`,'err');
+  }
   xkVeGrid();
   if(soCanhBao>0)toast(`⚠ Đã dò lại theo tồn kho — ${soCanhBao} dòng phải đổi/tách mã do hết tồn`,'err');
   else toast('✓ Không có mã nào vượt tồn kho','ok');
@@ -1826,22 +1844,32 @@ function xkToDamTenBan(){
     td.style.fontWeight='700'; td.style.fontSize='14px';
   });
 }
+// tổng kết cuối bảng: SL BÁN (nlParseSo(r.sl) mọi dòng, kể cả dòng tách chưa gắn
+// mã — đây là tổng CẦU gốc, không đổi dù có tách dòng) so với SL ĐÃ GẮN MÃ THẬT
+// (chỉ cộng sl_kho khi dòng đó CÓ mã — không fallback về sl như trước, vì fallback
+// khiến 2 tổng luôn bằng nhau, che mất phần chưa gắn được mã) — hiệu số giữa 2 tổng
+// này chính là số lượng còn CHƯA xuất được kho, giúp phát hiện ngay nếu có sai lệch.
 function xkTongKet(){
   const el=document.getElementById('nlTongCong'); if(!el)return;
   if(!xkRows.length){el.innerHTML='<div class="hint" style="padding:4px 0">Chưa có dữ liệu — import Sheet TON rồi bấm "🔍 Dò mã hàng tự động".</div>';return}
   const khop=xkRows.filter(r=>String(r.ma||'').trim()).length;
-  let tBan=0, tKho=0, tSl=0, tSlKho=0;
+  let tBan=0, tKho=0, tSl=0, tSlGan=0;
   xkRows.forEach(r=>{
     tBan+=nlParseSo(r.tt);
     tSl+=nlParseSo(r.sl);
-    const sl=nlParseSo((r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl);
-    tSlKho+=sl;
-    tKho+=sl*nlParseSo(r.gia_xk);
+    if(String(r.ma||'').trim()){
+      const sl=nlParseSo((r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl);
+      tSlGan+=sl;
+      tKho+=sl*nlParseSo(r.gia_xk);
+    }
   });
+  const tSlThieu=tSl-tSlGan;
   el.innerHTML=`<div style="display:flex;gap:22px;flex-wrap:wrap;background:#f0f9f4;border-radius:8px;padding:10px 14px">
     <span>Số dòng: <b>${xkRows.length}</b> — đã gắn mã <b style="color:#1a7a7a">${khop}</b>,
       còn thiếu <b style="color:${xkRows.length-khop?'#b91c1c':'#1a7a7a'}">${xkRows.length-khop}</b></span>
-    <span>Tổng số lượng BÁN: <b>${tSl.toLocaleString('vi-VN')}</b> — XUẤT KHO: <b>${tSlKho.toLocaleString('vi-VN')}</b></span>
+    <span style="font-size:15px">🔢 Tổng SL BÁN (gốc): <b>${tSl.toLocaleString('vi-VN')}</b>
+      — Tổng SL ĐÃ XUẤT KHO: <b style="color:#1a7a7a">${tSlGan.toLocaleString('vi-VN')}</b>
+      — Chưa xuất được: <b style="color:${tSlThieu?'#b91c1c':'#1a7a7a'}">${tSlThieu.toLocaleString('vi-VN')}</b></span>
     <span>Tổng thành tiền BÁN: <b style="color:#1f6b4a">${Math.round(tBan).toLocaleString('vi-VN')} đ</b></span>
     <span>Tổng thành tiền XUẤT KHO (giá vốn): <b style="color:#8a5d00">${Math.round(tKho).toLocaleString('vi-VN')} đ</b></span>
     <span>Chênh lệch: <b>${Math.round(tBan-tKho).toLocaleString('vi-VN')} đ</b></span></div>`;
