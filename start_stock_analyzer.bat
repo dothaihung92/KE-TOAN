@@ -76,10 +76,18 @@ if "%HAVE_GIT%"=="0" (
 
 echo.
 echo [2/3] Dang cai dat / cap nhat thu vien can thiet...
-%PYCMD% -m pip install --upgrade -r stock_analyzer\requirements.txt
+echo   Dang nang cap pip...
+%PYCMD% -m pip install --upgrade pip >nul 2>&1
+%PYCMD% -m pip install --prefer-binary --upgrade -r stock_analyzer\requirements.txt
 if errorlevel 1 (
     echo.
-    echo [LOI] Cai dat thu vien that bai. Kiem tra ket noi mang roi chay lai file nay.
+    echo [LOI] Cai dat thu vien that bai.
+    echo   Neu thay loi lien quan toi numpy, meson, Unknown compiler: pip
+    echo   dang co gang tu bien dich numpy tu ma nguon vi khong tim thay
+    echo   ban cai san ^(wheel^) cho phien ban Python tren may ban.
+    echo   Cach sua - cai lai Python ban 64-bit, phien ban 3.11 hoac 3.12
+    echo   tu python.org ^(Python qua moi nhu 3.14 hoac qua cu deu co the
+    echo   chua co ban cai san^), roi chay lai file nay.
     echo.
     pause
     exit /b 1
