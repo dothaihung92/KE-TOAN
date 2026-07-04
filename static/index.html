@@ -1891,7 +1891,16 @@ function xkMoGan(idx){
   document.getElementById('xkGanModal').style.display='flex';
   setTimeout(()=>document.getElementById('xkGanSearch').focus(),0);
 }
-function xkDongGan(){document.getElementById('xkGanModal').style.display='none';xkGanIdx=-1;}
+function xkDongGan(){
+  document.getElementById('xkGanModal').style.display='none';
+  const idxDangGan=xkGanIdx;
+  xkGanIdx=-1;
+  // đóng modal (kể cả bấm Đóng/Esc, không chọn mã) vẫn focus lại ô vừa thao
+  // tác trong lưới, tránh rơi mất focus khiến mũi tên cuộn khung thay vì di
+  // chuyển ô — nếu dòng đó đã bị xoá/không còn thì querySelector không tìm
+  // thấy, bỏ qua, không lỗi.
+  if(idxDangGan>=0)xkFocusO(idxDangGan,'Mã hàng kho');
+}
 // tồn CÒN LẠI THẬT SỰ cho mỗi mã tại thời điểm gán dòng idx: tồn gốc trừ đi
 // những gì các dòng KHÁC (mọi dòng trừ dòng đang gán) đã dùng — không phải
 // tồn gốc tĩnh, để không gây hiểu lầm như trường hợp gán mã đã bị dòng khác dùng bớt.
@@ -1987,8 +1996,22 @@ function xkChonMa(ma){
   }else{
     r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
   }
+  const idxVuaGan=xkGanIdx;
   xkDongGan();
   xkVeGrid();
+  // đóng bảng gán mã xong focus lại đúng ô "Mã hàng kho" của dòng vừa gắn,
+  // để người dùng bấm mũi tên tiếp tục làm việc trong lưới ngay, không bị
+  // rớt ra ngoài khiến mũi tên cuộn cả khung thay vì di chuyển ô.
+  xkFocusO(idxVuaGan,'Mã hàng kho');
+}
+// focus lại đúng ô (theo tên cột) của 1 dòng trong lưới hiện tại — dùng sau
+// khi đóng modal/thao tác làm mất focus, để bàn phím (mũi tên, Enter...)
+// tiếp tục điều khiển được lưới ngay, không bị rơi ra ngoài.
+function xkFocusO(idx,tenCot){
+  const ci=nlHeader.indexOf(tenCot);
+  if(ci<0)return;
+  const td=document.querySelector(`td[data-r="${idx}"][data-c="${ci}"]`);
+  if(td)td.focus();
 }
 async function xkLuu(){
   if(!current)return;
@@ -2468,7 +2491,12 @@ function nlPhimO(e,td){
       return;
     }
     td.blur();
-    const next=document.querySelector(`td[data-r="${r+1}"][data-c="${c}"]`);
+    // truy vấn LẠI sau khi blur (không dùng biến td cũ) vì blur có thể làm
+    // vẽ lại cả lưới (vd sửa cột Nợ/MST) khiến tham chiếu cũ bị mất; hết dòng
+    // dưới (đang ở dòng cuối) thì quay về đúng ô hiện tại thay vì rớt focus
+    // ra ngoài — tránh mũi tên sau đó bị trình duyệt hiểu thành cuộn khung.
+    const next=document.querySelector(`td[data-r="${r+1}"][data-c="${c}"]`)
+            || document.querySelector(`td[data-r="${r}"][data-c="${c}"]`);
     if(next)next.focus();
   }
   if(e.key==='Escape'){td.blur();nlXoaHighlight();}
