@@ -406,7 +406,7 @@
       </div>
       <button class="btn ghost sm" onclick="xkDongGan()">✕</button>
     </div>
-    <input id="xkGanSearch" placeholder="🔎 Tìm theo tên hàng hoặc mã..." oninput="xkVeDanhSachGan()"
+    <input id="xkGanSearch" placeholder="🔎 Tìm theo tên hàng hoặc mã... (↑↓ chọn, Enter gắn mã)" oninput="xkVeDanhSachGan()" onkeydown="xkGanPhimO(event)"
            style="padding:10px 12px;font-size:15px;border:1px solid #ccc;border-radius:8px;width:100%;box-sizing:border-box;margin-bottom:10px">
     <div id="xkGanList" style="overflow:auto;flex:1;border:1px solid #eee;border-radius:8px"></div>
     <div style="margin-top:10px;text-align:right">
@@ -1594,7 +1594,7 @@ async function luuCaHaiBangKe(){
 }
 
 /* ----- XUẤT KHO ----- */
-let xkTon=[], xkRows=[], xkGanIdx=-1;
+let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1;
 const XK_HEADERS=['Tồn kho','Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
                    'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho'];
 function xkEsc(s){return String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;')}
@@ -1889,6 +1889,7 @@ function xkMoGan(idx){
   document.getElementById('xkGanSearch').value='';
   xkVeDanhSachGan();
   document.getElementById('xkGanModal').style.display='flex';
+  setTimeout(()=>document.getElementById('xkGanSearch').focus(),0);
 }
 function xkDongGan(){document.getElementById('xkGanModal').style.display='none';xkGanIdx=-1;}
 // tồn CÒN LẠI THẬT SỰ cho mỗi mã tại thời điểm gán dòng idx: tồn gốc trừ đi
@@ -1905,22 +1906,26 @@ function xkTonConLaiMap(boQuaIdx){
 }
 function xkVeDanhSachGan(){
   const box=document.getElementById('xkGanList'); if(!box)return;
-  const r=xkRows[xkGanIdx]; if(!r){box.innerHTML='';return}
+  const r=xkRows[xkGanIdx]; if(!r){box.innerHTML='';xkGanDanhSach=[];xkGanHighlight=-1;return}
   const tonConLai=xkTonConLaiMap(xkGanIdx);
   const tenChuanBan=xkChuanTen(r.ten_sp);
   const q=(document.getElementById('xkGanSearch').value||'').toLowerCase().trim();
   const goiY=(r.goi_y||[]).filter(g=>!q||`${g.ten} ${g.ma}`.toLowerCase().includes(q))
-    .map(g=>({...g, con_lai: tonConLai[g.ma]??g.con_lai}))
+    .map(g=>({...g, con_lai: tonConLai[g.ma]??g.con_lai, noibat:true}))
     .filter(g=>g.con_lai>0);           // mã đã hết tồn thì không hiện gợi ý
   const goiYma=new Set(goiY.map(g=>g.ma));
   const khac=xkTon.filter(t=>!goiYma.has(t.ma)&&(!q||`${t.ten} ${t.ma}`.toLowerCase().includes(q))).slice(0,200)
-    .map(t=>({...t, con_lai: tonConLai[t.ma]??t.ton}))
+    .map(t=>({...t, con_lai: tonConLai[t.ma]??t.ton, noibat:false}))
     .filter(t=>t.con_lai>0);           // mã đã hết tồn thì không hiện trong danh sách còn lại
-  const dong=(it,noibat)=>{
+  // gộp 1 mảng DUY NHẤT theo đúng thứ tự hiển thị để mũi tên lên/xuống + Enter
+  // trong modal điều hướng/chọn được đúng dòng đang tô sáng (giống ô tìm kiếm gợi ý)
+  xkGanDanhSach=[...goiY, ...khac];
+  xkGanHighlight=xkGanDanhSach.length?0:-1;
+  const dong=(it,i)=>{
     const khacXa=!xkManh(tenChuanBan, xkChuanTen(it.ten)) && (it.diem==null || it.diem<0.6);
-    return `<div onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
-      style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;${noibat?'background:#fff7e6':''}"
-      onmouseover="this.style.background='#eef7f7'" onmouseout="this.style.background='${noibat?'#fff7e6':'#fff'}'">
+    return `<div data-idx="${i}" onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
+      onmouseenter="xkGanHighlight=${i};xkGanCapNhatHighlight()"
+      style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
         <div style="font-weight:800;font-size:16px">${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
         ${it.diem!=null?`<div style="font-size:13px;font-weight:700;color:${it.diem>=0.9?'#1a7a7a':'#b06a00'};white-space:nowrap">Khớp ${Math.round(it.diem*100)}%</div>`:''}
@@ -1931,9 +1936,30 @@ function xkVeDanhSachGan(){
     </div>`;
   };
   let html='';
-  if(goiY.length)html+=`<div style="padding:6px 14px;font-size:13px;color:#b06a00;background:#fff7e6;font-weight:800">GỢI Ý PHÙ HỢP</div>`+goiY.map(g=>dong(g,true)).join('');
-  html+=khac.map(t=>dong(t,false)).join('');
+  if(goiY.length)html+=`<div style="padding:6px 14px;font-size:13px;color:#b06a00;background:#fff7e6;font-weight:800">GỢI Ý PHÙ HỢP</div>`;
+  html+=xkGanDanhSach.map((it,i)=>dong(it,i)).join('');
   box.innerHTML=html||'<div class="hint" style="padding:12px">Không tìm thấy</div>';
+  xkGanCapNhatHighlight();
+}
+// tô sáng dòng đang chọn (bàn phím hoặc rê chuột) trong danh sách gán mã
+function xkGanCapNhatHighlight(){
+  const box=document.getElementById('xkGanList'); if(!box)return;
+  box.querySelectorAll('[data-idx]').forEach(el=>{
+    const i=+el.dataset.idx, it=xkGanDanhSach[i], hl=i===xkGanHighlight;
+    el.style.background=hl?'#cfe9e9':(it&&it.noibat?'#fff7e6':'#fff');
+    el.style.boxShadow=hl?'inset 0 0 0 2px #1a7a7a':'none';
+  });
+  const active=box.querySelector(`[data-idx="${xkGanHighlight}"]`);
+  if(active)active.scrollIntoView({block:'nearest'});
+}
+// mũi tên lên/xuống chọn dòng, Enter gắn đúng mã đang tô sáng, Esc đóng modal
+function xkGanPhimO(e){
+  const n=(xkGanDanhSach||[]).length;
+  if(e.key==='ArrowDown'){e.preventDefault();if(n){xkGanHighlight=(xkGanHighlight+1+n)%n;xkGanCapNhatHighlight();}}
+  else if(e.key==='ArrowUp'){e.preventDefault();if(n){xkGanHighlight=(xkGanHighlight-1+n)%n;xkGanCapNhatHighlight();}}
+  else if(e.key==='Enter'){e.preventDefault();
+    if(xkGanHighlight>=0&&xkGanHighlight<n)xkChonMa(xkGanDanhSach[xkGanHighlight].ma);}
+  else if(e.key==='Escape'){e.preventDefault();xkDongGan();}
 }
 function xkChonMa(ma){
   if(xkGanIdx<0)return;
@@ -2431,8 +2457,17 @@ function nlPhimO(e,td){
     if(next){td.blur();nlChon={r1:nr,c1:nc,r2:nr,c2:nc};nlCapNhatHighlight();next.focus();}
     return;
   }
-  if(e.key==='Enter'){e.preventDefault();td.blur();
+  if(e.key==='Enter'){e.preventDefault();
     const r=+td.dataset.r,c=+td.dataset.c;
+    // Enter tại ô "Mã hàng kho" đang TRỐNG (màn Xuất Kho) -> tự mở luôn bảng
+    // gán mã cho dòng đó, thay vì chỉ nhảy xuống dòng dưới như bình thường.
+    if(nhapLieuLoaiHienTai==='xk' && String(nlHeader[c]||'').trim()==='Mã hàng kho' && !String(td.textContent||'').trim()){
+      td.blur();
+      xkTuNlRows();
+      xkMoGan(r);
+      return;
+    }
+    td.blur();
     const next=document.querySelector(`td[data-r="${r+1}"][data-c="${c}"]`);
     if(next)next.focus();
   }
