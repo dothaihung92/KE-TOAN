@@ -2413,6 +2413,13 @@ function nlLocDong(){
   return out;
 }
 function nlVeTong(){
+  // màn Xuất Kho dùng tổng kết RIÊNG (xkTongKet, có SL BÁN/XUẤT KHO/tồn kho...)
+  // — rất nhiều nơi (lọc, sửa ô, xoá dòng, undo...) gọi thẳng nlVeTong()/
+  // veGridNhapLieu() nên phải chặn ở đây 1 chỗ duy nhất, nếu không tổng kết
+  // riêng sẽ bị đè lại bởi tổng kết CHUNG (Tổng chưa VAT/Tổng VAT...) mỗi khi
+  // các thao tác đó chạy. Đồng bộ lại xkRows từ lưới trước khi tính, để tổng
+  // kết luôn khớp với dữ liệu mới sửa (kể cả gõ tay chưa Fill Down/Lưu).
+  if(nhapLieuLoaiHienTai==='xk'){xkTuNlRows();xkTongKet();return;}
   const el=document.getElementById('nlTongCong');if(!el)return;
   let ciDS=-1,ciThue=-1;
   nlHeader.forEach((h,i)=>{
@@ -2474,8 +2481,18 @@ function nlPhimO(e,td){
     e.preventDefault();
     const r=+td.dataset.r,c=+td.dataset.c;
     let nr=r,nc=c;
-    if(e.key==='ArrowUp')nr--; else if(e.key==='ArrowDown')nr++;
-    else if(e.key==='ArrowLeft')nc--; else nc++;
+    if(e.key==='ArrowLeft')nc--;
+    else if(e.key==='ArrowRight')nc++;
+    else{
+      // lên/xuống: idx của dòng KHÔNG liên tục khi đang lọc (vd còn 68, 96,
+      // 104...) nên không thể chỉ +1/-1 — phải nhảy tới đúng dòng ĐANG HIỂN
+      // THỊ liền kề, nếu không ô "dòng+1" không tồn tại trong DOM -> im re.
+      const hienThi=nlLocDong().map(o=>o.idx);
+      const vt=hienThi.indexOf(r);
+      const vtMoi=vt+(e.key==='ArrowUp'?-1:1);
+      if(vt<0||vtMoi<0||vtMoi>=hienThi.length)return;
+      nr=hienThi[vtMoi];
+    }
     const next=document.querySelector(`td[data-r="${nr}"][data-c="${nc}"]`);
     if(next){td.blur();nlChon={r1:nr,c1:nc,r2:nr,c2:nc};nlCapNhatHighlight();next.focus();}
     return;
@@ -2490,12 +2507,17 @@ function nlPhimO(e,td){
       xkMoGan(r);
       return;
     }
+    // dòng KẾ TIẾP ĐANG HIỂN THỊ (không phải cứ +1, vì khi đang lọc thì idx
+    // các dòng không liên tục) — nếu không còn dòng dưới thì ở lại đúng dòng.
+    const hienThi=nlLocDong().map(o=>o.idx);
+    const vt=hienThi.indexOf(r);
+    const rKe=(vt>=0&&vt+1<hienThi.length)?hienThi[vt+1]:r;
     td.blur();
     // truy vấn LẠI sau khi blur (không dùng biến td cũ) vì blur có thể làm
     // vẽ lại cả lưới (vd sửa cột Nợ/MST) khiến tham chiếu cũ bị mất; hết dòng
     // dưới (đang ở dòng cuối) thì quay về đúng ô hiện tại thay vì rớt focus
     // ra ngoài — tránh mũi tên sau đó bị trình duyệt hiểu thành cuộn khung.
-    const next=document.querySelector(`td[data-r="${r+1}"][data-c="${c}"]`)
+    const next=document.querySelector(`td[data-r="${rKe}"][data-c="${c}"]`)
             || document.querySelector(`td[data-r="${r}"][data-c="${c}"]`);
     if(next)next.focus();
   }
