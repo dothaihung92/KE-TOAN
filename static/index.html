@@ -1787,10 +1787,11 @@ function xkKiemTraTonLoi(){
       conThieu-=lay;
     };
     layTu(maCu);                          // 1) dùng nốt mã đang gán (nếu còn)
-    if(conThieu>0){                       // 2) dò các mã KHÁC cùng tên, còn tồn nhiều hơn trước
+    if(conThieu>0){                       // 2) dò các mã KHÁC cùng tên, LẤY THEO ĐÚNG THỨ TỰ
+      // xuất hiện trong file tồn kho (dùng hết mã đứng trước mới sang mã đứng
+      // sau) — không ưu tiên theo tồn nhiều/ít, giữ nguyên thứ tự xkTon.
       const tenChuan=xkChuanTen(r.ten_sp);
       xkTon.filter(t=>!daThu.has(t.ma) && xkManh(tenChuan, xkChuanTen(t.ten)))
-        .sort((a,b)=>(tonMap[b.ma]-(daDung[b.ma]||0))-(tonMap[a.ma]-(daDung[a.ma]||0)))
         .forEach(t=>layTu(t.ma));
     }
     if(!phanBo.length){

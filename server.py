@@ -5486,10 +5486,12 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
 
     Nhiều mặt hàng trong TON có TÊN TRÙNG NHAU nhưng khác mã (vd 1 mã do phần
     mềm sinh 'HH00033-8' và 1 mã đã có sẵn trong MISA 'MH90' cho CÙNG 1 sản
-    phẩm) — không thể tự chọn đúng theo tên, nên KHÔNG đoán bừa: nếu có > 1
-    ứng viên "mạnh" (trùng y hệt hoặc chỉ lệch hậu tố nhỏ) cùng thoả, để TRỐNG
-    kèm gợi ý cho người dùng tự chọn — trừ khi đã được HỌC (hoc_ma: tên chuẩn
-    hoá -> mã) từ lần người dùng tự gắn trước đó, sẽ tự áp lại."""
+    phẩm) -> tự LẤY LUÔN mã còn đủ tồn, KHÔNG hỏi lại: ưu tiên mã đã được HỌC
+    (hoc_ma: tên chuẩn hoá -> mã) từ lần người dùng tự gắn trước đó nếu vẫn đủ
+    tồn; nếu không, ưu tiên mã XUẤT HIỆN TRƯỚC theo đúng thứ tự trong file tồn
+    kho (ton_rows) — dùng HẾT mã đứng trước rồi mới bắt đầu dùng tới mã đứng
+    sau, không ưu tiên theo tồn nhiều/ít. Chỉ TÁCH DÒNG (cộng dồn nhiều mã,
+    cũng theo đúng thứ tự đó) khi không mã đơn nào đủ cả số lượng cần bán."""
     col = _xk_src_cols(src_header)
     hoc_ma = hoc_ma or {}
 
@@ -5550,13 +5552,13 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
         # Nhiều mã trùng/gần trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ có sẵn
         # trong MISA cho cùng sản phẩm) -> LẤY LUÔN mã còn đủ tồn cho số lượng
         # bán, KHÔNG hỏi lại — ưu tiên mã đã HỌC trước đó nếu vẫn đủ tồn, rồi đến
-        # mã còn tồn ÍT NHẤT nhưng vẫn đủ (đỡ lẻ tồn kho).
+        # mã XUẤT HIỆN TRƯỚC theo đúng thứ tự trong file tồn kho (pool đã giữ
+        # nguyên thứ tự đó) — dùng HẾT mã đứng trước rồi mới chuyển sang mã
+        # đứng sau, không ưu tiên theo tồn nhiều/ít.
         ma_hoc = hoc_ma.get(ten_chuan)
         pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
         if not pick:
-            du_ton = [tn for tn in pool if tn["con_lai"] >= sl_can]
-            if du_ton:
-                pick = min(du_ton, key=lambda tn: tn["con_lai"])
+            pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
         if pick:
             pick["con_lai"] -= sl_can
             rec = dict(it)
@@ -5564,13 +5566,14 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
                        gia_xk=pick["gia"], goi_y=[], mo_ho=False, thieu_ton=False)
             out.append(rec)
             continue
-        # KHÔNG mã đơn nào đủ cả số lượng -> TÁCH DÒNG: cộng dồn nhiều mã lại
-        # (mã còn tồn NHIỀU hơn lấy trước) cho đến khi đủ số lượng bán; phần
-        # còn thiếu (nếu tổng tồn cả nhóm vẫn không đủ) tách thành 1 dòng
-        # riêng để trống, kèm gợi ý, cho người dùng tự gắn mã khác.
+        # KHÔNG mã đơn nào đủ cả số lượng -> TÁCH DÒNG: cộng dồn nhiều mã lại,
+        # LẤY THEO ĐÚNG THỨ TỰ xuất hiện trong file tồn kho (dùng hết mã đứng
+        # trước mới lấy tới mã đứng sau) cho đến khi đủ số lượng bán; phần còn
+        # thiếu (nếu tổng tồn cả nhóm vẫn không đủ) tách thành 1 dòng riêng để
+        # trống, kèm gợi ý, cho người dùng tự gắn mã khác.
         can_lay = sl_can
         da_dung_tien = 0
-        for tn in sorted(pool, key=lambda t: -t["con_lai"]):
+        for tn in pool:
             if can_lay <= 0 or tn["con_lai"] <= 0:
                 continue
             lay = min(tn["con_lai"], can_lay)
