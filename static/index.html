@@ -1940,10 +1940,26 @@ function xkChonMa(ma){
   const tn=(r.goi_y||[]).find(g=>String(g.ma)===String(ma)) || xkTon.find(t=>String(t.ma)===String(ma));
   if(!tn)return;
   const tonConLai=xkTonConLaiMap(xkGanIdx)[tn.ma];
+  const canXuat=Number(r.sl)||0;
   if(tonConLai!=null && tonConLai<=0){
     if(!confirm(`Mã ${tn.ma} hiện không còn tồn (đã dùng hết bởi dòng khác). Vẫn gắn mã này (âm kho)?`))return;
+    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
+  }else if(tonConLai!=null && tonConLai<canXuat){
+    // mã còn tồn NHƯNG không đủ số lượng cần xuất của dòng này — cảnh báo và
+    // TỰ TÁCH: dòng hiện tại chỉ nhận đúng phần tồn còn, phần thiếu tách
+    // xuống 1 dòng mới (chưa gắn mã) để người dùng gắn tiếp mã khác, tránh
+    // gắn quá số lượng khiến tồn kho báo âm mà không ai hay biết.
+    if(!confirm(`Mã ${tn.ma} chỉ còn tồn ${tonConLai}, nhưng dòng này cần xuất ${canXuat}.\nPhần mềm sẽ gắn ${tonConLai} cho mã này, phần còn thiếu ${canXuat-tonConLai} sẽ tách xuống 1 dòng mới để bạn gán mã khác. Tiếp tục?`))return;
+    const ttGoc=Number(r.tt)||0;
+    const ttGan=Math.round(ttGoc*tonConLai/(canXuat||1));
+    const dongThieu={...r, sl:canXuat-tonConLai, tt:ttGoc-ttGan,
+      ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl_kho:'', mo_ho:true, thieu_ton:true};
+    r.sl=tonConLai; r.tt=ttGan;
+    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
+    xkRows.splice(xkGanIdx+1,0,dongThieu);
+  }else{
+    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
   }
-  r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
   xkDongGan();
   xkVeGrid();
 }
