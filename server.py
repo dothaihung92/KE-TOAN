@@ -5593,6 +5593,36 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
             out.append(rec)
     return out
 
+XK_GIATHANH_XUAT_HEADERS = ["Tồn kho", "Số HĐ", "Ngày", "Tên Sản Phẩm", "ĐVT", "Số lượng",
+    "Đơn giá", "Thành tiền", "Mã hàng kho", "Tên hàng xuất kho", "ĐVT kho", "SL kho",
+    "Đơn Giá kho", "Thành Tiền kho"]
+
+def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
+    """Mirror hệt các cột hiển thị trên lưới màn hình Xuất Kho (giống hàm
+    xkRowsToNl ở JS): Tồn kho CHẠY DẦN theo mã (trừ dần từ trên xuống), SL/Đơn
+    giá kho fallback về SL/-- bán khi dòng chưa gắn mã — để file xuất khớp
+    đúng những gì người dùng thấy trên màn hình."""
+    ton_map = {str(t.get("ma") or "").strip(): _to_num(t.get("ton")) or 0 for t in (ton_rows or [])}
+    da_dung = {}
+    out = []
+    for r in (giathanh_rows or []):
+        sl_kho = r.get("sl_kho")
+        if sl_kho in (None, ""):
+            sl_kho = r.get("sl")
+        gia_xk = r.get("gia_xk")
+        sl_n, gia_n = _to_num(sl_kho), _to_num(gia_xk)
+        tt_kho = round(sl_n * gia_n) if isinstance(sl_n, (int, float)) and isinstance(gia_n, (int, float)) else ""
+        ma = str(r.get("ma") or "").strip()
+        ton = ""
+        if ma and ma in ton_map:
+            sl_ban = _to_num(r.get("sl"))
+            da_dung[ma] = da_dung.get(ma, 0) + (sl_ban if isinstance(sl_ban, (int, float)) else 0)
+            ton = ton_map[ma] - da_dung[ma]
+        out.append([ton, r.get("sohd", ""), r.get("ngay", ""), r.get("ten_sp", ""), r.get("dvt", ""),
+                    r.get("sl", ""), r.get("dgia", ""), r.get("tt", ""),
+                    ma, r.get("ten_xk", ""), r.get("dvt_xk", ""), sl_kho, gia_xk, tt_kho])
+    return out
+
 def _xk_cuoi_thang(ngay):
     """'dd/mm/yyyy' của NGÀY CUỐI THÁNG chứa ngày truyền vào (dd/mm/yyyy hoặc yyyy-mm-dd)."""
     import calendar
@@ -5811,6 +5841,83 @@ def xk_export(cid: int):
     so_bo_qua = tong - len(out)
     return FileResponse(path, filename=fname,
                          headers={"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua)})
+
+@app.post("/api/xk/export-giathanh/{cid}")
+def xk_export_giathanh(cid: int):
+    """Kết xuất giá thành: xuất TOÀN BỘ bảng GIATHANH (đủ cột BÁN & KHO cạnh
+    nhau, kể cả dòng CHƯA gắn mã — tô đỏ nhạt để dễ nhận biết) ra file Excel
+    để xem/lưu trữ/gửi đối chiếu — khác với 'Xuất kho' (chỉ lấy dòng đã gắn
+    mã, đúng 51 cột form nhập MISA)."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    data = _doc_du_lieu_cty(cid)
+    giathanh = data.get("xk_giathanh") or []
+    if not giathanh:
+        raise HTTPException(400, "Chưa có dữ liệu giá thành — hãy bấm \"Dò mã hàng tự động\" trước")
+    ton_rows = data.get("xk_ton") or []
+    rows = _gen_giathanh_export_rows(ton_rows, giathanh)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Giá thành"
+    for c, h in enumerate(XK_GIATHANH_XUAT_HEADERS, 1):
+        cell = ws.cell(1, c)
+        cell.value = h
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1A7A7A")
+    cot_tien = {7, 8, 13, 14}
+    do_nhat = PatternFill("solid", fgColor="FDE8E8")
+    for ri, row in enumerate(rows, 2):
+        chua_gan = not str(giathanh[ri - 2].get("ma") or "").strip()
+        for ci, v in enumerate(row, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in cot_tien and isinstance(v, (int, float)):
+                cell.number_format = "#,##0"
+            if chua_gan:
+                cell.fill = do_nhat
+    for c in range(1, len(XK_GIATHANH_XUAT_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 18
+    ws.freeze_panes = "A2"
+    # dòng tổng kết cuối bảng — giống hệt tổng kết hiển thị trên màn hình (chỉ
+    # cộng SL/Thành tiền KHO của những dòng ĐÃ gắn mã, không fallback về SL bán)
+    ri_tong = len(rows) + 2
+    t_sl = sum(v for r in giathanh if isinstance((v := _to_num(r.get("sl"))), (int, float)))
+    t_ban = sum(v for r in giathanh if isinstance((v := _to_num(r.get("tt"))), (int, float)))
+    t_sl_gan, t_kho = 0, 0
+    for r, row in zip(giathanh, rows):
+        if not str(r.get("ma") or "").strip():
+            continue
+        if isinstance(row[11], (int, float)):
+            t_sl_gan += row[11]
+        if isinstance(row[13], (int, float)):
+            t_kho += row[13]
+    ws.cell(ri_tong, 4).value = "TỔNG CỘNG"
+    ws.cell(ri_tong, 4).font = Font(bold=True)
+    ws.cell(ri_tong, 6).value = t_sl
+    ws.cell(ri_tong, 8).value = round(t_ban)
+    ws.cell(ri_tong, 12).value = t_sl_gan
+    ws.cell(ri_tong, 14).value = round(t_kho)
+    for c in (6, 8, 12, 14):
+        ws.cell(ri_tong, c).font = Font(bold=True)
+        if c in (8, 14):
+            ws.cell(ri_tong, c).number_format = "#,##0"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"KetXuatGiaThanh_{mst}_{datetime.datetime.now().strftime('%d%m%Y')}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(rows))})
 
 
 @app.get("/api/danh-muc-ncc/{cid}")

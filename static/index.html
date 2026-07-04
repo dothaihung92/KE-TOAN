@@ -1652,6 +1652,7 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
         <button class="btn ghost sm" onclick="xkKiemTraTon()" style="color:#8a5d00;border-color:#e8b923">✅ Kiểm tra tồn kho</button>
         <button class="btn gold sm" onclick="xkLuu()">💾 Lưu tạm</button>
+        <button class="btn sm" style="background:#1a7a7a" onclick="xkXuatGiaThanh()">📊 Kết xuất giá thành</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
@@ -1972,6 +1973,21 @@ async function xkLuu(){
     xkVeGrid();
     toast(`💾 Đã lưu (khớp ${d.so_khop}/${d.so_dong})`,'ok');
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
+}
+// xuất TOÀN BỘ bảng giá thành (đủ cột BÁN & KHO, kể cả dòng chưa gắn mã) ra
+// Excel để xem/lưu trữ — khác với xkXuatFile() vốn chỉ xuất đúng form MISA
+// "Xuất kho" (chỉ lấy dòng đã gắn mã).
+async function xkXuatGiaThanh(){
+  if(!current)return;
+  if(!xkRows.length){toast('Chưa có dữ liệu để kết xuất','err');return}
+  await xkLuu();
+  try{
+    const r=await fetch(`/api/xk/export-giathanh/${current}`,{method:'POST'});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const sd=r.headers.get('X-So-Dong')||'';
+    dl(await r.blob(),'KetXuatGiaThanh.xlsx');
+    toast(`📊 Đã kết xuất ${sd} dòng giá thành`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function xkXuatFile(){
   if(!current)return;
