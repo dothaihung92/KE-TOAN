@@ -7478,9 +7478,6 @@ def export_excel(cid: int):
             for d in dong_list:
                 it = d["it"]
                 ds = d["ds"]
-                # MUA VÀO: bỏ hẳn dòng có Thành tiền = 0 (không đưa vào Chi tiết MUA VÀO)
-                if loai == "purchase" and (not isinstance(ds, (int, float)) or ds == 0):
-                    continue
                 dvt_out, sl_out, dgia_out = it.get("dvt", ""), d["sl"], d["dgia"]
                 # HĐ hạch toán Nợ 6427: khi import phần mềm cần ĐVT=MHDV, SL=1,
                 # Đơn giá = Thành tiền/Số lượng (=Thành tiền vì SL=1)
