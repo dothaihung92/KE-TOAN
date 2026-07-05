@@ -4545,6 +4545,150 @@ def _luu_danh_muc(cid, loai, dm_rows):
     return len(rows)
 
 
+def _dm_doc_header_ma_ten(wb):
+    """File IMPORT danh mục mã hàng do người dùng tự chuẩn bị (không theo mẫu
+    bảng kê hóa đơn cố định) -> dò dòng tiêu đề (chứa cả chữ 'mã' và 'tên')
+    trong 10 dòng đầu sheet đầu tiên, trả (header, các dòng dữ liệu phía sau)."""
+    ws = wb.worksheets[0]
+    all_rows = list(ws.iter_rows(values_only=True))
+    header_idx = 0
+    for i in range(min(10, len(all_rows))):
+        cells = [str(c or "").strip().lower() for c in all_rows[i]]
+        if any("mã" in c for c in cells) and any("tên" in c for c in cells):
+            header_idx = i
+            break
+    header = list(all_rows[header_idx]) if all_rows else []
+    return header, all_rows[header_idx + 1:]
+
+
+def _dm_import_cols(header):
+    """Dò cột trong file IMPORT danh mục (khác _dm_cols dùng cho bảng kê hóa
+    đơn) — file này do người dùng tự chuẩn bị nên tên cột có thể khác nhau."""
+    hlow = [str(h or "").strip().lower() for h in header]
+    def find(contains):
+        for i, h in enumerate(hlow):
+            if any(k in h for k in contains):
+                return i
+        return -1
+    return {
+        "ma": find(("mã hàng", "mã vật tư", "mã sp", "mã tscđ", "mã ccdc", "mã(*)", "mã (*)", "mã")),
+        "ten": find(("tên hàng", "mặt hàng", "tên vật tư", "tên sản phẩm", "tên(*)", "tên (*)", "tên")),
+        "dvt": find(("đvt", "đơn vị tính")),
+        "ts": find(("thuế suất",)),
+        "kho": find(("kho",)),
+        "sl": find(("số lượng",)),
+        "dgia": find(("đơn giá",)),
+        "tt": find(("thành tiền",)),
+        "sohd": find(("số hđ", "số hoá đơn", "số hóa đơn")),
+        "ngay": find(("ngày",)),
+    }
+
+
+def _nhap_danh_muc(cid, loai, wb):
+    """IMPORT danh mục mã hàng (DM Hàng hóa/NVL/TSCĐ/CCDC) từ 1 file Excel
+    người dùng tự chuẩn bị: dòng nào CÓ điền cột 'Mã hàng' -> lấy ĐÚNG mã đó;
+    dòng KHÔNG điền mã -> tự dò theo TÊN (chuẩn hoá bỏ dấu/hoa-thường/khoảng
+    trắng, giống cách so khớp ở Xuất Kho) trong danh mục ĐÃ CÓ SẴN trong phần
+    mềm (đã lưu từ trước) để lấy lại đúng mã cũ cho cùng 1 mặt hàng; nếu không
+    tìm thấy tên nào khớp thì tự sinh mã mới nối tiếp (giống lúc dò tự động từ
+    bảng kê). Trả (all_rows, thống kê) để nạp thẳng vào lưới Danh mục cho
+    người dùng xem lại rồi bấm Lưu như bình thường."""
+    header, data_rows = _dm_doc_header_ma_ten(wb)
+    col = _dm_import_cols(header)
+    if col["ten"] < 0:
+        raise ValueError("Không tìm thấy cột 'Tên hàng'/'Mặt hàng' trong file")
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else None
+
+    data = _doc_du_lieu_cty(cid)
+    store = data.get("dm_" + loai, {}) or {}
+    la_ts = _dm_la_ts(loai)
+    prefix = {"hh": "HH", "nvl": "NVL", "tscd": "TSCD", "ccdc": "CCDC"}[loai]
+    next_n = int(store.get("next", 1))
+    so_dien_ma = so_trung_ten = so_moi = 0
+
+    if la_ts:
+        saved_rows = [list(r) for r in store.get("rows", []) if len(r) >= 12]
+        ten_to_ma = {}
+        for r in saved_rows:
+            tc = _chuan_ten_hang_xk(r[1])
+            if tc:
+                ten_to_ma.setdefault(tc, r[0])
+        hsd_md = 60 if loai == "tscd" else 24
+        dtpb_md = "VP"
+        tkcp_md = "6424" if loai == "tscd" else "6422"
+        rk = lambda row: f"{row[6]}|{row[7]}|{row[1]}|{row[5]}"
+    else:
+        saved_rows = [list(r) for r in store.get("rows", []) if len(r) >= 11]
+        ten_to_base = {}
+        for r in saved_rows:
+            tc = _chuan_ten_hang_xk(r[DM_I_TEN])
+            base = str(r[DM_I_MA] or "").split("-")[0]
+            if tc and base:
+                ten_to_base.setdefault(tc, base)
+        kho_md = "HH" if loai == "hh" else "NVL"
+        rk = lambda row: f"{row[DM_I_MA]}|{row[DM_I_HD]}|{row[DM_I_NGAY]}|{row[DM_I_TT]}"
+
+    seen = set(rk(r) for r in saved_rows)
+    new_rows = []
+    for r in data_rows:
+        ten = str(gv(r, col["ten"]) or "").strip()
+        if not ten:
+            continue
+        ma_dien = str(gv(r, col["ma"]) or "").strip() if col["ma"] >= 0 else ""
+        dvt = str(gv(r, col["dvt"]) or "").strip() if col["dvt"] >= 0 else ""
+        sl = _to_num(gv(r, col["sl"])) if col["sl"] >= 0 else ""
+        dgia = _to_num(gv(r, col["dgia"])) if col["dgia"] >= 0 else ""
+        tt = _to_num(gv(r, col["tt"])) if col["tt"] >= 0 else ""
+        sohd = str(gv(r, col["sohd"]) or "") if col["sohd"] >= 0 else ""
+        ngay = str(gv(r, col["ngay"]) or "") if col["ngay"] >= 0 else ""
+        tc = _chuan_ten_hang_xk(ten)
+
+        if la_ts:
+            if ma_dien:
+                ma = ma_dien
+                so_dien_ma += 1
+            elif tc in ten_to_ma:
+                ma = ten_to_ma[tc]
+                so_trung_ten += 1
+            else:
+                ma = prefix + str(next_n).zfill(5)
+                next_n += 1
+                so_moi += 1
+            ten_to_ma[tc] = ma
+            newrow = [ma, ten, dvt, sl, dgia, tt, sohd, ngay, hsd_md, dtpb_md, ngay, tkcp_md]
+        else:
+            rate = _dm_rate(gv(r, col["ts"]) if col["ts"] >= 0 else "")
+            if ma_dien:
+                ma = ma_dien
+                base = ma_dien.split("-")[0]
+                so_dien_ma += 1
+            elif tc in ten_to_base:
+                base = ten_to_base[tc]
+                ma = f"{base}-{rate}"
+                so_trung_ten += 1
+            else:
+                base = prefix + str(next_n).zfill(5)
+                next_n += 1
+                ma = f"{base}-{rate}"
+                so_moi += 1
+            ten_to_base[tc] = base
+            ky_tu = "".join(ten.split()) + dvt
+            kho_val = str(gv(r, col["kho"]) or "").strip() if col["kho"] >= 0 else ""
+            newrow = [ma, ten, dvt, rate, ky_tu, sl, dgia, tt, sohd, ngay, kho_val or kho_md]
+
+        key = rk(newrow)
+        if key in seen:
+            continue
+        seen.add(key)
+        new_rows.append(newrow)
+
+    all_rows = saved_rows + new_rows
+    return all_rows, {"so_dong": len(new_rows), "so_dien_ma": so_dien_ma,
+                       "so_trung_ten": so_trung_ten, "so_moi": so_moi}
+
+
 def _xuat_dm_excel(rows, ten_sheet, fname, cid, loai="hh"):
     import openpyxl
     from openpyxl.styles import Font, PatternFill
@@ -4595,6 +4739,30 @@ async def danh_muc_hang(cid: int, request: Request, loai: str = "hh"):
                                      body.get("rows", []))
     return {"headers": _dm_headers(loai), "rows": all_rows,
             "so_dong": len(all_rows), "so_moi": so_moi}
+
+
+@app.post("/api/danh-muc-hang/import/{cid}")
+async def danh_muc_hang_import(cid: int, request: Request, loai: str = "hh"):
+    """IMPORT danh mục mã hàng từ 1 file Excel người dùng tự chuẩn bị (không
+    phải bảng kê hóa đơn): dòng có điền 'Mã hàng' -> lấy đúng mã đó; dòng
+    không điền -> tự dò theo tên trong danh mục đã có sẵn để lấy lại mã cũ,
+    không tìm thấy thì tự sinh mã mới. Trả về (headers, rows) để nạp thẳng
+    vào lưới Danh mục cho người dùng xem lại rồi bấm Lưu như bình thường."""
+    import openpyxl, io as _io
+    form = await request.form()
+    up = form.get("file")
+    if up is None:
+        raise HTTPException(400, "Chưa chọn file")
+    try:
+        content = await up.read()
+        wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file: {e}")
+    try:
+        all_rows, tk = _nhap_danh_muc(cid, loai, wb)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"headers": _dm_headers(loai), "rows": all_rows, "so_dong": len(all_rows), **tk}
 
 
 @app.post("/api/danh-muc-hang/save/{cid}")

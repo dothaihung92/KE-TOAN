@@ -2834,11 +2834,13 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
         <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
         <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
         <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
+        <button class="btn sm" style="background:#5a3e8a" onclick="document.getElementById('dmImportFile').click()">📥 Import file</button>
+        <input type="file" id="dmImportFile" accept=".xlsx" style="display:none" onchange="dmImportDanhMuc(this)">
         <button class="btn ghost sm" onclick="quayLaiBangKeIn()">← Về bảng kê</button>
       </div>
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Sửa trực tiếp như bảng kê. <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo. Bấm <b>Lưu</b> để ghi nhớ mã hàng (kỳ sau nối tiếp).</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Sửa trực tiếp như bảng kê. <b>Ctrl+D</b> Fill Down | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo. Bấm <b>Lưu</b> để ghi nhớ mã hàng (kỳ sau nối tiếp). "📥 Import file": nạp file Danh mục mã hàng của bạn (cột "Mã hàng" có điền thì lấy đúng mã đó, để trống thì tự dò theo tên trong danh mục đã có để lấy lại mã cũ, không thấy thì tự sinh mã mới).</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
@@ -2866,6 +2868,24 @@ async function dmLuuGrid(){
     const d=await r.json();
     toast(`💾 Đã lưu danh mục (${d.so_dong} mặt hàng)`,'ok');
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
+}
+// Import file Danh mục mã hàng (do người dùng tự chuẩn bị) vào lưới DM đang
+// mở: dòng có điền "Mã hàng" -> lấy đúng mã đó; để trống -> tự dò theo tên
+// trong danh mục đã lưu để lấy lại mã cũ, không thấy thì tự sinh mã mới.
+// Chỉ nạp vào lưới để xem/sửa lại — vẫn phải bấm "💾 Lưu" mới ghi nhận.
+async function dmImportDanhMuc(input){
+  const f=input.files&&input.files[0]; if(!f)return;
+  const loai=nlDMMode;
+  toast('Đang import danh mục...','');
+  try{
+    const fd=new FormData(); fd.append('file',f);
+    const r=await fetch(`/api/danh-muc-hang/import/${current}?loai=${loai}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    moDanhMucGrid(loai,d.headers,d.rows,d.so_dong);
+    toast(`✓ Import xong ${d.so_dong} dòng — ${d.so_dien_ma} có sẵn mã trong file, ${d.so_trung_ten} dò trùng tên lấy lại mã cũ, ${d.so_moi} sinh mã mới. Kiểm tra rồi bấm "💾 Lưu".`,'ok');
+  }catch(e){toast('Lỗi import: '+e.message,'err')}
+  input.value='';
 }
 async function dmXuatGrid(){
   try{
