@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:620px">
+  <h1>Nội dung do AI soạn</h1>
+  <p class="muted">Xem lại và chỉnh sửa trước khi đăng — AI chỉ gợi ý, bạn quyết định nội dung cuối cùng.</p>
+  <form method="post" action="{{ url_for('fb.post_schedule', ref_id=page_id) }}">
+    <label>Nội dung bài đăng</label>
+    <textarea name="noi_dung" rows="6" style="width:100%;padding:9px 10px;border:1px solid #dfe3e8;border-radius:7px;font-size:14px">{{ content }}</textarea>
+
+    <label>Link đính kèm (tuỳ chọn)</label>
+    <input name="link" value="{{ link }}">
+
+    <label>Ảnh (URL, tuỳ chọn)</label>
+    <input name="image_url" placeholder="https://...">
+
+    <div class="row" style="margin-top:10px">
+      <div>
+        <label><input type="checkbox" name="publish_now" value="1" style="width:auto"> Đăng ngay</label>
+      </div>
+      <div>
+        <label>Hoặc lên lịch lúc</label>
+        <input name="scheduled_at" type="datetime-local">
+      </div>
+    </div>
+
+    <div style="margin-top:18px" class="actions">
+      <button class="btn" type="submit">Xác nhận</button>
+      <a class="btn sec" href="{{ url_for('fb.page_dashboard', ref_id=page_id) }}">Huỷ</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

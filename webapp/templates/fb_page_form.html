@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:620px">
+  <h1>{{ "Kết nối Fanpage" if action == "add" else "Sửa thông tin Fanpage" }}</h1>
+  <p class="muted">
+    Lấy Page Access Token trong
+    <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener">Graph API Explorer</a>
+    (chọn quyền <code>pages_manage_posts</code>, <code>pages_read_engagement</code>,
+    và <code>ads_management</code> nếu muốn chạy quảng cáo). Token được mã hoá trước khi lưu.
+  </p>
+  <form method="post">
+    <label>Tên gợi nhớ *</label>
+    <input name="ten" required value="{{ page['ten'] if page else '' }}">
+
+    <label>Page ID *</label>
+    <input name="page_id" required value="{{ page['page_id'] if page else '' }}">
+
+    <label>Page Access Token {{ "*" if action == "add" else "(để trống nếu không đổi)" }}</label>
+    <input name="access_token" type="password" {{ "required" if action == "add" else "" }}
+           autocomplete="new-password">
+
+    <label>Ad Account ID (không cần "act_", để trống nếu chưa chạy quảng cáo)</label>
+    <input name="ad_account_id" value="{{ page['ad_account_id'] if page else '' }}">
+
+    <div style="margin-top:18px" class="actions">
+      <button class="btn" type="submit">Lưu</button>
+      <a class="btn sec" href="{{ url_for('fb.pages') }}">Huỷ</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

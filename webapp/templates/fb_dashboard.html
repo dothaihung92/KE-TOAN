@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>{{ page['ten'] }}</h1>
+  {% if page_info %}
+  <p class="muted">
+    {{ page_info.get('name', '') }} · {{ page_info.get('fan_count', 0) }} lượt thích ·
+    {% if page_info.get('link') %}<a href="{{ page_info['link'] }}" target="_blank" rel="noopener">Xem Fanpage</a>{% endif %}
+  </p>
+  {% endif %}
+  <div class="actions">
+    <a class="btn sec sm" href="{{ url_for('fb.page_edit', ref_id=page['id']) }}">Sửa kết nối</a>
+    <form method="post" action="{{ url_for('fb.post_run_due', ref_id=page['id']) }}" style="display:inline">
+      <button class="btn sec sm" type="submit">Đăng ngay các bài đến hạn</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Sản phẩm</h2>
+  {% if products %}
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Tên</th><th>Mô tả</th><th>Giá</th><th>Link</th><th></th></tr></thead>
+      <tbody>
+        {% for pr in products %}
+        <tr>
+          <td>{{ pr['ten'] }}</td>
+          <td>{{ pr['mo_ta'] }}</td>
+          <td>{{ pr['gia'] }}</td>
+          <td>{% if pr['link'] %}<a href="{{ pr['link'] }}" target="_blank" rel="noopener">Link</a>{% endif %}</td>
+          <td class="actions">
+            <form method="post" action="{{ url_for('fb.post_generate', ref_id=page['id']) }}" style="display:inline">
+              <input type="hidden" name="product_id" value="{{ pr['id'] }}">
+              <button class="btn sm" type="submit">AI soạn bài</button>
+            </form>
+            <form method="post" action="{{ url_for('fb.product_delete', ref_id=page['id'], product_id=pr['id']) }}"
+                  onsubmit="return confirm('Xoá sản phẩm {{ pr['ten'] }}?');" style="display:inline">
+              <button class="btn sm danger" type="submit">Xoá</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Chưa có sản phẩm nào.</p>
+  {% endif %}
+
+  <h2 style="margin-top:18px">+ Thêm sản phẩm</h2>
+  <form method="post" action="{{ url_for('fb.product_add', ref_id=page['id']) }}">
+    <div class="row">
+      <div><label>Tên sản phẩm *</label><input name="ten" required></div>
+      <div><label>Giá</label><input name="gia" placeholder="vd: 299.000đ"></div>
+    </div>
+    <label>Mô tả</label>
+    <input name="mo_ta" placeholder="Đặc điểm nổi bật của sản phẩm...">
+    <label>Link sản phẩm</label>
+    <input name="link" placeholder="https://...">
+    <div style="margin-top:12px"><button class="btn" type="submit">Thêm sản phẩm</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Bài đăng đã lên lịch</h2>
+  {% if posts %}
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Thời gian</th><th>Nội dung</th><th>Trạng thái</th><th></th></tr></thead>
+      <tbody>
+        {% for po in posts %}
+        <tr>
+          <td>{{ po['scheduled_at'] }}</td>
+          <td style="white-space:normal;max-width:420px">{{ po['noi_dung'] }}</td>
+          <td>
+            {% if po['status'] == 'published' %}<span class="pill">đã đăng</span>
+            {% elif po['status'] == 'failed' %}<span class="pill" style="color:#a93226">lỗi: {{ po['error'] }}</span>
+            {% else %}<span class="pill">chờ đăng</span>{% endif %}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('fb.post_delete', ref_id=page['id'], post_id=po['id']) }}"
+                  onsubmit="return confirm('Xoá bài đã lên lịch?');">
+              <button class="btn sm danger" type="submit">Xoá</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Chưa có bài nào được lên lịch. Bấm "AI soạn bài" ở một sản phẩm phía trên để bắt đầu.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Chiến dịch quảng cáo</h2>
+  <p class="muted">
+    Chiến dịch được tạo ở trạng thái <b>TẠM DỪNG</b> trên Facebook — vào
+    <a href="https://www.facebook.com/adsmanager" target="_blank" rel="noopener">Ads Manager</a>
+    để đặt đối tượng mục tiêu, duyệt nội dung rồi tự bật chạy.
+  </p>
+  {% if campaigns %}
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Tên</th><th>Ngân sách/ngày</th><th>Trạng thái</th></tr></thead>
+      <tbody>
+        {% for c in campaigns %}
+        <tr>
+          <td>{{ c['ten'] }}</td>
+          <td>{{ c['daily_budget_cents'] }}</td>
+          <td>{{ c['status'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Chưa có chiến dịch nào.</p>
+  {% endif %}
+
+  {% if page['ad_account_id'] %}
+  <h2 style="margin-top:18px">+ Tạo chiến dịch mới</h2>
+  <form method="post" action="{{ url_for('fb.campaign_create', ref_id=page['id']) }}">
+    <div class="row">
+      <div><label>Tên chiến dịch *</label><input name="ten" required></div>
+      <div>
+        <label>Sản phẩm quảng cáo *</label>
+        <select name="product_id" required>
+          {% for pr in products %}<option value="{{ pr['id'] }}">{{ pr['ten'] }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label>Ngân sách/ngày (đơn vị nhỏ nhất tiền tệ tài khoản) *</label>
+        <input name="daily_budget" type="number" min="1" required></div>
+    </div>
+    <div style="margin-top:12px"><button class="btn" type="submit">Tạo chiến dịch (PAUSED)</button></div>
+  </form>
+  {% else %}
+  <p class="muted">Cần nhập Ad Account ID ở phần "Sửa kết nối" để tạo chiến dịch quảng cáo.</p>
+  {% endif %}
+</div>
+{% endblock %}

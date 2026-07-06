@@ -23,6 +23,21 @@ tiền) và xuất ra **Excel / CSV / JSON**.
 
 ## Cài đặt
 
+### Windows (không rành dòng lệnh) — dùng `start.bat`
+
+Nếu máy đã cài [Python](https://www.python.org/downloads/) (nhớ tick **Add
+Python to PATH** lúc cài), chỉ cần **nhấp đúp vào file `start.bat`**:
+
+- Tự kiểm tra Python đã cài chưa.
+- Tự `git pull` để cập nhật phiên bản mới nhất (nếu tải bằng Git).
+- Tự tạo môi trường ảo (`venv`) và cài/cập nhật thư viện cần thiết.
+- Tự khởi chạy phần mềm và mở trình duyệt.
+
+Lần sau chỉ cần chạy lại `start.bat` là phần mềm tự cập nhật rồi mở lên,
+không cần làm lại các bước cài đặt thủ công bên dưới.
+
+### Cài đặt thủ công (mọi hệ điều hành)
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -109,19 +124,73 @@ Chức năng web:
 > 🔐 Thư mục `instance/` chứa CSDL công ty và khoá mã hoá — đã được `.gitignore`,
 > **không commit** lên git. Hãy sao lưu và bảo vệ thư mục này.
 
+## Fanpage AI — đăng bài & quản lý quảng cáo sản phẩm
+
+Module `fbai/` cho phép dùng AI soạn nội dung, lên lịch đăng bài và tạo chiến
+dịch quảng cáo sản phẩm cho Fanpage Facebook, **thông qua Graph API /
+Marketing API chính thức của Meta** — không giả lập trình duyệt, không
+auto-like/comment/kết bạn hàng loạt (những hành vi đó vi phạm điều khoản
+Meta và dễ bị khoá page/tài khoản quảng cáo).
+
+### Chuẩn bị
+
+1. Tạo Facebook App tại <https://developers.facebook.com/apps>.
+2. Lấy **Page Access Token** (quyền `pages_manage_posts`,
+   `pages_read_engagement`, và `ads_management` nếu muốn chạy quảng cáo) qua
+   [Graph API Explorer](https://developers.facebook.com/tools/explorer/).
+3. (Tuỳ chọn, để chạy quảng cáo) Lấy **Ad Account ID** trong Ads Manager.
+4. (Tuỳ chọn, để AI viết nội dung tự nhiên hơn) Đặt biến môi trường
+   `ANTHROPIC_API_KEY` hoặc `OPENAI_API_KEY`. Nếu không có, hệ thống dùng
+   mẫu nội dung có sẵn.
+
+### Dùng trên web
+
+Trong giao diện web (`python run_web.py`), vào mục **Fanpage AI**:
+
+- **Kết nối Fanpage**: nhập Page ID + Access Token (mã hoá khi lưu, giống
+  mật khẩu công ty).
+- **Sản phẩm**: khai báo tên/mô tả/giá/link sản phẩm.
+- **AI soạn bài**: bấm "AI soạn bài" ở một sản phẩm để AI viết nội dung,
+  xem lại/sửa rồi chọn đăng ngay hoặc lên lịch.
+- **Quảng cáo**: tạo chiến dịch cho một sản phẩm với ngân sách/ngày — chiến
+  dịch luôn được tạo ở trạng thái **PAUSED**, bạn tự vào Ads Manager duyệt
+  đối tượng mục tiêu rồi bật chạy (hệ thống không tự chi tiền quảng cáo).
+
+### Tự động đăng bài đến hạn
+
+Bài đã lên lịch cần một tiến trình đăng đúng giờ. Chạy định kỳ bằng cron:
+
+```bash
+# ví dụ: mỗi 5 phút
+*/5 * * * * cd /path/to/KE-TOAN && python -m fbai.scheduler
+```
+
+Hoặc bấm nút "Đăng ngay các bài đến hạn" trên giao diện web.
+
+> ⚠️ Bạn tự chịu trách nhiệm tuân thủ Điều khoản dịch vụ của Meta và các quy
+> định quảng cáo hiện hành. Đây là công cụ hỗ trợ, không đảm bảo hiệu quả
+> marketing hay việc Meta phê duyệt quảng cáo.
+
 ## Cấu trúc dự án
 
 ```
-hddt/                 # Thư viện lõi
+hddt/                 # Thư viện lõi tra cứu hoá đơn điện tử
   client.py           # Giao tiếp API: captcha, đăng nhập, tra cứu hoá đơn
   captcha.py          # Lưu / hiển thị / (tuỳ chọn) OCR captcha
   exporter.py         # Xuất JSON / CSV / Excel
   cli.py              # Giao diện dòng lệnh
+fbai/                 # Fanpage AI: đăng bài & quảng cáo sản phẩm
+  client.py           # Giao tiếp Graph API (Fanpage) + Marketing API (quảng cáo)
+  content.py          # Sinh nội dung bài đăng bằng AI (hoặc mẫu có sẵn)
+  db.py               # Quản lý Fanpage/sản phẩm/lịch đăng/chiến dịch (SQLite)
+  scheduler.py         # Đăng các bài đã lên lịch (chạy qua cron)
 webapp/               # Giao diện web
-  app.py              # Các route Flask
+  app.py              # Các route Flask (hoá đơn điện tử)
+  fb_app.py            # Các route Flask (Fanpage AI)
   db.py               # Quản lý công ty + mã hoá mật khẩu (SQLite)
   templates/          # Giao diện HTML
 run_web.py            # Khởi chạy web
+start.bat             # (Windows) Tự cập nhật + cài thư viện + khởi chạy web
 ```
 
 ## Ghi chú kỹ thuật

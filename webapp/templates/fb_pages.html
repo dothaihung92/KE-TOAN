@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>Fanpage AI — Đăng bài &amp; Quảng cáo</h1>
+  <p class="muted">
+    Kết nối Fanpage bằng Page Access Token, để AI soạn nội dung, lên lịch đăng bài
+    và tạo chiến dịch quảng cáo sản phẩm qua Facebook Graph API / Marketing API chính thức.
+  </p>
+  {% if pages %}
+  <div class="tablebox">
+    <table>
+      <thead>
+        <tr><th>Tên</th><th>Page ID</th><th>Ad Account</th><th>Thao tác</th></tr>
+      </thead>
+      <tbody>
+        {% for p in pages %}
+        <tr>
+          <td>{{ p['ten'] }}</td>
+          <td>{{ p['page_id'] }}</td>
+          <td>{{ p['ad_account_id'] or '—' }}</td>
+          <td>
+            <div class="actions">
+              <a class="btn sm" href="{{ url_for('fb.page_dashboard', ref_id=p['id']) }}">Quản lý</a>
+              <a class="btn sm sec" href="{{ url_for('fb.page_edit', ref_id=p['id']) }}">Sửa</a>
+              <form method="post" action="{{ url_for('fb.page_delete', ref_id=p['id']) }}"
+                    onsubmit="return confirm('Xoá Fanpage {{ p['ten'] }}?');" style="display:inline">
+                <button class="btn sm danger" type="submit">Xoá</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>Chưa có Fanpage nào. <a href="{{ url_for('fb.page_add') }}">Kết nối Fanpage đầu tiên →</a></p>
+  {% endif %}
+  <div style="margin-top:14px"><a class="btn" href="{{ url_for('fb.page_add') }}">+ Kết nối Fanpage</a></div>
+</div>
+{% endblock %}
