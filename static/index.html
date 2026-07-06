@@ -1513,7 +1513,9 @@ let nlDMMode=null;        // null=bảng kê; 'hh'/'nvl'=đang ở lưới Danh 
 let nlSoMoi=0;             // số dòng MỚI ở cuối lưới Danh mục (tô xanh), 0=không tô
 let nlFormulas={};    // lưu công thức: key "r_c" -> "=K5/J5"
 let nlUndoStack=[];   // stack undo: [{header, rows, formulas}]
+let dmDaSua=false;    // đang ở lưới Danh mục (nlDMMode) và CÓ sửa/import chưa Lưu
 function nlLuuUndo(){
+  if(nlDMMode)dmDaSua=true;   // mọi thay đổi trong lưới Danh mục -> đánh dấu chưa lưu
   nlUndoStack.push({
     header:nlHeader.slice(),
     rows:nlRows.map(r=>r.slice()),
@@ -1521,6 +1523,10 @@ function nlLuuUndo(){
   });
   if(nlUndoStack.length>50)nlUndoStack.shift();
 }
+// cảnh báo khi đóng/tải lại tab trong lúc Danh mục còn thay đổi chưa lưu
+window.addEventListener('beforeunload',(e)=>{
+  if(nlDMMode&&dmDaSua){e.preventDefault();e.returnValue='';}
+});
 function nlUndo(){
   if(!nlUndoStack.length){toast('Không có gì để Undo','err');return;}
   const s=nlUndoStack.pop();
@@ -1542,9 +1548,11 @@ function moNhapLieu(){
 }
 function dongNhapLieu(){
   if((nlChung.in||nlChung.out)){if(!confirm('Dữ liệu vừa import chưa lưu sẽ mất. Thoát?'))return;}
+  if(nlDMMode&&dmDaSua&&!confirm('Danh mục vừa sửa/import CHƯA LƯU sẽ mất. Vẫn thoát?'))return;
   document.getElementById('nhapLieuScreen').style.display='none';
 }
 function quayLaiChonBangKe(){
+  if(nlDMMode&&dmDaSua&&!confirm('Danh mục vừa sửa/import CHƯA LƯU sẽ mất. Vẫn thoát ra ngoài?'))return;
   document.getElementById('nhapLieuHome').style.display='block';
   document.getElementById('nhapLieuContent').style.display='none';
   capNhatBadge();
@@ -2848,6 +2856,7 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
   nlRows=rows.map(r=>{const x=r.slice();while(x.length<nlHeader.length)x.push('');x.length=nlHeader.length;return x;});
   nlFreezeCol=0;nlChon=null;nlFilters={};nlSnapTrong={};nlFormulas={};nlUndoStack=[];
   nlChiHienCanhBao=false;nlCanhBaoNo={};nlIdxCotNo=-1;
+  dmDaSua=false;    // vừa nạp lại từ server -> chưa có gì thay đổi
   // Các dòng MỚI luôn được server nối vào CUỐI (all_rows = saved_rows + new_rows)
   // -> N dòng cuối cùng của lưới chính là dòng mới, còn lại là dòng đã lưu từ trước.
   nlSoMoi=soMoi||0;
@@ -2857,8 +2866,10 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
   document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng${soMoi!=null?` — <b style="color:#1f6b4a">${soMoi} mới</b>`:''} (Nợ ${DM_NO[loai]||''}).${khoNote}${moiNote}`;
 }
 function quayLaiBangKeIn(){
+  if(nlDMMode&&dmDaSua&&!confirm('Danh mục vừa sửa/import CHƯA LƯU sẽ mất. Vẫn thoát ra bảng kê?'))return;
   nlDMMode=null;
   nlSoMoi=0;
+  dmDaSua=false;
   moBangKe('in');
 }
 async function dmLuuGrid(){
@@ -2866,6 +2877,7 @@ async function dmLuuGrid(){
     const r=await fetch(`/api/danh-muc-hang/save/${current}?loai=${nlDMMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Lưu thất bại');
     const d=await r.json();
+    dmDaSua=false;
     toast(`💾 Đã lưu danh mục (${d.so_dong} mặt hàng)`,'ok');
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
 }
@@ -2883,6 +2895,7 @@ async function dmImportDanhMuc(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     moDanhMucGrid(loai,d.headers,d.rows,d.so_dong);
+    dmDaSua=true;    // vừa import xong -> CHƯA lưu, phải bấm Lưu mới ghi nhận
     toast(`✓ Import xong ${d.so_dong} dòng — ${d.so_dien_ma} có sẵn mã trong file, ${d.so_trung_ten} dò trùng tên lấy lại mã cũ, ${d.so_moi} sinh mã mới. Kiểm tra rồi bấm "💾 Lưu".`,'ok');
   }catch(e){toast('Lỗi import: '+e.message,'err')}
   input.value='';
@@ -2892,6 +2905,7 @@ async function dmXuatGrid(){
     const r=await fetch(`/api/danh-muc-hang-export/${current}?loai=${nlDMMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
     dl(await r.blob(),`DanhMuc_${DM_FILE[nlDMMode]||'DM'}.xlsx`);
+    dmDaSua=false;   // dmXuatGrid cũng LƯU lại ở server (xem danh_muc_hang_export)
     toast('📤 Đã xuất & lưu danh mục','ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
