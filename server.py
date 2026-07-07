@@ -6579,16 +6579,84 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
             return True
         return False
 
+    mst_cty = str(comp["mst"] or "").strip()
+
+    # ===== XÁC ĐỊNH KỲ KÊ KHAI + RANH GIỚI NGÀY *TRƯỚC* khi cộng dồn hóa đơn =====
+    # QUAN TRỌNG: trước đây hàm này cộng dồn TẤT CẢ hóa đơn/tờ khai NK của công
+    # ty (không lọc theo ngày) rồi mới xác định kỳ ở CUỐI hàm -> tờ khai kỳ nào
+    # cũng vô tình cộng nhầm cả hóa đơn của kỳ khác (kể cả những năm trước) còn
+    # lưu trong CSDL, khiến số liệu luôn SAI/CAO HƠN thực tế. Giờ xác định kỳ
+    # (và khoảng ngày dd/mm/yyyy tương ứng) TRƯỚC, rồi chỉ cộng những hóa đơn có
+    # ngày lập (tdlap) THỰC SỰ nằm trong đúng khoảng đó.
+    import calendar
+
+    def _ngay_hdon(tdlap):
+        """'tdlap' dạng 'YYYY-MM-DD...' (hoặc có hậu tố giờ) -> date, None nếu hỏng."""
+        s = str(tdlap or "").split("T")[0]
+        try:
+            return datetime.datetime.strptime(s, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    ky_auto = ""
+    if not ky or "/" not in ky:
+        for r in rows:
+            if r["loai"] == "sold" and not status_loai_bo(r):
+                d = _ngay_hdon(r["tdlap"])
+                if d:
+                    ky_auto = f"{d.month:02d}/{d.year}"
+                    break
+        ky = ky or ky_auto or "01/2026"
+
+    # ky có thể là 'MM/YYYY' hoặc 'QX/YYYY' (kỳ quý) -> tách an toàn, không crash
+    try:
+        mm, yyyy = _ky_ve_thang(ky)
+    except Exception:
+        ky = ky_auto or "01/2026"
+        mm, yyyy = _ky_ve_thang(ky)
+    last_day = calendar.monthrange(int(yyyy), int(mm))[1]
+
+    # ===== NHẬN BIẾT KỲ QUÝ: nếu khoảng ngày tra cứu (tu/den do FE gửi) trải
+    # đúng 1 quý -> dùng ĐÚNG khoảng ngày đó làm ranh giới lọc (không chỉ để
+    # LABEL); nếu FE không gửi tu/den thì mặc định lọc theo cả THÁNG của ky =====
+    la_quy = False
+    quy_so = 0
+    tu_ngay_kkhai = f"01/{mm}/{yyyy}"
+    den_ngay_kkhai = f"{last_day}/{mm}/{yyyy}"
+    d_tu = datetime.date(int(yyyy), int(mm), 1)
+    d_den = datetime.date(int(yyyy), int(mm), last_day)
+    if tu and den:
+        try:
+            d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
+            d2 = datetime.datetime.strptime(den, "%d/%m/%Y").date()
+            songay = (d2 - d1).days
+            # quý: bắt đầu tháng 1/4/7/10, kéo dài ~3 tháng
+            if d1.month in (1, 4, 7, 10) and d1.day == 1 and 85 <= songay <= 95:
+                la_quy = True
+                quy_so = (d1.month - 1) // 3 + 1
+                yyyy = str(d1.year)
+            tu_ngay_kkhai = d1.strftime("%d/%m/%Y")
+            den_ngay_kkhai = d2.strftime("%d/%m/%Y")
+            d_tu, d_den = d1, d2
+        except Exception:
+            pass
+
+    def trong_ky(tdlap):
+        d = _ngay_hdon(tdlap)
+        return bool(d and d_tu <= d <= d_den)
+
     # ----- Tổng MUA VÀO (PHẢI KHỚP với sheet 'BK Mua vào' trong file Excel) -----
     # Dùng ĐÚNG cách tính của BK Mua vào:
+    #  - CHỈ lấy hóa đơn có ngày lập THUỘC ĐÚNG KỲ đang kê khai
     #  - chỉ loại HĐ thay thế (4) / xóa bỏ (6); KHÔNG loại 'không đủ điều kiện'
     #    (để [23]/[24] khớp bảng kê — vẫn liệt kê đủ HĐ mua vào)
     #  - loại HĐ lẫn của công ty khác (MST người mua khác MST công ty)
     #  - HKD: nếu tgtcthue=0 nhưng tgtttbso>0 -> lấy tgtttbso (doanh số)
-    mst_cty = str(comp["mst"] or "").strip()
     mua_ds = mua_thue = 0
     for r in rows:
         if r["loai"] != "purchase":
+            continue
+        if not trong_ky(r["tdlap"]):
             continue
         try:
             _raw = json.loads(r["raw"]) if r["raw"] else {}
@@ -6606,13 +6674,12 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
         mua_ds += ds
         mua_thue += _to_num(r["tgtthue"]) or 0
 
-    # ----- BÁN RA: tách theo nhóm thuế suất từ chi tiết -----
+    # ----- BÁN RA: tách theo nhóm thuế suất từ chi tiết (CHỈ hóa đơn thuộc kỳ) -----
     # Cần đọc chi tiết để biết hàng nào 8% (NQ142). Dùng detail_json/file nếu có.
     ban_theo_ts = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
                    "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0},
                    "KCT": {"ds": 0, "thue": 0}}
     save_dir = (comp["save_dir"] or "").strip() if comp else ""
-    client = CLIENTS.get(cid)
 
     # Xây index file 1 lần (tránh os.walk lặp lại gây chậm)
     _fidx = {}
@@ -6659,14 +6726,11 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
                 return muc
         return "10"
 
-    ky_auto = ""
     for r in rows:
         if r["loai"] != "sold" or status_loai_bo(r):
             continue
-        if not ky_auto:
-            nd = (r["tdlap"] or "").split("T")[0]
-            if "-" in nd:
-                y, m, _d = nd.split("-"); ky_auto = f"{int(m):02d}/{y}"
+        if not trong_ky(r["tdlap"]):
+            continue
         info = get_summary(r)
         if info and info.get("theo_ts"):
             for k, v in info["theo_ts"].items():
@@ -6680,10 +6744,7 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
             ban_theo_ts[nhom]["ds"] += ds
             ban_theo_ts[nhom]["thue"] += thue
 
-    if not ky or "/" not in ky:
-        ky = ky_auto or "01/2026"
-
-    # ƯU TIÊN dữ liệu đã import từ Excel (nếu có) -> ghi đè số liệu tra cứu
+    # ƯU TIÊN dữ liệu đã import từ Excel (nếu có, đúng kỳ) -> ghi đè số liệu tra cứu
     imp = _get_imported(cid, ky)
     if imp:
         mua_ds = _to_num(imp["mua_ds"]) or 0
@@ -6695,35 +6756,6 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
             "10": {"ds": _to_num(imp["ban_ds_10"]) or 0, "thue": _to_num(imp["ban_thue_10"]) or 0},
             "KCT": {"ds": 0, "thue": 0},
         }
-
-    # ky có thể là 'MM/YYYY' hoặc 'QX/YYYY' (kỳ quý) -> tách an toàn, không crash
-    try:
-        mm, yyyy = _ky_ve_thang(ky)
-    except Exception:
-        ky = ky_auto or "01/2026"
-        mm, yyyy = _ky_ve_thang(ky)
-    import calendar
-    last_day = calendar.monthrange(int(yyyy), int(mm))[1]
-
-    # ===== NHẬN BIẾT KỲ QUÝ: nếu khoảng ngày tra cứu trải đúng 1 quý =====
-    la_quy = False
-    quy_so = 0
-    tu_ngay_kkhai = f"01/{mm}/{yyyy}"
-    den_ngay_kkhai = f"{last_day}/{mm}/{yyyy}"
-    if tu and den:
-        try:
-            d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
-            d2 = datetime.datetime.strptime(den, "%d/%m/%Y").date()
-            songay = (d2 - d1).days
-            # quý: bắt đầu tháng 1/4/7/10, kéo dài ~3 tháng
-            if d1.month in (1, 4, 7, 10) and d1.day == 1 and 85 <= songay <= 95:
-                la_quy = True
-                quy_so = (d1.month - 1) // 3 + 1
-                yyyy = str(d1.year)
-                tu_ngay_kkhai = d1.strftime("%d/%m/%Y")
-                den_ngay_kkhai = d2.strftime("%d/%m/%Y")
-        except Exception:
-            pass
 
     # ===== SỐ DƯ ĐẦU KỲ [22]: lấy từ tạm tính VAT đã lưu (vat_balance) =====
     ct22_val = 0
@@ -6744,14 +6776,19 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
         pass
 
     # ----- Tính các chỉ tiêu tờ khai -----
-    # ===== TỜ KHAI NHẬP KHẨU: tổng trị giá tính thuế GTGT + thuế GTGT hàng NK =====
+    # ===== TỜ KHAI NHẬP KHẨU: tổng trị giá tính thuế GTGT + thuế GTGT hàng NK
+    # CỦA ĐÚNG KỲ (theo ngày đăng ký tờ khai, ngay_dk) — trước đây cộng TẤT CẢ
+    # tờ khai nhập khẩu từng nhập cho công ty, không lọc theo kỳ, nên tờ khai
+    # GTGT kỳ nào cũng bị cộng nhầm cả tờ khai NK của kỳ/năm khác. =====
     tk_ds_nk = tk_thue_nk = 0
     try:
         conn_tk = db()
         tk_rows = conn_tk.execute(
-            "SELECT items_json FROM tokhai_nhap WHERE company_id=?", (cid,)).fetchall()
+            "SELECT ngay_dk, items_json FROM tokhai_nhap WHERE company_id=?", (cid,)).fetchall()
         conn_tk.close()
         for tkr in tk_rows:
+            if not trong_ky(tkr["ngay_dk"]):
+                continue
             try:
                 its = json.loads(tkr["items_json"]) if tkr["items_json"] else []
             except Exception:
