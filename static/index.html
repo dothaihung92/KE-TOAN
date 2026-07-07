@@ -2372,12 +2372,11 @@ function veGridNhapLieu(){
   }
   html+='</thead><tbody>';
   // Trong lưới Danh mục (hh/nvl/tscd/ccdc), các dòng MỚI (chưa có trong danh mục
-  // đã lưu trước đó) luôn được server nối vào CUỐI danh sách -> N dòng có idx
-  // lớn nhất chính là dòng mới. Dùng idx GỐC (không phụ thuộc lọc/sắp xếp hiển
-  // thị) để xác định đúng ngay cả khi đang lọc.
-  const nlMoiTuIdx=nlRows.length-nlSoMoi;
+  // đã lưu trước đó) được server đẩy lên ĐẦU danh sách -> N dòng có idx NHỎ nhất
+  // (0..nlSoMoi-1) chính là dòng mới. Dùng idx GỐC (không phụ thuộc lọc/sắp xếp
+  // hiển thị) để xác định đúng ngay cả khi đang lọc.
   rowsHienThi.forEach(({row,idx})=>{
-    const laMoi=!!(nlDMMode&&nlSoMoi>0&&idx>=nlMoiTuIdx);
+    const laMoi=!!(nlDMMode&&nlSoMoi>0&&idx<nlSoMoi);
     html+=`<tr><td onclick="nlChonDong(${idx})" style="position:sticky;left:0;z-index:1;background:${laMoi?'#cdf0da':'#f4f6f8'};padding:2px 6px;border:1px solid #eee;color:#999;text-align:center;cursor:pointer" title="${laMoi?'🆕 Mặt hàng MỚI — ':''}Bấm chọn cả dòng">${idx+1}</td>`;
     row.forEach((cell,ci)=>{
       const tien=nlLaCotTien(ci);

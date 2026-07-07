@@ -4466,7 +4466,8 @@ def _gen_danh_muc_ts(cid, loai, header, rows):
         #  ĐT phân bổ, Ngày ghi tăng, TK Chi phí]
         new_rows.append([ma, ten, dvt, sl, dgia, tt, sohd, ngay,
                          hsd_md, dtpb_md, ngay, tkcp_md])
-    return saved_rows + new_rows, len(new_rows)
+    # dòng MỚI đẩy lên TRÊN, dòng cũ (đã lưu) xếp phía DƯỚI
+    return new_rows + saved_rows, len(new_rows)
 
 def _gen_danh_muc(cid, loai, header, rows):
     """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL ('nvl', Nợ 152).
@@ -4523,7 +4524,8 @@ def _gen_danh_muc(cid, loai, header, rows):
         seen.add(rk(newrow))
         new_rows.append(newrow)
 
-    all_rows = saved_rows + new_rows
+    # dòng MỚI đẩy lên TRÊN, dòng cũ (đã lưu) xếp phía DƯỚI
+    all_rows = new_rows + saved_rows
     return all_rows, len(new_rows)
 
 
@@ -4691,7 +4693,8 @@ def _nhap_danh_muc(cid, loai, wb):
         seen.add(key)
         new_rows.append(newrow)
 
-    all_rows = saved_rows + new_rows
+    # dòng MỚI (import lần này) đẩy lên TRÊN, dòng cũ (đã lưu) xếp phía DƯỚI
+    all_rows = new_rows + saved_rows
     return all_rows, {"so_dong": len(new_rows), "so_dien_ma": so_dien_ma,
                        "so_trung_ten": so_trung_ten, "so_moi": so_moi}
 
