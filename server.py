@@ -646,6 +646,13 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password TEXT")
     if "dvc_password2" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password2 TEXT")
+    # Migration: tách riêng phần HÀNG NHẬP KHẨU (tờ khai NK) trong dữ liệu import
+    # để điền đúng chỉ tiêu [23a]/[24a] trên tờ khai 01/GTGT
+    icols = [r[1] for r in conn.execute("PRAGMA table_info(imported_data)").fetchall()]
+    if "mua_ds_nk" not in icols:
+        conn.execute("ALTER TABLE imported_data ADD COLUMN mua_ds_nk REAL DEFAULT 0")
+    if "mua_thue_nk" not in icols:
+        conn.execute("ALTER TABLE imported_data ADD COLUMN mua_thue_nk REAL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -6262,6 +6269,7 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
         return None
 
     mua_ds = mua_thue = 0
+    mua_ds_nk = mua_thue_nk = 0     # TRONG ĐÓ: phần hàng NHẬP KHẨU (tờ khai NK) -> [23a]/[24a]
     mua_rows = 0
     mua_sheet_found = "BK Mua vào" in wb.sheetnames
     ban_sheet_found = "BK Bán ra" in wb.sheetnames
@@ -6285,7 +6293,7 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
     # làm với BÁN RA bên dưới, để không bỏ sót khi file có thêm dòng tiêu đề/khoảng trắng.
     if mua_sheet_found:
         ws = wb["BK Mua vào"]
-        c_ds = c_thue = None
+        c_ds = c_thue = c_kh = c_tt = None
         hdr_row = 1
         for r in range(1, min(ws.max_row, 15) + 1):
             for c in range(1, ws.max_column + 1):
@@ -6294,22 +6302,41 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                     c_ds = c; hdr_row = r
                 elif v == "thuế gtgt":
                     c_thue = c; hdr_row = max(hdr_row, r)
+                elif v in ("ký hiệu", "ki hieu"):
+                    c_kh = c
+                elif v in ("trạng thái", "trang thai"):
+                    c_tt = c
             if c_ds:
                 break
         for r in range(hdr_row + 1, ws.max_row + 1):
             full = " ".join(str(ws.cell(r, c).value or "") for c in range(1, ws.max_column + 1))
             if not full.strip():
                 continue
-            if "tổng" in full.lower():   # bỏ dòng TỔNG CỘNG (ở bất kỳ cột nào)
+            kh = _sach(ws.cell(r, c_kh).value) if c_kh else ""
+            low_full = full.lower()
+            # Bỏ dòng TỔNG CỘNG / Tổng nhóm — nhận biết bằng Ký hiệu ĐỂ TRỐNG
+            # (dòng dữ liệu luôn có Ký hiệu). TUYỆT ĐỐI không lọc theo chữ 'tổng'
+            # chung chung như trước, vì sẽ bỏ nhầm hóa đơn của NCC có TÊN chứa
+            # 'TỔNG' (vd 'TỔNG CÔNG TY HÀNG KHÔNG VIỆT NAM', 'TỔNG CÔNG TY CP
+            # BƯU CHÍNH VIETTEL') -> thiếu doanh số/thuế mua vào.
+            if (c_kh and not kh) or "tổng cộng" in low_full or "tổng nhóm" in low_full:
                 continue
             got = False
+            row_ds = row_thue = 0
             if c_ds:
-                v = num(ws.cell(r, c_ds).value)
-                mua_ds += v
+                row_ds = num(ws.cell(r, c_ds).value)
+                mua_ds += row_ds
                 got = True
             if c_thue:
-                mua_thue += num(ws.cell(r, c_thue).value)
+                row_thue = num(ws.cell(r, c_thue).value)
+                mua_thue += row_thue
                 got = True
+            # Nhận biết dòng HÀNG NHẬP KHẨU (tờ khai NK): Ký hiệu = 'TKNK' hoặc
+            # Trạng thái ghi 'Tờ khai nhập khẩu' -> tách riêng cho [23a]/[24a].
+            tt_stt = _sach(ws.cell(r, c_tt).value) if c_tt else ""
+            if got and ("tknk" in kh or "nhập khẩu" in tt_stt or "nhap khau" in tt_stt):
+                mua_ds_nk += row_ds
+                mua_thue_nk += row_thue
             if got:
                 mua_rows += 1
 
@@ -6345,8 +6372,10 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                 elif "10%" in head3: cur_nhom = "10"
                 elif "không chịu" in head3.lower(): cur_nhom = None
                 continue
-            # BỎ mọi dòng tổng (Tổng nhóm / TỔNG CỘNG - ở bất kỳ cột nào)
-            if "tổng" in low:
+            # BỎ dòng tổng (Tổng nhóm / TỔNG CỘNG) — dùng CỤM TỪ cụ thể, KHÔNG
+            # lọc theo chữ 'tổng' chung chung để tránh bỏ nhầm hóa đơn của khách
+            # hàng có TÊN chứa 'TỔNG' (vd 'TỔNG CÔNG TY ...').
+            if "tổng cộng" in low or "tổng nhóm" in low:
                 continue
             ds = num(ws.cell(r, c_ds).value) if c_ds else 0
             th = num(ws.cell(r, c_thue).value) if c_thue else 0
@@ -6360,16 +6389,19 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
     conn = db()
     conn.execute("""
         INSERT INTO imported_data (company_id, ky, mua_ds, mua_thue,
+            mua_ds_nk, mua_thue_nk,
             ban_ds_0, ban_ds_5, ban_thue_5, ban_ds_8, ban_thue_8,
             ban_ds_10, ban_thue_10, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(company_id, ky) DO UPDATE SET
             mua_ds=excluded.mua_ds, mua_thue=excluded.mua_thue,
+            mua_ds_nk=excluded.mua_ds_nk, mua_thue_nk=excluded.mua_thue_nk,
             ban_ds_0=excluded.ban_ds_0, ban_ds_5=excluded.ban_ds_5,
             ban_thue_5=excluded.ban_thue_5, ban_ds_8=excluded.ban_ds_8,
             ban_thue_8=excluded.ban_thue_8, ban_ds_10=excluded.ban_ds_10,
             ban_thue_10=excluded.ban_thue_10, updated_at=excluded.updated_at
-    """, (cid, ky, round(mua_ds), round(mua_thue), round(ban["0"]["ds"]),
+    """, (cid, ky, round(mua_ds), round(mua_thue),
+          round(mua_ds_nk), round(mua_thue_nk), round(ban["0"]["ds"]),
           round(ban["5"]["ds"]), round(ban["5"]["thue"]),
           round(ban["8"]["ds"]), round(ban["8"]["thue"]),
           round(ban["10"]["ds"]), round(ban["10"]["thue"]),
@@ -6379,6 +6411,7 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
     return {
         "ok": True, "ky": ky,
         "mua_ds": round(mua_ds), "mua_thue": round(mua_thue), "mua_rows": mua_rows,
+        "mua_ds_nk": round(mua_ds_nk), "mua_thue_nk": round(mua_thue_nk),
         "mua_sheet_found": mua_sheet_found,
         "ban_thue": round(sum(b["thue"] for b in ban.values())),
         "ban_8_ds": round(ban["8"]["ds"]), "ban_rows": ban_rows,
@@ -6746,9 +6779,17 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
 
     # ƯU TIÊN dữ liệu đã import từ Excel (nếu có, đúng kỳ) -> ghi đè số liệu tra cứu
     imp = _get_imported(cid, ky)
+    imp_nk_ds = imp_nk_thue = 0     # phần hàng NHẬP KHẨU đã nằm SẴN trong mua_ds/mua_thue của file import
     if imp:
         mua_ds = _to_num(imp["mua_ds"]) or 0
         mua_thue = _to_num(imp["mua_thue"]) or 0
+        # phần hàng nhập khẩu (tờ khai NK) đã được cộng SẴN trong tổng mua vào
+        # của 'BK Mua vào' -> chỉ tách ra để điền [23a]/[24a], KHÔNG cộng thêm lần nữa.
+        try:
+            imp_nk_ds = _to_num(imp["mua_ds_nk"]) or 0
+            imp_nk_thue = _to_num(imp["mua_thue_nk"]) or 0
+        except Exception:
+            imp_nk_ds = imp_nk_thue = 0
         ban_theo_ts = {
             "0": {"ds": _to_num(imp["ban_ds_0"]) or 0, "thue": 0},
             "5": {"ds": _to_num(imp["ban_ds_5"]) or 0, "thue": _to_num(imp["ban_thue_5"]) or 0},
@@ -6849,11 +6890,23 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
 
     # Các chỉ tiêu (giữ nguyên những thẻ khác như ct22, ct36... = giá trị template
     # hoặc tính lại). Ở đây ta điền số liệu kỳ này:
-    # ct23/24 = mua vào (gồm cả hàng nhập khẩu); ct23a/24a = TRONG ĐÓ hàng nhập khẩu
-    ct23a = tk_ds_nk          # giá trị HHDV nhập khẩu (chưa thuế GTGT)
-    ct24a = tk_thue_nk        # thuế GTGT hàng nhập khẩu
-    ct23 = round(mua_ds) + tk_ds_nk      # tổng mua vào gồm cả nhập khẩu
-    ct24 = round(mua_thue) + tk_thue_nk
+    # ct23/24 = TỔNG mua vào (gồm cả hàng nhập khẩu); ct23a/24a = TRONG ĐÓ hàng nhập khẩu.
+    if imp and imp_nk_ds:
+        # File import Excel: sheet 'BK Mua vào' đã bao gồm SẴN các dòng tờ khai
+        # nhập khẩu (Ký hiệu 'TKNK'/Trạng thái 'Tờ khai nhập khẩu') trong TỔNG
+        # mua vào -> [23]/[24] giữ nguyên tổng, [23a]/[24a] chỉ TÁCH riêng phần
+        # nhập khẩu ra để khai đúng chỉ tiêu, TUYỆT ĐỐI không cộng thêm lần nữa.
+        ct23 = round(mua_ds)
+        ct24 = round(mua_thue)
+        ct23a = round(imp_nk_ds)      # giá trị HHDV nhập khẩu (chưa thuế GTGT)
+        ct24a = round(imp_nk_thue)    # thuế GTGT hàng nhập khẩu
+    else:
+        # Tra cứu / file import không có dòng NK: tờ khai NK (nếu có) được nhập
+        # RIÊNG (bảng tokhai_nhap) và CHƯA nằm trong mua_ds -> cộng thêm vào tổng.
+        ct23a = tk_ds_nk
+        ct24a = tk_thue_nk
+        ct23 = round(mua_ds) + tk_ds_nk
+        ct24 = round(mua_thue) + tk_thue_nk
     ct25 = ct24
     ct30 = round(ds_5); ct31 = round(thue_5)
     ds_10_tk = ban_theo_ts["10"]["ds"] + ds_8
