@@ -821,17 +821,95 @@ def login(cid: int, body: dict = Body(...)):
 _DDDDOCR_INSTANCE = None
 _DDDDOCR_ERR = ""
 
+def _thu_nap_ddddocr():
+    """Thử khởi tạo ddddocr. Trả (instance|None, chuoi_loi)."""
+    try:
+        import ddddocr
+        return ddddocr.DdddOcr(show_ad=False), ""
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+def _loi_thieu_vcredist(err):
+    """Nhận biết lỗi ddddocr do THIẾU Visual C++ Redistributable (onnxruntime
+    không nạp được DLL) — để tự cài VC++ rồi thử lại."""
+    low = str(err or "").lower()
+    return ("dll load failed" in low or "onnxruntime" in low
+            or "vcruntime" in low or "pybind11" in low
+            or "_pybind11_state" in low)
+
+def _cai_vcredist():
+    """Tải & cài 'Microsoft Visual C++ Redistributable (x64)' (im lặng, có xin
+    quyền Admin qua UAC). CHỈ chạy trên Windows. Trả True nếu đã CHẠY được
+    installer (không chắc người dùng có bấm Yes ở UAC hay không)."""
+    import sys as _sys
+    if _sys.platform != "win32":
+        return False
+    import os as _os, tempfile as _tmp, subprocess as _sp
+    import urllib.request as _url, ssl as _ssl
+    dest = _os.path.join(_tmp.gettempdir(), "vc_redist.x64.exe")
+    try:
+        ctx = _ssl.create_default_context()
+        req = _url.Request("https://aka.ms/vs/17/release/vc_redist.x64.exe",
+                           headers={"User-Agent": "Mozilla/5.0"})
+        with _url.urlopen(req, timeout=120, context=ctx) as r, open(dest, "wb") as f:
+            f.write(r.read())
+    except Exception:
+        return False
+    try:
+        # Dùng PowerShell Start-Process -Verb RunAs de HIEN UAC (xin quyen Admin)
+        # va -Wait de doi cai xong. subprocess.run thuong khong tu bat UAC duoc.
+        ps = ("Start-Process -FilePath '%s' -ArgumentList "
+              "'/install','/quiet','/norestart' -Verb RunAs -Wait") % dest
+        _sp.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-Command", ps], timeout=900)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            _os.remove(dest)
+        except Exception:
+            pass
+
 def _get_ddddocr():
     global _DDDDOCR_INSTANCE, _DDDDOCR_ERR
     if _DDDDOCR_INSTANCE is None:
-        try:
-            import ddddocr
-            _DDDDOCR_INSTANCE = ddddocr.DdddOcr(show_ad=False)
-            _DDDDOCR_ERR = ""
-        except Exception as e:
-            _DDDDOCR_INSTANCE = False
-            _DDDDOCR_ERR = f"{type(e).__name__}: {e}"
+        inst, err = _thu_nap_ddddocr()
+        _DDDDOCR_INSTANCE = inst if inst else False
+        _DDDDOCR_ERR = "" if inst else err
     return _DDDDOCR_INSTANCE or None
+
+def _sua_ddddocr_tu_dong():
+    """Tự KHẮC PHỤC khi ddddocr không nạp được do thiếu VC++ Redistributable:
+    tải & cài VC++ rồi thử nạp lại NGAY trong tiến trình hiện tại. Trả dict
+    trạng thái để giao diện hiển thị."""
+    global _DDDDOCR_INSTANCE, _DDDDOCR_ERR
+    import sys as _sys
+    # đã chạy được rồi thì thôi
+    if _get_ddddocr() is not None:
+        return {"ok": True, "loaded": True, "message": "Bộ giải mã captcha đã sẵn sàng."}
+    if not _loi_thieu_vcredist(_DDDDOCR_ERR):
+        return {"ok": False, "loaded": False,
+                "message": "Lỗi ddddocr không phải do thiếu VC++: " + (_DDDDOCR_ERR or "không rõ")}
+    if _sys.platform != "win32":
+        return {"ok": False, "loaded": False,
+                "message": "Chỉ tự cài được trên Windows. Hãy cài onnxruntime/VC++ thủ công."}
+    da_chay = _cai_vcredist()
+    if not da_chay:
+        return {"ok": False, "loaded": False,
+                "message": "Không tải/cài được VC++ Redistributable. Cài tay tại "
+                           "https://aka.ms/vs/17/release/vc_redist.x64.exe rồi mở lại phần mềm."}
+    # xoá cache import cũ rồi thử nạp lại ngay
+    for m in list(_sys.modules):
+        if m == "ddddocr" or m.startswith("onnxruntime"):
+            _sys.modules.pop(m, None)
+    _DDDDOCR_INSTANCE = None
+    if _get_ddddocr() is not None:
+        return {"ok": True, "loaded": True,
+                "message": "Đã cài VC++ Redistributable — bộ giải mã captcha đã chạy được!"}
+    return {"ok": True, "loaded": False, "need_restart": True,
+            "message": "Đã cài VC++ Redistributable. Vui lòng ĐÓNG và MỞ LẠI phần mềm "
+                       "một lần để nhận thư viện mới, rồi tự đăng nhập lại."}
 
 def _svg_to_png(svg_text: str) -> bytes:
     """Rasterize SVG → PNG bytes (pure-Python qua svglib + reportlab). '' nếu thất bại."""
@@ -960,6 +1038,14 @@ def _ocr_png(png_bytes: bytes) -> str:
         except Exception:
             pass
     return ""
+
+
+@app.post("/api/fix-ocr")
+def fix_ocr():
+    """Tự khắc phục lỗi bộ giải mã captcha (ddddocr) không nạp được do thiếu
+    'Microsoft Visual C++ Redistributable': tải & cài VC++ (im lặng, có UAC)
+    rồi thử nạp lại ngay. Giao diện gọi endpoint này khi gặp lỗi DLL onnxruntime."""
+    return _sua_ddddocr_tu_dong()
 
 
 @app.post("/api/solve-login/{cid}")

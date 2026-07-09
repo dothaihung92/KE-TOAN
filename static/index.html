@@ -999,7 +999,7 @@ async function doAutoLogin(){
   const btn2=document.getElementById('loginBtn');
   btn2.disabled=true;
   const MAX=6;
-  let done=false, lastErr='';
+  let done=false, lastErr='', daThuFixOcr=false;
   for(let i=1;i<=MAX && !done;i++){
     btn.innerHTML=`<span class="spin"></span> Lần ${i}/${MAX}...`;btn.disabled=true;
     try{
@@ -1020,9 +1020,19 @@ async function doAutoLogin(){
       done=true;
     }catch(e){
       lastErr=e.message||'';
-      // Nếu là lỗi ddddocr KHÔNG nạp được (thiếu VC++ Redistributable...) thì
-      // thử lại cũng vô ích -> dừng ngay và báo rõ cho người dùng.
-      if(/ddddocr|Visual C\+\+/i.test(lastErr))break;
+      // Lỗi ddddocr KHÔNG nạp được (thiếu VC++ Redistributable) -> TỰ CÀI ngay
+      // 1 lần rồi thử lại, thay vì bắt người dùng tự đi cài.
+      if(/ddddocr|Visual C\+\+|onnxruntime|DLL load/i.test(lastErr)){
+        if(daThuFixOcr)break;               // đã thử cài mà vẫn lỗi -> dừng
+        daThuFixOcr=true;
+        btn.innerHTML=`<span class="spin"></span> Đang tự cài bộ giải captcha...`;
+        toast('Đang tự tải & cài bộ giải mã captcha (VC++). Nếu Windows hỏi, hãy bấm "Yes". Vui lòng chờ...','');
+        try{
+          const fx=await api('/api/fix-ocr',{method:'POST'});
+          if(fx.loaded){toast('✓ '+(fx.message||'Đã cài xong, đang đăng nhập lại...'),'ok');i--;continue;}
+          else{lastErr=fx.message||lastErr;break;}
+        }catch(e2){lastErr=e2.message||lastErr;break;}
+      }
     }
   }
   if(!done){toast('Tự đăng nhập thất bại: '+lastErr,'err');loadCaptcha();}
