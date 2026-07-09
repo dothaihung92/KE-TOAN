@@ -89,18 +89,23 @@ if exist "update.py" (
     echo.
 )
 
-REM ====== Tu dong cai lai neu requirements.txt thay doi ======
-"%PYEXE%" -c "import os,sys; sys.exit(0 if os.path.exists('.installed') and os.path.getmtime('.installed')>=os.path.getmtime('requirements.txt') else 1)" >nul 2>&1
-if errorlevel 1 (
-    if exist ".installed" (
-        echo [*] requirements.txt da thay doi - dang cap nhat thu vien...
-        del .installed >nul 2>&1
-    )
+REM ====== Kiem tra thu vien da cai DAY DU chua ======
+REM Kiem tra bang cach THU TIM tung module (find_spec) - tin cay hon file
+REM .installed vi .installed co the bi COPY theo khi mang thu muc sang may khac,
+REM khien may moi tuong da cai roi nhung thuc te CHUA co thu vien -> loi
+REM "ModuleNotFoundError: No module named 'requests'".
+set NEEDINSTALL=
+"%PYEXE%" -c "import importlib.util as u,sys; m=['requests','fastapi','uvicorn','openpyxl','multipart','ddddocr','PIL','svglib','reportlab','curl_cffi','selenium']; sys.exit(0 if all(u.find_spec(x) for x in m) else 1)" >nul 2>&1
+if errorlevel 1 set NEEDINSTALL=1
+
+REM requirements.txt moi hon .installed -> co the co thu vien moi -> cai lai
+if not defined NEEDINSTALL (
+    "%PYEXE%" -c "import os,sys; sys.exit(0 if os.path.exists('.installed') and os.path.getmtime('.installed')>=os.path.getmtime('requirements.txt') else 1)" >nul 2>&1
+    if errorlevel 1 set NEEDINSTALL=1
 )
 
-REM ====== Cai thu vien lan dau ======
-if not exist ".installed" (
-    echo [*] Lan dau chay - dang cai thu vien can thiet...
+if defined NEEDINSTALL (
+    echo [*] Dang cai/cap nhat thu vien can thiet...
     echo     (Chi cham lan nay, cac lan sau se mo nhanh^)
     echo.
     "%PYEXE%" -m pip install --upgrade pip >nul 2>&1
