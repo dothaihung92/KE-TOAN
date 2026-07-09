@@ -1,0 +1,9 @@
+# File .bat cua Windows PHAI giu nguyen ket thuc dong CRLF va byte goc.
+# Danh dau -text (nhu binary) de git KHONG chuyen doi LF/CRLF khi commit/checkout,
+# va de raw.githubusercontent (update.py tai ve) tra ve dung byte da commit.
+# Neu de git tu chuyen thanh LF, chay tren cmd.exe se bi nuot ky tu dau dong
+# (color->olor, echo->cho, set->et, if->f...) khien start.bat loi.
+*.bat -text
+
+# Script Unix giu LF
+*.sh text eol=lf

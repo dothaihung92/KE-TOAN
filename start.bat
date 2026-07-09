@@ -125,7 +125,7 @@ if defined NEEDINSTALL (
 REM ====== Kiem tra bo giai captcha (ddddocr) co CHAY duoc khong ======
 REM ddddocr dung onnxruntime -> can 'Microsoft Visual C++ Redistributable'.
 REM May moi thuong THIEU goi nay -> ddddocr khong nap duoc -> tu dang nhap
-REM (OCR) that bai voi mã rong. Neu phat hien loi -> tu tai & cai VC++ Redist.
+REM (OCR) that bai voi ma rong. Neu phat hien loi -> tu tai & cai VC++ Redist.
 REM Chi kiem tra khi VUA cai thu vien (may moi) - tranh cham moi lan khoi dong.
 if not defined NEEDINSTALL goto :OCROK
 "%PYEXE%" -c "import ddddocr; ddddocr.DdddOcr(show_ad=False)" >nul 2>&1
