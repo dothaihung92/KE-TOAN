@@ -122,6 +122,38 @@ if defined NEEDINSTALL (
     echo.
 )
 
+REM ====== Kiem tra bo giai captcha (ddddocr) co CHAY duoc khong ======
+REM ddddocr dung onnxruntime -> can 'Microsoft Visual C++ Redistributable'.
+REM May moi thuong THIEU goi nay -> ddddocr khong nap duoc -> tu dang nhap
+REM (OCR) that bai voi mã rong. Neu phat hien loi -> tu tai & cai VC++ Redist.
+REM Chi kiem tra khi VUA cai thu vien (may moi) - tranh cham moi lan khoi dong.
+if not defined NEEDINSTALL goto :OCROK
+"%PYEXE%" -c "import ddddocr; ddddocr.DdddOcr(show_ad=False)" >nul 2>&1
+if not errorlevel 1 goto :OCROK
+echo [!] Bo giai captcha chua chay duoc - co the may thieu Visual C++ Redistributable.
+echo [*] Dang tai va cai 'Microsoft Visual C++ Redistributable (x64)' ...
+set "VCINST=%TEMP%\vc_redist.x64.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try{ Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile '%VCINST%' }catch{ exit 1 }"
+if exist "%VCINST%" (
+    "%VCINST%" /install /quiet /norestart
+    del "%VCINST%" >nul 2>&1
+    REM do lai
+    "%PYEXE%" -c "import ddddocr; ddddocr.DdddOcr(show_ad=False)" >nul 2>&1
+    if not errorlevel 1 (
+        echo [OK] Da cai VC++ Redistributable - bo giai captcha da chay duoc!
+    ) else (
+        echo [!] Van chua chay duoc. Vui long cai tay 'Microsoft Visual C++ Redistributable x64'
+        echo     tai: https://aka.ms/vs/17/release/vc_redist.x64.exe  roi mo lai phan mem.
+        echo     ^(Van co the dung nut "Lay ma" de nhap captcha bang TAY.^)
+    )
+) else (
+    echo [!] Khong tai duoc VC++ Redistributable ^(kiem tra mang^). Ban co the:
+    echo     - Cai tay tai: https://aka.ms/vs/17/release/vc_redist.x64.exe
+    echo     - Hoac dung nut "Lay ma" de nhap captcha bang TAY.
+)
+echo.
+:OCROK
+
 echo [*] Dang khoi dong phan mem...
 echo [*] Trinh duyet se tu mo tai: http://127.0.0.1:8686
 echo.

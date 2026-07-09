@@ -983,7 +983,20 @@ def solve_login(cid: int, body: dict = Body(...)):
         png = b""
     guess = _ocr_png(png)
     if not guess:
-        raise HTTPException(422, "OCR không đọc được mã (rỗng)")
+        # Phân biệt 2 nguyên nhân để báo cho đúng:
+        #  - ddddocr KHÔNG NẠP ĐƯỢC (thường do máy mới thiếu Microsoft Visual
+        #    C++ Redistributable mà onnxruntime cần) -> báo rõ để cài, đừng để
+        #    người dùng loay hoay tưởng captcha mờ.
+        #  - ddddocr nạp OK nhưng đọc không ra -> thử captcha khác (lỗi tạm).
+        if _get_ddddocr() is None:
+            raise HTTPException(
+                500,
+                "Chưa dùng được bộ giải mã captcha (ddddocr) trên máy này"
+                + (f" — {_DDDDOCR_ERR}" if _DDDDOCR_ERR else "")
+                + ". Máy mới thường thiếu 'Microsoft Visual C++ Redistributable "
+                "(x64)' — cài đặt gói này rồi khởi động lại phần mềm; hoặc mở "
+                f"http://127.0.0.1:8686/api/captcha-debug/{cid} để xem chi tiết lỗi.")
+        raise HTTPException(422, "OCR không đọc được mã (ảnh captcha mờ) — thử lại mã khác.")
     client = get_client(cid)
     try:
         token = client.login(

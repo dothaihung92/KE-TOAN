@@ -1018,9 +1018,14 @@ async function doAutoLogin(){
       await loadCompanies();
       selectCompany(current);
       done=true;
-    }catch(e){lastErr=e.message;}
+    }catch(e){
+      lastErr=e.message||'';
+      // Nếu là lỗi ddddocr KHÔNG nạp được (thiếu VC++ Redistributable...) thì
+      // thử lại cũng vô ích -> dừng ngay và báo rõ cho người dùng.
+      if(/ddddocr|Visual C\+\+/i.test(lastErr))break;
+    }
   }
-  if(!done){toast('Tự đăng nhập thất bại sau '+MAX+' lần. '+lastErr,'err');loadCaptcha();}
+  if(!done){toast('Tự đăng nhập thất bại: '+lastErr,'err');loadCaptcha();}
   btn.innerHTML='🤖 Tự đăng nhập';btn.disabled=false;btn2.disabled=false;
 }
 
