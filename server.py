@@ -6706,6 +6706,124 @@ def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: i
         conn.close()
 
 
+# ============================================================
+#  GHI DANH MỤC HÀNG HÓA THẲNG VÀO MISA (bảng InventoryItem)
+#  ⚠ Ghi vào DB MISA — chỉ chạy trên dữ liệu THỬ/đã sao lưu. Có preview trước,
+#  bỏ qua mã đã tồn tại, chạy trong transaction (lỗi -> rollback, không ghi dở).
+# ============================================================
+def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True):
+    """Thêm các mã hàng (Danh mục Hàng hóa của phần mềm) vào bảng InventoryItem
+    của MISA. Chỉ THÊM mã MỚI (bỏ qua mã đã có). Tự tạo đơn vị tính (Unit) nếu
+    chưa có. preview=True: chỉ xem trước, KHÔNG ghi (rollback)."""
+    import uuid as _uuid
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        # mã hàng đã tồn tại (để bỏ qua, không ghi đè)
+        existing = set()
+        for r in cur.execute("SELECT InventoryItemCode FROM InventoryItem").fetchall():
+            if r[0]:
+                existing.add(str(r[0]).strip().lower())
+        # đơn vị tính hiện có {tên_lower: UnitID}
+        units = {}
+        for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+            if uname:
+                units[str(uname).strip().lower()] = uid
+        # InventoryItemType MISA dùng cho HÀNG HÓA (dò từ dữ liệu thật, tránh đoán)
+        item_type = 1
+        try:
+            row = cur.execute(
+                "SELECT TOP 1 InventoryItemType FROM InventoryItem "
+                "WHERE ISNULL(IsSystem,0)=0 AND InventoryAccount LIKE '156%' "
+                "AND InventoryItemType IS NOT NULL "
+                "GROUP BY InventoryItemType ORDER BY COUNT(*) DESC").fetchone()
+            if row and row[0] is not None:
+                item_type = int(row[0])
+        except Exception:
+            pass
+
+        cols = ["InventoryItemID", "InventoryItemCode", "InventoryItemName", "InventoryItemType",
+                "UnitID", "InventoryAccount", "COGSAccount", "SaleAccount", "TaxRate",
+                "MinimumStock", "PurchaseDiscountRate", "UnitPrice", "SalePrice1", "SalePrice2",
+                "SalePrice3", "FixedSalePrice", "FixedUnitPrice", "IsUnitPriceAfterTax",
+                "IsSystem", "Inactive", "IsPromotion", "VAT43Type", "CreatedDate"]
+        sql_ins = ("INSERT INTO InventoryItem ([%s]) VALUES (%s)"
+                   % ("],[".join(cols), ",".join(["?"] * len(cols))))
+        now = datetime.datetime.now()
+
+        ket = []
+        them = trung = dv_moi = 0
+        seen = set()
+        for r in dm_rows:
+            ma = str((r[0] if len(r) > 0 else "") or "").strip()
+            ten = str((r[1] if len(r) > 1 else "") or "").strip()
+            dvt = str((r[2] if len(r) > 2 else "") or "").strip()
+            ts = r[3] if len(r) > 3 else None
+            if not ma or not ten:
+                continue
+            k = ma.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            if k in existing:
+                trung += 1
+                ket.append({"ma": ma, "ten": ten, "trang_thai": "đã có (bỏ qua)"})
+                continue
+            # đơn vị tính -> UnitID (tạo mới nếu chưa có)
+            unit_id = None
+            if dvt:
+                uk = dvt.lower()
+                if uk in units:
+                    unit_id = units[uk]
+                else:
+                    unit_id = str(_uuid.uuid4())
+                    if not preview:
+                        cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                    "VALUES (?,?,?,0)", unit_id, dvt[:20], None)
+                    units[uk] = unit_id
+                    dv_moi += 1
+            tax = ts if isinstance(ts, (int, float)) else None
+            if not preview:
+                cur.execute(sql_ins,
+                    str(_uuid.uuid4()), ma[:50], ten[:500], item_type,
+                    unit_id, "1561", "632", "5111", tax,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "Chưa xác định", now)
+            them += 1
+            ket.append({"ma": ma, "ten": ten, "dvt": dvt,
+                        "trang_thai": "sẽ thêm" if preview else "đã thêm"})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
+                "so_don_vi_moi": dv_moi, "item_type": item_type, "danh_sach": ket[:1000]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/import-hang-hoa/{cid}")
+async def misa_sql_import_hang_hoa(cid: int, request: Request):
+    """Import Danh mục Hàng hóa vào MISA (bảng InventoryItem). body: {rows,
+    preview, database?}. preview=true -> chỉ xem trước, không ghi."""
+    body = await request.json()
+    rows = body.get("rows") or []
+    preview = bool(body.get("preview", True))
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    if not rows:
+        raise HTTPException(400, "Danh mục trống — không có mã hàng để import.")
+    return _misa_ghi_hang_hoa(cid, database, rows, preview=preview)
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
