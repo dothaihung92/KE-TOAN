@@ -486,6 +486,7 @@
             <button class="btn" style="background:#2e5c8a" onclick="misaXuatTronGoi()">📦 Xuất trọn gói cho MISA</button>
             <button class="btn ghost sm" onclick="misaMoThuMuc()">📂 Mở thư mục file</button>
             <button class="btn ghost sm" onclick="misaHuongDan()">📖 Hướng dẫn import</button>
+            <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối CSDL MISA (thử nghiệm)</button>
           </div>
         </div>
       </div>
@@ -507,6 +508,45 @@
     <div id="misaModalBody" style="overflow:auto;flex:1;font-size:14px;line-height:1.5"></div>
     <div style="margin-top:12px;text-align:right">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL Kết nối CSDL MISA (SQL Server) — CHỈ ĐỌC / khám phá cấu trúc -->
+<div id="misaSqlModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:710;align-items:center;justify-content:center">
+  <div style="width:min(920px,97vw);max-height:92vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:18px">
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:8px">
+      <div style="font-weight:800;font-size:18px;color:#b06a00">🗄 Kết nối trực tiếp CSDL MISA SME (thử nghiệm)</div>
+      <button class="btn ghost sm" onclick="document.getElementById('misaSqlModal').style.display='none'">✕</button>
+    </div>
+    <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;color:#8a5d00">
+      ⚠ <b>Cảnh báo:</b> Ghi thẳng vào database MISA KHÔNG được MISA hỗ trợ, có thể hỏng sổ sách/mất bảo hành.
+      Bước này <b>CHỈ ĐỌC</b> để xem cấu trúc bảng. <b>Hãy sao lưu dữ liệu MISA trước.</b> Việc ghi (nếu làm) chỉ thực hiện sau khi đã lập bản đồ bảng và thử trên bản sao.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:8px">
+      <label style="font-size:12px">Server (máy chủ SQL)<br><input id="msqlServer" placeholder=".\MISASME2023" style="width:200px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
+      <label style="font-size:12px">Xác thực<br>
+        <select id="msqlAuth" onchange="misaSqlToggleAuth()" style="padding:6px;border:1px solid #ccc;border-radius:6px">
+          <option value="sql">Tài khoản SQL (user/mật khẩu)</option>
+          <option value="win">Windows (Trusted)</option>
+        </select></label>
+      <label id="msqlUserWrap" style="font-size:12px">User<br><input id="msqlUser" placeholder="sa" style="width:110px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
+      <label id="msqlPassWrap" style="font-size:12px">Mật khẩu<br><input id="msqlPass" type="password" placeholder="••••" style="width:130px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
+      <button class="btn sm" style="background:#2e5c8a" onclick="misaSqlTest()">🔌 Lưu & Kết nối thử</button>
+    </div>
+    <div id="msqlDrivers" style="font-size:11.5px;color:var(--muted);margin-bottom:6px"></div>
+    <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:6px">
+      <label style="font-size:12px">Database công ty<br>
+        <select id="msqlDb" onchange="misaSqlLoadBang()" style="min-width:220px;padding:6px;border:1px solid #ccc;border-radius:6px"></select></label>
+      <label style="font-size:12px">Lọc tên bảng<br><input id="msqlLoc" oninput="misaSqlLocBang()" placeholder="vd: Voucher, Inventory..." style="width:200px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
+    </div>
+    <div style="display:flex;gap:10px;flex:1;overflow:hidden">
+      <div style="width:270px;overflow:auto;border:1px solid #eee;border-radius:8px">
+        <div id="msqlBangList" style="font-size:12.5px"></div>
+      </div>
+      <div style="flex:1;overflow:auto;border:1px solid #eee;border-radius:8px;padding:8px">
+        <div id="msqlChiTiet" style="font-size:12.5px;color:var(--muted)">Chọn 1 bảng bên trái để xem cột & dữ liệu mẫu.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1714,6 +1754,94 @@ LUU Y:
   document.getElementById('misaModalBody').innerHTML=
     `<pre style="white-space:pre-wrap;background:#f6f8fa;border:1px solid #e0e0e0;border-radius:8px;padding:10px;font-size:12.5px;margin:0">${misaEsc(t)}</pre>`;
   document.getElementById('misaModal').style.display='flex';
+}
+/* ----- Kết nối trực tiếp CSDL MISA (SQL Server) — CHỈ ĐỌC / khám phá ----- */
+let msqlDbHienTai='';
+function misaSqlToggleAuth(){
+  const win=document.getElementById('msqlAuth').value==='win';
+  document.getElementById('msqlUserWrap').style.display=win?'none':'';
+  document.getElementById('msqlPassWrap').style.display=win?'none':'';
+}
+async function misaSqlMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaSqlModal').style.display='flex';
+  try{
+    const d=await api(`/api/misa-sql/trang-thai/${current}`);
+    document.getElementById('msqlDrivers').innerHTML=(d.drivers&&d.drivers.length)
+      ?`Driver ODBC: <b style="color:#1a7a7a">${d.drivers.map(misaEsc).join(', ')}</b>`
+      :`<b style="color:#b91c1c">⚠ Chưa có ODBC Driver for SQL Server</b> — cài "ODBC Driver 17/18 for SQL Server" của Microsoft.`;
+    const c=d.cfg||{};
+    document.getElementById('msqlServer').value=c.server||'';
+    document.getElementById('msqlUser').value=c.user||'';
+    document.getElementById('msqlPass').value='';
+    document.getElementById('msqlPass').placeholder=c.co_mat_khau?'(đã lưu — để trống nếu không đổi)':'••••';
+    document.getElementById('msqlAuth').value=c.trusted?'win':'sql';
+    misaSqlToggleAuth();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaSqlLuu(){
+  const body={server:document.getElementById('msqlServer').value.trim(),
+    trusted:document.getElementById('msqlAuth').value==='win',
+    user:document.getElementById('msqlUser').value.trim(),
+    password:document.getElementById('msqlPass').value};
+  await api(`/api/misa-sql/luu-cau-hinh/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+}
+async function misaSqlTest(){
+  try{
+    await misaSqlLuu();
+    toast('Đang kết nối SQL Server...','');
+    const d=await api(`/api/misa-sql/test/${current}`,{method:'POST'});
+    const sel=document.getElementById('msqlDb');
+    sel.innerHTML='<option value="">-- chọn database --</option>'+
+      (d.databases||[]).map(x=>`<option value="${misaEsc(x)}">${misaEsc(x)}</option>`).join('');
+    document.getElementById('msqlBangList').innerHTML='';
+    document.getElementById('msqlChiTiet').innerHTML='Đã kết nối. Chọn database của công ty trong MISA rồi xem bảng.';
+    toast('✓ Kết nối thành công. '+(d.version||''),'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+let msqlBangCache=[];
+async function misaSqlLoadBang(){
+  const db=document.getElementById('msqlDb').value; msqlDbHienTai=db;
+  document.getElementById('msqlBangList').innerHTML='<div style="padding:8px;color:#999">Đang tải danh sách bảng...</div>';
+  document.getElementById('msqlChiTiet').innerHTML='Chọn 1 bảng bên trái để xem cột & dữ liệu mẫu.';
+  if(!db){document.getElementById('msqlBangList').innerHTML='';return}
+  try{
+    const d=await api(`/api/misa-sql/bang/${current}?database=${encodeURIComponent(db)}`,{method:'POST'});
+    msqlBangCache=d.bang||[];
+    misaSqlVeBang();
+  }catch(e){document.getElementById('msqlBangList').innerHTML=`<div style="padding:8px;color:#b91c1c">${misaEsc(e.message)}</div>`;}
+}
+function misaSqlLocBang(){misaSqlVeBang();}
+function misaSqlVeBang(){
+  const loc=(document.getElementById('msqlLoc').value||'').toLowerCase();
+  const ds=msqlBangCache.filter(b=>!loc||b.bang.toLowerCase().includes(loc));
+  document.getElementById('msqlBangList').innerHTML=`<div style="padding:6px 8px;color:#999;position:sticky;top:0;background:#fff">${ds.length} bảng</div>`+
+    ds.map(b=>`<div onclick="misaSqlChonBang('${misaEsc(b.bang).replace(/'/g,"\\'")}')" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid #f2f2f2"
+      onmouseover="this.style.background='#eef7f7'" onmouseout="this.style.background='#fff'">
+      <b>${misaEsc(b.bang)}</b> <span style="color:#999">(${b.so_dong.toLocaleString('vi-VN')})</span></div>`).join('');
+}
+async function misaSqlChonBang(bang){
+  const box=document.getElementById('msqlChiTiet');
+  box.innerHTML='Đang tải cấu trúc...';
+  try{
+    const c=await api(`/api/misa-sql/cot/${current}?database=${encodeURIComponent(msqlDbHienTai)}&bang=${encodeURIComponent(bang)}`,{method:'POST'});
+    const x=await api(`/api/misa-sql/xem/${current}?database=${encodeURIComponent(msqlDbHienTai)}&bang=${encodeURIComponent(bang)}&n=15`,{method:'POST'});
+    let h=`<div style="font-weight:800;font-size:14px;margin-bottom:6px">🗂 ${misaEsc(bang)}</div>`;
+    h+=`<table style="border-collapse:collapse;font-size:12px;margin-bottom:12px"><tr style="background:#f0f0f0">
+        <th style="border:1px solid #ddd;padding:2px 6px">Cột</th><th style="border:1px solid #ddd;padding:2px 6px">Kiểu</th>
+        <th style="border:1px solid #ddd;padding:2px 6px">Null</th><th style="border:1px solid #ddd;padding:2px 6px">Khóa</th></tr>`;
+    (c.cot||[]).forEach(col=>{h+=`<tr><td style="border:1px solid #ddd;padding:2px 6px">${misaEsc(col.cot)}${col.khoa_chinh?' 🔑':''}</td>
+      <td style="border:1px solid #ddd;padding:2px 6px">${misaEsc(col.kieu)}${col.dai?`(${col.dai})`:''}</td>
+      <td style="border:1px solid #ddd;padding:2px 6px;text-align:center">${col.null?'✓':''}</td>
+      <td style="border:1px solid #ddd;padding:2px 6px;text-align:center">${col.khoa_chinh?'PK':''}</td></tr>`;});
+    h+='</table>';
+    h+=`<div style="font-weight:700;margin-bottom:4px">Dữ liệu mẫu (${x.so_dong} dòng đầu):</div>`;
+    h+='<div style="overflow:auto"><table style="border-collapse:collapse;font-size:11px"><tr style="background:#f0f0f0">'+
+      (x.cot||[]).map(cn=>`<th style="border:1px solid #ddd;padding:2px 5px;white-space:nowrap">${misaEsc(cn)}</th>`).join('')+'</tr>';
+    (x.rows||[]).forEach(r=>{h+='<tr>'+r.map(v=>`<td style="border:1px solid #ddd;padding:2px 5px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis">${misaEsc(v)}</td>`).join('')+'</tr>';});
+    h+='</table></div>';
+    box.innerHTML=h;
+  }catch(e){box.innerHTML=`<div style="color:#b91c1c">${misaEsc(e.message)}</div>`;}
 }
 async function xkTaiTrangThai(){
   try{

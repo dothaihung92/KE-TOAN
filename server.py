@@ -6344,6 +6344,181 @@ def misa_mo_thu_muc(cid: int):
     return {"ok": True, "folder": d}
 
 
+# ============================================================
+#  KẾT NỐI TRỰC TIẾP CSDL MISA SME (SQL Server) — GIAI ĐOẠN CHỈ ĐỌC
+#  ⚠ CẢNH BÁO: Ghi thẳng vào DB của MISA KHÔNG được MISA hỗ trợ, rủi ro hỏng
+#  sổ sách / mất bảo hành. Giai đoạn này CHỈ ĐỌC (khám phá cấu trúc bảng) để
+#  lập bản đồ. Mọi thao tác GHI sẽ chỉ làm sau khi đã sao lưu + thử trên bản
+#  sao. Cấu hình kết nối lưu trong dữ liệu công ty (máy local).
+# ============================================================
+def _misa_sql_drivers():
+    try:
+        import pyodbc
+        return [d for d in pyodbc.drivers() if "SQL Server" in d]
+    except Exception:
+        return []
+
+def _misa_sql_cfg(cid):
+    data = _doc_du_lieu_cty(cid)
+    return data.get("misa_sql") or {}
+
+def _misa_sql_connect(cid, cfg=None, database=None, timeout=8, readonly=True):
+    """Mở kết nối pyodbc tới SQL Server của MISA. Mặc định ApplicationIntent
+    ReadOnly (chỉ đọc). Ném HTTPException với thông báo rõ nếu lỗi."""
+    try:
+        import pyodbc
+    except Exception:
+        raise HTTPException(400, "Chưa cài thư viện pyodbc. Đóng phần mềm, chạy lại start.bat để tự cài.")
+    cfg = cfg or _misa_sql_cfg(cid)
+    drivers = _misa_sql_drivers()
+    if not drivers:
+        raise HTTPException(400, "Máy chưa có 'ODBC Driver for SQL Server'. Tải & cài "
+                                 "'ODBC Driver 17 (hoặc 18) for SQL Server' của Microsoft rồi thử lại.")
+    server = str(cfg.get("server") or "").strip()
+    if not server:
+        raise HTTPException(400, "Thiếu 'server' (tên máy chủ SQL). Ví dụ: .\\MISASME2023 hoặc localhost\\MISASME2022")
+    db = database or str(cfg.get("database") or "").strip()
+    drv = sorted(drivers, reverse=True)[0]     # driver mới nhất
+    parts = ["DRIVER={%s}" % drv, "SERVER=%s" % server]
+    if db:
+        parts.append("DATABASE=%s" % db)
+    if cfg.get("trusted"):
+        parts.append("Trusted_Connection=yes")
+    else:
+        parts.append("UID=%s" % (cfg.get("user") or ""))
+        parts.append("PWD=%s" % (cfg.get("password") or ""))
+    parts.append("TrustServerCertificate=yes")
+    if readonly:
+        parts.append("ApplicationIntent=ReadOnly")
+    try:
+        conn = pyodbc.connect(";".join(parts) + ";", timeout=timeout)
+        conn.autocommit = True
+        return conn
+    except Exception as e:
+        raise HTTPException(400, "Không kết nối được SQL Server: %s. Kiểm tra tên server/instance, "
+                                 "đã bật TCP/IP + SQL Browser, và tài khoản/mật khẩu." % (str(e)[:300]))
+
+
+@app.get("/api/misa-sql/trang-thai/{cid}")
+def misa_sql_trang_thai(cid: int):
+    """Cho biết máy có driver ODBC chưa + cấu hình đã lưu (ẩn mật khẩu)."""
+    cfg = _misa_sql_cfg(cid)
+    return {"drivers": _misa_sql_drivers(),
+            "cfg": {"server": cfg.get("server", ""), "database": cfg.get("database", ""),
+                    "trusted": bool(cfg.get("trusted")), "user": cfg.get("user", ""),
+                    "co_mat_khau": bool(cfg.get("password"))}}
+
+
+@app.post("/api/misa-sql/luu-cau-hinh/{cid}")
+async def misa_sql_luu_cau_hinh(cid: int, request: Request):
+    """Lưu cấu hình kết nối SQL của MISA cho công ty (local)."""
+    body = await request.json()
+    data = _doc_du_lieu_cty(cid)
+    cu = data.get("misa_sql") or {}
+    cfg = {
+        "server": str(body.get("server") or "").strip(),
+        "database": str(body.get("database") or "").strip(),
+        "trusted": bool(body.get("trusted")),
+        "user": str(body.get("user") or "").strip(),
+        # giữ mật khẩu cũ nếu FE gửi rỗng (không bắt gõ lại mỗi lần)
+        "password": (body.get("password") if body.get("password") else cu.get("password", "")),
+    }
+    data["misa_sql"] = cfg
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True}
+
+
+@app.post("/api/misa-sql/test/{cid}")
+def misa_sql_test(cid: int):
+    """Thử kết nối + trả phiên bản SQL Server và danh sách database (để chọn
+    đúng DB của công ty trong MISA)."""
+    conn = _misa_sql_connect(cid, database="master")
+    try:
+        cur = conn.cursor()
+        ver = cur.execute("SELECT @@VERSION").fetchval()
+        dbs = [r[0] for r in cur.execute(
+            "SELECT name FROM sys.databases WHERE database_id > 4 ORDER BY name").fetchall()]
+        return {"ok": True, "version": str(ver)[:120], "databases": dbs}
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/bang/{cid}")
+def misa_sql_bang(cid: int, database: str = "", loc: str = ""):
+    """Liệt kê bảng (+ số dòng ước lượng) của 1 database. loc: lọc theo tên."""
+    if not database:
+        raise HTTPException(400, "Chưa chọn database")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        sql = (
+            "SELECT t.name, ISNULL(SUM(p.rows),0) AS so_dong "
+            "FROM sys.tables t "
+            "LEFT JOIN sys.partitions p ON p.object_id=t.object_id AND p.index_id IN (0,1) "
+            "GROUP BY t.name")
+        rows = cur.execute(sql).fetchall()
+        out = [{"bang": r[0], "so_dong": int(r[1])} for r in rows]
+        if loc:
+            lo = loc.lower()
+            out = [x for x in out if lo in x["bang"].lower()]
+        out.sort(key=lambda x: x["bang"].lower())
+        return {"ok": True, "database": database, "so_bang": len(out), "bang": out}
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/cot/{cid}")
+def misa_sql_cot(cid: int, database: str = "", bang: str = ""):
+    """Mô tả cột của 1 bảng (tên, kiểu, cho null, khóa chính)."""
+    if not (database and bang):
+        raise HTTPException(400, "Thiếu database/bảng")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cols = cur.execute("""
+            SELECT c.COLUMN_NAME, c.DATA_TYPE, c.CHARACTER_MAXIMUM_LENGTH,
+                   c.IS_NULLABLE, c.COLUMN_DEFAULT
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            WHERE c.TABLE_NAME=? ORDER BY c.ORDINAL_POSITION""", bang).fetchall()
+        pk = set()
+        try:
+            for r in cur.execute("""
+                SELECT k.COLUMN_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS t
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE k ON k.CONSTRAINT_NAME=t.CONSTRAINT_NAME
+                WHERE t.TABLE_NAME=? AND t.CONSTRAINT_TYPE='PRIMARY KEY'""", bang).fetchall():
+                pk.add(r[0])
+        except Exception:
+            pass
+        out = [{"cot": r[0], "kieu": r[1], "dai": r[2], "null": (r[3] == "YES"),
+                "mac_dinh": (str(r[4]) if r[4] is not None else ""), "khoa_chinh": (r[0] in pk)}
+               for r in cols]
+        return {"ok": True, "database": database, "bang": bang, "cot": out}
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/xem/{cid}")
+def misa_sql_xem(cid: int, database: str = "", bang: str = "", n: int = 20):
+    """Xem thử tối đa N dòng đầu của bảng (CHỈ ĐỌC) để hiểu dữ liệu mẫu."""
+    if not (database and bang):
+        raise HTTPException(400, "Thiếu database/bảng")
+    if not bang.replace("_", "").replace(" ", "").isalnum():
+        raise HTTPException(400, "Tên bảng không hợp lệ")
+    n = max(1, min(int(n or 20), 100))
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT TOP (%d) * FROM [%s]" % (n, bang))
+        cols = [d[0] for d in cur.description]
+        rows = []
+        for r in cur.fetchall():
+            rows.append([(v.isoformat() if hasattr(v, "isoformat") else
+                          (str(v) if v is not None else "")) for v in r])
+        return {"ok": True, "cot": cols, "rows": rows, "so_dong": len(rows)}
+    finally:
+        conn.close()
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
