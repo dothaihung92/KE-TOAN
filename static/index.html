@@ -542,7 +542,10 @@
       <label style="font-size:12px">Database công ty<br>
         <select id="msqlDb" onchange="misaSqlLoadBang()" style="min-width:220px;padding:6px;border:1px solid #ccc;border-radius:6px"></select></label>
       <label style="font-size:12px">Lọc tên bảng<br><input id="msqlLoc" oninput="misaSqlLocBang()" placeholder="vd: Voucher, Inventory..." style="width:200px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
-      <button class="btn sm" style="background:#5a3e8a" onclick="misaSqlXuatCauTruc()" title="Xuất cấu trúc các bảng ra 1 file text để gửi cho người phát triển">📄 Xuất cấu trúc bảng ra file</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <button class="btn sm" style="background:#5a3e8a" onclick="misaSqlXuatCauTruc('loc')" title="Xuất cấu trúc các bảng đang lọc (hoặc bảng quan trọng nếu ô Lọc trống)">📄 Xuất cấu trúc (theo lọc / bảng quan trọng)</button>
+      <button class="btn sm" style="background:#8a3e5a" onclick="misaSqlXuatCauTruc('tatca')" title="Xuất cấu trúc TẤT CẢ các bảng trong database">📦 Xuất cấu trúc TẤT CẢ bảng</button>
     </div>
     <div id="msqlSchema" style="font-size:12px;margin-bottom:6px"></div>
     <div style="display:flex;gap:10px;flex:1;overflow:hidden">
@@ -1899,13 +1902,15 @@ async function misaSqlDongBoSchema(){
 // Xuất cấu trúc bảng (cột + vài dòng mẫu) ra 1 file text. Nếu đang gõ Lọc thì
 // xuất đúng các bảng khớp lọc; nếu để trống thì xuất các bảng QUAN TRỌNG (danh
 // mục + chứng từ) để gửi cho người phát triển dựng chức năng ghi.
-async function misaSqlXuatCauTruc(){
+async function misaSqlXuatCauTruc(cheDo){
   if(!msqlDbHienTai){toast('Chọn database trước','err');return}
-  const loc=(document.getElementById('msqlLoc').value||'').trim();
-  toast('Đang xuất cấu trúc bảng ra file...','');
+  const tatCa=cheDo==='tatca';
+  const loc=tatCa?'':((document.getElementById('msqlLoc').value||'').trim());
+  const nMau=tatCa?1:2;   // xuất tất cả thì mỗi bảng 1 dòng mẫu cho gọn
+  toast(tatCa?'Đang xuất cấu trúc TẤT CẢ bảng (có thể mất 1-2 phút)...':'Đang xuất cấu trúc bảng ra file...','');
   try{
-    const d=await api(`/api/misa-sql/xuat-cau-truc/${current}?database=${encodeURIComponent(msqlDbHienTai)}&loc=${encodeURIComponent(loc)}&n_mau=2`,{method:'POST'});
-    toast(`📄 Đã xuất cấu trúc ${d.so_bang} bảng ra file (đã tự mở). Gửi file này cho người phát triển.`,'ok');
+    const d=await api(`/api/misa-sql/xuat-cau-truc/${current}?database=${encodeURIComponent(msqlDbHienTai)}&loc=${encodeURIComponent(loc)}&n_mau=${nMau}&tat_ca=${tatCa?1:0}`,{method:'POST'});
+    toast(`📄 Đã xuất cấu trúc ${d.so_bang} bảng ra file (đã tự mở trên Desktop). Gửi file này cho người phát triển.`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function xkTaiTrangThai(){

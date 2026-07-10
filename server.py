@@ -6625,10 +6625,11 @@ _MISA_BANG_QUAN_TRONG = [
     "OUTWard", "GLVoucher", "Voucher", "Invoice", "GeneralLedger"]
 
 @app.post("/api/misa-sql/xuat-cau-truc/{cid}")
-def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: int = 2):
+def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: int = 2,
+                           tat_ca: int = 0):
     """Xuất cấu trúc bảng MISA ra 1 FILE text để gửi cho người phát triển dựng
-    chức năng ghi. loc rỗng -> lấy các bảng theo danh sách từ khóa quan trọng
-    (danh mục + chứng từ). Có kèm tối đa n_mau dòng dữ liệu mẫu. Chỉ đọc."""
+    chức năng ghi. tat_ca=1 -> TẤT CẢ bảng; loc có -> bảng khớp lọc; else ->
+    các bảng theo danh sách từ khóa quan trọng. Kèm tối đa n_mau dòng mẫu. Chỉ đọc."""
     if not database:
         raise HTTPException(400, "Chưa chọn database")
     n_mau = max(0, min(int(n_mau or 0), 5))
@@ -6655,13 +6656,14 @@ def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: i
         except Exception:
             pass
         all_names = sorted(cols_by)
-        if loc.strip():
+        if tat_ca:
+            names = all_names                       # xuất TẤT CẢ bảng, không giới hạn
+        elif loc.strip():
             lo = loc.strip().lower()
-            names = [t for t in all_names if lo in t.lower()]
+            names = [t for t in all_names if lo in t.lower()][:120]
         else:
             names = [t for t in all_names
-                     if any(k.lower() in t.lower() for k in _MISA_BANG_QUAN_TRONG)]
-        names = names[:80]
+                     if any(k.lower() in t.lower() for k in _MISA_BANG_QUAN_TRONG)][:120]
         out = ["CAU TRUC BANG MISA — database: %s" % database,
                "Loc: %s | So bang xuat: %d" % (loc or "(bang quan trong)", len(names)),
                "=" * 70, ""]
