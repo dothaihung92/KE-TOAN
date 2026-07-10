@@ -542,6 +542,7 @@
       <label style="font-size:12px">Database công ty<br>
         <select id="msqlDb" onchange="misaSqlLoadBang()" style="min-width:220px;padding:6px;border:1px solid #ccc;border-radius:6px"></select></label>
       <label style="font-size:12px">Lọc tên bảng<br><input id="msqlLoc" oninput="misaSqlLocBang()" placeholder="vd: Voucher, Inventory..." style="width:200px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
+      <button class="btn sm" style="background:#5a3e8a" onclick="misaSqlXuatCauTruc()" title="Xuất cấu trúc các bảng ra 1 file text để gửi cho người phát triển">📄 Xuất cấu trúc bảng ra file</button>
     </div>
     <div id="msqlSchema" style="font-size:12px;margin-bottom:6px"></div>
     <div style="display:flex;gap:10px;flex:1;overflow:hidden">
@@ -1893,6 +1894,18 @@ async function misaSqlDongBoSchema(){
     const d=await api(`/api/misa-sql/schema-dongbo/${current}?database=${encodeURIComponent(msqlDbHienTai)}`,{method:'POST'});
     toast(`✓ Đã đồng bộ cấu trúc MISA (${d.so_bang} bảng, ${d.so_cot} cột)`,'ok');
     misaSqlKiemTraSchema();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Xuất cấu trúc bảng (cột + vài dòng mẫu) ra 1 file text. Nếu đang gõ Lọc thì
+// xuất đúng các bảng khớp lọc; nếu để trống thì xuất các bảng QUAN TRỌNG (danh
+// mục + chứng từ) để gửi cho người phát triển dựng chức năng ghi.
+async function misaSqlXuatCauTruc(){
+  if(!msqlDbHienTai){toast('Chọn database trước','err');return}
+  const loc=(document.getElementById('msqlLoc').value||'').trim();
+  toast('Đang xuất cấu trúc bảng ra file...','');
+  try{
+    const d=await api(`/api/misa-sql/xuat-cau-truc/${current}?database=${encodeURIComponent(msqlDbHienTai)}&loc=${encodeURIComponent(loc)}&n_mau=2`,{method:'POST'});
+    toast(`📄 Đã xuất cấu trúc ${d.so_bang} bảng ra file (đã tự mở). Gửi file này cho người phát triển.`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function xkTaiTrangThai(){

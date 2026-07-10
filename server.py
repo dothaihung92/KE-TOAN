@@ -6615,6 +6615,94 @@ def misa_sql_schema_dongbo(cid: int, database: str = ""):
     return {"ok": True, "so_bang": nt, "so_cot": nc}
 
 
+# Danh sách TỪ KHÓA các bảng cần lấy để dựng chức năng ghi vào MISA (danh mục
+# + chứng từ). Dùng để lọc nhanh khi xuất cấu trúc.
+_MISA_BANG_QUAN_TRONG = [
+    "InventoryItem", "Unit", "InventoryItemCategory", "InventoryItemUnitConvert",
+    "Stock", "AccountObject", "AccountObjectCategory", "Account",
+    "FixedAsset", "FixedAssetCategory", "Tool", "InstrumentTool",
+    "PUVoucher", "PUInvoice", "SAVoucher", "SAInvoice", "INVoucher", "INWard",
+    "OUTWard", "GLVoucher", "Voucher", "Invoice", "GeneralLedger"]
+
+@app.post("/api/misa-sql/xuat-cau-truc/{cid}")
+def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: int = 2):
+    """Xuất cấu trúc bảng MISA ra 1 FILE text để gửi cho người phát triển dựng
+    chức năng ghi. loc rỗng -> lấy các bảng theo danh sách từ khóa quan trọng
+    (danh mục + chứng từ). Có kèm tối đa n_mau dòng dữ liệu mẫu. Chỉ đọc."""
+    if not database:
+        raise HTTPException(400, "Chưa chọn database")
+    n_mau = max(0, min(int(n_mau or 0), 5))
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        # cột + kiểu
+        col_rows = cur.execute(
+            "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE "
+            "FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' "
+            "ORDER BY TABLE_NAME, ORDINAL_POSITION").fetchall()
+        cols_by = {}
+        for t, c, dt, ln, nu in col_rows:
+            cols_by.setdefault(t, []).append((c, dt, ln, nu))
+        # khóa chính
+        pk_by = {}
+        try:
+            for t, c in cur.execute(
+                "SELECT tc.TABLE_NAME, kcu.COLUMN_NAME "
+                "FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc "
+                "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu ON kcu.CONSTRAINT_NAME=tc.CONSTRAINT_NAME "
+                "WHERE tc.CONSTRAINT_TYPE='PRIMARY KEY'").fetchall():
+                pk_by.setdefault(t, set()).add(c)
+        except Exception:
+            pass
+        all_names = sorted(cols_by)
+        if loc.strip():
+            lo = loc.strip().lower()
+            names = [t for t in all_names if lo in t.lower()]
+        else:
+            names = [t for t in all_names
+                     if any(k.lower() in t.lower() for k in _MISA_BANG_QUAN_TRONG)]
+        names = names[:80]
+        out = ["CAU TRUC BANG MISA — database: %s" % database,
+               "Loc: %s | So bang xuat: %d" % (loc or "(bang quan trong)", len(names)),
+               "=" * 70, ""]
+        for t in names:
+            pk = pk_by.get(t, set())
+            out.append("### BANG: %s" % t)
+            for (c, dt, ln, nu) in cols_by[t]:
+                out.append("   %-40s %s%s %s%s" % (
+                    c, dt, ("(%s)" % ln if ln not in (None, -1) else ""),
+                    "NULL" if nu == "YES" else "NOTNULL", "  [PK]" if c in pk else ""))
+            if n_mau > 0 and t.replace("_", "").replace(" ", "").isalnum():
+                try:
+                    cur.execute("SELECT TOP (%d) * FROM [%s]" % (n_mau, t))
+                    scols = [d[0] for d in cur.description]
+                    out.append("   --- DU LIEU MAU ---")
+                    for r in cur.fetchall():
+                        kv = []
+                        for cn, v in zip(scols, r):
+                            sv = v.isoformat() if hasattr(v, "isoformat") else (str(v) if v is not None else "NULL")
+                            if len(sv) > 60:
+                                sv = sv[:60] + "..."
+                            kv.append("%s=%s" % (cn, sv))
+                        out.append("   • " + " | ".join(kv))
+                except Exception as e:
+                    out.append("   (khong doc duoc du lieu mau: %s)" % str(e)[:80])
+            out.append("")
+        conn2 = db()
+        comp = conn2.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+        conn2.close()
+        mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+        fname = "CauTrucMISA_%s_%s.txt" % (mst, datetime.datetime.now().strftime("%d%m%Y_%H%M"))
+        base = _get_desktop_dir() or DOWNLOAD_DIR
+        path = os.path.join(base, fname)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(out))
+        _open_file_local(path)
+        return {"ok": True, "file": path, "so_bang": len(names)}
+    finally:
+        conn.close()
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
