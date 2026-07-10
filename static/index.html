@@ -543,6 +543,7 @@
         <select id="msqlDb" onchange="misaSqlLoadBang()" style="min-width:220px;padding:6px;border:1px solid #ccc;border-radius:6px"></select></label>
       <label style="font-size:12px">Lọc tên bảng<br><input id="msqlLoc" oninput="misaSqlLocBang()" placeholder="vd: Voucher, Inventory..." style="width:200px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
     </div>
+    <div id="msqlSchema" style="font-size:12px;margin-bottom:6px"></div>
     <div style="display:flex;gap:10px;flex:1;overflow:hidden">
       <div style="width:270px;overflow:auto;border:1px solid #eee;border-radius:8px">
         <div id="msqlBangList" style="font-size:12.5px"></div>
@@ -1765,9 +1766,11 @@ function misaSqlToggleAuth(){
   document.getElementById('msqlUserWrap').style.display=win?'none':'';
   document.getElementById('msqlPassWrap').style.display=win?'none':'';
 }
+let msqlCfgDb='';    // database đã lưu trong cấu hình
 async function misaSqlMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   document.getElementById('misaSqlModal').style.display='flex';
+  document.getElementById('msqlSchema').innerHTML='';
   try{
     const d=await api(`/api/misa-sql/trang-thai/${current}`);
     document.getElementById('msqlDrivers').innerHTML=(d.drivers&&d.drivers.length)
@@ -1779,27 +1782,39 @@ async function misaSqlMo(){
     document.getElementById('msqlPass').value='';
     document.getElementById('msqlPass').placeholder=c.co_mat_khau?'(đã lưu — để trống nếu không đổi)':'••••';
     document.getElementById('msqlAuth').value=c.trusted?'win':'sql';
+    msqlCfgDb=c.database||'';
     misaSqlToggleAuth();
+    // Đã lưu kết nối trước đó -> TỰ KẾT NỐI LẠI, khỏi phải nhập/chọn lại
+    if(c.server && (c.trusted || c.co_mat_khau)){
+      await misaSqlTest(true);
+    }
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaSqlLuu(){
   const body={server:document.getElementById('msqlServer').value.trim(),
     trusted:document.getElementById('msqlAuth').value==='win',
     user:document.getElementById('msqlUser').value.trim(),
-    password:document.getElementById('msqlPass').value};
+    password:document.getElementById('msqlPass').value,
+    database:document.getElementById('msqlDb').value||msqlCfgDb||''};
   await api(`/api/misa-sql/luu-cau-hinh/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
-async function misaSqlTest(){
+async function misaSqlTest(tuDong){
   try{
     await misaSqlLuu();
-    toast('Đang kết nối SQL Server...','');
+    if(!tuDong)toast('Đang kết nối SQL Server...','');
     const d=await api(`/api/misa-sql/test/${current}`,{method:'POST'});
     const sel=document.getElementById('msqlDb');
     sel.innerHTML='<option value="">-- chọn database --</option>'+
       (d.databases||[]).map(x=>`<option value="${misaEsc(x)}">${misaEsc(x)}</option>`).join('');
-    document.getElementById('msqlBangList').innerHTML='';
-    document.getElementById('msqlChiTiet').innerHTML='Đã kết nối. Chọn database của công ty trong MISA rồi xem bảng.';
     toast('✓ Kết nối thành công. '+(d.version||''),'ok');
+    // Có database đã lưu -> tự chọn + tải bảng + kiểm tra cấu trúc
+    if(msqlCfgDb && (d.databases||[]).includes(msqlCfgDb)){
+      sel.value=msqlCfgDb;
+      await misaSqlLoadBang();
+    }else{
+      document.getElementById('msqlBangList').innerHTML='';
+      document.getElementById('msqlChiTiet').innerHTML='Đã kết nối. Chọn database của công ty trong MISA rồi xem bảng.';
+    }
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 let msqlBangCache=[];
@@ -1807,11 +1822,15 @@ async function misaSqlLoadBang(){
   const db=document.getElementById('msqlDb').value; msqlDbHienTai=db;
   document.getElementById('msqlBangList').innerHTML='<div style="padding:8px;color:#999">Đang tải danh sách bảng...</div>';
   document.getElementById('msqlChiTiet').innerHTML='Chọn 1 bảng bên trái để xem cột & dữ liệu mẫu.';
+  document.getElementById('msqlSchema').innerHTML='';
   if(!db){document.getElementById('msqlBangList').innerHTML='';return}
+  msqlCfgDb=db;
   try{
+    await misaSqlLuu();                 // lưu database đã chọn để lần sau tự vào
     const d=await api(`/api/misa-sql/bang/${current}?database=${encodeURIComponent(db)}`,{method:'POST'});
     msqlBangCache=d.bang||[];
     misaSqlVeBang();
+    misaSqlKiemTraSchema();             // kiểm tra cấu trúc MISA có thay đổi không
   }catch(e){document.getElementById('msqlBangList').innerHTML=`<div style="padding:8px;color:#b91c1c">${misaEsc(e.message)}</div>`;}
 }
 function misaSqlLocBang(){misaSqlVeBang();}
@@ -1845,6 +1864,36 @@ async function misaSqlChonBang(bang){
     h+='</table></div>';
     box.innerHTML=h;
   }catch(e){box.innerHTML=`<div style="color:#b91c1c">${misaEsc(e.message)}</div>`;}
+}
+// Kiểm tra cấu trúc MISA có thay đổi so với mốc đã lưu (MISA cập nhật phiên bản
+// -> có thể thêm/bớt bảng/cột). Không đổi thì báo OK; có đổi thì cảnh báo + nút
+// "đồng bộ lại" để cập nhật mốc theo cấu trúc MISA hiện tại.
+async function misaSqlKiemTraSchema(){
+  const el=document.getElementById('msqlSchema'); if(!el)return;
+  el.innerHTML='<span style="color:#999">Đang kiểm tra cấu trúc MISA...</span>';
+  try{
+    const d=await api(`/api/misa-sql/schema-check/${current}?database=${encodeURIComponent(msqlDbHienTai)}`,{method:'POST'});
+    if(d.trang_thai==='moc_moi'){
+      el.innerHTML=`<div style="background:#eef7ff;border:1px solid #b8d4f0;border-radius:6px;padding:6px 10px;color:#245">
+        📌 Đã ghi nhận cấu trúc MISA (${d.so_bang} bảng, ${d.so_cot} cột) làm mốc để lần sau tự kiểm tra thay đổi.</div>`;
+    }else if(!d.changed){
+      el.innerHTML=`<div style="background:#eafbf1;border:1px solid #8fd9ac;border-radius:6px;padding:6px 10px;color:#1f6b4a">
+        ✓ Cấu trúc MISA không đổi (${d.so_bang} bảng, ${d.so_cot} cột) — tiếp tục dùng bình thường.</div>`;
+    }else{
+      const ds=a=>a&&a.length?misaEsc(a.slice(0,15).join(', '))+(a.length>15?'...':''):'—';
+      el.innerHTML=`<div style="background:#fff3cd;border:1px solid #ffce5a;border-radius:6px;padding:8px 10px;color:#8a5d00">
+        ⚠ <b>Cấu trúc MISA đã THAY ĐỔI</b> (có thể do cập nhật phiên bản MISA). Hiện: ${d.so_bang} bảng, ${d.so_cot} cột.<br>
+        <span style="font-size:11.5px">Bảng thêm: ${ds(d.bang_them)} | Bảng mất: ${ds(d.bang_mat)} | Bảng đổi cột: ${ds(d.bang_doi_cot)}</span><br>
+        <button class="btn sm" style="background:#8a5d00;margin-top:6px" onclick="misaSqlDongBoSchema()">🔄 Đồng bộ lại theo MISA hiện tại</button></div>`;
+    }
+  }catch(e){el.innerHTML=`<div style="color:#b91c1c;font-size:11.5px">Không kiểm tra được cấu trúc: ${misaEsc(e.message)}</div>`;}
+}
+async function misaSqlDongBoSchema(){
+  try{
+    const d=await api(`/api/misa-sql/schema-dongbo/${current}?database=${encodeURIComponent(msqlDbHienTai)}`,{method:'POST'});
+    toast(`✓ Đã đồng bộ cấu trúc MISA (${d.so_bang} bảng, ${d.so_cot} cột)`,'ok');
+    misaSqlKiemTraSchema();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function xkTaiTrangThai(){
   try{

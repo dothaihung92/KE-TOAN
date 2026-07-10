@@ -6547,6 +6547,74 @@ def misa_sql_xem(cid: int, database: str = "", bang: str = "", n: int = 20):
         conn.close()
 
 
+def _misa_sql_doc_schema(cid, database):
+    """Đọc toàn bộ cấu trúc (bảng -> danh sách cột) của database (chỉ đọc)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA='dbo' ORDER BY TABLE_NAME, ORDINAL_POSITION").fetchall()
+        tables = {}
+        for t, c in rows:
+            tables.setdefault(t, []).append(c)
+        return tables
+    finally:
+        conn.close()
+
+def _misa_sql_fingerprint(tables):
+    import hashlib
+    s = "|".join(t + ":" + ",".join(tables[t]) for t in sorted(tables))
+    return (hashlib.sha1(s.encode("utf-8")).hexdigest(),
+            len(tables), sum(len(v) for v in tables.values()))
+
+
+@app.post("/api/misa-sql/schema-check/{cid}")
+def misa_sql_schema_check(cid: int, database: str = ""):
+    """So sánh cấu trúc MISA hiện tại với mốc đã lưu. Nếu chưa có mốc -> lưu
+    làm mốc. Nếu khác (MISA cập nhật thêm/bớt bảng/cột) -> báo có thay đổi để
+    người dùng đồng bộ lại. Chỉ đọc INFORMATION_SCHEMA."""
+    if not database:
+        raise HTTPException(400, "Chưa chọn database")
+    tables = _misa_sql_doc_schema(cid, database)
+    fp, nt, nc = _misa_sql_fingerprint(tables)
+    data = _doc_du_lieu_cty(cid)
+    snap = data.get("misa_sql_schema") or {}
+    now = datetime.datetime.now().isoformat()
+    if snap.get("database") != database or not snap.get("hash"):
+        data["misa_sql_schema"] = {"database": database, "hash": fp, "so_bang": nt,
+                                   "so_cot": nc, "tables": tables, "updated_at": now}
+        _ghi_du_lieu_cty(cid, data)
+        return {"trang_thai": "moc_moi", "changed": False, "so_bang": nt, "so_cot": nc,
+                "updated_at": now}
+    if snap.get("hash") == fp:
+        return {"trang_thai": "khong_doi", "changed": False, "so_bang": nt, "so_cot": nc,
+                "updated_at": snap.get("updated_at", "")}
+    old = snap.get("tables") or {}
+    them = sorted(set(tables) - set(old))
+    mat = sorted(set(old) - set(tables))
+    doi = sorted(t for t in (set(tables) & set(old)) if tables[t] != old.get(t))
+    return {"trang_thai": "da_doi", "changed": True, "so_bang": nt, "so_cot": nc,
+            "bang_them": them[:80], "bang_mat": mat[:80], "bang_doi_cot": doi[:80],
+            "moc_updated_at": snap.get("updated_at", "")}
+
+
+@app.post("/api/misa-sql/schema-dongbo/{cid}")
+def misa_sql_schema_dongbo(cid: int, database: str = ""):
+    """Cập nhật mốc cấu trúc = cấu trúc MISA HIỆN TẠI (sau khi người dùng xác
+    nhận đồng bộ theo phiên bản MISA mới)."""
+    if not database:
+        raise HTTPException(400, "Chưa chọn database")
+    tables = _misa_sql_doc_schema(cid, database)
+    fp, nt, nc = _misa_sql_fingerprint(tables)
+    data = _doc_du_lieu_cty(cid)
+    data["misa_sql_schema"] = {"database": database, "hash": fp, "so_bang": nt,
+                               "so_cot": nc, "tables": tables,
+                               "updated_at": datetime.datetime.now().isoformat()}
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True, "so_bang": nt, "so_cot": nc}
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
