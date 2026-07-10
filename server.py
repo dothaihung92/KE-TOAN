@@ -6730,11 +6730,15 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
     conn.autocommit = False
     try:
         cur = conn.cursor()
-        # mã hàng đã tồn tại (để bỏ qua, không ghi đè)
-        existing = set()
-        for r in cur.execute("SELECT InventoryItemCode FROM InventoryItem").fetchall():
-            if r[0]:
-                existing.add(str(r[0]).strip().lower())
+        # mã hàng đã tồn tại + TÊN trong MISA (để bỏ qua, và đối chiếu tên lệch)
+        existing = {}   # ma_lower -> tên trong MISA
+        for code, name in cur.execute(
+                "SELECT InventoryItemCode, InventoryItemName FROM InventoryItem").fetchall():
+            if code:
+                existing[str(code).strip().lower()] = str(name or "")
+
+        def _norm_ten(s):
+            return " ".join(str(s or "").split()).lower()
         # đơn vị tính hiện có {tên_lower: UnitID}
         units = {}
         for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
@@ -6767,7 +6771,7 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
         now = datetime.datetime.now()
 
         ket = []
-        them = trung = dv_moi = 0
+        them = trung = dv_moi = lech_ten = 0
         seen = set()
         for r in dm_rows:
             ma = str((r[0] if len(r) > 0 else "") or "").strip()
@@ -6781,8 +6785,13 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
                 continue
             seen.add(k)
             if k in existing:
+                ten_misa = existing[k]
+                lech = _norm_ten(ten) != _norm_ten(ten_misa)
                 trung += 1
-                ket.append({"ma": ma, "ten": ten, "trang_thai": "đã có (bỏ qua)"})
+                if lech:
+                    lech_ten += 1
+                ket.append({"ma": ma, "ten": ten, "ten_misa": ten_misa, "lech_ten": lech,
+                            "trang_thai": "đã có — KHÁC TÊN" if lech else "đã có (bỏ qua)"})
                 continue
             # đơn vị tính -> UnitID (tạo mới nếu chưa có)
             unit_id = None
@@ -6811,7 +6820,8 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
-                "so_don_vi_moi": dv_moi, "item_type": item_type, "danh_sach": ket[:1000]}
+                "so_lech_ten": lech_ten, "so_don_vi_moi": dv_moi, "item_type": item_type,
+                "danh_sach": ket[:1000]}
     except HTTPException:
         conn.rollback()
         raise
