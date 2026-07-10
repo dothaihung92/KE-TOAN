@@ -4284,19 +4284,73 @@ async def nhap_lieu_export(cid: int, request: Request, loai: str = "in"):
     return FileResponse(path, filename=fname)
 
 
-@app.post("/api/mua-hang-dv/{cid}")
-async def mua_hang_dich_vu(cid: int, request: Request):
-    """Lọc Bảng kê Mua vào (đã hạch toán) -> kết xuất 'Chứng từ mua dịch vụ'
-    theo form MISA. Chỉ lấy dòng có Nợ bắt đầu bằng '6' (chi phí dịch vụ).
-    Nhận {header, rows} của lưới Nhập Liệu đầu vào."""
+# ---- Helper CHUNG: ghi 1 workbook theo form MISA + lưu (dùng lại cho xuất
+#      lẻ từng chứng từ VÀ cho 'Xuất trọn gói cho MISA') ----
+def _viet_wb_misa(headers, rows, sheet, cot_text=None, cot_tien=None, cot_thapphan=None):
+    """Tạo openpyxl Workbook theo form MISA: tiêu đề đậm nền xanh, định dạng số
+    cho cột tiền/thập phân, dạng chữ cho cột mã/số HĐ. Trả về workbook.
+    headers có thể chứa chuỗi rỗng '' cho cột đệm (không tô đậm)."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
-    body = await request.json()
-    header = body.get("header", [])
-    rows = body.get("rows", [])
-    hlow = [str(h or "").strip().lower() for h in header]
+    cot_text = cot_text or set(); cot_tien = cot_tien or set(); cot_thapphan = cot_thapphan or set()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = str(sheet)[:31]
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(1, c); cell.value = h
+        if h:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="2E5C8A")
+    for ri, row in enumerate(rows, 2):
+        for ci, v in enumerate(row, 1):
+            if v == "" or v is None:
+                continue
+            cell = ws.cell(ri, ci); cell.value = v
+            if ci in cot_text:
+                cell.number_format = "@"
+            elif ci in cot_thapphan:
+                cell.number_format = "#,##0.####"
+            elif ci in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+    return wb
 
+def _luu_file_misa(wb, fname, cid):
+    """Lưu workbook ra DOWNLOAD_DIR + copy sang Desktop và thư mục công ty. Trả path."""
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return path
+
+# Form 'Chứng từ mua dịch vụ' (MISA): 40 cột A..AN + AO đệm + AP 'Lọc' + AQ đệm
+MUA_DV_HEADERS = [
+    "Hiển thị trên sổ", "Phương thức thanh toán", "Nhận kèm hóa đơn",
+    "Là CP mua hàng", "Ngày hạch toán (*)", "Ngày chứng từ (*)",
+    "Số chứng từ (*)", "Mã nhà cung cấp", "Tên nhà cung cấp", "Địa chỉ",
+    "Diễn giải/Lý do chi/Nội dung thanh toán", "NV mua hàng", "Loại tiền",
+    "Tỷ giá", "Mã dịch vụ (*)", "Tên dịch vụ", "TK chi phí/TK kho (*)",
+    "TK công nợ/TK tiền (*)", "Đối tượng", "ĐVT", "Số lượng", "Đơn giá",
+    "Thành tiền", "Thành tiền quy đổi", "Tỷ lệ CK (%)", "Tiền chiết khấu",
+    "Tiền chiết khấu quy đổi", "% thuế GTGT", "Tiền thuế GTGT",
+    "Tiền thuế GTGT quy đổi", "TK thuế GTGT", "Mẫu số HĐ", "Ký hiệu HĐ",
+    "Số hóa đơn", "Ngày hóa đơn", "Nhóm HHDV mua vào", "Mã NCC", "Tên NCC",
+    "Mã số thuế NCC", "Địa chỉ NCC", "", "Lọc", ""]
+MUA_DV_COT_TEXT = {7, 8, 19, 34, 37, 39, 42, 43}
+MUA_DV_COT_TIEN = {23, 29}
+MUA_DV_COT_THAPPHAN = {21, 22}
+
+def _gen_mua_hang_dv(cid, header, rows):
+    """Từ lưới Nhập Liệu đầu vào -> danh sách dòng 'Chứng từ mua dịch vụ' (chỉ
+    dòng Nợ là TK chi phí 6xx). Mỗi dòng là list phẳng dài 43 cột."""
+    hlow = [str(h or "").strip().lower() for h in header]
     def tim(eqs=(), contains=()):
         for i, h in enumerate(hlow):
             if h in eqs:
@@ -4305,67 +4359,28 @@ async def mua_hang_dich_vu(cid: int, request: Request):
             if any(k in h for k in contains):
                 return i
         return -1
-
-    i_kh = tim(("ký hiệu",), ("ký hiệu",))
     i_so = tim(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn"))
     i_ngay = tim(("ngày",), ("ngày",))
     i_nb = tim(("người bán",), ("người bán",))
     i_mst = tim(("mst bán", "mst"), ("mst",))
     i_ten = tim(("tên hàng hóa/dịch vụ",), ("tên hàng",))
-    i_dvt = tim(("đvt",), ("đvt", "đơn vị tính"))
-    i_sl = tim(("số lượng",), ("số lượng",))
-    i_dg = tim(("đơn giá",), ("đơn giá",))
-    i_tt = tim(("thành tiền",), ("thành tiền",))
-    i_ts = tim(("thuế suất",), ("thuế suất",))   # tránh 'thuế suất nk' nhờ ưu tiên ==
+    i_ts = tim(("thuế suất",), ("thuế suất",))
     i_tthue = tim(("tiền thuế gtgt",), ("tiền thuế",))
+    i_tt = tim(("thành tiền",), ("thành tiền",))
     i_no = tim(("nợ",), ())
     i_co = tim(("có",), ())
 
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
 
-    def ts_num(v):
-        return _chuan_thue_suat(v)
-
     soct_seen, soct_cache = {}, {}
     def so_chung_tu(sohd, mst_disp, ngay):
-        # cùng 1 hóa đơn (số HĐ+MST+ngày) -> dùng lại đúng 1 số chứng từ
         return _so_ct_unique_memo("DV", ngay, mst_disp, (sohd, mst_disp, ngay),
-                                   soct_seen, soct_cache)
-
-    # form headers (cột A..AN) + cột 'Lọc'
-    out_headers = [
-        "Hiển thị trên sổ", "Phương thức thanh toán", "Nhận kèm hóa đơn",
-        "Là CP mua hàng", "Ngày hạch toán (*)", "Ngày chứng từ (*)",
-        "Số chứng từ (*)", "Mã nhà cung cấp", "Tên nhà cung cấp", "Địa chỉ",
-        "Diễn giải/Lý do chi/Nội dung thanh toán", "NV mua hàng", "Loại tiền",
-        "Tỷ giá", "Mã dịch vụ (*)", "Tên dịch vụ", "TK chi phí/TK kho (*)",
-        "TK công nợ/TK tiền (*)", "Đối tượng", "ĐVT", "Số lượng", "Đơn giá",
-        "Thành tiền", "Thành tiền quy đổi", "Tỷ lệ CK (%)", "Tiền chiết khấu",
-        "Tiền chiết khấu quy đổi", "% thuế GTGT", "Tiền thuế GTGT",
-        "Tiền thuế GTGT quy đổi", "TK thuế GTGT", "Mẫu số HĐ", "Ký hiệu HĐ",
-        "Số hóa đơn", "Ngày hóa đơn", "Nhóm HHDV mua vào", "Mã NCC", "Tên NCC",
-        "Mã số thuế NCC", "Địa chỉ NCC"]
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Chứng từ mua dịch vụ"
-    for c, h in enumerate(out_headers, 1):
-        ws.cell(1, c).value = h
-    ws.cell(1, 42).value = "Lọc"      # cột AP
-    for c in range(1, 43):
-        if ws.cell(1, c).value:
-            ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
-            ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
-
-    cot_thapphan = {21, 22}            # U,V số lượng/đơn giá (giữ phần thập phân)
-    cot_tien = {23, 29}                # W,AC thành tiền/tiền thuế (số nguyên)
-    cot_text = {7, 8, 19, 34, 37, 39, 42, 43}  # G,H,S,AH,AK,AM,AP,AQ giữ dạng chữ
-    r_out = 1
-    so_dong = 0
+                                  soct_seen, soct_cache)
+    out = []
     for r in rows:
         no = str(gv(r, i_no) or "").strip()
-        if not no.startswith("6"):    # chỉ lấy Nợ là TK chi phí 6xx
+        if not no.startswith("6"):          # chỉ lấy Nợ là TK chi phí 6xx
             continue
         co = str(gv(r, i_co) or "").strip()
         mst_disp = _dinh_dang_mst(gv(r, i_mst))
@@ -4374,53 +4389,43 @@ async def mua_hang_dich_vu(cid: int, request: Request):
         ten = gv(r, i_ten)
         soct = so_chung_tu(sohd, mst_disp, ngay)
         tt_val = _to_num(gv(r, i_tt))
-        r_out += 1
         row_vals = {
-            1: 0, 2: 1, 3: 1,                       # A,B,C
-            5: ngay, 6: ngay, 7: soct,              # E,F,G
-            8: mst_disp, 9: gv(r, i_nb),            # H,I
-            11: ten,                                 # K Diễn giải
-            15: "MHDV", 16: ten,                    # O,P
-            17: no, 18: co, 19: mst_disp,           # Q,R,S
-            # ĐVT để trống; Số lượng=1, Đơn giá=Thành tiền (để import phần mềm tự động)
+            1: 0, 2: 1, 3: 1,
+            5: ngay, 6: ngay, 7: soct,
+            8: mst_disp, 9: gv(r, i_nb),
+            11: ten,
+            15: "MHDV", 16: ten,
+            17: no, 18: co, 19: mst_disp,
             20: "", 21: 1,
             22: tt_val, 23: tt_val,
-            28: ts_num(gv(r, i_ts)), 29: _to_num(gv(r, i_tthue)),
-            31: "1331",                              # AE TK thuế GTGT
-            34: sohd, 35: ngay, 36: "1",            # AH,AI,AJ
-            37: mst_disp, 38: gv(r, i_nb), 39: mst_disp,  # AK,AL,AM
-            42: sohd, 43: soct,                      # AP Lọc, AQ
+            28: _chuan_thue_suat(gv(r, i_ts)), 29: _to_num(gv(r, i_tthue)),
+            31: "1331",
+            34: sohd, 35: ngay, 36: "1",
+            37: mst_disp, 38: gv(r, i_nb), 39: mst_disp,
+            42: sohd, 43: soct,
         }
+        row = [""] * 43
         for c, v in row_vals.items():
-            cell = ws.cell(r_out, c)
-            cell.value = v
-            if c in cot_text:
-                cell.number_format = "@"
-            elif c in cot_thapphan:
-                cell.number_format = "#,##0.####"
-            elif c in cot_tien:
-                cell.number_format = "#,##0"
-        so_dong += 1
+            row[c - 1] = v
+        out.append(row)
+    return out
 
-    for c in range(1, 44):
-        ws.column_dimensions[get_column_letter(c)].width = 16
-    ws.freeze_panes = "A2"
-
+@app.post("/api/mua-hang-dv/{cid}")
+async def mua_hang_dich_vu(cid: int, request: Request):
+    """Lọc Bảng kê Mua vào (đã hạch toán) -> kết xuất 'Chứng từ mua dịch vụ'
+    theo form MISA. Chỉ lấy dòng có Nợ bắt đầu bằng '6' (chi phí dịch vụ).
+    Nhận {header, rows} của lưới Nhập Liệu đầu vào."""
+    body = await request.json()
+    out = _gen_mua_hang_dv(cid, body.get("header", []), body.get("rows", []))
     conn = db()
     comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     mst_cty = _chuan_mst(comp["mst"]) if comp else str(cid)
     fname = f"MuaHangDichVu_{mst_cty}.xlsx"
-    path = os.path.join(DOWNLOAD_DIR, fname)
-    wb.save(path)
-    import shutil
-    for d in (_get_desktop_dir(), (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
-        if d and os.path.isdir(d):
-            try:
-                shutil.copy(path, os.path.join(d, fname))
-            except Exception:
-                pass
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(so_dong)})
+    wb = _viet_wb_misa(MUA_DV_HEADERS, out, "Chứng từ mua dịch vụ",
+                       MUA_DV_COT_TEXT, MUA_DV_COT_TIEN, MUA_DV_COT_THAPPHAN)
+    path = _luu_file_misa(wb, fname, cid)
+    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
 
 
 # ============ DANH MỤC HÀNG HÓA / NVL / VTHH (từ bảng kê mua vào) ============
@@ -6198,6 +6203,145 @@ def xk_export_giathanh(cid: int):
             except Exception:
                 pass
     return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(rows))})
+
+
+# ============================================================
+#  XUẤT TRỌN GÓI CHO MISA SME (tất cả chứng từ + danh mục 1 lần, 1 thư mục)
+# ============================================================
+def _huong_dan_misa_text():
+    return (
+        "HUONG DAN NHAP (IMPORT) DU LIEU VAO MISA SME.NET\n"
+        "==================================================\n\n"
+        "Cac file trong thu muc nay da dung dinh dang mau nhap khau cua MISA.\n"
+        "Vao MISA SME, moi loai chung tu import o phan he tuong ung:\n\n"
+        "1) DANH MUC truoc tien (de co ma hang/vat tu):\n"
+        "   - DanhMuc_DMHH / DMNVL: Danh muc > Vat tu hang hoa > tien ich Nhap khau.\n"
+        "   - DanhMuc_DMTSCD: Danh muc > Tai san co dinh > Nhap khau.\n"
+        "   - DanhMuc_DMCCDC: Danh muc > Cong cu dung cu > Nhap khau.\n\n"
+        "2) CHUNG TU MUA VAO:\n"
+        "   - MuaHangNhapKho: Nghiep vu > Mua hang > Chung tu mua hang > tien ich\n"
+        "     Nhap khau (chon mau 'Mua hang hoa nhap kho').\n"
+        "   - MuaHangKQK (khong qua kho / TSCD-CCDC): Nghiep vu > Mua hang >\n"
+        "     Nhap khau (mau 'Mua hang khong qua kho').\n"
+        "   - MuaHangDichVu: Nghiep vu > Mua hang > Chung tu mua dich vu > Nhap khau.\n\n"
+        "3) BAN HANG:\n"
+        "   - BanHang: Nghiep vu > Ban hang > Chung tu ban hang > Nhap khau.\n\n"
+        "4) XUAT KHO:\n"
+        "   - XuatKho: Nghiep vu > Kho > Xuat kho > Nhap khau.\n\n"
+        "5) GHI TANG TAI SAN / CONG CU:\n"
+        "   - GhiTangTSCD: Nghiep vu > Tai san co dinh > Ghi tang > Nhap khau.\n"
+        "   - GhiTangCCDC: Nghiep vu > Cong cu dung cu > Ghi tang > Nhap khau.\n\n"
+        "LUU Y:\n"
+        "- Ten menu co the khac chut theo phien ban MISA. Neu khong thay 'Nhap khau'\n"
+        "  o phan he, thu: Tep (File) > Nhap khau du lieu tu Excel.\n"
+        "- Khi nhap khau, chon dung file va MISA se tu khop cot theo mau. Kiem tra\n"
+        "  lai truoc khi 'Thuc hien' de cat vao so.\n"
+        "- Nen nhap DANH MUC truoc, roi moi nhap cac chung tu.\n")
+
+def _xuat_tron_goi_misa(cid):
+    """Sinh TẤT CẢ file MISA của công ty (từ dữ liệu ĐÃ LƯU: Bảng kê đầu vào/ra,
+    Xuất kho, các Danh mục) vào CÙNG 1 thư mục. Trả (folder, danh_sach_file)."""
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    mst = _chuan_mst(comp["mst"]) or str(cid)
+    base = _get_desktop_dir() or DOWNLOAD_DIR
+    folder = os.path.join(base, f"MISA_{mst}_{datetime.datetime.now().strftime('%d%m%Y_%H%M')}")
+    os.makedirs(folder, exist_ok=True)
+
+    dv = nhap_lieu_get(cid, "in")
+    dr = nhap_lieu_get(cid, "out")
+    hv, rv = dv.get("header") or [], dv.get("rows") or []
+    ho, ro = dr.get("header") or [], dr.get("rows") or []
+    data = _doc_du_lieu_cty(cid)
+    ket = []
+
+    def lam(ten, fname, sheet, headers, rows, cot_text, cot_tien, cot_thapphan=None):
+        if not rows:
+            return
+        wb = _viet_wb_misa(headers, rows, sheet, cot_text, cot_tien, cot_thapphan)
+        wb.save(os.path.join(folder, fname))
+        ket.append({"ten": ten, "file": fname, "so_dong": len(rows)})
+
+    # ----- Danh mục trước (import trước trong MISA) -----
+    for loai in ("hh", "nvl", "tscd", "ccdc"):
+        store = data.get("dm_" + loai) or {}
+        rows = [list(r) for r in (store.get("rows") or [])]
+        if not rows:
+            continue
+        sheet = {"hh": "DMHH", "nvl": "DMNVL", "tscd": "DMTSCD", "ccdc": "DMCCDC"}[loai]
+        if _dm_la_ts(loai):
+            ct_text, ct_tien = {1, 7}, {4, 5, 6}
+        else:
+            ct_text = {DM_I_MA + 1, DM_I_KY + 1, DM_I_HD + 1, DM_I_KHO + 1}
+            ct_tien = {DM_I_SL + 1, DM_I_DG + 1, DM_I_TT + 1}
+        lam(f"Danh mục {sheet[2:]}", f"DanhMuc_{sheet}_{mst}.xlsx", sheet,
+            _dm_headers(loai), rows, ct_text, ct_tien)
+
+    # ----- Chứng từ MUA VÀO (từ bảng kê đầu vào đã lưu) -----
+    if rv:
+        lam("Mua hàng nhập kho", f"MuaHangNhapKho_{mst}.xlsx", "Mua hàng NK",
+            MUA_NK_HEADERS, _gen_mua_hang_nk(cid, hv, rv),
+            {7, 9, 10, 11, 13, 20, 22, 24, 25, 38, 39, 45}, {27, 28, 29, 36, 42, 44})
+        lam("Mua hàng không qua kho", f"MuaHangKQK_{mst}.xlsx", "Mua hàng không qua Kho",
+            MUA_KQK_HEADERS, _gen_mua_hang_kqk(cid, hv, rv),
+            {7, 8, 9, 10, 12, 18, 20, 21, 35, 40}, {23, 24, 25, 32, 37, 39})
+        lam("Mua hàng dịch vụ", f"MuaHangDichVu_{mst}.xlsx", "Chứng từ mua dịch vụ",
+            MUA_DV_HEADERS, _gen_mua_hang_dv(cid, hv, rv),
+            MUA_DV_COT_TEXT, MUA_DV_COT_TIEN, MUA_DV_COT_THAPPHAN)
+        lam("Ghi tăng CCDC", f"GhiTangCCDC_{mst}.xlsx", "Ghi Tăng CCDC",
+            GHITANG_CCDC_HEADERS, _gen_ghi_tang_ccdc(cid, hv, rv),
+            {1, 4, 5, 7, 18}, {9, 10, 11, 12, 13})
+        lam("Ghi tăng TSCĐ", f"GhiTangTSCD_{mst}.xlsx", "Ghi tăng tài sản cố định",
+            GHITANG_TSCD_HEADERS, _gen_ghi_tang_tscd(cid, hv, rv),
+            {1, 5, 6, 8, 9, 19}, {10, 11, 15})
+
+    # ----- BÁN HÀNG (từ bảng kê đầu ra đã lưu) -----
+    if ro:
+        lam("Bán hàng", f"BanHang_{mst}.xlsx", "Chứng từ bán hàng",
+            BAN_HANG_HEADERS, _gen_ban_hang(cid, ho, ro),
+            {9, 13, 14, 16, 19, 25, 28, 29, 47}, {32, 33, 34, 45})
+
+    # ----- XUẤT KHO (từ giá thành đã lưu) -----
+    xk = data.get("xk_giathanh") or []
+    if xk:
+        xk_rows, _soct = _gen_xuat_kho_rows(xk)
+        lam("Xuất kho", f"XuatKho_{mst}.xlsx", "Xuất kho", XUAT_KHO_HEADERS, xk_rows,
+            {5, 28, 31, 33, 34, 35}, {36, 37, 38, 39, 40})
+
+    try:
+        with open(os.path.join(folder, "HUONG_DAN_IMPORT_MISA.txt"), "w", encoding="utf-8") as f:
+            f.write(_huong_dan_misa_text())
+    except Exception:
+        pass
+    return folder, ket
+
+
+@app.post("/api/misa/xuat-tron-goi/{cid}")
+def misa_xuat_tron_goi(cid: int):
+    """Xuất trọn gói cho MISA: tạo tất cả file chứng từ + danh mục của công ty
+    (từ dữ liệu đã lưu) vào 1 thư mục, rồi tự MỞ thư mục đó."""
+    folder, ket = _xuat_tron_goi_misa(cid)
+    if not ket:
+        raise HTTPException(400, "Chưa có dữ liệu đã lưu để xuất. Hãy Import & Lưu Bảng kê "
+                                 "đầu vào/đầu ra, tạo Danh mục, hoặc dò mã Xuất kho trước.")
+    _open_file_local(folder)   # tự mở thư mục chứa file cho người dùng
+    return {"ok": True, "folder": folder, "files": ket, "so_file": len(ket),
+            "huong_dan": _huong_dan_misa_text()}
+
+
+@app.post("/api/misa/mo-thu-muc/{cid}")
+def misa_mo_thu_muc(cid: int):
+    """Mở thư mục lưu file (Desktop hoặc thư mục công ty) để người dùng lấy file
+    kéo vào MISA."""
+    d = _get_desktop_dir()
+    if not (d and os.path.isdir(d)):
+        p = _du_lieu_cty_path(cid)
+        d = os.path.dirname(p) if p else DOWNLOAD_DIR
+    _open_file_local(d)
+    return {"ok": True, "folder": d}
 
 
 @app.get("/api/danh-muc-ncc/{cid}")

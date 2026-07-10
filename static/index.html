@@ -476,10 +476,37 @@
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Dò mã hàng từ Tồn kho → form MISA Xuất kho</div>
         </div>
       </div>
+      <div style="margin-top:16px;background:#f0f7ff;border:2px solid #2e5c8a;border-radius:14px;padding:16px 20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+          <div style="min-width:240px;flex:1">
+            <div style="font-size:17px;font-weight:800;color:#2e5c8a">🔗 Kết nối MISA SME</div>
+            <div style="font-size:13px;color:var(--muted);margin-top:4px">Xuất TẤT CẢ file chứng từ + danh mục của công ty (từ dữ liệu đã Lưu) vào 1 thư mục, tự mở sẵn để bạn nhập thẳng vào MISA — không cần thao tác Excel từng bước.</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" style="background:#2e5c8a" onclick="misaXuatTronGoi()">📦 Xuất trọn gói cho MISA</button>
+            <button class="btn ghost sm" onclick="misaMoThuMuc()">📂 Mở thư mục file</button>
+            <button class="btn ghost sm" onclick="misaHuongDan()">📖 Hướng dẫn import</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div id="nhapLieuContent" style="display:none">
       <button class="btn ghost sm" onclick="quayLaiChonBangKe()" style="margin-bottom:14px">← Chọn loại khác</button>
       <div id="nhapLieuBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL Kết nối MISA (kết quả xuất trọn gói + hướng dẫn) -->
+<div id="misaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:700;align-items:center;justify-content:center">
+  <div style="width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:10px">
+      <div style="font-weight:800;font-size:19px;color:#2e5c8a">🔗 Kết nối MISA SME</div>
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">✕</button>
+    </div>
+    <div id="misaModalBody" style="overflow:auto;flex:1;font-size:14px;line-height:1.5"></div>
+    <div style="margin-top:12px;text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
     </div>
   </div>
 </div>
@@ -1628,6 +1655,65 @@ function moXuatKho(){
   document.getElementById('nhapLieuContent').style.display='block';
   xkVeTrangChinh();
   xkTaiTrangThai();
+}
+/* ----- KẾT NỐI MISA SME (xuất trọn gói + hướng dẫn import) ----- */
+function misaEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function misaXuatTronGoi(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang xuất trọn gói cho MISA...','');
+  try{
+    const d=await api(`/api/misa/xuat-tron-goi/${current}`,{method:'POST'});
+    const ds=(d.files||[]).map(f=>`<li><b>${misaEsc(f.file)}</b> — ${misaEsc(f.ten)} (${f.so_dong} dòng)</li>`).join('');
+    const html=`<div style="background:#eafbf1;border:1px solid #8fd9ac;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+        ✓ Đã tạo <b>${d.so_file}</b> file vào thư mục (đã tự mở):<br><code style="font-size:12px">${misaEsc(d.folder)}</code></div>
+      <ul style="margin:0 0 12px 18px;padding:0">${ds}</ul>
+      <div style="font-weight:700;margin-bottom:4px">📖 Hướng dẫn nhập vào MISA:</div>
+      <pre style="white-space:pre-wrap;background:#f6f8fa;border:1px solid #e0e0e0;border-radius:8px;padding:10px;font-size:12.5px;margin:0">${misaEsc(d.huong_dan||'')}</pre>`;
+    document.getElementById('misaModalBody').innerHTML=html;
+    document.getElementById('misaModal').style.display='flex';
+    toast(`📦 Đã xuất ${d.so_file} file cho MISA`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaMoThuMuc(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  try{await api(`/api/misa/mo-thu-muc/${current}`,{method:'POST'});toast('📂 Đã mở thư mục lưu file','ok');}
+  catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function misaHuongDan(){
+  const t=`HUONG DAN NHAP (IMPORT) DU LIEU VAO MISA SME.NET
+==================================================
+
+Cac file xuat ra da dung dinh dang mau nhap khau cua MISA.
+Trong MISA SME, moi loai chung tu import o phan he tuong ung:
+
+1) DANH MUC truoc (de co ma hang/vat tu):
+   - DanhMuc_DMHH / DMNVL: Danh muc > Vat tu hang hoa > Nhap khau.
+   - DanhMuc_DMTSCD: Danh muc > Tai san co dinh > Nhap khau.
+   - DanhMuc_DMCCDC: Danh muc > Cong cu dung cu > Nhap khau.
+
+2) MUA VAO:
+   - MuaHangNhapKho: Nghiep vu > Mua hang > Chung tu mua hang > Nhap khau.
+   - MuaHangKQK: Nghiep vu > Mua hang > Nhap khau (mau khong qua kho).
+   - MuaHangDichVu: Nghiep vu > Mua hang > Chung tu mua dich vu > Nhap khau.
+
+3) BAN HANG:
+   - BanHang: Nghiep vu > Ban hang > Chung tu ban hang > Nhap khau.
+
+4) XUAT KHO:
+   - XuatKho: Nghiep vu > Kho > Xuat kho > Nhap khau.
+
+5) GHI TANG TAI SAN / CONG CU:
+   - GhiTangTSCD: Nghiep vu > Tai san co dinh > Ghi tang > Nhap khau.
+   - GhiTangCCDC: Nghiep vu > Cong cu dung cu > Ghi tang > Nhap khau.
+
+LUU Y:
+- Ten menu co the khac chut theo phien ban MISA. Neu khong thay 'Nhap khau'
+  o phan he, thu: Tep (File) > Nhap khau du lieu tu Excel.
+- Nen nhap DANH MUC truoc, roi moi nhap cac chung tu.
+- File luu san trong thu muc tren Desktop (ten MISA_<MST>_<ngay>).`;
+  document.getElementById('misaModalBody').innerHTML=
+    `<pre style="white-space:pre-wrap;background:#f6f8fa;border:1px solid #e0e0e0;border-radius:8px;padding:10px;font-size:12.5px;margin:0">${misaEsc(t)}</pre>`;
+  document.getElementById('misaModal').style.display='flex';
 }
 async function xkTaiTrangThai(){
   try{
