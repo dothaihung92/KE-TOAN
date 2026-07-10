@@ -6392,8 +6392,8 @@ def _misa_sql_connect(cid, cfg=None, database=None, timeout=8, readonly=True):
         parts.append("UID=%s" % (cfg.get("user") or ""))
         parts.append("PWD=%s" % (cfg.get("password") or ""))
     parts.append("TrustServerCertificate=yes")
-    if readonly:
-        parts.append("ApplicationIntent=ReadOnly")
+    # KHÔNG dùng ApplicationIntent=ReadOnly (một số cấu hình/driver cũ gây lỗi
+    # kết nối). An toàn "chỉ đọc" đảm bảo bằng việc chỉ chạy lệnh SELECT.
     try:
         conn = pyodbc.connect(";".join(parts) + ";", timeout=timeout)
         conn.autocommit = True
@@ -6402,18 +6402,27 @@ def _misa_sql_connect(cid, cfg=None, database=None, timeout=8, readonly=True):
         msg = str(e)
         # Kết nối TỚI ĐƯỢC server nhưng SAI đăng nhập (18456) -> hướng dẫn đúng cách
         if "18456" in msg or "Login failed" in msg:
+            # 4060 = đăng nhập OK nhưng không có quyền mở đúng database này
+            if "4060" in msg or "Cannot open database" in msg:
+                raise HTTPException(
+                    400,
+                    "Đăng nhập được nhưng tài khoản này KHÔNG có quyền mở database '%s' (lỗi 4060). "
+                    "Tài khoản Windows thường không được MISA cấp quyền trên database của nó. "
+                    "Hãy dùng tài khoản 'sa': đổi Xác thực = 'Tài khoản SQL', User = sa, kèm mật khẩu sa "
+                    "của MISA (tài khoản sa có toàn quyền, mở được mọi database). Nếu chưa biết mật khẩu "
+                    "sa, hỏi người cài MISA hoặc xem trong cấu hình kết nối của MISA."
+                    % (db or "?"))
             u = cfg.get("user") or ""
             raise HTTPException(
                 400,
                 "Kết nối được SQL Server nhưng SAI TÀI KHOẢN/MẬT KHẨU"
                 + (" (đăng nhập '%s' không hợp lệ)" % u if u else "")
                 + ". Lưu ý: MISA KHÔNG dùng Mã số thuế làm tài khoản SQL. Hãy thử: "
-                "① chọn Xác thực = 'Windows (Trusted)' và để trống user/mật khẩu (thường "
-                "chạy được vì tài khoản Windows cài MISA có quyền quản trị SQL); hoặc "
+                "① Xác thực = 'Windows (Trusted)' để trống user/mật khẩu; hoặc "
                 "② nhập đúng tài khoản 'sa' của MISA.")
         if "Cannot open database" in msg or "4060" in msg:
-            raise HTTPException(400, "Đăng nhập OK nhưng không mở được database đã chọn (không có quyền "
-                                     "hoặc sai tên DB). Chọn lại đúng database của công ty. Chi tiết: %s" % msg[:200])
+            raise HTTPException(400, "Không mở được database đã chọn (không có quyền hoặc sai tên DB). "
+                                     "Thử dùng tài khoản 'sa'. Chi tiết: %s" % msg[:200])
         raise HTTPException(400, "Không kết nối được SQL Server: %s. Kiểm tra tên server/instance, "
                                  "đã bật TCP/IP + SQL Browser, và tài khoản/mật khẩu." % (msg[:300]))
 
