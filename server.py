@@ -6378,7 +6378,11 @@ def _misa_sql_connect(cid, cfg=None, database=None, timeout=8, readonly=True):
     if not server:
         raise HTTPException(400, "Thiếu 'server' (tên máy chủ SQL). Ví dụ: .\\MISASME2023 hoặc localhost\\MISASME2022")
     db = database or str(cfg.get("database") or "").strip()
-    drv = sorted(drivers, reverse=True)[0]     # driver mới nhất
+    # ưu tiên driver hiện đại (18/17) rồi mới tới Native Client / 'SQL Server'
+    _uu_tien = ["ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server",
+                "ODBC Driver 13 for SQL Server", "SQL Server Native Client 11.0",
+                "SQL Server Native Client 10.0", "SQL Server"]
+    drv = next((d for d in _uu_tien if d in drivers), sorted(drivers, reverse=True)[0])
     parts = ["DRIVER={%s}" % drv, "SERVER=%s" % server]
     if db:
         parts.append("DATABASE=%s" % db)
@@ -6395,8 +6399,23 @@ def _misa_sql_connect(cid, cfg=None, database=None, timeout=8, readonly=True):
         conn.autocommit = True
         return conn
     except Exception as e:
+        msg = str(e)
+        # Kết nối TỚI ĐƯỢC server nhưng SAI đăng nhập (18456) -> hướng dẫn đúng cách
+        if "18456" in msg or "Login failed" in msg:
+            u = cfg.get("user") or ""
+            raise HTTPException(
+                400,
+                "Kết nối được SQL Server nhưng SAI TÀI KHOẢN/MẬT KHẨU"
+                + (" (đăng nhập '%s' không hợp lệ)" % u if u else "")
+                + ". Lưu ý: MISA KHÔNG dùng Mã số thuế làm tài khoản SQL. Hãy thử: "
+                "① chọn Xác thực = 'Windows (Trusted)' và để trống user/mật khẩu (thường "
+                "chạy được vì tài khoản Windows cài MISA có quyền quản trị SQL); hoặc "
+                "② nhập đúng tài khoản 'sa' của MISA.")
+        if "Cannot open database" in msg or "4060" in msg:
+            raise HTTPException(400, "Đăng nhập OK nhưng không mở được database đã chọn (không có quyền "
+                                     "hoặc sai tên DB). Chọn lại đúng database của công ty. Chi tiết: %s" % msg[:200])
         raise HTTPException(400, "Không kết nối được SQL Server: %s. Kiểm tra tên server/instance, "
-                                 "đã bật TCP/IP + SQL Browser, và tài khoản/mật khẩu." % (str(e)[:300]))
+                                 "đã bật TCP/IP + SQL Browser, và tài khoản/mật khẩu." % (msg[:300]))
 
 
 @app.get("/api/misa-sql/trang-thai/{cid}")
