@@ -6711,11 +6711,21 @@ def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: i
 #  ⚠ Ghi vào DB MISA — chỉ chạy trên dữ liệu THỬ/đã sao lưu. Có preview trước,
 #  bỏ qua mã đã tồn tại, chạy trong transaction (lỗi -> rollback, không ghi dở).
 # ============================================================
-def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True):
-    """Thêm các mã hàng (Danh mục Hàng hóa của phần mềm) vào bảng InventoryItem
-    của MISA. Chỉ THÊM mã MỚI (bỏ qua mã đã có). Tự tạo đơn vị tính (Unit) nếu
-    chưa có. preview=True: chỉ xem trước, KHÔNG ghi (rollback)."""
+# Danh mục kho -> (TK kho, TK giá vốn, TK doanh thu, tiền tố TK để dò tính chất)
+_MISA_INV_ACC = {
+    "hh":  ("1561", "632", "5111", "156%"),   # Hàng hóa
+    "nvl": ("152",  "632", "5111", "152%"),   # Nguyên vật liệu
+    "ccdc": ("153", "632", "5111", "153%"),   # Công cụ dụng cụ (nhập kho)
+}
+_MISA_INV_TEN = {"hh": "Hàng hóa", "nvl": "Nguyên vật liệu", "ccdc": "Công cụ dụng cụ"}
+
+def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
+    """Thêm các mã (Danh mục Hàng hóa/NVL/CCDC của phần mềm) vào bảng
+    InventoryItem của MISA. Chỉ THÊM mã MỚI (bỏ qua mã đã có). Tự tạo đơn vị
+    tính (Unit) nếu chưa có. preview=True: chỉ xem trước, KHÔNG ghi (rollback).
+    loai: hh/nvl/ccdc -> quyết định TK kho + dò 'tính chất' (InventoryItemType)."""
     import uuid as _uuid
+    inv_acc, cogs_acc, sale_acc, acc_like = _MISA_INV_ACC.get(loai, _MISA_INV_ACC["hh"])
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
@@ -6730,18 +6740,22 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True):
         for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
             if uname:
                 units[str(uname).strip().lower()] = uid
-        # InventoryItemType MISA dùng cho HÀNG HÓA (dò từ dữ liệu thật, tránh đoán)
+        # 'Tính chất' (InventoryItemType) MISA dùng cho loại này (dò từ dữ liệu
+        # thật theo TK kho, tránh đoán). Nếu công ty thử chưa có mã loại này thì
+        # dò rộng theo mọi TK 15x làm dự phòng.
         item_type = 1
-        try:
-            row = cur.execute(
-                "SELECT TOP 1 InventoryItemType FROM InventoryItem "
-                "WHERE ISNULL(IsSystem,0)=0 AND InventoryAccount LIKE '156%' "
-                "AND InventoryItemType IS NOT NULL "
-                "GROUP BY InventoryItemType ORDER BY COUNT(*) DESC").fetchone()
+        for like in (acc_like, "15%"):
+            try:
+                row = cur.execute(
+                    "SELECT TOP 1 InventoryItemType FROM InventoryItem "
+                    "WHERE ISNULL(IsSystem,0)=0 AND InventoryAccount LIKE ? "
+                    "AND InventoryItemType IS NOT NULL "
+                    "GROUP BY InventoryItemType ORDER BY COUNT(*) DESC", like).fetchone()
+            except Exception:
+                row = None
             if row and row[0] is not None:
                 item_type = int(row[0])
-        except Exception:
-            pass
+                break
 
         cols = ["InventoryItemID", "InventoryItemCode", "InventoryItemName", "InventoryItemType",
                 "UnitID", "InventoryAccount", "COGSAccount", "SaleAccount", "TaxRate",
@@ -6787,7 +6801,7 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True):
             if not preview:
                 cur.execute(sql_ins,
                     str(_uuid.uuid4()), ma[:50], ten[:500], item_type,
-                    unit_id, "1561", "632", "5111", tax,
+                    unit_id, inv_acc, cogs_acc, sale_acc, tax,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "Chưa xác định", now)
             them += 1
             ket.append({"ma": ma, "ten": ten, "dvt": dvt,
@@ -6810,18 +6824,21 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True):
 
 @app.post("/api/misa-sql/import-hang-hoa/{cid}")
 async def misa_sql_import_hang_hoa(cid: int, request: Request):
-    """Import Danh mục Hàng hóa vào MISA (bảng InventoryItem). body: {rows,
-    preview, database?}. preview=true -> chỉ xem trước, không ghi."""
+    """Import Danh mục Hàng hóa/NVL/CCDC vào MISA (bảng InventoryItem). body:
+    {rows, preview, loai, database?}. preview=true -> chỉ xem trước, không ghi."""
     body = await request.json()
     rows = body.get("rows") or []
     preview = bool(body.get("preview", True))
+    loai = (body.get("loai") or "hh").strip()
+    if loai not in _MISA_INV_ACC:
+        raise HTTPException(400, "Loại danh mục '%s' chưa hỗ trợ ghi vào MISA (mới có hh/nvl/ccdc)." % loai)
     database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     if not rows:
-        raise HTTPException(400, "Danh mục trống — không có mã hàng để import.")
-    return _misa_ghi_hang_hoa(cid, database, rows, preview=preview)
+        raise HTTPException(400, "Danh mục trống — không có mã để import.")
+    return _misa_ghi_hang_hoa(cid, database, rows, preview=preview, loai=loai)
 
 
 @app.get("/api/danh-muc-ncc/{cid}")

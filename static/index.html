@@ -3142,7 +3142,7 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
         <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
         <button class="btn sm" style="background:#5a3e8a" onclick="document.getElementById('dmImportFile').click()">📥 Import file</button>
         <input type="file" id="dmImportFile" accept=".xlsx" style="display:none" onchange="dmImportDanhMuc(this)">
-        ${loai==='hh'?`<button class="btn sm" style="background:#b06a00" onclick="dmImportMisa()" title="Ghi danh mục hàng hóa thẳng vào MISA (bảng InventoryItem)">⬆ Import vào MISA</button>`:''}
+        ${['hh','nvl','ccdc'].includes(loai)?`<button class="btn sm" style="background:#b06a00" onclick="dmImportMisa()" title="Ghi danh mục thẳng vào MISA (bảng InventoryItem)">⬆ Import vào MISA</button>`:''}
         <button class="btn ghost sm" onclick="quayLaiBangKeIn()">← Về bảng kê</button>
       </div>
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
@@ -3201,14 +3201,15 @@ async function dmImportDanhMuc(input){
 }
 // Ghi Danh mục Hàng hóa THẲNG vào MISA (bảng InventoryItem). Xem trước rồi mới ghi.
 async function dmImportMisa(){
-  if(nlDMMode!=='hh'){toast('Chức năng này hiện chỉ cho Danh mục Hàng hóa','err');return}
+  if(!['hh','nvl','ccdc'].includes(nlDMMode)){toast('Chức năng này hiện cho DM Hàng hóa / NVL / CCDC','err');return}
+  const loai=nlDMMode;
   const rows=nlRows.map(r=>[r[0],r[1],r[2],r[3]]);   // Mã, Tên, ĐVT, Thuế suất
   if(!rows.length){toast('Danh mục trống','err');return}
   toast('Đang kiểm tra (xem trước)...','');
   try{
     // 1) PREVIEW (không ghi)
     const pv=await api(`/api/misa-sql/import-hang-hoa/${current}`,{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:true})});
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:true,loai})});
     const ds=(pv.danh_sach||[]).slice(0,300).map(x=>`<tr>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ma)}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td>
@@ -3231,13 +3232,14 @@ async function dmImportMisa(){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function dmImportMisaGhi(){
+  const loai=nlDMMode;
   const rows=nlRows.map(r=>[r[0],r[1],r[2],r[3]]);
   toast('Đang ghi vào MISA...','');
   try{
     const d=await api(`/api/misa-sql/import-hang-hoa/${current}`,{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:false})});
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:false,loai})});
     document.getElementById('misaModal').style.display='none';
-    toast(`✓ Đã ghi ${d.so_them} mã hàng vào MISA (bỏ qua ${d.so_trung} mã đã có, tạo ${d.so_don_vi_moi} ĐVT). Mở MISA kiểm tra Danh mục Vật tư hàng hóa.`,'ok');
+    toast(`✓ Đã ghi ${d.so_them} mã vào MISA (bỏ qua ${d.so_trung} mã đã có, tạo ${d.so_don_vi_moi} ĐVT). Mở MISA kiểm tra Danh mục Vật tư hàng hóa.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 async function dmXuatGrid(){
