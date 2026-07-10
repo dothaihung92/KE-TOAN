@@ -535,7 +535,7 @@
       <button class="btn sm" style="background:#2e5c8a" onclick="misaSqlTest()">🔌 Lưu & Kết nối thử</button>
     </div>
     <div style="font-size:11.5px;color:#8a5d00;background:#fffdf5;border:1px solid #f0e2b0;border-radius:6px;padding:6px 10px;margin-bottom:6px">
-      💡 Mẹo: MISA <b>không</b> dùng Mã số thuế làm tài khoản SQL. Nếu chưa biết mật khẩu <code>sa</code>, hãy chọn Xác thực = <b>Windows (Trusted)</b> và để trống user/mật khẩu — thường kết nối được ngay trên máy đã cài MISA.
+      💡 <b>Lưu ý 2 lớp tài khoản khác nhau:</b> Tài khoản đăng nhập <b>trong MISA</b> (vd MST + mật khẩu của bạn) là tài khoản của <i>phần mềm MISA</i> — <b>KHÁC</b> với tài khoản <code>sa</code> của <i>SQL Server</i> mà mục này cần. Mật khẩu <code>sa</code> được đặt khi cài SQL cho MISA (thường do người cài MISA/kỹ thuật giữ), không phải mật khẩu bạn gõ khi mở MISA. Nếu không có mật khẩu <code>sa</code>, cần người có quyền quản trị SQL cấp quyền — hoặc dùng phương án "Xuất trọn gói + import" cho an toàn.
     </div>
     <div id="msqlDrivers" style="font-size:11.5px;color:var(--muted);margin-bottom:6px"></div>
     <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:6px">
