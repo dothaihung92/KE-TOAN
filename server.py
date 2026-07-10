@@ -6665,7 +6665,8 @@ def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: i
             names = [t for t in all_names
                      if any(k.lower() in t.lower() for k in _MISA_BANG_QUAN_TRONG)][:120]
         out = ["CAU TRUC BANG MISA — database: %s" % database,
-               "Loc: %s | So bang xuat: %d" % (loc or "(bang quan trong)", len(names)),
+               "Loc: %s | So bang xuat: %d" % (
+                   "(TAT CA bang)" if tat_ca else (loc or "(bang quan trong)"), len(names)),
                "=" * 70, ""]
         for t in names:
             pk = pk_by.get(t, set())
