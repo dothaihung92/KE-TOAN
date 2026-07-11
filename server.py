@@ -7284,16 +7284,50 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
                         "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
-                        "loai_ct_misa": ref_type_ten, "trang_thai": st})
+                        "loai_ct_misa": ref_type_ten, "trang_thai": st, "ref_id": ref_id})
         tong_pu = cur.execute("SELECT COUNT(*) FROM PUVoucher").fetchone()[0]
         if preview:
             conn.rollback()
         else:
             conn.commit()
+        # TỰ KIỂM TRA: sau khi ghi thật, chạy lại đúng view MISA dùng cho màn
+        # hình "Mua hàng hóa, dịch vụ" (View_PUVoucherService) để xem MISA có
+        # THỰC SỰ tìm thấy chứng từ vừa ghi hay không — cho biết chính xác lỗi
+        # nằm ở dữ liệu ghi (view không thấy) hay ở tầng hiển thị MISA (view
+        # thấy nhưng màn hình không hiện, có thể do lọc chi nhánh/phiên làm việc).
+        tu_kiem_tra = None
+        if not preview and them_ct:
+            ref_ids = [x["ref_id"] for x in ket if x.get("ref_id")]
+            if ref_ids:
+                try:
+                    ph = ",".join(["?"] * len(ref_ids))
+                    thay = cur.execute(
+                        "SELECT RefID, RefNoFinance, InvoiceStatusName, DisplayOnBookName "
+                        "FROM View_PUVoucherService WHERE RefID IN (%s)" % ph,
+                        ref_ids).fetchall()
+                    thay_ids = {str(r[0]).upper() for r in thay}
+                    tu_kiem_tra = {
+                        "view": "View_PUVoucherService",
+                        "so_ghi": len(ref_ids), "so_view_thay": len(thay),
+                        "ket_luan": ("View THẤY đủ chứng từ -> lỗi nằm ở tầng hiển thị MISA "
+                                    "(chi nhánh/phiên làm việc), KHÔNG phải dữ liệu ghi."
+                                    if len(thay) == len(ref_ids) else
+                                    "View KHÔNG thấy (hoặc thấy thiếu) chứng từ -> lỗi nằm ở "
+                                    "dữ liệu ghi (RefType/PUVoucherDetail/join)."),
+                    }
+                    # gắn kết quả tự kiểm tra vào từng dòng tương ứng
+                    for x in ket:
+                        if x.get("ref_id"):
+                            x["view_thay"] = str(x["ref_id"]).upper() in thay_ids
+                except Exception as e:
+                    tu_kiem_tra = {"loi": "Không tự kiểm tra được view: %s" % str(e)[:200]}
+        for x in ket:
+            x.pop("ref_id", None)
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
+                "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
                 "hoc_display_on_book": hoc_dob, "mau_that": mau_that,
                 "danh_sach": ket[:500]}
