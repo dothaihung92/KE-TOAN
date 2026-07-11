@@ -6725,7 +6725,7 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
     tính (Unit) nếu chưa có. preview=True: chỉ xem trước, KHÔNG ghi (rollback).
     loai: hh/nvl/ccdc -> quyết định TK kho + dò 'tính chất' (InventoryItemType)."""
     import uuid as _uuid
-    inv_acc, cogs_acc, sale_acc, acc_like = _MISA_INV_ACC.get(loai, _MISA_INV_ACC["hh"])
+    inv_acc, cogs_acc, sale_acc, _acc_like = _MISA_INV_ACC.get(loai, _MISA_INV_ACC["hh"])
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
@@ -6744,22 +6744,13 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
         for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
             if uname:
                 units[str(uname).strip().lower()] = uid
-        # 'Tính chất' (InventoryItemType) MISA dùng cho loại này (dò từ dữ liệu
-        # thật theo TK kho, tránh đoán). Nếu công ty thử chưa có mã loại này thì
-        # dò rộng theo mọi TK 15x làm dự phòng.
+        # 'Tính chất' (InventoryItemType) = 1 (Vật tư, hàng hóa) cho cả 3 danh
+        # mục Hàng hóa/NVL/CCDC. Trước đây dò theo dữ liệu có sẵn trong MISA
+        # (mã nào cùng TK kho thì lấy tính chất đó) nhưng có công ty đã lỡ gắn
+        # sai tính chất (vd Thành phẩm) cho các mã cũ trên TK 152 -> khiến mã
+        # mới import theo cũng bị sai. Vì Hàng hóa/NVL/CCDC của phần mềm luôn
+        # là "Vật tư, hàng hóa" nên gắn cố định, không dò nữa.
         item_type = 1
-        for like in (acc_like, "15%"):
-            try:
-                row = cur.execute(
-                    "SELECT TOP 1 InventoryItemType FROM InventoryItem "
-                    "WHERE ISNULL(IsSystem,0)=0 AND InventoryAccount LIKE ? "
-                    "AND InventoryItemType IS NOT NULL "
-                    "GROUP BY InventoryItemType ORDER BY COUNT(*) DESC", like).fetchone()
-            except Exception:
-                row = None
-            if row and row[0] is not None:
-                item_type = int(row[0])
-                break
 
         cols = ["InventoryItemID", "InventoryItemCode", "InventoryItemName", "InventoryItemType",
                 "UnitID", "InventoryAccount", "COGSAccount", "SaleAccount", "TaxRate",
