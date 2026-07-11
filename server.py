@@ -7079,35 +7079,46 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             else:
                 d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
                 d["refids"].append(refid)
-        # HỌC "mẫu" từ chứng từ Mua hàng MISA đã có sẵn (do chính MISA tạo,
-        # đang HIỂN THỊ được) để ghi giống hệt -> tránh đoán RefType/
-        # DisplayOnBook/IncludeInvoice sai khiến chứng từ không hiện trong
-        # danh sách "Mua hàng hóa, dịch vụ". Đồng thời trả về để chẩn đoán.
+        # HỌC "mẫu" từ chứng từ Mua hàng MISA THẬT (do người dùng/MISA tạo,
+        # đang HIỂN THỊ được) — CHỈ học từ chứng từ THẬT, KHÔNG học từ bản ghi
+        # do PHẦN MỀM tạo (JournalMemo bắt đầu "Nhập từ phần mềm kế toán") để
+        # tránh vòng lặp học lại chính bản ghi lỗi của mình.
+        # - RefType: khớp theo loại (mua + nhập kho/không qua kho/dịch vụ).
+        # - DisplayOnBook: lấy giá trị PHỔ BIẾN NHẤT của chứng từ THẬT (bất kỳ
+        #   loại nào) vì đây là thiết lập hiển thị chung, quyết định chứng từ có
+        #   hiện trong danh sách hay không.
+        _PM_MEMO = "Nhập từ phần mềm kế toán"
         tu_khoa_loai = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
                         "dv": ["mua", "dịch vụ"]}[loai]
         loai_ct_dang_co = []
-        hoc = None   # {"reftype","refname","display_on_book","include_invoice","so"}
+        mau_that = []   # chẩn đoán: mẫu chứng từ THẬT (để đối chiếu)
+        hoc = None      # RefType học theo loại
+        hoc_dob = None  # DisplayOnBook phổ biến của chứng từ THẬT
         try:
-            for rt, rn, dob, inc, cnt in cur.execute(
+            _dem_loai, _dem_dob = {}, {}
+            for rt, rn, dob, inc, memo, rnm, pf, pm in cur.execute(
                     "SELECT pv.RefType, rt.RefTypeName, pv.DisplayOnBook, pv.IncludeInvoice, "
-                    "COUNT(*) c FROM PUVoucher pv JOIN SYSRefType rt ON rt.RefType=pv.RefType "
-                    "GROUP BY pv.RefType, rt.RefTypeName, pv.DisplayOnBook, pv.IncludeInvoice "
-                    "ORDER BY c DESC").fetchall():
-                loai_ct_dang_co.append({"ten": rn, "reftype": int(rt), "so": int(cnt),
-                                        "display_on_book": dob})
+                    "ISNULL(pv.JournalMemo,''), pv.RefNoManagement, "
+                    "ISNULL(pv.IsPostedFinance,0), ISNULL(pv.IsPostedManagement,0) "
+                    "FROM PUVoucher pv JOIN SYSRefType rt ON rt.RefType=pv.RefType").fetchall():
+                if str(memo).startswith(_PM_MEMO):
+                    continue   # bỏ qua bản ghi do phần mềm tạo
+                key = (int(rt), rn)
+                _dem_loai[key] = _dem_loai.get(key, 0) + 1
+                if dob is not None:
+                    _dem_dob[dob] = _dem_dob.get(dob, 0) + 1
+                if len(mau_that) < 5:
+                    mau_that.append({"so_ct": rnm, "loai": rn, "display_on_book": dob,
+                                     "include_invoice": inc, "da_ghi_so": bool(pf or pm)})
+            for (rt, rn), c in sorted(_dem_loai.items(), key=lambda kv: -kv[1]):
+                loai_ct_dang_co.append({"ten": rn, "so": c})
                 n = (rn or "").lower()
                 if hoc is None and all(k in n for k in tu_khoa_loai):
-                    hoc = {"reftype": int(rt), "refname": rn, "display_on_book": dob,
-                           "include_invoice": inc, "so": int(cnt)}
+                    hoc = {"reftype": rt, "refname": rn}
+            if _dem_dob:
+                hoc_dob = max(_dem_dob.items(), key=lambda kv: kv[1])[0]
         except Exception:
             pass
-        # gộp trùng tên loại cho phần hiển thị chẩn đoán (nhiều dòng cùng tên do
-        # khác DisplayOnBook)
-        _gop = {}
-        for x in loai_ct_dang_co:
-            _gop[x["ten"]] = _gop.get(x["ten"], 0) + x["so"]
-        loai_ct_dang_co = [{"ten": k, "so": v} for k, v in
-                           sorted(_gop.items(), key=lambda kv: -kv[1])]
 
         now = datetime.datetime.now()
         ket = []
@@ -7211,15 +7222,14 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     "InvNo": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
                     "InvDate": ngay_dt,
                 }))
-            # DisplayOnBook/IncludeInvoice: theo mẫu học được (nếu có) để hiện
-            # đúng sổ như chứng từ MISA thật; mặc định 3 = hiện cả sổ tài chính
-            # lẫn quản trị (an toàn hơn 1 = chỉ 1 sổ, dễ bị "ẩn" ở sổ đang xem).
-            dob = hoc["display_on_book"] if (hoc and hoc.get("display_on_book") is not None) else 3
-            inc = hoc["include_invoice"] if (hoc and hoc.get("include_invoice") is not None) else 1
+            # DisplayOnBook lấy theo chứng từ MISA THẬT (hoc_dob) để hiện đúng
+            # sổ như chúng; mặc định 3 = hiện cả sổ tài chính lẫn quản trị khi
+            # chưa học được (an toàn hơn 1 = chỉ 1 sổ, dễ bị "ẩn" ở sổ đang xem).
+            dob = hoc_dob if hoc_dob is not None else 3
             header_cols = dict(_PU_HEADER_DEFAULT, **{
                 "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
-                "IncludeInvoice": inc, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
+                "IncludeInvoice": 1, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
                 "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
                 "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
@@ -7256,7 +7266,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "hoc_mau": (hoc["refname"] if hoc else None),
-                "hoc_display_on_book": (hoc.get("display_on_book") if hoc else None),
+                "hoc_display_on_book": hoc_dob, "mau_that": mau_that,
                 "danh_sach": ket[:500]}
     except HTTPException:
         conn.rollback()

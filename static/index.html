@@ -3100,12 +3100,12 @@ async function muaHangImportMisa(loai){
         ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng chứng từ trong MISA kiểm tra rồi tự bấm "Ghi sổ".
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
       <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Mua hàng trong bảng)</span>`:''}</div>
-      ${pv.hoc_mau?`<div style="background:#e9f7ee;border:1px solid #8fd9ac;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3a;margin-bottom:8px">
-        ✓ Sẽ ghi GIỐNG mẫu chứng từ MISA đang hiển thị được: <b>${misaEsc(pv.hoc_mau)}</b>${pv.hoc_display_on_book!=null?` (hiện ở sổ mã ${pv.hoc_display_on_book})`:''} — nên sẽ hiện đúng trong danh sách.</div>`
-        :`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
-        ⚠ MISA CHƯA có sẵn chứng từ ${MUA_HANG_TEN[loai]} nào để học mẫu — phần mềm sẽ tự dò loại chứng từ. Nếu ghi xong không hiện, hãy TỰ nhập tay 1 chứng từ mẫu trong MISA rồi chạy lại để phần mềm học theo.</div>`}
-      ${(pv.loai_ct_dang_co&&pv.loai_ct_dang_co.length)?`<div style="background:#f2f7f2;border:1px solid #bcd9bc;border-radius:6px;padding:6px 10px;font-size:11.5px;color:#2a5c2a;margin-bottom:8px">
-        🔎 Các loại chứng từ Mua hàng MISA đang có sẵn (để đối chiếu): ${pv.loai_ct_dang_co.map(x=>`${misaEsc(x.ten)} (${x.so})`).join(' · ')}</div>`:''}
+      <div style="background:#e9f7ee;border:1px solid #8fd9ac;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3a;margin-bottom:8px">
+        ${pv.hoc_mau?`✓ Loại chứng từ sẽ ghi (học từ chứng từ MISA thật): <b>${misaEsc(pv.hoc_mau)}</b>. `:`⚠ MISA chưa có sẵn chứng từ ${MUA_HANG_TEN[loai]} thật để học loại — phần mềm tự dò. `}
+        ${pv.hoc_display_on_book!=null?`Sẽ ghi <b>"Hiện trên sổ" = ${pv.hoc_display_on_book}</b> (giống chứng từ MISA đang hiển thị).`:`Chưa học được "Hiện trên sổ" từ chứng từ thật → dùng mặc định 3 (cả 2 sổ).`}</div>
+      ${(pv.mau_that&&pv.mau_that.length)?`<div style="background:#f2f7f2;border:1px solid #bcd9bc;border-radius:6px;padding:6px 10px;font-size:11.5px;color:#2a5c2a;margin-bottom:8px">
+        🔎 Mẫu chứng từ MISA THẬT (đang hiển thị được) để đối chiếu:<br>${pv.mau_that.map(x=>`• ${misaEsc(x.so_ct||'')} — ${misaEsc(x.loai||'')} — Hiện trên sổ=<b>${x.display_on_book}</b>, NhậnHĐ=${x.include_invoice}, ${x.da_ghi_so?'đã ghi sổ':'chưa ghi sổ'}`).join('<br>')}</div>`
+        :`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:11.5px;color:#8a5300;margin-bottom:8px">⚠ Không có chứng từ Mua hàng THẬT nào trong MISA để đối chiếu — nếu ghi xong không hiện, hãy TỰ nhập tay 1 chứng từ mẫu trong MISA rồi chạy lại để phần mềm học theo.</div>`}
       <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:6px 10px;font-size:12px;color:#264b8a;margin-bottom:8px">
         📌 Nếu vừa ghi mà KHÔNG thấy chứng từ trong MISA: bấm nút <b>"Lấy dữ liệu"</b> trên màn hình MISA để tải lại, hoặc <b>đóng MISA mở lại</b>
         (MISA lưu bộ nhớ đệm). Nếu cột <b>"Loại CT (MISA)"</b> ở dưới KHÁC với các loại MISA đang có ở trên → chứng từ bị gán sai loại, hãy bấm <b>"Ghi đè"</b> để ghi lại.</div>
