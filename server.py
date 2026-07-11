@@ -7008,9 +7008,11 @@ _PU_DETAIL_DEFAULT = {
     "PUContractDetailID": None,
 }
 
-def _misa_ghi_mua_hang(cid, database, loai, preview=True):
+def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
     """Ghi chứng từ Mua hàng (loai: nk/kqk/dv) thẳng vào MISA — xem cảnh báo
-    ở đầu file. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU (nhap_lieu 'in')."""
+    ở đầu file. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU (nhap_lieu 'in').
+    ghi_de=True: gỡ các chứng từ CHƯA GHI SỔ trùng số (do phần mềm tạo, có
+    thể sai loại CT) rồi ghi lại — KHÔNG đụng chứng từ đã ghi sổ."""
     import uuid as _uuid
     if loai not in _MUA_COT:
         raise HTTPException(400, "Loại '%s' chưa hỗ trợ (chỉ nk/kqk/dv)." % loai)
@@ -7064,9 +7066,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
         # KHÔNG đụng chứng từ đã ghi sổ, bỏ qua chứng từ chưa ghi sổ trùng số
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall())
-        posted_refno, unposted_refno, unposted_reftype = set(), set(), {}
-        for rn, rt, pf, pm in cur.execute(
-                "SELECT RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
+        posted_refno = set()
+        unposted_docs = {}   # k_doc -> {"refids": [...], "reftype_ten": name}
+        for refid, rn, rt, pf, pm in cur.execute(
+                "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
                 "ISNULL(IsPostedManagement,0) FROM PUVoucher").fetchall():
             if not rn:
                 continue
@@ -7074,12 +7077,24 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
             if pf or pm:
                 posted_refno.add(k)
             else:
-                unposted_refno.add(k)
-                unposted_reftype[k] = reftype_ten.get(rt)
+                d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
+                d["refids"].append(refid)
+        # chẩn đoán: các LOẠI chứng từ Mua hàng đang thực có trong CSDL (để đối
+        # chiếu — nếu chứng từ mình ghi có loại KHÁC với loại MISA thường dùng
+        # thì đó là lý do không hiện trong danh sách "Mua hàng hóa, dịch vụ").
+        loai_ct_dang_co = []
+        try:
+            for name, cnt in cur.execute(
+                    "SELECT rt.RefTypeName, COUNT(*) FROM PUVoucher pv "
+                    "JOIN SYSRefType rt ON rt.RefType=pv.RefType "
+                    "GROUP BY rt.RefTypeName ORDER BY COUNT(*) DESC").fetchall():
+                loai_ct_dang_co.append({"ten": name, "so": int(cnt)})
+        except Exception:
+            pass
 
         now = datetime.datetime.now()
         ket = []
-        them_ct = them_dong = trung = bo_ncc = bo_mahang = 0
+        them_ct = them_dong = trung = bo_ncc = bo_mahang = go = 0
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
@@ -7088,10 +7103,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
                 continue
-            if k_doc in unposted_refno:
+            if k_doc in unposted_docs and not ghi_de:
                 trung += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines),
-                            "loai_ct_misa": unposted_reftype.get(k_doc),
+                            "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
                             "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
                 continue
             first = lines[0]
@@ -7102,6 +7117,12 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
                 ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
                             "trang_thai": "bỏ qua — NCC (MST %s) chưa có trong MISA" % mst})
                 continue
+            ghi_de_ct = k_doc in unposted_docs   # chứng từ cũ (chưa ghi sổ) cần gỡ ghi lại
+            if ghi_de_ct and not preview:
+                for rid in unposted_docs[k_doc]["refids"]:
+                    cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", rid)
+                    cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", rid)
+                    cur.execute("DELETE FROM PUVoucher WHERE RefID=?", rid)
             acc_obj_id, ten_ncc_misa = ncc[mst_k]
             valid_lines = []
             for r in lines:
@@ -7125,7 +7146,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
                     pass
             ngay_dt = ngay_dt or now
             co_tk = str(first[cfg["co"]] or "").strip()
-            tu_khoa = {"nk": ["nhập kho"], "kqk": ["không qua kho"], "dv": ["dịch vụ"]}[loai]
+            # yêu cầu có "mua" để KHÔNG trúng nhầm loại CT khác cũng chứa "nhập
+            # kho"/"dịch vụ" (vd nhập kho thành phẩm, xuất kho...) -> tránh gán
+            # sai loại khiến chứng từ không hiện trong danh sách Mua hàng.
+            tu_khoa = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
+                       "dv": ["mua", "dịch vụ"]}[loai]
             ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa, co_tk)
             if not ref_type:
                 ket.append({"so_ct": doc, "so_dong": len(lines),
@@ -7189,18 +7214,23 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
                                [d[c] for c in dc])
             them_ct += 1
             them_dong += len(detail_rows)
+            if ghi_de_ct:
+                go += 1
+            st = ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct \
+                else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
                         "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
-                        "loai_ct_misa": ref_type_ten,
-                        "trang_thai": "sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)"})
+                        "loai_ct_misa": ref_type_ten, "trang_thai": st})
         tong_pu = cur.execute("SELECT COUNT(*) FROM PUVoucher").fetchone()[0]
         if preview:
             conn.rollback()
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
-                "so_dong": them_dong, "so_trung": trung, "so_bo_qua_ncc": bo_ncc,
-                "so_bo_qua_mahang": bo_mahang, "tong_trong_bang": tong_pu, "danh_sach": ket[:500]}
+                "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
+                "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
+                "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
+                "danh_sach": ket[:500]}
     except HTTPException:
         conn.rollback()
         raise
@@ -7212,14 +7242,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
 
 
 @app.post("/api/misa-sql/import-mua-hang/{cid}")
-def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: str = ""):
+def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: str = "",
+                            ghi_de: int = 0):
     """Ghi chứng từ Mua hàng (loai=nk/kqk/dv) thẳng vào MISA (PUVoucher).
-    preview=1 -> chỉ xem trước, không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ."""
+    preview=1 -> chỉ xem trước, không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ.
+    ghi_de=1 -> gỡ chứng từ chưa ghi sổ trùng số rồi ghi lại."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview))
+    return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
 @app.get("/api/danh-muc-ncc/{cid}")
