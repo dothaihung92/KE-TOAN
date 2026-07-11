@@ -6706,23 +6706,16 @@ async def misa_sql_import_hang_hoa(cid: int, request: Request):
 
 
 # ============================================================
-#  GHI TĂNG TSCĐ / CCDC THẲNG VÀO MISA (bảng FixedAsset / SUIncrement)
-#  ⚠ RỦI RO CAO HƠN Hàng hóa/NVL: đây là NGHIỆP VỤ KẾ TOÁN (ghi tăng tài
-#  sản/công cụ), không phải danh mục đơn thuần — MISA còn phải hạch toán
-#  Nợ 211/242, Có 111/112/331... Phần mềm KHÔNG tự động ghi sổ (không đụng
-#  vào GeneralLedger/GLVoucher): mọi bản ghi tạo ra đều ở trạng thái CHƯA
-#  GHI SỔ (IsPostedManagement=IsPostedFinance=0). Anh PHẢI mở từng
-#  TSCĐ/CCDC trong MISA để kiểm tra lại (đặc biệt Hạn sử dụng/Đơn vị tính
-#  — phần mềm phỏng đoán là NĂM) rồi tự bấm "Ghi sổ".
+#  DANH MỤC MÃ TSCĐ / CCDC THẲNG VÀO MISA (bảng FixedAsset / SUIncrement)
+#  Chỉ đăng ký MÃ + TÊN — giống hệt Danh mục Hàng hóa/NVL, KHÔNG tự tính
+#  Nguyên giá/Khấu hao/Thành tiền (những thông tin đó thuộc chứng từ Ghi
+#  tăng riêng, làm ở bước sau — xem nút "📈 Ghi Tăng TSCĐ/CCDC" ở trang
+#  chủ). MISA không có bảng "danh mục TSCĐ" tách rời khỏi FixedAsset/
+#  SUIncrement nên vẫn phải ghi vào 2 bảng đó, nhưng LUÔN ở trạng thái
+#  CHƯA GHI SỔ (IsPostedManagement=IsPostedFinance=0) và không đụng tới
+#  GeneralLedger/GLVoucher — anh tự hoàn thiện + Ghi sổ trong MISA khi
+#  làm chứng từ Ghi tăng thật.
 # ============================================================
-def _misa_parse_ngay_vn(s, mac_dinh=None):
-    s = str(s or "").strip()
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
-        try:
-            return datetime.datetime.strptime(s, fmt)
-        except Exception:
-            pass
-    return mac_dinh or datetime.datetime.now()
 
 def _misa_ts_branch_id(cur):
     row = cur.execute(
@@ -6748,11 +6741,12 @@ def _misa_ts_next_seq(cur, table, col, prefix):
             maxn = max(maxn, int(m.group(1)))
     return maxn + 1
 
-def _misa_ghi_tang_tscd(cid, database, dm_rows, preview=True):
-    """Ghi tăng TSCĐ thẳng vào bảng FixedAsset của MISA (CHƯA ghi sổ — xem
-    cảnh báo ở đầu file). dm_rows theo đúng thứ tự DM_TSCD_HEADERS: Mã, Tên,
-    ĐVT, SL, Đơn giá, Thành tiền, HĐ, Ngày HĐ, Hạn sử dụng(tháng), Đối tượng
-    phân bổ, Ngày ghi tăng, TK Chi phí."""
+def _misa_dm_tscd(cid, database, dm_rows, preview=True):
+    """Đăng ký DANH MỤC MÃ TSCĐ vào bảng FixedAsset của MISA — CHỈ Mã + Tên
+    (giống hệt Danh mục Hàng hóa/NVL), KHÔNG tự tính Nguyên giá/Khấu
+    hao/Hạn sử dụng (những cột đó dùng cho chứng từ Ghi tăng riêng, làm
+    sau). Ghi ở trạng thái CHƯA GHI SỔ để anh tự hoàn thiện + Ghi sổ trong
+    MISA khi làm chứng từ Ghi tăng thật. dm_rows: mỗi dòng ít nhất [Mã, Tên]."""
     import uuid as _uuid
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
@@ -6763,30 +6757,28 @@ def _misa_ghi_tang_tscd(cid, database, dm_rows, preview=True):
             raise HTTPException(400, "Không dò được Chi nhánh (OrganizationUnit) trong MISA.")
         ref_type = _misa_ts_reftype(cur, "FixedAsset")
         if not ref_type:
-            raise HTTPException(400, "Không dò được loại chứng từ 'Ghi tăng TSCĐ' (SYSRefType) "
-                                     "trong MISA.")
+            raise HTTPException(400, "Không dò được loại chứng từ TSCĐ (SYSRefType) trong MISA.")
         cat = cur.execute(
-            "SELECT TOP 1 FixedAssetCategoryID, FixedAssetCategoryName, OrgPriceAccount, "
-            "DepreciationAccount FROM FixedAssetCategory WHERE ISNULL(IsParent,0)=0 "
-            "AND ISNULL(Inactive,0)=0 ORDER BY FixedAssetCategoryCode").fetchone()
+            "SELECT TOP 1 FixedAssetCategoryID, FixedAssetCategoryName FROM FixedAssetCategory "
+            "WHERE ISNULL(IsParent,0)=0 AND ISNULL(Inactive,0)=0 "
+            "ORDER BY FixedAssetCategoryCode").fetchone()
         if not cat:
             raise HTTPException(400, "MISA chưa có Loại TSCĐ (Danh mục > Loại TSCĐ) nào — vào MISA "
                                      "tạo ít nhất 1 loại TSCĐ trước rồi thử lại.")
-        cat_id, cat_name, org_acc, dep_acc = cat
+        cat_id, cat_name = cat
         existing = set()
         for (code,) in cur.execute("SELECT FixedAssetCode FROM FixedAsset").fetchall():
             if code:
                 existing.add(str(code).strip().lower())
-        next_seq = _misa_ts_next_seq(cur, "FixedAsset", "RefNo", "GT")
+        next_seq = _misa_ts_next_seq(cur, "FixedAsset", "RefNo", "MHTS")
         now = datetime.datetime.now()
         ket = []
         them = trung = 0
         seen = set()
         for r in dm_rows:
-            r = list(r) + [None] * (12 - len(r))
-            ma, ten, dvt, sl, dgia, tt, sohd, ngayhd, hansd, dtpb, ngaygt, tkcp = r[:12]
-            ma = str(ma or "").strip()
-            ten = str(ten or "").strip()
+            ma = str((r[0] if len(r) > 0 else "") or "").strip()
+            ten = str((r[1] if len(r) > 1 else "") or "").strip()
+            dvt = str((r[2] if len(r) > 2 else "") or "").strip()
             if not ma or not ten:
                 continue
             k = ma.lower()
@@ -6797,61 +6789,30 @@ def _misa_ghi_tang_tscd(cid, database, dm_rows, preview=True):
                 trung += 1
                 ket.append({"ma": ma, "ten": ten, "trang_thai": "đã có (bỏ qua)"})
                 continue
-            org_price = _to_num(tt) or 0
-            thang = _to_num(hansd) or 60
-            nam = round(thang / 12, 2)
-            monthly = round(org_price / thang, 2) if thang else 0
-            yearly = round(monthly * 12, 2)
-            rate_m = round(100 / thang, 4) if thang else 0
-            rate_y = round(rate_m * 12, 4)
-            ngay_dt = _misa_parse_ngay_vn(ngaygt, now)
-            refno = "GT%05d" % next_seq
+            refno = "MHTS%05d" % next_seq
             next_seq += 1
-            memo = "HĐ %s ngày %s — nhập từ phần mềm kế toán" % (sohd or "", ngayhd or "")
             cols_vals = [
                 ("FixedAssetID", str(_uuid.uuid4())),
                 ("RefNo", refno[:20]),
-                ("RefDate", ngay_dt),
+                ("RefDate", now),
                 ("RefType", ref_type),
                 ("FixedAssetCategoryID", cat_id),
                 ("BranchID", branch_id),
                 ("FixedAssetCode", ma[:25]),
                 ("FixedAssetName", ten[:128]),
-                ("Quantity", _to_num(sl) or 1),
-                ("JournalMemo", memo[:500]),
-                ("IsNotDepreciation", 0),
-                ("OrgPrice", org_price),
-                ("DepreciationAmount", 0),
-                ("LifeTime", nam),
-                ("LifeTimeRemaining", nam),
-                ("LifeTimeUnit", 1),                 # 1 = Năm (phỏng đoán — kiểm tra lại trong MISA)
+                ("IsNotDepreciation", 1),      # chưa có thông tin khấu hao — điền sau khi Ghi tăng
+                ("LifeTimeUnit", 1),
                 ("LifeTimeRemainingUnit", 1),
-                ("DepreciationDate", ngay_dt),
-                ("DepreciationRateMonth", rate_m),
-                ("DepreciationRateYear", rate_y),
-                ("MonthlyDepreciationAmount", monthly),
-                ("YearlyDepreciationAmount", yearly),
-                ("AccumDepreciationAmount", 0),
-                ("RemainingAmount", org_price),
+                ("DepreciationDate", now),
                 ("IsLimitDepreciationAmount", 0),
-                ("DepreciationAmountByIncomeTax", 0),
-                ("RemainingAmountByIncomeTax", org_price),
-                ("MonthlyDepreciationAmountByIncomeTax", monthly),
-                ("OrgPriceAccount", org_acc),
-                ("DepreciationAccount", dep_acc),
                 ("IsEnoughVoucher", 0),
                 ("RefOrder", 0),
                 ("Inactive", 0),
                 ("DisplayOnBook", 1),
                 ("CreatedDate", now),
-                ("IsPostedManagement", 0),           # LUÔN chưa ghi sổ
+                ("IsPostedManagement", 0),     # LUÔN chưa ghi sổ
                 ("IsPostedFinance", 0),
-                ("LifeTimeInMonth", thang),
-                ("LifeTimeRemainingInMonth", thang),
                 ("IsFixedAssetOfStateBudget", 0),
-                ("PricePurchase", org_price),
-                ("TransportationCost", 0),
-                ("TestRunCost", 0),
             ]
             if not preview:
                 col_names = ",".join("[%s]" % c for c, _ in cols_vals)
@@ -6859,16 +6820,14 @@ def _misa_ghi_tang_tscd(cid, database, dm_rows, preview=True):
                 cur.execute("INSERT INTO FixedAsset (%s) VALUES (%s)" % (col_names, ph),
                             [v for _, v in cols_vals])
             them += 1
-            ket.append({"ma": ma, "ten": ten, "dvt": dvt, "nguyen_gia": org_price,
-                        "han_su_dung_thang": thang, "refno": refno,
-                        "trang_thai": "sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)"})
+            ket.append({"ma": ma, "ten": ten, "dvt": dvt, "refno": refno,
+                        "trang_thai": "sẽ thêm" if preview else "đã thêm"})
         if preview:
             conn.rollback()
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
-                "loai_tscd": cat_name, "tk_nguyen_gia": org_acc, "tk_khau_hao": dep_acc,
-                "danh_sach": ket[:1000]}
+                "loai_tscd": cat_name, "danh_sach": ket[:1000]}
     except HTTPException:
         conn.rollback()
         raise
@@ -6878,11 +6837,10 @@ def _misa_ghi_tang_tscd(cid, database, dm_rows, preview=True):
     finally:
         conn.close()
 
-def _misa_ghi_tang_ccdc(cid, database, dm_rows, preview=True):
-    """Ghi tăng CCDC (phân bổ, Nợ 242) thẳng vào bảng SUIncrement của MISA
-    (CHƯA ghi sổ). dm_rows theo DM_CCDC_HEADERS: Mã, Tên, ĐVT, SL, Đơn giá,
-    Thành tiền, HĐ, Ngày, Hạn sử dụng(tháng, = số kỳ phân bổ), Đối tượng
-    phân bổ, Ngày ghi tăng, TK Chi phí (= TK phân bổ)."""
+def _misa_dm_ccdc(cid, database, dm_rows, preview=True):
+    """Đăng ký DANH MỤC MÃ CCDC vào bảng SUIncrement của MISA — CHỈ Mã +
+    Tên (giống Danh mục Hàng hóa/NVL), KHÔNG tự tính Thành tiền/Số kỳ phân
+    bổ (dùng cho chứng từ Ghi tăng riêng, làm sau). CHƯA GHI SỔ."""
     import uuid as _uuid
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
@@ -6893,22 +6851,20 @@ def _misa_ghi_tang_ccdc(cid, database, dm_rows, preview=True):
             raise HTTPException(400, "Không dò được Chi nhánh (OrganizationUnit) trong MISA.")
         ref_type = _misa_ts_reftype(cur, "SUIncrement")
         if not ref_type:
-            raise HTTPException(400, "Không dò được loại chứng từ 'Ghi tăng CCDC' (SYSRefType) "
-                                     "trong MISA.")
+            raise HTTPException(400, "Không dò được loại chứng từ CCDC (SYSRefType) trong MISA.")
         existing = set()
         for (code,) in cur.execute("SELECT SupplyCode FROM SUIncrement").fetchall():
             if code:
                 existing.add(str(code).strip().lower())
-        next_seq = _misa_ts_next_seq(cur, "SUIncrement", "RefNo", "GT")
+        next_seq = _misa_ts_next_seq(cur, "SUIncrement", "RefNo", "MHCC")
         now = datetime.datetime.now()
         ket = []
         them = trung = 0
         seen = set()
         for r in dm_rows:
-            r = list(r) + [None] * (12 - len(r))
-            ma, ten, dvt, sl, dgia, tt, sohd, ngay, hansd, dtpb, ngaygt, tkcp = r[:12]
-            ma = str(ma or "").strip()
-            ten = str(ten or "").strip()
+            ma = str((r[0] if len(r) > 0 else "") or "").strip()
+            ten = str((r[1] if len(r) > 1 else "") or "").strip()
+            dvt = str((r[2] if len(r) > 2 else "") or "").strip()
             if not ma or not ten:
                 continue
             k = ma.lower()
@@ -6919,11 +6875,7 @@ def _misa_ghi_tang_ccdc(cid, database, dm_rows, preview=True):
                 trung += 1
                 ket.append({"ma": ma, "ten": ten, "trang_thai": "đã có (bỏ qua)"})
                 continue
-            amount = _to_num(tt) or 0
-            ky = int(_to_num(hansd) or 24)
-            termly = round(amount / ky, 2) if ky else 0
-            ngay_dt = _misa_parse_ngay_vn(ngaygt, now)
-            refno = "GT%05d" % next_seq
+            refno = "MHCC%05d" % next_seq
             next_seq += 1
             cols_vals = [
                 ("SupplyID", str(_uuid.uuid4())),
@@ -6931,25 +6883,21 @@ def _misa_ghi_tang_ccdc(cid, database, dm_rows, preview=True):
                 ("SupplyName", ten[:255]),
                 ("BranchID", branch_id),
                 ("RefType", ref_type),
-                ("RefDate", ngay_dt),
                 ("RefNo", refno[:20]),
-                ("IsPostedManagement", 0),           # LUÔN chưa ghi sổ
-                ("Unit", str(dvt or "")[:20]),
-                ("Quantity", _to_num(sl) or 1),
-                ("UnitPrice", _to_num(dgia) or 0),
-                ("Amount", amount),
-                ("AllocationTime", ky),
-                ("RemainingAllocationTime", ky),
+                ("IsPostedManagement", 0),     # LUÔN chưa ghi sổ
+                ("Unit", dvt[:20]),
+                ("Quantity", 0),
+                ("UnitPrice", 0),
+                ("Amount", 0),
+                ("AllocationTime", 0),
+                ("RemainingAllocationTime", 0),
                 ("AllocatedAmount", 0),
-                ("RemaingAmount", amount),
-                ("TermlyAllocationAmount", termly),
-                ("AllocationAccount", str(tkcp or "")[:20] or None),
+                ("RemaingAmount", 0),
+                ("TermlyAllocationAmount", 0),
                 ("DisplayOnBook", 1),
                 ("RefOrder", 0),
                 ("CreatedDate", now),
                 ("IsPostedFinance", 0),
-                ("ReasonIncrement", ("HĐ %s ngày %s — nhập từ phần mềm kế toán" %
-                                     (sohd or "", ngay or ""))[:255]),
                 ("SuspendAllocate", 0),
             ]
             if not preview:
@@ -6958,8 +6906,8 @@ def _misa_ghi_tang_ccdc(cid, database, dm_rows, preview=True):
                 cur.execute("INSERT INTO SUIncrement (%s) VALUES (%s)" % (col_names, ph),
                             [v for _, v in cols_vals])
             them += 1
-            ket.append({"ma": ma, "ten": ten, "dvt": dvt, "thanh_tien": amount, "so_ky": ky,
-                        "refno": refno, "trang_thai": "sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)"})
+            ket.append({"ma": ma, "ten": ten, "dvt": dvt, "refno": refno,
+                        "trang_thai": "sẽ thêm" if preview else "đã thêm"})
         if preview:
             conn.rollback()
         else:
@@ -6976,10 +6924,11 @@ def _misa_ghi_tang_ccdc(cid, database, dm_rows, preview=True):
         conn.close()
 
 
-@app.post("/api/misa-sql/import-ghi-tang/{cid}")
-async def misa_sql_import_ghi_tang(cid: int, request: Request):
-    """Ghi tăng TSCĐ/CCDC thẳng vào MISA (bảng FixedAsset/SUIncrement, CHƯA
-    ghi sổ). body: {rows, preview, loai(tscd/ccdc), database?}."""
+@app.post("/api/misa-sql/import-danh-muc-ts/{cid}")
+async def misa_sql_import_danh_muc_ts(cid: int, request: Request):
+    """Đăng ký Danh mục mã TSCĐ/CCDC thẳng vào MISA (bảng FixedAsset/
+    SUIncrement, chỉ Mã+Tên, CHƯA ghi sổ). body: {rows, preview,
+    loai(tscd/ccdc), database?}."""
     body = await request.json()
     rows = body.get("rows") or []
     preview = bool(body.get("preview", True))
@@ -6993,8 +6942,8 @@ async def misa_sql_import_ghi_tang(cid: int, request: Request):
     if not rows:
         raise HTTPException(400, "Danh mục trống — không có mã để import.")
     if loai == "tscd":
-        return _misa_ghi_tang_tscd(cid, database, rows, preview=preview)
-    return _misa_ghi_tang_ccdc(cid, database, rows, preview=preview)
+        return _misa_dm_tscd(cid, database, rows, preview=preview)
+    return _misa_dm_ccdc(cid, database, rows, preview=preview)
 
 
 @app.get("/api/danh-muc-ncc/{cid}")
