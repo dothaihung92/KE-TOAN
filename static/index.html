@@ -3214,26 +3214,35 @@ async function dmGhiTangMisa(){
         Sắp ghi vào database <b>${misaEsc(pv.database||'?')}</b>${loai==='tscd'?` (Loại TSCĐ mặc định: <b>${misaEsc(pv.loai_tscd||'')}</b>, có thể đổi lại trong MISA)`:''} —
         chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>. Nguyên giá/Khấu hao/Ngày ghi tăng anh tự điền khi làm chứng từ
         "📈 Ghi Tăng ${loai==='tscd'?'TSCĐ':'CCDC'}" thật trong MISA.</div>
-      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_them}</b> mã — bỏ qua (đã có): <b>${pv.so_trung}</b></div>
-      <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_them}</b> mã — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.ref_type!=null?` <span style="color:#999">(loại CT #${pv.ref_type}, hiện có ${pv.tong_trong_bang} bản ghi trong bảng)</span>`:''}</div>
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:6px 10px;font-size:12px;color:#264b8a;margin-bottom:8px">
+        📌 Sau khi ghi, xem trong MISA ở menu <b>${loai==='tscd'?'Tài sản cố định':'Công cụ dụng cụ'}</b> (KHÔNG phải "Vật tư hàng hóa").
+        Nếu MISA đang mở sẵn, hãy <b>đóng MISA mở lại</b> (hoặc bấm <b>Nạp</b>) vì MISA lưu bộ nhớ đệm — ghi thẳng CSDL sẽ không hiện ngay.</div>
+      ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        Có <b>${pv.so_trung}</b> mã ĐÃ CÓ (chưa ghi sổ) trong MISA. Nếu các mã cũ ghi bị lỗi/không hiện, bấm
+        <b>"Ghi đè"</b> để gỡ bản chưa ghi sổ rồi ghi lại (KHÔNG đụng bản đã ghi sổ).</div>`:''}
+      <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Mã</th><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">ĐVT</th><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
-      <div style="margin-top:12px;text-align:right">
+      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
-        ${pv.so_them>0?`<button class="btn sm" style="background:#a03a3a" onclick="dmGhiTangMisaGhi()">⬆ Ghi ${pv.so_them} mã vào MISA</button>`:''}
+        ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="dmGhiTangMisaGhi(true)">♻ Ghi đè ${pv.so_trung} mã (chưa ghi sổ)</button>`:''}
+        ${pv.so_them>0?`<button class="btn sm" style="background:#a03a3a" onclick="dmGhiTangMisaGhi(false)">⬆ Ghi ${pv.so_them} mã mới vào MISA</button>`:''}
       </div>`;
     document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
-async function dmGhiTangMisaGhi(){
+async function dmGhiTangMisaGhi(ghiDe){
   const loai=nlDMMode;
   const rows=nlRows.map(r=>[r[0],r[1],r[2]]);
   toast('Đang ghi vào MISA...','');
   try{
     const d=await api(`/api/misa-sql/import-danh-muc-ts/${current}`,{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:false,loai})});
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:false,loai,ghi_de:!!ghiDe})});
     document.getElementById('misaModal').style.display='none';
-    toast(`✓ Đã ghi ${d.so_them} mã vào MISA (bỏ qua ${d.so_trung} mã đã có). Khi làm chứng từ Ghi tăng thật, mở MISA điền Nguyên giá/Khấu hao cho các mã này.`,'ok');
+    const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de} mã cũ)`:'';
+    const menu=loai==='tscd'?'Tài sản cố định':'Công cụ dụng cụ';
+    toast(`✓ Đã ghi ${d.so_them} mã vào MISA${goTxt}. ĐÓNG MISA MỞ LẠI rồi vào menu "${menu}" để kiểm tra.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 async function dmXuatGrid(){
