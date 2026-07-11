@@ -3086,11 +3086,13 @@ async function muaHangImportMisa(loai){
     if(pv.ghi_chu){toast(pv.ghi_chu,'err');return}
     const ds=(pv.danh_sach||[]).slice(0,300).map(x=>{
       const boqua=x.trang_thai.includes('bỏ qua');
-      return `<tr style="${boqua?'background:#fff4e6':''}">
+      const ngayloi=!!x.ngay_loi;
+      return `<tr style="${ngayloi?'background:#fde8e8':(boqua?'background:#fff4e6':'')}">
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ncc||x.ncc_mst||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.so_dong}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.tong_tien!=null?Number(x.tong_tien).toLocaleString('vi-VN'):''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;${ngayloi?'color:#b91c1c;font-weight:700':''}" title="${ngayloi?'Không đọc được ngày gốc \''+misaEsc(x.ngay_goc||'')+'\' -> rơi về ngày hôm nay':''}">${misaEsc(x.ngay_ct||'')}${ngayloi?' ⚠':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px;color:${boqua?'#8a5300':(x.trang_thai.includes('sẽ thêm')?'#1a7a7a':'#999')}">${misaEsc(x.trang_thai)}</td></tr>`;
     }).join('');
@@ -3113,8 +3115,10 @@ async function muaHangImportMisa(loai){
         ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA, <b>${pv.so_bo_qua_mahang}</b> dòng do thiếu mã hàng — hãy import Danh mục Hàng hóa/NVL/TSCĐ/CCDC và KH/NCC trước, rồi chạy lại.</div>`:''}
       ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (chưa ghi sổ) trong MISA. Nếu chúng bị gán sai loại/không hiện, bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ đã ghi sổ).</div>`:''}
+      ${pv.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Có <b>${pv.so_ngay_loi}</b> chứng từ KHÔNG đọc được ngày từ dữ liệu gốc (cột tô đỏ ở dưới) → bị ghi tạm bằng NGÀY HÔM NAY. Nếu bộ lọc "Kỳ" trên MISA không bao gồm hôm nay, chứng từ sẽ KHÔNG hiện dù dữ liệu đúng — kiểm tra lại định dạng ngày trong Bảng kê đầu vào.</div>`:''}
       <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="misaXemDinhNghiaView('View_PUVoucherService','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Xem SQL thật của màn hình Mua hàng hóa, dịch vụ trong MISA (chỉ đọc, để chẩn đoán)">🔍 Xem SQL màn hình MISA</button>

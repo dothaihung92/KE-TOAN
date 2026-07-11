@@ -7151,7 +7151,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
 
         now = datetime.datetime.now()
         ket = []
-        them_ct = them_dong = trung = bo_ncc = bo_mahang = go = 0
+        them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = 0
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
@@ -7201,6 +7201,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     break
                 except Exception:
                     pass
+            # KHÔNG đọc được ngày từ dữ liệu -> rơi về NGÀY HÔM NAY, dễ khiến
+            # chứng từ nằm NGOÀI khoảng "Kỳ" đang lọc trên màn hình MISA (vd
+            # dữ liệu là hóa đơn năm 2025 nhưng ghi nhầm thành ngày hôm nay) -
+            # đánh dấu lại để báo rõ trong kết quả.
+            ngay_loi = ngay_dt is None
             ngay_dt = ngay_dt or now
             co_tk = str(first[cfg["co"]] or "").strip()
             # Ưu tiên "mẫu" học được từ chứng từ MISA đang hiển thị được (chắc
@@ -7280,11 +7285,15 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             them_dong += len(detail_rows)
             if ghi_de_ct:
                 go += 1
+            if ngay_loi:
+                so_ngay_loi += 1
             st = ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct \
                 else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
                         "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
-                        "loai_ct_misa": ref_type_ten, "trang_thai": st, "ref_id": ref_id})
+                        "loai_ct_misa": ref_type_ten, "trang_thai": st, "ref_id": ref_id,
+                        "ngay_ct": ngay_dt.strftime("%d/%m/%Y"), "ngay_loi": ngay_loi,
+                        "ngay_goc": ngay_str})
         tong_pu = cur.execute("SELECT COUNT(*) FROM PUVoucher").fetchone()[0]
         if preview:
             conn.rollback()
@@ -7326,6 +7335,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
+                "so_ngay_loi": so_ngay_loi,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
