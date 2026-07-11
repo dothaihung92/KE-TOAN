@@ -8,7 +8,7 @@ Tu dong cap nhat phan mem tu GitHub (repo Public).
 
 Tra ve exit code 10 neu start.bat bi thay doi (de start.bat tu khoi dong lai).
 """
-import os, sys, json, ssl, urllib.request
+import os, sys, json, ssl, time, urllib.request, urllib.error
 
 OWNER  = "dothaihung92"
 REPO   = "ke-toan"
@@ -19,10 +19,36 @@ VER_FILE = os.path.join(BASE, ".version")
 API = "https://api.github.com"
 RAW = "https://raw.githubusercontent.com"
 
+# GitHub gioi han 60 request/gio cho may KHONG dang nhap (theo dia chi IP).
+# Neu may nay/mang nay khoi dong phan mem nhieu lan lien tiep (vd dang thu
+# nghiem, hoac IP dung chung voi nguoi khac), se de bi "403 rate limit
+# exceeded". De tranh, CHI kiem tra cap nhat toi da 1 lan / khoang thoi gian
+# duoi day; cac lan khoi dong khac trong khoang do se bo qua kiem tra mang,
+# chay thang voi ban dang co san.
+CHECK_COOLDOWN_SEC = 180
+LAST_CHECK_FILE = os.path.join(BASE, ".last_update_check")
+
+
+def _da_kiem_tra_gan_day():
+    try:
+        with open(LAST_CHECK_FILE, encoding="utf-8") as f:
+            t = float(f.read().strip())
+        return (time.time() - t) < CHECK_COOLDOWN_SEC
+    except Exception:
+        return False
+
+
+def _danh_dau_da_kiem_tra():
+    try:
+        with open(LAST_CHECK_FILE, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
+    except Exception:
+        pass
+
 # Khong dung toi (du lieu nguoi dung / file cuc bo)
 SKIP_PREFIX = ("data/", ".git/", "__pycache__/", ".github/")
 SKIP_EXT    = (".db", ".pyc", ".sqlite")
-SKIP_NAMES  = {".installed", ".version"}
+SKIP_NAMES  = {".installed", ".version", ".last_update_check"}
 
 
 def _get(url, raw=False, timeout=25):
@@ -61,8 +87,22 @@ def should_skip(path):
 
 
 def main():
+    if _da_kiem_tra_gan_day():
+        print("[update] Vua kiem tra gan day - bo qua lan nay (tranh bi GitHub "
+              "gioi han so lan hoi), chay thang voi ban dang co san.")
+        return 0
+    _danh_dau_da_kiem_tra()
+
     try:
         sha = latest_sha()
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            print("[update] GitHub tam thoi gioi han so lan kiem tra cap nhat tu may/mang "
+                  "nay (binh thuong, khong phai loi phan mem) - se tu kiem tra lai sau. "
+                  "Phan mem van chay binh thuong voi ban dang co san.")
+        else:
+            print(f"[update] Khong kiem tra duoc cap nhat (chay tiep): {e}")
+        return 0
     except Exception as e:
         print(f"[update] Khong kiem tra duoc cap nhat (chay tiep): {e}")
         return 0

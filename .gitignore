@@ -25,3 +25,5 @@ secret.key
 data/
 downloads/
 .installed
+.version
+.last_update_check
