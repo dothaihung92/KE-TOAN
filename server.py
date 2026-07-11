@@ -6885,11 +6885,11 @@ def _misa_pu_reftype(cur, tu_khoa, co_tk=None):
     """Chọn RefType phù hợp nhất trong SYSRefType (MasterTableName='PUVoucher')
     theo từ khóa loại chứng từ (vd 'nhập kho'/'không qua kho'/'dịch vụ') +
     gợi ý phương thức thanh toán theo TK Có (111->tiền mặt, 112->chuyển
-    khoản/ngân hàng, khác->công nợ)."""
+    khoản/ngân hàng, khác->công nợ). Trả (RefType, RefTypeName) hoặc (None, None)."""
     rows = cur.execute(
         "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall()
     if not rows:
-        return None
+        return None, None
     pt_kw = ()
     if co_tk:
         if co_tk.startswith("111"):
@@ -6906,7 +6906,9 @@ def _misa_pu_reftype(cur, tu_khoa, co_tk=None):
         return 1 + (1 if any(k in n for k in pt_kw) else 0)
 
     best = max(rows, key=lambda r: diem(r[1]))
-    return int(best[0]) if diem(best[1]) >= 0 else None
+    if diem(best[1]) < 0:
+        return None, None
+    return int(best[0]), best[1]
 
 def _num0(v):
     return v if isinstance(v, (int, float)) else 0
@@ -7060,14 +7062,20 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
                 hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
         # chứng từ đã có trong MISA (dò theo Số chứng từ = RefNoManagement) —
         # KHÔNG đụng chứng từ đã ghi sổ, bỏ qua chứng từ chưa ghi sổ trùng số
-        posted_refno, unposted_refno = set(), set()
-        for rn, pf, pm in cur.execute(
-                "SELECT RefNoManagement, ISNULL(IsPostedFinance,0), ISNULL(IsPostedManagement,0) "
-                "FROM PUVoucher").fetchall():
+        reftype_ten = dict(cur.execute(
+            "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall())
+        posted_refno, unposted_refno, unposted_reftype = set(), set(), {}
+        for rn, rt, pf, pm in cur.execute(
+                "SELECT RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
+                "ISNULL(IsPostedManagement,0) FROM PUVoucher").fetchall():
             if not rn:
                 continue
             k = str(rn).strip().lower()
-            (posted_refno if (pf or pm) else unposted_refno).add(k)
+            if pf or pm:
+                posted_refno.add(k)
+            else:
+                unposted_refno.add(k)
+                unposted_reftype[k] = reftype_ten.get(rt)
 
         now = datetime.datetime.now()
         ket = []
@@ -7083,6 +7091,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
             if k_doc in unposted_refno:
                 trung += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "loai_ct_misa": unposted_reftype.get(k_doc),
                             "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
                 continue
             first = lines[0]
@@ -7117,7 +7126,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
             ngay_dt = ngay_dt or now
             co_tk = str(first[cfg["co"]] or "").strip()
             tu_khoa = {"nk": ["nhập kho"], "kqk": ["không qua kho"], "dv": ["dịch vụ"]}[loai]
-            ref_type = _misa_pu_reftype(cur, tu_khoa, co_tk)
+            ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa, co_tk)
             if not ref_type:
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
@@ -7181,15 +7190,17 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
             them_ct += 1
             them_dong += len(detail_rows)
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
-                        "tong_tien": total_amount, "tien_thue": total_vat,
+                        "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
+                        "loai_ct_misa": ref_type_ten,
                         "trang_thai": "sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)"})
+        tong_pu = cur.execute("SELECT COUNT(*) FROM PUVoucher").fetchone()[0]
         if preview:
             conn.rollback()
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
                 "so_dong": them_dong, "so_trung": trung, "so_bo_qua_ncc": bo_ncc,
-                "so_bo_qua_mahang": bo_mahang, "danh_sach": ket[:500]}
+                "so_bo_qua_mahang": bo_mahang, "tong_trong_bang": tong_pu, "danh_sach": ket[:500]}
     except HTTPException:
         conn.rollback()
         raise

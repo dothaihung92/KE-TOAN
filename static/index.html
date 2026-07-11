@@ -3091,6 +3091,7 @@ async function muaHangImportMisa(loai){
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ncc||x.ncc_mst||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.so_dong}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.tong_tien!=null?Number(x.tong_tien).toLocaleString('vi-VN'):''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px;color:${boqua?'#8a5300':(x.trang_thai.includes('sẽ thêm')?'#1a7a7a':'#999')}">${misaEsc(x.trang_thai)}</td></tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
@@ -3098,11 +3099,14 @@ async function muaHangImportMisa(loai){
         ⚠ RỦI RO CAO: đây là chứng từ <b>${MUA_HANG_TEN[loai]}</b> — Nợ/Có, thuế GTGT thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b>
         ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng chứng từ trong MISA kiểm tra rồi tự bấm "Ghi sổ".
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
-      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b></div>
+      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Mua hàng trong bảng)</span>`:''}</div>
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:6px 10px;font-size:12px;color:#264b8a;margin-bottom:8px">
+        📌 Nếu vừa ghi mà KHÔNG thấy chứng từ trong MISA: bấm nút <b>"Lấy dữ liệu"</b> trên màn hình MISA để tải lại, hoặc <b>đóng MISA mở lại</b>
+        (MISA lưu bộ nhớ đệm, ghi thẳng CSDL không tự cập nhật ngay). Kiểm tra thêm bộ lọc <b>"Trạng thái"</b> có đang lọc chỉ hiện chứng từ đã ghi sổ không.</div>
       ${(pv.so_bo_qua_ncc>0||pv.so_bo_qua_mahang>0)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA, <b>${pv.so_bo_qua_mahang}</b> dòng do thiếu mã hàng — hãy import Danh mục Hàng hóa/NVL/TSCĐ/CCDC và KH/NCC trước, rồi chạy lại.</div>`:''}
       <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
