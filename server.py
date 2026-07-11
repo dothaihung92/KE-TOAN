@@ -6413,8 +6413,10 @@ def misa_sql_xem_view(cid: int, database: str = "", view: str = ""):
     """Xem ĐỊNH NGHĨA (SQL text) của 1 view/stored procedure MISA — CHỈ ĐỌC,
     không đụng dữ liệu. Dùng để chẩn đoán vì sao 1 màn hình MISA lọc/không
     hiện dữ liệu (xem view đó JOIN/WHERE theo điều kiện gì)."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not (database and view):
-        raise HTTPException(400, "Thiếu database/tên view")
+        raise HTTPException(400, "Thiếu database/tên view — mở '🗄 Kết nối CSDL MISA' và kết nối "
+                                 "tới database trước.")
     if not view.replace("_", "").isalnum():
         raise HTTPException(400, "Tên view không hợp lệ")
     conn = _misa_sql_connect(cid, database=database)

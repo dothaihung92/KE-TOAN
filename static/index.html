@@ -3117,7 +3117,7 @@ async function muaHangImportMisa(loai){
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-        <button class="btn ghost sm" onclick="misaXemDinhNghiaView('View_PUVoucherService')" title="Xem SQL thật của màn hình Mua hàng hóa, dịch vụ trong MISA (chỉ đọc, để chẩn đoán)">🔍 Xem SQL màn hình MISA</button>
+        <button class="btn ghost sm" onclick="misaXemDinhNghiaView('View_PUVoucherService','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Xem SQL thật của màn hình Mua hàng hóa, dịch vụ trong MISA (chỉ đọc, để chẩn đoán)">🔍 Xem SQL màn hình MISA</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
@@ -3136,10 +3136,11 @@ async function muaHangImportMisaGhi(loai,ghiDe){
 }
 // Xem SQL thật (định nghĩa view) của 1 màn hình MISA — CHỈ ĐỌC, để chẩn đoán
 // vì sao chứng từ ghi thẳng vào bảng không hiện trên màn hình đó.
-async function misaXemDinhNghiaView(tenView){
+async function misaXemDinhNghiaView(tenView,database){
   toast('Đang lấy định nghĩa view...','');
   try{
-    const d=await api(`/api/misa-sql/xem-view/${current}?view=${encodeURIComponent(tenView)}`,{method:'POST'});
+    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
+    const d=await api(`/api/misa-sql/xem-view/${current}?view=${encodeURIComponent(tenView)}${dbQ}`,{method:'POST'});
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
         🔍 Định nghĩa (SQL thật) của <b>${misaEsc(d.view)}</b> — chỉ đọc, không đụng dữ liệu. Copy đoạn dưới gửi lại để chẩn đoán chính xác.</div>
