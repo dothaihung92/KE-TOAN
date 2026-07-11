@@ -6437,6 +6437,28 @@ def misa_sql_xem_view(cid: int, database: str = "", view: str = ""):
         conn.close()
 
 
+@app.post("/api/misa-sql/tim-object/{cid}")
+def misa_sql_tim_object(cid: int, database: str = "", tu_khoa: str = ""):
+    """Tìm bảng/view/stored procedure/hàm có tên chứa từ khóa — CHỈ ĐỌC. Dùng
+    để tìm đúng stored procedure màn hình MISA thực sự gọi (thường có thêm
+    điều kiện lọc KHÔNG nằm trong view, vd theo chi nhánh/phiên làm việc)."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    tu_khoa = (tu_khoa or "").strip()
+    if not (database and tu_khoa):
+        raise HTTPException(400, "Thiếu database/từ khóa tìm kiếm.")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT name, type_desc FROM sys.objects "
+            "WHERE name LIKE ? AND type IN ('P','V','FN','TF','IF') "
+            "ORDER BY type_desc, name", "%" + tu_khoa + "%").fetchall()
+        ket = [{"ten": r[0], "loai": r[1]} for r in rows]
+        return {"ok": True, "tu_khoa": tu_khoa, "so_luong": len(ket), "danh_sach": ket[:300]}
+    finally:
+        conn.close()
+
+
 def _misa_sql_doc_schema(cid, database):
     """Đọc toàn bộ cấu trúc (bảng -> danh sách cột) của database (chỉ đọc)."""
     conn = _misa_sql_connect(cid, database=database)

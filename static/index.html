@@ -3122,6 +3122,7 @@ async function muaHangImportMisa(loai){
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="misaXemDinhNghiaView('View_PUVoucherService','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Xem SQL thật của màn hình Mua hàng hóa, dịch vụ trong MISA (chỉ đọc, để chẩn đoán)">🔍 Xem SQL màn hình MISA</button>
+        <button class="btn ghost sm" onclick="misaTimObject('PUVoucher','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Tìm stored procedure/view liên quan tên chứa 'PUVoucher' (chỉ đọc, để chẩn đoán)">🔎 Tìm Stored Procedure</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
@@ -3173,6 +3174,33 @@ async function misaXemDinhNghiaView(tenView,database){
       <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
         🔍 Định nghĩa (SQL thật) của <b>${misaEsc(d.view)}</b> — chỉ đọc, không đụng dữ liệu. Copy đoạn dưới gửi lại để chẩn đoán chính xác.</div>
       <textarea readonly style="width:100%;height:50vh;font-family:monospace;font-size:11.5px;padding:8px;border:1px solid #ddd;border-radius:6px">${misaEsc(d.dinh_nghia)}</textarea>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Tìm bảng/view/stored procedure/hàm theo từ khóa tên — CHỈ ĐỌC, để tìm
+// đúng procedure màn hình MISA thực sự gọi (có thể lọc thêm điều kiện
+// KHÔNG nằm trong view, vd theo chi nhánh/phiên làm việc).
+async function misaTimObject(tuKhoa,database){
+  toast('Đang tìm...','');
+  try{
+    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
+    const d=await api(`/api/misa-sql/tim-object/${current}?tu_khoa=${encodeURIComponent(tuKhoa)}${dbQ}`,{method:'POST'});
+    const rows=(d.danh_sach||[]).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;color:#666">${misaEsc(x.loai)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">
+        ${['SQL_STORED_PROCEDURE','VIEW','SQL_SCALAR_FUNCTION','SQL_TABLE_VALUED_FUNCTION','SQL_INLINE_TABLE_VALUED_FUNCTION'].includes(x.loai)?`<button class="btn ghost sm" onclick="misaXemDinhNghiaView('${misaEsc(x.ten).replace(/'/g,"\\'")}','${misaEsc(database||'').replace(/'/g,"\\'")}')">🔍 Xem SQL</button>`:''}
+      </td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
+        🔎 Tìm thấy <b>${d.so_luong}</b> bảng/view/procedure/hàm có tên chứa "<b>${misaEsc(tuKhoa)}</b>" — chỉ đọc, không đụng dữ liệu.
+        Tìm procedure (SQL_STORED_PROCEDURE) tên gần giống màn hình "Mua hàng hóa, dịch vụ" (vd chứa "GetList"/"Service"/"Search") rồi bấm "Xem SQL" để kiểm tra điều kiện lọc thật.</div>
+      <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
+        ${rows}</table></div>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
