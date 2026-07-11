@@ -2395,6 +2395,12 @@ function moBangKe(loai){
         <button class="btn sm" onclick="nlMuaHangDV(this)" style="background:#5a3e8a" title="Lọc các dòng Nợ là TK chi phí 6xx và kết xuất form MISA Chứng từ mua dịch vụ">📑 Mua Hàng Dịch Vụ</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('nk')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần Danh mục Hàng hóa/NVL + KH/NCC đã import trước">⬆ Nhập kho vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('kqk')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần Danh mục TSCĐ/CCDC + KH/NCC đã import trước">⬆ Không qua kho vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">📚 Danh mục:</span>
         <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
         <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
@@ -3066,6 +3072,52 @@ async function nlMuaHangKQK(btn){
     toast(sd&&sd!=='0'?`🏗 Đã kết xuất ${sd} dòng mua hàng không qua kho (Nợ 2111/211/2421/242)`:'⚠ Không có dòng nào Nợ là TSCĐ/CCDC (2111/211/2421/242)','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
+}
+const MUA_HANG_TEN={nk:'Mua hàng nhập kho',kqk:'Mua hàng không qua kho',dv:'Mua hàng dịch vụ'};
+// Ghi chứng từ Mua hàng THẲNG vào MISA (PUVoucher/PUVoucherDetail) — RỦI RO CAO
+// NHẤT trong phần mềm vì đây là chứng từ kế toán thật. Lấy dữ liệu từ Bảng kê
+// đầu vào ĐÃ LƯU (không cần chọn lại). LUÔN ghi ở trạng thái CHƯA GHI SỔ —
+// mã hàng/NCC phải đã có sẵn trong MISA, thiếu thì bị bỏ qua (không đoán/tạo mới).
+async function muaHangImportMisa(loai){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang kiểm tra (xem trước)...','');
+  try{
+    const pv=await api(`/api/misa-sql/import-mua-hang/${current}?loai=${loai}&preview=1`,{method:'POST'});
+    if(pv.ghi_chu){toast(pv.ghi_chu,'err');return}
+    const ds=(pv.danh_sach||[]).slice(0,300).map(x=>{
+      const boqua=x.trang_thai.includes('bỏ qua');
+      return `<tr style="${boqua?'background:#fff4e6':''}">
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ncc||x.ncc_mst||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.so_dong}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.tong_tien!=null?Number(x.tong_tien).toLocaleString('vi-VN'):''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;color:${boqua?'#8a5300':(x.trang_thai.includes('sẽ thêm')?'#1a7a7a':'#999')}">${misaEsc(x.trang_thai)}</td></tr>`;
+    }).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+        ⚠ RỦI RO CAO: đây là chứng từ <b>${MUA_HANG_TEN[loai]}</b> — Nợ/Có, thuế GTGT thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b>
+        ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng chứng từ trong MISA kiểm tra rồi tự bấm "Ghi sổ".
+        Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
+      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b></div>
+      ${(pv.so_bo_qua_ncc>0||pv.so_bo_qua_mahang>0)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA, <b>${pv.so_bo_qua_mahang}</b> dòng do thiếu mã hàng — hãy import Danh mục Hàng hóa/NVL/TSCĐ/CCDC và KH/NCC trước, rồi chạy lại.</div>`:''}
+      <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
+        ${ds}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}')">⬆ Ghi ${pv.so_chungtu} chứng từ vào MISA</button>`:''}
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function muaHangImportMisaGhi(loai){
+  toast('Đang ghi vào MISA...','');
+  try{
+    const d=await api(`/api/misa-sql/import-mua-hang/${current}?loai=${loai}&preview=0`,{method:'POST'});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA — CHƯA GHI SỔ. Mở MISA kiểm tra từng chứng từ rồi tự bấm Ghi sổ.`,'ok');
+  }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 async function nlBanHang(btn){
   const old=btn?btn.innerHTML:'';

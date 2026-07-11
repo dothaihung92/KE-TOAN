@@ -6762,6 +6762,14 @@ def _misa_thu_thap_khncc(cid):
                     "ten": e["ten"], "ncc": e["ncc"], "kh": e["kh"]})
     return out
 
+def _misa_branch_id(cur):
+    """Chi nhánh gốc (OrganizationUnit không có ParentID) — dùng làm BranchID
+    ngầm định khi ghi các bảng MISA (đa số công ty vừa/nhỏ chỉ có 1 chi nhánh)."""
+    row = cur.execute(
+        "SELECT TOP 1 OrganizationUnitID FROM OrganizationUnit "
+        "WHERE ParentID IS NULL ORDER BY Grade").fetchone()
+    return row[0] if row else None
+
 def _misa_ghi_khncc(cid, database, preview=True):
     """Ghi Danh mục KH/NCC (thu thập từ hóa đơn mua vào/bán ra đã lưu) thẳng
     vào bảng AccountObject của MISA (Danh mục > Đối tượng). Chỉ THÊM mã
@@ -6772,10 +6780,7 @@ def _misa_ghi_khncc(cid, database, preview=True):
     conn.autocommit = False
     try:
         cur = conn.cursor()
-        branch = cur.execute(
-            "SELECT TOP 1 OrganizationUnitID FROM OrganizationUnit "
-            "WHERE ParentID IS NULL ORDER BY Grade").fetchone()
-        branch_id = branch[0] if branch else None
+        branch_id = _misa_branch_id(cur)
         existing = {}   # mst_lower -> tên trong MISA (đối chiếu theo Mã ĐT hoặc MST)
         for code, taxcode, name in cur.execute(
                 "SELECT AccountObjectCode, CompanyTaxCode, AccountObjectName "
@@ -6845,6 +6850,296 @@ def misa_sql_import_khncc(cid: int, preview: int = 1, database: str = ""):
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_ghi_khncc(cid, database, preview=bool(preview))
+
+
+# ============================================================
+#  GHI CHỨNG TỪ MUA HÀNG THẲNG VÀO MISA (PUVoucher + PUVoucherDetail)
+#  ⚠ RỦI RO CAO NHẤT từ trước tới giờ — đây là chứng từ kế toán thật (Nợ
+#  152/156/242/211/6xx, Có 111/112/331, thuế GTGT đầu vào...). LUÔN ghi ở
+#  trạng thái CHƯA GHI SỔ (IsPostedFinance=IsPostedManagement=0), KHÔNG
+#  đụng tới GeneralLedger/GLVoucher — anh PHẢI mở từng chứng từ trong MISA
+#  kiểm tra rồi tự bấm "Ghi sổ". Mã hàng/NCC phải ĐÃ CÓ sẵn trong Danh mục
+#  MISA (từ các bước import trước) — dòng/chứng từ nào thiếu sẽ bị BỎ QUA,
+#  không tự đoán/tạo mới. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU, dùng lại
+#  đúng logic đã kiểm chứng khi xuất Excel theo mẫu MISA (_gen_mua_hang_*).
+# ============================================================
+_MUA_TEN = {"nk": "Mua hàng nhập kho", "kqk": "Mua hàng không qua kho",
+            "dv": "Mua hàng dịch vụ"}
+# vị trí (0-based) các cột cần trong mảng phẳng do _gen_mua_hang_* sinh ra
+_MUA_COT = {
+    "nk": dict(doc=6, ngayct=5, sohd=10, mst=12, ten_ncc=13, ma=19, ten=20,
+               dvt=25, sl=26, dgia=27, tt=28, no=23, co=24, ts=34, tthue=35,
+               tk_thue=38, tkdu_thue=37, nhtg=41, nts=42, nthue=43, ntk=44,
+               la_nk_col=1),
+    "kqk": dict(doc=6, ngayct=5, sohd=9, mst=11, ten_ncc=12, ma=17, ten=18,
+                dvt=21, sl=22, dgia=23, tt=24, no=19, co=20, ts=30, tthue=31,
+                tk_thue=34, tkdu_thue=33, nhtg=36, nts=37, nthue=38, ntk=39,
+                la_nk_col=1),
+    "dv": dict(doc=6, ngayct=5, sohd=33, mst=7, ten_ncc=8, ma=14, ten=15,
+               dvt=19, sl=20, dgia=21, tt=22, no=16, co=17, ts=27, tthue=28,
+               tk_thue=30, tkdu_thue=None, nhtg=None, nts=None, nthue=None,
+               ntk=None, la_nk_col=None),
+}
+
+def _misa_pu_reftype(cur, tu_khoa, co_tk=None):
+    """Chọn RefType phù hợp nhất trong SYSRefType (MasterTableName='PUVoucher')
+    theo từ khóa loại chứng từ (vd 'nhập kho'/'không qua kho'/'dịch vụ') +
+    gợi ý phương thức thanh toán theo TK Có (111->tiền mặt, 112->chuyển
+    khoản/ngân hàng, khác->công nợ)."""
+    rows = cur.execute(
+        "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall()
+    if not rows:
+        return None
+    pt_kw = ()
+    if co_tk:
+        if co_tk.startswith("111"):
+            pt_kw = ("tiền mặt",)
+        elif co_tk.startswith("112"):
+            pt_kw = ("chuyển khoản", "ngân hàng")
+        else:
+            pt_kw = ("công nợ", "chưa thanh toán", "chưa trả")
+
+    def diem(name):
+        n = (name or "").lower()
+        if not all(k in n for k in tu_khoa):
+            return -1
+        return 1 + (1 if any(k in n for k in pt_kw) else 0)
+
+    best = max(rows, key=lambda r: diem(r[1]))
+    return int(best[0]) if diem(best[1]) >= 0 else None
+
+def _num0(v):
+    return v if isinstance(v, (int, float)) else 0
+
+def _misa_ghi_mua_hang(cid, database, loai, preview=True):
+    """Ghi chứng từ Mua hàng (loai: nk/kqk/dv) thẳng vào MISA — xem cảnh báo
+    ở đầu file. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU (nhap_lieu 'in')."""
+    import uuid as _uuid
+    if loai not in _MUA_COT:
+        raise HTTPException(400, "Loại '%s' chưa hỗ trợ (chỉ nk/kqk/dv)." % loai)
+    cfg = _MUA_COT[loai]
+    dl = nhap_lieu_get(cid, "in")
+    header, rows = dl.get("header") or [], dl.get("rows") or []
+    if not rows:
+        raise HTTPException(400, "Chưa có Bảng kê đầu vào đã lưu — Import & Lưu trước.")
+    if loai == "nk":
+        flat = _gen_mua_hang_nk(cid, header, rows)
+    elif loai == "kqk":
+        flat = _gen_mua_hang_kqk(cid, header, rows)
+    else:
+        flat = _gen_mua_hang_dv(cid, header, rows)
+    if not flat:
+        return {"preview": preview, "database": database, "so_chungtu": 0, "so_dong": 0,
+                "so_trung": 0, "so_bo_qua_ncc": 0, "so_bo_qua_mahang": 0, "danh_sach": [],
+                "ghi_chu": "Không có dòng nào phù hợp (%s) trong Bảng kê đầu vào." % _MUA_TEN[loai]}
+    # gom các dòng theo Số chứng từ / Số phiếu nhập -> 1 nhóm = 1 PUVoucher
+    groups, order = {}, []
+    for r in flat:
+        doc = str(r[cfg["doc"]] or "").strip()
+        if not doc:
+            continue
+        if doc not in groups:
+            groups[doc] = []
+            order.append(doc)
+        groups[doc].append(r)
+
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        branch_id = _misa_branch_id(cur)
+        ncc = {}   # mst/mã ĐT (lower) -> (AccountObjectID, tên trong MISA)
+        for aid, taxcode, code, name in cur.execute(
+                "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
+                "FROM AccountObject").fetchall():
+            nm = str(name or "")
+            if taxcode:
+                ncc[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm)
+            if code:
+                ncc[str(code).strip().lower()] = (aid, nm)
+        hang = {}  # mã hàng (lower) -> (InventoryItemID, UnitID, tên trong MISA)
+        for iid, code, uid, ten_h in cur.execute(
+                "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
+                "FROM InventoryItem").fetchall():
+            if code:
+                hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        # chứng từ đã có trong MISA (dò theo Số chứng từ = RefNoManagement) —
+        # KHÔNG đụng chứng từ đã ghi sổ, bỏ qua chứng từ chưa ghi sổ trùng số
+        posted_refno, unposted_refno = set(), set()
+        for rn, pf, pm in cur.execute(
+                "SELECT RefNoManagement, ISNULL(IsPostedFinance,0), ISNULL(IsPostedManagement,0) "
+                "FROM PUVoucher").fetchall():
+            if not rn:
+                continue
+            k = str(rn).strip().lower()
+            (posted_refno if (pf or pm) else unposted_refno).add(k)
+
+        now = datetime.datetime.now()
+        ket = []
+        them_ct = them_dong = trung = bo_ncc = bo_mahang = 0
+        for doc in order:
+            lines = groups[doc]
+            k_doc = doc.strip().lower()
+            if k_doc in posted_refno:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                continue
+            if k_doc in unposted_refno:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                continue
+            first = lines[0]
+            mst = str(first[cfg["mst"]] or "").strip()
+            mst_k = mst.lower()
+            if mst_k not in ncc:
+                bo_ncc += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                            "trang_thai": "bỏ qua — NCC (MST %s) chưa có trong MISA" % mst})
+                continue
+            acc_obj_id, ten_ncc_misa = ncc[mst_k]
+            valid_lines = []
+            for r in lines:
+                ma = str(r[cfg["ma"]] or "").strip()
+                mk = ma.lower()
+                if mk not in hang:
+                    bo_mahang += 1
+                    continue
+                valid_lines.append((r, hang[mk]))
+            if not valid_lines:
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"})
+                continue
+            ngay_dt = None
+            ngay_str = str(first[cfg["ngayct"]] or "").strip()
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    ngay_dt = datetime.datetime.strptime(ngay_str, fmt)
+                    break
+                except Exception:
+                    pass
+            ngay_dt = ngay_dt or now
+            co_tk = str(first[cfg["co"]] or "").strip()
+            tu_khoa = {"nk": ["nhập kho"], "kqk": ["không qua kho"], "dv": ["dịch vụ"]}[loai]
+            ref_type = _misa_pu_reftype(cur, tu_khoa, co_tk)
+            if not ref_type:
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
+                continue
+            ref_id = str(_uuid.uuid4())
+            total_amount = total_vat = total_import_tax = 0
+            detail_rows = []
+            for idx, (r, (iid, uid, ten_h)) in enumerate(valid_lines, 1):
+                sl = _num0(r[cfg["sl"]])
+                dgia = _num0(r[cfg["dgia"]])
+                tt = _num0(r[cfg["tt"]])
+                ts = _num0(r[cfg["ts"]]) if cfg["ts"] is not None else None
+                tthue = _num0(r[cfg["tthue"]])
+                tk_thue = str(r[cfg["tk_thue"]] or "").strip() or None
+                tkdu = (str(r[cfg["tkdu_thue"]] or "").strip() or None
+                        if cfg["tkdu_thue"] is not None else None)
+                no_acc = str(r[cfg["no"]] or "").strip()
+                co_acc = str(r[cfg["co"]] or "").strip()
+                nk_tg = _num0(r[cfg["nhtg"]]) if cfg["nhtg"] is not None else 0
+                nk_ts = _num0(r[cfg["nts"]]) if cfg["nts"] is not None else 0
+                nk_thue = _num0(r[cfg["nthue"]]) if cfg["nthue"] is not None else 0
+                nk_tk = ((str(r[cfg["ntk"]] or "").strip() or None)
+                         if (cfg["ntk"] is not None and nk_thue) else None)
+                total_amount += tt
+                total_vat += tthue
+                total_import_tax += nk_thue
+                detail_rows.append({
+                    "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
+                    "Description": ten_h or str(r[cfg["ten"]] or ""), "DebitAccount": no_acc,
+                    "CreditAccount": co_acc, "UnitID": uid, "Quantity": sl, "UnitPrice": dgia,
+                    "AmountOC": tt, "Amount": tt, "DiscountRate": 0, "DiscountAmountOC": 0,
+                    "DiscountAmount": 0, "FreightAmount": 0, "InwardAmount": 0,
+                    "MainConvertRate": 1, "ExchangeRateOperator": "*", "MainQuantity": sl,
+                    "MainUnitPrice": dgia, "VATRate": ts, "VATAmountOC": tthue, "VATAmount": tthue,
+                    "VATAccount": tk_thue, "DeductionDebitAccount": tkdu, "UnResonableCost": 0,
+                    "FOBAmountOC": 0, "FOBAmount": 0, "ImportChargeAmount": 0,
+                    "ImportTaxRatePrice": nk_tg, "ImportTaxRate": nk_ts,
+                    "ImportTaxAmountOC": nk_thue, "ImportTaxAmount": nk_thue,
+                    "ImportTaxAccount": nk_tk, "SpecialConsumeTaxRate": 0,
+                    "SpecialConsumeTaxAmountOC": 0, "SpecialConsumeTaxAmount": 0,
+                    "SortOrder": idx, "EnvironmentalTaxAmount": 0, "EnvironmentalTaxAmountOC": 0,
+                    "CashOutAmountFinance": 0, "CashOutDiffAmountFinance": 0,
+                    "CashOutVATAmountFinance": 0, "CashOutDiffVATAmountFinance": 0,
+                    "CashOutAmountManagement": 0, "CashOutDiffAmountManagement": 0,
+                    "CashOutVATAmountManagement": 0, "CashOutDiffVATAmountManagement": 0,
+                    "CashOutExchangeRateFinance": 1, "CashOutExchangeRateManagement": 1,
+                    "UnitPriceAfterTax": 0, "ImportChargeExchangeRate": 1,
+                    "ImportTaxRatePriceOC": 0, "ImportChargeBeforeCustomAmountOC": 0,
+                    "ImportChargeBeforeCustomAmountMainCurrency": 0,
+                    "AllocationRateImportOriginCurrency": 0,
+                    "ImportChargeBeforeCustomAmountAllocated": 0,
+                    "PanelLengthQuantity": 0, "PanelWidthQuantity": 0, "PanelHeightQuantity": 0,
+                    "PanelRadiusQuantity": 0, "PanelQuantity": 0,
+                    "DeductionsTaxAmountOC": 0, "DeductionsTaxAmount": 0,
+                    "AntiDumpingTaxRate": 0, "AntiDumpingTaxAmountOC": 0, "AntiDumpingTaxAmount": 0,
+                    "InvNo": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
+                    "InvDate": ngay_dt,
+                })
+            header_cols = {
+                "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
+                "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
+                "IsPostedFinance": 0, "IsPostedManagement": 0, "IncludeInvoice": 1,
+                "AccountObjectID": acc_obj_id,
+                "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
+                "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
+                "CurrencyID": "VND", "ExchangeRate": 1,
+                "TotalAmountOC": total_amount, "TotalAmount": total_amount,
+                "TotalImportTaxAmountOC": total_import_tax, "TotalImportTaxAmount": total_import_tax,
+                "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
+                "TotalDiscountAmountOC": 0, "TotalDiscountAmount": 0,
+                "TotalFreightAmount": 0, "TotalInwardAmount": 0,
+                "TotalSpecialConsumeTaxAmountOC": 0, "TotalSpecialConsumeTaxAmount": 0,
+                "TotalCustomBeforeAmount": 0, "DisplayOnBook": 1,
+                "RefOrder": 0, "CreatedDate": now, "CABAAmountOC": 0, "CABAAmount": 0,
+                "INRefOrder": now, "IsPULotVoucher": 0,
+            }
+            if not preview:
+                hc = list(header_cols.keys())
+                cur.execute("INSERT INTO PUVoucher ([%s]) VALUES (%s)" %
+                           ("],[".join(hc), ",".join(["?"] * len(hc))),
+                           [header_cols[c] for c in hc])
+                for d in detail_rows:
+                    dc = list(d.keys())
+                    cur.execute("INSERT INTO PUVoucherDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(dc), ",".join(["?"] * len(dc))),
+                               [d[c] for c in dc])
+            them_ct += 1
+            them_dong += len(detail_rows)
+            ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
+                        "tong_tien": total_amount, "tien_thue": total_vat,
+                        "trang_thai": "sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)"})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_chungtu": them_ct,
+                "so_dong": them_dong, "so_trung": trung, "so_bo_qua_ncc": bo_ncc,
+                "so_bo_qua_mahang": bo_mahang, "danh_sach": ket[:500]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/import-mua-hang/{cid}")
+def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: str = ""):
+    """Ghi chứng từ Mua hàng (loai=nk/kqk/dv) thẳng vào MISA (PUVoucher).
+    preview=1 -> chỉ xem trước, không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview))
 
 
 @app.get("/api/danh-muc-ncc/{cid}")
