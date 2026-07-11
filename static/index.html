@@ -456,6 +456,7 @@
           <div style="font-size:38px;margin-bottom:8px">📋</div>
           <div style="font-size:18px;font-weight:700;color:#5a3e8a">Danh mục KH/NCC</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Xuất Excel MST + tên từ mua vào & bán ra</div>
+          <button class="btn sm" style="background:#b06a00;margin-top:10px" onclick="event.stopPropagation();khnccImportMisa()" title="Ghi thẳng vào MISA (Danh mục > Đối tượng)">⬆ Import vào MISA</button>
         </div>
         <div onclick="ghiTang('ccdc')" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b06a00;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#fdf5ec'" onmouseout="this.style.background='#fff'">
@@ -2311,6 +2312,48 @@ async function xuatDanhMucNCC(){
     dl(blob,`DanhMuc_KHNCC.xlsx`);
     toast('✓ Đã xuất Danh mục KH/NCC (cũng lưu ra Desktop)','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Ghi Danh mục KH/NCC (thu thập từ mua vào/bán ra đã lưu) THẲNG vào MISA
+// (bảng AccountObject, Danh mục > Đối tượng). MST xuất hiện ở mua vào ->
+// Nhà cung cấp, ở bán ra -> Khách hàng (có thể cả 2). Xem trước rồi mới ghi.
+async function khnccImportMisa(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang kiểm tra (xem trước)...','');
+  try{
+    const pv=await api(`/api/misa-sql/import-khncc/${current}?preview=1`,{method:'POST'});
+    const ds=(pv.danh_sach||[]).slice(0,400).map(x=>{
+      const red=!!x.lech_ten;
+      return `<tr style="${red?'background:#fde8e8':''}">
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.mst)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;${red?'color:#b91c1c;font-weight:700':'color:#999'}">${misaEsc(x.ten_misa||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.vai_tro||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;color:${red?'#b91c1c':(x.trang_thai.includes('bỏ qua')?'#999':'#1a7a7a')};${red?'font-weight:700':''}">${misaEsc(x.trang_thai)}</td></tr>`;
+    }).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:10px">
+        ⚠ Sắp GHI vào database MISA: <b>${misaEsc(pv.database||'?')}</b> (Danh mục &gt; Đối tượng) —
+        chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>. Chỉ THÊM MST mới, bỏ qua MST đã có.</div>
+      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_them}</b> đối tượng — bỏ qua (đã có): <b>${pv.so_trung}</b></div>
+      ${pv.so_lech_ten>0?`<div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;padding:6px 10px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Có <b>${pv.so_lech_ten}</b> MST ĐÃ CÓ trong MISA nhưng TÊN KHÁC với phần mềm (các dòng tô đỏ) — phần mềm KHÔNG ghi đè.</div>`:''}
+      <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">MST</th><th style="border:1px solid #eee;padding:2px 6px">Tên (phần mềm)</th><th style="border:1px solid #eee;padding:2px 6px">Tên trong MISA</th><th style="border:1px solid #eee;padding:2px 6px">Vai trò</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
+        ${ds}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_them>0?`<button class="btn sm" style="background:#b06a00" onclick="khnccImportMisaGhi()">⬆ Ghi ${pv.so_them} đối tượng vào MISA</button>`:''}
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function khnccImportMisaGhi(){
+  toast('Đang ghi vào MISA...','');
+  try{
+    const d=await api(`/api/misa-sql/import-khncc/${current}?preview=0`,{method:'POST'});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã ghi ${d.so_them} đối tượng vào MISA (bỏ qua ${d.so_trung} đã có). Mở MISA kiểm tra Danh mục Đối tượng.`,'ok');
+  }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 async function ghiTang(loai){
   if(!current){toast('Chọn công ty trước','err');return}

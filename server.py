@@ -6710,6 +6710,143 @@ async def misa_sql_import_hang_hoa(cid: int, request: Request):
     return _misa_ghi_hang_hoa(cid, database, rows, preview=preview, loai=loai)
 
 
+# ============================================================
+#  GHI DANH MỤC KH/NCC THẲNG VÀO MISA (bảng AccountObject)
+#  Đối tượng đơn thuần (không kèm bút toán) — an toàn như InventoryItem.
+#  Thu thập MST+tên từ hóa đơn mua vào (NCC) / bán ra (KH) đã lưu, MST nào
+#  xuất hiện ở mua vào -> IsVendor=1, ở bán ra -> IsCustomer=1 (có thể cả 2).
+# ============================================================
+def _misa_khncc_chuan_mst(s):
+    return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+
+def _misa_khncc_dinh_dang_mst(s):
+    s = _misa_khncc_chuan_mst(s)
+    if len(s) == 13 and s.isdigit():
+        return s[:10] + "-" + s[10:]
+    return s
+
+def _misa_thu_thap_khncc(cid):
+    """Thu thập MST + tên + vai trò (NCC/KH) từ hóa đơn mua vào/bán ra đã
+    lưu. Trả list [{"mst","mst_hien","ten","ncc","kh"}], sắp theo MST."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT loai, nbmst, nbten, nmmst, raw FROM invoices WHERE company_id=?", (cid,)).fetchall()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst_cty = _misa_khncc_chuan_mst(comp["mst"]) if comp else ""
+    ds = {}   # mst -> {"ten","ncc","kh"}
+    for r in rows:
+        if r["loai"] == "purchase":
+            mst = _misa_khncc_chuan_mst(r["nbmst"])
+            ten = str(r["nbten"] or "").strip()
+            vai = "ncc"
+        else:
+            try:
+                raw = json.loads(r["raw"]) if r["raw"] else {}
+            except Exception:
+                raw = {}
+            mst = _misa_khncc_chuan_mst(r["nmmst"] or raw.get("nmmst", ""))
+            ten = str(raw.get("nmten", "") or "").strip()
+            vai = "kh"
+        if not mst or mst == mst_cty:
+            continue
+        e = ds.setdefault(mst, {"ten": "", "ncc": False, "kh": False})
+        e[vai] = True
+        if ten and len(ten) > len(e["ten"]):
+            e["ten"] = ten
+    out = []
+    for mst, e in sorted(ds.items()):
+        if not e["ten"]:
+            continue
+        out.append({"mst": mst, "mst_hien": _misa_khncc_dinh_dang_mst(mst),
+                    "ten": e["ten"], "ncc": e["ncc"], "kh": e["kh"]})
+    return out
+
+def _misa_ghi_khncc(cid, database, preview=True):
+    """Ghi Danh mục KH/NCC (thu thập từ hóa đơn mua vào/bán ra đã lưu) thẳng
+    vào bảng AccountObject của MISA (Danh mục > Đối tượng). Chỉ THÊM mã
+    MỚI (bỏ qua MST đã có, không ghi đè). preview=True: chỉ xem trước."""
+    import uuid as _uuid
+    items = _misa_thu_thap_khncc(cid)
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        branch = cur.execute(
+            "SELECT TOP 1 OrganizationUnitID FROM OrganizationUnit "
+            "WHERE ParentID IS NULL ORDER BY Grade").fetchone()
+        branch_id = branch[0] if branch else None
+        existing = {}   # mst_lower -> tên trong MISA (đối chiếu theo Mã ĐT hoặc MST)
+        for code, taxcode, name in cur.execute(
+                "SELECT AccountObjectCode, CompanyTaxCode, AccountObjectName "
+                "FROM AccountObject").fetchall():
+            ten_misa = str(name or "")
+            if code:
+                existing[str(code).strip().lower()] = ten_misa
+            if taxcode:
+                existing[_misa_khncc_chuan_mst(taxcode).lower()] = ten_misa
+
+        def _norm_ten(s):
+            return " ".join(str(s or "").split()).lower()
+
+        now = datetime.datetime.now()
+        ket = []
+        them = trung = lech_ten = 0
+        for it in items:
+            mst, mst_hien, ten = it["mst"], it["mst_hien"], it["ten"]
+            k = mst.lower()
+            if k in existing:
+                ten_misa = existing[k]
+                lech = _norm_ten(ten) != _norm_ten(ten_misa)
+                trung += 1
+                if lech:
+                    lech_ten += 1
+                ket.append({"mst": mst_hien, "ten": ten, "ten_misa": ten_misa, "lech_ten": lech,
+                            "vai_tro": "+".join(x for x in (["NCC"] if it["ncc"] else []) + (["KH"] if it["kh"] else [])),
+                            "trang_thai": "đã có — KHÁC TÊN" if lech else "đã có (bỏ qua)"})
+                continue
+            is_vendor = 1 if it["ncc"] else 0
+            is_customer = 1 if it["kh"] else 0
+            taxcode = mst_hien if (mst.isdigit() and len(mst) != 12) else None
+            if not preview:
+                cur.execute(
+                    "INSERT INTO AccountObject ([AccountObjectID],[AccountObjectCode],"
+                    "[AccountObjectName],[CompanyTaxCode],[IsVendor],[IsCustomer],"
+                    "[AccountObjectType],[Inactive],[BranchID],[CreatedDate]) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    str(_uuid.uuid4()), mst_hien[:50], ten[:400], taxcode,
+                    is_vendor, is_customer, 0, 0, branch_id, now)
+            them += 1
+            ket.append({"mst": mst_hien, "ten": ten,
+                        "vai_tro": "+".join(x for x in (["NCC"] if it["ncc"] else []) + (["KH"] if it["kh"] else [])),
+                        "trang_thai": "sẽ thêm" if preview else "đã thêm"})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
+                "so_lech_ten": lech_ten, "danh_sach": ket[:1000]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/import-khncc/{cid}")
+def misa_sql_import_khncc(cid: int, preview: int = 1, database: str = ""):
+    """Ghi Danh mục KH/NCC thẳng vào MISA (bảng AccountObject).
+    preview=1 -> chỉ xem trước, không ghi."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_ghi_khncc(cid, database, preview=bool(preview))
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
