@@ -6408,6 +6408,33 @@ def misa_sql_xem(cid: int, database: str = "", bang: str = "", n: int = 20):
         conn.close()
 
 
+@app.post("/api/misa-sql/xem-view/{cid}")
+def misa_sql_xem_view(cid: int, database: str = "", view: str = ""):
+    """Xem ĐỊNH NGHĨA (SQL text) của 1 view/stored procedure MISA — CHỈ ĐỌC,
+    không đụng dữ liệu. Dùng để chẩn đoán vì sao 1 màn hình MISA lọc/không
+    hiện dữ liệu (xem view đó JOIN/WHERE theo điều kiện gì)."""
+    if not (database and view):
+        raise HTTPException(400, "Thiếu database/tên view")
+    if not view.replace("_", "").isalnum():
+        raise HTTPException(400, "Tên view không hợp lệ")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        row = cur.execute("SELECT OBJECT_DEFINITION(OBJECT_ID(?))", view).fetchone()
+        dinh_nghia = row[0] if row else None
+        if not dinh_nghia:
+            row2 = cur.execute(
+                "SELECT m.definition FROM sys.sql_modules m "
+                "JOIN sys.objects o ON o.object_id=m.object_id WHERE o.name=?", view).fetchone()
+            dinh_nghia = row2[0] if row2 else None
+        if not dinh_nghia:
+            raise HTTPException(404, "Không tìm thấy định nghĩa view '%s' (có thể không có quyền "
+                                     "VIEW DEFINITION, hoặc tên view sai)." % view)
+        return {"ok": True, "view": view, "dinh_nghia": dinh_nghia}
+    finally:
+        conn.close()
+
+
 def _misa_sql_doc_schema(cid, database):
     """Đọc toàn bộ cấu trúc (bảng -> danh sách cột) của database (chỉ đọc)."""
     conn = _misa_sql_connect(cid, database=database)
