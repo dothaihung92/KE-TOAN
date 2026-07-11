@@ -6573,20 +6573,24 @@ def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: i
 #  bỏ qua mã đã tồn tại, chạy trong transaction (lỗi -> rollback, không ghi dở).
 # ============================================================
 # Danh mục kho -> (TK kho, TK giá vốn, TK doanh thu, tiền tố TK để dò tính chất)
-# LƯU Ý: DM CCDC của phần mềm là CCDC phân bổ (Nợ 2421/242, bảng FixedAsset/Tool
-# của MISA — không phải InventoryItem) nên KHÔNG cho vào đây. Bảng InventoryItem
-# chỉ áp dụng cho Hàng hóa (1561/156) và NVL (152).
+# TẤT CẢ đều ghi vào bảng InventoryItem (Danh mục > Vật tư hàng hóa) với tính
+# chất "Vật tư hàng hóa". TSCĐ/CCDC cũng đăng ký làm mã Vật tư hàng hóa (theo
+# yêu cầu người dùng) — chỉ khác TK kho ngầm định (có thể sửa lại trong MISA).
 _MISA_INV_ACC = {
-    "hh":  ("1561", "632", "5111", "156%"),   # Hàng hóa
-    "nvl": ("152",  "632", "5111", "152%"),   # Nguyên vật liệu
+    "hh":   ("1561", "632", "5111", "156%"),   # Hàng hóa
+    "nvl":  ("152",  "632", "5111", "152%"),   # Nguyên vật liệu
+    "tscd": ("211",  "632", "5111", "211%"),   # TSCĐ (ghi làm mã Vật tư hàng hóa)
+    "ccdc": ("153",  "632", "5111", "153%"),   # CCDC (ghi làm mã Vật tư hàng hóa)
 }
-_MISA_INV_TEN = {"hh": "Hàng hóa", "nvl": "Nguyên vật liệu"}
+_MISA_INV_TEN = {"hh": "Hàng hóa", "nvl": "Nguyên vật liệu",
+                 "tscd": "TSCĐ", "ccdc": "CCDC"}
 
 def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
-    """Thêm các mã (Danh mục Hàng hóa/NVL/CCDC của phần mềm) vào bảng
-    InventoryItem của MISA. Chỉ THÊM mã MỚI (bỏ qua mã đã có). Tự tạo đơn vị
-    tính (Unit) nếu chưa có. preview=True: chỉ xem trước, KHÔNG ghi (rollback).
-    loai: hh/nvl/ccdc -> quyết định TK kho + dò 'tính chất' (InventoryItemType)."""
+    """Thêm các mã (Danh mục Hàng hóa/NVL/TSCĐ/CCDC của phần mềm) vào bảng
+    InventoryItem của MISA (Danh mục > Vật tư hàng hóa), tính chất luôn là
+    "Vật tư hàng hóa". Chỉ THÊM mã MỚI (bỏ qua mã đã có). Tự tạo đơn vị tính
+    (Unit) nếu chưa có. preview=True: chỉ xem trước, KHÔNG ghi (rollback).
+    loai: hh/nvl/tscd/ccdc -> chỉ khác TK kho ngầm định."""
     import uuid as _uuid
     inv_acc, cogs_acc, sale_acc, _acc_like = _MISA_INV_ACC.get(loai, _MISA_INV_ACC["hh"])
     conn = _misa_sql_connect(cid, database=database)
@@ -6688,14 +6692,15 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
 
 @app.post("/api/misa-sql/import-hang-hoa/{cid}")
 async def misa_sql_import_hang_hoa(cid: int, request: Request):
-    """Import Danh mục Hàng hóa/NVL vào MISA (bảng InventoryItem). body:
-    {rows, preview, loai, database?}. preview=true -> chỉ xem trước, không ghi."""
+    """Import Danh mục Hàng hóa/NVL/TSCĐ/CCDC vào MISA (bảng InventoryItem).
+    body: {rows, preview, loai, database?}. preview=true -> chỉ xem trước."""
     body = await request.json()
     rows = body.get("rows") or []
     preview = bool(body.get("preview", True))
     loai = (body.get("loai") or "hh").strip()
     if loai not in _MISA_INV_ACC:
-        raise HTTPException(400, "Loại danh mục '%s' chưa hỗ trợ ghi vào MISA (mới có hh/nvl)." % loai)
+        raise HTTPException(400, "Loại danh mục '%s' chưa hỗ trợ ghi vào MISA "
+                                 "(chỉ hh/nvl/tscd/ccdc)." % loai)
     database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -6703,303 +6708,6 @@ async def misa_sql_import_hang_hoa(cid: int, request: Request):
     if not rows:
         raise HTTPException(400, "Danh mục trống — không có mã để import.")
     return _misa_ghi_hang_hoa(cid, database, rows, preview=preview, loai=loai)
-
-
-# ============================================================
-#  DANH MỤC MÃ TSCĐ / CCDC THẲNG VÀO MISA (bảng FixedAsset / SUIncrement)
-#  Chỉ đăng ký MÃ + TÊN — giống hệt Danh mục Hàng hóa/NVL, KHÔNG tự tính
-#  Nguyên giá/Khấu hao/Thành tiền (những thông tin đó thuộc chứng từ Ghi
-#  tăng riêng, làm ở bước sau — xem nút "📈 Ghi Tăng TSCĐ/CCDC" ở trang
-#  chủ). MISA không có bảng "danh mục TSCĐ" tách rời khỏi FixedAsset/
-#  SUIncrement nên vẫn phải ghi vào 2 bảng đó, nhưng LUÔN ở trạng thái
-#  CHƯA GHI SỔ (IsPostedManagement=IsPostedFinance=0) và không đụng tới
-#  GeneralLedger/GLVoucher — anh tự hoàn thiện + Ghi sổ trong MISA khi
-#  làm chứng từ Ghi tăng thật.
-# ============================================================
-
-def _misa_ts_branch_id(cur):
-    row = cur.execute(
-        "SELECT TOP 1 OrganizationUnitID FROM OrganizationUnit "
-        "WHERE ParentID IS NULL ORDER BY Grade").fetchone()
-    return row[0] if row else None
-
-def _misa_ts_reftype(cur, master_table):
-    """Lấy đúng loại chứng từ GHI TĂNG cho bảng FixedAsset/SUIncrement.
-    SYSRefType có NHIỀU RefType cùng MasterTableName (ghi tăng, ghi giảm,
-    điều chuyển, đánh giá lại...) — phải chọn đúng 'Ghi tăng', không lấy
-    bừa RefType nhỏ nhất (dễ trúng ghi giảm/điều chuyển -> MISA không hiện
-    trong danh sách ghi tăng)."""
-    rows = cur.execute(
-        "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=? "
-        "ORDER BY RefType", master_table).fetchall()
-    if not rows:
-        return None
-    # ưu tiên tên có 'ghi tăng' / 'tăng'; loại trừ giảm/điều chuyển/đánh giá/kiểm kê
-    def _diem(name):
-        n = (name or "").lower()
-        if any(x in n for x in ("giảm", "điều chuyển", "điều chỉnh",
-                                "đánh giá", "kiểm kê", "thanh lý", "khấu hao")):
-            return -1
-        if "ghi tăng" in n:
-            return 3
-        if "tăng" in n:
-            return 2
-        return 0
-    best = max(rows, key=lambda r: _diem(r[1]))
-    return int(best[0])
-
-def _misa_ts_next_seq(cur, table, col, prefix):
-    """Dò số thứ tự lớn nhất đang dùng trong cột RefNo/mã dạng PREFIX+số, trả
-    số tiếp theo (an toàn, không trùng chứng từ có sẵn)."""
-    import re as _re
-    maxn = 0
-    for (v,) in cur.execute("SELECT %s FROM [%s] WHERE %s LIKE ?" % (col, table, col),
-                             prefix + "%").fetchall():
-        m = _re.search(r"(\d+)$", str(v or ""))
-        if m:
-            maxn = max(maxn, int(m.group(1)))
-    return maxn + 1
-
-def _misa_dm_tscd(cid, database, dm_rows, preview=True, ghi_de=False):
-    """Đăng ký DANH MỤC MÃ TSCĐ vào bảng FixedAsset của MISA — CHỈ Mã + Tên
-    (giống hệt Danh mục Hàng hóa/NVL), KHÔNG tự tính Nguyên giá/Khấu
-    hao/Hạn sử dụng (những cột đó dùng cho chứng từ Ghi tăng riêng, làm
-    sau). Ghi ở trạng thái CHƯA GHI SỔ để anh tự hoàn thiện + Ghi sổ trong
-    MISA khi làm chứng từ Ghi tăng thật. dm_rows: mỗi dòng ít nhất [Mã, Tên].
-    ghi_de=True: gỡ các bản ghi CHƯA GHI SỔ có mã trùng rồi ghi lại (để sửa
-    các bản đã ghi trước bằng loại chứng từ sai)."""
-    import uuid as _uuid
-    conn = _misa_sql_connect(cid, database=database)
-    conn.autocommit = False
-    try:
-        cur = conn.cursor()
-        branch_id = _misa_ts_branch_id(cur)
-        if not branch_id:
-            raise HTTPException(400, "Không dò được Chi nhánh (OrganizationUnit) trong MISA.")
-        ref_type = _misa_ts_reftype(cur, "FixedAsset")
-        if not ref_type:
-            raise HTTPException(400, "Không dò được loại chứng từ TSCĐ (SYSRefType) trong MISA.")
-        cat = cur.execute(
-            "SELECT TOP 1 FixedAssetCategoryID, FixedAssetCategoryName FROM FixedAssetCategory "
-            "WHERE ISNULL(IsParent,0)=0 AND ISNULL(Inactive,0)=0 "
-            "ORDER BY FixedAssetCategoryCode").fetchone()
-        if not cat:
-            raise HTTPException(400, "MISA chưa có Loại TSCĐ (Danh mục > Loại TSCĐ) nào — vào MISA "
-                                     "tạo ít nhất 1 loại TSCĐ trước rồi thử lại.")
-        cat_id, cat_name = cat
-        # mã đã có: tách bản đã ghi sổ (KHÔNG đụng) và chưa ghi sổ (có thể ghi đè)
-        posted, unposted = set(), set()
-        for code, pf, pm in cur.execute(
-                "SELECT FixedAssetCode, ISNULL(IsPostedFinance,0), ISNULL(IsPostedManagement,0) "
-                "FROM FixedAsset").fetchall():
-            if not code:
-                continue
-            k = str(code).strip().lower()
-            (posted if (pf or pm) else unposted).add(k)
-        next_seq = _misa_ts_next_seq(cur, "FixedAsset", "RefNo", "MHTS")
-        now = datetime.datetime.now()
-        ket = []
-        them = trung = go = 0
-        seen = set()
-        for r in dm_rows:
-            ma = str((r[0] if len(r) > 0 else "") or "").strip()
-            ten = str((r[1] if len(r) > 1 else "") or "").strip()
-            dvt = str((r[2] if len(r) > 2 else "") or "").strip()
-            if not ma or not ten:
-                continue
-            k = ma.lower()
-            if k in seen:
-                continue
-            seen.add(k)
-            if k in posted:
-                trung += 1
-                ket.append({"ma": ma, "ten": ten, "trang_thai": "đã ghi sổ (bỏ qua)"})
-                continue
-            if k in unposted and not ghi_de:
-                trung += 1
-                ket.append({"ma": ma, "ten": ten, "trang_thai": "đã có (bỏ qua)"})
-                continue
-            if k in unposted and ghi_de:
-                if not preview:
-                    cur.execute("DELETE FROM FixedAsset WHERE LOWER(FixedAssetCode)=? "
-                                "AND ISNULL(IsPostedFinance,0)=0 AND ISNULL(IsPostedManagement,0)=0", k)
-                go += 1
-            refno = "MHTS%05d" % next_seq
-            next_seq += 1
-            cols_vals = [
-                ("FixedAssetID", str(_uuid.uuid4())),
-                ("RefNo", refno[:20]),
-                ("RefDate", now),
-                ("RefType", ref_type),
-                ("FixedAssetCategoryID", cat_id),
-                ("BranchID", branch_id),
-                ("FixedAssetCode", ma[:25]),
-                ("FixedAssetName", ten[:128]),
-                ("IsNotDepreciation", 1),      # chưa có thông tin khấu hao — điền sau khi Ghi tăng
-                ("LifeTimeUnit", 1),
-                ("LifeTimeRemainingUnit", 1),
-                ("DepreciationDate", now),
-                ("IsLimitDepreciationAmount", 0),
-                ("IsEnoughVoucher", 0),
-                ("RefOrder", 0),
-                ("Inactive", 0),
-                ("DisplayOnBook", 1),
-                ("CreatedDate", now),
-                ("IsPostedManagement", 0),     # LUÔN chưa ghi sổ
-                ("IsPostedFinance", 0),
-                ("IsFixedAssetOfStateBudget", 0),
-            ]
-            if not preview:
-                col_names = ",".join("[%s]" % c for c, _ in cols_vals)
-                ph = ",".join(["?"] * len(cols_vals))
-                cur.execute("INSERT INTO FixedAsset (%s) VALUES (%s)" % (col_names, ph),
-                            [v for _, v in cols_vals])
-            them += 1
-            st = ("sẽ ghi đè" if preview else "đã ghi đè") if (k in unposted and ghi_de) \
-                else ("sẽ thêm" if preview else "đã thêm")
-            ket.append({"ma": ma, "ten": ten, "dvt": dvt, "refno": refno, "trang_thai": st})
-        tong = cur.execute("SELECT COUNT(*) FROM FixedAsset").fetchone()[0]
-        if preview:
-            conn.rollback()
-        else:
-            conn.commit()
-        return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
-                "so_ghi_de": go, "loai_tscd": cat_name, "ref_type": ref_type,
-                "tong_trong_bang": tong, "danh_sach": ket[:1000]}
-    except HTTPException:
-        conn.rollback()
-        raise
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
-    finally:
-        conn.close()
-
-def _misa_dm_ccdc(cid, database, dm_rows, preview=True, ghi_de=False):
-    """Đăng ký DANH MỤC MÃ CCDC vào bảng SUIncrement của MISA — CHỈ Mã +
-    Tên (giống Danh mục Hàng hóa/NVL), KHÔNG tự tính Thành tiền/Số kỳ phân
-    bổ (dùng cho chứng từ Ghi tăng riêng, làm sau). CHƯA GHI SỔ.
-    ghi_de=True: gỡ các bản CHƯA GHI SỔ mã trùng rồi ghi lại."""
-    import uuid as _uuid
-    conn = _misa_sql_connect(cid, database=database)
-    conn.autocommit = False
-    try:
-        cur = conn.cursor()
-        branch_id = _misa_ts_branch_id(cur)
-        if not branch_id:
-            raise HTTPException(400, "Không dò được Chi nhánh (OrganizationUnit) trong MISA.")
-        ref_type = _misa_ts_reftype(cur, "SUIncrement")
-        if not ref_type:
-            raise HTTPException(400, "Không dò được loại chứng từ CCDC (SYSRefType) trong MISA.")
-        posted, unposted = set(), set()
-        for code, pf, pm in cur.execute(
-                "SELECT SupplyCode, ISNULL(IsPostedFinance,0), ISNULL(IsPostedManagement,0) "
-                "FROM SUIncrement").fetchall():
-            if not code:
-                continue
-            k = str(code).strip().lower()
-            (posted if (pf or pm) else unposted).add(k)
-        next_seq = _misa_ts_next_seq(cur, "SUIncrement", "RefNo", "MHCC")
-        now = datetime.datetime.now()
-        ket = []
-        them = trung = go = 0
-        seen = set()
-        for r in dm_rows:
-            ma = str((r[0] if len(r) > 0 else "") or "").strip()
-            ten = str((r[1] if len(r) > 1 else "") or "").strip()
-            dvt = str((r[2] if len(r) > 2 else "") or "").strip()
-            if not ma or not ten:
-                continue
-            k = ma.lower()
-            if k in seen:
-                continue
-            seen.add(k)
-            if k in posted:
-                trung += 1
-                ket.append({"ma": ma, "ten": ten, "trang_thai": "đã ghi sổ (bỏ qua)"})
-                continue
-            if k in unposted and not ghi_de:
-                trung += 1
-                ket.append({"ma": ma, "ten": ten, "trang_thai": "đã có (bỏ qua)"})
-                continue
-            if k in unposted and ghi_de:
-                if not preview:
-                    cur.execute("DELETE FROM SUIncrement WHERE LOWER(SupplyCode)=? "
-                                "AND ISNULL(IsPostedFinance,0)=0 AND ISNULL(IsPostedManagement,0)=0", k)
-                go += 1
-            refno = "MHCC%05d" % next_seq
-            next_seq += 1
-            cols_vals = [
-                ("SupplyID", str(_uuid.uuid4())),
-                ("SupplyCode", ma[:25]),
-                ("SupplyName", ten[:255]),
-                ("BranchID", branch_id),
-                ("RefType", ref_type),
-                ("RefNo", refno[:20]),
-                ("IsPostedManagement", 0),     # LUÔN chưa ghi sổ
-                ("Unit", dvt[:20]),
-                ("Quantity", 0),
-                ("UnitPrice", 0),
-                ("Amount", 0),
-                ("AllocationTime", 0),
-                ("RemainingAllocationTime", 0),
-                ("AllocatedAmount", 0),
-                ("RemaingAmount", 0),
-                ("TermlyAllocationAmount", 0),
-                ("DisplayOnBook", 1),
-                ("RefOrder", 0),
-                ("CreatedDate", now),
-                ("IsPostedFinance", 0),
-                ("SuspendAllocate", 0),
-            ]
-            if not preview:
-                col_names = ",".join("[%s]" % c for c, _ in cols_vals)
-                ph = ",".join(["?"] * len(cols_vals))
-                cur.execute("INSERT INTO SUIncrement (%s) VALUES (%s)" % (col_names, ph),
-                            [v for _, v in cols_vals])
-            them += 1
-            st = ("sẽ ghi đè" if preview else "đã ghi đè") if (k in unposted and ghi_de) \
-                else ("sẽ thêm" if preview else "đã thêm")
-            ket.append({"ma": ma, "ten": ten, "dvt": dvt, "refno": refno, "trang_thai": st})
-        tong = cur.execute("SELECT COUNT(*) FROM SUIncrement").fetchone()[0]
-        if preview:
-            conn.rollback()
-        else:
-            conn.commit()
-        return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
-                "so_ghi_de": go, "ref_type": ref_type, "tong_trong_bang": tong,
-                "danh_sach": ket[:1000]}
-    except HTTPException:
-        conn.rollback()
-        raise
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
-    finally:
-        conn.close()
-
-
-@app.post("/api/misa-sql/import-danh-muc-ts/{cid}")
-async def misa_sql_import_danh_muc_ts(cid: int, request: Request):
-    """Đăng ký Danh mục mã TSCĐ/CCDC thẳng vào MISA (bảng FixedAsset/
-    SUIncrement, chỉ Mã+Tên, CHƯA ghi sổ). body: {rows, preview,
-    loai(tscd/ccdc), database?}."""
-    body = await request.json()
-    rows = body.get("rows") or []
-    preview = bool(body.get("preview", True))
-    ghi_de = bool(body.get("ghi_de", False))
-    loai = (body.get("loai") or "").strip()
-    if loai not in ("tscd", "ccdc"):
-        raise HTTPException(400, "Loại '%s' chưa hỗ trợ (chỉ tscd/ccdc)." % loai)
-    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    if not database:
-        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
-                                 "kết nối tới dữ liệu THỬ trước.")
-    if not rows:
-        raise HTTPException(400, "Danh mục trống — không có mã để import.")
-    if loai == "tscd":
-        return _misa_dm_tscd(cid, database, rows, preview=preview, ghi_de=ghi_de)
-    return _misa_dm_ccdc(cid, database, rows, preview=preview, ghi_de=ghi_de)
 
 
 @app.get("/api/danh-muc-ncc/{cid}")
