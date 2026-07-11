@@ -3183,11 +3183,26 @@ async function misaXemDinhNghiaView(tenView,database){
 // Tìm bảng/view/stored procedure/hàm theo từ khóa tên — CHỈ ĐỌC, để tìm
 // đúng procedure màn hình MISA thực sự gọi (có thể lọc thêm điều kiện
 // KHÔNG nằm trong view, vd theo chi nhánh/phiên làm việc).
+let misaTimObjectKQ=[];
+function misaTimObjectXuat(tuKhoa){
+  if(!misaTimObjectKQ.length){toast('Chưa có kết quả để kết xuất','err');return;}
+  const txt=misaTimObjectKQ.map(x=>`${x.ten}\t${x.loai}`).join('\n');
+  const blob=new Blob([`Tên\tLoại\n${txt}`],{type:'text/plain;charset=utf-8'});
+  dl(blob,`tim-object-${(tuKhoa||'ketqua').replace(/[^a-z0-9]+/gi,'_')}.txt`);
+  toast(`⬇ Đã kết xuất ${misaTimObjectKQ.length} dòng`,'ok');
+}
+async function misaTimObjectCopy(){
+  if(!misaTimObjectKQ.length){toast('Chưa có kết quả để copy','err');return;}
+  const txt=misaTimObjectKQ.map(x=>`${x.ten}\t${x.loai}`).join('\n');
+  try{await navigator.clipboard.writeText(txt);toast(`📋 Đã copy ${misaTimObjectKQ.length} dòng`,'ok');}
+  catch(e){toast('Lỗi copy: '+e.message,'err')}
+}
 async function misaTimObject(tuKhoa,database){
   toast('Đang tìm...','');
   try{
     const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
     const d=await api(`/api/misa-sql/tim-object/${current}?tu_khoa=${encodeURIComponent(tuKhoa)}${dbQ}`,{method:'POST'});
+    misaTimObjectKQ=d.danh_sach||[];
     const rows=(d.danh_sach||[]).map(x=>`<tr>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td>
       <td style="border:1px solid #eee;padding:2px 6px;color:#666">${misaEsc(x.loai)}</td>
@@ -3202,6 +3217,8 @@ async function misaTimObject(tuKhoa,database){
         <input id="misaTimTuKhoa" value="${misaEsc(tuKhoa)}" placeholder="Từ khóa khác, vd PUVoucherService, MuaHang, GetList..." style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:12.5px"
                onkeydown="if(event.key==='Enter')misaTimObject(this.value,'${misaEsc(database||'').replace(/'/g,"\\'")}')">
         <button class="btn sm" style="background:#2e5c8a" onclick="misaTimObject(document.getElementById('misaTimTuKhoa').value,'${misaEsc(database||'').replace(/'/g,"\\'")}')">🔎 Tìm lại</button>
+        <button class="btn ghost sm" onclick="misaTimObjectXuat('${misaEsc(tuKhoa).replace(/'/g,"\\'")}')">⬇ Kết xuất tất cả (.txt)</button>
+        <button class="btn ghost sm" onclick="misaTimObjectCopy()">📋 Copy tất cả</button>
       </div>
       <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
