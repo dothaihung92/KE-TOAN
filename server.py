@@ -6452,7 +6452,11 @@ def misa_sql_tim_object(cid: int, database: str = "", tu_khoa: str = ""):
         rows = cur.execute(
             "SELECT name, type_desc FROM sys.objects "
             "WHERE name LIKE ? AND type IN ('P','V','FN','TF','IF') "
-            "ORDER BY type_desc, name", "%" + tu_khoa + "%").fetchall()
+            # ưu tiên tên có vẻ là procedure "lấy danh sách" (GetList/Search/
+            # Filter) vì đây là loại procedure màn hình lưới hay gọi
+            "ORDER BY CASE WHEN name LIKE '%GetList%' OR name LIKE '%Search%' "
+            "OR name LIKE '%Filter%' THEN 0 ELSE 1 END, type_desc, name",
+            "%" + tu_khoa + "%").fetchall()
         ket = [{"ten": r[0], "loai": r[1]} for r in rows]
         return {"ok": True, "tu_khoa": tu_khoa, "so_luong": len(ket), "danh_sach": ket[:300]}
     finally:

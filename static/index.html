@@ -3198,7 +3198,12 @@ async function misaTimObject(tuKhoa,database){
       <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
         🔎 Tìm thấy <b>${d.so_luong}</b> bảng/view/procedure/hàm có tên chứa "<b>${misaEsc(tuKhoa)}</b>" — chỉ đọc, không đụng dữ liệu.
         Tìm procedure (SQL_STORED_PROCEDURE) tên gần giống màn hình "Mua hàng hóa, dịch vụ" (vd chứa "GetList"/"Service"/"Search") rồi bấm "Xem SQL" để kiểm tra điều kiện lọc thật.</div>
-      <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <input id="misaTimTuKhoa" value="${misaEsc(tuKhoa)}" placeholder="Từ khóa khác, vd PUVoucherService, MuaHang, GetList..." style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:12.5px"
+               onkeydown="if(event.key==='Enter')misaTimObject(this.value,'${misaEsc(database||'').replace(/'/g,"\\'")}')">
+        <button class="btn sm" style="background:#2e5c8a" onclick="misaTimObject(document.getElementById('misaTimTuKhoa').value,'${misaEsc(database||'').replace(/'/g,"\\'")}')">🔎 Tìm lại</button>
+      </div>
+      <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
         ${rows}</table></div>
       <div style="margin-top:12px;text-align:right">
