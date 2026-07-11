@@ -6911,6 +6911,101 @@ def _misa_pu_reftype(cur, tu_khoa, co_tk=None):
 def _num0(v):
     return v if isinstance(v, (int, float)) else 0
 
+# Mẫu ĐẦY ĐỦ mọi cột của PUVoucher/PUVoucherDetail (trừ EditVersion — rowversion
+# tự sinh, không được phép ghi). LUÔN liệt kê hết mọi cột (kể cả để NULL tường
+# minh) thay vì bỏ qua cột không dùng — vì nhiều cột (đặc biệt các cột *Account
+# FK sang bảng Account) có RÀNG BUỘC DEFAULT khác NULL trên CSDL thật của MISA;
+# nếu bỏ qua, SQL Server tự điền giá trị default đó và có thể VI PHẠM FOREIGN
+# KEY (vd cột SpecialConsumeTaxAccount) dù cột này NULL được. Ghi tường minh
+# NULL để chắc chắn không dính default lạ.
+_PU_HEADER_DEFAULT = {
+    "RefID": None, "BranchID": None, "RefDate": None, "PostedDate": None,
+    "CABARefDate": None, "CABAPostedDate": None, "RefType": None,
+    "RefNoFinance": None, "RefNoManagement": None, "CABARefNoManagement": None,
+    "CABARefNoFinance": None, "IsPostedFinance": 0, "IsPostedManagement": 0,
+    "IncludeInvoice": 0, "PUInvoiceRefID": None, "AccountObjectID": None,
+    "AccountObjectName": None, "AccountObjectAddress": None,
+    "AccountObjectBankAccount": None, "AccountObjectBankName": None,
+    "AccountObjectContactName": None, "IdentificationNumber": None,
+    "IssueDate": None, "IssueBy": None, "Receiver": None, "JournalMemo": None,
+    "EmployeeID": None, "DocumentIncluded": None, "CABAJournalMemo": None,
+    "CABADocumentIncluded": None, "BankAccountID": None, "BankName": None,
+    "PaymentTermID": None, "DueTime": None, "DueDate": None,
+    "CurrencyID": "VND", "ExchangeRate": 1,
+    "TotalAmountOC": 0, "TotalAmount": 0, "TotalImportTaxAmountOC": 0,
+    "TotalImportTaxAmount": 0, "TotalVATAmountOC": 0, "TotalVATAmount": 0,
+    "TotalDiscountAmountOC": 0, "TotalDiscountAmount": 0, "TotalFreightAmount": 0,
+    "TotalInwardAmount": 0, "TotalSpecialConsumeTaxAmountOC": 0,
+    "TotalSpecialConsumeTaxAmount": 0, "TotalCustomBeforeAmount": 0,
+    "DisplayOnBook": 1, "IsPaid": 0, "IsPostedCashBookFinance": 0,
+    "IsPostedCashBookManagement": 0, "CashBookPostedDate": None,
+    "IsPostedInventoryBookFinance": 0, "IsPostedInventoryBookManagement": 0,
+    "InventoryPostedDate": None, "RefOrder": 0, "CreatedDate": None,
+    "CreatedBy": None, "ModifiedDate": None, "ModifiedBy": None,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None, "CABAAmountOC": 0, "CABAAmount": 0,
+    "INRefOrder": None, "IsPULotVoucher": 0, "AccountObjectAddressOther": None,
+    "AccountObjectIdentificationNumberOther": None, "IsConvertVAT": None,
+    "RefIDMshop": None, "RefNoMshop": None,
+}
+_PU_DETAIL_DEFAULT = {
+    "RefDetailID": None, "RefID": None, "InventoryItemID": None,
+    "Description": None, "StockID": None, "DebitAccount": None,
+    "CreditAccount": None, "UnitID": None, "Quantity": 0, "UnitPrice": 0,
+    "AmountOC": 0, "Amount": 0, "DiscountRate": 0, "DiscountAmountOC": 0,
+    "DiscountAmount": 0, "FreightAmount": 0, "InwardAmount": 0,
+    "PUContractID": None, "LotNo": None, "ExpiryDate": None,
+    "MainUnitID": None, "MainConvertRate": 1, "ExchangeRateOperator": "*",
+    "MainQuantity": 0, "MainUnitPrice": 0, "VATRate": None,
+    "VATAmountOC": 0, "VATAmount": 0, "VATAccount": None,
+    "DeductionDebitAccount": None, "PurchasePurposeID": None,
+    "ExpenseItemID": None, "OrganizationUnitID": None, "JobID": None,
+    "ProjectWorkID": None, "OrderID": None, "ContractID": None,
+    "ListItemID": None, "PUOrderRefID": None, "PUOrderRefDetailID": None,
+    "INProductionOrderRefID": None, "UnResonableCost": 0,
+    "FOBAmountOC": 0, "FOBAmount": 0, "ImportChargeAmount": 0,
+    "ImportTaxRatePrice": 0, "ImportTaxRate": 0, "ImportTaxAmountOC": 0,
+    "ImportTaxAmount": 0, "ImportTaxAccount": None,
+    "SpecialConsumeTaxRate": 0, "SpecialConsumeTaxAmountOC": 0,
+    "SpecialConsumeTaxAmount": 0, "SpecialConsumeTaxAccount": None,
+    "SortOrder": 0, "CustomField1": None, "CustomField2": None,
+    "CustomField3": None, "CustomField4": None, "CustomField5": None,
+    "CustomField6": None, "CustomField7": None, "CustomField8": None,
+    "CustomField9": None, "CustomField10": None,
+    "PUInvoiceRefID": None, "BudgetItemID": None, "ProductionID": None,
+    "EnvironmentalTaxAmount": 0, "EnvironmentalTaxAccount": None,
+    "InventoryResaleTypeID": None, "EnvironmentalTaxAmountOC": 0,
+    "VATDescription": None, "AccountObjectID": None,
+    "TaxAccountObjectID": None, "TaxAccountObjectName": None,
+    "TaxAccountObjectAddress": None, "TaxAccountObjectTaxCode": None,
+    "InvDate": None, "InvNo": None, "InvSeries": None, "InvTemplateNo": None,
+    "CashOutAmountFinance": 0, "CashOutDiffAmountFinance": 0,
+    "CashOutVATAmountFinance": 0, "CashOutDiffVATAmountFinance": 0,
+    "CashOutDiffAccountNumberFinance": None,
+    "CashOutAmountManagement": 0, "CashOutDiffAmountManagement": 0,
+    "CashOutVATAmountManagement": 0, "CashOutDiffVATAmountManagement": 0,
+    "CashOutDiffAccountNumberManagement": None,
+    "CashOutExchangeRateFinance": 1, "CashOutExchangeRateManagement": 1,
+    "AllocationRate": None, "AllocationRateImport": None,
+    "DateEnoughTaxPayment": None, "UnitPriceAfterTax": 0,
+    "ImportChargeExchangeRate": 1, "ImportTaxRatePriceOC": 0,
+    "ImportChargeBeforeCustomAmountOC": 0,
+    "ImportChargeBeforeCustomAmountMainCurrency": 0,
+    "AllocationRateImportOriginCurrency": 0,
+    "ImportChargeBeforeCustomAmountAllocated": 0,
+    "EInvoiceItemName": None, "PanelLengthQuantity": 0,
+    "PanelWidthQuantity": 0, "PanelHeightQuantity": 0,
+    "PanelRadiusQuantity": 0, "PanelQuantity": 0,
+    "LOANAgreementID": None, "InvestmentProjectID": None,
+    "DeductionsTaxAmountOC": 0, "DeductionsTaxAmount": 0,
+    "VATRate406": None, "VATRateOther": None,
+    "AntiDumpingTaxRate": 0, "AntiDumpingTaxAmountOC": 0,
+    "AntiDumpingTaxAmount": 0, "AntiDumpingTaxAccount": None,
+    "PUContractDetailID": None,
+}
+
 def _misa_ghi_mua_hang(cid, database, loai, preview=True):
     """Ghi chứng từ Mua hàng (loai: nk/kqk/dv) thẳng vào MISA — xem cảnh báo
     ở đầu file. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU (nhap_lieu 'in')."""
@@ -7049,56 +7144,30 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True):
                 total_amount += tt
                 total_vat += tthue
                 total_import_tax += nk_thue
-                detail_rows.append({
+                detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
                     "Description": ten_h or str(r[cfg["ten"]] or ""), "DebitAccount": no_acc,
                     "CreditAccount": co_acc, "UnitID": uid, "Quantity": sl, "UnitPrice": dgia,
-                    "AmountOC": tt, "Amount": tt, "DiscountRate": 0, "DiscountAmountOC": 0,
-                    "DiscountAmount": 0, "FreightAmount": 0, "InwardAmount": 0,
-                    "MainConvertRate": 1, "ExchangeRateOperator": "*", "MainQuantity": sl,
-                    "MainUnitPrice": dgia, "VATRate": ts, "VATAmountOC": tthue, "VATAmount": tthue,
-                    "VATAccount": tk_thue, "DeductionDebitAccount": tkdu, "UnResonableCost": 0,
-                    "FOBAmountOC": 0, "FOBAmount": 0, "ImportChargeAmount": 0,
+                    "AmountOC": tt, "Amount": tt, "MainQuantity": sl, "MainUnitPrice": dgia,
+                    "VATRate": ts, "VATAmountOC": tthue, "VATAmount": tthue,
+                    "VATAccount": tk_thue, "DeductionDebitAccount": tkdu,
                     "ImportTaxRatePrice": nk_tg, "ImportTaxRate": nk_ts,
                     "ImportTaxAmountOC": nk_thue, "ImportTaxAmount": nk_thue,
-                    "ImportTaxAccount": nk_tk, "SpecialConsumeTaxRate": 0,
-                    "SpecialConsumeTaxAmountOC": 0, "SpecialConsumeTaxAmount": 0,
-                    "SortOrder": idx, "EnvironmentalTaxAmount": 0, "EnvironmentalTaxAmountOC": 0,
-                    "CashOutAmountFinance": 0, "CashOutDiffAmountFinance": 0,
-                    "CashOutVATAmountFinance": 0, "CashOutDiffVATAmountFinance": 0,
-                    "CashOutAmountManagement": 0, "CashOutDiffAmountManagement": 0,
-                    "CashOutVATAmountManagement": 0, "CashOutDiffVATAmountManagement": 0,
-                    "CashOutExchangeRateFinance": 1, "CashOutExchangeRateManagement": 1,
-                    "UnitPriceAfterTax": 0, "ImportChargeExchangeRate": 1,
-                    "ImportTaxRatePriceOC": 0, "ImportChargeBeforeCustomAmountOC": 0,
-                    "ImportChargeBeforeCustomAmountMainCurrency": 0,
-                    "AllocationRateImportOriginCurrency": 0,
-                    "ImportChargeBeforeCustomAmountAllocated": 0,
-                    "PanelLengthQuantity": 0, "PanelWidthQuantity": 0, "PanelHeightQuantity": 0,
-                    "PanelRadiusQuantity": 0, "PanelQuantity": 0,
-                    "DeductionsTaxAmountOC": 0, "DeductionsTaxAmount": 0,
-                    "AntiDumpingTaxRate": 0, "AntiDumpingTaxAmountOC": 0, "AntiDumpingTaxAmount": 0,
+                    "ImportTaxAccount": nk_tk, "SortOrder": idx,
                     "InvNo": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
                     "InvDate": ngay_dt,
-                })
-            header_cols = {
+                }))
+            header_cols = dict(_PU_HEADER_DEFAULT, **{
                 "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
-                "IsPostedFinance": 0, "IsPostedManagement": 0, "IncludeInvoice": 1,
-                "AccountObjectID": acc_obj_id,
+                "IncludeInvoice": 1, "AccountObjectID": acc_obj_id,
                 "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
                 "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
-                "CurrencyID": "VND", "ExchangeRate": 1,
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
                 "TotalImportTaxAmountOC": total_import_tax, "TotalImportTaxAmount": total_import_tax,
                 "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
-                "TotalDiscountAmountOC": 0, "TotalDiscountAmount": 0,
-                "TotalFreightAmount": 0, "TotalInwardAmount": 0,
-                "TotalSpecialConsumeTaxAmountOC": 0, "TotalSpecialConsumeTaxAmount": 0,
-                "TotalCustomBeforeAmount": 0, "DisplayOnBook": 1,
-                "RefOrder": 0, "CreatedDate": now, "CABAAmountOC": 0, "CABAAmount": 0,
-                "INRefOrder": now, "IsPULotVoucher": 0,
-            }
+                "CreatedDate": now, "INRefOrder": now,
+            })
             if not preview:
                 hc = list(header_cols.keys())
                 cur.execute("INSERT INTO PUVoucher ([%s]) VALUES (%s)" %
