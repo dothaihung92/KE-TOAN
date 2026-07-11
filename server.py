@@ -7079,18 +7079,35 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             else:
                 d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
                 d["refids"].append(refid)
-        # chẩn đoán: các LOẠI chứng từ Mua hàng đang thực có trong CSDL (để đối
-        # chiếu — nếu chứng từ mình ghi có loại KHÁC với loại MISA thường dùng
-        # thì đó là lý do không hiện trong danh sách "Mua hàng hóa, dịch vụ").
+        # HỌC "mẫu" từ chứng từ Mua hàng MISA đã có sẵn (do chính MISA tạo,
+        # đang HIỂN THỊ được) để ghi giống hệt -> tránh đoán RefType/
+        # DisplayOnBook/IncludeInvoice sai khiến chứng từ không hiện trong
+        # danh sách "Mua hàng hóa, dịch vụ". Đồng thời trả về để chẩn đoán.
+        tu_khoa_loai = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
+                        "dv": ["mua", "dịch vụ"]}[loai]
         loai_ct_dang_co = []
+        hoc = None   # {"reftype","refname","display_on_book","include_invoice","so"}
         try:
-            for name, cnt in cur.execute(
-                    "SELECT rt.RefTypeName, COUNT(*) FROM PUVoucher pv "
-                    "JOIN SYSRefType rt ON rt.RefType=pv.RefType "
-                    "GROUP BY rt.RefTypeName ORDER BY COUNT(*) DESC").fetchall():
-                loai_ct_dang_co.append({"ten": name, "so": int(cnt)})
+            for rt, rn, dob, inc, cnt in cur.execute(
+                    "SELECT pv.RefType, rt.RefTypeName, pv.DisplayOnBook, pv.IncludeInvoice, "
+                    "COUNT(*) c FROM PUVoucher pv JOIN SYSRefType rt ON rt.RefType=pv.RefType "
+                    "GROUP BY pv.RefType, rt.RefTypeName, pv.DisplayOnBook, pv.IncludeInvoice "
+                    "ORDER BY c DESC").fetchall():
+                loai_ct_dang_co.append({"ten": rn, "reftype": int(rt), "so": int(cnt),
+                                        "display_on_book": dob})
+                n = (rn or "").lower()
+                if hoc is None and all(k in n for k in tu_khoa_loai):
+                    hoc = {"reftype": int(rt), "refname": rn, "display_on_book": dob,
+                           "include_invoice": inc, "so": int(cnt)}
         except Exception:
             pass
+        # gộp trùng tên loại cho phần hiển thị chẩn đoán (nhiều dòng cùng tên do
+        # khác DisplayOnBook)
+        _gop = {}
+        for x in loai_ct_dang_co:
+            _gop[x["ten"]] = _gop.get(x["ten"], 0) + x["so"]
+        loai_ct_dang_co = [{"ten": k, "so": v} for k, v in
+                           sorted(_gop.items(), key=lambda kv: -kv[1])]
 
         now = datetime.datetime.now()
         ket = []
@@ -7146,12 +7163,15 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     pass
             ngay_dt = ngay_dt or now
             co_tk = str(first[cfg["co"]] or "").strip()
-            # yêu cầu có "mua" để KHÔNG trúng nhầm loại CT khác cũng chứa "nhập
-            # kho"/"dịch vụ" (vd nhập kho thành phẩm, xuất kho...) -> tránh gán
-            # sai loại khiến chứng từ không hiện trong danh sách Mua hàng.
-            tu_khoa = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
-                       "dv": ["mua", "dịch vụ"]}[loai]
-            ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa, co_tk)
+            # Ưu tiên "mẫu" học được từ chứng từ MISA đang hiển thị được (chắc
+            # chắn đúng). Nếu công ty chưa có chứng từ loại này thì mới dò
+            # SYSRefType theo từ khóa ("mua" + loại) làm dự phòng.
+            if hoc:
+                ref_type, ref_type_ten = hoc["reftype"], hoc["refname"]
+            else:
+                tu_khoa = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
+                           "dv": ["mua", "dịch vụ"]}[loai]
+                ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa, co_tk)
             if not ref_type:
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
@@ -7191,10 +7211,15 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     "InvNo": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
                     "InvDate": ngay_dt,
                 }))
+            # DisplayOnBook/IncludeInvoice: theo mẫu học được (nếu có) để hiện
+            # đúng sổ như chứng từ MISA thật; mặc định 3 = hiện cả sổ tài chính
+            # lẫn quản trị (an toàn hơn 1 = chỉ 1 sổ, dễ bị "ẩn" ở sổ đang xem).
+            dob = hoc["display_on_book"] if (hoc and hoc.get("display_on_book") is not None) else 3
+            inc = hoc["include_invoice"] if (hoc and hoc.get("include_invoice") is not None) else 1
             header_cols = dict(_PU_HEADER_DEFAULT, **{
                 "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
-                "IncludeInvoice": 1, "AccountObjectID": acc_obj_id,
+                "IncludeInvoice": inc, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
                 "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
                 "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
@@ -7230,6 +7255,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
+                "hoc_mau": (hoc["refname"] if hoc else None),
+                "hoc_display_on_book": (hoc.get("display_on_book") if hoc else None),
                 "danh_sach": ket[:500]}
     except HTTPException:
         conn.rollback()
