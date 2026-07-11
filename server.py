@@ -6573,12 +6573,14 @@ def misa_sql_xuat_cau_truc(cid: int, database: str = "", loc: str = "", n_mau: i
 #  bỏ qua mã đã tồn tại, chạy trong transaction (lỗi -> rollback, không ghi dở).
 # ============================================================
 # Danh mục kho -> (TK kho, TK giá vốn, TK doanh thu, tiền tố TK để dò tính chất)
+# LƯU Ý: DM CCDC của phần mềm là CCDC phân bổ (Nợ 2421/242, bảng FixedAsset/Tool
+# của MISA — không phải InventoryItem) nên KHÔNG cho vào đây. Bảng InventoryItem
+# chỉ áp dụng cho Hàng hóa (1561/156) và NVL (152).
 _MISA_INV_ACC = {
     "hh":  ("1561", "632", "5111", "156%"),   # Hàng hóa
     "nvl": ("152",  "632", "5111", "152%"),   # Nguyên vật liệu
-    "ccdc": ("153", "632", "5111", "153%"),   # Công cụ dụng cụ (nhập kho)
 }
-_MISA_INV_TEN = {"hh": "Hàng hóa", "nvl": "Nguyên vật liệu", "ccdc": "Công cụ dụng cụ"}
+_MISA_INV_TEN = {"hh": "Hàng hóa", "nvl": "Nguyên vật liệu"}
 
 def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
     """Thêm các mã (Danh mục Hàng hóa/NVL/CCDC của phần mềm) vào bảng
@@ -6686,14 +6688,14 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
 
 @app.post("/api/misa-sql/import-hang-hoa/{cid}")
 async def misa_sql_import_hang_hoa(cid: int, request: Request):
-    """Import Danh mục Hàng hóa/NVL/CCDC vào MISA (bảng InventoryItem). body:
+    """Import Danh mục Hàng hóa/NVL vào MISA (bảng InventoryItem). body:
     {rows, preview, loai, database?}. preview=true -> chỉ xem trước, không ghi."""
     body = await request.json()
     rows = body.get("rows") or []
     preview = bool(body.get("preview", True))
     loai = (body.get("loai") or "hh").strip()
     if loai not in _MISA_INV_ACC:
-        raise HTTPException(400, "Loại danh mục '%s' chưa hỗ trợ ghi vào MISA (mới có hh/nvl/ccdc)." % loai)
+        raise HTTPException(400, "Loại danh mục '%s' chưa hỗ trợ ghi vào MISA (mới có hh/nvl)." % loai)
     database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
