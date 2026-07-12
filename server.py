@@ -7306,7 +7306,12 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
                 "CABARefDate": ngay_dt,   # chứng từ THẬT luôn có CABARefDate = RefDate
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
-                "IncludeInvoice": 1, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
+                # IncludeInvoice=0: KHÔNG bật "Nhận kèm hóa đơn" vì mình không tạo bản ghi
+                # PUInvoice liên kết (PUInvoiceRefID luôn NULL) — chứng từ MISA thật khi
+                # IncludeInvoice=1 LUÔN có PUInvoiceRefID trỏ tới 1 PUInvoice có thật; để
+                # IncludeInvoice=1 mà PUInvoiceRefID rỗng là dữ liệu mâu thuẫn, có thể khiến
+                # màn hình MISA (cần đọc thông tin hóa đơn liên kết) bỏ qua dòng này.
+                "IncludeInvoice": 0, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
                 "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
                 "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
