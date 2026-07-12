@@ -7439,6 +7439,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             dob = hoc_dob if hoc_dob is not None else 3
             header_cols = dict(_PU_HEADER_DEFAULT, **{
                 "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
+                # PostedDate (ngày HẠCH TOÁN) BẮT BUỘC phải có: bắt câu lệnh thật
+                # của MISA cho thấy màn hình lưới lọc "Kỳ" theo PostedDate
+                # (PostedDate BETWEEN ...) chứ KHÔNG theo RefDate — để NULL là
+                # chứng từ bị loại khỏi mọi màn hình dù các cột khác đúng hết.
+                "PostedDate": ngay_dt, "CABAPostedDate": ngay_dt,
                 "CABARefDate": ngay_dt,   # chứng từ THẬT luôn có CABARefDate = RefDate
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
                 # IncludeInvoice=0: KHÔNG bật "Nhận kèm hóa đơn" vì mình không tạo bản ghi
@@ -7491,10 +7496,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         else:
             conn.commit()
         # TỰ KIỂM TRA: sau khi ghi thật, chạy lại đúng view MISA dùng cho màn
-        # hình "Mua hàng hóa, dịch vụ" (View_PUVoucherService) để xem MISA có
-        # THỰC SỰ tìm thấy chứng từ vừa ghi hay không — cho biết chính xác lỗi
-        # nằm ở dữ liệu ghi (view không thấy) hay ở tầng hiển thị MISA (view
-        # thấy nhưng màn hình không hiện, có thể do lọc chi nhánh/phiên làm việc).
+        # hình "Mua hàng hóa, dịch vụ" với ĐÚNG BỘ LỌC THẬT của MISA (bắt được
+        # từ câu lệnh MISA thực thi): PostedDate trong kỳ + BranchID + DisplayOnBook
+        # IN (0,2) — trước đây chỉ dò RefID nên "thấy" cả chứng từ mà màn hình
+        # MISA sẽ lọc mất (vd PostedDate NULL), gây kết luận sai.
         tu_kiem_tra = None
         if not preview and them_ct:
             ref_ids = [x["ref_id"] for x in ket if x.get("ref_id")]
@@ -7502,18 +7507,20 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 try:
                     ph = ",".join(["?"] * len(ref_ids))
                     thay = cur.execute(
-                        "SELECT RefID, RefNoFinance, InvoiceStatusName, DisplayOnBookName "
-                        "FROM View_PUVoucherService WHERE RefID IN (%s)" % ph,
-                        ref_ids).fetchall()
+                        "SELECT RefID FROM View_PUVoucherService WHERE RefID IN (%s) "
+                        "AND PostedDate IS NOT NULL AND BranchID=? "
+                        "AND (DisplayOnBook = 0 OR DisplayOnBook = 2)" % ph,
+                        ref_ids + [branch_id]).fetchall()
                     thay_ids = {str(r[0]).upper() for r in thay}
                     tu_kiem_tra = {
-                        "view": "View_PUVoucherService",
+                        "view": "View_PUVoucherService (kèm đúng bộ lọc thật của màn hình MISA: "
+                                "PostedDate + chi nhánh + DisplayOnBook 0/2)",
                         "so_ghi": len(ref_ids), "so_view_thay": len(thay),
-                        "ket_luan": ("View THẤY đủ chứng từ -> lỗi nằm ở tầng hiển thị MISA "
-                                    "(chi nhánh/phiên làm việc), KHÔNG phải dữ liệu ghi."
+                        "ket_luan": ("Chứng từ LỌT QUA đúng bộ lọc màn hình MISA -> sẽ hiện "
+                                    "trên lưới (bấm 'Lấy dữ liệu' trên MISA)."
                                     if len(thay) == len(ref_ids) else
-                                    "View KHÔNG thấy (hoặc thấy thiếu) chứng từ -> lỗi nằm ở "
-                                    "dữ liệu ghi (RefType/PUVoucherDetail/join)."),
+                                    "Chứng từ KHÔNG lọt qua bộ lọc màn hình MISA "
+                                    "(PostedDate/chi nhánh/DisplayOnBook) — gửi lại kết quả này."),
                     }
                     # gắn kết quả tự kiểm tra vào từng dòng tương ứng
                     for x in ket:
