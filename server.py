@@ -7407,6 +7407,67 @@ def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: st
     return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
+def _misa_val_str(v):
+    if v is None:
+        return ""
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    return str(v)
+
+
+@app.post("/api/misa-sql/so-sanh-mua-hang/{cid}")
+def misa_sql_so_sanh_mua_hang(cid: int, loai: str, so_ct: str, database: str = ""):
+    """Đối chiếu TỪNG CỘT của 1 chứng từ Mua hàng do phần mềm vừa ghi (so_ct)
+    với 1 chứng từ Mua hàng THẬT cùng loại đang hiển thị tốt trên MISA — CHỈ
+    ĐỌC. Dùng khi đã loại trừ chi nhánh/kỳ/trạng thái/cache mà vẫn không hiện,
+    để tìm chính xác cột nào khác biệt giữa 2 chứng từ."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    so_ct = (so_ct or "").strip()
+    if not (database and so_ct):
+        raise HTTPException(400, "Thiếu database/số chứng từ")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT TOP 1 * FROM PUVoucher WHERE RefNoManagement=? OR RefNoFinance=?",
+                    so_ct, so_ct)
+        cols_moi = [d[0] for d in cur.description]
+        row_moi = cur.fetchone()
+        if not row_moi:
+            raise HTTPException(404, "Không tìm thấy chứng từ '%s' trong PUVoucher." % so_ct)
+        _PM_MEMO = "Nhập từ phần mềm kế toán"
+        tu_khoa_loai = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
+                        "dv": ["mua", "dịch vụ"]}.get(loai, [])
+        cur.execute(
+            "SELECT pv.*, rt.RefTypeName, ISNULL(pv.JournalMemo,'') FROM PUVoucher pv "
+            "JOIN SYSRefType rt ON rt.RefType=pv.RefType")
+        cols_full = [d[0] for d in cur.description]
+        row_that = None
+        for r in cur.fetchall():
+            memo = r[-1]
+            if str(memo).startswith(_PM_MEMO):
+                continue
+            rn = str(r[-2] or "").lower()
+            if tu_khoa_loai and not all(k in rn for k in tu_khoa_loai):
+                continue
+            row_that = r
+            break
+        if not row_that:
+            raise HTTPException(404, "Không có chứng từ Mua hàng THẬT nào (loại '%s') để đối chiếu." % loai)
+        cols_that = cols_full[:-2]   # bỏ 2 cột phụ RefTypeName/JournalMemo vừa thêm
+        row_that = row_that[:-2]
+        map_that = dict(zip(cols_that, row_that))
+        map_moi = dict(zip(cols_moi, row_moi))
+        ket = []
+        for c in cols_moi:
+            v_that = _misa_val_str(map_that.get(c))
+            v_moi = _misa_val_str(map_moi.get(c))
+            ket.append({"cot": c, "that": v_that, "moi": v_moi, "khac": v_that != v_moi})
+        so_khac = sum(1 for x in ket if x["khac"])
+        return {"ok": True, "so_ct": so_ct, "so_khac": so_khac, "cot": ket}
+    finally:
+        conn.close()
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.

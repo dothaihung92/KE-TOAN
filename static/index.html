@@ -3146,23 +3146,49 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}</td>
       <td style="border:1px solid #eee;padding:2px 6px;${ngayloi?'color:#b91c1c;font-weight:700':''}" title="${ngayloi?'Không đọc được ngày gốc \''+misaEsc(x.ngay_goc||'')+'\'':''}">${misaEsc(x.ngay_ct||'')}${ngayloi?' ⚠ rơi về hôm nay':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${x.view_thay===true?'<span style="color:#1a7a7a">✓ view thấy</span>':(x.view_thay===false?'<span style="color:#b91c1c">✗ view không thấy</span>':'')}</td></tr>`;
+      <td style="border:1px solid #eee;padding:2px 6px">${x.view_thay===true?'<span style="color:#1a7a7a">✓ view thấy</span>':(x.view_thay===false?'<span style="color:#b91c1c">✗ view không thấy</span>':'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px"><button class="btn ghost sm" onclick="misaSoSanhMuaHang('${loai}','${misaEsc(x.so_ct).replace(/'/g,"\\'")}','${misaEsc(d.database||'').replace(/'/g,"\\'")}')">🔬 So sánh</button></td></tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
       ${tkt&&!tkt.loi?`<div style="background:${tot?'#e9f7ee':'#fde8e8'};border:1px solid ${tot?'#8fd9ac':'#e39a9a'};border-radius:8px;padding:10px 14px;font-size:13px;color:${tot?'#1a6b3a':'#a03a3a'};margin-bottom:10px">
         🔎 <b>Tự kiểm tra sau khi ghi</b> (chạy thẳng đúng view MISA dùng cho "Mua hàng hóa, dịch vụ"):<br>
         View tìm thấy <b>${tkt.so_view_thay}/${tkt.so_ghi}</b> chứng từ vừa ghi.<br>
         <b>${misaEsc(tkt.ket_luan)}</b></div>
-      ${tot?`<div style="font-size:12.5px;color:#333;margin-bottom:8px">→ Dữ liệu đã ghi ĐÚNG và view MISA nhìn thấy được. Nếu màn hình MISA vẫn không hiện: bấm "Lấy dữ liệu" hoặc đóng MISA mở lại — MISA có thể đang lọc theo chi nhánh/phiên làm việc khác, hoặc kỳ lọc không bao gồm ngày chứng từ (xem bảng dưới).</div>`
+      ${tot?`<div style="font-size:12.5px;color:#333;margin-bottom:8px">→ Dữ liệu đã ghi ĐÚNG và view MISA nhìn thấy được. Nếu màn hình MISA vẫn không hiện dù đã kiểm tra chi nhánh/kỳ/cache: bấm "🔬 So sánh" ở dòng chứng từ dưới đây để đối chiếu TỪNG CỘT với 1 chứng từ thật cùng loại, tìm đúng cột khác biệt.</div>`
       :`<div style="font-size:12.5px;color:#333;margin-bottom:8px">→ Ngay cả view của MISA cũng KHÔNG thấy chứng từ vừa ghi — lỗi nằm ở dữ liệu ghi, cần xem lại. Gửi lại thông tin này để tiếp tục chẩn đoán.</div>`}`:''}
       ${d.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_ngay_loi} chứng từ không đọc được ngày gốc, đã ghi tạm bằng NGÀY HÔM NAY — kiểm tra bộ lọc "Kỳ" trên MISA có bao gồm hôm nay không.</div>`:''}
       ${dsRows?`<div style="max-height:30vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th><th style="border:1px solid #eee;padding:2px 6px">Tự kiểm tra</th></tr>
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th><th style="border:1px solid #eee;padding:2px 6px">Tự kiểm tra</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
         ${dsRows}</table></div>`:''}
       <div style="text-align:right"><button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button></div>`;
     document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+// Đối chiếu TỪNG CỘT của 1 chứng từ vừa ghi với 1 chứng từ Mua hàng THẬT
+// cùng loại đang hiển thị tốt trên MISA — CHỈ ĐỌC. Dùng khi đã loại trừ
+// chi nhánh/kỳ/trạng thái/cache mà chứng từ vẫn không hiện trên MISA.
+async function misaSoSanhMuaHang(loai,soCt,database){
+  toast('Đang đối chiếu...','');
+  try{
+    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
+    const d=await api(`/api/misa-sql/so-sanh-mua-hang/${current}?loai=${loai}&so_ct=${encodeURIComponent(soCt)}${dbQ}`,{method:'POST'});
+    const rows=(d.cot||[]).slice().sort((a,b)=>(b.khac-a.khac)).map(x=>`<tr style="${x.khac?'background:#fde8e8':''}">
+      <td style="border:1px solid #eee;padding:2px 6px;${x.khac?'font-weight:700;color:#b91c1c':''}">${misaEsc(x.cot)}${x.khac?' ⚠':''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px">${misaEsc(x.that)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px">${misaEsc(x.moi)}</td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
+        🔬 Đối chiếu từng cột giữa chứng từ vừa ghi (<b>${misaEsc(soCt)}</b>) và 1 chứng từ Mua hàng THẬT cùng loại đang hiển thị tốt trên MISA.
+        Có <b>${d.so_khac}</b> cột khác nhau (tô đỏ, RefID/số chứng từ khác nhau là bình thường — chú ý các cột KHÁC ngoài đó, đặc biệt liên quan chi nhánh/trạng thái/liên kết hóa đơn).</div>
+      <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="border:1px solid #eee;padding:2px 6px">Cột</th><th style="border:1px solid #eee;padding:2px 6px">Chứng từ THẬT</th><th style="border:1px solid #eee;padding:2px 6px">Chứng từ MỚI ghi</th></tr>
+        ${rows}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Xem SQL thật (định nghĩa view) của 1 màn hình MISA — CHỈ ĐỌC, để chẩn đoán
 // vì sao chứng từ ghi thẳng vào bảng không hiện trên màn hình đó.
