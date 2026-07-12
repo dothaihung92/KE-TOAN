@@ -6409,6 +6409,28 @@ def misa_sql_xem(cid: int, database: str = "", bang: str = "", n: int = 20):
         conn.close()
 
 
+@app.post("/api/misa-sql/liet-ke-reftype/{cid}")
+def misa_sql_liet_ke_reftype(cid: int, database: str = "", master_table: str = "PUVoucher"):
+    """Liệt kê TOÀN BỘ loại chứng từ (SYSRefType) của 1 bảng đích (mặc định
+    PUVoucher) — CHỈ ĐỌC. Dùng khi phần mềm báo 'không dò được loại chứng từ
+    MISA phù hợp' để xem chính xác tên các loại chứng từ MISA đang có, tìm
+    đúng từ khóa (vd tên có viết khác đi so với 'mua'/'dịch vụ' mong đợi)."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    master_table = (master_table or "PUVoucher").strip()
+    if not database:
+        raise HTTPException(400, "Thiếu database")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=? "
+            "ORDER BY RefTypeName", master_table).fetchall()
+        ket = [{"reftype": r[0], "ten": r[1]} for r in rows]
+        return {"ok": True, "master_table": master_table, "so_luong": len(ket), "danh_sach": ket}
+    finally:
+        conn.close()
+
+
 def _misa_sql_doc_schema(cid, database):
     """Đọc toàn bộ cấu trúc (bảng -> danh sách cột) của database (chỉ đọc)."""
     conn = _misa_sql_connect(cid, database=database)

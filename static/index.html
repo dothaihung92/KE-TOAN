@@ -3084,6 +3084,7 @@ async function muaHangImportMisa(loai){
   try{
     const pv=await api(`/api/misa-sql/import-mua-hang/${current}?loai=${loai}&preview=1`,{method:'POST'});
     if(pv.ghi_chu){toast(pv.ghi_chu,'err');return}
+    const khongDoLoai=(pv.danh_sach||[]).some(x=>x.trang_thai.includes('không dò được loại chứng từ'));
     const ds=(pv.danh_sach||[]).slice(0,300).map(x=>{
       const boqua=x.trang_thai.includes('bỏ qua');
       const ngayloi=!!x.ngay_loi;
@@ -3113,6 +3114,9 @@ async function muaHangImportMisa(loai){
         ⚠ Có <b>${pv.so_tien_0}</b> chứng từ TỔNG TIỀN = 0 (cột tô đỏ ở dưới) → khả năng cao "Đơn giá"/"Thành tiền" đang TRỐNG cho (các) hóa đơn này trong Bảng kê Đầu vào. Kiểm tra lại 2 cột đó trước khi ghi/ghi đè.</div>`:''}
       ${(pv.thieu_kho&&pv.thieu_kho.length)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ MISA chưa có kho mã <b>${pv.thieu_kho.map(misaEsc).join(', ')}</b> — cột "Kho" của các dòng này sẽ bị bỏ trống (mở chứng từ trong MISA có thể báo lỗi). Vào MISA: <b>Danh mục → Kho</b> tạo kho với đúng mã trên rồi bấm "Ghi đè" lại.</div>`:''}
+      ${khongDoLoai?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#a03a3a;margin-bottom:8px">
+        ⚠ Không dò được loại chứng từ MISA phù hợp cho ${MUA_HANG_TEN[loai]} — MISA chưa có tên loại chứng từ khớp từ khóa mong đợi.
+        <button class="btn ghost sm" style="margin-left:6px" onclick="misaXemLoaiChungTu('${misaEsc(pv.database||'').replace(/'/g,"\\'")}')">🔎 Xem danh sách loại chứng từ MISA</button></div>`:''}
       <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
@@ -3152,6 +3156,30 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       </div>`;
     document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+// Liệt kê loại chứng từ (SYSRefType) của bảng PUVoucher trong MISA — CHỈ ĐỌC.
+// Dùng khi phần mềm báo "không dò được loại chứng từ MISA phù hợp" để xem
+// đúng tên loại chứng từ MISA đang có, tìm ra từ khóa cần khớp.
+async function misaXemLoaiChungTu(database){
+  toast('Đang lấy danh sách loại chứng từ...','');
+  try{
+    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
+    const d=await api(`/api/misa-sql/liet-ke-reftype/${current}?master_table=PUVoucher${dbQ}`,{method:'POST'});
+    const rows=(d.danh_sach||[]).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${x.reftype}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
+        🔎 <b>${d.so_luong}</b> loại chứng từ MISA đang có cho bảng ${misaEsc(d.master_table)} — chỉ đọc.
+        Tìm dòng có tên gần đúng loại đang cần (vd chứa "dịch vụ") rồi gửi lại tên chính xác để chỉnh từ khóa dò trong phần mềm.</div>
+      <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="border:1px solid #eee;padding:2px 6px">RefType</th><th style="border:1px solid #eee;padding:2px 6px">Tên</th></tr>
+        ${rows}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function nlBanHang(btn){
   const old=btn?btn.innerHTML:'';
