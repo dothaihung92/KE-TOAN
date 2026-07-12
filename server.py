@@ -6410,18 +6410,29 @@ def misa_sql_xem(cid: int, database: str = "", bang: str = "", n: int = 20):
 
 
 @app.post("/api/misa-sql/liet-ke-reftype/{cid}")
-def misa_sql_liet_ke_reftype(cid: int, database: str = "", master_table: str = "PUVoucher"):
-    """Liệt kê TOÀN BỘ loại chứng từ (SYSRefType) của 1 bảng đích (mặc định
-    PUVoucher) — CHỈ ĐỌC. Dùng khi phần mềm báo 'không dò được loại chứng từ
-    MISA phù hợp' để xem chính xác tên các loại chứng từ MISA đang có, tìm
-    đúng từ khóa (vd tên có viết khác đi so với 'mua'/'dịch vụ' mong đợi)."""
+def misa_sql_liet_ke_reftype(cid: int, database: str = "", master_table: str = "PUVoucher",
+                             tu_khoa: str = ""):
+    """Liệt kê loại chứng từ (SYSRefType) — CHỈ ĐỌC. Dùng khi phần mềm báo
+    'không dò được loại chứng từ MISA phù hợp' để xem chính xác tên các loại
+    chứng từ MISA đang có. Mặc định lọc theo master_table (vd PUVoucher);
+    nếu truyền tu_khoa (vd 'dịch vụ') thì tìm theo TÊN trên MỌI bảng đích,
+    trả kèm MasterTableName — để biết loại đó thực sự thuộc bảng nào (có
+    thể KHÁC PUVoucher, vd PUService cho chứng từ mua dịch vụ)."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    master_table = (master_table or "PUVoucher").strip()
+    tu_khoa = (tu_khoa or "").strip()
     if not database:
         raise HTTPException(400, "Thiếu database")
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
+        if tu_khoa:
+            rows = cur.execute(
+                "SELECT RefType, RefTypeName, MasterTableName FROM SYSRefType "
+                "WHERE RefTypeName LIKE ? ORDER BY MasterTableName, RefTypeName",
+                "%" + tu_khoa + "%").fetchall()
+            ket = [{"reftype": r[0], "ten": r[1], "bang": r[2]} for r in rows]
+            return {"ok": True, "tu_khoa": tu_khoa, "so_luong": len(ket), "danh_sach": ket}
+        master_table = (master_table or "PUVoucher").strip()
         rows = cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=? "
             "ORDER BY RefTypeName", master_table).fetchall()
@@ -6910,13 +6921,16 @@ _MUA_COT = {
                ntk=None, la_nk_col=None, kho=None),
 }
 
-def _misa_pu_reftype(cur, tu_khoa, co_tk=None):
-    """Chọn RefType phù hợp nhất trong SYSRefType (MasterTableName='PUVoucher')
-    theo từ khóa loại chứng từ (vd 'nhập kho'/'không qua kho'/'dịch vụ') +
-    gợi ý phương thức thanh toán theo TK Có (111->tiền mặt, 112->chuyển
-    khoản/ngân hàng, khác->công nợ). Trả (RefType, RefTypeName) hoặc (None, None)."""
+def _misa_pu_reftype(cur, tu_khoa, co_tk=None, master_table="PUVoucher"):
+    """Chọn RefType phù hợp nhất trong SYSRefType (mặc định MasterTableName=
+    'PUVoucher'; 'Mua hàng dịch vụ' dùng bảng RIÊNG 'PUService', khác hẳn
+    PUVoucher — truyền master_table='PUService' cho loại đó) theo từ khóa
+    loại chứng từ (vd 'nhập kho'/'không qua kho'/'dịch vụ') + gợi ý phương
+    thức thanh toán theo TK Có (111->tiền mặt, 112->chuyển khoản/ngân hàng,
+    khác->công nợ). Trả (RefType, RefTypeName) hoặc (None, None)."""
     rows = cur.execute(
-        "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall()
+        "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=?",
+        master_table).fetchall()
     if not rows:
         return None, None
     pt_kw = ()
@@ -7076,12 +7090,76 @@ _PU_INV_DET_DEFAULT = {
     "CustomField10": None, "VATDescription": None, "PUOrderRefID": None,
     "PUOrderRefDetailID": None, "InvestmentProjectID": None, "VATRateOther": None,
 }
+# "Mua hàng dịch vụ" KHÔNG dùng PUVoucher — nó có bảng RIÊNG PUService/
+# PUServiceDetail (xác nhận từ cấu trúc CSDL thật + đối chiếu SYSRefType:
+# không có loại chứng từ nào chứa "dịch vụ" trong MasterTableName='PUVoucher').
+# Không có PUInvoice liên kết — thông tin hóa đơn (InvNo/InvDate/NCC thuế)
+# nằm THẲNG trên từng dòng PUServiceDetail. Không có cột Kho/ĐVT chính quy
+# đổi (dịch vụ không nhập kho). Mẫu đầy đủ cột (trừ EditVersion) như trên.
+_PU_SERVICE_DEFAULT = {
+    "RefID": None, "BranchID": None, "RefDate": None, "PostedDate": None,
+    "RefType": None, "RefNoFinance": None, "RefNoManagement": None,
+    "IsPostedFinance": 0, "IsPostedManagement": 0, "IsFreightService": 0,
+    "AccountObjectID": None, "AccountObjectName": None, "AccountObjectAddress": None,
+    "AccountObjectBankAccount": None, "AccountObjectBankName": None,
+    "AccountObjectContactname": None, "IdentificationNumber": None,
+    "IssueDate": None, "IssueBy": None, "JournalMemo": None, "EmployeeID": None,
+    "DocumentIncluded": None, "BankAccountID": None, "BankName": None,
+    "PaymentTermID": None, "DueTime": None, "DueDate": None,
+    "CurrencyID": "VND", "ExchangeRate": 1,
+    "TotalAmountOC": 0, "TotalAmount": 0, "TotalVATAmountOC": 0, "TotalVATAmount": 0,
+    "TotalDiscountAmountOC": 0, "TotalDiscountAmount": 0,
+    "DisplayOnBook": 1, "IsPaid": 0, "IsPostedCashBookFinance": 0,
+    "IsPostedCashBookManagement": 0, "CashBookPostedDate": None,
+    "RefOrder": 0, "CreatedDate": None, "CreatedBy": None,
+    "ModifiedDate": None, "ModifiedBy": None,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None, "CABAAmountOC": 0, "CABAAmount": 0,
+    "PUInvoiceRefID": None, "IncludeInvoice": 0,
+    "AccountObjectAddressOther": None, "AccountObjectIdentificationNumberOther": None,
+    "TransactionID": None, "SellerTaxCode": None, "EInvoiceType": None,
+    "IsImportEInvoice": 0,
+}
+_PU_SERVICE_DET_DEFAULT = {
+    "RefDetailID": None, "RefID": None, "InventoryItemID": None, "Description": None,
+    "DebitAccount": None, "CreditAccount": None, "UnitID": None,
+    "Quantity": 0, "UnitPrice": 0, "AmountOC": 0, "Amount": 0,
+    "DiscountRate": 0, "DiscountAmountOC": 0, "DiscountAmount": 0, "InwardAmount": 0,
+    "PUContractID": None, "VATRate": None, "VATAmountOC": 0, "VATAmount": 0,
+    "VATAccount": None, "InvTemplateNo": None, "InvSeries": None,
+    "InvDate": None, "InvNo": None, "PurchasePurposeID": None,
+    "TaxAccountObjectID": None, "TaxAccountObjectName": None,
+    "TaxAccountObjectTaxCode": None, "TaxAccountObjectAddress": None,
+    "BudgetItemID": None, "ExpenseItemID": None, "OrganizationUnitID": None,
+    "AccountObjectID": None, "JobID": None, "ProjectWorkID": None,
+    "OrderID": None, "ContractID": None, "ListItemID": None, "UnResonableCost": 0,
+    "PUOrderRefDetailID": None, "PUOrderRefID": None, "SortOrder": 0,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None, "VATDescription": None,
+    "CashOutAmountFinance": 0, "CashOutDiffAmountFinance": 0,
+    "CashOutVATAmountFinance": 0, "CashOutDiffVATAmountFinance": 0,
+    "CashOutDiffAccountNumberFinance": None,
+    "CashOutAmountManagement": 0, "CashOutDiffAmountManagement": 0,
+    "CashOutVATAmountManagement": 0, "CashOutDiffVATAmountManagement": 0,
+    "CashOutDiffAccountNumberManagement": None,
+    "CashOutExchangeRateFinance": 0, "CashOutExchangeRateManagement": 0,
+    "EInvoiceItemName": None, "LOANAgreementID": None, "InvestmentProjectID": None,
+    "DeductionsTaxAmountOC": 0, "DeductionsTaxAmount": 0,
+    "VATRate406": None, "VATRateOther": None,
+}
 
 def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
-    """Ghi chứng từ Mua hàng (loai: nk/kqk/dv) thẳng vào MISA — xem cảnh báo
-    ở đầu file. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU (nhap_lieu 'in').
-    ghi_de=True: gỡ các chứng từ CHƯA GHI SỔ trùng số (do phần mềm tạo, có
-    thể sai loại CT) rồi ghi lại — KHÔNG đụng chứng từ đã ghi sổ."""
+    """Ghi chứng từ Mua hàng NHẬP KHO/KHÔNG QUA KHO (loai: nk/kqk) thẳng vào
+    PUVoucher — xem cảnh báo ở đầu file. loai='dv' (Mua hàng dịch vụ) KHÔNG
+    dùng hàm này nữa — xem _misa_ghi_mua_hang_dv() (bảng RIÊNG PUService, xác
+    nhận qua cấu trúc CSDL thật). Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU
+    (nhap_lieu 'in'). ghi_de=True: gỡ các chứng từ CHƯA GHI SỔ trùng số (do
+    phần mềm tạo, có thể sai loại CT) rồi ghi lại — KHÔNG đụng chứng từ đã
+    ghi sổ."""
     import uuid as _uuid
     if loai not in _MUA_COT:
         raise HTTPException(400, "Loại '%s' chưa hỗ trợ (chỉ nk/kqk/dv)." % loai)
@@ -7590,16 +7668,351 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         conn.close()
 
 
+def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
+    """Ghi chứng từ MUA HÀNG DỊCH VỤ thẳng vào MISA — bảng RIÊNG PUService/
+    PUServiceDetail (KHÔNG phải PUVoucher — xác nhận qua cấu trúc CSDL thật:
+    SYSRefType không có loại chứng từ nào chứa "dịch vụ" dưới MasterTableName
+    ='PUVoucher'). Không có PUInvoice liên kết — thông tin hóa đơn nằm thẳng
+    trên PUServiceDetail. Không có Kho/ĐVT quy đổi. Cùng nguyên tắc an toàn
+    như _misa_ghi_mua_hang(): CHƯA GHI SỔ, không đụng chứng từ đã ghi sổ của
+    người dùng, ghi_de=True chỉ gỡ chứng từ do chính phần mềm tạo."""
+    import uuid as _uuid
+    cfg = _MUA_COT["dv"]
+    dl = nhap_lieu_get(cid, "in")
+    header, rows = dl.get("header") or [], dl.get("rows") or []
+    if not rows:
+        raise HTTPException(400, "Chưa có Bảng kê đầu vào đã lưu — Import & Lưu trước.")
+    flat = _gen_mua_hang_dv(cid, header, rows)
+    if not flat:
+        return {"preview": preview, "database": database, "so_chungtu": 0, "so_dong": 0,
+                "so_trung": 0, "so_bo_qua_ncc": 0, "so_bo_qua_mahang": 0, "danh_sach": [],
+                "ghi_chu": "Không có dòng nào phù hợp (%s) trong Bảng kê đầu vào." % _MUA_TEN["dv"]}
+    groups, order = {}, []
+    for r in flat:
+        doc = str(r[cfg["doc"]] or "").strip()
+        if not doc:
+            continue
+        if doc not in groups:
+            groups[doc] = []
+            order.append(doc)
+        groups[doc].append(r)
+
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        branch_id = _misa_branch_id(cur)
+        ncc = {}
+        for aid, taxcode, code, name in cur.execute(
+                "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
+                "FROM AccountObject").fetchall():
+            nm = str(name or "")
+            if taxcode:
+                ncc[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm)
+            if code:
+                ncc[str(code).strip().lower()] = (aid, nm)
+        hang = {}
+        for iid, code, uid, ten_h in cur.execute(
+                "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
+                "FROM InventoryItem").fetchall():
+            if code:
+                hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        reftype_ten = dict(cur.execute(
+            "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUService'").fetchall())
+        posted_refno = set()
+        unposted_docs = {}
+        for refid, rn, rt, pf, pm, mark in cur.execute(
+                "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
+                "ISNULL(IsPostedManagement,0), ISNULL(CustomField10,'') FROM PUService").fetchall():
+            if not rn:
+                continue
+            k = str(rn).strip().lower()
+            la_cua_minh = mark == _PM_MARK
+            if (pf or pm) and not la_cua_minh:
+                posted_refno.add(k)
+            else:
+                d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
+                d["refids"].append(refid)
+        tu_khoa_loai = ["mua", "dịch vụ"]
+        loai_ct_dang_co = []
+        mau_that = []
+        hoc = None
+        hoc_dob = None
+        hoc_branch = None
+        hoc_branch_ten = None
+        hoc_nguoi_tao = None
+        max_reforder = 0
+        try:
+            _dem_loai, _dem_dob, _dem_branch, _dem_nguoi = {}, {}, {}, {}
+            for rt, rn, dob, inc, mark, rnm, pf, pm, br, brn, cb, ro in cur.execute(
+                    "SELECT ps.RefType, rt.RefTypeName, ps.DisplayOnBook, ps.IncludeInvoice, "
+                    "ISNULL(ps.CustomField10,''), ps.RefNoManagement, "
+                    "ISNULL(ps.IsPostedFinance,0), ISNULL(ps.IsPostedManagement,0), "
+                    "ps.BranchID, ou.OrganizationUnitName, ps.CreatedBy, ISNULL(ps.RefOrder,0) "
+                    "FROM PUService ps JOIN SYSRefType rt ON rt.RefType=ps.RefType "
+                    "LEFT JOIN OrganizationUnit ou ON ou.OrganizationUnitID=ps.BranchID").fetchall():
+                max_reforder = max(max_reforder, ro or 0)
+                if mark == _PM_MARK:
+                    continue
+                key = (int(rt), rn)
+                _dem_loai[key] = _dem_loai.get(key, 0) + 1
+                if dob is not None:
+                    _dem_dob[dob] = _dem_dob.get(dob, 0) + 1
+                if br is not None:
+                    _dem_branch[br] = _dem_branch.get(br, [0, brn])
+                    _dem_branch[br][0] += 1
+                if cb:
+                    _dem_nguoi[cb] = _dem_nguoi.get(cb, 0) + 1
+                if len(mau_that) < 5:
+                    mau_that.append({"so_ct": rnm, "loai": rn, "display_on_book": dob,
+                                     "include_invoice": inc, "da_ghi_so": bool(pf or pm),
+                                     "chi_nhanh": brn})
+            for (rt, rn), c in sorted(_dem_loai.items(), key=lambda kv: -kv[1]):
+                loai_ct_dang_co.append({"ten": rn, "so": c})
+                n = (rn or "").lower()
+                if hoc is None and all(k in n for k in tu_khoa_loai):
+                    hoc = {"reftype": rt, "refname": rn}
+            if _dem_dob:
+                hoc_dob = max(_dem_dob.items(), key=lambda kv: kv[1])[0]
+            if _dem_branch:
+                hoc_branch, (_, hoc_branch_ten) = max(
+                    _dem_branch.items(), key=lambda kv: kv[1][0])
+            if _dem_nguoi:
+                hoc_nguoi_tao = max(_dem_nguoi.items(), key=lambda kv: kv[1])[0]
+        except Exception:
+            pass
+        hoc_purpose = None
+        try:
+            row_pp = cur.execute(
+                "SELECT TOP 1 d.PurchasePurposeID FROM PUServiceDetail d "
+                "JOIN PUService ps ON ps.RefID=d.RefID "
+                "WHERE ISNULL(ps.CustomField10,'') <> ? "
+                "AND d.PurchasePurposeID IS NOT NULL", _PM_MARK).fetchone()
+            if row_pp:
+                hoc_purpose = row_pp[0]
+            if hoc_purpose is None:
+                row_pp = cur.execute(
+                    "SELECT TOP 1 PurchasePurposeID FROM PurchasePurpose "
+                    "WHERE PurchasePurposeCode='1'").fetchone()
+                if row_pp:
+                    hoc_purpose = row_pp[0]
+        except Exception:
+            pass
+        if hoc_branch is not None:
+            branch_id = hoc_branch
+
+        now = datetime.datetime.now()
+        ket = []
+        them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = so_tien_0 = 0
+        for doc in order:
+            lines = groups[doc]
+            k_doc = doc.strip().lower()
+            if k_doc in posted_refno:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                continue
+            if k_doc in unposted_docs and not ghi_de:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
+                            "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                continue
+            first = lines[0]
+            mst = str(first[cfg["mst"]] or "").strip()
+            mst_k = mst.lower()
+            if mst_k not in ncc:
+                bo_ncc += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                            "trang_thai": "bỏ qua — NCC (MST %s) chưa có trong MISA" % mst})
+                continue
+            ghi_de_ct = k_doc in unposted_docs
+            if ghi_de_ct and not preview:
+                for rid in unposted_docs[k_doc]["refids"]:
+                    cur.execute("DELETE FROM PUServiceDetail WHERE RefID=?", rid)
+                    cur.execute("DELETE FROM PUService WHERE RefID=?", rid)
+            acc_obj_id, ten_ncc_misa = ncc[mst_k]
+            valid_lines = []
+            for r in lines:
+                ma = str(r[cfg["ma"]] or "").strip()
+                mk = ma.lower()
+                if mk not in hang:
+                    bo_mahang += 1
+                    continue
+                valid_lines.append((r, hang[mk]))
+            if not valid_lines:
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"})
+                continue
+            ngay_dt = None
+            ngay_str = str(first[cfg["ngayct"]] or "").strip()
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    ngay_dt = datetime.datetime.strptime(ngay_str, fmt)
+                    break
+                except Exception:
+                    pass
+            ngay_loi = ngay_dt is None
+            ngay_dt = ngay_dt or now
+            co_tk = str(first[cfg["co"]] or "").strip()
+            if hoc:
+                ref_type, ref_type_ten = hoc["reftype"], hoc["refname"]
+            else:
+                ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa_loai, co_tk,
+                                                          master_table="PUService")
+            if not ref_type:
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
+                continue
+            ref_id = str(_uuid.uuid4())
+            total_amount = total_vat = 0
+            detail_rows = []
+            for idx, (r, (iid, uid, ten_h)) in enumerate(valid_lines, 1):
+                sl = _num0(r[cfg["sl"]])
+                dgia = _num0(r[cfg["dgia"]])
+                tt = _num0(r[cfg["tt"]])
+                ts = _num0(r[cfg["ts"]]) if cfg["ts"] is not None else None
+                tthue = _num0(r[cfg["tthue"]])
+                tk_thue = str(r[cfg["tk_thue"]] or "").strip() or None
+                no_acc = str(r[cfg["no"]] or "").strip()
+                co_acc = str(r[cfg["co"]] or "").strip()
+                total_amount += tt
+                total_vat += tthue
+                mo_ta = ten_h or str(r[cfg["ten"]] or "")
+                detail_rows.append(dict(_PU_SERVICE_DET_DEFAULT, **{
+                    "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
+                    "Description": mo_ta, "DebitAccount": no_acc, "CreditAccount": co_acc,
+                    "UnitID": uid, "Quantity": sl, "UnitPrice": dgia,
+                    "AmountOC": tt, "Amount": tt,
+                    "VATRate": ts, "VATAmountOC": tthue, "VATAmount": tthue,
+                    "VATAccount": tk_thue,
+                    # thông tin hóa đơn + NCC thuế nằm THẲNG trên dòng (không
+                    # có PUInvoice liên kết như PUVoucher)
+                    "InvNo": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
+                    "InvDate": ngay_dt,
+                    "TaxAccountObjectID": acc_obj_id, "TaxAccountObjectName": ten_ncc_misa,
+                    "TaxAccountObjectTaxCode": mst[:50] or None,
+                    "AccountObjectID": acc_obj_id, "PurchasePurposeID": hoc_purpose,
+                    "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
+                    "SortOrder": idx,
+                }))
+            dob = hoc_dob if hoc_dob is not None else 3
+            ten_ncc_dg = ten_ncc_misa or str(first[cfg["ten_ncc"]] or "")
+            so_hd_dg = str(first[cfg["sohd"]] or "").strip() if cfg["sohd"] is not None else ""
+            dien_giai = ("Mua hàng - %s - %s %s" %
+                        (ten_ncc_dg, so_hd_dg, ngay_dt.strftime("%d/%m/%Y"))).strip()[:500]
+            header_cols = dict(_PU_SERVICE_DEFAULT, **{
+                "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
+                "PostedDate": ngay_dt, "RefType": ref_type,
+                "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
+                # IncludeInvoice=1 nhưng PUInvoiceRefID vẫn NULL — chứng từ
+                # dịch vụ THẬT không liên kết PUInvoice, thông tin hóa đơn
+                # đã nằm thẳng trên từng dòng PUServiceDetail (xem trên).
+                "IncludeInvoice": 1, "DisplayOnBook": dob,
+                "AccountObjectID": acc_obj_id, "AccountObjectName": ten_ncc_dg,
+                "JournalMemo": dien_giai,
+                "TotalAmountOC": total_amount, "TotalAmount": total_amount,
+                "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
+                "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
+                "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
+                "RefOrder": max_reforder + them_ct + 1,
+                "CustomField10": _PM_MARK,
+            })
+            if not preview:
+                hc = list(header_cols.keys())
+                cur.execute("INSERT INTO PUService ([%s]) VALUES (%s)" %
+                           ("],[".join(hc), ",".join(["?"] * len(hc))),
+                           [header_cols[c] for c in hc])
+                for d in detail_rows:
+                    dc = list(d.keys())
+                    cur.execute("INSERT INTO PUServiceDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(dc), ",".join(["?"] * len(dc))),
+                               [d[c] for c in dc])
+            them_ct += 1
+            them_dong += len(detail_rows)
+            if ghi_de_ct:
+                go += 1
+            if ngay_loi:
+                so_ngay_loi += 1
+            tien_0 = total_amount == 0
+            if tien_0:
+                so_tien_0 += 1
+            st = ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct \
+                else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
+            ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
+                        "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
+                        "loai_ct_misa": ref_type_ten, "trang_thai": st, "ref_id": ref_id,
+                        "ngay_ct": ngay_dt.strftime("%d/%m/%Y"), "ngay_loi": ngay_loi,
+                        "ngay_goc": ngay_str, "tien_0": tien_0})
+        tong_pu = cur.execute("SELECT COUNT(*) FROM PUService").fetchone()[0]
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        tu_kiem_tra = None
+        if not preview and them_ct:
+            ref_ids = [x["ref_id"] for x in ket if x.get("ref_id")]
+            if ref_ids:
+                try:
+                    ph = ",".join(["?"] * len(ref_ids))
+                    thay = cur.execute(
+                        "SELECT RefID FROM View_PUVoucherService WHERE RefID IN (%s) "
+                        "AND PostedDate IS NOT NULL AND BranchID=? "
+                        "AND (DisplayOnBook = 0 OR DisplayOnBook = 2)" % ph,
+                        ref_ids + [branch_id]).fetchall()
+                    thay_ids = {str(r[0]).upper() for r in thay}
+                    tu_kiem_tra = {
+                        "view": "View_PUVoucherService (kèm đúng bộ lọc thật của màn hình MISA: "
+                                "PostedDate + chi nhánh + DisplayOnBook 0/2)",
+                        "so_ghi": len(ref_ids), "so_view_thay": len(thay),
+                        "ket_luan": ("Chứng từ LỌT QUA đúng bộ lọc màn hình MISA -> sẽ hiện "
+                                    "trên lưới (bấm 'Lấy dữ liệu' trên MISA)."
+                                    if len(thay) == len(ref_ids) else
+                                    "Chứng từ KHÔNG lọt qua bộ lọc màn hình MISA "
+                                    "(PostedDate/chi nhánh/DisplayOnBook) — gửi lại kết quả này."),
+                    }
+                    for x in ket:
+                        if x.get("ref_id"):
+                            x["view_thay"] = str(x["ref_id"]).upper() in thay_ids
+                except Exception as e:
+                    tu_kiem_tra = {"loi": "Không tự kiểm tra được view: %s" % str(e)[:200]}
+        for x in ket:
+            x.pop("ref_id", None)
+        return {"preview": preview, "database": database, "so_chungtu": them_ct,
+                "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
+                "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
+                "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
+                "so_hoa_don": 0, "thieu_kho": [],
+                "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
+                "tu_kiem_tra": tu_kiem_tra,
+                "hoc_mau": (hoc["refname"] if hoc else None),
+                "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
+                "mau_that": mau_that,
+                "danh_sach": ket[:500]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
 @app.post("/api/misa-sql/import-mua-hang/{cid}")
 def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: str = "",
                             ghi_de: int = 0):
-    """Ghi chứng từ Mua hàng (loai=nk/kqk/dv) thẳng vào MISA (PUVoucher).
-    preview=1 -> chỉ xem trước, không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ.
-    ghi_de=1 -> gỡ chứng từ chưa ghi sổ trùng số rồi ghi lại."""
+    """Ghi chứng từ Mua hàng (loai=nk/kqk/dv) thẳng vào MISA. nk/kqk ghi vào
+    PUVoucher; dv (Mua hàng dịch vụ) ghi vào bảng RIÊNG PUService (khác hẳn
+    PUVoucher — xác nhận qua SYSRefType thật). preview=1 -> chỉ xem trước,
+    không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ. ghi_de=1 -> gỡ chứng từ
+    chưa ghi sổ trùng số rồi ghi lại."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
+    if loai == "dv":
+        return _misa_ghi_mua_hang_dv(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
     return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
