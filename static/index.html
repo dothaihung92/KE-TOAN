@@ -3215,19 +3215,34 @@ async function misaKiemTraRLS(database){
 // Đối chiếu TỪNG CỘT của 1 chứng từ vừa ghi với 1 chứng từ Mua hàng THẬT
 // cùng loại đang hiển thị tốt trên MISA — CHỈ ĐỌC. Dùng khi đã loại trừ
 // chi nhánh/kỳ/trạng thái/cache mà chứng từ vẫn không hiện trên MISA.
-async function misaSoSanhMuaHang(loai,soCt,database){
+let misaSoSanhKQ=[];
+function misaSoSanhXuat(soCt,bang){
+  if(!misaSoSanhKQ.length){toast('Chưa có kết quả để kết xuất','err');return;}
+  const txt=misaSoSanhKQ.map(x=>`${x.cot}\t${x.that}\t${x.moi}\t${x.khac?'KHAC':''}`).join('\n');
+  dl(new Blob([`Cột\tChứng từ THẬT\tChứng từ MỚI ghi\tKhác?\n${txt}`],{type:'text/plain;charset=utf-8'}),`so-sanh-${bang}-${(soCt||'ct').replace(/[^a-z0-9]+/gi,'_')}.txt`);
+  toast(`⬇ Đã kết xuất ${misaSoSanhKQ.length} dòng`,'ok');
+}
+async function misaSoSanhMuaHang(loai,soCt,database,bang){
+  bang=bang||'header';
   toast('Đang đối chiếu...','');
   try{
     const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
-    const d=await api(`/api/misa-sql/so-sanh-mua-hang/${current}?loai=${loai}&so_ct=${encodeURIComponent(soCt)}${dbQ}`,{method:'POST'});
-    const rows=(d.cot||[]).slice().sort((a,b)=>(b.khac-a.khac)).map(x=>`<tr style="${x.khac?'background:#fde8e8':''}">
+    const d=await api(`/api/misa-sql/so-sanh-mua-hang/${current}?loai=${loai}&so_ct=${encodeURIComponent(soCt)}&bang=${bang}${dbQ}`,{method:'POST'});
+    misaSoSanhKQ=d.cot||[];
+    const rows=misaSoSanhKQ.slice().sort((a,b)=>(b.khac-a.khac)).map(x=>`<tr style="${x.khac?'background:#fde8e8':''}">
       <td style="border:1px solid #eee;padding:2px 6px;${x.khac?'font-weight:700;color:#b91c1c':''}">${misaEsc(x.cot)}${x.khac?' ⚠':''}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px">${misaEsc(x.that)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px">${misaEsc(x.moi)}</td></tr>`).join('');
+      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px;${x.that==='(NULL)'?'color:#999;font-style:italic':''}">${misaEsc(x.that)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px;${x.moi==='(NULL)'?'color:#999;font-style:italic':''}">${misaEsc(x.moi)}</td></tr>`).join('');
+    const nutBang=(b,ten)=>`<button class="btn ${bang===b?'':'ghost '}sm" ${bang===b?'style="background:#2e5c8a"':''} onclick="misaSoSanhMuaHang('${loai}','${misaEsc(soCt).replace(/'/g,"\\'")}','${misaEsc(database||'').replace(/'/g,"\\'")}','${b}')">${ten}</button>`;
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
-        🔬 Đối chiếu từng cột giữa chứng từ vừa ghi (<b>${misaEsc(soCt)}</b>) và 1 chứng từ Mua hàng THẬT cùng loại đang hiển thị tốt trên MISA.
-        Có <b>${d.so_khac}</b> cột khác nhau (tô đỏ, RefID/số chứng từ khác nhau là bình thường — chú ý các cột KHÁC ngoài đó, đặc biệt liên quan chi nhánh/trạng thái/liên kết hóa đơn).</div>
+        🔬 Đối chiếu từng cột ${bang==='detail'?'<b>DÒNG CHI TIẾT (PUVoucherDetail)</b>':'<b>chứng từ (PUVoucher)</b>'} giữa chứng từ vừa ghi (<b>${misaEsc(soCt)}</b>) và 1 chứng từ Mua hàng THẬT.
+        Có <b>${d.so_khac}</b> cột khác nhau. <b>(NULL)</b> = cột trống hoàn toàn — nếu MISA báo "Failed to enable constraints" khi mở chứng từ, thủ phạm là cột nào bên MỚI là (NULL) mà bên THẬT có giá trị.</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        ${nutBang('header','📋 Cột chứng từ')}
+        ${nutBang('detail','📦 Cột dòng chi tiết')}
+        <button class="btn ghost sm" onclick="misaSoSanhXuat('${misaEsc(soCt).replace(/'/g,"\\'")}','${bang}')">⬇ Kết xuất (.txt)</button>
+      </div>
       <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0;position:sticky;top:0"><th style="border:1px solid #eee;padding:2px 6px">Cột</th><th style="border:1px solid #eee;padding:2px 6px">Chứng từ THẬT</th><th style="border:1px solid #eee;padding:2px 6px">Chứng từ MỚI ghi</th></tr>
         ${rows}</table></div>

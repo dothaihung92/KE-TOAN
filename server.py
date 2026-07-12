@@ -7610,19 +7610,26 @@ def misa_sql_test_danh_dau_ghi_so(cid: int, so_ct: str, ghi_so: int = 1, databas
 
 
 def _misa_val_str(v):
+    # phân biệt rõ NULL với chuỗi rỗng/số 0 — lỗi "Failed to enable constraints"
+    # của MISA client chính là do cột NULL trong khi MISA yêu cầu không rỗng,
+    # nên nếu hiển thị NULL thành "" sẽ không bao giờ tìm ra cột lỗi.
     if v is None:
-        return ""
+        return "(NULL)"
     if hasattr(v, "isoformat"):
         return v.isoformat()
     return str(v)
 
 
 @app.post("/api/misa-sql/so-sanh-mua-hang/{cid}")
-def misa_sql_so_sanh_mua_hang(cid: int, loai: str, so_ct: str, database: str = ""):
+def misa_sql_so_sanh_mua_hang(cid: int, loai: str, so_ct: str, database: str = "",
+                              bang: str = "header"):
     """Đối chiếu TỪNG CỘT của 1 chứng từ Mua hàng do phần mềm vừa ghi (so_ct)
     với 1 chứng từ Mua hàng THẬT cùng loại đang hiển thị tốt trên MISA — CHỈ
-    ĐỌC. Dùng khi đã loại trừ chi nhánh/kỳ/trạng thái/cache mà vẫn không hiện,
-    để tìm chính xác cột nào khác biệt giữa 2 chứng từ."""
+    ĐỌC. bang='header': so cột PUVoucher; bang='detail': so cột DÒNG CHI TIẾT
+    (PUVoucherDetail, dòng đầu của mỗi bên) — dùng khi MISA báo 'Failed to
+    enable constraints' lúc mở chứng từ (cột chi tiết NULL trong khi MISA
+    client yêu cầu không rỗng). NULL hiển thị là '(NULL)' để phân biệt với
+    chuỗi rỗng/0."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     so_ct = (so_ct or "").strip()
     if not (database and so_ct):
@@ -7659,13 +7666,29 @@ def misa_sql_so_sanh_mua_hang(cid: int, loai: str, so_ct: str, database: str = "
         row_that = row_that[:-2]
         map_that = dict(zip(cols_that, row_that))
         map_moi = dict(zip(cols_moi, row_moi))
+        if (bang or "").strip().lower() == "detail":
+            # so DÒNG CHI TIẾT đầu tiên của 2 chứng từ (PUVoucherDetail)
+            cur.execute("SELECT TOP 1 * FROM PUVoucherDetail WHERE RefID=? ORDER BY SortOrder",
+                        map_moi.get("RefID"))
+            cols_moi = [d[0] for d in cur.description]
+            row_moi = cur.fetchone()
+            if not row_moi:
+                raise HTTPException(404, "Chứng từ '%s' không có dòng chi tiết nào." % so_ct)
+            cur.execute("SELECT TOP 1 * FROM PUVoucherDetail WHERE RefID=? ORDER BY SortOrder",
+                        map_that.get("RefID"))
+            cols_that2 = [d[0] for d in cur.description]
+            row_that = cur.fetchone()
+            if not row_that:
+                raise HTTPException(404, "Chứng từ THẬT đối chiếu không có dòng chi tiết.")
+            map_that = dict(zip(cols_that2, row_that))
+            map_moi = dict(zip(cols_moi, row_moi))
         ket = []
         for c in cols_moi:
             v_that = _misa_val_str(map_that.get(c))
             v_moi = _misa_val_str(map_moi.get(c))
             ket.append({"cot": c, "that": v_that, "moi": v_moi, "khac": v_that != v_moi})
         so_khac = sum(1 for x in ket if x["khac"])
-        return {"ok": True, "so_ct": so_ct, "so_khac": so_khac, "cot": ket}
+        return {"ok": True, "so_ct": so_ct, "bang": bang, "so_khac": so_khac, "cot": ket}
     finally:
         conn.close()
 
