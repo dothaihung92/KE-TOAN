@@ -7161,7 +7161,7 @@ _PU_DETAIL_DEFAULT = {
     "CustomField9": None, "CustomField10": None,
     "PUInvoiceRefID": None, "BudgetItemID": None, "ProductionID": None,
     "EnvironmentalTaxAmount": 0, "EnvironmentalTaxAccount": None,
-    "InventoryResaleTypeID": None, "EnvironmentalTaxAmountOC": 0,
+    "InventoryResaleTypeID": 0, "EnvironmentalTaxAmountOC": 0,
     "VATDescription": None, "AccountObjectID": None,
     "TaxAccountObjectID": None, "TaxAccountObjectName": None,
     "TaxAccountObjectAddress": None, "TaxAccountObjectTaxCode": None,
@@ -7172,10 +7172,12 @@ _PU_DETAIL_DEFAULT = {
     "CashOutAmountManagement": 0, "CashOutDiffAmountManagement": 0,
     "CashOutVATAmountManagement": 0, "CashOutDiffVATAmountManagement": 0,
     "CashOutDiffAccountNumberManagement": None,
-    "CashOutExchangeRateFinance": 1, "CashOutExchangeRateManagement": 1,
-    "AllocationRate": None, "AllocationRateImport": None,
+    # các giá trị 0 (không phải 1/NULL) — đối chiếu từng cột với dòng chi tiết
+    # của chứng từ MISA THẬT cho thấy MISA để 0
+    "CashOutExchangeRateFinance": 0, "CashOutExchangeRateManagement": 0,
+    "AllocationRate": 0, "AllocationRateImport": 0,
     "DateEnoughTaxPayment": None, "UnitPriceAfterTax": 0,
-    "ImportChargeExchangeRate": 1, "ImportTaxRatePriceOC": 0,
+    "ImportChargeExchangeRate": 0, "ImportTaxRatePriceOC": 0,
     "ImportChargeBeforeCustomAmountOC": 0,
     "ImportChargeBeforeCustomAmountMainCurrency": 0,
     "AllocationRateImportOriginCurrency": 0,
@@ -7382,6 +7384,27 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 hoc_nguoi_tao = max(_dem_nguoi.items(), key=lambda kv: kv[1])[0]
         except Exception:
             pass
+        # PurchasePurposeID (Nhóm HHDV mua vào) — chứng từ thật LUÔN có; học từ
+        # dòng chi tiết thật, fallback tra bảng PurchasePurpose theo mã '1'
+        # (Hàng hóa, dịch vụ trong nước — đúng giá trị cột "Nhóm HHDV mua vào"
+        # của form Excel mẫu).
+        hoc_purpose = None
+        try:
+            row_pp = cur.execute(
+                "SELECT TOP 1 d.PurchasePurposeID FROM PUVoucherDetail d "
+                "JOIN PUVoucher pv ON pv.RefID=d.RefID "
+                "WHERE ISNULL(pv.JournalMemo,'') NOT LIKE ? "
+                "AND d.PurchasePurposeID IS NOT NULL", _PM_MEMO + "%").fetchone()
+            if row_pp:
+                hoc_purpose = row_pp[0]
+            if hoc_purpose is None:
+                row_pp = cur.execute(
+                    "SELECT TOP 1 PurchasePurposeID FROM PurchasePurpose "
+                    "WHERE PurchasePurposeCode='1'").fetchone()
+                if row_pp:
+                    hoc_purpose = row_pp[0]
+        except Exception:
+            pass
         # Ưu tiên chi nhánh (BranchID) học được từ chứng từ Mua hàng MISA THẬT
         # — nếu công ty có nhiều chi nhánh, màn hình lưới thường lọc theo chi
         # nhánh đang chọn nên ghi SAI chi nhánh sẽ khiến chứng từ "biến mất".
@@ -7473,6 +7496,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                             "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
                 continue
             ref_id = str(_uuid.uuid4())
+            # sinh sẵn RefID hóa đơn kèm để link từ header + TỪNG DÒNG chi tiết
+            # (chứng từ NHẬP KHO thật: cả PUVoucher.PUInvoiceRefID lẫn
+            # PUVoucherDetail.PUInvoiceRefID đều trỏ tới hóa đơn)
+            inv_id = str(_uuid.uuid4()) if inv_reftype else None
             total_amount = total_vat = total_import_tax = 0
             detail_rows = []
             for idx, (r, (iid, uid, ten_h)) in enumerate(valid_lines, 1):
@@ -7503,21 +7530,29 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     stock_id = kho_map.get(kho_code)
                     if stock_id is None and kho_code:
                         thieu_kho.add(kho_code.upper())
+                mo_ta = ten_h or str(r[cfg["ten"]] or "")
                 detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
-                    "Description": ten_h or str(r[cfg["ten"]] or ""), "DebitAccount": no_acc,
+                    "Description": mo_ta, "DebitAccount": no_acc,
                     "CreditAccount": co_acc, "UnitID": uid, "Quantity": sl, "UnitPrice": dgia,
                     "AmountOC": tt, "Amount": tt, "MainQuantity": sl, "MainUnitPrice": dgia,
                     # MainUnitID = ĐVT chính (bằng chính ĐVT khi không có quy đổi)
                     # + NCC trên từng dòng + Kho — khớp form nhập tay của MISA
                     "MainUnitID": uid, "StockID": stock_id, "AccountObjectID": acc_obj_id,
+                    # các cột dòng chi tiết thật LUÔN có (đối chiếu từng cột):
+                    # giá trị nhập kho/FOB = thành tiền, NCC thuế, nhóm HHDV mua
+                    # vào, diễn giải thuế, link hóa đơn kèm trên TỪNG dòng
+                    "InwardAmount": tt, "FOBAmountOC": tt, "FOBAmount": tt,
+                    "TaxAccountObjectID": acc_obj_id, "PurchasePurposeID": hoc_purpose,
+                    "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
+                    "PUInvoiceRefID": inv_id,
                     "VATRate": ts, "VATAmountOC": tthue, "VATAmount": tthue,
                     "VATAccount": tk_thue, "DeductionDebitAccount": tkdu,
                     "ImportTaxRatePrice": nk_tg, "ImportTaxRate": nk_ts,
                     "ImportTaxAmountOC": nk_thue, "ImportTaxAmount": nk_thue,
-                    "ImportTaxAccount": nk_tk, "SortOrder": idx,
+                    "ImportTaxAccount": nk_tk, "SortOrder": idx - 1,
                     "InvNo": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
-                    "InvDate": ngay_dt,
+                    "InvDate": ngay_dt, "InvSeries": "", "InvTemplateNo": "",
                 }))
             # DisplayOnBook lấy theo chứng từ MISA THẬT (hoc_dob) để hiện đúng
             # sổ như chúng; mặc định 3 = hiện cả sổ tài chính lẫn quản trị khi
@@ -7533,10 +7568,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "CABARefDate": ngay_dt,   # chứng từ THẬT luôn có CABARefDate = RefDate
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
                 # IncludeInvoice=1 ("Nhận kèm hóa đơn") + tạo bản ghi hóa đơn
-                # PUInvoice/PUInvoiceDetail bên dưới. Dữ liệu MISA thật xác nhận:
-                # PUVoucher.PUInvoiceRefID vẫn NULL kể cả khi IncludeInvoice=1 —
-                # hóa đơn liên kết chiều ngược qua PUInvoiceDetail.PUVoucherRefID.
-                "IncludeInvoice": 1, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
+                # PUInvoice/PUInvoiceDetail bên dưới. Chứng từ NHẬP KHO thật link
+                # hóa đơn ở CẢ 2 CHIỀU: PUVoucher(+Detail).PUInvoiceRefID trỏ đến
+                # hóa đơn, và PUInvoiceDetail.PUVoucherRefID trỏ ngược về chứng từ.
+                "IncludeInvoice": 1, "PUInvoiceRefID": inv_id,
+                "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
                 "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
                 "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
@@ -7565,7 +7601,6 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             if inv_reftype:
                 inv_no = (str(first[cfg["sohd"]] or "")[:25] or None) \
                     if cfg.get("sohd") is not None else None
-                inv_id = str(_uuid.uuid4())
                 inv_header = dict(_PU_INV_DEFAULT, **{
                     "RefID": inv_id, "BranchID": branch_id, "RefType": inv_reftype,
                     "RefDate": ngay_dt, "PostedDate": ngay_dt,
