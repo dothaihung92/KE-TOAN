@@ -3132,6 +3132,7 @@ async function muaHangImportMisa(loai){
         <button class="btn ghost sm" onclick="misaXemDinhNghiaView('View_PUVoucherService','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Xem SQL thật của màn hình Mua hàng hóa, dịch vụ trong MISA (chỉ đọc, để chẩn đoán)">🔍 Xem SQL màn hình MISA</button>
         <button class="btn ghost sm" onclick="misaTimObject('PUVoucher','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Tìm stored procedure/view liên quan tên chứa 'PUVoucher' (chỉ đọc, để chẩn đoán)">🔎 Tìm Stored Procedure</button>
         <button class="btn ghost sm" onclick="misaKiemTraRLS('${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Kiểm tra database có bật Row-Level Security (lọc dữ liệu theo người đăng nhập) không (chỉ đọc)">🔒 Kiểm tra RLS</button>
+        <button class="btn ghost sm" onclick="misaBatCauLenh('${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Đọc nguyên văn câu lệnh SQL mà MISA vừa chạy khi tải lưới (chỉ đọc) — bấm 'Lấy dữ liệu' trên MISA trước rồi bấm nút này">📡 Bắt câu lệnh MISA</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
@@ -3178,6 +3179,7 @@ async function muaHangImportMisaGhi(loai,ghiDe){
         ${dsRows}</table></div>`:''}
       <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="misaKiemTraRLS('${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="Kiểm tra database có bật Row-Level Security (lọc dữ liệu theo người đăng nhập) không (chỉ đọc)">🔒 Kiểm tra RLS</button>
+        <button class="btn ghost sm" onclick="misaBatCauLenh('${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="Đọc nguyên văn câu lệnh SQL mà MISA vừa chạy khi tải lưới (chỉ đọc) — bấm 'Lấy dữ liệu' trên MISA trước rồi bấm nút này">📡 Bắt câu lệnh MISA</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     document.getElementById('misaModal').style.display='flex';
@@ -3245,6 +3247,43 @@ async function misaTestGhiSo(soCt,ghiSo,database){
     const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
     const d=await api(`/api/misa-sql/test-danh-dau-ghi-so/${current}?so_ct=${encodeURIComponent(soCt)}&ghi_so=${ghiSo?1:0}${dbQ}`,{method:'POST'});
     toast(d.ghi_so?`🧪 Đã đánh dấu "${soCt}" ĐÃ GHI SỔ (test) — kiểm tra lại trên MISA ("Lấy dữ liệu")`:`↩ Đã đặt lại "${soCt}" CHƯA GHI SỔ`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Bắt các câu lệnh SQL mà MISA VỪA chạy (đọc bộ nhớ đệm câu lệnh của SQL
+// Server — CHỈ ĐỌC). Dùng để thấy NGUYÊN VĂN điều kiện lọc @where mà màn
+// hình MISA tự dựng khi tải lưới, thay vì đoán vì sao chứng từ bị lọc mất.
+let misaBatKQ=[];
+function misaBatXuat(){
+  if(!misaBatKQ.length){toast('Chưa có câu lệnh để kết xuất','err');return;}
+  const txt=misaBatKQ.map(x=>`-- ${x.luc} (chạy ${x.so_lan} lần)${x.cua_phan_mem_nay?' [CỦA PHẦN MỀM NÀY]':''}\n${x.cau_lenh}\n`).join('\n'+'='.repeat(80)+'\n');
+  dl(new Blob([txt],{type:'text/plain;charset=utf-8'}),'misa-cau-lenh-vua-chay.txt');
+  toast(`⬇ Đã kết xuất ${misaBatKQ.length} câu lệnh`,'ok');
+}
+async function misaBatCauLenh(database){
+  toast('Đang đọc câu lệnh MISA vừa chạy...','');
+  try{
+    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
+    const d=await api(`/api/misa-sql/bat-cau-lenh/${current}?tu_khoa=PUVoucher&phut=15${dbQ}`,{method:'POST'});
+    misaBatKQ=d.danh_sach||[];
+    const khoi=misaBatKQ.map(x=>`
+      <div style="border:1px solid ${x.cua_phan_mem_nay?'#e0e0e0':'#8fd9ac'};border-radius:6px;margin-bottom:8px;overflow:hidden">
+        <div style="background:${x.cua_phan_mem_nay?'#f5f5f5':'#e9f7ee'};padding:4px 8px;font-size:11.5px;color:#555">
+          🕐 ${misaEsc(x.luc)} — chạy ${x.so_lan} lần ${x.cua_phan_mem_nay?'<b style="color:#999">[của phần mềm này — bỏ qua]</b>':'<b style="color:#1a6b3a">[có thể là của MISA]</b>'}</div>
+        <textarea readonly style="width:100%;height:${x.cua_phan_mem_nay?'40':'110'}px;font-family:monospace;font-size:11px;border:0;padding:6px;background:#fff">${misaEsc(x.cau_lenh)}</textarea>
+      </div>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
+        📡 <b>${d.so_luong}</b> câu lệnh chứa "PUVoucher" đã chạy trong ${d.phut} phút gần đây (đọc từ bộ nhớ SQL Server — chỉ đọc).<br>
+        <b>Cách dùng đúng:</b> ① mở màn hình "Mua hàng hóa, dịch vụ" trên MISA → ② bấm "Lấy dữ liệu" trên MISA → ③ quay lại đây bấm lại nút này ngay. Câu lệnh <b>[có thể là của MISA]</b> màu xanh chính là câu SELECT MISA dùng để tải lưới — copy/kết xuất gửi lại để đọc điều kiện lọc thật.</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="btn ghost sm" onclick="misaBatXuat()">⬇ Kết xuất tất cả (.txt)</button>
+        <button class="btn ghost sm" onclick="misaBatCauLenh('${misaEsc(database||'').replace(/'/g,"\\'")}')">🔄 Bắt lại</button>
+      </div>
+      <div style="max-height:50vh;overflow:auto">${khoi||'<div style="color:#999;font-size:12.5px">Không có câu lệnh nào — bấm "Lấy dữ liệu" trên MISA trước rồi "Bắt lại".</div>'}</div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 /* ---------- ĐIỀU KHIỂN GIAO DIỆN MISA (Windows UI Automation) ---------- */

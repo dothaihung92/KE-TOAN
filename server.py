@@ -6507,6 +6507,56 @@ def misa_sql_kiem_tra_rls(cid: int, database: str = ""):
         conn.close()
 
 
+@app.post("/api/misa-sql/bat-cau-lenh/{cid}")
+def misa_sql_bat_cau_lenh(cid: int, database: str = "", tu_khoa: str = "PUVoucher",
+                          phut: int = 15):
+    """Đọc các câu lệnh SQL mà MISA VỪA THỰC THI từ bộ nhớ đệm câu lệnh của
+    SQL Server (sys.dm_exec_query_stats) — CHỈ ĐỌC. Cách dùng: mở màn hình
+    'Mua hàng hóa, dịch vụ' trên MISA, bấm 'Lấy dữ liệu', rồi chạy ngay công
+    cụ này -> sẽ thấy NGUYÊN VĂN câu SELECT + điều kiện lọc (@where) mà MISA
+    client tự dựng khi tải lưới — hết phải đoán vì sao chứng từ bị lọc mất.
+    Cần quyền VIEW SERVER STATE (tài khoản sa/quản trị máy thường có sẵn)."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    tu_khoa = (tu_khoa or "PUVoucher").strip()
+    phut = max(1, min(int(phut or 15), 120))
+    if not database:
+        raise HTTPException(400, "Thiếu database")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        try:
+            rows = cur.execute(
+                "SELECT TOP 100 qs.last_execution_time, qs.execution_count, st.text "
+                "FROM sys.dm_exec_query_stats qs "
+                "CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st "
+                "WHERE st.text LIKE ? "
+                "AND qs.last_execution_time > DATEADD(MINUTE, ?, GETDATE()) "
+                "ORDER BY qs.last_execution_time DESC",
+                "%" + tu_khoa + "%", -phut).fetchall()
+        except Exception as e:
+            msg = str(e)
+            if "VIEW SERVER STATE" in msg.upper() or "permission" in msg.lower():
+                raise HTTPException(400, "Tài khoản SQL hiện tại KHÔNG có quyền VIEW SERVER "
+                                         "STATE để đọc câu lệnh đã chạy. Đổi kết nối sang tài "
+                                         "khoản 'sa' rồi thử lại.")
+            raise HTTPException(400, "Không đọc được bộ nhớ câu lệnh: %s" % msg[:300])
+        ket = []
+        for t, n, sql_text in rows:
+            s = str(sql_text or "")
+            # bỏ qua câu lệnh của CHÍNH công cụ này / các query chẩn đoán của mình
+            if "dm_exec_query_stats" in s or "sys.security_policies" in s:
+                continue
+            la_cua_minh = ("Nhập từ phần mềm kế toán" in s or "INSERT INTO PUVoucher" in s
+                           or "WHERE RefID IN" in s)
+            ket.append({"luc": (t.isoformat() if hasattr(t, "isoformat") else str(t)),
+                        "so_lan": n, "cau_lenh": s[:4000],
+                        "cua_phan_mem_nay": la_cua_minh})
+        return {"ok": True, "tu_khoa": tu_khoa, "phut": phut,
+                "so_luong": len(ket), "danh_sach": ket[:60]}
+    finally:
+        conn.close()
+
+
 def _misa_sql_doc_schema(cid, database):
     """Đọc toàn bộ cấu trúc (bảng -> danh sách cột) của database (chỉ đọc)."""
     conn = _misa_sql_connect(cid, database=database)
