@@ -7441,19 +7441,31 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             ghi_de_ct = k_doc in unposted_docs   # chứng từ cũ (chưa ghi sổ) cần gỡ ghi lại
             if ghi_de_ct and not preview:
                 for rid in unposted_docs[k_doc]["refids"]:
-                    # gỡ cả HÓA ĐƠN đã tạo kèm (link qua PUInvoiceDetail.PUVoucherRefID)
+                    # dò HÓA ĐƠN đã tạo kèm (link 2 chiều: PUInvoiceDetail.
+                    # PUVoucherRefID và PUVoucher.PUInvoiceRefID) để gỡ cùng
+                    inv_ids = set()
                     try:
-                        inv_ids = [r[0] for r in cur.execute(
+                        inv_ids.update(r[0] for r in cur.execute(
                             "SELECT DISTINCT RefID FROM PUInvoiceDetail "
-                            "WHERE PUVoucherRefID=?", rid).fetchall()]
-                        for ivid in inv_ids:
-                            cur.execute("DELETE FROM PUInvoiceDetail WHERE RefID=?", ivid)
-                            cur.execute("DELETE FROM PUInvoice WHERE RefID=?", ivid)
+                            "WHERE PUVoucherRefID=?", rid).fetchall())
+                        row_h = cur.execute(
+                            "SELECT PUInvoiceRefID FROM PUVoucher WHERE RefID=?", rid).fetchone()
+                        if row_h and row_h[0]:
+                            inv_ids.add(row_h[0])
                     except Exception:
                         pass
+                    # gỡ CHỨNG TỪ TRƯỚC (PUVoucher.PUInvoiceRefID trỏ tới hóa
+                    # đơn nên phải gỡ chứng từ rồi mới gỡ được hóa đơn — ngược
+                    # với thứ tự lúc ghi)
                     cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", rid)
                     cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", rid)
                     cur.execute("DELETE FROM PUVoucher WHERE RefID=?", rid)
+                    for ivid in inv_ids:
+                        try:
+                            cur.execute("DELETE FROM PUInvoiceDetail WHERE RefID=?", ivid)
+                            cur.execute("DELETE FROM PUInvoice WHERE RefID=?", ivid)
+                        except Exception:
+                            pass
             acc_obj_id, ten_ncc_misa = ncc[mst_k]
             valid_lines = []
             for r in lines:
@@ -7585,19 +7597,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "CreatedBy": hoc_nguoi_tao, "ModifiedBy": hoc_nguoi_tao, "ModifiedDate": now,
                 "RefOrder": max_reforder + them_ct + 1, "IsConvertVAT": False,
             })
-            if not preview:
-                hc = list(header_cols.keys())
-                cur.execute("INSERT INTO PUVoucher ([%s]) VALUES (%s)" %
-                           ("],[".join(hc), ",".join(["?"] * len(hc))),
-                           [header_cols[c] for c in hc])
-                for d in detail_rows:
-                    dc = list(d.keys())
-                    cur.execute("INSERT INTO PUVoucherDetail ([%s]) VALUES (%s)" %
-                               ("],[".join(dc), ",".join(["?"] * len(dc))),
-                               [d[c] for c in dc])
             # HÓA ĐƠN kèm chứng từ ("Nhận kèm hóa đơn"): 1 chứng từ = 1 hóa đơn
             # (mỗi doc đã gộp theo đúng 1 số hóa đơn), chi tiết trỏ ngược về
             # chứng từ qua PUVoucherRefID/PUVoucherRefDetailID.
+            inv_header = None
             if inv_reftype:
                 inv_no = (str(first[cfg["sohd"]] or "")[:25] or None) \
                     if cfg.get("sohd") is not None else None
@@ -7616,11 +7619,25 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
                     "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
                 })
-                if not preview:
+            if not preview:
+                # THỨ TỰ GHI theo chiều khóa ngoại: PUInvoice trước (PUVoucher.
+                # PUInvoiceRefID trỏ tới nó), rồi PUVoucher -> PUVoucherDetail,
+                # cuối cùng PUInvoiceDetail (trỏ ngược về chứng từ + dòng).
+                if inv_header:
                     ic = list(inv_header.keys())
                     cur.execute("INSERT INTO PUInvoice ([%s]) VALUES (%s)" %
                                ("],[".join(ic), ",".join(["?"] * len(ic))),
                                [inv_header[c] for c in ic])
+                hc = list(header_cols.keys())
+                cur.execute("INSERT INTO PUVoucher ([%s]) VALUES (%s)" %
+                           ("],[".join(hc), ",".join(["?"] * len(hc))),
+                           [header_cols[c] for c in hc])
+                for d in detail_rows:
+                    dc = list(d.keys())
+                    cur.execute("INSERT INTO PUVoucherDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(dc), ",".join(["?"] * len(dc))),
+                               [d[c] for c in dc])
+                if inv_header:
                     for d in detail_rows:
                         idet = dict(_PU_INV_DET_DEFAULT, **{
                             "RefDetailID": str(_uuid.uuid4()), "RefID": inv_id,
@@ -7640,6 +7657,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         cur.execute("INSERT INTO PUInvoiceDetail ([%s]) VALUES (%s)" %
                                    ("],[".join(idc), ",".join(["?"] * len(idc))),
                                    [idet[c] for c in idc])
+            if inv_header:
                 so_hoa_don += 1
             them_ct += 1
             them_dong += len(detail_rows)
