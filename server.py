@@ -6478,16 +6478,31 @@ def misa_sql_kiem_tra_rls(cid: int, database: str = ""):
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
-        rows = cur.execute(
-            "SELECT sp.name, t.name, p.predicate_definition, p.predicate_type_desc, p.operation_desc "
-            "FROM sys.security_policies sp "
-            "JOIN sys.security_predicates p ON p.object_id = sp.object_id "
-            "JOIN sys.tables t ON t.object_id = p.target_object_id").fetchall()
-        ket = [{"chinh_sach": r[0], "bang": r[1], "dieu_kien": r[2],
-                "loai": r[3], "thao_tac": r[4]} for r in rows]
         who = cur.execute("SELECT SUSER_SNAME(), CURRENT_USER").fetchone()
+        try:
+            rows = cur.execute(
+                "SELECT sp.name, t.name, p.predicate_definition, p.predicate_type_desc, p.operation_desc "
+                "FROM sys.security_policies sp "
+                "JOIN sys.security_predicates p ON p.object_id = sp.object_id "
+                "JOIN sys.tables t ON t.object_id = p.target_object_id").fetchall()
+            ket = [{"chinh_sach": r[0], "bang": r[1], "dieu_kien": r[2],
+                    "loai": r[3], "thao_tac": r[4]} for r in rows]
+            ho_tro_rls = True
+        except Exception as e:
+            # sys.security_policies chỉ có từ SQL Server 2016 -> bản cũ hơn sẽ
+            # lỗi "Invalid object name". Coi như KHÔNG có RLS (tính năng còn
+            # không tồn tại) thay vì để lỗi 500 khó hiểu.
+            ket = []
+            ho_tro_rls = False
+            rls_loi = str(e)[:200]
         return {"ok": True, "co_rls": len(ket) > 0, "chinh_sach": ket,
+                "ho_tro_rls": ho_tro_rls,
+                "rls_loi": (None if ho_tro_rls else rls_loi),
                 "dang_dang_nhap": {"suser_sname": who[0], "current_user": who[1]}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, "Không kiểm tra được RLS: %s" % str(e)[:300])
     finally:
         conn.close()
 
