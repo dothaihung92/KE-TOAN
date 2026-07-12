@@ -7612,25 +7612,33 @@ def _misa_ui_window(tieu_de):
 
 
 @app.get("/api/misa-ui/tim-cua-so")
-def misa_ui_tim_cua_so():
+def misa_ui_tim_cua_so(tat_ca: int = 0):
     """Dò các cửa sổ Windows đang mở có tên chứa 'MISA' — CHỈ ĐỌC. Dùng để
     xác nhận điều khiển được giao diện MISA trước khi tự động hóa thao tác,
-    và lấy đúng TIÊU ĐỀ cửa sổ để dùng cho các API điều khiển khác."""
+    và lấy đúng TIÊU ĐỀ cửa sổ để dùng cho các API điều khiển khác.
+    tat_ca=1: bỏ lọc theo tên, liệt kê MỌI cửa sổ đang mở (chẩn đoán khi
+    không tìm thấy cửa sổ nào chứa chữ 'misa' — có thể do tiêu đề khác, hoặc
+    do MISA chạy quyền Admin còn phần mềm này chạy quyền thường, Windows chặn
+    dò cửa sổ khác mức quyền — UAC/UIPI)."""
     Desktop = _misa_ui()
     try:
         wins = Desktop(backend="uia").windows()
     except Exception as e:
         raise HTTPException(400, "Không dò được cửa sổ Windows: %s" % str(e)[:300])
+    tong = 0
     ket = []
     for w in wins:
         try:
             title = w.window_text()
-            if title and "misa" in title.lower():
+            tong += 1
+            if not title:
+                continue
+            if tat_ca or "misa" in title.lower():
                 ket.append({"tieu_de": title, "loai": w.friendly_class_name(),
                             "hien": bool(w.is_visible())})
         except Exception:
             continue
-    return {"ok": True, "so_luong": len(ket), "danh_sach": ket}
+    return {"ok": True, "tong_so_cua_so": tong, "so_luong": len(ket), "danh_sach": ket}
 
 
 @app.get("/api/misa-ui/cay-dieu-khien")

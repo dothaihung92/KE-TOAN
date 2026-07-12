@@ -3250,19 +3250,22 @@ async function misaTestGhiSo(soCt,ghiSo,database){
 /* ---------- ĐIỀU KHIỂN GIAO DIỆN MISA (Windows UI Automation) ---------- */
 // Dò cửa sổ MISA đang mở trên máy (Windows) — CHỈ ĐỌC. Bước đầu tiên để
 // tự động hóa thao tác (bấm Nhập khẩu Excel) thay vì ghi thẳng CSDL.
-async function misaUiTimCuaSo(){
+async function misaUiTimCuaSo(tatCa){
   toast('Đang dò cửa sổ MISA...','');
   try{
-    const d=await api(`/api/misa-ui/tim-cua-so`,{method:'GET'});
+    const d=await api(`/api/misa-ui/tim-cua-so?tat_ca=${tatCa?1:0}`,{method:'GET'});
     const rows=(d.danh_sach||[]).map(x=>`<tr>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.tieu_de)}</td>
       <td style="border:1px solid #eee;padding:2px 6px;color:#666">${misaEsc(x.loai)}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${x.hien?'✓':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px"><button class="btn ghost sm" onclick="misaUiCayDieuKhien('${misaEsc(x.tieu_de).replace(/'/g,"\\'")}')">🌳 Dò cây điều khiển</button></td></tr>`).join('');
     document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
-        🔍 Tìm thấy <b>${d.so_luong}</b> cửa sổ MISA đang mở — chỉ đọc, chưa bấm/gõ gì.
-        Bấm "🌳 Dò cây điều khiển" trên đúng cửa sổ chính của MISA (thường có tiêu đề dài nhất, chứa tên công ty) để tìm tên nút/menu thật.</div>
+      <div style="background:${d.so_luong?'#eef4ff':'#fff4e6'};border:1px solid ${d.so_luong?'#b8ccef':'#f0c088'};border-radius:8px;padding:8px 12px;font-size:12.5px;color:${d.so_luong?'#264b8a':'#8a5300'};margin-bottom:10px">
+        🔍 Tìm thấy <b>${d.so_luong}</b>${tatCa?'':' cửa sổ tên chứa "MISA"'} trong tổng <b>${d.tong_so_cua_so}</b> cửa sổ Windows đang mở — chỉ đọc, chưa bấm/gõ gì.
+        ${d.so_luong?'Bấm "🌳 Dò cây điều khiển" trên đúng cửa sổ chính của MISA (thường có tiêu đề dài nhất, chứa tên công ty) để tìm tên nút/menu thật.'
+          :(tatCa?'Không thấy cửa sổ MISA nào trong danh sách TẤT CẢ cửa sổ này — kiểm tra MISA có đang mở không, hoặc có đang chạy quyền Administrator không (nếu MISA chạy "Run as Administrator" còn phần mềm này chạy quyền thường, Windows sẽ chặn dò/điều khiển — cần đóng MISA, mở lại KHÔNG chạy quyền Admin, hoặc chạy start.bat bằng quyền Admin).'
+          :'Không có cửa sổ nào tên chứa "MISA" — có thể MISA đặt tên cửa sổ khác. Bấm nút bên dưới để xem TẤT CẢ cửa sổ đang mở, tự tìm đúng cửa sổ MISA trong danh sách.')}</div>
+      ${(!tatCa)?`<div style="margin-bottom:8px"><button class="btn ghost sm" onclick="misaUiTimCuaSo(true)">📋 Hiện TẤT CẢ cửa sổ đang mở</button></div>`:''}
       <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tiêu đề</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px">Đang hiện</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
         ${rows}</table></div>
