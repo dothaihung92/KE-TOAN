@@ -3087,11 +3087,12 @@ async function muaHangImportMisa(loai){
     const ds=(pv.danh_sach||[]).slice(0,300).map(x=>{
       const boqua=x.trang_thai.includes('bỏ qua');
       const ngayloi=!!x.ngay_loi;
+      const tien0=!!x.tien_0;
       return `<tr style="${ngayloi?'background:#fde8e8':(boqua?'background:#fff4e6':'')}">
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ncc||x.ncc_mst||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.so_dong}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.tong_tien!=null?Number(x.tong_tien).toLocaleString('vi-VN'):''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right;${tien0?'color:#b91c1c;font-weight:700':''}" title="${tien0?'Tổng tiền = 0 -> Đơn giá/Thành tiền trong Bảng kê Đầu vào có thể đang trống cho chứng từ này':''}">${x.tong_tien!=null?Number(x.tong_tien).toLocaleString('vi-VN'):''}${tien0?' ⚠':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;${ngayloi?'color:#b91c1c;font-weight:700':''}" title="${ngayloi?'Không đọc được ngày gốc \''+misaEsc(x.ngay_goc||'')+'\' -> rơi về ngày hôm nay':''}">${misaEsc(x.ngay_ct||'')}${ngayloi?' ⚠':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px;color:${boqua?'#8a5300':(x.trang_thai.includes('sẽ thêm')?'#1a7a7a':'#999')}">${misaEsc(x.trang_thai)}</td></tr>`;
@@ -3118,6 +3119,8 @@ async function muaHangImportMisa(loai){
         Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (chưa ghi sổ) trong MISA. Nếu chúng bị gán sai loại/không hiện, bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ đã ghi sổ).</div>`:''}
       ${pv.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có <b>${pv.so_ngay_loi}</b> chứng từ KHÔNG đọc được ngày từ dữ liệu gốc (cột tô đỏ ở dưới) → bị ghi tạm bằng NGÀY HÔM NAY. Nếu bộ lọc "Kỳ" trên MISA không bao gồm hôm nay, chứng từ sẽ KHÔNG hiện dù dữ liệu đúng — kiểm tra lại định dạng ngày trong Bảng kê đầu vào.</div>`:''}
+      ${pv.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Có <b>${pv.so_tien_0}</b> chứng từ TỔNG TIỀN = 0 (cột tô đỏ ở dưới) → khả năng cao "Đơn giá"/"Thành tiền" đang TRỐNG cho (các) hóa đơn này trong Bảng kê Đầu vào. Kiểm tra lại 2 cột đó trước khi ghi/ghi đè.</div>`:''}
       <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
@@ -3142,8 +3145,9 @@ async function muaHangImportMisaGhi(loai,ghiDe){
     const dsGhi=(d.danh_sach||[]).filter(x=>x.ngay_ct);
     const dsRows=dsGhi.map(x=>{
       const ngayloi=!!x.ngay_loi;
+      const tien0=!!x.tien_0;
       return `<tr style="${ngayloi?'background:#fde8e8':''}">
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}${tien0?' <span style="color:#b91c1c;font-weight:700" title="Tổng tiền chứng từ này = 0">⚠ 0đ</span>':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;${ngayloi?'color:#b91c1c;font-weight:700':''}" title="${ngayloi?'Không đọc được ngày gốc \''+misaEsc(x.ngay_goc||'')+'\'':''}">${misaEsc(x.ngay_ct||'')}${ngayloi?' ⚠ rơi về hôm nay':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${x.view_thay===true?'<span style="color:#1a7a7a">✓ view thấy</span>':(x.view_thay===false?'<span style="color:#b91c1c">✗ view không thấy</span>':'')}</td>
@@ -3158,6 +3162,8 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       :`<div style="font-size:12.5px;color:#333;margin-bottom:8px">→ Ngay cả view của MISA cũng KHÔNG thấy chứng từ vừa ghi — lỗi nằm ở dữ liệu ghi, cần xem lại. Gửi lại thông tin này để tiếp tục chẩn đoán.</div>`}`:''}
       ${d.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_ngay_loi} chứng từ không đọc được ngày gốc, đã ghi tạm bằng NGÀY HÔM NAY — kiểm tra bộ lọc "Kỳ" trên MISA có bao gồm hôm nay không.</div>`:''}
+      ${d.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Có ${d.so_tien_0} chứng từ TỔNG TIỀN = 0 (đánh dấu ⚠ 0đ ở cột Số CT dưới đây) — kiểm tra lại "Đơn giá"/"Thành tiền" trong Bảng kê Đầu vào cho (các) hóa đơn này.</div>`:''}
       ${dsRows?`<div style="max-height:30vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th><th style="border:1px solid #eee;padding:2px 6px">Tự kiểm tra</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
         ${dsRows}</table></div>`:''}

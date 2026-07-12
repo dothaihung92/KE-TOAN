@@ -7193,7 +7193,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
 
         now = datetime.datetime.now()
         ket = []
-        them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = 0
+        them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = so_tien_0 = 0
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
@@ -7304,6 +7304,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             dob = hoc_dob if hoc_dob is not None else 3
             header_cols = dict(_PU_HEADER_DEFAULT, **{
                 "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
+                "CABARefDate": ngay_dt,   # chứng từ THẬT luôn có CABARefDate = RefDate
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
                 "IncludeInvoice": 1, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
                 "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
@@ -7329,13 +7330,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 go += 1
             if ngay_loi:
                 so_ngay_loi += 1
+            tien_0 = total_amount == 0
+            if tien_0:
+                so_tien_0 += 1
             st = ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct \
                 else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
                         "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
                         "loai_ct_misa": ref_type_ten, "trang_thai": st, "ref_id": ref_id,
                         "ngay_ct": ngay_dt.strftime("%d/%m/%Y"), "ngay_loi": ngay_loi,
-                        "ngay_goc": ngay_str})
+                        "ngay_goc": ngay_str, "tien_0": tien_0})
         tong_pu = cur.execute("SELECT COUNT(*) FROM PUVoucher").fetchone()[0]
         if preview:
             conn.rollback()
@@ -7377,7 +7381,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
-                "so_ngay_loi": so_ngay_loi,
+                "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
