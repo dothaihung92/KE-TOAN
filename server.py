@@ -7053,15 +7053,15 @@ _MUA_COT = {
     "nk": dict(doc=6, ngayct=5, sohd=10, mst=12, ten_ncc=13, ma=19, ten=20,
                dvt=25, sl=26, dgia=27, tt=28, no=23, co=24, ts=34, tthue=35,
                tk_thue=38, tkdu_thue=37, nhtg=41, nts=42, nthue=43, ntk=44,
-               la_nk_col=1),
+               la_nk_col=1, kho=21),
     "kqk": dict(doc=6, ngayct=5, sohd=9, mst=11, ten_ncc=12, ma=17, ten=18,
                 dvt=21, sl=22, dgia=23, tt=24, no=19, co=20, ts=30, tthue=31,
                 tk_thue=34, tkdu_thue=33, nhtg=36, nts=37, nthue=38, ntk=39,
-                la_nk_col=1),
+                la_nk_col=1, kho=None),
     "dv": dict(doc=6, ngayct=5, sohd=33, mst=7, ten_ncc=8, ma=14, ten=15,
                dvt=19, sl=20, dgia=21, tt=22, no=16, co=17, ts=27, tthue=28,
                tk_thue=30, tkdu_thue=None, nhtg=None, nts=None, nthue=None,
-               ntk=None, la_nk_col=None),
+               ntk=None, la_nk_col=None, kho=None),
 }
 
 def _misa_pu_reftype(cur, tu_khoa, co_tk=None):
@@ -7190,6 +7190,44 @@ _PU_DETAIL_DEFAULT = {
     "AntiDumpingTaxAmount": 0, "AntiDumpingTaxAccount": None,
     "PUContractDetailID": None,
 }
+# Bảng HÓA ĐƠN mua hàng (PUInvoice/PUInvoiceDetail) — tạo kèm khi ghi chứng từ
+# Mua hàng "Nhận kèm hóa đơn": chứng từ MISA thật có IncludeInvoice=1 nhưng
+# PUVoucher.PUInvoiceRefID vẫn NULL — hóa đơn liên kết CHIỀU NGƯỢC LẠI qua
+# PUInvoiceDetail.PUVoucherRefID/PUVoucherRefDetailID. Liệt kê đủ mọi cột
+# (trừ EditVersion rowversion) như bài học FK-default ở PUVoucher.
+_PU_INV_DEFAULT = {
+    "RefID": None, "BranchID": None, "RefType": None, "RefDate": None,
+    "PostedDate": None, "RefNoFinance": None, "RefNoManagement": None,
+    "IsPostedFinance": 0, "IsPostedManagement": 0, "IsImportPurchase": 0,
+    "IncludeInvoice": 1, "AccountObjectID": None, "AccountObjectName": None,
+    "AccountObjectAddress": None, "AccountObjectTaxCode": None,
+    "JournalMemo": None, "EmployeeID": None, "InvTemplateNo": None,
+    "InvDate": None, "InvSeries": None, "InvNo": None, "CurrencyID": "VND",
+    "ExchangeRate": 1, "TotalTurnoverAmountOC": 0, "TotalTurnoverAmount": 0,
+    "TotalVATAmountOC": 0, "TotalVATAmount": 0, "IsPaid": 0,
+    "IsSummaryBySameInventoryItem": 0, "DisplayOnBook": None, "RefOrder": 0,
+    "CreatedDate": None, "CreatedBy": None, "ModifiedDate": None, "ModifiedBy": None,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None, "DueDate": None, "TransactionID": None,
+    "SellerTaxCode": None, "EInvoiceType": None, "IsImportEInvoice": 0,
+}
+_PU_INV_DET_DEFAULT = {
+    "RefDetailID": None, "RefID": None, "InventoryItemID": None, "Description": None,
+    "DebitAccount": None, "CreditAccount": None, "TurnoverAmountOC": 0,
+    "TurnoverAmount": 0, "VATRate": None, "VATAmountOC": 0, "VATAmount": 0,
+    "PurchasePurposeID": None, "PUVoucherRefID": None, "PUVoucherRefDetailID": None,
+    "PUContractID": None, "ListItemID": None, "ExpenseItemID": None,
+    "OrganizationUnitID": None, "JobID": None, "ProjectWorkID": None,
+    "OrderID": None, "ContractID": None, "UnResonableCost": 0, "SortOrder": 0,
+    "PUVoucherRefNoFinance": None, "PUVoucherRefNoManagement": None,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None, "VATDescription": None, "PUOrderRefID": None,
+    "PUOrderRefDetailID": None, "InvestmentProjectID": None, "VATRateOther": None,
+}
 
 def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
     """Ghi chứng từ Mua hàng (loai: nk/kqk/dv) thẳng vào MISA — xem cảnh báo
@@ -7253,6 +7291,26 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # phần mềm bật lên, không phải ghi sổ thật của MISA).
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall())
+        # kho (Stock) — điền StockID cho dòng nhập kho theo cột "Kho" của form
+        kho_map = {}
+        try:
+            for sid, scode in cur.execute("SELECT StockID, StockCode FROM Stock").fetchall():
+                if scode:
+                    kho_map[str(scode).strip().lower()] = sid
+        except Exception:
+            pass
+        # loại chứng từ của bảng HÓA ĐƠN mua hàng (PUInvoice) — để tạo hóa đơn
+        # kèm theo ("Nhận kèm hóa đơn"); ưu tiên tên có chữ "mua"
+        inv_reftype = None
+        try:
+            _inv_rows = cur.execute(
+                "SELECT RefType, RefTypeName FROM SYSRefType "
+                "WHERE MasterTableName='PUInvoice'").fetchall()
+            if _inv_rows:
+                inv_reftype = next((int(r[0]) for r in _inv_rows
+                                    if "mua" in str(r[1] or "").lower()), int(_inv_rows[0][0]))
+        except Exception:
+            pass
         posted_refno = set()
         unposted_docs = {}   # k_doc -> {"refids": [...], "reftype_ten": name}
         for refid, rn, rt, pf, pm, memo in cur.execute(
@@ -7333,6 +7391,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         now = datetime.datetime.now()
         ket = []
         them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = so_tien_0 = 0
+        so_hoa_don = 0        # số hóa đơn (PUInvoice) tạo kèm chứng từ
+        thieu_kho = set()     # mã kho trong form nhưng CHƯA có trong MISA
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
@@ -7358,6 +7418,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             ghi_de_ct = k_doc in unposted_docs   # chứng từ cũ (chưa ghi sổ) cần gỡ ghi lại
             if ghi_de_ct and not preview:
                 for rid in unposted_docs[k_doc]["refids"]:
+                    # gỡ cả HÓA ĐƠN đã tạo kèm (link qua PUInvoiceDetail.PUVoucherRefID)
+                    try:
+                        inv_ids = [r[0] for r in cur.execute(
+                            "SELECT DISTINCT RefID FROM PUInvoiceDetail "
+                            "WHERE PUVoucherRefID=?", rid).fetchall()]
+                        for ivid in inv_ids:
+                            cur.execute("DELETE FROM PUInvoiceDetail WHERE RefID=?", ivid)
+                            cur.execute("DELETE FROM PUInvoice WHERE RefID=?", ivid)
+                    except Exception:
+                        pass
                     cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", rid)
                     cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", rid)
                     cur.execute("DELETE FROM PUVoucher WHERE RefID=?", rid)
@@ -7424,11 +7494,23 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 total_amount += tt
                 total_vat += tthue
                 total_import_tax += nk_thue
+                # Kho: tra StockID theo cột "Kho" của form (vd 'HH'/'NVL') —
+                # thiếu kho là 1 nguyên nhân MISA báo "Failed to enable
+                # constraints" khi mở chứng từ nhập kho
+                stock_id = None
+                if cfg.get("kho") is not None:
+                    kho_code = str(r[cfg["kho"]] or "").strip().lower()
+                    stock_id = kho_map.get(kho_code)
+                    if stock_id is None and kho_code:
+                        thieu_kho.add(kho_code.upper())
                 detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
                     "Description": ten_h or str(r[cfg["ten"]] or ""), "DebitAccount": no_acc,
                     "CreditAccount": co_acc, "UnitID": uid, "Quantity": sl, "UnitPrice": dgia,
                     "AmountOC": tt, "Amount": tt, "MainQuantity": sl, "MainUnitPrice": dgia,
+                    # MainUnitID = ĐVT chính (bằng chính ĐVT khi không có quy đổi)
+                    # + NCC trên từng dòng + Kho — khớp form nhập tay của MISA
+                    "MainUnitID": uid, "StockID": stock_id, "AccountObjectID": acc_obj_id,
                     "VATRate": ts, "VATAmountOC": tthue, "VATAmount": tthue,
                     "VATAccount": tk_thue, "DeductionDebitAccount": tkdu,
                     "ImportTaxRatePrice": nk_tg, "ImportTaxRate": nk_ts,
@@ -7450,12 +7532,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "PostedDate": ngay_dt, "CABAPostedDate": ngay_dt,
                 "CABARefDate": ngay_dt,   # chứng từ THẬT luôn có CABARefDate = RefDate
                 "RefType": ref_type, "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
-                # IncludeInvoice=0: KHÔNG bật "Nhận kèm hóa đơn" vì mình không tạo bản ghi
-                # PUInvoice liên kết (PUInvoiceRefID luôn NULL) — chứng từ MISA thật khi
-                # IncludeInvoice=1 LUÔN có PUInvoiceRefID trỏ tới 1 PUInvoice có thật; để
-                # IncludeInvoice=1 mà PUInvoiceRefID rỗng là dữ liệu mâu thuẫn, có thể khiến
-                # màn hình MISA (cần đọc thông tin hóa đơn liên kết) bỏ qua dòng này.
-                "IncludeInvoice": 0, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
+                # IncludeInvoice=1 ("Nhận kèm hóa đơn") + tạo bản ghi hóa đơn
+                # PUInvoice/PUInvoiceDetail bên dưới. Dữ liệu MISA thật xác nhận:
+                # PUVoucher.PUInvoiceRefID vẫn NULL kể cả khi IncludeInvoice=1 —
+                # hóa đơn liên kết chiều ngược qua PUInvoiceDetail.PUVoucherRefID.
+                "IncludeInvoice": 1, "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
                 "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
                 "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
@@ -7478,6 +7559,53 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     cur.execute("INSERT INTO PUVoucherDetail ([%s]) VALUES (%s)" %
                                ("],[".join(dc), ",".join(["?"] * len(dc))),
                                [d[c] for c in dc])
+            # HÓA ĐƠN kèm chứng từ ("Nhận kèm hóa đơn"): 1 chứng từ = 1 hóa đơn
+            # (mỗi doc đã gộp theo đúng 1 số hóa đơn), chi tiết trỏ ngược về
+            # chứng từ qua PUVoucherRefID/PUVoucherRefDetailID.
+            if inv_reftype:
+                inv_no = (str(first[cfg["sohd"]] or "")[:25] or None) \
+                    if cfg.get("sohd") is not None else None
+                inv_id = str(_uuid.uuid4())
+                inv_header = dict(_PU_INV_DEFAULT, **{
+                    "RefID": inv_id, "BranchID": branch_id, "RefType": inv_reftype,
+                    "RefDate": ngay_dt, "PostedDate": ngay_dt,
+                    "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
+                    "AccountObjectID": acc_obj_id,
+                    "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
+                    "AccountObjectTaxCode": mst[:50] or None,
+                    "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
+                    "InvNo": inv_no, "InvDate": ngay_dt,
+                    "TotalTurnoverAmountOC": total_amount, "TotalTurnoverAmount": total_amount,
+                    "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
+                    "DisplayOnBook": dob, "RefOrder": max_reforder + them_ct + 1,
+                    "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
+                    "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
+                })
+                if not preview:
+                    ic = list(inv_header.keys())
+                    cur.execute("INSERT INTO PUInvoice ([%s]) VALUES (%s)" %
+                               ("],[".join(ic), ",".join(["?"] * len(ic))),
+                               [inv_header[c] for c in ic])
+                    for d in detail_rows:
+                        idet = dict(_PU_INV_DET_DEFAULT, **{
+                            "RefDetailID": str(_uuid.uuid4()), "RefID": inv_id,
+                            "InventoryItemID": d["InventoryItemID"],
+                            "Description": d["Description"],
+                            "DebitAccount": d["DebitAccount"],
+                            "CreditAccount": d["CreditAccount"],
+                            "TurnoverAmountOC": d["AmountOC"], "TurnoverAmount": d["Amount"],
+                            "VATRate": d["VATRate"], "VATAmountOC": d["VATAmountOC"],
+                            "VATAmount": d["VATAmount"], "SortOrder": d["SortOrder"],
+                            "PUVoucherRefID": ref_id,
+                            "PUVoucherRefDetailID": d["RefDetailID"],
+                            "PUVoucherRefNoFinance": doc[:20],
+                            "PUVoucherRefNoManagement": doc[:20],
+                        })
+                        idc = list(idet.keys())
+                        cur.execute("INSERT INTO PUInvoiceDetail ([%s]) VALUES (%s)" %
+                                   ("],[".join(idc), ",".join(["?"] * len(idc))),
+                                   [idet[c] for c in idc])
+                so_hoa_don += 1
             them_ct += 1
             them_dong += len(detail_rows)
             if ghi_de_ct:
@@ -7538,6 +7666,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
+                "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
