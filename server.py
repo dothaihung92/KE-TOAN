@@ -7575,6 +7575,146 @@ def misa_sql_so_sanh_mua_hang(cid: int, loai: str, so_ct: str, database: str = "
         conn.close()
 
 
+# ============================================================
+#  ĐIỀU KHIỂN GIAO DIỆN MISA SME (Windows UI Automation) — chỉ chạy được
+#  trên Windows, nơi MISA đang mở. Dùng để TỰ ĐỘNG bấm "Nhập khẩu dữ liệu
+#  từ Excel" đúng luồng chuẩn của MISA (an toàn hơn ghi thẳng CSDL vì đi
+#  qua tầng xử lý thật của MISA). Làm theo cách CHỈ ĐỌC (dò cửa sổ/cây điều
+#  khiển) TRƯỚC khi có bước bấm/gõ nào — để biết chính xác tên nút/menu
+#  thật của MISA thay vì đoán mù, tránh bấm nhầm vào phần mềm kế toán thật.
+# ============================================================
+def _misa_ui():
+    try:
+        import pywinauto  # noqa: F401
+        from pywinauto import Desktop
+        return Desktop
+    except Exception:
+        raise HTTPException(
+            400, "Chưa cài thư viện pywinauto (điều khiển giao diện Windows) hoặc máy không phải "
+                 "Windows. Đóng phần mềm, chạy lại start.bat để tự cài, hoặc cài tay: "
+                 "pip install pywinauto")
+
+
+def _misa_ui_window(tieu_de):
+    Desktop = _misa_ui()
+    tieu_de = (tieu_de or "").strip()
+    if not tieu_de:
+        raise HTTPException(400, "Thiếu tiêu đề cửa sổ MISA (lấy từ /api/misa-ui/tim-cua-so)")
+    try:
+        win = Desktop(backend="uia").window(title=tieu_de)
+        if not win.exists():
+            raise HTTPException(404, "Không tìm thấy cửa sổ '%s' đang mở." % tieu_de)
+        return win
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, "Không kết nối được cửa sổ '%s': %s" % (tieu_de, str(e)[:300]))
+
+
+@app.get("/api/misa-ui/tim-cua-so")
+def misa_ui_tim_cua_so():
+    """Dò các cửa sổ Windows đang mở có tên chứa 'MISA' — CHỈ ĐỌC. Dùng để
+    xác nhận điều khiển được giao diện MISA trước khi tự động hóa thao tác,
+    và lấy đúng TIÊU ĐỀ cửa sổ để dùng cho các API điều khiển khác."""
+    Desktop = _misa_ui()
+    try:
+        wins = Desktop(backend="uia").windows()
+    except Exception as e:
+        raise HTTPException(400, "Không dò được cửa sổ Windows: %s" % str(e)[:300])
+    ket = []
+    for w in wins:
+        try:
+            title = w.window_text()
+            if title and "misa" in title.lower():
+                ket.append({"tieu_de": title, "loai": w.friendly_class_name(),
+                            "hien": bool(w.is_visible())})
+        except Exception:
+            continue
+    return {"ok": True, "so_luong": len(ket), "danh_sach": ket}
+
+
+@app.get("/api/misa-ui/cay-dieu-khien")
+def misa_ui_cay_dieu_khien(tieu_de: str = "", do_sau: int = 3, chi_co_ten: int = 1):
+    """Liệt kê các control (nút/menu/ô nhập...) bên trong 1 cửa sổ MISA đang
+    mở — CHỈ ĐỌC, không bấm/gõ gì. Dùng để tìm CHÍNH XÁC tên nút/menu thật
+    (vd 'Nhập khẩu dữ liệu từ Excel') trước khi tự động bấm, tránh đoán mù.
+    chi_co_ten=1: chỉ liệt kê control có Tên hoặc AutomationId (bớt nhiễu)."""
+    win = _misa_ui_window(tieu_de)
+    do_sau = max(1, min(int(do_sau or 3), 8))
+    try:
+        descendants = win.descendants()
+    except Exception as e:
+        raise HTTPException(400, "Không đọc được cây điều khiển: %s" % str(e)[:300])
+    ket = []
+    for c in descendants:
+        try:
+            ei = c.element_info
+            ten = c.window_text() or ""
+            aid = getattr(ei, "automation_id", "") or ""
+            if chi_co_ten and not ten and not aid:
+                continue
+            # độ sâu ước lượng qua số control cha (rect lồng nhau) — pywinauto
+            # không có sẵn "depth" trực tiếp nên bỏ qua lọc do_sau chính xác,
+            # chỉ dùng do_sau để giới hạn TỔNG SỐ trả về (tránh quá tải).
+            ket.append({"ten": ten, "loai": str(getattr(ei, "control_type", "")),
+                        "automation_id": aid, "class_name": c.friendly_class_name()})
+            if len(ket) >= do_sau * 200:
+                break
+        except Exception:
+            continue
+    return {"ok": True, "tieu_de": tieu_de, "so_luong": len(ket), "danh_sach": ket[:600]}
+
+
+@app.post("/api/misa-ui/bam")
+def misa_ui_bam(tieu_de: str, ten: str = "", automation_id: str = ""):
+    """Bấm (click) 1 control bên trong cửa sổ MISA — tìm theo Tên HOẶC
+    AutomationId (khớp CHÍNH XÁC, lấy từ /api/misa-ui/cay-dieu-khien).
+    ⚠ ĐÂY LÀ THAO TÁC THẬT trên MISA đang mở — chỉ dùng khi đã xác nhận
+    đúng tên control qua bước dò ở trên."""
+    win = _misa_ui_window(tieu_de)
+    ten = (ten or "").strip()
+    automation_id = (automation_id or "").strip()
+    if not (ten or automation_id):
+        raise HTTPException(400, "Thiếu 'ten' hoặc 'automation_id' của control cần bấm")
+    try:
+        target = None
+        for c in win.descendants():
+            try:
+                if automation_id and getattr(c.element_info, "automation_id", "") == automation_id:
+                    target = c
+                    break
+                if ten and c.window_text() == ten:
+                    target = c
+                    break
+            except Exception:
+                continue
+        if target is None:
+            raise HTTPException(404, "Không tìm thấy control tên/id '%s'." % (ten or automation_id))
+        target.click_input()
+        return {"ok": True, "da_bam": ten or automation_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, "Không bấm được: %s" % str(e)[:300])
+
+
+@app.post("/api/misa-ui/go-phim")
+def misa_ui_go_phim(tieu_de: str, van_ban: str = "", phim: str = ""):
+    """Gõ văn bản và/hoặc gửi phím đặc biệt (vd '{ENTER}', '{TAB}', '{ESC}')
+    vào cửa sổ MISA đang có focus — dùng khi hộp thoại chọn file hiện ra cần
+    gõ đường dẫn rồi Enter. ⚠ THAO TÁC THẬT trên MISA đang mở."""
+    win = _misa_ui_window(tieu_de)
+    try:
+        win.set_focus()
+        if van_ban:
+            win.type_keys(van_ban, with_spaces=True, with_tabs=True)
+        if phim:
+            win.type_keys(phim)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(400, "Không gõ được: %s" % str(e)[:300])
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.

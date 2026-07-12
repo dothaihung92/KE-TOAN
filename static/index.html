@@ -2401,6 +2401,10 @@ function moBangKe(loai){
         <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🖥 Auto MISA:</span>
+        <button class="btn sm" style="background:#2e5c8a" onclick="misaUiTimCuaSo()" title="Dò cửa sổ MISA đang mở trên máy (Windows) — bước đầu để tự động bấm Nhập khẩu Excel">🔍 Dò cửa sổ MISA</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">📚 Danh mục:</span>
         <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
         <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
@@ -3241,6 +3245,77 @@ async function misaTestGhiSo(soCt,ghiSo,database){
     const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
     const d=await api(`/api/misa-sql/test-danh-dau-ghi-so/${current}?so_ct=${encodeURIComponent(soCt)}&ghi_so=${ghiSo?1:0}${dbQ}`,{method:'POST'});
     toast(d.ghi_so?`🧪 Đã đánh dấu "${soCt}" ĐÃ GHI SỔ (test) — kiểm tra lại trên MISA ("Lấy dữ liệu")`:`↩ Đã đặt lại "${soCt}" CHƯA GHI SỔ`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+/* ---------- ĐIỀU KHIỂN GIAO DIỆN MISA (Windows UI Automation) ---------- */
+// Dò cửa sổ MISA đang mở trên máy (Windows) — CHỈ ĐỌC. Bước đầu tiên để
+// tự động hóa thao tác (bấm Nhập khẩu Excel) thay vì ghi thẳng CSDL.
+async function misaUiTimCuaSo(){
+  toast('Đang dò cửa sổ MISA...','');
+  try{
+    const d=await api(`/api/misa-ui/tim-cua-so`,{method:'GET'});
+    const rows=(d.danh_sach||[]).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.tieu_de)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;color:#666">${misaEsc(x.loai)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${x.hien?'✓':''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px"><button class="btn ghost sm" onclick="misaUiCayDieuKhien('${misaEsc(x.tieu_de).replace(/'/g,"\\'")}')">🌳 Dò cây điều khiển</button></td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
+        🔍 Tìm thấy <b>${d.so_luong}</b> cửa sổ MISA đang mở — chỉ đọc, chưa bấm/gõ gì.
+        Bấm "🌳 Dò cây điều khiển" trên đúng cửa sổ chính của MISA (thường có tiêu đề dài nhất, chứa tên công ty) để tìm tên nút/menu thật.</div>
+      <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tiêu đề</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px">Đang hiện</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
+        ${rows}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+let misaUiCayKQ=[];
+function misaUiCayXuat(){
+  if(!misaUiCayKQ.length){toast('Chưa có kết quả để kết xuất','err');return;}
+  const txt=misaUiCayKQ.map(x=>`${x.ten}\t${x.loai}\t${x.automation_id}\t${x.class_name}`).join('\n');
+  const blob=new Blob([`Tên\tLoại\tAutomationId\tClassName\n${txt}`],{type:'text/plain;charset=utf-8'});
+  dl(blob,`misa-cay-dieu-khien.txt`);
+  toast(`⬇ Đã kết xuất ${misaUiCayKQ.length} dòng`,'ok');
+}
+// Dò cây control (nút/menu/ô nhập) bên trong 1 cửa sổ MISA — CHỈ ĐỌC.
+async function misaUiCayDieuKhien(tieuDe){
+  toast('Đang dò cây điều khiển (có thể mất vài giây)...','');
+  try{
+    const d=await api(`/api/misa-ui/cay-dieu-khien?tieu_de=${encodeURIComponent(tieuDe)}`,{method:'GET'});
+    misaUiCayKQ=d.danh_sach||[];
+    const rows=misaUiCayKQ.map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;color:#666;font-size:11px">${misaEsc(x.loai)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-size:11px">${misaEsc(x.automation_id)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">
+        <button class="btn ghost sm" onclick="misaUiBam('${misaEsc(tieuDe).replace(/'/g,"\\'")}','${misaEsc(x.ten).replace(/'/g,"\\'")}','${misaEsc(x.automation_id).replace(/'/g,"\\'")}')">🖱 Bấm thử</button>
+      </td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+        ⚠ Danh sách dưới đây chỉ đọc, nhưng nút "🖱 Bấm thử" ở mỗi dòng sẽ BẤM THẬT vào MISA đang mở — chỉ bấm khi chắc chắn đúng control (vd nút "Nhập khẩu"), tránh bấm vào chỗ ghi/xóa dữ liệu thật.</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="btn ghost sm" onclick="misaUiCayXuat()">⬇ Kết xuất tất cả (.txt)</button>
+      </div>
+      <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Loại control</th><th style="border:1px solid #eee;padding:2px 6px">AutomationId</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
+        ${rows}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// BẤM THẬT vào 1 control của MISA đang mở — luôn xác nhận trước vì đây là
+// thao tác thật trên phần mềm kế toán, không phải chỉ đọc.
+async function misaUiBam(tieuDe,ten,automationId){
+  if(!confirm(`Bấm THẬT vào control "${ten||automationId}" trong MISA đang mở?\n\nChỉ tiếp tục nếu chắc chắn đây đúng là nút/menu cần bấm (vd "Nhập khẩu"), không phải nút ghi/xóa dữ liệu.`))return;
+  toast('Đang bấm...','');
+  try{
+    const d=await api(`/api/misa-ui/bam?tieu_de=${encodeURIComponent(tieuDe)}&ten=${encodeURIComponent(ten||'')}&automation_id=${encodeURIComponent(automationId||'')}`,{method:'POST'});
+    toast(`🖱 Đã bấm "${d.da_bam}" — kiểm tra trên MISA xem đúng ý chưa`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Xem SQL thật (định nghĩa view) của 1 màn hình MISA — CHỈ ĐỌC, để chẩn đoán
