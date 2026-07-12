@@ -2401,10 +2401,6 @@ function moBangKe(loai){
         <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
-        <span style="font-size:12px;color:#999;min-width:84px">🖥 Auto MISA:</span>
-        <button class="btn sm" style="background:#2e5c8a" onclick="misaUiTimCuaSo()" title="Dò cửa sổ MISA đang mở trên máy (Windows) — bước đầu để tự động bấm Nhập khẩu Excel">🔍 Dò cửa sổ MISA</button>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">📚 Danh mục:</span>
         <button class="btn sm" onclick="nlDanhMuc('hh')" style="background:#1f6b4a" title="Danh mục Hàng hóa (Nợ 1561/156)">🏷 DM Hàng Hóa</button>
         <button class="btn sm" onclick="nlDanhMuc('nvl')" style="background:#1f6b4a" title="Danh mục NVL (Nợ 152)">🧱 DM NVL</button>
@@ -3107,20 +3103,10 @@ async function muaHangImportMisa(loai){
         ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng chứng từ trong MISA kiểm tra rồi tự bấm "Ghi sổ".
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
       <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Mua hàng trong bảng)</span>`:''}</div>
-      <div style="background:#e9f7ee;border:1px solid #8fd9ac;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3a;margin-bottom:8px">
-        ${pv.hoc_mau?`✓ Loại chứng từ sẽ ghi (học từ chứng từ MISA thật): <b>${misaEsc(pv.hoc_mau)}</b>. `:`⚠ MISA chưa có sẵn chứng từ ${MUA_HANG_TEN[loai]} thật để học loại — phần mềm tự dò. `}
-        ${pv.hoc_display_on_book!=null?`Sẽ ghi <b>"Hiện trên sổ" = ${pv.hoc_display_on_book}</b> (giống chứng từ MISA đang hiển thị). `:`Chưa học được "Hiện trên sổ" từ chứng từ thật → dùng mặc định 3 (cả 2 sổ). `}
-        ${pv.hoc_chi_nhanh?`Sẽ ghi vào chi nhánh: <b>${misaEsc(pv.hoc_chi_nhanh)}</b> (học từ chứng từ MISA thật — nếu công ty có nhiều chi nhánh, ghi sai chi nhánh là nguyên nhân hay gặp nhất khiến chứng từ "biến mất" trên lưới).`:`⚠ Chưa học được chi nhánh từ chứng từ thật → dùng chi nhánh gốc mặc định.`}</div>
-      ${(pv.mau_that&&pv.mau_that.length)?`<div style="background:#f2f7f2;border:1px solid #bcd9bc;border-radius:6px;padding:6px 10px;font-size:11.5px;color:#2a5c2a;margin-bottom:8px">
-        🔎 Mẫu chứng từ MISA THẬT (đang hiển thị được) để đối chiếu:<br>${pv.mau_that.map(x=>`• ${misaEsc(x.so_ct||'')} — ${misaEsc(x.loai||'')} — Hiện trên sổ=<b>${x.display_on_book}</b>, NhậnHĐ=${x.include_invoice}, Chi nhánh=${misaEsc(x.chi_nhanh||'?')}, ${x.da_ghi_so?'đã ghi sổ':'chưa ghi sổ'}`).join('<br>')}</div>`
-        :`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:11.5px;color:#8a5300;margin-bottom:8px">⚠ Không có chứng từ Mua hàng THẬT nào trong MISA để đối chiếu — nếu ghi xong không hiện, hãy TỰ nhập tay 1 chứng từ mẫu trong MISA rồi chạy lại để phần mềm học theo.</div>`}
-      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:6px 10px;font-size:12px;color:#264b8a;margin-bottom:8px">
-        📌 Nếu vừa ghi mà KHÔNG thấy chứng từ trong MISA: bấm nút <b>"Lấy dữ liệu"</b> trên màn hình MISA để tải lại, hoặc <b>đóng MISA mở lại</b>
-        (MISA lưu bộ nhớ đệm). Nếu cột <b>"Loại CT (MISA)"</b> ở dưới KHÁC với các loại MISA đang có ở trên → chứng từ bị gán sai loại, hãy bấm <b>"Ghi đè"</b> để ghi lại.</div>
       ${(pv.so_bo_qua_ncc>0||pv.so_bo_qua_mahang>0)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA, <b>${pv.so_bo_qua_mahang}</b> dòng do thiếu mã hàng — hãy import Danh mục Hàng hóa/NVL/TSCĐ/CCDC và KH/NCC trước, rồi chạy lại.</div>`:''}
       ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
-        Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (chưa ghi sổ) trong MISA. Nếu chúng bị gán sai loại/không hiện, bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ đã ghi sổ).</div>`:''}
+        Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (chưa ghi sổ) trong MISA — bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ đã ghi sổ).</div>`:''}
       ${pv.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có <b>${pv.so_ngay_loi}</b> chứng từ KHÔNG đọc được ngày từ dữ liệu gốc (cột tô đỏ ở dưới) → bị ghi tạm bằng NGÀY HÔM NAY. Nếu bộ lọc "Kỳ" trên MISA không bao gồm hôm nay, chứng từ sẽ KHÔNG hiện dù dữ liệu đúng — kiểm tra lại định dạng ngày trong Bảng kê đầu vào.</div>`:''}
       ${pv.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
@@ -3131,10 +3117,6 @@ async function muaHangImportMisa(loai){
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">NCC</th><th style="border:1px solid #eee;padding:2px 6px">Số dòng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-        <button class="btn ghost sm" onclick="misaXemDinhNghiaView('View_PUVoucherService','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Xem SQL thật của màn hình Mua hàng hóa, dịch vụ trong MISA (chỉ đọc, để chẩn đoán)">🔍 Xem SQL màn hình MISA</button>
-        <button class="btn ghost sm" onclick="misaTimObject('PUVoucher','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Tìm stored procedure/view liên quan tên chứa 'PUVoucher' (chỉ đọc, để chẩn đoán)">🔎 Tìm Stored Procedure</button>
-        <button class="btn ghost sm" onclick="misaKiemTraRLS('${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Kiểm tra database có bật Row-Level Security (lọc dữ liệu theo người đăng nhập) không (chỉ đọc)">🔒 Kiểm tra RLS</button>
-        <button class="btn ghost sm" onclick="misaBatCauLenh('${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Đọc nguyên văn câu lệnh SQL mà MISA vừa chạy khi tải lưới (chỉ đọc) — bấm 'Lấy dữ liệu' trên MISA trước rồi bấm nút này">📡 Bắt câu lệnh MISA</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
@@ -3148,8 +3130,6 @@ async function muaHangImportMisaGhi(loai,ghiDe){
     const d=await api(`/api/misa-sql/import-mua-hang/${current}?loai=${loai}&preview=0&ghi_de=${ghiDe?1:0}`,{method:'POST'});
     const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de} chứng từ cũ)`:'';
     toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt} — CHƯA GHI SỔ.`,'ok');
-    const tkt=d.tu_kiem_tra;
-    const tot=tkt&&!tkt.loi&&tkt.so_view_thay===tkt.so_ghi;
     const dsGhi=(d.danh_sach||[]).filter(x=>x.ngay_ct);
     const dsRows=dsGhi.map(x=>{
       const ngayloi=!!x.ngay_loi;
@@ -3157,304 +3137,21 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       return `<tr style="${ngayloi?'background:#fde8e8':''}">
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}${tien0?' <span style="color:#b91c1c;font-weight:700" title="Tổng tiền chứng từ này = 0">⚠ 0đ</span>':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;${ngayloi?'color:#b91c1c;font-weight:700':''}" title="${ngayloi?'Không đọc được ngày gốc \''+misaEsc(x.ngay_goc||'')+'\'':''}">${misaEsc(x.ngay_ct||'')}${ngayloi?' ⚠ rơi về hôm nay':''}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${x.view_thay===true?'<span style="color:#1a7a7a">✓ view thấy</span>':(x.view_thay===false?'<span style="color:#b91c1c">✗ view không thấy</span>':'')}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;white-space:nowrap">
-        <button class="btn ghost sm" onclick="misaSoSanhMuaHang('${loai}','${misaEsc(x.so_ct).replace(/'/g,"\\'")}','${misaEsc(d.database||'').replace(/'/g,"\\'")}')">🔬 So sánh</button>
-        <button class="btn ghost sm" style="color:#a03a3a" onclick="misaTestGhiSo('${misaEsc(x.so_ct).replace(/'/g,"\\'")}',1,'${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="CHỈ TEST: đánh dấu chứng từ này ĐÃ GHI SỔ để xem MISA có hiện không — không phải quy trình ghi sổ thật">🧪 Test đã ghi sổ</button>
-        <button class="btn ghost sm" onclick="misaTestGhiSo('${misaEsc(x.so_ct).replace(/'/g,"\\'")}',0,'${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="Đặt lại CHƯA GHI SỔ sau khi test xong">↩ Đặt lại</button>
-      </td></tr>`;
+      <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td></tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
-      ${tkt&&!tkt.loi?`<div style="background:${tot?'#e9f7ee':'#fde8e8'};border:1px solid ${tot?'#8fd9ac':'#e39a9a'};border-radius:8px;padding:10px 14px;font-size:13px;color:${tot?'#1a6b3a':'#a03a3a'};margin-bottom:10px">
-        🔎 <b>Tự kiểm tra sau khi ghi</b> (chạy thẳng đúng view MISA dùng cho "Mua hàng hóa, dịch vụ"):<br>
-        View tìm thấy <b>${tkt.so_view_thay}/${tkt.so_ghi}</b> chứng từ vừa ghi.<br>
-        <b>${misaEsc(tkt.ket_luan)}</b></div>
-      ${tot?`<div style="font-size:12.5px;color:#333;margin-bottom:8px">→ Dữ liệu đã ghi ĐÚNG và view MISA nhìn thấy được. Nếu màn hình MISA vẫn không hiện dù đã kiểm tra chi nhánh/kỳ/cache: bấm "🔬 So sánh" ở dòng chứng từ dưới đây để đối chiếu TỪNG CỘT với 1 chứng từ thật cùng loại, tìm đúng cột khác biệt.</div>`
-      :`<div style="font-size:12.5px;color:#333;margin-bottom:8px">→ Ngay cả view của MISA cũng KHÔNG thấy chứng từ vừa ghi — lỗi nằm ở dữ liệu ghi, cần xem lại. Gửi lại thông tin này để tiếp tục chẩn đoán.</div>`}`:''}
       ${d.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_ngay_loi} chứng từ không đọc được ngày gốc, đã ghi tạm bằng NGÀY HÔM NAY — kiểm tra bộ lọc "Kỳ" trên MISA có bao gồm hôm nay không.</div>`:''}
       ${d.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_tien_0} chứng từ TỔNG TIỀN = 0 (đánh dấu ⚠ 0đ ở cột Số CT dưới đây) — kiểm tra lại "Đơn giá"/"Thành tiền" trong Bảng kê Đầu vào cho (các) hóa đơn này.</div>`:''}
       ${dsRows?`<div style="max-height:30vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th><th style="border:1px solid #eee;padding:2px 6px">Tự kiểm tra</th><th style="border:1px solid #eee;padding:2px 6px">Công cụ chẩn đoán</th></tr>
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th></tr>
         ${dsRows}</table></div>`:''}
-      <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-        <button class="btn ghost sm" onclick="misaKiemTraRLS('${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="Kiểm tra database có bật Row-Level Security (lọc dữ liệu theo người đăng nhập) không (chỉ đọc)">🔒 Kiểm tra RLS</button>
-        <button class="btn ghost sm" onclick="misaBatCauLenh('${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="Đọc nguyên văn câu lệnh SQL mà MISA vừa chạy khi tải lưới (chỉ đọc) — bấm 'Lấy dữ liệu' trên MISA trước rồi bấm nút này">📡 Bắt câu lệnh MISA</button>
+      <div style="text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
-}
-// Kiểm tra database MISA có bật Row-Level Security (RLS) trên bảng Mua hàng
-// không — CHỈ ĐỌC. RLS lọc dữ liệu ÂM THẦM theo người đăng nhập, không hiện
-// trong bất kỳ view/procedure nào xem được — có thể là lý do ẩn cuối cùng.
-async function misaKiemTraRLS(database){
-  toast('Đang kiểm tra Row-Level Security...','');
-  try{
-    const dbQ=database?`database=${encodeURIComponent(database)}`:'';
-    const d=await api(`/api/misa-sql/kiem-tra-rls/${current}?${dbQ}`,{method:'POST'});
-    const rows=(d.chinh_sach||[]).map(x=>`<tr>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.chinh_sach)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.bang)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px">${misaEsc(x.dieu_kien)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.loai)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.thao_tac)}</td></tr>`).join('');
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:${d.co_rls?'#fde8e8':'#e9f7ee'};border:1px solid ${d.co_rls?'#e39a9a':'#8fd9ac'};border-radius:8px;padding:10px 14px;font-size:13px;color:${d.co_rls?'#a03a3a':'#1a6b3a'};margin-bottom:10px">
-        🔒 <b>${d.co_rls?`CÓ Row-Level Security trên database này! Đây rất có thể là nguyên nhân — RLS lọc dữ liệu theo người đăng nhập một cách ÂM THẦM, không hiện trong view/procedure. Chứng từ do phần mềm ghi (đăng nhập SQL khác) có thể bị RLS ẩn khỏi tài khoản MISA đang dùng thật.`:(d.ho_tro_rls?`Không phát hiện Row-Level Security trên database này.`:`SQL Server này KHÔNG hỗ trợ Row-Level Security (bản cũ hơn 2016, hoặc không xem được) — coi như không có RLS, cần tìm hướng khác.`)}</b></div>
-      <div style="font-size:12px;color:#666;margin-bottom:8px">Đang đọc dữ liệu bằng tài khoản SQL: <b>${misaEsc(d.dang_dang_nhap?.suser_sname||'?')}</b> (CURRENT_USER: ${misaEsc(d.dang_dang_nhap?.current_user||'?')})</div>
-      ${rows?`<div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Chính sách</th><th style="border:1px solid #eee;padding:2px 6px">Bảng</th><th style="border:1px solid #eee;padding:2px 6px">Điều kiện lọc</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px">Thao tác</th></tr>
-        ${rows}</table></div>`:''}
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-// Đối chiếu TỪNG CỘT của 1 chứng từ vừa ghi với 1 chứng từ Mua hàng THẬT
-// cùng loại đang hiển thị tốt trên MISA — CHỈ ĐỌC. Dùng khi đã loại trừ
-// chi nhánh/kỳ/trạng thái/cache mà chứng từ vẫn không hiện trên MISA.
-let misaSoSanhKQ=[];
-function misaSoSanhXuat(soCt,bang){
-  if(!misaSoSanhKQ.length){toast('Chưa có kết quả để kết xuất','err');return;}
-  const txt=misaSoSanhKQ.map(x=>`${x.cot}\t${x.that}\t${x.moi}\t${x.khac?'KHAC':''}`).join('\n');
-  dl(new Blob([`Cột\tChứng từ THẬT\tChứng từ MỚI ghi\tKhác?\n${txt}`],{type:'text/plain;charset=utf-8'}),`so-sanh-${bang}-${(soCt||'ct').replace(/[^a-z0-9]+/gi,'_')}.txt`);
-  toast(`⬇ Đã kết xuất ${misaSoSanhKQ.length} dòng`,'ok');
-}
-async function misaSoSanhMuaHang(loai,soCt,database,bang){
-  bang=bang||'header';
-  toast('Đang đối chiếu...','');
-  try{
-    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
-    const d=await api(`/api/misa-sql/so-sanh-mua-hang/${current}?loai=${loai}&so_ct=${encodeURIComponent(soCt)}&bang=${bang}${dbQ}`,{method:'POST'});
-    misaSoSanhKQ=d.cot||[];
-    const rows=misaSoSanhKQ.slice().sort((a,b)=>(b.khac-a.khac)).map(x=>`<tr style="${x.khac?'background:#fde8e8':''}">
-      <td style="border:1px solid #eee;padding:2px 6px;${x.khac?'font-weight:700;color:#b91c1c':''}">${misaEsc(x.cot)}${x.khac?' ⚠':''}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px;${x.that==='(NULL)'?'color:#999;font-style:italic':''}">${misaEsc(x.that)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px;${x.moi==='(NULL)'?'color:#999;font-style:italic':''}">${misaEsc(x.moi)}</td></tr>`).join('');
-    const nutBang=(b,ten)=>`<button class="btn ${bang===b?'':'ghost '}sm" ${bang===b?'style="background:#2e5c8a"':''} onclick="misaSoSanhMuaHang('${loai}','${misaEsc(soCt).replace(/'/g,"\\'")}','${misaEsc(database||'').replace(/'/g,"\\'")}','${b}')">${ten}</button>`;
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
-        🔬 Đối chiếu từng cột ${bang==='detail'?'<b>DÒNG CHI TIẾT (PUVoucherDetail)</b>':'<b>chứng từ (PUVoucher)</b>'} giữa chứng từ vừa ghi (<b>${misaEsc(soCt)}</b>) và 1 chứng từ Mua hàng THẬT.
-        Có <b>${d.so_khac}</b> cột khác nhau. <b>(NULL)</b> = cột trống hoàn toàn — nếu MISA báo "Failed to enable constraints" khi mở chứng từ, thủ phạm là cột nào bên MỚI là (NULL) mà bên THẬT có giá trị.</div>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        ${nutBang('header','📋 Cột chứng từ')}
-        ${nutBang('detail','📦 Cột dòng chi tiết')}
-        <button class="btn ghost sm" onclick="misaSoSanhXuat('${misaEsc(soCt).replace(/'/g,"\\'")}','${bang}')">⬇ Kết xuất (.txt)</button>
-      </div>
-      <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="border:1px solid #eee;padding:2px 6px">Cột</th><th style="border:1px solid #eee;padding:2px 6px">Chứng từ THẬT</th><th style="border:1px solid #eee;padding:2px 6px">Chứng từ MỚI ghi</th></tr>
-        ${rows}</table></div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-// CHỈ DÙNG ĐỂ TEST/CHẨN ĐOÁN: đánh dấu (hoặc gỡ) 1 chứng từ do phần mềm này
-// ghi thành "ĐÃ GHI SỔ" để xem MISA có hiện trên lưới hay không. KHÔNG phải
-// quy trình ghi sổ thật (không cập nhật kho/sổ cái) — chỉ đổi 1 cờ để test.
-async function misaTestGhiSo(soCt,ghiSo,database){
-  if(ghiSo&&!confirm(`CHỈ ĐỂ TEST: đánh dấu chứng từ "${soCt}" là ĐÃ GHI SỔ để xem MISA có hiện không.\n\nLưu ý: đây KHÔNG phải quy trình "Ghi sổ" thật của MISA (không cập nhật kho/sổ cái) — chỉ đổi 1 cờ trạng thái. Sau khi test xong, nhớ bấm "↩ Đặt lại" hoặc xóa hẳn chứng từ test này trong MISA, đừng để lẫn với sổ sách thật.\n\nTiếp tục?`))return;
-  toast(ghiSo?'Đang đánh dấu đã ghi sổ (test)...':'Đang đặt lại chưa ghi sổ...','');
-  try{
-    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
-    const d=await api(`/api/misa-sql/test-danh-dau-ghi-so/${current}?so_ct=${encodeURIComponent(soCt)}&ghi_so=${ghiSo?1:0}${dbQ}`,{method:'POST'});
-    toast(d.ghi_so?`🧪 Đã đánh dấu "${soCt}" ĐÃ GHI SỔ (test) — kiểm tra lại trên MISA ("Lấy dữ liệu")`:`↩ Đã đặt lại "${soCt}" CHƯA GHI SỔ`,'ok');
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-// Bắt các câu lệnh SQL mà MISA VỪA chạy (đọc bộ nhớ đệm câu lệnh của SQL
-// Server — CHỈ ĐỌC). Dùng để thấy NGUYÊN VĂN điều kiện lọc @where mà màn
-// hình MISA tự dựng khi tải lưới, thay vì đoán vì sao chứng từ bị lọc mất.
-let misaBatKQ=[],misaBatPhien=[];
-function misaBatXuat(){
-  if(!misaBatKQ.length&&!misaBatPhien.length){toast('Chưa có gì để kết xuất','err');return;}
-  const p=misaBatPhien.map(x=>`[Phiên ${x.phien}]${x.la_phien_nay?' (PHIÊN CỦA PHẦN MỀM NÀY)':''} ${x.dang_nhap} | máy: ${x.may} | chương trình: ${x.chuong_trinh} | DB: ${x.db} | lần cuối: ${x.lan_cuoi}\nCâu lệnh cuối: ${x.cau_lenh_cuoi}\n`).join('\n');
-  const q=misaBatKQ.map(x=>`-- ${x.luc} (chạy ${x.so_lan} lần)${x.cua_phan_mem_nay?' [CỦA PHẦN MỀM NÀY]':''}\n${x.cau_lenh}\n`).join('\n'+'='.repeat(80)+'\n');
-  dl(new Blob([`===== AI ĐANG KẾT NỐI VÀO SQL SERVER =====\n${p}\n\n===== CÂU LỆNH ĐÃ CHẠY =====\n${q}`],{type:'text/plain;charset=utf-8'}),'misa-cau-lenh-vua-chay.txt');
-  toast(`⬇ Đã kết xuất ${misaBatPhien.length} phiên + ${misaBatKQ.length} câu lệnh`,'ok');
-}
-async function misaBatCauLenh(database){
-  toast('Đang đọc câu lệnh MISA vừa chạy...','');
-  try{
-    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
-    const d=await api(`/api/misa-sql/bat-cau-lenh/${current}?tu_khoa=PUVoucher&phut=15${dbQ}`,{method:'POST'});
-    misaBatKQ=d.danh_sach||[];misaBatPhien=d.phien||[];
-    const phienRows=misaBatPhien.map(x=>`<tr style="${x.la_phien_nay?'color:#999':'background:#e9f7ee'}">
-      <td style="border:1px solid #eee;padding:2px 6px">${x.phien}${x.la_phien_nay?' (phần mềm này)':''}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.chuong_trinh)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.dang_nhap)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.db)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-size:10.5px">${misaEsc(x.lan_cuoi)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:10.5px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${misaEsc(x.cau_lenh_cuoi)}">${misaEsc(x.cau_lenh_cuoi.slice(0,160))}</td></tr>`).join('');
-    const khoi=misaBatKQ.map(x=>`
-      <div style="border:1px solid ${x.cua_phan_mem_nay?'#e0e0e0':'#8fd9ac'};border-radius:6px;margin-bottom:8px;overflow:hidden">
-        <div style="background:${x.cua_phan_mem_nay?'#f5f5f5':'#e9f7ee'};padding:4px 8px;font-size:11.5px;color:#555">
-          🕐 ${misaEsc(x.luc)} — chạy ${x.so_lan} lần ${x.cua_phan_mem_nay?'<b style="color:#999">[của phần mềm này — bỏ qua]</b>':'<b style="color:#1a6b3a">[có thể là của MISA]</b>'}</div>
-        <textarea readonly style="width:100%;height:${x.cua_phan_mem_nay?'40':'110'}px;font-family:monospace;font-size:11px;border:0;padding:6px;background:#fff">${misaEsc(x.cau_lenh)}</textarea>
-      </div>`).join('');
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
-        📡 Máy chủ SQL: <b>${misaEsc(d.may_chu||'?')}</b> — <b>${d.so_luong}</b> câu lệnh chứa "PUVoucher" trong ${d.phut} phút gần đây, <b>${misaBatPhien.length}</b> kết nối đang mở (chỉ đọc).<br>
-        <b>Quan trọng:</b> nhìn bảng "Ai đang kết nối" — nếu KHÔNG có dòng xanh nào là chương trình MISA, nghĩa là MISA <b>không nói chuyện với SQL Server này</b> khi tải lưới (đọc qua tầng đệm/máy chủ khác) — gửi lại toàn bộ để phân tích.</div>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <button class="btn ghost sm" onclick="misaBatXuat()">⬇ Kết xuất tất cả (.txt)</button>
-        <button class="btn ghost sm" onclick="misaBatCauLenh('${misaEsc(database||'').replace(/'/g,"\\'")}')">🔄 Bắt lại</button>
-      </div>
-      <div style="font-weight:600;font-size:12.5px;margin-bottom:4px">🔌 Ai đang kết nối vào SQL Server này (dòng xanh = KHÔNG phải phần mềm này):</div>
-      <div style="max-height:22vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:11.5px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Phiên</th><th style="border:1px solid #eee;padding:2px 6px">Chương trình</th><th style="border:1px solid #eee;padding:2px 6px">Đăng nhập</th><th style="border:1px solid #eee;padding:2px 6px">DB</th><th style="border:1px solid #eee;padding:2px 6px">Lần cuối</th><th style="border:1px solid #eee;padding:2px 6px">Câu lệnh cuối</th></tr>
-        ${phienRows||'<tr><td colspan="6" style="padding:6px;color:#999">Không đọc được danh sách kết nối (thiếu quyền?)</td></tr>'}</table></div>
-      <div style="font-weight:600;font-size:12.5px;margin-bottom:4px">📜 Câu lệnh chứa "PUVoucher" đã chạy gần đây:</div>
-      <div style="max-height:30vh;overflow:auto">${khoi||'<div style="color:#999;font-size:12.5px">Không có câu lệnh nào — bấm "Lấy dữ liệu" trên MISA trước rồi "Bắt lại".</div>'}</div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-/* ---------- ĐIỀU KHIỂN GIAO DIỆN MISA (Windows UI Automation) ---------- */
-// Dò cửa sổ MISA đang mở trên máy (Windows) — CHỈ ĐỌC. Bước đầu tiên để
-// tự động hóa thao tác (bấm Nhập khẩu Excel) thay vì ghi thẳng CSDL.
-async function misaUiTimCuaSo(tatCa){
-  toast('Đang dò cửa sổ MISA...','');
-  try{
-    const d=await api(`/api/misa-ui/tim-cua-so?tat_ca=${tatCa?1:0}`,{method:'GET'});
-    const rows=(d.danh_sach||[]).map(x=>`<tr>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.tieu_de)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;color:#666">${misaEsc(x.loai)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">${x.hien?'✓':''}</td>
-      <td style="border:1px solid #eee;padding:2px 6px"><button class="btn ghost sm" onclick="misaUiCayDieuKhien('${misaEsc(x.tieu_de).replace(/'/g,"\\'")}')">🌳 Dò cây điều khiển</button></td></tr>`).join('');
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:${d.so_luong?'#eef4ff':'#fff4e6'};border:1px solid ${d.so_luong?'#b8ccef':'#f0c088'};border-radius:8px;padding:8px 12px;font-size:12.5px;color:${d.so_luong?'#264b8a':'#8a5300'};margin-bottom:10px">
-        🔍 Tìm thấy <b>${d.so_luong}</b>${tatCa?'':' cửa sổ tên chứa "MISA"'} trong tổng <b>${d.tong_so_cua_so}</b> cửa sổ Windows đang mở — chỉ đọc, chưa bấm/gõ gì.
-        ${d.so_luong?'Bấm "🌳 Dò cây điều khiển" trên đúng cửa sổ chính của MISA (thường có tiêu đề dài nhất, chứa tên công ty) để tìm tên nút/menu thật.'
-          :(tatCa?'Không thấy cửa sổ MISA nào trong danh sách TẤT CẢ cửa sổ này — kiểm tra MISA có đang mở không, hoặc có đang chạy quyền Administrator không (nếu MISA chạy "Run as Administrator" còn phần mềm này chạy quyền thường, Windows sẽ chặn dò/điều khiển — cần đóng MISA, mở lại KHÔNG chạy quyền Admin, hoặc chạy start.bat bằng quyền Admin).'
-          :'Không có cửa sổ nào tên chứa "MISA" — có thể MISA đặt tên cửa sổ khác. Bấm nút bên dưới để xem TẤT CẢ cửa sổ đang mở, tự tìm đúng cửa sổ MISA trong danh sách.')}</div>
-      ${(!tatCa)?`<div style="margin-bottom:8px"><button class="btn ghost sm" onclick="misaUiTimCuaSo(true)">📋 Hiện TẤT CẢ cửa sổ đang mở</button></div>`:''}
-      <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tiêu đề</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px">Đang hiện</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
-        ${rows}</table></div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-let misaUiCayKQ=[];
-function misaUiCayXuat(){
-  if(!misaUiCayKQ.length){toast('Chưa có kết quả để kết xuất','err');return;}
-  const txt=misaUiCayKQ.map(x=>`${x.ten}\t${x.loai}\t${x.automation_id}\t${x.class_name}`).join('\n');
-  const blob=new Blob([`Tên\tLoại\tAutomationId\tClassName\n${txt}`],{type:'text/plain;charset=utf-8'});
-  dl(blob,`misa-cay-dieu-khien.txt`);
-  toast(`⬇ Đã kết xuất ${misaUiCayKQ.length} dòng`,'ok');
-}
-// Dò cây control (nút/menu/ô nhập) bên trong 1 cửa sổ MISA — CHỈ ĐỌC.
-async function misaUiCayDieuKhien(tieuDe){
-  toast('Đang dò cây điều khiển (có thể mất vài giây)...','');
-  try{
-    const d=await api(`/api/misa-ui/cay-dieu-khien?tieu_de=${encodeURIComponent(tieuDe)}`,{method:'GET'});
-    misaUiCayKQ=d.danh_sach||[];
-    const rows=misaUiCayKQ.map(x=>`<tr>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;color:#666;font-size:11px">${misaEsc(x.loai)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;font-size:11px">${misaEsc(x.automation_id)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px">
-        <button class="btn ghost sm" onclick="misaUiBam('${misaEsc(tieuDe).replace(/'/g,"\\'")}','${misaEsc(x.ten).replace(/'/g,"\\'")}','${misaEsc(x.automation_id).replace(/'/g,"\\'")}')">🖱 Bấm thử</button>
-      </td></tr>`).join('');
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
-        ⚠ Danh sách dưới đây chỉ đọc, nhưng nút "🖱 Bấm thử" ở mỗi dòng sẽ BẤM THẬT vào MISA đang mở — chỉ bấm khi chắc chắn đúng control (vd nút "Nhập khẩu"), tránh bấm vào chỗ ghi/xóa dữ liệu thật.</div>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <button class="btn ghost sm" onclick="misaUiCayXuat()">⬇ Kết xuất tất cả (.txt)</button>
-      </div>
-      <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Loại control</th><th style="border:1px solid #eee;padding:2px 6px">AutomationId</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
-        ${rows}</table></div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-// BẤM THẬT vào 1 control của MISA đang mở — luôn xác nhận trước vì đây là
-// thao tác thật trên phần mềm kế toán, không phải chỉ đọc.
-async function misaUiBam(tieuDe,ten,automationId){
-  if(!confirm(`Bấm THẬT vào control "${ten||automationId}" trong MISA đang mở?\n\nChỉ tiếp tục nếu chắc chắn đây đúng là nút/menu cần bấm (vd "Nhập khẩu"), không phải nút ghi/xóa dữ liệu.`))return;
-  toast('Đang bấm...','');
-  try{
-    const d=await api(`/api/misa-ui/bam?tieu_de=${encodeURIComponent(tieuDe)}&ten=${encodeURIComponent(ten||'')}&automation_id=${encodeURIComponent(automationId||'')}`,{method:'POST'});
-    toast(`🖱 Đã bấm "${d.da_bam}" — kiểm tra trên MISA xem đúng ý chưa`,'ok');
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-// Xem SQL thật (định nghĩa view) của 1 màn hình MISA — CHỈ ĐỌC, để chẩn đoán
-// vì sao chứng từ ghi thẳng vào bảng không hiện trên màn hình đó.
-async function misaXemDinhNghiaView(tenView,database){
-  toast('Đang lấy định nghĩa view...','');
-  try{
-    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
-    const d=await api(`/api/misa-sql/xem-view/${current}?view=${encodeURIComponent(tenView)}${dbQ}`,{method:'POST'});
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
-        🔍 Định nghĩa (SQL thật) của <b>${misaEsc(d.view)}</b> — chỉ đọc, không đụng dữ liệu. Copy đoạn dưới gửi lại để chẩn đoán chính xác.</div>
-      <textarea readonly style="width:100%;height:50vh;font-family:monospace;font-size:11.5px;padding:8px;border:1px solid #ddd;border-radius:6px">${misaEsc(d.dinh_nghia)}</textarea>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-// Tìm bảng/view/stored procedure/hàm theo từ khóa tên — CHỈ ĐỌC, để tìm
-// đúng procedure màn hình MISA thực sự gọi (có thể lọc thêm điều kiện
-// KHÔNG nằm trong view, vd theo chi nhánh/phiên làm việc).
-let misaTimObjectKQ=[];
-function misaTimObjectXuat(tuKhoa){
-  if(!misaTimObjectKQ.length){toast('Chưa có kết quả để kết xuất','err');return;}
-  const txt=misaTimObjectKQ.map(x=>`${x.ten}\t${x.loai}`).join('\n');
-  const blob=new Blob([`Tên\tLoại\n${txt}`],{type:'text/plain;charset=utf-8'});
-  dl(blob,`tim-object-${(tuKhoa||'ketqua').replace(/[^a-z0-9]+/gi,'_')}.txt`);
-  toast(`⬇ Đã kết xuất ${misaTimObjectKQ.length} dòng`,'ok');
-}
-async function misaTimObjectCopy(){
-  if(!misaTimObjectKQ.length){toast('Chưa có kết quả để copy','err');return;}
-  const txt=misaTimObjectKQ.map(x=>`${x.ten}\t${x.loai}`).join('\n');
-  try{await navigator.clipboard.writeText(txt);toast(`📋 Đã copy ${misaTimObjectKQ.length} dòng`,'ok');}
-  catch(e){toast('Lỗi copy: '+e.message,'err')}
-}
-async function misaTimObject(tuKhoa,database){
-  toast('Đang tìm...','');
-  try{
-    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
-    const d=await api(`/api/misa-sql/tim-object/${current}?tu_khoa=${encodeURIComponent(tuKhoa)}${dbQ}`,{method:'POST'});
-    misaTimObjectKQ=d.danh_sach||[];
-    const rows=(d.danh_sach||[]).map(x=>`<tr>
-      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;color:#666">${misaEsc(x.loai)}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">
-        ${['SQL_STORED_PROCEDURE','VIEW','SQL_SCALAR_FUNCTION','SQL_TABLE_VALUED_FUNCTION','SQL_INLINE_TABLE_VALUED_FUNCTION'].includes(x.loai)?`<button class="btn ghost sm" onclick="misaXemDinhNghiaView('${misaEsc(x.ten).replace(/'/g,"\\'")}','${misaEsc(database||'').replace(/'/g,"\\'")}')">🔍 Xem SQL</button>`:''}
-      </td></tr>`).join('');
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
-        🔎 Tìm thấy <b>${d.so_luong}</b> bảng/view/procedure/hàm có tên chứa "<b>${misaEsc(tuKhoa)}</b>" — chỉ đọc, không đụng dữ liệu.
-        Tìm procedure (SQL_STORED_PROCEDURE) tên gần giống màn hình "Mua hàng hóa, dịch vụ" (vd chứa "GetList"/"Service"/"Search") rồi bấm "Xem SQL" để kiểm tra điều kiện lọc thật.</div>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <input id="misaTimTuKhoa" value="${misaEsc(tuKhoa)}" placeholder="Từ khóa khác, vd PUVoucherService, MuaHang, GetList..." style="flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:12.5px"
-               onkeydown="if(event.key==='Enter')misaTimObject(this.value,'${misaEsc(database||'').replace(/'/g,"\\'")}')">
-        <button class="btn sm" style="background:#2e5c8a" onclick="misaTimObject(document.getElementById('misaTimTuKhoa').value,'${misaEsc(database||'').replace(/'/g,"\\'")}')">🔎 Tìm lại</button>
-        <button class="btn ghost sm" onclick="misaTimObjectXuat('${misaEsc(tuKhoa).replace(/'/g,"\\'")}')">⬇ Kết xuất tất cả (.txt)</button>
-        <button class="btn ghost sm" onclick="misaTimObjectCopy()">📋 Copy tất cả</button>
-      </div>
-      <div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
-        ${rows}</table></div>
-      <div style="margin-top:12px;text-align:right">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function nlBanHang(btn){
   const old=btn?btn.innerHTML:'';

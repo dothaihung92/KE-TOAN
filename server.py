@@ -6408,189 +6408,6 @@ def misa_sql_xem(cid: int, database: str = "", bang: str = "", n: int = 20):
         conn.close()
 
 
-@app.post("/api/misa-sql/xem-view/{cid}")
-def misa_sql_xem_view(cid: int, database: str = "", view: str = ""):
-    """Xem ĐỊNH NGHĨA (SQL text) của 1 view/stored procedure MISA — CHỈ ĐỌC,
-    không đụng dữ liệu. Dùng để chẩn đoán vì sao 1 màn hình MISA lọc/không
-    hiện dữ liệu (xem view đó JOIN/WHERE theo điều kiện gì)."""
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    if not (database and view):
-        raise HTTPException(400, "Thiếu database/tên view — mở '🗄 Kết nối CSDL MISA' và kết nối "
-                                 "tới database trước.")
-    if not view.replace("_", "").isalnum():
-        raise HTTPException(400, "Tên view không hợp lệ")
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        row = cur.execute("SELECT OBJECT_DEFINITION(OBJECT_ID(?))", view).fetchone()
-        dinh_nghia = row[0] if row else None
-        if not dinh_nghia:
-            row2 = cur.execute(
-                "SELECT m.definition FROM sys.sql_modules m "
-                "JOIN sys.objects o ON o.object_id=m.object_id WHERE o.name=?", view).fetchone()
-            dinh_nghia = row2[0] if row2 else None
-        if not dinh_nghia:
-            raise HTTPException(404, "Không tìm thấy định nghĩa view '%s' (có thể không có quyền "
-                                     "VIEW DEFINITION, hoặc tên view sai)." % view)
-        return {"ok": True, "view": view, "dinh_nghia": dinh_nghia}
-    finally:
-        conn.close()
-
-
-@app.post("/api/misa-sql/tim-object/{cid}")
-def misa_sql_tim_object(cid: int, database: str = "", tu_khoa: str = ""):
-    """Tìm bảng/view/stored procedure/hàm có tên chứa từ khóa — CHỈ ĐỌC. Dùng
-    để tìm đúng stored procedure màn hình MISA thực sự gọi (thường có thêm
-    điều kiện lọc KHÔNG nằm trong view, vd theo chi nhánh/phiên làm việc)."""
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    tu_khoa = (tu_khoa or "").strip()
-    if not (database and tu_khoa):
-        raise HTTPException(400, "Thiếu database/từ khóa tìm kiếm.")
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        rows = cur.execute(
-            "SELECT name, type_desc FROM sys.objects "
-            "WHERE name LIKE ? AND type IN ('P','V','FN','TF','IF') "
-            # ưu tiên tên có vẻ là procedure "lấy danh sách" (GetList/Search/
-            # Filter) vì đây là loại procedure màn hình lưới hay gọi
-            "ORDER BY CASE WHEN name LIKE '%GetList%' OR name LIKE '%Search%' "
-            "OR name LIKE '%Filter%' THEN 0 ELSE 1 END, type_desc, name",
-            "%" + tu_khoa + "%").fetchall()
-        ket = [{"ten": r[0], "loai": r[1]} for r in rows]
-        return {"ok": True, "tu_khoa": tu_khoa, "so_luong": len(ket), "danh_sach": ket[:300]}
-    finally:
-        conn.close()
-
-
-@app.post("/api/misa-sql/kiem-tra-rls/{cid}")
-def misa_sql_kiem_tra_rls(cid: int, database: str = ""):
-    """Kiểm tra database có bật Row-Level Security (RLS) trên các bảng liên
-    quan Mua hàng không — CHỈ ĐỌC. Nếu có, RLS sẽ ÂM THẦM lọc bớt dòng theo
-    NGƯỜI ĐANG ĐĂNG NHẬP (SUSER_SNAME()) mà không hề xuất hiện trong bất kỳ
-    view/procedure nào ta xem được — giải thích được vì sao dữ liệu ghi ĐÚNG,
-    view/tự-kiểm-tra tìm THẤY (vì đang query bằng chính tài khoản vừa ghi),
-    nhưng cả màn hình lưới LẪN 'Tìm chứng từ' của MISA (đăng nhập tài khoản
-    khác) đều KHÔNG thấy."""
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    if not database:
-        raise HTTPException(400, "Thiếu database")
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        who = cur.execute("SELECT SUSER_SNAME(), CURRENT_USER").fetchone()
-        try:
-            rows = cur.execute(
-                "SELECT sp.name, t.name, p.predicate_definition, p.predicate_type_desc, p.operation_desc "
-                "FROM sys.security_policies sp "
-                "JOIN sys.security_predicates p ON p.object_id = sp.object_id "
-                "JOIN sys.tables t ON t.object_id = p.target_object_id").fetchall()
-            ket = [{"chinh_sach": r[0], "bang": r[1], "dieu_kien": r[2],
-                    "loai": r[3], "thao_tac": r[4]} for r in rows]
-            ho_tro_rls = True
-        except Exception as e:
-            # sys.security_policies chỉ có từ SQL Server 2016 -> bản cũ hơn sẽ
-            # lỗi "Invalid object name". Coi như KHÔNG có RLS (tính năng còn
-            # không tồn tại) thay vì để lỗi 500 khó hiểu.
-            ket = []
-            ho_tro_rls = False
-            rls_loi = str(e)[:200]
-        return {"ok": True, "co_rls": len(ket) > 0, "chinh_sach": ket,
-                "ho_tro_rls": ho_tro_rls,
-                "rls_loi": (None if ho_tro_rls else rls_loi),
-                "dang_dang_nhap": {"suser_sname": who[0], "current_user": who[1]}}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, "Không kiểm tra được RLS: %s" % str(e)[:300])
-    finally:
-        conn.close()
-
-
-@app.post("/api/misa-sql/bat-cau-lenh/{cid}")
-def misa_sql_bat_cau_lenh(cid: int, database: str = "", tu_khoa: str = "PUVoucher",
-                          phut: int = 15):
-    """Đọc các câu lệnh SQL mà MISA VỪA THỰC THI từ bộ nhớ đệm câu lệnh của
-    SQL Server (sys.dm_exec_query_stats) — CHỈ ĐỌC. Cách dùng: mở màn hình
-    'Mua hàng hóa, dịch vụ' trên MISA, bấm 'Lấy dữ liệu', rồi chạy ngay công
-    cụ này -> sẽ thấy NGUYÊN VĂN câu SELECT + điều kiện lọc (@where) mà MISA
-    client tự dựng khi tải lưới — hết phải đoán vì sao chứng từ bị lọc mất.
-    Cần quyền VIEW SERVER STATE (tài khoản sa/quản trị máy thường có sẵn)."""
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    tu_khoa = (tu_khoa or "PUVoucher").strip()
-    phut = max(1, min(int(phut or 15), 120))
-    if not database:
-        raise HTTPException(400, "Thiếu database")
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        try:
-            rows = cur.execute(
-                "SELECT TOP 100 qs.last_execution_time, qs.execution_count, st.text "
-                "FROM sys.dm_exec_query_stats qs "
-                "CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st "
-                "WHERE st.text LIKE ? "
-                "AND qs.last_execution_time > DATEADD(MINUTE, ?, GETDATE()) "
-                "ORDER BY qs.last_execution_time DESC",
-                "%" + tu_khoa + "%", -phut).fetchall()
-        except Exception as e:
-            msg = str(e)
-            if "VIEW SERVER STATE" in msg.upper() or "permission" in msg.lower():
-                raise HTTPException(400, "Tài khoản SQL hiện tại KHÔNG có quyền VIEW SERVER "
-                                         "STATE để đọc câu lệnh đã chạy. Đổi kết nối sang tài "
-                                         "khoản 'sa' rồi thử lại.")
-            raise HTTPException(400, "Không đọc được bộ nhớ câu lệnh: %s" % msg[:300])
-        # nhận diện câu lệnh của CHÍNH phần mềm này (các query dò/học/đếm/ghi
-        # trong _misa_ghi_mua_hang và các công cụ chẩn đoán) để phân biệt với
-        # câu lệnh thật của MISA
-        _MAU_CUA_MINH = (
-            "Nhập từ phần mềm kế toán", "INSERT INTO PUVoucher", "WHERE RefID IN",
-            "FROM PUVoucher pv JOIN SYSRefType", "SELECT COUNT(*) FROM PUVoucher",
-            "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance",
-            "FROM AccountObject", "FROM InventoryItem",
-        )
-        ket = []
-        for t, n, sql_text in rows:
-            s = str(sql_text or "")
-            # bỏ qua câu lệnh của CHÍNH công cụ này / các query chẩn đoán của mình
-            if "dm_exec_query_stats" in s or "sys.security_policies" in s:
-                continue
-            la_cua_minh = any(m in s for m in _MAU_CUA_MINH)
-            ket.append({"luc": (t.isoformat() if hasattr(t, "isoformat") else str(t)),
-                        "so_lan": n, "cau_lenh": s[:4000],
-                        "cua_phan_mem_nay": la_cua_minh})
-        # LIỆT KÊ AI ĐANG KẾT NỐI vào SQL Server này + câu lệnh CUỐI CÙNG của
-        # từng kết nối — để biết MISA client/dịch vụ MISA có thật sự nói chuyện
-        # với instance SQL này không (nếu KHÔNG có phiên nào của MISA -> MISA
-        # đọc dữ liệu qua tầng đệm/dịch vụ riêng, không đọc thẳng SQL khi tải
-        # lưới -> giải thích vì sao ghi thẳng bảng không hiện).
-        phien = []
-        may_chu = None
-        try:
-            may_chu = cur.execute("SELECT @@SERVERNAME").fetchone()[0]
-            spid = cur.execute("SELECT @@SPID").fetchone()[0]
-            for sid, login, host, prog, cuoi, dbn, txt in cur.execute(
-                    "SELECT s.session_id, s.login_name, ISNULL(s.host_name,''), "
-                    "ISNULL(s.program_name,''), s.last_request_end_time, "
-                    "ISNULL(DB_NAME(s.database_id),''), st.text "
-                    "FROM sys.dm_exec_sessions s "
-                    "LEFT JOIN sys.dm_exec_connections c ON c.session_id = s.session_id "
-                    "OUTER APPLY sys.dm_exec_sql_text(c.most_recent_sql_handle) st "
-                    "WHERE s.is_user_process = 1").fetchall():
-                phien.append({
-                    "phien": sid, "dang_nhap": login, "may": host, "chuong_trinh": prog,
-                    "db": dbn,
-                    "lan_cuoi": (cuoi.isoformat() if hasattr(cuoi, "isoformat") else str(cuoi or "")),
-                    "cau_lenh_cuoi": str(txt or "")[:2000],
-                    "la_phien_nay": sid == spid})
-        except Exception:
-            pass
-        return {"ok": True, "tu_khoa": tu_khoa, "phut": phut, "may_chu": may_chu,
-                "so_luong": len(ket), "danh_sach": ket[:60], "phien": phien[:50]}
-    finally:
-        conn.close()
-
-
 def _misa_sql_doc_schema(cid, database):
     """Đọc toàn bộ cấu trúc (bảng -> danh sách cột) của database (chỉ đọc)."""
     conn = _misa_sql_connect(cid, database=database)
@@ -7048,6 +6865,12 @@ def misa_sql_import_khncc(cid: int, preview: int = 1, database: str = ""):
 # ============================================================
 _MUA_TEN = {"nk": "Mua hàng nhập kho", "kqk": "Mua hàng không qua kho",
             "dv": "Mua hàng dịch vụ"}
+# Dấu hiệu NỘI BỘ đánh dấu chứng từ do chính phần mềm này ghi — lưu ở
+# CustomField10 (không hiển thị trên diễn giải/JournalMemo, để diễn giải
+# đọc tự nhiên như người dùng tự nhập tay: "Mua hàng - NCC - Số HĐ Ngày").
+# Dùng để: (1) loại trừ khi "học mẫu" từ chứng từ thật, (2) cho phép ghi đè
+# chứng từ do phần mềm tạo dù đang mang cờ đã ghi sổ.
+_PM_MARK = "HDDT-AUTO"
 # vị trí (0-based) các cột cần trong mảng phẳng do _gen_mua_hang_* sinh ra
 _MUA_COT = {
     "nk": dict(doc=6, ngayct=5, sohd=10, mst=12, ten_ncc=13, ma=19, ten=20,
@@ -7285,12 +7108,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "FROM InventoryItem").fetchall():
             if code:
                 hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
-        _PM_MEMO = "Nhập từ phần mềm kế toán"   # dấu hiệu chứng từ do phần mềm này tạo
         # chứng từ đã có trong MISA (dò theo Số chứng từ = RefNoManagement) —
         # KHÔNG đụng chứng từ đã ghi sổ CỦA NGƯỜI DÙNG; riêng chứng từ do CHÍNH
-        # PHẦN MỀM tạo (nhận diện qua JournalMemo) thì luôn cho phép ghi đè kể
-        # cả khi đang mang cờ "đã ghi sổ" (cờ đó chỉ có thể do nút test của
-        # phần mềm bật lên, không phải ghi sổ thật của MISA).
+        # PHẦN MỀM tạo (nhận diện qua CustomField10=_PM_MARK) thì luôn cho phép
+        # ghi đè kể cả khi đang mang cờ "đã ghi sổ".
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall())
         # kho (Stock) — điền StockID cho dòng nhập kho theo cột "Kho" của form
@@ -7315,13 +7136,13 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             pass
         posted_refno = set()
         unposted_docs = {}   # k_doc -> {"refids": [...], "reftype_ten": name}
-        for refid, rn, rt, pf, pm, memo in cur.execute(
+        for refid, rn, rt, pf, pm, mark in cur.execute(
                 "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
-                "ISNULL(IsPostedManagement,0), ISNULL(JournalMemo,'') FROM PUVoucher").fetchall():
+                "ISNULL(IsPostedManagement,0), ISNULL(CustomField10,'') FROM PUVoucher").fetchall():
             if not rn:
                 continue
             k = str(rn).strip().lower()
-            la_cua_minh = str(memo).startswith(_PM_MEMO)
+            la_cua_minh = mark == _PM_MARK
             if (pf or pm) and not la_cua_minh:
                 posted_refno.add(k)
             else:
@@ -7329,8 +7150,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 d["refids"].append(refid)
         # HỌC "mẫu" từ chứng từ Mua hàng MISA THẬT (do người dùng/MISA tạo,
         # đang HIỂN THỊ được) — CHỈ học từ chứng từ THẬT, KHÔNG học từ bản ghi
-        # do PHẦN MỀM tạo (JournalMemo bắt đầu "Nhập từ phần mềm kế toán") để
-        # tránh vòng lặp học lại chính bản ghi lỗi của mình.
+        # do PHẦN MỀM tạo (CustomField10=_PM_MARK) để tránh vòng lặp học lại
+        # chính bản ghi của mình.
         # - RefType: khớp theo loại (mua + nhập kho/không qua kho/dịch vụ).
         # - DisplayOnBook: lấy giá trị PHỔ BIẾN NHẤT của chứng từ THẬT (bất kỳ
         #   loại nào) vì đây là thiết lập hiển thị chung, quyết định chứng từ có
@@ -7347,15 +7168,15 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         max_reforder = 0       # RefOrder lớn nhất đang có (để ghi tiếp theo, không để 0)
         try:
             _dem_loai, _dem_dob, _dem_branch, _dem_nguoi = {}, {}, {}, {}
-            for rt, rn, dob, inc, memo, rnm, pf, pm, br, brn, cb, ro in cur.execute(
+            for rt, rn, dob, inc, mark, rnm, pf, pm, br, brn, cb, ro in cur.execute(
                     "SELECT pv.RefType, rt.RefTypeName, pv.DisplayOnBook, pv.IncludeInvoice, "
-                    "ISNULL(pv.JournalMemo,''), pv.RefNoManagement, "
+                    "ISNULL(pv.CustomField10,''), pv.RefNoManagement, "
                     "ISNULL(pv.IsPostedFinance,0), ISNULL(pv.IsPostedManagement,0), "
                     "pv.BranchID, ou.OrganizationUnitName, pv.CreatedBy, ISNULL(pv.RefOrder,0) "
                     "FROM PUVoucher pv JOIN SYSRefType rt ON rt.RefType=pv.RefType "
                     "LEFT JOIN OrganizationUnit ou ON ou.OrganizationUnitID=pv.BranchID").fetchall():
                 max_reforder = max(max_reforder, ro or 0)
-                if str(memo).startswith(_PM_MEMO):
+                if mark == _PM_MARK:
                     continue   # bỏ qua bản ghi do phần mềm tạo
                 key = (int(rt), rn)
                 _dem_loai[key] = _dem_loai.get(key, 0) + 1
@@ -7393,8 +7214,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             row_pp = cur.execute(
                 "SELECT TOP 1 d.PurchasePurposeID FROM PUVoucherDetail d "
                 "JOIN PUVoucher pv ON pv.RefID=d.RefID "
-                "WHERE ISNULL(pv.JournalMemo,'') NOT LIKE ? "
-                "AND d.PurchasePurposeID IS NOT NULL", _PM_MEMO + "%").fetchone()
+                "WHERE ISNULL(pv.CustomField10,'') <> ? "
+                "AND d.PurchasePurposeID IS NOT NULL", _PM_MARK).fetchone()
             if row_pp:
                 hoc_purpose = row_pp[0]
             if hoc_purpose is None:
@@ -7551,10 +7372,14 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     # MainUnitID = ĐVT chính (bằng chính ĐVT khi không có quy đổi)
                     # + NCC trên từng dòng + Kho — khớp form nhập tay của MISA
                     "MainUnitID": uid, "StockID": stock_id, "AccountObjectID": acc_obj_id,
-                    # các cột dòng chi tiết thật LUÔN có (đối chiếu từng cột):
-                    # giá trị nhập kho/FOB = thành tiền, NCC thuế, nhóm HHDV mua
-                    # vào, diễn giải thuế, link hóa đơn kèm trên TỪNG dòng
-                    "InwardAmount": tt, "FOBAmountOC": tt, "FOBAmount": tt,
+                    # giá trị NHẬP KHO/FOB = thành tiền — CHỈ áp dụng cho loại
+                    # thực sự nhập kho (có Kho); "không qua kho"/"dịch vụ" theo
+                    # đúng tên gọi KHÔNG có hàng nhập kho nên để 0 (mặc định).
+                    "InwardAmount": tt if cfg.get("kho") is not None else 0,
+                    "FOBAmountOC": tt if cfg.get("kho") is not None else 0,
+                    "FOBAmount": tt if cfg.get("kho") is not None else 0,
+                    # NCC thuế, nhóm HHDV mua vào, diễn giải thuế, link hóa đơn
+                    # kèm trên TỪNG dòng — áp dụng chung mọi loại
                     "TaxAccountObjectID": acc_obj_id, "PurchasePurposeID": hoc_purpose,
                     "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
                     "PUInvoiceRefID": inv_id,
@@ -7570,6 +7395,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             # sổ như chúng; mặc định 3 = hiện cả sổ tài chính lẫn quản trị khi
             # chưa học được (an toàn hơn 1 = chỉ 1 sổ, dễ bị "ẩn" ở sổ đang xem).
             dob = hoc_dob if hoc_dob is not None else 3
+            ten_ncc_dg = ten_ncc_misa or str(first[cfg["ten_ncc"]] or "")
+            so_hd_dg = str(first[cfg["sohd"]] or "").strip() if cfg["sohd"] is not None else ""
+            dien_giai = ("Mua hàng - %s - %s %s" %
+                        (ten_ncc_dg, so_hd_dg, ngay_dt.strftime("%d/%m/%Y"))).strip()[:500]
             header_cols = dict(_PU_HEADER_DEFAULT, **{
                 "RefID": ref_id, "BranchID": branch_id, "RefDate": ngay_dt,
                 # PostedDate (ngày HẠCH TOÁN) BẮT BUỘC phải có: bắt câu lệnh thật
@@ -7585,8 +7414,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 # hóa đơn, và PUInvoiceDetail.PUVoucherRefID trỏ ngược về chứng từ.
                 "IncludeInvoice": 1, "PUInvoiceRefID": inv_id,
                 "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
-                "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
-                "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
+                "AccountObjectName": ten_ncc_dg, "JournalMemo": dien_giai,
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
                 "TotalImportTaxAmountOC": total_import_tax, "TotalImportTaxAmount": total_import_tax,
                 "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
@@ -7596,6 +7424,9 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 # RefOrder tiếp nối số lớn nhất đang có (thay vì luôn 0), IsConvertVAT=False.
                 "CreatedBy": hoc_nguoi_tao, "ModifiedBy": hoc_nguoi_tao, "ModifiedDate": now,
                 "RefOrder": max_reforder + them_ct + 1, "IsConvertVAT": False,
+                # Dấu hiệu NỘI BỘ (không hiển thị) để nhận diện chứng từ do
+                # phần mềm này ghi — xem định nghĩa _PM_MARK.
+                "CustomField10": _PM_MARK,
             })
             # HÓA ĐƠN kèm chứng từ ("Nhận kèm hóa đơn"): 1 chứng từ = 1 hóa đơn
             # (mỗi doc đã gộp theo đúng 1 số hóa đơn), chi tiết trỏ ngược về
@@ -7608,16 +7439,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     "RefID": inv_id, "BranchID": branch_id, "RefType": inv_reftype,
                     "RefDate": ngay_dt, "PostedDate": ngay_dt,
                     "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
-                    "AccountObjectID": acc_obj_id,
-                    "AccountObjectName": ten_ncc_misa or str(first[cfg["ten_ncc"]] or ""),
+                    "AccountObjectID": acc_obj_id, "AccountObjectName": ten_ncc_dg,
                     "AccountObjectTaxCode": mst[:50] or None,
-                    "JournalMemo": ("Nhập từ phần mềm kế toán — %s" % doc)[:500],
+                    "JournalMemo": dien_giai,
                     "InvNo": inv_no, "InvDate": ngay_dt,
                     "TotalTurnoverAmountOC": total_amount, "TotalTurnoverAmount": total_amount,
                     "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
                     "DisplayOnBook": dob, "RefOrder": max_reforder + them_ct + 1,
                     "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
                     "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
+                    "CustomField10": _PM_MARK,
                 })
             if not preview:
                 # THỨ TỰ GHI theo chiều khóa ngoại: PUInvoice trước (PUVoucher.
@@ -7747,280 +7578,6 @@ def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: st
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview), ghi_de=bool(ghi_de))
-
-
-@app.post("/api/misa-sql/test-danh-dau-ghi-so/{cid}")
-def misa_sql_test_danh_dau_ghi_so(cid: int, so_ct: str, ghi_so: int = 1, database: str = ""):
-    """CHỈ DÙNG ĐỂ CHẨN ĐOÁN: đánh dấu 1 chứng từ do CHÍNH PHẦN MỀM NÀY ghi
-    (nhận diện qua JournalMemo) thành IsPostedFinance=1 ("đã ghi sổ") hoặc
-    ngược lại, để xem MISA có hiện chứng từ khi đã ghi sổ hay không. CHỈ cho
-    phép trên chứng từ có JournalMemo bắt đầu bằng dấu hiệu của phần mềm —
-    an toàn, không bao giờ đụng chứng từ thật của người dùng.
-    ⚠ ĐÂY KHÔNG PHẢI quy trình "Ghi sổ" thật của MISA (không cập nhật kho/sổ
-    cái/các bảng liên quan khác) — chỉ đổi 1 cờ để test hiển thị. Nhớ đặt lại
-    CHƯA GHI SỔ hoặc XÓA chứng từ test này sau khi chẩn đoán xong."""
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    so_ct = (so_ct or "").strip()
-    if not (database and so_ct):
-        raise HTTPException(400, "Thiếu database/số chứng từ")
-    conn = _misa_sql_connect(cid, database=database)
-    conn.autocommit = False
-    try:
-        cur = conn.cursor()
-        row = cur.execute(
-            "SELECT RefID, ISNULL(JournalMemo,'') FROM PUVoucher "
-            "WHERE RefNoManagement=? OR RefNoFinance=?", so_ct, so_ct).fetchone()
-        if not row:
-            raise HTTPException(404, "Không tìm thấy chứng từ '%s'." % so_ct)
-        ref_id, memo = row
-        if not str(memo).startswith("Nhập từ phần mềm kế toán"):
-            raise HTTPException(
-                400, "Chứng từ '%s' KHÔNG phải do phần mềm này ghi — để an toàn, chỉ cho "
-                     "phép test trên chứng từ do chính phần mềm tạo." % so_ct)
-        gs = 1 if ghi_so else 0
-        cur.execute("UPDATE PUVoucher SET IsPostedFinance=? WHERE RefID=?", gs, ref_id)
-        conn.commit()
-        return {"ok": True, "so_ct": so_ct, "ghi_so": bool(gs)}
-    except HTTPException:
-        conn.rollback()
-        raise
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(400, "Lỗi: %s" % str(e)[:300])
-    finally:
-        conn.close()
-
-
-def _misa_val_str(v):
-    # phân biệt rõ NULL với chuỗi rỗng/số 0 — lỗi "Failed to enable constraints"
-    # của MISA client chính là do cột NULL trong khi MISA yêu cầu không rỗng,
-    # nên nếu hiển thị NULL thành "" sẽ không bao giờ tìm ra cột lỗi.
-    if v is None:
-        return "(NULL)"
-    if hasattr(v, "isoformat"):
-        return v.isoformat()
-    return str(v)
-
-
-@app.post("/api/misa-sql/so-sanh-mua-hang/{cid}")
-def misa_sql_so_sanh_mua_hang(cid: int, loai: str, so_ct: str, database: str = "",
-                              bang: str = "header"):
-    """Đối chiếu TỪNG CỘT của 1 chứng từ Mua hàng do phần mềm vừa ghi (so_ct)
-    với 1 chứng từ Mua hàng THẬT cùng loại đang hiển thị tốt trên MISA — CHỈ
-    ĐỌC. bang='header': so cột PUVoucher; bang='detail': so cột DÒNG CHI TIẾT
-    (PUVoucherDetail, dòng đầu của mỗi bên) — dùng khi MISA báo 'Failed to
-    enable constraints' lúc mở chứng từ (cột chi tiết NULL trong khi MISA
-    client yêu cầu không rỗng). NULL hiển thị là '(NULL)' để phân biệt với
-    chuỗi rỗng/0."""
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    so_ct = (so_ct or "").strip()
-    if not (database and so_ct):
-        raise HTTPException(400, "Thiếu database/số chứng từ")
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT TOP 1 * FROM PUVoucher WHERE RefNoManagement=? OR RefNoFinance=?",
-                    so_ct, so_ct)
-        cols_moi = [d[0] for d in cur.description]
-        row_moi = cur.fetchone()
-        if not row_moi:
-            raise HTTPException(404, "Không tìm thấy chứng từ '%s' trong PUVoucher." % so_ct)
-        _PM_MEMO = "Nhập từ phần mềm kế toán"
-        tu_khoa_loai = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
-                        "dv": ["mua", "dịch vụ"]}.get(loai, [])
-        cur.execute(
-            "SELECT pv.*, rt.RefTypeName, ISNULL(pv.JournalMemo,'') FROM PUVoucher pv "
-            "JOIN SYSRefType rt ON rt.RefType=pv.RefType")
-        cols_full = [d[0] for d in cur.description]
-        row_that = None
-        for r in cur.fetchall():
-            memo = r[-1]
-            if str(memo).startswith(_PM_MEMO):
-                continue
-            rn = str(r[-2] or "").lower()
-            if tu_khoa_loai and not all(k in rn for k in tu_khoa_loai):
-                continue
-            row_that = r
-            break
-        if not row_that:
-            raise HTTPException(404, "Không có chứng từ Mua hàng THẬT nào (loại '%s') để đối chiếu." % loai)
-        cols_that = cols_full[:-2]   # bỏ 2 cột phụ RefTypeName/JournalMemo vừa thêm
-        row_that = row_that[:-2]
-        map_that = dict(zip(cols_that, row_that))
-        map_moi = dict(zip(cols_moi, row_moi))
-        if (bang or "").strip().lower() == "detail":
-            # so DÒNG CHI TIẾT đầu tiên của 2 chứng từ (PUVoucherDetail)
-            cur.execute("SELECT TOP 1 * FROM PUVoucherDetail WHERE RefID=? ORDER BY SortOrder",
-                        map_moi.get("RefID"))
-            cols_moi = [d[0] for d in cur.description]
-            row_moi = cur.fetchone()
-            if not row_moi:
-                raise HTTPException(404, "Chứng từ '%s' không có dòng chi tiết nào." % so_ct)
-            cur.execute("SELECT TOP 1 * FROM PUVoucherDetail WHERE RefID=? ORDER BY SortOrder",
-                        map_that.get("RefID"))
-            cols_that2 = [d[0] for d in cur.description]
-            row_that = cur.fetchone()
-            if not row_that:
-                raise HTTPException(404, "Chứng từ THẬT đối chiếu không có dòng chi tiết.")
-            map_that = dict(zip(cols_that2, row_that))
-            map_moi = dict(zip(cols_moi, row_moi))
-        ket = []
-        for c in cols_moi:
-            v_that = _misa_val_str(map_that.get(c))
-            v_moi = _misa_val_str(map_moi.get(c))
-            ket.append({"cot": c, "that": v_that, "moi": v_moi, "khac": v_that != v_moi})
-        so_khac = sum(1 for x in ket if x["khac"])
-        return {"ok": True, "so_ct": so_ct, "bang": bang, "so_khac": so_khac, "cot": ket}
-    finally:
-        conn.close()
-
-
-# ============================================================
-#  ĐIỀU KHIỂN GIAO DIỆN MISA SME (Windows UI Automation) — chỉ chạy được
-#  trên Windows, nơi MISA đang mở. Dùng để TỰ ĐỘNG bấm "Nhập khẩu dữ liệu
-#  từ Excel" đúng luồng chuẩn của MISA (an toàn hơn ghi thẳng CSDL vì đi
-#  qua tầng xử lý thật của MISA). Làm theo cách CHỈ ĐỌC (dò cửa sổ/cây điều
-#  khiển) TRƯỚC khi có bước bấm/gõ nào — để biết chính xác tên nút/menu
-#  thật của MISA thay vì đoán mù, tránh bấm nhầm vào phần mềm kế toán thật.
-# ============================================================
-def _misa_ui():
-    try:
-        import pywinauto  # noqa: F401
-        from pywinauto import Desktop
-        return Desktop
-    except Exception:
-        raise HTTPException(
-            400, "Chưa cài thư viện pywinauto (điều khiển giao diện Windows) hoặc máy không phải "
-                 "Windows. Đóng phần mềm, chạy lại start.bat để tự cài, hoặc cài tay: "
-                 "pip install pywinauto")
-
-
-def _misa_ui_window(tieu_de):
-    Desktop = _misa_ui()
-    tieu_de = (tieu_de or "").strip()
-    if not tieu_de:
-        raise HTTPException(400, "Thiếu tiêu đề cửa sổ MISA (lấy từ /api/misa-ui/tim-cua-so)")
-    try:
-        win = Desktop(backend="uia").window(title=tieu_de)
-        if not win.exists():
-            raise HTTPException(404, "Không tìm thấy cửa sổ '%s' đang mở." % tieu_de)
-        return win
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, "Không kết nối được cửa sổ '%s': %s" % (tieu_de, str(e)[:300]))
-
-
-@app.get("/api/misa-ui/tim-cua-so")
-def misa_ui_tim_cua_so(tat_ca: int = 0):
-    """Dò các cửa sổ Windows đang mở có tên chứa 'MISA' — CHỈ ĐỌC. Dùng để
-    xác nhận điều khiển được giao diện MISA trước khi tự động hóa thao tác,
-    và lấy đúng TIÊU ĐỀ cửa sổ để dùng cho các API điều khiển khác.
-    tat_ca=1: bỏ lọc theo tên, liệt kê MỌI cửa sổ đang mở (chẩn đoán khi
-    không tìm thấy cửa sổ nào chứa chữ 'misa' — có thể do tiêu đề khác, hoặc
-    do MISA chạy quyền Admin còn phần mềm này chạy quyền thường, Windows chặn
-    dò cửa sổ khác mức quyền — UAC/UIPI)."""
-    Desktop = _misa_ui()
-    try:
-        wins = Desktop(backend="uia").windows()
-    except Exception as e:
-        raise HTTPException(400, "Không dò được cửa sổ Windows: %s" % str(e)[:300])
-    tong = 0
-    ket = []
-    for w in wins:
-        try:
-            title = w.window_text()
-            tong += 1
-            if not title:
-                continue
-            if tat_ca or "misa" in title.lower():
-                ket.append({"tieu_de": title, "loai": w.friendly_class_name(),
-                            "hien": bool(w.is_visible())})
-        except Exception:
-            continue
-    return {"ok": True, "tong_so_cua_so": tong, "so_luong": len(ket), "danh_sach": ket}
-
-
-@app.get("/api/misa-ui/cay-dieu-khien")
-def misa_ui_cay_dieu_khien(tieu_de: str = "", do_sau: int = 3, chi_co_ten: int = 1):
-    """Liệt kê các control (nút/menu/ô nhập...) bên trong 1 cửa sổ MISA đang
-    mở — CHỈ ĐỌC, không bấm/gõ gì. Dùng để tìm CHÍNH XÁC tên nút/menu thật
-    (vd 'Nhập khẩu dữ liệu từ Excel') trước khi tự động bấm, tránh đoán mù.
-    chi_co_ten=1: chỉ liệt kê control có Tên hoặc AutomationId (bớt nhiễu)."""
-    win = _misa_ui_window(tieu_de)
-    do_sau = max(1, min(int(do_sau or 3), 8))
-    try:
-        descendants = win.descendants()
-    except Exception as e:
-        raise HTTPException(400, "Không đọc được cây điều khiển: %s" % str(e)[:300])
-    ket = []
-    for c in descendants:
-        try:
-            ei = c.element_info
-            ten = c.window_text() or ""
-            aid = getattr(ei, "automation_id", "") or ""
-            if chi_co_ten and not ten and not aid:
-                continue
-            # độ sâu ước lượng qua số control cha (rect lồng nhau) — pywinauto
-            # không có sẵn "depth" trực tiếp nên bỏ qua lọc do_sau chính xác,
-            # chỉ dùng do_sau để giới hạn TỔNG SỐ trả về (tránh quá tải).
-            ket.append({"ten": ten, "loai": str(getattr(ei, "control_type", "")),
-                        "automation_id": aid, "class_name": c.friendly_class_name()})
-            if len(ket) >= do_sau * 200:
-                break
-        except Exception:
-            continue
-    return {"ok": True, "tieu_de": tieu_de, "so_luong": len(ket), "danh_sach": ket[:600]}
-
-
-@app.post("/api/misa-ui/bam")
-def misa_ui_bam(tieu_de: str, ten: str = "", automation_id: str = ""):
-    """Bấm (click) 1 control bên trong cửa sổ MISA — tìm theo Tên HOẶC
-    AutomationId (khớp CHÍNH XÁC, lấy từ /api/misa-ui/cay-dieu-khien).
-    ⚠ ĐÂY LÀ THAO TÁC THẬT trên MISA đang mở — chỉ dùng khi đã xác nhận
-    đúng tên control qua bước dò ở trên."""
-    win = _misa_ui_window(tieu_de)
-    ten = (ten or "").strip()
-    automation_id = (automation_id or "").strip()
-    if not (ten or automation_id):
-        raise HTTPException(400, "Thiếu 'ten' hoặc 'automation_id' của control cần bấm")
-    try:
-        target = None
-        for c in win.descendants():
-            try:
-                if automation_id and getattr(c.element_info, "automation_id", "") == automation_id:
-                    target = c
-                    break
-                if ten and c.window_text() == ten:
-                    target = c
-                    break
-            except Exception:
-                continue
-        if target is None:
-            raise HTTPException(404, "Không tìm thấy control tên/id '%s'." % (ten or automation_id))
-        target.click_input()
-        return {"ok": True, "da_bam": ten or automation_id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400, "Không bấm được: %s" % str(e)[:300])
-
-
-@app.post("/api/misa-ui/go-phim")
-def misa_ui_go_phim(tieu_de: str, van_ban: str = "", phim: str = ""):
-    """Gõ văn bản và/hoặc gửi phím đặc biệt (vd '{ENTER}', '{TAB}', '{ESC}')
-    vào cửa sổ MISA đang có focus — dùng khi hộp thoại chọn file hiện ra cần
-    gõ đường dẫn rồi Enter. ⚠ THAO TÁC THẬT trên MISA đang mở."""
-    win = _misa_ui_window(tieu_de)
-    try:
-        win.set_focus()
-        if van_ban:
-            win.type_keys(van_ban, with_spaces=True, with_tabs=True)
-        if phim:
-            win.type_keys(phim)
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(400, "Không gõ được: %s" % str(e)[:300])
 
 
 @app.get("/api/danh-muc-ncc/{cid}")
