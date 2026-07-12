@@ -3151,7 +3151,11 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       <td style="border:1px solid #eee;padding:2px 6px;${ngayloi?'color:#b91c1c;font-weight:700':''}" title="${ngayloi?'Không đọc được ngày gốc \''+misaEsc(x.ngay_goc||'')+'\'':''}">${misaEsc(x.ngay_ct||'')}${ngayloi?' ⚠ rơi về hôm nay':''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${x.view_thay===true?'<span style="color:#1a7a7a">✓ view thấy</span>':(x.view_thay===false?'<span style="color:#b91c1c">✗ view không thấy</span>':'')}</td>
-      <td style="border:1px solid #eee;padding:2px 6px"><button class="btn ghost sm" onclick="misaSoSanhMuaHang('${loai}','${misaEsc(x.so_ct).replace(/'/g,"\\'")}','${misaEsc(d.database||'').replace(/'/g,"\\'")}')">🔬 So sánh</button></td></tr>`;
+      <td style="border:1px solid #eee;padding:2px 6px;white-space:nowrap">
+        <button class="btn ghost sm" onclick="misaSoSanhMuaHang('${loai}','${misaEsc(x.so_ct).replace(/'/g,"\\'")}','${misaEsc(d.database||'').replace(/'/g,"\\'")}')">🔬 So sánh</button>
+        <button class="btn ghost sm" style="color:#a03a3a" onclick="misaTestGhiSo('${misaEsc(x.so_ct).replace(/'/g,"\\'")}',1,'${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="CHỈ TEST: đánh dấu chứng từ này ĐÃ GHI SỔ để xem MISA có hiện không — không phải quy trình ghi sổ thật">🧪 Test đã ghi sổ</button>
+        <button class="btn ghost sm" onclick="misaTestGhiSo('${misaEsc(x.so_ct).replace(/'/g,"\\'")}',0,'${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="Đặt lại CHƯA GHI SỔ sau khi test xong">↩ Đặt lại</button>
+      </td></tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
       ${tkt&&!tkt.loi?`<div style="background:${tot?'#e9f7ee':'#fde8e8'};border:1px solid ${tot?'#8fd9ac':'#e39a9a'};border-radius:8px;padding:10px 14px;font-size:13px;color:${tot?'#1a6b3a':'#a03a3a'};margin-bottom:10px">
@@ -3165,7 +3169,7 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       ${d.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_tien_0} chứng từ TỔNG TIỀN = 0 (đánh dấu ⚠ 0đ ở cột Số CT dưới đây) — kiểm tra lại "Đơn giá"/"Thành tiền" trong Bảng kê Đầu vào cho (các) hóa đơn này.</div>`:''}
       ${dsRows?`<div style="max-height:30vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:12px;width:100%">
-        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th><th style="border:1px solid #eee;padding:2px 6px">Tự kiểm tra</th><th style="border:1px solid #eee;padding:2px 6px"></th></tr>
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th><th style="border:1px solid #eee;padding:2px 6px">Tự kiểm tra</th><th style="border:1px solid #eee;padding:2px 6px">Công cụ chẩn đoán</th></tr>
         ${dsRows}</table></div>`:''}
       <div style="text-align:right"><button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button></div>`;
     document.getElementById('misaModal').style.display='flex';
@@ -3194,6 +3198,18 @@ async function misaSoSanhMuaHang(loai,soCt,database){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// CHỈ DÙNG ĐỂ TEST/CHẨN ĐOÁN: đánh dấu (hoặc gỡ) 1 chứng từ do phần mềm này
+// ghi thành "ĐÃ GHI SỔ" để xem MISA có hiện trên lưới hay không. KHÔNG phải
+// quy trình ghi sổ thật (không cập nhật kho/sổ cái) — chỉ đổi 1 cờ để test.
+async function misaTestGhiSo(soCt,ghiSo,database){
+  if(ghiSo&&!confirm(`CHỈ ĐỂ TEST: đánh dấu chứng từ "${soCt}" là ĐÃ GHI SỔ để xem MISA có hiện không.\n\nLưu ý: đây KHÔNG phải quy trình "Ghi sổ" thật của MISA (không cập nhật kho/sổ cái) — chỉ đổi 1 cờ trạng thái. Sau khi test xong, nhớ bấm "↩ Đặt lại" hoặc xóa hẳn chứng từ test này trong MISA, đừng để lẫn với sổ sách thật.\n\nTiếp tục?`))return;
+  toast(ghiSo?'Đang đánh dấu đã ghi sổ (test)...':'Đang đặt lại chưa ghi sổ...','');
+  try{
+    const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
+    const d=await api(`/api/misa-sql/test-danh-dau-ghi-so/${current}?so_ct=${encodeURIComponent(soCt)}&ghi_so=${ghiSo?1:0}${dbQ}`,{method:'POST'});
+    toast(d.ghi_so?`🧪 Đã đánh dấu "${soCt}" ĐÃ GHI SỔ (test) — kiểm tra lại trên MISA ("Lấy dữ liệu")`:`↩ Đã đặt lại "${soCt}" CHƯA GHI SỔ`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Xem SQL thật (định nghĩa view) của 1 màn hình MISA — CHỈ ĐỌC, để chẩn đoán

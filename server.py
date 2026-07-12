@@ -7428,6 +7428,48 @@ def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: st
     return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
+@app.post("/api/misa-sql/test-danh-dau-ghi-so/{cid}")
+def misa_sql_test_danh_dau_ghi_so(cid: int, so_ct: str, ghi_so: int = 1, database: str = ""):
+    """CHỈ DÙNG ĐỂ CHẨN ĐOÁN: đánh dấu 1 chứng từ do CHÍNH PHẦN MỀM NÀY ghi
+    (nhận diện qua JournalMemo) thành IsPostedFinance=1 ("đã ghi sổ") hoặc
+    ngược lại, để xem MISA có hiện chứng từ khi đã ghi sổ hay không. CHỈ cho
+    phép trên chứng từ có JournalMemo bắt đầu bằng dấu hiệu của phần mềm —
+    an toàn, không bao giờ đụng chứng từ thật của người dùng.
+    ⚠ ĐÂY KHÔNG PHẢI quy trình "Ghi sổ" thật của MISA (không cập nhật kho/sổ
+    cái/các bảng liên quan khác) — chỉ đổi 1 cờ để test hiển thị. Nhớ đặt lại
+    CHƯA GHI SỔ hoặc XÓA chứng từ test này sau khi chẩn đoán xong."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    so_ct = (so_ct or "").strip()
+    if not (database and so_ct):
+        raise HTTPException(400, "Thiếu database/số chứng từ")
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        row = cur.execute(
+            "SELECT RefID, ISNULL(JournalMemo,'') FROM PUVoucher "
+            "WHERE RefNoManagement=? OR RefNoFinance=?", so_ct, so_ct).fetchone()
+        if not row:
+            raise HTTPException(404, "Không tìm thấy chứng từ '%s'." % so_ct)
+        ref_id, memo = row
+        if not str(memo).startswith("Nhập từ phần mềm kế toán"):
+            raise HTTPException(
+                400, "Chứng từ '%s' KHÔNG phải do phần mềm này ghi — để an toàn, chỉ cho "
+                     "phép test trên chứng từ do chính phần mềm tạo." % so_ct)
+        gs = 1 if ghi_so else 0
+        cur.execute("UPDATE PUVoucher SET IsPostedFinance=? WHERE RefID=?", gs, ref_id)
+        conn.commit()
+        return {"ok": True, "so_ct": so_ct, "ghi_so": bool(gs)}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi: %s" % str(e)[:300])
+    finally:
+        conn.close()
+
+
 def _misa_val_str(v):
     if v is None:
         return ""
