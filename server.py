@@ -6463,6 +6463,35 @@ def misa_sql_tim_object(cid: int, database: str = "", tu_khoa: str = ""):
         conn.close()
 
 
+@app.post("/api/misa-sql/kiem-tra-rls/{cid}")
+def misa_sql_kiem_tra_rls(cid: int, database: str = ""):
+    """Kiểm tra database có bật Row-Level Security (RLS) trên các bảng liên
+    quan Mua hàng không — CHỈ ĐỌC. Nếu có, RLS sẽ ÂM THẦM lọc bớt dòng theo
+    NGƯỜI ĐANG ĐĂNG NHẬP (SUSER_SNAME()) mà không hề xuất hiện trong bất kỳ
+    view/procedure nào ta xem được — giải thích được vì sao dữ liệu ghi ĐÚNG,
+    view/tự-kiểm-tra tìm THẤY (vì đang query bằng chính tài khoản vừa ghi),
+    nhưng cả màn hình lưới LẪN 'Tìm chứng từ' của MISA (đăng nhập tài khoản
+    khác) đều KHÔNG thấy."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Thiếu database")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT sp.name, t.name, p.predicate_definition, p.predicate_type_desc, p.operation_desc "
+            "FROM sys.security_policies sp "
+            "JOIN sys.security_predicates p ON p.object_id = sp.object_id "
+            "JOIN sys.tables t ON t.object_id = p.target_object_id").fetchall()
+        ket = [{"chinh_sach": r[0], "bang": r[1], "dieu_kien": r[2],
+                "loai": r[3], "thao_tac": r[4]} for r in rows]
+        who = cur.execute("SELECT SUSER_SNAME(), CURRENT_USER").fetchone()
+        return {"ok": True, "co_rls": len(ket) > 0, "chinh_sach": ket,
+                "dang_dang_nhap": {"suser_sname": who[0], "current_user": who[1]}}
+    finally:
+        conn.close()
+
+
 def _misa_sql_doc_schema(cid, database):
     """Đọc toàn bộ cấu trúc (bảng -> danh sách cột) của database (chỉ đọc)."""
     conn = _misa_sql_connect(cid, database=database)

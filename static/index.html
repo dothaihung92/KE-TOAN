@@ -3127,6 +3127,7 @@ async function muaHangImportMisa(loai){
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="misaXemDinhNghiaView('View_PUVoucherService','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Xem SQL thật của màn hình Mua hàng hóa, dịch vụ trong MISA (chỉ đọc, để chẩn đoán)">🔍 Xem SQL màn hình MISA</button>
         <button class="btn ghost sm" onclick="misaTimObject('PUVoucher','${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Tìm stored procedure/view liên quan tên chứa 'PUVoucher' (chỉ đọc, để chẩn đoán)">🔎 Tìm Stored Procedure</button>
+        <button class="btn ghost sm" onclick="misaKiemTraRLS('${misaEsc(pv.database||'').replace(/'/g,"\\'")}')" title="Kiểm tra database có bật Row-Level Security (lọc dữ liệu theo người đăng nhập) không (chỉ đọc)">🔒 Kiểm tra RLS</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
@@ -3171,9 +3172,39 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       ${dsRows?`<div style="max-height:30vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT đã ghi</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT</th><th style="border:1px solid #eee;padding:2px 6px">Tự kiểm tra</th><th style="border:1px solid #eee;padding:2px 6px">Công cụ chẩn đoán</th></tr>
         ${dsRows}</table></div>`:''}
-      <div style="text-align:right"><button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button></div>`;
+      <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn ghost sm" onclick="misaKiemTraRLS('${misaEsc(d.database||'').replace(/'/g,"\\'")}')" title="Kiểm tra database có bật Row-Level Security (lọc dữ liệu theo người đăng nhập) không (chỉ đọc)">🔒 Kiểm tra RLS</button>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
     document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+// Kiểm tra database MISA có bật Row-Level Security (RLS) trên bảng Mua hàng
+// không — CHỈ ĐỌC. RLS lọc dữ liệu ÂM THẦM theo người đăng nhập, không hiện
+// trong bất kỳ view/procedure nào xem được — có thể là lý do ẩn cuối cùng.
+async function misaKiemTraRLS(database){
+  toast('Đang kiểm tra Row-Level Security...','');
+  try{
+    const dbQ=database?`database=${encodeURIComponent(database)}`:'';
+    const d=await api(`/api/misa-sql/kiem-tra-rls/${current}?${dbQ}`,{method:'POST'});
+    const rows=(d.chinh_sach||[]).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.chinh_sach)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.bang)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:11px">${misaEsc(x.dieu_kien)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.loai)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.thao_tac)}</td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:${d.co_rls?'#fde8e8':'#e9f7ee'};border:1px solid ${d.co_rls?'#e39a9a':'#8fd9ac'};border-radius:8px;padding:10px 14px;font-size:13px;color:${d.co_rls?'#a03a3a':'#1a6b3a'};margin-bottom:10px">
+        🔒 <b>${d.co_rls?`CÓ Row-Level Security trên database này! Đây rất có thể là nguyên nhân — RLS lọc dữ liệu theo người đăng nhập một cách ÂM THẦM, không hiện trong view/procedure. Chứng từ do phần mềm ghi (đăng nhập SQL khác) có thể bị RLS ẩn khỏi tài khoản MISA đang dùng thật.`:`Không phát hiện Row-Level Security trên database này.`}</b></div>
+      <div style="font-size:12px;color:#666;margin-bottom:8px">Đang đọc dữ liệu bằng tài khoản SQL: <b>${misaEsc(d.dang_dang_nhap?.suser_sname||'?')}</b> (CURRENT_USER: ${misaEsc(d.dang_dang_nhap?.current_user||'?')})</div>
+      ${rows?`<div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Chính sách</th><th style="border:1px solid #eee;padding:2px 6px">Bảng</th><th style="border:1px solid #eee;padding:2px 6px">Điều kiện lọc</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th><th style="border:1px solid #eee;padding:2px 6px">Thao tác</th></tr>
+        ${rows}</table></div>`:''}
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Đối chiếu TỪNG CỘT của 1 chứng từ vừa ghi với 1 chứng từ Mua hàng THẬT
 // cùng loại đang hiển thị tốt trên MISA — CHỈ ĐỌC. Dùng khi đã loại trừ
