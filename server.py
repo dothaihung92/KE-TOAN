@@ -7245,19 +7245,24 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "FROM InventoryItem").fetchall():
             if code:
                 hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        _PM_MEMO = "Nhập từ phần mềm kế toán"   # dấu hiệu chứng từ do phần mềm này tạo
         # chứng từ đã có trong MISA (dò theo Số chứng từ = RefNoManagement) —
-        # KHÔNG đụng chứng từ đã ghi sổ, bỏ qua chứng từ chưa ghi sổ trùng số
+        # KHÔNG đụng chứng từ đã ghi sổ CỦA NGƯỜI DÙNG; riêng chứng từ do CHÍNH
+        # PHẦN MỀM tạo (nhận diện qua JournalMemo) thì luôn cho phép ghi đè kể
+        # cả khi đang mang cờ "đã ghi sổ" (cờ đó chỉ có thể do nút test của
+        # phần mềm bật lên, không phải ghi sổ thật của MISA).
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall())
         posted_refno = set()
         unposted_docs = {}   # k_doc -> {"refids": [...], "reftype_ten": name}
-        for refid, rn, rt, pf, pm in cur.execute(
+        for refid, rn, rt, pf, pm, memo in cur.execute(
                 "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
-                "ISNULL(IsPostedManagement,0) FROM PUVoucher").fetchall():
+                "ISNULL(IsPostedManagement,0), ISNULL(JournalMemo,'') FROM PUVoucher").fetchall():
             if not rn:
                 continue
             k = str(rn).strip().lower()
-            if pf or pm:
+            la_cua_minh = str(memo).startswith(_PM_MEMO)
+            if (pf or pm) and not la_cua_minh:
                 posted_refno.add(k)
             else:
                 d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
@@ -7270,7 +7275,6 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # - DisplayOnBook: lấy giá trị PHỔ BIẾN NHẤT của chứng từ THẬT (bất kỳ
         #   loại nào) vì đây là thiết lập hiển thị chung, quyết định chứng từ có
         #   hiện trong danh sách hay không.
-        _PM_MEMO = "Nhập từ phần mềm kế toán"
         tu_khoa_loai = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
                         "dv": ["mua", "dịch vụ"]}[loai]
         loai_ct_dang_co = []
