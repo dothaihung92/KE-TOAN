@@ -3252,19 +3252,27 @@ async function misaTestGhiSo(soCt,ghiSo,database){
 // Bắt các câu lệnh SQL mà MISA VỪA chạy (đọc bộ nhớ đệm câu lệnh của SQL
 // Server — CHỈ ĐỌC). Dùng để thấy NGUYÊN VĂN điều kiện lọc @where mà màn
 // hình MISA tự dựng khi tải lưới, thay vì đoán vì sao chứng từ bị lọc mất.
-let misaBatKQ=[];
+let misaBatKQ=[],misaBatPhien=[];
 function misaBatXuat(){
-  if(!misaBatKQ.length){toast('Chưa có câu lệnh để kết xuất','err');return;}
-  const txt=misaBatKQ.map(x=>`-- ${x.luc} (chạy ${x.so_lan} lần)${x.cua_phan_mem_nay?' [CỦA PHẦN MỀM NÀY]':''}\n${x.cau_lenh}\n`).join('\n'+'='.repeat(80)+'\n');
-  dl(new Blob([txt],{type:'text/plain;charset=utf-8'}),'misa-cau-lenh-vua-chay.txt');
-  toast(`⬇ Đã kết xuất ${misaBatKQ.length} câu lệnh`,'ok');
+  if(!misaBatKQ.length&&!misaBatPhien.length){toast('Chưa có gì để kết xuất','err');return;}
+  const p=misaBatPhien.map(x=>`[Phiên ${x.phien}]${x.la_phien_nay?' (PHIÊN CỦA PHẦN MỀM NÀY)':''} ${x.dang_nhap} | máy: ${x.may} | chương trình: ${x.chuong_trinh} | DB: ${x.db} | lần cuối: ${x.lan_cuoi}\nCâu lệnh cuối: ${x.cau_lenh_cuoi}\n`).join('\n');
+  const q=misaBatKQ.map(x=>`-- ${x.luc} (chạy ${x.so_lan} lần)${x.cua_phan_mem_nay?' [CỦA PHẦN MỀM NÀY]':''}\n${x.cau_lenh}\n`).join('\n'+'='.repeat(80)+'\n');
+  dl(new Blob([`===== AI ĐANG KẾT NỐI VÀO SQL SERVER =====\n${p}\n\n===== CÂU LỆNH ĐÃ CHẠY =====\n${q}`],{type:'text/plain;charset=utf-8'}),'misa-cau-lenh-vua-chay.txt');
+  toast(`⬇ Đã kết xuất ${misaBatPhien.length} phiên + ${misaBatKQ.length} câu lệnh`,'ok');
 }
 async function misaBatCauLenh(database){
   toast('Đang đọc câu lệnh MISA vừa chạy...','');
   try{
     const dbQ=database?`&database=${encodeURIComponent(database)}`:'';
     const d=await api(`/api/misa-sql/bat-cau-lenh/${current}?tu_khoa=PUVoucher&phut=15${dbQ}`,{method:'POST'});
-    misaBatKQ=d.danh_sach||[];
+    misaBatKQ=d.danh_sach||[];misaBatPhien=d.phien||[];
+    const phienRows=misaBatPhien.map(x=>`<tr style="${x.la_phien_nay?'color:#999':'background:#e9f7ee'}">
+      <td style="border:1px solid #eee;padding:2px 6px">${x.phien}${x.la_phien_nay?' (phần mềm này)':''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.chuong_trinh)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.dang_nhap)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.db)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-size:10.5px">${misaEsc(x.lan_cuoi)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-family:monospace;font-size:10.5px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${misaEsc(x.cau_lenh_cuoi)}">${misaEsc(x.cau_lenh_cuoi.slice(0,160))}</td></tr>`).join('');
     const khoi=misaBatKQ.map(x=>`
       <div style="border:1px solid ${x.cua_phan_mem_nay?'#e0e0e0':'#8fd9ac'};border-radius:6px;margin-bottom:8px;overflow:hidden">
         <div style="background:${x.cua_phan_mem_nay?'#f5f5f5':'#e9f7ee'};padding:4px 8px;font-size:11.5px;color:#555">
@@ -3273,13 +3281,18 @@ async function misaBatCauLenh(database){
       </div>`).join('');
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
-        📡 <b>${d.so_luong}</b> câu lệnh chứa "PUVoucher" đã chạy trong ${d.phut} phút gần đây (đọc từ bộ nhớ SQL Server — chỉ đọc).<br>
-        <b>Cách dùng đúng:</b> ① mở màn hình "Mua hàng hóa, dịch vụ" trên MISA → ② bấm "Lấy dữ liệu" trên MISA → ③ quay lại đây bấm lại nút này ngay. Câu lệnh <b>[có thể là của MISA]</b> màu xanh chính là câu SELECT MISA dùng để tải lưới — copy/kết xuất gửi lại để đọc điều kiện lọc thật.</div>
+        📡 Máy chủ SQL: <b>${misaEsc(d.may_chu||'?')}</b> — <b>${d.so_luong}</b> câu lệnh chứa "PUVoucher" trong ${d.phut} phút gần đây, <b>${misaBatPhien.length}</b> kết nối đang mở (chỉ đọc).<br>
+        <b>Quan trọng:</b> nhìn bảng "Ai đang kết nối" — nếu KHÔNG có dòng xanh nào là chương trình MISA, nghĩa là MISA <b>không nói chuyện với SQL Server này</b> khi tải lưới (đọc qua tầng đệm/máy chủ khác) — gửi lại toàn bộ để phân tích.</div>
       <div style="display:flex;gap:6px;margin-bottom:8px">
         <button class="btn ghost sm" onclick="misaBatXuat()">⬇ Kết xuất tất cả (.txt)</button>
         <button class="btn ghost sm" onclick="misaBatCauLenh('${misaEsc(database||'').replace(/'/g,"\\'")}')">🔄 Bắt lại</button>
       </div>
-      <div style="max-height:50vh;overflow:auto">${khoi||'<div style="color:#999;font-size:12.5px">Không có câu lệnh nào — bấm "Lấy dữ liệu" trên MISA trước rồi "Bắt lại".</div>'}</div>
+      <div style="font-weight:600;font-size:12.5px;margin-bottom:4px">🔌 Ai đang kết nối vào SQL Server này (dòng xanh = KHÔNG phải phần mềm này):</div>
+      <div style="max-height:22vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:11.5px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Phiên</th><th style="border:1px solid #eee;padding:2px 6px">Chương trình</th><th style="border:1px solid #eee;padding:2px 6px">Đăng nhập</th><th style="border:1px solid #eee;padding:2px 6px">DB</th><th style="border:1px solid #eee;padding:2px 6px">Lần cuối</th><th style="border:1px solid #eee;padding:2px 6px">Câu lệnh cuối</th></tr>
+        ${phienRows||'<tr><td colspan="6" style="padding:6px;color:#999">Không đọc được danh sách kết nối (thiếu quyền?)</td></tr>'}</table></div>
+      <div style="font-weight:600;font-size:12.5px;margin-bottom:4px">📜 Câu lệnh chứa "PUVoucher" đã chạy gần đây:</div>
+      <div style="max-height:30vh;overflow:auto">${khoi||'<div style="color:#999;font-size:12.5px">Không có câu lệnh nào — bấm "Lấy dữ liệu" trên MISA trước rồi "Bắt lại".</div>'}</div>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;

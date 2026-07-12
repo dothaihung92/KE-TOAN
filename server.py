@@ -6540,19 +6540,53 @@ def misa_sql_bat_cau_lenh(cid: int, database: str = "", tu_khoa: str = "PUVouche
                                          "STATE để đọc câu lệnh đã chạy. Đổi kết nối sang tài "
                                          "khoản 'sa' rồi thử lại.")
             raise HTTPException(400, "Không đọc được bộ nhớ câu lệnh: %s" % msg[:300])
+        # nhận diện câu lệnh của CHÍNH phần mềm này (các query dò/học/đếm/ghi
+        # trong _misa_ghi_mua_hang và các công cụ chẩn đoán) để phân biệt với
+        # câu lệnh thật của MISA
+        _MAU_CUA_MINH = (
+            "Nhập từ phần mềm kế toán", "INSERT INTO PUVoucher", "WHERE RefID IN",
+            "FROM PUVoucher pv JOIN SYSRefType", "SELECT COUNT(*) FROM PUVoucher",
+            "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance",
+            "FROM AccountObject", "FROM InventoryItem",
+        )
         ket = []
         for t, n, sql_text in rows:
             s = str(sql_text or "")
             # bỏ qua câu lệnh của CHÍNH công cụ này / các query chẩn đoán của mình
             if "dm_exec_query_stats" in s or "sys.security_policies" in s:
                 continue
-            la_cua_minh = ("Nhập từ phần mềm kế toán" in s or "INSERT INTO PUVoucher" in s
-                           or "WHERE RefID IN" in s)
+            la_cua_minh = any(m in s for m in _MAU_CUA_MINH)
             ket.append({"luc": (t.isoformat() if hasattr(t, "isoformat") else str(t)),
                         "so_lan": n, "cau_lenh": s[:4000],
                         "cua_phan_mem_nay": la_cua_minh})
-        return {"ok": True, "tu_khoa": tu_khoa, "phut": phut,
-                "so_luong": len(ket), "danh_sach": ket[:60]}
+        # LIỆT KÊ AI ĐANG KẾT NỐI vào SQL Server này + câu lệnh CUỐI CÙNG của
+        # từng kết nối — để biết MISA client/dịch vụ MISA có thật sự nói chuyện
+        # với instance SQL này không (nếu KHÔNG có phiên nào của MISA -> MISA
+        # đọc dữ liệu qua tầng đệm/dịch vụ riêng, không đọc thẳng SQL khi tải
+        # lưới -> giải thích vì sao ghi thẳng bảng không hiện).
+        phien = []
+        may_chu = None
+        try:
+            may_chu = cur.execute("SELECT @@SERVERNAME").fetchone()[0]
+            spid = cur.execute("SELECT @@SPID").fetchone()[0]
+            for sid, login, host, prog, cuoi, dbn, txt in cur.execute(
+                    "SELECT s.session_id, s.login_name, ISNULL(s.host_name,''), "
+                    "ISNULL(s.program_name,''), s.last_request_end_time, "
+                    "ISNULL(DB_NAME(s.database_id),''), st.text "
+                    "FROM sys.dm_exec_sessions s "
+                    "LEFT JOIN sys.dm_exec_connections c ON c.session_id = s.session_id "
+                    "OUTER APPLY sys.dm_exec_sql_text(c.most_recent_sql_handle) st "
+                    "WHERE s.is_user_process = 1").fetchall():
+                phien.append({
+                    "phien": sid, "dang_nhap": login, "may": host, "chuong_trinh": prog,
+                    "db": dbn,
+                    "lan_cuoi": (cuoi.isoformat() if hasattr(cuoi, "isoformat") else str(cuoi or "")),
+                    "cau_lenh_cuoi": str(txt or "")[:2000],
+                    "la_phien_nay": sid == spid})
+        except Exception:
+            pass
+        return {"ok": True, "tu_khoa": tu_khoa, "phut": phut, "may_chu": may_chu,
+                "so_luong": len(ket), "danh_sach": ket[:60], "phien": phien[:50]}
     finally:
         conn.close()
 
