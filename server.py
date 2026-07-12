@@ -7149,22 +7149,30 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         mau_that = []   # chẩn đoán: mẫu chứng từ THẬT (để đối chiếu)
         hoc = None      # RefType học theo loại
         hoc_dob = None  # DisplayOnBook phổ biến của chứng từ THẬT
+        hoc_branch = None      # BranchID phổ biến của chứng từ THẬT
+        hoc_branch_ten = None  # tên chi nhánh tương ứng (để hiển thị)
         try:
-            _dem_loai, _dem_dob = {}, {}
-            for rt, rn, dob, inc, memo, rnm, pf, pm in cur.execute(
+            _dem_loai, _dem_dob, _dem_branch = {}, {}, {}
+            for rt, rn, dob, inc, memo, rnm, pf, pm, br, brn in cur.execute(
                     "SELECT pv.RefType, rt.RefTypeName, pv.DisplayOnBook, pv.IncludeInvoice, "
                     "ISNULL(pv.JournalMemo,''), pv.RefNoManagement, "
-                    "ISNULL(pv.IsPostedFinance,0), ISNULL(pv.IsPostedManagement,0) "
-                    "FROM PUVoucher pv JOIN SYSRefType rt ON rt.RefType=pv.RefType").fetchall():
+                    "ISNULL(pv.IsPostedFinance,0), ISNULL(pv.IsPostedManagement,0), "
+                    "pv.BranchID, ou.OrganizationUnitName "
+                    "FROM PUVoucher pv JOIN SYSRefType rt ON rt.RefType=pv.RefType "
+                    "LEFT JOIN OrganizationUnit ou ON ou.OrganizationUnitID=pv.BranchID").fetchall():
                 if str(memo).startswith(_PM_MEMO):
                     continue   # bỏ qua bản ghi do phần mềm tạo
                 key = (int(rt), rn)
                 _dem_loai[key] = _dem_loai.get(key, 0) + 1
                 if dob is not None:
                     _dem_dob[dob] = _dem_dob.get(dob, 0) + 1
+                if br is not None:
+                    _dem_branch[br] = _dem_branch.get(br, [0, brn])
+                    _dem_branch[br][0] += 1
                 if len(mau_that) < 5:
                     mau_that.append({"so_ct": rnm, "loai": rn, "display_on_book": dob,
-                                     "include_invoice": inc, "da_ghi_so": bool(pf or pm)})
+                                     "include_invoice": inc, "da_ghi_so": bool(pf or pm),
+                                     "chi_nhanh": brn})
             for (rt, rn), c in sorted(_dem_loai.items(), key=lambda kv: -kv[1]):
                 loai_ct_dang_co.append({"ten": rn, "so": c})
                 n = (rn or "").lower()
@@ -7172,8 +7180,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     hoc = {"reftype": rt, "refname": rn}
             if _dem_dob:
                 hoc_dob = max(_dem_dob.items(), key=lambda kv: kv[1])[0]
+            if _dem_branch:
+                hoc_branch, (_, hoc_branch_ten) = max(
+                    _dem_branch.items(), key=lambda kv: kv[1][0])
         except Exception:
             pass
+        # Ưu tiên chi nhánh (BranchID) học được từ chứng từ Mua hàng MISA THẬT
+        # — nếu công ty có nhiều chi nhánh, màn hình lưới thường lọc theo chi
+        # nhánh đang chọn nên ghi SAI chi nhánh sẽ khiến chứng từ "biến mất".
+        if hoc_branch is not None:
+            branch_id = hoc_branch
 
         now = datetime.datetime.now()
         ket = []
@@ -7365,7 +7381,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
-                "hoc_display_on_book": hoc_dob, "mau_that": mau_that,
+                "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
+                "mau_that": mau_that,
                 "danh_sach": ket[:500]}
     except HTTPException:
         conn.rollback()
