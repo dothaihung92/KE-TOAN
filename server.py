@@ -5232,6 +5232,7 @@ def _gen_mua_hang_kqk(cid, header, rows):
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
 
+    so_phieu_seen, so_phieu_cache = {}, {}
     out = []
     for r in rows:
         no = str(gv(r, col["no"]) or "").strip()
@@ -5255,13 +5256,13 @@ def _gen_mua_hang_kqk(cid, header, rows):
         la_nk = kyhieu.upper() == "TKNK"
         mst = _dinh_dang_mst(gv(r, col["mst"])) if not la_nk else str(gv(r, col["mst"]) or "").strip()
         ma = mp.get(f"{sohd}|{ngay}|{ten}|{tt}", "")
-        # Số chứng từ: MHKQK1/<tháng>/<năm> (lấy từ ngày dd/mm/yyyy)
-        thang = nam = ""
-        p = ngay.replace("-", "/").split("/")
-        if len(p) == 3:
-            thang = str(int(p[1])) if p[1].isdigit() else p[1]
-            nam = p[2]
-        so_ct = f"MHKQK1/{thang}/{nam}"[:20]
+        # Số chứng từ: DUY NHẤT theo từng hóa đơn (số HĐ+MST+ngày) — trước đây
+        # gộp theo THÁNG (MHKQK1/<tháng>/<năm>) khiến nhiều hóa đơn khác nhau
+        # trong cùng 1 tháng bị dồn chung vào 1 chứng từ. Các dòng cùng 1 hóa
+        # đơn vẫn dùng chung 1 số (nhớ qua so_phieu_cache).
+        mst_raw = gv(r, col["mst"])
+        so_ct = _so_ct_unique_memo("MHKQK", ngay, mst_raw, (sohd, mst_raw, ngay),
+                                    so_phieu_seen, so_phieu_cache)
         rate = _dm_rate(gv(r, col["ts"]))
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
         nk_ts = _so_pct(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0
