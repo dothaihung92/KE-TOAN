@@ -8080,6 +8080,13 @@ def _misa_doc_ngay(s):
             pass
     return None
 
+def _snum(v):
+    """Ép về số, chấp nhận cả CHUỖI số ('24' -> 24) — dữ liệu DM lưu qua lưới
+    trình duyệt hay thành chuỗi; _num0 thuần sẽ trả 0 làm mất giá trị (vd Số
+    kỳ phân bổ CCDC ghi vào MISA thành 0 dù DM ghi 24)."""
+    v = _to_num(v)
+    return v if isinstance(v, (int, float)) else 0
+
 def _misa_dvsd_map(cur):
     """Bảng mã 'Đơn vị sử dụng'/'Đối tượng phân bổ' (vd 'VP') -> ID — xác
     nhận qua cấu trúc CSDL thật: MISA KHÔNG có bảng Department riêng, chỉ có
@@ -8297,11 +8304,11 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                         pass
             ngay_dt = _misa_doc_ngay(ngct) or now
             ngay_kh_dt = _misa_doc_ngay(ngkh) or ngay_dt
-            ng_gia_n = _num0(ng_gia)
-            hao_mon_n = _num0(hao_mon)
-            tg_sd_n = _num0(tg_sd)
-            dvt_tg_n = _num0(dvt_tg)
-            kh_thang_n = _num0(kh_thang)
+            ng_gia_n = _snum(ng_gia)
+            hao_mon_n = _snum(hao_mon)
+            tg_sd_n = _snum(tg_sd)
+            dvt_tg_n = _snum(dvt_tg)
+            kh_thang_n = _snum(kh_thang)
             catid = cat_map.get(str(loai).strip()) or (
                 next(iter(cat_map.values())) if cat_map else None)
             dvid = dvsd_map.get(str(dtpb).strip().upper()) or branch_id
@@ -8313,7 +8320,7 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             # Tỷ lệ KH tháng: dòng thật = 100/số tháng (vd 60 tháng -> 1.67%)
             # — KHÔNG phải giá trị 100 của cột "Tỷ lệ tính KH tháng (%)"
             # trong form Excel.
-            ty_le_thang = round(100.0 / tg_sd_n, 2) if tg_sd_n else _num0(ty_le_kh)
+            ty_le_thang = round(100.0 / tg_sd_n, 2) if tg_sd_n else _snum(ty_le_kh)
             row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols.values()}
             _misa_gan(row, cols, fa_id, "FixedAssetID")
             _misa_gan(row, cols, fa_id, "RefID")
@@ -8346,7 +8353,7 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, hao_mon_n, "AccumDepreciationAmount",
                      "AccumulatedDepreciationAmount")
             _misa_gan(row, cols, ng_gia_n - hao_mon_n, "RemainingAmount")
-            _misa_gan(row, cols, _num0(ty_le_pb), "AllocationRate")
+            _misa_gan(row, cols, _snum(ty_le_pb), "AllocationRate")
             _misa_gan(row, cols, str(tkcp or ""), "ExpenseAccount", "CostAccount")
             # GHI SỔ LUÔN theo yêu cầu: ghi tăng danh mục TSCĐ không sinh bút
             # toán Nợ/Có mới (hóa đơn mua đã hạch toán Nợ 211 ở Mua hàng) nên
@@ -8390,12 +8397,12 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                     _misa_gan(lrow, cols_led, tg_sd_n, "LifeTimeRemainingInMonth")
                     _misa_gan(lrow, cols_led, ty_le_thang, "DepreciationRateMonth")
                     _misa_gan(lrow, cols_led, kh_thang_n, "MonthlyDepreciationAmount")
-                    _misa_gan(lrow, cols_led, _num0(gt_kh) or ng_gia_n, "DepreciationAmount")
+                    _misa_gan(lrow, cols_led, _snum(gt_kh) or ng_gia_n, "DepreciationAmount")
                     _misa_gan(lrow, cols_led, hao_mon_n, "AccumDepreciationAmount")
                     _misa_gan(lrow, cols_led, hao_mon_n, "TotalDepreciationAmount")
                     _misa_gan(lrow, cols_led, ng_gia_n - hao_mon_n, "RemainingAmount")
                     # dòng thật: OriginDepreciationAmount = giá trị tính KH
-                    _misa_gan(lrow, cols_led, _num0(gt_kh) or ng_gia_n,
+                    _misa_gan(lrow, cols_led, _snum(gt_kh) or ng_gia_n,
                              "OriginDepreciationAmount")
                     _misa_gan(lrow, cols_led, str(tkkh or ""), "DepreciationAccount")
                     _misa_gan(lrow, cols_led, str(tkng or ""), "OrgPriceAccount")
@@ -8424,7 +8431,7 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                     _misa_gan(arow, cols_alloc, dvid, "ObjectID")
                     _misa_gan(arow, cols_alloc, hoc_objtype if hoc_objtype is not None else 1,
                              "ObjectType")
-                    _misa_gan(arow, cols_alloc, _num0(ty_le_pb) or 100, "AllocationRate")
+                    _misa_gan(arow, cols_alloc, _snum(ty_le_pb) or 100, "AllocationRate")
                     _misa_gan(arow, cols_alloc, str(tkcp or ""), "CostAccount")
                     ac = list(arow.keys())
                     cur.execute("INSERT INTO FixedAssetDetailAllocation ([%s]) VALUES (%s)" %
@@ -8478,9 +8485,45 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
         cols_dep = _misa_cot_bang_that(cur, "SUIncrementDetailDepartment")
         cols_alloc = _misa_cot_bang_that(cur, "SUIncrementDetailAllocation")
         cols_det = _misa_cot_bang_that(cur, "SUIncrementDetail")
+        # Màn hình lưới "Công cụ dụng cụ > Ghi tăng" KHÔNG đọc SUIncrement
+        # (bảng đó là "Sổ theo dõi CCDC") mà đọc bảng sổ cái SupplyLedger —
+        # y hệt bài học FixedAssetLedger bên TSCĐ: chỉ ghi SUIncrement thì
+        # CCDC hiện ở Sổ theo dõi nhưng lưới Ghi tăng trống.
+        cols_led = _misa_cot_bang_that(cur, "SupplyLedger")
         if not cols:
             raise HTTPException(400, "Không tìm thấy bảng SUIncrement trong CSDL MISA đang kết nối.")
         hoc_rt, hoc_dob = _misa_hoc_reftype(cur, "SUIncrement", ["tăng"])
+        # RefType sổ cái — học riêng từ SupplyLedger (bản ghi nhập tay trên
+        # MISA), ưu tiên hơn phép đếm trên SUIncrement (bị dòng cũ do phần
+        # mềm ghi lấn át) — như bài TSCĐ.
+        led_rt = None
+        try:
+            _cnt_led = {}
+            for (rt,) in cur.execute(
+                    "SELECT RefType FROM SupplyLedger WHERE RefType<>0").fetchall():
+                _cnt_led[rt] = _cnt_led.get(rt, 0) + 1
+            if _cnt_led:
+                led_rt = max(_cnt_led.items(), key=lambda kv: kv[1])[0]
+        except Exception:
+            pass
+        if led_rt is not None:
+            hoc_rt = led_rt
+        led_id_tay = "supplyledgerid" in cols_led
+        next_led_id = 1
+        if led_id_tay:
+            try:
+                next_led_id = (cur.execute(
+                    "SELECT ISNULL(MAX(SupplyLedgerID),0) FROM SupplyLedger"
+                ).fetchone()[0] or 0) + 1
+            except Exception:
+                pass
+        max_ro_sub = 0
+        try:
+            r_sub = cur.execute(
+                "SELECT ISNULL(MAX(RefOrderInSubSystem),0) FROM SupplyLedger").fetchone()
+            max_ro_sub = (r_sub[0] or 0) if r_sub else 0
+        except Exception:
+            pass
         if hoc_rt is None:
             return {"preview": preview, "database": database, "so_them": 0, "so_trung": 0,
                     "khong_do_loai": True,
@@ -8546,8 +8589,9 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                 ghi_de_su = True
                 if not preview:
                     old_id = existed[k]["id"]
-                    for tbl in ("SUIncrementDetailAllocation", "SUIncrementDetailDepartment",
-                               "SUIncrementDetail", "SUIncrementDetailSource"):
+                    for tbl in ("SupplyLedger", "SUIncrementDetailAllocation",
+                               "SUIncrementDetailDepartment", "SUIncrementDetail",
+                               "SUIncrementDetailSource"):
                         try:
                             cur.execute("DELETE FROM %s WHERE SupplyID=?" % tbl, old_id)
                         except Exception:
@@ -8560,9 +8604,9 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
             supply_id = str(_uuid.uuid4())
             dvid = dvsd_map.get(str(dvsd).strip().upper()) or branch_id
             objid = dvsd_map.get(str(dtpb).strip().upper()) or branch_id
-            tt_n = _num0(tt)
-            sl_n = _num0(sl) or 1
-            so_ky_n = _num0(so_ky)
+            tt_n = _snum(tt)
+            sl_n = _snum(sl) or 1
+            so_ky_n = _snum(so_ky)
             row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols.values()}
             _misa_gan(row, cols, supply_id, "SupplyID", "RefID")
             _misa_gan(row, cols, str(ma)[:25], "SupplyCode")
@@ -8576,13 +8620,13 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, 1, "IsPostedFinance")
             _misa_gan(row, cols, str(dvt or "")[:20], "Unit")
             _misa_gan(row, cols, sl_n, "Quantity")
-            _misa_gan(row, cols, _num0(dgia), "UnitPrice")
+            _misa_gan(row, cols, _snum(dgia), "UnitPrice")
             _misa_gan(row, cols, tt_n, "Amount")
             _misa_gan(row, cols, so_ky_n, "AllocationTime")
             _misa_gan(row, cols, so_ky_n, "RemainingAllocationTime")
             _misa_gan(row, cols, 0, "AllocatedAmount")
             _misa_gan(row, cols, tt_n, "RemaingAmount")
-            _misa_gan(row, cols, _num0(tien_ky), "TermlyAllocationAmount")
+            _misa_gan(row, cols, _snum(tien_ky), "TermlyAllocationAmount")
             _misa_gan(row, cols, str(tk_cho_pb or ""), "AllocationAccount")
             _misa_gan(row, cols, dob, "DisplayOnBook")
             _misa_gan(row, cols, max_reforder + them + 1, "RefOrder")
@@ -8601,8 +8645,8 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                     _misa_gan(drow, cols_dep, supply_id, "SupplyID")
                     _misa_gan(drow, cols_dep, dvid, "OrganizationUnitID")
                     _misa_gan(drow, cols_dep, 0, "SortOrder")
-                    _misa_gan(drow, cols_dep, _num0(sl_dvsd) or sl_n, "Quantity")
-                    _misa_gan(drow, cols_dep, _num0(dgia), "UnitPrice")
+                    _misa_gan(drow, cols_dep, _snum(sl_dvsd) or sl_n, "Quantity")
+                    _misa_gan(drow, cols_dep, _snum(dgia), "UnitPrice")
                     _misa_gan(drow, cols_dep, tt_n, "Amount")
                     _misa_gan(drow, cols_dep, so_ky_n, "AllocationTime")
                     _misa_gan(drow, cols_dep, so_ky_n, "RemainingAllocationTime")
@@ -8619,7 +8663,7 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                     _misa_gan(arow, cols_alloc, objid, "ObjectID")
                     _misa_gan(arow, cols_alloc, hoc_objtype if hoc_objtype is not None else 1,
                              "ObjectType")
-                    _misa_gan(arow, cols_alloc, _num0(ty_le_pb), "AllocationRate")
+                    _misa_gan(arow, cols_alloc, _snum(ty_le_pb), "AllocationRate")
                     _misa_gan(arow, cols_alloc, str(tkcp or ""), "CostAccount")
                     ac = list(arow.keys())
                     cur.execute("INSERT INTO SUIncrementDetailAllocation ([%s]) VALUES (%s)" %
@@ -8635,6 +8679,38 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                     cur.execute("INSERT INTO SUIncrementDetail ([%s]) VALUES (%s)" %
                                ("],[".join(xc), ",".join(["?"] * len(xc))),
                                [xrow[c] for c in xc])
+                # Dòng SỔ CÁI ghi tăng CCDC (SupplyLedger) — chính là dòng mà
+                # màn hình lưới "Ghi tăng" hiển thị (RefDate/PostedDate lọc
+                # theo Kỳ). RefID/RefDetailID = SupplyID theo mẫu FixedAsset.
+                if cols_led:
+                    lrow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_led.values()}
+                    if led_id_tay:
+                        _misa_gan(lrow, cols_led, next_led_id, "SupplyLedgerID")
+                        next_led_id += 1
+                    _misa_gan(lrow, cols_led, supply_id, "RefID")
+                    _misa_gan(lrow, cols_led, supply_id, "RefDetailID")
+                    _misa_gan(lrow, cols_led, supply_id, "SupplyID")
+                    _misa_gan(lrow, cols_led, hoc_rt, "RefType")
+                    _misa_gan(lrow, cols_led, str(e)[:20], "RefNo")
+                    _misa_gan(lrow, cols_led, ngay_dt, "RefDate")
+                    _misa_gan(lrow, cols_led, ngay_dt, "PostedDate")
+                    _misa_gan(lrow, cols_led, ("Ghi tăng CCDC - %s" % ten)[:500], "JournalMemo")
+                    _misa_gan(lrow, cols_led, str(ten)[:255], "Description")
+                    _misa_gan(lrow, cols_led, so_ky_n, "IncrementAllocationTime")
+                    _misa_gan(lrow, cols_led, sl_n, "IncrementQuantity")
+                    _misa_gan(lrow, cols_led, tt_n, "IncrementAmount")
+                    _misa_gan(lrow, cols_led, _snum(tien_ky), "TermlyAllocationAmount")
+                    _misa_gan(lrow, cols_led, branch_id, "BranchID")
+                    _misa_gan(lrow, cols_led, 0, "SortOrder")
+                    _misa_gan(lrow, cols_led, max_reforder + them + 1, "RefOrder")
+                    _misa_gan(lrow, cols_led, str(ma)[:25], "SupplyCode")
+                    _misa_gan(lrow, cols_led, str(ten)[:255], "SupplyName")
+                    _misa_gan(lrow, cols_led, dvid, "OrganizationUnitID")
+                    _misa_gan(lrow, cols_led, max_ro_sub + them + 1, "RefOrderInSubSystem")
+                    lc = list(lrow.keys())
+                    cur.execute("INSERT INTO SupplyLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [lrow[c] for c in lc])
             them += 1
             if ghi_de_su:
                 go += 1
