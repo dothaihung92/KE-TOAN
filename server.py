@@ -8152,7 +8152,56 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
         cols = _misa_cot_bang_that(cur, "FixedAsset")
         if not cols:
             raise HTTPException(400, "Không tìm thấy bảng FixedAsset trong CSDL MISA đang kết nối.")
+        # Màn hình lưới "Tài sản cố định > Ghi tăng" KHÔNG đọc bảng FixedAsset
+        # (sổ tài sản) mà đọc bảng FixedAssetLedger — bản ghi "chứng từ ghi
+        # tăng" có RefNo/RefDate/PostedDate (NOTNULL) đúng các cột Số chứng
+        # từ/Ngày ghi tăng của lưới; khung "Thiết lập phân bổ" đọc bảng
+        # FixedAssetDetailAllocation. Xác nhận qua thử nghiệm thật: chỉ ghi
+        # FixedAsset -> lưới trống; bản ghi nhập tay trên MISA hiện bình
+        # thường vì MISA tạo đủ cả 3 bảng.
+        cols_led = _misa_cot_bang_that(cur, "FixedAssetLedger")
+        cols_alloc = _misa_cot_bang_that(cur, "FixedAssetDetailAllocation")
         hoc_rt, hoc_dob = _misa_hoc_reftype(cur, "FixedAsset", ["tăng"])
+        # RefType của dòng sổ cái ghi tăng — học riêng từ FixedAssetLedger
+        # (có thể khác RefType trên FixedAsset); fallback dùng chung hoc_rt.
+        led_rt = None
+        try:
+            _cnt_led = {}
+            for (rt,) in cur.execute(
+                    "SELECT RefType FROM FixedAssetLedger WHERE RefType<>0").fetchall():
+                _cnt_led[rt] = _cnt_led.get(rt, 0) + 1
+            if _cnt_led:
+                led_rt = max(_cnt_led.items(), key=lambda kv: kv[1])[0]
+        except Exception:
+            pass
+        # Ưu tiên RefType học từ SỔ CÁI ghi tăng: trước phiên bản này phần
+        # mềm chưa từng ghi FixedAssetLedger nên dòng nào trong đó cũng là
+        # THẬT (nhập tay trên MISA) — đáng tin hơn phép đếm đa số trên
+        # FixedAsset (đang bị chính các dòng cũ do phần mềm ghi lấn át).
+        if led_rt is not None:
+            hoc_rt = led_rt
+        # ObjectType của dòng phân bổ — học từ bản ghi thật (nhập tay); chưa
+        # có thì đoán 1 (đơn vị tổ chức).
+        hoc_objtype = None
+        try:
+            row_ot = cur.execute(
+                "SELECT TOP 1 ObjectType FROM FixedAssetDetailAllocation "
+                "WHERE ObjectType IS NOT NULL").fetchone()
+            if row_ot:
+                hoc_objtype = row_ot[0]
+        except Exception:
+            pass
+        # FixedAssetLedgerID là int PK — nếu KHÔNG phải identity (còn xuất
+        # hiện trong danh sách cột ghi được) thì phải tự cấp MAX+1.
+        led_id_tay = "fixedassetledgerid" in cols_led
+        next_led_id = 1
+        if led_id_tay:
+            try:
+                next_led_id = (cur.execute(
+                    "SELECT ISNULL(MAX(FixedAssetLedgerID),0) FROM FixedAssetLedger"
+                ).fetchone()[0] or 0) + 1
+            except Exception:
+                pass
         if hoc_rt is None:
             return {"preview": preview, "database": database, "so_them": 0, "so_trung": 0,
                     "khong_do_loai": True,
@@ -8216,9 +8265,18 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                     continue
                 ghi_de_ts = True
                 if not preview:
+                    old_id = existed[k]["id"]
+                    # gỡ các bảng vệ tinh TRƯỚC (dòng sổ cái ghi tăng, thiết
+                    # lập phân bổ, các bảng chi tiết) rồi mới gỡ FixedAsset.
+                    for tbl in ("FixedAssetLedger", "FixedAssetDetailAllocation",
+                               "FixedAssetDetail", "FixedAssetDetailAccessory",
+                               "FixedAssetDetailBoardDelivery", "FixedAssetDetailSource"):
+                        try:
+                            cur.execute("DELETE FROM %s WHERE FixedAssetID=?" % tbl, old_id)
+                        except Exception:
+                            pass
                     try:
-                        cur.execute("DELETE FROM FixedAsset WHERE [%s]=?" % id_col,
-                                   existed[k]["id"])
+                        cur.execute("DELETE FROM FixedAsset WHERE [%s]=?" % id_col, old_id)
                     except Exception:
                         pass
             ngay_dt = _misa_doc_ngay(ngct) or now
@@ -8231,8 +8289,11 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             catid = cat_map.get(str(loai).strip()) or (
                 next(iter(cat_map.values())) if cat_map else None)
             dvid = dvsd_map.get(str(dtpb).strip().upper()) or branch_id
+            fa_id = str(_uuid.uuid4())     # id tài sản (FixedAsset.FixedAssetID)
+            ref_id = str(_uuid.uuid4())    # id "chứng từ ghi tăng" (FixedAsset.RefID = Ledger.RefID)
             row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols.values()}
-            _misa_gan(row, cols, str(_uuid.uuid4()), "FixedAssetID", "RefID")
+            _misa_gan(row, cols, fa_id, "FixedAssetID")
+            _misa_gan(row, cols, ref_id, "RefID")
             _misa_gan(row, cols, branch_id, "BranchID")
             _misa_gan(row, cols, hoc_rt, "RefType")
             _misa_gan(row, cols, str(ma)[:25], "FixedAssetCode")
@@ -8278,6 +8339,60 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                 cur.execute("INSERT INTO FixedAsset ([%s]) VALUES (%s)" %
                            ("],[".join(cs), ",".join(["?"] * len(cs))),
                            [row[c] for c in cs])
+                # Dòng SỔ CÁI ghi tăng (FixedAssetLedger) — chính là dòng mà
+                # màn hình lưới "Ghi tăng" hiển thị. RefDate + PostedDate đều
+                # NOTNULL và là cột lưới lọc theo "Kỳ".
+                if cols_led:
+                    lrow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_led.values()}
+                    if led_id_tay:
+                        _misa_gan(lrow, cols_led, next_led_id, "FixedAssetLedgerID")
+                        next_led_id += 1
+                    _misa_gan(lrow, cols_led, ref_id, "RefID")
+                    _misa_gan(lrow, cols_led, fa_id, "FixedAssetID")
+                    _misa_gan(lrow, cols_led, led_rt if led_rt is not None else hoc_rt, "RefType")
+                    _misa_gan(lrow, cols_led, str(e)[:20], "RefNo")
+                    _misa_gan(lrow, cols_led, ngay_dt, "RefDate")
+                    _misa_gan(lrow, cols_led, ngay_dt, "PostedDate")
+                    _misa_gan(lrow, cols_led, dvid, "OrganizationUnitID")
+                    _misa_gan(lrow, cols_led, tg_sd_n, "LifeTimeInMonth")
+                    _misa_gan(lrow, cols_led, tg_sd_n, "LifeTimeRemainingInMonth")
+                    _misa_gan(lrow, cols_led, _num0(ty_le_kh), "DepreciationRateMonth")
+                    _misa_gan(lrow, cols_led, kh_thang_n, "MonthlyDepreciationAmount")
+                    _misa_gan(lrow, cols_led, _num0(gt_kh) or ng_gia_n, "DepreciationAmount")
+                    _misa_gan(lrow, cols_led, hao_mon_n, "AccumDepreciationAmount")
+                    _misa_gan(lrow, cols_led, hao_mon_n, "TotalDepreciationAmount")
+                    _misa_gan(lrow, cols_led, ng_gia_n - hao_mon_n, "RemainingAmount")
+                    _misa_gan(lrow, cols_led, str(tkkh or ""), "DepreciationAccount")
+                    _misa_gan(lrow, cols_led, str(tkng or ""), "OrgPriceAccount")
+                    _misa_gan(lrow, cols_led, ng_gia_n, "OrgPrice")
+                    _misa_gan(lrow, cols_led, ("Ghi tăng tài sản - %s" % ten)[:500], "JournalMemo")
+                    _misa_gan(lrow, cols_led, branch_id, "BranchID")
+                    _misa_gan(lrow, cols_led, max_reforder + them + 1, "RefOrder")
+                    _misa_gan(lrow, cols_led, str(ma)[:25], "FixedAssetCode")
+                    _misa_gan(lrow, cols_led, str(ten)[:128], "FixedAssetName")
+                    if catid is not None:
+                        _misa_gan(lrow, cols_led, catid, "FixedAssetCategoryID")
+                    lc = list(lrow.keys())
+                    cur.execute("INSERT INTO FixedAssetLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [lrow[c] for c in lc])
+                # Thiết lập PHÂN BỔ (FixedAssetDetailAllocation) — khung
+                # "Thiết lập phân bổ" dưới lưới Ghi tăng: Đối tượng PB +
+                # Tỷ lệ PB + TK chi phí.
+                if cols_alloc:
+                    arow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_alloc.values()}
+                    _misa_gan(arow, cols_alloc, str(_uuid.uuid4()), "FixedAssetDetailID")
+                    _misa_gan(arow, cols_alloc, fa_id, "FixedAssetID")
+                    _misa_gan(arow, cols_alloc, 0, "SortOrder")
+                    _misa_gan(arow, cols_alloc, dvid, "ObjectID")
+                    _misa_gan(arow, cols_alloc, hoc_objtype if hoc_objtype is not None else 1,
+                             "ObjectType")
+                    _misa_gan(arow, cols_alloc, _num0(ty_le_pb) or 100, "AllocationRate")
+                    _misa_gan(arow, cols_alloc, str(tkcp or ""), "CostAccount")
+                    ac = list(arow.keys())
+                    cur.execute("INSERT INTO FixedAssetDetailAllocation ([%s]) VALUES (%s)" %
+                               ("],[".join(ac), ",".join(["?"] * len(ac))),
+                               [arow[c] for c in ac])
             them += 1
             if ghi_de_ts:
                 go += 1
@@ -8337,6 +8452,19 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                                  for r in out]}
         dob = hoc_dob if hoc_dob is not None else 3
         dvsd_map = _misa_dvsd_map(cur)
+        # ObjectType dòng phân bổ — học từ bản ghi thật (CCDC trước, rồi tới
+        # TSCĐ vì 2 màn hình dùng chung khái niệm Đối tượng phân bổ).
+        hoc_objtype = None
+        for tbl_ot in ("SUIncrementDetailAllocation", "FixedAssetDetailAllocation"):
+            try:
+                row_ot = cur.execute(
+                    "SELECT TOP 1 ObjectType FROM %s WHERE ObjectType IS NOT NULL" % tbl_ot
+                ).fetchone()
+                if row_ot:
+                    hoc_objtype = row_ot[0]
+                    break
+            except Exception:
+                pass
         ma_col = _misa_chon_cot(cols, "SupplyCode")
         id_col = _misa_chon_cot(cols, "SupplyID", "RefID")
         pf_col = _misa_chon_cot(cols, "IsPostedFinance")
@@ -8453,11 +8581,8 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                     _misa_gan(arow, cols_alloc, supply_id, "SupplyID")
                     _misa_gan(arow, cols_alloc, 0, "SortOrder")
                     _misa_gan(arow, cols_alloc, objid, "ObjectID")
-                    # ObjectType: CHƯA có mẫu thật để xác nhận (CSDL công ty
-                    # chưa từng ghi tăng CCDC thật qua MISA để đối chiếu) —
-                    # đoán 1 (đơn vị tổ chức), khớp việc "Đối tượng phân bổ"
-                    # và "Đơn vị sử dụng" dùng chung 1 mã trên form Excel mẫu.
-                    _misa_gan(arow, cols_alloc, 1, "ObjectType")
+                    _misa_gan(arow, cols_alloc, hoc_objtype if hoc_objtype is not None else 1,
+                             "ObjectType")
                     _misa_gan(arow, cols_alloc, _num0(ty_le_pb), "AllocationRate")
                     _misa_gan(arow, cols_alloc, str(tkcp or ""), "CostAccount")
                     ac = list(arow.keys())
