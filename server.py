@@ -6636,10 +6636,12 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
 
         def _norm_ten(s):
             return " ".join(str(s or "").split()).lower()
-        # đơn vị tính hiện có {tên_lower: UnitID}
+        # đơn vị tính hiện có {tên_lower: UnitID} — BỎ QUA Unit tên RÁC (chuỗi
+        # GUID thay vì tên thật, xem _misa_unit_hong) để không lỡ khớp/tái sử
+        # dụng bản ghi hỏng; dvt trùng tên với Unit rác sẽ tự tạo Unit MỚI sạch.
         units = {}
         for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
-            if uname:
+            if uname and not _misa_unit_hong(uname):
                 units[str(uname).strip().lower()] = uid
         # 'Tính chất' (InventoryItemType) = 1 (Vật tư, hàng hóa) cho cả 3 danh
         # mục Hàng hóa/NVL/CCDC. Trước đây dò theo dữ liệu có sẵn trong MISA
@@ -6718,6 +6720,94 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
         raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
     finally:
         conn.close()
+
+
+def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
+    """Quét TOÀN BỘ InventoryItem đã có trong MISA (không chỉ mã mới import)
+    để tìm + sửa ĐVT "mồ côi"/RÁC: UnitID không tồn tại trong Unit, hoặc trỏ
+    tới Unit có tên là chuỗi GUID rác (_misa_unit_hong) — xác nhận thật qua
+    mã HH00087-8 hiện "ĐVT chính: fac19b53" và crash InvalidCastException khi
+    mở trong MISA. Đối chiếu Mã hàng với Bảng kê Danh mục hiện tại của phần
+    mềm để lấy đúng tên ĐVT thật, tạo/tái dùng Unit sạch rồi UPDATE
+    InventoryItem.UnitID. Không đụng tới mã hàng có ĐVT đã sạch."""
+    dvt_theo_ma = {}   # ma_lower -> dvt text (từ Bảng kê Danh mục của phần mềm)
+    for r in dm_rows:
+        ma = str((r[0] if len(r) > 0 else "") or "").strip()
+        dvt = str((r[2] if len(r) > 2 else "") or "").strip()
+        if ma and dvt:
+            dvt_theo_ma.setdefault(ma.lower(), dvt)
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        unit_ten = {}   # tên sạch (lower) -> UnitID
+        unit_id_sach = set()
+        for u_id, u_name in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+            if u_name and _misa_unit_hong(u_name):
+                continue
+            unit_id_sach.add(str(u_id).strip().lower())
+            if u_name:
+                unit_ten[str(u_name).strip().lower()] = u_id
+        import uuid as _uuid
+        them = sua = 0
+        ket = []
+        for iid, code, uid in cur.execute(
+                "SELECT InventoryItemID, InventoryItemCode, UnitID FROM InventoryItem").fetchall():
+            k = str(code or "").strip().lower()
+            if k not in dvt_theo_ma:
+                continue
+            hong = uid is None or str(uid).strip().lower() not in unit_id_sach
+            if not hong:
+                continue
+            dvt_text = dvt_theo_ma[k]
+            uk = dvt_text.lower()
+            if uk in unit_ten:
+                uid2 = unit_ten[uk]
+            else:
+                uid2 = str(_uuid.uuid4())
+                if not preview:
+                    cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                unit_ten[uk] = uid2
+                unit_id_sach.add(uid2.lower())
+                them += 1
+            if not preview:
+                cur.execute("UPDATE InventoryItem SET UnitID=? WHERE InventoryItemID=?", uid2, iid)
+            sua += 1
+            ket.append({"ma": code, "dvt": dvt_text,
+                        "trang_thai": "sẽ sửa" if preview else "đã sửa"})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_sua": sua, "so_don_vi_moi": them,
+                "danh_sach": ket[:1000]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/quet-sua-dvt/{cid}")
+async def misa_sql_quet_sua_dvt(cid: int, request: Request):
+    """Quét & sửa ĐVT mồ côi/rác trên TOÀN BỘ Danh mục Vật tư hàng hóa đã có
+    trong MISA (không chỉ mã mới import) — xem _misa_quet_sua_dvt_hang_hoa.
+    body: {rows, preview, database?} — rows = Bảng kê Danh mục hiện tại của
+    phần mềm (Mã, Tên, ĐVT...) để tra đúng tên ĐVT thật."""
+    body = await request.json()
+    rows = body.get("rows") or []
+    preview = bool(body.get("preview", True))
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    if not rows:
+        raise HTTPException(400, "Danh mục trống — không có mã để đối chiếu.")
+    return _misa_quet_sua_dvt_hang_hoa(cid, database, rows, preview=preview)
 
 
 @app.post("/api/misa-sql/import-hang-hoa/{cid}")
@@ -7290,9 +7380,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # ở cột ĐVT trên chứng từ. Nạp bảng Unit để kiểm tra và TỰ SỬA: tra/
         # tạo Unit theo tên ĐVT trong Bảng kê rồi cập nhật lại danh mục hàng.
         unit_ten = {}    # tên ĐVT (lower) -> UnitID
-        unit_ids = set()
+        unit_ids = set()   # CHỈ chứa Unit tên SẠCH — Unit tên rác coi như "mồ côi" để bị sửa
         try:
             for u_id, u_name in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+                if u_name and _misa_unit_hong(u_name):
+                    continue
                 unit_ids.add(str(u_id).strip().lower())
                 if u_name:
                     unit_ten[str(u_name).strip().lower()] = u_id
@@ -8279,6 +8371,17 @@ def _snum(v):
     kỳ phân bổ CCDC ghi vào MISA thành 0 dù DM ghi 24)."""
     v = _to_num(v)
     return v if isinstance(v, (int, float)) else 0
+
+def _misa_unit_hong(ten):
+    """Nhận diện tên ĐVT (Unit.UnitName) là RÁC — thật ra chứa (một phần)
+    chuỗi GUID thay vì tên đơn vị thật (vd 'fac19b53-57' thay vì 'PCS'/'Cái').
+    Xác nhận qua thực tế: mã hàng hiện "ĐVT chính: fac19b53" trong MISA và
+    crash "InvalidCastException" khi mở — Unit đứng sau UnitID này bị hỏng
+    tên. Tên ĐVT thật (chữ Việt có dấu, hoặc PCS/KG/Cái/Hộp...) không bao
+    giờ khớp mẫu toàn hex+gạch ngang này nên phân biệt an toàn."""
+    import re as _re_uh
+    t = str(ten or "").strip()
+    return bool(t) and bool(_re_uh.match(r"^[0-9a-f]{6,}(-[0-9a-f]{2,})*$", t, _re_uh.IGNORECASE))
 
 def _misa_tk_fallback(tk, tk_set):
     """Đối chiếu số TÀI KHOẢN với danh mục TK thật của MISA (bảng Account —

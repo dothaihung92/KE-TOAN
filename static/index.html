@@ -3335,7 +3335,8 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
         <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
         <button class="btn sm" style="background:#5a3e8a" onclick="document.getElementById('dmImportFile').click()">📥 Import file</button>
         <input type="file" id="dmImportFile" accept=".xlsx" style="display:none" onchange="dmImportDanhMuc(this)">
-        ${['hh','nvl','tscd','ccdc'].includes(loai)?`<button class="btn sm" style="background:#b06a00" onclick="dmImportMisa()" title="Ghi danh mục thẳng vào MISA (Danh mục > Vật tư hàng hóa, tính chất Vật tư hàng hóa)">⬆ Import vào MISA</button>`:''}
+        ${['hh','nvl','tscd','ccdc'].includes(loai)?`<button class="btn sm" style="background:#b06a00" onclick="dmImportMisa()" title="Ghi danh mục thẳng vào MISA (Danh mục > Vật tư hàng hóa, tính chất Vật tư hàng hóa)">⬆ Import vào MISA</button>
+        <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="dmQuetSuaDvt()" title="Quét mã đã có trong MISA, tự sửa ĐVT bị hỏng liên kết (hiện GUID thô, mở báo lỗi)">🔧 Quét & sửa ĐVT hỏng</button>`:''}
         <button class="btn ghost sm" onclick="quayLaiBangKeIn()">← Về bảng kê</button>
       </div>
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
@@ -3448,6 +3449,46 @@ async function dmImportMisaGhi(){
     document.getElementById('misaModal').style.display='none';
     toast(`✓ Đã ghi ${d.so_them} mã vào MISA (bỏ qua ${d.so_trung} mã đã có, tạo ${d.so_don_vi_moi} ĐVT). Mở MISA kiểm tra Danh mục Vật tư hàng hóa.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+// Quét & sửa ĐVT mồ côi/rác trên TOÀN BỘ mã đã có trong MISA (không chỉ mã
+// mới import) — xử lý triệt để bug ĐVT hiện GUID thô + crash khi mở mã hàng
+// trong MISA (Unit bị hỏng tên, xem _misa_quet_sua_dvt_hang_hoa).
+async function dmQuetSuaDvt(){
+  if(!['hh','nvl','tscd','ccdc'].includes(nlDMMode)){toast('Chức năng này cho DM Hàng hóa / NVL / TSCĐ / CCDC','err');return}
+  const rows=dmMisaRows(nlDMMode);
+  if(!rows.length){toast('Danh mục trống','err');return}
+  toast('Đang quét ĐVT hỏng...','');
+  try{
+    const pv=await api(`/api/misa-sql/quet-sua-dvt/${current}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:true})});
+    const ds=(pv.danh_sach||[]).slice(0,400).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ma)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.dvt)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;color:#8a5300">${misaEsc(x.trang_thai)}</td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:10px">
+        ⚠ Sắp SỬA dữ liệu trong database MISA: <b>${misaEsc(pv.database||'?')}</b><br>
+        Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>. Chỉ sửa mã có ĐVT hỏng liên kết (mồ côi/GUID rác) — mã đã có ĐVT đúng không bị đụng vào.</div>
+      <div style="margin-bottom:6px">Sẽ sửa: <b style="color:#1a7a7a">${pv.so_sua}</b> mã hàng — tạo mới ĐVT: <b>${pv.so_don_vi_moi}</b></div>
+      ${ds?`<div style="max-height:44vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Mã</th><th style="border:1px solid #eee;padding:2px 6px">ĐVT sẽ gán</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
+        ${ds}</table></div>`:'<div style="color:#999">Không tìm thấy mã nào bị hỏng ĐVT.</div>'}
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_sua>0?`<button class="btn sm" style="background:#b06a00" onclick="dmQuetSuaDvtGhi()">🔧 Sửa ${pv.so_sua} mã</button>`:''}
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function dmQuetSuaDvtGhi(){
+  const rows=dmMisaRows(nlDMMode);
+  toast('Đang sửa ĐVT...','');
+  try{
+    const d=await api(`/api/misa-sql/quet-sua-dvt/${current}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({rows,preview:false})});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã sửa ĐVT cho ${d.so_sua} mã hàng (tạo mới ${d.so_don_vi_moi} ĐVT). Mở MISA kiểm tra lại.`,'ok');
+  }catch(e){toast('Lỗi sửa: '+e.message,'err')}
 }
 async function dmXuatGrid(){
   try{
