@@ -8180,6 +8180,26 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
         # FixedAsset (đang bị chính các dòng cũ do phần mềm ghi lấn át).
         if led_rt is not None:
             hoc_rt = led_rt
+        # Học thêm quy ước từ dòng FixedAsset THẬT — nhận diện qua CreatedBy
+        # có giá trị (MISA luôn đóng dấu người tạo; các dòng do phần mềm ghi
+        # để trống). Ưu tiên hơn phép đếm đa số hoc_dob (bị dòng cũ của phần
+        # mềm lấn át).
+        hoc_fa_that = None   # (DisplayOnBook, IsEnoughVoucher, CreatedBy)
+        try:
+            hoc_fa_that = cur.execute(
+                "SELECT TOP 1 DisplayOnBook, IsEnoughVoucher, CreatedBy "
+                "FROM FixedAsset WHERE ISNULL(CreatedBy,'')<>''").fetchone()
+        except Exception:
+            pass
+        # RefOrderInSubSystem của sổ cái — dòng thật đánh số 1,2,3... riêng
+        # trong phân hệ TSCĐ (khác RefOrder chung); ghi tiếp nối MAX hiện có.
+        max_ro_sub = 0
+        try:
+            r_sub = cur.execute(
+                "SELECT ISNULL(MAX(RefOrderInSubSystem),0) FROM FixedAssetLedger").fetchone()
+            max_ro_sub = (r_sub[0] or 0) if r_sub else 0
+        except Exception:
+            pass
         # ObjectType của dòng phân bổ — học từ bản ghi thật (nhập tay); chưa
         # có thì đoán 1 (đơn vị tổ chức).
         hoc_objtype = None
@@ -8289,11 +8309,18 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             catid = cat_map.get(str(loai).strip()) or (
                 next(iter(cat_map.values())) if cat_map else None)
             dvid = dvsd_map.get(str(dtpb).strip().upper()) or branch_id
-            fa_id = str(_uuid.uuid4())     # id tài sản (FixedAsset.FixedAssetID)
-            ref_id = str(_uuid.uuid4())    # id "chứng từ ghi tăng" (FixedAsset.RefID = Ledger.RefID)
+            # Dòng THẬT (nhập tay trên MISA): RefID = RefDetailID =
+            # FixedAssetID — cả 3 dùng CHUNG 1 GUID của tài sản. Bắt chước
+            # y hệt (trước đây RefID sinh GUID riêng + RefDetailID NULL —
+            # nghi phạm chính khiến lưới Ghi tăng không hiện dòng nào).
+            fa_id = str(_uuid.uuid4())
+            # Tỷ lệ KH tháng: dòng thật = 100/số tháng (vd 60 tháng -> 1.67%)
+            # — KHÔNG phải giá trị 100 của cột "Tỷ lệ tính KH tháng (%)"
+            # trong form Excel.
+            ty_le_thang = round(100.0 / tg_sd_n, 2) if tg_sd_n else _num0(ty_le_kh)
             row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols.values()}
             _misa_gan(row, cols, fa_id, "FixedAssetID")
-            _misa_gan(row, cols, ref_id, "RefID")
+            _misa_gan(row, cols, fa_id, "RefID")
             _misa_gan(row, cols, branch_id, "BranchID")
             _misa_gan(row, cols, hoc_rt, "RefType")
             _misa_gan(row, cols, str(ma)[:25], "FixedAssetCode")
@@ -8316,7 +8343,7 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, tg_sd_n, "LifeTimeRemainingInMonth")
             _misa_gan(row, cols, dvt_tg_n, "LifeTimeUnit", "LifeTimeType")
             _misa_gan(row, cols, dvt_tg_n, "LifeTimeRemainingUnit")
-            _misa_gan(row, cols, _num0(ty_le_kh), "DepreciationRateMonth", "DepreciationRate")
+            _misa_gan(row, cols, ty_le_thang, "DepreciationRateMonth", "DepreciationRate")
             _misa_gan(row, cols, kh_thang_n, "MonthlyDepreciationAmount",
                      "DepreciationAmountMonth")
             _misa_gan(row, cols, kh_thang_n * 12, "YearlyDepreciationAmount")
@@ -8327,13 +8354,17 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, str(tkcp or ""), "ExpenseAccount", "CostAccount")
             _misa_gan(row, cols, 0, "IsPostedFinance")
             _misa_gan(row, cols, 0, "IsPostedManagement")
-            _misa_gan(row, cols, True, "IsEnoughVoucher")
-            _misa_gan(row, cols, dob, "DisplayOnBook")
+            _misa_gan(row, cols, hoc_fa_that[1] if hoc_fa_that else True, "IsEnoughVoucher")
+            _misa_gan(row, cols, hoc_fa_that[0] if hoc_fa_that and hoc_fa_that[0] is not None
+                     else dob, "DisplayOnBook")
             _misa_gan(row, cols, max_reforder + them + 1, "RefOrder")
             _misa_gan(row, cols, 0, "Inactive")
             _misa_gan(row, cols, ("Ghi tăng tài sản - %s" % ten)[:500], "JournalMemo", "Reason")
             _misa_gan(row, cols, now, "CreatedDate")
             _misa_gan(row, cols, now, "ModifiedDate")
+            if hoc_fa_that and hoc_fa_that[2]:
+                _misa_gan(row, cols, hoc_fa_that[2], "CreatedBy")
+                _misa_gan(row, cols, hoc_fa_that[2], "ModifiedBy")
             if not preview:
                 cs = list(row.keys())
                 cur.execute("INSERT INTO FixedAsset ([%s]) VALUES (%s)" %
@@ -8347,7 +8378,9 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                     if led_id_tay:
                         _misa_gan(lrow, cols_led, next_led_id, "FixedAssetLedgerID")
                         next_led_id += 1
-                    _misa_gan(lrow, cols_led, ref_id, "RefID")
+                    # dòng thật: RefID = RefDetailID = FixedAssetID (cùng GUID)
+                    _misa_gan(lrow, cols_led, fa_id, "RefID")
+                    _misa_gan(lrow, cols_led, fa_id, "RefDetailID")
                     _misa_gan(lrow, cols_led, fa_id, "FixedAssetID")
                     _misa_gan(lrow, cols_led, led_rt if led_rt is not None else hoc_rt, "RefType")
                     _misa_gan(lrow, cols_led, str(e)[:20], "RefNo")
@@ -8356,18 +8389,23 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                     _misa_gan(lrow, cols_led, dvid, "OrganizationUnitID")
                     _misa_gan(lrow, cols_led, tg_sd_n, "LifeTimeInMonth")
                     _misa_gan(lrow, cols_led, tg_sd_n, "LifeTimeRemainingInMonth")
-                    _misa_gan(lrow, cols_led, _num0(ty_le_kh), "DepreciationRateMonth")
+                    _misa_gan(lrow, cols_led, ty_le_thang, "DepreciationRateMonth")
                     _misa_gan(lrow, cols_led, kh_thang_n, "MonthlyDepreciationAmount")
                     _misa_gan(lrow, cols_led, _num0(gt_kh) or ng_gia_n, "DepreciationAmount")
                     _misa_gan(lrow, cols_led, hao_mon_n, "AccumDepreciationAmount")
                     _misa_gan(lrow, cols_led, hao_mon_n, "TotalDepreciationAmount")
                     _misa_gan(lrow, cols_led, ng_gia_n - hao_mon_n, "RemainingAmount")
+                    # dòng thật: OriginDepreciationAmount = giá trị tính KH
+                    _misa_gan(lrow, cols_led, _num0(gt_kh) or ng_gia_n,
+                             "OriginDepreciationAmount")
                     _misa_gan(lrow, cols_led, str(tkkh or ""), "DepreciationAccount")
                     _misa_gan(lrow, cols_led, str(tkng or ""), "OrgPriceAccount")
                     _misa_gan(lrow, cols_led, ng_gia_n, "OrgPrice")
                     _misa_gan(lrow, cols_led, ("Ghi tăng tài sản - %s" % ten)[:500], "JournalMemo")
                     _misa_gan(lrow, cols_led, branch_id, "BranchID")
                     _misa_gan(lrow, cols_led, max_reforder + them + 1, "RefOrder")
+                    # dòng thật đánh số riêng trong phân hệ TSCĐ: 1,2,3...
+                    _misa_gan(lrow, cols_led, max_ro_sub + them + 1, "RefOrderInSubSystem")
                     _misa_gan(lrow, cols_led, str(ma)[:25], "FixedAssetCode")
                     _misa_gan(lrow, cols_led, str(ten)[:128], "FixedAssetName")
                     if catid is not None:
