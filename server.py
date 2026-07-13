@@ -7285,6 +7285,51 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     tk_set.add(str(an).strip())
         except Exception:
             pass
+        # ĐƠN VỊ TÍNH: InventoryItem.UnitID có thể "MỒ CÔI" (GUID không còn
+        # trong bảng Unit — lỗi dữ liệu danh mục cũ) khiến MISA hiện GUID thô
+        # ở cột ĐVT trên chứng từ. Nạp bảng Unit để kiểm tra và TỰ SỬA: tra/
+        # tạo Unit theo tên ĐVT trong Bảng kê rồi cập nhật lại danh mục hàng.
+        unit_ten = {}    # tên ĐVT (lower) -> UnitID
+        unit_ids = set()
+        try:
+            for u_id, u_name in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+                unit_ids.add(str(u_id).strip().lower())
+                if u_name:
+                    unit_ten[str(u_name).strip().lower()] = u_id
+        except Exception:
+            pass
+        so_dvt_sua = 0
+
+        def sua_dvt(r, iid, uid):
+            """Trả UnitID dùng được cho dòng chứng từ; UnitID mồ côi thì thay
+            bằng Unit thật theo tên ĐVT của Bảng kê (tạo mới nếu chưa có) và
+            sửa luôn InventoryItem để hết tận gốc."""
+            nonlocal so_dvt_sua
+            if not unit_ids or uid is None or str(uid).strip().lower() in unit_ids:
+                return uid
+            import uuid as _uuid2
+            dvt_text = (str(r[cfg["dvt"]] or "").strip()
+                        if cfg.get("dvt") is not None else "")
+            uk = dvt_text.lower()
+            if uk and uk in unit_ten:
+                uid2 = unit_ten[uk]
+            elif dvt_text:
+                uid2 = str(_uuid2.uuid4())
+                if not preview:
+                    cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                unit_ten[uk] = uid2
+                unit_ids.add(uid2.lower())
+            else:
+                uid2 = None
+            if not preview:
+                try:
+                    cur.execute("UPDATE InventoryItem SET UnitID=? WHERE InventoryItemID=?",
+                               uid2, iid)
+                except Exception:
+                    pass
+            so_dvt_sua += 1
+            return uid2
         # chứng từ đã có trong MISA (dò theo Số chứng từ = RefNoManagement) —
         # KHÔNG đụng chứng từ đã ghi sổ CỦA NGƯỜI DÙNG; riêng chứng từ do CHÍNH
         # PHẦN MỀM tạo (nhận diện qua CustomField10=_PM_MARK) thì luôn cho phép
@@ -7540,6 +7585,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             total_amount = total_vat = total_import_tax = 0
             detail_rows = []
             for idx, (r, (iid, uid, ten_h)) in enumerate(valid_lines, 1):
+                uid = sua_dvt(r, iid, uid)
                 sl = _num0(r[cfg["sl"]])
                 dgia = _num0(r[cfg["dgia"]])
                 tt = _num0(r[cfg["tt"]])
@@ -7740,6 +7786,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
+                "so_dvt_sua": so_dvt_sua,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
@@ -7813,6 +7860,44 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                     tk_set.add(str(an).strip())
         except Exception:
             pass
+        # ĐVT mồ côi — kiểm tra + tự sửa như _misa_ghi_mua_hang
+        unit_ten = {}
+        unit_ids = set()
+        try:
+            for u_id, u_name in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+                unit_ids.add(str(u_id).strip().lower())
+                if u_name:
+                    unit_ten[str(u_name).strip().lower()] = u_id
+        except Exception:
+            pass
+        so_dvt_sua = 0
+
+        def sua_dvt(r, iid, uid):
+            nonlocal so_dvt_sua
+            if not unit_ids or uid is None or str(uid).strip().lower() in unit_ids:
+                return uid
+            dvt_text = (str(r[cfg["dvt"]] or "").strip()
+                        if cfg.get("dvt") is not None else "")
+            uk = dvt_text.lower()
+            if uk and uk in unit_ten:
+                uid2 = unit_ten[uk]
+            elif dvt_text:
+                uid2 = str(_uuid.uuid4())
+                if not preview:
+                    cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                unit_ten[uk] = uid2
+                unit_ids.add(uid2.lower())
+            else:
+                uid2 = None
+            if not preview:
+                try:
+                    cur.execute("UPDATE InventoryItem SET UnitID=? WHERE InventoryItemID=?",
+                               uid2, iid)
+                except Exception:
+                    pass
+            so_dvt_sua += 1
+            return uid2
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUService'").fetchall())
         posted_refno = set()
@@ -7988,6 +8073,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             total_amount = total_vat = 0
             detail_rows = []
             for idx, (r, (iid, uid, ten_h)) in enumerate(valid_lines, 1):
+                uid = sua_dvt(r, iid, uid)
                 sl = _num0(r[cfg["sl"]])
                 dgia = _num0(r[cfg["dgia"]])
                 tt = _num0(r[cfg["tt"]])
@@ -8085,6 +8171,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": 0, "thieu_kho": [],
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
+                "so_dvt_sua": so_dvt_sua,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
