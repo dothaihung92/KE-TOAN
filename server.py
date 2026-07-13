@@ -7276,6 +7276,15 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "FROM InventoryItem").fetchall():
             if code:
                 hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        # danh mục TÀI KHOẢN thật của MISA — các cột TK trên PUVoucherDetail
+        # có FK sang Account.AccountNumber; xem _misa_tk_fallback
+        tk_set = set()
+        try:
+            for (an,) in cur.execute("SELECT AccountNumber FROM Account").fetchall():
+                if an:
+                    tk_set.add(str(an).strip())
+        except Exception:
+            pass
         # chứng từ đã có trong MISA (dò theo Số chứng từ = RefNoManagement) —
         # KHÔNG đụng chứng từ đã ghi sổ CỦA NGƯỜI DÙNG; riêng chứng từ do CHÍNH
         # PHẦN MỀM tạo (nhận diện qua CustomField10=_PM_MARK) thì luôn cho phép
@@ -7405,6 +7414,18 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = so_tien_0 = 0
         so_hoa_don = 0        # số hóa đơn (PUInvoice) tạo kèm chứng từ
         thieu_kho = set()     # mã kho trong form nhưng CHƯA có trong MISA
+        bo_tk = 0             # chứng từ bỏ qua vì TK Nợ/Có không có trong MISA
+        tk_thay = set()       # "2421→242": TK đã tự rút về TK cha đang tồn tại
+
+        def tra_tk(tk, bat_buoc=False):
+            """Đối chiếu 1 số TK với danh mục Account thật; ghi nhận thay thế."""
+            t = str(tk or "").strip()
+            if not t or not tk_set:
+                return t or None
+            t2 = _misa_tk_fallback(t, tk_set)
+            if t2 and t2 != t:
+                tk_thay.add("%s→%s" % (t, t2))
+            return t2
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
@@ -7468,6 +7489,21 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"})
                 continue
+            # TK Nợ/Có phải tồn tại trong danh mục Account MISA (FK) — TK
+            # không rút được về TK cha thì bỏ qua chứng từ, báo rõ lý do.
+            if tk_set:
+                tk_loi = set()
+                for r, _h in valid_lines:
+                    for acc in (str(r[cfg["no"]] or "").strip(),
+                                str(r[cfg["co"]] or "").strip()):
+                        if acc and _misa_tk_fallback(acc, tk_set) is None:
+                            tk_loi.add(acc)
+                if tk_loi:
+                    bo_tk += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines),
+                                "trang_thai": "bỏ qua — TK %s không có trong danh mục "
+                                              "tài khoản MISA" % ", ".join(sorted(tk_loi))})
+                    continue
             ngay_dt = None
             ngay_str = str(first[cfg["ngayct"]] or "").strip()
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
@@ -7509,15 +7545,17 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 tt = _num0(r[cfg["tt"]])
                 ts = _num0(r[cfg["ts"]]) if cfg["ts"] is not None else None
                 tthue = _num0(r[cfg["tthue"]])
-                tk_thue = str(r[cfg["tk_thue"]] or "").strip() or None
-                tkdu = (str(r[cfg["tkdu_thue"]] or "").strip() or None
+                # mọi cột TK đều đối chiếu danh mục Account (FK) — TK không
+                # có tiểu khoản tự rút về TK cha (vd 2421 -> 242)
+                tk_thue = tra_tk(r[cfg["tk_thue"]])
+                tkdu = (tra_tk(r[cfg["tkdu_thue"]])
                         if cfg["tkdu_thue"] is not None else None)
-                no_acc = str(r[cfg["no"]] or "").strip()
-                co_acc = str(r[cfg["co"]] or "").strip()
+                no_acc = tra_tk(r[cfg["no"]])
+                co_acc = tra_tk(r[cfg["co"]])
                 nk_tg = _num0(r[cfg["nhtg"]]) if cfg["nhtg"] is not None else 0
                 nk_ts = _num0(r[cfg["nts"]]) if cfg["nts"] is not None else 0
                 nk_thue = _num0(r[cfg["nthue"]]) if cfg["nthue"] is not None else 0
-                nk_tk = ((str(r[cfg["ntk"]] or "").strip() or None)
+                nk_tk = (tra_tk(r[cfg["ntk"]])
                          if (cfg["ntk"] is not None and nk_thue) else None)
                 total_amount += tt
                 total_vat += tthue
@@ -7701,6 +7739,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
+                "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
@@ -7766,6 +7805,14 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "FROM InventoryItem").fetchall():
             if code:
                 hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        # danh mục TÀI KHOẢN thật (FK trên các cột TK) — xem _misa_tk_fallback
+        tk_set = set()
+        try:
+            for (an,) in cur.execute("SELECT AccountNumber FROM Account").fetchall():
+                if an:
+                    tk_set.add(str(an).strip())
+        except Exception:
+            pass
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUService'").fetchall())
         posted_refno = set()
@@ -7853,6 +7900,17 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         now = datetime.datetime.now()
         ket = []
         them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = so_tien_0 = 0
+        bo_tk = 0
+        tk_thay = set()
+
+        def tra_tk(tk):
+            t = str(tk or "").strip()
+            if not t or not tk_set:
+                return t or None
+            t2 = _misa_tk_fallback(t, tk_set)
+            if t2 and t2 != t:
+                tk_thay.add("%s→%s" % (t, t2))
+            return t2
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
@@ -7893,6 +7951,19 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"})
                 continue
+            if tk_set:
+                tk_loi = set()
+                for r, _h in valid_lines:
+                    for acc in (str(r[cfg["no"]] or "").strip(),
+                                str(r[cfg["co"]] or "").strip()):
+                        if acc and _misa_tk_fallback(acc, tk_set) is None:
+                            tk_loi.add(acc)
+                if tk_loi:
+                    bo_tk += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines),
+                                "trang_thai": "bỏ qua — TK %s không có trong danh mục "
+                                              "tài khoản MISA" % ", ".join(sorted(tk_loi))})
+                    continue
             ngay_dt = None
             ngay_str = str(first[cfg["ngayct"]] or "").strip()
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
@@ -7922,9 +7993,10 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 tt = _num0(r[cfg["tt"]])
                 ts = _num0(r[cfg["ts"]]) if cfg["ts"] is not None else None
                 tthue = _num0(r[cfg["tthue"]])
-                tk_thue = str(r[cfg["tk_thue"]] or "").strip() or None
-                no_acc = str(r[cfg["no"]] or "").strip()
-                co_acc = str(r[cfg["co"]] or "").strip()
+                # TK đối chiếu danh mục Account (FK), tự rút về TK cha nếu thiếu
+                tk_thue = tra_tk(r[cfg["tk_thue"]])
+                no_acc = tra_tk(r[cfg["no"]])
+                co_acc = tra_tk(r[cfg["co"]])
                 total_amount += tt
                 total_vat += tthue
                 mo_ta = ten_h or str(r[cfg["ten"]] or "")
@@ -8012,6 +8084,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": 0, "thieu_kho": [],
+                "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
@@ -8119,6 +8192,22 @@ def _snum(v):
     kỳ phân bổ CCDC ghi vào MISA thành 0 dù DM ghi 24)."""
     v = _to_num(v)
     return v if isinstance(v, (int, float)) else 0
+
+def _misa_tk_fallback(tk, tk_set):
+    """Đối chiếu số TÀI KHOẢN với danh mục TK thật của MISA (bảng Account —
+    các cột TK trên PUVoucherDetail có FOREIGN KEY sang đó, ghi TK không tồn
+    tại là dính lỗi FK_..._DebitAccount). TK không có thì RÚT VỀ TK CHA gần
+    nhất đang tồn tại (vd công ty không mở tiểu khoản 2421 -> dùng 242, đúng
+    tình huống thật: mua CCDC Nợ 2421 báo lỗi FK còn TSCĐ Nợ 2111 thì có TK
+    nên ghi được). Trả TK dùng được (>=3 số) hoặc None nếu không rút được."""
+    t = str(tk or "").strip()
+    if not t:
+        return None
+    while len(t) >= 3:
+        if t in tk_set:
+            return t
+        t = t[:-1]
+    return None
 
 def _misa_dvsd_map(cur):
     """Bảng mã 'Đơn vị sử dụng'/'Đối tượng phân bổ' (vd 'VP') -> ID — xác

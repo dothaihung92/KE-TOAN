@@ -3171,6 +3171,10 @@ async function muaHangImportMisa(loai){
         ⚠ Có <b>${pv.so_tien_0}</b> chứng từ TỔNG TIỀN = 0 (cột tô đỏ ở dưới) → khả năng cao "Đơn giá"/"Thành tiền" đang TRỐNG cho (các) hóa đơn này trong Bảng kê Đầu vào. Kiểm tra lại 2 cột đó trước khi ghi/ghi đè.</div>`:''}
       ${(pv.thieu_kho&&pv.thieu_kho.length)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ MISA chưa có kho mã <b>${pv.thieu_kho.map(misaEsc).join(', ')}</b> — cột "Kho" của các dòng này sẽ bị bỏ trống (mở chứng từ trong MISA có thể báo lỗi). Vào MISA: <b>Danh mục → Kho</b> tạo kho với đúng mã trên rồi bấm "Ghi đè" lại.</div>`:''}
+      ${(pv.tk_thay&&pv.tk_thay.length)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ Tài khoản trong Bảng kê KHÔNG có trong danh mục TK MISA, đã tự rút về TK cha: <b>${pv.tk_thay.map(misaEsc).join(', ')}</b> — muốn giữ đúng tiểu khoản thì vào MISA: <b>Danh mục → Hệ thống tài khoản</b> mở thêm tiểu khoản rồi Ghi đè lại.</div>`:''}
+      ${pv.so_bo_qua_tk>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Bỏ qua <b>${pv.so_bo_qua_tk}</b> chứng từ vì TK Nợ/Có không có trong danh mục tài khoản MISA (xem cột Trạng thái) — kiểm tra lại số TK trong Bảng kê hoặc mở thêm TK trong MISA.</div>`:''}
       ${khongDoLoai?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#a03a3a;margin-bottom:8px">
         ⚠ Không dò được loại chứng từ MISA phù hợp cho ${MUA_HANG_TEN[loai]} — MISA chưa có tên loại chứng từ khớp từ khóa mong đợi.
         <button class="btn ghost sm" style="margin-left:6px" onclick="misaXemLoaiChungTu('${misaEsc(pv.database||'').replace(/'/g,"\\'")}','${loai==='dv'?'PUService':'PUVoucher'}')">🔎 Xem danh sách loại chứng từ MISA</button></div>`:''}
@@ -3228,6 +3232,10 @@ async function muaHangImportMisaGhi(loai,ghiDe){
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
       ${tktHtml}
+      ${(d.tk_thay&&d.tk_thay.length)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ TK không có trong danh mục MISA, đã tự rút về TK cha: <b>${d.tk_thay.map(misaEsc).join(', ')}</b></div>`:''}
+      ${d.so_bo_qua_tk>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Bỏ qua ${d.so_bo_qua_tk} chứng từ vì TK Nợ/Có không có trong danh mục tài khoản MISA.</div>`:''}
       ${d.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_ngay_loi} chứng từ không đọc được ngày gốc, đã ghi tạm bằng NGÀY HÔM NAY — kiểm tra bộ lọc "Kỳ" trên MISA có bao gồm hôm nay không.</div>`:''}
       ${d.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
