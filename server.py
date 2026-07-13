@@ -7559,10 +7559,14 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     "InvNo": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
                     "InvDate": ngay_dt, "InvSeries": "", "InvTemplateNo": "",
                 }))
-            # DisplayOnBook lấy theo chứng từ MISA THẬT (hoc_dob) để hiện đúng
-            # sổ như chúng; mặc định 3 = hiện cả sổ tài chính lẫn quản trị khi
-            # chưa học được (an toàn hơn 1 = chỉ 1 sổ, dễ bị "ẩn" ở sổ đang xem).
-            dob = hoc_dob if hoc_dob is not None else 3
+            # DisplayOnBook BẮT BUỘC phải lọt bộ lọc thật của màn hình MISA
+            # "Mua hàng hóa, dịch vụ": DisplayOnBook IN (0, 2) — bắt được từ
+            # câu lệnh MISA thực thi. Bài học thực tế: khi công ty không còn
+            # chứng từ thật nào để học (hoc_dob=None), mặc định cũ 3 làm chứng
+            # từ TRƯỢT bộ lọc và biến mất khỏi lưới (tự kiểm tra chỉ ra đích
+            # danh cột này). Mặc định 0 = hiện trên cả 2 sổ; giá trị học được
+            # cũng phải thuộc (0,2) mới dùng.
+            dob = hoc_dob if hoc_dob in (0, 2) else 0
             ten_ncc_dg = ten_ncc_misa or str(first[cfg["ten_ncc"]] or "")
             so_hd_dg = str(first[cfg["sohd"]] or "").strip() if cfg["sohd"] is not None else ""
             dien_giai = ("Mua hàng - %s - %s %s" %
@@ -7941,7 +7945,8 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                     "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
                     "SortOrder": idx,
                 }))
-            dob = hoc_dob if hoc_dob is not None else 3
+            # DisplayOnBook phải thuộc (0,2) — xem giải thích ở _misa_ghi_mua_hang
+            dob = hoc_dob if hoc_dob in (0, 2) else 0
             ten_ncc_dg = ten_ncc_misa or str(first[cfg["ten_ncc"]] or "")
             so_hd_dg = str(first[cfg["sohd"]] or "").strip() if cfg["sohd"] is not None else ""
             dien_giai = ("Mua hàng - %s - %s %s" %
