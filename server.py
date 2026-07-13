@@ -8016,6 +8016,408 @@ def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: st
     return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
+# ============ GHI TĂNG TSCĐ / CCDC THẲNG VÀO MISA (FixedAsset / SUIncrement) ==
+# KHÁC Mua hàng: đây KHÔNG phải "chứng từ" (không có SYSRefType/loại chứng từ
+# trên form Excel mẫu) mà là GHI TĂNG DANH MỤC tài sản/CCDC — xem yêu cầu của
+# anh: "không phải ghi tăng chứng từ mà chỉ là ghi tăng danh mục tài sản và
+# ccdc". Dữ liệu lấy ĐÚNG công thức đã dùng cho file Excel mẫu MISA
+# (_gen_ghi_tang_tscd/_gen_ghi_tang_ccdc — đã đối chiếu byte-for-byte với
+# form Excel MISA thật ở phần trước). CSDL công ty này CHƯA có bản ghi
+# FixedAsset/SUIncrement nào (2 bảng đang TRỐNG) nên KHÔNG có "mẫu thật" để
+# học quy ước như Mua hàng — thay vì đoán bừa danh sách cột, DÒ TÊN CỘT THẬT
+# qua sys.columns lúc chạy (không hard-code) rồi mới liệt kê ĐỦ MỌI CỘT THẬT
+# khi INSERT (đúng bài học từ Mua hàng: bỏ sót cột dễ dính DEFAULT constraint
+# lạ, vi phạm FK ẩn). Với từng trường cần điền dữ liệu thật, thử NHIỀU TÊN
+# ỨNG VIÊN hợp lý — cột nào không khớp thì bỏ qua (giữ giá trị mặc định theo
+# kiểu dữ liệu), KHÔNG làm hỏng câu lệnh. Không có cột CustomField trên 2
+# bảng này (khác PUVoucher/PUService) nên KHÔNG dùng được _PM_MARK; thay vào
+# đó chỉ dựa vào cờ ĐÃ GHI SỔ (IsPostedFinance/IsPostedManagement, nếu có) để
+# quyết định ghi_de — bản ghi ĐÃ GHI SỔ không bao giờ bị đụng, y hệt nguyên
+# tắc an toàn của Mua hàng.
+def _misa_cot_bang_that(cur, table):
+    """Trả {tên cột viết thường: (tên cột thật, kiểu SQL)} của bảng THẬT
+    trong CSDL MISA đang kết nối — loại cột rowversion (timestamp, vd
+    EditVersion), cột computed và cột identity (không được phép ghi tay)."""
+    try:
+        rows = cur.execute(
+            "SELECT c.name, ty.name FROM sys.columns c "
+            "JOIN sys.types ty ON ty.user_type_id = c.user_type_id "
+            "WHERE c.object_id = OBJECT_ID(?) AND ty.name <> 'timestamp' "
+            "AND c.is_computed = 0 AND c.is_identity = 0 "
+            "ORDER BY c.column_id", table).fetchall()
+    except Exception:
+        return {}
+    return {str(n).strip().lower(): (n, t) for n, t in rows}
+
+def _misa_gia_tri_mac_dinh(sqltype):
+    """Giá trị mặc định AN TOÀN theo kiểu SQL khi liệt kê đủ mọi cột: số/bit
+    -> 0 (tránh NULL trên cột NOT NULL không có default), còn lại -> NULL
+    tường minh (tránh dính DEFAULT constraint lạ — xem lý do ở đầu mục Mua
+    hàng)."""
+    t = (sqltype or "").lower()
+    if t in ("bit", "int", "smallint", "tinyint", "bigint", "money",
+             "smallmoney", "decimal", "numeric", "float", "real"):
+        return 0
+    return None
+
+def _misa_chon_cot(cols_that, *ung_vien):
+    """Trả TÊN CỘT THẬT đầu tiên (trong danh sách ứng viên hợp lý, không
+    phân biệt hoa/thường) đang thật sự tồn tại trên bảng; None nếu không cột
+    nào khớp (khi đó trường tương ứng được bỏ qua, không đoán bừa tên cột)."""
+    for uv in ung_vien:
+        hit = cols_that.get(uv.lower())
+        if hit:
+            return hit[0]
+    return None
+
+def _misa_gan(row, cols_that, gt, *ung_vien):
+    ten = _misa_chon_cot(cols_that, *ung_vien)
+    if ten:
+        row[ten] = gt
+
+def _misa_doc_ngay(s):
+    s = str(s or "").strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.datetime.strptime(s, fmt)
+        except Exception:
+            pass
+    return None
+
+def _misa_dvsd_map(cur):
+    """Bảng mã 'Đơn vị sử dụng'/'Đối tượng phân bổ' (vd 'VP') -> ID — chưa rõ
+    MISA lưu ở Department hay OrganizationUnit (CSDL công ty này chưa có Ghi
+    tăng nào để đối chiếu), thử cả 2, ưu tiên Department nếu trùng mã."""
+    m = {}
+    for tbl, code_col in (("OrganizationUnit", "OrganizationUnitCode"),
+                          ("Department", "DepartmentCode")):
+        try:
+            for oid, code in cur.execute(
+                    "SELECT %sID, %s FROM %s" % (tbl, code_col, tbl)).fetchall():
+                if code:
+                    m[str(code).strip().upper()] = oid
+        except Exception:
+            pass
+    return m
+
+def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
+    """Ghi tăng TSCĐ thẳng vào bảng FixedAsset — mỗi dòng Excel = 1 tài sản =
+    1 dòng FixedAsset (KHÔNG gộp nhiều dòng như Mua hàng — Ghi tăng TSCĐ
+    không phải chứng từ nhiều dòng, mỗi tài sản độc lập). Nhận diện tài sản
+    ĐÃ GHI vào MISA qua Mã tài sản (FixedAssetCode, theo đúng dãy mã tự sinh
+    TSCD00001... của phần mềm)."""
+    import uuid as _uuid
+    header, rows = _doc_nhap_lieu(cid, "in")
+    out = _gen_ghi_tang_tscd(cid, header, rows)
+    if not out:
+        return {"preview": preview, "database": database, "so_them": 0, "so_trung": 0,
+                "danh_sach": [],
+                "ghi_chu": "Chưa có tài sản cố định nào (Nợ 2111/211) trong Bảng kê đầu vào."}
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        branch_id = _misa_branch_id(cur)
+        cols = _misa_cot_bang_that(cur, "FixedAsset")
+        if not cols:
+            raise HTTPException(400, "Không tìm thấy bảng FixedAsset trong CSDL MISA đang kết nối.")
+        cat_map = {}
+        try:
+            for catid, code in cur.execute(
+                    "SELECT FixedAssetCategoryID, FixedAssetCategoryCode "
+                    "FROM FixedAssetCategory").fetchall():
+                if code:
+                    cat_map[str(code).strip()] = catid
+        except Exception:
+            pass
+        dvsd_map = _misa_dvsd_map(cur)
+        ma_col = _misa_chon_cot(cols, "FixedAssetCode")
+        id_col = _misa_chon_cot(cols, "FixedAssetID", "RefID")
+        pf_col = _misa_chon_cot(cols, "IsPostedFinance")
+        pm_col = _misa_chon_cot(cols, "IsPostedManagement")
+        existed = {}
+        if ma_col and id_col:
+            try:
+                sel = "SELECT [%s],[%s]" % (id_col, ma_col)
+                sel += (",ISNULL([%s],0)" % pf_col) if pf_col else ",0"
+                sel += (",ISNULL([%s],0)" % pm_col) if pm_col else ",0"
+                sel += " FROM FixedAsset"
+                for rid, ma, pf, pm in cur.execute(sel).fetchall():
+                    if ma:
+                        existed[str(ma).strip().lower()] = {"id": rid, "posted": bool(pf or pm)}
+            except Exception:
+                pass
+        now = datetime.datetime.now()
+        them = trung = go = 0
+        ket = []
+        for r in out:
+            (ma, ten, loai, dtpb, e, ngct, ngkh, tkng, tkkh, ng_gia, gt_kh, dvt_tg,
+             tg_sd, ty_le_kh, kh_thang, hao_mon, dtpb2, ty_le_pb, tkcp, _kmcp, _mts) = \
+                (list(r) + [""] * 21)[:21]
+            k = str(ma).strip().lower()
+            ghi_de_ts = False
+            if k in existed:
+                if existed[k]["posted"]:
+                    trung += 1
+                    ket.append({"ma": ma, "ten": ten,
+                                "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                    continue
+                if not ghi_de:
+                    trung += 1
+                    ket.append({"ma": ma, "ten": ten,
+                                "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                    continue
+                ghi_de_ts = True
+                if not preview:
+                    try:
+                        cur.execute("DELETE FROM FixedAsset WHERE [%s]=?" % id_col,
+                                   existed[k]["id"])
+                    except Exception:
+                        pass
+            ngay_dt = _misa_doc_ngay(ngct) or now
+            ngay_kh_dt = _misa_doc_ngay(ngkh) or ngay_dt
+            row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols.values()}
+            _misa_gan(row, cols, str(_uuid.uuid4()), "FixedAssetID", "RefID")
+            _misa_gan(row, cols, branch_id, "BranchID")
+            _misa_gan(row, cols, str(ma)[:50], "FixedAssetCode")
+            _misa_gan(row, cols, str(ten)[:255], "FixedAssetName")
+            catid = cat_map.get(str(loai).strip())
+            if catid is not None:
+                _misa_gan(row, cols, catid, "FixedAssetCategoryID")
+            dvid = dvsd_map.get(str(dtpb).strip().upper())
+            if dvid is not None:
+                _misa_gan(row, cols, dvid, "DepartmentID", "UsingDepartmentID", "OrganizationUnitID")
+            _misa_gan(row, cols, str(e)[:20], "RefNoManagement", "RefNo")
+            _misa_gan(row, cols, str(e)[:20], "RefNoFinance")
+            _misa_gan(row, cols, ngay_dt, "RefDate")
+            _misa_gan(row, cols, ngay_dt, "PostedDate")
+            _misa_gan(row, cols, ngay_kh_dt, "DepreciationDate", "StartDepreciationDate")
+            _misa_gan(row, cols, str(tkng or ""), "OriginalPriceAccount", "OrgPriceAccount")
+            _misa_gan(row, cols, str(tkkh or ""), "DepreciationAccount", "AccumDepreciationAccount")
+            _misa_gan(row, cols, _num0(ng_gia), "OrgPrice", "OriginalPrice")
+            _misa_gan(row, cols, _num0(gt_kh), "DepreciationValue", "DepreciationCost",
+                     "DepreciationAmount")
+            _misa_gan(row, cols, _num0(tg_sd), "LifeTime")
+            _misa_gan(row, cols, _num0(dvt_tg), "LifeTimeUnit", "LifeTimeType")
+            _misa_gan(row, cols, _num0(ty_le_kh), "DepreciationRateMonth", "DepreciationRate")
+            _misa_gan(row, cols, _num0(kh_thang), "MonthlyDepreciationAmount",
+                     "DepreciationAmountMonth")
+            _misa_gan(row, cols, _num0(hao_mon), "AccumDepreciationAmount",
+                     "AccumulatedDepreciationAmount")
+            _misa_gan(row, cols, _num0(ty_le_pb), "AllocationRate")
+            _misa_gan(row, cols, str(tkcp or ""), "ExpenseAccount", "CostAccount")
+            _misa_gan(row, cols, 0, "IsPostedFinance")
+            _misa_gan(row, cols, 0, "IsPostedManagement")
+            _misa_gan(row, cols, ("Ghi tăng tài sản - %s" % ten)[:500], "JournalMemo", "Reason")
+            _misa_gan(row, cols, now, "CreatedDate")
+            _misa_gan(row, cols, now, "ModifiedDate")
+            if not preview:
+                cs = list(row.keys())
+                cur.execute("INSERT INTO FixedAsset ([%s]) VALUES (%s)" %
+                           ("],[".join(cs), ",".join(["?"] * len(cs))),
+                           [row[c] for c in cs])
+            them += 1
+            if ghi_de_ts:
+                go += 1
+            ket.append({"ma": ma, "ten": ten, "nguyen_gia": _num0(ng_gia),
+                        "trang_thai": ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ts
+                                    else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
+                "so_ghi_de": go, "danh_sach": ket[:500]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
+    """Ghi tăng CCDC thẳng vào SUIncrement (chứng từ, gộp theo Số chứng từ
+    ghi tăng — giống PUVoucher) + SUIncrementDetail (từng CCDC). An toàn
+    ghi_de CHỈ dựa vào cờ đã ghi sổ (không có CustomField để đánh dấu riêng
+    của phần mềm như Mua hàng): chứng từ CHƯA ghi sổ trùng số -> cho ghi đè;
+    chứng từ ĐÃ ghi sổ -> không bao giờ đụng vào, dù ghi_de=True."""
+    import uuid as _uuid
+    header, rows = _doc_nhap_lieu(cid, "in")
+    out = _gen_ghi_tang_ccdc(cid, header, rows)
+    if not out:
+        return {"preview": preview, "database": database, "so_chungtu": 0, "so_dong": 0,
+                "so_trung": 0, "danh_sach": [],
+                "ghi_chu": "Chưa có CCDC nào (Nợ 2421/242) trong Bảng kê đầu vào."}
+    groups, order = {}, []
+    for r in out:
+        doc = str(r[4] or "").strip()
+        if not doc:
+            continue
+        if doc not in groups:
+            groups[doc] = []
+            order.append(doc)
+        groups[doc].append(r)
+
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        branch_id = _misa_branch_id(cur)
+        cols_h = _misa_cot_bang_that(cur, "SUIncrement")
+        cols_d = _misa_cot_bang_that(cur, "SUIncrementDetail")
+        if not cols_h or not cols_d:
+            raise HTTPException(400, "Không tìm thấy bảng SUIncrement/SUIncrementDetail "
+                                     "trong CSDL MISA đang kết nối.")
+        dvsd_map = _misa_dvsd_map(cur)
+        rid_h = _misa_chon_cot(cols_h, "RefID", "SUIncrementID")
+        rn_h = _misa_chon_cot(cols_h, "RefNoManagement", "RefNo")
+        pf_h = _misa_chon_cot(cols_h, "IsPostedFinance")
+        pm_h = _misa_chon_cot(cols_h, "IsPostedManagement")
+        rid_d = _misa_chon_cot(cols_d, "RefID")
+        posted_refno, unposted_docs = set(), {}
+        if rid_h and rn_h:
+            try:
+                sel = "SELECT [%s],[%s]" % (rid_h, rn_h)
+                sel += (",ISNULL([%s],0)" % pf_h) if pf_h else ",0"
+                sel += (",ISNULL([%s],0)" % pm_h) if pm_h else ",0"
+                sel += " FROM SUIncrement"
+                for refid, rn, pf, pm in cur.execute(sel).fetchall():
+                    if not rn:
+                        continue
+                    k = str(rn).strip().lower()
+                    if pf or pm:
+                        posted_refno.add(k)
+                    else:
+                        unposted_docs.setdefault(k, []).append(refid)
+            except Exception:
+                pass
+        now = datetime.datetime.now()
+        them_ct = them_dong = trung = go = 0
+        ket = []
+        for doc in order:
+            lines = groups[doc]
+            k_doc = doc.strip().lower()
+            if k_doc in posted_refno:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                continue
+            if k_doc in unposted_docs and not ghi_de:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines),
+                            "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                continue
+            ghi_de_ct = k_doc in unposted_docs
+            if ghi_de_ct and not preview and rid_d:
+                for hid in unposted_docs[k_doc]:
+                    try:
+                        cur.execute("DELETE FROM SUIncrementDetail WHERE [%s]=?" % rid_d, hid)
+                        cur.execute("DELETE FROM SUIncrement WHERE [%s]=?" % rid_h, hid)
+                    except Exception:
+                        pass
+            ref_id = str(_uuid.uuid4())
+            total_amount = 0
+            detail_rows = []
+            for idx, r in enumerate(lines, 1):
+                (ma, ten, _loai, ly_do, e, ngct, tk_cho_pb, dvt, sl, dgia, tt, so_ky, tien_ky,
+                 dvsd, sl_dvsd, dtpb, ty_le_pb, tkcp, _kmcp) = (list(r) + [""] * 19)[:19]
+                tt_n = _num0(tt)
+                total_amount += tt_n
+                drow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_d.values()}
+                _misa_gan(drow, cols_d, str(_uuid.uuid4()), "RefDetailID", "SUIncrementDetailID")
+                _misa_gan(drow, cols_d, ref_id, "RefID")
+                _misa_gan(drow, cols_d, str(ma)[:50], "SupplyCode", "CCDCCode")
+                _misa_gan(drow, cols_d, str(ten)[:255], "SupplyName", "CCDCName")
+                _misa_gan(drow, cols_d, _num0(sl), "Quantity")
+                _misa_gan(drow, cols_d, _num0(dgia), "UnitPrice")
+                _misa_gan(drow, cols_d, tt_n, "Amount")
+                _misa_gan(drow, cols_d, _num0(so_ky), "AllocationTime", "TermlyNumOfPeriod")
+                _misa_gan(drow, cols_d, _num0(tien_ky), "TermlyAllocationAmount",
+                         "MonthlyAllocationAmount")
+                _misa_gan(drow, cols_d, str(tk_cho_pb or ""), "AllocationAccount",
+                         "WaitingAllocationAccount")
+                _misa_gan(drow, cols_d, str(tkcp or ""), "ExpenseAccount", "CostAccount")
+                _misa_gan(drow, cols_d, _num0(ty_le_pb), "AllocationRate")
+                dvid = dvsd_map.get(str(dvsd).strip().upper())
+                if dvid is not None:
+                    _misa_gan(drow, cols_d, dvid, "DepartmentID", "UsingDepartmentID",
+                             "OrganizationUnitID")
+                _misa_gan(drow, cols_d, _num0(sl_dvsd), "UsingQuantity")
+                _misa_gan(drow, cols_d, str(ly_do or "")[:500], "ReasonIncrement", "Reason")
+                _misa_gan(drow, cols_d, idx - 1, "SortOrder")
+                detail_rows.append(drow)
+            first = lines[0]
+            ngay_dt = _misa_doc_ngay(first[5]) or now
+            hrow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_h.values()}
+            _misa_gan(hrow, cols_h, ref_id, "RefID", "SUIncrementID")
+            _misa_gan(hrow, cols_h, branch_id, "BranchID")
+            _misa_gan(hrow, cols_h, str(doc)[:20], "RefNoManagement", "RefNo")
+            _misa_gan(hrow, cols_h, str(doc)[:20], "RefNoFinance")
+            _misa_gan(hrow, cols_h, ngay_dt, "RefDate")
+            _misa_gan(hrow, cols_h, ngay_dt, "PostedDate")
+            _misa_gan(hrow, cols_h, 0, "IsPostedFinance")
+            _misa_gan(hrow, cols_h, 0, "IsPostedManagement")
+            _misa_gan(hrow, cols_h, total_amount, "TotalAmount")
+            _misa_gan(hrow, cols_h, total_amount, "TotalAmountOC")
+            _misa_gan(hrow, cols_h, ("Ghi tăng CCDC - %s" % doc)[:500], "JournalMemo", "Reason")
+            _misa_gan(hrow, cols_h, now, "CreatedDate")
+            _misa_gan(hrow, cols_h, now, "ModifiedDate")
+            if not preview:
+                hc = list(hrow.keys())
+                cur.execute("INSERT INTO SUIncrement ([%s]) VALUES (%s)" %
+                           ("],[".join(hc), ",".join(["?"] * len(hc))),
+                           [hrow[c] for c in hc])
+                for d in detail_rows:
+                    dc = list(d.keys())
+                    cur.execute("INSERT INTO SUIncrementDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(dc), ",".join(["?"] * len(dc))),
+                               [d[c] for c in dc])
+            them_ct += 1
+            them_dong += len(detail_rows)
+            if ghi_de_ct:
+                go += 1
+            ket.append({"so_ct": doc, "so_dong": len(detail_rows), "tong_tien": total_amount,
+                        "trang_thai": ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct
+                                    else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_chungtu": them_ct,
+                "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
+                "danh_sach": ket[:500]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+@app.post("/api/misa-sql/import-ghitang/{cid}")
+def misa_sql_import_ghitang(cid: int, loai: str, preview: int = 1, database: str = "",
+                            ghi_de: int = 0):
+    """Ghi tăng TSCĐ (loai='tscd' -> bảng FixedAsset) / CCDC (loai='ccdc' ->
+    bảng SUIncrement/SUIncrementDetail) thẳng vào MISA, đúng dữ liệu đã dùng
+    cho file Excel mẫu Ghi Tăng TSCĐ/CCDC. Đây là GHI TĂNG DANH MỤC tài sản/
+    CCDC (không phải chứng từ nhiều loại như Mua hàng). preview=1 -> chỉ xem
+    trước, không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ. ghi_de=1 -> gỡ bản
+    ghi CHƯA GHI SỔ trùng mã/số rồi ghi lại — không bao giờ đụng bản ghi đã
+    ghi sổ."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    if loai == "ccdc":
+        return _misa_ghi_tang_ccdc(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+    if loai == "tscd":
+        return _misa_ghi_tang_tscd(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+    raise HTTPException(400, "Loại '%s' chưa hỗ trợ (chỉ tscd/ccdc)." % loai)
+
+
 @app.get("/api/danh-muc-ncc/{cid}")
 def danh_muc_ncc(cid: int):
     """Tạo file Danh mục KH/NCC từ dữ liệu hóa đơn mua vào + bán ra.
