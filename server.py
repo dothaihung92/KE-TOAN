@@ -7148,6 +7148,77 @@ _PU_SERVICE_DET_DEFAULT = {
     "VATRate406": None, "VATRateOther": None,
 }
 
+def _misa_tu_kiem_tra_muahang(cur, ref_ids, branch_id, bang_chinh, ket):
+    """TỰ KIỂM TRA sau khi ghi Mua hàng: chạy lại đúng view + BỘ LỌC THẬT của
+    màn hình MISA "Mua hàng hóa, dịch vụ" (bắt được từ câu lệnh MISA thực thi:
+    View_PUVoucherService WHERE PostedDate trong kỳ + BranchID + DisplayOnBook
+    IN (0,2)). Khi có chứng từ KHÔNG lọt bộ lọc, TỰ CHẨN ĐOÁN đích danh lý do
+    từng chứng từ: (a) không có mặt trong view (view JOIN rớt — vd thiếu hóa
+    đơn kèm/loại chứng từ), hay (b) có trong view nhưng trượt 1 trong 3 điều
+    kiện lọc — kèm giá trị PostedDate/BranchID/DisplayOnBook THẬT đã ghi để
+    so. bang_chinh: 'PUVoucher' (nk/kqk) hoặc 'PUService' (dv). Gắn cờ
+    view_thay vào từng dòng ket. Trả dict tu_kiem_tra."""
+    try:
+        ph = ",".join(["?"] * len(ref_ids))
+        thay = cur.execute(
+            "SELECT RefID FROM View_PUVoucherService WHERE RefID IN (%s) "
+            "AND PostedDate IS NOT NULL AND BranchID=? "
+            "AND (DisplayOnBook = 0 OR DisplayOnBook = 2)" % ph,
+            ref_ids + [branch_id]).fetchall()
+        thay_ids = {str(r[0]).upper() for r in thay}
+        for x in ket:
+            if x.get("ref_id"):
+                x["view_thay"] = str(x["ref_id"]).upper() in thay_ids
+        tkt = {
+            "view": "View_PUVoucherService (kèm đúng bộ lọc thật của màn hình MISA: "
+                    "PostedDate + chi nhánh + DisplayOnBook 0/2)",
+            "so_ghi": len(ref_ids), "so_view_thay": len(thay),
+            "ket_luan": ("Chứng từ LỌT QUA đúng bộ lọc màn hình MISA -> sẽ hiện "
+                        "trên lưới (bấm 'Lấy dữ liệu' trên MISA)."
+                        if len(thay) == len(ref_ids) else
+                        "Chứng từ KHÔNG lọt qua bộ lọc màn hình MISA — xem chẩn "
+                        "đoán từng dòng bên dưới."),
+        }
+        if len(thay) != len(ref_ids):
+            # chẩn đoán: chứng từ có MẶT trong view không (không kèm lọc)?
+            trong_view = set()
+            try:
+                trong_view = {str(r[0]).upper() for r in cur.execute(
+                    "SELECT RefID FROM View_PUVoucherService WHERE RefID IN (%s)" % ph,
+                    ref_ids).fetchall()}
+            except Exception:
+                pass
+            # giá trị THẬT đã ghi của 3 cột bị lọc
+            dong_loi = []
+            try:
+                for rid, rn, pd, br, dob in cur.execute(
+                        "SELECT RefID, RefNoManagement, PostedDate, BranchID, DisplayOnBook "
+                        "FROM %s WHERE RefID IN (%s)" % (bang_chinh, ph),
+                        ref_ids).fetchall():
+                    k = str(rid).upper()
+                    if k in thay_ids:
+                        continue
+                    dong_loi.append({
+                        "so_ct": rn,
+                        "trong_view": k in trong_view,
+                        "posted_date": (pd.strftime("%d/%m/%Y")
+                                        if hasattr(pd, "strftime") else str(pd or "NULL")),
+                        "dung_chi_nhanh": (str(br).upper() == str(branch_id).upper()
+                                           if br is not None and branch_id is not None else False),
+                        "display_on_book": dob,
+                    })
+            except Exception:
+                pass
+            tkt["dong_loi"] = dong_loi[:50]
+            tkt["goi_y"] = ("Chứng từ KHÔNG có mặt trong View_PUVoucherService -> "
+                            "view JOIN rớt (vd bảng hóa đơn kèm/loại chứng từ)."
+                            if dong_loi and not any(d["trong_view"] for d in dong_loi) else
+                            "Chứng từ CÓ trong view nhưng trượt bộ lọc — so 3 cột "
+                            "PostedDate / đúng chi nhánh / DisplayOnBook ở bảng dưới.")
+        return tkt
+    except Exception as e:
+        return {"loi": "Không tự kiểm tra được view: %s" % str(e)[:200]}
+
 def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
     """Ghi chứng từ Mua hàng NHẬP KHO/KHÔNG QUA KHO (loai: nk/kqk) thẳng vào
     PUVoucher — xem cảnh báo ở đầu file. loai='dv' (Mua hàng dịch vụ) KHÔNG
@@ -7617,30 +7688,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         if not preview and them_ct:
             ref_ids = [x["ref_id"] for x in ket if x.get("ref_id")]
             if ref_ids:
-                try:
-                    ph = ",".join(["?"] * len(ref_ids))
-                    thay = cur.execute(
-                        "SELECT RefID FROM View_PUVoucherService WHERE RefID IN (%s) "
-                        "AND PostedDate IS NOT NULL AND BranchID=? "
-                        "AND (DisplayOnBook = 0 OR DisplayOnBook = 2)" % ph,
-                        ref_ids + [branch_id]).fetchall()
-                    thay_ids = {str(r[0]).upper() for r in thay}
-                    tu_kiem_tra = {
-                        "view": "View_PUVoucherService (kèm đúng bộ lọc thật của màn hình MISA: "
-                                "PostedDate + chi nhánh + DisplayOnBook 0/2)",
-                        "so_ghi": len(ref_ids), "so_view_thay": len(thay),
-                        "ket_luan": ("Chứng từ LỌT QUA đúng bộ lọc màn hình MISA -> sẽ hiện "
-                                    "trên lưới (bấm 'Lấy dữ liệu' trên MISA)."
-                                    if len(thay) == len(ref_ids) else
-                                    "Chứng từ KHÔNG lọt qua bộ lọc màn hình MISA "
-                                    "(PostedDate/chi nhánh/DisplayOnBook) — gửi lại kết quả này."),
-                    }
-                    # gắn kết quả tự kiểm tra vào từng dòng tương ứng
-                    for x in ket:
-                        if x.get("ref_id"):
-                            x["view_thay"] = str(x["ref_id"]).upper() in thay_ids
-                except Exception as e:
-                    tu_kiem_tra = {"loi": "Không tự kiểm tra được view: %s" % str(e)[:200]}
+                tu_kiem_tra = _misa_tu_kiem_tra_muahang(cur, ref_ids, branch_id,
+                                                        "PUVoucher", ket)
         for x in ket:
             x.pop("ref_id", None)
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
@@ -7949,29 +7998,8 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         if not preview and them_ct:
             ref_ids = [x["ref_id"] for x in ket if x.get("ref_id")]
             if ref_ids:
-                try:
-                    ph = ",".join(["?"] * len(ref_ids))
-                    thay = cur.execute(
-                        "SELECT RefID FROM View_PUVoucherService WHERE RefID IN (%s) "
-                        "AND PostedDate IS NOT NULL AND BranchID=? "
-                        "AND (DisplayOnBook = 0 OR DisplayOnBook = 2)" % ph,
-                        ref_ids + [branch_id]).fetchall()
-                    thay_ids = {str(r[0]).upper() for r in thay}
-                    tu_kiem_tra = {
-                        "view": "View_PUVoucherService (kèm đúng bộ lọc thật của màn hình MISA: "
-                                "PostedDate + chi nhánh + DisplayOnBook 0/2)",
-                        "so_ghi": len(ref_ids), "so_view_thay": len(thay),
-                        "ket_luan": ("Chứng từ LỌT QUA đúng bộ lọc màn hình MISA -> sẽ hiện "
-                                    "trên lưới (bấm 'Lấy dữ liệu' trên MISA)."
-                                    if len(thay) == len(ref_ids) else
-                                    "Chứng từ KHÔNG lọt qua bộ lọc màn hình MISA "
-                                    "(PostedDate/chi nhánh/DisplayOnBook) — gửi lại kết quả này."),
-                    }
-                    for x in ket:
-                        if x.get("ref_id"):
-                            x["view_thay"] = str(x["ref_id"]).upper() in thay_ids
-                except Exception as e:
-                    tu_kiem_tra = {"loi": "Không tự kiểm tra được view: %s" % str(e)[:200]}
+                tu_kiem_tra = _misa_tu_kiem_tra_muahang(cur, ref_ids, branch_id,
+                                                        "PUService", ket)
         for x in ket:
             x.pop("ref_id", None)
         return {"preview": preview, "database": database, "so_chungtu": them_ct,

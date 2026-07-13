@@ -3191,6 +3191,32 @@ async function muaHangImportMisaGhi(loai,ghiDe){
     const d=await api(`/api/misa-sql/import-mua-hang/${current}?loai=${loai}&preview=0&ghi_de=${ghiDe?1:0}`,{method:'POST'});
     const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de} chứng từ cũ)`:'';
     toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt} — CHƯA GHI SỔ.`,'ok');
+    // TỰ KIỂM TRA: đối chiếu với đúng view + bộ lọc thật của màn hình MISA
+    // "Mua hàng hóa, dịch vụ" — nếu có chứng từ bị lọc mất, hiện chẩn đoán
+    // đích danh lý do từng dòng (mất khỏi view / PostedDate / chi nhánh / DisplayOnBook).
+    let tktHtml='';
+    const tkt=d.tu_kiem_tra;
+    if(tkt){
+      if(tkt.loi){
+        tktHtml=`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">⚠ ${misaEsc(tkt.loi)}</div>`;
+      }else if(tkt.so_view_thay===tkt.so_ghi){
+        tktHtml=`<div style="background:#e8f6ee;border:1px solid #9dd6b5;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3c;margin-bottom:8px">
+          ✓ Tự kiểm tra: <b>${tkt.so_view_thay}/${tkt.so_ghi}</b> chứng từ lọt qua đúng bộ lọc màn hình MISA — bấm "Lấy dữ liệu" trên MISA sẽ thấy.</div>`;
+      }else{
+        const dl=(tkt.dong_loi||[]).map(x=>`<tr>
+          <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct||'')}</td>
+          <td style="border:1px solid #eee;padding:2px 6px;text-align:center;${x.trong_view?'':'color:#b91c1c;font-weight:700'}">${x.trong_view?'✓':'✗ MẤT'}</td>
+          <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(String(x.posted_date))}</td>
+          <td style="border:1px solid #eee;padding:2px 6px;text-align:center;${x.dung_chi_nhanh?'':'color:#b91c1c;font-weight:700'}">${x.dung_chi_nhanh?'✓':'✗'}</td>
+          <td style="border:1px solid #eee;padding:2px 6px;text-align:center">${x.display_on_book!=null?x.display_on_book:''}</td></tr>`).join('');
+        tktHtml=`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#a03a3a;margin-bottom:8px">
+          ⚠ Tự kiểm tra: chỉ <b>${tkt.so_view_thay}/${tkt.so_ghi}</b> chứng từ lọt bộ lọc màn hình MISA. ${misaEsc(tkt.goi_y||'')}
+          ${dl?`<div style="max-height:22vh;overflow:auto;margin-top:6px"><table style="border-collapse:collapse;font-size:11.5px;width:100%;background:#fff">
+            <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Trong view</th><th style="border:1px solid #eee;padding:2px 6px">PostedDate</th><th style="border:1px solid #eee;padding:2px 6px">Đúng CN</th><th style="border:1px solid #eee;padding:2px 6px">DisplayOnBook</th></tr>
+            ${dl}</table></div>`:''}
+          <div style="margin-top:4px">→ Chụp/gửi lại khung này để xử lý tiếp.</div></div>`;
+      }
+    }
     const dsGhi=(d.danh_sach||[]).filter(x=>x.ngay_ct);
     const dsRows=dsGhi.map(x=>{
       const ngayloi=!!x.ngay_loi;
@@ -3201,6 +3227,7 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td></tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
+      ${tktHtml}
       ${d.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_ngay_loi} chứng từ không đọc được ngày gốc, đã ghi tạm bằng NGÀY HÔM NAY — kiểm tra bộ lọc "Kỳ" trên MISA có bao gồm hôm nay không.</div>`:''}
       ${d.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
