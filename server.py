@@ -8634,6 +8634,12 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, now, "ModifiedDate")
             _misa_gan(row, cols, str(ly_do or "")[:255], "ReasonIncrement")
             _misa_gan(row, cols, False, "SuspendAllocate")
+            # id dòng "Đơn vị sử dụng" (SUIncrementDetailDepartment) — sinh
+            # TRƯỚC vì dòng sổ cái SupplyLedger thật trỏ RefDetailID về đây
+            # (đối chiếu dòng nhập tay GTCC00001: RefID=SupplyID nhưng
+            # RefDetailID là GUID KHÁC = dòng đơn vị sử dụng; trước đây gán
+            # RefDetailID=SupplyID nên lưới Ghi tăng JOIN trượt, không hiện).
+            dep_id = str(_uuid.uuid4())
             if not preview:
                 cs = list(row.keys())
                 cur.execute("INSERT INTO SUIncrement ([%s]) VALUES (%s)" %
@@ -8641,7 +8647,7 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                            [row[c] for c in cs])
                 if cols_dep:
                     drow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_dep.values()}
-                    _misa_gan(drow, cols_dep, str(_uuid.uuid4()), "SupplyDetailID")
+                    _misa_gan(drow, cols_dep, dep_id, "SupplyDetailID")
                     _misa_gan(drow, cols_dep, supply_id, "SupplyID")
                     _misa_gan(drow, cols_dep, dvid, "OrganizationUnitID")
                     _misa_gan(drow, cols_dep, 0, "SortOrder")
@@ -8688,7 +8694,8 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                         _misa_gan(lrow, cols_led, next_led_id, "SupplyLedgerID")
                         next_led_id += 1
                     _misa_gan(lrow, cols_led, supply_id, "RefID")
-                    _misa_gan(lrow, cols_led, supply_id, "RefDetailID")
+                    # RefDetailID = dòng ĐƠN VỊ SỬ DỤNG (không phải SupplyID)
+                    _misa_gan(lrow, cols_led, dep_id, "RefDetailID")
                     _misa_gan(lrow, cols_led, supply_id, "SupplyID")
                     _misa_gan(lrow, cols_led, hoc_rt, "RefType")
                     _misa_gan(lrow, cols_led, str(e)[:20], "RefNo")
@@ -8702,7 +8709,8 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                     _misa_gan(lrow, cols_led, _snum(tien_ky), "TermlyAllocationAmount")
                     _misa_gan(lrow, cols_led, branch_id, "BranchID")
                     _misa_gan(lrow, cols_led, 0, "SortOrder")
-                    _misa_gan(lrow, cols_led, max_reforder + them + 1, "RefOrder")
+                    # dòng thật để RefOrder=0 (khác FixedAssetLedger) — bắt chước
+                    _misa_gan(lrow, cols_led, 0, "RefOrder")
                     _misa_gan(lrow, cols_led, str(ma)[:25], "SupplyCode")
                     _misa_gan(lrow, cols_led, str(ten)[:255], "SupplyName")
                     _misa_gan(lrow, cols_led, dvid, "OrganizationUnitID")
