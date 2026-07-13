@@ -2372,7 +2372,8 @@ async function ghiTang(loai){
 const GHI_TANG_TEN={ccdc:'Ghi Tăng CCDC',tscd:'Ghi Tăng TSCĐ'};
 // Ghi tăng TSCĐ/CCDC THẲNG vào MISA (FixedAsset / SUIncrement) — GHI TĂNG
 // DANH MỤC tài sản/CCDC (không phải chứng từ nhiều loại như Mua hàng). Lấy
-// dữ liệu đúng công thức Excel mẫu. LUÔN ghi CHƯA GHI SỔ.
+// dữ liệu đúng công thức Excel mẫu. Ghi ĐÃ GHI SỔ luôn, số chứng từ = mã
+// (mỗi tài sản/CCDC 1 số riêng, tăng dần — tránh lỗi trùng số chứng từ).
 async function ghiTangImportMisa(loai){
   if(!current){toast('Chọn công ty trước','err');return}
   toast('Đang kiểm tra (xem trước)...','');
@@ -2395,9 +2396,8 @@ async function ghiTangImportMisa(loai){
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
         ⚠ RỦI RO CAO: đây là <b>${GHI_TANG_TEN[loai]}</b> — ghi vào <b>${misaEsc(pv.database||'?')}</b>
-        ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng bản ghi trong MISA kiểm tra rồi tự bấm "Ghi sổ".
-        Bảng ${laTscd?'FixedAsset':'SUIncrement'} còn ít dữ liệu mẫu thật để đối chiếu tên cột — nếu thiếu/sai trường nào,
-        gửi lại để chỉnh. Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
+        ở trạng thái <b>ĐÃ GHI SỔ</b> luôn, mỗi ${laTscd?'tài sản':'CCDC'} 1 số chứng từ riêng (= mã, tăng dần).
+        Mở MISA kiểm tra lại sau khi ghi. Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
       ${pv.khong_do_loai?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#a03a3a;margin-bottom:8px">
         ⚠ Không dò được loại chứng từ MISA phù hợp cho ${GHI_TANG_TEN[loai]}.
         <button class="btn ghost sm" style="margin-left:6px" onclick="misaXemLoaiChungTu('${misaEsc(pv.database||'').replace(/'/g,"\\'")}','${laTscd?'FixedAsset':'SUIncrement'}')">🔎 Xem danh sách loại chứng từ MISA</button></div>`:''}
@@ -2407,7 +2407,7 @@ async function ghiTangImportMisa(loai){
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
-        ${soTrung>0?`<button class="btn sm" style="background:#8a5300" onclick="ghiTangImportMisaGhi('${loai}',true)">♻ Ghi đè ${soTrung} (chưa ghi sổ)</button>`:''}
+        ${soTrung>0?`<button class="btn sm" style="background:#8a5300" onclick="ghiTangImportMisaGhi('${loai}',true)">♻ Ghi đè ${soTrung} đã có</button>`:''}
         ${soThem>0?`<button class="btn sm" style="background:#a03a3a" onclick="ghiTangImportMisaGhi('${loai}',false)">⬆ Ghi ${soThem} vào MISA</button>`:''}
       </div>`;
     document.getElementById('misaModal').style.display='flex';
@@ -2421,7 +2421,7 @@ async function ghiTangImportMisaGhi(loai,ghiDe){
     const donVi=loai==='tscd'?'tài sản':'CCDC';
     const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de})`:'';
     document.getElementById('misaModal').style.display='none';
-    toast(`✓ Đã ghi ${soThem} ${donVi} vào MISA${goTxt} — CHƯA GHI SỔ. Mở MISA kiểm tra rồi tự Ghi sổ.`,'ok');
+    toast(`✓ Đã ghi ${soThem} ${donVi} vào MISA${goTxt} — ĐÃ GHI SỔ, mỗi ${donVi} 1 số chứng từ riêng. Mở MISA kiểm tra lại.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 function moBangKe(loai){

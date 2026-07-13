@@ -5375,16 +5375,12 @@ def _doc_nhap_lieu(cid, loai="in"):
     except Exception:
         return [], []
 
-def _so_ct_ghitang(prefix, ngay):
-    p = str(ngay or "").replace("-", "/").split("/")
-    if len(p) == 3:
-        thang = str(int(p[1])) if p[1].isdigit() else p[1]
-        return f"{prefix}1/{thang}/{p[2]}"
-    return prefix + "1"
-
 def _gen_ghi_tang_ccdc(cid, header, rows):
     """Ghi tăng CCDC từ DM CCDC. Lý do ghi tăng = số HĐ; TK chờ phân bổ = 242;
-    các cột khác từ DM CCDC. Số tiền PB hàng kỳ = Thành tiền / Tổng số kỳ."""
+    các cột khác từ DM CCDC. Số tiền PB hàng kỳ = Thành tiền / Tổng số kỳ.
+    Số chứng từ ghi tăng = MÃ CCDC (mỗi CCDC 1 số riêng, tăng dần) — đúng quy
+    ước MISA (bản ghi nhập tay trên MISA: số chứng từ = mã, vd GTTS00001) và
+    tránh lỗi trùng số chứng từ khi ghi sổ."""
     cat, _ = _gen_danh_muc_ts(cid, "ccdc", header, rows)
     out = []
     for d in cat:
@@ -5394,15 +5390,16 @@ def _gen_ghi_tang_ccdc(cid, header, rows):
         hsd_n = _to_num(hsd) or 0
         m_pb = round(tt_n / hsd_n) if hsd_n else ""
         ngct = ngay_ght or ngay
-        e = _so_ct_ghitang("CCDC", ngct)
-        out.append([ma, ten, "", sohd, e, ngct, 242, dvt, sl, dgia, tt,
+        out.append([ma, ten, "", sohd, ma, ngct, 242, dvt, sl, dgia, tt,
                     hsd, m_pb, dtpb, 1, dtpb, 100, tkcp, ""])
     return out
 
 def _gen_ghi_tang_tscd(cid, header, rows):
     """Ghi tăng TSCĐ từ DM TSCĐ. Loại TS=12; TK nguyên giá 2111; TK khấu hao
     2141; Nguyên giá=Giá trị tính KH=thành tiền; ĐVT thời gian SD=0; Tỷ lệ KH
-    tháng=100; Thời gian SD=Hạn SD; Giá trị KH tháng=Giá trị KH/Thời gian SD."""
+    tháng=100; Thời gian SD=Hạn SD; Giá trị KH tháng=Giá trị KH/Thời gian SD.
+    Số chứng từ ghi tăng = MÃ TÀI SẢN (mỗi tài sản 1 số riêng, tăng dần) —
+    đúng quy ước MISA và tránh lỗi trùng số chứng từ khi ghi sổ."""
     cat, _ = _gen_danh_muc_ts(cid, "tscd", header, rows)
     out = []
     for d in cat:
@@ -5412,8 +5409,7 @@ def _gen_ghi_tang_tscd(cid, header, rows):
         hsd_n = _to_num(hsd) or 0
         kh_thang = round(tt_n / hsd_n) if hsd_n else ""
         ngct = ngay_ght or ngay
-        e = _so_ct_ghitang("TSCD", ngct)
-        out.append([ma, ten, 12, dtpb, e, ngct, ngct, 2111, 2141, tt, tt,
+        out.append([ma, ten, 12, dtpb, ma, ngct, ngct, 2111, 2141, tt, tt,
                     0, hsd, 100, kh_thang, "", dtpb, 100, tkcp, "", ""])
     return out
 
@@ -8273,15 +8269,15 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             k = str(ma).strip().lower()
             ghi_de_ts = False
             if k in existed:
-                if existed[k]["posted"]:
-                    trung += 1
-                    ket.append({"ma": ma, "ten": ten,
-                                "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
-                    continue
+                # Mã TSCD00001, TSCD00002... là DÃY DO PHẦN MỀM TỰ SINH nên
+                # bản ghi trùng mã chính là bản ghi phần mềm đã ghi lần trước
+                # — cho phép ghi đè kể cả khi đang mang cờ đã ghi sổ (giống
+                # nguyên tắc _PM_MARK bên Mua hàng; bản ghi người dùng tự tạo
+                # trên MISA mang mã kiểu GTTS00001 không bao giờ trùng dãy này).
                 if not ghi_de:
                     trung += 1
                     ket.append({"ma": ma, "ten": ten,
-                                "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                                "trang_thai": "đã có (bỏ qua — bấm Ghi đè để ghi lại)"})
                     continue
                 ghi_de_ts = True
                 if not preview:
@@ -8352,8 +8348,11 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, ng_gia_n - hao_mon_n, "RemainingAmount")
             _misa_gan(row, cols, _num0(ty_le_pb), "AllocationRate")
             _misa_gan(row, cols, str(tkcp or ""), "ExpenseAccount", "CostAccount")
-            _misa_gan(row, cols, 0, "IsPostedFinance")
-            _misa_gan(row, cols, 0, "IsPostedManagement")
+            # GHI SỔ LUÔN theo yêu cầu: ghi tăng danh mục TSCĐ không sinh bút
+            # toán Nợ/Có mới (hóa đơn mua đã hạch toán Nợ 211 ở Mua hàng) nên
+            # đặt cờ đã ghi sổ ngay, khỏi phải mở từng bản ghi bấm Ghi sổ.
+            _misa_gan(row, cols, 1, "IsPostedFinance")
+            _misa_gan(row, cols, 1, "IsPostedManagement")
             _misa_gan(row, cols, hoc_fa_that[1] if hoc_fa_that else True, "IsEnoughVoucher")
             _misa_gan(row, cols, hoc_fa_that[0] if hoc_fa_that and hoc_fa_that[0] is not None
                      else dob, "DisplayOnBook")
@@ -8436,7 +8435,7 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                 go += 1
             ket.append({"ma": ma, "ten": ten, "nguyen_gia": ng_gia_n,
                         "trang_thai": ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ts
-                                    else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")})
+                                    else ("sẽ thêm" if preview else "đã thêm (ĐÃ ghi sổ)")})
         if preview:
             conn.rollback()
         else:
@@ -8536,15 +8535,13 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
             k = str(ma).strip().lower()
             ghi_de_su = False
             if k in existed:
-                if existed[k]["posted"]:
-                    trung += 1
-                    ket.append({"ma": ma, "ten": ten,
-                                "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
-                    continue
+                # Mã CCDC00001... là dãy do phần mềm tự sinh — bản ghi trùng
+                # mã là của phần mềm, cho ghi đè kể cả đang mang cờ đã ghi sổ
+                # (xem giải thích ở _misa_ghi_tang_tscd).
                 if not ghi_de:
                     trung += 1
                     ket.append({"ma": ma, "ten": ten,
-                                "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                                "trang_thai": "đã có (bỏ qua — bấm Ghi đè để ghi lại)"})
                     continue
                 ghi_de_su = True
                 if not preview:
@@ -8574,8 +8571,9 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, hoc_rt, "RefType")
             _misa_gan(row, cols, ngay_dt, "RefDate")
             _misa_gan(row, cols, str(e)[:20], "RefNo")
-            _misa_gan(row, cols, 0, "IsPostedManagement")
-            _misa_gan(row, cols, 0, "IsPostedFinance")
+            # GHI SỔ LUÔN theo yêu cầu (như _misa_ghi_tang_tscd)
+            _misa_gan(row, cols, 1, "IsPostedManagement")
+            _misa_gan(row, cols, 1, "IsPostedFinance")
             _misa_gan(row, cols, str(dvt or "")[:20], "Unit")
             _misa_gan(row, cols, sl_n, "Quantity")
             _misa_gan(row, cols, _num0(dgia), "UnitPrice")
@@ -8642,7 +8640,7 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                 go += 1
             ket.append({"ma": ma, "ten": ten, "thanh_tien": tt_n,
                         "trang_thai": ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_su
-                                    else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")})
+                                    else ("sẽ thêm" if preview else "đã thêm (ĐÃ ghi sổ)")})
         if preview:
             conn.rollback()
         else:
@@ -8665,9 +8663,10 @@ def misa_sql_import_ghitang(cid: int, loai: str, preview: int = 1, database: str
     bảng SUIncrement/SUIncrementDetail) thẳng vào MISA, đúng dữ liệu đã dùng
     cho file Excel mẫu Ghi Tăng TSCĐ/CCDC. Đây là GHI TĂNG DANH MỤC tài sản/
     CCDC (không phải chứng từ nhiều loại như Mua hàng). preview=1 -> chỉ xem
-    trước, không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ. ghi_de=1 -> gỡ bản
-    ghi CHƯA GHI SỔ trùng mã/số rồi ghi lại — không bao giờ đụng bản ghi đã
-    ghi sổ."""
+    trước, không ghi. Ghi ĐÃ GHI SỔ luôn (theo yêu cầu — ghi tăng danh mục
+    không sinh bút toán mới), mỗi tài sản/CCDC 1 số chứng từ riêng = mã.
+    ghi_de=1 -> gỡ bản ghi trùng mã (dãy mã do phần mềm tự sinh nên trùng mã
+    = bản ghi của phần mềm, kể cả đang mang cờ đã ghi sổ) rồi ghi lại."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
