@@ -76,6 +76,21 @@ def _get_desktop_dir():
     return home
 
 
+def _resp_xuat(path, fname, extra=None):
+    """Trả FileResponse cho file kết xuất. Nếu file ĐÃ CÓ trên Desktop (đã
+    được copy ra đó) thì gắn header 'X-Saved-Desktop: 1' để trình duyệt KHÔNG
+    tải trùng thêm 1 bản vào thư mục Downloads — người dùng chỉ muốn 1 bản
+    ngoài Desktop. File nào KHÔNG có trên Desktop (vd file mẫu) thì không gắn
+    header -> trình duyệt vẫn tải bình thường (không mất file)."""
+    h = dict(extra or {})
+    try:
+        d = _get_desktop_dir()
+        if d and os.path.isfile(os.path.join(d, fname)):
+            h["X-Saved-Desktop"] = "1"
+    except Exception:
+        pass
+    return FileResponse(path, filename=fname, headers=h)
+
 def _open_file_local(path):
     """Mở file bằng ứng dụng mặc định của HĐH (Excel/trình xem XML).
     Chỉ chạy khi server chạy local trên máy người dùng."""
@@ -3571,7 +3586,7 @@ def export_companies():
         except Exception:
             pass
     _open_file_local(open_path)
-    return FileResponse(path, filename=fname)
+    return _resp_xuat(path, fname)
 
 
 @app.get("/api/companies-template")
@@ -3595,7 +3610,7 @@ def companies_template():
         ws.column_dimensions[col].width = w
     path = os.path.join(DOWNLOAD_DIR, "Mau_DanhSach_CongTy.xlsx")
     wb.save(path)
-    return FileResponse(path, filename="Mau_DanhSach_CongTy.xlsx")
+    return _resp_xuat(path, "Mau_DanhSach_CongTy.xlsx")
 
 
 def _parse_tokhai_nhap(wb):
@@ -4281,7 +4296,7 @@ async def nhap_lieu_export(cid: int, request: Request, loai: str = "in"):
             shutil.copy(path, os.path.join(desktop, fname))
         except Exception:
             pass
-    return FileResponse(path, filename=fname)
+    return _resp_xuat(path, fname)
 
 
 # ---- Helper CHUNG: ghi 1 workbook theo form MISA + lưu (dùng lại cho xuất
@@ -4425,7 +4440,7 @@ async def mua_hang_dich_vu(cid: int, request: Request):
     wb = _viet_wb_misa(MUA_DV_HEADERS, out, "Chứng từ mua dịch vụ",
                        MUA_DV_COT_TEXT, MUA_DV_COT_TIEN, MUA_DV_COT_THAPPHAN)
     path = _luu_file_misa(wb, fname, cid)
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(out))})
 
 
 # ============ DANH MỤC HÀNG HÓA / NVL / VTHH (từ bảng kê mua vào) ============
@@ -4902,7 +4917,7 @@ async def danh_muc_hang_export(cid: int, request: Request, loai: str = "hh"):
     fname = f"DanhMuc_{ten}_{mst}.xlsx"
     rows_clean = [list(r) for r in dm_rows if any(str(x).strip() for x in r)]
     path = _xuat_dm_excel(rows_clean, sheet, fname, cid, loai)
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(rows_clean))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(rows_clean))})
 
 
 VTHH_HEADERS = [
@@ -5014,7 +5029,7 @@ async def danh_muc_vthh(cid: int, request: Request, export: int = 0):
                 shutil.copy(path, os.path.join(d, fname))
             except Exception:
                 pass
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(out))})
 
 
 # ============ MUA HÀNG NHẬP KHO (form MISA "Mua hàng NK") ============
@@ -5196,7 +5211,7 @@ async def mua_hang_nhap_kho(cid: int, request: Request, export: int = 0):
                 shutil.copy(path, os.path.join(d, fname))
             except Exception:
                 pass
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(out))})
 
 
 # ============ MUA HÀNG KHÔNG QUA KHO (TSCĐ/CCDC - form MISA) ============
@@ -5340,7 +5355,7 @@ async def mua_hang_khong_qua_kho(cid: int, request: Request, export: int = 0):
                 shutil.copy(path, os.path.join(d, fname))
             except Exception:
                 pass
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(out))})
 
 
 # ============ GHI TĂNG CCDC / TSCĐ (form MISA, từ DM CCDC/TSCĐ) ============
@@ -5460,7 +5475,7 @@ def ghi_tang_ccdc(cid: int):
     # cột số: SL(9) Đơn giá(10) Thành tiền(11) Số kỳ PB(12) Tiền PB/kỳ(13)
     path = _xuat_ghitang_excel(GHITANG_CCDC_HEADERS, out, "Ghi Tăng CCDC", fname,
                                cid, {9, 10, 11, 12, 13}, {1, 4, 5, 7, 18})
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(out))})
 
 
 @app.post("/api/ghi-tang-tscd/{cid}")
@@ -5475,7 +5490,7 @@ def ghi_tang_tscd(cid: int):
     # cột số: Nguyên giá(10) Giá trị KH(11) Thời gian SD(13) Giá trị KH tháng(15)
     path = _xuat_ghitang_excel(GHITANG_TSCD_HEADERS, out, "Ghi tăng tài sản cố định",
                                fname, cid, {10, 11, 15}, {1, 5, 6, 8, 9, 19})
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(out))})
 
 
 # ============ BÁN HÀNG (form MISA "Chứng từ bán hàng") ============
@@ -5622,7 +5637,7 @@ async def ban_hang(cid: int, request: Request, export: int = 0):
                 shutil.copy(path, os.path.join(d, fname))
             except Exception:
                 pass
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(out))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(out))})
 
 
 # ============================================================
@@ -6121,8 +6136,8 @@ def xk_export(cid: int):
                 pass
     tong = len(giathanh)
     so_bo_qua = tong - len(out)
-    return FileResponse(path, filename=fname,
-                         headers={"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua)})
+    return _resp_xuat(path, fname,
+                      {"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua)})
 
 @app.post("/api/xk/export-giathanh/{cid}")
 def xk_export_giathanh(cid: int):
@@ -6199,7 +6214,7 @@ def xk_export_giathanh(cid: int):
                 shutil.copy(path, os.path.join(d, fname))
             except Exception:
                 pass
-    return FileResponse(path, filename=fname, headers={"X-So-Dong": str(len(rows))})
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(rows))})
 
 
 # ============================================================
@@ -9296,7 +9311,7 @@ def danh_muc_ncc(cid: int):
             shutil.copy(path, os.path.join(desktop, fname))
         except Exception:
             pass
-    return FileResponse(path, filename=fname)
+    return _resp_xuat(path, fname)
 
 
 @app.post("/api/import-excel/{cid}")
@@ -11356,7 +11371,7 @@ def export_excel(cid: int):
         except Exception:
             pass
     _open_file_local(open_path)
-    return FileResponse(path, filename=fname_x)
+    return _resp_xuat(path, fname_x)
 
 
 # ---------- ĐỌC FILE XML -> XUẤT EXCEL CHI TIẾT ----------
@@ -11702,7 +11717,7 @@ async def parse_xml_to_excel(request: Request):
 
     path = os.path.join(DOWNLOAD_DIR, "ChiTiet_TuXML.xlsx")
     wb.save(path)
-    return FileResponse(path, filename="ChiTiet_HoaDon_TuXML.xlsx")
+    return _resp_xuat(path, "ChiTiet_HoaDon_TuXML.xlsx")
 
 
 # ---------- MỤC 5: XEM HÓA ĐƠN DẠNG HTML (chuyển từ XML/JSON) ----------

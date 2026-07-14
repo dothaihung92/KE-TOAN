@@ -1562,14 +1562,14 @@ async function xoaFileTai(){
 async function exportCongTy(){
   try{
     const r=await fetch('/api/export-companies');
-    dl(await r.blob(),'DanhSach_CongTy.xlsx');
+    await xuatFile(r,'DanhSach_CongTy.xlsx');
     toast('Đã xuất danh sách công ty (lưu ra Desktop)','ok');
   }catch(e){toast('Lỗi xuất danh sách','err')}
 }
 async function taiMauCongTy(){
   try{
     const r=await fetch('/api/companies-template');
-    dl(await r.blob(),'Mau_DanhSach_CongTy.xlsx');
+    await xuatFile(r,'Mau_DanhSach_CongTy.xlsx');
     toast('Đã tải file mẫu. Điền thông tin rồi Import Excel.','ok');
   }catch(e){toast('Lỗi tải mẫu','err')}
 }
@@ -2285,7 +2285,7 @@ async function xkXuatGiaThanh(){
     const r=await fetch(`/api/xk/export-giathanh/${current}`,{method:'POST'});
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
-    dl(await r.blob(),'KetXuatGiaThanh.xlsx');
+    await xuatFile(r,'KetXuatGiaThanh.xlsx');
     toast(`📊 Đã kết xuất ${sd} dòng giá thành`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
@@ -2298,7 +2298,7 @@ async function xkXuatFile(){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
     const bq=r.headers.get('X-Bo-Qua')||'0';
-    dl(await r.blob(),'XuatKho.xlsx');
+    await xuatFile(r,'XuatKho.xlsx');
     toast(`📤 Đã xuất ${sd} dòng`+(bq!=='0'?` (bỏ qua ${bq} dòng chưa gắn mã)`:''),'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
@@ -2310,8 +2310,7 @@ async function xuatDanhMucNCC(){
   try{
     const r=await fetch(`/api/danh-muc-ncc/${current}`);
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    const blob=await r.blob();
-    dl(blob,`DanhMuc_KHNCC.xlsx`);
+    await xuatFile(r,`DanhMuc_KHNCC.xlsx`);
     toast('✓ Đã xuất Danh mục KH/NCC (cũng lưu ra Desktop)','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
@@ -2365,7 +2364,7 @@ async function ghiTang(loai){
     const r=await fetch(`/api/ghi-tang-${loai}/${current}`,{method:'POST'});
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
-    dl(await r.blob(),`${loai==='ccdc'?'GhiTangCCDC':'GhiTangTSCD'}.xlsx`);
+    await xuatFile(r,`${loai==='ccdc'?'GhiTangCCDC':'GhiTangTSCD'}.xlsx`);
     toast(sd&&sd!=='0'?`📈 Đã xuất ${ten} (${sd} dòng)`:`⚠ DM ${loai==='ccdc'?'CCDC':'TSCĐ'} chưa có dữ liệu — hãy tạo & lưu DM trước`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
@@ -3091,7 +3090,7 @@ async function nlXuatExcel(){
   try{
     const r=await fetch(`/api/nhap-lieu/export/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
-    dl(await r.blob(),`NhapLieu_${nhapLieuLoaiHienTai}.xlsx`);toast('Đã xuất Excel','ok');
+    await xuatFile(r,`NhapLieu_${nhapLieuLoaiHienTai}.xlsx`);toast('Đã xuất Excel','ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
 async function nlMuaHangDV(btn){
@@ -3101,7 +3100,7 @@ async function nlMuaHangDV(btn){
     const r=await fetch(`/api/mua-hang-dv/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
-    dl(await r.blob(),`MuaHangDichVu.xlsx`);
+    await xuatFile(r,`MuaHangDichVu.xlsx`);
     toast(sd&&sd!=='0'?`📑 Đã kết xuất ${sd} dòng mua dịch vụ (Nợ 6xx)`:'⚠ Không có dòng nào Nợ là TK 6xx','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
@@ -3113,7 +3112,7 @@ async function nlMuaHangNK(btn){
     const r=await fetch(`/api/mua-hang-nk/${current}?export=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
-    dl(await r.blob(),`MuaHangNhapKho.xlsx`);
+    await xuatFile(r,`MuaHangNhapKho.xlsx`);
     toast(sd&&sd!=='0'?`📦 Đã kết xuất ${sd} dòng mua hàng nhập kho (Nợ 1561/156/152)`:'⚠ Không có dòng nào Nợ là TK kho (1561/156/152)','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
@@ -3125,7 +3124,7 @@ async function nlMuaHangKQK(btn){
     const r=await fetch(`/api/mua-hang-kqk/${current}?export=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
-    dl(await r.blob(),`MuaHangKhongQuaKho.xlsx`);
+    await xuatFile(r,`MuaHangKhongQuaKho.xlsx`);
     toast(sd&&sd!=='0'?`🏗 Đã kết xuất ${sd} dòng mua hàng không qua kho (Nợ 2111/211/2421/242)`:'⚠ Không có dòng nào Nợ là TSCĐ/CCDC (2111/211/2421/242)','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
@@ -3284,7 +3283,7 @@ async function nlBanHang(btn){
     const r=await fetch(`/api/ban-hang/${current}?export=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
-    dl(await r.blob(),`BanHang.xlsx`);
+    await xuatFile(r,`BanHang.xlsx`);
     toast(sd&&sd!=='0'?`🛒 Đã kết xuất ${sd} dòng bán hàng`:'⚠ Bảng kê đầu ra chưa có dữ liệu','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
@@ -3506,7 +3505,7 @@ async function dmXuatGrid(){
   try{
     const r=await fetch(`/api/danh-muc-hang-export/${current}?loai=${nlDMMode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
-    dl(await r.blob(),`DanhMuc_${DM_FILE[nlDMMode]||'DM'}.xlsx`);
+    await xuatFile(r,`DanhMuc_${DM_FILE[nlDMMode]||'DM'}.xlsx`);
     dmDaSua=false;   // dmXuatGrid cũng LƯU lại ở server (xem danh_muc_hang_export)
     toast('📤 Đã xuất & lưu danh mục','ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
@@ -3531,7 +3530,7 @@ async function dmXuatVTHH(){
     const r=await fetch(`/api/danh-muc-vthh/${current}?export=1`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Xuất thất bại');
     const sm=r.headers.get('X-So-Dong')||'';
-    dl(await r.blob(),`DanhMuc_VTHH.xlsx`);
+    await xuatFile(r,`DanhMuc_VTHH.xlsx`);
     toast(`📦 Đã xuất VTHH (${sm} mã hàng)`,'ok');
     dmDong();
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
@@ -3677,13 +3676,21 @@ async function exportExcel(btn){
   try{
     const r=await fetch(`/api/export-excel/${current}`);
     if(!r.ok){let m='Lỗi xuất Excel';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    dl(await r.blob(),`BangKe_HoaDon.xlsx`);toast('Đã xuất Excel xong','ok');
+    await xuatFile(r,`BangKe_HoaDon.xlsx`);toast('Đã xuất Excel xong','ok');
   }catch(e){toast(e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
 }
 function dl(blob,name){
   const u=URL.createObjectURL(blob),a=document.createElement('a');
   a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);
+}
+// Kết xuất Excel: nếu server đã lưu file ra Desktop (header X-Saved-Desktop)
+// thì KHÔNG tải thêm 1 bản vào thư mục Downloads của trình duyệt — người
+// dùng chỉ muốn 1 bản ngoài Desktop. Server không lưu được Desktop thì mới
+// tải qua trình duyệt (đề phòng mất file).
+async function xuatFile(r,name){
+  if(r.headers.get('X-Saved-Desktop')){ try{await r.blob();}catch{} return; }
+  dl(await r.blob(),name);
 }
 async function deleteCompany(id){
   if(!confirm('Xóa công ty này và toàn bộ hóa đơn đã lưu?'))return;
