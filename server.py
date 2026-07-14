@@ -7437,7 +7437,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # ghi đè kể cả khi đang mang cờ "đã ghi sổ".
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUVoucher'").fetchall())
-        # kho (Stock) — điền StockID cho dòng nhập kho theo cột "Kho" của form
+        # kho (Stock) — điền StockID cho dòng nhập kho theo cột "Kho" của form.
+        # Kho THIẾU trên MISA sẽ được TỰ TẠO (như Unit) để cột Kho trên chứng
+        # từ nhập kho không bị trống — trước đây chỉ cảnh báo rồi để trống nên
+        # chứng từ hiện thiếu Kho (và có thể báo "Failed to enable constraints").
         kho_map = {}
         try:
             for sid, scode in cur.execute("SELECT StockID, StockCode FROM Stock").fetchall():
@@ -7445,6 +7448,30 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     kho_map[str(scode).strip().lower()] = sid
         except Exception:
             pass
+        kho_moi = set()   # mã kho vừa tự tạo (để báo lại)
+        now_stock = datetime.datetime.now()
+
+        def tra_kho(kho_text):
+            """StockID theo mã kho; tự tạo Stock nếu chưa có (không để trống)."""
+            kc = str(kho_text or "").strip()
+            if not kc:
+                return None
+            kl = kc.lower()
+            if kl in kho_map:
+                return kho_map[kl]
+            sid = str(_uuid.uuid4())
+            if not preview:
+                try:
+                    cur.execute(
+                        "INSERT INTO Stock (StockID, StockCode, StockName, Description, "
+                        "Inactive, CreatedDate, CreatedBy, InventoryAccount, BranchID) "
+                        "VALUES (?,?,?,?,0,?,?,?,?)",
+                        sid, kc[:20], kc[:128], None, now_stock, hoc_nguoi_tao, None, branch_id)
+                except Exception:
+                    return None
+            kho_map[kl] = sid
+            kho_moi.add(kc.upper())
+            return sid
         # loại chứng từ của bảng HÓA ĐƠN mua hàng (PUInvoice) — để tạo hóa đơn
         # kèm theo ("Nhận kèm hóa đơn"); ưu tiên tên có chữ "mua"
         inv_reftype = None
@@ -7712,10 +7739,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 # constraints" khi mở chứng từ nhập kho
                 stock_id = None
                 if cfg.get("kho") is not None:
-                    kho_code = str(r[cfg["kho"]] or "").strip().lower()
-                    stock_id = kho_map.get(kho_code)
-                    if stock_id is None and kho_code:
-                        thieu_kho.add(kho_code.upper())
+                    stock_id = tra_kho(r[cfg["kho"]])
                 mo_ta = ten_h or str(r[cfg["ten"]] or "")
                 detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
@@ -7771,7 +7795,12 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 # hóa đơn, và PUInvoiceDetail.PUVoucherRefID trỏ ngược về chứng từ.
                 "IncludeInvoice": 1, "PUInvoiceRefID": inv_id,
                 "DisplayOnBook": dob, "AccountObjectID": acc_obj_id,
+                # JournalMemo = "Diễn giải" (form nhập kho); CABAJournalMemo =
+                # "Lý do chi" trên tab Phiếu chi (biến thể Thanh toán ngay/Tiền
+                # mặt của Mua hàng không qua kho) — cùng nội dung để cả 2 chỗ
+                # đều có, không còn ô "Lý do chi" trống.
                 "AccountObjectName": ten_ncc_dg, "JournalMemo": dien_giai,
+                "CABAJournalMemo": dien_giai,
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
                 "TotalImportTaxAmountOC": total_import_tax, "TotalImportTaxAmount": total_import_tax,
                 "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
@@ -7886,6 +7915,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
+                "kho_moi": sorted(kho_moi),
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
                 "so_dvt_sua": so_dvt_sua,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
