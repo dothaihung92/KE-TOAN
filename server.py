@@ -6742,21 +6742,30 @@ def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
         cur = conn.cursor()
         unit_ten = {}   # tên sạch (lower) -> UnitID
         unit_id_sach = set()
+        unit_ten_theo_id = {}   # UnitID (lower) -> tên gốc (để chẩn đoán/hiển thị)
         for u_id, u_name in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+            unit_ten_theo_id[str(u_id).strip().lower()] = str(u_name or "")
             if u_name and _misa_unit_hong(u_name):
                 continue
             unit_id_sach.add(str(u_id).strip().lower())
             if u_name:
                 unit_ten[str(u_name).strip().lower()] = u_id
         import uuid as _uuid
-        them = sua = 0
+        them = sua = doi_chieu = 0
         ket = []
+        chan_doan = []   # mẫu các mã ĐÃ đối chiếu (để soi khi quét ra 0)
         for iid, code, uid in cur.execute(
                 "SELECT InventoryItemID, InventoryItemCode, UnitID FROM InventoryItem").fetchall():
             k = str(code or "").strip().lower()
             if k not in dvt_theo_ma:
                 continue
-            hong = uid is None or str(uid).strip().lower() not in unit_id_sach
+            doi_chieu += 1
+            uid_l = str(uid).strip().lower() if uid is not None else None
+            ten_unit_misa = unit_ten_theo_id.get(uid_l, "") if uid_l else ""
+            hong = uid is None or uid_l not in unit_id_sach
+            if len(chan_doan) < 60:
+                chan_doan.append({"ma": code, "unit_id": (str(uid) if uid is not None else None),
+                                  "unit_ten_misa": ten_unit_misa, "hong": hong})
             if not hong:
                 continue
             dvt_text = dvt_theo_ma[k]
@@ -6774,14 +6783,14 @@ def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
             if not preview:
                 cur.execute("UPDATE InventoryItem SET UnitID=? WHERE InventoryItemID=?", uid2, iid)
             sua += 1
-            ket.append({"ma": code, "dvt": dvt_text,
+            ket.append({"ma": code, "dvt": dvt_text, "unit_ten_cu": ten_unit_misa,
                         "trang_thai": "sẽ sửa" if preview else "đã sửa"})
         if preview:
             conn.rollback()
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_sua": sua, "so_don_vi_moi": them,
-                "danh_sach": ket[:1000]}
+                "so_doi_chieu": doi_chieu, "chan_doan": chan_doan, "danh_sach": ket[:1000]}
     except HTTPException:
         conn.rollback()
         raise
@@ -8378,10 +8387,12 @@ def _misa_unit_hong(ten):
     Xác nhận qua thực tế: mã hàng hiện "ĐVT chính: fac19b53" trong MISA và
     crash "InvalidCastException" khi mở — Unit đứng sau UnitID này bị hỏng
     tên. Tên ĐVT thật (chữ Việt có dấu, hoặc PCS/KG/Cái/Hộp...) không bao
-    giờ khớp mẫu toàn hex+gạch ngang này nên phân biệt an toàn."""
+    giờ khớp mẫu toàn hex+gạch ngang này nên phân biệt an toàn. Lưu ý mẫu
+    phải chấp nhận cả GUID bị CẮT CỤT ở 20 ký tự của cột UnitName (vd
+    'fac19b53-57bb-4995-9' — đuôi sau dấu gạch chỉ còn 1 ký tự)."""
     import re as _re_uh
     t = str(ten or "").strip()
-    return bool(t) and bool(_re_uh.match(r"^[0-9a-f]{6,}(-[0-9a-f]{2,})*$", t, _re_uh.IGNORECASE))
+    return bool(t) and bool(_re_uh.match(r"^[0-9a-f]{6,}(-[0-9a-f]{1,})*-?$", t, _re_uh.IGNORECASE))
 
 def _misa_tk_fallback(tk, tk_set):
     """Đối chiếu số TÀI KHOẢN với danh mục TK thật của MISA (bảng Account —
