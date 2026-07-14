@@ -8456,6 +8456,16 @@ def _misa_dvsd_map(cur):
         pass
     return m
 
+# RefType CHUẨN của dòng SỔ CÁI ghi tăng (xác nhận từ dữ liệu thật công ty:
+# FixedAssetLedger.RefType=250, SupplyLedger.RefType=450). Đây là giá trị mà
+# màn hình lưới "Ghi tăng" lọc theo — KHÔNG học được thì phải dùng hằng số
+# này, KHÔNG để None/0 (bằng 0 = "Phi chứng từ" -> lưới Ghi tăng bỏ qua).
+# Bài học: khi người dùng XÓA hết bản ghi mẫu (kể cả bản nhập tay), phép học
+# RefType trả rỗng -> nếu không có fallback cứng, dòng sổ cái ghi sai RefType
+# và biến mất khỏi lưới Ghi tăng dù vẫn hiện ở Sổ theo dõi/Sổ tài sản.
+_FA_LEDGER_REFTYPE = 250   # Ghi tăng TSCĐ
+_SU_LEDGER_REFTYPE = 450   # Ghi tăng CCDC
+
 def _misa_hoc_reftype(cur, table, tu_khoa):
     """Học RefType + DisplayOnBook PHỔ BIẾN NHẤT từ bản ghi ĐANG CÓ Ý NGHĨA
     (RefType<>0 — RefType=0 là "Phi chứng từ", giá trị mặc định rỗng của SQL
@@ -8536,6 +8546,12 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
         # FixedAsset (đang bị chính các dòng cũ do phần mềm ghi lấn át).
         if led_rt is not None:
             hoc_rt = led_rt
+        # Fallback CỨNG: khi KHÔNG học/dò được gì (vd người dùng xóa hết mẫu),
+        # dùng RefType chuẩn 250 thay vì để None/0 — dòng sổ cái ghi tăng ghi
+        # RefType=0 sẽ biến mất khỏi lưới "Ghi tăng" (xem _FA_LEDGER_REFTYPE).
+        # Chỉ là DỰ PHÒNG: nếu học/dò được (led_rt/hoc_rt) thì luôn ưu tiên.
+        if hoc_rt is None:
+            hoc_rt = _FA_LEDGER_REFTYPE
         # Học thêm quy ước từ dòng FixedAsset THẬT — nhận diện qua CreatedBy
         # có giá trị (MISA luôn đóng dấu người tạo; các dòng do phần mềm ghi
         # để trống). Ưu tiên hơn phép đếm đa số hoc_dob (bị dòng cũ của phần
@@ -8578,13 +8594,11 @@ def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
                 ).fetchone()[0] or 0) + 1
             except Exception:
                 pass
-        if hoc_rt is None:
-            return {"preview": preview, "database": database, "so_them": 0, "so_trung": 0,
-                    "khong_do_loai": True,
-                    "danh_sach": [{"ma": r[0], "ten": r[1],
-                                  "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"}
-                                 for r in out]}
-        dob = hoc_dob if hoc_dob is not None else 3
+        # DisplayOnBook: chứng từ ghi tăng THẬT (GTTS00001 nhập tay) có
+        # DisplayOnBook=0; mặc định 0 (không phải 3) và chỉ nhận giá trị học
+        # được nếu thuộc (0,2) — cùng bài học DisplayOnBook bên Mua hàng: giá
+        # trị 3 làm bản ghi trượt bộ lọc màn hình và biến mất.
+        dob = hoc_dob if hoc_dob in (0, 2) else 0
         cat_map = {}
         try:
             for catid, code in cur.execute(
@@ -8861,6 +8875,11 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
             pass
         if led_rt is not None:
             hoc_rt = led_rt
+        # Fallback CỨNG như TSCĐ (chỉ dự phòng, ưu tiên học/dò được trước):
+        # SupplyLedger dùng RefType 450 khi không biết gì — không để dòng sổ
+        # cái CCDC biến mất khỏi lưới "Ghi tăng".
+        if hoc_rt is None:
+            hoc_rt = _SU_LEDGER_REFTYPE
         led_id_tay = "supplyledgerid" in cols_led
         next_led_id = 1
         if led_id_tay:
