@@ -9006,12 +9006,15 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
             _misa_gan(row, cols, now, "ModifiedDate")
             _misa_gan(row, cols, str(ly_do or "")[:255], "ReasonIncrement")
             _misa_gan(row, cols, False, "SuspendAllocate")
-            # id dòng "Đơn vị sử dụng" (SUIncrementDetailDepartment) — sinh
-            # TRƯỚC vì dòng sổ cái SupplyLedger thật trỏ RefDetailID về đây
-            # (đối chiếu dòng nhập tay GTCC00001: RefID=SupplyID nhưng
-            # RefDetailID là GUID KHÁC = dòng đơn vị sử dụng; trước đây gán
-            # RefDetailID=SupplyID nên lưới Ghi tăng JOIN trượt, không hiện).
-            dep_id = str(_uuid.uuid4())
+            # 1 DÒNG CHI TIẾT của increment có 1 SupplyDetailID DUY NHẤT, dùng
+            # CHUNG cho cả 3 bảng con (SUIncrementDetail "Mô tả", ...Department
+            # "Đơn vị sử dụng", ...Allocation "Phân bổ"); dòng sổ cái
+            # SupplyLedger.RefDetailID trỏ về chính SupplyDetailID này. Đối
+            # chiếu dữ liệu thật: SupplyLedger.RefDetailID KHÁC SupplyID và
+            # KHÔNG khớp SUIncrementDetail.SupplyDetailID khi 3 bảng dùng ID
+            # RIÊNG -> lưới Ghi tăng JOIN theo RefDetailID bị trượt, mất dòng.
+            # Nay 3 bảng + ledger dùng CHUNG det_id nên mọi đường JOIN đều khớp.
+            det_id = str(_uuid.uuid4())
             if not preview:
                 cs = list(row.keys())
                 cur.execute("INSERT INTO SUIncrement ([%s]) VALUES (%s)" %
@@ -9019,7 +9022,7 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                            [row[c] for c in cs])
                 if cols_dep:
                     drow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_dep.values()}
-                    _misa_gan(drow, cols_dep, dep_id, "SupplyDetailID")
+                    _misa_gan(drow, cols_dep, det_id, "SupplyDetailID")
                     _misa_gan(drow, cols_dep, supply_id, "SupplyID")
                     _misa_gan(drow, cols_dep, dvid, "OrganizationUnitID")
                     _misa_gan(drow, cols_dep, 0, "SortOrder")
@@ -9035,7 +9038,7 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                                [drow[c] for c in dc])
                 if cols_alloc:
                     arow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_alloc.values()}
-                    _misa_gan(arow, cols_alloc, str(_uuid.uuid4()), "SupplyDetailID")
+                    _misa_gan(arow, cols_alloc, det_id, "SupplyDetailID")
                     _misa_gan(arow, cols_alloc, supply_id, "SupplyID")
                     _misa_gan(arow, cols_alloc, 0, "SortOrder")
                     _misa_gan(arow, cols_alloc, objid, "ObjectID")
@@ -9049,7 +9052,7 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                                [arow[c] for c in ac])
                 if cols_det:
                     xrow = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_det.values()}
-                    _misa_gan(xrow, cols_det, str(_uuid.uuid4()), "SupplyDetailID")
+                    _misa_gan(xrow, cols_det, det_id, "SupplyDetailID")
                     _misa_gan(xrow, cols_det, supply_id, "SupplyID")
                     _misa_gan(xrow, cols_det, str(ten)[:255], "Description")
                     _misa_gan(xrow, cols_det, 0, "SortOrder")
@@ -9066,8 +9069,9 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                         _misa_gan(lrow, cols_led, next_led_id, "SupplyLedgerID")
                         next_led_id += 1
                     _misa_gan(lrow, cols_led, supply_id, "RefID")
-                    # RefDetailID = dòng ĐƠN VỊ SỬ DỤNG (không phải SupplyID)
-                    _misa_gan(lrow, cols_led, dep_id, "RefDetailID")
+                    # RefDetailID = SupplyDetailID CHUNG của dòng chi tiết (khớp
+                    # cả 3 bảng con) — không phải SupplyID, không phải ID riêng
+                    _misa_gan(lrow, cols_led, det_id, "RefDetailID")
                     _misa_gan(lrow, cols_led, supply_id, "SupplyID")
                     _misa_gan(lrow, cols_led, hoc_rt, "RefType")
                     _misa_gan(lrow, cols_led, str(e)[:20], "RefNo")
