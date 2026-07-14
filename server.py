@@ -8916,7 +8916,12 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
                     "danh_sach": [{"ma": r[0], "ten": r[1],
                                   "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"}
                                  for r in out]}
-        dob = hoc_dob if hoc_dob is not None else 3
+        # DisplayOnBook BẮT BUỘC thuộc (0,2): lưới "Công cụ dụng cụ > Ghi
+        # tăng" lọc DisplayOnBook IN (0,2) — giá trị 3 (mặc định cũ / học lại
+        # từ chính bản ghi phần mềm) bị loại khỏi lưới dù vẫn hiện ở Sổ theo
+        # dõi. ĐÂY là nguyên nhân CCDC không hiện Ghi tăng dù mọi thứ khác
+        # đúng (cùng bài học DisplayOnBook bên Mua hàng/TSCĐ).
+        dob = hoc_dob if hoc_dob in (0, 2) else 0
         dvsd_map = _misa_dvsd_map(cur)
         # ObjectType dòng phân bổ — học từ bản ghi thật (CCDC trước, rồi tới
         # TSCĐ vì 2 màn hình dùng chung khái niệm Đối tượng phân bổ).
