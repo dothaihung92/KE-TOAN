@@ -8859,6 +8859,20 @@ def _misa_ghi_tang_ccdc(cid, database, preview=True, ghi_de=False):
         cols_led = _misa_cot_bang_that(cur, "SupplyLedger")
         if not cols:
             raise HTTPException(400, "Không tìm thấy bảng SUIncrement trong CSDL MISA đang kết nối.")
+        # DỌN RÁC: các dòng chi tiết/sổ cái CCDC MỒ CÔI (SupplyID không còn
+        # trong SUIncrement) — di chứng của các lần import cũ mà ghi đè chưa
+        # gỡ hết (đối chiếu dữ liệu thật: SUIncrementDetailDepartment còn hàng
+        # loạt SupplyID không khớp SUIncrement/SupplyLedger nào). Gỡ để dữ
+        # liệu sạch, tránh lưới Ghi tăng nhiễu.
+        if not preview:
+            for _tbl in ("SupplyLedger", "SUIncrementDetailAllocation",
+                        "SUIncrementDetailDepartment", "SUIncrementDetail",
+                        "SUIncrementDetailSource"):
+                try:
+                    cur.execute("DELETE FROM %s WHERE SupplyID NOT IN "
+                               "(SELECT SupplyID FROM SUIncrement)" % _tbl)
+                except Exception:
+                    pass
         hoc_rt, hoc_dob = _misa_hoc_reftype(cur, "SUIncrement", ["tăng"])
         # RefType sổ cái — học riêng từ SupplyLedger (bản ghi nhập tay trên
         # MISA), ưu tiên hơn phép đếm trên SUIncrement (bị dòng cũ do phần
