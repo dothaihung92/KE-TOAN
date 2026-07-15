@@ -10194,75 +10194,144 @@ def export_excel(cid: int):
     # ===== NẠP TRƯỚC CHI TIẾT SONG SONG (tăng tốc xuất Excel) =====
     # Chỉ nạp hóa đơn CHƯA có detail_json VÀ chưa có file đã tải (ƯU TIÊN TUYỆT ĐỐI
     # file XML/ZIP đã tải sẵn trên máy — KHÔNG gọi mạng lại cho hóa đơn đã có file).
+    import concurrent.futures as _cf
     client0 = CLIENTS.get(cid)
     save_dir0 = (comp["save_dir"] or "").strip() if comp else ""
-    have_file = set()
+
+    # XÂY INDEX FILE 1 LẦN — dùng chung cho cả bước kiểm tra "đã có file" lẫn
+    # lúc dựng sheet sau này (trước đây quét thư mục 2 LẦN riêng biệt).
+    _file_index = {}
     if save_dir0 and os.path.isdir(save_dir0):
         for rootdir, _d, files in os.walk(save_dir0):
             for fn in files:
                 low = fn.lower()
-                if low.endswith(".zip") or low.endswith(".xml"):
-                    parts = fn.rsplit(".", 1)[0].split("_")
-                    if len(parts) >= 2:
-                        have_file.add((parts[0], parts[1].lstrip("0") or "0"))
+                if not (low.endswith(".zip") or low.endswith(".xml")):
+                    continue
+                name = fn.rsplit(".", 1)[0]
+                parts = name.split("_")
+                if len(parts) >= 2:
+                    f_khh = parts[0]
+                    f_sho = parts[1].lstrip("0") or "0"
+                    key = (f_khh, f_sho)
+                    path = os.path.join(rootdir, fn)
+                    prev = _file_index.get(key)
+                    # ƯU TIÊN file .xml (đọc trực tiếp); chỉ giữ .zip khi chưa có .xml
+                    if prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml")):
+                        _file_index[key] = path
+    have_file = set(_file_index.keys())
     _tlog(f"tim thay {len(have_file)} file hoa don da tai tren may (thu muc: {save_dir0 or '(chưa đặt)'})")
 
+    def find_invoice_file(r):
+        khh = str(r["khhdon"] or "").strip()
+        sho = str(r["shdon"] or "").strip().lstrip("0") or "0"
+        return _file_index.get((khh, sho))
+
+    def _doc_file_hoadon(fpath):
+        """Đọc + parse 1 file XML/ZIP hóa đơn đã tải. Trả về (items, summary)."""
+        try:
+            with open(fpath, "rb") as f:
+                data = f.read()
+            if fpath.lower().endswith(".zip"):
+                import zipfile as _zf, io as _io2
+                try:
+                    z = _zf.ZipFile(_io2.BytesIO(data))
+                    xn = next((n for n in z.namelist()
+                               if n.lower().endswith(".xml")), None)
+                    if xn:
+                        data = z.read(xn)
+                except Exception:
+                    pass
+            return _parse_xml_invoice(data), _parse_invoice_summary(data)
+        except Exception:
+            return [], None
+
     can_nap = []
-    da_co_file = 0
+    da_co_file_rows = []
     for r in rows:
         if r["detail_json"]:
             continue
         khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
         if (khh, sho) in have_file:
-            da_co_file += 1
+            da_co_file_rows.append(r)
             continue   # đã có file trên máy -> get_invoice_items sẽ đọc file, KHÔNG cần mạng
         can_nap.append(dict(r))
-    _tlog(f"{da_co_file} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file")
+    _tlog(f"{len(da_co_file_rows)} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file")
 
-    if can_nap and client0 and client0.token and not client0._token_dead:
-        import concurrent.futures as _cf
+    def _tai_1(rr):
+        if client0._token_dead:
+            return rr["id"], None   # phiên đã hết -> khỏi thử, trả nhanh
+        ht0 = rr["he_thong"] or "query"
+        for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
+            try:
+                d = client0.get_detail(rr["nbmst"], rr["khhdon"],
+                                       rr["khmshdon"], rr["shdon"], ht,
+                                       max_retry=1, cho_khi_429=False)
+                if d and (d.get("hdhhdvu") or d.get("nbmst")):
+                    return rr["id"], json.dumps(d, ensure_ascii=False)
+            except Exception:
+                pass
+        return rr["id"], None
+
+    def _nap_song_song(ds_rows, nhan):
+        """Nạp chi tiết qua mạng SONG SONG cho 1 danh sách hóa đơn, lưu DB
+        1 lần. Trả về số hóa đơn lấy được."""
+        if not (ds_rows and client0 and client0.token and not client0._token_dead):
+            return 0
         results_map = {}
-        _tlog(f"thử nạp nhanh (không chờ khi bị giới hạn tốc độ) {len(can_nap)} hóa đơn qua mạng...")
-
-        def _tai_1(rr):
-            if client0._token_dead:
-                return rr["id"], None   # phiên đã hết -> khỏi thử, trả nhanh
-            ht0 = rr["he_thong"] or "query"
-            for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
-                try:
-                    d = client0.get_detail(rr["nbmst"], rr["khhdon"],
-                                           rr["khmshdon"], rr["shdon"], ht,
-                                           max_retry=1, cho_khi_429=False)
-                    if d and (d.get("hdhhdvu") or d.get("nbmst")):
-                        return rr["id"], json.dumps(d, ensure_ascii=False)
-                except Exception:
-                    pass
-            return rr["id"], None
-
+        _tlog(f"{nhan} {len(ds_rows)} hóa đơn qua mạng (song song)...")
         # số luồng song song: KHÔNG chờ (429 bỏ ngay) nên có thể chạy nhiều luồng hơn
         workers = {"fast": 20, "balanced": 12, "safe": 6}.get(CURRENT_SPEED, 12)
         with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            for inv_id, dj in ex.map(_tai_1, can_nap):
+            for inv_id, dj in ex.map(_tai_1, ds_rows):
                 if dj:
                     results_map[inv_id] = dj
-        # lưu hết vào DB 1 lần
+        cn = db()
         for inv_id, dj in results_map.items():
-            conn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
-        conn.commit()
-        con_thieu = len(can_nap) - len(results_map)
-        if client0._token_dead:
-            _tlog(f"phiên đăng nhập đã hết hạn giữa chừng — dừng nạp qua mạng, còn {con_thieu} hóa đơn chưa có chi tiết")
-        elif con_thieu:
-            _tlog(f"lấy được {len(results_map)}/{len(can_nap)}; còn {con_thieu} hóa đơn bị giới hạn tốc độ — "
-                 f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)")
-        # đọc lại rows để có detail_json mới
-        rows = conn.execute(
-            "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
-            (cid,)).fetchall()
-    elif can_nap:
-        why = ("chưa đăng nhập/phiên đã hết" if not (client0 and client0.token) else "phiên đã hết hạn")
-        _tlog(f"bỏ qua nạp mạng cho {len(can_nap)} hóa đơn ({why}) — sẽ hiện placeholder, "
-             f"đăng nhập lại rồi xuất lại để lấy nốt")
+            cn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
+        cn.commit(); cn.close()
+        return len(results_map)
+
+    if can_nap:
+        if client0 and client0.token and not client0._token_dead:
+            so_lay_duoc = _nap_song_song(can_nap, "thử nạp nhanh (không chờ khi bị giới hạn tốc độ)")
+            con_thieu = len(can_nap) - so_lay_duoc
+            if client0._token_dead:
+                _tlog(f"phiên đăng nhập đã hết hạn giữa chừng — dừng nạp qua mạng, còn {con_thieu} hóa đơn chưa có chi tiết")
+            elif con_thieu:
+                _tlog(f"lấy được {so_lay_duoc}/{len(can_nap)}; còn {con_thieu} hóa đơn bị giới hạn tốc độ — "
+                     f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)")
+        else:
+            why = ("chưa đăng nhập/phiên đã hết" if not (client0 and client0.token) else "phiên đã hết hạn")
+            _tlog(f"bỏ qua nạp mạng cho {len(can_nap)} hóa đơn ({why}) — sẽ hiện placeholder, "
+                 f"đăng nhập lại rồi xuất lại để lấy nốt")
+
+    # ===== KIỂM TRA NHANH file "đã có" có THỰC SỰ ĐỌC ĐƯỢC không (offline,
+    # không cần mạng) — hóa đơn nào file lỗi/rỗng (hỏng, sai định dạng...)
+    # thì gộp NẠP LẠI QUA MẠNG SONG SONG luôn ở đây. TRƯỚC ĐÂY việc này để
+    # tới lúc dựng sheet mới phát hiện rồi gọi mạng TUẦN TỰ TỪNG CÁI 1 — với
+    # hàng trăm hóa đơn, đây chính là nguyên nhân "đã nạp xong chi tiết" mà
+    # vẫn treo rất lâu ở bước dựng sheet.
+    _items_cache = {}
+    if da_co_file_rows:
+        can_nap2 = []
+        for r in da_co_file_rows:
+            fpath = find_invoice_file(r)
+            items, summary = (_doc_file_hoadon(fpath) if fpath else ([], None))
+            if items:
+                key = (r["khhdon"], r["shdon"], r["nbmst"], r["loai"])
+                _items_cache[key] = (items, summary)
+            else:
+                can_nap2.append(dict(r))
+        if can_nap2:
+            so_lay_duoc2 = _nap_song_song(can_nap2, "file đã tải nhưng đọc lỗi/rỗng — nạp lại")
+            if so_lay_duoc2 < len(can_nap2):
+                _tlog(f"⚠ {len(can_nap2) - so_lay_duoc2}/{len(can_nap2)} hóa đơn có file trên máy "
+                     f"nhưng ĐỌC LỖI và nạp lại qua mạng cũng không được — sẽ hiện placeholder")
+
+    # đọc lại rows để có detail_json mới nhất (từ cả 2 lượt nạp mạng ở trên)
+    rows = conn.execute(
+        "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
+        (cid,)).fetchall()
     conn.close()
     _tlog(f"xong nap chi tiet ({len(rows)} hoa don) -> bat dau dung sheet")
 
@@ -10333,36 +10402,11 @@ def export_excel(cid: int):
                         pass
 
     # ===== Chuẩn bị: hàm tìm/đọc chi tiết hóa đơn =====
-    save_dir = (comp["save_dir"] or "").strip() if comp else ""
+    # (_file_index / find_invoice_file / _items_cache đã được xây + nạp trước
+    # ở bước "NẠP TRƯỚC CHI TIẾT SONG SONG" phía trên — dùng lại ở đây,
+    # KHÔNG quét lại thư mục hay xóa cache đã có.)
     client = CLIENTS.get(cid)  # client đang đăng nhập (nếu có) để tải lại khi thiếu file
 
-    # XÂY INDEX FILE 1 LẦN (nhanh hơn nhiều so với quét lại mỗi hóa đơn).
-    # Khóa = (KHHDON, số HĐ bỏ 0 đầu) -> đường dẫn file
-    _file_index = {}
-    if save_dir and os.path.isdir(save_dir):
-        for rootdir, _d, files in os.walk(save_dir):
-            for fn in files:
-                low = fn.lower()
-                if not (low.endswith(".zip") or low.endswith(".xml")):
-                    continue
-                name = fn.rsplit(".", 1)[0]
-                parts = name.split("_")
-                if len(parts) >= 2:
-                    f_khh = parts[0]
-                    f_sho = parts[1].lstrip("0") or "0"
-                    key = (f_khh, f_sho)
-                    path = os.path.join(rootdir, fn)
-                    prev = _file_index.get(key)
-                    # ƯU TIÊN file .xml (đọc trực tiếp); chỉ giữ .zip khi chưa có .xml
-                    if prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml")):
-                        _file_index[key] = path
-
-    def find_invoice_file(r):
-        khh = str(r["khhdon"] or "").strip()
-        sho = str(r["shdon"] or "").strip().lstrip("0") or "0"
-        return _file_index.get((khh, sho))
-
-    _items_cache = {}
     def get_invoice_items(r):
         """Lấy danh sách mặt hàng của 1 hóa đơn:
         1) từ chi tiết đã lưu trong DB -> 2) từ file XML đã tải ->
@@ -10392,23 +10436,7 @@ def export_excel(cid: int):
         if not items:
             fpath = find_invoice_file(r)
             if fpath:
-                try:
-                    with open(fpath, "rb") as f:
-                        data = f.read()
-                    if fpath.lower().endswith(".zip"):
-                        import zipfile as _zf, io as _io2
-                        try:
-                            z = _zf.ZipFile(_io2.BytesIO(data))
-                            xn = next((n for n in z.namelist()
-                                       if n.lower().endswith(".xml")), None)
-                            if xn:
-                                data = z.read(xn)
-                        except Exception:
-                            pass
-                    items = _parse_xml_invoice(data)
-                    summary = _parse_invoice_summary(data)
-                except Exception:
-                    items = []; summary = None
+                items, summary = _doc_file_hoadon(fpath)
 
         # (2) gọi detail JSON — thử cả hệ thống đã lưu và hệ thống còn lại
         # (đã nạp song song trước -> ở đây chỉ vớt nhanh, KHÔNG chờ nếu bị giới hạn
