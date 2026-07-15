@@ -392,11 +392,10 @@
            style="font-size:22px;font-weight:800;white-space:nowrap;cursor:pointer;user-select:none">—</div>
       <div id="vat_copyhint" style="font-size:12px;color:var(--muted);margin-top:2px">👆 Bấm vào số để copy</div>
     </div>
-    <p class="hint" id="vat_note">Nhập số dư đầu kỳ rồi bấm "Tính". Bấm "Save" để lưu số dư cuối kỳ cho kỳ sau dùng lại.</p>
+    <p class="hint" id="vat_note">Nhập số dư đầu kỳ (bỏ trống để tự lấy từ kỳ trước). Bấm "Tính & Save" để tính và lưu số dư cuối kỳ cho kỳ sau dùng lại.</p>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeVatModal()">Đóng</button>
-      <button class="btn" onclick="tinhVat()">Tính</button>
-      <button class="btn gold" onclick="saveVat()">💾 Save</button>
+      <button class="btn gold" onclick="tinhVaLuuVat()">💾 Tính & Save</button>
     </div>
   </div>
 </div>
@@ -3682,7 +3681,7 @@ function fmtD(n){return (n||0).toLocaleString('vi-VN')+' đ'}
 async function tinhVat(){
   const ky=document.getElementById('vat_ky').value.trim();
   const dudauRaw=document.getElementById('vat_dudau').value;
-  if(!ky){toast('Nhập kỳ kê khai','err');return}
+  if(!ky){toast('Nhập kỳ kê khai','err');return false}
   try{
     let url=`/api/vat-tmtinh/${current}?ky=${encodeURIComponent(ky)}`;
     if(dudauRaw!=='')url+=`&du_dau_ky=${parseFloat(dudauRaw)||0}`;
@@ -3690,8 +3689,8 @@ async function tinhVat(){
     if(!r.ok)throw new Error((await r.json()).detail||'Lỗi tính');
     const d=await r.json();vatResult=d;
     const note=document.getElementById('vat_note');
-    if(d.nguon==='import')note.innerHTML='✅ Đang dùng <b>dữ liệu đã import</b> (đã kiểm tra). Bấm Save để lưu số dư.';
-    else note.textContent='Đang dùng dữ liệu tra cứu. Nhập số dư đầu kỳ rồi bấm Tính. Bấm Save để lưu.';
+    if(d.nguon==='import')note.innerHTML='✅ Đang dùng <b>dữ liệu đã import</b> (đã kiểm tra). Bấm "Tính & Save" để lưu số dư.';
+    else note.textContent='Đang dùng dữ liệu tra cứu. Nhập số dư đầu kỳ rồi bấm "Tính & Save" để lưu.';
     document.getElementById('vat_mua').textContent=fmtD(d.vat_mua);
     document.getElementById('vat_ban').textContent=fmtD(d.vat_ban);
     document.getElementById('vat_dudau_show').textContent=fmtD(d.du_dau_ky);
@@ -3707,7 +3706,12 @@ async function tinhVat(){
       kq.textContent=fmtD(d.du_cuoi_ky);kq.style.color='#1f6b4a';
       kq.dataset.raw=Math.round(d.du_cuoi_ky);
     }
-  }catch(e){toast(e.message,'err')}
+    return true;
+  }catch(e){toast(e.message,'err');return false}
+}
+async function tinhVaLuuVat(){
+  const ok=await tinhVat();
+  if(ok)await saveVat();
 }
 function copyVatKetQua(){
   const kq=document.getElementById('vat_ketqua');
