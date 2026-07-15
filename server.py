@@ -996,6 +996,48 @@ def _svg_to_png(svg_text: str) -> bytes:
     except Exception:
         return b""
 
+
+def _svg_to_png_browser(svg_text: str, drv) -> bytes:
+    """Rasterize SVG → PNG bằng TRÌNH DUYỆT ẨN THẬT (Chrome headless, qua
+    canvas) — CHÍNH XÁC HƠN NHIỀU so với _svg_to_png (svglib chỉ vẽ gần đúng,
+    thường sai lệch đúng phần nhiễu/méo mà TCT cố tình thêm vào captcha để
+    chống đọc tự động). Đây là cách y hệt lúc người dùng tự bấm nút
+    'Tự đăng nhập' trên giao diện (trình duyệt của người dùng vẽ SVG lên
+    canvas). '' nếu thất bại (drv=None hoặc lỗi)."""
+    if drv is None or not svg_text:
+        return b""
+    js = """
+    var cb = arguments[arguments.length-1];
+    var svgB64 = arguments[0];
+    try {
+      var img = new Image();
+      img.onload = function(){
+        try {
+          var scale = 4;
+          var w = img.naturalWidth || 120, h = img.naturalHeight || 40;
+          var cv = document.createElement('canvas');
+          cv.width = w * scale; cv.height = h * scale;
+          var ctx = cv.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+          ctx.drawImage(img, 0, 0, cv.width, cv.height);
+          cb({ok: true, data: cv.toDataURL('image/png')});
+        } catch(e) { cb({ok: false, err: String(e)}); }
+      };
+      img.onerror = function(){ cb({ok: false, err: 'img-load-error'}); };
+      img.src = 'data:image/svg+xml;base64,' + svgB64;
+    } catch(e) { cb({ok: false, err: String(e)}); }
+    """
+    try:
+        b64 = base64.b64encode(svg_text.encode("utf-8")).decode("ascii")
+        drv.set_script_timeout(15)
+        res = drv.execute_async_script(js, b64)
+        if res and res.get("ok") and res.get("data"):
+            head, b64png = res["data"].split(",", 1)
+            return base64.b64decode(b64png)
+    except Exception:
+        pass
+    return b""
+
 def _preprocess_png(png_bytes: bytes) -> bytes:
     """Làm sạch PNG để ddddocr đoán chuẩn hơn: grayscale + threshold + phóng to."""
     try:
@@ -1017,8 +1059,10 @@ def _preprocess_png(png_bytes: bytes) -> bytes:
     except Exception:
         return png_bytes
 
-def _solve_captcha(content: str) -> str:
-    """Trả về mã đoán được từ content (data URI / SVG / PNG base64). '' nếu không giải nổi."""
+def _solve_captcha(content: str, drv=None) -> str:
+    """Trả về mã đoán được từ content (data URI / SVG / PNG base64). '' nếu không giải nổi.
+    drv: webdriver Chrome ẩn (tùy chọn) — nếu có, dùng để vẽ SVG→PNG CHÍNH XÁC
+    như trình duyệt thật (thay vì svglib gần đúng), tăng tỉ lệ OCR đúng."""
     import re as _re_cap
     if not content:
         return ""
@@ -1069,6 +1113,9 @@ def _solve_captcha(content: str) -> str:
                 png_bytes = base64.b64decode(m_emb.group(1))
             except Exception:
                 png_bytes = None
+        # ƯU TIÊN vẽ bằng trình duyệt ẩn thật (chính xác hơn hẳn svglib) khi có
+        if not png_bytes and drv is not None:
+            png_bytes = _svg_to_png_browser(svg_text, drv)
         if not png_bytes:
             png_bytes = _svg_to_png(svg_text)
 
@@ -1162,10 +1209,12 @@ def solve_login(cid: int, body: dict = Body(...)):
         raise HTTPException(401, f"Sai mã '{guess}': {e}")
 
 
-def _tu_dong_dang_nhap(cid, so_lan=5):
+def _tu_dong_dang_nhap(cid, so_lan=5, drv=None):
     """Tự lấy captcha -> giải -> đăng nhập cho 1 công ty (dùng chung cho endpoint
     /api/auto-login VÀ cho tra cứu hàng loạt — công ty chưa đăng nhập thì tự
     đăng nhập bằng tài khoản/mật khẩu đã lưu thay vì bỏ qua).
+    drv: webdriver Chrome ẩn (tùy chọn) để vẽ captcha SVG→PNG chính xác như
+    trình duyệt thật (xem _svg_to_png_browser) — tăng tỉ lệ tự đăng nhập thành công.
     Trả (ok: bool, message: str, so_lan_thu: int, ma_da_thu: list)."""
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
@@ -1183,7 +1232,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5):
         except Exception as e:
             return False, f"Lỗi lấy captcha: {e}", lan, tried
         ckey = cap.get("key") or ""
-        cval = _solve_captcha(cap.get("content") or "")
+        cval = _solve_captcha(cap.get("content") or "", drv=drv)
         tried.append(cval or "(không giải được)")
         if not cval:
             last_err = "Không giải được captcha"
@@ -1202,10 +1251,34 @@ def _tu_dong_dang_nhap(cid, so_lan=5):
     return False, f"Tự đăng nhập thất bại sau {so_lan} lần. Lỗi cuối: {last_err}", so_lan, tried
 
 
+def _mo_trinh_duyet_captcha():
+    """Mở 1 trình duyệt Chrome ẩn dùng để vẽ captcha SVG→PNG chính xác (xem
+    _svg_to_png_browser). Trả None nếu không mở được (máy không có Chrome...)
+    — khi đó tự đăng nhập sẽ tự rớt về cách vẽ svglib (kém chính xác hơn)."""
+    try:
+        return _dvc_make_driver(headless=True, esigner=False)
+    except Exception:
+        return None
+
+
+def _dong_trinh_duyet_captcha(drv):
+    if drv:
+        try:
+            drv.quit()
+        except Exception:
+            pass
+
+
 @app.post("/api/auto-login/{cid}")
 def auto_login(cid: int):
-    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần (server-side, fallback)."""
-    ok, thong_bao, so_lan_thu, ma_da_thu = _tu_dong_dang_nhap(cid, so_lan=5)
+    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần (server-side, fallback).
+    Dùng trình duyệt ẩn thật để vẽ captcha (chính xác như lúc người dùng tự bấm
+    nút trên giao diện) thay vì svglib để tăng tỉ lệ thành công."""
+    drv = _mo_trinh_duyet_captcha()
+    try:
+        ok, thong_bao, so_lan_thu, ma_da_thu = _tu_dong_dang_nhap(cid, so_lan=8, drv=drv)
+    finally:
+        _dong_trinh_duyet_captcha(drv)
     if not ok:
         ma_loi = 404 if "Không tìm thấy công ty" in thong_bao else 401
         raise HTTPException(ma_loi, f"{thong_bao}. Mã đã thử: {ma_da_thu}")
@@ -3380,6 +3453,18 @@ _BATCH_SEQ = {"n": 0}
 
 def _run_batch(batch_id: int, cids: list, body: dict):
     batch = BATCH_JOBS[batch_id]
+    # Trình duyệt ẩn dùng CHUNG cho cả batch để vẽ captcha chính xác khi tự
+    # đăng nhập (mở LƯỜI — chỉ mở khi thật sự gặp công ty chưa đăng nhập đầu
+    # tiên, và dùng lại cho các công ty/lượt thử sau, đỡ tốn thời gian mở lại
+    # trình duyệt nhiều lần).
+    drv_captcha = [None, False]  # [driver_hoac_None, da_thu_mo_chua]
+
+    def _drv():
+        if not drv_captcha[1]:
+            drv_captcha[1] = True
+            drv_captcha[0] = _mo_trinh_duyet_captcha()
+        return drv_captcha[0]
+
     try:
         for cid in cids:
             if batch.get("cancel"):
@@ -3394,12 +3479,11 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 # (vd sai mật khẩu, OCR không giải được captcha) thì mới bỏ qua.
                 item["status"] = "login"
                 item["note"] = "Đang tự động đăng nhập..."
-                # so_lan cao hơn mặc định (12 thay vì 5): OCR captcha server-side
-                # (rasterize SVG bằng svglib, không có trình duyệt thật để vẽ như
-                # lúc người dùng bấm "Tự đăng nhập" trên giao diện) có tỉ lệ đọc
-                # đúng THẤP HƠN — chạy nền không ai chờ nên thử nhiều lần hơn để
-                # tăng tỉ lệ thành công thay vì bỏ cuộc sớm.
-                ok, thong_bao, _, _ = _tu_dong_dang_nhap(cid, so_lan=12)
+                # Dùng trình duyệt ẩn (nếu mở được) để vẽ captcha CHÍNH XÁC như
+                # lúc người dùng tự bấm nút trên giao diện, thay vì svglib gần
+                # đúng — tăng hẳn tỉ lệ thành công. so_lan=8 vẫn cao hơn mức 5-6
+                # lần người dùng thường cần, để dự phòng khi thi thoảng vẫn đọc sai.
+                ok, thong_bao, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, drv=_drv())
                 if not ok:
                     item["status"] = "skipped"
                     item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
@@ -3426,6 +3510,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
     finally:
         batch["running"] = False
         batch["current"] = None
+        _dong_trinh_duyet_captcha(drv_captcha[0])
 
 
 @app.post("/api/fetch-batch")
