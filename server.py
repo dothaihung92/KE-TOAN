@@ -1209,12 +1209,14 @@ def solve_login(cid: int, body: dict = Body(...)):
         raise HTTPException(401, f"Sai mã '{guess}': {e}")
 
 
-def _tu_dong_dang_nhap(cid, so_lan=5, drv=None):
+def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
     """Tự lấy captcha -> giải -> đăng nhập cho 1 công ty (dùng chung cho endpoint
     /api/auto-login VÀ cho tra cứu hàng loạt — công ty chưa đăng nhập thì tự
     đăng nhập bằng tài khoản/mật khẩu đã lưu thay vì bỏ qua).
     drv: webdriver Chrome ẩn (tùy chọn) để vẽ captcha SVG→PNG chính xác như
     trình duyệt thật (xem _svg_to_png_browser) — tăng tỉ lệ tự đăng nhập thành công.
+    progress: callback(text) báo tiến độ từng lần thử (tùy chọn) — để người
+    dùng biết đang thử lần thứ mấy, không phải chờ 'im lặng' cả quá trình.
     Trả (ok: bool, message: str, so_lan_thu: int, ma_da_thu: list)."""
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
@@ -1227,6 +1229,8 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None):
     last_err = ""
     tried = []
     for lan in range(1, so_lan + 1):
+        if progress:
+            progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan} (đang giải captcha)...")
         try:
             cap = client.get_captcha()
         except Exception as e:
@@ -1236,7 +1240,11 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None):
         tried.append(cval or "(không giải được)")
         if not cval:
             last_err = "Không giải được captcha"
+            if progress:
+                progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: không giải được captcha, thử lại...")
             continue
+        if progress:
+            progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: đã đoán mã, đang đăng nhập...")
         try:
             client.login(
                 username=comp["username"] or comp["mst"],
@@ -1247,6 +1255,8 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None):
             return True, f"Đăng nhập tự động thành công (lần {lan})", lan, tried
         except Exception as e:
             last_err = str(e)
+            if progress:
+                progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: sai mã/lỗi đăng nhập, thử lại...")
             continue
     return False, f"Tự đăng nhập thất bại sau {so_lan} lần. Lỗi cuối: {last_err}", so_lan, tried
 
@@ -3470,6 +3480,21 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             if batch.get("cancel"):
                 break
             item = batch["items"].get(cid)
+            # Đặt "current" + khởi tạo job NGAY TỪ ĐẦU (kể cả trước khi đăng
+            # nhập) — trước đây "current" chỉ được gán ngay trước lúc tra cứu,
+            # nên suốt bước tự đăng nhập (có thể mất vài chục giây) người dùng
+            # không thấy phần mềm đang xử lý công ty nào / tới đâu.
+            batch["current"] = cid
+            FETCH_JOBS[cid] = _new_fetch_job()
+
+            def _bao_tien_do(t, _cid=cid, _item=item):
+                _item["note"] = t
+                job = FETCH_JOBS.get(_cid)
+                if job is not None:
+                    kw = {"stage": "login", "text": t}
+                    job["messages"].append(kw)
+                    job["last"] = kw
+
             client = get_client(cid)
             if not client.token:
                 # TỰ ĐỘNG ĐĂNG NHẬP (bằng tài khoản/mật khẩu đã lưu) thay vì bỏ
@@ -3478,21 +3503,21 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 # loạt. Công ty nào chưa lưu mật khẩu / tự đăng nhập thất bại
                 # (vd sai mật khẩu, OCR không giải được captcha) thì mới bỏ qua.
                 item["status"] = "login"
-                item["note"] = "Đang tự động đăng nhập..."
+                _bao_tien_do("Đang tự động đăng nhập...")
                 # Dùng trình duyệt ẩn (nếu mở được) để vẽ captcha CHÍNH XÁC như
                 # lúc người dùng tự bấm nút trên giao diện, thay vì svglib gần
                 # đúng — tăng hẳn tỉ lệ thành công. so_lan=8 vẫn cao hơn mức 5-6
                 # lần người dùng thường cần, để dự phòng khi thi thoảng vẫn đọc sai.
-                ok, thong_bao, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, drv=_drv())
+                # progress=_bao_tien_do -> báo rõ đang thử lần mấy, không "im
+                # lặng" trong lúc chờ (có thể mất vài chục giây).
+                ok, thong_bao, _, _ = _tu_dong_dang_nhap(
+                    cid, so_lan=8, drv=_drv(), progress=_bao_tien_do)
                 if not ok:
                     item["status"] = "skipped"
                     item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
                     batch["done"] += 1
                     continue
             item["status"] = "running"
-            batch["current"] = cid
-            # khởi tạo job cho công ty này (UI từng công ty dùng lại được)
-            FETCH_JOBS[cid] = _new_fetch_job()
             try:
                 _run_fetch_job(cid, body)   # chạy đồng bộ trong thread batch
                 last = (FETCH_JOBS.get(cid) or {}).get("last") or {}
@@ -3559,11 +3584,21 @@ def fetch_batch_status(batch_id: int):
     batch = BATCH_JOBS.get(batch_id)
     if not batch:
         return {"running": False, "no_job": True}
+    # Chi tiết TRỰC TIẾP công ty đang xử lý (đăng nhập/tra cứu/tải file...) —
+    # để người dùng thấy phần mềm đang chạy TỚI ĐÂU, không chỉ biết "đang xử
+    # lý công ty X" mà không rõ đang ở bước nào bên trong.
+    current_detail = ""
+    cur_cid = batch["current"]
+    if cur_cid is not None:
+        job = FETCH_JOBS.get(cur_cid)
+        if job:
+            current_detail = (job.get("last") or {}).get("text", "")
     return {
         "running": batch["running"],
         "total": batch["total"],
         "done": batch["done"],
         "current": batch["current"],
+        "current_detail": current_detail,
         "items": [batch["items"][c] for c in batch["order"]],
     }
 

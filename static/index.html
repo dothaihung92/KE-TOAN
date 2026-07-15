@@ -363,6 +363,7 @@
       <div style="background:#fff;border-radius:6px;height:8px;overflow:hidden">
         <div id="batchBar" style="height:100%;width:0%;background:var(--green);transition:width .3s"></div>
       </div>
+      <div id="batchDetail" style="margin-top:8px;font-size:12.5px;color:var(--muted);font-style:italic;min-height:1.2em"></div>
       <div id="batchLog" style="margin-top:10px;font-size:13px;max-height:180px;overflow:auto"></div>
     </div>
 
@@ -1303,6 +1304,7 @@ function openBatchModal(){
   renderBatchCoList();
   document.getElementById('batchProgress').style.display='none';
   document.getElementById('batchLog').innerHTML='';
+  document.getElementById('batchDetail').textContent='';
   document.getElementById('batchStartBtn').disabled=false;
   document.getElementById('batchModal').classList.add('show');
 }
@@ -1385,6 +1387,7 @@ async function doBatchFetch(){
   btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang chạy...';
   document.getElementById('batchProgress').style.display='block';
   document.getElementById('batchLog').innerHTML='';
+  document.getElementById('batchDetail').textContent='';
   document.getElementById('batchBar').style.width='0%';
   document.getElementById('batchProgressText').textContent='Bắt đầu...';
 
@@ -1405,6 +1408,10 @@ async function doBatchFetch(){
       document.getElementById('batchProgressText').textContent=
         running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
                :`Hoàn tất ${st.done}/${st.total} công ty`;
+      // dòng chi tiết TRỰC TIẾP (đang đăng nhập lần mấy / đang tải hóa đơn nào...)
+      // để biết phần mềm đang chạy tới đâu, không chỉ biết "đang xử lý công ty X"
+      document.getElementById('batchDetail').textContent=
+        (running && st.current_detail)?('↳ '+st.current_detail):'';
       const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
       document.getElementById('batchLog').innerHTML=st.items.map(i=>{
         const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(i.status==='done'?'#1f6b4a':'#555'));
