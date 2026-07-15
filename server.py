@@ -37,8 +37,8 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 #  Mức "balanced" là cân bằng giữa tốc độ và an toàn.
 # ============================================================
 SPEED_PROFILES = {
-    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "between_loai": 2.5, "song_song": 5},
-    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "between_loai": 3, "song_song": 3},
+    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "between_loai": 2.5, "song_song": 8},
+    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "between_loai": 3, "song_song": 5},
     "safe":     {"page": 2.0, "status": 2.0, "month": 2.5, "file": 1.2,  "retry_base": 10, "retry_max": 10, "between_loai": 5, "song_song": 1},
 }
 CURRENT_SPEED = "fast"  # mặc định nhanh
@@ -10331,7 +10331,7 @@ def export_excel(cid: int):
         can_nap.append(dict(r))
     _tlog(f"{len(da_co_file_rows)} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file")
 
-    def _tai_1(rr):
+    def _tai_1(rr, cho_khi_429=False, max_retry=1):
         if client0._token_dead:
             return rr["id"], None   # phiên đã hết -> khỏi thử, trả nhanh
         ht0 = rr["he_thong"] or "query"
@@ -10339,24 +10339,32 @@ def export_excel(cid: int):
             try:
                 d = client0.get_detail(rr["nbmst"], rr["khhdon"],
                                        rr["khmshdon"], rr["shdon"], ht,
-                                       max_retry=1, cho_khi_429=False)
+                                       max_retry=max_retry, cho_khi_429=cho_khi_429)
                 if d and (d.get("hdhhdvu") or d.get("nbmst")):
                     return rr["id"], json.dumps(d, ensure_ascii=False)
             except Exception:
                 pass
         return rr["id"], None
 
-    def _nap_song_song(ds_rows, nhan):
+    def _nap_song_song(ds_rows, nhan, cho_khi_429=False, workers=None):
         """Nạp chi tiết qua mạng SONG SONG cho 1 danh sách hóa đơn, lưu DB
-        1 lần. Trả về số hóa đơn lấy được."""
+        1 lần. Trả về số hóa đơn lấy được.
+        cho_khi_429=True -> CHỜ theo Retry-After khi bị giới hạn tốc độ thay
+        vì bỏ ngay (dùng cho lượt cuối, đảm bảo KHÔNG bỏ sót hóa đơn nào)."""
         if not (ds_rows and client0 and client0.token and not client0._token_dead):
             return 0
         results_map = {}
         _tlog(f"{nhan} {len(ds_rows)} hóa đơn qua mạng (song song)...")
-        # số luồng song song: KHÔNG chờ (429 bỏ ngay) nên có thể chạy nhiều luồng hơn
-        workers = {"fast": 20, "balanced": 12, "safe": 6}.get(CURRENT_SPEED, 12)
+        if workers is None:
+            # số luồng song song: KHÔNG chờ (429 bỏ ngay) nên có thể chạy nhiều luồng hơn
+            workers = {"fast": 20, "balanced": 12, "safe": 6}.get(CURRENT_SPEED, 12)
+        max_retry = 2 if cho_khi_429 else 1
+
+        def _goi(rr):
+            return _tai_1(rr, cho_khi_429=cho_khi_429, max_retry=max_retry)
+
         with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            for inv_id, dj in ex.map(_tai_1, ds_rows):
+            for inv_id, dj in ex.map(_goi, ds_rows):
                 if dj:
                     results_map[inv_id] = dj
         cn = db()
@@ -10386,8 +10394,8 @@ def export_excel(cid: int):
     # hàng trăm hóa đơn, đây chính là nguyên nhân "đã nạp xong chi tiết" mà
     # vẫn treo rất lâu ở bước dựng sheet.
     _items_cache = {}
+    can_nap2 = []
     if da_co_file_rows:
-        can_nap2 = []
         for r in da_co_file_rows:
             fpath = find_invoice_file(r)
             items, summary = (_doc_file_hoadon(fpath) if fpath else ([], None))
@@ -10400,9 +10408,34 @@ def export_excel(cid: int):
             so_lay_duoc2 = _nap_song_song(can_nap2, "file đã tải nhưng đọc lỗi/rỗng — nạp lại")
             if so_lay_duoc2 < len(can_nap2):
                 _tlog(f"⚠ {len(can_nap2) - so_lay_duoc2}/{len(can_nap2)} hóa đơn có file trên máy "
-                     f"nhưng ĐỌC LỖI và nạp lại qua mạng cũng không được — sẽ hiện placeholder")
+                     f"nhưng ĐỌC LỖI và nạp lại qua mạng cũng không được")
 
-    # đọc lại rows để có detail_json mới nhất (từ cả 2 lượt nạp mạng ở trên)
+    # ===== LƯỢT CUỐI: ĐẢM BẢO LẤY ĐỦ, không để hóa đơn nào hiện placeholder
+    # "chưa lấy được chi tiết" chỉ vì bị giới hạn tốc độ (429) ở 2 lượt nhanh
+    # phía trên. 2 lượt trên bỏ ngay khi gặp 429 (để không làm chậm cả quá
+    # trình) — số hóa đơn CÒN THIẾU lúc này thường đã nhỏ, nên lượt cuối này
+    # CHỜ đúng theo Retry-After của trang Thuế (chấp nhận chậm hơn) với ít
+    # luồng song song hơn, để lấy cho BẰNG ĐƯỢC thay vì bỏ cuộc.
+    ds_can_kiem_tra = can_nap + can_nap2
+    if ds_can_kiem_tra and client0 and client0.token and not client0._token_dead:
+        ids_can_kiem_tra = [r["id"] for r in ds_can_kiem_tra]
+        ph = ",".join("?" * len(ids_can_kiem_tra))
+        con_thieu_rows = conn.execute(
+            f"SELECT * FROM invoices WHERE id IN ({ph}) AND (detail_json IS NULL OR detail_json='')",
+            ids_can_kiem_tra).fetchall()
+        if con_thieu_rows:
+            _tlog(f"còn {len(con_thieu_rows)} hóa đơn chưa lấy được — thử LẦN CUỐI "
+                 f"(chờ đúng thời gian giới hạn tốc độ của trang Thuế, để không bỏ sót)...")
+            so_lay_duoc3 = _nap_song_song(con_thieu_rows, "thử lại lần cuối (chờ khi bị giới hạn tốc độ)",
+                                          cho_khi_429=True, workers=4)
+            if so_lay_duoc3 < len(con_thieu_rows):
+                _tlog(f"⚠ vẫn còn {len(con_thieu_rows) - so_lay_duoc3} hóa đơn KHÔNG lấy được chi tiết "
+                     f"dù đã chờ thử lại — có thể phiên đăng nhập hết hạn giữa chừng, đăng nhập lại rồi "
+                     f"xuất lại để lấy nốt")
+            else:
+                _tlog("đã lấy đủ chi tiết cho toàn bộ hóa đơn còn thiếu ở lượt cuối")
+
+    # đọc lại rows để có detail_json mới nhất (từ các lượt nạp mạng ở trên)
     rows = conn.execute(
         "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
         (cid,)).fetchall()
