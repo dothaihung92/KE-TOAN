@@ -375,7 +375,18 @@ class GDTClient:
             r = None
             last_net_err = None
             sp = SP()
+            # GIỚI HẠN TỔNG THỜI GIAN thử lại 1 trang (không chỉ giới hạn SỐ LẦN):
+            # hệ thống hóa đơn máy tính tiền (sco-query) của Tổng cục Thuế phản
+            # hồi rất chậm/hay treo — trước đây retry_max=8 lần, mỗi lần chờ
+            # timeout=60s + nghỉ tới 60s, cộng dồn có thể tới ~960s CHO 1 TRANG,
+            # nhân với 3 trạng thái (ttxly) của "mua vào" x thêm 1 lượt thử lại
+            # ở tầng trên -> hàng chục phút đến cả tiếng cho 1 tháng, khiến hóa
+            # đơn máy tính tiền gần như không chạy được (cả mua vào lẫn bán ra).
+            t_bat_dau_thu = time.time()
+            NGUONG_THOI_GIAN_THU_LAI = 75  # giây
             for attempt in range(sp["retry_max"]):
+                if time.time() - t_bat_dau_thu > NGUONG_THOI_GIAN_THU_LAI:
+                    break
                 try:
                     r = self.session.get(full_url, headers=extra_headers, timeout=60)
                 except Exception as e:
@@ -492,7 +503,12 @@ class GDTClient:
         sp = SP()
         so_lan = max_retry if max_retry else sp["retry_max"]
         last_err = None
+        t_bat_dau_thu = time.time()
+        NGUONG_THOI_GIAN_THU_LAI = 150  # giây — chặn cộng dồn khi hệ thống (vd
+                                          # máy tính tiền) phản hồi chậm/treo liên tục
         for attempt in range(so_lan):
+            if time.time() - t_bat_dau_thu > NGUONG_THOI_GIAN_THU_LAI:
+                break
             try:
                 r = self.session.get(url, params=params, headers=extra_headers, timeout=90)
             except Exception as e:
