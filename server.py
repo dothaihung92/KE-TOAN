@@ -11206,15 +11206,20 @@ def export_excel(cid: int):
 
         # AN TOÀN: với hóa đơn MUA VÀO, loại bỏ hóa đơn mà MST người mua (nmmst)
         # KHÁC MST công ty đang xem (đó là hóa đơn lẫn của công ty khác, vd hóa đơn
-        # xuất khẩu của bên bán bị cổng thuế trả nhầm). Giữ lại nếu nmmst trống/khớp.
+        # xuất khẩu của bên bán bị cổng thuế trả nhầm). Giữ lại nếu nmmst trống/khớp
+        # — so khớp theo MST GỐC 10 số (bỏ hậu tố chi nhánh '-001'...), vì hóa đơn
+        # có thể ghi MST đơn vị trực thuộc (13 số) trong khi công ty đăng ký MST
+        # gốc (10 số) hoặc ngược lại — TRƯỚC ĐÂY so khớp CHUỖI Y HỆT nên loại nhầm
+        # hóa đơn hợp lệ của chính công ty, khiến VAT/doanh số mua vào ở Excel
+        # thấp hơn số liệu tra cứu (KPI trang chính/Tạm tính VAT không lọc MST).
         if loai == "purchase":
-            mst_cty = str(comp["mst"] or "").strip()
+            mst_cty_goc = _chuan_mst(comp["mst"])[:10]
             def _hop_le_mua(r):
                 nm = str(r["nmmst"] or "").strip()
                 # nmmst trống -> giữ (một số HĐ không ghi MST mua)
                 if not nm:
                     return True
-                return nm == mst_cty
+                return _chuan_mst(nm)[:10] == mst_cty_goc
             loai_rows = [r for r in loai_rows if _hop_le_mua(r)]
         # BÁN RA: KHÔNG lọc theo MST người bán nữa — trang Thuế tra cứu "bán ra"
         # đã CHỈ trả về đúng hóa đơn của công ty đang đăng nhập (không có rủi ro
@@ -11472,16 +11477,17 @@ def export_excel(cid: int):
     # Lưu tổng BK theo hóa đơn để đối chiếu (việc 4)
     bk_totals = {"purchase": {}, "sold": {}}
 
-    mst_cty_bk = str(comp["mst"] or "").strip()
+    mst_cty_bk_goc = _chuan_mst(comp["mst"])[:10]
     def _hd_dung_cty(r, loai):
-        """Loại hóa đơn lẫn của công ty khác: mua vào -> nmmst phải = MST công ty.
-        BÁN RA: KHÔNG lọc theo MST người bán (nbmst) — xem giải thích ở
-        build_detail_sheet phía trên (trang Thuế đã tự lọc đúng công ty đăng
-        nhập; hộ/cá nhân kinh doanh có thể có MST trên hóa đơn khác MST đăng
-        ký trong phần mềm, lọc thêm ở đây gây mất trắng hóa đơn bán ra)."""
+        """Loại hóa đơn lẫn của công ty khác: mua vào -> nmmst phải cùng MST GỐC
+        (10 số, bỏ hậu tố chi nhánh) với công ty. BÁN RA: KHÔNG lọc theo MST
+        người bán (nbmst) — xem giải thích ở build_detail_sheet phía trên
+        (trang Thuế đã tự lọc đúng công ty đăng nhập; hộ/cá nhân kinh doanh có
+        thể có MST trên hóa đơn khác MST đăng ký trong phần mềm, lọc thêm ở
+        đây gây mất trắng hóa đơn bán ra)."""
         if loai == "purchase":
             nm = str(r["nmmst"] or "").strip()
-            return (not nm) or nm == mst_cty_bk
+            return (not nm) or _chuan_mst(nm)[:10] == mst_cty_bk_goc
         return True
 
     # ----- BẢNG KÊ MUA VÀO (mỗi hóa đơn 1 dòng + cột Mặt hàng) -----
