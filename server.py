@@ -3394,7 +3394,12 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 # (vd sai mật khẩu, OCR không giải được captcha) thì mới bỏ qua.
                 item["status"] = "login"
                 item["note"] = "Đang tự động đăng nhập..."
-                ok, thong_bao, _, _ = _tu_dong_dang_nhap(cid)
+                # so_lan cao hơn mặc định (12 thay vì 5): OCR captcha server-side
+                # (rasterize SVG bằng svglib, không có trình duyệt thật để vẽ như
+                # lúc người dùng bấm "Tự đăng nhập" trên giao diện) có tỉ lệ đọc
+                # đúng THẤP HƠN — chạy nền không ai chờ nên thử nhiều lần hơn để
+                # tăng tỉ lệ thành công thay vì bỏ cuộc sớm.
+                ok, thong_bao, _, _ = _tu_dong_dang_nhap(cid, so_lan=12)
                 if not ok:
                     item["status"] = "skipped"
                     item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
