@@ -2963,10 +2963,14 @@ def _run_fetch_job(cid: int, body: dict):
                     "FROM invoices WHERE company_id=?", (cid,)):
                 old_status[(str(r["khmshdon"] or ""), str(r["khhdon"] or ""),
                             str(r["shdon"] or ""), r["loai"], r["he_thong"])] = str(r["tthai"] or "")
-            # Xóa sạch toàn bộ hóa đơn cũ của công ty trước khi tra cứu mới
-            conn.execute("DELETE FROM invoices WHERE company_id=?", (cid,))
-            conn.commit()
-            msg(stage="start", text="Đã xóa dữ liệu cũ. Bắt đầu tra cứu...")
+            # KHÔNG xóa dữ liệu cũ ngay từ đầu nữa — TRƯỚC ĐÂY xóa sạch hết rồi
+            # mới tra cứu lại, nên nếu lượt tra cứu MỚI này lại LỖI (vd 1 trạng
+            # thái mua vào lỗi dù đã thử lại) thì dữ liệu CŨ (đã lưu từ lần
+            # TRƯỚC thành công) cũng biến mất theo — nhìn như phần mềm "tự mất
+            # dữ liệu". Nay chỉ xóa dữ liệu cũ CỦA TỪNG LOẠI (mua/bán x hệ
+            # thống) NGAY TRƯỚC KHI lưu kết quả MỚI THÀNH CÔNG của đúng loại
+            # đó — loại nào lỗi thì GIỮ NGUYÊN dữ liệu cũ, không bị mất.
+            msg(stage="start", text="Bắt đầu tra cứu...")
 
             total_saved = 0
             file_saved = 0
@@ -3040,7 +3044,9 @@ def _run_fetch_job(cid: int, body: dict):
                         msg(stage="error",
                             text=f"✗ {loai_txt}{ht_txt}: LỖI, CHƯA TRA CỨU ĐƯỢC dù đã thử lại — "
                                  f"{loi_cuoi[:140]}. KẾT QUẢ {loai_txt.upper()} CÓ THỂ THIẾU — "
-                                 f"NÊN TRA CỨU LẠI riêng kỳ/công ty này.")
+                                 f"NÊN TRA CỨU LẠI riêng kỳ/công ty này (dữ liệu {loai_txt}{ht_txt} "
+                                 f"đã lưu từ lần tra cứu trước — NẾU CÓ — vẫn được GIỮ NGUYÊN, "
+                                 f"không bị xóa).")
                         continue
 
                     # Không raise lỗi nhưng vẫn có thể lỗi RIÊNG PHẦN (vd 1 trong 3 trạng
@@ -3061,8 +3067,16 @@ def _run_fetch_job(cid: int, body: dict):
                             loai_that_bai[loai] = True
                             msg(stage="error",
                                 text=f"✗ {loai_txt}{ht_txt}: Trang Thuế báo có {exp0} hóa đơn "
-                                     f"nhưng KHÔNG lấy được cái nào — LỖI, nên tra cứu LẠI.")
+                                     f"nhưng KHÔNG lấy được cái nào — LỖI, nên tra cứu LẠI (dữ liệu "
+                                     f"{loai_txt}{ht_txt} đã lưu từ lần trước — nếu có — vẫn được "
+                                     f"GIỮ NGUYÊN, không bị xóa).")
                         else:
+                            # XÁC NHẬN THẬT SỰ 0 hóa đơn (không phải lỗi) -> được phép
+                            # xóa dữ liệu CŨ của đúng loại này (phản ánh đúng hiện trạng).
+                            conn.execute(
+                                "DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?",
+                                (cid, loai, he_thong))
+                            conn.commit()
                             msg(stage="found",
                                 text=f"{loai_txt}{ht_txt}: 0 hóa đơn (không có dữ liệu trong kỳ)",
                                 total_saved=total_saved)
@@ -3076,6 +3090,11 @@ def _run_fetch_job(cid: int, body: dict):
                             msg(stage="info",
                                 text=f"Đã loại {bo} hóa đơn ngân hàng khỏi {loai_txt}{ht_txt}")
 
+                    # CHỈ xóa dữ liệu CŨ của đúng loại này NGAY TRƯỚC KHI lưu kết quả
+                    # MỚI (đã xác nhận tra cứu được) — loại khác lỗi thì không đụng tới.
+                    conn.execute(
+                        "DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?",
+                        (cid, loai, he_thong))
                     for inv in invs:
                         try:
                             conn.execute("""
@@ -3284,9 +3303,11 @@ def _run_fetch_job(cid: int, body: dict):
                 if loai_that_bai["sold"]:
                     loi_ben.append("BÁN RA")
                 done_text = (f"❌ LỖI khi tra cứu {', '.join(loi_ben)} — DỮ LIỆU CHƯA ĐẦY ĐỦ "
-                            f"(đã lưu tạm {total_saved} hóa đơn: đầu vào {tk_mua['got']}, "
-                            f"đầu ra {tk_ban['got']}). BẮT BUỘC tra cứu LẠI công ty này "
-                            f"(nên chuyển chế độ 'Chậm & an toàn' nếu vẫn lỗi).")
+                            f"(hiện có {total_saved} hóa đơn: đầu vào {tk_mua['got']}, "
+                            f"đầu ra {tk_ban['got']} — riêng loại LỖI ở trên vẫn đang GIỮ dữ "
+                            f"liệu của lần tra cứu THÀNH CÔNG gần nhất, KHÔNG bị mất). "
+                            f"BẮT BUỘC tra cứu LẠI công ty này (nên chuyển chế độ "
+                            f"'Chậm & an toàn' nếu vẫn lỗi).")
             else:
                 done_text = f"Hoàn tất! Đã lưu {total_saved} hóa đơn"
                 if "purchase" in loai_list or "sold" in loai_list:
