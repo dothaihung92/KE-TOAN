@@ -421,11 +421,19 @@ class GDTClient:
             time.sleep(sp["page"])  # nghỉ giữa các trang
 
         # KIỂM TRA ĐỦ CHƯA: nếu trang Thuế báo total nhiều hơn số lấy được,
-        # thử phân trang lại 1 lần nữa (phòng trang bị lỗi giữa chừng)
-        if (total_expected and len(results) < total_expected):
+        # thử phân trang lại 1 lần nữa (phòng trang bị lỗi giữa chừng).
+        # CHỈ áp dụng khi đã lấy được ÍT NHẤT 1 hóa đơn nhưng còn thiếu — tức
+        # là dấu hiệu thật sự của "phân trang bị đứt giữa chừng". Nếu lấy
+        # được 0 hóa đơn thì KHÔNG chạy lại: trang Thuế thường trả 'total'
+        # > 0 dù 'datas' rỗng (total không lọc đúng theo trạng thái/kỳ thực
+        # tế đang truy vấn) — trước đây cứ thấy total>0 mà results=0 là chạy
+        # lại TOÀN BỘ phân trang (tối đa 500 trang, chờ 429 không giới hạn số
+        # lần thử) nên các kỳ KHÔNG có hóa đơn lại chậm hơn hẳn kỳ có hóa đơn.
+        if (total_expected and 0 < len(results) < total_expected):
             try:
                 retry_results = []
                 state2 = None
+                so_lan_429 = 0
                 for _ in range(500):
                     qs = (f"sort=tdlap:desc&size={page_size}"
                           f"&search={quote(search, safe='=;,:/')}")
@@ -433,6 +441,9 @@ class GDTClient:
                         qs += f"&state={quote(str(state2), safe='')}"
                     r2 = self.session.get(f"{url}?{qs}", headers=extra_headers, timeout=60)
                     if r2.status_code == 429:
+                        so_lan_429 += 1
+                        if so_lan_429 > SP()["retry_max"]:
+                            break
                         time.sleep(min(SP()["retry_base"] * 2, 90)); continue
                     if r2.status_code != 200:
                         break
