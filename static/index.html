@@ -303,7 +303,7 @@
 <div class="modal-bg" id="batchModal">
   <div class="modal" style="max-width:680px">
     <h3>🚀 Tra cứu hóa đơn hàng loạt</h3>
-    <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Hệ thống xử lý <b>lần lượt</b> từng công ty (an toàn, tránh bị Tổng cục Thuế chặn tạm). Công ty <b>chưa đăng nhập</b> sẽ bị bỏ qua — hãy đăng nhập trước.</p>
+    <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Hệ thống xử lý <b>lần lượt</b> từng công ty (an toàn, tránh bị Tổng cục Thuế chặn tạm). Công ty <b>chưa đăng nhập</b> sẽ được <b>tự động đăng nhập</b> (bằng tài khoản/mật khẩu đã lưu) trước khi tra cứu — chỉ bỏ qua nếu công ty đó chưa lưu mật khẩu hoặc tự đăng nhập thất bại.</p>
 
     <div class="field">
       <label>Chọn nhanh theo kỳ</label>
@@ -1405,7 +1405,7 @@ async function doBatchFetch(){
       document.getElementById('batchProgressText').textContent=
         running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
                :`Hoàn tất ${st.done}/${st.total} công ty`;
-      const ic={pending:'⏳',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
+      const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
       document.getElementById('batchLog').innerHTML=st.items.map(i=>{
         const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(i.status==='done'?'#1f6b4a':'#555'));
         const sl=i.status==='done'?` (${i.total_saved} HĐ)`:'';

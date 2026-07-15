@@ -1162,22 +1162,26 @@ def solve_login(cid: int, body: dict = Body(...)):
         raise HTTPException(401, f"Sai mã '{guess}': {e}")
 
 
-@app.post("/api/auto-login/{cid}")
-def auto_login(cid: int):
-    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần (server-side, fallback)."""
+def _tu_dong_dang_nhap(cid, so_lan=5):
+    """Tự lấy captcha -> giải -> đăng nhập cho 1 công ty (dùng chung cho endpoint
+    /api/auto-login VÀ cho tra cứu hàng loạt — công ty chưa đăng nhập thì tự
+    đăng nhập bằng tài khoản/mật khẩu đã lưu thay vì bỏ qua).
+    Trả (ok: bool, message: str, so_lan_thu: int, ma_da_thu: list)."""
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     if not comp:
-        raise HTTPException(404, "Không tìm thấy công ty")
+        return False, "Không tìm thấy công ty", 0, []
+    if not comp["password"]:
+        return False, "Công ty chưa lưu mật khẩu — không thể tự đăng nhập", 0, []
     client = get_client(cid)
     last_err = ""
     tried = []
-    for lan in range(1, 6):
+    for lan in range(1, so_lan + 1):
         try:
             cap = client.get_captcha()
         except Exception as e:
-            raise HTTPException(500, f"Lỗi lấy captcha: {e}")
+            return False, f"Lỗi lấy captcha: {e}", lan, tried
         ckey = cap.get("key") or ""
         cval = _solve_captcha(cap.get("content") or "")
         tried.append(cval or "(không giải được)")
@@ -1185,18 +1189,29 @@ def auto_login(cid: int):
             last_err = "Không giải được captcha"
             continue
         try:
-            token = client.login(
+            client.login(
                 username=comp["username"] or comp["mst"],
                 password=comp["password"],
                 cvalue=cval,
                 ckey=ckey,
             )
-            return {"ok": True, "token": token[:20] + "...",
-                    "so_lan_thu": lan, "ma_da_thu": tried}
+            return True, f"Đăng nhập tự động thành công (lần {lan})", lan, tried
         except Exception as e:
             last_err = str(e)
             continue
-    raise HTTPException(401, f"Tự đăng nhập thất bại sau 5 lần. Mã đã thử: {tried}. Lỗi cuối: {last_err}")
+    return False, f"Tự đăng nhập thất bại sau {so_lan} lần. Lỗi cuối: {last_err}", so_lan, tried
+
+
+@app.post("/api/auto-login/{cid}")
+def auto_login(cid: int):
+    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần (server-side, fallback)."""
+    ok, thong_bao, so_lan_thu, ma_da_thu = _tu_dong_dang_nhap(cid, so_lan=5)
+    if not ok:
+        ma_loi = 404 if "Không tìm thấy công ty" in thong_bao else 401
+        raise HTTPException(ma_loi, f"{thong_bao}. Mã đã thử: {ma_da_thu}")
+    client = get_client(cid)
+    return {"ok": True, "token": (client.token or "")[:20] + "...",
+            "so_lan_thu": so_lan_thu, "ma_da_thu": ma_da_thu}
 
 
 @app.get("/api/captcha-debug/{cid}")
@@ -3372,10 +3387,19 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             item = batch["items"].get(cid)
             client = get_client(cid)
             if not client.token:
-                item["status"] = "skipped"
-                item["note"] = "Chưa đăng nhập — bỏ qua"
-                batch["done"] += 1
-                continue
+                # TỰ ĐỘNG ĐĂNG NHẬP (bằng tài khoản/mật khẩu đã lưu) thay vì bỏ
+                # qua — trước đây công ty chưa đăng nhập bị SKIP hẳn, người
+                # dùng phải tự đăng nhập TỪNG CÔNG TY trước khi tra cứu hàng
+                # loạt. Công ty nào chưa lưu mật khẩu / tự đăng nhập thất bại
+                # (vd sai mật khẩu, OCR không giải được captcha) thì mới bỏ qua.
+                item["status"] = "login"
+                item["note"] = "Đang tự động đăng nhập..."
+                ok, thong_bao, _, _ = _tu_dong_dang_nhap(cid)
+                if not ok:
+                    item["status"] = "skipped"
+                    item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
+                    batch["done"] += 1
+                    continue
             item["status"] = "running"
             batch["current"] = cid
             # khởi tạo job cho công ty này (UI từng công ty dùng lại được)
