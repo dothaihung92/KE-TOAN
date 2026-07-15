@@ -13,6 +13,7 @@ import base64
 import sqlite3
 import zipfile
 import datetime
+import concurrent.futures as _cf
 from typing import Optional, List
 
 import requests
@@ -36,9 +37,9 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 #  Mức "balanced" là cân bằng giữa tốc độ và an toàn.
 # ============================================================
 SPEED_PROFILES = {
-    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "between_loai": 2.5},
-    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "between_loai": 3},
-    "safe":     {"page": 2.0, "status": 2.0, "month": 2.5, "file": 1.2,  "retry_base": 10, "retry_max": 10, "between_loai": 5},
+    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "between_loai": 2.5, "song_song": 5},
+    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "between_loai": 3, "song_song": 3},
+    "safe":     {"page": 2.0, "status": 2.0, "month": 2.5, "file": 1.2,  "retry_base": 10, "retry_max": 10, "between_loai": 5, "song_song": 1},
 }
 CURRENT_SPEED = "fast"  # mặc định nhanh
 
@@ -3109,18 +3110,41 @@ def _run_fetch_job(cid: int, body: dict):
                                     return False
                             return False
 
-                        loi_file = []   # các hóa đơn tải file KHÔNG thành công (để thử lại)
-                        for i, inv in enumerate(invs, 1):
-                            msg(stage="download",
-                                text=f"Đang tải file {loai_txt}: {i}/{n} (còn {n-i})",
-                                cur=i, total=n)
+                        # TẢI SONG SONG (thay vì từng file 1) để rút ngắn thời gian chờ —
+                        # mỗi file là 1 request mạng riêng tới trang Thuế, tải tuần tự
+                        # từng cái 1 với hàng chục/hàng trăm hóa đơn khiến tổng thời gian
+                        # cộng dồn rất lâu dù mỗi file không lỗi gì. Giới hạn số luồng
+                        # đồng thời (không tải ồ ạt) để tránh bị 429 chặn tốc độ.
+                        SO_LUONG_SONG_SONG = SP().get("song_song", 4)
+
+                        def _tai_nhieu_file(ds_inv, nhan):
+                            """Tải song song danh sách hóa đơn, trả về (so_thanh_cong, ds_loi)."""
                             if getattr(client, "_token_dead", False):
-                                loi_file.append(inv)   # phiên hết hạn -> khỏi thử, để dồn báo cuối
-                            elif _tai_1_file(inv):
-                                file_saved += 1
-                            else:
-                                loi_file.append(inv)
-                            time.sleep(SP()["file"])
+                                return 0, list(ds_inv)  # phiên đã hết hạn -> khỏi thử
+                            loi = []
+                            so_ok = 0
+                            so_xong = 0
+                            n_ds = len(ds_inv)
+                            with _cf.ThreadPoolExecutor(max_workers=SO_LUONG_SONG_SONG) as ex:
+                                futs = {ex.submit(_tai_1_file, inv): inv for inv in ds_inv}
+                                for fut in _cf.as_completed(futs):
+                                    inv = futs[fut]
+                                    try:
+                                        ok = fut.result()
+                                    except Exception:
+                                        ok = False
+                                    so_xong += 1
+                                    msg(stage="download",
+                                        text=f"{nhan} {loai_txt}: {so_xong}/{n_ds} (còn {n_ds - so_xong})",
+                                        cur=so_xong, total=n_ds)
+                                    if ok:
+                                        so_ok += 1
+                                    else:
+                                        loi.append(inv)
+                            return so_ok, loi
+
+                        ok_1, loi_file = _tai_nhieu_file(invs, "Đang tải file")
+                        file_saved += ok_1
 
                         # THỬ LẠI 1 LƯỢT các file bị lỗi (thường do bị chặn tốc độ giữa
                         # chừng) — trước đây KHÔNG hề thử lại nên 1 lần vấp là mất file
@@ -3130,19 +3154,8 @@ def _run_fetch_job(cid: int, body: dict):
                                 text=f"⚠ {loai_txt}{ht_txt}: {len(loi_file)} file tải chưa được, "
                                      f"đang thử lại...")
                             time.sleep(5)
-                            con_loi = []
-                            for j, inv in enumerate(loi_file, 1):
-                                msg(stage="download",
-                                    text=f"Thử lại file {loai_txt}: {j}/{len(loi_file)}",
-                                    cur=j, total=len(loi_file))
-                                if getattr(client, "_token_dead", False):
-                                    con_loi.append(inv)
-                                elif _tai_1_file(inv):
-                                    file_saved += 1
-                                else:
-                                    con_loi.append(inv)
-                                time.sleep(SP()["file"])
-                            loi_file = con_loi
+                            ok_2, loi_file = _tai_nhieu_file(loi_file, "Thử lại file")
+                            file_saved += ok_2
 
                         if loi_file:
                             file_thieu_tong += len(loi_file)
