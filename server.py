@@ -11525,10 +11525,12 @@ def export_excel(cid: int):
         # HKD: nếu tgtcthue=0 nhưng tgtttbso>0 -> lấy thành tiền (tổng thanh toán)
         if not ds:
             ds = _to_num(r["tgtttbso"]) or 0
-        # mặt hàng đầu tiên + thuế suất
+        # mặt hàng đầu tiên + thuế suất (loại dòng "Tổng tiền phí" ra khỏi
+        # phần gộp này vì nó đã được ghi thành 1 dòng riêng ở dưới)
         _items, _sm = get_invoice_items(r)
+        _items_hh = [it for it in _items if not it.get("_la_phi")]
         la_ck_hd = False
-        if _items:
+        if _items_hh:
             def _is_ck(it):
                 """Dòng CHIẾT KHẤU THUẦN (cần ghi âm cả hóa đơn nếu mọi dòng đều vậy).
                 LƯU Ý: dòng TChat=3 NHƯNG có chiết khấu dòng (STCKhau>0) là HÀNG
@@ -11548,7 +11550,7 @@ def export_excel(cid: int):
                     return True
                 ten = str(it.get("ten_hang", "") or "").lower()
                 return "chiết khấu" in ten or "chiet khau" in ten
-            items_ko_gc = [it for it in _items if str(it.get("tchat","") or "")!="4"]
+            items_ko_gc = [it for it in _items_hh if str(it.get("tchat","") or "")!="4"]
             if items_ko_gc and all(_is_ck(it) for it in items_ko_gc):
                 la_ck_hd = True
         if la_ck_hd:
@@ -11556,18 +11558,18 @@ def export_excel(cid: int):
             thue = -abs(thue) if isinstance(thue, (int, float)) else thue
         mat_hang = ""
         thue_suat = ""
-        if _items:
-            mat_hang = _items[0].get("ten_hang", "")
+        if _items_hh:
+            mat_hang = _items_hh[0].get("ten_hang", "")
             # thuế suất từ summary (nếu có nhiều mức thì gộp); lấy mức đầu tiên có
             ts_set = []
-            for it in _items:
+            for it in _items_hh:
                 tsv = str(it.get("tsuat", "") or "").strip()
                 if tsv and tsv not in ts_set:
                     ts_set.append(tsv)
             thue_suat = ", ".join(ts_set) if ts_set else ""
             if la_ck_hd:
                 mat_hang += " (Chiết khấu TM - ghi âm)"
-            elif len(_items) > 1:
+            elif len(_items_hh) > 1:
                 mat_hang += " ..."
         ws.append([stt, r["khhdon"], r["shdon"], ngay, r["nbten"], r["nbmst"],
                    mat_hang, thue_suat, ds, thue, _to_num(r["tgtttbso"]),
@@ -11576,6 +11578,19 @@ def export_excel(cid: int):
         tong_thue_mua += thue if isinstance(thue, (int, float)) else 0
         ikey = (str(r["khhdon"]), str(r["shdon"]).lstrip("0") or "0")
         bk_totals["purchase"][ikey] = {"ds": ds, "thue": thue}
+        # dòng riêng "Tổng tiền phí" (thu hộ/lệ phí ngoài DSHHDVu, không nằm
+        # trong TgTCThue) — khớp với dòng đã thêm ở "Chi tiết MUA VÀO"
+        for it_phi in _items:
+            if not it_phi.get("_la_phi"):
+                continue
+            tien_phi = _to_num(it_phi.get("thtien")) or 0
+            if not tien_phi:
+                continue
+            stt += 1
+            ws.append([stt, r["khhdon"], r["shdon"], ngay, r["nbten"], r["nbmst"],
+                       "Tổng tiền phí", "KCT", tien_phi, 0, "", ""])
+            tong_ds_mua += tien_phi
+            bk_totals["purchase"][ikey]["ds"] += tien_phi
 
     # ===== TỜ KHAI NHẬP KHẨU: mỗi tờ khai gộp thành 1 dòng trong BK Mua vào =====
     conn_tk2 = db()
