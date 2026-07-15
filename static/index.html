@@ -3650,6 +3650,7 @@ async function importExcel(input){
     if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     let msg=`Đã import (kỳ ${ky||'?'}): VAT mua ${(d.mua_thue||0).toLocaleString('vi-VN')}đ (${d.mua_rows||0} dòng), VAT bán ${(d.ban_thue||0).toLocaleString('vi-VN')}đ. Màn hình đã cập nhật theo số đã điều chỉnh.`;
+    if(d.so_dong_ghi_de)msg+=` ✅ Đã ghi đè ${d.so_dong_ghi_de} hóa đơn vào danh sách chi tiết — "Xuất Excel tổng hợp" sẽ dùng đúng dữ liệu vừa import.`;
     if(d.mua_sheet_found===false)msg+=' ⚠ Không thấy sheet "BK Mua vào" trong file.';
     else if(!d.mua_rows)msg+=' ⚠ Không đọc được dòng mua vào nào — kiểm tra lại file.';
     if(d.ban_sheet_found===false)msg+=' ⚠ Không thấy sheet "BK Bán ra" trong file.';
