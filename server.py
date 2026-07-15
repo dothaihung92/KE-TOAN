@@ -9826,6 +9826,60 @@ def del_imported_api(cid: int):
     return {"ok": True}
 
 
+def _khoang_ngay_ky(ky):
+    """'MM/YYYY' hoặc 'QX/YYYY' -> (d_tu, d_den) của đúng kỳ đó (tháng thì
+    trọn tháng, quý thì trọn 3 tháng). (None, None) nếu ky không hợp lệ."""
+    import calendar as _cal
+    ky = (ky or "").strip()
+    if not ky or "/" not in ky:
+        return None, None
+    try:
+        a, b = ky.split("/", 1)
+        a = a.strip().upper()
+        yyyy = int(b.strip())
+        if a.startswith("Q") and a[1:].isdigit():
+            q = max(1, min(4, int(a[1:])))
+            mm1 = (q - 1) * 3 + 1
+            mm2 = mm1 + 2
+            d_tu = datetime.date(yyyy, mm1, 1)
+            d_den = datetime.date(yyyy, mm2, _cal.monthrange(yyyy, mm2)[1])
+        else:
+            mm = int(a)
+            d_tu = datetime.date(yyyy, mm, 1)
+            d_den = datetime.date(yyyy, mm, _cal.monthrange(yyyy, mm)[1])
+        return d_tu, d_den
+    except Exception:
+        return None, None
+
+
+def _tong_thue_nk_tokhai(cid, ky):
+    """Tổng thuế GTGT hàng nhập khẩu (bảng tokhai_nhap — import RIÊNG từ tờ
+    khai hải quan, KHÔNG phải import bảng kê Excel) của ĐÚNG kỳ đang tính."""
+    d_tu, d_den = _khoang_ngay_ky(ky)
+    if not d_tu:
+        return 0
+    conn = db()
+    tk_rows = conn.execute(
+        "SELECT ngay_dk, items_json FROM tokhai_nhap WHERE company_id=?", (cid,)).fetchall()
+    conn.close()
+    tong = 0
+    for tkr in tk_rows:
+        s = str(tkr["ngay_dk"] or "").split("T")[0]
+        try:
+            d = datetime.datetime.strptime(s, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if not (d_tu <= d <= d_den):
+            continue
+        try:
+            its = json.loads(tkr["items_json"]) if tkr["items_json"] else []
+        except Exception:
+            its = []
+        for it in its:
+            tong += round(it.get("tien_thue_gtgt", 0) or 0)
+    return tong
+
+
 @app.get("/api/vat-tmtinh/{cid}")
 def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
     """
@@ -9860,10 +9914,21 @@ def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
             return True
         return False
 
+    # Thuế GTGT hàng NHẬP KHẨU từ bảng tokhai_nhap (import RIÊNG tờ khai hải
+    # quan) — TRƯỚC ĐÂY hàm này hoàn toàn không cộng khoản này, nên sau khi
+    # import tờ khai nhập khẩu, phần tạm tính VẪN GIỮ NGUYÊN như chưa import.
+    thue_nk_rieng = _tong_thue_nk_tokhai(cid, ky)
+
     # ƯU TIÊN dữ liệu đã import từ Excel (nếu có); nếu không, dùng dữ liệu tra cứu
     imp = _get_imported(cid, ky)
     if imp:
         vat_mua = _to_num(imp["mua_thue"]) or 0
+        # Nếu file Excel bảng kê ĐÃ có sẵn dòng hàng nhập khẩu (ký hiệu TKNK) thì
+        # mua_thue đã bao gồm thuế NK rồi — KHÔNG cộng thêm lần nữa (giống hệt
+        # cách tính của tờ khai chính thức ở /api/xuat-to-khai) để tránh trùng.
+        imp_nk_thue = _to_num(imp["mua_thue_nk"]) or 0 if "mua_thue_nk" in imp.keys() else 0
+        if not imp_nk_thue:
+            vat_mua += thue_nk_rieng
         vat_ban = (_to_num(imp["ban_thue_5"]) or 0) + (_to_num(imp["ban_thue_8"]) or 0) \
                   + (_to_num(imp["ban_thue_10"]) or 0)
         nguon = "import"
@@ -9876,6 +9941,9 @@ def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
                 vat_mua += _to_num(r["tgtthue"]) or 0
             elif r["loai"] == "sold":
                 vat_ban += _to_num(r["tgtthue"]) or 0
+        # Hóa đơn tra cứu từ trang Thuế KHÔNG bao giờ có tờ khai nhập khẩu (đây
+        # là dữ liệu hải quan, nhập riêng) -> luôn cộng thêm.
+        vat_mua += thue_nk_rieng
         nguon = "tra cứu"
 
     # số dư đầu kỳ: ưu tiên giá trị truyền vào; nếu None thì lấy du_cuoi_ky kỳ trước
