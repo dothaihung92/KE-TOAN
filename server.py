@@ -11316,8 +11316,13 @@ def export_excel(cid: int):
                 thue_goc_raw = it.get("tien_thue")
                 ts_upper = ts_raw.upper().replace(" ", "")
                 phan_bo = False
-                # Thuế suất hiển thị: ô trống / KCT / KKKNT -> "0%"
-                if ts_upper in ("", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG", "KHONG"):
+                # Thuế suất hiển thị: ô trống / KCT / KKKNT -> "0%" — RIÊNG dòng
+                # "Tổng tiền phí" (_la_phi) hiện đúng chữ "KCT" theo yêu cầu,
+                # không quy về "0%" như các dòng hàng thông thường.
+                if it.get("_la_phi"):
+                    ts_hien = "KCT"
+                    tien_thue = 0
+                elif ts_upper in ("", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG", "KHONG"):
                     ts_hien = "0%"
                     tien_thue = 0
                 # Có tiền thuế GỐC trên hóa đơn → dùng (kể cả = 0)
@@ -12028,6 +12033,16 @@ def _parse_detail_json(detail):
             "tgtthue": detail.get("tgtthue", ""),
             "tgtttbso": detail.get("tgtttbso", ""),
         })
+
+    # Tổng tiền phí (không chịu thuế) — xem giải thích ở _lay_tong_tien_phi_xml
+    tong_phi = _lay_tong_tien_phi_json(detail)
+    if tong_phi:
+        common = {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
+                  "ngay": ngay, "ten_nban": ten_nban, "mst_nban": mst_nban,
+                  "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
+                  "tgtcthue": detail.get("tgtcthue", ""), "tgtthue": detail.get("tgtthue", ""),
+                  "tgtttbso": detail.get("tgtttbso", "")}
+        rows.append(_dong_phi_hoa_don(tong_phi, common))
     return rows
 
 
@@ -12081,8 +12096,99 @@ def _summary_from_detail_json(detail):
             cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0})
             cur["ds"] += ds if isinstance(ds, (int, float)) else 0
             cur["thue"] += thue
+    # Tổng tiền phí (không chịu thuế) — cộng vào nhóm KCT để khớp với dòng
+    # 'Tổng tiền phí' đã thêm ở _parse_detail_json (Chi tiết BÁN RA vs BK Bán ra).
+    tong_phi = _lay_tong_tien_phi_json(detail)
+    if tong_phi:
+        cur = theo_ts.setdefault("KCT", {"ds": 0, "thue": 0})
+        cur["ds"] += tong_phi
     info["theo_ts"] = theo_ts
     return info
+
+
+def _lay_tong_tien_phi_xml(root):
+    """Tìm 'Tổng tiền phí' trên hóa đơn — các khoản phí KHÔNG chịu VAT (vd lệ
+    phí đăng kiểm, phí sân bay/thu hộ, phí dịch vụ...) hiển thị ở 1 bảng RIÊNG
+    trên hóa đơn (ngoài danh sách hàng hóa/dịch vụ DSHHDVu), TRƯỚC ĐÂY phần
+    mềm hoàn toàn không đọc nên bỏ sót khoản này. Khung định dạng hóa đơn điện
+    tử không có 1 tên thẻ cố định duy nhất cho phần này -> dò nhiều cách.
+    Trả về tổng số tiền phí (0 nếu hóa đơn không có mục này)."""
+    for tag in ("TgTPhi", "TgTTPhi", "TongTienPhi"):
+        el = root.find(f".//{tag}")
+        if el is not None and el.text:
+            v = _to_num(el.text.strip()) or 0
+            if v:
+                return v
+    tong = 0
+    for phi in (root.findall(".//DSPhi/Phi") + root.findall(".//DSKPhi/KPhi")
+                + root.findall(".//DSTKhoanPhi/TKhoanPhi")):
+        for tag in ("TienPhi", "TienKhoanPhi", "TPhi", "STien"):
+            el = phi.find(tag)
+            if el is not None and el.text:
+                tong += _to_num(el.text.strip()) or 0
+                break
+    if tong:
+        return tong
+    # TTKhac chung của hóa đơn (không nằm trong từng dòng hàng) có TTruong
+    # chứa chữ 'phí' -> khoản phí đặt tên tự do, không theo cấu trúc DSPhi
+    for ttin in root.findall(".//TTKhac/TTin"):
+        tt = ttin.find("TTruong")
+        if tt is not None and tt.text and "phí" in tt.text.strip().lower():
+            dl = ttin.find("DLieu")
+            if dl is not None and dl.text:
+                v = _to_num(dl.text.strip()) or 0
+                if v:
+                    return v
+    return 0
+
+
+def _lay_tong_tien_phi_json(detail):
+    """Bản JSON của _lay_tong_tien_phi_xml (endpoint detail của TCT)."""
+    if not detail or not isinstance(detail, dict):
+        return 0
+    for k in ("tgtphi", "tgttphi", "tongtienphi"):
+        v = _to_num(detail.get(k))
+        if v:
+            return v
+    tong = 0
+    for k in ("dsphi", "dskphi", "dstkhoanphi"):
+        lst = detail.get(k) or []
+        if isinstance(lst, list):
+            for it in lst:
+                if not isinstance(it, dict):
+                    continue
+                for kk in ("tienphi", "tienkhoanphi", "tphi", "stien"):
+                    v = _to_num(it.get(kk))
+                    if v:
+                        tong += v
+                        break
+    if tong:
+        return tong
+    lst = detail.get("ttkhac") or []
+    if isinstance(lst, list):
+        for it in lst:
+            if not isinstance(it, dict):
+                continue
+            truong = str(it.get("ttruong") or it.get("truong") or "").lower()
+            if "phí" in truong or "phi" in truong:
+                v = _to_num(it.get("dlieu") or it.get("giatri"))
+                if v:
+                    tong += v
+    return tong
+
+
+def _dong_phi_hoa_don(tong_phi, common):
+    """Dựng 1 'dòng hàng' giả đại diện cho Tổng tiền phí (không chịu thuế —
+    KCT) để cộng chung vào danh sách mặt hàng, hiện đúng như hóa đơn thường:
+    Thành tiền = tổng tiền phí, Thuế suất = KCT, Tiền thuế GTGT = 0đ."""
+    d = dict(common)
+    d.update({
+        "stt": "", "tchat": "", "ma_vt": "", "ten_hang": "Tổng tiền phí",
+        "dvt": "", "sluong": "", "dgia": "",
+        "thtien": tong_phi, "stckhau": "", "tsuat": "KCT", "tien_thue": 0,
+        "_la_phi": True,   # đánh dấu để hiện đúng chữ "KCT" (không phải "0%")
+    })
+    return d
 
 
 def _parse_xml_invoice(xml_bytes):
@@ -12160,6 +12266,16 @@ def _parse_xml_invoice(xml_bytes):
             "tien_thue": lay_ttkhac(hh, "TongTien_Thue"),
             "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso,
         })
+
+    # Tổng tiền phí (không chịu thuế) — vd lệ phí đăng kiểm, phí sân bay/thu
+    # hộ... nằm RIÊNG ngoài danh sách hàng hóa dịch vụ, cộng thêm 1 dòng KCT.
+    tong_phi = _lay_tong_tien_phi_xml(root)
+    if tong_phi:
+        common = {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
+                  "ngay": ngay, "ten_nban": ten_nban, "mst_nban": mst_nban,
+                  "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
+                  "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso}
+        rows.append(_dong_phi_hoa_don(tong_phi, common))
     return rows
 
 
@@ -12239,6 +12355,12 @@ def _parse_invoice_summary(xml_bytes):
             cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0})
             cur["ds"] += ds if isinstance(ds, (int, float)) else 0
             cur["thue"] += thue
+    # Tổng tiền phí (không chịu thuế) — cộng vào nhóm KCT để khớp với dòng
+    # 'Tổng tiền phí' đã thêm ở _parse_xml_invoice (Chi tiết BÁN RA vs BK Bán ra).
+    tong_phi = _lay_tong_tien_phi_xml(root)
+    if tong_phi:
+        cur = theo_ts.setdefault("KCT", {"ds": 0, "thue": 0})
+        cur["ds"] += tong_phi
     info["theo_ts"] = theo_ts
     return info
 
