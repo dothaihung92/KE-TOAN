@@ -148,6 +148,28 @@ def _save_invoice_files(folder, base, zip_bytes):
                 f.write(zip_bytes)
 
 
+def _doc_kiem_tra_file_hoadon(fpath):
+    """Đọc + thử parse nhanh 1 file hóa đơn đã tải (XML thuần, hoặc ZIP chứa
+    XML) để biết file có ĐỌC ĐƯỢC hay không. File hỏng/sai định dạng -> trả
+    về [] (rỗng), coi như KHÔNG dùng được (phải tải lại)."""
+    try:
+        with open(fpath, "rb") as f:
+            data = f.read()
+        if fpath.lower().endswith(".zip"):
+            import zipfile as _zf, io as _io2
+            try:
+                z = _zf.ZipFile(_io2.BytesIO(data))
+                xn = next((n for n in z.namelist()
+                           if n.lower().endswith(".xml")), None)
+                if xn:
+                    data = z.read(xn)
+            except Exception:
+                pass
+        return bool(_parse_xml_invoice(data))
+    except Exception:
+        return False
+
+
 # ============================================================
 #  GDT API CLIENT  (module gọi API Tổng cục Thuế)
 #  --> Nếu TCT đổi endpoint, chỉ cần sửa các URL trong class này
@@ -2931,6 +2953,16 @@ def _run_fetch_job(cid: int, body: dict):
     def run():
         conn = db()
         try:
+            # Ghi nhớ TRẠNG THÁI (tthai) của các hóa đơn ĐÃ CÓ trước khi xóa —
+            # dùng để phát hiện hóa đơn bị THAY THẾ/ĐIỀU CHỈNH so với lần tra
+            # cứu trước (vd hóa đơn số 10 lần trước "mới" (1), lần này trang
+            # Thuế báo đã "bị thay thế" (4) -> PHẢI tải lại, không dùng file cũ).
+            old_status = {}
+            for r in conn.execute(
+                    "SELECT khmshdon, khhdon, shdon, loai, he_thong, tthai "
+                    "FROM invoices WHERE company_id=?", (cid,)):
+                old_status[(str(r["khmshdon"] or ""), str(r["khhdon"] or ""),
+                            str(r["shdon"] or ""), r["loai"], r["he_thong"])] = str(r["tthai"] or "")
             # Xóa sạch toàn bộ hóa đơn cũ của công ty trước khi tra cứu mới
             conn.execute("DELETE FROM invoices WHERE company_id=?", (cid,))
             conn.commit()
@@ -3089,6 +3121,23 @@ def _run_fetch_job(cid: int, body: dict):
                         os.makedirs(sub, exist_ok=True)
                         n = len(invs)
 
+                        # INDEX FILE ĐÃ CÓ trong thư mục này (1 lần, tránh quét lại mỗi
+                        # hóa đơn) — dùng để BỎ QUA tải hóa đơn đã có file đọc được trên
+                        # máy, tránh tải đi tải lại (chỉ cần lấy hóa đơn mới phát sinh).
+                        _file_index_dl = {}
+                        for fn in os.listdir(sub):
+                            low = fn.lower()
+                            if not (low.endswith(".xml") or low.endswith(".zip")):
+                                continue
+                            name = fn.rsplit(".", 1)[0]
+                            parts = name.split("_")
+                            if len(parts) >= 2:
+                                key2 = (parts[0], parts[1].lstrip("0") or "0")
+                                prev = _file_index_dl.get(key2)
+                                # ƯU TIÊN .xml (đọc trực tiếp, khỏi giải nén)
+                                if prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml")):
+                                    _file_index_dl[key2] = os.path.join(sub, fn)
+
                         def _tai_1_file(inv):
                             nbmst = inv.get("nbmst", "")
                             khhdon = inv.get("khhdon", "")
@@ -3096,7 +3145,22 @@ def _run_fetch_job(cid: int, body: dict):
                             shdon = inv.get("shdon", "")
                             base = f"{khhdon}_{shdon}_{nbmst}"
                             if "xml" not in fmts:
-                                return True   # không yêu cầu tải xml -> coi như "xong"
+                                return "ok"   # không yêu cầu tải xml -> coi như "xong"
+
+                            # ĐÃ CÓ FILE + ĐỌC ĐƯỢC + TRẠNG THÁI (tthai) KHÔNG ĐỔI so với
+                            # lần tra cứu trước -> BỎ QUA, không tải lại trên trang Thuế.
+                            # Nếu tthai đã đổi (hóa đơn bị THAY THẾ/ĐIỀU CHỈNH kể từ lần
+                            # trước) thì VẪN PHẢI tải lại để lấy đúng bản mới nhất.
+                            key = (str(khmshdon or ""), str(khhdon or ""),
+                                   str(shdon or ""), loai, he_thong)
+                            tthai_cu = old_status.get(key)
+                            tthai_moi = str(inv.get("tthai") or "")
+                            fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0")
+                            fpath = _file_index_dl.get(fkey)
+                            if (fpath and (tthai_cu is None or tthai_cu == tthai_moi)
+                                    and _doc_kiem_tra_file_hoadon(fpath)):
+                                return "skip"
+
                             try:
                                 zdata = client.download_xml(nbmst, khhdon, khmshdon,
                                                             shdon, loai, he_thong)
@@ -3105,10 +3169,10 @@ def _run_fetch_job(cid: int, body: dict):
                             if zdata:
                                 try:
                                     _save_invoice_files(sub, base, zdata)
-                                    return True
+                                    return "ok"
                                 except Exception:
-                                    return False
-                            return False
+                                    return "fail"
+                            return "fail"
 
                         # TẢI SONG SONG (thay vì từng file 1) để rút ngắn thời gian chờ —
                         # mỗi file là 1 request mạng riêng tới trang Thuế, tải tuần tự
@@ -3118,11 +3182,13 @@ def _run_fetch_job(cid: int, body: dict):
                         SO_LUONG_SONG_SONG = SP().get("song_song", 4)
 
                         def _tai_nhieu_file(ds_inv, nhan):
-                            """Tải song song danh sách hóa đơn, trả về (so_thanh_cong, ds_loi)."""
+                            """Tải song song danh sách hóa đơn.
+                            Trả về (so_thanh_cong, ds_loi, so_bo_qua_da_co_san)."""
                             if getattr(client, "_token_dead", False):
-                                return 0, list(ds_inv)  # phiên đã hết hạn -> khỏi thử
+                                return 0, list(ds_inv), 0  # phiên đã hết hạn -> khỏi thử
                             loi = []
                             so_ok = 0
+                            so_bo_qua = 0
                             so_xong = 0
                             n_ds = len(ds_inv)
                             with _cf.ThreadPoolExecutor(max_workers=SO_LUONG_SONG_SONG) as ex:
@@ -3130,20 +3196,22 @@ def _run_fetch_job(cid: int, body: dict):
                                 for fut in _cf.as_completed(futs):
                                     inv = futs[fut]
                                     try:
-                                        ok = fut.result()
+                                        kq = fut.result()
                                     except Exception:
-                                        ok = False
+                                        kq = "fail"
                                     so_xong += 1
                                     msg(stage="download",
                                         text=f"{nhan} {loai_txt}: {so_xong}/{n_ds} (còn {n_ds - so_xong})",
                                         cur=so_xong, total=n_ds)
-                                    if ok:
+                                    if kq == "skip":
+                                        so_ok += 1; so_bo_qua += 1
+                                    elif kq == "ok":
                                         so_ok += 1
                                     else:
                                         loi.append(inv)
-                            return so_ok, loi
+                            return so_ok, loi, so_bo_qua
 
-                        ok_1, loi_file = _tai_nhieu_file(invs, "Đang tải file")
+                        ok_1, loi_file, bo_qua = _tai_nhieu_file(invs, "Đang tải file")
                         file_saved += ok_1
 
                         # THỬ LẠI 1 LƯỢT các file bị lỗi (thường do bị chặn tốc độ giữa
@@ -3154,8 +3222,14 @@ def _run_fetch_job(cid: int, body: dict):
                                 text=f"⚠ {loai_txt}{ht_txt}: {len(loi_file)} file tải chưa được, "
                                      f"đang thử lại...")
                             time.sleep(5)
-                            ok_2, loi_file = _tai_nhieu_file(loi_file, "Thử lại file")
+                            ok_2, loi_file, bo_qua_2 = _tai_nhieu_file(loi_file, "Thử lại file")
                             file_saved += ok_2
+                            bo_qua += bo_qua_2
+
+                        if bo_qua:
+                            msg(stage="info",
+                                text=f"↷ {loai_txt}{ht_txt}: {bo_qua} hóa đơn đã có sẵn file trên máy "
+                                     f"(đọc được, trạng thái không đổi) — bỏ qua, không tải lại")
 
                         if loi_file:
                             file_thieu_tong += len(loi_file)
