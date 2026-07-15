@@ -3195,6 +3195,20 @@ def _run_fetch_job(cid: int, body: dict):
                         (cid, loai, he_thong))
                     for inv in invs:
                         try:
+                            # Hóa đơn bán hàng (Mẫu số 2 — hộ/cá nhân kinh doanh
+                            # KHÔNG chịu VAT) trang Thuế trả tgtcthue (tiền hàng
+                            # CHƯA thuế) = 0/rỗng vì không tách thuế, CHỈ có tổng
+                            # tiền thanh toán (tgtttbso). Trước đây lưu thẳng 0,
+                            # khiến "Tổng tiền chưa VAT" và các báo cáo tổng hợp
+                            # HIỆN 0 dù hóa đơn có giá trị thật — nhìn như phần
+                            # mềm "không ghi nhận" hóa đơn dù đã tải được. Với
+                            # hóa đơn không VAT (tgtthue=0), tiền CHƯA thuế PHẢI
+                            # BẰNG tổng tiền thanh toán -> lấy tgtttbso làm dự
+                            # phòng khi tgtcthue rỗng/0.
+                            tgtcthue_v = _to_num(inv.get("tgtcthue"))
+                            tgtttbso_v = _to_num(inv.get("tgtttbso"))
+                            if not tgtcthue_v and tgtttbso_v:
+                                tgtcthue_v = tgtttbso_v
                             conn.execute("""
                                 INSERT OR IGNORE INTO invoices
                                 (company_id, loai, he_thong, nbmst, nbten, nmmst,
@@ -3206,7 +3220,7 @@ def _run_fetch_job(cid: int, body: dict):
                                 inv.get("nbmst"), inv.get("nbten"), inv.get("nmmst"),
                                 str(inv.get("khmshdon", "")), inv.get("khhdon"), str(inv.get("shdon", "")),
                                 inv.get("tdlap"),
-                                inv.get("tgtcthue"), inv.get("tgtthue"), inv.get("tgtttbso"),
+                                tgtcthue_v, inv.get("tgtthue"), inv.get("tgtttbso"),
                                 str(inv.get("tthai", "")),
                                 json.dumps(inv, ensure_ascii=False),
                             ))
