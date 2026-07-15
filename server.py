@@ -11216,15 +11216,13 @@ def export_excel(cid: int):
                     return True
                 return nm == mst_cty
             loai_rows = [r for r in loai_rows if _hop_le_mua(r)]
-        else:
-            # hóa đơn BÁN RA: người bán phải là công ty mình -> loại HĐ nbmst khác
-            mst_cty = str(comp["mst"] or "").strip()
-            def _hop_le_ban(r):
-                nb = str(r["nbmst"] or "").strip()
-                if not nb:
-                    return True
-                return nb == mst_cty
-            loai_rows = [r for r in loai_rows if _hop_le_ban(r)]
+        # BÁN RA: KHÔNG lọc theo MST người bán nữa — trang Thuế tra cứu "bán ra"
+        # đã CHỈ trả về đúng hóa đơn của công ty đang đăng nhập (không có rủi ro
+        # lẫn hóa đơn công ty khác như bên mua vào), nên lọc thêm ở đây chỉ có
+        # hại: hộ/cá nhân kinh doanh (HKD) đôi khi có MST trên hóa đơn (nbmst,
+        # vd mã số thuế cá nhân) KHÁC với MST đăng ký trong phần mềm (vd mã số
+        # thuế sàn TMĐT dùng để đăng nhập) — trước đây bị lọc SẠCH TOÀN BỘ hóa
+        # đơn bán ra dù đã tra cứu/tải được, nhìn như phần mềm "không ghi nhận".
 
         loai_rows.sort(key=_sort_key_ngay)
 
@@ -11259,6 +11257,25 @@ def export_excel(cid: int):
                 no_r = map_no_ht.get(_chuan_mst(r["nbmst"]), "")
 
             if not items:
+                dang_nhap_ok = bool(client and client.token and not getattr(client, "_token_dead", False))
+                tong_tien_hd = _to_num(r["tgtcthue"]) or _to_num(r["tgtttbso"]) or 0
+                # Hóa đơn KHÔNG lấy được chi tiết dòng hàng (không phải do lỗi
+                # mạng/đăng nhập — ĐÃ đăng nhập thành công) NHƯNG có số tiền
+                # thật từ danh sách tra cứu -> thường là "Hóa đơn bán hàng" của
+                # hộ/cá nhân kinh doanh (không tách VAT, TCT không trả chi tiết
+                # dòng hàng cho loại này). Ghi nhận CẢ HÓA ĐƠN thành 1 dòng
+                # KHÔNG CHỊU THUẾ (KCT) thay vì để trống/báo "chưa lấy được chi
+                # tiết" — báo lỗi đó SAI vì không phải do mạng, thử lại cũng
+                # không bao giờ có chi tiết dòng hàng cho loại hóa đơn này.
+                if loai == "sold" and dang_nhap_ok and tong_tien_hd:
+                    nmten_raw = raw.get("nmten", "") or raw.get("nmtnmua", "") or ""
+                    append_row([r["khhdon"], r["shdon"], ngay_fmt,
+                                nmten_raw, r["nmmst"], 1, "",
+                                "(Cả hóa đơn — không tách dòng hàng)", "",
+                                "", "", tong_tien_hd, "KCT", 0, tt, kq])
+                    cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
+                    cur["ds"] += tong_tien_hd
+                    continue
                 if client and getattr(client, "_token_dead", False):
                     ly_do = "(chưa lấy được chi tiết — phiên đăng nhập đã hết, đăng nhập lại rồi xuất lại)"
                 elif not (client and client.token):
@@ -11457,14 +11474,15 @@ def export_excel(cid: int):
 
     mst_cty_bk = str(comp["mst"] or "").strip()
     def _hd_dung_cty(r, loai):
-        """Loại hóa đơn lẫn của công ty khác: mua vào -> nmmst phải = MST công ty;
-        bán ra -> nbmst phải = MST công ty (cho phép trống)."""
+        """Loại hóa đơn lẫn của công ty khác: mua vào -> nmmst phải = MST công ty.
+        BÁN RA: KHÔNG lọc theo MST người bán (nbmst) — xem giải thích ở
+        build_detail_sheet phía trên (trang Thuế đã tự lọc đúng công ty đăng
+        nhập; hộ/cá nhân kinh doanh có thể có MST trên hóa đơn khác MST đăng
+        ký trong phần mềm, lọc thêm ở đây gây mất trắng hóa đơn bán ra)."""
         if loai == "purchase":
             nm = str(r["nmmst"] or "").strip()
             return (not nm) or nm == mst_cty_bk
-        else:
-            nb = str(r["nbmst"] or "").strip()
-            return (not nb) or nb == mst_cty_bk
+        return True
 
     # ----- BẢNG KÊ MUA VÀO (mỗi hóa đơn 1 dòng + cột Mặt hàng) -----
     ws = wb.create_sheet("BK Mua vào")
@@ -11631,9 +11649,16 @@ def export_excel(cid: int):
         items, info = get_invoice_items(r)
         ikey = (str(r["khhdon"]), str(r["shdon"]).lstrip("0") or "0")
         if not info or not info.get("theo_ts"):
-            groups["KHAC"].append((r, raw, tt, kq, None, None))
-            bk_totals["sold"][ikey] = {"ds": _to_num(r["tgtcthue"]) or 0,
-                                       "thue": _to_num(r["tgtthue"]) or 0}
+            ds_fallback = _to_num(r["tgtcthue"]) or 0
+            thue_fallback = _to_num(r["tgtthue"]) or 0
+            dang_nhap_ok = bool(client and client.token and not getattr(client, "_token_dead", False))
+            # Không lấy được chi tiết dòng hàng nhưng ĐÃ đăng nhập thành công
+            # và có số tiền thật -> hóa đơn bán hàng của hộ/cá nhân kinh doanh
+            # (không tách VAT) -> xếp vào nhóm KCT (đúng bản chất), không phải
+            # "Khác/chưa lấy được file" (dễ hiểu nhầm là lỗi mạng, thử lại được).
+            g = "KCT" if (dang_nhap_ok and ds_fallback) else "KHAC"
+            groups[g].append((r, raw, tt, kq, None, None))
+            bk_totals["sold"][ikey] = {"ds": ds_fallback, "thue": thue_fallback}
             continue
         bt = bk_totals["sold"].setdefault(ikey, {"ds": 0, "thue": 0})
         for key, val in info["theo_ts"].items():
@@ -11673,8 +11698,11 @@ def export_excel(cid: int):
             else:
                 ds = _to_num(r["tgtcthue"]) or 0
                 thue = _to_num(r["tgtthue"]) or 0
+                dang_nhap_ok_row = bool(client and client.token and not getattr(client, "_token_dead", False))
+                mat_hang_txt = ("(Cả hóa đơn — không tách dòng hàng)" if (dang_nhap_ok_row and ds)
+                                else "(chưa lấy được file XML)")
                 ws.append([stt, "1", r["khhdon"], r["shdon"], ngay,
-                           "", r["nmmst"], "(chưa lấy được file XML)",
+                           "", r["nmmst"], mat_hang_txt,
                            ds, thue, tt, kq])
             sub_ds += ds if isinstance(ds, (int, float)) else 0
             sub_thue += thue if isinstance(thue, (int, float)) else 0
