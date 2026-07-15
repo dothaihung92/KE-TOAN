@@ -12113,6 +12113,16 @@ def _lay_tong_tien_phi_xml(root):
     mềm hoàn toàn không đọc nên bỏ sót khoản này. Khung định dạng hóa đơn điện
     tử không có 1 tên thẻ cố định duy nhất cho phần này -> dò nhiều cách.
     Trả về tổng số tiền phí (0 nếu hóa đơn không có mục này)."""
+    # Cấu trúc THẬT xác nhận từ hóa đơn thật (2 hóa đơn mẫu khác nhà cung cấp,
+    # cùng thống nhất 1 cấu trúc): TToan > DSLPhi > LPhi > {TLPhi (tên loại
+    # phí), TPhi (số tiền)} — có thể nhiều dòng LPhi, cộng dồn hết.
+    tong_dslphi = 0
+    for lphi in root.findall(".//DSLPhi/LPhi"):
+        el = lphi.find("TPhi")
+        if el is not None and el.text:
+            tong_dslphi += _to_num(el.text.strip()) or 0
+    if tong_dslphi:
+        return tong_dslphi
     for tag in ("TgTPhi", "TgTTPhi", "TongTienPhi"):
         el = root.find(f".//{tag}")
         if el is not None and el.text:
@@ -12146,6 +12156,16 @@ def _lay_tong_tien_phi_json(detail):
     """Bản JSON của _lay_tong_tien_phi_xml (endpoint detail của TCT)."""
     if not detail or not isinstance(detail, dict):
         return 0
+    # Cấu trúc THẬT (xác nhận từ XML thật, JSON dùng tên thẻ viết thường):
+    # dslphi: [{tlphi (tên loại phí), tphi (số tiền)}, ...]
+    lst_that = detail.get("dslphi") or []
+    if isinstance(lst_that, list):
+        tong_that = 0
+        for it in lst_that:
+            if isinstance(it, dict):
+                tong_that += _to_num(it.get("tphi")) or 0
+        if tong_that:
+            return tong_that
     for k in ("tgtphi", "tgttphi", "tongtienphi"):
         v = _to_num(detail.get(k))
         if v:
