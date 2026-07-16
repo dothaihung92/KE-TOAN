@@ -1757,8 +1757,9 @@ def _dvc_browser_lay_token_info(drv):
 _DVC_TO_KHAI_CONFIG = {
     "GTGT": {"ma_tthc": "1.007014", "ma_tkhai": "842", "url": "/tk01gtgt/nop-file-xml",
               "ten": "01/GTGT - Tờ khai thuế GTGT (TT80/2021)"},
-    # TNCN: chưa có — cần bắt 1 phiên nộp tờ khai TNCN thật (Preserve log,
-    # giống cách đã làm với GTGT) để lấy đúng maTthc/maTKhai/url rồi thêm vào đây.
+    "TNCN": {"ma_tthc": "2.002235", "ma_tkhai": "864", "url": "/tk05-tncn-tt80/nop-file-xml",
+              "ten": "05/KK-TNCN - Tờ khai khấu trừ thuế TNCN (TT80/2021)",
+              "ktra_doi_tuong": True},
 }
 
 _DVC_LOAI_TU_KHOA_FILE = {
@@ -1767,13 +1768,27 @@ _DVC_LOAI_TU_KHOA_FILE = {
 }
 
 _JS_INIT_NOP_TKHAI = r"""
-var maTthc = arguments[0], maTKhai = arguments[1];
+var maTthc = arguments[0], maTKhai = arguments[1], ktraDoiTuong = arguments[2];
 var cb = arguments[arguments.length-1];
 function xsrf(){ var m=document.cookie.match(/XSRF-TOKEN=([^;]+)/); return m?decodeURIComponent(m[1]):''; }
 var tok = xsrf();
 function post(url, data){
   return $.ajax({type:'POST', url:url, data:data||undefined,
     headers:{'X-XSRF-TOKEN':tok, 'X-Requested-With':'XMLHttpRequest'}});
+}
+function buoc4(r1, r2, r3){
+  if(!ktraDoiTuong){
+    cb({ok:true, b1:(''+r1).slice(0,150), b2:(''+r2).slice(0,150), b3:(''+r3).slice(0,250)});
+    return;
+  }
+  // Riêng TNCN: cổng còn gọi thêm ktraDoiTuongKeKhai sau init-nop-tkhai
+  // (kiểm tra loại người nộp thuế/đối tượng kê khai) trước khi cho vào trang tải file.
+  post('/tthc/getfragmenttthc/ktraDoiTuongKeKhai', {loaiTKhai: maTKhai})
+    .done(function(r4){
+      cb({ok:true, b1:(''+r1).slice(0,150), b2:(''+r2).slice(0,150), b3:(''+r3).slice(0,250),
+          b4:(''+r4).slice(0,150)});
+    })
+    .fail(function(x){ cb({ok:false, buoc:4, status:x.status, text:(x.responseText||'').slice(0,250)}); });
 }
 post('/tthc/sso/check-to-khai?maTthc='+encodeURIComponent(maTthc)+'&module=DN')
   .done(function(r1){
@@ -1782,9 +1797,8 @@ post('/tthc/sso/check-to-khai?maTthc='+encodeURIComponent(maTthc)+'&module=DN')
         post('/tthc/getfragmenttthc/init-nop-tkhai', {
           maTTHC:maTthc, maTKhai:maTKhai, maHoSo:'', mstUyQuyen:'',
           mstKhaiThay:'', doiTuongNopThay:'', maCqtAllowBS:'', isTraiNghiem:'false'
-        }).done(function(r3){
-          cb({ok:true, b1:(''+r1).slice(0,150), b2:(''+r2).slice(0,150), b3:(''+r3).slice(0,250)});
-        }).fail(function(x){ cb({ok:false, buoc:3, status:x.status, text:(x.responseText||'').slice(0,250)}); });
+        }).done(function(r3){ buoc4(r1, r2, r3); })
+          .fail(function(x){ cb({ok:false, buoc:3, status:x.status, text:(x.responseText||'').slice(0,250)}); });
       }).fail(function(x){ cb({ok:false, buoc:2, status:x.status, text:(x.responseText||'').slice(0,250)}); });
   }).fail(function(x){ cb({ok:false, buoc:1, status:x.status, text:(x.responseText||'').slice(0,250)}); });
 """
@@ -1839,7 +1853,8 @@ def _dvc_browser_nop_to_khai(drv, cfg, file_path):
     _t.sleep(1.2)
     _dvc_wait_jquery(drv, 12)
     try:
-        res = drv.execute_async_script(_JS_INIT_NOP_TKHAI, cfg["ma_tthc"], cfg["ma_tkhai"])
+        res = drv.execute_async_script(
+            _JS_INIT_NOP_TKHAI, cfg["ma_tthc"], cfg["ma_tkhai"], bool(cfg.get("ktra_doi_tuong")))
     except Exception as e:
         return {"ok": False, "loi": f"Lỗi gọi init-nop-tkhai: {e}", "buoc": buoc}
     buoc.append({"buoc": "init-nop-tkhai", "ket_qua": res})
