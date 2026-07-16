@@ -287,7 +287,10 @@
       </label>
       <input id="dvcbSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="dvcbFilter()"
              style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px;margin-bottom:6px">
-      <div id="dvcbCoList" style="max-height:220px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:8px"></div>
+      <div style="display:grid;grid-template-columns:1fr 92px 78px 110px;gap:10px;padding:0 4px 4px;font-size:11.5px;color:#999;font-weight:600">
+        <span></span><span>Hạn Token</span><span>Hết hạn</span><span>Tổ chức cấp</span>
+      </div>
+      <div id="dvcbCoList" style="max-height:220px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="dvcbCount">0</b> công ty</div>
     </div>
     </div>
@@ -770,23 +773,29 @@ function dvcbRenderCoList(giuDaChon){
   });
   const box=document.getElementById('dvcbCoList');
   box.innerHTML = ds.map(({c,conNgay})=>{
-    let badge='';
+    let hanCol='<span></span>', ngayCol='<span></span>', toChucCol='<span></span>';
     if(conNgay!=null){
-      const mau = conNgay<0 ? '#b91c1c' : (conNgay<=30 ? '#c47600' : '#888');
-      const chu = conNgay<0 ? `⚠ hết hạn ${Math.abs(conNgay)} ngày trước`
-                : (conNgay<=30 ? `⚠ còn ${conNgay} ngày` : `còn ${conNgay} ngày`);
+      const qua = conNgay<0;
+      const gap = conNgay<=30;
+      const bg = qua ? '#fdecea' : (gap ? '#fff4e5' : '#f2f2f2');
+      const fg = qua ? '#b91c1c' : (gap ? '#b45309' : '#666');
+      const chu = qua ? `⚠ Hết hạn ${Math.abs(conNgay)}d` : (gap ? `⚠ Còn ${conNgay}d` : `Còn ${conNgay}d`);
       const p = c.token_ngay_het_han.split('-');
       const ngayStr = `${p[2]}/${p[1]}/${p[0]}`;
       const toChuc = tenNganCapCKS(c.token_to_chuc_cap);
-      badge = `<span style="color:${mau};font-size:12px;white-space:nowrap;text-align:right;flex:none" title="${(c.token_to_chuc_cap||'').replace(/"/g,'')}">`+
-        `🔑 ${chu} (hết hạn ${ngayStr})${toChuc?`<br><span style="color:#888">${toChuc}</span>`:''}</span>`;
+      hanCol = `<span style="background:${bg};color:${fg};font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap">${chu}</span>`;
+      ngayCol = `<span style="font-size:12px;color:#888;white-space:nowrap">${ngayStr}</span>`;
+      toChucCol = toChuc
+        ? `<span style="font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block" title="${(c.token_to_chuc_cap||'').replace(/"/g,'')}">${toChuc}</span>`
+        : '<span></span>';
     }
     const checked = daChonTruoc ? daChonTruoc.has(String(c.id)) : true;
-    return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 0">`+
+    return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" `+
+      `style="display:grid;grid-template-columns:1fr 92px 78px 110px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #f0f0f0">`+
       `<span style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden">`+
       `<input type="checkbox" class="dvcbChk" value="${c.id}" ${checked?'checked':''} onchange="dvcbCount()">`+
       `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.ten} <span style="color:#888">(${c.mst})</span></span></span>`+
-      badge+`</label>`;
+      hanCol+ngayCol+toChucCol+`</label>`;
   }).join('') || '<div style="color:#888">Chưa có công ty</div>';
   dvcbCount();
 }
