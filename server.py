@@ -3092,6 +3092,7 @@ def _run_fetch_job(cid: int, body: dict):
             # sạch sẽ khi thực ra chưa tra cứu được (nguyên nhân gốc của việc phần
             # mềm "báo xong" dù bán ra bị lỗi/rớt mạng giữa chừng).
             loai_that_bai = {"purchase": False, "sold": False}
+            ly_do_loi = {"purchase": [], "sold": []}   # lý do CỤ THỂ (kỹ thuật) của từng lỗi
             target_dir = None
             if save_dir:
                 try:
@@ -3151,6 +3152,7 @@ def _run_fetch_job(cid: int, body: dict):
                         # tổng kết cuối cùng không biết loại này đã THẤT BẠI và có thể
                         # báo "Hoàn tất" sạch sẽ dù trang Thuế thực ra có dữ liệu.
                         loai_that_bai[loai] = True
+                        ly_do_loi[loai].append(f"{loai_txt}{ht_txt}: {loi_cuoi[:200]}")
                         msg(stage="error",
                             text=f"✗ {loai_txt}{ht_txt}: LỖI, CHƯA TRA CỨU ĐƯỢC dù đã thử lại — "
                                  f"{loi_cuoi[:140]}. KẾT QUẢ {loai_txt.upper()} CÓ THỂ THIẾU — "
@@ -3164,6 +3166,9 @@ def _run_fetch_job(cid: int, body: dict):
                     loi_rieng = getattr(client, "last_query_errors", None) or []
                     if loi_rieng:
                         loai_that_bai[loai] = True
+                        ly_do_loi[loai].append(
+                            f"{loai_txt}{ht_txt}: một phần bị lỗi ({len(loi_rieng)} lượt) — "
+                            f"{'; '.join(loi_rieng[:3])}")
                         msg(stage="warn",
                             text=f"⚠ {loai_txt}{ht_txt}: một phần bị lỗi dù đã thử lại "
                                  f"({len(loi_rieng)} lượt) — KẾT QUẢ CÓ THỂ THIẾU. "
@@ -3175,6 +3180,8 @@ def _run_fetch_job(cid: int, body: dict):
                             # Trang Thuế báo CÓ hóa đơn nhưng ta lấy được 0 -> chắc chắn
                             # có vấn đề, TUYỆT ĐỐI không được coi là "không có dữ liệu".
                             loai_that_bai[loai] = True
+                            ly_do_loi[loai].append(
+                                f"{loai_txt}{ht_txt}: Thuế báo có {exp0} hóa đơn nhưng lấy được 0")
                             msg(stage="error",
                                 text=f"✗ {loai_txt}{ht_txt}: Trang Thuế báo có {exp0} hóa đơn "
                                      f"nhưng KHÔNG lấy được cái nào — LỖI, nên tra cứu LẠI (dữ liệu "
@@ -3426,12 +3433,21 @@ def _run_fetch_job(cid: int, body: dict):
                     loi_ben.append("MUA VÀO")
                 if loai_that_bai["sold"]:
                     loi_ben.append("BÁN RA")
+                # Ghép LÝ DO CỤ THỂ (kỹ thuật) của từng loại lỗi vào — trước đây
+                # dòng tổng kết này chỉ nói "LỖI MUA VÀO" chung chung, không nói
+                # rõ NGUYÊN NHÂN (vd timeout, 500, 429...) khiến người dùng không
+                # biết đang lỗi gì để xử lý.
+                chi_tiet_loi = []
+                for lo in ("purchase", "sold"):
+                    chi_tiet_loi.extend(ly_do_loi[lo])
                 done_text = (f"❌ LỖI khi tra cứu {', '.join(loi_ben)} — DỮ LIỆU CHƯA ĐẦY ĐỦ "
                             f"(hiện có {total_saved} hóa đơn: đầu vào {tk_mua['got']}, "
                             f"đầu ra {tk_ban['got']} — riêng loại LỖI ở trên vẫn đang GIỮ dữ "
                             f"liệu của lần tra cứu THÀNH CÔNG gần nhất, KHÔNG bị mất). "
                             f"BẮT BUỘC tra cứu LẠI công ty này (nên chuyển chế độ "
                             f"'Chậm & an toàn' nếu vẫn lỗi).")
+                if chi_tiet_loi:
+                    done_text += " NGUYÊN NHÂN: " + " | ".join(chi_tiet_loi)
             else:
                 done_text = f"Hoàn tất! Đã lưu {total_saved} hóa đơn"
                 if "purchase" in loai_list or "sold" in loai_list:
