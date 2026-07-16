@@ -3327,6 +3327,13 @@ def _run_fetch_job(cid: int, body: dict):
                             base = f"{khhdon}_{shdon}_{nbmst}"
                             if "xml" not in fmts:
                                 return "ok"   # không yêu cầu tải xml -> coi như "xong"
+                            # Hóa đơn "Tổng cục thuế đã nhận KHÔNG MÃ" (ttxly=6): chỉ
+                            # cần ghi nhận DỮ LIỆU chi tiết (đã có sẵn từ tra cứu danh
+                            # sách), KHÔNG cần tải file — trang Thuế không cấp mã cho
+                            # loại này nên việc tải file luôn thất bại vô ích, chỉ tổ
+                            # tốn thời gian + báo lỗi "chưa tải được" sai sự thật.
+                            if str(inv.get("ttxly") or "").strip() == "6":
+                                return "khong_ma"
 
                             # ĐÃ CÓ FILE + ĐỌC ĐƯỢC + TRẠNG THÁI (tthai) KHÔNG ĐỔI so với
                             # lần tra cứu trước -> BỎ QUA, không tải lại trên trang Thuế.
@@ -3364,12 +3371,17 @@ def _run_fetch_job(cid: int, body: dict):
 
                         def _tai_nhieu_file(ds_inv, nhan):
                             """Tải song song danh sách hóa đơn.
-                            Trả về (so_thanh_cong, ds_loi, so_bo_qua_da_co_san)."""
+                            Trả về (so_thanh_cong, ds_loi, so_bo_qua_da_co_san, so_khong_ma)."""
                             if getattr(client, "_token_dead", False):
-                                return 0, list(ds_inv), 0  # phiên đã hết hạn -> khỏi thử
+                                # phiên đã hết hạn -> khỏi thử mạng, nhưng HĐ "không mã"
+                                # vốn dĩ không cần tải file nên vẫn KHÔNG tính là lỗi
+                                kma = [iv for iv in ds_inv if str(iv.get("ttxly") or "").strip() == "6"]
+                                loi_thuc = [iv for iv in ds_inv if iv not in kma]
+                                return 0, loi_thuc, 0, len(kma)
                             loi = []
                             so_ok = 0
                             so_bo_qua = 0
+                            so_khong_ma = 0
                             so_xong = 0
                             n_ds = len(ds_inv)
                             with _cf.ThreadPoolExecutor(max_workers=SO_LUONG_SONG_SONG) as ex:
@@ -3386,13 +3398,18 @@ def _run_fetch_job(cid: int, body: dict):
                                         cur=so_xong, total=n_ds)
                                     if kq == "skip":
                                         so_ok += 1; so_bo_qua += 1
+                                    elif kq == "khong_ma":
+                                        # KHÔNG cộng vào so_ok (= file_saved): hóa đơn
+                                        # này thật sự không có file nào được lưu, chỉ
+                                        # là KHÔNG PHẢI lỗi (không tính là loi/thiếu).
+                                        so_khong_ma += 1
                                     elif kq == "ok":
                                         so_ok += 1
                                     else:
                                         loi.append(inv)
-                            return so_ok, loi, so_bo_qua
+                            return so_ok, loi, so_bo_qua, so_khong_ma
 
-                        ok_1, loi_file, bo_qua = _tai_nhieu_file(invs, "Đang tải file")
+                        ok_1, loi_file, bo_qua, khong_ma = _tai_nhieu_file(invs, "Đang tải file")
                         file_saved += ok_1
 
                         # THỬ LẠI 1 LƯỢT các file bị lỗi (thường do bị chặn tốc độ giữa
@@ -3403,28 +3420,36 @@ def _run_fetch_job(cid: int, body: dict):
                                 text=f"⚠ {loai_txt}{ht_txt}: {len(loi_file)} file tải chưa được, "
                                      f"đang thử lại... [{_mo_ta_ds_hd_loi(loi_file, loai)}]")
                             time.sleep(5)
-                            ok_2, loi_file, bo_qua_2 = _tai_nhieu_file(loi_file, "Thử lại file")
+                            ok_2, loi_file, bo_qua_2, khong_ma_2 = _tai_nhieu_file(loi_file, "Thử lại file")
                             file_saved += ok_2
                             bo_qua += bo_qua_2
+                            khong_ma += khong_ma_2
 
                         if bo_qua:
                             msg(stage="info",
                                 text=f"↷ {loai_txt}{ht_txt}: {bo_qua} hóa đơn đã có sẵn file trên máy "
                                      f"(đọc được, trạng thái không đổi) — bỏ qua, không tải lại")
 
+                        if khong_ma:
+                            msg(stage="info",
+                                text=f"↷ {loai_txt}{ht_txt}: {khong_ma} hóa đơn 'Tổng cục thuế đã "
+                                     f"nhận không mã' — chỉ ghi nhận dữ liệu chi tiết, không tải file "
+                                     f"(loại hóa đơn này không có file để tải)")
+
+                        n_can_tai = n - khong_ma   # tổng cần tải (không tính HĐ không mã)
                         if loi_file:
                             file_thieu_tong += len(loi_file)
                             mota_loi_file = _mo_ta_ds_hd_loi(loi_file, loai)
                             file_thieu_mota.append(f"{loai_txt}{ht_txt}: {mota_loi_file}")
                             msg(stage="warn",
-                                text=f"⚠ {loai_txt}{ht_txt}: KHÔNG tải được {len(loi_file)}/{n} file "
+                                text=f"⚠ {loai_txt}{ht_txt}: KHÔNG tải được {len(loi_file)}/{n_can_tai} file "
                                      f"(dữ liệu bảng vẫn lưu đủ) — CÁC HÓA ĐƠN CHƯA TẢI ĐƯỢC: "
                                      f"{mota_loi_file}. Chạy lại tra cứu kỳ này "
                                      f"(chế độ 'Chậm & an toàn') để tải nốt, hoặc kết xuất Excel sẽ "
                                      f"tự lấy chi tiết các hóa đơn này qua mạng khi cần.")
                         elif "xml" in fmts:
                             msg(stage="info",
-                                text=f"✓ {loai_txt}{ht_txt}: đã tải đủ {n}/{n} file")
+                                text=f"✓ {loai_txt}{ht_txt}: đã tải đủ {n_can_tai}/{n_can_tai} file")
                       except Exception as e:
                         msg(stage="warn",
                             text=f"Lỗi tải file {loai_txt} (dữ liệu bảng vẫn lưu): {str(e)[:100]}")
