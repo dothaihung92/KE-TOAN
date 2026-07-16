@@ -332,14 +332,16 @@
       </div>
     </div>
     <div class="field">
-      <label>Công ty</label>
-      <select id="ntkCty" style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px"></select>
+      <label>Công ty <span style="font-weight:400;color:var(--muted)">(xanh = đã nộp xong với file hiện có trong thư mục mặc định)</span></label>
+      <input id="ntkSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="ntkFilter()"
+             style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px;margin-bottom:6px">
+      <div id="ntkCtyList" style="max-height:220px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:4px 8px"></div>
     </div>
     <div class="field">
-      <label>Loại tờ khai</label>
-      <select id="ntkLoai" style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px">
-        <option value="GTGT">01/GTGT — Tờ khai thuế GTGT (TT80/2021)</option>
-        <option value="TNCN">05/KK-TNCN — Tờ khai khấu trừ thuế TNCN (TT80/2021)</option>
+      <label>Kỳ nộp</label>
+      <select id="ntkKy" style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px" onchange="ntkKyChange()">
+        <option value="quy">Theo Quý — nộp lần lượt 01/GTGT rồi 05/KK-TNCN</option>
+        <option value="nam">Theo Năm (sẽ cập nhật sau)</option>
       </select>
     </div>
     <div id="ntkKetQua" style="display:none;margin-top:8px;border-radius:10px;padding:12px 14px;font-size:13px"></div>
@@ -945,47 +947,89 @@ function dvcbFilter(){
 }
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
 
+let ntkTrangThai={}, ntkSelectedCid=null;
 async function moNopToKhai(){
-  const sel=document.getElementById('ntkCty');
-  sel.innerHTML=companies.map(c=>`<option value="${c.id}">${c.ten} (${c.mst})</option>`).join('');
   document.getElementById('ntkKetQua').style.display='none';
+  document.getElementById('ntkSearch').value='';
+  ntkSelectedCid=null;
   try{
     const r=await api('/api/settings/thu-muc-nop-to-khai');
     document.getElementById('ntkThuMuc').value=r.thu_muc||'';
   }catch(e){}
+  await ntkTaiTrangThai();
   document.getElementById('nopToKhaiModal').style.display='flex';
 }
+async function ntkTaiTrangThai(){
+  try{ ntkTrangThai=await api('/api/dvc/nop-to-khai-trang-thai'); }catch(e){ ntkTrangThai={}; }
+  ntkRenderCtyList();
+}
+function ntkDaXongCty(cid){
+  const t=ntkTrangThai[cid];
+  if(!t)return false;
+  return !!(t.GTGT&&t.GTGT.da_nop) && !!(t.TNCN&&t.TNCN.da_nop);
+}
+function ntkRenderCtyList(){
+  const q=(document.getElementById('ntkSearch').value||'').toLowerCase().trim();
+  const list=document.getElementById('ntkCtyList');
+  const shown=companies.filter(c=>!q||(c.ten||'').toLowerCase().includes(q)||(c.mst||'').toLowerCase().includes(q));
+  if(ntkSelectedCid && !shown.some(c=>c.id===ntkSelectedCid)) ntkSelectedCid=null;
+  list.innerHTML=shown.map(c=>{
+    const xong=ntkDaXongCty(c.id);
+    const chon=(c.id===ntkSelectedCid);
+    const bg=chon?'#dbeafe':(xong?'#eaf7ee':'transparent');
+    const border=chon?'1px solid #60a5fa':'1px solid transparent';
+    return `<div onclick="ntkChonCty(${c.id})" style="cursor:pointer;padding:6px 8px;border-radius:6px;background:${bg};border:${border};display:flex;justify-content:space-between;align-items:center">
+      <span>${xong?'✅ ':''}${c.ten} (${c.mst})</span>
+    </div>`;
+  }).join('')||'<div style="padding:8px;color:#999">Không có công ty nào khớp</div>';
+}
+function ntkFilter(){ntkRenderCtyList();}
+function ntkChonCty(cid){ntkSelectedCid=cid;ntkRenderCtyList();}
+function ntkKyChange(){}
 function dongNopToKhai(){document.getElementById('nopToKhaiModal').style.display='none';}
 async function ntkLuuThuMuc(){
   const thu_muc=document.getElementById('ntkThuMuc').value.trim();
   try{
     await api('/api/settings/thu-muc-nop-to-khai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({thu_muc})});
     toast('Đã lưu thư mục mặc định','ok');
+    await ntkTaiTrangThai();
   }catch(e){toast('Lỗi lưu: '+e.message,'err');}
 }
+async function ntkChayMotLoai(cid,loai,kq){
+  kq.innerHTML+=`<br>⏳ Đang xử lý ${loai}... (cửa sổ Chrome sẽ hiện ra trên máy, đừng tắt)`;
+  try{
+    const r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai})});
+    if(r.ok){
+      kq.innerHTML+=`<br>✅ [${loai}] ${r.thong_bao}<br>📄 File: <code>${r.file_da_chon}</code>`;
+      return true;
+    }
+    kq.innerHTML+=`<br>⚠ [${loai}] ${r.thong_bao||r.loi||'Có lỗi'}`;
+    return false;
+  }catch(e){
+    kq.innerHTML+=`<br>❌ [${loai}] ${e.message}`;
+    return false;
+  }
+}
 async function ntkChay(){
-  const cid=document.getElementById('ntkCty').value;
-  const loai=document.getElementById('ntkLoai').value;
+  const cid=ntkSelectedCid;
+  const ky=document.getElementById('ntkKy').value;
   if(!cid){toast('Chưa chọn công ty','err');return;}
+  if(ky==='nam'){toast('Nộp theo Năm chưa được hỗ trợ — sẽ cập nhật sau','err');return;}
   const btn=document.getElementById('ntkRunBtn');
   const kq=document.getElementById('ntkKetQua');
   btn.disabled=true;
   kq.style.display='block';
   kq.style.background='#eef6f0';
-  kq.innerHTML='⏳ Đang tự động đăng nhập + khởi tạo tờ khai + chọn file... (cửa sổ Chrome sẽ hiện ra trên máy, đừng tắt)';
+  kq.innerHTML='⏳ Bắt đầu...';
   try{
-    const r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai})});
-    if(r.ok){
-      kq.style.background='#eef6f0';
-      kq.innerHTML=`✅ ${r.thong_bao}<br><br>📄 File đã chọn: <code>${r.file_da_chon}</code>`;
-      toast('Đã tải file lên — hãy chuyển sang cửa sổ Chrome để tự Ký + Nộp','ok');
+    const okGtgt=await ntkChayMotLoai(cid,'GTGT',kq);
+    const okTncn=await ntkChayMotLoai(cid,'TNCN',kq);
+    if(okGtgt&&okTncn){
+      toast('Đã tải xong cả GTGT và TNCN — hãy chuyển sang các cửa sổ Chrome để tự Ký + Nộp','ok');
     }else{
       kq.style.background='#fdecea';
-      kq.innerHTML=`⚠ ${r.thong_bao||r.loi||'Có lỗi'}`;
     }
-  }catch(e){
-    kq.style.background='#fdecea';
-    kq.innerHTML='❌ '+e.message;
+    await ntkTaiTrangThai();
   }finally{
     btn.disabled=false;
   }

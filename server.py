@@ -722,6 +722,14 @@ def init_db():
         key TEXT PRIMARY KEY,
         value TEXT
     );
+    CREATE TABLE IF NOT EXISTS nop_to_khai_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER,
+        loai TEXT,          -- GTGT / TNCN
+        file_ten TEXT,      -- tên file (không kèm đường dẫn) đã tải lên thành công lần gần nhất
+        done_at TEXT,
+        UNIQUE(company_id, loai)
+    );
     """)
     # Migration: thêm cột he_thong nếu DB cũ chưa có
     cols = [r[1] for r in conn.execute("PRAGMA table_info(invoices)").fetchall()]
@@ -3709,11 +3717,42 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                 "file_da_chon": file_path,
                 "thong_bao": "Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
                              "bạn có thể tự làm tiếp bằng tay từ đó."}
+    conn = db()
+    conn.execute(
+        "INSERT INTO nop_to_khai_log (company_id, loai, file_ten, done_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(company_id, loai) DO UPDATE SET file_ten=excluded.file_ten, done_at=excluded.done_at",
+        (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
     return {"ok": True, "file_da_chon": file_path,
             "ung_vien_khac": [u for u in ung_vien if u != file_path],
             "thong_bao": "Đã tự động đăng nhập, khởi tạo đúng tờ khai và tải file XML lên. "
                          "DỪNG LẠI theo yêu cầu an toàn — hãy chuyển sang cửa sổ Chrome vừa "
                          "mở để tự KIỂM TRA rồi bấm \"Ký hồ sơ\" và \"Nộp tờ khai\"."}
+
+
+@app.get("/api/dvc/nop-to-khai-trang-thai")
+def dvc_nop_to_khai_trang_thai():
+    """Với mỗi công ty: file XML (GTGT/TNCN) đang khớp trong 'thư mục mặc
+    định', và đã từng tải-lên-thành-công với ĐÚNG file đó chưa (để tô xanh
+    'đã xong' trong danh sách chọn công ty). Nếu kỳ sau file thay tên khác
+    (kỳ mới) thì tự động coi là CHƯA xong — không cần người dùng tự dọn cờ."""
+    folder = _get_setting("thu_muc_nop_to_khai", "")
+    conn = db()
+    rows = conn.execute("SELECT id, mst FROM companies ORDER BY ten").fetchall()
+    logs = {(r["company_id"], r["loai"]): r["file_ten"]
+            for r in conn.execute("SELECT company_id, loai, file_ten FROM nop_to_khai_log").fetchall()}
+    conn.close()
+    out = {}
+    for c in rows:
+        cid = c["id"]
+        item = {}
+        for loai in _DVC_TO_KHAI_CONFIG:
+            fp, _ = _tim_file_nop_to_khai(folder, c["mst"], loai)
+            ten = os.path.basename(fp) if fp else None
+            item[loai] = {"file": ten, "da_nop": bool(ten) and logs.get((cid, loai)) == ten}
+        out[str(cid)] = item
+    return out
 
 
 @app.get("/api/dvc/tai-excel")
