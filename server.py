@@ -3611,6 +3611,26 @@ def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
         pass
 
 
+def _sua_tdlap_theo_id(row_id, ngay_xml, tdlap_cu):
+    """Như _sua_ngay_lap_tu_xml nhưng dùng khi ĐÃ CÓ id dòng + ngày đã parse
+    sẵn từ XML (vd lúc xuất Excel đọc lại file đã tải trên máy) — tránh phải
+    parse lại XML lần nữa và không cần dò theo khmshdon/khhdon/shdon."""
+    try:
+        if not ngay_xml:
+            return
+        ngay_xml_d = str(ngay_xml).split("T")[0]
+        ngay_cu_d = str(tdlap_cu or "").split("T")[0]
+        if not ngay_cu_d or ngay_xml_d == ngay_cu_d:
+            return
+        tdlap_moi = ngay_xml if "T" in str(ngay_xml) else f"{ngay_xml}T00:00:00"
+        cn = db()
+        cn.execute("UPDATE invoices SET tdlap=? WHERE id=?", (tdlap_moi, row_id))
+        cn.commit()
+        cn.close()
+    except Exception:
+        pass
+
+
 def _luu_loi_tra_cuu(cid: int, text: str):
     """Lưu LỖI tra cứu gần nhất vào công ty (DB) — để không bị mất khi
     thông báo/toast trên trình duyệt tự tắt. Mở lại công ty vẫn thấy đúng
@@ -10976,6 +10996,13 @@ def export_excel(cid: int):
             if items:
                 key = (r["khhdon"], r["shdon"], r["nbmst"], r["loai"])
                 _items_cache[key] = (items, summary)
+                # Tranh thủ đối chiếu/tự sửa NGÀY LẬP theo đúng file XML gốc —
+                # đã gặp trường hợp API tra cứu danh sách và file XML thật
+                # của CHÍNH Tổng cục Thuế lệch ngày nhau (vd hóa đơn VETC).
+                try:
+                    _sua_tdlap_theo_id(r["id"], items[0].get("ngay"), r["tdlap"])
+                except Exception:
+                    pass
             else:
                 can_nap2.append(dict(r))
         if can_nap2:
@@ -11118,6 +11145,16 @@ def export_excel(cid: int):
             fpath = find_invoice_file(r)
             if fpath:
                 items, summary = _doc_file_hoadon(fpath)
+                # Tranh thủ đối chiếu/tự sửa NGÀY LẬP theo đúng file XML gốc —
+                # đã gặp trường hợp API tra cứu danh sách và file XML thật của
+                # CHÍNH Tổng cục Thuế lệch ngày nhau (vd hóa đơn VETC). Sửa
+                # ngay ở đây để áp dụng luôn khi xuất Excel, không cần đợi
+                # tra cứu lại qua mạng.
+                if items:
+                    try:
+                        _sua_tdlap_theo_id(r["id"], items[0].get("ngay"), r["tdlap"])
+                    except Exception:
+                        pass
 
         # (2) gọi detail JSON — thử cả hệ thống đã lưu và hệ thống còn lại
         # (đã nạp song song trước -> ở đây chỉ vớt nhanh, KHÔNG chờ nếu bị giới hạn
