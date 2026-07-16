@@ -3382,6 +3382,7 @@ def _run_fetch_job(cid: int, body: dict):
                             if zdata:
                                 try:
                                     _save_invoice_files(sub, base, zdata)
+                                    _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata)
                                     return "ok"
                                 except Exception:
                                     return "fail"
@@ -3566,6 +3567,38 @@ def _run_fetch_job(cid: int, body: dict):
 def _new_fetch_job():
     return {"messages": [], "last": None, "running": True,
             "cursor": 0, "started": time.time(), "cancel": False}
+
+
+def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
+    """Sửa lại NGÀY LẬP (tdlap) của hóa đơn trong DB nếu ngày trong file XML
+    thật (<NLap>) khác với ngày trang Thuế trả về lúc tra cứu danh sách.
+
+    Đã gặp trường hợp: hóa đơn K26TEG/61820238 (VETC) trang Thuế TRA CỨU
+    DANH SÁCH báo tdlap=2026-03-31, nhưng file XML thật (đã tải về) lại ghi
+    <NLap>2026-04-01</NLap> — 2 nguồn dữ liệu của CHÍNH Tổng cục Thuế không
+    khớp nhau. File XML là NGUỒN GỐC/CHUẨN nhất (chữ ký số + toàn bộ nội
+    dung hóa đơn) nên khi đã tải được, dùng ngày trong XML để tự sửa lại
+    cho đúng, không phụ thuộc ngày (có thể sai) của API tra cứu danh sách."""
+    try:
+        rows = _parse_xml_invoice(zdata)
+        ngay_xml = (rows[0].get("ngay") or "").strip() if rows else ""
+        if not ngay_xml:
+            return
+        ngay_xml_d = ngay_xml.split("T")[0]
+        ngay_cu_d = str(inv.get("tdlap") or "").split("T")[0]
+        if not ngay_cu_d or ngay_xml_d == ngay_cu_d:
+            return
+        tdlap_moi = ngay_xml if "T" in ngay_xml else f"{ngay_xml}T00:00:00"
+        cn = db()
+        cn.execute(
+            "UPDATE invoices SET tdlap=? WHERE company_id=? AND khmshdon=? "
+            "AND khhdon=? AND shdon=? AND loai=? AND he_thong=?",
+            (tdlap_moi, cid, str(inv.get("khmshdon") or ""),
+             str(inv.get("khhdon") or ""), str(inv.get("shdon") or ""), loai, he_thong))
+        cn.commit()
+        cn.close()
+    except Exception:
+        pass
 
 
 def _luu_loi_tra_cuu(cid: int, text: str):
