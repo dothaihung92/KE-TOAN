@@ -2181,6 +2181,53 @@ def _ten_file_than_thien(ten_to_khai_full, ky, mst, lan_bs):
         ten += f"_L{lb}"
     return ten
 
+# Nhận diện MÃ NGẮN loại tờ khai từ TÊN ĐẦY ĐỦ — dùng cho tab "Thuế điện tử"
+# (cột "Tờ khai/Phụ lục" ghi TÊN ĐẦY ĐỦ, vd "TỜ KHAI THUẾ GIÁ TRỊ GIA TĂNG
+# (TT80/2021)(00-...)", KHÔNG có dạng "MÃ - Tên" như tab DVC, nên
+# _ma_to_khai_tu_ten/_TEN_TO_KHAI_MAP không dùng được — trước đây rơi vào
+# nhánh dự phòng, cắt bỏ dấu kiểu Việt còn trơ lại đúng 1 chữ cái đầu (vd
+# "Tờ khai..." -> "T"), khiến tên file vô nghĩa như "T_QUY1.2025-...").
+# Khớp theo TỪ KHÓA (không phân biệt hoa/thường, không dấu) — ưu tiên các
+# mẫu CỤ THỂ hơn (quyết toán, báo cáo tài chính...) trước các mẫu chung.
+_TDT_LOAI_TU_KHOA = [
+    ("QTTNCN", ["quyet toan thue thu nhap ca nhan", "quyet toan tncn"]),
+    ("QTTNDN", ["quyet toan thue thu nhap doanh nghiep", "quyet toan tndn"]),
+    ("BCTC",   ["bao cao tai chinh"]),
+    ("GTGT",   ["gia tri gia tang", "gtgt"]),
+    ("TNCN",   ["thu nhap ca nhan", "tncn"]),
+    ("TNDN",   ["thu nhap doanh nghiep", "tndn"]),
+    ("TTDB",   ["tieu thu dac biet"]),
+    ("TAINGUYEN", ["thue tai nguyen", "tai nguyen"]),
+    ("MONBAI", ["mon bai"]),
+    ("BVMT",   ["bao ve moi truong"]),
+    ("XNK",    ["xuat nhap khau"]),
+]
+_TDT_TU_BO_QUA = {"to", "khai", "bao", "cao", "thue", "ve", "cua", "va", "so", "phu", "luc"}
+
+def _loai_tk_tu_ten_day_du(ten_to_khai_full):
+    """Nhận diện mã ngắn loại tờ khai từ TÊN ĐẦY ĐỦ (không có mã đi kèm)."""
+    kd = _khong_dau(ten_to_khai_full or "")
+    for ma_ngan, tu_khoa_list in _TDT_LOAI_TU_KHOA:
+        if any(tk in kd for tk in tu_khoa_list):
+            return ma_ngan
+    # không nhận diện được -> lấy từ có nghĩa ĐẦU TIÊN (bỏ các từ đệm
+    # "tờ khai", "báo cáo"...) thay vì lấy đại 1 chữ cái như trước đây
+    words = [w for w in kd.split() if w and w not in _TDT_TU_BO_QUA]
+    return (words[0].upper() if words else "ToKhai")
+
+def _ten_file_than_thien_tdt(ten_to_khai_full, ky, mst, lan_bs):
+    """Như _ten_file_than_thien nhưng dùng nhận diện loại tờ khai theo TÊN
+    ĐẦY ĐỦ (tab Thuế điện tử). Ví dụ: GTGT_QUY1.2025-0313889644."""
+    import re as _re
+    nhan = _loai_tk_tu_ten_day_du(ten_to_khai_full)
+    ky_s = _chuan_ky_ten_file(ky)
+    mst_s = _re.sub(r'[^A-Za-z0-9]', '', str(mst or ""))
+    ten = f"{nhan}_{ky_s}-{mst_s}"
+    lb = _so_lan_bs(lan_bs)
+    if lb > 0:
+        ten += f"_L{lb}"
+    return ten
+
 def _dvc_map_bang(rows):
     """Từ mảng dòng {cells, ma} (DOM, xem _JS_PARSE_TABLE) → list dict theo TRACUU_COLS + 'ma'.
     Tự dò cột theo tiêu đề. Cũng chấp nhận mảng dòng×ô "thô" (list) để tương thích ngược."""
@@ -2973,6 +3020,34 @@ def dvc_tai_bao_cao(cid: int, body: dict = Body(...)):
 DVC_BATCH = {}        # batch_id -> {...}
 _DVC_BATCH_SEQ = {"n": 0}
 
+# Mốc chuyển hệ thống: dichvucong.gdt.gov.vn (tab "DVC") chỉ có tờ khai TỪ
+# ngày này; tờ khai TRƯỚC ngày này chỉ tra cứu được qua tab "Thuế điện tử"
+# (etax cũ) — 2 nguồn KHÔNG dùng chung dữ liệu.
+_DVC_MOC_CHUYEN_HE_THONG = datetime.date(2025, 7, 1)
+
+def _nguon_tra_cuu_theo_ky(tu_str, den_str):
+    """Tự động chọn (các) nguồn tra cứu theo khoảng ngày, không cần người
+    dùng tự chọn. Trả về list nguồn cần tra cứu — thường 1 phần tử, nhưng
+    nếu khoảng ngày VẮT QUA mốc 01/07/2025 thì trả cả 2 (['thuedientu',
+    'dvc']) để không bỏ sót tờ khai của giai đoạn nào."""
+    def _dmy(s):
+        try:
+            d, m, y = (s or "").split("/")
+            return datetime.date(int(y), int(m), int(d))
+        except Exception:
+            return None
+    tu_d, den_d = _dmy(tu_str), _dmy(den_str)
+    if not tu_d or not den_d:
+        return ["dvc"]
+    moc = _DVC_MOC_CHUYEN_HE_THONG
+    nguon = []
+    if tu_d < moc:
+        nguon.append("thuedientu")
+    if den_d >= moc:
+        nguon.append("dvc")
+    return nguon or ["dvc"]
+
+
 def _dvc_run_batch(batch_id, cids, body):
     job = DVC_BATCH[batch_id]
     tu = (body.get("tu_ngay") or "").strip()
@@ -2981,11 +3056,10 @@ def _dvc_run_batch(batch_id, cids, body):
     tai_file = bool(body.get("tai_file"))       # có tải file tờ khai về không
     tai_tb = bool(body.get("tai_thong_bao", True))
     luu_pass = bool(body.get("luu", True))
-    # Nguồn tra cứu: "dvc" (mặc định, tờ khai TỪ 01/07/2025) hoặc "thuedientu"
-    # (tab "Tra cứu hồ sơ đã nộp trên thuế điện tử" — tờ khai TRƯỚC 01/07/2025).
-    nguon = (body.get("nguon") or "dvc").strip().lower()
-    _tra_cuu_fn = _dvc_browser_tracuu_tdt if nguon == "thuedientu" else _dvc_browser_tracuu
-    _tai_file_fn = _dvc_browser_download_tdt if nguon == "thuedientu" else _dvc_browser_download
+    # Nguồn tra cứu: TỰ ĐỘNG chọn theo khoảng ngày (người dùng không cần tự
+    # chọn) — "dvc" cho tờ khai TỪ 01/07/2025, "thuedientu" (tab cũ) cho tờ
+    # khai TRƯỚC ngày đó; nếu khoảng ngày vắt qua mốc này, tra cứu CẢ 2.
+    ds_nguon = _nguon_tra_cuu_theo_ky(tu, den)
     tracuu_rows = []      # gom mọi dòng cho Excel tra cứu
     sai_pass = []         # công ty đăng nhập không được
     drv = None
@@ -3035,78 +3109,95 @@ def _dvc_run_batch(batch_id, cids, body):
                                  "ly_do": json.dumps(info, ensure_ascii=False)[:480]})
                 job["done"] += 1; continue
             item["dung_pass"] = dung_pass
-            # tra cứu
-            try:
-                rows, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu, den)
-            except Exception as e:
-                rows, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
-            for rec in rows:
-                rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
-                tracuu_rows.append(rec2)
-            item["so_dong"] = len(rows)
-            # Nếu tra cứu THÀNH CÔNG nhưng KHÔNG có tờ khai nào trong kỳ
-            # -> ghi chú "CHƯA NỘP TỜ KHAI" (đỏ). Nếu tra cứu lỗi thì không kết luận.
-            if not rows:
-                if raw_html:
-                    tracuu_rows.append({
-                        "mst": mst, "ten": ten,
-                        "to_khai": "(Chưa tìm thấy tờ khai trong kỳ)",
-                        "ky": ky_label, "loai": "", "ngay_nop": "",
-                        "lan_nop": "", "lan_bs": "",
-                        "trang_thai": "CHƯA NỘP TỜ KHAI",
-                    })
-                    item["chua_nop"] = True
+            # Tra cứu LẦN LƯỢT từng nguồn phù hợp với khoảng ngày (thường chỉ
+            # 1 nguồn; vắt qua mốc 01/07/2025 thì tra cứu cả 2 rồi gộp lại).
+            co_du_lieu_nguon_nao = False
+            for ngu in ds_nguon:
+                if ngu == "thuedientu":
+                    _tra_cuu_fn = _dvc_browser_tracuu_tdt
+                    _tai_file_fn = _dvc_browser_download_tdt
+                    _ten_file_fn = _ten_file_than_thien_tdt
+                    nhan_nguon = "Thuế điện tử (trước 01/07/2025)"
                 else:
-                    item["loi_tra_cuu"] = "; ".join(sdiag)[:200]
-            # tải file (tùy chọn)
-            if tai_file and ma_list:
-                folder = _dvc_save_folder(cid)
-                if folder:
-                    seen_ma = set()
-                    # 1) các hồ sơ dò được đủ dữ liệu dòng (to_khai/ky/lan_bs) -> đặt tên thân thiện
-                    for rec in rows:
-                        ma = (rec.get("ma") or "").strip()
-                        if not ma or ma in seen_ma:
-                            continue
-                        seen_ma.add(ma)
-                        if job.get("cancel"):
-                            break
-                        ten_goi = _ten_file_than_thien(rec.get("to_khai"), rec.get("ky"), mst, rec.get("lan_bs"))
-                        try:
-                            if tai_tb:
-                                tb_files, _ = _dvc_browser_thongbao(drv, ma)
-                                so_tb = len(tb_files)
-                                for k, (fn, raw) in enumerate(tb_files, 1):
-                                    if raw:
-                                        ext = os.path.splitext(fn)[1] or ".xml"
-                                        hau_to = f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"
-                                        _dvc_luu_file(folder, f"{ten_goi}{hau_to}{ext}", raw); item["so_file"] += 1
-                            fn, raw = _tai_file_fn(drv, ma)
-                            if raw:
-                                ext = os.path.splitext(fn)[1] or ".zip"
-                                _dvc_luu_file(folder, f"{ten_goi}{ext}", raw); item["so_file"] += 1
-                        except Exception:
-                            pass
-                        time.sleep(0.3)
-                    # 2) các mã hồ sơ tìm thấy nhưng KHÔNG ghép được dữ liệu dòng -> tải với tên gốc (dự phòng)
-                    for ma in ma_list:
-                        if ma in seen_ma:
-                            continue
-                        seen_ma.add(ma)
-                        if job.get("cancel"):
-                            break
-                        try:
-                            if tai_tb:
-                                tb_files, _ = _dvc_browser_thongbao(drv, ma)
-                                for fn, raw in tb_files:
-                                    if raw:
-                                        _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
-                            fn, raw = _tai_file_fn(drv, ma)
-                            if raw:
-                                _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
-                        except Exception:
-                            pass
-                        time.sleep(0.3)
+                    _tra_cuu_fn = _dvc_browser_tracuu
+                    _tai_file_fn = _dvc_browser_download
+                    _ten_file_fn = _ten_file_than_thien
+                    nhan_nguon = "DVC (từ 01/07/2025)"
+                try:
+                    rows, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu, den)
+                except Exception as e:
+                    rows, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+                for rec in rows:
+                    rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
+                    tracuu_rows.append(rec2)
+                item["so_dong"] = item.get("so_dong", 0) + len(rows)
+                # Nếu tra cứu THÀNH CÔNG nhưng KHÔNG có tờ khai nào trong kỳ
+                # (của ĐÚNG NGUỒN này) -> ghi chú "CHƯA NỘP TỜ KHAI" (đỏ).
+                # Nếu tra cứu lỗi thì không kết luận.
+                if not rows:
+                    if raw_html:
+                        tracuu_rows.append({
+                            "mst": mst, "ten": ten,
+                            "to_khai": f"(Chưa tìm thấy tờ khai trong kỳ — nguồn {nhan_nguon})",
+                            "ky": ky_label, "loai": "", "ngay_nop": "",
+                            "lan_nop": "", "lan_bs": "",
+                            "trang_thai": "CHƯA NỘP TỜ KHAI",
+                        })
+                    else:
+                        item.setdefault("loi_tra_cuu", "")
+                        item["loi_tra_cuu"] += (f"[{nhan_nguon}] " + "; ".join(sdiag))[:200]
+                else:
+                    co_du_lieu_nguon_nao = True
+                # tải file (tùy chọn)
+                if tai_file and ma_list:
+                    folder = _dvc_save_folder(cid)
+                    if folder:
+                        seen_ma = set()
+                        # 1) các hồ sơ dò được đủ dữ liệu dòng (to_khai/ky/lan_bs) -> đặt tên thân thiện
+                        for rec in rows:
+                            ma = (rec.get("ma") or "").strip()
+                            if not ma or ma in seen_ma:
+                                continue
+                            seen_ma.add(ma)
+                            if job.get("cancel"):
+                                break
+                            ten_goi = _ten_file_fn(rec.get("to_khai"), rec.get("ky"), mst, rec.get("lan_bs"))
+                            try:
+                                if tai_tb:
+                                    tb_files, _ = _dvc_browser_thongbao(drv, ma)
+                                    so_tb = len(tb_files)
+                                    for k, (fn, raw) in enumerate(tb_files, 1):
+                                        if raw:
+                                            ext = os.path.splitext(fn)[1] or ".xml"
+                                            hau_to = f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"
+                                            _dvc_luu_file(folder, f"{ten_goi}{hau_to}{ext}", raw); item["so_file"] += 1
+                                fn, raw = _tai_file_fn(drv, ma)
+                                if raw:
+                                    ext = os.path.splitext(fn)[1] or ".zip"
+                                    _dvc_luu_file(folder, f"{ten_goi}{ext}", raw); item["so_file"] += 1
+                            except Exception:
+                                pass
+                            time.sleep(0.3)
+                        # 2) các mã hồ sơ tìm thấy nhưng KHÔNG ghép được dữ liệu dòng -> tải với tên gốc (dự phòng)
+                        for ma in ma_list:
+                            if ma in seen_ma:
+                                continue
+                            seen_ma.add(ma)
+                            if job.get("cancel"):
+                                break
+                            try:
+                                if tai_tb:
+                                    tb_files, _ = _dvc_browser_thongbao(drv, ma)
+                                    for fn, raw in tb_files:
+                                        if raw:
+                                            _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
+                                fn, raw = _tai_file_fn(drv, ma)
+                                if raw:
+                                    _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
+                            except Exception:
+                                pass
+                            time.sleep(0.3)
+            item["chua_nop"] = not co_du_lieu_nguon_nao and not item.get("loi_tra_cuu")
             item["trang_thai"] = "xong"
             job["done"] += 1
             time.sleep(0.5)
