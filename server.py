@@ -1901,16 +1901,19 @@ try {
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
-# Tải tờ khai từ tab "Thuế điện tử" — CHƯA XÁC NHẬN được endpoint downloadhoso
-# có phân biệt "loai" hay không (chưa bắt được request thật lúc bấm nút tải
-# trên tab này), nên gửi kèm loai='ETAX' để phòng hờ server cần phân biệt
-# nguồn — không ảnh hưởng gì nếu server bỏ qua field lạ.
+# Tải tờ khai từ tab "Thuế điện tử" — endpoint THẬT đã xác nhận qua request
+# bắt được từ trình duyệt: POST /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX,
+# body {"maHoSo": <mã giao dịch, số>}. "body" được dựng sẵn thành CHUỖI JSON
+# từ Python (giống _JS_DOWNLOAD_TB) để giữ nguyên "Mã giao dịch" — số này có
+# tới 17 chữ số, VƯỢT quá độ chính xác an toàn của kiểu Number trong
+# JavaScript (Number.MAX_SAFE_INTEGER chỉ 16 chữ số) — nếu để JS tự
+# JSON.stringify({maHoSo:ma}) sẽ làm SAI lệch vài chữ số cuối.
 _JS_DOWNLOAD_TDT = r"""
 var cb = arguments[arguments.length-1];
-var ma = arguments[0];
+var body = arguments[0];
 try {
-  $.ajax({ type:'POST', url:'/tthc/tchs/downloadhoso',
-    contentType:'application/json', data: JSON.stringify({maHoSo:ma, maGiaoDich:ma, loai:'ETAX'}),
+  $.ajax({ type:'POST', url:'/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX',
+    contentType:'application/json', data: body,
     success:function(d){ cb({ok:true, data:d}); },
     error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
   });
@@ -2399,11 +2402,9 @@ def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
 
 def _dvc_browser_download_tdt(drv, ma):
     """Tải tờ khai từ tab "Thuế điện tử" — vào trang chi tiết (?loai=ETAX,
-    đúng đường dẫn quan sát được khi bấm 1 dòng kết quả) trước để có đúng
-    ngữ cảnh/referer, rồi gọi tải. *** Thử nghiệm: cơ chế tải cụ thể (có
-    phân biệt "loai" hay dùng lại y hệt downloadhoso của tab DVC) chưa được
-    xác nhận bằng request thật — nếu lỗi, cần bắt lại đúng request khi bấm
-    nút tải trên tab này để chỉnh cho đúng. ***"""
+    đúng đường dẫn xác nhận được từ request thật) trước để có đúng ngữ
+    cảnh/referer, rồi gọi POST /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX
+    (endpoint đã xác nhận qua request bắt được từ trình duyệt)."""
     import time as _t
     try:
         drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
@@ -2411,7 +2412,12 @@ def _dvc_browser_download_tdt(drv, ma):
         _dvc_wait_jquery(drv, 10)
     except Exception:
         pass
-    res = drv.execute_async_script(_JS_DOWNLOAD_TDT, ma)
+    # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
+    # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
+    # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).
+    ma_so = "".join(ch for ch in str(ma) if ch.isdigit()) or "0"
+    body = '{"maHoSo":%s}' % ma_so
+    res = drv.execute_async_script(_JS_DOWNLOAD_TDT, body)
     if not res or not res.get("ok"):
         raise Exception(f"{res}")
     d = _dvc_norm_data(res.get("data"))
