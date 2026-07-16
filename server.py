@@ -271,7 +271,8 @@ class GDTClient:
 
             self._last_total = 0
             self._loi_rieng_phan = []
-            chunk = self._query_one_range(s_from, s_to, loai, page_size, he_thong)
+            chunk = self._query_one_range(s_from, s_to, loai, page_size, he_thong,
+                                          progress=progress)
             total_expected += getattr(self, "_last_total", 0) or 0
             for loi in (getattr(self, "_loi_rieng_phan", None) or []):
                 loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
@@ -297,7 +298,7 @@ class GDTClient:
         return all_results
 
     def _query_one_range(self, tu_ngay, den_ngay, loai="purchase",
-                         page_size=50, he_thong="query"):
+                         page_size=50, he_thong="query", progress=None):
         """
         Tra cứu 1 khoảng ngày (<= 31 ngày).
         Khớp đúng cURL thật từ hoadondientu.gdt.gov.vn:
@@ -338,7 +339,7 @@ class GDTClient:
                 search = f"{date_filter};ttxly=={ttxly}"
                 try:
                     part, ptotal = _thu_lai(lambda: self._fetch_paginated(
-                        url, search, action, page_size, want_total=True))
+                        url, search, action, page_size, want_total=True, progress=progress))
                     if ptotal:
                         total_all += ptotal
                 except Exception as e:
@@ -365,14 +366,16 @@ class GDTClient:
             # không có nhiều lượt dự phòng như mua vào theo từng trạng thái, nên
             # dễ bị 1 lần rớt mạng ngẫu nhiên làm mất luôn cả kết quả bán ra).
             results, total = _thu_lai(lambda: self._fetch_paginated(
-                url, date_filter, action, page_size, want_total=True))
+                url, date_filter, action, page_size, want_total=True, progress=progress))
             self._last_total = total  # lưu để báo lên
             self._loi_rieng_phan = []
             return results
 
-    def _fetch_paginated(self, url, search, action, page_size=50, want_total=False):
+    def _fetch_paginated(self, url, search, action, page_size=50, want_total=False, progress=None):
         """Gọi 1 endpoint với tham số search, tự phân trang và xử lý 429.
-        want_total=True -> trả (results, total_kỳ_vọng) để kiểm tra đủ chưa."""
+        want_total=True -> trả (results, total_kỳ_vọng) để kiểm tra đủ chưa.
+        progress: callback(str) báo tiến độ khi đang chờ 429/lỗi mạng (tùy
+        chọn) — để màn hình KHÔNG đứng yên như "đứng máy" trong lúc chờ."""
         from urllib.parse import quote
         extra_headers = {
             "accept-language": "vi",
@@ -415,7 +418,10 @@ class GDTClient:
                 except Exception as e:
                     last_net_err = e
                     r = None
-                    time.sleep(min(sp["retry_base"] * (attempt + 1), 60))
+                    cho = min(sp["retry_base"] * (attempt + 1), 60)
+                    if progress:
+                        progress(f"lỗi mạng, đợi {cho}s rồi thử lại (lần {attempt + 1}/{sp['retry_max']})...")
+                    time.sleep(cho)
                     continue
                 if r.status_code == 429:
                     ra = r.headers.get("Retry-After")
@@ -424,6 +430,9 @@ class GDTClient:
                     except Exception:
                         wait = sp["retry_base"] * (attempt + 1)
                     wait = min(wait, 90)
+                    if progress:
+                        progress(f"bị Tổng cục Thuế giới hạn tốc độ (429), đợi {wait}s rồi "
+                                 f"thử lại (lần {attempt + 1}/{sp['retry_max']})...")
                     time.sleep(wait)
                     continue
                 break
@@ -468,7 +477,19 @@ class GDTClient:
                 retry_results = []
                 state2 = None
                 so_lan_429 = 0
+                # GIỚI HẠN TỔNG THỜI GIAN cho cả vòng retry này — trước đây CHỈ
+                # giới hạn số trang (500) và số lần 429 (retry_max), không giới
+                # hạn THỜI GIAN, nên nếu mỗi trang đều mất gần 60s (timeout) mà
+                # KHÔNG lỗi hẳn (vd trang Thuế phản hồi rất chậm), vòng lặp có
+                # thể "treo" hàng giờ mà người dùng chỉ thấy 1 dòng tiến độ đứng
+                # yên — trông như phần mềm bị đơ dù thực ra vẫn đang thử lại.
+                t_bat_dau_fallback = time.time()
+                NGUONG_FALLBACK = 90  # giây
                 for _ in range(500):
+                    if time.time() - t_bat_dau_fallback > NGUONG_FALLBACK:
+                        if progress:
+                            progress("đã thử lại quá lâu, dùng tạm kết quả hiện có...")
+                        break
                     qs = (f"sort=tdlap:desc&size={page_size}"
                           f"&search={quote(search, safe='=;,:/')}")
                     if state2:
@@ -478,7 +499,11 @@ class GDTClient:
                         so_lan_429 += 1
                         if so_lan_429 > SP()["retry_max"]:
                             break
-                        time.sleep(min(SP()["retry_base"] * 2, 90)); continue
+                        wait2 = min(SP()["retry_base"] * 2, 90)
+                        if progress:
+                            progress(f"bị giới hạn tốc độ (429), đợi {wait2}s rồi thử lại "
+                                     f"(lần {so_lan_429}/{SP()['retry_max']})...")
+                        time.sleep(wait2); continue
                     if r2.status_code != 200:
                         break
                     d2 = r2.json()
