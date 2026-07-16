@@ -193,6 +193,7 @@
     <h3 id="coModalTitle">Thêm công ty</h3>
     <div class="field"><label>Tên công ty</label><input id="m_ten" placeholder="Công ty TNHH ABC"></div>
     <div class="field"><label>Mã số thuế</label><input id="m_mst" placeholder="0301234567"></div>
+    <div class="field"><label>MST khác <span style="font-weight:400;color:var(--muted)">(hộ/cá nhân kinh doanh: mã định danh cá nhân/CCCD nếu hóa đơn ghi MST mua khác MST đăng ký ở trên — cách nhau bởi dấu phẩy nếu nhiều mã)</span></label><input id="m_mst_khac" placeholder="VD: 079089022914"></div>
     <div class="field"><label>Tên đăng nhập trang Thuế <span style="font-weight:400;color:var(--muted)">(thường là MST)</span></label><input id="m_user" placeholder="Để trống sẽ dùng MST"></div>
     <div class="field"><label>Mật khẩu trang Thuế</label>
       <div style="display:flex;gap:6px">
@@ -623,6 +624,7 @@ async function openCompanyModal(edit=null){
   document.getElementById('coModalTitle').textContent=edit?'Sửa công ty':'Thêm công ty';
   document.getElementById('m_ten').value=edit?.ten||'';
   document.getElementById('m_mst').value=edit?.mst||'';
+  document.getElementById('m_mst_khac').value=edit?.mst_khac||'';
   document.getElementById('m_user').value=edit?.username||'';
   document.getElementById('m_note').value=edit?.ghichu||'';
   document.getElementById('m_dir').value=edit?.save_dir||'';
@@ -849,7 +851,8 @@ async function saveCompany(){
     password:m_pass.value,ghichu:m_note.value.trim(),save_dir:m_dir.value.trim(),
     data_dir:document.getElementById('m_datadir').value.trim(),
     dvc_password:document.getElementById('m_dvc1').value.trim(),
-    dvc_password2:document.getElementById('m_dvc2').value.trim()};
+    dvc_password2:document.getElementById('m_dvc2').value.trim(),
+    mst_khac:document.getElementById('m_mst_khac').value.trim()};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

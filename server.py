@@ -715,6 +715,8 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error TEXT")
     if "last_fetch_error_at" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error_at TEXT")
+    if "mst_khac" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN mst_khac TEXT")
     # Migration: tách riêng phần HÀNG NHẬP KHẨU (tờ khai NK) trong dữ liệu import
     # để điền đúng chỉ tiêu [23a]/[24a] trên tờ khai 01/GTGT
     icols = [r[1] for r in conn.execute("PRAGMA table_info(imported_data)").fetchall()]
@@ -798,12 +800,13 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, dvc_password, dvc_password2, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, dvc_password, dvc_password2, mst_khac, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""),
          (data.get("dvc_password") or "").strip(),
          (data.get("dvc_password2") or "").strip(),
+         (data.get("mst_khac") or "").strip(),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -834,10 +837,11 @@ def update_company(cid: int, data: dict = Body(...)):
     if dvc2 is None or dvc2 == "":
         dvc2 = (cur["dvc_password2"] if cur and "dvc_password2" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, dvc_password=?, dvc_password2=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, dvc_password=?, dvc_password2=?, mst_khac=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
-         data.get("data_dir", ""), dvc1.strip(), dvc2.strip(), cid)
+         data.get("data_dir", ""), dvc1.strip(), dvc2.strip(),
+         (data.get("mst_khac") or "").strip(), cid)
     )
     conn.commit()
     conn.close()
@@ -4307,6 +4311,18 @@ NGUONG_5TR = 5_000_000  # hóa đơn >= 5tr -> Có 331 (chuyển khoản), < 5tr
 def _chuan_mst(s):
     """Chuẩn hóa MST: bỏ khoảng trắng, gạch, chấm."""
     return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+
+def _ds_mst_khac(mst_khac_raw):
+    """Tách chuỗi 'MST khác' (nhiều mã, cách nhau bởi , ; hoặc xuống dòng)
+    thành tập hợp MST đã chuẩn hóa. Dùng cho hộ/cá nhân kinh doanh: hóa đơn
+    đôi khi ghi mã số thuế là MÃ ĐỊNH DANH CÁ NHÂN (CCCD, 12 số) của chủ hộ
+    thay vì MST hộ kinh doanh đã đăng ký trong phần mềm — 2 mã này KHÁC NHAU
+    hoàn toàn (không phải cùng gốc 10 số + hậu tố chi nhánh) nên không thể tự
+    nhận diện, phải khai báo thêm ở mục 'MST khác' của công ty."""
+    s = str(mst_khac_raw or "")
+    for sep in (";", "\n", "\t"):
+        s = s.replace(sep, ",")
+    return {_chuan_mst(m) for m in s.split(",") if _chuan_mst(m)}
 
 def _dinh_dang_mst(s):
     """MST 13 số (đơn vị trực thuộc) -> 10 số + '-' + 3 số. Khác giữ nguyên."""
@@ -11305,12 +11321,18 @@ def export_excel(cid: int):
         # thấp hơn số liệu tra cứu (KPI trang chính/Tạm tính VAT không lọc MST).
         if loai == "purchase":
             mst_cty_goc = _chuan_mst(comp["mst"])[:10]
+            # Hộ/cá nhân kinh doanh: hóa đơn đôi khi ghi MST người mua là MÃ
+            # ĐỊNH DANH CÁ NHÂN (CCCD 12 số) của chủ hộ thay vì MST hộ kinh
+            # doanh đã đăng ký — 2 mã này KHÁC HẲN nhau (không cùng gốc 10 số),
+            # nên phải khai báo thêm ở "MST khác" của công ty mới nhận diện được.
+            mst_khac_set = _ds_mst_khac(comp["mst_khac"] if "mst_khac" in comp.keys() else "")
             def _hop_le_mua(r):
                 nm = str(r["nmmst"] or "").strip()
                 # nmmst trống -> giữ (một số HĐ không ghi MST mua)
                 if not nm:
                     return True
-                return _chuan_mst(nm)[:10] == mst_cty_goc
+                nmc = _chuan_mst(nm)
+                return nmc[:10] == mst_cty_goc or nmc in mst_khac_set
             loai_rows = [r for r in loai_rows if _hop_le_mua(r)]
         # BÁN RA: KHÔNG lọc theo MST người bán nữa — trang Thuế tra cứu "bán ra"
         # đã CHỈ trả về đúng hóa đơn của công ty đang đăng nhập (không có rủi ro
@@ -11574,16 +11596,21 @@ def export_excel(cid: int):
     bk_totals = {"purchase": {}, "sold": {}}
 
     mst_cty_bk_goc = _chuan_mst(comp["mst"])[:10]
+    mst_khac_bk_set = _ds_mst_khac(comp["mst_khac"] if "mst_khac" in comp.keys() else "")
     def _hd_dung_cty(r, loai):
         """Loại hóa đơn lẫn của công ty khác: mua vào -> nmmst phải cùng MST GỐC
-        (10 số, bỏ hậu tố chi nhánh) với công ty. BÁN RA: KHÔNG lọc theo MST
-        người bán (nbmst) — xem giải thích ở build_detail_sheet phía trên
-        (trang Thuế đã tự lọc đúng công ty đăng nhập; hộ/cá nhân kinh doanh có
-        thể có MST trên hóa đơn khác MST đăng ký trong phần mềm, lọc thêm ở
-        đây gây mất trắng hóa đơn bán ra)."""
+        (10 số, bỏ hậu tố chi nhánh) hoặc khớp 1 trong các "MST khác" đã khai
+        (vd mã định danh cá nhân/CCCD của chủ hộ kinh doanh) với công ty. BÁN
+        RA: KHÔNG lọc theo MST người bán (nbmst) — xem giải thích ở
+        build_detail_sheet phía trên (trang Thuế đã tự lọc đúng công ty đăng
+        nhập; hộ/cá nhân kinh doanh có thể có MST trên hóa đơn khác MST đăng
+        ký trong phần mềm, lọc thêm ở đây gây mất trắng hóa đơn bán ra)."""
         if loai == "purchase":
             nm = str(r["nmmst"] or "").strip()
-            return (not nm) or _chuan_mst(nm)[:10] == mst_cty_bk_goc
+            if not nm:
+                return True
+            nmc = _chuan_mst(nm)
+            return nmc[:10] == mst_cty_bk_goc or nmc in mst_khac_bk_set
         return True
 
     # ----- BẢNG KÊ MUA VÀO (mỗi hóa đơn 1 dòng + cột Mặt hàng) -----
