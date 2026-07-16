@@ -742,6 +742,12 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error_at TEXT")
     if "mst_khac" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN mst_khac TEXT")
+    if "token_to_chuc_cap" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN token_to_chuc_cap TEXT")
+    if "token_ngay_het_han" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN token_ngay_het_han TEXT")
+    if "token_check_at" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN token_check_at TEXT")
     # Migration: tách riêng phần HÀNG NHẬP KHẨU (tờ khai NK) trong dữ liệu import
     # để điền đúng chỉ tiêu [23a]/[24a] trên tờ khai 01/GTGT
     icols = [r[1] for r in conn.execute("PRAGMA table_info(imported_data)").fetchall()]
@@ -1628,6 +1634,83 @@ def _dvc_parse_id_tbao(html):
             if m and m not in seen:
                 seen.add(m); ids.append(m)
     return ids
+
+
+def _chuan_ngay_het_han(s):
+    """Chuẩn hoá chuỗi 'Ngày hết hạn' CKS (nhiều định dạng có thể gặp trên
+    trang, vd '2028-11-07 00:00:00.0' hoặc '07/11/2028') về ISO yyyy-mm-dd
+    để lưu/so sánh/sắp xếp. Trả '' nếu không nhận dạng được."""
+    import re as _re
+    s = str(s or "").strip()
+    if not s:
+        return ""
+    m = _re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})', s)
+    if m:
+        y, mo, d = m.groups()
+        return f"{y}-{int(mo):02d}-{int(d):02d}"
+    m = _re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})', s)
+    if m:
+        d, mo, y = m.groups()
+        return f"{y}-{int(mo):02d}-{int(d):02d}"
+    return ""
+
+
+def _dvc_parse_token_info(rows_from_js):
+    """rows_from_js: list {cells, ma} (từ _JS_PARSE_TABLE chạy trên trang
+    "Quản lý thông tin"). Trang có THỂ có nhiều bảng khác nhau (vd "Thông
+    tin ngân hàng" nằm ngay dưới) nên phải TÌM ĐÚNG bảng "Thông tin chứng
+    thư số" qua tiêu đề cột, rồi trả về (to_chuc_cap, ngay_het_han_iso) của
+    dòng dữ liệu ĐẦU TIÊN (chứng thư đang dùng). Trả (None, None) nếu
+    không tìm thấy."""
+    header_idx, header = -1, []
+    for i, r in enumerate(rows_from_js):
+        cells = r.get("cells") or [] if isinstance(r, dict) else (r or [])
+        joined = _khong_dau(" ".join(cells))
+        if "to chuc cap" in joined and "ngay het han" in joined:
+            header_idx = i
+            header = [_khong_dau(c) for c in cells]
+            break
+    if header_idx < 0:
+        return None, None
+
+    def find(*keys):
+        for j, h in enumerate(header):
+            if any(k in h for k in keys):
+                return j
+        return -1
+
+    idx_to_chuc = find("to chuc cap")
+    idx_het_han = find("ngay het han")
+    for r in rows_from_js[header_idx + 1:]:
+        cells = r.get("cells") or [] if isinstance(r, dict) else (r or [])
+        if not cells or all(not c for c in cells):
+            continue
+        to_chuc = cells[idx_to_chuc].strip() if 0 <= idx_to_chuc < len(cells) else ""
+        het_han = cells[idx_het_han].strip() if 0 <= idx_het_han < len(cells) else ""
+        if to_chuc or het_han:
+            return to_chuc, _chuan_ngay_het_han(het_han)
+    return None, None
+
+
+def _dvc_browser_lay_token_info(drv):
+    """Vào trang "Quản lý thông tin" (dichvucong.gdt.gov.vn/tthc/dang-ky-dich-vu,
+    sau khi đã đăng nhập), đọc thông tin chứng thư số (CKS): Tổ chức cấp +
+    Ngày hết hạn. Trả (to_chuc_cap, ngay_het_han_iso) hoặc (None, None)."""
+    import time as _t
+    try:
+        drv.get(DVC_BASE + "/dang-ky-dich-vu")
+        _t.sleep(1.5)
+        _dvc_wait_jquery(drv, 10)
+        html = drv.page_source or ""
+    except Exception:
+        return None, None
+    try:
+        pr = drv.execute_async_script(_JS_PARSE_TABLE, html)
+        if pr and pr.get("ok"):
+            return _dvc_parse_token_info(pr.get("rows") or [])
+    except Exception:
+        pass
+    return None, None
 
 
 def _dvc_save_folder(cid):
@@ -3269,6 +3352,7 @@ def dvc_batch_start(body: dict = Body(...)):
     bid = _DVC_BATCH_SEQ["n"]
     DVC_BATCH[bid] = {"running": True, "total": len(cids), "done": 0,
                       "current": None, "items": [], "cancel": False}
+    import threading
     threading.Thread(target=lambda: _dvc_run_batch(bid, cids, body), daemon=True).start()
     return {"ok": True, "batch_id": bid}
 
@@ -3285,6 +3369,114 @@ def dvc_batch_cancel(bid: int):
     if job:
         job["cancel"] = True
     return {"ok": True}
+
+
+# ============================================================
+#  KIỂM TRA HẠN TOKEN (chứng thư số CKS): đăng nhập từng công ty, vào
+#  trang "Quản lý thông tin", đọc Tổ chức cấp + Ngày hết hạn, lưu vào DB
+#  để nhớ lâu dài và cảnh báo công ty nào sắp hết hạn (không cần tra cứu
+#  tờ khai — chỉ đăng nhập rồi đọc thông tin, nhanh hơn nhiều).
+# ============================================================
+DVC_TOKEN_BATCH = {}
+_DVC_TOKEN_BATCH_SEQ = {"n": 0}
+
+def _dvc_run_token_batch(batch_id, cids, body):
+    job = DVC_TOKEN_BATCH[batch_id]
+    drv = None
+    try:
+        try:
+            drv = _dvc_make_driver(headless=True)
+        except Exception as e:
+            job["loi"] = f"Không mở được Chrome: {e}"
+            job["running"] = False
+            return
+        for cid in cids:
+            if job.get("cancel"):
+                break
+            conn = db()
+            comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+            conn.close()
+            if not comp:
+                job["done"] += 1; continue
+            ten = comp["ten"]; mst = comp["mst"]
+            job["current"] = ten
+            item = {"cid": cid, "mst": mst, "ten": ten, "trang_thai": "đang xử lý"}
+            job["items"].append(item)
+            pw1 = (comp["dvc_password"] if "dvc_password" in comp.keys() else "") or ""
+            pw2 = (comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or ""
+            pw1 = (pw1 or "").strip(); pw2 = (pw2 or "").strip()
+            if body.get("pass_chung"):
+                pw2 = pw2 or (body.get("pass_chung") or "").strip()
+            if not pw1 and not pw2:
+                item["trang_thai"] = "thiếu mật khẩu"
+                job["done"] += 1; continue
+            try:
+                drv.get(DVC_BASE + "/homelogin")
+                drv.delete_all_cookies()
+            except Exception:
+                pass
+            try:
+                ok, dung_pass, info = _dvc_browser_login_2pass(drv, mst, pw1, pw2)
+            except Exception as e:
+                ok, dung_pass, info = False, 0, {"loi": str(e)}
+            if not ok:
+                item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
+                job["done"] += 1; continue
+            to_chuc_cap, ngay_het_han = _dvc_browser_lay_token_info(drv)
+            if not to_chuc_cap and not ngay_het_han:
+                item["trang_thai"] = "không đọc được thông tin token"
+                job["done"] += 1; continue
+            cn = db()
+            cn.execute(
+                "UPDATE companies SET token_to_chuc_cap=?, token_ngay_het_han=?, "
+                "token_check_at=? WHERE id=?",
+                (to_chuc_cap or "", ngay_het_han or "",
+                 datetime.datetime.now().isoformat(), cid))
+            cn.commit(); cn.close()
+            item["to_chuc_cap"] = to_chuc_cap
+            item["ngay_het_han"] = ngay_het_han
+            item["trang_thai"] = "xong"
+            job["done"] += 1
+            time.sleep(0.4)
+    finally:
+        try:
+            if drv: drv.quit()
+        except Exception:
+            pass
+    job["running"] = False
+    job["current"] = None
+
+
+@app.post("/api/dvc/token-batch")
+def dvc_token_batch_start(body: dict = Body(...)):
+    """Kiểm tra hạn Token (chứng thư số) hàng loạt. body: {cids:[...], pass_chung?}."""
+    cids = body.get("cids") or []
+    if not cids:
+        conn = db()
+        cids = [r["id"] for r in conn.execute("SELECT id FROM companies ORDER BY ten").fetchall()]
+        conn.close()
+    _DVC_TOKEN_BATCH_SEQ["n"] += 1
+    bid = _DVC_TOKEN_BATCH_SEQ["n"]
+    DVC_TOKEN_BATCH[bid] = {"running": True, "total": len(cids), "done": 0,
+                            "current": None, "items": [], "cancel": False}
+    import threading
+    threading.Thread(target=lambda: _dvc_run_token_batch(bid, cids, body), daemon=True).start()
+    return {"ok": True, "batch_id": bid}
+
+@app.get("/api/dvc/token-batch-status/{bid}")
+def dvc_token_batch_status(bid: int):
+    job = DVC_TOKEN_BATCH.get(bid)
+    if not job:
+        raise HTTPException(404, "Không tìm thấy phiên")
+    return job
+
+@app.post("/api/dvc/token-batch-cancel/{bid}")
+def dvc_token_batch_cancel(bid: int):
+    job = DVC_TOKEN_BATCH.get(bid)
+    if job:
+        job["cancel"] = True
+    return {"ok": True}
+
 
 @app.get("/api/dvc/tai-excel")
 def dvc_tai_excel(path: str):

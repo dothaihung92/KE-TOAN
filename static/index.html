@@ -295,6 +295,7 @@
     <div class="modal-actions" style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
       <button class="btn ghost" onclick="dongDVCBatch()">Đóng</button>
       <button class="btn ghost" id="dvcbCancelBtn" style="display:none" onclick="dvcbCancel()">Dừng</button>
+      <button class="btn ghost" id="dvcbTokenBtn" onclick="dvcbCheckToken()">🔑 Kiểm tra hạn Token</button>
       <button class="btn" id="dvcbRunBtn" onclick="dvcbRun()">▶ Bắt đầu</button>
     </div>
   </div>
@@ -736,12 +737,7 @@ function moDVCBatch(){
   document.getElementById('dvcb_quy').value=Math.floor(now.getMonth()/3)+1;
   document.getElementById('dvcb_loaiky').value='quy';
   dvcbKyChange();
-  // danh sách công ty (mỗi dòng 1 wrapper để lọc)
-  const box=document.getElementById('dvcbCoList');
-  box.innerHTML=companies.map(c=>
-    `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" style="display:flex;padding:3px 0">`+
-    `<input type="checkbox" class="dvcbChk" value="${c.id}" checked onchange="dvcbCount()"><span>${c.ten} <span style="color:#888">(${c.mst})</span></span></label>`
-  ).join('')||'<div style="color:#888">Chưa có công ty</div>';
+  dvcbRenderCoList();
   document.getElementById('dvcbSearch').value='';
   dvcbCount();
   document.getElementById('dvcbProgress').style.display='none';
@@ -749,6 +745,88 @@ function moDVCBatch(){
   document.getElementById('dvcbRunBtn').style.display='';
   document.getElementById('dvcbCancelBtn').style.display='none';
   document.getElementById('dvcBatchModal').style.display='flex';
+}
+function dvcbRenderCoList(giuDaChon){
+  // giữ lại các công ty đang được chọn (nếu có) khi vẽ lại danh sách sau
+  // khi kiểm tra hạn Token — tránh mất lựa chọn của người dùng
+  const daChonTruoc = giuDaChon
+    ? new Set([...document.querySelectorAll('.dvcbChk:checked')].map(c=>c.value))
+    : null;
+  const homNay = new Date(); homNay.setHours(0,0,0,0);
+  const ds = companies.map(c=>{
+    let conNgay = null;
+    if(c.token_ngay_het_han){
+      const d = new Date(c.token_ngay_het_han+'T00:00:00');
+      if(!isNaN(d)) conNgay = Math.round((d - homNay)/86400000);
+    }
+    return {c, conNgay};
+  });
+  // sắp xếp: công ty SẮP HẾT HẠN nhất lên đầu; chưa có dữ liệu token xếp cuối
+  ds.sort((a,b)=>{
+    if(a.conNgay==null && b.conNgay==null) return 0;
+    if(a.conNgay==null) return 1;
+    if(b.conNgay==null) return -1;
+    return a.conNgay - b.conNgay;
+  });
+  const box=document.getElementById('dvcbCoList');
+  box.innerHTML = ds.map(({c,conNgay})=>{
+    let badge='';
+    if(conNgay!=null){
+      const mau = conNgay<0 ? '#b91c1c' : (conNgay<=30 ? '#c47600' : '#888');
+      const chu = conNgay<0 ? `⚠ hết hạn ${Math.abs(conNgay)} ngày trước`
+                : (conNgay<=30 ? `⚠ còn ${conNgay} ngày` : `còn ${conNgay} ngày`);
+      const p = c.token_ngay_het_han.split('-');
+      const ngayStr = `${p[2]}/${p[1]}/${p[0]}`;
+      badge = ` <span style="color:${mau};font-size:12px;margin-left:6px" title="${(c.token_to_chuc_cap||'').replace(/"/g,'')}">🔑 ${chu} (hết hạn ${ngayStr})</span>`;
+    }
+    const checked = daChonTruoc ? daChonTruoc.has(String(c.id)) : true;
+    return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" style="display:flex;padding:3px 0">`+
+      `<input type="checkbox" class="dvcbChk" value="${c.id}" ${checked?'checked':''} onchange="dvcbCount()"><span>${c.ten} <span style="color:#888">(${c.mst})</span>${badge}</span></label>`;
+  }).join('') || '<div style="color:#888">Chưa có công ty</div>';
+  dvcbCount();
+}
+let dvcbTokenId=null, dvcbTokenTimer=null;
+async function dvcbCheckToken(){
+  const cids=[...document.querySelectorAll('.dvcbChk:checked')].map(c=>+c.value);
+  if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return;}
+  const prog=document.getElementById('dvcbProgress');
+  prog.style.display='block';prog.innerHTML='⏳ Đang khởi động trình duyệt ẩn để kiểm tra hạn Token...';
+  document.getElementById('dvcbTokenBtn').disabled=true;
+  document.getElementById('dvcbRunBtn').disabled=true;
+  try{
+    const r=await api('/api/dvc/token-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cids})});
+    dvcbTokenId=r.batch_id;
+    dvcbTokenTimer=setInterval(dvcbTokenPoll,1500);
+  }catch(e){
+    prog.innerHTML='❌ '+e.message;
+    document.getElementById('dvcbTokenBtn').disabled=false;
+    document.getElementById('dvcbRunBtn').disabled=false;
+  }
+}
+async function dvcbTokenPoll(){
+  if(dvcbTokenId==null)return;
+  let j;try{j=await api(`/api/dvc/token-batch-status/${dvcbTokenId}`);}catch{return;}
+  const prog=document.getElementById('dvcbProgress');
+  let html=`Đang kiểm tra hạn Token: <b>${j.done}/${j.total}</b>`+(j.current?` · đang: ${j.current}`:'');
+  if(j.items&&j.items.length){
+    html+='<div style="max-height:160px;overflow:auto;margin-top:6px">'+
+      j.items.map(it=>{
+        const c=it.trang_thai==='xong'?'#0a7d4b':(it.trang_thai&&it.trang_thai.indexOf('sai')>=0?'#b91c1c':'#555');
+        const p=it.ngay_het_han?it.ngay_het_han.split('-'):null;
+        const extra=p?` (hết hạn ${p[2]}/${p[1]}/${p[0]})`:'';
+        return `<div style="color:${c}">• ${it.ten}: ${it.trang_thai}${extra}</div>`;
+      }).join('')+'</div>';
+  }
+  prog.innerHTML=html;
+  if(!j.running){
+    clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;
+    document.getElementById('dvcbTokenBtn').disabled=false;
+    document.getElementById('dvcbRunBtn').disabled=false;
+    prog.innerHTML=html+'<hr><b>✅ Đã kiểm tra xong.</b>'+(j.loi?`<br><span style="color:#b91c1c">${j.loi}</span>`:'');
+    toast('Đã kiểm tra hạn Token','ok');
+    await loadCompanies();          // lấy lại dữ liệu companies mới (có token info)
+    dvcbRenderCoList(true);         // vẽ lại danh sách, sắp xếp lại theo hạn mới, giữ lựa chọn cũ
+  }
 }
 function dvcbKyChange(){
   const v=document.getElementById('dvcb_loaiky').value;
@@ -788,7 +866,7 @@ function dvcbFilter(){
   });
   dvcbCount();
 }
-function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
+function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
 function dvcbSelectAll(v){
   // chỉ tác động các dòng đang HIỆN (sau khi lọc)
   document.querySelectorAll('.dvcbRow').forEach(r=>{
