@@ -3003,6 +3003,27 @@ def dvc_tai_excel(path: str):
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+def _mo_ta_ds_hd_loi(ds_inv, loai, gioi_han=10):
+    """Mô tả ngắn gọn danh sách hóa đơn LỖI (chưa tải được file) — kèm tên
+    công ty đối tác (mua vào: tên người bán; bán ra: tên người mua) + số hóa
+    đơn, để người dùng biết CHÍNH XÁC đang thiếu file của hóa đơn nào, thay
+    vì chỉ biết SỐ LƯỢNG chung chung."""
+    dong = []
+    for inv in ds_inv[:gioi_han]:
+        if loai == "purchase":
+            ten = (inv.get("nbten") or "").strip() or (inv.get("nbmst") or "?")
+        else:
+            ten = (inv.get("nmten") or "").strip() or (inv.get("nmmst") or "?")
+        khhdon = inv.get("khhdon", "") or ""
+        shdon = inv.get("shdon", "") or ""
+        dong.append(f"{ten} (SH {khhdon}-{shdon})")
+    txt = "; ".join(dong)
+    con_lai = len(ds_inv) - gioi_han
+    if con_lai > 0:
+        txt += f"; ... và {con_lai} hóa đơn khác"
+    return txt
+
+
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
 def _run_fetch_job(cid: int, body: dict):
     """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
@@ -3050,14 +3071,19 @@ def _run_fetch_job(cid: int, body: dict):
         if job is not None:
             job["messages"].append(kw)
             job["last"] = kw
-        # Lưu LỖI vào công ty (DB) để không bị mất khi thông báo/toast tự tắt —
-        # người dùng mở lại công ty vẫn thấy đúng lỗi lần tra cứu gần nhất.
-        # "done" (thành công, không lỗi) thì xóa ghi chú lỗi cũ đi.
+        # Lưu LỖI/GHI CHÚ vào công ty (DB) để không bị mất khi thông báo/toast tự
+        # tắt — người dùng mở lại công ty vẫn thấy đúng ghi chú lần tra cứu gần
+        # nhất. "done" mà KHÔNG còn thiếu file nào thì mới xóa ghi chú cũ đi —
+        # nếu vẫn còn file chưa tải được (dữ liệu bảng đã đủ, chỉ thiếu file XML)
+        # thì vẫn GIỮ ghi chú lại để người dùng biết còn hóa đơn nào cần tải lại.
         stage = kw.get("stage")
         if stage == "error":
             _luu_loi_tra_cuu(cid, kw.get("text") or "")
         elif stage == "done":
-            _xoa_loi_tra_cuu(cid)
+            if kw.get("file_thieu"):
+                _luu_loi_tra_cuu(cid, kw.get("text") or "")
+            else:
+                _xoa_loi_tra_cuu(cid)
         return None
 
     def run():
@@ -3085,6 +3111,7 @@ def _run_fetch_job(cid: int, body: dict):
             total_saved = 0
             file_saved = 0
             file_thieu_tong = 0   # số file XML KHÔNG tải được (sau khi đã thử lại), gộp cả kỳ
+            file_thieu_mota = []  # mô tả cụ thể (tên công ty + số HĐ) từng nhóm file thiếu
             # đếm theo loại để tổng kết: {loai: {"exp": tổng trang Thuế báo, "got": số lấy được}}
             thongke = {"purchase": {"exp": 0, "got": 0}, "sold": {"exp": 0, "got": 0}}
             # Đánh dấu RIÊNG khi 1 loại (mua/bán) bị LỖI THẬT SỰ dù đã thử lại —
@@ -3370,7 +3397,7 @@ def _run_fetch_job(cid: int, body: dict):
                         if loi_file and not getattr(client, "_token_dead", False):
                             msg(stage="warn",
                                 text=f"⚠ {loai_txt}{ht_txt}: {len(loi_file)} file tải chưa được, "
-                                     f"đang thử lại...")
+                                     f"đang thử lại... [{_mo_ta_ds_hd_loi(loi_file, loai)}]")
                             time.sleep(5)
                             ok_2, loi_file, bo_qua_2 = _tai_nhieu_file(loi_file, "Thử lại file")
                             file_saved += ok_2
@@ -3383,11 +3410,14 @@ def _run_fetch_job(cid: int, body: dict):
 
                         if loi_file:
                             file_thieu_tong += len(loi_file)
+                            mota_loi_file = _mo_ta_ds_hd_loi(loi_file, loai)
+                            file_thieu_mota.append(f"{loai_txt}{ht_txt}: {mota_loi_file}")
                             msg(stage="warn",
                                 text=f"⚠ {loai_txt}{ht_txt}: KHÔNG tải được {len(loi_file)}/{n} file "
-                                     f"(dữ liệu bảng vẫn lưu đủ) — chạy lại tra cứu kỳ này (chế độ "
-                                     f"'Chậm & an toàn') để tải nốt, hoặc kết xuất Excel sẽ tự lấy "
-                                     f"chi tiết các hóa đơn này qua mạng khi cần.")
+                                     f"(dữ liệu bảng vẫn lưu đủ) — CÁC HÓA ĐƠN CHƯA TẢI ĐƯỢC: "
+                                     f"{mota_loi_file}. Chạy lại tra cứu kỳ này "
+                                     f"(chế độ 'Chậm & an toàn') để tải nốt, hoặc kết xuất Excel sẽ "
+                                     f"tự lấy chi tiết các hóa đơn này qua mạng khi cần.")
                         elif "xml" in fmts:
                             msg(stage="info",
                                 text=f"✓ {loai_txt}{ht_txt}: đã tải đủ {n}/{n} file")
@@ -3456,6 +3486,8 @@ def _run_fetch_job(cid: int, body: dict):
                     done_text += f", tải {file_saved} file vào: {target_dir}"
                 if file_thieu_tong:
                     done_text += f" — ⚠ CÒN {file_thieu_tong} FILE CHƯA TẢI ĐƯỢC (dữ liệu bảng vẫn đủ)"
+                    if file_thieu_mota:
+                        done_text += ". CHI TIẾT: " + " | ".join(file_thieu_mota)
                 if thieu:
                     done_text += " — ⚠ CÓ THỂ THIẾU, nên tra cứu lại (chế độ Chậm & an toàn)"
             msg(stage=("error" if co_loi else "done"), text=done_text,
