@@ -748,6 +748,12 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN token_ngay_het_han TEXT")
     if "token_check_at" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN token_check_at TEXT")
+    if "dia_chi" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN dia_chi TEXT")
+    if "ma_cqt_noi_nop" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN ma_cqt_noi_nop TEXT")
+    if "ten_cqt_noi_nop" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN ten_cqt_noi_nop TEXT")
     # Migration: tách riêng phần HÀNG NHẬP KHẨU (tờ khai NK) trong dữ liệu import
     # để điền đúng chỉ tiêu [23a]/[24a] trên tờ khai 01/GTGT
     icols = [r[1] for r in conn.execute("PRAGMA table_info(imported_data)").fetchall()]
@@ -831,13 +837,16 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, dvc_password, dvc_password2, mst_khac, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""),
          (data.get("dvc_password") or "").strip(),
          (data.get("dvc_password2") or "").strip(),
          (data.get("mst_khac") or "").strip(),
+         (data.get("dia_chi") or "").strip(),
+         (data.get("ma_cqt_noi_nop") or "").strip(),
+         (data.get("ten_cqt_noi_nop") or "").strip(),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -868,11 +877,14 @@ def update_company(cid: int, data: dict = Body(...)):
     if dvc2 is None or dvc2 == "":
         dvc2 = (cur["dvc_password2"] if cur and "dvc_password2" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, dvc_password=?, dvc_password2=?, mst_khac=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), dvc1.strip(), dvc2.strip(),
-         (data.get("mst_khac") or "").strip(), cid)
+         (data.get("mst_khac") or "").strip(),
+         (data.get("dia_chi") or "").strip(),
+         (data.get("ma_cqt_noi_nop") or "").strip(),
+         (data.get("ten_cqt_noi_nop") or "").strip(), cid)
     )
     conn.commit()
     conn.close()
@@ -11127,6 +11139,30 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
     xml = set_tag(xml, "ngayLapTKhai", datetime.date.today().isoformat())
     xml = set_tag(xml, "mst", esc(comp["mst"]))
     xml = set_tag(xml, "tenNNT", esc(comp["ten"]))
+    # Địa chỉ + Cơ quan thuế nơi nộp: TRƯỚC ĐÂY luôn giữ nguyên giá trị của
+    # công ty MẪU dùng để tạo file template (địa chỉ + mã/tên CQT của 1
+    # công ty CỤ THỂ khác), khiến MỌI công ty xuất ra đều mang nhầm CQT/địa
+    # chỉ của công ty đó — chính là nguyên nhân lỗi "Cơ quan thuế nơi nộp
+    # không là Cơ quan thuế quản lý" khi nộp tờ khai của công ty KHÁC. Giờ
+    # lấy đúng theo thông tin đã khai báo riêng cho TỪNG công ty (mục "Sửa
+    # công ty"); công ty nào CHƯA khai báo thì báo cảnh báo rõ ràng thay vì
+    # âm thầm gửi nhầm thông tin của công ty khác.
+    dia_chi = (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or ""
+    ma_cqt = (comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else "") or ""
+    ten_cqt = (comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else "") or ""
+    canh_bao_cqt = []
+    if dia_chi:
+        xml = set_tag(xml, "dchiNNT", esc(dia_chi))
+    else:
+        canh_bao_cqt.append("địa chỉ trụ sở")
+    if ma_cqt:
+        xml = set_tag(xml, "maCQTNoiNop", esc(ma_cqt))
+    else:
+        canh_bao_cqt.append("mã CQT nơi nộp")
+    if ten_cqt:
+        xml = set_tag(xml, "tenCQTNoiNop", esc(ten_cqt))
+    else:
+        canh_bao_cqt.append("tên CQT nơi nộp")
     if nguoi_ky:
         xml = set_tag(xml, "nguoiKy", esc(nguoi_ky))
         xml = set_tag(xml, "ngayKy", datetime.date.today().isoformat())
@@ -11155,9 +11191,16 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
     ds_10_tk = ban_theo_ts["10"]["ds"] + ds_8
     thue_10_tk = ban_theo_ts["10"]["thue"] + thue_8
     ct32 = round(ds_10_tk); ct33 = round(thue_10_tk)
-    ct27 = ct30 + ct32; ct28 = ct31 + ct33
     ct29 = round(ds_0)
-    ct34 = ct27 + ct29; ct35 = ct28
+    # [27]/[28] = TỔNG doanh thu/thuế GTGT của HHDV bán ra CHỊU THUẾ GTGT —
+    # gồm CẢ mức thuế suất 0% (ds_0/ct29). [29] CHỈ LÀ "trong đó: chịu thuế
+    # suất 0%" — một PHẦN của [27], KHÔNG PHẢI khoản cộng thêm. Trước đây
+    # code không cộng ds_0 vào ct27 (coi 0% như hàng KHÔNG chịu thuế), nên
+    # công ty có doanh thu 0% (vd xuất khẩu) bị ghi ct27=0 sai hoàn toàn —
+    # xác nhận qua file HTKK chuẩn thật (đã nộp được): ct27 = ct29 = ct34
+    # khi TOÀN BỘ doanh thu là 0%, chứ không phải ct27=0.
+    ct27 = ct29 + ct30 + ct32; ct28 = ct31 + ct33
+    ct34 = ct27; ct35 = ct28
     ct36 = ct35 - ct25          # thuế GTGT phát sinh trong kỳ
     # ct22 = thuế còn được khấu trừ kỳ trước chuyển sang (số dư đầu kỳ)
     ct22 = ct22_val
@@ -11187,15 +11230,22 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
     ]:
         xml = set_tag(xml, tag, val)
 
-    # Phụ lục NQ142: điền số liệu hàng 8%
-    xml = set_tag(xml, "giaTriHHDV", round(ds_8))
-    xml = set_tag(xml, "thueGTGTDuocGiam", thue_duoc_giam)
-    xml = set_tag(xml, "tongCongGiaTriHHDV", round(ds_8))
-    xml = set_tag(xml, "tongCongThueGTGTDuocGiam", thue_duoc_giam)
-    xml = set_tag(xml, "ct9", thue_duoc_giam)
-    # tên hàng hóa bán ra trong phụ lục (thẻ tenHHDV - chỉ thẻ trong HH_DV_BanRaTrongKy)
-    xml = _re.sub(r"(<tenHHDV>)(.*?)(</tenHHDV>)",
-                  r"\g<1>Hàng hóa, dịch vụ thuế suất 8%\g<3>", xml, count=1)
+    # Phụ lục NQ142/2024/QH15 (giảm 2% thuế GTGT hàng 8%): CHỈ khai khi kỳ
+    # này THẬT SỰ có doanh thu bán ra thuế suất 8% (ds_8>0) — trước đây
+    # phụ lục này LUÔN được đính kèm dù ds_8=0 (điền toàn số 0), khiến tờ
+    # khai của những công ty KHÔNG có doanh thu 8% trong kỳ vẫn kèm 1 phụ
+    # lục rỗng không cần thiết. Nếu không có 8% -> XÓA HẲN khối <PLuc>.
+    if round(ds_8):
+        xml = set_tag(xml, "giaTriHHDV", round(ds_8))
+        xml = set_tag(xml, "thueGTGTDuocGiam", thue_duoc_giam)
+        xml = set_tag(xml, "tongCongGiaTriHHDV", round(ds_8))
+        xml = set_tag(xml, "tongCongThueGTGTDuocGiam", thue_duoc_giam)
+        xml = set_tag(xml, "ct9", thue_duoc_giam)
+        # tên hàng hóa bán ra trong phụ lục (thẻ tenHHDV - chỉ thẻ trong HH_DV_BanRaTrongKy)
+        xml = _re.sub(r"(<tenHHDV>)(.*?)(</tenHHDV>)",
+                      r"\g<1>Hàng hóa, dịch vụ thuế suất 8%\g<3>", xml, count=1)
+    else:
+        xml = _re.sub(r"\s*<PLuc>.*?</PLuc>\s*(?=</HSoKhaiThue>)", "\n", xml, count=1, flags=_re.DOTALL)
 
     # phần kỳ trong tên file: quý -> Q{n}{yyyy}, tháng -> M{mm}{yyyy}
     if la_quy:
@@ -11230,7 +11280,12 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
         except Exception:
             pass
     _open_file_local(open_path)
-    return {"ok": True, "fname": fname, "path": open_path}
+    canh_bao = ""
+    if canh_bao_cqt:
+        canh_bao = (f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
+                    f"MẪU (có thể sai công ty), dễ bị Cơ quan Thuế báo lỗi. Vào 'Sửa công ty' để điền đủ "
+                    f"trước khi nộp.")
+    return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao}
 
 
 def _ky_ve_thang(ky):

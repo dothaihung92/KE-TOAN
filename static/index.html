@@ -194,6 +194,12 @@
     <div class="field"><label>Tên công ty</label><input id="m_ten" placeholder="Công ty TNHH ABC"></div>
     <div class="field"><label>Mã số thuế</label><input id="m_mst" placeholder="0301234567"></div>
     <div class="field"><label>MST khác <span style="font-weight:400;color:var(--muted)">(hộ/cá nhân kinh doanh: mã định danh cá nhân/CCCD nếu hóa đơn ghi MST mua khác MST đăng ký ở trên — cách nhau bởi dấu phẩy nếu nhiều mã)</span></label><input id="m_mst_khac" placeholder="VD: 079089022914"></div>
+    <div class="field"><label>Địa chỉ trụ sở <span style="font-weight:400;color:var(--muted)">(đúng theo đăng ký thuế — dùng khi Kết xuất XML cho HTKK)</span></label><input id="m_dia_chi" placeholder="VD: 141/69/23, Khu phố 3C, ..."></div>
+    <div class="row" style="display:flex;gap:10px">
+      <div class="field" style="flex:1"><label>Mã CQT nơi nộp <span style="font-weight:400;color:var(--muted)">(HTKK)</span></label><input id="m_ma_cqt" placeholder="VD: 70113"></div>
+      <div class="field" style="flex:2"><label>Tên CQT nơi nộp</label><input id="m_ten_cqt" placeholder="VD: Thuế cơ sở 7 Thành phố Hồ Chí Minh"></div>
+    </div>
+    <p class="hint" style="margin-top:-6px">⚠ 3 mục trên PHẢI đúng theo đăng ký thuế của công ty (xem trên tờ khai HTKK đã nộp được lần gần nhất, hoặc hỏi kế toán) — nếu để trống hoặc sai, file "Kết xuất XML cho HTKK" có thể bị Cơ quan Thuế báo lỗi "Cơ quan thuế nơi nộp không là Cơ quan thuế quản lý".</p>
     <div class="field"><label>Tên đăng nhập trang Thuế <span style="font-weight:400;color:var(--muted)">(thường là MST)</span></label><input id="m_user" placeholder="Để trống sẽ dùng MST"></div>
     <div class="field"><label>Mật khẩu trang Thuế</label>
       <div style="display:flex;gap:6px">
@@ -629,6 +635,9 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_ten').value=edit?.ten||'';
   document.getElementById('m_mst').value=edit?.mst||'';
   document.getElementById('m_mst_khac').value=edit?.mst_khac||'';
+  document.getElementById('m_dia_chi').value=edit?.dia_chi||'';
+  document.getElementById('m_ma_cqt').value=edit?.ma_cqt_noi_nop||'';
+  document.getElementById('m_ten_cqt').value=edit?.ten_cqt_noi_nop||'';
   document.getElementById('m_user').value=edit?.username||'';
   document.getElementById('m_note').value=edit?.ghichu||'';
   document.getElementById('m_dir').value=edit?.save_dir||'';
@@ -958,7 +967,10 @@ async function saveCompany(){
     data_dir:document.getElementById('m_datadir').value.trim(),
     dvc_password:document.getElementById('m_dvc1').value.trim(),
     dvc_password2:document.getElementById('m_dvc2').value.trim(),
-    mst_khac:document.getElementById('m_mst_khac').value.trim()};
+    mst_khac:document.getElementById('m_mst_khac').value.trim(),
+    dia_chi:document.getElementById('m_dia_chi').value.trim(),
+    ma_cqt_noi_nop:document.getElementById('m_ma_cqt').value.trim(),
+    ten_cqt_noi_nop:document.getElementById('m_ten_cqt').value.trim()};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1757,6 +1769,7 @@ async function exportHTKK(){
     const res=await r.json();
     await loadCompanies();
     toast('Đã kết xuất XML: '+res.fname+' (đã tự mở). Nhập vào HTKK qua "Tải dữ liệu"','ok');
+    if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
   }catch(e){toast(e.message,'err')}
 }
 
