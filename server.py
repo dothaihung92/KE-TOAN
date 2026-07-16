@@ -3372,6 +3372,16 @@ def _run_fetch_job(cid: int, body: dict):
                             fpath = _file_index_dl.get(fkey)
                             if (fpath and (tthai_cu is None or tthai_cu == tthai_moi)
                                     and _doc_kiem_tra_file_hoadon(fpath)):
+                                # File đã có sẵn trên máy từ TRƯỚC (không tải lại) —
+                                # vẫn tranh thủ đối chiếu/tự sửa ngày lập theo đúng
+                                # file này, phòng khi hóa đơn được lưu TỪ TRƯỚC lúc
+                                # có bản sửa lỗi lệch ngày (file cũ không đổi, chỉ
+                                # cách đọc/đối chiếu ngày mới thêm sau).
+                                try:
+                                    with open(fpath, "rb") as _f:
+                                        _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, _f.read())
+                                except Exception:
+                                    pass
                                 return "skip"
 
                             try:
