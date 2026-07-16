@@ -718,6 +718,10 @@ def init_db():
         updated_at TEXT,
         UNIQUE(company_id, so_tk)
     );
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    );
     """)
     # Migration: thêm cột he_thong nếu DB cũ chưa có
     cols = [r[1] for r in conn.execute("PRAGMA table_info(invoices)").fetchall()]
@@ -765,6 +769,22 @@ def init_db():
     conn.close()
 
 init_db()
+
+
+def _get_setting(key, default=""):
+    conn = db()
+    row = conn.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row and row["value"] is not None else default
+
+
+def _set_setting(key, value):
+    conn = db()
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+    conn.commit()
+    conn.close()
 
 
 # ============================================================
@@ -1723,6 +1743,125 @@ def _dvc_browser_lay_token_info(drv):
     except Exception:
         pass
     return None, None
+
+
+# ============================================================
+#  TỰ ĐỘNG NỘP TỜ KHAI XML (từ "thư mục mặc định") — DỪNG LẠI TRƯỚC
+#  BƯỚC KÝ SỐ + NỘP CHÍNH THỨC để người dùng tự xác nhận (không thể tự
+#  động hoá bước ký/nộp vì đây là hành động pháp lý khó đảo ngược, và bản
+#  thân việc ký còn cần app hub CKS cục bộ (http://localhost:32001) có thể
+#  hiện hộp nhập mã PIN không thể điều khiển từ trình duyệt).
+#  Các bước init-nop-tkhai bên dưới bắt CHÍNH XÁC từ 1 phiên nộp 01/GTGT
+#  thật (do người dùng cung cấp qua DevTools "Preserve log").
+# ============================================================
+_DVC_TO_KHAI_CONFIG = {
+    "GTGT": {"ma_tthc": "1.007014", "ma_tkhai": "842", "url": "/tk01gtgt/nop-file-xml",
+              "ten": "01/GTGT - Tờ khai thuế GTGT (TT80/2021)"},
+    # TNCN: chưa có — cần bắt 1 phiên nộp tờ khai TNCN thật (Preserve log,
+    # giống cách đã làm với GTGT) để lấy đúng maTthc/maTKhai/url rồi thêm vào đây.
+}
+
+_DVC_LOAI_TU_KHOA_FILE = {
+    "GTGT": ["gtgt"],
+    "TNCN": ["tncn"],
+}
+
+_JS_INIT_NOP_TKHAI = r"""
+var maTthc = arguments[0], maTKhai = arguments[1];
+var cb = arguments[arguments.length-1];
+function xsrf(){ var m=document.cookie.match(/XSRF-TOKEN=([^;]+)/); return m?decodeURIComponent(m[1]):''; }
+var tok = xsrf();
+function post(url, data){
+  return $.ajax({type:'POST', url:url, data:data||undefined,
+    headers:{'X-XSRF-TOKEN':tok, 'X-Requested-With':'XMLHttpRequest'}});
+}
+post('/tthc/sso/check-to-khai?maTthc='+encodeURIComponent(maTthc)+'&module=DN')
+  .done(function(r1){
+    post('/tthc/getfragmenttkhai/check-uyquyen', {maTKhai:maTKhai})
+      .done(function(r2){
+        post('/tthc/getfragmenttthc/init-nop-tkhai', {
+          maTTHC:maTthc, maTKhai:maTKhai, maHoSo:'', mstUyQuyen:'',
+          mstKhaiThay:'', doiTuongNopThay:'', maCqtAllowBS:'', isTraiNghiem:'false'
+        }).done(function(r3){
+          cb({ok:true, b1:(''+r1).slice(0,150), b2:(''+r2).slice(0,150), b3:(''+r3).slice(0,250)});
+        }).fail(function(x){ cb({ok:false, buoc:3, status:x.status, text:(x.responseText||'').slice(0,250)}); });
+      }).fail(function(x){ cb({ok:false, buoc:2, status:x.status, text:(x.responseText||'').slice(0,250)}); });
+  }).fail(function(x){ cb({ok:false, buoc:1, status:x.status, text:(x.responseText||'').slice(0,250)}); });
+"""
+
+
+def _tim_file_nop_to_khai(folder, mst, loai):
+    """Tìm (các) file XML trong 'thư mục mặc định' khớp công ty (theo MST đầu
+    tên file, đúng quy ước fname của export_htkk: {mst13}-...) + loại tờ khai
+    (theo từ khoá trong tên file, vd 'gtgt'/'tncn'). Trả (file_moi_nhat, [tất cả ứng viên])."""
+    if not folder or not os.path.isdir(folder):
+        return None, []
+    mst10 = "".join(ch for ch in str(mst or "") if ch.isdigit())[:10]
+    if not mst10:
+        return None, []
+    tu_khoa = _DVC_LOAI_TU_KHOA_FILE.get(loai, [])
+    ung_vien = []
+    try:
+        ten_file_list = os.listdir(folder)
+    except Exception:
+        return None, []
+    for fn in ten_file_list:
+        low = fn.lower()
+        if not low.endswith(".xml"):
+            continue
+        if not low.startswith(mst10):
+            continue
+        if tu_khoa and not any(k in low for k in tu_khoa):
+            continue
+        full = os.path.join(folder, fn)
+        try:
+            mtime = os.path.getmtime(full)
+        except Exception:
+            mtime = 0
+        ung_vien.append((mtime, full))
+    if not ung_vien:
+        return None, []
+    ung_vien.sort(reverse=True)
+    return ung_vien[0][1], [u[1] for u in ung_vien]
+
+
+_DVC_OPEN_DRIVERS = []   # giữ tham chiếu các trình duyệt HIỂN THỊ đang chờ người dùng tự Ký+Nộp
+
+
+def _dvc_browser_nop_to_khai(drv, cfg, file_path):
+    """Sau khi đã đăng nhập: khởi tạo đúng phiên nộp tờ khai (giống hệt 3
+    request thật đã bắt được: check-to-khai → check-uyquyen → init-nop-tkhai),
+    điều hướng tới trang nộp file XML, rồi tự đưa file vào ô chọn tệp.
+    DỪNG LẠI Ở ĐÂY — không tự bấm "Ký hồ sơ" / "Nộp tờ khai"."""
+    import time as _t
+    buoc = []
+    drv.get(DVC_BASE + "/thu-tuc-hanh-chinh")
+    _t.sleep(1.2)
+    _dvc_wait_jquery(drv, 12)
+    try:
+        res = drv.execute_async_script(_JS_INIT_NOP_TKHAI, cfg["ma_tthc"], cfg["ma_tkhai"])
+    except Exception as e:
+        return {"ok": False, "loi": f"Lỗi gọi init-nop-tkhai: {e}", "buoc": buoc}
+    buoc.append({"buoc": "init-nop-tkhai", "ket_qua": res})
+    if not res or not res.get("ok"):
+        return {"ok": False, "loi": "Không khởi tạo được phiên nộp tờ khai (có thể công ty "
+                                     "chưa có quyền với thủ tục này, hoặc phiên đăng nhập chưa "
+                                     "sẵn sàng)", "buoc": buoc}
+    drv.get(DVC_BASE + cfg["url"])
+    _t.sleep(1.5)
+    _dvc_wait_jquery(drv, 12)
+    try:
+        finp = drv.find_element("css selector", "input[type=file]")
+    except Exception as e:
+        return {"ok": False, "loi": f"Không tìm thấy ô chọn tệp trên trang {cfg['url']}: {e}",
+                "buoc": buoc}
+    try:
+        finp.send_keys(os.path.abspath(file_path))
+    except Exception as e:
+        return {"ok": False, "loi": f"Không đưa được file vào ô chọn tệp: {e}", "buoc": buoc}
+    _t.sleep(2)
+    buoc.append({"buoc": "da-chon-file", "file": file_path})
+    return {"ok": True, "buoc": buoc, "url_hien_tai": drv.current_url}
 
 
 def _dvc_save_folder(cid):
@@ -3488,6 +3627,78 @@ def dvc_token_batch_cancel(bid: int):
     if job:
         job["cancel"] = True
     return {"ok": True}
+
+
+@app.get("/api/settings/thu-muc-nop-to-khai")
+def get_thu_muc_nop_to_khai():
+    return {"thu_muc": _get_setting("thu_muc_nop_to_khai", "")}
+
+
+@app.post("/api/settings/thu-muc-nop-to-khai")
+def set_thu_muc_nop_to_khai(body: dict = Body(...)):
+    folder = (body.get("thu_muc") or "").strip()
+    _set_setting("thu_muc_nop_to_khai", folder)
+    return {"ok": True, "thu_muc": folder}
+
+
+@app.post("/api/dvc/nop-to-khai/{cid}")
+def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
+    """TỰ ĐỘNG tới bước "sẵn sàng ký": đăng nhập, khởi tạo đúng tờ khai, tự
+    tìm + chọn file XML khớp công ty trong "thư mục mặc định", rồi DỪNG LẠI.
+    Trình duyệt được mở HIỂN THỊ (không ẩn) và KHÔNG bị đóng sau khi hàm này
+    trả về, để người dùng tự chuyển sang đó kiểm tra rồi tự bấm "Ký hồ sơ"
+    và "Nộp tờ khai" bằng tay. body: {loai: "GTGT"|"TNCN"}"""
+    loai = (body.get("loai") or "").strip().upper()
+    cfg = _DVC_TO_KHAI_CONFIG.get(loai)
+    if not cfg:
+        raise HTTPException(
+            400, f"Chưa hỗ trợ tự động nộp tờ khai loại '{loai}'. "
+                 f"Hiện chỉ hỗ trợ: {', '.join(_DVC_TO_KHAI_CONFIG) or '(chưa có)'}.")
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    pw1 = ((comp["dvc_password"] if "dvc_password" in comp.keys() else "") or "").strip()
+    pw2 = ((comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or "").strip()
+    if not pw1 and not pw2:
+        raise HTTPException(400, "Chưa lưu mật khẩu Dịch vụ công cho công ty này")
+    folder = _get_setting("thu_muc_nop_to_khai", "")
+    if not folder:
+        raise HTTPException(400, "Chưa cài đặt 'Thư mục mặc định' chứa các file XML cần nộp")
+    file_path, ung_vien = _tim_file_nop_to_khai(folder, comp["mst"], loai)
+    if not file_path:
+        raise HTTPException(
+            404, f"Không tìm thấy file XML {loai} khớp MST {comp['mst']} trong thư mục {folder}")
+    try:
+        drv = _dvc_make_driver(headless=False, esigner=True)
+    except Exception as e:
+        raise HTTPException(500, f"Không mở được Chrome: {e}")
+    try:
+        ok, dung_pass, info = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
+        if not ok:
+            drv.quit()
+            raise HTTPException(401, f"Đăng nhập thất bại: {json.dumps(info, ensure_ascii=False)}")
+        ket = _dvc_browser_nop_to_khai(drv, cfg, file_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            drv.quit()
+        except Exception:
+            pass
+        raise HTTPException(500, f"Lỗi khi tự động hoá: {e}")
+    _DVC_OPEN_DRIVERS.append(drv)   # giữ trình duyệt MỞ, không quit()
+    if not ket.get("ok"):
+        return {"ok": False, "loi": ket.get("loi"), "buoc": ket.get("buoc"),
+                "file_da_chon": file_path,
+                "thong_bao": "Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
+                             "bạn có thể tự làm tiếp bằng tay từ đó."}
+    return {"ok": True, "file_da_chon": file_path,
+            "ung_vien_khac": [u for u in ung_vien if u != file_path],
+            "thong_bao": "Đã tự động đăng nhập, khởi tạo đúng tờ khai và tải file XML lên. "
+                         "DỪNG LẠI theo yêu cầu an toàn — hãy chuyển sang cửa sổ Chrome vừa "
+                         "mở để tự KIỂM TRA rồi bấm \"Ký hồ sơ\" và \"Nộp tờ khai\"."}
 
 
 @app.get("/api/dvc/tai-excel")

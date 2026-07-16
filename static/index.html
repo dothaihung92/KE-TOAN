@@ -169,6 +169,9 @@
     <div style="padding:0 12px 8px">
       <button class="btn" style="width:100%;font-size:13px;padding:9px" onclick="openBatchModal()">🚀 Tra cứu hoá đơn hàng loạt</button>
     </div>
+    <div style="padding:0 12px 8px">
+      <button class="btn ghost" style="width:100%;font-size:12.5px;padding:9px" onclick="moNopToKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
+    </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:12px;padding:7px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
     </div>
@@ -306,6 +309,43 @@
       <button class="btn ghost" id="dvcbCancelBtn" style="display:none" onclick="dvcbCancel()">Dừng</button>
       <button class="btn ghost" id="dvcbTokenBtn" onclick="dvcbCheckToken()">🔑 Kiểm tra hạn Token</button>
       <button class="btn" id="dvcbRunBtn" onclick="dvcbRun()">▶ Bắt đầu</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL TỰ ĐỘNG NỘP TỜ KHAI (dừng trước khi ký) -->
+<div class="modal-bg" id="nopToKhaiModal">
+  <div class="modal" style="width:min(620px,96vw);max-width:620px">
+    <h3 style="margin-top:0">📤 Tự động nộp tờ khai</h3>
+    <p class="hint" style="margin-top:0">
+      Phần mềm tự đăng nhập, tự chọn đúng tờ khai và tự tải file XML (khớp theo MST) từ
+      <b>thư mục mặc định</b> lên cổng Dịch vụ công. <b>Sau đó DỪNG LẠI</b> — cửa sổ Chrome
+      sẽ mở hiển thị (không ẩn) để bạn tự kiểm tra rồi tự bấm <b>"Ký hồ sơ"</b> và
+      <b>"Nộp tờ khai"</b> bằng tay. Phần mềm không tự ký/nộp vì đây là hành động nộp thuế
+      chính thức, khó/không thể huỷ.
+    </p>
+    <div class="field">
+      <label>Thư mục mặc định <span style="font-weight:400;color:var(--muted)">(chứa các file XML cần nộp của tất cả công ty)</span></label>
+      <div style="display:flex;gap:8px">
+        <input id="ntkThuMuc" placeholder="VD: D:\ToKhaiCanNop" style="flex:1">
+        <button class="btn ghost" onclick="ntkLuuThuMuc()">Lưu</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Công ty</label>
+      <select id="ntkCty" style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px"></select>
+    </div>
+    <div class="field">
+      <label>Loại tờ khai</label>
+      <select id="ntkLoai" style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px">
+        <option value="GTGT">01/GTGT — Tờ khai thuế GTGT (TT80/2021)</option>
+        <option value="TNCN">TNCN — (chưa hỗ trợ, cần bắt thêm 1 phiên nộp thật)</option>
+      </select>
+    </div>
+    <div id="ntkKetQua" style="display:none;margin-top:8px;border-radius:10px;padding:12px 14px;font-size:13px"></div>
+    <div class="modal-actions" style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
+      <button class="btn ghost" onclick="dongNopToKhai()">Đóng</button>
+      <button class="btn" id="ntkRunBtn" onclick="ntkChay()">🚀 Chạy tới bước sẵn sàng ký</button>
     </div>
   </div>
 </div>
@@ -904,6 +944,53 @@ function dvcbFilter(){
   dvcbCount();
 }
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
+
+async function moNopToKhai(){
+  const sel=document.getElementById('ntkCty');
+  sel.innerHTML=companies.map(c=>`<option value="${c.id}">${c.ten} (${c.mst})</option>`).join('');
+  document.getElementById('ntkKetQua').style.display='none';
+  try{
+    const r=await api('/api/settings/thu-muc-nop-to-khai');
+    document.getElementById('ntkThuMuc').value=r.thu_muc||'';
+  }catch(e){}
+  document.getElementById('nopToKhaiModal').style.display='flex';
+}
+function dongNopToKhai(){document.getElementById('nopToKhaiModal').style.display='none';}
+async function ntkLuuThuMuc(){
+  const thu_muc=document.getElementById('ntkThuMuc').value.trim();
+  try{
+    await api('/api/settings/thu-muc-nop-to-khai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({thu_muc})});
+    toast('Đã lưu thư mục mặc định','ok');
+  }catch(e){toast('Lỗi lưu: '+e.message,'err');}
+}
+async function ntkChay(){
+  const cid=document.getElementById('ntkCty').value;
+  const loai=document.getElementById('ntkLoai').value;
+  if(!cid){toast('Chưa chọn công ty','err');return;}
+  const btn=document.getElementById('ntkRunBtn');
+  const kq=document.getElementById('ntkKetQua');
+  btn.disabled=true;
+  kq.style.display='block';
+  kq.style.background='#eef6f0';
+  kq.innerHTML='⏳ Đang tự động đăng nhập + khởi tạo tờ khai + chọn file... (cửa sổ Chrome sẽ hiện ra trên máy, đừng tắt)';
+  try{
+    const r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai})});
+    if(r.ok){
+      kq.style.background='#eef6f0';
+      kq.innerHTML=`✅ ${r.thong_bao}<br><br>📄 File đã chọn: <code>${r.file_da_chon}</code>`;
+      toast('Đã tải file lên — hãy chuyển sang cửa sổ Chrome để tự Ký + Nộp','ok');
+    }else{
+      kq.style.background='#fdecea';
+      kq.innerHTML=`⚠ ${r.thong_bao||r.loi||'Có lỗi'}`;
+    }
+  }catch(e){
+    kq.style.background='#fdecea';
+    kq.innerHTML='❌ '+e.message;
+  }finally{
+    btn.disabled=false;
+  }
+}
+
 function dvcbSelectAll(v){
   // chỉ tác động các dòng đang HIỆN (sau khi lọc)
   document.querySelectorAll('.dvcbRow').forEach(r=>{
