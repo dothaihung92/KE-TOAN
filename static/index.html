@@ -868,7 +868,23 @@ async function selectCompany(id){
   const ws=document.getElementById('workspace');ws.style.display='block';
   const online=getClient(id);
   ws.innerHTML=renderWorkspace(c,online);
+  renderFetchErrorBanner(c);
   await refreshInvoices();
+}
+function renderFetchErrorBanner(c){
+  // Ghi chú LỖI của lần tra cứu gần nhất — lưu ở server nên KHÔNG mất khi
+  // toast tự tắt / tải lại trang / chuyển qua công ty khác rồi quay lại.
+  const box=document.getElementById('fetchErrorBanner');
+  if(!box)return;
+  if(c&&c.last_fetch_error){
+    let khi='';
+    if(c.last_fetch_error_at){try{khi=' — '+new Date(c.last_fetch_error_at).toLocaleString('vi-VN');}catch{}}
+    document.getElementById('fetchErrorTitle').textContent='⚠ Lỗi lần tra cứu gần nhất'+khi+':';
+    document.getElementById('fetchErrorText').textContent=c.last_fetch_error;
+    box.style.display='flex';
+  }else{
+    box.style.display='none';
+  }
 }
 const clientState={};
 let fetchPollCancel=false;
@@ -989,6 +1005,13 @@ function renderWorkspace(c,online){
       <div id="progressLog" style="margin-top:10px;font-size:13px;max-height:140px;overflow:auto"></div>
     </div>
     <div id="ketQuaTraCuu" style="display:none;margin-top:14px;border-radius:10px;padding:14px 16px;border:1px solid #d0d7de;background:#fff"></div>
+    <div id="fetchErrorBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#fdecea;border:1px solid #f1a9a0;border-radius:10px;padding:12px 14px;margin-top:14px;font-size:13.5px;color:#7a1f1f">
+      <div style="flex:1">
+        <b id="fetchErrorTitle">⚠ Lỗi lần tra cứu gần nhất:</b>
+        <div id="fetchErrorText" style="margin-top:4px;white-space:pre-wrap"></div>
+      </div>
+      <button class="btn ghost sm" onclick="document.getElementById('fetchErrorBanner').style.display='none'">Ẩn</button>
+    </div>
     <p class="hint">Mỗi lần tra cứu sẽ <b>xóa dữ liệu cũ</b> và lấy lại từ đầu. File XML/PDF (nếu tick) được lưu vào thư mục cấu hình trong phần "Sửa công ty". PDF cần endpoint riêng của Tổng cục Thuế — hiện chỉ XML hoạt động đầy đủ.</p>
   </div>
 
@@ -1219,6 +1242,7 @@ async function doFetch(){
   box.style.display='block';pbar.style.width='0%';ptext.textContent='Bắt đầu...';
   const _pl=document.getElementById('progressLog');if(_pl)_pl.innerHTML='';
   const _kq=document.getElementById('ketQuaTraCuu');if(_kq)_kq.style.display='none';
+  const _eb=document.getElementById('fetchErrorBanner');if(_eb)_eb.style.display='none';
 
   try{
     // Bắt đầu tra cứu CHẠY NỀN (server chạy độc lập, không phụ thuộc trình duyệt)
@@ -1264,10 +1288,15 @@ async function doFetch(){
         }else if(m.stage==='done'){
           pbar.style.width='100%';toast(m.text,m.text.includes('⚠')?'err':'ok');
           hienKetQua(m);
+          renderFetchErrorBanner({last_fetch_error:null});  // thành công -> ẩn ghi chú lỗi cũ
         }else if(m.stage==='error'){
           hadError=true;toast(m.text,'err');
           if(plog){plog.innerHTML+=`<div style="color:#c00;font-weight:700">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
           if(m.text.includes('hết hạn'))clientState[current]=false;
+          // ghi note LỖI HIỆN TẠI ra 1 khung riêng KHÔNG tự tắt (khác với toast),
+          // để người dùng luôn xem lại được lỗi gì dù đã bấm tắt thông báo
+          renderFetchErrorBanner({last_fetch_error:m.text,
+            last_fetch_error_at:new Date().toISOString()});
         }
       }
     }
@@ -1276,6 +1305,8 @@ async function doFetch(){
     setTimeout(()=>{box.style.display='none';},2000);
   }catch(e){
     box.style.display='none';
+    renderFetchErrorBanner({last_fetch_error:e.message,
+      last_fetch_error_at:new Date().toISOString()});
     if(e.message.includes('hết hạn')||e.message.includes('đăng nhập')){
       clientState[current]=false;toast('Cần đăng nhập lại','err');selectCompany(current);
     }else toast('Lỗi: '+e.message,'err');

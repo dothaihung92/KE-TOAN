@@ -711,6 +711,10 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password TEXT")
     if "dvc_password2" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password2 TEXT")
+    if "last_fetch_error" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error TEXT")
+    if "last_fetch_error_at" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error_at TEXT")
     # Migration: tách riêng phần HÀNG NHẬP KHẨU (tờ khai NK) trong dữ liệu import
     # để điền đúng chỉ tiêu [23a]/[24a] trên tờ khai 01/GTGT
     icols = [r[1] for r in conn.execute("PRAGMA table_info(imported_data)").fetchall()]
@@ -3046,6 +3050,14 @@ def _run_fetch_job(cid: int, body: dict):
         if job is not None:
             job["messages"].append(kw)
             job["last"] = kw
+        # Lưu LỖI vào công ty (DB) để không bị mất khi thông báo/toast tự tắt —
+        # người dùng mở lại công ty vẫn thấy đúng lỗi lần tra cứu gần nhất.
+        # "done" (thành công, không lỗi) thì xóa ghi chú lỗi cũ đi.
+        stage = kw.get("stage")
+        if stage == "error":
+            _luu_loi_tra_cuu(cid, kw.get("text") or "")
+        elif stage == "done":
+            _xoa_loi_tra_cuu(cid)
         return None
 
     def run():
@@ -3454,13 +3466,42 @@ def _new_fetch_job():
             "cursor": 0, "started": time.time(), "cancel": False}
 
 
+def _luu_loi_tra_cuu(cid: int, text: str):
+    """Lưu LỖI tra cứu gần nhất vào công ty (DB) — để không bị mất khi
+    thông báo/toast trên trình duyệt tự tắt. Mở lại công ty vẫn thấy đúng
+    lỗi lần tra cứu gần nhất, cho tới khi tra cứu lại THÀNH CÔNG."""
+    try:
+        cn = db()
+        cn.execute(
+            "UPDATE companies SET last_fetch_error=?, last_fetch_error_at=? WHERE id=?",
+            (text or "", datetime.datetime.now().isoformat(), cid))
+        cn.commit()
+        cn.close()
+    except Exception:
+        pass
+
+
+def _xoa_loi_tra_cuu(cid: int):
+    try:
+        cn = db()
+        cn.execute(
+            "UPDATE companies SET last_fetch_error=NULL, last_fetch_error_at=NULL WHERE id=?",
+            (cid,))
+        cn.commit()
+        cn.close()
+    except Exception:
+        pass
+
+
 @app.post("/api/fetch/{cid}")
 def fetch_invoices(cid: int, body: dict = Body(...)):
     """Tra cứu + tải hóa đơn cho 1 công ty (chạy nền). Trình duyệt poll
     /api/fetch-status/{cid} để lấy tiến độ."""
     client = get_client(cid)
     if not client.token:
+        _luu_loi_tra_cuu(cid, "Chưa đăng nhập tài khoản thuế cho công ty này")
         raise HTTPException(401, "Chưa đăng nhập tài khoản thuế cho công ty này")
+    _xoa_loi_tra_cuu(cid)   # bắt đầu lượt mới -> xóa ghi chú lỗi lần trước
     FETCH_JOBS[cid] = _new_fetch_job()
     import threading
     threading.Thread(target=lambda: _run_fetch_job(cid, body), daemon=True).start()
@@ -3529,6 +3570,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 if not ok:
                     item["status"] = "skipped"
                     item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
+                    _luu_loi_tra_cuu(cid, item["note"])
                     batch["done"] += 1
                     continue
             item["status"] = "running"
@@ -3545,6 +3587,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             except Exception as e:
                 item["status"] = "error"
                 item["note"] = str(e)[:160]
+                _luu_loi_tra_cuu(cid, item["note"])
             batch["done"] += 1
     finally:
         batch["running"] = False
