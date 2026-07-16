@@ -1296,6 +1296,7 @@ function renderWorkspace(c,online){
     <div class="row" style="margin-top:16px">
       <button class="btn ghost" onclick="exportExcel(this)">📊 Xuất Excel tổng hợp</button>
       <button class="btn gold" onclick="exportHTKK()">📑 Kết xuất XML cho HTKK (01/GTGT)</button>
+      <button class="btn gold" onclick="exportHTKKTNCN()">📑 Kết xuất XML TNCN (05/KK-TNCN)</button>
       <button class="btn" onclick="openVatModal()">🧮 Tạm tính thuế VAT</button>
       <button class="btn ghost" onclick="document.getElementById('importFile').click()">📥 Import dữ liệu đã kiểm tra</button>
       <input type="file" id="importFile" accept=".xlsx" style="display:none" onchange="importExcel(this)">
@@ -1900,6 +1901,38 @@ async function exportHTKK(){
     const res=await r.json();
     await loadCompanies();
     toast('Đã kết xuất XML: '+res.fname+' (đã tự mở). Nhập vào HTKK qua "Tải dữ liệu"','ok');
+    if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
+  }catch(e){toast(e.message,'err')}
+}
+
+async function exportHTKKTNCN(){
+  const tu=document.getElementById('tuNgay').value;
+  const den0=document.getElementById('denNgay').value;
+  let ky=kyKeKhaiTu(tu,den0);
+  if(!ky){
+    ky=prompt('Nhập kỳ kê khai (MM/YYYY hoặc QX/YYYY):','')||'';
+    if(ky&&!ky.includes('/')){toast('Kỳ kê khai không hợp lệ, cần dạng MM/YYYY hoặc QX/YYYY','err');return;}
+  }
+  const co=companies.find(c=>c.id===current);
+  let nguoiKy=co&&co.nguoi_ky?co.nguoi_ky:'';
+  if(!nguoiKy){
+    nguoiKy=prompt('Tên người ký tờ khai (sẽ được lưu lại cho lần sau):','')||'';
+  }
+  toast('Đang kết xuất XML TNCN (kỳ '+ky+')...','');
+  try{
+    const tuN=document.getElementById('tuNgay').value;
+    const denN=document.getElementById('denNgay').value;
+    const fmt=d=>{if(!d)return '';const p=d.split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:'';};
+    let url=`/api/export-htkk-tncn/${current}?`;
+    if(ky)url+=`ky=${encodeURIComponent(ky)}&`;
+    if(tuN)url+=`tu=${encodeURIComponent(fmt(tuN))}&`;
+    if(denN)url+=`den=${encodeURIComponent(fmt(denN))}&`;
+    if(nguoiKy)url+=`nguoi_ky=${encodeURIComponent(nguoiKy)}`;
+    const r=await fetch(url);
+    if(!r.ok){let m='Lỗi kết xuất';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const res=await r.json();
+    await loadCompanies();
+    toast('Đã kết xuất XML: '+res.fname+' (đã tự mở)','ok');
     if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
   }catch(e){toast(e.message,'err')}
 }

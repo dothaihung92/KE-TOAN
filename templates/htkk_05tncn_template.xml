@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HSoThueDTu xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://kekhaithue.gdt.gov.vn/TKhaiThue">
+  <HSoKhaiThue id="ID_1">
+    <TTinChung>
+      <TTinDVu>
+        <maDVu>HTKK</maDVu>
+        <tenDVu>HỖ TRỢ KÊ KHAI THUẾ</tenDVu>
+        <pbanDVu>5.6.7</pbanDVu>
+        <ttinNhaCCapDVu>312B9326732D211FCDC8BE012479640A</ttinNhaCCapDVu>
+      </TTinDVu>
+      <TTinTKhaiThue>
+        <TKhaiThue>
+          <maTKhai>864</maTKhai>
+          <tenTKhai>TK khấu trừ thuế thu nhập cá nhân Mẫu 05/KK-TNCN (TT80/2021)</tenTKhai>
+          <moTaBMau>(Ban hành kèm theo Thông tư số 80/2021/TT-BTC ngày 29 tháng 9 năm 2021 của Bộ trưởng Bộ Tài chính)</moTaBMau>
+          <pbanTKhaiXML>2.9.3</pbanTKhaiXML>
+          <loaiTKhai>C</loaiTKhai>
+          <soLan>0</soLan>
+          <KyKKhaiThue>
+            <kieuKy>Q</kieuKy>
+            <kyKKhai>2/2026</kyKKhai>
+            <kyKKhaiTuNgay>01/04/2026</kyKKhaiTuNgay>
+            <kyKKhaiDenNgay>30/06/2026</kyKKhaiDenNgay>
+            <kyKKhaiTuThang />
+            <kyKKhaiDenThang />
+          </KyKKhaiThue>
+          <maCQTNoiNop>70113</maCQTNoiNop>
+          <tenCQTNoiNop>Thuế cơ sở 7 Thành phố Hồ Chí Minh</tenCQTNoiNop>
+          <ngayLapTKhai>2026-07-17</ngayLapTKhai>
+          <GiaHan>
+            <maLyDoGiaHan />
+            <lyDoGiaHan />
+          </GiaHan>
+          <nguoiKy>NGUYỄN TRÍ KIÊN</nguoiKy>
+          <ngayKy>2026-07-17</ngayKy>
+          <nganhNgheKD />
+        </TKhaiThue>
+        <NNT>
+          <mst>0317256924</mst>
+          <tenNNT>CÔNG TY TNHH XUẤT NHẬP KHẨU SUNSTEEL INTERNATIONAL</tenNNT>
+          <dchiNNT>01 Nguyễn Văn Linh</dchiNNT>
+          <tenXaNNT>Phường Tân Thuận</tenXaNNT>
+          <maXaNNT>70113080</maXaNNT>
+          <maHuyenNNT />
+          <tenHuyenNNT />
+          <maTinhNNT>701</maTinhNNT>
+          <tenTinhNNT>Thành phố Hồ Chí Minh</tenTinhNNT>
+          <dthoaiNNT />
+          <faxNNT />
+          <emailNNT />
+        </NNT>
+      </TTinTKhaiThue>
+    </TTinChung>
+    <CTieuTKhaiChinh>
+      <mst_cu>0317256924</mst_cu>
+      <ct15>0</ct15>
+      <ct16>0</ct16>
+      <ct17>0</ct17>
+      <ct18>0</ct18>
+      <ct19>0</ct19>
+      <ct20>0</ct20>
+      <ct21>0</ct21>
+      <ct22>0</ct22>
+      <ct23>0</ct23>
+      <ct24>0</ct24>
+      <ct25>0</ct25>
+      <ct25_1>0</ct25_1>
+      <ct26>0</ct26>
+      <ct27>0</ct27>
+      <ct28>0</ct28>
+      <ct29>0</ct29>
+      <ct30>0</ct30>
+      <ct31>0</ct31>
+      <ct32>0</ct32>
+    </CTieuTKhaiChinh>
+  </HSoKhaiThue>
+</HSoThueDTu>

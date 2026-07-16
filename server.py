@@ -11553,6 +11553,176 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao}
 
 
+@app.get("/api/export-htkk-tncn/{cid}")
+def export_htkk_tncn(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = ""):
+    """
+    Tạo file XML tờ khai 05/KK-TNCN (TT80/2021) để nhập vào HTKK.
+    LƯU Ý: phần mềm hiện CHƯA có phân hệ tiền lương/thu nhập chịu thuế TNCN
+    (không chấm công/tính lương) nên file luôn xuất ra ở dạng KHÔNG PHÁT SINH
+    (mọi chỉ tiêu = 0) — đúng cho công ty/kỳ không phát sinh khấu trừ TNCN.
+    Nếu kỳ này CÓ phát sinh, cần tự điền số liệu vào file (hoặc trên HTKK)
+    trước khi nộp — phần mềm chỉ tự điền đúng công ty + kỳ báo cáo.
+    ky: 'MM/YYYY' hoặc 'QX/YYYY'; nếu trống lấy tháng hiện tại.
+    """
+    import html as _html
+    import re as _re
+    import calendar
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    if not comp:
+        conn.close()
+        raise HTTPException(404, "Không tìm thấy công ty")
+    try:
+        saved_nk = comp["nguoi_ky"] if "nguoi_ky" in comp.keys() else ""
+    except Exception:
+        saved_nk = ""
+    if nguoi_ky:
+        conn.execute("UPDATE companies SET nguoi_ky=? WHERE id=?", (nguoi_ky, cid))
+        conn.commit()
+    else:
+        nguoi_ky = saved_nk or ""
+    conn.close()
+
+    homnay = datetime.date.today()
+    ky = ky or f"{homnay.month:02d}/{homnay.year}"
+    try:
+        mm, yyyy = _ky_ve_thang(ky)
+    except Exception:
+        ky = f"{homnay.month:02d}/{homnay.year}"
+        mm, yyyy = _ky_ve_thang(ky)
+    last_day = calendar.monthrange(int(yyyy), int(mm))[1]
+
+    la_quy = False
+    quy_so = 0
+    tu_ngay_kkhai = f"01/{mm}/{yyyy}"
+    den_ngay_kkhai = f"{last_day}/{mm}/{yyyy}"
+    if tu and den:
+        try:
+            d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
+            d2 = datetime.datetime.strptime(den, "%d/%m/%Y").date()
+            songay = (d2 - d1).days
+            if d1.month in (1, 4, 7, 10) and d1.day == 1 and 85 <= songay <= 95:
+                la_quy = True
+                quy_so = (d1.month - 1) // 3 + 1
+                yyyy = str(d1.year)
+            tu_ngay_kkhai = d1.strftime("%d/%m/%Y")
+            den_ngay_kkhai = d2.strftime("%d/%m/%Y")
+        except Exception:
+            pass
+    else:
+        # 05/KK-TNCN thường kê khai theo QUÝ; nếu ky truyền vào dạng 'QX/YYYY'
+        # thì tách trực tiếp, không bắt buộc phải có tu/den.
+        kyu = (ky or "").strip().upper()
+        if kyu.startswith("Q") and "/" in kyu:
+            try:
+                q_str, y_str = kyu[1:].split("/", 1)
+                quy_so = max(1, min(4, int(q_str)))
+                yyyy = y_str.strip()
+                la_quy = True
+                mm1 = (quy_so - 1) * 3 + 1
+                mm2 = mm1 + 2
+                tu_ngay_kkhai = f"01/{mm1:02d}/{yyyy}"
+                den_ngay_kkhai = f"{calendar.monthrange(int(yyyy), mm2)[1]}/{mm2:02d}/{yyyy}"
+            except Exception:
+                pass
+
+    tpl_path = os.path.join(BASE_DIR, "templates", "htkk_05tncn_template.xml")
+    with open(tpl_path, encoding="utf-8-sig") as f:
+        xml = f.read()
+
+    def set_tag(xml, tag, value):
+        pat = _re.compile(r"(<" + tag + r">)(.*?)(</" + tag + r">)", _re.DOTALL)
+        return pat.sub(lambda m: m.group(1) + str(value) + m.group(3), xml, count=1)
+
+    def esc(s):
+        return _html.escape(str(s or ""))
+
+    if la_quy:
+        xml = set_tag(xml, "kieuKy", "Q")
+        xml = set_tag(xml, "kyKKhai", f"{quy_so}/{yyyy}")
+    else:
+        xml = set_tag(xml, "kieuKy", "M")
+        xml = set_tag(xml, "kyKKhai", esc(ky))
+    xml = set_tag(xml, "kyKKhaiTuNgay", tu_ngay_kkhai)
+    xml = set_tag(xml, "kyKKhaiDenNgay", den_ngay_kkhai)
+    xml = set_tag(xml, "ngayLapTKhai", homnay.isoformat())
+    xml = set_tag(xml, "mst", esc(comp["mst"]))
+    xml = set_tag(xml, "mst_cu", esc(comp["mst"]))
+    xml = set_tag(xml, "tenNNT", esc(comp["ten"]))
+
+    # Địa chỉ + CQT nơi nộp: lấy đúng theo thông tin đã khai báo riêng cho
+    # TỪNG công ty (mục "Sửa công ty") — cùng cơ chế/cảnh báo như 01/GTGT,
+    # để tránh lặp lại lỗi "Cơ quan thuế nơi nộp không là Cơ quan thuế quản lý".
+    dia_chi = (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or ""
+    ma_cqt = (comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else "") or ""
+    ten_cqt = (comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else "") or ""
+    canh_bao_cqt = []
+    if dia_chi:
+        xml = set_tag(xml, "dchiNNT", esc(dia_chi))
+    else:
+        canh_bao_cqt.append("địa chỉ trụ sở")
+    if ma_cqt:
+        xml = set_tag(xml, "maCQTNoiNop", esc(ma_cqt))
+    else:
+        canh_bao_cqt.append("mã CQT nơi nộp")
+    if ten_cqt:
+        xml = set_tag(xml, "tenCQTNoiNop", esc(ten_cqt))
+    else:
+        canh_bao_cqt.append("tên CQT nơi nộp")
+    if nguoi_ky:
+        xml = set_tag(xml, "nguoiKy", esc(nguoi_ky))
+        xml = set_tag(xml, "ngayKy", homnay.isoformat())
+
+    # Chưa có nguồn dữ liệu tiền lương/thu nhập chịu thuế TNCN -> luôn xuất
+    # tờ khai "không phát sinh" (mọi chỉ tiêu = 0), khớp file mẫu chuẩn.
+    for tag in ("ct15", "ct16", "ct17", "ct18", "ct19", "ct20", "ct21", "ct22",
+                "ct23", "ct24", "ct25", "ct25_1", "ct26", "ct27", "ct28",
+                "ct29", "ct30", "ct31", "ct32"):
+        xml = set_tag(xml, tag, 0)
+
+    if la_quy:
+        ky_fname = f"Q{quy_so}{yyyy}"
+    else:
+        ky_fname = f"M{mm}{yyyy}"
+    mst_file = str(comp["mst"] or "").strip()
+    if len(mst_file) == 10:
+        mst_file = mst_file + "000"
+    fname = f"{mst_file}-05_KK_TNCN_TT80-{ky_fname}-L00.xml"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("﻿" + xml)
+    open_path = path
+    desktop = _get_desktop_dir()
+    if desktop and os.path.isdir(desktop):
+        try:
+            dest = os.path.join(desktop, fname)
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write("﻿" + xml)
+            open_path = dest
+        except Exception:
+            pass
+    save_dir2 = (comp["save_dir"] or "").strip() if comp else ""
+    if save_dir2 and os.path.isdir(save_dir2):
+        try:
+            dest2 = os.path.join(save_dir2, fname)
+            with open(dest2, "w", encoding="utf-8") as f:
+                f.write("﻿" + xml)
+        except Exception:
+            pass
+    _open_file_local(open_path)
+    canh_bao_parts = []
+    if canh_bao_cqt:
+        canh_bao_parts.append(
+            f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
+            f"MẪU (có thể sai công ty). Vào 'Sửa công ty' để điền đủ trước khi nộp.")
+    canh_bao_parts.append(
+        "ℹ Phần mềm chưa có phân hệ tiền lương/TNCN nên file này luôn là tờ khai KHÔNG PHÁT "
+        "SINH (mọi chỉ tiêu = 0). Nếu kỳ này công ty CÓ phát sinh khấu trừ TNCN, hãy tự điền số "
+        "liệu vào file (hoặc trực tiếp trên HTKK) trước khi nộp.")
+    canh_bao = " ".join(canh_bao_parts)
+    return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao}
+
+
 def _ky_ve_thang(ky):
     """Tách kỳ 'MM/YYYY' hoặc 'QX/YYYY' -> (mm:str 2 số, yyyy:str).
     Với kỳ quý, lấy THÁNG ĐẦU của quý làm mm (chỉ dùng để tính ngày mặc định
