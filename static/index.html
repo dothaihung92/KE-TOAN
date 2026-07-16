@@ -777,13 +777,28 @@ function dvcbRenderCoList(giuDaChon){
                 : (conNgay<=30 ? `⚠ còn ${conNgay} ngày` : `còn ${conNgay} ngày`);
       const p = c.token_ngay_het_han.split('-');
       const ngayStr = `${p[2]}/${p[1]}/${p[0]}`;
-      badge = ` <span style="color:${mau};font-size:12px;margin-left:6px" title="${(c.token_to_chuc_cap||'').replace(/"/g,'')}">🔑 ${chu} (hết hạn ${ngayStr})</span>`;
+      const toChuc = tenNganCapCKS(c.token_to_chuc_cap);
+      badge = `<span style="color:${mau};font-size:12px;white-space:nowrap;text-align:right;flex:none" title="${(c.token_to_chuc_cap||'').replace(/"/g,'')}">`+
+        `🔑 ${chu} (hết hạn ${ngayStr})${toChuc?`<br><span style="color:#888">${toChuc}</span>`:''}</span>`;
     }
     const checked = daChonTruoc ? daChonTruoc.has(String(c.id)) : true;
-    return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" style="display:flex;padding:3px 0">`+
-      `<input type="checkbox" class="dvcbChk" value="${c.id}" ${checked?'checked':''} onchange="dvcbCount()"><span>${c.ten} <span style="color:#888">(${c.mst})</span>${badge}</span></label>`;
+    return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 0">`+
+      `<span style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden">`+
+      `<input type="checkbox" class="dvcbChk" value="${c.id}" ${checked?'checked':''} onchange="dvcbCount()">`+
+      `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.ten} <span style="color:#888">(${c.mst})</span></span></span>`+
+      badge+`</label>`;
   }).join('') || '<div style="color:#888">Chưa có công ty</div>';
   dvcbCount();
+}
+function tenNganCapCKS(dn){
+  // "Tổ chức cấp" thô là chuỗi Distinguished Name (vd "CN=I-CA SHA-256,
+  // O=I-CA, C=VN") — lấy phần O= (tên tổ chức) cho gọn, dễ đọc; chuỗi đầy
+  // đủ vẫn xem được qua tooltip (title) khi rê chuột.
+  if(!dn) return '';
+  const m = dn.match(/O=([^,]+)/i);
+  if(m) return m[1].trim();
+  const m2 = dn.match(/CN=([^,]+)/i);
+  return m2 ? m2[1].trim() : dn;
 }
 let dvcbTokenId=null, dvcbTokenTimer=null;
 async function dvcbCheckToken(){
@@ -813,8 +828,12 @@ async function dvcbTokenPoll(){
       j.items.map(it=>{
         const c=it.trang_thai==='xong'?'#0a7d4b':(it.trang_thai&&it.trang_thai.indexOf('sai')>=0?'#b91c1c':'#555');
         const p=it.ngay_het_han?it.ngay_het_han.split('-'):null;
-        const extra=p?` (hết hạn ${p[2]}/${p[1]}/${p[0]})`:'';
-        return `<div style="color:${c}">• ${it.ten}: ${it.trang_thai}${extra}</div>`;
+        const ngay=p?`hết hạn ${p[2]}/${p[1]}/${p[0]}`:'';
+        const toChuc=tenNganCapCKS(it.to_chuc_cap);
+        const phai=[ngay,toChuc].filter(Boolean).join(' · ');
+        return `<div style="display:flex;justify-content:space-between;gap:10px;color:${c}">`+
+          `<span>• ${it.ten}: ${it.trang_thai}</span>`+
+          (phai?`<span style="flex:none;color:#888;font-size:12px">${phai}</span>`:'')+`</div>`;
       }).join('')+'</div>';
   }
   prog.innerHTML=html;
