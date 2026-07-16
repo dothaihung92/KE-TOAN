@@ -250,6 +250,14 @@
     <p class="hint" style="margin-top:0">Lần lượt đăng nhập từng công ty (thử <b>mật khẩu 1</b> → sai thì <b>mật khẩu 2</b>), tra cứu tờ khai đã nộp theo kỳ, rồi xuất Excel tổng hợp <b>trạng thái</b> (Đã/Không chấp nhận, chờ). Công ty sai mật khẩu liệt kê ra file riêng. Mật khẩu lấy từ thông tin đã lưu.</p>
 
     <div class="field">
+      <label>Nguồn tra cứu</label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <label class="chk"><input type="radio" name="dvcb_nguon" value="dvc" checked> Dịch vụ công (DVC) — tờ khai <b>từ 01/07/2025</b></label>
+        <label class="chk"><input type="radio" name="dvcb_nguon" value="thuedientu"> Thuế điện tử (cũ) — tờ khai <b>trước 01/07/2025</b></label>
+      </div>
+      <p class="hint" style="margin:4px 0 0">Chọn đúng nguồn theo kỳ đang tra cứu — 2 hệ thống của Tổng cục Thuế KHÔNG dùng chung dữ liệu, mỗi bên chỉ có tờ khai của đúng giai đoạn của nó.</p>
+    </div>
+    <div class="field">
       <label>Kỳ tra cứu</label>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select id="dvcb_loaiky" onchange="dvcbKyChange()" style="padding:7px;border:1px solid #d0d7de;border-radius:8px">
@@ -806,7 +814,9 @@ async function dvcbRun(){
   if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return;}
   const [tu,den]=dvcbKyToDates();
   if(!tu||!den){toast('Chọn kỳ tra cứu','err');return;}
+  const nguonEl=document.querySelector('input[name="dvcb_nguon"]:checked');
   const body={cids,tu_ngay:tu,den_ngay:den,ky_label:dvcbKyLabel(),
+    nguon:nguonEl?nguonEl.value:'dvc',
     tai_file:document.getElementById('dvcb_taifile').checked,
     tai_thong_bao:document.getElementById('dvcb_tb').checked};
   const prog=document.getElementById('dvcbProgress');

@@ -1881,6 +1881,42 @@ try {
 
 # Tải 1 thông báo (Tiếp nhận / Xác nhận). body là chuỗi JSON dựng sẵn từ Python
 # để giữ nguyên idTbao (số rất lớn, tránh mất chính xác khi qua JS number).
+_JS_SEARCH_TDT = r"""
+var cb = arguments[arguments.length-1];
+var tu=arguments[0], den=arguments[1], cap=arguments[2];
+try {
+  function getCookie(name){
+    var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  var csrf = getCookie('XSRF-TOKEN');
+  $.ajax({ type:'POST', url:'/tthc/tchs/thuedientu', dataType:'html',
+    data:{ _csrf:csrf, page:'', size:'', maToKhai_tdt:'', maGiaoDichTthc_tdt:'',
+           tuNgay_tdt:tu, denNgay_tdt:den, scope_tdt2:'SELF', mstUyQuyen_tdt2:'', captcha:cap },
+    headers:{ 'X-XSRF-TOKEN':csrf, 'HX-Request':'true', 'HX-Target':'bangKetQuaTraCuu_tdt',
+              'HX-Current-URL': location.href },
+    success:function(d){ cb({ok:true, html:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,300)}); }
+  });
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
+# Tải tờ khai từ tab "Thuế điện tử" — CHƯA XÁC NHẬN được endpoint downloadhoso
+# có phân biệt "loai" hay không (chưa bắt được request thật lúc bấm nút tải
+# trên tab này), nên gửi kèm loai='ETAX' để phòng hờ server cần phân biệt
+# nguồn — không ảnh hưởng gì nếu server bỏ qua field lạ.
+_JS_DOWNLOAD_TDT = r"""
+var cb = arguments[arguments.length-1];
+var ma = arguments[0];
+try {
+  $.ajax({ type:'POST', url:'/tthc/tchs/downloadhoso',
+    contentType:'application/json', data: JSON.stringify({maHoSo:ma, maGiaoDich:ma, loai:'ETAX'}),
+    success:function(d){ cb({ok:true, data:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
+  });
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
 _JS_DOWNLOAD_TB = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
@@ -2200,6 +2236,68 @@ def _dvc_map_bang(rows):
     return out
 
 
+def _dvc_map_bang_tdt(rows):
+    """Như _dvc_map_bang nhưng cho bảng kết quả tab "Tra cứu hồ sơ đã nộp
+    trên thuế điện tử" (dùng cho tờ khai nộp TRƯỚC 01/07/2025 — tab DVC chỉ
+    có dữ liệu TỪ 01/07/2025). Cột thật: STT, Mã giao dịch, Tờ khai/Phụ lục,
+    Kỳ tính thuế, Loại tờ khai, Lần nộp, Lần bổ sung, Ngày nộp, Nơi nộp,
+    Tiến trình giải quyết hồ sơ (Trạng thái), Thao tác.
+    Trả list dict theo TRACUU_COLS (dùng chung khuôn Excel với tab DVC) +
+    'ma' = Mã giao dịch (khoá để tải file — định dạng số, khác mã hồ sơ
+    dạng chữ-số-chấm-gạch của tab DVC nhưng cùng cơ chế tải)."""
+    if not rows:
+        return []
+    def _cells_of(r):
+        return r.get("cells") or [] if isinstance(r, dict) else (r or [])
+
+    h_idx = -1
+    for i, r in enumerate(rows[:5]):
+        joined = _khong_dau(" ".join(_cells_of(r)))
+        if "trang thai" in joined or "to khai" in joined or "ma giao dich" in joined:
+            h_idx = i; break
+    if h_idx < 0:
+        h_idx = 0
+    header = [_khong_dau(c) for c in _cells_of(rows[h_idx])]
+
+    def find(*keys, avoid=()):
+        for j, h in enumerate(header):
+            if any(k in h for k in keys) and not any(a in h for a in avoid):
+                return j
+        return -1
+
+    col = {
+        "ma_giao_dich": find("ma giao dich"),
+        "to_khai":      find("to khai", "phu luc"),
+        "ky":           find("ky tinh thue", "ky"),
+        "loai":         find("loai to khai", "loai"),
+        "lan_nop":      find("lan nop", avoid=("bo sung",)),
+        "lan_bs":       find("bo sung"),
+        "ngay_nop":     find("ngay nop", "ngay"),
+        "trang_thai":   find("trang thai", "tien trinh"),
+    }
+    out = []
+    for r in rows[h_idx + 1:]:
+        cells = _cells_of(r)
+        if not cells or all(not c for c in cells):
+            continue
+        j = _khong_dau(" ".join(cells))
+        if "tong so ban ghi" in j or "trang" == j[:5]:
+            continue
+        rec = {}
+        ok_any = False
+        for c in TRACUU_COLS:
+            idx = col.get(c, -1)
+            v = cells[idx] if 0 <= idx < len(cells) else ""
+            rec[c] = v
+            if v:
+                ok_any = True
+        if ok_any:
+            ma_idx = col.get("ma_giao_dich", -1)
+            rec["ma"] = cells[ma_idx].strip() if 0 <= ma_idx < len(cells) else ""
+            out.append(rec)
+    return out
+
+
 def _dvc_browser_login_2pass(drv, mst, pw1, pw2):
     """Thử pass1 rồi pass2. Trả (ok, dùng_pass(1/2/0), info)."""
     if pw1:
@@ -2254,6 +2352,75 @@ def _dvc_browser_tracuu(drv, tu, den, so_lan=8):
             diag.append(f"{cap}→{str(res)[:80]}")
         _t.sleep(0.4)
     return [], [], "", diag
+
+
+def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
+    """Như _dvc_browser_tracuu nhưng tra cứu ở tab "Tra cứu hồ sơ đã nộp
+    trên thuế điện tử" — chỉ hỗ trợ tờ khai nộp TRƯỚC 01/07/2025 (tab DVC
+    hiện có chỉ có dữ liệu TỪ 01/07/2025 trở đi, nên 2 tab bổ sung cho nhau).
+    Trả (rows_struct, ma_list, raw_html, diag)."""
+    import time as _t
+    diag = []
+    drv.get(DVC_BASE + "/tchs"); _t.sleep(1.5)
+    if not _dvc_wait_jquery(drv, 15):
+        return [], [], "", ["Trang /tchs không nạp được"]
+    for lan in range(1, so_lan + 1):
+        try:
+            cap = _dvc_cap_from_js(drv.execute_async_script(_JS_GETCAPTCHA))
+        except Exception as e:
+            diag.append(f"(captcha lỗi: {e})"); continue
+        if not cap:
+            diag.append("(captcha rỗng)"); continue
+        try:
+            res = drv.execute_async_script(_JS_SEARCH_TDT, tu, den, cap)
+        except Exception as e:
+            diag.append(f"{cap}→lỗi search: {e}"); continue
+        if res and res.get("ok"):
+            html = res.get("html") or ""
+            low = html.lower()
+            if ("tổng số bản ghi" in low or "mã giao dịch" in low
+                    or "<table" in low or "totalpage" in low):
+                rows, ma = [], []
+                try:
+                    pr = drv.execute_async_script(_JS_PARSE_TABLE, html)
+                    if pr and pr.get("ok"):
+                        rows = _dvc_map_bang_tdt(pr.get("rows") or [])
+                        ma = [r["ma"] for r in rows if r.get("ma")]
+                except Exception as e:
+                    diag.append(f"parse bảng lỗi: {e}")
+                diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng")
+                return rows, ma, html, diag
+            diag.append(f"{cap}→chưa ra bảng ({len(html)})")
+        else:
+            diag.append(f"{cap}→{str(res)[:80]}")
+        _t.sleep(0.4)
+    return [], [], "", diag
+
+
+def _dvc_browser_download_tdt(drv, ma):
+    """Tải tờ khai từ tab "Thuế điện tử" — vào trang chi tiết (?loai=ETAX,
+    đúng đường dẫn quan sát được khi bấm 1 dòng kết quả) trước để có đúng
+    ngữ cảnh/referer, rồi gọi tải. *** Thử nghiệm: cơ chế tải cụ thể (có
+    phân biệt "loai" hay dùng lại y hệt downloadhoso của tab DVC) chưa được
+    xác nhận bằng request thật — nếu lỗi, cần bắt lại đúng request khi bấm
+    nút tải trên tab này để chỉnh cho đúng. ***"""
+    import time as _t
+    try:
+        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
+        _t.sleep(1.0)
+        _dvc_wait_jquery(drv, 10)
+    except Exception:
+        pass
+    res = drv.execute_async_script(_JS_DOWNLOAD_TDT, ma)
+    if not res or not res.get("ok"):
+        raise Exception(f"{res}")
+    d = _dvc_norm_data(res.get("data"))
+    if not isinstance(d, dict):
+        raise Exception("phản hồi không hợp lệ")
+    content = d.get("content") or ""
+    fname = d.get("fileName") or f"{ma}.zip"
+    raw = base64.b64decode(content) if content else b""
+    return fname, raw
 
 
 def _xuat_tracuu_excel(rows, path):
@@ -2808,6 +2975,11 @@ def _dvc_run_batch(batch_id, cids, body):
     tai_file = bool(body.get("tai_file"))       # có tải file tờ khai về không
     tai_tb = bool(body.get("tai_thong_bao", True))
     luu_pass = bool(body.get("luu", True))
+    # Nguồn tra cứu: "dvc" (mặc định, tờ khai TỪ 01/07/2025) hoặc "thuedientu"
+    # (tab "Tra cứu hồ sơ đã nộp trên thuế điện tử" — tờ khai TRƯỚC 01/07/2025).
+    nguon = (body.get("nguon") or "dvc").strip().lower()
+    _tra_cuu_fn = _dvc_browser_tracuu_tdt if nguon == "thuedientu" else _dvc_browser_tracuu
+    _tai_file_fn = _dvc_browser_download_tdt if nguon == "thuedientu" else _dvc_browser_download
     tracuu_rows = []      # gom mọi dòng cho Excel tra cứu
     sai_pass = []         # công ty đăng nhập không được
     drv = None
@@ -2859,7 +3031,7 @@ def _dvc_run_batch(batch_id, cids, body):
             item["dung_pass"] = dung_pass
             # tra cứu
             try:
-                rows, ma_list, raw_html, sdiag = _dvc_browser_tracuu(drv, tu, den)
+                rows, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu, den)
             except Exception as e:
                 rows, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
             for rec in rows:
@@ -2903,7 +3075,7 @@ def _dvc_run_batch(batch_id, cids, body):
                                         ext = os.path.splitext(fn)[1] or ".xml"
                                         hau_to = f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"
                                         _dvc_luu_file(folder, f"{ten_goi}{hau_to}{ext}", raw); item["so_file"] += 1
-                            fn, raw = _dvc_browser_download(drv, ma)
+                            fn, raw = _tai_file_fn(drv, ma)
                             if raw:
                                 ext = os.path.splitext(fn)[1] or ".zip"
                                 _dvc_luu_file(folder, f"{ten_goi}{ext}", raw); item["so_file"] += 1
@@ -2923,7 +3095,7 @@ def _dvc_run_batch(batch_id, cids, body):
                                 for fn, raw in tb_files:
                                     if raw:
                                         _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
-                            fn, raw = _dvc_browser_download(drv, ma)
+                            fn, raw = _tai_file_fn(drv, ma)
                             if raw:
                                 _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
                         except Exception:
