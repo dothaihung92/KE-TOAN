@@ -976,11 +976,14 @@ function dvcbFilter(){
 }
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
 
-let ntkTrangThai={}, ntkSelectedCid=null;
+let ntkTrangThai={}, ntkSelectedCid=null, ntkHangDoi=[];
+const NTK_TEN_LOAI={GTGT:'01/GTGT',TNCN:'05/KK-TNCN'};
 async function moNopToKhai(){
   document.getElementById('ntkKetQua').style.display='none';
   document.getElementById('ntkSearch').value='';
   ntkSelectedCid=null;
+  ntkHangDoi=[];
+  ntkCapNhatNutChay();
   try{
     const r=await api('/api/settings/thu-muc-nop-to-khai');
     document.getElementById('ntkThuMuc').value=r.thu_muc||'';
@@ -1013,8 +1016,16 @@ function ntkRenderCtyList(){
   }).join('')||'<div style="padding:8px;color:#999">Không có công ty nào khớp</div>';
 }
 function ntkFilter(){ntkRenderCtyList();}
-function ntkChonCty(cid){ntkSelectedCid=cid;ntkRenderCtyList();}
-function ntkKyChange(){}
+function ntkChonCty(cid){
+  if(ntkHangDoi.length&&cid!==ntkSelectedCid){
+    // đổi công ty giữa chừng khi còn tờ khai chưa nộp trong hàng đợi -> hủy
+    // hàng đợi cũ (thuộc công ty trước), tránh nhầm sang công ty vừa chọn
+    ntkHangDoi=[];
+    ntkCapNhatNutChay();
+  }
+  ntkSelectedCid=cid;ntkRenderCtyList();
+}
+function ntkKyChange(){ntkHangDoi=[];ntkCapNhatNutChay();}
 function dongNopToKhai(){document.getElementById('nopToKhaiModal').style.display='none';}
 async function ntkLuuThuMuc(){
   const thu_muc=document.getElementById('ntkThuMuc').value.trim();
@@ -1039,6 +1050,13 @@ async function ntkChayMotLoai(cid,loai,kq){
     return false;
   }
 }
+function ntkCapNhatNutChay(){
+  const btn=document.getElementById('ntkRunBtn');
+  if(!btn)return;
+  btn.textContent=ntkHangDoi.length
+    ? `➡ Tiếp tục nộp ${NTK_TEN_LOAI[ntkHangDoi[0]]||ntkHangDoi[0]}`
+    : '🚀 Chạy tới bước sẵn sàng ký';
+}
 async function ntkChay(){
   const cid=ntkSelectedCid;
   const ky=document.getElementById('ntkKy').value;
@@ -1046,21 +1064,41 @@ async function ntkChay(){
   if(ky==='nam'){toast('Nộp theo Năm chưa được hỗ trợ — sẽ cập nhật sau','err');return;}
   const btn=document.getElementById('ntkRunBtn');
   const kq=document.getElementById('ntkKetQua');
+
+  // CHỈ chạy TỪNG tờ khai một, KHÔNG mở song song nhiều cửa sổ Chrome cùng
+  // lúc — trước đây bấm 1 lần là tự chạy GTGT rồi chạy luôn TNCN ngay sau
+  // đó (không đợi người dùng ký+nộp xong tờ khai trước), nên 2 cửa sổ mở
+  // chồng lên nhau. Giờ mỗi lần bấm nút chỉ xử lý ĐÚNG 1 tờ khai trong
+  // hàng đợi; xong tờ khai này (đã tự ký+nộp xong bên cửa sổ Chrome) mới
+  // bấm tiếp để phần mềm mở cửa sổ cho tờ khai tiếp theo.
+  if(!ntkHangDoi.length){
+    ntkHangDoi = (ky==='quy') ? ['GTGT','TNCN'] : [];
+    kq.style.display='block';
+    kq.style.background='#eef6f0';
+    kq.innerHTML='';
+  }
+  const loai=ntkHangDoi.shift();
+  if(!loai){ntkCapNhatNutChay();return;}
+
   btn.disabled=true;
-  kq.style.display='block';
-  kq.style.background='#eef6f0';
-  kq.innerHTML='⏳ Bắt đầu...';
   try{
-    const okGtgt=await ntkChayMotLoai(cid,'GTGT',kq);
-    const okTncn=await ntkChayMotLoai(cid,'TNCN',kq);
-    if(okGtgt&&okTncn){
-      toast('Đã tải xong cả GTGT và TNCN — hãy chuyển sang các cửa sổ Chrome để tự Ký + Nộp','ok');
-    }else{
+    const ok=await ntkChayMotLoai(cid,loai,kq);
+    if(!ok){
       kq.style.background='#fdecea';
+      ntkHangDoi=[];   // dừng hẳn, không tự chạy tiếp tờ khai còn lại trong hàng đợi
+    }else if(ntkHangDoi.length){
+      const tiep=NTK_TEN_LOAI[ntkHangDoi[0]]||ntkHangDoi[0];
+      kq.innerHTML+=`<br><br>👉 Hãy chuyển sang cửa sổ Chrome vừa mở để tự <b>Ký hồ sơ</b> + `+
+                    `<b>Nộp tờ khai</b> cho ${NTK_TEN_LOAI[loai]||loai} TRƯỚC. Xong rồi quay lại đây `+
+                    `bấm nút bên dưới để tiếp tục nộp ${tiep}.`;
+      toast(`Đã xong ${NTK_TEN_LOAI[loai]||loai} — tự Ký+Nộp xong rồi bấm tiếp để nộp ${tiep}`,'ok');
+    }else{
+      toast('Đã tải xong — hãy chuyển sang cửa sổ Chrome để tự Ký + Nộp','ok');
     }
     await ntkTaiTrangThai();
   }finally{
     btn.disabled=false;
+    ntkCapNhatNutChay();
   }
 }
 
