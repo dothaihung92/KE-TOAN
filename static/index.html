@@ -4,94 +4,128 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Quản lý Hóa đơn điện tử — Đa công ty</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --ink:#16241d; --paper:#f6f4ec; --card:#ffffff;
-    --green:#1f6b4a; --green-d:#164d36; --green-l:#e8f1ec;
+    --ink:#16241d; --paper:#f3f1e8; --card:#ffffff;
+    --green:#1f6b4a; --green-d:#123f2c; --green-l:#e8f1ec; --green-glow:rgba(31,107,74,.16);
     --gold:#c08a2d; --gold-l:#f5ecd8;
-    --line:#dcd8c8; --muted:#6b7569; --red:#b3402f; --red-l:#f7e8e4;
-    --shadow:0 1px 3px rgba(22,36,29,.08),0 8px 24px rgba(22,36,29,.06);
+    --line:#e1ddce; --line-soft:#eceadf; --muted:#6b7569; --red:#b3402f; --red-l:#f7e8e4;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:18px;
+    --shadow-sm:0 1px 2px rgba(22,36,29,.06);
+    --shadow:0 1px 2px rgba(22,36,29,.05),0 6px 16px rgba(22,36,29,.06);
+    --shadow-lg:0 12px 32px rgba(22,36,29,.12),0 4px 10px rgba(22,36,29,.06);
+    --ease:cubic-bezier(.4,0,.2,1);
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
   body{
     font-family:'Be Vietnam Pro',system-ui,'Segoe UI',sans-serif;
-    background:var(--paper); color:var(--ink); line-height:1.5;
+    background:var(--paper); color:var(--ink); line-height:1.55;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   }
+  /* thanh cuộn mảnh, đồng bộ theme (Chrome/Edge) */
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:rgba(22,36,29,.18);border-radius:20px;border:2px solid transparent;background-clip:padding-box}
+  ::-webkit-scrollbar-thumb:hover{background:rgba(22,36,29,.32);background-clip:padding-box}
+  .sidebar ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18)}
+  .sidebar ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
+
   /* ===== Sidebar layout ===== */
-  .app{display:grid;grid-template-columns:300px 1fr;min-height:100vh}
+  .app{display:grid;grid-template-columns:296px 1fr;min-height:100vh}
   .sidebar{
-    background:var(--green-d);color:#e8f1ec;padding:0;
+    background:linear-gradient(180deg,var(--green-d),#0f3527 100%);color:#e8f1ec;padding:0;
     display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+    box-shadow:2px 0 18px rgba(0,0,0,.12);z-index:2;
   }
-  .brand{padding:24px 22px 18px;border-bottom:1px solid rgba(255,255,255,.1)}
-  .brand h1{font-size:17px;font-weight:700;letter-spacing:-.2px;line-height:1.25}
-  .brand .sub{font-size:11px;color:#9cc0ad;margin-top:4px;letter-spacing:.3px;text-transform:uppercase}
+  .brand{padding:24px 22px 18px;border-bottom:1px solid rgba(255,255,255,.1);
+    display:flex;align-items:center;gap:12px}
+  .brand .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--gold),#e0af52);
+    display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+  .brand h1{font-size:16.5px;font-weight:700;letter-spacing:-.2px;line-height:1.25}
+  .brand .sub{font-size:11px;color:#9cc0ad;margin-top:3px;letter-spacing:.4px;text-transform:uppercase;font-weight:600}
   .co-list{flex:1;overflow-y:auto;padding:12px}
-  .co-list .lbl{font-size:11px;color:#7faa8e;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px 6px}
+  .co-list .lbl{font-size:11px;color:#7faa8e;text-transform:uppercase;letter-spacing:.6px;padding:10px 10px 7px;font-weight:700}
   .co{
-    padding:11px 13px;border-radius:9px;cursor:pointer;margin-bottom:4px;
-    transition:.15s;border:1px solid transparent;
+    padding:10px 13px;border-radius:10px;cursor:pointer;margin-bottom:3px;
+    transition:.16s var(--ease);border:1px solid transparent;position:relative;
   }
-  .co:hover{background:rgba(255,255,255,.06)}
-  .co.active{background:var(--green);border-color:rgba(255,255,255,.18)}
-  .co .nm{font-size:14px;font-weight:600;line-height:1.35;word-break:break-word}
-  .co .mst{font-size:12px;color:#9cc0ad;margin-top:2px;font-variant-numeric:tabular-nums}
-  .co .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#7d8c81;margin-right:6px}
-  .co.online .dot{background:#5fd99a;box-shadow:0 0 6px #5fd99a}
+  .co:hover{background:rgba(255,255,255,.07);transform:translateX(1px)}
+  .co.active{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.14);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+  .co.active::before{content:'';position:absolute;left:-1px;top:8px;bottom:8px;width:3px;border-radius:3px;
+    background:linear-gradient(180deg,var(--gold),#e0af52)}
+  .co .nm{font-size:13.5px;font-weight:600;line-height:1.35;word-break:break-word}
+  .co .mst{font-size:11.5px;color:#9cc0ad;margin-top:2px;font-variant-numeric:tabular-nums}
+  .co .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#5f7568;margin-right:6px}
+  .co.online .dot{background:#5fd99a;box-shadow:0 0 7px #5fd99a}
   .add-co{margin:8px;padding:11px;border:1.5px dashed rgba(255,255,255,.25);
-    border-radius:9px;color:#bcd6c7;text-align:center;cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
-  .add-co:hover{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.4)}
+    border-radius:10px;color:#bcd6c7;text-align:center;cursor:pointer;font-size:13px;font-weight:600;transition:.16s var(--ease)}
+  .add-co:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.45);color:#fff}
 
   /* ===== Main ===== */
-  .main{padding:28px 34px;overflow-y:auto;max-height:100vh}
+  .main{padding:30px 36px;overflow-y:auto;max-height:100vh}
   .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;
     height:80vh;text-align:center;color:var(--muted)}
-  .empty-state .ic{font-size:54px;margin-bottom:14px;opacity:.5}
-  .empty-state h2{font-size:20px;color:var(--ink);margin-bottom:6px;font-weight:600}
+  .empty-state .ic{font-size:30px;margin-bottom:16px;opacity:.9;width:76px;height:76px;border-radius:50%;
+    background:var(--green-l);display:flex;align-items:center;justify-content:center}
+  .empty-state h2{font-size:20px;color:var(--ink);margin-bottom:6px;font-weight:700}
+  .empty-state p{font-size:14px;max-width:320px}
 
-  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px}
-  .topbar h2{font-size:22px;font-weight:700;letter-spacing:-.3px}
-  .topbar .mst-badge{font-size:13px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
-  .status-pill{font-size:12px;font-weight:600;padding:6px 13px;border-radius:20px;display:inline-flex;align-items:center;gap:6px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;
+    padding-bottom:18px;border-bottom:1px solid var(--line)}
+  .topbar h2{font-size:22px;font-weight:800;letter-spacing:-.4px}
+  .topbar .mst-badge{font-size:13px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
+  .status-pill{font-size:12px;font-weight:700;padding:6px 14px;border-radius:20px;display:inline-flex;align-items:center;gap:6px;
+    box-shadow:var(--shadow-sm)}
   .status-pill.off{background:var(--red-l);color:var(--red)}
   .status-pill.on{background:var(--green-l);color:var(--green)}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;margin-bottom:22px}
-  .stat{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px 18px;box-shadow:var(--shadow);overflow:hidden}
-  .stat .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
-  .stat .v{font-size:22px;font-weight:700;margin-top:6px;letter-spacing:-.3px;font-variant-numeric:tabular-nums;word-break:break-all;line-height:1.2}
-  .stat.gold .v{color:var(--gold)}
-  .stat.green .v{color:var(--green)}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:17px 19px;
+    box-shadow:var(--shadow);overflow:hidden;transition:.18s var(--ease);border-left:3px solid var(--line)}
+  .stat:hover{box-shadow:var(--shadow-lg);transform:translateY(-2px)}
+  .stat .k{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+  .stat .v{font-size:22px;font-weight:800;margin-top:7px;letter-spacing:-.3px;font-variant-numeric:tabular-nums;word-break:break-all;line-height:1.2}
+  .stat.gold{border-left-color:var(--gold)} .stat.gold .v{color:var(--gold)}
+  .stat.green{border-left-color:var(--green)} .stat.green .v{color:var(--green)}
 
-  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;box-shadow:var(--shadow);margin-bottom:18px}
-  .card h3{font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px}
-  .card h3 .n{width:22px;height:22px;background:var(--green);color:#fff;border-radius:6px;
-    display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:22px;box-shadow:var(--shadow);margin-bottom:18px}
+  .card h3{font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:9px}
+  .card h3 .n{width:23px;height:23px;background:var(--green);color:#fff;border-radius:7px;
+    display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;box-shadow:0 2px 6px var(--green-glow)}
 
   .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
   .field{display:flex;flex-direction:column;gap:5px}
   .field label{font-size:12px;font-weight:600;color:var(--muted)}
   input,select{
     font-family:inherit;font-size:14px;padding:9px 12px;border:1.5px solid var(--line);
-    border-radius:8px;background:#fff;color:var(--ink);transition:.15s;outline:none;
+    border-radius:var(--radius-sm);background:#fff;color:var(--ink);transition:.15s var(--ease);outline:none;
   }
-  input:focus,select:focus{border-color:var(--green)}
+  input:hover,select:hover{border-color:#c9c4ae}
+  input:focus,select:focus{border-color:var(--green);box-shadow:0 0 0 3.5px var(--green-glow)}
+  input::placeholder{color:#a8ab9f}
   .btn{
-    font-family:inherit;font-size:14px;font-weight:600;padding:10px 18px;border:none;border-radius:8px;
-    background:var(--green);color:#fff;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:7px;
+    font-family:inherit;font-size:14px;font-weight:600;padding:10px 18px;border:none;border-radius:var(--radius-sm);
+    background:var(--green);color:#fff;cursor:pointer;transition:.15s var(--ease);display:inline-flex;align-items:center;gap:7px;
+    box-shadow:0 1px 2px rgba(22,36,29,.1);
   }
-  .btn:hover{background:var(--green-d)}
-  .btn:disabled{opacity:.45;cursor:not-allowed}
-  .btn.ghost{background:#fff;color:var(--green);border:1.5px solid var(--green)}
-  .btn.ghost:hover{background:var(--green-l)}
-  .btn.gold{background:var(--gold)}.btn.gold:hover{background:#a3741f}
+  .btn:hover{background:var(--green-d);transform:translateY(-1px);box-shadow:0 4px 10px var(--green-glow)}
+  .btn:active{transform:translateY(0)}
+  .btn:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+  .btn.ghost{background:#fff;color:var(--green);border:1.5px solid var(--line)}
+  .btn.ghost:hover{background:var(--green-l);border-color:var(--green);box-shadow:none}
+  .btn.gold{background:var(--gold)}.btn.gold:hover{background:#a3741f;box-shadow:0 4px 10px rgba(192,138,45,.25)}
   .btn.sm{padding:7px 13px;font-size:13px}
-  .btn.danger{background:#fff;color:var(--red);border:1.5px solid var(--red)}
+  .btn.danger{background:#fff;color:var(--red);border:1.5px solid var(--red-l)}
+  .btn.danger:hover{background:var(--red-l);box-shadow:none}
 
   /* captcha box */
   .captcha-box{display:flex;gap:14px;align-items:center;background:var(--green-l);
-    padding:14px;border-radius:10px;margin-top:6px}
-  .captcha-img{background:#fff;border:1.5px solid var(--line);border-radius:8px;padding:6px;
+    padding:14px;border-radius:var(--radius-md);margin-top:6px}
+  .captcha-img{background:#fff;border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:6px;
     min-width:150px;min-height:50px;display:flex;align-items:center;justify-content:center}
   .captcha-img svg{max-height:42px}
 
@@ -102,39 +136,45 @@
   .modal .field input[type=checkbox]{width:17px;height:17px;display:inline-block;flex:none;vertical-align:middle}
 
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th{text-align:left;padding:11px 12px;background:var(--green);color:#fff;
-    font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.3px;
+  th{text-align:left;padding:12px 12px;background:linear-gradient(180deg,var(--green),var(--green-d));color:#fff;
+    font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;
     position:sticky;top:0;z-index:5;box-shadow:0 2px 4px rgba(0,0,0,.12)}
-  td{padding:9px 12px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
-  tr:hover td{background:#fafaf6}
-  .tbl-wrap{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  th:first-child{border-top-left-radius:8px} th:last-child{border-top-right-radius:8px}
+  td{padding:10px 12px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  tbody tr:nth-child(even) td{background:#faf9f3}
+  tr:hover td{background:var(--green-l)}
+  .tbl-wrap{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius-md);box-shadow:var(--shadow-sm)}
   .num{text-align:right}
-  .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px}
+  .tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px}
   .tag.buy{background:var(--gold-l);color:var(--gold)}
   .tag.sell{background:var(--green-l);color:var(--green)}
 
   .toast{position:fixed;bottom:24px;right:24px;background:var(--ink);color:#fff;padding:14px 20px;
-    border-radius:10px;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.25);z-index:999;
-    opacity:0;transform:translateY(12px);transition:.25s;max-width:380px}
-  .toast.show{opacity:1;transform:translateY(0)}
+    border-radius:var(--radius-md);font-size:14px;box-shadow:var(--shadow-lg);z-index:999;
+    opacity:0;transform:translateY(12px) scale(.98);transition:.28s var(--ease);max-width:380px}
+  .toast.show{opacity:1;transform:translateY(0) scale(1)}
   .toast.err{background:var(--red)}
   .toast.ok{background:var(--green)}
 
   /* modal */
-  .modal-bg{position:fixed;inset:0;background:rgba(22,36,29,.45);display:none;
-    align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(2px)}
+  .modal-bg{position:fixed;inset:0;background:rgba(15,25,20,.5);display:none;
+    align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px);
+    animation:fadein .18s var(--ease)}
   .modal-bg.show{display:flex}
-  .modal{background:#fff;border-radius:16px;padding:26px;width:min(460px,92vw);box-shadow:0 20px 60px rgba(0,0,0,.3);
-    max-height:90vh;overflow-y:auto}
-  .modal h3{font-size:18px;margin-bottom:18px}
+  .modal{background:#fff;border-radius:var(--radius-lg);padding:26px;width:min(460px,92vw);box-shadow:var(--shadow-lg);
+    max-height:90vh;overflow-y:auto;animation:popin .2s var(--ease)}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  @keyframes popin{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+  .modal h3{font-size:18px;margin-bottom:18px;font-weight:700}
   .modal .field{margin-bottom:13px}
   .modal .field input{width:100%}
   .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
   .tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--line)}
   .tab{padding:9px 16px;cursor:pointer;font-size:14px;font-weight:600;color:var(--muted);
-    border-bottom:2px solid transparent;margin-bottom:-2px}
+    border-bottom:2px solid transparent;margin-bottom:-2px;transition:.15s var(--ease)}
+  .tab:hover{color:var(--ink)}
   .tab.active{color:var(--green);border-color:var(--green)}
-  .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.55}
   .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.4);
     border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -146,8 +186,11 @@
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="brand">
-      <h1>Hóa đơn điện tử</h1>
-      <div class="sub">Quản lý đa công ty</div>
+      <div class="logo">🧾</div>
+      <div>
+        <h1>Hóa đơn điện tử</h1>
+        <div class="sub">Quản lý đa công ty</div>
+      </div>
     </div>
     <div style="padding:10px 12px 4px">
       <input id="coSearch" placeholder="🔍 Tìm công ty / MST..." oninput="loadCompanies()"
@@ -262,18 +305,18 @@
     <div class="field">
       <label>Kỳ tra cứu</label>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select id="dvcb_loaiky" onchange="dvcbKyChange()" style="padding:7px;border:1px solid #d0d7de;border-radius:8px">
+        <select id="dvcb_loaiky" onchange="dvcbKyChange()" style="padding:7px;border:1px solid var(--line);border-radius:8px">
           <option value="thang">Tháng</option>
           <option value="quy" selected>Quý</option>
           <option value="nam">Năm</option>
           <option value="tuychon">Tùy chọn ngày</option>
         </select>
-        <select id="dvcb_thang" style="padding:7px;border:1px solid #d0d7de;border-radius:8px;display:none"></select>
-        <select id="dvcb_quy" style="padding:7px;border:1px solid #d0d7de;border-radius:8px">
+        <select id="dvcb_thang" style="padding:7px;border:1px solid var(--line);border-radius:8px;display:none"></select>
+        <select id="dvcb_quy" style="padding:7px;border:1px solid var(--line);border-radius:8px">
           <option value="1">Quý 1</option><option value="2">Quý 2</option>
           <option value="3">Quý 3</option><option value="4">Quý 4</option>
         </select>
-        <select id="dvcb_nam" style="padding:7px;border:1px solid #d0d7de;border-radius:8px"></select>
+        <select id="dvcb_nam" style="padding:7px;border:1px solid var(--line);border-radius:8px"></select>
       </div>
     </div>
     <div id="dvcb_ngayrow" style="display:none;gap:12px;flex-wrap:wrap">
@@ -296,11 +339,11 @@
         </span>
       </label>
       <input id="dvcbSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="dvcbFilter()"
-             style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px;margin-bottom:6px">
+             style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px">
       <div style="display:grid;grid-template-columns:1fr 92px 78px 110px;gap:10px;padding:0 4px 4px;font-size:11.5px;color:#999;font-weight:600">
         <span></span><span>Hạn Token</span><span>Hết hạn</span><span>Tổ chức cấp</span>
       </div>
-      <div id="dvcbCoList" style="max-height:220px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:4px 8px"></div>
+      <div id="dvcbCoList" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="dvcbCount">0</b> công ty</div>
     </div>
     </div>
@@ -346,19 +389,19 @@
         </span>
       </label>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <input id="ntkSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="ntkRenderCtyList()" style="flex:1;padding:8px;border:1px solid #d0d7de;border-radius:8px">
-        <select id="ntkLoc" onchange="ntkRenderCtyList()" style="padding:8px;border:1px solid #d0d7de;border-radius:8px">
+        <input id="ntkSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="ntkRenderCtyList()" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px">
+        <select id="ntkLoc" onchange="ntkRenderCtyList()" style="padding:8px;border:1px solid var(--line);border-radius:8px">
           <option value="tatca">Tất cả</option>
           <option value="chuanop">Chưa nộp</option>
           <option value="danop">Đã nộp</option>
         </select>
       </div>
-      <div id="ntkCtyList" style="max-height:220px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:4px 8px"></div>
+      <div id="ntkCtyList" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
     </div>
     <div class="field">
       <label>Kỳ nộp</label>
-      <select id="ntkKy" style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px" onchange="ntkKyChange()">
+      <select id="ntkKy" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
         <option value="quy">Theo Quý — nộp lần lượt 01/GTGT rồi 05/KK-TNCN</option>
         <option value="nam">Theo Năm (sẽ cập nhật sau)</option>
       </select>
@@ -382,7 +425,7 @@
     <div class="field">
       <label>Chọn nhanh theo kỳ</label>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select id="bKyLoai" onchange="batchKyChange()" style="padding:7px;border:1px solid #d0d7de;border-radius:8px">
+        <select id="bKyLoai" onchange="batchKyChange()" style="padding:7px;border:1px solid var(--line);border-radius:8px">
           <option value="tuychon">Tùy chọn ngày</option>
           <option value="thang">Từng tháng</option>
           <option value="quy">Từng quý</option>
@@ -390,12 +433,12 @@
           <option value="h2">6 tháng cuối năm</option>
           <option value="nam">Cả năm</option>
         </select>
-        <select id="bKyThang" onchange="batchKyApply()" style="padding:7px;border:1px solid #d0d7de;border-radius:8px;display:none"></select>
-        <select id="bKyQuy" onchange="batchKyApply()" style="padding:7px;border:1px solid #d0d7de;border-radius:8px;display:none">
+        <select id="bKyThang" onchange="batchKyApply()" style="padding:7px;border:1px solid var(--line);border-radius:8px;display:none"></select>
+        <select id="bKyQuy" onchange="batchKyApply()" style="padding:7px;border:1px solid var(--line);border-radius:8px;display:none">
           <option value="1">Quý 1</option><option value="2">Quý 2</option>
           <option value="3">Quý 3</option><option value="4">Quý 4</option>
         </select>
-        <select id="bKyNam" onchange="batchKyApply()" style="padding:7px;border:1px solid #d0d7de;border-radius:8px;display:none"></select>
+        <select id="bKyNam" onchange="batchKyApply()" style="padding:7px;border:1px solid var(--line);border-radius:8px;display:none"></select>
       </div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -425,8 +468,8 @@
         </span>
       </label>
       <input id="batchSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="batchFilter()"
-             style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px;margin-bottom:6px">
-      <div id="batchCoList" style="max-height:230px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:8px"></div>
+             style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px">
+      <div id="batchCoList" style="max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="batchCount">0</b> công ty</div>
     </div>
 
@@ -1518,7 +1561,7 @@ function renderWorkspace(c,online){
       </div>
       <div id="progressLog" style="margin-top:10px;font-size:13px;max-height:140px;overflow:auto"></div>
     </div>
-    <div id="ketQuaTraCuu" style="display:none;margin-top:14px;border-radius:10px;padding:14px 16px;border:1px solid #d0d7de;background:#fff"></div>
+    <div id="ketQuaTraCuu" style="display:none;margin-top:14px;border-radius:10px;padding:14px 16px;border:1px solid var(--line);background:#fff"></div>
     <div id="fetchErrorBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#fdecea;border:1px solid #f1a9a0;border-radius:10px;padding:12px 14px;margin-top:14px;font-size:13.5px;color:#7a1f1f">
       <div style="flex:1">
         <b id="fetchErrorTitle">⚠ Lỗi/cảnh báo lần tra cứu gần nhất:</b>
