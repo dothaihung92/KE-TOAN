@@ -417,6 +417,15 @@
       <div style="background:#fff;border-radius:6px;height:8px;overflow:hidden">
         <div id="batchBar" style="height:100%;width:0%;background:var(--green);transition:width .3s"></div>
       </div>
+      <div id="batchDlWrap" style="display:none;margin-top:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:3px">
+          <span>⬇️ Đang tải hóa đơn (bỏ qua hóa đơn đã có sẵn file, không đổi)</span>
+          <span id="batchDlText" style="font-weight:600"></span>
+        </div>
+        <div style="background:#fff;border-radius:6px;height:6px;overflow:hidden">
+          <div id="batchDlBar" style="height:100%;width:0%;background:#3b82f6;transition:width .3s"></div>
+        </div>
+      </div>
       <div id="batchDetail" style="margin-top:8px;font-size:12.5px;color:var(--muted);font-style:italic;min-height:1.2em"></div>
       <div id="batchLog" style="margin-top:10px;font-size:13px;max-height:180px;overflow:auto"></div>
     </div>
@@ -1700,6 +1709,18 @@ async function doBatchFetch(){
       // để biết phần mềm đang chạy tới đâu, không chỉ biết "đang xử lý công ty X"
       document.getElementById('batchDetail').textContent=
         (running && st.current_detail)?('↳ '+st.current_detail):'';
+      // Thanh tiến độ TẢI FILE riêng (số hóa đơn đang tải/còn lại) — giống hệt
+      // tra cứu 1 công ty, thay vì chỉ 1 dòng chữ nhỏ khó theo dõi.
+      const dlWrap=document.getElementById('batchDlWrap');
+      if(running && st.current_cur!=null && st.current_total){
+        dlWrap.style.display='block';
+        document.getElementById('batchDlText').textContent=
+          `${st.current_cur}/${st.current_total} (còn ${st.current_total-st.current_cur})`;
+        document.getElementById('batchDlBar').style.width=
+          Math.round(st.current_cur/st.current_total*100)+'%';
+      }else{
+        dlWrap.style.display='none';
+      }
       const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
       document.getElementById('batchLog').innerHTML=st.items.map(i=>{
         const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(i.status==='done'?'#1f6b4a':'#555'));

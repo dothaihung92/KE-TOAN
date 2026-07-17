@@ -4568,17 +4568,29 @@ def fetch_batch_status(batch_id: int):
     # để người dùng thấy phần mềm đang chạy TỚI ĐÂU, không chỉ biết "đang xử
     # lý công ty X" mà không rõ đang ở bước nào bên trong.
     current_detail = ""
+    current_cur = None
+    current_total = None
     cur_cid = batch["current"]
     if cur_cid is not None:
         job = FETCH_JOBS.get(cur_cid)
         if job:
-            current_detail = (job.get("last") or {}).get("text", "")
+            last = job.get("last") or {}
+            current_detail = last.get("text", "")
+            # Tiến độ TẢI FILE (số hóa đơn đang tải/còn lại) của công ty đang
+            # chạy — giống hệt thanh tiến trình tải file ở tra cứu 1 công ty,
+            # để "Tra cứu hóa đơn hàng loạt" cũng thấy rõ đang tải bao nhiêu/
+            # còn bao nhiêu, không chỉ 1 dòng chữ nhỏ.
+            if last.get("stage") == "download" and last.get("total"):
+                current_cur = last.get("cur")
+                current_total = last.get("total")
     return {
         "running": batch["running"],
         "total": batch["total"],
         "done": batch["done"],
         "current": batch["current"],
         "current_detail": current_detail,
+        "current_cur": current_cur,
+        "current_total": current_total,
         "items": [batch["items"][c] for c in batch["order"]],
     }
 
