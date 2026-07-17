@@ -3979,7 +3979,20 @@ def dvc_kiem_tra_da_nop(cid: int, body: dict = Body(...)):
         (cid, loai, 1 if xac_nhan else 0, datetime.datetime.now().isoformat(), chi_tiet))
     conn.commit()
     conn.close()
-    return {"ok": True, "xac_nhan": xac_nhan, "trang_thai": trang_thai_text, "chi_tiet": chi_tiet}
+    # Đã XÁC NHẬN THẬT SỰ là nộp xong -> cửa sổ Chrome dùng để ký/nộp không
+    # còn cần nữa, tự đóng lại (nếu còn mở) thay vì để người dùng phải tự tắt.
+    phien_id = (body.get("phien_id") or "").strip()
+    da_dong_trinh_duyet = False
+    if xac_nhan and phien_id:
+        drv_phien = _DVC_OPEN_DRIVERS.pop(phien_id, None)
+        if drv_phien is not None:
+            try:
+                drv_phien.quit()
+                da_dong_trinh_duyet = True
+            except Exception:
+                pass
+    return {"ok": True, "xac_nhan": xac_nhan, "trang_thai": trang_thai_text, "chi_tiet": chi_tiet,
+            "da_dong_trinh_duyet": da_dong_trinh_duyet}
 
 
 @app.post("/api/dvc/nop-to-khai-thu-cong/{cid}")

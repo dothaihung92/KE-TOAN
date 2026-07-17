@@ -998,7 +998,7 @@ function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}i
 
 let ntkTrangThai={}, ntkChonSet=new Set(), ntkHangDoi=[], ntkDangCho=null, ntkDangChay=false, ntkBiDung=false;
 let ntkPollTimer=null, ntkPollLan=0;
-const NTK_KHOANG_POLL_MS=60000, NTK_POLL_TOI_DA=15;   // tu kiem tra moi 60s, toi da 15 lan (~15 phut)
+const NTK_KHOANG_POLL_MS=30000, NTK_POLL_TOI_DA=30;   // tu kiem tra moi 30s, toi da 30 lan (~15 phut)
 const NTK_TEN_LOAI={GTGT:'01/GTGT',TNCN:'05/KK-TNCN'};
 async function moNopToKhai(){
   document.getElementById('ntkKetQua').style.display='none';
@@ -1149,14 +1149,15 @@ async function ntkKiemTraTuDong(){
     if(nhan)nhan.textContent='⏸ Đã dừng tự động kiểm tra (quá lâu chưa thấy xác nhận) — bấm nút bên dưới để kiểm tra thủ công.';
     return;
   }
-  const {cid,loai,ten}=ntkDangCho;
+  const {cid,loai,ten,phien_id}=ntkDangCho;
   if(nhan)nhan.textContent=`⏳ Đang tự động kiểm tra trên cổng Thuế... (lần ${ntkPollLan}/${NTK_POLL_TOI_DA})`;
   try{
     const r=await api(`/api/dvc/kiem-tra-da-nop/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({loai})});
+      body:JSON.stringify({loai,phien_id})});
     if(r.xac_nhan){
       ntkDungPoll();
-      ntkGhi(`<br>✅ <b>Đã tự động xác nhận</b>: ${r.chi_tiet||r.trang_thai}`);
+      ntkGhi(`<br>✅ <b>Đã tự động xác nhận</b>: ${r.chi_tiet||r.trang_thai}`+
+             (r.da_dong_trinh_duyet?' — đã tự đóng cửa sổ Chrome.':''));
       toast(`Đã xác nhận nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
       ntkDangCho=null;
       await ntkTaiTrangThai();
@@ -1208,7 +1209,8 @@ async function ntkXuLyTiep(){
   if(kyOk){
     ntkGhi(`<br>🖊️ Đã TỰ bấm "Ký hồ sơ" và chọn chứng thư số xong.`);
     ntkGhi(`<br>👉 Hãy chuyển sang cửa sổ Chrome, tự nhập <b>mã PIN</b> và bấm <b>"Nộp tờ khai"</b> `+
-           `cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút xác nhận bên dưới:`);
+           `cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Phần mềm sẽ TỰ kiểm tra lại và tự chuyển sang `+
+           `tờ khai tiếp theo (không cần bấm nút) — cửa sổ Chrome cũng sẽ tự đóng khi xác nhận xong.`);
   }else{
     ntkGhi(`<br>⚠ Chưa TỰ bấm được "Ký hồ sơ" (${(r.ky_ho_so&&r.ky_ho_so.loi)||'không rõ lý do'}).`);
     ntkGhi(`<br>👉 Bấm "🖊️ Tự bấm Ký hồ sơ" để thử lại, hoặc tự làm toàn bộ bằng tay trên cửa sổ `+
@@ -1247,14 +1249,15 @@ async function ntkBamKyHoSo(){
 async function ntkXacNhanVaTiep(){
   if(!ntkDangCho)return;
   ntkDungPoll();   // dang tu kiem tra thu cong roi, tam dung poll tranh trung lap
-  const {cid,loai,ten}=ntkDangCho;
+  const {cid,loai,ten,phien_id}=ntkDangCho;
   const el=document.getElementById('ntkChoXacNhan');
   if(el)el.innerHTML='⏳ Đang tra cứu lại trên cổng Dịch vụ công để xác nhận...';
   try{
     const r=await api(`/api/dvc/kiem-tra-da-nop/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({loai})});
+      body:JSON.stringify({loai,phien_id})});
     if(r.xac_nhan){
-      ntkGhi(`<br>✅ <b>Đã xác nhận</b>: ${r.chi_tiet||r.trang_thai}`);
+      ntkGhi(`<br>✅ <b>Đã xác nhận</b>: ${r.chi_tiet||r.trang_thai}`+
+             (r.da_dong_trinh_duyet?' — đã tự đóng cửa sổ Chrome.':''));
       toast(`Đã xác nhận nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
       ntkDangCho=null;
       await ntkTaiTrangThai();
