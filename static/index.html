@@ -1707,7 +1707,20 @@ async function doBatchFetch(){
         return `<div style="color:${mau}">${ic[i.status]||'•'} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>`;
       }).join('');
     }
-    toast('Tra cứu hàng loạt hoàn tất','ok');
+    // TRƯỚC ĐÂY luôn báo "hoàn tất" màu xanh dù có công ty LỖI/BỎ QUA — người
+    // dùng dễ tưởng đã xong hết, không biết phải kéo xuống xem batchLog mới
+    // thấy công ty nào lỗi. Giờ toast phản ánh ĐÚNG kết quả, kèm tên công ty lỗi.
+    const dsLoi=st.items.filter(i=>i.status==='error');
+    const dsBoQua=st.items.filter(i=>i.status==='skipped');
+    if(dsLoi.length){
+      toast(`⚠ Xong ${st.total} công ty nhưng CÓ ${dsLoi.length} công ty LỖI khi tải: `+
+            dsLoi.map(i=>i.ten).join(', ')+' — xem chi tiết bên dưới, nên tra cứu lại','err');
+    }else if(dsBoQua.length){
+      toast(`Hoàn tất, nhưng ${dsBoQua.length} công ty bị BỎ QUA (chưa đăng nhập được): `+
+            dsBoQua.map(i=>i.ten).join(', '),'err');
+    }else{
+      toast('Tra cứu hàng loạt hoàn tất, không có lỗi','ok');
+    }
     await loadCompanies();
     if(current)await refreshInvoices();
   }catch(e){toast('Lỗi: '+e.message,'err');}
