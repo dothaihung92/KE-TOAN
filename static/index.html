@@ -997,6 +997,8 @@ function dvcbFilter(){
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
 
 let ntkTrangThai={}, ntkChonSet=new Set(), ntkHangDoi=[], ntkDangCho=null, ntkDangChay=false, ntkBiDung=false;
+let ntkPollTimer=null, ntkPollLan=0;
+const NTK_KHOANG_POLL_MS=60000, NTK_POLL_TOI_DA=15;   // tu kiem tra moi 60s, toi da 15 lan (~15 phut)
 const NTK_TEN_LOAI={GTGT:'01/GTGT',TNCN:'05/KK-TNCN'};
 async function moNopToKhai(){
   document.getElementById('ntkKetQua').style.display='none';
@@ -1124,10 +1126,48 @@ async function ntkBatDau(){
   await ntkXuLyTiep();
 }
 function ntkDung(){
+  ntkDungPoll();
   ntkBiDung=true;
   ntkGhi('<br>⏹ Đã dừng theo yêu cầu — các công ty còn lại trong hàng đợi CHƯA được xử lý.');
   ntkHangDoi=[];ntkDangCho=null;ntkDangChay=false;
   ntkCapNhatNutChay();
+}
+function ntkDungPoll(){
+  if(ntkPollTimer){clearInterval(ntkPollTimer);ntkPollTimer=null;}
+  ntkPollLan=0;
+}
+function ntkBatDauPoll(){
+  ntkDungPoll();
+  ntkPollTimer=setInterval(ntkKiemTraTuDong, NTK_KHOANG_POLL_MS);
+}
+async function ntkKiemTraTuDong(){
+  if(!ntkDangCho){ntkDungPoll();return;}
+  ntkPollLan++;
+  const nhan=document.getElementById('ntkTrangThaiPoll');
+  if(ntkPollLan>NTK_POLL_TOI_DA){
+    ntkDungPoll();
+    if(nhan)nhan.textContent='⏸ Đã dừng tự động kiểm tra (quá lâu chưa thấy xác nhận) — bấm nút bên dưới để kiểm tra thủ công.';
+    return;
+  }
+  const {cid,loai,ten}=ntkDangCho;
+  if(nhan)nhan.textContent=`⏳ Đang tự động kiểm tra trên cổng Thuế... (lần ${ntkPollLan}/${NTK_POLL_TOI_DA})`;
+  try{
+    const r=await api(`/api/dvc/kiem-tra-da-nop/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({loai})});
+    if(r.xac_nhan){
+      ntkDungPoll();
+      ntkGhi(`<br>✅ <b>Đã tự động xác nhận</b>: ${r.chi_tiet||r.trang_thai}`);
+      toast(`Đã xác nhận nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
+      ntkDangCho=null;
+      await ntkTaiTrangThai();
+      await ntkXuLyTiep();
+    }else if(nhan){
+      nhan.textContent=`⏳ Chưa thấy được chấp nhận (lần ${ntkPollLan}/${NTK_POLL_TOI_DA}) — tự kiểm tra lại sau `+
+        `${NTK_KHOANG_POLL_MS/1000}s. Bạn cũng có thể bấm nút bên dưới để kiểm tra ngay.`;
+    }
+  }catch(e){
+    if(nhan)nhan.textContent=`⚠ Lỗi khi tự kiểm tra (lần ${ntkPollLan}/${NTK_POLL_TOI_DA}): ${e.message} — sẽ tự thử lại.`;
+  }
 }
 function ntkTenCty(cid){
   const c=companies.find(x=>x.id===cid);
@@ -1175,7 +1215,9 @@ async function ntkXuLyTiep(){
            `Chrome vừa mở cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút xác nhận bên dưới:`);
   }
   ntkGhi(`<br><span id="ntkChoXacNhan"></span>`);
+  ntkGhi(`<br><span id="ntkTrangThaiPoll" style="font-size:12px;color:var(--muted);font-style:italic"></span>`);
   ntkVeNutChoXacNhan(!kyOk);
+  ntkBatDauPoll();   // tự kiểm tra định kỳ, không bắt buộc phải quay lại bấm tay
 }
 function ntkVeNutChoXacNhan(hienNutKy){
   const el=document.getElementById('ntkChoXacNhan');
@@ -1204,6 +1246,7 @@ async function ntkBamKyHoSo(){
 }
 async function ntkXacNhanVaTiep(){
   if(!ntkDangCho)return;
+  ntkDungPoll();   // dang tu kiem tra thu cong roi, tam dung poll tranh trung lap
   const {cid,loai,ten}=ntkDangCho;
   const el=document.getElementById('ntkChoXacNhan');
   if(el)el.innerHTML='⏳ Đang tra cứu lại trên cổng Dịch vụ công để xác nhận...';
@@ -1221,15 +1264,18 @@ async function ntkXacNhanVaTiep(){
       if(el)el.innerHTML=`<button class="btn ghost" onclick="ntkXacNhanVaTiep()">🔄 Kiểm tra lại</button> `+
         `<button class="btn ghost" onclick="ntkDanhDauThuCongVaTiep()">☑ Vẫn đánh dấu đã nộp (thủ công)</button> `+
         `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua, xử lý tiếp</button>`;
+      ntkBatDauPoll();   // van chua xong -> tiep tuc tu kiem tra dinh ky ben canh nut bam tay
     }
   }catch(e){
     ntkGhi(`<br>❌ Lỗi khi kiểm tra: ${e.message}`);
     if(el)el.innerHTML=`<button class="btn ghost" onclick="ntkXacNhanVaTiep()">🔄 Thử lại</button> `+
       `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua, xử lý tiếp</button>`;
+    ntkBatDauPoll();
   }
 }
 async function ntkDanhDauThuCongVaTiep(){
   if(!ntkDangCho)return;
+  ntkDungPoll();
   const {cid,loai,ten}=ntkDangCho;
   try{
     await api(`/api/dvc/nop-to-khai-thu-cong/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1242,6 +1288,7 @@ async function ntkDanhDauThuCongVaTiep(){
 }
 async function ntkBoQuaVaTiep(){
   if(!ntkDangCho)return;
+  ntkDungPoll();
   ntkGhi(`<br>⏭ Bỏ qua ${ntkDangCho.ten} (${NTK_TEN_LOAI[ntkDangCho.loai]||ntkDangCho.loai}) — vẫn ở trạng thái chưa nộp.`);
   ntkDangCho=null;
   await ntkXuLyTiep();
