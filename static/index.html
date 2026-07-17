@@ -652,7 +652,25 @@ let companies=[], current=null, editingId=null, captchaKey=null, curRows=[];
 function toast(msg,type=''){
   const t=document.getElementById('toast');
   t.textContent=msg; t.className='toast show '+type;
-  setTimeout(()=>t.className='toast',3200);
+  // Lỗi cần đủ thời gian để đọc/chụp lại — trước đây tự tắt sau 3.2s như
+  // thông báo thường, có khi biến mất trước khi kịp đọc hết nội dung lỗi.
+  setTimeout(()=>t.className='toast', type==='err'?8000:3200);
+}
+async function docLoiTuResponse(r){
+  // Đọc lỗi từ response CÀNG CHI TIẾT CÀNG TỐT — trước đây nếu response
+  // không phải JSON hợp lệ (vd lỗi 500 trả về trang HTML) thì rơi về đúng
+  // 1 câu chung chung "Lỗi kết xuất", không biết lỗi thật là gì để báo lại.
+  try{
+    const j=await r.json();
+    return j.detail||`Lỗi kết xuất (mã ${r.status})`;
+  }catch{
+    try{
+      const t=await r.text();
+      return t?`Lỗi kết xuất (mã ${r.status}): ${t.slice(0,300)}`:`Lỗi kết xuất (mã ${r.status})`;
+    }catch{
+      return `Lỗi kết xuất (mã ${r.status})`;
+    }
+  }
 }
 async function api(path,opts={}){
   const r=await fetch(path,opts);
@@ -1945,12 +1963,12 @@ async function exportHTKK(){
     if(denN)url+=`den=${encodeURIComponent(fmt(denN))}&`;
     if(nguoiKy)url+=`nguoi_ky=${encodeURIComponent(nguoiKy)}`;
     const r=await fetch(url);
-    if(!r.ok){let m='Lỗi kết xuất';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    if(!r.ok)throw new Error(await docLoiTuResponse(r));
     const res=await r.json();
     await loadCompanies();
     toast('Đã kết xuất XML: '+res.fname+' (đã tự mở). Nhập vào HTKK qua "Tải dữ liệu"','ok');
     if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
-  }catch(e){toast(e.message,'err')}
+  }catch(e){console.error('Lỗi kết xuất HTKK:',e);toast(e.message,'err')}
 }
 
 async function exportHTKKTNCN(){
@@ -1977,12 +1995,12 @@ async function exportHTKKTNCN(){
     if(denN)url+=`den=${encodeURIComponent(fmt(denN))}&`;
     if(nguoiKy)url+=`nguoi_ky=${encodeURIComponent(nguoiKy)}`;
     const r=await fetch(url);
-    if(!r.ok){let m='Lỗi kết xuất';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    if(!r.ok)throw new Error(await docLoiTuResponse(r));
     const res=await r.json();
     await loadCompanies();
     toast('Đã kết xuất XML: '+res.fname+' (đã tự mở)','ok');
     if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
-  }catch(e){toast(e.message,'err')}
+  }catch(e){console.error('Lỗi kết xuất TNCN:',e);toast(e.message,'err')}
 }
 
 /* ---------- IMPORT DANH SÁCH CÔNG TY ---------- */
