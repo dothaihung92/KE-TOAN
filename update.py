@@ -32,7 +32,6 @@ FILES = [
     "start.sh",
     ".gitattributes",
     "static/index.html",
-    "static/logo.png",
     "templates/htkk_01gtgt_template.xml",
 ]
 

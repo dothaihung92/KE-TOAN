@@ -821,11 +821,6 @@ def home():
         return f.read()
 
 
-@app.get("/logo.png")
-def logo_png():
-    return FileResponse(os.path.join(BASE_DIR, "static", "logo.png"), media_type="image/png")
-
-
 # ---------- TỐC ĐỘ TẢI ----------
 @app.get("/api/speed")
 def get_speed():
