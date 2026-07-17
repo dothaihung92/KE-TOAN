@@ -3912,16 +3912,24 @@ def _run_fetch_job(cid: int, body: dict):
 
                     # Thử tối đa 2 LƯỢT cho toàn bộ khoảng ngày (mỗi lượt bên trong
                     # đã tự thử lại theo tháng/trạng thái) trước khi báo lỗi hẳn.
+                    # QUAN TRỌNG: trước đây lượt 2 CHỈ được kích hoạt khi query_invoices
+                    # RAISE hẳn 1 lỗi — nếu nó trả về BÌNH THƯỜNG (không raise) nhưng chỉ
+                    # LỖI RIÊNG PHẦN (vd mua vào máy tính tiền: 1/3 trạng thái ttxly rớt
+                    # mạng dù 2 trạng thái kia OK) thì KHÔNG hề được thử lại tự động —
+                    # phần mềm chỉ báo "có thể thiếu" rồi bắt người dùng tự tra cứu lại
+                    # tay. Giờ lỗi riêng phần cũng tính là "chưa xong", được thử lại
+                    # NGAY trong cùng 1 lượt tra cứu, không cần người dùng can thiệp.
                     invs = None
                     loi_cuoi = None
+                    loi_rieng = []
                     bo_qua_404 = False
-                    for lan_thu in range(2):
+                    SO_LAN_THU = 2
+                    for lan_thu in range(SO_LAN_THU):
                         try:
                             invs = client.query_invoices(
                                 tu, den, loai=loai, he_thong=he_thong,
                                 progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"))
                             loi_cuoi = None
-                            break
                         except Exception as e:
                             es = str(e)
                             if "TOKEN_EXPIRED" in es:
@@ -3931,11 +3939,26 @@ def _run_fetch_job(cid: int, body: dict):
                                 bo_qua_404 = True
                                 break
                             loi_cuoi = es
-                            if lan_thu == 0:
+                            loi_rieng = []
+                            if lan_thu < SO_LAN_THU - 1:
                                 cho = 30 if ("429" in es or "quá nhiều" in es) else 8
                                 msg(stage="warn",
                                     text=f"⚠ {loai_txt}{ht_txt}: {es[:140]}. Đang chờ {cho}s rồi thử lại...")
                                 time.sleep(cho)
+                            continue
+
+                        # Không raise lỗi nhưng vẫn có thể lỗi RIÊNG PHẦN (vd 1 trong 3
+                        # trạng thái mua vào lỗi dù 2 cái kia OK) — CŨNG PHẢI thử lại
+                        # toàn bộ (chưa xong = chưa dừng), không chỉ khi raise hẳn.
+                        loi_rieng = getattr(client, "last_query_errors", None) or []
+                        if not loi_rieng:
+                            break   # lấy sạch, không lỗi gì -> xong, khỏi thử thêm
+                        if lan_thu < SO_LAN_THU - 1:
+                            msg(stage="warn",
+                                text=f"⚠ {loai_txt}{ht_txt}: {len(loi_rieng)} lượt bị lỗi riêng "
+                                     f"phần ({'; '.join(loi_rieng[:2])}) — đang tra cứu LẠI toàn "
+                                     f"bộ để lấy cho đủ, chưa dừng...")
+                            time.sleep(10)
 
                     if bo_qua_404:
                         msg(stage="warn", text=f"{loai_txt}{ht_txt}: không có (404) — bỏ qua")
@@ -3955,18 +3978,15 @@ def _run_fetch_job(cid: int, body: dict):
                                  f"không bị xóa).")
                         continue
 
-                    # Không raise lỗi nhưng vẫn có thể lỗi RIÊNG PHẦN (vd 1 trong 3 trạng
-                    # thái mua vào lỗi dù 2 cái kia OK) — vẫn phải cảnh báo, không im lặng.
-                    loi_rieng = getattr(client, "last_query_errors", None) or []
                     if loi_rieng:
                         loai_that_bai[loai] = True
                         ly_do_loi[loai].append(
-                            f"{loai_txt}{ht_txt}: một phần bị lỗi ({len(loi_rieng)} lượt) — "
-                            f"{'; '.join(loi_rieng[:3])}")
+                            f"{loai_txt}{ht_txt}: một phần bị lỗi ({len(loi_rieng)} lượt) dù đã "
+                            f"tra cứu lại {SO_LAN_THU} lượt — {'; '.join(loi_rieng[:3])}")
                         msg(stage="warn",
-                            text=f"⚠ {loai_txt}{ht_txt}: một phần bị lỗi dù đã thử lại "
-                                 f"({len(loi_rieng)} lượt) — KẾT QUẢ CÓ THỂ THIẾU. "
-                                 f"Chi tiết: {'; '.join(loi_rieng[:3])}")
+                            text=f"⚠ {loai_txt}{ht_txt}: một phần bị lỗi dù đã tra cứu lại "
+                                 f"{SO_LAN_THU} lượt ({len(loi_rieng)} lượt còn lỗi) — KẾT QUẢ CÓ "
+                                 f"THỂ THIẾU. Chi tiết: {'; '.join(loi_rieng[:3])}")
 
                     exp0 = getattr(client, "last_query_total", 0) or 0
                     if not invs:
