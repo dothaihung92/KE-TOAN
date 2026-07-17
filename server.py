@@ -893,7 +893,9 @@ def update_company(cid: int, data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     # Nếu password để trống -> GIỮ password cũ (không xóa)
-    cur = conn.execute("SELECT password, dvc_password, dvc_password2 FROM companies WHERE id=?", (cid,)).fetchone()
+    cur = conn.execute(
+        "SELECT password, dvc_password, dvc_password2, dia_chi, ma_cqt_noi_nop, "
+        "ten_cqt_noi_nop FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
@@ -904,15 +906,28 @@ def update_company(cid: int, data: dict = Body(...)):
     dvc2 = data.get("dvc_password2")
     if dvc2 is None or dvc2 == "":
         dvc2 = (cur["dvc_password2"] if cur and "dvc_password2" in cur.keys() else "") or ""
+    # Địa chỉ trụ sở / mã+tên CQT nơi nộp (dùng cho Kết xuất XML cho HTKK):
+    # NẾU request không gửi kèm (hoặc gửi rỗng) -> GIỮ giá trị cũ, giống hệt
+    # cách xử lý mật khẩu ở trên — trước đây LUÔN ghi đè theo đúng những gì
+    # request gửi lên, nên bất kỳ lần lưu nào (kể cả từ 1 chỗ khác chỉ định
+    # sửa 1 trường khác) mà vô tình thiếu 1 trong 3 trường này sẽ XÓA SẠCH
+    # dữ liệu đã nhập trước đó, buộc phải nhập lại từ đầu.
+    dia_chi = (data.get("dia_chi") or "").strip()
+    if not dia_chi:
+        dia_chi = (cur["dia_chi"] if cur and "dia_chi" in cur.keys() else "") or ""
+    ma_cqt = (data.get("ma_cqt_noi_nop") or "").strip()
+    if not ma_cqt:
+        ma_cqt = (cur["ma_cqt_noi_nop"] if cur and "ma_cqt_noi_nop" in cur.keys() else "") or ""
+    ten_cqt = (data.get("ten_cqt_noi_nop") or "").strip()
+    if not ten_cqt:
+        ten_cqt = (cur["ten_cqt_noi_nop"] if cur and "ten_cqt_noi_nop" in cur.keys() else "") or ""
     conn.execute(
         "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
-         (data.get("dia_chi") or "").strip(),
-         (data.get("ma_cqt_noi_nop") or "").strip(),
-         (data.get("ten_cqt_noi_nop") or "").strip(), cid)
+         dia_chi, ma_cqt, ten_cqt, cid)
     )
     conn.commit()
     conn.close()
