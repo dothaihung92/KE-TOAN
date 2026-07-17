@@ -3821,6 +3821,14 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                 "file_da_chon": file_path, "phien_id": phien_id,
                 "thong_bao": "Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
                              "bạn có thể tự làm tiếp bằng tay từ đó."}
+    # Tải file XONG là TỰ LUÔN bấm "Ký hồ sơ" → chọn chứng thư số → "Tiếp
+    # tục" (không bắt người dùng phải bấm thêm 1 nút riêng trong phần mềm) —
+    # rồi DỪNG LẠI ở đúng biên an toàn: không đụng tới ô nhập mã PIN hay nút
+    # "Nộp tờ khai", 2 việc đó vẫn bắt buộc người dùng tự làm.
+    try:
+        ket_ky = _dvc_bam_ky_ho_so(drv)
+    except Exception as e:
+        ket_ky = {"ok": False, "loi": f"Lỗi khi tự bấm Ký hồ sơ: {e}", "buoc": []}
     conn = db()
     # Mỗi lần TỰ ĐỘNG tải file lên là 1 lượt CHỜ KÝ MỚI — reset xác nhận "đã
     # nộp" cũ về chưa, vì xác nhận trước đó (nếu có) là của LẦN CHẠY TRƯỚC,
@@ -3833,11 +3841,18 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
+    if ket_ky.get("ok"):
+        thong_bao = ("Đã tự động đăng nhập, tải file XML lên, bấm \"Ký hồ sơ\" và vào tới bước "
+                     "chọn chứng thư số. DỪNG LẠI theo yêu cầu an toàn — hãy chuyển sang cửa sổ "
+                     "Chrome vừa mở để tự nhập mã PIN và bấm \"Nộp tờ khai\".")
+    else:
+        thong_bao = ("Đã tự động đăng nhập và tải file XML lên, nhưng KHÔNG tự bấm được "
+                     f"\"Ký hồ sơ\" ({ket_ky.get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn "
+                     "đang mở — hãy tự bấm \"Ký hồ sơ\" và \"Nộp tờ khai\" bằng tay từ đó.")
     return {"ok": True, "file_da_chon": file_path, "phien_id": phien_id,
+            "ky_ho_so": ket_ky,
             "ung_vien_khac": [u for u in ung_vien if u != file_path],
-            "thong_bao": "Đã tự động đăng nhập, khởi tạo đúng tờ khai và tải file XML lên. "
-                         "DỪNG LẠI theo yêu cầu an toàn — hãy chuyển sang cửa sổ Chrome vừa "
-                         "mở để tự KIỂM TRA rồi bấm \"Ký hồ sơ\" và \"Nộp tờ khai\"."}
+            "thong_bao": thong_bao}
 
 
 @app.post("/api/dvc/bam-ky-ho-so/{phien_id}")

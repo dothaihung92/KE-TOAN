@@ -1164,17 +1164,23 @@ async function ntkXuLyTiep(){
   }
   ntkDangCho={cid,loai,ten,phien_id:r.phien_id};
   ntkGhi(`<br>✅ Đã tải file lên: <code>${r.file_da_chon}</code>`);
-  ntkGhi(`<br>👉 Bấm "🖊️ Tự bấm Ký hồ sơ" để phần mềm tự chọn chứng thư số giúp bạn (dừng lại `+
-         `NGAY TRƯỚC khi nhập mã PIN), hoặc tự làm toàn bộ bằng tay trên cửa sổ Chrome vừa mở. `+
-         `Sau khi đã tự nhập mã PIN + bấm <b>"Nộp tờ khai"</b> xong cho ${ten} (${NTK_TEN_LOAI[loai]||loai}), `+
-         `bấm nút xác nhận bên dưới:`);
+  const kyOk=r.ky_ho_so&&r.ky_ho_so.ok;
+  if(kyOk){
+    ntkGhi(`<br>🖊️ Đã TỰ bấm "Ký hồ sơ" và chọn chứng thư số xong.`);
+    ntkGhi(`<br>👉 Hãy chuyển sang cửa sổ Chrome, tự nhập <b>mã PIN</b> và bấm <b>"Nộp tờ khai"</b> `+
+           `cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút xác nhận bên dưới:`);
+  }else{
+    ntkGhi(`<br>⚠ Chưa TỰ bấm được "Ký hồ sơ" (${(r.ky_ho_so&&r.ky_ho_so.loi)||'không rõ lý do'}).`);
+    ntkGhi(`<br>👉 Bấm "🖊️ Tự bấm Ký hồ sơ" để thử lại, hoặc tự làm toàn bộ bằng tay trên cửa sổ `+
+           `Chrome vừa mở cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút xác nhận bên dưới:`);
+  }
   ntkGhi(`<br><span id="ntkChoXacNhan"></span>`);
-  ntkVeNutChoXacNhan();
+  ntkVeNutChoXacNhan(!kyOk);
 }
-function ntkVeNutChoXacNhan(){
+function ntkVeNutChoXacNhan(hienNutKy){
   const el=document.getElementById('ntkChoXacNhan');
   if(!el||!ntkDangCho)return;
-  const nutKy=ntkDangCho.phien_id
+  const nutKy=(hienNutKy&&ntkDangCho.phien_id)
     ?`<button class="btn ghost" onclick="ntkBamKyHoSo()">🖊️ Tự bấm Ký hồ sơ</button> `:'';
   el.innerHTML=nutKy+
                `<button class="btn" onclick="ntkXacNhanVaTiep()">✅ Tôi đã nộp — Kiểm tra &amp; tiếp tục</button> `+
