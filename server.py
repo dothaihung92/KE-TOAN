@@ -773,6 +773,20 @@ def init_db():
         conn.execute("ALTER TABLE imported_data ADD COLUMN mua_ds_nk REAL DEFAULT 0")
     if "mua_thue_nk" not in icols:
         conn.execute("ALTER TABLE imported_data ADD COLUMN mua_thue_nk REAL DEFAULT 0")
+    # Migration: "đã nộp xong" (nop_to_khai_log) PHẢI dựa trên xác nhận THẬT
+    # SỰ đã được cổng Thuế chấp nhận (tra cứu lại), không phải chỉ vì đã tự
+    # động tải file lên xong (bước đó mới là "sẵn sàng ký", CHƯA chắc đã nộp).
+    ntkcols = [r[1] for r in conn.execute("PRAGMA table_info(nop_to_khai_log)").fetchall()]
+    if "xac_nhan" not in ntkcols:
+        conn.execute("ALTER TABLE nop_to_khai_log ADD COLUMN xac_nhan INTEGER DEFAULT 0")
+    if "xac_nhan_at" not in ntkcols:
+        conn.execute("ALTER TABLE nop_to_khai_log ADD COLUMN xac_nhan_at TEXT")
+    if "xac_nhan_nguon" not in ntkcols:
+        # 'auto' = phần mềm tự tra cứu lại và xác nhận được; 'thu_cong' = người
+        # dùng tự đánh dấu bằng tay (dùng khi tra cứu tự động không xác định được)
+        conn.execute("ALTER TABLE nop_to_khai_log ADD COLUMN xac_nhan_nguon TEXT")
+    if "xac_nhan_chi_tiet" not in ntkcols:
+        conn.execute("ALTER TABLE nop_to_khai_log ADD COLUMN xac_nhan_chi_tiet TEXT")
     conn.commit()
     conn.close()
 
@@ -2378,7 +2392,12 @@ def _dvc_browser_thongbao(drv, ma):
 
 def _khong_dau(s):
     import unicodedata
-    s = unicodedata.normalize("NFD", str(s or ""))
+    # "đ"/"Đ" là 1 CHỮ CÁI RIÊNG trong Unicode (Latin D with stroke), KHÔNG
+    # phải chữ cái gốc + dấu kết hợp nên NFD không tách được — nếu bỏ qua sẽ
+    # khiến MỌI so khớp từ khoá có chữ "đ" (vd "đã chấp nhận") luôn thất bại
+    # dù chuỗi gốc đúng y hệt. Phải tự thay trước khi chuẩn hoá NFD.
+    s = str(s or "").replace("đ", "d").replace("Đ", "D")
+    s = unicodedata.normalize("NFD", s)
     return "".join(c for c in s if unicodedata.category(c) != "Mn").lower().strip()
 
 # Các cột báo cáo Tra cứu tờ khai (theo file mẫu)
@@ -3733,9 +3752,14 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                 "thong_bao": "Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
                              "bạn có thể tự làm tiếp bằng tay từ đó."}
     conn = db()
+    # Mỗi lần TỰ ĐỘNG tải file lên là 1 lượt CHỜ KÝ MỚI — reset xác nhận "đã
+    # nộp" cũ về chưa, vì xác nhận trước đó (nếu có) là của LẦN CHẠY TRƯỚC,
+    # không phải lần này (người dùng vẫn cần Ký+Nộp rồi kiểm tra lại).
     conn.execute(
-        "INSERT INTO nop_to_khai_log (company_id, loai, file_ten, done_at) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(company_id, loai) DO UPDATE SET file_ten=excluded.file_ten, done_at=excluded.done_at",
+        "INSERT INTO nop_to_khai_log (company_id, loai, file_ten, done_at, xac_nhan, xac_nhan_at, xac_nhan_nguon) "
+        "VALUES (?, ?, ?, ?, 0, NULL, NULL) "
+        "ON CONFLICT(company_id, loai) DO UPDATE SET file_ten=excluded.file_ten, "
+        "done_at=excluded.done_at, xac_nhan=0, xac_nhan_at=NULL, xac_nhan_nguon=NULL",
         (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
@@ -3746,17 +3770,158 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                          "mở để tự KIỂM TRA rồi bấm \"Ký hồ sơ\" và \"Nộp tờ khai\"."}
 
 
+def _ky_tu_ten_file_nop(ten_file):
+    """Tách khoảng ngày (tu, den dạng dd/mm/yyyy) từ tên file XML nộp tờ
+    khai, dựa theo mẫu 'Q{quý}{yyyy}' hoặc 'M{mm}{yyyy}' đã dùng trong tên
+    file — khớp cả quy ước phần mềm tự xuất (export_htkk*) lẫn tên file
+    HTKK xuất thật (vd '...TT80Q22026L00.xml'). (None, None) nếu không
+    nhận diện được."""
+    import re as _re, calendar as _cal
+    m = _re.search(r"Q([1-4])(\d{4})", ten_file or "", _re.I)
+    if m:
+        q, yyyy = int(m.group(1)), int(m.group(2))
+        mm1 = (q - 1) * 3 + 1
+        mm2 = mm1 + 2
+        return f"01/{mm1:02d}/{yyyy}", f"{_cal.monthrange(yyyy, mm2)[1]}/{mm2:02d}/{yyyy}"
+    m = _re.search(r"M(\d{2})(\d{4})", ten_file or "", _re.I)
+    if m:
+        mm, yyyy = int(m.group(1)), int(m.group(2))
+        return f"01/{mm:02d}/{yyyy}", f"{_cal.monthrange(yyyy, mm)[1]}/{mm:02d}/{yyyy}"
+    return None, None
+
+
+def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
+    """Tra cứu LẠI trên cổng Dịch vụ công (tự chọn DVC/Thuế điện tử theo
+    đúng mốc 01/07/2025, dùng chung hạ tầng đã có) xem tờ khai loại `loai`
+    trong khoảng tu-den ĐÃ ĐƯỢC CƠ QUAN THUẾ CHẤP NHẬN thật hay chưa —
+    không suy đoán, không tự nhận là xong chỉ vì đã tải file lên.
+    Trả (xac_nhan: bool, trang_thai_text: str, chi_tiet: str)."""
+    nguon_list = _nguon_tra_cuu_theo_ky(tu, den)
+    tat_ca = []
+    for nguon in nguon_list:
+        if nguon == "dvc":
+            rows, _, _, _ = _dvc_browser_tracuu(drv, tu, den)
+        else:
+            rows, _, _, _ = _dvc_browser_tracuu_tdt(drv, tu, den)
+        tat_ca.extend(rows or [])
+    khop = [r for r in tat_ca if _loai_tk_tu_ten_day_du(r.get("to_khai", "")) == loai]
+    if not khop:
+        return False, "", ("Chưa tìm thấy tờ khai đã nộp trên cổng Dịch vụ công trong khoảng "
+                            f"{tu} - {den}. Có thể bạn chưa bấm \"Ký hồ sơ\"/\"Nộp tờ khai\", "
+                            "hoặc cổng Thuế chưa cập nhật kịp.")
+    for r in khop:
+        if "da chap nhan" in _khong_dau(r.get("trang_thai", "")):
+            return True, r.get("trang_thai", ""), (
+                f"Tờ khai '{r.get('to_khai', '')}' kỳ {r.get('ky', '')} — {r.get('trang_thai', '')}")
+    r0 = khop[0]
+    return False, r0.get("trang_thai", ""), (
+        f"Tìm thấy tờ khai '{r0.get('to_khai', '')}' kỳ {r0.get('ky', '')} nhưng trạng thái hiện "
+        f"là '{r0.get('trang_thai', '')}' (chưa phải \"Đã chấp nhận\").")
+
+
+@app.post("/api/dvc/kiem-tra-da-nop/{cid}")
+def dvc_kiem_tra_da_nop(cid: int, body: dict = Body(...)):
+    """Tra cứu LẠI trên cổng Dịch vụ công để XÁC NHẬN tờ khai đã thực sự
+    được cơ quan Thuế chấp nhận, TRƯỚC KHI đánh dấu "đã nộp xong" — vì bước
+    tự động tải file lên chỉ mới là "sẵn sàng ký", CHƯA chắc người dùng đã
+    thực sự bấm Ký hồ sơ + Nộp tờ khai. body: {loai, tu?, den?} (tu/den
+    dd/mm/yyyy; nếu không truyền sẽ tự suy ra từ tên file đã khớp)."""
+    loai = (body.get("loai") or "").strip().upper()
+    if loai not in _DVC_TO_KHAI_CONFIG:
+        raise HTTPException(400, f"Loại '{loai}' không hợp lệ")
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    tu, den = body.get("tu"), body.get("den")
+    if not tu or not den:
+        folder = _get_setting("thu_muc_nop_to_khai", "")
+        fp, _ = _tim_file_nop_to_khai(folder, comp["mst"], loai)
+        if fp:
+            tu, den = _ky_tu_ten_file_nop(os.path.basename(fp))
+    if not tu or not den:
+        raise HTTPException(
+            400, "Không xác định được kỳ để tra cứu lại (không tìm thấy file/kỳ tương ứng)")
+    pw1 = ((comp["dvc_password"] if "dvc_password" in comp.keys() else "") or "").strip()
+    pw2 = ((comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or "").strip()
+    if not pw1 and not pw2:
+        raise HTTPException(400, "Chưa lưu mật khẩu Dịch vụ công cho công ty này")
+    try:
+        drv = _dvc_make_driver(headless=True)
+    except Exception as e:
+        raise HTTPException(500, f"Không mở được Chrome: {e}")
+    try:
+        ok, dung_pass, info = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
+        if not ok:
+            raise HTTPException(401, f"Đăng nhập thất bại: {json.dumps(info, ensure_ascii=False)}")
+        xac_nhan, trang_thai_text, chi_tiet = _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den)
+    finally:
+        try:
+            drv.quit()
+        except Exception:
+            pass
+    conn = db()
+    conn.execute(
+        "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, xac_nhan_nguon, xac_nhan_chi_tiet) "
+        "VALUES (?, ?, ?, ?, 'auto', ?) "
+        "ON CONFLICT(company_id, loai) DO UPDATE SET xac_nhan=excluded.xac_nhan, "
+        "xac_nhan_at=excluded.xac_nhan_at, xac_nhan_nguon='auto', "
+        "xac_nhan_chi_tiet=excluded.xac_nhan_chi_tiet",
+        (cid, loai, 1 if xac_nhan else 0, datetime.datetime.now().isoformat(), chi_tiet))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "xac_nhan": xac_nhan, "trang_thai": trang_thai_text, "chi_tiet": chi_tiet}
+
+
+@app.post("/api/dvc/nop-to-khai-thu-cong/{cid}")
+def dvc_nop_to_khai_thu_cong(cid: int, body: dict = Body(...)):
+    """Đánh dấu THỦ CÔNG trạng thái "đã nộp" cho 1 công ty + loại tờ khai —
+    dùng khi người dùng tự biết chắc đã nộp (hoặc muốn bỏ đánh dấu) mà
+    không chờ/không cần phần mềm tự tra cứu lại. body: {loai, xac_nhan}."""
+    loai = (body.get("loai") or "").strip().upper()
+    if loai not in _DVC_TO_KHAI_CONFIG:
+        raise HTTPException(400, f"Loại '{loai}' không hợp lệ")
+    xac_nhan = bool(body.get("xac_nhan"))
+    conn = db()
+    conn.execute(
+        "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, xac_nhan_nguon) "
+        "VALUES (?, ?, ?, ?, 'thu_cong') "
+        "ON CONFLICT(company_id, loai) DO UPDATE SET xac_nhan=excluded.xac_nhan, "
+        "xac_nhan_at=excluded.xac_nhan_at, xac_nhan_nguon='thu_cong'",
+        (cid, loai, 1 if xac_nhan else 0, datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/dvc/reset-trang-thai-nop")
+def dvc_reset_trang_thai_nop():
+    """Xoá TOÀN BỘ trạng thái "đã nộp" đã ghi nhận cho mọi công ty — dùng
+    khi bắt đầu 1 kỳ kê khai mới, để tất cả công ty trở về "chưa nộp"."""
+    conn = db()
+    conn.execute("DELETE FROM nop_to_khai_log")
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 @app.get("/api/dvc/nop-to-khai-trang-thai")
 def dvc_nop_to_khai_trang_thai():
     """Với mỗi công ty: file XML (GTGT/TNCN) đang khớp trong 'thư mục mặc
-    định', và đã từng tải-lên-thành-công với ĐÚNG file đó chưa (để tô xanh
-    'đã xong' trong danh sách chọn công ty). Nếu kỳ sau file thay tên khác
-    (kỳ mới) thì tự động coi là CHƯA xong — không cần người dùng tự dọn cờ."""
+    định', và đã được XÁC NHẬN THẬT SỰ là nộp xong chưa (qua tra cứu lại
+    trên cổng Thuế, hoặc người dùng tự đánh dấu thủ công) — KHÔNG còn coi
+    "đã tải file lên" là "đã nộp xong" nữa, vì đó mới chỉ là bước sẵn sàng
+    ký. Xác nhận kiểu 'auto' tự động hết hiệu lực nếu file khớp đổi tên
+    (sang kỳ mới); xác nhận 'thu_cong' được giữ tới khi người dùng tự bỏ
+    đánh dấu hoặc bấm 'Bỏ hết trạng thái đã nộp'."""
     folder = _get_setting("thu_muc_nop_to_khai", "")
     conn = db()
     rows = conn.execute("SELECT id, mst FROM companies ORDER BY ten").fetchall()
-    logs = {(r["company_id"], r["loai"]): r["file_ten"]
-            for r in conn.execute("SELECT company_id, loai, file_ten FROM nop_to_khai_log").fetchall()}
+    logs = {(r["company_id"], r["loai"]): r
+            for r in conn.execute(
+                "SELECT company_id, loai, file_ten, xac_nhan, xac_nhan_nguon, xac_nhan_chi_tiet "
+                "FROM nop_to_khai_log").fetchall()}
     conn.close()
     out = {}
     for c in rows:
@@ -3765,7 +3930,25 @@ def dvc_nop_to_khai_trang_thai():
         for loai in _DVC_TO_KHAI_CONFIG:
             fp, _ = _tim_file_nop_to_khai(folder, c["mst"], loai)
             ten = os.path.basename(fp) if fp else None
-            item[loai] = {"file": ten, "da_nop": bool(ten) and logs.get((cid, loai)) == ten}
+            log = logs.get((cid, loai))
+            da_nop = False
+            if log and log["xac_nhan"]:
+                if log["xac_nhan_nguon"] == "thu_cong":
+                    da_nop = True
+                elif ten and log["file_ten"] and ten != log["file_ten"]:
+                    # có file KHÁC xuất hiện trong thư mục (kỳ mới) -> xác
+                    # nhận cũ không còn đáng tin, phải tra cứu lại
+                    da_nop = False
+                else:
+                    # vẫn đúng file cũ (hoặc thư mục hiện không còn file nào,
+                    # vd đã dọn sau khi nộp) -> GIỮ xác nhận đã có, không đòi
+                    # hỏi file phải luôn còn nằm trong thư mục mới tính là xong
+                    da_nop = True
+            item[loai] = {
+                "file": ten, "da_nop": da_nop,
+                "xac_nhan_nguon": (log["xac_nhan_nguon"] if log else None),
+                "chi_tiet": (log["xac_nhan_chi_tiet"] if log else None),
+            }
         out[str(cid)] = item
     return out
 

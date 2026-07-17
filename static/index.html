@@ -316,14 +316,17 @@
 
 <!-- MODAL TỰ ĐỘNG NỘP TỜ KHAI (dừng trước khi ký) -->
 <div class="modal-bg" id="nopToKhaiModal">
-  <div class="modal" style="width:min(620px,96vw);max-width:620px">
+  <div class="modal" style="width:min(680px,96vw);max-width:680px;max-height:92vh;display:flex;flex-direction:column">
     <h3 style="margin-top:0">📤 Tự động nộp tờ khai</h3>
+    <div style="overflow:auto;flex:1;padding-right:4px">
     <p class="hint" style="margin-top:0">
       Phần mềm tự đăng nhập, tự chọn đúng tờ khai và tự tải file XML (khớp theo MST) từ
       <b>thư mục mặc định</b> lên cổng Dịch vụ công. <b>Sau đó DỪNG LẠI</b> — cửa sổ Chrome
       sẽ mở hiển thị (không ẩn) để bạn tự kiểm tra rồi tự bấm <b>"Ký hồ sơ"</b> và
-      <b>"Nộp tờ khai"</b> bằng tay. Phần mềm không tự ký/nộp vì đây là hành động nộp thuế
-      chính thức, khó/không thể huỷ.
+      <b>"Nộp tờ khai"</b> bằng tay. Phần mềm không tự ký/nộp. Xong 1 tờ khai (đã Ký+Nộp),
+      bấm nút <b>"Tôi đã nộp — Kiểm tra & tiếp tục"</b> để phần mềm <b>tra cứu lại trên
+      cổng Thuế xác nhận thật sự đã được chấp nhận</b> rồi mới đánh dấu xanh và tự chuyển
+      sang tờ khai/công ty tiếp theo — không đánh dấu "đã nộp" chỉ vì đã tải file lên.
     </p>
     <div class="field">
       <label>Thư mục mặc định <span style="font-weight:400;color:var(--muted)">(chứa các file XML cần nộp của tất cả công ty)</span></label>
@@ -333,10 +336,24 @@
       </div>
     </div>
     <div class="field">
-      <label>Công ty <span style="font-weight:400;color:var(--muted)">(xanh = đã nộp xong với file hiện có trong thư mục mặc định)</span></label>
-      <input id="ntkSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="ntkFilter()"
-             style="width:100%;padding:8px;border:1px solid #d0d7de;border-radius:8px;margin-bottom:6px">
+      <label style="display:flex;justify-content:space-between;align-items:center">
+        <span>Công ty</span>
+        <span style="font-weight:400">
+          <a href="#" onclick="ntkChonTatCa(true);return false" style="font-size:13px">Chọn tất cả (đang hiện)</a> ·
+          <a href="#" onclick="ntkChonTatCa(false);return false" style="font-size:13px">Bỏ chọn</a> ·
+          <a href="#" onclick="ntkResetTatCa();return false" style="font-size:13px;color:#b91c1c">Bỏ hết trạng thái đã nộp (kỳ mới)</a>
+        </span>
+      </label>
+      <div style="display:flex;gap:8px;margin-bottom:6px">
+        <input id="ntkSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="ntkRenderCtyList()" style="flex:1;padding:8px;border:1px solid #d0d7de;border-radius:8px">
+        <select id="ntkLoc" onchange="ntkRenderCtyList()" style="padding:8px;border:1px solid #d0d7de;border-radius:8px">
+          <option value="tatca">Tất cả</option>
+          <option value="chuanop">Chưa nộp</option>
+          <option value="danop">Đã nộp</option>
+        </select>
+      </div>
       <div id="ntkCtyList" style="max-height:220px;overflow:auto;border:1px solid #d0d7de;border-radius:8px;padding:4px 8px"></div>
+      <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
     </div>
     <div class="field">
       <label>Kỳ nộp</label>
@@ -346,9 +363,11 @@
       </select>
     </div>
     <div id="ntkKetQua" style="display:none;margin-top:8px;border-radius:10px;padding:12px 14px;font-size:13px"></div>
+    </div>
     <div class="modal-actions" style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
       <button class="btn ghost" onclick="dongNopToKhai()">Đóng</button>
-      <button class="btn" id="ntkRunBtn" onclick="ntkChay()">🚀 Chạy tới bước sẵn sàng ký</button>
+      <button class="btn ghost" id="ntkCancelBtn" style="display:none" onclick="ntkDung()">⏹ Dừng</button>
+      <button class="btn" id="ntkRunBtn" onclick="ntkBatDau()">🚀 Bắt đầu nộp lần lượt</button>
     </div>
   </div>
 </div>
@@ -976,13 +995,14 @@ function dvcbFilter(){
 }
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
 
-let ntkTrangThai={}, ntkSelectedCid=null, ntkHangDoi=[];
+let ntkTrangThai={}, ntkChonSet=new Set(), ntkHangDoi=[], ntkDangCho=null, ntkDangChay=false, ntkBiDung=false;
 const NTK_TEN_LOAI={GTGT:'01/GTGT',TNCN:'05/KK-TNCN'};
 async function moNopToKhai(){
   document.getElementById('ntkKetQua').style.display='none';
   document.getElementById('ntkSearch').value='';
-  ntkSelectedCid=null;
-  ntkHangDoi=[];
+  document.getElementById('ntkLoc').value='tatca';
+  ntkChonSet=new Set();
+  ntkHangDoi=[];ntkDangCho=null;ntkDangChay=false;ntkBiDung=false;
   ntkCapNhatNutChay();
   try{
     const r=await api('/api/settings/thu-muc-nop-to-khai');
@@ -1000,33 +1020,66 @@ function ntkDaXongCty(cid){
   if(!t)return false;
   return !!(t.GTGT&&t.GTGT.da_nop) && !!(t.TNCN&&t.TNCN.da_nop);
 }
+function ntkBadge(cid,loai){
+  const t=(ntkTrangThai[cid]||{})[loai]||{};
+  const xong=!!t.da_nop;
+  const bg=xong?'#dcfce7':'#fee2e2', fg=xong?'#15803d':'#b91c1c';
+  const nhan=xong?`✓ ${loai}`:`✗ ${loai}`;
+  const tit=t.chi_tiet?` title="${t.chi_tiet.replace(/"/g,'')}"`:'';
+  return `<span onclick="event.stopPropagation();ntkToggleThuCong(${cid},'${loai}',${!xong})" `+
+    `style="cursor:pointer;font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:10px;background:${bg};color:${fg};white-space:nowrap"${tit}>${nhan}</span>`;
+}
+async function ntkToggleThuCong(cid,loai,xacNhan){
+  try{
+    await api(`/api/dvc/nop-to-khai-thu-cong/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({loai,xac_nhan:xacNhan})});
+    await ntkTaiTrangThai();
+  }catch(e){toast('Lỗi: '+e.message,'err');}
+}
 function ntkRenderCtyList(){
   const q=(document.getElementById('ntkSearch').value||'').toLowerCase().trim();
+  const loc=document.getElementById('ntkLoc').value;
   const list=document.getElementById('ntkCtyList');
-  const shown=companies.filter(c=>!q||(c.ten||'').toLowerCase().includes(q)||(c.mst||'').toLowerCase().includes(q));
-  if(ntkSelectedCid && !shown.some(c=>c.id===ntkSelectedCid)) ntkSelectedCid=null;
+  let shown=companies.filter(c=>!q||(c.ten||'').toLowerCase().includes(q)||(c.mst||'').toLowerCase().includes(q));
+  if(loc==='chuanop')shown=shown.filter(c=>!ntkDaXongCty(c.id));
+  else if(loc==='danop')shown=shown.filter(c=>ntkDaXongCty(c.id));
   list.innerHTML=shown.map(c=>{
-    const xong=ntkDaXongCty(c.id);
-    const chon=(c.id===ntkSelectedCid);
-    const bg=chon?'#dbeafe':(xong?'#eaf7ee':'transparent');
-    const border=chon?'1px solid #60a5fa':'1px solid transparent';
-    return `<div onclick="ntkChonCty(${c.id})" style="cursor:pointer;padding:6px 8px;border-radius:6px;background:${bg};border:${border};display:flex;justify-content:space-between;align-items:center">
-      <span>${xong?'✅ ':''}${c.ten} (${c.mst})</span>
-    </div>`;
+    const chon=ntkChonSet.has(c.id);
+    return `<label class="chk" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer">
+      <input type="checkbox" ${chon?'checked':''} onchange="ntkToggleChon(${c.id},this.checked)">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.ten} <span style="color:#888">(${c.mst})</span></span>
+      ${ntkBadge(c.id,'GTGT')}${ntkBadge(c.id,'TNCN')}
+    </label>`;
   }).join('')||'<div style="padding:8px;color:#999">Không có công ty nào khớp</div>';
+  ntkCapNhatDemChon();
 }
-function ntkFilter(){ntkRenderCtyList();}
-function ntkChonCty(cid){
-  if(ntkHangDoi.length&&cid!==ntkSelectedCid){
-    // đổi công ty giữa chừng khi còn tờ khai chưa nộp trong hàng đợi -> hủy
-    // hàng đợi cũ (thuộc công ty trước), tránh nhầm sang công ty vừa chọn
-    ntkHangDoi=[];
-    ntkCapNhatNutChay();
-  }
-  ntkSelectedCid=cid;ntkRenderCtyList();
+function ntkToggleChon(cid,checked){
+  if(checked)ntkChonSet.add(cid);else ntkChonSet.delete(cid);
+  ntkCapNhatDemChon();
 }
-function ntkKyChange(){ntkHangDoi=[];ntkCapNhatNutChay();}
-function dongNopToKhai(){document.getElementById('nopToKhaiModal').style.display='none';}
+function ntkCapNhatDemChon(){
+  const el=document.getElementById('ntkCount');
+  if(el)el.textContent=ntkChonSet.size;
+}
+function ntkChonTatCa(v){
+  document.querySelectorAll('#ntkCtyList input[type=checkbox]').forEach(chk=>{
+    chk.checked=v;
+    chk.dispatchEvent(new Event('change'));
+  });
+}
+async function ntkResetTatCa(){
+  if(!confirm('Bỏ hết trạng thái "đã nộp" đã ghi nhận cho TẤT CẢ công ty (dùng khi bắt đầu kỳ kê khai mới)?'))return;
+  try{
+    await api('/api/dvc/reset-trang-thai-nop',{method:'POST'});
+    await ntkTaiTrangThai();
+    toast('Đã bỏ hết trạng thái đã nộp','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err');}
+}
+function ntkKyChange(){}
+function dongNopToKhai(){
+  if(ntkDangChay){toast('Đang chạy dở — bấm Dừng trước khi đóng','err');return;}
+  document.getElementById('nopToKhaiModal').style.display='none';
+}
 async function ntkLuuThuMuc(){
   const thu_muc=document.getElementById('ntkThuMuc').value.trim();
   try{
@@ -1035,71 +1088,135 @@ async function ntkLuuThuMuc(){
     await ntkTaiTrangThai();
   }catch(e){toast('Lỗi lưu: '+e.message,'err');}
 }
-async function ntkChayMotLoai(cid,loai,kq){
-  kq.innerHTML+=`<br>⏳ Đang xử lý ${loai}... (cửa sổ Chrome sẽ hiện ra trên máy, đừng tắt)`;
-  try{
-    const r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai})});
-    if(r.ok){
-      kq.innerHTML+=`<br>✅ [${loai}] ${r.thong_bao}<br>📄 File: <code>${r.file_da_chon}</code>`;
-      return true;
-    }
-    kq.innerHTML+=`<br>⚠ [${loai}] ${r.thong_bao||r.loi||'Có lỗi'}`;
-    return false;
-  }catch(e){
-    kq.innerHTML+=`<br>❌ [${loai}] ${e.message}`;
-    return false;
-  }
-}
 function ntkCapNhatNutChay(){
-  const btn=document.getElementById('ntkRunBtn');
-  if(!btn)return;
-  btn.textContent=ntkHangDoi.length
-    ? `➡ Tiếp tục nộp ${NTK_TEN_LOAI[ntkHangDoi[0]]||ntkHangDoi[0]}`
-    : '🚀 Chạy tới bước sẵn sàng ký';
+  const run=document.getElementById('ntkRunBtn'), cancel=document.getElementById('ntkCancelBtn');
+  if(!run)return;
+  run.style.display=ntkDangChay?'none':'';
+  cancel.style.display=ntkDangChay?'':'none';
+  run.disabled=ntkDangChay;
 }
-async function ntkChay(){
-  const cid=ntkSelectedCid;
-  const ky=document.getElementById('ntkKy').value;
-  if(!cid){toast('Chưa chọn công ty','err');return;}
-  if(ky==='nam'){toast('Nộp theo Năm chưa được hỗ trợ — sẽ cập nhật sau','err');return;}
-  const btn=document.getElementById('ntkRunBtn');
+function ntkGhi(html){
   const kq=document.getElementById('ntkKetQua');
-
-  // CHỈ chạy TỪNG tờ khai một, KHÔNG mở song song nhiều cửa sổ Chrome cùng
-  // lúc — trước đây bấm 1 lần là tự chạy GTGT rồi chạy luôn TNCN ngay sau
-  // đó (không đợi người dùng ký+nộp xong tờ khai trước), nên 2 cửa sổ mở
-  // chồng lên nhau. Giờ mỗi lần bấm nút chỉ xử lý ĐÚNG 1 tờ khai trong
-  // hàng đợi; xong tờ khai này (đã tự ký+nộp xong bên cửa sổ Chrome) mới
-  // bấm tiếp để phần mềm mở cửa sổ cho tờ khai tiếp theo.
-  if(!ntkHangDoi.length){
-    ntkHangDoi = (ky==='quy') ? ['GTGT','TNCN'] : [];
-    kq.style.display='block';
-    kq.style.background='#eef6f0';
-    kq.innerHTML='';
-  }
-  const loai=ntkHangDoi.shift();
-  if(!loai){ntkCapNhatNutChay();return;}
-
-  btn.disabled=true;
-  try{
-    const ok=await ntkChayMotLoai(cid,loai,kq);
-    if(!ok){
-      kq.style.background='#fdecea';
-      ntkHangDoi=[];   // dừng hẳn, không tự chạy tiếp tờ khai còn lại trong hàng đợi
-    }else if(ntkHangDoi.length){
-      const tiep=NTK_TEN_LOAI[ntkHangDoi[0]]||ntkHangDoi[0];
-      kq.innerHTML+=`<br><br>👉 Hãy chuyển sang cửa sổ Chrome vừa mở để tự <b>Ký hồ sơ</b> + `+
-                    `<b>Nộp tờ khai</b> cho ${NTK_TEN_LOAI[loai]||loai} TRƯỚC. Xong rồi quay lại đây `+
-                    `bấm nút bên dưới để tiếp tục nộp ${tiep}.`;
-      toast(`Đã xong ${NTK_TEN_LOAI[loai]||loai} — tự Ký+Nộp xong rồi bấm tiếp để nộp ${tiep}`,'ok');
-    }else{
-      toast('Đã tải xong — hãy chuyển sang cửa sổ Chrome để tự Ký + Nộp','ok');
+  kq.style.display='block';
+  kq.innerHTML+=html;
+  kq.scrollTop=kq.scrollHeight;
+}
+async function ntkBatDau(){
+  if(ntkDangChay)return;
+  if(!ntkChonSet.size){toast('Chưa chọn công ty nào','err');return;}
+  const ky=document.getElementById('ntkKy').value;
+  if(ky==='nam'){toast('Nộp theo Năm chưa được hỗ trợ — sẽ cập nhật sau','err');return;}
+  const dsLoai=(ky==='quy')?['GTGT','TNCN']:[];
+  // Bỏ qua sẵn những mục ĐÃ xác nhận nộp xong — chỉ xếp hàng những mục
+  // thật sự còn thiếu, tránh mở lại trình duyệt cho việc đã xong rồi.
+  ntkHangDoi=[];
+  for(const cid of companies.filter(c=>ntkChonSet.has(c.id)).map(c=>c.id)){
+    for(const loai of dsLoai){
+      const t=(ntkTrangThai[cid]||{})[loai];
+      if(!(t&&t.da_nop))ntkHangDoi.push({cid,loai});
     }
-    await ntkTaiTrangThai();
-  }finally{
-    btn.disabled=false;
-    ntkCapNhatNutChay();
   }
+  if(!ntkHangDoi.length){toast('Tất cả công ty đã chọn đều đã xác nhận nộp xong rồi','ok');return;}
+  ntkBiDung=false;ntkDangChay=true;ntkDangCho=null;
+  document.getElementById('ntkKetQua').innerHTML='';
+  ntkCapNhatNutChay();
+  await ntkXuLyTiep();
+}
+function ntkDung(){
+  ntkBiDung=true;
+  ntkGhi('<br>⏹ Đã dừng theo yêu cầu — các công ty còn lại trong hàng đợi CHƯA được xử lý.');
+  ntkHangDoi=[];ntkDangCho=null;ntkDangChay=false;
+  ntkCapNhatNutChay();
+}
+function ntkTenCty(cid){
+  const c=companies.find(x=>x.id===cid);
+  return c?c.ten:('#'+cid);
+}
+async function ntkXuLyTiep(){
+  if(ntkBiDung)return;
+  if(!ntkHangDoi.length){
+    ntkDangChay=false;ntkDangCho=null;
+    ntkCapNhatNutChay();
+    ntkGhi('<br><br>🏁 <b>Đã xử lý xong toàn bộ hàng đợi.</b>');
+    toast('Đã xử lý xong toàn bộ hàng đợi','ok');
+    return;
+  }
+  const {cid,loai}=ntkHangDoi.shift();
+  const ten=ntkTenCty(cid);
+  ntkGhi(`<br><br>━━━ <b>${ten}</b> — ${NTK_TEN_LOAI[loai]||loai} ━━━`);
+  ntkGhi(`<br>⏳ Đang tự đăng nhập + tải file lên... (cửa sổ Chrome sẽ hiện ra, đừng tắt)`);
+  let r;
+  try{
+    r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai})});
+  }catch(e){
+    // "không tìm thấy file" -> báo RÕ RÀNG rồi TỰ ĐỘNG bỏ qua, xử lý tiếp,
+    // không dừng cả hàng đợi chỉ vì 1 công ty thiếu tờ khai
+    const khongCoFile=/không tìm thấy file/i.test(e.message||'');
+    ntkGhi(`<br>${khongCoFile?'⚠':'❌'} <b>${ten}</b> — ${khongCoFile?`KHÔNG CÓ tờ khai ${NTK_TEN_LOAI[loai]||loai} để nộp trong thư mục mặc định — bỏ qua.`:e.message}`);
+    await ntkXuLyTiep();
+    return;
+  }
+  if(!r.ok){
+    ntkGhi(`<br>⚠ ${r.thong_bao||r.loi||'Có lỗi'} — bỏ qua, xử lý tiếp.`);
+    await ntkXuLyTiep();
+    return;
+  }
+  ntkDangCho={cid,loai,ten};
+  ntkGhi(`<br>✅ Đã tải file lên: <code>${r.file_da_chon}</code>`);
+  ntkGhi(`<br>👉 Hãy chuyển sang cửa sổ Chrome vừa mở, tự <b>Ký hồ sơ</b> + <b>Nộp tờ khai</b> cho `+
+         `${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút bên dưới:`);
+  ntkGhi(`<br><span id="ntkChoXacNhan"></span>`);
+  ntkVeNutChoXacNhan();
+}
+function ntkVeNutChoXacNhan(){
+  const el=document.getElementById('ntkChoXacNhan');
+  if(!el||!ntkDangCho)return;
+  el.innerHTML=`<button class="btn" onclick="ntkXacNhanVaTiep()">✅ Tôi đã nộp — Kiểm tra &amp; tiếp tục</button> `+
+               `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua (chưa nộp)</button>`;
+}
+async function ntkXacNhanVaTiep(){
+  if(!ntkDangCho)return;
+  const {cid,loai,ten}=ntkDangCho;
+  const el=document.getElementById('ntkChoXacNhan');
+  if(el)el.innerHTML='⏳ Đang tra cứu lại trên cổng Dịch vụ công để xác nhận...';
+  try{
+    const r=await api(`/api/dvc/kiem-tra-da-nop/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({loai})});
+    if(r.xac_nhan){
+      ntkGhi(`<br>✅ <b>Đã xác nhận</b>: ${r.chi_tiet||r.trang_thai}`);
+      toast(`Đã xác nhận nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
+      ntkDangCho=null;
+      await ntkTaiTrangThai();
+      await ntkXuLyTiep();
+    }else{
+      ntkGhi(`<br>⚠ <b>Chưa xác nhận được</b>: ${r.chi_tiet||'Chưa tìm thấy tờ khai được chấp nhận'}`);
+      if(el)el.innerHTML=`<button class="btn ghost" onclick="ntkXacNhanVaTiep()">🔄 Kiểm tra lại</button> `+
+        `<button class="btn ghost" onclick="ntkDanhDauThuCongVaTiep()">☑ Vẫn đánh dấu đã nộp (thủ công)</button> `+
+        `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua, xử lý tiếp</button>`;
+    }
+  }catch(e){
+    ntkGhi(`<br>❌ Lỗi khi kiểm tra: ${e.message}`);
+    if(el)el.innerHTML=`<button class="btn ghost" onclick="ntkXacNhanVaTiep()">🔄 Thử lại</button> `+
+      `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua, xử lý tiếp</button>`;
+  }
+}
+async function ntkDanhDauThuCongVaTiep(){
+  if(!ntkDangCho)return;
+  const {cid,loai,ten}=ntkDangCho;
+  try{
+    await api(`/api/dvc/nop-to-khai-thu-cong/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({loai,xac_nhan:true})});
+    ntkGhi(`<br>☑ Đã đánh dấu THỦ CÔNG là đã nộp cho ${ten} (${NTK_TEN_LOAI[loai]||loai}).`);
+  }catch(e){ntkGhi(`<br>❌ Lỗi đánh dấu thủ công: ${e.message}`);}
+  ntkDangCho=null;
+  await ntkTaiTrangThai();
+  await ntkXuLyTiep();
+}
+async function ntkBoQuaVaTiep(){
+  if(!ntkDangCho)return;
+  ntkGhi(`<br>⏭ Bỏ qua ${ntkDangCho.ten} (${NTK_TEN_LOAI[ntkDangCho.loai]||ntkDangCho.loai}) — vẫn ở trạng thái chưa nộp.`);
+  ntkDangCho=null;
+  await ntkXuLyTiep();
 }
 
 function dvcbSelectAll(v){
