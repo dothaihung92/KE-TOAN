@@ -1876,7 +1876,76 @@ def _tim_file_nop_to_khai(folder, mst, loai):
     return ung_vien[0][1], [u[1] for u in ung_vien]
 
 
-_DVC_OPEN_DRIVERS = []   # giữ tham chiếu các trình duyệt HIỂN THỊ đang chờ người dùng tự Ký+Nộp
+_DVC_OPEN_DRIVERS = {}   # {phien_id: drv} — giữ tham chiếu trình duyệt HIỂN THỊ đang chờ người
+                          # dùng tự Ký+Nộp, tra theo phien_id để thao tác tiếp lên ĐÚNG cửa sổ đó
+
+
+def _dvc_bam_ky_ho_so(drv):
+    """Sau khi đã tải file XML lên (trang .../nop-file-xml), tự bấm nút "Ký
+    hồ sơ", đợi khung "Chọn chữ ký số" hiện ra rồi tự bấm "Tiếp tục" để vào
+    đúng chứng thư số — DỪNG LẠI NGAY SAU ĐÓ. Từ đây trở đi là bước nhập mã
+    PIN thật của token (rất có thể do 1 chương trình/driver riêng của
+    Windows xử lý, NGOÀI tầm với của trình duyệt) và bấm "Nộp tờ khai" —
+    BẮT BUỘC người dùng tự làm, phần mềm không được và không thể tự động."""
+    import time as _t
+    buoc = []
+
+    _HOA = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ"
+    _THUONG = "abcdefghijklmnopqrstuvwxyzáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ"
+
+    def _tim_nut(text_can_tim):
+        xpath = (f"//*[self::button or self::a or self::span][contains("
+                 f"translate(normalize-space(.),'{_HOA}','{_THUONG}'),'{text_can_tim.lower()}')]")
+        try:
+            els = drv.find_elements("xpath", xpath)
+        except Exception:
+            return []
+        return [e for e in els if e.is_displayed()]
+
+    try:
+        nut_ky = _tim_nut("ký hồ sơ")
+        if not nut_ky:
+            return {"ok": False, "loi": "Không tìm thấy nút \"Ký hồ sơ\" trên trang hiện tại",
+                    "buoc": buoc}
+        nut_ky[0].click()
+        buoc.append("Đã bấm \"Ký hồ sơ\"")
+    except Exception as e:
+        return {"ok": False, "loi": f"Lỗi khi bấm \"Ký hồ sơ\": {e}", "buoc": buoc}
+
+    hien = False
+    for _ in range(20):
+        _t.sleep(0.5)
+        if _tim_nut("tiếp tục"):
+            hien = True
+            break
+    if not hien:
+        return {"ok": False,
+                "loi": "Không thấy khung \"Chọn chữ ký số\" hiện ra sau khi bấm \"Ký hồ sơ\" "
+                       "(có thể trang tải chậm hoặc đã đổi giao diện) — cửa sổ Chrome vẫn mở, "
+                       "bạn tự làm tiếp từ đây.",
+                "buoc": buoc}
+    buoc.append("Khung \"Chọn chữ ký số\" đã hiện ra")
+
+    try:
+        radios = [r for r in drv.find_elements("css selector", "input[type=radio]") if r.is_displayed()]
+        if radios and not any(r.is_selected() for r in radios):
+            radios[0].click()
+            buoc.append("Đã chọn chứng thư số (dòng đầu tiên trong danh sách)")
+    except Exception:
+        pass
+
+    try:
+        nut_tt = _tim_nut("tiếp tục")
+        if not nut_tt:
+            return {"ok": False,
+                    "loi": "Không tìm thấy nút \"Tiếp tục\" trong khung chọn chữ ký số",
+                    "buoc": buoc}
+        nut_tt[0].click()
+        buoc.append("Đã bấm \"Tiếp tục\" để vào bước ký")
+    except Exception as e:
+        return {"ok": False, "loi": f"Lỗi khi bấm \"Tiếp tục\": {e}", "buoc": buoc}
+
+    return {"ok": True, "buoc": buoc}
 
 
 def _dvc_browser_nop_to_khai(drv, cfg, file_path):
@@ -3745,10 +3814,11 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         except Exception:
             pass
         raise HTTPException(500, f"Lỗi khi tự động hoá: {e}")
-    _DVC_OPEN_DRIVERS.append(drv)   # giữ trình duyệt MỞ, không quit()
+    phien_id = f"{cid}-{loai}-{int(time.time() * 1000)}"
+    _DVC_OPEN_DRIVERS[phien_id] = drv   # giữ trình duyệt MỞ, không quit()
     if not ket.get("ok"):
         return {"ok": False, "loi": ket.get("loi"), "buoc": ket.get("buoc"),
-                "file_da_chon": file_path,
+                "file_da_chon": file_path, "phien_id": phien_id,
                 "thong_bao": "Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
                              "bạn có thể tự làm tiếp bằng tay từ đó."}
     conn = db()
@@ -3763,11 +3833,34 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
-    return {"ok": True, "file_da_chon": file_path,
+    return {"ok": True, "file_da_chon": file_path, "phien_id": phien_id,
             "ung_vien_khac": [u for u in ung_vien if u != file_path],
             "thong_bao": "Đã tự động đăng nhập, khởi tạo đúng tờ khai và tải file XML lên. "
                          "DỪNG LẠI theo yêu cầu an toàn — hãy chuyển sang cửa sổ Chrome vừa "
                          "mở để tự KIỂM TRA rồi bấm \"Ký hồ sơ\" và \"Nộp tờ khai\"."}
+
+
+@app.post("/api/dvc/bam-ky-ho-so/{phien_id}")
+def dvc_bam_ky_ho_so(phien_id: str):
+    """Trên ĐÚNG cửa sổ Chrome đã tải file XML lên (theo phien_id trả về từ
+    /api/dvc/nop-to-khai), tự bấm "Ký hồ sơ" rồi tự bấm "Tiếp tục" trong
+    khung "Chọn chữ ký số" — RỒI DỪNG LẠI. Không đụng tới bước nhập mã PIN
+    hay nút "Nộp tờ khai" — 2 việc đó BẮT BUỘC người dùng tự làm."""
+    drv = _DVC_OPEN_DRIVERS.get(phien_id)
+    if not drv:
+        raise HTTPException(
+            404, "Không tìm thấy phiên trình duyệt này (có thể cửa sổ đã bị đóng, hoặc "
+                 "phiên đã quá cũ) — hãy chạy lại từ bước tải file lên.")
+    try:
+        ket = _dvc_bam_ky_ho_so(drv)
+    except Exception as e:
+        raise HTTPException(500, f"Lỗi khi tự bấm Ký hồ sơ: {e}")
+    if not ket.get("ok"):
+        return {"ok": False, "loi": ket.get("loi"), "buoc": ket.get("buoc"),
+                "thong_bao": "Dừng giữa chừng — cửa sổ Chrome vẫn đang mở, bạn tự làm tiếp từ đó."}
+    return {"ok": True, "buoc": ket.get("buoc"),
+            "thong_bao": "Đã bấm \"Ký hồ sơ\" và vào tới bước chọn chứng thư số. DỪNG LẠI Ở ĐÂY — "
+                         "hãy chuyển sang cửa sổ Chrome để tự nhập mã PIN và bấm \"Nộp tờ khai\"."}
 
 
 def _ky_tu_ten_file_nop(ten_file):

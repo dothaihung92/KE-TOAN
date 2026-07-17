@@ -321,12 +321,13 @@
     <div style="overflow:auto;flex:1;padding-right:4px">
     <p class="hint" style="margin-top:0">
       Phần mềm tự đăng nhập, tự chọn đúng tờ khai và tự tải file XML (khớp theo MST) từ
-      <b>thư mục mặc định</b> lên cổng Dịch vụ công. <b>Sau đó DỪNG LẠI</b> — cửa sổ Chrome
-      sẽ mở hiển thị (không ẩn) để bạn tự kiểm tra rồi tự bấm <b>"Ký hồ sơ"</b> và
-      <b>"Nộp tờ khai"</b> bằng tay. Phần mềm không tự ký/nộp. Xong 1 tờ khai (đã Ký+Nộp),
-      bấm nút <b>"Tôi đã nộp — Kiểm tra & tiếp tục"</b> để phần mềm <b>tra cứu lại trên
-      cổng Thuế xác nhận thật sự đã được chấp nhận</b> rồi mới đánh dấu xanh và tự chuyển
-      sang tờ khai/công ty tiếp theo — không đánh dấu "đã nộp" chỉ vì đã tải file lên.
+      <b>thư mục mặc định</b> lên cổng Dịch vụ công. Có thể bấm thêm <b>"🖊️ Tự bấm Ký hồ sơ"</b>
+      để phần mềm tự chọn chứng thư số giúp — nhưng <b>DỪNG LẠI ngay trước khi nhập mã PIN</b>,
+      vì bước đó cần token vật lý/mã PIN thật của bạn. Bạn tự nhập PIN và tự bấm
+      <b>"Nộp tờ khai"</b> — phần mềm không tự ký/nộp, đây là hành động nộp thuế chính thức.
+      Xong 1 tờ khai, bấm nút <b>"Tôi đã nộp — Kiểm tra & tiếp tục"</b> để phần mềm <b>tra cứu
+      lại trên cổng Thuế xác nhận thật sự đã được chấp nhận</b> rồi mới đánh dấu xanh và tự
+      chuyển sang tờ khai/công ty tiếp theo — không đánh dấu "đã nộp" chỉ vì đã tải file lên.
     </p>
     <div class="field">
       <label>Thư mục mặc định <span style="font-weight:400;color:var(--muted)">(chứa các file XML cần nộp của tất cả công ty)</span></label>
@@ -1161,18 +1162,39 @@ async function ntkXuLyTiep(){
     await ntkXuLyTiep();
     return;
   }
-  ntkDangCho={cid,loai,ten};
+  ntkDangCho={cid,loai,ten,phien_id:r.phien_id};
   ntkGhi(`<br>✅ Đã tải file lên: <code>${r.file_da_chon}</code>`);
-  ntkGhi(`<br>👉 Hãy chuyển sang cửa sổ Chrome vừa mở, tự <b>Ký hồ sơ</b> + <b>Nộp tờ khai</b> cho `+
-         `${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút bên dưới:`);
+  ntkGhi(`<br>👉 Bấm "🖊️ Tự bấm Ký hồ sơ" để phần mềm tự chọn chứng thư số giúp bạn (dừng lại `+
+         `NGAY TRƯỚC khi nhập mã PIN), hoặc tự làm toàn bộ bằng tay trên cửa sổ Chrome vừa mở. `+
+         `Sau khi đã tự nhập mã PIN + bấm <b>"Nộp tờ khai"</b> xong cho ${ten} (${NTK_TEN_LOAI[loai]||loai}), `+
+         `bấm nút xác nhận bên dưới:`);
   ntkGhi(`<br><span id="ntkChoXacNhan"></span>`);
   ntkVeNutChoXacNhan();
 }
 function ntkVeNutChoXacNhan(){
   const el=document.getElementById('ntkChoXacNhan');
   if(!el||!ntkDangCho)return;
-  el.innerHTML=`<button class="btn" onclick="ntkXacNhanVaTiep()">✅ Tôi đã nộp — Kiểm tra &amp; tiếp tục</button> `+
+  const nutKy=ntkDangCho.phien_id
+    ?`<button class="btn ghost" onclick="ntkBamKyHoSo()">🖊️ Tự bấm Ký hồ sơ</button> `:'';
+  el.innerHTML=nutKy+
+               `<button class="btn" onclick="ntkXacNhanVaTiep()">✅ Tôi đã nộp — Kiểm tra &amp; tiếp tục</button> `+
                `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua (chưa nộp)</button>`;
+}
+async function ntkBamKyHoSo(){
+  if(!ntkDangCho||!ntkDangCho.phien_id)return;
+  const {phien_id}=ntkDangCho;
+  ntkGhi(`<br>⏳ Đang tự bấm "Ký hồ sơ"...`);
+  try{
+    const r=await api(`/api/dvc/bam-ky-ho-so/${phien_id}`,{method:'POST'});
+    if(r.ok){
+      ntkGhi(`<br>✅ ${r.thong_bao}`);
+      toast('Đã bấm Ký hồ sơ — hãy tự nhập mã PIN và bấm Nộp tờ khai trên cửa sổ Chrome','ok');
+    }else{
+      ntkGhi(`<br>⚠ ${r.thong_bao||r.loi||'Có lỗi'}`);
+    }
+  }catch(e){
+    ntkGhi(`<br>❌ Lỗi khi tự bấm Ký hồ sơ: ${e.message} — bạn tự bấm bằng tay trên cửa sổ Chrome.`);
+  }
 }
 async function ntkXacNhanVaTiep(){
   if(!ntkDangCho)return;
