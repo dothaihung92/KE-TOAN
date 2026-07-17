@@ -2287,6 +2287,44 @@ try {
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
+_DVC_HOA_KO_DAU = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ"
+_DVC_THUONG_KO_DAU = "abcdefghijklmnopqrstuvwxyzáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ"
+
+
+def _dvc_qua_man_chon_loai_tk(drv, giay_cho=15):
+    """Trang đăng nhập DVC hiện thêm 1 màn 'Chọn loại tài khoản đăng nhập'
+    (Thuế điện tử / Định danh điện tử / Công chức thuế) TRƯỚC khi vào được
+    form nhập mật khẩu + captcha thật sự (khác trước đây vào thẳng form).
+    Nếu gặp màn này thì tự bấm 'Đăng nhập bằng tài khoản Thuế điện tử' rồi
+    chờ form thật load xong; nếu không gặp (portal đổi lại như cũ, hoặc đã
+    ở sẵn form thật) thì bỏ qua ngay, không tốn thời gian chờ vô ích."""
+    import time as _t
+    xpath = (f"//*[contains(translate(normalize-space(.),"
+             f"'{_DVC_HOA_KO_DAU}','{_DVC_THUONG_KO_DAU}'),'đăng nhập bằng tài khoản thuế điện tử')]")
+    for _ in range(int(giay_cho * 2)):
+        try:
+            if drv.find_elements("id", "image-capt") or drv.find_elements("id", "imgCaptcha"):
+                return False   # da o san form that (co anh captcha) -> khong can bam gi them
+        except Exception:
+            pass
+        try:
+            els = [e for e in drv.find_elements("xpath", xpath) if e.is_displayed()]
+        except Exception:
+            els = []
+        if els:
+            try:
+                els[0].click()
+            except Exception:
+                try:
+                    drv.execute_script("arguments[0].click();", els[0])
+                except Exception:
+                    return False
+            _t.sleep(1.2)
+            return True
+        _t.sleep(0.5)
+    return False
+
+
 def _dvc_wait_jquery(drv, giay=12):
     import time as _t
     for _ in range(int(giay*2)):
@@ -2345,6 +2383,7 @@ def _dvc_browser_login(drv, mst, password, so_lan=8):
     import re as _re, time as _t
     drv.get(DVC_BASE + "/homelogin"); _t.sleep(1.5)
     drv.get(DVC_BASE + "/login"); _t.sleep(1.0)
+    _dvc_qua_man_chon_loai_tk(drv)
     if not _dvc_wait_jquery(drv, 15):
         return False, {"loi": "Trang login không nạp được jQuery (có thể WAF chặn cả trình duyệt)"}
     digits = _re.sub(r"\D", "", mst or "")
