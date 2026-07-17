@@ -941,7 +941,7 @@ function dvcbFilter(){
   const q=(document.getElementById('dvcbSearch').value||'').toLowerCase().trim();
   document.querySelectorAll('.dvcbRow').forEach(r=>{
     const hien=(!q||r.dataset.key.includes(q));
-    r.style.display=hien?'flex':'none';
+    r.style.display=hien?'grid':'none';   // .dvcbRow dùng display:grid (4 cột) — 'flex' làm lệch/nhảy cột
     if(!hien){const c=r.querySelector('.dvcbChk');if(c)c.checked=false;}
   });
   dvcbCount();
