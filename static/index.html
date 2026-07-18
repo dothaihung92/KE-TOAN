@@ -35,7 +35,7 @@
   .sidebar ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
 
   /* ===== Sidebar layout ===== */
-  .app{display:grid;grid-template-columns:370px 1fr;min-height:100vh}
+  .app{display:grid;grid-template-columns:400px 1fr;min-height:100vh}
   .sidebar{
     background:linear-gradient(180deg,var(--green-d),#0f3527 100%);color:#e8f1ec;padding:0;
     display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
@@ -58,7 +58,7 @@
   .co.active::before{content:'';position:absolute;left:-1px;top:8px;bottom:8px;width:3px;border-radius:3px;
     background:linear-gradient(180deg,var(--gold),#e0af52)}
   .co .nm{font-size:13.5px;font-weight:600;line-height:1.35;word-break:break-word}
-  .co .mst{font-size:11.5px;color:#9cc0ad;margin-top:2px;font-variant-numeric:tabular-nums}
+  .co .mst{font-size:11.5px;color:#9cc0ad;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
   .co .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#5f7568;margin-right:6px}
   .co.online .dot{background:#5fd99a;box-shadow:0 0 7px #5fd99a}
   .add-co{margin:8px;padding:11px;border:1.5px dashed rgba(255,255,255,.25);
@@ -765,7 +765,7 @@ function tokenTrangThaiCty(c){
   const conNgay=Math.round((d-homNay)/86400000);
   const qua=conNgay<0, gap=!qua&&conNgay<=30;
   const fg=qua?'#f6867a':(gap?'#f0c869':'#9cc0ad');
-  const nhan=qua?'Hết hạn':(gap?'Sắp hết hạn':'');
+  const nhan=qua?`Hết hạn ${Math.abs(conNgay)} ngày`:`Còn hạn ${conNgay} ngày`;
   const p=c.token_ngay_het_han.split('-');
   const ngayStr=`${p[2]}/${p[1]}/${p[0]}`;
   return {conNgay,fg,nhan,ngayStr};
@@ -797,7 +797,7 @@ async function loadCompanies(){
     d.className='co'+(current===c.id?' active':'')+(c._online?' online':'');
     d.onclick=()=>selectCompany(c.id);
     const tt=tokenTrangThaiCty(c);
-    const tokenHtml=tt?` - Hạn token: ${tt.ngayStr}${tt.nhan?` - <span style="color:${tt.fg};font-weight:700">${tt.nhan}</span>`:''}`:'';
+    const tokenHtml=tt?` · ${tt.ngayStr} · <span style="color:${tt.fg};font-weight:700">${tt.nhan}</span>`:'';
     d.innerHTML=`<div class="nm"><span class="dot"></span>${c.ten}</div><div class="mst">MST: ${c.mst}${tokenHtml}</div>`;
     list.appendChild(d);
   });
