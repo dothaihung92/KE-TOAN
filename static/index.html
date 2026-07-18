@@ -2360,7 +2360,7 @@ async function importCongTy(input){
     const d=await r.json();
     await loadCompanies();
     let msg=`Đã thêm ${d.added} công ty`;
-    if(d.skipped)msg+=`, bỏ qua ${d.skipped} (trùng MST)`;
+    if(d.updated)msg+=`, cập nhật ${d.updated} công ty (trùng MST)`;
     toast(msg,'ok');
   }catch(e){toast(e.message,'err')}
   input.value='';

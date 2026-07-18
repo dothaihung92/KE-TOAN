@@ -5136,7 +5136,8 @@ async def import_companies(request: Request):
     — xem đầy đủ trong _CONGTY_COT (Tên công ty, MST, MST khác, Địa chỉ trụ
     sở, Mã/Tên CQT nơi nộp, Tên đăng nhập, Mật khẩu, 2 Mật khẩu Dịch vụ
     công, Ghi chú, Thư mục lưu XML/PDF, Thư mục lưu dữ liệu, Người ký).
-    Chỉ Tên và MST là bắt buộc. Bỏ qua dòng trùng MST.
+    Chỉ Tên và MST là bắt buộc. Trùng MST -> CẬP NHẬT công ty đã có theo dữ
+    liệu trong file (ô nào để trống thì giữ nguyên giá trị cũ, không xoá).
     """
     import openpyxl, io as _io
     form = await request.form()
@@ -5179,7 +5180,7 @@ async def import_companies(request: Request):
         raise HTTPException(400, "File phải có cột 'Tên công ty' và 'MST'")
 
     conn = db()
-    added = skipped = 0
+    added = updated = 0
     errors = []
     for r in range(2, ws.max_row + 1):
         ten = str(ws.cell(r, c_ten).value or "").strip()
@@ -5189,15 +5190,37 @@ async def import_companies(request: Request):
         # MST có thể bị Excel đọc thành số -> bỏ .0
         if mst.endswith(".0"):
             mst = mst[:-2]
-        dup = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
-        if dup:
-            skipped += 1
-            continue
+        dup = conn.execute("SELECT * FROM companies WHERE mst=?", (mst,)).fetchone()
         gia_tri = {"ten": ten, "mst": mst}
         for field, c in cols.items():
             if field in ("ten", "mst"):
                 continue
             gia_tri[field] = str(ws.cell(r, c).value or "").strip() if c else ""
+        if dup:
+            # Trùng MST -> CẬP NHẬT theo file import thay vì bỏ qua. Ô nào để
+            # trống trong Excel thì GIỮ NGUYÊN giá trị cũ (tránh import 1 file
+            # chỉ sửa vài cột lại xoá mất dữ liệu các cột khác).
+            dupd = dict(dup)
+            for field in list(gia_tri):
+                if field in ("ten", "mst"):
+                    continue
+                if not gia_tri[field]:
+                    gia_tri[field] = dupd.get(field) or ""
+            try:
+                conn.execute(
+                    "UPDATE companies SET ten=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, "
+                    "ten_cqt_noi_nop=?, username=?, password=?, dvc_password=?, "
+                    "dvc_password2=?, ghichu=?, save_dir=?, data_dir=?, nguoi_ky=? "
+                    "WHERE id=?",
+                    (gia_tri["ten"], gia_tri["mst_khac"], gia_tri["dia_chi"],
+                     gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"], gia_tri["username"],
+                     gia_tri["password"], gia_tri["dvc_password"], gia_tri["dvc_password2"],
+                     gia_tri["ghichu"], gia_tri["save_dir"], gia_tri["data_dir"],
+                     gia_tri["nguoi_ky"], dupd["id"]))
+                updated += 1
+            except Exception as e:
+                errors.append(f"{ten}: {e}")
+            continue
         try:
             conn.execute(
                 "INSERT INTO companies (ten, mst, mst_khac, dia_chi, ma_cqt_noi_nop, "
@@ -5214,7 +5237,7 @@ async def import_companies(request: Request):
             errors.append(f"{ten}: {e}")
     conn.commit()
     conn.close()
-    return {"ok": True, "added": added, "skipped": skipped, "errors": errors[:5]}
+    return {"ok": True, "added": added, "updated": updated, "errors": errors[:5]}
 
 
 @app.get("/api/export-companies")
