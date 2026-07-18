@@ -102,7 +102,7 @@ def kiem_tra_ma_kich_hoat(ma_kich_hoat: str, hwid: str = None):
         hwid_ma, han_str = payload_str.split("|")
     except Exception:
         return False, None, "Mã kích hoạt sai định dạng (payload)"
-    if hwid_ma != hwid:
+    if hwid_ma.strip().lower() != hwid.strip().lower():
         return False, None, "Mã kích hoạt này được cấp cho MÁY KHÁC — liên hệ admin để cấp lại"
     try:
         han = datetime.datetime.strptime(han_str, "%Y%m%d").date()

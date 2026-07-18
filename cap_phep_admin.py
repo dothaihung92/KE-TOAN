@@ -98,7 +98,7 @@ def cap_phep_moi():
     priv = _doc_khoa_rieng()
     conn = _log_db()
     print("=== CẤP PHÉP SỬ DỤNG ===")
-    hwid = input("Mã máy (HWID) user gửi qua Zalo: ").strip().upper()
+    hwid = input("Mã máy (HWID) user gửi qua Zalo: ").strip().lower()
     if not hwid or len(hwid) != 16:
         print("[LỖI] Mã máy phải đúng 16 ký tự (copy y nguyên từ màn hình 'Kích hoạt' của user).")
         return
