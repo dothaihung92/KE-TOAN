@@ -327,9 +327,11 @@
 
       <div class="card">
         <h3><span class="n">👥</span> Danh sách user đã cấp phép</h3>
+        <input id="adminSearch" placeholder="🔎 Lọc theo SĐT hoặc mã máy (HWID)..." oninput="adminVeDanhSach()"
+               style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px">
         <div class="tbl-wrap">
           <table>
-            <thead><tr><th>HWID</th><th>SĐT</th><th>Ngày cấp</th><th>Hạn dùng</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead>
+            <thead><tr><th style="width:44px">STT</th><th>HWID</th><th>SĐT</th><th>Ngày cấp</th><th>Hạn dùng</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead>
             <tbody id="adminDanhSachBody"></tbody>
           </table>
         </div>
@@ -897,11 +899,16 @@ function adminVeThongKe(){
 }
 function adminVeDanhSach(){
   const tb=document.getElementById('adminDanhSachBody');
-  if(!adminDanhSachCache.length){
-    tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">Chưa cấp phép cho ai</td></tr>';
+  const q=(document.getElementById('adminSearch')?.value||'').trim().toLowerCase();
+  const ds=q?adminDanhSachCache.filter(r=>
+    (r.hwid||'').toLowerCase().includes(q)||(r.so_dien_thoai||'').toLowerCase().includes(q)
+  ):adminDanhSachCache;
+  if(!ds.length){
+    tb.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">`+
+      (q?'Không tìm thấy':'Chưa cấp phép cho ai')+`</td></tr>`;
     return;
   }
-  tb.innerHTML=adminDanhSachCache.map(r=>{
+  tb.innerHTML=ds.map((r,i)=>{
     let han, tt, fg;
     if(r.vinh_vien){han='Vĩnh viễn';tt='Vĩnh viễn';fg='var(--green)';}
     else{
@@ -911,7 +918,7 @@ function adminVeDanhSach(){
       else{tt=`Còn hạn (${r.con_ngay} ngày)`;fg='var(--muted)';}
     }
     const loai=r.la_dung_thu?' <span class="tag buy">thử</span>':'';
-    return `<tr><td style="font-family:monospace;font-size:12px">${r.hwid}</td>`+
+    return `<tr><td style="color:var(--muted)">${i+1}</td><td style="font-family:monospace;font-size:12px">${r.hwid}</td>`+
       `<td>${r.so_dien_thoai||''}</td><td>${fmtDate(r.ngay_cap)}</td><td>${han}</td>`+
       `<td style="color:${fg};font-weight:600">${tt}${loai}</td><td>${r.ghi_chu||''}</td></tr>`;
   }).join('');
@@ -932,6 +939,7 @@ async function moAdminModal(){
   document.getElementById('ad_ghichu').value='';
   document.getElementById('adminMaKetQua').style.display='none';
   document.getElementById('adminLichSuHwid').style.display='none';
+  document.getElementById('adminSearch').value='';
   adminToggleVinhVien();
   document.getElementById('adminModal').classList.add('show');
   await adminTaiDanhSach();
