@@ -22,6 +22,8 @@ from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSO
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
+import license_core
+
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
 # ============================================================
@@ -813,6 +815,61 @@ def _set_setting(key, value):
 #  FASTAPI APP
 # ============================================================
 app = FastAPI(title="HDDT Manager")
+
+# ---------- GIẤY PHÉP SỬ DỤNG (license) ----------
+# Đường dẫn được phép truy cập ngay cả khi CHƯA kích hoạt/đã hết hạn — chỉ
+# đủ để hiện trang chính (frontend tự vẽ màn "Kích hoạt") + 2 API kích hoạt.
+_LICENSE_DUOC_PHEP = {"/", "/api/license/status", "/api/license/kich-hoat"}
+
+
+def _trang_thai_giay_phep():
+    """Kiểm tra lại giấy phép đã lưu MỖI LẦN gọi (không cache) để luôn phản
+    ánh đúng trạng thái hiện tại (vd vừa hết hạn giữa phiên làm việc).
+    Trả (ok, ngay_het_han hoặc None, loi)."""
+    ma = _get_setting("license_ma_kich_hoat", "")
+    if not ma:
+        return False, None, "Chưa kích hoạt"
+    return license_core.kiem_tra_ma_kich_hoat(ma)
+
+
+@app.middleware("http")
+async def _kiem_tra_giay_phep_moi_request(request: Request, call_next):
+    if request.url.path in _LICENSE_DUOC_PHEP:
+        return await call_next(request)
+    ok, _, loi = _trang_thai_giay_phep()
+    if not ok:
+        return JSONResponse(status_code=403, content={
+            "detail": f"Phần mềm chưa kích hoạt hoặc đã hết hạn ({loi}). "
+                      f"Vào mục 'Kích hoạt phần mềm' để nhập mã kích hoạt mới."})
+    return await call_next(request)
+
+
+@app.get("/api/license/status")
+def license_status():
+    hwid = license_core.lay_hwid()
+    ma = _get_setting("license_ma_kich_hoat", "")
+    if not ma:
+        return {"kich_hoat": False, "hwid": hwid, "ngay_het_han": None,
+                "con_ngay": None, "so_dien_thoai": "", "loi": "Chưa kích hoạt"}
+    ok, han, loi = license_core.kiem_tra_ma_kich_hoat(ma, hwid=hwid)
+    con_ngay = (datetime.date.fromisoformat(han) - datetime.date.today()).days if han else None
+    return {"kich_hoat": ok, "hwid": hwid, "ngay_het_han": han, "con_ngay": con_ngay,
+            "so_dien_thoai": _get_setting("license_so_dien_thoai", ""), "loi": loi}
+
+
+@app.post("/api/license/kich-hoat")
+def license_kich_hoat(body: dict = Body(...)):
+    ma = (body.get("ma_kich_hoat") or "").strip()
+    sdt = (body.get("so_dien_thoai") or "").strip()
+    if not ma:
+        raise HTTPException(400, "Chưa nhập mã kích hoạt")
+    ok, han, loi = license_core.kiem_tra_ma_kich_hoat(ma)
+    if not ok:
+        raise HTTPException(400, loi or "Mã kích hoạt không hợp lệ")
+    _set_setting("license_ma_kich_hoat", ma)
+    if sdt:
+        _set_setting("license_so_dien_thoai", sdt)
+    return {"ok": True, "ngay_het_han": han}
 
 
 @app.get("/", response_class=HTMLResponse)

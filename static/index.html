@@ -229,6 +229,10 @@
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:12px;padding:7px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
     </div>
+    <div id="licenseBar" style="display:none;padding:0 12px 10px">
+      <div id="licenseBarInner" onclick="moLicenseModalGiaHan()"
+        style="cursor:pointer;text-align:center;font-size:11.5px;font-weight:700;padding:7px;border-radius:8px"></div>
+    </div>
     <div class="sidebar-footer">
       <div class="sf-name">CÔNG TY TNHH TƯ VẤN VÀ DỊCH VỤ KẾ TOÁN HƯNG PHÚC</div>
       <div class="sf-line">MST: 0315525949</div>
@@ -247,6 +251,35 @@
       <!-- nội dung động -->
     </div>
   </main>
+</div>
+
+<!-- MODAL GIẤY PHÉP SỬ DỤNG -->
+<div class="modal-bg" id="licenseModal">
+  <div class="modal" style="max-width:480px">
+    <h3>🔑 Kích hoạt phần mềm</h3>
+    <p class="hint" id="licenseHint" style="margin-top:0">Phần mềm cần được cấp phép sử dụng.</p>
+    <div class="field">
+      <label>Mã máy (HWID)</label>
+      <div style="display:flex;gap:6px">
+        <input id="lic_hwid" readonly style="flex:1;font-family:monospace">
+        <button type="button" class="btn ghost sm" onclick="licenseCopyHwid()">📋 Copy</button>
+      </div>
+    </div>
+    <div class="field"><label>Số điện thoại của bạn</label>
+      <input id="lic_sdt" placeholder="VD: 0901234567"></div>
+    <div class="modal-actions" style="justify-content:flex-start;margin-top:4px">
+      <button type="button" class="btn gold" onclick="licenseNhanZalo()">💬 Nhắn Zalo cho Admin (0986883137)</button>
+    </div>
+    <div class="field" style="margin-top:16px">
+      <label>Mã kích hoạt <span style="font-weight:400;color:var(--muted)">(admin gửi lại cho bạn qua Zalo)</span></label>
+      <input id="lic_ma" placeholder="Dán mã kích hoạt vào đây" style="font-family:monospace">
+    </div>
+    <div id="licenseErr" style="display:none;color:var(--red);font-size:13px;margin-top:8px"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="licenseCloseBtn" style="display:none" onclick="dongLicenseModal()">Đóng</button>
+      <button class="btn" onclick="licenseKichHoat()">✅ Kích hoạt</button>
+    </div>
+  </div>
 </div>
 
 <!-- MODAL CÔNG TY -->
@@ -752,8 +785,98 @@ async function docLoiTuResponse(r){
 }
 async function api(path,opts={}){
   const r=await fetch(path,opts);
-  if(!r.ok){const e=await r.json().catch(()=>({detail:r.statusText}));throw new Error(e.detail||'Lỗi');}
+  if(!r.ok){
+    const e=await r.json().catch(()=>({detail:r.statusText}));
+    if(r.status===403&&!path.startsWith('/api/license/'))licenseKiemTraLai();
+    throw new Error(e.detail||'Lỗi');
+  }
   return r.headers.get('content-type')?.includes('json')?r.json():r;
+}
+
+/* ---------- GIẤY PHÉP SỬ DỤNG ---------- */
+let licenseBatBuoc=false, licenseDaLoadApp=false;
+async function licenseTaiTrangThai(){ return api('/api/license/status'); }
+function licenseVeThanhTrangThai(st){
+  const bar=document.getElementById('licenseBar'), inner=document.getElementById('licenseBarInner');
+  if(!st.kich_hoat||st.con_ngay==null){bar.style.display='none';return;}
+  bar.style.display='';
+  const gap=st.con_ngay<=7;
+  inner.style.background=gap?'rgba(246,134,122,.18)':'rgba(255,255,255,.06)';
+  inner.style.color=gap?'#f6867a':'#9cc0ad';
+  inner.textContent=(gap?'⚠ ':'🔑 ')+`Còn ${st.con_ngay} ngày sử dụng — bấm để gia hạn`;
+}
+function licenseMoModal(st){
+  licenseBatBuoc=!st.kich_hoat;
+  document.getElementById('lic_hwid').value=st.hwid;
+  document.getElementById('lic_sdt').value=st.so_dien_thoai||'';
+  document.getElementById('lic_ma').value='';
+  document.getElementById('licenseCloseBtn').style.display=licenseBatBuoc?'none':'';
+  const hint=document.getElementById('licenseHint');
+  if(st.kich_hoat){
+    hint.textContent='Nhập mã kích hoạt mới để gia hạn sử dụng.';
+  }else if(st.loi&&st.loi!=='Chưa kích hoạt'){
+    hint.textContent=`Giấy phép hiện tại không dùng được: ${st.loi}. Gửi Mã máy dưới đây cho admin để được cấp lại.`;
+  }else{
+    hint.textContent='Phần mềm cần được cấp phép sử dụng. Gửi thông tin dưới đây cho admin qua Zalo để được cấp mã kích hoạt.';
+  }
+  document.getElementById('licenseErr').style.display='none';
+  document.getElementById('licenseModal').classList.add('show');
+}
+function dongLicenseModal(){
+  if(licenseBatBuoc)return;
+  document.getElementById('licenseModal').classList.remove('show');
+}
+async function moLicenseModalGiaHan(){
+  try{licenseMoModal(await licenseTaiTrangThai());}catch(e){toast(e.message,'err')}
+}
+function licenseCopy(txt,cb){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(cb).catch(()=>fallbackCopy(txt,cb));
+  }else fallbackCopy(txt,cb);
+}
+function licenseCopyHwid(){
+  licenseCopy(document.getElementById('lic_hwid').value,()=>toast('Đã copy mã máy','ok'));
+}
+function licenseNhanZalo(){
+  const hwid=document.getElementById('lic_hwid').value;
+  const sdt=document.getElementById('lic_sdt').value.trim();
+  const msg=`Xin cấp phép sử dụng phần mềm Hóa đơn điện tử.\nMã máy: ${hwid}\nSĐT: ${sdt||'(chưa nhập)'}`;
+  licenseCopy(msg,()=>toast('Đã copy nội dung — dán vào khung chat Zalo gửi Admin','ok'));
+  window.open('https://zalo.me/0986883137','_blank');
+}
+async function licenseKichHoat(){
+  const ma=document.getElementById('lic_ma').value.trim();
+  const sdt=document.getElementById('lic_sdt').value.trim();
+  const errEl=document.getElementById('licenseErr');
+  errEl.style.display='none';
+  if(!ma){errEl.textContent='Chưa nhập mã kích hoạt';errEl.style.display='block';return;}
+  try{
+    const r=await api('/api/license/kich-hoat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ma_kich_hoat:ma,so_dien_thoai:sdt})});
+    toast('Kích hoạt thành công! Hạn dùng: '+fmtDate(r.ngay_het_han),'ok');
+    licenseBatBuoc=false;
+    document.getElementById('licenseModal').classList.remove('show');
+    const st=await licenseTaiTrangThai();
+    licenseVeThanhTrangThai(st);
+    if(!licenseDaLoadApp){licenseDaLoadApp=true;loadCompanies();}
+  }catch(e){errEl.textContent=e.message;errEl.style.display='block';}
+}
+async function licenseKiemTraLai(){
+  // gọi lại khi 1 API bất kỳ báo 403 (vd hết hạn giữa phiên làm việc) -> ép
+  // về màn Kích hoạt thay vì chỉ báo lỗi mơ hồ khó hiểu
+  try{
+    const st=await licenseTaiTrangThai();
+    if(!st.kich_hoat)licenseMoModal(st);
+  }catch(e){}
+}
+async function khoiDongPhanMem(){
+  let st;
+  try{ st=await licenseTaiTrangThai(); }
+  catch(e){ licenseDaLoadApp=true; loadCompanies(); return; }
+  if(!st.kich_hoat){ licenseMoModal(st); return; }
+  licenseVeThanhTrangThai(st);
+  licenseDaLoadApp=true;
+  loadCompanies();
 }
 
 /* ---------- COMPANIES ---------- */
@@ -4486,7 +4609,7 @@ async function deleteCompany(id){
 function fmtDate(iso){if(!iso)return'';const[y,m,d]=iso.split('-');return `${d}/${m}/${y}`}
 function fmtVND(n){if(n==null)return'0';return Math.round(n).toLocaleString('vi-VN')}
 
-loadCompanies();
+khoiDongPhanMem();
 </script>
 </body>
 </html>

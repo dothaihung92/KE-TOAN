@@ -27,3 +27,9 @@ downloads/
 .installed
 .version
 .last_update_check
+
+# Giấy phép (license) - KHOÁ RIÊNG của admin, TUYỆT ĐỐI không commit (lộ ra
+# là ai cũng tự cấp được mã kích hoạt giả). admin_license_log.db đã khớp
+# pattern *.db ở trên nhưng ghi rõ thêm cho dễ hiểu.
+admin_private_key.pem
+admin_license_log.db

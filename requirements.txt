@@ -10,3 +10,4 @@ reportlab
 curl_cffi
 selenium
 pyodbc
+cryptography
