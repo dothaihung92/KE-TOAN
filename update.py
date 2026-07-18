@@ -69,8 +69,19 @@ def _tai_raw(path, timeout=20):
         return r.read()
 
 
+def _thieu_file_can_thiet():
+    """True nếu có file trong FILES chưa từng tồn tại trên máy này — dùng để
+    BỎ QUA cooldown, ép kiểm tra ngay. Tránh lặp lại lỗi 'file mới thêm vào
+    FILES nhưng máy user kẹt ở cooldown nên mãi không tải về được, dẫn tới
+    server.py crash vì import module chưa từng có trên đĩa'."""
+    for path in FILES:
+        if not os.path.exists(os.path.join(BASE, path.replace("/", os.sep))):
+            return True
+    return False
+
+
 def main():
-    if _da_kiem_tra_gan_day():
+    if not _thieu_file_can_thiet() and _da_kiem_tra_gan_day():
         print("[update] Vua kiem tra gan day - bo qua lan nay, chay thang voi ban dang co san.")
         return 0
     _danh_dau_da_kiem_tra()
