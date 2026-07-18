@@ -12265,6 +12265,18 @@ def export_excel(cid: int):
     # file XML/ZIP đã tải sẵn trên máy — KHÔNG gọi mạng lại cho hóa đơn đã có file).
     import concurrent.futures as _cf
     client0 = CLIENTS.get(cid)
+    # CHƯA đăng nhập (hoặc phiên đã hết) mà công ty có lưu mật khẩu -> TỰ ĐĂNG
+    # NHẬP trước khi xuất, thay vì bỏ cuộc và hiện placeholder "chưa có file
+    # XML đã tải — đăng nhập rồi xuất lại" bắt người dùng phải tự làm lại thao
+    # tác thủ công (đăng nhập ở màn hình khác rồi quay lại bấm xuất lần nữa).
+    if comp and (not client0 or not client0.token or client0._token_dead) and comp["password"]:
+        _tlog("chưa đăng nhập — tự động đăng nhập trước khi xuất...")
+        try:
+            ok_dn, msg_dn, _, _ = _tu_dong_dang_nhap(cid, so_lan=8)
+        except Exception as e:
+            ok_dn, msg_dn = False, str(e)
+        _tlog(f"tự đăng nhập {'thành công' if ok_dn else 'thất bại'}: {msg_dn}")
+        client0 = CLIENTS.get(cid)
     save_dir0 = (comp["save_dir"] or "").strip() if comp else ""
 
     # XÂY INDEX FILE 1 LẦN — dùng chung cho cả bước kiểm tra "đã có file" lẫn
