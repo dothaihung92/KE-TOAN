@@ -34,6 +34,7 @@ FILES = [
     "static/index.html",
     "templates/htkk_01gtgt_template.xml",
     "license_core.py",
+    "cap_phep_admin.py",
 ]
 
 # raw.githubusercontent.com khong bi gioi han nhu api.github.com, nhung van
