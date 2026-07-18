@@ -88,12 +88,13 @@
   .status-pill.off{background:var(--red-l);color:var(--red)}
   .status-pill.on{background:var(--green-l);color:var(--green)}
 
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;margin-bottom:22px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:22px}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-md);padding:17px 19px;
-    box-shadow:var(--shadow);overflow:hidden;transition:.18s var(--ease);border-left:3px solid var(--line)}
+    box-shadow:var(--shadow);overflow:visible;transition:.18s var(--ease);border-left:3px solid var(--line)}
   .stat:hover{box-shadow:var(--shadow-lg);transform:translateY(-2px)}
   .stat .k{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700}
-  .stat .v{font-size:22px;font-weight:800;margin-top:7px;letter-spacing:-.3px;font-variant-numeric:tabular-nums;word-break:break-all;line-height:1.2}
+  .stat .v{font-size:22px;font-weight:800;margin-top:7px;letter-spacing:-.3px;font-variant-numeric:tabular-nums;
+    white-space:nowrap;line-height:1.2}
   .stat.gold{border-left-color:var(--gold)} .stat.gold .v{color:var(--gold)}
   .stat.green{border-left-color:var(--green)} .stat.green .v{color:var(--green)}
 
