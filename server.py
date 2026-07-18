@@ -5114,12 +5114,29 @@ def _mo_ta_ket_qua(ttxly):
     return TTXLY_DESC.get(s, s or "")
 
 
+# Cột đầy đủ dùng chung cho export/import/mẫu công ty — khớp đúng các
+# trường trong form "Thêm/Sửa công ty" (không gồm token_*/last_fetch_error*
+# vì đó là dữ liệu hệ thống tự ghi nhận, không phải người dùng tự nhập).
+_CONGTY_COT = [
+    ("Tên công ty", "ten"), ("MST", "mst"), ("MST khác", "mst_khac"),
+    ("Địa chỉ trụ sở", "dia_chi"), ("Mã CQT nơi nộp", "ma_cqt_noi_nop"),
+    ("Tên CQT nơi nộp", "ten_cqt_noi_nop"), ("Tên đăng nhập", "username"),
+    ("Mật khẩu", "password"), ("Mật khẩu Dịch vụ công 1", "dvc_password"),
+    ("Mật khẩu Dịch vụ công 2", "dvc_password2"), ("Ghi chú", "ghichu"),
+    ("Thư mục lưu XML/PDF", "save_dir"), ("Thư mục lưu dữ liệu", "data_dir"),
+    ("Người ký", "nguoi_ky"),
+]
+_CONGTY_COT_ROONG = ["mã số thuế", "ma so thue"]  # từ khoá nhận diện thêm riêng cho cột MST
+
+
 @app.post("/api/import-companies")
 async def import_companies(request: Request):
     """
-    Import nhiều công ty từ file Excel. Cột nhận diện theo tiêu đề (dòng 1):
-    Tên công ty | MST | Tên đăng nhập | Mật khẩu | Thư mục lưu | Người ký
-    (chỉ Tên và MST là bắt buộc). Bỏ qua dòng trùng MST.
+    Import nhiều công ty từ file Excel. Cột nhận diện theo tiêu đề (dòng 1)
+    — xem đầy đủ trong _CONGTY_COT (Tên công ty, MST, MST khác, Địa chỉ trụ
+    sở, Mã/Tên CQT nơi nộp, Tên đăng nhập, Mật khẩu, 2 Mật khẩu Dịch vụ
+    công, Ghi chú, Thư mục lưu XML/PDF, Thư mục lưu dữ liệu, Người ký).
+    Chỉ Tên và MST là bắt buộc. Bỏ qua dòng trùng MST.
     """
     import openpyxl, io as _io
     form = await request.form()
@@ -5133,20 +5150,31 @@ async def import_companies(request: Request):
         raise HTTPException(400, f"Không đọc được file Excel: {e}")
     ws = wb.active
 
-    def find_col(*names):
+    def find_col(*names, exclude=()):
         for c in range(1, ws.max_column + 1):
+            if c in exclude:
+                continue
             v = str(ws.cell(1, c).value or "").strip().lower()
             for n in names:
                 if n in v:
                     return c
         return None
 
-    c_ten = find_col("tên công ty", "ten cong ty", "tên")
-    c_mst = find_col("mst", "mã số thuế", "ma so thue")
-    c_user = find_col("đăng nhập", "dang nhap", "username", "user")
-    c_pass = find_col("mật khẩu", "mat khau", "password", "pass")
-    c_dir = find_col("thư mục", "thu muc", "save_dir", "lưu")
-    c_nk = find_col("người ký", "nguoi ky")
+    # Nhận diện cột dài/cụ thể hơn TRƯỚC (vd "MST khác" trước "MST", "Mật
+    # khẩu Dịch vụ công 1" trước "Mật khẩu") rồi loại cột đã dùng khỏi các
+    # lượt tìm sau — tránh nhận nhầm vì tên cột ngắn là 1 phần của tên cột
+    # dài hơn (vd "mst" nằm trong "mst khác").
+    cols = {}
+    used = set()
+    for nhan, field in sorted(_CONGTY_COT, key=lambda x: -len(x[0])):
+        keys = [nhan.lower()]
+        if field == "mst":
+            keys += _CONGTY_COT_ROONG
+        c = find_col(*keys, exclude=used)
+        cols[field] = c
+        if c:
+            used.add(c)
+    c_ten, c_mst = cols["ten"], cols["mst"]
     if not c_ten or not c_mst:
         raise HTTPException(400, "File phải có cột 'Tên công ty' và 'MST'")
 
@@ -5165,15 +5193,22 @@ async def import_companies(request: Request):
         if dup:
             skipped += 1
             continue
-        user = str(ws.cell(r, c_user).value or "").strip() if c_user else ""
-        pw = str(ws.cell(r, c_pass).value or "").strip() if c_pass else ""
-        sdir = str(ws.cell(r, c_dir).value or "").strip() if c_dir else ""
-        nk = str(ws.cell(r, c_nk).value or "").strip() if c_nk else ""
+        gia_tri = {"ten": ten, "mst": mst}
+        for field, c in cols.items():
+            if field in ("ten", "mst"):
+                continue
+            gia_tri[field] = str(ws.cell(r, c).value or "").strip() if c else ""
         try:
             conn.execute(
-                "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, nguoi_ky, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (ten, mst, user, pw, "", sdir, nk, datetime.datetime.now().isoformat()))
+                "INSERT INTO companies (ten, mst, mst_khac, dia_chi, ma_cqt_noi_nop, "
+                "ten_cqt_noi_nop, username, password, dvc_password, dvc_password2, "
+                "ghichu, save_dir, data_dir, nguoi_ky, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (gia_tri["ten"], gia_tri["mst"], gia_tri["mst_khac"], gia_tri["dia_chi"],
+                 gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"], gia_tri["username"],
+                 gia_tri["password"], gia_tri["dvc_password"], gia_tri["dvc_password2"],
+                 gia_tri["ghichu"], gia_tri["save_dir"], gia_tri["data_dir"],
+                 gia_tri["nguoi_ky"], datetime.datetime.now().isoformat()))
             added += 1
         except Exception as e:
             errors.append(f"{ten}: {e}")
@@ -5184,7 +5219,8 @@ async def import_companies(request: Request):
 
 @app.get("/api/export-companies")
 def export_companies():
-    """Xuất danh sách công ty hiện có ra file Excel (kèm thông tin đăng nhập)."""
+    """Xuất danh sách công ty hiện có ra file Excel (đầy đủ thông tin —
+    khớp đúng các trường trong form Thêm/Sửa công ty, kể cả mật khẩu)."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     conn = db()
@@ -5193,18 +5229,17 @@ def export_companies():
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Danh sách công ty"
-    headers = ["Tên công ty", "MST", "Tên đăng nhập", "Mật khẩu",
-               "Thư mục lưu", "Người ký"]
+    headers = [nhan for nhan, _ in _CONGTY_COT]
     ws.append(headers)
     for c in range(1, len(headers) + 1):
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
         ws.cell(1, c).fill = PatternFill("solid", fgColor="1F6B4A")
     for r in rows:
         d = dict(r)
-        ws.append([d.get("ten", ""), d.get("mst", ""), d.get("username", ""),
-                   d.get("password", ""), d.get("save_dir", ""), d.get("nguoi_ky", "")])
-    for col, w in zip("ABCDEF", [32, 16, 16, 16, 24, 18]):
-        ws.column_dimensions[col].width = w
+        ws.append([d.get(field, "") or "" for _, field in _CONGTY_COT])
+    widths = [30, 15, 16, 34, 14, 26, 15, 16, 18, 18, 20, 22, 22, 16]
+    for i, w in enumerate(widths):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = w
     ws.freeze_panes = "A2"
     fname = "DanhSach_CongTy.xlsx"
     path = os.path.join(DOWNLOAD_DIR, fname)
@@ -5225,23 +5260,25 @@ def export_companies():
 
 @app.get("/api/companies-template")
 def companies_template():
-    """Tải file Excel mẫu để nhập danh sách công ty."""
+    """Tải file Excel mẫu để nhập danh sách công ty (đầy đủ các cột như
+    export, để import lại đúng khớp)."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Danh sách công ty"
-    headers = ["Tên công ty", "MST", "Tên đăng nhập", "Mật khẩu",
-               "Thư mục lưu", "Người ký"]
+    headers = [nhan for nhan, _ in _CONGTY_COT]
     ws.append(headers)
     for c in range(1, len(headers) + 1):
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
         ws.cell(1, c).fill = PatternFill("solid", fgColor="1F6B4A")
-    ws.append(["CÔNG TY TNHH ABC", "0301234567", "0301234567", "matkhau123",
-               "D:\\HoaDon\\ABC", "Nguyễn Văn A"])
-    ws.append(["CÔNG TY TNHH XYZ", "0307654321", "", "", "", ""])
-    for col, w in zip("ABCDEF", [32, 16, 16, 16, 22, 18]):
-        ws.column_dimensions[col].width = w
+    ws.append(["CÔNG TY TNHH ABC", "0301234567", "", "141/69/23, Khu phố 3C, ...",
+               "70113", "Thuế cơ sở 7 Thành phố Hồ Chí Minh", "0301234567", "matkhau123",
+               "matkhaudvc1", "", "", "D:\\HoaDon\\ABC", "", "Nguyễn Văn A"])
+    ws.append(["CÔNG TY TNHH XYZ", "0307654321", "", "", "", "", "", "", "", "", "", "", "", ""])
+    widths = [30, 15, 16, 34, 14, 26, 15, 16, 18, 18, 20, 22, 22, 16]
+    for i, w in enumerate(widths):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = w
     path = os.path.join(DOWNLOAD_DIR, "Mau_DanhSach_CongTy.xlsx")
     wb.save(path)
     return _resp_xuat(path, "Mau_DanhSach_CongTy.xlsx")
