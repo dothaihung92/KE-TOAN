@@ -757,6 +757,19 @@ async function api(path,opts={}){
 }
 
 /* ---------- COMPANIES ---------- */
+function tokenTrangThaiCty(c){
+  if(!c.token_ngay_het_han)return null;
+  const d=new Date(c.token_ngay_het_han+'T00:00:00');
+  if(isNaN(d))return null;
+  const homNay=new Date();homNay.setHours(0,0,0,0);
+  const conNgay=Math.round((d-homNay)/86400000);
+  const qua=conNgay<0, gap=!qua&&conNgay<=30;
+  const fg=qua?'#f6867a':(gap?'#f0c869':'#9cc0ad');
+  const nhan=qua?'Hết hạn':(gap?'Sắp hết hạn':'');
+  const p=c.token_ngay_het_han.split('-');
+  const ngayStr=`${p[2]}/${p[1]}/${p[0]}`;
+  return {conNgay,fg,nhan,ngayStr};
+}
 async function loadCompanies(){
   companies=await api('/api/companies');
   // đồng bộ trạng thái đăng nhập từ backend (giữ phiên nhiều công ty)
@@ -766,6 +779,15 @@ async function loadCompanies(){
   const q=(sb&&sb.value||'').toLowerCase().trim();
   let shown=companies;
   if(q)shown=companies.filter(c=>(c.ten||'').toLowerCase().includes(q)||(c.mst||'').toLowerCase().includes(q));
+  // công ty token SẮP/ĐÃ hết hạn xếp lên đầu; chưa có dữ liệu token xếp cuối
+  shown=shown.slice().sort((a,b)=>{
+    const ta=tokenTrangThaiCty(a), tb=tokenTrangThaiCty(b);
+    const na=ta?ta.conNgay:null, nb=tb?tb.conNgay:null;
+    if(na==null&&nb==null)return 0;
+    if(na==null)return 1;
+    if(nb==null)return -1;
+    return na-nb;
+  });
   list.innerHTML='<div class="lbl">Danh sách công ty</div>';
   if(!shown.length){
     list.innerHTML+='<div style="padding:14px;color:#7faa8e;font-size:13px;text-align:center">'+(q?'Không tìm thấy':'Chưa có công ty nào')+'</div>';
@@ -774,7 +796,9 @@ async function loadCompanies(){
     const d=document.createElement('div');
     d.className='co'+(current===c.id?' active':'')+(c._online?' online':'');
     d.onclick=()=>selectCompany(c.id);
-    d.innerHTML=`<div class="nm"><span class="dot"></span>${c.ten}</div><div class="mst">MST: ${c.mst}</div>`;
+    const tt=tokenTrangThaiCty(c);
+    const tokenHtml=tt?` - Hạn token: ${tt.ngayStr}${tt.nhan?` - <span style="color:${tt.fg};font-weight:700">${tt.nhan}</span>`:''}`:'';
+    d.innerHTML=`<div class="nm"><span class="dot"></span>${c.ten}</div><div class="mst">MST: ${c.mst}${tokenHtml}</div>`;
     list.appendChild(d);
   });
 }
