@@ -229,6 +229,9 @@
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:12px;padding:7px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
     </div>
+    <div id="adminBtnWrap" style="display:none;padding:0 12px 8px">
+      <button class="btn gold" style="width:100%;font-size:12.5px;padding:9px" onclick="moAdminModal()">👑 Quản lý user</button>
+    </div>
     <div id="licenseBar" style="display:none;padding:0 12px 10px">
       <div id="licenseBarInner" onclick="moLicenseModalGiaHan()"
         style="cursor:pointer;text-align:center;font-size:11.5px;font-weight:700;padding:7px;border-radius:8px"></div>
@@ -278,6 +281,62 @@
     <div class="modal-actions">
       <button class="btn ghost" id="licenseCloseBtn" style="display:none" onclick="dongLicenseModal()">Đóng</button>
       <button class="btn" onclick="licenseKichHoat()">✅ Kích hoạt</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL QUẢN LÝ USER (chỉ hiện trên máy admin) -->
+<div class="modal-bg" id="adminModal">
+  <div class="modal" style="width:min(760px,96vw);max-width:760px;max-height:92vh;display:flex;flex-direction:column">
+    <h3 style="margin-top:0">👑 Quản lý user</h3>
+    <div style="overflow:auto;flex:1;padding-right:4px">
+      <div id="adminTomTat" class="grid" style="margin-bottom:16px"></div>
+
+      <div class="card" style="margin-bottom:16px">
+        <h3><span class="n">+</span> Cấp phép mới</h3>
+        <div class="row">
+          <div class="field" style="flex:2;min-width:200px"><label>Mã máy (HWID) user gửi qua Zalo</label>
+            <input id="ad_hwid" placeholder="16 ký tự, VD: 2430c68f69546bab" style="font-family:monospace"></div>
+          <div class="field" style="flex:1;min-width:140px"><label>Số điện thoại</label>
+            <input id="ad_sdt" placeholder="VD: 0901234567"></div>
+        </div>
+        <div id="adminLichSuHwid" style="display:none;font-size:12.5px;color:var(--gold);margin:4px 0 8px;
+          background:var(--gold-l);padding:8px 10px;border-radius:8px"></div>
+        <div class="row" style="margin-top:6px">
+          <label class="chk"><input type="checkbox" id="ad_vinhvien" onchange="adminToggleVinhVien()"> Cấp vĩnh viễn (không cần gia hạn)</label>
+          <label class="chk"><input type="checkbox" id="ad_dungthu"> Đây là bản dùng thử</label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="field" id="ad_songay_wrap" style="flex:1;min-width:140px"><label>Số ngày cấp</label>
+            <input id="ad_songay" type="number" value="7" placeholder="VD: 7 hoặc 365"></div>
+          <div class="field" style="flex:2;min-width:200px"><label>Ghi chú <span style="font-weight:400;color:var(--muted)">(tuỳ chọn)</span></label>
+            <input id="ad_ghichu" placeholder="VD: khách quen, gói năm..."></div>
+        </div>
+        <div class="modal-actions" style="justify-content:flex-start;margin-top:10px">
+          <button class="btn" onclick="adminCapPhep()">🔑 Tạo mã kích hoạt</button>
+        </div>
+        <div id="adminMaKetQua" style="display:none;margin-top:10px;background:var(--green-l);
+          border-radius:10px;padding:12px 14px">
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">Mã kích hoạt — gửi lại cho user qua Zalo:</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <code id="adminMaText" style="flex:1;word-break:break-all;font-size:12.5px"></code>
+            <button type="button" class="btn ghost sm" onclick="adminCopyMa()">📋 Copy</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3><span class="n">👥</span> Danh sách user đã cấp phép</h3>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>HWID</th><th>SĐT</th><th>Ngày cấp</th><th>Hạn dùng</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead>
+            <tbody id="adminDanhSachBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions" style="border-top:1px solid var(--line);padding-top:12px;margin-top:8px">
+      <button class="btn ghost" onclick="dongAdminModal()">Đóng</button>
     </div>
   </div>
 </div>
@@ -798,12 +857,120 @@ let licenseBatBuoc=false, licenseDaLoadApp=false;
 async function licenseTaiTrangThai(){ return api('/api/license/status'); }
 function licenseVeThanhTrangThai(st){
   const bar=document.getElementById('licenseBar'), inner=document.getElementById('licenseBarInner');
-  if(!st.kich_hoat||st.con_ngay==null){bar.style.display='none';return;}
+  if(!st.kich_hoat){bar.style.display='none';return;}
   bar.style.display='';
+  if(st.vinh_vien){
+    inner.style.background='rgba(255,255,255,.06)';inner.style.color='#9cc0ad';
+    inner.textContent='🔑 Giấy phép vĩnh viễn — không cần gia hạn';
+    return;
+  }
+  if(st.con_ngay==null){bar.style.display='none';return;}
   const gap=st.con_ngay<=7;
   inner.style.background=gap?'rgba(246,134,122,.18)':'rgba(255,255,255,.06)';
   inner.style.color=gap?'#f6867a':'#9cc0ad';
   inner.textContent=(gap?'⚠ ':'🔑 ')+`Còn ${st.con_ngay} ngày sử dụng — bấm để gia hạn`;
+}
+
+/* ---------- QUẢN LÝ USER (chỉ hoạt động trên máy admin) ---------- */
+async function adminKiemTraQuyen(){
+  try{
+    const r=await api('/api/admin/trang-thai');
+    document.getElementById('adminBtnWrap').style.display=r.la_admin?'':'none';
+  }catch(e){}
+}
+function adminToggleVinhVien(){
+  document.getElementById('ad_songay_wrap').style.display=
+    document.getElementById('ad_vinhvien').checked?'none':'';
+}
+let adminDanhSachCache=[];
+function adminVeThongKe(){
+  const el=document.getElementById('adminTomTat');
+  const tong=adminDanhSachCache.length;
+  const vinhVien=adminDanhSachCache.filter(r=>r.vinh_vien).length;
+  const sapHetHan=adminDanhSachCache.filter(r=>!r.vinh_vien&&r.con_ngay!=null&&r.con_ngay>=0&&r.con_ngay<=7).length;
+  const hetHan=adminDanhSachCache.filter(r=>!r.vinh_vien&&r.con_ngay!=null&&r.con_ngay<0).length;
+  el.innerHTML=
+    `<div class="stat"><div class="k">Tổng số user</div><div class="v">${tong}</div></div>`+
+    `<div class="stat green"><div class="k">Vĩnh viễn</div><div class="v">${vinhVien}</div></div>`+
+    `<div class="stat gold"><div class="k">Sắp hết hạn (≤7 ngày)</div><div class="v">${sapHetHan}</div></div>`+
+    `<div class="stat"><div class="k">Đã hết hạn</div><div class="v" style="color:var(--red)">${hetHan}</div></div>`;
+}
+function adminVeDanhSach(){
+  const tb=document.getElementById('adminDanhSachBody');
+  if(!adminDanhSachCache.length){
+    tb.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">Chưa cấp phép cho ai</td></tr>';
+    return;
+  }
+  tb.innerHTML=adminDanhSachCache.map(r=>{
+    let han, tt, fg;
+    if(r.vinh_vien){han='Vĩnh viễn';tt='Vĩnh viễn';fg='var(--green)';}
+    else{
+      han=fmtDate(r.ngay_het_han);
+      if(r.con_ngay<0){tt=`Hết hạn ${Math.abs(r.con_ngay)} ngày trước`;fg='var(--red)';}
+      else if(r.con_ngay<=7){tt=`Sắp hết hạn (${r.con_ngay} ngày)`;fg='var(--gold)';}
+      else{tt=`Còn hạn (${r.con_ngay} ngày)`;fg='var(--muted)';}
+    }
+    const loai=r.la_dung_thu?' <span class="tag buy">thử</span>':'';
+    return `<tr><td style="font-family:monospace;font-size:12px">${r.hwid}</td>`+
+      `<td>${r.so_dien_thoai||''}</td><td>${fmtDate(r.ngay_cap)}</td><td>${han}</td>`+
+      `<td style="color:${fg};font-weight:600">${tt}${loai}</td><td>${r.ghi_chu||''}</td></tr>`;
+  }).join('');
+}
+async function adminTaiDanhSach(){
+  try{
+    adminDanhSachCache=await api('/api/admin/danh-sach-user');
+    adminVeThongKe();
+    adminVeDanhSach();
+  }catch(e){toast(e.message,'err')}
+}
+async function moAdminModal(){
+  document.getElementById('ad_hwid').value='';
+  document.getElementById('ad_sdt').value='';
+  document.getElementById('ad_vinhvien').checked=false;
+  document.getElementById('ad_dungthu').checked=false;
+  document.getElementById('ad_songay').value=7;
+  document.getElementById('ad_ghichu').value='';
+  document.getElementById('adminMaKetQua').style.display='none';
+  document.getElementById('adminLichSuHwid').style.display='none';
+  adminToggleVinhVien();
+  document.getElementById('adminModal').classList.add('show');
+  await adminTaiDanhSach();
+}
+function dongAdminModal(){
+  document.getElementById('adminModal').classList.remove('show');
+}
+document.addEventListener('input',e=>{
+  if(e.target&&e.target.id==='ad_hwid')adminHienLichSuHwid();
+});
+function adminHienLichSuHwid(){
+  const hwid=document.getElementById('ad_hwid').value.trim().toLowerCase();
+  const el=document.getElementById('adminLichSuHwid');
+  const su=adminDanhSachCache.filter(r=>r.hwid===hwid);
+  if(hwid.length!==16||!su.length){el.style.display='none';return;}
+  const daDungThu=su.some(r=>r.la_dung_thu);
+  el.style.display='block';
+  el.innerHTML=`⚠ Máy này đã được cấp <b>${su.length}</b> lần trước`+
+    (daDungThu?' (đã có lần DÙNG THỬ — cân nhắc trước khi cấp thêm bản thử miễn phí).':'.');
+}
+async function adminCapPhep(){
+  const hwid=document.getElementById('ad_hwid').value.trim().toLowerCase();
+  const vinhVien=document.getElementById('ad_vinhvien').checked;
+  if(hwid.length!==16){toast('Mã máy (HWID) phải đúng 16 ký tự','err');return;}
+  const body={hwid, so_dien_thoai:document.getElementById('ad_sdt').value.trim(),
+    vinh_vien:vinhVien, la_dung_thu:document.getElementById('ad_dungthu').checked,
+    ghi_chu:document.getElementById('ad_ghichu').value.trim()};
+  if(!vinhVien)body.so_ngay=parseInt(document.getElementById('ad_songay').value)||0;
+  try{
+    const r=await api('/api/admin/cap-phep',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)});
+    document.getElementById('adminMaText').textContent=r.ma_kich_hoat;
+    document.getElementById('adminMaKetQua').style.display='block';
+    toast('Đã tạo mã kích hoạt','ok');
+    await adminTaiDanhSach();
+  }catch(e){toast(e.message,'err')}
+}
+function adminCopyMa(){
+  licenseCopy(document.getElementById('adminMaText').textContent,()=>toast('Đã copy mã kích hoạt','ok'));
 }
 function licenseMoModal(st){
   licenseBatBuoc=!st.kich_hoat;
@@ -858,6 +1025,7 @@ async function licenseKichHoat(){
     document.getElementById('licenseModal').classList.remove('show');
     const st=await licenseTaiTrangThai();
     licenseVeThanhTrangThai(st);
+    adminKiemTraQuyen();
     if(!licenseDaLoadApp){licenseDaLoadApp=true;loadCompanies();}
   }catch(e){errEl.textContent=e.message;errEl.style.display='block';}
 }
@@ -875,6 +1043,7 @@ async function khoiDongPhanMem(){
   catch(e){ licenseDaLoadApp=true; loadCompanies(); return; }
   if(!st.kich_hoat){ licenseMoModal(st); return; }
   licenseVeThanhTrangThai(st);
+  adminKiemTraQuyen();
   licenseDaLoadApp=true;
   loadCompanies();
 }

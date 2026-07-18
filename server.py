@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import license_core
+import cap_phep_admin
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -850,11 +851,14 @@ def license_status():
     ma = _get_setting("license_ma_kich_hoat", "")
     if not ma:
         return {"kich_hoat": False, "hwid": hwid, "ngay_het_han": None,
-                "con_ngay": None, "so_dien_thoai": "", "loi": "Chưa kích hoạt"}
+                "con_ngay": None, "vinh_vien": False, "so_dien_thoai": "", "loi": "Chưa kích hoạt"}
     ok, han, loi = license_core.kiem_tra_ma_kich_hoat(ma, hwid=hwid)
-    con_ngay = (datetime.date.fromisoformat(han) - datetime.date.today()).days if han else None
+    vinh_vien = bool(han) and license_core.la_vinh_vien(han)
+    con_ngay = None
+    if han and not vinh_vien:
+        con_ngay = (datetime.date.fromisoformat(han) - datetime.date.today()).days
     return {"kich_hoat": ok, "hwid": hwid, "ngay_het_han": han, "con_ngay": con_ngay,
-            "so_dien_thoai": _get_setting("license_so_dien_thoai", ""), "loi": loi}
+            "vinh_vien": vinh_vien, "so_dien_thoai": _get_setting("license_so_dien_thoai", ""), "loi": loi}
 
 
 @app.post("/api/license/kich-hoat")
@@ -870,6 +874,35 @@ def license_kich_hoat(body: dict = Body(...)):
     if sdt:
         _set_setting("license_so_dien_thoai", sdt)
     return {"ok": True, "ngay_het_han": han}
+
+
+# ---------- QUẢN LÝ USER (chỉ hoạt động trên máy admin — có sẵn
+# admin_private_key.pem cục bộ; máy user bình thường không có file này nên
+# 3 API dưới đây luôn trả 403, nút "Quản lý user" cũng tự ẩn ở giao diện) ----------
+@app.get("/api/admin/trang-thai")
+def admin_trang_thai():
+    return {"la_admin": cap_phep_admin.la_may_admin()}
+
+
+@app.get("/api/admin/danh-sach-user")
+def admin_danh_sach_user():
+    if not cap_phep_admin.la_may_admin():
+        raise HTTPException(403, "Không phải máy admin")
+    return cap_phep_admin.danh_sach_du_lieu()
+
+
+@app.post("/api/admin/cap-phep")
+def admin_cap_phep(body: dict = Body(...)):
+    if not cap_phep_admin.la_may_admin():
+        raise HTTPException(403, "Không phải máy admin")
+    try:
+        ma_dep, han_iso = cap_phep_admin.cap_phep(
+            hwid=body.get("hwid"), so_dien_thoai=(body.get("so_dien_thoai") or "").strip(),
+            so_ngay=body.get("so_ngay"), vinh_vien=bool(body.get("vinh_vien")),
+            la_dung_thu=bool(body.get("la_dung_thu")), ghi_chu=(body.get("ghi_chu") or "").strip())
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "ma_kich_hoat": ma_dep, "ngay_het_han": han_iso}
 
 
 @app.get("/", response_class=HTMLResponse)

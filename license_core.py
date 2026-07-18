@@ -27,6 +27,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 # Sinh bằng: python cap_phep_admin.py --tao-khoa (chạy 1 lần, chỉ trên máy admin)
 PUBLIC_KEY_HEX = "99b3ea79ee42f36e12192e0791e41951957326772f805309c016463d041d9462"
 
+# Ngày hết hạn "giả" dùng để đánh dấu giấy phép VĨNH VIỄN (không cần gia
+# hạn) — vẫn ký/kiểm tra như bình thường, chỉ khác là không bao giờ coi là
+# hết hạn và không hiện đếm ngược.
+NGAY_VINH_VIEN = "99991231"
+
 
 def _sha16(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
@@ -70,6 +75,10 @@ def dinh_dang_ma(ma_tho: str) -> str:
 def _chuan_hoa_ma(ma: str) -> str:
     """Bỏ dấu gạch ngang/khoảng trắng người dùng gõ/dán vào, chuẩn hoá hoa."""
     return _B32_RE.sub("", (ma or "").strip().upper())
+
+
+def la_vinh_vien(ngay_het_han_iso: str) -> bool:
+    return ngay_het_han_iso == datetime.date(9999, 12, 31).isoformat()
 
 
 def kiem_tra_ma_kich_hoat(ma_kich_hoat: str, hwid: str = None):

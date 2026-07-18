@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-CÔNG CỤ ADMIN — cấp phép + quản lý/theo dõi user. CHỈ CHẠY TRÊN MÁY ADMIN,
-KHÔNG BAO GIỜ commit lên git / đưa vào danh sách tự cập nhật (update.py) —
-file admin_private_key.pem sinh ra ở bước --tao-khoa PHẢI giữ riêng, lộ ra
-là bất kỳ ai cũng tự cấp được mã kích hoạt giả cho chính họ.
+CÔNG CỤ ADMIN — cấp phép + quản lý/theo dõi user. Các hàm trong file này
+được server.py gọi lại để hiện màn "Quản lý user" NGAY TRONG PHẦN MỀM khi
+chạy trên đúng máy admin (phát hiện qua sự tồn tại của admin_private_key.pem
+— máy user bình thường không có file này nên màn admin sẽ không hiện).
 
-Cách dùng:
+CHỈ CHẠY ĐƯỢC TRÊN MÁY ADMIN — admin_private_key.pem KHÔNG BAO GIỜ commit
+lên git (đã có trong .gitignore); lộ ra là bất kỳ ai cũng tự cấp được mã
+kích hoạt giả cho chính họ.
+
+Cách dùng (dòng lệnh — vẫn dùng được song song với màn "Quản lý user" trong
+app, cùng đọc/ghi 1 dữ liệu):
   1) Lần đầu (chỉ 1 lần):  python cap_phep_admin.py --tao-khoa
      -> dán PUBLIC KEY HEX in ra vào PUBLIC_KEY_HEX trong license_core.py
         rồi commit license_core.py (không commit admin_private_key.pem).
   2) Cấp phép cho 1 user:  python cap_phep_admin.py
-     -> nhập Mã máy (HWID) + SĐT user gửi qua Zalo, số ngày cấp, phần mềm
-        tự tạo mã kích hoạt để gửi lại cho user qua Zalo.
   3) Xem danh sách user đã cấp (theo dõi/quản lý):
      python cap_phep_admin.py --danh-sach
 """
@@ -28,6 +31,11 @@ LOG_DB_PATH = os.path.join(BASE_DIR, "admin_license_log.db")
 
 sys.path.insert(0, BASE_DIR)
 import license_core as lc  # noqa: E402
+
+
+def la_may_admin() -> bool:
+    """Máy hiện tại có phải máy admin không (có sẵn khoá riêng)."""
+    return os.path.exists(PRIVATE_KEY_PATH)
 
 
 def _log_db():
@@ -79,92 +87,131 @@ def tao_khoa():
 
 
 def _doc_khoa_rieng():
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives import serialization
     if not os.path.exists(PRIVATE_KEY_PATH):
-        print(f"[LỖI] Chưa có khoá riêng ({PRIVATE_KEY_PATH}). Chạy trước: "
-              f"python cap_phep_admin.py --tao-khoa")
-        sys.exit(1)
+        raise RuntimeError(
+            f"Chưa có khoá riêng ({PRIVATE_KEY_PATH}). Chạy trước: "
+            f"python cap_phep_admin.py --tao-khoa")
     with open(PRIVATE_KEY_PATH, "rb") as f:
         return serialization.load_pem_private_key(f.read(), password=None)
 
 
-def _lich_su_hwid(conn, hwid):
-    return conn.execute(
+def lich_su_hwid(hwid):
+    conn = _log_db()
+    rows = conn.execute(
         "SELECT * FROM cap_phep WHERE hwid=? ORDER BY id DESC", (hwid,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def cap_phep(hwid, so_dien_thoai, so_ngay=None, vinh_vien=False, la_dung_thu=False, ghi_chu=""):
+    """Ký + ghi log 1 lượt cấp phép. hwid PHẢI đúng 16 hex (chữ thường, khớp
+    lay_hwid()). vinh_vien=True bỏ qua so_ngay, cấp không thời hạn.
+    Trả (ma_kich_hoat_dep, ngay_het_han_iso)."""
+    hwid = (hwid or "").strip().lower()
+    if not hwid or len(hwid) != 16:
+        raise ValueError("Mã máy (HWID) phải đúng 16 ký tự")
+    priv = _doc_khoa_rieng()
+    if vinh_vien:
+        han_str = lc.NGAY_VINH_VIEN
+        han_iso = datetime.date(9999, 12, 31).isoformat()
+    else:
+        so_ngay = int(so_ngay)
+        han = datetime.date.today() + datetime.timedelta(days=so_ngay)
+        han_str = han.strftime("%Y%m%d")
+        han_iso = han.isoformat()
+    payload = f"{hwid}|{han_str}".encode("utf-8")
+    chu_ky = priv.sign(payload)
+    ma_dep = lc.dinh_dang_ma(base64.b32encode(payload + chu_ky).decode("ascii").rstrip("="))
+
+    conn = _log_db()
+    conn.execute(
+        "INSERT INTO cap_phep (hwid, so_dien_thoai, ghi_chu, so_ngay, ngay_cap, "
+        "ngay_het_han, la_dung_thu) VALUES (?,?,?,?,?,?,?)",
+        (hwid, so_dien_thoai, ghi_chu, (None if vinh_vien else so_ngay),
+         datetime.date.today().isoformat(), han_iso, 1 if la_dung_thu else 0))
+    conn.commit()
+    conn.close()
+    return ma_dep, han_iso
+
+
+def danh_sach_du_lieu():
+    """Danh sách tất cả lượt cấp phép (mới nhất mỗi HWID lên trước theo hạn
+    dùng), kèm số ngày còn lại — dùng cho cả CLI --danh-sach và màn 'Quản
+    lý user' trong app."""
+    conn = _log_db()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM cap_phep ORDER BY ngay_het_han ASC").fetchall()]
+    conn.close()
+    homnay = datetime.date.today()
+    ra = []
+    for r in rows:
+        vv = lc.la_vinh_vien(r["ngay_het_han"])
+        con_ngay = None if vv else (datetime.date.fromisoformat(r["ngay_het_han"]) - homnay).days
+        r["vinh_vien"] = vv
+        r["con_ngay"] = con_ngay
+        ra.append(r)
+    return ra
 
 
 def cap_phep_moi():
-    priv = _doc_khoa_rieng()
-    conn = _log_db()
     print("=== CẤP PHÉP SỬ DỤNG ===")
     hwid = input("Mã máy (HWID) user gửi qua Zalo: ").strip().lower()
-    if not hwid or len(hwid) != 16:
-        print("[LỖI] Mã máy phải đúng 16 ký tự (copy y nguyên từ màn hình 'Kích hoạt' của user).")
-        return
-    su = _lich_su_hwid(conn, hwid)
+    su = lich_su_hwid(hwid) if hwid and len(hwid) == 16 else []
     if su:
         print(f"\n⚠ Máy này ĐÃ được cấp {len(su)} lần trước:")
         for r in su:
             loai = "DÙNG THỬ" if r["la_dung_thu"] else "CHÍNH THỨC"
-            print(f"   - {r['ngay_cap']}: {r['so_ngay']} ngày ({loai}), hết hạn {r['ngay_het_han']}, "
-                  f"SĐT {r['so_dien_thoai'] or '(không rõ)'}")
+            print(f"   - {r['ngay_cap']}: {r['so_ngay'] or 'vĩnh viễn'} ngày ({loai}), "
+                  f"hết hạn {r['ngay_het_han']}, SĐT {r['so_dien_thoai'] or '(không rõ)'}")
         if any(r["la_dung_thu"] for r in su):
             print("   -> Máy này ĐÃ dùng thử rồi — cân nhắc không cấp thêm bản dùng thử miễn phí nữa.")
         print()
 
     sdt = input("Số điện thoại đăng ký: ").strip()
-    try:
-        so_ngay = int(input("Số ngày cấp (vd 7 cho dùng thử, 365 cho 1 năm): ").strip())
-    except ValueError:
-        print("[LỖI] Số ngày phải là số nguyên.")
-        return
+    vinh_vien = input("Cấp VĨNH VIỄN, không cần gia hạn? (y/N): ").strip().lower() == "y"
+    so_ngay = None
+    if not vinh_vien:
+        try:
+            so_ngay = int(input("Số ngày cấp (vd 7 cho dùng thử, 365 cho 1 năm): ").strip())
+        except ValueError:
+            print("[LỖI] Số ngày phải là số nguyên.")
+            return
     la_dung_thu = input("Đây là bản DÙNG THỬ? (y/N): ").strip().lower() == "y"
     ghi_chu = input("Ghi chú (tuỳ chọn): ").strip()
 
-    han = datetime.date.today() + datetime.timedelta(days=so_ngay)
-    payload = f"{hwid}|{han.strftime('%Y%m%d')}".encode("utf-8")
-    chu_ky = priv.sign(payload)
-    ma_kich_hoat = base64.b32encode(payload + chu_ky).decode("ascii").rstrip("=")
-    ma_dep = lc.dinh_dang_ma(ma_kich_hoat)
-
-    conn.execute(
-        "INSERT INTO cap_phep (hwid, so_dien_thoai, ghi_chu, so_ngay, ngay_cap, "
-        "ngay_het_han, la_dung_thu) VALUES (?,?,?,?,?,?,?)",
-        (hwid, sdt, ghi_chu, so_ngay, datetime.date.today().isoformat(),
-         han.isoformat(), 1 if la_dung_thu else 0))
-    conn.commit()
-    conn.close()
+    try:
+        ma_dep, han_iso = cap_phep(hwid, sdt, so_ngay, vinh_vien, la_dung_thu, ghi_chu)
+    except (ValueError, RuntimeError) as e:
+        print(f"[LỖI] {e}")
+        return
 
     print()
-    print(f"[OK] Mã kích hoạt (hết hạn {han.strftime('%d/%m/%Y')}) — gửi lại cho user qua Zalo:")
+    han_hien = "VĨNH VIỄN" if vinh_vien else datetime.date.fromisoformat(han_iso).strftime("%d/%m/%Y")
+    print(f"[OK] Mã kích hoạt (hết hạn {han_hien}) — gửi lại cho user qua Zalo:")
     print()
     print(f"   {ma_dep}")
     print()
 
 
 def danh_sach():
-    conn = _log_db()
-    rows = conn.execute("SELECT * FROM cap_phep ORDER BY ngay_het_han ASC").fetchall()
-    conn.close()
+    rows = danh_sach_du_lieu()
     if not rows:
         print("Chưa cấp phép cho ai.")
         return
-    homnay = datetime.date.today()
-    print(f"{'HWID':<18}{'SĐT':<14}{'Ngày cấp':<12}{'Hết hạn':<12}{'Trạng thái':<20}{'Ghi chú'}")
+    print(f"{'HWID':<18}{'SĐT':<14}{'Ngày cấp':<12}{'Hết hạn':<18}{'Trạng thái':<20}{'Ghi chú'}")
     print("-" * 100)
     for r in rows:
-        han = datetime.date.fromisoformat(r["ngay_het_han"])
-        conngay = (han - homnay).days
-        if conngay < 0:
-            tt = f"HẾT HẠN {abs(conngay)} ngày trước"
-        elif conngay <= 7:
-            tt = f"Sắp hết hạn ({conngay} ngày)"
+        if r["vinh_vien"]:
+            han_hien, tt = "VĨNH VIỄN", "Vĩnh viễn"
         else:
-            tt = f"Còn hạn ({conngay} ngày)"
+            han_hien = r["ngay_het_han"]
+            cn = r["con_ngay"]
+            tt = (f"HẾT HẠN {abs(cn)} ngày trước" if cn < 0 else
+                  f"Sắp hết hạn ({cn} ngày)" if cn <= 7 else f"Còn hạn ({cn} ngày)")
         loai = " [thử]" if r["la_dung_thu"] else ""
         print(f"{r['hwid']:<18}{(r['so_dien_thoai'] or ''):<14}{r['ngay_cap']:<12}"
-              f"{r['ngay_het_han']:<12}{tt:<20}{(r['ghi_chu'] or '')}{loai}")
+              f"{han_hien:<18}{tt:<20}{(r['ghi_chu'] or '')}{loai}")
 
 
 def main():
