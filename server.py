@@ -905,6 +905,38 @@ def admin_cap_phep(body: dict = Body(...)):
     return {"ok": True, "ma_kich_hoat": ma_dep, "ngay_het_han": han_iso}
 
 
+# ---------- TỰ ĐỘNG TẮT MÁY (sau khi tra cứu hàng loạt xong) ----------
+@app.post("/api/tat-may")
+def dat_lich_tat_may(body: dict = Body(...)):
+    """Hẹn giờ tắt máy sau `tre_giay` giây (mặc định 60s) — CHO PHÉP HUỶ
+    trong lúc chờ (xem /api/huy-tat-may) để tránh tắt nhầm khi người dùng
+    đang làm việc khác. CHỈ hỗ trợ Windows (nơi phần mềm này thực tế chạy)."""
+    import platform, subprocess
+    if platform.system() != "Windows":
+        raise HTTPException(400, "Tính năng tự tắt máy hiện chỉ hỗ trợ Windows")
+    tre_giay = int(body.get("tre_giay") or 60)
+    tre_giay = max(10, min(tre_giay, 3600))
+    try:
+        subprocess.run(["shutdown", "/s", "/t", str(tre_giay)], check=True,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as e:
+        raise HTTPException(500, f"Không đặt được lịch tắt máy: {e}")
+    return {"ok": True, "tre_giay": tre_giay}
+
+
+@app.post("/api/huy-tat-may")
+def huy_lich_tat_may():
+    import platform, subprocess
+    if platform.system() != "Windows":
+        raise HTTPException(400, "Tính năng tự tắt máy hiện chỉ hỗ trợ Windows")
+    try:
+        subprocess.run(["shutdown", "/a"], check=False,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as e:
+        raise HTTPException(500, f"Không huỷ được lịch tắt máy: {e}")
+    return {"ok": True}
+
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     with open(os.path.join(BASE_DIR, "static", "index.html"), encoding="utf-8") as f:
