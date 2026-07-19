@@ -685,7 +685,7 @@ def init_db():
         tgtttbso REAL,       -- tổng thanh toán
         tthai TEXT,          -- trạng thái
         raw TEXT,            -- json gốc
-        UNIQUE(company_id, khmshdon, khhdon, shdon, loai, he_thong)
+        UNIQUE(company_id, nbmst, khmshdon, khhdon, shdon, loai, he_thong)
     );
     CREATE TABLE IF NOT EXISTS vat_balance (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -740,6 +740,48 @@ def init_db():
         conn.execute("ALTER TABLE invoices ADD COLUMN he_thong TEXT DEFAULT 'query'")
     if "detail_json" not in cols:
         conn.execute("ALTER TABLE invoices ADD COLUMN detail_json TEXT")
+    # Migration: khoá UNIQUE cũ (company_id, khmshdon, khhdon, shdon, loai,
+    # he_thong) KHÔNG có MST người bán (nbmst) — mỗi người bán tự đánh ký
+    # hiệu + số hoá đơn RIÊNG nên 2 người bán khác nhau HOÀN TOÀN có thể
+    # trùng ký hiệu+số. Khi đó hóa đơn tải sau bị "INSERT OR IGNORE" ÂM THẦM
+    # BỎ QUA (coi là trùng với hóa đơn của người bán kia) -> mất hẳn 1 hóa
+    # đơn khỏi báo cáo, hoặc chi tiết (mặt hàng) bị đọc nhầm giữa 2 hóa đơn
+    # trùng số của 2 công ty khác nhau. Thêm nbmst vào UNIQUE để mỗi hóa đơn
+    # của mỗi người bán được lưu tách riêng.
+    _ddl_inv = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='invoices'").fetchone()
+    if _ddl_inv and _ddl_inv[0] and "UNIQUE(company_id, nbmst," not in _ddl_inv[0]:
+        conn.executescript("""
+            ALTER TABLE invoices RENAME TO invoices_mig_cu;
+            CREATE TABLE invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id INTEGER,
+                loai TEXT,
+                he_thong TEXT,
+                nbmst TEXT,
+                nbten TEXT,
+                nmmst TEXT,
+                khmshdon TEXT,
+                khhdon TEXT,
+                shdon TEXT,
+                tdlap TEXT,
+                tgtcthue REAL,
+                tgtthue REAL,
+                tgtttbso REAL,
+                tthai TEXT,
+                raw TEXT,
+                detail_json TEXT,
+                UNIQUE(company_id, nbmst, khmshdon, khhdon, shdon, loai, he_thong)
+            );
+            INSERT OR IGNORE INTO invoices
+                (id, company_id, loai, he_thong, nbmst, nbten, nmmst, khmshdon,
+                 khhdon, shdon, tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw, detail_json)
+            SELECT id, company_id, loai, he_thong, nbmst, nbten, nmmst, khmshdon,
+                   khhdon, shdon, tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw, detail_json
+            FROM invoices_mig_cu;
+            DROP TABLE invoices_mig_cu;
+        """)
+        conn.commit()
     ccols = [r[1] for r in conn.execute("PRAGMA table_info(companies)").fetchall()]
     if "save_dir" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN save_dir TEXT")
@@ -4568,19 +4610,34 @@ def _run_fetch_job(cid: int, body: dict):
                         # INDEX FILE ĐÃ CÓ trong thư mục này (1 lần, tránh quét lại mỗi
                         # hóa đơn) — dùng để BỎ QUA tải hóa đơn đã có file đọc được trên
                         # máy, tránh tải đi tải lại (chỉ cần lấy hóa đơn mới phát sinh).
+                        # Khoá theo (ký hiệu, số hoá đơn, MST người bán) — KHÔNG được
+                        # bỏ MST khỏi khoá: nhiều người bán khác nhau có thể trùng
+                        # ký hiệu + số hoá đơn (vd cả 2 đều "C26MTT" số "246"), nếu chỉ
+                        # khoá theo (ký hiệu, số) sẽ nhận NHẦM file của hóa đơn công ty
+                        # khác là "đã tải" cho hóa đơn đang xét.
                         _file_index_dl = {}
+                        _file_index_dl_2 = {}   # dự phòng cho file cũ không có MST trong tên
                         for fn in os.listdir(sub):
                             low = fn.lower()
                             if not (low.endswith(".xml") or low.endswith(".zip")):
                                 continue
                             name = fn.rsplit(".", 1)[0]
                             parts = name.split("_")
-                            if len(parts) >= 2:
-                                key2 = (parts[0], parts[1].lstrip("0") or "0")
-                                prev = _file_index_dl.get(key2)
-                                # ƯU TIÊN .xml (đọc trực tiếp, khỏi giải nén)
-                                if prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml")):
-                                    _file_index_dl[key2] = os.path.join(sub, fn)
+                            if len(parts) < 2:
+                                continue
+                            f_khh, f_sho = parts[0], parts[1].lstrip("0") or "0"
+                            path2 = os.path.join(sub, fn)
+
+                            def _uu_tien_xml(prev, low=low):
+                                return prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml"))
+                            if len(parts) >= 3:
+                                key3 = (f_khh, f_sho, parts[2])
+                                if _uu_tien_xml(_file_index_dl.get(key3)):
+                                    _file_index_dl[key3] = path2
+                            else:
+                                key2 = (f_khh, f_sho)
+                                if _uu_tien_xml(_file_index_dl_2.get(key2)):
+                                    _file_index_dl_2[key2] = path2
 
                         def _tai_1_file(inv):
                             nbmst = inv.get("nbmst", "")
@@ -4606,8 +4663,8 @@ def _run_fetch_job(cid: int, body: dict):
                                    str(shdon or ""), loai, he_thong)
                             tthai_cu = old_status.get(key)
                             tthai_moi = str(inv.get("tthai") or "")
-                            fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0")
-                            fpath = _file_index_dl.get(fkey)
+                            fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0", str(nbmst or ""))
+                            fpath = _file_index_dl.get(fkey) or _file_index_dl_2.get(fkey[:2])
                             if (fpath and (tthai_cu is None or tthai_cu == tthai_moi)
                                     and _doc_kiem_tra_file_hoadon(fpath)):
                                 # File đã có sẵn trên máy từ TRƯỚC (không tải lại) —
@@ -12403,7 +12460,12 @@ def export_excel(cid: int):
 
     # XÂY INDEX FILE 1 LẦN — dùng chung cho cả bước kiểm tra "đã có file" lẫn
     # lúc dựng sheet sau này (trước đây quét thư mục 2 LẦN riêng biệt).
+    # Khoá theo (ký hiệu, số hoá đơn, MST người bán) — KHÔNG được bỏ MST khỏi
+    # khoá: nhiều người bán khác nhau có thể trùng ký hiệu + số hoá đơn (vd cả
+    # 2 đều "C26MTT" số "246"), nếu chỉ khoá theo (ký hiệu, số) sẽ ĐỌC NHẦM chi
+    # tiết (mặt hàng, tiền...) của hóa đơn công ty khác cho hóa đơn đang xét.
     _file_index = {}
+    _file_index_2 = {}   # dự phòng cho file cũ không có MST trong tên
     if save_dir0 and os.path.isdir(save_dir0):
         for rootdir, _d, files in os.walk(save_dir0):
             for fn in files:
@@ -12412,22 +12474,29 @@ def export_excel(cid: int):
                     continue
                 name = fn.rsplit(".", 1)[0]
                 parts = name.split("_")
-                if len(parts) >= 2:
-                    f_khh = parts[0]
-                    f_sho = parts[1].lstrip("0") or "0"
-                    key = (f_khh, f_sho)
-                    path = os.path.join(rootdir, fn)
-                    prev = _file_index.get(key)
-                    # ƯU TIÊN file .xml (đọc trực tiếp); chỉ giữ .zip khi chưa có .xml
-                    if prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml")):
+                if len(parts) < 2:
+                    continue
+                f_khh, f_sho = parts[0], parts[1].lstrip("0") or "0"
+                path = os.path.join(rootdir, fn)
+
+                def _uu_tien_xml(prev, low=low):
+                    return prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml"))
+                if len(parts) >= 3:
+                    key = (f_khh, f_sho, parts[2])
+                    if _uu_tien_xml(_file_index.get(key)):
                         _file_index[key] = path
-    have_file = set(_file_index.keys())
+                else:
+                    key2 = (f_khh, f_sho)
+                    if _uu_tien_xml(_file_index_2.get(key2)):
+                        _file_index_2[key2] = path
+    have_file = set(_file_index.keys()) | set(_file_index_2.keys())
     _tlog(f"tim thay {len(have_file)} file hoa don da tai tren may (thu muc: {save_dir0 or '(chưa đặt)'})")
 
     def find_invoice_file(r):
         khh = str(r["khhdon"] or "").strip()
         sho = str(r["shdon"] or "").strip().lstrip("0") or "0"
-        return _file_index.get((khh, sho))
+        mst = str(r["nbmst"] or "").strip()
+        return _file_index.get((khh, sho, mst)) or _file_index_2.get((khh, sho))
 
     def _doc_file_hoadon(fpath):
         """Đọc + parse 1 file XML/ZIP hóa đơn đã tải. Trả về (items, summary)."""
@@ -12454,7 +12523,8 @@ def export_excel(cid: int):
         if r["detail_json"]:
             continue
         khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
-        if (khh, sho) in have_file:
+        mst = str(r["nbmst"] or "").strip()
+        if (khh, sho, mst) in _file_index or (khh, sho) in _file_index_2:
             da_co_file_rows.append(r)
             continue   # đã có file trên máy -> get_invoice_items sẽ đọc file, KHÔNG cần mạng
         can_nap.append(dict(r))
