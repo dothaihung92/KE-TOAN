@@ -584,23 +584,37 @@ class GDTClient:
         return None
 
     def get_detail(self, nbmst, khhdon, khmshdon, shdon, he_thong="query",
-                   max_retry=None, cho_khi_429=True):
-        """Lấy JSON chi tiết đầy đủ 1 hóa đơn.
+                   max_retry=None, cho_khi_429=True, loai=None):
+        """Lấy JSON chi tiết đầy đủ 1 hóa đơn — CÙNG API với nút "Xem hóa đơn"
+        trên trang Thuế (chỉ xem dữ liệu, không phải in/tải file).
         max_retry: giới hạn số lần thử (khi xuất Excel hàng loạt -> đặt nhỏ để
         1 hóa đơn lỗi không làm nghẽn cả luồng nhiều phút).
         cho_khi_429: True (mặc định) -> gặp 429 thì CHỜ theo Retry-After rồi thử lại
         (dùng cho tra cứu tương tác, không vội). False -> BỎ QUA NGAY khi bị giới
         hạn tốc độ, không chờ (dùng cho xuất Excel hàng loạt hàng nghìn hóa đơn,
-        để 1 lượt rớt không kéo cả tiến trình chờ hàng chục phút)."""
+        để 1 lượt rớt không kéo cả tiến trình chờ hàng chục phút).
+        loai: 'purchase'/'sold' — để gửi header action ĐÚNG HỆT trình duyệt."""
+        from urllib.parse import quote
         base = f"https://hoadondientu.gdt.gov.vn/api/{he_thong}"
         url = f"{base}/invoices/detail"
         params = {
             "nbmst": nbmst, "khhdon": khhdon,
             "shdon": shdon, "khmshdon": khmshdon,
         }
+        # Header action GIỐNG HỆT trình duyệt thật khi bấm "Xem hóa đơn" (đã
+        # đối chiếu request thực tế): tiếng Việt có dấu + URL-encode. Trước
+        # đây gửi "Xem hoa don" không dấu — khác chữ ký trình duyệt, dễ bị
+        # tường lửa trang Thuế nhận diện là truy cập tự động.
+        if loai == "purchase":
+            act = "Xem hóa đơn (hóa đơn mua vào)"
+        elif loai == "sold":
+            act = "Xem hóa đơn (hóa đơn bán ra)"
+        else:
+            act = "Xem hóa đơn"
         extra_headers = {
             "accept-language": "vi",
-            "action": "Xem hoa don",
+            # safe="()": trình duyệt thật KHÔNG mã hóa dấu ngoặc trong header này
+            "action": quote(act, safe="()"),
             "end-point": "/tra-cuu/tra-cuu-hoa-don",
             "referer": "https://hoadondientu.gdt.gov.vn/tra-cuu/tra-cuu-hoa-don",
         }
@@ -12579,7 +12593,8 @@ def export_excel(cid: int):
             try:
                 d = client0.get_detail(rr["nbmst"], rr["khhdon"],
                                        rr["khmshdon"], rr["shdon"], ht,
-                                       max_retry=max_retry, cho_khi_429=cho_khi_429)
+                                       max_retry=max_retry, cho_khi_429=cho_khi_429,
+                                       loai=rr["loai"])
                 if d and (d.get("hdhhdvu") or d.get("nbmst")):
                     return rr["id"], json.dumps(d, ensure_ascii=False)
             except Exception:
@@ -12596,12 +12611,18 @@ def export_excel(cid: int):
         results_map = {}
         _tlog(f"{nhan} {len(ds_rows)} hóa đơn qua mạng (song song)...")
         if workers is None:
-            # số luồng song song: KHÔNG chờ (429 bỏ ngay) nên có thể chạy nhiều luồng hơn
-            workers = {"fast": 20, "balanced": 12, "safe": 6}.get(CURRENT_SPEED, 12)
+            # SỐ LUỒNG THẤP + CÓ NGHỈ giữa các lần xem — mô phỏng người thật
+            # bấm "Xem hóa đơn" lần lượt. Trước đây tới 20 luồng bắn liên tục
+            # không nghỉ khiến tường lửa trang Thuế coi là tấn công và CHẶN CẢ
+            # IP ở tầng kết nối (trình duyệt cũng không vào được) — người dùng
+            # xác nhận cứ xuất Excel số lượng lớn là bị chặn.
+            workers = {"fast": 4, "balanced": 3, "safe": 2}.get(CURRENT_SPEED, 3)
         max_retry = 2 if cho_khi_429 else 1
 
         def _goi(rr):
-            return _tai_1(rr, cho_khi_429=cho_khi_429, max_retry=max_retry)
+            kq = _tai_1(rr, cho_khi_429=cho_khi_429, max_retry=max_retry)
+            time.sleep(SP()["file"])   # nghỉ giữa các lần xem (như người thật)
+            return kq
 
         with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
             for inv_id, dj in ex.map(_goi, ds_rows):
@@ -12680,7 +12701,7 @@ def export_excel(cid: int):
             _tlog(f"còn {len(con_thieu_rows)} hóa đơn chưa lấy được — thử LẦN CUỐI "
                  f"(chờ đúng thời gian giới hạn tốc độ của trang Thuế, để không bỏ sót)...")
             so_lay_duoc3 = _nap_song_song(con_thieu_rows, "thử lại lần cuối (chờ khi bị giới hạn tốc độ)",
-                                          cho_khi_429=True, workers=4)
+                                          cho_khi_429=True, workers=2)
             if so_lay_duoc3 < len(con_thieu_rows):
                 _tlog(f"⚠ vẫn còn {len(con_thieu_rows) - so_lay_duoc3} hóa đơn KHÔNG lấy được chi tiết "
                      f"dù đã chờ thử lại — có thể phiên đăng nhập hết hạn giữa chừng, đăng nhập lại rồi "
@@ -12817,7 +12838,7 @@ def export_excel(cid: int):
                 try:
                     detail = client.get_detail(
                         r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], ht,
-                        max_retry=1, cho_khi_429=False)
+                        max_retry=1, cho_khi_429=False, loai=r["loai"])
                     if detail and (detail.get("hdhhdvu") or detail.get("nbmst")):
                         items = _parse_detail_json(detail)
                         summary = _summary_from_detail_json(detail)
@@ -14536,7 +14557,8 @@ def invoice_html(invoice_id: int):
     client = CLIENTS.get(row["company_id"])
     if client and client.token:
         detail = client.get_detail(row["nbmst"], row["khhdon"],
-                                   row["khmshdon"], row["shdon"], he_thong)
+                                   row["khmshdon"], row["shdon"], he_thong,
+                                   loai=row["loai"])
         if detail:
             inv = detail
     return HTMLResponse(_render_invoice_html(inv))
