@@ -4659,12 +4659,30 @@ def _run_fetch_job(cid: int, body: dict):
                             base = f"{khhdon}_{shdon}_{nbmst}"
                             if "xml" not in fmts:
                                 return "ok"   # không yêu cầu tải xml -> coi như "xong"
-                            # Hóa đơn "Tổng cục thuế đã nhận KHÔNG MÃ" (ttxly=6): chỉ
-                            # cần ghi nhận DỮ LIỆU chi tiết (đã có sẵn từ tra cứu danh
-                            # sách), KHÔNG cần tải file — trang Thuế không cấp mã cho
-                            # loại này nên việc tải file luôn thất bại vô ích, chỉ tổ
-                            # tốn thời gian + báo lỗi "chưa tải được" sai sự thật.
+                            # Hóa đơn "Tổng cục thuế đã nhận KHÔNG MÃ" (ttxly=6):
+                            # KHÔNG có file XML để tải (trang Thuế không cấp mã cho
+                            # loại này nên việc tải file luôn thất bại vô ích) — NHƯNG
+                            # đã kiểm chứng bằng dữ liệu thật là API chi tiết (cùng API
+                            # dùng cho nút "Xem hóa đơn") VẪN lấy được đầy đủ dòng hàng
+                            # (kể cả tên hàng hóa) cho loại này khi gọi thành công. Lấy
+                            # luôn CHI TIẾT ngay lúc tra cứu (thay vì để tới lúc Xuất
+                            # Excel mới gọi) để lần xuất Excel sau có sẵn, khỏi phải chờ.
                             if str(inv.get("ttxly") or "").strip() == "6":
+                                try:
+                                    d = client.get_detail(nbmst, khhdon, khmshdon, shdon,
+                                                          he_thong, max_retry=2, cho_khi_429=False)
+                                    if d and d.get("hdhhdvu"):
+                                        cn2 = db()
+                                        cn2.execute(
+                                            """UPDATE invoices SET detail_json=? WHERE
+                                               company_id=? AND nbmst=? AND khmshdon=? AND
+                                               khhdon=? AND shdon=? AND loai=? AND he_thong=?""",
+                                            (json.dumps(d, ensure_ascii=False), cid, nbmst,
+                                             str(khmshdon or ""), khhdon, str(shdon or ""),
+                                             loai, he_thong))
+                                        cn2.commit(); cn2.close()
+                                except Exception:
+                                    pass
                                 return "khong_ma"
 
                             # ĐÃ CÓ FILE + ĐỌC ĐƯỢC + TRẠNG THÁI (tthai) KHÔNG ĐỔI so với
