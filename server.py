@@ -12600,25 +12600,27 @@ def export_excel(cid: int):
         cn.commit(); cn.close()
         return len(results_map)
 
-    if can_nap:
+    # Hóa đơn KHÔNG MÃ: KHÔNG gọi mạng dù chỉ 1 lần — chắc chắn thất bại (TCT
+    # không hề lưu chi tiết dòng hàng cho loại này), gọi chỉ tổ chờ timeout vô
+    # ích (có khi cả chục phút nếu trang Thuế đang chặn/không phản hồi) và góp
+    # phần làm nặng thêm tình trạng bị giới hạn tốc độ cho các hóa đơn KHÁC
+    # thật sự có thể lấy được. Chỉ gọi mạng cho phần CÒN LẠI (không phải không mã).
+    can_nap_mang = [r for r in can_nap if r["id"] not in id_khong_ma]
+    if id_khong_ma:
+        _tlog(f"bỏ qua {len(id_khong_ma)} hóa đơn KHÔNG MÃ — KHÔNG gọi mạng (chắc chắn "
+             f"không có chi tiết), dùng luôn tổng tiền theo bảng kê khi dựng sheet")
+    if can_nap_mang:
         if client0 and client0.token and not client0._token_dead:
-            so_lay_duoc = _nap_song_song(can_nap, "thử nạp nhanh (không chờ khi bị giới hạn tốc độ)")
-            con_thieu = len(can_nap) - so_lay_duoc
+            so_lay_duoc = _nap_song_song(can_nap_mang, "thử nạp nhanh (không chờ khi bị giới hạn tốc độ)")
+            con_thieu = len(can_nap_mang) - so_lay_duoc
             if client0._token_dead:
                 _tlog(f"phiên đăng nhập đã hết hạn giữa chừng — dừng nạp qua mạng, còn {con_thieu} hóa đơn chưa có chi tiết")
             elif con_thieu:
-                con_thieu_that = con_thieu - len(id_khong_ma & {r["id"] for r in can_nap})
-                if con_thieu_that > 0:
-                    _tlog(f"lấy được {so_lay_duoc}/{len(can_nap)}; còn {con_thieu_that} hóa đơn bị giới hạn tốc độ — "
-                         f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)"
-                         + (f" (không tính {len(id_khong_ma)} hóa đơn KHÔNG MÃ — sẽ luôn dùng tổng "
-                            f"tiền theo bảng kê, không cần/không thể lấy thêm)" if id_khong_ma else ""))
-                else:
-                    _tlog(f"lấy được {so_lay_duoc}/{len(can_nap)}; {con_thieu} hóa đơn còn lại đều là "
-                         f"KHÔNG MÃ — sẽ dùng tổng tiền theo bảng kê, không cần chạy lại")
+                _tlog(f"lấy được {so_lay_duoc}/{len(can_nap_mang)}; còn {con_thieu} hóa đơn bị giới hạn tốc độ — "
+                     f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)")
         else:
             why = ("chưa đăng nhập/phiên đã hết" if not (client0 and client0.token) else "phiên đã hết hạn")
-            _tlog(f"bỏ qua nạp mạng cho {len(can_nap)} hóa đơn ({why}) — sẽ hiện placeholder, "
+            _tlog(f"bỏ qua nạp mạng cho {len(can_nap_mang)} hóa đơn ({why}) — sẽ hiện placeholder, "
                  f"đăng nhập lại rồi xuất lại để lấy nốt")
 
     # ===== KIỂM TRA NHANH file "đã có" có THỰC SỰ ĐỌC ĐƯỢC không (offline,
