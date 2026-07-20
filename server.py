@@ -4651,14 +4651,6 @@ def _run_fetch_job(cid: int, body: dict):
                                 if _uu_tien_xml(_file_index_dl_2.get(key2)):
                                     _file_index_dl_2[key2] = path2
 
-                        # Đếm số lần LIÊN TIẾP gọi API chi tiết cho hóa đơn không mã bị
-                        # lỗi mạng (không phải 429 — lỗi mạng thật, dấu hiệu trang Thuế
-                        # đang sập/không phản hồi) — dùng để NGẮT SỚM, tránh mỗi hóa đơn
-                        # đều phải chờ hết timeout mới bỏ cuộc khi cả trăm hóa đơn không
-                        # mã cùng lúc đều chắc chắn thất bại (kéo dài tra cứu vô ích).
-                        _kma_loi_lien_tiep = {"n": 0}
-                        NGUONG_NGUNG_KMA = 4
-
                         def _tai_1_file(inv):
                             nbmst = inv.get("nbmst", "")
                             khhdon = inv.get("khhdon", "")
@@ -4667,34 +4659,19 @@ def _run_fetch_job(cid: int, body: dict):
                             base = f"{khhdon}_{shdon}_{nbmst}"
                             if "xml" not in fmts:
                                 return "ok"   # không yêu cầu tải xml -> coi như "xong"
-                            # Hóa đơn "Tổng cục thuế đã nhận KHÔNG MÃ" (ttxly=6):
-                            # KHÔNG có file XML để tải (trang Thuế không cấp mã cho
-                            # loại này nên việc tải file luôn thất bại vô ích) — NHƯNG
-                            # đã kiểm chứng bằng dữ liệu thật là API chi tiết (cùng API
-                            # dùng cho nút "Xem hóa đơn") VẪN lấy được đầy đủ dòng hàng
-                            # (kể cả tên hàng hóa) cho loại này khi gọi thành công. Lấy
-                            # luôn CHI TIẾT ngay lúc tra cứu (thay vì để tới lúc Xuất
-                            # Excel mới gọi) để lần xuất Excel sau có sẵn, khỏi phải chờ.
+                            # Hóa đơn "Tổng cục thuế đã nhận KHÔNG MÃ" (ttxly=6): không
+                            # có file XML để tải (trang Thuế không cấp mã cho loại này).
+                            # KHÔNG gọi API chi tiết ở đây — từng thử "lấy luôn chi tiết
+                            # ngay lúc tra cứu" nhưng việc bắn thêm hàng trăm request
+                            # chi tiết XEN LẪN các request tải file (chạy song song
+                            # nhiều luồng) khiến tường lửa trang Thuế coi là tấn công
+                            # và CHẶN CẢ IP ở tầng kết nối (trình duyệt cũng không vào
+                            # được — ERR_HTTP2_PROTOCOL_ERROR), người dùng đã xác nhận
+                            # cứ tra cứu là bị chặn. Chi tiết dòng hàng của loại hóa
+                            # đơn này sẽ được lấy ở bước KẾT XUẤT EXCEL (đã có sẵn cơ
+                            # chế thử lại kiên nhẫn + phương án dự phòng tổng tiền theo
+                            # bảng kê) — một điểm gọi mạng duy nhất, dễ kiểm soát nhịp.
                             if str(inv.get("ttxly") or "").strip() == "6":
-                                if _kma_loi_lien_tiep["n"] < NGUONG_NGUNG_KMA:
-                                    try:
-                                        d = client.get_detail(nbmst, khhdon, khmshdon, shdon,
-                                                              he_thong, max_retry=1, cho_khi_429=False)
-                                        if d and d.get("hdhhdvu"):
-                                            _kma_loi_lien_tiep["n"] = 0
-                                            cn2 = db()
-                                            cn2.execute(
-                                                """UPDATE invoices SET detail_json=? WHERE
-                                                   company_id=? AND nbmst=? AND khmshdon=? AND
-                                                   khhdon=? AND shdon=? AND loai=? AND he_thong=?""",
-                                                (json.dumps(d, ensure_ascii=False), cid, nbmst,
-                                                 str(khmshdon or ""), khhdon, str(shdon or ""),
-                                                 loai, he_thong))
-                                            cn2.commit(); cn2.close()
-                                        else:
-                                            _kma_loi_lien_tiep["n"] += 1
-                                    except Exception:
-                                        _kma_loi_lien_tiep["n"] += 1
                                 return "khong_ma"
 
                             # ĐÃ CÓ FILE + ĐỌC ĐƯỢC + TRẠNG THÁI (tthai) KHÔNG ĐỔI so với
