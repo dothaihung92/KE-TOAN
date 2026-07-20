@@ -12535,11 +12535,17 @@ def export_excel(cid: int):
 
     can_nap = []
     da_co_file_rows = []
-    id_khong_ma = set()   # id hóa đơn "không mã" (ttxly=6) — KHÔNG BAO GIỜ có
-                           # chi tiết dòng hàng qua mạng, dù thử lại kiên nhẫn
-                           # bao lâu cũng vậy -> loại khỏi vòng chờ 429 tốn thời
-                           # gian ở "LƯỢT CUỐI" phía dưới (đỡ tốn công + đỡ gọi
-                           # thêm request vô ích lên trang Thuế).
+    # Hóa đơn "KHÔNG MÃ" (ttxly=6): đã KIỂM CHỨNG THỰC TẾ (response API thật)
+    # rằng endpoint get_detail() (/invoices/detail — cùng API dùng cho nút
+    # "Xem hóa đơn" trên trang Thuế) VẪN gọi được và trả về dòng hàng với
+    # ĐÚNG số tiền/thuế suất — CHỈ RIÊNG trường "tên hàng hóa" bị trang Thuế
+    # để trống (không phải lỗi phần mềm, không phải không gọi được mạng).
+    # Vẫn cho gọi mạng bình thường ở lượt nhanh đầu (để lấy đúng breakdown
+    # theo từng dòng/thuế suất — chính xác hơn cách gộp theo tổng hóa đơn),
+    # nhưng KHÔNG đưa vào vòng CHỜ 429 kiên nhẫn ở "LƯỢT CUỐI" phía dưới (nếu
+    # lượt nhanh đã không lấy được do giới hạn tốc độ, có sẵn phương án dự
+    # phòng dùng tổng tiền theo bảng kê — không cần chờ thêm tốn thời gian).
+    id_khong_ma = set()
     for r in rows:
         if r["detail_json"]:
             continue
@@ -12555,8 +12561,8 @@ def export_excel(cid: int):
             pass
         can_nap.append(dict(r))
     _tlog(f"{len(da_co_file_rows)} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file"
-          + (f" (trong đó {len(id_khong_ma)} hóa đơn KHÔNG MÃ — sẽ không chờ thử lại nhiều lần vì "
-             f"chắc chắn không có chi tiết, dùng tổng tiền theo bảng kê)" if id_khong_ma else ""))
+          + (f" (trong đó {len(id_khong_ma)} hóa đơn KHÔNG MÃ — vẫn thử lấy 1 lượt qua mạng, "
+             f"nếu không được sẽ dùng tổng tiền theo bảng kê thay vì chờ lâu)" if id_khong_ma else ""))
 
     def _tai_1(rr, cho_khi_429=False, max_retry=1):
         if client0._token_dead:
@@ -12600,27 +12606,20 @@ def export_excel(cid: int):
         cn.commit(); cn.close()
         return len(results_map)
 
-    # Hóa đơn KHÔNG MÃ: KHÔNG gọi mạng dù chỉ 1 lần — chắc chắn thất bại (TCT
-    # không hề lưu chi tiết dòng hàng cho loại này), gọi chỉ tổ chờ timeout vô
-    # ích (có khi cả chục phút nếu trang Thuế đang chặn/không phản hồi) và góp
-    # phần làm nặng thêm tình trạng bị giới hạn tốc độ cho các hóa đơn KHÁC
-    # thật sự có thể lấy được. Chỉ gọi mạng cho phần CÒN LẠI (không phải không mã).
-    can_nap_mang = [r for r in can_nap if r["id"] not in id_khong_ma]
-    if id_khong_ma:
-        _tlog(f"bỏ qua {len(id_khong_ma)} hóa đơn KHÔNG MÃ — KHÔNG gọi mạng (chắc chắn "
-             f"không có chi tiết), dùng luôn tổng tiền theo bảng kê khi dựng sheet")
-    if can_nap_mang:
+    if can_nap:
         if client0 and client0.token and not client0._token_dead:
-            so_lay_duoc = _nap_song_song(can_nap_mang, "thử nạp nhanh (không chờ khi bị giới hạn tốc độ)")
-            con_thieu = len(can_nap_mang) - so_lay_duoc
+            so_lay_duoc = _nap_song_song(can_nap, "thử nạp nhanh (không chờ khi bị giới hạn tốc độ)")
+            con_thieu = len(can_nap) - so_lay_duoc
             if client0._token_dead:
                 _tlog(f"phiên đăng nhập đã hết hạn giữa chừng — dừng nạp qua mạng, còn {con_thieu} hóa đơn chưa có chi tiết")
             elif con_thieu:
-                _tlog(f"lấy được {so_lay_duoc}/{len(can_nap_mang)}; còn {con_thieu} hóa đơn bị giới hạn tốc độ — "
-                     f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)")
+                _tlog(f"lấy được {so_lay_duoc}/{len(can_nap)}; còn {con_thieu} hóa đơn bị giới hạn tốc độ — "
+                     f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)"
+                     + (f" (riêng hóa đơn KHÔNG MÃ nếu vẫn thiếu sẽ tự dùng tổng tiền theo "
+                        f"bảng kê, không cần chạy lại)" if id_khong_ma else ""))
         else:
             why = ("chưa đăng nhập/phiên đã hết" if not (client0 and client0.token) else "phiên đã hết hạn")
-            _tlog(f"bỏ qua nạp mạng cho {len(can_nap_mang)} hóa đơn ({why}) — sẽ hiện placeholder, "
+            _tlog(f"bỏ qua nạp mạng cho {len(can_nap)} hóa đơn ({why}) — sẽ hiện placeholder, "
                  f"đăng nhập lại rồi xuất lại để lấy nốt")
 
     # ===== KIỂM TRA NHANH file "đã có" có THỰC SỰ ĐỌC ĐƯỢC không (offline,
@@ -13957,6 +13956,12 @@ def _parse_detail_json(detail):
     ten_nmua = detail.get("nmten", "") or detail.get("nmtnmua", "") or ""
     mst_nmua = detail.get("nmmst", "") or ""
     items = detail.get("hdhhdvu") or []
+    # Hóa đơn KHÔNG MÃ (ttxly=6): đã kiểm chứng thực tế trang Thuế trả về
+    # ĐÚNG số tiền/thuế suất từng dòng qua API này, nhưng luôn để TRỐNG tên
+    # hàng hóa (giới hạn của TCT, không phải lỗi đọc dữ liệu) — thay bằng ghi
+    # chú rõ ràng, tránh hiện ô trống trông như lỗi/thiếu dữ liệu.
+    _ten_khong_ma = ("(TCT không cung cấp tên hàng hóa — hóa đơn không mã)"
+                     if str(detail.get("ttxly", "") or "").strip() == "6" else "")
     for it in items:
         rows.append({
             "khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
@@ -13965,7 +13970,7 @@ def _parse_detail_json(detail):
             "stt": str(it.get("stt", "") or ""),
             "tchat": str(it.get("tchat", "") or ""),
             "ma_vt": it.get("mhhdvu", "") or "",
-            "ten_hang": it.get("ten", "") or it.get("thhdvu", "") or "",
+            "ten_hang": it.get("ten", "") or it.get("thhdvu", "") or _ten_khong_ma,
             "dvt": it.get("dvtinh", "") or "",
             "sluong": it.get("sluong", ""),
             "dgia": it.get("dgia", ""),
