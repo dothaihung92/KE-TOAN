@@ -12561,8 +12561,8 @@ def export_excel(cid: int):
             pass
         can_nap.append(dict(r))
     _tlog(f"{len(da_co_file_rows)} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file"
-          + (f" (trong đó {len(id_khong_ma)} hóa đơn KHÔNG MÃ — vẫn thử lấy 1 lượt qua mạng, "
-             f"nếu không được sẽ dùng tổng tiền theo bảng kê thay vì chờ lâu)" if id_khong_ma else ""))
+          + (f" (trong đó {len(id_khong_ma)} hóa đơn KHÔNG MÃ — vẫn gọi mạng lấy chi tiết bình "
+             f"thường như hóa đơn khác, không loại trừ)" if id_khong_ma else ""))
 
     def _tai_1(rr, cho_khi_429=False, max_retry=1):
         if client0._token_dead:
@@ -12614,9 +12614,7 @@ def export_excel(cid: int):
                 _tlog(f"phiên đăng nhập đã hết hạn giữa chừng — dừng nạp qua mạng, còn {con_thieu} hóa đơn chưa có chi tiết")
             elif con_thieu:
                 _tlog(f"lấy được {so_lay_duoc}/{len(can_nap)}; còn {con_thieu} hóa đơn bị giới hạn tốc độ — "
-                     f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)"
-                     + (f" (riêng hóa đơn KHÔNG MÃ nếu vẫn thiếu sẽ tự dùng tổng tiền theo "
-                        f"bảng kê, không cần chạy lại)" if id_khong_ma else ""))
+                     f"chạy lại 'Kết xuất Excel' sau ít phút để lấy nốt (đã lưu tiến độ)")
         else:
             why = ("chưa đăng nhập/phiên đã hết" if not (client0 and client0.token) else "phiên đã hết hạn")
             _tlog(f"bỏ qua nạp mạng cho {len(can_nap)} hóa đơn ({why}) — sẽ hiện placeholder, "
@@ -12658,12 +12656,13 @@ def export_excel(cid: int):
     # trình) — số hóa đơn CÒN THIẾU lúc này thường đã nhỏ, nên lượt cuối này
     # CHỜ đúng theo Retry-After của trang Thuế (chấp nhận chậm hơn) với ít
     # luồng song song hơn, để lấy cho BẰNG ĐƯỢC thay vì bỏ cuộc.
-    # Loại hóa đơn KHÔNG MÃ khỏi lượt chờ 429 này — chắc chắn không có chi
-    # tiết dù chờ bao lâu, chờ chỉ tốn thời gian + gọi thêm request vô ích.
-    ds_can_kiem_tra = [r for r in (can_nap + can_nap2) if r["id"] not in id_khong_ma]
-    if id_khong_ma:
-        _tlog(f"bỏ qua thử lại lần cuối cho {len(id_khong_ma)} hóa đơn KHÔNG MÃ "
-             f"(chắc chắn không có chi tiết dòng hàng, sẽ dùng tổng tiền theo bảng kê khi dựng sheet)")
+    # LƯU Ý: hóa đơn KHÔNG MÃ (ttxly=6) VẪN được xử lý bình thường ở đây —
+    # đã kiểm chứng bằng dữ liệu thật là API get_detail() VẪN trả về đúng
+    # chi tiết dòng hàng (kể cả tên hàng hóa) cho loại này khi request thành
+    # công, KHÔNG hề "chắc chắn không có" như suy đoán ban đầu. Vấn đề thực
+    # sự chỉ là bị giới hạn tốc độ khi gọi hàng loạt — giống hệt hóa đơn
+    # thường — nên cần được thử lại kiên nhẫn giống nhau, không loại riêng.
+    ds_can_kiem_tra = can_nap + can_nap2
     if ds_can_kiem_tra and client0 and client0.token and not client0._token_dead:
         ids_can_kiem_tra = [r["id"] for r in ds_can_kiem_tra]
         ph = ",".join("?" * len(ids_can_kiem_tra))
@@ -12805,9 +12804,7 @@ def export_excel(cid: int):
         # (2) gọi detail JSON — thử cả hệ thống đã lưu và hệ thống còn lại
         # (đã nạp song song trước -> ở đây chỉ vớt nhanh, KHÔNG chờ nếu bị giới hạn
         # tốc độ hay phiên đã hết, để không làm chậm cả quá trình dựng sheet)
-        # Hóa đơn KHÔNG MÃ: đã biết chắc KHÔNG BAO GIỜ có chi tiết qua mạng
-        # (xem id_khong_ma phía trên) — bỏ qua để khỏi gọi mạng vô ích lần nữa.
-        if not items and r["id"] not in id_khong_ma and client and client.token and not client._token_dead:
+        if not items and client and client.token and not client._token_dead:
             ht0 = r["he_thong"] or "query"
             for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
                 try:
