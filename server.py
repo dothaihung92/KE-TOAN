@@ -4401,6 +4401,18 @@ def _run_fetch_job(cid: int, body: dict):
             file_saved = 0
             file_thieu_tong = 0   # số file XML KHÔNG tải được (sau khi đã thử lại), gộp cả kỳ
             file_thieu_mota = []  # mô tả cụ thể (tên công ty + số HĐ) từng nhóm file thiếu
+            # LỖI NGOẠI LỆ xảy ra NGAY TRONG bước tải file (vd lỗi tạo thư mục,
+            # lỗi liệt kê file đã có...) khiến CẢ KHỐI tải file của 1 loại (mua/
+            # bán) bị bỏ dở giữa chừng — khác với "loi_file" (từng hóa đơn lẻ
+            # không tải được, đã có cảnh báo + đếm vào file_thieu_tong ở trên).
+            # TRƯỚC ĐÂY lỗi này CHỈ hiện ở dòng log TRỰC TIẾP lúc đang chạy, KHÔNG
+            # được đưa vào done_text/banner tổng kết cuối cùng -> nếu người dùng
+            # không xem kịp dòng log lúc đó, xem lại sau sẽ KHÔNG THẤY DẤU VẾT
+            # gì của lỗi (loại hóa đơn đó lặng lẽ có 0 file, không tính là
+            # "thiếu" cũng không báo lỗi) — trông như "không có vấn đề gì" dù
+            # thực ra cả loại hóa đơn đó chưa tải được file nào. Ghi lại đây để
+            # LUÔN xuất hiện trong banner tổng kết cuối, không bị mất dấu.
+            loi_tai_file_ngoai_le = []
             # đếm theo loại để tổng kết: {loai: {"exp": tổng trang Thuế báo, "got": số lấy được}}
             thongke = {"purchase": {"exp": 0, "got": 0}, "sold": {"exp": 0, "got": 0}}
             # Đánh dấu RIÊNG khi 1 loại (mua/bán) bị LỖI THẬT SỰ dù đã thử lại —
@@ -4782,6 +4794,7 @@ def _run_fetch_job(cid: int, body: dict):
                             msg(stage="info",
                                 text=f"✓ {loai_txt}{ht_txt}: đã tải đủ {n_can_tai}/{n_can_tai} file")
                       except Exception as e:
+                        loi_tai_file_ngoai_le.append(f"{loai_txt}{ht_txt}: {str(e)[:150]}")
                         msg(stage="warn",
                             text=f"Lỗi tải file {loai_txt} (dữ liệu bảng vẫn lưu): {str(e)[:100]}")
 
@@ -4848,6 +4861,9 @@ def _run_fetch_job(cid: int, body: dict):
                     done_text += f" — ⚠ CÒN {file_thieu_tong} FILE CHƯA TẢI ĐƯỢC (dữ liệu bảng vẫn đủ)"
                     if file_thieu_mota:
                         done_text += ". CHI TIẾT: " + " | ".join(file_thieu_mota)
+                if loi_tai_file_ngoai_le:
+                    done_text += (f" — ❌ LỖI TẢI FILE (cả loại hóa đơn bị bỏ dở, CHƯA có file "
+                                  f"nào cho phần này): " + " | ".join(loi_tai_file_ngoai_le))
                 if thieu:
                     done_text += " — ⚠ CÓ THỂ THIẾU, nên tra cứu lại (chế độ Chậm & an toàn)"
             msg(stage=("error" if co_loi else "done"), text=done_text,
