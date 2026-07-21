@@ -287,7 +287,7 @@ class GDTClient:
     # loai: "purchase" (mua vào) hoặc "sold" (bán ra)
     # he_thong: "query" (HĐ điện tử thường) hoặc "sco-query" (HĐ máy tính tiền)
     def query_invoices(self, tu_ngay, den_ngay, loai="purchase", page_size=50,
-                       he_thong="query", progress=None):
+                       he_thong="query", progress=None, chi_cac_doan=None):
         """
         Tra cứu hóa đơn trong khoảng ngày bất kỳ (kể cả nhiều tháng/cả năm).
         Trang Thuế giới hạn mỗi lần gọi tối đa ~31 ngày, nên hàm này tự
@@ -295,7 +295,53 @@ class GDTClient:
         tu_ngay, den_ngay định dạng dd/mm/yyyy
         he_thong: "query" (hóa đơn điện tử) / "sco-query" (hóa đơn máy tính tiền)
         progress: hàm callback(msg) để báo tiến độ (tùy chọn)
+        chi_cac_doan: nếu có, CHỈ dò lại đúng các đoạn này (list dict
+          {"tu":dd/mm/yyyy,"den":dd/mm/yyyy,"ttxly":int_hoặc_None}) thay vì
+          toàn bộ khoảng ngày — dùng khi RETRY sau khi 1 phần nhỏ (vd 1
+          tháng × 1 trạng thái) bị lỗi mạng, để KHÔNG phải dò lại từ đầu
+          các tháng/trạng thái ĐÃ THÀNH CÔNG (trước đây bất kỳ lỗi cục bộ
+          nào cũng khiến cả khoảng ngày (có khi cả năm) bị dò lại từ đầu,
+          rất lâu — nhất là hệ thống máy tính tiền hay bị lỗi mạng vặt).
         """
+        all_results = []
+        seen = set()  # khử trùng lặp hóa đơn ở ranh giới tháng
+        total_expected = 0
+        loi_tich_luy = []   # gom LỖI THẬT SỰ (đã thử lại vẫn lỗi) qua các tháng/trạng thái
+        cac_doan_loi = []   # {"tu","den","ttxly"} — để RETRY ĐÚNG đoạn này ở lượt sau
+
+        if chi_cac_doan:
+            # ----- CHỈ dò lại các đoạn cụ thể đã lỗi ở lượt trước -----
+            for doan in chi_cac_doan:
+                s_from, s_to, ttxly = doan["tu"], doan["den"], doan.get("ttxly")
+                if progress:
+                    progress(f"đang dò lại đoạn lỗi trước đó {s_from} → {s_to}...")
+                self._last_total = 0
+                self._loi_rieng_phan = []
+                self._ttxly_that_bai_phan = []
+                # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
+                self._ttxly_can_do_lai = (ttxly,) if ttxly is not None else None
+                try:
+                    chunk = self._query_one_range(s_from, s_to, loai, page_size, he_thong,
+                                                  progress=progress)
+                finally:
+                    self._ttxly_can_do_lai = None
+                total_expected += getattr(self, "_last_total", 0) or 0
+                for loi in (getattr(self, "_loi_rieng_phan", None) or []):
+                    loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
+                for t in (getattr(self, "_ttxly_that_bai_phan", None) or []):
+                    cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": t})
+                for inv in chunk:
+                    key = (inv.get("khmshdon"), inv.get("khhdon"),
+                           inv.get("shdon"), inv.get("nbmst"))
+                    if key not in seen:
+                        seen.add(key)
+                        all_results.append(inv)
+            self.last_query_total = total_expected
+            self.last_query_got = len(all_results)
+            self.last_query_errors = loi_tich_luy
+            self.last_failed_chunks = cac_doan_loi
+            return all_results
+
         d_from = datetime.datetime.strptime(tu_ngay, "%d/%m/%Y").date()
         d_to = datetime.datetime.strptime(den_ngay, "%d/%m/%Y").date()
         if d_from > d_to:
@@ -312,6 +358,7 @@ class GDTClient:
                 self.last_query_total = 0
                 self.last_query_got = 0
                 self.last_query_errors = []
+                self.last_failed_chunks = []
                 if progress:
                     progress("kỳ này không có hóa đơn — bỏ qua nhanh")
                 return []
@@ -320,10 +367,6 @@ class GDTClient:
                 raise
             # lỗi khác khi đếm nhanh -> KHÔNG bỏ qua, dò đầy đủ như cũ cho an toàn
 
-        all_results = []
-        seen = set()  # khử trùng lặp hóa đơn ở ranh giới tháng
-        total_expected = 0
-        loi_tich_luy = []   # gom LỖI THẬT SỰ (đã thử lại vẫn lỗi) qua các tháng/trạng thái
         cur = d_from
         while cur <= d_to:
             # cuối tháng hiện tại
@@ -340,11 +383,14 @@ class GDTClient:
 
             self._last_total = 0
             self._loi_rieng_phan = []
+            self._ttxly_that_bai_phan = []
             chunk = self._query_one_range(s_from, s_to, loai, page_size, he_thong,
                                           progress=progress)
             total_expected += getattr(self, "_last_total", 0) or 0
             for loi in (getattr(self, "_loi_rieng_phan", None) or []):
                 loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
+            for t in (getattr(self, "_ttxly_that_bai_phan", None) or []):
+                cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": t})
             for inv in chunk:
                 key = (inv.get("khmshdon"), inv.get("khhdon"),
                        inv.get("shdon"), inv.get("nbmst"))
@@ -364,6 +410,7 @@ class GDTClient:
         # khác với "0 kết quả" hợp lệ; người gọi (_run_fetch_job) dùng để KHÔNG
         # báo "Hoàn tất" như bình thường mà cảnh báo rõ có thể thiếu dữ liệu.
         self.last_query_errors = loi_tich_luy
+        self.last_failed_chunks = cac_doan_loi
         return all_results
 
     def _toan_ky_rong(self, tu_ngay, den_ngay, loai, he_thong, page_size, progress=None):
@@ -426,11 +473,16 @@ class GDTClient:
             action = "Tìm kiếm (hóa đơn %smua vào)" % ("máy tính tiền " if is_mtt else "")
             # Các trạng thái xử lý hóa đơn mua vào (mỗi cái là 1 lần gọi riêng):
             #   5 = tổng hợp/đã cấp mã, 6 = đã nhận không mã, 8 = HĐ có rủi ro...
+            # ttxly_can_dò: khi RETRY 1 đoạn cụ thể (xem chi_cac_doan ở
+            # query_invoices), CHỈ cần dò lại ĐÚNG trạng thái đã lỗi trước đó,
+            # không cần dò lại cả 3 trạng thái (2 cái kia đã chắc chắn thành công).
+            ttxly_can_do = getattr(self, "_ttxly_can_do_lai", None) or (5, 6, 8)
             results = []
             seen = set()
             total_all = 0
-            loi_trang_thai = []   # các trạng thái LỖI THẬT SỰ (không phải rỗng) -> báo cho người dùng biết
-            for ttxly in (5, 6, 8):
+            loi_trang_thai = []   # mô tả LỖI THẬT SỰ (không phải rỗng) -> báo cho người dùng biết
+            ttxly_that_bai = []   # CÁC SỐ trạng thái bị lỗi (để RETRY ĐÚNG đoạn đó, không dò lại cả tháng)
+            for ttxly in ttxly_can_do:
                 search = f"{date_filter};ttxly=={ttxly}"
                 try:
                     part, ptotal = _thu_lai(lambda: self._fetch_paginated(
@@ -440,10 +492,13 @@ class GDTClient:
                 except Exception as e:
                     # Đã thử lại rồi vẫn lỗi -> GHI NHẬN LÀ LỖI (không coi như "không có"),
                     # để người gọi biết kết quả có thể THIẾU chứ không phải chắc chắn = 0.
+                    # KHÔNG raise (trừ TOKEN_EXPIRED) — để các trạng thái/tháng KHÁC vẫn
+                    # được dò tiếp, không mất trắng dữ liệu đã lấy được vì 1 lỗi cục bộ.
                     if "TOKEN_EXPIRED" in str(e):
                         raise
                     part = []
                     loi_trang_thai.append(f"ttxly={ttxly}: {str(e)[:120]}")
+                    ttxly_that_bai.append(ttxly)
                 for inv in part:
                     key = (inv.get("khmshdon"), inv.get("khhdon"),
                            inv.get("shdon"), inv.get("nbmst"))
@@ -453,17 +508,30 @@ class GDTClient:
                 time.sleep(SP()["status"])  # nghỉ giữa các trạng thái
             self._last_total = total_all
             self._loi_rieng_phan = loi_trang_thai
+            self._ttxly_that_bai_phan = ttxly_that_bai
             return results
         else:
             url = f"{base}/invoices/sold"
             action = "Tìm kiếm (hóa đơn %sbán ra)" % ("máy tính tiền " if is_mtt else "")
-            # Thử lại nội bộ trước khi để lỗi lan ra ngoài (bán ra chỉ gọi 1 lần,
-            # không có nhiều lượt dự phòng như mua vào theo từng trạng thái, nên
-            # dễ bị 1 lần rớt mạng ngẫu nhiên làm mất luôn cả kết quả bán ra).
-            results, total = _thu_lai(lambda: self._fetch_paginated(
-                url, date_filter, action, page_size, want_total=True, progress=progress))
-            self._last_total = total  # lưu để báo lên
-            self._loi_rieng_phan = []
+            # KHÔNG để lỗi lan ra ngoài (raise) nữa — trước đây 1 tháng lỗi hẳn
+            # (dù đã thử lại nội bộ) làm MẤT TRẮNG toàn bộ kết quả các tháng
+            # KHÁC đã lấy thành công trong CÙNG 1 lượt gọi query_invoices (vì
+            # ngoại lệ văng ra khỏi cả vòng lặp nhiều tháng). Ghi nhận là lỗi
+            # riêng phần giống mua vào, để tháng này được RETRY RIÊNG sau, các
+            # tháng khác vẫn giữ nguyên kết quả.
+            try:
+                results, total = _thu_lai(lambda: self._fetch_paginated(
+                    url, date_filter, action, page_size, want_total=True, progress=progress))
+                self._last_total = total  # lưu để báo lên
+                self._loi_rieng_phan = []
+                self._ttxly_that_bai_phan = []
+            except Exception as e:
+                if "TOKEN_EXPIRED" in str(e):
+                    raise
+                self._last_total = 0
+                self._loi_rieng_phan = [str(e)[:120]]
+                self._ttxly_that_bai_phan = [None]   # sold không có ttxly -> đánh dấu cả tháng lỗi
+                results = []
             return results
 
     def _dem_tong_nhanh(self, url, search, action, progress=None):
@@ -4629,25 +4697,32 @@ def _run_fetch_job(cid: int, body: dict):
                     msg(stage="query",
                         text=f"Đang tra cứu hóa đơn {loai_txt}{ht_txt}...")
 
-                    # Thử tối đa 2 LƯỢT cho toàn bộ khoảng ngày (mỗi lượt bên trong
-                    # đã tự thử lại theo tháng/trạng thái) trước khi báo lỗi hẳn.
-                    # QUAN TRỌNG: trước đây lượt 2 CHỈ được kích hoạt khi query_invoices
-                    # RAISE hẳn 1 lỗi — nếu nó trả về BÌNH THƯỜNG (không raise) nhưng chỉ
-                    # LỖI RIÊNG PHẦN (vd mua vào máy tính tiền: 1/3 trạng thái ttxly rớt
-                    # mạng dù 2 trạng thái kia OK) thì KHÔNG hề được thử lại tự động —
-                    # phần mềm chỉ báo "có thể thiếu" rồi bắt người dùng tự tra cứu lại
-                    # tay. Giờ lỗi riêng phần cũng tính là "chưa xong", được thử lại
-                    # NGAY trong cùng 1 lượt tra cứu, không cần người dùng can thiệp.
+                    # Thử tối đa 2 LƯỢT trước khi báo lỗi hẳn. QUAN TRỌNG: lượt
+                    # 2 (nếu cần) CHỈ dò lại ĐÚNG các đoạn (tháng × trạng thái)
+                    # đã lỗi ở lượt 1 (chi_cac_doan) — KHÔNG dò lại từ đầu toàn
+                    # bộ khoảng ngày. Trước đây hễ có lỗi riêng phần (vd mua vào
+                    # máy tính tiền: 1/3 trạng thái của 1 tháng bị rớt mạng dù
+                    # mọi tháng/trạng thái khác đều OK) là dò lại TOÀN BỘ từ đầu
+                    # (có khi cả năm), rất lâu và vô ích vì tuyệt đại đa số đã
+                    # thành công — nhất là hệ thống máy tính tiền hay bị lỗi
+                    # mạng vặt, khiến "không có phát sinh" vẫn phải chờ rất lâu.
                     invs = None
+                    exp0_gop = 0
                     loi_cuoi = None
                     loi_rieng = []
+                    cac_doan_loi = None
                     bo_qua_404 = False
                     SO_LAN_THU = 2
                     for lan_thu in range(SO_LAN_THU):
+                        # Đoạn CỤ THỂ sẽ dùng cho LƯỢT GỌI NÀY (None/rỗng ở lượt đầu,
+                        # hoặc khi client không có/không còn đoạn lỗi cụ thể để dò
+                        # riêng -> lượt này sẽ dò lại TOÀN BỘ khoảng ngày).
+                        doan_dung_de_goi = cac_doan_loi
                         try:
-                            invs = client.query_invoices(
+                            moi = client.query_invoices(
                                 tu, den, loai=loai, he_thong=he_thong,
-                                progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"))
+                                progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
+                                chi_cac_doan=doan_dung_de_goi)
                             loi_cuoi = None
                         except Exception as e:
                             es = str(e)
@@ -4666,17 +4741,42 @@ def _run_fetch_job(cid: int, body: dict):
                                 time.sleep(cho)
                             continue
 
+                        if not doan_dung_de_goi:
+                            # Lượt này KHÔNG dò theo đoạn cụ thể (lượt đầu, hoặc client
+                            # không hỗ trợ/không còn đoạn lỗi cụ thể để retry riêng) ->
+                            # kết quả là dò lại TOÀN BỘ khoảng ngày -> THAY THẾ hoàn
+                            # toàn kết quả/tổng kỳ vọng lượt trước (không cộng dồn,
+                            # tránh đếm trùng khiến báo "thiếu" sai dù đã lấy đủ).
+                            invs = moi
+                            exp0_gop = getattr(client, "last_query_total", 0) or 0
+                        else:
+                            # Lượt này CHỈ dò ĐÚNG đoạn bị lỗi trước đó -> CỘNG DỒN
+                            # (khử trùng) vào kết quả đã có của các đoạn khác.
+                            if invs is None:
+                                invs = moi
+                            else:
+                                seen_now = {(iv.get("khmshdon"), iv.get("khhdon"),
+                                            iv.get("shdon"), iv.get("nbmst")) for iv in invs}
+                                for iv in moi:
+                                    key = (iv.get("khmshdon"), iv.get("khhdon"),
+                                          iv.get("shdon"), iv.get("nbmst"))
+                                    if key not in seen_now:
+                                        invs.append(iv); seen_now.add(key)
+                            exp0_gop += getattr(client, "last_query_total", 0) or 0
+
                         # Không raise lỗi nhưng vẫn có thể lỗi RIÊNG PHẦN (vd 1 trong 3
                         # trạng thái mua vào lỗi dù 2 cái kia OK) — CŨNG PHẢI thử lại
-                        # toàn bộ (chưa xong = chưa dừng), không chỉ khi raise hẳn.
+                        # (chưa xong = chưa dừng), không chỉ khi raise hẳn.
                         loi_rieng = getattr(client, "last_query_errors", None) or []
+                        cac_doan_loi = getattr(client, "last_failed_chunks", None) or []
                         if not loi_rieng:
                             break   # lấy sạch, không lỗi gì -> xong, khỏi thử thêm
                         if lan_thu < SO_LAN_THU - 1:
                             msg(stage="warn",
                                 text=f"⚠ {loai_txt}{ht_txt}: {len(loi_rieng)} lượt bị lỗi riêng "
-                                     f"phần ({'; '.join(loi_rieng[:2])}) — đang tra cứu LẠI toàn "
-                                     f"bộ để lấy cho đủ, chưa dừng...")
+                                     f"phần ({'; '.join(loi_rieng[:2])}) — đang dò LẠI ĐÚNG "
+                                     f"{len(cac_doan_loi)} đoạn bị lỗi (không dò lại từ đầu), "
+                                     f"chưa dừng...")
                             time.sleep(10)
 
                     if bo_qua_404:
@@ -4707,7 +4807,12 @@ def _run_fetch_job(cid: int, body: dict):
                                  f"{SO_LAN_THU} lượt ({len(loi_rieng)} lượt còn lỗi) — KẾT QUẢ CÓ "
                                  f"THỂ THIẾU. Chi tiết: {'; '.join(loi_rieng[:3])}")
 
-                    exp0 = getattr(client, "last_query_total", 0) or 0
+                    exp0 = exp0_gop
+                    # Số lượng lấy được THẬT SỰ (gộp cả các lượt retry theo đoạn lỗi)
+                    # — KHÔNG dùng client.last_query_got vì sau khi retry theo
+                    # chi_cac_doan, giá trị đó chỉ phản ánh riêng lượt retry (1 vài
+                    # đoạn nhỏ), không phải tổng cộng dồn toàn kỳ.
+                    got_gop = len(invs) if invs else 0
                     if not invs:
                         if exp0:
                             # Trang Thuế báo CÓ hóa đơn nhưng ta lấy được 0 -> chắc chắn
@@ -4782,7 +4887,7 @@ def _run_fetch_job(cid: int, body: dict):
                     total_saved += len(invs)
                     # so sánh với tổng kỳ vọng từ trang Thuế (trước khi lọc ngân hàng)
                     exp = exp0
-                    got_raw = getattr(client, "last_query_got", len(invs)) or len(invs)
+                    got_raw = got_gop
                     thongke[loai]["exp"] += exp
                     thongke[loai]["got"] += got_raw
                     if exp and got_raw < exp:
