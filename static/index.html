@@ -370,6 +370,8 @@
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
     <div class="field"><label>Thư mục lưu DỮ LIỆU công ty <span style="font-weight:400;color:var(--muted)">(hạch toán, danh mục... — để trống = dùng thư mục XML/PDF ở trên)</span></label><input id="m_datadir" placeholder="VD: D:\\DuLieuKeToan\\CongTyABC"></div>
+    <div class="field"><label>Thư mục lưu file KẾT XUẤT <span style="font-weight:400;color:var(--muted)">(tự tạo cấu trúc Năm/Quý — chỉ dùng khi tick "Lưu file kết xuất" lúc tra cứu)</span></label><input id="m_exportdir" placeholder="VD: D:\\OneDrive\\...\\BAO CAO QUY"></div>
+    <p class="hint">📁 Ví dụ: chọn kỳ Quý 2/2026 + tick "Lưu file kết xuất" → phần mềm tự tạo <b>…\BAO CAO QUY\2026\Quý 2\</b> và lưu file Excel vào đó (tạo đủ cả 4 quý nếu thiếu).</p>
     <p class="hint">🔒 Thông tin lưu cục bộ trên máy bạn (SQLite), không gửi đi đâu khác ngoài trang Tổng cục Thuế khi đăng nhập.</p>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
@@ -589,6 +591,13 @@
              style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px">
       <div id="batchCoList" style="max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="batchCount">0</b> công ty</div>
+    </div>
+
+    <div class="field">
+      <label class="chk" style="font-weight:600">
+        <input type="checkbox" id="bLuuKetXuat"> 💾 Lưu file kết xuất (tự xuất Excel & lưu theo Năm/Quý)
+      </label>
+      <p class="hint" style="margin-top:4px">Sau khi mỗi công ty tra cứu xong, tự xuất Excel và lưu vào <b>Thư mục lưu file kết xuất</b> của công ty đó theo cấu trúc Năm/Quý (mỗi công ty cần đã đặt thư mục kết xuất trong phần Sửa công ty). Không tick = không tự xuất.</p>
     </div>
 
     <div class="field">
@@ -1137,6 +1146,7 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_note').value=edit?.ghichu||'';
   document.getElementById('m_dir').value=edit?.save_dir||'';
   document.getElementById('m_datadir').value=edit?.data_dir||'';
+  document.getElementById('m_exportdir').value=edit?.export_dir||'';
   // lấy mật khẩu thật để điền sẵn (để sửa cho đúng)
   let pass='',dvc1='',dvc2='';
   if(edit?.id){
@@ -1762,6 +1772,7 @@ async function saveCompany(){
   const body={ten:m_ten.value.trim(),mst:m_mst.value.trim(),username:m_user.value.trim(),
     password:m_pass.value,ghichu:m_note.value.trim(),save_dir:m_dir.value.trim(),
     data_dir:document.getElementById('m_datadir').value.trim(),
+    export_dir:document.getElementById('m_exportdir').value.trim(),
     dvc_password:document.getElementById('m_dvc1').value.trim(),
     dvc_password2:document.getElementById('m_dvc2').value.trim(),
     mst_khac:document.getElementById('m_mst_khac').value.trim(),
@@ -1911,6 +1922,10 @@ function renderWorkspace(c,online){
         </select>
       </div>
     </div>
+    <label class="chk" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px">
+      <input type="checkbox" id="cLuuKetXuat">
+      <span>💾 <b>Lưu file kết xuất</b> — sau khi tra cứu xong, tự xuất Excel &amp; lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý (không tick = xuất ra Desktop như thường)</span>
+    </label>
     <button class="btn" id="fetchBtn" onclick="doFetch()">🔍 Tra cứu hóa đơn</button>
     <div id="progressBox" style="display:none;margin-top:14px;background:var(--green-l);border-radius:10px;padding:14px 16px">
       <div style="display:flex;align-items:center;gap:10px">
@@ -2169,7 +2184,8 @@ async function doFetch(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({tu_ngay:tu,den_ngay:den,loai_list:loai,
         he_thong_list:heThong,dl_buy:dlBuy,dl_sell:dlSell,
-        lay_ngan_hang:document.getElementById('cNganHang').checked})});
+        lay_ngan_hang:document.getElementById('cNganHang').checked,
+        luu_ket_xuat:document.getElementById('cLuuKetXuat').checked})});
     if(!resp.ok){const e=await resp.json().catch(()=>({detail:'Lỗi'}));throw new Error(e.detail);}
 
     // POLL tiến độ — thu nhỏ cửa sổ vẫn không mất vì server chạy nền
@@ -2260,6 +2276,7 @@ function openBatchModal(){
   document.getElementById('batchDetail').textContent='';
   document.getElementById('batchStartBtn').disabled=false;
   document.getElementById('bTatMay').checked=false;
+  document.getElementById('bLuuKetXuat').checked=false;
   document.getElementById('batchTatMayCanhBao').style.display='none';
   document.getElementById('batchModal').classList.add('show');
   batchKiemTraDoDang();   // mời tiếp tục nếu có lượt tra cứu dở dang
@@ -2391,7 +2408,8 @@ async function doBatchFetch(){
   try{
     const r=await api('/api/fetch-batch',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({cids,tu_ngay:tu,den_ngay:den,loai_list:loai,he_thong_list:heThong,
-        dl_buy:dl,dl_sell:dl,lay_ngan_hang:document.getElementById('bNganHang').checked})});
+        dl_buy:dl,dl_sell:dl,lay_ngan_hang:document.getElementById('bNganHang').checked,
+        luu_ket_xuat:document.getElementById('bLuuKetXuat').checked})});
     await batchTheoDoi(r.batch_id);
   }catch(e){toast('Lỗi: '+e.message,'err');}
   btn.disabled=false;btn.innerHTML='🚀 Bắt đầu tra cứu';

@@ -80,6 +80,53 @@ def _get_desktop_dir():
     return home
 
 
+def _quy_cua_ky(tu_ngay, den_ngay):
+    """Từ khoảng ngày (dd/mm/yyyy) suy ra (năm, quý). Nếu khoảng ngày NẰM GỌN
+    trong 1 quý -> trả (năm, số_quý 1..4). Nếu trải nhiều quý (6 tháng/cả năm)
+    hoặc không đọc được -> trả (năm, None) để lưu thẳng vào thư mục năm."""
+    try:
+        d1 = datetime.datetime.strptime(tu_ngay, "%d/%m/%Y").date()
+        d2 = datetime.datetime.strptime(den_ngay, "%d/%m/%Y").date()
+    except Exception:
+        return None, None
+    if d1 > d2:
+        d1, d2 = d2, d1
+    q1 = (d1.month - 1) // 3 + 1
+    q2 = (d2.month - 1) // 3 + 1
+    if d1.year == d2.year and q1 == q2:
+        return d1.year, q1
+    return d1.year, None   # trải nhiều quý -> chỉ dùng thư mục năm
+
+
+def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
+    """Tạo (nếu thiếu) cấu trúc thư mục lưu file kết xuất theo Năm/Quý dưới
+    export_dir và trả về đường dẫn thư mục ĐÍCH để lưu file.
+      export_dir/<năm>/Quý 1..4/   (tạo đủ cả 4 quý khi tạo mới năm)
+    Nếu kỳ trải nhiều quý -> lưu thẳng vào export_dir/<năm>/.
+    Trả None nếu export_dir trống/không tạo được."""
+    export_dir = (export_dir or "").strip()
+    if not export_dir:
+        return None
+    nam, quy = _quy_cua_ky(tu_ngay, den_ngay)
+    if not nam:
+        return None
+    try:
+        thu_muc_nam = os.path.join(export_dir, str(nam))
+        os.makedirs(thu_muc_nam, exist_ok=True)
+        # tạo đủ 4 quý mỗi khi có thư mục năm (kể cả năm đã có sẵn — không sao,
+        # exist_ok) để người dùng thấy sẵn cấu trúc, khỏi tạo tay
+        for q in (1, 2, 3, 4):
+            os.makedirs(os.path.join(thu_muc_nam, f"Quý {q}"), exist_ok=True)
+        if quy:
+            dich = os.path.join(thu_muc_nam, f"Quý {quy}")
+        else:
+            dich = thu_muc_nam
+        os.makedirs(dich, exist_ok=True)
+        return dich
+    except Exception:
+        return None
+
+
 def _resp_xuat(path, fname, extra=None):
     """Trả FileResponse cho file kết xuất. Nếu file ĐÃ CÓ trên Desktop (đã
     được copy ra đó) thì gắn header 'X-Saved-Desktop: 1' để trình duyệt KHÔNG
@@ -911,6 +958,8 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN nguoi_ky TEXT")
     if "data_dir" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN data_dir TEXT")
+    if "export_dir" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN export_dir TEXT")
     if "dvc_password" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password TEXT")
     if "dvc_password2" not in ccols:
@@ -1178,10 +1227,10 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
-         data.get("data_dir", ""),
+         data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
          (data.get("dvc_password") or "").strip(),
          (data.get("dvc_password2") or "").strip(),
          (data.get("mst_khac") or "").strip(),
@@ -1235,10 +1284,11 @@ def update_company(cid: int, data: dict = Body(...)):
     if not ten_cqt:
         ten_cqt = (cur["ten_cqt_noi_nop"] if cur and "ten_cqt_noi_nop" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
-         data.get("data_dir", ""), dvc1.strip(), dvc2.strip(),
+         data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
+         dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
          dia_chi, ma_cqt, ten_cqt, cid)
     )
@@ -5014,6 +5064,19 @@ def _run_fetch_job(cid: int, body: dict):
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
                 tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
                 loi_tra_cuu=co_loi)
+
+            # ===== TỰ ĐỘNG KẾT XUẤT EXCEL vào thư mục Năm/Quý (nếu bật) =====
+            # Người dùng tick "Lưu file kết xuất" -> sau khi tra cứu + tải xong,
+            # tự xuất Excel và lưu vào <thư mục kết xuất>/<năm>/Quý N/ (không mở
+            # file, không rải Desktop — hợp cho tra cứu hàng loạt nhiều công ty).
+            if body.get("luu_ket_xuat") and not co_loi:
+                try:
+                    msg(stage="info", text="Đang tự động kết xuất Excel vào thư mục lưu file kết xuất...")
+                    export_excel(cid, luu_ket_xuat=1, tu_ngay=(tu or ""),
+                                 den_ngay=(den or ""), mo_file=0)
+                    msg(stage="info", text="✓ Đã kết xuất & lưu file vào thư mục theo Năm/Quý")
+                except Exception as e:
+                    msg(stage="warn", text=f"Không tự kết xuất được Excel: {str(e)[:120]}")
         except Exception as e:
             msg(stage="error", text=f"Lỗi: {str(e)[:160]}")
         finally:
@@ -5606,6 +5669,7 @@ _CONGTY_COT = [
     ("Mật khẩu", "password"), ("Mật khẩu Dịch vụ công 1", "dvc_password"),
     ("Mật khẩu Dịch vụ công 2", "dvc_password2"), ("Ghi chú", "ghichu"),
     ("Thư mục lưu XML/PDF", "save_dir"), ("Thư mục lưu dữ liệu", "data_dir"),
+    ("Thư mục lưu file kết xuất", "export_dir"),
     ("Người ký", "nguoi_ky"),
 ]
 _CONGTY_COT_ROONG = ["mã số thuế", "ma so thue"]  # từ khoá nhận diện thêm riêng cho cột MST
@@ -5692,13 +5756,13 @@ async def import_companies(request: Request):
                 conn.execute(
                     "UPDATE companies SET ten=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, "
                     "ten_cqt_noi_nop=?, username=?, password=?, dvc_password=?, "
-                    "dvc_password2=?, ghichu=?, save_dir=?, data_dir=?, nguoi_ky=? "
+                    "dvc_password2=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, nguoi_ky=? "
                     "WHERE id=?",
                     (gia_tri["ten"], gia_tri["mst_khac"], gia_tri["dia_chi"],
                      gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"], gia_tri["username"],
                      gia_tri["password"], gia_tri["dvc_password"], gia_tri["dvc_password2"],
                      gia_tri["ghichu"], gia_tri["save_dir"], gia_tri["data_dir"],
-                     gia_tri["nguoi_ky"], dupd["id"]))
+                     gia_tri["export_dir"], gia_tri["nguoi_ky"], dupd["id"]))
                 updated += 1
             except Exception as e:
                 errors.append(f"{ten}: {e}")
@@ -5707,13 +5771,13 @@ async def import_companies(request: Request):
             conn.execute(
                 "INSERT INTO companies (ten, mst, mst_khac, dia_chi, ma_cqt_noi_nop, "
                 "ten_cqt_noi_nop, username, password, dvc_password, dvc_password2, "
-                "ghichu, save_dir, data_dir, nguoi_ky, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "ghichu, save_dir, data_dir, export_dir, nguoi_ky, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (gia_tri["ten"], gia_tri["mst"], gia_tri["mst_khac"], gia_tri["dia_chi"],
                  gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"], gia_tri["username"],
                  gia_tri["password"], gia_tri["dvc_password"], gia_tri["dvc_password2"],
                  gia_tri["ghichu"], gia_tri["save_dir"], gia_tri["data_dir"],
-                 gia_tri["nguoi_ky"], datetime.datetime.now().isoformat()))
+                 gia_tri["export_dir"], gia_tri["nguoi_ky"], datetime.datetime.now().isoformat()))
             added += 1
         except Exception as e:
             errors.append(f"{ten}: {e}")
@@ -12726,7 +12790,13 @@ def _thue_theo_cong_thue(it, items, r):
 
 
 @app.get("/api/export-excel/{cid}")
-def export_excel(cid: int):
+def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
+                 den_ngay: str = "", mo_file: int = 1):
+    """Xuất Excel bảng kê hóa đơn.
+    luu_ket_xuat=1: NGOÀI Desktop, còn LƯU thêm vào thư mục kết xuất của công
+      ty theo cấu trúc Năm/Quý (dựa vào tu_ngay/den_ngay). Nếu công ty chưa
+      đặt 'Thư mục lưu file kết xuất' thì bỏ qua (vẫn lưu Desktop như thường).
+    mo_file=0: KHÔNG tự mở file (dùng khi tự động xuất hàng loạt sau tra cứu)."""
     import time as _tx
     _t0 = _tx.time()
     def _tlog(m):
@@ -14176,24 +14246,59 @@ def export_excel(cid: int):
     _tlog("DA GHI XONG file Excel")
     import shutil
     open_path = path
-    # Mặc định lưu ra DESKTOP cho dễ tìm
-    desktop = _get_desktop_dir()
-    if desktop and os.path.isdir(desktop):
-        try:
-            dest = os.path.join(desktop, fname_x)
-            shutil.copy(path, dest)
-            open_path = dest
-        except Exception:
-            pass
-    # lưu thêm vào thư mục công ty (nếu có cấu hình)
-    save_dir3 = (comp["save_dir"] or "").strip() if comp else ""
-    if save_dir3 and os.path.isdir(save_dir3):
-        try:
-            shutil.copy(path, os.path.join(save_dir3, fname_x))
-        except Exception:
-            pass
-    _open_file_local(open_path)
-    return _resp_xuat(path, fname_x)
+
+    # ===== LƯU FILE KẾT XUẤT theo Năm/Quý (nếu người dùng bật) =====
+    # Khi bật: KHÔNG rải ra Desktop nữa (nhất là lúc xuất hàng loạt sẽ tràn
+    # Desktop), mà lưu gọn vào thư mục kết xuất đã cấu hình theo cấu trúc
+    # <thư mục kết xuất>/<năm>/Quý N/. Kỳ lấy từ tu_ngay/den_ngay (nếu có),
+    # nếu không có thì suy từ ngày hóa đơn (ky_fname đã tính ở trên).
+    da_luu_ket_xuat = False
+    if luu_ket_xuat:
+        export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
+        # nếu không truyền kỳ, suy khoảng ngày từ các hóa đơn trong DB
+        _tu, _den = (tu_ngay or "").strip(), (den_ngay or "").strip()
+        if not (_tu and _den):
+            try:
+                ds_ngay = [(_r["tdlap"] or "").split("T")[0] for _r in rows if _r["tdlap"]]
+                ds_ngay = [n for n in ds_ngay if "-" in n]
+                if ds_ngay:
+                    n1, n2 = min(ds_ngay), max(ds_ngay)
+                    y1, m1, d1 = n1.split("-"); y2, m2, d2 = n2.split("-")
+                    _tu, _den = f"{d1}/{m1}/{y1}", f"{d2}/{m2}/{y2}"
+            except Exception:
+                pass
+        dich = _thu_muc_ket_xuat_ky(export_dir, _tu, _den)
+        if dich:
+            try:
+                dest_kx = os.path.join(dich, fname_x)
+                shutil.copy(path, dest_kx)
+                open_path = dest_kx
+                da_luu_ket_xuat = True
+                _tlog(f"da luu file ket xuat vao: {dich}")
+            except Exception as e:
+                _tlog(f"LOI luu file ket xuat: {e}")
+
+    # Mặc định lưu ra DESKTOP cho dễ tìm — CHỈ khi KHÔNG bật lưu kết xuất
+    # (bật lưu kết xuất là để gom vào thư mục theo quý, không rải Desktop)
+    if not da_luu_ket_xuat:
+        desktop = _get_desktop_dir()
+        if desktop and os.path.isdir(desktop):
+            try:
+                dest = os.path.join(desktop, fname_x)
+                shutil.copy(path, dest)
+                open_path = dest
+            except Exception:
+                pass
+        # lưu thêm vào thư mục công ty (nếu có cấu hình)
+        save_dir3 = (comp["save_dir"] or "").strip() if comp else ""
+        if save_dir3 and os.path.isdir(save_dir3):
+            try:
+                shutil.copy(path, os.path.join(save_dir3, fname_x))
+            except Exception:
+                pass
+    if mo_file:
+        _open_file_local(open_path)
+    return _resp_xuat(path, fname_x, extra={"X-Saved-Desktop": "1"} if da_luu_ket_xuat else None)
 
 
 # ---------- ĐỌC FILE XML -> XUẤT EXCEL CHI TIẾT ----------
