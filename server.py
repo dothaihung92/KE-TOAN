@@ -254,6 +254,25 @@ class GDTClient:
         if d_from > d_to:
             d_from, d_to = d_to, d_from
 
+        # ===== ĐẾM NHANH TOÀN KỲ trước khi dò từng tháng =====
+        # Nhiều công ty KHÔNG dùng hóa đơn máy tính tiền (sco-query) — trước đây
+        # vẫn dò từng tháng × 3 trạng thái (mua vào), mỗi lần gọi 1 request tới
+        # hệ thống sco-query vốn phản hồi rất chậm, dù kết quả luôn = 0. Với cả
+        # năm (12 tháng) đây là hàng chục request chờ vô ích. Nay gọi ĐẾM NHANH
+        # 1 phát cho TOÀN khoảng ngày: nếu tổng = 0 -> bỏ qua luôn, khỏi dò.
+        try:
+            if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress):
+                self.last_query_total = 0
+                self.last_query_got = 0
+                self.last_query_errors = []
+                if progress:
+                    progress("kỳ này không có hóa đơn — bỏ qua nhanh")
+                return []
+        except Exception as e:
+            if "TOKEN_EXPIRED" in str(e):
+                raise
+            # lỗi khác khi đếm nhanh -> KHÔNG bỏ qua, dò đầy đủ như cũ cho an toàn
+
         all_results = []
         seen = set()  # khử trùng lặp hóa đơn ở ranh giới tháng
         total_expected = 0
@@ -299,6 +318,32 @@ class GDTClient:
         # báo "Hoàn tất" như bình thường mà cảnh báo rõ có thể thiếu dữ liệu.
         self.last_query_errors = loi_tich_luy
         return all_results
+
+    def _toan_ky_rong(self, tu_ngay, den_ngay, loai, he_thong, page_size, progress=None):
+        """True nếu TOÀN khoảng ngày CHẮC CHẮN không có hóa đơn nào (tổng = 0).
+        Chỉ đếm nhanh (size=1) trên CẢ khoảng ngày, không dò từng tháng. Trả
+        False nếu có hóa đơn HOẶC không đếm chắc chắn được (khi đó dò đầy đủ)."""
+        base = f"https://hoadondientu.gdt.gov.vn/api/{he_thong}"
+        is_mtt = (he_thong == "sco-query")
+        date_filter = (f"tdlap=ge={tu_ngay}T00:00:00;tdlap=le={den_ngay}T23:59:59")
+        if loai == "purchase":
+            url = f"{base}/invoices/purchase"
+            action = "Tìm kiếm (hóa đơn %smua vào)" % ("máy tính tiền " if is_mtt else "")
+            # mua vào phân theo 3 trạng thái — CHỈ coi là rỗng khi CẢ 3 đều = 0
+            for ttxly in (5, 6, 8):
+                tong = self._dem_tong_nhanh(
+                    url, f"{date_filter};ttxly=={ttxly}", action, progress)
+                if tong is None:
+                    return False   # không chắc -> dò đầy đủ
+                if tong > 0:
+                    return False   # có hóa đơn -> dò đầy đủ
+                time.sleep(SP()["status"])
+            return True
+        else:
+            url = f"{base}/invoices/sold"
+            action = "Tìm kiếm (hóa đơn %sbán ra)" % ("máy tính tiền " if is_mtt else "")
+            tong = self._dem_tong_nhanh(url, date_filter, action, progress)
+            return tong == 0   # None (không chắc) -> False -> dò đầy đủ
 
     def _query_one_range(self, tu_ngay, den_ngay, loai="purchase",
                          page_size=50, he_thong="query", progress=None):
@@ -373,6 +418,58 @@ class GDTClient:
             self._last_total = total  # lưu để báo lên
             self._loi_rieng_phan = []
             return results
+
+    def _dem_tong_nhanh(self, url, search, action, progress=None):
+        """ĐẾM NHANH tổng số hóa đơn của 1 truy vấn — chỉ gọi 1 trang size=1 để
+        đọc trường 'total', KHÔNG phân trang lấy hết dữ liệu. Dùng để PHÁT HIỆN
+        SỚM khoảng ngày RỖNG (đặc biệt hóa đơn máy tính tiền — nhiều công ty
+        không hề dùng — để khỏi dò từng tháng × 3 trạng thái rất lâu cho con số
+        0). Trả về int total nếu chắc chắn (kể cả 0); None nếu KHÔNG chắc (lỗi
+        mạng/429...) -> người gọi nên dò đầy đủ bình thường cho an toàn.
+        TOKEN_EXPIRED thì raise để dừng cả tiến trình."""
+        from urllib.parse import quote
+        extra_headers = {
+            "accept-language": "vi",
+            "action": quote(action),
+            "end-point": "/tra-cuu/tra-cuu-hoa-don",
+            "referer": "https://hoadondientu.gdt.gov.vn/tra-cuu/tra-cuu-hoa-don",
+        }
+        qs = f"sort=tdlap:desc&size=1&search={quote(search, safe='=;,:/')}"
+        full_url = f"{url}?{qs}"
+        sp = SP()
+        t0 = time.time()
+        # ngân sách thời gian NGẮN cho phép đếm: nếu quá lâu (sco-query treo),
+        # bỏ cuộc đếm nhanh -> trả None -> dò đầy đủ như cũ (không làm chậm thêm)
+        NGUONG = 40
+        for attempt in range(sp["retry_max"]):
+            if time.time() - t0 > NGUONG:
+                return None
+            try:
+                r = self.session.get(full_url, headers=extra_headers, timeout=45)
+            except Exception:
+                if progress:
+                    progress("đang kiểm tra nhanh kỳ này có hóa đơn không...")
+                time.sleep(min(sp["retry_base"] * (attempt + 1), 20))
+                continue
+            if r.status_code == 401:
+                raise Exception("TOKEN_EXPIRED")
+            if r.status_code == 429:
+                ra = r.headers.get("Retry-After")
+                try:
+                    wait = int(ra) if ra else sp["retry_base"] * (attempt + 1)
+                except Exception:
+                    wait = sp["retry_base"] * (attempt + 1)
+                time.sleep(min(wait, 30))
+                continue
+            if r.status_code != 200:
+                return None   # 400/5xx... -> không chắc, để dò đầy đủ
+            try:
+                data = r.json()
+            except Exception:
+                return None
+            tong = data.get("total")
+            return int(tong) if isinstance(tong, (int, float)) else None
+        return None
 
     def _fetch_paginated(self, url, search, action, page_size=50, want_total=False, progress=None):
         """Gọi 1 endpoint với tham số search, tự phân trang và xử lý 429.
