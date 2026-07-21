@@ -529,7 +529,16 @@
 <div class="modal-bg" id="batchModal">
   <div class="modal" style="width:min(720px,96vw);max-width:720px;max-height:92vh;overflow-y:auto">
     <h3>🚀 Tra cứu hóa đơn hàng loạt</h3>
+    <div id="batchDoDang" style="display:none;background:#fff8e6;border:1px solid #f0d488;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+      <div style="font-weight:700;color:#8a6d1a;margin-bottom:4px">⏸ Có lượt tra cứu đang dở dang</div>
+      <div id="batchDoDangText" style="font-size:13px;color:#6b5613;margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" style="background:#c08a2d" onclick="batchTiepTuc()">▶ Tiếp tục phần còn lại</button>
+        <button class="btn ghost" onclick="batchBoQuaDoDang()">Bỏ qua</button>
+      </div>
+    </div>
     <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Hệ thống xử lý <b>lần lượt</b> từng công ty (an toàn, tránh bị Tổng cục Thuế chặn tạm). Công ty <b>chưa đăng nhập</b> sẽ được <b>tự động đăng nhập</b> (bằng tài khoản/mật khẩu đã lưu) trước khi tra cứu — chỉ bỏ qua nếu công ty đó chưa lưu mật khẩu hoặc tự đăng nhập thất bại.</p>
+    <p class="hint" style="margin-top:-4px;color:var(--muted)">💾 Tiến độ được lưu sau mỗi công ty — nếu phần mềm bị tắt đột ngột hoặc bạn bấm Dừng, lần sau mở lại sẽ được mời <b>tiếp tục phần còn dở dang</b>.</p>
 
     <div class="field">
       <label>Chọn nhanh theo kỳ</label>
@@ -2253,6 +2262,7 @@ function openBatchModal(){
   document.getElementById('bTatMay').checked=false;
   document.getElementById('batchTatMayCanhBao').style.display='none';
   document.getElementById('batchModal').classList.add('show');
+  batchKiemTraDoDang();   // mời tiếp tục nếu có lượt tra cứu dở dang
 }
 function closeBatchModal(){
   batchPollCancel=true;
@@ -2382,61 +2392,96 @@ async function doBatchFetch(){
     const r=await api('/api/fetch-batch',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({cids,tu_ngay:tu,den_ngay:den,loai_list:loai,he_thong_list:heThong,
         dl_buy:dl,dl_sell:dl,lay_ngan_hang:document.getElementById('bNganHang').checked})});
-    batchId=r.batch_id;batchPollCancel=false;
-    let running=true;
-    while(running){
-      await new Promise(s=>setTimeout(s,1000));
-      if(batchPollCancel)return;
-      let st;
-      try{st=await api(`/api/fetch-batch-status/${batchId}`);}catch{continue;}
-      running=st.running;
-      document.getElementById('batchBar').style.width=Math.round(st.done/st.total*100)+'%';
-      const cur=st.items.find(i=>i.cid===st.current);
-      document.getElementById('batchProgressText').textContent=
-        running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
-               :`Hoàn tất ${st.done}/${st.total} công ty`;
-      // dòng chi tiết TRỰC TIẾP (đang đăng nhập lần mấy / đang tải hóa đơn nào...)
-      // để biết phần mềm đang chạy tới đâu, không chỉ biết "đang xử lý công ty X"
-      document.getElementById('batchDetail').textContent=
-        (running && st.current_detail)?('↳ '+st.current_detail):'';
-      // Thanh tiến độ TẢI FILE riêng (số hóa đơn đang tải/còn lại) — giống hệt
-      // tra cứu 1 công ty, thay vì chỉ 1 dòng chữ nhỏ khó theo dõi.
-      const dlWrap=document.getElementById('batchDlWrap');
-      if(running && st.current_cur!=null && st.current_total){
-        dlWrap.style.display='block';
-        document.getElementById('batchDlText').textContent=
-          `${st.current_cur}/${st.current_total} (còn ${st.current_total-st.current_cur})`;
-        document.getElementById('batchDlBar').style.width=
-          Math.round(st.current_cur/st.current_total*100)+'%';
-      }else{
-        dlWrap.style.display='none';
-      }
-      const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
-      document.getElementById('batchLog').innerHTML=st.items.map(i=>{
-        const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(i.status==='done'?'#1f6b4a':'#555'));
-        const sl=i.status==='done'?` (${i.total_saved} HĐ)`:'';
-        return `<div style="color:${mau}">${ic[i.status]||'•'} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>`;
-      }).join('');
-    }
-    // TRƯỚC ĐÂY luôn báo "hoàn tất" màu xanh dù có công ty LỖI/BỎ QUA — người
-    // dùng dễ tưởng đã xong hết, không biết phải kéo xuống xem batchLog mới
-    // thấy công ty nào lỗi. Giờ toast phản ánh ĐÚNG kết quả, kèm tên công ty lỗi.
-    const dsLoi=st.items.filter(i=>i.status==='error');
-    const dsBoQua=st.items.filter(i=>i.status==='skipped');
-    if(dsLoi.length){
-      toast(`⚠ Xong ${st.total} công ty nhưng CÓ ${dsLoi.length} công ty LỖI khi tải: `+
-            dsLoi.map(i=>i.ten).join(', ')+' — xem chi tiết bên dưới, nên tra cứu lại','err');
-    }else if(dsBoQua.length){
-      toast(`Hoàn tất, nhưng ${dsBoQua.length} công ty bị BỎ QUA (chưa đăng nhập được): `+
-            dsBoQua.map(i=>i.ten).join(', '),'err');
-    }else{
-      toast('Tra cứu hàng loạt hoàn tất, không có lỗi','ok');
-    }
-    await loadCompanies();
-    if(current)await refreshInvoices();
-    if(document.getElementById('bTatMay').checked)await batDauDemNguocTatMay();
+    await batchTheoDoi(r.batch_id);
   }catch(e){toast('Lỗi: '+e.message,'err');}
   btn.disabled=false;btn.innerHTML='🚀 Bắt đầu tra cứu';
+}
+// Theo dõi tiến độ 1 batch (dùng chung cho tra cứu mới lẫn TIẾP TỤC dở dang)
+async function batchTheoDoi(bid){
+  batchId=bid;batchPollCancel=false;
+  document.getElementById('batchDoDang').style.display='none';
+  let running=true, st=null;
+  while(running){
+    await new Promise(s=>setTimeout(s,1000));
+    if(batchPollCancel)return;
+    try{st=await api(`/api/fetch-batch-status/${batchId}`);}catch{continue;}
+    running=st.running;
+    document.getElementById('batchBar').style.width=Math.round(st.done/st.total*100)+'%';
+    const cur=st.items.find(i=>i.cid===st.current);
+    document.getElementById('batchProgressText').textContent=
+      running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
+             :`Hoàn tất ${st.done}/${st.total} công ty`;
+    document.getElementById('batchDetail').textContent=
+      (running && st.current_detail)?('↳ '+st.current_detail):'';
+    const dlWrap=document.getElementById('batchDlWrap');
+    if(running && st.current_cur!=null && st.current_total){
+      dlWrap.style.display='block';
+      document.getElementById('batchDlText').textContent=
+        `${st.current_cur}/${st.current_total} (còn ${st.current_total-st.current_cur})`;
+      document.getElementById('batchDlBar').style.width=
+        Math.round(st.current_cur/st.current_total*100)+'%';
+    }else{
+      dlWrap.style.display='none';
+    }
+    const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
+    document.getElementById('batchLog').innerHTML=st.items.map(i=>{
+      const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(i.status==='done'?'#1f6b4a':'#555'));
+      const sl=i.status==='done'?` (${i.total_saved} HĐ)`:'';
+      return `<div style="color:${mau}">${ic[i.status]||'•'} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>`;
+    }).join('');
+  }
+  if(!st)return;
+  const dsLoi=st.items.filter(i=>i.status==='error');
+  const dsBoQua=st.items.filter(i=>i.status==='skipped');
+  if(dsLoi.length){
+    toast(`⚠ Xong ${st.total} công ty nhưng CÓ ${dsLoi.length} công ty LỖI khi tải: `+
+          dsLoi.map(i=>i.ten).join(', ')+' — xem chi tiết bên dưới, nên tra cứu lại','err');
+  }else if(dsBoQua.length){
+    toast(`Hoàn tất, nhưng ${dsBoQua.length} công ty bị BỎ QUA (chưa đăng nhập được): `+
+          dsBoQua.map(i=>i.ten).join(', '),'err');
+  }else{
+    toast('Tra cứu hàng loạt hoàn tất, không có lỗi','ok');
+  }
+  await loadCompanies();
+  if(current)await refreshInvoices();
+  if(document.getElementById('bTatMay').checked)await batDauDemNguocTatMay();
+}
+// Kiểm tra & hiện lời mời TIẾP TỤC lượt tra cứu dở dang (khi mở khung)
+let batchDoDangId=null;
+async function batchKiemTraDoDang(){
+  const box=document.getElementById('batchDoDang');
+  box.style.display='none';batchDoDangId=null;
+  try{
+    const r=await api('/api/fetch-batch-do-dang');
+    if(!r||!r.co)return;
+    batchDoDangId=r.batch_id;
+    const ky=(r.tu_ngay&&r.den_ngay)?` (kỳ ${r.tu_ngay} → ${r.den_ngay})`:'';
+    const tenList=r.ten_con_lai&&r.ten_con_lai.length
+      ? '<div style="margin-top:4px">Còn lại: '+r.ten_con_lai.join(', ')+(r.con_lai>r.ten_con_lai.length?'…':'')+'</div>' : '';
+    document.getElementById('batchDoDangText').innerHTML=
+      `Đã xong <b>${r.da_xong}/${r.total}</b> công ty${ky}. Còn <b>${r.con_lai}</b> công ty chưa tra cứu.${tenList}`;
+    box.style.display='block';
+  }catch(e){}
+}
+async function batchTiepTuc(){
+  if(!batchDoDangId)return;
+  const btn=document.getElementById('batchStartBtn');
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang chạy...';
+  document.getElementById('batchProgress').style.display='block';
+  document.getElementById('batchLog').innerHTML='';
+  document.getElementById('batchDetail').textContent='';
+  document.getElementById('batchBar').style.width='0%';
+  document.getElementById('batchProgressText').textContent='Tiếp tục phần còn dở dang...';
+  try{
+    const r=await api(`/api/fetch-batch-tiep-tuc/${batchDoDangId}`,{method:'POST'});
+    await batchTheoDoi(r.batch_id);
+  }catch(e){toast('Lỗi khi tiếp tục: '+e.message,'err');}
+  btn.disabled=false;btn.innerHTML='🚀 Bắt đầu tra cứu';
+}
+async function batchBoQuaDoDang(){
+  if(batchDoDangId){try{await api(`/api/fetch-batch-bo-qua/${batchDoDangId}`,{method:'POST'});}catch{}}
+  document.getElementById('batchDoDang').style.display='none';
+  batchDoDangId=null;
 }
 async function cancelBatch(){
   if(batchId){try{await api(`/api/fetch-batch-cancel/${batchId}`,{method:'POST'});}catch{}}

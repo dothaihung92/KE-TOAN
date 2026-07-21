@@ -747,6 +747,17 @@ def init_db():
         done_at TEXT,
         UNIQUE(company_id, loai)
     );
+    CREATE TABLE IF NOT EXISTS batch_tra_cuu (
+        batch_id INTEGER PRIMARY KEY,
+        body_json TEXT,          -- tham số tra cứu (ngày, loại, hệ thống...)
+        order_json TEXT,         -- danh sách company_id theo đúng thứ tự
+        items_json TEXT,         -- {cid: {status, note, total_saved, ten}}
+        total INTEGER,
+        done INTEGER,
+        trang_thai TEXT,         -- 'dang_chay' / 'tam_dung' / 'hoan_tat'
+        created_at TEXT,
+        updated_at TEXT
+    );
     """)
     # Migration: thêm cột he_thong nếu DB cũ chưa có
     cols = [r[1] for r in conn.execute("PRAGMA table_info(invoices)").fetchall()]
@@ -850,6 +861,19 @@ def init_db():
     conn.close()
 
 init_db()
+
+
+def _seed_batch_seq():
+    """Cho _BATCH_SEQ nối tiếp batch_id lớn nhất đã lưu trong DB -> batch mới
+    KHÔNG trùng id batch cũ (đã lưu để tra cứu tiếp)."""
+    try:
+        cn = db()
+        r = cn.execute("SELECT MAX(batch_id) m FROM batch_tra_cuu").fetchone()
+        cn.close()
+        if r and r["m"]:
+            _BATCH_SEQ["n"] = max(_BATCH_SEQ["n"], int(r["m"]))
+    except Exception:
+        pass
 
 
 def _get_setting(key, default=""):
@@ -5011,6 +5035,30 @@ def fetch_invoices(cid: int, body: dict = Body(...)):
 # đồng thời BATCH_JOBS[batch_id] tổng hợp trạng thái toàn batch.
 BATCH_JOBS = {}      # {batch_id: {...}}
 _BATCH_SEQ = {"n": 0}
+_seed_batch_seq()   # nối tiếp id từ batch đã lưu trong DB (tránh trùng)
+
+
+def _batch_luu_db(batch_id, batch, body, trang_thai=None):
+    """Ghi trạng thái batch xuống SQLite để TRA CỨU TIẾP nếu phần mềm bị tắt
+    đột ngột / dừng giữa chừng. Gọi sau mỗi công ty xong (tiến độ luôn được
+    lưu), nên dù mất điện/crash cũng chỉ mất tối đa dở dang 1 công ty."""
+    try:
+        cn = db()
+        now = datetime.datetime.now().isoformat()
+        cn.execute("""INSERT INTO batch_tra_cuu
+            (batch_id, body_json, order_json, items_json, total, done, trang_thai, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(batch_id) DO UPDATE SET
+                items_json=excluded.items_json, done=excluded.done,
+                trang_thai=excluded.trang_thai, updated_at=excluded.updated_at""",
+            (batch_id, json.dumps(body, ensure_ascii=False),
+             json.dumps(batch["order"]),
+             json.dumps(batch["items"], ensure_ascii=False),
+             batch["total"], batch["done"],
+             trang_thai or batch.get("trang_thai", "dang_chay"), now, now))
+        cn.commit(); cn.close()
+    except Exception:
+        pass
 
 
 def _run_batch(batch_id: int, cids: list, body: dict):
@@ -5069,8 +5117,10 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                     item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
                     _luu_loi_tra_cuu(cid, item["note"])
                     batch["done"] += 1
+                    _batch_luu_db(batch_id, batch, body)
                     continue
             item["status"] = "running"
+            _batch_luu_db(batch_id, batch, body)
             try:
                 _run_fetch_job(cid, body)   # chạy đồng bộ trong thread batch
                 last = (FETCH_JOBS.get(cid) or {}).get("last") or {}
@@ -5086,10 +5136,19 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 item["note"] = str(e)[:160]
                 _luu_loi_tra_cuu(cid, item["note"])
             batch["done"] += 1
+            # LƯU TIẾN ĐỘ sau MỖI công ty -> tắt đột ngột chỉ mất dở dang 1 cty
+            _batch_luu_db(batch_id, batch, body)
     finally:
         batch["running"] = False
         batch["current"] = None
         _dong_trinh_duyet_captcha(drv_captcha[0])
+        # Còn công ty nào CHƯA xong (do người dùng bấm Dừng giữa chừng) -> đánh
+        # dấu 'tam_dung' để lần sau mở khung sẽ mời TIẾP TỤC phần còn dở dang.
+        # Nếu đã chạy hết vòng (tất cả công ty đều được xử lý) -> 'hoan_tat'.
+        con_do_dang = any(it["status"] in ("pending", "login", "running")
+                          for it in batch["items"].values())
+        _batch_luu_db(batch_id, batch, body,
+                      trang_thai="tam_dung" if con_do_dang else "hoan_tat")
 
 
 @app.post("/api/fetch-batch")
@@ -5114,23 +5173,133 @@ def fetch_batch(body: dict = Body(...)):
     if not cids:
         raise HTTPException(404, "Không tìm thấy công ty đã chọn")
 
+    return _khoi_dong_batch(cids, ten_map, body)
+
+
+def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
+    """Tạo + chạy 1 batch mới. items_cu (nếu có): trạng thái cũ để GIỮ số HĐ đã
+    lấy của công ty đã xong khi tiếp tục batch dở dang (chỉ chạy lại cty chưa xong)."""
+    import threading
+    # batch_id nối tiếp cả các batch đã lưu trong DB (tránh trùng id cũ)
     _BATCH_SEQ["n"] += 1
     batch_id = _BATCH_SEQ["n"]
+
+    def _mk_item(c):
+        it = {"cid": c, "ten": ten_map[c], "status": "pending",
+              "total_saved": 0, "note": ""}
+        if items_cu and str(c) in items_cu and items_cu[str(c)].get("status") == "done":
+            old = items_cu[str(c)]
+            it.update(status="done", total_saved=old.get("total_saved", 0),
+                      note=old.get("note", "Đã xong ở lần trước"))
+        return it
+
+    items = {c: _mk_item(c) for c in cids}
+    da_xong = sum(1 for it in items.values() if it["status"] == "done")
+    # công ty CẦN chạy (chưa xong) — công ty đã xong thì giữ nguyên, bỏ qua
+    cids_chay = [c for c in cids if items[c]["status"] != "done"]
     BATCH_JOBS[batch_id] = {
         "running": True,
         "cancel": False,
         "total": len(cids),
-        "done": 0,
+        "done": da_xong,
         "current": None,
         "started": time.time(),
         "order": cids,
-        "items": {c: {"cid": c, "ten": ten_map[c], "status": "pending",
-                      "total_saved": 0, "note": ""} for c in cids},
+        "items": items,
+        "trang_thai": "dang_chay",
     }
-    import threading
-    threading.Thread(target=lambda: _run_batch(batch_id, cids, body),
+    # đánh dấu MỌI batch dở dang CŨ thành 'hoan_tat' (không mời tiếp tục nữa) —
+    # chỉ giữ đúng 1 batch mới nhất để tránh nhiều lời mời chồng chéo
+    try:
+        cn = db()
+        cn.execute("UPDATE batch_tra_cuu SET trang_thai='hoan_tat' "
+                   "WHERE trang_thai IN ('dang_chay','tam_dung')")
+        cn.commit(); cn.close()
+    except Exception:
+        pass
+    _batch_luu_db(batch_id, BATCH_JOBS[batch_id], body)
+    threading.Thread(target=lambda: _run_batch(batch_id, cids_chay, body),
                      daemon=True).start()
     return {"ok": True, "batch_id": batch_id}
+
+
+@app.get("/api/fetch-batch-do-dang")
+def fetch_batch_do_dang():
+    """Trả về batch tra cứu ĐANG DỞ DANG (bị tắt đột ngột / dừng giữa chừng) để
+    mời người dùng TIẾP TỤC. None nếu không có."""
+    try:
+        cn = db()
+        row = cn.execute(
+            "SELECT * FROM batch_tra_cuu WHERE trang_thai IN ('dang_chay','tam_dung') "
+            "ORDER BY batch_id DESC LIMIT 1").fetchone()
+        cn.close()
+    except Exception:
+        return {"co": False}
+    if not row:
+        return {"co": False}
+    # đang thực sự chạy trong bộ nhớ (chưa tắt) -> không phải "dở dang cần tiếp"
+    mem = BATCH_JOBS.get(row["batch_id"])
+    if mem and mem.get("running"):
+        return {"co": False}
+    try:
+        items = json.loads(row["items_json"] or "{}")
+        body = json.loads(row["body_json"] or "{}")
+    except Exception:
+        return {"co": False}
+    con_lai = [it for it in items.values() if it.get("status") != "done"]
+    if not con_lai:
+        return {"co": False}
+    return {
+        "co": True,
+        "batch_id": row["batch_id"],
+        "total": row["total"],
+        "da_xong": row["total"] - len(con_lai),
+        "con_lai": len(con_lai),
+        "tu_ngay": body.get("tu_ngay", ""),
+        "den_ngay": body.get("den_ngay", ""),
+        "ten_con_lai": [it.get("ten", "") for it in con_lai][:20],
+    }
+
+
+@app.post("/api/fetch-batch-tiep-tuc/{batch_id}")
+def fetch_batch_tiep_tuc(batch_id: int):
+    """Tiếp tục 1 batch dở dang: chỉ chạy các công ty CHƯA xong, giữ nguyên
+    kết quả các công ty đã xong ở lần trước."""
+    cn = db()
+    row = cn.execute("SELECT * FROM batch_tra_cuu WHERE batch_id=?", (batch_id,)).fetchone()
+    if not row:
+        cn.close()
+        raise HTTPException(404, "Không tìm thấy lượt tra cứu dở dang")
+    try:
+        body = json.loads(row["body_json"] or "{}")
+        items = json.loads(row["items_json"] or "{}")
+        order = json.loads(row["order_json"] or "[]")
+    except Exception:
+        cn.close()
+        raise HTTPException(400, "Dữ liệu lượt tra cứu dở dang bị hỏng")
+    # lấy tên công ty còn tồn tại (công ty đã xoá thì bỏ)
+    order = [int(c) for c in order]
+    rows = cn.execute(
+        "SELECT id, ten, mst FROM companies WHERE id IN (%s)"
+        % (",".join("?" * len(order)) or "NULL"), order).fetchall() if order else []
+    cn.close()
+    ten_map = {r["id"]: (r["ten"] or r["mst"]) for r in rows}
+    order = [c for c in order if c in ten_map]
+    if not order:
+        raise HTTPException(404, "Các công ty của lượt tra cứu dở dang không còn tồn tại")
+    return _khoi_dong_batch(order, ten_map, body, items_cu=items)
+
+
+@app.post("/api/fetch-batch-bo-qua/{batch_id}")
+def fetch_batch_bo_qua(batch_id: int):
+    """Bỏ qua lời mời tiếp tục 1 batch dở dang (đánh dấu hoàn tất)."""
+    try:
+        cn = db()
+        cn.execute("UPDATE batch_tra_cuu SET trang_thai='hoan_tat' WHERE batch_id=?", (batch_id,))
+        cn.commit(); cn.close()
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 @app.get("/api/fetch-batch-status/{batch_id}")
