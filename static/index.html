@@ -595,9 +595,9 @@
 
     <div class="field">
       <label class="chk" style="font-weight:600">
-        <input type="checkbox" id="bLuuKetXuat"> 💾 Lưu file kết xuất (tự xuất Excel & lưu theo Năm/Quý)
+        <input type="checkbox" id="bLuuKetXuat"> 💾 Lưu file kết xuất (tự xuất Excel + XML GTGT/TNCN theo Năm/Quý)
       </label>
-      <p class="hint" style="margin-top:4px">Sau khi mỗi công ty tra cứu xong, tự xuất Excel và lưu vào <b>Thư mục lưu file kết xuất</b> của công ty đó theo cấu trúc Năm/Quý (mỗi công ty cần đã đặt thư mục kết xuất trong phần Sửa công ty). Không tick = không tự xuất.</p>
+      <p class="hint" style="margin-top:4px">Sau khi mỗi công ty tra cứu xong, tự xuất <b>Excel + XML tờ khai GTGT + XML tờ khai TNCN</b> và lưu vào <b>Thư mục lưu file kết xuất</b> của công ty đó theo cấu trúc Năm/Quý (mỗi công ty cần đã đặt thư mục kết xuất trong phần Sửa công ty). Không tick = không tự xuất.</p>
     </div>
 
     <div class="field">
@@ -1940,7 +1940,7 @@ function renderWorkspace(c,online){
     </div>
     <label class="chk" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px">
       <input type="checkbox" id="cLuuKetXuat">
-      <span>💾 <b>Lưu file kết xuất</b> — sau khi tra cứu xong, tự xuất Excel &amp; lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý (không tick = xuất ra Desktop như thường)</span>
+      <span>💾 <b>Lưu file kết xuất</b> — sau khi tra cứu xong, tự xuất <b>Excel + XML tờ khai GTGT + XML tờ khai TNCN</b> &amp; lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý (không tick = xuất ra Desktop như thường)</span>
     </label>
     <button class="btn" id="fetchBtn" onclick="doFetch()">🔍 Tra cứu hóa đơn</button>
     <div id="progressBox" style="display:none;margin-top:14px;background:var(--green-l);border-radius:10px;padding:14px 16px">

@@ -5074,9 +5074,24 @@ def _run_fetch_job(cid: int, body: dict):
                     msg(stage="info", text="Đang tự động kết xuất Excel vào thư mục lưu file kết xuất...")
                     export_excel(cid, luu_ket_xuat=1, tu_ngay=(tu or ""),
                                  den_ngay=(den or ""), mo_file=0)
-                    msg(stage="info", text="✓ Đã kết xuất & lưu file vào thư mục theo Năm/Quý")
+                    msg(stage="info", text="✓ Đã kết xuất Excel vào thư mục theo Năm/Quý")
                 except Exception as e:
                     msg(stage="warn", text=f"Không tự kết xuất được Excel: {str(e)[:120]}")
+                # Kèm luôn file XML tờ khai GTGT (01/GTGT) và TNCN (05/KK-TNCN)
+                # vào cùng thư mục Năm/Quý để nộp HTKK — mỗi cái độc lập, lỗi cái
+                # này không chặn cái kia.
+                try:
+                    export_htkk(cid, tu=(tu or ""), den=(den or ""),
+                                luu_ket_xuat=1, mo_file=0)
+                    msg(stage="info", text="✓ Đã kết xuất XML tờ khai GTGT (01/GTGT)")
+                except Exception as e:
+                    msg(stage="warn", text=f"Không tự kết xuất được XML GTGT: {str(e)[:120]}")
+                try:
+                    export_htkk_tncn(cid, tu=(tu or ""), den=(den or ""),
+                                     luu_ket_xuat=1, mo_file=0)
+                    msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
+                except Exception as e:
+                    msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
         except Exception as e:
             msg(stage="error", text=f"Lỗi: {str(e)[:160]}")
         finally:
@@ -12088,11 +12103,14 @@ def vat_luu(cid: int, data: dict = Body(...)):
 
 
 @app.get("/api/export-htkk/{cid}")
-def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = ""):
+def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
+                luu_ket_xuat: int = 0, mo_file: int = 1):
     """
     Tạo file XML tờ khai 01/GTGT (TT80/2021) để nhập vào HTKK.
     Hàng bán ra 8% -> đưa vào nhóm 10% (ct32/ct33) + Phụ lục NQ142/2024.
     ky: 'MM/YYYY' (vd '05/2026'); nếu trống lấy từ hóa đơn.
+    luu_ket_xuat=1: lưu thêm vào thư mục kết xuất của công ty theo Năm/Quý.
+    mo_file=0: không tự mở file (dùng khi tự xuất sau tra cứu hàng loạt).
     """
     import html as _html
     conn = db()
@@ -12523,24 +12541,40 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
         f.write("\ufeff" + xml)
     # Mặc định lưu ra DESKTOP cho dễ tìm; lưu thêm vào thư mục công ty (nếu có)
     open_path = path
-    desktop = _get_desktop_dir()
-    if desktop and os.path.isdir(desktop):
-        try:
-            dest = os.path.join(desktop, fname)
-            with open(dest, "w", encoding="utf-8") as f:
-                f.write("\ufeff" + xml)
-            open_path = dest
-        except Exception:
-            pass
-    save_dir2 = (comp["save_dir"] or "").strip() if comp else ""
-    if save_dir2 and os.path.isdir(save_dir2):
-        try:
-            dest2 = os.path.join(save_dir2, fname)
-            with open(dest2, "w", encoding="utf-8") as f:
-                f.write("\ufeff" + xml)
-        except Exception:
-            pass
-    _open_file_local(open_path)
+    # ===== LƯU vào thư mục KẾT XUẤT theo Năm/Quý (nếu bật) — không rải Desktop =====
+    da_luu_ket_xuat = False
+    if luu_ket_xuat:
+        export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
+        dich = _thu_muc_ket_xuat_ky(export_dir, tu_ngay_kkhai, den_ngay_kkhai)
+        if dich:
+            try:
+                dest_kx = os.path.join(dich, fname)
+                with open(dest_kx, "w", encoding="utf-8") as f:
+                    f.write("\ufeff" + xml)
+                open_path = dest_kx
+                da_luu_ket_xuat = True
+            except Exception:
+                pass
+    if not da_luu_ket_xuat:
+        desktop = _get_desktop_dir()
+        if desktop and os.path.isdir(desktop):
+            try:
+                dest = os.path.join(desktop, fname)
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write("\ufeff" + xml)
+                open_path = dest
+            except Exception:
+                pass
+        save_dir2 = (comp["save_dir"] or "").strip() if comp else ""
+        if save_dir2 and os.path.isdir(save_dir2):
+            try:
+                dest2 = os.path.join(save_dir2, fname)
+                with open(dest2, "w", encoding="utf-8") as f:
+                    f.write("\ufeff" + xml)
+            except Exception:
+                pass
+    if mo_file:
+        _open_file_local(open_path)
     canh_bao = ""
     if canh_bao_cqt:
         canh_bao = (f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
@@ -12550,7 +12584,8 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
 
 
 @app.get("/api/export-htkk-tncn/{cid}")
-def export_htkk_tncn(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = ""):
+def export_htkk_tncn(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
+                     luu_ket_xuat: int = 0, mo_file: int = 1):
     """
     Tạo file XML tờ khai 05/KK-TNCN (TT80/2021) để nhập vào HTKK.
     LƯU Ý: phần mềm hiện CHƯA có phân hệ tiền lương/thu nhập chịu thuế TNCN
@@ -12688,24 +12723,40 @@ def export_htkk_tncn(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", d
     with open(path, "w", encoding="utf-8") as f:
         f.write("﻿" + xml)
     open_path = path
-    desktop = _get_desktop_dir()
-    if desktop and os.path.isdir(desktop):
-        try:
-            dest = os.path.join(desktop, fname)
-            with open(dest, "w", encoding="utf-8") as f:
-                f.write("﻿" + xml)
-            open_path = dest
-        except Exception:
-            pass
-    save_dir2 = (comp["save_dir"] or "").strip() if comp else ""
-    if save_dir2 and os.path.isdir(save_dir2):
-        try:
-            dest2 = os.path.join(save_dir2, fname)
-            with open(dest2, "w", encoding="utf-8") as f:
-                f.write("﻿" + xml)
-        except Exception:
-            pass
-    _open_file_local(open_path)
+    # ===== LƯU vào thư mục KẾT XUẤT theo Năm/Quý (nếu bật) — không rải Desktop =====
+    da_luu_ket_xuat = False
+    if luu_ket_xuat:
+        export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
+        dich = _thu_muc_ket_xuat_ky(export_dir, tu_ngay_kkhai, den_ngay_kkhai)
+        if dich:
+            try:
+                dest_kx = os.path.join(dich, fname)
+                with open(dest_kx, "w", encoding="utf-8") as f:
+                    f.write("﻿" + xml)
+                open_path = dest_kx
+                da_luu_ket_xuat = True
+            except Exception:
+                pass
+    if not da_luu_ket_xuat:
+        desktop = _get_desktop_dir()
+        if desktop and os.path.isdir(desktop):
+            try:
+                dest = os.path.join(desktop, fname)
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write("﻿" + xml)
+                open_path = dest
+            except Exception:
+                pass
+        save_dir2 = (comp["save_dir"] or "").strip() if comp else ""
+        if save_dir2 and os.path.isdir(save_dir2):
+            try:
+                dest2 = os.path.join(save_dir2, fname)
+                with open(dest2, "w", encoding="utf-8") as f:
+                    f.write("﻿" + xml)
+            except Exception:
+                pass
+    if mo_file:
+        _open_file_local(open_path)
     canh_bao_parts = []
     if canh_bao_cqt:
         canh_bao_parts.append(
