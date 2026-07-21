@@ -1133,6 +1133,15 @@ async function loadCompanies(){
     list.appendChild(d);
   });
 }
+// LUÔN mở form Sửa với dữ liệu MỚI NHẤT của công ty (tra theo id trong mảng
+// companies vừa được loadCompanies làm mới) — trước đây nút Sửa nhúng sẵn dữ
+// liệu công ty lúc render workspace, nên sau khi Lưu (workspace chưa vẽ lại)
+// bấm Sửa lại hiện dữ liệu CŨ trước khi lưu -> tưởng bị "mất thông tin".
+function editCompanyById(id){
+  const c=companies.find(x=>x.id===id);
+  if(c)openCompanyModal(c);
+  else toast('Không tìm thấy công ty','err');
+}
 async function openCompanyModal(edit=null){
   editingId=edit?edit.id:null;
   document.getElementById('coModalTitle').textContent=edit?'Sửa công ty':'Thêm công ty';
@@ -1783,7 +1792,14 @@ async function saveCompany(){
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     else await api('/api/companies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const suaId=editingId;
     closeCompanyModal();await loadCompanies();toast('Đã lưu công ty','ok');
+    // vẽ lại phần thông tin công ty đang mở để hiển thị dữ liệu MỚI ngay
+    if(suaId&&current===suaId){
+      const c=companies.find(x=>x.id===current);
+      if(c){const ws=document.getElementById('workspace');
+        if(ws&&ws.style.display!=='none'){ws.innerHTML=renderWorkspace(c,getClient(current));renderFetchErrorBanner(c);await refreshInvoices();}}
+    }
   }catch(e){toast(e.message,'err')}
 }
 
@@ -1831,7 +1847,7 @@ function renderWorkspace(c,online){
       <span class="status-pill ${online?'on':'off'}" id="statusPill">
         ${online?'● Đã đăng nhập':'○ Chưa đăng nhập'}
       </span>
-      <button class="btn ghost sm" onclick='openCompanyModal(${JSON.stringify(c)})'>Sửa</button>
+      <button class="btn ghost sm" onclick="editCompanyById(${c.id})">Sửa</button>
       <button class="btn danger sm" onclick="deleteCompany(${c.id})">Xóa</button>
     </div>
   </div>
