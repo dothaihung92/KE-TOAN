@@ -5196,6 +5196,17 @@ def _run_fetch_job(cid: int, body: dict):
             # Người dùng tick "Lưu file kết xuất" -> sau khi tra cứu + tải xong,
             # tự xuất Excel và lưu vào <thư mục kết xuất>/<năm>/Quý N/ (không mở
             # file, không rải Desktop — hợp cho tra cứu hàng loạt nhiều công ty).
+            if body.get("luu_ket_xuat") and co_loi:
+                # KHÔNG được để người dùng tick "Lưu file kết xuất" mà không thấy
+                # gì xảy ra và cũng không hiểu vì sao — trước đây im lặng bỏ qua
+                # hẳn bước này khi tra cứu có lỗi, trông như tính năng "không
+                # hoạt động" dù thực ra là CỐ Ý (tránh xuất báo cáo từ dữ liệu
+                # có thể thiếu). Nay báo RÕ để người dùng biết cần tra cứu lại.
+                msg(stage="warn",
+                    text="⚠ KHÔNG tự động kết xuất (Excel/XML GTGT/XML TNCN) vào thư mục lưu file kết "
+                         "xuất vì lần tra cứu này CÓ LỖI — dữ liệu có thể thiếu. Hãy tra cứu lại cho "
+                         "đến khi THÀNH CÔNG rồi mới kết xuất (hoặc bấm nút 'Xuất Excel'/'Kết xuất "
+                         "XML' thủ công ở dưới sau khi đã tra cứu xong).")
             if body.get("luu_ket_xuat") and not co_loi:
                 try:
                     msg(stage="info", text="Đang tự động kết xuất Excel vào thư mục lưu file kết xuất...")
@@ -12707,7 +12718,8 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
         canh_bao = (f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
                     f"MẪU (có thể sai công ty), dễ bị Cơ quan Thuế báo lỗi. Vào 'Sửa công ty' để điền đủ "
                     f"trước khi nộp.")
-    return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao}
+    return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
+            "da_luu_ket_xuat": da_luu_ket_xuat}
 
 
 @app.get("/api/export-htkk-tncn/{cid}")
@@ -12894,7 +12906,8 @@ def export_htkk_tncn(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", d
         "SINH (mọi chỉ tiêu = 0). Nếu kỳ này công ty CÓ phát sinh khấu trừ TNCN, hãy tự điền số "
         "liệu vào file (hoặc trực tiếp trên HTKK) trước khi nộp.")
     canh_bao = " ".join(canh_bao_parts)
-    return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao}
+    return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
+            "da_luu_ket_xuat": da_luu_ket_xuat}
 
 
 def _ky_ve_thang(ky):

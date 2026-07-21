@@ -2696,7 +2696,11 @@ async function exportHTKK(){
     const tuN=document.getElementById('tuNgay').value;
     const denN=document.getElementById('denNgay').value;
     const fmt=d=>{if(!d)return '';const p=d.split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:'';};
-    let url=`/api/export-htkk/${current}?`;
+    // Cùng tôn trọng ô "Lưu file kết xuất" như nút Xuất Excel — bấm riêng nút
+    // này (không nhất thiết vừa tra cứu xong) vẫn lưu đúng vào thư mục Năm/Quý
+    // đã cấu hình thay vì luôn rơi ra Desktop.
+    const luu=document.getElementById('cLuuKetXuat')?.checked?1:0;
+    let url=`/api/export-htkk/${current}?luu_ket_xuat=${luu}&`;
     if(ky)url+=`ky=${encodeURIComponent(ky)}&`;
     if(tuN)url+=`tu=${encodeURIComponent(fmt(tuN))}&`;
     if(denN)url+=`den=${encodeURIComponent(fmt(denN))}&`;
@@ -2705,7 +2709,7 @@ async function exportHTKK(){
     if(!r.ok)throw new Error(await docLoiTuResponse(r));
     const res=await r.json();
     await loadCompanies();
-    toast('Đã kết xuất XML: '+res.fname+' (đã tự mở). Nhập vào HTKK qua "Tải dữ liệu"','ok');
+    toast('Đã kết xuất XML: '+res.fname+(res.da_luu_ket_xuat?' (đã lưu vào thư mục kết xuất theo Năm/Quý)':' (đã tự mở)')+'. Nhập vào HTKK qua "Tải dữ liệu"','ok');
     if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
   }catch(e){console.error('Lỗi kết xuất HTKK:',e);toast(e.message,'err')}
 }
@@ -2728,7 +2732,9 @@ async function exportHTKKTNCN(){
     const tuN=document.getElementById('tuNgay').value;
     const denN=document.getElementById('denNgay').value;
     const fmt=d=>{if(!d)return '';const p=d.split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:'';};
-    let url=`/api/export-htkk-tncn/${current}?`;
+    // Cùng tôn trọng ô "Lưu file kết xuất" như nút Xuất Excel/GTGT ở trên.
+    const luu=document.getElementById('cLuuKetXuat')?.checked?1:0;
+    let url=`/api/export-htkk-tncn/${current}?luu_ket_xuat=${luu}&`;
     if(ky)url+=`ky=${encodeURIComponent(ky)}&`;
     if(tuN)url+=`tu=${encodeURIComponent(fmt(tuN))}&`;
     if(denN)url+=`den=${encodeURIComponent(fmt(denN))}&`;
@@ -2737,7 +2743,7 @@ async function exportHTKKTNCN(){
     if(!r.ok)throw new Error(await docLoiTuResponse(r));
     const res=await r.json();
     await loadCompanies();
-    toast('Đã kết xuất XML: '+res.fname+' (đã tự mở)','ok');
+    toast('Đã kết xuất XML: '+res.fname+(res.da_luu_ket_xuat?' (đã lưu vào thư mục kết xuất theo Năm/Quý)':' (đã tự mở)'),'ok');
     if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
   }catch(e){console.error('Lỗi kết xuất TNCN:',e);toast(e.message,'err')}
 }
@@ -4880,9 +4886,19 @@ async function exportExcel(btn){
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang xử lý, vui lòng đợi...';}
   toast('Đang kết xuất Excel — có thể mất 1-2 phút nếu nhiều hóa đơn','');
   try{
-    const r=await fetch(`/api/export-excel/${current}`);
+    // Nút "Xuất Excel" ở đây tự bấm riêng (không nhất thiết vừa tra cứu xong)
+    // -> vẫn tôn trọng ô "Lưu file kết xuất" ở trên (cùng màn hình), để lưu
+    // đúng vào thư mục Năm/Quý đã cấu hình thay vì luôn rơi ra Desktop.
+    const luu=document.getElementById('cLuuKetXuat')?.checked?1:0;
+    const tu=fmtDate(document.getElementById('tuNgay').value);
+    const den=fmtDate(document.getElementById('denNgay').value);
+    let url=`/api/export-excel/${current}?luu_ket_xuat=${luu}`;
+    if(tu)url+=`&tu_ngay=${encodeURIComponent(tu)}`;
+    if(den)url+=`&den_ngay=${encodeURIComponent(den)}`;
+    const r=await fetch(url);
     if(!r.ok){let m='Lỗi xuất Excel';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    await xuatFile(r,`BangKe_HoaDon.xlsx`);toast('Đã xuất Excel xong','ok');
+    await xuatFile(r,`BangKe_HoaDon.xlsx`);
+    toast(luu&&r.headers.get('X-Saved-Desktop')?'Đã xuất Excel xong (đã lưu vào thư mục kết xuất theo Năm/Quý)':'Đã xuất Excel xong','ok');
   }catch(e){toast(e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
 }
