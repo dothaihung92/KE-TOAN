@@ -4989,6 +4989,13 @@ def _run_fetch_job(cid: int, body: dict):
                                 if _uu_tien_xml(_file_index_dl_2.get(key2)):
                                     _file_index_dl_2[key2] = path2
 
+                        # Ghi lại LÝ DO CỤ THỂ khi 1 hóa đơn ĐÃ CÓ file trên máy nhưng
+                        # vẫn phải tải lại (không được bỏ qua) — trước đây người dùng
+                        # chỉ thấy "vẫn tải lại" dù file cũ rõ ràng còn đó, không biết
+                        # vì sao (trạng thái đổi thật, hay file cũ đọc lỗi, hay không
+                        # khớp được với file cũ do sai khoá) để tự kiểm tra/báo lại.
+                        ly_do_tai_lai_du_co_file = []
+
                         def _tai_1_file(inv):
                             nbmst = inv.get("nbmst", "")
                             khhdon = inv.get("khhdon", "")
@@ -5022,19 +5029,30 @@ def _run_fetch_job(cid: int, body: dict):
                             tthai_moi = str(inv.get("tthai") or "")
                             fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0", str(nbmst or ""))
                             fpath = _file_index_dl.get(fkey) or _file_index_dl_2.get(fkey[:2])
-                            if (fpath and (tthai_cu is None or tthai_cu == tthai_moi)
-                                    and _doc_kiem_tra_file_hoadon(fpath)):
-                                # File đã có sẵn trên máy từ TRƯỚC (không tải lại) —
-                                # vẫn tranh thủ đối chiếu/tự sửa ngày lập theo đúng
-                                # file này, phòng khi hóa đơn được lưu TỪ TRƯỚC lúc
-                                # có bản sửa lỗi lệch ngày (file cũ không đổi, chỉ
-                                # cách đọc/đối chiếu ngày mới thêm sau).
-                                try:
-                                    with open(fpath, "rb") as _f:
-                                        _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, _f.read())
-                                except Exception:
-                                    pass
-                                return "skip"
+                            if fpath:
+                                doc_duoc = _doc_kiem_tra_file_hoadon(fpath)
+                                if (tthai_cu is None or tthai_cu == tthai_moi) and doc_duoc:
+                                    # File đã có sẵn trên máy từ TRƯỚC (không tải lại) —
+                                    # vẫn tranh thủ đối chiếu/tự sửa ngày lập theo đúng
+                                    # file này, phòng khi hóa đơn được lưu TỪ TRƯỚC lúc
+                                    # có bản sửa lỗi lệch ngày (file cũ không đổi, chỉ
+                                    # cách đọc/đối chiếu ngày mới thêm sau).
+                                    try:
+                                        with open(fpath, "rb") as _f:
+                                            _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, _f.read())
+                                    except Exception:
+                                        pass
+                                    return "skip"
+                                # ĐÃ CÓ file (tìm khớp key) nhưng KHÔNG được bỏ qua —
+                                # ghi rõ lý do cụ thể để biết chính xác vì sao vẫn phải
+                                # tải lại (thay vì chỉ thấy "vẫn tải lại" không rõ vì sao).
+                                if len(ly_do_tai_lai_du_co_file) < 10:
+                                    if not doc_duoc:
+                                        ly_do_tai_lai_du_co_file.append(
+                                            f"{khhdon} {shdon}: file cũ có nhưng KHÔNG đọc được ({fpath})")
+                                    else:
+                                        ly_do_tai_lai_du_co_file.append(
+                                            f"{khhdon} {shdon}: trạng thái đổi ({tthai_cu} → {tthai_moi})")
 
                             try:
                                 zdata = client.download_xml(nbmst, khhdon, khmshdon,
@@ -5099,6 +5117,13 @@ def _run_fetch_job(cid: int, body: dict):
 
                         ok_1, loi_file, bo_qua, khong_ma = _tai_nhieu_file(invs, "Đang tải file")
                         file_saved += ok_1
+
+                        if ly_do_tai_lai_du_co_file:
+                            msg(stage="info",
+                                text=f"ℹ {loai_txt}{ht_txt}: {len(ly_do_tai_lai_du_co_file)}"
+                                     f"{'+' if len(ly_do_tai_lai_du_co_file) >= 10 else ''} hóa đơn ĐÃ CÓ file "
+                                     f"cũ trên máy nhưng vẫn tải lại — lý do cụ thể: "
+                                     f"{'; '.join(ly_do_tai_lai_du_co_file[:10])}")
 
                         # THỬ LẠI 1 LƯỢT các file bị lỗi (thường do bị chặn tốc độ giữa
                         # chừng) — trước đây KHÔNG hề thử lại nên 1 lần vấp là mất file
