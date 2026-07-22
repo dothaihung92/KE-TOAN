@@ -355,13 +355,22 @@ class GDTClient:
             # ----- CHỈ dò lại các đoạn cụ thể đã lỗi ở lượt trước -----
             def _xu_ly_doan(doan):
                 s_from, s_to, ttxly = doan["tu"], doan["den"], doan.get("ttxly")
-                if progress:
-                    progress(f"đang dò lại đoạn lỗi trước đó {s_from} → {s_to}...")
+                # Gắn nhãn [ĐOẠN dd/mm→dd/mm] vào MỌI dòng tiến độ của đoạn
+                # này (kể cả các dòng lỗi/thử lại phát sinh bên trong
+                # _query_one_range/_fetch_paginated) — để giao diện phân biệt
+                # được ĐANG chạy đoạn nào, thay vì chỉ 1 dòng chung chung đè
+                # lẫn nhau khi nhiều đoạn chạy song song.
+                def _progress_doan(t):
+                    if progress:
+                        progress(f"[ĐOẠN {s_from}→{s_to}] {t}")
+                _progress_doan("đang dò lại đoạn lỗi trước đó...")
                 # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
                 ttxly_can_do = (ttxly,) if ttxly is not None else None
-                return s_from, s_to, self._query_one_range(
+                ket_qua = self._query_one_range(
                     s_from, s_to, loai, page_size, he_thong,
-                    progress=progress, ttxly_can_do=ttxly_can_do)
+                    progress=_progress_doan, ttxly_can_do=ttxly_can_do)
+                _progress_doan("✓ xong")
+                return s_from, s_to, ket_qua
 
             with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
                 futs = [ex.submit(_xu_ly_doan, doan) for doan in chi_cac_doan]
@@ -421,10 +430,18 @@ class GDTClient:
             cur = chunk_end + datetime.timedelta(days=1)
 
         def _xu_ly_thang(s_from, s_to):
-            if progress:
-                progress(f"đang tải {s_from} → {s_to}...")
-            return s_from, s_to, self._query_one_range(
-                s_from, s_to, loai, page_size, he_thong, progress=progress)
+            # Gắn nhãn [THÁNG dd/mm→dd/mm] vào MỌI dòng tiến độ của tháng này
+            # (kể cả lỗi/thử lại phát sinh bên trong) — để giao diện hiện
+            # ĐƯỢC NHIỀU DÒNG, mỗi dòng 1 tháng đang chạy song song, thay vì
+            # chỉ 1 dòng chung chung bị đè liên tục bởi tháng nào báo sau cùng.
+            def _progress_thang(t):
+                if progress:
+                    progress(f"[THÁNG {s_from}→{s_to}] {t}")
+            _progress_thang("đang tải...")
+            ket_qua = self._query_one_range(
+                s_from, s_to, loai, page_size, he_thong, progress=_progress_thang)
+            _progress_thang("✓ xong")
+            return s_from, s_to, ket_qua
 
         with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
             futs = [ex.submit(_xu_ly_thang, s_from, s_to) for s_from, s_to in cac_thang]
@@ -432,7 +449,7 @@ class GDTClient:
                 s_from, s_to, ket_qua = fut.result()
                 _gop(s_from, s_to, ket_qua)
                 if progress:
-                    progress(f"đã lấy {len(all_results)} tờ (đến {s_to})")
+                    progress(f"đã lấy {len(all_results)} tờ (lũy kế, vừa xong {s_to})")
         # lưu tổng kỳ vọng để báo "đủ chưa"
         self.last_query_total = total_expected
         self.last_query_got = len(all_results)

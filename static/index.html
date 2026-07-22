@@ -1951,6 +1951,7 @@ function renderWorkspace(c,online){
       <div style="margin-top:10px;background:#fff;border-radius:6px;height:8px;overflow:hidden">
         <div id="progressBar" style="height:100%;width:0%;background:var(--green);transition:width .3s"></div>
       </div>
+      <div id="progressThangBox" style="display:none;margin-top:10px;font-size:12.5px;background:#fff;border-radius:8px;padding:8px 10px;max-height:160px;overflow:auto"></div>
       <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
         <label for="songSongSlider" style="font-size:13px;font-weight:600;color:var(--green-d);white-space:nowrap">⚡ Số luồng tải song song:</label>
         <input type="range" id="songSongSlider" min="0" max="32" value="8" step="1"
@@ -2175,6 +2176,27 @@ async function setSpeed(){
   }catch(e){}
 }
 
+/* ---------- HIỆN CÁC THÁNG/ĐOẠN ĐANG XỬ LÝ SONG SONG ---------- */
+// Server gắn nhãn "[THÁNG dd/mm→dd/mm] ..." hoặc "[ĐOẠN dd/mm→dd/mm] ..." vào
+// MỌI dòng tiến độ của 1 tháng/đoạn cụ thể (kể cả lỗi/thử lại) — bóc tách ra
+// đây để hiện NHIỀU DÒNG cùng lúc (mỗi dòng 1 tháng đang chạy song song),
+// thay vì chỉ 1 dòng chung chung bị đè liên tục bởi tháng nào báo tin sau cùng.
+const RE_TAG_THANG=/^(.+?): \[(THÁNG|ĐOẠN) ([^\]]+)\] (.*)$/;
+let thangDangChay=new Map();   // key "THÁNG dd/mm→dd/mm" -> {text, loi, done}
+function renderThangDangChay(){
+  const box=document.getElementById('progressThangBox');
+  if(!box)return;
+  const rows=[...thangDangChay.entries()];
+  if(!rows.length){box.style.display='none';box.innerHTML='';return;}
+  box.style.display='block';
+  box.innerHTML=rows.map(([key,v])=>{
+    const mau=v.done?'#1f6b4a':(v.loi?'#c47':'#555');
+    const icon=v.done?'✓':'○';
+    return `<div style="color:${mau}">${icon} <b>${key}</b>: ${v.text}</div>`;
+  }).join('');
+  box.scrollTop=box.scrollHeight;
+}
+
 /* ---------- CHỈNH SỐ LUỒNG TẢI SONG SONG NGAY TRONG LÚC ĐANG TRA CỨU ---------- */
 const SPEED_SONG_SONG={fast:16,balanced:8,safe:1};
 let songSongCid=null;      // công ty đang tra cứu (job nào slider đang điều khiển)
@@ -2215,6 +2237,8 @@ async function doFetch(){
   const _pl=document.getElementById('progressLog');if(_pl)_pl.innerHTML='';
   const _kq=document.getElementById('ketQuaTraCuu');if(_kq)_kq.style.display='none';
   const _eb=document.getElementById('fetchErrorBanner');if(_eb)_eb.style.display='none';
+  thangDangChay.clear();
+  const _ptb=document.getElementById('progressThangBox');if(_ptb){_ptb.style.display='none';_ptb.innerHTML='';}
 
   try{
     // Bắt đầu tra cứu CHẠY NỀN (server chạy độc lập, không phụ thuộc trình duyệt)
@@ -2251,7 +2275,25 @@ async function doFetch(){
       }catch(err){continue;}  // mất mạng tạm thời -> thử lại
       cursor=st.cursor;running=st.running;
       for(const m of (st.messages||[])){
-        ptext.textContent=m.text||'';
+        const mTag=RE_TAG_THANG.exec(m.text||'');
+        if(mTag){
+          const [,tienTo,loaiTag,key,subText]=mTag;
+          const fullKey=loaiTag+' '+key;
+          if(subText.includes('✓ xong')){
+            if(thangDangChay.has(fullKey)){
+              thangDangChay.set(fullKey,{text:'✓ xong',loi:false,done:true});
+              renderThangDangChay();
+              setTimeout(()=>{thangDangChay.delete(fullKey);renderThangDangChay();},3000);
+            }
+          }else{
+            thangDangChay.set(fullKey,{text:subText,loi:/lỗi|đợi|429|50\d/.test(subText),done:false});
+            renderThangDangChay();
+          }
+          const soDang=[...thangDangChay.values()].filter(v=>!v.done).length||thangDangChay.size;
+          ptext.textContent=`${tienTo}: đang xử lý ${soDang} ${loaiTag==='THÁNG'?'tháng':'đoạn'} đồng thời...`;
+        }else{
+          ptext.textContent=m.text||'';
+        }
         const plog=document.getElementById('progressLog');
         if(m.stage==='download'&&m.total){
           pbar.style.width=Math.round(m.cur/m.total*100)+'%';
@@ -2268,12 +2310,14 @@ async function doFetch(){
         }else if(m.stage==='done'){
           pbar.style.width='100%';toast(m.text,m.text.includes('⚠')?'err':'ok');
           hienKetQua(m);
+          thangDangChay.clear();renderThangDangChay();
           // thành công nhưng vẫn còn file chưa tải được -> GIỮ banner (khớp với
           // server, không tự xóa để người dùng còn biết hóa đơn nào cần tải lại)
           renderFetchErrorBanner(m.file_thieu
             ?{last_fetch_error:m.text,last_fetch_error_at:new Date().toISOString()}
             :{last_fetch_error:null});
         }else if(m.stage==='error'){
+          thangDangChay.clear();renderThangDangChay();
           hadError=true;toast(m.text,'err');
           if(plog){plog.innerHTML+=`<div style="color:#c00;font-weight:700">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
           if(m.text.includes('hết hạn'))clientState[current]=false;
