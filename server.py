@@ -763,6 +763,17 @@ class GDTClient:
             # tổng số hóa đơn kỳ vọng (trang Thuế trả 'total')
             if total_expected is None:
                 total_expected = data.get("total")
+            # Báo tiến độ SỐ LƯỢNG hóa đơn đang lấy được / còn lại — trước đây
+            # chỉ có dòng "đang tải..." đứng yên trong lúc phân trang (có thể
+            # mất nhiều giây/phút với kỳ nhiều hóa đơn), người dùng không biết
+            # đã lấy được bao nhiêu, còn lại bao nhiêu.
+            if progress:
+                if total_expected:
+                    con_lai = max(0, total_expected - len(results))
+                    progress(f"đang tải danh sách... đã lấy {len(results)}/{total_expected} "
+                             f"hóa đơn (còn {con_lai})")
+                else:
+                    progress(f"đang tải danh sách... đã lấy {len(results)} hóa đơn")
             state = data.get("state")
             if not state or len(datas) == 0:
                 break
