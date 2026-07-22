@@ -665,7 +665,14 @@ class GDTClient:
             while True:
                 attempt += 1
                 try:
-                    r = self.session.get(full_url, headers=extra_headers, timeout=60)
+                    # timeout 90s (không phải 60s) — hệ thống máy tính tiền có
+                    # thể phân trang chậm dần theo offset khi tổng số hóa đơn
+                    # lớn (vd "bán ra" hàng nghìn tờ); nếu timeout NGẮN HƠN
+                    # thời gian trang Thuế thực sự cần để trả lời, request sẽ
+                    # LUÔN bị hủy giữa chừng (Read timed out) và thử lại mãi
+                    # mà không bao giờ kịp nhận được phản hồi — trông như lỗi
+                    # mạng liên tục dù thực ra là do timeout đặt quá ngắn.
+                    r = self.session.get(full_url, headers=extra_headers, timeout=90)
                 except Exception as e:
                     last_net_err = e
                     r = None
@@ -674,9 +681,13 @@ class GDTClient:
                     # KHÔNG tăng dần theo số lần thử — trước đây chờ tăng dần
                     # (4s, 8s, 12s...) khiến cảm giác "treo" rất lâu giữa các lần
                     # thử, nhất là hệ thống máy tính tiền hay bị lỗi mạng vặt.
+                    # Ghi rõ LOẠI lỗi cụ thể (vd "Read timed out", "Connection
+                    # reset", SSL...) vào log thay vì chỉ nói chung chung "lỗi
+                    # mạng" — để biết chính xác đang gặp vấn đề gì mà xử lý.
                     cho = 3
                     if progress:
-                        progress(f"lỗi mạng, đợi {cho}s rồi thử lại (lần {attempt})...")
+                        progress(f"lỗi mạng ({type(e).__name__}: {str(e)[:100]}), "
+                                 f"đợi {cho}s rồi thử lại (lần {attempt})...")
                     time.sleep(cho)
                     continue
                 if r.status_code == 429:
