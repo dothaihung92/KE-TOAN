@@ -869,19 +869,23 @@ function toast(msg,type=''){
 }
 async function docLoiTuResponse(r){
   // Đọc lỗi từ response CÀNG CHI TIẾT CÀNG TỐT — trước đây nếu response
-  // không phải JSON hợp lệ (vd lỗi 500 trả về trang HTML) thì rơi về đúng
-  // 1 câu chung chung "Lỗi kết xuất", không biết lỗi thật là gì để báo lại.
-  try{
-    const j=await r.json();
-    return j.detail||`Lỗi kết xuất (mã ${r.status})`;
-  }catch{
+  // không phải JSON hợp lệ (vd lỗi 500 trả về trang text thường) thì rơi về
+  // đúng 1 câu chung chung "Lỗi kết xuất", không biết lỗi thật là gì để báo
+  // lại. LƯU Ý: body của Response chỉ đọc được 1 LẦN — trước đây gọi
+  // r.json() rồi r.text() trên CÙNG 1 response khi json() thất bại, khiến
+  // r.text() luôn ném lỗi "body stream already read" và rơi thẳng về câu
+  // chung chung dù server CÓ trả chi tiết lỗi (vd traceback) — nay chỉ đọc
+  // text() 1 LẦN DUY NHẤT rồi mới thử parse JSON từ chuỗi đó.
+  let t = '';
+  try{ t = await r.text(); }catch{}
+  if(t){
     try{
-      const t=await r.text();
-      return t?`Lỗi kết xuất (mã ${r.status}): ${t.slice(0,300)}`:`Lỗi kết xuất (mã ${r.status})`;
-    }catch{
-      return `Lỗi kết xuất (mã ${r.status})`;
-    }
+      const j = JSON.parse(t);
+      if(j && j.detail) return j.detail;
+    }catch{}
+    return `Lỗi kết xuất (mã ${r.status}): ${t.slice(0,300)}`;
   }
+  return `Lỗi kết xuất (mã ${r.status})`;
 }
 async function api(path,opts={}){
   const r=await fetch(path,opts);

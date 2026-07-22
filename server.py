@@ -12478,6 +12478,18 @@ def vat_luu(cid: int, data: dict = Body(...)):
 @app.get("/api/export-htkk/{cid}")
 def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
                 luu_ket_xuat: int = 0, mo_file: int = 1):
+    """Bọc lỗi để trả về CHI TIẾT lỗi thật thay vì lỗi 500 trống không rõ
+    nguyên nhân (xem thêm giải thích ở export_htkk_tncn)."""
+    try:
+        return _export_htkk_impl(cid, ky, nguoi_ky, tu, den, luu_ket_xuat, mo_file)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Lỗi kết xuất XML GTGT: {type(e).__name__}: {str(e)[:200]}")
+
+
+def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
+                luu_ket_xuat: int = 0, mo_file: int = 1):
     """
     Tạo file XML tờ khai 01/GTGT (TT80/2021) để nhập vào HTKK.
     Hàng bán ra 8% -> đưa vào nhóm 10% (ct32/ct33) + Phụ lục NQ142/2024.
@@ -12959,6 +12971,20 @@ def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: s
 
 @app.get("/api/export-htkk-tncn/{cid}")
 def export_htkk_tncn(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
+                     luu_ket_xuat: int = 0, mo_file: int = 1):
+    """Bọc lỗi để trả về CHI TIẾT lỗi thật (thay vì lỗi 500 trống không rõ
+    nguyên nhân — trước đây 1 lỗi bất ngờ nào đó (vd không ghi được file do
+    thư mục kết xuất không hợp lệ) khiến người dùng chỉ thấy "Lỗi kết xuất
+    (mã 500)" không biết vì sao, không tự khắc phục được."""
+    try:
+        return _export_htkk_tncn_impl(cid, ky, nguoi_ky, tu, den, luu_ket_xuat, mo_file)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Lỗi kết xuất XML TNCN: {type(e).__name__}: {str(e)[:200]}")
+
+
+def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
                      luu_ket_xuat: int = 0, mo_file: int = 1):
     """
     Tạo file XML tờ khai 05/KK-TNCN (TT80/2021) để nhập vào HTKK.
