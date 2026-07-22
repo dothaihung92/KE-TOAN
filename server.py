@@ -5178,7 +5178,14 @@ def _run_fetch_job(cid: int, body: dict):
                             def _uu_tien_xml(prev, low=low):
                                 return prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml"))
                             if len(parts) >= 3:
-                                key3 = (f_khh, f_sho, parts[2])
+                                # Chuẩn hóa MST trong khoá (bỏ dấu gạch/khoảng
+                                # trắng) — MST cùng 1 người bán đôi khi trang
+                                # Thuế trả về LỆCH ĐỊNH DẠNG giữa các lần tra
+                                # cứu khác nhau (có/không hậu tố chi nhánh), nếu
+                                # so khớp CHUỖI Y HỆT sẽ không nhận ra file ĐÃ
+                                # CÓ SẴN trên máy (nhìn như file "chưa tải" dù
+                                # thực ra đã tải, khiến tải lại không cần thiết).
+                                key3 = (f_khh, f_sho, _chuan_mst(parts[2])[:10])
                                 if _uu_tien_xml(_file_index_dl.get(key3)):
                                     _file_index_dl[key3] = path2
                             else:
@@ -5224,7 +5231,7 @@ def _run_fetch_job(cid: int, body: dict):
                                    str(shdon or ""), loai, he_thong)
                             tthai_cu = old_status.get(key)
                             tthai_moi = str(inv.get("tthai") or "")
-                            fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0", str(nbmst or ""))
+                            fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0", _chuan_mst(nbmst)[:10])
                             fpath = _file_index_dl.get(fkey) or _file_index_dl_2.get(fkey[:2])
                             if fpath:
                                 doc_duoc = _doc_kiem_tra_file_hoadon(fpath)
@@ -13418,7 +13425,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 def _uu_tien_xml(prev, low=low):
                     return prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml"))
                 if len(parts) >= 3:
-                    key = (f_khh, f_sho, parts[2])
+                    # Chuẩn hóa MST trong khoá (bỏ dấu gạch/khoảng trắng) —
+                    # MST cùng 1 người bán đôi khi trang Thuế trả về LỆCH ĐỊNH
+                    # DẠNG giữa các lần tra cứu (có/không hậu tố chi nhánh),
+                    # so khớp CHUỖI Y HỆT sẽ không nhận ra file ĐÃ CÓ SẴN trên
+                    # máy — khiến kết xuất tưởng "thiếu file" rồi tự đi tải lại
+                    # qua mạng dù file đã tải từ trước, dù người dùng xác nhận
+                    # file vẫn còn nguyên trên máy.
+                    key = (f_khh, f_sho, _chuan_mst(parts[2])[:10])
                     if _uu_tien_xml(_file_index.get(key)):
                         _file_index[key] = path
                 else:
@@ -13431,7 +13445,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     def find_invoice_file(r):
         khh = str(r["khhdon"] or "").strip()
         sho = str(r["shdon"] or "").strip().lstrip("0") or "0"
-        mst = str(r["nbmst"] or "").strip()
+        mst = _chuan_mst(r["nbmst"])[:10]
         return _file_index.get((khh, sho, mst)) or _file_index_2.get((khh, sho))
 
     def _doc_file_hoadon(fpath):
@@ -13470,7 +13484,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         if r["detail_json"]:
             continue
         khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
-        mst = str(r["nbmst"] or "").strip()
+        mst = _chuan_mst(r["nbmst"])[:10]
         if (khh, sho, mst) in _file_index or (khh, sho) in _file_index_2:
             da_co_file_rows.append(r)
             continue   # đã có file trên máy -> get_invoice_items sẽ đọc file, KHÔNG cần mạng
