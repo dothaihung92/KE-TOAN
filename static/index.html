@@ -2231,17 +2231,20 @@ async function setSpeed(){
 // đây để hiện NHIỀU DÒNG cùng lúc (mỗi dòng 1 tháng đang chạy song song),
 // thay vì chỉ 1 dòng chung chung bị đè liên tục bởi tháng nào báo tin sau cùng.
 const RE_TAG_THANG=/^(.+?): \[(THÁNG|ĐOẠN) ([^\]]+)\] (.*)$/;
-let thangDangChay=new Map();   // key "THÁNG dd/mm→dd/mm" -> {text, loi, done}
+// key "tienTo :: THÁNG dd/mm→dd/mm" -> {nhan, text, loi, done} — tienTo (vd
+// "mua vào (máy tính tiền)") nằm TRONG khoá vì mua vào/bán ra × thường/MTT
+// có thể chạy song song và xử lý TRÙNG khoảng tháng cùng lúc.
+let thangDangChay=new Map();
 function renderThangDangChay(){
   const box=document.getElementById('progressThangBox');
   if(!box)return;
-  const rows=[...thangDangChay.entries()];
+  const rows=[...thangDangChay.values()];
   if(!rows.length){box.style.display='none';box.innerHTML='';return;}
   box.style.display='block';
-  box.innerHTML=rows.map(([key,v])=>{
+  box.innerHTML=rows.map(v=>{
     const mau=v.done?'#1f6b4a':(v.loi?'#c47':'#555');
     const icon=v.done?'✓':'○';
-    return `<div style="color:${mau}">${icon} <b>${key}</b>: ${v.text}</div>`;
+    return `<div style="color:${mau}">${icon} <b>${v.nhan}</b>: ${v.text}</div>`;
   }).join('');
   box.scrollTop=box.scrollHeight;
 }
@@ -2327,19 +2330,29 @@ async function doFetch(){
         const mTag=RE_TAG_THANG.exec(m.text||'');
         if(mTag){
           const [,tienTo,loaiTag,key,subText]=mTag;
-          const fullKey=loaiTag+' '+key;
+          // Gộp CẢ tienTo (vd "mua vào (máy tính tiền)") vào khoá — từ khi
+          // mua vào/bán ra (× thường/MTT) có thể chạy SONG SONG với nhau,
+          // 2 tổ hợp KHÁC NHAU có thể cùng xử lý TRÙNG khoảng tháng (vd cả
+          // 2 đều đang ở "THÁNG 01/05→31/05"), nếu chỉ khoá theo tháng thì
+          // dòng của tổ hợp này sẽ bị tổ hợp kia GHI ĐÈ mất.
+          const fullKey=tienTo+' :: '+loaiTag+' '+key;
+          const nhan=`${tienTo} — ${loaiTag} ${key}`;
           if(subText.includes('✓ xong')){
             if(thangDangChay.has(fullKey)){
-              thangDangChay.set(fullKey,{text:'✓ xong',loi:false,done:true});
+              thangDangChay.set(fullKey,{nhan,text:'✓ xong',loi:false,done:true});
               renderThangDangChay();
               setTimeout(()=>{thangDangChay.delete(fullKey);renderThangDangChay();},3000);
             }
           }else{
-            thangDangChay.set(fullKey,{text:subText,loi:/lỗi|đợi|429|50\d/.test(subText),done:false});
+            thangDangChay.set(fullKey,{nhan,text:subText,loi:/lỗi|đợi|429|50\d/.test(subText),done:false});
             renderThangDangChay();
           }
-          const soDang=[...thangDangChay.values()].filter(v=>!v.done).length||thangDangChay.size;
-          ptext.textContent=`${tienTo}: đang xử lý ${soDang} ${loaiTag==='THÁNG'?'tháng':'đoạn'} đồng thời...`;
+          const dangChay=[...thangDangChay.values()].filter(v=>!v.done);
+          const soDang=dangChay.length||thangDangChay.size;
+          const tienToDang=[...new Set(dangChay.map(v=>v.nhan.split(' — ')[0]))];
+          ptext.textContent=tienToDang.length>1
+            ?`Đang xử lý song song ${soDang} tháng/đoạn (${tienToDang.join(', ')})...`
+            :`${tienTo}: đang xử lý ${soDang} ${loaiTag==='THÁNG'?'tháng':'đoạn'} đồng thời...`;
         }else{
           ptext.textContent=m.text||'';
         }

@@ -42,9 +42,9 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 #  Mức "balanced" là cân bằng giữa tốc độ và an toàn.
 # ============================================================
 SPEED_PROFILES = {
-    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "between_loai": 2.5, "song_song": 16},
-    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "between_loai": 3, "song_song": 8},
-    "safe":     {"page": 2.0, "status": 2.0, "month": 2.5, "file": 1.2,  "retry_base": 10, "retry_max": 10, "between_loai": 5, "song_song": 1},
+    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "song_song": 16},
+    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "song_song": 8},
+    "safe":     {"page": 2.0, "status": 2.0, "month": 2.5, "file": 1.2,  "retry_base": 10, "retry_max": 10, "song_song": 1},
 }
 CURRENT_SPEED = "fast"  # mặc định nhanh
 
@@ -274,8 +274,6 @@ class GDTClient:
             self.session.headers.update(self.HEADERS)
         self.token: Optional[str] = None
         self._last_total = 0
-        self.last_query_total = 0
-        self.last_query_got = 0
         self._token_dead = False  # bật khi gặp 401 (hết phiên) -> bỏ qua nốt các gọi mạng
 
     # --- Lấy ảnh captcha ---
@@ -320,7 +318,8 @@ class GDTClient:
     # loai: "purchase" (mua vào) hoặc "sold" (bán ra)
     # he_thong: "query" (HĐ điện tử thường) hoặc "sco-query" (HĐ máy tính tiền)
     def query_invoices(self, tu_ngay, den_ngay, loai="purchase", page_size=50,
-                       he_thong="query", progress=None, chi_cac_doan=None):
+                       he_thong="query", progress=None, chi_cac_doan=None,
+                       mtt_limiter=None):
         """
         Tra cứu hóa đơn trong khoảng ngày bất kỳ (kể cả nhiều tháng/cả năm).
         Trang Thuế giới hạn mỗi lần gọi tối đa ~31 ngày, nên hàm này tự
@@ -335,6 +334,17 @@ class GDTClient:
           các tháng/trạng thái ĐÃ THÀNH CÔNG (trước đây bất kỳ lỗi cục bộ
           nào cũng khiến cả khoảng ngày (có khi cả năm) bị dò lại từ đầu,
           rất lâu — nhất là hệ thống máy tính tiền hay bị lỗi mạng vặt).
+        mtt_limiter: DynamicLimiter DÙNG CHUNG (vd giữa mua vào và bán ra
+          máy tính tiền chạy song song ở _run_fetch_job) để tổng số lượt
+          gọi ĐANG THỰC SỰ chạy tới hệ thống máy tính tiền — CỘNG DỒN CẢ
+          2 LOẠI — không bao giờ vượt quá MTT_SONG_SONG_TOI_DA, dù mỗi
+          loại đều tự giới hạn nội bộ bằng so_luong_song_song riêng. Nếu
+          không truyền (vd gọi lẻ, không chạy song song với loại khác) thì
+          chỉ dựa vào giới hạn nội bộ như trước.
+
+        Trả về tuple (results, total_expected, loi_rieng, cac_doan_loi) —
+        KHÔNG dùng self.last_query_* nữa (không an toàn khi mua vào/bán ra
+        chạy song song trên cùng 1 client — xem _run_fetch_job).
         """
         all_results = []
         seen = set()  # khử trùng lặp hóa đơn ở ranh giới tháng
@@ -382,9 +392,16 @@ class GDTClient:
                 _progress_doan("đang dò lại đoạn lỗi trước đó...")
                 # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
                 ttxly_can_do = (ttxly,) if ttxly is not None else None
-                ket_qua = self._query_one_range(
-                    s_from, s_to, loai, page_size, he_thong,
-                    progress=_progress_doan, ttxly_can_do=ttxly_can_do)
+                dung_chung = mtt_limiter if he_thong == "sco-query" else None
+                if dung_chung:
+                    dung_chung.acquire()
+                try:
+                    ket_qua = self._query_one_range(
+                        s_from, s_to, loai, page_size, he_thong,
+                        progress=_progress_doan, ttxly_can_do=ttxly_can_do)
+                finally:
+                    if dung_chung:
+                        dung_chung.release()
                 _progress_doan("✓ xong")
                 return s_from, s_to, ket_qua
 
@@ -393,11 +410,7 @@ class GDTClient:
                 for fut in _cf.as_completed(futs):
                     s_from, s_to, ket_qua = fut.result()
                     _gop(s_from, s_to, ket_qua)
-            self.last_query_total = total_expected
-            self.last_query_got = len(all_results)
-            self.last_query_errors = loi_tich_luy
-            self.last_failed_chunks = cac_doan_loi
-            return all_results
+            return all_results, total_expected, loi_tich_luy, cac_doan_loi
 
         d_from = datetime.datetime.strptime(tu_ngay, "%d/%m/%Y").date()
         d_to = datetime.datetime.strptime(den_ngay, "%d/%m/%Y").date()
@@ -416,13 +429,9 @@ class GDTClient:
         if he_thong != "sco-query":
             try:
                 if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress):
-                    self.last_query_total = 0
-                    self.last_query_got = 0
-                    self.last_query_errors = []
-                    self.last_failed_chunks = []
                     if progress:
                         progress("kỳ này không có hóa đơn — bỏ qua nhanh")
-                    return []
+                    return [], 0, [], []
             except Exception as e:
                 if "TOKEN_EXPIRED" in str(e):
                     raise
@@ -454,8 +463,15 @@ class GDTClient:
                 if progress:
                     progress(f"[THÁNG {s_from}→{s_to}] {t}")
             _progress_thang("đang tải...")
-            ket_qua = self._query_one_range(
-                s_from, s_to, loai, page_size, he_thong, progress=_progress_thang)
+            dung_chung = mtt_limiter if he_thong == "sco-query" else None
+            if dung_chung:
+                dung_chung.acquire()
+            try:
+                ket_qua = self._query_one_range(
+                    s_from, s_to, loai, page_size, he_thong, progress=_progress_thang)
+            finally:
+                if dung_chung:
+                    dung_chung.release()
             _progress_thang("✓ xong")
             return s_from, s_to, ket_qua
 
@@ -466,15 +482,14 @@ class GDTClient:
                 _gop(s_from, s_to, ket_qua)
                 if progress:
                     progress(f"đã lấy {len(all_results)} tờ (lũy kế, vừa xong {s_to})")
-        # lưu tổng kỳ vọng để báo "đủ chưa"
-        self.last_query_total = total_expected
-        self.last_query_got = len(all_results)
         # LỖI THẬT SỰ ở 1 phần (vd 1 trạng thái mua vào lỗi hẳn dù đã thử lại) —
         # khác với "0 kết quả" hợp lệ; người gọi (_run_fetch_job) dùng để KHÔNG
         # báo "Hoàn tất" như bình thường mà cảnh báo rõ có thể thiếu dữ liệu.
-        self.last_query_errors = loi_tich_luy
-        self.last_failed_chunks = cac_doan_loi
-        return all_results
+        # Trả về TRỰC TIẾP qua tuple (KHÔNG qua self.last_query_* nữa) — từ khi
+        # mua vào/bán ra (× thường/máy tính tiền) có thể chạy SONG SONG với
+        # nhau trên CÙNG 1 client (xem _run_fetch_job), lưu qua thuộc tính
+        # instance sẽ bị 1 tổ hợp khác GHI ĐÈ trước khi tổ hợp này kịp đọc lại.
+        return all_results, total_expected, loi_tich_luy, cac_doan_loi
 
     def _toan_ky_rong(self, tu_ngay, den_ngay, loai, he_thong, page_size, progress=None):
         """True nếu TOÀN khoảng ngày CHẮC CHẮN không có hóa đơn nào (tổng = 0).
@@ -4838,21 +4853,29 @@ def _run_fetch_job(cid: int, body: dict):
                 except Exception as e:
                     msg(stage="warn", text=f"Không tạo được thư mục lưu: {e}")
 
-            for li, loai in enumerate(loai_list):
-                loai_txt = "mua vào" if loai == "purchase" else "bán ra"
-                # nghỉ trước khi chuyển từ mua sang bán (mua đã gọi nhiều request)
-                if li > 0:
-                    time.sleep(SP().get("between_loai", 2))
-                for he_thong in he_thong_list:
-                    # dừng nếu người dùng chuyển công ty khác
-                    _job = FETCH_JOBS.get(cid)
-                    if _job and _job.get("cancel"):
-                        msg(stage="warn", text="Đã dừng tra cứu (chuyển sang công ty khác)")
-                        return
-                    ht_txt = " (máy tính tiền)" if he_thong == "sco-query" else ""
-                    msg(stage="query",
-                        text=f"Đang tra cứu hóa đơn {loai_txt}{ht_txt}...")
+            khoa_tonghop = threading.Lock()  # bảo vệ biến gộp khi các tổ hợp
+            # (mua/bán × thường/máy tính tiền) chạy SONG SONG với nhau
+            mtt_limiter_query = (FETCH_JOBS.get(cid) or {}).get("limiter_mtt_query")
 
+            def _xu_ly_to_hop(loai, he_thong):
+                # Mua vào/bán ra (cả 2 hệ thống) chạy SONG SONG với nhau —
+                # trước đây hoàn toàn TUẦN TỰ (mua thường -> mua MTT -> bán
+                # thường -> bán MTT), nên 1 tổ hợp bị kẹt (vd máy tính tiền
+                # đang thử lại 504 nhiều lần) khiến các tổ hợp CÒN LẠI phải
+                # đợi dù không liên quan gì tới lỗi đó. Kết nối DB RIÊNG cho
+                # từng tổ hợp (không dùng chung "conn" ngoài — vốn chỉ còn
+                # dùng để đọc old_status trước khi các tổ hợp bắt đầu).
+                nonlocal total_saved, file_saved, file_thieu_tong
+                loai_txt = "mua vào" if loai == "purchase" else "bán ra"
+                ht_txt = " (máy tính tiền)" if he_thong == "sco-query" else ""
+                _job = FETCH_JOBS.get(cid)
+                if _job and _job.get("cancel"):
+                    msg(stage="warn", text="Đã dừng tra cứu (chuyển sang công ty khác)")
+                    return
+                msg(stage="query",
+                    text=f"Đang tra cứu hóa đơn {loai_txt}{ht_txt}...")
+                conn = db()
+                try:
                     # Thử tối đa 2 LƯỢT trước khi báo lỗi hẳn. QUAN TRỌNG: lượt
                     # 2 (nếu cần) CHỈ dò lại ĐÚNG các đoạn (tháng × trạng thái)
                     # đã lỗi ở lượt 1 (chi_cac_doan) — KHÔNG dò lại từ đầu toàn
@@ -4875,10 +4898,11 @@ def _run_fetch_job(cid: int, body: dict):
                         # riêng -> lượt này sẽ dò lại TOÀN BỘ khoảng ngày).
                         doan_dung_de_goi = cac_doan_loi
                         try:
-                            moi = client.query_invoices(
+                            moi, moi_total, loi_rieng, cac_doan_loi = client.query_invoices(
                                 tu, den, loai=loai, he_thong=he_thong,
                                 progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
-                                chi_cac_doan=doan_dung_de_goi)
+                                chi_cac_doan=doan_dung_de_goi,
+                                mtt_limiter=(mtt_limiter_query if he_thong == "sco-query" else None))
                             loi_cuoi = None
                         except Exception as e:
                             es = str(e)
@@ -4904,7 +4928,7 @@ def _run_fetch_job(cid: int, body: dict):
                             # toàn kết quả/tổng kỳ vọng lượt trước (không cộng dồn,
                             # tránh đếm trùng khiến báo "thiếu" sai dù đã lấy đủ).
                             invs = moi
-                            exp0_gop = getattr(client, "last_query_total", 0) or 0
+                            exp0_gop = moi_total or 0
                         else:
                             # Lượt này CHỈ dò ĐÚNG đoạn bị lỗi trước đó -> CỘNG DỒN
                             # (khử trùng) vào kết quả đã có của các đoạn khác.
@@ -4918,13 +4942,13 @@ def _run_fetch_job(cid: int, body: dict):
                                           iv.get("shdon"), iv.get("nbmst"))
                                     if key not in seen_now:
                                         invs.append(iv); seen_now.add(key)
-                            exp0_gop += getattr(client, "last_query_total", 0) or 0
+                            exp0_gop += moi_total or 0
 
                         # Không raise lỗi nhưng vẫn có thể lỗi RIÊNG PHẦN (vd 1 trong 3
                         # trạng thái mua vào lỗi dù 2 cái kia OK) — CŨNG PHẢI thử lại
                         # (chưa xong = chưa dừng), không chỉ khi raise hẳn.
-                        loi_rieng = getattr(client, "last_query_errors", None) or []
-                        cac_doan_loi = getattr(client, "last_failed_chunks", None) or []
+                        loi_rieng = loi_rieng or []
+                        cac_doan_loi = cac_doan_loi or []
                         if not loi_rieng:
                             break   # lấy sạch, không lỗi gì -> xong, khỏi thử thêm
                         if lan_thu < SO_LAN_THU - 1:
@@ -4937,27 +4961,29 @@ def _run_fetch_job(cid: int, body: dict):
 
                     if bo_qua_404:
                         msg(stage="warn", text=f"{loai_txt}{ht_txt}: không có (404) — bỏ qua")
-                        continue
+                        return
                     if loi_cuoi is not None:
                         # Đã thử lại vẫn lỗi -> ĐÂY LÀ LỖI THẬT SỰ, không phải "0 hóa đơn".
                         # KHÔNG được continue âm thầm mà không đánh dấu — nếu không, phần
                         # tổng kết cuối cùng không biết loại này đã THẤT BẠI và có thể
                         # báo "Hoàn tất" sạch sẽ dù trang Thuế thực ra có dữ liệu.
-                        loai_that_bai[loai] = True
-                        ly_do_loi[loai].append(f"{loai_txt}{ht_txt}: {loi_cuoi[:200]}")
+                        with khoa_tonghop:
+                            loai_that_bai[loai] = True
+                            ly_do_loi[loai].append(f"{loai_txt}{ht_txt}: {loi_cuoi[:200]}")
                         msg(stage="error",
                             text=f"✗ {loai_txt}{ht_txt}: LỖI, CHƯA TRA CỨU ĐƯỢC dù đã thử lại — "
                                  f"{loi_cuoi[:140]}. KẾT QUẢ {loai_txt.upper()} CÓ THỂ THIẾU — "
                                  f"NÊN TRA CỨU LẠI riêng kỳ/công ty này (dữ liệu {loai_txt}{ht_txt} "
                                  f"đã lưu từ lần tra cứu trước — NẾU CÓ — vẫn được GIỮ NGUYÊN, "
                                  f"không bị xóa).")
-                        continue
+                        return
 
                     if loi_rieng:
-                        loai_that_bai[loai] = True
-                        ly_do_loi[loai].append(
-                            f"{loai_txt}{ht_txt}: một phần bị lỗi ({len(loi_rieng)} lượt) dù đã "
-                            f"tra cứu lại {SO_LAN_THU} lượt — {'; '.join(loi_rieng[:3])}")
+                        with khoa_tonghop:
+                            loai_that_bai[loai] = True
+                            ly_do_loi[loai].append(
+                                f"{loai_txt}{ht_txt}: một phần bị lỗi ({len(loi_rieng)} lượt) dù đã "
+                                f"tra cứu lại {SO_LAN_THU} lượt — {'; '.join(loi_rieng[:3])}")
                         msg(stage="warn",
                             text=f"⚠ {loai_txt}{ht_txt}: một phần bị lỗi dù đã tra cứu lại "
                                  f"{SO_LAN_THU} lượt ({len(loi_rieng)} lượt còn lỗi) — KẾT QUẢ CÓ "
@@ -4973,9 +4999,10 @@ def _run_fetch_job(cid: int, body: dict):
                         if exp0:
                             # Trang Thuế báo CÓ hóa đơn nhưng ta lấy được 0 -> chắc chắn
                             # có vấn đề, TUYỆT ĐỐI không được coi là "không có dữ liệu".
-                            loai_that_bai[loai] = True
-                            ly_do_loi[loai].append(
-                                f"{loai_txt}{ht_txt}: Thuế báo có {exp0} hóa đơn nhưng lấy được 0")
+                            with khoa_tonghop:
+                                loai_that_bai[loai] = True
+                                ly_do_loi[loai].append(
+                                    f"{loai_txt}{ht_txt}: Thuế báo có {exp0} hóa đơn nhưng lấy được 0")
                             msg(stage="error",
                                 text=f"✗ {loai_txt}{ht_txt}: Trang Thuế báo có {exp0} hóa đơn "
                                      f"nhưng KHÔNG lấy được cái nào — LỖI, nên tra cứu LẠI (dữ liệu "
@@ -4991,7 +5018,7 @@ def _run_fetch_job(cid: int, body: dict):
                             msg(stage="found",
                                 text=f"{loai_txt}{ht_txt}: 0 hóa đơn (không có dữ liệu trong kỳ)",
                                 total_saved=total_saved)
-                        continue
+                        return
 
                     if not lay_ngan_hang:
                         truoc = len(invs)
@@ -5040,12 +5067,13 @@ def _run_fetch_job(cid: int, body: dict):
                         except Exception:
                             pass
                     conn.commit()
-                    total_saved += len(invs)
                     # so sánh với tổng kỳ vọng từ trang Thuế (trước khi lọc ngân hàng)
                     exp = exp0
                     got_raw = got_gop
-                    thongke[loai]["exp"] += exp
-                    thongke[loai]["got"] += got_raw
+                    with khoa_tonghop:
+                        total_saved += len(invs)
+                        thongke[loai]["exp"] += exp
+                        thongke[loai]["got"] += got_raw
                     if exp and got_raw < exp:
                         msg(stage="warn",
                             text=f"⚠ {loai_txt}{ht_txt}: Trang Thuế báo có {exp} HĐ "
@@ -5241,7 +5269,8 @@ def _run_fetch_job(cid: int, body: dict):
                             return so_ok, loi, so_bo_qua, so_khong_ma
 
                         ok_1, loi_file, bo_qua, khong_ma = _tai_nhieu_file(invs, "Đang tải file")
-                        file_saved += ok_1
+                        with khoa_tonghop:
+                            file_saved += ok_1
 
                         if ly_do_tai_lai_du_co_file:
                             msg(stage="info",
@@ -5259,7 +5288,8 @@ def _run_fetch_job(cid: int, body: dict):
                                      f"đang thử lại... [{_mo_ta_ds_hd_loi(loi_file, loai)}]")
                             time.sleep(5)
                             ok_2, loi_file, bo_qua_2, khong_ma_2 = _tai_nhieu_file(loi_file, "Thử lại file")
-                            file_saved += ok_2
+                            with khoa_tonghop:
+                                file_saved += ok_2
                             bo_qua += bo_qua_2
                             khong_ma += khong_ma_2
 
@@ -5276,9 +5306,10 @@ def _run_fetch_job(cid: int, body: dict):
 
                         n_can_tai = n - khong_ma   # tổng cần tải (không tính HĐ không mã)
                         if loi_file:
-                            file_thieu_tong += len(loi_file)
                             mota_loi_file = _mo_ta_ds_hd_loi(loi_file, loai)
-                            file_thieu_mota.append(f"{loai_txt}{ht_txt}: {mota_loi_file}")
+                            with khoa_tonghop:
+                                file_thieu_tong += len(loi_file)
+                                file_thieu_mota.append(f"{loai_txt}{ht_txt}: {mota_loi_file}")
                             msg(stage="warn",
                                 text=f"⚠ {loai_txt}{ht_txt}: KHÔNG tải được {len(loi_file)}/{n_can_tai} file "
                                      f"(dữ liệu bảng vẫn lưu đủ) — CÁC HÓA ĐƠN CHƯA TẢI ĐƯỢC: "
@@ -5289,9 +5320,18 @@ def _run_fetch_job(cid: int, body: dict):
                             msg(stage="info",
                                 text=f"✓ {loai_txt}{ht_txt}: đã tải đủ {n_can_tai}/{n_can_tai} file")
                       except Exception as e:
-                        loi_tai_file_ngoai_le.append(f"{loai_txt}{ht_txt}: {str(e)[:150]}")
+                        with khoa_tonghop:
+                            loi_tai_file_ngoai_le.append(f"{loai_txt}{ht_txt}: {str(e)[:150]}")
                         msg(stage="warn",
                             text=f"Lỗi tải file {loai_txt} (dữ liệu bảng vẫn lưu): {str(e)[:100]}")
+                finally:
+                    conn.close()
+
+            combos = [(loai, he_thong) for loai in loai_list for he_thong in he_thong_list]
+            with _cf.ThreadPoolExecutor(max_workers=max(1, len(combos))) as ex:
+                futs = [ex.submit(_xu_ly_to_hop, loai, he_thong) for loai, he_thong in combos]
+                for fut in _cf.as_completed(futs):
+                    fut.result()
 
             # ===== TỔNG KẾT số hóa đơn theo trang Thuế (để biết lấy đủ chưa) =====
             tk_mua = thongke["purchase"]
@@ -5467,7 +5507,14 @@ def _new_fetch_job():
     return {"messages": [], "last": None, "running": True,
             "cursor": 0, "started": time.time(), "cancel": False,
             "limiter": DynamicLimiter(SP().get("song_song", 4)),
-            "limiter_mtt": DynamicLimiter(MTT_SONG_SONG_TOI_DA)}
+            "limiter_mtt": DynamicLimiter(MTT_SONG_SONG_TOI_DA),
+            # Dùng CHUNG cho bước TRA CỨU DANH SÁCH máy tính tiền (khác với
+            # "limiter_mtt" ở trên vốn chỉ áp dụng cho bước TẢI FILE) — khi
+            # mua vào (MTT) và bán ra (MTT) chạy SONG SONG với nhau (xem
+            # _run_fetch_job), tổng số lượt tra cứu ĐANG THỰC SỰ gọi tới hệ
+            # thống máy tính tiền của CẢ 2 loại cộng lại vẫn không vượt quá
+            # mức an toàn cố định này.
+            "limiter_mtt_query": DynamicLimiter(MTT_SONG_SONG_TOI_DA)}
 
 
 def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
