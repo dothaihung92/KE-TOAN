@@ -1812,6 +1812,19 @@ async function luuTuyChonKetXuat(id,bat){
       headers:{'Content-Type':'application/json'},body:JSON.stringify({bat})});
     const c=companies.find(x=>x.id===id);if(c)c.luu_ket_xuat_mac_dinh=bat?1:0;
   }catch(e){}
+  // Tick BẬT — DÙ TICK TRƯỚC HAY SAU khi tra cứu — nếu công ty này đã có sẵn
+  // dữ liệu hóa đơn (từ lần tra cứu trước đó) thì TỰ ĐỘNG kết xuất luôn
+  // (Excel + XML GTGT + XML TNCN) vào thư mục đã cấu hình, khỏi cần bấm
+  // thêm nút nào — đúng ý: "chỉ cần tick vào là sẽ lưu vào thư mục".
+  if(bat && id===current){
+    toast('Đã tick — đang tự động kết xuất vào thư mục lưu file kết xuất...','');
+    // truyền {} (không phải nút thật) để exportExcel KHÔNG lỡ lấy nhầm
+    // window.event (checkbox vừa tick) làm "nút bấm" rồi vô tình khóa/đổi
+    // nội dung của chính ô tick.
+    try{await exportExcel({});}catch(e){}
+    try{await exportHTKK();}catch(e){}
+    try{await exportHTKKTNCN();}catch(e){}
+  }
 }
 async function selectCompany(id){
   fetchPollCancel=true;  // dừng vòng poll tra cứu của công ty trước
