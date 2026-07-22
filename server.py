@@ -4891,7 +4891,17 @@ def _run_fetch_job(cid: int, body: dict):
                     loi_rieng = []
                     cac_doan_loi = None
                     bo_qua_404 = False
-                    SO_LAN_THU = 2
+                    # Trước đây chỉ thử lại tối đa 2 lượt, và CHỈ thử lại khi có
+                    # lỗi RÕ RÀNG (loi_rieng) — nếu trang Thuế báo total nhiều
+                    # hơn số lấy được nhưng KHÔNG kèm lỗi cụ thể nào (vd 1 hóa
+                    # đơn lặng lẽ rơi mất giữa 2 trang phân trang), phần mềm chỉ
+                    # CẢNH BÁO ("có thể thiếu — nên tra cứu lại") rồi coi như
+                    # xong, bắt người dùng phải tự bấm tra cứu lại — trái với
+                    # yêu cầu "phải tải đầy đủ mới xong quá trình tải". Nay tăng
+                    # số lượt thử VÀ coi luôn trường hợp "thiếu so với total"
+                    # (dù không có lỗi cụ thể) là CHƯA XONG, tự động dò lại toàn
+                    # bộ khoảng ngày cho tới khi khớp đủ hoặc hết số lượt thử.
+                    SO_LAN_THU = 6
                     for lan_thu in range(SO_LAN_THU):
                         # Đoạn CỤ THỂ sẽ dùng cho LƯỢT GỌI NÀY (None/rỗng ở lượt đầu,
                         # hoặc khi client không có/không còn đoạn lỗi cụ thể để dò
@@ -4949,14 +4959,23 @@ def _run_fetch_job(cid: int, body: dict):
                         # (chưa xong = chưa dừng), không chỉ khi raise hẳn.
                         loi_rieng = loi_rieng or []
                         cac_doan_loi = cac_doan_loi or []
-                        if not loi_rieng:
-                            break   # lấy sạch, không lỗi gì -> xong, khỏi thử thêm
+                        # THIẾU so với total (dù KHÔNG có lỗi cụ thể nào) — cũng
+                        # coi là CHƯA XONG, phải dò lại (xem giải thích ở SO_LAN_THU).
+                        con_thieu = bool(exp0_gop) and len(invs or []) < exp0_gop
+                        if not loi_rieng and not con_thieu:
+                            break   # lấy sạch, không lỗi gì, không thiếu -> xong, khỏi thử thêm
                         if lan_thu < SO_LAN_THU - 1:
-                            msg(stage="warn",
-                                text=f"⚠ {loai_txt}{ht_txt}: {len(loi_rieng)} lượt bị lỗi riêng "
-                                     f"phần ({'; '.join(loi_rieng[:2])}) — đang dò LẠI ĐÚNG "
-                                     f"{len(cac_doan_loi)} đoạn bị lỗi (không dò lại từ đầu), "
-                                     f"chưa dừng...")
+                            if loi_rieng:
+                                msg(stage="warn",
+                                    text=f"⚠ {loai_txt}{ht_txt}: {len(loi_rieng)} lượt bị lỗi riêng "
+                                         f"phần ({'; '.join(loi_rieng[:2])}) — đang dò LẠI ĐÚNG "
+                                         f"{len(cac_doan_loi)} đoạn bị lỗi (không dò lại từ đầu), "
+                                         f"chưa dừng...")
+                            else:
+                                msg(stage="warn",
+                                    text=f"⚠ {loai_txt}{ht_txt}: trang Thuế báo {exp0_gop} hóa đơn "
+                                         f"nhưng mới lấy {len(invs or [])} — đang dò LẠI TOÀN BỘ kỳ "
+                                         f"này để lấy đủ (lần {lan_thu + 2}/{SO_LAN_THU}), chưa dừng...")
                             time.sleep(10)
 
                     if bo_qua_404:
@@ -5075,9 +5094,20 @@ def _run_fetch_job(cid: int, body: dict):
                         thongke[loai]["exp"] += exp
                         thongke[loai]["got"] += got_raw
                     if exp and got_raw < exp:
-                        msg(stage="warn",
-                            text=f"⚠ {loai_txt}{ht_txt}: Trang Thuế báo có {exp} HĐ "
-                                 f"nhưng chỉ lấy được {got_raw}. Có thể bị thiếu — "
+                        # Đã thử lại đủ SO_LAN_THU lượt (dò lại TOÀN BỘ kỳ mỗi
+                        # lần) mà VẪN thiếu — không còn là "cảnh báo nhẹ" nữa,
+                        # đây là CHƯA HOÀN THÀNH thật sự (người dùng yêu cầu
+                        # "phải tải đầy đủ mới xong quá trình tải"), nên đánh
+                        # dấu THẤT BẠI để dòng tổng kết cuối cùng phản ánh đúng
+                        # (không được báo "Hoàn tất" khi còn thiếu hóa đơn).
+                        with khoa_tonghop:
+                            loai_that_bai[loai] = True
+                            ly_do_loi[loai].append(
+                                f"{loai_txt}{ht_txt}: đã dò lại {SO_LAN_THU} lượt vẫn thiếu "
+                                f"({got_raw}/{exp} HĐ)")
+                        msg(stage="error",
+                            text=f"✗ {loai_txt}{ht_txt}: Trang Thuế báo có {exp} HĐ nhưng chỉ lấy "
+                                 f"được {got_raw} DÙ ĐÃ DÒ LẠI {SO_LAN_THU} LƯỢT — CHƯA HOÀN THÀNH, "
                                  f"nên tra cứu LẠI kỳ này (hoặc chuyển chế độ Chậm & an toàn).")
                     elif exp:
                         msg(stage="info",
