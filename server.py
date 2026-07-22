@@ -12,6 +12,7 @@ import time
 import base64
 import sqlite3
 import zipfile
+import calendar
 import datetime
 import threading
 import concurrent.futures as _cf
@@ -97,6 +98,19 @@ def _quy_cua_ky(tu_ngay, den_ngay):
     if d1.year == d2.year and q1 == q2:
         return d1.year, q1
     return d1.year, None   # trải nhiều quý -> chỉ dùng thư mục năm
+
+
+def _tu_den_cua_quy(nam, quy):
+    """CHIỀU NGƯỢC của _quy_cua_ky: từ (năm, quý 1..4) suy ra khoảng ngày
+    (tu_ngay, den_ngay) dd/mm/yyyy của đúng quý đó. quy rỗng/0/None -> cả năm."""
+    nam = int(nam)
+    if not quy:
+        return f"01/01/{nam}", f"31/12/{nam}"
+    quy = int(quy)
+    thang_dau = (quy - 1) * 3 + 1
+    thang_cuoi = thang_dau + 2
+    ngay_cuoi = calendar.monthrange(nam, thang_cuoi)[1]
+    return f"01/{thang_dau:02d}/{nam}", f"{ngay_cuoi:02d}/{thang_cuoi:02d}/{nam}"
 
 
 def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
@@ -2391,6 +2405,25 @@ def _tim_file_nop_to_khai(folder, mst, loai):
     return ung_vien[0][1], [u[1] for u in ung_vien]
 
 
+def _tim_file_nop_theo_cong_ty(comp, loai, nam, quy, folder_mac_dinh):
+    """Tìm file XML để nộp cho 1 công ty — ƯU TIÊN tìm ĐÚNG trong "Thư mục
+    lưu file kết xuất" RIÊNG của công ty này (theo cấu trúc Năm/Quý đã có
+    sẵn, dựa vào (nam, quy) người dùng chọn), thay vì chỉ dựa vào 1 "thư mục
+    mặc định" dùng chung cho mọi công ty (phải tự gom file thủ công). Nếu
+    công ty CHƯA cấu hình thư mục riêng, hoặc không tìm thấy file ở đó ->
+    LÙI VỀ thư mục mặc định như cách làm cũ (không phá vỡ công ty đang dùng
+    cách cũ). Trả (file_moi_nhat, [tất cả ứng viên])."""
+    export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
+    if export_dir and nam:
+        tu_ngay, den_ngay = _tu_den_cua_quy(nam, quy)
+        dich = _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay)
+        if dich:
+            fp, ung_vien = _tim_file_nop_to_khai(dich, comp["mst"], loai)
+            if fp:
+                return fp, ung_vien
+    return _tim_file_nop_to_khai(folder_mac_dinh, comp["mst"], loai)
+
+
 _DVC_OPEN_DRIVERS = {}   # {phien_id: drv} — giữ tham chiếu trình duyệt HIỂN THỊ đang chờ người
                           # dùng tự Ký+Nộp, tra theo phien_id để thao tác tiếp lên ĐÚNG cửa sổ đó
 
@@ -4324,11 +4357,16 @@ def set_thu_muc_nop_to_khai(body: dict = Body(...)):
 @app.post("/api/dvc/nop-to-khai/{cid}")
 def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
     """TỰ ĐỘNG tới bước "sẵn sàng ký": đăng nhập, khởi tạo đúng tờ khai, tự
-    tìm + chọn file XML khớp công ty trong "thư mục mặc định", rồi DỪNG LẠI.
-    Trình duyệt được mở HIỂN THỊ (không ẩn) và KHÔNG bị đóng sau khi hàm này
-    trả về, để người dùng tự chuyển sang đó kiểm tra rồi tự bấm "Ký hồ sơ"
-    và "Nộp tờ khai" bằng tay. body: {loai: "GTGT"|"TNCN"}"""
+    tìm + chọn file XML khớp công ty, rồi DỪNG LẠI. Trình duyệt được mở
+    HIỂN THỊ (không ẩn) và KHÔNG bị đóng sau khi hàm này trả về, để người
+    dùng tự chuyển sang đó kiểm tra rồi tự bấm "Ký hồ sơ" và "Nộp tờ khai"
+    bằng tay. body: {loai: "GTGT"|"TNCN", nam?: int, quy?: int}
+    File được tìm ƯU TIÊN trong "Thư mục lưu file kết xuất" RIÊNG của công
+    ty (theo Năm/Quý đã chọn) nếu công ty đã cấu hình; nếu không, lùi về
+    "thư mục mặc định" dùng chung như cách làm cũ."""
     loai = (body.get("loai") or "").strip().upper()
+    nam = body.get("nam")
+    quy = body.get("quy")
     cfg = _DVC_TO_KHAI_CONFIG.get(loai)
     if not cfg:
         raise HTTPException(
@@ -4344,12 +4382,16 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
     if not pw1 and not pw2:
         raise HTTPException(400, "Chưa lưu mật khẩu Dịch vụ công cho công ty này")
     folder = _get_setting("thu_muc_nop_to_khai", "")
-    if not folder:
-        raise HTTPException(400, "Chưa cài đặt 'Thư mục mặc định' chứa các file XML cần nộp")
-    file_path, ung_vien = _tim_file_nop_to_khai(folder, comp["mst"], loai)
+    export_dir = (comp["export_dir"] if "export_dir" in comp.keys() else "") or ""
+    if not folder and not export_dir:
+        raise HTTPException(
+            400, "Chưa cấu hình 'Thư mục lưu file kết xuất' cho công ty này, và cũng chưa "
+                 "cài đặt 'Thư mục mặc định' dùng chung — cần ít nhất 1 trong 2.")
+    file_path, ung_vien = _tim_file_nop_theo_cong_ty(comp, loai, nam, quy, folder)
     if not file_path:
         raise HTTPException(
-            404, f"Không tìm thấy file XML {loai} khớp MST {comp['mst']} trong thư mục {folder}")
+            404, f"Không tìm thấy file XML {loai} khớp MST {comp['mst']} (đã tìm trong thư mục "
+                 f"kết xuất riêng của công ty theo kỳ đã chọn, và thư mục mặc định)")
     try:
         drv = _dvc_make_driver(headless=False, esigner=True)
     except Exception as e:
@@ -4486,8 +4528,9 @@ def dvc_kiem_tra_da_nop(cid: int, body: dict = Body(...)):
     """Tra cứu LẠI trên cổng Dịch vụ công để XÁC NHẬN tờ khai đã thực sự
     được cơ quan Thuế chấp nhận, TRƯỚC KHI đánh dấu "đã nộp xong" — vì bước
     tự động tải file lên chỉ mới là "sẵn sàng ký", CHƯA chắc người dùng đã
-    thực sự bấm Ký hồ sơ + Nộp tờ khai. body: {loai, tu?, den?} (tu/den
-    dd/mm/yyyy; nếu không truyền sẽ tự suy ra từ tên file đã khớp)."""
+    thực sự bấm Ký hồ sơ + Nộp tờ khai. body: {loai, tu?, den?, nam?, quy?}
+    (tu/den dd/mm/yyyy; nếu không truyền, ưu tiên suy từ (nam, quy), rồi mới
+    tới suy từ tên file đã khớp — như cách làm cũ)."""
     loai = (body.get("loai") or "").strip().upper()
     if loai not in _DVC_TO_KHAI_CONFIG:
         raise HTTPException(400, f"Loại '{loai}' không hợp lệ")
@@ -4497,9 +4540,12 @@ def dvc_kiem_tra_da_nop(cid: int, body: dict = Body(...)):
     if not comp:
         raise HTTPException(404, "Không tìm thấy công ty")
     tu, den = body.get("tu"), body.get("den")
+    nam = body.get("nam")
+    if (not tu or not den) and nam:
+        tu, den = _tu_den_cua_quy(nam, body.get("quy"))
     if not tu or not den:
         folder = _get_setting("thu_muc_nop_to_khai", "")
-        fp, _ = _tim_file_nop_to_khai(folder, comp["mst"], loai)
+        fp, _ = _tim_file_nop_theo_cong_ty(comp, loai, nam, body.get("quy"), folder)
         if fp:
             tu, den = _ky_tu_ten_file_nop(os.path.basename(fp))
     if not tu or not den:
@@ -4582,17 +4628,18 @@ def dvc_reset_trang_thai_nop():
 
 
 @app.get("/api/dvc/nop-to-khai-trang-thai")
-def dvc_nop_to_khai_trang_thai():
-    """Với mỗi công ty: file XML (GTGT/TNCN) đang khớp trong 'thư mục mặc
-    định', và đã được XÁC NHẬN THẬT SỰ là nộp xong chưa (qua tra cứu lại
-    trên cổng Thuế, hoặc người dùng tự đánh dấu thủ công) — KHÔNG còn coi
-    "đã tải file lên" là "đã nộp xong" nữa, vì đó mới chỉ là bước sẵn sàng
-    ký. Xác nhận kiểu 'auto' tự động hết hiệu lực nếu file khớp đổi tên
-    (sang kỳ mới); xác nhận 'thu_cong' được giữ tới khi người dùng tự bỏ
-    đánh dấu hoặc bấm 'Bỏ hết trạng thái đã nộp'."""
+def dvc_nop_to_khai_trang_thai(nam: int = 0, quy: int = 0):
+    """Với mỗi công ty: file XML (GTGT/TNCN) đang khớp — ưu tiên tìm trong
+    "Thư mục lưu file kết xuất" riêng của công ty theo (nam, quy) đã chọn,
+    lùi về "thư mục mặc định" nếu không có — và đã được XÁC NHẬN THẬT SỰ là
+    nộp xong chưa (qua tra cứu lại trên cổng Thuế, hoặc người dùng tự đánh
+    dấu thủ công) — KHÔNG còn coi "đã tải file lên" là "đã nộp xong" nữa, vì
+    đó mới chỉ là bước sẵn sàng ký. Xác nhận kiểu 'auto' tự động hết hiệu
+    lực nếu file khớp đổi tên (sang kỳ mới); xác nhận 'thu_cong' được giữ
+    tới khi người dùng tự bỏ đánh dấu hoặc bấm 'Bỏ hết trạng thái đã nộp'."""
     folder = _get_setting("thu_muc_nop_to_khai", "")
     conn = db()
-    rows = conn.execute("SELECT id, mst FROM companies ORDER BY ten").fetchall()
+    rows = conn.execute("SELECT * FROM companies ORDER BY ten").fetchall()
     logs = {(r["company_id"], r["loai"]): r
             for r in conn.execute(
                 "SELECT company_id, loai, file_ten, xac_nhan, xac_nhan_nguon, xac_nhan_chi_tiet "
@@ -4603,7 +4650,7 @@ def dvc_nop_to_khai_trang_thai():
         cid = c["id"]
         item = {}
         for loai in _DVC_TO_KHAI_CONFIG:
-            fp, _ = _tim_file_nop_to_khai(folder, c["mst"], loai)
+            fp, _ = _tim_file_nop_theo_cong_ty(c, loai, nam or None, quy or None, folder)
             ten = os.path.basename(fp) if fp else None
             log = logs.get((cid, loai))
             da_nop = False

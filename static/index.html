@@ -474,17 +474,32 @@
     <h3 style="margin-top:0">📤 Tự động nộp tờ khai</h3>
     <div style="overflow:auto;flex:1;padding-right:4px">
     <p class="hint" style="margin-top:0">
-      Phần mềm tự đăng nhập, tự chọn đúng tờ khai và tự tải file XML (khớp theo MST) từ
-      <b>thư mục mặc định</b> lên cổng Dịch vụ công. Có thể bấm thêm <b>"🖊️ Tự bấm Ký hồ sơ"</b>
-      để phần mềm tự chọn chứng thư số giúp — nhưng <b>DỪNG LẠI ngay trước khi nhập mã PIN</b>,
-      vì bước đó cần token vật lý/mã PIN thật của bạn. Bạn tự nhập PIN và tự bấm
-      <b>"Nộp tờ khai"</b> — phần mềm không tự ký/nộp, đây là hành động nộp thuế chính thức.
-      Xong 1 tờ khai, bấm nút <b>"Tôi đã nộp — Kiểm tra & tiếp tục"</b> để phần mềm <b>tra cứu
-      lại trên cổng Thuế xác nhận thật sự đã được chấp nhận</b> rồi mới đánh dấu xanh và tự
-      chuyển sang tờ khai/công ty tiếp theo — không đánh dấu "đã nộp" chỉ vì đã tải file lên.
+      Phần mềm tự đăng nhập, tự chọn đúng tờ khai và tự tải file XML (khớp theo MST) lên
+      cổng Dịch vụ công — file được tìm <b>ưu tiên trong "Thư mục lưu file kết xuất" RIÊNG của
+      từng công ty</b> (theo đúng Năm/Quý đã chọn bên dưới, nếu công ty đã cấu hình trong "Sửa
+      công ty"), công ty nào chưa cấu hình thì mới dùng <b>thư mục mặc định</b> dùng chung. Có
+      thể bấm thêm <b>"🖊️ Tự bấm Ký hồ sơ"</b> để phần mềm tự chọn chứng thư số giúp — nhưng
+      <b>DỪNG LẠI ngay trước khi nhập mã PIN</b>, vì bước đó cần token vật lý/mã PIN thật của
+      bạn. Bạn tự nhập PIN và tự bấm <b>"Nộp tờ khai"</b> — phần mềm không tự ký/nộp, đây là
+      hành động nộp thuế chính thức. Xong 1 tờ khai, bấm nút <b>"Tôi đã nộp — Kiểm tra &amp;
+      tiếp tục"</b> để phần mềm <b>tra cứu lại trên cổng Thuế xác nhận thật sự đã được chấp
+      nhận</b> rồi mới đánh dấu xanh và tự chuyển sang tờ khai/công ty tiếp theo — không đánh
+      dấu "đã nộp" chỉ vì đã tải file lên.
     </p>
     <div class="field">
-      <label>Thư mục mặc định <span style="font-weight:400;color:var(--muted)">(chứa các file XML cần nộp của tất cả công ty)</span></label>
+      <label>Kỳ nộp</label>
+      <div style="display:flex;gap:8px">
+        <select id="ntkQuy" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
+          <option value="1">Quý 1</option>
+          <option value="2">Quý 2</option>
+          <option value="3">Quý 3</option>
+          <option value="4">Quý 4</option>
+        </select>
+        <input id="ntkNam" type="number" placeholder="Năm" style="width:110px;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
+      </div>
+    </div>
+    <div class="field">
+      <label>Thư mục mặc định <span style="font-weight:400;color:var(--muted)">(dùng cho công ty CHƯA cấu hình "Thư mục lưu file kết xuất" riêng)</span></label>
       <div style="display:flex;gap:8px">
         <input id="ntkThuMuc" placeholder="VD: D:\ToKhaiCanNop" style="flex:1">
         <button class="btn ghost" onclick="ntkLuuThuMuc()">Lưu</button>
@@ -509,13 +524,6 @@
       </div>
       <div id="ntkCtyList" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
-    </div>
-    <div class="field">
-      <label>Kỳ nộp</label>
-      <select id="ntkKy" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
-        <option value="quy">Theo Quý — nộp lần lượt 01/GTGT rồi 05/KK-TNCN</option>
-        <option value="nam">Theo Năm (sẽ cập nhật sau)</option>
-      </select>
     </div>
     <div id="ntkKetQua" style="display:none;margin-top:8px;border-radius:10px;padding:12px 14px;font-size:13px"></div>
     </div>
@@ -1430,6 +1438,12 @@ async function moNopToKhai(){
   ntkChonSet=new Set();
   ntkHangDoi=[];ntkDangCho=null;ntkDangChay=false;ntkBiDung=false;
   ntkCapNhatNutChay();
+  // Mac dinh Nam/Quy theo NGAY HOM NAY, khoi phai tu go tay moi lan mo
+  if(!document.getElementById('ntkNam').value){
+    const now=new Date();
+    document.getElementById('ntkNam').value=now.getFullYear();
+    document.getElementById('ntkQuy').value=Math.floor(now.getMonth()/3)+1;
+  }
   try{
     const r=await api('/api/settings/thu-muc-nop-to-khai');
     document.getElementById('ntkThuMuc').value=r.thu_muc||'';
@@ -1437,8 +1451,13 @@ async function moNopToKhai(){
   await ntkTaiTrangThai();
   document.getElementById('nopToKhaiModal').style.display='flex';
 }
+function ntkNamQuy(){
+  return {nam:parseInt(document.getElementById('ntkNam').value)||new Date().getFullYear(),
+          quy:parseInt(document.getElementById('ntkQuy').value)||1};
+}
 async function ntkTaiTrangThai(){
-  try{ ntkTrangThai=await api('/api/dvc/nop-to-khai-trang-thai'); }catch(e){ ntkTrangThai={}; }
+  const {nam,quy}=ntkNamQuy();
+  try{ ntkTrangThai=await api(`/api/dvc/nop-to-khai-trang-thai?nam=${nam}&quy=${quy}`); }catch(e){ ntkTrangThai={}; }
   ntkRenderCtyList();
 }
 function ntkDaXongCty(cid){
@@ -1501,7 +1520,12 @@ async function ntkResetTatCa(){
     toast('Đã bỏ hết trạng thái đã nộp','ok');
   }catch(e){toast('Lỗi: '+e.message,'err');}
 }
-function ntkKyChange(){}
+function ntkKyChange(){
+  // Đổi kỳ (Năm/Quý) -> làm mới trạng thái tìm-thấy-file cho từng công ty
+  // theo ĐÚNG kỳ mới chọn (mỗi công ty tự tìm trong đúng thư mục Năm/Quý
+  // riêng của nó, nếu đã cấu hình).
+  ntkTaiTrangThai();
+}
 function dongNopToKhai(){
   if(ntkDangChay){toast('Đang chạy dở — bấm Dừng trước khi đóng','err');return;}
   document.getElementById('nopToKhaiModal').style.display='none';
@@ -1530,9 +1554,8 @@ function ntkGhi(html){
 async function ntkBatDau(){
   if(ntkDangChay)return;
   if(!ntkChonSet.size){toast('Chưa chọn công ty nào','err');return;}
-  const ky=document.getElementById('ntkKy').value;
-  if(ky==='nam'){toast('Nộp theo Năm chưa được hỗ trợ — sẽ cập nhật sau','err');return;}
-  const dsLoai=(ky==='quy')?['GTGT','TNCN']:[];
+  if(!document.getElementById('ntkNam').value){toast('Chưa nhập Năm cho kỳ nộp','err');return;}
+  const dsLoai=['GTGT','TNCN'];
   // Bỏ qua sẵn những mục ĐÃ xác nhận nộp xong — chỉ xếp hàng những mục
   // thật sự còn thiếu, tránh mở lại trình duyệt cho việc đã xong rồi.
   ntkHangDoi=[];
@@ -1576,7 +1599,7 @@ async function ntkKiemTraTuDong(){
   if(nhan)nhan.textContent=`⏳ Đang tự động kiểm tra trên cổng Thuế... (lần ${ntkPollLan}/${NTK_POLL_TOI_DA})`;
   try{
     const r=await api(`/api/dvc/kiem-tra-da-nop/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({loai,phien_id})});
+      body:JSON.stringify({loai,phien_id,...ntkNamQuy()})});
     if(r.xac_nhan){
       ntkDungPoll();
       ntkGhi(`<br>✅ <b>Đã tự động xác nhận</b>: ${r.chi_tiet||r.trang_thai}`+
@@ -1612,12 +1635,12 @@ async function ntkXuLyTiep(){
   ntkGhi(`<br>⏳ Đang tự đăng nhập + tải file lên... (cửa sổ Chrome sẽ hiện ra, đừng tắt)`);
   let r;
   try{
-    r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai})});
+    r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai,...ntkNamQuy()})});
   }catch(e){
     // "không tìm thấy file" -> báo RÕ RÀNG rồi TỰ ĐỘNG bỏ qua, xử lý tiếp,
     // không dừng cả hàng đợi chỉ vì 1 công ty thiếu tờ khai
     const khongCoFile=/không tìm thấy file/i.test(e.message||'');
-    ntkGhi(`<br>${khongCoFile?'⚠':'❌'} <b>${ten}</b> — ${khongCoFile?`KHÔNG CÓ tờ khai ${NTK_TEN_LOAI[loai]||loai} để nộp trong thư mục mặc định — bỏ qua.`:e.message}`);
+    ntkGhi(`<br>${khongCoFile?'⚠':'❌'} <b>${ten}</b> — ${khongCoFile?`KHÔNG CÓ tờ khai ${NTK_TEN_LOAI[loai]||loai} để nộp cho kỳ đã chọn (đã tìm cả thư mục kết xuất riêng lẫn thư mục mặc định) — bỏ qua.`:e.message}`);
     await ntkXuLyTiep();
     return;
   }
@@ -1677,7 +1700,7 @@ async function ntkXacNhanVaTiep(){
   if(el)el.innerHTML='⏳ Đang tra cứu lại trên cổng Dịch vụ công để xác nhận...';
   try{
     const r=await api(`/api/dvc/kiem-tra-da-nop/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({loai,phien_id})});
+      body:JSON.stringify({loai,phien_id,...ntkNamQuy()})});
     if(r.xac_nhan){
       ntkGhi(`<br>✅ <b>Đã xác nhận</b>: ${r.chi_tiet||r.trang_thai}`+
              (r.da_dong_trinh_duyet?' — đã tự đóng cửa sổ Chrome.':''));
