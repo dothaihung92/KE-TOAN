@@ -33,6 +33,7 @@ FILES = [
     ".gitattributes",
     "static/index.html",
     "templates/htkk_01gtgt_template.xml",
+    "templates/htkk_05tncn_template.xml",
     "license_core.py",
     "cap_phep_admin.py",
 ]
