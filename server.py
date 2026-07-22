@@ -398,28 +398,15 @@ class GDTClient:
             if progress:
                 progress(f"đang tải {s_from} → {s_to}...")
 
-            # Đếm nhanh cho TỪNG THÁNG (chỉ áp dụng hóa đơn máy tính tiền) —
-            # đếm nhanh TOÀN KỲ ở trên chỉ bỏ qua được khi CẢ khoảng ngày rỗng;
-            # nếu chỉ 1 vài tháng có hóa đơn còn lại đa số tháng khác rỗng, đếm
-            # nhanh toàn kỳ vẫn trả về False (có dữ liệu) nên KHÔNG bỏ qua được
-            # tháng nào — vẫn phải dò đầy đủ (rất lâu, hay lỗi mạng vặt) cho cả
-            # những tháng thực ra rỗng. Đếm nhanh THÊM lần nữa cho riêng tháng
-            # này để bỏ qua sớm, khỏi dò từng trạng thái/gọi mạng tốn thời gian.
-            if he_thong == "sco-query":
-                try:
-                    thang_rong = self._toan_ky_rong(s_from, s_to, loai, he_thong,
-                                                    page_size, progress)
-                except Exception as e:
-                    if "TOKEN_EXPIRED" in str(e):
-                        raise
-                    thang_rong = False
-                if thang_rong:
-                    if progress:
-                        progress(f"{s_from} → {s_to}: không có hóa đơn máy tính tiền — bỏ qua")
-                    cur = chunk_end + datetime.timedelta(days=1)
-                    time.sleep(SP()["month"])
-                    continue
-
+            # KHÔNG đếm nhanh THÊM cho từng tháng nữa (đã bỏ) — với công ty CÓ
+            # phát sinh máy tính tiền hầu hết các tháng (rất phổ biến), đếm
+            # nhanh riêng từng tháng KHÔNG BAO GIỜ bỏ qua được gì (luôn có dữ
+            # liệu) mà vẫn tốn thêm request riêng, đúng lúc hệ thống máy tính
+            # tiền đang chậm/lỗi mạng vặt thì phần thêm này lại càng lộ rõ,
+            # khiến người dùng thấy "kiểm tra nhanh" cũng lâu không kém tải
+            # thật. Đếm nhanh TOÀN KỲ (1 lần duy nhất, ở đầu hàm) vẫn còn —
+            # đủ để xử lý tốt trường hợp phổ biến nhất: công ty KHÔNG hề dùng
+            # máy tính tiền (bỏ qua cả kỳ ngay từ đầu, không tốn thêm gì).
             self._last_total = 0
             self._loi_rieng_phan = []
             self._ttxly_that_bai_phan = []
