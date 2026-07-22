@@ -13,6 +13,7 @@ import base64
 import sqlite3
 import zipfile
 import datetime
+import threading
 import concurrent.futures as _cf
 from typing import Optional, List
 
@@ -5054,11 +5055,22 @@ def _run_fetch_job(cid: int, body: dict):
                                         ly_do_tai_lai_du_co_file.append(
                                             f"{khhdon} {shdon}: trạng thái đổi ({tthai_cu} → {tthai_moi})")
 
+                            # Xin phép qua limiter trước khi THỰC SỰ gọi mạng — cho
+                            # phép người dùng CHỈNH số luồng đồng thời ngay trong lúc
+                            # đang tải (xem set_limit ở endpoint /api/fetch-song-song),
+                            # không cần dừng lại/chạy lại từ đầu.
+                            limiter = (FETCH_JOBS.get(cid) or {}).get("limiter")
+                            if limiter:
+                                limiter.acquire()
                             try:
-                                zdata = client.download_xml(nbmst, khhdon, khmshdon,
-                                                            shdon, loai, he_thong)
-                            except Exception:
-                                zdata = None
+                                try:
+                                    zdata = client.download_xml(nbmst, khhdon, khmshdon,
+                                                                shdon, loai, he_thong)
+                                except Exception:
+                                    zdata = None
+                            finally:
+                                if limiter:
+                                    limiter.release()
                             if zdata:
                                 try:
                                     _save_invoice_files(sub, base, zdata)
@@ -5071,9 +5083,11 @@ def _run_fetch_job(cid: int, body: dict):
                         # TẢI SONG SONG (thay vì từng file 1) để rút ngắn thời gian chờ —
                         # mỗi file là 1 request mạng riêng tới trang Thuế, tải tuần tự
                         # từng cái 1 với hàng chục/hàng trăm hóa đơn khiến tổng thời gian
-                        # cộng dồn rất lâu dù mỗi file không lỗi gì. Giới hạn số luồng
-                        # đồng thời (không tải ồ ạt) để tránh bị 429 chặn tốc độ.
-                        SO_LUONG_SONG_SONG = SP().get("song_song", 4)
+                        # cộng dồn rất lâu dù mỗi file không lỗi gì. Executor tạo với
+                        # TỐI ĐA 32 luồng (trần cứng) — số luồng THỰC SỰ hoạt động cùng
+                        # lúc do DynamicLimiter (FETCH_JOBS[cid]["limiter"]) quyết định,
+                        # chỉnh được ngay trong lúc đang tải qua /api/fetch-song-song.
+                        SO_LUONG_SONG_SONG = 32
 
                         def _tai_nhieu_file(ds_inv, nhan):
                             """Tải song song danh sách hóa đơn.
@@ -5294,9 +5308,46 @@ def _run_fetch_job(cid: int, body: dict):
     run()
 
 
+class DynamicLimiter:
+    """Giới hạn số luồng ĐANG THỰC SỰ chạy đồng thời (tải file), có thể
+    CHỈNH SỐ NGAY TRONG LÚC ĐANG TẢI — khác với ThreadPoolExecutor thường
+    (max_workers cố định ngay từ lúc tạo, không đổi được giữa chừng). Cách
+    làm: luôn tạo executor với số luồng TỐI ĐA (32), nhưng mỗi luồng phải
+    "xin phép" (acquire) qua limiter này trước khi thực sự gọi mạng — chỉnh
+    set_limit() sẽ áp dụng ngay cho các lượt xin phép TIẾP THEO, không cần
+    dừng lại và chạy lại từ đầu. limit=0 -> tạm dừng hẳn (không luồng nào
+    được xin phép) cho tới khi tăng lại."""
+
+    def __init__(self, initial=4):
+        self._cond = threading.Condition()
+        self._limit = max(0, min(32, int(initial)))
+        self._active = 0
+
+    def set_limit(self, n):
+        with self._cond:
+            self._limit = max(0, min(32, int(n)))
+            self._cond.notify_all()
+
+    def get_limit(self):
+        with self._cond:
+            return self._limit
+
+    def acquire(self):
+        with self._cond:
+            while self._active >= self._limit:
+                self._cond.wait(timeout=1.0)
+            self._active += 1
+
+    def release(self):
+        with self._cond:
+            self._active -= 1
+            self._cond.notify_all()
+
+
 def _new_fetch_job():
     return {"messages": [], "last": None, "running": True,
-            "cursor": 0, "started": time.time(), "cancel": False}
+            "cursor": 0, "started": time.time(), "cancel": False,
+            "limiter": DynamicLimiter(SP().get("song_song", 4))}
 
 
 def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
@@ -5721,6 +5772,19 @@ def fetch_cancel(cid: int):
     if job:
         job["cancel"] = True
     return {"ok": True}
+
+
+@app.post("/api/fetch-song-song/{cid}")
+def fetch_set_song_song(cid: int, body: dict = Body(...)):
+    """Chỉnh số luồng tải file đồng thời NGAY TRONG LÚC đang tra cứu/tải
+    file (0-32) — không cần dừng lại rồi chạy lại từ đầu. 0 = tạm dừng hẳn
+    việc tải file (không luồng nào được chạy) cho tới khi tăng lại."""
+    n = max(0, min(32, int(body.get("n", 0))))
+    job = FETCH_JOBS.get(cid)
+    if not job or not job.get("limiter"):
+        raise HTTPException(404, "Không có tiến trình tra cứu/tải file nào đang chạy cho công ty này")
+    job["limiter"].set_limit(n)
+    return {"ok": True, "n": n}
 
 
 @app.get("/api/fetch-status/{cid}")
