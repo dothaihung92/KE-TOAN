@@ -574,28 +574,34 @@ class GDTClient:
         qs = f"sort=tdlap:desc&size=1&search={quote(search, safe='=;,:/')}"
         full_url = f"{url}?{qs}"
         sp = SP()
-        t0 = time.time()
-        # ngân sách thời gian NGẮN cho phép đếm: nếu quá lâu (sco-query treo),
-        # bỏ cuộc đếm nhanh -> trả None -> dò đầy đủ như cũ (không làm chậm thêm)
-        NGUONG = 40
-        for attempt in range(sp["retry_max"]):
-            if time.time() - t0 > NGUONG:
-                return None
+        # KHÔNG bỏ cuộc sau 1 khoảng thời gian cố định nữa — trước đây nếu hệ
+        # thống máy tính tiền chậm/lỗi mạng vặt quá 40s thì ĐẾM NHANH bỏ cuộc
+        # (trả None) rồi rơi xuống dò ĐẦY ĐỦ (3 trạng thái x tải phân trang —
+        # còn nặng hơn nhiều), khiến CẢ HAI bước (đếm nhanh + dò đầy đủ) đều
+        # phải chờ, cảm giác treo liên tục dù tháng đó KHÔNG có hóa đơn nào.
+        # Nay đếm nhanh cũng cứ THỬ LẠI ĐẾN KHI CÓ KẾT QUẢ (chờ cố định 3s mỗi
+        # lần lỗi mạng) — vì bản thân request này rất nhẹ (size=1), rẻ hơn
+        # nhiều so với dò đầy đủ, nên cứ chờ tới khi có câu trả lời rồi mới
+        # quyết định bỏ qua hay dò đầy đủ, thay vì bỏ cuộc giữa chừng rồi vẫn
+        # phải làm việc nặng hơn ngay sau đó.
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 r = self.session.get(full_url, headers=extra_headers, timeout=45)
             except Exception:
                 if progress:
-                    progress("đang kiểm tra nhanh kỳ này có hóa đơn không...")
-                time.sleep(min(sp["retry_base"] * (attempt + 1), 20))
+                    progress(f"đang kiểm tra nhanh kỳ này có hóa đơn không... (lần {attempt})")
+                time.sleep(3)
                 continue
             if r.status_code == 401:
                 raise Exception("TOKEN_EXPIRED")
             if r.status_code == 429:
                 ra = r.headers.get("Retry-After")
                 try:
-                    wait = int(ra) if ra else sp["retry_base"] * (attempt + 1)
+                    wait = int(ra) if ra else sp["retry_base"]
                 except Exception:
-                    wait = sp["retry_base"] * (attempt + 1)
+                    wait = sp["retry_base"]
                 time.sleep(min(wait, 30))
                 continue
             if r.status_code != 200:
@@ -606,7 +612,6 @@ class GDTClient:
                 return None
             tong = data.get("total")
             return int(tong) if isinstance(tong, (int, float)) else None
-        return None
 
     def _fetch_paginated(self, url, search, action, page_size=50, want_total=False, progress=None):
         """Gọi 1 endpoint với tham số search, tự phân trang và xử lý 429.
@@ -635,21 +640,19 @@ class GDTClient:
             # 1 lần rớt mạng ngẫu nhiên giữa chừng làm rớt luôn cả lượt tra cứu
             # (thường gặp nhất ở "bán ra" vì chỉ gọi 1 lần, không có nhiều lượt
             # dự phòng như "mua vào" theo từng trạng thái).
+            # KHÔNG giới hạn số lần/tổng thời gian thử lại nữa — trước đây bỏ
+            # cuộc sau 8 lần hoặc 75s rồi báo LỖI hẳn (dù trang Thuế/hệ thống
+            # máy tính tiền chỉ đang chậm chứ không phải hỏng hẳn), khiến người
+            # dùng phải tự tra cứu lại nhiều lần. Nay cứ THỬ LẠI ĐẾN KHI TẢI
+            # ĐƯỢC (chờ cố định 3s giữa các lần lỗi mạng, không tăng dần) —
+            # CHỈ dừng khi thật sự tải được, hoặc gặp lỗi KHÔNG THỂ retry
+            # (token hết hạn / 400 — kiểm tra ở dưới, sau khi có response).
             r = None
             last_net_err = None
             sp = SP()
-            # GIỚI HẠN TỔNG THỜI GIAN thử lại 1 trang (không chỉ giới hạn SỐ LẦN):
-            # hệ thống hóa đơn máy tính tiền (sco-query) của Tổng cục Thuế phản
-            # hồi rất chậm/hay treo — trước đây retry_max=8 lần, mỗi lần chờ
-            # timeout=60s + nghỉ tới 60s, cộng dồn có thể tới ~960s CHO 1 TRANG,
-            # nhân với 3 trạng thái (ttxly) của "mua vào" x thêm 1 lượt thử lại
-            # ở tầng trên -> hàng chục phút đến cả tiếng cho 1 tháng, khiến hóa
-            # đơn máy tính tiền gần như không chạy được (cả mua vào lẫn bán ra).
-            t_bat_dau_thu = time.time()
-            NGUONG_THOI_GIAN_THU_LAI = 75  # giây
-            for attempt in range(sp["retry_max"]):
-                if time.time() - t_bat_dau_thu > NGUONG_THOI_GIAN_THU_LAI:
-                    break
+            attempt = 0
+            while True:
+                attempt += 1
                 try:
                     r = self.session.get(full_url, headers=extra_headers, timeout=60)
                 except Exception as e:
@@ -662,27 +665,23 @@ class GDTClient:
                     # thử, nhất là hệ thống máy tính tiền hay bị lỗi mạng vặt.
                     cho = 3
                     if progress:
-                        progress(f"lỗi mạng, đợi {cho}s rồi thử lại (lần {attempt + 1}/{sp['retry_max']})...")
+                        progress(f"lỗi mạng, đợi {cho}s rồi thử lại (lần {attempt})...")
                     time.sleep(cho)
                     continue
                 if r.status_code == 429:
                     ra = r.headers.get("Retry-After")
                     try:
-                        wait = int(ra) if ra else sp["retry_base"] * (attempt + 1)
+                        wait = int(ra) if ra else sp["retry_base"]
                     except Exception:
-                        wait = sp["retry_base"] * (attempt + 1)
+                        wait = sp["retry_base"]
                     wait = min(wait, 90)
                     if progress:
                         progress(f"bị Tổng cục Thuế giới hạn tốc độ (429), đợi {wait}s rồi "
-                                 f"thử lại (lần {attempt + 1}/{sp['retry_max']})...")
+                                 f"thử lại (lần {attempt})...")
                     time.sleep(wait)
                     continue
                 break
 
-            if r is None:
-                raise Exception(
-                    f"Lỗi kết nối mạng khi tra cứu (đã thử {sp['retry_max']} lần): "
-                    f"{last_net_err}")
             if r.status_code == 401:
                 raise Exception("TOKEN_EXPIRED")
             if r.status_code == 429:
