@@ -462,15 +462,22 @@ class GDTClient:
         if loai == "purchase":
             url = f"{base}/invoices/purchase"
             action = "Tìm kiếm (hóa đơn %smua vào)" % ("máy tính tiền " if is_mtt else "")
-            # mua vào phân theo 3 trạng thái — CHỈ coi là rỗng khi CẢ 3 đều = 0
-            for ttxly in (5, 6, 8):
-                tong = self._dem_tong_nhanh(
-                    url, f"{date_filter};ttxly=={ttxly}", action, progress)
-                if tong is None:
-                    return False   # không chắc -> dò đầy đủ
-                if tong > 0:
-                    return False   # có hóa đơn -> dò đầy đủ
-                time.sleep(SP()["status"])
+            # mua vào phân theo 3 trạng thái — CHỈ coi là rỗng khi CẢ 3 đều = 0.
+            # Chạy SONG SONG cả 3 (thay vì lần lượt + nghỉ giữa mỗi lần) — kiểm
+            # tra nhanh này CHỈ áp dụng cho máy tính tiền (is_mtt), là hệ thống
+            # phản hồi chậm hơn hẳn hóa đơn điện tử thường; làm tuần tự 3 lần
+            # (mỗi lần có thể tự thử lại nhiều lần nếu mạng trục trặc) sẽ cộng
+            # dồn thời gian chờ, khiến kiểm tra nhanh không còn "nhanh" nữa —
+            # đây chính là phần việc THÊM RIÊNG cho máy tính tiền mà hóa đơn
+            # điện tử thường không phải làm, nên cần giảm tối đa thời gian.
+            with _cf.ThreadPoolExecutor(max_workers=3) as ex:
+                tongs = list(ex.map(
+                    lambda tt: self._dem_tong_nhanh(
+                        url, f"{date_filter};ttxly=={tt}", action, progress),
+                    (5, 6, 8)))
+            for tong in tongs:
+                if tong is None or tong > 0:
+                    return False   # không chắc hoặc có hóa đơn -> dò đầy đủ
             return True
         else:
             url = f"{base}/invoices/sold"
