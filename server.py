@@ -655,7 +655,12 @@ class GDTClient:
                 except Exception as e:
                     last_net_err = e
                     r = None
-                    cho = min(sp["retry_base"] * (attempt + 1), 60)
+                    # Lỗi mạng thoáng qua (mất kết nối/timeout, KHÁC với 429 bị
+                    # giới hạn tốc độ ở dưới) -> chờ CỐ ĐỊNH 3s rồi thử lại ngay,
+                    # KHÔNG tăng dần theo số lần thử — trước đây chờ tăng dần
+                    # (4s, 8s, 12s...) khiến cảm giác "treo" rất lâu giữa các lần
+                    # thử, nhất là hệ thống máy tính tiền hay bị lỗi mạng vặt.
+                    cho = 3
                     if progress:
                         progress(f"lỗi mạng, đợi {cho}s rồi thử lại (lần {attempt + 1}/{sp['retry_max']})...")
                     time.sleep(cho)
