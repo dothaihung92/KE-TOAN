@@ -5476,10 +5476,14 @@ def _run_fetch_job(cid: int, body: dict):
                 tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
                 loi_tra_cuu=co_loi)
 
-            # ===== TỰ ĐỘNG KẾT XUẤT EXCEL vào thư mục Năm/Quý (nếu bật) =====
-            # Người dùng tick "Lưu file kết xuất" -> sau khi tra cứu + tải xong,
-            # tự xuất Excel và lưu vào <thư mục kết xuất>/<năm>/Quý N/ (không mở
-            # file, không rải Desktop — hợp cho tra cứu hàng loạt nhiều công ty).
+            # ===== TỰ ĐỘNG KẾT XUẤT (CHỈ TRA CỨU HÀNG LOẠT) vào thư mục
+            # Năm/Quý (nếu bật) — tra cứu 1 công ty giờ KHÔNG tự động kết xuất
+            # nữa (người dùng yêu cầu chỉ xuất khi tự bấm nút), nhưng hàng
+            # loạt (nhiều công ty cùng lúc) vẫn cần tự xuất vì không có cách
+            # nào bấm nút xuất riêng cho từng công ty sau khi chạy xong.
+            # body["luu_ket_xuat"] CHỈ được gửi từ tra cứu hàng loạt (ô tick
+            # riêng "bLuuKetXuat" trong modal) — tra cứu 1 công ty không còn
+            # gửi khoá này nên sẽ không bao giờ tự động kết xuất.
             if body.get("luu_ket_xuat") and co_loi:
                 # KHÔNG được để người dùng tick "Lưu file kết xuất" mà không thấy
                 # gì xảy ra và cũng không hiểu vì sao — trước đây im lặng bỏ qua
