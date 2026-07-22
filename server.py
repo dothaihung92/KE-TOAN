@@ -680,14 +680,20 @@ class GDTClient:
                                  f"thử lại (lần {attempt})...")
                     time.sleep(wait)
                     continue
+                if r.status_code >= 500:
+                    # Lỗi PHÍA MÁY CHỦ Thuế (500/502/503/504...) — thường là quá
+                    # tải/đang bảo trì TẠM THỜI (nhất là hệ thống máy tính tiền),
+                    # không phải do request sai — nên THỬ LẠI giống hệt lỗi mạng
+                    # (chờ cố định 3s) thay vì báo lỗi ngay, bắt người dùng phải
+                    # tự bấm tra cứu lại. CHỈ 400 (request sai) mới báo lỗi ngay.
+                    if progress:
+                        progress(f"lỗi máy chủ Thuế ({r.status_code}), đợi 3s rồi thử lại (lần {attempt})...")
+                    time.sleep(3)
+                    continue
                 break
 
             if r.status_code == 401:
                 raise Exception("TOKEN_EXPIRED")
-            if r.status_code == 429:
-                raise Exception(
-                    "Trang Thuế tạm chặn do gọi quá nhiều (429). "
-                    "Hãy đợi vài phút rồi thử lại, hoặc chuyển sang chế độ 'Chậm & an toàn'.")
             if r.status_code == 400:
                 raise Exception(
                     f"Trang Thuế từ chối (400). Thử thu hẹp khoảng ngày "
