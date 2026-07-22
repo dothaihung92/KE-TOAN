@@ -40,8 +40,8 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 #  Mức "balanced" là cân bằng giữa tốc độ và an toàn.
 # ============================================================
 SPEED_PROFILES = {
-    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "between_loai": 2.5, "song_song": 8},
-    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "between_loai": 3, "song_song": 5},
+    "fast":     {"page": 0.5, "status": 0.5, "month": 0.5, "file": 0.15, "retry_base": 4, "retry_max": 8, "between_loai": 2.5, "song_song": 16},
+    "balanced": {"page": 1.0, "status": 1.0, "month": 1.2, "file": 0.6,  "retry_base": 5, "retry_max": 8, "between_loai": 3, "song_song": 8},
     "safe":     {"page": 2.0, "status": 2.0, "month": 2.5, "file": 1.2,  "retry_base": 10, "retry_max": 10, "between_loai": 5, "song_song": 1},
 }
 CURRENT_SPEED = "fast"  # mặc định nhanh
