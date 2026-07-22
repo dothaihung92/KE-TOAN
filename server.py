@@ -237,8 +237,24 @@ class GDTClient:
     }
 
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update(self.HEADERS)
+        # hoadondientu.gdt.gov.vn cũng đứng sau WAF F5 (thấy cookie kiểu
+        # "TS0114b13e=..." — dấu hiệu điển hình của F5 BIG-IP ASM) chặn/làm
+        # chậm request theo dấu vân tay TLS/JA3 — request.Session (dùng
+        # OpenSSL của Python) có vân tay TLS KHÁC hẳn Chrome thật, dù đã copy
+        # đúng từng header (action, User-Agent...) vẫn có thể bị WAF coi là
+        # bot và xử lý chậm/lỗi ngẫu nhiên (500/treo) dù trình duyệt thật gọi
+        # CÙNG request lại rất nhanh. DVCClient (dịch vụ công) đã gặp và sửa
+        # y hệt vấn đề này bằng curl_cffi (giả lập đúng vân tay TLS Chrome) —
+        # áp dụng lại đây cho GDTClient.
+        self.impersonate = False
+        try:
+            from curl_cffi import requests as _cffi
+            self.session = _cffi.Session(impersonate="chrome")
+            self.impersonate = True
+            self.session.headers.update({"Accept": self.HEADERS["Accept"]})
+        except Exception:
+            self.session = requests.Session()
+            self.session.headers.update(self.HEADERS)
         self.token: Optional[str] = None
         self._last_total = 0
         self.last_query_total = 0
