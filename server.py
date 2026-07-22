@@ -102,9 +102,11 @@ def _quy_cua_ky(tu_ngay, den_ngay):
 def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
     """Tạo (nếu thiếu) cấu trúc thư mục lưu file kết xuất theo Năm/Quý dưới
     export_dir và trả về đường dẫn thư mục ĐÍCH để lưu file.
-      export_dir/<năm>/Quý 1..4/   (tạo đủ cả 4 quý khi tạo mới năm)
+      export_dir/<năm>/QUY 1..4/   (tạo đủ cả 4 quý khi tạo mới năm)
     Nếu kỳ trải nhiều quý -> lưu thẳng vào export_dir/<năm>/.
-    Trả None nếu export_dir trống/không tạo được."""
+    Trả None nếu export_dir trống/không tạo được.
+    Tên thư mục quý dùng "QUY N" (không dấu, viết hoa) thay vì "Quý N" —
+    tránh lỗi hiển thị/gõ dấu tiếng Việt trên một số hệ thống/ổ mạng cũ."""
     export_dir = (export_dir or "").strip()
     if not export_dir:
         return None
@@ -117,9 +119,9 @@ def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
         # tạo đủ 4 quý mỗi khi có thư mục năm (kể cả năm đã có sẵn — không sao,
         # exist_ok) để người dùng thấy sẵn cấu trúc, khỏi tạo tay
         for q in (1, 2, 3, 4):
-            os.makedirs(os.path.join(thu_muc_nam, f"Quý {q}"), exist_ok=True)
+            os.makedirs(os.path.join(thu_muc_nam, f"QUY {q}"), exist_ok=True)
         if quy:
-            dich = os.path.join(thu_muc_nam, f"Quý {quy}")
+            dich = os.path.join(thu_muc_nam, f"QUY {quy}")
         else:
             dich = thu_muc_nam
         os.makedirs(dich, exist_ok=True)
@@ -1124,6 +1126,13 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN ma_cqt_noi_nop TEXT")
     if "ten_cqt_noi_nop" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN ten_cqt_noi_nop TEXT")
+    if "luu_ket_xuat_mac_dinh" not in ccols:
+        # Ghi nhớ trạng thái tick "Lưu file kết xuất" theo TỪNG CÔNG TY — trước
+        # đây ô tick này chỉ là trạng thái tạm trên giao diện (mất khi đổi công
+        # ty/tải lại trang), buộc người dùng phải tự nhớ tick lại MỖI LẦN
+        # trước khi tra cứu thì mới lưu đúng vào thư mục đã cấu hình. Nay lưu
+        # lại để tick 1 lần là áp dụng luôn cho các lần kết xuất sau.
+        conn.execute("ALTER TABLE companies ADD COLUMN luu_ket_xuat_mac_dinh INTEGER DEFAULT 0")
     # Migration: tách riêng phần HÀNG NHẬP KHẨU (tờ khai NK) trong dữ liệu import
     # để điền đúng chỉ tiêu [23a]/[24a] trên tờ khai 01/GTGT
     icols = [r[1] for r in conn.execute("PRAGMA table_info(imported_data)").fetchall()]
@@ -1439,6 +1448,21 @@ def update_company(cid: int, data: dict = Body(...)):
     # Luôn reset phiên đăng nhập cũ sau khi sửa (phòng đổi MST/mật khẩu)
     if cid in CLIENTS:
         del CLIENTS[cid]
+    return {"ok": True}
+
+
+@app.post("/api/company/{cid}/luu-ket-xuat")
+def set_luu_ket_xuat_mac_dinh(cid: int, body: dict = Body(...)):
+    """Ghi nhớ trạng thái tick "Lưu file kết xuất" RIÊNG cho công ty này —
+    trước đây ô tick chỉ là trạng thái tạm trên giao diện (mất khi đổi công
+    ty/tải lại trang), buộc phải tự nhớ tick lại MỖI LẦN trước khi tra cứu
+    thì mới lưu đúng vào thư mục đã cấu hình. Nay tick 1 lần là nhớ luôn,
+    áp dụng cho mọi lần tra cứu/kết xuất sau của công ty này."""
+    n = 1 if body.get("bat") else 0
+    conn = db()
+    conn.execute("UPDATE companies SET luu_ket_xuat_mac_dinh=? WHERE id=?", (n, cid))
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 @app.delete("/api/companies/{cid}")

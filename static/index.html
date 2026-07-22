@@ -1804,6 +1804,15 @@ async function saveCompany(){
 }
 
 /* ---------- SELECT & WORKSPACE ---------- */
+async function luuTuyChonKetXuat(id,bat){
+  // Ghi nhớ tick "Lưu file kết xuất" RIÊNG cho công ty này — tick 1 lần là
+  // nhớ luôn, khỏi phải tick lại mỗi lần trước khi tra cứu.
+  try{
+    await api(`/api/company/${id}/luu-ket-xuat`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({bat})});
+    const c=companies.find(x=>x.id===id);if(c)c.luu_ket_xuat_mac_dinh=bat?1:0;
+  }catch(e){}
+}
 async function selectCompany(id){
   fetchPollCancel=true;  // dừng vòng poll tra cứu của công ty trước
   current=id;
@@ -1939,8 +1948,8 @@ function renderWorkspace(c,online){
       </div>
     </div>
     <label class="chk" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px">
-      <input type="checkbox" id="cLuuKetXuat">
-      <span>💾 <b>Lưu file kết xuất</b> — sau khi tra cứu xong, tự xuất <b>Excel + XML tờ khai GTGT + XML tờ khai TNCN</b> &amp; lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý (không tick = xuất ra Desktop như thường)</span>
+      <input type="checkbox" id="cLuuKetXuat" ${c.luu_ket_xuat_mac_dinh?'checked':''} onchange="luuTuyChonKetXuat(${c.id},this.checked)">
+      <span>💾 <b>Lưu file kết xuất</b> — sau khi tra cứu xong, tự xuất <b>Excel + XML tờ khai GTGT + XML tờ khai TNCN</b> &amp; lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý (không tick = xuất ra Desktop như thường). <b>Đã tick 1 lần sẽ được nhớ</b> cho các lần tra cứu/kết xuất sau, khỏi phải tick lại.</span>
     </label>
     <button class="btn" id="fetchBtn" onclick="doFetch()">🔍 Tra cứu hóa đơn</button>
     <div id="progressBox" style="display:none;margin-top:14px;background:var(--green-l);border-radius:10px;padding:14px 16px">
