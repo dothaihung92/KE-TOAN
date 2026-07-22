@@ -183,6 +183,37 @@ def _to_num(v):
         return v if v not in (None,) else ""
 
 
+def _gop_hoa_don_trung_he_thong(rows):
+    """Gộp các dòng invoices TRÙNG LẶP giữa 2 hệ thống (hóa đơn điện tử
+    'query' / máy tính tiền 'sco-query') — cùng 1 hóa đơn thật (giống hệt
+    nbmst/khmshdon/khhdon/shdon/loai) đôi khi được trang Thuế trả về ở CẢ 2
+    hệ thống, nên được lưu thành 2 DÒNG RIÊNG trong DB (khoá UNIQUE có cột
+    he_thong nên không tự loại nhau). Nếu không gộp lại ở đây, mọi báo cáo
+    tổng hợp (Excel, tờ khai GTGT, Tạm tính VAT, danh sách hóa đơn) sẽ ĐẾM/
+    TÍNH TIỀN GẤP ĐÔI cho đúng các hóa đơn này — người dùng đã phát hiện qua
+    file Excel kết xuất bị liệt kê trùng lặp.
+    Giữ lại dòng có 'ttxly' trong raw (đầy đủ thông tin xử lý hơn); nếu cả
+    2 dòng đều có/đều không có ttxly thì giữ dòng gặp trước. Nhận list các
+    sqlite3.Row, trả về list đã lọc, GIỮ NGUYÊN thứ tự ban đầu."""
+    def _co_ttxly(r):
+        try:
+            raw = json.loads(r["raw"]) if r["raw"] else {}
+        except Exception:
+            raw = {}
+        return bool(str(raw.get("ttxly", "") or "").strip())
+
+    best = {}
+    for r in rows:
+        key = (str(r["nbmst"] or ""), str(r["khmshdon"] or ""),
+               str(r["khhdon"] or ""), str(r["shdon"] or ""), r["loai"])
+        if key not in best:
+            best[key] = r
+        elif _co_ttxly(r) and not _co_ttxly(best[key]):
+            best[key] = r
+    giu_lai = {id(r) for r in best.values()}
+    return [r for r in rows if id(r) in giu_lai]
+
+
 def _save_invoice_files(folder, base, zip_bytes):
     """
     Lưu file invoice.zip do TCT trả về, đồng thời giải nén lấy
@@ -6011,6 +6042,7 @@ def get_invoices(cid: int, loai: Optional[str] = None):
             "SELECT * FROM invoices WHERE company_id=? ORDER BY tdlap DESC",
             (cid,)).fetchall()
     conn.close()
+    rows = _gop_hoa_don_trung_he_thong(rows)
     out = []
     for r in rows:
         d = dict(r)
@@ -12449,7 +12481,8 @@ def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
     """
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
-    rows = conn.execute("SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall()
+    rows = _gop_hoa_don_trung_he_thong(
+        conn.execute("SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall())
     if not comp:
         conn.close()
         raise HTTPException(404, "Không tìm thấy công ty")
@@ -12577,7 +12610,8 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     import html as _html
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
-    rows = conn.execute("SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall()
+    rows = _gop_hoa_don_trung_he_thong(
+        conn.execute("SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall())
     if not comp:
         conn.close()
         raise HTTPException(404, "Không tìm thấy công ty")
@@ -13337,9 +13371,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
 
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
-    rows = conn.execute(
+    rows = _gop_hoa_don_trung_he_thong(conn.execute(
         "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
-        (cid,)).fetchall()
+        (cid,)).fetchall())
 
     # ===== NẠP TRƯỚC CHI TIẾT SONG SONG (tăng tốc xuất Excel) =====
     # Chỉ nạp hóa đơn CHƯA có detail_json VÀ chưa có file đã tải (ƯU TIÊN TUYỆT ĐỐI
@@ -13575,9 +13609,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 _tlog("đã lấy đủ chi tiết cho toàn bộ hóa đơn còn thiếu ở lượt cuối")
 
     # đọc lại rows để có detail_json mới nhất (từ các lượt nạp mạng ở trên)
-    rows = conn.execute(
+    rows = _gop_hoa_don_trung_he_thong(conn.execute(
         "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
-        (cid,)).fetchall()
+        (cid,)).fetchall())
     conn.close()
     _tlog(f"xong nap chi tiet ({len(rows)} hoa don) -> bat dau dung sheet")
 
@@ -15478,6 +15512,7 @@ def invoices_html_zip(cid: int, loai: Optional[str] = None):
             "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
             (cid,)).fetchall()
     conn.close()
+    rows = _gop_hoa_don_trung_he_thong(rows)
 
     if not rows:
         raise HTTPException(404, "Chưa có hóa đơn nào để xuất")
