@@ -325,27 +325,24 @@ class GDTClient:
         total_expected = 0
         loi_tich_luy = []   # gom LỖI THẬT SỰ (đã thử lại vẫn lỗi) qua các tháng/trạng thái
         cac_doan_loi = []   # {"tu","den","ttxly"} — để RETRY ĐÚNG đoạn này ở lượt sau
+        khoa = threading.Lock()  # bảo vệ các biến gộp kết quả ở trên khi nhiều luồng ghi cùng lúc
 
-        if chi_cac_doan:
-            # ----- CHỈ dò lại các đoạn cụ thể đã lỗi ở lượt trước -----
-            for doan in chi_cac_doan:
-                s_from, s_to, ttxly = doan["tu"], doan["den"], doan.get("ttxly")
-                if progress:
-                    progress(f"đang dò lại đoạn lỗi trước đó {s_from} → {s_to}...")
-                self._last_total = 0
-                self._loi_rieng_phan = []
-                self._ttxly_that_bai_phan = []
-                # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
-                self._ttxly_can_do_lai = (ttxly,) if ttxly is not None else None
-                try:
-                    chunk = self._query_one_range(s_from, s_to, loai, page_size, he_thong,
-                                                  progress=progress)
-                finally:
-                    self._ttxly_can_do_lai = None
-                total_expected += getattr(self, "_last_total", 0) or 0
-                for loi in (getattr(self, "_loi_rieng_phan", None) or []):
+        # Số đoạn/tháng xử lý ĐỒNG THỜI — máy tính tiền dùng mức THẤP hơn (hệ
+        # thống dễ quá tải hơn, xem MTT_SONG_SONG_TOI_DA), hóa đơn điện tử
+        # thường cao hơn (hệ thống ổn định hơn). Nhờ chạy song song, nếu 1
+        # tháng đang bị lỗi máy chủ (502/504, phải chờ thử lại nhiều lần) thì
+        # CÁC THÁNG KHÁC vẫn được xử lý cùng lúc — không phải xếp hàng chờ
+        # đúng tháng đó xong rồi mới tới tháng tiếp theo như trước đây.
+        so_luong_song_song = MTT_SONG_SONG_TOI_DA if he_thong == "sco-query" else 4
+
+        def _gop(s_from, s_to, ket_qua):
+            chunk, total, loi_rieng, ttxly_that_bai = ket_qua
+            with khoa:
+                nonlocal total_expected
+                total_expected += total or 0
+                for loi in loi_rieng:
                     loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
-                for t in (getattr(self, "_ttxly_that_bai_phan", None) or []):
+                for t in ttxly_that_bai:
                     cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": t})
                 for inv in chunk:
                     key = (inv.get("khmshdon"), inv.get("khhdon"),
@@ -353,6 +350,24 @@ class GDTClient:
                     if key not in seen:
                         seen.add(key)
                         all_results.append(inv)
+
+        if chi_cac_doan:
+            # ----- CHỈ dò lại các đoạn cụ thể đã lỗi ở lượt trước -----
+            def _xu_ly_doan(doan):
+                s_from, s_to, ttxly = doan["tu"], doan["den"], doan.get("ttxly")
+                if progress:
+                    progress(f"đang dò lại đoạn lỗi trước đó {s_from} → {s_to}...")
+                # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
+                ttxly_can_do = (ttxly,) if ttxly is not None else None
+                return s_from, s_to, self._query_one_range(
+                    s_from, s_to, loai, page_size, he_thong,
+                    progress=progress, ttxly_can_do=ttxly_can_do)
+
+            with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
+                futs = [ex.submit(_xu_ly_doan, doan) for doan in chi_cac_doan]
+                for fut in _cf.as_completed(futs):
+                    s_from, s_to, ket_qua = fut.result()
+                    _gop(s_from, s_to, ket_qua)
             self.last_query_total = total_expected
             self.last_query_got = len(all_results)
             self.last_query_errors = loi_tich_luy
@@ -364,71 +379,60 @@ class GDTClient:
         if d_from > d_to:
             d_from, d_to = d_to, d_from
 
-        # ===== ĐẾM NHANH TOÀN KỲ trước khi dò từng tháng =====
-        # Nhiều công ty KHÔNG dùng hóa đơn máy tính tiền (sco-query) — trước đây
-        # vẫn dò từng tháng × 3 trạng thái (mua vào), mỗi lần gọi 1 request tới
-        # hệ thống sco-query vốn phản hồi rất chậm, dù kết quả luôn = 0. Với cả
-        # năm (12 tháng) đây là hàng chục request chờ vô ích. Nay gọi ĐẾM NHANH
-        # 1 phát cho TOÀN khoảng ngày: nếu tổng = 0 -> bỏ qua luôn, khỏi dò.
-        try:
-            if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress):
-                self.last_query_total = 0
-                self.last_query_got = 0
-                self.last_query_errors = []
-                self.last_failed_chunks = []
-                if progress:
-                    progress("kỳ này không có hóa đơn — bỏ qua nhanh")
-                return []
-        except Exception as e:
-            if "TOKEN_EXPIRED" in str(e):
-                raise
-            # lỗi khác khi đếm nhanh -> KHÔNG bỏ qua, dò đầy đủ như cũ cho an toàn
+        # ===== ĐẾM NHANH TOÀN KỲ trước khi dò từng tháng (CHỈ hóa đơn điện tử
+        # thường — KHÔNG áp dụng máy tính tiền nữa, theo yêu cầu) =====
+        # Nhiều công ty KHÔNG dùng hóa đơn máy tính tiền, nhưng với công ty CÓ
+        # dùng (phát sinh hầu hết các tháng) thì bước đếm nhanh này KHÔNG BAO
+        # GIỜ bỏ qua được gì — mà hệ thống máy tính tiền vốn hay chậm/lỗi vặt
+        # (502/504) khiến NGAY CẢ bước "đếm nhanh" (đáng lẽ nhẹ) cũng hiện lỗi
+        # thử lại liên tục, gây cảm giác "kiểm tra" cũng lâu không kém tải
+        # thật. Với hóa đơn điện tử thường (hệ thống ổn định hơn) vẫn giữ bước
+        # này vì rẻ và vẫn có ích khi công ty thật sự không có hóa đơn nào.
+        if he_thong != "sco-query":
+            try:
+                if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress):
+                    self.last_query_total = 0
+                    self.last_query_got = 0
+                    self.last_query_errors = []
+                    self.last_failed_chunks = []
+                    if progress:
+                        progress("kỳ này không có hóa đơn — bỏ qua nhanh")
+                    return []
+            except Exception as e:
+                if "TOKEN_EXPIRED" in str(e):
+                    raise
+                # lỗi khác khi đếm nhanh -> KHÔNG bỏ qua, dò đầy đủ như cũ cho an toàn
 
+        # Tính SẴN toàn bộ các đoạn tháng cần dò (thay vì dò tuần tự từng
+        # tháng một) — để có thể XỬ LÝ SONG SONG NHIỀU THÁNG CÙNG LÚC ngay
+        # bên dưới: nếu 1 tháng đang bị lỗi máy chủ (502/504, đang chờ thử
+        # lại) thì các tháng KHÁC vẫn tiếp tục chạy, không phải xếp hàng chờ
+        # đúng tháng đó xong xuôi mới bắt đầu tháng tiếp theo (khác hẳn trước
+        # đây: hoàn toàn tuần tự, 1 tháng bị kẹt là mọi tháng sau đều phải đợi).
+        cac_thang = []
         cur = d_from
         while cur <= d_to:
-            # cuối tháng hiện tại
             if cur.month == 12:
                 month_end = datetime.date(cur.year, 12, 31)
             else:
                 month_end = datetime.date(cur.year, cur.month + 1, 1) - datetime.timedelta(days=1)
             chunk_end = min(month_end, d_to)
+            cac_thang.append((cur.strftime("%d/%m/%Y"), chunk_end.strftime("%d/%m/%Y")))
+            cur = chunk_end + datetime.timedelta(days=1)
 
-            s_from = cur.strftime("%d/%m/%Y")
-            s_to = chunk_end.strftime("%d/%m/%Y")
+        def _xu_ly_thang(s_from, s_to):
             if progress:
                 progress(f"đang tải {s_from} → {s_to}...")
+            return s_from, s_to, self._query_one_range(
+                s_from, s_to, loai, page_size, he_thong, progress=progress)
 
-            # KHÔNG đếm nhanh THÊM cho từng tháng nữa (đã bỏ) — với công ty CÓ
-            # phát sinh máy tính tiền hầu hết các tháng (rất phổ biến), đếm
-            # nhanh riêng từng tháng KHÔNG BAO GIỜ bỏ qua được gì (luôn có dữ
-            # liệu) mà vẫn tốn thêm request riêng, đúng lúc hệ thống máy tính
-            # tiền đang chậm/lỗi mạng vặt thì phần thêm này lại càng lộ rõ,
-            # khiến người dùng thấy "kiểm tra nhanh" cũng lâu không kém tải
-            # thật. Đếm nhanh TOÀN KỲ (1 lần duy nhất, ở đầu hàm) vẫn còn —
-            # đủ để xử lý tốt trường hợp phổ biến nhất: công ty KHÔNG hề dùng
-            # máy tính tiền (bỏ qua cả kỳ ngay từ đầu, không tốn thêm gì).
-            self._last_total = 0
-            self._loi_rieng_phan = []
-            self._ttxly_that_bai_phan = []
-            chunk = self._query_one_range(s_from, s_to, loai, page_size, he_thong,
-                                          progress=progress)
-            total_expected += getattr(self, "_last_total", 0) or 0
-            for loi in (getattr(self, "_loi_rieng_phan", None) or []):
-                loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
-            for t in (getattr(self, "_ttxly_that_bai_phan", None) or []):
-                cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": t})
-            for inv in chunk:
-                key = (inv.get("khmshdon"), inv.get("khhdon"),
-                       inv.get("shdon"), inv.get("nbmst"))
-                if key not in seen:
-                    seen.add(key)
-                    all_results.append(inv)
-            # báo số tờ đã lấy lũy kế
-            if progress:
-                progress(f"đã lấy {len(all_results)} tờ (đến {s_to})")
-
-            cur = chunk_end + datetime.timedelta(days=1)
-            time.sleep(SP()["month"])  # nghỉ giữa các tháng
+        with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
+            futs = [ex.submit(_xu_ly_thang, s_from, s_to) for s_from, s_to in cac_thang]
+            for fut in _cf.as_completed(futs):
+                s_from, s_to, ket_qua = fut.result()
+                _gop(s_from, s_to, ket_qua)
+                if progress:
+                    progress(f"đã lấy {len(all_results)} tờ (đến {s_to})")
         # lưu tổng kỳ vọng để báo "đủ chưa"
         self.last_query_total = total_expected
         self.last_query_got = len(all_results)
@@ -473,13 +477,23 @@ class GDTClient:
             return tong == 0   # None (không chắc) -> False -> dò đầy đủ
 
     def _query_one_range(self, tu_ngay, den_ngay, loai="purchase",
-                         page_size=50, he_thong="query", progress=None):
+                         page_size=50, he_thong="query", progress=None,
+                         ttxly_can_do=None):
         """
         Tra cứu 1 khoảng ngày (<= 31 ngày).
         Khớp đúng cURL thật từ hoadondientu.gdt.gov.vn:
           HĐ điện tử : /api/query/invoices/{purchase,sold}
           HĐ máy tính tiền: /api/sco-query/invoices/{purchase,sold}
         Mua vào được phân theo trạng thái xử lý (ttxly): 5, 6, 8 -> gọi từng cái và gộp.
+        ttxly_can_do: khi RETRY 1 đoạn cụ thể, CHỈ dò đúng (các) trạng thái đã
+          lỗi trước đó (tuple số) thay vì mặc định cả 3.
+
+        Trả về TUPLE (results, total, loi_rieng_phan, ttxly_that_bai_phan) —
+        KHÔNG còn ghi qua self._last_total/self._loi_rieng_phan/... (thuộc
+        tính instance) nữa, vì hàm này có thể được gọi ĐỒNG THỜI từ nhiều
+        luồng khác nhau (nhiều tháng/đoạn chạy song song) trên CÙNG 1 client
+        — ghi qua thuộc tính chung sẽ bị luồng khác ghi đè/đọc nhầm giữa
+        chừng (race condition). Trả về qua giá trị hàm thì an toàn tuyệt đối.
         """
         base = f"https://hoadondientu.gdt.gov.vn/api/{he_thong}"
         is_mtt = (he_thong == "sco-query")
@@ -506,10 +520,7 @@ class GDTClient:
             action = "Tìm kiếm (hóa đơn %smua vào)" % ("máy tính tiền " if is_mtt else "")
             # Các trạng thái xử lý hóa đơn mua vào (mỗi cái là 1 lần gọi riêng):
             #   5 = tổng hợp/đã cấp mã, 6 = đã nhận không mã, 8 = HĐ có rủi ro...
-            # ttxly_can_dò: khi RETRY 1 đoạn cụ thể (xem chi_cac_doan ở
-            # query_invoices), CHỈ cần dò lại ĐÚNG trạng thái đã lỗi trước đó,
-            # không cần dò lại cả 3 trạng thái (2 cái kia đã chắc chắn thành công).
-            ttxly_can_do = getattr(self, "_ttxly_can_do_lai", None) or (5, 6, 8)
+            ttxly_can_do = ttxly_can_do or (5, 6, 8)
             results = []
             seen = set()
             total_all = 0
@@ -539,10 +550,7 @@ class GDTClient:
                         seen.add(key)
                         results.append(inv)
                 time.sleep(SP()["status"])  # nghỉ giữa các trạng thái
-            self._last_total = total_all
-            self._loi_rieng_phan = loi_trang_thai
-            self._ttxly_that_bai_phan = ttxly_that_bai
-            return results
+            return results, total_all, loi_trang_thai, ttxly_that_bai
         else:
             url = f"{base}/invoices/sold"
             action = "Tìm kiếm (hóa đơn %sbán ra)" % ("máy tính tiền " if is_mtt else "")
@@ -555,17 +563,12 @@ class GDTClient:
             try:
                 results, total = _thu_lai(lambda: self._fetch_paginated(
                     url, date_filter, action, page_size, want_total=True, progress=progress))
-                self._last_total = total  # lưu để báo lên
-                self._loi_rieng_phan = []
-                self._ttxly_that_bai_phan = []
+                return results, total, [], []
             except Exception as e:
                 if "TOKEN_EXPIRED" in str(e):
                     raise
-                self._last_total = 0
-                self._loi_rieng_phan = [str(e)[:120]]
-                self._ttxly_that_bai_phan = [None]   # sold không có ttxly -> đánh dấu cả tháng lỗi
-                results = []
-            return results
+                # sold không có ttxly -> đánh dấu cả tháng lỗi (ttxly=None)
+                return [], 0, [str(e)[:120]], [None]
 
     def _dem_tong_nhanh(self, url, search, action, progress=None):
         """ĐẾM NHANH tổng số hóa đơn của 1 truy vấn — chỉ gọi 1 trang size=1 để
