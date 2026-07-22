@@ -5063,8 +5063,12 @@ def _run_fetch_job(cid: int, body: dict):
                             # Xin phép qua limiter trước khi THỰC SỰ gọi mạng — cho
                             # phép người dùng CHỈNH số luồng đồng thời ngay trong lúc
                             # đang tải (xem set_limit ở endpoint /api/fetch-song-song),
-                            # không cần dừng lại/chạy lại từ đầu.
-                            limiter = (FETCH_JOBS.get(cid) or {}).get("limiter")
+                            # không cần dừng lại/chạy lại từ đầu. Máy tính tiền dùng
+                            # limiter RIÊNG, trần thấp cố định (không theo thanh trượt
+                            # chung) — hệ thống này dễ quá tải hơn, tránh dồn thêm tải.
+                            _job_ct = FETCH_JOBS.get(cid) or {}
+                            limiter = _job_ct.get("limiter_mtt") if he_thong == "sco-query" \
+                                else _job_ct.get("limiter")
                             if limiter:
                                 limiter.acquire()
                             try:
@@ -5349,10 +5353,19 @@ class DynamicLimiter:
             self._cond.notify_all()
 
 
+MTT_SONG_SONG_TOI_DA = 3  # trần riêng, THẤP HƠN hẳn, cho tải file máy tính
+# tiền — hệ thống này đã biết là kém ổn định/dễ quá tải (hay gặp 502/504) hơn
+# hẳn hóa đơn điện tử thường; dồn cùng mức đồng thời cao (thanh trượt người
+# dùng chỉnh, có thể tới 32) vào đúng hệ thống yếu này dễ khiến nó CÀNG quá
+# tải hơn, sinh thêm lỗi — nên tách riêng, không phụ thuộc thanh trượt chung
+# (thanh trượt vẫn áp dụng đầy đủ cho hóa đơn điện tử thường).
+
+
 def _new_fetch_job():
     return {"messages": [], "last": None, "running": True,
             "cursor": 0, "started": time.time(), "cancel": False,
-            "limiter": DynamicLimiter(SP().get("song_song", 4))}
+            "limiter": DynamicLimiter(SP().get("song_song", 4)),
+            "limiter_mtt": DynamicLimiter(MTT_SONG_SONG_TOI_DA)}
 
 
 def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
