@@ -1946,6 +1946,11 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
                 cvalue=cval,
                 ckey=ckey,
             )
+            # "Hồi sinh" client sau khi đăng nhập lại thành công — nếu trước đó
+            # đã bị đánh dấu _token_dead=True (do gặp 401 lúc tải file/lấy chi
+            # tiết), phải RESET lại để các bước đó không tiếp tục bỏ qua mạng
+            # dù token đã hợp lệ trở lại.
+            client._token_dead = False
             return True, f"Đăng nhập tự động thành công (lần {lan})", lan, tried
         except Exception as e:
             last_err = str(e)
@@ -4887,6 +4892,11 @@ def _run_fetch_job(cid: int, body: dict):
             khoa_tonghop = threading.Lock()  # bảo vệ biến gộp khi các tổ hợp
             # (mua/bán × thường/máy tính tiền) chạy SONG SONG với nhau
             mtt_limiter_query = (FETCH_JOBS.get(cid) or {}).get("limiter_mtt_query")
+            # Chỉ cho phép 1 tổ hợp tự đăng nhập lại tại 1 thời điểm — 4 tổ hợp
+            # dùng CHUNG 1 client/token, nên nếu token hết hạn giữa chừng, CẢ 4
+            # có thể cùng phát hiện gần như đồng thời; không có khoá này sẽ có
+            # nhiều lượt tự giải captcha + đăng nhập chạy song song vô ích.
+            khoa_relogin = threading.Lock()
 
             def _xu_ly_to_hop(loai, he_thong):
                 # Mua vào/bán ra (cả 2 hệ thống) chạy SONG SONG với nhau —
@@ -4948,6 +4958,43 @@ def _run_fetch_job(cid: int, body: dict):
                         except Exception as e:
                             es = str(e)
                             if "TOKEN_EXPIRED" in es:
+                                # TỰ ĐỘNG đăng nhập lại (nếu công ty có lưu mật
+                                # khẩu) rồi thử lại tiếp, thay vì DỪNG NGAY bắt
+                                # người dùng tự bấm đăng nhập lại rồi tra cứu lại
+                                # từ đầu — phần mềm đã có sẵn cơ chế tự đăng
+                                # nhập (dùng cho tra cứu hàng loạt/xuất Excel),
+                                # chỉ là trước đây KHÔNG được áp dụng ở đây.
+                                conn_relog = db()
+                                comp_relog = conn_relog.execute(
+                                    "SELECT password FROM companies WHERE id=?", (cid,)).fetchone()
+                                conn_relog.close()
+                                if comp_relog and comp_relog["password"] and lan_thu < SO_LAN_THU - 1:
+                                    # Token CŨ (đã hết hạn) vẫn còn là 1 chuỗi
+                                    # KHÁC RỖNG bình thường — raise exception
+                                    # không tự xoá nó — nên KHÔNG thể chỉ kiểm
+                                    # tra "client.token có giá trị hay không" để
+                                    # biết đã được làm mới hay chưa. Phải SO
+                                    # SÁNH với giá trị token NGAY TRƯỚC lúc chờ
+                                    # khoá: nếu đã ĐỔI KHÁC, nghĩa là 1 tổ hợp
+                                    # khác vừa đăng nhập lại xong trong lúc chờ.
+                                    token_truoc_khi_cho = client.token
+                                    with khoa_relogin:
+                                        if client.token != token_truoc_khi_cho:
+                                            ok_dn = True
+                                        else:
+                                            msg(stage="warn",
+                                                text=f"⚠ {loai_txt}{ht_txt}: Token hết hạn giữa chừng — "
+                                                     f"đang tự động đăng nhập lại...")
+                                            ok_dn, tb_dn, _, _ = _tu_dong_dang_nhap(cid, so_lan=5)
+                                    if ok_dn:
+                                        msg(stage="info",
+                                            text=f"✓ {loai_txt}{ht_txt}: đã tự đăng nhập lại thành công, "
+                                                 f"đang tiếp tục tra cứu...")
+                                        continue
+                                    msg(stage="error",
+                                        text=f"Token hết hạn — tự đăng nhập lại thất bại ({tb_dn}), "
+                                             f"cần đăng nhập lại thủ công")
+                                    return
                                 msg(stage="error", text="Token hết hạn, cần đăng nhập lại")
                                 return
                             if he_thong == "sco-query" and "404" in es:
