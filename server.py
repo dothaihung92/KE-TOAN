@@ -1197,15 +1197,6 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN ma_cqt_noi_nop TEXT")
     if "ten_cqt_noi_nop" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN ten_cqt_noi_nop TEXT")
-    if "ma_xa_nnt" not in ccols:
-        # Mã/tên phường-xã của trụ sở — dùng cho tờ khai 05/KK-TNCN (thẻ
-        # maXaNNT/tenXaNNT). Trước đây KHÔNG có trường này nên file XML luôn
-        # dùng giá trị MẪU cứng trong template (vd "Phường Tân Thuận" mã
-        # 70113080), SAI với thực tế của từng công ty — người dùng phát hiện
-        # khi so sánh với file HTKK thật (đúng phường/xã) xuất trực tiếp.
-        conn.execute("ALTER TABLE companies ADD COLUMN ma_xa_nnt TEXT")
-    if "ten_xa_nnt" not in ccols:
-        conn.execute("ALTER TABLE companies ADD COLUMN ten_xa_nnt TEXT")
     if "luu_ket_xuat_mac_dinh" not in ccols:
         # Ghi nhớ trạng thái tick "Lưu file kết xuất" theo TỪNG CÔNG TY — trước
         # đây ô tick này chỉ là trạng thái tạm trên giao diện (mất khi đổi công
@@ -1458,7 +1449,7 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, ma_xa_nnt, ten_xa_nnt, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
@@ -1468,8 +1459,6 @@ def add_company(data: dict = Body(...)):
          (data.get("dia_chi") or "").strip(),
          (data.get("ma_cqt_noi_nop") or "").strip(),
          (data.get("ten_cqt_noi_nop") or "").strip(),
-         (data.get("ma_xa_nnt") or "").strip(),
-         (data.get("ten_xa_nnt") or "").strip(),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -1490,7 +1479,7 @@ def update_company(cid: int, data: dict = Body(...)):
     # Nếu password để trống -> GIỮ password cũ (không xóa)
     cur = conn.execute(
         "SELECT password, dvc_password, dvc_password2, dia_chi, ma_cqt_noi_nop, "
-        "ten_cqt_noi_nop, ma_xa_nnt, ten_xa_nnt FROM companies WHERE id=?", (cid,)).fetchone()
+        "ten_cqt_noi_nop FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
@@ -1516,20 +1505,14 @@ def update_company(cid: int, data: dict = Body(...)):
     ten_cqt = (data.get("ten_cqt_noi_nop") or "").strip()
     if not ten_cqt:
         ten_cqt = (cur["ten_cqt_noi_nop"] if cur and "ten_cqt_noi_nop" in cur.keys() else "") or ""
-    ma_xa = (data.get("ma_xa_nnt") or "").strip()
-    if not ma_xa:
-        ma_xa = (cur["ma_xa_nnt"] if cur and "ma_xa_nnt" in cur.keys() else "") or ""
-    ten_xa = (data.get("ten_xa_nnt") or "").strip()
-    if not ten_xa:
-        ten_xa = (cur["ten_xa_nnt"] if cur and "ten_xa_nnt" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, ma_xa_nnt=?, ten_xa_nnt=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
          dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
-         dia_chi, ma_cqt, ten_cqt, ma_xa, ten_xa, cid)
+         dia_chi, ma_cqt, ten_cqt, cid)
     )
     conn.commit()
     conn.close()
@@ -6190,9 +6173,7 @@ def _mo_ta_ket_qua(ttxly):
 _CONGTY_COT = [
     ("Tên công ty", "ten"), ("MST", "mst"), ("MST khác", "mst_khac"),
     ("Địa chỉ trụ sở", "dia_chi"), ("Mã CQT nơi nộp", "ma_cqt_noi_nop"),
-    ("Tên CQT nơi nộp", "ten_cqt_noi_nop"),
-    ("Mã phường xã", "ma_xa_nnt"), ("Tên phường xã", "ten_xa_nnt"),
-    ("Tên đăng nhập", "username"),
+    ("Tên CQT nơi nộp", "ten_cqt_noi_nop"), ("Tên đăng nhập", "username"),
     ("Mật khẩu", "password"), ("Mật khẩu Dịch vụ công 1", "dvc_password"),
     ("Mật khẩu Dịch vụ công 2", "dvc_password2"), ("Ghi chú", "ghichu"),
     ("Thư mục lưu XML/PDF", "save_dir"), ("Thư mục lưu dữ liệu", "data_dir"),
@@ -6282,12 +6263,11 @@ async def import_companies(request: Request):
             try:
                 conn.execute(
                     "UPDATE companies SET ten=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, "
-                    "ten_cqt_noi_nop=?, ma_xa_nnt=?, ten_xa_nnt=?, username=?, password=?, dvc_password=?, "
+                    "ten_cqt_noi_nop=?, username=?, password=?, dvc_password=?, "
                     "dvc_password2=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, nguoi_ky=? "
                     "WHERE id=?",
                     (gia_tri["ten"], gia_tri["mst_khac"], gia_tri["dia_chi"],
-                     gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"],
-                     gia_tri["ma_xa_nnt"], gia_tri["ten_xa_nnt"], gia_tri["username"],
+                     gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"], gia_tri["username"],
                      gia_tri["password"], gia_tri["dvc_password"], gia_tri["dvc_password2"],
                      gia_tri["ghichu"], gia_tri["save_dir"], gia_tri["data_dir"],
                      gia_tri["export_dir"], gia_tri["nguoi_ky"], dupd["id"]))
@@ -6298,12 +6278,11 @@ async def import_companies(request: Request):
         try:
             conn.execute(
                 "INSERT INTO companies (ten, mst, mst_khac, dia_chi, ma_cqt_noi_nop, "
-                "ten_cqt_noi_nop, ma_xa_nnt, ten_xa_nnt, username, password, dvc_password, dvc_password2, "
+                "ten_cqt_noi_nop, username, password, dvc_password, dvc_password2, "
                 "ghichu, save_dir, data_dir, export_dir, nguoi_ky, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (gia_tri["ten"], gia_tri["mst"], gia_tri["mst_khac"], gia_tri["dia_chi"],
-                 gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"],
-                 gia_tri["ma_xa_nnt"], gia_tri["ten_xa_nnt"], gia_tri["username"],
+                 gia_tri["ma_cqt_noi_nop"], gia_tri["ten_cqt_noi_nop"], gia_tri["username"],
                  gia_tri["password"], gia_tri["dvc_password"], gia_tri["dvc_password2"],
                  gia_tri["ghichu"], gia_tri["save_dir"], gia_tri["data_dir"],
                  gia_tri["export_dir"], gia_tri["nguoi_ky"], datetime.datetime.now().isoformat()))
@@ -13244,20 +13223,14 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
     else:
         canh_bao_cqt.append("tên CQT nơi nộp")
     # maXaNNT/tenXaNNT (phường/xã trụ sở): template mẫu có sẵn giá trị CỨNG
-    # (copy từ 1 công ty mẫu khi tạo template) — nếu không ghi đè theo đúng
-    # từng công ty, MỌI công ty sẽ bị SAI phường/xã (đã phát hiện qua so
-    # sánh với file HTKK thật xuất trực tiếp: phần mềm luôn ghi "Phường Tân
-    # Thuận" mã 70113080 dù công ty thực tế ở phường/xã khác).
-    ma_xa = (comp["ma_xa_nnt"] if "ma_xa_nnt" in comp.keys() else "") or ""
-    ten_xa = (comp["ten_xa_nnt"] if "ten_xa_nnt" in comp.keys() else "") or ""
-    if ma_xa:
-        xml = set_tag(xml, "maXaNNT", esc(ma_xa))
-    else:
-        canh_bao_cqt.append("mã phường/xã")
-    if ten_xa:
-        xml = set_tag(xml, "tenXaNNT", esc(ten_xa))
-    else:
-        canh_bao_cqt.append("tên phường/xã")
+    # (copy từ 1 công ty mẫu khi tạo template) — theo yêu cầu, KHÔNG tạo
+    # thêm trường khai báo riêng cho phường/xã, mà dùng LUÔN mã/tên CQT nơi
+    # nộp đã khai báo sẵn (cùng 1 nơi với maCQTNoiNop/tenCQTNoiNop ở trên)
+    # để tránh còn sót giá trị mẫu sai của công ty khác.
+    if ma_cqt:
+        xml = set_tag(xml, "maXaNNT", esc(ma_cqt))
+    if ten_cqt:
+        xml = set_tag(xml, "tenXaNNT", esc(ten_cqt))
     if nguoi_ky:
         xml = set_tag(xml, "nguoiKy", esc(nguoi_ky))
         xml = set_tag(xml, "ngayKy", homnay.isoformat())
