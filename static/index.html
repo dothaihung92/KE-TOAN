@@ -475,57 +475,60 @@
   <div class="modal" style="width:min(880px,96vw);max-width:880px;max-height:92vh;display:flex;flex-direction:column">
     <h3 style="margin-top:0">📤 Tự động nộp tờ khai</h3>
     <div style="overflow:auto;flex:1;padding-right:4px">
-    <p class="hint" style="margin-top:0">
-      Phần mềm tự đăng nhập, tự chọn đúng tờ khai và tự tải file XML (khớp theo MST) lên
-      cổng Dịch vụ công — file được tìm <b>ưu tiên trong "Thư mục lưu file kết xuất" RIÊNG của
-      từng công ty</b> (theo đúng Năm/Quý đã chọn bên dưới, nếu công ty đã cấu hình trong "Sửa
-      công ty"), công ty nào chưa cấu hình thì mới dùng <b>thư mục mặc định</b> dùng chung. Có
-      thể bấm thêm <b>"🖊️ Tự bấm Ký hồ sơ"</b> để phần mềm tự chọn chứng thư số giúp — nhưng
-      <b>DỪNG LẠI ngay trước khi nhập mã PIN</b>, vì bước đó cần token vật lý/mã PIN thật của
-      bạn. Bạn tự nhập PIN và tự bấm <b>"Nộp tờ khai"</b> — phần mềm không tự ký/nộp, đây là
-      hành động nộp thuế chính thức. Xong 1 tờ khai, bấm nút <b>"Tôi đã nộp — Kiểm tra &amp;
-      tiếp tục"</b> để phần mềm <b>tra cứu lại trên cổng Thuế xác nhận thật sự đã được chấp
-      nhận</b> rồi mới đánh dấu xanh và tự chuyển sang tờ khai/công ty tiếp theo — không đánh
-      dấu "đã nộp" chỉ vì đã tải file lên.
-    </p>
+    <details style="margin-bottom:10px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:13.5px;font-weight:600">ℹ️ Xem hướng dẫn sử dụng</summary>
+      <p class="hint" style="margin-top:6px">
+        Phần mềm tự đăng nhập, tự chọn đúng tờ khai và tự tải file XML (khớp theo MST) lên
+        cổng Dịch vụ công — file được tìm <b>ưu tiên trong "Thư mục lưu file kết xuất" RIÊNG của
+        từng công ty</b> (theo đúng Năm/Quý đã chọn bên dưới, nếu công ty đã cấu hình trong "Sửa
+        công ty"), công ty nào chưa cấu hình thì mới dùng <b>thư mục mặc định</b> dùng chung. Có
+        thể bấm thêm <b>"🖊️ Tự bấm Ký hồ sơ"</b> để phần mềm tự chọn chứng thư số giúp — nhưng
+        <b>DỪNG LẠI ngay trước khi nhập mã PIN</b>, vì bước đó cần token vật lý/mã PIN thật của
+        bạn. Bạn tự nhập PIN và tự bấm <b>"Nộp tờ khai"</b> — phần mềm không tự ký/nộp, đây là
+        hành động nộp thuế chính thức. Xong 1 tờ khai, bấm nút <b>"Tôi đã nộp — Kiểm tra &amp;
+        tiếp tục"</b> để phần mềm <b>tra cứu lại trên cổng Thuế xác nhận thật sự đã được chấp
+        nhận</b> rồi mới đánh dấu xanh và tự chuyển sang tờ khai/công ty tiếp theo — không đánh
+        dấu "đã nộp" chỉ vì đã tải file lên.
+      </p>
+    </details>
     <div class="field">
-      <label>Kỳ nộp</label>
+      <label style="font-size:15px">Kỳ nộp</label>
       <div style="display:flex;gap:8px">
-        <select id="ntkQuy" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
+        <select id="ntkQuy" style="flex:1;padding:10px;font-size:14.5px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
           <option value="1">Quý 1</option>
           <option value="2">Quý 2</option>
           <option value="3">Quý 3</option>
           <option value="4">Quý 4</option>
         </select>
-        <input id="ntkNam" type="number" placeholder="Năm" style="width:110px;padding:8px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
+        <input id="ntkNam" type="number" placeholder="Năm" style="width:120px;padding:10px;font-size:14.5px;border:1px solid var(--line);border-radius:8px" onchange="ntkKyChange()">
       </div>
     </div>
     <div class="field">
-      <label>Thư mục mặc định <span style="font-weight:400;color:var(--muted)">(dùng cho công ty CHƯA cấu hình "Thư mục lưu file kết xuất" riêng)</span></label>
+      <label style="font-size:15px">Thư mục mặc định <span style="font-weight:400;color:var(--muted);font-size:13px">(dùng cho công ty CHƯA cấu hình "Thư mục lưu file kết xuất" riêng)</span></label>
       <div style="display:flex;gap:8px">
-        <input id="ntkThuMuc" placeholder="VD: D:\ToKhaiCanNop" style="flex:1">
+        <input id="ntkThuMuc" placeholder="VD: D:\ToKhaiCanNop" style="flex:1;padding:10px;font-size:14.5px">
         <button class="btn ghost" onclick="ntkLuuThuMuc()">Lưu</button>
       </div>
     </div>
     <div class="field">
-      <label style="display:flex;justify-content:space-between;align-items:center">
+      <label style="display:flex;justify-content:space-between;align-items:center;font-size:15px">
         <span>Công ty</span>
         <span style="font-weight:400">
-          <a href="#" onclick="ntkChonTatCa(true);return false" style="font-size:13px">Chọn tất cả (đang hiện)</a> ·
-          <a href="#" onclick="ntkChonTatCa(false);return false" style="font-size:13px">Bỏ chọn</a> ·
-          <a href="#" onclick="ntkResetTatCa();return false" style="font-size:13px;color:#b91c1c">Bỏ hết trạng thái đã nộp (kỳ mới)</a>
+          <a href="#" onclick="ntkChonTatCa(true);return false" style="font-size:13.5px">Chọn tất cả (đang hiện)</a> ·
+          <a href="#" onclick="ntkChonTatCa(false);return false" style="font-size:13.5px">Bỏ chọn</a> ·
+          <a href="#" onclick="ntkResetTatCa();return false" style="font-size:13.5px;color:#b91c1c">Bỏ hết trạng thái đã nộp (kỳ mới)</a>
         </span>
       </label>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <input id="ntkSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="ntkRenderCtyList()" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px">
-        <select id="ntkLoc" onchange="ntkRenderCtyList()" style="padding:8px;border:1px solid var(--line);border-radius:8px">
+        <input id="ntkSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="ntkRenderCtyList()" style="flex:1;padding:10px;font-size:14.5px;border:1px solid var(--line);border-radius:8px">
+        <select id="ntkLoc" onchange="ntkRenderCtyList()" style="padding:10px;font-size:14.5px;border:1px solid var(--line);border-radius:8px">
           <option value="tatca">Tất cả</option>
           <option value="chuanop">Chưa nộp</option>
           <option value="danop">Đã nộp</option>
         </select>
       </div>
-      <div id="ntkCtyList" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
-      <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
+      <div id="ntkCtyList" style="max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
+      <div style="font-size:13px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
     </div>
     <div id="ntkKetQua" style="display:none;margin-top:8px;border-radius:10px;padding:12px 14px;font-size:13px"></div>
     </div>
