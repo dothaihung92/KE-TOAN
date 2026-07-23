@@ -35,7 +35,7 @@
   .sidebar ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
 
   /* ===== Sidebar layout ===== */
-  .app{display:grid;grid-template-columns:400px 1fr;min-height:100vh}
+  .app{display:grid;grid-template-columns:480px 1fr;min-height:100vh}
   .sidebar{
     background:linear-gradient(180deg,var(--green-d),#0f3527 100%);color:#e8f1ec;padding:0;
     display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
@@ -45,24 +45,24 @@
     display:flex;align-items:center;gap:12px}
   .brand .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--gold),#e0af52);
     display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;box-shadow:0 4px 12px rgba(0,0,0,.25)}
-  .brand h1{font-size:16.5px;font-weight:700;letter-spacing:-.2px;line-height:1.25}
-  .brand .sub{font-size:11px;color:#9cc0ad;margin-top:3px;letter-spacing:.4px;text-transform:uppercase;font-weight:600}
+  .brand h1{font-size:19px;font-weight:700;letter-spacing:-.2px;line-height:1.25}
+  .brand .sub{font-size:12.5px;color:#9cc0ad;margin-top:3px;letter-spacing:.4px;text-transform:uppercase;font-weight:600}
   .co-list{flex:1;overflow-y:auto;padding:12px}
-  .co-list .lbl{font-size:11px;color:#7faa8e;text-transform:uppercase;letter-spacing:.6px;padding:10px 10px 7px;font-weight:700}
+  .co-list .lbl{font-size:12.5px;color:#7faa8e;text-transform:uppercase;letter-spacing:.6px;padding:10px 10px 7px;font-weight:700}
   .co{
-    padding:10px 13px;border-radius:10px;cursor:pointer;margin-bottom:3px;
+    padding:12px 14px;border-radius:10px;cursor:pointer;margin-bottom:4px;
     transition:.16s var(--ease);border:1px solid transparent;position:relative;
   }
   .co:hover{background:rgba(255,255,255,.07);transform:translateX(1px)}
   .co.active{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.14);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
   .co.active::before{content:'';position:absolute;left:-1px;top:8px;bottom:8px;width:3px;border-radius:3px;
     background:linear-gradient(180deg,var(--gold),#e0af52)}
-  .co .nm{font-size:13.5px;font-weight:600;line-height:1.35;word-break:break-word}
-  .co .mst{font-size:11.5px;color:#9cc0ad;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .co .nm{font-size:15.5px;font-weight:600;line-height:1.4;word-break:break-word}
+  .co .mst{font-size:13.5px;color:#9cc0ad;margin-top:4px;font-variant-numeric:tabular-nums;white-space:normal;line-height:1.5}
   .co .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#5f7568;margin-right:6px}
   .co.online .dot{background:#5fd99a;box-shadow:0 0 7px #5fd99a}
-  .add-co{margin:8px;padding:11px;border:1.5px dashed rgba(255,255,255,.25);
-    border-radius:10px;color:#bcd6c7;text-align:center;cursor:pointer;font-size:13px;font-weight:600;transition:.16s var(--ease)}
+  .add-co{margin:8px;padding:12px;border:1.5px dashed rgba(255,255,255,.25);
+    border-radius:10px;color:#bcd6c7;text-align:center;cursor:pointer;font-size:14.5px;font-weight:600;transition:.16s var(--ease)}
   .add-co:hover{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.45);color:#fff}
   .sidebar-footer{padding:14px 18px 16px;border-top:1px solid rgba(255,255,255,.1);
     text-align:center}
@@ -204,7 +204,7 @@
     </div>
     <div style="padding:10px 12px 4px">
       <input id="coSearch" placeholder="🔍 Tìm công ty / MST..." oninput="loadCompanies()"
-             style="width:100%;padding:8px 10px;font-size:13px;border:1px solid rgba(255,255,255,.2);
+             style="width:100%;padding:10px 12px;font-size:14.5px;border:1px solid rgba(255,255,255,.2);
              border-radius:8px;background:rgba(255,255,255,.08);color:#e8f1ec">
     </div>
     <div class="co-list" id="coList">
@@ -212,25 +212,25 @@
     </div>
     <div class="add-co" onclick="openCompanyModal()">+ Thêm công ty</div>
     <div style="padding:0 12px 12px;display:flex;gap:8px">
-      <button class="btn ghost" style="flex:1;font-size:12px;padding:7px" onclick="document.getElementById('impCoFile').click()">📥 Import Excel</button>
-      <button class="btn ghost" style="flex:1;font-size:12px;padding:7px" onclick="taiMauCongTy()">📄 Tải mẫu</button>
-      <button class="btn ghost" style="flex:1;font-size:12px;padding:7px" onclick="exportCongTy()">📤 Export DS</button>
+      <button class="btn ghost" style="flex:1;font-size:13.5px;padding:8px" onclick="document.getElementById('impCoFile').click()">📥 Import Excel</button>
+      <button class="btn ghost" style="flex:1;font-size:13.5px;padding:8px" onclick="taiMauCongTy()">📄 Tải mẫu</button>
+      <button class="btn ghost" style="flex:1;font-size:13.5px;padding:8px" onclick="exportCongTy()">📤 Export DS</button>
       <input type="file" id="impCoFile" accept=".xlsx" style="display:none" onchange="importCongTy(this)">
     </div>
     <div style="padding:0 12px 8px">
-      <button class="btn" style="width:100%;font-size:12.5px;padding:9px;background:#0a7d4b;color:#fff" onclick="moDVCBatch()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
+      <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff" onclick="moDVCBatch()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
     </div>
     <div style="padding:0 12px 8px">
-      <button class="btn" style="width:100%;font-size:13px;padding:9px" onclick="openBatchModal()">🚀 Tra cứu hoá đơn hàng loạt</button>
+      <button class="btn" style="width:100%;font-size:14.5px;padding:10px" onclick="openBatchModal()">🚀 Tra cứu hoá đơn hàng loạt</button>
     </div>
     <div style="padding:0 12px 8px">
-      <button class="btn ghost" style="width:100%;font-size:12.5px;padding:9px" onclick="moNopToKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
+      <button class="btn ghost" style="width:100%;font-size:14px;padding:10px" onclick="moNopToKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
     </div>
     <div style="padding:0 12px 12px">
-      <button class="btn ghost" style="width:100%;font-size:12px;padding:7px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
+      <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
     </div>
     <div id="adminBtnWrap" style="display:none;padding:0 12px 8px">
-      <button class="btn gold" style="width:100%;font-size:12.5px;padding:9px" onclick="moAdminModal()">👑 Quản lý user</button>
+      <button class="btn gold" style="width:100%;font-size:14px;padding:10px" onclick="moAdminModal()">👑 Quản lý user</button>
     </div>
     <div id="licenseBar" style="display:none;padding:0 12px 10px">
       <div id="licenseBarInner" onclick="moLicenseModalGiaHan()"
@@ -1139,7 +1139,7 @@ async function loadCompanies(){
   });
   list.innerHTML='<div class="lbl">Danh sách công ty</div>';
   if(!shown.length){
-    list.innerHTML+='<div style="padding:14px;color:#7faa8e;font-size:13px;text-align:center">'+(q?'Không tìm thấy':'Chưa có công ty nào')+'</div>';
+    list.innerHTML+='<div style="padding:14px;color:#7faa8e;font-size:14px;text-align:center">'+(q?'Không tìm thấy':'Chưa có công ty nào')+'</div>';
   }
   shown.forEach(c=>{
     const d=document.createElement('div');
