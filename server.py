@@ -384,13 +384,14 @@ class GDTClient:
         cac_doan_loi = []   # {"tu","den","ttxly"} — để RETRY ĐÚNG đoạn này ở lượt sau
         khoa = threading.Lock()  # bảo vệ các biến gộp kết quả ở trên khi nhiều luồng ghi cùng lúc
 
-        # Số đoạn/tháng xử lý ĐỒNG THỜI — máy tính tiền dùng mức THẤP hơn (hệ
-        # thống dễ quá tải hơn, xem MTT_SONG_SONG_TOI_DA), hóa đơn điện tử
-        # thường cao hơn (hệ thống ổn định hơn). Nhờ chạy song song, nếu 1
-        # tháng đang bị lỗi máy chủ (502/504, phải chờ thử lại nhiều lần) thì
-        # CÁC THÁNG KHÁC vẫn được xử lý cùng lúc — không phải xếp hàng chờ
-        # đúng tháng đó xong rồi mới tới tháng tiếp theo như trước đây.
-        so_luong_song_song = MTT_SONG_SONG_TOI_DA if he_thong == "sco-query" else 4
+        # Số luồng THỰC SỰ thực thi cùng lúc trong ThreadPoolExecutor bên dưới
+        # — đây chỉ là TRẦN CỨNG (an toàn, không giới hạn thực tế), số luồng
+        # ĐANG THỰC SỰ chạy được quyết định bởi mtt_limiter (điều chỉnh được
+        # ngay trong lúc đang chạy qua /api/fetch-song-song-mtt) đối với máy
+        # tính tiền, giống hệt cách file tải dùng DynamicLimiter thay vì
+        # max_workers cố định. Hóa đơn điện tử thường không có limiter riêng
+        # cho bước tra cứu danh sách nên vẫn giữ mức cố định thấp hơn 1 chút.
+        so_luong_song_song = MTT_TRAN_CUNG_EXECUTOR if he_thong == "sco-query" else 4
 
         def _gop(s_from, s_to, ket_qua):
             chunk, total, loi_rieng, ttxly_that_bai = ket_qua
@@ -5614,12 +5615,14 @@ class DynamicLimiter:
             self._cond.notify_all()
 
 
-MTT_SONG_SONG_TOI_DA = 3  # trần riêng, THẤP HƠN hẳn, cho tải file máy tính
-# tiền — hệ thống này đã biết là kém ổn định/dễ quá tải (hay gặp 502/504) hơn
-# hẳn hóa đơn điện tử thường; dồn cùng mức đồng thời cao (thanh trượt người
-# dùng chỉnh, có thể tới 32) vào đúng hệ thống yếu này dễ khiến nó CÀNG quá
-# tải hơn, sinh thêm lỗi — nên tách riêng, không phụ thuộc thanh trượt chung
-# (thanh trượt vẫn áp dụng đầy đủ cho hóa đơn điện tử thường).
+MTT_SONG_SONG_TOI_DA = 3  # mức KHỞI ĐẦU (mặc định) — hệ thống máy tính tiền
+# đã biết là kém ổn định/dễ quá tải (hay gặp 502/504) hơn hẳn hóa đơn điện tử
+# thường, nên mặc định THẤP hơn hẳn mức chung. NHƯNG người dùng có thể tự
+# CHỈNH LÊN ngay trong lúc đang chạy (qua /api/fetch-song-song-mtt) nếu thấy
+# hệ thống MTT hôm đó vẫn ổn định ở mức cao hơn — không còn cố định cứng như
+# trước, tương tự thanh trượt chung cho hóa đơn điện tử thường.
+MTT_TRAN_CUNG_EXECUTOR = 16  # trần CỨNG (an toàn) cho ThreadPoolExecutor xử
+# lý tháng MTT — số luồng THỰC SỰ chạy đồng thời do mtt_limiter quyết định.
 
 
 def _new_fetch_job():
@@ -5632,7 +5635,8 @@ def _new_fetch_job():
             # mua vào (MTT) và bán ra (MTT) chạy SONG SONG với nhau (xem
             # _run_fetch_job), tổng số lượt tra cứu ĐANG THỰC SỰ gọi tới hệ
             # thống máy tính tiền của CẢ 2 loại cộng lại vẫn không vượt quá
-            # mức an toàn cố định này.
+            # mức hiện tại của limiter này — CẢ 2 limiter MTT được chỉnh
+            # CÙNG LÚC bởi /api/fetch-song-song-mtt (1 nút chỉnh chung).
             "limiter_mtt_query": DynamicLimiter(MTT_SONG_SONG_TOI_DA)}
 
 
@@ -6070,6 +6074,22 @@ def fetch_set_song_song(cid: int, body: dict = Body(...)):
     if not job or not job.get("limiter"):
         raise HTTPException(404, "Không có tiến trình tra cứu/tải file nào đang chạy cho công ty này")
     job["limiter"].set_limit(n)
+    return {"ok": True, "n": n}
+
+
+@app.post("/api/fetch-song-song-mtt/{cid}")
+def fetch_set_song_song_mtt(cid: int, body: dict = Body(...)):
+    """Chỉnh số luồng tra cứu/tải hóa đơn MÁY TÍNH TIỀN (MTT) đồng thời NGAY
+    TRONG LÚC đang chạy (1-16) — hệ thống MTT của Thuế dễ quá tải hơn hóa đơn
+    điện tử thường nên mặc định thấp (3), nhưng người dùng có thể tự tăng lên
+    nếu thấy hôm đó hệ thống MTT vẫn ổn định. Chỉnh CÙNG LÚC cả 2 limiter
+    (limiter_mtt: bước tải file, limiter_mtt_query: bước tra cứu danh sách)."""
+    n = max(1, min(MTT_TRAN_CUNG_EXECUTOR, int(body.get("n", MTT_SONG_SONG_TOI_DA))))
+    job = FETCH_JOBS.get(cid)
+    if not job or not job.get("limiter_mtt") or not job.get("limiter_mtt_query"):
+        raise HTTPException(404, "Không có tiến trình tra cứu/tải file nào đang chạy cho công ty này")
+    job["limiter_mtt"].set_limit(n)
+    job["limiter_mtt_query"].set_limit(n)
     return {"ok": True, "n": n}
 
 

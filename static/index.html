@@ -2000,7 +2000,14 @@ function renderWorkspace(c,online){
                oninput="chinhSongSong(this.value)" style="flex:1">
         <span id="songSongVal" style="font-size:13px;font-weight:700;color:var(--green-d);min-width:2.2em;text-align:right">8</span>
       </div>
-      <p class="hint" style="margin:4px 0 0">Kéo để tăng/giảm tốc độ tải file NGAY TRONG LÚC đang chạy (0 = tạm dừng tải file, kéo lại để tiếp tục) — không cần dừng rồi tra cứu lại từ đầu. <b>Riêng hóa đơn máy tính tiền</b> luôn giới hạn tối đa 3 luồng (hệ thống này của Thuế dễ quá tải hơn), không theo thanh trượt này.</p>
+      <p class="hint" style="margin:4px 0 0">Kéo để tăng/giảm tốc độ tải file NGAY TRONG LÚC đang chạy (0 = tạm dừng tải file, kéo lại để tiếp tục) — không cần dừng rồi tra cứu lại từ đầu.</p>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+        <label for="songSongMttSlider" style="font-size:13px;font-weight:600;color:var(--green-d);white-space:nowrap">🧾 Luồng máy tính tiền (MTT):</label>
+        <input type="range" id="songSongMttSlider" min="1" max="16" value="3" step="1"
+               oninput="chinhSongSongMtt(this.value)" style="flex:1">
+        <span id="songSongMttVal" style="font-size:13px;font-weight:700;color:var(--green-d);min-width:2.2em;text-align:right">3</span>
+      </div>
+      <p class="hint" style="margin:4px 0 0">Riêng hóa đơn <b>máy tính tiền</b> có thanh trượt RIÊNG (mặc định 3 luồng vì hệ thống này của Thuế dễ quá tải hơn) — kéo tăng lên nếu thấy tải chậm và hệ thống MTT hôm đó vẫn ổn định, kéo giảm lại nếu gặp lỗi/quá tải.</p>
       <div id="progressLog" style="margin-top:10px;font-size:13px;max-height:140px;overflow:auto"></div>
     </div>
     <div id="ketQuaTraCuu" style="display:none;margin-top:14px;border-radius:10px;padding:14px 16px;border:1px solid var(--line);background:#fff"></div>
@@ -2256,6 +2263,18 @@ function chinhSongSong(v){
     }catch(e){/* job có thể đã xong giữa lúc kéo -> bỏ qua */}
   },200);
 }
+let songSongMttCid=null;      // công ty đang tra cứu (job nào slider MTT đang điều khiển)
+let songSongMttDebounce=null; // gộp các lần kéo liên tiếp lại, khỏi gọi API dồn dập
+function chinhSongSongMtt(v){
+  document.getElementById('songSongMttVal').textContent=v;
+  if(!songSongMttCid)return;
+  clearTimeout(songSongMttDebounce);
+  songSongMttDebounce=setTimeout(async()=>{
+    try{await api(`/api/fetch-song-song-mtt/${songSongMttCid}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({n:parseInt(v)})});
+    }catch(e){/* job có thể đã xong giữa lúc kéo -> bỏ qua */}
+  },200);
+}
 async function doFetch(){
   const btn=document.getElementById('fetchBtn');
   const tu=fmtDate(document.getElementById('tuNgay').value);
@@ -2303,6 +2322,9 @@ async function doFetch(){
     const _ssInit=SPEED_SONG_SONG[document.getElementById('speedSel').value]||8;
     const _ssSlider=document.getElementById('songSongSlider');
     if(_ssSlider){_ssSlider.value=_ssInit;document.getElementById('songSongVal').textContent=_ssInit;}
+    songSongMttCid=fetchCid;
+    const _ssMttSlider=document.getElementById('songSongMttSlider');
+    if(_ssMttSlider){_ssMttSlider.value=3;document.getElementById('songSongMttVal').textContent=3;}
     let cursor=0, running=true, hadError=false;
     while(running){
       await new Promise(r=>setTimeout(r,800));
@@ -2311,6 +2333,7 @@ async function doFetch(){
         try{await api(`/api/fetch-cancel/${fetchCid}`,{method:'POST'});}catch{}
         box.style.display='none';
         if(songSongCid===fetchCid)songSongCid=null;
+        if(songSongMttCid===fetchCid)songSongMttCid=null;
         return;
       }
       let st;
@@ -2383,11 +2406,13 @@ async function doFetch(){
       }
     }
     if(songSongCid===fetchCid)songSongCid=null;
+    if(songSongMttCid===fetchCid)songSongMttCid=null;
     await refreshInvoices();
     // ẩn thanh tiến trình nhưng GIỮ bảng kết quả để người dùng xem
     setTimeout(()=>{box.style.display='none';},2000);
   }catch(e){
     songSongCid=null;
+    songSongMttCid=null;
     box.style.display='none';
     renderFetchErrorBanner({last_fetch_error:e.message,
       last_fetch_error_at:new Date().toISOString()});
