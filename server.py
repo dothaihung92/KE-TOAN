@@ -1451,7 +1451,7 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
@@ -1461,6 +1461,7 @@ def add_company(data: dict = Body(...)):
          (data.get("dia_chi") or "").strip(),
          (data.get("ma_cqt_noi_nop") or "").strip(),
          (data.get("ten_cqt_noi_nop") or "").strip(),
+         (data.get("nguoi_ky") or "").strip(),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -1481,7 +1482,7 @@ def update_company(cid: int, data: dict = Body(...)):
     # Nếu password để trống -> GIỮ password cũ (không xóa)
     cur = conn.execute(
         "SELECT password, dvc_password, dvc_password2, dia_chi, ma_cqt_noi_nop, "
-        "ten_cqt_noi_nop FROM companies WHERE id=?", (cid,)).fetchone()
+        "ten_cqt_noi_nop, nguoi_ky FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
@@ -1507,14 +1508,17 @@ def update_company(cid: int, data: dict = Body(...)):
     ten_cqt = (data.get("ten_cqt_noi_nop") or "").strip()
     if not ten_cqt:
         ten_cqt = (cur["ten_cqt_noi_nop"] if cur and "ten_cqt_noi_nop" in cur.keys() else "") or ""
+    nguoi_ky = (data.get("nguoi_ky") or "").strip()
+    if not nguoi_ky:
+        nguoi_ky = (cur["nguoi_ky"] if cur and "nguoi_ky" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
          dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
-         dia_chi, ma_cqt, ten_cqt, cid)
+         dia_chi, ma_cqt, ten_cqt, nguoi_ky, cid)
     )
     conn.commit()
     conn.close()
