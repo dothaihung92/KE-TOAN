@@ -472,7 +472,7 @@
 
 <!-- MODAL TỰ ĐỘNG NỘP TỜ KHAI (dừng trước khi ký) -->
 <div class="modal-bg" id="nopToKhaiModal">
-  <div class="modal" style="width:min(680px,96vw);max-width:680px;max-height:92vh;display:flex;flex-direction:column">
+  <div class="modal" style="width:min(880px,96vw);max-width:880px;max-height:92vh;display:flex;flex-direction:column">
     <h3 style="margin-top:0">📤 Tự động nộp tờ khai</h3>
     <div style="overflow:auto;flex:1;padding-right:4px">
     <p class="hint" style="margin-top:0">
@@ -524,7 +524,7 @@
           <option value="danop">Đã nộp</option>
         </select>
       </div>
-      <div id="ntkCtyList" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
+      <div id="ntkCtyList" style="max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
     </div>
     <div id="ntkKetQua" style="display:none;margin-top:8px;border-radius:10px;padding:12px 14px;font-size:13px"></div>
@@ -1501,10 +1501,10 @@ function ntkRenderCtyList(){
   else if(loc==='danop')shown=shown.filter(c=>ntkDaXongCty(c.id));
   list.innerHTML=shown.map(c=>{
     const chon=ntkChonSet.has(c.id);
-    return `<label class="chk" style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer">
+    return `<label class="chk" style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer">
       <input type="checkbox" ${chon?'checked':''} onchange="ntkToggleChon(${c.id},this.checked)">
-      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.ten} <span style="color:#888">(${c.mst})</span></span>
-      ${ntkBadge(c.id,'GTGT')}${ntkBadge(c.id,'TNCN')}
+      <span style="flex:1;min-width:0;white-space:normal;word-break:break-word;font-size:14px;line-height:1.4">${c.ten} <span style="color:#888">(${c.mst})</span></span>
+      <span style="display:flex;gap:4px;flex:none">${ntkBadge(c.id,'GTGT')}${ntkBadge(c.id,'TNCN')}</span>
     </label>`;
   }).join('')||'<div style="padding:8px;color:#999">Không có công ty nào khớp</div>';
   ntkCapNhatDemChon();
