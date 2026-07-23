@@ -807,6 +807,7 @@ class GDTClient:
             last_net_err = None
             sp = SP()
             attempt = 0
+            so_lan_5xx_lien_tiep = 0   # đếm số lần lỗi 5xx LIÊN TIẾP (reset khi gặp loại khác)
             while True:
                 if cancel_check and cancel_check():
                     raise Exception("CANCELLED")
@@ -831,6 +832,7 @@ class GDTClient:
                     # Ghi rõ LOẠI lỗi cụ thể (vd "Read timed out", "Connection
                     # reset", SSL...) vào log thay vì chỉ nói chung chung "lỗi
                     # mạng" — để biết chính xác đang gặp vấn đề gì mà xử lý.
+                    so_lan_5xx_lien_tiep = 0
                     cho = 3
                     if progress:
                         progress(f"lỗi mạng ({type(e).__name__}: {str(e)[:100]}), "
@@ -838,6 +840,7 @@ class GDTClient:
                     _ngu_ktra_huy(cho, cancel_check)
                     continue
                 if r.status_code == 429:
+                    so_lan_5xx_lien_tiep = 0
                     ra = r.headers.get("Retry-After")
                     try:
                         wait = int(ra) if ra else sp["retry_base"]
@@ -852,52 +855,55 @@ class GDTClient:
                 if r.status_code >= 500:
                     # Lỗi PHÍA MÁY CHỦ Thuế (500/502/503/504...) — thường là quá
                     # tải/đang bảo trì TẠM THỜI (nhất là hệ thống máy tính tiền),
-                    # không phải do request sai. Trước đây chỉ chờ 3s rồi TUẦN
-                    # TỰ thử lại (1 luồng, 1 lần 1). Nay TRANH THỦ đúng khoảng
-                    # chờ đó bắn THÊM 1 LUỒNG PHỤ thử lại NGAY SONG SONG (thay
-                    # vì ngồi chờ không làm gì) — nếu luồng phụ này KHÔNG bị
-                    # lỗi (có thể lỗi 504 chỉ là NGẪU NHIÊN ở đúng lượt gọi đó,
-                    # không phải toàn hệ thống đang sập), dùng luôn kết quả của
-                    # nó và "đóng" (bỏ qua) luồng cũ bị lỗi. Nếu luồng phụ CŨNG
-                    # lỗi, coi như hệ thống thật sự đang quá tải toàn diện —
-                    # KHÔNG bắn thêm luồng nữa ở lượt kế tiếp, quay lại chờ/thử
-                    # tuần tự bình thường, tránh nhân request lên vô tội vạ.
+                    # không phải do request sai.
+                    so_lan_5xx_lien_tiep += 1
+                    if so_lan_5xx_lien_tiep == 1:
+                        # LẦN ĐẦU gặp 5xx -> chỉ chờ 3s rồi TỰ THỬ LẠI BÌNH
+                        # THƯỜNG (tuần tự, KHÔNG chạy song song với ai) — giống
+                        # hệt cách xử lý gốc, chưa vội coi là bất thường.
+                        if progress:
+                            progress(f"lỗi máy chủ Thuế ({r.status_code}), đợi 3s rồi thử lại "
+                                     f"(lần {attempt})...")
+                        _ngu_ktra_huy(3, cancel_check)
+                        continue
+                    # Đã chờ 3s rồi thử lại nhưng VẪN lỗi 5xx (2 lần LIÊN TIẾP)
+                    # — lúc này mới thử bằng 1 LUỒNG KHÁC xem kênh đó có bị lỗi
+                    # không (có thể lỗi chỉ do đúng lượt gọi/kết nối đó, không
+                    # phải toàn hệ thống đang sập). Làm TUẦN TỰ — chờ luồng
+                    # khác xong rồi mới quyết định tiếp, KHÔNG chạy song song
+                    # với lượt thử ban đầu.
                     if progress:
-                        progress(f"lỗi máy chủ Thuế ({r.status_code}), thử SONG SONG bằng 1 luồng "
-                                 f"khác xem có bị lỗi không (lần {attempt})...")
+                        progress(f"vẫn lỗi máy chủ Thuế ({r.status_code}) sau khi đã thử lại — "
+                                 f"đang thử bằng 1 luồng khác xem có bị lỗi không...")
                     ket_qua_phu = {}
 
-                    def _thu_luong_phu():
+                    def _thu_luong_khac():
                         try:
                             ket_qua_phu["r"] = self.session.get(full_url, headers=extra_headers, timeout=90)
                         except Exception as e2:
                             ket_qua_phu["err"] = e2
 
-                    t_phu = threading.Thread(target=_thu_luong_phu, daemon=True)
-                    t_bat_dau_phu = time.time()
-                    t_phu.start()
-                    # Chờ luồng phụ tối đa 3s (đúng bằng thời gian chờ cũ) —
-                    # vẫn kiểm tra cancel_check() mỗi 0.5s để dừng được ngay
-                    # nếu bị hủy tra cứu giữa chừng (không đợi hết 3s).
-                    while t_phu.is_alive() and time.time() - t_bat_dau_phu < 3:
+                    t_khac = threading.Thread(target=_thu_luong_khac, daemon=True)
+                    t_khac.start()
+                    while t_khac.is_alive():
                         if cancel_check and cancel_check():
                             raise Exception("CANCELLED")
-                        t_phu.join(timeout=0.5)
-                    r_phu = ket_qua_phu.get("r")
-                    if r_phu is not None and r_phu.status_code < 500 and r_phu.status_code != 429:
-                        # Luồng phụ THÀNH CÔNG (không lỗi máy chủ/giới hạn tốc
-                        # độ) -> dùng luôn kết quả này, bỏ qua lỗi của luồng cũ.
+                        t_khac.join(timeout=0.5)
+                    r_khac = ket_qua_phu.get("r")
+                    so_lan_5xx_lien_tiep = 0   # dù kết quả thế nào cũng bắt đầu chu kỳ đếm mới
+                    if r_khac is not None and r_khac.status_code < 500 and r_khac.status_code != 429:
+                        # Luồng khác THÀNH CÔNG (không lỗi máy chủ/giới hạn tốc
+                        # độ) -> dùng luôn kết quả này, bỏ qua luồng cũ bị lỗi.
                         if progress:
-                            progress(f"✓ luồng phụ tải được (không bị {r.status_code}) — dùng luôn, "
+                            progress(f"✓ luồng khác tải được (không bị {r.status_code}) — dùng luôn, "
                                      f"bỏ qua luồng bị lỗi")
-                        r = r_phu
+                        r = r_khac
                         break
-                    # Luồng phụ cũng lỗi (hoặc chưa xong kịp trong 3s, coi như
-                    # bỏ dở — không chờ thêm, để không tốn công vô ích) -> quay
-                    # lại chờ/thử tuần tự như trước, không bắn thêm luồng nữa.
-                    con_lai = max(0.0, 3 - (time.time() - t_bat_dau_phu))
-                    if con_lai:
-                        _ngu_ktra_huy(con_lai, cancel_check)
+                    # Luồng khác CŨNG lỗi -> coi như hệ thống thật sự đang quá
+                    # tải toàn diện, quay lại chờ 3s rồi thử lại bình thường.
+                    if progress:
+                        progress(f"luồng khác cũng bị lỗi — đợi 3s rồi thử lại (lần {attempt})...")
+                    _ngu_ktra_huy(3, cancel_check)
                     continue
                 break
 
