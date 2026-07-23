@@ -12573,6 +12573,78 @@ def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
     }
 
 
+def _nam_quy_cua_ky(ky):
+    """Tách 'ky' ('QX/YYYY' hoặc 'MM/YYYY') -> (nam:int, quy:int 1-4).
+    Kỳ tháng cũng quy về đúng quý chứa tháng đó (chỉ dùng để XÁC ĐỊNH thư
+    mục Năm/Quý lưu file kết xuất — không phải quyết định loại kỳ kê khai
+    tháng/quý). Trả (None, None) nếu không phân tích được."""
+    ky = (ky or "").strip()
+    if "/" not in ky:
+        return None, None
+    a, b = ky.split("/", 1)
+    a = a.strip().upper()
+    try:
+        nam = int(b.strip())
+    except Exception:
+        return None, None
+    if a.startswith("Q") and a[1:].isdigit():
+        return nam, max(1, min(4, int(a[1:])))
+    try:
+        thang = int(a)
+    except Exception:
+        return None, None
+    return nam, (thang - 1) // 3 + 1
+
+
+def _doc_ct41_ky_truoc(comp, ky_hien_tai):
+    """Tự động đọc chỉ tiêu [41] (thuế GTGT còn được khấu trừ chuyển kỳ
+    sau) từ file XML tờ khai 01/GTGT của KỲ LIỀN TRƯỚC ky_hien_tai, tìm
+    trong thư mục lưu file kết xuất riêng của công ty (cấu trúc Năm/Quý) —
+    dùng làm 'Số dư đầu kỳ' (chỉ tiêu [22]) cho kỳ hiện tại, thay vì phải
+    tự mở file cũ ra chép tay số liệu.
+    Trả (gia_tri_hoac_None, ky_truoc, duong_dan_file_hoac_None)."""
+    import re as _re_ct41
+    ky_truoc = _ky_lien_truoc(ky_hien_tai)
+    if not ky_truoc:
+        return None, "", None
+    nam, quy = _nam_quy_cua_ky(ky_truoc)
+    if not nam:
+        return None, ky_truoc, None
+    fp, _ung_vien = _tim_file_nop_theo_cong_ty(comp, "GTGT", nam, quy, "")
+    if not fp:
+        return None, ky_truoc, None
+    try:
+        with open(fp, encoding="utf-8-sig") as f:
+            xml = f.read()
+        m = _re_ct41.search(r"<ct41>(.*?)</ct41>", xml, _re_ct41.DOTALL)
+        if m:
+            return (_to_num(m.group(1).strip()) or 0), ky_truoc, fp
+    except Exception:
+        pass
+    return None, ky_truoc, fp
+
+
+@app.get("/api/vat-du-dau-ky-tu-dong/{cid}")
+def vat_du_dau_ky_tu_dong(cid: int, ky: str = ""):
+    """Tự động lấy 'Số dư đầu kỳ' từ chỉ tiêu [41] của tờ khai GTGT kỳ
+    liền trước (đọc file XML đã lưu trong thư mục kết xuất Năm/Quý riêng
+    của công ty), thay vì phải tự tìm file cũ ra chép tay."""
+    if not ky:
+        raise HTTPException(400, "Thiếu kỳ kê khai")
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    gia_tri, ky_truoc, fp = _doc_ct41_ky_truoc(comp, ky)
+    if gia_tri is None:
+        raise HTTPException(
+            404, f"Không tìm thấy tờ khai GTGT của kỳ {ky_truoc or '(không xác định được kỳ trước)'} "
+                 f"trong thư mục lưu file kết xuất của công ty này — hãy kiểm tra đã cấu hình đúng "
+                 f"'Thư mục lưu file kết xuất' và đã có file kết xuất kỳ đó chưa (mục 'Sửa công ty').")
+    return {"ok": True, "du_dau_ky": gia_tri, "ky_truoc": ky_truoc, "file": os.path.basename(fp)}
+
+
 @app.post("/api/vat-tmtinh/{cid}")
 def vat_luu(cid: int, data: dict = Body(...)):
     """Lưu số dư VAT của kỳ (gọi khi bấm Save)."""
