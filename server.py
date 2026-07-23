@@ -268,6 +268,25 @@ def _doc_kiem_tra_file_hoadon(fpath):
         return False
 
 
+def _ngu_ktra_huy(giay, cancel_check=None):
+    """time.sleep(giay) nhưng chia nhỏ thành từng đoạn ngắn, kiểm tra
+    cancel_check() giữa mỗi đoạn — để khi người dùng hủy tra cứu (vd chuyển
+    sang công ty khác) giữa lúc đang CHỜ để thử lại (có thể chờ tới 90s nếu
+    bị 429 giới hạn tốc độ), tiến trình dừng lại trong khoảng nửa giây thay
+    vì phải chờ hết trọn thời gian chờ rồi mới kiểm tra lại."""
+    if not cancel_check:
+        time.sleep(giay)
+        return
+    con_lai = giay
+    buoc = 0.5
+    while con_lai > 0:
+        if cancel_check():
+            return
+        thoi = min(buoc, con_lai)
+        time.sleep(thoi)
+        con_lai -= thoi
+
+
 # ============================================================
 #  GDT API CLIENT  (module gọi API Tổng cục Thuế)
 #  --> Nếu TCT đổi endpoint, chỉ cần sửa các URL trong class này
@@ -350,7 +369,7 @@ class GDTClient:
     # he_thong: "query" (HĐ điện tử thường) hoặc "sco-query" (HĐ máy tính tiền)
     def query_invoices(self, tu_ngay, den_ngay, loai="purchase", page_size=50,
                        he_thong="query", progress=None, chi_cac_doan=None,
-                       mtt_limiter=None):
+                       mtt_limiter=None, cancel_check=None):
         """
         Tra cứu hóa đơn trong khoảng ngày bất kỳ (kể cả nhiều tháng/cả năm).
         Trang Thuế giới hạn mỗi lần gọi tối đa ~31 ngày, nên hàm này tự
@@ -373,6 +392,11 @@ class GDTClient:
           thường (không tách riêng nữa). Nếu không truyền (vd gọi lẻ, không
           chạy song song với loại khác) thì chỉ dựa vào giới hạn nội bộ
           như trước.
+        cancel_check: callable() -> bool — kiểm tra người dùng đã hủy tra
+          cứu chưa (vd chuyển sang công ty khác giữa chừng). Được kiểm tra
+          liên tục ở NHIỀU điểm bên trong (mỗi trang/mỗi lần thử lại/mỗi
+          tháng/mỗi trạng thái) để tiến trình DỪNG THẬT SỰ trong vài giây,
+          thay vì cứ âm thầm chạy tiếp tới khi tự xong dù giao diện đã ẩn.
 
         Trả về tuple (results, total_expected, loi_rieng, cac_doan_loi) —
         KHÔNG dùng self.last_query_* nữa (không an toàn khi mua vào/bán ra
@@ -414,6 +438,8 @@ class GDTClient:
             # ----- CHỈ dò lại các đoạn cụ thể đã lỗi ở lượt trước -----
             def _xu_ly_doan(doan):
                 s_from, s_to, ttxly = doan["tu"], doan["den"], doan.get("ttxly")
+                if cancel_check and cancel_check():
+                    return s_from, s_to, ([], 0, [], [])
                 # Gắn nhãn [ĐOẠN dd/mm→dd/mm] vào MỌI dòng tiến độ của đoạn
                 # này (kể cả các dòng lỗi/thử lại phát sinh bên trong
                 # _query_one_range/_fetch_paginated) — để giao diện phân biệt
@@ -431,7 +457,8 @@ class GDTClient:
                 try:
                     ket_qua = self._query_one_range(
                         s_from, s_to, loai, page_size, he_thong,
-                        progress=_progress_doan, ttxly_can_do=ttxly_can_do)
+                        progress=_progress_doan, ttxly_can_do=ttxly_can_do,
+                        cancel_check=cancel_check)
                 finally:
                     if dung_chung:
                         dung_chung.release()
@@ -441,7 +468,12 @@ class GDTClient:
             with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
                 futs = [ex.submit(_xu_ly_doan, doan) for doan in chi_cac_doan]
                 for fut in _cf.as_completed(futs):
-                    s_from, s_to, ket_qua = fut.result()
+                    try:
+                        s_from, s_to, ket_qua = fut.result()
+                    except Exception as e:
+                        if "CANCELLED" in str(e):
+                            break   # dừng gộp thêm — với-block vẫn đợi các đoạn còn lại tự thoát nhanh
+                        raise
                     _gop(s_from, s_to, ket_qua)
             return all_results, total_expected, loi_tich_luy, cac_doan_loi
 
@@ -461,12 +493,13 @@ class GDTClient:
         # này vì rẻ và vẫn có ích khi công ty thật sự không có hóa đơn nào.
         if he_thong != "sco-query":
             try:
-                if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress):
+                if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress,
+                                      cancel_check=cancel_check):
                     if progress:
                         progress("kỳ này không có hóa đơn — bỏ qua nhanh")
                     return [], 0, [], []
             except Exception as e:
-                if "TOKEN_EXPIRED" in str(e):
+                if "TOKEN_EXPIRED" in str(e) or "CANCELLED" in str(e):
                     raise
                 # lỗi khác khi đếm nhanh -> KHÔNG bỏ qua, dò đầy đủ như cũ cho an toàn
 
@@ -488,6 +521,8 @@ class GDTClient:
             cur = chunk_end + datetime.timedelta(days=1)
 
         def _xu_ly_thang(s_from, s_to):
+            if cancel_check and cancel_check():
+                return s_from, s_to, ([], 0, [], [])
             # Gắn nhãn [THÁNG dd/mm→dd/mm] vào MỌI dòng tiến độ của tháng này
             # (kể cả lỗi/thử lại phát sinh bên trong) — để giao diện hiện
             # ĐƯỢC NHIỀU DÒNG, mỗi dòng 1 tháng đang chạy song song, thay vì
@@ -501,7 +536,8 @@ class GDTClient:
                 dung_chung.acquire()
             try:
                 ket_qua = self._query_one_range(
-                    s_from, s_to, loai, page_size, he_thong, progress=_progress_thang)
+                    s_from, s_to, loai, page_size, he_thong, progress=_progress_thang,
+                    cancel_check=cancel_check)
             finally:
                 if dung_chung:
                     dung_chung.release()
@@ -511,7 +547,12 @@ class GDTClient:
         with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
             futs = [ex.submit(_xu_ly_thang, s_from, s_to) for s_from, s_to in cac_thang]
             for fut in _cf.as_completed(futs):
-                s_from, s_to, ket_qua = fut.result()
+                try:
+                    s_from, s_to, ket_qua = fut.result()
+                except Exception as e:
+                    if "CANCELLED" in str(e):
+                        break   # dừng gộp thêm — với-block vẫn đợi các tháng còn lại tự thoát nhanh
+                    raise
                 _gop(s_from, s_to, ket_qua)
                 if progress:
                     progress(f"đã lấy {len(all_results)} tờ (lũy kế, vừa xong {s_to})")
@@ -524,7 +565,8 @@ class GDTClient:
         # instance sẽ bị 1 tổ hợp khác GHI ĐÈ trước khi tổ hợp này kịp đọc lại.
         return all_results, total_expected, loi_tich_luy, cac_doan_loi
 
-    def _toan_ky_rong(self, tu_ngay, den_ngay, loai, he_thong, page_size, progress=None):
+    def _toan_ky_rong(self, tu_ngay, den_ngay, loai, he_thong, page_size, progress=None,
+                      cancel_check=None):
         """True nếu TOÀN khoảng ngày CHẮC CHẮN không có hóa đơn nào (tổng = 0).
         Chỉ đếm nhanh (size=1) trên CẢ khoảng ngày, không dò từng tháng. Trả
         False nếu có hóa đơn HOẶC không đếm chắc chắn được (khi đó dò đầy đủ)."""
@@ -545,7 +587,8 @@ class GDTClient:
             with _cf.ThreadPoolExecutor(max_workers=3) as ex:
                 tongs = list(ex.map(
                     lambda tt: self._dem_tong_nhanh(
-                        url, f"{date_filter};ttxly=={tt}", action, progress),
+                        url, f"{date_filter};ttxly=={tt}", action, progress,
+                        cancel_check=cancel_check),
                     (5, 6, 8)))
             for tong in tongs:
                 if tong is None or tong > 0:
@@ -554,12 +597,12 @@ class GDTClient:
         else:
             url = f"{base}/invoices/sold"
             action = "Tìm kiếm (hóa đơn %sbán ra)" % ("máy tính tiền " if is_mtt else "")
-            tong = self._dem_tong_nhanh(url, date_filter, action, progress)
+            tong = self._dem_tong_nhanh(url, date_filter, action, progress, cancel_check=cancel_check)
             return tong == 0   # None (không chắc) -> False -> dò đầy đủ
 
     def _query_one_range(self, tu_ngay, den_ngay, loai="purchase",
                          page_size=50, he_thong="query", progress=None,
-                         ttxly_can_do=None):
+                         ttxly_can_do=None, cancel_check=None):
         """
         Tra cứu 1 khoảng ngày (<= 31 ngày).
         Khớp đúng cURL thật từ hoadondientu.gdt.gov.vn:
@@ -583,13 +626,13 @@ class GDTClient:
 
         def _thu_lai(fn, so_lan=2):
             """Gọi fn() tối đa so_lan lần (nghỉ giữa các lần) trước khi bỏ cuộc.
-            TOKEN_EXPIRED thì raise ngay, không cần thử lại."""
+            TOKEN_EXPIRED/CANCELLED thì raise ngay, không cần thử lại."""
             last_err = None
             for i in range(so_lan):
                 try:
                     return fn()
                 except Exception as e:
-                    if "TOKEN_EXPIRED" in str(e):
+                    if "TOKEN_EXPIRED" in str(e) or "CANCELLED" in str(e):
                         raise
                     last_err = e
                     if i < so_lan - 1:
@@ -608,18 +651,21 @@ class GDTClient:
             loi_trang_thai = []   # mô tả LỖI THẬT SỰ (không phải rỗng) -> báo cho người dùng biết
             ttxly_that_bai = []   # CÁC SỐ trạng thái bị lỗi (để RETRY ĐÚNG đoạn đó, không dò lại cả tháng)
             for ttxly in ttxly_can_do:
+                if cancel_check and cancel_check():
+                    raise Exception("CANCELLED")
                 search = f"{date_filter};ttxly=={ttxly}"
                 try:
                     part, ptotal = _thu_lai(lambda: self._fetch_paginated(
-                        url, search, action, page_size, want_total=True, progress=progress))
+                        url, search, action, page_size, want_total=True, progress=progress,
+                        cancel_check=cancel_check))
                     if ptotal:
                         total_all += ptotal
                 except Exception as e:
                     # Đã thử lại rồi vẫn lỗi -> GHI NHẬN LÀ LỖI (không coi như "không có"),
                     # để người gọi biết kết quả có thể THIẾU chứ không phải chắc chắn = 0.
-                    # KHÔNG raise (trừ TOKEN_EXPIRED) — để các trạng thái/tháng KHÁC vẫn
-                    # được dò tiếp, không mất trắng dữ liệu đã lấy được vì 1 lỗi cục bộ.
-                    if "TOKEN_EXPIRED" in str(e):
+                    # KHÔNG raise (trừ TOKEN_EXPIRED/CANCELLED) — để các trạng thái/tháng
+                    # KHÁC vẫn được dò tiếp, không mất trắng dữ liệu đã lấy được vì 1 lỗi cục bộ.
+                    if "TOKEN_EXPIRED" in str(e) or "CANCELLED" in str(e):
                         raise
                     part = []
                     loi_trang_thai.append(f"ttxly={ttxly}: {str(e)[:120]}")
@@ -643,22 +689,27 @@ class GDTClient:
             # tháng khác vẫn giữ nguyên kết quả.
             try:
                 results, total = _thu_lai(lambda: self._fetch_paginated(
-                    url, date_filter, action, page_size, want_total=True, progress=progress))
+                    url, date_filter, action, page_size, want_total=True, progress=progress,
+                    cancel_check=cancel_check))
                 return results, total, [], []
             except Exception as e:
-                if "TOKEN_EXPIRED" in str(e):
+                if "TOKEN_EXPIRED" in str(e) or "CANCELLED" in str(e):
                     raise
                 # sold không có ttxly -> đánh dấu cả tháng lỗi (ttxly=None)
                 return [], 0, [str(e)[:120]], [None]
 
-    def _dem_tong_nhanh(self, url, search, action, progress=None):
+    def _dem_tong_nhanh(self, url, search, action, progress=None, cancel_check=None):
         """ĐẾM NHANH tổng số hóa đơn của 1 truy vấn — chỉ gọi 1 trang size=1 để
         đọc trường 'total', KHÔNG phân trang lấy hết dữ liệu. Dùng để PHÁT HIỆN
         SỚM khoảng ngày RỖNG (đặc biệt hóa đơn máy tính tiền — nhiều công ty
         không hề dùng — để khỏi dò từng tháng × 3 trạng thái rất lâu cho con số
         0). Trả về int total nếu chắc chắn (kể cả 0); None nếu KHÔNG chắc (lỗi
         mạng/429...) -> người gọi nên dò đầy đủ bình thường cho an toàn.
-        TOKEN_EXPIRED thì raise để dừng cả tiến trình."""
+        TOKEN_EXPIRED thì raise để dừng cả tiến trình.
+        cancel_check: callable() -> bool, gọi lại để kiểm tra người dùng đã
+        hủy tra cứu (vd chuyển sang công ty khác) chưa — nếu có, raise CANCELLED
+        NGAY thay vì cứ thử lại vô tận, để tiến trình dừng thật sự chứ không
+        chỉ dừng hiển thị ở giao diện trong khi vẫn âm thầm chạy nền."""
         from urllib.parse import quote
         extra_headers = {
             "accept-language": "vi",
@@ -681,13 +732,15 @@ class GDTClient:
         # phải làm việc nặng hơn ngay sau đó.
         attempt = 0
         while True:
+            if cancel_check and cancel_check():
+                raise Exception("CANCELLED")
             attempt += 1
             try:
                 r = self.session.get(full_url, headers=extra_headers, timeout=45)
             except Exception:
                 if progress:
                     progress(f"đang kiểm tra nhanh kỳ này có hóa đơn không... (lần {attempt})")
-                time.sleep(3)
+                _ngu_ktra_huy(3, cancel_check)
                 continue
             if r.status_code == 401:
                 raise Exception("TOKEN_EXPIRED")
@@ -697,7 +750,7 @@ class GDTClient:
                     wait = int(ra) if ra else sp["retry_base"]
                 except Exception:
                     wait = sp["retry_base"]
-                time.sleep(min(wait, 30))
+                _ngu_ktra_huy(min(wait, 30), cancel_check)
                 continue
             if r.status_code != 200:
                 return None   # 400/5xx... -> không chắc, để dò đầy đủ
@@ -708,11 +761,17 @@ class GDTClient:
             tong = data.get("total")
             return int(tong) if isinstance(tong, (int, float)) else None
 
-    def _fetch_paginated(self, url, search, action, page_size=50, want_total=False, progress=None):
+    def _fetch_paginated(self, url, search, action, page_size=50, want_total=False, progress=None,
+                        cancel_check=None):
         """Gọi 1 endpoint với tham số search, tự phân trang và xử lý 429.
         want_total=True -> trả (results, total_kỳ_vọng) để kiểm tra đủ chưa.
         progress: callback(str) báo tiến độ khi đang chờ 429/lỗi mạng (tùy
-        chọn) — để màn hình KHÔNG đứng yên như "đứng máy" trong lúc chờ."""
+        chọn) — để màn hình KHÔNG đứng yên như "đứng máy" trong lúc chờ.
+        cancel_check: callable() -> bool — kiểm tra người dùng đã hủy tra cứu
+        chưa (vd chuyển công ty khác giữa chừng); nếu có, raise CANCELLED
+        ngay ở đầu mỗi trang/mỗi lần thử lại, KHÔNG cứ thử lại vô tận nữa —
+        để việc "chuyển công ty khác" thực sự dừng hẳn tiến trình cũ đang
+        chạy nền, thay vì chỉ ẩn khỏi giao diện mà vẫn âm thầm chạy tiếp."""
         from urllib.parse import quote
         extra_headers = {
             "accept-language": "vi",
@@ -724,6 +783,8 @@ class GDTClient:
         state = None
         total_expected = None
         for _ in range(500):  # tối đa 500 trang an toàn
+            if cancel_check and cancel_check():
+                raise Exception("CANCELLED")
             qs = (f"sort=tdlap:desc&size={page_size}"
                   f"&search={quote(search, safe='=;,:/')}")
             if state:
@@ -747,6 +808,8 @@ class GDTClient:
             sp = SP()
             attempt = 0
             while True:
+                if cancel_check and cancel_check():
+                    raise Exception("CANCELLED")
                 attempt += 1
                 try:
                     # timeout 90s (không phải 60s) — hệ thống máy tính tiền có
@@ -772,7 +835,7 @@ class GDTClient:
                     if progress:
                         progress(f"lỗi mạng ({type(e).__name__}: {str(e)[:100]}), "
                                  f"đợi {cho}s rồi thử lại (lần {attempt})...")
-                    time.sleep(cho)
+                    _ngu_ktra_huy(cho, cancel_check)
                     continue
                 if r.status_code == 429:
                     ra = r.headers.get("Retry-After")
@@ -784,7 +847,7 @@ class GDTClient:
                     if progress:
                         progress(f"bị Tổng cục Thuế giới hạn tốc độ (429), đợi {wait}s rồi "
                                  f"thử lại (lần {attempt})...")
-                    time.sleep(wait)
+                    _ngu_ktra_huy(wait, cancel_check)
                     continue
                 if r.status_code >= 500:
                     # Lỗi PHÍA MÁY CHỦ Thuế (500/502/503/504...) — thường là quá
@@ -794,7 +857,7 @@ class GDTClient:
                     # tự bấm tra cứu lại. CHỈ 400 (request sai) mới báo lỗi ngay.
                     if progress:
                         progress(f"lỗi máy chủ Thuế ({r.status_code}), đợi 3s rồi thử lại (lần {attempt})...")
-                    time.sleep(3)
+                    _ngu_ktra_huy(3, cancel_check)
                     continue
                 break
 
@@ -854,6 +917,8 @@ class GDTClient:
                         if progress:
                             progress("đã thử lại quá lâu, dùng tạm kết quả hiện có...")
                         break
+                    if cancel_check and cancel_check():
+                        break
                     qs = (f"sort=tdlap:desc&size={page_size}"
                           f"&search={quote(search, safe='=;,:/')}")
                     if state2:
@@ -867,7 +932,7 @@ class GDTClient:
                         if progress:
                             progress(f"bị giới hạn tốc độ (429), đợi {wait2}s rồi thử lại "
                                      f"(lần {so_lan_429}/{SP()['retry_max']})...")
-                        time.sleep(wait2); continue
+                        _ngu_ktra_huy(wait2, cancel_check); continue
                     if r2.status_code != 200:
                         break
                     d2 = r2.json()
@@ -4952,6 +5017,14 @@ def _run_fetch_job(cid: int, body: dict):
                     # bộ khoảng ngày cho tới khi khớp đủ hoặc hết số lượt thử.
                     SO_LAN_THU = 6
                     for lan_thu in range(SO_LAN_THU):
+                        # Kiểm tra NGAY ĐẦU mỗi lượt thử — nếu người dùng đã chuyển
+                        # sang công ty khác (hoặc bấm dừng) giữa chừng, dừng HẲN ở
+                        # đây, không bắt đầu thêm lượt thử/tháng/trang nào nữa.
+                        if (FETCH_JOBS.get(cid) or {}).get("cancel"):
+                            msg(stage="warn",
+                                text=f"⏹ {loai_txt}{ht_txt}: đã dừng tra cứu theo yêu cầu "
+                                     f"(chuyển sang công ty khác)")
+                            return
                         # Đoạn CỤ THỂ sẽ dùng cho LƯỢT GỌI NÀY (None/rỗng ở lượt đầu,
                         # hoặc khi client không có/không còn đoạn lỗi cụ thể để dò
                         # riêng -> lượt này sẽ dò lại TOÀN BỘ khoảng ngày).
@@ -4961,10 +5034,26 @@ def _run_fetch_job(cid: int, body: dict):
                                 tu, den, loai=loai, he_thong=he_thong,
                                 progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
                                 chi_cac_doan=doan_dung_de_goi,
-                                mtt_limiter=(mtt_limiter_query if he_thong == "sco-query" else None))
+                                mtt_limiter=(mtt_limiter_query if he_thong == "sco-query" else None),
+                                cancel_check=lambda: bool((FETCH_JOBS.get(cid) or {}).get("cancel")))
                             loi_cuoi = None
+                            # query_invoices có thể trả về BÌNH THƯỜNG (không raise)
+                            # với dữ liệu THIẾU nếu bị hủy giữa chừng lúc đang gộp
+                            # kết quả các tháng/đoạn — kiểm tra lại NGAY sau khi có
+                            # kết quả để không hiểu nhầm "thiếu" này là lỗi cần thử
+                            # lại (đằng nào cũng đã bị hủy, thử lại chỉ tốn công).
+                            if (FETCH_JOBS.get(cid) or {}).get("cancel"):
+                                msg(stage="warn",
+                                    text=f"⏹ {loai_txt}{ht_txt}: đã dừng tra cứu theo yêu cầu "
+                                         f"(chuyển sang công ty khác)")
+                                return
                         except Exception as e:
                             es = str(e)
+                            if "CANCELLED" in es:
+                                msg(stage="warn",
+                                    text=f"⏹ {loai_txt}{ht_txt}: đã dừng tra cứu theo yêu cầu "
+                                         f"(chuyển sang công ty khác)")
+                                return
                             if "TOKEN_EXPIRED" in es:
                                 # TỰ ĐỘNG đăng nhập lại (nếu công ty có lưu mật
                                 # khẩu) rồi thử lại tiếp, thay vì DỪNG NGAY bắt
@@ -5256,6 +5345,8 @@ def _run_fetch_job(cid: int, body: dict):
                         ly_do_tai_lai_du_co_file = []
 
                         def _tai_1_file(inv):
+                            if (FETCH_JOBS.get(cid) or {}).get("cancel"):
+                                return "cancelled"
                             nbmst = inv.get("nbmst", "")
                             khhdon = inv.get("khhdon", "")
                             khmshdon = inv.get("khmshdon", "")
@@ -5353,6 +5444,8 @@ def _run_fetch_job(cid: int, body: dict):
                         def _tai_nhieu_file(ds_inv, nhan):
                             """Tải song song danh sách hóa đơn.
                             Trả về (so_thanh_cong, ds_loi, so_bo_qua_da_co_san, so_khong_ma)."""
+                            if (FETCH_JOBS.get(cid) or {}).get("cancel"):
+                                return 0, [], 0, 0
                             if getattr(client, "_token_dead", False):
                                 # phiên đã hết hạn -> khỏi thử mạng, nhưng HĐ "không mã"
                                 # vốn dĩ không cần tải file nên vẫn KHÔNG tính là lỗi
@@ -5386,6 +5479,11 @@ def _run_fetch_job(cid: int, body: dict):
                                         so_khong_ma += 1
                                     elif kq == "ok":
                                         so_ok += 1
+                                    elif kq == "cancelled":
+                                        # Đã dừng theo yêu cầu (chuyển công ty khác) —
+                                        # KHÔNG tính là lỗi (không thử lại), chỉ đơn
+                                        # giản là chưa tải, sẽ tải lại nếu tra cứu lại.
+                                        pass
                                     else:
                                         loi.append(inv)
                             return so_ok, loi, so_bo_qua, so_khong_ma
@@ -5454,6 +5552,16 @@ def _run_fetch_job(cid: int, body: dict):
                 futs = [ex.submit(_xu_ly_to_hop, loai, he_thong) for loai, he_thong in combos]
                 for fut in _cf.as_completed(futs):
                     fut.result()
+
+            # Đã dừng theo yêu cầu (chuyển công ty khác/bấm dừng) giữa chừng —
+            # KHÔNG được báo "Hoàn tất" (dữ liệu có thể còn dở dang do bị dừng
+            # sớm, không phải vì đã tra cứu xong thật sự).
+            if (FETCH_JOBS.get(cid) or {}).get("cancel"):
+                msg(stage="done",
+                    text=f"⏹ Đã dừng tra cứu theo yêu cầu (chuyển sang công ty khác) — "
+                         f"đã lưu {total_saved} hóa đơn tính tới lúc dừng.",
+                    total_saved=total_saved, file_saved=file_saved)
+                return
 
             # ===== TỔNG KẾT số hóa đơn theo trang Thuế (để biết lấy đủ chưa) =====
             tk_mua = thongke["purchase"]
