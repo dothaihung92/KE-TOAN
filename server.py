@@ -852,12 +852,52 @@ class GDTClient:
                 if r.status_code >= 500:
                     # Lỗi PHÍA MÁY CHỦ Thuế (500/502/503/504...) — thường là quá
                     # tải/đang bảo trì TẠM THỜI (nhất là hệ thống máy tính tiền),
-                    # không phải do request sai — nên THỬ LẠI giống hệt lỗi mạng
-                    # (chờ cố định 3s) thay vì báo lỗi ngay, bắt người dùng phải
-                    # tự bấm tra cứu lại. CHỈ 400 (request sai) mới báo lỗi ngay.
+                    # không phải do request sai. Trước đây chỉ chờ 3s rồi TUẦN
+                    # TỰ thử lại (1 luồng, 1 lần 1). Nay TRANH THỦ đúng khoảng
+                    # chờ đó bắn THÊM 1 LUỒNG PHỤ thử lại NGAY SONG SONG (thay
+                    # vì ngồi chờ không làm gì) — nếu luồng phụ này KHÔNG bị
+                    # lỗi (có thể lỗi 504 chỉ là NGẪU NHIÊN ở đúng lượt gọi đó,
+                    # không phải toàn hệ thống đang sập), dùng luôn kết quả của
+                    # nó và "đóng" (bỏ qua) luồng cũ bị lỗi. Nếu luồng phụ CŨNG
+                    # lỗi, coi như hệ thống thật sự đang quá tải toàn diện —
+                    # KHÔNG bắn thêm luồng nữa ở lượt kế tiếp, quay lại chờ/thử
+                    # tuần tự bình thường, tránh nhân request lên vô tội vạ.
                     if progress:
-                        progress(f"lỗi máy chủ Thuế ({r.status_code}), đợi 3s rồi thử lại (lần {attempt})...")
-                    _ngu_ktra_huy(3, cancel_check)
+                        progress(f"lỗi máy chủ Thuế ({r.status_code}), thử SONG SONG bằng 1 luồng "
+                                 f"khác xem có bị lỗi không (lần {attempt})...")
+                    ket_qua_phu = {}
+
+                    def _thu_luong_phu():
+                        try:
+                            ket_qua_phu["r"] = self.session.get(full_url, headers=extra_headers, timeout=90)
+                        except Exception as e2:
+                            ket_qua_phu["err"] = e2
+
+                    t_phu = threading.Thread(target=_thu_luong_phu, daemon=True)
+                    t_bat_dau_phu = time.time()
+                    t_phu.start()
+                    # Chờ luồng phụ tối đa 3s (đúng bằng thời gian chờ cũ) —
+                    # vẫn kiểm tra cancel_check() mỗi 0.5s để dừng được ngay
+                    # nếu bị hủy tra cứu giữa chừng (không đợi hết 3s).
+                    while t_phu.is_alive() and time.time() - t_bat_dau_phu < 3:
+                        if cancel_check and cancel_check():
+                            raise Exception("CANCELLED")
+                        t_phu.join(timeout=0.5)
+                    r_phu = ket_qua_phu.get("r")
+                    if r_phu is not None and r_phu.status_code < 500 and r_phu.status_code != 429:
+                        # Luồng phụ THÀNH CÔNG (không lỗi máy chủ/giới hạn tốc
+                        # độ) -> dùng luôn kết quả này, bỏ qua lỗi của luồng cũ.
+                        if progress:
+                            progress(f"✓ luồng phụ tải được (không bị {r.status_code}) — dùng luôn, "
+                                     f"bỏ qua luồng bị lỗi")
+                        r = r_phu
+                        break
+                    # Luồng phụ cũng lỗi (hoặc chưa xong kịp trong 3s, coi như
+                    # bỏ dở — không chờ thêm, để không tốn công vô ích) -> quay
+                    # lại chờ/thử tuần tự như trước, không bắn thêm luồng nữa.
+                    con_lai = max(0.0, 3 - (time.time() - t_bat_dau_phu))
+                    if con_lai:
+                        _ngu_ktra_huy(con_lai, cancel_check)
                     continue
                 break
 
