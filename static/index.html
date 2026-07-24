@@ -623,7 +623,10 @@
     <div id="batchProgress" style="display:none;margin-top:8px;background:var(--green-l);border-radius:10px;padding:12px 14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span id="batchProgressText" style="font-size:14px;font-weight:600;color:var(--green-d)">Đang xử lý...</span>
-        <button class="btn ghost sm" onclick="cancelBatch()">⏹ Dừng</button>
+        <span style="display:flex;gap:6px">
+          <button class="btn ghost sm" onclick="anBatchModal()">🔽 Ẩn (chạy nền)</button>
+          <button class="btn ghost sm" onclick="cancelBatch()">⏹ Dừng</button>
+        </span>
       </div>
       <div style="background:#fff;border-radius:6px;height:8px;overflow:hidden">
         <div id="batchBar" style="height:100%;width:0%;background:var(--green);transition:width .3s"></div>
@@ -651,6 +654,21 @@
       <button class="btn ghost" onclick="closeBatchModal()">Đóng</button>
       <button class="btn" id="batchStartBtn" onclick="doBatchFetch()">🚀 Bắt đầu tra cứu</button>
     </div>
+  </div>
+</div>
+
+<!-- Khung nhỏ nổi khi ẨN khung tra cứu hàng loạt — vẫn chạy nền, bấm để mở lại -->
+<div id="batchMiniBar" onclick="hienLaiBatchModal()"
+     style="display:none;position:fixed;right:20px;bottom:20px;z-index:500;cursor:pointer;
+     background:var(--green-d);color:#fff;border-radius:12px;padding:12px 16px;
+     box-shadow:0 8px 24px rgba(0,0,0,.28);max-width:320px">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span class="spin" style="border-color:rgba(255,255,255,.3);border-top-color:#fff;flex:none"></span>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:13.5px">🚀 Tra cứu hàng loạt</div>
+      <div id="batchMiniText" style="font-size:12.5px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Đang chạy nền...</div>
+    </div>
+    <span style="font-size:11px;opacity:.85;white-space:nowrap">Bấm để<br>mở lại</span>
   </div>
 </div>
 
@@ -2406,8 +2424,11 @@ async function doFetch(){
   btn.disabled=false;btn.innerHTML='🔍 Tra cứu hóa đơn';
 }
 /* ---------- TRA CỨU HÀNG LOẠT ---------- */
-let batchId=null, batchPollCancel=false;
+let batchId=null, batchPollCancel=false, batchHidden=false;
 function openBatchModal(){
+  // Đang có 1 lượt tra cứu hàng loạt chạy nền (đã bấm "Ẩn") -> mở lại ĐÚNG
+  // khung đang chạy đó (giữ tiến độ), KHÔNG reset lại toàn bộ form về mặc định.
+  if(batchId&&batchHidden){hienLaiBatchModal();return}
   // gợi ý khoảng ngày từ form công ty đang mở (nếu có)
   const t=document.getElementById('tuNgay'), d=document.getElementById('denNgay');
   if(t&&t.value)document.getElementById('bTuNgay').value=t.value;
@@ -2442,6 +2463,20 @@ function closeBatchModal(){
   // (không tự huỷ), vì người dùng CHỌN tự tắt máy nên đóng khung không có
   // nghĩa là đổi ý — muốn huỷ thì bấm nút "Huỷ tắt máy" lúc còn mở khung.
   document.getElementById('batchModal').classList.remove('show');
+}
+// ẨN khung (KHÁC "Đóng"): tiếp tục theo dõi tiến độ CHẠY NỀN (không set
+// batchPollCancel), chỉ ẩn giao diện + hiện 1 khung nhỏ nổi góc màn hình để
+// người dùng vẫn làm việc khác trên phần mềm, bấm vào khung nhỏ đó (hoặc mở
+// lại nút "Tra cứu hóa đơn hàng loạt") để xem lại tiến độ đầy đủ.
+function anBatchModal(){
+  batchHidden=true;
+  document.getElementById('batchModal').classList.remove('show');
+  document.getElementById('batchMiniBar').style.display='block';
+}
+function hienLaiBatchModal(){
+  batchHidden=false;
+  document.getElementById('batchMiniBar').style.display='none';
+  document.getElementById('batchModal').classList.add('show');
 }
 let batchTatMayTimer=null;
 async function batDauDemNguocTatMay(){
@@ -2581,9 +2616,13 @@ async function batchTheoDoi(bid){
     running=st.running;
     document.getElementById('batchBar').style.width=Math.round(st.done/st.total*100)+'%';
     const cur=st.items.find(i=>i.cid===st.current);
-    document.getElementById('batchProgressText').textContent=
-      running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
-             :`Hoàn tất ${st.done}/${st.total} công ty`;
+    const dongTrangThai=running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
+                                :`Hoàn tất ${st.done}/${st.total} công ty`;
+    document.getElementById('batchProgressText').textContent=dongTrangThai;
+    // Vẫn cập nhật khung nhỏ nổi dù đang ẨN (tiếp tục chạy nền) — để bấm vào
+    // xem lại tiến độ mới nhất mà không cần đợi mở khung ra mới thấy.
+    const miniText=document.getElementById('batchMiniText');
+    if(miniText)miniText.textContent=dongTrangThai;
     document.getElementById('batchDetail').textContent=
       (running && st.current_detail)?('↳ '+st.current_detail):'';
     const dlWrap=document.getElementById('batchDlWrap');
@@ -2604,6 +2643,11 @@ async function batchTheoDoi(bid){
     }).join('');
   }
   if(!st)return;
+  // Đã chạy xong (dù đang ẨN hay đang mở) -> tắt hẳn khung nhỏ nổi, khỏi
+  // để lại 1 khung "đang chạy" trong khi thực ra đã xong từ lâu.
+  batchHidden=false;
+  const miniBar=document.getElementById('batchMiniBar');
+  if(miniBar)miniBar.style.display='none';
   const dsLoi=st.items.filter(i=>i.status==='error');
   const dsBoQua=st.items.filter(i=>i.status==='skipped');
   if(dsLoi.length){

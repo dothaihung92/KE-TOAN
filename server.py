@@ -5761,9 +5761,34 @@ def _run_fetch_job(cid: int, body: dict):
             if body.get("luu_ket_xuat") and not co_loi:
                 try:
                     msg(stage="info", text="Đang tự động kết xuất Excel vào thư mục lưu file kết xuất...")
-                    export_excel(cid, luu_ket_xuat=1, tu_ngay=(tu or ""),
-                                 den_ngay=(den or ""), mo_file=0)
+                    resp_excel = export_excel(cid, luu_ket_xuat=1, tu_ngay=(tu or ""),
+                                              den_ngay=(den or ""), mo_file=0)
                     msg(stage="info", text="✓ Đã kết xuất Excel vào thư mục theo Năm/Quý")
+                    # Sheet "Đối chiếu" trong file vừa xuất có phát hiện hóa đơn LỆCH
+                    # (Chi tiết vs Bảng kê) không — báo RÕ (không chỉ im lặng nằm
+                    # trong file) để người dùng biết mà mở file kiểm tra lại, thay vì
+                    # phải tự mở từng file Excel của từng công ty ra xem mới biết.
+                    try:
+                        so_lech_ban = int(resp_excel.headers.get("X-So-Lech-Ban", "0"))
+                        so_lech_mua = int(resp_excel.headers.get("X-So-Lech-Mua", "0"))
+                    except Exception:
+                        so_lech_ban = so_lech_mua = 0
+                    if so_lech_ban or so_lech_mua:
+                        ve_lech = []
+                        if so_lech_ban:
+                            ve_lech.append(f"bán ra {so_lech_ban}")
+                        if so_lech_mua:
+                            ve_lech.append(f"mua vào {so_lech_mua}")
+                        msg(stage="warn",
+                            text=f"⚠ Sheet 'Đối chiếu' trong file Excel vừa xuất phát hiện "
+                                 f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) "
+                                 f"giữa Chi tiết và Bảng kê — hãy mở file kiểm tra lại kỹ (mục "
+                                 f"'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet Đối chiếu).",
+                            total_saved=total_saved, file_saved=file_saved,
+                            file_thieu=file_thieu_tong,
+                            tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
+                            tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
+                            loi_tra_cuu=co_loi)
                 except Exception as e:
                     msg(stage="warn", text=f"Không tự kết xuất được Excel: {str(e)[:120]}")
                 # Kèm luôn file XML tờ khai GTGT (01/GTGT) và TNCN (05/KK-TNCN)
@@ -15100,7 +15125,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         if not lech:
             ws.append(["", "✓ Không có hóa đơn nào lệch (>= 100đ)"])
             ws.cell(ws.max_row, 2).font = Font(color="1F6B4A")
-            return
+            return 0
         ws.append(["Ký hiệu", "Số HĐ", "Chưa VAT (Chi tiết)", "Chưa VAT (Bảng kê)",
                    "Lệch chưa VAT", "VAT (Chi tiết)", "VAT (Bảng kê)", "Lệch VAT", "Ghi chú"])
         hr = ws.max_row
@@ -15135,9 +15160,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 if c >= 3:
                     ws.cell(rr, c).number_format = "#,##0"
             ws.cell(rr, 9).font = Font(color="C00000")
+        return len(lech)
 
-    them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - BÁN RA (kiểm tra & điều chỉnh):", "sold")
-    them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - MUA VÀO (kiểm tra & điều chỉnh):", "purchase")
+    so_lech_ban = them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - BÁN RA (kiểm tra & điều chỉnh):", "sold")
+    so_lech_mua = them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - MUA VÀO (kiểm tra & điều chỉnh):", "purchase")
 
     # định dạng số cột C và F (kể cả ô công thức SUMIF/SUM ra số lẻ)
     for r in range(1, ws.max_row + 1):
@@ -15237,7 +15263,15 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 pass
     if mo_file:
         _open_file_local(open_path)
-    return _resp_xuat(path, fname_x, extra={"X-Saved-Desktop": "1"} if da_luu_ket_xuat else None)
+    extra_headers = {}
+    if da_luu_ket_xuat:
+        extra_headers["X-Saved-Desktop"] = "1"
+    # Số hóa đơn LỆCH phát hiện ở sheet "Đối chiếu" (Chi tiết vs Bảng kê) —
+    # để nơi gọi (vd tự động xuất sau tra cứu hàng loạt) biết mà báo người
+    # dùng đi kiểm tra lại, không phải tự mở từng file Excel ra xem mới biết.
+    extra_headers["X-So-Lech-Ban"] = str(so_lech_ban)
+    extra_headers["X-So-Lech-Mua"] = str(so_lech_mua)
+    return _resp_xuat(path, fname_x, extra=extra_headers)
 
 
 # ---------- ĐỌC FILE XML -> XUẤT EXCEL CHI TIẾT ----------
