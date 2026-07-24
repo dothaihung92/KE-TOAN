@@ -183,6 +183,20 @@ def _to_num(v):
         return v if v not in (None,) else ""
 
 
+def _tygia_ngoai_te(dvtte, tgia):
+    """Trả về tỷ giá (số) nếu hóa đơn dùng NGOẠI TỆ (đơn vị tiền tệ khác VND
+    và có tỷ giá hợp lệ > 0); trả về None nếu là VND (không cần quy đổi) hoặc
+    không đọc được tỷ giá — dùng để quy đổi đơn giá/thành tiền hóa đơn USD...
+    ra VNĐ khi xuất Excel (Chi tiết BÁN RA / BK Bán ra)."""
+    dv = str(dvtte or "").strip().upper()
+    if not dv or dv == "VND":
+        return None
+    tg = _to_num(tgia)
+    if not isinstance(tg, (int, float)) or tg <= 0:
+        return None
+    return tg
+
+
 def _gop_hoa_don_trung_he_thong(rows):
     """Gộp các dòng invoices TRÙNG LẶP giữa 2 hệ thống (hóa đơn điện tử
     'query' / máy tính tiền 'sco-query') — cùng 1 hóa đơn thật (giống hệt
@@ -14266,7 +14280,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                  "số lượng", "thành tiền chưa vat", "tổng tiền", "tổng cộng",
                  "chưa vat (chi tiết)", "chưa vat (bảng kê)", "lệch chưa vat",
                  "vat (chi tiết)", "vat (bảng kê)", "lệch vat", "thuế", "thành tiền chưa thuế",
-                 "trị giá tính thuế nk", "tiền thuế nk"}
+                 "trị giá tính thuế nk", "tiền thuế nk", "thành tiền usd", "tỷ giá"}
 
     def format_so(ws, header_row=None):
         """Áp định dạng số cho các cột tiền. Tự tìm (các) dòng header nếu cần."""
@@ -15121,9 +15135,13 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     sold_rows = [r for r in rows if r["loai"] == "sold" and _hd_dung_cty(r, "sold")]
 
     # Bỏ phần tiêu đề dài (gây lệch cột) — header bắt đầu ngay dòng 1
+    # Cột M/N: hóa đơn NGOẠI TỆ (vd USD) — "Doanh số bán chưa thuế"/"Thuế GTGT"
+    # (cột I/J) LUÔN là VNĐ đã quy đổi (tỷ giá * số tiền gốc); M/N chỉ để
+    # tham khảo lại số tiền GỐC ngoại tệ + tỷ giá đã dùng, để trống nếu là VND.
     hdr2 = ["STT", "Ký hiệu mẫu", "Ký hiệu HĐ", "Số hóa đơn", "Ngày lập",
             "Tên người mua", "MST người mua", "Mặt hàng",
-            "Doanh số bán chưa thuế", "Thuế GTGT", "Trạng thái", "Kết quả"]
+            "Doanh số bán chưa thuế", "Thuế GTGT", "Trạng thái", "Kết quả",
+            "Thành tiền USD", "Tỷ giá"]
     ws.append(hdr2)
     hrow = ws.max_row
     for c in range(1, len(hdr2) + 1):
@@ -15190,9 +15208,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             if info and tsdata:
                 _k, val = tsdata
                 ds = val["ds"]; thue = val["thue"]
+                # Hóa đơn ngoại tệ: hiện lại số tiền GỐC (USD...) + tỷ giá đã
+                # dùng để quy đổi ra cột Doanh số/Thuế (đã là VNĐ) ở trên.
+                usd_out = _to_num(val.get("ds_nt")) if info.get("tygia") else ""
+                tygia_out = info.get("tygia") or ""
                 ws.append([stt, info["khmshdon"], info["khhdon"], info["shdon"],
                            ngay, info["ten_nmua"] or "Khách lẻ", info["mst_nmua"],
-                           info["mat_hang"], _to_num(ds), _to_num(thue), tt, kq])
+                           info["mat_hang"], _to_num(ds), _to_num(thue), tt, kq,
+                           usd_out, tygia_out])
             else:
                 ds = _to_num(r["tgtcthue"]) or 0
                 thue = _to_num(r["tgtthue"]) or 0
@@ -15201,19 +15224,19 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                                 else "(chưa lấy được file XML)")
                 ws.append([stt, "1", r["khhdon"], r["shdon"], ngay,
                            "", r["nmmst"], mat_hang_txt,
-                           ds, thue, tt, kq])
+                           ds, thue, tt, kq, "", ""])
             sub_ds += ds if isinstance(ds, (int, float)) else 0
             sub_thue += thue if isinstance(thue, (int, float)) else 0
         ws.append(["", "", "", "", "", "", "", "Tổng nhóm",
-                   _to_num(sub_ds), _to_num(sub_thue), "", ""])
-        for c in range(1, 13):
+                   _to_num(sub_ds), _to_num(sub_thue), "", "", "", ""])
+        for c in range(1, 15):
             ws.cell(ws.max_row, c).font = bold
         grand_ds += sub_ds; grand_thue += sub_thue
 
     ws.append([])
     ws.append(["", "", "", "", "", "", "", "TỔNG CỘNG",
-               _to_num(grand_ds), _to_num(grand_thue), "", ""])
-    for c in range(1, 13):
+               _to_num(grand_ds), _to_num(grand_thue), "", "", "", ""])
+    for c in range(1, 15):
         ws.cell(ws.max_row, c).font = Font(bold=True, color="C00000", name="Times New Roman")
     autofit(ws)
     format_so(ws)
@@ -15550,7 +15573,29 @@ def _parse_detail_json(detail):
     # chú rõ ràng, tránh hiện ô trống trông như lỗi/thiếu dữ liệu.
     _ten_khong_ma = ("(TCT không cung cấp tên hàng hóa — hóa đơn không mã)"
                      if str(detail.get("ttxly", "") or "").strip() == "6" else "")
+    # Hóa đơn NGOẠI TỆ (vd USD) -> quy đổi đơn giá/thành tiền/tiền thuế ra VNĐ
+    # (tỷ giá * giá trị gốc ngoại tệ), giống hệt _parse_xml_invoice.
+    dvtte = detail.get("dvtte", "") or ""
+    tygia = _tygia_ngoai_te(dvtte, detail.get("tgia", ""))
+    tgtcthue, tgtthue, tgtttbso = detail.get("tgtcthue", ""), detail.get("tgtthue", ""), detail.get("tgtttbso", "")
+    if tygia:
+        if isinstance(_to_num(tgtcthue), (int, float)):
+            tgtcthue = _to_num(tgtcthue) * tygia
+        if isinstance(_to_num(tgtthue), (int, float)):
+            tgtthue = _to_num(tgtthue) * tygia
+        if isinstance(_to_num(tgtttbso), (int, float)):
+            tgtttbso = _to_num(tgtttbso) * tygia
     for it in items:
+        dgia_nt, thtien_nt = it.get("dgia", ""), it.get("thtien", "")
+        tien_thue_nt = it.get("tthue", "") or it.get("tongtien_thue", "")
+        dgia_out, thtien_out, tien_thue_out = dgia_nt, thtien_nt, tien_thue_nt
+        if tygia:
+            if isinstance(_to_num(dgia_nt), (int, float)):
+                dgia_out = _to_num(dgia_nt) * tygia
+            if isinstance(_to_num(thtien_nt), (int, float)):
+                thtien_out = _to_num(thtien_nt) * tygia
+            if isinstance(_to_num(tien_thue_nt), (int, float)):
+                tien_thue_out = _to_num(tien_thue_nt) * tygia
         rows.append({
             "khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
             "ngay": ngay, "ten_nban": ten_nban, "mst_nban": mst_nban,
@@ -15561,24 +15606,27 @@ def _parse_detail_json(detail):
             "ten_hang": it.get("ten", "") or it.get("thhdvu", "") or _ten_khong_ma,
             "dvt": it.get("dvtinh", "") or "",
             "sluong": it.get("sluong", ""),
-            "dgia": it.get("dgia", ""),
-            "thtien": it.get("thtien", ""),
+            "dgia": dgia_out,
+            "thtien": thtien_out,
             "stckhau": it.get("stckhau", ""),
             "tsuat": str(it.get("ltsuat", "") or it.get("tsuat", "") or ""),
-            "tien_thue": it.get("tthue", "") or it.get("tongtien_thue", ""),
-            "tgtcthue": detail.get("tgtcthue", ""),
-            "tgtthue": detail.get("tgtthue", ""),
-            "tgtttbso": detail.get("tgtttbso", ""),
+            "tien_thue": tien_thue_out,
+            "tgtcthue": tgtcthue,
+            "tgtthue": tgtthue,
+            "tgtttbso": tgtttbso,
+            # NGOẠI TỆ gốc + tỷ giá (dùng cho cột M/N của BK Bán ra) — None nếu là VND
+            "dvtte": dvtte or "VND", "tygia": tygia, "thtien_nt": thtien_nt if tygia else None,
         })
 
     # Tổng tiền phí (không chịu thuế) — xem giải thích ở _lay_tong_tien_phi_xml
     tong_phi = _lay_tong_tien_phi_json(detail)
+    if tong_phi and tygia:
+        tong_phi = tong_phi * tygia
     if tong_phi:
         common = {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
                   "ngay": ngay, "ten_nban": ten_nban, "mst_nban": mst_nban,
                   "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
-                  "tgtcthue": detail.get("tgtcthue", ""), "tgtthue": detail.get("tgtthue", ""),
-                  "tgtttbso": detail.get("tgtttbso", "")}
+                  "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso}
         rows.append(_dong_phi_hoa_don(tong_phi, common))
     return rows
 
@@ -15610,6 +15658,14 @@ def _summary_from_detail_json(detail):
             return s2
         return s or "KHAC"
 
+    # Hóa đơn NGOẠI TỆ (vd USD) -> "ds"/"thue" LUÔN quy đổi ra VNĐ (tỷ giá *
+    # giá trị gốc); "ds_nt" giữ nguyên số tiền GỐC ngoại tệ (dùng cho cột
+    # "Thành tiền USD" của BK Bán ra).
+    dvtte = detail.get("dvtte", "") or ""
+    tygia = _tygia_ngoai_te(dvtte, detail.get("tgia", ""))
+    info["dvtte"] = dvtte or "VND"
+    info["tygia"] = tygia
+
     theo_ts = {}
     # ưu tiên phần tổng hợp thuế suất nếu có
     ltsuat = detail.get("thttltsuat") or detail.get("hdhhdvu_ltsuat") or []
@@ -15618,9 +15674,12 @@ def _summary_from_detail_json(detail):
             key = norm_ts(l.get("tsuat"))
             ds = _to_num(l.get("thtien")) or 0
             thue = _to_num(l.get("tthue")) or 0
-            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0})
-            cur["ds"] += ds if isinstance(ds, (int, float)) else 0
-            cur["thue"] += thue if isinstance(thue, (int, float)) else 0
+            ds = ds if isinstance(ds, (int, float)) else 0
+            thue = thue if isinstance(thue, (int, float)) else 0
+            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
+            cur["ds_nt"] += ds
+            cur["ds"] += ds * tygia if tygia else ds
+            cur["thue"] += thue * tygia if tygia else thue
     else:
         for it in items:
             key = norm_ts(it.get("ltsuat") or it.get("tsuat"))
@@ -15629,16 +15688,19 @@ def _summary_from_detail_json(detail):
                 rate = float(str(it.get("ltsuat") or it.get("tsuat") or "0").replace("%", "")) / 100
             except Exception:
                 rate = 0
-            thue = round(ds * rate) if isinstance(ds, (int, float)) else 0
-            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0})
-            cur["ds"] += ds if isinstance(ds, (int, float)) else 0
-            cur["thue"] += thue
+            ds = ds if isinstance(ds, (int, float)) else 0
+            thue = round(ds * rate)
+            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
+            cur["ds_nt"] += ds
+            cur["ds"] += ds * tygia if tygia else ds
+            cur["thue"] += thue * tygia if tygia else thue
     # Tổng tiền phí (không chịu thuế) — cộng vào nhóm KCT để khớp với dòng
     # 'Tổng tiền phí' đã thêm ở _parse_detail_json (Chi tiết BÁN RA vs BK Bán ra).
     tong_phi = _lay_tong_tien_phi_json(detail)
     if tong_phi:
-        cur = theo_ts.setdefault("KCT", {"ds": 0, "thue": 0})
-        cur["ds"] += tong_phi
+        cur = theo_ts.setdefault("KCT", {"ds": 0, "thue": 0, "ds_nt": 0})
+        cur["ds_nt"] += tong_phi
+        cur["ds"] += tong_phi * tygia if tygia else tong_phi
     info["theo_ts"] = theo_ts
     return info
 
@@ -15789,6 +15851,15 @@ def _parse_xml_invoice(xml_bytes):
     tgtcthue = find_text(root, "TgTCThue")
     tgtthue = find_text(root, "TgTThue")
     tgtttbso = find_text(root, "TgTTTBSo")
+    # Hóa đơn NGOẠI TỆ (vd USD): DVTTe/TGia nằm trong TToan — quy đổi đơn
+    # giá/thành tiền/tiền thuế từng dòng hàng ra VNĐ (tỷ giá * đơn giá/thành
+    # tiền gốc ngoại tệ), để "Chi tiết BÁN RA"/"BK Bán ra" luôn hiện đúng VNĐ.
+    dvtte = find_text(root, "DVTTe")
+    tygia = _tygia_ngoai_te(dvtte, find_text(root, "TGia"))
+    if tygia:
+        tgtcthue = _to_num(tgtcthue) * tygia if isinstance(_to_num(tgtcthue), (int, float)) else tgtcthue
+        tgtthue = _to_num(tgtthue) * tygia if isinstance(_to_num(tgtthue), (int, float)) else tgtthue
+        tgtttbso = _to_num(tgtttbso) * tygia if isinstance(_to_num(tgtttbso), (int, float)) else tgtttbso
 
     # Danh sách hàng hóa dịch vụ (chỉ lấy HHDVu trong DSHHDVu)
     dshh = root.find(".//DSHHDVu")
@@ -15805,6 +15876,17 @@ def _parse_xml_invoice(xml_bytes):
         return ""
 
     for hh in hh_list:
+        dgia_nt = find_text(hh, "DGia")
+        thtien_nt = find_text(hh, "ThTien")
+        tien_thue_nt = lay_ttkhac(hh, "TongTien_Thue")
+        dgia_out, thtien_out, tien_thue_out = dgia_nt, thtien_nt, tien_thue_nt
+        if tygia:
+            if isinstance(_to_num(dgia_nt), (int, float)):
+                dgia_out = _to_num(dgia_nt) * tygia
+            if isinstance(_to_num(thtien_nt), (int, float)):
+                thtien_out = _to_num(thtien_nt) * tygia
+            if isinstance(_to_num(tien_thue_nt), (int, float)):
+                tien_thue_out = _to_num(tien_thue_nt) * tygia
         rows.append({
             "khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
             "ngay": ngay, "ten_nban": ten_nban, "mst_nban": mst_nban,
@@ -15815,18 +15897,22 @@ def _parse_xml_invoice(xml_bytes):
             "ten_hang": find_text(hh, "THHDVu"),
             "dvt": find_text(hh, "DVTinh"),
             "sluong": find_text(hh, "SLuong"),
-            "dgia": find_text(hh, "DGia"),
-            "thtien": find_text(hh, "ThTien"),
+            "dgia": dgia_out,
+            "thtien": thtien_out,
             "stckhau": find_text(hh, "STCKhau"),  # số tiền chiết khấu dòng này
             "tsuat": find_text(hh, "TSuat"),
             # tiền thuế GTGT lấy ĐÚNG từ XML (TTKhac > TongTien_Thue)
-            "tien_thue": lay_ttkhac(hh, "TongTien_Thue"),
+            "tien_thue": tien_thue_out,
             "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso,
+            # NGOẠI TỆ gốc + tỷ giá (dùng cho cột M/N của BK Bán ra) — None nếu là VND
+            "dvtte": dvtte or "VND", "tygia": tygia, "thtien_nt": thtien_nt if tygia else None,
         })
 
     # Tổng tiền phí (không chịu thuế) — vd lệ phí đăng kiểm, phí sân bay/thu
     # hộ... nằm RIÊNG ngoài danh sách hàng hóa dịch vụ, cộng thêm 1 dòng KCT.
     tong_phi = _lay_tong_tien_phi_xml(root)
+    if tong_phi and tygia:
+        tong_phi = tong_phi * tygia
     if tong_phi:
         common = {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
                   "ngay": ngay, "ten_nban": ten_nban, "mst_nban": mst_nban,
@@ -15890,6 +15976,14 @@ def _parse_invoice_summary(xml_bytes):
             return s2
         return s or "KHAC"
 
+    # Hóa đơn NGOẠI TỆ (vd USD) -> "ds"/"thue" LUÔN quy đổi ra VNĐ (tỷ giá *
+    # giá trị gốc); "ds_nt" giữ nguyên số tiền GỐC ngoại tệ (dùng cho cột
+    # "Thành tiền USD" của BK Bán ra).
+    dvtte = ft(root, "DVTTe")
+    tygia = _tygia_ngoai_te(dvtte, ft(root, "TGia"))
+    info["dvtte"] = dvtte or "VND"
+    info["tygia"] = tygia
+
     theo_ts = {}
     lts = root.findall(".//THTTLTSuat/LTSuat")
     if lts:
@@ -15897,9 +15991,12 @@ def _parse_invoice_summary(xml_bytes):
             key = norm_ts(ft(l, "TSuat"))
             ds = _to_num(ft(l, "ThTien")) or 0
             thue = _to_num(ft(l, "TThue")) or 0
-            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0})
-            cur["ds"] += ds if isinstance(ds, (int, float)) else 0
-            cur["thue"] += thue if isinstance(thue, (int, float)) else 0
+            ds = ds if isinstance(ds, (int, float)) else 0
+            thue = thue if isinstance(thue, (int, float)) else 0
+            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
+            cur["ds_nt"] += ds
+            cur["ds"] += ds * tygia if tygia else ds
+            cur["thue"] += thue * tygia if tygia else thue
     elif dshh is not None:
         for hh in dshh.findall("HHDVu"):
             key = norm_ts(ft(hh, "TSuat"))
@@ -15908,16 +16005,19 @@ def _parse_invoice_summary(xml_bytes):
                 rate = float(str(ft(hh, "TSuat")).replace("%", "")) / 100
             except Exception:
                 rate = 0
-            thue = round(ds * rate) if isinstance(ds, (int, float)) else 0
-            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0})
-            cur["ds"] += ds if isinstance(ds, (int, float)) else 0
-            cur["thue"] += thue
+            ds = ds if isinstance(ds, (int, float)) else 0
+            thue = round(ds * rate)
+            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
+            cur["ds_nt"] += ds
+            cur["ds"] += ds * tygia if tygia else ds
+            cur["thue"] += thue * tygia if tygia else thue
     # Tổng tiền phí (không chịu thuế) — cộng vào nhóm KCT để khớp với dòng
     # 'Tổng tiền phí' đã thêm ở _parse_xml_invoice (Chi tiết BÁN RA vs BK Bán ra).
     tong_phi = _lay_tong_tien_phi_xml(root)
     if tong_phi:
-        cur = theo_ts.setdefault("KCT", {"ds": 0, "thue": 0})
-        cur["ds"] += tong_phi
+        cur = theo_ts.setdefault("KCT", {"ds": 0, "thue": 0, "ds_nt": 0})
+        cur["ds_nt"] += tong_phi
+        cur["ds"] += tong_phi * tygia if tygia else tong_phi
     info["theo_ts"] = theo_ts
     return info
 
