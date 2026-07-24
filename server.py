@@ -6094,9 +6094,12 @@ def fetch_invoices(cid: int, body: dict = Body(...)):
 
 
 # ---------- TRA CỨU HÀNG LOẠT (nhiều công ty cùng lúc) ----------
-# Mỗi batch lấy lần lượt từng công ty (tuần tự) để tránh bị Tổng cục Thuế
-# chặn tạm (429). Tiến độ từng công ty vẫn ghi vào FETCH_JOBS[cid] như cũ,
-# đồng thời BATCH_JOBS[batch_id] tổng hợp trạng thái toàn batch.
+# Chạy CÙNG LÚC tối đa BATCH_SONG_SONG công ty (worker pool) — xong công ty
+# nào thì lập tức lấy công ty tiếp theo trong hàng đợi chạy tiếp, thay vì đợi
+# xong HẲN 1 công ty rồi mới bắt đầu công ty kế (tuần tự như trước). Tiến độ
+# từng công ty vẫn ghi vào FETCH_JOBS[cid] như cũ, đồng thời BATCH_JOBS[batch_id]
+# tổng hợp trạng thái toàn batch (current_list = các công ty đang chạy).
+BATCH_SONG_SONG = 3
 BATCH_JOBS = {}      # {batch_id: {...}}
 _BATCH_SEQ = {"n": 0}
 _seed_batch_seq()   # nối tiếp id từ batch đã lưu trong DB (tránh trùng)
@@ -6126,29 +6129,42 @@ def _batch_luu_db(batch_id, batch, body, trang_thai=None):
 
 
 def _run_batch(batch_id: int, cids: list, body: dict):
+    """Chạy CÙNG LÚC tối đa BATCH_SONG_SONG công ty (worker pool) — công ty
+    nào xong trước thì lập tức nhường chỗ cho công ty tiếp theo trong hàng
+    đợi, không phải đợi xong HẾT 1 lượt BATCH_SONG_SONG công ty rồi mới bắt
+    đầu lượt kế. batch["current_list"] là danh sách cid ĐANG chạy tại một
+    thời điểm (tối đa BATCH_SONG_SONG phần tử)."""
     batch = BATCH_JOBS[batch_id]
     # Trình duyệt ẩn dùng CHUNG cho cả batch để vẽ captcha chính xác khi tự
     # đăng nhập (mở LƯỜI — chỉ mở khi thật sự gặp công ty chưa đăng nhập đầu
     # tiên, và dùng lại cho các công ty/lượt thử sau, đỡ tốn thời gian mở lại
-    # trình duyệt nhiều lần).
+    # trình duyệt nhiều lần). Có thể có NHIỀU công ty cùng cần tự đăng nhập
+    # cùng lúc (chạy song song) nhưng trình duyệt ẩn CHỈ 1 cửa sổ -> khoá lại
+    # để mỗi lần chỉ 1 công ty dùng trình duyệt vẽ captcha (không tranh nhau),
+    # phần TẢI HÓA ĐƠN (_run_fetch_job) của từng công ty vẫn chạy song song
+    # bình thường vì mỗi công ty có phiên đăng nhập/kết nối RIÊNG.
     drv_captcha = [None, False]  # [driver_hoac_None, da_thu_mo_chua]
+    drv_lock = threading.Lock()
+    batch_lock = threading.Lock()   # bảo vệ batch["done"]/current_list/_batch_luu_db
 
     def _drv():
-        if not drv_captcha[1]:
-            drv_captcha[1] = True
-            drv_captcha[0] = _mo_trinh_duyet_captcha()
-        return drv_captcha[0]
+        with drv_lock:
+            if not drv_captcha[1]:
+                drv_captcha[1] = True
+                drv_captcha[0] = _mo_trinh_duyet_captcha()
+            return drv_captcha[0]
 
-    try:
-        for cid in cids:
-            if batch.get("cancel"):
-                break
-            item = batch["items"].get(cid)
-            # Đặt "current" + khởi tạo job NGAY TỪ ĐẦU (kể cả trước khi đăng
-            # nhập) — trước đây "current" chỉ được gán ngay trước lúc tra cứu,
-            # nên suốt bước tự đăng nhập (có thể mất vài chục giây) người dùng
-            # không thấy phần mềm đang xử lý công ty nào / tới đâu.
-            batch["current"] = cid
+    def _xu_ly_1_cong_ty(cid):
+        if batch.get("cancel"):
+            return
+        item = batch["items"].get(cid)
+        try:
+            # Đặt vào current_list + khởi tạo job NGAY TỪ ĐẦU (kể cả trước khi
+            # đăng nhập) — để người dùng thấy phần mềm đang xử lý công ty nào
+            # suốt bước tự đăng nhập (có thể mất vài chục giây), không chỉ lúc
+            # bắt đầu tải hóa đơn.
+            with batch_lock:
+                batch.setdefault("current_list", []).append(cid)
             FETCH_JOBS[cid] = _new_fetch_job()
 
             def _bao_tien_do(t, _cid=cid, _item=item):
@@ -6180,13 +6196,15 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                     item["status"] = "skipped"
                     item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
                     _luu_loi_tra_cuu(cid, item["note"])
-                    batch["done"] += 1
-                    _batch_luu_db(batch_id, batch, body)
-                    continue
+                    with batch_lock:
+                        batch["done"] += 1
+                        _batch_luu_db(batch_id, batch, body)
+                    return
             item["status"] = "running"
-            _batch_luu_db(batch_id, batch, body)
+            with batch_lock:
+                _batch_luu_db(batch_id, batch, body)
             try:
-                _run_fetch_job(cid, body)   # chạy đồng bộ trong thread batch
+                _run_fetch_job(cid, body)   # chạy đồng bộ trong thread riêng của công ty này
                 last = (FETCH_JOBS.get(cid) or {}).get("last") or {}
                 item["total_saved"] = last.get("total_saved", 0)
                 # Số hóa đơn LẤY ĐƯỢC so với số trang Thuế BÁO (tk_..._got/exp,
@@ -6210,12 +6228,39 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 item["status"] = "error"
                 item["note"] = str(e)[:160]
                 _luu_loi_tra_cuu(cid, item["note"])
-            batch["done"] += 1
-            # LƯU TIẾN ĐỘ sau MỖI công ty -> tắt đột ngột chỉ mất dở dang 1 cty
-            _batch_luu_db(batch_id, batch, body)
+            with batch_lock:
+                batch["done"] += 1
+                # LƯU TIẾN ĐỘ sau MỖI công ty -> tắt đột ngột chỉ mất dở dang 1 cty
+                _batch_luu_db(batch_id, batch, body)
+        except Exception as e:
+            # Lưới an toàn CUỐI CÙNG — bất kỳ lỗi bất ngờ nào (kể cả ngoài
+            # phần tra cứu, vd lỗi khi tự đăng nhập) TUYỆT ĐỐI không được để
+            # công ty này "kẹt" mãi ở trạng thái pending/running mà không ai
+            # biết, vì batch chạy NHIỀU luồng cùng lúc nên lỗi ở đây sẽ không
+            # tự nổi lên console như code chạy tuần tự trước đây.
+            item["status"] = "error"
+            item["note"] = str(e)[:160]
+            with batch_lock:
+                batch["done"] += 1
+                _batch_luu_db(batch_id, batch, body)
+        finally:
+            with batch_lock:
+                cl = batch.setdefault("current_list", [])
+                if cid in cl:
+                    cl.remove(cid)
+
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=BATCH_SONG_SONG) as executor:
+            for cid in cids:
+                executor.submit(_xu_ly_1_cong_ty, cid)
+            # thoát khỏi khối "with" tự động CHỜ hết mọi công ty đã nộp vào
+            # hàng đợi xong (kể cả những công ty còn đang chạy lúc cancel) —
+            # đúng với hành vi cũ: bấm Dừng KHÔNG ngắt ngang công ty đang chạy,
+            # chỉ không bắt đầu công ty MỚI nào nữa (_xu_ly_1_cong_ty tự kiểm
+            # tra cancel ngay đầu hàm với các công ty chưa kịp bắt đầu).
     finally:
         batch["running"] = False
-        batch["current"] = None
+        batch["current_list"] = []
         _dong_trinh_duyet_captcha(drv_captcha[0])
         # Còn công ty nào CHƯA xong (do người dùng bấm Dừng giữa chừng) -> đánh
         # dấu 'tam_dung' để lần sau mở khung sẽ mời TIẾP TỤC phần còn dở dang.
@@ -6281,7 +6326,7 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
         "cancel": False,
         "total": len(cids),
         "done": da_xong,
-        "current": None,
+        "current_list": [],   # danh sách cid ĐANG chạy (tối đa BATCH_SONG_SONG)
         "started": time.time(),
         "order": cids,
         "items": items,
@@ -6386,33 +6431,30 @@ def fetch_batch_status(batch_id: int):
     batch = BATCH_JOBS.get(batch_id)
     if not batch:
         return {"running": False, "no_job": True}
-    # Chi tiết TRỰC TIẾP công ty đang xử lý (đăng nhập/tra cứu/tải file...) —
-    # để người dùng thấy phần mềm đang chạy TỚI ĐÂU, không chỉ biết "đang xử
-    # lý công ty X" mà không rõ đang ở bước nào bên trong.
-    current_detail = ""
-    current_cur = None
-    current_total = None
-    cur_cid = batch["current"]
-    if cur_cid is not None:
+    # Chi tiết TRỰC TIẾP từng công ty ĐANG chạy (đăng nhập/tra cứu/tải file...)
+    # — chạy CÙNG LÚC tối đa BATCH_SONG_SONG công ty nên trả về 1 DANH SÁCH,
+    # không phải chỉ 1 công ty như trước, để người dùng thấy đủ cả mấy công
+    # ty đang chạy song song, mỗi công ty đang ở bước nào.
+    current_list = []
+    for cur_cid in list(batch.get("current_list") or []):
+        it = batch["items"].get(cur_cid)
+        entry = {"cid": cur_cid, "ten": (it or {}).get("ten", ""), "detail": "",
+                  "cur": None, "total": None}
         job = FETCH_JOBS.get(cur_cid)
         if job:
             last = job.get("last") or {}
-            current_detail = last.get("text", "")
-            # Tiến độ TẢI FILE (số hóa đơn đang tải/còn lại) của công ty đang
-            # chạy — giống hệt thanh tiến trình tải file ở tra cứu 1 công ty,
-            # để "Tra cứu hóa đơn hàng loạt" cũng thấy rõ đang tải bao nhiêu/
-            # còn bao nhiêu, không chỉ 1 dòng chữ nhỏ.
+            entry["detail"] = last.get("text", "")
+            # Tiến độ TẢI FILE (số hóa đơn đang tải/còn lại) của công ty này —
+            # giống hệt thanh tiến trình tải file ở tra cứu 1 công ty.
             if last.get("stage") == "download" and last.get("total"):
-                current_cur = last.get("cur")
-                current_total = last.get("total")
+                entry["cur"] = last.get("cur")
+                entry["total"] = last.get("total")
+        current_list.append(entry)
     return {
         "running": batch["running"],
         "total": batch["total"],
         "done": batch["done"],
-        "current": batch["current"],
-        "current_detail": current_detail,
-        "current_cur": current_cur,
-        "current_total": current_total,
+        "current_list": current_list,
         "items": [batch["items"][c] for c in batch["order"]],
     }
 
@@ -6422,10 +6464,10 @@ def fetch_batch_cancel(batch_id: int):
     batch = BATCH_JOBS.get(batch_id)
     if batch:
         batch["cancel"] = True
-        # dừng luôn công ty đang chạy
-        cur = batch.get("current")
-        if cur and FETCH_JOBS.get(cur):
-            FETCH_JOBS[cur]["cancel"] = True
+        # dừng luôn TẤT CẢ công ty đang chạy song song (không chỉ 1 công ty)
+        for cur in list(batch.get("current_list") or []):
+            if FETCH_JOBS.get(cur):
+                FETCH_JOBS[cur]["cancel"] = True
     return {"ok": True}
 
 

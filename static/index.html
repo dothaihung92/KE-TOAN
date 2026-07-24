@@ -558,7 +558,7 @@
         <button class="btn ghost" onclick="batchBoQuaDoDang()">Bỏ qua</button>
       </div>
     </div>
-    <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Hệ thống xử lý <b>lần lượt</b> từng công ty (an toàn, tránh bị Tổng cục Thuế chặn tạm). Công ty <b>chưa đăng nhập</b> sẽ được <b>tự động đăng nhập</b> (bằng tài khoản/mật khẩu đã lưu) trước khi tra cứu — chỉ bỏ qua nếu công ty đó chưa lưu mật khẩu hoặc tự đăng nhập thất bại.</p>
+    <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Hệ thống chạy <b>song song tối đa 3 công ty cùng lúc</b> — xong công ty nào thì lập tức chạy tiếp công ty khác trong hàng đợi. Công ty <b>chưa đăng nhập</b> sẽ được <b>tự động đăng nhập</b> (bằng tài khoản/mật khẩu đã lưu) trước khi tra cứu — chỉ bỏ qua nếu công ty đó chưa lưu mật khẩu hoặc tự đăng nhập thất bại.</p>
     <p class="hint" style="margin-top:-4px;color:var(--muted)">💾 Tiến độ được lưu sau mỗi công ty — nếu phần mềm bị tắt đột ngột hoặc bạn bấm Dừng, lần sau mở lại sẽ được mời <b>tiếp tục phần còn dở dang</b>.</p>
 
     <div class="field">
@@ -2624,26 +2624,25 @@ async function batchTheoDoi(bid){
     try{st=await api(`/api/fetch-batch-status/${batchId}`);}catch{continue;}
     running=st.running;
     document.getElementById('batchBar').style.width=Math.round(st.done/st.total*100)+'%';
-    const cur=st.items.find(i=>i.cid===st.current);
-    const dongTrangThai=running?`Đang xử lý ${st.done}/${st.total}${cur?(' — '+cur.ten):''}...`
+    // Chạy CÙNG LÚC tối đa 3 công ty (worker pool) -> current_list là 1
+    // DANH SÁCH các công ty đang chạy tại thời điểm này, không còn 1 công
+    // ty duy nhất như trước.
+    const dsDangChay=st.current_list||[];
+    const tenDangChay=dsDangChay.map(c=>c.ten).filter(Boolean);
+    const dongTrangThai=running?`Đang xử lý ${st.done}/${st.total} (chạy song song ${dsDangChay.length})`
+                                +(tenDangChay.length?(' — '+tenDangChay.join(', ')):'')+'...'
                                 :`Hoàn tất ${st.done}/${st.total} công ty`;
     document.getElementById('batchProgressText').textContent=dongTrangThai;
     // Vẫn cập nhật khung nhỏ nổi dù đang ẨN (tiếp tục chạy nền) — để bấm vào
     // xem lại tiến độ mới nhất mà không cần đợi mở khung ra mới thấy.
     const miniText=document.getElementById('batchMiniText');
     if(miniText)miniText.textContent=dongTrangThai;
-    document.getElementById('batchDetail').textContent=
-      (running && st.current_detail)?('↳ '+st.current_detail):'';
-    const dlWrap=document.getElementById('batchDlWrap');
-    if(running && st.current_cur!=null && st.current_total){
-      dlWrap.style.display='block';
-      document.getElementById('batchDlText').textContent=
-        `${st.current_cur}/${st.current_total} (còn ${st.current_total-st.current_cur})`;
-      document.getElementById('batchDlBar').style.width=
-        Math.round(st.current_cur/st.current_total*100)+'%';
-    }else{
-      dlWrap.style.display='none';
-    }
+    // Mỗi công ty đang chạy song song hiện riêng 1 dòng chi tiết (kèm luôn
+    // tiến độ tải file nếu có, vd "3/10 (còn 7)" đã có sẵn trong text).
+    document.getElementById('batchDetail').innerHTML=running
+      ?dsDangChay.map(c=>`↳ <b>${c.ten}</b>: ${c.detail||'...'}`).join('<br>')
+      :'';
+    document.getElementById('batchDlWrap').style.display='none';
     const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
     document.getElementById('batchLog').innerHTML=st.items.map(i=>{
       const lech=i.status==='done'&&i.lech;
