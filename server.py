@@ -4890,6 +4890,114 @@ def _mo_ta_ds_hd_loi(ds_inv, loai, gioi_han=10):
     return txt
 
 
+def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
+    """Sau khi ĐÃ TẢI XONG file XML (bước RIÊNG BIỆT, không chạy xen lẫn
+    với việc tải file — tránh lặp lại sự cố tường lửa Thuế từng CHẶN CẢ IP
+    khi 2 loại request (tải file + lấy chi tiết) chạy xen kẽ nhau qua nhiều
+    luồng cùng lúc), lấy nốt 'chi tiết dòng hàng' (detail_json) qua mạng cho
+    các hóa đơn KHÔNG có file trên máy (hóa đơn 'không mã' ttxly=6 — Thuế
+    không cấp file XML cho loại này, hoặc hóa đơn tải file bị lỗi/thất bại)
+    — để lúc Xuất Excel CHỈ cần ĐỌC dữ liệu đã có sẵn (file hoặc detail_json
+    đã lưu), không phải tự đi tải bù qua mạng gây treo lâu như trước.
+
+    Theo đúng yêu cầu: tra cứu phải tải/lấy đủ dữ liệu ngay từ bước tra cứu;
+    kết xuất Excel chỉ đọc file và xuất ra."""
+    if not (client and client.token and not getattr(client, "_token_dead", False)):
+        return
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM invoices WHERE company_id=? AND (detail_json IS NULL OR detail_json='')",
+        (cid,)).fetchall()
+    conn.close()
+    if not rows:
+        return
+
+    # Xây index file trên máy (giống hệt cách Xuất Excel làm) để biết hóa
+    # đơn nào ĐÃ CÓ file — chỉ những hóa đơn KHÔNG có file mới cần lấy chi
+    # tiết qua mạng ở đây.
+    file_index = {}
+    file_index_2 = {}
+    if save_dir and os.path.isdir(save_dir):
+        for rootdir, _d, files in os.walk(save_dir):
+            for fn in files:
+                low = fn.lower()
+                if not (low.endswith(".zip") or low.endswith(".xml")):
+                    continue
+                name = fn.rsplit(".", 1)[0]
+                parts = name.split("_")
+                if len(parts) < 2:
+                    continue
+                f_khh, f_sho = parts[0], parts[1].lstrip("0") or "0"
+                if len(parts) >= 3:
+                    file_index[(f_khh, f_sho, _chuan_mst(parts[2])[:10])] = True
+                else:
+                    file_index_2[(f_khh, f_sho)] = True
+
+    can_nap = []
+    for r in rows:
+        khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
+        mst = _chuan_mst(r["nbmst"])[:10]
+        if (khh, sho, mst) in file_index or (khh, sho) in file_index_2:
+            continue
+        can_nap.append(r)
+    if not can_nap:
+        return
+
+    msg(stage="info",
+        text=f"Đang lấy nốt chi tiết dòng hàng cho {len(can_nap)} hóa đơn không có file trên máy "
+             f"(hóa đơn không mã/tải file lỗi) — để Xuất Excel sau này không phải tải bù...")
+
+    def _goi(r):
+        ht0 = r["he_thong"] or "query"
+        for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
+            try:
+                d = client.get_detail(r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], ht,
+                                      max_retry=2, cho_khi_429=True, loai=r["loai"])
+                if d and (d.get("hdhhdvu") or d.get("nbmst")):
+                    return r["id"], json.dumps(d, ensure_ascii=False)
+            except Exception:
+                pass
+        time.sleep(SP()["file"])
+        return r["id"], None
+
+    workers = {"fast": 4, "balanced": 3, "safe": 2}.get(CURRENT_SPEED, 3)
+    SO_VONG_KHONG_TIEN_TOI_DA = 5
+    so_vong_khong_tien = 0
+    vong = 0
+    ds = can_nap
+    while ds:
+        if getattr(client, "_token_dead", False):
+            msg(stage="warn",
+                text=f"⚠ phiên đăng nhập hết hạn giữa chừng — còn {len(ds)} hóa đơn CHƯA lấy được "
+                     f"chi tiết dòng hàng, đăng nhập lại rồi tra cứu lại để lấy nốt")
+            return
+        vong += 1
+        ket_qua = {}
+        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            for inv_id, dj in ex.map(_goi, ds):
+                if dj:
+                    ket_qua[inv_id] = dj
+        if ket_qua:
+            cn = db()
+            for inv_id, dj in ket_qua.items():
+                cn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
+            cn.commit(); cn.close()
+        ds = [r for r in ds if r["id"] not in ket_qua]
+        if not ket_qua:
+            so_vong_khong_tien += 1
+            if so_vong_khong_tien >= SO_VONG_KHONG_TIEN_TOI_DA:
+                msg(stage="warn",
+                    text=f"⚠ đã thử {so_vong_khong_tien} vòng liên tiếp không lấy thêm được hóa đơn "
+                         f"nào — còn {len(ds)}/{len(can_nap)} hóa đơn CHƯA lấy được chi tiết dòng hàng "
+                         f"(Xuất Excel sẽ tự thử lấy bù nếu cần).")
+                return
+        else:
+            so_vong_khong_tien = 0
+    msg(stage="info",
+        text=f"✓ Đã lấy đủ chi tiết dòng hàng cho {len(can_nap)} hóa đơn không có file — Xuất Excel "
+             f"giờ chỉ cần đọc dữ liệu đã có sẵn.")
+
+
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
 def _run_fetch_job(cid: int, body: dict):
     """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
@@ -5608,6 +5716,16 @@ def _run_fetch_job(cid: int, body: dict):
                          f"đã lưu {total_saved} hóa đơn tính tới lúc dừng.",
                     total_saved=total_saved, file_saved=file_saved)
                 return
+
+            # ===== LẤY NỐT CHI TIẾT DÒNG HÀNG cho hóa đơn KHÔNG có file (hóa
+            # đơn không mã/tải file lỗi) NGAY TẠI ĐÂY (sau khi các tổ hợp đã
+            # tải file XONG HẲN, KHÔNG còn tổ hợp nào đang tải file xen lẫn) —
+            # để bước Xuất Excel sau này CHỈ cần đọc dữ liệu có sẵn (file/
+            # detail_json), không phải tự đi tải bù qua mạng gây treo lâu.
+            try:
+                _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg)
+            except Exception as e:
+                msg(stage="warn", text=f"Không lấy nốt được chi tiết dòng hàng: {str(e)[:120]}")
 
             # ===== TỔNG KẾT số hóa đơn theo trang Thuế (để biết lấy đủ chưa) =====
             tk_mua = thongke["purchase"]
