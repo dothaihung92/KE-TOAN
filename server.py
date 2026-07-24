@@ -5012,6 +5012,110 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
              f"giờ chỉ cần đọc dữ liệu đã có sẵn.")
 
 
+def _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den):
+    """Tự lấy số dư đầu kỳ (chỉ tiêu [41] tờ khai GTGT kỳ trước, đọc từ thư
+    mục kết xuất Năm/Quý riêng của công ty) rồi TÍNH + LƯU LUÔN tạm tính thuế
+    GTGT kỳ hiện tại — để mở 'Tạm tính thuế VAT' ra là có sẵn kết quả, không
+    phải tự bấm 'Lấy tự động' rồi 'Tính & Save' sau mỗi lần tra cứu.
+    Dùng chung cho: tra cứu 1 công ty, tra cứu hàng loạt, VÀ công ty KHÔNG
+    có mật khẩu trang Thuế (coi như 0 hóa đơn nhưng vẫn cần đúng số dư đầu kỳ).
+    Trả về (ok_msg, canh_bao) — chỉ 1 trong 2 khác None."""
+    ok_msg = canh_bao = None
+    try:
+        ky_hien_tai = _ky_tu_khoang_ngay(tu or "", den or "")
+        if ky_hien_tai:
+            conn_vat = db()
+            comp_vat = conn_vat.execute(
+                "SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+            conn_vat.close()
+            if comp_vat:
+                gia_tri_ct41, ky_truoc_vat, _fp_vat = _doc_ct41_ky_truoc(comp_vat, ky_hien_tai)
+                if gia_tri_ct41 is not None:
+                    ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=gia_tri_ct41)
+                    vat_luu(cid, data={
+                        "ky": ky_hien_tai, "du_dau_ky": gia_tri_ct41,
+                        "vat_mua": ket_qua_vat["vat_mua"], "vat_ban": ket_qua_vat["vat_ban"],
+                        "phai_nop": ket_qua_vat["phai_nop"],
+                        "du_cuoi_ky": ket_qua_vat["du_cuoi_ky"]})
+                    so_tien_fmt = f"{round(gia_tri_ct41):,}".replace(",", ".")
+                    ok_msg = (
+                        f"✓ Đã tự động lấy số dư đầu kỳ {so_tien_fmt} đ (từ tờ khai "
+                        f"GTGT kỳ {ky_truoc_vat}) và tính tạm thuế GTGT kỳ "
+                        f"{ky_hien_tai} — xem tại 'Tạm tính thuế VAT'.")
+                else:
+                    # KHÔNG tìm thấy tờ khai GTGT kỳ trước trong thư mục lưu
+                    # file kết xuất — PHẢI báo RÕ (đỏ), không được im lặng bỏ
+                    # qua, để người dùng biết mà tự nhập tay "Số dư đầu kỳ"
+                    # hoặc kiểm tra lại đã cấu hình/đã có file kỳ đó chưa.
+                    canh_bao = (
+                        f"⚠ Không tìm thấy tờ khai GTGT của kỳ "
+                        f"{ky_truoc_vat or '(không xác định được kỳ trước)'} trong thư mục "
+                        f"lưu file kết xuất — CHƯA tự lấy được 'Số dư đầu kỳ' cho kỳ "
+                        f"{ky_hien_tai}. Hãy kiểm tra đã cấu hình đúng 'Thư mục lưu file kết "
+                        f"xuất' và đã có file kết xuất kỳ đó chưa (mục Sửa công ty), hoặc tự "
+                        f"nhập tay trong khung 'Tạm tính thuế VAT'.")
+    except Exception as e:
+        canh_bao = f"⚠ Không tự lấy được số dư đầu kỳ/tính tạm thuế GTGT: {str(e)[:120]}"
+    return ok_msg, canh_bao
+
+
+def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
+                              file_thieu_tong=0, tk_mua=None, tk_ban=None, co_loi=False):
+    """Tự động kết xuất Excel + XML GTGT (01/GTGT) + XML TNCN (05/KK-TNCN) vào
+    thư mục lưu file kết xuất Năm/Quý — dùng chung cho tra cứu hàng loạt VÀ
+    công ty KHÔNG có mật khẩu trang Thuế (coi như 0 hóa đơn, vẫn tự kết xuất
+    báo cáo — chỉ cần đúng số dư đầu kỳ). msg: callback(**kw) ghi tiến độ."""
+    tk_mua = tk_mua or {"got": 0, "exp": 0}
+    tk_ban = tk_ban or {"got": 0, "exp": 0}
+    try:
+        msg(stage="info", text="Đang tự động kết xuất Excel vào thư mục lưu file kết xuất...")
+        resp_excel = export_excel(cid, luu_ket_xuat=1, tu_ngay=(tu or ""),
+                                  den_ngay=(den or ""), mo_file=0)
+        msg(stage="info", text="✓ Đã kết xuất Excel vào thư mục theo Năm/Quý")
+        # Sheet "Đối chiếu" trong file vừa xuất có phát hiện hóa đơn LỆCH
+        # (Chi tiết vs Bảng kê) không — báo RÕ (không chỉ im lặng nằm
+        # trong file) để người dùng biết mà mở file kiểm tra lại, thay vì
+        # phải tự mở từng file Excel của từng công ty ra xem mới biết.
+        try:
+            so_lech_ban = int(resp_excel.headers.get("X-So-Lech-Ban", "0"))
+            so_lech_mua = int(resp_excel.headers.get("X-So-Lech-Mua", "0"))
+        except Exception:
+            so_lech_ban = so_lech_mua = 0
+        if so_lech_ban or so_lech_mua:
+            ve_lech = []
+            if so_lech_ban:
+                ve_lech.append(f"bán ra {so_lech_ban}")
+            if so_lech_mua:
+                ve_lech.append(f"mua vào {so_lech_mua}")
+            msg(stage="warn",
+                text=f"⚠ Sheet 'Đối chiếu' trong file Excel vừa xuất phát hiện "
+                     f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) "
+                     f"giữa Chi tiết và Bảng kê — hãy mở file kiểm tra lại kỹ (mục "
+                     f"'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet Đối chiếu).",
+                total_saved=total_saved, file_saved=file_saved,
+                file_thieu=file_thieu_tong,
+                tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
+                tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
+                loi_tra_cuu=co_loi)
+    except Exception as e:
+        msg(stage="warn", text=f"Không tự kết xuất được Excel: {str(e)[:120]}")
+    # Kèm luôn file XML tờ khai GTGT (01/GTGT) và TNCN (05/KK-TNCN)
+    # vào cùng thư mục Năm/Quý để nộp HTKK — mỗi cái độc lập, lỗi cái
+    # này không chặn cái kia.
+    try:
+        export_htkk(cid, tu=(tu or ""), den=(den or ""),
+                    luu_ket_xuat=1, mo_file=0)
+        msg(stage="info", text="✓ Đã kết xuất XML tờ khai GTGT (01/GTGT)")
+    except Exception as e:
+        msg(stage="warn", text=f"Không tự kết xuất được XML GTGT: {str(e)[:120]}")
+    try:
+        export_htkk_tncn(cid, tu=(tu or ""), den=(den or ""),
+                         luu_ket_xuat=1, mo_file=0)
+        msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
+    except Exception as e:
+        msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
+
+
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
 def _run_fetch_job(cid: int, body: dict):
     """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
@@ -5784,44 +5888,9 @@ def _run_fetch_job(cid: int, body: dict):
             # cảnh báo được ghép NGAY VÀO banner tổng kết (hiện đỏ qua toast),
             # không tách thành 1 dòng thông báo lỗi RIÊNG (tránh bị hiểu nhầm
             # thành lỗi tra cứu hóa đơn thật sự, ảnh hưởng trạng thái batch).
-            vat_dau_ky_ok_msg = None
-            vat_dau_ky_canh_bao = None
+            vat_dau_ky_ok_msg = vat_dau_ky_canh_bao = None
             if not co_loi:
-                try:
-                    ky_hien_tai = _ky_tu_khoang_ngay(tu or "", den or "")
-                    if ky_hien_tai:
-                        conn_vat = db()
-                        comp_vat = conn_vat.execute(
-                            "SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
-                        conn_vat.close()
-                        if comp_vat:
-                            gia_tri_ct41, ky_truoc_vat, _fp_vat = _doc_ct41_ky_truoc(comp_vat, ky_hien_tai)
-                            if gia_tri_ct41 is not None:
-                                ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=gia_tri_ct41)
-                                vat_luu(cid, data={
-                                    "ky": ky_hien_tai, "du_dau_ky": gia_tri_ct41,
-                                    "vat_mua": ket_qua_vat["vat_mua"], "vat_ban": ket_qua_vat["vat_ban"],
-                                    "phai_nop": ket_qua_vat["phai_nop"],
-                                    "du_cuoi_ky": ket_qua_vat["du_cuoi_ky"]})
-                                so_tien_fmt = f"{round(gia_tri_ct41):,}".replace(",", ".")
-                                vat_dau_ky_ok_msg = (
-                                    f"✓ Đã tự động lấy số dư đầu kỳ {so_tien_fmt} đ (từ tờ khai "
-                                    f"GTGT kỳ {ky_truoc_vat}) và tính tạm thuế GTGT kỳ "
-                                    f"{ky_hien_tai} — xem tại 'Tạm tính thuế VAT'.")
-                            else:
-                                # KHÔNG tìm thấy tờ khai GTGT kỳ trước trong thư mục lưu
-                                # file kết xuất — PHẢI báo RÕ (đỏ), không được im lặng bỏ
-                                # qua, để người dùng biết mà tự nhập tay "Số dư đầu kỳ"
-                                # hoặc kiểm tra lại đã cấu hình/đã có file kỳ đó chưa.
-                                vat_dau_ky_canh_bao = (
-                                    f"⚠ Không tìm thấy tờ khai GTGT của kỳ "
-                                    f"{ky_truoc_vat or '(không xác định được kỳ trước)'} trong thư mục "
-                                    f"lưu file kết xuất — CHƯA tự lấy được 'Số dư đầu kỳ' cho kỳ "
-                                    f"{ky_hien_tai}. Hãy kiểm tra đã cấu hình đúng 'Thư mục lưu file kết "
-                                    f"xuất' và đã có file kết xuất kỳ đó chưa (mục Sửa công ty), hoặc tự "
-                                    f"nhập tay trong khung 'Tạm tính thuế VAT'.")
-                except Exception as e:
-                    vat_dau_ky_canh_bao = f"⚠ Không tự lấy được số dư đầu kỳ/tính tạm thuế GTGT: {str(e)[:120]}"
+                vat_dau_ky_ok_msg, vat_dau_ky_canh_bao = _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den)
 
             if co_loi:
                 # KHÔNG BAO GIỜ báo "Hoàn tất" khi có lỗi — phải là trạng thái LỖI rõ ràng
@@ -5891,53 +5960,9 @@ def _run_fetch_job(cid: int, body: dict):
                          "đến khi THÀNH CÔNG rồi mới kết xuất (hoặc bấm nút 'Xuất Excel'/'Kết xuất "
                          "XML' thủ công ở dưới sau khi đã tra cứu xong).")
             if body.get("luu_ket_xuat") and not co_loi:
-                try:
-                    msg(stage="info", text="Đang tự động kết xuất Excel vào thư mục lưu file kết xuất...")
-                    resp_excel = export_excel(cid, luu_ket_xuat=1, tu_ngay=(tu or ""),
-                                              den_ngay=(den or ""), mo_file=0)
-                    msg(stage="info", text="✓ Đã kết xuất Excel vào thư mục theo Năm/Quý")
-                    # Sheet "Đối chiếu" trong file vừa xuất có phát hiện hóa đơn LỆCH
-                    # (Chi tiết vs Bảng kê) không — báo RÕ (không chỉ im lặng nằm
-                    # trong file) để người dùng biết mà mở file kiểm tra lại, thay vì
-                    # phải tự mở từng file Excel của từng công ty ra xem mới biết.
-                    try:
-                        so_lech_ban = int(resp_excel.headers.get("X-So-Lech-Ban", "0"))
-                        so_lech_mua = int(resp_excel.headers.get("X-So-Lech-Mua", "0"))
-                    except Exception:
-                        so_lech_ban = so_lech_mua = 0
-                    if so_lech_ban or so_lech_mua:
-                        ve_lech = []
-                        if so_lech_ban:
-                            ve_lech.append(f"bán ra {so_lech_ban}")
-                        if so_lech_mua:
-                            ve_lech.append(f"mua vào {so_lech_mua}")
-                        msg(stage="warn",
-                            text=f"⚠ Sheet 'Đối chiếu' trong file Excel vừa xuất phát hiện "
-                                 f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) "
-                                 f"giữa Chi tiết và Bảng kê — hãy mở file kiểm tra lại kỹ (mục "
-                                 f"'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet Đối chiếu).",
-                            total_saved=total_saved, file_saved=file_saved,
-                            file_thieu=file_thieu_tong,
-                            tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
-                            tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
-                            loi_tra_cuu=co_loi)
-                except Exception as e:
-                    msg(stage="warn", text=f"Không tự kết xuất được Excel: {str(e)[:120]}")
-                # Kèm luôn file XML tờ khai GTGT (01/GTGT) và TNCN (05/KK-TNCN)
-                # vào cùng thư mục Năm/Quý để nộp HTKK — mỗi cái độc lập, lỗi cái
-                # này không chặn cái kia.
-                try:
-                    export_htkk(cid, tu=(tu or ""), den=(den or ""),
-                                luu_ket_xuat=1, mo_file=0)
-                    msg(stage="info", text="✓ Đã kết xuất XML tờ khai GTGT (01/GTGT)")
-                except Exception as e:
-                    msg(stage="warn", text=f"Không tự kết xuất được XML GTGT: {str(e)[:120]}")
-                try:
-                    export_htkk_tncn(cid, tu=(tu or ""), den=(den or ""),
-                                     luu_ket_xuat=1, mo_file=0)
-                    msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
-                except Exception as e:
-                    msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
+                _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=total_saved,
+                                          file_saved=file_saved, file_thieu_tong=file_thieu_tong,
+                                          tk_mua=tk_mua, tk_ban=tk_ban, co_loi=co_loi)
         except Exception as e:
             msg(stage="error", text=f"Lỗi: {str(e)[:160]}")
         finally:
@@ -6154,6 +6179,41 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 drv_captcha[0] = _mo_trinh_duyet_captcha()
             return drv_captcha[0]
 
+    def _xu_ly_khong_co_mat_khau(cid, item):
+        """Công ty KHÔNG có mật khẩu trang Thuế -> coi như 0 hóa đơn đầu vào/
+        đầu ra kỳ này (không có gì để tra cứu qua mạng), NHƯNG vẫn tự động lấy
+        đúng số dư đầu kỳ + tính tạm thuế GTGT + kết xuất Excel/XML GTGT/XML
+        TNCN như bình thường — theo yêu cầu người dùng: công ty không có mật
+        khẩu thì không tra cứu được, nhưng vẫn cần nộp báo cáo đúng kỳ."""
+        tu, den = body.get("tu_ngay"), body.get("den_ngay")
+
+        def _msg(**kw):
+            job = FETCH_JOBS.get(cid)
+            if job is not None:
+                job["messages"].append(kw)
+                job["last"] = kw
+
+        vat_ok_msg, vat_canh_bao = _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den)
+        done_text = ("Công ty chưa lưu mật khẩu trang Thuế — coi như KHÔNG có hóa đơn đầu "
+                     "vào/đầu ra kỳ này, đã tự động kết xuất báo cáo (chỉ cần đúng số dư đầu kỳ).")
+        if vat_canh_bao:
+            done_text += f" — {vat_canh_bao}"
+        _msg(stage="done", text=done_text, total_saved=0, file_saved=0, file_thieu=0,
+             tk_mua_got=0, tk_mua_exp=0, tk_ban_got=0, tk_ban_exp=0, loi_tra_cuu=False)
+        if vat_ok_msg:
+            _msg(stage="info", text=vat_ok_msg)
+        if body.get("luu_ket_xuat"):
+            _tu_dong_ket_xuat_bao_cao(cid, tu, den, _msg)
+        item["status"] = "done"
+        item["note"] = done_text
+        item["total_saved"] = 0
+        item["tk_mua_got"] = item["tk_mua_exp"] = 0
+        item["tk_ban_got"] = item["tk_ban_exp"] = 0
+        item["lech"] = False
+        with batch_lock:
+            batch["done"] += 1
+            _batch_luu_db(batch_id, batch, body)
+
     def _xu_ly_1_cong_ty(cid):
         if batch.get("cancel"):
             return
@@ -6199,6 +6259,13 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 ok, thong_bao, _, _ = _tu_dong_dang_nhap(
                     cid, so_lan=8, drv=_drv(), progress=_bao_tien_do)
                 if not ok:
+                    if thong_bao == "Công ty chưa lưu mật khẩu — không thể tự đăng nhập":
+                        # Công ty KHÔNG có mật khẩu trang Thuế -> KHÔNG có gì để
+                        # tra cứu qua mạng (không phải lỗi cần xử lý) -> coi như
+                        # 0 hóa đơn đầu vào/đầu ra kỳ này, VẪN tự động kết xuất
+                        # báo cáo (chỉ cần đúng số dư đầu kỳ) thay vì bỏ qua hẳn.
+                        _xu_ly_khong_co_mat_khau(cid, item)
+                        return
                     item["status"] = "skipped"
                     item["note"] = f"Tự đăng nhập thất bại: {thong_bao}"
                     _luu_loi_tra_cuu(cid, item["note"])
