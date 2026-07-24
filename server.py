@@ -6783,8 +6783,14 @@ def _parse_tokhai_nhap(wb):
     else:
         ws = wb[wb.sheetnames[0]]
 
+    # Đọc CẢ SHEET 1 lần qua iter_rows (tuần tự, rất nhanh) thay vì gọi
+    # ws.cell(r, c).value lặp lại nhiều lần — random access kiểu ws.cell()
+    # chậm hơn iter_rows() tới hàng trăm lần với sheet nhiều dòng.
+    _grid_tkn = [list(row) for row in ws.iter_rows(values_only=True)]
+
     def cell(r, c):
-        v = ws.cell(r, c).value
+        row = _grid_tkn[r - 1] if 0 < r <= len(_grid_tkn) else None
+        v = row[c - 1] if row is not None and 0 < c <= len(row) else None
         return str(v).strip() if v is not None else ""
 
     def to_num(s):
@@ -6901,40 +6907,51 @@ async def import_tokhai_nhap(cid: int, request: Request):
     """Import 1 hoặc nhiều file tờ khai hải quan nhập khẩu (.xlsx).
     Mỗi dòng hàng -> 1 dòng trong Chi tiết MUA VÀO."""
     import openpyxl, io as _io
+    from starlette.concurrency import run_in_threadpool
     form = await request.form()
     files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
     if not files:
         raise HTTPException(400, "Chưa chọn file tờ khai")
-    conn = db()
-    added = 0
-    tong_tk = 0
-    loi = []
-    for up in files:
-        if up is None:
-            continue
-        try:
-            content = await up.read()
-            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
-            tk = _parse_tokhai_nhap(wb)
-        except Exception as e:
-            loi.append(f"{getattr(up,'filename','file')}: {e}")
-            continue
-        if not tk["so_tk"] or not tk["items"]:
-            loi.append(f"{getattr(up,'filename','file')}: không đọc được số tờ khai hoặc dòng hàng")
-            continue
-        conn.execute("""
-            INSERT INTO tokhai_nhap (company_id, so_tk, ngay_dk, nguoi_xk, items_json, updated_at)
-            VALUES (?,?,?,?,?,?)
-            ON CONFLICT(company_id, so_tk) DO UPDATE SET
-                ngay_dk=excluded.ngay_dk, nguoi_xk=excluded.nguoi_xk,
-                items_json=excluded.items_json, updated_at=excluded.updated_at
-        """, (cid, tk["so_tk"], tk["ngay_dk"], tk["nguoi_xk"],
-              json.dumps(tk["items"], ensure_ascii=False),
-              datetime.datetime.now().isoformat()))
-        added += len(tk["items"])
-        tong_tk += 1
-    conn.commit()
-    conn.close()
+    # Đọc BYTES của file (I/O, phải await) trước, rồi mới xử lý (CPU: mở +
+    # dò từng dòng file Excel) ở THREAD RIÊNG qua run_in_threadpool — làm
+    # trực tiếp trên vòng lặp asyncio sẽ CHẶN ĐỨNG toàn bộ server (mọi
+    # request khác treo cứng, kể cả trang chủ) khi file tờ khai nhiều dòng,
+    # khiến trình duyệt báo "Failed to fetch" (đã xác nhận: file ~15.000
+    # dòng làm server đơ hẳn, không phản hồi bất kỳ request nào).
+    ten_va_noi_dung = [(getattr(up, "filename", "file"), await up.read())
+                       for up in files if up is not None]
+
+    def _xu_ly():
+        conn = db()
+        added = 0
+        tong_tk = 0
+        loi = []
+        for ten_file, content in ten_va_noi_dung:
+            try:
+                wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+                tk = _parse_tokhai_nhap(wb)
+            except Exception as e:
+                loi.append(f"{ten_file}: {e}")
+                continue
+            if not tk["so_tk"] or not tk["items"]:
+                loi.append(f"{ten_file}: không đọc được số tờ khai hoặc dòng hàng")
+                continue
+            conn.execute("""
+                INSERT INTO tokhai_nhap (company_id, so_tk, ngay_dk, nguoi_xk, items_json, updated_at)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(company_id, so_tk) DO UPDATE SET
+                    ngay_dk=excluded.ngay_dk, nguoi_xk=excluded.nguoi_xk,
+                    items_json=excluded.items_json, updated_at=excluded.updated_at
+            """, (cid, tk["so_tk"], tk["ngay_dk"], tk["nguoi_xk"],
+                  json.dumps(tk["items"], ensure_ascii=False),
+                  datetime.datetime.now().isoformat()))
+            added += len(tk["items"])
+            tong_tk += 1
+        conn.commit()
+        conn.close()
+        return added, tong_tk, loi
+
+    added, tong_tk, loi = await run_in_threadpool(_xu_ly)
     return {"ok": True, "so_to_khai": tong_tk, "so_dong_hang": added, "loi": loi[:5]}
 
 
@@ -12493,297 +12510,326 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
     lưu vào imported_data. Sau khi import, xuất XML và tạm tính VAT dùng số này.
     """
     import openpyxl, io as _io
+    from starlette.concurrency import run_in_threadpool
     form = await request.form()
     up = form.get("file")
     if up is None:
         raise HTTPException(400, "Chưa chọn file Excel")
     content = await up.read()
-    try:
-        wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
-    except Exception as e:
-        raise HTTPException(400, f"Không đọc được file Excel: {e}")
 
-    def _sach(s):
-        # bỏ khoảng trắng thường + non-breaking space, phòng file bị chỉnh tay
-        return str(s or "").replace("\xa0", " ").strip().lower()
-
-    def col_idx(ws, ten, row=1):
-        for c in range(1, ws.max_column + 1):
-            if _sach(ws.cell(row, c).value) == ten.lower():
-                return c
-        return None
-
-    mua_ds = mua_thue = 0
-    mua_ds_nk = mua_thue_nk = 0     # TRONG ĐÓ: phần hàng NHẬP KHẨU (tờ khai NK) -> [23a]/[24a]
-    mua_rows = 0
-    mua_sheet_found = "BK Mua vào" in wb.sheetnames
-    ban_sheet_found = "BK Bán ra" in wb.sheetnames
-    ban = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
-           "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0}}
-
-    def num(v):
+    def _xu_ly():
+        # Toàn bộ xử lý CPU-bound (mở + dò từng dòng file Excel + ghi DB) chạy
+        # ở THREAD RIÊNG qua run_in_threadpool — làm trực tiếp trên vòng lặp
+        # asyncio sẽ CHẶN ĐỨNG toàn bộ server (mọi request khác treo cứng, kể
+        # cả trang chủ) khi file nhiều dòng, khiến trình duyệt báo "Failed to
+        # fetch" (đã xác nhận: file ~15.000 dòng làm server đơ hẳn, không phản
+        # hồi bất kỳ request nào, kể cả trang chủ).
         try:
-            return float(v)
-        except Exception:
-            return 0
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            raise HTTPException(400, f"Không đọc được file Excel: {e}")
 
-    def norm_ts(v):
-        s = str(v or "").replace("%", "").strip()
-        if s in ("0", "5", "8", "10"):
-            return s
-        return None
+        def _sach(s):
+            # bỏ khoảng trắng thường + non-breaking space, phòng file bị chỉnh tay
+            return str(s or "").replace("\xa0", " ").strip().lower()
 
-    _TTHAI_MA_TU_MOTA = {v.lower(): k for k, v in TTHAI_DESC.items()}
-
-    def _ma_trang_thai(mota_hoac_ma):
-        """'Hóa đơn mới' -> '1' (chấp nhận cả khi ô đã ghi sẵn mã số)."""
-        s = str(mota_hoac_ma or "").strip()
-        if s in TTHAI_DESC:
-            return s
-        return _TTHAI_MA_TU_MOTA.get(s.lower(), "1")
-
-    def _ngay_iso(v):
-        """'dd/mm/yyyy' (hoặc đã là yyyy-mm-dd) -> 'yyyy-mm-dd'. '' nếu không đọc được."""
-        s = str(v or "").strip()
-        if not s:
-            return ""
-        if "-" in s and len(s.split("-")[0]) == 4:
-            return s.split("T")[0].split()[0]
-        try:
-            d, m, y = s.split("/")
-            return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
-        except Exception:
-            return ""
-
-    mst_cty = str((conn := db()).execute(
-        "SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()["mst"] or "").strip()
-    conn.close()
-    mua_invoices = []   # hóa đơn MUA VÀO đọc được đầy đủ (để GHI ĐÈ bảng invoices)
-    ban_invoices = []   # hóa đơn BÁN RA đọc được đầy đủ
-
-    # ===== MUA VÀO: đọc từ sheet 'BK Mua vào' =====
-    # Dò dòng tiêu đề ở vài dòng đầu (không giả định luôn ở dòng 1) — cùng cách
-    # làm với BÁN RA bên dưới, để không bỏ sót khi file có thêm dòng tiêu đề/khoảng trắng.
-    if mua_sheet_found:
-        ws = wb["BK Mua vào"]
-        c_ds = c_thue = c_kh = c_tt = None
-        c_shdon = c_ngay = c_mst = c_ten = c_tt_bso = None
-        hdr_row = 1
-        for r in range(1, min(ws.max_row, 15) + 1):
+        def col_idx(ws, ten, row=1):
             for c in range(1, ws.max_column + 1):
-                v = _sach(ws.cell(r, c).value)
-                if v == "doanh số mua chưa thuế":
-                    c_ds = c; hdr_row = r
-                elif v == "thuế gtgt":
-                    c_thue = c; hdr_row = max(hdr_row, r)
-                elif v in ("ký hiệu", "ki hieu"):
-                    c_kh = c
-                elif v in ("trạng thái", "trang thai"):
-                    c_tt = c
-                elif v in ("số hoá đơn", "số hóa đơn", "so hoa don"):
-                    c_shdon = c
-                elif v in ("ngày lập", "ngay lap"):
-                    c_ngay = c
-                elif v in ("mst người bán", "mst nguoi ban"):
-                    c_mst = c
-                elif v in ("tên người bán", "ten nguoi ban"):
-                    c_ten = c
-                elif v in ("tổng thanh toán", "tong thanh toan"):
-                    c_tt_bso = c
-            if c_ds:
-                break
-        for r in range(hdr_row + 1, ws.max_row + 1):
-            full = " ".join(str(ws.cell(r, c).value or "") for c in range(1, ws.max_column + 1))
-            if not full.strip():
-                continue
-            kh = _sach(ws.cell(r, c_kh).value) if c_kh else ""
-            low_full = full.lower()
-            # Bỏ dòng TỔNG CỘNG / Tổng nhóm — nhận biết bằng Ký hiệu ĐỂ TRỐNG
-            # (dòng dữ liệu luôn có Ký hiệu). TUYỆT ĐỐI không lọc theo chữ 'tổng'
-            # chung chung như trước, vì sẽ bỏ nhầm hóa đơn của NCC có TÊN chứa
-            # 'TỔNG' (vd 'TỔNG CÔNG TY HÀNG KHÔNG VIỆT NAM', 'TỔNG CÔNG TY CP
-            # BƯU CHÍNH VIETTEL') -> thiếu doanh số/thuế mua vào.
-            if (c_kh and not kh) or "tổng cộng" in low_full or "tổng nhóm" in low_full:
-                continue
-            got = False
-            row_ds = row_thue = 0
-            if c_ds:
-                row_ds = num(ws.cell(r, c_ds).value)
-                mua_ds += row_ds
-                got = True
-            if c_thue:
-                row_thue = num(ws.cell(r, c_thue).value)
-                mua_thue += row_thue
-                got = True
-            # Nhận biết dòng HÀNG NHẬP KHẨU (tờ khai NK): Ký hiệu = 'TKNK' hoặc
-            # Trạng thái ghi 'Tờ khai nhập khẩu' -> tách riêng cho [23a]/[24a].
-            tt_stt = _sach(ws.cell(r, c_tt).value) if c_tt else ""
-            if got and ("tknk" in kh or "nhập khẩu" in tt_stt or "nhap khau" in tt_stt):
-                mua_ds_nk += row_ds
-                mua_thue_nk += row_thue
-            if got:
-                mua_rows += 1
-                # ĐỦ Ký hiệu + Số hóa đơn -> lưu thành 1 dòng hóa đơn đầy đủ để
-                # GHI ĐÈ bảng invoices (không chỉ cộng số tổng như trước) — để
-                # "Xuất Excel tổng hợp" dùng ĐÚNG dữ liệu vừa import, đúng kỳ.
-                if c_shdon:
-                    shdon_v = str(ws.cell(r, c_shdon).value or "").strip()
-                    if shdon_v:
-                        ngay_iso = _ngay_iso(ws.cell(r, c_ngay).value) if c_ngay else ""
-                        tt_bso = num(ws.cell(r, c_tt_bso).value) if c_tt_bso else (row_ds + row_thue)
-                        mua_invoices.append({
-                            "khmshdon": "1", "khhdon": ws.cell(r, c_kh).value or "",
-                            "shdon": shdon_v, "tdlap": ngay_iso,
-                            "nbmst": str(ws.cell(r, c_mst).value or "").strip() if c_mst else "",
-                            "nbten": ws.cell(r, c_ten).value or "" if c_ten else "",
-                            "nmmst": mst_cty,
-                            "tgtcthue": row_ds, "tgtthue": row_thue, "tgtttbso": tt_bso or (row_ds + row_thue),
-                            "tthai": _ma_trang_thai(ws.cell(r, c_tt).value) if c_tt else "1",
-                        })
+                if _sach(ws.cell(row, c).value) == ten.lower():
+                    return c
+            return None
 
-    # ===== BÁN RA: đọc từ sheet 'BK Bán ra' (tách nhóm theo dòng tiêu đề) =====
-    if "BK Bán ra" in wb.sheetnames:
-        ws = wb["BK Bán ra"]
-        c_ds = col_idx(ws, "Doanh số bán chưa thuế")
-        c_thue = col_idx(ws, "Thuế GTGT")
-        c_khms = col_idx(ws, "Ký hiệu mẫu")
-        c_kh_b = col_idx(ws, "Ký hiệu HĐ") or col_idx(ws, "Ký hiệu")
-        c_shdon_b = col_idx(ws, "Số hóa đơn") or col_idx(ws, "Số Hoá Đơn")
-        c_ngay_b = col_idx(ws, "Ngày lập")
-        c_mst_b = col_idx(ws, "MST người mua")
-        c_ten_b = col_idx(ws, "Tên người mua")
-        c_tt_b = col_idx(ws, "Trạng thái")
-        # nếu không tìm thấy header (do có tiêu đề phía trên), dò theo cột cố định
-        if not c_ds:
-            # tìm dòng header chứa "Doanh số bán chưa thuế"
-            for r in range(1, min(ws.max_row, 30) + 1):
+        def _grid(ws):
+            # Đọc CẢ SHEET 1 LẦN bằng iter_rows (tuần tự, rất nhanh) rồi tra
+            # cứu qua list trong bộ nhớ — thay vì gọi ws.cell(r, c).value lặp
+            # lại hàng chục nghìn lần. ws.cell() truy cập ngẫu nhiên CHẬM HƠN
+            # iter_rows() TỚI HÀNG TRĂM LẦN với sheet nhiều dòng (đã đo thực
+            # tế: file ~15.000 dòng mất VÀI PHÚT với ws.cell(), chỉ ~0.2 giây
+            # với iter_rows) — đây là nguyên nhân THẬT SỰ khiến import file
+            # lớn "treo" rất lâu, phía trình duyệt tưởng mất kết nối và báo
+            # "Failed to fetch".
+            return [list(row) for row in ws.iter_rows(values_only=True)]
+
+        def _o(grid, r, c):
+            row = grid[r - 1] if 0 < r <= len(grid) else None
+            return row[c - 1] if row is not None and 0 < c <= len(row) else None
+
+        mua_ds = mua_thue = 0
+        mua_ds_nk = mua_thue_nk = 0     # TRONG ĐÓ: phần hàng NHẬP KHẨU (tờ khai NK) -> [23a]/[24a]
+        mua_rows = 0
+        mua_sheet_found = "BK Mua vào" in wb.sheetnames
+        ban_sheet_found = "BK Bán ra" in wb.sheetnames
+        ban = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
+               "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0}}
+
+        def num(v):
+            try:
+                return float(v)
+            except Exception:
+                return 0
+
+        def norm_ts(v):
+            s = str(v or "").replace("%", "").strip()
+            if s in ("0", "5", "8", "10"):
+                return s
+            return None
+
+        _TTHAI_MA_TU_MOTA = {v.lower(): k for k, v in TTHAI_DESC.items()}
+
+        def _ma_trang_thai(mota_hoac_ma):
+            """'Hóa đơn mới' -> '1' (chấp nhận cả khi ô đã ghi sẵn mã số)."""
+            s = str(mota_hoac_ma or "").strip()
+            if s in TTHAI_DESC:
+                return s
+            return _TTHAI_MA_TU_MOTA.get(s.lower(), "1")
+
+        def _ngay_iso(v):
+            """'dd/mm/yyyy' (hoặc đã là yyyy-mm-dd) -> 'yyyy-mm-dd'. '' nếu không đọc được."""
+            s = str(v or "").strip()
+            if not s:
+                return ""
+            if "-" in s and len(s.split("-")[0]) == 4:
+                return s.split("T")[0].split()[0]
+            try:
+                d, m, y = s.split("/")
+                return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+            except Exception:
+                return ""
+
+        mst_cty = str((conn := db()).execute(
+            "SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()["mst"] or "").strip()
+        conn.close()
+        mua_invoices = []   # hóa đơn MUA VÀO đọc được đầy đủ (để GHI ĐÈ bảng invoices)
+        ban_invoices = []   # hóa đơn BÁN RA đọc được đầy đủ
+
+        # ===== MUA VÀO: đọc từ sheet 'BK Mua vào' =====
+        # Dò dòng tiêu đề ở vài dòng đầu (không giả định luôn ở dòng 1) — cùng cách
+        # làm với BÁN RA bên dưới, để không bỏ sót khi file có thêm dòng tiêu đề/khoảng trắng.
+        if mua_sheet_found:
+            ws = wb["BK Mua vào"]
+            g_mua = _grid(ws)
+            c_ds = c_thue = c_kh = c_tt = None
+            c_shdon = c_ngay = c_mst = c_ten = c_tt_bso = None
+            hdr_row = 1
+            for r in range(1, min(ws.max_row, 15) + 1):
                 for c in range(1, ws.max_column + 1):
-                    v = str(ws.cell(r, c).value or "")
-                    if "Doanh số bán chưa thuế" in v:
-                        c_ds = c
-                    if v.strip() == "Thuế GTGT":
-                        c_thue = c
+                    v = _sach(_o(g_mua, r, c))
+                    if v == "doanh số mua chưa thuế":
+                        c_ds = c; hdr_row = r
+                    elif v == "thuế gtgt":
+                        c_thue = c; hdr_row = max(hdr_row, r)
+                    elif v in ("ký hiệu", "ki hieu"):
+                        c_kh = c
+                    elif v in ("trạng thái", "trang thai"):
+                        c_tt = c
+                    elif v in ("số hoá đơn", "số hóa đơn", "so hoa don"):
+                        c_shdon = c
+                    elif v in ("ngày lập", "ngay lap"):
+                        c_ngay = c
+                    elif v in ("mst người bán", "mst nguoi ban"):
+                        c_mst = c
+                    elif v in ("tên người bán", "ten nguoi ban"):
+                        c_ten = c
+                    elif v in ("tổng thanh toán", "tong thanh toan"):
+                        c_tt_bso = c
                 if c_ds:
                     break
-        cur_nhom = None
-        ban_rows = 0
-        for r in range(1, ws.max_row + 1):
-            # gộp text cả dòng để phát hiện tiêu đề nhóm / dòng tổng
-            full = " ".join(str(ws.cell(r, c).value or "") for c in range(1, ws.max_column + 1))
-            low = full.lower()
-            head3 = " ".join(str(ws.cell(r, c).value or "") for c in range(1, 4))
-            # dòng tiêu đề nhóm thuế suất
-            if "thuế suất" in head3.lower() or "%" in head3 or "không chịu thuế" in head3.lower():
-                if "0%" in head3: cur_nhom = "0"
-                elif "5%" in head3: cur_nhom = "5"
-                elif "8%" in head3: cur_nhom = "8"
-                elif "10%" in head3: cur_nhom = "10"
-                elif "không chịu" in head3.lower(): cur_nhom = None
-                continue
-            # BỎ dòng tổng (Tổng nhóm / TỔNG CỘNG) — dùng CỤM TỪ cụ thể, KHÔNG
-            # lọc theo chữ 'tổng' chung chung để tránh bỏ nhầm hóa đơn của khách
-            # hàng có TÊN chứa 'TỔNG' (vd 'TỔNG CÔNG TY ...').
-            if "tổng cộng" in low or "tổng nhóm" in low:
-                continue
-            ds = num(ws.cell(r, c_ds).value) if c_ds else 0
-            th = num(ws.cell(r, c_thue).value) if c_thue else 0
-            if (ds or th) and cur_nhom in ban:
-                ban[cur_nhom]["ds"] += ds
-                ban[cur_nhom]["thue"] += th
-                ban_rows += 1
-                if c_shdon_b:
-                    shdon_v = str(ws.cell(r, c_shdon_b).value or "").strip()
-                    if shdon_v:
-                        ngay_iso = _ngay_iso(ws.cell(r, c_ngay_b).value) if c_ngay_b else ""
-                        ban_invoices.append({
-                            "khmshdon": str(ws.cell(r, c_khms).value or "1").strip() if c_khms else "1",
-                            "khhdon": ws.cell(r, c_kh_b).value or "" if c_kh_b else "",
-                            "shdon": shdon_v, "tdlap": ngay_iso,
-                            "nmmst": str(ws.cell(r, c_mst_b).value or "").strip() if c_mst_b else "",
-                            "nmten": ws.cell(r, c_ten_b).value or "" if c_ten_b else "",
-                            "nbmst": mst_cty,
-                            "tgtcthue": ds, "tgtthue": th, "tgtttbso": ds + th,
-                            "tthai": _ma_trang_thai(ws.cell(r, c_tt_b).value) if c_tt_b else "1",
-                        })
-    else:
-        ban_rows = 0
+            for r in range(hdr_row + 1, ws.max_row + 1):
+                full = " ".join(str(v or "") for v in g_mua[r - 1])
+                if not full.strip():
+                    continue
+                kh = _sach(_o(g_mua, r, c_kh)) if c_kh else ""
+                low_full = full.lower()
+                # Bỏ dòng TỔNG CỘNG / Tổng nhóm — nhận biết bằng Ký hiệu ĐỂ TRỐNG
+                # (dòng dữ liệu luôn có Ký hiệu). TUYỆT ĐỐI không lọc theo chữ 'tổng'
+                # chung chung như trước, vì sẽ bỏ nhầm hóa đơn của NCC có TÊN chứa
+                # 'TỔNG' (vd 'TỔNG CÔNG TY HÀNG KHÔNG VIỆT NAM', 'TỔNG CÔNG TY CP
+                # BƯU CHÍNH VIETTEL') -> thiếu doanh số/thuế mua vào.
+                if (c_kh and not kh) or "tổng cộng" in low_full or "tổng nhóm" in low_full:
+                    continue
+                got = False
+                row_ds = row_thue = 0
+                if c_ds:
+                    row_ds = num(_o(g_mua, r, c_ds))
+                    mua_ds += row_ds
+                    got = True
+                if c_thue:
+                    row_thue = num(_o(g_mua, r, c_thue))
+                    mua_thue += row_thue
+                    got = True
+                # Nhận biết dòng HÀNG NHẬP KHẨU (tờ khai NK): Ký hiệu = 'TKNK' hoặc
+                # Trạng thái ghi 'Tờ khai nhập khẩu' -> tách riêng cho [23a]/[24a].
+                tt_stt = _sach(_o(g_mua, r, c_tt)) if c_tt else ""
+                if got and ("tknk" in kh or "nhập khẩu" in tt_stt or "nhap khau" in tt_stt):
+                    mua_ds_nk += row_ds
+                    mua_thue_nk += row_thue
+                if got:
+                    mua_rows += 1
+                    # ĐỦ Ký hiệu + Số hóa đơn -> lưu thành 1 dòng hóa đơn đầy đủ để
+                    # GHI ĐÈ bảng invoices (không chỉ cộng số tổng như trước) — để
+                    # "Xuất Excel tổng hợp" dùng ĐÚNG dữ liệu vừa import, đúng kỳ.
+                    if c_shdon:
+                        shdon_v = str(_o(g_mua, r, c_shdon) or "").strip()
+                        if shdon_v:
+                            ngay_iso = _ngay_iso(_o(g_mua, r, c_ngay)) if c_ngay else ""
+                            tt_bso = num(_o(g_mua, r, c_tt_bso)) if c_tt_bso else (row_ds + row_thue)
+                            mua_invoices.append({
+                                "khmshdon": "1", "khhdon": _o(g_mua, r, c_kh) or "",
+                                "shdon": shdon_v, "tdlap": ngay_iso,
+                                "nbmst": str(_o(g_mua, r, c_mst) or "").strip() if c_mst else "",
+                                "nbten": _o(g_mua, r, c_ten) or "" if c_ten else "",
+                                "nmmst": mst_cty,
+                                "tgtcthue": row_ds, "tgtthue": row_thue, "tgtttbso": tt_bso or (row_ds + row_thue),
+                                "tthai": _ma_trang_thai(_o(g_mua, r, c_tt)) if c_tt else "1",
+                            })
 
-    # ===== GHI ĐÈ bảng 'invoices' (danh sách chi tiết dùng cho Xuất Excel tổng
-    # hợp) bằng ĐÚNG dữ liệu vừa import — trước đây import chỉ lưu SỐ TỔNG
-    # (imported_data), không đụng tới 'invoices', nên sau khi import "Xuất
-    # Excel tổng hợp" (đọc từ 'invoices') vẫn hiện dữ liệu TRA CỨU/IMPORT CŨ
-    # của kỳ trước, không phải dữ liệu vừa import. File "đã kiểm tra" là bản
-    # CHÍNH THỨC/CUỐI CÙNG của kỳ đang import -> THAY THẾ TOÀN BỘ danh sách cũ
-    # (giống hệt cách 1 lượt tra cứu mới thay thế dữ liệu cũ), KHÔNG cộng dồn
-    # lẫn với kỳ trước — CHỈ áp dụng riêng cho loại (mua/bán) đọc được đủ Ký
-    # hiệu + Số hóa đơn; loại không đọc được cột này thì GIỮ NGUYÊN dữ liệu cũ
-    # (file cũ/thiếu cột thì vẫn chỉ lưu số tổng như trước, không đụng invoices).
-    so_dong_ghi_de = 0
-    if mua_invoices or ban_invoices:
-        conn_gd = db()
-        if mua_invoices:
-            conn_gd.execute(
-                "DELETE FROM invoices WHERE company_id=? AND loai='purchase'", (cid,))
-            for inv in mua_invoices:
-                conn_gd.execute("""
-                    INSERT OR REPLACE INTO invoices
-                    (company_id, loai, he_thong, nbmst, nbten, nmmst,
-                     khmshdon, khhdon, shdon, tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (cid, "purchase", "import", inv["nbmst"], inv["nbten"], inv["nmmst"],
-                      inv["khmshdon"], inv["khhdon"], inv["shdon"], inv["tdlap"],
-                      inv["tgtcthue"], inv["tgtthue"], inv["tgtttbso"], inv["tthai"],
-                      json.dumps({"tthai": inv["tthai"], "nguon": "import_excel"}, ensure_ascii=False)))
-                so_dong_ghi_de += 1
-        if ban_invoices:
-            conn_gd.execute(
-                "DELETE FROM invoices WHERE company_id=? AND loai='sold'", (cid,))
-            for inv in ban_invoices:
-                conn_gd.execute("""
-                    INSERT OR REPLACE INTO invoices
-                    (company_id, loai, he_thong, nbmst, nbten, nmmst,
-                     khmshdon, khhdon, shdon, tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (cid, "sold", "import", inv["nbmst"], "", inv["nmmst"],
-                      inv["khmshdon"], inv["khhdon"], inv["shdon"], inv["tdlap"],
-                      inv["tgtcthue"], inv["tgtthue"], inv["tgtttbso"], inv["tthai"],
-                      json.dumps({"tthai": inv["tthai"], "nguon": "import_excel"}, ensure_ascii=False)))
-                so_dong_ghi_de += 1
-        conn_gd.commit()
-        conn_gd.close()
+        # ===== BÁN RA: đọc từ sheet 'BK Bán ra' (tách nhóm theo dòng tiêu đề) =====
+        if "BK Bán ra" in wb.sheetnames:
+            ws = wb["BK Bán ra"]
+            g_ban = _grid(ws)
+            c_ds = col_idx(ws, "Doanh số bán chưa thuế")
+            c_thue = col_idx(ws, "Thuế GTGT")
+            c_khms = col_idx(ws, "Ký hiệu mẫu")
+            c_kh_b = col_idx(ws, "Ký hiệu HĐ") or col_idx(ws, "Ký hiệu")
+            c_shdon_b = col_idx(ws, "Số hóa đơn") or col_idx(ws, "Số Hoá Đơn")
+            c_ngay_b = col_idx(ws, "Ngày lập")
+            c_mst_b = col_idx(ws, "MST người mua")
+            c_ten_b = col_idx(ws, "Tên người mua")
+            c_tt_b = col_idx(ws, "Trạng thái")
+            # nếu không tìm thấy header (do có tiêu đề phía trên), dò theo cột cố định
+            if not c_ds:
+                # tìm dòng header chứa "Doanh số bán chưa thuế"
+                for r in range(1, min(ws.max_row, 30) + 1):
+                    for c in range(1, ws.max_column + 1):
+                        v = str(_o(g_ban, r, c) or "")
+                        if "Doanh số bán chưa thuế" in v:
+                            c_ds = c
+                        if v.strip() == "Thuế GTGT":
+                            c_thue = c
+                    if c_ds:
+                        break
+            cur_nhom = None
+            ban_rows = 0
+            for r in range(1, ws.max_row + 1):
+                # gộp text cả dòng để phát hiện tiêu đề nhóm / dòng tổng
+                row_vals = g_ban[r - 1]
+                full = " ".join(str(v or "") for v in row_vals)
+                low = full.lower()
+                head3 = " ".join(str(v or "") for v in row_vals[0:3])
+                # dòng tiêu đề nhóm thuế suất
+                if "thuế suất" in head3.lower() or "%" in head3 or "không chịu thuế" in head3.lower():
+                    if "0%" in head3: cur_nhom = "0"
+                    elif "5%" in head3: cur_nhom = "5"
+                    elif "8%" in head3: cur_nhom = "8"
+                    elif "10%" in head3: cur_nhom = "10"
+                    elif "không chịu" in head3.lower(): cur_nhom = None
+                    continue
+                # BỎ dòng tổng (Tổng nhóm / TỔNG CỘNG) — dùng CỤM TỪ cụ thể, KHÔNG
+                # lọc theo chữ 'tổng' chung chung để tránh bỏ nhầm hóa đơn của khách
+                # hàng có TÊN chứa 'TỔNG' (vd 'TỔNG CÔNG TY ...').
+                if "tổng cộng" in low or "tổng nhóm" in low:
+                    continue
+                ds = num(_o(g_ban, r, c_ds)) if c_ds else 0
+                th = num(_o(g_ban, r, c_thue)) if c_thue else 0
+                if (ds or th) and cur_nhom in ban:
+                    ban[cur_nhom]["ds"] += ds
+                    ban[cur_nhom]["thue"] += th
+                    ban_rows += 1
+                    if c_shdon_b:
+                        shdon_v = str(_o(g_ban, r, c_shdon_b) or "").strip()
+                        if shdon_v:
+                            ngay_iso = _ngay_iso(_o(g_ban, r, c_ngay_b)) if c_ngay_b else ""
+                            ban_invoices.append({
+                                "khmshdon": str(_o(g_ban, r, c_khms) or "1").strip() if c_khms else "1",
+                                "khhdon": _o(g_ban, r, c_kh_b) or "" if c_kh_b else "",
+                                "shdon": shdon_v, "tdlap": ngay_iso,
+                                "nmmst": str(_o(g_ban, r, c_mst_b) or "").strip() if c_mst_b else "",
+                                "nmten": _o(g_ban, r, c_ten_b) or "" if c_ten_b else "",
+                                "nbmst": mst_cty,
+                                "tgtcthue": ds, "tgtthue": th, "tgtttbso": ds + th,
+                                "tthai": _ma_trang_thai(_o(g_ban, r, c_tt_b)) if c_tt_b else "1",
+                            })
+        else:
+            ban_rows = 0
 
-    conn = db()
-    conn.execute("""
-        INSERT INTO imported_data (company_id, ky, mua_ds, mua_thue,
-            mua_ds_nk, mua_thue_nk,
-            ban_ds_0, ban_ds_5, ban_thue_5, ban_ds_8, ban_thue_8,
-            ban_ds_10, ban_thue_10, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(company_id, ky) DO UPDATE SET
-            mua_ds=excluded.mua_ds, mua_thue=excluded.mua_thue,
-            mua_ds_nk=excluded.mua_ds_nk, mua_thue_nk=excluded.mua_thue_nk,
-            ban_ds_0=excluded.ban_ds_0, ban_ds_5=excluded.ban_ds_5,
-            ban_thue_5=excluded.ban_thue_5, ban_ds_8=excluded.ban_ds_8,
-            ban_thue_8=excluded.ban_thue_8, ban_ds_10=excluded.ban_ds_10,
-            ban_thue_10=excluded.ban_thue_10, updated_at=excluded.updated_at
-    """, (cid, ky, round(mua_ds), round(mua_thue),
-          round(mua_ds_nk), round(mua_thue_nk), round(ban["0"]["ds"]),
-          round(ban["5"]["ds"]), round(ban["5"]["thue"]),
-          round(ban["8"]["ds"]), round(ban["8"]["thue"]),
-          round(ban["10"]["ds"]), round(ban["10"]["thue"]),
-          datetime.datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
-    return {
-        "ok": True, "ky": ky,
-        "mua_ds": round(mua_ds), "mua_thue": round(mua_thue), "mua_rows": mua_rows,
-        "mua_ds_nk": round(mua_ds_nk), "mua_thue_nk": round(mua_thue_nk),
-        "mua_sheet_found": mua_sheet_found,
-        "ban_thue": round(sum(b["thue"] for b in ban.values())),
-        "ban_8_ds": round(ban["8"]["ds"]), "ban_rows": ban_rows,
-        "ban_sheet_found": ban_sheet_found,
-        "so_dong_ghi_de": so_dong_ghi_de,
-    }
+        # ===== GHI ĐÈ bảng 'invoices' (danh sách chi tiết dùng cho Xuất Excel tổng
+        # hợp) bằng ĐÚNG dữ liệu vừa import — trước đây import chỉ lưu SỐ TỔNG
+        # (imported_data), không đụng tới 'invoices', nên sau khi import "Xuất
+        # Excel tổng hợp" (đọc từ 'invoices') vẫn hiện dữ liệu TRA CỨU/IMPORT CŨ
+        # của kỳ trước, không phải dữ liệu vừa import. File "đã kiểm tra" là bản
+        # CHÍNH THỨC/CUỐI CÙNG của kỳ đang import -> THAY THẾ TOÀN BỘ danh sách cũ
+        # (giống hệt cách 1 lượt tra cứu mới thay thế dữ liệu cũ), KHÔNG cộng dồn
+        # lẫn với kỳ trước — CHỈ áp dụng riêng cho loại (mua/bán) đọc được đủ Ký
+        # hiệu + Số hóa đơn; loại không đọc được cột này thì GIỮ NGUYÊN dữ liệu cũ
+        # (file cũ/thiếu cột thì vẫn chỉ lưu số tổng như trước, không đụng invoices).
+        so_dong_ghi_de = 0
+        if mua_invoices or ban_invoices:
+            conn_gd = db()
+            if mua_invoices:
+                conn_gd.execute(
+                    "DELETE FROM invoices WHERE company_id=? AND loai='purchase'", (cid,))
+                for inv in mua_invoices:
+                    conn_gd.execute("""
+                        INSERT OR REPLACE INTO invoices
+                        (company_id, loai, he_thong, nbmst, nbten, nmmst,
+                         khmshdon, khhdon, shdon, tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, (cid, "purchase", "import", inv["nbmst"], inv["nbten"], inv["nmmst"],
+                          inv["khmshdon"], inv["khhdon"], inv["shdon"], inv["tdlap"],
+                          inv["tgtcthue"], inv["tgtthue"], inv["tgtttbso"], inv["tthai"],
+                          json.dumps({"tthai": inv["tthai"], "nguon": "import_excel"}, ensure_ascii=False)))
+                    so_dong_ghi_de += 1
+            if ban_invoices:
+                conn_gd.execute(
+                    "DELETE FROM invoices WHERE company_id=? AND loai='sold'", (cid,))
+                for inv in ban_invoices:
+                    conn_gd.execute("""
+                        INSERT OR REPLACE INTO invoices
+                        (company_id, loai, he_thong, nbmst, nbten, nmmst,
+                         khmshdon, khhdon, shdon, tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, (cid, "sold", "import", inv["nbmst"], "", inv["nmmst"],
+                          inv["khmshdon"], inv["khhdon"], inv["shdon"], inv["tdlap"],
+                          inv["tgtcthue"], inv["tgtthue"], inv["tgtttbso"], inv["tthai"],
+                          json.dumps({"tthai": inv["tthai"], "nguon": "import_excel"}, ensure_ascii=False)))
+                    so_dong_ghi_de += 1
+            conn_gd.commit()
+            conn_gd.close()
+
+        conn = db()
+        conn.execute("""
+            INSERT INTO imported_data (company_id, ky, mua_ds, mua_thue,
+                mua_ds_nk, mua_thue_nk,
+                ban_ds_0, ban_ds_5, ban_thue_5, ban_ds_8, ban_thue_8,
+                ban_ds_10, ban_thue_10, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(company_id, ky) DO UPDATE SET
+                mua_ds=excluded.mua_ds, mua_thue=excluded.mua_thue,
+                mua_ds_nk=excluded.mua_ds_nk, mua_thue_nk=excluded.mua_thue_nk,
+                ban_ds_0=excluded.ban_ds_0, ban_ds_5=excluded.ban_ds_5,
+                ban_thue_5=excluded.ban_thue_5, ban_ds_8=excluded.ban_ds_8,
+                ban_thue_8=excluded.ban_thue_8, ban_ds_10=excluded.ban_ds_10,
+                ban_thue_10=excluded.ban_thue_10, updated_at=excluded.updated_at
+        """, (cid, ky, round(mua_ds), round(mua_thue),
+              round(mua_ds_nk), round(mua_thue_nk), round(ban["0"]["ds"]),
+              round(ban["5"]["ds"]), round(ban["5"]["thue"]),
+              round(ban["8"]["ds"]), round(ban["8"]["thue"]),
+              round(ban["10"]["ds"]), round(ban["10"]["thue"]),
+              datetime.datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+        return {
+            "ok": True, "ky": ky,
+            "mua_ds": round(mua_ds), "mua_thue": round(mua_thue), "mua_rows": mua_rows,
+            "mua_ds_nk": round(mua_ds_nk), "mua_thue_nk": round(mua_thue_nk),
+            "mua_sheet_found": mua_sheet_found,
+            "ban_thue": round(sum(b["thue"] for b in ban.values())),
+            "ban_8_ds": round(ban["8"]["ds"]), "ban_rows": ban_rows,
+            "ban_sheet_found": ban_sheet_found,
+            "so_dong_ghi_de": so_dong_ghi_de,
+        }
+
+    return await run_in_threadpool(_xu_ly)
 
 
 def _get_imported(cid, ky=""):
