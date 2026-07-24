@@ -13884,6 +13884,22 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     _tlog(f"{len(da_co_file_rows)} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file"
           + (f" (trong đó {len(id_khong_ma)} hóa đơn KHÔNG MÃ — vẫn gọi mạng lấy chi tiết bình "
              f"thường như hóa đơn khác, không loại trừ)" if id_khong_ma else ""))
+    # Ghi rõ TỪNG hóa đơn thiếu cả file lẫn detail (ký hiệu/số/MST/trạng thái)
+    # — trước đây CHỈ có con số tổng, không biết CHÍNH XÁC hóa đơn nào để tự
+    # kiểm tra lại trên máy (vd người dùng chắc chắn đã tick "Tải file XML"
+    # lúc tra cứu nhưng vẫn thiếu — cần biết đúng hóa đơn nào mới dò được vì
+    # sao: file bị xoá sau đó, tên file lệch định dạng không khớp được, hay
+    # thật sự chưa từng tải được lúc tra cứu).
+    if can_nap:
+        for r in can_nap[:30]:
+            try:
+                raw_cn = json.loads(r["raw"]) if r["raw"] else {}
+            except Exception:
+                raw_cn = {}
+            _tlog(f"  · thiếu: {r['loai']} {r['khhdon']} số {r['shdon']} — MST bán {r['nbmst']} — "
+                 f"tthai={r['tthai']} ttxly={raw_cn.get('ttxly', '')} — id={r['id']}")
+        if len(can_nap) > 30:
+            _tlog(f"  · ... còn {len(can_nap) - 30} hóa đơn thiếu khác (không liệt kê hết)")
 
     def _tai_1(rr, cho_khi_429=False, max_retry=1):
         if client0._token_dead:
