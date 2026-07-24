@@ -6166,6 +6166,12 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             with batch_lock:
                 batch.setdefault("current_list", []).append(cid)
             FETCH_JOBS[cid] = _new_fetch_job()
+            # Xóa ghi chú lỗi lần tra cứu TRƯỚC (nếu có) NGAY KHI bắt đầu lượt
+            # mới — giống HỆT tra cứu 1 công ty (/api/fetch/{cid}) — để không
+            # hiện lỗi CŨ trong lúc lượt MỚI này còn đang chạy (trước đây batch
+            # chỉ xóa lúc XONG, nên nếu công ty có lỗi từ trước, cả lúc đang
+            # chạy lại vẫn hiện "lỗi" dù thực ra đang tra cứu bình thường).
+            _xoa_loi_tra_cuu(cid)
 
             def _bao_tien_do(t, _cid=cid, _item=item):
                 _item["note"] = t
