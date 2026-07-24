@@ -648,6 +648,7 @@
       </div>
       <div id="batchDetail" style="margin-top:8px;font-size:12.5px;color:var(--muted);font-style:italic;min-height:1.2em"></div>
       <div id="batchLog" style="margin-top:10px;font-size:13px;max-height:180px;overflow:auto"></div>
+      <div id="batchKetQua" style="display:none;margin-top:10px;border-radius:8px;padding:10px 12px;font-size:13px"></div>
     </div>
 
     <div id="batchTatMayCanhBao" style="display:none;margin-top:10px;background:var(--red-l);border-radius:10px;
@@ -2454,6 +2455,7 @@ function openBatchModal(){
   document.getElementById('batchProgress').style.display='none';
   document.getElementById('batchLog').innerHTML='';
   document.getElementById('batchDetail').textContent='';
+  document.getElementById('batchKetQua').style.display='none';
   document.getElementById('batchStartBtn').disabled=false;
   document.getElementById('bTatMay').checked=false;
   // Mặc định BẬT sẵn (tự xuất Excel/XML luôn sau khi tra cứu hàng loạt xong) —
@@ -2598,6 +2600,7 @@ async function doBatchFetch(){
   document.getElementById('batchProgress').style.display='block';
   document.getElementById('batchLog').innerHTML='';
   document.getElementById('batchDetail').textContent='';
+  document.getElementById('batchKetQua').style.display='none';
   document.getElementById('batchBar').style.width='0%';
   document.getElementById('batchProgressText').textContent='Bắt đầu...';
 
@@ -2643,9 +2646,11 @@ async function batchTheoDoi(bid){
     }
     const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
     document.getElementById('batchLog').innerHTML=st.items.map(i=>{
-      const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(i.status==='done'?'#1f6b4a':'#555'));
+      const lech=i.status==='done'&&i.lech;
+      const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(lech?'#b8860b':(i.status==='done'?'#1f6b4a':'#555')));
       const sl=i.status==='done'?` (${i.total_saved} HĐ)`:'';
-      return `<div style="color:${mau}">${ic[i.status]||'•'} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>`;
+      const icon=lech?'⚠':(ic[i.status]||'•');
+      return `<div style="color:${mau}">${icon} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>`;
     }).join('');
   }
   if(!st)return;
@@ -2654,6 +2659,23 @@ async function batchTheoDoi(bid){
   batchHidden=false;
   const miniBar=document.getElementById('batchMiniBar');
   if(miniBar)miniBar.style.display='none';
+  // Báo RÕ có công ty nào bị LỆCH hóa đơn không (số lấy được ít hơn số trang
+  // Thuế báo) — xanh nếu không công ty nào lệch, đỏ nếu có, để không phải mở
+  // từng công ty ra xem "Kết quả tra cứu" mới biết.
+  const kq=document.getElementById('batchKetQua');
+  if(kq){
+    const dsLech=st.items.filter(i=>i.status==='done'&&i.lech);
+    if(dsLech.length){
+      kq.style.background='#fff1f0';kq.style.color='#c00';kq.style.border='1px solid #f0a0a0';
+      kq.innerHTML=`⚠ CÓ ${dsLech.length} CÔNG TY BỊ LỆCH HÓA ĐƠN (lấy thiếu so với số trang Thuế báo): `+
+        dsLech.map(i=>`${i.ten} (mua ${i.tk_mua_got||0}/${i.tk_mua_exp||0}, bán ${i.tk_ban_got||0}/${i.tk_ban_exp||0})`).join('; ')+
+        ' — nên tra cứu lại (chế độ "Chậm & an toàn").';
+    }else{
+      kq.style.background='#f0f9f4';kq.style.color='#1f6b4a';kq.style.border='1px solid #a0d0b0';
+      kq.innerHTML='✓ Không lệch — đã lấy đủ hóa đơn theo số trang Thuế báo cho tất cả công ty.';
+    }
+    kq.style.display='block';
+  }
   const dsLoi=st.items.filter(i=>i.status==='error');
   const dsBoQua=st.items.filter(i=>i.status==='skipped');
   if(dsLoi.length){
@@ -2693,6 +2715,7 @@ async function batchTiepTuc(){
   document.getElementById('batchProgress').style.display='block';
   document.getElementById('batchLog').innerHTML='';
   document.getElementById('batchDetail').textContent='';
+  document.getElementById('batchKetQua').style.display='none';
   document.getElementById('batchBar').style.width='0%';
   document.getElementById('batchProgressText').textContent='Tiếp tục phần còn dở dang...';
   try{

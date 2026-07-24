@@ -6175,6 +6175,17 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 _run_fetch_job(cid, body)   # chạy đồng bộ trong thread batch
                 last = (FETCH_JOBS.get(cid) or {}).get("last") or {}
                 item["total_saved"] = last.get("total_saved", 0)
+                # Số hóa đơn LẤY ĐƯỢC so với số trang Thuế BÁO (tk_..._got/exp,
+                # do _run_fetch_job ghi vào msg() cuối cùng) — để báo LỆCH hay
+                # không ngay trên khung tra cứu hàng loạt, không phải mở từng
+                # công ty ra xem mới biết.
+                mua_got, mua_exp = last.get("tk_mua_got", 0), last.get("tk_mua_exp", 0)
+                ban_got, ban_exp = last.get("tk_ban_got", 0), last.get("tk_ban_exp", 0)
+                item["tk_mua_got"], item["tk_mua_exp"] = mua_got, mua_exp
+                item["tk_ban_got"], item["tk_ban_exp"] = ban_got, ban_exp
+                item["lech"] = bool(last.get("loi_tra_cuu")
+                                     or (mua_exp and mua_got < mua_exp)
+                                     or (ban_exp and ban_got < ban_exp))
                 if last.get("stage") == "error":
                     item["status"] = "error"
                     item["note"] = last.get("text", "Lỗi")
@@ -6236,11 +6247,15 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
 
     def _mk_item(c):
         it = {"cid": c, "ten": ten_map[c], "status": "pending",
-              "total_saved": 0, "note": ""}
+              "total_saved": 0, "note": "", "lech": False,
+              "tk_mua_got": 0, "tk_mua_exp": 0, "tk_ban_got": 0, "tk_ban_exp": 0}
         if items_cu and str(c) in items_cu and items_cu[str(c)].get("status") == "done":
             old = items_cu[str(c)]
             it.update(status="done", total_saved=old.get("total_saved", 0),
-                      note=old.get("note", "Đã xong ở lần trước"))
+                      note=old.get("note", "Đã xong ở lần trước"),
+                      lech=old.get("lech", False),
+                      tk_mua_got=old.get("tk_mua_got", 0), tk_mua_exp=old.get("tk_mua_exp", 0),
+                      tk_ban_got=old.get("tk_ban_got", 0), tk_ban_exp=old.get("tk_ban_exp", 0))
         return it
 
     items = {c: _mk_item(c) for c in cids}
