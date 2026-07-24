@@ -13994,12 +13994,16 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 _tlog(f"⚠ {len(can_nap2) - so_lay_duoc2}/{len(can_nap2)} hóa đơn có file trên máy "
                      f"nhưng ĐỌC LỖI và nạp lại qua mạng cũng không được")
 
-    # ===== LƯỢT CUỐI: ĐẢM BẢO LẤY ĐỦ, không để hóa đơn nào hiện placeholder
-    # "chưa lấy được chi tiết" chỉ vì bị giới hạn tốc độ (429) ở 2 lượt nhanh
-    # phía trên. 2 lượt trên bỏ ngay khi gặp 429 (để không làm chậm cả quá
-    # trình) — số hóa đơn CÒN THIẾU lúc này thường đã nhỏ, nên lượt cuối này
-    # CHỜ đúng theo Retry-After của trang Thuế (chấp nhận chậm hơn) với ít
-    # luồng song song hơn, để lấy cho BẰNG ĐƯỢC thay vì bỏ cuộc.
+    # ===== LƯỢT CUỐI: PHẢI LẤY ĐỦ mới xong, không để hóa đơn nào hiện
+    # placeholder "chưa lấy được chi tiết" chỉ vì bị giới hạn tốc độ (429) —
+    # theo đúng yêu cầu "phải tải đầy đủ mới xong quá trình". 2 lượt phía
+    # trên bỏ ngay khi gặp 429 (để không làm chậm cả quá trình) — số hóa đơn
+    # CÒN THIẾU lúc này thường đã nhỏ, nên lượt cuối này LẶP NHIỀU VÒNG, mỗi
+    # vòng CHỜ đúng theo Retry-After của trang Thuế (chấp nhận chậm hơn) với
+    # ít luồng song song hơn, CHỈ DỪNG khi lấy đủ hết — trước đây chỉ thử 1
+    # vòng rồi bỏ cuộc dù vẫn còn thiếu nhiều (vd 7/11 hóa đơn vẫn thiếu sau
+    # 1 vòng ~9 phút), khiến file Excel xuất ra còn dòng "chưa lấy được chi
+    # tiết" dù trang Thuế thực ra vẫn trả lời được nếu kiên nhẫn thử tiếp.
     # LƯU Ý: hóa đơn KHÔNG MÃ (ttxly=6) VẪN được xử lý bình thường ở đây —
     # đã kiểm chứng bằng dữ liệu thật là API get_detail() VẪN trả về đúng
     # chi tiết dòng hàng (kể cả tên hàng hóa) cho loại này khi request thành
@@ -14010,20 +14014,40 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     if ds_can_kiem_tra and client0 and client0.token and not client0._token_dead:
         ids_can_kiem_tra = [r["id"] for r in ds_can_kiem_tra]
         ph = ",".join("?" * len(ids_can_kiem_tra))
-        con_thieu_rows = conn.execute(
-            f"SELECT * FROM invoices WHERE id IN ({ph}) AND (detail_json IS NULL OR detail_json='')",
-            ids_can_kiem_tra).fetchall()
-        if con_thieu_rows:
-            _tlog(f"còn {len(con_thieu_rows)} hóa đơn chưa lấy được — thử LẦN CUỐI "
-                 f"(chờ đúng thời gian giới hạn tốc độ của trang Thuế, để không bỏ sót)...")
-            so_lay_duoc3 = _nap_song_song(con_thieu_rows, "thử lại lần cuối (chờ khi bị giới hạn tốc độ)",
+        # An toàn: nếu NHIỀU VÒNG LIÊN TỤC không lấy thêm được hóa đơn nào
+        # (có thể lỗi khác hẳn 429 tạm thời, vd phiên hết hạn/lỗi hẳn phía
+        # Thuế cho đúng hóa đơn đó) thì mới dừng lại — tránh lặp vô tận vô
+        # ích khi vấn đề không phải do giới hạn tốc độ.
+        SO_VONG_KHONG_TIEN_TOI_DA = 5
+        so_vong_khong_tien = 0
+        vong = 0
+        while True:
+            con_thieu_rows = conn.execute(
+                f"SELECT * FROM invoices WHERE id IN ({ph}) AND (detail_json IS NULL OR detail_json='')",
+                ids_can_kiem_tra).fetchall()
+            if not con_thieu_rows:
+                if vong:
+                    _tlog("✓ đã lấy đủ chi tiết cho toàn bộ hóa đơn còn thiếu (không còn hóa đơn nào "
+                         "phải hiện placeholder 'chưa lấy được chi tiết')")
+                break
+            if client0._token_dead:
+                _tlog(f"⚠ phiên đăng nhập hết hạn giữa chừng — còn {len(con_thieu_rows)} hóa đơn CHƯA "
+                     f"lấy được chi tiết, đăng nhập lại rồi xuất lại để lấy nốt")
+                break
+            vong += 1
+            _tlog(f"còn {len(con_thieu_rows)} hóa đơn chưa lấy được — thử lại vòng {vong} (chờ đúng "
+                 f"thời gian giới hạn tốc độ của trang Thuế, KHÔNG bỏ cuộc cho tới khi lấy đủ)...")
+            so_lay_duoc3 = _nap_song_song(con_thieu_rows, f"thử lại vòng {vong} (chờ khi bị giới hạn tốc độ)",
                                           cho_khi_429=True, workers=2)
-            if so_lay_duoc3 < len(con_thieu_rows):
-                _tlog(f"⚠ vẫn còn {len(con_thieu_rows) - so_lay_duoc3} hóa đơn KHÔNG lấy được chi tiết "
-                     f"dù đã chờ thử lại — có thể phiên đăng nhập hết hạn giữa chừng, đăng nhập lại rồi "
-                     f"xuất lại để lấy nốt")
+            if so_lay_duoc3 == 0:
+                so_vong_khong_tien += 1
+                if so_vong_khong_tien >= SO_VONG_KHONG_TIEN_TOI_DA:
+                    _tlog(f"⚠ đã thử {so_vong_khong_tien} vòng liên tiếp KHÔNG lấy thêm được hóa đơn nào "
+                         f"(có thể lỗi khác ngoài giới hạn tốc độ) — dừng lại, còn {len(con_thieu_rows)} "
+                         f"hóa đơn CHƯA lấy được chi tiết. Xuất lại 'Kết xuất Excel' sau ít phút để thử tiếp.")
+                    break
             else:
-                _tlog("đã lấy đủ chi tiết cho toàn bộ hóa đơn còn thiếu ở lượt cuối")
+                so_vong_khong_tien = 0
 
     # đọc lại rows để có detail_json mới nhất (từ các lượt nạp mạng ở trên)
     rows = _gop_hoa_don_trung_he_thong(conn.execute(
