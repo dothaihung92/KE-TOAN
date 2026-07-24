@@ -4947,17 +4947,21 @@ function openVatModal(){
   document.getElementById('vat_ketqua').textContent='—';
   document.getElementById('vatModal').classList.add('show');
   // Tự động lấy số dư đầu kỳ NGAY khi mở khung (không cần bấm "Lấy tự động")
-  // — im lặng nếu không tìm thấy file kỳ trước (vd chưa cấu hình thư mục kết
-  // xuất, hoặc kỳ đầu tiên chưa có kỳ trước), vẫn tính bình thường như cũ.
+  // — nếu KHÔNG tìm thấy file kỳ trước vẫn báo ĐỎ rõ ràng (không im lặng bỏ
+  // qua), để người dùng biết mà tự nhập tay hoặc kiểm tra lại thư mục kết xuất.
   if(ky)layDuDauKyTuDong(true);
   else tinhVat();
 }
 function closeVatModal(){document.getElementById('vatModal').classList.remove('show')}
 function fmtD(n){return (n||0).toLocaleString('vi-VN')+' đ'}
-async function layDuDauKyTuDong(imLangKhiLoi){
-  if(!current){if(!imLangKhiLoi)toast('Chọn công ty trước','err');return}
+async function layDuDauKyTuDong(tuDong){
+  // tuDong=true: gọi TỰ ĐỘNG (lúc mở khung/đổi kỳ) -> chỉ bỏ qua toast cho
+  // 2 điều kiện tiên quyết chưa đủ (chưa chọn công ty/chưa có kỳ, không phải
+  // lỗi thật). Lỗi "không tìm thấy file kỳ trước" thì LUÔN báo đỏ, kể cả
+  // khi gọi tự động — theo yêu cầu không được im lặng bỏ qua.
+  if(!current){if(!tuDong)toast('Chọn công ty trước','err');return}
   const ky=document.getElementById('vat_ky').value.trim();
-  if(!ky){if(!imLangKhiLoi)toast('Nhập kỳ kê khai trước','err');return}
+  if(!ky){if(!tuDong)toast('Nhập kỳ kê khai trước','err');return}
   try{
     const r=await fetch(`/api/vat-du-dau-ky-tu-dong/${current}?ky=${encodeURIComponent(ky)}`);
     if(!r.ok)throw new Error((await r.json()).detail||'Không lấy được');
@@ -4966,8 +4970,8 @@ async function layDuDauKyTuDong(imLangKhiLoi){
     toast(`✓ Đã tự động lấy từ tờ khai GTGT kỳ ${d.ky_truoc} (file ${d.file}): ${fmtD(d.du_dau_ky)}`,'ok');
     await tinhVat();
   }catch(e){
-    if(!imLangKhiLoi)toast(e.message,'err');
-    else await tinhVat();   // tu dong: khong tim thay thi tinh binh thuong, khong bao loi
+    toast(e.message,'err');   // LUON bao do, ke ca goi tu dong — khong im lang
+    await tinhVat();          // van tinh binh thuong (dung du_dau_ky da luu/de trong)
   }
 }
 async function tinhVat(){

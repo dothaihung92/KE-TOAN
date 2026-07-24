@@ -5640,6 +5640,57 @@ def _run_fetch_job(cid: int, body: dict):
             thieu = (co_loi or
                      (tk_mua["exp"] and tk_mua["got"] < tk_mua["exp"]) or
                      (tk_ban["exp"] and tk_ban["got"] < tk_ban["exp"]))
+
+            # ===== TỰ ĐỘNG LẤY SỐ DƯ ĐẦU KỲ (chỉ tiêu [41] của tờ khai GTGT kỳ
+            # trước, đọc từ thư mục kết xuất Năm/Quý riêng của công ty) VÀ TÍNH
+            # + LƯU LUÔN tạm tính thuế GTGT kỳ này — để mở "Tạm tính thuế VAT"
+            # ra là có sẵn kết quả, không phải tự bấm "Lấy tự động" rồi "Tính &
+            # Save" sau mỗi lần tra cứu (áp dụng cho cả tra cứu 1 công ty lẫn
+            # hàng loạt). Chỉ làm khi tra cứu THÀNH CÔNG (không co_loi) — dữ
+            # liệu hóa đơn dùng để tính vat_mua/vat_ban phải đáng tin cậy. Tính
+            # TRƯỚC khi ghép done_text để nếu KHÔNG tìm thấy file kỳ trước, lời
+            # cảnh báo được ghép NGAY VÀO banner tổng kết (hiện đỏ qua toast),
+            # không tách thành 1 dòng thông báo lỗi RIÊNG (tránh bị hiểu nhầm
+            # thành lỗi tra cứu hóa đơn thật sự, ảnh hưởng trạng thái batch).
+            vat_dau_ky_ok_msg = None
+            vat_dau_ky_canh_bao = None
+            if not co_loi:
+                try:
+                    ky_hien_tai = _ky_tu_khoang_ngay(tu or "", den or "")
+                    if ky_hien_tai:
+                        conn_vat = db()
+                        comp_vat = conn_vat.execute(
+                            "SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+                        conn_vat.close()
+                        if comp_vat:
+                            gia_tri_ct41, ky_truoc_vat, _fp_vat = _doc_ct41_ky_truoc(comp_vat, ky_hien_tai)
+                            if gia_tri_ct41 is not None:
+                                ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=gia_tri_ct41)
+                                vat_luu(cid, data={
+                                    "ky": ky_hien_tai, "du_dau_ky": gia_tri_ct41,
+                                    "vat_mua": ket_qua_vat["vat_mua"], "vat_ban": ket_qua_vat["vat_ban"],
+                                    "phai_nop": ket_qua_vat["phai_nop"],
+                                    "du_cuoi_ky": ket_qua_vat["du_cuoi_ky"]})
+                                so_tien_fmt = f"{round(gia_tri_ct41):,}".replace(",", ".")
+                                vat_dau_ky_ok_msg = (
+                                    f"✓ Đã tự động lấy số dư đầu kỳ {so_tien_fmt} đ (từ tờ khai "
+                                    f"GTGT kỳ {ky_truoc_vat}) và tính tạm thuế GTGT kỳ "
+                                    f"{ky_hien_tai} — xem tại 'Tạm tính thuế VAT'.")
+                            else:
+                                # KHÔNG tìm thấy tờ khai GTGT kỳ trước trong thư mục lưu
+                                # file kết xuất — PHẢI báo RÕ (đỏ), không được im lặng bỏ
+                                # qua, để người dùng biết mà tự nhập tay "Số dư đầu kỳ"
+                                # hoặc kiểm tra lại đã cấu hình/đã có file kỳ đó chưa.
+                                vat_dau_ky_canh_bao = (
+                                    f"⚠ Không tìm thấy tờ khai GTGT của kỳ "
+                                    f"{ky_truoc_vat or '(không xác định được kỳ trước)'} trong thư mục "
+                                    f"lưu file kết xuất — CHƯA tự lấy được 'Số dư đầu kỳ' cho kỳ "
+                                    f"{ky_hien_tai}. Hãy kiểm tra đã cấu hình đúng 'Thư mục lưu file kết "
+                                    f"xuất' và đã có file kết xuất kỳ đó chưa (mục Sửa công ty), hoặc tự "
+                                    f"nhập tay trong khung 'Tạm tính thuế VAT'.")
+                except Exception as e:
+                    vat_dau_ky_canh_bao = f"⚠ Không tự lấy được số dư đầu kỳ/tính tạm thuế GTGT: {str(e)[:120]}"
+
             if co_loi:
                 # KHÔNG BAO GIỜ báo "Hoàn tất" khi có lỗi — phải là trạng thái LỖI rõ ràng
                 loi_ben = []
@@ -5677,12 +5728,16 @@ def _run_fetch_job(cid: int, body: dict):
                                   f"nào cho phần này): " + " | ".join(loi_tai_file_ngoai_le))
                 if thieu:
                     done_text += " — ⚠ CÓ THỂ THIẾU, nên tra cứu lại (chế độ Chậm & an toàn)"
+                if vat_dau_ky_canh_bao:
+                    done_text += f" — {vat_dau_ky_canh_bao}"
             msg(stage=("error" if co_loi else "done"), text=done_text,
                 total_saved=total_saved, file_saved=file_saved,
                 file_thieu=file_thieu_tong,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
                 tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
                 loi_tra_cuu=co_loi)
+            if vat_dau_ky_ok_msg:
+                msg(stage="info", text=vat_dau_ky_ok_msg)
 
             # ===== TỰ ĐỘNG KẾT XUẤT (CHỈ TRA CỨU HÀNG LOẠT) vào thư mục
             # Năm/Quý (nếu bật) — tra cứu 1 công ty giờ KHÔNG tự động kết xuất
@@ -5726,39 +5781,6 @@ def _run_fetch_job(cid: int, body: dict):
                     msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
                 except Exception as e:
                     msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
-
-            # ===== TỰ ĐỘNG LẤY SỐ DƯ ĐẦU KỲ (chỉ tiêu [41] của tờ khai GTGT kỳ
-            # trước, đọc từ thư mục kết xuất Năm/Quý riêng của công ty) VÀ TÍNH
-            # + LƯU LUÔN tạm tính thuế GTGT kỳ này — để mở "Tạm tính thuế VAT"
-            # ra là có sẵn kết quả, không phải tự bấm "Lấy tự động" rồi "Tính &
-            # Save" sau mỗi lần tra cứu (áp dụng cho cả tra cứu 1 công ty lẫn
-            # hàng loạt). Chỉ làm khi tra cứu THÀNH CÔNG (không co_loi) — dữ
-            # liệu hóa đơn dùng để tính vat_mua/vat_ban phải đáng tin cậy.
-            if not co_loi:
-                try:
-                    ky_hien_tai = _ky_tu_khoang_ngay(tu or "", den or "")
-                    if ky_hien_tai:
-                        conn_vat = db()
-                        comp_vat = conn_vat.execute(
-                            "SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
-                        conn_vat.close()
-                        if comp_vat:
-                            gia_tri_ct41, ky_truoc_vat, _fp_vat = _doc_ct41_ky_truoc(comp_vat, ky_hien_tai)
-                            if gia_tri_ct41 is not None:
-                                ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=gia_tri_ct41)
-                                vat_luu(cid, data={
-                                    "ky": ky_hien_tai, "du_dau_ky": gia_tri_ct41,
-                                    "vat_mua": ket_qua_vat["vat_mua"], "vat_ban": ket_qua_vat["vat_ban"],
-                                    "phai_nop": ket_qua_vat["phai_nop"],
-                                    "du_cuoi_ky": ket_qua_vat["du_cuoi_ky"]})
-                                so_tien_fmt = f"{round(gia_tri_ct41):,}".replace(",", ".")
-                                msg(stage="info",
-                                    text=f"✓ Đã tự động lấy số dư đầu kỳ {so_tien_fmt} đ (từ tờ khai "
-                                         f"GTGT kỳ {ky_truoc_vat}) và tính tạm thuế GTGT kỳ "
-                                         f"{ky_hien_tai} — xem tại 'Tạm tính thuế VAT'.")
-                except Exception as e:
-                    msg(stage="warn",
-                        text=f"Không tự lấy được số dư đầu kỳ/tính tạm thuế GTGT: {str(e)[:120]}")
         except Exception as e:
             msg(stage="error", text=f"Lỗi: {str(e)[:160]}")
         finally:
