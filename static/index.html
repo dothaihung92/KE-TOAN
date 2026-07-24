@@ -657,14 +657,15 @@
 <div class="modal-bg" id="vatModal">
   <div class="modal">
     <h3>🧮 Tạm tính thuế GTGT trong kỳ</h3>
-    <div class="field"><label>Kỳ kê khai (MM/YYYY hoặc QX/YYYY)</label><input id="vat_ky" placeholder="05/2026 hoặc Q2/2026"></div>
+    <div class="field"><label>Kỳ kê khai (MM/YYYY hoặc QX/YYYY)</label>
+      <input id="vat_ky" placeholder="05/2026 hoặc Q2/2026" onchange="layDuDauKyTuDong(true)"></div>
     <div class="field">
       <label>Số dư đầu kỳ <span style="font-weight:400;color:var(--muted)">(thuế GTGT còn được khấu trừ kỳ trước chuyển sang — chỉ tiêu [22])</span></label>
       <div style="display:flex;gap:6px">
         <input id="vat_dudau" type="number" placeholder="0" style="flex:1">
-        <button type="button" class="btn ghost sm" onclick="layDuDauKyTuDong()" style="white-space:nowrap">🔄 Lấy tự động</button>
+        <button type="button" class="btn ghost sm" onclick="layDuDauKyTuDong()" style="white-space:nowrap">🔄 Lấy lại</button>
       </div>
-      <p class="hint" style="margin-top:4px">Bấm "Lấy tự động" để phần mềm tự vào thư mục kết xuất kỳ trước, đọc chỉ tiêu [41] trên tờ khai GTGT kỳ đó và điền vào đây.</p>
+      <p class="hint" style="margin-top:4px">Phần mềm tự động vào thư mục kết xuất kỳ trước, đọc chỉ tiêu [41] trên tờ khai GTGT kỳ đó và điền vào đây ngay khi mở khung này (không cần bấm nút). Bấm "Lấy lại" nếu muốn làm mới.</p>
     </div>
     <div style="background:var(--green-l);border-radius:10px;padding:14px 16px;margin:10px 0;font-size:14px;line-height:2">
       <div style="display:flex;justify-content:space-between;gap:10px"><span>VAT đầu vào (mua):</span><b id="vat_mua" style="white-space:nowrap">—</b></div>
@@ -2428,7 +2429,9 @@ function openBatchModal(){
   document.getElementById('batchDetail').textContent='';
   document.getElementById('batchStartBtn').disabled=false;
   document.getElementById('bTatMay').checked=false;
-  document.getElementById('bLuuKetXuat').checked=false;
+  // Mặc định BẬT sẵn (tự xuất Excel/XML luôn sau khi tra cứu hàng loạt xong) —
+  // trước đây phải tự nhớ tick lại mỗi lần mở khung này mới xuất.
+  document.getElementById('bLuuKetXuat').checked=true;
   document.getElementById('batchTatMayCanhBao').style.display='none';
   document.getElementById('batchModal').classList.add('show');
   batchKiemTraDoDang();   // mời tiếp tục nếu có lượt tra cứu dở dang
@@ -4943,22 +4946,29 @@ function openVatModal(){
   document.getElementById('vat_dudau_show').textContent='—';
   document.getElementById('vat_ketqua').textContent='—';
   document.getElementById('vatModal').classList.add('show');
-  tinhVat();
+  // Tự động lấy số dư đầu kỳ NGAY khi mở khung (không cần bấm "Lấy tự động")
+  // — im lặng nếu không tìm thấy file kỳ trước (vd chưa cấu hình thư mục kết
+  // xuất, hoặc kỳ đầu tiên chưa có kỳ trước), vẫn tính bình thường như cũ.
+  if(ky)layDuDauKyTuDong(true);
+  else tinhVat();
 }
 function closeVatModal(){document.getElementById('vatModal').classList.remove('show')}
 function fmtD(n){return (n||0).toLocaleString('vi-VN')+' đ'}
-async function layDuDauKyTuDong(){
-  if(!current){toast('Chọn công ty trước','err');return}
+async function layDuDauKyTuDong(imLangKhiLoi){
+  if(!current){if(!imLangKhiLoi)toast('Chọn công ty trước','err');return}
   const ky=document.getElementById('vat_ky').value.trim();
-  if(!ky){toast('Nhập kỳ kê khai trước','err');return}
+  if(!ky){if(!imLangKhiLoi)toast('Nhập kỳ kê khai trước','err');return}
   try{
     const r=await fetch(`/api/vat-du-dau-ky-tu-dong/${current}?ky=${encodeURIComponent(ky)}`);
     if(!r.ok)throw new Error((await r.json()).detail||'Không lấy được');
     const d=await r.json();
     document.getElementById('vat_dudau').value=d.du_dau_ky;
-    toast(`✓ Đã lấy từ tờ khai GTGT kỳ ${d.ky_truoc} (file ${d.file}): ${fmtD(d.du_dau_ky)}`,'ok');
+    toast(`✓ Đã tự động lấy từ tờ khai GTGT kỳ ${d.ky_truoc} (file ${d.file}): ${fmtD(d.du_dau_ky)}`,'ok');
     await tinhVat();
-  }catch(e){toast(e.message,'err')}
+  }catch(e){
+    if(!imLangKhiLoi)toast(e.message,'err');
+    else await tinhVat();   // tu dong: khong tim thay thi tinh binh thuong, khong bao loi
+  }
 }
 async function tinhVat(){
   const ky=document.getElementById('vat_ky').value.trim();

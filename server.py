@@ -5726,6 +5726,39 @@ def _run_fetch_job(cid: int, body: dict):
                     msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
                 except Exception as e:
                     msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
+
+            # ===== TỰ ĐỘNG LẤY SỐ DƯ ĐẦU KỲ (chỉ tiêu [41] của tờ khai GTGT kỳ
+            # trước, đọc từ thư mục kết xuất Năm/Quý riêng của công ty) VÀ TÍNH
+            # + LƯU LUÔN tạm tính thuế GTGT kỳ này — để mở "Tạm tính thuế VAT"
+            # ra là có sẵn kết quả, không phải tự bấm "Lấy tự động" rồi "Tính &
+            # Save" sau mỗi lần tra cứu (áp dụng cho cả tra cứu 1 công ty lẫn
+            # hàng loạt). Chỉ làm khi tra cứu THÀNH CÔNG (không co_loi) — dữ
+            # liệu hóa đơn dùng để tính vat_mua/vat_ban phải đáng tin cậy.
+            if not co_loi:
+                try:
+                    ky_hien_tai = _ky_tu_khoang_ngay(tu or "", den or "")
+                    if ky_hien_tai:
+                        conn_vat = db()
+                        comp_vat = conn_vat.execute(
+                            "SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+                        conn_vat.close()
+                        if comp_vat:
+                            gia_tri_ct41, ky_truoc_vat, _fp_vat = _doc_ct41_ky_truoc(comp_vat, ky_hien_tai)
+                            if gia_tri_ct41 is not None:
+                                ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=gia_tri_ct41)
+                                vat_luu(cid, data={
+                                    "ky": ky_hien_tai, "du_dau_ky": gia_tri_ct41,
+                                    "vat_mua": ket_qua_vat["vat_mua"], "vat_ban": ket_qua_vat["vat_ban"],
+                                    "phai_nop": ket_qua_vat["phai_nop"],
+                                    "du_cuoi_ky": ket_qua_vat["du_cuoi_ky"]})
+                                so_tien_fmt = f"{round(gia_tri_ct41):,}".replace(",", ".")
+                                msg(stage="info",
+                                    text=f"✓ Đã tự động lấy số dư đầu kỳ {so_tien_fmt} đ (từ tờ khai "
+                                         f"GTGT kỳ {ky_truoc_vat}) và tính tạm thuế GTGT kỳ "
+                                         f"{ky_hien_tai} — xem tại 'Tạm tính thuế VAT'.")
+                except Exception as e:
+                    msg(stage="warn",
+                        text=f"Không tự lấy được số dư đầu kỳ/tính tạm thuế GTGT: {str(e)[:120]}")
         except Exception as e:
             msg(stage="error", text=f"Lỗi: {str(e)[:160]}")
         finally:
@@ -13611,6 +13644,30 @@ def _ky_lien_truoc(ky):
     pm = 12 if m <= 1 else m - 1
     py = y - 1 if m <= 1 else y
     return f"{pm:02d}/{py}"
+
+
+def _ky_tu_khoang_ngay(tu, den):
+    """Suy ra kỳ kê khai 'QX/YYYY' (nếu khoảng ngày đúng 1 quý) hoặc
+    'MM/YYYY' từ khoảng ngày tra cứu (dd/mm/yyyy) — bản Python của hàm
+    kyKeKhaiTu() bên frontend, dùng để TỰ ĐỘNG xác định kỳ khi không có ô
+    nhập kỳ riêng (vd sau khi tra cứu hóa đơn hàng loạt xong)."""
+    if not tu:
+        return ""
+    try:
+        d1, m1s, y1 = tu.split("/")
+        m1 = int(m1s)
+    except Exception:
+        return ""
+    if den:
+        try:
+            d2, m2s, y2 = den.split("/")
+            m2 = int(m2s)
+        except Exception:
+            d2 = y2 = None
+        else:
+            if d1 == "01" and m1 in (1, 4, 7, 10) and y1 == y2 and m2 - m1 == 2:
+                return f"Q{(m1 - 1) // 3 + 1}/{y1}"
+    return f"{m1:02d}/{y1}"
 
 
 def _parse_thue_suat(ts_raw):
