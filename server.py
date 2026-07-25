@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.25"
+APP_BUILD = "2026-07-25.26"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2728,13 +2728,34 @@ def _dvc_click_chac_chan(drv, el):
         return False, f"{loi_goc} | bấm bằng JS cũng lỗi: {str(e)[:200]}"
 
 
+def _dvc_xu_ly_alert_neu_co(drv):
+    """Nếu trang hiện hộp thoại JS GỐC của trình duyệt (window.confirm/alert
+    — vd "Bạn có chắc chắn muốn nộp tờ khai?") thì tự bấm OK để xác nhận
+    luôn — đây KHÔNG phải phần tử DOM (không tìm bằng find_elements/nút
+    "Đồng ý" được) mà là hộp thoại CỦA CHÍNH TRÌNH DUYỆT, phải dùng
+    Selenium switch_to.alert. Nếu không xử lý hộp thoại này thì mọi lệnh
+    đọc trang sau đó (current_url/page_source) đều bị chặn/lỗi
+    (UnexpectedAlertPresentException). Trả nội dung hộp thoại nếu vừa xử
+    lý, None nếu không có."""
+    try:
+        alert = drv.switch_to.alert
+        text = alert.text
+        alert.accept()
+        return text
+    except Exception:
+        return None
+
+
 def _dvc_cho_ket_qua_nop(drv, cho_toi_da=30):
     """Chờ trang chuyển sang màn kết quả "THÀNH CÔNG" sau khi bấm "Nộp tờ
     khai" — LUÔN kiểm tra ít nhất 1 lần (cho_toi_da=0 nghĩa là chỉ xem ngay
-    lúc này, không chờ). Trả (thanh_cong, ma_ho_so)."""
+    lúc này, không chờ). Tự xử lý hộp thoại xác nhận JS gốc (nếu có) ở MỖI
+    vòng — nếu không thì việc đọc trang bên dưới sẽ bị chặn mãi. Trả
+    (thanh_cong, ma_ho_so)."""
     import time as _t, re as _re
     cho_den = _t.time() + cho_toi_da
     while True:
+        _dvc_xu_ly_alert_neu_co(drv)
         try:
             url = (drv.current_url or "").lower()
         except Exception:
@@ -3113,9 +3134,16 @@ def _dvc_bam_nut_nop_to_khai(drv, cho_ky_toi_da=25, cho_ket_qua_toi_da=30, so_la
             continue
         buoc.append(f"Đã bấm \"Nộp tờ khai\" (lần {lan}/{so_lan_thu})")
 
-        # (3) hộp xác nhận "Bạn có chắc muốn nộp?" — nếu có thì tự đồng ý
+        # (3) hộp xác nhận "Bạn có chắc muốn nộp?" — nếu có thì tự đồng ý.
+        # Có 2 dạng CÓ THỂ gặp: (a) hộp thoại JS GỐC của trình duyệt
+        # (window.confirm) — _dvc_cho_ket_qua_nop() bên dưới TỰ xử lý dạng
+        # này ở đầu mỗi vòng (xem _dvc_xu_ly_alert_neu_co); (b) 1 nút DOM
+        # thường như "Đồng ý"/"Xác nhận" do trang tự vẽ — tìm và bấm luôn.
         _t.sleep(1.5)
-        if not _dvc_cho_ket_qua_nop(drv, 0)[0]:
+        alert_da_xu_ly = _dvc_xu_ly_alert_neu_co(drv)
+        if alert_da_xu_ly:
+            buoc.append(f"Đã tự xác nhận hộp thoại của trình duyệt: \"{alert_da_xu_ly}\"")
+        elif not _dvc_cho_ket_qua_nop(drv, 0)[0]:
             for tu in _DVC_NUT_XAC_NHAN_NOP:
                 nut_xn = _dvc_nut_gon_nhat(drv, tu)
                 if nut_xn:
