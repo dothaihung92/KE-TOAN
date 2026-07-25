@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.23"
+APP_BUILD = "2026-07-25.24"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2754,26 +2754,70 @@ def _dvc_bam_ky_ho_so(drv):
 
 
 # ============================================================
-#  TỰ ĐỘNG NHẬP MÃ PIN chữ ký số + BẤM "NỘP TỜ KHAI" — hộp thoại "Xác nhận
-#  PIN" là 1 CỬA SỔ WINDOWS RIÊNG do hub CKS cục bộ tự bật ra (đã xác nhận
-#  qua ảnh chụp thật của người dùng), KHÔNG nằm trong DOM trang web nên
-#  Selenium không điều khiển được — phải dùng pywinauto (điều khiển ứng
-#  dụng Windows qua UI Automation) để dò đúng cửa sổ theo TIÊU ĐỀ thật
-#  "Xác nhận PIN", nhập PIN vào ô "Mã PIN:" rồi bấm "Đăng nhập".
+#  TỰ ĐỘNG NHẬP MÃ PIN chữ ký số + BẤM "NỘP TỜ KHAI" — hộp thoại nhập PIN là
+#  1 CỬA SỔ WINDOWS RIÊNG do hub CKS cục bộ tự bật ra (đã xác nhận qua ảnh
+#  chụp thật của người dùng), KHÔNG nằm trong DOM trang web nên Selenium
+#  không điều khiển được — phải dùng pywinauto (điều khiển ứng dụng Windows
+#  qua UI Automation) để dò đúng cửa sổ, nhập PIN vào ô "Mã PIN:" rồi bấm
+#  "Đăng nhập". TIÊU ĐỀ cửa sổ KHÁC NHAU tuỳ nhà cung cấp token (đã xác nhận
+#  qua ảnh chụp thật của người dùng, dùng "nhiều token"): "Xác nhận PIN"
+#  (chung), "Đăng nhập" (VINCA Token — có kèm dòng "Bạn còn N lần để đăng
+#  nhập"). Tiêu đề "Đăng nhập" khá chung chung nên phải kiểm tra THÊM nội
+#  dung (có nhắc "mã pin"/"token") để chắc chắn đúng hộp thoại token, tránh
+#  nhầm với 1 cửa sổ "Đăng nhập" khác không liên quan trên máy.
 #  AN TOÀN: hầu hết token/CKS KHOÁ VĨNH VIỄN sau 3 LẦN NHẬP SAI PIN liên
 #  tiếp (phải mang tới nhà cung cấp mở khoá lại) — nên CHỈ thử tối đa 2 LẦN
-#  rồi DỪNG HẲN (tự bấm "Huỷ bỏ"), không bao giờ thử lần thứ 3, đúng yêu cầu
-#  của người dùng.
+#  rồi DỪNG HẲN (tự bấm "Huỷ"/"Huỷ bỏ"), không bao giờ thử lần thứ 3, đúng
+#  yêu cầu của người dùng. Nếu hộp thoại tự báo rõ số lần CÒN LẠI (vd VINCA
+#  Token "Bạn còn N lần để đăng nhập") thì còn CHẶT HƠN: không bao giờ dùng
+#  tới lần thử CUỐI CÙNG được báo — luôn chừa lại ít nhất 1 lần cho người
+#  dùng tự nhập tay nếu cần.
 # ============================================================
-_DVC_PIN_DIALOG_TITLE = "Xác nhận PIN"
+_DVC_PIN_DIALOG_TITLES = ("Xác nhận PIN", "Đăng nhập")
 _DVC_PIN_TU_KHOA_SAI = ("sai", "khong dung", "khong hop le", "invalid", "incorrect",
                         "khoa", "loi", "error", "khong chinh xac")
+
+def _dvc_la_hop_thoai_pin(w):
+    """Xác nhận ĐÚNG là hộp thoại nhập PIN token — tiêu đề "Xác nhận PIN" là
+    đủ chắc chắn (dùng riêng cho việc này), nhưng tiêu đề "Đăng nhập" (VINCA
+    Token) khá chung chung nên phải có THÊM ô nhập + nhắc tới "mã pin"/
+    "token" trong nội dung mới coi là đúng."""
+    try:
+        tieu_de = w.window_text().strip()
+    except Exception:
+        return False
+    if tieu_de not in _DVC_PIN_DIALOG_TITLES:
+        return False
+    if tieu_de == "Xác nhận PIN":
+        return True
+    try:
+        if not w.descendants(control_type="Edit"):
+            return False
+        noi_dung = " ".join(_khong_dau(t.window_text()) for t in w.descendants(control_type="Text"))
+        return "ma pin" in noi_dung or "token" in noi_dung
+    except Exception:
+        return False
+
+
+def _dvc_so_lan_con_lai(w):
+    """Đọc số lần CÒN LẠI để đăng nhập nếu hộp thoại tự báo (vd VINCA Token:
+    "Bạn còn 10 lần để đăng nhập") — None nếu không có."""
+    import re as _re
+    try:
+        for t in w.descendants(control_type="Text"):
+            m = _re.search(r"con\s+(\d+)\s+lan", _khong_dau(t.window_text() or ""))
+            if m:
+                return int(m.group(1))
+    except Exception:
+        pass
+    return None
+
 
 def _dvc_tim_hop_thoai_pin(desk):
     try:
         for w in desk.windows():
             try:
-                if w.window_text().strip() == _DVC_PIN_DIALOG_TITLE and w.is_visible():
+                if w.is_visible() and _dvc_la_hop_thoai_pin(w):
                     return w
             except Exception:
                 continue
@@ -2810,15 +2854,18 @@ def _dvc_bam_cho_phep_neu_co(desk):
 
 
 def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_da=8):
-    """Tự nhập mã PIN vào hộp thoại "Xác nhận PIN" (cửa sổ Windows RIÊNG do
-    hub CKS bật ra sau khi bấm "Tiếp tục" trong _dvc_bam_ky_ho_so — KHÔNG
-    phải trang web nên phải dùng pywinauto, không dùng Selenium được). Chờ
-    hộp thoại hiện ra tối đa cho_hien_toi_da giây; mỗi lần nhập xong bấm
+    """Tự nhập mã PIN vào hộp thoại nhập PIN của token (cửa sổ Windows RIÊNG
+    do hub CKS bật ra sau khi bấm "Tiếp tục" trong _dvc_bam_ky_ho_so — KHÔNG
+    phải trang web nên phải dùng pywinauto, không dùng Selenium được — xem
+    _DVC_PIN_DIALOG_TITLES cho các tiêu đề đã gặp tuỳ nhà cung cấp token).
+    Chờ hộp thoại hiện ra tối đa cho_hien_toi_da giây (đồng thời tự bấm
+    "Cho phép" nếu Chrome hiện bong bóng xin quyền); mỗi lần nhập xong bấm
     "Đăng nhập" rồi chờ tối đa cho_dong_toi_da giây xem hộp thoại có TỰ ĐÓNG
     (= đăng nhập PIN thành công) không. SAI PIN thì hộp thoại vẫn còn —
-    thử lại, nhưng CHỈ tối đa so_lan_toi_da lần (mặc định 2) rồi DỪNG HẲN
-    (tự bấm "Huỷ bỏ") để tránh khoá token — token thường khoá sau 3 lần
-    nhập sai liên tiếp, không bao giờ được thử lần thứ 3.
+    thử lại, nhưng CHỈ tối đa so_lan_toi_da lần (mặc định 2, hoặc ÍT HƠN
+    nếu token tự báo số lần còn lại thấp hơn — xem _dvc_so_lan_con_lai) rồi
+    DỪNG HẲN (tự bấm "Huỷ"/"Huỷ bỏ") để tránh khoá token — token thường khoá
+    sau 3 lần nhập sai liên tiếp, không bao giờ được thử vượt quá giới hạn.
     Trả dict: {ok, buoc, sai_pin?, khong_thay_hop_thoai?, so_lan_da_thu, loi?}."""
     try:
         from pywinauto import Desktop
@@ -2845,14 +2892,29 @@ def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_d
         _t.sleep(0.5)
     if not dlg:
         return {"ok": False, "khong_thay_hop_thoai": True, "buoc": buoc, "so_lan_da_thu": 0,
-                "loi": f"Không thấy hộp thoại \"{_DVC_PIN_DIALOG_TITLE}\" hiện ra sau "
-                       f"{cho_hien_toi_da}s — có thể token chưa cắm, hub CKS chưa chạy, hoặc "
-                       "giao diện đã đổi khác. Hãy tự kiểm tra và nhập PIN bằng tay."}
+                "loi": f"Không thấy hộp thoại nhập mã PIN của token hiện ra sau {cho_hien_toi_da}s "
+                       f"(đã tìm các tiêu đề: {', '.join(_DVC_PIN_DIALOG_TITLES)}) — có thể token "
+                       "chưa cắm, hub CKS chưa chạy, hoặc giao diện đã đổi khác. Hãy tự kiểm tra và "
+                       "nhập PIN bằng tay."}
     if da_bam_cho_phep:
         buoc.append("Đã tự bấm \"Cho phép\" ở bong bóng xin quyền của Chrome")
-    buoc.append(f"Hộp thoại \"{_DVC_PIN_DIALOG_TITLE}\" đã hiện ra")
+    tieu_de_hop_thoai = dlg.window_text().strip()
+    buoc.append(f"Hộp thoại \"{tieu_de_hop_thoai}\" đã hiện ra")
+    so_lan_con_lai = _dvc_so_lan_con_lai(dlg)
+    # LUÔN chừa lại ÍT NHẤT 1 lần thử cho người dùng tự nhập tay (không bao
+    # giờ tự dùng tới lần thử CUỐI CÙNG mà token báo) — cùng nguyên tắc với
+    # gợi ý "sai quá 2 lần thì dừng" của người dùng, áp cho token báo trước
+    # số lần cụ thể.
+    so_lan_thuc_te = min(so_lan_toi_da, so_lan_con_lai - 1) if so_lan_con_lai is not None else so_lan_toi_da
+    if so_lan_con_lai is not None:
+        buoc.append(f"Token báo còn {so_lan_con_lai} lần để đăng nhập — tự giới hạn thử tối đa "
+                    f"{max(so_lan_thuc_te, 0)} lần (luôn chừa lại ít nhất 1 lần)")
+    if so_lan_thuc_te < 1:
+        return {"ok": False, "sai_pin": False, "so_lan_da_thu": 0, "buoc": buoc,
+                "loi": f"Token báo chỉ còn {so_lan_con_lai} lần để đăng nhập — KHÔNG tự thử để "
+                       "tránh khoá hẳn token, hãy tự kiểm tra/nhập PIN đúng bằng tay cho công ty này."}
 
-    for lan in range(1, so_lan_toi_da + 1):
+    for lan in range(1, so_lan_thuc_te + 1):
         dlg = _dvc_tim_hop_thoai_pin(desk)
         if not dlg:
             buoc.append("Hộp thoại đã tự đóng trước khi kịp thao tác — coi như đã xong")
@@ -2869,7 +2931,7 @@ def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_d
             except Exception:
                 pass
             o_pin.type_keys(pin, with_spaces=True)
-            buoc.append(f"Đã nhập mã PIN (lần {lan}/{so_lan_toi_da})")
+            buoc.append(f"Đã nhập mã PIN (lần {lan}/{so_lan_thuc_te})")
             nut_dn = None
             for b in dlg.descendants(control_type="Button"):
                 try:
@@ -2910,23 +2972,23 @@ def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_d
                         break
             except Exception:
                 pass
-        if lan >= so_lan_toi_da:
+        if lan >= so_lan_thuc_te:
             if dlg2:
                 try:
                     for b in dlg2.descendants(control_type="Button"):
                         if "huy" in _khong_dau(b.window_text()):
                             b.click_input()
-                            buoc.append("Đã bấm \"Huỷ bỏ\"")
+                            buoc.append("Đã bấm \"Huỷ\"")
                             break
                 except Exception:
                     pass
             return {"ok": False, "sai_pin": True, "so_lan_da_thu": lan, "buoc": buoc,
                     "loi": f"Sai mã PIN {lan} lần liên tiếp{(' (' + thong_bao_loi + ')') if thong_bao_loi else ''}"
-                           " — ĐÃ DỪNG LẠI (bấm \"Huỷ bỏ\") để tránh khoá token (token thường khoá "
-                           "sau 3 lần nhập sai) — hãy tự kiểm tra/nhập đúng mã PIN bằng tay cho "
-                           "công ty này."}
+                           " — ĐÃ DỪNG LẠI (bấm \"Huỷ\") để tránh khoá token (token thường khoá sau "
+                           "3 lần nhập sai, hoặc theo đúng số lần token báo) — hãy tự kiểm tra/nhập "
+                           "đúng mã PIN bằng tay cho công ty này."}
         buoc.append(f"Lần {lan} chưa thành công — thử lại")
-    return {"ok": False, "sai_pin": True, "so_lan_da_thu": so_lan_toi_da, "buoc": buoc,
+    return {"ok": False, "sai_pin": True, "so_lan_da_thu": so_lan_thuc_te, "buoc": buoc,
             "loi": "Không xác nhận được đăng nhập PIN"}
 
 
