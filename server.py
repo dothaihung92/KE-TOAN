@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.19"
+APP_BUILD = "2026-07-25.20"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4784,11 +4784,45 @@ def _ky_tu_ten_file_nop(ten_file):
     return None, None
 
 
+def _ky_text_ra_tu_den(ky_text):
+    """Suy (tu, den) dạng dd/mm/yyyy từ chuỗi cột 'Kỳ' hiển thị TRÊN CỔNG DVC/
+    Thuế điện tử (vd 'Q1/2026', 'Quý 1/2026', 'Tháng 3/2026', '2026'/'Năm
+    2026') — dùng để đối chiếu ĐÚNG KỲ TỜ KHAI của từng dòng kết quả, KHÔNG
+    được tin theo khoảng ngày đã dùng để tìm kiếm. (None, None) nếu không
+    nhận diện được."""
+    import re as _re, calendar as _cal
+    kd = _khong_dau(ky_text)
+    m = _re.search(r'q(?:uy)?\s*([1-4])\D+(\d{4})', kd)
+    if m:
+        q, yyyy = int(m.group(1)), int(m.group(2))
+        mm1 = (q - 1) * 3 + 1
+        mm2 = mm1 + 2
+        return f"01/{mm1:02d}/{yyyy}", f"{_cal.monthrange(yyyy, mm2)[1]}/{mm2:02d}/{yyyy}"
+    m = _re.search(r'thang\s*(\d{1,2})\D+(\d{4})', kd)
+    if m:
+        mm, yyyy = int(m.group(1)), int(m.group(2))
+        return f"01/{mm:02d}/{yyyy}", f"{_cal.monthrange(yyyy, mm)[1]}/{mm:02d}/{yyyy}"
+    m = _re.search(r'nam\s*(\d{4})', kd)
+    if m:
+        yyyy = int(m.group(1))
+        return f"01/01/{yyyy}", f"31/12/{yyyy}"
+    if _re.match(r'^\d{4}$', kd):
+        yyyy = int(kd)
+        return f"01/01/{yyyy}", f"31/12/{yyyy}"
+    return None, None
+
+
 def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
     """Tra cứu LẠI trên cổng Dịch vụ công (tự chọn DVC/Thuế điện tử theo
     đúng mốc 01/07/2025, dùng chung hạ tầng đã có) xem tờ khai loại `loai`
     trong khoảng tu-den ĐÃ ĐƯỢC CƠ QUAN THUẾ CHẤP NHẬN thật hay chưa —
     không suy đoán, không tự nhận là xong chỉ vì đã tải file lên.
+    LƯU Ý QUAN TRỌNG: ô tìm kiếm tu/den trên cổng lọc theo NGÀY NỘP HỒ SƠ,
+    KHÔNG phải theo kỳ tính thuế của tờ khai — 1 tờ khai kỳ Quý 1 hoàn toàn
+    có thể được NỘP vào ngày rơi trong khoảng Quý 2 (nộp đúng hạn cuối tháng
+    4, hoặc nộp muộn/nộp bổ sung), nên PHẢI tự đối chiếu lại cột 'Kỳ' THẬT
+    của từng dòng kết quả với đúng kỳ tu-den đang kiểm tra, không được coi
+    mọi dòng khớp loại tờ khai nằm trong kết quả tìm kiếm là "đúng kỳ".
     Trả (xac_nhan: bool, trang_thai_text: str, chi_tiet: str)."""
     nguon_list = _nguon_tra_cuu_theo_ky(tu, den)
     tat_ca = []
@@ -4798,8 +4832,22 @@ def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
         else:
             rows, _, _, _ = _dvc_browser_tracuu_tdt(drv, tu, den)
         tat_ca.extend(rows or [])
-    khop = [r for r in tat_ca if _loai_tk_tu_ten_day_du(r.get("to_khai", "")) == loai]
+    cung_loai = [r for r in tat_ca if _loai_tk_tu_ten_day_du(r.get("to_khai", "")) == loai]
+    khop = []
+    khop_khac_ky = []
+    for r in cung_loai:
+        ky_tu, ky_den = _ky_text_ra_tu_den(r.get("ky", ""))
+        if ky_tu == tu and ky_den == den:
+            khop.append(r)
+        else:
+            khop_khac_ky.append(r)
     if not khop:
+        if khop_khac_ky:
+            rk = khop_khac_ky[0]
+            return False, "", (
+                f"Trong khoảng ngày nộp {tu} - {den} chỉ tìm thấy tờ khai '{rk.get('to_khai', '')}' "
+                f"của KỲ KHÁC (kỳ {rk.get('ky', '')}), CHƯA tìm thấy tờ khai đúng kỳ đang kiểm tra "
+                "— có thể bạn CHƯA nộp kỳ này.")
         return False, "", ("Chưa tìm thấy tờ khai đã nộp trên cổng Dịch vụ công trong khoảng "
                             f"{tu} - {den}. Có thể bạn chưa bấm \"Ký hồ sơ\"/\"Nộp tờ khai\", "
                             "hoặc cổng Thuế chưa cập nhật kịp.")
