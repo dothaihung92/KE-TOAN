@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.8"
+APP_BUILD = "2026-07-25.9"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13021,6 +13021,31 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
         # lẫn với kỳ trước — CHỈ áp dụng riêng cho loại (mua/bán) đọc được đủ Ký
         # hiệu + Số hóa đơn; loại không đọc được cột này thì GIỮ NGUYÊN dữ liệu cũ
         # (file cũ/thiếu cột thì vẫn chỉ lưu số tổng như trước, không đụng invoices).
+        # Gộp các dòng CÙNG 1 hóa đơn thật (cùng MST người bán + Ký hiệu + Số
+        # hóa đơn) thành 1 dòng duy nhất trước khi ghi vào bảng 'invoices' —
+        # sheet 'BK Mua vào' đôi khi có 1 hóa đơn tách thành NHIỀU DÒNG (vd 1
+        # dòng hàng hóa 8% + 1 dòng 'Tổng tiền phí' KCT riêng, cùng Ký hiệu/Số
+        # hóa đơn). Bảng 'invoices' lưu 1 DÒNG/hóa đơn (không phải theo từng
+        # dòng hàng) và khoá UNIQUE không phân biệt được nhiều dòng cùng Ký
+        # hiệu/Số hóa đơn khi import (he_thong='import', khmshdon luôn '1')
+        # -> INSERT OR REPLACE ghi đè, ÂM THẦM MẤT dòng trước đó, khiến tổng
+        # mua vào ghi vào 'invoices' bị THIẾU so với tổng thật của bảng kê
+        # (đúng lỗi người dùng phát hiện: [23]/[24]/[25] lệch so với TỔNG
+        # CỘNG của 'BK Mua vào').
+        if mua_invoices:
+            gop = {}
+            for inv in mua_invoices:
+                key = (_chuan_mst(inv["nbmst"]), str(inv["khhdon"] or "").strip(),
+                       str(inv["shdon"] or "").strip())
+                if key not in gop:
+                    gop[key] = dict(inv)
+                else:
+                    g = gop[key]
+                    g["tgtcthue"] = (g["tgtcthue"] or 0) + (inv["tgtcthue"] or 0)
+                    g["tgtthue"] = (g["tgtthue"] or 0) + (inv["tgtthue"] or 0)
+                    g["tgtttbso"] = (g["tgtttbso"] or 0) + (inv["tgtttbso"] or 0)
+            mua_invoices = list(gop.values())
+
         so_dong_ghi_de = 0
         if mua_invoices or ban_invoices:
             conn_gd = db()
