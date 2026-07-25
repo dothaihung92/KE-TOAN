@@ -5354,7 +5354,18 @@ def _run_fetch_job(cid: int, body: dict):
                                             msg(stage="warn",
                                                 text=f"⚠ {loai_txt}{ht_txt}: Token hết hạn giữa chừng — "
                                                      f"đang tự động đăng nhập lại...")
-                                            ok_dn, tb_dn, _, _ = _tu_dong_dang_nhap(cid, so_lan=5)
+                                            # Dùng trình duyệt ẩn vẽ captcha CHÍNH
+                                            # XÁC (như /api/auto-login, xuất Excel)
+                                            # thay vì rớt về svglib kém chính xác
+                                            # hơn — tăng tỉ lệ tự đăng nhập lại
+                                            # thành công, đỡ mất hẳn phần dữ liệu
+                                            # còn lại của lượt tra cứu này.
+                                            drv_relog = _mo_trinh_duyet_captcha()
+                                            try:
+                                                ok_dn, tb_dn, _, _ = _tu_dong_dang_nhap(
+                                                    cid, so_lan=5, drv=drv_relog)
+                                            finally:
+                                                _dong_trinh_duyet_captcha(drv_relog)
                                     if ok_dn:
                                         msg(stage="info",
                                             text=f"✓ {loai_txt}{ht_txt}: đã tự đăng nhập lại thành công, "
@@ -14088,10 +14099,18 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # tác thủ công (đăng nhập ở màn hình khác rồi quay lại bấm xuất lần nữa).
     if comp and (not client0 or not client0.token or client0._token_dead) and comp["password"]:
         _tlog("chưa đăng nhập — tự động đăng nhập trước khi xuất...")
+        # Dùng trình duyệt ẩn để vẽ captcha CHÍNH XÁC (như tra cứu hàng loạt/
+        # /api/auto-login) thay vì để rớt về svglib (kém chính xác hơn hẳn) —
+        # trước đây bước tự đăng nhập lúc xuất Excel KHÔNG mở trình duyệt ẩn,
+        # nên tỉ lệ giải captcha thấp hơn hẳn, hay thất bại sau đủ 8 lần thử
+        # dù có mật khẩu đúng, khiến các hóa đơn chưa có file/detail bị bỏ lỡ.
+        drv_dn = _mo_trinh_duyet_captcha()
         try:
-            ok_dn, msg_dn, _, _ = _tu_dong_dang_nhap(cid, so_lan=8)
+            ok_dn, msg_dn, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, drv=drv_dn)
         except Exception as e:
             ok_dn, msg_dn = False, str(e)
+        finally:
+            _dong_trinh_duyet_captcha(drv_dn)
         _tlog(f"tự đăng nhập {'thành công' if ok_dn else 'thất bại'}: {msg_dn}")
         client0 = CLIENTS.get(cid)
     save_dir0 = (comp["save_dir"] or "").strip() if comp else ""
