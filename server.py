@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.6"
+APP_BUILD = "2026-07-25.7"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13879,8 +13879,20 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         canh_bao = (f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
                     f"MẪU (có thể sai công ty), dễ bị Cơ quan Thuế báo lỗi. Vào 'Sửa công ty' để điền đủ "
                     f"trước khi nộp.")
+    # Đã có dữ liệu IMPORT cho đúng kỳ này -> XML VỪA XUẤT dùng số liệu IMPORT
+    # (không phải số liệu tra cứu mới nhất) — TRƯỚC ĐÂY người dùng tra cứu lại
+    # xong xuất XML vẫn thấy sai/cũ mà không hiểu vì sao, vì import ưu tiên
+    # ghi đè VĨNH VIỄN cho tới khi tự bấm "Dùng lại dữ liệu tra cứu" ở màn
+    # danh sách hóa đơn — không có cảnh báo nào ở bước xuất XML để biết điều
+    # này đang xảy ra. Nay báo rõ để người dùng biết cần bỏ dữ liệu import
+    # nếu muốn XML phản ánh đúng lần tra cứu mới nhất.
+    if imp:
+        canh_bao = (canh_bao + " " if canh_bao else "") + (
+            "⚠ File XML này đang dùng DỮ LIỆU ĐÃ IMPORT cho kỳ này (KHÔNG phải dữ liệu tra cứu mới "
+            "nhất) — nếu vừa tra cứu lại hóa đơn mà số liệu chưa đổi, vào màn hình 'Dữ liệu hóa đơn' "
+            "của công ty, bấm 'Dùng lại dữ liệu tra cứu' để bỏ dữ liệu import rồi xuất lại.")
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
-            "da_luu_ket_xuat": da_luu_ket_xuat}
+            "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp)}
 
 
 @app.get("/api/export-htkk-tncn/{cid}")
