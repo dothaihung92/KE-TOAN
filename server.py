@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.12"
+APP_BUILD = "2026-07-25.13"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5167,7 +5167,7 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
                 file_thieu=file_thieu_tong,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
                 tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
-                loi_tra_cuu=co_loi)
+                loi_tra_cuu=co_loi, lech_doi_chieu=True)
     except Exception as e:
         msg(stage="warn", text=f"Không tự kết xuất được Excel: {str(e)[:120]}")
     # Kèm luôn file XML tờ khai GTGT (01/GTGT) và TNCN (05/KK-TNCN)
@@ -6326,6 +6326,9 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             if _m.get("lech_bk"):
                 item["lech_bk"] = True
                 item["lech_bk_text"] = _m.get("text", "")
+            if _m.get("lech_doi_chieu"):
+                item["lech_doi_chieu"] = True
+                item["lech_doi_chieu_text"] = _m.get("text", "")
         with batch_lock:
             batch["done"] += 1
             _batch_luu_db(batch_id, batch, body)
@@ -6417,6 +6420,9 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                     if _m.get("lech_bk"):
                         item["lech_bk"] = True
                         item["lech_bk_text"] = _m.get("text", "")
+                    if _m.get("lech_doi_chieu"):
+                        item["lech_doi_chieu"] = True
+                        item["lech_doi_chieu_text"] = _m.get("text", "")
                 if last.get("stage") == "error":
                     item["status"] = "error"
                     item["note"] = last.get("text", "Lỗi")
@@ -6507,7 +6513,8 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
         it = {"cid": c, "ten": ten_map[c], "status": "pending",
               "total_saved": 0, "note": "", "lech": False,
               "tk_mua_got": 0, "tk_mua_exp": 0, "tk_ban_got": 0, "tk_ban_exp": 0,
-              "lech_bk": False, "lech_bk_text": ""}
+              "lech_bk": False, "lech_bk_text": "",
+              "lech_doi_chieu": False, "lech_doi_chieu_text": ""}
         if items_cu and str(c) in items_cu and items_cu[str(c)].get("status") == "done":
             old = items_cu[str(c)]
             it.update(status="done", total_saved=old.get("total_saved", 0),
@@ -6515,7 +6522,9 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
                       lech=old.get("lech", False),
                       tk_mua_got=old.get("tk_mua_got", 0), tk_mua_exp=old.get("tk_mua_exp", 0),
                       tk_ban_got=old.get("tk_ban_got", 0), tk_ban_exp=old.get("tk_ban_exp", 0),
-                      lech_bk=old.get("lech_bk", False), lech_bk_text=old.get("lech_bk_text", ""))
+                      lech_bk=old.get("lech_bk", False), lech_bk_text=old.get("lech_bk_text", ""),
+                      lech_doi_chieu=old.get("lech_doi_chieu", False),
+                      lech_doi_chieu_text=old.get("lech_doi_chieu_text", ""))
         return it
 
     items = {c: _mk_item(c) for c in cids}
@@ -15939,6 +15948,22 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # dùng đi kiểm tra lại, không phải tự mở từng file Excel ra xem mới biết.
     extra_headers["X-So-Lech-Ban"] = str(so_lech_ban)
     extra_headers["X-So-Lech-Mua"] = str(so_lech_mua)
+    # LƯU LẠI cảnh báo vào công ty (không mất khi toast tự tắt/tải lại
+    # trang) — TRƯỚC ĐÂY chỉ nút "Xuất Excel" đơn lẻ (không qua tra cứu
+    # hàng loạt) HOÀN TOÀN không báo gì cho người dùng biết có hóa đơn lệch,
+    # phải tự mở file ra xem mới phát hiện. Áp dụng chung cho MỌI lần xuất
+    # Excel (đơn lẻ hay tự động), không chỉ tra cứu hàng loạt.
+    if so_lech_ban or so_lech_mua:
+        ve_lech = []
+        if so_lech_ban:
+            ve_lech.append(f"bán ra {so_lech_ban}")
+        if so_lech_mua:
+            ve_lech.append(f"mua vào {so_lech_mua}")
+        _luu_loi_tra_cuu(
+            cid, f"⚠ Sheet 'Đối chiếu' trong file Excel vừa xuất phát hiện "
+                 f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) giữa Chi tiết và "
+                 f"Bảng kê — hãy mở file kiểm tra lại kỹ (mục 'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet "
+                 f"Đối chiếu).")
     return _resp_xuat(path, fname_x, extra=extra_headers)
 
 
