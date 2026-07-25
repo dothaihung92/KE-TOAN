@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.18"
+APP_BUILD = "2026-07-25.19"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2615,16 +2615,21 @@ post('/tthc/sso/check-to-khai?maTthc='+encodeURIComponent(maTthc)+'&module=DN')
 """
 
 
-def _tim_file_nop_to_khai(folder, mst, loai):
+def _tim_file_nop_to_khai(folder, mst, loai, nam=None, quy=None):
     """Tìm (các) file XML trong 'thư mục mặc định' khớp công ty (theo MST đầu
     tên file, đúng quy ước fname của export_htkk: {mst13}-...) + loại tờ khai
-    (theo từ khoá trong tên file, vd 'gtgt'/'tncn'). Trả (file_moi_nhat, [tất cả ứng viên])."""
+    (theo từ khoá trong tên file, vd 'gtgt'/'tncn'). Nếu có truyền (nam, quy)
+    -> CHỈ lấy file có KỲ (suy từ tên file qua _ky_tu_ten_file_nop) KHỚP ĐÚNG
+    kỳ đã chọn — tránh nhặt NHẦM file của kỳ khác (vd thư mục còn sót lại file
+    Quý 1 trong khi người dùng đang chọn nộp Quý 2) chỉ vì file đó có mtime
+    mới hơn. Trả (file_moi_nhat, [tất cả ứng viên])."""
     if not folder or not os.path.isdir(folder):
         return None, []
     mst10 = "".join(ch for ch in str(mst or "") if ch.isdigit())[:10]
     if not mst10:
         return None, []
     tu_khoa = _DVC_LOAI_TU_KHOA_FILE.get(loai, [])
+    ky_muon = _tu_den_cua_quy(nam, quy) if nam and quy else None
     ung_vien = []
     try:
         ten_file_list = os.listdir(folder)
@@ -2637,6 +2642,8 @@ def _tim_file_nop_to_khai(folder, mst, loai):
         if not low.startswith(mst10):
             continue
         if tu_khoa and not any(k in low for k in tu_khoa):
+            continue
+        if ky_muon and _ky_tu_ten_file_nop(fn) != ky_muon:
             continue
         full = os.path.join(folder, fn)
         try:
@@ -2663,10 +2670,10 @@ def _tim_file_nop_theo_cong_ty(comp, loai, nam, quy, folder_mac_dinh):
         tu_ngay, den_ngay = _tu_den_cua_quy(nam, quy)
         dich = _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay)
         if dich:
-            fp, ung_vien = _tim_file_nop_to_khai(dich, comp["mst"], loai)
+            fp, ung_vien = _tim_file_nop_to_khai(dich, comp["mst"], loai, nam, quy)
             if fp:
                 return fp, ung_vien
-    return _tim_file_nop_to_khai(folder_mac_dinh, comp["mst"], loai)
+    return _tim_file_nop_to_khai(folder_mac_dinh, comp["mst"], loai, nam, quy)
 
 
 _DVC_OPEN_DRIVERS = {}   # {phien_id: drv} — giữ tham chiếu trình duyệt HIỂN THỊ đang chờ người
@@ -4652,9 +4659,16 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         # DỪNG LẠI NGAY, không tải file lên nộp trùng lần nữa. Dùng lại
         # ĐÚNG session trình duyệt vừa đăng nhập (không tốn thêm 1 lượt đăng
         # nhập/mở Chrome riêng).
-        tu_ck, den_ck = _ky_tu_ten_file_nop(os.path.basename(file_path))
+        # Ưu tiên kỳ NGƯỜI DÙNG ĐÃ CHỌN trên form (nam/quy) làm chuẩn — không
+        # được để tên file "lấn át" lựa chọn của người dùng (trước đây làm
+        # ngược lại: nếu thư mục còn sót/nhặt nhầm file của kỳ KHÁC, phần
+        # mềm sẽ kiểm tra + báo "đã nộp" theo kỳ CỦA FILE ĐÓ chứ không phải
+        # kỳ người dùng vừa chọn — vd chọn Quý 2 nhưng lại báo đã nộp Quý 1).
+        # Suy từ tên file chỉ dùng làm phương án DỰ PHÒNG khi form không có
+        # nam/quy (vd gọi từ chỗ khác không truyền kỳ).
+        tu_ck, den_ck = (_tu_den_cua_quy(nam, quy) if nam and quy else (None, None))
         if not tu_ck or not den_ck:
-            tu_ck, den_ck = (_tu_den_cua_quy(nam, quy) if nam else (None, None))
+            tu_ck, den_ck = _ky_tu_ten_file_nop(os.path.basename(file_path))
         if tu_ck and den_ck:
             try:
                 xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = _dvc_kiem_tra_da_nop_mot_loai(
