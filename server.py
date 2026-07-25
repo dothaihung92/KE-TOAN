@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.9"
+APP_BUILD = "2026-07-25.10"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15326,9 +15326,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     style_header(ws, len(hdr1))
     stt = 0
     tong_ds_mua = tong_thue_mua = 0
-    for r in rows:
-        if r["loai"] != "purchase":
-            continue
+    # Sắp xếp riêng cho sheet này theo Ngày lập TĂNG DẦN (thấp -> cao) — theo
+    # yêu cầu người dùng, dễ đối chiếu tuần tự theo thời gian. 'rows' gốc
+    # đang ORDER BY tdlap DESC (mới nhất trước) dùng chung cho các sheet
+    # khác nên KHÔNG đổi thứ tự đó, chỉ sắp lại RIÊNG danh sách mua vào ở đây.
+    rows_mua_vao = sorted(
+        (r for r in rows if r["loai"] == "purchase"),
+        key=lambda r: str(r["tdlap"] or ""))
+    for r in rows_mua_vao:
         if not _hd_dung_cty(r, "purchase"):   # loại HĐ lẫn của công ty khác
             continue
         try:
