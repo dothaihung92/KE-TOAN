@@ -4916,7 +4916,11 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
 
     Theo đúng yêu cầu: tra cứu phải tải/lấy đủ dữ liệu ngay từ bước tra cứu;
     kết xuất Excel chỉ đọc file và xuất ra."""
-    if not (client and client.token and not getattr(client, "_token_dead", False)):
+    # LƯU Ý: KHÔNG loại trừ client._token_dead ở đây — nếu phiên vừa chết
+    # NGAY TRONG lúc tải file (bước ngay trước khi gọi hàm này) thì vòng lặp
+    # bên dưới vẫn phải được chạy để CÓ CƠ HỘI tự đăng nhập lại, thay vì bỏ
+    # cuộc ngay từ đầu chỉ vì phiên đang chết đúng lúc này.
+    if not (client and client.token):
         return
     conn = db()
     rows = conn.execute(
@@ -4981,10 +4985,37 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
     ds = can_nap
     while ds:
         if getattr(client, "_token_dead", False):
+            # Phiên hết hạn GIỮA CHỪNG lúc đang lấy nốt chi tiết -> TỰ ĐĂNG
+            # NHẬP LẠI (dùng trình duyệt ẩn vẽ captcha chính xác, giống
+            # /api/auto-login) rồi TIẾP TỤC lấy nốt, thay vì bỏ cuộc ngay và
+            # đẩy việc dở dang sang cho Xuất Excel xử lý — đúng yêu cầu "tra
+            # cứu phải tải hết, lỗi thì quay lại tải cho đủ, Xuất Excel chỉ
+            # đọc file".
+            conn_relog = db()
+            comp_relog = conn_relog.execute(
+                "SELECT password FROM companies WHERE id=?", (cid,)).fetchone()
+            conn_relog.close()
+            if not (comp_relog and comp_relog["password"]):
+                msg(stage="warn",
+                    text=f"⚠ phiên đăng nhập hết hạn giữa chừng — còn {len(ds)} hóa đơn CHƯA lấy được "
+                         f"chi tiết dòng hàng, đăng nhập lại rồi tra cứu lại để lấy nốt")
+                return
             msg(stage="warn",
-                text=f"⚠ phiên đăng nhập hết hạn giữa chừng — còn {len(ds)} hóa đơn CHƯA lấy được "
-                     f"chi tiết dòng hàng, đăng nhập lại rồi tra cứu lại để lấy nốt")
-            return
+                text=f"⚠ phiên đăng nhập hết hạn giữa chừng — đang tự động đăng nhập lại để lấy nốt "
+                     f"{len(ds)} hóa đơn còn thiếu chi tiết...")
+            drv_relog = _mo_trinh_duyet_captcha()
+            try:
+                ok_relog, tb_relog, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, drv=drv_relog)
+            finally:
+                _dong_trinh_duyet_captcha(drv_relog)
+            if not ok_relog:
+                msg(stage="warn",
+                    text=f"⚠ tự đăng nhập lại thất bại ({tb_relog}) — còn {len(ds)} hóa đơn CHƯA lấy "
+                         f"được chi tiết dòng hàng, đăng nhập lại rồi tra cứu lại để lấy nốt")
+                return
+            msg(stage="info", text="✓ đã tự đăng nhập lại thành công, tiếp tục lấy nốt chi tiết...")
+            client = get_client(cid)   # client mới (token mới) sau khi đăng nhập lại
+            continue
         vong += 1
         ket_qua = {}
         with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
@@ -14338,7 +14369,12 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # sự chỉ là bị giới hạn tốc độ khi gọi hàng loạt — giống hệt hóa đơn
     # thường — nên cần được thử lại kiên nhẫn giống nhau, không loại riêng.
     ds_can_kiem_tra = can_nap + can_nap2
-    if ds_can_kiem_tra and client0 and client0.token and not client0._token_dead:
+    # LƯU Ý: KHÔNG loại trừ trường hợp client0._token_dead ở đây — vòng lặp
+    # bên dưới đã TỰ ĐỘNG đăng nhập lại khi phát hiện phiên hết hạn giữa
+    # chừng (xem nhánh "if client0._token_dead" trong vòng while), nên vẫn
+    # phải VÀO vòng lặp ngay cả khi phiên vừa chết ở bước "thử nạp nhanh"
+    # phía trên — nếu chặn ở đây thì không bao giờ có cơ hội đăng nhập lại.
+    if ds_can_kiem_tra and client0 and client0.token:
         ids_can_kiem_tra = [r["id"] for r in ds_can_kiem_tra]
         ph = ",".join("?" * len(ids_can_kiem_tra))
         # An toàn: nếu NHIỀU VÒNG LIÊN TỤC không lấy thêm được hóa đơn nào
@@ -14358,9 +14394,28 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                          "phải hiện placeholder 'chưa lấy được chi tiết')")
                 break
             if client0._token_dead:
-                _tlog(f"⚠ phiên đăng nhập hết hạn giữa chừng — còn {len(con_thieu_rows)} hóa đơn CHƯA "
-                     f"lấy được chi tiết, đăng nhập lại rồi xuất lại để lấy nốt")
-                break
+                # Phiên hết hạn GIỮA CHỪNG -> TỰ ĐĂNG NHẬP LẠI (trình duyệt ẩn
+                # vẽ captcha chính xác) rồi TIẾP TỤC lấy nốt thay vì bỏ cuộc —
+                # đúng yêu cầu "tra cứu/xuất phải tải hết, lỗi thì quay lại
+                # tải cho đủ", không để hiện placeholder "chưa lấy được".
+                if not (comp and comp["password"]):
+                    _tlog(f"⚠ phiên đăng nhập hết hạn giữa chừng — còn {len(con_thieu_rows)} hóa đơn CHƯA "
+                         f"lấy được chi tiết, đăng nhập lại rồi xuất lại để lấy nốt")
+                    break
+                _tlog(f"⚠ phiên đăng nhập hết hạn giữa chừng — đang tự động đăng nhập lại để lấy nốt "
+                     f"{len(con_thieu_rows)} hóa đơn còn thiếu chi tiết...")
+                drv_relog2 = _mo_trinh_duyet_captcha()
+                try:
+                    ok_relog2, tb_relog2, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, drv=drv_relog2)
+                finally:
+                    _dong_trinh_duyet_captcha(drv_relog2)
+                if not ok_relog2:
+                    _tlog(f"⚠ tự đăng nhập lại thất bại ({tb_relog2}) — còn {len(con_thieu_rows)} hóa đơn "
+                         f"CHƯA lấy được chi tiết, đăng nhập lại rồi xuất lại để lấy nốt")
+                    break
+                _tlog("✓ đã tự đăng nhập lại thành công, tiếp tục lấy nốt chi tiết...")
+                client0 = CLIENTS.get(cid)
+                continue
             vong += 1
             _tlog(f"còn {len(con_thieu_rows)} hóa đơn chưa lấy được — thử lại vòng {vong} (chờ đúng "
                  f"thời gian giới hạn tốc độ của trang Thuế, KHÔNG bỏ cuộc cho tới khi lấy đủ)...")
