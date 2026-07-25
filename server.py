@@ -5227,12 +5227,26 @@ def _run_fetch_job(cid: int, body: dict):
             # dùng để phát hiện hóa đơn bị THAY THẾ/ĐIỀU CHỈNH so với lần tra
             # cứu trước (vd hóa đơn số 10 lần trước "mới" (1), lần này trang
             # Thuế báo đã "bị thay thế" (4) -> PHẢI tải lại, không dùng file cũ).
+            # Ghi nhớ luôn detail_json ĐÃ LẤY ĐƯỢC (nếu có) — hóa đơn "không mã"
+            # (ttxly=6, không có file XML) tốn hẳn 1 lượt gọi mạng riêng
+            # (_dam_bao_du_chi_tiet_hoa_don) mới lấy được chi tiết dòng hàng.
+            # Trước đây MỖI LẦN tra cứu lại đều XÓA HẲN dòng cũ (kể cả
+            # detail_json đã lấy được từ lần trước) rồi CHÈN LẠI dòng mới
+            # KHÔNG có detail_json — nên hóa đơn không mã bị lấy lại chi tiết
+            # qua mạng TỪ ĐẦU ở MỌI lần tra cứu, dù trạng thái hóa đơn không
+            # đổi gì cả. Nay GIỮ LẠI detail_json cũ nếu trạng thái (tthai)
+            # KHÔNG đổi — hóa đơn bị thay thế/điều chỉnh (tthai đổi) vẫn phải
+            # lấy lại chi tiết mới, không dùng bản cũ.
             old_status = {}
+            old_detail_json = {}
             for r in conn.execute(
-                    "SELECT khmshdon, khhdon, shdon, loai, he_thong, tthai "
+                    "SELECT khmshdon, khhdon, shdon, loai, he_thong, tthai, detail_json "
                     "FROM invoices WHERE company_id=?", (cid,)):
-                old_status[(str(r["khmshdon"] or ""), str(r["khhdon"] or ""),
-                            str(r["shdon"] or ""), r["loai"], r["he_thong"])] = str(r["tthai"] or "")
+                key = (str(r["khmshdon"] or ""), str(r["khhdon"] or ""),
+                       str(r["shdon"] or ""), r["loai"], r["he_thong"])
+                old_status[key] = str(r["tthai"] or "")
+                if r["detail_json"]:
+                    old_detail_json[key] = r["detail_json"]
             # KHÔNG xóa dữ liệu cũ ngay từ đầu nữa — TRƯỚC ĐÂY xóa sạch hết rồi
             # mới tra cứu lại, nên nếu lượt tra cứu MỚI này lại LỖI (vd 1 trạng
             # thái mua vào lỗi dù đã thử lại) thì dữ liệu CŨ (đã lưu từ lần
@@ -5568,12 +5582,21 @@ def _run_fetch_job(cid: int, body: dict):
                             tgtttbso_v = _to_num(inv.get("tgtttbso"))
                             if not tgtcthue_v and tgtttbso_v:
                                 tgtcthue_v = tgtttbso_v
+                            # Trạng thái KHÔNG đổi so với lần tra cứu trước -> giữ lại
+                            # detail_json đã lấy được (nếu có), khỏi phải lấy lại qua
+                            # mạng ở bước _dam_bao_du_chi_tiet_hoa_don (chủ yếu áp
+                            # dụng cho hóa đơn "không mã" — vốn không có file XML để
+                            # so sánh "đã có file" như các hóa đơn thường).
+                            key_dj = (str(inv.get("khmshdon", "")), str(inv.get("khhdon", "")),
+                                     str(inv.get("shdon", "")), loai, he_thong)
+                            dj_giu_lai = (old_detail_json.get(key_dj)
+                                         if old_status.get(key_dj) == str(inv.get("tthai", "")) else None)
                             conn.execute("""
                                 INSERT OR IGNORE INTO invoices
                                 (company_id, loai, he_thong, nbmst, nbten, nmmst,
                                  khmshdon, khhdon, shdon,
-                                 tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                 tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw, detail_json)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                             """, (
                                 cid, loai, he_thong,
                                 inv.get("nbmst"), inv.get("nbten"), inv.get("nmmst"),
@@ -5582,6 +5605,7 @@ def _run_fetch_job(cid: int, body: dict):
                                 tgtcthue_v, inv.get("tgtthue"), inv.get("tgtttbso"),
                                 str(inv.get("tthai", "")),
                                 json.dumps(inv, ensure_ascii=False),
+                                dj_giu_lai,
                             ))
                         except Exception:
                             pass
