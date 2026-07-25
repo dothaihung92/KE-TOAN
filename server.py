@@ -208,7 +208,13 @@ def _gop_hoa_don_trung_he_thong(rows):
     file Excel kết xuất bị liệt kê trùng lặp.
     Giữ lại dòng có 'ttxly' trong raw (đầy đủ thông tin xử lý hơn); nếu cả
     2 dòng đều có/đều không có ttxly thì giữ dòng gặp trước. Nhận list các
-    sqlite3.Row, trả về list đã lọc, GIỮ NGUYÊN thứ tự ban đầu."""
+    sqlite3.Row, trả về list đã lọc, GIỮ NGUYÊN thứ tự ban đầu.
+
+    Khoá so khớp phải CHUẨN HÓA (không so chuỗi y hệt) — đã xác nhận thực tế
+    hóa đơn hộ/cá nhân kinh doanh (máy tính tiền) đôi khi trang Thuế trả về
+    khmshdon/shdon LỆCH ĐỊNH DẠNG nhẹ giữa 2 hệ thống (vd '1' so với '01',
+    hoặc MST có/không dấu gạch), khiến so khớp CHUỖI Y HỆT trước đây bỏ sót,
+    không gộp được, làm hóa đơn hiện LẶP ĐÔI trong file Excel kết xuất."""
     def _co_ttxly(r):
         try:
             raw = json.loads(r["raw"]) if r["raw"] else {}
@@ -216,10 +222,15 @@ def _gop_hoa_don_trung_he_thong(rows):
             raw = {}
         return bool(str(raw.get("ttxly", "") or "").strip())
 
+    def _chuan_ma(v):
+        """Bỏ số 0 ở đầu (khmshdon/shdon đôi khi lệch định dạng '1' vs '01')."""
+        s = str(v or "").strip()
+        return s.lstrip("0") or "0" if s else ""
+
     best = {}
     for r in rows:
-        key = (str(r["nbmst"] or ""), str(r["khmshdon"] or ""),
-               str(r["khhdon"] or ""), str(r["shdon"] or ""), r["loai"])
+        key = (_chuan_mst(r["nbmst"]), _chuan_ma(r["khmshdon"]),
+               str(r["khhdon"] or "").strip(), _chuan_ma(r["shdon"]), r["loai"])
         if key not in best:
             best[key] = r
         elif _co_ttxly(r) and not _co_ttxly(best[key]):
