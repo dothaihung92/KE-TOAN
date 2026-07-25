@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.17"
+APP_BUILD = "2026-07-25.18"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11815,7 +11815,10 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 co_acc = tra_tk(r[cfg["co"]])
                 total_amount += tt
                 total_vat += tthue
-                mo_ta = ten_h or str(r[cfg["ten"]] or "")
+                # Ưu tiên TÊN HÀNG HÓA/DỊCH VỤ THẬT lấy từ file Excel (r[cfg["ten"]])
+                # — mã dịch vụ dùng chung "MHDV" nên tên trong danh mục InventoryItem
+                # (ten_h) chỉ là tên CHUNG CHUNG, không phải tên thật của từng dòng.
+                mo_ta = str(r[cfg["ten"]] or "").strip() or ten_h or ""
                 detail_rows.append(dict(_PU_SERVICE_DET_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
                     "Description": mo_ta, "DebitAccount": no_acc, "CreditAccount": co_acc,
@@ -11831,6 +11834,11 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                     "TaxAccountObjectTaxCode": mst[:50] or None,
                     "AccountObjectID": acc_obj_id, "PurchasePurposeID": hoc_purpose,
                     "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
+                    # Cột MISA dùng để HIỂN THỊ "Tên dịch vụ" trên lưới khi chứng từ
+                    # gắn với hóa đơn điện tử — nếu để trống MISA sẽ hiện thay bằng
+                    # tên CHUNG trong danh mục InventoryItem (mã "MHDV" -> tên chung
+                    # "Mua Hàng Dịch Vụ" cho MỌI dòng, đúng lỗi người dùng báo).
+                    "EInvoiceItemName": mo_ta[:255] if mo_ta else None,
                     "SortOrder": idx,
                 }))
             # DisplayOnBook phải thuộc (0,2) — xem giải thích ở _misa_ghi_mua_hang
