@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.5"
+APP_BUILD = "2026-07-25.6"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12969,6 +12969,17 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                 # hàng có TÊN chứa 'TỔNG' (vd 'TỔNG CÔNG TY ...').
                 if "tổng cộng" in low or "tổng nhóm" in low:
                     continue
+                # Dòng phải có Số hóa đơn mới tính là hóa đơn thật — bỏ qua các
+                # dòng tổng phụ KHÔNG có nhãn "Tổng nhóm"/"TỔNG CỘNG" mà người
+                # dùng tự chèn thêm khi chỉnh tay file Excel (vd 1 dòng chỉ ghi
+                # số tiền cộng dồn "chịu thuế" trước dòng TỔNG CỘNG cuối cùng —
+                # xác nhận qua file thật của người dùng). Trước đây bất kỳ dòng
+                # nào có số tiền khác 0 đều bị cộng dồn, khiến dòng tổng phụ này
+                # bị tính TRÙNG với chính các hóa đơn đã cộng phía trên, làm
+                # doanh số/thuế nhóm đó bị nhân đôi trên tờ khai xuất ra.
+                shdon_v = str(_o(g_ban, r, c_shdon_b) or "").strip() if c_shdon_b else ""
+                if c_shdon_b and not shdon_v:
+                    continue
                 ds = num(_o(g_ban, r, c_ds)) if c_ds else 0
                 th = num(_o(g_ban, r, c_thue)) if c_thue else 0
                 if (ds or th) and cur_nhom in ban:
@@ -12976,7 +12987,6 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                     ban[cur_nhom]["thue"] += th
                     ban_rows += 1
                     if c_shdon_b:
-                        shdon_v = str(_o(g_ban, r, c_shdon_b) or "").strip()
                         if shdon_v:
                             ngay_iso = _ngay_iso(_o(g_ban, r, c_ngay_b)) if c_ngay_b else ""
                             ban_invoices.append({
