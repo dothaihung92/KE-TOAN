@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.11"
+APP_BUILD = "2026-07-25.12"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5181,8 +5181,8 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
         # liệu giữa bảng kê và XML — để người dùng biết công ty nào cần kiểm
         # tra lại mà không phải mở từng công ty ra xem (đã LƯU LẠI persistent
         # ở _export_htkk_impl, ở đây chỉ thêm hiển thị NGAY trong log tiến độ).
-        if isinstance(res_htkk, dict) and res_htkk.get("canh_bao"):
-            msg(stage="warn", text=res_htkk["canh_bao"])
+        if isinstance(res_htkk, dict) and res_htkk.get("lech_bk"):
+            msg(stage="warn", text=res_htkk["canh_bao"], lech_bk=True)
     except Exception as e:
         msg(stage="warn", text=f"Không tự kết xuất được XML GTGT: {str(e)[:120]}")
     try:
@@ -6322,6 +6322,10 @@ def _run_batch(batch_id: int, cids: list, body: dict):
         item["tk_mua_got"] = item["tk_mua_exp"] = 0
         item["tk_ban_got"] = item["tk_ban_exp"] = 0
         item["lech"] = False
+        for _m in (FETCH_JOBS.get(cid) or {}).get("messages", []):
+            if _m.get("lech_bk"):
+                item["lech_bk"] = True
+                item["lech_bk_text"] = _m.get("text", "")
         with batch_lock:
             batch["done"] += 1
             _batch_luu_db(batch_id, batch, body)
@@ -6403,6 +6407,16 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 item["lech"] = bool(last.get("loi_tra_cuu")
                                      or (mua_exp and mua_got < mua_exp)
                                      or (ban_exp and ban_got < ban_exp))
+                # LỆCH SỐ LIỆU XML (TỔNG CỘNG BK Mua vào/Bán ra khác chỉ tiêu
+                # [23][24][25]/[34][35]) — do _tu_dong_ket_xuat_bao_cao ghi
+                # (msg lech_bk=True) SAU KHI đã xuất XML ở cuối lượt tra cứu,
+                # nên phải quét TOÀN BỘ job["messages"] (không chỉ "last" —
+                # "last" thường bị các thông báo xuất Excel/XML TNCN sau đó
+                # ghi đè mất) mới không bỏ sót cảnh báo này trong batch.
+                for _m in (FETCH_JOBS.get(cid) or {}).get("messages", []):
+                    if _m.get("lech_bk"):
+                        item["lech_bk"] = True
+                        item["lech_bk_text"] = _m.get("text", "")
                 if last.get("stage") == "error":
                     item["status"] = "error"
                     item["note"] = last.get("text", "Lỗi")
@@ -6492,14 +6506,16 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
     def _mk_item(c):
         it = {"cid": c, "ten": ten_map[c], "status": "pending",
               "total_saved": 0, "note": "", "lech": False,
-              "tk_mua_got": 0, "tk_mua_exp": 0, "tk_ban_got": 0, "tk_ban_exp": 0}
+              "tk_mua_got": 0, "tk_mua_exp": 0, "tk_ban_got": 0, "tk_ban_exp": 0,
+              "lech_bk": False, "lech_bk_text": ""}
         if items_cu and str(c) in items_cu and items_cu[str(c)].get("status") == "done":
             old = items_cu[str(c)]
             it.update(status="done", total_saved=old.get("total_saved", 0),
                       note=old.get("note", "Đã xong ở lần trước"),
                       lech=old.get("lech", False),
                       tk_mua_got=old.get("tk_mua_got", 0), tk_mua_exp=old.get("tk_mua_exp", 0),
-                      tk_ban_got=old.get("tk_ban_got", 0), tk_ban_exp=old.get("tk_ban_exp", 0))
+                      tk_ban_got=old.get("tk_ban_got", 0), tk_ban_exp=old.get("tk_ban_exp", 0),
+                      lech_bk=old.get("lech_bk", False), lech_bk_text=old.get("lech_bk_text", ""))
         return it
 
     items = {c: _mk_item(c) for c in cids}

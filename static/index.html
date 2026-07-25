@@ -2658,10 +2658,12 @@ async function batchTheoDoi(bid){
     const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
     document.getElementById('batchLog').innerHTML=st.items.map(i=>{
       const lech=i.status==='done'&&i.lech;
-      const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(lech?'#b8860b':(i.status==='done'?'#1f6b4a':'#555')));
+      const lechBk=i.status==='done'&&i.lech_bk;
+      const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':((lech||lechBk)?'#b8860b':(i.status==='done'?'#1f6b4a':'#555')));
       const sl=i.status==='done'?` (${i.total_saved} HĐ)`:'';
-      const icon=lech?'⚠':(ic[i.status]||'•');
-      return `<div style="color:${mau}">${icon} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>`;
+      const icon=(lech||lechBk)?'⚠':(ic[i.status]||'•');
+      const dongLechBk=lechBk?`<div style="margin-left:20px;color:#b8860b">↳ ${i.lech_bk_text||'Lệch số liệu XML so với bảng kê'}</div>`:'';
+      return `<div style="color:${mau}">${icon} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>${dongLechBk}`;
     }).join('');
   }
   if(!st)return;
@@ -2676,14 +2678,26 @@ async function batchTheoDoi(bid){
   const kq=document.getElementById('batchKetQua');
   if(kq){
     const dsLech=st.items.filter(i=>i.status==='done'&&i.lech);
+    // Lệch RIÊNG: số liệu XML (chỉ tiêu [23][24][25]/[34][35]) khác TỔNG CỘNG
+    // sheet BK Mua vào/Bán ra — KHÁC với "lệch" ở trên (thiếu file tải về).
+    const dsLechBk=st.items.filter(i=>i.status==='done'&&i.lech_bk);
+    let html='';
     if(dsLech.length){
-      kq.style.background='#fff1f0';kq.style.color='#c00';kq.style.border='1px solid #f0a0a0';
-      kq.innerHTML=`⚠ CÓ ${dsLech.length} CÔNG TY BỊ LỆCH HÓA ĐƠN (lấy thiếu so với số trang Thuế báo): `+
+      html+=`⚠ CÓ ${dsLech.length} CÔNG TY BỊ LỆCH HÓA ĐƠN (lấy thiếu so với số trang Thuế báo): `+
         dsLech.map(i=>`${i.ten} (mua ${i.tk_mua_got||0}/${i.tk_mua_exp||0}, bán ${i.tk_ban_got||0}/${i.tk_ban_exp||0})`).join('; ')+
         ' — nên tra cứu lại (chế độ "Chậm & an toàn").';
+    }
+    if(dsLechBk.length){
+      if(html)html+='<br>';
+      html+=`⚠ CÓ ${dsLechBk.length} CÔNG TY LỆCH SỐ LIỆU XML (khác TỔNG CỘNG bảng kê Mua vào/Bán ra): `+
+        dsLechBk.map(i=>i.ten).join(', ')+' — xem chi tiết ở từng công ty (đã lưu lại cảnh báo), kiểm tra trước khi nộp.';
+    }
+    if(html){
+      kq.style.background='#fff1f0';kq.style.color='#c00';kq.style.border='1px solid #f0a0a0';
+      kq.innerHTML=html;
     }else{
       kq.style.background='#f0f9f4';kq.style.color='#1f6b4a';kq.style.border='1px solid #a0d0b0';
-      kq.innerHTML='✓ Không lệch — đã lấy đủ hóa đơn theo số trang Thuế báo cho tất cả công ty.';
+      kq.innerHTML='✓ Không lệch — đã lấy đủ hóa đơn theo số trang Thuế báo, số liệu XML khớp bảng kê cho tất cả công ty.';
     }
     kq.style.display='block';
   }
