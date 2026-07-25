@@ -1746,15 +1746,24 @@ async function ntkXuLyTiep(){
     await ntkXuLyTiep();
     return;
   }
-  ntkDangCho={cid,loai,ten,phien_id:r.phien_id};
   ntkGhi(`<br>✅ Đã tải file lên: <code>${r.file_da_chon}</code>`);
   const kyOk=r.ky_ho_so&&r.ky_ho_so.ok;
   if(r.da_tu_dong_nop){
-    ntkGhi(`<br>🖊️ Đã TỰ ký hồ sơ, tự nhập mã PIN và tự bấm "Nộp tờ khai" XONG cho ${ten} `+
-           `(${NTK_TEN_LOAI[loai]||loai}).`);
-    ntkGhi(`<br>⏳ Đang tự kiểm tra lại trên cổng Thuế để xác nhận — không cần làm gì thêm, phần `+
-           `mềm sẽ tự chuyển sang tờ khai tiếp theo khi xác nhận xong.`);
-  }else if(kyOk){
+    // Trang đã báo THÀNH CÔNG (nộp xong thật) -> coi như xong việc của
+    // tờ khai này, CHUYỂN LUÔN sang tờ khai tiếp theo (vd GTGT xong -> TNCN)
+    // — không cần đợi cơ quan Thuế xử lý xong "Đã chấp nhận" (việc đó xác
+    // nhận lại sau, không chặn việc nộp tờ khai khác).
+    const maHoSo=(r.nop&&r.nop.ma_ho_so)?` (Mã hồ sơ: ${r.nop.ma_ho_so})`:'';
+    ntkGhi(`<br>🖊️ Đã TỰ ký hồ sơ, tự nhập mã PIN và tự bấm "Nộp tờ khai" — trang báo `+
+           `<b>THÀNH CÔNG</b>${maHoSo} cho ${ten} (${NTK_TEN_LOAI[loai]||loai}).`);
+    ntkGhi(`<br>➡️ Tự chuyển sang tờ khai tiếp theo...`);
+    toast(`✅ Đã nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
+    ntkDangCho=null;
+    await ntkXuLyTiep();
+    return;
+  }
+  ntkDangCho={cid,loai,ten,phien_id:r.phien_id};
+  if(kyOk){
     ntkGhi(`<br>🖊️ Đã TỰ bấm "Ký hồ sơ" và chọn chứng thư số xong.`);
     ntkGhi(`<br>⚠ ${r.thong_bao}`);
     ntkGhi(`<br>👉 Hãy tự hoàn tất trên cửa sổ Chrome cho ${ten} (${NTK_TEN_LOAI[loai]||loai}), `+
@@ -1766,7 +1775,7 @@ async function ntkXuLyTiep(){
   }
   ntkGhi(`<br><span id="ntkChoXacNhan"></span>`);
   ntkGhi(`<br><span id="ntkTrangThaiPoll" style="font-size:12px;color:var(--muted);font-style:italic"></span>`);
-  ntkVeNutChoXacNhan(!r.da_tu_dong_nop);
+  ntkVeNutChoXacNhan(true);
   ntkBatDauPoll();   // tự kiểm tra định kỳ, không bắt buộc phải quay lại bấm tay
 }
 function ntkVeNutChoXacNhan(hienNutKy){
