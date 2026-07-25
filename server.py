@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.14"
+APP_BUILD = "2026-07-25.15"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5219,7 +5219,9 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
     # thực ra 1 phần chưa kiểm tra được do lỗi.
     if da_kiem_tra_doi_chieu and da_kiem_tra_xml:
         if cac_dong_lech:
-            _luu_ket_qua_doi_chieu(cid, True, " ".join(cac_dong_lech))
+            # \n\n giữa 2 cảnh báo (đối chiếu / XML) để tách dòng rõ ràng khi
+            # hiện trong banner (dễ đọc hơn 1 đoạn văn dài dính liền nhau).
+            _luu_ket_qua_doi_chieu(cid, True, "\n\n".join(cac_dong_lech))
         else:
             _luu_ket_qua_doi_chieu(
                 cid, False,
@@ -13979,7 +13981,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             f"{lech_ban_thue:,.0f}đ thuế. Thường do có hóa đơn NGOÀI kỳ đang khai — kiểm "
             f"tra lại trước khi nộp.")
     if canh_bao_lech:
-        _luu_loi_tra_cuu(cid, " ".join(canh_bao_lech))
+        _luu_loi_tra_cuu(cid, "\n\n".join(canh_bao_lech))
 
     ct36 = ct35 - ct25          # thuế GTGT phát sinh trong kỳ
     # ct22 = thuế còn được khấu trừ kỳ trước chuyển sang (số dư đầu kỳ)
@@ -14089,10 +14091,10 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # không còn dùng cache imported_data cho phần này nên không còn bị "xuất
     # ra số liệu import CŨ" dù đã tra cứu lại.
     if imp and imp_nk_ds:
-        canh_bao = (canh_bao + " " if canh_bao else "") + (
+        canh_bao = (canh_bao + "\n\n" if canh_bao else "") + (
             "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy từ dữ liệu đã import gần nhất cho kỳ này.")
     if canh_bao_lech:
-        canh_bao = (canh_bao + " " if canh_bao else "") + " ".join(canh_bao_lech)
+        canh_bao = (canh_bao + "\n\n" if canh_bao else "") + "\n\n".join(canh_bao_lech)
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
             "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds),
             "lech_bk": bool(canh_bao_lech)}
