@@ -1787,11 +1787,14 @@ async function ntkXacNhanVaTiep(){
       await ntkTaiTrangThai();
       await ntkXuLyTiep();
     }else{
-      ntkGhi(`<br>⚠ <b>Chưa xác nhận được</b>: ${r.chi_tiet||'Chưa tìm thấy tờ khai được chấp nhận'}`);
-      if(el)el.innerHTML=`<button class="btn ghost" onclick="ntkXacNhanVaTiep()">🔄 Kiểm tra lại</button> `+
-        `<button class="btn ghost" onclick="ntkDanhDauThuCongVaTiep()">☑ Vẫn đánh dấu đã nộp (thủ công)</button> `+
-        `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua, xử lý tiếp</button>`;
-      ntkBatDauPoll();   // van chua xong -> tiep tuc tu kiem tra dinh ky ben canh nut bam tay
+      // Bạn đã tự bấm "Tôi đã nộp" -> TIN THEO xác nhận của bạn, KHÔNG bắt
+      // bấm thêm 1 lần nữa chỉ vì cổng Thuế xử lý chậm chưa kịp cập nhật
+      // ngay sau khi vừa nộp — tự ghi nhận THỦ CÔNG rồi đi thẳng sang tờ
+      // khai tiếp theo (vd TNCN) luôn, không dừng lại chờ bấm thêm nút.
+      ntkGhi(`<br>⚠ Cổng Thuế chưa cập nhật kịp (${r.chi_tiet||'chưa tìm thấy tờ khai được chấp nhận'}) `+
+             `— vì bạn đã xác nhận đã nộp nên vẫn ghi nhận và chuyển sang tờ khai tiếp theo; `+
+             `hãy tự kiểm tra lại trên cổng Thuế sau.`);
+      await ntkDanhDauThuCongVaTiep();
     }
   }catch(e){
     ntkGhi(`<br>❌ Lỗi khi kiểm tra: ${e.message}`);
