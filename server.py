@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.13"
+APP_BUILD = "2026-07-25.14"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1339,6 +1339,18 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error TEXT")
     if "last_fetch_error_at" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error_at TEXT")
+    # Trạng thái đối chiếu (sheet "Đối chiếu" + số liệu XML vs bảng kê) lần
+    # kiểm tra gần nhất — TÁCH RIÊNG khỏi last_fetch_error (vốn chỉ dành cho
+    # lỗi/cảnh báo của QUÁ TRÌNH tra cứu, vd hết phiên đăng nhập) để có thể
+    # hiện banner XANH "không lệch" rõ ràng khi đã kiểm tra và không thấy gì
+    # sai, thay vì chỉ im lặng (không phân biệt được "chưa kiểm tra" với
+    # "đã kiểm tra, ổn") — theo đúng yêu cầu người dùng.
+    if "doi_chieu_ket_qua" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN doi_chieu_ket_qua TEXT")
+    if "doi_chieu_text" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN doi_chieu_text TEXT")
+    if "doi_chieu_at" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN doi_chieu_at TEXT")
     if "mst_khac" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN mst_khac TEXT")
     if "token_to_chuc_cap" not in ccols:
@@ -5131,18 +5143,29 @@ def _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den):
 
 
 def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
-                              file_thieu_tong=0, tk_mua=None, tk_ban=None, co_loi=False):
-    """Tự động kết xuất Excel + XML GTGT (01/GTGT) + XML TNCN (05/KK-TNCN) vào
-    thư mục lưu file kết xuất Năm/Quý — dùng chung cho tra cứu hàng loạt VÀ
-    công ty KHÔNG có mật khẩu trang Thuế (coi như 0 hóa đơn, vẫn tự kết xuất
-    báo cáo — chỉ cần đúng số dư đầu kỳ). msg: callback(**kw) ghi tiến độ."""
+                              file_thieu_tong=0, tk_mua=None, tk_ban=None, co_loi=False,
+                              luu_ket_xuat=True):
+    """Tự động kết xuất Excel + XML GTGT (01/GTGT) + XML TNCN (05/KK-TNCN) —
+    dùng chung cho tra cứu hàng loạt, công ty KHÔNG có mật khẩu trang Thuế,
+    VÀ tra cứu 1 công ty (để tự động kiểm tra đối chiếu + XML ngay khi tra
+    cứu xong). luu_ket_xuat=False: vẫn xuất + kiểm tra như thường nhưng
+    KHÔNG ép lưu vào thư mục Năm/Quý đã cấu hình (chỉ để KIỂM TRA, không
+    phải người dùng chủ động bấm lưu — file vẫn ra Desktop như xuất thường).
+    msg: callback(**kw) ghi tiến độ."""
     tk_mua = tk_mua or {"got": 0, "exp": 0}
     tk_ban = tk_ban or {"got": 0, "exp": 0}
+    luu = 1 if luu_ket_xuat else 0
+    # Kết quả 2 phần kiểm tra (Đối chiếu + XML vs bảng kê) — gộp lại thành 1
+    # trạng thái DUY NHẤT lưu vào công ty (banner XANH/ĐỎ), theo đúng yêu cầu
+    # người dùng: báo rõ "có lệch" hay "không lệch" chứ không chỉ im lặng khi ổn.
+    da_kiem_tra_doi_chieu = da_kiem_tra_xml = False
+    lech_doi_chieu_found = lech_xml_found = False
+    cac_dong_lech = []
     try:
-        msg(stage="info", text="Đang tự động kết xuất Excel vào thư mục lưu file kết xuất...")
-        resp_excel = export_excel(cid, luu_ket_xuat=1, tu_ngay=(tu or ""),
+        msg(stage="info", text="Đang tự động kết xuất Excel" + (" vào thư mục lưu file kết xuất..." if luu_ket_xuat else "..."))
+        resp_excel = export_excel(cid, luu_ket_xuat=luu, tu_ngay=(tu or ""),
                                   den_ngay=(den or ""), mo_file=0)
-        msg(stage="info", text="✓ Đã kết xuất Excel vào thư mục theo Năm/Quý")
+        msg(stage="info", text="✓ Đã kết xuất Excel" + (" vào thư mục theo Năm/Quý" if luu_ket_xuat else ""))
         # Sheet "Đối chiếu" trong file vừa xuất có phát hiện hóa đơn LỆCH
         # (Chi tiết vs Bảng kê) không — báo RÕ (không chỉ im lặng nằm
         # trong file) để người dùng biết mà mở file kiểm tra lại, thay vì
@@ -5152,17 +5175,20 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
             so_lech_mua = int(resp_excel.headers.get("X-So-Lech-Mua", "0"))
         except Exception:
             so_lech_ban = so_lech_mua = 0
+        da_kiem_tra_doi_chieu = True
         if so_lech_ban or so_lech_mua:
+            lech_doi_chieu_found = True
             ve_lech = []
             if so_lech_ban:
                 ve_lech.append(f"bán ra {so_lech_ban}")
             if so_lech_mua:
                 ve_lech.append(f"mua vào {so_lech_mua}")
-            msg(stage="warn",
-                text=f"⚠ Sheet 'Đối chiếu' trong file Excel vừa xuất phát hiện "
-                     f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) "
-                     f"giữa Chi tiết và Bảng kê — hãy mở file kiểm tra lại kỹ (mục "
-                     f"'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet Đối chiếu).",
+            dong = (f"⚠ Sheet 'Đối chiếu' trong file Excel vừa xuất phát hiện "
+                    f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) "
+                    f"giữa Chi tiết và Bảng kê — hãy mở file kiểm tra lại kỹ (mục "
+                    f"'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet Đối chiếu).")
+            cac_dong_lech.append(dong)
+            msg(stage="warn", text=dong,
                 total_saved=total_saved, file_saved=file_saved,
                 file_thieu=file_thieu_tong,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
@@ -5175,19 +5201,33 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
     # này không chặn cái kia.
     try:
         res_htkk = export_htkk(cid, tu=(tu or ""), den=(den or ""),
-                               luu_ket_xuat=1, mo_file=0)
+                               luu_ket_xuat=luu, mo_file=0)
         msg(stage="info", text="✓ Đã kết xuất XML tờ khai GTGT (01/GTGT)")
+        da_kiem_tra_xml = True
         # Báo NGAY trong tiến độ tra cứu hàng loạt nếu công ty này bị LỆCH số
         # liệu giữa bảng kê và XML — để người dùng biết công ty nào cần kiểm
         # tra lại mà không phải mở từng công ty ra xem (đã LƯU LẠI persistent
         # ở _export_htkk_impl, ở đây chỉ thêm hiển thị NGAY trong log tiến độ).
         if isinstance(res_htkk, dict) and res_htkk.get("lech_bk"):
+            lech_xml_found = True
+            cac_dong_lech.append(res_htkk["canh_bao"])
             msg(stage="warn", text=res_htkk["canh_bao"], lech_bk=True)
     except Exception as e:
         msg(stage="warn", text=f"Không tự kết xuất được XML GTGT: {str(e)[:120]}")
+    # LƯU LẠI trạng thái đối chiếu TỔNG HỢP — CHỈ khi cả 2 phần đều kiểm tra
+    # được (không lỗi giữa chừng), để tránh báo "XANH, không lệch" nhầm khi
+    # thực ra 1 phần chưa kiểm tra được do lỗi.
+    if da_kiem_tra_doi_chieu and da_kiem_tra_xml:
+        if cac_dong_lech:
+            _luu_ket_qua_doi_chieu(cid, True, " ".join(cac_dong_lech))
+        else:
+            _luu_ket_qua_doi_chieu(
+                cid, False,
+                "✓ Không lệch — sheet 'Đối chiếu' không phát hiện hóa đơn lệch, số liệu XML khớp "
+                "TỔNG CỘNG bảng kê Mua vào/Bán ra.")
     try:
         export_htkk_tncn(cid, tu=(tu or ""), den=(den or ""),
-                         luu_ket_xuat=1, mo_file=0)
+                         luu_ket_xuat=luu, mo_file=0)
         msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
     except Exception as e:
         msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
@@ -6052,15 +6092,18 @@ def _run_fetch_job(cid: int, body: dict):
             if vat_dau_ky_ok_msg:
                 msg(stage="info", text=vat_dau_ky_ok_msg)
 
-            # ===== TỰ ĐỘNG KẾT XUẤT (CHỈ TRA CỨU HÀNG LOẠT) vào thư mục
-            # Năm/Quý (nếu bật) — tra cứu 1 công ty giờ KHÔNG tự động kết xuất
-            # nữa (người dùng yêu cầu chỉ xuất khi tự bấm nút), nhưng hàng
-            # loạt (nhiều công ty cùng lúc) vẫn cần tự xuất vì không có cách
-            # nào bấm nút xuất riêng cho từng công ty sau khi chạy xong.
-            # body["luu_ket_xuat"] CHỈ được gửi từ tra cứu hàng loạt (ô tick
-            # riêng "bLuuKetXuat" trong modal) — tra cứu 1 công ty không còn
-            # gửi khoá này nên sẽ không bao giờ tự động kết xuất.
-            if body.get("luu_ket_xuat") and co_loi:
+            # ===== TỰ ĐỘNG KẾT XUẤT + KIỂM TRA ĐỐI CHIẾU/XML =====
+            # - TRA CỨU HÀNG LOẠT (body["batch"]=True): CHỈ tự xuất (Excel +
+            #   XML) vào thư mục Năm/Quý khi TICK "Lưu file kết xuất" — không
+            #   tick thì không có gì để kiểm tra (giữ nguyên hành vi cũ).
+            # - TRA CỨU 1 CÔNG TY: LUÔN tự động kiểm tra đối chiếu + XML ngay
+            #   khi tra cứu xong thành công (theo yêu cầu người dùng — hiện rõ
+            #   banner XANH "không lệch" hoặc ĐỎ "có lệch"), BẤT KỂ có tick ô
+            #   "Lưu file kết xuất" hay không — ô đó chỉ quyết định file có
+            #   được lưu thêm vào thư mục Năm/Quý đã cấu hình hay không (không
+            #   tick vẫn lưu ra Desktop như xuất thủ công bình thường).
+            la_batch = bool(body.get("batch"))
+            if la_batch and body.get("luu_ket_xuat") and co_loi:
                 # KHÔNG được để người dùng tick "Lưu file kết xuất" mà không thấy
                 # gì xảy ra và cũng không hiểu vì sao — trước đây im lặng bỏ qua
                 # hẳn bước này khi tra cứu có lỗi, trông như tính năng "không
@@ -6071,10 +6114,11 @@ def _run_fetch_job(cid: int, body: dict):
                          "xuất vì lần tra cứu này CÓ LỖI — dữ liệu có thể thiếu. Hãy tra cứu lại cho "
                          "đến khi THÀNH CÔNG rồi mới kết xuất (hoặc bấm nút 'Xuất Excel'/'Kết xuất "
                          "XML' thủ công ở dưới sau khi đã tra cứu xong).")
-            if body.get("luu_ket_xuat") and not co_loi:
+            elif not co_loi and (la_batch and body.get("luu_ket_xuat") or not la_batch):
                 _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=total_saved,
                                           file_saved=file_saved, file_thieu_tong=file_thieu_tong,
-                                          tk_mua=tk_mua, tk_ban=tk_ban, co_loi=co_loi)
+                                          tk_mua=tk_mua, tk_ban=tk_ban, co_loi=co_loi,
+                                          luu_ket_xuat=bool(body.get("luu_ket_xuat")))
         except Exception as e:
             msg(stage="error", text=f"Lỗi: {str(e)[:160]}")
         finally:
@@ -6209,6 +6253,23 @@ def _xoa_loi_tra_cuu(cid: int):
         cn.execute(
             "UPDATE companies SET last_fetch_error=NULL, last_fetch_error_at=NULL WHERE id=?",
             (cid,))
+        cn.commit()
+        cn.close()
+    except Exception:
+        pass
+
+
+def _luu_ket_qua_doi_chieu(cid: int, lech: bool, text: str):
+    """Lưu KẾT QUẢ lần kiểm tra đối chiếu gần nhất (sheet 'Đối chiếu' + số
+    liệu XML so với bảng kê) — LUÔN ghi, kể cả khi KHÔNG lệch, để giao diện
+    phân biệt được 'chưa từng kiểm tra' (NULL) với 'đã kiểm tra, không lệch'
+    (ok) thay vì chỉ im lặng khi ổn — theo đúng yêu cầu người dùng: hiện rõ
+    banner XANH khi không lệch, ĐỎ khi có lệch."""
+    try:
+        cn = db()
+        cn.execute(
+            "UPDATE companies SET doi_chieu_ket_qua=?, doi_chieu_text=?, doi_chieu_at=? WHERE id=?",
+            ("lech" if lech else "ok", text or "", datetime.datetime.now().isoformat(), cid))
         cn.commit()
         cn.close()
     except Exception:
@@ -6486,6 +6547,11 @@ def fetch_batch(body: dict = Body(...)):
     cids = [int(c) for c in cids]
     if not cids:
         raise HTTPException(400, "Chưa chọn công ty nào")
+    # Đánh dấu để _run_fetch_job biết đây là TRA CỨU HÀNG LOẠT (không phải 1
+    # công ty đơn lẻ) — quyết định có tự động kiểm tra đối chiếu/XML NGAY cả
+    # khi KHÔNG tick "Lưu file kết xuất" hay không (chỉ áp dụng cho tra cứu 1
+    # công ty; hàng loạt vẫn giữ đúng hành vi cũ: không tick = không xuất gì).
+    body["batch"] = True
 
     conn = db()
     rows = conn.execute(

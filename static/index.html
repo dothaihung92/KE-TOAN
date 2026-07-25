@@ -1874,7 +1874,7 @@ async function saveCompany(){
     if(suaId&&current===suaId){
       const c=companies.find(x=>x.id===current);
       if(c){const ws=document.getElementById('workspace');
-        if(ws&&ws.style.display!=='none'){ws.innerHTML=renderWorkspace(c,getClient(current));renderFetchErrorBanner(c);await refreshInvoices();}}
+        if(ws&&ws.style.display!=='none'){ws.innerHTML=renderWorkspace(c,getClient(current));renderFetchErrorBanner(c);renderDoiChieuBanner(c);await refreshInvoices();}}
     }
   }catch(e){toast(e.message,'err')}
 }
@@ -1901,6 +1901,7 @@ async function selectCompany(id){
   const online=getClient(id);
   ws.innerHTML=renderWorkspace(c,online);
   renderFetchErrorBanner(c);
+  renderDoiChieuBanner(c);
   await refreshInvoices();
 }
 function renderFetchErrorBanner(c){
@@ -1913,6 +1914,27 @@ function renderFetchErrorBanner(c){
     if(c.last_fetch_error_at){try{khi=' — '+new Date(c.last_fetch_error_at).toLocaleString('vi-VN');}catch{}}
     document.getElementById('fetchErrorTitle').textContent='⚠ Lỗi/cảnh báo lần tra cứu gần nhất'+khi+':';
     document.getElementById('fetchErrorText').textContent=c.last_fetch_error;
+    box.style.display='flex';
+  }else{
+    box.style.display='none';
+  }
+}
+function renderDoiChieuBanner(c){
+  // Trạng thái đối chiếu (sheet "Đối chiếu" + số liệu XML so với bảng kê)
+  // lần kiểm tra gần nhất — LƯU Ở SERVER, hiện rõ XANH (không lệch) hay ĐỎ
+  // (có lệch), khác 'fetchErrorBanner' (chỉ dành cho lỗi quá trình tra cứu).
+  const box=document.getElementById('doiChieuBanner');
+  if(!box)return;
+  if(c&&c.doi_chieu_ket_qua){
+    let khi='';
+    if(c.doi_chieu_at){try{khi=' — '+new Date(c.doi_chieu_at).toLocaleString('vi-VN');}catch{}}
+    const lech=c.doi_chieu_ket_qua==='lech';
+    box.style.background=lech?'#fdecea':'#f0f9f4';
+    box.style.border='1px solid '+(lech?'#f1a9a0':'#a0d0b0');
+    box.style.color=lech?'#7a1f1f':'#1f6b4a';
+    document.getElementById('doiChieuTitle').textContent=
+      (lech?'⚠':'✓')+' Đối chiếu Bảng kê / XML lần kiểm tra gần nhất'+khi+':';
+    document.getElementById('doiChieuText').textContent=c.doi_chieu_text||'';
     box.style.display='flex';
   }else{
     box.style.display='none';
@@ -2055,6 +2077,13 @@ function renderWorkspace(c,online){
         <div id="fetchErrorText" style="margin-top:4px;white-space:pre-wrap"></div>
       </div>
       <button class="btn ghost sm" onclick="document.getElementById('fetchErrorBanner').style.display='none'">Ẩn</button>
+    </div>
+    <div id="doiChieuBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;border-radius:10px;padding:12px 14px;margin-top:14px;font-size:13.5px">
+      <div style="flex:1">
+        <b id="doiChieuTitle"></b>
+        <div id="doiChieuText" style="margin-top:4px;white-space:pre-wrap"></div>
+      </div>
+      <button class="btn ghost sm" onclick="document.getElementById('doiChieuBanner').style.display='none'">Ẩn</button>
     </div>
     <p class="hint">Mỗi lần tra cứu sẽ <b>xóa dữ liệu cũ</b> và lấy lại từ đầu. File XML/PDF (nếu tick) được lưu vào thư mục cấu hình trong phần "Sửa công ty". PDF cần endpoint riêng của Tổng cục Thuế — hiện chỉ XML hoạt động đầy đủ.</p>
   </div>
@@ -2429,6 +2458,14 @@ async function doFetch(){
     }
     if(songSongCid===fetchCid)songSongCid=null;
     await refreshInvoices();
+    // Job đã CHẠY XONG HẲN (kể cả bước tự kiểm tra đối chiếu/XML chạy sau
+    // message "done") — tải lại thông tin công ty để lấy đúng kết quả kiểm
+    // tra MỚI NHẤT rồi hiện banner XANH/ĐỎ tương ứng.
+    if(!hadError){
+      await loadCompanies();
+      const _c=companies.find(x=>x.id===fetchCid);
+      if(_c&&current===fetchCid)renderDoiChieuBanner(_c);
+    }
     // ẩn thanh tiến trình nhưng GIỮ bảng kết quả để người dùng xem
     setTimeout(()=>{box.style.display='none';},2000);
   }catch(e){
