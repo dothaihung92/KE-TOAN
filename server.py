@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.24"
+APP_BUILD = "2026-07-25.25"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2695,6 +2695,63 @@ def _dvc_tim_nut(drv, text_can_tim):
     return [e for e in els if e.is_displayed()]
 
 
+def _dvc_nut_gon_nhat(drv, text_can_tim):
+    """Như _dvc_tim_nut nhưng ưu tiên phần tử có chữ NGẮN NHẤT — vì XPath
+    khớp cả thẻ bọc ngoài (vd 1 <span> chứa cả thanh công cụ) lẫn đúng cái
+    nút; bấm vào thẻ bọc ngoài có thể không ăn."""
+    def _do_dai(e):
+        try:
+            return len((e.text or "").strip())
+        except Exception:
+            return 10 ** 6
+    return sorted(_dvc_tim_nut(drv, text_can_tim), key=_do_dai)
+
+
+def _dvc_click_chac_chan(drv, el):
+    """Bấm 1 phần tử CHẮC CHẮN hơn: cuộn vào tầm nhìn rồi bấm bình thường;
+    nếu bị lớp phủ/modal còn sót che (ElementClickInterceptedException) thì
+    bấm bằng JS (JS không bị lớp phủ chặn). Trả (ok, loi)."""
+    try:
+        drv.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+    except Exception:
+        pass
+    loi_goc = ""
+    try:
+        el.click()
+        return True, None
+    except Exception as e:
+        loi_goc = str(e)[:200]
+    try:
+        drv.execute_script("arguments[0].click();", el)
+        return True, None
+    except Exception as e:
+        return False, f"{loi_goc} | bấm bằng JS cũng lỗi: {str(e)[:200]}"
+
+
+def _dvc_cho_ket_qua_nop(drv, cho_toi_da=30):
+    """Chờ trang chuyển sang màn kết quả "THÀNH CÔNG" sau khi bấm "Nộp tờ
+    khai" — LUÔN kiểm tra ít nhất 1 lần (cho_toi_da=0 nghĩa là chỉ xem ngay
+    lúc này, không chờ). Trả (thanh_cong, ma_ho_so)."""
+    import time as _t, re as _re
+    cho_den = _t.time() + cho_toi_da
+    while True:
+        try:
+            url = (drv.current_url or "").lower()
+        except Exception:
+            url = ""
+        try:
+            html = drv.page_source or ""
+        except Exception:
+            html = ""
+        low = html.lower()
+        if "ket-qua-xml" in url or ("thành công" in low and "mã hồ sơ" in low):
+            m = _re.search(r"[A-Za-z]\d{1,3}\.\d{1,3}-\d{6}-\d+", html)
+            return True, (m.group(0) if m else None)
+        if _t.time() >= cho_den:
+            return False, None
+        _t.sleep(1)
+
+
 def _dvc_bam_ky_ho_so(drv):
     """Sau khi đã tải file XML lên (trang .../nop-file-xml), tự bấm nút "Ký
     hồ sơ", đợi khung "Chọn chữ ký số" hiện ra rồi tự bấm "Tiếp tục" để vào
@@ -2992,59 +3049,97 @@ def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_d
             "loi": "Không xác nhận được đăng nhập PIN"}
 
 
-def _dvc_bam_nut_nop_to_khai(drv, cho_toi_da=15, cho_ket_qua_toi_da=25):
-    """Sau khi hộp thoại "Xác nhận PIN" đã đóng (ký PIN xong), tự bấm nút
-    "Nộp tờ khai" THẬT trên trang — hoàn tất NỘP CHÍNH THỨC lên cơ quan
-    Thuế (hành động KHÔNG THỂ ĐẢO NGƯỢC). CHỜ tới khi trang chuyển sang màn
-    "THÀNH CÔNG" (URL .../ket-qua-xml, có "Mã hồ sơ") mới coi là XÁC NHẬN
-    THẬT SỰ đã nộp xong — không chỉ dựa vào việc đã bấm được nút (có thể
-    trang còn xử lý/báo lỗi). Xác nhận được ngay ở đây là điều kiện để phần
-    mềm CHUYỂN LUÔN sang tờ khai tiếp theo (vd GTGT xong -> TNCN) mà không
-    cần đợi cơ quan Thuế xử lý xong (bước "Đã chấp nhận" xử lý sau, tra cứu
-    lại riêng — không cần chờ trước khi nộp tờ khai khác)."""
-    import time as _t, re as _re
-    _t.sleep(1.5)   # chờ trang xử lý xong việc ký trước khi tìm nút Nộp
-    nut = []
-    cho_den = _t.time() + cho_toi_da
-    while _t.time() < cho_den:
-        nut = _dvc_tim_nut(drv, "nộp tờ khai")
-        if nut:
-            break
-        _t.sleep(1)
-    if not nut:
-        return {"ok": False,
-                "loi": "Không tìm thấy nút \"Nộp tờ khai\" trên trang sau khi ký PIN xong — "
-                       "có thể trang chưa xử lý xong, hoặc bước ký chưa thực sự hoàn tất."}
-    try:
-        nut[0].click()
-    except Exception as e:
-        return {"ok": False, "loi": f"Lỗi khi bấm \"Nộp tờ khai\": {e}"}
+# Nút xác nhận trong hộp thoại "Bạn có chắc muốn nộp?" (nếu cổng có hiện)
+_DVC_NUT_XAC_NHAN_NOP = ("đồng ý", "xác nhận", "chấp nhận")
 
-    thanh_cong = False
-    ma_ho_so = None
-    cho_den2 = _t.time() + cho_ket_qua_toi_da
-    while _t.time() < cho_den2:
-        try:
-            url = (drv.current_url or "").lower()
-        except Exception:
-            url = ""
-        try:
-            html = drv.page_source or ""
-        except Exception:
-            html = ""
-        if "ket-qua-xml" in url or "thành công" in html.lower():
-            thanh_cong = True
-            m = _re.search(r"[A-Za-z]\d{1,3}\.\d{1,3}-\d{6}-\d+", html)
-            if m:
-                ma_ho_so = m.group(0)
+def _dvc_bam_nut_nop_to_khai(drv, cho_ky_toi_da=25, cho_ket_qua_toi_da=30, so_lan_thu=3):
+    """Sau khi hộp thoại PIN đã đóng (ký PIN xong), tự bấm nút "Nộp tờ khai"
+    THẬT trên trang — hoàn tất NỘP CHÍNH THỨC lên cơ quan Thuế (hành động
+    KHÔNG THỂ ĐẢO NGƯỢC).
+
+    QUAN TRỌNG (nguyên nhân đã gặp thật: "đã ký thành công rồi mà không bấm
+    Nộp tờ khai"): nút "Nộp tờ khai" nằm SẴN trên trang ngay cạnh "Ký hồ sơ"
+    NGAY TỪ ĐẦU — nên KHÔNG được coi "tìm thấy nút" là "ký xong rồi" mà bấm
+    ngay. Bấm quá sớm (chữ ký chưa gắn xong vào hồ sơ) thì cổng bỏ qua/báo
+    lỗi và vẫn nằm ở trang nộp file; hoặc khung modal "Chọn chữ ký số" còn
+    sót lớp phủ khiến cú bấm bị CHẶN (ElementClickInterceptedException) mà
+    trước đây bị coi là lỗi cứng, bỏ luôn không thử lại. Vì vậy:
+      1. CHỜ khung "Chọn chữ ký số" đóng hẳn + chờ thêm 1 nhịp cho trang gắn
+         chữ ký, RỒI mới bấm.
+      2. Bấm qua _dvc_click_chac_chan (cuộn vào tầm nhìn, bị lớp phủ chặn
+         thì bấm bằng JS).
+      3. Nếu cổng hiện hộp xác nhận "Bạn có chắc..." thì tự bấm Đồng ý.
+      4. Chưa thấy trang "THÀNH CÔNG" thì THỬ LẠI (tối đa so_lan_thu lần) —
+         lần sau chắc chắn đã qua thời gian ký xong.
+    CHỜ tới khi trang chuyển sang màn "THÀNH CÔNG" (URL .../ket-qua-xml, có
+    "Mã hồ sơ") mới coi là XÁC NHẬN THẬT SỰ đã nộp xong — điều kiện để phần
+    mềm CHUYỂN LUÔN sang tờ khai tiếp theo (vd GTGT xong -> TNCN)."""
+    import time as _t
+    buoc = []
+
+    # (1) chờ ký xong THẬT: khung "Chọn chữ ký số" (chứa nút "Tiếp tục") phải
+    #     đóng hẳn — đó là dấu hiệu hub CKS đã trả chữ ký về cho trang
+    cho_den = _t.time() + cho_ky_toi_da
+    modal_dong = False
+    while _t.time() < cho_den:
+        if not _dvc_tim_nut(drv, "tiếp tục"):
+            modal_dong = True
             break
-        _t.sleep(1)
-    if not thanh_cong:
-        return {"ok": False,
-                "loi": "Đã bấm \"Nộp tờ khai\" nhưng KHÔNG thấy trang xác nhận \"THÀNH CÔNG\" "
-                       f"sau {cho_ket_qua_toi_da}s — hãy tự kiểm tra lại trên cửa sổ Chrome (có "
-                       "thể đã nộp thành công nhưng trang tải chậm, hoặc có lỗi cần xử lý)."}
-    return {"ok": True, "ma_ho_so": ma_ho_so}
+        _t.sleep(0.5)
+    buoc.append("Khung \"Chọn chữ ký số\" đã đóng — trang đã nhận chữ ký" if modal_dong
+                else f"Khung \"Chọn chữ ký số\" vẫn còn sau {cho_ky_toi_da}s — vẫn thử bấm "
+                     "\"Nộp tờ khai\"")
+    _t.sleep(3)   # nhịp chờ trang gắn chữ ký vào hồ sơ trước khi nộp
+
+    loi_cuoi = ""
+    for lan in range(1, so_lan_thu + 1):
+        # có thể lần bấm trước ĐÃ thành công nhưng trang chậm — kiểm tra trước
+        thanh_cong, ma_ho_so = _dvc_cho_ket_qua_nop(drv, 0)
+        if thanh_cong:
+            buoc.append("Trang đã ở màn THÀNH CÔNG")
+            return {"ok": True, "ma_ho_so": ma_ho_so, "buoc": buoc}
+
+        nut = _dvc_nut_gon_nhat(drv, "nộp tờ khai")
+        if not nut:
+            loi_cuoi = "Không tìm thấy nút \"Nộp tờ khai\" trên trang"
+            buoc.append(f"Lần {lan}: {loi_cuoi}")
+            _t.sleep(3)
+            continue
+        ok_click, loi_click = _dvc_click_chac_chan(drv, nut[0])
+        if not ok_click:
+            loi_cuoi = f"bấm nút không được ({loi_click})"
+            buoc.append(f"Lần {lan}: {loi_cuoi}")
+            _t.sleep(3)
+            continue
+        buoc.append(f"Đã bấm \"Nộp tờ khai\" (lần {lan}/{so_lan_thu})")
+
+        # (3) hộp xác nhận "Bạn có chắc muốn nộp?" — nếu có thì tự đồng ý
+        _t.sleep(1.5)
+        if not _dvc_cho_ket_qua_nop(drv, 0)[0]:
+            for tu in _DVC_NUT_XAC_NHAN_NOP:
+                nut_xn = _dvc_nut_gon_nhat(drv, tu)
+                if nut_xn:
+                    if _dvc_click_chac_chan(drv, nut_xn[0])[0]:
+                        buoc.append(f"Đã bấm nút xác nhận \"{tu}\" trong hộp thoại xác nhận nộp")
+                    break
+
+        # (4) chờ trang kết quả
+        thanh_cong, ma_ho_so = _dvc_cho_ket_qua_nop(drv, cho_ket_qua_toi_da)
+        if thanh_cong:
+            buoc.append("Trang báo THÀNH CÔNG" +
+                        (f" (Mã hồ sơ: {ma_ho_so})" if ma_ho_so else ""))
+            return {"ok": True, "ma_ho_so": ma_ho_so, "buoc": buoc}
+        loi_cuoi = f"bấm rồi nhưng không thấy trang \"THÀNH CÔNG\" sau {cho_ket_qua_toi_da}s"
+        buoc.append(f"Lần {lan}: {loi_cuoi} — thử lại" if lan < so_lan_thu else f"Lần {lan}: {loi_cuoi}")
+
+    try:
+        url_hien_tai = drv.current_url
+    except Exception:
+        url_hien_tai = ""
+    return {"ok": False, "buoc": buoc,
+            "loi": f"Đã thử bấm \"Nộp tờ khai\" {so_lan_thu} lần nhưng {loi_cuoi} "
+                   f"(đang ở: {url_hien_tai}) — hãy tự kiểm tra lại trên cửa sổ Chrome (có thể "
+                   "trang báo lỗi cần xử lý, hoặc đã nộp được nhưng trang tải quá chậm)."}
 
 
 def _dvc_browser_nop_to_khai(drv, cfg, file_path):
