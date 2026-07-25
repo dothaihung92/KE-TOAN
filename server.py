@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.7"
+APP_BUILD = "2026-07-25.8"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12998,6 +12998,15 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                                 "nbmst": mst_cty,
                                 "tgtcthue": ds, "tgtthue": th, "tgtttbso": ds + th,
                                 "tthai": _ma_trang_thai(_o(g_ban, r, c_tt_b)) if c_tt_b else "1",
+                                # Nhóm thuế suất đọc được từ TIÊU ĐỀ NHÓM của
+                                # sheet 'BK Bán ra' ('0'/'5'/'8'/'10'/'KCT') —
+                                # LƯU LẠI để khi xuất XML 01/GTGT vẫn phân
+                                # loại đúng chỉ tiêu [26]/[29]-[33], vì hóa
+                                # đơn import KHÔNG có chi tiết dòng hàng
+                                # (ltsuat) để tự suy ra nhóm như hóa đơn tra
+                                # cứu — thiếu trường này thì KCT/10% import
+                                # sẽ không phân biệt được, lại rơi về đoán mò.
+                                "nhom_ts": cur_nhom,
                             })
         else:
             ban_rows = 0
@@ -13041,7 +13050,8 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                     """, (cid, "sold", "import", inv["nbmst"], "", inv["nmmst"],
                           inv["khmshdon"], inv["khhdon"], inv["shdon"], inv["tdlap"],
                           inv["tgtcthue"], inv["tgtthue"], inv["tgtttbso"], inv["tthai"],
-                          json.dumps({"tthai": inv["tthai"], "nguon": "import_excel"}, ensure_ascii=False)))
+                          json.dumps({"tthai": inv["tthai"], "nguon": "import_excel",
+                                      "nhom_ts": inv.get("nhom_ts")}, ensure_ascii=False)))
                     so_dong_ghi_de += 1
             conn_gd.commit()
             conn_gd.close()
@@ -13569,17 +13579,16 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
                 pass
         return None
 
-    def suy_nhom_thue(ds, thue):
-        """Khi không có chi tiết, suy nhóm thuế suất từ tỷ lệ thuế/doanh số."""
-        if not ds:
-            return "10"
-        ty_le = (thue or 0) / ds * 100
-        if ty_le < 1:
-            return "0"
-        for muc in ("5", "8", "10"):
-            if abs(ty_le - float(muc)) < 1.5:
-                return muc
-        return "10"
+    # Khi KHÔNG có chi tiết dòng hàng (không detail_json, không file đã tải):
+    # dùng ĐÚNG cùng quy tắc với sheet "BK Bán ra" của Xuất Excel tổng hợp
+    # (đã xác nhận đúng thực tế qua dữ liệu người dùng gửi) — hóa đơn không
+    # tách được VAT (thường là hộ/cá nhân kinh doanh) mà ĐÃ đăng nhập được
+    # (đủ tin cậy tổng tiền) thì xếp vào KCT, KHÔNG suy đoán mò theo tỉ lệ
+    # thuế/doanh số như trước (cách cũ: thuế=0 -> luôn coi là "thuế suất 0%",
+    # LẪN LỘN với KCT — 2 khái niệm khác hẳn nhau trên tờ khai, dẫn tới doanh
+    # thu KCT thật bị ghi nhầm vào chỉ tiêu [29] "chịu thuế suất 0%" thay vì
+    # [26], đúng lỗi người dùng đã phát hiện qua file XML kết xuất).
+    client = CLIENTS.get(cid)
 
     for r in rows:
         if r["loai"] != "sold" or status_loai_bo(r):
@@ -13595,34 +13604,48 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         else:
             ds = _to_num(r["tgtcthue"]) or 0
             thue = _to_num(r["tgtthue"]) or 0
-            nhom = suy_nhom_thue(ds, thue)
+            # Hóa đơn từ IMPORT EXCEL không có chi tiết dòng hàng (ltsuat) để
+            # tự suy nhóm — nhưng lúc import ĐÃ đọc được đúng nhóm từ tiêu đề
+            # nhóm của sheet 'BK Bán ra' (lưu vào raw.nhom_ts) -> ưu tiên
+            # dùng lại, không đoán mò/không rơi về mặc định KCT hay 10%.
+            nhom_luu = None
+            try:
+                raw_r = json.loads(r["raw"]) if r["raw"] else {}
+                if raw_r.get("nguon") == "import_excel":
+                    nhom_luu = raw_r.get("nhom_ts")
+            except Exception:
+                pass
+            if nhom_luu in ban_theo_ts:
+                nhom = nhom_luu
+            else:
+                dang_nhap_ok = bool(client and client.token and not getattr(client, "_token_dead", False))
+                nhom = "KCT" if (dang_nhap_ok and ds) else "10"
             ban_theo_ts[nhom]["ds"] += ds
             ban_theo_ts[nhom]["thue"] += thue
 
-    # ƯU TIÊN dữ liệu đã import từ Excel (nếu có, đúng kỳ) -> ghi đè số liệu tra cứu
-    imp = _get_imported(cid, ky)
+    # KHÔNG còn dùng dữ liệu ĐÃ IMPORT (bảng imported_data) để ghi đè mua_ds/
+    # mua_thue/ban_theo_ts ở đây nữa — import Excel "dữ liệu đã kiểm tra" đã
+    # GHI ĐÈ THẲNG vào bảng 'invoices' rồi (cả mua vào lẫn bán ra, xem
+    # import_excel), nên 2 vòng lặp phía trên (mua_ds/mua_thue và
+    # ban_theo_ts) ĐÃ tính đúng theo đúng dữ liệu import (nếu có) hệt như 2
+    # sheet "BK Mua vào"/"BK Bán ra" của Xuất Excel tổng hợp. Trước đây còn
+    # giữ 1 bảng cache riêng (imported_data) ưu tiên ghi đè NGOÀI 2 vòng lặp
+    # trên — bảng cache này chỉ được tính đúng 1 LẦN lúc import, không tự
+    # cập nhật khi có sửa lỗi phân loại nhóm thuế suất hay khi người dùng
+    # tra cứu lại sau đó, nên ngày càng lệch khỏi dữ liệu THẬT trong
+    # 'invoices'/hiện trên 2 sheet BK — đúng nguyên nhân người dùng báo
+    # "tra cứu lại xong xuất XML vẫn sai" (XML âm thầm dùng số liệu import
+    # CŨ, không phải dữ liệu mới). Chỉ còn giữ lại phần hàng NHẬP KHẨU (tờ
+    # khai NK) từ imported_data vì đây là số liệu KHÔNG có ở bảng 'invoices'
+    # theo từng dòng hóa đơn (chỉ dùng để tách [23a]/[24a]).
     imp_nk_ds = imp_nk_thue = 0     # phần hàng NHẬP KHẨU đã nằm SẴN trong mua_ds/mua_thue của file import
+    imp = _get_imported(cid, ky)
     if imp:
-        mua_ds = _to_num(imp["mua_ds"]) or 0
-        mua_thue = _to_num(imp["mua_thue"]) or 0
-        # phần hàng nhập khẩu (tờ khai NK) đã được cộng SẴN trong tổng mua vào
-        # của 'BK Mua vào' -> chỉ tách ra để điền [23a]/[24a], KHÔNG cộng thêm lần nữa.
         try:
             imp_nk_ds = _to_num(imp["mua_ds_nk"]) or 0
             imp_nk_thue = _to_num(imp["mua_thue_nk"]) or 0
         except Exception:
             imp_nk_ds = imp_nk_thue = 0
-        try:
-            imp_ds_kct = _to_num(imp["ban_ds_kct"]) or 0
-        except Exception:
-            imp_ds_kct = 0   # bản ghi import CŨ (trước khi thêm cột) chưa có giá trị này
-        ban_theo_ts = {
-            "0": {"ds": _to_num(imp["ban_ds_0"]) or 0, "thue": 0},
-            "5": {"ds": _to_num(imp["ban_ds_5"]) or 0, "thue": _to_num(imp["ban_thue_5"]) or 0},
-            "8": {"ds": _to_num(imp["ban_ds_8"]) or 0, "thue": _to_num(imp["ban_thue_8"]) or 0},
-            "10": {"ds": _to_num(imp["ban_ds_10"]) or 0, "thue": _to_num(imp["ban_thue_10"]) or 0},
-            "KCT": {"ds": imp_ds_kct, "thue": 0},
-        }
 
     # ===== SỐ DƯ ĐẦU KỲ [22]: lấy từ tạm tính VAT đã lưu (vat_balance) =====
     ct22_val = 0
@@ -13879,20 +13902,18 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         canh_bao = (f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
                     f"MẪU (có thể sai công ty), dễ bị Cơ quan Thuế báo lỗi. Vào 'Sửa công ty' để điền đủ "
                     f"trước khi nộp.")
-    # Đã có dữ liệu IMPORT cho đúng kỳ này -> XML VỪA XUẤT dùng số liệu IMPORT
-    # (không phải số liệu tra cứu mới nhất) — TRƯỚC ĐÂY người dùng tra cứu lại
-    # xong xuất XML vẫn thấy sai/cũ mà không hiểu vì sao, vì import ưu tiên
-    # ghi đè VĨNH VIỄN cho tới khi tự bấm "Dùng lại dữ liệu tra cứu" ở màn
-    # danh sách hóa đơn — không có cảnh báo nào ở bước xuất XML để biết điều
-    # này đang xảy ra. Nay báo rõ để người dùng biết cần bỏ dữ liệu import
-    # nếu muốn XML phản ánh đúng lần tra cứu mới nhất.
-    if imp:
+    # [23a]/[24a] (hàng nhập khẩu) vẫn lấy riêng từ imported_data (số liệu
+    # KHÔNG có theo từng dòng ở bảng 'invoices') — báo rõ khi đang dùng để dễ
+    # đối chiếu. Các chỉ tiêu còn lại ([23]-[36]) giờ LUÔN tính trực tiếp từ
+    # bảng 'invoices' hiện có (đúng dữ liệu tra cứu mới nhất, hoặc dữ liệu
+    # import nếu vừa import — vì import đã ghi đè thẳng vào 'invoices'),
+    # không còn dùng cache imported_data cho phần này nên không còn bị "xuất
+    # ra số liệu import CŨ" dù đã tra cứu lại.
+    if imp and imp_nk_ds:
         canh_bao = (canh_bao + " " if canh_bao else "") + (
-            "⚠ File XML này đang dùng DỮ LIỆU ĐÃ IMPORT cho kỳ này (KHÔNG phải dữ liệu tra cứu mới "
-            "nhất) — nếu vừa tra cứu lại hóa đơn mà số liệu chưa đổi, vào màn hình 'Dữ liệu hóa đơn' "
-            "của công ty, bấm 'Dùng lại dữ liệu tra cứu' để bỏ dữ liệu import rồi xuất lại.")
+            "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy từ dữ liệu đã import gần nhất cho kỳ này.")
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
-            "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp)}
+            "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds)}
 
 
 @app.get("/api/export-htkk-tncn/{cid}")
