@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.3"
+APP_BUILD = "2026-07-25.4"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1236,6 +1236,7 @@ def init_db():
         ban_ds_5 REAL, ban_thue_5 REAL,
         ban_ds_8 REAL, ban_thue_8 REAL,
         ban_ds_10 REAL, ban_thue_10 REAL,
+        ban_ds_kct REAL,
         updated_at TEXT,
         UNIQUE(company_id, ky)
     );
@@ -1366,6 +1367,11 @@ def init_db():
         conn.execute("ALTER TABLE imported_data ADD COLUMN mua_ds_nk REAL DEFAULT 0")
     if "mua_thue_nk" not in icols:
         conn.execute("ALTER TABLE imported_data ADD COLUMN mua_thue_nk REAL DEFAULT 0")
+    # Migration: lưu riêng doanh số bán ra KHÔNG CHỊU THUẾ (KCT) khi import Excel
+    # - trước đây import bỏ hẳn nhóm KCT (không có cột lưu), nên [26] trên tờ
+    # khai 01/GTGT luôn bị ghi 0 dù công ty có doanh thu KCT thật.
+    if "ban_ds_kct" not in icols:
+        conn.execute("ALTER TABLE imported_data ADD COLUMN ban_ds_kct REAL DEFAULT 0")
     # Migration: "đã nộp xong" (nop_to_khai_log) PHẢI dựa trên xác nhận THẬT
     # SỰ đã được cổng Thuế chấp nhận (tra cứu lại), không phải chỉ vì đã tự
     # động tải file lên xong (bước đó mới là "sẵn sàng ký", CHƯA chắc đã nộp).
@@ -12789,7 +12795,8 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
         mua_sheet_found = "BK Mua vào" in wb.sheetnames
         ban_sheet_found = "BK Bán ra" in wb.sheetnames
         ban = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
-               "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0}}
+               "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0},
+               "KCT": {"ds": 0, "thue": 0}}
 
         def num(v):
             try:
@@ -12947,11 +12954,15 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                 head3 = " ".join(str(v or "") for v in row_vals[0:3])
                 # dòng tiêu đề nhóm thuế suất
                 if "thuế suất" in head3.lower() or "%" in head3 or "không chịu thuế" in head3.lower():
-                    if "0%" in head3: cur_nhom = "0"
+                    # PHẢI kiểm tra "10%" TRƯỚC "0%": '0%' là CHUỖI CON của '10%'
+                    # (vd head3='...chịu thuế suất 10%' vẫn chứa '0%'), nên nếu
+                    # kiểm tra '0%' trước sẽ nhận NHẦM nhóm 10% thật thành nhóm
+                    # 0% -> mất trắng số thuế của nhóm 10% khi import Excel.
+                    if "10%" in head3: cur_nhom = "10"
+                    elif "0%" in head3: cur_nhom = "0"
                     elif "5%" in head3: cur_nhom = "5"
                     elif "8%" in head3: cur_nhom = "8"
-                    elif "10%" in head3: cur_nhom = "10"
-                    elif "không chịu" in head3.lower(): cur_nhom = None
+                    elif "không chịu" in head3.lower(): cur_nhom = "KCT"
                     continue
                 # BỎ dòng tổng (Tổng nhóm / TỔNG CỘNG) — dùng CỤM TỪ cụ thể, KHÔNG
                 # lọc theo chữ 'tổng' chung chung để tránh bỏ nhầm hóa đơn của khách
@@ -13030,20 +13041,22 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
             INSERT INTO imported_data (company_id, ky, mua_ds, mua_thue,
                 mua_ds_nk, mua_thue_nk,
                 ban_ds_0, ban_ds_5, ban_thue_5, ban_ds_8, ban_thue_8,
-                ban_ds_10, ban_thue_10, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ban_ds_10, ban_thue_10, ban_ds_kct, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(company_id, ky) DO UPDATE SET
                 mua_ds=excluded.mua_ds, mua_thue=excluded.mua_thue,
                 mua_ds_nk=excluded.mua_ds_nk, mua_thue_nk=excluded.mua_thue_nk,
                 ban_ds_0=excluded.ban_ds_0, ban_ds_5=excluded.ban_ds_5,
                 ban_thue_5=excluded.ban_thue_5, ban_ds_8=excluded.ban_ds_8,
                 ban_thue_8=excluded.ban_thue_8, ban_ds_10=excluded.ban_ds_10,
-                ban_thue_10=excluded.ban_thue_10, updated_at=excluded.updated_at
+                ban_thue_10=excluded.ban_thue_10, ban_ds_kct=excluded.ban_ds_kct,
+                updated_at=excluded.updated_at
         """, (cid, ky, round(mua_ds), round(mua_thue),
               round(mua_ds_nk), round(mua_thue_nk), round(ban["0"]["ds"]),
               round(ban["5"]["ds"]), round(ban["5"]["thue"]),
               round(ban["8"]["ds"]), round(ban["8"]["thue"]),
               round(ban["10"]["ds"]), round(ban["10"]["thue"]),
+              round(ban["KCT"]["ds"]),
               datetime.datetime.now().isoformat()))
         conn.commit()
         conn.close()
@@ -13589,12 +13602,16 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             imp_nk_thue = _to_num(imp["mua_thue_nk"]) or 0
         except Exception:
             imp_nk_ds = imp_nk_thue = 0
+        try:
+            imp_ds_kct = _to_num(imp["ban_ds_kct"]) or 0
+        except Exception:
+            imp_ds_kct = 0   # bản ghi import CŨ (trước khi thêm cột) chưa có giá trị này
         ban_theo_ts = {
             "0": {"ds": _to_num(imp["ban_ds_0"]) or 0, "thue": 0},
             "5": {"ds": _to_num(imp["ban_ds_5"]) or 0, "thue": _to_num(imp["ban_thue_5"]) or 0},
             "8": {"ds": _to_num(imp["ban_ds_8"]) or 0, "thue": _to_num(imp["ban_thue_8"]) or 0},
             "10": {"ds": _to_num(imp["ban_ds_10"]) or 0, "thue": _to_num(imp["ban_thue_10"]) or 0},
-            "KCT": {"ds": 0, "thue": 0},
+            "KCT": {"ds": imp_ds_kct, "thue": 0},
         }
 
     # ===== SỐ DƯ ĐẦU KỲ [22]: lấy từ tạm tính VAT đã lưu (vat_balance) =====
@@ -13736,6 +13753,11 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     thue_10_tk = ban_theo_ts["10"]["thue"] + thue_8
     ct32 = round(ds_10_tk); ct33 = round(thue_10_tk)
     ct29 = round(ds_0)
+    # [26] = doanh số bán ra KHÔNG CHỊU THUẾ GTGT (KCT) — TRƯỚC ĐÂY luôn ghi
+    # cứng 0 (kể cả khi công ty có hóa đơn KCT thật), nên tờ khai xuất ra bị
+    # THIẾU hẳn nhóm KCT, đồng thời [34] (tổng doanh thu) cũng sai theo do
+    # không cộng phần này. Nay lấy đúng theo dữ liệu đã gộp (ban_theo_ts).
+    ct26 = round(ban_theo_ts["KCT"]["ds"])
     # [27]/[28] = TỔNG doanh thu/thuế GTGT của HHDV bán ra CHỊU THUẾ GTGT —
     # gồm CẢ mức thuế suất 0% (ds_0/ct29). [29] CHỈ LÀ "trong đó: chịu thuế
     # suất 0%" — một PHẦN của [27], KHÔNG PHẢI khoản cộng thêm. Trước đây
@@ -13744,7 +13766,9 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # xác nhận qua file HTKK chuẩn thật (đã nộp được): ct27 = ct29 = ct34
     # khi TOÀN BỘ doanh thu là 0%, chứ không phải ct27=0.
     ct27 = ct29 + ct30 + ct32; ct28 = ct31 + ct33
-    ct34 = ct27; ct35 = ct28
+    # [34] = [26]+[27] theo đúng mẫu 01/GTGT (tổng doanh thu bán ra gồm CẢ
+    # không chịu thuế lẫn chịu thuế) — trước đây chỉ = [27], thiếu [26].
+    ct34 = ct26 + ct27; ct35 = ct28
     ct36 = ct35 - ct25          # thuế GTGT phát sinh trong kỳ
     # ct22 = thuế còn được khấu trừ kỳ trước chuyển sang (số dư đầu kỳ)
     ct22 = ct22_val
@@ -13763,7 +13787,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         ("ct21", 0), ("ct22", ct22),
         ("ct23", ct23), ("ct24", ct24),
         ("ct23a", ct23a), ("ct24a", ct24a),
-        ("ct25", ct25), ("ct26", 0),
+        ("ct25", ct25), ("ct26", ct26),
         ("ct27", ct27), ("ct28", ct28), ("ct29", ct29),
         ("ct30", ct30), ("ct31", ct31),
         ("ct32", ct32), ("ct33", ct33), ("ct32a", 0),
