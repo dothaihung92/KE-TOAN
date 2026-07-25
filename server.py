@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.10"
+APP_BUILD = "2026-07-25.11"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5174,9 +5174,15 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
     # vào cùng thư mục Năm/Quý để nộp HTKK — mỗi cái độc lập, lỗi cái
     # này không chặn cái kia.
     try:
-        export_htkk(cid, tu=(tu or ""), den=(den or ""),
-                    luu_ket_xuat=1, mo_file=0)
+        res_htkk = export_htkk(cid, tu=(tu or ""), den=(den or ""),
+                               luu_ket_xuat=1, mo_file=0)
         msg(stage="info", text="✓ Đã kết xuất XML tờ khai GTGT (01/GTGT)")
+        # Báo NGAY trong tiến độ tra cứu hàng loạt nếu công ty này bị LỆCH số
+        # liệu giữa bảng kê và XML — để người dùng biết công ty nào cần kiểm
+        # tra lại mà không phải mở từng công ty ra xem (đã LƯU LẠI persistent
+        # ở _export_htkk_impl, ở đây chỉ thêm hiển thị NGAY trong log tiến độ).
+        if isinstance(res_htkk, dict) and res_htkk.get("canh_bao"):
+            msg(stage="warn", text=res_htkk["canh_bao"])
     except Exception as e:
         msg(stage="warn", text=f"Không tự kết xuất được XML GTGT: {str(e)[:120]}")
     try:
@@ -13542,11 +13548,14 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     #    (để [23]/[24] khớp bảng kê — vẫn liệt kê đủ HĐ mua vào)
     #  - loại HĐ lẫn của công ty khác (MST người mua khác MST công ty)
     #  - HKD: nếu tgtcthue=0 nhưng tgtttbso>0 -> lấy tgtttbso (doanh số)
+    # mua_ds_full/mua_thue_full: GIỐNG HỆT vòng trên nhưng KHÔNG lọc theo kỳ —
+    # dùng để đối chiếu với TỔNG CỘNG thật của sheet "BK Mua vào" (sheet đó
+    # liệt kê MỌI hóa đơn mua vào hiện có của công ty, không lọc theo đúng
+    # kỳ khai) và cảnh báo nếu XML (chỉ tính đúng kỳ) lệch với bảng kê.
     mua_ds = mua_thue = 0
+    mua_ds_full = mua_thue_full = 0
     for r in rows:
         if r["loai"] != "purchase":
-            continue
-        if not trong_ky(r["tdlap"]):
             continue
         try:
             _raw = json.loads(r["raw"]) if r["raw"] else {}
@@ -13561,8 +13570,12 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         ds = _to_num(r["tgtcthue"]) or 0
         if not ds:
             ds = _to_num(r["tgtttbso"]) or 0
-        mua_ds += ds
-        mua_thue += _to_num(r["tgtthue"]) or 0
+        thue_r = _to_num(r["tgtthue"]) or 0
+        mua_ds_full += ds
+        mua_thue_full += thue_r
+        if trong_ky(r["tdlap"]):
+            mua_ds += ds
+            mua_thue += thue_r
 
     # ----- BÁN RA: tách theo nhóm thuế suất từ chi tiết (CHỈ hóa đơn thuộc kỳ) -----
     # Cần đọc chi tiết để biết hàng nào 8% (NQ142). Dùng detail_json/file nếu có.
@@ -13615,20 +13628,29 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # [26], đúng lỗi người dùng đã phát hiện qua file XML kết xuất).
     client = CLIENTS.get(cid)
 
+    # ban_ds_full/ban_thue_full: TỔNG CỘNG bán ra KHÔNG lọc theo kỳ — để đối
+    # chiếu với TỔNG CỘNG thật của sheet "BK Bán ra" (sheet đó liệt kê MỌI
+    # hóa đơn bán ra hiện có, không lọc theo đúng kỳ khai).
+    ban_ds_full = ban_thue_full = 0
+
     for r in rows:
         if r["loai"] != "sold" or status_loai_bo(r):
             continue
-        if not trong_ky(r["tdlap"]):
-            continue
+        r_trong_ky = trong_ky(r["tdlap"])
         info = get_summary(r)
         if info and info.get("theo_ts"):
             for k, v in info["theo_ts"].items():
                 tgt = k if k in ban_theo_ts else "10"
-                ban_theo_ts[tgt]["ds"] += v["ds"]
-                ban_theo_ts[tgt]["thue"] += v["thue"]
+                ban_ds_full += v["ds"]; ban_thue_full += v["thue"]
+                if r_trong_ky:
+                    ban_theo_ts[tgt]["ds"] += v["ds"]
+                    ban_theo_ts[tgt]["thue"] += v["thue"]
         else:
             ds = _to_num(r["tgtcthue"]) or 0
             thue = _to_num(r["tgtthue"]) or 0
+            ban_ds_full += ds; ban_thue_full += thue
+            if not r_trong_ky:
+                continue
             # Hóa đơn từ IMPORT EXCEL không có chi tiết dòng hàng (ltsuat) để
             # tự suy nhóm — nhưng lúc import ĐÃ đọc được đúng nhóm từ tiêu đề
             # nhóm của sheet 'BK Bán ra' (lưu vào raw.nhom_ts) -> ưu tiên
@@ -13696,21 +13718,25 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # tờ khai nhập khẩu từng nhập cho công ty, không lọc theo kỳ, nên tờ khai
     # GTGT kỳ nào cũng bị cộng nhầm cả tờ khai NK của kỳ/năm khác. =====
     tk_ds_nk = tk_thue_nk = 0
+    tk_ds_nk_full = tk_thue_nk_full = 0   # KHÔNG lọc kỳ - dùng để đối chiếu BK Mua vào
     try:
         conn_tk = db()
         tk_rows = conn_tk.execute(
             "SELECT ngay_dk, items_json FROM tokhai_nhap WHERE company_id=?", (cid,)).fetchall()
         conn_tk.close()
         for tkr in tk_rows:
-            if not trong_ky(tkr["ngay_dk"]):
-                continue
             try:
                 its = json.loads(tkr["items_json"]) if tkr["items_json"] else []
             except Exception:
                 its = []
+            r_trong_ky_tk = trong_ky(tkr["ngay_dk"])
             for it in its:
-                tk_ds_nk += round(it.get("tri_gia_gtgt", 0) or 0)
-                tk_thue_nk += round(it.get("tien_thue_gtgt", 0) or 0)
+                ds_it = round(it.get("tri_gia_gtgt", 0) or 0)
+                thue_it = round(it.get("tien_thue_gtgt", 0) or 0)
+                tk_ds_nk_full += ds_it; tk_thue_nk_full += thue_it
+                if r_trong_ky_tk:
+                    tk_ds_nk += ds_it
+                    tk_thue_nk += thue_it
     except Exception:
         pass
 
@@ -13827,6 +13853,43 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # [34] = [26]+[27] theo đúng mẫu 01/GTGT (tổng doanh thu bán ra gồm CẢ
     # không chịu thuế lẫn chịu thuế) — trước đây chỉ = [27], thiếu [26].
     ct34 = ct26 + ct27; ct35 = ct28
+
+    # ===== ĐỐI CHIẾU với TỔNG CỘNG thật của sheet "BK Mua vào"/"BK Bán ra"
+    # (Xuất Excel tổng hợp) — 2 sheet đó liệt kê MỌI hóa đơn hiện có, KHÔNG
+    # lọc theo đúng kỳ khai như XML, nên khi có hóa đơn NGOÀI kỳ (vd hóa đơn
+    # điều chỉnh ghi ngày lập ở kỳ trước) hoặc lỗi phân loại/nhập liệu, tổng
+    # 2 sheet có thể LỆCH với [23]/[24]/[25]/[34]/[35] mà người dùng không hề
+    # biết cho tới khi đối chiếu tay. Báo NGAY, LƯU LẠI (không mất khi toast
+    # tự tắt) để không bỏ sót — theo đúng yêu cầu người dùng.
+    mua_full_tk = 0 if (imp and imp_nk_ds) else tk_ds_nk_full
+    mua_thue_full_tk = 0 if (imp and imp_nk_ds) else tk_thue_nk_full
+    mua_ds_bk = round(mua_ds_full + mua_full_tk)
+    mua_thue_bk = round(mua_thue_full + mua_thue_full_tk)
+    ban_ds_bk = round(ban_ds_full)
+    ban_thue_bk = round(ban_thue_full)
+    NGUONG_LECH = 1000   # bỏ qua lệch làm tròn vặt vãnh dưới 1.000đ
+    lech_mua_ds = mua_ds_bk - ct23
+    lech_mua_thue = mua_thue_bk - ct25
+    lech_ban_ds = ban_ds_bk - ct34
+    lech_ban_thue = ban_thue_bk - ct35
+    canh_bao_lech = []
+    if abs(lech_mua_ds) >= NGUONG_LECH or abs(lech_mua_thue) >= NGUONG_LECH:
+        canh_bao_lech.append(
+            f"⚠ TỔNG CỘNG sheet 'BK Mua vào' (Doanh số {mua_ds_bk:,.0f}đ, Thuế GTGT "
+            f"{mua_thue_bk:,.0f}đ) LỆCH với chỉ tiêu [23]/[24]/[25] trên XML (Doanh số "
+            f"{ct23:,.0f}đ, Thuế {ct25:,.0f}đ) — chênh {lech_mua_ds:,.0f}đ doanh số, "
+            f"{lech_mua_thue:,.0f}đ thuế. Thường do có hóa đơn NGOÀI kỳ đang khai (vd hóa "
+            f"đơn điều chỉnh ghi ngày lập ở kỳ trước) — kiểm tra lại trước khi nộp.")
+    if abs(lech_ban_ds) >= NGUONG_LECH or abs(lech_ban_thue) >= NGUONG_LECH:
+        canh_bao_lech.append(
+            f"⚠ TỔNG CỘNG sheet 'BK Bán ra' (Doanh số {ban_ds_bk:,.0f}đ, Thuế GTGT "
+            f"{ban_thue_bk:,.0f}đ) LỆCH với chỉ tiêu [34]/[35] trên XML (Doanh số "
+            f"{ct34:,.0f}đ, Thuế {ct35:,.0f}đ) — chênh {lech_ban_ds:,.0f}đ doanh số, "
+            f"{lech_ban_thue:,.0f}đ thuế. Thường do có hóa đơn NGOÀI kỳ đang khai — kiểm "
+            f"tra lại trước khi nộp.")
+    if canh_bao_lech:
+        _luu_loi_tra_cuu(cid, " ".join(canh_bao_lech))
+
     ct36 = ct35 - ct25          # thuế GTGT phát sinh trong kỳ
     # ct22 = thuế còn được khấu trừ kỳ trước chuyển sang (số dư đầu kỳ)
     ct22 = ct22_val
@@ -13937,8 +14000,11 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     if imp and imp_nk_ds:
         canh_bao = (canh_bao + " " if canh_bao else "") + (
             "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy từ dữ liệu đã import gần nhất cho kỳ này.")
+    if canh_bao_lech:
+        canh_bao = (canh_bao + " " if canh_bao else "") + " ".join(canh_bao_lech)
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
-            "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds)}
+            "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds),
+            "lech_bk": bool(canh_bao_lech)}
 
 
 @app.get("/api/export-htkk-tncn/{cid}")
