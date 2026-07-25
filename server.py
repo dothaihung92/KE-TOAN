@@ -28,6 +28,14 @@ import license_core
 import cap_phep_admin
 
 # ============================================================
+#  PHIÊN BẢN (tăng số này mỗi lần sửa lỗi quan trọng — in ra màn hình lúc
+#  khởi động để người dùng/đối chiếu hỗ trợ biết máy đang chạy đúng bản mới
+#  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
+#  chưa tải được bản vá do lỗi mạng/khoá tạm)
+# ============================================================
+APP_BUILD = "2026-07-25.2"
+
+# ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1530,6 +1538,12 @@ def home():
 
 
 # ---------- TỐC ĐỘ TẢI ----------
+@app.get("/api/app-version")
+def get_app_version():
+    """Cho phép kiểm tra nhanh máy đang chạy đúng bản mới nhất hay chưa
+    (vd sau khi báo lỗi đã sửa nhưng update.py tải bản vá không thành công)."""
+    return {"build": APP_BUILD}
+
 @app.get("/api/speed")
 def get_speed():
     return {"speed": CURRENT_SPEED}
@@ -16532,6 +16546,7 @@ if __name__ == "__main__":
 
     print("=" * 55)
     print("  PHẦN MỀM QUẢN LÝ HÓA ĐƠN ĐIỆN TỬ ĐA CÔNG TY")
+    print(f"  Phiên bản: {APP_BUILD}")
     print(f"  Đang chạy tại: {URL}")
     if PORT != 8686:
         print(f"  (Cổng 8686 bận nên tự chuyển sang {PORT})")

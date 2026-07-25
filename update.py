@@ -13,7 +13,7 @@ Tu dong cap nhat phan mem tu GitHub (repo Public).
 
 Tra ve exit code 10 neu start.bat bi thay doi (de start.bat tu khoi dong lai).
 """
-import os, sys, ssl, time, urllib.request
+import os, sys, ssl, urllib.request
 
 OWNER  = "dothaihung92"
 REPO   = "ke-toan"
@@ -38,28 +38,12 @@ FILES = [
     "cap_phep_admin.py",
 ]
 
-# raw.githubusercontent.com khong bi gioi han nhu api.github.com, nhung van
-# dat cooldown de tranh goi mang qua day khi khoi dong lai lien tuc (vd dang
-# thu nghiem) - chi kiem tra cap nhat toi da 1 lan / khoang thoi gian duoi day.
-CHECK_COOLDOWN_SEC = 180
-LAST_CHECK_FILE = os.path.join(BASE, ".last_update_check")
-
-
-def _da_kiem_tra_gan_day():
-    try:
-        with open(LAST_CHECK_FILE, encoding="utf-8") as f:
-            t = float(f.read().strip())
-        return (time.time() - t) < CHECK_COOLDOWN_SEC
-    except Exception:
-        return False
-
-
-def _danh_dau_da_kiem_tra():
-    try:
-        with open(LAST_CHECK_FILE, "w", encoding="utf-8") as f:
-            f.write(str(time.time()))
-    except Exception:
-        pass
+# raw.githubusercontent.com khong bi gioi han nhu api.github.com nen KHONG can
+# cooldown de "tranh goi mang qua day" - truoc day co cooldown 180s khien
+# nguoi dung tat/mo lai phan mem de kiem tra ban cap nhat (vd sau khi bao loi)
+# trong vong 3 phut se bi BO QUA kiem tra, ngo la da chay ban moi nhung thuc
+# te van dang chay ban CU -> gay nham lan kho chuan doan. Nay LUON kiem tra
+# moi lan khoi dong cho chac chan.
 
 
 def _tai_raw(path, timeout=20):
@@ -70,23 +54,7 @@ def _tai_raw(path, timeout=20):
         return r.read()
 
 
-def _thieu_file_can_thiet():
-    """True nếu có file trong FILES chưa từng tồn tại trên máy này — dùng để
-    BỎ QUA cooldown, ép kiểm tra ngay. Tránh lặp lại lỗi 'file mới thêm vào
-    FILES nhưng máy user kẹt ở cooldown nên mãi không tải về được, dẫn tới
-    server.py crash vì import module chưa từng có trên đĩa'."""
-    for path in FILES:
-        if not os.path.exists(os.path.join(BASE, path.replace("/", os.sep))):
-            return True
-    return False
-
-
 def main():
-    if not _thieu_file_can_thiet() and _da_kiem_tra_gan_day():
-        print("[update] Vua kiem tra gan day - bo qua lan nay, chay thang voi ban dang co san.")
-        return 0
-    _danh_dau_da_kiem_tra()
-
     n = 0
     loi = 0
     startbat_changed = False

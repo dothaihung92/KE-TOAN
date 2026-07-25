@@ -246,6 +246,7 @@
       <div class="sf-name">CÔNG TY TNHH TƯ VẤN VÀ DỊCH VỤ KẾ TOÁN HƯNG PHÚC</div>
       <div class="sf-line">MST: 0315525949</div>
       <div class="sf-line">📞 Zalo: 0986883137</div>
+      <div class="sf-line" id="appBuildLine" style="opacity:.6"></div>
     </div>
   </aside>
 
@@ -1132,6 +1133,17 @@ async function khoiDongPhanMem(){
   adminKiemTraQuyen();
   licenseDaLoadApp=true;
   loadCompanies();
+  hienPhienBan();
+}
+async function hienPhienBan(){
+  // hiện bản build ở góc sidebar - giúp đối chiếu nhanh máy đang chạy đúng
+  // bản mới nhất hay chưa (khi báo lỗi đã sửa nhưng update.py chưa tải kịp)
+  try{
+    const r=await fetch('/api/app-version');
+    const d=await r.json();
+    const el=document.getElementById('appBuildLine');
+    if(el&&d.build)el.textContent='Bản: '+d.build;
+  }catch(e){}
 }
 
 /* ---------- COMPANIES ---------- */
