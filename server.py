@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.2"
+APP_BUILD = "2026-07-25.3"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -222,7 +222,16 @@ def _gop_hoa_don_trung_he_thong(rows):
     hóa đơn hộ/cá nhân kinh doanh (máy tính tiền) đôi khi trang Thuế trả về
     khmshdon/shdon LỆCH ĐỊNH DẠNG nhẹ giữa 2 hệ thống (vd '1' so với '01',
     hoặc MST có/không dấu gạch), khiến so khớp CHUỖI Y HỆT trước đây bỏ sót,
-    không gộp được, làm hóa đơn hiện LẶP ĐÔI trong file Excel kết xuất."""
+    không gộp được, làm hóa đơn hiện LẶP ĐÔI trong file Excel kết xuất.
+
+    KHÔNG dùng khmshdon trong khoá gộp: đã xác nhận thực tế có trường hợp
+    khmshdon trả về giữa 2 hệ thống lệch nhau KHÔNG PHẢI chỉ do số 0 ở đầu
+    (vd '1' vs '6' — mã phân loại khác hẳn, không phải cùng số chỉ khác định
+    dạng), khiến chuẩn hóa kiểu bỏ số 0 đầu vẫn không gộp được, hóa đơn vẫn
+    hiện lặp đôi. Ký hiệu (khhdon) hóa đơn của Tổng cục Thuế đã tự mang
+    thông tin mẫu số (ký tự đầu ký hiệu), nên chỉ cần so khớp
+    nbmst + khhdon + shdon + loai là đủ xác định 1 hóa đơn thật, không cần
+    thêm khmshdon (thêm vào chỉ làm khoá DỄ BỊ LỆCH giữa 2 hệ thống hơn)."""
     def _co_ttxly(r):
         try:
             raw = json.loads(r["raw"]) if r["raw"] else {}
@@ -231,14 +240,14 @@ def _gop_hoa_don_trung_he_thong(rows):
         return bool(str(raw.get("ttxly", "") or "").strip())
 
     def _chuan_ma(v):
-        """Bỏ số 0 ở đầu (khmshdon/shdon đôi khi lệch định dạng '1' vs '01')."""
+        """Bỏ số 0 ở đầu (shdon đôi khi lệch định dạng '1' vs '01')."""
         s = str(v or "").strip()
         return s.lstrip("0") or "0" if s else ""
 
     best = {}
     for r in rows:
-        key = (_chuan_mst(r["nbmst"]), _chuan_ma(r["khmshdon"]),
-               str(r["khhdon"] or "").strip(), _chuan_ma(r["shdon"]), r["loai"])
+        key = (_chuan_mst(r["nbmst"]), str(r["khhdon"] or "").strip(),
+               _chuan_ma(r["shdon"]), r["loai"])
         if key not in best:
             best[key] = r
         elif _co_ttxly(r) and not _co_ttxly(best[key]):
