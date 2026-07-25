@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.4"
+APP_BUILD = "2026-07-25.5"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15921,8 +15921,17 @@ def _summary_from_detail_json(detail):
     info["mat_hang"] = (ten_hangs[0] + (" ..." if len(ten_hangs) > 1 else "")) if ten_hangs else ""
 
     def norm_ts(ts):
-        s = str(ts or "").strip().upper()
-        if s in ("", "KCT", "KHAC", "KO", "KHÔNG") or "KKK" in s or "KCT" in s:
+        """Chuẩn hóa mã thuế suất -> '0'/'5'/'8'/'10'/'KCT'. Hàng KHÔNG CHỊU
+        THUẾ trên hóa đơn thật của Thuế không chỉ ghi 'KCT' mà còn có thể là
+        'KKKNT' (không kê khai, tính nộp thuế) hoặc 'KHTKKNT' (không thuộc
+        trường hợp phải kê khai, tính nộp thuế) — TRƯỚC ĐÂY chỉ nhận qua
+        chuỗi con 'KCT'/'KKK', BỎ SÓT 'KHTKKNT' (không chứa 2 chuỗi con đó),
+        khiến hàng KCT rơi vào nhánh mặc định rồi bị gộp NHẦM vào nhóm 10%
+        (do có fallback về '10' khi không khớp nhóm nào ở nơi gọi hàm này)
+        -> mất doanh thu ở chỉ tiêu [26], thừa sai ở chỉ tiêu [32]/[33]."""
+        s = str(ts or "").strip().upper().replace(" ", "")
+        if s in ("", "KCT", "KHAC", "KO", "KHÔNG", "KHONG", "KKKNT", "KHTKKNT") \
+                or "KKK" in s or "KCT" in s:
             return "KCT"
         s2 = s.replace("%", "").strip()
         if s2 in ("0", "5", "8", "10"):
@@ -16239,8 +16248,17 @@ def _parse_invoice_summary(xml_bytes):
     info["mat_hang"] = (ten_hangs[0] + (" ..." if len(ten_hangs) > 1 else "")) if ten_hangs else ""
 
     def norm_ts(ts):
-        s = str(ts or "").strip().upper()
-        if s in ("", "KCT", "KHAC", "KO", "KHÔNG") or "KKK" in s or "KCT" in s:
+        """Chuẩn hóa mã thuế suất -> '0'/'5'/'8'/'10'/'KCT'. Hàng KHÔNG CHỊU
+        THUẾ trên hóa đơn thật của Thuế không chỉ ghi 'KCT' mà còn có thể là
+        'KKKNT' (không kê khai, tính nộp thuế) hoặc 'KHTKKNT' (không thuộc
+        trường hợp phải kê khai, tính nộp thuế) — TRƯỚC ĐÂY chỉ nhận qua
+        chuỗi con 'KCT'/'KKK', BỎ SÓT 'KHTKKNT' (không chứa 2 chuỗi con đó),
+        khiến hàng KCT rơi vào nhánh mặc định rồi bị gộp NHẦM vào nhóm 10%
+        (do có fallback về '10' khi không khớp nhóm nào ở nơi gọi hàm này)
+        -> mất doanh thu ở chỉ tiêu [26], thừa sai ở chỉ tiêu [32]/[33]."""
+        s = str(ts or "").strip().upper().replace(" ", "")
+        if s in ("", "KCT", "KHAC", "KO", "KHÔNG", "KHONG", "KKKNT", "KHTKKNT") \
+                or "KKK" in s or "KCT" in s:
             return "KCT"
         s2 = s.replace("%", "").strip()
         if s2 in ("0", "5", "8", "10"):
