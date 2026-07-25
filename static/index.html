@@ -537,6 +537,13 @@
       <div id="ntkCtyList" style="max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:13px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
     </div>
+    <div id="ntkDaChapNhanBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#fdecea;border:1px solid #f1a9a0;border-radius:10px;padding:12px 14px;margin-top:8px;font-size:13.5px;color:#7a1f1f">
+      <div style="flex:1">
+        <b>⛔ Tờ khai ĐÃ ĐƯỢC CHẤP NHẬN — đã dừng nộp:</b>
+        <div id="ntkDaChapNhanText" style="margin-top:4px;white-space:pre-wrap"></div>
+      </div>
+      <button class="btn ghost sm" onclick="document.getElementById('ntkDaChapNhanBanner').style.display='none'">Ẩn</button>
+    </div>
     <div id="ntkKetQua" style="display:none;margin-top:8px;border-radius:10px;padding:12px 14px;font-size:13px"></div>
     </div>
     <div class="modal-actions" style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
@@ -1620,6 +1627,8 @@ async function ntkBatDau(){
   if(!ntkHangDoi.length){toast('Tất cả công ty đã chọn đều đã xác nhận nộp xong rồi','ok');return;}
   ntkBiDung=false;ntkDangChay=true;ntkDangCho=null;
   document.getElementById('ntkKetQua').innerHTML='';
+  const banner=document.getElementById('ntkDaChapNhanBanner');
+  if(banner)banner.style.display='none';
   ntkCapNhatNutChay();
   await ntkXuLyTiep();
 }
@@ -1694,6 +1703,23 @@ async function ntkXuLyTiep(){
     const khongCoFile=/không tìm thấy file/i.test(e.message||'');
     ntkGhi(`<br>${khongCoFile?'⚠':'❌'} <b>${ten}</b> — ${khongCoFile?`KHÔNG CÓ tờ khai ${NTK_TEN_LOAI[loai]||loai} để nộp cho kỳ đã chọn (đã tìm cả thư mục kết xuất riêng lẫn thư mục mặc định) — bỏ qua.`:e.message}`);
     await ntkXuLyTiep();
+    return;
+  }
+  if(r.da_chap_nhan){
+    // Tờ khai kỳ này ĐÃ ĐƯỢC CHẤP NHẬN từ trước — DỪNG HẲN (không tự nộp
+    // tiếp các công ty còn lại trong hàng đợi) và hiện banner KHÔNG TỰ ẨN,
+    // theo đúng yêu cầu người dùng (tránh vô tình nộp trùng thêm công ty
+    // khác nếu đang có gì đó bất thường, vd chọn nhầm kỳ).
+    ntkGhi(`<br>⛔ <b>${ten}</b> — ${r.thong_bao}`);
+    const banner=document.getElementById('ntkDaChapNhanBanner');
+    if(banner){
+      document.getElementById('ntkDaChapNhanText').textContent=`${ten} — ${NTK_TEN_LOAI[loai]||loai}: ${r.thong_bao}`;
+      banner.style.display='flex';
+    }
+    toast(`⛔ ${ten} đã được chấp nhận từ trước — đã dừng nộp tờ khai`,'err');
+    ntkBiDung=true;ntkDangCho=null;ntkDangChay=false;
+    ntkCapNhatNutChay();
+    await ntkTaiTrangThai();
     return;
   }
   if(!r.ok){

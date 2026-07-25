@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.15"
+APP_BUILD = "2026-07-25.16"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4646,6 +4646,37 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         if not ok:
             drv.quit()
             raise HTTPException(401, f"Đăng nhập thất bại: {json.dumps(info, ensure_ascii=False)}")
+        # KIỂM TRA TRƯỚC khi tải file lên: tờ khai kỳ này (loai) đã được cơ
+        # quan Thuế CHẤP NHẬN từ trước chưa (vd đã nộp ở máy khác, hoặc lần
+        # chạy trước đã xong nhưng phần mềm chưa kịp ghi nhận) — nếu CÓ thì
+        # DỪNG LẠI NGAY, không tải file lên nộp trùng lần nữa. Dùng lại
+        # ĐÚNG session trình duyệt vừa đăng nhập (không tốn thêm 1 lượt đăng
+        # nhập/mở Chrome riêng).
+        tu_ck, den_ck = _ky_tu_ten_file_nop(os.path.basename(file_path))
+        if not tu_ck or not den_ck:
+            tu_ck, den_ck = (_tu_den_cua_quy(nam, quy) if nam else (None, None))
+        if tu_ck and den_ck:
+            try:
+                xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = _dvc_kiem_tra_da_nop_mot_loai(
+                    drv, loai, tu_ck, den_ck)
+            except Exception:
+                xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = False, "", ""
+            if xac_nhan_truoc:
+                drv.quit()
+                conn = db()
+                conn.execute(
+                    "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, xac_nhan_nguon, xac_nhan_chi_tiet) "
+                    "VALUES (?, ?, 1, ?, 'auto', ?) "
+                    "ON CONFLICT(company_id, loai) DO UPDATE SET xac_nhan=1, "
+                    "xac_nhan_at=excluded.xac_nhan_at, xac_nhan_nguon='auto', "
+                    "xac_nhan_chi_tiet=excluded.xac_nhan_chi_tiet",
+                    (cid, loai, datetime.datetime.now().isoformat(), chi_tiet_truoc))
+                conn.commit()
+                conn.close()
+                return {"ok": False, "da_chap_nhan": True, "trang_thai": trang_thai_truoc,
+                        "chi_tiet": chi_tiet_truoc,
+                        "thong_bao": f"Tờ khai {loai} kỳ này ĐÃ ĐƯỢC CƠ QUAN THUẾ CHẤP NHẬN từ trước "
+                                     f"— KHÔNG tự động nộp lại để tránh nộp trùng. {chi_tiet_truoc}"}
         ket = _dvc_browser_nop_to_khai(drv, cfg, file_path)
     except HTTPException:
         raise
