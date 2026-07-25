@@ -518,6 +518,13 @@
       </div>
     </div>
     <div class="field">
+      <label style="font-size:15px">Mã PIN chữ ký số <span style="font-weight:400;color:var(--muted);font-size:13px">(phần mềm tự nhập vào hộp thoại "Xác nhận PIN" + tự bấm "Nộp tờ khai" — nếu token nào PIN khác, sai quá 2 lần phần mềm sẽ tự dừng và báo để bạn tự xử lý)</span></label>
+      <div style="display:flex;gap:8px">
+        <input id="ntkPin" type="password" placeholder="VD: 12345678" style="flex:1;padding:10px;font-size:14.5px">
+        <button class="btn ghost" onclick="ntkLuuPin()">Lưu</button>
+      </div>
+    </div>
+    <div class="field">
       <label style="display:flex;justify-content:space-between;align-items:center;font-size:15px">
         <span>Công ty</span>
         <span style="font-weight:400">
@@ -1507,6 +1514,10 @@ async function moNopToKhai(){
     const r=await api('/api/settings/thu-muc-nop-to-khai');
     document.getElementById('ntkThuMuc').value=r.thu_muc||'';
   }catch(e){}
+  try{
+    const rp=await api('/api/settings/pin-nop-to-khai');
+    document.getElementById('ntkPin').value=rp.pin||'';
+  }catch(e){}
   await ntkTaiTrangThai();
   document.getElementById('nopToKhaiModal').style.display='flex';
 }
@@ -1595,6 +1606,14 @@ async function ntkLuuThuMuc(){
     await api('/api/settings/thu-muc-nop-to-khai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({thu_muc})});
     toast('Đã lưu thư mục mặc định','ok');
     await ntkTaiTrangThai();
+  }catch(e){toast('Lỗi lưu: '+e.message,'err');}
+}
+async function ntkLuuPin(){
+  const pin=document.getElementById('ntkPin').value.trim();
+  if(!pin){toast('Chưa nhập mã PIN','err');return;}
+  try{
+    await api('/api/settings/pin-nop-to-khai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+    toast('Đã lưu mã PIN mặc định','ok');
   }catch(e){toast('Lỗi lưu: '+e.message,'err');}
 }
 function ntkCapNhatNutChay(){
@@ -1730,26 +1749,31 @@ async function ntkXuLyTiep(){
   ntkDangCho={cid,loai,ten,phien_id:r.phien_id};
   ntkGhi(`<br>✅ Đã tải file lên: <code>${r.file_da_chon}</code>`);
   const kyOk=r.ky_ho_so&&r.ky_ho_so.ok;
-  if(kyOk){
+  if(r.da_tu_dong_nop){
+    ntkGhi(`<br>🖊️ Đã TỰ ký hồ sơ, tự nhập mã PIN và tự bấm "Nộp tờ khai" XONG cho ${ten} `+
+           `(${NTK_TEN_LOAI[loai]||loai}).`);
+    ntkGhi(`<br>⏳ Đang tự kiểm tra lại trên cổng Thuế để xác nhận — không cần làm gì thêm, phần `+
+           `mềm sẽ tự chuyển sang tờ khai tiếp theo khi xác nhận xong.`);
+  }else if(kyOk){
     ntkGhi(`<br>🖊️ Đã TỰ bấm "Ký hồ sơ" và chọn chứng thư số xong.`);
-    ntkGhi(`<br>👉 Hãy chuyển sang cửa sổ Chrome, tự nhập <b>mã PIN</b> và bấm <b>"Nộp tờ khai"</b> `+
-           `cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Phần mềm sẽ TỰ kiểm tra lại và tự chuyển sang `+
-           `tờ khai tiếp theo (không cần bấm nút) — cửa sổ Chrome cũng sẽ tự đóng khi xác nhận xong.`);
+    ntkGhi(`<br>⚠ ${r.thong_bao}`);
+    ntkGhi(`<br>👉 Hãy tự hoàn tất trên cửa sổ Chrome cho ${ten} (${NTK_TEN_LOAI[loai]||loai}), `+
+           `hoặc bấm nút bên dưới để phần mềm thử lại tự động.`);
   }else{
     ntkGhi(`<br>⚠ Chưa TỰ bấm được "Ký hồ sơ" (${(r.ky_ho_so&&r.ky_ho_so.loi)||'không rõ lý do'}).`);
-    ntkGhi(`<br>👉 Bấm "🖊️ Tự bấm Ký hồ sơ" để thử lại, hoặc tự làm toàn bộ bằng tay trên cửa sổ `+
-           `Chrome vừa mở cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút xác nhận bên dưới:`);
+    ntkGhi(`<br>👉 Bấm "🖊️ Thử lại tự động" hoặc tự làm toàn bộ bằng tay trên cửa sổ Chrome vừa `+
+           `mở cho ${ten} (${NTK_TEN_LOAI[loai]||loai}). Xong rồi bấm nút xác nhận bên dưới:`);
   }
   ntkGhi(`<br><span id="ntkChoXacNhan"></span>`);
   ntkGhi(`<br><span id="ntkTrangThaiPoll" style="font-size:12px;color:var(--muted);font-style:italic"></span>`);
-  ntkVeNutChoXacNhan(!kyOk);
+  ntkVeNutChoXacNhan(!r.da_tu_dong_nop);
   ntkBatDauPoll();   // tự kiểm tra định kỳ, không bắt buộc phải quay lại bấm tay
 }
 function ntkVeNutChoXacNhan(hienNutKy){
   const el=document.getElementById('ntkChoXacNhan');
   if(!el||!ntkDangCho)return;
   const nutKy=(hienNutKy&&ntkDangCho.phien_id)
-    ?`<button class="btn ghost" onclick="ntkBamKyHoSo()">🖊️ Tự bấm Ký hồ sơ</button> `:'';
+    ?`<button class="btn ghost" onclick="ntkBamKyHoSo()">🖊️ Thử lại tự động (Ký + PIN + Nộp)</button> `:'';
   el.innerHTML=nutKy+
                `<button class="btn" onclick="ntkXacNhanVaTiep()">✅ Tôi đã nộp — Kiểm tra &amp; tiếp tục</button> `+
                `<button class="btn ghost" onclick="ntkBoQuaVaTiep()">⏭ Bỏ qua (chưa nộp)</button>`;
@@ -1757,17 +1781,18 @@ function ntkVeNutChoXacNhan(hienNutKy){
 async function ntkBamKyHoSo(){
   if(!ntkDangCho||!ntkDangCho.phien_id)return;
   const {phien_id}=ntkDangCho;
-  ntkGhi(`<br>⏳ Đang tự bấm "Ký hồ sơ"...`);
+  ntkGhi(`<br>⏳ Đang tự thử lại (Ký hồ sơ + nhập mã PIN + Nộp tờ khai)...`);
   try{
     const r=await api(`/api/dvc/bam-ky-ho-so/${phien_id}`,{method:'POST'});
     if(r.ok){
       ntkGhi(`<br>✅ ${r.thong_bao}`);
-      toast('Đã bấm Ký hồ sơ — hãy tự nhập mã PIN và bấm Nộp tờ khai trên cửa sổ Chrome','ok');
+      toast(r.da_tu_dong_nop?'Đã tự ký + nộp xong — đang tự kiểm tra xác nhận'
+                             :'Đã bấm Ký hồ sơ — hãy tự hoàn tất trên cửa sổ Chrome nếu cần','ok');
     }else{
       ntkGhi(`<br>⚠ ${r.thong_bao||r.loi||'Có lỗi'}`);
     }
   }catch(e){
-    ntkGhi(`<br>❌ Lỗi khi tự bấm Ký hồ sơ: ${e.message} — bạn tự bấm bằng tay trên cửa sổ Chrome.`);
+    ntkGhi(`<br>❌ Lỗi khi tự thử lại: ${e.message} — bạn tự làm bằng tay trên cửa sổ Chrome.`);
   }
 }
 async function ntkXacNhanVaTiep(){

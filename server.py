@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.21"
+APP_BUILD = "2026-07-25.22"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2679,28 +2679,33 @@ def _tim_file_nop_theo_cong_ty(comp, loai, nam, quy, folder_mac_dinh):
 _DVC_OPEN_DRIVERS = {}   # {phien_id: drv} — giữ tham chiếu trình duyệt HIỂN THỊ đang chờ người
                           # dùng tự Ký+Nộp, tra theo phien_id để thao tác tiếp lên ĐÚNG cửa sổ đó
 
+_HOA_KHONG_DAU = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ"
+_THUONG_KHONG_DAU = "abcdefghijklmnopqrstuvwxyzáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ"
+
+def _dvc_tim_nut(drv, text_can_tim):
+    """Tìm (các) nút/link đang HIỂN THỊ trên trang có chứa đúng đoạn chữ
+    text_can_tim (không phân biệt hoa/thường, có/không dấu)."""
+    xpath = (f"//*[self::button or self::a or self::span][contains("
+             f"translate(normalize-space(.),'{_HOA_KHONG_DAU}','{_THUONG_KHONG_DAU}'),"
+             f"'{text_can_tim.lower()}')]")
+    try:
+        els = drv.find_elements("xpath", xpath)
+    except Exception:
+        return []
+    return [e for e in els if e.is_displayed()]
+
 
 def _dvc_bam_ky_ho_so(drv):
     """Sau khi đã tải file XML lên (trang .../nop-file-xml), tự bấm nút "Ký
     hồ sơ", đợi khung "Chọn chữ ký số" hiện ra rồi tự bấm "Tiếp tục" để vào
-    đúng chứng thư số — DỪNG LẠI NGAY SAU ĐÓ. Từ đây trở đi là bước nhập mã
-    PIN thật của token (rất có thể do 1 chương trình/driver riêng của
-    Windows xử lý, NGOÀI tầm với của trình duyệt) và bấm "Nộp tờ khai" —
-    BẮT BUỘC người dùng tự làm, phần mềm không được và không thể tự động."""
+    đúng chứng thư số — bấm "Tiếp tục" xong là lúc hub CKS cục bộ (chương
+    trình RIÊNG ngoài trình duyệt) bật hộp thoại "Xác nhận PIN" — xem
+    _dvc_nhap_pin_ky_so() để tự nhập PIN tiếp bước này."""
     import time as _t
     buoc = []
 
-    _HOA = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ"
-    _THUONG = "abcdefghijklmnopqrstuvwxyzáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ"
-
     def _tim_nut(text_can_tim):
-        xpath = (f"//*[self::button or self::a or self::span][contains("
-                 f"translate(normalize-space(.),'{_HOA}','{_THUONG}'),'{text_can_tim.lower()}')]")
-        try:
-            els = drv.find_elements("xpath", xpath)
-        except Exception:
-            return []
-        return [e for e in els if e.is_displayed()]
+        return _dvc_tim_nut(drv, text_can_tim)
 
     try:
         nut_ky = _tim_nut("ký hồ sơ")
@@ -2746,6 +2751,174 @@ def _dvc_bam_ky_ho_so(drv):
         return {"ok": False, "loi": f"Lỗi khi bấm \"Tiếp tục\": {e}", "buoc": buoc}
 
     return {"ok": True, "buoc": buoc}
+
+
+# ============================================================
+#  TỰ ĐỘNG NHẬP MÃ PIN chữ ký số + BẤM "NỘP TỜ KHAI" — hộp thoại "Xác nhận
+#  PIN" là 1 CỬA SỔ WINDOWS RIÊNG do hub CKS cục bộ tự bật ra (đã xác nhận
+#  qua ảnh chụp thật của người dùng), KHÔNG nằm trong DOM trang web nên
+#  Selenium không điều khiển được — phải dùng pywinauto (điều khiển ứng
+#  dụng Windows qua UI Automation) để dò đúng cửa sổ theo TIÊU ĐỀ thật
+#  "Xác nhận PIN", nhập PIN vào ô "Mã PIN:" rồi bấm "Đăng nhập".
+#  AN TOÀN: hầu hết token/CKS KHOÁ VĨNH VIỄN sau 3 LẦN NHẬP SAI PIN liên
+#  tiếp (phải mang tới nhà cung cấp mở khoá lại) — nên CHỈ thử tối đa 2 LẦN
+#  rồi DỪNG HẲN (tự bấm "Huỷ bỏ"), không bao giờ thử lần thứ 3, đúng yêu cầu
+#  của người dùng.
+# ============================================================
+_DVC_PIN_DIALOG_TITLE = "Xác nhận PIN"
+_DVC_PIN_TU_KHOA_SAI = ("sai", "khong dung", "khong hop le", "invalid", "incorrect",
+                        "khoa", "loi", "error", "khong chinh xac")
+
+def _dvc_tim_hop_thoai_pin(desk):
+    try:
+        for w in desk.windows():
+            try:
+                if w.window_text().strip() == _DVC_PIN_DIALOG_TITLE and w.is_visible():
+                    return w
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_da=8):
+    """Tự nhập mã PIN vào hộp thoại "Xác nhận PIN" (cửa sổ Windows RIÊNG do
+    hub CKS bật ra sau khi bấm "Tiếp tục" trong _dvc_bam_ky_ho_so — KHÔNG
+    phải trang web nên phải dùng pywinauto, không dùng Selenium được). Chờ
+    hộp thoại hiện ra tối đa cho_hien_toi_da giây; mỗi lần nhập xong bấm
+    "Đăng nhập" rồi chờ tối đa cho_dong_toi_da giây xem hộp thoại có TỰ ĐÓNG
+    (= đăng nhập PIN thành công) không. SAI PIN thì hộp thoại vẫn còn —
+    thử lại, nhưng CHỈ tối đa so_lan_toi_da lần (mặc định 2) rồi DỪNG HẲN
+    (tự bấm "Huỷ bỏ") để tránh khoá token — token thường khoá sau 3 lần
+    nhập sai liên tiếp, không bao giờ được thử lần thứ 3.
+    Trả dict: {ok, buoc, sai_pin?, khong_thay_hop_thoai?, so_lan_da_thu, loi?}."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return {"ok": False, "khong_thay_hop_thoai": True, "buoc": [],
+                "loi": "Chưa cài thư viện pywinauto (cần để tự điều khiển hộp thoại nhập PIN — "
+                       "đây là cửa sổ Windows RIÊNG, ngoài trình duyệt) — đóng phần mềm, chạy lại "
+                       "start.bat để tự cài, rồi thử lại. Trong lúc chờ, hãy tự nhập PIN bằng tay."}
+    import time as _t
+    buoc = []
+    desk = Desktop(backend="uia")
+
+    dlg = None
+    cho_den = _t.time() + cho_hien_toi_da
+    while _t.time() < cho_den:
+        dlg = _dvc_tim_hop_thoai_pin(desk)
+        if dlg:
+            break
+        _t.sleep(0.5)
+    if not dlg:
+        return {"ok": False, "khong_thay_hop_thoai": True, "buoc": buoc, "so_lan_da_thu": 0,
+                "loi": f"Không thấy hộp thoại \"{_DVC_PIN_DIALOG_TITLE}\" hiện ra sau "
+                       f"{cho_hien_toi_da}s — có thể token chưa cắm, hub CKS chưa chạy, hoặc "
+                       "giao diện đã đổi khác. Hãy tự kiểm tra và nhập PIN bằng tay."}
+    buoc.append(f"Hộp thoại \"{_DVC_PIN_DIALOG_TITLE}\" đã hiện ra")
+
+    for lan in range(1, so_lan_toi_da + 1):
+        dlg = _dvc_tim_hop_thoai_pin(desk)
+        if not dlg:
+            buoc.append("Hộp thoại đã tự đóng trước khi kịp thao tác — coi như đã xong")
+            return {"ok": True, "buoc": buoc, "so_lan_da_thu": lan - 1}
+        try:
+            edits = dlg.descendants(control_type="Edit")
+            if not edits:
+                return {"ok": False, "buoc": buoc, "so_lan_da_thu": lan - 1,
+                        "loi": "Không tìm thấy ô nhập PIN trong hộp thoại"}
+            o_pin = edits[0]
+            o_pin.set_focus()
+            try:
+                o_pin.set_edit_text("")
+            except Exception:
+                pass
+            o_pin.type_keys(pin, with_spaces=True)
+            buoc.append(f"Đã nhập mã PIN (lần {lan}/{so_lan_toi_da})")
+            nut_dn = None
+            for b in dlg.descendants(control_type="Button"):
+                try:
+                    if "dang nhap" in _khong_dau(b.window_text()):
+                        nut_dn = b
+                        break
+                except Exception:
+                    continue
+            if not nut_dn:
+                return {"ok": False, "buoc": buoc, "so_lan_da_thu": lan - 1,
+                        "loi": "Không tìm thấy nút \"Đăng nhập\" trong hộp thoại"}
+            nut_dn.click_input()
+            buoc.append("Đã bấm \"Đăng nhập\"")
+        except Exception as e:
+            return {"ok": False, "buoc": buoc, "so_lan_da_thu": lan - 1,
+                    "loi": f"Lỗi khi thao tác hộp thoại PIN: {e}"}
+
+        dong = False
+        cho_den2 = _t.time() + cho_dong_toi_da
+        while _t.time() < cho_den2:
+            if not _dvc_tim_hop_thoai_pin(desk):
+                dong = True
+                break
+            _t.sleep(0.5)
+        if dong:
+            buoc.append("Hộp thoại đã tự đóng — đăng nhập PIN thành công")
+            return {"ok": True, "buoc": buoc, "so_lan_da_thu": lan}
+
+        dlg2 = _dvc_tim_hop_thoai_pin(desk)
+        thong_bao_loi = ""
+        if dlg2:
+            try:
+                for t in dlg2.descendants(control_type="Text"):
+                    tx_goc = t.window_text()
+                    if tx_goc and any(k in _khong_dau(tx_goc) for k in _DVC_PIN_TU_KHOA_SAI):
+                        thong_bao_loi = tx_goc
+                        buoc.append(f"Phát hiện thông báo trong hộp thoại: {tx_goc}")
+                        break
+            except Exception:
+                pass
+        if lan >= so_lan_toi_da:
+            if dlg2:
+                try:
+                    for b in dlg2.descendants(control_type="Button"):
+                        if "huy" in _khong_dau(b.window_text()):
+                            b.click_input()
+                            buoc.append("Đã bấm \"Huỷ bỏ\"")
+                            break
+                except Exception:
+                    pass
+            return {"ok": False, "sai_pin": True, "so_lan_da_thu": lan, "buoc": buoc,
+                    "loi": f"Sai mã PIN {lan} lần liên tiếp{(' (' + thong_bao_loi + ')') if thong_bao_loi else ''}"
+                           " — ĐÃ DỪNG LẠI (bấm \"Huỷ bỏ\") để tránh khoá token (token thường khoá "
+                           "sau 3 lần nhập sai) — hãy tự kiểm tra/nhập đúng mã PIN bằng tay cho "
+                           "công ty này."}
+        buoc.append(f"Lần {lan} chưa thành công — thử lại")
+    return {"ok": False, "sai_pin": True, "so_lan_da_thu": so_lan_toi_da, "buoc": buoc,
+            "loi": "Không xác nhận được đăng nhập PIN"}
+
+
+def _dvc_bam_nut_nop_to_khai(drv, cho_toi_da=15):
+    """Sau khi hộp thoại "Xác nhận PIN" đã đóng (ký PIN xong), tự bấm nút
+    "Nộp tờ khai" THẬT trên trang — hoàn tất NỘP CHÍNH THỨC lên cơ quan
+    Thuế (hành động KHÔNG THỂ ĐẢO NGƯỢC)."""
+    import time as _t
+    _t.sleep(1.5)   # chờ trang xử lý xong việc ký trước khi tìm nút Nộp
+    nut = []
+    cho_den = _t.time() + cho_toi_da
+    while _t.time() < cho_den:
+        nut = _dvc_tim_nut(drv, "nộp tờ khai")
+        if nut:
+            break
+        _t.sleep(1)
+    if not nut:
+        return {"ok": False,
+                "loi": "Không tìm thấy nút \"Nộp tờ khai\" trên trang sau khi ký PIN xong — "
+                       "có thể trang chưa xử lý xong, hoặc bước ký chưa thực sự hoàn tất."}
+    try:
+        nut[0].click()
+    except Exception as e:
+        return {"ok": False, "loi": f"Lỗi khi bấm \"Nộp tờ khai\": {e}"}
+    _t.sleep(2)
+    return {"ok": True}
 
 
 def _dvc_browser_nop_to_khai(drv, cfg, file_path):
@@ -4606,6 +4779,20 @@ def set_thu_muc_nop_to_khai(body: dict = Body(...)):
     return {"ok": True, "thu_muc": folder}
 
 
+@app.get("/api/settings/pin-nop-to-khai")
+def get_pin_nop_to_khai():
+    return {"pin": _get_setting("pin_nop_to_khai", "12345678")}
+
+
+@app.post("/api/settings/pin-nop-to-khai")
+def set_pin_nop_to_khai(body: dict = Body(...)):
+    pin = (body.get("pin") or "").strip()
+    if not pin:
+        raise HTTPException(400, "Mã PIN không được để trống")
+    _set_setting("pin_nop_to_khai", pin)
+    return {"ok": True, "pin": pin}
+
+
 @app.post("/api/dvc/nop-to-khai/{cid}")
 def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
     """TỰ ĐỘNG tới bước "sẵn sàng ký": đăng nhập, khởi tạo đúng tờ khai, tự
@@ -4708,17 +4895,35 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                 "thong_bao": "Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
                              "bạn có thể tự làm tiếp bằng tay từ đó."}
     # Tải file XONG là TỰ LUÔN bấm "Ký hồ sơ" → chọn chứng thư số → "Tiếp
-    # tục" (không bắt người dùng phải bấm thêm 1 nút riêng trong phần mềm) —
-    # rồi DỪNG LẠI ở đúng biên an toàn: không đụng tới ô nhập mã PIN hay nút
-    # "Nộp tờ khai", 2 việc đó vẫn bắt buộc người dùng tự làm.
+    # tục" (không bắt người dùng phải bấm thêm 1 nút riêng trong phần mềm).
     try:
         ket_ky = _dvc_bam_ky_ho_so(drv)
     except Exception as e:
         ket_ky = {"ok": False, "loi": f"Lỗi khi tự bấm Ký hồ sơ: {e}", "buoc": []}
+    # Bấm "Tiếp tục" xong (ở bước trên) là lúc hub CKS cục bộ bật hộp thoại
+    # Windows "Xác nhận PIN" — tự nhập PIN mặc định rồi tự bấm "Nộp tờ khai"
+    # luôn, KHÔNG dừng lại chờ người dùng nữa (theo yêu cầu). An toàn: chỉ
+    # thử PIN tối đa 2 lần rồi dừng hẳn (xem _dvc_nhap_pin_ky_so) để tránh
+    # khoá token.
+    ket_pin = None
+    ket_nop = None
+    if ket_ky.get("ok"):
+        pin = _get_setting("pin_nop_to_khai", "12345678")
+        try:
+            ket_pin = _dvc_nhap_pin_ky_so(pin)
+        except Exception as e:
+            ket_pin = {"ok": False, "loi": f"Lỗi khi tự nhập mã PIN: {e}", "buoc": []}
+        if ket_pin.get("ok"):
+            try:
+                ket_nop = _dvc_bam_nut_nop_to_khai(drv)
+            except Exception as e:
+                ket_nop = {"ok": False, "loi": f"Lỗi khi tự bấm \"Nộp tờ khai\": {e}"}
     conn = db()
     # Mỗi lần TỰ ĐỘNG tải file lên là 1 lượt CHỜ KÝ MỚI — reset xác nhận "đã
     # nộp" cũ về chưa, vì xác nhận trước đó (nếu có) là của LẦN CHẠY TRƯỚC,
-    # không phải lần này (người dùng vẫn cần Ký+Nộp rồi kiểm tra lại).
+    # không phải lần này (vẫn cần tra cứu lại trên cổng Thuế để xác nhận
+    # THẬT SỰ đã được chấp nhận — bấm "Nộp tờ khai" xong không có nghĩa là
+    # cơ quan Thuế đã xử lý xong ngay).
     conn.execute(
         "INSERT INTO nop_to_khai_log (company_id, loai, file_ten, done_at, xac_nhan, xac_nhan_at, xac_nhan_nguon) "
         "VALUES (?, ?, ?, ?, 0, NULL, NULL) "
@@ -4727,16 +4932,26 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
-    if ket_ky.get("ok"):
-        thong_bao = ("Đã tự động đăng nhập, tải file XML lên, bấm \"Ký hồ sơ\" và vào tới bước "
-                     "chọn chứng thư số. DỪNG LẠI theo yêu cầu an toàn — hãy chuyển sang cửa sổ "
-                     "Chrome vừa mở để tự nhập mã PIN và bấm \"Nộp tờ khai\".")
-    else:
+    da_tu_dong_nop = bool(ket_ky.get("ok") and ket_pin and ket_pin.get("ok")
+                          and ket_nop and ket_nop.get("ok"))
+    if da_tu_dong_nop:
+        thong_bao = ("Đã tự động đăng nhập, tải file XML lên, ký hồ sơ, nhập mã PIN và bấm "
+                     "\"Nộp tờ khai\" XONG — đang tự kiểm tra lại trên cổng Thuế để xác nhận.")
+    elif not ket_ky.get("ok"):
         thong_bao = ("Đã tự động đăng nhập và tải file XML lên, nhưng KHÔNG tự bấm được "
                      f"\"Ký hồ sơ\" ({ket_ky.get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn "
                      "đang mở — hãy tự bấm \"Ký hồ sơ\" và \"Nộp tờ khai\" bằng tay từ đó.")
+    elif not (ket_pin and ket_pin.get("ok")):
+        thong_bao = ("Đã tự động Ký hồ sơ + chọn chứng thư số, nhưng KHÔNG tự nhập được mã PIN "
+                     f"({(ket_pin or {}).get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn đang "
+                     "mở — hãy tự nhập mã PIN và bấm \"Nộp tờ khai\" bằng tay từ đó.")
+    else:
+        thong_bao = ("Đã tự động Ký hồ sơ + nhập mã PIN xong, nhưng KHÔNG tự bấm được "
+                     f"\"Nộp tờ khai\" ({(ket_nop or {}).get('loi') or 'không rõ lý do'}). Cửa sổ "
+                     "Chrome vẫn đang mở — hãy tự bấm \"Nộp tờ khai\" bằng tay từ đó.")
     return {"ok": True, "file_da_chon": file_path, "phien_id": phien_id,
-            "ky_ho_so": ket_ky,
+            "ky_ho_so": ket_ky, "pin": ket_pin, "nop": ket_nop,
+            "da_tu_dong_nop": da_tu_dong_nop,
             "ung_vien_khac": [u for u in ung_vien if u != file_path],
             "thong_bao": thong_bao}
 
@@ -4744,9 +4959,10 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
 @app.post("/api/dvc/bam-ky-ho-so/{phien_id}")
 def dvc_bam_ky_ho_so(phien_id: str):
     """Trên ĐÚNG cửa sổ Chrome đã tải file XML lên (theo phien_id trả về từ
-    /api/dvc/nop-to-khai), tự bấm "Ký hồ sơ" rồi tự bấm "Tiếp tục" trong
-    khung "Chọn chữ ký số" — RỒI DỪNG LẠI. Không đụng tới bước nhập mã PIN
-    hay nút "Nộp tờ khai" — 2 việc đó BẮT BUỘC người dùng tự làm."""
+    /api/dvc/nop-to-khai) — dùng khi lần đầu KHÔNG tự bấm "Ký hồ sơ" được:
+    tự bấm "Ký hồ sơ" → chọn chứng thư số → "Tiếp tục", rồi tự nhập mã PIN
+    (hộp thoại Windows riêng) + tự bấm "Nộp tờ khai" luôn (giống hệt luồng
+    tự động trong /api/dvc/nop-to-khai)."""
     drv = _DVC_OPEN_DRIVERS.get(phien_id)
     if not drv:
         raise HTTPException(
@@ -4759,9 +4975,31 @@ def dvc_bam_ky_ho_so(phien_id: str):
     if not ket.get("ok"):
         return {"ok": False, "loi": ket.get("loi"), "buoc": ket.get("buoc"),
                 "thong_bao": "Dừng giữa chừng — cửa sổ Chrome vẫn đang mở, bạn tự làm tiếp từ đó."}
-    return {"ok": True, "buoc": ket.get("buoc"),
-            "thong_bao": "Đã bấm \"Ký hồ sơ\" và vào tới bước chọn chứng thư số. DỪNG LẠI Ở ĐÂY — "
-                         "hãy chuyển sang cửa sổ Chrome để tự nhập mã PIN và bấm \"Nộp tờ khai\"."}
+    pin = _get_setting("pin_nop_to_khai", "12345678")
+    try:
+        ket_pin = _dvc_nhap_pin_ky_so(pin)
+    except Exception as e:
+        ket_pin = {"ok": False, "loi": f"Lỗi khi tự nhập mã PIN: {e}", "buoc": []}
+    ket_nop = None
+    if ket_pin.get("ok"):
+        try:
+            ket_nop = _dvc_bam_nut_nop_to_khai(drv)
+        except Exception as e:
+            ket_nop = {"ok": False, "loi": f"Lỗi khi tự bấm \"Nộp tờ khai\": {e}"}
+    da_tu_dong_nop = bool(ket_pin.get("ok") and ket_nop and ket_nop.get("ok"))
+    if da_tu_dong_nop:
+        thong_bao = ("Đã tự bấm \"Ký hồ sơ\", nhập mã PIN và bấm \"Nộp tờ khai\" XONG — đang tự "
+                     "kiểm tra lại trên cổng Thuế để xác nhận.")
+    elif not ket_pin.get("ok"):
+        thong_bao = ("Đã bấm \"Ký hồ sơ\" và chọn chứng thư số, nhưng KHÔNG tự nhập được mã PIN "
+                     f"({ket_pin.get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn đang mở — hãy "
+                     "tự nhập mã PIN và bấm \"Nộp tờ khai\" bằng tay từ đó.")
+    else:
+        thong_bao = ("Đã nhập mã PIN xong, nhưng KHÔNG tự bấm được \"Nộp tờ khai\" "
+                     f"({(ket_nop or {}).get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn đang "
+                     "mở — hãy tự bấm \"Nộp tờ khai\" bằng tay từ đó.")
+    return {"ok": True, "buoc": ket.get("buoc"), "pin": ket_pin, "nop": ket_nop,
+            "da_tu_dong_nop": da_tu_dong_nop, "thong_bao": thong_bao}
 
 
 def _ky_tu_ten_file_nop(ten_file):
