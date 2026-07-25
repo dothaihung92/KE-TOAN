@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.16"
+APP_BUILD = "2026-07-25.17"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5051,13 +5051,14 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
     def _goi(r):
         ht0 = r["he_thong"] or "query"
         for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
-            try:
-                d = client.get_detail(r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], ht,
-                                      max_retry=2, cho_khi_429=True, loai=r["loai"])
-                if d and (d.get("hdhhdvu") or d.get("nbmst")):
-                    return r["id"], json.dumps(d, ensure_ascii=False)
-            except Exception:
-                pass
+            for km in _bien_the_khmshdon(r["khmshdon"]):
+                try:
+                    d = client.get_detail(r["nbmst"], r["khhdon"], km, r["shdon"], ht,
+                                          max_retry=2, cho_khi_429=True, loai=r["loai"])
+                    if d and (d.get("hdhhdvu") or d.get("nbmst")):
+                        return r["id"], json.dumps(d, ensure_ascii=False)
+                except Exception:
+                    pass
         time.sleep(SP()["file"])
         return r["id"], None
 
@@ -5114,10 +5115,17 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
         if not ket_qua:
             so_vong_khong_tien += 1
             if so_vong_khong_tien >= SO_VONG_KHONG_TIEN_TOI_DA:
+                # Ghi rõ TỪNG hóa đơn còn thiếu (không chỉ con số tổng) — vẫn
+                # thất bại dù đã thử NHIỀU khmshdon/hệ thống khác nhau thường
+                # là do API .../invoices/detail thật sự KHÔNG CÓ dữ liệu cho
+                # đúng tổ hợp tham số đó (khác lỗi giới hạn tốc độ tạm thời),
+                # cần biết CHÍNH XÁC hóa đơn nào mới dò tiếp được nguyên nhân.
+                ds_mota = "; ".join(
+                    f"{r['khhdon']} số {r['shdon']} (MST {r['nbmst']}, id={r['id']})" for r in ds[:10])
                 msg(stage="warn",
                     text=f"⚠ đã thử {so_vong_khong_tien} vòng liên tiếp không lấy thêm được hóa đơn "
-                         f"nào — còn {len(ds)}/{len(can_nap)} hóa đơn CHƯA lấy được chi tiết dòng hàng "
-                         f"(Xuất Excel sẽ tự thử lấy bù nếu cần).")
+                         f"nào — còn {len(ds)}/{len(can_nap)} hóa đơn CHƯA lấy được chi tiết dòng hàng: "
+                         f"{ds_mota}{' ...' if len(ds) > 10 else ''} (Xuất Excel sẽ tự thử lấy bù nếu cần).")
                 return
         else:
             so_vong_khong_tien = 0
@@ -7459,6 +7467,29 @@ NGUONG_5TR = 5_000_000  # hóa đơn >= 5tr -> Có 331 (chuyển khoản), < 5tr
 def _chuan_mst(s):
     """Chuẩn hóa MST: bỏ khoảng trắng, gạch, chấm."""
     return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+
+
+def _bien_the_khmshdon(v):
+    """Các biến thể khmshdon để THỬ LẠI khi gọi get_detail() thất bại hết —
+    đã xác nhận thực tế (cùng nguyên nhân đã sửa cho lỗi hóa đơn hiện lặp
+    đôi) khmshdon trả về LỆCH ĐỊNH DẠNG/GIÁ TRỊ giữa 2 hệ thống 'query' và
+    'sco-query' cho CÙNG 1 hóa đơn thật (vd '1' so với '01', hoặc lệch hẳn
+    số như '1' so với '6') — nếu giá trị khmshdon ĐANG LƯU trong DB (từ lần
+    tra cứu danh sách) không khớp với giá trị mà API .../invoices/detail
+    thực sự yêu cầu, gọi mãi cũng KHÔNG BAO GIỜ lấy được chi tiết cho đúng
+    hóa đơn đó dù mọi hóa đơn khác đều thành công — không phải do giới hạn
+    tốc độ nên có thử lại bao nhiêu lần với ĐÚNG giá trị cũ cũng vô ích.
+    Trả về danh sách KHÔNG TRÙNG, giá trị gốc luôn thử TRƯỚC (không đổi
+    hành vi cho trường hợp bình thường, chỉ thêm phương án dự phòng)."""
+    goc = str(v or "").strip()
+    bien_the = [goc]
+    stripped = goc.lstrip("0") or "0"
+    if stripped not in bien_the:
+        bien_the.append(stripped)
+    padded = goc.zfill(2)
+    if padded not in bien_the:
+        bien_the.append(padded)
+    return bien_the
 
 def _ds_mst_khac(mst_khac_raw):
     """Tách chuỗi 'MST khác' (nhiều mã, cách nhau bởi , ; hoặc xuống dòng)
@@ -14604,15 +14635,16 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             return rr["id"], None   # phiên đã hết -> khỏi thử, trả nhanh
         ht0 = rr["he_thong"] or "query"
         for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
-            try:
-                d = client0.get_detail(rr["nbmst"], rr["khhdon"],
-                                       rr["khmshdon"], rr["shdon"], ht,
-                                       max_retry=max_retry, cho_khi_429=cho_khi_429,
-                                       loai=rr["loai"])
-                if d and (d.get("hdhhdvu") or d.get("nbmst")):
-                    return rr["id"], json.dumps(d, ensure_ascii=False)
-            except Exception:
-                pass
+            for km in _bien_the_khmshdon(rr["khmshdon"]):
+                try:
+                    d = client0.get_detail(rr["nbmst"], rr["khhdon"],
+                                           km, rr["shdon"], ht,
+                                           max_retry=max_retry, cho_khi_429=cho_khi_429,
+                                           loai=rr["loai"])
+                    if d and (d.get("hdhhdvu") or d.get("nbmst")):
+                        return rr["id"], json.dumps(d, ensure_ascii=False)
+                except Exception:
+                    pass
         return rr["id"], None
 
     def _nap_song_song(ds_rows, nhan, cho_khi_429=False, workers=None):
@@ -14764,9 +14796,19 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             if so_lay_duoc3 == 0:
                 so_vong_khong_tien += 1
                 if so_vong_khong_tien >= SO_VONG_KHONG_TIEN_TOI_DA:
+                    # Liệt kê CHÍNH XÁC hóa đơn còn thiếu — đã thử cả biến thể
+                    # khmshdon lẫn cả 2 hệ thống mà vẫn thất bại NHIỀU vòng
+                    # liên tiếp thường là API thật sự KHÔNG CÓ dữ liệu cho
+                    # đúng tổ hợp tham số đang lưu (khác lỗi giới hạn tốc độ
+                    # tạm thời) — cần biết đúng hóa đơn nào để dò tiếp.
+                    ds_mota2 = "; ".join(
+                        f"{r['khhdon']} số {r['shdon']} (MST {r['nbmst']}, id={r['id']})"
+                        for r in con_thieu_rows[:10])
                     _tlog(f"⚠ đã thử {so_vong_khong_tien} vòng liên tiếp KHÔNG lấy thêm được hóa đơn nào "
                          f"(có thể lỗi khác ngoài giới hạn tốc độ) — dừng lại, còn {len(con_thieu_rows)} "
-                         f"hóa đơn CHƯA lấy được chi tiết. Xuất lại 'Kết xuất Excel' sau ít phút để thử tiếp.")
+                         f"hóa đơn CHƯA lấy được chi tiết: {ds_mota2}"
+                         f"{' ...' if len(con_thieu_rows) > 10 else ''}. Xuất lại 'Kết xuất Excel' sau ít "
+                         f"phút để thử tiếp.")
                     break
             else:
                 so_vong_khong_tien = 0
