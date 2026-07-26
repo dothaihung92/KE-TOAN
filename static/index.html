@@ -1968,7 +1968,7 @@ async function saveCompany(){
     if(suaId&&current===suaId){
       const c=companies.find(x=>x.id===current);
       if(c){const ws=document.getElementById('workspace');
-        if(ws&&ws.style.display!=='none'){ws.innerHTML=renderWorkspace(c,getClient(current));renderFetchErrorBanner(c);renderDoiChieuBanner(c);await refreshInvoices();}}
+        if(ws&&ws.style.display!=='none'){ws.innerHTML=renderWorkspace(c,getClient(current));renderFetchErrorBanner(c);renderDoiChieuBanner(c);renderVatPhaiNopBanner(c);await refreshInvoices();}}
     }
   }catch(e){toast(e.message,'err')}
 }
@@ -1996,6 +1996,7 @@ async function selectCompany(id){
   ws.innerHTML=renderWorkspace(c,online);
   renderFetchErrorBanner(c);
   renderDoiChieuBanner(c);
+  renderVatPhaiNopBanner(c);
   await refreshInvoices();
 }
 function renderFetchErrorBanner(c){
@@ -2029,6 +2030,23 @@ function renderDoiChieuBanner(c){
     document.getElementById('doiChieuTitle').textContent=
       (lech?'⚠':'✓')+' Đối chiếu Bảng kê / XML lần kiểm tra gần nhất'+khi+':';
     document.getElementById('doiChieuText').textContent=c.doi_chieu_text||'';
+    box.style.display='flex';
+  }else{
+    box.style.display='none';
+  }
+}
+function renderVatPhaiNopBanner(c){
+  // Số thuế GTGT PHẢI NỘP kỳ gần nhất kết xuất (chỉ tiêu [40]) — LƯU Ở
+  // SERVER, hiện KHÔNG TỰ ẨN để biết ngay công ty này có phải nộp không và
+  // nộp bao nhiêu, không phải tự mở XML/HTKK ra xem.
+  const box=document.getElementById('vatPhaiNopBanner');
+  if(!box)return;
+  if(c&&c.vat_phai_nop_at&&Number(c.vat_phai_nop)>0){
+    let khi='';
+    if(c.vat_phai_nop_at){try{khi=' — '+new Date(c.vat_phai_nop_at).toLocaleString('vi-VN');}catch{}}
+    document.getElementById('vatPhaiNopTitle').textContent='💰 Kỳ '+(c.vat_phai_nop_ky||'')+' PHÁT SINH PHẢI NỘP thuế GTGT'+khi+':';
+    document.getElementById('vatPhaiNopText').textContent=
+      Number(c.vat_phai_nop).toLocaleString('vi-VN')+'đ (chỉ tiêu [40] trên XML 01/GTGT).';
     box.style.display='flex';
   }else{
     box.style.display='none';
@@ -2178,6 +2196,13 @@ function renderWorkspace(c,online){
         <div id="doiChieuText" style="margin-top:4px;white-space:pre-wrap"></div>
       </div>
       <button class="btn ghost sm" onclick="document.getElementById('doiChieuBanner').style.display='none'">Ẩn</button>
+    </div>
+    <div id="vatPhaiNopBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#fff7e6;border:1px solid #f0c36d;border-radius:10px;padding:12px 14px;margin-top:14px;font-size:13.5px;color:#7a5200">
+      <div style="flex:1">
+        <b id="vatPhaiNopTitle"></b>
+        <div id="vatPhaiNopText" style="margin-top:4px;white-space:pre-wrap;font-weight:700;font-size:15px"></div>
+      </div>
+      <button class="btn ghost sm" onclick="document.getElementById('vatPhaiNopBanner').style.display='none'">Ẩn</button>
     </div>
     <p class="hint">Mỗi lần tra cứu sẽ <b>xóa dữ liệu cũ</b> và lấy lại từ đầu. File XML/PDF (nếu tick) được lưu vào thư mục cấu hình trong phần "Sửa công ty". PDF cần endpoint riêng của Tổng cục Thuế — hiện chỉ XML hoạt động đầy đủ.</p>
   </div>
@@ -2558,7 +2583,7 @@ async function doFetch(){
     if(!hadError){
       await loadCompanies();
       const _c=companies.find(x=>x.id===fetchCid);
-      if(_c&&current===fetchCid)renderDoiChieuBanner(_c);
+      if(_c&&current===fetchCid){renderDoiChieuBanner(_c);renderVatPhaiNopBanner(_c);}
     }
     // ẩn thanh tiến trình nhưng GIỮ bảng kết quả để người dùng xem
     setTimeout(()=>{box.style.display='none';},2000);
@@ -2791,13 +2816,15 @@ async function batchTheoDoi(bid){
       const lech=i.status==='done'&&i.lech;
       const lechBk=i.status==='done'&&i.lech_bk;
       const lechDc=i.status==='done'&&i.lech_doi_chieu;
+      const coVat=i.status==='done'&&i.vat_phai_nop;
       const coLech=lech||lechBk||lechDc;
       const mau=i.status==='error'?'#c00':(i.status==='skipped'?'#c47':(coLech?'#b8860b':(i.status==='done'?'#1f6b4a':'#555')));
       const sl=i.status==='done'?` (${i.total_saved} HĐ)`:'';
       const icon=coLech?'⚠':(ic[i.status]||'•');
       const dongLechBk=lechBk?`<div style="margin-left:20px;color:#b8860b">↳ ${i.lech_bk_text||'Lệch số liệu XML so với bảng kê'}</div>`:'';
       const dongLechDc=lechDc?`<div style="margin-left:20px;color:#b8860b">↳ ${i.lech_doi_chieu_text||'Có hóa đơn lệch giữa Chi tiết và Bảng kê (sheet Đối chiếu)'}</div>`:'';
-      return `<div style="color:${mau}">${icon} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>${dongLechBk}${dongLechDc}`;
+      const dongVat=coVat?`<div style="margin-left:20px;color:#8a5a00">↳ ${i.vat_phai_nop_text||'Phát sinh phải nộp thuế GTGT'}</div>`:'';
+      return `<div style="color:${mau}">${icon} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>${dongLechBk}${dongLechDc}${dongVat}`;
     }).join('');
   }
   if(!st)return;
@@ -2818,6 +2845,9 @@ async function batchTheoDoi(bid){
     // Lệch ĐỐI CHIẾU: sheet "Đối chiếu" phát hiện hóa đơn lệch giữa Chi
     // tiết và Bảng kê — KHÁC 2 loại lệch trên (thiếu file / khác chỉ tiêu XML).
     const dsLechDc=st.items.filter(i=>i.status==='done'&&i.lech_doi_chieu);
+    // Công ty PHÁT SINH PHẢI NỘP thuế GTGT kỳ này (chỉ tiêu [40]) — thông
+    // tin, KHÔNG phải lỗi/lệch, nên hiện riêng (không đổi màu đỏ như lệch).
+    const dsVat=st.items.filter(i=>i.status==='done'&&i.vat_phai_nop);
     let html='';
     if(dsLech.length){
       html+=`⚠ CÓ ${dsLech.length} CÔNG TY BỊ LỆCH HÓA ĐƠN (lấy thiếu so với số trang Thuế báo): `+
@@ -2834,9 +2864,17 @@ async function batchTheoDoi(bid){
       html+=`⚠ CÓ ${dsLechDc.length} CÔNG TY CÓ HÓA ĐƠN LỆCH (sheet Đối chiếu — Chi tiết khác Bảng kê): `+
         dsLechDc.map(i=>i.ten).join(', ')+' — mở file Excel kiểm tra mục "CHI TIẾT HÓA ĐƠN LỆCH".';
     }
+    let htmlVat='';
+    if(dsVat.length){
+      htmlVat=`💰 CÓ ${dsVat.length} CÔNG TY PHÁT SINH PHẢI NỘP THUẾ GTGT kỳ này: `+
+        dsVat.map(i=>`${i.ten} (${Number(i.vat_phai_nop_so_tien||0).toLocaleString('vi-VN')}đ)`).join('; ')+'.';
+    }
     if(html){
       kq.style.background='#fff1f0';kq.style.color='#c00';kq.style.border='1px solid #f0a0a0';
-      kq.innerHTML=html;
+      kq.innerHTML=html+(htmlVat?'<br>'+htmlVat:'');
+    }else if(htmlVat){
+      kq.style.background='#fff7e6';kq.style.color='#7a5200';kq.style.border='1px solid #f0c36d';
+      kq.innerHTML=htmlVat;
     }else{
       kq.style.background='#f0f9f4';kq.style.color='#1f6b4a';kq.style.border='1px solid #a0d0b0';
       kq.innerHTML='✓ Không lệch — đã lấy đủ hóa đơn theo số trang Thuế báo, số liệu XML và Đối chiếu đều khớp bảng kê cho tất cả công ty.';

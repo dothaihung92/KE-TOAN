@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.27"
+APP_BUILD = "2026-07-25.28"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1351,6 +1351,16 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN doi_chieu_text TEXT")
     if "doi_chieu_at" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN doi_chieu_at TEXT")
+    # Thông báo (KHÔNG tự ẩn) số thuế GTGT PHẢI NỘP trong kỳ, đọc từ chỉ tiêu
+    # [40] khi kết xuất XML 01/GTGT — để người dùng biết ngay công ty nào
+    # phát sinh phải nộp thuế và nộp bao nhiêu, không phải tự mở XML/HTKK ra
+    # xem mới biết.
+    if "vat_phai_nop" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN vat_phai_nop REAL")
+    if "vat_phai_nop_at" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN vat_phai_nop_at TEXT")
+    if "vat_phai_nop_ky" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN vat_phai_nop_ky TEXT")
     if "mst_khac" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN mst_khac TEXT")
     if "token_to_chuc_cap" not in ccols:
@@ -5854,6 +5864,17 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
             lech_xml_found = True
             cac_dong_lech.append(res_htkk["canh_bao"])
             msg(stage="warn", text=res_htkk["canh_bao"], lech_bk=True)
+        # Báo NGAY (không tự ẩn — đã LƯU LẠI persistent ở _export_htkk_impl
+        # qua _luu_thue_vat_phai_nop) nếu kỳ này công ty PHÁT SINH PHẢI NỘP
+        # thuế GTGT (chỉ tiêu [40]), kèm số tiền cụ thể — để biết ngay công
+        # ty nào phải nộp và nộp bao nhiêu mà không phải tự mở XML ra xem,
+        # cho cả tra cứu 1 công ty lẫn tra cứu hàng loạt.
+        if isinstance(res_htkk, dict) and round(res_htkk.get("thue_phai_nop") or 0) > 0:
+            dong_vat = (f"💰 Kỳ {res_htkk.get('thue_phai_nop_ky', '')} PHÁT SINH PHẢI NỘP thuế "
+                       f"GTGT: {round(res_htkk['thue_phai_nop']):,.0f}đ (chỉ tiêu [40] trên "
+                       f"XML 01/GTGT).")
+            msg(stage="info", text=dong_vat, vat_phai_nop=True,
+               vat_phai_nop_so_tien=round(res_htkk["thue_phai_nop"]))
     except Exception as e:
         msg(stage="warn", text=f"Không tự kết xuất được XML GTGT: {str(e)[:120]}")
     # LƯU LẠI trạng thái đối chiếu TỔNG HỢP — CHỈ khi cả 2 phần đều kiểm tra
@@ -6920,6 +6941,22 @@ def _luu_ket_qua_doi_chieu(cid: int, lech: bool, text: str):
         pass
 
 
+def _luu_thue_vat_phai_nop(cid: int, so_tien: float, ky_text: str):
+    """Lưu số thuế GTGT PHẢI NỘP trong kỳ (chỉ tiêu [40] khi kết xuất XML
+    01/GTGT) — LUÔN ghi (kể cả 0, để phân biệt 'chưa kiểm tra' (NULL) với
+    'đã kiểm tra, không phải nộp'), để giao diện hiện thông báo KHÔNG TỰ ẨN
+    cho người dùng biết ngay công ty nào phải nộp và nộp bao nhiêu."""
+    try:
+        cn = db()
+        cn.execute(
+            "UPDATE companies SET vat_phai_nop=?, vat_phai_nop_at=?, vat_phai_nop_ky=? WHERE id=?",
+            (so_tien or 0, datetime.datetime.now().isoformat(), ky_text or "", cid))
+        cn.commit()
+        cn.close()
+    except Exception:
+        pass
+
+
 @app.post("/api/fetch/{cid}")
 def fetch_invoices(cid: int, body: dict = Body(...)):
     """Tra cứu + tải hóa đơn cho 1 công ty (chạy nền). Trình duyệt poll
@@ -7034,6 +7071,10 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             if _m.get("lech_doi_chieu"):
                 item["lech_doi_chieu"] = True
                 item["lech_doi_chieu_text"] = _m.get("text", "")
+            if _m.get("vat_phai_nop"):
+                item["vat_phai_nop"] = True
+                item["vat_phai_nop_text"] = _m.get("text", "")
+                item["vat_phai_nop_so_tien"] = _m.get("vat_phai_nop_so_tien", 0)
         with batch_lock:
             batch["done"] += 1
             _batch_luu_db(batch_id, batch, body)
@@ -7128,6 +7169,10 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                     if _m.get("lech_doi_chieu"):
                         item["lech_doi_chieu"] = True
                         item["lech_doi_chieu_text"] = _m.get("text", "")
+                    if _m.get("vat_phai_nop"):
+                        item["vat_phai_nop"] = True
+                        item["vat_phai_nop_text"] = _m.get("text", "")
+                        item["vat_phai_nop_so_tien"] = _m.get("vat_phai_nop_so_tien", 0)
                 if last.get("stage") == "error":
                     item["status"] = "error"
                     item["note"] = last.get("text", "Lỗi")
@@ -7224,7 +7269,8 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
               "total_saved": 0, "note": "", "lech": False,
               "tk_mua_got": 0, "tk_mua_exp": 0, "tk_ban_got": 0, "tk_ban_exp": 0,
               "lech_bk": False, "lech_bk_text": "",
-              "lech_doi_chieu": False, "lech_doi_chieu_text": ""}
+              "lech_doi_chieu": False, "lech_doi_chieu_text": "",
+              "vat_phai_nop": False, "vat_phai_nop_text": "", "vat_phai_nop_so_tien": 0}
         if items_cu and str(c) in items_cu and items_cu[str(c)].get("status") == "done":
             old = items_cu[str(c)]
             it.update(status="done", total_saved=old.get("total_saved", 0),
@@ -7234,7 +7280,10 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
                       tk_ban_got=old.get("tk_ban_got", 0), tk_ban_exp=old.get("tk_ban_exp", 0),
                       lech_bk=old.get("lech_bk", False), lech_bk_text=old.get("lech_bk_text", ""),
                       lech_doi_chieu=old.get("lech_doi_chieu", False),
-                      lech_doi_chieu_text=old.get("lech_doi_chieu_text", ""))
+                      lech_doi_chieu_text=old.get("lech_doi_chieu_text", ""),
+                      vat_phai_nop=old.get("vat_phai_nop", False),
+                      vat_phai_nop_text=old.get("vat_phai_nop_text", ""),
+                      vat_phai_nop_so_tien=old.get("vat_phai_nop_so_tien", 0))
         return it
 
     items = {c: _mk_item(c) for c in cids}
@@ -14670,6 +14719,14 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     ct41 = max(-con_lai, 0)      # thuế chưa khấu trừ hết kỳ này
     ct43 = max(ct41 - ct42, 0)   # còn được khấu trừ chuyển kỳ sau
 
+    # Thông báo (KHÔNG tự ẩn) số thuế GTGT PHẢI NỘP kỳ này — theo đúng chỉ
+    # tiêu [40] vừa kết xuất, để người dùng biết ngay công ty nào phát sinh
+    # phải nộp và nộp bao nhiêu mà không phải tự mở XML/HTKK ra xem. LUÔN
+    # ghi (kể cả 0đ) để phân biệt "chưa kiểm tra" với "đã kiểm tra, không
+    # phải nộp".
+    ky_hien_thi_vat = f"Quý {quy_so}/{yyyy}" if la_quy else f"Tháng {mm}/{yyyy}"
+    _luu_thue_vat_phai_nop(cid, ct40, ky_hien_thi_vat)
+
     for tag, val in [
         ("ct21", 0), ("ct22", ct22),
         ("ct23", ct23), ("ct24", ct24),
@@ -14770,7 +14827,8 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         canh_bao = (canh_bao + "\n\n" if canh_bao else "") + "\n\n".join(canh_bao_lech)
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
             "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds),
-            "lech_bk": bool(canh_bao_lech)}
+            "lech_bk": bool(canh_bao_lech),
+            "thue_phai_nop": ct40, "thue_phai_nop_ky": ky_hien_thi_vat}
 
 
 @app.get("/api/export-htkk-tncn/{cid}")
