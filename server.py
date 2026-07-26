@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.4"
+APP_BUILD = "2026-07-26.5"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5132,12 +5132,21 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         tu_ck, den_ck = (_tu_den_cua_quy(nam, quy) if nam and quy else (None, None))
         if not tu_ck or not den_ck:
             tu_ck, den_ck = _ky_tu_ten_file_nop(os.path.basename(file_path))
+        loi_kiem_tra_truoc = ""
         if tu_ck and den_ck:
             try:
                 xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = _dvc_kiem_tra_da_nop_mot_loai(
                     drv, loai, tu_ck, den_ck)
-            except Exception:
+            except Exception as e:
+                # KHÔNG được coi lỗi khi tra cứu lại là "chắc chắn CHƯA nộp"
+                # rồi âm thầm tiếp tục nộp — bước tra cứu lại này CHÍNH LÀ
+                # lưới an toàn chống nộp trùng (vd lỡ tay bỏ tick "đã nộp" để
+                # thử). Nếu bước này tự nó lỗi (mất mạng, cổng đổi giao diện,
+                # timeout...) thì lưới an toàn coi như KHÔNG chạy được lần
+                # này — phải giữ lại lý do để báo RÕ, không được im lặng coi
+                # như đã kiểm tra xong và kết luận "chưa nộp".
                 xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = False, "", ""
+                loi_kiem_tra_truoc = str(e)[:200]
             if xac_nhan_truoc:
                 drv.quit()
                 if tai_su_dung_phien:
@@ -5170,10 +5179,15 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
     phien_id = phien_id_cu if tai_su_dung_phien else f"{cid}-{loai}-{int(time.time() * 1000)}"
     _DVC_OPEN_DRIVERS[phien_id] = drv   # giữ trình duyệt MỞ, không quit()
     if not ket.get("ok"):
+        _tb_dung_giua = ("Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
+                         "bạn có thể tự làm tiếp bằng tay từ đó.")
+        if loi_kiem_tra_truoc:
+            _tb_dung_giua = (f"⚠ KHÔNG tra cứu lại được xem tờ khai {loai} kỳ này đã nộp/được "
+                             f"chấp nhận từ trước hay chưa ({loi_kiem_tra_truoc}) — hãy tự vào cổng "
+                             f"Thuế kiểm tra lại nếu nghi ngờ có thể bị nộp trùng. ") + _tb_dung_giua
         return {"ok": False, "loi": ket.get("loi"), "buoc": ket.get("buoc"),
                 "file_da_chon": file_path, "phien_id": phien_id,
-                "thong_bao": "Tự động hoá dừng giữa chừng — cửa sổ Chrome vẫn đang mở, "
-                             "bạn có thể tự làm tiếp bằng tay từ đó."}
+                "thong_bao": _tb_dung_giua}
     # Tải file XONG là TỰ LUÔN bấm "Ký hồ sơ" → chọn chứng thư số → "Tiếp
     # tục" (không bắt người dùng phải bấm thêm 1 nút riêng trong phần mềm).
     try:
@@ -5269,6 +5283,11 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         thong_bao = ("Đã tự động Ký hồ sơ + chọn chứng thư số, nhưng KHÔNG tự nhập được mã PIN "
                      f"({(ket_pin or {}).get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn đang "
                      "mở — hãy tự nhập mã PIN và bấm \"Nộp tờ khai\" bằng tay từ đó.")
+    if loi_kiem_tra_truoc:
+        thong_bao = (f"⚠ KHÔNG tra cứu lại được xem tờ khai {loai} kỳ này đã nộp/được chấp nhận "
+                     f"từ trước hay chưa ({loi_kiem_tra_truoc}) — lưới an toàn chống nộp trùng đã "
+                     f"KHÔNG chạy được lần này nên vẫn cứ tiếp tục nộp như bình thường. Hãy tự vào "
+                     f"cổng Thuế kiểm tra lại nếu nghi ngờ có thể bị nộp trùng. ") + thong_bao
     return {"ok": True, "file_da_chon": file_path, "phien_id": phien_id,
             "ky_ho_so": ket_ky, "pin": ket_pin, "nop": ket_nop,
             "da_tu_dong_nop": da_tu_dong_nop,
