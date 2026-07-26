@@ -1756,7 +1756,11 @@ async function ntkXuLyTiep(){
     // GTGT rồi qua kiểm tra/nộp tiếp TNCN, còn TNCN chưa nộp thì vẫn nộp
     // bình thường. Chỉ khi TẤT CẢ mục trong hàng đợi đều đã kiểm tra xong
     // (dù đã chấp nhận sẵn hay vừa nộp) mới coi là hoàn tất.
-    ntkPhienMo=null;
+    // Server GIỮ NGUYÊN phiên trình duyệt (không tự đóng) và trả về phien_id
+    // — ghi nhớ lại để nếu công ty này còn mục KHÁC trong hàng đợi (vd GTGT
+    // đã chấp nhận -> kiểm tra tiếp TNCN) thì DÙNG LẠI ĐÚNG phiên đã đăng
+    // nhập sẵn, khỏi phải đóng rồi mở trình duyệt mới + đăng nhập lại từ đầu.
+    ntkPhienMo=r.phien_id?{cid,phien_id:r.phien_id}:null;
     ntkGhi(`<br>✅ <b>${ten}</b> — ${NTK_TEN_LOAI[loai]||loai}: ĐÃ ĐƯỢC CHẤP NHẬN từ trước — tự `+
            `tick, bỏ qua, tiếp tục xử lý mục tiếp theo. ${r.thong_bao}`);
     const banner=document.getElementById('ntkDaChapNhanBanner');

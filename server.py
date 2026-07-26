@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.7"
+APP_BUILD = "2026-07-26.8"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5148,9 +5148,14 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                 xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = False, "", ""
                 loi_kiem_tra_truoc = str(e)[:200]
             if xac_nhan_truoc:
-                drv.quit()
-                if tai_su_dung_phien:
-                    _DVC_OPEN_DRIVERS.pop(phien_id_cu, None)
+                # GIỮ NGUYÊN phiên trình duyệt đang mở (KHÔNG quit()) và trả
+                # về phien_id — để nếu công ty này còn tờ khai KHÁC cần kiểm
+                # tra/nộp tiếp (vd GTGT đã chấp nhận -> kiểm tra tiếp TNCN),
+                # hàng đợi DÙNG LẠI ĐÚNG phiên đã đăng nhập sẵn thay vì phải
+                # đóng rồi mở trình duyệt mới + đăng nhập lại từ đầu chỉ để
+                # kiểm tra tiếp 1 loại khác của CÙNG công ty.
+                phien_id = phien_id_cu if tai_su_dung_phien else f"{cid}-{loai}-{int(time.time() * 1000)}"
+                _DVC_OPEN_DRIVERS[phien_id] = drv
                 conn = db()
                 conn.execute(
                     "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, xac_nhan_nguon, xac_nhan_chi_tiet) "
@@ -5161,8 +5166,8 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                     (cid, loai, datetime.datetime.now().isoformat(), chi_tiet_truoc))
                 conn.commit()
                 conn.close()
-                return {"ok": False, "da_chap_nhan": True, "trang_thai": trang_thai_truoc,
-                        "chi_tiet": chi_tiet_truoc,
+                return {"ok": False, "da_chap_nhan": True, "phien_id": phien_id,
+                        "trang_thai": trang_thai_truoc, "chi_tiet": chi_tiet_truoc,
                         "thong_bao": f"Tờ khai {loai} kỳ này ĐÃ ĐƯỢC CƠ QUAN THUẾ CHẤP NHẬN từ trước "
                                      f"— KHÔNG tự động nộp lại để tránh nộp trùng. {chi_tiet_truoc}"}
         ket = _dvc_browser_nop_to_khai(drv, cfg, file_path)
