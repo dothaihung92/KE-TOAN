@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.5"
+APP_BUILD = "2026-07-26.6"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5424,13 +5424,35 @@ def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
     của từng dòng kết quả với đúng kỳ tu-den đang kiểm tra, không được coi
     mọi dòng khớp loại tờ khai nằm trong kết quả tìm kiếm là "đúng kỳ".
     Trả (xac_nhan: bool, trang_thai_text: str, chi_tiet: str)."""
-    nguon_list = _nguon_tra_cuu_theo_ky(tu, den)
+    # QUAN TRỌNG: ô tìm kiếm tren cổng lọc theo NGÀY NỘP HỒ SƠ — nhưng tờ
+    # khai theo quý GẦN NHƯ LUÔN được nộp SAU KHI quý đã kết thúc (hạn luật
+    # định là cuối tháng đầu quý tiếp theo, vd Quý 2 hạn 30/07), tức ngày nộp
+    # thật sự luôn RƠI RA NGOÀI khoảng tu-den (kỳ tính thuế) — vd kỳ Quý
+    # 2/2026 là 01/04-30/06/2026 nhưng hồ sơ thường được nộp đầu/giữa tháng
+    # 07/2026. Nếu chỉ tìm ĐÚNG trong khoảng tu-den của kỳ tính thuế thì
+    # HẦU HẾT mọi trường hợp thực tế đều bị bỏ sót (tìm không ra), khiến lưới
+    # an toàn chống nộp trùng gần như không bao giờ phát huy tác dụng — đã
+    # xác nhận đúng lỗi này qua dữ liệu thật (tờ khai 'Đã chấp nhận' ngày nộp
+    # 17/07/2026 cho kỳ Quý 2/2026 kết thúc 30/06/2026). Mở RỘNG vùng tìm
+    # kiếm (ngày nộp) tới HÔM NAY (không thể nộp trong tương lai) — nhưng
+    # VẪN giữ nguyên tu/den làm mốc so sánh cột 'Kỳ' thật của từng dòng kết
+    # quả, để không nhận nhầm tờ khai của KỲ KHÁC là đúng kỳ đang kiểm tra.
+    tu_tim, den_tim = tu, den
+    try:
+        d2, m2, y2 = den.split("/")
+        den_ngay = datetime.date(int(y2), int(m2), int(d2))
+        hom_nay = datetime.date.today()
+        if hom_nay > den_ngay:
+            den_tim = hom_nay.strftime("%d/%m/%Y")
+    except Exception:
+        pass
+    nguon_list = _nguon_tra_cuu_theo_ky(tu_tim, den_tim)
     tat_ca = []
     for nguon in nguon_list:
         if nguon == "dvc":
-            rows, _, _, _ = _dvc_browser_tracuu(drv, tu, den)
+            rows, _, _, _ = _dvc_browser_tracuu(drv, tu_tim, den_tim)
         else:
-            rows, _, _, _ = _dvc_browser_tracuu_tdt(drv, tu, den)
+            rows, _, _, _ = _dvc_browser_tracuu_tdt(drv, tu_tim, den_tim)
         tat_ca.extend(rows or [])
     cung_loai = [r for r in tat_ca if _loai_tk_tu_ten_day_du(r.get("to_khai", "")) == loai]
     khop = []
@@ -5445,11 +5467,11 @@ def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
         if khop_khac_ky:
             rk = khop_khac_ky[0]
             return False, "", (
-                f"Trong khoảng ngày nộp {tu} - {den} chỉ tìm thấy tờ khai '{rk.get('to_khai', '')}' "
+                f"Trong khoảng ngày nộp {tu_tim} - {den_tim} chỉ tìm thấy tờ khai '{rk.get('to_khai', '')}' "
                 f"của KỲ KHÁC (kỳ {rk.get('ky', '')}), CHƯA tìm thấy tờ khai đúng kỳ đang kiểm tra "
                 "— có thể bạn CHƯA nộp kỳ này.")
         return False, "", ("Chưa tìm thấy tờ khai đã nộp trên cổng Dịch vụ công trong khoảng "
-                            f"{tu} - {den}. Có thể bạn chưa bấm \"Ký hồ sơ\"/\"Nộp tờ khai\", "
+                            f"{tu_tim} - {den_tim}. Có thể bạn chưa bấm \"Ký hồ sơ\"/\"Nộp tờ khai\", "
                             "hoặc cổng Thuế chưa cập nhật kịp.")
     for r in khop:
         if "da chap nhan" in _khong_dau(r.get("trang_thai", "")):
