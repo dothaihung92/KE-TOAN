@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.33"
+APP_BUILD = "2026-07-26.1"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14396,6 +14396,37 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # dùng để đối chiếu với TỔNG CỘNG thật của sheet "BK Mua vào" (sheet đó
     # liệt kê MỌI hóa đơn mua vào hiện có của công ty, không lọc theo đúng
     # kỳ khai) và cảnh báo nếu XML (chỉ tính đúng kỳ) lệch với bảng kê.
+    # Xây index file đã tải về (ZIP/XML) 1 lần, dùng CHUNG cho cả 2 vòng MUA
+    # VÀO và BÁN RA bên dưới (tránh os.walk lặp lại gây chậm).
+    save_dir = (comp["save_dir"] or "").strip() if comp else ""
+    _fidx = {}
+    if save_dir and os.path.isdir(save_dir):
+        for rootdir, _d, files in os.walk(save_dir):
+            for fn in files:
+                low = fn.lower()
+                if not (low.endswith(".zip") or low.endswith(".xml")):
+                    continue
+                nm = fn.rsplit(".", 1)[0]; parts = nm.split("_")
+                if len(parts) >= 2:
+                    _fidx.setdefault((parts[0], parts[1].lstrip("0") or "0"),
+                                     os.path.join(rootdir, fn))
+
+    def _phi_tu_file(r):
+        """"Tổng tiền phí" đọc từ file hóa đơn đã tải về (ZIP/XML), dùng khi
+        KHÔNG có detail_json trong DB (vd hóa đơn được nạp qua tải file thay
+        vì gọi API chi tiết — detail_json chỉ được lưu lại khi gọi API)."""
+        fp = _fidx.get((str(r["khhdon"] or ""), str(r["shdon"] or "").lstrip("0") or "0"))
+        if not fp:
+            return 0
+        try:
+            import xml.etree.ElementTree as ET
+            with open(fp, "rb") as f:
+                data = f.read()
+            root = ET.fromstring(_extract_invoice_xml(data))
+            return _lay_tong_tien_phi_xml(root) or 0
+        except Exception:
+            return 0
+
     mua_ds = mua_thue = 0
     mua_ds_full = mua_thue_full = 0
     for r in rows:
@@ -14428,6 +14459,12 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             dj_r = None
         if dj_r:
             ds += _lay_tong_tien_phi_json(dj_r) or 0
+        else:
+            # Không có detail_json trong DB (hóa đơn được nạp qua file tải
+            # về, không qua API chi tiết) — vẫn phải dò phí từ chính file đã
+            # tải, đúng như "BK Mua vào" của Xuất Excel làm (get_invoice_items
+            # có bước dự phòng đọc file khi chưa có detail_json).
+            ds += _phi_tu_file(r) or 0
         mua_ds_full += ds
         mua_thue_full += thue_r
         if trong_ky(r["tdlap"]):
@@ -14439,20 +14476,6 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     ban_theo_ts = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
                    "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0},
                    "KCT": {"ds": 0, "thue": 0}}
-    save_dir = (comp["save_dir"] or "").strip() if comp else ""
-
-    # Xây index file 1 lần (tránh os.walk lặp lại gây chậm)
-    _fidx = {}
-    if save_dir and os.path.isdir(save_dir):
-        for rootdir, _d, files in os.walk(save_dir):
-            for fn in files:
-                low = fn.lower()
-                if not (low.endswith(".zip") or low.endswith(".xml")):
-                    continue
-                nm = fn.rsplit(".", 1)[0]; parts = nm.split("_")
-                if len(parts) >= 2:
-                    _fidx.setdefault((parts[0], parts[1].lstrip("0") or "0"),
-                                     os.path.join(rootdir, fn))
 
     def get_summary(r):
         """CHỈ dùng dữ liệu đã có (không gọi mạng để tránh treo)."""
