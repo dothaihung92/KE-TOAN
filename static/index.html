@@ -5352,6 +5352,14 @@ async function exportExcel(btn){
       if(c)renderFetchErrorBanner(c);
       toast(`⚠ Phát hiện ${soLechBan+soLechMua} hóa đơn LỆCH giữa Chi tiết và Bảng kê — xem chi tiết ở banner phía trên`,'err');
     }
+    // Không lưu được vào 'Thư mục lưu file kết xuất' đã cấu hình (vd đường
+    // dẫn quá dài, OneDrive đang khoá...) — báo NGAY bằng toast lỗi, tránh để
+    // người dùng tưởng đã lưu đúng chỗ trong khi file thực ra vẫn rơi ra
+    // Desktop mà không rõ lý do.
+    const loiLuuKx=r.headers.get('X-Loi-Luu-Ket-Xuat');
+    if(loiLuuKx){
+      setTimeout(()=>toast('⚠ '+decodeURIComponent(loiLuuKx),'err'),300);
+    }
   }catch(e){toast(e.message,'err')}
   if(btn){btn.disabled=false;btn.innerHTML=old;}
 }

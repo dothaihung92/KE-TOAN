@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.3"
+APP_BUILD = "2026-07-26.4"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14851,6 +14851,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     open_path = path
     # ===== LƯU vào thư mục KẾT XUẤT theo Năm/Quý (nếu bật) — không rải Desktop =====
     da_luu_ket_xuat = False
+    loi_luu_ket_xuat = ""
     if luu_ket_xuat:
         export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
         dich = _thu_muc_ket_xuat_ky(export_dir, tu_ngay_kkhai, den_ngay_kkhai)
@@ -14861,8 +14862,15 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
                     f.write("\ufeff" + xml)
                 open_path = dest_kx
                 da_luu_ket_xuat = True
-            except Exception:
-                pass
+            except Exception as e:
+                # KH\u00d4NG \u0111\u01b0\u1ee3c \u00e2m th\u1ea7m nu\u1ed1t l\u1ed7i r\u1ed3i l\u1eb7ng l\u1ebd r\u01a1i v\u1ec1 Desktop \u2014 ng\u01b0\u1eddi
+                # d\u00f9ng \u0111\u00e3 c\u1ea5u h\u00ecnh \u0111\u00fang \u0111\u01b0\u1eddng d\u1eabn (th\u1ea5y r\u00f5 trong 'S\u1eeda c\u00f4ng ty')
+                # nh\u01b0ng file v\u1eabn c\u1ee9 ra Desktop m\u00e0 KH\u00d4NG BI\u1ebeT V\u00cc SAO (vd \u0111\u01b0\u1eddng d\u1eabn
+                # qu\u00e1 d\u00e0i >260 k\u00fd t\u1ef1 tr\u00ean Windows, \u1ed5 OneDrive \u0111ang kho\u00e1/\u0111\u1ed3ng b\u1ed9,
+                # thi\u1ebfu quy\u1ec1n ghi...) \u2014 ph\u1ea3i b\u00e1o R\u00d5 nguy\u00ean nh\u00e2n th\u1eadt.
+                loi_luu_ket_xuat = str(e)[:200]
+        elif export_dir:
+            loi_luu_ket_xuat = "kh\u00f4ng t\u1ea1o \u0111\u01b0\u1ee3c th\u01b0 m\u1ee5c \u0111\u00edch (ki\u1ec3m tra l\u1ea1i \u0111\u01b0\u1eddng d\u1eabn/quy\u1ec1n ghi)"
     if not da_luu_ket_xuat:
         desktop = _get_desktop_dir()
         if desktop and os.path.isdir(desktop):
@@ -14900,6 +14908,11 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy từ dữ liệu đã import gần nhất cho kỳ này.")
     if canh_bao_lech:
         canh_bao = (canh_bao + "\n\n" if canh_bao else "") + "\n\n".join(canh_bao_lech)
+    if loi_luu_ket_xuat:
+        canh_bao = (canh_bao + "\n\n" if canh_bao else "") + (
+            f"⚠ KHÔNG lưu được vào 'Thư mục lưu file kết xuất' đã cấu hình ({loi_luu_ket_xuat}) "
+            f"— đã lưu tạm ra Desktop thay thế. Hãy kiểm tra lại đường dẫn (đường dẫn quá dài, "
+            f"ổ mạng/OneDrive đang khoá, hoặc thiếu quyền ghi đều có thể gây lỗi này).")
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
             "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds),
             "lech_bk": bool(canh_bao_lech),
@@ -15071,6 +15084,7 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
     open_path = path
     # ===== LƯU vào thư mục KẾT XUẤT theo Năm/Quý (nếu bật) — không rải Desktop =====
     da_luu_ket_xuat = False
+    loi_luu_ket_xuat = ""
     if luu_ket_xuat:
         export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
         dich = _thu_muc_ket_xuat_ky(export_dir, tu_ngay_kkhai, den_ngay_kkhai)
@@ -15081,8 +15095,15 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
                     f.write("﻿" + xml)
                 open_path = dest_kx
                 da_luu_ket_xuat = True
-            except Exception:
-                pass
+            except Exception as e:
+                # KHÔNG được âm thầm nuốt lỗi rồi lặng lẽ rơi về Desktop — người
+                # dùng đã cấu hình đúng đường dẫn (thấy rõ trong 'Sửa công ty')
+                # nhưng file vẫn cứ ra Desktop mà KHÔNG BIẾT VÌ SAO (vd đường dẫn
+                # quá dài >260 ký tự trên Windows, ổ OneDrive đang khoá/đồng bộ,
+                # thiếu quyền ghi...) — phải báo RÕ nguyên nhân thật.
+                loi_luu_ket_xuat = str(e)[:200]
+        elif export_dir:
+            loi_luu_ket_xuat = "không tạo được thư mục đích (kiểm tra lại đường dẫn/quyền ghi)"
     if not da_luu_ket_xuat:
         desktop = _get_desktop_dir()
         if desktop and os.path.isdir(desktop):
@@ -15112,6 +15133,11 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
         "ℹ Phần mềm chưa có phân hệ tiền lương/TNCN nên file này luôn là tờ khai KHÔNG PHÁT "
         "SINH (mọi chỉ tiêu = 0). Nếu kỳ này công ty CÓ phát sinh khấu trừ TNCN, hãy tự điền số "
         "liệu vào file (hoặc trực tiếp trên HTKK) trước khi nộp.")
+    if loi_luu_ket_xuat:
+        canh_bao_parts.append(
+            f"⚠ KHÔNG lưu được vào 'Thư mục lưu file kết xuất' đã cấu hình ({loi_luu_ket_xuat}) "
+            f"— đã lưu tạm ra Desktop thay thế. Hãy kiểm tra lại đường dẫn (đường dẫn quá dài, "
+            f"ổ mạng/OneDrive đang khoá, hoặc thiếu quyền ghi đều có thể gây lỗi này).")
     canh_bao = " ".join(canh_bao_parts)
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
             "da_luu_ket_xuat": da_luu_ket_xuat}
@@ -16780,6 +16806,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # <thư mục kết xuất>/<năm>/Quý N/. Kỳ lấy từ tu_ngay/den_ngay (nếu có),
     # nếu không có thì suy từ ngày hóa đơn (ky_fname đã tính ở trên).
     da_luu_ket_xuat = False
+    loi_luu_ket_xuat = ""
     if luu_ket_xuat:
         export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
         # nếu không truyền kỳ, suy khoảng ngày từ các hóa đơn trong DB
@@ -16803,7 +16830,16 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 da_luu_ket_xuat = True
                 _tlog(f"da luu file ket xuat vao: {dich}")
             except Exception as e:
+                # KHÔNG được âm thầm nuốt lỗi (chỉ ghi log console không ai
+                # thấy) rồi lặng lẽ rơi về Desktop — người dùng đã cấu hình
+                # đúng đường dẫn (thấy rõ trong 'Sửa công ty') nhưng file vẫn
+                # cứ ra Desktop mà KHÔNG BIẾT VÌ SAO (vd đường dẫn quá dài
+                # >260 ký tự trên Windows, ổ OneDrive đang khoá/đồng bộ, thiếu
+                # quyền ghi...) — phải báo RÕ nguyên nhân thật, không chỉ log.
+                loi_luu_ket_xuat = str(e)[:200]
                 _tlog(f"LOI luu file ket xuat: {e}")
+        elif export_dir:
+            loi_luu_ket_xuat = "không tạo được thư mục đích (kiểm tra lại đường dẫn/quyền ghi)"
 
     # Mặc định lưu ra DESKTOP cho dễ tìm — CHỈ khi KHÔNG bật lưu kết xuất
     # (bật lưu kết xuất là để gom vào thư mục theo quý, không rải Desktop)
@@ -16828,6 +16864,15 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     extra_headers = {}
     if da_luu_ket_xuat:
         extra_headers["X-Saved-Desktop"] = "1"
+    if loi_luu_ket_xuat:
+        # Header HTTP chỉ nhận ASCII -> percent-encode để giữ nguyên tiếng Việt
+        # có dấu, frontend decodeURIComponent() lại rồi mới hiện toast.
+        import urllib.parse as _up
+        extra_headers["X-Loi-Luu-Ket-Xuat"] = _up.quote(
+            f"KHÔNG lưu được vào 'Thư mục lưu file kết xuất' đã cấu hình "
+            f"({loi_luu_ket_xuat}) — đã lưu tạm ra Desktop thay thế. Hãy kiểm tra lại đường dẫn "
+            f"(đường dẫn quá dài, ổ mạng/OneDrive đang khoá, hoặc thiếu quyền ghi đều có thể gây "
+            f"lỗi này).")
     # Số hóa đơn LỆCH phát hiện ở sheet "Đối chiếu" (Chi tiết vs Bảng kê) —
     # để nơi gọi (vd tự động xuất sau tra cứu hàng loạt) biết mà báo người
     # dùng đi kiểm tra lại, không phải tự mở từng file Excel ra xem mới biết.
