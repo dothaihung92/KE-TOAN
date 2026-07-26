@@ -1720,6 +1720,7 @@ async function ntkXuLyTiep(){
     ntkDangChay=false;ntkDangCho=null;
     ntkCapNhatNutChay();
     await ntkDongPhienNeuCo();   // hết hàng đợi -> tự đóng nốt trình duyệt còn mở
+    await ntkTaiTrangThai();     // tải lại trạng thái để hiện đúng tick ✓ mới nhất
     ntkGhi('<br><br>🏁 <b>Đã xử lý xong toàn bộ hàng đợi.</b>');
     toast('Đã xử lý xong toàn bộ hàng đợi','ok');
     return;
@@ -1789,6 +1790,7 @@ async function ntkXuLyTiep(){
     ntkGhi(`<br>➡️ Tự chuyển sang tờ khai tiếp theo...`);
     toast(`✅ Đã nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
     ntkDangCho=null;
+    await ntkTaiTrangThai();   // tải lại NGAY để hiện đúng tick ✓ (server đã tự ghi xac_nhan=1)
     await ntkXuLyTiep();
     return;
   }
