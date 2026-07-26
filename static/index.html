@@ -2044,7 +2044,8 @@ function renderVatPhaiNopBanner(c){
   if(c&&c.vat_phai_nop_at&&Number(c.vat_phai_nop)>0){
     let khi='';
     if(c.vat_phai_nop_at){try{khi=' — '+new Date(c.vat_phai_nop_at).toLocaleString('vi-VN');}catch{}}
-    document.getElementById('vatPhaiNopTitle').textContent='💰 Kỳ '+(c.vat_phai_nop_ky||'')+' PHÁT SINH PHẢI NỘP thuế GTGT'+khi+':';
+    box.style.background='#fdecea';box.style.border='1px solid #f1a9a0';box.style.color='#7a1f1f';
+    document.getElementById('vatPhaiNopTitle').textContent='🔴 Công ty PHẢI NỘP thuế GTGT — kỳ '+(c.vat_phai_nop_ky||'')+khi+':';
     document.getElementById('vatPhaiNopText').textContent=
       Number(c.vat_phai_nop).toLocaleString('vi-VN')+'đ (chỉ tiêu [40] trên XML 01/GTGT).';
     box.style.display='flex';
@@ -2197,7 +2198,7 @@ function renderWorkspace(c,online){
       </div>
       <button class="btn ghost sm" onclick="document.getElementById('doiChieuBanner').style.display='none'">Ẩn</button>
     </div>
-    <div id="vatPhaiNopBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#fff7e6;border:1px solid #f0c36d;border-radius:10px;padding:12px 14px;margin-top:14px;font-size:13.5px;color:#7a5200">
+    <div id="vatPhaiNopBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#fdecea;border:1px solid #f1a9a0;border-radius:10px;padding:12px 14px;margin-top:14px;font-size:13.5px;color:#7a1f1f">
       <div style="flex:1">
         <b id="vatPhaiNopTitle"></b>
         <div id="vatPhaiNopText" style="margin-top:4px;white-space:pre-wrap;font-weight:700;font-size:15px"></div>
@@ -2823,7 +2824,7 @@ async function batchTheoDoi(bid){
       const icon=coLech?'⚠':(ic[i.status]||'•');
       const dongLechBk=lechBk?`<div style="margin-left:20px;color:#b8860b">↳ ${i.lech_bk_text||'Lệch số liệu XML so với bảng kê'}</div>`:'';
       const dongLechDc=lechDc?`<div style="margin-left:20px;color:#b8860b">↳ ${i.lech_doi_chieu_text||'Có hóa đơn lệch giữa Chi tiết và Bảng kê (sheet Đối chiếu)'}</div>`:'';
-      const dongVat=coVat?`<div style="margin-left:20px;color:#8a5a00">↳ ${i.vat_phai_nop_text||'Phát sinh phải nộp thuế GTGT'}</div>`:'';
+      const dongVat=coVat?`<div style="margin-left:20px;color:#c00">↳ ${i.vat_phai_nop_text||'Công ty phải nộp thuế GTGT'}</div>`:'';
       return `<div style="color:${mau}">${icon} <b>${i.ten}</b>${sl} ${i.note?'— '+i.note:''}</div>${dongLechBk}${dongLechDc}${dongVat}`;
     }).join('');
   }
@@ -2866,15 +2867,12 @@ async function batchTheoDoi(bid){
     }
     let htmlVat='';
     if(dsVat.length){
-      htmlVat=`💰 CÓ ${dsVat.length} CÔNG TY PHÁT SINH PHẢI NỘP THUẾ GTGT kỳ này: `+
+      htmlVat=`🔴 CÓ ${dsVat.length} CÔNG TY PHẢI NỘP THUẾ GTGT kỳ này: `+
         dsVat.map(i=>`${i.ten} (${Number(i.vat_phai_nop_so_tien||0).toLocaleString('vi-VN')}đ)`).join('; ')+'.';
     }
-    if(html){
+    if(html||htmlVat){
       kq.style.background='#fff1f0';kq.style.color='#c00';kq.style.border='1px solid #f0a0a0';
-      kq.innerHTML=html+(htmlVat?'<br>'+htmlVat:'');
-    }else if(htmlVat){
-      kq.style.background='#fff7e6';kq.style.color='#7a5200';kq.style.border='1px solid #f0c36d';
-      kq.innerHTML=htmlVat;
+      kq.innerHTML=[html,htmlVat].filter(Boolean).join('<br>');
     }else{
       kq.style.background='#f0f9f4';kq.style.color='#1f6b4a';kq.style.border='1px solid #a0d0b0';
       kq.innerHTML='✓ Không lệch — đã lấy đủ hóa đơn theo số trang Thuế báo, số liệu XML và Đối chiếu đều khớp bảng kê cho tất cả công ty.';

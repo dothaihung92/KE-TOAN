@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.29"
+APP_BUILD = "2026-07-25.30"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5893,9 +5893,8 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
         # ty nào phải nộp và nộp bao nhiêu mà không phải tự mở XML ra xem,
         # cho cả tra cứu 1 công ty lẫn tra cứu hàng loạt.
         if isinstance(res_htkk, dict) and round(res_htkk.get("thue_phai_nop") or 0) > 0:
-            dong_vat = (f"💰 Kỳ {res_htkk.get('thue_phai_nop_ky', '')} PHÁT SINH PHẢI NỘP thuế "
-                       f"GTGT: {round(res_htkk['thue_phai_nop']):,.0f}đ (chỉ tiêu [40] trên "
-                       f"XML 01/GTGT).")
+            dong_vat = (f"🔴 Công ty PHẢI NỘP thuế GTGT — kỳ {res_htkk.get('thue_phai_nop_ky', '')}: "
+                       f"{round(res_htkk['thue_phai_nop']):,.0f}đ (chỉ tiêu [40] trên XML 01/GTGT).")
             msg(stage="info", text=dong_vat, vat_phai_nop=True,
                vat_phai_nop_so_tien=round(res_htkk["thue_phai_nop"]))
     except Exception as e:
