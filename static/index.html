@@ -1564,13 +1564,24 @@ function ntkRenderCtyList(){
   else if(loc==='danop')shown=shown.filter(c=>ntkDaXongCty(c.id));
   list.innerHTML=shown.map(c=>{
     const chon=ntkChonSet.has(c.id);
-    return `<label class="chk" style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer">
+    // Bấm chuột phải vào dòng công ty -> copy nhanh MST (không hiện menu
+    // chuột phải mặc định của trình duyệt).
+    return `<label class="chk" oncontextmenu="ntkCopyMst(event,${c.id});return false" style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #f0f0f0;cursor:pointer">
       <input type="checkbox" ${chon?'checked':''} onchange="ntkToggleChon(${c.id},this.checked)">
       <span style="flex:1;min-width:0;white-space:normal;word-break:break-word;font-size:14px;line-height:1.4">${c.ten} <span style="color:#888">(${c.mst})</span></span>
       <span style="display:flex;gap:4px;flex:none">${ntkBadge(c.id,'GTGT')}${ntkBadge(c.id,'TNCN')}</span>
     </label>`;
   }).join('')||'<div style="padding:8px;color:#999">Không có công ty nào khớp</div>';
   ntkCapNhatDemChon();
+}
+function ntkCopyMst(ev,cid){
+  ev.preventDefault();
+  const c=companies.find(x=>x.id===cid);
+  if(!c||!c.mst){toast('Không tìm thấy MST để copy','err');return;}
+  const done=()=>toast('✓ Đã copy MST: '+c.mst,'ok');
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(c.mst).then(done).catch(()=>fallbackCopy(c.mst,done));
+  }else fallbackCopy(c.mst,done);
 }
 function ntkToggleChon(cid,checked){
   if(checked)ntkChonSet.add(cid);else ntkChonSet.delete(cid);
@@ -1581,6 +1592,15 @@ function ntkCapNhatDemChon(){
   if(el)el.textContent=ntkChonSet.size;
 }
 function ntkChonTatCa(v){
+  if(!v){
+    // "Bỏ chọn" phải xoá TOÀN BỘ lựa chọn đang có, kể cả những công ty đang
+    // bị ẩn do đang lọc/tìm kiếm (trước đây chỉ bỏ tick các dòng ĐANG HIỂN
+    // THỊ trên màn hình, dò công ty khác xong quay lại thì các công ty cũ
+    // đã chọn từ trước vẫn còn nguyên trong hàng đợi).
+    ntkChonSet.clear();
+    ntkRenderCtyList();
+    return;
+  }
   document.querySelectorAll('#ntkCtyList input[type=checkbox]').forEach(chk=>{
     chk.checked=v;
     chk.dispatchEvent(new Event('change'));
