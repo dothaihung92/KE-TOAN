@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.2"
+APP_BUILD = "2026-07-26.3"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14453,18 +14453,28 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         # chỉ tiêu [23] trên XML sẽ THIẾU đúng phần phí này so với BK Mua
         # vào (đã xác nhận qua dữ liệu thật người dùng gửi: hóa đơn vé máy
         # bay có dòng "Tổng tiền phí" KCT tách riêng ngoài TgTCThue).
-        try:
-            dj_r = json.loads(r["detail_json"]) if r["detail_json"] else None
-        except Exception:
-            dj_r = None
-        if dj_r:
-            ds += _lay_tong_tien_phi_json(dj_r) or 0
-        else:
-            # Không có detail_json trong DB (hóa đơn được nạp qua file tải
-            # về, không qua API chi tiết) — vẫn phải dò phí từ chính file đã
-            # tải, đúng như "BK Mua vào" của Xuất Excel làm (get_invoice_items
-            # có bước dự phòng đọc file khi chưa có detail_json).
-            ds += _phi_tu_file(r) or 0
+        # Hóa đơn được GHI ĐÈ qua "Import Excel đã kiểm tra" (he_thong=
+        # 'import') đã CỘNG SẴN dòng "Tổng tiền phí" vào tgtcthue lúc import
+        # (import_excel gộp mọi dòng cùng Ký hiệu/Số HĐ trong sheet 'BK Mua
+        # vào' — kể cả dòng phí riêng — thành 1 dòng invoices duy nhất, xem
+        # phần "GHI ĐÈ bảng 'invoices'" trong import_excel). Nếu vẫn dò thêm
+        # phí ở đây (qua detail_json/file tải) thì bị CỘNG TRÙNG LẦN NỮA,
+        # khiến [23] SAI (thừa) sau khi import — đúng lỗi người dùng phát
+        # hiện: xuất trực tiếp thì khớp, nhưng Import Excel đã kiểm tra rồi
+        # xuất lại thì [23] lại sai.
+        if str(r["he_thong"] or "") != "import":
+            try:
+                dj_r = json.loads(r["detail_json"]) if r["detail_json"] else None
+            except Exception:
+                dj_r = None
+            if dj_r:
+                ds += _lay_tong_tien_phi_json(dj_r) or 0
+            else:
+                # Không có detail_json trong DB (hóa đơn được nạp qua file tải
+                # về, không qua API chi tiết) — vẫn phải dò phí từ chính file đã
+                # tải, đúng như "BK Mua vào" của Xuất Excel làm (get_invoice_items
+                # có bước dự phòng đọc file khi chưa có detail_json).
+                ds += _phi_tu_file(r) or 0
         mua_ds_full += ds
         mua_thue_full += thue_r
         if trong_ky(r["tdlap"]):
