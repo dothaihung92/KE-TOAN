@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.8"
+APP_BUILD = "2026-07-26.9"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3083,7 +3083,8 @@ def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_d
 # Nút xác nhận trong hộp thoại "Bạn có chắc muốn nộp?" (nếu cổng có hiện)
 _DVC_NUT_XAC_NHAN_NOP = ("đồng ý", "xác nhận", "chấp nhận")
 
-def _dvc_bam_nut_nop_to_khai(drv, cho_ky_toi_da=25, cho_ket_qua_toi_da=30, so_lan_thu=3):
+def _dvc_bam_nut_nop_to_khai(drv, cho_ky_toi_da=25, cho_ket_qua_toi_da=30, so_lan_thu=3,
+                             cho_gan_chu_ky=3):
     """Sau khi hộp thoại PIN đã đóng (ký PIN xong), tự bấm nút "Nộp tờ khai"
     THẬT trên trang — hoàn tất NỘP CHÍNH THỨC lên cơ quan Thuế (hành động
     KHÔNG THỂ ĐẢO NGƯỢC).
@@ -3096,7 +3097,9 @@ def _dvc_bam_nut_nop_to_khai(drv, cho_ky_toi_da=25, cho_ket_qua_toi_da=30, so_la
     sót lớp phủ khiến cú bấm bị CHẶN (ElementClickInterceptedException) mà
     trước đây bị coi là lỗi cứng, bỏ luôn không thử lại. Vì vậy:
       1. CHỜ khung "Chọn chữ ký số" đóng hẳn + chờ thêm 1 nhịp cho trang gắn
-         chữ ký, RỒI mới bấm.
+         chữ ký (cho_gan_chu_ky giây — mặc định 3s cho lần ký PIN thật vừa
+         xong; gọi với giá trị NHỎ HƠN khi biết chữ ký đã gắn xong từ TRƯỚC
+         đó rồi, vd dùng chung phiên không hiện lại hộp thoại PIN), RỒI mới bấm.
       2. Bấm qua _dvc_click_chac_chan (cuộn vào tầm nhìn, bị lớp phủ chặn
          thì bấm bằng JS).
       3. Nếu cổng hiện hộp xác nhận "Bạn có chắc..." thì tự bấm Đồng ý.
@@ -3120,7 +3123,7 @@ def _dvc_bam_nut_nop_to_khai(drv, cho_ky_toi_da=25, cho_ket_qua_toi_da=30, so_la
     buoc.append("Khung \"Chọn chữ ký số\" đã đóng — trang đã nhận chữ ký" if modal_dong
                 else f"Khung \"Chọn chữ ký số\" vẫn còn sau {cho_ky_toi_da}s — vẫn thử bấm "
                      "\"Nộp tờ khai\"")
-    _t.sleep(3)   # nhịp chờ trang gắn chữ ký vào hồ sơ trước khi nộp
+    _t.sleep(cho_gan_chu_ky)   # nhịp chờ trang gắn chữ ký vào hồ sơ trước khi nộp
 
     loi_cuoi = ""
     for lan in range(1, so_lan_thu + 1):
@@ -5214,7 +5217,7 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         # CẦN chờ đủ 30s như phiên đăng nhập lần đầu mới biết — chờ ngắn hơn
         # (8s) là đủ, giảm thời gian chờ vô ích cho các tờ khai sau trong
         # cùng phiên (vd TNCN sau GTGT).
-        cho_hien_pin = 8 if tai_su_dung_phien else 30
+        cho_hien_pin = 4 if tai_su_dung_phien else 30
         try:
             ket_pin = _dvc_nhap_pin_ky_so(pin, cho_hien_toi_da=cho_hien_pin)
         except Exception as e:
@@ -5229,8 +5232,18 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         # thấy hộp thoại; nếu vẫn không nộp được thì _dvc_bam_nut_nop_to_khai
         # tự báo lỗi rõ như bình thường.
         if ket_pin.get("ok") or ket_pin.get("khong_thay_hop_thoai"):
+            # Nhịp chờ "gắn chữ ký vào hồ sơ" sau khi khung "Chọn chữ ký số"
+            # đóng: mặc định 3s cho lần VỪA nhập PIN thật xong (ký mới hoàn
+            # tất ngay lúc này, trang cần 1 nhịp để gắn). Nhưng khi KHÔNG hề
+            # thấy hộp thoại PIN (token đã mở khoá sẵn từ tờ khai trước trong
+            # CÙNG phiên) thì việc ký đã tự hoàn tất NGẦM từ trước đó (ngay
+            # sau khi bấm "Tiếp tục"), không phải vừa mới xong — không cần
+            # chờ thêm nhịp dài, bấm "Nộp tờ khai" ngay để đỡ phải chờ vô ích
+            # (đúng yêu cầu người dùng: ký xong là bấm nộp luôn, không chờ
+            # thêm 10-15s như trước).
+            cho_gan_chu_ky = 1 if ket_pin.get("khong_thay_hop_thoai") else 3
             try:
-                ket_nop = _dvc_bam_nut_nop_to_khai(drv)
+                ket_nop = _dvc_bam_nut_nop_to_khai(drv, cho_gan_chu_ky=cho_gan_chu_ky)
             except Exception as e:
                 ket_nop = {"ok": False, "loi": f"Lỗi khi tự bấm \"Nộp tờ khai\": {e}"}
     da_tu_dong_nop = bool(ket_ky.get("ok") and ket_pin
@@ -5327,10 +5340,13 @@ def dvc_bam_ky_ho_so(phien_id: str):
     ket_nop = None
     # KHÔNG thấy hộp thoại PIN (khác "thấy nhưng sai PIN") vẫn cứ THỬ bấm
     # "Nộp tờ khai" — xem giải thích chi tiết ở /api/dvc/nop-to-khai (hub CKS
-    # thường nhớ token đã mở khoá từ lần ký trước trong CÙNG phiên).
+    # thường nhớ token đã mở khoá từ lần ký trước trong CÙNG phiên, nên ký đã
+    # tự hoàn tất ngầm từ trước chứ không phải vừa mới xong -> khỏi cần chờ
+    # thêm nhịp dài mới bấm "Nộp tờ khai", bấm ngay cho nhanh).
     if ket_pin.get("ok") or ket_pin.get("khong_thay_hop_thoai"):
+        cho_gan_chu_ky = 1 if ket_pin.get("khong_thay_hop_thoai") else 3
         try:
-            ket_nop = _dvc_bam_nut_nop_to_khai(drv)
+            ket_nop = _dvc_bam_nut_nop_to_khai(drv, cho_gan_chu_ky=cho_gan_chu_ky)
         except Exception as e:
             ket_nop = {"ok": False, "loi": f"Lỗi khi tự bấm \"Nộp tờ khai\": {e}"}
     da_tu_dong_nop = bool(ket_nop and ket_nop.get("ok"))
