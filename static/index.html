@@ -544,9 +544,9 @@
       <div id="ntkCtyList" style="max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:13px;color:#888;margin-top:4px">Đã chọn: <b id="ntkCount">0</b> công ty</div>
     </div>
-    <div id="ntkDaChapNhanBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#fdecea;border:1px solid #f1a9a0;border-radius:10px;padding:12px 14px;margin-top:8px;font-size:13.5px;color:#7a1f1f">
+    <div id="ntkDaChapNhanBanner" style="display:none;align-items:flex-start;justify-content:space-between;gap:12px;background:#f0f9f4;border:1px solid #a0d0b0;border-radius:10px;padding:12px 14px;margin-top:8px;font-size:13.5px;color:#1f6b4a">
       <div style="flex:1">
-        <b>⛔ Tờ khai ĐÃ ĐƯỢC CHẤP NHẬN — đã dừng nộp:</b>
+        <b>✅ Tờ khai ĐÃ ĐƯỢC CHẤP NHẬN từ trước — tự tick, đã bỏ qua:</b>
         <div id="ntkDaChapNhanText" style="margin-top:4px;white-space:pre-wrap"></div>
       </div>
       <button class="btn ghost sm" onclick="document.getElementById('ntkDaChapNhanBanner').style.display='none'">Ẩn</button>
@@ -1749,22 +1749,25 @@ async function ntkXuLyTiep(){
     return;
   }
   if(r.da_chap_nhan){
-    // Tờ khai kỳ này ĐÃ ĐƯỢC CHẤP NHẬN từ trước — DỪNG HẲN (không tự nộp
-    // tiếp các công ty còn lại trong hàng đợi) và hiện banner KHÔNG TỰ ẨN,
-    // theo đúng yêu cầu người dùng (tránh vô tình nộp trùng thêm công ty
-    // khác nếu đang có gì đó bất thường, vd chọn nhầm kỳ). Server đã tự
-    // đóng trình duyệt trong nhánh này rồi.
+    // Tờ khai loại NÀY của công ty này ĐÃ ĐƯỢC CHẤP NHẬN từ trước — tự động
+    // TICK ✓ đúng loại đó (server đã tự ghi xac_nhan=1) rồi TIẾP TỤC hàng
+    // đợi bình thường (không dừng cả hàng đợi chỉ vì 1 mục đã xong) — vd
+    // công ty nộp cả GTGT lẫn TNCN: nếu GTGT đã nộp từ trước thì tự tick
+    // GTGT rồi qua kiểm tra/nộp tiếp TNCN, còn TNCN chưa nộp thì vẫn nộp
+    // bình thường. Chỉ khi TẤT CẢ mục trong hàng đợi đều đã kiểm tra xong
+    // (dù đã chấp nhận sẵn hay vừa nộp) mới coi là hoàn tất.
     ntkPhienMo=null;
-    ntkGhi(`<br>⛔ <b>${ten}</b> — ${r.thong_bao}`);
+    ntkGhi(`<br>✅ <b>${ten}</b> — ${NTK_TEN_LOAI[loai]||loai}: ĐÃ ĐƯỢC CHẤP NHẬN từ trước — tự `+
+           `tick, bỏ qua, tiếp tục xử lý mục tiếp theo. ${r.thong_bao}`);
     const banner=document.getElementById('ntkDaChapNhanBanner');
     if(banner){
       document.getElementById('ntkDaChapNhanText').textContent=`${ten} — ${NTK_TEN_LOAI[loai]||loai}: ${r.thong_bao}`;
       banner.style.display='flex';
     }
-    toast(`⛔ ${ten} đã được chấp nhận từ trước — đã dừng nộp tờ khai`,'err');
-    ntkBiDung=true;ntkDangCho=null;ntkDangChay=false;
-    ntkCapNhatNutChay();
-    await ntkTaiTrangThai();
+    toast(`✅ ${ten} — ${NTK_TEN_LOAI[loai]||loai} đã được chấp nhận từ trước, tự tick và tiếp tục`,'ok');
+    ntkDangCho=null;
+    await ntkTaiTrangThai();   // tải lại NGAY để hiện đúng tick ✓ vừa xác nhận
+    await ntkXuLyTiep();
     return;
   }
   if(!r.ok){
