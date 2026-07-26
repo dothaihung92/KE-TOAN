@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.26"
+APP_BUILD = "2026-07-25.27"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5044,11 +5044,21 @@ def set_pin_nop_to_khai(body: dict = Body(...)):
 
 @app.post("/api/dvc/nop-to-khai/{cid}")
 def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
-    """TỰ ĐỘNG tới bước "sẵn sàng ký": đăng nhập, khởi tạo đúng tờ khai, tự
-    tìm + chọn file XML khớp công ty, rồi DỪNG LẠI. Trình duyệt được mở
-    HIỂN THỊ (không ẩn) và KHÔNG bị đóng sau khi hàm này trả về, để người
-    dùng tự chuyển sang đó kiểm tra rồi tự bấm "Ký hồ sơ" và "Nộp tờ khai"
-    bằng tay. body: {loai: "GTGT"|"TNCN", nam?: int, quy?: int}
+    """TỰ ĐỘNG hết mức: đăng nhập (hoặc DÙNG LẠI phiên trình duyệt đã đăng
+    nhập sẵn — xem phien_id_cu bên dưới), khởi tạo đúng tờ khai, tự tìm +
+    chọn file XML khớp công ty, tự Ký hồ sơ + nhập PIN + bấm "Nộp tờ khai".
+    body: {loai: "GTGT"|"TNCN", nam?: int, quy?: int, phien_id?: str}
+    phien_id (tuỳ chọn): phien_id của 1 phiên trình duyệt ĐANG MỞ (trả về từ
+    lần gọi TRƯỚC, vd vừa nộp xong GTGT của CÙNG công ty này) — nếu còn
+    sống thì DÙNG LẠI ĐÚNG cửa sổ + phiên đăng nhập đó để nộp tiếp tờ khai
+    khác (vd TNCN), KHÔNG mở Chrome mới/đăng nhập lại. Ngoài lợi ích không
+    tốn thời gian đăng nhập lại, còn tránh được rủi ro 2 phiên trình duyệt
+    cùng tranh giành hub CKS cục bộ/token vật lý cùng lúc (đã gặp thật:
+    tờ khai thứ 2 "đứng im" không ký/nộp được vì phiên trước đó CHƯA ĐÓNG
+    vẫn đang giữ hub/token). Trình duyệt được mở HIỂN THỊ (không ẩn) và
+    KHÔNG bị đóng sau khi hàm này trả về — người gọi (frontend) chịu trách
+    nhiệm đóng qua /api/dvc/dong-phien khi không còn tờ khai nào khác cần
+    nộp cho công ty này nữa.
     File được tìm ƯU TIÊN trong "Thư mục lưu file kết xuất" RIÊNG của công
     ty (theo Năm/Quý đã chọn) nếu công ty đã cấu hình; nếu không, lùi về
     "thư mục mặc định" dùng chung như cách làm cũ."""
@@ -5080,12 +5090,19 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         raise HTTPException(
             404, f"Không tìm thấy file XML {loai} khớp MST {comp['mst']} (đã tìm trong thư mục "
                  f"kết xuất riêng của công ty theo kỳ đã chọn, và thư mục mặc định)")
+    phien_id_cu = (body.get("phien_id") or "").strip()
+    drv = _DVC_OPEN_DRIVERS.get(phien_id_cu) if phien_id_cu else None
+    tai_su_dung_phien = drv is not None
+    if not tai_su_dung_phien:
+        try:
+            drv = _dvc_make_driver(headless=False, esigner=True)
+        except Exception as e:
+            raise HTTPException(500, f"Không mở được Chrome: {e}")
     try:
-        drv = _dvc_make_driver(headless=False, esigner=True)
-    except Exception as e:
-        raise HTTPException(500, f"Không mở được Chrome: {e}")
-    try:
-        ok, dung_pass, info = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
+        if tai_su_dung_phien:
+            ok, info = True, {}
+        else:
+            ok, dung_pass, info = _dvc_browser_login_2pass(drv, comp["mst"], pw1, pw2)
         if not ok:
             drv.quit()
             raise HTTPException(401, f"Đăng nhập thất bại: {json.dumps(info, ensure_ascii=False)}")
@@ -5113,6 +5130,8 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                 xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = False, "", ""
             if xac_nhan_truoc:
                 drv.quit()
+                if tai_su_dung_phien:
+                    _DVC_OPEN_DRIVERS.pop(phien_id_cu, None)
                 conn = db()
                 conn.execute(
                     "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, xac_nhan_nguon, xac_nhan_chi_tiet) "
@@ -5135,8 +5154,10 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
             drv.quit()
         except Exception:
             pass
+        if tai_su_dung_phien:
+            _DVC_OPEN_DRIVERS.pop(phien_id_cu, None)
         raise HTTPException(500, f"Lỗi khi tự động hoá: {e}")
-    phien_id = f"{cid}-{loai}-{int(time.time() * 1000)}"
+    phien_id = phien_id_cu if tai_su_dung_phien else f"{cid}-{loai}-{int(time.time() * 1000)}"
     _DVC_OPEN_DRIVERS[phien_id] = drv   # giữ trình duyệt MỞ, không quit()
     if not ket.get("ok"):
         return {"ok": False, "loi": ket.get("loi"), "buoc": ket.get("buoc"),
@@ -5167,22 +5188,37 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
                 ket_nop = _dvc_bam_nut_nop_to_khai(drv)
             except Exception as e:
                 ket_nop = {"ok": False, "loi": f"Lỗi khi tự bấm \"Nộp tờ khai\": {e}"}
-    conn = db()
-    # Mỗi lần TỰ ĐỘNG tải file lên là 1 lượt CHỜ KÝ MỚI — reset xác nhận "đã
-    # nộp" cũ về chưa, vì xác nhận trước đó (nếu có) là của LẦN CHẠY TRƯỚC,
-    # không phải lần này (vẫn cần tra cứu lại trên cổng Thuế để xác nhận
-    # THẬT SỰ đã được chấp nhận — bấm "Nộp tờ khai" xong không có nghĩa là
-    # cơ quan Thuế đã xử lý xong ngay).
-    conn.execute(
-        "INSERT INTO nop_to_khai_log (company_id, loai, file_ten, done_at, xac_nhan, xac_nhan_at, xac_nhan_nguon) "
-        "VALUES (?, ?, ?, ?, 0, NULL, NULL) "
-        "ON CONFLICT(company_id, loai) DO UPDATE SET file_ten=excluded.file_ten, "
-        "done_at=excluded.done_at, xac_nhan=0, xac_nhan_at=NULL, xac_nhan_nguon=NULL",
-        (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
     da_tu_dong_nop = bool(ket_ky.get("ok") and ket_pin and ket_pin.get("ok")
                           and ket_nop and ket_nop.get("ok"))
+    ma_ho_so = (ket_nop or {}).get("ma_ho_so") if da_tu_dong_nop else None
+    conn = db()
+    if da_tu_dong_nop:
+        # Đã tự Ký + nhập PIN + bấm "Nộp tờ khai" và cổng báo THÀNH CÔNG
+        # (kèm Mã hồ sơ) — TỰ TICK NGAY là đã nộp xong theo đúng yêu cầu,
+        # không bắt tra cứu lại xác nhận "Đã chấp nhận" mới tick (bước đó xử
+        # lý sau, ở lần nộp kỳ tiếp theo sẽ tự kiểm tra lại).
+        conn.execute(
+            "INSERT INTO nop_to_khai_log (company_id, loai, file_ten, done_at, xac_nhan, xac_nhan_at, xac_nhan_nguon, xac_nhan_chi_tiet) "
+            "VALUES (?, ?, ?, ?, 1, ?, 'auto', ?) "
+            "ON CONFLICT(company_id, loai) DO UPDATE SET file_ten=excluded.file_ten, "
+            "done_at=excluded.done_at, xac_nhan=1, xac_nhan_at=excluded.xac_nhan_at, "
+            "xac_nhan_nguon='auto', xac_nhan_chi_tiet=excluded.xac_nhan_chi_tiet",
+            (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat(),
+             datetime.datetime.now().isoformat(),
+             "Đã tự động Ký hồ sơ + nhập PIN + Nộp tờ khai — cổng báo THÀNH CÔNG" +
+             (f" (Mã hồ sơ: {ma_ho_so})" if ma_ho_so else "") + "."))
+    else:
+        # Mỗi lần TỰ ĐỘNG tải file lên là 1 lượt CHỜ KÝ MỚI — reset xác nhận
+        # "đã nộp" cũ về chưa, vì xác nhận trước đó (nếu có) là của LẦN CHẠY
+        # TRƯỚC, không phải lần này.
+        conn.execute(
+            "INSERT INTO nop_to_khai_log (company_id, loai, file_ten, done_at, xac_nhan, xac_nhan_at, xac_nhan_nguon) "
+            "VALUES (?, ?, ?, ?, 0, NULL, NULL) "
+            "ON CONFLICT(company_id, loai) DO UPDATE SET file_ten=excluded.file_ten, "
+            "done_at=excluded.done_at, xac_nhan=0, xac_nhan_at=NULL, xac_nhan_nguon=NULL",
+            (cid, loai, os.path.basename(file_path), datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
     if da_tu_dong_nop:
         ma_ho_so = (ket_nop or {}).get("ma_ho_so")
         thong_bao = ("Đã tự động đăng nhập, tải file XML lên, ký hồ sơ, nhập mã PIN và bấm "
@@ -5252,6 +5288,21 @@ def dvc_bam_ky_ho_so(phien_id: str):
                      "mở — hãy tự bấm \"Nộp tờ khai\" bằng tay từ đó.")
     return {"ok": True, "buoc": ket.get("buoc"), "pin": ket_pin, "nop": ket_nop,
             "da_tu_dong_nop": da_tu_dong_nop, "thong_bao": thong_bao}
+
+
+@app.post("/api/dvc/dong-phien/{phien_id}")
+def dvc_dong_phien(phien_id: str):
+    """Chủ động đóng 1 phiên trình duyệt đang mở (vd đã nộp xong HẾT các tờ
+    khai của 1 công ty, chuyển sang công ty khác — hoặc xong hết hàng đợi).
+    Không lỗi nếu phiên đã đóng/không tồn tại (idempotent)."""
+    drv = _DVC_OPEN_DRIVERS.pop(phien_id, None)
+    if drv is None:
+        return {"ok": True, "da_dong": False}
+    try:
+        drv.quit()
+    except Exception:
+        pass
+    return {"ok": True, "da_dong": True}
 
 
 def _ky_tu_ten_file_nop(ten_file):

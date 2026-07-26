@@ -1495,6 +1495,10 @@ function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}i
 
 let ntkTrangThai={}, ntkChonSet=new Set(), ntkHangDoi=[], ntkDangCho=null, ntkDangChay=false, ntkBiDung=false;
 let ntkPollTimer=null, ntkPollLan=0;
+let ntkPhienMo=null;   // {cid, phien_id} — phiên trình duyệt ĐANG MỞ, dùng lại cho tờ khai
+                        // TIẾP THEO của CÙNG công ty (vd GTGT xong -> TNCN), tránh mở Chrome mới
+                        // + đăng nhập lại (vừa chậm vừa có thể tranh giành hub CKS/token vật lý
+                        // với phiên cũ chưa đóng, từng gây "đứng im" ở tờ khai thứ 2)
 const NTK_KHOANG_POLL_MS=30000, NTK_POLL_TOI_DA=30;   // tu kiem tra moi 30s, toi da 30 lan (~15 phut)
 const NTK_TEN_LOAI={GTGT:'01/GTGT',TNCN:'05/KK-TNCN'};
 async function moNopToKhai(){
@@ -1644,18 +1648,27 @@ async function ntkBatDau(){
     }
   }
   if(!ntkHangDoi.length){toast('Tất cả công ty đã chọn đều đã xác nhận nộp xong rồi','ok');return;}
-  ntkBiDung=false;ntkDangChay=true;ntkDangCho=null;
+  ntkBiDung=false;ntkDangChay=true;ntkDangCho=null;ntkPhienMo=null;
   document.getElementById('ntkKetQua').innerHTML='';
   const banner=document.getElementById('ntkDaChapNhanBanner');
   if(banner)banner.style.display='none';
   ntkCapNhatNutChay();
   await ntkXuLyTiep();
 }
+async function ntkDongPhienNeuCo(){
+  // Đóng phiên trình duyệt ĐANG MỞ (nếu có) — dùng khi chuyển sang công ty
+  // khác hoặc đã xử lý xong toàn bộ hàng đợi, tránh để sót cửa sổ Chrome.
+  if(!ntkPhienMo)return;
+  const pid=ntkPhienMo.phien_id;
+  ntkPhienMo=null;
+  try{await api(`/api/dvc/dong-phien/${pid}`,{method:'POST'});}catch(e){}
+}
 function ntkDung(){
   ntkDungPoll();
   ntkBiDung=true;
   ntkGhi('<br>⏹ Đã dừng theo yêu cầu — các công ty còn lại trong hàng đợi CHƯA được xử lý.');
   ntkHangDoi=[];ntkDangCho=null;ntkDangChay=false;
+  ntkDongPhienNeuCo();
   ntkCapNhatNutChay();
 }
 function ntkDungPoll(){
@@ -1686,6 +1699,7 @@ async function ntkKiemTraTuDong(){
              (r.da_dong_trinh_duyet?' — đã tự đóng cửa sổ Chrome.':''));
       toast(`Đã xác nhận nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
       ntkDangCho=null;
+      if(r.da_dong_trinh_duyet&&ntkPhienMo&&ntkPhienMo.phien_id===phien_id)ntkPhienMo=null;
       await ntkTaiTrangThai();
       await ntkXuLyTiep();
     }else if(nhan){
@@ -1705,17 +1719,26 @@ async function ntkXuLyTiep(){
   if(!ntkHangDoi.length){
     ntkDangChay=false;ntkDangCho=null;
     ntkCapNhatNutChay();
+    await ntkDongPhienNeuCo();   // hết hàng đợi -> tự đóng nốt trình duyệt còn mở
     ntkGhi('<br><br>🏁 <b>Đã xử lý xong toàn bộ hàng đợi.</b>');
     toast('Đã xử lý xong toàn bộ hàng đợi','ok');
     return;
   }
   const {cid,loai}=ntkHangDoi.shift();
   const ten=ntkTenCty(cid);
+  // Nếu phiên đang mở là CỦA CÔNG TY KHÁC -> đóng lại trước (không còn
+  // dùng được cho công ty mới, để mở mãi vô ích).
+  if(ntkPhienMo&&ntkPhienMo.cid!==cid)await ntkDongPhienNeuCo();
+  const taiSuDungPhien=!!(ntkPhienMo&&ntkPhienMo.cid===cid);
   ntkGhi(`<br><br>━━━ <b>${ten}</b> — ${NTK_TEN_LOAI[loai]||loai} ━━━`);
-  ntkGhi(`<br>⏳ Đang tự đăng nhập + tải file lên... (cửa sổ Chrome sẽ hiện ra, đừng tắt)`);
+  ntkGhi(taiSuDungPhien
+    ? `<br>⏳ Đang nộp tiếp trong CHÍNH cửa sổ Chrome vừa đăng nhập (không mở mới, không đăng nhập lại)...`
+    : `<br>⏳ Đang tự đăng nhập + tải file lên... (cửa sổ Chrome sẽ hiện ra, đừng tắt)`);
   let r;
   try{
-    r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({loai,...ntkNamQuy()})});
+    const body={loai,...ntkNamQuy()};
+    if(taiSuDungPhien)body.phien_id=ntkPhienMo.phien_id;
+    r=await api(`/api/dvc/nop-to-khai/${cid}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   }catch(e){
     // "không tìm thấy file" -> báo RÕ RÀNG rồi TỰ ĐỘNG bỏ qua, xử lý tiếp,
     // không dừng cả hàng đợi chỉ vì 1 công ty thiếu tờ khai
@@ -1728,7 +1751,9 @@ async function ntkXuLyTiep(){
     // Tờ khai kỳ này ĐÃ ĐƯỢC CHẤP NHẬN từ trước — DỪNG HẲN (không tự nộp
     // tiếp các công ty còn lại trong hàng đợi) và hiện banner KHÔNG TỰ ẨN,
     // theo đúng yêu cầu người dùng (tránh vô tình nộp trùng thêm công ty
-    // khác nếu đang có gì đó bất thường, vd chọn nhầm kỳ).
+    // khác nếu đang có gì đó bất thường, vd chọn nhầm kỳ). Server đã tự
+    // đóng trình duyệt trong nhánh này rồi.
+    ntkPhienMo=null;
     ntkGhi(`<br>⛔ <b>${ten}</b> — ${r.thong_bao}`);
     const banner=document.getElementById('ntkDaChapNhanBanner');
     if(banner){
@@ -1742,10 +1767,15 @@ async function ntkXuLyTiep(){
     return;
   }
   if(!r.ok){
+    // Trình duyệt vẫn còn mở (server giữ lại) — nếu có phien_id thì vẫn ghi
+    // nhận để CÓ THỂ dùng lại cho tờ khai khác của CÙNG công ty này.
+    ntkPhienMo=r.phien_id?{cid,phien_id:r.phien_id}:null;
     ntkGhi(`<br>⚠ ${r.thong_bao||r.loi||'Có lỗi'} — bỏ qua, xử lý tiếp.`);
     await ntkXuLyTiep();
     return;
   }
+  ntkPhienMo={cid,phien_id:r.phien_id};   // giữ lại để DÙNG CHUNG cho tờ khai
+                                          // tiếp theo của CÙNG công ty này
   ntkGhi(`<br>✅ Đã tải file lên: <code>${r.file_da_chon}</code>`);
   const kyOk=r.ky_ho_so&&r.ky_ho_so.ok;
   if(r.da_tu_dong_nop){
@@ -1818,6 +1848,7 @@ async function ntkXacNhanVaTiep(){
              (r.da_dong_trinh_duyet?' — đã tự đóng cửa sổ Chrome.':''));
       toast(`Đã xác nhận nộp xong ${NTK_TEN_LOAI[loai]||loai} cho ${ten}`,'ok');
       ntkDangCho=null;
+      if(r.da_dong_trinh_duyet&&ntkPhienMo&&ntkPhienMo.phien_id===phien_id)ntkPhienMo=null;
       await ntkTaiTrangThai();
       await ntkXuLyTiep();
     }else{
