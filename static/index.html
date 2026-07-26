@@ -2030,7 +2030,7 @@ function renderDoiChieuBanner(c){
     box.style.border='1px solid '+(lech?'#f1a9a0':'#a0d0b0');
     box.style.color=lech?'#7a1f1f':'#1f6b4a';
     document.getElementById('doiChieuTitle').textContent=
-      (lech?'⚠':'✓')+' Đối chiếu Bảng kê / XML lần kiểm tra gần nhất'+khi+':';
+      (lech?'⚠':'✓')+' Kiểm tra đối chiếu số liệu lần gần nhất'+khi+':';
     document.getElementById('doiChieuText').textContent=c.doi_chieu_text||'';
     box.style.display='flex';
   }else{
