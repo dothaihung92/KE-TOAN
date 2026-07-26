@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.32"
+APP_BUILD = "2026-07-25.33"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14415,6 +14415,19 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         if not ds:
             ds = _to_num(r["tgtttbso"]) or 0
         thue_r = _to_num(r["tgtthue"]) or 0
+        # "Tổng tiền phí" (thu hộ/lệ phí ngoài DSHHDVu) KHÔNG nằm trong
+        # TgTCThue của hóa đơn — phải cộng THÊM vào doanh số mua vào, đúng
+        # như cách sheet "BK Mua vào" (Xuất Excel) đã làm (thêm 1 dòng riêng
+        # "Tổng tiền phí"/KCT cộng vào tong_ds_mua) — nếu không cộng thì
+        # chỉ tiêu [23] trên XML sẽ THIẾU đúng phần phí này so với BK Mua
+        # vào (đã xác nhận qua dữ liệu thật người dùng gửi: hóa đơn vé máy
+        # bay có dòng "Tổng tiền phí" KCT tách riêng ngoài TgTCThue).
+        try:
+            dj_r = json.loads(r["detail_json"]) if r["detail_json"] else None
+        except Exception:
+            dj_r = None
+        if dj_r:
+            ds += _lay_tong_tien_phi_json(dj_r) or 0
         mua_ds_full += ds
         mua_thue_full += thue_r
         if trong_ky(r["tdlap"]):
