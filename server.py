@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.30"
+APP_BUILD = "2026-07-25.31"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5189,8 +5189,15 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
     ket_nop = None
     if ket_ky.get("ok"):
         pin = _get_setting("pin_nop_to_khai", "12345678")
+        # Đang DÙNG LẠI phiên (vd GTGT xong -> TNCN ngay trong CÙNG cửa sổ) —
+        # hub CKS thường KHÔNG hiện lại hộp thoại PIN nữa (đã nhớ token mở
+        # khoá từ tờ khai trước, xem giải thích chi tiết bên dưới) nên KHÔNG
+        # CẦN chờ đủ 30s như phiên đăng nhập lần đầu mới biết — chờ ngắn hơn
+        # (8s) là đủ, giảm thời gian chờ vô ích cho các tờ khai sau trong
+        # cùng phiên (vd TNCN sau GTGT).
+        cho_hien_pin = 8 if tai_su_dung_phien else 30
         try:
-            ket_pin = _dvc_nhap_pin_ky_so(pin)
+            ket_pin = _dvc_nhap_pin_ky_so(pin, cho_hien_toi_da=cho_hien_pin)
         except Exception as e:
             ket_pin = {"ok": False, "loi": f"Lỗi khi tự nhập mã PIN: {e}", "buoc": []}
         # KHÔNG thấy hộp thoại PIN hiện ra (khác hẳn "thấy nhưng sai PIN") —
