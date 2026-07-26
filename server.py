@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-25.28"
+APP_BUILD = "2026-07-25.29"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5193,12 +5193,21 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
             ket_pin = _dvc_nhap_pin_ky_so(pin)
         except Exception as e:
             ket_pin = {"ok": False, "loi": f"Lỗi khi tự nhập mã PIN: {e}", "buoc": []}
-        if ket_pin.get("ok"):
+        # KHÔNG thấy hộp thoại PIN hiện ra (khác hẳn "thấy nhưng sai PIN") —
+        # gặp thật khi DÙNG CHUNG 1 phiên trình duyệt cho nhiều tờ khai liên
+        # tiếp (vd GTGT xong -> TNCN): hub CKS cục bộ thường NHỚ token đã mở
+        # khoá từ lần ký TRƯỚC trong CÙNG phiên (không hỏi lại PIN mỗi lần ký
+        # để đỡ phiền), nên hộp thoại PIN có thể KHÔNG BAO GIỜ hiện ra dù ký
+        # vẫn tự hoàn tất ngầm — không phải lỗi thật. Vì vậy vẫn CỨ THỬ bấm
+        # "Nộp tờ khai" xem có được không, thay vì dừng lại ngay chỉ vì không
+        # thấy hộp thoại; nếu vẫn không nộp được thì _dvc_bam_nut_nop_to_khai
+        # tự báo lỗi rõ như bình thường.
+        if ket_pin.get("ok") or ket_pin.get("khong_thay_hop_thoai"):
             try:
                 ket_nop = _dvc_bam_nut_nop_to_khai(drv)
             except Exception as e:
                 ket_nop = {"ok": False, "loi": f"Lỗi khi tự bấm \"Nộp tờ khai\": {e}"}
-    da_tu_dong_nop = bool(ket_ky.get("ok") and ket_pin and ket_pin.get("ok")
+    da_tu_dong_nop = bool(ket_ky.get("ok") and ket_pin
                           and ket_nop and ket_nop.get("ok"))
     ma_ho_so = (ket_nop or {}).get("ma_ho_so") if da_tu_dong_nop else None
     conn = db()
@@ -5238,14 +5247,21 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
         thong_bao = ("Đã tự động đăng nhập và tải file XML lên, nhưng KHÔNG tự bấm được "
                      f"\"Ký hồ sơ\" ({ket_ky.get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn "
                      "đang mở — hãy tự bấm \"Ký hồ sơ\" và \"Nộp tờ khai\" bằng tay từ đó.")
-    elif not (ket_pin and ket_pin.get("ok")):
+    elif ket_nop is not None:
+        # Đã THỬ bấm "Nộp tờ khai" (kể cả khi không thấy hộp thoại PIN — có
+        # thể phiên đã ký sẵn từ tờ khai trước trong CÙNG cửa sổ) nhưng vẫn
+        # không thành công.
+        ghi_chu_pin = (" (không thấy hộp thoại nhập PIN — có thể phiên đã tự ký sẵn từ tờ khai "
+                       "trước, hoặc token/hub CKS có vấn đề)"
+                       if ket_pin and ket_pin.get("khong_thay_hop_thoai") else "")
+        thong_bao = (f"Đã tự động Ký hồ sơ + chọn chứng thư số xong{ghi_chu_pin}, nhưng KHÔNG tự "
+                     f"bấm được \"Nộp tờ khai\" ({(ket_nop or {}).get('loi') or 'không rõ lý do'}). "
+                     "Cửa sổ Chrome vẫn đang mở — hãy tự nhập mã PIN (nếu cần) và bấm \"Nộp tờ "
+                     "khai\" bằng tay từ đó.")
+    else:
         thong_bao = ("Đã tự động Ký hồ sơ + chọn chứng thư số, nhưng KHÔNG tự nhập được mã PIN "
                      f"({(ket_pin or {}).get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn đang "
                      "mở — hãy tự nhập mã PIN và bấm \"Nộp tờ khai\" bằng tay từ đó.")
-    else:
-        thong_bao = ("Đã tự động Ký hồ sơ + nhập mã PIN xong, nhưng KHÔNG tự bấm được "
-                     f"\"Nộp tờ khai\" ({(ket_nop or {}).get('loi') or 'không rõ lý do'}). Cửa sổ "
-                     "Chrome vẫn đang mở — hãy tự bấm \"Nộp tờ khai\" bằng tay từ đó.")
     return {"ok": True, "file_da_chon": file_path, "phien_id": phien_id,
             "ky_ho_so": ket_ky, "pin": ket_pin, "nop": ket_nop,
             "da_tu_dong_nop": da_tu_dong_nop,
@@ -5278,24 +5294,31 @@ def dvc_bam_ky_ho_so(phien_id: str):
     except Exception as e:
         ket_pin = {"ok": False, "loi": f"Lỗi khi tự nhập mã PIN: {e}", "buoc": []}
     ket_nop = None
-    if ket_pin.get("ok"):
+    # KHÔNG thấy hộp thoại PIN (khác "thấy nhưng sai PIN") vẫn cứ THỬ bấm
+    # "Nộp tờ khai" — xem giải thích chi tiết ở /api/dvc/nop-to-khai (hub CKS
+    # thường nhớ token đã mở khoá từ lần ký trước trong CÙNG phiên).
+    if ket_pin.get("ok") or ket_pin.get("khong_thay_hop_thoai"):
         try:
             ket_nop = _dvc_bam_nut_nop_to_khai(drv)
         except Exception as e:
             ket_nop = {"ok": False, "loi": f"Lỗi khi tự bấm \"Nộp tờ khai\": {e}"}
-    da_tu_dong_nop = bool(ket_pin.get("ok") and ket_nop and ket_nop.get("ok"))
+    da_tu_dong_nop = bool(ket_nop and ket_nop.get("ok"))
     if da_tu_dong_nop:
         ma_ho_so = (ket_nop or {}).get("ma_ho_so")
         thong_bao = ("Đã tự bấm \"Ký hồ sơ\", nhập mã PIN và bấm \"Nộp tờ khai\" — trang báo "
                      "THÀNH CÔNG" + (f" (Mã hồ sơ: {ma_ho_so})" if ma_ho_so else "") + ".")
-    elif not ket_pin.get("ok"):
+    elif ket_nop is not None:
+        ghi_chu_pin = (" (không thấy hộp thoại nhập PIN — có thể phiên đã tự ký sẵn từ tờ khai "
+                       "trước, hoặc token/hub CKS có vấn đề)"
+                       if ket_pin.get("khong_thay_hop_thoai") else "")
+        thong_bao = (f"Đã bấm \"Ký hồ sơ\" và chọn chứng thư số xong{ghi_chu_pin}, nhưng KHÔNG tự "
+                     f"bấm được \"Nộp tờ khai\" ({(ket_nop or {}).get('loi') or 'không rõ lý do'}). "
+                     "Cửa sổ Chrome vẫn đang mở — hãy tự nhập mã PIN (nếu cần) và bấm \"Nộp tờ "
+                     "khai\" bằng tay từ đó.")
+    else:
         thong_bao = ("Đã bấm \"Ký hồ sơ\" và chọn chứng thư số, nhưng KHÔNG tự nhập được mã PIN "
                      f"({ket_pin.get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn đang mở — hãy "
                      "tự nhập mã PIN và bấm \"Nộp tờ khai\" bằng tay từ đó.")
-    else:
-        thong_bao = ("Đã nhập mã PIN xong, nhưng KHÔNG tự bấm được \"Nộp tờ khai\" "
-                     f"({(ket_nop or {}).get('loi') or 'không rõ lý do'}). Cửa sổ Chrome vẫn đang "
-                     "mở — hãy tự bấm \"Nộp tờ khai\" bằng tay từ đó.")
     return {"ok": True, "buoc": ket.get("buoc"), "pin": ket_pin, "nop": ket_nop,
             "da_tu_dong_nop": da_tu_dong_nop, "thong_bao": thong_bao}
 
