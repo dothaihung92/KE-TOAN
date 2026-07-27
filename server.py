@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.7"
+APP_BUILD = "2026-07-27.8"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15020,9 +15020,9 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
 
     # ===== SỐ DƯ ĐẦU KỲ [22]: lấy từ tạm tính VAT đã lưu (vat_balance) =====
     ct22_val = 0
+    ky_tim = (f"Q{quy_so}/{yyyy}" if la_quy else ky)
     try:
         conn2 = db()
-        ky_tim = (f"Q{quy_so}/{yyyy}" if la_quy else ky)
         vb = conn2.execute(
             "SELECT du_dau_ky FROM vat_balance WHERE company_id=? AND ky=?",
             (cid, ky_tim)).fetchone()
@@ -15035,6 +15035,31 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             ct22_val = round(_to_num(vb["du_dau_ky"]) or 0)
     except Exception:
         pass
+
+    # CHƯA có tạm tính VAT lưu sẵn cho kỳ này (vd công ty KHÔNG có mật khẩu
+    # trang Thuế/không phát sinh hóa đơn nên chưa từng chạy "Tra cứu tờ khai
+    # thuế hàng loạt" hay tự bấm "Tạm tính thuế VAT" — bước tự động lấy số dư
+    # đầu kỳ trước đây CHỈ có ở 2 luồng đó, KHÔNG có khi bấm thẳng "Kết xuất
+    # XML cho HTKK", nên số dư đầu kỳ [22] bị bỏ trống/0 dù kỳ trước ĐÃ CÓ tờ
+    # khai với chỉ tiêu [41] > 0) -> TỰ ĐỘNG đọc chỉ tiêu [41] của tờ khai kỳ
+    # liền trước (từ thư mục lưu file kết xuất riêng của công ty), giống hệt
+    # "Tạm tính thuế VAT" đã làm, rồi LƯU LUÔN vào vat_balance để lần sau khỏi
+    # phải dò lại file.
+    if not ct22_val and comp:
+        try:
+            gia_tri_ct41, ky_truoc, _fp = _doc_ct41_ky_truoc(comp, ky_tim)
+            if gia_tri_ct41:
+                ct22_val = round(gia_tri_ct41)
+                conn3 = db()
+                conn3.execute("""
+                    INSERT INTO vat_balance (company_id, ky, du_dau_ky, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(company_id, ky) DO UPDATE SET
+                        du_dau_ky=excluded.du_dau_ky, updated_at=excluded.updated_at
+                """, (cid, ky_tim, ct22_val, datetime.datetime.now().isoformat()))
+                conn3.commit(); conn3.close()
+        except Exception:
+            pass
 
     # ----- Tính các chỉ tiêu tờ khai -----
     # ===== TỜ KHAI NHẬP KHẨU: tổng trị giá tính thuế GTGT + thuế GTGT hàng NK
