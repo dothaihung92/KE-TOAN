@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.13"
+APP_BUILD = "2026-07-27.14"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2573,22 +2573,34 @@ def _dvc_parse_token_info(rows_from_js):
 def _dvc_browser_lay_token_info(drv):
     """Vào trang "Quản lý thông tin" (dichvucong.gdt.gov.vn/tthc/dang-ky-dich-vu,
     sau khi đã đăng nhập), đọc thông tin chứng thư số (CKS): Tổ chức cấp +
-    Ngày hết hạn. Trả (to_chuc_cap, ngay_het_han_iso) hoặc (None, None)."""
+    Ngày hết hạn. Trả (to_chuc_cap, ngay_het_han_iso, chi_tiet_loi) — chi_tiet_loi
+    là chuỗi mô tả NGUYÊN NHÂN cụ thể khi KHÔNG đọc được (None nếu đọc được) —
+    trước đây mọi lỗi ở đây đều bị NUỐT ÂM THẦM (except: pass/return None,None),
+    khiến người dùng chỉ thấy "không đọc được thông tin token" mà không biết vì
+    sao (trang không tải được? bảng rỗng/khác cấu trúc? lỗi JS?), đúng phản ánh
+    của người dùng."""
     import time as _t
     try:
         drv.get(DVC_BASE + "/dang-ky-dich-vu")
         _t.sleep(1.5)
-        _dvc_wait_jquery(drv, 10)
+        if not _dvc_wait_jquery(drv, 10):
+            return None, None, "Trang \"Quản lý thông tin\" không nạp được jQuery (có thể tải chậm/bị chặn)"
         html = drv.page_source or ""
-    except Exception:
-        return None, None
+    except Exception as e:
+        return None, None, f"Lỗi khi mở trang \"Quản lý thông tin\": {e}"
     try:
         pr = drv.execute_async_script(_JS_PARSE_TABLE, html)
-        if pr and pr.get("ok"):
-            return _dvc_parse_token_info(pr.get("rows") or [])
-    except Exception:
-        pass
-    return None, None
+    except Exception as e:
+        return None, None, f"Lỗi khi đọc bảng dữ liệu (JS): {e}"
+    if not pr or not pr.get("ok"):
+        return None, None, f"Không đọc được bảng dữ liệu trên trang (kết quả: {str(pr)[:150]})"
+    to_chuc_cap, ngay_het_han = _dvc_parse_token_info(pr.get("rows") or [])
+    if not to_chuc_cap and not ngay_het_han:
+        so_dong = len(pr.get("rows") or [])
+        return None, None, (f"Trang đã tải được ({so_dong} dòng dữ liệu) nhưng KHÔNG tìm thấy dòng "
+                             f"'Tổ chức cấp'/'Ngày hết hạn' chứng thư số — có thể công ty này chưa "
+                             f"đăng ký chứng thư số trên Dịch vụ công, hoặc giao diện trang đã đổi khác")
+    return to_chuc_cap, ngay_het_han, None
 
 
 # ============================================================
@@ -4027,6 +4039,36 @@ def _dvc_browser_login_2pass(drv, mst, pw1, pw2):
     return False, 0, {"pass1": info1, "pass2": "(không có pass2)"}
 
 
+def _dvc_mo_ta_loi_dang_nhap(info):
+    """Rút gọn dict 'info' trả về từ _dvc_browser_login_2pass (khi đăng nhập
+    THẤT BẠI) thành 1 dòng dễ hiểu — TRƯỚC ĐÂY thông tin chi tiết này bị bỏ
+    qua hoàn toàn ở nơi gọi (chỉ hiện chung chung "sai mật khẩu / lỗi đăng
+    nhập"), khiến người dùng không biết CHÍNH XÁC là sai mật khẩu 1, mật khẩu
+    2, hay lỗi khác (trang không tải được, captcha lỗi liên tục...)."""
+    if not isinstance(info, dict):
+        return str(info)[:200]
+
+    def _1_dong(nhan, sub):
+        if isinstance(sub, str):
+            return f"{nhan}: {sub}"
+        if isinstance(sub, dict):
+            if "bo_qua" in sub:
+                return f"{nhan}: {sub['bo_qua']}"
+            if "loi" in sub:
+                return f"{nhan}: {sub['loi']}"
+            da_thu = sub.get("da_thu")
+            if da_thu:
+                return f"{nhan}: sai sau {len(da_thu)} lần thử ({da_thu[-1]})"
+        return f"{nhan}: thất bại (không rõ lý do — {str(sub)[:100]})"
+
+    phan = []
+    if "pass1" in info:
+        phan.append(_1_dong("Mật khẩu 1", info["pass1"]))
+    if "pass2" in info:
+        phan.append(_1_dong("Mật khẩu 2", info["pass2"]))
+    return " | ".join(phan) if phan else str(info)[:200]
+
+
 def _dvc_browser_tracuu(drv, tu, den, so_lan=8):
     """Tra cứu → trả (rows_struct, ma_list, raw_html, diag)."""
     import time as _t
@@ -4772,6 +4814,7 @@ def _dvc_run_batch(batch_id, cids, body):
                 ok, dung_pass, info = False, 0, {"loi": str(e)}
             if not ok:
                 item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
+                item["loi_chi_tiet"] = _dvc_mo_ta_loi_dang_nhap(info)
                 sai_pass.append({"mst": mst, "ten": ten,
                                  "ly_do": json.dumps(info, ensure_ascii=False)[:480]})
                 job["done"] += 1; continue
@@ -5104,10 +5147,12 @@ def _dvc_run_token_batch(batch_id, cids, body):
                 ok, dung_pass, info = False, 0, {"loi": str(e)}
             if not ok:
                 item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
+                item["loi_chi_tiet"] = _dvc_mo_ta_loi_dang_nhap(info)
                 job["done"] += 1; continue
-            to_chuc_cap, ngay_het_han = _dvc_browser_lay_token_info(drv)
+            to_chuc_cap, ngay_het_han, chi_tiet_loi_token = _dvc_browser_lay_token_info(drv)
             if not to_chuc_cap and not ngay_het_han:
                 item["trang_thai"] = "không đọc được thông tin token"
+                item["loi_chi_tiet"] = chi_tiet_loi_token or "Không rõ nguyên nhân"
                 job["done"] += 1; continue
             cn = db()
             cn.execute(

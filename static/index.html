@@ -1516,9 +1516,14 @@ async function dvcbTokenPoll(){
         const ngay=p?`hết hạn ${p[2]}/${p[1]}/${p[0]}`:'';
         const toChuc=tenNganCapCKS(it.to_chuc_cap);
         const phai=[ngay,toChuc].filter(Boolean).join(' · ');
+        // Chi tiết NGUYÊN NHÂN cụ thể khi lấy Token thất bại (sai mật khẩu
+        // 1/2, không đọc được trang, bảng dữ liệu rỗng...) — trước đây chỉ
+        // hiện chung chung "sai mật khẩu / lỗi đăng nhập"/"không đọc được
+        // thông tin token", không biết vì sao để tự xử lý.
+        const chiTiet=it.loi_chi_tiet?`<div style="margin-left:14px;color:#b91c1c;font-size:12px">↳ ${it.loi_chi_tiet}</div>`:'';
         return `<div style="display:flex;justify-content:space-between;gap:10px;color:${c}">`+
           `<span>• ${it.ten}: ${it.trang_thai}</span>`+
-          (phai?`<span style="flex:none;color:#888;font-size:12px">${phai}</span>`:'')+`</div>`;
+          (phai?`<span style="flex:none;color:#888;font-size:12px">${phai}</span>`:'')+`</div>${chiTiet}`;
       }).join('')+'</div>';
   }
   prog.innerHTML=html;
@@ -2087,7 +2092,11 @@ async function dvcbPoll(){
         // quả tra cứu thật vừa có (nếu có thay đổi) — hiện rõ để biết công
         // ty nào vừa được cập nhật trạng thái.
         const dongBo=it.dong_bo_nop_to_khai?`<div style="margin-left:14px;color:#8a6d1f">↳ ${it.dong_bo_nop_to_khai}</div>`:'';
-        return `<div style="color:${c}">• ${it.ten}: ${it.trang_thai}${it.so_dong?` (${it.so_dong} dòng${it.so_file?', '+it.so_file+' file':''})`:''}</div>${dongBo}`;
+        // Chi tiết NGUYÊN NHÂN cụ thể khi đăng nhập thất bại (sai mật khẩu
+        // 1/2, trang không tải được...) — trước đây chỉ hiện chung chung
+        // "sai mật khẩu / lỗi đăng nhập", không biết vì sao.
+        const chiTiet=it.loi_chi_tiet?`<div style="margin-left:14px;color:#b91c1c;font-size:12px">↳ ${it.loi_chi_tiet}</div>`:'';
+        return `<div style="color:${c}">• ${it.ten}: ${it.trang_thai}${it.so_dong?` (${it.so_dong} dòng${it.so_file?', '+it.so_file+' file':''})`:''}</div>${dongBo}${chiTiet}`;
       }).join('')+'</div>';
   }
   if(!j.running){
