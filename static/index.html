@@ -465,13 +465,16 @@
         <select id="dvcbLocTrangThai" onchange="dvcbFilter()"
                 style="padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px">
           <option value="">Trạng thái CQT: Tất cả</option>
-          <option value="da_chap_nhan">✅ Có loại Đã chấp nhận</option>
-          <option value="cho">🟡 Có loại đang Chờ</option>
+          <option value="day_du">✅ Đã nộp xong (cả GTGT &amp; TNCN)</option>
+          <option value="co_cho">🟡 Đã nộp, đang chờ xử lý</option>
           <option value="tu_choi">🔴 Có loại bị Từ chối</option>
-          <option value="chua_co">⚪ Chưa có dữ liệu (kỳ này)</option>
+          <option value="chua_co">⚪ Chưa nộp báo cáo (kỳ này)</option>
+          <option value="da_chap_nhan">— Có loại Đã chấp nhận (không nhất thiết cả 2)</option>
+          <option value="cho">— Có loại đang Chờ (không nhất thiết cả 2)</option>
         </select>
       </div>
-      <p class="hint" style="margin-top:0;margin-bottom:6px">🎨 Cột <b>GTGT</b>/<b>TNCN</b>: trạng thái cơ quan Thuế đã chấp nhận tờ khai của ĐÚNG kỳ đang chọn ở trên hay chưa — <span style="color:#0a7d4b">xanh = Đã chấp nhận</span>, <span style="color:#b45309">vàng = Chờ xử lý</span>, <span style="color:#b91c1c">đỏ = Từ chối</span>, xám = chưa có dữ liệu. Dữ liệu này được ghi lại từ lần "▶ Bắt đầu" tra cứu gần nhất cho đúng kỳ đang chọn (chỉ khi chọn kỳ theo <b>Quý</b>) — chưa từng chạy cho kỳ này thì chưa có màu.</p>
+      <p class="hint" style="margin-top:0;margin-bottom:2px" id="dvcbTongHopTt"></p>
+      <p class="hint" style="margin-top:0;margin-bottom:6px">🎨 Cột <b>GTGT</b>/<b>TNCN</b>: trạng thái cơ quan Thuế đã chấp nhận tờ khai của ĐÚNG kỳ đang chọn ở trên hay chưa — <span style="color:#0a7d4b">xanh = Đã chấp nhận</span>, <span style="color:#b45309">vàng = Chờ xử lý</span>, <span style="color:#b91c1c">đỏ = Từ chối</span>, xám = chưa có dữ liệu. Dữ liệu này được ghi lại từ lần "▶ Bắt đầu" tra cứu gần nhất cho đúng kỳ đang chọn (chỉ khi chọn kỳ theo <b>Quý</b>) — chưa từng chạy cho kỳ này thì chưa có màu. Chọn 1 loại trong ô lọc trên rồi bấm "Chọn tất cả (đang hiện)" để chỉ tick đúng nhóm công ty đó.</p>
       <div style="display:grid;grid-template-columns:1fr 60px 60px 92px 78px 110px;gap:10px;padding:0 4px 4px;font-size:11.5px;color:#999;font-weight:600">
         <span></span><span>GTGT</span><span>TNCN</span><span>Hạn Token</span><span>Hết hạn</span><span>Tổ chức cấp</span>
       </div>
@@ -1428,8 +1431,17 @@ function dvcbRenderCoList(giuDaChon){
     const tncnCol=spanTt(mTncn,(ttCty.TNCN||{}).chi_tiet);
     // key dùng để lọc theo trạng thái: liệt kê mọi nhóm màu đang có (GTGT
     // và/hoặc TNCN) + đánh dấu "chua_co" nếu CẢ 2 đều chưa có dữ liệu.
+    // Thêm 2 nhóm GỘP chính xác hơn (khác với "có loại..." vốn chỉ cần 1
+    // trong 2 khớp): "day_du" = CẢ GTGT lẫn TNCN đều đã chấp nhận (đã nộp
+    // xong thật sự); "co_cho" = đã nộp ít nhất 1 loại nhưng còn đang chờ xử
+    // lý (chưa đủ cả 2 được chấp nhận, và không phải "chưa nộp gì cả").
     const nhomTt=[ttGtgt,ttTncn].filter(Boolean);
-    const dataTt=(nhomTt.length?nhomTt:['chua_co']).join(' ');
+    const dayDu=ttGtgt==='da_chap_nhan'&&ttTncn==='da_chap_nhan';
+    const coCho=!dayDu&&(ttGtgt==='cho'||ttTncn==='cho');
+    const tags=nhomTt.length?[...nhomTt]:['chua_co'];
+    if(dayDu)tags.push('day_du');
+    if(coCho)tags.push('co_cho');
+    const dataTt=tags.join(' ');
     return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" data-trangthai="${dataTt}" `+
       `style="display:grid;grid-template-columns:1fr 60px 60px 92px 78px 110px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #f0f0f0">`+
       `<span style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden">`+
@@ -1438,6 +1450,30 @@ function dvcbRenderCoList(giuDaChon){
       gtgtCol+tncnCol+hanCol+ngayCol+toChucCol+`</label>`;
   }).join('') || '<div style="color:#888">Chưa có công ty</div>';
   dvcbCount();
+  // Tóm tắt số công ty đã nộp xong/đang chờ/chưa nộp báo cáo — CHỈ có ý
+  // nghĩa khi trạng thái CQT đang tải đúng cho kỳ Quý (xem dvcbTaiTrangThaiCqt);
+  // các loại kỳ khác (Tháng/Năm/Tùy chọn) không có dữ liệu này.
+  const tomTat=document.getElementById('dvcbTongHopTt');
+  if(tomTat){
+    if(document.getElementById('dvcb_loaiky').value!=='quy'){
+      tomTat.textContent='';
+    }else{
+      let soDayDu=0,soCho=0,soChuaNop=0,soTuChoi=0;
+      companies.forEach(c=>{
+        const tt=dvcbTrangThaiCqt[String(c.id)]||{};
+        const g=(tt.GTGT||{}).trang_thai||null, t=(tt.TNCN||{}).trang_thai||null;
+        if(g==='da_chap_nhan'&&t==='da_chap_nhan')soDayDu++;
+        else if(g==='tu_choi'||t==='tu_choi')soTuChoi++;
+        else if(g==='cho'||t==='cho')soCho++;
+        else if(!g&&!t)soChuaNop++;
+      });
+      tomTat.innerHTML=`📊 Trong <b>${companies.length}</b> công ty: `+
+        `<span style="color:#0a7d4b">✅ Đã nộp xong: <b>${soDayDu}</b></span> · `+
+        `<span style="color:#b45309">🟡 Đang chờ xử lý: <b>${soCho}</b></span> · `+
+        `<span style="color:#b91c1c">🔴 Bị từ chối: <b>${soTuChoi}</b></span> · `+
+        `<span style="color:#666">⚪ Chưa nộp báo cáo kỳ này: <b>${soChuaNop}</b></span>`;
+    }
+  }
 }
 function tenNganCapCKS(dn){
   // "Tổ chức cấp" thô là chuỗi Distinguished Name (vd "CN=I-CA SHA-256,
