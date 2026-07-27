@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.5"
+APP_BUILD = "2026-07-27.6"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14463,6 +14463,86 @@ def vat_luu(cid: int, data: dict = Body(...)):
     return {"ok": True}
 
 
+def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
+    """Đọc nhóm BÁN RA theo thuế suất TRỰC TIẾP từ file Excel 'Bảng kê hóa
+    đơn' (BangKe_HoaDon_{mst}...xlsx) ĐÃ XUẤT VÀ LƯU SẴN trên máy (sheet
+    'BK Bán ra') — theo đúng yêu cầu: Kết xuất XML KHÔNG tự tra cứu/gọi mạng
+    lại nữa, CHỈ dựa vào số liệu đã có sẵn trong file bảng kê đã lưu (số liệu
+    người dùng đã xem/xác nhận đúng trong file đó). Đọc TỪNG DÒNG hóa đơn
+    (không dùng dòng 'Tổng nhóm'/'TỔNG CỘNG' có sẵn — 2 dòng đó gộp CẢ LỊCH
+    SỬ hóa đơn công ty, không lọc theo đúng kỳ khai), tự lọc lại theo đúng
+    khoảng ngày (d_tu..d_den) của kỳ đang xuất XML.
+    Trả về dict {'KCT'/'0'/'5'/'8'/'10'/'KHAC': {'ds','thue'}}, hoặc None nếu
+    không tìm thấy file / không đọc được / không có dòng nào khớp kỳ."""
+    import glob
+    ung_vien = []
+    for thu_muc in (DOWNLOAD_DIR, save_dir):
+        if thu_muc and os.path.isdir(thu_muc):
+            try:
+                ung_vien += glob.glob(os.path.join(thu_muc, f"BangKe_HoaDon_{mst}*.xlsx"))
+            except Exception:
+                pass
+    if not ung_vien:
+        return None
+    fpath = max(ung_vien, key=lambda p: os.path.getmtime(p))
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(fpath, data_only=True, read_only=True)
+        if "BK Bán ra" not in wb.sheetnames:
+            return None
+        ws = wb["BK Bán ra"]
+    except Exception:
+        return None
+
+    nhan_to_key = {
+        "1. Hàng hóa, dịch vụ không chịu thuế GTGT (KCT)": "KCT",
+        "2. Hàng hóa, dịch vụ chịu thuế suất 0%": "0",
+        "3. Hàng hóa, dịch vụ chịu thuế suất 5%": "5",
+        "4. Hàng hóa, dịch vụ chịu thuế suất 8%": "8",
+        "5. Hàng hóa, dịch vụ chịu thuế suất 10%": "10",
+        "6. Khác / chưa lấy được file XML": "KHAC",
+    }
+    ket_qua = {"KCT": {"ds": 0, "thue": 0}, "0": {"ds": 0, "thue": 0},
+               "5": {"ds": 0, "thue": 0}, "8": {"ds": 0, "thue": 0},
+               "10": {"ds": 0, "thue": 0}, "KHAC": {"ds": 0, "thue": 0}}
+    ds_full = thue_full = 0   # TỔNG CỘNG cả sheet (không lọc kỳ) — để đối chiếu [34]/[35]
+    nhom_hien_tai = None
+    tim_thay_dong = False
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            col_a = row[0] if len(row) > 0 else None
+            if isinstance(col_a, str) and col_a.strip() in nhan_to_key:
+                nhom_hien_tai = nhan_to_key[col_a.strip()]
+                continue
+            if not isinstance(col_a, (int, float)) or nhom_hien_tai is None:
+                continue
+            ds_o = row[8] if len(row) > 8 else 0     # cột I: Doanh số bán chưa thuế
+            thue_o = row[9] if len(row) > 9 else 0   # cột J: Thuế GTGT
+            ds_o = ds_o if isinstance(ds_o, (int, float)) else 0
+            thue_o = thue_o if isinstance(thue_o, (int, float)) else 0
+            ds_full += ds_o; thue_full += thue_o
+            ngay_raw = row[4] if len(row) > 4 else None   # cột E: Ngày lập
+            d = None
+            if isinstance(ngay_raw, (datetime.date, datetime.datetime)):
+                d = ngay_raw.date() if isinstance(ngay_raw, datetime.datetime) else ngay_raw
+            elif isinstance(ngay_raw, str) and "/" in ngay_raw:
+                try:
+                    d = datetime.datetime.strptime(ngay_raw.strip(), "%d/%m/%Y").date()
+                except Exception:
+                    d = None
+            if not (d and d_tu <= d <= d_den):
+                continue
+            tim_thay_dong = True
+            ket_qua[nhom_hien_tai]["ds"] += ds_o
+            ket_qua[nhom_hien_tai]["thue"] += thue_o
+    except Exception:
+        return None
+    if not tim_thay_dong:
+        return None
+    ket_qua["_full"] = {"ds": ds_full, "thue": thue_full}
+    return ket_qua
+
+
 @app.get("/api/export-htkk/{cid}")
 def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
                 luu_ket_xuat: int = 0, mo_file: int = 1):
@@ -14767,115 +14847,127 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # LẪN LỘN với KCT — 2 khái niệm khác hẳn nhau trên tờ khai, dẫn tới doanh
     # thu KCT thật bị ghi nhầm vào chỉ tiêu [29] "chịu thuế suất 0%" thay vì
     # [26], đúng lỗi người dùng đã phát hiện qua file XML kết xuất).
-    client = CLIENTS.get(cid)
-
-    # TỰ ĐĂNG NHẬP LẠI nếu phiên đã hết/chưa đăng nhập — GIỐNG HỆT Xuất Excel
-    # đã làm (export_excel dòng ~15495-15515) — trước đây bước này CHỈ có ở
-    # Xuất Excel, KHÔNG có ở Kết xuất XML HTKK riêng. Vì vậy khi bấm "Kết xuất
-    # XML cho HTKK" TRỰC TIẾP (không qua Xuất Excel/tra cứu ngay trước đó) mà
-    # phiên đăng nhập đã hết, tầng gọi mạng dự phòng của get_items() phía trên
-    # không có phiên để gọi -> ÂM THẦM bỏ qua -> hóa đơn thiếu chi tiết rơi
-    # vào nhánh đoán mò theo trạng thái đăng nhập -> MỌI hóa đơn (kể cả KCT/
-    # 5%/8% thật) bị dồn hết vào "10%" — đúng lỗi đã báo lại nhiều lần dù đã
-    # thêm tầng gọi mạng. CHỈ tự đăng nhập lại khi THẬT SỰ có hóa đơn (trong
-    # kỳ) còn thiếu cả detail_json lẫn file đã tải, để không làm chậm vô ích
-    # khi dữ liệu đã có sẵn đầy đủ (vd vừa tra cứu/xuất Excel xong).
-    def _thieu_chi_tiet(r):
-        try:
-            if r["detail_json"]:
-                return False
-        except Exception:
-            pass
-        return not _fidx.get((str(r["khhdon"] or ""), str(r["shdon"] or "").lstrip("0") or "0"))
-
-    ids_thieu_chi_tiet = [
-        r["id"] for r in rows
-        if r["loai"] == "sold" and not status_loai_bo(r) and trong_ky(r["tdlap"])
-        and _thieu_chi_tiet(r)]
-    if (ids_thieu_chi_tiet and comp
-            and (not client or not client.token or getattr(client, "_token_dead", False))
-            and comp["password"]):
-        drv_dn = _mo_trinh_duyet_captcha()
-        try:
-            _tu_dong_dang_nhap(cid, so_lan=8, drv=drv_dn)
-        except Exception:
-            pass
-        finally:
-            _dong_trinh_duyet_captcha(drv_dn)
-        client = CLIENTS.get(cid)
-
-    if ids_thieu_chi_tiet and client and client.token and not getattr(client, "_token_dead", False):
-        # LẤY NỐT chi tiết dòng hàng cho ĐÚNG các hóa đơn (trong kỳ) còn thiếu,
-        # dùng lại _dam_bao_du_chi_tiet_hoa_don() — hàm ĐÃ CHỨNG MINH đáng tin
-        # cậy (nhiều luồng song song + tự thử lại/chờ giới hạn tốc độ 429 +
-        # tự đăng nhập lại giữa chừng nếu phiên chết), vốn dùng cho bước "tra
-        # cứu phải lấy đủ dữ liệu" trước khi Xuất Excel. Tầng gọi mạng "thử 1
-        # lần, không chờ" của get_items() phía dưới KHÔNG đủ khi công ty có
-        # NHIỀU hóa đơn CÙNG LÚC thiếu chi tiết (vd hàng nghìn hóa đơn máy
-        # tính tiền) — gọi tuần tự từng hóa đơn 1 lần sẽ bị giới hạn tốc độ
-        # (429) gần như ngay và bỏ cuộc luôn, đúng lý do lỗi vẫn còn dù đã
-        # thêm tầng gọi mạng + tự đăng nhập lại. CHỈ giới hạn trong phạm vi
-        # hóa đơn CỦA KỲ ĐANG XUẤT (chi_ids) — KHÔNG quét toàn bộ lịch sử hóa
-        # đơn công ty — để tránh treo lâu với công ty có hàng vạn hóa đơn cũ.
-        try:
-            _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, lambda **kw: None,
-                                          chi_ids=ids_thieu_chi_tiet)
-        except Exception:
-            pass
-        client = CLIENTS.get(cid)
-        # ĐỌC LẠI rows để có detail_json MỚI NHẤT vừa lấy được ở trên — 'rows'
-        # nạp lúc đầu hàm là bản CHỤP TRƯỚC khi gọi mạng, vẫn còn detail_json
-        # rỗng (sqlite3.Row không tự cập nhật theo DB), nếu không đọc lại thì
-        # get_items() bên dưới vẫn thấy r["detail_json"] rỗng như cũ, coi như
-        # CHƯA lấy được gì dù DB đã lưu đúng — vô hiệu hóa cả bước lấy nốt vừa
-        # làm ở trên.
-        _conn_lai = db()
-        rows = _gop_hoa_don_trung_he_thong(
-            _conn_lai.execute("SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall())
-        _conn_lai.close()
-
-    # ban_ds_full/ban_thue_full: TỔNG CỘNG bán ra KHÔNG lọc theo kỳ — để đối
-    # chiếu với TỔNG CỘNG thật của sheet "BK Bán ra" (sheet đó liệt kê MỌI
-    # hóa đơn bán ra hiện có, không lọc theo đúng kỳ khai).
+    # ===== ƯU TIÊN TUYỆT ĐỐI: đọc thẳng file Excel "Bảng kê hóa đơn" ĐÃ XUẤT
+    # VÀ LƯU SẴN trên máy (sheet "BK Bán ra") — THEO ĐÚNG YÊU CẦU: Kết xuất
+    # XML KHÔNG tự tra cứu/gọi mạng lấy lại chi tiết hóa đơn nữa, chỉ dựa vào
+    # số liệu đã có sẵn trong file bảng kê (người dùng đã xem/xác nhận đúng
+    # trong file đó). CHỈ khi KHÔNG tìm thấy file này (chưa từng Xuất Excel)
+    # mới rơi xuống nhánh cũ (tự đăng nhập lại + gọi mạng lấy chi tiết).
+    _tu_file_bk = _doc_nhom_ban_ra_tu_file_bang_ke(mst_cty, save_dir, d_tu, d_den)
     ban_ds_full = ban_thue_full = 0
+    if _tu_file_bk is not None:
+        full = _tu_file_bk.pop("_full", {"ds": 0, "thue": 0})
+        ban_ds_full, ban_thue_full = full["ds"], full["thue"]
+        for k, v in _tu_file_bk.items():
+            tgt = k if k in ban_theo_ts else "KCT"   # "KHAC" (Xuất Excel chưa lấy được file) gộp vào KCT
+            ban_theo_ts[tgt]["ds"] += v["ds"]
+            ban_theo_ts[tgt]["thue"] += v["thue"]
+    else:
+        client = CLIENTS.get(cid)
 
-    for r in rows:
-        if r["loai"] != "sold" or status_loai_bo(r):
-            continue
-        r_trong_ky = trong_ky(r["tdlap"])
-        items_r = get_items(r)
-        theo_ts_r = _nhom_hoa_don_theo_thue_suat(items_r) if items_r else None
-        if theo_ts_r:
-            for k, v in theo_ts_r.items():
-                tgt = k if k in ban_theo_ts else "10"
-                ban_ds_full += v["ds"]; ban_thue_full += v["thue"]
-                if r_trong_ky:
-                    ban_theo_ts[tgt]["ds"] += v["ds"]
-                    ban_theo_ts[tgt]["thue"] += v["thue"]
-        else:
-            ds = _to_num(r["tgtcthue"]) or 0
-            thue = _to_num(r["tgtthue"]) or 0
-            ban_ds_full += ds; ban_thue_full += thue
-            if not r_trong_ky:
-                continue
-            # Hóa đơn từ IMPORT EXCEL không có chi tiết dòng hàng (ltsuat) để
-            # tự suy nhóm — nhưng lúc import ĐÃ đọc được đúng nhóm từ tiêu đề
-            # nhóm của sheet 'BK Bán ra' (lưu vào raw.nhom_ts) -> ưu tiên
-            # dùng lại, không đoán mò/không rơi về mặc định KCT hay 10%.
-            nhom_luu = None
+        # TỰ ĐĂNG NHẬP LẠI nếu phiên đã hết/chưa đăng nhập — GIỐNG HỆT Xuất
+        # Excel đã làm (export_excel dòng ~15495-15515) — trước đây bước này
+        # CHỈ có ở Xuất Excel, KHÔNG có ở Kết xuất XML HTKK riêng. Vì vậy khi
+        # bấm "Kết xuất XML cho HTKK" TRỰC TIẾP (không qua Xuất Excel/tra cứu
+        # ngay trước đó, KHÔNG có sẵn file bảng kê ở nhánh trên) mà phiên đăng
+        # nhập đã hết, tầng gọi mạng dự phòng của get_items() phía dưới không
+        # có phiên để gọi -> ÂM THẦM bỏ qua -> hóa đơn thiếu chi tiết rơi vào
+        # nhánh đoán mò theo trạng thái đăng nhập -> MỌI hóa đơn (kể cả KCT/
+        # 5%/8% thật) bị dồn hết vào "10%" — đúng lỗi đã báo lại nhiều lần dù
+        # đã thêm tầng gọi mạng. CHỈ tự đăng nhập lại khi THẬT SỰ có hóa đơn
+        # (trong kỳ) còn thiếu cả detail_json lẫn file đã tải, để không làm
+        # chậm vô ích khi dữ liệu đã có sẵn đầy đủ.
+        def _thieu_chi_tiet(r):
             try:
-                raw_r = json.loads(r["raw"]) if r["raw"] else {}
-                if raw_r.get("nguon") == "import_excel":
-                    nhom_luu = raw_r.get("nhom_ts")
+                if r["detail_json"]:
+                    return False
             except Exception:
                 pass
-            if nhom_luu in ban_theo_ts:
-                nhom = nhom_luu
+            return not _fidx.get((str(r["khhdon"] or ""), str(r["shdon"] or "").lstrip("0") or "0"))
+
+        ids_thieu_chi_tiet = [
+            r["id"] for r in rows
+            if r["loai"] == "sold" and not status_loai_bo(r) and trong_ky(r["tdlap"])
+            and _thieu_chi_tiet(r)]
+        if (ids_thieu_chi_tiet and comp
+                and (not client or not client.token or getattr(client, "_token_dead", False))
+                and comp["password"]):
+            drv_dn = _mo_trinh_duyet_captcha()
+            try:
+                _tu_dong_dang_nhap(cid, so_lan=8, drv=drv_dn)
+            except Exception:
+                pass
+            finally:
+                _dong_trinh_duyet_captcha(drv_dn)
+            client = CLIENTS.get(cid)
+
+        if ids_thieu_chi_tiet and client and client.token and not getattr(client, "_token_dead", False):
+            # LẤY NỐT chi tiết dòng hàng cho ĐÚNG các hóa đơn (trong kỳ) còn
+            # thiếu, dùng lại _dam_bao_du_chi_tiet_hoa_don() — hàm ĐÃ CHỨNG
+            # MINH đáng tin cậy (nhiều luồng song song + tự thử lại/chờ giới
+            # hạn tốc độ 429 + tự đăng nhập lại giữa chừng nếu phiên chết),
+            # vốn dùng cho bước "tra cứu phải lấy đủ dữ liệu" trước khi Xuất
+            # Excel. Tầng gọi mạng "thử 1 lần, không chờ" của get_items() phía
+            # dưới KHÔNG đủ khi công ty có NHIỀU hóa đơn CÙNG LÚC thiếu chi
+            # tiết (vd hàng nghìn hóa đơn máy tính tiền) — gọi tuần tự từng
+            # hóa đơn 1 lần sẽ bị giới hạn tốc độ (429) gần như ngay và bỏ
+            # cuộc luôn. CHỈ giới hạn trong phạm vi hóa đơn CỦA KỲ ĐANG XUẤT
+            # (chi_ids) — KHÔNG quét toàn bộ lịch sử hóa đơn công ty — để
+            # tránh treo lâu với công ty có hàng vạn hóa đơn cũ.
+            try:
+                _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, lambda **kw: None,
+                                              chi_ids=ids_thieu_chi_tiet)
+            except Exception:
+                pass
+            client = CLIENTS.get(cid)
+            # ĐỌC LẠI rows để có detail_json MỚI NHẤT vừa lấy được ở trên —
+            # 'rows' nạp lúc đầu hàm là bản CHỤP TRƯỚC khi gọi mạng, vẫn còn
+            # detail_json rỗng (sqlite3.Row không tự cập nhật theo DB), nếu
+            # không đọc lại thì get_items() bên dưới vẫn thấy r["detail_json"]
+            # rỗng như cũ, coi như CHƯA lấy được gì dù DB đã lưu đúng.
+            _conn_lai = db()
+            rows = _gop_hoa_don_trung_he_thong(
+                _conn_lai.execute("SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall())
+            _conn_lai.close()
+
+        for r in rows:
+            if r["loai"] != "sold" or status_loai_bo(r):
+                continue
+            r_trong_ky = trong_ky(r["tdlap"])
+            items_r = get_items(r)
+            theo_ts_r = _nhom_hoa_don_theo_thue_suat(items_r) if items_r else None
+            if theo_ts_r:
+                for k, v in theo_ts_r.items():
+                    tgt = k if k in ban_theo_ts else "10"
+                    ban_ds_full += v["ds"]; ban_thue_full += v["thue"]
+                    if r_trong_ky:
+                        ban_theo_ts[tgt]["ds"] += v["ds"]
+                        ban_theo_ts[tgt]["thue"] += v["thue"]
             else:
-                dang_nhap_ok = bool(client and client.token and not getattr(client, "_token_dead", False))
-                nhom = "KCT" if (dang_nhap_ok and ds) else "10"
-            ban_theo_ts[nhom]["ds"] += ds
-            ban_theo_ts[nhom]["thue"] += thue
+                ds = _to_num(r["tgtcthue"]) or 0
+                thue = _to_num(r["tgtthue"]) or 0
+                ban_ds_full += ds; ban_thue_full += thue
+                if not r_trong_ky:
+                    continue
+                # Hóa đơn từ IMPORT EXCEL không có chi tiết dòng hàng (ltsuat)
+                # để tự suy nhóm — nhưng lúc import ĐÃ đọc được đúng nhóm từ
+                # tiêu đề nhóm của sheet 'BK Bán ra' (lưu vào raw.nhom_ts) ->
+                # ưu tiên dùng lại, không đoán mò/không rơi về mặc định KCT
+                # hay 10%.
+                nhom_luu = None
+                try:
+                    raw_r = json.loads(r["raw"]) if r["raw"] else {}
+                    if raw_r.get("nguon") == "import_excel":
+                        nhom_luu = raw_r.get("nhom_ts")
+                except Exception:
+                    pass
+                if nhom_luu in ban_theo_ts:
+                    nhom = nhom_luu
+                else:
+                    dang_nhap_ok = bool(client and client.token and not getattr(client, "_token_dead", False))
+                    nhom = "KCT" if (dang_nhap_ok and ds) else "10"
+                ban_theo_ts[nhom]["ds"] += ds
+                ban_theo_ts[nhom]["thue"] += thue
 
     # KHÔNG còn dùng dữ liệu ĐÃ IMPORT (bảng imported_data) để ghi đè mua_ds/
     # mua_thue/ban_theo_ts ở đây nữa — import Excel "dữ liệu đã kiểm tra" đã
