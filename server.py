@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.1"
+APP_BUILD = "2026-07-27.2"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14675,22 +14675,33 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
                    "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0},
                    "KCT": {"ds": 0, "thue": 0}}
 
-    def get_summary(r):
-        """CHỈ dùng dữ liệu đã có (không gọi mạng để tránh treo)."""
+    def get_items(r):
+        """CHỈ dùng dữ liệu đã có (không gọi mạng để tránh treo). Trả THẲNG
+        list dòng hàng chi tiết (qua _parse_detail_json/_parse_xml_invoice —
+        CÙNG 2 hàm mà sheet "Chi tiết BÁN RA"/"BK Bán ra" của Xuất Excel dùng)
+        — KHÔNG dùng _summary_from_detail_json/_parse_invoice_summary (khối
+        tổng hợp riêng "thttltsuat"/"THTTLTSuat" của Tổng cục Thuế trong 2 hàm
+        đó đã xác nhận có thể SAI/rỗng thuế suất với hóa đơn MTT — máy tính
+        tiền — dù dòng hàng chi tiết vẫn đúng), để chỉ tiêu [27]-[35] LUÔN
+        khớp đúng tổng của 2 sheet Excel, tránh 2 nơi tính lệch nhau."""
         try:
             dj = r["detail_json"] if "detail_json" in r.keys() else None
         except Exception:
             dj = None
         if dj:
             try:
-                return _summary_from_detail_json(json.loads(dj))
+                items_dj = _parse_detail_json(json.loads(dj))
+                if items_dj:
+                    return items_dj
             except Exception:
                 pass
         fp = _fidx.get((str(r["khhdon"] or ""), str(r["shdon"] or "").lstrip("0") or "0"))
         if fp:
             try:
                 with open(fp, "rb") as f:
-                    return _parse_invoice_summary(f.read())
+                    items_f = _parse_xml_invoice(f.read())
+                if items_f:
+                    return items_f
             except Exception:
                 pass
         return None
@@ -14715,9 +14726,10 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         if r["loai"] != "sold" or status_loai_bo(r):
             continue
         r_trong_ky = trong_ky(r["tdlap"])
-        info = get_summary(r)
-        if info and info.get("theo_ts"):
-            for k, v in info["theo_ts"].items():
+        items_r = get_items(r)
+        theo_ts_r = _nhom_hoa_don_theo_thue_suat(items_r) if items_r else None
+        if theo_ts_r:
+            for k, v in theo_ts_r.items():
                 tgt = k if k in ban_theo_ts else "10"
                 ban_ds_full += v["ds"]; ban_thue_full += v["thue"]
                 if r_trong_ky:
@@ -17402,6 +17414,48 @@ def _dong_phi_hoa_don(tong_phi, common):
         "_la_phi": True,   # đánh dấu để hiện đúng chữ "KCT" (không phải "0%")
     })
     return d
+
+
+def _chuan_hoa_thue_suat(ts):
+    """Chuẩn hóa mã thuế suất -> '0'/'5'/'8'/'10'/'KCT'. Dùng CHUNG cho mọi
+    nơi cần gộp hóa đơn/dòng hàng theo nhóm thuế suất — TRƯỚC ĐÂY mỗi hàm
+    (_summary_from_detail_json/_parse_invoice_summary) tự viết 1 bản riêng dễ
+    lệch nhau. Hàng KHÔNG CHỊU THUẾ trên hóa đơn thật của Thuế không chỉ ghi
+    'KCT' mà còn có thể là 'KKKNT'/'KHTKKNT'."""
+    s = str(ts or "").strip().upper().replace(" ", "")
+    if s in ("", "KCT", "KHAC", "KO", "KHÔNG", "KHONG", "KKKNT", "KHTKKNT") \
+            or "KKK" in s or "KCT" in s:
+        return "KCT"
+    s2 = s.replace("%", "").strip()
+    if s2 in ("0", "5", "8", "10"):
+        return s2
+    return s or "KHAC"
+
+
+def _nhom_hoa_don_theo_thue_suat(items):
+    """Gộp list dòng hàng (output _parse_detail_json/_parse_xml_invoice) theo
+    nhóm thuế suất chuẩn hoá -> {'0'|'5'|'8'|'10'|'KCT'|...: {'ds','thue'}}.
+    Dùng THẲNG dòng hàng chi tiết (KHÔNG qua khối tổng hợp riêng của Tổng
+    cục Thuế, vốn đã xác nhận có thể SAI/rỗng thuế suất với hóa đơn MTT —
+    máy tính tiền) — khớp ĐÚNG cách sheet 'Chi tiết BÁN RA'/'BK Bán ra' tính
+    (cũng dùng _parse_detail_json/_parse_xml_invoice), để chỉ tiêu [27]-[35]
+    trên XML LUÔN khớp đúng tổng của 2 sheet đó, không lệch."""
+    theo_ts = {}
+    for it in items or []:
+        key = _chuan_hoa_thue_suat(it.get("tsuat"))
+        ds = _to_num(it.get("thtien")) or 0
+        ds = ds if isinstance(ds, (int, float)) else 0
+        thue = _to_num(it.get("tien_thue"))
+        if not isinstance(thue, (int, float)):
+            try:
+                rate = float(str(it.get("tsuat") or "0").replace("%", "")) / 100
+            except Exception:
+                rate = 0
+            thue = round(ds * rate)
+        cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0})
+        cur["ds"] += ds
+        cur["thue"] += thue
+    return theo_ts
 
 
 def _parse_xml_invoice(xml_bytes):
