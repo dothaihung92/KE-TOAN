@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.11"
+APP_BUILD = "2026-07-26.12"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4696,6 +4696,11 @@ def _dvc_run_batch(batch_id, cids, body):
     ds_nguon = _nguon_tra_cuu_theo_ky(tu, den)
     tracuu_rows = []      # gom mọi dòng cho Excel tra cứu
     sai_pass = []         # công ty đăng nhập không được
+    # ĐỒNG BỘ trạng thái tick "Tự động nộp tờ khai" (GTGT/TNCN) theo đúng kết
+    # quả tra cứu THẬT trên cổng — chỉ áp dụng khi khoảng ngày đang tra cứu
+    # RƠI GỌN vào ĐÚNG 1 quý (kỳ tính thuế của GTGT/TNCN luôn theo quý); nếu
+    # trải nhiều quý/cả năm thì bỏ qua (không rõ đồng bộ cho quý nào).
+    dong_bo_nam, dong_bo_quy = _quy_cua_ky(tu, den)
     drv = None
     try:
         try:
@@ -4832,6 +4837,58 @@ def _dvc_run_batch(batch_id, cids, body):
                                 pass
                             time.sleep(0.3)
             item["chua_nop"] = not co_du_lieu_nguon_nao and not item.get("loi_tra_cuu")
+
+            # ===== ĐỒNG BỘ tick "Tự động nộp tờ khai" (GTGT/TNCN) theo đúng
+            # kết quả tra cứu THẬT vừa có =====
+            # - Tờ khai loại nào ĐÃ được cơ quan Thuế "Đã chấp nhận" đúng kỳ
+            #   này -> tự TICK (nếu đang chưa tick).
+            # - Loại nào CHƯA được chấp nhận đúng kỳ này -> tự BỎ TICK (nếu
+            #   đang tick sai — vd người dùng lỡ tick nhầm, hoặc tick từ 1
+            #   lần kiểm tra trước đó không còn đúng nữa).
+            # Dùng lại _dvc_kiem_tra_da_nop_mot_loai (đã tự mở rộng vùng tìm
+            # theo NGÀY NỘP tới hôm nay) để không bỏ sót tờ khai nộp SAU khi
+            # quý đã kết thúc (trường hợp GẦN NHƯ LUÔN xảy ra với tờ khai
+            # quý) — không dùng lại dữ liệu tra cứu thô ở trên vì đó tìm theo
+            # ĐÚNG khoảng ngày người dùng chọn cho công cụ này, có thể quá hẹp.
+            # KHÔNG đụng tới xác nhận đã đánh dấu THỦ CÔNG (thu_cong) — chỉ tự
+            # đồng bộ những xác nhận trước đó cũng LÀ tự động (hoặc chưa có).
+            if dong_bo_quy:
+                tu_ky_db, den_ky_db = _tu_den_cua_quy(dong_bo_nam, dong_bo_quy)
+                dong_bo_ghi_chu = []
+                for loai_dongbo in ("GTGT", "TNCN"):
+                    try:
+                        xn_dongbo, _tt_dongbo, ct_dongbo = _dvc_kiem_tra_da_nop_mot_loai(
+                            drv, loai_dongbo, tu_ky_db, den_ky_db)
+                    except Exception:
+                        continue
+                    conn_db2 = db()
+                    log_cu = conn_db2.execute(
+                        "SELECT xac_nhan, xac_nhan_nguon FROM nop_to_khai_log "
+                        "WHERE company_id=? AND loai=?", (cid, loai_dongbo)).fetchone()
+                    if log_cu and log_cu["xac_nhan_nguon"] == "thu_cong":
+                        conn_db2.close()
+                        continue   # giữ nguyên đánh dấu thủ công, không tự ý đè
+                    if xn_dongbo:
+                        if not (log_cu and log_cu["xac_nhan"]):
+                            dong_bo_ghi_chu.append(f"tự TICK {loai_dongbo} (đã chấp nhận)")
+                        conn_db2.execute(
+                            "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, "
+                            "xac_nhan_nguon, xac_nhan_chi_tiet) VALUES (?, ?, 1, ?, 'auto', ?) "
+                            "ON CONFLICT(company_id, loai) DO UPDATE SET xac_nhan=1, "
+                            "xac_nhan_at=excluded.xac_nhan_at, xac_nhan_nguon='auto', "
+                            "xac_nhan_chi_tiet=excluded.xac_nhan_chi_tiet",
+                            (cid, loai_dongbo, datetime.datetime.now().isoformat(), ct_dongbo))
+                    elif log_cu and log_cu["xac_nhan"]:
+                        dong_bo_ghi_chu.append(f"tự BỎ TICK {loai_dongbo} (chưa nộp/chưa chấp nhận)")
+                        conn_db2.execute(
+                            "UPDATE nop_to_khai_log SET xac_nhan=0, xac_nhan_at=?, "
+                            "xac_nhan_nguon='auto', xac_nhan_chi_tiet=? WHERE company_id=? AND loai=?",
+                            (datetime.datetime.now().isoformat(), ct_dongbo, cid, loai_dongbo))
+                    conn_db2.commit()
+                    conn_db2.close()
+                if dong_bo_ghi_chu:
+                    item["dong_bo_nop_to_khai"] = "; ".join(dong_bo_ghi_chu)
+
             item["trang_thai"] = "xong"
             job["done"] += 1
             time.sleep(0.5)
