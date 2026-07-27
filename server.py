@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.10"
+APP_BUILD = "2026-07-27.11"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4790,10 +4790,43 @@ def _dvc_run_batch(batch_id, cids, body):
                     _tai_file_fn = _dvc_browser_download
                     _ten_file_fn = _ten_file_than_thien
                     nhan_nguon = "DVC (từ 01/07/2025)"
+                # QUAN TRỌNG: ô tìm kiếm trên cổng lọc theo NGÀY NỘP HỒ SƠ, KHÔNG
+                # phải theo kỳ tính thuế của tờ khai (giống hệt vấn đề đã gặp và
+                # sửa ở _dvc_kiem_tra_da_nop_mot_loai) — tờ khai kỳ QUÝ luôn được
+                # nộp SAU KHI quý đã kết thúc (hạn nộp là cuối tháng đầu quý sau,
+                # vd Quý 2 hạn 30/07), nên:
+                #  1) Nếu chỉ tìm ĐÚNG trong khoảng tu-den của kỳ đang chọn (vd
+                #     Quý 2 = 01/04-30/06) thì gần như KHÔNG BAO GIỜ thấy tờ khai
+                #     CỦA ĐÚNG kỳ đó (vì nộp sau 30/06) — phải MỞ RỘNG vùng tìm
+                #     (ngày nộp) tới HÔM NAY mới thấy được.
+                #  2) Nhưng mở rộng vùng tìm như vậy lại LẪN vào tờ khai của KỲ
+                #     TRƯỚC (vd kỳ Quý 1 hạn nộp 30/04 — ngày nộp đó lại RƠI VÀO
+                #     đúng khoảng Quý 2 đang tìm), nên PHẢI đối chiếu lại cột 'Kỳ'
+                #     THẬT của từng dòng kết quả với đúng kỳ tu-den đang tra cứu,
+                #     bỏ hẳn dòng của kỳ khác — nếu không, kết quả xuất Excel sẽ
+                #     lẫn lộn tờ khai của nhiều kỳ khác nhau (đã xác nhận qua dữ
+                #     liệu thật người dùng gửi: chọn Quý 2/2026 nhưng bảng kết quả
+                #     lại toàn tờ khai kỳ Quý 1/2026 và tờ khai quyết toán cả năm).
+                tu_tim, den_tim = tu, den
                 try:
-                    rows, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu, den)
+                    d2, m2, y2 = den.split("/")
+                    den_ngay_kt = datetime.date(int(y2), int(m2), int(d2))
+                    hom_nay_kt = datetime.date.today()
+                    if hom_nay_kt > den_ngay_kt:
+                        den_tim = hom_nay_kt.strftime("%d/%m/%Y")
+                except Exception:
+                    pass
+                try:
+                    rows_tho, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu_tim, den_tim)
                 except Exception as e:
-                    rows, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+                    rows_tho, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+                rows = [r for r in rows_tho
+                        if _ky_text_ra_tu_den(r.get("ky", "")) == (tu, den)]
+                if rows_tho and not rows:
+                    sdiag = list(sdiag) + [
+                        f"tìm thấy {len(rows_tho)} dòng trong khoảng ngày nộp {tu_tim}-{den_tim} "
+                        f"nhưng KHÔNG dòng nào đúng kỳ {ky_label} đang tra cứu (kỳ khác) — coi như "
+                        f"CHƯA nộp đúng kỳ này"]
                 for rec in rows:
                     rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
                     tracuu_rows.append(rec2)
