@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.14"
+APP_BUILD = "2026-07-27.1"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17245,33 +17245,49 @@ def _summary_from_detail_json(detail):
     info["tygia"] = tygia
 
     theo_ts = {}
-    # ưu tiên phần tổng hợp thuế suất nếu có
-    ltsuat = detail.get("thttltsuat") or detail.get("hdhhdvu_ltsuat") or []
-    if ltsuat and isinstance(ltsuat, list):
-        for l in ltsuat:
-            key = norm_ts(l.get("tsuat"))
-            ds = _to_num(l.get("thtien")) or 0
-            thue = _to_num(l.get("tthue")) or 0
+    # Ưu tiên đọc TỪNG DÒNG HÀNG (hdhhdvu) — ĐÃ XÁC NHẬN đúng thực tế (khớp
+    # với sheet "Chi tiết BÁN RA" dùng _parse_detail_json cho CÙNG hóa đơn).
+    # TRƯỚC ĐÂY ưu tiên đọc mảng tổng hợp theo thuế suất "thttltsuat" của TCT
+    # trước — nhưng đã phát hiện với hóa đơn MTT (máy tính tiền), mảng tổng
+    # hợp này có thể SAI/rỗng thuế suất (rơi về "0" dù dòng hàng thật là
+    # 10%), khiến chỉ tiêu [29] (0%) SAI THỪA còn [32]/[33] (10%) THIẾU đúng
+    # phần đó, đồng thời MẤT LUÔN tiền thuế phần bị gộp nhầm (ct29 không có
+    # cột thuế). Chỉ dùng "thttltsuat" khi hóa đơn KHÔNG có dòng hàng chi
+    # tiết nào (trường hợp hiếm, TCT chỉ trả tổng hợp).
+    if items:
+        for it in items:
+            key = norm_ts(it.get("ltsuat") or it.get("tsuat"))
+            ds = _to_num(it.get("thtien")) or 0
             ds = ds if isinstance(ds, (int, float)) else 0
-            thue = thue if isinstance(thue, (int, float)) else 0
+            # Ưu tiên tiền thuế THẬT của dòng hàng (giống _parse_detail_json)
+            # thay vì tự tính lại theo tỉ lệ (tránh lệch làm tròn).
+            thue_goc = it.get("tthue") if it.get("tthue") not in (None, "") else it.get("tongtien_thue")
+            thue_num = _to_num(thue_goc)
+            if isinstance(thue_num, (int, float)):
+                thue = thue_num
+            else:
+                try:
+                    rate = float(str(it.get("ltsuat") or it.get("tsuat") or "0").replace("%", "")) / 100
+                except Exception:
+                    rate = 0
+                thue = round(ds * rate)
             cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
             cur["ds_nt"] += ds
             cur["ds"] += ds * tygia if tygia else ds
             cur["thue"] += thue * tygia if tygia else thue
     else:
-        for it in items:
-            key = norm_ts(it.get("ltsuat") or it.get("tsuat"))
-            ds = _to_num(it.get("thtien")) or 0
-            try:
-                rate = float(str(it.get("ltsuat") or it.get("tsuat") or "0").replace("%", "")) / 100
-            except Exception:
-                rate = 0
-            ds = ds if isinstance(ds, (int, float)) else 0
-            thue = round(ds * rate)
-            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
-            cur["ds_nt"] += ds
-            cur["ds"] += ds * tygia if tygia else ds
-            cur["thue"] += thue * tygia if tygia else thue
+        ltsuat = detail.get("thttltsuat") or detail.get("hdhhdvu_ltsuat") or []
+        if ltsuat and isinstance(ltsuat, list):
+            for l in ltsuat:
+                key = norm_ts(l.get("tsuat"))
+                ds = _to_num(l.get("thtien")) or 0
+                thue = _to_num(l.get("tthue")) or 0
+                ds = ds if isinstance(ds, (int, float)) else 0
+                thue = thue if isinstance(thue, (int, float)) else 0
+                cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
+                cur["ds_nt"] += ds
+                cur["ds"] += ds * tygia if tygia else ds
+                cur["thue"] += thue * tygia if tygia else thue
     # Tổng tiền phí (không chịu thuế) — cộng vào nhóm KCT để khớp với dòng
     # 'Tổng tiền phí' đã thêm ở _parse_detail_json (Chi tiết BÁN RA vs BK Bán ra).
     tong_phi = _lay_tong_tien_phi_json(detail)
@@ -17572,28 +17588,50 @@ def _parse_invoice_summary(xml_bytes):
     info["tygia"] = tygia
 
     theo_ts = {}
-    lts = root.findall(".//THTTLTSuat/LTSuat")
-    if lts:
+    # Ưu tiên đọc TỪNG DÒNG HÀNG (DSHHDVu/HHDVu) — ĐÃ XÁC NHẬN đúng thực tế
+    # (khớp với sheet "Chi tiết BÁN RA" dùng _parse_xml_invoice cho CÙNG hóa
+    # đơn). TRƯỚC ĐÂY ưu tiên đọc khối tổng hợp "THTTLTSuat" trước — nhưng đã
+    # phát hiện với hóa đơn MTT (máy tính tiền), khối tổng hợp này có thể
+    # SAI/rỗng thuế suất (rơi về "0" dù dòng hàng thật là 10%), khiến chỉ
+    # tiêu [29] (0%) SAI THỪA còn [32]/[33] (10%) THIẾU đúng phần đó, đồng
+    # thời MẤT LUÔN tiền thuế phần bị gộp nhầm (ct29 không có cột thuế). Chỉ
+    # dùng "THTTLTSuat" khi hóa đơn KHÔNG có dòng hàng chi tiết nào.
+    if dshh is not None and dshh.findall("HHDVu"):
+        for hh in dshh.findall("HHDVu"):
+            key = norm_ts(ft(hh, "TSuat"))
+            ds = _to_num(ft(hh, "ThTien")) or 0
+            ds = ds if isinstance(ds, (int, float)) else 0
+            # Ưu tiên tiền thuế THẬT của dòng hàng (giống _parse_xml_invoice,
+            # TTKhac>TongTien_Thue) thay vì tự tính lại theo tỉ lệ.
+            thue_goc = None
+            for ttin in hh.findall(".//TTKhac/TTin"):
+                tt = ttin.find("TTruong")
+                if tt is not None and tt.text and tt.text.strip() == "TongTien_Thue":
+                    dl = ttin.find("DLieu")
+                    if dl is not None and dl.text:
+                        thue_goc = dl.text.strip()
+                    break
+            thue_num = _to_num(thue_goc)
+            if isinstance(thue_num, (int, float)):
+                thue = thue_num
+            else:
+                try:
+                    rate = float(str(ft(hh, "TSuat")).replace("%", "")) / 100
+                except Exception:
+                    rate = 0
+                thue = round(ds * rate)
+            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
+            cur["ds_nt"] += ds
+            cur["ds"] += ds * tygia if tygia else ds
+            cur["thue"] += thue * tygia if tygia else thue
+    else:
+        lts = root.findall(".//THTTLTSuat/LTSuat")
         for l in lts:
             key = norm_ts(ft(l, "TSuat"))
             ds = _to_num(ft(l, "ThTien")) or 0
             thue = _to_num(ft(l, "TThue")) or 0
             ds = ds if isinstance(ds, (int, float)) else 0
             thue = thue if isinstance(thue, (int, float)) else 0
-            cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
-            cur["ds_nt"] += ds
-            cur["ds"] += ds * tygia if tygia else ds
-            cur["thue"] += thue * tygia if tygia else thue
-    elif dshh is not None:
-        for hh in dshh.findall("HHDVu"):
-            key = norm_ts(ft(hh, "TSuat"))
-            ds = _to_num(ft(hh, "ThTien")) or 0
-            try:
-                rate = float(str(ft(hh, "TSuat")).replace("%", "")) / 100
-            except Exception:
-                rate = 0
-            ds = ds if isinstance(ds, (int, float)) else 0
-            thue = round(ds * rate)
             cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
             cur["ds_nt"] += ds
             cur["ds"] += ds * tygia if tygia else ds
