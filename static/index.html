@@ -2007,6 +2007,20 @@ async function dvcbPoll(){
   const prog=document.getElementById('dvcbProgress');
   let html=`Tiến độ: <b>${j.done}/${j.total}</b>`+(j.current?` · đang: ${j.current}`:'');
   if(j.items&&j.items.length){
+    // Đếm nhanh (cập nhật LIÊN TỤC theo tiến độ, không cần đợi tới lúc
+    // "Hoàn tất" mới biết): số cty đã lấy được dữ liệu xong, số cty KHÔNG
+    // đăng nhập được (sai/thiếu mật khẩu), và số cty CHƯA NỘP báo cáo
+    // trong đúng kỳ đang tra cứu (không có dữ liệu tờ khai nào, không phải
+    // do lỗi tra cứu).
+    const soXong=j.items.filter(it=>it.trang_thai==='xong').length;
+    const soKhongDangNhap=j.items.filter(it=>it.trang_thai==='thiếu mật khẩu'||it.trang_thai==='sai mật khẩu / lỗi đăng nhập').length;
+    const soChuaNop=j.items.filter(it=>it.chua_nop).length;
+    html+=`<div style="margin-top:4px;font-size:13px">`+
+      `<span style="color:#0a7d4b">✓ Lấy được: <b>${soXong}</b></span> · `+
+      `<span style="color:#b91c1c">✗ Không đăng nhập được: <b>${soKhongDangNhap}</b></span> · `+
+      `<span style="color:#b45309">⚠ Chưa nộp báo cáo kỳ này: <b>${soChuaNop}</b></span></div>`;
+  }
+  if(j.items&&j.items.length){
     html+='<div style="max-height:160px;overflow:auto;margin-top:6px">'+
       j.items.map(it=>{
         let c=it.trang_thai==='xong'?'#0a7d4b':(it.trang_thai&&it.trang_thai.indexOf('sai')>=0?'#b91c1c':'#555');
