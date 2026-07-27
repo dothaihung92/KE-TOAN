@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.6"
+APP_BUILD = "2026-07-27.7"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -469,6 +469,19 @@ class GDTClient:
                     loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
                 for t in ttxly_that_bai:
                     cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": t})
+                # THIẾU so với total của ĐÚNG THÁNG NÀY (trang Thuế báo nhiều
+                # hơn số lấy được) dù KHÔNG có lỗi/exception nào (vd 1 hóa đơn
+                # lặng lẽ rơi mất giữa ranh giới phân trang) — TRƯỚC ĐÂY chỉ
+                # phát hiện được ở TỔNG CỘNG toàn khoảng ngày (nhiều tháng), nên
+                # phải dò lại TOÀN BỘ khoảng ngày đó (có khi cả năm) dù chỉ 1
+                # tháng bị thiếu vài hóa đơn — rất lâu, đúng phản ánh của người
+                # dùng. Ghi nhận NGAY ở đây (mức 1 THÁNG) để lượt sau chỉ cần
+                # dò lại ĐÚNG tháng này (chi_cac_doan), không phải dò lại từ
+                # đầu. Chỉ thêm khi KHÔNG đã có ttxly_that_bai cho tháng này
+                # (tránh trùng — trường hợp đó lượt sau đã dò riêng theo đúng
+                # trạng thái lỗi rồi, cần chi tiết hơn "cả tháng").
+                if not ttxly_that_bai and total and len(chunk) < total:
+                    cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": None})
                 for inv in chunk:
                     key = (inv.get("khmshdon"), inv.get("khhdon"),
                            inv.get("shdon"), inv.get("nbmst"))
@@ -6444,11 +6457,23 @@ def _run_fetch_job(cid: int, body: dict):
                         if not loi_rieng and not con_thieu:
                             break   # lấy sạch, không lỗi gì, không thiếu -> xong, khỏi thử thêm
                         if lan_thu < SO_LAN_THU - 1:
-                            if loi_rieng:
+                            # QUAN TRỌNG: chọn thông báo theo cac_doan_loi (đoạn CỤ THỂ sẽ
+                            # được dùng cho lượt sau, xem 'doan_dung_de_goi' đầu vòng lặp),
+                            # KHÔNG chỉ theo loi_rieng — kể cả khi KHÔNG có lỗi/exception rõ
+                            # ràng nào (chỉ thiếu số lượng so với total), _gop() ở
+                            # query_invoices giờ đã ghi nhận ĐÚNG (các) tháng còn thiếu vào
+                            # cac_doan_loi, nên lượt sau CHỈ dò lại đúng (các) tháng đó —
+                            # KHÔNG còn phải dò lại TOÀN BỘ khoảng ngày (có khi nhiều tháng)
+                            # chỉ vì thiếu vài hóa đơn ở 1 tháng — trước đây thông báo (và cả
+                            # thực tế dò lại) luôn nói "TOÀN BỘ kỳ" trong trường hợp này dù
+                            # không cần thiết, rất mất thời gian với công ty nhiều hóa đơn.
+                            if cac_doan_loi:
+                                ly_do = (f"{len(loi_rieng)} lượt bị lỗi riêng phần ({'; '.join(loi_rieng[:2])})"
+                                         if loi_rieng else
+                                         f"trang Thuế báo {exp0_gop} hóa đơn nhưng mới lấy {len(invs or [])}")
                                 msg(stage="warn",
-                                    text=f"⚠ {loai_txt}{ht_txt}: {len(loi_rieng)} lượt bị lỗi riêng "
-                                         f"phần ({'; '.join(loi_rieng[:2])}) — đang dò LẠI ĐÚNG "
-                                         f"{len(cac_doan_loi)} đoạn bị lỗi (không dò lại từ đầu), "
+                                    text=f"⚠ {loai_txt}{ht_txt}: {ly_do} — đang dò LẠI ĐÚNG "
+                                         f"{len(cac_doan_loi)} đoạn còn thiếu/lỗi (không dò lại từ đầu), "
                                          f"chưa dừng...")
                             else:
                                 msg(stage="warn",
