@@ -432,11 +432,11 @@
           <option value="tuychon">Tùy chọn ngày</option>
         </select>
         <select id="dvcb_thang" style="padding:7px;border:1px solid var(--line);border-radius:8px;display:none"></select>
-        <select id="dvcb_quy" style="padding:7px;border:1px solid var(--line);border-radius:8px">
+        <select id="dvcb_quy" onchange="dvcbKyChange()" style="padding:7px;border:1px solid var(--line);border-radius:8px">
           <option value="1">Quý 1</option><option value="2">Quý 2</option>
           <option value="3">Quý 3</option><option value="4">Quý 4</option>
         </select>
-        <select id="dvcb_nam" style="padding:7px;border:1px solid var(--line);border-radius:8px"></select>
+        <select id="dvcb_nam" onchange="dvcbKyChange()" style="padding:7px;border:1px solid var(--line);border-radius:8px"></select>
       </div>
     </div>
     <div id="dvcb_ngayrow" style="display:none;gap:12px;flex-wrap:wrap">
@@ -458,10 +458,21 @@
           <a href="#" onclick="dvcbSelectAll(false);return false" style="font-size:13px">Bỏ chọn</a>
         </span>
       </label>
-      <input id="dvcbSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="dvcbFilter()"
-             style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px">
-      <div style="display:grid;grid-template-columns:1fr 92px 78px 110px;gap:10px;padding:0 4px 4px;font-size:11.5px;color:#999;font-weight:600">
-        <span></span><span>Hạn Token</span><span>Hết hạn</span><span>Tổ chức cấp</span>
+      <div style="display:flex;gap:8px;margin-bottom:6px">
+        <input id="dvcbSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="dvcbFilter()"
+               style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px">
+        <select id="dvcbLocTrangThai" onchange="dvcbFilter()"
+                style="padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+          <option value="">Trạng thái CQT: Tất cả</option>
+          <option value="da_chap_nhan">✅ Có loại Đã chấp nhận</option>
+          <option value="cho">🟡 Có loại đang Chờ</option>
+          <option value="tu_choi">🔴 Có loại bị Từ chối</option>
+          <option value="chua_co">⚪ Chưa có dữ liệu (kỳ này)</option>
+        </select>
+      </div>
+      <p class="hint" style="margin-top:0;margin-bottom:6px">🎨 Cột <b>GTGT</b>/<b>TNCN</b>: trạng thái cơ quan Thuế đã chấp nhận tờ khai của ĐÚNG kỳ đang chọn ở trên hay chưa — <span style="color:#0a7d4b">xanh = Đã chấp nhận</span>, <span style="color:#b45309">vàng = Chờ xử lý</span>, <span style="color:#b91c1c">đỏ = Từ chối</span>, xám = chưa có dữ liệu. Dữ liệu này được ghi lại từ lần "▶ Bắt đầu" tra cứu gần nhất cho đúng kỳ đang chọn (chỉ khi chọn kỳ theo <b>Quý</b>) — chưa từng chạy cho kỳ này thì chưa có màu.</p>
+      <div style="display:grid;grid-template-columns:1fr 60px 60px 92px 78px 110px;gap:10px;padding:0 4px 4px;font-size:11.5px;color:#999;font-weight:600">
+        <span></span><span>GTGT</span><span>TNCN</span><span>Hạn Token</span><span>Hết hạn</span><span>Tổ chức cấp</span>
       </div>
       <div id="dvcbCoList" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="dvcbCount">0</b> công ty</div>
@@ -1325,7 +1336,8 @@ async function dvcTaiBaoCao(){
 
 /* ---------- DVC HÀNG LOẠT ---------- */
 let dvcbTimer=null;
-function moDVCBatch(){
+let dvcbTrangThaiCqt={};   // {cid: {GTGT:{trang_thai,nhan,...}, TNCN:{...}}} của ĐÚNG kỳ đang chọn
+async function moDVCBatch(){
   const now=new Date(), yr=now.getFullYear();
   // điền select tháng / năm
   const th=document.getElementById('dvcb_thang');
@@ -1336,15 +1348,32 @@ function moDVCBatch(){
   nm.value=yr;
   document.getElementById('dvcb_quy').value=Math.floor(now.getMonth()/3)+1;
   document.getElementById('dvcb_loaiky').value='quy';
-  dvcbKyChange();
-  dvcbRenderCoList();
+  await dvcbKyChange();   // tự tải trạng thái CQT của đúng kỳ + vẽ lại danh sách
   document.getElementById('dvcbSearch').value='';
+  document.getElementById('dvcbLocTrangThai').value='';
   dvcbCount();
   document.getElementById('dvcbProgress').style.display='none';
   document.getElementById('dvcbProgress').innerHTML='';
   document.getElementById('dvcbRunBtn').style.display='';
   document.getElementById('dvcbCancelBtn').style.display='none';
   document.getElementById('dvcBatchModal').style.display='flex';
+}
+async function dvcbTaiTrangThaiCqt(){
+  // Trạng thái cơ quan Thuế (GTGT/TNCN) CHỈ có ý nghĩa khi kỳ đang chọn là
+  // ĐÚNG 1 quý trọn vẹn (khớp đúng kỳ tính thuế của GTGT/TNCN) — Tháng/Năm/
+  // Tùy chọn ngày thì bỏ qua (không rõ ứng với quý nào), xoá dữ liệu cũ đi
+  // để không hiện màu sai kỳ.
+  if(document.getElementById('dvcb_loaiky').value!=='quy'){dvcbTrangThaiCqt={};return;}
+  const nam=+document.getElementById('dvcb_nam').value, quy=+document.getElementById('dvcb_quy').value;
+  try{dvcbTrangThaiCqt=await api(`/api/dvc/trang-thai-cqt?nam=${nam}&quy=${quy}`);}
+  catch(e){dvcbTrangThaiCqt={};}
+}
+function dvcbMauTrangThai(tt){
+  // tt: 'da_chap_nhan' | 'cho' | 'tu_choi' | null/undefined (chưa có dữ liệu)
+  if(tt==='da_chap_nhan')return{bg:'#dcfce7',fg:'#15803d',nhan:'✓ Đã chấp nhận'};
+  if(tt==='cho')return{bg:'#fff4e5',fg:'#b45309',nhan:'⏳ Chờ xử lý'};
+  if(tt==='tu_choi')return{bg:'#fdecea',fg:'#b91c1c',nhan:'✗ Từ chối'};
+  return{bg:'#f2f2f2',fg:'#999',nhan:'—'};
 }
 function dvcbRenderCoList(giuDaChon){
   // giữ lại các công ty đang được chọn (nếu có) khi vẽ lại danh sách sau
@@ -1387,12 +1416,25 @@ function dvcbRenderCoList(giuDaChon){
         : '<span></span>';
     }
     const checked = daChonTruoc ? daChonTruoc.has(String(c.id)) : true;
-    return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" `+
-      `style="display:grid;grid-template-columns:1fr 92px 78px 110px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #f0f0f0">`+
+    // Trạng thái cơ quan Thuế (GTGT/TNCN) của ĐÚNG kỳ đang chọn — dữ liệu do
+    // chính lần chạy "Tra cứu tờ khai thuế hàng loạt" gần nhất cho kỳ này
+    // ghi lại (xem dvcbTaiTrangThaiCqt).
+    const ttCty=dvcbTrangThaiCqt[String(c.id)]||{};
+    const ttGtgt=(ttCty.GTGT||{}).trang_thai||null, ttTncn=(ttCty.TNCN||{}).trang_thai||null;
+    const mGtgt=dvcbMauTrangThai(ttGtgt), mTncn=dvcbMauTrangThai(ttTncn);
+    const spanTt=(m,chiTiet)=>`<span title="${(chiTiet||'').replace(/"/g,'')}" style="background:${m.bg};color:${m.fg};font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:10px;white-space:nowrap">${m.nhan}</span>`;
+    const gtgtCol=spanTt(mGtgt,(ttCty.GTGT||{}).chi_tiet);
+    const tncnCol=spanTt(mTncn,(ttCty.TNCN||{}).chi_tiet);
+    // key dùng để lọc theo trạng thái: liệt kê mọi nhóm màu đang có (GTGT
+    // và/hoặc TNCN) + đánh dấu "chua_co" nếu CẢ 2 đều chưa có dữ liệu.
+    const nhomTt=[ttGtgt,ttTncn].filter(Boolean);
+    const dataTt=(nhomTt.length?nhomTt:['chua_co']).join(' ');
+    return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" data-trangthai="${dataTt}" `+
+      `style="display:grid;grid-template-columns:1fr 60px 60px 92px 78px 110px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #f0f0f0">`+
       `<span style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden">`+
       `<input type="checkbox" class="dvcbChk" value="${c.id}" ${checked?'checked':''} onchange="dvcbCount()">`+
       `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.ten} <span style="color:#888">(${c.mst})</span></span></span>`+
-      hanCol+ngayCol+toChucCol+`</label>`;
+      gtgtCol+tncnCol+hanCol+ngayCol+toChucCol+`</label>`;
   }).join('') || '<div style="color:#888">Chưa có công ty</div>';
   dvcbCount();
 }
@@ -1453,12 +1495,20 @@ async function dvcbTokenPoll(){
     dvcbRenderCoList(true);         // vẽ lại danh sách, sắp xếp lại theo hạn mới, giữ lựa chọn cũ
   }
 }
-function dvcbKyChange(){
+async function dvcbKyChange(){
   const v=document.getElementById('dvcb_loaiky').value;
   document.getElementById('dvcb_thang').style.display=(v==='thang')?'':'none';
   document.getElementById('dvcb_quy').style.display=(v==='quy')?'':'none';
   document.getElementById('dvcb_nam').style.display=(v==='thang'||v==='quy'||v==='nam')?'':'none';
   document.getElementById('dvcb_ngayrow').style.display=(v==='tuychon')?'flex':'none';
+  // Trạng thái CQT (GTGT/TNCN) gắn với ĐÚNG 1 quý — đổi kỳ (loại kỳ, hoặc
+  // đổi Quý/Năm) là phải tải lại đúng dữ liệu của kỳ mới rồi vẽ lại màu,
+  // tránh hiện nhầm màu của kỳ cũ. Chỉ GIỮ lựa chọn cũ nếu danh sách đã từng
+  // vẽ rồi (đổi kỳ giữa chừng) — lần đầu mở khung (chưa có dòng nào) thì để
+  // dvcbRenderCoList tự mặc định tick hết như trước.
+  const daTungVe=document.querySelectorAll('.dvcbChk').length>0;
+  await dvcbTaiTrangThaiCqt();
+  dvcbRenderCoList(daTungVe);
 }
 function dvcbKyToDates(){
   // trả [tu_dd/mm/yyyy, den_dd/mm/yyyy] theo lựa chọn kỳ
@@ -1484,9 +1534,12 @@ function dvcbKyLabel(){
 }
 function dvcbFilter(){
   const q=(document.getElementById('dvcbSearch').value||'').toLowerCase().trim();
+  const locTt=document.getElementById('dvcbLocTrangThai')?.value||'';
   document.querySelectorAll('.dvcbRow').forEach(r=>{
-    const hien=(!q||r.dataset.key.includes(q));
-    r.style.display=hien?'grid':'none';   // .dvcbRow dùng display:grid (4 cột) — 'flex' làm lệch/nhảy cột
+    const khopTen=(!q||r.dataset.key.includes(q));
+    const khopTt=(!locTt||(r.dataset.trangthai||'').split(' ').includes(locTt));
+    const hien=khopTen&&khopTt;
+    r.style.display=hien?'grid':'none';   // .dvcbRow dùng display:grid (6 cột) — 'flex' làm lệch/nhảy cột
     if(!hien){const c=r.querySelector('.dvcbChk');if(c)c.checked=false;}
   });
   dvcbCount();

@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.13"
+APP_BUILD = "2026-07-26.14"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1261,6 +1261,18 @@ def init_db():
         file_ten TEXT,      -- tên file (không kèm đường dẫn) đã tải lên thành công lần gần nhất
         done_at TEXT,
         UNIQUE(company_id, loai)
+    );
+    CREATE TABLE IF NOT EXISTS to_khai_trang_thai_cqt (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER,
+        loai TEXT,          -- GTGT / TNCN
+        nam INTEGER,
+        quy INTEGER,
+        trang_thai TEXT,        -- 'da_chap_nhan' / 'cho' / 'tu_choi' / NULL (chưa nộp/chưa có dữ liệu)
+        trang_thai_goc TEXT,    -- chữ gốc trên cổng Thuế (vd "Đã chấp nhận")
+        chi_tiet TEXT,
+        checked_at TEXT,
+        UNIQUE(company_id, loai, nam, quy)
     );
     CREATE TABLE IF NOT EXISTS batch_tra_cuu (
         batch_id INTEGER PRIMARY KEY,
@@ -4860,7 +4872,7 @@ def _dvc_run_batch(batch_id, cids, body):
                 dong_bo_ghi_chu = []
                 for loai_dongbo in ("GTGT", "TNCN"):
                     try:
-                        xn_dongbo, _tt_dongbo, ct_dongbo = _dvc_kiem_tra_da_nop_mot_loai(
+                        xn_dongbo, tt_dongbo, ct_dongbo = _dvc_kiem_tra_da_nop_mot_loai(
                             drv, loai_dongbo, tu_ky_db, den_ky_db)
                     except Exception:
                         continue
@@ -4884,6 +4896,20 @@ def _dvc_run_batch(batch_id, cids, body):
                             "UPDATE nop_to_khai_log SET xac_nhan=0, xac_nhan_at=?, "
                             "xac_nhan_nguon='auto', xac_nhan_chi_tiet=? WHERE company_id=? AND loai=?",
                             (datetime.datetime.now().isoformat(), ct_dongbo, cid, loai_dongbo))
+                    # LƯU LẠI trạng thái cơ quan Thuế (3 màu: đã chấp nhận/chờ/
+                    # từ chối) THEO ĐÚNG KỲ vừa kiểm tra — dùng riêng để hiện
+                    # màu ngay trong danh sách công ty của công cụ tra cứu
+                    # hàng loạt này (độc lập với nop_to_khai_log, không ảnh
+                    # hưởng luồng tự động nộp tờ khai).
+                    nhom_mau = _phan_loai_trang_thai_cqt(tt_dongbo)
+                    conn_db2.execute(
+                        "INSERT INTO to_khai_trang_thai_cqt (company_id, loai, nam, quy, trang_thai, "
+                        "trang_thai_goc, chi_tiet, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(company_id, loai, nam, quy) DO UPDATE SET trang_thai=excluded.trang_thai, "
+                        "trang_thai_goc=excluded.trang_thai_goc, chi_tiet=excluded.chi_tiet, "
+                        "checked_at=excluded.checked_at",
+                        (cid, loai_dongbo, dong_bo_nam, dong_bo_quy, nhom_mau, tt_dongbo, ct_dongbo,
+                         datetime.datetime.now().isoformat()))
                     conn_db2.commit()
                     conn_db2.close()
                 if dong_bo_ghi_chu:
@@ -5490,6 +5516,21 @@ def _ky_text_ra_tu_den(ky_text):
     return None, None
 
 
+def _phan_loai_trang_thai_cqt(trang_thai_text):
+    """Phân loại chữ trạng thái THÔ trên cổng Thuế (vd 'Đã chấp nhận', 'Đang
+    xử lý', 'Không chấp nhận'...) thành 1 trong 3 nhóm để tô màu:
+      'da_chap_nhan' (xanh) / 'cho' (vàng) / 'tu_choi' (đỏ)
+    Trả None nếu rỗng (chưa nộp/chưa có dữ liệu — không tô màu)."""
+    if not trang_thai_text:
+        return None
+    t = _khong_dau(trang_thai_text)
+    if "da chap nhan" in t:
+        return "da_chap_nhan"
+    if any(k in t for k in ("khong chap nhan", "tu choi", "khong du dieu kien", "huy bo", "da huy")):
+        return "tu_choi"
+    return "cho"
+
+
 def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
     """Tra cứu LẠI trên cổng Dịch vụ công (tự chọn DVC/Thuế điện tử theo
     đúng mốc 01/07/2025, dùng chung hạ tầng đã có) xem tờ khai loại `loai`
@@ -5710,6 +5751,29 @@ def dvc_nop_to_khai_trang_thai(nam: int = 0, quy: int = 0):
                 "chi_tiet": (log["xac_nhan_chi_tiet"] if log else None),
             }
         out[str(cid)] = item
+    return out
+
+
+@app.get("/api/dvc/trang-thai-cqt")
+def dvc_trang_thai_cqt(nam: int, quy: int):
+    """Trạng thái tờ khai GTGT/TNCN theo cơ quan Thuế (Đã chấp nhận/Chờ/Từ
+    chối) của ĐÚNG 1 quý — dùng để tô màu trong danh sách công ty của công cụ
+    "Tra cứu tờ khai thuế / tải tờ khai hàng loạt". Dữ liệu do chính công cụ
+    đó ghi lại mỗi lần chạy xong (bảng to_khai_trang_thai_cqt) — endpoint này
+    CHỈ đọc lại, không tự tra cứu mới (tránh mở trình duyệt/đăng nhập chỉ để
+    hiện danh sách)."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT company_id, loai, trang_thai, trang_thai_goc, chi_tiet, checked_at "
+        "FROM to_khai_trang_thai_cqt WHERE nam=? AND quy=?", (nam, quy)).fetchall()
+    conn.close()
+    out = {}
+    for r in rows:
+        cid = str(r["company_id"])
+        out.setdefault(cid, {})[r["loai"]] = {
+            "trang_thai": r["trang_thai"], "nhan": r["trang_thai_goc"],
+            "chi_tiet": r["chi_tiet"], "checked_at": r["checked_at"],
+        }
     return out
 
 
