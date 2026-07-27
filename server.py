@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.8"
+APP_BUILD = "2026-07-27.9"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2874,10 +2874,13 @@ def _dvc_bam_ky_ho_so(drv):
 #  qua UI Automation) để dò đúng cửa sổ, nhập PIN vào ô "Mã PIN:" rồi bấm
 #  "Đăng nhập". TIÊU ĐỀ cửa sổ KHÁC NHAU tuỳ nhà cung cấp token (đã xác nhận
 #  qua ảnh chụp thật của người dùng, dùng "nhiều token"): "Xác nhận PIN"
-#  (chung), "Đăng nhập" (VINCA Token — có kèm dòng "Bạn còn N lần để đăng
-#  nhập"). Tiêu đề "Đăng nhập" khá chung chung nên phải kiểm tra THÊM nội
-#  dung (có nhắc "mã pin"/"token") để chắc chắn đúng hộp thoại token, tránh
-#  nhầm với 1 cửa sổ "Đăng nhập" khác không liên quan trên máy.
+#  (chung), "Kiểm tra mã PIN" (Viettel-CA — logo Viettel, có nút "Thay đổi
+#  mã PIN"/"Đăng nhập"/"Hủy"), "Đăng nhập" (VINCA Token — có kèm dòng "Bạn
+#  còn N lần để đăng nhập"). Tiêu đề "Đăng nhập" khá chung chung nên phải
+#  kiểm tra THÊM nội dung (có nhắc "mã pin"/"token") để chắc chắn đúng hộp
+#  thoại token, tránh nhầm với 1 cửa sổ "Đăng nhập" khác không liên quan
+#  trên máy — "Xác nhận PIN"/"Kiểm tra mã PIN" đã đủ riêng biệt, không cần
+#  kiểm tra thêm.
 #  AN TOÀN: hầu hết token/CKS KHOÁ VĨNH VIỄN sau 3 LẦN NHẬP SAI PIN liên
 #  tiếp (phải mang tới nhà cung cấp mở khoá lại) — nên CHỈ thử tối đa 2 LẦN
 #  rồi DỪNG HẲN (tự bấm "Huỷ"/"Huỷ bỏ"), không bao giờ thử lần thứ 3, đúng
@@ -2886,22 +2889,22 @@ def _dvc_bam_ky_ho_so(drv):
 #  tới lần thử CUỐI CÙNG được báo — luôn chừa lại ít nhất 1 lần cho người
 #  dùng tự nhập tay nếu cần.
 # ============================================================
-_DVC_PIN_DIALOG_TITLES = ("Xác nhận PIN", "Đăng nhập")
+_DVC_PIN_DIALOG_TITLES = ("Xác nhận PIN", "Kiểm tra mã PIN", "Đăng nhập")
 _DVC_PIN_TU_KHOA_SAI = ("sai", "khong dung", "khong hop le", "invalid", "incorrect",
                         "khoa", "loi", "error", "khong chinh xac")
 
 def _dvc_la_hop_thoai_pin(w):
-    """Xác nhận ĐÚNG là hộp thoại nhập PIN token — tiêu đề "Xác nhận PIN" là
-    đủ chắc chắn (dùng riêng cho việc này), nhưng tiêu đề "Đăng nhập" (VINCA
-    Token) khá chung chung nên phải có THÊM ô nhập + nhắc tới "mã pin"/
-    "token" trong nội dung mới coi là đúng."""
+    """Xác nhận ĐÚNG là hộp thoại nhập PIN token — tiêu đề "Xác nhận PIN"/
+    "Kiểm tra mã PIN" (Viettel-CA) là đủ chắc chắn (dùng riêng cho việc này),
+    nhưng tiêu đề "Đăng nhập" (VINCA Token) khá chung chung nên phải có THÊM
+    ô nhập + nhắc tới "mã pin"/"token" trong nội dung mới coi là đúng."""
     try:
         tieu_de = w.window_text().strip()
     except Exception:
         return False
     if tieu_de not in _DVC_PIN_DIALOG_TITLES:
         return False
-    if tieu_de == "Xác nhận PIN":
+    if tieu_de in ("Xác nhận PIN", "Kiểm tra mã PIN"):
         return True
     try:
         if not w.descendants(control_type="Edit"):
