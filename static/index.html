@@ -448,6 +448,7 @@
       <div style="display:flex;gap:16px;flex-wrap:wrap">
         <label class="chk"><input type="checkbox" id="dvcb_taifile"> Tải luôn file tờ khai về máy</label>
         <label class="chk"><input type="checkbox" id="dvcb_tb" checked> Tải kèm thông báo (Tiếp nhận/Xác nhận)</label>
+        <label class="chk" title="Chỉ áp dụng khi chọn kỳ theo Quý — công ty đã có màu xanh 'Đã chấp nhận' cho CẢ GTGT lẫn TNCN của đúng kỳ đang chọn sẽ được bỏ qua, không tra cứu/tải lại"><input type="checkbox" id="dvcb_boqua_dachapnhan" checked> Bỏ qua công ty đã chấp nhận (GTGT &amp; TNCN)</label>
       </div>
     </div>
     <div class="field">
@@ -1984,8 +1985,30 @@ function dvcbCount(){
 }
 let dvcbId=null;
 async function dvcbRun(){
-  const cids=[...document.querySelectorAll('.dvcbChk:checked')].map(c=>+c.value);
+  let cids=[...document.querySelectorAll('.dvcbChk:checked')].map(c=>+c.value);
   if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return;}
+  // Bỏ qua công ty đã được cơ quan Thuế CHẤP NHẬN đủ CẢ GTGT lẫn TNCN cho
+  // đúng kỳ đang chọn (dữ liệu trạng thái CQT chỉ có ý nghĩa khi chọn kỳ
+  // theo Quý — xem dvcbTaiTrangThaiCqt) — không cần tra cứu/tải lại nữa,
+  // đỡ mất thời gian cho những công ty đã xong.
+  if(document.getElementById('dvcb_boqua_dachapnhan').checked
+     && document.getElementById('dvcb_loaiky').value==='quy'){
+    const truocKhiLoc=cids.length;
+    cids=cids.filter(cid=>{
+      const tt=dvcbTrangThaiCqt[String(cid)]||{};
+      const gtgtOk=(tt.GTGT||{}).trang_thai==='da_chap_nhan';
+      const tncnOk=(tt.TNCN||{}).trang_thai==='da_chap_nhan';
+      return !(gtgtOk&&tncnOk);
+    });
+    const soBoQua=truocKhiLoc-cids.length;
+    if(soBoQua>0){
+      if(!cids.length){
+        toast(`Cả ${soBoQua} công ty đã chọn đều đã được chấp nhận đủ GTGT & TNCN cho kỳ này — không cần tra cứu lại`,'ok');
+        return;
+      }
+      toast(`Đã bỏ qua ${soBoQua} công ty đã được chấp nhận đủ GTGT & TNCN cho kỳ này`,'ok');
+    }
+  }
   const [tu,den]=dvcbKyToDates();
   if(!tu||!den){toast('Chọn kỳ tra cứu','err');return;}
   const body={cids,tu_ngay:tu,den_ngay:den,ky_label:dvcbKyLabel(),
