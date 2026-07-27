@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.4"
+APP_BUILD = "2026-07-27.5"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5813,7 +5813,7 @@ def _mo_ta_ds_hd_loi(ds_inv, loai, gioi_han=10):
     return txt
 
 
-def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
+def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
     """Sau khi ĐÃ TẢI XONG file XML (bước RIÊNG BIỆT, không chạy xen lẫn
     với việc tải file — tránh lặp lại sự cố tường lửa Thuế từng CHẶN CẢ IP
     khi 2 loại request (tải file + lấy chi tiết) chạy xen kẽ nhau qua nhiều
@@ -5822,6 +5822,12 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
     không cấp file XML cho loại này, hoặc hóa đơn tải file bị lỗi/thất bại)
     — để lúc Xuất Excel CHỈ cần ĐỌC dữ liệu đã có sẵn (file hoặc detail_json
     đã lưu), không phải tự đi tải bù qua mạng gây treo lâu như trước.
+
+    chi_ids: nếu truyền vào (list id bảng invoices) -> CHỈ lấy nốt chi tiết
+    cho ĐÚNG các hóa đơn đó (vd Kết xuất XML HTKK chỉ cần đủ dữ liệu cho hóa
+    đơn CỦA KỲ đang xuất, không cần quét/chờ toàn bộ lịch sử hóa đơn công ty
+    — tránh treo lâu với công ty có hàng vạn hóa đơn cũ). None (mặc định,
+    dùng khi tra cứu hàng loạt) -> quét TẤT CẢ hóa đơn công ty như trước.
 
     Theo đúng yêu cầu: tra cứu phải tải/lấy đủ dữ liệu ngay từ bước tra cứu;
     kết xuất Excel chỉ đọc file và xuất ra."""
@@ -5832,9 +5838,16 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg):
     if not (client and client.token):
         return
     conn = db()
-    rows = conn.execute(
-        "SELECT * FROM invoices WHERE company_id=? AND (detail_json IS NULL OR detail_json='')",
-        (cid,)).fetchall()
+    if chi_ids:
+        ph = ",".join("?" * len(chi_ids))
+        rows = conn.execute(
+            f"SELECT * FROM invoices WHERE company_id=? AND id IN ({ph}) "
+            f"AND (detail_json IS NULL OR detail_json='')",
+            (cid, *chi_ids)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM invoices WHERE company_id=? AND (detail_json IS NULL OR detail_json='')",
+            (cid,)).fetchall()
     conn.close()
     if not rows:
         return
@@ -14775,10 +14788,11 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             pass
         return not _fidx.get((str(r["khhdon"] or ""), str(r["shdon"] or "").lstrip("0") or "0"))
 
-    can_thieu_chi_tiet = any(
-        _thieu_chi_tiet(r) for r in rows
-        if r["loai"] == "sold" and not status_loai_bo(r) and trong_ky(r["tdlap"]))
-    if (can_thieu_chi_tiet and comp
+    ids_thieu_chi_tiet = [
+        r["id"] for r in rows
+        if r["loai"] == "sold" and not status_loai_bo(r) and trong_ky(r["tdlap"])
+        and _thieu_chi_tiet(r)]
+    if (ids_thieu_chi_tiet and comp
             and (not client or not client.token or getattr(client, "_token_dead", False))
             and comp["password"]):
         drv_dn = _mo_trinh_duyet_captcha()
@@ -14789,6 +14803,36 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         finally:
             _dong_trinh_duyet_captcha(drv_dn)
         client = CLIENTS.get(cid)
+
+    if ids_thieu_chi_tiet and client and client.token and not getattr(client, "_token_dead", False):
+        # LẤY NỐT chi tiết dòng hàng cho ĐÚNG các hóa đơn (trong kỳ) còn thiếu,
+        # dùng lại _dam_bao_du_chi_tiet_hoa_don() — hàm ĐÃ CHỨNG MINH đáng tin
+        # cậy (nhiều luồng song song + tự thử lại/chờ giới hạn tốc độ 429 +
+        # tự đăng nhập lại giữa chừng nếu phiên chết), vốn dùng cho bước "tra
+        # cứu phải lấy đủ dữ liệu" trước khi Xuất Excel. Tầng gọi mạng "thử 1
+        # lần, không chờ" của get_items() phía dưới KHÔNG đủ khi công ty có
+        # NHIỀU hóa đơn CÙNG LÚC thiếu chi tiết (vd hàng nghìn hóa đơn máy
+        # tính tiền) — gọi tuần tự từng hóa đơn 1 lần sẽ bị giới hạn tốc độ
+        # (429) gần như ngay và bỏ cuộc luôn, đúng lý do lỗi vẫn còn dù đã
+        # thêm tầng gọi mạng + tự đăng nhập lại. CHỈ giới hạn trong phạm vi
+        # hóa đơn CỦA KỲ ĐANG XUẤT (chi_ids) — KHÔNG quét toàn bộ lịch sử hóa
+        # đơn công ty — để tránh treo lâu với công ty có hàng vạn hóa đơn cũ.
+        try:
+            _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, lambda **kw: None,
+                                          chi_ids=ids_thieu_chi_tiet)
+        except Exception:
+            pass
+        client = CLIENTS.get(cid)
+        # ĐỌC LẠI rows để có detail_json MỚI NHẤT vừa lấy được ở trên — 'rows'
+        # nạp lúc đầu hàm là bản CHỤP TRƯỚC khi gọi mạng, vẫn còn detail_json
+        # rỗng (sqlite3.Row không tự cập nhật theo DB), nếu không đọc lại thì
+        # get_items() bên dưới vẫn thấy r["detail_json"] rỗng như cũ, coi như
+        # CHƯA lấy được gì dù DB đã lưu đúng — vô hiệu hóa cả bước lấy nốt vừa
+        # làm ở trên.
+        _conn_lai = db()
+        rows = _gop_hoa_don_trung_he_thong(
+            _conn_lai.execute("SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall())
+        _conn_lai.close()
 
     # ban_ds_full/ban_thue_full: TỔNG CỘNG bán ra KHÔNG lọc theo kỳ — để đối
     # chiếu với TỔNG CỘNG thật của sheet "BK Bán ra" (sheet đó liệt kê MỌI
