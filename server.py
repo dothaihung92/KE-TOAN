@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.3"
+APP_BUILD = "2026-07-27.4"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14706,7 +14706,18 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         if fp:
             try:
                 with open(fp, "rb") as f:
-                    items_f = _parse_xml_invoice(f.read())
+                    # File tải về thường là .zip (chứa invoice.xml bên trong) —
+                    # _fidx có thể trỏ vào chính file .zip đó (không ưu tiên .xml
+                    # như _file_index của Xuất Excel). Phải giải nén qua
+                    # _extract_invoice_xml (tự nhận diện chữ ký 'PK' của ZIP,
+                    # KHÔNG dựa vào đuôi file) trước khi đưa cho _parse_xml_invoice
+                    # — nếu không, đưa thẳng bytes ZIP vào hàm parse XML sẽ LUÔN
+                    # THẤT BẠI ÂM THẦM (except bắt hết), khiến hóa đơn bị coi như
+                    # "không có chi tiết" dù file đã tải sẵn trên máy, rơi xuống
+                    # nhánh đoán mò/gọi mạng phía dưới — đúng nguyên nhân hàng
+                    # loạt hóa đơn bị dồn sai nhóm thuế suất khi phần lớn file đã
+                    # tải về là .zip.
+                    items_f = _parse_xml_invoice(_extract_invoice_xml(f.read()))
                 if items_f:
                     return items_f
             except Exception:
@@ -14744,6 +14755,40 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # thu KCT thật bị ghi nhầm vào chỉ tiêu [29] "chịu thuế suất 0%" thay vì
     # [26], đúng lỗi người dùng đã phát hiện qua file XML kết xuất).
     client = CLIENTS.get(cid)
+
+    # TỰ ĐĂNG NHẬP LẠI nếu phiên đã hết/chưa đăng nhập — GIỐNG HỆT Xuất Excel
+    # đã làm (export_excel dòng ~15495-15515) — trước đây bước này CHỈ có ở
+    # Xuất Excel, KHÔNG có ở Kết xuất XML HTKK riêng. Vì vậy khi bấm "Kết xuất
+    # XML cho HTKK" TRỰC TIẾP (không qua Xuất Excel/tra cứu ngay trước đó) mà
+    # phiên đăng nhập đã hết, tầng gọi mạng dự phòng của get_items() phía trên
+    # không có phiên để gọi -> ÂM THẦM bỏ qua -> hóa đơn thiếu chi tiết rơi
+    # vào nhánh đoán mò theo trạng thái đăng nhập -> MỌI hóa đơn (kể cả KCT/
+    # 5%/8% thật) bị dồn hết vào "10%" — đúng lỗi đã báo lại nhiều lần dù đã
+    # thêm tầng gọi mạng. CHỈ tự đăng nhập lại khi THẬT SỰ có hóa đơn (trong
+    # kỳ) còn thiếu cả detail_json lẫn file đã tải, để không làm chậm vô ích
+    # khi dữ liệu đã có sẵn đầy đủ (vd vừa tra cứu/xuất Excel xong).
+    def _thieu_chi_tiet(r):
+        try:
+            if r["detail_json"]:
+                return False
+        except Exception:
+            pass
+        return not _fidx.get((str(r["khhdon"] or ""), str(r["shdon"] or "").lstrip("0") or "0"))
+
+    can_thieu_chi_tiet = any(
+        _thieu_chi_tiet(r) for r in rows
+        if r["loai"] == "sold" and not status_loai_bo(r) and trong_ky(r["tdlap"]))
+    if (can_thieu_chi_tiet and comp
+            and (not client or not client.token or getattr(client, "_token_dead", False))
+            and comp["password"]):
+        drv_dn = _mo_trinh_duyet_captcha()
+        try:
+            _tu_dong_dang_nhap(cid, so_lan=8, drv=drv_dn)
+        except Exception:
+            pass
+        finally:
+            _dong_trinh_duyet_captcha(drv_dn)
+        client = CLIENTS.get(cid)
 
     # ban_ds_full/ban_thue_full: TỔNG CỘNG bán ra KHÔNG lọc theo kỳ — để đối
     # chiếu với TỔNG CỘNG thật của sheet "BK Bán ra" (sheet đó liệt kê MỌI
