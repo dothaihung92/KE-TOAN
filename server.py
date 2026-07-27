@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.2"
+APP_BUILD = "2026-07-27.3"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14676,14 +14676,21 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
                    "KCT": {"ds": 0, "thue": 0}}
 
     def get_items(r):
-        """CHỈ dùng dữ liệu đã có (không gọi mạng để tránh treo). Trả THẲNG
-        list dòng hàng chi tiết (qua _parse_detail_json/_parse_xml_invoice —
-        CÙNG 2 hàm mà sheet "Chi tiết BÁN RA"/"BK Bán ra" của Xuất Excel dùng)
-        — KHÔNG dùng _summary_from_detail_json/_parse_invoice_summary (khối
-        tổng hợp riêng "thttltsuat"/"THTTLTSuat" của Tổng cục Thuế trong 2 hàm
-        đó đã xác nhận có thể SAI/rỗng thuế suất với hóa đơn MTT — máy tính
-        tiền — dù dòng hàng chi tiết vẫn đúng), để chỉ tiêu [27]-[35] LUÔN
-        khớp đúng tổng của 2 sheet Excel, tránh 2 nơi tính lệch nhau."""
+        """Trả THẲNG list dòng hàng chi tiết (qua _parse_detail_json/
+        _parse_xml_invoice — CÙNG 2 hàm mà sheet "Chi tiết BÁN RA"/"BK Bán
+        ra" của Xuất Excel dùng) — KHÔNG dùng _summary_from_detail_json/
+        _parse_invoice_summary (khối tổng hợp riêng "thttltsuat"/"THTTLTSuat"
+        của Tổng cục Thuế trong 2 hàm đó đã xác nhận có thể SAI/rỗng thuế
+        suất với hóa đơn MTT — máy tính tiền), để chỉ tiêu [27]-[35] LUÔN
+        khớp đúng tổng của 2 sheet Excel, tránh 2 nơi tính lệch nhau.
+        Ưu tiên dữ liệu ĐÃ CÓ (detail_json trong DB, rồi file đã tải) —
+        CHỈ gọi mạng (tier cuối, giống hệt get_invoice_items của Xuất Excel)
+        khi CẢ 2 đều không có, để không phải ĐOÁN MÒ nhóm thuế suất qua
+        trạng thái đăng nhập (cách cũ: không đăng nhập -> đoán đại là "10%",
+        khiến CẢ hóa đơn KCT/5%/8% thật cũng bị dồn nhầm hết vào [32]/[33] —
+        đúng lỗi đã xác nhận qua dữ liệu thật). Giới hạn thử 1 lần, KHÔNG chờ
+        khi bị giới hạn tốc độ (cho_khi_429=False) — như Xuất Excel — để
+        không làm treo/chậm quá trình kết xuất khi có nhiều hóa đơn thiếu."""
         try:
             dj = r["detail_json"] if "detail_json" in r.keys() else None
         except Exception:
@@ -14704,6 +14711,27 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
                     return items_f
             except Exception:
                 pass
+        if client and client.token and not getattr(client, "_token_dead", False):
+            ht0 = r["he_thong"] or "query"
+            for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
+                try:
+                    detail = client.get_detail(
+                        r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], ht,
+                        max_retry=1, cho_khi_429=False, loai=r["loai"])
+                    if detail and (detail.get("hdhhdvu") or detail.get("nbmst")):
+                        items_api = _parse_detail_json(detail)
+                        try:
+                            cn = db()
+                            cn.execute("UPDATE invoices SET detail_json=? WHERE id=?",
+                                       (json.dumps(detail, ensure_ascii=False), r["id"]))
+                            cn.commit(); cn.close()
+                        except Exception:
+                            pass
+                        if items_api:
+                            return items_api
+                        break
+                except Exception:
+                    pass
         return None
 
     # Khi KHÔNG có chi tiết dòng hàng (không detail_json, không file đã tải):
