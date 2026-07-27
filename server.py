@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.10"
+APP_BUILD = "2026-07-26.11"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6854,10 +6854,15 @@ def _run_fetch_job(cid: int, body: dict):
             #   tick thì không có gì để kiểm tra (giữ nguyên hành vi cũ).
             # - TRA CỨU 1 CÔNG TY: LUÔN tự động kiểm tra đối chiếu + XML ngay
             #   khi tra cứu xong thành công (theo yêu cầu người dùng — hiện rõ
-            #   banner XANH "không lệch" hoặc ĐỎ "có lệch"), BẤT KỂ có tick ô
-            #   "Lưu file kết xuất" hay không — ô đó chỉ quyết định file có
-            #   được lưu thêm vào thư mục Năm/Quý đã cấu hình hay không (không
-            #   tick vẫn lưu ra Desktop như xuất thủ công bình thường).
+            #   banner XANH "không lệch" hoặc ĐỎ "có lệch"). Việc CÓ lưu thêm
+            #   vào thư mục Năm/Quý đã cấu hình hay không TÔN TRỌNG đúng ô
+            #   "Lưu file kết xuất" của công ty (frontend gửi kèm trong
+            #   body["luu_ket_xuat"] khi bấm "Tra cứu hóa đơn") — tick thì lưu
+            #   vào thư mục đã cấu hình, không tick thì lưu ra Desktop như
+            #   xuất thủ công. TRƯỚC ĐÂY cờ này KHÔNG được gửi cho tra cứu 1
+            #   công ty nên luôn bị coi là "không tick" dù đã tick trên giao
+            #   diện, khiến file bị lưu THÊM ra Desktop dù đã lưu đúng vào thư
+            #   mục kết xuất (nộp trùng bản, đúng lỗi người dùng phát hiện).
             la_batch = bool(body.get("batch"))
             if la_batch and body.get("luu_ket_xuat") and co_loi:
                 # KHÔNG được để người dùng tick "Lưu file kết xuất" mà không thấy

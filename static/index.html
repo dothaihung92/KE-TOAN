@@ -2191,7 +2191,7 @@ function renderWorkspace(c,online){
     </div>
     <label class="chk" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px">
       <input type="checkbox" id="cLuuKetXuat" ${c.luu_ket_xuat_mac_dinh?'checked':''} onchange="luuTuyChonKetXuat(${c.id},this.checked)">
-      <span>💾 <b>Lưu file kết xuất</b> — khi bấm <b>Xuất Excel</b>/<b>Kết xuất XML</b> (không tự động), nếu tick thì lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý; không tick thì lưu ra Desktop như thường. <b>Đã tick 1 lần sẽ được nhớ</b> cho các lần kết xuất sau, khỏi phải tick lại.</span>
+      <span>💾 <b>Lưu file kết xuất</b> — áp dụng cho cả khi bấm <b>Xuất Excel</b>/<b>Kết xuất XML</b> thủ công LẪN khi tự động kết xuất ngay sau khi <b>Tra cứu hóa đơn</b> xong: nếu tick thì lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý; không tick thì lưu ra Desktop như thường. <b>Đã tick 1 lần sẽ được nhớ</b> cho các lần sau, khỏi phải tick lại.</span>
     </label>
     <button class="btn" id="fetchBtn" onclick="doFetch()">🔍 Tra cứu hóa đơn</button>
     <div id="progressBox" style="display:none;margin-top:14px;background:var(--green-l);border-radius:10px;padding:14px 16px">
@@ -2510,11 +2510,18 @@ async function doFetch(){
 
   try{
     // Bắt đầu tra cứu CHẠY NỀN (server chạy độc lập, không phụ thuộc trình duyệt)
+    // Truyền đúng ô "Lưu file kết xuất" của công ty (cLuuKetXuat) vào lượt
+    // tra cứu này — để bước TỰ ĐỘNG kết xuất Excel/XML ngay sau khi tra cứu
+    // xong cũng lưu vào đúng thư mục đã cấu hình thay vì LUÔN rơi ra Desktop
+    // (trước đây không gửi cờ này nên tra cứu 1 công ty luôn tự xuất thêm 1
+    // bản ra Desktop dù đã tick lưu vào thư mục kết xuất, gây trùng file).
+    const luuKX=document.getElementById('cLuuKetXuat')?.checked?1:0;
     const resp=await fetch(`/api/fetch/${current}`,{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({tu_ngay:tu,den_ngay:den,loai_list:loai,
         he_thong_list:heThong,dl_buy:dlBuy,dl_sell:dlSell,
-        lay_ngan_hang:document.getElementById('cNganHang').checked})});
+        lay_ngan_hang:document.getElementById('cNganHang').checked,
+        luu_ket_xuat:luuKX})});
     if(!resp.ok){const e=await resp.json().catch(()=>({detail:'Lỗi'}));throw new Error(e.detail);}
 
     // POLL tiến độ — thu nhỏ cửa sổ vẫn không mất vì server chạy nền
