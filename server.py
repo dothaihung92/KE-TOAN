@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-26.12"
+APP_BUILD = "2026-07-26.13"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4850,8 +4850,11 @@ def _dvc_run_batch(batch_id, cids, body):
             # quý đã kết thúc (trường hợp GẦN NHƯ LUÔN xảy ra với tờ khai
             # quý) — không dùng lại dữ liệu tra cứu thô ở trên vì đó tìm theo
             # ĐÚNG khoảng ngày người dùng chọn cho công cụ này, có thể quá hẹp.
-            # KHÔNG đụng tới xác nhận đã đánh dấu THỦ CÔNG (thu_cong) — chỉ tự
-            # đồng bộ những xác nhận trước đó cũng LÀ tự động (hoặc chưa có).
+            # ĐÈ CẢ xác nhận đã đánh dấu THỦ CÔNG trước đó — công cụ "Tra cứu
+            # tờ khai thuế / tải tờ khai hàng loạt" này CHÍNH LÀ nơi kiểm tra
+            # lại TOÀN BỘ công ty đã nộp đầy đủ hay chưa (nguồn xác thực
+            # chính, tra cứu thật trên cổng Thuế), nên phải được tin cậy hơn
+            # 1 lần đánh dấu tay trước đó — không loại trừ trường hợp nào.
             if dong_bo_quy:
                 tu_ky_db, den_ky_db = _tu_den_cua_quy(dong_bo_nam, dong_bo_quy)
                 dong_bo_ghi_chu = []
@@ -4865,9 +4868,6 @@ def _dvc_run_batch(batch_id, cids, body):
                     log_cu = conn_db2.execute(
                         "SELECT xac_nhan, xac_nhan_nguon FROM nop_to_khai_log "
                         "WHERE company_id=? AND loai=?", (cid, loai_dongbo)).fetchone()
-                    if log_cu and log_cu["xac_nhan_nguon"] == "thu_cong":
-                        conn_db2.close()
-                        continue   # giữ nguyên đánh dấu thủ công, không tự ý đè
                     if xn_dongbo:
                         if not (log_cu and log_cu["xac_nhan"]):
                             dong_bo_ghi_chu.append(f"tự TICK {loai_dongbo} (đã chấp nhận)")
