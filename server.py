@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.30"
+APP_BUILD = "2026-07-27.31"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14766,11 +14766,34 @@ def vat_luu(cid: int, data: dict = Body(...)):
     return {"ok": True}
 
 
-def _tim_file_bang_ke_moi_nhat(mst, save_dir):
+def _tim_file_bang_ke_moi_nhat(mst, save_dir, export_dir=None, d_tu=None, d_den=None):
     """Tìm file Excel 'Bảng kê hóa đơn' (BangKe_HoaDon_{mst}...xlsx) ĐÃ XUẤT
-    VÀ LƯU SẴN trên máy — MỚI NHẤT nếu có nhiều bản (nhiều kỳ). Trả đường dẫn
-    hoặc None nếu không tìm thấy."""
+    VÀ LƯU SẴN trên máy. Trả đường dẫn hoặc None nếu không tìm thấy.
+
+    ƯU TIÊN thư mục 'Thư mục lưu file kết xuất' (export_dir) NGƯỜI DÙNG đã tự
+    cấu hình cho công ty (đúng thư mục Năm/Quý của kỳ đang xuất) — đây là nơi
+    người dùng CHỦ ĐỘNG chọn, đáng tin hơn hẳn thư mục 'downloads' nội bộ của
+    phần mềm (thư mục này CHUNG cho mọi công ty, và nếu phần mềm được cài bên
+    trong 1 ổ đồng bộ như OneDrive thì Date Modified của file cũ trong đó có
+    thể bị hệ thống đồng bộ tự "chạm" lại, khiến bản CŨ bị chọn nhầm thay vì
+    bản vừa xuất — đã xác nhận đúng nguyên nhân qua dữ liệu thật của người
+    dùng). CHỈ khi export_dir không có sẵn bản nào cho đúng kỳ này mới rơi về
+    tìm trong (downloads nội bộ, save_dir) và chọn bản mới nhất theo mtime
+    như trước."""
     import glob
+    if export_dir and d_tu and d_den:
+        try:
+            dich = _thu_muc_ket_xuat_ky(
+                export_dir, d_tu.strftime("%d/%m/%Y"), d_den.strftime("%d/%m/%Y"))
+        except Exception:
+            dich = None
+        if dich and os.path.isdir(dich):
+            try:
+                ung_vien_kx = glob.glob(os.path.join(dich, f"BangKe_HoaDon_{mst}*.xlsx"))
+            except Exception:
+                ung_vien_kx = []
+            if ung_vien_kx:
+                return max(ung_vien_kx, key=lambda p: os.path.getmtime(p))
     ung_vien = []
     for thu_muc in (DOWNLOAD_DIR, save_dir):
         if thu_muc and os.path.isdir(thu_muc):
@@ -14783,7 +14806,7 @@ def _tim_file_bang_ke_moi_nhat(mst, save_dir):
     return max(ung_vien, key=lambda p: os.path.getmtime(p))
 
 
-def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
+def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
     """Đọc tổng MUA VÀO (doanh số + thuế GTGT) TRỰC TIẾP từ file Excel 'Bảng
     kê hóa đơn' đã xuất và lưu sẵn trên máy (sheet 'BK Mua vào') — cùng
     nguyên tắc với _doc_nhom_ban_ra_tu_file_bang_ke (xem giải thích ở đó):
@@ -14796,7 +14819,7 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     KHÔNG phát sinh mua vào kỳ này là chuyện bình thường, không phải lỗi).
     CHỈ trả None khi KHÔNG tìm/đọc được file hoặc sheet 'BK Mua vào' — tức
     thật sự chưa có dữ liệu để tin cậy, chứ không phải "có nhưng bằng 0"."""
-    fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir)
+    fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir, export_dir, d_tu, d_den)
     if not fpath:
         return None
     try:
@@ -14835,7 +14858,7 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full, "_file": fpath}
 
 
-def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
+def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
     """Đọc nhóm BÁN RA theo thuế suất TRỰC TIẾP từ file Excel 'Bảng kê hóa
     đơn' (BangKe_HoaDon_{mst}...xlsx) ĐÃ XUẤT VÀ LƯU SẴN trên máy (sheet
     'BK Bán ra') — theo đúng yêu cầu: Kết xuất XML KHÔNG tự tra cứu/gọi mạng
@@ -14848,7 +14871,7 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     toàn bộ bằng 0 (công ty KHÔNG phát sinh bán ra kỳ này là chuyện bình
     thường, không phải lỗi). CHỈ trả None khi KHÔNG tìm/đọc được file hoặc
     sheet 'BK Bán ra' — tức thật sự chưa có dữ liệu để tin cậy."""
-    fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir)
+    fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir, export_dir, d_tu, d_den)
     if not fpath:
         return None
     try:
@@ -15048,8 +15071,9 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # Giờ nếu không đọc được bảng kê đúng kỳ thì BÁO LỖI RÕ ngay, không âm
     # thầm dùng nguồn số liệu khác.
     save_dir = (comp["save_dir"] or "").strip() if comp else ""
+    export_dir_cty = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
 
-    _tu_file_bk_mua = _doc_mua_vao_tu_file_bang_ke(mst_cty, save_dir, d_tu, d_den)
+    _tu_file_bk_mua = _doc_mua_vao_tu_file_bang_ke(mst_cty, save_dir, d_tu, d_den, export_dir_cty)
     if _tu_file_bk_mua is None:
         raise HTTPException(400,
             f"Không đọc được dữ liệu MUA VÀO đúng kỳ {ky} ({tu_ngay_kkhai} - "
@@ -15066,7 +15090,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     ban_theo_ts = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
                    "8": {"ds": 0, "thue": 0}, "10": {"ds": 0, "thue": 0},
                    "KCT": {"ds": 0, "thue": 0}}
-    _tu_file_bk = _doc_nhom_ban_ra_tu_file_bang_ke(mst_cty, save_dir, d_tu, d_den)
+    _tu_file_bk = _doc_nhom_ban_ra_tu_file_bang_ke(mst_cty, save_dir, d_tu, d_den, export_dir_cty)
     if _tu_file_bk is None:
         raise HTTPException(400,
             f"Không đọc được dữ liệu BÁN RA đúng kỳ {ky} ({tu_ngay_kkhai} - "
