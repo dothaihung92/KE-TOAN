@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.28"
+APP_BUILD = "2026-07-27.29"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14832,7 +14832,7 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
             ds += ds_o; thue += thue_o
     except Exception:
         return None
-    return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full}
+    return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full, "_file": fpath}
 
 
 def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
@@ -14902,6 +14902,7 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     except Exception:
         return None
     ket_qua["_full"] = {"ds": ds_full, "thue": thue_full}
+    ket_qua["_file"] = fpath
     return ket_qua
 
 
@@ -15059,6 +15060,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             f"lại nữa, chỉ đọc đúng số liệu trong file bảng kê đã xuất.")
     mua_ds, mua_thue = _tu_file_bk_mua["ds"], _tu_file_bk_mua["thue"]
     mua_ds_full, mua_thue_full = _tu_file_bk_mua["ds_full"], _tu_file_bk_mua["thue_full"]
+    file_bk_da_doc = _tu_file_bk_mua.get("_file") or ""
 
     # ----- BÁN RA: tách theo nhóm thuế suất — CŨNG CHỈ đọc từ bảng kê -----
     ban_theo_ts = {"0": {"ds": 0, "thue": 0}, "5": {"ds": 0, "thue": 0},
@@ -15074,6 +15076,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             f"rồi mới bấm 'Kết xuất XML' — Kết xuất XML không tự tra cứu/tính "
             f"lại nữa, chỉ đọc đúng số liệu trong file bảng kê đã xuất.")
     full = _tu_file_bk.pop("_full", {"ds": 0, "thue": 0})
+    _tu_file_bk.pop("_file", None)
     ban_ds_full, ban_thue_full = full["ds"], full["thue"]
     for k, v in _tu_file_bk.items():
         tgt = k if k in ban_theo_ts else "KCT"   # "KHAC" (Xuất Excel chưa lấy được file) gộp vào KCT
@@ -15458,9 +15461,25 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             f"⚠ KHÔNG lưu được vào 'Thư mục lưu file kết xuất' đã cấu hình ({loi_luu_ket_xuat}) "
             f"— đã lưu tạm ra Desktop thay thế. Hãy kiểm tra lại đường dẫn (đường dẫn quá dài, "
             f"ổ mạng/OneDrive đang khoá, hoặc thiếu quyền ghi đều có thể gây lỗi này).")
+    # LUÔN hiển thị RÕ file bảng kê đã dùng để tính [23]-[35] (đường dẫn +
+    # thời gian sửa đổi) — trước đây khi số liệu ra sai, không cách nào biết
+    # NGAY server vừa đọc đúng file nào trên máy (có thể còn sót 1 bản khác
+    # trùng tên ở thư mục khác mà người dùng không để ý), phải đoán mò/hỏi
+    # qua lại nhiều lượt. Giờ báo thẳng để đối chiếu trực tiếp với file đang
+    # xem trên máy.
+    if file_bk_da_doc:
+        try:
+            _mtime_bk = datetime.datetime.fromtimestamp(
+                os.path.getmtime(file_bk_da_doc)).strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            _mtime_bk = "?"
+        canh_bao = (canh_bao + "\n\n" if canh_bao else "") + (
+            f"ℹ️ Số liệu [23]-[35] lấy từ file bảng kê: {file_bk_da_doc} "
+            f"(sửa đổi lúc {_mtime_bk}).")
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
             "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds),
             "lech_bk": bool(canh_bao_lech),
+            "file_bang_ke": file_bk_da_doc,
             "thue_phai_nop": ct40, "thue_phai_nop_ky": ky_hien_thi_vat}
 
 
