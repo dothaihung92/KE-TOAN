@@ -2161,7 +2161,9 @@ async function luuTuyChonKetXuat(id,bat){
   }catch(e){}
 }
 async function selectCompany(id){
-  fetchPollCancel=true;  // dừng vòng poll tra cứu của công ty trước
+  fetchPollCancel=true;  // ngừng THEO DÕI vòng poll tra cứu công ty trước ở
+                          // giao diện (KHÔNG hủy job trên server — job đó vẫn
+                          // chạy nền, quay lại đúng công ty đó sẽ tự hiện lại)
   current=id;
   await loadCompanies();  // đồng bộ trạng thái đăng nhập trước
   const c=companies.find(x=>x.id===id);
@@ -2173,6 +2175,13 @@ async function selectCompany(id){
   renderDoiChieuBanner(c);
   renderVatPhaiNopBanner(c);
   await refreshInvoices();
+  // Công ty này có đang tra cứu DỞ DANG (job chạy nền, có thể đã bắt đầu từ
+  // trước khi chuyển sang công ty khác) -> tự hiện lại đúng tiến độ và tiếp
+  // tục theo dõi, KHÔNG bắt tra cứu lại từ đầu.
+  try{
+    const st=await api(`/api/fetch-status/${id}`);
+    if(st&&st.running&&current===id)watchFetchProgress(id);
+  }catch{}
 }
 function renderFetchErrorBanner(c){
   // Ghi chú LỖI của lần tra cứu gần nhất — lưu ở server nên KHÔNG mất khi
@@ -2643,16 +2652,10 @@ async function doFetch(){
   if(document.getElementById('cBuyXml').checked)dlBuy.push('xml');
   if(document.getElementById('cSellXml').checked)dlSell.push('xml');
 
-  btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang xử lý...';
   const box=document.getElementById('progressBox');
-  const ptext=document.getElementById('progressText');
-  const pbar=document.getElementById('progressBar');
-  box.style.display='block';pbar.style.width='0%';ptext.textContent='Bắt đầu...';
-  const _pl=document.getElementById('progressLog');if(_pl)_pl.innerHTML='';
+  box.style.display='block';
   const _kq=document.getElementById('ketQuaTraCuu');if(_kq)_kq.style.display='none';
   const _eb=document.getElementById('fetchErrorBanner');if(_eb)_eb.style.display='none';
-  thangDangChay.clear();
-  const _ptb=document.getElementById('progressThangBox');if(_ptb){_ptb.style.display='none';_ptb.innerHTML='';}
 
   try{
     // Bắt đầu tra cứu CHẠY NỀN (server chạy độc lập, không phụ thuộc trình duyệt)
@@ -2669,96 +2672,125 @@ async function doFetch(){
         lay_ngan_hang:document.getElementById('cNganHang').checked,
         luu_ket_xuat:luuKX})});
     if(!resp.ok){const e=await resp.json().catch(()=>({detail:'Lỗi'}));throw new Error(e.detail);}
-
-    // POLL tiến độ — thu nhỏ cửa sổ vẫn không mất vì server chạy nền
-    const fetchCid=current;        // công ty đang tra cứu
-    fetchPollCancel=false;
-    // khởi tạo thanh trượt số luồng theo đúng tốc độ đang chọn, cho phép chỉnh
-    // ngay trong lúc đang tải (không cần dừng lại rồi tra cứu lại từ đầu)
-    songSongCid=fetchCid;
-    const _ssInit=SPEED_SONG_SONG[document.getElementById('speedSel').value]||8;
-    const _ssSlider=document.getElementById('songSongSlider');
-    if(_ssSlider){_ssSlider.value=_ssInit;document.getElementById('songSongVal').textContent=_ssInit;}
-    let cursor=0, running=true, hadError=false;
-    while(running){
-      await new Promise(r=>setTimeout(r,800));
-      // nếu người dùng bấm sang công ty khác -> dừng theo dõi (server vẫn tự dừng)
-      if(fetchPollCancel||current!==fetchCid){
-        try{await api(`/api/fetch-cancel/${fetchCid}`,{method:'POST'});}catch{}
-        box.style.display='none';
-        if(songSongCid===fetchCid)songSongCid=null;
-        return;
-      }
-      let st;
-      try{
-        st=await api(`/api/fetch-status/${fetchCid}?cursor=${cursor}`);
-      }catch(err){continue;}  // mất mạng tạm thời -> thử lại
-      cursor=st.cursor;running=st.running;
-      for(const m of (st.messages||[])){
-        const mTag=RE_TAG_THANG.exec(m.text||'');
-        if(mTag){
-          const [,tienTo,loaiTag,key,subText]=mTag;
-          // Gộp CẢ tienTo (vd "mua vào (máy tính tiền)") vào khoá — từ khi
-          // mua vào/bán ra (× thường/MTT) có thể chạy SONG SONG với nhau,
-          // 2 tổ hợp KHÁC NHAU có thể cùng xử lý TRÙNG khoảng tháng (vd cả
-          // 2 đều đang ở "THÁNG 01/05→31/05"), nếu chỉ khoá theo tháng thì
-          // dòng của tổ hợp này sẽ bị tổ hợp kia GHI ĐÈ mất.
-          const fullKey=tienTo+' :: '+loaiTag+' '+key;
-          const nhan=`${tienTo} — ${loaiTag} ${key}`;
-          if(subText.includes('✓ xong')){
-            if(thangDangChay.has(fullKey)){
-              thangDangChay.set(fullKey,{nhan,text:'✓ xong',loi:false,done:true});
-              renderThangDangChay();
-              setTimeout(()=>{thangDangChay.delete(fullKey);renderThangDangChay();},3000);
-            }
-          }else{
-            thangDangChay.set(fullKey,{nhan,text:subText,loi:/lỗi|đợi|429|50\d/.test(subText),done:false});
+    await watchFetchProgress(current);
+  }catch(e){
+    songSongCid=null;
+    box.style.display='none';
+    renderFetchErrorBanner({last_fetch_error:e.message,
+      last_fetch_error_at:new Date().toISOString()});
+    if(e.message.includes('hết hạn')||e.message.includes('đăng nhập')){
+      clientState[current]=false;toast('Cần đăng nhập lại','err');selectCompany(current);
+    }else toast('Lỗi: '+e.message,'err');
+    const btn=document.getElementById('fetchBtn');
+    if(btn){btn.disabled=false;btn.innerHTML='🔍 Tra cứu hóa đơn';}
+  }
+}
+// Theo dõi tiến độ tra cứu 1 công ty (fetchCid) — TÁCH RIÊNG khỏi doFetch()
+// để dùng chung được cho cả lượt BẮT ĐẦU MỚI lẫn lượt TIẾP TỤC XEM LẠI khi
+// quay về đúng công ty đang có job chạy nền (xem selectCompany()). Trước đây
+// hễ chuyển sang công ty khác là gọi /api/fetch-cancel HỦY LUÔN job trên
+// server -> quay lại công ty cũ thì tra cứu đã mất, không tiếp tục nữa; giờ
+// chuyển công ty chỉ NGỪNG THEO DÕI ở giao diện, job vẫn chạy nền bình
+// thường, quay lại là tự hiện lại đúng tiến độ và tiếp tục theo dõi.
+async function watchFetchProgress(fetchCid){
+  const box=document.getElementById('progressBox');
+  const ptext=document.getElementById('progressText');
+  const pbar=document.getElementById('progressBar');
+  const btn=document.getElementById('fetchBtn');
+  if(!box||!ptext||!pbar)return;
+  box.style.display='block';pbar.style.width='0%';ptext.textContent='Bắt đầu...';
+  const _pl=document.getElementById('progressLog');if(_pl)_pl.innerHTML='';
+  thangDangChay.clear();
+  const _ptb=document.getElementById('progressThangBox');if(_ptb){_ptb.style.display='none';_ptb.innerHTML='';}
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang xử lý...';}
+  fetchPollCancel=false;
+  // khởi tạo thanh trượt số luồng theo đúng tốc độ đang chọn, cho phép chỉnh
+  // ngay trong lúc đang tải (không cần dừng lại rồi tra cứu lại từ đầu)
+  songSongCid=fetchCid;
+  const _ssInit=SPEED_SONG_SONG[document.getElementById('speedSel').value]||8;
+  const _ssSlider=document.getElementById('songSongSlider');
+  if(_ssSlider){_ssSlider.value=_ssInit;document.getElementById('songSongVal').textContent=_ssInit;}
+  let cursor=0, running=true, hadError=false;
+  while(running){
+    // nếu người dùng bấm sang công ty khác -> chỉ NGỪNG THEO DÕI ở đây (KHÔNG
+    // hủy job trên server) — job vẫn chạy nền, quay lại đúng công ty này thì
+    // selectCompany() tự phát hiện job đang chạy và gọi lại hàm này để xem tiếp.
+    if(fetchPollCancel||current!==fetchCid){
+      if(songSongCid===fetchCid)songSongCid=null;
+      return;
+    }
+    let st;
+    try{
+      st=await api(`/api/fetch-status/${fetchCid}?cursor=${cursor}`);
+    }catch(err){await new Promise(r=>setTimeout(r,800));continue;}  // mất mạng tạm thời -> thử lại
+    cursor=st.cursor;running=st.running;
+    for(const m of (st.messages||[])){
+      const mTag=RE_TAG_THANG.exec(m.text||'');
+      if(mTag){
+        const [,tienTo,loaiTag,key,subText]=mTag;
+        // Gộp CẢ tienTo (vd "mua vào (máy tính tiền)") vào khoá — từ khi
+        // mua vào/bán ra (× thường/MTT) có thể chạy SONG SONG với nhau,
+        // 2 tổ hợp KHÁC NHAU có thể cùng xử lý TRÙNG khoảng tháng (vd cả
+        // 2 đều đang ở "THÁNG 01/05→31/05"), nếu chỉ khoá theo tháng thì
+        // dòng của tổ hợp này sẽ bị tổ hợp kia GHI ĐÈ mất.
+        const fullKey=tienTo+' :: '+loaiTag+' '+key;
+        const nhan=`${tienTo} — ${loaiTag} ${key}`;
+        if(subText.includes('✓ xong')){
+          if(thangDangChay.has(fullKey)){
+            thangDangChay.set(fullKey,{nhan,text:'✓ xong',loi:false,done:true});
             renderThangDangChay();
+            setTimeout(()=>{thangDangChay.delete(fullKey);renderThangDangChay();},3000);
           }
-          const dangChay=[...thangDangChay.values()].filter(v=>!v.done);
-          const soDang=dangChay.length||thangDangChay.size;
-          const tienToDang=[...new Set(dangChay.map(v=>v.nhan.split(' — ')[0]))];
-          ptext.textContent=tienToDang.length>1
-            ?`Đang xử lý song song ${soDang} tháng/đoạn (${tienToDang.join(', ')})...`
-            :`${tienTo}: đang xử lý ${soDang} ${loaiTag==='THÁNG'?'tháng':'đoạn'} đồng thời...`;
         }else{
-          ptext.textContent=m.text||'';
+          thangDangChay.set(fullKey,{nhan,text:subText,loi:/lỗi|đợi|429|50\d/.test(subText),done:false});
+          renderThangDangChay();
         }
-        const plog=document.getElementById('progressLog');
-        if(m.stage==='download'&&m.total){
-          pbar.style.width=Math.round(m.cur/m.total*100)+'%';
-        }else if(m.stage==='found'){
-          pbar.style.width='50%';
-        }else if(m.stage==='info'){
-          // dòng thống kê lấy đủ chưa
-          if(plog){
-            const mau=(m.text.includes('⚠')||m.text.includes('✗'))?'#c00':(m.text.includes('✓')?'#1f6b4a':'#555');
-            plog.innerHTML+=`<div style="color:${mau};font-weight:${m.text.includes('✗')?700:400}">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;
-          }
-        }else if(m.stage==='warn'){
-          if(plog){plog.innerHTML+=`<div style="color:#c47">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
-        }else if(m.stage==='done'){
-          pbar.style.width='100%';toast(m.text,m.text.includes('⚠')?'err':'ok');
-          hienKetQua(m);
-          thangDangChay.clear();renderThangDangChay();
-          // thành công nhưng vẫn còn file chưa tải được -> GIỮ banner (khớp với
-          // server, không tự xóa để người dùng còn biết hóa đơn nào cần tải lại)
-          renderFetchErrorBanner(m.file_thieu
-            ?{last_fetch_error:m.text,last_fetch_error_at:new Date().toISOString()}
-            :{last_fetch_error:null});
-        }else if(m.stage==='error'){
-          thangDangChay.clear();renderThangDangChay();
-          hadError=true;toast(m.text,'err');
-          if(plog){plog.innerHTML+=`<div style="color:#c00;font-weight:700">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
-          if(m.text.includes('hết hạn'))clientState[current]=false;
-          // ghi note LỖI HIỆN TẠI ra 1 khung riêng KHÔNG tự tắt (khác với toast),
-          // để người dùng luôn xem lại được lỗi gì dù đã bấm tắt thông báo
-          renderFetchErrorBanner({last_fetch_error:m.text,
-            last_fetch_error_at:new Date().toISOString()});
+        const dangChay=[...thangDangChay.values()].filter(v=>!v.done);
+        const soDang=dangChay.length||thangDangChay.size;
+        const tienToDang=[...new Set(dangChay.map(v=>v.nhan.split(' — ')[0]))];
+        ptext.textContent=tienToDang.length>1
+          ?`Đang xử lý song song ${soDang} tháng/đoạn (${tienToDang.join(', ')})...`
+          :`${tienTo}: đang xử lý ${soDang} ${loaiTag==='THÁNG'?'tháng':'đoạn'} đồng thời...`;
+      }else{
+        ptext.textContent=m.text||'';
+      }
+      const plog=document.getElementById('progressLog');
+      if(m.stage==='download'&&m.total){
+        pbar.style.width=Math.round(m.cur/m.total*100)+'%';
+      }else if(m.stage==='found'){
+        pbar.style.width='50%';
+      }else if(m.stage==='info'){
+        // dòng thống kê lấy đủ chưa
+        if(plog){
+          const mau=(m.text.includes('⚠')||m.text.includes('✗'))?'#c00':(m.text.includes('✓')?'#1f6b4a':'#555');
+          plog.innerHTML+=`<div style="color:${mau};font-weight:${m.text.includes('✗')?700:400}">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;
         }
+      }else if(m.stage==='warn'){
+        if(plog){plog.innerHTML+=`<div style="color:#c47">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
+      }else if(m.stage==='done'){
+        pbar.style.width='100%';toast(m.text,m.text.includes('⚠')?'err':'ok');
+        hienKetQua(m);
+        thangDangChay.clear();renderThangDangChay();
+        // thành công nhưng vẫn còn file chưa tải được -> GIỮ banner (khớp với
+        // server, không tự xóa để người dùng còn biết hóa đơn nào cần tải lại)
+        renderFetchErrorBanner(m.file_thieu
+          ?{last_fetch_error:m.text,last_fetch_error_at:new Date().toISOString()}
+          :{last_fetch_error:null});
+      }else if(m.stage==='error'){
+        thangDangChay.clear();renderThangDangChay();
+        hadError=true;toast(m.text,'err');
+        if(plog){plog.innerHTML+=`<div style="color:#c00;font-weight:700">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
+        if(m.text.includes('hết hạn')&&current===fetchCid)clientState[current]=false;
+        // ghi note LỖI HIỆN TẠI ra 1 khung riêng KHÔNG tự tắt (khác với toast),
+        // để người dùng luôn xem lại được lỗi gì dù đã bấm tắt thông báo
+        renderFetchErrorBanner({last_fetch_error:m.text,
+          last_fetch_error_at:new Date().toISOString()});
       }
     }
-    if(songSongCid===fetchCid)songSongCid=null;
+    if(running)await new Promise(r=>setTimeout(r,800));
+  }
+  if(songSongCid===fetchCid)songSongCid=null;
+  if(current===fetchCid){
     await refreshInvoices();
     // Job đã CHẠY XONG HẲN (kể cả bước tự kiểm tra đối chiếu/XML chạy sau
     // message "done") — tải lại thông tin công ty để lấy đúng kết quả kiểm
@@ -2769,17 +2801,10 @@ async function doFetch(){
       if(_c&&current===fetchCid){renderDoiChieuBanner(_c);renderVatPhaiNopBanner(_c);}
     }
     // ẩn thanh tiến trình nhưng GIỮ bảng kết quả để người dùng xem
-    setTimeout(()=>{box.style.display='none';},2000);
-  }catch(e){
-    songSongCid=null;
-    box.style.display='none';
-    renderFetchErrorBanner({last_fetch_error:e.message,
-      last_fetch_error_at:new Date().toISOString()});
-    if(e.message.includes('hết hạn')||e.message.includes('đăng nhập')){
-      clientState[current]=false;toast('Cần đăng nhập lại','err');selectCompany(current);
-    }else toast('Lỗi: '+e.message,'err');
+    setTimeout(()=>{if(current===fetchCid)box.style.display='none';},2000);
+    const btn2=document.getElementById('fetchBtn');
+    if(btn2){btn2.disabled=false;btn2.innerHTML='🔍 Tra cứu hóa đơn';}
   }
-  btn.disabled=false;btn.innerHTML='🔍 Tra cứu hóa đơn';
 }
 /* ---------- TRA CỨU HÀNG LOẠT ---------- */
 let batchId=null, batchPollCancel=false, batchHidden=false;
