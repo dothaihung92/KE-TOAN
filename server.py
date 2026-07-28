@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.35"
+APP_BUILD = "2026-07-27.36"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14887,16 +14887,22 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
     fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir, export_dir, d_tu, d_den)
     if not fpath:
         return None
+    # QUAN TRỌNG: mở workbook read_only mà KHÔNG gọi wb.close() sẽ giữ
+    # NGUYÊN handle file mở (openpyxl read_only stream trực tiếp từ file
+    # zip, không tự đóng khi hết hàm) — Windows/OneDrive coi file này vẫn
+    # đang "được dùng" bởi tiến trình phần mềm, khiến người dùng mở file
+    # bằng Excel để sửa tay xong KHÔNG SAVE ĐƯỢC ("Document not saved")
+    # dù chỉ đang ĐỌC, không hề ghi gì (đã xác nhận đúng nguyên nhân qua
+    # dữ liệu thật của người dùng). Bọc try/finally để LUÔN đóng lại ngay
+    # khi đọc xong, dù đọc lỗi hay đúng ở giữa chừng.
+    wb = None
     try:
         import openpyxl
         wb = openpyxl.load_workbook(fpath, data_only=True, read_only=True)
         if "BK Mua vào" not in wb.sheetnames:
             return None
         ws = wb["BK Mua vào"]
-    except Exception:
-        return None
-    ds = thue = ds_full = thue_full = 0
-    try:
+        ds = thue = ds_full = thue_full = 0
         for row in ws.iter_rows(min_row=2, values_only=True):
             stt = row[0] if len(row) > 0 else None
             if not isinstance(stt, (int, float)):
@@ -14918,9 +14924,15 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
             if not (d and d_tu <= d <= d_den):
                 continue
             ds += ds_o; thue += thue_o
+        return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full, "_file": fpath}
     except Exception:
         return None
-    return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full, "_file": fpath}
+    finally:
+        if wb is not None:
+            try:
+                wb.close()
+            except Exception:
+                pass
 
 
 def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
@@ -14939,29 +14951,31 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None
     fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir, export_dir, d_tu, d_den)
     if not fpath:
         return None
+    # Xem giải thích try/finally + wb.close() ở _doc_mua_vao_tu_file_bang_ke:
+    # KHÔNG đóng workbook read_only sẽ giữ handle file mở, khiến người dùng
+    # mở file này bằng Excel để sửa tay KHÔNG SAVE ĐƯỢC dù phần mềm chỉ đang
+    # ĐỌC (đã xác nhận đúng nguyên nhân qua dữ liệu thật của người dùng).
+    wb = None
     try:
         import openpyxl
         wb = openpyxl.load_workbook(fpath, data_only=True, read_only=True)
         if "BK Bán ra" not in wb.sheetnames:
             return None
         ws = wb["BK Bán ra"]
-    except Exception:
-        return None
 
-    nhan_to_key = {
-        "1. Hàng hóa, dịch vụ không chịu thuế GTGT (KCT)": "KCT",
-        "2. Hàng hóa, dịch vụ chịu thuế suất 0%": "0",
-        "3. Hàng hóa, dịch vụ chịu thuế suất 5%": "5",
-        "4. Hàng hóa, dịch vụ chịu thuế suất 8%": "8",
-        "5. Hàng hóa, dịch vụ chịu thuế suất 10%": "10",
-        "6. Khác / chưa lấy được file XML": "KHAC",
-    }
-    ket_qua = {"KCT": {"ds": 0, "thue": 0}, "0": {"ds": 0, "thue": 0},
-               "5": {"ds": 0, "thue": 0}, "8": {"ds": 0, "thue": 0},
-               "10": {"ds": 0, "thue": 0}, "KHAC": {"ds": 0, "thue": 0}}
-    ds_full = thue_full = 0   # TỔNG CỘNG cả sheet (không lọc kỳ) — để đối chiếu [34]/[35]
-    nhom_hien_tai = None
-    try:
+        nhan_to_key = {
+            "1. Hàng hóa, dịch vụ không chịu thuế GTGT (KCT)": "KCT",
+            "2. Hàng hóa, dịch vụ chịu thuế suất 0%": "0",
+            "3. Hàng hóa, dịch vụ chịu thuế suất 5%": "5",
+            "4. Hàng hóa, dịch vụ chịu thuế suất 8%": "8",
+            "5. Hàng hóa, dịch vụ chịu thuế suất 10%": "10",
+            "6. Khác / chưa lấy được file XML": "KHAC",
+        }
+        ket_qua = {"KCT": {"ds": 0, "thue": 0}, "0": {"ds": 0, "thue": 0},
+                   "5": {"ds": 0, "thue": 0}, "8": {"ds": 0, "thue": 0},
+                   "10": {"ds": 0, "thue": 0}, "KHAC": {"ds": 0, "thue": 0}}
+        ds_full = thue_full = 0   # TỔNG CỘNG cả sheet (không lọc kỳ) — để đối chiếu [34]/[35]
+        nhom_hien_tai = None
         for row in ws.iter_rows(min_row=2, values_only=True):
             col_a = row[0] if len(row) > 0 else None
             if isinstance(col_a, str) and col_a.strip() in nhan_to_key:
@@ -14987,11 +15001,17 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None
                 continue
             ket_qua[nhom_hien_tai]["ds"] += ds_o
             ket_qua[nhom_hien_tai]["thue"] += thue_o
+        ket_qua["_full"] = {"ds": ds_full, "thue": thue_full}
+        ket_qua["_file"] = fpath
+        return ket_qua
     except Exception:
         return None
-    ket_qua["_full"] = {"ds": ds_full, "thue": thue_full}
-    ket_qua["_file"] = fpath
-    return ket_qua
+    finally:
+        if wb is not None:
+            try:
+                wb.close()
+            except Exception:
+                pass
 
 
 @app.get("/api/export-htkk/{cid}")
