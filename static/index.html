@@ -3327,7 +3327,11 @@ async function exportHTKK(){
     if(tuN)url+=`tu=${encodeURIComponent(fmt(tuN))}&`;
     if(denN)url+=`den=${encodeURIComponent(fmt(denN))}&`;
     if(nguoiKy)url+=`nguoi_ky=${encodeURIComponent(nguoiKy)}`;
-    const r=await fetch(url);
+    // cache:'no-store' — bắt buộc gọi lại server MỖI LẦN bấm (endpoint này
+    // ghi file XML mới mỗi lần gọi), không để trình duyệt lặng lẽ phục vụ
+    // lại kết quả CŨ theo cache (từng khiến số liệu XML "đứng yên" dù dữ
+    // liệu công ty đã đổi).
+    const r=await fetch(url,{cache:'no-store'});
     if(!r.ok)throw new Error(await docLoiTuResponse(r));
     const res=await r.json();
     await loadCompanies();
@@ -3361,7 +3365,7 @@ async function exportHTKKTNCN(){
     if(tuN)url+=`tu=${encodeURIComponent(fmt(tuN))}&`;
     if(denN)url+=`den=${encodeURIComponent(fmt(denN))}&`;
     if(nguoiKy)url+=`nguoi_ky=${encodeURIComponent(nguoiKy)}`;
-    const r=await fetch(url);
+    const r=await fetch(url,{cache:'no-store'});
     if(!r.ok)throw new Error(await docLoiTuResponse(r));
     const res=await r.json();
     await loadCompanies();
@@ -5464,7 +5468,7 @@ async function tinhVat(){
   try{
     let url=`/api/vat-tmtinh/${current}?ky=${encodeURIComponent(ky)}`;
     if(dudauRaw!=='')url+=`&du_dau_ky=${parseFloat(dudauRaw)||0}`;
-    const r=await fetch(url);
+    const r=await fetch(url,{cache:'no-store'});
     if(!r.ok)throw new Error((await r.json()).detail||'Lỗi tính');
     const d=await r.json();vatResult=d;
     const note=document.getElementById('vat_note');
@@ -5541,7 +5545,7 @@ async function exportExcel(btn){
     let url=`/api/export-excel/${current}?luu_ket_xuat=${luu}`;
     if(tu)url+=`&tu_ngay=${encodeURIComponent(tu)}`;
     if(den)url+=`&den_ngay=${encodeURIComponent(den)}`;
-    const r=await fetch(url);
+    const r=await fetch(url,{cache:'no-store'});
     if(!r.ok){let m='Lỗi xuất Excel';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     await xuatFile(r,`BangKe_HoaDon.xlsx`);
     toast(luu&&r.headers.get('X-Saved-Desktop')?'Đã xuất Excel xong (đã lưu vào thư mục kết xuất theo Năm/Quý)':'Đã xuất Excel xong','ok');

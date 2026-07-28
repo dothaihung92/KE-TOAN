@@ -19,7 +19,7 @@ import concurrent.futures as _cf
 from typing import Optional, List
 
 import requests
-from fastapi import FastAPI, HTTPException, Body, Request
+from fastapi import FastAPI, HTTPException, Body, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.20"
+APP_BUILD = "2026-07-27.21"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -165,6 +165,12 @@ def _resp_xuat(path, fname, extra=None):
             h["X-Saved-Desktop"] = "1"
     except Exception:
         pass
+    # KHÔNG được để trình duyệt CACHE — endpoint gọi hàm này (vd "Xuất Excel
+    # tổng hợp") GHI FILE MỚI mỗi lần gọi (GET, cùng URL/tham số mỗi lần bấm
+    # lại); nếu trình duyệt lặng lẽ phục vụ lại response CŨ thì file trên đĩa
+    # không được cập nhật, các bước sau (vd "Kết xuất XML" đọc lại đúng file
+    # này) vẫn thấy dữ liệu CŨ dù người dùng đã sửa/tra cứu lại.
+    h["Cache-Control"] = "no-store"
     return FileResponse(path, filename=fname, headers=h)
 
 def _open_file_local(path):
@@ -14498,7 +14504,7 @@ def _tong_thue_nk_tokhai(cid, ky):
 
 
 @app.get("/api/vat-tmtinh/{cid}")
-def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
+def vat_tam_tinh(cid: int, response: Response, ky: str = "", du_dau_ky: float = None):
     """
     Tạm tính thuế VAT trong kỳ:
       - vat_mua: tổng VAT đầu vào (từ hóa đơn mua, loại HĐ thay thế/hủy)
@@ -14509,6 +14515,12 @@ def vat_tam_tinh(cid: int, ky: str = "", du_dau_ky: float = None):
       chenh > 0 -> phải nộp = chenh ; du_cuoi_ky = 0
       chenh <= 0 -> phải nộp = 0 ; du_cuoi_ky = -chenh (chuyển kỳ sau)
     """
+    # KHÔNG được để trình duyệt CACHE endpoint này — đây là hành động tính
+    # toán LẠI mỗi lần bấm, dùng GET nên trình duyệt có thể tự phục vụ lại
+    # response CŨ (cùng URL/tham số) mà KHÔNG hề gọi lại server, khiến người
+    # dùng tưởng đã tính lại nhưng thực ra vẫn thấy đúng kết quả CŨ dù dữ
+    # liệu công ty (import/tra cứu lại) đã thay đổi.
+    response.headers["Cache-Control"] = "no-store"
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     rows = _gop_hoa_don_trung_he_thong(
@@ -14831,10 +14843,17 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
 
 
 @app.get("/api/export-htkk/{cid}")
-def export_htkk(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
+def export_htkk(cid: int, response: Response, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
                 luu_ket_xuat: int = 0, mo_file: int = 1):
     """Bọc lỗi để trả về CHI TIẾT lỗi thật thay vì lỗi 500 trống không rõ
     nguyên nhân (xem thêm giải thích ở export_htkk_tncn)."""
+    # KHÔNG được để trình duyệt CACHE endpoint này (GET, cùng URL/tham số mỗi
+    # lần bấm "Kết xuất XML") — đây là hành động GHI FILE MỚI mỗi lần gọi;
+    # nếu trình duyệt tự phục vụ lại response CŨ từ cache thì server KHÔNG hề
+    # chạy lại, file XML trên đĩa vẫn giữ nguyên nội dung CŨ dù dữ liệu công
+    # ty (bảng kê/import) đã đổi — người dùng bấm xuất lại nhưng vẫn thấy y
+    # hệt số liệu cũ, tưởng nhầm là code tính sai.
+    response.headers["Cache-Control"] = "no-store"
     try:
         return _export_htkk_impl(cid, ky, nguoi_ky, tu, den, luu_ket_xuat, mo_file)
     except HTTPException:
@@ -15383,12 +15402,15 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
 
 
 @app.get("/api/export-htkk-tncn/{cid}")
-def export_htkk_tncn(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
+def export_htkk_tncn(cid: int, response: Response, ky: str = "", nguoi_ky: str = "", tu: str = "", den: str = "",
                      luu_ket_xuat: int = 0, mo_file: int = 1):
     """Bọc lỗi để trả về CHI TIẾT lỗi thật (thay vì lỗi 500 trống không rõ
     nguyên nhân — trước đây 1 lỗi bất ngờ nào đó (vd không ghi được file do
     thư mục kết xuất không hợp lệ) khiến người dùng chỉ thấy "Lỗi kết xuất
     (mã 500)" không biết vì sao, không tự khắc phục được."""
+    # KHÔNG cache (xem giải thích ở export_htkk) — GET nhưng có tác dụng phụ
+    # ghi file mới mỗi lần gọi.
+    response.headers["Cache-Control"] = "no-store"
     try:
         return _export_htkk_tncn_impl(cid, ky, nguoi_ky, tu, den, luu_ket_xuat, mo_file)
     except HTTPException:
@@ -15707,7 +15729,12 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     luu_ket_xuat=1: NGOÀI Desktop, còn LƯU thêm vào thư mục kết xuất của công
       ty theo cấu trúc Năm/Quý (dựa vào tu_ngay/den_ngay). Nếu công ty chưa
       đặt 'Thư mục lưu file kết xuất' thì bỏ qua (vẫn lưu Desktop như thường).
-    mo_file=0: KHÔNG tự mở file (dùng khi tự động xuất hàng loạt sau tra cứu)."""
+    mo_file=0: KHÔNG tự mở file (dùng khi tự động xuất hàng loạt sau tra cứu).
+    Response trả về là FileResponse (qua _resp_xuat) — header 'Cache-Control:
+    no-store' được gắn ở đó (không cache endpoint này, vì file "Bảng kê hóa
+    đơn" ghi ra ở đây là NGUỒN DUY NHẤT mà "Kết xuất XML" đọc vào từ bản .18
+    trở đi — nếu trình duyệt lặng lẽ phục vụ lại response CŨ, file trên đĩa
+    không được cập nhật dù dữ liệu công ty đã đổi)."""
     import time as _tx
     _t0 = _tx.time()
     def _tlog(m):
