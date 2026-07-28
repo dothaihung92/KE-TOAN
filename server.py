@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.17"
+APP_BUILD = "2026-07-27.18"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14687,6 +14687,77 @@ def vat_luu(cid: int, data: dict = Body(...)):
     return {"ok": True}
 
 
+def _tim_file_bang_ke_moi_nhat(mst, save_dir):
+    """Tìm file Excel 'Bảng kê hóa đơn' (BangKe_HoaDon_{mst}...xlsx) ĐÃ XUẤT
+    VÀ LƯU SẴN trên máy — MỚI NHẤT nếu có nhiều bản (nhiều kỳ). Trả đường dẫn
+    hoặc None nếu không tìm thấy."""
+    import glob
+    ung_vien = []
+    for thu_muc in (DOWNLOAD_DIR, save_dir):
+        if thu_muc and os.path.isdir(thu_muc):
+            try:
+                ung_vien += glob.glob(os.path.join(thu_muc, f"BangKe_HoaDon_{mst}*.xlsx"))
+            except Exception:
+                pass
+    if not ung_vien:
+        return None
+    return max(ung_vien, key=lambda p: os.path.getmtime(p))
+
+
+def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
+    """Đọc tổng MUA VÀO (doanh số + thuế GTGT) TRỰC TIẾP từ file Excel 'Bảng
+    kê hóa đơn' đã xuất và lưu sẵn trên máy (sheet 'BK Mua vào') — cùng
+    nguyên tắc với _doc_nhom_ban_ra_tu_file_bang_ke (xem giải thích ở đó):
+    Kết xuất XML KHÔNG tự tra cứu/gọi mạng nữa, chỉ dựa vào số liệu đã có sẵn
+    trong bảng kê (đã gồm sẵn 'Tổng tiền phí' — sheet đó CỘNG SẴN dòng phí
+    riêng vào danh sách, không cần tính lại). Đọc TỪNG DÒNG hóa đơn, tự lọc
+    theo đúng khoảng ngày (d_tu..d_den) của kỳ đang xuất XML (sheet liệt kê
+    CẢ LỊCH SỬ hóa đơn công ty, không lọc theo đúng kỳ khai).
+    Trả về {'ds','thue','ds_full','thue_full'}, hoặc None nếu không tìm thấy
+    file / không đọc được / không có dòng nào khớp kỳ."""
+    fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir)
+    if not fpath:
+        return None
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(fpath, data_only=True, read_only=True)
+        if "BK Mua vào" not in wb.sheetnames:
+            return None
+        ws = wb["BK Mua vào"]
+    except Exception:
+        return None
+    ds = thue = ds_full = thue_full = 0
+    tim_thay_dong = False
+    try:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            stt = row[0] if len(row) > 0 else None
+            if not isinstance(stt, (int, float)):
+                continue   # bỏ dòng "TỔNG CỘNG"/trống — chỉ lấy dòng hóa đơn thật (cột A = STT số)
+            ds_o = row[8] if len(row) > 8 else 0     # cột I: Doanh số mua chưa thuế
+            thue_o = row[9] if len(row) > 9 else 0   # cột J: Thuế GTGT
+            ds_o = ds_o if isinstance(ds_o, (int, float)) else 0
+            thue_o = thue_o if isinstance(thue_o, (int, float)) else 0
+            ds_full += ds_o; thue_full += thue_o
+            ngay_raw = row[3] if len(row) > 3 else None   # cột D: Ngày lập
+            d = None
+            if isinstance(ngay_raw, (datetime.date, datetime.datetime)):
+                d = ngay_raw.date() if isinstance(ngay_raw, datetime.datetime) else ngay_raw
+            elif isinstance(ngay_raw, str) and "/" in ngay_raw:
+                try:
+                    d = datetime.datetime.strptime(ngay_raw.strip(), "%d/%m/%Y").date()
+                except Exception:
+                    d = None
+            if not (d and d_tu <= d <= d_den):
+                continue
+            tim_thay_dong = True
+            ds += ds_o; thue += thue_o
+    except Exception:
+        return None
+    if not tim_thay_dong:
+        return None
+    return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full}
+
+
 def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     """Đọc nhóm BÁN RA theo thuế suất TRỰC TIẾP từ file Excel 'Bảng kê hóa
     đơn' (BangKe_HoaDon_{mst}...xlsx) ĐÃ XUẤT VÀ LƯU SẴN trên máy (sheet
@@ -14698,17 +14769,9 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     khoảng ngày (d_tu..d_den) của kỳ đang xuất XML.
     Trả về dict {'KCT'/'0'/'5'/'8'/'10'/'KHAC': {'ds','thue'}}, hoặc None nếu
     không tìm thấy file / không đọc được / không có dòng nào khớp kỳ."""
-    import glob
-    ung_vien = []
-    for thu_muc in (DOWNLOAD_DIR, save_dir):
-        if thu_muc and os.path.isdir(thu_muc):
-            try:
-                ung_vien += glob.glob(os.path.join(thu_muc, f"BangKe_HoaDon_{mst}*.xlsx"))
-            except Exception:
-                pass
-    if not ung_vien:
+    fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir)
+    if not fpath:
         return None
-    fpath = max(ung_vien, key=lambda p: os.path.getmtime(p))
     try:
         import openpyxl
         wb = openpyxl.load_workbook(fpath, data_only=True, read_only=True)
@@ -14932,59 +14995,71 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         except Exception:
             return 0
 
+    # ƯU TIÊN TUYỆT ĐỐI (giống hệt BÁN RA phía dưới): đọc thẳng file Excel
+    # "Bảng kê hóa đơn" đã xuất và lưu sẵn (sheet "BK Mua vào") nếu có — theo
+    # đúng yêu cầu người dùng: Kết xuất XML KHÔNG tự tra cứu/gọi mạng lại nữa,
+    # cả chỉ tiêu ĐẦU RA lẫn ĐẦU VÀO đều chỉ dựa vào bảng kê đã lưu. Sheet đó
+    # đã CỘNG SẴN "Tổng tiền phí" vào từng dòng nên không cần tính lại riêng.
+    # CHỈ khi KHÔNG tìm thấy file (chưa từng Xuất Excel) mới rơi xuống nhánh
+    # cũ (tính lại từ invoices trong DB + dò phí qua detail_json/file).
     mua_ds = mua_thue = 0
     mua_ds_full = mua_thue_full = 0
-    for r in rows:
-        if r["loai"] != "purchase":
-            continue
-        try:
-            _raw = json.loads(r["raw"]) if r["raw"] else {}
-        except Exception:
-            _raw = {}
-        _tt = str(_raw.get("tthai", r["tthai"]) or "").strip()
-        if _tt in ("4", "6"):
-            continue
-        _nm = str(r["nmmst"] or "").strip()
-        if _nm and _nm != mst_cty:
-            continue
-        ds = _to_num(r["tgtcthue"]) or 0
-        if not ds:
-            ds = _to_num(r["tgtttbso"]) or 0
-        thue_r = _to_num(r["tgtthue"]) or 0
-        # "Tổng tiền phí" (thu hộ/lệ phí ngoài DSHHDVu) KHÔNG nằm trong
-        # TgTCThue của hóa đơn — phải cộng THÊM vào doanh số mua vào, đúng
-        # như cách sheet "BK Mua vào" (Xuất Excel) đã làm (thêm 1 dòng riêng
-        # "Tổng tiền phí"/KCT cộng vào tong_ds_mua) — nếu không cộng thì
-        # chỉ tiêu [23] trên XML sẽ THIẾU đúng phần phí này so với BK Mua
-        # vào (đã xác nhận qua dữ liệu thật người dùng gửi: hóa đơn vé máy
-        # bay có dòng "Tổng tiền phí" KCT tách riêng ngoài TgTCThue).
-        # Hóa đơn được GHI ĐÈ qua "Import Excel đã kiểm tra" (he_thong=
-        # 'import') đã CỘNG SẴN dòng "Tổng tiền phí" vào tgtcthue lúc import
-        # (import_excel gộp mọi dòng cùng Ký hiệu/Số HĐ trong sheet 'BK Mua
-        # vào' — kể cả dòng phí riêng — thành 1 dòng invoices duy nhất, xem
-        # phần "GHI ĐÈ bảng 'invoices'" trong import_excel). Nếu vẫn dò thêm
-        # phí ở đây (qua detail_json/file tải) thì bị CỘNG TRÙNG LẦN NỮA,
-        # khiến [23] SAI (thừa) sau khi import — đúng lỗi người dùng phát
-        # hiện: xuất trực tiếp thì khớp, nhưng Import Excel đã kiểm tra rồi
-        # xuất lại thì [23] lại sai.
-        if str(r["he_thong"] or "") != "import":
+    _tu_file_bk_mua = _doc_mua_vao_tu_file_bang_ke(mst_cty, save_dir, d_tu, d_den)
+    if _tu_file_bk_mua is not None:
+        mua_ds, mua_thue = _tu_file_bk_mua["ds"], _tu_file_bk_mua["thue"]
+        mua_ds_full, mua_thue_full = _tu_file_bk_mua["ds_full"], _tu_file_bk_mua["thue_full"]
+    else:
+        for r in rows:
+            if r["loai"] != "purchase":
+                continue
             try:
-                dj_r = json.loads(r["detail_json"]) if r["detail_json"] else None
+                _raw = json.loads(r["raw"]) if r["raw"] else {}
             except Exception:
-                dj_r = None
-            if dj_r:
-                ds += _lay_tong_tien_phi_json(dj_r) or 0
-            else:
-                # Không có detail_json trong DB (hóa đơn được nạp qua file tải
-                # về, không qua API chi tiết) — vẫn phải dò phí từ chính file đã
-                # tải, đúng như "BK Mua vào" của Xuất Excel làm (get_invoice_items
-                # có bước dự phòng đọc file khi chưa có detail_json).
-                ds += _phi_tu_file(r) or 0
-        mua_ds_full += ds
-        mua_thue_full += thue_r
-        if trong_ky(r["tdlap"]):
-            mua_ds += ds
-            mua_thue += thue_r
+                _raw = {}
+            _tt = str(_raw.get("tthai", r["tthai"]) or "").strip()
+            if _tt in ("4", "6"):
+                continue
+            _nm = str(r["nmmst"] or "").strip()
+            if _nm and _nm != mst_cty:
+                continue
+            ds = _to_num(r["tgtcthue"]) or 0
+            if not ds:
+                ds = _to_num(r["tgtttbso"]) or 0
+            thue_r = _to_num(r["tgtthue"]) or 0
+            # "Tổng tiền phí" (thu hộ/lệ phí ngoài DSHHDVu) KHÔNG nằm trong
+            # TgTCThue của hóa đơn — phải cộng THÊM vào doanh số mua vào, đúng
+            # như cách sheet "BK Mua vào" (Xuất Excel) đã làm (thêm 1 dòng riêng
+            # "Tổng tiền phí"/KCT cộng vào tong_ds_mua) — nếu không cộng thì
+            # chỉ tiêu [23] trên XML sẽ THIẾU đúng phần phí này so với BK Mua
+            # vào (đã xác nhận qua dữ liệu thật người dùng gửi: hóa đơn vé máy
+            # bay có dòng "Tổng tiền phí" KCT tách riêng ngoài TgTCThue).
+            # Hóa đơn được GHI ĐÈ qua "Import Excel đã kiểm tra" (he_thong=
+            # 'import') đã CỘNG SẴN dòng "Tổng tiền phí" vào tgtcthue lúc import
+            # (import_excel gộp mọi dòng cùng Ký hiệu/Số HĐ trong sheet 'BK Mua
+            # vào' — kể cả dòng phí riêng — thành 1 dòng invoices duy nhất, xem
+            # phần "GHI ĐÈ bảng 'invoices'" trong import_excel). Nếu vẫn dò thêm
+            # phí ở đây (qua detail_json/file tải) thì bị CỘNG TRÙNG LẦN NỮA,
+            # khiến [23] SAI (thừa) sau khi import — đúng lỗi người dùng phát
+            # hiện: xuất trực tiếp thì khớp, nhưng Import Excel đã kiểm tra rồi
+            # xuất lại thì [23] lại sai.
+            if str(r["he_thong"] or "") != "import":
+                try:
+                    dj_r = json.loads(r["detail_json"]) if r["detail_json"] else None
+                except Exception:
+                    dj_r = None
+                if dj_r:
+                    ds += _lay_tong_tien_phi_json(dj_r) or 0
+                else:
+                    # Không có detail_json trong DB (hóa đơn được nạp qua file tải
+                    # về, không qua API chi tiết) — vẫn phải dò phí từ chính file đã
+                    # tải, đúng như "BK Mua vào" của Xuất Excel làm (get_invoice_items
+                    # có bước dự phòng đọc file khi chưa có detail_json).
+                    ds += _phi_tu_file(r) or 0
+            mua_ds_full += ds
+            mua_thue_full += thue_r
+            if trong_ky(r["tdlap"]):
+                mua_ds += ds
+                mua_thue += thue_r
 
     # ----- BÁN RA: tách theo nhóm thuế suất từ chi tiết (CHỈ hóa đơn thuộc kỳ) -----
     # Cần đọc chi tiết để biết hàng nào 8% (NQ142). Dùng detail_json/file nếu có.
