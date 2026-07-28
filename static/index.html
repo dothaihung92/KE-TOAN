@@ -485,10 +485,26 @@
     <div id="dvcbProgress" style="display:none;flex:none;margin-top:8px;background:var(--green-l,#eef6f0);border-radius:10px;padding:12px 14px;font-size:13px;max-height:200px;overflow:auto"></div>
     <div class="modal-actions" style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
       <button class="btn ghost" onclick="dongDVCBatch()">Đóng</button>
+      <button class="btn ghost" id="dvcbHideBtn" style="display:none" onclick="anDVCBatch()">🫥 Ẩn (chạy nền)</button>
       <button class="btn ghost" id="dvcbCancelBtn" style="display:none" onclick="dvcbCancel()">Dừng</button>
       <button class="btn ghost" id="dvcbTokenBtn" onclick="dvcbCheckToken()">🔑 Kiểm tra hạn Token</button>
       <button class="btn" id="dvcbRunBtn" onclick="dvcbRun()">▶ Bắt đầu</button>
     </div>
+  </div>
+</div>
+
+<!-- Khung nhỏ nổi khi ẨN khung tra cứu tờ khai thuế hàng loạt — vẫn chạy nền, bấm để mở lại -->
+<div id="dvcbMiniBar" onclick="hienLaiDVCBatch()"
+     style="display:none;position:fixed;right:20px;bottom:100px;z-index:500;cursor:pointer;
+     background:var(--green-d);color:#fff;border-radius:12px;padding:12px 16px;
+     box-shadow:0 8px 24px rgba(0,0,0,.28);max-width:320px">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span class="spin" style="border-color:rgba(255,255,255,.3);border-top-color:#fff;flex:none"></span>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;font-size:13.5px">📊 Tra cứu tờ khai thuế</div>
+      <div id="dvcbMiniText" style="font-size:12.5px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Đang chạy nền...</div>
+    </div>
+    <span style="font-size:11px;opacity:.85;white-space:nowrap">Bấm để<br>mở lại</span>
   </div>
 </div>
 
@@ -1342,6 +1358,9 @@ async function dvcTaiBaoCao(){
 let dvcbTimer=null;
 let dvcbTrangThaiCqt={};   // {cid: {GTGT:{trang_thai,nhan,...}, TNCN:{...}}} của ĐÚNG kỳ đang chọn
 async function moDVCBatch(){
+  // Đang có 1 lượt tra cứu tờ khai chạy nền (đã bấm "Ẩn") -> mở lại ĐÚNG
+  // khung đang chạy đó (giữ tiến độ), KHÔNG reset lại toàn bộ form về mặc định.
+  if(dvcbId!=null&&dvcbHidden){hienLaiDVCBatch();return}
   const now=new Date(), yr=now.getFullYear();
   // điền select tháng / năm
   const th=document.getElementById('dvcb_thang');
@@ -1360,6 +1379,7 @@ async function moDVCBatch(){
   document.getElementById('dvcbProgress').innerHTML='';
   document.getElementById('dvcbRunBtn').style.display='';
   document.getElementById('dvcbCancelBtn').style.display='none';
+  document.getElementById('dvcbHideBtn').style.display='none';
   document.getElementById('dvcBatchModal').style.display='flex';
 }
 async function dvcbTaiTrangThaiCqt(){
@@ -1590,7 +1610,7 @@ function dvcbFilter(){
   });
   dvcbCount();
 }
-function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';}
+function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';dvcbHidden=false;const mb=document.getElementById('dvcbMiniBar');if(mb)mb.style.display='none';}
 
 let ntkTrangThai={}, ntkChonSet=new Set(), ntkHangDoi=[], ntkDangCho=null, ntkDangChay=false, ntkBiDung=false;
 let ntkPollTimer=null, ntkPollLan=0;
@@ -2028,7 +2048,21 @@ function dvcbCount(){
   const n=document.querySelectorAll('.dvcbChk:checked').length;
   const el=document.getElementById('dvcbCount');if(el)el.textContent=n;
 }
-let dvcbId=null;
+let dvcbId=null, dvcbHidden=false;
+// ẨN khung (KHÁC "Đóng"): tiếp tục theo dõi tiến độ CHẠY NỀN (không dừng
+// dvcbTimer), chỉ ẩn giao diện + hiện 1 khung nhỏ nổi góc màn hình để người
+// dùng vẫn làm việc khác trên phần mềm, bấm vào khung nhỏ đó (hoặc mở lại
+// nút "Tra cứu tờ khai thuế / tải tờ khai hàng loạt") để xem lại tiến độ.
+function anDVCBatch(){
+  dvcbHidden=true;
+  document.getElementById('dvcBatchModal').style.display='none';
+  document.getElementById('dvcbMiniBar').style.display='block';
+}
+function hienLaiDVCBatch(){
+  dvcbHidden=false;
+  document.getElementById('dvcbMiniBar').style.display='none';
+  document.getElementById('dvcBatchModal').style.display='flex';
+}
 async function dvcbRun(){
   let cids=[...document.querySelectorAll('.dvcbChk:checked')].map(c=>+c.value);
   if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return;}
@@ -2063,11 +2097,12 @@ async function dvcbRun(){
   prog.style.display='block';prog.innerHTML='⏳ Đang khởi động trình duyệt ẩn... (lần đầu hơi lâu)';
   document.getElementById('dvcbRunBtn').style.display='none';
   document.getElementById('dvcbCancelBtn').style.display='';
+  document.getElementById('dvcbHideBtn').style.display='';
   try{
     const r=await api('/api/dvc/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     dvcbId=r.batch_id;
     dvcbTimer=setInterval(dvcbPoll,2000);
-  }catch(e){prog.innerHTML='❌ '+e.message;document.getElementById('dvcbRunBtn').style.display='';document.getElementById('dvcbCancelBtn').style.display='none';}
+  }catch(e){prog.innerHTML='❌ '+e.message;document.getElementById('dvcbRunBtn').style.display='';document.getElementById('dvcbCancelBtn').style.display='none';document.getElementById('dvcbHideBtn').style.display='none';}
 }
 async function dvcbPoll(){
   if(dvcbId==null)return;
@@ -2076,7 +2111,12 @@ async function dvcbPoll(){
   // Xử lý song song nhiều công ty cùng lúc (mỗi luồng 1 trình duyệt ẩn
   // riêng) — hiện đủ TẤT CẢ công ty đang chạy (current_list), không chỉ 1.
   const dangChay=(j.current_list&&j.current_list.length)?j.current_list.join(', '):j.current;
+  const dongTienDo=`Tiến độ: ${j.done}/${j.total}`+(dangChay?` · đang: ${dangChay}`:'');
   let html=`Tiến độ: <b>${j.done}/${j.total}</b>`+(dangChay?` · đang: ${dangChay}`:'');
+  // Vẫn cập nhật khung nhỏ nổi dù đang ẨN (tiếp tục chạy nền) — để bấm vào
+  // xem lại tiến độ mới nhất mà không cần đợi mở khung ra mới thấy.
+  const miniText=document.getElementById('dvcbMiniText');
+  if(miniText)miniText.textContent=dongTienDo;
   if(j.items&&j.items.length){
     // Đếm nhanh (cập nhật LIÊN TỤC theo tiến độ, không cần đợi tới lúc
     // "Hoàn tất" mới biết): số cty đã lấy được dữ liệu xong, số cty KHÔNG
@@ -2110,6 +2150,14 @@ async function dvcbPoll(){
     clearInterval(dvcbTimer);dvcbTimer=null;
     document.getElementById('dvcbRunBtn').style.display='';
     document.getElementById('dvcbCancelBtn').style.display='none';
+    document.getElementById('dvcbHideBtn').style.display='none';
+    // Đã chạy xong (dù đang ẨN hay đang mở) -> tắt hẳn khung nhỏ nổi và tự
+    // mở lại khung chính, khỏi để lại 1 khung "đang chạy" trong khi thực ra
+    // đã xong từ lâu — người dùng đang làm việc khác không biết đã xong.
+    dvcbHidden=false;
+    const miniBar=document.getElementById('dvcbMiniBar');
+    if(miniBar)miniBar.style.display='none';
+    document.getElementById('dvcBatchModal').style.display='flex';
     html+=`<hr><b>✅ Hoàn tất.</b> Tổng ${j.so_dong_tong||0} dòng tra cứu, ${j.so_sai_pass||0} công ty sai mật khẩu.`;
     if(j.file_tracuu)html+=`<br>📄 <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_tracuu)}" target="_blank">Tải Excel Tra cứu tờ khai</a>`;
     if(j.file_saipass)html+=`<br>⚠️ <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_saipass)}" target="_blank">Tải Excel Sai mật khẩu</a>`;
