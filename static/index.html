@@ -420,7 +420,6 @@
   <div class="modal" style="width:min(1180px,96vw);max-width:1180px;max-height:92vh;display:flex;flex-direction:column">
     <h3 style="margin-top:0">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</h3>
     <div style="overflow:auto;flex:1;padding-right:4px">
-    <p class="hint" style="margin-top:0">Lần lượt đăng nhập từng công ty (thử <b>mật khẩu 1</b> → sai thì <b>mật khẩu 2</b>), tra cứu tờ khai đã nộp theo kỳ, rồi xuất Excel tổng hợp <b>trạng thái</b> (Đã/Không chấp nhận, chờ). Công ty sai mật khẩu liệt kê ra file riêng. Mật khẩu lấy từ thông tin đã lưu. Phần mềm <b>tự nhận biết nguồn tra cứu</b> theo khoảng ngày (trước 01/07/2025 dùng hệ thống Thuế điện tử, từ ngày đó trở đi dùng DVC — nếu khoảng ngày vắt qua mốc này sẽ tự tra cứu cả 2).</p>
 
     <div class="field">
       <label>Kỳ tra cứu</label>
@@ -473,12 +472,11 @@
           <option value="cho">— Có loại đang Chờ (không nhất thiết cả 2)</option>
         </select>
       </div>
-      <p class="hint" style="margin-top:0;margin-bottom:2px" id="dvcbTongHopTt"></p>
-      <p class="hint" style="margin-top:0;margin-bottom:6px">🎨 Cột <b>GTGT</b>/<b>TNCN</b>: trạng thái cơ quan Thuế đã chấp nhận tờ khai của ĐÚNG kỳ đang chọn ở trên hay chưa — <span style="color:#0a7d4b">xanh = Đã chấp nhận</span>, <span style="color:#b45309">vàng = Chờ xử lý</span>, <span style="color:#b91c1c">đỏ = Từ chối</span>, xám = chưa có dữ liệu. Dữ liệu này được ghi lại từ lần "▶ Bắt đầu" tra cứu gần nhất cho đúng kỳ đang chọn (chỉ khi chọn kỳ theo <b>Quý</b>) — chưa từng chạy cho kỳ này thì chưa có màu. Chọn 1 loại trong ô lọc trên rồi bấm "Chọn tất cả (đang hiện)" để chỉ tick đúng nhóm công ty đó.</p>
+      <p class="hint" style="margin-top:0;margin-bottom:6px" id="dvcbTongHopTt"></p>
       <div style="display:grid;grid-template-columns:1fr 60px 60px 92px 78px 110px;gap:10px;padding:0 4px 4px;font-size:11.5px;color:#999;font-weight:600">
         <span></span><span>GTGT</span><span>TNCN</span><span>Hạn Token</span><span>Hết hạn</span><span>Tổ chức cấp</span>
       </div>
-      <div id="dvcbCoList" style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
+      <div id="dvcbCoList" style="max-height:440px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
       <div style="font-size:12px;color:#888;margin-top:4px">Đã chọn: <b id="dvcbCount">0</b> công ty</div>
     </div>
     </div>
@@ -2112,7 +2110,7 @@ async function dvcbPoll(){
   // riêng) — hiện đủ TẤT CẢ công ty đang chạy (current_list), không chỉ 1.
   const dangChay=(j.current_list&&j.current_list.length)?j.current_list.join(', '):j.current;
   const dongTienDo=`Tiến độ: ${j.done}/${j.total}`+(dangChay?` · đang: ${dangChay}`:'');
-  let html=`Tiến độ: <b>${j.done}/${j.total}</b>`+(dangChay?` · đang: ${dangChay}`:'');
+  let html=`Tiến độ: <b>${j.done}/${j.total}</b>`;
   // Vẫn cập nhật khung nhỏ nổi dù đang ẨN (tiếp tục chạy nền) — để bấm vào
   // xem lại tiến độ mới nhất mà không cần đợi mở khung ra mới thấy.
   const miniText=document.getElementById('dvcbMiniText');
