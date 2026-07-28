@@ -417,7 +417,7 @@
 
 <!-- MODAL TRA CỨU TỜ KHAI THUẾ / TẢI TỜ KHAI HÀNG LOẠT (Dịch vụ công) -->
 <div class="modal-bg" id="dvcBatchModal">
-  <div class="modal" style="width:min(900px,96vw);max-width:900px;max-height:92vh;display:flex;flex-direction:column">
+  <div class="modal" style="width:min(1180px,96vw);max-width:1180px;max-height:92vh;display:flex;flex-direction:column">
     <h3 style="margin-top:0">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</h3>
     <div style="overflow:auto;flex:1;padding-right:4px">
     <p class="hint" style="margin-top:0">Lần lượt đăng nhập từng công ty (thử <b>mật khẩu 1</b> → sai thì <b>mật khẩu 2</b>), tra cứu tờ khai đã nộp theo kỳ, rồi xuất Excel tổng hợp <b>trạng thái</b> (Đã/Không chấp nhận, chờ). Công ty sai mật khẩu liệt kê ra file riêng. Mật khẩu lấy từ thông tin đã lưu. Phần mềm <b>tự nhận biết nguồn tra cứu</b> theo khoảng ngày (trước 01/07/2025 dùng hệ thống Thuế điện tử, từ ngày đó trở đi dùng DVC — nếu khoảng ngày vắt qua mốc này sẽ tự tra cứu cả 2).</p>
@@ -1443,10 +1443,11 @@ function dvcbRenderCoList(giuDaChon){
     if(coCho)tags.push('co_cho');
     const dataTt=tags.join(' ');
     return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" data-trangthai="${dataTt}" `+
+      `oncontextmenu="ntkCopyMst(event,${c.id});return false" title="Bấm chuột phải để copy MST" `+
       `style="display:grid;grid-template-columns:1fr 60px 60px 92px 78px 110px;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid #f0f0f0">`+
-      `<span style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden">`+
+      `<span style="display:flex;align-items:center;gap:6px;min-width:0">`+
       `<input type="checkbox" class="dvcbChk" value="${c.id}" ${checked?'checked':''} onchange="dvcbCount()">`+
-      `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.ten} <span style="color:#888">(${c.mst})</span></span></span>`+
+      `<span style="white-space:normal;word-break:break-word;line-height:1.3">${c.ten} <span style="color:#888">(${c.mst})</span></span></span>`+
       gtgtCol+tncnCol+hanCol+ngayCol+toChucCol+`</label>`;
   }).join('') || '<div style="color:#888">Chưa có công ty</div>';
   dvcbCount();
