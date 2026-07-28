@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.27"
+APP_BUILD = "2026-07-27.28"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6185,6 +6185,14 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
                 cn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
             cn.commit(); cn.close()
         ds = [r for r in ds if r["id"] not in ket_qua]
+        # Báo tiến độ SAU MỖI VÒNG (đã xong bao nhiêu / còn lại bao nhiêu) —
+        # trước đây chỉ có 1 dòng lúc BẮT ĐẦU ("đang lấy nốt cho N hóa đơn")
+        # và 1 dòng lúc XONG HẲN, ở giữa hoàn toàn im lặng dù có thể mất khá
+        # lâu với công ty nhiều hóa đơn thiếu chi tiết — người dùng không
+        # biết đang chạy tới đâu, tưởng bị treo.
+        da_xong = len(can_nap) - len(ds)
+        msg(stage="download", cur=da_xong, total=len(can_nap),
+            text=f"Đang lấy nốt chi tiết dòng hàng: {da_xong}/{len(can_nap)} (còn {len(ds)})")
         if not ket_qua:
             so_vong_khong_tien += 1
             if so_vong_khong_tien >= SO_VONG_KHONG_TIEN_TOI_DA:
@@ -7079,10 +7087,17 @@ def _run_fetch_job(cid: int, body: dict):
                                      f"(đọc được, trạng thái không đổi) — bỏ qua, không tải lại")
 
                         if khong_ma:
+                            # SỬA CHỮ: bước này KHÔNG hề lấy chi tiết dòng hàng ngay (xem
+                            # _tai_1_file — cố tình KHÔNG gọi API chi tiết ở đây để tránh
+                            # tường lửa Thuế chặn IP do gọi xen lẫn với tải file), chi tiết
+                            # sẽ được lấy ở bước "lấy nốt chi tiết dòng hàng" NGAY SAU ĐÂY
+                            # (hoặc lúc Xuất Excel nếu vẫn còn thiếu). Chữ cũ "chỉ ghi nhận
+                            # dữ liệu chi tiết" khiến người dùng tưởng đã xong, rồi thấy
+                            # bước sau vẫn phải lấy gần hết số này thì tưởng nhầm là lỗi.
                             msg(stage="info",
                                 text=f"↷ {loai_txt}{ht_txt}: {khong_ma} hóa đơn 'Tổng cục thuế đã "
-                                     f"nhận không mã' — chỉ ghi nhận dữ liệu chi tiết, không tải file "
-                                     f"(loại hóa đơn này không có file để tải)")
+                                     f"nhận không mã' — không có file để tải, sẽ lấy chi tiết dòng "
+                                     f"hàng ở bước riêng ngay sau khi tải file xong")
 
                         n_can_tai = n - khong_ma   # tổng cần tải (không tính HĐ không mã)
                         if loi_file:
