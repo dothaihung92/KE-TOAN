@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.25"
+APP_BUILD = "2026-07-27.26"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4783,18 +4783,24 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
     return nguon or ["dvc"]
 
 
-DVC_BATCH_SONG_SONG = 3   # số công ty xử lý ĐỒNG THỜI (mỗi luồng 1 trình duyệt ẩn riêng)
+# Số công ty xử lý ĐỒNG THỜI (mỗi luồng 1 trình duyệt ẩn riêng) — TÁCH RIÊNG
+# 2 hằng số cho 2 tính năng để tăng luồng cho tính năng này KHÔNG ảnh hưởng
+# tới tính năng kia (vd tăng cho "Tra cứu tờ khai thuế hàng loạt" nhưng vẫn
+# muốn giữ "Kiểm tra hạn Token" nhẹ nhàng như cũ).
+DVC_TOKHAI_BATCH_SONG_SONG = 10   # "Tra cứu tờ khai thuế / tải tờ khai hàng loạt"
+DVC_TOKEN_BATCH_SONG_SONG = 3     # "Kiểm tra hạn Token"
 
 
 def _dvc_run_batch(batch_id, cids, body):
-    """Chạy CÙNG LÚC tối đa DVC_BATCH_SONG_SONG công ty (mỗi luồng (worker)
-    mở 1 trình duyệt ẩn RIÊNG, dùng lại cho MỌI công ty luồng đó xử lý —
-    tránh mở/đóng trình duyệt liên tục) — công ty nào xong trước thì luồng
-    đó lập tức lấy công ty tiếp theo còn lại trong hàng đợi, không phải đợi
-    xong HẾT 1 lượt mới bắt đầu lượt kế (khác hẳn trước đây: 1 trình duyệt
-    DUY NHẤT xử lý TUẦN TỰ từng công ty một, rất lâu với hàng trăm công ty).
+    """Chạy CÙNG LÚC tối đa DVC_TOKHAI_BATCH_SONG_SONG công ty (mỗi luồng
+    (worker) mở 1 trình duyệt ẩn RIÊNG, dùng lại cho MỌI công ty luồng đó xử
+    lý — tránh mở/đóng trình duyệt liên tục) — công ty nào xong trước thì
+    luồng đó lập tức lấy công ty tiếp theo còn lại trong hàng đợi, không
+    phải đợi xong HẾT 1 lượt mới bắt đầu lượt kế (khác hẳn trước đây: 1
+    trình duyệt DUY NHẤT xử lý TUẦN TỰ từng công ty một, rất lâu với hàng
+    trăm công ty).
     job['current_list']: tên các công ty ĐANG xử lý tại một thời điểm (tối
-    đa DVC_BATCH_SONG_SONG phần tử)."""
+    đa DVC_TOKHAI_BATCH_SONG_SONG phần tử)."""
     import queue as _queue
     job = DVC_BATCH[batch_id]
     tu = (body.get("tu_ngay") or "").strip()
@@ -5093,7 +5099,7 @@ def _dvc_run_batch(batch_id, cids, body):
     hang_doi = _queue.Queue()
     for cid in cids:
         hang_doi.put(cid)
-    so_luong = max(1, min(DVC_BATCH_SONG_SONG, len(cids)))
+    so_luong = max(1, min(DVC_TOKHAI_BATCH_SONG_SONG, len(cids)))
     threads = [threading.Thread(target=_worker) for _ in range(so_luong)]
     for t in threads:
         t.start()
@@ -5192,9 +5198,9 @@ DVC_TOKEN_BATCH = {}
 _DVC_TOKEN_BATCH_SEQ = {"n": 0}
 
 def _dvc_run_token_batch(batch_id, cids, body):
-    """Kiểm tra hạn Token CÙNG LÚC tối đa DVC_BATCH_SONG_SONG công ty — cùng
-    kiểu xử lý song song (mỗi luồng 1 trình duyệt ẩn riêng) như _dvc_run_batch,
-    xem giải thích chi tiết ở đó."""
+    """Kiểm tra hạn Token CÙNG LÚC tối đa DVC_TOKEN_BATCH_SONG_SONG công ty —
+    cùng kiểu xử lý song song (mỗi luồng 1 trình duyệt ẩn riêng) như
+    _dvc_run_batch, xem giải thích chi tiết ở đó."""
     import queue as _queue
     job = DVC_TOKEN_BATCH[batch_id]
     job_lock = threading.Lock()
@@ -5288,7 +5294,7 @@ def _dvc_run_token_batch(batch_id, cids, body):
     hang_doi = _queue.Queue()
     for cid in cids:
         hang_doi.put(cid)
-    so_luong = max(1, min(DVC_BATCH_SONG_SONG, len(cids)))
+    so_luong = max(1, min(DVC_TOKEN_BATCH_SONG_SONG, len(cids)))
     threads = [threading.Thread(target=_worker) for _ in range(so_luong)]
     for t in threads:
         t.start()
