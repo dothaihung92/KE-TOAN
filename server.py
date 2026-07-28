@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.15"
+APP_BUILD = "2026-07-27.16"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4752,7 +4752,19 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
     return nguon or ["dvc"]
 
 
+DVC_BATCH_SONG_SONG = 3   # số công ty xử lý ĐỒNG THỜI (mỗi luồng 1 trình duyệt ẩn riêng)
+
+
 def _dvc_run_batch(batch_id, cids, body):
+    """Chạy CÙNG LÚC tối đa DVC_BATCH_SONG_SONG công ty (mỗi luồng (worker)
+    mở 1 trình duyệt ẩn RIÊNG, dùng lại cho MỌI công ty luồng đó xử lý —
+    tránh mở/đóng trình duyệt liên tục) — công ty nào xong trước thì luồng
+    đó lập tức lấy công ty tiếp theo còn lại trong hàng đợi, không phải đợi
+    xong HẾT 1 lượt mới bắt đầu lượt kế (khác hẳn trước đây: 1 trình duyệt
+    DUY NHẤT xử lý TUẦN TỰ từng công ty một, rất lâu với hàng trăm công ty).
+    job['current_list']: tên các công ty ĐANG xử lý tại một thời điểm (tối
+    đa DVC_BATCH_SONG_SONG phần tử)."""
+    import queue as _queue
     job = DVC_BATCH[batch_id]
     tu = (body.get("tu_ngay") or "").strip()
     den = (body.get("den_ngay") or "").strip()
@@ -4764,34 +4776,31 @@ def _dvc_run_batch(batch_id, cids, body):
     # chọn) — "dvc" cho tờ khai TỪ 01/07/2025, "thuedientu" (tab cũ) cho tờ
     # khai TRƯỚC ngày đó; nếu khoảng ngày vắt qua mốc này, tra cứu CẢ 2.
     ds_nguon = _nguon_tra_cuu_theo_ky(tu, den)
-    tracuu_rows = []      # gom mọi dòng cho Excel tra cứu
-    sai_pass = []         # công ty đăng nhập không được
+    tracuu_rows = []      # gom mọi dòng cho Excel tra cứu — DÙNG CHUNG giữa các luồng, khoá bằng job_lock
+    sai_pass = []         # công ty đăng nhập không được — DÙNG CHUNG, khoá bằng job_lock
     # ĐỒNG BỘ trạng thái tick "Tự động nộp tờ khai" (GTGT/TNCN) theo đúng kết
     # quả tra cứu THẬT trên cổng — chỉ áp dụng khi khoảng ngày đang tra cứu
     # RƠI GỌN vào ĐÚNG 1 quý (kỳ tính thuế của GTGT/TNCN luôn theo quý); nếu
     # trải nhiều quý/cả năm thì bỏ qua (không rõ đồng bộ cho quý nào).
     dong_bo_nam, dong_bo_quy = _quy_cua_ky(tu, den)
-    drv = None
-    try:
-        try:
-            drv = _dvc_make_driver(headless=True)
-        except Exception as e:
-            job["loi"] = f"Không mở được Chrome: {e}"
-            job["running"] = False
+    job_lock = threading.Lock()   # bảo vệ job['items']/['done']/['current_list'] + tracuu_rows/sai_pass
+
+    def _xu_ly_1_cty(cid, drv):
+        conn = db()
+        comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+        conn.close()
+        if not comp:
+            with job_lock:
+                job["done"] += 1
             return
-        for cid in cids:
-            if job.get("cancel"):
-                break
-            conn = db()
-            comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
-            conn.close()
-            if not comp:
-                job["done"] += 1; continue
-            ten = comp["ten"]; mst = comp["mst"]
-            job["current"] = ten
-            item = {"cid": cid, "mst": mst, "ten": ten, "trang_thai": "đang xử lý",
-                    "so_dong": 0, "so_file": 0}
+        ten = comp["ten"]; mst = comp["mst"]
+        item = {"cid": cid, "mst": mst, "ten": ten, "trang_thai": "đang xử lý",
+                "so_dong": 0, "so_file": 0}
+        with job_lock:
             job["items"].append(item)
+            job.setdefault("current_list", []).append(ten)
+            job["current"] = ten
+        try:
             pw1 = (comp["dvc_password"] if "dvc_password" in comp.keys() else "") or ""
             pw2 = (comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or ""
             pw1 = (pw1 or "").strip(); pw2 = (pw2 or "").strip()
@@ -4800,8 +4809,9 @@ def _dvc_run_batch(batch_id, cids, body):
                 pw2 = pw2 or (body.get("pass_chung") or "").strip()
             if not pw1 and not pw2:
                 item["trang_thai"] = "thiếu mật khẩu"
-                sai_pass.append({"mst": mst, "ten": ten, "ly_do": "Chưa lưu mật khẩu Dịch vụ công"})
-                job["done"] += 1; continue
+                with job_lock:
+                    sai_pass.append({"mst": mst, "ten": ten, "ly_do": "Chưa lưu mật khẩu Dịch vụ công"})
+                return
             # xoá phiên công ty trước để tránh lẫn đăng nhập
             try:
                 drv.get(DVC_BASE + "/homelogin")
@@ -4815,9 +4825,10 @@ def _dvc_run_batch(batch_id, cids, body):
             if not ok:
                 item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
                 item["loi_chi_tiet"] = _dvc_mo_ta_loi_dang_nhap(info)
-                sai_pass.append({"mst": mst, "ten": ten,
-                                 "ly_do": json.dumps(info, ensure_ascii=False)[:480]})
-                job["done"] += 1; continue
+                with job_lock:
+                    sai_pass.append({"mst": mst, "ten": ten,
+                                     "ly_do": json.dumps(info, ensure_ascii=False)[:480]})
+                return
             item["dung_pass"] = dung_pass
             # Tra cứu LẦN LƯỢT từng nguồn phù hợp với khoảng ngày (thường chỉ
             # 1 nguồn; vắt qua mốc 01/07/2025 thì tra cứu cả 2 rồi gộp lại).
@@ -4870,22 +4881,24 @@ def _dvc_run_batch(batch_id, cids, body):
                         f"tìm thấy {len(rows_tho)} dòng trong khoảng ngày nộp {tu_tim}-{den_tim} "
                         f"nhưng KHÔNG dòng nào đúng kỳ {ky_label} đang tra cứu (kỳ khác) — coi như "
                         f"CHƯA nộp đúng kỳ này"]
-                for rec in rows:
-                    rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
-                    tracuu_rows.append(rec2)
+                with job_lock:
+                    for rec in rows:
+                        rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
+                        tracuu_rows.append(rec2)
                 item["so_dong"] = item.get("so_dong", 0) + len(rows)
                 # Nếu tra cứu THÀNH CÔNG nhưng KHÔNG có tờ khai nào trong kỳ
                 # (của ĐÚNG NGUỒN này) -> ghi chú "CHƯA NỘP TỜ KHAI" (đỏ).
                 # Nếu tra cứu lỗi thì không kết luận.
                 if not rows:
                     if raw_html:
-                        tracuu_rows.append({
-                            "mst": mst, "ten": ten,
-                            "to_khai": f"(Chưa tìm thấy tờ khai trong kỳ — nguồn {nhan_nguon})",
-                            "ky": ky_label, "loai": "", "ngay_nop": "",
-                            "lan_nop": "", "lan_bs": "",
-                            "trang_thai": "CHƯA NỘP TỜ KHAI",
-                        })
+                        with job_lock:
+                            tracuu_rows.append({
+                                "mst": mst, "ten": ten,
+                                "to_khai": f"(Chưa tìm thấy tờ khai trong kỳ — nguồn {nhan_nguon})",
+                                "ky": ky_label, "loai": "", "ngay_nop": "",
+                                "lan_nop": "", "lan_bs": "",
+                                "trang_thai": "CHƯA NỘP TỜ KHAI",
+                            })
                     else:
                         item.setdefault("loi_tra_cuu", "")
                         item["loi_tra_cuu"] += (f"[{nhan_nguon}] " + "; ".join(sdiag))[:200]
@@ -5008,13 +5021,54 @@ def _dvc_run_batch(batch_id, cids, body):
                     item["dong_bo_nop_to_khai"] = "; ".join(dong_bo_ghi_chu)
 
             item["trang_thai"] = "xong"
-            job["done"] += 1
             time.sleep(0.5)
-    finally:
+        finally:
+            with job_lock:
+                job["done"] += 1
+                cl = job.get("current_list", [])
+                if ten in cl:
+                    cl.remove(ten)
+
+    def _worker():
+        drv = None
         try:
-            if drv: drv.quit()
-        except Exception:
-            pass
+            try:
+                drv = _dvc_make_driver(headless=True)
+            except Exception as e:
+                with job_lock:
+                    job["loi"] = ((job.get("loi") or "") + f" Không mở được Chrome (1 luồng): {e}").strip()
+                return
+            while True:
+                if job.get("cancel"):
+                    break
+                try:
+                    cid_lam = hang_doi.get_nowait()
+                except _queue.Empty:
+                    break
+                try:
+                    _xu_ly_1_cty(cid_lam, drv)
+                except Exception:
+                    # Lưới an toàn — 1 công ty lỗi bất ngờ (ngoài mọi try/except đã
+                    # có bên trong) TUYỆT ĐỐI không được làm cả luồng "chết" giữa
+                    # chừng, kẹt mãi các công ty còn lại trong hàng đợi của nó.
+                    with job_lock:
+                        job["done"] += 1
+        finally:
+            try:
+                if drv: drv.quit()
+            except Exception:
+                pass
+
+    hang_doi = _queue.Queue()
+    for cid in cids:
+        hang_doi.put(cid)
+    so_luong = max(1, min(DVC_BATCH_SONG_SONG, len(cids)))
+    threads = [threading.Thread(target=_worker) for _ in range(so_luong)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    job["current_list"] = []
     # xuất Excel
     try:
         out_dir = _dvc_batch_out_dir()
@@ -5077,7 +5131,7 @@ def dvc_batch_start(body: dict = Body(...)):
     _DVC_BATCH_SEQ["n"] += 1
     bid = _DVC_BATCH_SEQ["n"]
     DVC_BATCH[bid] = {"running": True, "total": len(cids), "done": 0,
-                      "current": None, "items": [], "cancel": False}
+                      "current": None, "current_list": [], "items": [], "cancel": False}
     import threading
     threading.Thread(target=lambda: _dvc_run_batch(bid, cids, body), daemon=True).start()
     return {"ok": True, "batch_id": bid}
@@ -5107,27 +5161,28 @@ DVC_TOKEN_BATCH = {}
 _DVC_TOKEN_BATCH_SEQ = {"n": 0}
 
 def _dvc_run_token_batch(batch_id, cids, body):
+    """Kiểm tra hạn Token CÙNG LÚC tối đa DVC_BATCH_SONG_SONG công ty — cùng
+    kiểu xử lý song song (mỗi luồng 1 trình duyệt ẩn riêng) như _dvc_run_batch,
+    xem giải thích chi tiết ở đó."""
+    import queue as _queue
     job = DVC_TOKEN_BATCH[batch_id]
-    drv = None
-    try:
-        try:
-            drv = _dvc_make_driver(headless=True)
-        except Exception as e:
-            job["loi"] = f"Không mở được Chrome: {e}"
-            job["running"] = False
+    job_lock = threading.Lock()
+
+    def _xu_ly_1_cty(cid, drv):
+        conn = db()
+        comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+        conn.close()
+        if not comp:
+            with job_lock:
+                job["done"] += 1
             return
-        for cid in cids:
-            if job.get("cancel"):
-                break
-            conn = db()
-            comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
-            conn.close()
-            if not comp:
-                job["done"] += 1; continue
-            ten = comp["ten"]; mst = comp["mst"]
-            job["current"] = ten
-            item = {"cid": cid, "mst": mst, "ten": ten, "trang_thai": "đang xử lý"}
+        ten = comp["ten"]; mst = comp["mst"]
+        item = {"cid": cid, "mst": mst, "ten": ten, "trang_thai": "đang xử lý"}
+        with job_lock:
             job["items"].append(item)
+            job.setdefault("current_list", []).append(ten)
+            job["current"] = ten
+        try:
             pw1 = (comp["dvc_password"] if "dvc_password" in comp.keys() else "") or ""
             pw2 = (comp["dvc_password2"] if "dvc_password2" in comp.keys() else "") or ""
             pw1 = (pw1 or "").strip(); pw2 = (pw2 or "").strip()
@@ -5135,7 +5190,7 @@ def _dvc_run_token_batch(batch_id, cids, body):
                 pw2 = pw2 or (body.get("pass_chung") or "").strip()
             if not pw1 and not pw2:
                 item["trang_thai"] = "thiếu mật khẩu"
-                job["done"] += 1; continue
+                return
             try:
                 drv.get(DVC_BASE + "/homelogin")
                 drv.delete_all_cookies()
@@ -5148,12 +5203,12 @@ def _dvc_run_token_batch(batch_id, cids, body):
             if not ok:
                 item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
                 item["loi_chi_tiet"] = _dvc_mo_ta_loi_dang_nhap(info)
-                job["done"] += 1; continue
+                return
             to_chuc_cap, ngay_het_han, chi_tiet_loi_token = _dvc_browser_lay_token_info(drv)
             if not to_chuc_cap and not ngay_het_han:
                 item["trang_thai"] = "không đọc được thông tin token"
                 item["loi_chi_tiet"] = chi_tiet_loi_token or "Không rõ nguyên nhân"
-                job["done"] += 1; continue
+                return
             cn = db()
             cn.execute(
                 "UPDATE companies SET token_to_chuc_cap=?, token_ngay_het_han=?, "
@@ -5164,13 +5219,51 @@ def _dvc_run_token_batch(batch_id, cids, body):
             item["to_chuc_cap"] = to_chuc_cap
             item["ngay_het_han"] = ngay_het_han
             item["trang_thai"] = "xong"
-            job["done"] += 1
             time.sleep(0.4)
-    finally:
+        finally:
+            with job_lock:
+                job["done"] += 1
+                cl = job.get("current_list", [])
+                if ten in cl:
+                    cl.remove(ten)
+
+    def _worker():
+        drv = None
         try:
-            if drv: drv.quit()
-        except Exception:
-            pass
+            try:
+                drv = _dvc_make_driver(headless=True)
+            except Exception as e:
+                with job_lock:
+                    job["loi"] = ((job.get("loi") or "") + f" Không mở được Chrome (1 luồng): {e}").strip()
+                return
+            while True:
+                if job.get("cancel"):
+                    break
+                try:
+                    cid_lam = hang_doi.get_nowait()
+                except _queue.Empty:
+                    break
+                try:
+                    _xu_ly_1_cty(cid_lam, drv)
+                except Exception:
+                    with job_lock:
+                        job["done"] += 1
+        finally:
+            try:
+                if drv: drv.quit()
+            except Exception:
+                pass
+
+    hang_doi = _queue.Queue()
+    for cid in cids:
+        hang_doi.put(cid)
+    so_luong = max(1, min(DVC_BATCH_SONG_SONG, len(cids)))
+    threads = [threading.Thread(target=_worker) for _ in range(so_luong)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    job["current_list"] = []
     job["running"] = False
     job["current"] = None
 
@@ -5186,7 +5279,7 @@ def dvc_token_batch_start(body: dict = Body(...)):
     _DVC_TOKEN_BATCH_SEQ["n"] += 1
     bid = _DVC_TOKEN_BATCH_SEQ["n"]
     DVC_TOKEN_BATCH[bid] = {"running": True, "total": len(cids), "done": 0,
-                            "current": None, "items": [], "cancel": False}
+                            "current": None, "current_list": [], "items": [], "cancel": False}
     import threading
     threading.Thread(target=lambda: _dvc_run_token_batch(bid, cids, body), daemon=True).start()
     return {"ok": True, "batch_id": bid}

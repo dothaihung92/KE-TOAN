@@ -1508,7 +1508,10 @@ async function dvcbTokenPoll(){
   if(dvcbTokenId==null)return;
   let j;try{j=await api(`/api/dvc/token-batch-status/${dvcbTokenId}`);}catch{return;}
   const prog=document.getElementById('dvcbProgress');
-  let html=`Đang kiểm tra hạn Token: <b>${j.done}/${j.total}</b>`+(j.current?` · đang: ${j.current}`:'');
+  // Xử lý song song nhiều công ty cùng lúc (mỗi luồng 1 trình duyệt ẩn
+  // riêng) — hiện đủ TẤT CẢ công ty đang chạy (current_list), không chỉ 1.
+  const dangChayTk=(j.current_list&&j.current_list.length)?j.current_list.join(', '):j.current;
+  let html=`Đang kiểm tra hạn Token: <b>${j.done}/${j.total}</b>`+(dangChayTk?` · đang: ${dangChayTk}`:'');
   if(j.items&&j.items.length){
     html+='<div style="max-height:160px;overflow:auto;margin-top:6px">'+
       j.items.map(it=>{
@@ -2070,7 +2073,10 @@ async function dvcbPoll(){
   if(dvcbId==null)return;
   let j;try{j=await api(`/api/dvc/batch-status/${dvcbId}`);}catch{return;}
   const prog=document.getElementById('dvcbProgress');
-  let html=`Tiến độ: <b>${j.done}/${j.total}</b>`+(j.current?` · đang: ${j.current}`:'');
+  // Xử lý song song nhiều công ty cùng lúc (mỗi luồng 1 trình duyệt ẩn
+  // riêng) — hiện đủ TẤT CẢ công ty đang chạy (current_list), không chỉ 1.
+  const dangChay=(j.current_list&&j.current_list.length)?j.current_list.join(', '):j.current;
+  let html=`Tiến độ: <b>${j.done}/${j.total}</b>`+(dangChay?` · đang: ${dangChay}`:'');
   if(j.items&&j.items.length){
     // Đếm nhanh (cập nhật LIÊN TỤC theo tiến độ, không cần đợi tới lúc
     // "Hoàn tất" mới biết): số cty đã lấy được dữ liệu xong, số cty KHÔNG
