@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.26"
+APP_BUILD = "2026-07-27.27"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3686,14 +3686,20 @@ def _dvc_norm_data(d):
 
 def _dvc_browser_login(drv, mst, password, so_lan=8):
     """Mở trang, qua WAF, tự giải captcha + đăng nhập. Trả (ok, info)."""
-    import re as _re, time as _t
+    import time as _t
     drv.get(DVC_BASE + "/homelogin"); _t.sleep(1.5)
     drv.get(DVC_BASE + "/login"); _t.sleep(1.0)
     _dvc_qua_man_chon_loai_tk(drv)
     if not _dvc_wait_jquery(drv, 15):
         return False, {"loi": "Trang login không nạp được jQuery (có thể WAF chặn cả trình duyệt)"}
-    digits = _re.sub(r"\D", "", mst or "")
-    ten = f"{digits}-QL"
+    # GIỮ NGUYÊN dấu gạch ngang trong MST (không chỉ lấy chữ số rồi nối lại)
+    # — công ty CHI NHÁNH có MST dạng "xxxxxxxxxx-xxx" (MST công ty mẹ + số
+    # nhánh); trước đây bỏ hết ký tự không phải số rồi nối chuỗi khiến MST
+    # chi nhánh bị NỐI LIỀN số nhánh vào MST chính (vd "0313030299-001"
+    # thành "0313030299001-QL") — SAI tên đăng nhập thật của DVC (đã xác
+    # nhận đúng tên đăng nhập thật phải giữ dấu gạch: "0313030299-001-QL"),
+    # khiến đăng nhập LUÔN báo sai tài khoản/mật khẩu dù mật khẩu đúng.
+    ten = f"{str(mst or '').strip()}-QL"
     tried = []
     for lan in range(1, so_lan + 1):
         try:
