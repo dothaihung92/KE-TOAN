@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.22"
+APP_BUILD = "2026-07-27.23"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6041,14 +6041,12 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
     — để lúc Xuất Excel CHỈ cần ĐỌC dữ liệu đã có sẵn (file hoặc detail_json
     đã lưu), không phải tự đi tải bù qua mạng gây treo lâu như trước.
 
-    chi_ids: nếu truyền vào (list id bảng invoices) -> CHỈ lấy nốt chi tiết
-    cho ĐÚNG các hóa đơn đó (vd Kết xuất XML HTKK chỉ cần đủ dữ liệu cho hóa
-    đơn CỦA KỲ đang xuất, không cần quét/chờ toàn bộ lịch sử hóa đơn công ty
-    — tránh treo lâu với công ty có hàng vạn hóa đơn cũ). None (mặc định,
-    dùng khi tra cứu hàng loạt) -> quét TẤT CẢ hóa đơn công ty như trước.
-
-    Theo đúng yêu cầu: tra cứu phải tải/lấy đủ dữ liệu ngay từ bước tra cứu;
-    kết xuất Excel chỉ đọc file và xuất ra."""
+    chi_ids: list id bảng invoices (CÓ THỂ rỗng []) -> CHỈ lấy nốt chi tiết
+    cho ĐÚNG các hóa đơn đó (vd tra cứu/Kết xuất XML chỉ cần đủ dữ liệu cho
+    hóa đơn CỦA KỲ đang chạy, không cần quét/chờ TOÀN BỘ lịch sử hóa đơn
+    công ty — tránh treo lâu/gây hiểu nhầm "sao lấy nhiều hóa đơn hơn cả số
+    trong kỳ" với công ty có nhiều hóa đơn tồn đọng từ các kỳ trước). None
+    (không truyền) -> quét TẤT CẢ hóa đơn công ty (mọi kỳ)."""
     # LƯU Ý: KHÔNG loại trừ client._token_dead ở đây — nếu phiên vừa chết
     # NGAY TRONG lúc tải file (bước ngay trước khi gọi hàm này) thì vòng lặp
     # bên dưới vẫn phải được chạy để CÓ CƠ HỘI tự đăng nhập lại, thay vì bỏ
@@ -6056,7 +6054,13 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
     if not (client and client.token):
         return
     conn = db()
-    if chi_ids:
+    if chi_ids is not None:
+        # chi_ids CÓ THỂ rỗng (vd không có hóa đơn nào trong kỳ) — PHẢI phân
+        # biệt rõ với "không truyền" (None), không được coi rỗng là "không
+        # giới hạn" rồi lỡ quét lại TOÀN BỘ lịch sử hóa đơn công ty.
+        if not chi_ids:
+            conn.close()
+            return
         ph = ",".join("?" * len(chi_ids))
         rows = conn.execute(
             f"SELECT * FROM invoices WHERE company_id=? AND id IN ({ph}) "
@@ -7112,8 +7116,37 @@ def _run_fetch_job(cid: int, body: dict):
             # tải file XONG HẲN, KHÔNG còn tổ hợp nào đang tải file xen lẫn) —
             # để bước Xuất Excel sau này CHỈ cần đọc dữ liệu có sẵn (file/
             # detail_json), không phải tự đi tải bù qua mạng gây treo lâu.
+            # CHỈ GIỚI HẠN trong đúng khoảng ngày (tu/den) đang tra cứu lần
+            # này — trước đây quét CẢ lịch sử hóa đơn công ty (mọi kỳ trước),
+            # khiến số hóa đơn "đang lấy nốt chi tiết" hiện ra CAO HƠN HẲN số
+            # hóa đơn thật của kỳ đang tra cứu (vd kỳ chỉ có 229 tờ nhưng lại
+            # thấy "410 hóa đơn"), gây hiểu nhầm là lỗi dù thực ra chỉ đang
+            # dọn luôn hóa đơn tồn đọng từ các kỳ khác.
+            chi_ids_ky = None
             try:
-                _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg)
+                _d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date() if tu else None
+                _d2 = datetime.datetime.strptime(den, "%d/%m/%Y").date() if den else None
+            except Exception:
+                _d1 = _d2 = None
+            if _d1 and _d2:
+                try:
+                    _conn_ky = db()
+                    _rows_ky = _conn_ky.execute(
+                        "SELECT id, tdlap FROM invoices WHERE company_id=?", (cid,)).fetchall()
+                    _conn_ky.close()
+                    chi_ids_ky = []
+                    for _r in _rows_ky:
+                        _s = str(_r["tdlap"] or "").split("T")[0]
+                        try:
+                            _d = datetime.datetime.strptime(_s, "%Y-%m-%d").date()
+                        except Exception:
+                            continue
+                        if _d1 <= _d <= _d2:
+                            chi_ids_ky.append(_r["id"])
+                except Exception:
+                    chi_ids_ky = None
+            try:
+                _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=chi_ids_ky)
             except Exception as e:
                 msg(stage="warn", text=f"Không lấy nốt được chi tiết dòng hàng: {str(e)[:120]}")
 
