@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.29"
+APP_BUILD = "2026-07-27.30"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17364,6 +17364,32 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     except Exception:
         pass
     fname_x = f"BangKe_HoaDon_{comp['mst']}{ky_fname}.xlsx"
+
+    def _xoa_bang_ke_cu(thu_muc, fname_giu_lai):
+        """Xoá các bản 'BangKe_HoaDon_{mst}*.xlsx' CŨ (tên khác fname_giu_lai)
+        trong thu_muc — vì ky_fname (suy từ hóa đơn ĐẦU TIÊN đọc được, không
+        phải đúng theo kỳ đang xuất) có thể đổi tên file giữa các lần xuất,
+        để lại NHIỀU bản CŨ cùng MST không ai xoá. '_tim_file_bang_ke_moi_nhat'
+        (Kết xuất XML dùng để đọc số liệu) chọn bản có Date Modified MỚI NHẤT
+        trong số TẤT CẢ bản trùng MST — nếu thư mục này nằm trong ổ đồng bộ
+        (OneDrive...), Date Modified của bản CŨ có thể bị hệ thống đồng bộ tự
+        "chạm" lại mà không đổi nội dung, khiến bản CŨ bị chọn nhầm thay vì
+        bản vừa xuất (đã xác nhận đúng nguyên nhân qua dữ liệu thật của người
+        dùng). Xoá sạch bản cũ mỗi lần xuất -> luôn chỉ còn ĐÚNG 1 bản, không
+        còn gì để chọn nhầm nữa.
+        """
+        import glob as _glob
+        if not (thu_muc and os.path.isdir(thu_muc)):
+            return
+        for _fp in _glob.glob(os.path.join(thu_muc, f"BangKe_HoaDon_{comp['mst']}*.xlsx")):
+            if os.path.basename(_fp) == fname_giu_lai:
+                continue
+            try:
+                os.remove(_fp)
+            except Exception:
+                pass
+
+    _xoa_bang_ke_cu(DOWNLOAD_DIR, fname_x)
     # chỉ tạo DUY NHẤT 1 file BangKe_HoaDon (không tạo thêm file TongHop)
     path = os.path.join(DOWNLOAD_DIR, fname_x)
     _tlog("bat dau ghi file Excel ra dia...")
@@ -17428,6 +17454,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         save_dir3 = (comp["save_dir"] or "").strip() if comp else ""
         if save_dir3 and os.path.isdir(save_dir3):
             try:
+                _xoa_bang_ke_cu(save_dir3, fname_x)
                 shutil.copy(path, os.path.join(save_dir3, fname_x))
             except Exception:
                 pass
