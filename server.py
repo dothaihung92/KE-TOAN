@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.21"
+APP_BUILD = "2026-07-27.22"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14725,8 +14725,10 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     riêng vào danh sách, không cần tính lại). Đọc TỪNG DÒNG hóa đơn, tự lọc
     theo đúng khoảng ngày (d_tu..d_den) của kỳ đang xuất XML (sheet liệt kê
     CẢ LỊCH SỬ hóa đơn công ty, không lọc theo đúng kỳ khai).
-    Trả về {'ds','thue','ds_full','thue_full'}, hoặc None nếu không tìm thấy
-    file / không đọc được / không có dòng nào khớp kỳ."""
+    Trả về {'ds','thue','ds_full','thue_full'} — kể cả khi bằng 0 (công ty
+    KHÔNG phát sinh mua vào kỳ này là chuyện bình thường, không phải lỗi).
+    CHỈ trả None khi KHÔNG tìm/đọc được file hoặc sheet 'BK Mua vào' — tức
+    thật sự chưa có dữ liệu để tin cậy, chứ không phải "có nhưng bằng 0"."""
     fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir)
     if not fpath:
         return None
@@ -14739,7 +14741,6 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     except Exception:
         return None
     ds = thue = ds_full = thue_full = 0
-    tim_thay_dong = False
     try:
         for row in ws.iter_rows(min_row=2, values_only=True):
             stt = row[0] if len(row) > 0 else None
@@ -14761,11 +14762,8 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
                     d = None
             if not (d and d_tu <= d <= d_den):
                 continue
-            tim_thay_dong = True
             ds += ds_o; thue += thue_o
     except Exception:
-        return None
-    if not tim_thay_dong:
         return None
     return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full}
 
@@ -14779,8 +14777,10 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
     (không dùng dòng 'Tổng nhóm'/'TỔNG CỘNG' có sẵn — 2 dòng đó gộp CẢ LỊCH
     SỬ hóa đơn công ty, không lọc theo đúng kỳ khai), tự lọc lại theo đúng
     khoảng ngày (d_tu..d_den) của kỳ đang xuất XML.
-    Trả về dict {'KCT'/'0'/'5'/'8'/'10'/'KHAC': {'ds','thue'}}, hoặc None nếu
-    không tìm thấy file / không đọc được / không có dòng nào khớp kỳ."""
+    Trả về dict {'KCT'/'0'/'5'/'8'/'10'/'KHAC': {'ds','thue'}} — kể cả khi
+    toàn bộ bằng 0 (công ty KHÔNG phát sinh bán ra kỳ này là chuyện bình
+    thường, không phải lỗi). CHỈ trả None khi KHÔNG tìm/đọc được file hoặc
+    sheet 'BK Bán ra' — tức thật sự chưa có dữ liệu để tin cậy."""
     fpath = _tim_file_bang_ke_moi_nhat(mst, save_dir)
     if not fpath:
         return None
@@ -14806,7 +14806,6 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
                "10": {"ds": 0, "thue": 0}, "KHAC": {"ds": 0, "thue": 0}}
     ds_full = thue_full = 0   # TỔNG CỘNG cả sheet (không lọc kỳ) — để đối chiếu [34]/[35]
     nhom_hien_tai = None
-    tim_thay_dong = False
     try:
         for row in ws.iter_rows(min_row=2, values_only=True):
             col_a = row[0] if len(row) > 0 else None
@@ -14831,12 +14830,9 @@ def _doc_nhom_ban_ra_tu_file_bang_ke(mst, save_dir, d_tu, d_den):
                     d = None
             if not (d and d_tu <= d <= d_den):
                 continue
-            tim_thay_dong = True
             ket_qua[nhom_hien_tai]["ds"] += ds_o
             ket_qua[nhom_hien_tai]["thue"] += thue_o
     except Exception:
-        return None
-    if not tim_thay_dong:
         return None
     ket_qua["_full"] = {"ds": ds_full, "thue": thue_full}
     return ket_qua
