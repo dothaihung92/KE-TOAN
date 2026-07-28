@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.31"
+APP_BUILD = "2026-07-27.32"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14428,6 +14428,21 @@ async def import_excel(cid: int, request: Request, ky: str = ""):
                     so_dong_ghi_de += 1
             conn_gd.commit()
             conn_gd.close()
+
+        # Sau khi GHI ĐÈ 'invoices' -> TỰ ĐỘNG xuất lại ngay file Excel "Bảng
+        # kê hóa đơn" (BangKe_HoaDon_{mst}...xlsx, kể cả lưu vào thư mục kết
+        # xuất đã cấu hình nếu có). "Kết xuất XML" (từ bản .18) CHỈ đọc số
+        # liệu từ file bảng kê ĐÃ LƯU TRÊN ĐĨA, không hề đụng tới 'invoices'
+        # nữa — nếu không xuất lại NGAY ở đây, file bảng kê trên đĩa vẫn giữ
+        # snapshot TRƯỚC KHI import, nên dù 'invoices' đã ghi đè đúng số liệu
+        # vừa import, "Kết xuất XML" vẫn ra số liệu CŨ (đã xác nhận đúng
+        # nguyên nhân qua dữ liệu thật: import xong, XML vẫn giữ nguyên số cũ
+        # dù đã sửa/kiểm tra lại file, vì file bảng kê chưa được xuất lại).
+        if so_dong_ghi_de:
+            try:
+                export_excel(cid, luu_ket_xuat=1, tu_ngay="", den_ngay="", mo_file=0)
+            except Exception:
+                pass
 
         conn = db()
         conn.execute("""
