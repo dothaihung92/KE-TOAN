@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.23"
+APP_BUILD = "2026-07-27.24"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -7122,6 +7122,13 @@ def _run_fetch_job(cid: int, body: dict):
             # hóa đơn thật của kỳ đang tra cứu (vd kỳ chỉ có 229 tờ nhưng lại
             # thấy "410 hóa đơn"), gây hiểu nhầm là lỗi dù thực ra chỉ đang
             # dọn luôn hóa đơn tồn đọng từ các kỳ khác.
+            # PHẢI gộp qua _gop_hoa_don_trung_he_thong TRƯỚC khi lọc kỳ —
+            # 1 hóa đơn thật đôi khi có 2 DÒNG riêng trong 'invoices' (hệ
+            # thống 'query' và 'sco-query' cùng trả về, xem giải thích ở hàm
+            # đó); mọi báo cáo (Xuất Excel/XML) chỉ dùng ĐÚNG 1 dòng "giữ
+            # lại" sau khi gộp, dòng còn lại không cần lấy chi tiết làm gì —
+            # nếu không gộp trước, số hóa đơn hiện ra vẫn cao gần gấp đôi số
+            # tờ thật (vd 400 dù kỳ chỉ có ~233 tờ) dù ĐÃ giới hạn đúng kỳ.
             chi_ids_ky = None
             try:
                 _d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date() if tu else None
@@ -7131,8 +7138,8 @@ def _run_fetch_job(cid: int, body: dict):
             if _d1 and _d2:
                 try:
                     _conn_ky = db()
-                    _rows_ky = _conn_ky.execute(
-                        "SELECT id, tdlap FROM invoices WHERE company_id=?", (cid,)).fetchall()
+                    _rows_ky = _gop_hoa_don_trung_he_thong(_conn_ky.execute(
+                        "SELECT * FROM invoices WHERE company_id=?", (cid,)).fetchall())
                     _conn_ky.close()
                     chi_ids_ky = []
                     for _r in _rows_ky:
