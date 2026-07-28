@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.16"
+APP_BUILD = "2026-07-27.17"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2534,39 +2534,64 @@ def _chuan_ngay_het_han(s):
 
 
 def _dvc_parse_token_info(rows_from_js):
-    """rows_from_js: list {cells, ma} (từ _JS_PARSE_TABLE chạy trên trang
-    "Quản lý thông tin"). Trang có THỂ có nhiều bảng khác nhau (vd "Thông
-    tin ngân hàng" nằm ngay dưới) nên phải TÌM ĐÚNG bảng "Thông tin chứng
-    thư số" qua tiêu đề cột, rồi trả về (to_chuc_cap, ngay_het_han_iso) của
-    dòng dữ liệu ĐẦU TIÊN (chứng thư đang dùng). Trả (None, None) nếu
-    không tìm thấy."""
-    header_idx, header = -1, []
-    for i, r in enumerate(rows_from_js):
+    """rows_from_js: list {cells, ma} (từ _JS_PARSE_TABLE — d.querySelectorAll
+    ('table tr') gom TẤT CẢ dòng của MỌI bảng trên trang thành 1 danh sách
+    PHẲNG, theo đúng thứ tự xuất hiện). Trang "Quản lý thông tin" CÓ THỂ có
+    NHIỀU bảng "Thông tin chứng thư số" khác nhau — đã xác nhận qua ảnh chụp
+    thật của người dùng: 1 bảng ở mục "Thông tin khai thuế" (chứng thư THẬT
+    đang dùng, có dữ liệu) và 1 bảng KHÁC ở mục "Thông tin hóa đơn" (thường
+    RỖNG nếu công ty không đăng ký CKS riêng cho hóa đơn điện tử) — cả 2 đều
+    có cột "Tổ chức cấp"/"Ngày hết hạn" giống hệt nhau.
+    TRƯỚC ĐÂY chỉ thử ĐÚNG bảng khớp tiêu đề ĐẦU TIÊN gặp được rồi dừng hẳn —
+    nếu tình cờ đó lại là bảng RỖNG (dù bảng khác ngay sau có đủ dữ liệu) thì
+    coi như "không đọc được", dẫn tới cột Hạn Token bị bỏ trống dù công ty
+    THẬT SỰ có chứng thư số hợp lệ (đúng lỗi người dùng phát hiện). Giờ THỬ
+    LẦN LƯỢT từng bảng khớp tiêu đề theo đúng thứ tự trên trang, bảng nào có
+    ít nhất 1 dòng dữ liệu THẬT thì dùng ngay; bảng rỗng thì bỏ qua, thử tiếp
+    bảng sau — chỉ trả (None, None) khi KHÔNG bảng nào có dữ liệu."""
+    i = 0
+    n = len(rows_from_js)
+    while i < n:
+        r = rows_from_js[i]
         cells = r.get("cells") or [] if isinstance(r, dict) else (r or [])
         joined = _khong_dau(" ".join(cells))
-        if "to chuc cap" in joined and "ngay het han" in joined:
-            header_idx = i
-            header = [_khong_dau(c) for c in cells]
-            break
-    if header_idx < 0:
-        return None, None
-
-    def find(*keys):
-        for j, h in enumerate(header):
-            if any(k in h for k in keys):
-                return j
-        return -1
-
-    idx_to_chuc = find("to chuc cap")
-    idx_het_han = find("ngay het han")
-    for r in rows_from_js[header_idx + 1:]:
-        cells = r.get("cells") or [] if isinstance(r, dict) else (r or [])
-        if not cells or all(not c for c in cells):
+        if not ("to chuc cap" in joined and "ngay het han" in joined):
+            i += 1
             continue
-        to_chuc = cells[idx_to_chuc].strip() if 0 <= idx_to_chuc < len(cells) else ""
-        het_han = cells[idx_het_han].strip() if 0 <= idx_het_han < len(cells) else ""
-        if to_chuc or het_han:
-            return to_chuc, _chuan_ngay_het_han(het_han)
+        header = [_khong_dau(c) for c in cells]
+
+        def find(*keys):
+            for j, h in enumerate(header):
+                if any(k in h for k in keys):
+                    return j
+            return -1
+
+        idx_to_chuc = find("to chuc cap")
+        idx_het_han = find("ngay het han")
+        j = i + 1
+        while j < n:
+            r2 = rows_from_js[j]
+            cells2 = r2.get("cells") or [] if isinstance(r2, dict) else (r2 or [])
+            if not cells2:
+                j += 1
+                continue
+            joined2 = _khong_dau(" ".join(cells2))
+            if "to chuc cap" in joined2 and "ngay het han" in joined2:
+                # Gặp tiêu đề 1 bảng KHÁC -> hết dữ liệu của bảng đang xét,
+                # dừng ở đây (không lẫn sang bảng sau); vòng ngoài sẽ tự thử
+                # tiếp đúng bảng này ở lượt kế.
+                break
+            if all(not c for c in cells2):
+                j += 1
+                continue
+            to_chuc = cells2[idx_to_chuc].strip() if 0 <= idx_to_chuc < len(cells2) else ""
+            het_han = cells2[idx_het_han].strip() if 0 <= idx_het_han < len(cells2) else ""
+            if to_chuc or het_han:
+                return to_chuc, _chuan_ngay_het_han(het_han)
+            j += 1
+        # Bảng này không có dòng dữ liệu nào (rỗng thật) -> thử bảng khớp
+        # tiêu đề TIẾP THEO (nếu có), không dừng hẳn ngay.
+        i = j if j > i else i + 1
     return None, None
 
 
