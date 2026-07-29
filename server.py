@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.47"
+APP_BUILD = "2026-07-27.48"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15998,20 +15998,23 @@ def _thue_theo_cong_thue(it, items, r):
 
 @app.get("/api/export-excel/{cid}")
 def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
-                 den_ngay: str = "", mo_file: int = 0):
+                 den_ngay: str = "", mo_file: int = 1):
     """Xuất Excel bảng kê hóa đơn.
     luu_ket_xuat=1: NGOÀI Desktop, còn LƯU thêm vào thư mục kết xuất của công
       ty theo cấu trúc Năm/Quý (dựa vào tu_ngay/den_ngay). Nếu công ty chưa
       đặt 'Thư mục lưu file kết xuất' thì bỏ qua (vẫn lưu Desktop như thường).
-    mo_file: MẶC ĐỊNH = 0, tức KHÔNG tự mở file Excel nữa (trước đây mặc định
-      TỰ MỞ) — file "Bảng kê hóa đơn" này giờ là NGUỒN DỮ LIỆU chính mà "Kết
-      xuất XML" đọc vào và bị GHI ĐÈ LẠI mỗi khi Import "dữ liệu đã kiểm tra"
-      (xem import_excel); nếu Excel còn đang mở sẵn file này (do lần xuất
-      TRƯỚC tự mở), Windows/OneDrive sẽ KHOÁ file — lần ghi đè SAU (Import
-      hoặc bấm Xuất lại) sẽ báo lỗi "File In Use"/"Document not saved", người
-      dùng không xoá/sửa lại được file, đồng thời còn dễ hiểu lầm phần mềm
-      vẫn đọc số liệu CŨ (đã xác nhận đúng nguyên nhân qua dữ liệu thật của
-      người dùng). Người dùng cần xem file thì tự mở tay từ đường dẫn trả về.
+    mo_file: MẶC ĐỊNH = 1 (tự mở file Excel ngay sau khi xuất, cho tiện xem
+      luôn). Có ĐÁNH ĐỔI đã biết: file "Bảng kê hóa đơn" này là NGUỒN DỮ
+      LIỆU chính mà "Kết xuất XML" đọc vào và bị GHI ĐÈ LẠI mỗi khi Import
+      "dữ liệu đã kiểm tra" (xem import_excel) hoặc bấm "Xuất Excel tổng
+      hợp" lần nữa — nếu Excel CÒN ĐANG MỞ sẵn file này (do lần xuất TRƯỚC
+      tự mở, chưa đóng), Windows/OneDrive có thể KHOÁ file, khiến lần ghi
+      đè SAU đó báo lỗi "File In Use"/"Document not saved". Từng đổi mặc
+      định về 0 (không tự mở) để né hẳn lỗi này, nhưng người dùng thấy bất
+      tiện hơn nhiều so với việc thỉnh thoảng phải đóng Excel trước khi
+      Import/Xuất lại — nên bật lại tự mở theo yêu cầu. Nếu gặp lại "File In
+      Use": đóng file Excel đang mở rồi thử lại, hoặc gọi endpoint này với
+      mo_file=0 để tắt tự mở.
     Response trả về là FileResponse (qua _resp_xuat) — header 'Cache-Control:
     no-store' được gắn ở đó (không cache endpoint này, vì file "Bảng kê hóa
     đơn" ghi ra ở đây là NGUỒN DUY NHẤT mà "Kết xuất XML" đọc vào từ bản .18
