@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.46"
+APP_BUILD = "2026-07-27.47"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14952,6 +14952,7 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
             return None
         ws = wb["BK Mua vào"]
         ds = thue = ds_full = thue_full = 0
+        ds_nk = thue_nk = 0   # TRONG ĐÓ: riêng hàng NHẬP KHẨU (dòng 'TKNK') -> [23a]/[24a]
         for row in ws.iter_rows(min_row=2, values_only=True):
             stt = row[0] if len(row) > 0 else None
             if not isinstance(stt, (int, float)):
@@ -14973,7 +14974,22 @@ def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
             if not (d and d_tu <= d <= d_den):
                 continue
             ds += ds_o; thue += thue_o
-        return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full, "_file": fpath}
+            # Ký hiệu 'TKNK' (cột B) hoặc Trạng thái 'Tờ khai nhập khẩu' (cột L)
+            # -> dòng hàng NHẬP KHẨU, tách riêng cho [23a]/[24a]. Tính TRỰC TIẾP
+            # từ CHÍNH file bảng kê đang đọc (giống hệt cách tính [23]/[24] ở
+            # trên) — TRƯỚC ĐÂY phần này lấy từ 1 bảng cache riêng
+            # (imported_data.mua_ds_nk, chỉ được ghi 1 LẦN lúc "Import dữ liệu
+            # đã kiểm tra") nên khi người dùng import THÊM tờ khai nhập khẩu rồi
+            # xuất lại Excel (không re-import "dữ liệu đã kiểm tra"), [23]/[24]
+            # tự cập nhật đúng (đọc file mới) nhưng [23a]/[24a] vẫn giữ số CŨ từ
+            # cache — đã xác nhận đúng nguyên nhân qua dữ liệu thật (công ty
+            # AFLEX MST 0316363200: xuất Excel xong, [23a]/[24a] vẫn không đổi).
+            kh = str(row[1] or "").strip().upper() if len(row) > 1 else ""
+            tt_row = str(row[11] or "").strip().lower() if len(row) > 11 else ""
+            if kh == "TKNK" or "nhập khẩu" in tt_row or "nhap khau" in tt_row:
+                ds_nk += ds_o; thue_nk += thue_o
+        return {"ds": ds, "thue": thue, "ds_full": ds_full, "thue_full": thue_full,
+                "ds_nk": ds_nk, "thue_nk": thue_nk, "_file": fpath}
     except Exception:
         return None
     finally:
@@ -15253,17 +15269,21 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # tra cứu lại sau đó, nên ngày càng lệch khỏi dữ liệu THẬT trong
     # 'invoices'/hiện trên 2 sheet BK — đúng nguyên nhân người dùng báo
     # "tra cứu lại xong xuất XML vẫn sai" (XML âm thầm dùng số liệu import
-    # CŨ, không phải dữ liệu mới). Chỉ còn giữ lại phần hàng NHẬP KHẨU (tờ
-    # khai NK) từ imported_data vì đây là số liệu KHÔNG có ở bảng 'invoices'
-    # theo từng dòng hóa đơn (chỉ dùng để tách [23a]/[24a]).
-    imp_nk_ds = imp_nk_thue = 0     # phần hàng NHẬP KHẨU đã nằm SẴN trong mua_ds/mua_thue của file import
+    # CŨ, không phải dữ liệu mới).
+    #
+    # Phần hàng NHẬP KHẨU ([23a]/[24a]) TRƯỚC ĐÂY vẫn còn lấy riêng từ cache
+    # imported_data.mua_ds_nk/mua_thue_nk (ghi 1 LẦN lúc "Import dữ liệu đã
+    # kiểm tra", không tự cập nhật) — nên khi người dùng import THÊM tờ khai
+    # nhập khẩu rồi chỉ "Xuất Excel tổng hợp" lại (không re-import "dữ liệu đã
+    # kiểm tra"), [23]/[24] tự cập nhật đúng (đọc file mới) nhưng [23a]/[24a]
+    # vẫn giữ nguyên số CŨ từ cache — đã xác nhận đúng nguyên nhân qua dữ liệu
+    # thật (công ty AFLEX MST 0316363200: xuất Excel xong, [23a]/[24a] không
+    # đổi, vẫn thiếu 2 trong 4 tờ khai nhập khẩu). Giờ tính TRỰC TIẾP từ CHÍNH
+    # file bảng kê vừa đọc ở trên (dòng Ký hiệu 'TKNK') — cùng 1 nguồn dữ liệu
+    # với [23]/[24], luôn đồng bộ, không còn phụ thuộc cache import riêng nữa.
+    imp_nk_ds = _tu_file_bk_mua.get("ds_nk") or 0
+    imp_nk_thue = _tu_file_bk_mua.get("thue_nk") or 0
     imp = _get_imported(cid, ky)
-    if imp:
-        try:
-            imp_nk_ds = _to_num(imp["mua_ds_nk"]) or 0
-            imp_nk_thue = _to_num(imp["mua_thue_nk"]) or 0
-        except Exception:
-            imp_nk_ds = imp_nk_thue = 0
 
     # ===== SỐ DƯ ĐẦU KỲ [22]: lấy từ tạm tính VAT đã lưu (vat_balance) =====
     ct22_val = 0
@@ -15602,34 +15622,30 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
         canh_bao = (f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
                     f"MẪU (có thể sai công ty), dễ bị Cơ quan Thuế báo lỗi. Vào 'Sửa công ty' để điền đủ "
                     f"trước khi nộp.")
-    # [23a]/[24a] (hàng nhập khẩu) vẫn lấy riêng từ imported_data (số liệu
-    # KHÔNG có theo từng dòng ở bảng 'invoices') — báo rõ khi đang dùng để dễ
-    # đối chiếu. Các chỉ tiêu còn lại ([23]-[36]) giờ LUÔN tính trực tiếp từ
-    # bảng 'invoices' hiện có (đúng dữ liệu tra cứu mới nhất, hoặc dữ liệu
-    # import nếu vừa import — vì import đã ghi đè thẳng vào 'invoices'),
-    # không còn dùng cache imported_data cho phần này nên không còn bị "xuất
-    # ra số liệu import CŨ" dù đã tra cứu lại.
+    # [23a]/[24a] (hàng nhập khẩu) giờ tính TRỰC TIẾP từ CHÍNH file bảng kê
+    # (dòng Ký hiệu 'TKNK') — CÙNG 1 nguồn dữ liệu và CÙNG lúc đọc với
+    # [23]/[24] ở trên, không còn qua cache imported_data riêng (vốn chỉ ghi
+    # 1 LẦN lúc "Import dữ liệu đã kiểm tra", dễ bị lạc hậu khi import thêm
+    # tờ khai nhập khẩu rồi chỉ Xuất Excel lại mà không re-import).
     if imp and imp_nk_ds:
         canh_bao = (canh_bao + "\n\n" if canh_bao else "") + (
-            "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy từ dữ liệu đã import gần nhất cho kỳ này.")
+            "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy trực tiếp từ file bảng kê đã xuất cho kỳ này.")
         # Đối chiếu với số liệu tờ khai nhập khẩu (bảng tokhai_nhap) tính lại
-        # TRỰC TIẾP cho đúng kỳ này (tk_ds_nk/tk_thue_nk) — nếu KHÁC với số đã
-        # "đóng băng" trong lần import ở trên (imp_nk_ds/imp_nk_thue), rất có
-        # thể người dùng đã import thêm/xoá tờ khai nhập khẩu SAU lần "Import
-        # dữ liệu đã kiểm tra" gần nhất, nên [23a]/[24a] đang dùng số CŨ, sai
-        # lệch so với thực tế hiện có — phải cảnh báo THẲNG, không được âm
-        # thầm xuất ra số liệu chưa cập nhật đủ (đã xác nhận qua dữ liệu thật:
-        # công ty AFLEX MST 0316363200, kỳ Quý 2/2026 — XML ra [24a]=42.174.617đ
-        # trong khi tờ khai nhập khẩu đang có tổng tới 143.286.915đ cho đúng kỳ).
+        # TRỰC TIẾP cho đúng kỳ này (tk_ds_nk/tk_thue_nk) — nếu KHÁC với số vừa
+        # đọc được từ file bảng kê (imp_nk_ds/imp_nk_thue), nghĩa là file bảng
+        # kê trên đĩa CHƯA PHẢN ÁNH tờ khai nhập khẩu mới nhất (đã import thêm/
+        # xoá SAU lần "Xuất Excel tổng hợp" gần nhất) — phải cảnh báo THẲNG,
+        # không được âm thầm xuất ra số liệu chưa cập nhật đủ.
         if round(tk_thue_nk) != round(imp_nk_thue) or round(tk_ds_nk) != round(imp_nk_ds):
             canh_bao += (
                 f"\n\n⚠ CẢNH BÁO CHÊNH LỆCH HÀNG NHẬP KHẨU: tờ khai nhập khẩu đã import (mục "
                 f"'🛃 Import tờ khai nhập khẩu') hiện có tổng thuế GTGT hàng NK đúng kỳ này là "
-                f"{round(tk_thue_nk):,} đ, nhưng [23a]/[24a] trong file XML này đang lấy từ dữ liệu "
-                f"'đã kiểm tra' CŨ ({round(imp_nk_thue):,} đ) — CHÊNH LỆCH {round(tk_thue_nk - imp_nk_thue):,} đ. "
-                f"Rất có thể bạn đã import thêm/xoá tờ khai nhập khẩu SAU lần 'Import dữ liệu đã kiểm tra' "
-                f"gần nhất. Hãy bấm '📊 Xuất Excel tổng hợp' rồi '📥 Import dữ liệu đã kiểm tra' LẠI (import "
-                f"đúng file Excel vừa xuất) để cập nhật đủ số liệu TRƯỚC KHI nộp tờ khai này.")
+                f"{round(tk_thue_nk):,} đ, nhưng file bảng kê đang dùng để xuất XML này (BangKe_HoaDon_"
+                f"{mst_cty}...xlsx) chỉ có {round(imp_nk_thue):,} đ — CHÊNH LỆCH "
+                f"{round(tk_thue_nk - imp_nk_thue):,} đ. File bảng kê trên đĩa có thể đã CŨ hơn tờ khai "
+                f"nhập khẩu mới nhất. Hãy bấm '📊 Xuất Excel tổng hợp' LẠI cho đúng kỳ này rồi mới kết xuất "
+                f"XML (nếu công ty có dùng 'Import dữ liệu đã kiểm tra', nhớ import lại file Excel vừa xuất "
+                f"trước khi kết xuất XML).")
     if canh_bao_lech:
         canh_bao = (canh_bao + "\n\n" if canh_bao else "") + "\n\n".join(canh_bao_lech)
     if loi_luu_ket_xuat:
