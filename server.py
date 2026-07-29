@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.49"
+APP_BUILD = "2026-07-27.50"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4990,7 +4990,7 @@ def _dvc_run_batch(batch_id, cids, body):
                 except Exception as e:
                     rows_tho, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
                 rows = [r for r in rows_tho
-                        if _ky_text_ra_tu_den(r.get("ky", "")) == (tu, den)]
+                        if _ky_dong_bo_trong_khoang(r.get("ky", ""), tu, den)]
                 if rows_tho and not rows:
                     sdiag = list(sdiag) + [
                         f"tìm thấy {len(rows_tho)} dòng trong khoảng ngày nộp {tu_tim}-{den_tim} "
@@ -5832,6 +5832,33 @@ def _ky_text_ra_tu_den(ky_text):
         yyyy = int(kd)
         return f"01/01/{yyyy}", f"31/12/{yyyy}"
     return None, None
+
+
+def _ky_dong_bo_trong_khoang(ky_text, tu_str, den_str):
+    """True nếu kỳ của 1 dòng kết quả (cột 'Kỳ' thô, vd 'Quý 1/2026') NẰM TRỌN
+    trong khoảng (tu_str, den_str) đang tra cứu (dd/mm/yyyy) — dùng thay cho so
+    sánh BẰNG TUYỆT ĐỐI như trước (_ky_text_ra_tu_den(...) == (tu, den)).
+    So bằng tuyệt đối chỉ đúng khi người dùng chọn ĐÚNG 1 kỳ (Quý/Tháng) khớp
+    hệt kỳ tính thuế thật của dòng đó; nhưng khi chọn "Tùy chọn ngày" với
+    khoảng RỘNG HƠN 1 kỳ (vd cả năm 2023, trong khi công ty nộp theo QUÝ), so
+    bằng tuyệt đối luôn SAI (không kỳ quý nào bằng hệt cả năm) -> mọi tờ khai
+    thật đều bị loại, báo nhầm 'CHƯA NỘP' dù công ty đã nộp đủ (đã xác nhận
+    qua dữ liệu thật: chọn Tùy chọn ngày 01/01/2023-31/12/2023, công ty báo
+    'Chưa nộp báo cáo kỳ này' dù có nộp tờ khai quý bình thường trong năm đó).
+    Vẫn PHẢI kiểm tra kỳ của dòng nằm TRỌN trong khoảng đang tra cứu (không
+    phải chỉ giao nhau) để không lẫn tờ khai của kỳ VẮT RA NGOÀI khoảng chọn."""
+    import datetime as _dt2
+    ky_tu, ky_den = _ky_text_ra_tu_den(ky_text)
+    if not ky_tu or not ky_den:
+        return False
+    try:
+        d1 = _dt2.datetime.strptime(ky_tu, "%d/%m/%Y").date()
+        d2 = _dt2.datetime.strptime(ky_den, "%d/%m/%Y").date()
+        dt_req = _dt2.datetime.strptime(tu_str, "%d/%m/%Y").date()
+        dd_req = _dt2.datetime.strptime(den_str, "%d/%m/%Y").date()
+    except Exception:
+        return False
+    return dt_req <= d1 and d2 <= dd_req
 
 
 def _phan_loai_trang_thai_cqt(trang_thai_text):
