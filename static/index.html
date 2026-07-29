@@ -1434,7 +1434,11 @@ function dvcbRenderCoList(giuDaChon){
       hanCol = `<span style="background:${bg};color:${fg};font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap">${chu}</span>`;
       ngayCol = `<span style="font-size:12px;color:#888;white-space:nowrap">${ngayStr}</span>`;
     }
-    const checked = daChonTruoc ? daChonTruoc.has(String(c.id)) : true;
+    // Mặc định KHÔNG tự tick công ty nào khi mở khung lần đầu — để người
+    // dùng tự chọn đúng công ty cần tra cứu (trước đây tự tick hết 116 công
+    // ty, dễ lỡ tay chạy nhầm cả loạt không cần thiết). Dùng nút "Chọn tất
+    // cả (đang hiện)" nếu thật sự muốn chọn hết.
+    const checked = daChonTruoc ? daChonTruoc.has(String(c.id)) : false;
     // Trạng thái cơ quan Thuế (GTGT/TNCN) của ĐÚNG kỳ đang chọn — dữ liệu do
     // chính lần chạy "Tra cứu tờ khai thuế hàng loạt" gần nhất cho kỳ này
     // ghi lại (xem dvcbTaiTrangThaiCqt).
