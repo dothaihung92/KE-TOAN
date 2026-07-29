@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.37"
+APP_BUILD = "2026-07-27.38"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3737,11 +3737,26 @@ def _dvc_norm_data(d):
 def _dvc_browser_login(drv, mst, password, so_lan=8):
     """Mở trang, qua WAF, tự giải captcha + đăng nhập. Trả (ok, info)."""
     import time as _t
-    drv.get(DVC_BASE + "/homelogin"); _t.sleep(1.5)
-    drv.get(DVC_BASE + "/login"); _t.sleep(1.0)
-    _dvc_qua_man_chon_loai_tk(drv)
-    if not _dvc_wait_jquery(drv, 15):
-        return False, {"loi": "Trang login không nạp được jQuery (có thể WAF chặn cả trình duyệt)"}
+    # "Trang login không nạp được jQuery" hầu hết là WAF chặn TẠM THỜI khi
+    # nhiều luồng (nhiều trình duyệt ẩn) cùng dội request lên cổng DVC từ
+    # CÙNG 1 địa chỉ IP trong lúc chạy "Tra cứu tờ khai hàng loạt" song song
+    # nhiều công ty — KHÔNG PHẢI lỗi vĩnh viễn của riêng công ty đó (đã xác
+    # nhận qua phản ánh thật của người dùng: đăng nhập TỪNG công ty một luôn
+    # thành công, chỉ chạy hàng loạt song song mới báo lỗi này hàng loạt).
+    # Trước đây báo lỗi NGAY ở lần tải đầu tiên -> công ty bị coi là "sai mật
+    # khẩu/lỗi đăng nhập" oan trong khi mật khẩu hoàn toàn đúng. Giờ thử tải
+    # lại vài lần, nghỉ tăng dần giữa các lần, để né đúng lúc WAF đang chặn.
+    ok_jquery = False
+    for lan_tai in range(3):
+        drv.get(DVC_BASE + "/homelogin"); _t.sleep(1.5)
+        drv.get(DVC_BASE + "/login"); _t.sleep(1.0)
+        _dvc_qua_man_chon_loai_tk(drv)
+        if _dvc_wait_jquery(drv, 15):
+            ok_jquery = True
+            break
+        _t.sleep(3 + lan_tai * 3)
+    if not ok_jquery:
+        return False, {"loi": "Trang login không nạp được jQuery (có thể WAF chặn cả trình duyệt, đã thử tải lại 3 lần)"}
     # GIỮ NGUYÊN dấu gạch ngang trong MST (không chỉ lấy chữ số rồi nối lại)
     # — công ty CHI NHÁNH có MST dạng "xxxxxxxxxx-xxx" (MST công ty mẹ + số
     # nhánh); trước đây bỏ hết ký tự không phải số rồi nối chuỗi khiến MST
