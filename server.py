@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.52"
+APP_BUILD = "2026-07-27.53"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16177,6 +16177,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # lượt nhanh đã không lấy được do giới hạn tốc độ, có sẵn phương án dự
     # phòng dùng tổng tiền theo bảng kê — không cần chờ thêm tốn thời gian).
     id_khong_ma = set()
+    can_lam_moi_khong_file = []   # có detail_json nhưng KHÔNG có file -> làm mới NGÀY LẬP qua mạng (xem dưới)
     for r in rows:
         khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
         mst = _chuan_mst(r["nbmst"])[:10]
@@ -16203,6 +16204,18 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                             _sua_tdlap_theo_id(r["id"], items[0].get("ngay"), r["tdlap"])
                         except Exception:
                             pass
+            else:
+                # Hóa đơn "KHÔNG MÃ" (Tổng cục Thuế KHÔNG cấp file XML/ZIP cho
+                # loại này) KHÔNG CÓ FILE để đối chiếu như nhánh trên — cùng 1
+                # lỗi "khoá cứng ngày sai" nhưng không có cách nào tự sửa nếu
+                # không hỏi lại chính trang Thuế. Đã xác nhận qua dữ liệu thật:
+                # hóa đơn K25TCN/360602 (không mã — trang xem hóa đơn ghi đúng
+                # 01/10/2025) luôn hiện "Ngày lập" 30/09/2025 trên bảng kê dù
+                # Xuất Excel lại nhiều lần, vì detail_json (cache 1 lần từ lần
+                # tra cứu ĐẦU) không bao giờ được hỏi lại. Gom lại, làm mới
+                # SONG SONG ở bước riêng bên dưới (không hỏi mạng ngay trong
+                # vòng lặp tuần tự này — chậm nếu có nhiều hóa đơn không mã).
+                can_lam_moi_khong_file.append(r)
             continue
         if co_file:
             da_co_file_rows.append(r)
@@ -16216,6 +16229,48 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     _tlog(f"{len(da_co_file_rows)} hóa đơn dùng được file đã tải, {len(can_nap)} hóa đơn thiếu cả detail lẫn file"
           + (f" (trong đó {len(id_khong_ma)} hóa đơn KHÔNG MÃ — vẫn gọi mạng lấy chi tiết bình "
              f"thường như hóa đơn khác, không loại trừ)" if id_khong_ma else ""))
+
+    # ===== Làm mới Ngày lập cho hóa đơn ĐÃ CÓ detail_json nhưng KHÔNG CÓ file
+    # (chủ yếu hóa đơn KHÔNG MÃ) — xem giải thích ở nhánh "else" phía trên.
+    # Chạy SONG SONG (không tuần tự từng cái) để không làm chậm Xuất Excel khi
+    # công ty có nhiều hóa đơn không mã. Chỉ CẦN gọi lại ĐÚNG hệ thống/khmshdon
+    # đã lưu trước đó (đã từng lấy được chi tiết thành công với tổ hợp này) —
+    # không cần thử lại mọi biến thể như lúc lấy chi tiết LẦN ĐẦU.
+    if can_lam_moi_khong_file and client0 and client0.token and not client0._token_dead:
+        _tlog(f"đối chiếu lại Ngày lập cho {len(can_lam_moi_khong_file)} hóa đơn không có file (không mã)...")
+
+        def _lam_moi_ngay(r):
+            try:
+                ht0 = r["he_thong"] or "query"
+                d_fresh = client0.get_detail(r["nbmst"], r["khhdon"], r["khmshdon"],
+                                              r["shdon"], ht0, max_retry=1,
+                                              cho_khi_429=False, loai=r["loai"])
+                if not (d_fresh and (d_fresh.get("hdhhdvu") or d_fresh.get("nbmst"))):
+                    return None
+                return r["id"], d_fresh
+            except Exception:
+                return None
+
+        so_da_sua = 0
+        _by_id_khong_file = {r["id"]: r for r in can_lam_moi_khong_file}
+        workers_lm = {"fast": 4, "balanced": 3, "safe": 2}.get(CURRENT_SPEED, 3)
+        with _cf.ThreadPoolExecutor(max_workers=workers_lm) as ex:
+            for ket in ex.map(_lam_moi_ngay, can_lam_moi_khong_file):
+                if not ket:
+                    continue
+                inv_id, d_fresh = ket
+                r0 = _by_id_khong_file.get(inv_id)
+                ngay_cu_d = str(r0["tdlap"] or "").split("T")[0] if r0 else ""
+                ngay_fresh = str(d_fresh.get("tdlap") or "").strip()
+                if ngay_fresh and ngay_cu_d and ngay_fresh.split("T")[0] != ngay_cu_d:
+                    cn = db()
+                    cn.execute("UPDATE invoices SET tdlap=?, detail_json=? WHERE id=?",
+                               (ngay_fresh, json.dumps(d_fresh, ensure_ascii=False), inv_id))
+                    cn.commit(); cn.close()
+                    so_da_sua += 1
+        if so_da_sua:
+            _tlog(f"✓ đã tự sửa lại Ngày lập cho {so_da_sua}/{len(can_lam_moi_khong_file)} hóa đơn không mã "
+                 f"(khác với ngày đã lưu trước đó)")
     # Ghi rõ TỪNG hóa đơn thiếu cả file lẫn detail (ký hiệu/số/MST/trạng thái)
     # — trước đây CHỈ có con số tổng, không biết CHÍNH XÁC hóa đơn nào để tự
     # kiểm tra lại trên máy (vd người dùng chắc chắn đã tick "Tải file XML"
