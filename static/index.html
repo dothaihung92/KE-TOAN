@@ -459,7 +459,7 @@
         </span>
       </label>
       <div style="display:flex;gap:8px;margin-bottom:6px">
-        <input id="dvcbSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST..." oninput="dvcbFilter()"
+        <input id="dvcbSearch" placeholder="🔎 Tìm theo tên công ty hoặc MST... (↑↓ để chọn dòng, Enter để tick)" oninput="dvcbFilter()" onkeydown="dvcbSearchKeydown(event)"
                style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px">
         <select id="dvcbLocTrangThai" onchange="dvcbFilter()"
                 style="padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px">
@@ -487,6 +487,7 @@
       <button class="btn ghost" id="dvcbHideBtn" style="display:none" onclick="anDVCBatch()">🫥 Ẩn (chạy nền)</button>
       <button class="btn ghost" id="dvcbCancelBtn" style="display:none" onclick="dvcbCancel()">Dừng</button>
       <button class="btn ghost" id="dvcbTokenBtn" onclick="dvcbCheckToken()">🔑 Kiểm tra hạn Token</button>
+      <button class="btn ghost" id="dvcbForceBtn" title="Tra cứu/tải lại các công ty đã chọn NGAY CẢ KHI tờ khai đã được chấp nhận — bỏ qua hẳn tuỳ chọn 'Bỏ qua công ty đã chấp nhận' ở trên cho lần chạy này" onclick="dvcbRun(true)">🔄 Tải lại tờ khai (dù đã chấp nhận)</button>
       <button class="btn" id="dvcbRunBtn" onclick="dvcbRun()">▶ Bắt đầu</button>
     </div>
   </div>
@@ -1377,6 +1378,7 @@ async function moDVCBatch(){
   document.getElementById('dvcbProgress').style.display='none';
   document.getElementById('dvcbProgress').innerHTML='';
   document.getElementById('dvcbRunBtn').style.display='';
+  document.getElementById('dvcbForceBtn').style.display='';
   document.getElementById('dvcbCancelBtn').style.display='none';
   document.getElementById('dvcbHideBtn').style.display='none';
   document.getElementById('dvcBatchModal').style.display='flex';
@@ -1534,6 +1536,7 @@ async function dvcbCheckToken(){
   prog.style.display='block';prog.innerHTML='⏳ Đang khởi động trình duyệt ẩn để kiểm tra hạn Token...';
   document.getElementById('dvcbTokenBtn').disabled=true;
   document.getElementById('dvcbRunBtn').disabled=true;
+  document.getElementById('dvcbForceBtn').disabled=true;
   try{
     const r=await api('/api/dvc/token-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cids})});
     dvcbTokenId=r.batch_id;
@@ -1542,6 +1545,7 @@ async function dvcbCheckToken(){
     prog.innerHTML='❌ '+e.message;
     document.getElementById('dvcbTokenBtn').disabled=false;
     document.getElementById('dvcbRunBtn').disabled=false;
+    document.getElementById('dvcbForceBtn').disabled=false;
   }
 }
 async function dvcbTokenPoll(){
@@ -1575,6 +1579,7 @@ async function dvcbTokenPoll(){
     clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;
     document.getElementById('dvcbTokenBtn').disabled=false;
     document.getElementById('dvcbRunBtn').disabled=false;
+    document.getElementById('dvcbForceBtn').disabled=false;
     prog.innerHTML=html+'<hr><b>✅ Đã kiểm tra xong.</b>'+(j.loi?`<br><span style="color:#b91c1c">${j.loi}</span>`:'');
     toast('Đã kiểm tra hạn Token','ok');
     await loadCompanies();          // lấy lại dữ liệu companies mới (có token info)
@@ -1634,6 +1639,43 @@ function dvcbFilter(){
     // cũ, làm người dùng phải tick lại/tra cứu lại nhiều lần.
   });
   dvcbCount();
+  // Danh sách dòng hiện ra thay đổi (gõ thêm/bớt chữ) -> vị trí đang bôi
+  // đậm bằng phím mũi tên không còn đúng nữa, bỏ bôi đậm và bắt đầu lại
+  // từ dòng đầu tiên của kết quả mới.
+  dvcbActiveIdx=-1;
+  dvcbHighlightRow(-1);
+}
+// ---- Chọn công ty bằng bàn phím (↑/↓ để di chuyển, Enter để tick/bỏ tick)
+// ngay trong ô tìm kiếm — không cần với chuột xuống danh sách nữa, tiện khi
+// gõ tìm 1 công ty rồi chọn luôn.
+let dvcbActiveIdx=-1;
+function dvcbVisibleRows(){
+  return [...document.querySelectorAll('.dvcbRow')].filter(r=>r.style.display!=='none');
+}
+function dvcbHighlightRow(idx){
+  dvcbVisibleRows().forEach((r,i)=>{r.style.background=(i===idx)?'#e3f1e9':'';});
+  if(idx>=0){
+    const rows=dvcbVisibleRows();
+    if(rows[idx])rows[idx].scrollIntoView({block:'nearest'});
+  }
+}
+function dvcbSearchKeydown(e){
+  if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='Enter')return;
+  const rows=dvcbVisibleRows();
+  if(!rows.length)return;
+  e.preventDefault();
+  if(e.key==='ArrowDown'){
+    dvcbActiveIdx=(dvcbActiveIdx<rows.length-1)?dvcbActiveIdx+1:0;
+    dvcbHighlightRow(dvcbActiveIdx);
+  }else if(e.key==='ArrowUp'){
+    dvcbActiveIdx=(dvcbActiveIdx>0)?dvcbActiveIdx-1:rows.length-1;
+    dvcbHighlightRow(dvcbActiveIdx);
+  }else if(e.key==='Enter'){
+    if(dvcbActiveIdx<0||dvcbActiveIdx>=rows.length)dvcbActiveIdx=0;
+    const chk=rows[dvcbActiveIdx].querySelector('.dvcbChk');
+    if(chk){chk.checked=!chk.checked;dvcbCount();}
+    dvcbHighlightRow(dvcbActiveIdx);
+  }
 }
 function dongDVCBatch(){if(dvcbTimer){clearInterval(dvcbTimer);dvcbTimer=null;}if(dvcbTokenTimer){clearInterval(dvcbTokenTimer);dvcbTokenTimer=null;}document.getElementById('dvcBatchModal').style.display='none';dvcbHidden=false;const mb=document.getElementById('dvcbMiniBar');if(mb)mb.style.display='none';}
 
@@ -2088,15 +2130,19 @@ function hienLaiDVCBatch(){
   document.getElementById('dvcbMiniBar').style.display='none';
   document.getElementById('dvcBatchModal').style.display='flex';
 }
-async function dvcbRun(){
+async function dvcbRun(force){
   let cids=[...document.querySelectorAll('.dvcbChk:checked')].map(c=>+c.value);
   if(!cids.length){toast('Chọn ít nhất 1 công ty','err');return;}
-  // Bỏ qua công ty đã được cơ quan Thuế CHẤP NHẬN đủ CẢ GTGT lẫn TNCN cho
-  // đúng kỳ đang chọn (dữ liệu trạng thái CQT chỉ có ý nghĩa khi chọn kỳ
-  // theo Quý — xem dvcbTaiTrangThaiCqt) — không cần tra cứu/tải lại nữa,
-  // đỡ mất thời gian cho những công ty đã xong.
-  if(document.getElementById('dvcb_boqua_dachapnhan').checked
+  // force=true (nút "🔄 Tải lại tờ khai (dù đã chấp nhận)"): bỏ qua HẲN
+  // tuỳ chọn "Bỏ qua công ty đã chấp nhận" cho lần chạy này — dùng khi
+  // người dùng CHẮC CHẮN muốn tra cứu/tải lại dù cổng Thuế đã báo chấp
+  // nhận (vd nộp bổ sung/điều chỉnh sau khi đã được chấp nhận lần đầu).
+  if(!force && document.getElementById('dvcb_boqua_dachapnhan').checked
      && document.getElementById('dvcb_loaiky').value==='quy'){
+    // Bỏ qua công ty đã được cơ quan Thuế CHẤP NHẬN đủ CẢ GTGT lẫn TNCN cho
+    // đúng kỳ đang chọn (dữ liệu trạng thái CQT chỉ có ý nghĩa khi chọn kỳ
+    // theo Quý — xem dvcbTaiTrangThaiCqt) — không cần tra cứu/tải lại nữa,
+    // đỡ mất thời gian cho những công ty đã xong.
     const truocKhiLoc=cids.length;
     cids=cids.filter(cid=>{
       const tt=dvcbTrangThaiCqt[String(cid)]||{};
@@ -2119,15 +2165,24 @@ async function dvcbRun(){
     tai_file:document.getElementById('dvcb_taifile').checked,
     tai_thong_bao:document.getElementById('dvcb_tb').checked};
   const prog=document.getElementById('dvcbProgress');
-  prog.style.display='block';prog.innerHTML='⏳ Đang khởi động trình duyệt ẩn... (lần đầu hơi lâu)';
+  prog.style.display='block';
+  prog.innerHTML=force?'⏳ Đang khởi động trình duyệt ẩn để TẢI LẠI (bỏ qua trạng thái đã chấp nhận)... (lần đầu hơi lâu)'
+                      :'⏳ Đang khởi động trình duyệt ẩn... (lần đầu hơi lâu)';
   document.getElementById('dvcbRunBtn').style.display='none';
+  document.getElementById('dvcbForceBtn').style.display='none';
   document.getElementById('dvcbCancelBtn').style.display='';
   document.getElementById('dvcbHideBtn').style.display='';
   try{
     const r=await api('/api/dvc/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     dvcbId=r.batch_id;
     dvcbTimer=setInterval(dvcbPoll,2000);
-  }catch(e){prog.innerHTML='❌ '+e.message;document.getElementById('dvcbRunBtn').style.display='';document.getElementById('dvcbCancelBtn').style.display='none';document.getElementById('dvcbHideBtn').style.display='none';}
+  }catch(e){
+    prog.innerHTML='❌ '+e.message;
+    document.getElementById('dvcbRunBtn').style.display='';
+    document.getElementById('dvcbForceBtn').style.display='';
+    document.getElementById('dvcbCancelBtn').style.display='none';
+    document.getElementById('dvcbHideBtn').style.display='none';
+  }
 }
 async function dvcbPoll(){
   if(dvcbId==null)return;
@@ -2174,6 +2229,7 @@ async function dvcbPoll(){
   if(!j.running){
     clearInterval(dvcbTimer);dvcbTimer=null;
     document.getElementById('dvcbRunBtn').style.display='';
+    document.getElementById('dvcbForceBtn').style.display='';
     document.getElementById('dvcbCancelBtn').style.display='none';
     document.getElementById('dvcbHideBtn').style.display='none';
     // Đã chạy xong (dù đang ẨN hay đang mở) -> tắt hẳn khung nhỏ nổi và tự
