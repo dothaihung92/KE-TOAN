@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.45"
+APP_BUILD = "2026-07-27.46"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14721,6 +14721,7 @@ def vat_tam_tinh(cid: int, response: Response, ky: str = "", du_dau_ky: float = 
 
     # ƯU TIÊN dữ liệu đã import từ Excel (nếu có); nếu không, dùng dữ liệu tra cứu
     imp = _get_imported(cid, ky)
+    canh_bao_nk = ""
     if imp:
         vat_mua = _to_num(imp["mua_thue"]) or 0
         # Nếu file Excel bảng kê ĐÃ có sẵn dòng hàng nhập khẩu (ký hiệu TKNK) thì
@@ -14729,6 +14730,16 @@ def vat_tam_tinh(cid: int, response: Response, ky: str = "", du_dau_ky: float = 
         imp_nk_thue = _to_num(imp["mua_thue_nk"]) or 0 if "mua_thue_nk" in imp.keys() else 0
         if not imp_nk_thue:
             vat_mua += thue_nk_rieng
+        elif round(imp_nk_thue) != round(thue_nk_rieng):
+            # Dữ liệu "đã kiểm tra" (đóng băng lúc import) có phần thuế NK KHÁC
+            # với tính lại TRỰC TIẾP từ tờ khai nhập khẩu đang có cho đúng kỳ
+            # này -> rất có thể đã import thêm/xoá tờ khai nhập khẩu SAU lần
+            # import "dữ liệu đã kiểm tra" gần nhất, số liệu đang dùng bị CŨ.
+            canh_bao_nk = (
+                f"⚠ Tờ khai nhập khẩu đang có tổng thuế GTGT hàng NK đúng kỳ này là "
+                f"{round(thue_nk_rieng):,} đ, nhưng số đang dùng để tạm tính (từ dữ liệu 'đã kiểm tra') "
+                f"là {round(imp_nk_thue):,} đ — CHÊNH LỆCH {round(thue_nk_rieng - imp_nk_thue):,} đ. "
+                f"Hãy Xuất Excel tổng hợp rồi Import lại 'dữ liệu đã kiểm tra' để cập nhật trước khi nộp tờ khai.")
         vat_ban = (_to_num(imp["ban_thue_5"]) or 0) + (_to_num(imp["ban_thue_8"]) or 0) \
                   + (_to_num(imp["ban_thue_10"]) or 0)
         nguon = "import"
@@ -14770,7 +14781,7 @@ def vat_tam_tinh(cid: int, response: Response, ky: str = "", du_dau_ky: float = 
         "ky": ky, "vat_mua": round(vat_mua), "vat_ban": round(vat_ban),
         "du_dau_ky": round(du_dau_ky or 0),
         "phai_nop": round(phai_nop), "du_cuoi_ky": round(du_cuoi_ky),
-        "nguon": nguon,
+        "nguon": nguon, "canh_bao_nk": canh_bao_nk,
     }
 
 
@@ -15601,6 +15612,24 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     if imp and imp_nk_ds:
         canh_bao = (canh_bao + "\n\n" if canh_bao else "") + (
             "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy từ dữ liệu đã import gần nhất cho kỳ này.")
+        # Đối chiếu với số liệu tờ khai nhập khẩu (bảng tokhai_nhap) tính lại
+        # TRỰC TIẾP cho đúng kỳ này (tk_ds_nk/tk_thue_nk) — nếu KHÁC với số đã
+        # "đóng băng" trong lần import ở trên (imp_nk_ds/imp_nk_thue), rất có
+        # thể người dùng đã import thêm/xoá tờ khai nhập khẩu SAU lần "Import
+        # dữ liệu đã kiểm tra" gần nhất, nên [23a]/[24a] đang dùng số CŨ, sai
+        # lệch so với thực tế hiện có — phải cảnh báo THẲNG, không được âm
+        # thầm xuất ra số liệu chưa cập nhật đủ (đã xác nhận qua dữ liệu thật:
+        # công ty AFLEX MST 0316363200, kỳ Quý 2/2026 — XML ra [24a]=42.174.617đ
+        # trong khi tờ khai nhập khẩu đang có tổng tới 143.286.915đ cho đúng kỳ).
+        if round(tk_thue_nk) != round(imp_nk_thue) or round(tk_ds_nk) != round(imp_nk_ds):
+            canh_bao += (
+                f"\n\n⚠ CẢNH BÁO CHÊNH LỆCH HÀNG NHẬP KHẨU: tờ khai nhập khẩu đã import (mục "
+                f"'🛃 Import tờ khai nhập khẩu') hiện có tổng thuế GTGT hàng NK đúng kỳ này là "
+                f"{round(tk_thue_nk):,} đ, nhưng [23a]/[24a] trong file XML này đang lấy từ dữ liệu "
+                f"'đã kiểm tra' CŨ ({round(imp_nk_thue):,} đ) — CHÊNH LỆCH {round(tk_thue_nk - imp_nk_thue):,} đ. "
+                f"Rất có thể bạn đã import thêm/xoá tờ khai nhập khẩu SAU lần 'Import dữ liệu đã kiểm tra' "
+                f"gần nhất. Hãy bấm '📊 Xuất Excel tổng hợp' rồi '📥 Import dữ liệu đã kiểm tra' LẠI (import "
+                f"đúng file Excel vừa xuất) để cập nhật đủ số liệu TRƯỚC KHI nộp tờ khai này.")
     if canh_bao_lech:
         canh_bao = (canh_bao + "\n\n" if canh_bao else "") + "\n\n".join(canh_bao_lech)
     if loi_luu_ket_xuat:

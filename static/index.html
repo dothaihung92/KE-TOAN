@@ -5662,6 +5662,7 @@ async function tinhVat(){
     const note=document.getElementById('vat_note');
     if(d.nguon==='import')note.innerHTML='✅ Đang dùng <b>dữ liệu đã import</b> (đã kiểm tra). Bấm "Tính & Save" để lưu số dư.';
     else note.textContent='Đang dùng dữ liệu tra cứu. Nhập số dư đầu kỳ rồi bấm "Tính & Save" để lưu.';
+    if(d.canh_bao_nk)note.innerHTML+=`<div style="margin-top:6px;color:#b91c1c;font-weight:600">${d.canh_bao_nk}</div>`;
     document.getElementById('vat_mua').textContent=fmtD(d.vat_mua);
     document.getElementById('vat_ban').textContent=fmtD(d.vat_ban);
     document.getElementById('vat_dudau_show').textContent=fmtD(d.du_dau_ky);
