@@ -508,6 +508,22 @@
   </div>
 </div>
 
+<!-- MODAL XEM/XOÁ TỜ KHAI NHẬP KHẨU ĐÃ IMPORT — dữ liệu này lưu RIÊNG (bảng
+     tokhai_nhap), KHÔNG liên quan gì tới hóa đơn XML tra cứu từ Thuế, nên
+     xoá/tải lại hóa đơn KHÔNG làm mất tờ khai nhập khẩu đã import trước đó —
+     phải tự xoá ở đây nếu không còn cần nữa. -->
+<div class="modal-bg" id="tknkModal">
+  <div class="modal" style="width:min(640px,96vw);max-width:640px;max-height:88vh;display:flex;flex-direction:column">
+    <h3 style="margin-top:0">🛃 Tờ khai nhập khẩu đã import</h3>
+    <p class="hint" style="margin-top:0">Dữ liệu này lưu riêng, KHÔNG tự mất khi bạn xoá/tải lại hóa đơn — luôn được cộng thêm vào Chi tiết MUA VÀO mỗi khi Xuất Excel cho tới khi bạn tự xoá ở đây.</p>
+    <div id="tknkList" style="overflow:auto;flex:1;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
+    <div class="modal-actions" style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
+      <button class="btn ghost" onclick="document.getElementById('tknkModal').style.display='none'">Đóng</button>
+      <button class="btn ghost" style="color:#b91c1c" onclick="tknkXoaTatCa()">🗑 Xoá tất cả</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL TỰ ĐỘNG NỘP TỜ KHAI (dừng trước khi ký) -->
 <div class="modal-bg" id="nopToKhaiModal">
   <div class="modal" style="width:min(880px,96vw);max-width:880px;max-height:92vh;display:flex;flex-direction:column">
@@ -2563,6 +2579,7 @@ function renderWorkspace(c,online){
       <input type="file" id="importFile" accept=".xlsx" style="display:none" onchange="importExcel(this)">
       <button class="btn ghost" onclick="document.getElementById('importTKNK').click()">🛃 Import tờ khai nhập khẩu</button>
       <input type="file" id="importTKNK" accept=".xlsx" multiple style="display:none" onchange="importToKhaiNhap(this)">
+      <button class="btn ghost" onclick="moTknkModal()">📋 Xem/Xoá TK nhập khẩu đã import</button>
       <button class="btn" style="background:#5a3e8a;color:#fff" onclick="moNhapLieu()">✍️ Nhập Liệu</button>
     </div>
     <p class="hint">XML là bản gốc có giá trị pháp lý do Tổng cục Thuế cấp. PDF được tạo từ XML để xem/in. Excel tổng hợp gồm 3 sheet: mua vào, bán ra, và chi tiết từng mặt hàng.</p>
@@ -5528,6 +5545,41 @@ async function importToKhaiNhap(input){
   input.value='';
 }
 
+// ---- Xem/Xoá tờ khai nhập khẩu đã import (bảng tokhai_nhap, lưu RIÊNG —
+// không liên quan hóa đơn XML, không tự mất khi xoá/tải lại hóa đơn) ----
+async function moTknkModal(){
+  document.getElementById('tknkModal').style.display='flex';
+  await tknkTai();
+}
+async function tknkTai(){
+  const box=document.getElementById('tknkList');
+  box.innerHTML='Đang tải...';
+  try{
+    const ds=await api(`/api/tokhai-nhap/${current}`);
+    if(!ds.length){box.innerHTML='<div style="color:#888;padding:8px 4px">Chưa import tờ khai nhập khẩu nào cho công ty này.</div>';return;}
+    box.innerHTML=ds.map(x=>{
+      const p=(x.ngay_dk||'').split('-'); const ngay=p.length===3?`${p[2]}/${p[1]}/${p[0]}`:(x.ngay_dk||'');
+      const soTkEsc=(x.so_tk||'').replace(/'/g,"\\'");
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid #f0f0f0">
+        <div style="min-width:0">
+          <div style="font-weight:600">Số TK ${x.so_tk} <span style="color:#888;font-weight:400">— ${ngay}</span></div>
+          <div style="font-size:12.5px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.nguoi_xk||''} · ${x.so_dong} dòng hàng</div>
+        </div>
+        <button class="btn ghost" style="flex:none;color:#b91c1c" onclick="tknkXoaMot('${soTkEsc}')">🗑 Xoá</button>
+      </div>`;
+    }).join('');
+  }catch(e){box.innerHTML='❌ '+e.message;}
+}
+async function tknkXoaMot(soTk){
+  if(!confirm(`Xoá tờ khai nhập khẩu số ${soTk}? (sẽ không còn hiện trong Chi tiết MUA VÀO khi xuất Excel nữa)`))return;
+  try{await api(`/api/tokhai-nhap/${current}?so_tk=${encodeURIComponent(soTk)}`,{method:'DELETE'});toast('Đã xoá','ok');await tknkTai();}
+  catch(e){toast(e.message,'err')}
+}
+async function tknkXoaTatCa(){
+  if(!confirm('Xoá TẤT CẢ tờ khai nhập khẩu đã import cho công ty này?'))return;
+  try{await api(`/api/tokhai-nhap/${current}`,{method:'DELETE'});toast('Đã xoá tất cả','ok');await tknkTai();}
+  catch(e){toast(e.message,'err')}
+}
 async function importExcel(input){
   const file=input.files&&input.files[0];
   if(!file){return}
