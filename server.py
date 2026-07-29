@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.50"
+APP_BUILD = "2026-07-27.51"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16169,11 +16169,33 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # phòng dùng tổng tiền theo bảng kê — không cần chờ thêm tốn thời gian).
     id_khong_ma = set()
     for r in rows:
-        if r["detail_json"]:
-            continue
         khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
         mst = _chuan_mst(r["nbmst"])[:10]
-        if (khh, sho, mst) in _file_index or (khh, sho) in _file_index_2:
+        co_file = (khh, sho, mst) in _file_index or (khh, sho) in _file_index_2
+        if r["detail_json"]:
+            # Vẫn tranh thủ đối chiếu/tự sửa NGÀY LẬP nếu có file trên máy, dù
+            # detail_json đã có sẵn từ TRƯỚC — TRƯỚC ĐÂY bỏ qua HẲN các dòng
+            # đã có detail_json (continue ngay ở đây, không xét file), nên hóa
+            # đơn nào bị sai ngày ngay từ LẦN ĐẦU (trước khi có cơ chế đối
+            # chiếu này, hoặc trước khi cổng Thuế tự sửa lại phía họ) sẽ bị
+            # "khoá cứng" ngày SAI MÃI MÃI — không bao giờ được đối chiếu lại
+            # nữa dù Xuất Excel bao nhiêu lần, vì detail_json không đổi. Đã
+            # xác nhận qua dữ liệu thật: hóa đơn K25TCN/239341 (CÔNG TY XĂNG
+            # DẦU TIỀN GIANG) luôn hiện "Ngày lập" 30/06/2025 trên bảng kê dù
+            # file XML/trang xem hóa đơn thật ghi đúng 01/07/2025 — khiến hóa
+            # đơn bị tính nhầm sang kỳ TRƯỚC (Quý 2) khi thực ra thuộc Quý 3,
+            # "biến mất" khỏi tờ khai HTKK của đúng kỳ.
+            if co_file:
+                fpath = _file_index.get((khh, sho, mst)) or _file_index_2.get((khh, sho))
+                if fpath:
+                    items, _s = _doc_file_hoadon(fpath)
+                    if items:
+                        try:
+                            _sua_tdlap_theo_id(r["id"], items[0].get("ngay"), r["tdlap"])
+                        except Exception:
+                            pass
+            continue
+        if co_file:
             da_co_file_rows.append(r)
             continue   # đã có file trên máy -> get_invoice_items sẽ đọc file, KHÔNG cần mạng
         try:
