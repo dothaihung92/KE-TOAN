@@ -1369,9 +1369,9 @@ async function moDVCBatch(){
   nm.value=yr;
   document.getElementById('dvcb_quy').value=Math.floor(now.getMonth()/3)+1;
   document.getElementById('dvcb_loaiky').value='quy';
-  await dvcbKyChange();   // tự tải trạng thái CQT của đúng kỳ + vẽ lại danh sách
   document.getElementById('dvcbSearch').value='';
   document.getElementById('dvcbLocTrangThai').value='';
+  await dvcbKyChange();   // tự tải trạng thái CQT của đúng kỳ + vẽ lại danh sách
   dvcbCount();
   document.getElementById('dvcbProgress').style.display='none';
   document.getElementById('dvcbProgress').innerHTML='';
@@ -1464,7 +1464,12 @@ function dvcbRenderCoList(giuDaChon){
       `<span style="white-space:normal;word-break:break-word;line-height:1.3">${c.ten} <span style="color:#888">(${c.mst})</span></span></span>`+
       gtgtCol+tncnCol+hanCol+ngayCol+`</label>`;
   }).join('') || '<div style="color:#888">Chưa có công ty</div>';
-  dvcbCount();
+  // Danh sách vừa được vẽ lại từ đầu (mất hết trạng thái ẩn/hiện theo bộ lọc
+  // cũ) — áp lại NGAY từ khoá tìm kiếm/trạng thái đang gõ trong ô lọc, tránh
+  // phải tự gõ lại tìm kiếm mới thấy lọc đúng (vd sau khi tra cứu hàng loạt
+  // xong hoặc kiểm tra hạn Token xong, danh sách được vẽ lại để cập nhật
+  // trạng thái mới).
+  dvcbFilter();
   // Tóm tắt số công ty đã nộp xong/đang chờ/chưa nộp báo cáo — CHỈ có ý
   // nghĩa khi trạng thái CQT đang tải đúng cho kỳ Quý (xem dvcbTaiTrangThaiCqt);
   // các loại kỳ khác (Tháng/Năm/Tùy chọn) không có dữ liệu này.
@@ -1600,7 +1605,12 @@ function dvcbFilter(){
     const khopTt=(!locTt||(r.dataset.trangthai||'').split(' ').includes(locTt));
     const hien=khopTen&&khopTt;
     r.style.display=hien?'grid':'none';   // .dvcbRow dùng display:grid (6 cột) — 'flex' làm lệch/nhảy cột
-    if(!hien){const c=r.querySelector('.dvcbChk');if(c)c.checked=false;}
+    // KHÔNG tự bỏ tick công ty chỉ vì đang bị lọc ẩn đi (trước đây có làm
+    // vậy) — người dùng tra cứu (gõ tìm) để lọc bớt danh sách cho dễ nhìn,
+    // KHÔNG có nghĩa là muốn bỏ chọn công ty đang bị ẩn. Việc tự bỏ tick ở
+    // đây từng khiến công ty đã chọn bị mất tick oan khi danh sách được vẽ
+    // lại (vd sau khi chạy tra cứu hàng loạt xong) rồi lọc lại theo từ khoá
+    // cũ, làm người dùng phải tick lại/tra cứu lại nhiều lần.
   });
   dvcbCount();
 }
