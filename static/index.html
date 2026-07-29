@@ -4425,6 +4425,8 @@ function moBangKe(loai){
         <button class="btn ghost sm" onclick="nlFillDown()" title="Ctrl+D">⬇ Fill Down</button>
         <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
         <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
+        <button class="btn ghost sm" onclick="document.getElementById('nlImportFile').click()">📥 Import Excel</button>
+        <input type="file" id="nlImportFile" accept=".xlsx" multiple style="display:none" onchange="nlImportVaoBang(this)">
         <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
         <button class="btn ghost sm" onclick="xoaNhapLieu()" style="color:#c00">🗑 Xóa bộ</button>
       </div>
@@ -4481,6 +4483,42 @@ async function taiNhapLieu(){
       else info.textContent='Chưa có dữ liệu. Import & tách ở màn hình trước, hoặc bấm ➕ Dòng.';
     }
   }catch{nlHeader=[];nlRows=[];veGridNhapLieu();}
+}
+async function nlImportVaoBang(input){
+  const files=input.files;
+  if(!files||!files.length)return;
+  toast(`Đang đọc ${files.length} file...`,'');
+  try{
+    const fd=new FormData();
+    for(const f of files)fd.append('files',f);
+    const r=await fetch(`/api/nhap-lieu/import/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    const kq=nhapLieuLoaiHienTai==='out'?d.out:d.in;
+    if(!kq||!kq.rows||!kq.rows.length){
+      toast(`Không đọc được dòng nào phù hợp cho ${nhapLieuLoaiHienTai==='out'?'Bảng kê Đầu ra':'Bảng kê Đầu vào'}`+(d.loi&&d.loi.length?`: ${d.loi.join('; ')}`:''),'err');
+      input.value='';return;
+    }
+    nlLuuUndo();
+    // Nối thêm vào bảng ĐANG XEM (không thay thế) — giữ nguyên header/dữ liệu
+    // đã có, để import nhiều đợt (nhiều tháng/nhiều file) vẫn cộng dồn được,
+    // giống hệt cách "Import & tách" ở màn hình trước vẫn làm (gộp nối đuôi).
+    if(!nlHeader.length&&kq.header&&kq.header.length)nlHeader=kq.header.slice();
+    const soCot=nlHeader.length||kq.header.length||0;
+    for(const row of kq.rows){
+      const r2=row.slice(0,soCot);
+      while(r2.length<soCot)r2.push('');
+      nlRows.push(r2);
+    }
+    nlBoCotKhongCan();nlDamBaoNoCo();
+    if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
+    else if(nhapLieuLoaiHienTai==='out')nlTuDienNoCoRa();
+    nlTinhCanhBaoNo();
+    veGridNhapLieu();
+    toast(`✓ Đã thêm ${kq.rows.length} dòng vào bảng đang xem (${nlRows.length} dòng, chưa lưu — nhớ bấm 💾 Lưu)`,'ok');
+    if(d.loi&&d.loi.length)toast(`⚠ ${d.loi.join('; ')}`,'err');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
 }
 function nlBoCotKhongCan(){
   const boTen=['trạng thái','kết quả'];
