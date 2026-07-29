@@ -4491,12 +4491,15 @@ async function nlImportVaoBang(input){
   try{
     const fd=new FormData();
     for(const f of files)fd.append('files',f);
-    const r=await fetch(`/api/nhap-lieu/import/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',body:fd});
+    // Dùng endpoint import RIÊNG cho khung Nhập Liệu (đọc thẳng sheet
+    // 'Đầu vào'/'Đầu ra' — đúng định dạng file do CHÍNH nút "Xuất Excel" ở
+    // đây tạo ra) — KHÁC với /api/nhap-lieu/import (dò sheet 'Chi tiết MUA
+    // VÀO' của Xuất Excel TỔNG HỢP hóa đơn, dùng ở màn hình Import ban đầu).
+    const r=await fetch(`/api/nhap-lieu/import-bang-ke/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',body:fd});
     if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    const d=await r.json();
-    const kq=nhapLieuLoaiHienTai==='out'?d.out:d.in;
+    const kq=await r.json();
     if(!kq||!kq.rows||!kq.rows.length){
-      toast(`Không đọc được dòng nào phù hợp cho ${nhapLieuLoaiHienTai==='out'?'Bảng kê Đầu ra':'Bảng kê Đầu vào'}`+(d.loi&&d.loi.length?`: ${d.loi.join('; ')}`:''),'err');
+      toast(`Không đọc được dòng nào phù hợp cho ${nhapLieuLoaiHienTai==='out'?'Bảng kê Đầu ra':'Bảng kê Đầu vào'}`+(kq.loi&&kq.loi.length?`: ${kq.loi.join('; ')}`:''),'err');
       input.value='';return;
     }
     nlLuuUndo();
@@ -4516,7 +4519,7 @@ async function nlImportVaoBang(input){
     nlTinhCanhBaoNo();
     veGridNhapLieu();
     toast(`✓ Đã thêm ${kq.rows.length} dòng vào bảng đang xem (${nlRows.length} dòng, chưa lưu — nhớ bấm 💾 Lưu)`,'ok');
-    if(d.loi&&d.loi.length)toast(`⚠ ${d.loi.join('; ')}`,'err');
+    if(kq.loi&&kq.loi.length)toast(`⚠ ${kq.loi.join('; ')}`,'err');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
 }

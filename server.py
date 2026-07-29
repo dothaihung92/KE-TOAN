@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.54"
+APP_BUILD = "2026-07-27.55"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9029,6 +9029,55 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
             "out": {"header": header_out, "rows": rows_out, "so_dong": len(rows_out)},
             "ctbr": {"header": header_ctbr, "rows": rows_ctbr, "so_dong": len(rows_ctbr)},
             "loi": loi[:5]}
+
+
+@app.post("/api/nhap-lieu/import-bang-ke/{cid}")
+async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in"):
+    """Import TRỰC TIẾP file Excel đã xuất từ CHÍNH khung Nhập Liệu (nút
+    'Xuất Excel' của Bảng kê Đầu vào/Đầu ra — xem nhap_lieu_export bên dưới,
+    sheet tên 'Đầu vào'/'Đầu ra', header = Y HỆT cột đang có trên lưới lúc
+    xuất, không cố định danh sách cột như 'Chi tiết MUA VÀO').
+
+    KHÁC với nhap_lieu_import (dò cột theo TÊN cố định 'Ký hiệu'/'STT' trong
+    sheet 'Chi tiết MUA VÀO'/'BK Bán ra' của Xuất Excel TỔNG HỢP hóa đơn) —
+    dùng khi người dùng chỉnh sửa/nối thêm dữ liệu bên ngoài rồi import lại
+    ĐÚNG khung Bảng kê Đầu vào/Đầu ra (round-trip), không phải import lần
+    đầu từ dữ liệu hóa đơn. Đọc thẳng dòng 1 = tiêu đề, bỏ dòng 'TỔNG CỘNG'
+    cuối bảng, không dò/suy đoán vị trí cột."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    header = []
+    rows = []
+    loi = []
+    ten_sheet_uu_tien = "Đầu ra" if loai == "out" else "Đầu vào"
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})")
+            continue
+        ws = wb[ten_sheet_uu_tien] if ten_sheet_uu_tien in wb.sheetnames else wb[wb.sheetnames[0]]
+        grid = [list(r) for r in ws.iter_rows(values_only=True)]
+        if not grid:
+            loi.append(f"{fn}: sheet rỗng")
+            continue
+        h = [str(c or "").strip() for c in grid[0]]
+        if not header:
+            header = h
+        for r in grid[1:]:
+            if not r or all(c is None or str(c).strip() == "" for c in r):
+                continue
+            if str(r[0] or "").strip().upper() == "TỔNG CỘNG":
+                continue
+            rows.append(["" if c is None else c for c in r])
+    return {"ok": True, "header": header, "rows": rows, "so_dong": len(rows), "loi": loi[:5]}
 
 
 @app.post("/api/nhap-lieu/save/{cid}")
