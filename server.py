@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.51"
+APP_BUILD = "2026-07-27.52"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6290,21 +6290,30 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
             continue
         vong += 1
         ket_qua = {}
+        # Dùng submit()+as_completed() thay vì ex.map() — map() trả kết quả
+        # THEO ĐÚNG THỨ TỰ đưa vào (phải đợi hóa đơn ĐẦU DANH SÁCH xong mới
+        # trả, dù hóa đơn SAU đó đã xong từ lâu), nên KHÔNG thể báo tiến độ
+        # NGAY khi từng hóa đơn xong — người dùng chỉ thấy 1 dòng tĩnh suốt cả
+        # vòng (có thể hàng trăm hóa đơn, vài phút) rồi mới nhảy số 1 lần,
+        # tưởng phần mềm bị treo dù vẫn chạy bình thường. as_completed() trả
+        # kết quả theo ĐÚNG THỨ TỰ HOÀN THÀNH THẬT, báo tiến độ đếm dần từng
+        # hóa đơn — thấy rõ đang chạy tới đâu.
         with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            for inv_id, dj in ex.map(_goi, ds):
+            futs = {ex.submit(_goi, r): r for r in ds}
+            for fut in _cf.as_completed(futs):
+                inv_id, dj = fut.result()
                 if dj:
                     ket_qua[inv_id] = dj
+                da_xong_tam = (len(can_nap) - len(ds)) + len(ket_qua)
+                msg(stage="download", cur=da_xong_tam, total=len(can_nap),
+                    text=f"Đang lấy nốt chi tiết dòng hàng: {da_xong_tam}/{len(can_nap)} "
+                         f"(còn {len(can_nap) - da_xong_tam})")
         if ket_qua:
             cn = db()
             for inv_id, dj in ket_qua.items():
                 cn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
             cn.commit(); cn.close()
         ds = [r for r in ds if r["id"] not in ket_qua]
-        # Báo tiến độ SAU MỖI VÒNG (đã xong bao nhiêu / còn lại bao nhiêu) —
-        # trước đây chỉ có 1 dòng lúc BẮT ĐẦU ("đang lấy nốt cho N hóa đơn")
-        # và 1 dòng lúc XONG HẲN, ở giữa hoàn toàn im lặng dù có thể mất khá
-        # lâu với công ty nhiều hóa đơn thiếu chi tiết — người dùng không
-        # biết đang chạy tới đâu, tưởng bị treo.
         da_xong = len(can_nap) - len(ds)
         msg(stage="download", cur=da_xong, total=len(can_nap),
             text=f"Đang lấy nốt chi tiết dòng hàng: {da_xong}/{len(can_nap)} (còn {len(ds)})")
