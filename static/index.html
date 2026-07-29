@@ -466,6 +466,7 @@
           <option value="">Trạng thái CQT: Tất cả</option>
           <option value="day_du">✅ Đã nộp xong (cả GTGT &amp; TNCN)</option>
           <option value="co_cho">🟡 Đã nộp, đang chờ xử lý</option>
+          <option value="thieu_mot_loai">🟠 Thiếu 1 loại (đã chấp nhận 1, còn thiếu loại kia)</option>
           <option value="tu_choi">🔴 Có loại bị Từ chối</option>
           <option value="chua_co">⚪ Chưa nộp báo cáo (kỳ này)</option>
           <option value="da_chap_nhan">— Có loại Đã chấp nhận (không nhất thiết cả 2)</option>
@@ -1445,16 +1446,25 @@ function dvcbRenderCoList(giuDaChon){
     const tncnCol=spanTt(mTncn,(ttCty.TNCN||{}).chi_tiet);
     // key dùng để lọc theo trạng thái: liệt kê mọi nhóm màu đang có (GTGT
     // và/hoặc TNCN) + đánh dấu "chua_co" nếu CẢ 2 đều chưa có dữ liệu.
-    // Thêm 2 nhóm GỘP chính xác hơn (khác với "có loại..." vốn chỉ cần 1
+    // Thêm các nhóm GỘP chính xác hơn (khác với "có loại..." vốn chỉ cần 1
     // trong 2 khớp): "day_du" = CẢ GTGT lẫn TNCN đều đã chấp nhận (đã nộp
     // xong thật sự); "co_cho" = đã nộp ít nhất 1 loại nhưng còn đang chờ xử
-    // lý (chưa đủ cả 2 được chấp nhận, và không phải "chưa nộp gì cả").
+    // lý (chưa đủ cả 2 được chấp nhận, và không phải "chưa nộp gì cả");
+    // "thieu_mot_loai" = 1 loại ĐÃ được chấp nhận nhưng loại KIA vẫn hoàn
+    // toàn CHƯA có dữ liệu gì (không phải đang chờ, không phải bị từ chối)
+    // — VẪN LÀ CHƯA ĐỦ, phải tiếp tục tra cứu/tải lại, KHÔNG được coi là đã
+    // xong chỉ vì 1 trong 2 loại đã xanh (trước đây nhóm này bị "lọt lưới",
+    // không rơi vào nhóm tóm tắt nào cả, dễ khiến người dùng tưởng nhầm là
+    // phần mềm đã bỏ qua/coi như xong).
     const nhomTt=[ttGtgt,ttTncn].filter(Boolean);
     const dayDu=ttGtgt==='da_chap_nhan'&&ttTncn==='da_chap_nhan';
-    const coCho=!dayDu&&(ttGtgt==='cho'||ttTncn==='cho');
+    const tuChoi=ttGtgt==='tu_choi'||ttTncn==='tu_choi';
+    const coCho=!dayDu&&!tuChoi&&(ttGtgt==='cho'||ttTncn==='cho');
+    const thieuMotLoai=!dayDu&&!tuChoi&&!coCho&&nhomTt.length>0&&nhomTt.length<2;
     const tags=nhomTt.length?[...nhomTt]:['chua_co'];
     if(dayDu)tags.push('day_du');
     if(coCho)tags.push('co_cho');
+    if(thieuMotLoai)tags.push('thieu_mot_loai');
     const dataTt=tags.join(' ');
     return `<label class="chk dvcbRow" data-key="${((c.ten||'')+' '+(c.mst||'')).toLowerCase().replace(/"/g,'')}" data-trangthai="${dataTt}" `+
       `oncontextmenu="ntkCopyMst(event,${c.id});return false" title="Bấm chuột phải để copy MST" `+
@@ -1478,18 +1488,25 @@ function dvcbRenderCoList(giuDaChon){
     if(document.getElementById('dvcb_loaiky').value!=='quy'){
       tomTat.textContent='';
     }else{
-      let soDayDu=0,soCho=0,soChuaNop=0,soTuChoi=0;
+      // Thứ tự kiểm tra ưu tiên (mỗi công ty CHỈ rơi vào ĐÚNG 1 nhóm, tổng
+      // các nhóm PHẢI khớp companies.length — trước đây thiếu nhóm "thiếu 1
+      // loại" nên công ty đã chấp nhận 1 loại (vd GTGT) nhưng loại kia (vd
+      // TNCN) hoàn toàn CHƯA nộp gì bị "lọt lưới", không tính vào nhóm nào,
+      // khiến người dùng tưởng nhầm phần mềm đã coi công ty đó là xong).
+      let soDayDu=0,soCho=0,soChuaNop=0,soTuChoi=0,soThieu=0;
       companies.forEach(c=>{
         const tt=dvcbTrangThaiCqt[String(c.id)]||{};
         const g=(tt.GTGT||{}).trang_thai||null, t=(tt.TNCN||{}).trang_thai||null;
-        if(g==='da_chap_nhan'&&t==='da_chap_nhan')soDayDu++;
-        else if(g==='tu_choi'||t==='tu_choi')soTuChoi++;
+        if(g==='tu_choi'||t==='tu_choi')soTuChoi++;
+        else if(g==='da_chap_nhan'&&t==='da_chap_nhan')soDayDu++;
         else if(g==='cho'||t==='cho')soCho++;
         else if(!g&&!t)soChuaNop++;
+        else soThieu++;   // 1 loại đã chấp nhận, loại kia CHƯA nộp gì -> vẫn CHƯA ĐỦ
       });
       tomTat.innerHTML=`📊 Trong <b>${companies.length}</b> công ty: `+
         `<span style="color:#0a7d4b">✅ Đã nộp xong: <b>${soDayDu}</b></span> · `+
         `<span style="color:#b45309">🟡 Đang chờ xử lý: <b>${soCho}</b></span> · `+
+        `<span style="color:#c2410c">🟠 Thiếu 1 loại (chưa đủ): <b>${soThieu}</b></span> · `+
         `<span style="color:#b91c1c">🔴 Bị từ chối: <b>${soTuChoi}</b></span> · `+
         `<span style="color:#666">⚪ Chưa nộp báo cáo kỳ này: <b>${soChuaNop}</b></span>`;
     }
