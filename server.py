@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.38"
+APP_BUILD = "2026-07-27.39"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4858,7 +4858,14 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
 # 2 hằng số cho 2 tính năng để tăng luồng cho tính năng này KHÔNG ảnh hưởng
 # tới tính năng kia (vd tăng cho "Tra cứu tờ khai thuế hàng loạt" nhưng vẫn
 # muốn giữ "Kiểm tra hạn Token" nhẹ nhàng như cũ).
-DVC_TOKHAI_BATCH_SONG_SONG = 10   # "Tra cứu tờ khai thuế / tải tờ khai hàng loạt"
+# TỪNG tăng lên 10 theo yêu cầu tăng tốc, nhưng gây ra hàng loạt lỗi "Trang
+# login không nạp được jQuery (WAF chặn)" do 10 trình duyệt ẩn cùng dội
+# request đăng nhập lên cổng DVC từ CÙNG 1 địa chỉ IP cùng lúc (đăng nhập
+# TỪNG công ty một tuần tự luôn thành công, chỉ chạy song song mới lỗi —
+# đúng phản ánh thật của người dùng). Đã thêm cơ chế tự thử tải lại trang
+# login 3 lần ở _dvc_browser_login, nhưng vẫn giảm bớt xuống 5 để giảm khả
+# năng bị chặn ngay từ đầu — vẫn nhanh hơn hẳn mức cũ (3) mà an toàn hơn 10.
+DVC_TOKHAI_BATCH_SONG_SONG = 5    # "Tra cứu tờ khai thuế / tải tờ khai hàng loạt"
 DVC_TOKEN_BATCH_SONG_SONG = 3     # "Kiểm tra hạn Token"
 
 
