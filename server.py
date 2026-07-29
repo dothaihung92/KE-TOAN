@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.43"
+APP_BUILD = "2026-07-27.44"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5049,7 +5049,23 @@ def _dvc_run_batch(batch_id, cids, body):
                             except Exception:
                                 pass
                             time.sleep(0.3)
-                        # 2) các mã hồ sơ tìm thấy nhưng KHÔNG ghép được dữ liệu dòng -> tải với tên gốc (dự phòng)
+                        # Các hồ sơ có ĐỦ dữ liệu dòng (nằm trong rows_tho, biết rõ
+                        # cột "Kỳ") nhưng KHÔNG khớp đúng kỳ đang tra cứu (tu, den)
+                        # -> đây là tờ khai của KỲ KHÁC (vd nộp bổ sung/điều chỉnh
+                        # cho Quý 1 nhưng nộp muộn trong khoảng ngày nộp của Quý 2)
+                        # — KHÔNG được tải xuống ở bước "dự phòng" bên dưới, dù mã hồ
+                        # sơ của nó vẫn nằm trong ma_list (danh sách mọi mã tìm thấy,
+                        # không lọc theo kỳ). Trước đây thiếu bước loại trừ này nên
+                        # tờ khai của kỳ khác bị tải lẫn vào (đặt tên gốc dạng
+                        # "files_xxx.zip"), lẫn cả vào kết quả của kỳ đang chọn.
+                        ma_ky_khac = {(r.get("ma") or "").strip() for r in rows_tho} - seen_ma
+                        ma_ky_khac.discard("")
+                        seen_ma |= ma_ky_khac
+                        # 2) mã hồ sơ tìm thấy trong ma_list nhưng KHÔNG có trong
+                        # rows_tho (raw_html có link mã nhưng không ghép được dữ
+                        # liệu dòng để biết cột "Kỳ" của nó) -> CHƯA XÁC ĐỊNH được
+                        # kỳ, tải với tên gốc (dự phòng) như trước — CHỈ áp dụng cho
+                        # trường hợp này, không áp dụng cho hồ sơ đã biết rõ là kỳ khác.
                         for ma in ma_list:
                             if ma in seen_ma:
                                 continue
