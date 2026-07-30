@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.65"
+APP_BUILD = "2026-07-27.66"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11880,6 +11880,89 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
         raise HTTPException(400, "Lỗi khi sửa ĐVT chứng từ (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
     finally:
         conn.close()
+
+
+def _misa_chan_doan_dvt_sau_du(cid, database, ma_list):
+    """CHẨN ĐOÁN SÂU cho lỗi ĐVT hiện GUID thô — dùng khi các bước sửa trước
+    (Danh mục + UnitID/MainUnitID trên chứng từ) đều báo ĐÃ ĐÚNG/0 lỗi nhưng
+    MISA vẫn hiện GUID trên lưới Chi tiết chứng từ Mua hàng, kể cả với chứng
+    từ MỚI TINH ghi lại từ đầu. Nghi vấn: MISA còn 1 bảng "chuyển đổi đơn vị
+    tính" RIÊNG (InventoryItemUnitConvert — thấy trong danh sách bảng quan
+    trọng ở _MISA_BANG_QUAN_TRONG) mà mã hàng cần có 1 dòng đăng ký (InventoryItemID,
+    UnitID) trong đó thì MISA mới nhận diện được ĐVT khi hiển thị/ghi chứng
+    từ; InventoryItem.UnitID tự nó vẫn "đúng"/hiện tên bình thường ở màn hình
+    Danh mục (không cần bảng này) nhưng lưới Chi tiết chứng từ Mua hàng có
+    thể cần bảng này mới ra tên, nếu thiếu dòng đăng ký sẽ hiện GUID thô dù
+    UnitID vẫn "khớp" theo mọi kiểm tra khác. Hàm này CHỈ ĐỌC, không sửa gì,
+    để lấy bằng chứng cụ thể trước khi vá thêm."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        # cột thật của InventoryItemUnitConvert (có thể không tồn tại ở 1 số
+        # bản MISA cũ hơn -> bọc try/except)
+        cot_convert = []
+        try:
+            cot_convert = [c for (c,) in cur.execute(
+                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_NAME='InventoryItemUnitConvert' ORDER BY ORDINAL_POSITION").fetchall()]
+        except Exception:
+            pass
+        ket = []
+        for ma in ma_list:
+            ma = str(ma or "").strip()
+            if not ma:
+                continue
+            row = cur.execute(
+                "SELECT ii.InventoryItemID, ii.UnitID, u.UnitName "
+                "FROM InventoryItem ii LEFT JOIN Unit u ON u.UnitID = ii.UnitID "
+                "WHERE ii.InventoryItemCode=?", ma).fetchone()
+            if not row:
+                ket.append({"ma": ma, "loi": "không thấy mã này trong InventoryItem"})
+                continue
+            iid, uid, uname = row
+            muc = {"ma": ma, "inventory_item_id": str(iid), "unit_id": (str(uid) if uid else None),
+                   "unit_name_danh_muc": uname}
+            if cot_convert:
+                try:
+                    rows_conv = cur.execute(
+                        "SELECT * FROM InventoryItemUnitConvert WHERE InventoryItemID=?", iid).fetchall()
+                    muc["so_dong_unitconvert"] = len(rows_conv)
+                    muc["unitconvert_cols"] = cot_convert
+                    muc["unitconvert_mau"] = [list(map(lambda v: str(v) if v is not None else None, r))
+                                              for r in rows_conv[:5]]
+                except Exception as e:
+                    muc["loi_unitconvert"] = str(e)[:200]
+            else:
+                muc["ghi_chu"] = "Không tìm thấy bảng InventoryItemUnitConvert trên CSDL này."
+            # dòng chứng từ Mua hàng gần nhất của mã này (nếu có) — xem RAW
+            # UnitID/MainUnitID thật đang lưu, không qua so sánh nào cả
+            try:
+                rows_ct = cur.execute(
+                    "SELECT TOP 3 pv.RefNoManagement, pvd.UnitID, pvd.MainUnitID "
+                    "FROM PUVoucherDetail pvd JOIN PUVoucher pv ON pv.RefID=pvd.RefID "
+                    "WHERE pvd.InventoryItemID=? ORDER BY pv.RefDate DESC", iid).fetchall()
+                muc["chung_tu_mau"] = [{"so_ct": rn, "unit_id": (str(u1) if u1 else None),
+                                        "main_unit_id": (str(u2) if u2 else None)}
+                                       for rn, u1, u2 in rows_ct]
+            except Exception as e:
+                muc["loi_chung_tu"] = str(e)[:200]
+            ket.append(muc)
+        return {"database": database, "ket_qua": ket}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-dvt/{cid}")
+def misa_sql_chan_doan_dvt(cid: int, ma: str, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_dvt_sau_du. ma: danh
+    sách mã hàng cách nhau bởi dấu phẩy, vd 'NVL00182-10,NVL00181-10'."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    ma_list = [x.strip() for x in (ma or "").split(",") if x.strip()]
+    if not ma_list:
+        raise HTTPException(400, "Thiếu mã hàng cần chẩn đoán.")
+    return _misa_chan_doan_dvt_sau_du(cid, database, ma_list)
 
 
 def _misa_tu_dong_sua_dvt_sau_ghi(cid, database):
