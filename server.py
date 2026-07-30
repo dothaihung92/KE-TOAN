@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.78"
+APP_BUILD = "2026-07-27.79"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14339,6 +14339,27 @@ def _misa_chan_doan_ban_hang(cid, database, so_ct_list):
     try:
         cur = conn.cursor()
 
+        # Bảng PHỤ TRỢ nghi vấn: chứng từ tự tay tạo trong MISA có thể tự động
+        # sinh kèm bản ghi ở các bảng nội bộ khác (không phải 4 bảng chính đã
+        # đối chiếu khớp gần hết) — vd bảng theo dõi công nợ (TK 131), sổ cái
+        # tổng hợp, cache... mà ghi thẳng SQL không tạo ra. Đếm số dòng liên
+        # quan tới RefID trong các bảng này để phát hiện thiếu sót.
+        _BANG_PHU_TRO = ["DebtListDetailVoucher", "AccountObjectLedger",
+                         "GeneralLedger", "CacheMatch_InventoryItem"]
+
+        def dem_bang_phu_tro(rid, rid_detail=None):
+            ket_dem = {}
+            for b in _BANG_PHU_TRO:
+                try:
+                    if b == "CacheMatch_InventoryItem":
+                        continue   # khóa theo InventoryItemID, không theo RefID chứng từ
+                    n = cur.execute(
+                        "SELECT COUNT(*) FROM %s WHERE RefID=?" % b, rid).fetchone()[0]
+                    ket_dem[b] = n
+                except Exception as e:
+                    ket_dem[b] = "lỗi: %s" % str(e)[:100]
+            return ket_dem
+
         def full_muc(rid):
             m = {"sa_voucher": _misa_dump_row_full(cur, "SAVoucher", "RefID", rid)}
             det = cur.execute(
@@ -14355,6 +14376,9 @@ def _misa_chan_doan_ban_hang(cid, database, so_ct_list):
                     if invdet:
                         m["sa_invoice_detail"] = _misa_dump_row_full(
                             cur, "SAInvoiceDetail", "RefDetailID", invdet[0])
+            m["bang_phu_tro_theo_refid_chung_tu"] = dem_bang_phu_tro(rid)
+            if det and det[1]:
+                m["bang_phu_tro_theo_refid_hoa_don"] = dem_bang_phu_tro(det[1])
             return m
 
         # THAM KHẢO: 1 chứng từ Bán hàng THẬT (KHÔNG do phần mềm này tạo) đã
