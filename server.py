@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.68"
+APP_BUILD = "2026-07-27.69"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12606,6 +12606,77 @@ _SA_VOUCHER_DET_DEFAULT = {
     "SpecificType": None, "VINNumber": None, "SenderName": None,
     "SenderAddress": None, "SenderTaxCode": None, "SenderIDNumber": None,
 }
+# HÓA ĐƠN bán hàng (SAInvoice/SAInvoiceDetail) — TƯỞNG KHÔNG CẦN vì SAVoucher
+# đã có sẵn cột InvNo/InvDate/InvSeries (khác PUVoucher), NHƯNG xác nhận qua
+# dữ liệu thật: mở lại chứng từ SAVoucher chỉ điền InvNo/InvDate/InvSeries ở
+# header (không tạo SAInvoice) thì tab "Hóa đơn" trên form MISA và cột "Số
+# hóa đơn"/"Mẫu số HĐ"/"Ký hiệu HĐ" trên lưới danh sách đều HIỆN TRỐNG dù
+# header đã có dữ liệu — MISA đọc thông tin hóa đơn hiển thị từ bản ghi
+# SAInvoice/SAInvoiceDetail LIÊN KẾT (qua SAVoucherDetail.SAInvoiceRefID ->
+# SAInvoiceDetail.SAVoucherRefID/SAVoucherRefDetailID), không phải trực tiếp
+# từ SAVoucher.InvNo/InvDate/InvSeries (các cột đó có vẻ chỉ mang tính lưu
+# trữ/tương thích, không phải nguồn hiển thị chính). Cùng cơ chế 2 chiều với
+# PUInvoice/PUVoucher bên Mua hàng. Mẫu đầy đủ cột (trừ EditVersion).
+_SA_INVOICE_DEFAULT = {
+    "RefID": None, "BranchID": None, "DisplayOnBook": 1, "RefType": None,
+    "AccountObjectID": None, "AccountObjectName": None, "AccountObjectAddress": None,
+    "AccountObjectTaxCode": None, "AccountObjectBankAccount": None,
+    "PaymentMethod": None, "Buyer": None, "EmployeeID": None,
+    "IsPaid": 0, "IsPosted": 0,
+    "InvTemplateNo": None, "InvSeries": None, "InvNo": None, "InvDate": None,
+    "IncludeInvoice": 1, "IsAttachList": 0, "ListNo": None, "ListDate": None,
+    "CommonInventoryName": None, "ContractCode": None, "ContractDate": None,
+    "PlaceOfDelivery": None, "PlaceOfReceipt": None, "BillOfLadingNo": None,
+    "ContainerNo": None, "TransportName": None,
+    "CurrencyID": "VND", "ExchangeRate": 1,
+    "TotalSaleAmountOC": 0, "TotalSaleAmount": 0,
+    "TotalDiscountAmountOC": 0, "TotalDiscountAmount": 0,
+    "TotalVATAmountOC": 0, "TotalVATAmount": 0, "TotalAmountOC": 0, "TotalAmount": 0,
+    "CreatedDate": None, "CreatedBy": None, "ModifiedDate": None, "ModifiedBy": None,
+    # InvTypeID cùng lớp rủi ro với IsOutwardExported (tên gợi ý 1 enum loại
+    # hóa đơn) — để 0 (mặc định) thay vì NULL để tránh crash tương tự khi mở
+    # chứng từ, dù cột cho phép NULL theo schema.
+    "InvTypeID": 0, "isBranchIssued": None,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None,
+    "IsPostedLastYear": 0, "IsInvoiceReplace": 0, "AdjustRefID": None,
+    "AdjustRefType": None, "AdjustJournalMemo": None, "AdjustPurchasePurposeID": None,
+    "AdjustVATRate": None, "AdjustTACareerGroupID": None, "AdjustInvTemplateNo": None,
+    "AdjustInvSeries": None, "AdjustInvNo": None, "AdjustInvDate": None,
+    "ExportNontariffZones": 0, "RefIDMshop": None, "RefNoMshop": None,
+    "IsGetForInvoice": None, "AdjustInvestmentProjectID": None,
+    "IsReductionInvoice": 0, "InvoiceCode": None, "InvoiceSystem": 0,
+    "IsAdjustAutoCalculate": None, "IsProcessInvoiceError": 0, "TaxReductionType": 0,
+    "IsSAInvoiceValueAdjustEmptyVat": 0, "IsDiscountInvoice": 0,
+    "JournalMemo": None, "RoomNo": None, "CheckInDate": None, "CheckOutDate": None,
+    "BudgetCode": None, "PassportNumber": None, "IdentificationNumber": None,
+    "InvReplaceType": 0, "OldVersion": 0, "EInvoiceType": None, "IsImportEInvoice": 0,
+    "AccountObjectPhoneNumber": None, "ShopCode": None, "ShopName": None,
+    "ListNoEInvoice": None, "ListDateEInvoice": None,
+}
+_SA_INVOICE_DET_DEFAULT = {
+    "RefDetailID": None, "RefID": None, "InventoryItemID": None, "Description": None,
+    "UnitID": None, "Quantity": 0, "UnitPrice": 0, "UnitPriceAfterTax": 0,
+    "AmountOC": 0, "Amount": 0, "DiscountRate": None,
+    "DiscountAmountOC": 0, "DiscountAmount": 0,
+    "VATRate": None, "VATAmountOC": 0, "VATAmount": 0,
+    "IsPromotion": 0, "SortOrder": 0, "TACareerGroupID": None,
+    "MainUnitID": None, "MainUnitPrice": 0, "MainConvertRate": 1, "MainQuantity": 0,
+    "ExchangeRateOperator": "*",
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None,
+    "PurchasePurposeID": None, "VATAccount": None, "TaxType": None,
+    "LotNo": None, "ExpiryDate": None, "NotInVATDeclaration": 0,
+    "AmountAfterTax": None, "SAVoucherRefID": None, "SAVoucherRefDetailID": None,
+    "InvestmentProjectID": None, "DeductionsTaxAmount": 0, "DeductionsTaxAmountOC": 0,
+    "VATRate406": None, "VATRateOther": None, "IsTradeDiscount": 0,
+    "SpecificType": None, "VINNumber": None, "SenderName": None,
+    "SenderAddress": None, "SenderTaxCode": None, "SenderIDNumber": None,
+}
 
 def _misa_tu_kiem_tra_muahang(cur, ref_ids, branch_id, bang_chinh, ket):
     """TỰ KIỂM TRA sau khi ghi Mua hàng: chạy lại đúng view + BỘ LỌC THẬT của
@@ -13846,6 +13917,22 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 return t or None
             return _misa_tk_fallback(t, tk_set) or t
 
+        # loại chứng từ của bảng HÓA ĐƠN bán hàng (SAInvoice) — BẮT BUỘC phải
+        # tạo kèm SAInvoice/SAInvoiceDetail liên kết 2 chiều với SAVoucher(Detail)
+        # thì tab "Hóa đơn" + cột Số hóa đơn/Mẫu số/Ký hiệu trên MISA mới hiện
+        # đúng (xem giải thích ở _SA_INVOICE_DEFAULT) — CHỈ điền InvNo/InvDate/
+        # InvSeries ở SAVoucher.header là KHÔNG ĐỦ (đã xác nhận: hiện trống).
+        inv_reftype = None
+        try:
+            _inv_rows = cur.execute(
+                "SELECT RefType, RefTypeName FROM SYSRefType "
+                "WHERE MasterTableName='SAInvoice'").fetchall()
+            if _inv_rows:
+                inv_reftype = next((int(r[0]) for r in _inv_rows
+                                    if "bán" in str(r[1] or "").lower()), int(_inv_rows[0][0]))
+        except Exception:
+            pass
+
         reftype_ten = dict(cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='SAVoucher'").fetchall())
         posted_refno = set()
@@ -13981,8 +14068,15 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             ghi_de_ct = k_doc in unposted_docs
             if ghi_de_ct and not preview:
                 for rid in unposted_docs[k_doc]["refids"]:
+                    # gỡ luôn HÓA ĐƠN liên kết (SAInvoice/SAInvoiceDetail) kèm
+                    # chứng từ cũ trước khi xóa, tránh để lại bản ghi mồ côi.
+                    old_inv_ids = [r[0] for r in cur.execute(
+                        "SELECT RefID FROM SAInvoiceDetail WHERE SAVoucherRefID=?", rid).fetchall()]
                     cur.execute("DELETE FROM SAVoucherDetail WHERE RefID=?", rid)
                     cur.execute("DELETE FROM SAVoucher WHERE RefID=?", rid)
+                    for oiid in set(old_inv_ids):
+                        cur.execute("DELETE FROM SAInvoiceDetail WHERE RefID=?", oiid)
+                        cur.execute("DELETE FROM SAInvoice WHERE RefID=?", oiid)
             tong_hd = tong.get(f"{kyhieu}|{sohd}", 0)
             tk_no = 131 if abs(tong_hd) >= NGUONG_5TR else 1111
             tk_no_dc = tra_tk(str(tk_no))
@@ -14006,16 +14100,21 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 continue
             rate = _chuan_thue_suat((thue / ds * 100) if ds else 0)
             ref_id = str(_uuid.uuid4())
+            # RefID hóa đơn kèm — sinh sẵn để link 2 chiều SAVoucherDetail <->
+            # SAInvoice/SAInvoiceDetail (xem _SA_INVOICE_DEFAULT: bắt buộc để
+            # MISA hiện đúng Số hóa đơn/Mẫu số/Ký hiệu HĐ).
+            inv_id = str(_uuid.uuid4()) if inv_reftype else None
             mo_ta = mathang or ("Bán hàng - %s" % ten_kh_misa)
+            detail_id = str(_uuid.uuid4())
             detail_row = dict(_SA_VOUCHER_DET_DEFAULT, **{
-                "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid_bh,
+                "RefDetailID": detail_id, "RefID": ref_id, "InventoryItemID": iid_bh,
                 "Description": mo_ta[:500], "DebitAccount": tk_no_dc, "CreditAccount": tk_co_dc,
                 "UnitID": uid_bh, "Quantity": 1, "UnitPrice": ds,
                 "AmountOC": ds, "Amount": ds,
                 "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue, "VATAccount": "33311",
                 "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
                 "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
-                "SortOrder": 1,
+                "SortOrder": 1, "SAInvoiceRefID": inv_id,
             })
             dien_giai = (("Bán hàng - %s - %s %s%s" %
                          (ten_kh_misa, sohd, ngay_dt.strftime("%d/%m/%Y"),
@@ -14038,7 +14137,41 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 "RefOrder": max_reforder + them_ct + 1,
                 "CustomField10": _PM_MARK,
             })
+            inv_header = inv_detail = None
+            if inv_reftype:
+                inv_header = dict(_SA_INVOICE_DEFAULT, **{
+                    "RefID": inv_id, "BranchID": branch_id, "DisplayOnBook": dob,
+                    "RefType": inv_reftype,
+                    "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
+                    "AccountObjectTaxCode": mst[:50] or None,
+                    "InvTemplateNo": maus[:25] or None, "InvSeries": kyhieu[:20] or None,
+                    "InvNo": sohd[:25] or None, "InvDate": ngay_dt,
+                    "JournalMemo": dien_giai,
+                    "TotalSaleAmountOC": ds, "TotalSaleAmount": ds,
+                    "TotalVATAmountOC": thue, "TotalVATAmount": thue,
+                    "TotalAmountOC": ds + thue, "TotalAmount": ds + thue,
+                    "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
+                    "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
+                    "CustomField10": _PM_MARK,
+                })
+                inv_detail = dict(_SA_INVOICE_DET_DEFAULT, **{
+                    "RefDetailID": str(_uuid.uuid4()), "RefID": inv_id,
+                    "InventoryItemID": iid_bh, "Description": mo_ta[:500],
+                    "UnitID": uid_bh, "Quantity": 1, "UnitPrice": ds,
+                    "AmountOC": ds, "Amount": ds,
+                    "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue,
+                    "SortOrder": 1,
+                    "SAVoucherRefID": ref_id, "SAVoucherRefDetailID": detail_id,
+                })
             if not preview:
+                # THỨ TỰ theo chiều khóa ngoại: SAInvoice trước (SAVoucherDetail.
+                # SAInvoiceRefID trỏ tới nó), rồi SAVoucher -> SAVoucherDetail,
+                # cuối cùng SAInvoiceDetail (trỏ ngược về chứng từ + dòng).
+                if inv_header:
+                    ic = list(inv_header.keys())
+                    cur.execute("INSERT INTO SAInvoice ([%s]) VALUES (%s)" %
+                               ("],[".join(ic), ",".join(["?"] * len(ic))),
+                               [inv_header[c] for c in ic])
                 hc = list(header_cols.keys())
                 cur.execute("INSERT INTO SAVoucher ([%s]) VALUES (%s)" %
                            ("],[".join(hc), ",".join(["?"] * len(hc))),
@@ -14047,6 +14180,11 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 cur.execute("INSERT INTO SAVoucherDetail ([%s]) VALUES (%s)" %
                            ("],[".join(dc), ",".join(["?"] * len(dc))),
                            [detail_row[c] for c in dc])
+                if inv_detail:
+                    idc = list(inv_detail.keys())
+                    cur.execute("INSERT INTO SAInvoiceDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(idc), ",".join(["?"] * len(idc))),
+                               [inv_detail[c] for c in idc])
             them_ct += 1
             if ghi_de_ct:
                 go += 1
