@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.67"
+APP_BUILD = "2026-07-27.68"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12544,7 +12544,15 @@ _SA_VOUCHER_DEFAULT = {
     "IsInvoiceExported": 0, "AccountObjectID": None, "AccountObjectName": None,
     "AccountObjectAddress": None, "Payer": None, "JournalMemo": None,
     "SupplierID": None, "SupplierName": None, "EmployeeID": None,
-    "DocumentIncluded": None, "IsPaid": 0, "IsOutwardExported": None,
+    "DocumentIncluded": None, "IsPaid": 0,
+    # IsOutwardExported/DebtStatus tuy NULL được theo schema nhưng MISA THẬT
+    # (xác nhận qua lỗi thật): "System.InvalidCastException: Operator '='
+    # is not defined for type 'DBNull' and type 'EnumOutwardExportedStatus'"
+    # tại SetEnableAndDisableToolbar — crash ngay khi bấm chọn dòng chứng từ
+    # có giá trị NULL ở cột này (MISA so sánh trực tiếp với enum, không tự
+    # coi NULL là "chưa xuất"). Phải để 0 (chưa xuất kho) như chứng từ MISA
+    # thật luôn có, không được để NULL dù cột cho phép.
+    "IsOutwardExported": 0,
     "PaymentTermID": None, "DueDay": None, "DueDate": None,
     "CurrencyID": "VND", "ExchangeRate": 1,
     "TotalSaleAmountOC": 0, "TotalSaleAmount": 0, "TotalAmountOC": 0, "TotalAmount": 0,
@@ -12552,7 +12560,9 @@ _SA_VOUCHER_DEFAULT = {
     "TotalVATAmountOC": 0, "TotalVATAmount": 0,
     "TotalExportTaxAmountOC": 0, "TotalExportTaxAmount": 0,
     "IsPostedCashBookFinance": 0, "IsPostedCashBookManagement": 0, "CashBookPostedDate": None,
-    "DebtStatus": None, "RefOrder": 0, "CreatedDate": None, "CreatedBy": None,
+    # DebtStatus cùng lớp rủi ro với IsOutwardExported (enum-cast trên NULL)
+    # — để 0 cho an toàn thay vì NULL dù cột cho phép.
+    "DebtStatus": 0, "RefOrder": 0, "CreatedDate": None, "CreatedBy": None,
     "ModifiedDate": None, "ModifiedBy": None,
     "CustomField1": None, "CustomField2": None, "CustomField3": None,
     "CustomField4": None, "CustomField5": None, "CustomField6": None,
