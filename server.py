@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.59"
+APP_BUILD = "2026-07-27.60"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11781,6 +11781,72 @@ def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
         conn.close()
 
 
+def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
+    """Sửa lại ĐVT (UnitID) trên CÁC DÒNG CHỨNG TỪ ĐÃ GHI vào MISA
+    (PUVoucherDetail của Mua hàng Nhập kho/Không qua kho, PUServiceDetail
+    của Mua hàng Dịch vụ) do CHÍNH phần mềm tạo (CustomField10=_PM_MARK) và
+    CHƯA GHI SỔ (IsPostedFinance=0 AND IsPostedManagement=0) — khớp lại
+    UnitID của từng dòng với UnitID HIỆN TẠI (đã đúng) của InventoryItem
+    tương ứng.
+
+    LÝ DO CẦN BƯỚC RIÊNG NÀY: UnitID trên PUVoucherDetail/PUServiceDetail
+    là 1 bản SAO CHÉP tại thời điểm ghi chứng từ — KHÔNG tự động cập nhật
+    theo Danh mục (InventoryItem) sau đó. "Quét & sửa ĐVT hỏng"
+    (_misa_quet_sua_dvt_hang_hoa) chỉ sửa ĐÚNG InventoryItem.UnitID (Danh
+    mục), hoàn toàn KHÔNG đụng tới các dòng chứng từ ĐÃ GHI trước đó bằng
+    UnitID sai/mồ côi — nên dù Danh mục Vật tư đã hiện ĐÚNG ĐVT, các chứng
+    từ Mua hàng/TSCĐ ghi TRƯỚC ĐÓ vẫn hiện ĐVT sai/GUID thô mãi mãi (đã xác
+    nhận qua dữ liệu thật: Danh mục Vật tư hiện ĐVT đúng nhưng 1 số chứng từ
+    Mua hàng/TSCĐ vẫn hiện GUID thô ở cột ĐVT). CHỈ sửa chứng từ do CHÍNH
+    phần mềm tạo và CHƯA GHI SỔ — an toàn tuyệt đối, không đụng chứng từ của
+    MISA/người dùng tự tạo hay chứng từ đã ghi sổ (đúng nguyên tắc an toàn
+    chung của mọi hàm ghi MISA trong file này)."""
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        ket = []
+        rows_pv = cur.execute(
+            "SELECT pvd.RefDetailID, pv.RefNoManagement, ii.InventoryItemCode, ii.UnitID "
+            "FROM PUVoucherDetail pvd "
+            "JOIN PUVoucher pv ON pv.RefID = pvd.RefID "
+            "JOIN InventoryItem ii ON ii.InventoryItemID = pvd.InventoryItemID "
+            "WHERE ISNULL(pv.CustomField10,'') = ? "
+            "AND ISNULL(pv.IsPostedFinance,0)=0 AND ISNULL(pv.IsPostedManagement,0)=0 "
+            "AND (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID)",
+            _PM_MARK).fetchall()
+        for rid, rn, code, uid_moi in rows_pv:
+            ket.append({"so_ct": rn, "ma": code, "loai": "Mua hàng"})
+            if not preview:
+                cur.execute("UPDATE PUVoucherDetail SET UnitID=? WHERE RefDetailID=?", uid_moi, rid)
+        rows_ps = cur.execute(
+            "SELECT psd.RefDetailID, ps.RefNoManagement, ii.InventoryItemCode, ii.UnitID "
+            "FROM PUServiceDetail psd "
+            "JOIN PUService ps ON ps.RefID = psd.RefID "
+            "JOIN InventoryItem ii ON ii.InventoryItemID = psd.InventoryItemID "
+            "WHERE ISNULL(ps.CustomField10,'') = ? "
+            "AND ISNULL(ps.IsPostedFinance,0)=0 AND ISNULL(ps.IsPostedManagement,0)=0 "
+            "AND (psd.UnitID IS NULL OR psd.UnitID <> ii.UnitID)",
+            _PM_MARK).fetchall()
+        for rid, rn, code, uid_moi in rows_ps:
+            ket.append({"so_ct": rn, "ma": code, "loai": "Dịch vụ"})
+            if not preview:
+                cur.execute("UPDATE PUServiceDetail SET UnitID=? WHERE RefDetailID=?", uid_moi, rid)
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_sua": len(ket), "danh_sach": ket[:1000]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi sửa ĐVT chứng từ (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
 @app.post("/api/misa-sql/quet-sua-dvt/{cid}")
 async def misa_sql_quet_sua_dvt(cid: int, request: Request):
     """Quét & sửa ĐVT mồ côi/rác trên TOÀN BỘ Danh mục Vật tư hàng hóa đã có
@@ -11797,6 +11863,19 @@ async def misa_sql_quet_sua_dvt(cid: int, request: Request):
     if not rows:
         raise HTTPException(400, "Danh mục trống — không có mã để đối chiếu.")
     return _misa_quet_sua_dvt_hang_hoa(cid, database, rows, preview=preview)
+
+
+@app.post("/api/misa-sql/sua-dvt-chung-tu/{cid}")
+def misa_sql_sua_dvt_chung_tu(cid: int, preview: int = 1, database: str = ""):
+    """Sửa ĐVT (UnitID) trên CÁC DÒNG CHỨNG TỪ ĐÃ GHI (Mua hàng/Dịch vụ) do
+    CHÍNH phần mềm tạo và CHƯA GHI SỔ — xem _misa_sua_dvt_chung_tu_da_ghi.
+    Khác với /api/misa-sql/quet-sua-dvt (chỉ sửa Danh mục Vật tư hàng hóa,
+    không đụng chứng từ đã ghi). preview=1 -> chỉ xem trước, không sửa."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=bool(preview))
 
 
 @app.post("/api/misa-sql/import-hang-hoa/{cid}")
