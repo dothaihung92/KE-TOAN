@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.75"
+APP_BUILD = "2026-07-27.76"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12633,10 +12633,15 @@ _SA_INVOICE_DEFAULT = {
     "TotalDiscountAmountOC": 0, "TotalDiscountAmount": 0,
     "TotalVATAmountOC": 0, "TotalVATAmount": 0, "TotalAmountOC": 0, "TotalAmount": 0,
     "CreatedDate": None, "CreatedBy": None, "ModifiedDate": None, "ModifiedBy": None,
-    # InvTypeID cùng lớp rủi ro với IsOutwardExported (tên gợi ý 1 enum loại
-    # hóa đơn) — để 0 (mặc định) thay vì NULL để tránh crash tương tự khi mở
-    # chứng từ, dù cột cho phép NULL theo schema.
-    "InvTypeID": 0, "isBranchIssued": None,
+    # InvTypeID — xác nhận qua đối chiếu TRỰC TIẾP với chứng từ THẬT (MISA tự
+    # tạo khi tick "Lập kèm hóa đơn"): giá trị luôn là 1 (hóa đơn gốc), KHÔNG
+    # phải 0. Trước đây đoán "0 = chưa xác định" cho AN TOÀN (tránh crash kiểu
+    # IsOutwardExported) nhưng hóa ra đây chính là lý do MISA ẨN HẲN khối
+    # "Hóa đơn" (Số hóa đơn/Ngày hóa đơn/Khách hàng) dù mọi dữ liệu khác đều
+    # đúng — MISA coi InvTypeID=0 là hóa đơn CHƯA XÁC ĐỊNH LOẠI nên không đủ
+    # điều kiện hiển thị. isBranchIssued cũng lấy đúng giá trị thật (False,
+    # không phải NULL).
+    "InvTypeID": 1, "isBranchIssued": False,
     "CustomField1": None, "CustomField2": None, "CustomField3": None,
     "CustomField4": None, "CustomField5": None, "CustomField6": None,
     "CustomField7": None, "CustomField8": None, "CustomField9": None,
