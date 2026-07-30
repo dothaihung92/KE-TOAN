@@ -5273,7 +5273,8 @@ async function misaSuaDvtChungTuGhi(){
   try{
     const d=await api(`/api/misa-sql/sua-dvt-chung-tu/${current}?preview=0`,{method:'POST'});
     document.getElementById('misaModal').style.display='none';
-    toast(`✓ Đã sửa ĐVT cho ${d.so_sua} dòng chứng từ.`,'ok');
+    const dmTxt=(d.so_dvt_hang_sua>0)?` (đã sửa thêm ${d.so_dvt_hang_sua} mã trong Danh mục)`:'';
+    toast(`✓ Đã sửa ĐVT cho ${d.so_sua} dòng chứng từ${dmTxt}.`,'ok');
   }catch(e){toast('Lỗi sửa: '+e.message,'err')}
 }
 async function muaHangImportMisaGhi(loai,ghiDe){
@@ -5281,10 +5282,11 @@ async function muaHangImportMisaGhi(loai,ghiDe){
   try{
     const d=await api(`/api/misa-sql/import-mua-hang/${current}?loai=${loai}&preview=0&ghi_de=${ghiDe?1:0}`,{method:'POST'});
     const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de} chứng từ cũ)`:'';
-    // ĐVT trên chứng từ (nếu bị lệch/hỏng liên kết) giờ TỰ ĐỘNG được sửa lại
-    // ngay sau khi ghi — xem _misa_sua_dvt_chung_tu_da_ghi, không cần tự bấm
-    // nút "🔧 Sửa ĐVT chứng từ đã ghi" riêng nữa.
-    const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng)`:'';
+    // ĐVT (Danh mục lẫn chứng từ, nếu bị lệch/hỏng liên kết) giờ TỰ ĐỘNG
+    // được sửa lại ngay sau khi ghi — xem _misa_tu_dong_sua_dvt_sau_ghi,
+    // không cần tự bấm nút "🔧 Sửa ĐVT chứng từ đã ghi" riêng nữa.
+    const dmTxt=(d.so_dvt_hang_sua>0)?`, ${d.so_dvt_hang_sua} mã Danh mục`:'';
+    const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
     toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt}${dvtTxt} — CHƯA GHI SỔ.`,'ok');
     // TỰ KIỂM TRA: đối chiếu với đúng view + bộ lọc thật của màn hình MISA
     // "Mua hàng hóa, dịch vụ" — nếu có chứng từ bị lọc mất, hiện chẩn đoán

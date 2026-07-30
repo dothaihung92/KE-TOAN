@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.61"
+APP_BUILD = "2026-07-27.62"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11847,6 +11847,47 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
         conn.close()
 
 
+def _misa_tu_dong_sua_dvt_sau_ghi(cid, database):
+    """Tự động sửa TẬN GỐC ĐVT ngay sau khi ghi chứng từ Mua hàng/Dịch vụ vào
+    MISA — gọi LẦN LƯỢT 2 bước:
+    (1) _misa_quet_sua_dvt_hang_hoa cho CẢ 4 loại Danh mục (hh/nvl/tscd/ccdc)
+        đã lưu của phần mềm (đọc thẳng từ dữ liệu công ty, không cần frontend
+        gửi rows) — sửa InventoryItem.UnitID nếu đang mồ côi/rác NGAY TỪ
+        Danh mục.
+    (2) _misa_sua_dvt_chung_tu_da_ghi — khớp lại UnitID trên các dòng chứng
+        từ (PUVoucherDetail/PUServiceDetail) do phần mềm tạo, chưa ghi sổ,
+        theo Danh mục VỪA SỬA XONG ở bước (1).
+
+    BẮT BUỘC làm cả 2 bước theo ĐÚNG THỨ TỰ này: nếu chỉ làm bước (2) mà
+    InventoryItem.UnitID của CHÍNH mã hàng đó cũng đang mồ côi/rác (2 giá trị
+    THAM CHIẾU NHAU cùng sai — chứng từ chỉ COPY lại UnitID của Danh mục lúc
+    ghi), bước (2) sẽ thấy "khớp nhau" (cùng sai) nên tưởng KHÔNG CẦN sửa,
+    ĐVT vẫn hiện GUID thô như cũ (đã xác nhận qua dữ liệu thật: chứng từ mới
+    ghi vẫn hiện GUID dù đã có bước tự sửa chứng từ, vì Danh mục NVL/TSCĐ bản
+    thân nó cũng đang orphan chưa từng được quét/sửa).
+
+    Best-effort — không raise lỗi ra ngoài (không được làm hỏng kết quả ghi
+    chứng từ chính). Trả {"so_dvt_hang_sua", "so_dvt_chungtu_sua"}."""
+    so_dvt_hang_sua = 0
+    try:
+        data = _doc_du_lieu_cty(cid)
+        for loai in ("hh", "nvl", "tscd", "ccdc"):
+            dm_rows = (data.get("dm_" + loai) or {}).get("rows") or []
+            if not dm_rows:
+                continue
+            kq = _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=False)
+            so_dvt_hang_sua += kq.get("so_sua", 0)
+    except Exception:
+        pass
+    so_dvt_chungtu_sua = 0
+    try:
+        kq2 = _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=False)
+        so_dvt_chungtu_sua = kq2.get("so_sua", 0)
+    except Exception:
+        pass
+    return {"so_dvt_hang_sua": so_dvt_hang_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua}
+
+
 @app.post("/api/misa-sql/quet-sua-dvt/{cid}")
 async def misa_sql_quet_sua_dvt(cid: int, request: Request):
     """Quét & sửa ĐVT mồ côi/rác trên TOÀN BỘ Danh mục Vật tư hàng hóa đã có
@@ -11870,12 +11911,23 @@ def misa_sql_sua_dvt_chung_tu(cid: int, preview: int = 1, database: str = ""):
     """Sửa ĐVT (UnitID) trên CÁC DÒNG CHỨNG TỪ ĐÃ GHI (Mua hàng/Dịch vụ) do
     CHÍNH phần mềm tạo và CHƯA GHI SỔ — xem _misa_sua_dvt_chung_tu_da_ghi.
     Khác với /api/misa-sql/quet-sua-dvt (chỉ sửa Danh mục Vật tư hàng hóa,
-    không đụng chứng từ đã ghi). preview=1 -> chỉ xem trước, không sửa."""
+    không đụng chứng từ đã ghi). preview=1 -> chỉ xem trước (chỉ đối chiếu
+    chứng từ, xem trước bằng con số TỐI THIỂU cần sửa); preview=0 -> sửa
+    THẬT, chạy CẢ bước sửa Danh mục trước (_misa_tu_dong_sua_dvt_sau_ghi) —
+    nếu chỉ sửa chứng từ mà chính Danh mục cũng đang mồ côi/rác thì không đủ
+    (xem giải thích ở _misa_tu_dong_sua_dvt_sau_ghi), nên khi SỬA THẬT luôn
+    làm đủ cả 2 bước để chắc chắn hết GUID thô, không chỉ dựa vào con số xem
+    trước."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=bool(preview))
+    if not preview:
+        kq = _misa_tu_dong_sua_dvt_sau_ghi(cid, database)
+        return {"preview": False, "database": database,
+                "so_sua": kq.get("so_dvt_chungtu_sua", 0),
+                "so_dvt_hang_sua": kq.get("so_dvt_hang_sua", 0)}
+    return _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True)
 
 
 @app.post("/api/misa-sql/import-hang-hoa/{cid}")
@@ -13016,17 +13068,18 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         else:
             conn.commit()
         # TỰ SỬA NGAY ĐVT trên các dòng chứng từ vừa ghi (không bắt người
-        # dùng phải tự bấm nút "🔧 Sửa ĐVT chứng từ đã ghi" riêng nữa) — xem
-        # _misa_sua_dvt_chung_tu_da_ghi để biết vì sao cần bước riêng này
-        # (UnitID trên PUVoucherDetail là bản sao lúc ghi, không tự theo kịp
-        # Danh mục). Dùng KẾT NỐI RIÊNG (không phải conn/cur đang mở) vì
-        # transaction hiện tại đã commit xong — lỗi ở đây (nếu có) KHÔNG
-        # được làm hỏng kết quả ghi chứng từ vừa xong.
-        so_dvt_chungtu_sua = 0
+        # dùng phải tự bấm nút "🔧 Sửa ĐVT chứng từ đã ghi" riêng nữa) — sửa
+        # CẢ Danh mục (InventoryItem, nếu chính nó cũng đang mồ côi/rác) LẪN
+        # chứng từ vừa ghi, xem _misa_tu_dong_sua_dvt_sau_ghi để biết vì sao
+        # cần sửa CẢ 2 bước theo đúng thứ tự. Dùng KẾT NỐI RIÊNG (không phải
+        # conn/cur đang mở) vì transaction hiện tại đã commit xong — lỗi ở
+        # đây (nếu có) KHÔNG được làm hỏng kết quả ghi chứng từ vừa xong.
+        so_dvt_hang_sua = so_dvt_chungtu_sua = 0
         if not preview and them_ct:
             try:
-                _kq_sua_dvt = _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=False)
-                so_dvt_chungtu_sua = _kq_sua_dvt.get("so_sua", 0)
+                _kq_sua_dvt = _misa_tu_dong_sua_dvt_sau_ghi(cid, database)
+                so_dvt_hang_sua = _kq_sua_dvt.get("so_dvt_hang_sua", 0)
+                so_dvt_chungtu_sua = _kq_sua_dvt.get("so_dvt_chungtu_sua", 0)
             except Exception:
                 pass
         # TỰ KIỂM TRA: sau khi ghi thật, chạy lại đúng view MISA dùng cho màn
@@ -13049,7 +13102,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
                 "kho_moi": sorted(kho_moi),
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
-                "so_dvt_sua": so_dvt_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
+                "so_dvt_sua": so_dvt_sua, "so_dvt_hang_sua": so_dvt_hang_sua,
+                "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
@@ -13467,14 +13521,15 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             conn.rollback()
         else:
             conn.commit()
-        # TỰ SỬA NGAY ĐVT trên các dòng chứng từ vừa ghi — xem giải thích ở
-        # _misa_ghi_mua_hang (cùng cơ chế, không bắt người dùng phải tự bấm
-        # nút riêng nữa).
-        so_dvt_chungtu_sua = 0
+        # TỰ SỬA NGAY ĐVT (CẢ Danh mục lẫn chứng từ vừa ghi) — xem giải thích
+        # ở _misa_ghi_mua_hang / _misa_tu_dong_sua_dvt_sau_ghi (cùng cơ chế,
+        # không bắt người dùng phải tự bấm nút riêng nữa).
+        so_dvt_hang_sua = so_dvt_chungtu_sua = 0
         if not preview and them_ct:
             try:
-                _kq_sua_dvt = _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=False)
-                so_dvt_chungtu_sua = _kq_sua_dvt.get("so_sua", 0)
+                _kq_sua_dvt = _misa_tu_dong_sua_dvt_sau_ghi(cid, database)
+                so_dvt_hang_sua = _kq_sua_dvt.get("so_dvt_hang_sua", 0)
+                so_dvt_chungtu_sua = _kq_sua_dvt.get("so_dvt_chungtu_sua", 0)
             except Exception:
                 pass
         tu_kiem_tra = None
@@ -13491,7 +13546,8 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": 0, "thieu_kho": [],
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
-                "so_dvt_sua": so_dvt_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
+                "so_dvt_sua": so_dvt_sua, "so_dvt_hang_sua": so_dvt_hang_sua,
+                "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
