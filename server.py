@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.63"
+APP_BUILD = "2026-07-27.64"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11809,31 +11809,49 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
     xem điều kiện WHERE) — chứng từ MISA/người dùng tự nhập đúng từ đầu sẽ
     không bao giờ rơi vào điều kiện này nên không hề bị đụng tới; (3) chỉ
     tác động chứng từ CHƯA GHI SỔ (chưa vào sổ cái), vẫn có thể sửa/xóa tay
-    bình thường trong MISA nếu cần."""
+    bình thường trong MISA nếu cần.
+
+    CHẨN ĐOÁN: dù bỏ CustomField10, người dùng vẫn báo bấm nút ra "0 dòng
+    cần sửa" trong khi chứng từ thật vẫn hiện GUID — nghi vấn hàng đầu là
+    chứng từ đó ĐÃ GHI SỔ trong MISA (IsPostedFinance/IsPostedManagement=1)
+    nên bị loại khỏi điều kiện an toàn ở trên (KHÔNG phải lỗi logic đối
+    chiếu). Vì vậy hàm này giờ dò THÊM 1 lượt KHÔNG lọc trạng thái ghi sổ để
+    đếm riêng số dòng lệch ĐVT đã bị loại vì lý do "đã ghi sổ" — trả về
+    "so_da_ghi_so_khong_sua" để hiển thị rõ cho người dùng biết vì sao 0 dòng
+    (thay vì im lặng báo sạch)."""
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
         cur = conn.cursor()
         ket = []
-        rows_pv = cur.execute(
-            "SELECT pvd.RefDetailID, pv.RefNoManagement, ii.InventoryItemCode, ii.UnitID "
+        da_ghi_so = []   # lệch ĐVT nhưng bị loại vì ĐÃ GHI SỔ — chỉ để chẩn đoán
+        rows_pv_all = cur.execute(
+            "SELECT pvd.RefDetailID, pv.RefNoManagement, ii.InventoryItemCode, ii.UnitID, "
+            "ISNULL(pv.IsPostedFinance,0), ISNULL(pv.IsPostedManagement,0) "
             "FROM PUVoucherDetail pvd "
             "JOIN PUVoucher pv ON pv.RefID = pvd.RefID "
             "JOIN InventoryItem ii ON ii.InventoryItemID = pvd.InventoryItemID "
-            "WHERE ISNULL(pv.IsPostedFinance,0)=0 AND ISNULL(pv.IsPostedManagement,0)=0 "
-            "AND (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID)").fetchall()
-        for rid, rn, code, uid_moi in rows_pv:
+            "WHERE (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID)").fetchall()
+        for rid, rn, code, uid_moi, ptc, pql in rows_pv_all:
+            if ptc or pql:
+                if len(da_ghi_so) < 200:
+                    da_ghi_so.append({"so_ct": rn, "ma": code, "loai": "Mua hàng"})
+                continue
             ket.append({"so_ct": rn, "ma": code, "loai": "Mua hàng"})
             if not preview:
                 cur.execute("UPDATE PUVoucherDetail SET UnitID=? WHERE RefDetailID=?", uid_moi, rid)
-        rows_ps = cur.execute(
-            "SELECT psd.RefDetailID, ps.RefNoManagement, ii.InventoryItemCode, ii.UnitID "
+        rows_ps_all = cur.execute(
+            "SELECT psd.RefDetailID, ps.RefNoManagement, ii.InventoryItemCode, ii.UnitID, "
+            "ISNULL(ps.IsPostedFinance,0), ISNULL(ps.IsPostedManagement,0) "
             "FROM PUServiceDetail psd "
             "JOIN PUService ps ON ps.RefID = psd.RefID "
             "JOIN InventoryItem ii ON ii.InventoryItemID = psd.InventoryItemID "
-            "WHERE ISNULL(ps.IsPostedFinance,0)=0 AND ISNULL(ps.IsPostedManagement,0)=0 "
-            "AND (psd.UnitID IS NULL OR psd.UnitID <> ii.UnitID)").fetchall()
-        for rid, rn, code, uid_moi in rows_ps:
+            "WHERE (psd.UnitID IS NULL OR psd.UnitID <> ii.UnitID)").fetchall()
+        for rid, rn, code, uid_moi, ptc, pql in rows_ps_all:
+            if ptc or pql:
+                if len(da_ghi_so) < 200:
+                    da_ghi_so.append({"so_ct": rn, "ma": code, "loai": "Dịch vụ"})
+                continue
             ket.append({"so_ct": rn, "ma": code, "loai": "Dịch vụ"})
             if not preview:
                 cur.execute("UPDATE PUServiceDetail SET UnitID=? WHERE RefDetailID=?", uid_moi, rid)
@@ -11841,7 +11859,8 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
             conn.rollback()
         else:
             conn.commit()
-        return {"preview": preview, "database": database, "so_sua": len(ket), "danh_sach": ket[:1000]}
+        return {"preview": preview, "database": database, "so_sua": len(ket), "danh_sach": ket[:1000],
+                "so_da_ghi_so_khong_sua": len(da_ghi_so), "da_ghi_so_mau": da_ghi_so[:50]}
     except HTTPException:
         conn.rollback()
         raise
@@ -11885,12 +11904,17 @@ def _misa_tu_dong_sua_dvt_sau_ghi(cid, database):
     except Exception:
         pass
     so_dvt_chungtu_sua = 0
+    so_da_ghi_so_khong_sua = 0
+    da_ghi_so_mau = []
     try:
         kq2 = _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=False)
         so_dvt_chungtu_sua = kq2.get("so_sua", 0)
+        so_da_ghi_so_khong_sua = kq2.get("so_da_ghi_so_khong_sua", 0)
+        da_ghi_so_mau = kq2.get("da_ghi_so_mau", [])
     except Exception:
         pass
-    return {"so_dvt_hang_sua": so_dvt_hang_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua}
+    return {"so_dvt_hang_sua": so_dvt_hang_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
+            "so_da_ghi_so_khong_sua": so_da_ghi_so_khong_sua, "da_ghi_so_mau": da_ghi_so_mau}
 
 
 @app.post("/api/misa-sql/quet-sua-dvt/{cid}")
@@ -11931,7 +11955,9 @@ def misa_sql_sua_dvt_chung_tu(cid: int, preview: int = 1, database: str = ""):
         kq = _misa_tu_dong_sua_dvt_sau_ghi(cid, database)
         return {"preview": False, "database": database,
                 "so_sua": kq.get("so_dvt_chungtu_sua", 0),
-                "so_dvt_hang_sua": kq.get("so_dvt_hang_sua", 0)}
+                "so_dvt_hang_sua": kq.get("so_dvt_hang_sua", 0),
+                "so_da_ghi_so_khong_sua": kq.get("so_da_ghi_so_khong_sua", 0),
+                "da_ghi_so_mau": kq.get("da_ghi_so_mau", [])}
     return _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True)
 
 

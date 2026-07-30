@@ -5256,11 +5256,20 @@ async function misaSuaDvtChungTu(){
         ⚠ Sắp SỬA dữ liệu trong database MISA: <b>${misaEsc(pv.database||'?')}</b><br>
         Chỉ sửa CHỨNG TỪ CHƯA GHI SỔ do chính phần mềm tạo — không đụng chứng từ đã ghi sổ hoặc do MISA/người dùng tự tạo.</div>
       <div style="margin-bottom:6px">Sẽ sửa: <b style="color:#1a7a7a">${pv.so_sua}</b> dòng chứng từ</div>
-      ${pv.so_sua===0?`<div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:8px 12px;font-size:12px;color:#264b8a">
+      ${pv.so_da_ghi_so_khong_sua>0?`<div style="background:#fff0f0;border:1px solid #e8b0b0;border-radius:6px;padding:8px 12px;font-size:12px;color:#a03a3a;margin-bottom:8px">
+        ⚠ Phát hiện <b>${pv.so_da_ghi_so_khong_sua}</b> dòng chứng từ VẪN đang bị lệch ĐVT nhưng KHÔNG tự sửa được vì chứng từ đó <b>ĐÃ GHI SỔ</b> trong MISA
+        (phần mềm chỉ sửa chứng từ chưa ghi sổ, để không đụng vào dữ liệu đã vào sổ cái).
+        Muốn sửa các dòng này: vào MISA bấm <b>"Bỏ ghi sổ"</b> chứng từ đó rồi bấm lại nút này, sau đó ghi sổ lại nếu cần.
+        ${(pv.da_ghi_so_mau||[]).length?`<div style="margin-top:6px;max-height:20vh;overflow:auto"><table style="border-collapse:collapse;font-size:11.5px;width:100%">
+          <tr style="background:#f7e3e3"><th style="border:1px solid #eed;padding:2px 6px">Số CT</th><th style="border:1px solid #eed;padding:2px 6px">Mã hàng</th><th style="border:1px solid #eed;padding:2px 6px">Loại</th></tr>
+          ${pv.da_ghi_so_mau.slice(0,200).map(x=>`<tr><td style="border:1px solid #eed;padding:2px 6px">${misaEsc(x.so_ct||'')}</td><td style="border:1px solid #eed;padding:2px 6px">${misaEsc(x.ma||'')}</td><td style="border:1px solid #eed;padding:2px 6px">${misaEsc(x.loai||'')}</td></tr>`).join('')}
+          </table></div>`:''}
+        </div>`:''}
+      ${pv.so_sua===0&&!pv.so_da_ghi_so_khong_sua?`<div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:8px 12px;font-size:12px;color:#264b8a">
         Không có dòng chứng từ nào cần sửa (ĐVT đang khớp đúng với Danh mục, hoặc chưa có chứng từ nào do phần mềm tạo).</div>`
-      :`<div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+      :(pv.so_sua>0?`<div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Mã hàng</th><th style="border:1px solid #eee;padding:2px 6px">Loại</th></tr>
-        ${ds}</table></div>`}
+        ${ds}</table></div>`:'')}
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_sua>0?`<button class="btn sm" style="background:#a03a3a" onclick="misaSuaDvtChungTuGhi()">🔧 Sửa ${pv.so_sua} dòng</button>`:''}
@@ -5274,7 +5283,8 @@ async function misaSuaDvtChungTuGhi(){
     const d=await api(`/api/misa-sql/sua-dvt-chung-tu/${current}?preview=0`,{method:'POST'});
     document.getElementById('misaModal').style.display='none';
     const dmTxt=(d.so_dvt_hang_sua>0)?` (đã sửa thêm ${d.so_dvt_hang_sua} mã trong Danh mục)`:'';
-    toast(`✓ Đã sửa ĐVT cho ${d.so_sua} dòng chứng từ${dmTxt}.`,'ok');
+    const ghiSoTxt=(d.so_da_ghi_so_khong_sua>0)?` — CÒN ${d.so_da_ghi_so_khong_sua} dòng KHÔNG sửa được vì đã ghi sổ (bỏ ghi sổ trong MISA rồi bấm lại nếu muốn sửa).`:'';
+    toast(`✓ Đã sửa ĐVT cho ${d.so_sua} dòng chứng từ${dmTxt}.${ghiSoTxt}`,'ok');
   }catch(e){toast('Lỗi sửa: '+e.message,'err')}
 }
 async function muaHangImportMisaGhi(loai,ghiDe){
