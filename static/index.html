@@ -4457,6 +4457,10 @@ function moBangKe(loai){
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🧾 Chứng từ:</span>
         <button class="btn sm" onclick="nlBanHang(this)" style="background:#1f6b4a" title="Kết xuất form MISA Chứng từ bán hàng (TK Có 5111, Nợ 131/1111 theo 5tr)">🛒 Bán Hàng</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
+        <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, CHƯA ghi sổ) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
       </div>`:''}
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
@@ -5369,6 +5373,73 @@ async function muaHangImportMisaGhi(loai,ghiDe){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+// Ghi chứng từ BÁN HÀNG (Bảng kê Đầu ra) thẳng vào MISA (SAVoucher) — mỗi
+// dòng Bảng kê = 1 hóa đơn = 1 chứng từ (khác Mua hàng: không tách nhiều
+// dòng theo mã hàng), dùng mã dùng chung "BH" vì Bảng kê Đầu ra không có
+// cột mã hàng riêng từng dòng.
+async function banHangImportMisa(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang kiểm tra (xem trước)...','');
+  try{
+    const pv=await api(`/api/misa-sql/import-ban-hang/${current}?preview=1`,{method:'POST'});
+    const khongDoLoai=(pv.danh_sach||[]).some(x=>(x.trang_thai||'').includes('không dò được loại chứng từ'));
+    const ds=(pv.danh_sach||[]).slice(0,300).map(x=>{
+      const trangThai=x.trang_thai||'';
+      const boqua=trangThai.includes('bỏ qua')||trangThai.includes('đã có')||trangThai.includes('đã ghi sổ');
+      const ngayloi=!!x.ngay_loi;
+      const tien0=!!x.tien_0;
+      return `<tr style="${ngayloi?'background:#fde8e8':(boqua?'background:#fff4e6':'')}">
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_hd||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.kh||x.kh_mst||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right;${tien0?'color:#b91c1c;font-weight:700':''}" title="${tien0?'Tổng tiền = 0 -> Doanh số/Thuế GTGT trong Bảng kê Đầu ra có thể đang trống cho hóa đơn này':''}">${x.tong_tien!=null?Number(x.tong_tien).toLocaleString('vi-VN'):''}${tien0?' ⚠':''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;${ngayloi?'color:#b91c1c;font-weight:700':''}" title="${ngayloi?'Không đọc được ngày gốc \''+misaEsc(x.ngay_goc||'')+'\' -> rơi về ngày hôm nay':''}">${misaEsc(x.ngay_ct||'')}${ngayloi?' ⚠':''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;font-size:11px;color:#666">${misaEsc(x.loai_ct_misa||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;color:${boqua?'#8a5300':(trangThai.includes('sẽ thêm')?'#1a7a7a':'#999')}">${misaEsc(trangThai)}</td></tr>`;
+    }).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+        ⚠ RỦI RO CAO: đây là chứng từ <b>Bán hàng</b> — Nợ/Có, thuế GTGT thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b>
+        ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng chứng từ trong MISA kiểm tra rồi tự bấm "Ghi sổ".
+        Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
+      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Bán hàng trong bảng)</span>`:''}</div>
+      ${pv.so_bo_qua_kh>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ Bỏ qua <b>${pv.so_bo_qua_kh}</b> hóa đơn do Khách hàng chưa có trong MISA — hãy import Khách hàng trước, rồi chạy lại.</div>`:''}
+      ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (chưa ghi sổ) trong MISA — bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ đã ghi sổ).</div>`:''}
+      ${pv.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Có <b>${pv.so_ngay_loi}</b> hóa đơn KHÔNG đọc được ngày từ dữ liệu gốc (cột tô đỏ ở dưới) → bị ghi tạm bằng NGÀY HÔM NAY. Nếu bộ lọc "Kỳ" trên MISA không bao gồm hôm nay, chứng từ sẽ KHÔNG hiện dù dữ liệu đúng.</div>`:''}
+      ${pv.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Có <b>${pv.so_tien_0}</b> hóa đơn TỔNG TIỀN = 0 (cột tô đỏ ở dưới) → kiểm tra lại "Doanh số bán chưa thuế"/"Thuế GTGT" trong Bảng kê Đầu ra trước khi ghi/ghi đè.</div>`:''}
+      ${(pv.tk_thay&&pv.tk_thay.length)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ Tài khoản KHÔNG có trong danh mục TK MISA, đã tự rút về TK cha: <b>${pv.tk_thay.map(misaEsc).join(', ')}</b>.</div>`:''}
+      ${pv.so_bo_qua_tk>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
+        ⚠ Bỏ qua <b>${pv.so_bo_qua_tk}</b> chứng từ vì TK Nợ/Có (131/1111/5111) không có trong danh mục tài khoản MISA.</div>`:''}
+      ${khongDoLoai?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#a03a3a;margin-bottom:8px">
+        ⚠ Không dò được loại chứng từ MISA phù hợp cho Bán hàng — MISA chưa có tên loại chứng từ khớp từ khóa mong đợi.
+        <button class="btn ghost sm" style="margin-left:6px" onclick="misaXemLoaiChungTu('${misaEsc(pv.database||'').replace(/'/g,"\\'")}','SAVoucher')">🔎 Xem danh sách loại chứng từ MISA</button></div>`:''}
+      <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Số HĐ</th><th style="border:1px solid #eee;padding:2px 6px">Khách hàng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
+        ${ds}</table></div>
+      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="banHangImportMisaGhi(true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
+        ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisaGhi(false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function banHangImportMisaGhi(ghiDe){
+  toast('Đang ghi vào MISA...','');
+  try{
+    const d=await api(`/api/misa-sql/import-ban-hang/${current}?preview=0&ghi_de=${ghiDe?1:0}`,{method:'POST'});
+    const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de} chứng từ cũ)`:'';
+    const dmTxt=(d.so_dvt_hang_sua>0)?`, ${d.so_dvt_hang_sua} mã Danh mục`:'';
+    const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ Bán hàng vào MISA${goTxt}${dvtTxt} — CHƯA GHI SỔ.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 // Liệt kê loại chứng từ (SYSRefType) của 1 bảng MISA — CHỈ ĐỌC. Dùng khi

@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.66"
+APP_BUILD = "2026-07-27.67"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12531,6 +12531,71 @@ _PU_SERVICE_DET_DEFAULT = {
     "DeductionsTaxAmountOC": 0, "DeductionsTaxAmount": 0,
     "VATRate406": None, "VATRateOther": None,
 }
+# "Bán hàng" (Bảng kê Đầu ra) — bảng RIÊNG SAVoucher/SAVoucherDetail (xác nhận
+# qua cấu trúc CSDL thật, xuất bằng '📄 Xuất cấu trúc' lọc 'SA'). KHÁC PUVoucher:
+# thông tin hóa đơn (InvNo/InvDate/InvSeries) nằm THẲNG trên SAVoucher (không
+# cần bảng SAInvoice riêng) — và bảng này KHÔNG có cột "InvTemplateNo" (không
+# lưu được Mẫu số HĐ riêng, chỉ đưa vào Diễn giải để tham khảo). Mẫu đầy đủ cột
+# (trừ EditVersion rowversion) như bài học FK-default ở PUVoucher.
+_SA_VOUCHER_DEFAULT = {
+    "RefID": None, "BranchID": None, "DisplayOnBook": 1, "RefType": None,
+    "RefDate": None, "PostedDate": None, "RefNoFinance": None, "RefNoManagement": None,
+    "IsPostedFinance": 0, "IsPostedManagement": 0, "IncludeInvoice": 0,
+    "IsInvoiceExported": 0, "AccountObjectID": None, "AccountObjectName": None,
+    "AccountObjectAddress": None, "Payer": None, "JournalMemo": None,
+    "SupplierID": None, "SupplierName": None, "EmployeeID": None,
+    "DocumentIncluded": None, "IsPaid": 0, "IsOutwardExported": None,
+    "PaymentTermID": None, "DueDay": None, "DueDate": None,
+    "CurrencyID": "VND", "ExchangeRate": 1,
+    "TotalSaleAmountOC": 0, "TotalSaleAmount": 0, "TotalAmountOC": 0, "TotalAmount": 0,
+    "TotalDiscountAmountOC": 0, "TotalDiscountAmount": 0,
+    "TotalVATAmountOC": 0, "TotalVATAmount": 0,
+    "TotalExportTaxAmountOC": 0, "TotalExportTaxAmount": 0,
+    "IsPostedCashBookFinance": 0, "IsPostedCashBookManagement": 0, "CashBookPostedDate": None,
+    "DebtStatus": None, "RefOrder": 0, "CreatedDate": None, "CreatedBy": None,
+    "ModifiedDate": None, "ModifiedBy": None,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None, "BankAccountID": None, "BankName": None,
+    "CABAAmountOC": 0, "CABAAmount": 0, "InvNo": None, "InvDate": None, "InvSeries": None,
+    "IsSaleWithOutward": 0, "AccountObjectTaxCode": None, "IsInvoiceExportedLastYear": 0,
+    "PUVoucherRefID": None, "ShippingAddress": None, "OtherTerm": None,
+    "ExportNontariffZones": 0, "RefIDMshop": None, "RefNoMshop": None,
+    "IsReductionInvoice": 0, "TaxReductionType": 0, "IsInvoiceCal": 0,
+}
+_SA_VOUCHER_DET_DEFAULT = {
+    "RefDetailID": None, "RefID": None, "InventoryItemID": None, "Description": None,
+    "DebitAccount": None, "CreditAccount": None, "UnitID": None,
+    "Quantity": 0, "UnitPrice": 0, "UnitPriceAfterTax": 0,
+    "AmountOC": 0, "Amount": 0, "DiscountRate": 0, "DiscountAmountOC": 0,
+    "DiscountAmount": 0, "DiscountAccount": None,
+    "VATRate": None, "VATAmountOC": 0, "VATAmount": 0, "VATAccount": None,
+    "FOBAmount": 0, "ExportTaxRate": 0, "ExportTaxAmount": 0, "ExportTaxAccount": None,
+    "OrderID": None, "SAOrderRefDetailID": None, "LotNo": None, "ExpiryDate": None,
+    "ContractID": None, "ProjectWorkID": None, "ExpenseItemID": None,
+    "OrganizationUnitID": None, "ListItemID": None, "IsPromotion": 0,
+    "MainUnitID": None, "MainUnitPrice": 0, "MainConvertRate": 1, "MainQuantity": 0,
+    "ExchangeRateOperator": "*", "SortOrder": 0,
+    "CustomField1": None, "CustomField2": None, "CustomField3": None,
+    "CustomField4": None, "CustomField5": None, "CustomField6": None,
+    "CustomField7": None, "CustomField8": None, "CustomField9": None,
+    "CustomField10": None, "TACareerGroupID": None, "BudgetItemID": None,
+    "SAInvoiceRefID": None, "ContractDetailID": None, "SAQuoteRefDetailID": None,
+    "JobID": None, "StockID": None, "VATDescription": None,
+    "UnResonableCost": 0, "NotInVATDeclaration": 0, "PUVoucherRefID": None,
+    "GuarantyPeriod": None, "OutwardRefID": None,
+    "AccountObjectID": None, "AccountObjectName": None, "AccountObjectAddress": None,
+    "INTransferRefID": None, "INTransferRefDetailID": None,
+    "PanelLengthQuantity": 0, "PanelWidthQuantity": 0, "PanelHeightQuantity": 0,
+    "PanelRadiusQuantity": 0, "PanelQuantity": 0,
+    "PUVoucherRefDetailID": None, "AmountAfterTax": None,
+    "QuantityBilled": None, "MainQuantityBilled": None, "LOANAgreementID": None,
+    "DeductionsTaxAmount": 0, "DeductionsTaxAmountOC": 0,
+    "VATRate406": None, "VATRateOther": None,
+    "SpecificType": None, "VINNumber": None, "SenderName": None,
+    "SenderAddress": None, "SenderTaxCode": None, "SenderIDNumber": None,
+}
 
 def _misa_tu_kiem_tra_muahang(cur, ref_ids, branch_id, bang_chinh, ket):
     """TỰ KIỂM TRA sau khi ghi Mua hàng: chạy lại đúng view + BỘ LỌC THẬT của
@@ -13687,6 +13752,351 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
     finally:
         conn.close()
+
+
+def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
+    """Ghi chứng từ BÁN HÀNG thẳng vào MISA (bảng RIÊNG SAVoucher/
+    SAVoucherDetail — xem _SA_VOUCHER_DEFAULT). Dữ liệu lấy từ Bảng kê Đầu ra
+    ĐÃ LƯU (nhap_lieu 'out') — MỖI DÒNG trong bảng kê = 1 hóa đơn = 1 chứng từ
+    (khác Mua hàng: bảng kê Đầu ra không có nhiều dòng chi tiết theo mã hàng
+    cho 1 hóa đơn, chỉ có 1 dòng doanh thu/hóa đơn), dùng ĐÚNG công thức đã
+    kiểm chứng ở _gen_ban_hang (TK Có doanh thu=5111 cố định; TK Nợ=131 nếu
+    tổng hóa đơn >= 5tr, ngược lại 1111 — tiền mặt). Vì bảng kê không có mã
+    hàng riêng từng dòng, dùng 1 mã DÙNG CHUNG "BH" (tự tạo nếu chưa có,
+    giống "MHDV" bên Mua hàng dịch vụ). CHƯA GHI SỔ, không đụng chứng từ đã
+    ghi sổ của người dùng; ghi_de=True chỉ gỡ chứng từ do chính phần mềm tạo
+    (CustomField10=_PM_MARK) trùng số rồi ghi lại."""
+    import uuid as _uuid
+    dl = nhap_lieu_get(cid, "out")
+    header, rows = dl.get("header") or [], dl.get("rows") or []
+    if not rows:
+        raise HTTPException(400, "Chưa có Bảng kê đầu ra đã lưu — Import & Lưu trước.")
+    col = _bh_cols(header)
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        branch_id = _misa_branch_id(cur)
+        kh = {}   # mst/mã (lower) -> (AccountObjectID, tên trong MISA)
+        for aid, taxcode, code, name in cur.execute(
+                "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
+                "FROM AccountObject").fetchall():
+            nm = str(name or "")
+            if taxcode:
+                kh[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm)
+            if code:
+                kh[str(code).strip().lower()] = (aid, nm)
+        hang = {}
+        for iid, code, uid, ten_h in cur.execute(
+                "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
+                "FROM InventoryItem").fetchall():
+            if code:
+                hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        # Mã hàng "BH" (mã CHUNG dùng cho mọi dòng doanh thu — Bảng kê Đầu ra
+        # không tách mã hàng từng dòng) PHẢI có sẵn trong Danh mục Vật tư hàng
+        # hóa của MISA thì mới ghi được (SAVoucherDetail.InventoryItemID
+        # NOTNULL) — tự tạo NGAY nếu chưa có, giống bài học "MHDV" bên Mua
+        # hàng dịch vụ (trước đây quên tự tạo khiến 100% dòng bị bỏ qua).
+        if "bh" not in hang:
+            bh_id = str(_uuid.uuid4())
+            if not preview:
+                try:
+                    cur.execute(
+                        "INSERT INTO InventoryItem (InventoryItemID, InventoryItemCode, "
+                        "InventoryItemName, InventoryItemType, UnitID, InventoryAccount, "
+                        "COGSAccount, SaleAccount, TaxRate, MinimumStock, PurchaseDiscountRate, "
+                        "UnitPrice, SalePrice1, SalePrice2, SalePrice3, FixedSalePrice, "
+                        "FixedUnitPrice, IsUnitPriceAfterTax, IsSystem, Inactive, IsPromotion, "
+                        "VAT43Type, CreatedDate) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        bh_id, "BH", "Bán Hàng", 1, None, None, None, "5111", None,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "Chưa xác định",
+                        datetime.datetime.now())
+                except Exception:
+                    row_bh = cur.execute(
+                        "SELECT TOP 1 InventoryItemID FROM InventoryItem WHERE InventoryItemCode=?",
+                        "BH").fetchone()
+                    bh_id = row_bh[0] if row_bh else bh_id
+            hang["bh"] = (bh_id, None, "Bán Hàng")
+        tk_set = set()
+        try:
+            for (an,) in cur.execute("SELECT AccountNumber FROM Account").fetchall():
+                if an:
+                    tk_set.add(str(an).strip())
+        except Exception:
+            pass
+
+        def tra_tk(tk):
+            t = str(tk or "").strip()
+            if not t or not tk_set:
+                return t or None
+            return _misa_tk_fallback(t, tk_set) or t
+
+        reftype_ten = dict(cur.execute(
+            "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='SAVoucher'").fetchall())
+        posted_refno = set()
+        unposted_docs = {}
+        for refid, rn, rt, pf, pm, mark in cur.execute(
+                "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
+                "ISNULL(IsPostedManagement,0), ISNULL(CustomField10,'') FROM SAVoucher").fetchall():
+            if not rn:
+                continue
+            k = str(rn).strip().lower()
+            la_cua_minh = mark == _PM_MARK
+            if (pf or pm) and not la_cua_minh:
+                posted_refno.add(k)
+            else:
+                d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
+                d["refids"].append(refid)
+        # "học" quy ước (RefType/DisplayOnBook/chi nhánh/người tạo/RefOrder) từ
+        # chứng từ SAVoucher THẬT đang có — cùng lý do/cơ chế như Mua hàng
+        # (_misa_ghi_mua_hang): tránh đoán RefType/DisplayOnBook sai khiến
+        # chứng từ ghi xong bị MISA ẩn khỏi màn hình.
+        tu_khoa_loai = ["bán"]
+        loai_ct_dang_co = []
+        mau_that = []
+        hoc = None
+        hoc_dob = None
+        hoc_branch = None
+        hoc_branch_ten = None
+        hoc_nguoi_tao = None
+        max_reforder = 0
+        try:
+            _dem_loai, _dem_dob, _dem_branch, _dem_nguoi = {}, {}, {}, {}
+            for rt, rn, dob, inc, mark, rnm, pf, pm, br, brn, cb, ro in cur.execute(
+                    "SELECT sv.RefType, rt.RefTypeName, sv.DisplayOnBook, sv.IncludeInvoice, "
+                    "ISNULL(sv.CustomField10,''), sv.RefNoManagement, "
+                    "ISNULL(sv.IsPostedFinance,0), ISNULL(sv.IsPostedManagement,0), "
+                    "sv.BranchID, ou.OrganizationUnitName, sv.CreatedBy, ISNULL(sv.RefOrder,0) "
+                    "FROM SAVoucher sv JOIN SYSRefType rt ON rt.RefType=sv.RefType "
+                    "LEFT JOIN OrganizationUnit ou ON ou.OrganizationUnitID=sv.BranchID").fetchall():
+                max_reforder = max(max_reforder, ro or 0)
+                if mark == _PM_MARK:
+                    continue
+                key = (int(rt), rn)
+                _dem_loai[key] = _dem_loai.get(key, 0) + 1
+                if dob is not None:
+                    _dem_dob[dob] = _dem_dob.get(dob, 0) + 1
+                if br is not None:
+                    _dem_branch[br] = _dem_branch.get(br, [0, brn])
+                    _dem_branch[br][0] += 1
+                if cb:
+                    _dem_nguoi[cb] = _dem_nguoi.get(cb, 0) + 1
+                if len(mau_that) < 5:
+                    mau_that.append({"so_ct": rnm, "loai": rn, "display_on_book": dob,
+                                     "include_invoice": inc, "da_ghi_so": bool(pf or pm),
+                                     "chi_nhanh": brn})
+            for (rt, rn), c in sorted(_dem_loai.items(), key=lambda kv: -kv[1]):
+                loai_ct_dang_co.append({"ten": rn, "so": c})
+                n = (rn or "").lower()
+                if hoc is None and all(k in n for k in tu_khoa_loai):
+                    hoc = {"reftype": rt, "refname": rn}
+            if _dem_dob:
+                hoc_dob = max(_dem_dob.items(), key=lambda kv: kv[1])[0]
+            if _dem_branch:
+                hoc_branch, (_, hoc_branch_ten) = max(
+                    _dem_branch.items(), key=lambda kv: kv[1][0])
+            if _dem_nguoi:
+                hoc_nguoi_tao = max(_dem_nguoi.items(), key=lambda kv: kv[1])[0]
+        except Exception:
+            pass
+        if hoc_branch is not None:
+            branch_id = hoc_branch
+
+        # tổng theo từng hóa đơn (ký hiệu + số HĐ) để áp ngưỡng 5tr — ĐÚNG
+        # công thức đã dùng ở _gen_ban_hang
+        tong = {}
+        for r in rows:
+            key = f"{gv(r, col['kyhieu'])}|{gv(r, col['sohd'])}"
+            t = (_to_num(gv(r, col["ds"])) or 0) + (_to_num(gv(r, col["thue"])) or 0)
+            tong[key] = tong.get(key, 0) + t
+
+        now = datetime.datetime.now()
+        iid_bh, uid_bh, ten_bh = hang["bh"]
+        seq_thang = {}
+        ket = []
+        them_ct = trung = bo_kh = go = so_ngay_loi = so_tien_0 = bo_tk = 0
+        tk_thay = set()
+        for r in rows:
+            sohd = str(gv(r, col["sohd"]) or "").strip()
+            if not sohd:
+                continue
+            ds = round(_to_num(gv(r, col["ds"])) or 0)
+            thue = round(_to_num(gv(r, col["thue"])) or 0)
+            ngay_str = str(gv(r, col["ngay"]) or "").strip()
+            mathang = str(gv(r, col["mathang"]) or "").strip()
+            nguoimua = str(gv(r, col["nguoimua"]) or "").strip()
+            mst = _dinh_dang_mst(gv(r, col["mst"]))
+            kyhieu = str(gv(r, col["kyhieu"]) or "").strip()
+            maus = str(gv(r, col["maus"]) or "").strip() if col["maus"] >= 0 else ""
+            mst_k = mst.lower()
+            if mst_k not in kh:
+                bo_kh += 1
+                ket.append({"so_hd": sohd, "kh_mst": mst,
+                            "trang_thai": "bỏ qua — Khách hàng (MST %s) chưa có trong MISA" % mst})
+                continue
+            acc_obj_id, ten_kh_misa = kh[mst_k]
+            ngay_dt = None
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    ngay_dt = datetime.datetime.strptime(ngay_str, fmt)
+                    break
+                except Exception:
+                    pass
+            ngay_loi = ngay_dt is None
+            ngay_dt = ngay_dt or now
+            p = ngay_str.replace("-", "/").split("/")
+            thang = nam = ""
+            if len(p) == 3:
+                thang = str(int(p[1])) if p[1].isdigit() else p[1]
+                nam = p[2]
+            mk = (thang, nam)
+            seq_thang[mk] = seq_thang.get(mk, 0) + 1
+            doc = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
+            k_doc = doc.strip().lower()
+            if k_doc in posted_refno:
+                trung += 1
+                ket.append({"so_ct": doc, "so_hd": sohd, "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                continue
+            if k_doc in unposted_docs and not ghi_de:
+                trung += 1
+                ket.append({"so_ct": doc, "so_hd": sohd,
+                            "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
+                            "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                continue
+            ghi_de_ct = k_doc in unposted_docs
+            if ghi_de_ct and not preview:
+                for rid in unposted_docs[k_doc]["refids"]:
+                    cur.execute("DELETE FROM SAVoucherDetail WHERE RefID=?", rid)
+                    cur.execute("DELETE FROM SAVoucher WHERE RefID=?", rid)
+            tong_hd = tong.get(f"{kyhieu}|{sohd}", 0)
+            tk_no = 131 if abs(tong_hd) >= NGUONG_5TR else 1111
+            tk_no_dc = tra_tk(str(tk_no))
+            tk_co_dc = tra_tk("5111")
+            if tk_set:
+                tk_loi = {t for t in (tk_no_dc, tk_co_dc) if t and t not in tk_set}
+                if tk_loi:
+                    bo_tk += 1
+                    ket.append({"so_ct": doc, "so_hd": sohd,
+                                "trang_thai": "bỏ qua — TK %s không có trong danh mục "
+                                              "tài khoản MISA" % ", ".join(sorted(tk_loi))})
+                    continue
+            if hoc:
+                ref_type, ref_type_ten = hoc["reftype"], hoc["refname"]
+            else:
+                ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa_loai, str(tk_no),
+                                                          master_table="SAVoucher")
+            if not ref_type:
+                ket.append({"so_ct": doc, "so_hd": sohd,
+                            "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
+                continue
+            rate = _chuan_thue_suat((thue / ds * 100) if ds else 0)
+            ref_id = str(_uuid.uuid4())
+            mo_ta = mathang or ("Bán hàng - %s" % ten_kh_misa)
+            detail_row = dict(_SA_VOUCHER_DET_DEFAULT, **{
+                "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid_bh,
+                "Description": mo_ta[:500], "DebitAccount": tk_no_dc, "CreditAccount": tk_co_dc,
+                "UnitID": uid_bh, "Quantity": 1, "UnitPrice": ds,
+                "AmountOC": ds, "Amount": ds,
+                "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue, "VATAccount": "33311",
+                "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
+                "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
+                "SortOrder": 1,
+            })
+            dien_giai = (("Bán hàng - %s - %s %s%s" %
+                         (ten_kh_misa, sohd, ngay_dt.strftime("%d/%m/%Y"),
+                          (" (mẫu %s)" % maus) if maus else "")).strip())[:500]
+            dob = hoc_dob if hoc_dob in (0, 2) else 0
+            header_cols = dict(_SA_VOUCHER_DEFAULT, **{
+                "RefID": ref_id, "BranchID": branch_id, "DisplayOnBook": dob,
+                "RefType": ref_type, "RefDate": ngay_dt, "PostedDate": ngay_dt,
+                "RefNoFinance": doc, "RefNoManagement": doc,
+                "IncludeInvoice": 1, "IsInvoiceExported": 1,
+                "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
+                "AccountObjectTaxCode": mst[:50] or None,
+                "JournalMemo": dien_giai,
+                "TotalSaleAmountOC": ds, "TotalSaleAmount": ds,
+                "TotalAmountOC": ds + thue, "TotalAmount": ds + thue,
+                "TotalVATAmountOC": thue, "TotalVATAmount": thue,
+                "InvNo": sohd[:500], "InvDate": ngay_dt, "InvSeries": kyhieu[:20] or None,
+                "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
+                "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
+                "RefOrder": max_reforder + them_ct + 1,
+                "CustomField10": _PM_MARK,
+            })
+            if not preview:
+                hc = list(header_cols.keys())
+                cur.execute("INSERT INTO SAVoucher ([%s]) VALUES (%s)" %
+                           ("],[".join(hc), ",".join(["?"] * len(hc))),
+                           [header_cols[c] for c in hc])
+                dc = list(detail_row.keys())
+                cur.execute("INSERT INTO SAVoucherDetail ([%s]) VALUES (%s)" %
+                           ("],[".join(dc), ",".join(["?"] * len(dc))),
+                           [detail_row[c] for c in dc])
+            them_ct += 1
+            if ghi_de_ct:
+                go += 1
+            if ngay_loi:
+                so_ngay_loi += 1
+            if ds + thue == 0:
+                so_tien_0 += 1
+            st = ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct \
+                else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
+            ket.append({"so_ct": doc, "so_hd": sohd, "kh": ten_kh_misa, "tong_tien": ds,
+                        "tien_thue": thue, "ref_type": ref_type, "loai_ct_misa": ref_type_ten,
+                        "trang_thai": st, "ngay_ct": ngay_dt.strftime("%d/%m/%Y"),
+                        "ngay_loi": ngay_loi, "ngay_goc": ngay_str, "tien_0": ds + thue == 0})
+        tong_sa = cur.execute("SELECT COUNT(*) FROM SAVoucher").fetchone()[0]
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        # TỰ SỬA NGAY ĐVT trên chứng từ vừa ghi (cùng cơ chế Mua hàng) — mã
+        # "BH" không có ĐVT (UnitID=None) nên bình thường không cần, nhưng vẫn
+        # gọi cho AN TOÀN/ĐỒNG NHẤT nếu về sau đổi mã hàng dùng chung có ĐVT.
+        so_dvt_hang_sua = so_dvt_chungtu_sua = 0
+        if not preview and them_ct:
+            try:
+                _kq_sua_dvt = _misa_tu_dong_sua_dvt_sau_ghi(cid, database)
+                so_dvt_hang_sua = _kq_sua_dvt.get("so_dvt_hang_sua", 0)
+                so_dvt_chungtu_sua = _kq_sua_dvt.get("so_dvt_chungtu_sua", 0)
+            except Exception:
+                pass
+        return {"preview": preview, "database": database, "so_chungtu": them_ct,
+                "so_trung": trung, "so_ghi_de": go, "so_bo_qua_kh": bo_kh,
+                "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
+                "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
+                "so_dvt_hang_sua": so_dvt_hang_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
+                "tong_trong_bang": tong_sa, "loai_ct_dang_co": loai_ct_dang_co,
+                "hoc_mau": (hoc["refname"] if hoc else None),
+                "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
+                "mau_that": mau_that,
+                "danh_sach": ket[:500]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/import-ban-hang/{cid}")
+def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi_de: int = 0):
+    """Ghi chứng từ Bán hàng (Bảng kê Đầu ra) thẳng vào MISA — xem
+    _misa_ghi_ban_hang. preview=1 -> chỉ xem trước, không ghi. LUÔN ghi ở
+    trạng thái CHƯA GHI SỔ. ghi_de=1 -> gỡ chứng từ chưa ghi sổ trùng số
+    (do chính phần mềm tạo) rồi ghi lại."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_ghi_ban_hang(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
 @app.post("/api/misa-sql/import-mua-hang/{cid}")
