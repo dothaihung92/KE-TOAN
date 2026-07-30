@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.58"
+APP_BUILD = "2026-07-27.59"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13022,6 +13022,35 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "FROM InventoryItem").fetchall():
             if code:
                 hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        # Mã hàng "MHDV" (mã CHUNG dùng cho mọi dòng Chứng từ mua dịch vụ —
+        # xem _gen_mua_hang_dv) PHẢI có sẵn trong Danh mục Vật tư hàng hóa của
+        # MISA thì mới ghi được — TRƯỚC ĐÂY không có nút/bước nào trong phần
+        # mềm tự tạo mã này, người dùng phải tự tạo tay trong MISA trước, nếu
+        # quên thì TOÀN BỘ chứng từ dịch vụ đều bị bỏ qua với lý do "thiếu mã
+        # hàng trong MISA" (đã xác nhận qua dữ liệu thật: 1735/1735 dòng bị
+        # bỏ qua). Giờ tự tạo NGAY nếu chưa có, không bắt người dùng phải biết
+        # trước cần tạo mã này.
+        if "mhdv" not in hang:
+            mhdv_id = str(_uuid.uuid4())
+            if not preview:
+                try:
+                    cur.execute(
+                        "INSERT INTO InventoryItem (InventoryItemID, InventoryItemCode, "
+                        "InventoryItemName, InventoryItemType, UnitID, InventoryAccount, "
+                        "COGSAccount, SaleAccount, TaxRate, MinimumStock, PurchaseDiscountRate, "
+                        "UnitPrice, SalePrice1, SalePrice2, SalePrice3, FixedSalePrice, "
+                        "FixedUnitPrice, IsUnitPriceAfterTax, IsSystem, Inactive, IsPromotion, "
+                        "VAT43Type, CreatedDate) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        mhdv_id, "MHDV", "Mua Hàng Dịch Vụ", 1, None, None, None, None, None,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "Chưa xác định",
+                        datetime.datetime.now())
+                except Exception:
+                    row_mhdv = cur.execute(
+                        "SELECT TOP 1 InventoryItemID FROM InventoryItem WHERE InventoryItemCode=?",
+                        "MHDV").fetchone()
+                    mhdv_id = row_mhdv[0] if row_mhdv else mhdv_id
+            hang["mhdv"] = (mhdv_id, None, "Mua Hàng Dịch Vụ")
         # danh mục TÀI KHOẢN thật (FK trên các cột TK) — xem _misa_tk_fallback
         tk_set = set()
         try:
