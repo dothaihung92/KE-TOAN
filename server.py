@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.57"
+APP_BUILD = "2026-07-27.58"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11836,11 +11836,24 @@ def _misa_khncc_dinh_dang_mst(s):
 
 def _misa_thu_thap_khncc(cid):
     """Thu thập MST + tên + vai trò (NCC/KH) từ hóa đơn mua vào/bán ra đã
-    lưu. Trả list [{"mst","mst_hien","ten","ncc","kh"}], sắp theo MST."""
+    lưu (bảng invoices — tra cứu qua mạng) VÀ từ Bảng kê Đầu vào/Đầu ra đã
+    lưu ở khung Nhập Liệu (bảng nhap_lieu — nhập tay/import Excel riêng).
+    Trả list [{"mst","mst_hien","ten","ncc","kh"}], sắp theo MST.
+
+    TRƯỚC ĐÂY chỉ quét bảng 'invoices' — nhà cung cấp/khách hàng nào CHỈ có
+    trong dữ liệu Nhập Liệu (chưa từng tra cứu được hóa đơn qua mạng, vd
+    nhập tay/import từ Excel bảng kê cũ) sẽ KHÔNG BAO GIỜ xuất hiện trong
+    Danh mục Đối tượng cần thêm, khiến các nút "...vào MISA" (đọc dữ liệu
+    từ Bảng kê Đầu vào/Đầu ra) MÃI báo "bỏ qua — NCC/KH chưa có trong MISA"
+    dù dữ liệu đã đủ (đã xác nhận qua dữ liệu thật: MST 5200213156 có nhiều
+    dòng trong Bảng kê Đầu vào nhưng không hề xuất hiện trong bảng xem
+    trước Đối tượng vì chỉ quét 'invoices')."""
     conn = db()
     rows = conn.execute(
         "SELECT loai, nbmst, nbten, nmmst, raw FROM invoices WHERE company_id=?", (cid,)).fetchall()
     comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    nl_rows = conn.execute(
+        "SELECT loai, header_json, rows_json FROM nhap_lieu WHERE company_id=?", (cid,)).fetchall()
     conn.close()
     mst_cty = _misa_khncc_chuan_mst(comp["mst"]) if comp else ""
     ds = {}   # mst -> {"ten","ncc","kh"}
@@ -11863,6 +11876,42 @@ def _misa_thu_thap_khncc(cid):
         e[vai] = True
         if ten and len(ten) > len(e["ten"]):
             e["ten"] = ten
+
+    def _tim_cot(header, *can_chua):
+        hl = [str(h or "").strip().lower() for h in header]
+        for tim in can_chua:
+            for i, h in enumerate(hl):
+                if tim in h:
+                    return i
+        return -1
+
+    for nr in nl_rows:
+        try:
+            header = json.loads(nr["header_json"]) if nr["header_json"] else []
+            data_rows = json.loads(nr["rows_json"]) if nr["rows_json"] else []
+        except Exception:
+            continue
+        if not header or not data_rows:
+            continue
+        if nr["loai"] == "out":
+            i_ten = _tim_cot(header, "người mua")
+            i_mst = _tim_cot(header, "mst mua", "mst")
+            vai = "kh"
+        else:
+            i_ten = _tim_cot(header, "người bán")
+            i_mst = _tim_cot(header, "mst bán", "mst")
+            vai = "ncc"
+        if i_mst < 0:
+            continue
+        for row in data_rows:
+            mst = _misa_khncc_chuan_mst(row[i_mst] if i_mst < len(row) else "")
+            ten = str(row[i_ten]).strip() if (0 <= i_ten < len(row) and row[i_ten] is not None) else ""
+            if not mst or mst == mst_cty:
+                continue
+            e = ds.setdefault(mst, {"ten": "", "ncc": False, "kh": False})
+            e[vai] = True
+            if ten and len(ten) > len(e["ten"]):
+                e["ten"] = ten
     out = []
     for mst, e in sorted(ds.items()):
         if not e["ten"]:
