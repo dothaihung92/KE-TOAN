@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.79"
+APP_BUILD = "2026-07-27.80"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14215,6 +14215,16 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
                     "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
                     "CustomField10": _PM_MARK,
+                    # IsPosted trên SAInvoice là khái niệm ĐỘC LẬP với việc ghi
+                    # sổ chứng từ SAVoucher — xác nhận qua đối chiếu 2 chứng từ
+                    # THẬT (BH00001 đã ghi sổ VÀ BH00002 CHƯA ghi sổ): CẢ HAI
+                    # đều có SAInvoice.IsPosted=True. Có vẻ đây là "hóa đơn đã
+                    # hoàn chỉnh/chốt", không phải "đã vào sổ cái" — để False
+                    # (như trước) khiến MISA không nhận diện được hóa đơn liên
+                    # kết dù SAVoucher vẫn đúng CHƯA GHI SỔ. Sửa = True không vi
+                    # phạm nguyên tắc an toàn (SAVoucher.IsPostedFinance vẫn
+                    # luôn False, sổ cái không hề bị đụng).
+                    "IsPosted": True,
                 })
                 inv_detail = dict(_SA_INVOICE_DET_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": inv_id,
