@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.80"
+APP_BUILD = "2026-07-27.81"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14159,7 +14159,18 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue, "VATAccount": "33311",
                 "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
                 "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
-                "SortOrder": 1, "SAInvoiceRefID": inv_id, "StockID": stock_id_mac_dinh,
+                # QuantityBilled/MainQuantityBilled = SỐ LƯỢNG ĐÃ LẬP HÓA ĐƠN.
+                # Đây là mấu chốt: cả 2 chứng từ THẬT đối chiếu được đều có 2
+                # cột này = Quantity (1.0); phần mềm để NULL nên MISA hiểu dòng
+                # này CHƯA hề được xuất hóa đơn -> không hiện thông tin hóa đơn
+                # ở tab "Hóa đơn"/cột Số hóa đơn dù bản ghi SAInvoice liên kết
+                # vẫn tồn tại và đúng. AmountAfterTax cũng để 0 như chứng từ
+                # thật thay vì NULL.
+                "QuantityBilled": 1, "MainQuantityBilled": 1, "AmountAfterTax": 0,
+                # SortOrder chứng từ thật đánh từ 0 (không phải 1); các cột text
+                # để CHUỖI RỖNG như MISA thật, không để NULL.
+                "SortOrder": 0, "GuarantyPeriod": "", "AccountObjectAddress": "",
+                "SAInvoiceRefID": inv_id, "StockID": stock_id_mac_dinh,
             })
             # Diễn giải mang đủ Mẫu số/Ký hiệu (không còn ghi vào 2 ô riêng
             # InvTemplateNo/InvSeries nữa — xem giải thích ở dưới) để KHÔNG
@@ -14198,6 +14209,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
                 "RefOrder": max_reforder + them_ct + 1,
                 "CustomField10": _PM_MARK,
+                # các cột text để CHUỖI RỖNG như chứng từ MISA thật, không NULL
+                "AccountObjectAddress": "", "Payer": "", "ShippingAddress": "",
             })
             inv_header = inv_detail = None
             if inv_reftype:
@@ -14225,16 +14238,20 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     # phạm nguyên tắc an toàn (SAVoucher.IsPostedFinance vẫn
                     # luôn False, sổ cái không hề bị đụng).
                     "IsPosted": True,
+                    # các cột text để CHUỖI RỖNG như hóa đơn MISA thật
+                    "PaymentMethod": "TM/CK", "Buyer": "", "PlaceOfDelivery": "",
+                    "RoomNo": "", "BudgetCode": "", "PassportNumber": "",
+                    "IdentificationNumber": "", "AccountObjectPhoneNumber": "",
+                    "ShopCode": "", "ShopName": "",
                 })
-                inv_detail = dict(_SA_INVOICE_DET_DEFAULT, **{
-                    "RefDetailID": str(_uuid.uuid4()), "RefID": inv_id,
-                    "InventoryItemID": iid_bh, "Description": mo_ta[:500],
-                    "UnitID": uid_bh, "Quantity": 1, "UnitPrice": ds,
-                    "AmountOC": ds, "Amount": ds,
-                    "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue,
-                    "SortOrder": 1,
-                    "SAVoucherRefID": ref_id, "SAVoucherRefDetailID": detail_id,
-                })
+                # KHÔNG tạo SAInvoiceDetail: đối chiếu CẢ HAI chứng từ THẬT
+                # (BH00001 và BH00002 — đều hiện đúng thông tin hóa đơn) cho
+                # thấy chúng KHÔNG có dòng SAInvoiceDetail nào cả. MISA đọc
+                # thông tin hóa đơn qua SAVoucherDetail.SAInvoiceRefID ->
+                # SAInvoice là đủ; dòng SAInvoiceDetail phần mềm tự thêm là
+                # bản ghi THỪA so với cấu trúc thật, có thể chính nó làm MISA
+                # hiểu sai/bỏ qua khối hóa đơn. Bỏ hẳn cho khớp chứng từ thật.
+                inv_detail = None
             if not preview:
                 # THỨ TỰ theo chiều khóa ngoại: SAInvoice trước (SAVoucherDetail.
                 # SAInvoiceRefID trỏ tới nó), rồi SAVoucher -> SAVoucherDetail,
