@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.69"
+APP_BUILD = "2026-07-27.70"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12646,7 +12646,12 @@ _SA_INVOICE_DEFAULT = {
     "AdjustVATRate": None, "AdjustTACareerGroupID": None, "AdjustInvTemplateNo": None,
     "AdjustInvSeries": None, "AdjustInvNo": None, "AdjustInvDate": None,
     "ExportNontariffZones": 0, "RefIDMshop": None, "RefNoMshop": None,
-    "IsGetForInvoice": None, "AdjustInvestmentProjectID": None,
+    # IsGetForInvoice KHÔNG được liệt kê ở đây dù có trong INFORMATION_SCHEMA.
+    # COLUMNS — xác nhận qua lỗi thật: "The column 'IsGetForInvoice' cannot
+    # be modified because it is either a computed column or is the result
+    # of a UNION operator" — đây là CỘT TÍNH TOÁN (computed column), SQL
+    # Server không cho INSERT trực tiếp dù schema liệt kê như cột thường.
+    "AdjustInvestmentProjectID": None,
     "IsReductionInvoice": 0, "InvoiceCode": None, "InvoiceSystem": 0,
     "IsAdjustAutoCalculate": None, "IsProcessInvoiceError": 0, "TaxReductionType": 0,
     "IsSAInvoiceValueAdjustEmptyVat": 0, "IsDiscountInvoice": 0,
