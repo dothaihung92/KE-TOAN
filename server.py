@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.71"
+APP_BUILD = "2026-07-27.72"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14264,6 +14264,62 @@ def _misa_chan_doan_ban_hang(cid, database, so_ct_list):
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
+        # THAM KHẢO: tìm 1 chứng từ Bán hàng THẬT (KHÔNG phải do phần mềm này
+        # tạo) đã có sẵn Số hóa đơn, để so sánh cấu trúc — vì dữ liệu do phần
+        # mềm ghi đã xác nhận liên kết đúng 2 chiều SAVoucher<->SAInvoice
+        # nhưng MISA vẫn không hiện, khả năng cao còn thiếu 1 yếu tố khác mà
+        # chỉ có thể thấy khi đối chiếu với chứng từ THẬT MISA tự hiện đúng.
+        tham_khao = None
+        try:
+            ref_row = cur.execute(
+                "SELECT TOP 1 RefID, RefNoManagement, InvNo, InvDate, InvSeries, RefType "
+                "FROM SAVoucher WHERE ISNULL(CustomField10,'') <> ? "
+                "AND InvNo IS NOT NULL AND InvNo <> '' "
+                "ORDER BY CreatedDate DESC", _PM_MARK).fetchone()
+            if ref_row:
+                rrid, rrn, rinvno, rinvdate, rinvseries, rreftype = ref_row
+                tham_khao = {
+                    "so_ct": rrn, "ref_id": str(rrid), "inv_no": rinvno,
+                    "inv_date": (rinvdate.strftime("%d/%m/%Y") if rinvdate else None),
+                    "inv_series": rinvseries, "ref_type": rreftype,
+                }
+                rdets = cur.execute(
+                    "SELECT RefDetailID, SAInvoiceRefID FROM SAVoucherDetail "
+                    "WHERE RefID=?", rrid).fetchall()
+                tham_khao["sa_voucher_detail"] = [
+                    {"ref_detail_id": str(d[0]), "sa_invoice_ref_id": (str(d[1]) if d[1] else None)}
+                    for d in rdets]
+                rinv_ids = {str(d[1]).upper() for d in rdets if d[1]}
+                if rinv_ids:
+                    ph2 = ",".join(["?"] * len(rinv_ids))
+                    rinv_rows = cur.execute(
+                        "SELECT RefID, InvNo, InvTemplateNo, InvSeries FROM SAInvoice "
+                        "WHERE RefID IN (%s)" % ph2, list(rinv_ids)).fetchall()
+                    tham_khao["sa_invoice_lien_ket"] = [
+                        {"ref_id": str(r[0]), "inv_no": r[1], "inv_template_no": r[2],
+                         "inv_series": r[3]} for r in rinv_rows]
+                else:
+                    tham_khao["sa_invoice_lien_ket"] = []
+                    tham_khao["ghi_chu"] = ("Chứng từ THẬT này KHÔNG có SAInvoice liên kết qua "
+                                            "SAInvoiceRefID nào cả, dù vẫn có InvNo trên header "
+                                            "-> khả năng cao MISA hiện Số hóa đơn TỪ CHÍNH cột "
+                                            "InvNo/InvDate/InvSeries trên SAVoucher/SAVoucherDetail, "
+                                            "KHÔNG cần bảng SAInvoice riêng như PUInvoice bên Mua hàng.")
+            else:
+                tham_khao = {"ghi_chu": "Không tìm thấy chứng từ Bán hàng THẬT nào (không do phần "
+                                        "mềm tạo) có sẵn Số hóa đơn để so sánh."}
+        except Exception as e:
+            tham_khao = {"loi": str(e)[:300]}
+        # Kiểm tra bảng Mẫu hóa đơn (IPTemplate) — nghi vấn khác: Mẫu số/Ký
+        # hiệu dùng để ghi có thể KHÔNG khớp mẫu hóa đơn nào đã đăng ký thật
+        # trong MISA, khiến MISA không nhận diện được để hiện lên.
+        ip_template = []
+        try:
+            ip_template = [{"inv_template_no": r[0], "inv_series": r[1]}
+                           for r in cur.execute(
+                               "SELECT DISTINCT InvTemplateNo, InvSeries FROM IPTemplate").fetchall()]
+        except Exception:
+            pass
         ket = []
         for so_ct in so_ct_list:
             so_ct = str(so_ct or "").strip()
@@ -14318,7 +14374,8 @@ def _misa_chan_doan_ban_hang(cid, database, so_ct_list):
                  "sa_voucher_ref_detail_id": (str(r[2]) if r[2] else None)}
                 for r in inv_det_rows]
             ket.append(muc)
-        return {"database": database, "ket_qua": ket}
+        return {"database": database, "ket_qua": ket, "tham_khao_chung_tu_that": tham_khao,
+                "mau_hoa_don_da_dang_ky_ip_template": ip_template[:50]}
     finally:
         conn.close()
 
