@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.56"
+APP_BUILD = "2026-07-27.57"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11643,8 +11643,27 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
                 else:
                     unit_id = str(_uuid.uuid4())
                     if not preview:
-                        cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
-                                    "VALUES (?,?,?,0)", unit_id, dvt[:20], None)
+                        try:
+                            cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                        "VALUES (?,?,?,0)", unit_id, dvt[:20], None)
+                        except Exception:
+                            # ĐVT này thật ra ĐÃ CÓ SẴN trong MISA nhưng lỡ
+                            # không khớp được ở bước dò 'units' phía trên (vd
+                            # lệch ký tự ẩn/khoảng trắng/collation không so
+                            # khớp được bằng .strip().lower() thông thường) —
+                            # SQL Server báo TRÙNG KHOÁ UnitName (IX_UnitName)
+                            # khi cố thêm mới (đã xác nhận qua dữ liệu thật:
+                            # đơn vị 'm³' báo lỗi này). TRƯỚC ĐÂY để lỗi này
+                            # làm HỎNG CẢ LƯỢT import (rollback toàn bộ, không
+                            # ghi được mã hàng nào dù chỉ 1 đơn vị tính bị
+                            # trùng) — giờ tra lại ĐÚNG UnitID đã có theo tên
+                            # (so khớp collation thật của SQL Server, không
+                            # qua .lower() nữa) rồi dùng lại, coi như ĐVT có
+                            # sẵn, KHÔNG làm gián đoạn phần còn lại.
+                            row_u = cur.execute(
+                                "SELECT TOP 1 UnitID FROM Unit WHERE UnitName=?",
+                                dvt[:20]).fetchone()
+                            unit_id = row_u[0] if row_u else None
                     units[uk] = unit_id
                     dv_moi += 1
             tax = ts if isinstance(ts, (int, float)) else None
@@ -11726,10 +11745,20 @@ def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
             else:
                 uid2 = str(_uuid.uuid4())
                 if not preview:
-                    cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
-                                "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                    try:
+                        cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                    "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                    except Exception:
+                        # ĐVT đã có sẵn nhưng lỡ không khớp được ở bước dò
+                        # phía trên (xem giải thích ở _misa_ghi_hang_hoa) —
+                        # tra lại UnitID thật theo tên rồi dùng lại, không để
+                        # lỗi trùng khoá làm hỏng cả lượt quét/sửa.
+                        row_u2 = cur.execute(
+                            "SELECT TOP 1 UnitID FROM Unit WHERE UnitName=?",
+                            dvt_text[:20]).fetchone()
+                        uid2 = row_u2[0] if row_u2 else uid2
                 unit_ten[uk] = uid2
-                unit_id_sach.add(uid2.lower())
+                unit_id_sach.add(str(uid2).lower())
                 them += 1
             if not preview:
                 cur.execute("UPDATE InventoryItem SET UnitID=? WHERE InventoryItemID=?", uid2, iid)
@@ -12368,10 +12397,20 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             elif dvt_text:
                 uid2 = str(_uuid2.uuid4())
                 if not preview:
-                    cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
-                                "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                    try:
+                        cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                    "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                    except Exception:
+                        # ĐVT đã có sẵn nhưng lỡ không khớp được ở bước dò
+                        # phía trên (xem giải thích ở _misa_ghi_hang_hoa) —
+                        # tra lại UnitID thật theo tên rồi dùng lại, không để
+                        # lỗi trùng khoá làm hỏng cả lượt ghi chứng từ.
+                        row_u2 = cur.execute(
+                            "SELECT TOP 1 UnitID FROM Unit WHERE UnitName=?",
+                            dvt_text[:20]).fetchone()
+                        uid2 = row_u2[0] if row_u2 else uid2
                 unit_ten[uk] = uid2
-                unit_ids.add(uid2.lower())
+                unit_ids.add(str(uid2).lower())
             else:
                 uid2 = None
             if not preview:
@@ -12966,10 +13005,20 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             elif dvt_text:
                 uid2 = str(_uuid.uuid4())
                 if not preview:
-                    cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
-                                "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                    try:
+                        cur.execute("INSERT INTO Unit (UnitID, UnitName, Description, Inactive) "
+                                    "VALUES (?,?,?,0)", uid2, dvt_text[:20], None)
+                    except Exception:
+                        # ĐVT đã có sẵn nhưng lỡ không khớp được ở bước dò
+                        # phía trên (xem giải thích ở _misa_ghi_hang_hoa) —
+                        # tra lại UnitID thật theo tên rồi dùng lại, không để
+                        # lỗi trùng khoá làm hỏng cả lượt ghi chứng từ.
+                        row_u2 = cur.execute(
+                            "SELECT TOP 1 UnitID FROM Unit WHERE UnitName=?",
+                            dvt_text[:20]).fetchone()
+                        uid2 = row_u2[0] if row_u2 else uid2
                 unit_ten[uk] = uid2
-                unit_ids.add(uid2.lower())
+                unit_ids.add(str(uid2).lower())
             else:
                 uid2 = None
             if not preview:
