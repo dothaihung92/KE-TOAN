@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.76"
+APP_BUILD = "2026-07-27.77"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13927,6 +13927,29 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 return t or None
             return _misa_tk_fallback(t, tk_set) or t
 
+        # StockID mặc định — xác nhận qua đối chiếu THẬT: chứng từ MISA tự tạo
+        # luôn có StockID trên SAVoucherDetail (dù KHÔNG tick "Kiêm phiếu xuất
+        # kho"); chứng từ phần mềm để NULL — nghi vấn hàng đầu gây crash
+        # "NullReferenceException tại SaveVoucher()" khi Sửa/Lưu lại, có thể
+        # cũng liên quan tới việc MISA không hiện tab "Hóa đơn". Ưu tiên học
+        # theo Kho chứng từ Bán hàng THẬT (không do phần mềm tạo) đang dùng,
+        # fallback lấy Kho đầu tiên có trong danh mục.
+        stock_id_mac_dinh = None
+        try:
+            row_sk = cur.execute(
+                "SELECT TOP 1 svd.StockID FROM SAVoucherDetail svd "
+                "JOIN SAVoucher sv ON sv.RefID=svd.RefID "
+                "WHERE ISNULL(sv.CustomField10,'') <> ? AND svd.StockID IS NOT NULL "
+                "ORDER BY sv.CreatedDate DESC", _PM_MARK).fetchone()
+            if row_sk:
+                stock_id_mac_dinh = row_sk[0]
+            else:
+                row_sk = cur.execute("SELECT TOP 1 StockID FROM Stock").fetchone()
+                if row_sk:
+                    stock_id_mac_dinh = row_sk[0]
+        except Exception:
+            pass
+
         # loại chứng từ của bảng HÓA ĐƠN bán hàng (SAInvoice) — BẮT BUỘC phải
         # tạo kèm SAInvoice/SAInvoiceDetail liên kết 2 chiều với SAVoucher(Detail)
         # thì tab "Hóa đơn" + cột Số hóa đơn/Mẫu số/Ký hiệu trên MISA mới hiện
@@ -14124,7 +14147,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue, "VATAccount": "33311",
                 "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
                 "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
-                "SortOrder": 1, "SAInvoiceRefID": inv_id,
+                "SortOrder": 1, "SAInvoiceRefID": inv_id, "StockID": stock_id_mac_dinh,
             })
             # Diễn giải mang đủ Mẫu số/Ký hiệu (không còn ghi vào 2 ô riêng
             # InvTemplateNo/InvSeries nữa — xem giải thích ở dưới) để KHÔNG
