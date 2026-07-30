@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.70"
+APP_BUILD = "2026-07-27.71"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14250,6 +14250,90 @@ def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_ghi_ban_hang(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+
+
+def _misa_chan_doan_ban_hang(cid, database, so_ct_list):
+    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC) — dùng khi chứng từ Bán hàng đã ghi (kể cả sau
+    khi đã thêm SAInvoice/SAInvoiceDetail) nhưng MISA vẫn không hiện Số hóa
+    đơn/Khách hàng ở tab "Hóa đơn"/lưới danh sách. Lấy RAW dữ liệu thật đang
+    có cho 1 vài Số chứng từ cụ thể: SAVoucher (Inv* trực tiếp trên header),
+    SAVoucherDetail (SAInvoiceRefID), và SAInvoice/SAInvoiceDetail LIÊN KẾT
+    (dò cả 2 chiều: theo SAVoucherDetail.SAInvoiceRefID lẫn theo
+    SAInvoiceDetail.SAVoucherRefID) — để biết CHÍNH XÁC bản ghi có tồn tại
+    hay không, hay tồn tại nhưng lệch liên kết."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        ket = []
+        for so_ct in so_ct_list:
+            so_ct = str(so_ct or "").strip()
+            if not so_ct:
+                continue
+            muc = {"so_ct": so_ct}
+            row = cur.execute(
+                "SELECT RefID, InvNo, InvDate, InvSeries, AccountObjectID, AccountObjectName, "
+                "RefType, CustomField10 FROM SAVoucher WHERE RefNoManagement=?", so_ct).fetchone()
+            if not row:
+                muc["loi"] = "Không thấy SAVoucher nào có Số chứng từ này"
+                ket.append(muc)
+                continue
+            rid, invno, invdate, invseries, aoid, aoname, reftype, mark = row
+            muc["sa_voucher"] = {
+                "ref_id": str(rid), "inv_no": invno,
+                "inv_date": (invdate.strftime("%d/%m/%Y") if invdate else None),
+                "inv_series": invseries, "account_object_id": (str(aoid) if aoid else None),
+                "account_object_name": aoname, "ref_type": reftype,
+                "la_phan_mem_tao": (mark == _PM_MARK),
+            }
+            dets = cur.execute(
+                "SELECT RefDetailID, SAInvoiceRefID, AccountObjectID, AccountObjectName "
+                "FROM SAVoucherDetail WHERE RefID=?", rid).fetchall()
+            muc["sa_voucher_detail"] = [
+                {"ref_detail_id": str(d[0]), "sa_invoice_ref_id": (str(d[1]) if d[1] else None),
+                 "account_object_id": (str(d[2]) if d[2] else None), "account_object_name": d[3]}
+                for d in dets]
+            inv_ids = {str(d[1]).upper() for d in dets if d[1]}
+            if inv_ids:
+                ph = ",".join(["?"] * len(inv_ids))
+                inv_rows = cur.execute(
+                    "SELECT RefID, InvNo, InvDate, InvSeries, InvTemplateNo, AccountObjectID, "
+                    "AccountObjectName FROM SAInvoice WHERE RefID IN (%s)" % ph,
+                    list(inv_ids)).fetchall()
+                muc["sa_invoice_theo_sainvoicerefid"] = [
+                    {"ref_id": str(r[0]), "inv_no": r[1],
+                     "inv_date": (r[2].strftime("%d/%m/%Y") if r[2] else None),
+                     "inv_series": r[3], "inv_template_no": r[4],
+                     "account_object_id": (str(r[5]) if r[5] else None), "account_object_name": r[6]}
+                    for r in inv_rows]
+            else:
+                muc["sa_invoice_theo_sainvoicerefid"] = []
+            # dò NGƯỢC LẠI: có bản ghi SAInvoiceDetail nào trỏ về chứng từ này
+            # không (qua SAVoucherRefID) — để phát hiện trường hợp SAInvoice
+            # đã tạo nhưng link ngược bị lệch/rỗng.
+            inv_det_rows = cur.execute(
+                "SELECT RefDetailID, RefID, SAVoucherRefDetailID FROM SAInvoiceDetail "
+                "WHERE SAVoucherRefID=?", rid).fetchall()
+            muc["sa_invoice_detail_theo_savoucherrefid"] = [
+                {"ref_detail_id": str(r[0]), "ref_id": str(r[1]),
+                 "sa_voucher_ref_detail_id": (str(r[2]) if r[2] else None)}
+                for r in inv_det_rows]
+            ket.append(muc)
+        return {"database": database, "ket_qua": ket}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-ban-hang/{cid}")
+def misa_sql_chan_doan_ban_hang(cid: int, so_ct: str, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_ban_hang. so_ct: danh
+    sách Số chứng từ cách nhau bởi dấu phẩy, vd 'BH031/T12/2024,BH005/T12/2024'."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    so_ct_list = [x.strip() for x in (so_ct or "").split(",") if x.strip()]
+    if not so_ct_list:
+        raise HTTPException(400, "Thiếu Số chứng từ cần chẩn đoán.")
+    return _misa_chan_doan_ban_hang(cid, database, so_ct_list)
 
 
 @app.post("/api/misa-sql/import-mua-hang/{cid}")
