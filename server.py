@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.77"
+APP_BUILD = "2026-07-27.78"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14144,6 +14144,18 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 "Description": mo_ta[:500], "DebitAccount": tk_no_dc, "CreditAccount": tk_co_dc,
                 "UnitID": uid_bh, "Quantity": 1, "UnitPrice": ds,
                 "AmountOC": ds, "Amount": ds,
+                # MainQuantity/MainUnitPrice PHẢI bằng đúng Số lượng/Đơn giá khi
+                # không quy đổi ĐVT (giống bài học ở Mua hàng: MainUnitID/
+                # MainQuantity = bằng chính uid/sl) — chứng từ THẬT đối chiếu
+                # được luôn có 2 giá trị này bằng Quantity/UnitPrice, KHÔNG bao
+                # giờ để 0; để 0 có thể là nguyên nhân crash NullReference khi
+                # MISA tính toán lại lúc Lưu (xác nhận: chứng từ tự tay tạo —
+                # luôn có Main*=Quantity/UnitPrice — lưu bình thường, không crash).
+                "MainQuantity": 1, "MainUnitPrice": ds,
+                # DiscountAccount: chứng từ thật luôn có TK chiết khấu (dù
+                # DiscountRate/DiscountAmount=0) — đối chiếu về TK có thật
+                # trong danh mục, không để NULL.
+                "DiscountAccount": tra_tk("5211"),
                 "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue, "VATAccount": "33311",
                 "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
                 "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
