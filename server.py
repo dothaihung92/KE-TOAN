@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.62"
+APP_BUILD = "2026-07-27.63"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11782,12 +11782,11 @@ def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
 
 
 def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
-    """Sửa lại ĐVT (UnitID) trên CÁC DÒNG CHỨNG TỪ ĐÃ GHI vào MISA
-    (PUVoucherDetail của Mua hàng Nhập kho/Không qua kho, PUServiceDetail
-    của Mua hàng Dịch vụ) do CHÍNH phần mềm tạo (CustomField10=_PM_MARK) và
-    CHƯA GHI SỔ (IsPostedFinance=0 AND IsPostedManagement=0) — khớp lại
-    UnitID của từng dòng với UnitID HIỆN TẠI (đã đúng) của InventoryItem
-    tương ứng.
+    """Sửa lại ĐVT (UnitID) trên CÁC DÒNG CHỨNG TỪ CHƯA GHI SỔ
+    (IsPostedFinance=0 AND IsPostedManagement=0) trong MISA — PUVoucherDetail
+    của Mua hàng Nhập kho/Không qua kho, PUServiceDetail của Mua hàng Dịch
+    vụ — khớp lại UnitID của từng dòng với UnitID HIỆN TẠI (đã đúng) của
+    InventoryItem tương ứng.
 
     LÝ DO CẦN BƯỚC RIÊNG NÀY: UnitID trên PUVoucherDetail/PUServiceDetail
     là 1 bản SAO CHÉP tại thời điểm ghi chứng từ — KHÔNG tự động cập nhật
@@ -11796,11 +11795,21 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
     mục), hoàn toàn KHÔNG đụng tới các dòng chứng từ ĐÃ GHI trước đó bằng
     UnitID sai/mồ côi — nên dù Danh mục Vật tư đã hiện ĐÚNG ĐVT, các chứng
     từ Mua hàng/TSCĐ ghi TRƯỚC ĐÓ vẫn hiện ĐVT sai/GUID thô mãi mãi (đã xác
-    nhận qua dữ liệu thật: Danh mục Vật tư hiện ĐVT đúng nhưng 1 số chứng từ
-    Mua hàng/TSCĐ vẫn hiện GUID thô ở cột ĐVT). CHỈ sửa chứng từ do CHÍNH
-    phần mềm tạo và CHƯA GHI SỔ — an toàn tuyệt đối, không đụng chứng từ của
-    MISA/người dùng tự tạo hay chứng từ đã ghi sổ (đúng nguyên tắc an toàn
-    chung của mọi hàm ghi MISA trong file này)."""
+    nhận qua dữ liệu thật: Danh mục Vật tư hiện ĐVT đúng "Cây" nhưng chứng từ
+    Mua hàng NVL cùng mã đó vẫn hiện GUID thô ở cột ĐVT).
+
+    TRƯỚC ĐÂY còn giới hạn thêm CustomField10=_PM_MARK (chỉ sửa chứng từ do
+    CHÍNH phần mềm tạo) — nhưng vẫn gặp lại đúng lỗi này dù đã chạy bước sửa,
+    khả năng cao chứng từ liên quan được tạo TRƯỚC KHI có đánh dấu
+    CustomField10 (bản cũ hơn) nên không khớp được điều kiện đó, bị loại
+    khỏi diện sửa. Bỏ điều kiện CustomField10, CHỈ còn giữ điều kiện CHƯA
+    GHI SỔ làm ranh giới an toàn — vẫn đủ an toàn vì: (1) CHỈ sửa đúng 1
+    trường ĐVT/UnitID, không đụng số tiền/tài khoản/bất kỳ dữ liệu nào khác;
+    (2) CHỈ áp dụng khi UnitID đang THỰC SỰ sai (mồ côi/không khớp Danh mục,
+    xem điều kiện WHERE) — chứng từ MISA/người dùng tự nhập đúng từ đầu sẽ
+    không bao giờ rơi vào điều kiện này nên không hề bị đụng tới; (3) chỉ
+    tác động chứng từ CHƯA GHI SỔ (chưa vào sổ cái), vẫn có thể sửa/xóa tay
+    bình thường trong MISA nếu cần."""
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
@@ -11811,10 +11820,8 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
             "FROM PUVoucherDetail pvd "
             "JOIN PUVoucher pv ON pv.RefID = pvd.RefID "
             "JOIN InventoryItem ii ON ii.InventoryItemID = pvd.InventoryItemID "
-            "WHERE ISNULL(pv.CustomField10,'') = ? "
-            "AND ISNULL(pv.IsPostedFinance,0)=0 AND ISNULL(pv.IsPostedManagement,0)=0 "
-            "AND (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID)",
-            _PM_MARK).fetchall()
+            "WHERE ISNULL(pv.IsPostedFinance,0)=0 AND ISNULL(pv.IsPostedManagement,0)=0 "
+            "AND (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID)").fetchall()
         for rid, rn, code, uid_moi in rows_pv:
             ket.append({"so_ct": rn, "ma": code, "loai": "Mua hàng"})
             if not preview:
@@ -11824,10 +11831,8 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
             "FROM PUServiceDetail psd "
             "JOIN PUService ps ON ps.RefID = psd.RefID "
             "JOIN InventoryItem ii ON ii.InventoryItemID = psd.InventoryItemID "
-            "WHERE ISNULL(ps.CustomField10,'') = ? "
-            "AND ISNULL(ps.IsPostedFinance,0)=0 AND ISNULL(ps.IsPostedManagement,0)=0 "
-            "AND (psd.UnitID IS NULL OR psd.UnitID <> ii.UnitID)",
-            _PM_MARK).fetchall()
+            "WHERE ISNULL(ps.IsPostedFinance,0)=0 AND ISNULL(ps.IsPostedManagement,0)=0 "
+            "AND (psd.UnitID IS NULL OR psd.UnitID <> ii.UnitID)").fetchall()
         for rid, rn, code, uid_moi in rows_ps:
             ket.append({"so_ct": rn, "ma": code, "loai": "Dịch vụ"})
             if not preview:
