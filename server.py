@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.64"
+APP_BUILD = "2026-07-27.65"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11811,14 +11811,23 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
     tác động chứng từ CHƯA GHI SỔ (chưa vào sổ cái), vẫn có thể sửa/xóa tay
     bình thường trong MISA nếu cần.
 
-    CHẨN ĐOÁN: dù bỏ CustomField10, người dùng vẫn báo bấm nút ra "0 dòng
-    cần sửa" trong khi chứng từ thật vẫn hiện GUID — nghi vấn hàng đầu là
-    chứng từ đó ĐÃ GHI SỔ trong MISA (IsPostedFinance/IsPostedManagement=1)
-    nên bị loại khỏi điều kiện an toàn ở trên (KHÔNG phải lỗi logic đối
-    chiếu). Vì vậy hàm này giờ dò THÊM 1 lượt KHÔNG lọc trạng thái ghi sổ để
-    đếm riêng số dòng lệch ĐVT đã bị loại vì lý do "đã ghi sổ" — trả về
-    "so_da_ghi_so_khong_sua" để hiển thị rõ cho người dùng biết vì sao 0 dòng
-    (thay vì im lặng báo sạch)."""
+    CHẨN ĐOÁN VÒNG 1: dù bỏ CustomField10, người dùng vẫn báo bấm nút ra "0
+    dòng cần sửa" trong khi chứng từ thật vẫn hiện GUID — nghi vấn ĐÃ GHI SỔ
+    (IsPostedFinance/IsPostedManagement=1) bị loại bỏ (test thực tế: người
+    dùng xác nhận KHÔNG PHẢI do ghi sổ — vẫn 0 dòng dù không lọc trạng thái
+    ghi sổ). Hàm vẫn giữ lại phần đếm riêng "so_da_ghi_so_khong_sua" để
+    chẩn đoán/hiển thị, nhưng gốc rễ thật sự là VÒNG 2 dưới đây.
+
+    CHẨN ĐOÁN VÒNG 2 (gốc rễ thật): PUVoucherDetail có 2 cột lưu ĐVT riêng
+    biệt — "UnitID" (ĐVT giao dịch) VÀ "MainUnitID" (ĐVT chính/quy đổi kho).
+    Khi ghi chứng từ, CẢ 2 cột đều được gán CÙNG 1 giá trị uid tại thời điểm
+    đó (xem _misa_ghi_mua_hang: "MainUnitID": uid). Nếu uid lúc ghi bị
+    sai/mồ côi, CẢ 2 cột đều sai. Vòng sửa trước đây CHỈ update UnitID, để
+    nguyên MainUnitID — nên dù UnitID đã khớp lại đúng Danh mục (0 dòng lệch
+    UnitID), cột ĐVT hiển thị trên lưới chứng từ MISA (đọc theo MainUnitID)
+    vẫn còn hiện GUID rác y như cũ. PUServiceDetail (Mua hàng Dịch vụ) KHÔNG
+    có cột MainUnitID (không có Kho/quy đổi) nên không bị ảnh hưởng bởi lỗi
+    này. Giờ đối chiếu + sửa CẢ UnitID lẫn MainUnitID cho PUVoucherDetail."""
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
@@ -11831,7 +11840,8 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
             "FROM PUVoucherDetail pvd "
             "JOIN PUVoucher pv ON pv.RefID = pvd.RefID "
             "JOIN InventoryItem ii ON ii.InventoryItemID = pvd.InventoryItemID "
-            "WHERE (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID)").fetchall()
+            "WHERE (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID "
+            "OR pvd.MainUnitID IS NULL OR pvd.MainUnitID <> ii.UnitID)").fetchall()
         for rid, rn, code, uid_moi, ptc, pql in rows_pv_all:
             if ptc or pql:
                 if len(da_ghi_so) < 200:
@@ -11839,7 +11849,8 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
                 continue
             ket.append({"so_ct": rn, "ma": code, "loai": "Mua hàng"})
             if not preview:
-                cur.execute("UPDATE PUVoucherDetail SET UnitID=? WHERE RefDetailID=?", uid_moi, rid)
+                cur.execute("UPDATE PUVoucherDetail SET UnitID=?, MainUnitID=? WHERE RefDetailID=?",
+                            uid_moi, uid_moi, rid)
         rows_ps_all = cur.execute(
             "SELECT psd.RefDetailID, ps.RefNoManagement, ii.InventoryItemCode, ii.UnitID, "
             "ISNULL(ps.IsPostedFinance,0), ISNULL(ps.IsPostedManagement,0) "
