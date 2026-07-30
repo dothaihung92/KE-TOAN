@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.74"
+APP_BUILD = "2026-07-27.75"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14269,130 +14269,82 @@ def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi
     return _misa_ghi_ban_hang(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
+def _misa_dump_row_full(cur, table, where_col, where_val):
+    """SELECT * 1 dòng, trả dict TẤT CẢ cột (không chọn lọc) — dùng cho chẩn
+    đoán so sánh, tránh bỏ sót cột như các lần chọn lọc trước."""
+    row = cur.execute("SELECT * FROM %s WHERE %s=?" % (table, where_col), where_val).fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in cur.description]
+    out = {}
+    for c, v in zip(cols, row):
+        if hasattr(v, "strftime"):
+            out[c] = v.strftime("%d/%m/%Y %H:%M:%S")
+        elif v is not None and not isinstance(v, (str, int, float, bool)):
+            out[c] = str(v)
+        else:
+            out[c] = v
+    return out
+
+
 def _misa_chan_doan_ban_hang(cid, database, so_ct_list):
-    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC) — dùng khi chứng từ Bán hàng đã ghi (kể cả sau
-    khi đã thêm SAInvoice/SAInvoiceDetail) nhưng MISA vẫn không hiện Số hóa
-    đơn/Khách hàng ở tab "Hóa đơn"/lưới danh sách. Lấy RAW dữ liệu thật đang
-    có cho 1 vài Số chứng từ cụ thể: SAVoucher (Inv* trực tiếp trên header),
-    SAVoucherDetail (SAInvoiceRefID), và SAInvoice/SAInvoiceDetail LIÊN KẾT
-    (dò cả 2 chiều: theo SAVoucherDetail.SAInvoiceRefID lẫn theo
-    SAInvoiceDetail.SAVoucherRefID) — để biết CHÍNH XÁC bản ghi có tồn tại
-    hay không, hay tồn tại nhưng lệch liên kết."""
+    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC) — dùng khi chứng từ Bán hàng đã ghi nhưng MISA
+    vẫn không hiện Số hóa đơn/Khách hàng ở tab "Hóa đơn"/lưới danh sách, DÙ
+    đã đối chiếu InvSeries/InvTemplateNo khớp y hệt chứng từ THẬT. Vòng này
+    lấy TOÀN BỘ MỌI CỘT (SELECT *, không chọn lọc như các vòng trước — tránh
+    bỏ sót cột khác biệt thật sự) của SAVoucher/SAVoucherDetail/SAInvoice/
+    SAInvoiceDetail cho cả chứng từ đang lỗi VÀ 1 chứng từ THẬT (không do
+    phần mềm tạo) để so sánh song song từng cột."""
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
-        # THAM KHẢO: tìm 1 chứng từ Bán hàng THẬT (KHÔNG phải do phần mềm này
-        # tạo) đã có sẵn Số hóa đơn, để so sánh cấu trúc — vì dữ liệu do phần
-        # mềm ghi đã xác nhận liên kết đúng 2 chiều SAVoucher<->SAInvoice
-        # nhưng MISA vẫn không hiện, khả năng cao còn thiếu 1 yếu tố khác mà
-        # chỉ có thể thấy khi đối chiếu với chứng từ THẬT MISA tự hiện đúng.
+
+        def full_muc(rid):
+            m = {"sa_voucher": _misa_dump_row_full(cur, "SAVoucher", "RefID", rid)}
+            det = cur.execute(
+                "SELECT TOP 1 RefDetailID, SAInvoiceRefID FROM SAVoucherDetail "
+                "WHERE RefID=?", rid).fetchone()
+            if det:
+                m["sa_voucher_detail"] = _misa_dump_row_full(
+                    cur, "SAVoucherDetail", "RefDetailID", det[0])
+                if det[1]:
+                    m["sa_invoice"] = _misa_dump_row_full(cur, "SAInvoice", "RefID", det[1])
+                    invdet = cur.execute(
+                        "SELECT TOP 1 RefDetailID FROM SAInvoiceDetail "
+                        "WHERE RefID=?", det[1]).fetchone()
+                    if invdet:
+                        m["sa_invoice_detail"] = _misa_dump_row_full(
+                            cur, "SAInvoiceDetail", "RefDetailID", invdet[0])
+            return m
+
+        # THAM KHẢO: 1 chứng từ Bán hàng THẬT (KHÔNG do phần mềm này tạo) đã
+        # có sẵn Số hóa đơn, dump ĐẦY ĐỦ để so sánh song song.
         tham_khao = None
         try:
             ref_row = cur.execute(
-                "SELECT TOP 1 RefID, RefNoManagement, InvNo, InvDate, InvSeries, RefType "
-                "FROM SAVoucher WHERE ISNULL(CustomField10,'') <> ? "
+                "SELECT TOP 1 RefID FROM SAVoucher WHERE ISNULL(CustomField10,'') <> ? "
                 "AND InvNo IS NOT NULL AND InvNo <> '' "
                 "ORDER BY CreatedDate DESC", _PM_MARK).fetchone()
             if ref_row:
-                rrid, rrn, rinvno, rinvdate, rinvseries, rreftype = ref_row
-                tham_khao = {
-                    "so_ct": rrn, "ref_id": str(rrid), "inv_no": rinvno,
-                    "inv_date": (rinvdate.strftime("%d/%m/%Y") if rinvdate else None),
-                    "inv_series": rinvseries, "ref_type": rreftype,
-                }
-                rdets = cur.execute(
-                    "SELECT RefDetailID, SAInvoiceRefID FROM SAVoucherDetail "
-                    "WHERE RefID=?", rrid).fetchall()
-                tham_khao["sa_voucher_detail"] = [
-                    {"ref_detail_id": str(d[0]), "sa_invoice_ref_id": (str(d[1]) if d[1] else None)}
-                    for d in rdets]
-                rinv_ids = {str(d[1]).upper() for d in rdets if d[1]}
-                if rinv_ids:
-                    ph2 = ",".join(["?"] * len(rinv_ids))
-                    rinv_rows = cur.execute(
-                        "SELECT RefID, InvNo, InvTemplateNo, InvSeries FROM SAInvoice "
-                        "WHERE RefID IN (%s)" % ph2, list(rinv_ids)).fetchall()
-                    tham_khao["sa_invoice_lien_ket"] = [
-                        {"ref_id": str(r[0]), "inv_no": r[1], "inv_template_no": r[2],
-                         "inv_series": r[3]} for r in rinv_rows]
-                else:
-                    tham_khao["sa_invoice_lien_ket"] = []
-                    tham_khao["ghi_chu"] = ("Chứng từ THẬT này KHÔNG có SAInvoice liên kết qua "
-                                            "SAInvoiceRefID nào cả, dù vẫn có InvNo trên header "
-                                            "-> khả năng cao MISA hiện Số hóa đơn TỪ CHÍNH cột "
-                                            "InvNo/InvDate/InvSeries trên SAVoucher/SAVoucherDetail, "
-                                            "KHÔNG cần bảng SAInvoice riêng như PUInvoice bên Mua hàng.")
+                tham_khao = full_muc(ref_row[0])
             else:
-                tham_khao = {"ghi_chu": "Không tìm thấy chứng từ Bán hàng THẬT nào (không do phần "
-                                        "mềm tạo) có sẵn Số hóa đơn để so sánh."}
+                tham_khao = {"ghi_chu": "Không tìm thấy chứng từ Bán hàng THẬT nào để so sánh."}
         except Exception as e:
             tham_khao = {"loi": str(e)[:300]}
-        # Kiểm tra bảng Mẫu hóa đơn (IPTemplate) — nghi vấn khác: Mẫu số/Ký
-        # hiệu dùng để ghi có thể KHÔNG khớp mẫu hóa đơn nào đã đăng ký thật
-        # trong MISA, khiến MISA không nhận diện được để hiện lên.
-        ip_template = []
-        try:
-            ip_template = [{"inv_template_no": r[0], "inv_series": r[1]}
-                           for r in cur.execute(
-                               "SELECT DISTINCT InvTemplateNo, InvSeries FROM IPTemplate").fetchall()]
-        except Exception:
-            pass
         ket = []
         for so_ct in so_ct_list:
             so_ct = str(so_ct or "").strip()
             if not so_ct:
                 continue
-            muc = {"so_ct": so_ct}
             row = cur.execute(
-                "SELECT RefID, InvNo, InvDate, InvSeries, AccountObjectID, AccountObjectName, "
-                "RefType, CustomField10 FROM SAVoucher WHERE RefNoManagement=?", so_ct).fetchone()
+                "SELECT RefID FROM SAVoucher WHERE RefNoManagement=?", so_ct).fetchone()
             if not row:
-                muc["loi"] = "Không thấy SAVoucher nào có Số chứng từ này"
-                ket.append(muc)
+                ket.append({"so_ct": so_ct, "loi": "Không thấy SAVoucher nào có Số chứng từ này"})
                 continue
-            rid, invno, invdate, invseries, aoid, aoname, reftype, mark = row
-            muc["sa_voucher"] = {
-                "ref_id": str(rid), "inv_no": invno,
-                "inv_date": (invdate.strftime("%d/%m/%Y") if invdate else None),
-                "inv_series": invseries, "account_object_id": (str(aoid) if aoid else None),
-                "account_object_name": aoname, "ref_type": reftype,
-                "la_phan_mem_tao": (mark == _PM_MARK),
-            }
-            dets = cur.execute(
-                "SELECT RefDetailID, SAInvoiceRefID, AccountObjectID, AccountObjectName "
-                "FROM SAVoucherDetail WHERE RefID=?", rid).fetchall()
-            muc["sa_voucher_detail"] = [
-                {"ref_detail_id": str(d[0]), "sa_invoice_ref_id": (str(d[1]) if d[1] else None),
-                 "account_object_id": (str(d[2]) if d[2] else None), "account_object_name": d[3]}
-                for d in dets]
-            inv_ids = {str(d[1]).upper() for d in dets if d[1]}
-            if inv_ids:
-                ph = ",".join(["?"] * len(inv_ids))
-                inv_rows = cur.execute(
-                    "SELECT RefID, InvNo, InvDate, InvSeries, InvTemplateNo, AccountObjectID, "
-                    "AccountObjectName FROM SAInvoice WHERE RefID IN (%s)" % ph,
-                    list(inv_ids)).fetchall()
-                muc["sa_invoice_theo_sainvoicerefid"] = [
-                    {"ref_id": str(r[0]), "inv_no": r[1],
-                     "inv_date": (r[2].strftime("%d/%m/%Y") if r[2] else None),
-                     "inv_series": r[3], "inv_template_no": r[4],
-                     "account_object_id": (str(r[5]) if r[5] else None), "account_object_name": r[6]}
-                    for r in inv_rows]
-            else:
-                muc["sa_invoice_theo_sainvoicerefid"] = []
-            # dò NGƯỢC LẠI: có bản ghi SAInvoiceDetail nào trỏ về chứng từ này
-            # không (qua SAVoucherRefID) — để phát hiện trường hợp SAInvoice
-            # đã tạo nhưng link ngược bị lệch/rỗng.
-            inv_det_rows = cur.execute(
-                "SELECT RefDetailID, RefID, SAVoucherRefDetailID FROM SAInvoiceDetail "
-                "WHERE SAVoucherRefID=?", rid).fetchall()
-            muc["sa_invoice_detail_theo_savoucherrefid"] = [
-                {"ref_detail_id": str(r[0]), "ref_id": str(r[1]),
-                 "sa_voucher_ref_detail_id": (str(r[2]) if r[2] else None)}
-                for r in inv_det_rows]
+            muc = {"so_ct": so_ct}
+            muc.update(full_muc(row[0]))
             ket.append(muc)
-        return {"database": database, "ket_qua": ket, "tham_khao_chung_tu_that": tham_khao,
-                "mau_hoa_don_da_dang_ky_ip_template": ip_template[:50]}
+        return {"database": database, "ket_qua": ket, "tham_khao_chung_tu_that": tham_khao}
     finally:
         conn.close()
 
