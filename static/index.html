@@ -5318,7 +5318,7 @@ async function misaChanDoanBanHang(){
     const d=await api(`/api/misa-sql/chan-doan-ban-hang/${current}?so_ct=${encodeURIComponent(soCt)}`,{method:'GET'});
     document.getElementById('misaModalBody').innerHTML=`
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b></div>
-      <pre style="max-height:60vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11.5px;white-space:pre-wrap">${misaEsc(JSON.stringify(d.ket_qua,null,2))}</pre>
+      <pre style="max-height:60vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11.5px;white-space:pre-wrap">${misaEsc(JSON.stringify({ket_qua:d.ket_qua,tham_khao_chung_tu_that:d.tham_khao_chung_tu_that,mau_hoa_don_da_dang_ky_ip_template:d.mau_hoa_don_da_dang_ky_ip_template},null,2))}</pre>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
