@@ -4482,7 +4482,14 @@ async function taiNhapLieu(){
       if(nlRows.length){let t=`${nlRows.length} dòng`;if(d.updated_at){const dt=new Date(d.updated_at);t+=` — lưu lúc ${dt.toLocaleString('vi-VN')}`;}info.textContent=t;}
       else info.textContent='Chưa có dữ liệu. Import & tách ở màn hình trước, hoặc bấm ➕ Dòng.';
     }
-  }catch{nlHeader=[];nlRows=[];veGridNhapLieu();}
+  }catch(e){
+    // KHÔNG được âm thầm coi lỗi tải (mất mạng, server đang khởi động lại...)
+    // là "công ty chưa có dữ liệu" rồi hiện bảng trống — dễ khiến người dùng
+    // tưởng nhầm dữ liệu đã lưu bị MẤT (rồi có thể lỡ tay bấm Lưu đè lên dữ
+    // liệu thật vẫn còn nguyên trên server). Báo lỗi rõ + KHÔNG đụng gì đến
+    // nlHeader/nlRows hiện tại.
+    toast('Không tải được dữ liệu đã lưu — thử lại (KHÔNG bấm Lưu lúc này kẻo ghi đè mất dữ liệu thật): '+e.message,'err');
+  }
 }
 async function nlImportVaoBang(input){
   const files=input.files;
@@ -4506,7 +4513,14 @@ async function nlImportVaoBang(input){
     // Nối thêm vào bảng ĐANG XEM (không thay thế) — giữ nguyên header/dữ liệu
     // đã có, để import nhiều đợt (nhiều tháng/nhiều file) vẫn cộng dồn được,
     // giống hệt cách "Import & tách" ở màn hình trước vẫn làm (gộp nối đuôi).
-    if(!nlHeader.length&&kq.header&&kq.header.length)nlHeader=kq.header.slice();
+    // QUAN TRỌNG: kiểm tra bảng RỖNG hay không phải bằng nlRows.length (số
+    // DÒNG dữ liệu thật), KHÔNG phải nlHeader.length — vì bảng trống vẫn LUÔN
+    // có sẵn 2 cột "Nợ"/"Có" do nlDamBaoNoCo() tự thêm vào (kể cả khi 0
+    // dòng), nên nlHeader không bao giờ thực sự rỗng. Trước đây kiểm tra
+    // nhầm theo nlHeader.length khiến header 19 cột thật của file import bị
+    // BỎ QUA (tưởng "đã có header rồi"), mọi dòng import bị cắt còn ĐÚNG 2
+    // CỘT ĐẦU rồi nhét vào nhầm 2 cột "Nợ"/"Có" — mất sạch 17 cột còn lại.
+    if(!nlRows.length&&kq.header&&kq.header.length)nlHeader=kq.header.slice();
     const soCot=nlHeader.length||kq.header.length||0;
     for(const row of kq.rows){
       const r2=row.slice(0,soCot);
@@ -5095,6 +5109,11 @@ function nlLocTrong(ci){
 }
 async function nlLuu(){
   if(nlDMMode)return dmLuuGrid();
+  // An toàn: Lưu bảng RỖNG (0 dòng) sẽ GHI ĐÈ/XOÁ MẤT dữ liệu đã lưu trước đó
+  // của công ty (nếu có) — thường chỉ xảy ra do lỡ tay (vd bấm Lưu ngay sau
+  // khi trang tải lỗi hiện bảng trống, tưởng nhầm là "chưa nhập gì"). Hỏi
+  // lại 1 câu cho chắc, tránh mất dữ liệu oan.
+  if(!nlRows.length&&!confirm('Bảng đang TRỐNG (0 dòng). Lưu bây giờ sẽ XOÁ dữ liệu đã lưu trước đó (nếu có) của công ty này. Vẫn lưu?'))return;
   try{
     const r=await fetch(`/api/nhap-lieu/save/${current}?loai=${nhapLieuLoaiHienTai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nlHeader,rows:nlRows})});
     if(!r.ok)throw new Error('Lưu thất bại');
