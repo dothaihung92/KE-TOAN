@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.60"
+APP_BUILD = "2026-07-27.61"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13015,6 +13015,20 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             conn.rollback()
         else:
             conn.commit()
+        # TỰ SỬA NGAY ĐVT trên các dòng chứng từ vừa ghi (không bắt người
+        # dùng phải tự bấm nút "🔧 Sửa ĐVT chứng từ đã ghi" riêng nữa) — xem
+        # _misa_sua_dvt_chung_tu_da_ghi để biết vì sao cần bước riêng này
+        # (UnitID trên PUVoucherDetail là bản sao lúc ghi, không tự theo kịp
+        # Danh mục). Dùng KẾT NỐI RIÊNG (không phải conn/cur đang mở) vì
+        # transaction hiện tại đã commit xong — lỗi ở đây (nếu có) KHÔNG
+        # được làm hỏng kết quả ghi chứng từ vừa xong.
+        so_dvt_chungtu_sua = 0
+        if not preview and them_ct:
+            try:
+                _kq_sua_dvt = _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=False)
+                so_dvt_chungtu_sua = _kq_sua_dvt.get("so_sua", 0)
+            except Exception:
+                pass
         # TỰ KIỂM TRA: sau khi ghi thật, chạy lại đúng view MISA dùng cho màn
         # hình "Mua hàng hóa, dịch vụ" với ĐÚNG BỘ LỌC THẬT của MISA (bắt được
         # từ câu lệnh MISA thực thi): PostedDate trong kỳ + BranchID + DisplayOnBook
@@ -13035,7 +13049,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
                 "kho_moi": sorted(kho_moi),
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
-                "so_dvt_sua": so_dvt_sua,
+                "so_dvt_sua": so_dvt_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
@@ -13453,6 +13467,16 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             conn.rollback()
         else:
             conn.commit()
+        # TỰ SỬA NGAY ĐVT trên các dòng chứng từ vừa ghi — xem giải thích ở
+        # _misa_ghi_mua_hang (cùng cơ chế, không bắt người dùng phải tự bấm
+        # nút riêng nữa).
+        so_dvt_chungtu_sua = 0
+        if not preview and them_ct:
+            try:
+                _kq_sua_dvt = _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=False)
+                so_dvt_chungtu_sua = _kq_sua_dvt.get("so_sua", 0)
+            except Exception:
+                pass
         tu_kiem_tra = None
         if not preview and them_ct:
             ref_ids = [x["ref_id"] for x in ket if x.get("ref_id")]
@@ -13467,7 +13491,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": 0, "thieu_kho": [],
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
-                "so_dvt_sua": so_dvt_sua,
+                "so_dvt_sua": so_dvt_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
                 "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
