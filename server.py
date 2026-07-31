@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.81"
+APP_BUILD = "2026-07-27.82"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12168,12 +12168,21 @@ def _misa_thu_thap_khncc(cid):
             e[vai] = True
             if ten and len(ten) > len(e["ten"]):
                 e["ten"] = ten
+    # TRƯỚC ĐÂY: MST thu thập được nhưng KHÔNG kèm được Tên (ô "Tên người
+    # mua"/"Tên NCC" trống ở MỌI dòng có MST đó) bị BỎ QUA ÂM THẦM — MST vẫn
+    # có dữ liệu (hóa đơn/Bảng kê) nhưng biến mất khỏi danh sách cần thêm,
+    # không có cảnh báo gì, khiến người dùng không hiểu vì sao 1 MST rõ ràng
+    # có trong Bảng kê lại không import được (đã xác nhận qua báo cáo thật:
+    # MST 1200724379/1400355383 không hiện). Giờ VẪN GIỮ LẠI, dùng MST làm
+    # tên tạm (đánh dấu thieu_ten=True) để không mất — người dùng có thể tự
+    # sửa tên trong MISA sau khi import.
     out = []
     for mst, e in sorted(ds.items()):
-        if not e["ten"]:
-            continue
-        out.append({"mst": mst, "mst_hien": _misa_khncc_dinh_dang_mst(mst),
-                    "ten": e["ten"], "ncc": e["ncc"], "kh": e["kh"]})
+        mst_hien = _misa_khncc_dinh_dang_mst(mst)
+        thieu_ten = not e["ten"]
+        ten = e["ten"] or ("(Chưa rõ tên — MST %s)" % mst_hien)
+        out.append({"mst": mst, "mst_hien": mst_hien,
+                    "ten": ten, "ncc": e["ncc"], "kh": e["kh"], "thieu_ten": thieu_ten})
     return out
 
 def _misa_branch_id(cur):
@@ -12210,9 +12219,11 @@ def _misa_ghi_khncc(cid, database, preview=True):
 
         now = datetime.datetime.now()
         ket = []
-        them = trung = lech_ten = 0
+        them = trung = lech_ten = thieu_ten = 0
         for it in items:
             mst, mst_hien, ten = it["mst"], it["mst_hien"], it["ten"]
+            if it.get("thieu_ten"):
+                thieu_ten += 1
             k = mst.lower()
             if k in existing:
                 ten_misa = existing[k]
@@ -12236,7 +12247,7 @@ def _misa_ghi_khncc(cid, database, preview=True):
                     str(_uuid.uuid4()), mst_hien[:50], ten[:400], taxcode,
                     is_vendor, is_customer, 0, 0, branch_id, now)
             them += 1
-            ket.append({"mst": mst_hien, "ten": ten,
+            ket.append({"mst": mst_hien, "ten": ten, "thieu_ten": it.get("thieu_ten", False),
                         "vai_tro": "+".join(x for x in (["NCC"] if it["ncc"] else []) + (["KH"] if it["kh"] else [])),
                         "trang_thai": "sẽ thêm" if preview else "đã thêm"})
         if preview:
@@ -12244,7 +12255,7 @@ def _misa_ghi_khncc(cid, database, preview=True):
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
-                "so_lech_ten": lech_ten, "danh_sach": ket[:1000]}
+                "so_lech_ten": lech_ten, "so_thieu_ten": thieu_ten, "danh_sach": ket[:1000]}
     except HTTPException:
         conn.rollback()
         raise
