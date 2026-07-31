@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.85"
+APP_BUILD = "2026-07-27.86"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12948,6 +12948,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             pass
         posted_refno = set()
         unposted_docs = {}   # k_doc -> {"refids": [...], "reftype_ten": name}
+        _tmp_unposted = {}
         for refid, rn, rt, pf, pm, mark in cur.execute(
                 "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
                 "ISNULL(IsPostedManagement,0), ISNULL(CustomField10,'') FROM PUVoucher").fetchall():
@@ -12958,8 +12959,19 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             if (pf or pm) and not la_cua_minh:
                 posted_refno.add(k)
             else:
-                d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
+                d = _tmp_unposted.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt), "all_own": True})
                 d["refids"].append(refid)
+                if not la_cua_minh:
+                    d["all_own"] = False
+        # CHỈ coi 1 "Số chứng từ" là an toàn để Ghi đè (tự xóa/ghi lại) nếu
+        # TOÀN BỘ chứng từ trùng số đó là do phần mềm tạo trước đó — nếu LẪN
+        # chứng từ THẬT của khách (chưa ghi sổ) trùng số, KHÔNG được tự xóa
+        # (tránh mất dữ liệu thật), coi như "đã có, chặn" thay vì "ghi đè được".
+        for k, d in _tmp_unposted.items():
+            if d["all_own"]:
+                unposted_docs[k] = d
+            else:
+                posted_refno.add(k)
         # HỌC "mẫu" từ chứng từ Mua hàng MISA THẬT (do người dùng/MISA tạo,
         # đang HIỂN THỊ được) — CHỈ học từ chứng từ THẬT, KHÔNG học từ bản ghi
         # do PHẦN MỀM tạo (CustomField10=_PM_MARK) để tránh vòng lặp học lại
@@ -13550,6 +13562,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='PUService'").fetchall())
         posted_refno = set()
         unposted_docs = {}
+        _tmp_unposted = {}
         for refid, rn, rt, pf, pm, mark in cur.execute(
                 "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
                 "ISNULL(IsPostedManagement,0), ISNULL(CustomField10,'') FROM PUService").fetchall():
@@ -13560,8 +13573,15 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             if (pf or pm) and not la_cua_minh:
                 posted_refno.add(k)
             else:
-                d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
+                d = _tmp_unposted.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt), "all_own": True})
                 d["refids"].append(refid)
+                if not la_cua_minh:
+                    d["all_own"] = False
+        for k, d in _tmp_unposted.items():
+            if d["all_own"]:
+                unposted_docs[k] = d
+            else:
+                posted_refno.add(k)
         tu_khoa_loai = ["mua", "dịch vụ"]
         loai_ct_dang_co = []
         mau_that = []
@@ -13981,6 +14001,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='SAVoucher'").fetchall())
         posted_refno = set()
         unposted_docs = {}
+        _tmp_unposted = {}
         for refid, rn, rt, pf, pm, mark in cur.execute(
                 "SELECT RefID, RefNoManagement, RefType, ISNULL(IsPostedFinance,0), "
                 "ISNULL(IsPostedManagement,0), ISNULL(CustomField10,'') FROM SAVoucher").fetchall():
@@ -13991,8 +14012,19 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             if (pf or pm) and not la_cua_minh:
                 posted_refno.add(k)
             else:
-                d = unposted_docs.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt)})
+                d = _tmp_unposted.setdefault(k, {"refids": [], "reftype_ten": reftype_ten.get(rt), "all_own": True})
                 d["refids"].append(refid)
+                if not la_cua_minh:
+                    d["all_own"] = False
+        # CHỈ coi 1 "Số chứng từ" là an toàn để Ghi đè (tự xóa/ghi lại) nếu
+        # TOÀN BỘ chứng từ trùng số đó là do phần mềm tạo trước đó — nếu LẪN
+        # chứng từ THẬT của khách (chưa ghi sổ) trùng số, KHÔNG được tự xóa
+        # (tránh mất dữ liệu thật), coi như "đã có, chặn" thay vì "ghi đè được".
+        for k, d in _tmp_unposted.items():
+            if d["all_own"]:
+                unposted_docs[k] = d
+            else:
+                posted_refno.add(k)
         # "học" quy ước (RefType/DisplayOnBook/chi nhánh/người tạo/RefOrder) từ
         # chứng từ SAVoucher THẬT đang có — cùng lý do/cơ chế như Mua hàng
         # (_misa_ghi_mua_hang): tránh đoán RefType/DisplayOnBook sai khiến
@@ -14059,6 +14091,45 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
         now = datetime.datetime.now()
         iid_bh, uid_bh, ten_bh = hang["bh"]
         seq_thang = {}
+        # Khởi tạo SỐ CHỨNG TỪ tiếp nối số đã có trong MISA, KHÔNG bắt đầu lại
+        # từ 001 mỗi lần import — trước đây seq_thang bắt đầu từ 0 nên khi
+        # công ty đã tự đánh số BH001..BH00N/T{tháng}/{năm} theo đúng quy ước
+        # mặc định của MISA (giống hệt format phần mềm tự sinh), lô import
+        # cùng tháng sẽ ĐÈ TRÙNG "Số chứng từ" với chứng từ THẬT đã có (đã xác
+        # nhận qua ảnh chụp MISA: 2 dòng khác nhau cùng hiện "BH001/T12/2023").
+        # Nay dò số lớn nhất đã tồn tại theo từng tháng/năm rồi đánh tiếp từ đó.
+        import re as _re_bh
+        try:
+            for (rn,) in cur.execute(
+                    "SELECT RefNoManagement FROM SAVoucher WHERE RefNoManagement LIKE 'BH%' "
+                    "UNION SELECT RefNoFinance FROM SAVoucher WHERE RefNoFinance LIKE 'BH%'"
+                    ).fetchall():
+                m = _re_bh.match(r'^BH(\d+)/T(\d+)/(\d+)$', str(rn or "").strip(), _re_bh.IGNORECASE)
+                if m:
+                    k2 = (str(int(m.group(2))), m.group(3))
+                    seq_thang[k2] = max(seq_thang.get(k2, 0), int(m.group(1)))
+        except Exception:
+            pass
+        # Nhận diện chứng từ ĐÃ TỪNG được CHÍNH phần mềm ghi cho ĐÚNG hóa đơn
+        # này để "Ghi đè" thay thế đúng chỗ — khóa theo (MST khách hàng, Số
+        # hóa đơn), KHÔNG theo "Số chứng từ" (Số chứng từ giờ luôn sinh SỐ MỚI
+        # tiếp nối MISA — xem seq_thang ở trên — nên không còn ổn định giữa 2
+        # lần chạy để dùng làm khóa nhận diện "đã ghi trước đó" được nữa).
+        _pm_invoices = {}   # (mst_lower, sohd_lower) -> {"refids", "doc", "posted"}
+        try:
+            for refid, rn, ax, invno, pf, pm in cur.execute(
+                    "SELECT RefID, RefNoManagement, ISNULL(AccountObjectTaxCode,''), "
+                    "ISNULL(InvNo,''), ISNULL(IsPostedFinance,0), ISNULL(IsPostedManagement,0) "
+                    "FROM SAVoucher WHERE ISNULL(CustomField10,'')=?", _PM_MARK).fetchall():
+                if not invno:
+                    continue
+                bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower())
+                e = _pm_invoices.setdefault(bk, {"refids": [], "doc": rn, "posted": False})
+                e["refids"].append(refid)
+                if pf or pm:
+                    e["posted"] = True
+        except Exception:
+            pass
         ket = []
         them_ct = trung = bo_kh = go = so_ngay_loi = so_tien_0 = bo_tk = 0
         tk_thay = set()
@@ -14095,32 +14166,59 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             if len(p) == 3:
                 thang = str(int(p[1])) if p[1].isdigit() else p[1]
                 nam = p[2]
-            mk = (thang, nam)
-            seq_thang[mk] = seq_thang.get(mk, 0) + 1
-            doc = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
-            k_doc = doc.strip().lower()
-            if k_doc in posted_refno:
+            bk = (mst_k, sohd.strip().lower())
+            pm_e = _pm_invoices.get(bk)
+            if pm_e and pm_e["posted"]:
                 trung += 1
-                ket.append({"so_ct": doc, "so_hd": sohd, "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                ket.append({"so_ct": pm_e["doc"], "so_hd": sohd,
+                            "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
                 continue
-            if k_doc in unposted_docs and not ghi_de:
+            if pm_e and not ghi_de:
                 trung += 1
-                ket.append({"so_ct": doc, "so_hd": sohd,
-                            "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
+                ket.append({"so_ct": pm_e["doc"], "so_hd": sohd,
                             "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
                 continue
-            ghi_de_ct = k_doc in unposted_docs
-            if ghi_de_ct and not preview:
-                for rid in unposted_docs[k_doc]["refids"]:
-                    # gỡ luôn HÓA ĐƠN liên kết (SAInvoice/SAInvoiceDetail) kèm
-                    # chứng từ cũ trước khi xóa, tránh để lại bản ghi mồ côi.
-                    old_inv_ids = [r[0] for r in cur.execute(
-                        "SELECT RefID FROM SAInvoiceDetail WHERE SAVoucherRefID=?", rid).fetchall()]
-                    cur.execute("DELETE FROM SAVoucherDetail WHERE RefID=?", rid)
-                    cur.execute("DELETE FROM SAVoucher WHERE RefID=?", rid)
-                    for oiid in set(old_inv_ids):
-                        cur.execute("DELETE FROM SAInvoiceDetail WHERE RefID=?", oiid)
-                        cur.execute("DELETE FROM SAInvoice WHERE RefID=?", oiid)
+            ghi_de_ct = bool(pm_e)
+            if ghi_de_ct:
+                # Ghi đè ĐÚNG chứng từ cũ của CHÍNH phần mềm cho hóa đơn này —
+                # giữ nguyên Số chứng từ cũ (không sinh số mới) để không tích
+                # tụ chứng từ trùng lặp mỗi lần bấm "Ghi đè" test lại. NHƯNG
+                # nếu số cũ đó đang bị TRÙNG với 1 chứng từ KHÁC (thật/của
+                # khách — trường hợp đã xảy ra thực tế: bản ghi cũ do phần
+                # mềm tạo lúc numbering còn lỗi, trùng đúng "BH001/T12/2023"
+                # có sẵn của khách) thì KHÔNG được dùng lại số đó nữa — sinh
+                # SỐ MỚI để tránh tái trùng.
+                doc = pm_e["doc"]
+                if doc.strip().lower() in posted_refno:
+                    mk = (thang, nam)
+                    seq_thang[mk] = seq_thang.get(mk, 0) + 1
+                    doc = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
+                if not preview:
+                    for rid in pm_e["refids"]:
+                        # gỡ luôn HÓA ĐƠN liên kết (SAInvoice/SAInvoiceDetail)
+                        # kèm chứng từ cũ trước khi xóa, tránh để lại bản ghi
+                        # mồ côi.
+                        old_inv_ids = [r[0] for r in cur.execute(
+                            "SELECT RefID FROM SAInvoiceDetail WHERE SAVoucherRefID=?",
+                            rid).fetchall()]
+                        cur.execute("DELETE FROM SAVoucherDetail WHERE RefID=?", rid)
+                        cur.execute("DELETE FROM SAVoucher WHERE RefID=?", rid)
+                        for oiid in set(old_inv_ids):
+                            cur.execute("DELETE FROM SAInvoiceDetail WHERE RefID=?", oiid)
+                            cur.execute("DELETE FROM SAInvoice WHERE RefID=?", oiid)
+            else:
+                mk = (thang, nam)
+                seq_thang[mk] = seq_thang.get(mk, 0) + 1
+                doc = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
+            k_doc = doc.strip().lower()
+            if k_doc in posted_refno and not ghi_de_ct:
+                # số vừa sinh trùng chứng từ khác đã có trong MISA (hiếm) —
+                # bỏ qua dòng này để an toàn, không đụng chứng từ không liên
+                # quan.
+                trung += 1
+                ket.append({"so_ct": doc, "so_hd": sohd,
+                            "trang_thai": "bỏ qua — trùng Số chứng từ với chứng từ khác trong MISA"})
+                continue
             tong_hd = tong.get(f"{kyhieu}|{sohd}", 0)
             tk_no = 131 if abs(tong_hd) >= NGUONG_5TR else 1111
             tk_no_dc = tra_tk(str(tk_no))
