@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.82"
+APP_BUILD = "2026-07-27.83"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17864,7 +17864,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # Lưu tổng theo từng hóa đơn (để đối chiếu việc 4)
     ct_totals = {"purchase": {}, "sold": {}}
 
-    def phan_bo_chiet_khau(items):
+    def phan_bo_chiet_khau(items, tgtcthue_hd=None):
         """Xử lý dòng hàng hóa đơn MUA VÀO — gồm CÁC LOẠI CHIẾT KHẤU THƯƠNG MẠI:
 
         LOẠI 1 — Chiết khấu trên TỪNG DÒNG (STCKhau>0 ngay trên dòng hàng):
@@ -17961,6 +17961,45 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 ck_rieng_items.setdefault(rate, []).append(it)
                 skip_ck_rieng.add(id(it))
 
+        # --- Quyết định TOÀN HÓA ĐƠN có nên trừ CK dòng (STCKhau) vào Thành
+        # tiền hay không, đối chiếu với TgTCThue (Tổng tiền chưa thuế CHÍNH
+        # THỨC của hóa đơn) — đáng tin cậy hơn hẳn heuristic so SLuong*DGia
+        # với ThTien ở _net_sau_ck (dễ sai vì có hóa đơn ĐƠN GIÁ ghi sẵn là
+        # giá SAU chiết khấu, khiến SLuong*DGia trùng ThTien một cách tình cờ
+        # dù không hề "gộp" — xác nhận qua dữ liệu thật: hóa đơn Xiaomi
+        # KHHDon C26MYY, ThTien=990.741=DGia*SLuong y hệt "Thành tiền chưa có
+        # thuế GTGT" hiện trên bản gốc hóa đơn — KHÔNG trừ Chiết khấu 111.111
+        # — và TgTCThue của hóa đơn cũng khớp CHÍNH XÁC tổng ThTien KHÔNG trừ
+        # CK; heuristic cũ lại đoán nhầm là "gộp" nên trừ thêm 1 lần nữa,
+        # sai). None = không đối chiếu được -> dùng lại heuristic cũ theo
+        # từng dòng (_net_sau_ck) làm dự phòng.
+        tru_ck_toan_hd = None
+        tgtcthue_v = _to_num(tgtcthue_hd)
+        if isinstance(tgtcthue_v, (int, float)) and tgtcthue_v > 0:
+            tong_khong_tru = tong_co_tru = 0
+            co_dong_loai1 = False
+            for it in items:
+                tchat_i = str(it.get("tchat", "") or "")
+                tt_i = _to_num(it.get("thtien")) or 0
+                if (tchat_i == "4" and (not tt_i or tt_i == 0)) or id(it) in skip_ck_rieng:
+                    continue
+                if not isinstance(tt_i, (int, float)):
+                    continue
+                ck_i = _to_num(it.get("stckhau")) or 0
+                tong_khong_tru += tt_i
+                if tt_i > 0 and isinstance(ck_i, (int, float)) and ck_i > 0:
+                    co_dong_loai1 = True
+                    tong_co_tru += round(tt_i - ck_i)
+                else:
+                    tong_co_tru += tt_i
+            if co_dong_loai1:
+                lech_khong_tru = abs(tong_khong_tru - tgtcthue_v)
+                lech_co_tru = abs(tong_co_tru - tgtcthue_v)
+                if lech_khong_tru <= 1 and lech_khong_tru < lech_co_tru:
+                    tru_ck_toan_hd = False
+                elif lech_co_tru <= 1 and lech_co_tru < lech_khong_tru:
+                    tru_ck_toan_hd = True
+
         # --- Pass 2: dựng các dòng hàng (đã trừ CK dòng), bỏ ghi chú + CK riêng ---
         out = []
         for it in items:
@@ -17990,10 +18029,20 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 else:
                     h["_la_ck"] = True
             else:
-                # LOẠI 1: dòng hàng dương -> trừ chiết khấu dòng (nếu có) vào thành tiền
+                # LOẠI 1: dòng hàng dương -> trừ chiết khấu dòng (nếu có) vào thành
+                # tiền — CHỈ khi đã xác định (qua đối chiếu TgTCThue) hoặc dự
+                # phòng theo heuristic cũ (tru_ck_toan_hd=None) là hóa đơn này
+                # THẬT SỰ cần trừ; tru_ck_toan_hd=False -> giữ nguyên ThTien gốc
+                # (đã là giá sau chiết khấu, KHÔNG trừ thêm lần nữa).
                 if isinstance(ck, (int, float)) and ck > 0:
-                    h["thtien"] = _net_sau_ck(it)
-                    h["_co_ck_dong"] = True
+                    if tru_ck_toan_hd is False:
+                        h["_co_ck_dong"] = True   # vẫn đánh dấu có CK để hiển thị, không trừ
+                    elif tru_ck_toan_hd is True:
+                        h["thtien"] = round(tt - ck)
+                        h["_co_ck_dong"] = True
+                    else:
+                        h["thtien"] = _net_sau_ck(it)
+                        h["_co_ck_dong"] = True
             out.append(h)
 
         # --- Pass 3: phân bổ giảm HKD NQ204 vào thành tiền các dòng dương ---
@@ -18245,7 +18294,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 continue
 
             if loai == "purchase":
-                items = phan_bo_chiet_khau(items)
+                items = phan_bo_chiet_khau(items, tgtcthue_hd=r["tgtcthue"])
 
             _TS_KHONG_THUE = ("", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG",
                               "KHONG", "0%", "0")
