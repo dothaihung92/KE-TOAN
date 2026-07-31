@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.83"
+APP_BUILD = "2026-07-27.84"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16702,11 +16702,23 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # Các chỉ tiêu (giữ nguyên những thẻ khác như ct22, ct36... = giá trị template
     # hoặc tính lại). Ở đây ta điền số liệu kỳ này:
     # ct23/24 = TỔNG mua vào (gồm cả hàng nhập khẩu); ct23a/24a = TRONG ĐÓ hàng nhập khẩu.
-    if imp and imp_nk_ds:
-        # File import Excel: sheet 'BK Mua vào' đã bao gồm SẴN các dòng tờ khai
-        # nhập khẩu (Ký hiệu 'TKNK'/Trạng thái 'Tờ khai nhập khẩu') trong TỔNG
-        # mua vào -> [23]/[24] giữ nguyên tổng, [23a]/[24a] chỉ TÁCH riêng phần
-        # nhập khẩu ra để khai đúng chỉ tiêu, TUYỆT ĐỐI không cộng thêm lần nữa.
+    # CHỈ dựa vào imp_nk_ds (tính TRỰC TIẾP từ CHÍNH file bảng kê đang đọc,
+    # xem _doc_mua_vao_tu_file_bang_ke — ds/thue LUÔN CỘNG SẴN cả dòng TKNK)
+    # — TRƯỚC ĐÂY còn kèm điều kiện "imp" (imported_data, 1 cache RIÊNG từ
+    # luồng "Import dữ liệu đã kiểm tra" cũ, không liên quan gì tới việc
+    # mua_ds đọc từ file bảng kê có sẵn NK hay chưa) khiến công ty KHÔNG
+    # dùng luồng import Excel đó (đa số chỉ dùng "Xuất Excel tổng hợp" qua
+    # tra cứu) luôn rơi vào nhánh else, CỘNG THÊM tk_ds_nk (bảng tokhai_nhap)
+    # LẦN NỮA lên trên mua_ds vốn đã có sẵn NK -> [23]/[24] bị CỘNG TRÙNG
+    # hàng nhập khẩu (đã xác nhận qua dữ liệu thật: công ty MST 0315364970,
+    # [23]=941.743.359 trong khi mua_ds thật (đọc từ bảng kê, gồm cả NK) chỉ
+    # 489.623.783 — chênh đúng bằng 452.119.576, chính là giá trị NK bị cộng
+    # 2 lần).
+    if imp_nk_ds:
+        # sheet 'BK Mua vào' đã bao gồm SẴN các dòng tờ khai nhập khẩu (Ký
+        # hiệu 'TKNK'/Trạng thái 'Tờ khai nhập khẩu') trong TỔNG mua vào ->
+        # [23]/[24] giữ nguyên tổng, [23a]/[24a] chỉ TÁCH riêng phần nhập
+        # khẩu ra để khai đúng chỉ tiêu, TUYỆT ĐỐI không cộng thêm lần nữa.
         ct23 = round(mua_ds)
         ct24 = round(mua_thue)
         ct23a = round(imp_nk_ds)      # giá trị HHDV nhập khẩu (chưa thuế GTGT)
@@ -16748,8 +16760,8 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # 2 sheet có thể LỆCH với [23]/[24]/[25]/[34]/[35] mà người dùng không hề
     # biết cho tới khi đối chiếu tay. Báo NGAY, LƯU LẠI (không mất khi toast
     # tự tắt) để không bỏ sót — theo đúng yêu cầu người dùng.
-    mua_full_tk = 0 if (imp and imp_nk_ds) else tk_ds_nk_full
-    mua_thue_full_tk = 0 if (imp and imp_nk_ds) else tk_thue_nk_full
+    mua_full_tk = 0 if imp_nk_ds else tk_ds_nk_full
+    mua_thue_full_tk = 0 if imp_nk_ds else tk_thue_nk_full
     mua_ds_bk = round(mua_ds_full + mua_full_tk)
     mua_thue_bk = round(mua_thue_full + mua_thue_full_tk)
     ban_ds_bk = round(ban_ds_full)
@@ -16898,7 +16910,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # [23]/[24] ở trên, không còn qua cache imported_data riêng (vốn chỉ ghi
     # 1 LẦN lúc "Import dữ liệu đã kiểm tra", dễ bị lạc hậu khi import thêm
     # tờ khai nhập khẩu rồi chỉ Xuất Excel lại mà không re-import).
-    if imp and imp_nk_ds:
+    if imp_nk_ds:
         canh_bao = (canh_bao + "\n\n" if canh_bao else "") + (
             "ℹ️ Chỉ tiêu [23a]/[24a] (hàng nhập khẩu) lấy trực tiếp từ file bảng kê đã xuất cho kỳ này.")
         # Đối chiếu với số liệu tờ khai nhập khẩu (bảng tokhai_nhap) tính lại
@@ -16940,7 +16952,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             f"ℹ️ Số liệu [23]-[35] lấy từ file bảng kê: {file_bk_da_doc} "
             f"(sửa đổi lúc {_mtime_bk}).")
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
-            "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp and imp_nk_ds),
+            "da_luu_ket_xuat": da_luu_ket_xuat, "dung_du_lieu_import": bool(imp_nk_ds),
             "lech_bk": bool(canh_bao_lech),
             "file_bang_ke": file_bk_da_doc,
             "thue_phai_nop": ct40, "thue_phai_nop_ky": ky_hien_thi_vat}
