@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.84"
+APP_BUILD = "2026-07-27.85"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14194,16 +14194,16 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                           (" (%s)" % mau_ky_hieu_txt) if mau_ky_hieu_txt else "",
                           ngay_dt.strftime("%d/%m/%Y"))).strip())[:500]
             dob = hoc_dob if hoc_dob in (0, 2) else 0
-            # KHÔNG ghi InvSeries/InvTemplateNo (để trống như MISA thật) —
-            # xác nhận qua đối chiếu trực tiếp: chứng từ TỰ TAY tạo (Số hóa
-            # đơn 444, hiện ĐÚNG trên MISA) có InvSeries="" và InvTemplateNo
-            # =NULL; chứng từ phần mềm ghi cụ thể "1"/"C24TTP" thì MISA ẨN
-            # HẲN khối "Hóa đơn" (Số hóa đơn/Ngày hóa đơn cũng mất theo, dù 2
-            # cột đó tự nó không sai). Nguyên nhân: công ty CHƯA đăng ký Mẫu
-            # hóa đơn nào trong MISA (bảng IPTemplate rỗng) — Mẫu số/Ký hiệu
-            # cụ thể không khớp được mẫu nào đã đăng ký khiến MISA từ chối
-            # hiện luôn cả khối, để trống thì không cần đối chiếu nên hiện
-            # bình thường. Mẫu số/Ký hiệu vẫn được giữ đủ trong Diễn giải.
+            # InvSeries/InvTemplateNo: GHI ĐÚNG giá trị thật (kyhieu/maus) —
+            # vòng trước từng để trống vì tưởng công ty chưa đăng ký Mẫu hóa
+            # đơn (dựa trên 2 chứng từ TỰ TAY tạo bỏ trống 2 ô này lúc test
+            # nhanh), nhưng đối chiếu lại với chứng từ THẬT khác của CHÍNH
+            # công ty này (BH040/T10/2025, và hàng loạt chứng từ C25TTP khác
+            # đang hiện đúng trên MISA) cho thấy Mẫu số="1"/Ký hiệu="C25TTP"
+            # ĐẦY ĐỦ vẫn hiển thị bình thường — kết luận "để trống" trước đó
+            # là suy diễn sai từ dữ liệu test không đại diện. Gốc rễ thật của
+            # lỗi không hiện là QuantityBilled/MainQuantityBilled bị NULL
+            # (đã sửa ở bản .81), không liên quan gì InvSeries/InvTemplateNo.
             header_cols = dict(_SA_VOUCHER_DEFAULT, **{
                 "RefID": ref_id, "BranchID": branch_id, "DisplayOnBook": dob,
                 "RefType": ref_type, "RefDate": ngay_dt, "PostedDate": ngay_dt,
@@ -14215,7 +14215,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 "TotalSaleAmountOC": ds, "TotalSaleAmount": ds,
                 "TotalAmountOC": ds + thue, "TotalAmount": ds + thue,
                 "TotalVATAmountOC": thue, "TotalVATAmount": thue,
-                "InvNo": sohd[:500], "InvDate": ngay_dt, "InvSeries": "",
+                "InvNo": sohd[:500], "InvDate": ngay_dt, "InvSeries": kyhieu[:20] or "",
                 "CreatedDate": now, "CreatedBy": hoc_nguoi_tao,
                 "ModifiedDate": now, "ModifiedBy": hoc_nguoi_tao,
                 "RefOrder": max_reforder + them_ct + 1,
@@ -14230,7 +14230,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     "RefType": inv_reftype,
                     "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
                     "AccountObjectTaxCode": mst[:50] or None,
-                    "InvTemplateNo": None, "InvSeries": "",
+                    "InvTemplateNo": maus[:25] or None, "InvSeries": kyhieu[:20] or "",
                     "InvNo": sohd[:25] or None, "InvDate": ngay_dt,
                     "JournalMemo": dien_giai,
                     "TotalSaleAmountOC": ds, "TotalSaleAmount": ds,
