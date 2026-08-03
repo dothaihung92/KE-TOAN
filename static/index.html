@@ -5177,6 +5177,36 @@ function nlLocTrong(ci){
     const s=new Set();
     nlRows.forEach((r,idx)=>{if(String(r[ci]==null?'':r[ci]).trim()==='')s.add(idx);});
     nlSnapTrong[ci]=s;
+    // Màn Xuất Kho: gom các dòng TRỐNG CÙNG TÊN SẢN PHẨM đứng cạnh nhau để
+    // xử lý nhanh theo khối (chọn vùng/Fill Down 1 lần) thay vì rải rác xen
+    // giữa nhiều mặt hàng khác — CHỈ đổi chỗ NỘI DUNG cho nhau GIỮA ĐÚNG các
+    // vị trí (chỉ số dòng) đang trống, không đụng tới dòng nào khác, nên cơ
+    // chế chọn vùng/Fill Down/Fill Right (vốn dựa vào thứ tự CHỈ SỐ dòng
+    // trong nlRows để suy ra thứ tự hiển thị) vẫn đúng như cũ, không cần sửa
+    // các hàm đó. Đổi chỗ ĐỒNG THỜI cả xkRows (đã đồng bộ trước bằng
+    // xkTuNlRows()) theo ĐÚNG cùng 1 hoán vị — xkRows giữ "goi_y" (gợi ý mã)
+    // tính riêng theo từng dòng, nếu chỉ đổi nlRows mà không đổi xkRows theo
+    // sẽ khiến gợi ý ở modal "Gán mã hàng kho" bị lệch sang nhầm dòng khác.
+    if(nhapLieuLoaiHienTai==='xk'&&s.size>1){
+      const iTen=nlHeader.findIndex(h=>String(h||'').trim().toLowerCase()==='tên sản phẩm');
+      if(iTen>=0){
+        xkTuNlRows();
+        const viTri=[...s].sort((a,b)=>a-b);
+        const dong=viTri.map(vt=>nlRows[vt]);
+        const dongXk=viTri.map(vt=>xkRows[vt]);
+        const thuTu=viTri.map((_,i)=>i);
+        thuTu.sort((ia,ib)=>{
+          const ta=String(dong[ia][iTen]||'').trim().toLowerCase();
+          const tb=String(dong[ib][iTen]||'').trim().toLowerCase();
+          return ta<tb?-1:(ta>tb?1:0);
+        });
+        viTri.forEach((vt,i)=>{
+          nlRows[vt]=dong[thuTu[i]];
+          xkRows[vt]=dongXk[thuTu[i]];
+        });
+        nlChon=null;
+      }
+    }
   }
   veGridNhapLieu();
 }
