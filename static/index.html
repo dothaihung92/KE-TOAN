@@ -4121,6 +4121,7 @@ function xkMoGan(idx){
   xkGanIdx=idx;
   const r=xkRows[idx];
   document.getElementById('xkGanTenSp').innerHTML=`Tên bán: "${xkEsc(r.ten_sp)}"${r.sl?` — SL ${r.sl}`:''}`+
+    (r.dgia!=null&&r.dgia!==''?` — Đơn giá bán: ${fmtVND(r.dgia)}`:'')+
     (r.thieu_ton?'<br><span style="color:#b91c1c">⚠ Không mã nào còn đủ tồn cho số lượng này — chọn tạm nếu chấp nhận âm kho</span>':'');
   document.getElementById('xkGanSearch').value='';
   xkVeDanhSachGan();
@@ -4153,7 +4154,6 @@ function xkVeDanhSachGan(){
   const box=document.getElementById('xkGanList'); if(!box)return;
   const r=xkRows[xkGanIdx]; if(!r){box.innerHTML='';xkGanDanhSach=[];xkGanHighlight=-1;return}
   const tonConLai=xkTonConLaiMap(xkGanIdx);
-  const tenChuanBan=xkChuanTen(r.ten_sp);
   const q=(document.getElementById('xkGanSearch').value||'').toLowerCase().trim();
   const goiY=(r.goi_y||[]).filter(g=>!q||`${g.ten} ${g.ma}`.toLowerCase().includes(q))
     .map(g=>({...g, con_lai: tonConLai[g.ma]??g.con_lai, noibat:true}))
@@ -4167,7 +4167,6 @@ function xkVeDanhSachGan(){
   xkGanDanhSach=[...goiY, ...khac];
   xkGanHighlight=xkGanDanhSach.length?0:-1;
   const dong=(it,i)=>{
-    const khacXa=!xkManh(tenChuanBan, xkChuanTen(it.ten)) && (it.diem==null || it.diem<0.6);
     return `<div data-idx="${i}" onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
       onmouseenter="xkGanHighlight=${i};xkGanCapNhatHighlight()"
       style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0">
@@ -4177,7 +4176,6 @@ function xkVeDanhSachGan(){
       </div>
       <div style="font-size:14px;color:var(--muted);margin-top:2px">ĐVT: ${xkEsc(it.dvt)||'—'} · Đơn giá: ${fmtVND(it.gia)} ·
         Còn lại: <b style="color:${it.con_lai>0?'#1a7a7a':'#b91c1c'}">${it.con_lai}</b></div>
-      ${khacXa?'<div style="font-size:12px;color:#b91c1c;font-weight:700;margin-top:2px">⚠ Tên khác khá nhiều so với tên bán — kiểm tra kỹ trước khi chọn</div>':''}
     </div>`;
   };
   let html='';
@@ -5008,6 +5006,12 @@ document.addEventListener('mouseup',()=>{nlDangKeo=false;});
 document.addEventListener('keydown',(e)=>{
   const nlScreen=document.getElementById('nhapLieuScreen');
   if(!nlScreen||nlScreen.style.display==='none')return;
+  // Có modal con (vd "Gán mã hàng kho") đang mở trên màn Nhập Liệu thì để
+  // modal đó tự xử lý phím tắt/Esc của riêng nó — không cho phím tắt toàn
+  // cục (Esc "Quay về") chạy song song, tránh vừa đóng modal vừa bị thoát
+  // luôn ra ngoài màn Nhập Liệu chỉ với 1 lần bấm Esc.
+  const ganModal=document.getElementById('xkGanModal');
+  if(ganModal&&ganModal.style.display==='flex')return;
   if(!(e.ctrlKey||e.metaKey||e.altKey)&&e.key!=='Escape')return;
   const k=e.key.toLowerCase();
   if(e.ctrlKey&&e.shiftKey&&k==='l'){e.preventDefault();nlBatFilter();}
