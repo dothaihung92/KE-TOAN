@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.87"
+APP_BUILD = "2026-07-27.88"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16222,18 +16222,44 @@ def _nam_quy_cua_ky(ky):
 def _doc_ct41_ky_truoc(comp, ky_hien_tai):
     """Tự động đọc chỉ tiêu [41] (thuế GTGT còn được khấu trừ chuyển kỳ
     sau) từ file XML tờ khai 01/GTGT của KỲ LIỀN TRƯỚC ky_hien_tai, tìm
-    trong thư mục lưu file kết xuất riêng của công ty (cấu trúc Năm/Quý) —
-    dùng làm 'Số dư đầu kỳ' (chỉ tiêu [22]) cho kỳ hiện tại, thay vì phải
-    tự mở file cũ ra chép tay số liệu.
+    trong thư mục lưu file kết xuất riêng của công ty (cấu trúc Năm/Quý
+    hoặc Năm/Tháng nếu công ty kê khai theo tháng) — dùng làm 'Số dư đầu
+    kỳ' (chỉ tiêu [22]) cho kỳ hiện tại, thay vì phải tự mở file cũ ra
+    chép tay số liệu.
     Trả (gia_tri_hoac_None, ky_truoc, duong_dan_file_hoac_None)."""
     import re as _re_ct41
     ky_truoc = _ky_lien_truoc(ky_hien_tai)
     if not ky_truoc:
         return None, "", None
-    nam, quy = _nam_quy_cua_ky(ky_truoc)
-    if not nam:
-        return None, ky_truoc, None
-    fp, _ung_vien = _tim_file_nop_theo_cong_ty(comp, "GTGT", nam, quy, "")
+    a_truoc = ky_truoc.split("/", 1)[0].strip().upper()
+    if a_truoc.startswith("Q"):
+        nam, quy = _nam_quy_cua_ky(ky_truoc)
+        if not nam:
+            return None, ky_truoc, None
+        fp, _ung_vien = _tim_file_nop_theo_cong_ty(comp, "GTGT", nam, quy, "")
+    else:
+        # Kỳ trước là THÁNG — tìm ĐÚNG theo đúng tháng đó, KHÔNG quy về quý
+        # chứa nó nữa: trước đây _nam_quy_cua_ky() quy tháng về quý rồi tìm
+        # theo cấu trúc Năm/Quý (Quý N cả 3 tháng) — với công ty kê khai
+        # theo THÁNG (tự tổ chức thư mục Năm/THANG N — xem _thu_muc_ket_xuat_ky)
+        # thì tìm sai thư mục/không khớp kỳ trong tên file -> không lấy được
+        # số dư đầu kỳ (đã xác nhận qua tờ khai thật của công ty HOÀNG CHÂU
+        # HOÀNG, kỳ tháng 06/2026: chỉ tiêu [22] không lấy đúng số dư cuối kỳ
+        # tháng 05/2026). Nay tìm thẳng theo khoảng ngày ĐÚNG 1 THÁNG đó.
+        try:
+            mm, yyyy = _ky_ve_thang(ky_truoc)
+            nam = int(yyyy)
+        except Exception:
+            return None, ky_truoc, None
+        export_dir = (comp["export_dir"] if comp and "export_dir" in comp.keys() else "") or ""
+        fp = None
+        if export_dir:
+            last_day = calendar.monthrange(nam, int(mm))[1]
+            tu_ngay = f"01/{mm}/{yyyy}"
+            den_ngay = f"{last_day:02d}/{mm}/{yyyy}"
+            dich = _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay)
+            if dich:
+                fp, _ung_vien = _tim_file_nop_to_khai(dich, comp["mst"], "GTGT")
     if not fp:
         return None, ky_truoc, None
     try:
