@@ -4531,11 +4531,35 @@ async function nlImportVaoBang(input){
     // nhầm theo nlHeader.length khiến header 19 cột thật của file import bị
     // BỎ QUA (tưởng "đã có header rồi"), mọi dòng import bị cắt còn ĐÚNG 2
     // CỘT ĐẦU rồi nhét vào nhầm 2 cột "Nợ"/"Có" — mất sạch 17 cột còn lại.
-    if(!nlRows.length&&kq.header&&kq.header.length)nlHeader=kq.header.slice();
-    const soCot=nlHeader.length||kq.header.length||0;
+    if(!nlRows.length&&kq.header&&kq.header.length){
+      nlHeader=kq.header.slice();
+    }else if(kq.header&&kq.header.length){
+      // Bảng ĐANG XEM đã có sẵn dữ liệu (import nối thêm đợt sau) — file mới
+      // có thể có THÊM cột mà bảng cũ chưa có (vd cột "Nợ"/"Có"/cột hàng NK
+      // ở phiên bản cũ chưa có) -> phải THÊM cột đó vào nlHeader (và backfill
+      // '' cho các dòng cũ), KHÔNG được bỏ qua — trước đây ghép DÒNG MỚI theo
+      // VỊ TRÍ cột của header CŨ (soCot = nlHeader.length CŨ), nên nếu header
+      // cũ ít cột hơn file mới, các cột cuối (thường là "Nợ"/"Có" — đã xác
+      // nhận qua file thật: hạch toán ĐẦY ĐỦ trong Excel nhưng bị cắt mất khi
+      // ghép, rồi nlDamBaoNoCo() lại tự thêm cột "Nợ"/"Có" MỚI rỗng) bị cắt
+      // mất, hạch toán trong file rõ ràng nhưng hiện trống trên lưới.
+      const hLowCur=nlHeader.map(h=>String(h||'').trim().toLowerCase());
+      for(const h of kq.header){
+        const hl=String(h||'').trim().toLowerCase();
+        if(hl&&!hLowCur.includes(hl)){
+          nlHeader.push(h);nlRows.forEach(r=>r.push(''));hLowCur.push(hl);
+        }
+      }
+    }
+    // Ghép từng dòng THEO TÊN CỘT (không theo vị trí) — cột nào bảng đang
+    // xem có mà file mới không có (hoặc thứ tự cột khác nhau) vẫn khớp đúng.
+    const hLowNow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
+    const hLowNew=(kq.header||[]).map(h=>String(h||'').trim().toLowerCase());
     for(const row of kq.rows){
-      const r2=row.slice(0,soCot);
-      while(r2.length<soCot)r2.push('');
+      const r2=nlHeader.map((_,i)=>{
+        const j=hLowNew.indexOf(hLowNow[i]);
+        return (j>=0&&j<row.length)?row[j]:'';
+      });
       nlRows.push(r2);
     }
     nlBoCotKhongCan();nlDamBaoNoCo();
