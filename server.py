@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.86"
+APP_BUILD = "2026-07-27.87"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -108,6 +108,38 @@ def _quy_cua_ky(tu_ngay, den_ngay):
     return d1.year, None   # trải nhiều quý -> chỉ dùng thư mục năm
 
 
+def _thang_cua_ky(tu_ngay, den_ngay):
+    """Như _quy_cua_ky nhưng theo THÁNG: nếu khoảng ngày (dd/mm/yyyy) NẰM GỌN
+    trong đúng 1 tháng -> trả (năm, tháng 1..12); nếu trải nhiều tháng hoặc
+    không đọc được -> trả (năm, None) để lưu thẳng vào thư mục năm."""
+    try:
+        d1 = datetime.datetime.strptime(tu_ngay, "%d/%m/%Y").date()
+        d2 = datetime.datetime.strptime(den_ngay, "%d/%m/%Y").date()
+    except Exception:
+        return None, None
+    if d1 > d2:
+        d1, d2 = d2, d1
+    if d1.year == d2.year and d1.month == d2.month:
+        return d1.year, d1.month
+    return d1.year, None   # trải nhiều tháng -> chỉ dùng thư mục năm
+
+
+def _co_thu_muc_theo_thang(thu_muc_nam):
+    """Công ty đã tự tổ chức thư mục kỳ THEO THÁNG (có sẵn ít nhất 1 thư mục
+    con dạng "THANG N"/"THÁNG N") thay vì theo Quý (vd OneDrive của khách:
+    .../2026/THANG 1.. THANG 6) — nếu có thì ưu tiên lưu tiếp đúng cấu trúc
+    tháng đó thay vì luôn mặc định tạo/dùng "QUY N"."""
+    try:
+        if not os.path.isdir(thu_muc_nam):
+            return False
+        for name in os.listdir(thu_muc_nam):
+            if _khong_dau(name).startswith("thang "):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _tu_den_cua_quy(nam, quy):
     """CHIỀU NGƯỢC của _quy_cua_ky: từ (năm, quý 1..4) suy ra khoảng ngày
     (tu_ngay, den_ngay) dd/mm/yyyy của đúng quý đó. quy rỗng/0/None -> cả năm."""
@@ -122,12 +154,17 @@ def _tu_den_cua_quy(nam, quy):
 
 
 def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
-    """Tạo (nếu thiếu) cấu trúc thư mục lưu file kết xuất theo Năm/Quý dưới
-    export_dir và trả về đường dẫn thư mục ĐÍCH để lưu file.
-      export_dir/<năm>/QUY 1..4/   (tạo đủ cả 4 quý khi tạo mới năm)
-    Nếu kỳ trải nhiều quý -> lưu thẳng vào export_dir/<năm>/.
+    """Tạo (nếu thiếu) cấu trúc thư mục lưu file kết xuất theo Năm/Quý (hoặc
+    Năm/Tháng — xem dưới) dưới export_dir và trả về đường dẫn thư mục ĐÍCH
+    để lưu file.
+      export_dir/<năm>/QUY 1..4/     (mặc định — tạo đủ cả 4 quý khi tạo mới năm)
+      export_dir/<năm>/THANG 1..12/  (nếu công ty ĐÃ TỰ tổ chức thư mục kỳ
+                                       theo tháng — vd OneDrive khách có sẵn
+                                       "THANG 1".."THANG 6" — thì lưu tiếp
+                                       đúng cấu trúc tháng đó thay vì Quý)
+    Nếu kỳ trải nhiều quý/tháng -> lưu thẳng vào export_dir/<năm>/.
     Trả None nếu export_dir trống/không tạo được.
-    Tên thư mục quý dùng "QUY N" (không dấu, viết hoa) thay vì "Quý N" —
+    Tên thư mục dùng "QUY N"/"THANG N" (không dấu, viết hoa) thay vì có dấu —
     tránh lỗi hiển thị/gõ dấu tiếng Việt trên một số hệ thống/ổ mạng cũ."""
     export_dir = (export_dir or "").strip()
     if not export_dir:
@@ -138,14 +175,19 @@ def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
     try:
         thu_muc_nam = os.path.join(export_dir, str(nam))
         os.makedirs(thu_muc_nam, exist_ok=True)
-        # tạo đủ 4 quý mỗi khi có thư mục năm (kể cả năm đã có sẵn — không sao,
-        # exist_ok) để người dùng thấy sẵn cấu trúc, khỏi tạo tay
-        for q in (1, 2, 3, 4):
-            os.makedirs(os.path.join(thu_muc_nam, f"QUY {q}"), exist_ok=True)
-        if quy:
-            dich = os.path.join(thu_muc_nam, f"QUY {quy}")
+        if _co_thu_muc_theo_thang(thu_muc_nam):
+            _, thang = _thang_cua_ky(tu_ngay, den_ngay)
+            # tạo đủ 12 tháng mỗi khi có thư mục năm (kể cả năm đã có sẵn —
+            # không sao, exist_ok) để người dùng thấy sẵn cấu trúc, khỏi tạo tay
+            for t in range(1, 13):
+                os.makedirs(os.path.join(thu_muc_nam, f"THANG {t}"), exist_ok=True)
+            dich = os.path.join(thu_muc_nam, f"THANG {thang}") if thang else thu_muc_nam
         else:
-            dich = thu_muc_nam
+            # tạo đủ 4 quý mỗi khi có thư mục năm (kể cả năm đã có sẵn — không
+            # sao, exist_ok) để người dùng thấy sẵn cấu trúc, khỏi tạo tay
+            for q in (1, 2, 3, 4):
+                os.makedirs(os.path.join(thu_muc_nam, f"QUY {q}"), exist_ok=True)
+            dich = os.path.join(thu_muc_nam, f"QUY {quy}") if quy else thu_muc_nam
         os.makedirs(dich, exist_ok=True)
         return dich
     except Exception:

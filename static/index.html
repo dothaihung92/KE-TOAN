@@ -379,8 +379,8 @@
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
     <div class="field"><label>Thư mục lưu DỮ LIỆU công ty <span style="font-weight:400;color:var(--muted)">(hạch toán, danh mục... — để trống = dùng thư mục XML/PDF ở trên)</span></label><input id="m_datadir" placeholder="VD: D:\\DuLieuKeToan\\CongTyABC"></div>
-    <div class="field"><label>Thư mục lưu file KẾT XUẤT <span style="font-weight:400;color:var(--muted)">(tự tạo cấu trúc Năm/Quý — chỉ dùng khi tick "Lưu file kết xuất" lúc tra cứu)</span></label><input id="m_exportdir" placeholder="VD: D:\\OneDrive\\...\\BAO CAO QUY"></div>
-    <p class="hint">📁 Ví dụ: chọn kỳ Quý 2/2026 + tick "Lưu file kết xuất" → phần mềm tự tạo <b>…\BAO CAO QUY\2026\Quý 2\</b> và lưu file Excel vào đó (tạo đủ cả 4 quý nếu thiếu).</p>
+    <div class="field"><label>Thư mục lưu file KẾT XUẤT <span style="font-weight:400;color:var(--muted)">(tự tạo cấu trúc Năm/Quý (hoặc Năm/Tháng nếu công ty đã tự tổ chức thư mục theo tháng) — chỉ dùng khi tick "Lưu file kết xuất" lúc tra cứu)</span></label><input id="m_exportdir" placeholder="VD: D:\\OneDrive\\...\\BAO CAO QUY"></div>
+    <p class="hint">📁 Ví dụ: chọn kỳ Quý 2/2026 + tick "Lưu file kết xuất" → phần mềm tự tạo <b>…\BAO CAO QUY\2026\Quý 2\</b> và lưu file Excel vào đó (tạo đủ cả 4 quý nếu thiếu). Nếu bên trong thư mục Năm đã có sẵn thư mục "THANG N" (công ty kê khai theo tháng) thì phần mềm tự lưu theo THÁNG (tạo đủ 12 tháng) thay vì theo Quý.</p>
     <p class="hint">🔒 Thông tin lưu cục bộ trên máy bạn (SQLite), không gửi đi đâu khác ngoài trang Tổng cục Thuế khi đăng nhập.</p>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
