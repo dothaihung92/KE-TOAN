@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.91"
+APP_BUILD = "2026-07-27.92"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12274,11 +12274,14 @@ def _misa_ghi_khncc(cid, database, preview=True):
                 if lech:
                     lech_ten += 1
                 ket.append({"mst": mst_hien, "ten": ten, "ten_misa": ten_misa, "lech_ten": lech,
-                            "vai_tro": "+".join(x for x in (["NCC"] if it["ncc"] else []) + (["KH"] if it["kh"] else [])),
-                            "trang_thai": "đã có — KHÁC TÊN" if lech else "đã có (bỏ qua)"})
+                            "vai_tro": "NCC+KH", "trang_thai": "đã có — KHÁC TÊN" if lech else "đã có (bỏ qua)"})
                 continue
-            is_vendor = 1 if it["ncc"] else 0
-            is_customer = 1 if it["kh"] else 0
+            # Luôn ghi vai trò CẢ NCC LẪN KH (IsVendor=IsCustomer=1) — theo
+            # yêu cầu, KHÔNG còn tùy vào việc MST đó thực tế chỉ xuất hiện ở
+            # mua vào hay bán ra (trước đây chỉ đúng 1 vai trò tùy nguồn dữ
+            # liệu tìm thấy, khiến 1 đối tượng vừa là KH vừa là NCC thực tế
+            # nhưng phần mềm chỉ mới thấy 1 chiều thì bị thiếu vai trò kia).
+            is_vendor = is_customer = 1
             taxcode = mst_hien if (mst.isdigit() and len(mst) != 12) else None
             if not preview:
                 cur.execute(
@@ -12290,8 +12293,7 @@ def _misa_ghi_khncc(cid, database, preview=True):
                     is_vendor, is_customer, 0, 0, branch_id, now)
             them += 1
             ket.append({"mst": mst_hien, "ten": ten, "thieu_ten": it.get("thieu_ten", False),
-                        "vai_tro": "+".join(x for x in (["NCC"] if it["ncc"] else []) + (["KH"] if it["kh"] else [])),
-                        "trang_thai": "sẽ thêm" if preview else "đã thêm"})
+                        "vai_tro": "NCC+KH", "trang_thai": "sẽ thêm" if preview else "đã thêm"})
         if preview:
             conn.rollback()
         else:
