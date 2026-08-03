@@ -4555,19 +4555,46 @@ async function nlImportVaoBang(input){
     // xem có mà file mới không có (hoặc thứ tự cột khác nhau) vẫn khớp đúng.
     const hLowNow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
     const hLowNew=(kq.header||[]).map(h=>String(h||'').trim().toLowerCase());
-    for(const row of kq.rows){
-      const r2=nlHeader.map((_,i)=>{
-        const j=hLowNew.indexOf(hLowNow[i]);
-        return (j>=0&&j<row.length)?row[j]:'';
-      });
-      nlRows.push(r2);
+    const rowsMoi=kq.rows.map(row=>nlHeader.map((_,i)=>{
+      const j=hLowNew.indexOf(hLowNow[i]);
+      return (j>=0&&j<row.length)?row[j]:'';
+    }));
+    // CẬP NHẬT ĐÈ theo hóa đơn (Ký hiệu + Số HĐ + MST) thay vì luôn cộng dồn
+    // thành dòng mới — trước đây import lại ĐÚNG file cũ (vd để sửa dữ liệu)
+    // sẽ NHÂN ĐÔI mọi dòng thay vì thay thế, buộc phải "Xóa bộ" cả bảng rồi
+    // import lại từ đầu. Nay: hóa đơn nào trong file mới TRÙNG (Ký hiệu+Số
+    // HĐ+MST) với hóa đơn đã có trên lưới thì XÓA các dòng CŨ của đúng hóa
+    // đơn đó trước khi thêm dòng MỚI vào — hóa đơn khác (chưa có) vẫn cộng
+    // dồn bình thường như trước, không ảnh hưởng cách import nhiều đợt/nhiều
+    // tháng.
+    const iKH=hLowNow.findIndex(h=>h.includes('ký hiệu'));
+    const iSoHD=hLowNow.findIndex(h=>h.includes('số hđ')||h.includes('so hd')||h==='số hóa đơn');
+    const iMst=hLowNow.findIndex(h=>h.includes('mst'));
+    function nlKeyHoaDon(r){
+      if(iSoHD<0)return null;
+      const shd=String(r[iSoHD]||'').trim().toLowerCase();
+      if(!shd)return null;
+      const kh=iKH>=0?String(r[iKH]||'').trim().toLowerCase():'';
+      const mst=iMst>=0?String(r[iMst]||'').trim().toLowerCase():'';
+      return `${kh}|${shd}|${mst}`;
     }
+    let soDe=0;
+    if(iSoHD>=0){
+      const keyMoi=new Set(rowsMoi.map(nlKeyHoaDon).filter(Boolean));
+      if(keyMoi.size){
+        const truoc=nlRows.length;
+        nlRows=nlRows.filter(r=>{const k=nlKeyHoaDon(r);return !(k&&keyMoi.has(k));});
+        soDe=truoc-nlRows.length;
+      }
+    }
+    nlRows.push(...rowsMoi);
     nlBoCotKhongCan();nlDamBaoNoCo();
     if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
     else if(nhapLieuLoaiHienTai==='out')nlTuDienNoCoRa();
     nlTinhCanhBaoNo();
     veGridNhapLieu();
-    toast(`✓ Đã thêm ${kq.rows.length} dòng vào bảng đang xem (${nlRows.length} dòng, chưa lưu — nhớ bấm 💾 Lưu)`,'ok');
+    toast(`✓ Đã thêm ${rowsMoi.length} dòng`+(soDe?` (đè lên ${soDe} dòng cũ trùng hóa đơn)`:'')+
+      ` vào bảng đang xem (${nlRows.length} dòng, chưa lưu — nhớ bấm 💾 Lưu)`,'ok');
     if(kq.loi&&kq.loi.length)toast(`⚠ ${kq.loi.join('; ')}`,'err');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
