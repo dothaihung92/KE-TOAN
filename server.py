@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.88"
+APP_BUILD = "2026-07-27.89"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18555,15 +18555,18 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 it = d["it"]
                 ds = d["ds"]
                 dvt_out, sl_out, dgia_out = it.get("dvt", ""), d["sl"], d["dgia"]
-                # HĐ hạch toán Nợ 6427: khi import phần mềm cần ĐVT=MHDV, SL=1,
-                # Đơn giá = Thành tiền/Số lượng (=Thành tiền vì SL=1)
+                ma_vt_out = it.get("ma_vt", "")
+                # HĐ hạch toán Nợ 6427: khi import vào MISA chỉ cần đổi MÃ
+                # HÀNG thành "MHDV" (mã dùng chung cho dòng chi phí quản lý
+                # DN); ĐVT/Số lượng/Đơn giá GIỮ NGUYÊN theo đúng hóa đơn gốc
+                # (trước đây ép luôn ĐVT="MHDV", SL=1 — không cần thiết và
+                # làm sai lệch số liệu gốc so với hóa đơn).
                 if loai == "purchase" and str(no_r or "").strip() == "6427":
-                    dvt_out, sl_out = "MHDV", 1
-                    dgia_out = (ds / sl_out) if isinstance(ds, (int, float)) else ds
+                    ma_vt_out = "MHDV"
                 append_row([
                     r["khhdon"], r["shdon"],
                     ngay_fmt, d["nguoi"], d["mst"],
-                    it.get("stt", ""), it.get("ma_vt", ""),
+                    it.get("stt", ""), ma_vt_out,
                     d["ten"], dvt_out,
                     sl_out, dgia_out,
                     ds, d["ts_hien"], d["tien_thue"],
