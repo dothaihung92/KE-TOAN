@@ -4121,6 +4121,7 @@ function xkMoGan(idx){
   xkGanIdx=idx;
   const r=xkRows[idx];
   document.getElementById('xkGanTenSp').innerHTML=`Tên bán: "${xkEsc(r.ten_sp)}"${r.sl?` — SL ${r.sl}`:''}`+
+    (r.dvt?` — ĐVT: ${xkEsc(r.dvt)}`:'')+
     (r.dgia!=null&&r.dgia!==''?` — Đơn giá bán: ${fmtVND(r.dgia)}`:'')+
     (r.thieu_ton?'<br><span style="color:#b91c1c">⚠ Không mã nào còn đủ tồn cho số lượng này — chọn tạm nếu chấp nhận âm kho</span>':'');
   document.getElementById('xkGanSearch').value='';
@@ -4198,11 +4199,17 @@ function xkGanCapNhatHighlight(){
 // mũi tên lên/xuống chọn dòng, Enter gắn đúng mã đang tô sáng, Esc đóng modal
 function xkGanPhimO(e){
   const n=(xkGanDanhSach||[]).length;
-  if(e.key==='ArrowDown'){e.preventDefault();if(n){xkGanHighlight=(xkGanHighlight+1+n)%n;xkGanCapNhatHighlight();}}
-  else if(e.key==='ArrowUp'){e.preventDefault();if(n){xkGanHighlight=(xkGanHighlight-1+n)%n;xkGanCapNhatHighlight();}}
-  else if(e.key==='Enter'){e.preventDefault();
+  // stopPropagation ở CẢ 4 phím: nếu không, sự kiện vẫn NỔI BỌT lên phím tắt
+  // toàn cục của màn Nhập Liệu (document keydown) — với Escape, handler ở
+  // đây đã đóng modal (đổi display='none') TRƯỚC KHI sự kiện nổi bọt tới,
+  // nên điều kiện chặn "modal đang mở" ở handler toàn cục không còn đúng
+  // nữa (modal đã bị chính dòng này ẩn đi) -> phím tắt toàn cục vẫn chạy
+  // tiếp "Esc = Quay về", thoát luôn ra ngoài dù chỉ bấm Esc 1 lần.
+  if(e.key==='ArrowDown'){e.preventDefault();e.stopPropagation();if(n){xkGanHighlight=(xkGanHighlight+1+n)%n;xkGanCapNhatHighlight();}}
+  else if(e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();if(n){xkGanHighlight=(xkGanHighlight-1+n)%n;xkGanCapNhatHighlight();}}
+  else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();
     if(xkGanHighlight>=0&&xkGanHighlight<n)xkChonMa(xkGanDanhSach[xkGanHighlight].ma);}
-  else if(e.key==='Escape'){e.preventDefault();xkDongGan();}
+  else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();xkDongGan();}
 }
 function xkChonMa(ma){
   if(xkGanIdx<0)return;
