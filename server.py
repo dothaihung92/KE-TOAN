@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.95"
+APP_BUILD = "2026-07-27.96"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6951,6 +6951,15 @@ def _run_fetch_job(cid: int, body: dict):
                     conn.execute(
                         "DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?",
                         (cid, loai, he_thong))
+                    # Chẩn đoán vì sao detail_json của hóa đơn "không mã" (ttxly=6)
+                    # đôi khi KHÔNG được giữ lại qua các lần tra cứu (người dùng báo
+                    # ĐÃ tra cứu xong hẳn 1 lần — bước "Đang lấy nốt chi tiết dòng
+                    # hàng" chạy 100% — nhưng lần tra cứu SAU lại phải lấy lại TỪ
+                    # ĐẦU cho gần như toàn bộ) — đếm cụ thể để biết ĐÚNG nguyên nhân
+                    # (chưa từng có old_detail_json / có nhưng key không khớp / có
+                    # khớp key nhưng tthai lệch) thay vì đoán.
+                    _km_tong = _km_co_cu = _km_khop_key = _km_giu_duoc = 0
+                    _km_vi_du_lech = []
                     for inv in invs:
                         try:
                             # Hóa đơn bán hàng (Mẫu số 2 — hộ/cá nhân kinh doanh
@@ -6974,8 +6983,22 @@ def _run_fetch_job(cid: int, body: dict):
                             # so sánh "đã có file" như các hóa đơn thường).
                             key_dj = (str(inv.get("khmshdon", "")), str(inv.get("khhdon", "")),
                                      str(inv.get("shdon", "")), loai, he_thong)
+                            tthai_moi_dj = str(inv.get("tthai", ""))
+                            tthai_cu_dj = old_status.get(key_dj)
                             dj_giu_lai = (old_detail_json.get(key_dj)
-                                         if old_status.get(key_dj) == str(inv.get("tthai", "")) else None)
+                                         if tthai_cu_dj == tthai_moi_dj else None)
+                            if str(inv.get("ttxly") or "").strip() == "6":
+                                _km_tong += 1
+                                if key_dj in old_detail_json:
+                                    _km_co_cu += 1
+                                if tthai_cu_dj is not None:
+                                    _km_khop_key += 1
+                                    if dj_giu_lai:
+                                        _km_giu_duoc += 1
+                                    elif key_dj in old_detail_json and len(_km_vi_du_lech) < 3:
+                                        _km_vi_du_lech.append(
+                                            f"{inv.get('khhdon')} {inv.get('shdon')}: "
+                                            f"tthai cũ={tthai_cu_dj!r} mới={tthai_moi_dj!r}")
                             conn.execute("""
                                 INSERT OR IGNORE INTO invoices
                                 (company_id, loai, he_thong, nbmst, nbten, nmmst,
@@ -6995,6 +7018,15 @@ def _run_fetch_job(cid: int, body: dict):
                         except Exception:
                             pass
                     conn.commit()
+                    if _km_tong:
+                        msg(stage="info",
+                            text=f"🔬 chẩn đoán giữ chi tiết hóa đơn không mã ({loai_txt}{ht_txt}): "
+                                 f"{_km_tong} hóa đơn không mã trong lượt này, {_km_co_cu} từng có "
+                                 f"detail_json cũ, {_km_khop_key} khớp được với lần tra cứu trước "
+                                 f"(còn lại là hóa đơn MỚI/chưa từng thấy), {_km_giu_duoc} giữ lại "
+                                 f"được detail_json"
+                                 + (f" — VÍ DỤ LỆCH TRẠNG THÁI: {'; '.join(_km_vi_du_lech)}"
+                                    if _km_vi_du_lech else ""))
                     # so sánh với tổng kỳ vọng từ trang Thuế (trước khi lọc ngân hàng)
                     exp = exp0
                     got_raw = got_gop
