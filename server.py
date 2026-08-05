@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.96"
+APP_BUILD = "2026-07-27.97"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10570,7 +10570,6 @@ def _gen_ban_hang(cid, header, rows):
         nguoimua = str(gv(r, col["nguoimua"]) or "")
         mst = _dinh_dang_mst(gv(r, col["mst"]))
         kyhieu = str(gv(r, col["kyhieu"]) or "")
-        maus = str(gv(r, col["maus"]) or "") if col["maus"] >= 0 else ""
         tong_hd = tong.get(f"{kyhieu}|{sohd}", 0)
         tk_no = 131 if abs(tong_hd) >= NGUONG_5TR else 1111
         # Số chứng từ: BH{seq:03d}/T{tháng}/{năm} (seq theo từng tháng)
@@ -10588,7 +10587,7 @@ def _gen_ban_hang(cid, header, rows):
         row[2] = 1 if abs(tong_hd) < NGUONG_5TR else 0   # PTTT: <5tr=tiền->1
         row[3] = 0; row[4] = 1; row[5] = 1
         row[6] = ngay; row[7] = ngay; row[8] = so_ct
-        row[11] = maus; row[12] = kyhieu               # Mẫu số / Ký hiệu HĐ
+        row[11] = ""; row[12] = kyhieu                  # Mẫu số (để trống) / Ký hiệu HĐ
         row[13] = sohd; row[14] = ngay
         row[15] = mst; row[16] = nguoimua; row[18] = mst
         row[19] = mathang
