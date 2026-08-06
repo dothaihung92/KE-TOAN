@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.98"
+APP_BUILD = "2026-07-27.99"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10783,7 +10783,7 @@ def _xk_key_ngay(ngay):
         return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
     return s
 
-def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
+def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=None):
     """Ghép mã hàng (từ TON) cho từng dòng bán ra (Chi tiết BÁN RA), TRỪ TỒN
     tuần tự theo ngày tăng dần — mặt hàng nào hết tồn (<=0) sẽ KHÔNG gán nữa.
 
@@ -10794,7 +10794,15 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
     tồn; nếu không, ưu tiên mã XUẤT HIỆN TRƯỚC theo đúng thứ tự trong file tồn
     kho (ton_rows) — dùng HẾT mã đứng trước rồi mới bắt đầu dùng tới mã đứng
     sau, không ưu tiên theo tồn nhiều/ít. Chỉ TÁCH DÒNG (cộng dồn nhiều mã,
-    cũng theo đúng thứ tự đó) khi không mã đơn nào đủ cả số lượng cần bán."""
+    cũng theo đúng thứ tự đó) khi không mã đơn nào đủ cả số lượng cần bán.
+
+    giathanh_cu (nếu có): GIATHANH đang có SẴN (lần dò trước / gán tay / vừa
+    Import giá thành) — GIỮ NGUYÊN mã đã gán cho ĐÚNG dòng hóa đơn (khớp theo
+    Số HĐ + Tên sản phẩm), trừ tồn TRƯỚC cho các dòng đó rồi mới dò tiếp phần
+    còn lại — để bấm lại "Dò mã hàng tự động" KHÔNG xóa mất phần đã làm trước
+    đó (đã xác nhận qua báo cáo thật: Import giá thành xong bấm Dò mã hàng tự
+    động làm mất sạch các dòng vừa import, vì trước đây hàm này luôn dò lại
+    TOÀN BỘ từ đầu, không biết gì tới GIATHANH đang có)."""
     col = _xk_src_cols(src_header)
     hoc_ma = hoc_ma or {}
 
@@ -10804,6 +10812,7 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
     ton_list = [dict(it, con_lai=_to_num(it.get("ton")) or 0,
                      ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
                 for it in (ton_rows or [])]
+    ton_by_ma = {tn["ma"]: tn for tn in ton_list}
 
     items = []
     for r in (src_rows or []):
@@ -10817,6 +10826,41 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
             "dgia": _to_num(gv(r, col["dgia"])), "tt": _to_num(gv(r, col["tt"])),
         })
     items.sort(key=lambda it: _xk_key_ngay(it["ngay"]))
+
+    # gom mã đã gán trước đó theo khoá (Số HĐ, Tên chuẩn hoá) — chỉ giữ dòng
+    # ĐẦU TIÊN gặp mỗi khoá (dòng bị TÁCH thành nhiều mã do thiếu tồn dùng
+    # chung 1 khoá, không tái tạo đúng — để dò lại bình thường an toàn hơn).
+    giu_lai = {}
+    for r in (giathanh_cu or []):
+        ma = str(r.get("ma") or "").strip()
+        if not ma:
+            continue
+        key = (str(r.get("sohd") or "").strip(), _chuan_ten_hang_xk(r.get("ten_sp")))
+        if key in giu_lai:
+            continue
+        giu_lai[key] = {"ma": ma, "ten_xk": r.get("ten_xk", ""),
+                        "dvt_xk": r.get("dvt_xk", ""), "gia_xk": r.get("gia_xk", "")}
+
+    # trừ tồn TRƯỚC cho các dòng giữ được mã cũ (chỉ khi mã đó CÒN ĐỦ tồn cho
+    # đúng số lượng dòng này — không đủ thì bỏ qua, để dò lại bình thường,
+    # tránh âm tồn kho ngầm không cảnh báo)
+    giu_assign = {}
+    for it in items:
+        key = (it["sohd"], _chuan_ten_hang_xk(it["ten_sp"]))
+        giu = giu_lai.get(key)
+        if not giu:
+            continue
+        tn = ton_by_ma.get(giu["ma"])
+        sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
+        if not tn or tn["con_lai"] < sl_can:
+            continue
+        tn["con_lai"] -= sl_can
+        rec = dict(it)
+        rec.update(ma=giu["ma"], ten_xk=giu["ten_xk"] or tn["ten"],
+                   dvt_xk=giu["dvt_xk"] or tn["dvt"],
+                   gia_xk=giu["gia_xk"] if giu["gia_xk"] not in (None, "") else tn["gia"],
+                   goi_y=[], mo_ho=False, thieu_ton=False)
+        giu_assign[id(it)] = rec
 
     def goi_y_cho(ten_chuan, manh):
         manh_ma = {tn["ma"] for tn in manh}
@@ -10835,6 +10879,10 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None):
 
     out = []
     for it in items:
+        pre = giu_assign.get(id(it))
+        if pre:
+            out.append(pre)
+            continue
         ten_chuan = _chuan_ten_hang_xk(it["ten_sp"])
         sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
         tt_goc = it.get("tt")
@@ -11042,7 +11090,9 @@ def xk_tao_giathanh(cid: int):
     dữ liệu 'Chi tiết BÁN RA' đã lưu sẵn từ màn Nhập Liệu (Import & tách dữ
     liệu -> Lưu cả 2 bảng kê). Áp lại các lựa chọn đã HỌC (từ lần người dùng
     tự gắn tay trước đó) cho những tên hàng có nhiều mã trùng tên (vd 1 mã do
-    phần mềm sinh + 1 mã cũ đã có sẵn trong MISA)."""
+    phần mềm sinh + 1 mã cũ đã có sẵn trong MISA). GIỮ NGUYÊN mã đã gán cho
+    đúng dòng hóa đơn nếu GIATHANH đang có sẵn (gán tay/Import giá thành) —
+    bấm lại nút này không xóa mất phần đã làm trước đó."""
     data = _doc_du_lieu_cty(cid)
     ton_rows = data.get("xk_ton") or []
     src = nhap_lieu_get(cid, "ctbr")
@@ -11051,7 +11101,9 @@ def xk_tao_giathanh(cid: int):
     if not src.get("rows"):
         raise HTTPException(400, "Chưa có dữ liệu 'Chi tiết BÁN RA' — vào màn Nhập Liệu, Import & tách dữ liệu rồi Lưu cả 2 bảng kê từ file có sheet 'Chi tiết BÁN RA'")
     hoc_ma = data.get("xk_hoc_ma") or {}
-    giathanh = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [], hoc_ma)
+    giathanh_cu = data.get("xk_giathanh") or []
+    giathanh = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
+                                hoc_ma, giathanh_cu)
     data["xk_giathanh"] = giathanh
     _ghi_du_lieu_cty(cid, data)
     so_khop = sum(1 for r in giathanh if r.get("ma"))
