@@ -3888,6 +3888,8 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" onclick="xkKiemTraTon()" style="color:#8a5d00;border-color:#e8b923">✅ Kiểm tra tồn kho</button>
         <button class="btn gold sm" onclick="xkLuu()">💾 Lưu tạm</button>
         <button class="btn sm" style="background:#1a7a7a" onclick="xkXuatGiaThanh()">📊 Kết xuất giá thành</button>
+        <button class="btn ghost sm" onclick="document.getElementById('xkFileGiaThanh').click()">📥 Import giá thành</button>
+        <input type="file" id="xkFileGiaThanh" accept=".xlsx" multiple style="display:none" onchange="xkImportGiaThanh(this)">
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
@@ -3907,6 +3909,26 @@ async function xkImportTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã import ${d.so_dong} mã hàng tồn kho`,'ok');
+    xkTaiTrangThai();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
+}
+// Import LẠI file "Kết xuất giá thành" (đã sửa tay Mã hàng kho/ĐVT kho/SL
+// kho/Đơn giá kho ngay trong Excel) — THAY THẾ toàn bộ bảng GIATHANH đang
+// có trên web, khỏi phải gán tay lại từng dòng nếu đã sửa sẵn ở Excel.
+async function xkImportGiaThanh(input){
+  const files=input.files; if(!files||!files.length)return;
+  if(xkRows.length && !confirm(`Import sẽ THAY THẾ toàn bộ ${xkRows.length} dòng giá thành đang có trên màn hình bằng đúng dữ liệu trong file Excel. Tiếp tục?`)){
+    input.value=''; return;
+  }
+  toast('Đang đọc file...','');
+  try{
+    const fd=new FormData(); for(const f of files)fd.append('files',f);
+    const r=await fetch(`/api/xk/import-giathanh/${current}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    toast(`✓ Đã import ${d.so_dong} dòng giá thành (khớp mã ${d.so_khop}/${d.so_dong})`,'ok');
+    if(d.loi&&d.loi.length)toast(`⚠ ${d.loi.join('; ')}`,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';

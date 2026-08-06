@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.97"
+APP_BUILD = "2026-07-27.98"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11224,6 +11224,98 @@ def xk_export_giathanh(cid: int):
             except Exception:
                 pass
     return _resp_xuat(path, fname, {"X-So-Dong": str(len(rows))})
+
+
+@app.post("/api/xk/import-giathanh/{cid}")
+async def xk_import_giathanh(cid: int, request: Request):
+    """Import LẠI file 'Kết xuất giá thành' (đã xuất bằng nút '📊 Kết xuất
+    giá thành', sheet 'Giá thành' — có thể đã được sửa tay Mã hàng kho/ĐVT
+    kho/SL kho/Đơn giá kho ngay trong Excel) để CẬP NHẬT LẠI bảng GIATHANH
+    trong phần mềm — khỏi phải gán tay lại từng dòng trên web nếu đã sửa
+    sẵn ở Excel. Đọc theo TÊN CỘT (không theo vị trí) nên không phụ thuộc
+    thứ tự cột. THAY THẾ TOÀN BỘ bảng GIATHANH hiện có (đúng bản chất
+    "nhập lại đúng những gì đang thấy trên file", không cộng dồn)."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    data = _doc_du_lieu_cty(cid)
+    ton_map = {str(it.get("ma") or "").strip(): it for it in (data.get("xk_ton") or [])}
+    hoc_ma = dict(data.get("xk_hoc_ma") or {})
+    rows_out = []
+    so_file_ok, loi = 0, []
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})")
+            continue
+        ws = wb["Giá thành"] if "Giá thành" in wb.sheetnames else wb.worksheets[0]
+        grid = [list(r) for r in ws.iter_rows(values_only=True)]
+        if not grid:
+            loi.append(f"{fn}: sheet rỗng")
+            continue
+        hlow = [str(c or "").strip().lower() for c in grid[0]]
+
+        def idx(*ten):
+            for t in ten:
+                if t in hlow:
+                    return hlow.index(t)
+            return -1
+
+        i_sohd, i_ngay = idx("số hđ"), idx("ngày")
+        i_ten, i_dvt = idx("tên sản phẩm"), idx("đvt")
+        i_sl, i_dgia, i_tt = idx("số lượng"), idx("đơn giá"), idx("thành tiền")
+        i_ma, i_tenxk = idx("mã hàng kho"), idx("tên hàng xuất kho")
+        i_dvtxk, i_slkho, i_giaxk = idx("đvt kho"), idx("sl kho"), idx("đơn giá kho")
+        if i_ten < 0 or i_ma < 0:
+            loi.append(f"{fn}: không thấy cột 'Tên Sản Phẩm'/'Mã hàng kho' "
+                       f"(không đúng mẫu 'Kết xuất giá thành')")
+            continue
+
+        def gv(r, i):
+            return r[i] if 0 <= i < len(r) else None
+
+        for r in grid[1:]:
+            if not r or all(c is None or str(c).strip() == "" for c in r):
+                continue
+            ten_sp = str(gv(r, i_ten) or "").strip()
+            if not ten_sp or ten_sp.upper() == "TỔNG CỘNG":
+                continue
+            ma = str(gv(r, i_ma) or "").strip()
+            tn = ton_map.get(ma) if ma else None
+            gia_xk_raw = gv(r, i_giaxk)
+            rec = {
+                "sohd": str(gv(r, i_sohd) or ""), "ngay": str(gv(r, i_ngay) or ""),
+                "ten_sp": ten_sp, "dvt": str(gv(r, i_dvt) or ""),
+                "sl": _to_num(gv(r, i_sl)), "dgia": _to_num(gv(r, i_dgia)),
+                "tt": _to_num(gv(r, i_tt)), "ma": ma,
+                "ten_xk": str(gv(r, i_tenxk) or "").strip() or (tn.get("ten", "") if tn else ""),
+                "dvt_xk": str(gv(r, i_dvtxk) or "").strip() or (tn.get("dvt", "") if tn else ""),
+                "sl_kho": _to_num(gv(r, i_slkho)),
+                "gia_xk": (_to_num(gia_xk_raw) if gia_xk_raw not in (None, "")
+                          else (tn.get("gia", "") if tn else "")),
+                "mo_ho": not bool(ma), "thieu_ton": not bool(ma), "goi_y": [],
+            }
+            if ma:
+                ten_chuan = _chuan_ten_hang_xk(ten_sp)
+                if ten_chuan:
+                    hoc_ma[ten_chuan] = ma
+            rows_out.append(rec)
+        so_file_ok += 1
+    if not rows_out:
+        raise HTTPException(400, "Không đọc được dòng nào phù hợp. " + "; ".join(loi[:3]))
+    data["xk_giathanh"] = rows_out
+    data["xk_hoc_ma"] = hoc_ma
+    _ghi_du_lieu_cty(cid, data)
+    so_khop = sum(1 for r in rows_out if r.get("ma"))
+    return {"ok": True, "so_file": so_file_ok, "so_dong": len(rows_out),
+            "so_khop": so_khop, "so_chua_khop": len(rows_out) - so_khop, "loi": loi[:5]}
 
 
 # ============================================================
