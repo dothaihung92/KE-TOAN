@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.100"
+APP_BUILD = "2026-07-27.101"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10947,6 +10947,35 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
             out.append(rec)
     return out
 
+def _xk_hop_nhat_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu):
+    """Chạy _gen_xk_giathanh() rồi CỘNG THÊM nguyên vẹn các dòng trong
+    giathanh_cu KHÔNG khớp bất kỳ dòng nào trong 'Chi tiết BÁN RA' (ctbr)
+    hiện có (theo khoá Số HĐ + Tên sản phẩm). _gen_xk_giathanh() CHỈ dựng
+    danh sách dòng từ ctbr — nếu giathanh_cu (từ lần dò trước/gán tay/Import
+    giá thành) có dòng KHÔNG khớp ctbr hiện tại (vd ctbr sau đó bị import lại
+    bằng dữ liệu hẹp hơn/khác kỳ so với lúc giathanh_cu được tạo) thì dòng đó
+    sẽ bị RỚT MẤT hoàn toàn nếu chỉ dùng thẳng kết quả _gen_xk_giathanh() —
+    đã xác nhận qua báo cáo thật: file Import giá thành 558 dòng, ctbr chỉ
+    còn 224 dòng, kết quả cuối chỉ còn 230 dòng (mất 328 dòng có thật). Dùng
+    CHUNG hàm này ở cả "Dò mã hàng tự động" lẫn "Import giá thành" để không
+    lặp lại lỗi tương tự ở 1 trong 2 chỗ."""
+    ket_qua = _gen_xk_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu)
+    col_ctbr = _xk_src_cols(ctbr_header or [])
+
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+
+    key_ctbr = set()
+    for r in (ctbr_rows or []):
+        ten = str(gv(r, col_ctbr["ten"]) or "").strip()
+        if not ten:
+            continue
+        key_ctbr.add((str(gv(r, col_ctbr["sohd"]) or "").strip(), _chuan_ten_hang_xk(ten)))
+    them_ngoai_ctbr = [r for r in (giathanh_cu or [])
+                      if (str(r.get("sohd") or "").strip(),
+                          _chuan_ten_hang_xk(r.get("ten_sp"))) not in key_ctbr]
+    return ket_qua + them_ngoai_ctbr
+
 XK_GIATHANH_XUAT_HEADERS = ["Tồn kho", "Số HĐ", "Ngày", "Tên Sản Phẩm", "ĐVT", "Số lượng",
     "Đơn giá", "Thành tiền", "Mã hàng kho", "Tên hàng xuất kho", "ĐVT kho", "SL kho",
     "Đơn Giá kho", "Thành Tiền kho"]
@@ -11102,8 +11131,8 @@ def xk_tao_giathanh(cid: int):
         raise HTTPException(400, "Chưa có dữ liệu 'Chi tiết BÁN RA' — vào màn Nhập Liệu, Import & tách dữ liệu rồi Lưu cả 2 bảng kê từ file có sheet 'Chi tiết BÁN RA'")
     hoc_ma = data.get("xk_hoc_ma") or {}
     giathanh_cu = data.get("xk_giathanh") or []
-    giathanh = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
-                                hoc_ma, giathanh_cu)
+    giathanh = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
+                                     hoc_ma, giathanh_cu)
     data["xk_giathanh"] = giathanh
     _ghi_du_lieu_cty(cid, data)
     so_khop = sum(1 for r in giathanh if r.get("ma"))
@@ -11374,8 +11403,8 @@ async def xk_import_giathanh(cid: int, request: Request):
     src = nhap_lieu_get(cid, "ctbr")
     da_tu_do_ma = False
     if ton_rows and src.get("rows"):
-        rows_out = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
-                                    hoc_ma, rows_out)
+        rows_out = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
+                                         hoc_ma, rows_out)
         da_tu_do_ma = True
     data["xk_giathanh"] = rows_out
     data["xk_hoc_ma"] = hoc_ma
