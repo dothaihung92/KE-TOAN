@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.101"
+APP_BUILD = "2026-07-27.102"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17705,6 +17705,35 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     rows = _gop_hoa_don_trung_he_thong(conn.execute(
         "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
         (cid,)).fetchall())
+
+    # CHỈ XỬ LÝ ĐÚNG KỲ ĐANG XUẤT khi có truyền tu_ngay/den_ngay — theo yêu
+    # cầu: trước đây bước "nạp trước chi tiết" bên dưới LUÔN xử lý TOÀN BỘ
+    # lịch sử hóa đơn công ty (mọi kỳ cộng dồn từ trước tới giờ), dù người
+    # dùng chỉ đang xuất 1 kỳ cụ thể — khiến phải chờ tải bù hàng trăm hóa
+    # đơn của CÁC KỲ KHÁC không liên quan mỗi lần xuất. Nếu KHÔNG truyền
+    # tu_ngay/den_ngay (rỗng) thì vẫn giữ hành vi CŨ — xử lý toàn bộ lịch sử
+    # (dùng cho các luồng cố ý muốn đầy đủ mọi kỳ trong 1 file).
+    def _ngay_hoa_don(tdlap):
+        s = str(tdlap or "").split("T")[0].strip()
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                return datetime.datetime.strptime(s, fmt).date()
+            except Exception:
+                pass
+        return None
+
+    _tu_loc = _den_loc = None
+    if (tu_ngay or "").strip() and (den_ngay or "").strip():
+        try:
+            _tu_loc = datetime.datetime.strptime(tu_ngay.strip(), "%d/%m/%Y").date()
+            _den_loc = datetime.datetime.strptime(den_ngay.strip(), "%d/%m/%Y").date()
+        except Exception:
+            _tu_loc = _den_loc = None
+    if _tu_loc and _den_loc:
+        _truoc_loc = len(rows)
+        rows = [r for r in rows
+               if (d := _ngay_hoa_don(r["tdlap"])) and _tu_loc <= d <= _den_loc]
+        _tlog(f"lọc đúng kỳ {tu_ngay} - {den_ngay}: {len(rows)}/{_truoc_loc} hóa đơn")
 
     # ===== NẠP TRƯỚC CHI TIẾT SONG SONG (tăng tốc xuất Excel) =====
     # Chỉ nạp hóa đơn CHƯA có detail_json VÀ chưa có file đã tải (ƯU TIÊN TUYỆT ĐỐI
