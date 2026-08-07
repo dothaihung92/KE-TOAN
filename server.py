@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.103"
+APP_BUILD = "2026-07-27.104"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3930,7 +3930,37 @@ def _khong_dau(s):
 # Các cột báo cáo Tra cứu tờ khai (theo file mẫu)
 TRACUU_COLS = ["to_khai", "ky", "loai", "ngay_nop", "lan_nop", "lan_bs", "trang_thai"]
 TRACUU_HEADERS = ["Mst", "Tên công ty", "Tờ khai", "Kỳ", "Loại",
-                  "Ngày nộp", "Lần nộp", "Lần bổ sung", "Trạng thái"]
+                  "Ngày nộp", "Lần nộp", "Lần bổ sung", "Trạng thái", "Nộp đúng hạn?"]
+
+
+def _han_nop_to_khai(ky):
+    """Suy HẠN NỘP tờ khai từ chuỗi 'Kỳ' trên trang Thuế, theo Luật Quản lý
+    thuế/TT80: kỳ QUÝ ('Qx/YYYY') chậm nhất ngày CUỐI THÁNG ĐẦU của quý sau
+    (vd Q1 -> 30/04); kỳ THÁNG ('MM/YYYY') chậm nhất ngày 20 THÁNG SAU; kỳ
+    NĂM (chỉ 'YYYY' — quyết toán/BCTC) chậm nhất ngày 31/03 năm sau. Trả về
+    None nếu 'Kỳ' không khớp mẫu nào (vd dòng 'chưa tìm thấy tờ khai' ghi
+    khoảng ngày '01/01/2016 - 31/12/2025') — KHÔNG đoán mò hạn trong trường
+    hợp đó."""
+    import re as _re_han
+    s = str(ky or "").strip()
+    m = _re_han.match(r'^Q(\d)/(\d{4})$', s, _re_han.IGNORECASE)
+    if m:
+        q, nam = int(m.group(1)), int(m.group(2))
+        # hạn = ngày cuối THÁNG ĐẦU của quý SAU — quý q kết thúc ở tháng q*3,
+        # quý sau bắt đầu ở tháng q*3+1 (q=1->tháng 4, q=2->tháng 7, q=3->
+        # tháng 10, q=4->tháng 1 năm sau). TRƯỚC ĐÂY nhầm dùng q+1 (ra tháng
+        # 2/3/4/5) thay vì q*3+1 (đúng phải là 4/7/10/1) — đã sửa.
+        thang_han, nam_han = (q * 3 + 1, nam) if q < 4 else (1, nam + 1)
+        return datetime.date(nam_han, thang_han, calendar.monthrange(nam_han, thang_han)[1])
+    if _re_han.match(r'^\d{4}$', s):
+        return datetime.date(int(s) + 1, 3, 31)
+    m = _re_han.match(r'^(\d{1,2})/(\d{4})$', s)
+    if m:
+        thang, nam = int(m.group(1)), int(m.group(2))
+        if 1 <= thang <= 12:
+            thang_han, nam_han = (thang + 1, nam) if thang < 12 else (1, nam + 1)
+            return datetime.date(nam_han, thang_han, 20)
+    return None
 
 # Nhãn gọn cho tên file, theo mã tờ khai (vd '01/GTGT' -> '01GTGT')
 _TEN_TO_KHAI_MAP = {
@@ -4339,15 +4369,36 @@ def _xuat_tracuu_excel(rows, path):
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     thin = Side(style="thin", color="BBBBBB")
     bd = Border(left=thin, right=thin, top=thin, bottom=thin)
+    do_nhat = PatternFill("solid", fgColor="FFC7CE")   # nền đỏ nhạt — trễ hạn nộp
     r = hr + 1
     for rec in rows:
         tt = _khong_dau(rec.get("trang_thai", ""))
         chua_nop = "chua nop" in tt
         do = chua_nop or "khong chap nhan" in tt or "tu choi" in tt
-        vals = [rec.get("mst", ""), rec.get("ten", "")] + [rec.get(c, "") for c in TRACUU_COLS]
+        # Đối chiếu Ngày nộp với HẠN NỘP suy từ Kỳ (xem _han_nop_to_khai) —
+        # CHỈ kết luận được khi có cả 2: Ngày nộp thật (đã nộp) VÀ suy được
+        # hạn từ Kỳ (bỏ qua các dòng "chưa tìm thấy tờ khai" ghi khoảng ngày
+        # thay vì đúng 1 kỳ) — không đoán mò khi thiếu dữ liệu.
+        han = _han_nop_to_khai(rec.get("ky", ""))
+        ngay_nop_s = str(rec.get("ngay_nop", "") or "").strip()
+        tre_han = False
+        dung_han_txt = ""
+        if han and ngay_nop_s:
+            try:
+                ngay_nop_d = datetime.datetime.strptime(
+                    ngay_nop_s.split(" ")[0], "%d/%m/%Y").date()
+                tre_han = ngay_nop_d > han
+                dung_han_txt = (f"Trễ hạn (hạn {han.strftime('%d/%m/%Y')})" if tre_han
+                                else f"Đúng hạn (hạn {han.strftime('%d/%m/%Y')})")
+            except Exception:
+                pass
+        vals = ([rec.get("mst", ""), rec.get("ten", "")] + [rec.get(c, "") for c in TRACUU_COLS]
+               + [dung_han_txt])
         for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v); cell.border = bd
             cell.alignment = Alignment(vertical="center", wrap_text=(c == 2 or c == 3))
+            if tre_han:
+                cell.fill = do_nhat   # tô đỏ NGUYÊN DÒNG khi nộp trễ hạn
             if chua_nop:
                 # cả dòng đỏ để dễ thấy công ty chưa nộp
                 cell.font = Font(color="C00000", bold=True)
@@ -4358,14 +4409,16 @@ def _xuat_tracuu_excel(rows, path):
                     cell.font = Font(color="008000")              # xanh
                 elif tt:
                     cell.font = Font(color="BF8F00")              # vàng (chờ)
+            elif c == 10 and tre_han:
+                cell.font = Font(color="C00000", bold=True)
         r += 1
-    widths = [16, 42, 40, 10, 12, 13, 9, 11, 16]
+    widths = [16, 42, 40, 10, 12, 13, 9, 11, 16, 22]
     for c, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(1, c).column_letter].width = w
     ws.freeze_panes = "A6"
     # bật filter cho các cột (hàng tiêu đề ở dòng 5)
     last_row = max(hr, r - 1)
-    ws.auto_filter.ref = f"A{hr}:I{last_row}"
+    ws.auto_filter.ref = f"A{hr}:J{last_row}"
     wb.save(path)
 
 def _xuat_saipass_excel(items, path):
