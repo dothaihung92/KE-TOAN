@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.102"
+APP_BUILD = "2026-07-27.103"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18135,11 +18135,20 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             else:
                 so_vong_khong_tien = 0
 
-    # đọc lại rows để có detail_json mới nhất (từ các lượt nạp mạng ở trên)
+    # đọc lại rows để có detail_json mới nhất (từ các lượt nạp mạng ở trên) —
+    # PHẢI lọc lại ĐÚNG KỲ lần nữa ở đây (giống bộ lọc đầu hàm): câu SELECT
+    # này đọc lại TOÀN BỘ hóa đơn công ty (mọi kỳ) để lấy detail_json mới
+    # nhất, nên nếu không lọc lại sẽ VÔ TÌNH NẠP LẠI cả rows CHƯA lọc — làm
+    # mất tác dụng bộ lọc kỳ đã áp ở đầu hàm, khiến sheet dựng ra sau đó vẫn
+    # gồm TOÀN BỘ lịch sử (469) thay vì đúng kỳ (149) dù bước nạp chi tiết đã
+    # chạy đúng phạm vi kỳ.
     rows = _gop_hoa_don_trung_he_thong(conn.execute(
         "SELECT * FROM invoices WHERE company_id=? ORDER BY loai, tdlap DESC",
         (cid,)).fetchall())
     conn.close()
+    if _tu_loc and _den_loc:
+        rows = [r for r in rows
+               if (d := _ngay_hoa_don(r["tdlap"])) and _tu_loc <= d <= _den_loc]
     _tlog(f"xong nap chi tiet ({len(rows)} hoa don) -> bat dau dung sheet")
 
     wb = openpyxl.Workbook()
