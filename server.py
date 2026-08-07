@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.99"
+APP_BUILD = "2026-07-27.100"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11362,12 +11362,28 @@ async def xk_import_giathanh(cid: int, request: Request):
         so_file_ok += 1
     if not rows_out:
         raise HTTPException(400, "Không đọc được dòng nào phù hợp. " + "; ".join(loi[:3]))
+    # Tự chạy luôn "Dò mã hàng tự động" ngay sau khi import — theo yêu cầu,
+    # để khỏi phải bấm thêm 1 bước riêng. Dùng CHÍNH các dòng vừa import làm
+    # giathanh_cu (giữ nguyên mã đã gán/sửa trong file — xem _gen_xk_giathanh)
+    # rồi đồng bộ thêm mọi hóa đơn THẬT khác trong 'Chi tiết BÁN RA' mà file
+    # import chưa có (vd hóa đơn phát sinh sau lúc xuất file cũ để sửa tay).
+    # Chỉ bỏ qua bước này (giữ nguyên đúng những gì đọc được từ file) nếu
+    # công ty CHƯA có đủ Tồn kho/Chi tiết BÁN RA để dò — không báo lỗi, vì
+    # import vẫn thành công, chỉ là chưa dò mã thêm được.
+    ton_rows = data.get("xk_ton") or []
+    src = nhap_lieu_get(cid, "ctbr")
+    da_tu_do_ma = False
+    if ton_rows and src.get("rows"):
+        rows_out = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
+                                    hoc_ma, rows_out)
+        da_tu_do_ma = True
     data["xk_giathanh"] = rows_out
     data["xk_hoc_ma"] = hoc_ma
     _ghi_du_lieu_cty(cid, data)
     so_khop = sum(1 for r in rows_out if r.get("ma"))
     return {"ok": True, "so_file": so_file_ok, "so_dong": len(rows_out),
-            "so_khop": so_khop, "so_chua_khop": len(rows_out) - so_khop, "loi": loi[:5]}
+            "so_khop": so_khop, "so_chua_khop": len(rows_out) - so_khop,
+            "da_tu_do_ma": da_tu_do_ma, "loi": loi[:5]}
 
 
 # ============================================================
