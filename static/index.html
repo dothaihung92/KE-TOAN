@@ -895,7 +895,7 @@
 
 <!-- MODAL Kết nối MISA (kết quả xuất trọn gói + hướng dẫn) -->
 <div id="misaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:700;align-items:center;justify-content:center">
-  <div style="width:min(1040px,96vw);max-height:92vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
+  <div id="misaModalBox" style="width:min(1040px,96vw);max-height:92vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
     <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:10px">
       <div style="font-weight:800;font-size:19px;color:#2e5c8a">🔗 Kết nối MISA SME</div>
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">✕</button>
@@ -4363,7 +4363,7 @@ async function khnccImportMisa(){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_them>0?`<button class="btn sm" style="background:#b06a00" onclick="khnccImportMisaGhi()">⬆ Ghi ${pv.so_them} đối tượng vào MISA</button>`:''}
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function khnccImportMisaGhi(){
@@ -4428,7 +4428,7 @@ async function ghiTangImportMisa(loai){
         ${soTrung>0?`<button class="btn sm" style="background:#8a5300" onclick="ghiTangImportMisaGhi('${loai}',true)">♻ Ghi đè ${soTrung} đã có</button>`:''}
         ${soThem>0?`<button class="btn sm" style="background:#a03a3a" onclick="ghiTangImportMisaGhi('${loai}',false)">⬆ Ghi ${soThem} vào MISA</button>`:''}
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function ghiTangImportMisaGhi(loai,ghiDe){
@@ -5049,6 +5049,8 @@ document.addEventListener('keydown',(e)=>{
   // luôn ra ngoài màn Nhập Liệu chỉ với 1 lần bấm Esc.
   const ganModal=document.getElementById('xkGanModal');
   if(ganModal&&ganModal.style.display==='flex')return;
+  const misaModalEl=document.getElementById('misaModal');
+  if(misaModalEl&&misaModalEl.style.display==='flex')return;
   if(!(e.ctrlKey||e.metaKey||e.altKey)&&e.key!=='Escape')return;
   const k=e.key.toLowerCase();
   if(e.ctrlKey&&e.shiftKey&&k==='l'){e.preventDefault();nlBatFilter();}
@@ -5365,7 +5367,7 @@ async function muaHangImportMisa(loai){
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Sửa ĐVT trên CHỨNG TỪ ĐÃ GHI (Mua hàng/Dịch vụ, chưa ghi sổ, do chính
@@ -5406,7 +5408,7 @@ async function misaSuaDvtChungTu(){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_sua>0?`<button class="btn sm" style="background:#a03a3a" onclick="misaSuaDvtChungTuGhi()">🔧 Sửa ${pv.so_sua} dòng</button>`:''}
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaSuaDvtChungTuGhi(){
@@ -5432,7 +5434,7 @@ async function misaChanDoanDvt(){
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaChanDoanBanHang(){
@@ -5448,7 +5450,7 @@ async function misaChanDoanBanHang(){
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaQuetKyBanHang(){
@@ -5491,7 +5493,7 @@ async function misaQuetKyBanHang(){
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaDoCauTrucHoaDon(){
@@ -5505,7 +5507,7 @@ async function misaDoCauTrucHoaDon(){
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaXemDinhNghiaView(){
@@ -5527,7 +5529,7 @@ async function misaXemDinhNghiaView(){
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaSuaThieuSAInvoiceReference(){
@@ -5553,7 +5555,7 @@ async function misaSuaThieuSAInvoiceReference(){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         <button class="btn sm" style="background:#2a7a3a" onclick="misaSuaThieuSAInvoiceReferenceXacNhan()">✔ Xác nhận sửa</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaSuaThieuSAInvoiceReferenceXacNhan(){
@@ -5592,7 +5594,7 @@ async function misaImportTuDongChay(preview){
     <div id="misaImportFooter" style="margin-top:14px;text-align:right">
       <span style="color:#999;font-size:14.5px"><span class="spin"></span> Đang chạy...</span>
     </div>`;
-  document.getElementById('misaModal').style.display='flex';
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
   const log=document.getElementById('misaImportLog');
   try{
     await api(`/api/misa-sql/import-tu-dong-start/${cid}?preview=${preview?1:0}`,{method:'POST'});
@@ -5651,6 +5653,34 @@ async function misaImportTuDong(){
 // + Đề xuất bù công nợ treo (Giai đoạn 2) =====
 let misaBuTruDsHienTai=[];
 let misaDoiChieuTu='', misaDoiChieuDen='';
+// Kích thước khung misaModal: mặc định vừa phải (min(1040px,96vw)), nhưng
+// 2 màn "Tổng hợp công nợ"/"Chi tiết công nợ" bảng nhiều cột/dòng nên cần
+// full màn hình + chữ to hơn mới dễ nhìn — misaModalFull() phóng to, các
+// nơi mở misaModal khác (khncc/hàng hóa/ghi tăng...) tự về lại cỡ thường
+// qua misaModalNormal() (gọi kèm ngay trước display='flex' của chúng).
+function misaModalNormal(){
+  const b=document.getElementById('misaModalBox');
+  if(!b)return;
+  b.style.width='min(1040px,96vw)';b.style.maxWidth='';
+  b.style.height='';b.style.maxHeight='92vh';
+}
+function misaModalFull(){
+  const b=document.getElementById('misaModalBox');
+  if(!b)return;
+  b.style.width='98vw';b.style.maxWidth='98vw';
+  b.style.height='94vh';b.style.maxHeight='94vh';
+}
+// Esc trong misaModal: nếu đang ở màn có "lối về" (vd Chi tiết công nợ ->
+// Tổng hợp công nợ) thì Esc quay lại thay vì đóng hẳn cửa sổ.
+let misaModalEscBack=null;
+document.addEventListener('keydown',(e)=>{
+  if(e.key!=='Escape')return;
+  const m=document.getElementById('misaModal');
+  if(!m||m.style.display!=='flex')return;
+  e.preventDefault();e.stopPropagation();
+  if(misaModalEscBack){const fn=misaModalEscBack;misaModalEscBack=null;fn();}
+  else{m.style.display='none';}
+});
 function misaDoiChieuMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   misaDoiChieuChay('kh');
@@ -5659,8 +5689,10 @@ async function misaDoiChieuChay(loai){
   const tuEl=document.getElementById('doiChieuTu'), denEl=document.getElementById('doiChieuDen');
   if(tuEl)misaDoiChieuTu=tuEl.value||'';
   if(denEl)misaDoiChieuDen=denEl.value||'';
+  misaModalEscBack=null;
   document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang đọc công nợ từ MISA...</div>`;
-  document.getElementById('misaModal').style.display='flex';
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  misaModalFull();
   try{
     const qs=new URLSearchParams({loai, tu_ngay:misaDoiChieuTu, den_ngay:misaDoiChieuDen});
     const d=await api(`/api/misa-sql/doi-chieu-cong-no/${current}?${qs}`);
@@ -5672,14 +5704,14 @@ async function misaDoiChieuChay(loai){
       tongPsNo+=r.phat_sinh_no; tongPsCo+=r.phat_sinh_co;
       tongCuoiNo+=r.du_cuoi_ky_no; tongCuoiCo+=r.du_cuoi_ky_co;
       return `<tr>
-        <td style="padding:6px 8px;border:1px solid #eee"><a href="javascript:void(0)" onclick="misaChiTietCongNo('${loai}','${r.account_object_id}')" style="color:#2e5c8a;font-weight:700;text-decoration:underline">${misaEsc(r.ma)}</a></td>
-        <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.ten)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_no)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_co)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.phat_sinh_no)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.phat_sinh_co)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700">${nf(r.du_cuoi_ky_no)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700">${nf(r.du_cuoi_ky_co)}</td>
+        <td style="padding:10px 12px;border:1px solid #eee"><a href="javascript:void(0)" onclick="misaChiTietCongNo('${loai}','${r.account_object_id}')" style="color:#2e5c8a;font-weight:700;text-decoration:underline">${misaEsc(r.ma)}</a></td>
+        <td style="padding:10px 12px;border:1px solid #eee">${misaEsc(r.ten)}</td>
+        <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_no)}</td>
+        <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_co)}</td>
+        <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(r.phat_sinh_no)}</td>
+        <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(r.phat_sinh_co)}</td>
+        <td style="padding:10px 12px;border:1px solid #eee;text-align:right;font-weight:700">${nf(r.du_cuoi_ky_no)}</td>
+        <td style="padding:10px 12px;border:1px solid #eee;text-align:right;font-weight:700">${nf(r.du_cuoi_ky_co)}</td>
       </tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
@@ -5691,30 +5723,30 @@ async function misaDoiChieuChay(loai){
           <input type="date" id="doiChieuDen" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
         <button class="btn sm" style="background:#2e5c8a" onclick="misaDoiChieuChay('${loai}')">Lọc</button>
       </div>
-      <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:10px 14px;font-size:13.5px;color:#2e5c8a;margin-bottom:10px">
+      <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:12px 16px;font-size:15px;color:#2e5c8a;margin-bottom:10px">
         Tổng hợp công nợ <b>${tenLoai}</b> — đọc thẳng từ MISA (AccountObjectLedger), y hệt báo cáo "Tổng hợp công nợ" trong MISA (nhóm theo Mã KH/NCC), chỉ tính chứng từ <b>đã ghi sổ</b>. Để trống ngày = toàn bộ lịch sử. <b>Chỉ hiện đối tượng còn dư cuối kỳ khác 0</b> — đã hết công nợ thì không hiện. Bấm vào <b>Mã</b> để xem chi tiết công nợ + kết quả đối chiếu 3 tầng.
       </div>
-      <div style="max-height:46vh;overflow:auto">
-      <table style="border-collapse:collapse;font-size:12.5px;width:100%">
+      <div style="max-height:64vh;overflow:auto">
+      <table style="border-collapse:collapse;font-size:15px;width:100%">
         <tr style="background:#f0f0f0;position:sticky;top:0">
-          <th rowspan="2" style="padding:6px 8px;border:1px solid #eee">Mã</th>
-          <th rowspan="2" style="padding:6px 8px;border:1px solid #eee">Tên</th>
-          <th colspan="2" style="padding:4px 8px;border:1px solid #eee">Dư đầu kỳ</th>
-          <th colspan="2" style="padding:4px 8px;border:1px solid #eee">Phát sinh</th>
-          <th colspan="2" style="padding:4px 8px;border:1px solid #eee">Dư cuối kỳ</th>
+          <th rowspan="2" style="padding:10px 12px;border:1px solid #eee">Mã</th>
+          <th rowspan="2" style="padding:10px 12px;border:1px solid #eee">Tên</th>
+          <th colspan="2" style="padding:6px 12px;border:1px solid #eee">Dư đầu kỳ</th>
+          <th colspan="2" style="padding:6px 12px;border:1px solid #eee">Phát sinh</th>
+          <th colspan="2" style="padding:6px 12px;border:1px solid #eee">Dư cuối kỳ</th>
         </tr>
-        <tr style="background:#f0f0f0;position:sticky;top:26px">
-          <th style="padding:4px 8px;border:1px solid #eee">Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Có</th>
-          <th style="padding:4px 8px;border:1px solid #eee">Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Có</th>
-          <th style="padding:4px 8px;border:1px solid #eee">Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Có</th>
-        </tr>${rows||'<tr><td colspan="8" style="padding:14px;text-align:center;color:#999">Không có dữ liệu (kiểm tra đã Ghi sổ chứng từ trong MISA chưa)</td></tr>'}
-        ${rows?`<tr style="background:#f7f7f7;font-weight:700"><td style="padding:6px 8px;border:1px solid #eee" colspan="2">Tổng</td>
-          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongDauNo)}</td>
-          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongDauCo)}</td>
-          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongPsNo)}</td>
-          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongPsCo)}</td>
-          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongCuoiNo)}</td>
-          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongCuoiCo)}</td></tr>`:''}
+        <tr style="background:#f0f0f0;position:sticky;top:39px">
+          <th style="padding:6px 12px;border:1px solid #eee">Nợ</th><th style="padding:6px 12px;border:1px solid #eee">Có</th>
+          <th style="padding:6px 12px;border:1px solid #eee">Nợ</th><th style="padding:6px 12px;border:1px solid #eee">Có</th>
+          <th style="padding:6px 12px;border:1px solid #eee">Nợ</th><th style="padding:6px 12px;border:1px solid #eee">Có</th>
+        </tr>${rows||'<tr><td colspan="8" style="padding:18px;text-align:center;color:#999">Không có dữ liệu (kiểm tra đã Ghi sổ chứng từ trong MISA chưa)</td></tr>'}
+        ${rows?`<tr style="background:#f7f7f7;font-weight:700"><td style="padding:10px 12px;border:1px solid #eee" colspan="2">Tổng</td>
+          <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(tongDauNo)}</td>
+          <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(tongDauCo)}</td>
+          <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(tongPsNo)}</td>
+          <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(tongPsCo)}</td>
+          <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(tongCuoiNo)}</td>
+          <td style="padding:10px 12px;border:1px solid #eee;text-align:right">${nf(tongCuoiCo)}</td></tr>`:''}
       </table></div>
       <div style="margin-top:14px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
@@ -5727,42 +5759,44 @@ function misaDoiChieuTabs(loaiDang){
   return `<div style="display:flex;gap:8px">${tab('kh','Khách hàng (phải thu)')}${tab('ncc','Nhà cung cấp (phải trả)')}</div>`;
 }
 async function misaChiTietCongNo(loai,accountObjectId){
+  misaModalFull();
+  misaModalEscBack=()=>misaDoiChieuChay(loai);
   document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang đọc chi tiết công nợ &amp; đối chiếu 3 tầng...</div>`;
   try{
     const qs=new URLSearchParams({loai,account_object_id:accountObjectId,tu_ngay:misaDoiChieuTu,den_ngay:misaDoiChieuDen});
     const d=await api(`/api/misa-sql/chi-tiet-cong-no/${current}?${qs}`);
     const nf=n=>(n||0).toLocaleString('vi-VN');
     const rows=(d.dong||[]).map(r=>`<tr style="${r.treo?'background:#fde8e8':''}">
-        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.ngay_hach_toan)}</td>
-        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.ngay_chung_tu)}</td>
-        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.so_chung_tu)}</td>
-        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.so_hoa_don)}</td>
-        <td style="padding:4px 8px;border:1px solid #eee;${r.treo?'color:#b91c1c;font-weight:700':''}">${misaEsc(r.dien_giai)}${r.treo?' ⚠':''}</td>
-        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.tk_doi_ung)}</td>
-        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${r.ps_no?nf(r.ps_no):''}</td>
-        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${r.ps_co?nf(r.ps_co):''}</td>
-        <td style="padding:4px 8px;border:1px solid #eee;text-align:right;font-weight:700">${r.du_no?nf(r.du_no):''}</td>
-        <td style="padding:4px 8px;border:1px solid #eee;text-align:right;font-weight:700">${r.du_co?nf(r.du_co):''}</td>
+        <td style="padding:8px 10px;border:1px solid #eee">${misaEsc(r.ngay_hach_toan)}</td>
+        <td style="padding:8px 10px;border:1px solid #eee">${misaEsc(r.ngay_chung_tu)}</td>
+        <td style="padding:8px 10px;border:1px solid #eee">${misaEsc(r.so_chung_tu)}</td>
+        <td style="padding:8px 10px;border:1px solid #eee">${misaEsc(r.so_hoa_don)}</td>
+        <td style="padding:8px 10px;border:1px solid #eee;${r.treo?'color:#b91c1c;font-weight:700':''}">${misaEsc(r.dien_giai)}${r.treo?' ⚠':''}</td>
+        <td style="padding:8px 10px;border:1px solid #eee">${misaEsc(r.tk_doi_ung)}</td>
+        <td style="padding:8px 10px;border:1px solid #eee;text-align:right">${r.ps_no?nf(r.ps_no):''}</td>
+        <td style="padding:8px 10px;border:1px solid #eee;text-align:right">${r.ps_co?nf(r.ps_co):''}</td>
+        <td style="padding:8px 10px;border:1px solid #eee;text-align:right;font-weight:700">${r.du_no?nf(r.du_no):''}</td>
+        <td style="padding:8px 10px;border:1px solid #eee;text-align:right;font-weight:700">${r.du_co?nf(r.du_co):''}</td>
       </tr>`).join('');
     document.getElementById('misaModalBody').innerHTML=`
-      <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')" style="margin-bottom:10px">← Quay lại Tổng hợp công nợ</button>
-      <div style="font-weight:800;font-size:16px;color:#2e5c8a;margin-bottom:4px">${misaEsc(d.ma)} — ${misaEsc(d.ten)}</div>
-      <div style="background:${d.so_treo>0?'#fde8e8':'#eafaf0'};border:1px solid ${d.so_treo>0?'#f5b5b5':'#7ac9a0'};border-radius:8px;padding:10px 14px;font-size:13px;color:${d.so_treo>0?'#b91c1c':'#1a7a4a'};margin-bottom:10px">
+      <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')" style="margin-bottom:10px">← Quay lại Tổng hợp công nợ (Esc)</button>
+      <div style="font-weight:800;font-size:19px;color:#2e5c8a;margin-bottom:6px">${misaEsc(d.ma)} — ${misaEsc(d.ten)}</div>
+      <div style="background:${d.so_treo>0?'#fde8e8':'#eafaf0'};border:1px solid ${d.so_treo>0?'#f5b5b5':'#7ac9a0'};border-radius:8px;padding:12px 16px;font-size:15px;color:${d.so_treo>0?'#b91c1c':'#1a7a4a'};margin-bottom:12px">
         ${d.so_treo>0?`⚠ Còn <b>${d.so_treo}</b> hóa đơn CHƯA khớp được khoản thanh toán nào (dòng tô đỏ bên dưới, có dấu ⚠).`:'✓ Tất cả hóa đơn đều đã khớp được khoản thanh toán.'}
         Tầng 1 khớp: <b>${d.tang1.length}</b> — Tầng 2 khớp: <b>${d.tang2.length}</b> — Không rõ: <b>${d.khong_ro.length}</b>.
       </div>
-      <div style="max-height:50vh;overflow:auto">
-      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
+      <div style="max-height:60vh;overflow:auto">
+      <table style="border-collapse:collapse;font-size:14.5px;width:100%">
         <tr style="background:#f0f0f0;position:sticky;top:0">
-          <th style="padding:4px 8px;border:1px solid #eee">Ngày hạch toán</th><th style="padding:4px 8px;border:1px solid #eee">Ngày chứng từ</th>
-          <th style="padding:4px 8px;border:1px solid #eee">Số chứng từ</th><th style="padding:4px 8px;border:1px solid #eee">Số HĐ</th>
-          <th style="padding:4px 8px;border:1px solid #eee">Diễn giải</th><th style="padding:4px 8px;border:1px solid #eee">TK đối ứng</th>
-          <th style="padding:4px 8px;border:1px solid #eee">PS Nợ</th><th style="padding:4px 8px;border:1px solid #eee">PS Có</th>
-          <th style="padding:4px 8px;border:1px solid #eee">Dư Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Dư Có</th>
+          <th style="padding:8px 10px;border:1px solid #eee">Ngày hạch toán</th><th style="padding:8px 10px;border:1px solid #eee">Ngày chứng từ</th>
+          <th style="padding:8px 10px;border:1px solid #eee">Số chứng từ</th><th style="padding:8px 10px;border:1px solid #eee">Số HĐ</th>
+          <th style="padding:8px 10px;border:1px solid #eee">Diễn giải</th><th style="padding:8px 10px;border:1px solid #eee">TK đối ứng</th>
+          <th style="padding:8px 10px;border:1px solid #eee">PS Nợ</th><th style="padding:8px 10px;border:1px solid #eee">PS Có</th>
+          <th style="padding:8px 10px;border:1px solid #eee">Dư Nợ</th><th style="padding:8px 10px;border:1px solid #eee">Dư Có</th>
         </tr>${rows}
       </table></div>
-      ${(d.khong_ro||[]).length?`<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#b91c1c">Không rõ — cần tự kiểm tra (${d.khong_ro.length})</summary>
-        ${d.khong_ro.map(x=>`<div style="margin:6px 0;padding:6px 10px;background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;font-size:12px">
+      ${(d.khong_ro||[]).length?`<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:15px;color:#b91c1c">Không rõ — cần tự kiểm tra (${d.khong_ro.length})</summary>
+        ${d.khong_ro.map(x=>`<div style="margin:6px 0;padding:8px 12px;background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;font-size:14px">
           TT ngày ${misaEsc(x.ngay_thanh_toan)}, ${x.so_tien.toLocaleString('vi-VN')}đ — ${misaEsc(x.loai_vuong)}${x.ung_vien?': '+x.ung_vien.map(u=>`HĐ ${misaEsc(u.inv_no)} (${u.so_tien.toLocaleString('vi-VN')}đ)`).join(', '):''}
         </div>`).join('')}</details>`:''}`;
   }catch(e){toast('Lỗi: '+e.message,'err')}
@@ -6007,7 +6041,7 @@ async function misaXemSAInvoiceReference(){
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function muaHangImportMisaGhi(loai,ghiDe){
@@ -6074,7 +6108,7 @@ async function muaHangImportMisaGhi(loai,ghiDe){
       <div style="text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 // Ghi chứng từ BÁN HÀNG (Bảng kê Đầu ra) thẳng vào MISA (SAVoucher) — mỗi
@@ -6130,7 +6164,7 @@ async function banHangImportMisa(){
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="banHangImportMisaGhi(true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisaGhi(false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function banHangImportMisaGhi(ghiDe){
@@ -6165,7 +6199,7 @@ async function misaXemLoaiChungTu(database,masterTable){
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function nlBanHang(btn){
@@ -6327,7 +6361,7 @@ async function dmImportMisa(){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_them>0?`<button class="btn sm" style="background:#b06a00" onclick="dmImportMisaGhi()">⬆ Ghi ${pv.so_them} mã vào MISA</button>`:''}
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function dmImportMisaGhi(){
@@ -6380,7 +6414,7 @@ async function dmQuetSuaDvt(){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_sua>0?`<button class="btn sm" style="background:#b06a00" onclick="dmQuetSuaDvtGhi()">🔧 Sửa ${pv.so_sua} mã</button>`:''}
       </div>`;
-    document.getElementById('misaModal').style.display='flex';
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function dmQuetSuaDvtGhi(){

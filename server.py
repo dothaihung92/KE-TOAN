@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.132"
+APP_BUILD = "2026-07-27.133"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
