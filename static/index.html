@@ -894,7 +894,7 @@
 
 <!-- MODAL Kết nối MISA (kết quả xuất trọn gói + hướng dẫn) -->
 <div id="misaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:700;align-items:center;justify-content:center">
-  <div style="width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
+  <div style="width:min(1040px,96vw);max-height:92vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
     <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:10px">
       <div style="font-weight:800;font-size:19px;color:#2e5c8a">🔗 Kết nối MISA SME</div>
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">✕</button>
@@ -5580,16 +5580,16 @@ async function misaImportTuDongChay(preview){
   const runId=++misaImportRunId;
   const cid=current;
   document.getElementById('misaModalBody').innerHTML=`
-    <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#2e5c8a;margin-bottom:10px">
+    <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:10px 14px;font-size:14.5px;color:#2e5c8a;margin-bottom:12px">
       ${preview?'⚠ XEM TRƯỚC — chưa ghi gì.':'<b>Đang ghi thật vào MISA</b> — KHÔNG đóng cửa sổ/tắt trình duyệt.'}
       Công ty nhiều chứng từ có thể mất vài phút, quá trình chạy hiện bên dưới.
     </div>
-    <div id="misaImportLog" style="max-height:38vh;overflow:auto;background:#0b1f1f;color:#c9f7e6;
-      font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;padding:10px 12px;
+    <div id="misaImportLog" style="max-height:58vh;min-height:280px;overflow:auto;background:#0b1f1f;color:#c9f7e6;
+      font-family:ui-monospace,Consolas,monospace;font-size:15.5px;line-height:1.85;padding:14px 16px;
       border-radius:8px;white-space:pre-wrap"></div>
     <div id="misaImportResult"></div>
-    <div id="misaImportFooter" style="margin-top:12px;text-align:right">
-      <span style="color:#999;font-size:12.5px"><span class="spin"></span> Đang chạy...</span>
+    <div id="misaImportFooter" style="margin-top:14px;text-align:right">
+      <span style="color:#999;font-size:14.5px"><span class="spin"></span> Đang chạy...</span>
     </div>`;
   document.getElementById('misaModal').style.display='flex';
   const log=document.getElementById('misaImportLog');
@@ -5630,12 +5630,12 @@ function misaImportHienKetQua(d,preview){
     if(b.bo_qua){mau='#999';trangThai='Bỏ qua — '+b.bo_qua;}
     else if(b.loi){mau='#b91c1c';trangThai='Lỗi — '+b.loi;}
     else{trangThai=(preview?'Sẽ ghi: ':'✓ Đã ghi: ')+misaTomTatBuoc(b.ket_qua);}
-    return `<tr><td style="padding:4px 8px;border:1px solid #eee;font-weight:600">${misaEsc(b.ten)}</td>
-      <td style="padding:4px 8px;border:1px solid #eee;color:${mau}">${misaEsc(trangThai)}</td></tr>`;
+    return `<tr><td style="padding:7px 10px;border:1px solid #eee;font-weight:600">${misaEsc(b.ten)}</td>
+      <td style="padding:7px 10px;border:1px solid #eee;color:${mau}">${misaEsc(trangThai)}</td></tr>`;
   }).join('');
   document.getElementById('misaImportResult').innerHTML=`
-    <table style="border-collapse:collapse;font-size:12.5px;width:100%;margin-top:10px">${rows}</table>
-    ${preview?'':'<div style="margin-top:8px;font-size:12.5px;color:#2e5c8a">Chứng từ Bán hàng/Mua hàng vẫn ghi ở trạng thái <b>CHƯA GHI SỔ</b> như mọi khi — vào từng màn hình MISA (Bán hàng/Mua hàng...), chọn tất cả rồi bấm "Ghi sổ" hàng loạt.</div>'}`;
+    <table style="border-collapse:collapse;font-size:14.5px;width:100%;margin-top:12px">${rows}</table>
+    ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Bán hàng/Mua hàng vẫn ghi ở trạng thái <b>CHƯA GHI SỔ</b> như mọi khi — vào từng màn hình MISA (Bán hàng/Mua hàng...), chọn tất cả rồi bấm "Ghi sổ" hàng loạt.</div>'}`;
   foot.innerHTML=`
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
