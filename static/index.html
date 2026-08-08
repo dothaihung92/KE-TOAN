@@ -5672,7 +5672,7 @@ async function misaDoiChieuChay(loai){
       tongPsNo+=r.phat_sinh_no; tongPsCo+=r.phat_sinh_co;
       tongCuoiNo+=r.du_cuoi_ky_no; tongCuoiCo+=r.du_cuoi_ky_co;
       return `<tr>
-        <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.ma)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee"><a href="javascript:void(0)" onclick="misaChiTietCongNo('${loai}','${r.account_object_id}')" style="color:#2e5c8a;font-weight:700;text-decoration:underline">${misaEsc(r.ma)}</a></td>
         <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.ten)}</td>
         <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_no)}</td>
         <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_co)}</td>
@@ -5692,7 +5692,7 @@ async function misaDoiChieuChay(loai){
         <button class="btn sm" style="background:#2e5c8a" onclick="misaDoiChieuChay('${loai}')">Lọc</button>
       </div>
       <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:10px 14px;font-size:13.5px;color:#2e5c8a;margin-bottom:10px">
-        Tổng hợp công nợ <b>${tenLoai}</b> — đọc thẳng từ MISA (AccountObjectLedger), y hệt báo cáo "Tổng hợp công nợ" trong MISA (nhóm theo Mã KH/NCC), chỉ tính chứng từ <b>đã ghi sổ</b>. Để trống ngày = toàn bộ lịch sử.
+        Tổng hợp công nợ <b>${tenLoai}</b> — đọc thẳng từ MISA (AccountObjectLedger), y hệt báo cáo "Tổng hợp công nợ" trong MISA (nhóm theo Mã KH/NCC), chỉ tính chứng từ <b>đã ghi sổ</b>. Để trống ngày = toàn bộ lịch sử. <b>Chỉ hiện đối tượng còn dư cuối kỳ khác 0</b> — đã hết công nợ thì không hiện. Bấm vào <b>Mã</b> để xem chi tiết công nợ + kết quả đối chiếu 3 tầng.
       </div>
       <div style="max-height:46vh;overflow:auto">
       <table style="border-collapse:collapse;font-size:12.5px;width:100%">
@@ -5725,6 +5725,47 @@ async function misaDoiChieuChay(loai){
 function misaDoiChieuTabs(loaiDang){
   const tab=(loai,ten)=>`<button class="btn ${loaiDang===loai?'':'ghost'} sm" style="${loaiDang===loai?'background:#7a4fb5':''}" onclick="misaDoiChieuChay('${loai}')">${ten}</button>`;
   return `<div style="display:flex;gap:8px">${tab('kh','Khách hàng (phải thu)')}${tab('ncc','Nhà cung cấp (phải trả)')}</div>`;
+}
+async function misaChiTietCongNo(loai,accountObjectId){
+  document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang đọc chi tiết công nợ &amp; đối chiếu 3 tầng...</div>`;
+  try{
+    const qs=new URLSearchParams({loai,account_object_id:accountObjectId,tu_ngay:misaDoiChieuTu,den_ngay:misaDoiChieuDen});
+    const d=await api(`/api/misa-sql/chi-tiet-cong-no/${current}?${qs}`);
+    const nf=n=>(n||0).toLocaleString('vi-VN');
+    const rows=(d.dong||[]).map(r=>`<tr style="${r.treo?'background:#fde8e8':''}">
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.ngay_hach_toan)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.ngay_chung_tu)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.so_chung_tu)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.so_hoa_don)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;${r.treo?'color:#b91c1c;font-weight:700':''}">${misaEsc(r.dien_giai)}${r.treo?' ⚠':''}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.tk_doi_ung)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${r.ps_no?nf(r.ps_no):''}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${r.ps_co?nf(r.ps_co):''}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right;font-weight:700">${r.du_no?nf(r.du_no):''}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right;font-weight:700">${r.du_co?nf(r.du_co):''}</td>
+      </tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')" style="margin-bottom:10px">← Quay lại Tổng hợp công nợ</button>
+      <div style="font-weight:800;font-size:16px;color:#2e5c8a;margin-bottom:4px">${misaEsc(d.ma)} — ${misaEsc(d.ten)}</div>
+      <div style="background:${d.so_treo>0?'#fde8e8':'#eafaf0'};border:1px solid ${d.so_treo>0?'#f5b5b5':'#7ac9a0'};border-radius:8px;padding:10px 14px;font-size:13px;color:${d.so_treo>0?'#b91c1c':'#1a7a4a'};margin-bottom:10px">
+        ${d.so_treo>0?`⚠ Còn <b>${d.so_treo}</b> hóa đơn CHƯA khớp được khoản thanh toán nào (dòng tô đỏ bên dưới, có dấu ⚠).`:'✓ Tất cả hóa đơn đều đã khớp được khoản thanh toán.'}
+        Tầng 1 khớp: <b>${d.tang1.length}</b> — Tầng 2 khớp: <b>${d.tang2.length}</b> — Không rõ: <b>${d.khong_ro.length}</b>.
+      </div>
+      <div style="max-height:50vh;overflow:auto">
+      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0">
+          <th style="padding:4px 8px;border:1px solid #eee">Ngày hạch toán</th><th style="padding:4px 8px;border:1px solid #eee">Ngày chứng từ</th>
+          <th style="padding:4px 8px;border:1px solid #eee">Số chứng từ</th><th style="padding:4px 8px;border:1px solid #eee">Số HĐ</th>
+          <th style="padding:4px 8px;border:1px solid #eee">Diễn giải</th><th style="padding:4px 8px;border:1px solid #eee">TK đối ứng</th>
+          <th style="padding:4px 8px;border:1px solid #eee">PS Nợ</th><th style="padding:4px 8px;border:1px solid #eee">PS Có</th>
+          <th style="padding:4px 8px;border:1px solid #eee">Dư Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Dư Có</th>
+        </tr>${rows}
+      </table></div>
+      ${(d.khong_ro||[]).length?`<details style="margin-top:10px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#b91c1c">Không rõ — cần tự kiểm tra (${d.khong_ro.length})</summary>
+        ${d.khong_ro.map(x=>`<div style="margin:6px 0;padding:6px 10px;background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;font-size:12px">
+          TT ngày ${misaEsc(x.ngay_thanh_toan)}, ${x.so_tien.toLocaleString('vi-VN')}đ — ${misaEsc(x.loai_vuong)}${x.ung_vien?': '+x.ung_vien.map(u=>`HĐ ${misaEsc(u.inv_no)} (${u.so_tien.toLocaleString('vi-VN')}đ)`).join(', '):''}
+        </div>`).join('')}</details>`:''}`;
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function misaBuTruMo(loai){
   document.getElementById('misaModalBody').innerHTML=`
