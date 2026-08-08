@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.106"
+APP_BUILD = "2026-07-27.107"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14889,12 +14889,39 @@ def _misa_chan_doan_ban_hang(cid, database, so_ct_list):
             row = cur.execute(
                 "SELECT RefID FROM SAVoucher WHERE RefNoManagement=?", so_ct).fetchone()
             if not row:
+                row = cur.execute(
+                    "SELECT RefID FROM SAVoucher WHERE RefNoFinance=?", so_ct).fetchone()
+            if not row:
                 ket.append({"so_ct": so_ct, "loi": "Không thấy SAVoucher nào có Số chứng từ này"})
                 continue
             muc = {"so_ct": so_ct}
             muc.update(full_muc(row[0]))
             ket.append(muc)
-        return {"database": database, "ket_qua": ket, "tham_khao_chung_tu_that": tham_khao}
+        # DANH SÁCH ĐẦY ĐỦ các RefType (loại chứng từ) khả dụng cho SAVoucher
+        # kèm SỐ CHỨNG TỪ THẬT (không do phần mềm tạo) CÓ Số hóa đơn đang dùng
+        # đúng RefType đó — để xác định RefType nào phần mềm ĐANG dùng (phần
+        # mềm tự "học" theo từ khoá 'bán', có thể học NHẦM nếu công ty có
+        # nhiều RefType cùng chứa chữ 'bán' trong tên) có phải RefType THẬT SỰ
+        # đa số hóa đơn thật đang dùng hay không — nghi vấn hàng đầu cho lỗi
+        # NullReferenceException lúc Sửa/Cất + không hiện Số hóa đơn/Khách
+        # hàng dù dữ liệu SAInvoice vẫn đầy đủ trong CSDL.
+        sys_reftype_ban_hang = []
+        try:
+            for rt, rn in cur.execute(
+                    "SELECT RefType, RefTypeName FROM SYSRefType "
+                    "WHERE MasterTableName='SAVoucher'").fetchall():
+                n_thuc = cur.execute(
+                    "SELECT COUNT(*) FROM SAVoucher WHERE RefType=? "
+                    "AND ISNULL(CustomField10,'')<>? AND InvNo IS NOT NULL AND InvNo<>''",
+                    rt, _PM_MARK).fetchone()[0]
+                sys_reftype_ban_hang.append({
+                    "reftype": rt, "ten": rn,
+                    "so_chung_tu_that_co_so_hoa_don": n_thuc})
+            sys_reftype_ban_hang.sort(key=lambda x: -x["so_chung_tu_that_co_so_hoa_don"])
+        except Exception as e:
+            sys_reftype_ban_hang = [{"loi": str(e)[:200]}]
+        return {"database": database, "ket_qua": ket, "tham_khao_chung_tu_that": tham_khao,
+                "sys_reftype_ban_hang": sys_reftype_ban_hang}
     finally:
         conn.close()
 
