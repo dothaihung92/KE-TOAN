@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.131"
+APP_BUILD = "2026-07-27.132"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16483,7 +16483,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     treo_ref_ids = {hd["ref_id"] for hd in d["hoa_don"] if not hd["matched"]}
 
     du_dau_no = du_dau_co = 0.0
-    for _rid, refdate, _pd, _rn, _inv, _jm, _de, _tk, debit, credit in rows:
+    for _rid, refdate, _pd, _rn, _inv, _jm, _de, _tk, debit, credit, _ma, _ten in rows:
         if tu_dt and refdate and refdate < tu_dt:
             du_dau_no += float(debit or 0)
             du_dau_co += float(credit or 0)
@@ -16493,7 +16493,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     dong = [{"ngay_hach_toan": "", "ngay_chung_tu": "", "so_chung_tu": "", "so_hoa_don": "",
             "dien_giai": "Số dư đầu kỳ", "tk_doi_ung": "", "ps_no": 0, "ps_co": 0,
             "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": False}]
-    for rid, refdate, postdate, refno, invno, jm, de, tk, debit, credit in rows:
+    for rid, refdate, postdate, refno, invno, jm, de, tk, debit, credit, _ma, _ten in rows:
         if tu_dt and refdate and refdate < tu_dt:
             continue
         if den_dt and refdate and refdate > den_dt:
