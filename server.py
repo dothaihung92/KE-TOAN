@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.120"
+APP_BUILD = "2026-07-27.121"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16113,10 +16113,15 @@ def _misa_doi_chieu_cong_no(cid, database, loai="kh", tu_ngay=None, den_ngay=Non
     'ncc', TK 331) — đọc THẲNG từ AccountObjectLedger theo khoảng ngày
     [tu_ngay, den_ngay] (lọc theo RefDate, dạng 'YYYY-MM-DD' hoặc
     'DD/MM/YYYY'; để trống = không giới hạn): Dư đầu kỳ (phát sinh trước
-    tu_ngay) + Phát sinh Nợ/Có trong kỳ + Dư cuối kỳ, theo từng đối tượng
-    (MST). KHÔNG phụ thuộc Bảng kê Đầu ra/Đầu vào của phần mềm — dùng được
-    cả khi hóa đơn được nhập/import thẳng vào MISA qua đường khác. Chỉ tính
-    chứng từ ĐÃ GHI SỔ (đúng bản chất AccountObjectLedger)."""
+    tu_ngay) + Phát sinh Nợ/Có trong kỳ + Dư cuối kỳ, theo từng đối tượng.
+    Nhóm theo AccountObjectID (đúng như MISA — 'Mã khách hàng/Mã NCC' trên
+    báo cáo là AccountObjectCode, KHÔNG phải MST/AccountObjectTaxCode — rất
+    nhiều đối tượng như 'Khách lẻ' hoặc NCC nước ngoài không có MST riêng
+    nên nhóm theo MST làm rớt mất phần lớn danh sách, đã xác nhận qua đối
+    chiếu file Excel 'Tổng hợp công nợ phải trả' thật của người dùng: nhóm
+    theo MST chỉ còn 11/68 dòng). KHÔNG phụ thuộc Bảng kê Đầu ra/Đầu vào của
+    phần mềm — dùng được cả khi hóa đơn được nhập/import thẳng vào MISA qua
+    đường khác. Chỉ tính chứng từ ĐÃ GHI SỔ (đúng bản chất AccountObjectLedger)."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
@@ -16129,22 +16134,22 @@ def _misa_doi_chieu_cong_no(cid, database, loai="kh", tu_ngay=None, den_ngay=Non
     try:
         cur = conn.cursor()
         rows = cur.execute(
-            "SELECT AccountObjectTaxCode, ISNULL(AccountObjectName,''), RefDate, "
-            "DebitAmount, CreditAmount FROM AccountObjectLedger "
-            "WHERE AccountNumber LIKE ? AND AccountObjectTaxCode IS NOT NULL "
-            "AND AccountObjectTaxCode <> ''", tk_prefix + "%").fetchall()
+            "SELECT AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectName,''), "
+            "ISNULL(AccountObjectTaxCode,''), RefDate, DebitAmount, CreditAmount "
+            "FROM AccountObjectLedger WHERE AccountNumber LIKE ? AND AccountObjectID IS NOT NULL",
+            tk_prefix + "%").fetchall()
     finally:
         conn.close()
 
     agg = {}
-    for mst, ten, refdate, debit, credit in rows:
-        key = _misa_khncc_chuan_mst(mst).lower()
-        if not key:
-            continue
+    for aoid, ma, ten, mst, refdate, debit, credit in rows:
+        key = str(aoid)
         if den_dt and refdate and refdate > den_dt:
             continue   # sau kỳ báo cáo -> bỏ qua hẳn
-        d = agg.setdefault(key, {"ten": ten or "", "du_dau_no": 0.0, "du_dau_co": 0.0,
-                                 "ps_no": 0.0, "ps_co": 0.0})
+        d = agg.setdefault(key, {"ma": ma or "", "ten": ten or "", "mst": mst or "",
+                                 "du_dau_no": 0.0, "du_dau_co": 0.0, "ps_no": 0.0, "ps_co": 0.0})
+        if ma and not d["ma"]:
+            d["ma"] = ma
         if ten and not d["ten"]:
             d["ten"] = ten
         debit = float(debit or 0)
@@ -16158,12 +16163,16 @@ def _misa_doi_chieu_cong_no(cid, database, loai="kh", tu_ngay=None, den_ngay=Non
 
     danh_sach = []
     for key, d in agg.items():
+        if not (d["du_dau_no"] or d["du_dau_co"] or d["ps_no"] or d["ps_co"]):
+            continue   # không có phát sinh/dư nào cả -> bỏ, tránh nhiễu
         du_dau = (d["du_dau_no"] - d["du_dau_co"]) if loai == "kh" else (d["du_dau_co"] - d["du_dau_no"])
         du_cuoi = (du_dau + d["ps_no"] - d["ps_co"]) if loai == "kh" else (du_dau + d["ps_co"] - d["ps_no"])
         danh_sach.append({
-            "mst": key.upper(), "ten": d["ten"],
-            "du_dau_ky": round(du_dau), "phat_sinh_no": round(d["ps_no"]),
-            "phat_sinh_co": round(d["ps_co"]), "du_cuoi_ky": round(du_cuoi),
+            "ma": d["ma"] or d["mst"] or "(không mã)", "ten": d["ten"], "mst": d["mst"],
+            "du_dau_ky_no": round(max(du_dau, 0)), "du_dau_ky_co": round(max(-du_dau, 0)),
+            "phat_sinh_no": round(d["ps_no"]), "phat_sinh_co": round(d["ps_co"]),
+            "du_cuoi_ky_no": round(max(du_cuoi, 0)), "du_cuoi_ky_co": round(max(-du_cuoi, 0)),
+            "du_cuoi_ky": round(du_cuoi),
         })
     danh_sach.sort(key=lambda x: -abs(x["du_cuoi_ky"]))
     return {"loai": loai, "database": database, "tu_ngay": tu_ngay, "den_ngay": den_ngay,
@@ -16192,7 +16201,7 @@ def _misa_fifo_cong_no(cur, tk_prefix, loai):
     phat_sinh_col = "DebitAmount" if loai == "kh" else "CreditAmount"
     giam_col = "CreditAmount" if loai == "kh" else "DebitAmount"
     rows = cur.execute(
-        "SELECT AccountObjectID, ISNULL(AccountObjectTaxCode,''), "
+        "SELECT AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectTaxCode,''), "
         "ISNULL(AccountObjectName,''), RefID, InvNo, InvDate, RefDate, "
         "%s, %s FROM AccountObjectLedger "
         "WHERE AccountNumber LIKE ? AND AccountObjectID IS NOT NULL"
@@ -16200,9 +16209,11 @@ def _misa_fifo_cong_no(cur, tk_prefix, loai):
     tong_giam = {}          # AccountObjectID -> tổng đã thu/chi (giảm nợ)
     hd_theo_doi_tuong = {}  # AccountObjectID -> {RefID: {...}}
     ten_mst = {}
-    for aoid, mst, ten, refid, invno, invdate, refdate, phat_sinh, giam in rows:
+    for aoid, ma, mst, ten, refid, invno, invdate, refdate, phat_sinh, giam in rows:
         aoid = str(aoid)
-        ten_mst[aoid] = (mst, ten)
+        # Mã KH/NCC (AccountObjectCode) là khóa hiển thị THẬT của MISA — nhiều
+        # đối tượng (khách lẻ, NCC nước ngoài...) không có MST nên ưu tiên mã.
+        ten_mst[aoid] = (ma or mst, ten)
         tong_giam[aoid] = tong_giam.get(aoid, 0.0) + float(giam or 0)
         if phat_sinh and float(phat_sinh) > 0:
             d = hd_theo_doi_tuong.setdefault(aoid, {})

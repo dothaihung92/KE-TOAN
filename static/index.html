@@ -5665,15 +5665,21 @@ async function misaDoiChieuChay(loai){
     const qs=new URLSearchParams({loai, tu_ngay:misaDoiChieuTu, den_ngay:misaDoiChieuDen});
     const d=await api(`/api/misa-sql/doi-chieu-cong-no/${current}?${qs}`);
     const tenLoai=loai==='kh'?'phải thu Khách hàng (TK 131)':'phải trả Nhà cung cấp (TK 331)';
+    const nf=n=>(n||0).toLocaleString('vi-VN');
+    let tongDauNo=0,tongDauCo=0,tongPsNo=0,tongPsCo=0,tongCuoiNo=0,tongCuoiCo=0;
     const rows=(d.danh_sach||[]).map(r=>{
-      const cuoi=r.du_cuoi_ky||0;
+      tongDauNo+=r.du_dau_ky_no; tongDauCo+=r.du_dau_ky_co;
+      tongPsNo+=r.phat_sinh_no; tongPsCo+=r.phat_sinh_co;
+      tongCuoiNo+=r.du_cuoi_ky_no; tongCuoiCo+=r.du_cuoi_ky_co;
       return `<tr>
-        <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.mst)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.ma)}</td>
         <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.ten)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.du_dau_ky.toLocaleString('vi-VN')}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.phat_sinh_no.toLocaleString('vi-VN')}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.phat_sinh_co.toLocaleString('vi-VN')}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700">${cuoi.toLocaleString('vi-VN')}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_no)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.du_dau_ky_co)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.phat_sinh_no)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(r.phat_sinh_co)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700">${nf(r.du_cuoi_ky_no)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700">${nf(r.du_cuoi_ky_co)}</td>
       </tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
@@ -5686,18 +5692,29 @@ async function misaDoiChieuChay(loai){
         <button class="btn sm" style="background:#2e5c8a" onclick="misaDoiChieuChay('${loai}')">Lọc</button>
       </div>
       <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:10px 14px;font-size:13.5px;color:#2e5c8a;margin-bottom:10px">
-        Tổng hợp công nợ <b>${tenLoai}</b> — đọc thẳng từ MISA (AccountObjectLedger), y hệt báo cáo "Tổng hợp công nợ" trong MISA, chỉ tính chứng từ <b>đã ghi sổ</b>. Để trống ngày = toàn bộ lịch sử.
+        Tổng hợp công nợ <b>${tenLoai}</b> — đọc thẳng từ MISA (AccountObjectLedger), y hệt báo cáo "Tổng hợp công nợ" trong MISA (nhóm theo Mã KH/NCC), chỉ tính chứng từ <b>đã ghi sổ</b>. Để trống ngày = toàn bộ lịch sử.
       </div>
       <div style="max-height:46vh;overflow:auto">
-      <table style="border-collapse:collapse;font-size:13px;width:100%">
+      <table style="border-collapse:collapse;font-size:12.5px;width:100%">
         <tr style="background:#f0f0f0;position:sticky;top:0">
-          <th style="padding:6px 8px;border:1px solid #eee">MST</th>
-          <th style="padding:6px 8px;border:1px solid #eee">Tên</th>
-          <th style="padding:6px 8px;border:1px solid #eee">Dư đầu kỳ</th>
-          <th style="padding:6px 8px;border:1px solid #eee">PS Nợ</th>
-          <th style="padding:6px 8px;border:1px solid #eee">PS Có</th>
-          <th style="padding:6px 8px;border:1px solid #eee">Dư cuối kỳ</th>
-        </tr>${rows||'<tr><td colspan="6" style="padding:14px;text-align:center;color:#999">Không có dữ liệu (kiểm tra đã Ghi sổ chứng từ trong MISA chưa)</td></tr>'}
+          <th rowspan="2" style="padding:6px 8px;border:1px solid #eee">Mã</th>
+          <th rowspan="2" style="padding:6px 8px;border:1px solid #eee">Tên</th>
+          <th colspan="2" style="padding:4px 8px;border:1px solid #eee">Dư đầu kỳ</th>
+          <th colspan="2" style="padding:4px 8px;border:1px solid #eee">Phát sinh</th>
+          <th colspan="2" style="padding:4px 8px;border:1px solid #eee">Dư cuối kỳ</th>
+        </tr>
+        <tr style="background:#f0f0f0;position:sticky;top:26px">
+          <th style="padding:4px 8px;border:1px solid #eee">Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Có</th>
+          <th style="padding:4px 8px;border:1px solid #eee">Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Có</th>
+          <th style="padding:4px 8px;border:1px solid #eee">Nợ</th><th style="padding:4px 8px;border:1px solid #eee">Có</th>
+        </tr>${rows||'<tr><td colspan="8" style="padding:14px;text-align:center;color:#999">Không có dữ liệu (kiểm tra đã Ghi sổ chứng từ trong MISA chưa)</td></tr>'}
+        ${rows?`<tr style="background:#f7f7f7;font-weight:700"><td style="padding:6px 8px;border:1px solid #eee" colspan="2">Tổng</td>
+          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongDauNo)}</td>
+          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongDauCo)}</td>
+          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongPsNo)}</td>
+          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongPsCo)}</td>
+          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongCuoiNo)}</td>
+          <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${nf(tongCuoiCo)}</td></tr>`:''}
       </table></div>
       <div style="margin-top:14px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
@@ -5760,7 +5777,7 @@ async function misaBuTruTim(loai){
       <div style="max-height:34vh;overflow:auto">
       <table style="border-collapse:collapse;font-size:12.5px;width:100%">
         <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
-          <th style="padding:5px 8px;border:1px solid #eee">MST</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
+          <th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
           <th style="padding:5px 8px;border:1px solid #eee">Số HĐ</th><th style="padding:5px 8px;border:1px solid #eee">Ngày</th>
           <th style="padding:5px 8px;border:1px solid #eee">Số tiền</th></tr>${rows}
       </table></div>
@@ -5797,7 +5814,7 @@ async function misaBuTruGhiChay(loai, ds, preview){
         ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} phiếu ${loai==='kh'?'Thu':'Chi'} tiền mặt, luôn ở trạng thái CHƯA GHI SỔ.`:`✓ Đã ghi ${d.so_ghi} phiếu ${loai==='kh'?'Thu':'Chi'} tiền mặt (CHƯA GHI SỔ) — vào MISA kiểm tra rồi Ghi sổ.`}
       </div>
       <table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left">
-        <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">MST</th><th style="padding:4px 8px;border:1px solid #eee">Tên</th><th style="padding:4px 8px;border:1px solid #eee">Số CT</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr>
+        <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">Mã</th><th style="padding:4px 8px;border:1px solid #eee">Tên</th><th style="padding:4px 8px;border:1px solid #eee">Số CT</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr>
         ${rows}
       </table>
       <div style="margin-top:10px;text-align:right">
