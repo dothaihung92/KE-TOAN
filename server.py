@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.127"
+APP_BUILD = "2026-07-27.128"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16239,7 +16239,7 @@ def _misa_doi_tuong_thanh_toan(cur, loai):
 
 
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
-                           nguong=5_000_000, max_to_hop=8):
+                           nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None):
     """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
     KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng):
 
@@ -16257,9 +16257,11 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     xác nhận khi có ĐÚNG 1 tổ hợp khớp; nhiều tổ hợp cùng khớp -> 'không rõ'.
 
     Tầng 3 — hóa đơn còn lại (không khớp được ở tầng 1/2 với bất kỳ khoản
-    thanh toán ngân hàng nào), giá trị < nguong, quá hạn > thang_qua_han
-    tháng (tính từ hôm nay) -> coi là hóa đơn tiền mặt bị lỡ ghi công nợ,
-    đưa ra để xuất Excel điều chỉnh (Nợ/Có 1111 đối ứng 131/331)."""
+    thanh toán ngân hàng nào), giá trị < nguong -> coi là hóa đơn tiền mặt
+    bị lỡ ghi công nợ, đưa ra để xuất Excel điều chỉnh (Nợ/Có 1111 đối ứng
+    131/331). Lọc theo NGÀY HÓA ĐƠN: có tu_ngay/den_ngay (vd đúng 1 kỳ như
+    01/01/2025-31/12/2025) thì dùng khoảng đó; không thì dùng 'quá hạn hơn
+    thang_qua_han tháng tính từ hôm nay' như cũ."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
@@ -16337,13 +16339,25 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                                  "so_tien": round(tt["so_tien"])})
 
     # Tầng 3
-    han = datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han))
+    tu_dt = _misa_doc_ngay(tu_ngay) if tu_ngay else None
+    den_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
+    if den_dt:
+        den_dt = den_dt.replace(hour=23, minute=59, second=59)
+    han = None if (tu_dt or den_dt) else (
+        datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han)))
     tang3 = []
     for aoid, d in doi_tuong_hd.items():
         for hd in d["hoa_don"]:
             if hd["matched"] or hd["so_tien"] >= nguong:
                 continue
-            if not hd["inv_date"] or hd["inv_date"] > han:
+            if not hd["inv_date"]:
+                continue
+            if tu_dt or den_dt:
+                if tu_dt and hd["inv_date"] < tu_dt:
+                    continue
+                if den_dt and hd["inv_date"] > den_dt:
+                    continue
+            elif hd["inv_date"] > han:
                 continue
             tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
                           "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
@@ -16352,7 +16366,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     tang1.sort(key=lambda x: x["inv_date"])
     tang2.sort(key=lambda x: x["ngay_thanh_toan"])
     tang3.sort(key=lambda x: x["inv_date"])
-    return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang,
+    return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang, "tu_ngay": tu_ngay,
+            "den_ngay": den_ngay,
             "thang_qua_han": thang_qua_han, "nguong": nguong,
             "tang1": tang1, "tang2": tang2, "khong_ro": khong_ro, "tang3": tang3}
 
@@ -16360,13 +16375,14 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
 @app.get("/api/misa-sql/doi-chieu-3-tang/{cid}")
 def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
                               thang_qua_han: int = 10, nguong: float = 5_000_000,
-                              database: str = ""):
+                              database: str = "", tu_ngay: str = "", den_ngay: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_doi_chieu_3_tang(cid, database, loai=loai, cua_so_thang=cua_so_thang,
-                                  thang_qua_han=thang_qua_han, nguong=nguong)
+                                  thang_qua_han=thang_qua_han, nguong=nguong,
+                                  tu_ngay=tu_ngay or None, den_ngay=den_ngay or None)
 
 
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):

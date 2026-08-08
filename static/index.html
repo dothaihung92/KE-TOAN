@@ -5733,14 +5733,19 @@ function misaBuTruMo(loai){
       <b>Tầng 1</b>: khớp 1-1 chính xác từng khoản thanh toán NH thật (đã nhập MISA) với từng hóa đơn, chỉ xét hóa đơn có ngày gần khoản thanh toán (trong cửa sổ bên dưới). <b>Tầng 2</b>: khớp 1 khoản thanh toán với TỔ HỢP nhiều hóa đơn cộng lại đúng số tiền. Cả 2 tầng chỉ liệt kê để biết, KHÔNG ghi gì. <b>Tầng 3</b>: hóa đơn còn lại không khớp được khoản nào, giá trị nhỏ + quá hạn lâu — đề xuất xuất Excel điều chỉnh về 0.
     </div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:14px">
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: Từ ngày (hóa đơn)</label>
+        <input type="date" id="buTruTu" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: Đến ngày (hóa đơn)</label>
+        <input type="date" id="buTruDen" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Cửa sổ ngày khớp (tầng 1-2, tháng sau HĐ)</label>
         <input type="number" id="buTruCuaSoThang" value="3" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
-      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: quá hạn hơn (tháng)</label>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: hoặc quá hạn hơn (tháng, khi để trống ngày)</label>
         <input type="number" id="buTruThangQuaHan" value="10" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: giá trị hóa đơn dưới (đ)</label>
         <input type="number" id="buTruNguong" value="5000000" step="100000" style="width:140px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruTim('${loai}')">🔍 Chạy đối chiếu</button>
     </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">Đã điền sẵn Từ ngày/Đến ngày theo khung bạn chọn ở màn Tổng hợp công nợ — xóa trống nếu muốn dùng "quá hạn hơn N tháng" thay vào.</div>
     <div id="misaBuTruKetQua"></div>
     <div style="margin-top:12px;text-align:right">
       <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')">← Quay lại tổng hợp công nợ</button>
@@ -5760,10 +5765,13 @@ async function misaBuTruTim(loai){
   const cuaSoThang=document.getElementById('buTruCuaSoThang').value||3;
   const thangQuaHan=document.getElementById('buTruThangQuaHan').value||10;
   const nguong=document.getElementById('buTruNguong').value||5000000;
+  const tuNgay=document.getElementById('buTruTu').value||'';
+  const denNgay=document.getElementById('buTruDen').value||'';
   const kq=document.getElementById('misaBuTruKetQua');
   kq.innerHTML=`<div style="text-align:center;padding:20px"><span class="spin"></span> Đang đối chiếu 3 tầng (có thể mất chút thời gian nếu nhiều hóa đơn)...</div>`;
   try{
-    const qs=new URLSearchParams({loai, cua_so_thang:cuaSoThang, thang_qua_han:thangQuaHan, nguong});
+    const qs=new URLSearchParams({loai, cua_so_thang:cuaSoThang, thang_qua_han:thangQuaHan, nguong,
+      tu_ngay:tuNgay, den_ngay:denNgay});
     const d=await api(`/api/misa-sql/doi-chieu-3-tang/${current}?${qs}`);
     let out=`
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
