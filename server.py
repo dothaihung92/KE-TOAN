@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.129"
+APP_BUILD = "2026-07-27.130"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16103,9 +16103,11 @@ def misa_sql_import_ghitang(cid: int, loai: str, preview: int = 1, database: str
 #  bao giờ thu/chi qua sổ, đề xuất — CHỈ GHI khi người dùng xác nhận từng
 #  dòng). Dựa trên cấu trúc CSDL MISA THẬT của công ty (file CauTrucMISA
 #  người dùng cung cấp) — AccountObjectLedger là sổ chi tiết công nợ theo
-#  đối tượng (chỉ có dữ liệu cho chứng từ ĐÃ GHI SỔ); BADepositDetail là nơi
-#  công ty này ghi nhận giao dịch ngân hàng thực tế (đồng bộ Ngân hàng điện
-#  tử — cột IsCreateFromEBHistory).
+#  đối tượng (chỉ có dữ liệu cho chứng từ ĐÃ GHI SỔ); công ty này ghi nhận
+#  giao dịch ngân hàng thực tế (đồng bộ Ngân hàng điện tử — cột
+#  IsCreateFromEBHistory) ở 2 bảng RIÊNG theo chiều: BADeposit/BADepositDetail
+#  (nộp tiền — thu tiền KH) và BAWithDraw/BAWithDrawDetail (rút tiền — chi
+#  tiền NCC/Ủy nhiệm chi).
 # ============================================================
 def _misa_doi_chieu_cong_no(cid, database, loai="kh", tu_ngay=None, den_ngay=None):
     """Giai đoạn 1 — CHỈ ĐỌC, dựng lại đúng báo cáo MISA có sẵn: 'Báo cáo >
@@ -16222,15 +16224,24 @@ def _misa_doi_tuong_hoa_don(cur, tk_prefix, loai):
 
 
 def _misa_doi_tuong_thanh_toan(cur, loai):
-    """Danh sách khoản thanh toán NGÂN HÀNG THẬT (BADepositDetail, ngày lấy
-    từ BADeposit) theo từng đối tượng — loai='kh': dòng Có 131 (thu tiền
-    KH qua NH); loai='ncc': dòng Nợ 331 (chi tiền NCC qua NH)."""
-    tk_cot = "CreditAccount" if loai == "kh" else "DebitAccount"
+    """Danh sách khoản thanh toán NGÂN HÀNG THẬT theo từng đối tượng —
+    loai='kh': NỘP tiền vào TK (thu tiền KH), bảng BADeposit/BADepositDetail,
+    dòng Có 131; loai='ncc': RÚT tiền từ TK (chi tiền NCC — đúng bản chất
+    'Ủy nhiệm chi'/UNC), bảng RIÊNG BAWithDraw/BAWithDrawDetail (KHÁC hẳn
+    BADeposit — xác nhận qua đối chiếu thật: RefNoFinance='UNC076/3/2025',
+    AccountObjectName='CÔNG TY TNHH OXYGEN RETAIL' nằm trong BAWithDraw,
+    KHÔNG có trong BADeposit — dùng nhầm BADepositDetail cho NCC khiến tầng
+    1/2 không tìm thấy khoản thanh toán nào, mọi hóa đơn NCC đều lọt vào
+    tầng 3 dù thực tế đã có thanh toán), dòng Nợ 331."""
+    if loai == "kh":
+        master, detail, tk_cot, tk_val = "BADeposit", "BADepositDetail", "CreditAccount", "131%"
+    else:
+        master, detail, tk_cot, tk_val = "BAWithDraw", "BAWithDrawDetail", "DebitAccount", "331%"
     rows = cur.execute(
         "SELECT bd.AccountObjectID, b.RefDate, bd.Amount, bd.RefID "
-        "FROM BADepositDetail bd JOIN BADeposit b ON bd.RefID = b.RefID "
+        "FROM %s bd JOIN %s b ON bd.RefID = b.RefID "
         "WHERE bd.AccountObjectID IS NOT NULL AND bd.%s LIKE ? AND bd.Amount > 0"
-        % tk_cot, ("131%" if loai == "kh" else "331%")).fetchall()
+        % (detail, master, tk_cot), tk_val).fetchall()
     doi_tuong = {}
     for aoid, refdate, tien, refid in rows:
         doi_tuong.setdefault(str(aoid), []).append(
@@ -16251,8 +16262,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     dùng 'quá hạn hơn thang_qua_han tháng tính từ hôm nay' như mặc định cũ.
 
     Tầng 1 — khớp 1-1 chính xác: mỗi khoản thanh toán ngân hàng thật (đã
-    nhập vào MISA, bảng BADepositDetail) so số tiền với TỪNG hóa đơn đang
-    nợ của ĐÚNG đối tượng đó, chỉ xét hóa đơn có ngày nằm trong cửa sổ
+    nhập vào MISA — xem _misa_doi_tuong_thanh_toan) so số tiền với TỪNG hóa
+    đơn đang nợ của ĐÚNG đối tượng đó, chỉ xét hóa đơn có ngày nằm trong cửa sổ
     [ngày hóa đơn - 7 ngày, ngày hóa đơn + cua_so_thang tháng] (thanh toán
     quá xa ngày hóa đơn thì không tính, dù trùng số tiền — coi là trùng
     ngẫu nhiên). Nếu CHỈ 1 hóa đơn khớp đúng số tiền trong cửa sổ đó -> ghi
@@ -16375,9 +16386,9 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                           "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
                           "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"])})
 
-    tang1.sort(key=lambda x: x["inv_date"])
-    tang2.sort(key=lambda x: x["ngay_thanh_toan"])
-    tang3.sort(key=lambda x: x["inv_date"])
+    tang1.sort(key=lambda x: (x["ma"], x["inv_date"]))
+    tang2.sort(key=lambda x: (x["ma"], x["ngay_thanh_toan"]))
+    tang3.sort(key=lambda x: (x["mst"], x["inv_date"]))
     return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang, "tu_ngay": tu_ngay,
             "den_ngay": den_ngay,
             "thang_qua_han": thang_qua_han, "nguong": nguong,
