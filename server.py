@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.116"
+APP_BUILD = "2026-07-27.117"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16104,7 +16104,28 @@ def misa_sql_import_ghitang(cid: int, loai: str, preview: int = 1, database: str
 #  báo lỗi (đúng yêu cầu). Mỗi bước dùng LẠI ĐÚNG hàm ghi đã kiểm chứng của
 #  từng chức năng riêng lẻ — không viết lại logic ghi.
 # ============================================================
-def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True):
+def _misa_tom_tat_buoc(r):
+    """Tóm tắt 1 dòng kết quả của 1 bước (số thêm/bỏ qua/ghi đè...) để hiện
+    trong dòng tiến độ — cùng logic với misaTomTatBuoc() phía JS."""
+    if not r:
+        return "xong"
+    phan = []
+    if r.get("so_chungtu") is not None:
+        phan.append(f"{r['so_chungtu']} chứng từ")
+    if r.get("so_them") is not None:
+        phan.append(f"thêm {r['so_them']}")
+    if r.get("so_ghi_de"):
+        phan.append(f"ghi đè {r['so_ghi_de']}")
+    if r.get("so_trung"):
+        phan.append(f"bỏ qua (đã có) {r['so_trung']}")
+    if r.get("so_don_vi_moi"):
+        phan.append(f"{r['so_don_vi_moi']} ĐVT mới")
+    if r.get("so_bo_qua_kh"):
+        phan.append(f"bỏ qua thiếu KH {r['so_bo_qua_kh']}")
+    return ", ".join(phan) or "xong"
+
+
+def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True, bao=None):
     """Chạy lần lượt: 1) Danh mục KH/NCC  2) Bảng kê Đầu ra (Bán hàng)
     3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC (sinh từ Bảng kê Đầu vào đã lưu)
     4) Mua hàng Nhập kho/Không qua kho/Dịch vụ (Bảng kê Đầu vào đã lưu)
@@ -16112,21 +16133,32 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True):
     Chứng từ (Bán hàng/Mua hàng) LUÔN ghi ở trạng thái CHƯA GHI SỔ như mọi
     khi (không tự Ghi sổ bằng SQL — xem giải thích lý do an toàn ở nơi gọi
     API này); Ghi tăng CCDC/TSCĐ vẫn ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi
-    tăng danh mục không sinh bút toán, không có tầng "Ghi sổ" riêng)."""
+    tăng danh mục không sinh bút toán, không có tầng "Ghi sổ" riêng).
+    bao(text): callback báo tiến độ từng bước (công ty nhiều dữ liệu chạy
+    khá lâu — không có callback thì chạy âm thầm như cũ)."""
+    if bao is None:
+        bao = lambda *_a: None
     buoc = []
 
     def chay(ten, fn):
+        bao(f"▶ Đang xử lý: {ten}...")
         try:
             r = fn()
             buoc.append({"ten": ten, "ket_qua": r})
+            tien_to = "Xem trước" if preview else "Đã ghi"
+            bao(f"✓ {ten} — {tien_to}: {_misa_tom_tat_buoc(r)}")
         except HTTPException as e:
             msg = str(e.detail)
             if any(k in msg for k in ("Chưa có", "trống", "Không có")):
                 buoc.append({"ten": ten, "bo_qua": msg})
+                bao(f"⏭ Bỏ qua: {ten} — {msg}")
             else:
                 buoc.append({"ten": ten, "loi": msg})
+                bao(f"✗ Lỗi: {ten} — {msg}")
         except Exception as e:
-            buoc.append({"ten": ten, "loi": str(e)[:300]})
+            emsg = str(e)[:300]
+            buoc.append({"ten": ten, "loi": emsg})
+            bao(f"✗ Lỗi: {ten} — {emsg}")
 
     chay("1. Danh mục KH/NCC", lambda: _misa_ghi_khncc(cid, database, preview=preview))
 
@@ -16165,18 +16197,55 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True):
     chay("5b. Ghi tăng TSCĐ",
          lambda: _misa_ghi_tang_tscd(cid, database, preview=preview, ghi_de=ghi_de))
 
+    bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
 
 
-@app.post("/api/misa-sql/import-tu-dong/{cid}")
-def misa_sql_import_tu_dong(cid: int, preview: int = 1, database: str = "", ghi_de: int = 1):
-    """Chạy TỰ ĐỘNG LẦN LƯỢT toàn bộ luồng import vào MISA — xem
-    _misa_import_tu_dong. preview=1 -> chỉ xem trước toàn bộ, không ghi gì."""
+# Job chạy NỀN cho "Import tự động toàn bộ" — công ty nhiều dữ liệu (nhiều
+# chứng từ) có thể mất vài phút, nên chạy trong 1 thread riêng + trình duyệt
+# poll /api/misa-sql/import-tu-dong-status/{cid} để hiện tiến độ TỪNG BƯỚC,
+# giống hệt cơ chế FETCH_JOBS/_new_fetch_job() dùng cho tra cứu hóa đơn.
+MISA_IMPORT_JOBS = {}   # {cid: {"messages": [...], "running": bool, "result": dict|None}}
+
+
+@app.post("/api/misa-sql/import-tu-dong-start/{cid}")
+def misa_sql_import_tu_dong_start(cid: int, preview: int = 1, database: str = "", ghi_de: int = 1):
+    """Bắt đầu chạy NỀN toàn bộ luồng import vào MISA — xem
+    _misa_import_tu_dong. Trả về ngay, trình duyệt poll
+    /api/misa-sql/import-tu-dong-status/{cid} để lấy tiến độ."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_import_tu_dong(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+    job = {"messages": [], "running": True, "started": time.time(), "result": None}
+    MISA_IMPORT_JOBS[cid] = job
+
+    def _bao(text):
+        job["messages"].append({"text": text, "t": time.time()})
+
+    def _chay_nen():
+        try:
+            job["result"] = _misa_import_tu_dong(
+                cid, database, preview=bool(preview), ghi_de=bool(ghi_de), bao=_bao)
+        except Exception as e:
+            _bao(f"✗ Lỗi không mong đợi — đã dừng: {str(e)[:300]}")
+        finally:
+            job["running"] = False
+
+    threading.Thread(target=_chay_nen, daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.get("/api/misa-sql/import-tu-dong-status/{cid}")
+def misa_sql_import_tu_dong_status(cid: int, cursor: int = 0):
+    """Trả về các dòng tiến độ MỚI kể từ cursor — trình duyệt poll endpoint
+    này để hiện quá trình chạy (giống /api/fetch-status)."""
+    job = MISA_IMPORT_JOBS.get(cid)
+    if not job:
+        return {"running": False, "messages": [], "cursor": 0, "result": None, "no_job": True}
+    msgs = job["messages"][cursor:]
+    return {"running": job["running"], "messages": msgs, "cursor": cursor + len(msgs),
+            "result": None if job["running"] else job["result"]}
 
 
 @app.get("/api/danh-muc-ncc/{cid}")

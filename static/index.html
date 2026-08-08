@@ -5574,30 +5574,73 @@ function misaTomTatBuoc(r){
   if(r.so_bo_qua_kh!=null&&r.so_bo_qua_kh>0)phan.push(`bỏ qua thiếu KH ${r.so_bo_qua_kh}`);
   return phan.join(', ')||'xong';
 }
+let misaImportRunId=0;   // để lượt chạy MỚI (vd bấm "Xác nhận chạy thật") tự
+                          // dừng vòng poll của lượt CŨ, tránh 2 vòng poll ghi đè nhau
 async function misaImportTuDongChay(preview){
-  toast(preview?'Đang kiểm tra (xem trước)...':'Đang chạy import tự động...','');
+  const runId=++misaImportRunId;
+  const cid=current;
+  document.getElementById('misaModalBody').innerHTML=`
+    <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#2e5c8a;margin-bottom:10px">
+      ${preview?'⚠ XEM TRƯỚC — chưa ghi gì.':'<b>Đang ghi thật vào MISA</b> — KHÔNG đóng cửa sổ/tắt trình duyệt.'}
+      Công ty nhiều chứng từ có thể mất vài phút, quá trình chạy hiện bên dưới.
+    </div>
+    <div id="misaImportLog" style="max-height:38vh;overflow:auto;background:#0b1f1f;color:#c9f7e6;
+      font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;padding:10px 12px;
+      border-radius:8px;white-space:pre-wrap"></div>
+    <div id="misaImportResult"></div>
+    <div id="misaImportFooter" style="margin-top:12px;text-align:right">
+      <span style="color:#999;font-size:12.5px"><span class="spin"></span> Đang chạy...</span>
+    </div>`;
+  document.getElementById('misaModal').style.display='flex';
+  const log=document.getElementById('misaImportLog');
   try{
-    const d=await api(`/api/misa-sql/import-tu-dong/${current}?preview=${preview?1:0}`,{method:'POST'});
-    const rows=(d.cac_buoc||[]).map(b=>{
-      let mau='#1a7a7a',trangThai;
-      if(b.bo_qua){mau='#999';trangThai='Bỏ qua — '+b.bo_qua;}
-      else if(b.loi){mau='#b91c1c';trangThai='Lỗi — '+b.loi;}
-      else{trangThai=(preview?'Sẽ ghi: ':'✓ Đã ghi: ')+misaTomTatBuoc(b.ket_qua);}
-      return `<tr><td style="padding:4px 8px;border:1px solid #eee;font-weight:600">${misaEsc(b.ten)}</td>
-        <td style="padding:4px 8px;border:1px solid #eee;color:${mau}">${misaEsc(trangThai)}</td></tr>`;
-    }).join('');
-    document.getElementById('misaModalBody').innerHTML=`
-      <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#2e5c8a;margin-bottom:10px">
-        ${preview?'⚠ XEM TRƯỚC — chưa ghi gì.':'✓ Đã chạy xong.'} database: <b>${misaEsc(d.database||'')}</b><br>
-        Chứng từ Bán hàng/Mua hàng vẫn ghi ở trạng thái <b>CHƯA GHI SỔ</b> như mọi khi — sau khi chạy xong, vào từng màn hình MISA (Bán hàng/Mua hàng...), chọn tất cả rồi bấm "Ghi sổ" hàng loạt.
-      </div>
-      <table style="border-collapse:collapse;font-size:12.5px;width:100%">${rows}</table>
-      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
-        ${preview?'<button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongChay(false)">✔ Xác nhận chạy thật</button>':''}
-      </div>`;
-    document.getElementById('misaModal').style.display='flex';
-  }catch(e){toast('Lỗi: '+e.message,'err')}
+    await api(`/api/misa-sql/import-tu-dong-start/${cid}?preview=${preview?1:0}`,{method:'POST'});
+  }catch(e){
+    log.textContent='✗ Lỗi: '+e.message;
+    document.getElementById('misaImportFooter').innerHTML=
+      `<button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>`;
+    return;
+  }
+  let cursor=0,running=true,result=null;
+  while(running){
+    if(runId!==misaImportRunId)return;   // đã có lượt chạy mới hơn / đóng modal -> dừng theo dõi
+    let st;
+    try{
+      st=await api(`/api/misa-sql/import-tu-dong-status/${cid}?cursor=${cursor}`);
+    }catch(e){await new Promise(r=>setTimeout(r,1000));continue}   // mất mạng tạm thời -> thử lại
+    if(runId!==misaImportRunId)return;
+    cursor=st.cursor;running=st.running;result=st.result;
+    for(const m of (st.messages||[])){
+      log.textContent+=(log.textContent?'\n':'')+m.text;
+    }
+    log.scrollTop=log.scrollHeight;
+    if(running)await new Promise(r=>setTimeout(r,900));
+  }
+  if(runId!==misaImportRunId)return;
+  misaImportHienKetQua(result,preview);
+}
+function misaImportHienKetQua(d,preview){
+  const foot=document.getElementById('misaImportFooter');
+  if(!d){
+    foot.innerHTML=`<button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>`;
+    return;
+  }
+  const rows=(d.cac_buoc||[]).map(b=>{
+    let mau='#1a7a7a',trangThai;
+    if(b.bo_qua){mau='#999';trangThai='Bỏ qua — '+b.bo_qua;}
+    else if(b.loi){mau='#b91c1c';trangThai='Lỗi — '+b.loi;}
+    else{trangThai=(preview?'Sẽ ghi: ':'✓ Đã ghi: ')+misaTomTatBuoc(b.ket_qua);}
+    return `<tr><td style="padding:4px 8px;border:1px solid #eee;font-weight:600">${misaEsc(b.ten)}</td>
+      <td style="padding:4px 8px;border:1px solid #eee;color:${mau}">${misaEsc(trangThai)}</td></tr>`;
+  }).join('');
+  document.getElementById('misaImportResult').innerHTML=`
+    <table style="border-collapse:collapse;font-size:12.5px;width:100%;margin-top:10px">${rows}</table>
+    ${preview?'':'<div style="margin-top:8px;font-size:12.5px;color:#2e5c8a">Chứng từ Bán hàng/Mua hàng vẫn ghi ở trạng thái <b>CHƯA GHI SỔ</b> như mọi khi — vào từng màn hình MISA (Bán hàng/Mua hàng...), chọn tất cả rồi bấm "Ghi sổ" hàng loạt.</div>'}`;
+  foot.innerHTML=`
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
+      ${preview?'<button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongChay(false)">✔ Xác nhận chạy thật</button>':''}
+    </div>`;
 }
 async function misaImportTuDong(){
   if(!current){toast('Chọn công ty trước','err');return}
