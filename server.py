@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.119"
+APP_BUILD = "2026-07-27.120"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16106,115 +16106,79 @@ def misa_sql_import_ghitang(cid: int, loai: str, preview: int = 1, database: str
 #  công ty này ghi nhận giao dịch ngân hàng thực tế (đồng bộ Ngân hàng điện
 #  tử — cột IsCreateFromEBHistory).
 # ============================================================
-def _misa_doi_chieu_cong_no(cid, database, loai="kh"):
-    """Giai đoạn 1 — CHỈ ĐỌC: so công nợ THẬT trong MISA (AccountObjectLedger,
-    TK 131=phải thu KH / 331=phải trả NCC, chỉ tính chứng từ ĐÃ GHI SỔ) với
-    tổng giá trị hóa đơn theo Bảng kê Đầu ra/Đầu vào đã lưu của phần mềm.
-    Không sửa gì — chỉ liệt kê chênh lệch theo từng đối tượng (MST) để biết
-    cần xử lý ở đâu. Chênh lệch dương = phần mềm ghi nhiều hơn MISA đang
-    theo dõi (khả năng: hóa đơn chưa ghi sổ trong MISA, hoặc đã ghi nhưng bị
-    gán tiền mặt 1111 thay vì công nợ)."""
+def _misa_doi_chieu_cong_no(cid, database, loai="kh", tu_ngay=None, den_ngay=None):
+    """Giai đoạn 1 — CHỈ ĐỌC, dựng lại đúng báo cáo MISA có sẵn: 'Báo cáo >
+    Bán hàng > Tổng hợp công nợ phải thu khách hàng' (loai='kh', TK 131) /
+    'Báo cáo > Mua hàng > Tổng hợp công nợ phải trả nhà cung cấp' (loai=
+    'ncc', TK 331) — đọc THẲNG từ AccountObjectLedger theo khoảng ngày
+    [tu_ngay, den_ngay] (lọc theo RefDate, dạng 'YYYY-MM-DD' hoặc
+    'DD/MM/YYYY'; để trống = không giới hạn): Dư đầu kỳ (phát sinh trước
+    tu_ngay) + Phát sinh Nợ/Có trong kỳ + Dư cuối kỳ, theo từng đối tượng
+    (MST). KHÔNG phụ thuộc Bảng kê Đầu ra/Đầu vào của phần mềm — dùng được
+    cả khi hóa đơn được nhập/import thẳng vào MISA qua đường khác. Chỉ tính
+    chứng từ ĐÃ GHI SỔ (đúng bản chất AccountObjectLedger)."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
-    bk_loai = "out" if loai == "kh" else "in"
+    tu_dt = _misa_doc_ngay(tu_ngay) if tu_ngay else None
+    den_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
+    if den_dt:
+        den_dt = den_dt.replace(hour=23, minute=59, second=59)
 
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
-        misa = {}
-        for mst, ten, no, co in cur.execute(
-                "SELECT ISNULL(AccountObjectTaxCode,''), MAX(AccountObjectName), "
-                "SUM(DebitAmount), SUM(CreditAmount) FROM AccountObjectLedger "
-                "WHERE AccountNumber LIKE ? GROUP BY AccountObjectTaxCode",
-                tk_prefix + "%").fetchall():
-            key = _misa_khncc_chuan_mst(mst).lower()
-            if not key:
-                continue
-            misa[key] = {"ten": ten or "", "no": float(no or 0), "co": float(co or 0)}
-        da_ghi_so = set()   # (mst chuẩn hoá, InvNo) đã có trong sổ MISA
-        for mst, invno in cur.execute(
-                "SELECT DISTINCT ISNULL(AccountObjectTaxCode,''), ISNULL(InvNo,'') "
-                "FROM AccountObjectLedger WHERE AccountNumber LIKE ?",
-                tk_prefix + "%").fetchall():
-            k = _misa_khncc_chuan_mst(mst).lower()
-            iv = str(invno or "").strip()
-            if k and iv:
-                da_ghi_so.add((k, iv))
+        rows = cur.execute(
+            "SELECT AccountObjectTaxCode, ISNULL(AccountObjectName,''), RefDate, "
+            "DebitAmount, CreditAmount FROM AccountObjectLedger "
+            "WHERE AccountNumber LIKE ? AND AccountObjectTaxCode IS NOT NULL "
+            "AND AccountObjectTaxCode <> ''", tk_prefix + "%").fetchall()
     finally:
         conn.close()
 
-    dl = nhap_lieu_get(cid, bk_loai)
-    header, rows = dl.get("header") or [], dl.get("rows") or []
-    ten_bk = "Đầu ra" if loai == "kh" else "Đầu vào"
-    if not rows:
-        return {"loai": loai, "database": database, "danh_sach": [],
-                "ghi_chu": f"Chưa có Bảng kê {ten_bk} đã lưu."}
-
-    def gv(r, i):
-        return r[i] if 0 <= i < len(r) else ""
-
-    pm = {}   # mst chuẩn hoá -> {"ten","tong","so_hd":set(),"so_hd_da_ghi":set()}
-    if loai == "kh":
-        col = _bh_cols(header)
-        for r in rows:
-            sohd = str(gv(r, col["sohd"]) or "").strip()
-            mst_goc = str(gv(r, col["mst"]) or "").strip()
-            if not sohd or not mst_goc:
-                continue   # bỏ khách lẻ không MST — không đối chiếu được
-            mst = _misa_khncc_chuan_mst(mst_goc).lower()
-            ten = str(gv(r, col["nguoimua"]) or "")
-            t = (_to_num(gv(r, col["ds"])) or 0) + (_to_num(gv(r, col["thue"])) or 0)
-            d = pm.setdefault(mst, {"ten": ten, "tong": 0.0, "so_hd": set(), "so_hd_da_ghi": set()})
-            d["tong"] += t
-            d["so_hd"].add(sohd)
-            if (mst, sohd) in da_ghi_so:
-                d["so_hd_da_ghi"].add(sohd)
-            if ten and not d["ten"]:
-                d["ten"] = ten
-    else:
-        col = _nk_cols(header)
-        for r in rows:
-            sohd = str(gv(r, col["sohd"]) or "").strip()
-            mst_goc = str(gv(r, col["mst"]) or "").strip()
-            if not sohd or not mst_goc:
-                continue
-            mst = _misa_khncc_chuan_mst(mst_goc).lower()
-            ten = str(gv(r, col["nb"]) or "")
-            t = (_to_num(gv(r, col["tt"])) or 0) + (_to_num(gv(r, col["tthue"])) or 0)
-            d = pm.setdefault(mst, {"ten": ten, "tong": 0.0, "so_hd": set(), "so_hd_da_ghi": set()})
-            d["tong"] += t
-            d["so_hd"].add(sohd)
-            if (mst, sohd) in da_ghi_so:
-                d["so_hd_da_ghi"].add(sohd)
-            if ten and not d["ten"]:
-                d["ten"] = ten
+    agg = {}
+    for mst, ten, refdate, debit, credit in rows:
+        key = _misa_khncc_chuan_mst(mst).lower()
+        if not key:
+            continue
+        if den_dt and refdate and refdate > den_dt:
+            continue   # sau kỳ báo cáo -> bỏ qua hẳn
+        d = agg.setdefault(key, {"ten": ten or "", "du_dau_no": 0.0, "du_dau_co": 0.0,
+                                 "ps_no": 0.0, "ps_co": 0.0})
+        if ten and not d["ten"]:
+            d["ten"] = ten
+        debit = float(debit or 0)
+        credit = float(credit or 0)
+        if tu_dt and refdate and refdate < tu_dt:
+            d["du_dau_no"] += debit
+            d["du_dau_co"] += credit
+        else:
+            d["ps_no"] += debit
+            d["ps_co"] += credit
 
     danh_sach = []
-    for key in set(pm.keys()) | set(misa.keys()):
-        p = pm.get(key, {"ten": "", "tong": 0.0, "so_hd": set(), "so_hd_da_ghi": set()})
-        m = misa.get(key, {"ten": "", "no": 0.0, "co": 0.0})
-        du_misa = (m["no"] - m["co"]) if loai == "kh" else (m["co"] - m["no"])
-        chenh_lech = round(p["tong"] - du_misa)
+    for key, d in agg.items():
+        du_dau = (d["du_dau_no"] - d["du_dau_co"]) if loai == "kh" else (d["du_dau_co"] - d["du_dau_no"])
+        du_cuoi = (du_dau + d["ps_no"] - d["ps_co"]) if loai == "kh" else (du_dau + d["ps_co"] - d["ps_no"])
         danh_sach.append({
-            "mst": key.upper(), "ten": p["ten"] or m["ten"] or "",
-            "so_hoa_don": len(p["so_hd"]),
-            "so_hoa_don_chua_ghi_so": len(p["so_hd"]) - len(p["so_hd_da_ghi"]),
-            "tong_hoa_don_pm": round(p["tong"]),
-            "du_cong_no_misa": round(du_misa),
-            "chenh_lech": chenh_lech,
+            "mst": key.upper(), "ten": d["ten"],
+            "du_dau_ky": round(du_dau), "phat_sinh_no": round(d["ps_no"]),
+            "phat_sinh_co": round(d["ps_co"]), "du_cuoi_ky": round(du_cuoi),
         })
-    danh_sach.sort(key=lambda x: -abs(x["chenh_lech"]))
-    return {"loai": loai, "database": database, "danh_sach": danh_sach}
+    danh_sach.sort(key=lambda x: -abs(x["du_cuoi_ky"]))
+    return {"loai": loai, "database": database, "tu_ngay": tu_ngay, "den_ngay": den_ngay,
+            "danh_sach": danh_sach}
 
 
 @app.get("/api/misa-sql/doi-chieu-cong-no/{cid}")
-def misa_sql_doi_chieu_cong_no(cid: int, loai: str = "kh", database: str = ""):
+def misa_sql_doi_chieu_cong_no(cid: int, loai: str = "kh", database: str = "",
+                               tu_ngay: str = "", den_ngay: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_doi_chieu_cong_no(cid, database, loai=loai)
+    return _misa_doi_chieu_cong_no(cid, database, loai=loai, tu_ngay=tu_ngay or None,
+                                   den_ngay=den_ngay or None)
 
 
 def _misa_fifo_cong_no(cur, tk_prefix, loai):
@@ -16267,14 +16231,17 @@ def _misa_fifo_cong_no(cur, tk_prefix, loai):
     return ket_qua
 
 
-def _misa_de_xuat_bu_tru(cid, database, loai="kh", thang_qua_han=6, nguong=5_000_000):
+def _misa_de_xuat_bu_tru(cid, database, loai="kh", thang_qua_han=6, nguong=5_000_000,
+                         tu_ngay=None, den_ngay=None):
     """Giai đoạn 2 (CHỈ ĐỌC — đề xuất, chưa ghi gì): tìm hóa đơn 'treo' —
     còn NGUYÊN 100% giá trị theo mô phỏng FIFO (chưa hề được thu/chi 1 đồng
-    nào), quá hạn > thang_qua_han tháng, giá trị < nguong — nhiều khả năng
-    là hóa đơn thu/chi TIỀN MẶT ngay lúc phát sinh nhưng bị lỡ ghi công nợ,
-    không ai theo dõi qua sổ Thu/Chi. Đối tượng nào CÓ giao dịch ngân hàng
-    (BADepositDetail) thì KHÔNG đề xuất — có thể đã thanh toán nhưng chưa
-    khớp đúng, để người dùng tự kiểm tra thay vì đoán bừa."""
+    nào), giá trị < nguong — nhiều khả năng là hóa đơn thu/chi TIỀN MẶT ngay
+    lúc phát sinh nhưng bị lỡ ghi công nợ, không ai theo dõi qua sổ Thu/Chi.
+    Đối tượng nào CÓ giao dịch ngân hàng (BADepositDetail) thì KHÔNG đề xuất
+    — có thể đã thanh toán nhưng chưa khớp đúng, để người dùng tự kiểm tra
+    thay vì đoán bừa. Lọc theo NGÀY HÓA ĐƠN: nếu có tu_ngay/den_ngay (vd
+    chọn đúng 1 kỳ báo cáo như MISA) thì dùng khoảng đó; không thì dùng
+    'quá hạn hơn thang_qua_han tháng tính từ hôm nay' như cũ."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
@@ -16293,7 +16260,12 @@ def _misa_de_xuat_bu_tru(cid, database, loai="kh", thang_qua_han=6, nguong=5_000
     finally:
         conn.close()
 
-    han = datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han))
+    tu_dt = _misa_doc_ngay(tu_ngay) if tu_ngay else None
+    den_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
+    if den_dt:
+        den_dt = den_dt.replace(hour=23, minute=59, second=59)
+    han = None if (tu_dt or den_dt) else (
+        datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han)))
     de_xuat = []
     for iv in hds:
         if iv["con_no"] <= 0 or abs(iv["con_no"] - iv["so_tien"]) > 1:
@@ -16301,7 +16273,14 @@ def _misa_de_xuat_bu_tru(cid, database, loai="kh", thang_qua_han=6, nguong=5_000
         if iv["so_tien"] >= nguong:
             continue
         ngay = iv["inv_date"]
-        if not ngay or ngay > han:
+        if not ngay:
+            continue
+        if tu_dt or den_dt:
+            if tu_dt and ngay < tu_dt:
+                continue
+            if den_dt and ngay > den_dt:
+                continue
+        elif ngay > han:
             continue
         if iv["account_object_id"] in co_giao_dich_nh:
             continue
@@ -16313,17 +16292,19 @@ def _misa_de_xuat_bu_tru(cid, database, loai="kh", thang_qua_han=6, nguong=5_000
         })
     de_xuat.sort(key=lambda x: x["inv_date"])
     return {"loai": loai, "database": database, "thang_qua_han": thang_qua_han,
-            "nguong": nguong, "de_xuat": de_xuat}
+            "nguong": nguong, "tu_ngay": tu_ngay, "den_ngay": den_ngay, "de_xuat": de_xuat}
 
 
 @app.get("/api/misa-sql/de-xuat-bu-tru/{cid}")
 def misa_sql_de_xuat_bu_tru(cid: int, loai: str = "kh", thang_qua_han: int = 6,
-                            nguong: float = 5_000_000, database: str = ""):
+                            nguong: float = 5_000_000, database: str = "",
+                            tu_ngay: str = "", den_ngay: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_de_xuat_bu_tru(cid, database, loai=loai, thang_qua_han=thang_qua_han, nguong=nguong)
+    return _misa_de_xuat_bu_tru(cid, database, loai=loai, thang_qua_han=thang_qua_han,
+                                nguong=nguong, tu_ngay=tu_ngay or None, den_ngay=den_ngay or None)
 
 
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):

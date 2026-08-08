@@ -5647,51 +5647,57 @@ async function misaImportTuDong(){
   if(!current){toast('Chọn công ty trước','err');return}
   misaImportTuDongChay(true);
 }
-// ===== Đối chiếu công nợ (Giai đoạn 1: so sánh) + Đề xuất bù công nợ treo (Giai đoạn 2) =====
+// ===== Đối chiếu công nợ (Giai đoạn 1: Tổng hợp công nợ theo kỳ, đọc thẳng MISA)
+// + Đề xuất bù công nợ treo (Giai đoạn 2) =====
 let misaBuTruDsHienTai=[];
+let misaDoiChieuTu='', misaDoiChieuDen='';
 function misaDoiChieuMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   misaDoiChieuChay('kh');
 }
 async function misaDoiChieuChay(loai){
-  document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang so sánh công nợ...</div>`;
+  const tuEl=document.getElementById('doiChieuTu'), denEl=document.getElementById('doiChieuDen');
+  if(tuEl)misaDoiChieuTu=tuEl.value||'';
+  if(denEl)misaDoiChieuDen=denEl.value||'';
+  document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang đọc công nợ từ MISA...</div>`;
   document.getElementById('misaModal').style.display='flex';
   try{
-    const d=await api(`/api/misa-sql/doi-chieu-cong-no/${current}?loai=${loai}`);
-    const tenLoai=loai==='kh'?'Khách hàng (TK 131)':'Nhà cung cấp (TK 331)';
-    if(d.ghi_chu){
-      document.getElementById('misaModalBody').innerHTML=`
-        ${misaDoiChieuTabs(loai)}
-        <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;color:#b91c1c;margin-top:10px">${misaEsc(d.ghi_chu)}</div>`;
-      return;
-    }
+    const qs=new URLSearchParams({loai, tu_ngay:misaDoiChieuTu, den_ngay:misaDoiChieuDen});
+    const d=await api(`/api/misa-sql/doi-chieu-cong-no/${current}?${qs}`);
+    const tenLoai=loai==='kh'?'phải thu Khách hàng (TK 131)':'phải trả Nhà cung cấp (TK 331)';
     const rows=(d.danh_sach||[]).map(r=>{
-      const lech=r.chenh_lech||0;
-      const mau=Math.abs(lech)<1?'#1a7a7a':(Math.abs(lech)>=5000000?'#b91c1c':'#b06a00');
+      const cuoi=r.du_cuoi_ky||0;
       return `<tr>
         <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.mst)}</td>
         <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.ten)}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:center">${r.so_hoa_don}${r.so_hoa_don_chua_ghi_so>0?` <span style="color:#b06a00">(${r.so_hoa_don_chua_ghi_so} chưa ghi sổ)</span>`:''}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.tong_hoa_don_pm.toLocaleString('vi-VN')}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.du_cong_no_misa.toLocaleString('vi-VN')}</td>
-        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700;color:${mau}">${lech.toLocaleString('vi-VN')}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.du_dau_ky.toLocaleString('vi-VN')}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.phat_sinh_no.toLocaleString('vi-VN')}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.phat_sinh_co.toLocaleString('vi-VN')}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700">${cuoi.toLocaleString('vi-VN')}</td>
       </tr>`;
     }).join('');
     document.getElementById('misaModalBody').innerHTML=`
       ${misaDoiChieuTabs(loai)}
-      <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:10px 14px;font-size:13.5px;color:#2e5c8a;margin:10px 0">
-        So sánh <b>${tenLoai}</b>: Tổng hóa đơn (phần mềm) so với Dư công nợ thật trong MISA (chỉ tính chứng từ <b>đã ghi sổ</b>). Chênh lệch dương thường do hóa đơn chưa ghi sổ trong MISA, hoặc bị gán nhầm tiền mặt thay vì công nợ.
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin:10px 0">
+        <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Từ ngày</label>
+          <input type="date" id="doiChieuTu" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+        <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Đến ngày</label>
+          <input type="date" id="doiChieuDen" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+        <button class="btn sm" style="background:#2e5c8a" onclick="misaDoiChieuChay('${loai}')">Lọc</button>
       </div>
-      <div style="max-height:48vh;overflow:auto">
+      <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:10px 14px;font-size:13.5px;color:#2e5c8a;margin-bottom:10px">
+        Tổng hợp công nợ <b>${tenLoai}</b> — đọc thẳng từ MISA (AccountObjectLedger), y hệt báo cáo "Tổng hợp công nợ" trong MISA, chỉ tính chứng từ <b>đã ghi sổ</b>. Để trống ngày = toàn bộ lịch sử.
+      </div>
+      <div style="max-height:46vh;overflow:auto">
       <table style="border-collapse:collapse;font-size:13px;width:100%">
         <tr style="background:#f0f0f0;position:sticky;top:0">
           <th style="padding:6px 8px;border:1px solid #eee">MST</th>
           <th style="padding:6px 8px;border:1px solid #eee">Tên</th>
-          <th style="padding:6px 8px;border:1px solid #eee">Số HĐ</th>
-          <th style="padding:6px 8px;border:1px solid #eee">Tổng HĐ (phần mềm)</th>
-          <th style="padding:6px 8px;border:1px solid #eee">Dư công nợ (MISA)</th>
-          <th style="padding:6px 8px;border:1px solid #eee">Chênh lệch</th>
-        </tr>${rows||'<tr><td colspan="6" style="padding:14px;text-align:center;color:#999">Không có dữ liệu</td></tr>'}
+          <th style="padding:6px 8px;border:1px solid #eee">Dư đầu kỳ</th>
+          <th style="padding:6px 8px;border:1px solid #eee">PS Nợ</th>
+          <th style="padding:6px 8px;border:1px solid #eee">PS Có</th>
+          <th style="padding:6px 8px;border:1px solid #eee">Dư cuối kỳ</th>
+        </tr>${rows||'<tr><td colspan="6" style="padding:14px;text-align:center;color:#999">Không có dữ liệu (kiểm tra đã Ghi sổ chứng từ trong MISA chưa)</td></tr>'}
       </table></div>
       <div style="margin-top:14px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
@@ -5707,10 +5713,14 @@ function misaBuTruMo(loai){
   document.getElementById('misaModalBody').innerHTML=`
     <div style="font-weight:800;font-size:16px;color:#7a4fb5;margin-bottom:10px">🩹 Đề xuất bù công nợ treo — ${loai==='kh'?'Khách hàng':'Nhà cung cấp'}</div>
     <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 14px;font-size:13px;color:#8a5d00;margin-bottom:12px">
-      Tìm hóa đơn còn NGUYÊN 100% công nợ (chưa hề thu/chi đồng nào theo mô phỏng khớp nợ theo tuổi nợ), quá hạn lâu, giá trị nhỏ, và đối tượng đó KHÔNG có giao dịch ngân hàng nào — khả năng cao là hóa đơn tiền mặt bị lỡ ghi công nợ.
+      Tìm hóa đơn còn NGUYÊN 100% công nợ (chưa hề thu/chi đồng nào theo mô phỏng khớp nợ theo tuổi nợ), giá trị nhỏ, và đối tượng đó KHÔNG có giao dịch ngân hàng nào — khả năng cao là hóa đơn tiền mặt bị lỡ ghi công nợ. Điền Từ ngày/Đến ngày để lọc đúng 1 kỳ (vd 01/01/2025-31/12/2025); để trống thì lọc theo "quá hạn hơn N tháng tính từ hôm nay".
     </div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:14px">
-      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Quá hạn hơn (tháng)</label>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Từ ngày (hóa đơn)</label>
+        <input type="date" id="buTruTu" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Đến ngày (hóa đơn)</label>
+        <input type="date" id="buTruDen" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Hoặc quá hạn hơn (tháng)</label>
         <input type="number" id="buTruThangQuaHan" value="6" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Giá trị hóa đơn dưới (đ)</label>
         <input type="number" id="buTruNguong" value="5000000" step="100000" style="width:140px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
@@ -5718,16 +5728,19 @@ function misaBuTruMo(loai){
     </div>
     <div id="misaBuTruKetQua"></div>
     <div style="margin-top:12px;text-align:right">
-      <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')">← Quay lại so sánh</button>
+      <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')">← Quay lại tổng hợp công nợ</button>
     </div>`;
 }
 async function misaBuTruTim(loai){
   const thangQuaHan=document.getElementById('buTruThangQuaHan').value||6;
   const nguong=document.getElementById('buTruNguong').value||5000000;
+  const tuNgay=document.getElementById('buTruTu').value||'';
+  const denNgay=document.getElementById('buTruDen').value||'';
   const kq=document.getElementById('misaBuTruKetQua');
   kq.innerHTML=`<div style="text-align:center;padding:20px"><span class="spin"></span> Đang tìm...</div>`;
   try{
-    const d=await api(`/api/misa-sql/de-xuat-bu-tru/${current}?loai=${loai}&thang_qua_han=${thangQuaHan}&nguong=${nguong}`);
+    const qs=new URLSearchParams({loai, thang_qua_han:thangQuaHan, nguong, tu_ngay:tuNgay, den_ngay:denNgay});
+    const d=await api(`/api/misa-sql/de-xuat-bu-tru/${current}?${qs}`);
     misaBuTruDsHienTai=d.de_xuat||[];
     if(!misaBuTruDsHienTai.length){
       kq.innerHTML=`<div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:12px;color:#1a7a4a">Không tìm thấy hóa đơn nào khớp điều kiện — không có gì để đề xuất.</div>`;
