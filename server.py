@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.114"
+APP_BUILD = "2026-07-27.115"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14713,7 +14713,9 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     "RefType": inv_reftype,
                     "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
                     "AccountObjectTaxCode": mst[:50] or None,
-                    "InvTemplateNo": maus[:25] or None, "InvSeries": kyhieu[:20] or "",
+                    # Mẫu số HĐ: để TRỐNG theo yêu cầu (không ghi giá trị maus
+                    # lên MISA nữa), dù vẫn đọc/dùng maus ở Diễn giải.
+                    "InvTemplateNo": None, "InvSeries": kyhieu[:20] or "",
                     "InvNo": sohd[:25] or None, "InvDate": ngay_dt,
                     "JournalMemo": dien_giai,
                     "TotalSaleAmountOC": ds, "TotalSaleAmount": ds,
@@ -14858,8 +14860,11 @@ def _misa_sua_thieu_sainvoicereference(cid, database, preview=True):
     < .113): các chứng từ này đã có SAInvoice/SAVoucherDetail.SAInvoiceRefID
     đúng nhưng CHƯA có dòng SAInvoiceReference — đúng nguyên nhân lưới danh
     sách Bán hàng (View_SAVoucher) không hiện Số hóa đơn/Ký hiệu/Mẫu số HĐ.
-    Chỉ SỬA BỔ SUNG (không xóa/sửa gì khác) nên dùng được cho cả chứng từ ĐÃ
-    GHI SỔ, không cần xóa/nhập lại."""
+    NHÂN TIỆN cũng xóa TRỐNG cột Mẫu số HĐ (InvTemplateNo) trên các hóa đơn
+    phần mềm đã tạo — theo yêu cầu không ghi giá trị này lên MISA nữa (build
+    < .114 từng ghi "1"/mẫu thật vào đây). Chỉ SỬA BỔ SUNG/XÓA ĐÚNG 1 CỘT
+    (không đụng gì khác) nên dùng được cho cả chứng từ ĐÃ GHI SỔ, không cần
+    xóa/nhập lại."""
     import uuid as _uuid
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
@@ -14882,12 +14887,20 @@ def _misa_sua_thieu_sainvoicereference(cid, database, preview=True):
                     "[ReferenceType],[ReferenceCreatedType]) VALUES (?,?,?,?,?,?)",
                     str(_uuid.uuid4()), inv_id, rid, rtype, 0, 1)
             ket.append({"so_ct": so_ct})
+        so_xoa_mau = cur.execute(
+            "SELECT COUNT(*) FROM SAInvoice "
+            "WHERE ISNULL(CustomField10,'')=? AND InvTemplateNo IS NOT NULL",
+            _PM_MARK).fetchone()[0]
+        if not preview and so_xoa_mau:
+            cur.execute(
+                "UPDATE SAInvoice SET InvTemplateNo=NULL "
+                "WHERE ISNULL(CustomField10,'')=? AND InvTemplateNo IS NOT NULL", _PM_MARK)
         if preview:
             conn.rollback()
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_sua": len(ket),
-                "danh_sach": ket[:500]}
+                "so_xoa_mau_so_hd": so_xoa_mau, "danh_sach": ket[:500]}
     except Exception as e:
         conn.rollback()
         raise HTTPException(400, "Lỗi khi sửa liên kết hóa đơn (đã hoàn tác): %s" % str(e)[:400])

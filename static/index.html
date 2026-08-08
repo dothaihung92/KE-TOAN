@@ -4498,7 +4498,7 @@ function moBangKe(loai){
         <button class="btn ghost sm" style="color:#666" onclick="misaDoCauTrucHoaDon()" title="Chỉ xem — dò TRIGGER/VIEW/bảng khác liên quan Số hóa đơn khi dữ liệu SAVoucher/SAInvoice đã đúng và đã Ghi sổ mà lưới MISA vẫn không hiện Số hóa đơn">🔍 Dò cấu trúc hóa đơn</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaXemDinhNghiaView()" title="Chỉ xem — lấy nguyên văn SQL định nghĩa 1 vài VIEW nghi vấn (vd View_SAVoucher, View_SAVoucherInvoiceReference) để biết điều kiện thật MISA cần để hiện Số hóa đơn">📜 Xem định nghĩa VIEW</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaXemSAInvoiceReference()" title="Chỉ xem — dò cấu trúc + dữ liệu thật bảng SAInvoiceReference (bảng liên kết Chứng từ↔Hóa đơn mà lưới MISA thực sự đọc) cho 1 Số chứng từ cụ thể">🔗 Xem SAInvoiceReference</button>
-        <button class="btn sm" style="background:#2a7a3a" onclick="misaSuaThieuSAInvoiceReference()" title="Bổ sung bảng SAInvoiceReference còn thiếu cho các chứng từ Bán hàng phần mềm đã tạo trước đây (kể cả đã Ghi sổ) — sửa lỗi Số hóa đơn không hiện trên lưới, KHÔNG cần xóa/nhập lại">🔧 Sửa liên kết Số hóa đơn</button>
+        <button class="btn sm" style="background:#2a7a3a" onclick="misaSuaThieuSAInvoiceReference()" title="Bổ sung bảng SAInvoiceReference còn thiếu (sửa lỗi Số hóa đơn/Ký hiệu HĐ không hiện trên lưới) + xóa trống Mẫu số HĐ cho các chứng từ Bán hàng phần mềm đã tạo trước đây (kể cả đã Ghi sổ), KHÔNG cần xóa/nhập lại">🔧 Sửa liên kết Số hóa đơn</button>
       </div>`:''}
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
@@ -5533,19 +5533,23 @@ async function misaSuaThieuSAInvoiceReference(){
   toast('Đang kiểm tra (xem trước)...','');
   try{
     const pv=await api(`/api/misa-sql/sua-thieu-sainvoicereference/${current}?preview=1`,{method:'POST'});
-    if(pv.so_sua===0){
-      toast('Không có chứng từ nào bị thiếu liên kết Số hóa đơn — không cần sửa.','ok');
+    if(pv.so_sua===0 && pv.so_xoa_mau_so_hd===0){
+      toast('Không có gì cần sửa — liên kết Số hóa đơn đã đủ và Mẫu số HĐ đã trống.','ok');
       return;
     }
     const ds=(pv.danh_sach||[]).map(x=>`<li>${misaEsc(x.so_ct||'')}</li>`).join('');
     document.getElementById('misaModalBody').innerHTML=`
-      <div style="margin-bottom:8px;font-size:13px">Phát hiện <b style="color:#a03a3a">${pv.so_sua}</b> chứng từ Bán hàng (phần mềm tạo trước đây) bị thiếu bảng liên kết SAInvoiceReference — nguyên nhân Số hóa đơn/Ký hiệu/Mẫu số HĐ không hiện trên lưới. Sẽ CHỈ BỔ SUNG bản ghi còn thiếu, không xóa/sửa gì khác, an toàn cho cả chứng từ đã Ghi sổ.</div>
-      <div style="max-height:40vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:8px 10px 8px 26px;font-size:12px">
-        <ul style="margin:0">${ds}</ul>
+      <div style="margin-bottom:8px;font-size:13px">
+        ${pv.so_sua>0?`Phát hiện <b style="color:#a03a3a">${pv.so_sua}</b> chứng từ Bán hàng (phần mềm tạo trước đây) bị thiếu bảng liên kết SAInvoiceReference — nguyên nhân Số hóa đơn/Ký hiệu HĐ không hiện trên lưới.<br>`:''}
+        ${pv.so_xoa_mau_so_hd>0?`Sẽ xóa TRỐNG Mẫu số HĐ cho <b style="color:#a03a3a">${pv.so_xoa_mau_so_hd}</b> hóa đơn phần mềm đã tạo (không ghi giá trị này lên MISA nữa).<br>`:''}
+        Chỉ bổ sung/xóa đúng phần thiếu/thừa, không đụng gì khác — an toàn cho cả chứng từ đã Ghi sổ.
       </div>
+      ${ds?`<div style="max-height:40vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:8px 10px 8px 26px;font-size:12px">
+        <ul style="margin:0">${ds}</ul>
+      </div>`:''}
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
-        <button class="btn sm" style="background:#2a7a3a" onclick="misaSuaThieuSAInvoiceReferenceXacNhan()">✔ Xác nhận sửa ${pv.so_sua} chứng từ</button>
+        <button class="btn sm" style="background:#2a7a3a" onclick="misaSuaThieuSAInvoiceReferenceXacNhan()">✔ Xác nhận sửa</button>
       </div>`;
     document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
@@ -5554,7 +5558,7 @@ async function misaSuaThieuSAInvoiceReferenceXacNhan(){
   toast('Đang sửa...','');
   try{
     const d=await api(`/api/misa-sql/sua-thieu-sainvoicereference/${current}?preview=0`,{method:'POST'});
-    toast(`✓ Đã bổ sung liên kết Số hóa đơn cho ${d.so_sua} chứng từ. Mở lại MISA (F5/khởi động lại) để xem lưới cập nhật.`,'ok');
+    toast(`✓ Đã bổ sung liên kết Số hóa đơn cho ${d.so_sua} chứng từ, xóa trống Mẫu số HĐ cho ${d.so_xoa_mau_so_hd} hóa đơn. Mở lại MISA (F5/khởi động lại) để xem lưới cập nhật.`,'ok');
     document.getElementById('misaModal').style.display='none';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
