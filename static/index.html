@@ -4494,6 +4494,7 @@ function moBangKe(loai){
         <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
         <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, CHƯA ghi sổ) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanBanHang()" title="Chỉ xem — dò sâu 1 vài Số chứng từ cụ thể khi ghi xong nhưng MISA không hiện Số hóa đơn/Khách hàng ở tab Hóa đơn">🔬 Chẩn đoán sâu Bán hàng</button>
+        <button class="btn ghost sm" style="color:#666" onclick="misaQuetKyBanHang()" title="Chỉ xem — quét TOÀN BỘ chứng từ Bán hàng trong 1 kỳ (vd T7/2026), so sánh chứng từ phần mềm tạo với chứng từ thật để biết lỗi thiếu Số hóa đơn chỉ do phần mềm hay do cả MISA">📋 Quét cả kỳ Bán hàng</button>
       </div>`:''}
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
@@ -5438,6 +5439,51 @@ async function misaChanDoanBanHang(){
     document.getElementById('misaModalBody').innerHTML=`
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b></div>
       <pre style="max-height:60vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11.5px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaQuetKyBanHang(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const ky=prompt('Nhập kỳ cần quét toàn bộ chứng từ Bán hàng (vd T7/2026):','T7/2026');
+  if(!ky)return;
+  toast('Đang quét...','');
+  try{
+    const d=await api(`/api/misa-sql/quet-ky-ban-hang/${current}?ky=${encodeURIComponent(ky)}`,{method:'GET'});
+    const rows=(d.chi_tiet||[]).map(r=>`
+      <tr style="${!r.so_hoa_don?'background:#ffe0e0':''}">
+        <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.so_ct||'')}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd;text-align:center">${r.la_phan_mem_tao?'✔ Phần mềm':'Thật'}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.so_hoa_don||'(trống)')}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.ky_hieu_hd||'')}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.mau_so_hd||'')}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd">${r.ref_type||''} - ${misaEsc(r.ref_type_ten||'')}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd;text-align:center">${r.da_ghi_so?'✔':''}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.ngay_tao||'')}</td>
+      </tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">
+        Kết quả quét kỳ <b>${misaEsc(d.ky||'')}</b> (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b><br>
+        Tổng ${d.tong_so_chung_tu} chứng từ — Phần mềm tạo: ${d.so_phan_mem_tao} (thiếu Số hóa đơn: <b style="color:${d.so_phan_mem_tao_thieu_so_hoa_don>0?'#c00':'#080'}">${d.so_phan_mem_tao_thieu_so_hoa_don}</b>) — Chứng từ thật: ${d.so_that} (thiếu Số hóa đơn: <b style="color:${d.so_that_thieu_so_hoa_don>0?'#c00':'#080'}">${d.so_that_thieu_so_hoa_don}</b>)<br>
+        <span style="color:#888">Nếu chứng từ THẬT (không do phần mềm tạo) cũng thiếu Số hóa đơn giống chứng từ phần mềm ⇒ đây là hành vi bình thường của lưới MISA (vd cần thao tác/khai báo khác), KHÔNG phải lỗi phần mềm. Nếu CHỈ chứng từ phần mềm thiếu ⇒ vẫn còn lỗi ghi ở phần mềm.</span>
+      </div>
+      <div style="max-height:55vh;overflow:auto">
+        <table style="border-collapse:collapse;font-size:11.5px;width:100%">
+          <thead><tr style="background:#f0f0f0">
+            <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Số CT</th>
+            <th style="padding:3px 6px;border:1px solid #ddd">Nguồn</th>
+            <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Số hóa đơn</th>
+            <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Ký hiệu</th>
+            <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Mẫu số</th>
+            <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">RefType</th>
+            <th style="padding:3px 6px;border:1px solid #ddd">Ghi sổ</th>
+            <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Ngày tạo</th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="8" style="padding:8px;text-align:center;color:#999">Không có chứng từ nào trong kỳ này</td></tr>'}</tbody>
+        </table>
+      </div>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;

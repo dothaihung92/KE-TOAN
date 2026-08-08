@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.108"
+APP_BUILD = "2026-07-27.109"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14964,6 +14964,67 @@ def misa_sql_chan_doan_ban_hang(cid: int, so_ct: str, database: str = ""):
     if not so_ct_list:
         raise HTTPException(400, "Thiếu Số chứng từ cần chẩn đoán.")
     return _misa_chan_doan_ban_hang(cid, database, so_ct_list)
+
+
+def _misa_quet_ky_ban_hang(cid, database, ky):
+    """CHỈ ĐỌC — quét TOÀN BỘ chứng từ Bán hàng (SAVoucher) có Số chứng từ
+    chứa kỳ chỉ định (vd 'T7/2026'), liệt kê tóm tắt Số hóa đơn/Ký hiệu/Mẫu
+    số/RefType/đã ghi sổ hay chưa cho TỪNG chứng từ, kèm đánh dấu có phải do
+    phần mềm này tạo hay không. Dùng để phân biệt: lỗi KHÔNG hiện Số hóa đơn
+    chỉ ảnh hưởng chứng từ phần mềm tạo (bug ghi sai) hay ảnh hưởng luôn cả
+    chứng từ THẬT không do phần mềm tạo trong cùng kỳ (hành vi bình thường
+    của lưới MISA, không phải lỗi phần mềm)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        ky_like = "%" + str(ky or "").strip().strip("/") + "%"
+        rows = cur.execute(
+            "SELECT v.RefID, v.RefNoManagement, v.RefNoFinance, v.CustomField10, "
+            "v.InvNo, v.InvDate, v.InvSeries, v.InvTemplateNo, v.RefType, "
+            "rt.RefTypeName, v.IsPosted, v.CreatedDate, v.CreatedBy "
+            "FROM SAVoucher v LEFT JOIN SYSRefType rt ON rt.RefType = v.RefType "
+            "AND rt.MasterTableName = 'SAVoucher' "
+            "WHERE v.RefNoManagement LIKE ? OR v.RefNoFinance LIKE ? "
+            "ORDER BY v.RefNoManagement", ky_like, ky_like).fetchall()
+        ket = []
+        for r in rows:
+            ket.append({
+                "so_ct": r[1] or r[2],
+                "la_phan_mem_tao": (str(r[3] or "") == _PM_MARK),
+                "so_hoa_don": r[4],
+                "ngay_hoa_don": r[5].strftime("%d/%m/%Y") if hasattr(r[5], "strftime") else r[5],
+                "ky_hieu_hd": r[6],
+                "mau_so_hd": r[7],
+                "ref_type": r[8],
+                "ref_type_ten": r[9],
+                "da_ghi_so": bool(r[10]),
+                "ngay_tao": r[11].strftime("%d/%m/%Y %H:%M:%S") if hasattr(r[11], "strftime") else r[11],
+                "nguoi_tao": r[12],
+            })
+        n_pm = sum(1 for x in ket if x["la_phan_mem_tao"])
+        n_pm_thieu = sum(1 for x in ket if x["la_phan_mem_tao"] and not x["so_hoa_don"])
+        n_that = len(ket) - n_pm
+        n_that_thieu = sum(1 for x in ket if not x["la_phan_mem_tao"] and not x["so_hoa_don"])
+        return {
+            "database": database, "ky": ky, "tong_so_chung_tu": len(ket),
+            "so_phan_mem_tao": n_pm, "so_phan_mem_tao_thieu_so_hoa_don": n_pm_thieu,
+            "so_that": n_that, "so_that_thieu_so_hoa_don": n_that_thieu,
+            "chi_tiet": ket,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/quet-ky-ban-hang/{cid}")
+def misa_sql_quet_ky_ban_hang(cid: int, ky: str, database: str = ""):
+    """CHỈ ĐỌC — xem _misa_quet_ky_ban_hang. ky: vd 'T7/2026'."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    ky = (ky or "").strip()
+    if not ky:
+        raise HTTPException(400, "Thiếu kỳ cần quét (vd T7/2026).")
+    return _misa_quet_ky_ban_hang(cid, database, ky)
 
 
 @app.post("/api/misa-sql/import-mua-hang/{cid}")
