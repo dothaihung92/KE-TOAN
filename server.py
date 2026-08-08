@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.133"
+APP_BUILD = "2026-07-27.134"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16455,7 +16455,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
             "ISNULL(JournalMemo,''), ISNULL(Description,''), ISNULL(CorrespondingAccountNumber,''), "
             "DebitAmount, CreditAmount, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectName,'') "
             "FROM AccountObjectLedger WHERE AccountObjectID = ? AND AccountNumber LIKE ? "
-            "ORDER BY RefDate, PostedDate", account_object_id, tk_prefix + "%").fetchall()
+            "ORDER BY RefDate, RefID, PostedDate", account_object_id, tk_prefix + "%").fetchall()
         doi_tuong_hd = _misa_doi_tuong_hoa_don(cur, tk_prefix, loai, account_object_id=account_object_id)
         doi_tuong_tt = _misa_doi_tuong_thanh_toan(cur, loai, account_object_id=account_object_id)
     finally:
@@ -16493,21 +16493,68 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     dong = [{"ngay_hach_toan": "", "ngay_chung_tu": "", "so_chung_tu": "", "so_hoa_don": "",
             "dien_giai": "Số dư đầu kỳ", "tk_doi_ung": "", "ps_no": 0, "ps_co": 0,
             "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": False}]
-    for rid, refdate, postdate, refno, invno, jm, de, tk, debit, credit, _ma, _ten in rows:
-        if tu_dt and refdate and refdate < tu_dt:
+
+    def la_dong_thue(tk):
+        t = str(tk or "").strip()
+        return t.startswith("133") or t.startswith("3331") or t.startswith("33311")
+
+    # Dòng thuộc 1 HÓA ĐƠN (có Số hóa đơn) gộp còn tối đa 2 dòng hiển thị —
+    # "Giá trị hàng hóa/dịch vụ" (mọi dòng không phải thuế cộng lại) và
+    # "Thuế GTGT" (mọi dòng thuế cộng lại) — đúng theo mẫu Excel người dùng
+    # cung cấp, không hiện chi tiết từng dòng mặt hàng/khoản mục bên trong.
+    # Dòng KHÔNG có Số hóa đơn (phiếu thu/chi, điều chỉnh...) giữ nguyên.
+    loc = [r for r in rows
+          if not (tu_dt and r[1] and r[1] < tu_dt) and not (den_dt and r[1] and r[1] > den_dt)]
+    i = 0
+    while i < len(loc):
+        rid, refdate, postdate, refno, invno, jm, de, tk, debit, credit, _ma, _ten = loc[i]
+        if not invno:
+            debit = float(debit or 0)
+            credit = float(credit or 0)
+            so_du += (debit - credit) if loai == "kh" else (credit - debit)
+            dong.append({
+                "ngay_hach_toan": _misa_ngay_str(postdate), "ngay_chung_tu": _misa_ngay_str(refdate),
+                "so_chung_tu": refno, "so_hoa_don": invno, "dien_giai": jm or de,
+                "tk_doi_ung": tk, "ps_no": round(debit), "ps_co": round(credit),
+                "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)),
+                "treo": str(rid) in treo_ref_ids,
+            })
+            i += 1
             continue
-        if den_dt and refdate and refdate > den_dt:
-            continue
-        debit = float(debit or 0)
-        credit = float(credit or 0)
-        so_du += (debit - credit) if loai == "kh" else (credit - debit)
-        dong.append({
-            "ngay_hach_toan": _misa_ngay_str(postdate), "ngay_chung_tu": _misa_ngay_str(refdate),
-            "so_chung_tu": refno, "so_hoa_don": invno, "dien_giai": jm or de,
-            "tk_doi_ung": tk, "ps_no": round(debit), "ps_co": round(credit),
-            "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)),
-            "treo": str(rid) in treo_ref_ids,
-        })
+        j = i
+        gt_no = gt_co = vat_no = vat_co = 0.0
+        gt_tk, vat_tk = set(), set()
+        while j < len(loc) and loc[j][0] == rid:
+            _r2, rd2, pd2, rn2, inv2, jm2, de2, tk2, d2, c2, _m2, _t2 = loc[j]
+            d2 = float(d2 or 0)
+            c2 = float(c2 or 0)
+            if la_dong_thue(tk2):
+                vat_no += d2; vat_co += c2
+                if tk2:
+                    vat_tk.add(str(tk2))
+            else:
+                gt_no += d2; gt_co += c2
+                if tk2:
+                    gt_tk.add(str(tk2))
+            j += 1
+        treo_hd = str(rid) in treo_ref_ids
+        if gt_no or gt_co:
+            so_du += (gt_no - gt_co) if loai == "kh" else (gt_co - gt_no)
+            dong.append({
+                "ngay_hach_toan": _misa_ngay_str(postdate), "ngay_chung_tu": _misa_ngay_str(refdate),
+                "so_chung_tu": refno, "so_hoa_don": invno, "dien_giai": "Giá trị hàng hóa/dịch vụ",
+                "tk_doi_ung": ", ".join(sorted(gt_tk)), "ps_no": round(gt_no), "ps_co": round(gt_co),
+                "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": treo_hd,
+            })
+        if vat_no or vat_co:
+            so_du += (vat_no - vat_co) if loai == "kh" else (vat_co - vat_no)
+            dong.append({
+                "ngay_hach_toan": _misa_ngay_str(postdate), "ngay_chung_tu": _misa_ngay_str(refdate),
+                "so_chung_tu": refno, "so_hoa_don": invno, "dien_giai": "Thuế GTGT",
+                "tk_doi_ung": ", ".join(sorted(vat_tk)), "ps_no": round(vat_no), "ps_co": round(vat_co),
+                "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": treo_hd,
+            })
+        i = j
 
     return {"loai": loai, "account_object_id": str(account_object_id),
             "ma": d.get("ma") or ma, "ten": d.get("ten") or ten,
