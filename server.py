@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.115"
+APP_BUILD = "2026-07-27.116"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16094,6 +16094,89 @@ def misa_sql_import_ghitang(cid: int, loai: str, preview: int = 1, database: str
     if loai == "tscd":
         return _misa_ghi_tang_tscd(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
     raise HTTPException(400, "Loại '%s' chưa hỗ trợ (chỉ tscd/ccdc)." % loai)
+
+
+# ============================================================
+#  IMPORT TỰ ĐỘNG TOÀN BỘ — chạy lần lượt mọi luồng ghi vào MISA đã có,
+#  theo ĐÚNG THỨ TỰ phụ thuộc dữ liệu (KH/NCC trước Bán hàng vì Bán hàng cần
+#  AccountObjectID; Danh mục Hàng hóa trước Mua hàng vì Mua hàng cần
+#  InventoryItemID). Bước nào KHÔNG có dữ liệu đã lưu -> tự BỎ QUA, không
+#  báo lỗi (đúng yêu cầu). Mỗi bước dùng LẠI ĐÚNG hàm ghi đã kiểm chứng của
+#  từng chức năng riêng lẻ — không viết lại logic ghi.
+# ============================================================
+def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True):
+    """Chạy lần lượt: 1) Danh mục KH/NCC  2) Bảng kê Đầu ra (Bán hàng)
+    3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC (sinh từ Bảng kê Đầu vào đã lưu)
+    4) Mua hàng Nhập kho/Không qua kho/Dịch vụ (Bảng kê Đầu vào đã lưu)
+    5) Ghi tăng CCDC/TSCĐ (Bảng kê Đầu vào đã lưu, TK Nợ 242x/211x).
+    Chứng từ (Bán hàng/Mua hàng) LUÔN ghi ở trạng thái CHƯA GHI SỔ như mọi
+    khi (không tự Ghi sổ bằng SQL — xem giải thích lý do an toàn ở nơi gọi
+    API này); Ghi tăng CCDC/TSCĐ vẫn ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi
+    tăng danh mục không sinh bút toán, không có tầng "Ghi sổ" riêng)."""
+    buoc = []
+
+    def chay(ten, fn):
+        try:
+            r = fn()
+            buoc.append({"ten": ten, "ket_qua": r})
+        except HTTPException as e:
+            msg = str(e.detail)
+            if any(k in msg for k in ("Chưa có", "trống", "Không có")):
+                buoc.append({"ten": ten, "bo_qua": msg})
+            else:
+                buoc.append({"ten": ten, "loi": msg})
+        except Exception as e:
+            buoc.append({"ten": ten, "loi": str(e)[:300]})
+
+    chay("1. Danh mục KH/NCC", lambda: _misa_ghi_khncc(cid, database, preview=preview))
+
+    chay("2. Bảng kê Đầu ra (Bán hàng)",
+         lambda: _misa_ghi_ban_hang(cid, database, preview=preview, ghi_de=ghi_de))
+
+    dl_in = nhap_lieu_get(cid, "in")
+    header_in, rows_in = dl_in.get("header") or [], dl_in.get("rows") or []
+
+    def _lam_danh_muc(loai):
+        if not rows_in:
+            raise HTTPException(400, "Chưa có Bảng kê Đầu vào đã lưu.")
+        all_rows, so_moi = _gen_danh_muc(cid, loai, header_in, rows_in)
+        if not all_rows:
+            raise HTTPException(400, "Không có mã nào thuộc danh mục này trong Bảng kê Đầu vào.")
+        if not preview:
+            _luu_danh_muc(cid, loai, all_rows)
+        misa_rows = [[r[0], r[1], r[2], r[3]] for r in all_rows] if loai in ("hh", "nvl") \
+            else [[r[0], r[1], r[2]] for r in all_rows]
+        return _misa_ghi_hang_hoa(cid, database, misa_rows, preview=preview, loai=loai)
+
+    chay("3a. Danh mục Hàng hóa", lambda: _lam_danh_muc("hh"))
+    chay("3b. Danh mục NVL", lambda: _lam_danh_muc("nvl"))
+    chay("3c. Danh mục TSCĐ", lambda: _lam_danh_muc("tscd"))
+    chay("3d. Danh mục CCDC", lambda: _lam_danh_muc("ccdc"))
+
+    chay("4a. Nhập kho vào MISA",
+         lambda: _misa_ghi_mua_hang(cid, database, "nk", preview=preview, ghi_de=ghi_de))
+    chay("4b. Không qua kho vào MISA",
+         lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=ghi_de))
+    chay("4c. Dịch vụ vào MISA",
+         lambda: _misa_ghi_mua_hang_dv(cid, database, preview=preview, ghi_de=ghi_de))
+
+    chay("5a. Ghi tăng CCDC",
+         lambda: _misa_ghi_tang_ccdc(cid, database, preview=preview, ghi_de=ghi_de))
+    chay("5b. Ghi tăng TSCĐ",
+         lambda: _misa_ghi_tang_tscd(cid, database, preview=preview, ghi_de=ghi_de))
+
+    return {"database": database, "preview": preview, "cac_buoc": buoc}
+
+
+@app.post("/api/misa-sql/import-tu-dong/{cid}")
+def misa_sql_import_tu_dong(cid: int, preview: int = 1, database: str = "", ghi_de: int = 1):
+    """Chạy TỰ ĐỘNG LẦN LƯỢT toàn bộ luồng import vào MISA — xem
+    _misa_import_tu_dong. preview=1 -> chỉ xem trước toàn bộ, không ghi gì."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_import_tu_dong(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
 @app.get("/api/danh-muc-ncc/{cid}")

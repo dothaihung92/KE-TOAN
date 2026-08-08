@@ -880,6 +880,7 @@
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối CSDL MISA (thử nghiệm)</button>
+            <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDong()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ — bước nào không có dữ liệu tự bỏ qua">🚀 Import tự động toàn bộ vào MISA</button>
           </div>
         </div>
       </div>
@@ -5561,6 +5562,46 @@ async function misaSuaThieuSAInvoiceReferenceXacNhan(){
     toast(`✓ Đã bổ sung liên kết Số hóa đơn cho ${d.so_sua} chứng từ, xóa trống Mẫu số HĐ cho ${d.so_xoa_mau_so_hd} hóa đơn. Mở lại MISA (F5/khởi động lại) để xem lưới cập nhật.`,'ok');
     document.getElementById('misaModal').style.display='none';
   }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function misaTomTatBuoc(r){
+  if(!r)return'';
+  const phan=[];
+  if(r.so_chungtu!=null)phan.push(`${r.so_chungtu} chứng từ`);
+  if(r.so_them!=null)phan.push(`thêm ${r.so_them}`);
+  if(r.so_ghi_de!=null&&r.so_ghi_de>0)phan.push(`ghi đè ${r.so_ghi_de}`);
+  if(r.so_trung!=null&&r.so_trung>0)phan.push(`bỏ qua (đã có) ${r.so_trung}`);
+  if(r.so_don_vi_moi!=null&&r.so_don_vi_moi>0)phan.push(`${r.so_don_vi_moi} ĐVT mới`);
+  if(r.so_bo_qua_kh!=null&&r.so_bo_qua_kh>0)phan.push(`bỏ qua thiếu KH ${r.so_bo_qua_kh}`);
+  return phan.join(', ')||'xong';
+}
+async function misaImportTuDongChay(preview){
+  toast(preview?'Đang kiểm tra (xem trước)...':'Đang chạy import tự động...','');
+  try{
+    const d=await api(`/api/misa-sql/import-tu-dong/${current}?preview=${preview?1:0}`,{method:'POST'});
+    const rows=(d.cac_buoc||[]).map(b=>{
+      let mau='#1a7a7a',trangThai;
+      if(b.bo_qua){mau='#999';trangThai='Bỏ qua — '+b.bo_qua;}
+      else if(b.loi){mau='#b91c1c';trangThai='Lỗi — '+b.loi;}
+      else{trangThai=(preview?'Sẽ ghi: ':'✓ Đã ghi: ')+misaTomTatBuoc(b.ket_qua);}
+      return `<tr><td style="padding:4px 8px;border:1px solid #eee;font-weight:600">${misaEsc(b.ten)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;color:${mau}">${misaEsc(trangThai)}</td></tr>`;
+    }).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#2e5c8a;margin-bottom:10px">
+        ${preview?'⚠ XEM TRƯỚC — chưa ghi gì.':'✓ Đã chạy xong.'} database: <b>${misaEsc(d.database||'')}</b><br>
+        Chứng từ Bán hàng/Mua hàng vẫn ghi ở trạng thái <b>CHƯA GHI SỔ</b> như mọi khi — sau khi chạy xong, vào từng màn hình MISA (Bán hàng/Mua hàng...), chọn tất cả rồi bấm "Ghi sổ" hàng loạt.
+      </div>
+      <table style="border-collapse:collapse;font-size:12.5px;width:100%">${rows}</table>
+      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
+        ${preview?'<button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongChay(false)">✔ Xác nhận chạy thật</button>':''}
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaImportTuDong(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  misaImportTuDongChay(true);
 }
 async function misaXemSAInvoiceReference(){
   if(!current){toast('Chọn công ty trước','err');return}
