@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.105"
+APP_BUILD = "2026-07-27.106"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14231,6 +14231,25 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 kh[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm)
             if code:
                 kh[str(code).strip().lower()] = (aid, nm)
+        # Mã "KL" (Khách lẻ — dùng chung cho khách không có MST/không phải
+        # công ty) PHẢI có sẵn trong Danh mục Đối tượng MISA thì mới ghi
+        # được — tự tạo NGAY nếu chưa có, giống bài học "BH"/"MHDV" (quên tự
+        # tạo trước khiến toàn bộ dòng liên quan bị bỏ qua).
+        if "kl" not in kh:
+            kl_id = str(_uuid.uuid4())
+            if not preview:
+                try:
+                    cur.execute(
+                        "INSERT INTO AccountObject ([AccountObjectID],[AccountObjectCode],"
+                        "[AccountObjectName],[IsVendor],[IsCustomer],[AccountObjectType],"
+                        "[Inactive],[BranchID],[CreatedDate]) VALUES (?,?,?,?,?,?,?,?,?)",
+                        kl_id, "KL", "Khách lẻ", 0, 1, 0, 0, branch_id, datetime.datetime.now())
+                except Exception:
+                    row_kl = cur.execute(
+                        "SELECT TOP 1 AccountObjectID FROM AccountObject WHERE AccountObjectCode=?",
+                        "KL").fetchone()
+                    kl_id = row_kl[0] if row_kl else kl_id
+            kh["kl"] = (kl_id, "Khách lẻ")
         hang = {}
         for iid, code, uid, ten_h in cur.execute(
                 "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
@@ -14464,13 +14483,25 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             mst = _dinh_dang_mst(gv(r, col["mst"]))
             kyhieu = str(gv(r, col["kyhieu"]) or "").strip()
             maus = str(gv(r, col["maus"]) or "").strip() if col["maus"] >= 0 else ""
-            mst_k = mst.lower()
+            # Khách hàng KHÔNG có MST (khách lẻ/cá nhân thông thường, không
+            # phải công ty/hộ kinh doanh) -> dùng chung 1 mã Đối tượng "KL"
+            # trong MISA thay vì bỏ qua cả dòng (trước đây mọi dòng không MST
+            # đều bị bỏ qua vì không khớp được MST nào trong Danh mục).
+            mst_k = mst.lower() or "kl"
             if mst_k not in kh:
                 bo_kh += 1
                 ket.append({"so_hd": sohd, "kh_mst": mst,
-                            "trang_thai": "bỏ qua — Khách hàng (MST %s) chưa có trong MISA" % mst})
+                            "trang_thai": (("bỏ qua — Khách hàng (MST %s) chưa có trong MISA" % mst)
+                                          if mst else
+                                          "bỏ qua — khách không có MST, chưa có mã \"KL\" (Khách lẻ) "
+                                          "trong Danh mục Đối tượng MISA — tự tạo mã KL rồi chạy lại")})
                 continue
             acc_obj_id, ten_kh_misa = kh[mst_k]
+            # Vẫn giữ TÊN NGƯỜI MUA THẬT trên từng hóa đơn (khác nhau mỗi
+            # dòng) thay vì luôn hiện tên đăng ký của mã KL (vd "Khách lẻ")
+            # — không mất thông tin người mua thật dù dùng chung 1 mã.
+            if not mst and nguoimua:
+                ten_kh_misa = nguoimua
             ngay_dt = None
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
                 try:
