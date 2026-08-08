@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.104"
+APP_BUILD = "2026-07-27.105"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10642,7 +10642,9 @@ def _gen_ban_hang(cid, header, rows):
         row[6] = ngay; row[7] = ngay; row[8] = so_ct
         row[11] = ""; row[12] = kyhieu                  # Mẫu số (để trống) / Ký hiệu HĐ
         row[13] = sohd; row[14] = ngay
-        row[15] = mst; row[16] = nguoimua; row[18] = mst
+        # Không có MST (khách hàng thông thường/khách lẻ, không phải công ty)
+        # -> ghi mã khách hàng chung "KL" thay vì để trống.
+        row[15] = mst or "KL"; row[16] = nguoimua; row[18] = mst
         row[19] = mathang
         row[24] = "BH"; row[25] = mathang
         row[27] = tk_no; row[28] = 5111                # AB Nợ / AC Có
