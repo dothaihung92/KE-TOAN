@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.113"
+APP_BUILD = "2026-07-27.114"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14562,15 +14562,23 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     doc = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
                 if not preview:
                     for rid in pm_e["refids"]:
-                        # gỡ luôn HÓA ĐƠN liên kết (SAInvoice/SAInvoiceDetail)
-                        # kèm chứng từ cũ trước khi xóa, tránh để lại bản ghi
-                        # mồ côi.
-                        old_inv_ids = [r[0] for r in cur.execute(
+                        # gỡ luôn HÓA ĐƠN liên kết (SAInvoice/SAInvoiceDetail) +
+                        # bảng liên kết SAInvoiceReference (nguồn thật lưới danh
+                        # sách Bán hàng đọc Số hóa đơn — xem chú thích ở khối ghi
+                        # mới) kèm chứng từ cũ trước khi xóa, tránh mồ côi. Dò qua
+                        # SAInvoiceReference.VoucherRefID (không còn dò qua
+                        # SAInvoiceDetail.SAVoucherRefID vì phần mềm không còn
+                        # tạo SAInvoiceDetail nữa).
+                        old_inv_ids = {r[0] for r in cur.execute(
+                            "SELECT SAInvoiceRefID FROM SAInvoiceReference WHERE VoucherRefID=?",
+                            rid).fetchall()}
+                        old_inv_ids |= {r[0] for r in cur.execute(
                             "SELECT RefID FROM SAInvoiceDetail WHERE SAVoucherRefID=?",
-                            rid).fetchall()]
+                            rid).fetchall()}
+                        cur.execute("DELETE FROM SAInvoiceReference WHERE VoucherRefID=?", rid)
                         cur.execute("DELETE FROM SAVoucherDetail WHERE RefID=?", rid)
                         cur.execute("DELETE FROM SAVoucher WHERE RefID=?", rid)
-                        for oiid in set(old_inv_ids):
+                        for oiid in old_inv_ids:
                             cur.execute("DELETE FROM SAInvoiceDetail WHERE RefID=?", oiid)
                             cur.execute("DELETE FROM SAInvoice WHERE RefID=?", oiid)
             else:
@@ -14698,7 +14706,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 # các cột text để CHUỖI RỖNG như chứng từ MISA thật, không NULL
                 "AccountObjectAddress": "", "Payer": "", "ShippingAddress": "",
             })
-            inv_header = inv_detail = None
+            inv_header = inv_detail = sa_invoice_ref_row = None
             if inv_reftype:
                 inv_header = dict(_SA_INVOICE_DEFAULT, **{
                     "RefID": inv_id, "BranchID": branch_id, "DisplayOnBook": dob,
@@ -14738,10 +14746,27 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 # bản ghi THỪA so với cấu trúc thật, có thể chính nó làm MISA
                 # hiểu sai/bỏ qua khối hóa đơn. Bỏ hẳn cho khớp chứng từ thật.
                 inv_detail = None
+                # LIÊN KẾT THẬT SỰ mà lưới danh sách Bán hàng đọc (View_SAVoucher)
+                # KHÔNG phải qua SAVoucherDetail.SAInvoiceRefID: đọc nguyên văn
+                # định nghĩa VIEW xác nhận SV.InvNo/InvSeries bị COMMENT (không
+                # dùng), Số hóa đơn/Ký hiệu/Mẫu số HĐ lấy hoàn toàn qua bảng
+                # SAInvoiceReference (join VoucherRefID=SAVoucher.RefID ->
+                # SAInvoiceRefID=SAInvoice.RefID). Dò bảng thật xác nhận mọi
+                # chứng từ thật đều có đúng 1 dòng ở đây với ReferenceType=0,
+                # ReferenceCreatedType=1 — phần mềm trước đây bỏ sót bảng này,
+                # đúng là nguyên nhân Số hóa đơn không hiện trên lưới dù
+                # SAVoucher/SAInvoice đã có dữ liệu đúng.
+                sa_invoice_ref_row = {
+                    "ReferencefID": str(_uuid.uuid4()), "SAInvoiceRefID": inv_id,
+                    "VoucherRefID": ref_id, "VoucherRefType": ref_type,
+                    "ReferenceType": 0, "ReferenceCreatedType": 1,
+                }
             if not preview:
                 # THỨ TỰ theo chiều khóa ngoại: SAInvoice trước (SAVoucherDetail.
                 # SAInvoiceRefID trỏ tới nó), rồi SAVoucher -> SAVoucherDetail,
-                # cuối cùng SAInvoiceDetail (trỏ ngược về chứng từ + dòng).
+                # cuối cùng SAInvoiceDetail (trỏ ngược về chứng từ + dòng), rồi
+                # SAInvoiceReference (cần cả SAVoucher.RefID lẫn SAInvoice.RefID
+                # đã tồn tại).
                 if inv_header:
                     ic = list(inv_header.keys())
                     cur.execute("INSERT INTO SAInvoice ([%s]) VALUES (%s)" %
@@ -14760,6 +14785,11 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     cur.execute("INSERT INTO SAInvoiceDetail ([%s]) VALUES (%s)" %
                                ("],[".join(idc), ",".join(["?"] * len(idc))),
                                [inv_detail[c] for c in idc])
+                if sa_invoice_ref_row:
+                    rc = list(sa_invoice_ref_row.keys())
+                    cur.execute("INSERT INTO SAInvoiceReference ([%s]) VALUES (%s)" %
+                               ("],[".join(rc), ",".join(["?"] * len(rc))),
+                               [sa_invoice_ref_row[c] for c in rc])
             them_ct += 1
             if ghi_de_ct:
                 go += 1
@@ -14820,6 +14850,58 @@ def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_ghi_ban_hang(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+
+
+def _misa_sua_thieu_sainvoicereference(cid, database, preview=True):
+    """GHI (trừ preview=True) — bổ sung bảng SAInvoiceReference còn THIẾU cho
+    các chứng từ Bán hàng DO PHẦN MỀM NÀY tạo TRƯỚC KHI phát hiện lỗi (build
+    < .113): các chứng từ này đã có SAInvoice/SAVoucherDetail.SAInvoiceRefID
+    đúng nhưng CHƯA có dòng SAInvoiceReference — đúng nguyên nhân lưới danh
+    sách Bán hàng (View_SAVoucher) không hiện Số hóa đơn/Ký hiệu/Mẫu số HĐ.
+    Chỉ SỬA BỔ SUNG (không xóa/sửa gì khác) nên dùng được cho cả chứng từ ĐÃ
+    GHI SỔ, không cần xóa/nhập lại."""
+    import uuid as _uuid
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT sv.RefID, sv.RefNoManagement, sv.RefType, svd.SAInvoiceRefID "
+            "FROM SAVoucher sv "
+            "JOIN SAVoucherDetail svd ON svd.RefID = sv.RefID "
+            "WHERE ISNULL(sv.CustomField10,'')=? AND svd.SAInvoiceRefID IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM SAInvoiceReference sir "
+            "WHERE sir.VoucherRefID = sv.RefID AND sir.SAInvoiceRefID = svd.SAInvoiceRefID)",
+            _PM_MARK).fetchall()
+        ket = []
+        for rid, so_ct, rtype, inv_id in rows:
+            if not preview:
+                cur.execute(
+                    "INSERT INTO SAInvoiceReference "
+                    "([ReferencefID],[SAInvoiceRefID],[VoucherRefID],[VoucherRefType],"
+                    "[ReferenceType],[ReferenceCreatedType]) VALUES (?,?,?,?,?,?)",
+                    str(_uuid.uuid4()), inv_id, rid, rtype, 0, 1)
+            ket.append({"so_ct": so_ct})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_sua": len(ket),
+                "danh_sach": ket[:500]}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi sửa liên kết hóa đơn (đã hoàn tác): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/sua-thieu-sainvoicereference/{cid}")
+def misa_sql_sua_thieu_sainvoicereference(cid: int, preview: int = 1, database: str = ""):
+    """Xem _misa_sua_thieu_sainvoicereference. preview=1 -> chỉ xem trước."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_sua_thieu_sainvoicereference(cid, database, preview=bool(preview))
 
 
 def _misa_dump_row_full(cur, table, where_col, where_val):
