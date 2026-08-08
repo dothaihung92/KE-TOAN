@@ -5781,10 +5781,35 @@ async function misaBuTruTim(loai){
           <th style="padding:5px 8px;border:1px solid #eee">Số HĐ</th><th style="padding:5px 8px;border:1px solid #eee">Ngày</th>
           <th style="padding:5px 8px;border:1px solid #eee">Số tiền</th></tr>${rows}
       </table></div>
-      <div id="misaBuTruXacNhan" style="margin-top:12px;text-align:right">
-        <button class="btn sm" style="background:#b06a00" onclick="misaBuTruXemTruoc('${loai}')">⬆ Xem trước ghi phiếu Thu/Chi tiền mặt</button>
+      <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#1a7a4a;margin-top:12px">
+        Khuyên dùng: xuất Excel đúng mẫu "Chứng từ nghiệp vụ khác" rồi Import qua chức năng gốc của MISA — an toàn hơn ghi thẳng SQL (MISA có tầng cache riêng cho Quỹ Thu/Chi tiền không tự cập nhật khi ghi thẳng SQL).
+      </div>
+      <div id="misaBuTruXacNhan" style="margin-top:10px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn ghost sm" style="color:#b91c1c;border-color:#f5b5b5" onclick="misaBuTruDonPhieuLoi('${loai}')">🧹 Gỡ phiếu SQL đã ghi thử trước đó</button>
+        <button class="btn ghost sm" onclick="misaBuTruXemTruoc('${loai}')">⬆ (Ít khuyên dùng) Ghi thẳng phiếu Thu/Chi tiền mặt qua SQL</button>
+        <button class="btn sm" style="background:#1a7a4a" onclick="misaBuTruXuatExcel('${loai}')">📥 Xuất Excel "Nghiệp vụ khác" (khuyên dùng)</button>
       </div>`;
   }catch(e){kq.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
+}
+async function misaBuTruXuatExcel(loai){
+  const ds=misaBuTruDsChon();
+  if(!ds.length){toast('Chưa chọn dòng nào','err');return}
+  toast('Đang xuất Excel...','');
+  try{
+    const r=await fetch(`/api/misa-sql/xuat-dieu-chinh-cong-no/${current}?loai=${loai}`,{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Xuất thất bại')}
+    await xuatFile(r,`DieuChinhCongNo_${loai}.xlsx`);
+    toast(`✓ Đã xuất Excel ${ds.length} dòng điều chỉnh công nợ — vào MISA: Nghiệp vụ khác > Import Excel để nạp.`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaBuTruDonPhieuLoi(loai){
+  if(!confirm('Gỡ toàn bộ phiếu Thu/Chi tiền mặt CHƯA GHI SỔ do phần mềm ghi thử qua SQL trước đó (loại '+(loai==='kh'?'Khách hàng':'Nhà cung cấp')+')? Không đụng phiếu đã ghi sổ.'))return;
+  toast('Đang gỡ...','');
+  try{
+    const d=await api(`/api/misa-sql/don-phieu-bu-tru-loi/${current}?loai=${loai}`,{method:'POST'});
+    toast(`✓ Đã gỡ ${d.so_xoa} phiếu.`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 let misaBuTruDsXacNhan=[];
 function misaBuTruDsChon(){

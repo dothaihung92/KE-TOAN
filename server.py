@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.125"
+APP_BUILD = "2026-07-27.126"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16477,6 +16477,44 @@ async def misa_sql_ghi_bu_tru_treo(cid: int, request: Request, loai: str = "kh",
     return _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=bool(preview))
 
 
+def _misa_don_phieu_bu_tru_loi(cid, database, loai):
+    """Gỡ các phiếu CHƯA GHI SỔ do _misa_ghi_bu_tru_treo tạo (CustomField10=
+    _PM_MARK) — dùng khi chuyển sang cách khác (xuất Excel 'Nghiệp vụ khác'
+    để import) và không cần các phiếu Thu/Chi tiền mặt đã ghi thử qua SQL
+    nữa, tránh trùng/rác. KHÔNG BAO GIỜ đụng phiếu đã ghi sổ."""
+    if loai not in ("kh", "ncc"):
+        raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
+    master_table = "CAReceipt" if loai == "kh" else "CAPayment"
+    detail_table = master_table + "Detail"
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM %s WHERE RefID IN (SELECT RefID FROM %s "
+            "WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0)"
+            % (detail_table, master_table), _PM_MARK)
+        so_xoa = cur.execute(
+            "DELETE FROM %s OUTPUT deleted.RefID WHERE CustomField10=? "
+            "AND ISNULL(IsPostedFinance,0)=0" % master_table, _PM_MARK).rowcount
+        conn.commit()
+        return {"so_xoa": so_xoa}
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi gỡ (đã hoàn tác): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/don-phieu-bu-tru-loi/{cid}")
+def misa_sql_don_phieu_bu_tru_loi(cid: int, loai: str = "kh", database: str = ""):
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_don_phieu_bu_tru_loi(cid, database, loai)
+
+
 def _misa_chan_doan_bu_tru(cid, database, loai="ncc"):
     """CHẨN ĐOÁN (CHỈ ĐỌC) — dùng khi phiếu Thu/Chi tiền mặt do
     _misa_ghi_bu_tru_treo tạo (CustomField10=_PM_MARK) ghi "thành công"
@@ -16579,6 +16617,115 @@ def misa_sql_chan_doan_bu_tru(cid: int, loai: str = "ncc", database: str = ""):
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_chan_doan_bu_tru(cid, database, loai=loai)
+
+
+# ============================================================
+#  XUẤT EXCEL "Chứng từ nghiệp vụ khác" (mẫu Import Excel GỐC của MISA,
+#  bảng GLVoucher/GLVoucherDetail) để BÙ CÔNG NỢ TREO — thay cho việc ghi
+#  thẳng SQL vào CAReceipt/CAPayment (đã xác nhận có 1 tầng cache riêng của
+#  MISA — CAReceiptPaymentList — không tự cập nhật khi ghi thẳng SQL, khiến
+#  phiếu không hiện trên lưới Quỹ dù dữ liệu đúng). Xuất Excel rồi người
+#  dùng tự Import qua đúng chức năng "Nghiệp vụ khác > Import Excel" của
+#  MISA — đi qua ĐÚNG luồng ứng dụng thật, không có rủi ro cache như trên.
+# ============================================================
+_GLVOUCHER_HEADERS = [
+    "Hiển thị trên sổ", "Ngày chứng từ (*)", "Ngày hạch toán (*)", "Số chứng từ (*)",
+    "Diễn giải", "Hạn thanh toán", "Loại tiền", "Tỷ giá", "Diễn giải (Hạch toán)",
+    "TK Nợ (*)", "TK Có (*)", "Số tiền", "Số tiền quy đổi", "Đối tượng Nợ", "Đối tượng Có",
+    "TK ngân hàng", "Khoản mục CP", "Đơn vị", "Đối tượng THCP", "Công trình", "Hợp đồng bán",
+    "CP không hợp lý", "Mã thống kê", "Diễn giải (Thuế)", "TK thuế GTGT", "Tiền thuế GTGT",
+    "% thuế GTGT", "Tỷ lệ tính thuế (Thuế suất KHAC)", "Giá trị HHDV chưa thuế", "Mẫu số HĐ",
+    "Ngày hóa đơn", "Ký hiệu HĐ", "Số hóa đơn", "Nhóm HHDV mua vào", "Mã đối tượng thuế",
+    "Tên đối tượng thuế", "Mã số thuế đối tượng thuế",
+]
+
+
+def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach):
+    """Xuất file Excel đúng mẫu 'Chứng từ nghiệp vụ khác' của MISA — mỗi
+    dòng trong danh_sach (lấy từ /api/misa-sql/de-xuat-bu-tru, người dùng có
+    thể bỏ bớt) thành 1 bút toán điều chỉnh công nợ về 0: loai='ncc' -> Nợ
+    331 (giảm phải trả)/Có 1111 (coi như đã chi tiền mặt), đối tượng gán ở
+    cột 'Đối tượng Nợ'; loai='kh' -> Nợ 1111/Có 131 (coi như đã thu tiền
+    mặt), đối tượng gán ở cột 'Đối tượng Có' — đúng TK có gắn đối tượng
+    trong từng bút toán. Ngày chứng từ/hạch toán lấy theo ĐÚNG ngày hóa đơn
+    gốc (không phải hôm nay) để bút toán nằm đúng kỳ phát sinh công nợ."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Chứng từ nghiệp vụ khác"
+    for c, h in enumerate(_GLVOUCHER_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    tk_no, tk_co = ("331", "1111") if loai == "ncc" else ("1111", "131")
+    seq = {}
+    r = 2
+    for it in danh_sach:
+        so_tien = _to_num(it.get("so_tien")) or 0
+        if so_tien <= 0:
+            continue
+        ma = str(it.get("mst") or it.get("ma") or "").strip()
+        ten = str(it.get("ten") or "").strip()
+        inv_no = str(it.get("inv_no") or "").strip()
+        try:
+            ngay_dt = datetime.datetime.strptime(str(it.get("inv_date") or "")[:10], "%Y-%m-%d")
+        except Exception:
+            ngay_dt = datetime.datetime.now()
+        mk = (ngay_dt.month, ngay_dt.year)
+        seq[mk] = seq.get(mk, 0) + 1
+        so_ct = ("DCCN%03d/T%s/%s" % (seq[mk], ngay_dt.month, ngay_dt.year))[:20]
+        dien_giai = ("Điều chỉnh công nợ treo HĐ %s - %s" % (inv_no, ten)).strip(" -")
+        row = [""] * len(_GLVOUCHER_HEADERS)
+        row[1] = ngay_dt.strftime("%d/%m/%Y")
+        row[2] = ngay_dt.strftime("%d/%m/%Y")
+        row[3] = so_ct
+        row[4] = dien_giai
+        row[6] = "VND"
+        row[7] = 1
+        row[8] = dien_giai
+        row[9] = tk_no
+        row[10] = tk_co
+        row[11] = so_tien
+        row[12] = so_tien
+        if loai == "ncc":
+            row[13] = ma
+        else:
+            row[14] = ma
+        for c, v in enumerate(row, 1):
+            cell = ws.cell(r, c)
+            cell.value = v
+            if c == 12 or c == 13:
+                cell.number_format = "#,##0"
+        r += 1
+    for c in range(1, len(_GLVOUCHER_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 18
+    ws.freeze_panes = "A2"
+    fname = "DieuChinhCongNo_%s_%s.xlsx" % (loai, datetime.datetime.now().strftime("%d%m%Y_%H%M"))
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(), (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return path, r - 2
+
+
+@app.post("/api/misa-sql/xuat-dieu-chinh-cong-no/{cid}")
+async def misa_xuat_dieu_chinh_cong_no(cid: int, request: Request, loai: str = "ncc"):
+    if loai not in ("kh", "ncc"):
+        raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
+    body = await request.json()
+    danh_sach = body.get("danh_sach") or []
+    if not danh_sach:
+        raise HTTPException(400, "Danh sách trống — không có gì để xuất.")
+    path, so_dong = _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach)
+    fname = os.path.basename(path)
+    return _resp_xuat(path, fname, {"X-So-Dong": str(so_dong)})
 
 
 # ============================================================
