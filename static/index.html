@@ -5458,7 +5458,6 @@ async function misaQuetKyBanHang(){
         <td style="padding:3px 6px;border:1px solid #ddd;text-align:center">${r.la_phan_mem_tao?'✔ Phần mềm':'Thật'}</td>
         <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.so_hoa_don||'(trống)')}</td>
         <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.ky_hieu_hd||'')}</td>
-        <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.mau_so_hd||'')}</td>
         <td style="padding:3px 6px;border:1px solid #ddd">${r.ref_type||''} - ${misaEsc(r.ref_type_ten||'')}</td>
         <td style="padding:3px 6px;border:1px solid #ddd;text-align:center">${r.da_ghi_so?'✔':''}</td>
         <td style="padding:3px 6px;border:1px solid #ddd">${misaEsc(r.ngay_tao||'')}</td>
@@ -5476,12 +5475,11 @@ async function misaQuetKyBanHang(){
             <th style="padding:3px 6px;border:1px solid #ddd">Nguồn</th>
             <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Số hóa đơn</th>
             <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Ký hiệu</th>
-            <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Mẫu số</th>
             <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">RefType</th>
             <th style="padding:3px 6px;border:1px solid #ddd">Ghi sổ</th>
             <th style="padding:3px 6px;border:1px solid #ddd;text-align:left">Ngày tạo</th>
           </tr></thead>
-          <tbody>${rows||'<tr><td colspan="8" style="padding:8px;text-align:center;color:#999">Không có chứng từ nào trong kỳ này</td></tr>'}</tbody>
+          <tbody>${rows||'<tr><td colspan="7" style="padding:8px;text-align:center;color:#999">Không có chứng từ nào trong kỳ này</td></tr>'}</tbody>
         </table>
       </div>
       <div style="margin-top:12px;text-align:right">

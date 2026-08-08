@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.109"
+APP_BUILD = "2026-07-27.110"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14980,8 +14980,9 @@ def _misa_quet_ky_ban_hang(cid, database, ky):
         ky_like = "%" + str(ky or "").strip().strip("/") + "%"
         rows = cur.execute(
             "SELECT v.RefID, v.RefNoManagement, v.RefNoFinance, v.CustomField10, "
-            "v.InvNo, v.InvDate, v.InvSeries, v.InvTemplateNo, v.RefType, "
-            "rt.RefTypeName, v.IsPosted, v.CreatedDate, v.CreatedBy "
+            "v.InvNo, v.InvDate, v.InvSeries, v.RefType, "
+            "rt.RefTypeName, ISNULL(v.IsPostedFinance,0), ISNULL(v.IsPostedManagement,0), "
+            "v.CreatedDate, v.CreatedBy "
             "FROM SAVoucher v LEFT JOIN SYSRefType rt ON rt.RefType = v.RefType "
             "AND rt.MasterTableName = 'SAVoucher' "
             "WHERE v.RefNoManagement LIKE ? OR v.RefNoFinance LIKE ? "
@@ -14994,10 +14995,9 @@ def _misa_quet_ky_ban_hang(cid, database, ky):
                 "so_hoa_don": r[4],
                 "ngay_hoa_don": r[5].strftime("%d/%m/%Y") if hasattr(r[5], "strftime") else r[5],
                 "ky_hieu_hd": r[6],
-                "mau_so_hd": r[7],
-                "ref_type": r[8],
-                "ref_type_ten": r[9],
-                "da_ghi_so": bool(r[10]),
+                "ref_type": r[7],
+                "ref_type_ten": r[8],
+                "da_ghi_so": bool(r[9]) or bool(r[10]),
                 "ngay_tao": r[11].strftime("%d/%m/%Y %H:%M:%S") if hasattr(r[11], "strftime") else r[11],
                 "nguoi_tao": r[12],
             })
