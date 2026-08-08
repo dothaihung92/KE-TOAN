@@ -5855,14 +5855,32 @@ async function misaBuTruChanDoan(loai){
         <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(k)}</td>
         <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(ct[k]??'NULL')}</td>
       </tr>`).join('')).join('');
+    const chiNhanhRows=(d.chi_nhanh||[]).map(cn=>`<tr style="${cn.id===String(cuaMinh.BranchID)?'background:#fff3cd;font-weight:700':''}">
+        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(cn.id)}${cn.id===String(cuaMinh.BranchID)?' ← phiếu đang dùng':''}</td>
+        <td style="padding:3px 8px;border:1px solid #eee">${misaEsc(cn.ten||'')}</td>
+        <td style="padding:3px 8px;border:1px solid #eee;text-align:center">${cn.co_cha?'Có':'Gốc'}</td>
+      </tr>`).join('');
     box.innerHTML=`
       <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:8px">
         Bảng <b>${misaEsc(d.bang)}</b>: có <b>${d.so_dong_cua_minh}</b> dòng phần mềm đã tạo. So sánh TOÀN BỘ cột dòng gần nhất (cột tô đỏ = khác với phiếu thật) — chụp màn hình gửi lại để xác định đúng cột gây lỗi không hiện trên lưới MISA.
       </div>
+      <div style="background:${d.trong_view===0?'#fde8e8':'#eafaf0'};border:1px solid ${d.trong_view===0?'#f5b5b5':'#7ac9a0'};border-radius:8px;padding:10px 14px;font-size:13px;font-weight:700;color:${d.trong_view===0?'#b91c1c':'#1a7a4a'};margin-bottom:10px">
+        Kiểm tra thẳng View_CAReceiptPayment (view mà lưới MISA đọc): ${d.trong_view===0?'❌ Phiếu KHÔNG có trong view này → đây là nguyên nhân chính, xem SQL view bên dưới để biết chặn ở đâu.':d.trong_view>0?`✓ Phiếu CÓ trong view (${d.trong_view} dòng) — vậy lưới MISA lọc theo tiêu chí khác (Kỳ/Chi nhánh trên giao diện), thử đổi bộ lọc trên MISA.`:'Không kiểm tra được: '+misaEsc(String(d.trong_view))}
+      </div>
       <div style="margin-bottom:4px;font-size:12.5px;font-weight:700">TK đã xác nhận có thật trong Danh mục Kế toán: ${(d.tk_that_co||[]).map(misaEsc).join(', ')||'<span style="color:#b91c1c">(không tìm thấy TK nào trong 331/1111/131/1121 — nghi TK không khớp)</span>'}</div>
+      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700;margin-top:8px">Chi nhánh (BranchID) — dòng tô vàng là chi nhánh phiếu đang dùng:</div>
+      <div style="max-height:16vh;overflow:auto;margin-bottom:10px">
+      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
+        <tr style="background:#f0f0f0"><th style="padding:3px 8px;border:1px solid #eee">ID</th><th style="padding:3px 8px;border:1px solid #eee">Tên</th><th style="padding:3px 8px;border:1px solid #eee">Có chi nhánh cha?</th></tr>
+        ${chiNhanhRows}
+      </table></div>
       <div style="margin-bottom:4px;font-size:12.5px;font-weight:700;margin-top:8px">Bảng chi tiết (${misaEsc(d.bang)}Detail) của phiếu gần nhất — ${d.chi_tiet&&d.chi_tiet.length?d.chi_tiet.length+' dòng':'<span style="color:#b91c1c">KHÔNG CÓ DÒNG CHI TIẾT NÀO — đây có thể là nguyên nhân</span>'}:</div>
       <div style="max-height:22vh;overflow:auto;margin-bottom:10px">
       <table style="border-collapse:collapse;font-size:11.5px;width:100%">${chiTietRows||''}</table></div>
+      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700">Định nghĩa SQL thật của View_CAReceiptPayment (đọc trực tiếp từ MISA — xem WHERE/JOIN để biết chặn ở đâu):</div>
+      <div style="max-height:26vh;overflow:auto;margin-bottom:10px;background:#0b1f1f;border-radius:8px;padding:10px 12px">
+        <pre style="color:#c9f7e6;font-size:11px;white-space:pre-wrap;margin:0;font-family:ui-monospace,Consolas,monospace">${misaEsc(d.view_sql||'(không lấy được)')}</pre>
+      </div>
       <div style="margin-bottom:4px;font-size:12.5px;font-weight:700">Các RefType khả dĩ cho bảng ${misaEsc(d.bang)} (cột "Số dòng thật" cao = MISA thật đang dùng loại đó cho Quỹ):</div>
       <div style="max-height:22vh;overflow:auto;margin-bottom:10px">
       <table style="border-collapse:collapse;font-size:11.5px;width:100%">

@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.124"
+APP_BUILD = "2026-07-27.125"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16532,6 +16532,31 @@ def _misa_chan_doan_bu_tru(cid, database, loai="ncc"):
         tk_that = [str(a) for (a,) in cur.execute(
             "SELECT AccountNumber FROM Account WHERE AccountNumber IN (?,?,?,?)",
             "331", "1111", "131", "1121").fetchall()]
+        # Lấy THẲNG định nghĩa SQL thật của view mà lưới "Quỹ > Thu, chi
+        # tiền" nhiều khả năng đọc qua (View_CAReceiptPayment) — thay vì tiếp
+        # tục đoán cột nào gây lọc mất, đọc đúng JOIN/WHERE thật MISA dùng.
+        view_sql = None
+        trong_view = None
+        try:
+            row_v = cur.execute(
+                "SELECT OBJECT_DEFINITION(OBJECT_ID('View_CAReceiptPayment'))").fetchone()
+            view_sql = row_v[0] if row_v else None
+        except Exception as e:
+            view_sql = "(không đọc được định nghĩa view: %s)" % str(e)[:200]
+        if cua_minh:
+            try:
+                row_c = cur.execute(
+                    "SELECT COUNT(*) FROM View_CAReceiptPayment WHERE RefID=?",
+                    cua_minh[0]["RefID"]).fetchone()
+                trong_view = int(row_c[0]) if row_c else 0
+            except Exception as e:
+                trong_view = "(lỗi: %s)" % str(e)[:200]
+        # Chi nhánh (BranchID) đang dùng có khớp đúng 1 OrganizationUnit thật
+        # không — liệt kê hết để so, vì view có cột OrganizationUnitName
+        # NOTNULL (nghi vấn INNER JOIN theo BranchID).
+        chi_nhanh = [{"id": str(oid), "ten": ten, "co_cha": pid is not None} for oid, ten, pid in
+                    cur.execute("SELECT OrganizationUnitID, OrganizationUnitName, ParentID "
+                               "FROM OrganizationUnit").fetchall()]
     finally:
         conn.close()
 
@@ -16543,7 +16568,8 @@ def _misa_chan_doan_bu_tru(cid, database, loai="ncc"):
     return {"loai": loai, "bang": master_table, "so_dong_cua_minh": so_dong_cua_minh,
             "cua_minh": [don_gian(x) for x in cua_minh], "that": don_gian(that),
             "cac_reftype": cac_reftype, "chi_tiet": [don_gian(x) for x in chi_tiet],
-            "tk_that_co": tk_that}
+            "tk_that_co": tk_that, "view_sql": view_sql, "trong_view": trong_view,
+            "chi_nhanh": chi_nhanh}
 
 
 @app.get("/api/misa-sql/chan-doan-bu-tru/{cid}")
