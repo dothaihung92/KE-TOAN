@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.107"
+APP_BUILD = "2026-07-27.108"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12650,7 +12650,18 @@ def _misa_pu_reftype(cur, tu_khoa, co_tk=None, master_table="PUVoucher"):
         elif co_tk.startswith("112"):
             pt_kw = ("chuyển khoản", "ngân hàng")
         else:
-            pt_kw = ("công nợ", "chưa thanh toán", "chưa trả")
+            # "chưa trả"/"chưa thanh toán" khớp đúng chiều Mua hàng (trả tiền
+            # CHO nhà cung cấp); Bán hàng dùng chiều NGƯỢC LẠI ("thu tiền" TỪ
+            # khách hàng) — RefTypeName thật vd "...chưa thu tiền" không khớp
+            # được từ khoá nào ở trên, khiến điểm luôn hoà (mọi RefType chứa
+            # "bán" đều =1 điểm) và max() chọn BỪA loại đầu tiên theo thứ tự
+            # trả về của SQL — đã xác nhận qua dữ liệu thật: chứng từ TK Nợ
+            # 131 (đúng nghĩa "chưa thu tiền") lại bị gán RefType "...Tiền
+            # mặt", có thể là nguyên nhân crash NullReferenceException lúc
+            # Sửa/Cất (RefType nói "tiền mặt" nhưng TK Nợ lại là công nợ —
+            # 2 thông tin trái ngược nhau trên cùng 1 chứng từ). Thêm "chưa
+            # thu tiền" để khớp đúng cho cả 2 chiều Mua/Bán.
+            pt_kw = ("công nợ", "chưa thanh toán", "chưa trả", "chưa thu tiền")
 
     def diem(name):
         n = (name or "").lower()
@@ -13485,15 +13496,19 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             ngay_loi = ngay_dt is None
             ngay_dt = ngay_dt or now
             co_tk = str(first[cfg["co"]] or "").strip()
-            # Ưu tiên "mẫu" học được từ chứng từ MISA đang hiển thị được (chắc
-            # chắn đúng). Nếu công ty chưa có chứng từ loại này thì mới dò
-            # SYSRefType theo từ khóa ("mua" + loại) làm dự phòng.
-            if hoc:
+            # ƯU TIÊN dò RefType theo ĐÚNG loại (nk/kqk/dv) + phương thức
+            # thanh toán của TỪNG CHỨNG TỪ (_misa_pu_reftype đã phân biệt
+            # tiền mặt/chuyển khoản/công nợ theo co_tk) — "hoc" (1 loại chứng
+            # từ HỌC CHUNG duy nhất, không phân biệt phương thức thanh toán)
+            # chỉ dùng làm DỰ PHÒNG khi không dò được — cùng lỗi/cách sửa như
+            # bên Bán hàng: trước đây "hoc" luôn được ưu tiên trước, khiến mọi
+            # chứng từ (dù tiền mặt hay công nợ) đều bị gán CHUNG 1 RefType.
+            ref_type, ref_type_ten = None, None
+            tu_khoa = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
+                       "dv": ["mua", "dịch vụ"]}[loai]
+            ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa, co_tk)
+            if not ref_type and hoc:
                 ref_type, ref_type_ten = hoc["reftype"], hoc["refname"]
-            else:
-                tu_khoa = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
-                           "dv": ["mua", "dịch vụ"]}[loai]
-                ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa, co_tk)
             if not ref_type:
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
@@ -14047,11 +14062,13 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             ngay_loi = ngay_dt is None
             ngay_dt = ngay_dt or now
             co_tk = str(first[cfg["co"]] or "").strip()
-            if hoc:
+            # ƯU TIÊN dò RefType theo ĐÚNG phương thức thanh toán của TỪNG
+            # chứng từ (xem giải thích ở nhánh Mua hàng nhập kho/không qua
+            # kho phía trên) — "hoc" chỉ dùng làm dự phòng khi không dò được.
+            ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa_loai, co_tk,
+                                                      master_table="PUService")
+            if not ref_type and hoc:
                 ref_type, ref_type_ten = hoc["reftype"], hoc["refname"]
-            else:
-                ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa_loai, co_tk,
-                                                          master_table="PUService")
             if not ref_type:
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
@@ -14581,11 +14598,21 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                                 "trang_thai": "bỏ qua — TK %s không có trong danh mục "
                                               "tài khoản MISA" % ", ".join(sorted(tk_loi))})
                     continue
-            if hoc:
+            # ƯU TIÊN dò RefType theo ĐÚNG TK Nợ của TỪNG DÒNG (_misa_pu_reftype
+            # đã biết phân biệt "Tiền mặt" (TK Nợ 111x) với "chưa thu tiền"
+            # (TK Nợ khác, vd 131) — xem sửa ở đó) — CHỈ dùng "hoc" (1 loại
+            # chứng từ HỌC CHUNG, không phân biệt tiền mặt/công nợ) làm dự
+            # phòng khi không dò được. TRƯỚC ĐÂY "hoc" luôn được ưu tiên trước,
+            # khiến MỌI dòng (dù TK Nợ 131 hay 1111) đều bị gán CHUNG 1 RefType
+            # — đã xác nhận qua dữ liệu thật: chứng từ TK Nợ 131 (đúng nghĩa
+            # "chưa thu tiền") bị gán nhầm RefType "...Tiền mặt", khả năng cao
+            # là nguyên nhân crash NullReferenceException lúc Sửa/Cất (RefType
+            # nói "tiền mặt" nhưng TK Nợ lại ghi công nợ — 2 thông tin trái
+            # ngược nhau trên cùng 1 chứng từ).
+            ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa_loai, str(tk_no),
+                                                      master_table="SAVoucher")
+            if not ref_type and hoc:
                 ref_type, ref_type_ten = hoc["reftype"], hoc["refname"]
-            else:
-                ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa_loai, str(tk_no),
-                                                          master_table="SAVoucher")
             if not ref_type:
                 ket.append({"so_ct": doc, "so_hd": sohd,
                             "trang_thai": "bỏ qua — không dò được loại chứng từ MISA phù hợp"})
