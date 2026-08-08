@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.112"
+APP_BUILD = "2026-07-27.113"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15100,6 +15100,67 @@ def misa_sql_xem_dinh_nghia_view(cid: int, ten: str, database: str = ""):
     if not ten_list:
         raise HTTPException(400, "Thiếu tên VIEW cần xem.")
     return _misa_xem_dinh_nghia_view(cid, database, ten_list)
+
+
+def _misa_xem_sainvoicereference(cid, database, so_ct):
+    """CHỈ ĐỌC — dump cấu trúc cột + TOÀN BỘ dòng SAInvoiceReference gắn với
+    1 Số chứng từ Bán hàng, kèm 3 dòng bất kỳ khác để tham khảo quy ước giá
+    trị (vd ReferenceType). View_SAVoucher (lưới danh sách Bán hàng) lấy Số
+    hóa đơn/Ký hiệu/Mẫu số HOÀN TOÀN qua bảng SAInvoiceReference (join
+    SIR.VoucherRefID = SV.RefID -> SAInvoice), KHÔNG đọc SAVoucher.InvNo/
+    InvSeries trực tiếp (2 cột đó bị comment trong định nghĩa VIEW) — nghi
+    vấn hàng đầu: phần mềm hiện CHƯA ghi bảng SAInvoiceReference này."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cols = cur.execute(
+            "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE "
+            "FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='SAInvoiceReference' "
+            "ORDER BY ORDINAL_POSITION").fetchall()
+        cols = [{"cot": r[0], "kieu": r[1], "do_dai": r[2], "null": r[3]} for r in cols]
+        row = cur.execute(
+            "SELECT RefID FROM SAVoucher WHERE RefNoManagement=?", so_ct).fetchone()
+        if not row:
+            row = cur.execute(
+                "SELECT RefID FROM SAVoucher WHERE RefNoFinance=?", so_ct).fetchone()
+
+        def dump_rows(rows_cur):
+            scols = [d[0] for d in cur.description]
+            out = []
+            for r in rows_cur:
+                m = {}
+                for c, v in zip(scols, r):
+                    m[c] = v.isoformat() if hasattr(v, "isoformat") else v
+                out.append(m)
+            return out
+
+        du_lieu = []
+        if row:
+            du_lieu = dump_rows(cur.execute(
+                "SELECT * FROM SAInvoiceReference WHERE VoucherRefID=?", row[0]).fetchall())
+        tham_khao = []
+        try:
+            tham_khao = dump_rows(cur.execute(
+                "SELECT TOP 3 * FROM SAInvoiceReference "
+                "ORDER BY VoucherRefID DESC").fetchall())
+        except Exception as e:
+            tham_khao = [{"loi": str(e)[:200]}]
+        return {"database": database, "so_ct": so_ct, "cot": cols,
+                "du_lieu_cua_ct_nay": du_lieu, "vi_du_3_dong_bat_ky": tham_khao}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/xem-sainvoicereference/{cid}")
+def misa_sql_xem_sainvoicereference(cid: int, so_ct: str, database: str = ""):
+    """CHỈ ĐỌC — xem _misa_xem_sainvoicereference."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    so_ct = (so_ct or "").strip()
+    if not so_ct:
+        raise HTTPException(400, "Thiếu Số chứng từ.")
+    return _misa_xem_sainvoicereference(cid, database, so_ct)
 
 
 @app.post("/api/misa-sql/import-mua-hang/{cid}")
