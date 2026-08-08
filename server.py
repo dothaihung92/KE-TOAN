@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.123"
+APP_BUILD = "2026-07-27.124"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16517,6 +16517,21 @@ def _misa_chan_doan_bu_tru(cid, database, loai="ncc"):
         for it in cac_reftype:
             it["so_dong_that"] = dem_reftype_that.get(it["reftype"], 0)
         cac_reftype.sort(key=lambda x: -x["so_dong_that"])
+        # Bảng CHI TIẾT (Nợ/Có/Số tiền) của phiếu vừa tạo — kiểm tra riêng vì
+        # trước đây chỉ soi bảng master, có thể dòng chi tiết bị thiếu/sai
+        # (vd DebitAccount/CreditAccount không khớp Account thật) khiến view
+        # Quỹ không đủ dữ liệu xác định đây là phiếu tiền mặt.
+        detail_table = master_table + "Detail"
+        chi_tiet = []
+        if cua_minh:
+            cur.execute("SELECT * FROM %s WHERE RefID=?" % detail_table, cua_minh[0]["RefID"])
+            dcols = [c[0] for c in cur.description]
+            chi_tiet = [dict(zip(dcols, r)) for r in cur.fetchall()]
+        # Danh sách TK thật có trong Danh mục Kế toán — kiểm tra "331"/"1111"
+        # có đúng khớp AccountNumber thật không (có thể cần hậu tố NCC/NH).
+        tk_that = [str(a) for (a,) in cur.execute(
+            "SELECT AccountNumber FROM Account WHERE AccountNumber IN (?,?,?,?)",
+            "331", "1111", "131", "1121").fetchall()]
     finally:
         conn.close()
 
@@ -16527,7 +16542,8 @@ def _misa_chan_doan_bu_tru(cid, database, loai="ncc"):
 
     return {"loai": loai, "bang": master_table, "so_dong_cua_minh": so_dong_cua_minh,
             "cua_minh": [don_gian(x) for x in cua_minh], "that": don_gian(that),
-            "cac_reftype": cac_reftype}
+            "cac_reftype": cac_reftype, "chi_tiet": [don_gian(x) for x in chi_tiet],
+            "tk_that_co": tk_that}
 
 
 @app.get("/api/misa-sql/chan-doan-bu-tru/{cid}")
