@@ -14,6 +14,7 @@ import sqlite3
 import zipfile
 import calendar
 import datetime
+import itertools
 import threading
 import concurrent.futures as _cf
 from typing import Optional, List
@@ -33,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.126"
+APP_BUILD = "2026-07-27.127"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16190,140 +16191,191 @@ def misa_sql_doi_chieu_cong_no(cid: int, loai: str = "kh", database: str = "",
                                    den_ngay=den_ngay or None)
 
 
-def _misa_fifo_cong_no(cur, tk_prefix, loai):
-    """Mô phỏng khớp nợ theo TUỔI NỢ (FIFO — hóa đơn cũ khớp trước) trên
-    TOÀN BỘ chứng từ ĐÃ GHI SỔ của AccountObjectLedger, theo từng đối tượng
-    (AccountObjectID). loai='kh' (TK 131: hóa đơn ghi Nợ, thu tiền ghi Có)
-    hoặc 'ncc' (TK 331: hóa đơn ghi Có, chi tiền ghi Nợ). Trả list hóa đơn
-    kèm 'con_no' (số còn lại theo mô phỏng FIFO — 0 nghĩa là coi như đã hết
-    nợ, dù có thể chỉ là bị 1 khoản thu/chi KHÁC của cùng đối tượng che mất
-    — đây là ước lượng, không phải số dư chính xác tuyệt đối từng hóa đơn)."""
+def _misa_ngay_str(d):
+    return d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d or "")
+
+
+def _misa_doi_tuong_hoa_don(cur, tk_prefix, loai):
+    """Danh sách hóa đơn (dòng phát sinh Nợ/Có TK 131/331 trong
+    AccountObjectLedger, gộp theo RefID = 1 hóa đơn) theo từng đối tượng —
+    KHÔNG mô phỏng FIFO, dùng để khớp trực tiếp với từng khoản thanh toán."""
     phat_sinh_col = "DebitAmount" if loai == "kh" else "CreditAmount"
-    giam_col = "CreditAmount" if loai == "kh" else "DebitAmount"
     rows = cur.execute(
         "SELECT AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectTaxCode,''), "
-        "ISNULL(AccountObjectName,''), RefID, InvNo, InvDate, RefDate, "
-        "%s, %s FROM AccountObjectLedger "
-        "WHERE AccountNumber LIKE ? AND AccountObjectID IS NOT NULL"
-        % (phat_sinh_col, giam_col), tk_prefix + "%").fetchall()
-    tong_giam = {}          # AccountObjectID -> tổng đã thu/chi (giảm nợ)
-    hd_theo_doi_tuong = {}  # AccountObjectID -> {RefID: {...}}
-    ten_mst = {}
-    for aoid, ma, mst, ten, refid, invno, invdate, refdate, phat_sinh, giam in rows:
+        "ISNULL(AccountObjectName,''), RefID, InvNo, InvDate, RefDate, %s "
+        "FROM AccountObjectLedger WHERE AccountNumber LIKE ? AND AccountObjectID IS NOT NULL "
+        "AND %s > 0" % (phat_sinh_col, phat_sinh_col), tk_prefix + "%").fetchall()
+    doi_tuong = {}
+    for aoid, ma, mst, ten, refid, invno, invdate, refdate, tien in rows:
         aoid = str(aoid)
-        # Mã KH/NCC (AccountObjectCode) là khóa hiển thị THẬT của MISA — nhiều
-        # đối tượng (khách lẻ, NCC nước ngoài...) không có MST nên ưu tiên mã.
-        ten_mst[aoid] = (ma or mst, ten)
-        tong_giam[aoid] = tong_giam.get(aoid, 0.0) + float(giam or 0)
-        if phat_sinh and float(phat_sinh) > 0:
-            d = hd_theo_doi_tuong.setdefault(aoid, {})
-            iv = d.setdefault(str(refid), {"inv_no": invno, "inv_date": invdate or refdate,
-                                            "so_tien": 0.0, "ref_id": str(refid)})
-            iv["so_tien"] += float(phat_sinh)
-
-    ket_qua = []
-    for aoid, hds_map in hd_theo_doi_tuong.items():
-        hds = sorted(hds_map.values(), key=lambda x: x["inv_date"] or datetime.datetime.min)
-        con_lai_giam = tong_giam.get(aoid, 0.0)
-        mst, ten = ten_mst.get(aoid, ("", ""))
-        for iv in hds:
-            tien = iv["so_tien"]
-            if con_lai_giam >= tien - 1:
-                con_lai_giam -= tien
-                con_no = 0.0
-            elif con_lai_giam > 0:
-                con_no = tien - con_lai_giam
-                con_lai_giam = 0.0
-            else:
-                con_no = tien
-            ket_qua.append({"account_object_id": aoid, "mst": mst, "ten": ten,
-                            "ref_id": iv["ref_id"], "inv_no": iv["inv_no"],
-                            "inv_date": iv["inv_date"], "so_tien": tien, "con_no": con_no})
-    return ket_qua
+        d = doi_tuong.setdefault(aoid, {"ma": ma or mst or "", "ten": ten or "", "hoa_don": {}})
+        if ma and not d["ma"]:
+            d["ma"] = ma
+        if ten and not d["ten"]:
+            d["ten"] = ten
+        hd = d["hoa_don"].setdefault(str(refid), {"ref_id": str(refid), "inv_no": invno,
+                                                    "inv_date": invdate or refdate, "so_tien": 0.0})
+        hd["so_tien"] += float(tien or 0)
+    for d in doi_tuong.values():
+        d["hoa_don"] = list(d["hoa_don"].values())
+    return doi_tuong
 
 
-def _misa_de_xuat_bu_tru(cid, database, loai="kh", thang_qua_han=6, nguong=5_000_000,
-                         tu_ngay=None, den_ngay=None):
-    """Giai đoạn 2 (CHỈ ĐỌC — đề xuất, chưa ghi gì): tìm hóa đơn 'treo' —
-    còn NGUYÊN 100% giá trị theo mô phỏng FIFO (chưa hề được thu/chi 1 đồng
-    nào), giá trị < nguong — nhiều khả năng là hóa đơn thu/chi TIỀN MẶT ngay
-    lúc phát sinh nhưng bị lỡ ghi công nợ, không ai theo dõi qua sổ Thu/Chi.
-    Đối tượng nào CÓ giao dịch ngân hàng (BADepositDetail) thì KHÔNG đề xuất
-    — có thể đã thanh toán nhưng chưa khớp đúng, để người dùng tự kiểm tra
-    thay vì đoán bừa. Lọc theo NGÀY HÓA ĐƠN: nếu có tu_ngay/den_ngay (vd
-    chọn đúng 1 kỳ báo cáo như MISA) thì dùng khoảng đó; không thì dùng
-    'quá hạn hơn thang_qua_han tháng tính từ hôm nay' như cũ."""
+def _misa_doi_tuong_thanh_toan(cur, loai):
+    """Danh sách khoản thanh toán NGÂN HÀNG THẬT (BADepositDetail, ngày lấy
+    từ BADeposit) theo từng đối tượng — loai='kh': dòng Có 131 (thu tiền
+    KH qua NH); loai='ncc': dòng Nợ 331 (chi tiền NCC qua NH)."""
+    tk_cot = "CreditAccount" if loai == "kh" else "DebitAccount"
+    rows = cur.execute(
+        "SELECT bd.AccountObjectID, b.RefDate, bd.Amount, bd.RefID "
+        "FROM BADepositDetail bd JOIN BADeposit b ON bd.RefID = b.RefID "
+        "WHERE bd.AccountObjectID IS NOT NULL AND bd.%s LIKE ? AND bd.Amount > 0"
+        % tk_cot, ("131%" if loai == "kh" else "331%")).fetchall()
+    doi_tuong = {}
+    for aoid, refdate, tien, refid in rows:
+        doi_tuong.setdefault(str(aoid), []).append(
+            {"ref_id": str(refid), "date": refdate, "so_tien": float(tien or 0)})
+    return doi_tuong
+
+
+def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
+                           nguong=5_000_000, max_to_hop=8):
+    """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
+    KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng):
+
+    Tầng 1 — khớp 1-1 chính xác: mỗi khoản thanh toán ngân hàng thật (đã
+    nhập vào MISA, bảng BADepositDetail) so số tiền với TỪNG hóa đơn đang
+    nợ của ĐÚNG đối tượng đó, chỉ xét hóa đơn có ngày nằm trong cửa sổ
+    [ngày hóa đơn - 7 ngày, ngày hóa đơn + cua_so_thang tháng] (thanh toán
+    quá xa ngày hóa đơn thì không tính, dù trùng số tiền — coi là trùng
+    ngẫu nhiên). Nếu CHỈ 1 hóa đơn khớp đúng số tiền trong cửa sổ đó -> ghi
+    nhận khớp. Nếu NHIỀU hóa đơn cùng khớp (trùng giá trị) -> đưa vào
+    'không rõ', không đoán bừa hóa đơn nào.
+
+    Tầng 2 — khớp TỔ HỢP nhiều hóa đơn cộng lại đúng bằng 1 khoản thanh
+    toán (tối đa max_to_hop hóa đơn/tổ hợp, tránh bùng nổ tổ hợp). Chỉ tự
+    xác nhận khi có ĐÚNG 1 tổ hợp khớp; nhiều tổ hợp cùng khớp -> 'không rõ'.
+
+    Tầng 3 — hóa đơn còn lại (không khớp được ở tầng 1/2 với bất kỳ khoản
+    thanh toán ngân hàng nào), giá trị < nguong, quá hạn > thang_qua_han
+    tháng (tính từ hôm nay) -> coi là hóa đơn tiền mặt bị lỡ ghi công nợ,
+    đưa ra để xuất Excel điều chỉnh (Nợ/Có 1111 đối ứng 131/331)."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
-        hds = _misa_fifo_cong_no(cur, tk_prefix, loai)
-        co_giao_dich_nh = set()
-        try:
-            for (aoid,) in cur.execute(
-                    "SELECT DISTINCT AccountObjectID FROM BADepositDetail "
-                    "WHERE AccountObjectID IS NOT NULL").fetchall():
-                co_giao_dich_nh.add(str(aoid))
-        except Exception:
-            pass
+        doi_tuong_hd = _misa_doi_tuong_hoa_don(cur, tk_prefix, loai)
+        doi_tuong_tt = _misa_doi_tuong_thanh_toan(cur, loai)
     finally:
         conn.close()
 
-    tu_dt = _misa_doc_ngay(tu_ngay) if tu_ngay else None
-    den_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
-    if den_dt:
-        den_dt = den_dt.replace(hour=23, minute=59, second=59)
-    han = None if (tu_dt or den_dt) else (
-        datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han)))
-    de_xuat = []
-    for iv in hds:
-        if iv["con_no"] <= 0 or abs(iv["con_no"] - iv["so_tien"]) > 1:
-            continue   # đã bị đối trừ 1 phần -> không phải diện "treo nguyên", để người dùng tự xử lý
-        if iv["so_tien"] >= nguong:
-            continue
-        ngay = iv["inv_date"]
-        if not ngay:
-            continue
-        if tu_dt or den_dt:
-            if tu_dt and ngay < tu_dt:
+    cua_so = datetime.timedelta(days=30 * int(cua_so_thang))
+    dem_truoc = datetime.timedelta(days=7)
+    tang1, tang2, khong_ro = [], [], []
+
+    def trong_cua_so(hd, tt):
+        if not hd["inv_date"] or not tt["date"]:
+            return False
+        return (hd["inv_date"] - dem_truoc) <= tt["date"] <= (hd["inv_date"] + cua_so)
+
+    for aoid, d in doi_tuong_hd.items():
+        ma, ten = d["ma"], d["ten"]
+        hds = d["hoa_don"]
+        for hd in hds:
+            hd["matched"] = False
+        tts = doi_tuong_tt.get(aoid, [])
+        for tt in tts:
+            tt["matched"] = False
+
+        # Tầng 1
+        for tt in tts:
+            ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)
+                       and abs(hd["so_tien"] - tt["so_tien"]) <= 1]
+            if len(ung_vien) == 1:
+                ung_vien[0]["matched"] = True
+                tt["matched"] = True
+                tang1.append({"ma": ma, "ten": ten, "inv_no": ung_vien[0]["inv_no"],
+                              "inv_date": _misa_ngay_str(ung_vien[0]["inv_date"]),
+                              "so_tien": round(ung_vien[0]["so_tien"]),
+                              "ngay_thanh_toan": _misa_ngay_str(tt["date"])})
+            elif len(ung_vien) > 1:
+                khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều hóa đơn trùng giá trị",
+                                 "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                 "so_tien": round(tt["so_tien"]),
+                                 "ung_vien": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
+                                              "so_tien": round(h["so_tien"])} for h in ung_vien]})
+
+        # Tầng 2 (chỉ xét khoản thanh toán CHƯA khớp ở tầng 1)
+        for tt in tts:
+            if tt["matched"]:
                 continue
-            if den_dt and ngay > den_dt:
+            ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)]
+            if len(ung_vien) < 2 or len(ung_vien) > 20:
+                continue   # quá nhiều ứng viên -> không dò tổ hợp, tránh bùng nổ
+            to_hop_khop = []
+            for k in range(2, min(max_to_hop, len(ung_vien)) + 1):
+                for to_hop in itertools.combinations(ung_vien, k):
+                    if abs(sum(h["so_tien"] for h in to_hop) - tt["so_tien"]) <= 1:
+                        to_hop_khop.append(to_hop)
+                        if len(to_hop_khop) > 1:
+                            break
+                if len(to_hop_khop) > 1:
+                    break
+            if len(to_hop_khop) == 1:
+                for hd in to_hop_khop[0]:
+                    hd["matched"] = True
+                tt["matched"] = True
+                tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                              "so_tien": round(tt["so_tien"]),
+                              "hoa_don": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
+                                          "so_tien": round(h["so_tien"])} for h in to_hop_khop[0]]})
+            elif len(to_hop_khop) > 1:
+                khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp hóa đơn cùng khớp",
+                                 "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                 "so_tien": round(tt["so_tien"])})
+
+    # Tầng 3
+    han = datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han))
+    tang3 = []
+    for aoid, d in doi_tuong_hd.items():
+        for hd in d["hoa_don"]:
+            if hd["matched"] or hd["so_tien"] >= nguong:
                 continue
-        elif ngay > han:
-            continue
-        if iv["account_object_id"] in co_giao_dich_nh:
-            continue
-        de_xuat.append({
-            "account_object_id": iv["account_object_id"], "mst": iv["mst"], "ten": iv["ten"],
-            "ref_id": iv["ref_id"], "inv_no": iv["inv_no"],
-            "inv_date": ngay.strftime("%Y-%m-%d") if hasattr(ngay, "strftime") else str(ngay),
-            "so_tien": round(iv["so_tien"]),
-        })
-    de_xuat.sort(key=lambda x: x["inv_date"])
-    return {"loai": loai, "database": database, "thang_qua_han": thang_qua_han,
-            "nguong": nguong, "tu_ngay": tu_ngay, "den_ngay": den_ngay, "de_xuat": de_xuat}
+            if not hd["inv_date"] or hd["inv_date"] > han:
+                continue
+            tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
+                          "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
+                          "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"])})
+
+    tang1.sort(key=lambda x: x["inv_date"])
+    tang2.sort(key=lambda x: x["ngay_thanh_toan"])
+    tang3.sort(key=lambda x: x["inv_date"])
+    return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang,
+            "thang_qua_han": thang_qua_han, "nguong": nguong,
+            "tang1": tang1, "tang2": tang2, "khong_ro": khong_ro, "tang3": tang3}
 
 
-@app.get("/api/misa-sql/de-xuat-bu-tru/{cid}")
-def misa_sql_de_xuat_bu_tru(cid: int, loai: str = "kh", thang_qua_han: int = 6,
-                            nguong: float = 5_000_000, database: str = "",
-                            tu_ngay: str = "", den_ngay: str = ""):
+@app.get("/api/misa-sql/doi-chieu-3-tang/{cid}")
+def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
+                              thang_qua_han: int = 10, nguong: float = 5_000_000,
+                              database: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_de_xuat_bu_tru(cid, database, loai=loai, thang_qua_han=thang_qua_han,
-                                nguong=nguong, tu_ngay=tu_ngay or None, den_ngay=den_ngay or None)
+    return _misa_doi_chieu_3_tang(cid, database, loai=loai, cua_so_thang=cua_so_thang,
+                                  thang_qua_han=thang_qua_han, nguong=nguong)
 
 
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
     """Ghi phiếu Thu tiền mặt (loai='kh': Nợ 1111/Có 131, bảng CAReceipt/
     CAReceiptDetail) hoặc Chi tiền mặt (loai='ncc': Nợ 331/Có 1111, bảng
     CAPayment/CAPaymentDetail) để tất toán các hóa đơn 'treo' NGƯỜI DÙNG ĐÃ
-    XÁC NHẬN ở bước đề xuất (_misa_de_xuat_bu_tru) — coi như thu/chi tiền
-    mặt ngay lúc phát sinh nhưng trước đó lỡ ghi công nợ. LUÔN ghi CHƯA GHI
+    XÁC NHẬN ở bước đối chiếu 3 tầng (_misa_doi_chieu_3_tang, tầng 3) — coi
+    như thu/chi tiền mặt ngay lúc phát sinh nhưng trước đó lỡ ghi công nợ.
+    LUÔN ghi CHƯA GHI
     SỔ (như mọi chứng từ khác phần mềm tạo) — không tự ghi sổ bằng SQL vì
     không tái tạo đủ các bảng sổ cái/công nợ phụ trợ mà thao tác Ghi sổ thật
     của MISA cập nhật; người dùng tự kiểm tra rồi Ghi sổ hàng loạt trong
@@ -16642,8 +16694,8 @@ _GLVOUCHER_HEADERS = [
 
 def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach):
     """Xuất file Excel đúng mẫu 'Chứng từ nghiệp vụ khác' của MISA — mỗi
-    dòng trong danh_sach (lấy từ /api/misa-sql/de-xuat-bu-tru, người dùng có
-    thể bỏ bớt) thành 1 bút toán điều chỉnh công nợ về 0: loai='ncc' -> Nợ
+    dòng trong danh_sach (lấy từ tang3 của /api/misa-sql/doi-chieu-3-tang,
+    người dùng có thể bỏ bớt) thành 1 bút toán điều chỉnh công nợ về 0: loai='ncc' -> Nợ
     331 (giảm phải trả)/Có 1111 (coi như đã chi tiền mặt), đối tượng gán ở
     cột 'Đối tượng Nợ'; loai='kh' -> Nợ 1111/Có 131 (coi như đã thu tiền
     mặt), đối tượng gán ở cột 'Đối tượng Có' — đúng TK có gắn đối tượng
