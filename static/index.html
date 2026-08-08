@@ -4496,6 +4496,7 @@ function moBangKe(loai){
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanBanHang()" title="Chỉ xem — dò sâu 1 vài Số chứng từ cụ thể khi ghi xong nhưng MISA không hiện Số hóa đơn/Khách hàng ở tab Hóa đơn">🔬 Chẩn đoán sâu Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaQuetKyBanHang()" title="Chỉ xem — quét TOÀN BỘ chứng từ Bán hàng trong 1 kỳ (vd T7/2026), so sánh chứng từ phần mềm tạo với chứng từ thật để biết lỗi thiếu Số hóa đơn chỉ do phần mềm hay do cả MISA">📋 Quét cả kỳ Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaDoCauTrucHoaDon()" title="Chỉ xem — dò TRIGGER/VIEW/bảng khác liên quan Số hóa đơn khi dữ liệu SAVoucher/SAInvoice đã đúng và đã Ghi sổ mà lưới MISA vẫn không hiện Số hóa đơn">🔍 Dò cấu trúc hóa đơn</button>
+        <button class="btn ghost sm" style="color:#666" onclick="misaXemDinhNghiaView()" title="Chỉ xem — lấy nguyên văn SQL định nghĩa 1 vài VIEW nghi vấn (vd View_SAVoucher, View_SAVoucherInvoiceReference) để biết điều kiện thật MISA cần để hiện Số hóa đơn">📜 Xem định nghĩa VIEW</button>
       </div>`:''}
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
@@ -5497,6 +5498,28 @@ async function misaDoCauTrucHoaDon(){
     document.getElementById('misaModalBody').innerHTML=`
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b></div>
       <pre style="max-height:60vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11.5px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaXemDinhNghiaView(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const ten=prompt('Nhập tên VIEW cần xem (cách nhau bởi dấu phẩy):',
+    'View_SAVoucher,View_SAVoucherInvoiceReference,View_SAInvoiceReference');
+  if(!ten)return;
+  toast('Đang lấy định nghĩa...','');
+  try{
+    const d=await api(`/api/misa-sql/xem-dinh-nghia-view/${current}?ten=${encodeURIComponent(ten)}`,{method:'GET'});
+    let html='';
+    for(const k in (d.dinh_nghia||{})){
+      html+=`<div style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:4px">${misaEsc(k)}</div>
+        <pre style="max-height:35vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(d.dinh_nghia[k]||'')}</pre></div>`;
+    }
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b></div>
+      <div style="max-height:65vh;overflow:auto">${html}</div>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;

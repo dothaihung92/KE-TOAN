@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.111"
+APP_BUILD = "2026-07-27.112"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15066,6 +15066,40 @@ def misa_sql_do_cau_truc_hoa_don(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_do_cau_truc_hoa_don(cid, database)
+
+
+def _misa_xem_dinh_nghia_view(cid, database, ten_view_list):
+    """CHỈ ĐỌC — lấy nguyên văn câu lệnh SQL định nghĩa 1 vài VIEW (qua
+    OBJECT_DEFINITION), để xem CHÍNH XÁC điều kiện lưới MISA cần để hiện
+    Số hóa đơn/Ký hiệu HĐ/Mẫu số HĐ khi nghi vấn lưới đọc qua VIEW thay vì
+    đọc thẳng SAVoucher/SAInvoice."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        ket = {}
+        for ten in ten_view_list:
+            ten = str(ten or "").strip()
+            if not ten:
+                continue
+            row = cur.execute("SELECT OBJECT_DEFINITION(OBJECT_ID(?))", ten).fetchone()
+            ket[ten] = (row[0] if row and row[0] else
+                        "(không lấy được định nghĩa — VIEW có thể bị mã hoá/encrypted hoặc không tồn tại)")
+        return {"database": database, "dinh_nghia": ket}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/xem-dinh-nghia-view/{cid}")
+def misa_sql_xem_dinh_nghia_view(cid: int, ten: str, database: str = ""):
+    """CHỈ ĐỌC — xem _misa_xem_dinh_nghia_view. ten: danh sách tên VIEW cách
+    nhau bởi dấu phẩy."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    ten_list = [x.strip() for x in (ten or "").split(",") if x.strip()]
+    if not ten_list:
+        raise HTTPException(400, "Thiếu tên VIEW cần xem.")
+    return _misa_xem_dinh_nghia_view(cid, database, ten_list)
 
 
 @app.post("/api/misa-sql/import-mua-hang/{cid}")
