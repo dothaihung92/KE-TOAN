@@ -881,6 +881,7 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối CSDL MISA (thử nghiệm)</button>
             <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDong()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ — bước nào không có dữ liệu tự bỏ qua">🚀 Import tự động toàn bộ vào MISA</button>
+            <button class="btn sm" style="background:#7a4fb5" onclick="misaDoiChieuMo()" title="So sánh công nợ phần mềm vs MISA + tìm hóa đơn tiền mặt bị lỡ ghi công nợ (treo)">📊 Đối chiếu công nợ</button>
           </div>
         </div>
       </div>
@@ -5645,6 +5646,152 @@ function misaImportHienKetQua(d,preview){
 async function misaImportTuDong(){
   if(!current){toast('Chọn công ty trước','err');return}
   misaImportTuDongChay(true);
+}
+// ===== Đối chiếu công nợ (Giai đoạn 1: so sánh) + Đề xuất bù công nợ treo (Giai đoạn 2) =====
+let misaBuTruDsHienTai=[];
+function misaDoiChieuMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  misaDoiChieuChay('kh');
+}
+async function misaDoiChieuChay(loai){
+  document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang so sánh công nợ...</div>`;
+  document.getElementById('misaModal').style.display='flex';
+  try{
+    const d=await api(`/api/misa-sql/doi-chieu-cong-no/${current}?loai=${loai}`);
+    const tenLoai=loai==='kh'?'Khách hàng (TK 131)':'Nhà cung cấp (TK 331)';
+    if(d.ghi_chu){
+      document.getElementById('misaModalBody').innerHTML=`
+        ${misaDoiChieuTabs(loai)}
+        <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;color:#b91c1c;margin-top:10px">${misaEsc(d.ghi_chu)}</div>`;
+      return;
+    }
+    const rows=(d.danh_sach||[]).map(r=>{
+      const lech=r.chenh_lech||0;
+      const mau=Math.abs(lech)<1?'#1a7a7a':(Math.abs(lech)>=5000000?'#b91c1c':'#b06a00');
+      return `<tr>
+        <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.mst)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee">${misaEsc(r.ten)}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:center">${r.so_hoa_don}${r.so_hoa_don_chua_ghi_so>0?` <span style="color:#b06a00">(${r.so_hoa_don_chua_ghi_so} chưa ghi sổ)</span>`:''}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.tong_hoa_don_pm.toLocaleString('vi-VN')}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right">${r.du_cong_no_misa.toLocaleString('vi-VN')}</td>
+        <td style="padding:6px 8px;border:1px solid #eee;text-align:right;font-weight:700;color:${mau}">${lech.toLocaleString('vi-VN')}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      ${misaDoiChieuTabs(loai)}
+      <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:10px 14px;font-size:13.5px;color:#2e5c8a;margin:10px 0">
+        So sánh <b>${tenLoai}</b>: Tổng hóa đơn (phần mềm) so với Dư công nợ thật trong MISA (chỉ tính chứng từ <b>đã ghi sổ</b>). Chênh lệch dương thường do hóa đơn chưa ghi sổ trong MISA, hoặc bị gán nhầm tiền mặt thay vì công nợ.
+      </div>
+      <div style="max-height:48vh;overflow:auto">
+      <table style="border-collapse:collapse;font-size:13px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0">
+          <th style="padding:6px 8px;border:1px solid #eee">MST</th>
+          <th style="padding:6px 8px;border:1px solid #eee">Tên</th>
+          <th style="padding:6px 8px;border:1px solid #eee">Số HĐ</th>
+          <th style="padding:6px 8px;border:1px solid #eee">Tổng HĐ (phần mềm)</th>
+          <th style="padding:6px 8px;border:1px solid #eee">Dư công nợ (MISA)</th>
+          <th style="padding:6px 8px;border:1px solid #eee">Chênh lệch</th>
+        </tr>${rows||'<tr><td colspan="6" style="padding:14px;text-align:center;color:#999">Không có dữ liệu</td></tr>'}
+      </table></div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+        <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruMo('${loai}')">🩹 Tìm hóa đơn treo &amp; đề xuất bù</button>
+      </div>`;
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function misaDoiChieuTabs(loaiDang){
+  const tab=(loai,ten)=>`<button class="btn ${loaiDang===loai?'':'ghost'} sm" style="${loaiDang===loai?'background:#7a4fb5':''}" onclick="misaDoiChieuChay('${loai}')">${ten}</button>`;
+  return `<div style="display:flex;gap:8px">${tab('kh','Khách hàng (phải thu)')}${tab('ncc','Nhà cung cấp (phải trả)')}</div>`;
+}
+function misaBuTruMo(loai){
+  document.getElementById('misaModalBody').innerHTML=`
+    <div style="font-weight:800;font-size:16px;color:#7a4fb5;margin-bottom:10px">🩹 Đề xuất bù công nợ treo — ${loai==='kh'?'Khách hàng':'Nhà cung cấp'}</div>
+    <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 14px;font-size:13px;color:#8a5d00;margin-bottom:12px">
+      Tìm hóa đơn còn NGUYÊN 100% công nợ (chưa hề thu/chi đồng nào theo mô phỏng khớp nợ theo tuổi nợ), quá hạn lâu, giá trị nhỏ, và đối tượng đó KHÔNG có giao dịch ngân hàng nào — khả năng cao là hóa đơn tiền mặt bị lỡ ghi công nợ.
+    </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:14px">
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Quá hạn hơn (tháng)</label>
+        <input type="number" id="buTruThangQuaHan" value="6" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Giá trị hóa đơn dưới (đ)</label>
+        <input type="number" id="buTruNguong" value="5000000" step="100000" style="width:140px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+      <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruTim('${loai}')">🔍 Tìm</button>
+    </div>
+    <div id="misaBuTruKetQua"></div>
+    <div style="margin-top:12px;text-align:right">
+      <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')">← Quay lại so sánh</button>
+    </div>`;
+}
+async function misaBuTruTim(loai){
+  const thangQuaHan=document.getElementById('buTruThangQuaHan').value||6;
+  const nguong=document.getElementById('buTruNguong').value||5000000;
+  const kq=document.getElementById('misaBuTruKetQua');
+  kq.innerHTML=`<div style="text-align:center;padding:20px"><span class="spin"></span> Đang tìm...</div>`;
+  try{
+    const d=await api(`/api/misa-sql/de-xuat-bu-tru/${current}?loai=${loai}&thang_qua_han=${thangQuaHan}&nguong=${nguong}`);
+    misaBuTruDsHienTai=d.de_xuat||[];
+    if(!misaBuTruDsHienTai.length){
+      kq.innerHTML=`<div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:12px;color:#1a7a4a">Không tìm thấy hóa đơn nào khớp điều kiện — không có gì để đề xuất.</div>`;
+      return;
+    }
+    const rows=misaBuTruDsHienTai.map((it,i)=>`
+      <tr>
+        <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><input type="checkbox" class="buTruChk" data-i="${i}" checked></td>
+        <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mst)}</td>
+        <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
+        <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_date||'')}</td>
+        <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
+      </tr>`).join('');
+    kq.innerHTML=`
+      <div style="margin-bottom:6px;font-size:13px">Tìm thấy <b>${misaBuTruDsHienTai.length}</b> hóa đơn nghi treo — bỏ tick dòng nào không muốn ghi:</div>
+      <div style="max-height:34vh;overflow:auto">
+      <table style="border-collapse:collapse;font-size:12.5px;width:100%">
+        <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
+          <th style="padding:5px 8px;border:1px solid #eee">MST</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
+          <th style="padding:5px 8px;border:1px solid #eee">Số HĐ</th><th style="padding:5px 8px;border:1px solid #eee">Ngày</th>
+          <th style="padding:5px 8px;border:1px solid #eee">Số tiền</th></tr>${rows}
+      </table></div>
+      <div id="misaBuTruXacNhan" style="margin-top:12px;text-align:right">
+        <button class="btn sm" style="background:#b06a00" onclick="misaBuTruXemTruoc('${loai}')">⬆ Xem trước ghi phiếu Thu/Chi tiền mặt</button>
+      </div>`;
+  }catch(e){kq.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
+}
+let misaBuTruDsXacNhan=[];
+function misaBuTruDsChon(){
+  return [...document.querySelectorAll('.buTruChk:checked')].map(c=>misaBuTruDsHienTai[+c.dataset.i]);
+}
+async function misaBuTruXemTruoc(loai){
+  const ds=misaBuTruDsChon();
+  if(!ds.length){toast('Chưa chọn dòng nào','err');return}
+  misaBuTruDsXacNhan=ds;
+  misaBuTruGhiChay(loai, ds, true);
+}
+async function misaBuTruGhiChay(loai, ds, preview){
+  const box=document.getElementById('misaBuTruXacNhan');
+  box.innerHTML=`<span class="spin"></span> Đang ${preview?'kiểm tra':'ghi'}...`;
+  try{
+    const d=await api(`/api/misa-sql/ghi-bu-tru-treo/${current}?loai=${loai}&preview=${preview?1:0}`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({danh_sach:ds})});
+    const rows=(d.danh_sach||[]).map(r=>`<tr>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.mst)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.ten)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(r.so_ct)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${r.so_tien.toLocaleString('vi-VN')}</td>
+      </tr>`).join('');
+    box.innerHTML=`
+      <div style="background:${preview?'#fff8e1':'#eafaf0'};border:1px solid ${preview?'#e8b923':'#7ac9a0'};border-radius:8px;padding:8px 12px;font-size:12.5px;color:${preview?'#8a5d00':'#1a7a4a'};margin-bottom:8px;text-align:left">
+        ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} phiếu ${loai==='kh'?'Thu':'Chi'} tiền mặt, luôn ở trạng thái CHƯA GHI SỔ.`:`✓ Đã ghi ${d.so_ghi} phiếu ${loai==='kh'?'Thu':'Chi'} tiền mặt (CHƯA GHI SỔ) — vào MISA kiểm tra rồi Ghi sổ.`}
+      </div>
+      <table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left">
+        <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">MST</th><th style="padding:4px 8px;border:1px solid #eee">Tên</th><th style="padding:4px 8px;border:1px solid #eee">Số CT</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr>
+        ${rows}
+      </table>
+      <div style="margin-top:10px;text-align:right">
+        <button class="btn ghost sm" onclick="misaBuTruMo('${loai}')">${preview?'Hủy':'Đóng'}</button>
+        ${preview?`<button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruGhiChay('${loai}', misaBuTruDsXacNhan, false)">✔ Xác nhận ghi thật</button>`:''}
+      </div>`;
+  }catch(e){box.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
 }
 async function misaXemSAInvoiceReference(){
   if(!current){toast('Chọn công ty trước','err');return}
