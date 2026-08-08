@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.110"
+APP_BUILD = "2026-07-27.111"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15025,6 +15025,47 @@ def misa_sql_quet_ky_ban_hang(cid: int, ky: str, database: str = ""):
     if not ky:
         raise HTTPException(400, "Thiếu kỳ cần quét (vd T7/2026).")
     return _misa_quet_ky_ban_hang(cid, database, ky)
+
+
+def _misa_do_cau_truc_hoa_don(cid, database):
+    """CHỈ ĐỌC — dò TRIGGER/VIEW gắn với SAVoucher/SAInvoice/SAVoucherDetail/
+    SAInvoiceDetail, và các BẢNG KHÁC có cột tên chứa 'InvNo' — dùng khi dữ
+    liệu SAVoucher/SAInvoice đã đối chiếu ĐÚNG HỆT chứng từ thật (từng cột,
+    kể cả sau khi Ghi sổ) mà lưới danh sách Bán hàng của MISA vẫn không hiện
+    Số hóa đơn/Ký hiệu HĐ/Mẫu số HĐ. Nghi vấn: lưới KHÔNG đọc thẳng SAVoucher/
+    SAInvoice mà đọc qua 1 VIEW hoặc 1 bảng cache/denormalize riêng được
+    TRIGGER tự sinh khi lưu qua ứng dụng MISA — ghi thẳng bằng SQL (bỏ qua
+    tầng nghiệp vụ MISA) có thể bỏ sót bước sinh dữ liệu cache/trigger đó."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        triggers = cur.execute(
+            "SELECT t.name, OBJECT_NAME(t.parent_id) FROM sys.triggers t "
+            "WHERE OBJECT_NAME(t.parent_id) IN "
+            "('SAVoucher','SAInvoice','SAVoucherDetail','SAInvoiceDetail')"
+        ).fetchall()
+        triggers = [{"trigger": r[0], "bang": r[1]} for r in triggers]
+        views = [r[0] for r in cur.execute(
+            "SELECT name FROM sys.views WHERE name LIKE '%Invoice%' "
+            "OR name LIKE '%SAVoucher%' OR name LIKE '%SaleVoucher%' "
+            "OR name LIKE '%Sale%'").fetchall()]
+        bang_co_invno = cur.execute(
+            "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE COLUMN_NAME LIKE '%InvNo%' ORDER BY TABLE_NAME").fetchall()
+        bang_co_invno = [{"bang": r[0], "cot": r[1]} for r in bang_co_invno]
+        return {"database": database, "triggers": triggers, "views": views,
+                "bang_co_cot_giong_invno": bang_co_invno}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/do-cau-truc-hoa-don/{cid}")
+def misa_sql_do_cau_truc_hoa_don(cid: int, database: str = ""):
+    """CHỈ ĐỌC — xem _misa_do_cau_truc_hoa_don."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_do_cau_truc_hoa_don(cid, database)
 
 
 @app.post("/api/misa-sql/import-mua-hang/{cid}")

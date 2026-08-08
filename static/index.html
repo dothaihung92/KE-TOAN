@@ -4495,6 +4495,7 @@ function moBangKe(loai){
         <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, CHƯA ghi sổ) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanBanHang()" title="Chỉ xem — dò sâu 1 vài Số chứng từ cụ thể khi ghi xong nhưng MISA không hiện Số hóa đơn/Khách hàng ở tab Hóa đơn">🔬 Chẩn đoán sâu Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaQuetKyBanHang()" title="Chỉ xem — quét TOÀN BỘ chứng từ Bán hàng trong 1 kỳ (vd T7/2026), so sánh chứng từ phần mềm tạo với chứng từ thật để biết lỗi thiếu Số hóa đơn chỉ do phần mềm hay do cả MISA">📋 Quét cả kỳ Bán hàng</button>
+        <button class="btn ghost sm" style="color:#666" onclick="misaDoCauTrucHoaDon()" title="Chỉ xem — dò TRIGGER/VIEW/bảng khác liên quan Số hóa đơn khi dữ liệu SAVoucher/SAInvoice đã đúng và đã Ghi sổ mà lưới MISA vẫn không hiện Số hóa đơn">🔍 Dò cấu trúc hóa đơn</button>
       </div>`:''}
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
@@ -5482,6 +5483,20 @@ async function misaQuetKyBanHang(){
           <tbody>${rows||'<tr><td colspan="7" style="padding:8px;text-align:center;color:#999">Không có chứng từ nào trong kỳ này</td></tr>'}</tbody>
         </table>
       </div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaDoCauTrucHoaDon(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang dò...','');
+  try{
+    const d=await api(`/api/misa-sql/do-cau-truc-hoa-don/${current}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b></div>
+      <pre style="max-height:60vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11.5px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
