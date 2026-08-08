@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.122"
+APP_BUILD = "2026-07-27.123"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16347,13 +16347,40 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
             raise HTTPException(
                 400, "Không tìm thấy bảng %s/%s trong CSDL MISA đang kết nối."
                 % (master_table, detail_table))
+        # Gỡ các phiếu CHƯA GHI SỔ do CHÍNH phần mềm tạo ở lần chạy TRƯỚC
+        # (CustomField10=_PM_MARK) trước khi ghi lại — tránh tồn đọng phiếu
+        # ghi nhầm RefType (rác) mỗi lần người dùng chạy lại sau khi sửa
+        # tham số. KHÔNG BAO GIỜ đụng phiếu đã ghi sổ (IsPostedFinance=1),
+        # dù phiếu đó do phần mềm tạo trước đó.
+        if not preview:
+            try:
+                cur.execute(
+                    "DELETE FROM %s WHERE RefID IN (SELECT RefID FROM %s "
+                    "WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0)"
+                    % (detail_table, master_table), _PM_MARK)
+                cur.execute(
+                    "DELETE FROM %s WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0"
+                    % master_table, _PM_MARK)
+            except Exception:
+                pass
         reftype_rows = cur.execute(
             "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=?",
             master_table).fetchall()
         if not reftype_rows:
             raise HTTPException(400, "Không tìm thấy RefType cho bảng %s trong SYSRefType." % master_table)
-        reftype = next((int(r[0]) for r in reftype_rows if "tiền mặt" in str(r[1] or "").lower()),
-                       int(reftype_rows[0][0]))
+        # Ưu tiên đúng loại "trả nhà cung cấp"/"của khách hàng" (vd RefType
+        # 1021 "Phiếu chi trả tiền nhà cung cấp") — xác nhận qua chẩn đoán
+        # thật: lọc theo "tiền mặt" đơn thuần từng trúng nhầm RefType 1023
+        # "Chi tiền mặt nộp thuế TNCN" (tên cũng có chữ "tiền mặt" nhưng SAI
+        # hẳn mục đích — Quỹ MISA không hiện phiếu ghi nhầm loại này).
+        tu_khoa_dung = "nhà cung cấp" if loai == "ncc" else "khách hàng"
+        tu_khoa_loai_tru = ("thuế", "lương", "bảo hiểm", "nhập khẩu", "tạm ứng")
+        reftype = next(
+            (int(r[0]) for r in reftype_rows if tu_khoa_dung in str(r[1] or "").lower()),
+            next((int(r[0]) for r in reftype_rows
+                  if "tiền mặt" in str(r[1] or "").lower()
+                  and not any(k in str(r[1] or "").lower() for k in tu_khoa_loai_tru)),
+                 int(reftype_rows[0][0])))
         max_reforder_row = cur.execute("SELECT MAX(RefOrder) FROM %s" % master_table).fetchone()
         reforder = int(max_reforder_row[0] or 0) if max_reforder_row else 0
         now = datetime.datetime.now()
