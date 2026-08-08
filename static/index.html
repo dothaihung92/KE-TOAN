@@ -5817,10 +5817,55 @@ async function misaBuTruGhiChay(loai, ds, preview){
         <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">Mã</th><th style="padding:4px 8px;border:1px solid #eee">Tên</th><th style="padding:4px 8px;border:1px solid #eee">Số CT</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr>
         ${rows}
       </table>
+      ${!preview?`<div id="misaBuTruChanDoan" style="margin-top:10px"></div>`:''}
       <div style="margin-top:10px;text-align:right">
         <button class="btn ghost sm" onclick="misaBuTruMo('${loai}')">${preview?'Hủy':'Đóng'}</button>
-        ${preview?`<button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruGhiChay('${loai}', misaBuTruDsXacNhan, false)">✔ Xác nhận ghi thật</button>`:''}
+        ${preview?`<button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruGhiChay('${loai}', misaBuTruDsXacNhan, false)">✔ Xác nhận ghi thật</button>`
+                 :`<button class="btn ghost sm" style="color:#b91c1c;border-color:#f5b5b5" onclick="misaBuTruChanDoan('${loai}')">🩺 Không thấy phiếu trên MISA? Chẩn đoán</button>`}
       </div>`;
+  }catch(e){box.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
+}
+async function misaBuTruChanDoan(loai){
+  const box=document.getElementById('misaBuTruChanDoan');
+  box.innerHTML=`<span class="spin"></span> Đang đọc toàn bộ cột phiếu vừa ghi để so sánh...`;
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-bu-tru/${current}?loai=${loai}`);
+    if(!d.cua_minh||!d.cua_minh.length){
+      box.innerHTML=`<div style="color:#b91c1c">Không tìm thấy dòng nào trong bảng ${misaEsc(d.bang)} có CustomField10 đánh dấu của phần mềm — có thể đã bị xoá hoặc ghi vào database khác. Kiểm tra lại tên database đang kết nối.</div>`;
+      return;
+    }
+    const cuaMinh=d.cua_minh[0];
+    const that=d.that||{};
+    const cotKhacBiet=Object.keys(cuaMinh).filter(k=>d.that && String(cuaMinh[k])!==String(that[k]??''));
+    const rows=Object.keys(cuaMinh).map(k=>{
+      const khac=d.that && cotKhacBiet.includes(k);
+      return `<tr style="${khac?'background:#fde8e8':''}">
+        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace;${khac?'font-weight:700;color:#b91c1c':''}">${misaEsc(k)}</td>
+        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(cuaMinh[k]??'NULL')}</td>
+        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${d.that?misaEsc(that[k]??'NULL'):'<i style="color:#999">— công ty chưa có phiếu thật nào —</i>'}</td>
+      </tr>`;
+    }).join('');
+    const reftypeCuaMinh=+cuaMinh.RefType;
+    const rtRows=(d.cac_reftype||[]).map(rt=>`<tr style="${rt.reftype===reftypeCuaMinh?'background:#fff3cd;font-weight:700':''}">
+        <td style="padding:3px 8px;border:1px solid #eee">${rt.reftype}${rt.reftype===reftypeCuaMinh?' ← phần mềm đang dùng':''}</td>
+        <td style="padding:3px 8px;border:1px solid #eee">${misaEsc(rt.ten||'')}</td>
+        <td style="padding:3px 8px;border:1px solid #eee;text-align:right">${rt.so_dong_that}</td>
+      </tr>`).join('');
+    box.innerHTML=`
+      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:8px">
+        Bảng <b>${misaEsc(d.bang)}</b>: có <b>${d.so_dong_cua_minh}</b> dòng phần mềm đã tạo. So sánh TOÀN BỘ cột dòng gần nhất (cột tô đỏ = khác với phiếu thật) — chụp màn hình gửi lại để xác định đúng cột gây lỗi không hiện trên lưới MISA.
+      </div>
+      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700">Các RefType khả dĩ cho bảng ${misaEsc(d.bang)} (cột "Số dòng thật" cao = MISA thật đang dùng loại đó cho Quỹ):</div>
+      <div style="max-height:22vh;overflow:auto;margin-bottom:10px">
+      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="padding:3px 8px;border:1px solid #eee">RefType</th><th style="padding:3px 8px;border:1px solid #eee">Tên</th><th style="padding:3px 8px;border:1px solid #eee">Số dòng thật</th></tr>
+        ${rtRows}
+      </table></div>
+      <div style="max-height:40vh;overflow:auto">
+      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="padding:3px 8px;border:1px solid #eee">Cột</th><th style="padding:3px 8px;border:1px solid #eee">Phiếu phần mềm tạo</th><th style="padding:3px 8px;border:1px solid #eee">Phiếu thật (nếu có)</th></tr>
+        ${rows}
+      </table></div>`;
   }catch(e){box.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
 }
 async function misaXemSAInvoiceReference(){

@@ -33,7 +33,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.121"
+APP_BUILD = "2026-07-27.122"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16448,6 +16448,68 @@ async def misa_sql_ghi_bu_tru_treo(cid: int, request: Request, loai: str = "kh",
     body = await request.json()
     danh_sach = body.get("danh_sach") or []
     return _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=bool(preview))
+
+
+def _misa_chan_doan_bu_tru(cid, database, loai="ncc"):
+    """CHẨN ĐOÁN (CHỈ ĐỌC) — dùng khi phiếu Thu/Chi tiền mặt do
+    _misa_ghi_bu_tru_treo tạo (CustomField10=_PM_MARK) ghi "thành công"
+    (không lỗi SQL) nhưng KHÔNG hiện trên lưới MISA 'Quỹ > Thu, chi tiền'.
+    Lấy TOÀN BỘ cột (SELECT *, không chọn lọc — tránh bỏ sót cột khác biệt
+    thật) của phiếu phần mềm vừa tạo, đối chiếu song song với 1 phiếu THẬT
+    (không do phần mềm tạo, nếu công ty có sẵn) để tìm đúng cột gây khác
+    biệt (RefType/BranchID/DisplayOnBook/IsPostedCashBookFinance...)."""
+    if loai not in ("kh", "ncc"):
+        raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
+    master_table = "CAReceipt" if loai == "kh" else "CAPayment"
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT TOP 3 * FROM %s WHERE CustomField10=? ORDER BY CreatedDate DESC"
+                   % master_table, _PM_MARK)
+        cols = [c[0] for c in cur.description]
+        cua_minh = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.execute("SELECT COUNT(*) FROM %s WHERE CustomField10=?" % master_table, _PM_MARK)
+        so_dong_cua_minh = cur.fetchone()[0]
+        cur.execute("SELECT TOP 1 * FROM %s WHERE ISNULL(CustomField10,'')<>? "
+                   "ORDER BY CreatedDate DESC" % master_table, _PM_MARK)
+        r = cur.fetchone()
+        that = dict(zip([c[0] for c in cur.description], r)) if r else None
+        # TOÀN BỘ RefType khả dĩ (tra SYSRefType) — RefType phần mềm đang
+        # chọn CÓ THỂ không đúng loại "Chi/Thu tiền mặt" thật MISA cần (view
+        # Quỹ đọc dữ liệu có khả năng lọc/derive theo RefType, xem CAType ở
+        # View_CAReceiptPayment) — liệt kê hết để đối chiếu bằng mắt.
+        cac_reftype = [{"reftype": int(rt), "ten": tn} for rt, tn in cur.execute(
+            "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=?",
+            master_table).fetchall()]
+        # Đếm số dòng THẬT (không do phần mềm tạo) theo từng RefType — RefType
+        # nào có nhiều dòng thật nhất mới chắc chắn là loại MISA thật sự dùng
+        # cho lưới Quỹ, thay vì suy đoán qua tên.
+        dem_reftype_that = {int(rt): n for rt, n in cur.execute(
+            "SELECT RefType, COUNT(*) FROM %s WHERE ISNULL(CustomField10,'')<>? "
+            "GROUP BY RefType" % master_table, _PM_MARK).fetchall()}
+        for it in cac_reftype:
+            it["so_dong_that"] = dem_reftype_that.get(it["reftype"], 0)
+        cac_reftype.sort(key=lambda x: -x["so_dong_that"])
+    finally:
+        conn.close()
+
+    def don_gian(d):
+        if not d:
+            return d
+        return {k: (str(v) if v is not None else None) for k, v in d.items()}
+
+    return {"loai": loai, "bang": master_table, "so_dong_cua_minh": so_dong_cua_minh,
+            "cua_minh": [don_gian(x) for x in cua_minh], "that": don_gian(that),
+            "cac_reftype": cac_reftype}
+
+
+@app.get("/api/misa-sql/chan-doan-bu-tru/{cid}")
+def misa_sql_chan_doan_bu_tru(cid: int, loai: str = "ncc", database: str = ""):
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_chan_doan_bu_tru(cid, database, loai=loai)
 
 
 # ============================================================
