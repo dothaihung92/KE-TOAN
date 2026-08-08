@@ -5733,11 +5733,11 @@ function misaBuTruMo(loai){
       <b>Tầng 1</b>: khớp 1-1 chính xác từng khoản thanh toán NH thật (đã nhập MISA) với từng hóa đơn, chỉ xét hóa đơn có ngày gần khoản thanh toán (trong cửa sổ bên dưới). <b>Tầng 2</b>: khớp 1 khoản thanh toán với TỔ HỢP nhiều hóa đơn cộng lại đúng số tiền. Cả 2 tầng chỉ liệt kê để biết, KHÔNG ghi gì. <b>Tầng 3</b>: hóa đơn còn lại không khớp được khoản nào, giá trị nhỏ + quá hạn lâu — đề xuất xuất Excel điều chỉnh về 0.
     </div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:14px">
-      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: Từ ngày (hóa đơn)</label>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Hóa đơn từ ngày</label>
         <input type="date" id="buTruTu" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
-      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: Đến ngày (hóa đơn)</label>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Đến ngày</label>
         <input type="date" id="buTruDen" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
-      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Cửa sổ ngày khớp (tầng 1-2, tháng sau HĐ)</label>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Cửa sổ ngày khớp thanh toán (tháng sau HĐ)</label>
         <input type="number" id="buTruCuaSoThang" value="3" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: hoặc quá hạn hơn (tháng, khi để trống ngày)</label>
         <input type="number" id="buTruThangQuaHan" value="10" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
@@ -5745,7 +5745,7 @@ function misaBuTruMo(loai){
         <input type="number" id="buTruNguong" value="5000000" step="100000" style="width:140px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruTim('${loai}')">🔍 Chạy đối chiếu</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">Đã điền sẵn Từ ngày/Đến ngày theo khung bạn chọn ở màn Tổng hợp công nợ — xóa trống nếu muốn dùng "quá hạn hơn N tháng" thay vào.</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">Hóa đơn từ ngày/Đến ngày áp dụng cho CẢ 3 TẦNG — chỉ hóa đơn trong khung này mới được xét (đã điền sẵn theo khung bạn chọn ở màn Tổng hợp công nợ, có thể tự đổi). Khoản thanh toán ngân hàng không bị giới hạn theo khung này. Xóa trống 2 ô ngày để tầng 3 dùng "quá hạn hơn N tháng" thay vào.</div>
     <div id="misaBuTruKetQua"></div>
     <div style="margin-top:12px;text-align:right">
       <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')">← Quay lại tổng hợp công nợ</button>

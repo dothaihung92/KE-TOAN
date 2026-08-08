@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.128"
+APP_BUILD = "2026-07-27.129"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16241,7 +16241,14 @@ def _misa_doi_tuong_thanh_toan(cur, loai):
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
                            nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None):
     """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
-    KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng):
+    KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng).
+
+    tu_ngay/den_ngay (nếu có — ĐÚNG khung người dùng tự nhập, không cố định
+    kỳ nào) lọc TRƯỚC hết danh sách HÓA ĐƠN được xét ở CẢ 3 TẦNG, theo ngày
+    hóa đơn. Khoản THANH TOÁN không bị giới hạn theo khung này — thanh toán
+    có thể tới sau kỳ báo cáo mà vẫn hợp lệ, do cửa sổ khớp (cua_so_thang)
+    tính từ ngày hóa đơn đã xử lý việc đó. Không nhập ngày nào thì tầng 3
+    dùng 'quá hạn hơn thang_qua_han tháng tính từ hôm nay' như mặc định cũ.
 
     Tầng 1 — khớp 1-1 chính xác: mỗi khoản thanh toán ngân hàng thật (đã
     nhập vào MISA, bảng BADepositDetail) so số tiền với TỪNG hóa đơn đang
@@ -16259,9 +16266,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     Tầng 3 — hóa đơn còn lại (không khớp được ở tầng 1/2 với bất kỳ khoản
     thanh toán ngân hàng nào), giá trị < nguong -> coi là hóa đơn tiền mặt
     bị lỡ ghi công nợ, đưa ra để xuất Excel điều chỉnh (Nợ/Có 1111 đối ứng
-    131/331). Lọc theo NGÀY HÓA ĐƠN: có tu_ngay/den_ngay (vd đúng 1 kỳ như
-    01/01/2025-31/12/2025) thì dùng khoảng đó; không thì dùng 'quá hạn hơn
-    thang_qua_han tháng tính từ hôm nay' như cũ."""
+    131/331)."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
@@ -16272,6 +16277,21 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         doi_tuong_tt = _misa_doi_tuong_thanh_toan(cur, loai)
     finally:
         conn.close()
+
+    # Lọc HÓA ĐƠN theo ĐÚNG khung Từ ngày/Đến ngày người dùng nhập — áp dụng
+    # cho CẢ 3 TẦNG (không chỉ tầng 3), đúng khung bất kỳ người dùng gõ vào,
+    # không cố định 1 kỳ nào. Khoản THANH TOÁN không bị giới hạn theo khung
+    # này — thanh toán có thể tới sau kỳ báo cáo mà vẫn hợp lệ (cửa sổ khớp
+    # cua_so_thang bên dưới đã xử lý việc đó, tính từ ngày hóa đơn).
+    tu_dt = _misa_doc_ngay(tu_ngay) if tu_ngay else None
+    den_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
+    if den_dt:
+        den_dt = den_dt.replace(hour=23, minute=59, second=59)
+    if tu_dt or den_dt:
+        for d in doi_tuong_hd.values():
+            d["hoa_don"] = [hd for hd in d["hoa_don"] if hd["inv_date"]
+                            and (not tu_dt or hd["inv_date"] >= tu_dt)
+                            and (not den_dt or hd["inv_date"] <= den_dt)]
 
     cua_so = datetime.timedelta(days=30 * int(cua_so_thang))
     dem_truoc = datetime.timedelta(days=7)
@@ -16338,11 +16358,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                                  "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
                                  "so_tien": round(tt["so_tien"])})
 
-    # Tầng 3
-    tu_dt = _misa_doc_ngay(tu_ngay) if tu_ngay else None
-    den_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
-    if den_dt:
-        den_dt = den_dt.replace(hour=23, minute=59, second=59)
+    # Tầng 3 — hóa đơn đã được lọc đúng khung Từ ngày/Đến ngày ở bước đầu
+    # (nếu có nhập); không nhập ngày nào thì dùng "quá hạn hơn N tháng".
     han = None if (tu_dt or den_dt) else (
         datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han)))
     tang3 = []
@@ -16352,12 +16369,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                 continue
             if not hd["inv_date"]:
                 continue
-            if tu_dt or den_dt:
-                if tu_dt and hd["inv_date"] < tu_dt:
-                    continue
-                if den_dt and hd["inv_date"] > den_dt:
-                    continue
-            elif hd["inv_date"] > han:
+            if han is not None and hd["inv_date"] > han:
                 continue
             tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
                           "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
