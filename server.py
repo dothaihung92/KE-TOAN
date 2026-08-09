@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.135"
+APP_BUILD = "2026-07-27.136"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16198,14 +16198,28 @@ def _misa_ngay_str(d):
     return d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d or "")
 
 
+def _misa_la_dong_thue(tk):
+    """Dòng thuế GTGT — TK đối ứng 133x (thuế GTGT đầu vào, mua hàng/NCC)
+    hoặc 3331x (thuế GTGT đầu ra, bán hàng/KH). Dùng chung để tách 1 hóa đơn
+    thành 2 THÀNH PHẦN: 'gt' (giá trị hàng hóa/dịch vụ) và 'vat' (thuế GTGT)
+    — cho phép khớp công nợ Tầng 2 theo TỪNG THÀNH PHẦN khi khách/NCC chỉ
+    thanh toán 1 PHẦN của hóa đơn trong 1 lần chuyển khoản gộp nhiều hóa đơn."""
+    t = str(tk or "").strip()
+    return t.startswith("133") or t.startswith("3331") or t.startswith("33311")
+
+
 def _misa_doi_tuong_hoa_don(cur, tk_prefix, loai, account_object_id=None):
     """Danh sách hóa đơn (dòng phát sinh Nợ/Có TK 131/331 trong
     AccountObjectLedger, gộp theo RefID = 1 hóa đơn) theo từng đối tượng —
     KHÔNG mô phỏng FIFO, dùng để khớp trực tiếp với từng khoản thanh toán.
+    Mỗi hóa đơn (hd) có thêm 'gt'/'vat' — tổng giá trị hàng hóa/dịch vụ và
+    tổng thuế GTGT riêng (theo _misa_la_dong_thue) — để Tầng 2 có thể khớp
+    theo TỪNG THÀNH PHẦN khi cần (hóa đơn bị 'tách' giữa 2 lần thanh toán).
     account_object_id: chỉ lấy 1 đối tượng (dùng cho màn chi tiết công nợ)."""
     phat_sinh_col = "DebitAmount" if loai == "kh" else "CreditAmount"
     sql = ("SELECT AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectTaxCode,''), "
-          "ISNULL(AccountObjectName,''), RefID, InvNo, InvDate, RefDate, %s "
+          "ISNULL(AccountObjectName,''), RefID, InvNo, InvDate, RefDate, %s, "
+          "ISNULL(CorrespondingAccountNumber,'') "
           "FROM AccountObjectLedger WHERE AccountNumber LIKE ? AND AccountObjectID IS NOT NULL "
           "AND %s > 0" % (phat_sinh_col, phat_sinh_col))
     params = [tk_prefix + "%"]
@@ -16214,7 +16228,7 @@ def _misa_doi_tuong_hoa_don(cur, tk_prefix, loai, account_object_id=None):
         params.append(account_object_id)
     rows = cur.execute(sql, params).fetchall()
     doi_tuong = {}
-    for aoid, ma, mst, ten, refid, invno, invdate, refdate, tien in rows:
+    for aoid, ma, mst, ten, refid, invno, invdate, refdate, tien, tk in rows:
         aoid = str(aoid)
         d = doi_tuong.setdefault(aoid, {"ma": ma or mst or "", "ten": ten or "", "hoa_don": {}})
         if ma and not d["ma"]:
@@ -16222,8 +16236,14 @@ def _misa_doi_tuong_hoa_don(cur, tk_prefix, loai, account_object_id=None):
         if ten and not d["ten"]:
             d["ten"] = ten
         hd = d["hoa_don"].setdefault(str(refid), {"ref_id": str(refid), "inv_no": invno,
-                                                    "inv_date": invdate or refdate, "so_tien": 0.0})
-        hd["so_tien"] += float(tien or 0)
+                                                    "inv_date": invdate or refdate, "so_tien": 0.0,
+                                                    "gt": 0.0, "vat": 0.0})
+        tien = float(tien or 0)
+        hd["so_tien"] += tien
+        if _misa_la_dong_thue(tk):
+            hd["vat"] += tien
+        else:
+            hd["gt"] += tien
     for d in doi_tuong.values():
         d["hoa_don"] = list(d["hoa_don"].values())
     return doi_tuong
@@ -16259,42 +16279,117 @@ def _misa_doi_tuong_thanh_toan(cur, loai, account_object_id=None):
     return doi_tuong
 
 
-def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dung_sai=20_000):
+def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dung_sai=20_000,
+                   truoc_ngay=7):
     """Chạy Tầng 1 (khớp 1-1 chính xác) + Tầng 2 (khớp tổ hợp nhiều hóa đơn,
     kể cả hóa đơn KHÔNG liên tiếp — ví dụ HĐ 1;2;5 mà bỏ qua 3;4, vì khách/NCC
     gộp nhiều hóa đơn để thanh toán 1 cục) — MUTATE cờ 'matched' trên từng hóa
     đơn (hd)/khoản thanh toán (tt) ngay trong doi_tuong_hd/doi_tuong_tt, trả về
-    (tang1, tang2, khong_ro). dung_sai (đ): tổ hợp Tầng 2 được chấp nhận khớp
-    dù lệch tối đa dung_sai đồng so với khoản thanh toán thật (bù phí chuyển
-    khoản ngân hàng khi gộp nhiều hóa đơn) — CHỈ áp dụng khi không có tổ hợp
-    nào khớp CHÍNH XÁC (ưu tiên khớp tuyệt đối trước). Dùng chung cho cả bảng
-    tổng hợp 3 tầng (_misa_doi_chieu_3_tang) và màn chi tiết công nợ 1 đối
-    tượng (_misa_chi_tiet_cong_no)."""
+    (tang1, tang2, khong_ro).
+
+    Tầng 2 xử lý các khoản thanh toán THEO THỨ TỰ NGÀY (sớm nhất trước, đúng
+    kiểu kế toán đối chiếu 'từ trên xuống, cộng dồn'), với 2 bước cho MỖI
+    khoản thanh toán:
+      (a) thử khớp tổ hợp các HÓA ĐƠN NGUYÊN (chưa hóa đơn nào bị tách dở);
+      (b) nếu không có tổ hợp hóa đơn nguyên nào khớp, thử khớp theo TỪNG
+          THÀNH PHẦN của hóa đơn ('gt'=giá trị hàng hóa/dịch vụ, 'vat'=thuế
+          GTGT — theo _misa_la_dong_thue) — cho phép 1 hóa đơn bị TÁCH: 1
+          phần gán cho khoản thanh toán này, phần còn lại chờ khoản sau (vì
+          khách/NCC nhiều khi chỉ thanh toán 1 PHẦN của 1 hóa đơn gộp chung
+          với các hóa đơn khác trong 1 lần chuyển khoản).
+    Nhờ xử lý theo thứ tự ngày, hóa đơn ở đầu kỳ được ưu tiên gán cho khoản
+    thanh toán SỚM NHẤT có thể trước, tránh 1 hóa đơn bị 'khớp nguyên' vào
+    nhầm 1 khoản thanh toán muộn hơn trong khi lẽ ra 1 phần của nó cần dùng
+    cho khoản thanh toán sớm hơn.
+
+    dung_sai (đ): tổ hợp Tầng 2 được chấp nhận khớp dù lệch tối đa dung_sai
+    đồng so với khoản thanh toán thật (bù phí chuyển khoản ngân hàng khi gộp
+    nhiều hóa đơn) — CHỈ áp dụng khi không có tổ hợp nào khớp CHÍNH XÁC (ưu
+    tiên khớp tuyệt đối trước).
+
+    truoc_ngay (ngày): 1 khoản thanh toán chỉ được xét cho 1 hóa đơn nếu
+    thanh toán đó không SỚM HƠN (ngày hóa đơn - truoc_ngay). Mặc định 7 ngày
+    (nới nhẹ, an toàn). LƯU Ý: nới rộng số này có thể giúp tìm thêm được vài
+    khoản khớp 'ngược thời gian' (thanh toán trước ngày hóa đơn khá lâu) —
+    nhưng với NHÀ CUNG CẤP có nhiều hóa đơn GIÁ TRỊ GIỐNG/GẦN NHAU lặp lại
+    hàng tháng (điện nước, thuê mặt bằng...), nới rộng cũng làm TĂNG nguy cơ
+    có NHIỀU tổ hợp cùng khớp (rơi vào 'không rõ') ở CÁC khoản thanh toán
+    khác — nên thử tăng dần và so sánh kết quả trước khi tin dùng.
+
+    Dùng chung cho cả bảng tổng hợp 3 tầng (_misa_doi_chieu_3_tang) và màn
+    chi tiết công nợ 1 đối tượng (_misa_chi_tiet_cong_no)."""
     dung_sai = max(0, int(dung_sai or 0))
     cua_so = datetime.timedelta(days=30 * int(cua_so_thang))
-    dem_truoc = datetime.timedelta(days=7)
+    dem_truoc = datetime.timedelta(days=max(0, int(truoc_ngay or 0)))
     tang1, tang2, khong_ro = [], [], []
+    ngay_xa = datetime.datetime(1, 1, 1)
 
     def trong_cua_so(hd, tt):
         if not hd["inv_date"] or not tt["date"]:
             return False
         return (hd["inv_date"] - dem_truoc) <= tt["date"] <= (hd["inv_date"] + cua_so)
 
+    def tim_to_hop(ung_vien, so_tien, nguong_lech):
+        khop = []
+        for k in range(2, min(max_to_hop, len(ung_vien)) + 1):
+            for to_hop in itertools.combinations(ung_vien, k):
+                if abs(sum(h["so_tien"] for h in to_hop) - so_tien) <= nguong_lech:
+                    khop.append(to_hop)
+                    if len(khop) > 1:
+                        break
+            if len(khop) > 1:
+                break
+        return khop
+
+    def thanh_phan_con_lai(hd):
+        """Các thành phần CHƯA gán cho khoản thanh toán nào của 1 hóa đơn —
+        'gt'/'vat' riêng nếu hóa đơn có cả 2 (tách được), hoặc 'full' nếu
+        hóa đơn chỉ có 1 loại dòng (không tách được giá trị/thuế riêng)."""
+        da_dung = hd["phan_dung"]
+        gt, vat = hd.get("gt", 0.0), hd.get("vat", 0.0)
+        ra = []
+        if gt and vat:
+            if "gt" not in da_dung:
+                ra.append({"hd": hd, "phan": "gt", "so_tien": gt})
+            if "vat" not in da_dung:
+                ra.append({"hd": hd, "phan": "vat", "so_tien": vat})
+        elif "full" not in da_dung:
+            ra.append({"hd": hd, "phan": "full", "so_tien": hd["so_tien"]})
+        return ra
+
+    def danh_dau_dung(hd, phan):
+        hd["phan_dung"].add(phan)
+        gt, vat = hd.get("gt", 0.0), hd.get("vat", 0.0)
+        day_du = {"gt", "vat"} if (gt and vat) else {"full"}
+        if hd["phan_dung"] >= day_du:
+            hd["matched"] = True
+
+    def danh_dau_ca_hoa_don(hd):
+        """Đánh dấu TOÀN BỘ hóa đơn đã dùng (Tầng 1 hoặc tổ hợp hóa đơn
+        NGUYÊN ở Tầng 2) — cả 2 thành phần gt/vat nếu có, hoặc 'full'."""
+        gt, vat = hd.get("gt", 0.0), hd.get("vat", 0.0)
+        if gt and vat:
+            danh_dau_dung(hd, "gt")
+            danh_dau_dung(hd, "vat")
+        else:
+            danh_dau_dung(hd, "full")
+
     for aoid, d in doi_tuong_hd.items():
         ma, ten = d["ma"], d["ten"]
-        hds = d["hoa_don"]
+        hds = sorted(d["hoa_don"], key=lambda h: h["inv_date"] or ngay_xa)
         for hd in hds:
             hd["matched"] = False
-        tts = doi_tuong_tt.get(aoid, [])
+            hd["phan_dung"] = set()
+        tts = sorted(doi_tuong_tt.get(aoid, []), key=lambda t: t["date"] or ngay_xa)
         for tt in tts:
             tt["matched"] = False
 
-        # Tầng 1
+        # Tầng 1 — khớp 1-1 chính xác
         for tt in tts:
             ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)
                        and abs(hd["so_tien"] - tt["so_tien"]) <= 1]
             if len(ung_vien) == 1:
-                ung_vien[0]["matched"] = True
+                danh_dau_ca_hoa_don(ung_vien[0])
                 tt["matched"] = True
                 tang1.append({"ma": ma, "ten": ten, "inv_no": ung_vien[0]["inv_no"],
                               "inv_date": _misa_ngay_str(ung_vien[0]["inv_date"]),
@@ -16307,44 +16402,64 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
                                  "ung_vien": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
                                               "so_tien": round(h["so_tien"])} for h in ung_vien]})
 
-        # Tầng 2 (chỉ xét khoản thanh toán CHƯA khớp ở tầng 1) — khách/NCC hay
-        # thanh toán 1 CỤC gộp nhiều hóa đơn (không nhất thiết liên tiếp,
-        # ví dụ HĐ 1;2;5 mà bỏ qua 3;4). Dò TẤT CẢ tổ hợp trong cửa sổ ngày,
-        # ưu tiên tổ hợp khớp CHÍNH XÁC trước; chỉ khi không có tổ hợp nào
-        # khớp tuyệt đối mới nới ra cho phép lệch tối đa dung_sai (đ) — bù
-        # phí chuyển khoản ngân hàng khi gộp nhiều hóa đơn cùng 1 lần chuyển.
-        def tim_to_hop(ung_vien, so_tien, nguong_lech):
-            khop = []
-            for k in range(2, min(max_to_hop, len(ung_vien)) + 1):
-                for to_hop in itertools.combinations(ung_vien, k):
-                    if abs(sum(h["so_tien"] for h in to_hop) - so_tien) <= nguong_lech:
-                        khop.append(to_hop)
-                        if len(khop) > 1:
-                            break
-                if len(khop) > 1:
-                    break
-            return khop
-
+        # Tầng 2 — xét khoản thanh toán CHƯA khớp ở tầng 1, THEO THỨ TỰ NGÀY
         for tt in tts:
             if tt["matched"]:
                 continue
-            ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)]
-            if len(ung_vien) < 2 or len(ung_vien) > 20:
-                continue   # quá nhiều ứng viên -> không dò tổ hợp, tránh bùng nổ
-            to_hop_khop = tim_to_hop(ung_vien, tt["so_tien"], 1)
-            if not to_hop_khop and dung_sai > 1:
-                to_hop_khop = tim_to_hop(ung_vien, tt["so_tien"], dung_sai)
+
+            # (a) tổ hợp các hóa đơn NGUYÊN (chưa bị tách dở phần nào)
+            ung_vien_hd = [hd for hd in hds if not hd["matched"] and not hd["phan_dung"]
+                          and trong_cua_so(hd, tt)]
+            to_hop_khop = []
+            if 2 <= len(ung_vien_hd) <= 20:
+                to_hop_khop = tim_to_hop(ung_vien_hd, tt["so_tien"], 1)
+                if not to_hop_khop and dung_sai > 1:
+                    to_hop_khop = tim_to_hop(ung_vien_hd, tt["so_tien"], dung_sai)
             if len(to_hop_khop) == 1:
                 for hd in to_hop_khop[0]:
-                    hd["matched"] = True
+                    danh_dau_ca_hoa_don(hd)
                 tt["matched"] = True
                 lech = round(tt["so_tien"] - sum(h["so_tien"] for h in to_hop_khop[0]))
                 tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
                               "so_tien": round(tt["so_tien"]), "lech": lech,
                               "hoa_don": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
                                           "so_tien": round(h["so_tien"])} for h in to_hop_khop[0]]})
+                continue
             elif len(to_hop_khop) > 1:
                 khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp hóa đơn cùng khớp",
+                                 "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                 "so_tien": round(tt["so_tien"])})
+                continue
+
+            # (b) không có tổ hợp hóa đơn NGUYÊN nào khớp -> thử khớp theo
+            # TỪNG THÀNH PHẦN (giá trị/thuế GTGT riêng), cho phép TÁCH hóa
+            # đơn — ví dụ HĐ A + HĐ B (trọn) + 1 dòng GIÁ TRỊ (không kèm
+            # thuế) của HĐ C, phần thuế GTGT của HĐ C còn lại chờ khoản
+            # thanh toán sau.
+            ung_vien_hd2 = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)]
+            don_vi = []
+            for hd in ung_vien_hd2:
+                don_vi.extend(thanh_phan_con_lai(hd))
+            if not (2 <= len(don_vi) <= 16):
+                continue   # quá nhiều thành phần -> không dò, tránh bùng nổ tổ hợp
+            to_hop_dong = tim_to_hop(don_vi, tt["so_tien"], 1)
+            if not to_hop_dong and dung_sai > 1:
+                to_hop_dong = tim_to_hop(don_vi, tt["so_tien"], dung_sai)
+            if len(to_hop_dong) == 1:
+                combo = to_hop_dong[0]
+                for dv in combo:
+                    danh_dau_dung(dv["hd"], dv["phan"])
+                tt["matched"] = True
+                lech = round(tt["so_tien"] - sum(dv["so_tien"] for dv in combo))
+                tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                              "so_tien": round(tt["so_tien"]), "lech": lech,
+                              "hoa_don": [{"inv_no": dv["hd"]["inv_no"],
+                                          "inv_date": _misa_ngay_str(dv["hd"]["inv_date"]),
+                                          "so_tien": round(dv["so_tien"]),
+                                          "phan": None if dv["phan"] == "full" else dv["phan"]}
+                                         for dv in combo]})
+            elif len(to_hop_dong) > 1:
+                khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp DÒNG hóa đơn cùng khớp",
                                  "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
                                  "so_tien": round(tt["so_tien"])})
     return tang1, tang2, khong_ro
@@ -16352,7 +16467,7 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
 
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
                            nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None,
-                           dung_sai=20_000):
+                           dung_sai=20_000, truoc_ngay=7):
     """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
     KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng).
 
@@ -16408,7 +16523,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
 
     tang1, tang2, khong_ro = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
-                                            dung_sai=dung_sai)
+                                            dung_sai=dung_sai, truoc_ngay=truoc_ngay)
 
     # Tầng 3 — hóa đơn đã được lọc đúng khung Từ ngày/Đến ngày ở bước đầu
     # (nếu có nhập); không nhập ngày nào thì dùng "quá hạn hơn N tháng".
@@ -16433,13 +16548,14 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang, "tu_ngay": tu_ngay,
             "den_ngay": den_ngay,
             "thang_qua_han": thang_qua_han, "nguong": nguong, "dung_sai": dung_sai,
+            "truoc_ngay": truoc_ngay,
             "tang1": tang1, "tang2": tang2, "khong_ro": khong_ro, "tang3": tang3}
 
 
 @app.get("/api/misa-sql/doi-chieu-3-tang/{cid}")
 def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
                               thang_qua_han: int = 10, nguong: float = 5_000_000,
-                              dung_sai: float = 20_000,
+                              dung_sai: float = 20_000, truoc_ngay: int = 7,
                               database: str = "", tu_ngay: str = "", den_ngay: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
@@ -16447,11 +16563,12 @@ def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_doi_chieu_3_tang(cid, database, loai=loai, cua_so_thang=cua_so_thang,
                                   thang_qua_han=thang_qua_han, nguong=nguong, dung_sai=dung_sai,
+                                  truoc_ngay=truoc_ngay,
                                   tu_ngay=tu_ngay or None, den_ngay=den_ngay or None)
 
 
 def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None, den_ngay=None,
-                           cua_so_thang=3, max_to_hop=8, dung_sai=20_000):
+                           cua_so_thang=3, max_to_hop=8, dung_sai=20_000, truoc_ngay=7):
     """Chi tiết công nợ 1 đối tượng (CHỈ ĐỌC) — dựng lại đúng báo cáo MISA
     'Chi tiết công nợ phải thu/phải trả' (từng dòng chứng từ + số dư lũy
     kế theo đúng mẫu Excel người dùng cung cấp: Ngày hạch toán, Ngày chứng
@@ -16501,8 +16618,9 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
                         and (not den_dt or hd["inv_date"] <= den_dt)]
     tang1, tang2, khong_ro = _misa_khop_1_2({str(account_object_id): d}, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
-                                            dung_sai=dung_sai)
-    treo_ref_ids = {hd["ref_id"] for hd in d["hoa_don"] if not hd["matched"]}
+                                            dung_sai=dung_sai, truoc_ngay=truoc_ngay)
+    hd_by_rid = {hd["ref_id"]: hd for hd in d["hoa_don"]}
+    so_treo = sum(1 for hd in d["hoa_don"] if not hd["matched"])
 
     du_dau_no = du_dau_co = 0.0
     for _rid, refdate, _pd, _rn, _inv, _jm, _de, _tk, debit, credit, _ma, _ten in rows:
@@ -16515,10 +16633,6 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     dong = [{"ngay_hach_toan": "", "ngay_chung_tu": "", "so_chung_tu": "", "so_hoa_don": "",
             "dien_giai": "Số dư đầu kỳ", "tk_doi_ung": "", "ps_no": 0, "ps_co": 0,
             "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": False}]
-
-    def la_dong_thue(tk):
-        t = str(tk or "").strip()
-        return t.startswith("133") or t.startswith("3331") or t.startswith("33311")
 
     # Dòng thuộc 1 HÓA ĐƠN (có Số hóa đơn) gộp còn tối đa 2 dòng hiển thị —
     # "Giá trị hàng hóa/dịch vụ" (mọi dòng không phải thuế cộng lại) và
@@ -16539,7 +16653,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
                 "so_chung_tu": refno, "so_hoa_don": invno, "dien_giai": jm or de,
                 "tk_doi_ung": tk, "ps_no": round(debit), "ps_co": round(credit),
                 "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)),
-                "treo": str(rid) in treo_ref_ids,
+                "treo": False,
             })
             i += 1
             continue
@@ -16550,7 +16664,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
             _r2, rd2, pd2, rn2, inv2, jm2, de2, tk2, d2, c2, _m2, _t2 = loc[j]
             d2 = float(d2 or 0)
             c2 = float(c2 or 0)
-            if la_dong_thue(tk2):
+            if _misa_la_dong_thue(tk2):
                 vat_no += d2; vat_co += c2
                 if tk2:
                     vat_tk.add(str(tk2))
@@ -16559,14 +16673,25 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
                 if tk2:
                     gt_tk.add(str(tk2))
             j += 1
-        treo_hd = str(rid) in treo_ref_ids
+        # hóa đơn có thể bị TÁCH ở Tầng 2 (1 phần giá trị/thuế khớp thanh
+        # toán này, phần kia còn chờ) — tô đỏ TỪNG dòng theo đúng phần đó
+        # còn treo hay đã khớp, không tô đỏ cả 2 dòng theo cả hóa đơn nữa.
+        hd = hd_by_rid.get(str(rid))
+        if hd is None or hd["matched"]:
+            treo_gt = treo_vat = False
+        else:
+            da_dung = hd.get("phan_dung", set())
+            if hd.get("gt") and hd.get("vat"):
+                treo_gt, treo_vat = "gt" not in da_dung, "vat" not in da_dung
+            else:
+                treo_gt = treo_vat = "full" not in da_dung
         if gt_no or gt_co:
             so_du += (gt_no - gt_co) if loai == "kh" else (gt_co - gt_no)
             dong.append({
                 "ngay_hach_toan": _misa_ngay_str(postdate), "ngay_chung_tu": _misa_ngay_str(refdate),
                 "so_chung_tu": refno, "so_hoa_don": invno, "dien_giai": "Giá trị hàng hóa/dịch vụ",
                 "tk_doi_ung": ", ".join(sorted(gt_tk)), "ps_no": round(gt_no), "ps_co": round(gt_co),
-                "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": treo_hd,
+                "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": treo_gt,
             })
         if vat_no or vat_co:
             so_du += (vat_no - vat_co) if loai == "kh" else (vat_co - vat_no)
@@ -16574,20 +16699,21 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
                 "ngay_hach_toan": _misa_ngay_str(postdate), "ngay_chung_tu": _misa_ngay_str(refdate),
                 "so_chung_tu": refno, "so_hoa_don": invno, "dien_giai": "Thuế GTGT",
                 "tk_doi_ung": ", ".join(sorted(vat_tk)), "ps_no": round(vat_no), "ps_co": round(vat_co),
-                "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": treo_hd,
+                "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": treo_vat,
             })
         i = j
 
     return {"loai": loai, "account_object_id": str(account_object_id),
             "ma": d.get("ma") or ma, "ten": d.get("ten") or ten,
             "dong": dong, "tang1": tang1, "tang2": tang2, "khong_ro": khong_ro,
-            "so_treo": len(treo_ref_ids)}
+            "so_treo": so_treo}
 
 
 @app.get("/api/misa-sql/chi-tiet-cong-no/{cid}")
 def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str = "",
                               tu_ngay: str = "", den_ngay: str = "", cua_so_thang: int = 3,
-                              max_to_hop: int = 8, dung_sai: float = 20_000, database: str = ""):
+                              max_to_hop: int = 8, dung_sai: float = 20_000, truoc_ngay: int = 7,
+                              database: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -16596,7 +16722,7 @@ def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str
         raise HTTPException(400, "Thiếu account_object_id.")
     return _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=tu_ngay or None,
                                   den_ngay=den_ngay or None, cua_so_thang=cua_so_thang,
-                                  max_to_hop=max_to_hop, dung_sai=dung_sai)
+                                  max_to_hop=max_to_hop, dung_sai=dung_sai, truoc_ngay=truoc_ngay)
 
 
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
