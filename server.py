@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.137"
+APP_BUILD = "2026-07-27.138"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16615,15 +16615,23 @@ def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
 
 
 def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None, den_ngay=None,
-                           cua_so_thang=3, max_to_hop=8, dung_sai=20_000, truoc_ngay=7):
+                           cua_so_thang=3, max_to_hop=8, dung_sai=20_000, truoc_ngay=7,
+                           nguong=5_000_000, thang_qua_han=10):
     """Chi tiết công nợ 1 đối tượng (CHỈ ĐỌC) — dựng lại đúng báo cáo MISA
     'Chi tiết công nợ phải thu/phải trả' (từng dòng chứng từ + số dư lũy
     kế theo đúng mẫu Excel người dùng cung cấp: Ngày hạch toán, Ngày chứng
     từ, Số chứng từ, Số hóa đơn, Diễn giải, TK đối ứng, Phát sinh Nợ/Có, Số
-    dư Nợ/Có), CÓ kèm kết quả khớp 3 tầng cho đối tượng này: dòng thuộc hóa
-    đơn ĐÃ khớp tầng 1/2 (có khoản thanh toán khớp) hiển thị bình thường,
-    dòng thuộc hóa đơn CHƯA khớp (còn treo) đánh dấu 'treo': True để giao
-    diện tô đỏ."""
+    dư Nợ/Có), CÓ kèm kết quả khớp 3 tầng cho đối tượng này.
+
+    'treo': True (tô đỏ) CHỈ đánh dấu cho hóa đơn thật sự là ứng viên TẦNG 3
+    — tức chưa khớp được thanh toán nào (kể cả Tầng 2b tạm ứng), giá trị
+    dưới nguong, và đủ điều kiện quá hạn (giống hệt tiêu chí Tầng 3 trong
+    _misa_doi_chieu_3_tang) — nghĩa là hóa đơn SẼ được đề xuất xử lý điều
+    chỉnh về tiền mặt. Hóa đơn CHƯA khớp nhưng KHÔNG đủ điều kiện Tầng 3
+    (giá trị lớn, hoặc còn quá mới) không tô đỏ — đó là công nợ bình thường
+    chưa tới hạn xử lý, không phải diện cần chú ý ngay. Khi 1 hóa đơn đủ
+    điều kiện tô đỏ, CẢ 2 dòng 'Giá trị hàng hóa/dịch vụ' và 'Thuế GTGT'
+    đều tô đỏ (không tách theo từng phần đã khớp/chưa khớp nữa)."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
@@ -16666,8 +16674,17 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2({str(account_object_id): d}, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
                                             dung_sai=dung_sai, truoc_ngay=truoc_ngay)
-    hd_by_rid = {hd["ref_id"]: hd for hd in d["hoa_don"]}
-    so_treo = sum(1 for hd in d["hoa_don"] if not hd["matched"])
+    # Tiêu chí TẦNG 3 y hệt _misa_doi_chieu_3_tang: chưa khớp + giá trị dưới
+    # nguong + đủ điều kiện quá hạn (nếu có lọc theo tu_ngay/den_ngay thì bỏ
+    # qua điều kiện quá hạn, giống hệt logic gốc).
+    han3 = None if (tu_dt or den_dt) else (
+        datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han)))
+    tang3_ref_ids = {
+        hd["ref_id"] for hd in d["hoa_don"]
+        if not hd["matched"] and hd["so_tien"] < nguong and hd["inv_date"]
+        and (han3 is None or hd["inv_date"] <= han3)
+    }
+    so_treo = len(tang3_ref_ids)
 
     du_dau_no = du_dau_co = 0.0
     for _rid, refdate, _pd, _rn, _inv, _jm, _de, _tk, debit, credit, _ma, _ten in rows:
@@ -16720,18 +16737,11 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
                 if tk2:
                     gt_tk.add(str(tk2))
             j += 1
-        # hóa đơn có thể bị TÁCH ở Tầng 2 (1 phần giá trị/thuế khớp thanh
-        # toán này, phần kia còn chờ) — tô đỏ TỪNG dòng theo đúng phần đó
-        # còn treo hay đã khớp, không tô đỏ cả 2 dòng theo cả hóa đơn nữa.
-        hd = hd_by_rid.get(str(rid))
-        if hd is None or hd["matched"]:
-            treo_gt = treo_vat = False
-        else:
-            da_dung = hd.get("phan_dung", set())
-            if hd.get("gt") and hd.get("vat"):
-                treo_gt, treo_vat = "gt" not in da_dung, "vat" not in da_dung
-            else:
-                treo_gt = treo_vat = "full" not in da_dung
+        # Chỉ tô đỏ hóa đơn thật sự là ứng viên TẦNG 3 (sẽ đề xuất xử lý điều
+        # chỉnh về tiền mặt) — CẢ 2 dòng giá trị/thuế cùng tô đỏ khi đó, chứ
+        # không tô đỏ mọi hóa đơn chỉ vì "chưa khớp" (công nợ lớn/còn mới
+        # chưa tới hạn xử lý thì không phải diện cần chú ý ngay).
+        treo_gt = treo_vat = str(rid) in tang3_ref_ids
         if gt_no or gt_co:
             so_du += (gt_no - gt_co) if loai == "kh" else (gt_co - gt_no)
             dong.append({
@@ -16760,6 +16770,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
 def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str = "",
                               tu_ngay: str = "", den_ngay: str = "", cua_so_thang: int = 3,
                               max_to_hop: int = 8, dung_sai: float = 20_000, truoc_ngay: int = 7,
+                              nguong: float = 5_000_000, thang_qua_han: int = 10,
                               database: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
@@ -16769,7 +16780,8 @@ def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str
         raise HTTPException(400, "Thiếu account_object_id.")
     return _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=tu_ngay or None,
                                   den_ngay=den_ngay or None, cua_so_thang=cua_so_thang,
-                                  max_to_hop=max_to_hop, dung_sai=dung_sai, truoc_ngay=truoc_ngay)
+                                  max_to_hop=max_to_hop, dung_sai=dung_sai, truoc_ngay=truoc_ngay,
+                                  nguong=nguong, thang_qua_han=thang_qua_han)
 
 
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
