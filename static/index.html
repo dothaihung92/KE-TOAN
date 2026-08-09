@@ -5783,7 +5783,7 @@ async function misaChiTietCongNo(loai,accountObjectId){
       <div style="font-weight:800;font-size:19px;color:#2e5c8a;margin-bottom:6px">${misaEsc(d.ma)} — ${misaEsc(d.ten)}</div>
       <div style="background:${d.so_treo>0?'#fde8e8':'#eafaf0'};border:1px solid ${d.so_treo>0?'#f5b5b5':'#7ac9a0'};border-radius:8px;padding:12px 16px;font-size:15px;color:${d.so_treo>0?'#b91c1c':'#1a7a4a'};margin-bottom:12px">
         ${d.so_treo>0?`⚠ Còn <b>${d.so_treo}</b> hóa đơn CHƯA khớp được khoản thanh toán nào (dòng tô đỏ bên dưới, có dấu ⚠).`:'✓ Tất cả hóa đơn đều đã khớp được khoản thanh toán.'}
-        Tầng 1 khớp: <b>${d.tang1.length}</b> — Tầng 2 khớp: <b>${d.tang2.length}</b> — Không rõ: <b>${d.khong_ro.length}</b>.
+        Tầng 1 khớp: <b>${d.tang1.length}</b> — Tầng 2 khớp: <b>${d.tang2.length}</b> — Tạm ứng khớp: <b>${(d.tam_ung||[]).length}</b> — Không rõ: <b>${d.khong_ro.length}</b>.
       </div>
       <div style="max-height:60vh;overflow:auto">
       <table style="border-collapse:collapse;font-size:14.5px;width:100%">
@@ -5858,6 +5858,7 @@ async function misaBuTruTim(loai){
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#1a7a4a">✓ Tầng 1 khớp: <b>${d.tang1.length}</b></div>
         <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#1a7a4a">✓ Tầng 2 khớp: <b>${d.tang2.length}</b></div>
+        <div style="background:#e8f0fd;border:1px solid #a8c5f5;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#1a4a8a">🏦 Tạm ứng khớp: <b>${(d.tam_ung||[]).length}</b></div>
         <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#b91c1c">⚠ Không rõ: <b>${d.khong_ro.length}</b></div>
         <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00">🩹 Tầng 3 (treo): <b>${d.tang3.length}</b></div>
       </div>
@@ -5866,6 +5867,10 @@ async function misaBuTruTim(loai){
       <details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Tầng 2 — khớp tổ hợp nhiều hóa đơn (${d.tang2.length})</summary>
         ${d.tang2.map(g=>`<div style="margin:6px 0;padding:6px 10px;background:#f7fdf9;border:1px solid #d3ecd9;border-radius:6px;font-size:12px">
           <b>${misaEsc(g.ma)} — ${misaEsc(g.ten)}</b>: TT ngày ${misaEsc(g.ngay_thanh_toan)}, ${g.so_tien.toLocaleString('vi-VN')}đ = ${g.hoa_don.map(h=>`HĐ ${misaEsc(h.inv_no)} (${h.so_tien.toLocaleString('vi-VN')}đ${h.phan?` — chỉ phần ${h.phan==='gt'?'giá trị':'thuế GTGT'}`:''})`).join(' + ')}${g.lech?` <span style="color:#b8860b">(lệch ${g.lech>0?'+':''}${g.lech.toLocaleString('vi-VN')}đ — phí NH)</span>`:''}
+        </div>`).join('')||'<div style="color:#999;font-size:12.5px">Không có</div>'}</details>
+      <details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700;font-size:13px">🏦 Tạm ứng/Ứng trước — thanh toán trước, hóa đơn xuất dần (${(d.tam_ung||[]).length})</summary>
+        ${(d.tam_ung||[]).map(g=>`<div style="margin:6px 0;padding:8px 10px;background:#f2f7fe;border:1px solid #a8c5f5;border-radius:6px;font-size:12px">
+          <b>${misaEsc(g.ma)} — ${misaEsc(g.ten)}</b> (${misaEsc(g.tu_ngay)} → ${misaEsc(g.den_ngay)}): ${g.thanh_toan.length} khoản tạm ứng (${g.thanh_toan.map(t=>`${misaEsc(t.ngay)}: ${t.so_tien.toLocaleString('vi-VN')}đ`).join(', ')}) tổng <b>${g.tong_tam_ung.toLocaleString('vi-VN')}đ</b> = ${g.hoa_don.length} hóa đơn (${g.hoa_don.map(h=>`HĐ ${misaEsc(h.inv_no)}`).join(', ')}) tổng ${g.tong_hoa_don.toLocaleString('vi-VN')}đ${g.lech?` <span style="color:#b8860b">(lệch ${g.lech>0?'+':''}${g.lech.toLocaleString('vi-VN')}đ)</span>`:''}
         </div>`).join('')||'<div style="color:#999;font-size:12.5px">Không có</div>'}</details>
       <details style="margin-bottom:8px" ${d.khong_ro.length?'open':''}><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#b91c1c">Không rõ — cần bạn tự kiểm tra trong MISA (${d.khong_ro.length})</summary>
         ${d.khong_ro.map(x=>`<div style="margin:6px 0;padding:6px 10px;background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;font-size:12px">

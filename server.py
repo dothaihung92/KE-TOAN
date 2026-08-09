@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.136"
+APP_BUILD = "2026-07-27.137"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16321,7 +16321,7 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
     dung_sai = max(0, int(dung_sai or 0))
     cua_so = datetime.timedelta(days=30 * int(cua_so_thang))
     dem_truoc = datetime.timedelta(days=max(0, int(truoc_ngay or 0)))
-    tang1, tang2, khong_ro = [], [], []
+    tang1, tang2, khong_ro, tam_ung = [], [], [], []
     ngay_xa = datetime.datetime(1, 1, 1)
 
     def trong_cua_so(hd, tt):
@@ -16462,7 +16462,53 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
                 khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp DÒNG hóa đơn cùng khớp",
                                  "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
                                  "so_tien": round(tt["so_tien"])})
-    return tang1, tang2, khong_ro
+
+        # Tầng 2b — Tạm ứng/Ứng trước: 1 (hoặc nhiều) khoản thanh toán đến
+        # TRƯỚC mà Tầng 1/2 không khớp được hóa đơn/tổ hợp nào gần đó, rồi
+        # NHIỀU hóa đơn xuất RA SAU đó theo từng đợt (có thể rất nhiều đợt,
+        # không giới hạn như tổ hợp Tầng 2) — CỘNG DỒN TUẦN TỰ theo đúng thứ
+        # tự ngày (khoản thanh toán +, hóa đơn -) cho tới khi số dư lũy kế về
+        # ~0 (trong ngưỡng dung_sai) thì xác nhận cả khối là 1 lần tạm ứng đã
+        # được dùng hết; khối mở quá lâu (> cua_so_thang tháng) mà chưa cân
+        # bằng thì bỏ dở (không đoán bừa), coi các hóa đơn/thanh toán đó vẫn
+        # treo như bình thường.
+        con_lai_tt = [tt for tt in tts if not tt["matched"]]
+        con_lai_hd = [hd for hd in hds if not hd["matched"] and not hd["phan_dung"]]
+        su_kien = sorted(
+            [{"loai": "tt", "date": tt["date"] or ngay_xa, "item": tt} for tt in con_lai_tt] +
+            [{"loai": "hd", "date": hd["inv_date"] or ngay_xa, "item": hd} for hd in con_lai_hd],
+            key=lambda e: e["date"])
+        khoi_tt, khoi_hd, running, khoi_bd = [], [], 0.0, None
+        for sk in su_kien:
+            if khoi_bd is not None and (sk["date"] - khoi_bd) > cua_so:
+                khoi_tt, khoi_hd, running, khoi_bd = [], [], 0.0, None
+            if sk["loai"] == "hd":
+                if khoi_bd is None:
+                    continue   # chưa có khoản tạm ứng nào đang mở -> để bước khác xử lý
+                running -= sk["item"]["so_tien"]
+                khoi_hd.append(sk["item"])
+            else:
+                if khoi_bd is None:
+                    khoi_bd = sk["date"]
+                running += sk["item"]["so_tien"]
+                khoi_tt.append(sk["item"])
+            if khoi_hd and abs(running) <= dung_sai:
+                for tt in khoi_tt:
+                    tt["matched"] = True
+                for hd in khoi_hd:
+                    danh_dau_ca_hoa_don(hd)
+                tam_ung.append({"ma": ma, "ten": ten,
+                                "tu_ngay": _misa_ngay_str(khoi_tt[0]["date"]),
+                                "den_ngay": _misa_ngay_str(khoi_hd[-1]["inv_date"]),
+                                "tong_tam_ung": round(sum(t["so_tien"] for t in khoi_tt)),
+                                "tong_hoa_don": round(sum(h["so_tien"] for h in khoi_hd)),
+                                "lech": round(running),
+                                "thanh_toan": [{"ngay": _misa_ngay_str(t["date"]),
+                                               "so_tien": round(t["so_tien"])} for t in khoi_tt],
+                                "hoa_don": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
+                                            "so_tien": round(h["so_tien"])} for h in khoi_hd]})
+                khoi_tt, khoi_hd, running, khoi_bd = [], [], 0.0, None
+    return tang1, tang2, khong_ro, tam_ung
 
 
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
@@ -16521,7 +16567,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                             and (not tu_dt or hd["inv_date"] >= tu_dt)
                             and (not den_dt or hd["inv_date"] <= den_dt)]
 
-    tang1, tang2, khong_ro = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
+    tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
                                             dung_sai=dung_sai, truoc_ngay=truoc_ngay)
 
@@ -16544,12 +16590,13 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
 
     tang1.sort(key=lambda x: (x["ma"], x["inv_date"]))
     tang2.sort(key=lambda x: (x["ma"], x["ngay_thanh_toan"]))
+    tam_ung.sort(key=lambda x: (x["ma"], x["tu_ngay"]))
     tang3.sort(key=lambda x: (x["mst"], x["inv_date"]))
     return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang, "tu_ngay": tu_ngay,
             "den_ngay": den_ngay,
             "thang_qua_han": thang_qua_han, "nguong": nguong, "dung_sai": dung_sai,
             "truoc_ngay": truoc_ngay,
-            "tang1": tang1, "tang2": tang2, "khong_ro": khong_ro, "tang3": tang3}
+            "tang1": tang1, "tang2": tang2, "tam_ung": tam_ung, "khong_ro": khong_ro, "tang3": tang3}
 
 
 @app.get("/api/misa-sql/doi-chieu-3-tang/{cid}")
@@ -16616,7 +16663,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
         d["hoa_don"] = [hd for hd in d["hoa_don"] if hd["inv_date"]
                         and (not tu_dt or hd["inv_date"] >= tu_dt)
                         and (not den_dt or hd["inv_date"] <= den_dt)]
-    tang1, tang2, khong_ro = _misa_khop_1_2({str(account_object_id): d}, doi_tuong_tt,
+    tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2({str(account_object_id): d}, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
                                             dung_sai=dung_sai, truoc_ngay=truoc_ngay)
     hd_by_rid = {hd["ref_id"]: hd for hd in d["hoa_don"]}
@@ -16705,7 +16752,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
 
     return {"loai": loai, "account_object_id": str(account_object_id),
             "ma": d.get("ma") or ma, "ten": d.get("ten") or ten,
-            "dong": dong, "tang1": tang1, "tang2": tang2, "khong_ro": khong_ro,
+            "dong": dong, "tang1": tang1, "tang2": tang2, "tam_ung": tam_ung, "khong_ro": khong_ro,
             "so_treo": so_treo}
 
 
