@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.134"
+APP_BUILD = "2026-07-27.135"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16259,12 +16259,18 @@ def _misa_doi_tuong_thanh_toan(cur, loai, account_object_id=None):
     return doi_tuong
 
 
-def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8):
-    """Chạy Tầng 1 (khớp 1-1 chính xác) + Tầng 2 (khớp tổ hợp nhiều hóa đơn)
-    — MUTATE cờ 'matched' trên từng hóa đơn (hd)/khoản thanh toán (tt) ngay
-    trong doi_tuong_hd/doi_tuong_tt, trả về (tang1, tang2, khong_ro). Dùng
-    chung cho cả bảng tổng hợp 3 tầng (_misa_doi_chieu_3_tang) và màn chi
-    tiết công nợ 1 đối tượng (_misa_chi_tiet_cong_no)."""
+def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dung_sai=20_000):
+    """Chạy Tầng 1 (khớp 1-1 chính xác) + Tầng 2 (khớp tổ hợp nhiều hóa đơn,
+    kể cả hóa đơn KHÔNG liên tiếp — ví dụ HĐ 1;2;5 mà bỏ qua 3;4, vì khách/NCC
+    gộp nhiều hóa đơn để thanh toán 1 cục) — MUTATE cờ 'matched' trên từng hóa
+    đơn (hd)/khoản thanh toán (tt) ngay trong doi_tuong_hd/doi_tuong_tt, trả về
+    (tang1, tang2, khong_ro). dung_sai (đ): tổ hợp Tầng 2 được chấp nhận khớp
+    dù lệch tối đa dung_sai đồng so với khoản thanh toán thật (bù phí chuyển
+    khoản ngân hàng khi gộp nhiều hóa đơn) — CHỈ áp dụng khi không có tổ hợp
+    nào khớp CHÍNH XÁC (ưu tiên khớp tuyệt đối trước). Dùng chung cho cả bảng
+    tổng hợp 3 tầng (_misa_doi_chieu_3_tang) và màn chi tiết công nợ 1 đối
+    tượng (_misa_chi_tiet_cong_no)."""
+    dung_sai = max(0, int(dung_sai or 0))
     cua_so = datetime.timedelta(days=30 * int(cua_so_thang))
     dem_truoc = datetime.timedelta(days=7)
     tang1, tang2, khong_ro = [], [], []
@@ -16301,28 +16307,40 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8):
                                  "ung_vien": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
                                               "so_tien": round(h["so_tien"])} for h in ung_vien]})
 
-        # Tầng 2 (chỉ xét khoản thanh toán CHƯA khớp ở tầng 1)
+        # Tầng 2 (chỉ xét khoản thanh toán CHƯA khớp ở tầng 1) — khách/NCC hay
+        # thanh toán 1 CỤC gộp nhiều hóa đơn (không nhất thiết liên tiếp,
+        # ví dụ HĐ 1;2;5 mà bỏ qua 3;4). Dò TẤT CẢ tổ hợp trong cửa sổ ngày,
+        # ưu tiên tổ hợp khớp CHÍNH XÁC trước; chỉ khi không có tổ hợp nào
+        # khớp tuyệt đối mới nới ra cho phép lệch tối đa dung_sai (đ) — bù
+        # phí chuyển khoản ngân hàng khi gộp nhiều hóa đơn cùng 1 lần chuyển.
+        def tim_to_hop(ung_vien, so_tien, nguong_lech):
+            khop = []
+            for k in range(2, min(max_to_hop, len(ung_vien)) + 1):
+                for to_hop in itertools.combinations(ung_vien, k):
+                    if abs(sum(h["so_tien"] for h in to_hop) - so_tien) <= nguong_lech:
+                        khop.append(to_hop)
+                        if len(khop) > 1:
+                            break
+                if len(khop) > 1:
+                    break
+            return khop
+
         for tt in tts:
             if tt["matched"]:
                 continue
             ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)]
             if len(ung_vien) < 2 or len(ung_vien) > 20:
                 continue   # quá nhiều ứng viên -> không dò tổ hợp, tránh bùng nổ
-            to_hop_khop = []
-            for k in range(2, min(max_to_hop, len(ung_vien)) + 1):
-                for to_hop in itertools.combinations(ung_vien, k):
-                    if abs(sum(h["so_tien"] for h in to_hop) - tt["so_tien"]) <= 1:
-                        to_hop_khop.append(to_hop)
-                        if len(to_hop_khop) > 1:
-                            break
-                if len(to_hop_khop) > 1:
-                    break
+            to_hop_khop = tim_to_hop(ung_vien, tt["so_tien"], 1)
+            if not to_hop_khop and dung_sai > 1:
+                to_hop_khop = tim_to_hop(ung_vien, tt["so_tien"], dung_sai)
             if len(to_hop_khop) == 1:
                 for hd in to_hop_khop[0]:
                     hd["matched"] = True
                 tt["matched"] = True
+                lech = round(tt["so_tien"] - sum(h["so_tien"] for h in to_hop_khop[0]))
                 tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
-                              "so_tien": round(tt["so_tien"]),
+                              "so_tien": round(tt["so_tien"]), "lech": lech,
                               "hoa_don": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
                                           "so_tien": round(h["so_tien"])} for h in to_hop_khop[0]]})
             elif len(to_hop_khop) > 1:
@@ -16333,7 +16351,8 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8):
 
 
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
-                           nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None):
+                           nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None,
+                           dung_sai=20_000):
     """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
     KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng).
 
@@ -16388,7 +16407,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                             and (not den_dt or hd["inv_date"] <= den_dt)]
 
     tang1, tang2, khong_ro = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
-                                            cua_so_thang=cua_so_thang, max_to_hop=max_to_hop)
+                                            cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
+                                            dung_sai=dung_sai)
 
     # Tầng 3 — hóa đơn đã được lọc đúng khung Từ ngày/Đến ngày ở bước đầu
     # (nếu có nhập); không nhập ngày nào thì dùng "quá hạn hơn N tháng".
@@ -16412,25 +16432,26 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     tang3.sort(key=lambda x: (x["mst"], x["inv_date"]))
     return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang, "tu_ngay": tu_ngay,
             "den_ngay": den_ngay,
-            "thang_qua_han": thang_qua_han, "nguong": nguong,
+            "thang_qua_han": thang_qua_han, "nguong": nguong, "dung_sai": dung_sai,
             "tang1": tang1, "tang2": tang2, "khong_ro": khong_ro, "tang3": tang3}
 
 
 @app.get("/api/misa-sql/doi-chieu-3-tang/{cid}")
 def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
                               thang_qua_han: int = 10, nguong: float = 5_000_000,
+                              dung_sai: float = 20_000,
                               database: str = "", tu_ngay: str = "", den_ngay: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_doi_chieu_3_tang(cid, database, loai=loai, cua_so_thang=cua_so_thang,
-                                  thang_qua_han=thang_qua_han, nguong=nguong,
+                                  thang_qua_han=thang_qua_han, nguong=nguong, dung_sai=dung_sai,
                                   tu_ngay=tu_ngay or None, den_ngay=den_ngay or None)
 
 
 def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None, den_ngay=None,
-                           cua_so_thang=3, max_to_hop=8):
+                           cua_so_thang=3, max_to_hop=8, dung_sai=20_000):
     """Chi tiết công nợ 1 đối tượng (CHỈ ĐỌC) — dựng lại đúng báo cáo MISA
     'Chi tiết công nợ phải thu/phải trả' (từng dòng chứng từ + số dư lũy
     kế theo đúng mẫu Excel người dùng cung cấp: Ngày hạch toán, Ngày chứng
@@ -16479,7 +16500,8 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
                         and (not tu_dt or hd["inv_date"] >= tu_dt)
                         and (not den_dt or hd["inv_date"] <= den_dt)]
     tang1, tang2, khong_ro = _misa_khop_1_2({str(account_object_id): d}, doi_tuong_tt,
-                                            cua_so_thang=cua_so_thang, max_to_hop=max_to_hop)
+                                            cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
+                                            dung_sai=dung_sai)
     treo_ref_ids = {hd["ref_id"] for hd in d["hoa_don"] if not hd["matched"]}
 
     du_dau_no = du_dau_co = 0.0
@@ -16565,7 +16587,7 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
 @app.get("/api/misa-sql/chi-tiet-cong-no/{cid}")
 def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str = "",
                               tu_ngay: str = "", den_ngay: str = "", cua_so_thang: int = 3,
-                              max_to_hop: int = 8, database: str = ""):
+                              max_to_hop: int = 8, dung_sai: float = 20_000, database: str = ""):
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -16574,7 +16596,7 @@ def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str
         raise HTTPException(400, "Thiếu account_object_id.")
     return _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=tu_ngay or None,
                                   den_ngay=den_ngay or None, cua_so_thang=cua_so_thang,
-                                  max_to_hop=max_to_hop)
+                                  max_to_hop=max_to_hop, dung_sai=dung_sai)
 
 
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):

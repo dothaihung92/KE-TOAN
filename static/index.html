@@ -5818,9 +5818,11 @@ function misaBuTruMo(loai){
         <input type="number" id="buTruThangQuaHan" value="10" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: giá trị hóa đơn dưới (đ)</label>
         <input type="number" id="buTruNguong" value="5000000" step="100000" style="width:140px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+      <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 2: cho lệch tối đa (đ, phí NH)</label>
+        <input type="number" id="buTruDungSai" value="20000" step="1000" min="0" style="width:120px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruTim('${loai}')">🔍 Chạy đối chiếu</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">Hóa đơn từ ngày/Đến ngày áp dụng cho CẢ 3 TẦNG — chỉ hóa đơn trong khung này mới được xét (đã điền sẵn theo khung bạn chọn ở màn Tổng hợp công nợ, có thể tự đổi). Khoản thanh toán ngân hàng không bị giới hạn theo khung này. Xóa trống 2 ô ngày để tầng 3 dùng "quá hạn hơn N tháng" thay vào.</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">Hóa đơn từ ngày/Đến ngày áp dụng cho CẢ 3 TẦNG — chỉ hóa đơn trong khung này mới được xét (đã điền sẵn theo khung bạn chọn ở màn Tổng hợp công nợ, có thể tự đổi). Khoản thanh toán ngân hàng không bị giới hạn theo khung này. Xóa trống 2 ô ngày để tầng 3 dùng "quá hạn hơn N tháng" thay vào. Tầng 2 dò MỌI tổ hợp hóa đơn (kể cả không liên tiếp, ví dụ HĐ 1;2;5) cộng lại khớp 1 khoản thanh toán — ưu tiên khớp tuyệt đối, chỉ khi không có tổ hợp khớp tuyệt đối mới chấp nhận lệch tối đa theo ô "cho lệch tối đa" (bù phí chuyển khoản khi gộp nhiều hóa đơn).</div>
     <div id="misaBuTruKetQua"></div>
     <div style="margin-top:12px;text-align:right">
       <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')">← Quay lại tổng hợp công nợ</button>
@@ -5840,13 +5842,14 @@ async function misaBuTruTim(loai){
   const cuaSoThang=document.getElementById('buTruCuaSoThang').value||3;
   const thangQuaHan=document.getElementById('buTruThangQuaHan').value||10;
   const nguong=document.getElementById('buTruNguong').value||5000000;
+  const dungSai=document.getElementById('buTruDungSai').value||20000;
   const tuNgay=document.getElementById('buTruTu').value||'';
   const denNgay=document.getElementById('buTruDen').value||'';
   const kq=document.getElementById('misaBuTruKetQua');
   kq.innerHTML=`<div style="text-align:center;padding:20px"><span class="spin"></span> Đang đối chiếu 3 tầng (có thể mất chút thời gian nếu nhiều hóa đơn)...</div>`;
   try{
     const qs=new URLSearchParams({loai, cua_so_thang:cuaSoThang, thang_qua_han:thangQuaHan, nguong,
-      tu_ngay:tuNgay, den_ngay:denNgay});
+      dung_sai:dungSai, tu_ngay:tuNgay, den_ngay:denNgay});
     const d=await api(`/api/misa-sql/doi-chieu-3-tang/${current}?${qs}`);
     let out=`
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
@@ -5859,7 +5862,7 @@ async function misaBuTruTim(loai){
         ${misaBuTruBangDon(d.tang1,[['ma','Mã'],['ten','Tên'],['inv_no','Số HĐ'],['inv_date','Ngày HĐ'],['ngay_thanh_toan','Ngày TT'],['so_tien','Số tiền',1]])}</details>
       <details style="margin-bottom:8px"><summary style="cursor:pointer;font-weight:700;font-size:13px">Tầng 2 — khớp tổ hợp nhiều hóa đơn (${d.tang2.length})</summary>
         ${d.tang2.map(g=>`<div style="margin:6px 0;padding:6px 10px;background:#f7fdf9;border:1px solid #d3ecd9;border-radius:6px;font-size:12px">
-          <b>${misaEsc(g.ma)} — ${misaEsc(g.ten)}</b>: TT ngày ${misaEsc(g.ngay_thanh_toan)}, ${g.so_tien.toLocaleString('vi-VN')}đ = ${g.hoa_don.map(h=>`HĐ ${misaEsc(h.inv_no)} (${h.so_tien.toLocaleString('vi-VN')}đ)`).join(' + ')}
+          <b>${misaEsc(g.ma)} — ${misaEsc(g.ten)}</b>: TT ngày ${misaEsc(g.ngay_thanh_toan)}, ${g.so_tien.toLocaleString('vi-VN')}đ = ${g.hoa_don.map(h=>`HĐ ${misaEsc(h.inv_no)} (${h.so_tien.toLocaleString('vi-VN')}đ)`).join(' + ')}${g.lech?` <span style="color:#b8860b">(lệch ${g.lech>0?'+':''}${g.lech.toLocaleString('vi-VN')}đ — phí NH)</span>`:''}
         </div>`).join('')||'<div style="color:#999;font-size:12.5px">Không có</div>'}</details>
       <details style="margin-bottom:8px" ${d.khong_ro.length?'open':''}><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#b91c1c">Không rõ — cần bạn tự kiểm tra trong MISA (${d.khong_ro.length})</summary>
         ${d.khong_ro.map(x=>`<div style="margin:6px 0;padding:6px 10px;background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;font-size:12px">
