@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.138"
+APP_BUILD = "2026-07-27.139"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4376,6 +4376,10 @@ def _xuat_tracuu_excel(rows, path):
         tt = _khong_dau(rec.get("trang_thai", ""))
         chua_nop = "chua nop" in tt
         do = chua_nop or "khong chap nhan" in tt or "tu choi" in tt
+        # Tờ khai BỔ SUNG (sửa đổi/bổ sung 1 kỳ đã nộp trước đó) đương nhiên
+        # nộp SAU hạn của kỳ gốc — không so hạn/không tô đỏ trễ hạn cho loại
+        # này, chỉ áp dụng cho tờ khai CHÍNH THỨC.
+        la_bo_sung = "bo sung" in _khong_dau(rec.get("loai", ""))
         # Đối chiếu Ngày nộp với HẠN NỘP suy từ Kỳ (xem _han_nop_to_khai) —
         # CHỈ kết luận được khi có cả 2: Ngày nộp thật (đã nộp) VÀ suy được
         # hạn từ Kỳ (bỏ qua các dòng "chưa tìm thấy tờ khai" ghi khoảng ngày
@@ -4384,7 +4388,9 @@ def _xuat_tracuu_excel(rows, path):
         ngay_nop_s = str(rec.get("ngay_nop", "") or "").strip()
         tre_han = False
         dung_han_txt = ""
-        if han and ngay_nop_s:
+        if la_bo_sung:
+            dung_han_txt = "Tờ khai bổ sung (không tính trễ hạn)"
+        elif han and ngay_nop_s:
             try:
                 ngay_nop_d = datetime.datetime.strptime(
                     ngay_nop_s.split(" ")[0], "%d/%m/%Y").date()
