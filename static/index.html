@@ -1598,7 +1598,9 @@ async function dvcbTokenPoll(){
     document.getElementById('dvcbTokenBtn').disabled=false;
     document.getElementById('dvcbRunBtn').disabled=false;
     document.getElementById('dvcbForceBtn').disabled=false;
-    prog.innerHTML=html+'<hr><b>✅ Đã kiểm tra xong.</b>'+(j.loi?`<br><span style="color:#b91c1c">${j.loi}</span>`:'');
+    let xongHtml=html+'<hr><b>✅ Đã kiểm tra xong.</b>'+(j.loi?`<br><span style="color:#b91c1c">${j.loi}</span>`:'');
+    if(j.file_saipass)xongHtml+=`<br>⚠️ <b>${j.so_sai_pass||0}</b> công ty thiếu/sai mật khẩu — <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_saipass)}" target="_blank">Tải Excel danh sách</a>`;
+    prog.innerHTML=xongHtml;
     toast('Đã kiểm tra hạn Token','ok');
     await loadCompanies();          // lấy lại dữ liệu companies mới (có token info)
     dvcbRenderCoList(true);         // vẽ lại danh sách, sắp xếp lại theo hạn mới, giữ lựa chọn cũ

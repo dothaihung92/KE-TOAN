@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.139"
+APP_BUILD = "2026-07-27.140"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5400,6 +5400,7 @@ def _dvc_run_token_batch(batch_id, cids, body):
     import queue as _queue
     job = DVC_TOKEN_BATCH[batch_id]
     job_lock = threading.Lock()
+    sai_pass = []   # công ty thiếu/sai mật khẩu — xuất Excel riêng cho dễ xử lý
 
     def _xu_ly_1_cty(cid, drv):
         conn = db()
@@ -5423,6 +5424,8 @@ def _dvc_run_token_batch(batch_id, cids, body):
                 pw2 = pw2 or (body.get("pass_chung") or "").strip()
             if not pw1 and not pw2:
                 item["trang_thai"] = "thiếu mật khẩu"
+                with job_lock:
+                    sai_pass.append({"mst": mst, "ten": ten, "ly_do": "Chưa lưu mật khẩu Dịch vụ công"})
                 return
             try:
                 drv.get(DVC_BASE + "/homelogin")
@@ -5436,6 +5439,8 @@ def _dvc_run_token_batch(batch_id, cids, body):
             if not ok:
                 item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
                 item["loi_chi_tiet"] = _dvc_mo_ta_loi_dang_nhap(info)
+                with job_lock:
+                    sai_pass.append({"mst": mst, "ten": ten, "ly_do": item["loi_chi_tiet"]})
                 return
             to_chuc_cap, ngay_het_han, chi_tiet_loi_token = _dvc_browser_lay_token_info(drv)
             if not to_chuc_cap and not ngay_het_han:
@@ -5497,6 +5502,16 @@ def _dvc_run_token_batch(batch_id, cids, body):
     for t in threads:
         t.join()
     job["current_list"] = []
+    job["so_sai_pass"] = len(sai_pass)
+    if sai_pass:
+        try:
+            out_dir = _dvc_batch_out_dir()
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            p = os.path.join(out_dir, f"SaiMatKhau_KiemTraToken_{ts}.xlsx")
+            _xuat_saipass_excel(sai_pass, p)
+            job["file_saipass"] = p
+        except Exception as e:
+            job["loi_xuat"] = str(e)
     job["running"] = False
     job["current"] = None
 
