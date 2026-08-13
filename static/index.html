@@ -2564,6 +2564,7 @@ function renderWorkspace(c,online){
     <div class="row" style="margin-bottom:8px;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn ghost sm" id="btnLocThayThe" onclick="locThayThe()">⚠ Chỉ hiện HĐ đã bị thay thế/hủy</button>
       <span id="demThayThe" style="font-size:13px;color:#c00;font-weight:600"></span>
+      <button class="btn ghost sm" onclick="xoaLocCot()">✕ Xóa lọc cột</button>
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr>
@@ -2571,6 +2572,18 @@ function renderWorkspace(c,online){
         <th id="thNguoi">Người bán</th><th id="thMst">MST bán</th>
         <th>Mặt hàng</th><th>Trạng thái</th>
         <th class="num">Chưa thuế</th><th class="num">Thuế</th><th class="num">Tổng</th>
+      </tr>
+      <tr id="invFilterRow">
+        <th><input class="colFilter" data-col="kh" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="so" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="ngay" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="nguoi" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="mst" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="hang" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="tt" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="ct" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="thue" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
+        <th><input class="colFilter" data-col="tong" placeholder="lọc..." oninput="filterInvoices()" style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>
       </tr></thead>
       <tbody id="invBody"><tr><td colspan="10" style="text-align:center;color:var(--muted);padding:24px">Chưa có dữ liệu</td></tr></tbody>
     </table></div>
@@ -3335,6 +3348,7 @@ function switchTab(el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');curTab=el.dataset.loai;
   const sb=document.getElementById('searchBox');if(sb)sb.value='';
+  document.querySelectorAll('#invFilterRow input.colFilter').forEach(inp=>inp.value='');
   refreshInvoices();
 }
 async function refreshInvoices(){
@@ -3439,14 +3453,38 @@ function locThayThe(){
 }
 function filterInvoices(){
   const q=(document.getElementById('searchBox').value||'').toLowerCase().trim();
-  if(!q){renderRows(curRows);return}
-  const filtered=curRows.filter(r=>
-    (r.nbten||'').toLowerCase().includes(q) ||
-    (r.nbmst||'').toLowerCase().includes(q) ||
-    (r.nmmst||'').toLowerCase().includes(q) ||
-    (r.shdon||'').toLowerCase().includes(q)
-  );
-  renderRows(filtered);
+  let rows=curRows;
+  if(q){
+    rows=rows.filter(r=>
+      (r.nbten||'').toLowerCase().includes(q) ||
+      (r.nbmst||'').toLowerCase().includes(q) ||
+      (r.nmmst||'').toLowerCase().includes(q) ||
+      (r.shdon||'').toLowerCase().includes(q)
+    );
+  }
+  // Lọc TỪNG CỘT (kiểu Excel, dưới tên cột) — kết hợp AND với ô tìm chung ở trên
+  const colVals={};
+  document.querySelectorAll('#invFilterRow input.colFilter').forEach(inp=>{
+    const v=(inp.value||'').toLowerCase().trim();
+    if(v)colVals[inp.dataset.col]=v;
+  });
+  if(Object.keys(colVals).length){
+    rows=rows.filter(r=>{
+      const nguoi=curTab==='sold'?(r.nmten||'(khách lẻ)'):(r.nbten||'');
+      const mst=curTab==='sold'?(r.nmmst||''):(r.nbmst||'');
+      const vals={
+        kh:r.khhdon||'', so:r.shdon||'', ngay:(r.tdlap||'').split('T')[0],
+        nguoi, mst, hang:r.mat_hang_dau||'', tt:r.tthai_mota||'',
+        ct:fmtVND(r.tgtcthue), thue:fmtVND(r.tgtthue), tong:fmtVND(r.tgtttbso),
+      };
+      return Object.keys(colVals).every(c=>String(vals[c]||'').toLowerCase().includes(colVals[c]));
+    });
+  }
+  renderRows(rows);
+}
+function xoaLocCot(){
+  document.querySelectorAll('#invFilterRow input.colFilter').forEach(inp=>inp.value='');
+  filterInvoices();
 }
 function openInvoiceHtml(id){
   // Mở hóa đơn HTML nguyên bản của Tổng cục Thuế trong tab mới
