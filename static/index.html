@@ -4533,7 +4533,7 @@ function moBangKe(loai){
       ${loai==='out'?`
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🧾 Chứng từ:</span>
-        <button class="btn sm" onclick="nlBanHang(this)" style="background:#1f6b4a" title="Kết xuất form MISA Chứng từ bán hàng (TK Có 5111, Nợ 131/1111 theo 5tr)">🛒 Bán Hàng</button>
+        <button class="btn sm" onclick="nlBanHang(this)" style="background:#1f6b4a" title="Kết xuất form MISA Chứng từ bán hàng (TK Có 5111, Nợ luôn 131 — công nợ)">🛒 Bán Hàng</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
@@ -4692,42 +4692,28 @@ function nlDamBaoNoCo(){
   if(!hLow.includes('có')){nlHeader.push('Có');nlRows.forEach(r=>r.push(''));}
   nlRows.forEach(r=>{while(r.length<nlHeader.length)r.push('');r.length=nlHeader.length;});
 }
-// Bảng kê ĐẦU RA: Nợ mặc định 5111; Có = 131 nếu tổng HĐ >=5tr, else 1111
+// Bảng kê ĐẦU RA: Nợ mặc định 5111; Có LUÔN 131 (công nợ) — hóa đơn đầu ra
+// luôn hạch toán qua công nợ, không phân biệt giá trị nữa (đồng bộ với
+// _gen_ban_hang/_misa_ghi_ban_hang phía server).
 function nlTuDienNoCoRa(){
   const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
-  const idx=(pred)=>hLow.findIndex(pred);
   const iNo=hLow.findIndex(h=>h==='nợ'||h==='no');
   const iCo=hLow.findIndex(h=>h==='có'||h==='co');
-  const iKH=idx(h=>h.includes('ký hiệu hđ'));
-  const iSo=idx(h=>h.includes('số hóa đơn')||h.includes('số hđ'));
-  const iDS=idx(h=>h.includes('doanh số')||h.includes('chưa thuế'));
-  const iThue=idx(h=>h.includes('thuế gtgt')||h.includes('tiền thuế'));
   if(iNo<0&&iCo<0)return;
-  const tong={};
-  nlRows.forEach(r=>{
-    const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
-    const t=(iDS>=0?nlParseSo(r[iDS]):0)+(iThue>=0?nlParseSo(r[iThue]):0);
-    tong[key]=(tong[key]||0)+t;
-  });
   nlRows.forEach(r=>{
     if(iNo>=0&&!String(r[iNo]||'').trim())r[iNo]='5111';
-    if(iCo>=0&&!String(r[iCo]||'').trim()){
-      const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
-      r[iCo]=Math.abs(tong[key]||0)>=5000000?'131':'1111';
-    }
+    if(iCo>=0&&!String(r[iCo]||'').trim())r[iCo]='131';
   });
 }
-// Tự điền Nợ (theo MST đã học) + Có (>=5tr->331, <5tr->1111) cho ô còn TRỐNG
+// Tự điền Nợ (theo MST đã học) + Có LUÔN 331 (công nợ) cho ô còn TRỐNG — hóa
+// đơn đầu vào luôn hạch toán qua công nợ, không phân biệt giá trị nữa (đồng
+// bộ với _co_theo_tong phía server).
 async function nlTuDienNoCo(){
   const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
   const idx=(pred)=>hLow.findIndex(pred);
   const iMst=idx(h=>h.includes('mst bán')||h.includes('mst ban')||h==='mst');
   const iNo=hLow.findIndex(h=>h==='nợ'||h==='no');
   const iCo=hLow.findIndex(h=>h==='có'||h==='co');
-  const iKH=idx(h=>h.includes('ký hiệu')||h.includes('ky hieu'));
-  const iSo=idx(h=>h.includes('số hđ')||h.includes('so hd'));
-  const iTT=idx(h=>h.includes('thành tiền')||h.includes('thanh tien'));
-  const iThue=idx(h=>h.includes('tiền thuế')||h.includes('thuế gtgt'));
   // 1) Nợ: lấy bảng đã học
   let mapNo={};
   try{const d=await api(`/api/hach-toan-no/${current}`);mapNo=d.map||{};}catch{}
@@ -4741,19 +4727,10 @@ async function nlTuDienNoCo(){
       }
     });
   }
-  // 2) Có: tính tổng hoá đơn (gộp theo Ký hiệu+Số HĐ) rồi 5tr -> 331/1111
-  if(iCo>=0&&iTT>=0){
-    const tong={};
+  // 2) Có: luôn 331 (công nợ)
+  if(iCo>=0){
     nlRows.forEach(r=>{
-      const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
-      const tt=nlParseSo(r[iTT])+(iThue>=0?nlParseSo(r[iThue]):0);
-      tong[key]=(tong[key]||0)+tt;
-    });
-    nlRows.forEach(r=>{
-      if(!String(r[iCo]||'').trim()){
-        const key=(iKH>=0?r[iKH]:'')+'|'+(iSo>=0?r[iSo]:'');
-        r[iCo]=Math.abs(tong[key]||0)>=5000000?'331':'1111';
-      }
+      if(!String(r[iCo]||'').trim())r[iCo]='331';
     });
   }
 }

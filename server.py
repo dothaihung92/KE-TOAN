@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.142"
+APP_BUILD = "2026-07-27.143"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -8914,7 +8914,15 @@ def _doc_sheet_nhap_lieu(wb, sheet_ten, header_marker):
 
 
 # ====== HẠCH TOÁN: nhớ tài khoản Nợ theo MST nhà cung cấp (mỗi cty 1 bộ) ======
-NGUONG_5TR = 5_000_000  # hóa đơn >= 5tr -> Có 331 (chuyển khoản), < 5tr -> Có 1111
+# TRƯỚC ĐÂY: hóa đơn >= 5tr -> công nợ (331/131), < 5tr -> tiền mặt (1111) —
+# theo luật hóa đơn >=5tr bắt buộc chuyển khoản mới được khấu trừ thuế. NAY
+# đổi theo yêu cầu: hóa đơn ĐẦU VÀO + ĐẦU RA LUÔN hạch toán qua CÔNG NỢ (331/
+# 131) bất kể giá trị — khoản thanh toán thật (tiền mặt/chuyển khoản) ghi
+# NHẬN RIÊNG qua phiếu thu/chi hoặc đối chiếu ngân hàng, không gộp chung vào
+# lúc ghi nhận hóa đơn nữa; nhờ vậy MỌI hóa đơn đều lên đúng Sổ chi tiết công
+# nợ (AccountObjectLedger) để dùng được "Đối chiếu công nợ 3 tầng". Giữ lại
+# NGUONG_5TR (không còn nơi nào dùng để rẽ nhánh Nợ/Có nữa) chỉ để tham khảo.
+NGUONG_5TR = 5_000_000
 
 def _chuan_mst(s):
     """Chuẩn hóa MST: bỏ khoảng trắng, gạch, chấm."""
@@ -9003,11 +9011,11 @@ def _so_ct_unique_memo(prefix, ngay, mst, invoice_key, seen, cache):
     return v
 
 def _co_theo_tong(tong):
-    """Cột Có: >= 5 triệu -> 331 (phải trả NB), còn lại -> 1111 (tiền mặt)."""
-    t = _to_num(tong)
-    if isinstance(t, (int, float)) and abs(t) >= NGUONG_5TR:
-        return "331"
-    return "1111"
+    """Cột Có: LUÔN 331 (phải trả người bán) — hóa đơn đầu vào luôn hạch toán
+    qua công nợ, không phân biệt giá trị nữa (xem giải thích ở NGUONG_5TR).
+    Giữ tham số 'tong' (không dùng) để không phải sửa các nơi đang gọi hàm
+    này."""
+    return "331"
 
 def _du_lieu_cty_path(cid):
     """File dữ liệu riêng của công ty (hạch toán, sau này thêm hàng hóa...).
@@ -10619,18 +10627,12 @@ def _bh_cols(header):
 
 def _gen_ban_hang(cid, header, rows):
     """Form MISA 'Chứng từ bán hàng' từ Bảng kê đầu ra. TK Có (doanh thu)=5111;
-    TK Nợ (tiền/công nợ) = 131 nếu tổng HĐ >= 5tr, ngược lại 1111."""
+    TK Nợ (công nợ) LUÔN = 131 — hóa đơn đầu ra luôn hạch toán qua công nợ,
+    không phân biệt giá trị nữa (xem giải thích ở NGUONG_5TR)."""
     col = _bh_cols(header)
 
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
-
-    # tổng theo từng hóa đơn (ký hiệu + số HĐ) để áp ngưỡng 5tr
-    tong = {}
-    for r in rows:
-        key = f"{gv(r,col['kyhieu'])}|{gv(r,col['sohd'])}"
-        t = (_to_num(gv(r, col["ds"])) or 0) + (_to_num(gv(r, col["thue"])) or 0)
-        tong[key] = tong.get(key, 0) + t
 
     seq_thang = {}
     out = []
@@ -10645,8 +10647,7 @@ def _gen_ban_hang(cid, header, rows):
         nguoimua = str(gv(r, col["nguoimua"]) or "")
         mst = _dinh_dang_mst(gv(r, col["mst"]))
         kyhieu = str(gv(r, col["kyhieu"]) or "")
-        tong_hd = tong.get(f"{kyhieu}|{sohd}", 0)
-        tk_no = 131 if abs(tong_hd) >= NGUONG_5TR else 1111
+        tk_no = 131
         # Số chứng từ: BH{seq:03d}/T{tháng}/{năm} (seq theo từng tháng)
         p = ngay.replace("-", "/").split("/")
         thang = nam = ""
@@ -10659,7 +10660,7 @@ def _gen_ban_hang(cid, header, rows):
         rate = _chuan_thue_suat((thue / ds * 100) if ds else 0)
         row = [""] * len(BAN_HANG_HEADERS)
         row[0] = 0; row[1] = 0
-        row[2] = 1 if abs(tong_hd) < NGUONG_5TR else 0   # PTTT: <5tr=tiền->1
+        row[2] = 0                                       # PTTT: luôn công nợ (không phải tiền)
         row[3] = 0; row[4] = 1; row[5] = 1
         row[6] = ngay; row[7] = ngay; row[8] = so_ct
         row[11] = ""; row[12] = kyhieu                  # Mẫu số (để trống) / Ký hiệu HĐ
@@ -14529,14 +14530,6 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
         if hoc_branch is not None:
             branch_id = hoc_branch
 
-        # tổng theo từng hóa đơn (ký hiệu + số HĐ) để áp ngưỡng 5tr — ĐÚNG
-        # công thức đã dùng ở _gen_ban_hang
-        tong = {}
-        for r in rows:
-            key = f"{gv(r, col['kyhieu'])}|{gv(r, col['sohd'])}"
-            t = (_to_num(gv(r, col["ds"])) or 0) + (_to_num(gv(r, col["thue"])) or 0)
-            tong[key] = tong.get(key, 0) + t
-
         now = datetime.datetime.now()
         iid_bh, uid_bh, ten_bh = hang["bh"]
         seq_thang = {}
@@ -14688,8 +14681,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 ket.append({"so_ct": doc, "so_hd": sohd,
                             "trang_thai": "bỏ qua — trùng Số chứng từ với chứng từ khác trong MISA"})
                 continue
-            tong_hd = tong.get(f"{kyhieu}|{sohd}", 0)
-            tk_no = 131 if abs(tong_hd) >= NGUONG_5TR else 1111
+            tk_no = 131   # hóa đơn đầu ra luôn hạch toán qua công nợ (xem NGUONG_5TR)
             tk_no_dc = tra_tk(str(tk_no))
             tk_co_dc = tra_tk("5111")
             if tk_set:
