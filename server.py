@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.143"
+APP_BUILD = "2026-07-27.144"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11025,19 +11025,31 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
             out.append(rec)
     return out
 
-def _xk_hop_nhat_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu):
-    """Chạy _gen_xk_giathanh() rồi CỘNG THÊM nguyên vẹn các dòng trong
-    giathanh_cu KHÔNG khớp bất kỳ dòng nào trong 'Chi tiết BÁN RA' (ctbr)
-    hiện có (theo khoá Số HĐ + Tên sản phẩm). _gen_xk_giathanh() CHỈ dựng
-    danh sách dòng từ ctbr — nếu giathanh_cu (từ lần dò trước/gán tay/Import
-    giá thành) có dòng KHÔNG khớp ctbr hiện tại (vd ctbr sau đó bị import lại
-    bằng dữ liệu hẹp hơn/khác kỳ so với lúc giathanh_cu được tạo) thì dòng đó
-    sẽ bị RỚT MẤT hoàn toàn nếu chỉ dùng thẳng kết quả _gen_xk_giathanh() —
-    đã xác nhận qua báo cáo thật: file Import giá thành 558 dòng, ctbr chỉ
-    còn 224 dòng, kết quả cuối chỉ còn 230 dòng (mất 328 dòng có thật). Dùng
-    CHUNG hàm này ở cả "Dò mã hàng tự động" lẫn "Import giá thành" để không
-    lặp lại lỗi tương tự ở 1 trong 2 chỗ."""
+def _xk_hop_nhat_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu,
+                          giu_ngoai_ctbr=True):
+    """Chạy _gen_xk_giathanh() rồi (nếu giu_ngoai_ctbr) CỘNG THÊM nguyên vẹn
+    các dòng trong giathanh_cu KHÔNG khớp bất kỳ dòng nào trong 'Chi tiết BÁN
+    RA' (ctbr) hiện có (theo khoá Số HĐ + Tên sản phẩm). _gen_xk_giathanh()
+    CHỈ dựng danh sách dòng từ ctbr — nếu giathanh_cu (từ lần dò trước/gán
+    tay/Import giá thành) có dòng KHÔNG khớp ctbr hiện tại thì dòng đó sẽ bị
+    RỚT MẤT hoàn toàn nếu chỉ dùng thẳng kết quả _gen_xk_giathanh().
+
+    giu_ngoai_ctbr=True (dùng cho "Import giá thành"): đã xác nhận qua báo
+    cáo thật — file Import giá thành 558 dòng, ctbr chỉ còn 224 dòng, kết quả
+    cuối chỉ còn 230 dòng (mất 328 dòng có thật) nếu KHÔNG giữ — cần giữ vì
+    file giá thành người dùng tự chuẩn bị có thể có dòng KHÔNG khớp ctbr do
+    sai khác định dạng, vẫn là dữ liệu THẬT của họ.
+
+    giu_ngoai_ctbr=False (dùng cho "Dò mã hàng tự động"): KHÔNG giữ — nếu
+    giữ, mỗi lần import 1 KỲ MỚI (vd chỉ có dữ liệu tháng 8) thì giathanh_cu
+    của KỲ TRƯỚC (tháng 7, không khớp ctbr tháng 8 hiện tại) vẫn bị cộng dồn
+    mãi vào GIÁTHÀNH, hiện lẫn cả 2 tháng dù người dùng chỉ import 1 tháng —
+    đã xác nhận qua báo cáo thật. "Dò mã hàng tự động" phải phản ánh ĐÚNG
+    TRỌN VẸN dữ liệu Nhập Liệu ĐANG import (đúng bằng ctbr hiện tại), không
+    tự cộng dồn dữ liệu KỲ CŨ không còn liên quan."""
     ket_qua = _gen_xk_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu)
+    if not giu_ngoai_ctbr:
+        return ket_qua
     col_ctbr = _xk_src_cols(ctbr_header or [])
 
     def gv(r, i):
@@ -11209,8 +11221,12 @@ def xk_tao_giathanh(cid: int):
         raise HTTPException(400, "Chưa có dữ liệu 'Chi tiết BÁN RA' — vào màn Nhập Liệu, Import & tách dữ liệu rồi Lưu cả 2 bảng kê từ file có sheet 'Chi tiết BÁN RA'")
     hoc_ma = data.get("xk_hoc_ma") or {}
     giathanh_cu = data.get("xk_giathanh") or []
+    # giu_ngoai_ctbr=False: KHÔNG cộng dồn dòng của KỲ CŨ không còn khớp
+    # 'Chi tiết BÁN RA' hiện tại — "Dò mã hàng tự động" phải phản ánh ĐÚNG dữ
+    # liệu Nhập Liệu ĐANG import, không giữ lại dữ liệu tháng/kỳ trước đã
+    # import khác (xem giải thích ở _xk_hop_nhat_giathanh).
     giathanh = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
-                                     hoc_ma, giathanh_cu)
+                                     hoc_ma, giathanh_cu, giu_ngoai_ctbr=False)
     data["xk_giathanh"] = giathanh
     _ghi_du_lieu_cty(cid, data)
     so_khop = sum(1 for r in giathanh if r.get("ma"))
