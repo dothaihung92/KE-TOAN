@@ -4519,6 +4519,7 @@ function moBangKe(loai){
         <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('kqk')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần Danh mục TSCĐ/CCDC + KH/NCC đã import trước">⬆ Không qua kho vào MISA</button>
         <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
         <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaDvtChungTu()" title="Sửa lại cột ĐVT trên các chứng từ Mua hàng/Dịch vụ CHƯA GHI SỔ do chính phần mềm tạo, nếu đang hiện GUID thô/sai (Danh mục đã đúng nhưng chứng từ cũ vẫn giữ ĐVT sai lúc ghi)">🔧 Sửa ĐVT chứng từ đã ghi</button>
+        <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaGiaTriNhapKho()" title="Sửa lại cột 'Giá trị nhập kho' (0 sai) trên các chứng từ Mua Hàng Nhập Kho/Không Qua Kho CHƯA GHI SỔ ghi trước đó — do trước đây bỏ sót không set tổng ở header">🔧 Sửa Giá trị nhập kho</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanDvt()" title="Chỉ xem — dò sâu 1 vài mã hàng cụ thể để tìm nguyên nhân gốc khi các nút sửa ở trên đều báo 'không có gì cần sửa' nhưng chứng từ MISA vẫn hiện GUID">🔬 Chẩn đoán sâu ĐVT</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
@@ -5461,6 +5462,44 @@ async function misaSuaDvtChungTuGhi(){
     const dmTxt=(d.so_dvt_hang_sua>0)?` (đã sửa thêm ${d.so_dvt_hang_sua} mã trong Danh mục)`:'';
     const ghiSoTxt=(d.so_da_ghi_so_khong_sua>0)?` — CÒN ${d.so_da_ghi_so_khong_sua} dòng KHÔNG sửa được vì đã ghi sổ (bỏ ghi sổ trong MISA rồi bấm lại nếu muốn sửa).`:'';
     toast(`✓ Đã sửa ĐVT cho ${d.so_sua} dòng chứng từ${dmTxt}.${ghiSoTxt}`,'ok');
+  }catch(e){toast('Lỗi sửa: '+e.message,'err')}
+}
+// Sửa lại "Giá trị nhập kho" (PUVoucher.TotalInwardAmount) trên chứng từ Mua
+// Hàng Nhập Kho/Không Qua Kho CHƯA GHI SỔ ghi TRƯỚC ĐÓ — do bản cũ của hàm
+// ghi chứng từ bỏ sót không set tổng này ở header (từng dòng chi tiết vẫn có
+// InwardAmount đúng), khiến cột "Giá trị nhập kho" luôn hiện 0.
+async function misaSuaGiaTriNhapKho(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang kiểm tra (xem trước)...','');
+  try{
+    const pv=await api(`/api/misa-sql/sua-gia-tri-nhap-kho/${current}?preview=1`,{method:'POST'});
+    const ds=(pv.danh_sach||[]).slice(0,400).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${(x.cu||0).toLocaleString('vi-VN')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${(x.dung||0).toLocaleString('vi-VN')}</td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:10px">
+        ⚠ Sắp SỬA dữ liệu trong database MISA: <b>${misaEsc(pv.database||'?')}</b><br>
+        Chỉ sửa CHỨNG TỪ CHƯA GHI SỔ — không đụng chứng từ đã ghi sổ. Chỉ sửa đúng 1 cột "Giá trị nhập kho", không đụng số tiền/tài khoản nào khác.</div>
+      <div style="margin-bottom:6px">Sẽ sửa: <b style="color:#1a7a7a">${pv.so_sua}</b> chứng từ</div>
+      ${pv.so_sua===0?`<div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:8px 12px;font-size:12px;color:#264b8a">
+        Không có chứng từ nào cần sửa (Giá trị nhập kho đang đúng, hoặc chưa có chứng từ Nhập Kho/Không Qua Kho nào chưa ghi sổ).</div>`
+      :`<div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Đang hiện</th><th style="border:1px solid #eee;padding:2px 6px">Sẽ sửa thành</th></tr>
+        ${ds}</table></div>`}
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_sua>0?`<button class="btn sm" style="background:#a03a3a" onclick="misaSuaGiaTriNhapKhoGhi()">🔧 Sửa ${pv.so_sua} chứng từ</button>`:''}
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaSuaGiaTriNhapKhoGhi(){
+  toast('Đang sửa...','');
+  try{
+    const d=await api(`/api/misa-sql/sua-gia-tri-nhap-kho/${current}?preview=0`,{method:'POST'});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã sửa Giá trị nhập kho cho ${d.so_sua} chứng từ`,'ok');
   }catch(e){toast('Lỗi sửa: '+e.message,'err')}
 }
 async function misaChanDoanDvt(){

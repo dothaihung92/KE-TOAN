@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.141"
+APP_BUILD = "2026-07-27.142"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12304,6 +12304,64 @@ def misa_sql_chan_doan_dvt(cid: int, ma: str, database: str = ""):
     return _misa_chan_doan_dvt_sau_du(cid, database, ma_list)
 
 
+def _misa_sua_gia_tri_nhap_kho_da_ghi(cid, database, preview=True):
+    """Sửa lại PUVoucher.TotalInwardAmount (cột 'Giá trị nhập kho' trên màn
+    hình 'Mua hàng hóa, dịch vụ') cho các chứng từ CHƯA GHI SỔ (IsPostedFinance=0
+    AND IsPostedManagement=0) — MISA đọc cột này TRỰC TIẾP từ PUVoucher, KHÔNG
+    tự cộng lại từ PUVoucherDetail.InwardAmount của từng dòng. Hàm ghi chứng từ
+    (_misa_ghi_mua_hang) trước đây bỏ sót không set TotalInwardAmount ở HEADER
+    dù từng dòng chi tiết đã có InwardAmount đúng — khiến cột 'Giá trị nhập
+    kho' luôn hiện 0 dù 'Tiền thuế GTGT'/'Tổng tiền thanh toán' vẫn đúng (2 cột
+    đó đọc từ TotalVATAmount/TotalAmount, đã được set sẵn). Đã sửa tận gốc ở
+    chỗ ghi mới; hàm này chỉ SỬA LẠI những chứng từ ĐàGHI TRƯỚC ĐÓ (còn chưa
+    ghi sổ nên vẫn an toàn để sửa) — cộng lại đúng theo PUVoucherDetail.
+
+    CHỈ sửa 1 cột TotalInwardAmount, không đụng số tiền/tài khoản/dữ liệu nào
+    khác, không giới hạn CustomField10 (giống cách sửa ĐVT chứng từ đã ghi —
+    xem _misa_sua_dvt_chung_tu_da_ghi để biết lý do bỏ điều kiện đó)."""
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT pv.RefID, pv.RefNoManagement, ISNULL(pv.TotalInwardAmount,0), "
+            "ISNULL(SUM(pvd.InwardAmount),0) "
+            "FROM PUVoucher pv JOIN PUVoucherDetail pvd ON pvd.RefID = pv.RefID "
+            "WHERE ISNULL(pv.IsPostedFinance,0)=0 AND ISNULL(pv.IsPostedManagement,0)=0 "
+            "GROUP BY pv.RefID, pv.RefNoManagement, pv.TotalInwardAmount "
+            "HAVING ISNULL(pv.TotalInwardAmount,0) <> ISNULL(SUM(pvd.InwardAmount),0)"
+        ).fetchall()
+        ket = []
+        for rid, rn, cu, dung in rows:
+            ket.append({"so_ct": rn, "cu": round(float(cu or 0)), "dung": round(float(dung or 0))})
+            if not preview:
+                cur.execute("UPDATE PUVoucher SET TotalInwardAmount=? WHERE RefID=?", dung, rid)
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_sua": len(ket), "danh_sach": ket[:1000]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi sửa Giá trị nhập kho (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/sua-gia-tri-nhap-kho/{cid}")
+def misa_sql_sua_gia_tri_nhap_kho(cid: int, preview: int = 1, database: str = ""):
+    """Sửa lại 'Giá trị nhập kho' (PUVoucher.TotalInwardAmount) trên các
+    chứng từ Mua hàng CHƯA GHI SỔ đã ghi trước đó — xem
+    _misa_sua_gia_tri_nhap_kho_da_ghi. preview=1 -> chỉ xem trước."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_sua_gia_tri_nhap_kho_da_ghi(cid, database, preview=bool(preview))
+
+
 def _misa_tu_dong_sua_dvt_sau_ghi(cid, database):
     """Tự động sửa TẬN GỐC ĐVT ngay sau khi ghi chứng từ Mua hàng/Dịch vụ vào
     MISA — gọi LẦN LƯỢT 2 bước:
@@ -13540,7 +13598,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             # (chứng từ NHẬP KHO thật: cả PUVoucher.PUInvoiceRefID lẫn
             # PUVoucherDetail.PUInvoiceRefID đều trỏ tới hóa đơn)
             inv_id = str(_uuid.uuid4()) if inv_reftype else None
-            total_amount = total_vat = total_import_tax = 0
+            total_amount = total_vat = total_import_tax = total_inward = 0
             detail_rows = []
             for idx, (r, (iid, uid, ten_h)) in enumerate(valid_lines, 1):
                 uid = sua_dvt(r, iid, uid)
@@ -13564,6 +13622,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 total_amount += tt
                 total_vat += tthue
                 total_import_tax += nk_thue
+                if cfg.get("kho") is not None:
+                    total_inward += tt
                 # Kho: tra StockID theo cột "Kho" của form (vd 'HH'/'NVL') —
                 # thiếu kho là 1 nguyên nhân MISA báo "Failed to enable
                 # constraints" khi mở chứng từ nhập kho
@@ -13634,6 +13694,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "TotalAmountOC": total_amount, "TotalAmount": total_amount,
                 "TotalImportTaxAmountOC": total_import_tax, "TotalImportTaxAmount": total_import_tax,
                 "TotalVATAmountOC": total_vat, "TotalVATAmount": total_vat,
+                # cột "Giá trị nhập kho" trên màn "Mua hàng hóa, dịch vụ" đọc từ
+                # PUVoucher.TotalInwardAmount (KHÔNG tự cộng từ PUVoucherDetail.
+                # InwardAmount của từng dòng) — thiếu dòng này khiến cột luôn
+                # hiện 0 dù từng dòng chi tiết đã có InwardAmount đúng.
+                "TotalInwardAmount": total_inward,
                 "CreatedDate": now, "INRefOrder": now,
                 # Khớp mẫu chứng từ THẬT: CreatedBy/ModifiedBy = người dùng phổ biến
                 # (thay vì để trống), ModifiedDate = CreatedDate (mới tạo = mới sửa),
@@ -13740,6 +13805,13 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 _kq_sua_dvt = _misa_tu_dong_sua_dvt_sau_ghi(cid, database)
                 so_dvt_hang_sua = _kq_sua_dvt.get("so_dvt_hang_sua", 0)
                 so_dvt_chungtu_sua = _kq_sua_dvt.get("so_dvt_chungtu_sua", 0)
+            except Exception:
+                pass
+            # TỰ SỬA NGAY "Giá trị nhập kho" cho các chứng từ Mua hàng CHƯA GHI
+            # SỔ ghi TRƯỚC ĐÓ (từ trước khi hàm này set TotalInwardAmount ở
+            # header) — xem _misa_sua_gia_tri_nhap_kho_da_ghi.
+            try:
+                _misa_sua_gia_tri_nhap_kho_da_ghi(cid, database, preview=False)
             except Exception:
                 pass
         # TỰ KIỂM TRA: sau khi ghi thật, chạy lại đúng view MISA dùng cho màn
