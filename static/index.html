@@ -4031,8 +4031,16 @@ function xkKiemTraTonLoi(){
   const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
   const daDung={};
   const ketQua=[];
+  // moRong[chỉ số dòng CŨ] = {batDau, soDong} — dòng cũ đó đã "nở" thành
+  // những dòng nào (chỉ số MỚI) sau khi tách — dùng để dịch lại vùng đang
+  // CHỌN (nlChon) và snapshot "lọc dòng trống" (nlSnapTrong) cho khớp, để
+  // Fill Down không bị "mất" vùng chọn/bộ lọc ngay sau khi tự tách dòng do
+  // hết tồn (người dùng khỏi phải chọn lại vùng rồi Fill Down lại từ đầu).
+  const moRong=[];
   let soCanhBao=0;
-  xkRows.forEach(r=>{
+  xkRows.forEach((r,chiSoCu)=>{
+    const batDau=ketQua.length;
+    const ghiMoRong=()=>{moRong[chiSoCu]={batDau, soDong:ketQua.length-batDau};};
     const maCu=String(r.ma||'').trim();
     const tongGoc=Number(r.sl)||0, ttGoc=Number(r.tt)||0;
     let conThieu=tongGoc;
@@ -4059,6 +4067,7 @@ function xkKiemTraTonLoi(){
     if(!phanBo.length){
       if(maCu)soCanhBao++;
       ketQua.push({...r, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl_kho:'', mo_ho:true, thieu_ton:true});
+      ghiMoRong();
       return;
     }
     if(phanBo.length>1 || phanBo[0].ma!==maCu || conThieu>0)soCanhBao++;
@@ -4075,6 +4084,7 @@ function xkKiemTraTonLoi(){
       ketQua.push({...r, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl:conThieu, sl_kho:'',
         tt:Math.round(ttGoc-ttDaDung), mo_ho:true, thieu_ton:true});
     }
+    ghiMoRong();
   });
   xkRows=ketQua;
   // đối chiếu bảo toàn số lượng: tổng SL trước và sau khi tách dòng theo tồn
@@ -4084,16 +4094,46 @@ function xkKiemTraTonLoi(){
   if(Math.abs(tongGocSau-tongGocTruoc)>0.001){
     toast(`⚠ CẢNH BÁO: tổng số lượng lệch ${(tongGocTruoc-tongGocSau).toLocaleString('vi-VN')} sau khi kiểm tra tồn kho — báo lại cho người phát triển`,'err');
   }
-  xkVeGrid();
+  xkVeGrid(moRong);
   if(soCanhBao>0)toast(`⚠ Đã dò lại theo tồn kho — ${soCanhBao} dòng phải đổi/tách mã do hết tồn`,'err');
   else toast('✓ Không có mã nào vượt tồn kho','ok');
 }
-function xkVeGrid(){
+// moRong (tuỳ chọn): dịch lại vùng đang CHỌN (nlChon) và snapshot "lọc dòng
+// trống" (nlSnapTrong) sau khi các dòng bị TÁCH (xem xkKiemTraTonLoi) —
+// truyền vào khi vừa tách dòng, bỏ trống khi chỉ vẽ lại bình thường.
+function xkVeGrid(moRong){
   xkRowsToNl();
+  if(moRong)xkRemapChiSoSauTach(moRong);
   veGridNhapLieu();
   xkToMauThieu();
   xkToDamTenBan();
   xkTongKet();
+}
+function xkRemapChiSoSauTach(moRong){
+  if(nlChon){
+    const r1=Math.min(nlChon.r1,nlChon.r2), r2=Math.max(nlChon.r1,nlChon.r2);
+    let moiDau=null, moiCuoi=null;
+    for(let i=r1;i<=r2;i++){
+      const m=moRong[i]; if(!m||m.soDong<=0)continue;
+      const dau=m.batDau, cuoi=m.batDau+m.soDong-1;
+      if(moiDau===null||dau<moiDau)moiDau=dau;
+      if(moiCuoi===null||cuoi>moiCuoi)moiCuoi=cuoi;
+    }
+    nlChon=(moiDau===null)?null:{r1:moiDau, c1:nlChon.c1, r2:moiCuoi, c2:nlChon.c2};
+  }
+  // Giữ ĐÚNG kiểu "sticky" đã có (chốt lúc bật lọc -> dòng điền xong vẫn
+  // hiển thị): mọi dòng MỚI thuộc phạm vi "nở" ra của 1 dòng CŨ đang ghim
+  // đều được ghim tiếp — kể cả dòng vẫn còn trống (cần điền tiếp) lẫn dòng
+  // đã có mã hợp lệ (giữ hiển thị để dễ theo dõi vừa tách ra sao).
+  Object.keys(nlSnapTrong||{}).forEach(ciStr=>{
+    const ci=Number(ciStr);
+    const moi=new Set();
+    (nlSnapTrong[ci]||new Set()).forEach(idxCu=>{
+      const m=moRong[idxCu]; if(!m)return;
+      for(let k=0;k<m.soDong;k++)moi.add(m.batDau+k);
+    });
+    nlSnapTrong[ci]=moi;
+  });
 }
 // tô đỏ các dòng CHƯA có mã hàng (để dễ nhận biết cần gán tay)
 function xkToMauThieu(){
