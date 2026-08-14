@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.150"
+APP_BUILD = "2026-07-27.151"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1654,7 +1654,12 @@ def doi_chieu_ngan_hang():
     sửa gì), tự quản lý dữ liệu qua localStorage của trình duyệt, không dùng
     chung dữ liệu/API với phần mềm chính. Phục vụ y nguyên qua route riêng để
     tránh xung đột biến/CSS với index.html (2 ứng dụng JS hoàn toàn tách biệt)."""
-    with open(os.path.join(BASE_DIR, "static", "doi_chieu_ngan_hang.html"), encoding="utf-8") as f:
+    duong_dan = os.path.join(BASE_DIR, "static", "doi_chieu_ngan_hang.html")
+    if not os.path.isfile(duong_dan):
+        raise HTTPException(
+            404, "Chưa có file 'doi_chieu_ngan_hang.html' trên máy này — đóng phần mềm, "
+                 "chạy lại start.bat để tự cập nhật rồi mở lại.")
+    with open(duong_dan, encoding="utf-8") as f:
         return f.read()
 
 
