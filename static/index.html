@@ -905,6 +905,35 @@
   </div>
 </div>
 
+<!-- MODAL Cấu hình AI đọc CCCD (dự phòng khi ảnh không có/đọc được mã QR) -->
+<div id="nvAiModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:750;align-items:center;justify-content:center">
+  <div style="width:min(520px,94vw);background:#fff;border-radius:12px;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:6px">
+      <div style="font-weight:800;font-size:18px;color:#a03a7a">🤖 Cấu hình AI đọc CCCD</div>
+      <button class="btn ghost sm" onclick="document.getElementById('nvAiModal').style.display='none'">✕</button>
+    </div>
+    <div class="hint" style="margin-bottom:12px">Mã QR trên thẻ CCCD/CMND LUÔN được thử trước (chính xác tuyệt đối, miễn phí, không cần cấu hình). Chỉ khi ảnh KHÔNG có/không đọc được mã QR, phần mềm mới dùng AI dưới đây đọc thay thế.</div>
+    <label style="font-size:13px;font-weight:600">Nhà cung cấp AI</label>
+    <select id="nvAiProvider" onchange="nvCapNhatFormAi()" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+      <option value="gemini">Google Gemini (có gói miễn phí — khuyên dùng)</option>
+      <option value="openai">Tương thích OpenAI (GPT-4o/4o-mini hoặc AI khác cùng chuẩn API)</option>
+    </select>
+    <label style="font-size:13px;font-weight:600">API Key</label>
+    <input id="nvAiApiKey" type="text" placeholder="Dán API Key vào đây" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div id="nvAiHintGemini" class="hint" style="margin:-6px 0 10px">Lấy API Key miễn phí tại <b>aistudio.google.com/apikey</b> (đăng nhập bằng tài khoản Google).</div>
+    <div id="nvAiAdvanced" style="display:none">
+      <label style="font-size:13px;font-weight:600">Model (để trống dùng mặc định)</label>
+      <input id="nvAiModel" type="text" placeholder="vd: gpt-4o-mini" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+      <label style="font-size:13px;font-weight:600">Base URL (để trống dùng api.openai.com)</label>
+      <input id="nvAiBaseUrl" type="text" placeholder="vd: https://api.openai.com/v1" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    </div>
+    <div style="text-align:right;margin-top:8px">
+      <button class="btn ghost sm" onclick="document.getElementById('nvAiModal').style.display='none'">Đóng</button>
+      <button class="btn gold sm" onclick="nvLuuCaiDatAi()">💾 Lưu</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL Kết nối MISA (kết quả xuất trọn gói + hướng dẫn) -->
 <div id="misaModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:700;align-items:center;justify-content:center">
   <div id="misaModalBox" style="width:min(1040px,96vw);max-height:92vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:20px">
@@ -3821,6 +3850,7 @@ function moDanhSachNhanVien(){
         <button class="btn sm" style="background:#7a4fb5" onclick="document.getElementById('nvCccdFile').click()" title="Chọn ảnh (JPG/PNG) hoặc PDF chụp CCCD — tự quét mã QR trên thẻ để điền Họ tên/Ngày sinh/CCCD/Ngày cấp/Địa chỉ. Đang chọn 1 ô trong dòng nào thì điền vào dòng đó, chưa chọn thì tự thêm dòng mới.">📷 Đọc CCCD (ảnh/PDF)</button>
         <input type="file" id="nvCccdFile" accept=".jpg,.jpeg,.png,.pdf,image/*,application/pdf" style="display:none" onchange="nvDocCccd(this)">
         <button class="btn ghost sm" onclick="nvXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
+        <button class="btn ghost sm" onclick="nvMoCaiDatAi()" title="Cấu hình AI (Gemini hoặc AI tương thích OpenAI) để đọc CCCD khi ảnh KHÔNG có/đọc được mã QR — mã QR vẫn luôn được thử trước vì chính xác tuyệt đối và miễn phí">🤖 Cấu hình AI đọc CCCD</button>
       </div>
       <div id="nvInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. Bấm chọn 1 ô trong dòng rồi bấm "📷 Đọc CCCD" để tự điền đúng dòng đó từ ảnh CCCD.</div>
@@ -3969,9 +3999,38 @@ async function nvDocCccd(input){
     nvChon={r:ri,c:0};
     nvDanhLaiStt();
     veGridNhanVien();
-    toast(`✓ Đã đọc CCCD: ${d.ho_ten||d.so_cccd}. Nhớ bấm 💾 Lưu!`,'ok');
+    const nguon=d.nguon==='ai'?' (bằng AI)':' (từ mã QR)';
+    toast(`✓ Đã đọc CCCD${nguon}: ${d.ho_ten||d.so_cccd}. Nhớ bấm 💾 Lưu!`,'ok');
   }catch(e){toast('Lỗi đọc CCCD: '+e.message,'err')}
   input.value='';
+}
+async function nvMoCaiDatAi(){
+  document.getElementById('nvAiModal').style.display='flex';
+  try{
+    const d=await api('/api/cai-dat/ai-doc-cccd');
+    document.getElementById('nvAiProvider').value=d.provider||'gemini';
+    document.getElementById('nvAiApiKey').value=d.api_key||'';
+    document.getElementById('nvAiModel').value=d.model||'';
+    document.getElementById('nvAiBaseUrl').value=d.base_url||'';
+  }catch(e){toast('Không tải được cấu hình AI: '+e.message,'err')}
+  nvCapNhatFormAi();
+}
+function nvCapNhatFormAi(){
+  const laOpenAi=document.getElementById('nvAiProvider').value==='openai';
+  document.getElementById('nvAiHintGemini').style.display=laOpenAi?'none':'';
+  document.getElementById('nvAiAdvanced').style.display=laOpenAi?'':'none';
+}
+async function nvLuuCaiDatAi(){
+  try{
+    await fetch('/api/cai-dat/ai-doc-cccd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      provider:document.getElementById('nvAiProvider').value,
+      api_key:document.getElementById('nvAiApiKey').value.trim(),
+      model:document.getElementById('nvAiModel').value.trim(),
+      base_url:document.getElementById('nvAiBaseUrl').value.trim(),
+    })});
+    toast('💾 Đã lưu cấu hình AI đọc CCCD','ok');
+    document.getElementById('nvAiModal').style.display='none';
+  }catch(e){toast('Lỗi lưu: '+e.message,'err')}
 }
 /* ----- KẾT NỐI MISA SME (import trực tiếp qua CSDL) ----- */
 function misaEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}

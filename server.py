@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.154"
+APP_BUILD = "2026-07-27.155"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9536,13 +9536,128 @@ def _phan_tich_qr_cccd(raw):
     }
 
 
+_CCCD_PROMPT_AI = (
+    "Đây là ảnh chụp Căn cước công dân (CCCD) hoặc CMND Việt Nam. Hãy đọc "
+    "CHÍNH XÁC các thông tin in trên thẻ và trả lời DUY NHẤT 1 đối tượng "
+    "JSON (không thêm chữ nào khác, không dùng markdown/```), để chuỗi rỗng "
+    '"" cho trường không đọc được, đúng các khoá sau:\n'
+    '{"so_cccd": "số CCCD/CMND in trên thẻ (9 hoặc 12 số)", '
+    '"ho_ten": "họ và tên đầy đủ, viết hoa như trên thẻ", '
+    '"ngay_sinh": "ngày sinh dạng dd/mm/yyyy", '
+    '"gioi_tinh": "Nam hoặc Nữ", '
+    '"dia_chi": "địa chỉ thường trú/nơi cư trú đầy đủ ghi trên thẻ", '
+    '"ngay_cap": "ngày cấp thẻ dạng dd/mm/yyyy nếu có ghi trên ảnh"}')
+
+
+def _cccd_tu_ai_ra_dict(du_lieu):
+    return {
+        "so_cccd": str(du_lieu.get("so_cccd", "") or "").strip(),
+        "so_cmnd_cu": "",
+        "ho_ten": str(du_lieu.get("ho_ten", "") or "").strip(),
+        "ngay_sinh": str(du_lieu.get("ngay_sinh", "") or "").strip(),
+        "gioi_tinh": str(du_lieu.get("gioi_tinh", "") or "").strip(),
+        "dia_chi": str(du_lieu.get("dia_chi", "") or "").strip(),
+        "ngay_cap": str(du_lieu.get("ngay_cap", "") or "").strip(),
+    }
+
+
+def _doc_cccd_gemini(img_bytes, mime, api_key, model=None):
+    """Gọi Gemini API (Google AI Studio, có gói MIỄN PHÍ) đọc dữ liệu CCCD từ
+    ảnh bằng AI thị giác — dùng khi ảnh KHÔNG có/không đọc được mã QR."""
+    model = (model or "gemini-2.0-flash").strip() or "gemini-2.0-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    body = {
+        "contents": [{"parts": [
+            {"text": _CCCD_PROMPT_AI},
+            {"inline_data": {"mime_type": mime, "data": base64.b64encode(img_bytes).decode("ascii")}},
+        ]}],
+        "generationConfig": {"response_mime_type": "application/json", "temperature": 0},
+    }
+    r = requests.post(url, json=body, timeout=45)
+    if r.status_code != 200:
+        loi = r.text[:300]
+        try:
+            loi = r.json().get("error", {}).get("message", loi)
+        except Exception:
+            pass
+        raise RuntimeError(f"Gemini lỗi ({r.status_code}): {loi}")
+    data = r.json()
+    try:
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception:
+        raise RuntimeError("Gemini không trả về nội dung (có thể ảnh bị bộ lọc an toàn chặn).")
+    try:
+        return _cccd_tu_ai_ra_dict(json.loads(text))
+    except Exception:
+        raise RuntimeError("Gemini trả về không đúng định dạng JSON.")
+
+
+def _doc_cccd_openai(img_bytes, mime, api_key, model=None, base_url=None):
+    """Gọi API tương thích chuẩn OpenAI (OpenAI GPT-4o/4o-mini, hoặc các AI
+    khác có API tương thích) đọc dữ liệu CCCD từ ảnh bằng AI thị giác."""
+    model = (model or "gpt-4o-mini").strip() or "gpt-4o-mini"
+    base = (base_url or "https://api.openai.com/v1").strip().rstrip("/") or "https://api.openai.com/v1"
+    data_uri = f"data:{mime};base64,{base64.b64encode(img_bytes).decode('ascii')}"
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": _CCCD_PROMPT_AI},
+            {"type": "image_url", "image_url": {"url": data_uri}},
+        ]}],
+        "response_format": {"type": "json_object"},
+        "temperature": 0,
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    r = requests.post(f"{base}/chat/completions", json=body, headers=headers, timeout=45)
+    if r.status_code != 200:
+        loi = r.text[:300]
+        try:
+            loi = r.json().get("error", {}).get("message", loi)
+        except Exception:
+            pass
+        raise RuntimeError(f"API lỗi ({r.status_code}): {loi}")
+    data = r.json()
+    try:
+        text = data["choices"][0]["message"]["content"]
+    except Exception:
+        raise RuntimeError("AI không trả về nội dung.")
+    try:
+        return _cccd_tu_ai_ra_dict(json.loads(text))
+    except Exception:
+        raise RuntimeError("AI trả về không đúng định dạng JSON.")
+
+
+@app.get("/api/cai-dat/ai-doc-cccd")
+def cai_dat_ai_doc_cccd_get():
+    """Lấy cấu hình AI đọc CCCD (dự phòng khi ảnh không có/đọc được mã QR)."""
+    return {
+        "provider": _get_setting("ai_cccd_provider", "gemini") or "gemini",
+        "api_key": _get_setting("ai_cccd_api_key", ""),
+        "model": _get_setting("ai_cccd_model", ""),
+        "base_url": _get_setting("ai_cccd_base_url", ""),
+    }
+
+
+@app.post("/api/cai-dat/ai-doc-cccd")
+async def cai_dat_ai_doc_cccd_set(request: Request):
+    body = await request.json()
+    _set_setting("ai_cccd_provider", str(body.get("provider", "gemini") or "gemini").strip())
+    _set_setting("ai_cccd_api_key", str(body.get("api_key", "") or "").strip())
+    _set_setting("ai_cccd_model", str(body.get("model", "") or "").strip())
+    _set_setting("ai_cccd_base_url", str(body.get("base_url", "") or "").strip())
+    return {"ok": True}
+
+
 @app.post("/api/nhan-vien/doc-cccd")
 async def nhan_vien_doc_cccd(request: Request):
-    """Đọc dữ liệu từ ảnh (jpg/png/...) hoặc PDF chụp CCCD/CMND bằng cách quét
-    MÃ QR in trên thẻ (chuẩn Bộ Công an) — KHÔNG dùng OCR nhận diện chữ in
-    (độ chính xác thấp với chữ tiếng Việt có dấu), mã QR cho dữ liệu CHÍNH
-    XÁC tuyệt đối khi đọc được. CCCD gắn chip (từ 2021): mã QR ở mặt TRƯỚC.
-    CCCD/CMND cũ không chip: mã QR (nếu có) ở mặt SAU."""
+    """Đọc dữ liệu từ ảnh (jpg/png/...) hoặc PDF chụp CCCD/CMND.
+    1) Thử quét MÃ QR in trên thẻ (chuẩn Bộ Công an) trước — cho dữ liệu
+       CHÍNH XÁC tuyệt đối, MIỄN PHÍ, không cần cấu hình gì. CCCD gắn chip
+       (từ 2021): mã QR ở mặt TRƯỚC. CCCD/CMND cũ không chip: mã QR (nếu có)
+       ở mặt SAU.
+    2) Nếu KHÔNG tìm/đọc được mã QR (ảnh chỉ chụp 1 mặt không có QR, mã bị
+       che/mờ...) VÀ đã cấu hình API Key AI (Gemini hoặc tương thích OpenAI)
+       ở mục Cấu hình AI đọc CCCD -> tự động dùng AI thị giác đọc thay thế."""
     form = await request.form()
     up = form.get("file")
     if up is None:
@@ -9555,8 +9670,9 @@ async def nhan_vien_doc_cccd(request: Request):
         raise HTTPException(
             503, "Chưa cài xong thư viện đọc mã QR (opencv) trên máy này — "
                  "đóng phần mềm, chạy lại start.bat để tự cài đủ thư viện rồi mở lại.")
+    la_pdf = fn.endswith(".pdf") or content[:4] == b"%PDF"
     anh_bytes_list = []
-    if fn.endswith(".pdf") or content[:4] == b"%PDF":
+    if la_pdf:
         try:
             import pymupdf
             with pymupdf.open(stream=content, filetype="pdf") as doc:
@@ -9574,15 +9690,40 @@ async def nhan_vien_doc_cccd(request: Request):
         qr_raw = _doc_qr_anh(b)
         if qr_raw:
             break
-    if not qr_raw:
+    if qr_raw:
+        du_lieu = _phan_tich_qr_cccd(qr_raw)
+        if du_lieu:
+            return {"ok": True, "nguon": "qr", **du_lieu}
+        # mã QR đọc được nhưng không đúng định dạng CCCD -> vẫn thử AI bên dưới
+
+    api_key = _get_setting("ai_cccd_api_key", "")
+    if not api_key:
         raise HTTPException(
             422, "Không tìm/đọc được mã QR trên ảnh — chụp rõ nét, đủ sáng, "
                  "không loá mã QR (CCCD gắn chip: QR mặt trước; CMND/CCCD cũ "
-                 "không chip: QR mặt sau nếu có) rồi thử lại, hoặc nhập tay.")
-    du_lieu = _phan_tich_qr_cccd(qr_raw)
-    if not du_lieu:
-        raise HTTPException(422, "Mã QR đọc được nhưng không đúng định dạng CCCD/CMND.")
-    return {"ok": True, **du_lieu}
+                 "không chip: QR mặt sau nếu có) rồi thử lại, hoặc nhập tay. "
+                 "(Có thể bấm '🤖 Cấu hình AI đọc CCCD' để thêm API Key AI đọc "
+                 "thay thế khi ảnh không có mã QR.)")
+    provider = (_get_setting("ai_cccd_provider", "gemini") or "gemini").strip().lower()
+    model = _get_setting("ai_cccd_model", "")
+    base_url = _get_setting("ai_cccd_base_url", "")
+    mime = "image/png" if la_pdf else (
+        "image/jpeg" if fn.endswith((".jpg", ".jpeg")) else
+        "image/png" if fn.endswith(".png") else
+        "image/webp" if fn.endswith(".webp") else "image/jpeg")
+    anh_ai = anh_bytes_list[0] if anh_bytes_list else content
+    try:
+        if provider == "openai":
+            du_lieu = _doc_cccd_openai(anh_ai, mime, api_key, model, base_url)
+        else:
+            du_lieu = _doc_cccd_gemini(anh_ai, mime, api_key, model)
+    except Exception as e:
+        raise HTTPException(422, f"AI đọc CCCD thất bại: {e}")
+    if not (du_lieu.get("ho_ten") or du_lieu.get("so_cccd")):
+        raise HTTPException(
+            422, "AI không đọc được thông tin từ ảnh này — chụp rõ nét, đủ "
+                 "sáng, đúng khung thẻ rồi thử lại, hoặc nhập tay.")
+    return {"ok": True, "nguon": "ai", **du_lieu}
 
 
 @app.post("/api/nhap-lieu/save/{cid}")
