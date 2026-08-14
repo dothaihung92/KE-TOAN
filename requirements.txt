@@ -11,4 +11,6 @@ curl_cffi
 selenium
 pyodbc
 cryptography
+opencv-python-headless
+pymupdf
 pywinauto; sys_platform == "win32"

@@ -877,6 +877,12 @@
           <div style="font-size:18px;font-weight:700;color:#1a7a7a">Xuất Kho</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Dò mã hàng từ Tồn kho → form MISA Xuất kho</div>
         </div>
+        <div onclick="moBangLuong()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #a03a7a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#fbeef7'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">🧑‍💼</div>
+          <div style="font-size:18px;font-weight:700;color:#a03a7a">Bảng Lương - BHXH</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Danh sách nhân viên, đọc CCCD tự động điền</div>
+        </div>
       </div>
       <div style="margin-top:16px;background:#f0f7ff;border:2px solid #2e5c8a;border-radius:14px;padding:16px 20px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -3777,6 +3783,195 @@ function moXuatKho(){
   document.getElementById('nhapLieuContent').style.display='block';
   xkVeTrangChinh();
   xkTaiTrangThai();
+}
+/* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
+const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
+                   'Ngày cấp','Tháng/Năm vào làm','Chức vụ','Lương Cơ bản',
+                   'PC Tiền cơm','PC Xăng xe','PC Chức vụ','PC Điện thoại','PC Trang phục'];
+let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={};
+function nvEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function moBangLuong(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  nlDMMode=null; nlSoMoi=0;
+  document.getElementById('nhapLieuHome').style.display='none';
+  document.getElementById('nhapLieuContent').style.display='block';
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <div onclick="moDanhSachNhanVien()" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #a03a7a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+           onmouseover="this.style.background='#fbeef7'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:38px;margin-bottom:8px">👥</div>
+        <div style="font-size:18px;font-weight:700;color:#a03a7a">Danh Sách Nhân Viên</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Hồ sơ nhân viên, lương cơ bản, phụ cấp</div>
+      </div>
+    </div>`;
+}
+function moDanhSachNhanVien(){
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;color:#a03a7a">👥 Danh Sách Nhân Viên</h3>
+        <button class="btn ghost sm" onclick="moBangLuong()">← Bảng Lương - BHXH</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <button class="btn gold sm" onclick="nvLuu()">💾 Lưu</button>
+        <button class="btn sm" style="background:#2e5c8a" onclick="nvThemDong()">➕ Thêm dòng</button>
+        <button class="btn ghost sm" onclick="document.getElementById('nvImportFile').click()">📥 Import Excel</button>
+        <input type="file" id="nvImportFile" accept=".xlsx" multiple style="display:none" onchange="nvImportExcel(this)">
+        <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
+        <button class="btn sm" style="background:#7a4fb5" onclick="document.getElementById('nvCccdFile').click()" title="Chọn ảnh (JPG/PNG) hoặc PDF chụp CCCD — tự quét mã QR trên thẻ để điền Họ tên/Ngày sinh/CCCD/Ngày cấp/Địa chỉ. Đang chọn 1 ô trong dòng nào thì điền vào dòng đó, chưa chọn thì tự thêm dòng mới.">📷 Đọc CCCD (ảnh/PDF)</button>
+        <input type="file" id="nvCccdFile" accept=".jpg,.jpeg,.png,.pdf,image/*,application/pdf" style="display:none" onchange="nvDocCccd(this)">
+        <button class="btn ghost sm" onclick="nvXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
+      </div>
+      <div id="nvInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. Bấm chọn 1 ô trong dòng rồi bấm "📷 Đọc CCCD" để tự điền đúng dòng đó từ ảnh CCCD.</div>
+      <div id="nvTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
+    </div>`;
+  taiNhanVien();
+}
+async function taiNhanVien(){
+  try{
+    const d=await api(`/api/nhap-lieu/${current}?loai=nv`);
+    nvHeader=(d.header&&d.header.length)?d.header.slice():NV_HEADERS.slice();
+    nvRows=(d.rows||[]).map(r=>r.slice());
+    nvFilters={}; nvChon=null;
+    veGridNhanVien();
+    const info=document.getElementById('nvInfo');
+    if(info){
+      if(nvRows.length){let t=`${nvRows.length} nhân viên`;if(d.updated_at){const dt=new Date(d.updated_at);t+=` — lưu lúc ${dt.toLocaleString('vi-VN')}`;}info.textContent=t;}
+      else info.textContent='Chưa có dữ liệu. Import Excel, Đọc CCCD, hoặc bấm ➕ Thêm dòng.';
+    }
+  }catch(e){toast('Không tải được dữ liệu đã lưu — thử lại: '+e.message,'err')}
+}
+function nvDanhLaiStt(){
+  const ci=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='stt');
+  if(ci<0)return;
+  nvRows.forEach((r,i)=>{r[ci]=i+1;});
+}
+function nvRowsLoc(){
+  const cot=Object.keys(nvFilters).filter(k=>nvFilters[k]);
+  if(!cot.length)return nvRows.map((r,i)=>i);
+  const idx=[];
+  nvRows.forEach((r,i)=>{
+    const ok=cot.every(ci=>String(r[ci]==null?'':r[ci]).toLowerCase().includes(nvFilters[ci].toLowerCase()));
+    if(ok)idx.push(i);
+  });
+  return idx;
+}
+function veGridNhanVien(){
+  const wrap=document.getElementById('nvTableWrap');
+  if(!wrap)return;
+  const idxHien=nvRowsLoc();
+  let html='<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>';
+  nvHeader.forEach(h=>{html+=`<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 8px;border:1px solid #8a2f68;white-space:nowrap">${nvEsc(h)}</th>`;});
+  html+='</tr><tr>';
+  nvHeader.forEach((h,ci)=>{html+=`<th style="position:sticky;top:29px;background:#f8eef5;padding:2px;border:1px solid #ddd"><input value="${nvEsc(nvFilters[ci]||'')}" oninput="nvFilters[${ci}]=this.value;veGridNhanVien()" placeholder="lọc..." style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>`;});
+  html+='</tr></thead><tbody>';
+  idxHien.forEach(ri=>{
+    const row=nvRows[ri];
+    html+=`<tr>`;
+    nvHeader.forEach((h,ci)=>{
+      const v=row[ci]==null?'':row[ci];
+      const chon=nvChon&&nvChon.r===ri;
+      html+=`<td contenteditable="true" data-r="${ri}" data-c="${ci}" onfocus="nvChon={r:${ri},c:${ci}}" onblur="nvSuaO(this)" style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;min-width:70px${chon?';background:#fdf0f8':''}">${nvEsc(v)}</td>`;
+    });
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  wrap.innerHTML=html;
+  if(!idxHien.length){
+    wrap.innerHTML+=`<div style="padding:20px;text-align:center;color:var(--muted)">${nvRows.length?'Không có dòng nào khớp bộ lọc.':'Chưa có dữ liệu.'}</div>`;
+  }
+}
+function nvSuaO(td){
+  const r=+td.dataset.r, c=+td.dataset.c;
+  if(!nvRows[r])return;
+  nvRows[r][c]=td.textContent.trim();
+}
+function nvThemDong(){
+  nvRows.push(nvHeader.map(()=>''));
+  nvChon={r:nvRows.length-1,c:0};
+  nvDanhLaiStt();
+  veGridNhanVien();
+}
+function nvXoaDong(){
+  if(!nvChon||nvChon.r==null||!nvRows[nvChon.r]){toast('Bấm chọn 1 ô trong dòng cần xóa trước','err');return}
+  if(!confirm('Xóa dòng nhân viên này?'))return;
+  nvRows.splice(nvChon.r,1);
+  nvChon=null;
+  nvDanhLaiStt();
+  veGridNhanVien();
+}
+async function nvLuu(){
+  try{
+    await fetch(`/api/nhap-lieu/save/${current}?loai=nv`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nvHeader,rows:nvRows})});
+    toast(`💾 Đã lưu ${nvRows.length} nhân viên`,'ok');
+    const info=document.getElementById('nvInfo');
+    if(info)info.textContent=`${nvRows.length} nhân viên — lưu lúc ${new Date().toLocaleString('vi-VN')}`;
+  }catch(e){toast('Lỗi lưu: '+e.message,'err')}
+}
+async function nvXuatExcel(){
+  try{
+    const r=await fetch(`/api/nhap-lieu/export/${current}?loai=nv`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nvHeader,rows:nvRows})});
+    if(!r.ok)throw new Error('Xuất thất bại');
+    await xuatFile(r,'DanhSachNhanVien.xlsx');
+    toast('📤 Đã xuất Excel','ok');
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
+}
+async function nvImportExcel(input){
+  const files=input.files;
+  if(!files||!files.length)return;
+  toast(`Đang đọc ${files.length} file...`,'');
+  try{
+    const fd=new FormData();
+    for(const f of files)fd.append('files',f);
+    const r=await fetch(`/api/nhap-lieu/import-nhan-vien/${current}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const kq=await r.json();
+    if(!kq||!kq.rows||!kq.rows.length){
+      toast('Không đọc được dòng nhân viên nào phù hợp'+(kq.loi&&kq.loi.length?`: ${kq.loi.join('; ')}`:''),'err');
+      input.value='';return;
+    }
+    // nối thêm vào danh sách đang xem (không thay thế), rồi đánh lại STT
+    if(!nvRows.length&&kq.header&&kq.header.length)nvHeader=kq.header.slice();
+    nvRows.push(...kq.rows.map(r=>{
+      const rr=r.slice();
+      while(rr.length<nvHeader.length)rr.push('');
+      rr.length=nvHeader.length;
+      return rr;
+    }));
+    nvDanhLaiStt();
+    veGridNhanVien();
+    toast(`✓ Đã thêm ${kq.rows.length} nhân viên`+(kq.loi&&kq.loi.length?` (⚠ ${kq.loi.join('; ')})`:'')+'. Nhớ bấm 💾 Lưu!','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
+}
+async function nvDocCccd(input){
+  const f=input.files&&input.files[0];
+  if(!f)return;
+  toast('Đang đọc mã QR trên CCCD...','');
+  try{
+    const fd=new FormData();
+    fd.append('file',f);
+    const r=await fetch('/api/nhan-vien/doc-cccd',{method:'POST',body:fd});
+    if(!r.ok){let m='Không đọc được';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    let ri=(nvChon&&nvChon.r!=null&&nvRows[nvChon.r])?nvChon.r:-1;
+    if(ri<0){nvRows.push(nvHeader.map(()=>''));ri=nvRows.length-1;}
+    const dat=(ten,val)=>{
+      const ci=nvHeader.indexOf(ten);
+      if(ci>=0&&val)nvRows[ri][ci]=val;
+    };
+    dat('CCCD',d.so_cccd);
+    dat('Họ và tên',d.ho_ten);
+    dat('Ngày sinh',d.ngay_sinh);
+    dat('Ngày cấp',d.ngay_cap);
+    dat('Địa chỉ hiện đang cư trú',d.dia_chi);
+    nvChon={r:ri,c:0};
+    nvDanhLaiStt();
+    veGridNhanVien();
+    toast(`✓ Đã đọc CCCD: ${d.ho_ten||d.so_cccd}. Nhớ bấm 💾 Lưu!`,'ok');
+  }catch(e){toast('Lỗi đọc CCCD: '+e.message,'err')}
+  input.value='';
 }
 /* ----- KẾT NỐI MISA SME (import trực tiếp qua CSDL) ----- */
 function misaEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}

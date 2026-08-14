@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.153"
+APP_BUILD = "2026-07-27.154"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9313,6 +9313,278 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
     return {"ok": True, "header": header, "rows": rows, "so_dong": len(rows), "loi": loi[:5]}
 
 
+NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
+              "Ngày cấp", "Tháng/Năm vào làm", "Chức vụ", "Lương Cơ bản",
+              "PC Tiền cơm", "PC Xăng xe", "PC Chức vụ", "PC Điện thoại", "PC Trang phục"]
+
+# Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
+# Thứ tự quan trọng: khớp cụm dài/đặc trưng trước để tránh nhầm (vd "phu cap
+# chuc vu" phải khớp PC Chức vụ trước khi "chuc vu" khớp nhầm cột Chức vụ).
+_NV_TU_KHOA = [
+    ("PC Tiền cơm", ["tien com", "phu cap com", "pc com"]),
+    ("PC Xăng xe", ["xang xe", "phu cap xang", "pc xang"]),
+    ("PC Chức vụ", ["phu cap chuc vu", "pc chuc vu"]),
+    ("PC Điện thoại", ["dien thoai", "phu cap dt", "pc dien thoai"]),
+    ("PC Trang phục", ["trang phuc", "phu cap trang phuc", "pc trang phuc"]),
+    ("Lương Cơ bản", ["luong co ban", "luong cb", "muc luong"]),
+    ("Chức vụ", ["chuc vu", "chuc danh"]),
+    ("Tháng/Năm vào làm", ["vao lam", "ngay vao", "thang nam vao"]),
+    ("Ngày cấp", ["ngay cap"]),
+    ("CCCD", ["cccd", "can cuoc", "cmnd", "so cmt"]),
+    ("Địa chỉ hiện đang cư trú", ["dia chi"]),
+    ("Ngày sinh", ["ngay sinh"]),
+    ("Họ và tên", ["ho va ten", "ho ten", "ho va ten nv"]),
+    ("Mã NV", ["ma nv", "ma so nv", "ma nhan vien", "ma so"]),
+    ("STT", ["stt"]),
+]
+
+
+def _nv_ghep_header_2_dong(ws, hang1_idx):
+    """Ghép header 2 dòng (dòng chính + dòng phụ của cột 'Phụ cấp' bị TÁCH
+    NHỎ, ô đầu gộp/merge — vd form mẫu: dòng 1 có ô 'Phụ cấp' gộp nhiều cột,
+    dòng 2 mới có tên PHỤ từng cột con 'Tiền cơm'/'Xăng xe'/...). Trả về danh
+    sách tiêu đề GỘP theo từng cột (ưu tiên dòng phụ nếu dòng chính TRỐNG do
+    nằm trong vùng merge, cộng thêm tên dòng chính làm tiền tố khi cả 2 có)."""
+    grid = list(ws.iter_rows(min_row=hang1_idx + 1, max_row=hang1_idx + 2, values_only=True))
+    hang1 = list(grid[0]) if len(grid) > 0 else []
+    hang2 = list(grid[1]) if len(grid) > 1 else []
+    # loang gia tri cac o GOM (merge) o dong 1 sang cac cot con trong vung merge
+    hang1_full = list(hang1)
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= hang1_idx + 1 <= rng.max_row and rng.min_col != rng.max_col:
+            v = ws.cell(rng.min_row, rng.min_col).value
+            if v:
+                for c in range(rng.min_col, rng.max_col + 1):
+                    if c - 1 < len(hang1_full):
+                        hang1_full[c - 1] = v
+    co_dong_phu = any(str(v or "").strip() for v in hang2)
+    def _1_dong(v):
+        return str(v or "").replace("\n", " ").replace("\r", " ").strip()
+    n = max(len(hang1), len(hang2))
+    out = []
+    for i in range(n):
+        c1 = _1_dong(hang1[i] if i < len(hang1) else "")
+        c2 = _1_dong(hang2[i] if i < len(hang2) else "")
+        c1f = _1_dong(hang1_full[i] if i < len(hang1_full) else "")
+        if c2:
+            out.append(f"{c1f} {c2}".strip() if c1f and c1f != c2 else c2)
+        else:
+            out.append(c1)
+    return out, (2 if co_dong_phu else 1)
+
+
+@app.post("/api/nhap-lieu/import-nhan-vien/{cid}")
+async def nhap_lieu_import_nhan_vien(cid: int, request: Request):
+    """Import Danh sách nhân viên từ 1 file Excel BẤT KỲ (không cố định layout
+    — tự dò dòng tiêu đề, tự ghép tiêu đề 2 dòng cho cột 'Phụ cấp' bị tách
+    nhỏ, tự bỏ dòng tiêu đề mục/dòng đánh số cột, tự bỏ dòng không có tên
+    người), rồi tự xếp vào ĐÚNG bộ cột cố định NV_HEADERS theo từ khoá."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    rows_out = []
+    loi = []
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})")
+            continue
+        ws = wb[wb.sheetnames[0]]
+        grid = [list(r) for r in ws.iter_rows(values_only=True)]
+        if not grid:
+            loi.append(f"{fn}: sheet rỗng")
+            continue
+        # 1) dò dòng tiêu đề: dòng có nhiều ô khớp từ khoá cột nhất trong 8 dòng đầu
+        tu_khoa_phang = [tk for _, ds in _NV_TU_KHOA for tk in ds]
+        diem_tot_nhat, hang1_idx = 0, 0
+        for i in range(min(8, len(grid))):
+            hang = [_khong_dau(str(c or "").replace("\n", " ").replace("\r", " ")) for c in grid[i]]
+            diem = sum(1 for o in hang if o and any(tk in o for tk in tu_khoa_phang))
+            if diem > diem_tot_nhat:
+                diem_tot_nhat, hang1_idx = diem, i
+        if diem_tot_nhat == 0:
+            loi.append(f"{fn}: không nhận diện được dòng tiêu đề (cần các cột như 'Họ và tên', 'CCCD'...)")
+            continue
+        header_ghep, so_dong_tieude = _nv_ghep_header_2_dong(ws, hang1_idx)
+        header_khong_dau = [_khong_dau(h) for h in header_ghep]
+        # 2) map cột nguồn -> cột đích cố định
+        cot_dich_cua = [None] * len(header_ghep)
+        da_dung = set()
+        for ten_dich, ds_tukhoa in _NV_TU_KHOA:
+            if ten_dich in da_dung:
+                continue
+            for i, o in enumerate(header_khong_dau):
+                if cot_dich_cua[i] is None and o and any(tk in o for tk in ds_tukhoa):
+                    cot_dich_cua[i] = ten_dich
+                    da_dung.add(ten_dich)
+                    break
+        i_ten = next((i for i, d in enumerate(cot_dich_cua) if d == "Họ và tên"), -1)
+        if i_ten < 0:
+            loi.append(f"{fn}: không tìm thấy cột 'Họ và tên'")
+            continue
+        i_manv = next((i for i, d in enumerate(cot_dich_cua) if d == "Mã NV"), -1)
+
+        def _la_dong_danh_so_cot(r):
+            """Dò dòng 'đánh số thứ tự cột' hay gặp dưới header mẫu (vd 'A','1',
+            '2','3'...) — giá trị ô i (i>=1) trùng đúng chỉ số i, không phải dữ
+            liệu nhân viên thật."""
+            khop, tong = 0, 0
+            for i in range(1, len(r)):
+                v = r[i]
+                if v is None or str(v).strip() == "":
+                    continue
+                s = str(v).strip()
+                if s.lstrip("-").isdigit():
+                    tong += 1
+                    if int(s) == i:
+                        khop += 1
+            return tong >= 4 and khop >= tong * 0.8
+
+        # duyệt các dòng dữ liệu (sau dòng tiêu đề + dòng phụ nếu có)
+        dong_bat_dau = hang1_idx + so_dong_tieude
+        for r in grid[dong_bat_dau:]:
+            if not r or all(c is None or str(c).strip() == "" for c in r):
+                continue
+            if _la_dong_danh_so_cot(r):
+                continue
+            ten = str(r[i_ten]).strip() if i_ten < len(r) and r[i_ten] is not None else ""
+            if not ten:
+                continue  # dòng tiêu đề mục (vd "I. Khối văn phòng") — không có tên
+            if _khong_dau(ten) in ("ho va ten", "hoten"):
+                continue  # lỡ trùng dòng tiêu đề lặp lại
+            if i_manv >= 0 and i_manv < len(r) and r[i_manv] is not None:
+                ma = str(r[i_manv]).strip().upper()
+                if ma and all(k in "IVXLCDM" for k in ma) and len(ma) <= 4:
+                    continue  # dòng tiêu đề mục đánh số La Mã ở cột Mã NV (vd "I")
+            dong_moi = ["" for _ in NV_HEADERS]
+            for i, ten_dich in enumerate(cot_dich_cua):
+                if ten_dich and i < len(r) and r[i] is not None and str(r[i]).strip() != "":
+                    j = NV_HEADERS.index(ten_dich)
+                    v = r[i]
+                    if isinstance(v, datetime.datetime):
+                        v = v.strftime("%d/%m/%Y")
+                    dong_moi[j] = v
+            rows_out.append(dong_moi)
+    # đánh lại STT tuần tự
+    for idx, r in enumerate(rows_out, 1):
+        r[0] = idx
+    return {"ok": True, "header": NV_HEADERS, "rows": rows_out, "so_dong": len(rows_out), "loi": loi[:5]}
+
+
+def _doc_qr_anh(img_bytes):
+    """Thử decode mã QR từ bytes ảnh (jpg/png/...) bằng OpenCV (không cần cài
+    thêm zbar hệ điều hành như pyzbar). Trả về chuỗi dữ liệu QR hoặc '' nếu
+    không tìm/đọc được."""
+    import cv2
+    import numpy as np
+    arr = np.frombuffer(img_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return ""
+    det = cv2.QRCodeDetector()
+    ung_vien = [img]
+    h, w = img.shape[:2]
+    # ảnh chụp điện thoại độ phân giải rất cao đôi khi khiến bộ dò QR của
+    # OpenCV đọc kém hơn — thử thêm bản thu nhỏ
+    if max(h, w) > 1600:
+        ti_le = 1600 / max(h, w)
+        ung_vien.append(cv2.resize(img, (max(1, int(w * ti_le)), max(1, int(h * ti_le)))))
+    for u in ung_vien:
+        try:
+            data, _points, _straight = det.detectAndDecode(u)
+            if data:
+                return data
+            ok, datas, _pts, _s = det.detectAndDecodeMulti(u)
+            if ok:
+                for d in datas:
+                    if d:
+                        return d
+        except Exception:
+            continue
+    return ""
+
+
+def _phan_tich_qr_cccd(raw):
+    """Parse chuỗi QR CCCD/CMND (chuẩn Bộ Công an, 7 trường phân cách '|'):
+    Số CCCD|Số CMND cũ|Họ tên|Ngày sinh(DDMMYYYY)|Giới tính|Địa chỉ thường
+    trú|Ngày cấp(DDMMYYYY). Trả về {} nếu chuỗi không đúng định dạng này."""
+    parts = (raw or "").split("|")
+    if len(parts) < 4:
+        return {}
+
+    def _ngay(s):
+        s = (s or "").strip()
+        if len(s) == 8 and s.isdigit():
+            return f"{s[0:2]}/{s[2:4]}/{s[4:8]}"
+        return s
+
+    return {
+        "so_cccd": parts[0].strip() if len(parts) > 0 else "",
+        "so_cmnd_cu": parts[1].strip() if len(parts) > 1 else "",
+        "ho_ten": parts[2].strip() if len(parts) > 2 else "",
+        "ngay_sinh": _ngay(parts[3]) if len(parts) > 3 else "",
+        "gioi_tinh": parts[4].strip() if len(parts) > 4 else "",
+        "dia_chi": parts[5].strip() if len(parts) > 5 else "",
+        "ngay_cap": _ngay(parts[6]) if len(parts) > 6 else "",
+    }
+
+
+@app.post("/api/nhan-vien/doc-cccd")
+async def nhan_vien_doc_cccd(request: Request):
+    """Đọc dữ liệu từ ảnh (jpg/png/...) hoặc PDF chụp CCCD/CMND bằng cách quét
+    MÃ QR in trên thẻ (chuẩn Bộ Công an) — KHÔNG dùng OCR nhận diện chữ in
+    (độ chính xác thấp với chữ tiếng Việt có dấu), mã QR cho dữ liệu CHÍNH
+    XÁC tuyệt đối khi đọc được. CCCD gắn chip (từ 2021): mã QR ở mặt TRƯỚC.
+    CCCD/CMND cũ không chip: mã QR (nếu có) ở mặt SAU."""
+    form = await request.form()
+    up = form.get("file")
+    if up is None:
+        raise HTTPException(400, "Chưa chọn file")
+    content = await up.read()
+    fn = (getattr(up, "filename", "") or "").lower()
+    try:
+        import cv2  # noqa: F401 — chỉ để kiểm tra đã cài chưa, báo lỗi rõ nếu thiếu
+    except Exception:
+        raise HTTPException(
+            503, "Chưa cài xong thư viện đọc mã QR (opencv) trên máy này — "
+                 "đóng phần mềm, chạy lại start.bat để tự cài đủ thư viện rồi mở lại.")
+    anh_bytes_list = []
+    if fn.endswith(".pdf") or content[:4] == b"%PDF":
+        try:
+            import pymupdf
+            with pymupdf.open(stream=content, filetype="pdf") as doc:
+                for page in doc:
+                    pix = page.get_pixmap(matrix=pymupdf.Matrix(3, 3))
+                    anh_bytes_list.append(pix.tobytes("png"))
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"Không đọc được file PDF: {e}")
+    else:
+        anh_bytes_list = [content]
+    qr_raw = ""
+    for b in anh_bytes_list:
+        qr_raw = _doc_qr_anh(b)
+        if qr_raw:
+            break
+    if not qr_raw:
+        raise HTTPException(
+            422, "Không tìm/đọc được mã QR trên ảnh — chụp rõ nét, đủ sáng, "
+                 "không loá mã QR (CCCD gắn chip: QR mặt trước; CMND/CCCD cũ "
+                 "không chip: QR mặt sau nếu có) rồi thử lại, hoặc nhập tay.")
+    du_lieu = _phan_tich_qr_cccd(qr_raw)
+    if not du_lieu:
+        raise HTTPException(422, "Mã QR đọc được nhưng không đúng định dạng CCCD/CMND.")
+    return {"ok": True, **du_lieu}
+
+
 @app.post("/api/nhap-lieu/save/{cid}")
 async def nhap_lieu_save(cid: int, request: Request, loai: str = "in"):
     """Lưu bộ dữ liệu Nhập Liệu của công ty (mỗi công ty 1 bộ/loại, import đè lên)."""
@@ -9414,7 +9686,7 @@ async def nhap_lieu_export(cid: int, request: Request, loai: str = "in"):
     rows = body.get("rows", [])
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Đầu ra" if loai == "out" else "Đầu vào"
+    ws.title = "Đầu ra" if loai == "out" else ("Danh sách nhân viên" if loai == "nv" else "Đầu vào")
     ws.append(header)
     for c in range(1, len(header) + 1):
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
@@ -9455,7 +9727,7 @@ async def nhap_lieu_export(cid: int, request: Request, loai: str = "in"):
     if ws.max_row > 1:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(header))}{ws.max_row}"
 
-    fname = f"NhapLieu_{'DauRa' if loai=='out' else 'DauVao'}.xlsx"
+    fname = f"NhapLieu_{'DauRa' if loai=='out' else ('DanhSachNhanVien' if loai=='nv' else 'DauVao')}.xlsx"
     path = os.path.join(DOWNLOAD_DIR, fname)
     wb.save(path)
     desktop = _get_desktop_dir()
