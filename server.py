@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.149"
+APP_BUILD = "2026-07-27.150"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1645,6 +1645,16 @@ def huy_lich_tat_may():
 @app.get("/", response_class=HTMLResponse)
 def home():
     with open(os.path.join(BASE_DIR, "static", "index.html"), encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/doi-chieu-ngan-hang", response_class=HTMLResponse)
+def doi_chieu_ngan_hang():
+    """Công cụ Đối chiếu ngân hàng — ứng dụng React ĐỘC LẬP (nguyên bản, KHÔNG
+    sửa gì), tự quản lý dữ liệu qua localStorage của trình duyệt, không dùng
+    chung dữ liệu/API với phần mềm chính. Phục vụ y nguyên qua route riêng để
+    tránh xung đột biến/CSS với index.html (2 ứng dụng JS hoàn toàn tách biệt)."""
+    with open(os.path.join(BASE_DIR, "static", "doi_chieu_ngan_hang.html"), encoding="utf-8") as f:
         return f.read()
 
 
