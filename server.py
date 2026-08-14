@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.151"
+APP_BUILD = "2026-07-27.152"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1661,6 +1661,67 @@ def doi_chieu_ngan_hang():
                  "chạy lại start.bat để tự cập nhật rồi mở lại.")
     with open(duong_dan, encoding="utf-8") as f:
         return f.read()
+
+
+@app.get("/api/dcnh/hoa-don")
+def dcnh_hoa_don(mst: str, tu: str = "", den: str = ""):
+    """CẦU NỐI cho công cụ "Đối Chiếu Ngân Hàng" (static/doi_chieu_ngan_hang.html,
+    ứng dụng React ĐỘC LẬP) — lấy hóa đơn ĐÃ TRA CỨU sẵn trong phần mềm chính
+    (bảng invoices) theo MST công ty + khoảng ngày (tu/den, dạng yyyy-mm-dd,
+    bỏ trống = không giới hạn), trả về ĐÚNG định dạng text (TAB-separated,
+    cột Số HĐ | Ngày | Tên công ty | MST | Tổng cộng) mà công cụ đó nhận ở ô
+    "Dán dữ liệu" (xem hàm parseInv trong doi_chieu_ngan_hang.html) — tự tách
+    riêng đầu vào (loai=purchase, đối tác = người bán)/đầu ra (loai=sold, đối
+    tác = người mua), không cần người dùng tự phân loại tay."""
+    mst_chuan = _chuan_mst(mst)
+    if not mst_chuan:
+        raise HTTPException(400, "Thiếu MST công ty")
+    conn = db()
+    comp = conn.execute(
+        "SELECT id, ten, mst FROM companies").fetchall()
+    comp = next((c for c in comp if _chuan_mst(c["mst"]) == mst_chuan), None)
+    if not comp:
+        conn.close()
+        raise HTTPException(
+            404, f"Không tìm thấy công ty MST {mst} trong phần mềm chính "
+                 "(vào Trang chủ, kiểm tra công ty đã có trong danh sách chưa).")
+    rows = conn.execute(
+        "SELECT loai, nbmst, nbten, nmmst, shdon, tdlap, tgtttbso, raw FROM invoices "
+        "WHERE company_id=? ORDER BY tdlap", (comp["id"],)).fetchall()
+    conn.close()
+
+    def ngay_vn(tdlap):
+        try:
+            d = str(tdlap or "").split("T")[0]
+            y, m, dd = d.split("-")
+            return f"{dd}/{m}/{y}"
+        except Exception:
+            return str(tdlap or "")
+
+    def dong(shdon, tdlap, ten_doi_tac, mst_doi_tac, tong):
+        return "\t".join([str(shdon or ""), ngay_vn(tdlap), ten_doi_tac or "",
+                          mst_doi_tac or "", str(round(tong or 0))])
+
+    dv_lines, dr_lines = [], []
+    for r in rows:
+        ngay_iso = str(r["tdlap"] or "").split("T")[0]
+        if tu and ngay_iso and ngay_iso < tu:
+            continue
+        if den and ngay_iso and ngay_iso > den:
+            continue
+        if r["loai"] == "purchase":
+            dv_lines.append(dong(r["shdon"], r["tdlap"], r["nbten"], r["nbmst"], r["tgtttbso"]))
+        else:
+            nmten = ""
+            try:
+                raw = json.loads(r["raw"]) if r["raw"] else {}
+                nmten = raw.get("nmten", "") or raw.get("nmtnmua", "") or ""
+            except Exception:
+                pass
+            dr_lines.append(dong(r["shdon"], r["tdlap"], nmten, r["nmmst"], r["tgtttbso"]))
+
+    return {"ten_cong_ty": comp["ten"], "so_dau_vao": len(dv_lines), "so_dau_ra": len(dr_lines),
+            "dau_vao": "\n".join(dv_lines), "dau_ra": "\n".join(dr_lines)}
 
 
 # ---------- TỐC ĐỘ TẢI ----------
