@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.156"
+APP_BUILD = "2026-07-27.157"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9536,6 +9536,138 @@ def _phan_tich_qr_cccd(raw):
     }
 
 
+# ============================================================
+#  ĐỌC CHỮ IN TRÊN CCCD CỤC BỘ (OCR, KHÔNG DÙNG AI) — dự phòng tầng 2 khi
+#  ảnh không có/không đọc được mã QR. Dùng EasyOCR (chạy ngay trên máy,
+#  không gọi ra ngoài, không cần API Key) — lần đầu dùng tự tải model
+#  tiếng Việt (~100MB, cần mạng 1 lần), từ đó chạy HOÀN TOÀN OFFLINE.
+# ============================================================
+_EASYOCR_INSTANCE = None
+_EASYOCR_ERR = ""
+
+
+def _get_easyocr():
+    """Tạo (1 lần, dùng lại cho các lần sau) bộ đọc chữ EasyOCR tiếng Việt.
+    Trả về None nếu chưa cài xong thư viện (dò lại _EASYOCR_ERR để biết lý
+    do)."""
+    global _EASYOCR_INSTANCE, _EASYOCR_ERR
+    if _EASYOCR_INSTANCE is None:
+        try:
+            import easyocr
+            _EASYOCR_INSTANCE = easyocr.Reader(["vi", "en"], gpu=False, verbose=False)
+        except Exception as e:
+            _EASYOCR_INSTANCE = False
+            _EASYOCR_ERR = str(e)
+    return _EASYOCR_INSTANCE or None
+
+
+def _doc_van_ban_easyocr(img_bytes):
+    """OCR toàn bộ chữ in trên 1 ảnh bằng EasyOCR, trả về danh sách DÒNG CHỮ
+    theo đúng thứ tự từ TRÊN xuống DƯỚI (sắp theo toạ độ y của khung chữ) —
+    thứ tự này cần để suy luận nhãn/giá trị theo luật ở _phan_tich_van_ban_cccd."""
+    reader = _get_easyocr()
+    if reader is None:
+        raise RuntimeError(
+            "Chưa cài xong bộ đọc chữ cục bộ (easyocr)"
+            + (f": {_EASYOCR_ERR}" if _EASYOCR_ERR else "")
+            + " — đóng phần mềm, chạy lại start.bat để tự cài đủ thư viện rồi mở lại "
+              "(lần đầu cài easyocr khá nặng, có thể mất vài phút).")
+    import numpy as np
+    import cv2
+    arr = np.frombuffer(img_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return []
+    ket_qua = reader.readtext(img, detail=1, paragraph=False)
+    ket_qua.sort(key=lambda kq: sum(diem[1] for diem in kq[0]) / 4.0)
+    return [str(text).strip() for (_bbox, text, _conf) in ket_qua if str(text or "").strip()]
+
+
+def _phan_tich_van_ban_cccd(dong_van_ban):
+    """Suy luận các trường CCCD từ danh sách DÒNG CHỮ đã OCR (theo thứ tự
+    trên->dưới) bằng LUẬT/TỪ KHOÁ nhãn in sẵn trên thẻ (song ngữ Việt-Anh)
+    — KHÔNG dùng AI. Đây là suy luận CHỮ IN nên có thể sai sót (nhất là dấu
+    tiếng Việt ả/ã/ạ dễ lẫn, hoặc "ngày cấp" không in trên CCCD gắn chip đời
+    mới — chỉ có trong mã QR), khác với mã QR (chính xác tuyệt đối). Trả về
+    {} nếu không suy luận được trường nào cả."""
+    import re
+    dong_sach = [str(d or "").strip() for d in dong_van_ban if str(d or "").strip()]
+    if not dong_sach:
+        return {}
+    dong_khong_dau = [_khong_dau(d) for d in dong_sach]
+
+    def _tim_theo_nhan(mau_nhan_list):
+        """mau_nhan_list: regex (viết theo dạng không dấu, thường). Trên mỗi
+        dòng, tìm nhãn khớp có VỊ TRÍ KẾT THÚC XA NHẤT (nhãn tiếng Anh in
+        SAU nhãn tiếng Việt cùng dòng sẽ được ưu tiên lấy hết, tránh sót
+        nhãn còn dính vào giá trị — vd "Họ và tên / Full name: A" phải lấy
+        hết cả "Họ và tên / Full name:" mới ra đúng "A"), trả về phần text
+        SAU nhãn đó nếu đủ dài, không thì lấy DÒNG KẾ TIẾP."""
+        for i, dkd in enumerate(dong_khong_dau):
+            vi_tri_ket_thuc = -1
+            for mau in mau_nhan_list:
+                for kh in re.finditer(mau, dkd):
+                    if kh.end() > vi_tri_ket_thuc:
+                        vi_tri_ket_thuc = kh.end()
+            if vi_tri_ket_thuc >= 0:
+                phan_sau = dong_sach[i][vi_tri_ket_thuc:].lstrip(" :./-").strip()
+                if len(phan_sau) >= 2:
+                    return phan_sau
+                if i + 1 < len(dong_sach):
+                    return dong_sach[i + 1]
+        return ""
+
+    ket_qua = {"so_cccd": "", "so_cmnd_cu": "", "ho_ten": "", "ngay_sinh": "",
+               "gioi_tinh": "", "dia_chi": "", "ngay_cap": ""}
+
+    so = _tim_theo_nhan([r"so\s*/?\s*no\.?", r"so\s*cccd", r"cccd\s*so"])
+    m = re.search(r"\d{9,12}", so.replace(" ", "")) if so else None
+    if not m:
+        for d in dong_sach:  # dự phòng: dò số đứng riêng 1 dòng dài 9 hoặc 12 số
+            m2 = re.fullmatch(r"\d{9}|\d{12}", d.replace(" ", ""))
+            if m2:
+                m = m2
+                break
+    if m:
+        ket_qua["so_cccd"] = m.group(0)
+
+    ket_qua["ho_ten"] = _tim_theo_nhan([r"ho\s*va\s*ten", r"full\s*name"])
+
+    ngay_sinh_raw = _tim_theo_nhan([r"ngay\s*sinh", r"date\s*of\s*birth"])
+    m = re.search(r"\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}", ngay_sinh_raw) if ngay_sinh_raw else None
+    if not m:
+        for d in dong_sach:  # dự phòng: ngày dd/mm/yyyy đầu tiên xuất hiện
+            m2 = re.search(r"\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}", d)
+            if m2:
+                m = m2
+                break
+    if m:
+        ket_qua["ngay_sinh"] = m.group(0).replace(".", "/").replace("-", "/")
+
+    gt_kd = _khong_dau(_tim_theo_nhan([r"gioi\s*tinh", r"\bsex\b"]))
+    if "nam" in gt_kd:
+        ket_qua["gioi_tinh"] = "Nam"
+    elif "nu" in gt_kd:
+        ket_qua["gioi_tinh"] = "Nữ"
+
+    # Ưu tiên "Nơi thường trú" (địa chỉ ĐANG cư trú — đúng ý nghĩa cột "Địa
+    # chỉ hiện đang cư trú"), chỉ dùng "Quê quán" (quê gốc, KHÁC nơi đang ở)
+    # làm dự phòng khi không tìm thấy dòng thường trú.
+    ket_qua["dia_chi"] = _tim_theo_nhan(
+        [r"noi\s*thuong\s*tru", r"place\s*of\s*residence", r"\bthuong\s*tru\b"])
+    if not ket_qua["dia_chi"]:
+        ket_qua["dia_chi"] = _tim_theo_nhan([r"que\s*quan", r"place\s*of\s*origin"])
+
+    ngay_cap_raw = _tim_theo_nhan([r"ngay\s*cap", r"date\s*of\s*issue", r"ngay,?\s*thang,?\s*nam"])
+    m = re.search(r"\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}", ngay_cap_raw) if ngay_cap_raw else None
+    if m:
+        ket_qua["ngay_cap"] = m.group(0).replace(".", "/").replace("-", "/")
+
+    if not (ket_qua["ho_ten"] or ket_qua["so_cccd"]):
+        return {}
+    return ket_qua
+
+
 _CCCD_PROMPT_AI = (
     "Đây là ảnh chụp Căn cước công dân (CCCD) hoặc CMND Việt Nam. Hãy đọc "
     "CHÍNH XÁC các thông tin in trên thẻ và trả lời DUY NHẤT 1 đối tượng "
@@ -9656,14 +9788,18 @@ async def cai_dat_ai_doc_cccd_set(request: Request):
 
 @app.post("/api/nhan-vien/doc-cccd")
 async def nhan_vien_doc_cccd(request: Request):
-    """Đọc dữ liệu từ ảnh (jpg/png/...) hoặc PDF chụp CCCD/CMND.
-    1) Thử quét MÃ QR in trên thẻ (chuẩn Bộ Công an) trước — cho dữ liệu
-       CHÍNH XÁC tuyệt đối, MIỄN PHÍ, không cần cấu hình gì. CCCD gắn chip
-       (từ 2021): mã QR ở mặt TRƯỚC. CCCD/CMND cũ không chip: mã QR (nếu có)
-       ở mặt SAU.
-    2) Nếu KHÔNG tìm/đọc được mã QR (ảnh chỉ chụp 1 mặt không có QR, mã bị
-       che/mờ...) VÀ đã cấu hình API Key AI (Gemini hoặc tương thích OpenAI)
-       ở mục Cấu hình AI đọc CCCD -> tự động dùng AI thị giác đọc thay thế."""
+    """Đọc dữ liệu từ ảnh (jpg/png/...) hoặc PDF chụp CCCD/CMND, thử lần lượt
+    3 tầng, DỪNG NGAY khi tầng nào đọc được:
+    1) Quét MÃ QR in trên thẻ (chuẩn Bộ Công an) — CHÍNH XÁC tuyệt đối, MIỄN
+       PHÍ, không cần cấu hình. CCCD gắn chip (từ 2021): QR ở mặt TRƯỚC.
+       CCCD/CMND cũ không chip: QR (nếu có) ở mặt SAU.
+    2) OCR CỤC BỘ đọc chữ in (EasyOCR, chạy ngay trên máy, KHÔNG dùng AI,
+       KHÔNG gọi ra ngoài, không tốn phí) — dùng khi ảnh không có/không đọc
+       được mã QR. Độ chính xác thấp hơn QR (đặc biệt dấu tiếng Việt), nên
+       LUÔN kiểm tra lại trước khi Lưu.
+    3) AI thị giác (Gemini/OpenAI-compatible) — CHỈ dùng khi đã cấu hình API
+       Key ở mục Cấu hình AI đọc CCCD VÀ tầng 2 (OCR cục bộ) không đọc được
+       gì hữu ích."""
     form = await request.form()
     up = form.get("file")
     if up is None:
@@ -9700,16 +9836,30 @@ async def nhan_vien_doc_cccd(request: Request):
         du_lieu = _phan_tich_qr_cccd(qr_raw)
         if du_lieu:
             return {"ok": True, "nguon": "qr", **du_lieu}
-        # mã QR đọc được nhưng không đúng định dạng CCCD -> vẫn thử AI bên dưới
+        # mã QR đọc được nhưng không đúng định dạng CCCD -> vẫn thử tiếp bên dưới
+
+    # 2) OCR cục bộ (EasyOCR, không dùng AI) — thử trước khi cần đến AI
+    loi_ocr = ""
+    try:
+        dong_van_ban = []
+        for b in anh_bytes_list:
+            dong_van_ban.extend(_doc_van_ban_easyocr(b))
+        du_lieu_ocr = _phan_tich_van_ban_cccd(dong_van_ban)
+        if du_lieu_ocr:
+            return {"ok": True, "nguon": "ocr", **du_lieu_ocr}
+    except Exception as e:
+        loi_ocr = str(e)
 
     api_key = _get_setting("ai_cccd_api_key", "")
     if not api_key:
         raise HTTPException(
-            422, "Không tìm/đọc được mã QR trên ảnh — chụp rõ nét, đủ sáng, "
-                 "không loá mã QR (CCCD gắn chip: QR mặt trước; CMND/CCCD cũ "
-                 "không chip: QR mặt sau nếu có) rồi thử lại, hoặc nhập tay. "
-                 "(Có thể bấm '🤖 Cấu hình AI đọc CCCD' để thêm API Key AI đọc "
-                 "thay thế khi ảnh không có mã QR.)")
+            422, "Không tìm/đọc được mã QR, OCR cục bộ cũng không đọc được "
+                 "thông tin từ ảnh này"
+                 + (f" ({loi_ocr})" if loi_ocr else "")
+                 + " — chụp rõ nét, đủ sáng, không loá mã QR (CCCD gắn chip: "
+                   "QR mặt trước; CMND/CCCD cũ không chip: QR mặt sau nếu có) "
+                   "rồi thử lại, hoặc nhập tay. (Có thể bấm '🤖 Cấu hình AI đọc "
+                   "CCCD' để thêm API Key AI đọc chính xác hơn.)")
     provider = (_get_setting("ai_cccd_provider", "gemini") or "gemini").strip().lower()
     model = _get_setting("ai_cccd_model", "")
     base_url = _get_setting("ai_cccd_base_url", "")

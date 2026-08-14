@@ -912,7 +912,7 @@
       <div style="font-weight:800;font-size:18px;color:#a03a7a">🤖 Cấu hình AI đọc CCCD</div>
       <button class="btn ghost sm" onclick="document.getElementById('nvAiModal').style.display='none'">✕</button>
     </div>
-    <div class="hint" style="margin-bottom:12px">Mã QR trên thẻ CCCD/CMND LUÔN được thử trước (chính xác tuyệt đối, miễn phí, không cần cấu hình). Chỉ khi ảnh KHÔNG có/không đọc được mã QR, phần mềm mới dùng AI dưới đây đọc thay thế.</div>
+    <div class="hint" style="margin-bottom:12px">Thứ tự tự động thử: 1) Mã QR trên thẻ (chính xác tuyệt đối, miễn phí). 2) OCR đọc chữ cục bộ ngay trên máy (không cần mạng/API Key, nhưng có thể sai sót — nhớ kiểm tra lại). 3) AI dưới đây — CHỈ dùng khi 2 cách trên không đọc được gì.</div>
     <label style="font-size:13px;font-weight:600">Nhà cung cấp AI</label>
     <select id="nvAiProvider" onchange="nvCapNhatFormAi()" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
       <option value="gemini">Google Gemini (có gói miễn phí — khuyên dùng)</option>
@@ -3848,7 +3848,7 @@ function moDanhSachNhanVien(){
         <button class="btn ghost sm" onclick="document.getElementById('nvImportFile').click()">📥 Import Excel</button>
         <input type="file" id="nvImportFile" accept=".xlsx" multiple style="display:none" onchange="nvImportExcel(this)">
         <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
-        <button class="btn sm" style="background:#7a4fb5" onclick="document.getElementById('nvCccdFile').click()" title="Chọn ảnh (JPG/PNG) hoặc PDF chụp CCCD — có thể chọn NHIỀU file cùng lúc (mỗi file = 1 nhân viên, tự thêm mỗi dòng). Chỉ chọn 1 file và đang chọn sẵn 1 dòng thì điền vào đúng dòng đó. Tự quét mã QR trên thẻ để điền Họ tên/Ngày sinh/CCCD/Ngày cấp/Địa chỉ.">📷 Đọc CCCD (ảnh/PDF, chọn nhiều được)</button>
+        <button class="btn sm" style="background:#7a4fb5" onclick="document.getElementById('nvCccdFile').click()" title="Chọn ảnh (JPG/PNG) hoặc PDF chụp CCCD — có thể chọn NHIỀU file cùng lúc (mỗi file = 1 nhân viên, tự thêm mỗi dòng). Chỉ chọn 1 file và đang chọn sẵn 1 dòng thì điền vào đúng dòng đó. Tự thử lần lượt: 1) quét mã QR trên thẻ (chính xác nhất) 2) OCR đọc chữ cục bộ, không cần mạng/API (nếu ảnh không có QR) 3) AI (nếu đã cấu hình API Key, chỉ khi OCR cục bộ không đọc được).">📷 Đọc CCCD (ảnh/PDF, chọn nhiều được)</button>
         <input type="file" id="nvCccdFile" accept=".jpg,.jpeg,.png,.pdf,image/*,application/pdf" multiple style="display:none" onchange="nvDocCccd(this)">
         <button class="btn ghost sm" onclick="nvXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
         <button class="btn ghost sm" onclick="nvMoCaiDatAi()" title="Cấu hình AI (Gemini hoặc AI tương thích OpenAI) để đọc CCCD khi ảnh KHÔNG có/đọc được mã QR — mã QR vẫn luôn được thử trước vì chính xác tuyệt đối và miễn phí">🤖 Cấu hình AI đọc CCCD</button>
@@ -4003,7 +4003,8 @@ async function nvDocCccd(input){
       dat('Địa chỉ hiện đang cư trú',d.dia_chi);
       nvChon={r:ri,c:0};
       ok++;
-      tenDaDoc.push(d.ho_ten||d.so_cccd||f.name);
+      const hauTo=d.nguon==='ocr'?' (OCR — nhớ kiểm tra lại)':(d.nguon==='ai'?' (AI)':'');
+      tenDaDoc.push((d.ho_ten||d.so_cccd||f.name)+hauTo);
     }catch(e){
       loi.push(`${f.name}: ${e.message}`);
     }
