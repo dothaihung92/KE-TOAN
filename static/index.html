@@ -921,9 +921,10 @@
     <label style="font-size:13px;font-weight:600">API Key</label>
     <input id="nvAiApiKey" type="text" placeholder="Dán API Key vào đây" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
     <div id="nvAiHintGemini" class="hint" style="margin:-6px 0 10px">Lấy API Key miễn phí tại <b>aistudio.google.com/apikey</b> (đăng nhập bằng tài khoản Google).</div>
+    <label style="font-size:13px;font-weight:600">Model (để trống dùng mặc định)</label>
+    <input id="nvAiModel" type="text" placeholder="vd: gemini-flash-latest" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div class="hint" style="margin:-6px 0 10px">Nếu báo lỗi "model ... no longer available/not found", vào <b>aistudio.google.com</b> xem tên model mới nhất rồi dán vào đây.</div>
     <div id="nvAiAdvanced" style="display:none">
-      <label style="font-size:13px;font-weight:600">Model (để trống dùng mặc định)</label>
-      <input id="nvAiModel" type="text" placeholder="vd: gpt-4o-mini" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
       <label style="font-size:13px;font-weight:600">Base URL (để trống dùng api.openai.com)</label>
       <input id="nvAiBaseUrl" type="text" placeholder="vd: https://api.openai.com/v1" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
     </div>
@@ -3847,8 +3848,8 @@ function moDanhSachNhanVien(){
         <button class="btn ghost sm" onclick="document.getElementById('nvImportFile').click()">📥 Import Excel</button>
         <input type="file" id="nvImportFile" accept=".xlsx" multiple style="display:none" onchange="nvImportExcel(this)">
         <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
-        <button class="btn sm" style="background:#7a4fb5" onclick="document.getElementById('nvCccdFile').click()" title="Chọn ảnh (JPG/PNG) hoặc PDF chụp CCCD — tự quét mã QR trên thẻ để điền Họ tên/Ngày sinh/CCCD/Ngày cấp/Địa chỉ. Đang chọn 1 ô trong dòng nào thì điền vào dòng đó, chưa chọn thì tự thêm dòng mới.">📷 Đọc CCCD (ảnh/PDF)</button>
-        <input type="file" id="nvCccdFile" accept=".jpg,.jpeg,.png,.pdf,image/*,application/pdf" style="display:none" onchange="nvDocCccd(this)">
+        <button class="btn sm" style="background:#7a4fb5" onclick="document.getElementById('nvCccdFile').click()" title="Chọn ảnh (JPG/PNG) hoặc PDF chụp CCCD — có thể chọn NHIỀU file cùng lúc (mỗi file = 1 nhân viên, tự thêm mỗi dòng). Chỉ chọn 1 file và đang chọn sẵn 1 dòng thì điền vào đúng dòng đó. Tự quét mã QR trên thẻ để điền Họ tên/Ngày sinh/CCCD/Ngày cấp/Địa chỉ.">📷 Đọc CCCD (ảnh/PDF, chọn nhiều được)</button>
+        <input type="file" id="nvCccdFile" accept=".jpg,.jpeg,.png,.pdf,image/*,application/pdf" multiple style="display:none" onchange="nvDocCccd(this)">
         <button class="btn ghost sm" onclick="nvXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
         <button class="btn ghost sm" onclick="nvMoCaiDatAi()" title="Cấu hình AI (Gemini hoặc AI tương thích OpenAI) để đọc CCCD khi ảnh KHÔNG có/đọc được mã QR — mã QR vẫn luôn được thử trước vì chính xác tuyệt đối và miễn phí">🤖 Cấu hình AI đọc CCCD</button>
       </div>
@@ -3976,32 +3977,41 @@ async function nvImportExcel(input){
   input.value='';
 }
 async function nvDocCccd(input){
-  const f=input.files&&input.files[0];
-  if(!f)return;
-  toast('Đang đọc mã QR trên CCCD...','');
-  try{
-    const fd=new FormData();
-    fd.append('file',f);
-    const r=await fetch('/api/nhan-vien/doc-cccd',{method:'POST',body:fd});
-    if(!r.ok){let m='Không đọc được';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    const d=await r.json();
-    let ri=(nvChon&&nvChon.r!=null&&nvRows[nvChon.r])?nvChon.r:-1;
-    if(ri<0){nvRows.push(nvHeader.map(()=>''));ri=nvRows.length-1;}
-    const dat=(ten,val)=>{
-      const ci=nvHeader.indexOf(ten);
-      if(ci>=0&&val)nvRows[ri][ci]=val;
-    };
-    dat('CCCD',d.so_cccd);
-    dat('Họ và tên',d.ho_ten);
-    dat('Ngày sinh',d.ngay_sinh);
-    dat('Ngày cấp',d.ngay_cap);
-    dat('Địa chỉ hiện đang cư trú',d.dia_chi);
-    nvChon={r:ri,c:0};
-    nvDanhLaiStt();
-    veGridNhanVien();
-    const nguon=d.nguon==='ai'?' (bằng AI)':' (từ mã QR)';
-    toast(`✓ Đã đọc CCCD${nguon}: ${d.ho_ten||d.so_cccd}. Nhớ bấm 💾 Lưu!`,'ok');
-  }catch(e){toast('Lỗi đọc CCCD: '+e.message,'err')}
+  const files=Array.from(input.files||[]);
+  if(!files.length)return;
+  toast(files.length>1?`Đang đọc CCCD từ ${files.length} file...`:'Đang đọc CCCD...','');
+  let ok=0, tenDaDoc=[], loi=[];
+  for(const f of files){
+    try{
+      const fd=new FormData();
+      fd.append('file',f);
+      const r=await fetch('/api/nhan-vien/doc-cccd',{method:'POST',body:fd});
+      if(!r.ok){let m='Không đọc được';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+      const d=await r.json();
+      // chỉ chọn 1 file và đang chọn sẵn 1 dòng -> điền vào đúng dòng đó; nhiều
+      // file (hoặc chưa chọn dòng nào) -> mỗi file 1 nhân viên, tự thêm dòng mới
+      let ri=(files.length===1&&nvChon&&nvChon.r!=null&&nvRows[nvChon.r])?nvChon.r:-1;
+      if(ri<0){nvRows.push(nvHeader.map(()=>''));ri=nvRows.length-1;}
+      const dat=(ten,val)=>{
+        const ci=nvHeader.indexOf(ten);
+        if(ci>=0&&val)nvRows[ri][ci]=val;
+      };
+      dat('CCCD',d.so_cccd);
+      dat('Họ và tên',d.ho_ten);
+      dat('Ngày sinh',d.ngay_sinh);
+      dat('Ngày cấp',d.ngay_cap);
+      dat('Địa chỉ hiện đang cư trú',d.dia_chi);
+      nvChon={r:ri,c:0};
+      ok++;
+      tenDaDoc.push(d.ho_ten||d.so_cccd||f.name);
+    }catch(e){
+      loi.push(`${f.name}: ${e.message}`);
+    }
+  }
+  nvDanhLaiStt();
+  veGridNhanVien();
+  if(ok)toast(`✓ Đã đọc ${ok}/${files.length} CCCD: ${tenDaDoc.join(', ')}. Nhớ bấm 💾 Lưu!`,'ok');
+  if(loi.length)toast(`Lỗi đọc CCCD (${loi.length}/${files.length} file): `+loi.slice(0,3).join(' | ')+(loi.length>3?` (+${loi.length-3} lỗi khác)`:''),'err');
   input.value='';
 }
 async function nvMoCaiDatAi(){
@@ -4019,6 +4029,7 @@ function nvCapNhatFormAi(){
   const laOpenAi=document.getElementById('nvAiProvider').value==='openai';
   document.getElementById('nvAiHintGemini').style.display=laOpenAi?'none':'';
   document.getElementById('nvAiAdvanced').style.display=laOpenAi?'':'none';
+  document.getElementById('nvAiModel').placeholder=laOpenAi?'vd: gpt-4o-mini':'vd: gemini-flash-latest';
 }
 async function nvLuuCaiDatAi(){
   try{

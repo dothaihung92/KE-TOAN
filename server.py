@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.155"
+APP_BUILD = "2026-07-27.156"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9563,8 +9563,14 @@ def _cccd_tu_ai_ra_dict(du_lieu):
 
 def _doc_cccd_gemini(img_bytes, mime, api_key, model=None):
     """Gọi Gemini API (Google AI Studio, có gói MIỄN PHÍ) đọc dữ liệu CCCD từ
-    ảnh bằng AI thị giác — dùng khi ảnh KHÔNG có/không đọc được mã QR."""
-    model = (model or "gemini-2.0-flash").strip() or "gemini-2.0-flash"
+    ảnh bằng AI thị giác — dùng khi ảnh KHÔNG có/không đọc được mã QR.
+    Mặc định dùng ALIAS "gemini-flash-latest" (Google tự trỏ sang model mới
+    nhất còn hỗ trợ) thay vì tên model ghim cứng theo phiên bản (vd
+    "gemini-2.0-flash") — tên ghim cứng theo phiên bản sẽ bị Google NGỪNG HỖ
+    TRỢ sau một thời gian (lỗi 404 "model is no longer available"), dùng
+    alias tránh phải sửa code định kỳ. Người dùng vẫn có thể tự ghi đè model
+    cụ thể ở mục Cấu hình AI đọc CCCD nếu muốn."""
+    model = (model or "gemini-flash-latest").strip() or "gemini-flash-latest"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     body = {
         "contents": [{"parts": [
