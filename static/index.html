@@ -230,10 +230,10 @@
     </div>
     <div id="hoTroKeKhaiSub" style="display:none;position:fixed;flex-direction:column;gap:8px;padding:10px;
         background:#123a2b;border:1px solid rgba(255,255,255,.18);border-radius:10px;
-        box-shadow:6px 6px 24px rgba(0,0,0,.3);z-index:50;width:340px">
-      <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff" onclick="moDVCBatch();toggleHoTroKeKhai()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
-      <button class="btn" style="width:100%;font-size:14.5px;padding:10px" onclick="openBatchModal();toggleHoTroKeKhai()">🚀 Tra cứu hoá đơn hàng loạt</button>
-      <button class="btn ghost" style="width:100%;font-size:14px;padding:10px" onclick="moNopToKhai();toggleHoTroKeKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
+        box-shadow:6px 6px 24px rgba(0,0,0,.3);z-index:50;width:max-content">
+      <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff;white-space:nowrap" onclick="moDVCBatch();toggleHoTroKeKhai()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
+      <button class="btn" style="width:100%;font-size:14.5px;padding:10px;white-space:nowrap" onclick="openBatchModal();toggleHoTroKeKhai()">🚀 Tra cứu hoá đơn hàng loạt</button>
+      <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moNopToKhai();toggleHoTroKeKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
@@ -1244,6 +1244,13 @@ function toggleHoTroKeKhai(e){
   el.style.top=r.top+'px';
   el.style.display='flex';
   if(arrow)arrow.textContent='▾';
+  // Không chữ nào bị tràn màn hình bên phải: đo lại chiều rộng THẬT sau khi
+  // hiện ra (width:max-content phụ thuộc nội dung), co lại sát mép phải nếu
+  // vượt quá cửa sổ.
+  const elR=el.getBoundingClientRect();
+  if(elR.right>window.innerWidth-8){
+    el.style.left=Math.max(8,window.innerWidth-elR.width-8)+'px';
+  }
 }
 document.addEventListener('click',(e)=>{
   const el=document.getElementById('hoTroKeKhaiSub');
