@@ -1023,6 +1023,12 @@ async function adminKiemTraQuyen(){
   try{
     const r=await api('/api/admin/trang-thai');
     document.getElementById('adminBtnWrap').style.display=r.la_admin?'':'none';
+    // Máy admin không cần hiện dòng trạng thái giấy phép (vĩnh viễn/còn hạn)
+    // — chỉ dành cho máy người dùng thường.
+    if(r.la_admin){
+      const bar=document.getElementById('licenseBar');
+      if(bar)bar.style.display='none';
+    }
   }catch(e){}
 }
 function adminToggleVinhVien(){
