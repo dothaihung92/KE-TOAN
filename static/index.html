@@ -223,15 +223,17 @@
       <button class="btn ghost" style="flex:1;font-size:13.5px;padding:8px" onclick="exportCongTy()">📤 Export DS</button>
       <input type="file" id="impCoFile" accept=".xlsx" style="display:none" onchange="importCongTy(this)">
     </div>
-    <div style="padding:0 12px 8px">
-      <button class="btn" id="btnHoTroKeKhai" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff;display:flex;align-items:center;justify-content:space-between" onclick="toggleHoTroKeKhai()">
+    <div style="padding:0 12px 8px;position:relative">
+      <button class="btn" id="btnHoTroKeKhai" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff;display:flex;align-items:center;justify-content:space-between" onclick="toggleHoTroKeKhai(event)">
         <span>🤖 Hỗ Trợ Kê khai tự động</span><span id="hoTroKeKhaiArrow">▸</span>
       </button>
-      <div id="hoTroKeKhaiSub" style="display:none;flex-direction:column;gap:8px;margin-top:8px;padding-left:8px;border-left:2px solid rgba(255,255,255,.15)">
-        <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff" onclick="moDVCBatch()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
-        <button class="btn" style="width:100%;font-size:14.5px;padding:10px" onclick="openBatchModal()">🚀 Tra cứu hoá đơn hàng loạt</button>
-        <button class="btn ghost" style="width:100%;font-size:14px;padding:10px" onclick="moNopToKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
-      </div>
+    </div>
+    <div id="hoTroKeKhaiSub" style="display:none;position:fixed;flex-direction:column;gap:8px;padding:10px;
+        background:#123a2b;border:1px solid rgba(255,255,255,.18);border-radius:10px;
+        box-shadow:6px 6px 24px rgba(0,0,0,.3);z-index:50;width:340px">
+      <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff" onclick="moDVCBatch();toggleHoTroKeKhai()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
+      <button class="btn" style="width:100%;font-size:14.5px;padding:10px" onclick="openBatchModal();toggleHoTroKeKhai()">🚀 Tra cứu hoá đơn hàng loạt</button>
+      <button class="btn ghost" style="width:100%;font-size:14px;padding:10px" onclick="moNopToKhai();toggleHoTroKeKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
@@ -1224,13 +1226,34 @@ function tokenTrangThaiCty(c){
   const ngayStr=`${p[2]}/${p[1]}/${p[0]}`;
   return {conNgay,fg,nhan,ngayStr};
 }
-function toggleHoTroKeKhai(){
+function toggleHoTroKeKhai(e){
+  if(e)e.stopPropagation();
   const el=document.getElementById('hoTroKeKhaiSub');
   const arrow=document.getElementById('hoTroKeKhaiArrow');
   const dangHien=el.style.display==='flex';
-  el.style.display=dangHien?'none':'flex';
-  if(arrow)arrow.textContent=dangHien?'▸':'▾';
+  if(dangHien){
+    el.style.display='none';
+    if(arrow)arrow.textContent='▸';
+    return;
+  }
+  // hiện ra BÊN PHẢI khung sidebar, ngang hàng với nút — không đẩy các nút
+  // khác trong sidebar xuống nữa (position:fixed, tính toạ độ theo nút)
+  const btn=document.getElementById('btnHoTroKeKhai');
+  const r=btn.getBoundingClientRect();
+  el.style.left=(r.right+10)+'px';
+  el.style.top=r.top+'px';
+  el.style.display='flex';
+  if(arrow)arrow.textContent='▾';
 }
+document.addEventListener('click',(e)=>{
+  const el=document.getElementById('hoTroKeKhaiSub');
+  const btn=document.getElementById('btnHoTroKeKhai');
+  if(!el||el.style.display!=='flex')return;
+  if(el.contains(e.target)||(btn&&btn.contains(e.target)))return;
+  el.style.display='none';
+  const arrow=document.getElementById('hoTroKeKhaiArrow');
+  if(arrow)arrow.textContent='▸';
+});
 async function loadCompanies(){
   companies=await api('/api/companies');
   // đồng bộ trạng thái đăng nhập từ backend (giữ phiên nhiều công ty)
