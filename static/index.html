@@ -224,13 +224,14 @@
       <input type="file" id="impCoFile" accept=".xlsx" style="display:none" onchange="importCongTy(this)">
     </div>
     <div style="padding:0 12px 8px">
-      <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff" onclick="moDVCBatch()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
-    </div>
-    <div style="padding:0 12px 8px">
-      <button class="btn" style="width:100%;font-size:14.5px;padding:10px" onclick="openBatchModal()">🚀 Tra cứu hoá đơn hàng loạt</button>
-    </div>
-    <div style="padding:0 12px 8px">
-      <button class="btn ghost" style="width:100%;font-size:14px;padding:10px" onclick="moNopToKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
+      <button class="btn" id="btnHoTroKeKhai" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff;display:flex;align-items:center;justify-content:space-between" onclick="toggleHoTroKeKhai()">
+        <span>🤖 Hỗ Trợ Kê khai tự động</span><span id="hoTroKeKhaiArrow">▸</span>
+      </button>
+      <div id="hoTroKeKhaiSub" style="display:none;flex-direction:column;gap:8px;margin-top:8px;padding-left:8px;border-left:2px solid rgba(255,255,255,.15)">
+        <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff" onclick="moDVCBatch()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
+        <button class="btn" style="width:100%;font-size:14.5px;padding:10px" onclick="openBatchModal()">🚀 Tra cứu hoá đơn hàng loạt</button>
+        <button class="btn ghost" style="width:100%;font-size:14px;padding:10px" onclick="moNopToKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
+      </div>
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
@@ -1222,6 +1223,13 @@ function tokenTrangThaiCty(c){
   const p=c.token_ngay_het_han.split('-');
   const ngayStr=`${p[2]}/${p[1]}/${p[0]}`;
   return {conNgay,fg,nhan,ngayStr};
+}
+function toggleHoTroKeKhai(){
+  const el=document.getElementById('hoTroKeKhaiSub');
+  const arrow=document.getElementById('hoTroKeKhaiArrow');
+  const dangHien=el.style.display==='flex';
+  el.style.display=dangHien?'none':'flex';
+  if(arrow)arrow.textContent=dangHien?'▸':'▾';
 }
 async function loadCompanies(){
   companies=await api('/api/companies');
