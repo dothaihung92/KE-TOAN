@@ -3361,22 +3361,11 @@ function CompanyScreen({
     }
   };
   // Lấy hoá đơn đầu vào/đầu ra ĐÃ TRA CỨU SẴN trong phần mềm chính (cùng máy,
-  // cùng server) theo MST công ty này + khoảng ngày tự chọn — phần mềm chính
-  // tự phân loại đầu vào/đầu ra, tự điền thẳng vào cả 2 ô dán dữ liệu, không
-  // cần copy/paste tay nữa.
-  const layHoaDonTuPhanMemChinh = async () => {
-    const tuStr = prompt("Từ ngày (dd/mm/yyyy) — để trống nếu không giới hạn:", "");
-    if (tuStr === null) return;
-    const denStr = prompt("Đến ngày (dd/mm/yyyy) — để trống nếu không giới hạn:", "");
-    if (denStr === null) return;
-    const toIso = s => {
-      const p = (s || "").trim().split("/");
-      return p.length === 3 ? `${p[2]}-${p[1].padStart(2, "0")}-${p[0].padStart(2, "0")}` : "";
-    };
+  // cùng server) theo MST công ty này — lấy TOÀN BỘ (không giới hạn ngày),
+  // phần mềm chính tự phân loại đầu vào/đầu ra, tự điền thẳng vào cả 2 ô dán
+  // dữ liệu, không cần chọn ngày hay copy/paste tay.
+  const layHoaDonTuPhanMemChinh = async (im_lang) => {
     const qs = new URLSearchParams({ mst: (co && co.mst) || "" });
-    const tuIso = toIso(tuStr), denIso = toIso(denStr);
-    if (tuIso) qs.set("tu", tuIso);
-    if (denIso) qs.set("den", denIso);
     try {
       const res = await fetch("/api/dcnh/hoa-don?" + qs.toString());
       if (!res.ok) {
@@ -3385,11 +3374,23 @@ function CompanyScreen({
       }
       const d = await res.json();
       upd({ dvText: d.dau_vao || "", drText: d.dau_ra || "" });
-      showToast(`Đã lấy ${d.so_dau_vao} HĐ đầu vào + ${d.so_dau_ra} HĐ đầu ra từ Tra cứu hóa đơn (${d.ten_cong_ty || co.mst})`, "ok");
+      if (!im_lang || d.so_dau_vao || d.so_dau_ra) {
+        showToast(`Đã lấy ${d.so_dau_vao} HĐ đầu vào + ${d.so_dau_ra} HĐ đầu ra từ Tra cứu hóa đơn (${d.ten_cong_ty || co.mst})`, "ok");
+      }
     } catch (e) {
-      showToast("Lỗi lấy dữ liệu từ Tra cứu hóa đơn: " + e.message, "err");
+      if (!im_lang) showToast("Lỗi lấy dữ liệu từ Tra cứu hóa đơn: " + e.message, "err");
     }
   };
+  // Tự động lấy ngay khi mở công ty (chỉ 1 lần/công ty/phiên làm việc, và chỉ
+  // khi cả 2 ô đầu vào + đầu ra đang trống — không ghi đè dữ liệu đã dán tay).
+  const daTuDongLayRef = useRef(null);
+  useEffect(() => {
+    if (!co || !co.mst) return;
+    if (daTuDongLayRef.current === co.id) return;
+    daTuDongLayRef.current = co.id;
+    if (dvText || drText) return;
+    layHoaDonTuPhanMemChinh(true);
+  }, [co && co.id]);
   const FileUploadBtn = ({
     label,
     type,
@@ -3729,8 +3730,8 @@ function CompanyScreen({
       padding: "3px 10px",
       fontSize: 12
     },
-    onClick: layHoaDonTuPhanMemChinh
-  }, "\uD83D\uDCE5 L\u1EA5y t\u1EEB Tra c\u1EE9u h\xF3a \u0111\u01A1n")), /*#__PURE__*/React.createElement("textarea", {
+    onClick: () => layHoaDonTuPhanMemChinh()
+  }, "\uD83D\uDD04 L\u1EA5y l\u1EA1i t\u1EEB Tra c\u1EE9u h\xF3a \u0111\u01A1n")), /*#__PURE__*/React.createElement("textarea", {
     value: dvText,
     onChange: e => upd({
       dvText: e.target.value
@@ -3763,8 +3764,8 @@ function CompanyScreen({
       padding: "3px 10px",
       fontSize: 12
     },
-    onClick: layHoaDonTuPhanMemChinh
-  }, "\uD83D\uDCE5 L\u1EA5y t\u1EEB Tra c\u1EE9u h\xF3a \u0111\u01A1n")), /*#__PURE__*/React.createElement("textarea", {
+    onClick: () => layHoaDonTuPhanMemChinh()
+  }, "\uD83D\uDD04 L\u1EA5y l\u1EA1i t\u1EEB Tra c\u1EE9u h\xF3a \u0111\u01A1n")), /*#__PURE__*/React.createElement("textarea", {
     value: drText,
     onChange: e => upd({
       drText: e.target.value
