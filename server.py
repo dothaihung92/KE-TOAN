@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.167"
+APP_BUILD = "2026-08-15.168"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16748,16 +16748,37 @@ def _misa_chan_doan_phan_bo_ccdc(cid, database):
             except Exception:
                 return []
 
-        def _dong_khop_gia_tri(bang, cot_tien_list, gia_tri_list):
+        def _liet_ke_cot_so(bang):
+            """Chỉ những cột KIỂU SỐ (money/decimal/numeric/float/real/int...) —
+            AN TOÀN để so sánh (=?) với giá trị tiền, tránh lỗi ép kiểu SQL
+            Server khi so sánh cột chữ/ngày/nhị phân với số."""
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "JOIN sys.types ty ON ty.user_type_id=c.user_type_id "
+                    "WHERE c.object_id=OBJECT_ID(?) AND ty.name IN "
+                    "('money','smallmoney','decimal','numeric','float','real',"
+                    "'int','bigint','smallint','tinyint') ORDER BY c.column_id",
+                    bang).fetchall()]
+            except Exception:
+                return []
+
+        def _dong_khop_gia_tri(bang, gia_tri_list):
+            """Dò 1 bảng: lấy toàn bộ tên cột (để xem cấu trúc) + vài dòng THẬT
+            khớp đúng 1 trong các số tiền đã biết trên các cột KIỂU SỐ. Nếu
+            không có cột số nào phù hợp hoặc bảng không tồn tại, vẫn trả về
+            cấu trúc cột (không lỗi) — không bao giờ để ngoại lệ văng ra ngoài."""
             cols = _liet_ke_cot_day_du(bang)
-            if not cols or not cot_tien_list:
-                return {"cot": cols, "dong": []}
-            dks = " OR ".join("[%s]=?" % c for c in cot_tien_list)
-            tham_so = []
-            dieu_kien_all = []
+            if not cols:
+                return {"cot": [], "dong": [], "ghi_chu": "Không tìm thấy bảng này."}
+            cot_so = _liet_ke_cot_so(bang)
+            if not cot_so:
+                return {"cot": cols, "dong": [], "ghi_chu": "Không có cột kiểu số để dò giá trị."}
+            dks = " OR ".join("[%s]=?" % c for c in cot_so)
+            tham_so, dieu_kien_all = [], []
             for gt in gia_tri_list:
                 dieu_kien_all.append("(" + dks + ")")
-                tham_so.extend([gt] * len(cot_tien_list))
+                tham_so.extend([gt] * len(cot_so))
             sql = "SELECT TOP 12 [%s] FROM [%s] WHERE %s" % (
                 "],[".join(cols), bang, " OR ".join(dieu_kien_all))
             dong = []
@@ -16765,30 +16786,41 @@ def _misa_chan_doan_phan_bo_ccdc(cid, database):
                 for r in cur.execute(sql, tham_so).fetchall():
                     dong.append(dict(zip(cols, [_dep(v) for v in r])))
             except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 return {"cot": cols, "dong": [], "loi": str(e)}
             return {"cot": cols, "dong": dong}
 
         chi_tiet_bang = {}
         for bang in ("SUAllocation",):
-            cols_b = _liet_ke_cot_day_du(bang)
-            cot_tien_b = [c for c in cols_b if c.lower() in
-                          ("totalamount", "amount", "totalallocationamount")]
-            chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, cot_tien_b or cols_b, gia_tri_biet_ct)
+            try:
+                chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, gia_tri_biet_ct)
+            except Exception as e:
+                chi_tiet_bang[bang] = {"loi": str(e)}
         for bang in ("SUAllocationDetailExpense", "SUAllocationDetailTable"):
-            cols_b = _liet_ke_cot_day_du(bang)
-            cot_tien_b = [c for c in cols_b if c.lower() in
-                          ("totalallocationamount", "allocationamount", "amount")]
-            chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, cot_tien_b or cols_b, gia_tri_biet_ccdc)
+            try:
+                chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, gia_tri_biet_ccdc)
+            except Exception as e:
+                chi_tiet_bang[bang] = {"loi": str(e)}
         for bang in ("SUAllocationDetailPost",):
-            cols_b = _liet_ke_cot_day_du(bang)
-            cot_tien_b = [c for c in cols_b if c.lower() in ("amount", "totalamount")]
-            chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, cot_tien_b or cols_b, gia_tri_biet_ct)
+            try:
+                chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, gia_tri_biet_ct)
+            except Exception as e:
+                chi_tiet_bang[bang] = {"loi": str(e)}
 
         return {"database": database, "cot_su_increment_tim_duoc": cot_that_su,
                 "cot_supply_ledger_tim_duoc": cot_that_led,
                 "su_increment": su_rows[:500], "supply_ledger_pbcc": led_rows,
                 "do_tim_bang_so_tien_that": do_tim,
                 "chi_tiet_bang_allocation": chi_tiet_bang}
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Công cụ CHẨN ĐOÁN không bao giờ được để văng lỗi 500 chung chung —
+        # trả lỗi cụ thể ra JSON để còn đọc được, thay vì "Internal Server Error".
+        raise HTTPException(400, f"Lỗi chẩn đoán (đã dừng an toàn, KHÔNG ghi/sửa gì): {e}")
     finally:
         conn.close()
 
