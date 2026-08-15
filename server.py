@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.164"
+APP_BUILD = "2026-07-27.165"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16647,6 +16647,63 @@ def misa_sql_phan_bo_ccdc(cid: int, preview: int = 1, database: str = "",
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_phan_bo_ccdc(cid, database, preview=bool(preview),
                               tu_thang=tu_thang, so_thang=so_thang)
+
+
+def _misa_chan_doan_phan_bo_ccdc(cid, database):
+    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC, không ghi/sửa gì) — dump TOÀN BỘ dữ liệu THẬT
+    liên quan phân bổ CCDC: từng dòng SUIncrement (trạng thái phân bổ đang
+    lưu cho mỗi CCDC) + các chứng từ PBCC thật đã có trên SupplyLedger — để
+    đối chiếu, tìm đúng công thức/cột MISA thật sự dùng cho 'Phân bổ chi
+    phí' khi _misa_phan_bo_ccdc tính sai (vd ra số âm/quá nhiều dòng)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cols_su = _misa_cot_bang_that(cur, "SUIncrement")
+        cols_led = _misa_cot_bang_that(cur, "SupplyLedger")
+
+        def _dep(v):
+            if hasattr(v, "isoformat"):
+                return v.isoformat()
+            if isinstance(v, float):
+                return round(v, 2)
+            return v
+
+        ten_cot_su = ["SupplyCode", "SupplyName", "Amount", "AllocationTime",
+                      "RemainingAllocationTime", "TermlyAllocationAmount",
+                      "RemaingAmount", "RemainingAmount", "AllocatedAmount"]
+        cot_that_su = [c for c in (_misa_chon_cot(cols_su, t) for t in ten_cot_su) if c]
+        su_rows = []
+        if cot_that_su:
+            sql = "SELECT [%s] FROM SUIncrement ORDER BY [%s]" % (
+                "],[".join(cot_that_su), cot_that_su[0])
+            for r in cur.execute(sql).fetchall():
+                su_rows.append(dict(zip(cot_that_su, [_dep(v) for v in r])))
+
+        ten_cot_led = ["RefNo", "RefDate", "PostedDate", "RefType", "DisplayOnBook",
+                       "SupplyCode", "SupplyName", "SupplyID", "RefID", "RefDetailID",
+                       "IncrementAmount", "TermlyAllocationAmount", "JournalMemo"]
+        cot_that_led = [c for c in (_misa_chon_cot(cols_led, t) for t in ten_cot_led) if c]
+        led_rows = []
+        if cot_that_led:
+            sql = ("SELECT TOP 60 [%s] FROM SupplyLedger WHERE RefNo LIKE 'PBCC%%' "
+                   "ORDER BY RefDate DESC, RefNo DESC" % "],[".join(cot_that_led))
+            for r in cur.execute(sql).fetchall():
+                led_rows.append(dict(zip(cot_that_led, [_dep(v) for v in r])))
+
+        return {"database": database, "cot_su_increment_tim_duoc": cot_that_su,
+                "cot_supply_ledger_tim_duoc": cot_that_led,
+                "su_increment": su_rows[:500], "supply_ledger_pbcc": led_rows}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-phan-bo-ccdc/{cid}")
+def misa_sql_chan_doan_phan_bo_ccdc(cid: int, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_phan_bo_ccdc."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_phan_bo_ccdc(cid, database)
 
 
 # ============================================================

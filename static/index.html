@@ -864,6 +864,7 @@
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Từ DM CCDC → form MISA ghi tăng</div>
           <button class="btn sm" style="background:#b06a00;margin-top:10px" onclick="event.stopPropagation();ghiTangImportMisa('ccdc')" title="Ghi thẳng vào MISA (Công cụ dụng cụ > Ghi tăng)">⬆ Import vào MISA</button>
           <button class="btn sm" style="background:#7a4fb5;margin-top:6px" onclick="event.stopPropagation();phanBoCcdcMo()" title="Tự động tạo chứng từ Phân bổ chi phí CCDC hàng tháng thẳng vào MISA (Công cụ dụng cụ > Phân bổ chi phí), mặc định 12 tháng, có thể tùy chỉnh">🤖 Phân bổ chi phí tự động</button>
+          <button class="btn ghost sm" style="color:#666;margin-top:6px" onclick="event.stopPropagation();phanBoCcdcChanDoan()" title="Chỉ xem — xem toàn bộ dữ liệu THẬT (không sửa gì) để chẩn đoán khi 'Phân bổ chi phí tự động' tính sai (số âm/quá nhiều dòng)">🔬 Chẩn đoán dữ liệu</button>
         </div>
         <div onclick="ghiTang('tscd')" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b06a00;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#fdf5ec'" onmouseout="this.style.background='#fff'">
@@ -4836,6 +4837,20 @@ async function phanBoCcdcGhi(thangBd,soThang){
     document.getElementById('misaModal').style.display='none';
     toast(`✓ Đã ghi ${d.so_dong||0} chứng từ Phân bổ chi phí CCDC vào MISA. Mở MISA kiểm tra lại.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+async function phanBoCcdcChanDoan(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang dò dữ liệu (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-phan-bo-ccdc/${current}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (CHỈ ĐỌC, không sửa/ghi gì) — database: <b>${misaEsc(d.database||'')}</b>. Copy toàn bộ nội dung dưới đây gửi lại để chẩn đoán công thức Phân bổ chi phí CCDC.</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function moBangKe(loai){
   nlDMMode=null;
