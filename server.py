@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.170"
+APP_BUILD = "2026-08-15.171"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16729,7 +16729,8 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             conn.rollback()
         else:
             conn.commit()
-        return {"preview": preview, "database": database, "so_dong": len(ket), "danh_sach": ket,
+        return {"preview": preview, "database": database, "so_dong": len(ket),
+                "so_chung_tu": len(set(x["so_chung_tu"] for x in ket)), "danh_sach": ket,
                 "thang_bat_dau": thang_bd, "so_thang": so_thang,
                 "hoc_duoc": {"ref_type": ref_type_pb, "display_on_book": dob_pb,
                             "tk_no_mac_dinh": debit_mac_dinh, "tk_co_mac_dinh": credit_mac_dinh}}
