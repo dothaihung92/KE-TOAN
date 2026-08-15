@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.174"
+APP_BUILD = "2026-08-15.175"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18507,23 +18507,45 @@ def _misa_tom_tat_buoc(r):
         phan.append(f"{r['so_don_vi_moi']} ĐVT mới")
     if r.get("so_bo_qua_kh"):
         phan.append(f"bỏ qua thiếu KH {r['so_bo_qua_kh']}")
+    if r.get("so_chung_tu") is not None:
+        phan.append(f"{r['so_chung_tu']} chứng từ")
+    if r.get("so_dong") is not None and "danh_sach" in r:
+        phan.append(f"{r['so_dong']} dòng")
+    if not phan and r.get("ghi_chu"):
+        return r["ghi_chu"]
     return ", ".join(phan) or "xong"
 
 
-def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True, bao=None):
+def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True, bao=None,
+                         tu_thang=None, den_thang=None):
     """Chạy lần lượt: 1) Danh mục KH/NCC  2) Bảng kê Đầu ra (Bán hàng)
     3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC (sinh từ Bảng kê Đầu vào đã lưu)
     4) Mua hàng Nhập kho/Không qua kho/Dịch vụ (Bảng kê Đầu vào đã lưu)
-    5) Ghi tăng CCDC/TSCĐ (Bảng kê Đầu vào đã lưu, TK Nợ 242x/211x).
+    5) Ghi tăng CCDC/TSCĐ (Bảng kê Đầu vào đã lưu, TK Nợ 242x/211x)
+    6) Phân bổ chi phí CCDC tự động  7) Tính khấu hao TSCĐ tự động.
     Chứng từ (Bán hàng/Mua hàng) LUÔN ghi ở trạng thái CHƯA GHI SỔ như mọi
     khi (không tự Ghi sổ bằng SQL — xem giải thích lý do an toàn ở nơi gọi
     API này); Ghi tăng CCDC/TSCĐ vẫn ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi
-    tăng danh mục không sinh bút toán, không có tầng "Ghi sổ" riêng).
+    tăng danh mục không sinh bút toán, không có tầng "Ghi sổ" riêng); Phân
+    bổ CCDC/Khấu hao TSCĐ tạo chứng từ hàng tháng theo khung tu_thang/
+    den_thang (yyyy-mm) người dùng chọn — để trống cả 2 = mỗi bước tự chọn
+    12 tháng kể từ chứng từ PBCC/KH gần nhất đã có (giống chạy riêng lẻ
+    từng nút "🤖 ... tự động").
     bao(text): callback báo tiến độ từng bước (công ty nhiều dữ liệu chạy
     khá lâu — không có callback thì chạy âm thầm như cũ)."""
     if bao is None:
         bao = lambda *_a: None
     buoc = []
+
+    tu_thang_kh = (tu_thang or "").strip() or None
+    so_thang_kh = 12
+    if tu_thang_kh and (den_thang or "").strip():
+        try:
+            y0, m0 = [int(x) for x in tu_thang_kh.split("-")]
+            y1, m1 = [int(x) for x in den_thang.strip().split("-")]
+            so_thang_kh = max(1, (y1 * 12 + m1) - (y0 * 12 + m0) + 1)
+        except Exception:
+            pass
 
     def chay(ten, fn):
         bao(f"▶ Đang xử lý: {ten}...")
@@ -18582,6 +18604,13 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True, bao=None):
     chay("5b. Ghi tăng TSCĐ",
          lambda: _misa_ghi_tang_tscd(cid, database, preview=preview, ghi_de=ghi_de))
 
+    chay("5c. Phân bổ chi phí CCDC tự động",
+         lambda: _misa_phan_bo_ccdc(cid, database, preview=preview,
+                                    tu_thang=tu_thang_kh, so_thang=so_thang_kh))
+    chay("5d. Tính khấu hao TSCĐ tự động",
+         lambda: _misa_khau_hao_tscd(cid, database, preview=preview,
+                                     tu_thang=tu_thang_kh, so_thang=so_thang_kh))
+
     bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
 
@@ -18594,9 +18623,12 @@ MISA_IMPORT_JOBS = {}   # {cid: {"messages": [...], "running": bool, "result": d
 
 
 @app.post("/api/misa-sql/import-tu-dong-start/{cid}")
-def misa_sql_import_tu_dong_start(cid: int, preview: int = 1, database: str = "", ghi_de: int = 1):
+def misa_sql_import_tu_dong_start(cid: int, preview: int = 1, database: str = "", ghi_de: int = 1,
+                                  tu_thang: str = "", den_thang: str = ""):
     """Bắt đầu chạy NỀN toàn bộ luồng import vào MISA — xem
-    _misa_import_tu_dong. Trả về ngay, trình duyệt poll
+    _misa_import_tu_dong. tu_thang/den_thang (yyyy-mm): khung tháng cho 2
+    bước Phân bổ chi phí CCDC/Tính khấu hao TSCĐ tự động, để trống = tự
+    chọn. Trả về ngay, trình duyệt poll
     /api/misa-sql/import-tu-dong-status/{cid} để lấy tiến độ."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
@@ -18611,7 +18643,8 @@ def misa_sql_import_tu_dong_start(cid: int, preview: int = 1, database: str = ""
     def _chay_nen():
         try:
             job["result"] = _misa_import_tu_dong(
-                cid, database, preview=bool(preview), ghi_de=bool(ghi_de), bao=_bao)
+                cid, database, preview=bool(preview), ghi_de=bool(ghi_de), bao=_bao,
+                tu_thang=tu_thang, den_thang=den_thang)
         except Exception as e:
             _bao(f"✗ Lỗi không mong đợi — đã dừng: {str(e)[:300]}")
         finally:

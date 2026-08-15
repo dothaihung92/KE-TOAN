@@ -896,7 +896,7 @@
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối CSDL MISA (thử nghiệm)</button>
-            <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDong()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ — bước nào không có dữ liệu tự bỏ qua">🚀 Import tự động toàn bộ vào MISA</button>
+            <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongMo()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động — bước nào không có dữ liệu tự bỏ qua">🚀 Import tự động toàn bộ vào MISA</button>
             <button class="btn sm" style="background:#7a4fb5" onclick="misaDoiChieuMo()" title="Tổng hợp công nợ theo kỳ (đọc thẳng MISA) + đối chiếu 3 tầng khớp thanh toán ngân hàng với hóa đơn + tìm hóa đơn tiền mặt bị lỡ ghi công nợ (treo)">📊 Đối chiếu công nợ</button>
           </div>
         </div>
@@ -6075,10 +6075,14 @@ function misaTomTatBuoc(r){
   if(r.so_trung!=null&&r.so_trung>0)phan.push(`bỏ qua (đã có) ${r.so_trung}`);
   if(r.so_don_vi_moi!=null&&r.so_don_vi_moi>0)phan.push(`${r.so_don_vi_moi} ĐVT mới`);
   if(r.so_bo_qua_kh!=null&&r.so_bo_qua_kh>0)phan.push(`bỏ qua thiếu KH ${r.so_bo_qua_kh}`);
+  if(r.so_chung_tu!=null)phan.push(`${r.so_chung_tu} chứng từ`);
+  if(r.so_dong!=null&&r.danh_sach!=null)phan.push(`${r.so_dong} dòng`);
+  if(!phan.length&&r.ghi_chu)return r.ghi_chu;
   return phan.join(', ')||'xong';
 }
 let misaImportRunId=0;   // để lượt chạy MỚI (vd bấm "Xác nhận chạy thật") tự
                           // dừng vòng poll của lượt CŨ, tránh 2 vòng poll ghi đè nhau
+let misaImportTuThang='', misaImportDenThang='';   // khung tháng cho bước Phân bổ CCDC/Khấu hao TSCĐ
 async function misaImportTuDongChay(preview){
   const runId=++misaImportRunId;
   const cid=current;
@@ -6097,7 +6101,10 @@ async function misaImportTuDongChay(preview){
   misaModalNormal();document.getElementById('misaModal').style.display='flex';
   const log=document.getElementById('misaImportLog');
   try{
-    await api(`/api/misa-sql/import-tu-dong-start/${cid}?preview=${preview?1:0}`,{method:'POST'});
+    const qs=new URLSearchParams({preview:preview?'1':'0'});
+    if(misaImportTuThang)qs.set('tu_thang',misaImportTuThang);
+    if(misaImportDenThang)qs.set('den_thang',misaImportDenThang);
+    await api(`/api/misa-sql/import-tu-dong-start/${cid}?${qs.toString()}`,{method:'POST'});
   }catch(e){
     log.textContent='✗ Lỗi: '+e.message;
     document.getElementById('misaImportFooter').innerHTML=
@@ -6145,8 +6152,23 @@ function misaImportHienKetQua(d,preview){
       ${preview?'<button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongChay(false)">✔ Xác nhận chạy thật</button>':''}
     </div>`;
 }
-async function misaImportTuDong(){
+function misaImportTuDongMo(){
   if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaModalBody').innerHTML=`
+    <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động — bước nào không có dữ liệu tự bỏ qua.</div>
+    <label style="font-size:13px;font-weight:600">Bước 6-7 (Phân bổ CCDC / Khấu hao TSCĐ) — Từ tháng/năm (để trống = tự nối tiếp chứng từ gần nhất)</label>
+    <input type="month" id="importTuThang" value="${misaEsc(misaImportTuThang)}" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <label style="font-size:13px;font-weight:600">Đến tháng/năm (để trống = chạy 12 tháng kể từ Từ tháng)</label>
+    <input type="month" id="importDenThang" value="${misaEsc(misaImportDenThang)}" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongBatDau()">▶ Bắt đầu (Xem trước)</button>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+function misaImportTuDongBatDau(){
+  misaImportTuThang=document.getElementById('importTuThang').value||'';
+  misaImportDenThang=document.getElementById('importDenThang').value||'';
   misaImportTuDongChay(true);
 }
 // ===== Đối chiếu công nợ (Giai đoạn 1: Tổng hợp công nợ theo kỳ, đọc thẳng MISA)
