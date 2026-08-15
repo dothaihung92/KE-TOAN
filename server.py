@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.165"
+APP_BUILD = "2026-07-27.166"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16649,11 +16649,49 @@ def misa_sql_phan_bo_ccdc(cid: int, preview: int = 1, database: str = "",
                               tu_thang=tu_thang, so_thang=so_thang)
 
 
+def _misa_tim_bang_chua_so_tien(cur, gia_tri_biet):
+    """Dò TOÀN BỘ bảng có tên liên quan CCDC/Allocation/Supply (sys.tables),
+    tìm bảng+cột NÀO chứa ĐÚNG 1 giá trị tiền THẬT đã biết trước (vd đọc từ
+    ảnh chụp màn hình MISA) — cách CHẮC CHẮN nhất để tìm đúng bảng lưu
+    'Phân bổ chi phí CCDC' khi SupplyLedger không chứa số tiền thật (đối
+    chiếu dữ liệu thật: IncrementAmount/TermlyAllocationAmount trên
+    SupplyLedger LUÔN = 0 ở các dòng PBCC — số tiền thật nằm ở bảng khác)."""
+    ket = []
+    bang_ung_vien = []
+    try:
+        bang_ung_vien = [r[0] for r in cur.execute(
+            "SELECT name FROM sys.tables WHERE name LIKE 'SU%' OR name LIKE '%Alloc%' "
+            "OR name LIKE '%CCDC%' OR name LIKE '%Supply%' OR name LIKE '%Cost%' "
+            "ORDER BY name").fetchall()]
+    except Exception:
+        pass
+    for bang in bang_ung_vien:
+        try:
+            cot_tien = [r[0] for r in cur.execute(
+                "SELECT c.name FROM sys.columns c JOIN sys.types ty ON ty.user_type_id=c.user_type_id "
+                "WHERE c.object_id=OBJECT_ID(?) AND ty.name IN "
+                "('money','smallmoney','decimal','numeric','float','real')", bang).fetchall()]
+        except Exception:
+            continue
+        for cot in cot_tien:
+            for gt in gia_tri_biet:
+                try:
+                    n = cur.execute(
+                        "SELECT COUNT(*) FROM [%s] WHERE [%s]=?" % (bang, cot), gt).fetchone()[0]
+                    if n:
+                        ket.append({"bang": bang, "cot": cot, "gia_tri_tim": gt, "so_dong_khop": n})
+                except Exception:
+                    pass
+    return {"bang_ung_vien_theo_ten": bang_ung_vien, "tim_thay_gia_tri": ket}
+
+
 def _misa_chan_doan_phan_bo_ccdc(cid, database):
     """CHẨN ĐOÁN SÂU (CHỈ ĐỌC, không ghi/sửa gì) — dump TOÀN BỘ dữ liệu THẬT
     liên quan phân bổ CCDC: từng dòng SUIncrement (trạng thái phân bổ đang
-    lưu cho mỗi CCDC) + các chứng từ PBCC thật đã có trên SupplyLedger — để
-    đối chiếu, tìm đúng công thức/cột MISA thật sự dùng cho 'Phân bổ chi
+    lưu cho mỗi CCDC) + các chứng từ PBCC thật đã có trên SupplyLedger, và
+    DÒ TÌM bảng THẬT chứa số tiền phân bổ (bằng cách tìm bảng có cột chứa
+    ĐÚNG các giá trị tiền thật đã biết từ ảnh chụp màn hình MISA) — để đối
+    chiếu, tìm đúng công thức/bảng/cột MISA thật sự dùng cho 'Phân bổ chi
     phí' khi _misa_phan_bo_ccdc tính sai (vd ra số âm/quá nhiều dòng)."""
     conn = _misa_sql_connect(cid, database=database)
     try:
@@ -16690,9 +16728,15 @@ def _misa_chan_doan_phan_bo_ccdc(cid, database):
             for r in cur.execute(sql).fetchall():
                 led_rows.append(dict(zip(cot_that_led, [_dep(v) for v in r])))
 
+        # Giá trị tiền THẬT đã biết chắc chắn (đọc từ ảnh chụp màn hình MISA
+        # người dùng gửi) — dùng làm "vân tay" dò đúng bảng/cột lưu số tiền.
+        gia_tri_biet = [264773, 6555117, 231856, 137500, 6880830, 8145224]
+        do_tim = _misa_tim_bang_chua_so_tien(cur, gia_tri_biet)
+
         return {"database": database, "cot_su_increment_tim_duoc": cot_that_su,
                 "cot_supply_ledger_tim_duoc": cot_that_led,
-                "su_increment": su_rows[:500], "supply_ledger_pbcc": led_rows}
+                "su_increment": su_rows[:500], "supply_ledger_pbcc": led_rows,
+                "do_tim_bang_so_tien_that": do_tim}
     finally:
         conn.close()
 
