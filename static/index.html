@@ -1301,13 +1301,44 @@ async function loadCompanies(){
   shown.forEach(c=>{
     const d=document.createElement('div');
     d.className='co'+(current===c.id?' active':'')+(c._online?' online':'');
+    d.dataset.mst=c.mst||'';
     d.onclick=()=>selectCompany(c.id);
+    d.oncontextmenu=(e)=>coCopyMst(e,c.mst);
     const tt=tokenTrangThaiCty(c);
     const tokenHtml=tt?` · ${tt.ngayStr} · <span style="color:${tt.fg};font-weight:700">${tt.nhan}</span>`:'';
     d.innerHTML=`<div class="nm"><span class="dot"></span>${c.ten}</div><div class="mst">MST: ${c.mst}${tokenHtml}</div>`;
     list.appendChild(d);
   });
 }
+// Chuột phải vào 1 công ty -> copy MST của đúng công ty đó (không mở menu chuột phải mặc định)
+function coCopyMst(e,mst){
+  e.preventDefault();
+  if(!mst){toast('Công ty này chưa có MST','err');return}
+  navigator.clipboard.writeText(mst).then(()=>{
+    toast(`📋 Đã copy MST: ${mst}`,'ok');
+  }).catch(()=>{
+    toast('Không copy được (trình duyệt chặn) — thử lại','err');
+  });
+}
+// Bôi đen (kéo chọn) nhiều dòng công ty rồi Ctrl+C -> "fill down" copy MST của
+// TỪNG công ty nằm trong vùng chọn, mỗi MST 1 dòng (dán thẳng vào 1 cột Excel
+// được luôn) — thay vì copy nguyên văn bản thô lộn xộn (tên, ngày, hạn dùng...).
+document.getElementById('coList').addEventListener('copy',(e)=>{
+  const sel=window.getSelection();
+  if(!sel||sel.rangeCount===0||sel.isCollapsed)return;
+  const range=sel.getRangeAt(0);
+  // Dùng Range.intersectsNode thay vì chỉ xét điểm đầu/cuối vùng chọn — kéo
+  // chuột lỡ tay quá đà xuống dưới dòng công ty cuối (vd chạm "+ Thêm công
+  // ty") vẫn nhận đúng các dòng công ty NẰM TRONG vùng chọn, không bị rớt.
+  const hang=Array.from(document.getElementById('coList').querySelectorAll('.co'))
+    .filter(h=>range.intersectsNode(h));
+  if(!hang.length)return; // vùng chọn không chạm dòng công ty nào -> để trình duyệt copy bình thường
+  const dsMst=hang.map(h=>h.dataset.mst).filter(Boolean);
+  if(!dsMst.length)return;
+  e.preventDefault();
+  e.clipboardData.setData('text/plain',dsMst.join('\n'));
+  toast(`📋 Đã copy ${dsMst.length} MST`,'ok');
+});
 // LUÔN mở form Sửa với dữ liệu MỚI NHẤT của công ty (tra theo id trong mảng
 // companies vừa được loadCompanies làm mới) — trước đây nút Sửa nhúng sẵn dữ
 // liệu công ty lúc render workspace, nên sau khi Lưu (workspace chưa vẽ lại)
