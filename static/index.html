@@ -816,7 +816,7 @@
 
 <!-- GIAO DIỆN NHẬP LIỆU (màn hình riêng) -->
 <div id="nhapLieuScreen" style="display:none;position:fixed;inset:0;background:var(--bg,#f4f6f3);z-index:500;overflow:auto">
-  <div style="max-width:1200px;margin:0 auto;padding:24px">
+  <div style="max-width:1900px;margin:0 auto;padding:24px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <h2 style="margin:0">✍️ Nhập Liệu <span id="nhapLieuTen" style="font-size:15px;font-weight:500;color:var(--muted)"></span></h2>
       <button class="btn ghost" onclick="dongNhapLieu()">← Quay lại</button>
@@ -3904,7 +3904,7 @@ function veGridNhanVien(){
   if(!wrap)return;
   const idxHien=nvRowsLoc();
   let html='<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>';
-  nvHeader.forEach(h=>{html+=`<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 8px;border:1px solid #8a2f68;white-space:nowrap">${nvEsc(h)}</th>`;});
+  nvHeader.forEach(h=>{html+=`<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 8px;border:1px solid #8a2f68;white-space:normal;max-width:110px;line-height:1.3">${nvEsc(h)}</th>`;});
   html+='</tr><tr>';
   nvHeader.forEach((h,ci)=>{html+=`<th style="position:sticky;top:29px;background:#f8eef5;padding:2px;border:1px solid #ddd"><input value="${nvEsc(nvFilters[ci]||'')}" oninput="nvFilters[${ci}]=this.value;veGridNhanVien()" placeholder="lọc..." style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>`;});
   html+='</tr></thead><tbody>';
