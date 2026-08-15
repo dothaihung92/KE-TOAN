@@ -863,6 +863,7 @@
           <div style="font-size:18px;font-weight:700;color:#b06a00">Ghi Tăng CCDC</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Từ DM CCDC → form MISA ghi tăng</div>
           <button class="btn sm" style="background:#b06a00;margin-top:10px" onclick="event.stopPropagation();ghiTangImportMisa('ccdc')" title="Ghi thẳng vào MISA (Công cụ dụng cụ > Ghi tăng)">⬆ Import vào MISA</button>
+          <button class="btn sm" style="background:#7a4fb5;margin-top:6px" onclick="event.stopPropagation();phanBoCcdcMo()" title="Tự động tạo chứng từ Phân bổ chi phí CCDC hàng tháng thẳng vào MISA (Công cụ dụng cụ > Phân bổ chi phí), mặc định 12 tháng, có thể tùy chỉnh">🤖 Phân bổ chi phí tự động</button>
         </div>
         <div onclick="ghiTang('tscd')" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b06a00;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#fdf5ec'" onmouseout="this.style.background='#fff'">
@@ -4776,6 +4777,64 @@ async function ghiTangImportMisaGhi(loai,ghiDe){
     const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de})`:'';
     document.getElementById('misaModal').style.display='none';
     toast(`✓ Đã ghi ${soThem} ${donVi} vào MISA${goTxt} — ĐÃ GHI SỔ, mỗi ${donVi} 1 số chứng từ riêng. Mở MISA kiểm tra lại.`,'ok');
+  }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+function phanBoCcdcMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaModalBody').innerHTML=`
+    <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+      ⚠ Tính năng MỚI — cấu trúc được dò tự động từ chính chứng từ PBCC thật đã có sẵn trong MISA của bạn, CHƯA qua nhiều lần kiểm chứng thực tế như Ghi Tăng CCDC. Luôn bấm "Xem trước" và kiểm tra kỹ trước khi ghi thật. Chỉ chạy trên dữ liệu THỬ / đã sao lưu.</div>
+    <div class="hint" style="margin-bottom:10px">Tự động tạo chứng từ "Phân bổ chi phí CCDC" hàng tháng (giống bấm Thêm trên MISA), dựa theo số kỳ còn lại đã lưu cho từng CCDC (từ lúc Ghi Tăng CCDC). Để trống "Tháng bắt đầu" để tự tiếp nối ngay sau chứng từ PBCC gần nhất đã có trong MISA.</div>
+    <label style="font-size:13px;font-weight:600">Tháng bắt đầu (để trống = tự động)</label>
+    <input type="month" id="pbccThangBd" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <label style="font-size:13px;font-weight:600">Số tháng xử lý</label>
+    <input type="number" id="pbccSoThang" value="12" min="1" max="60" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#7a4fb5" onclick="phanBoCcdcXemTruoc()">🔎 Xem trước</button>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function phanBoCcdcXemTruoc(){
+  const thangBd=document.getElementById('pbccThangBd').value||'';
+  const soThang=+document.getElementById('pbccSoThang').value||12;
+  toast('Đang tính toán (xem trước)...','');
+  try{
+    const qs=new URLSearchParams({preview:'1',so_thang:soThang});
+    if(thangBd)qs.set('tu_thang',thangBd);
+    const pv=await api(`/api/misa-sql/phan-bo-ccdc/${current}?${qs.toString()}`,{method:'POST'});
+    if(pv.ghi_chu){toast(pv.ghi_chu,'err');return}
+    const ds=(pv.danh_sach||[]).slice(0,500).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.thang||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_chung_tu||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ma||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.so_tien!=null?Number(x.so_tien).toLocaleString('vi-VN'):''}</td>
+    </tr>`).join('');
+    const tong=(pv.danh_sach||[]).reduce((s,x)=>s+(Number(x.so_tien)||0),0);
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+        ⚠ RỦI RO CAO: ghi vào <b>${misaEsc(pv.database||'?')}</b>. Mở MISA kiểm tra lại sau khi ghi. Chỉ chạy trên dữ liệu THỬ / đã sao lưu.</div>
+      <div style="margin-bottom:6px">Sẽ tạo <b style="color:#7a4fb5">${pv.so_dong||0}</b> chứng từ, tổng tiền <b>${tong.toLocaleString('vi-VN')}</b> — từ tháng <b>${misaEsc(pv.thang_bat_dau||'')}</b>, ${misaEsc(pv.so_thang||'')} tháng.</div>
+      <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tháng</th><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Mã CCDC</th><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Số tiền</th></tr>
+        ${ds||'<tr><td colspan="5" style="padding:10px;text-align:center;color:#999">Không có CCDC nào còn kỳ phân bổ trong khoảng này.</td></tr>'}</table></div>
+      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn ghost sm" onclick="phanBoCcdcMo()">← Sửa lại</button>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_dong>0?`<button class="btn sm" style="background:#a03a3a" onclick="phanBoCcdcGhi('${misaEsc(pv.thang_bat_dau||'')}',${+pv.so_thang||12})">⬆ Ghi ${pv.so_dong} chứng từ vào MISA</button>`:''}
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function phanBoCcdcGhi(thangBd,soThang){
+  toast('Đang ghi vào MISA...','');
+  try{
+    const qs=new URLSearchParams({preview:'0',so_thang:soThang});
+    if(thangBd)qs.set('tu_thang',thangBd);
+    const d=await api(`/api/misa-sql/phan-bo-ccdc/${current}?${qs.toString()}`,{method:'POST'});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã ghi ${d.so_dong||0} chứng từ Phân bổ chi phí CCDC vào MISA. Mở MISA kiểm tra lại.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 function moBangKe(loai){

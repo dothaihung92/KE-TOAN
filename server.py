@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.163"
+APP_BUILD = "2026-07-27.164"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16439,6 +16439,214 @@ def misa_sql_import_ghitang(cid: int, loai: str, preview: int = 1, database: str
     if loai == "tscd":
         return _misa_ghi_tang_tscd(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
     raise HTTPException(400, "Loại '%s' chưa hỗ trợ (chỉ tscd/ccdc)." % loai)
+
+
+def _misa_mau_dong_that(cur, table, dieu_kien_where, tham_so=()):
+    """Lấy 1 dòng THẬT (do người dùng tự tạo trên MISA, khác NULL/0 trên
+    NHIỀU cột nhất trong tối đa 5 dòng khớp điều kiện) — dùng để HỌC quy ước
+    cột nào MISA thật sự dùng cho 1 loại nghiệp vụ cụ thể khi nhiều loại
+    chứng từ khác nhau cùng nằm chung 1 bảng (vd SupplyLedger chứa cả dòng
+    'Ghi tăng' lẫn dòng 'Phân bổ chi phí', phân biệt qua RefType/RefNo).
+    Trả {tên cột: giá trị} hoặc {} nếu không có dòng nào khớp."""
+    try:
+        cols = [r[0] for r in cur.execute(
+            "SELECT name FROM sys.columns WHERE object_id=OBJECT_ID(?) "
+            "ORDER BY column_id", table).fetchall()]
+        if not cols:
+            return {}
+        sql = "SELECT TOP 5 [%s] FROM %s WHERE %s" % ("],[".join(cols), table, dieu_kien_where)
+        rows = cur.execute(sql, tham_so).fetchall()
+        if not rows:
+            return {}
+        best = max(rows, key=lambda r: sum(1 for v in r if v not in (None, 0, "")))
+        return dict(zip(cols, best))
+    except Exception:
+        return {}
+
+
+def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
+    """Tự động tạo chứng từ 'Phân bổ chi phí CCDC' HÀNG THÁNG thẳng vào
+    SupplyLedger — giống hệt bấm 'Thêm' trên màn 'Công cụ dụng cụ > Phân bổ
+    chi phí' của MISA (mã PBCC00001...). Dựa trên trạng thái phân bổ CÒN LẠI
+    lưu sẵn trên SUIncrement (RemainingAllocationTime/RemaingAmount/
+    TermlyAllocationAmount — do _misa_ghi_tang_ccdc ghi lúc Ghi Tăng CCDC).
+
+    KHÁC Ghi Tăng CCDC (đã qua nhiều lần thử thật trên MISA của người dùng):
+    đây là nghiệp vụ MỚI, CẤU TRÚC được HỌC TỰ ĐỘNG từ chính các dòng PBCC
+    THẬT đã có sẵn trong CSDL (RefNo LIKE 'PBCC%', do người dùng tự tạo tay
+    trên MISA trước đó) — không có dòng PBCC thật nào thì báo lỗi rõ, KHÔNG
+    đoán bừa RefType/cột số tiền. preview=True: chỉ tính toán, KHÔNG ghi gì
+    (rollback), trả về danh sách sẽ tạo để người dùng tự kiểm tra trước."""
+    import re
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cols_su = _misa_cot_bang_that(cur, "SUIncrement")
+        cols_led = _misa_cot_bang_that(cur, "SupplyLedger")
+        if not cols_su or not cols_led:
+            raise HTTPException(400, "Không tìm thấy bảng SUIncrement/SupplyLedger trong CSDL MISA đang kết nối.")
+        mau = _misa_mau_dong_that(cur, "SupplyLedger", "RefNo LIKE ?", ("PBCC%",))
+        if not mau:
+            raise HTTPException(
+                400, "Chưa có chứng từ 'Phân bổ chi phí CCDC' nào (mã bắt đầu bằng PBCC) "
+                     "trong MISA để học cấu trúc — hãy vào MISA, mục 'Công cụ dụng cụ > "
+                     "Phân bổ chi phí', tạo tay ít nhất 1 chứng từ rồi thử lại.")
+        ref_type_pb = mau.get("RefType")
+        dob_pb = mau.get("DisplayOnBook")
+        cot_tien_pb = None
+        for uv in ("IncrementAmount", "TermlyAllocationAmount", "Amount", "AllocationAmount"):
+            ten_that = _misa_chon_cot(cols_led, uv)
+            if ten_that and mau.get(ten_that):
+                cot_tien_pb = ten_that
+                break
+        if not cot_tien_pb:
+            cot_tien_pb = _misa_chon_cot(cols_led, "TermlyAllocationAmount")
+
+        max_so = 0
+        for (refno,) in cur.execute("SELECT RefNo FROM SupplyLedger WHERE RefNo LIKE 'PBCC%'").fetchall():
+            m = re.search(r"(\d+)$", str(refno or ""))
+            if m:
+                max_so = max(max_so, int(m.group(1)))
+
+        thang_bd = (tu_thang or "").strip()
+        if not thang_bd:
+            row_max_date = cur.execute(
+                "SELECT MAX(RefDate) FROM SupplyLedger WHERE RefNo LIKE 'PBCC%'").fetchone()
+            last_date = row_max_date[0] if row_max_date else None
+            if last_date:
+                y, m = last_date.year, last_date.month + 1
+                if m > 12:
+                    y += 1
+                    m = 1
+                thang_bd = f"{y}-{m:02d}"
+            else:
+                now = datetime.datetime.now()
+                thang_bd = f"{now.year}-{now.month:02d}"
+        try:
+            y0, m0 = [int(x) for x in thang_bd.split("-")]
+        except Exception:
+            raise HTTPException(400, "Tháng bắt đầu không hợp lệ (đúng dạng yyyy-mm).")
+
+        ma_col = _misa_chon_cot(cols_su, "SupplyCode")
+        id_col = _misa_chon_cot(cols_su, "SupplyID", "RefID")
+        ten_col = _misa_chon_cot(cols_su, "SupplyName")
+        rat_col = _misa_chon_cot(cols_su, "RemainingAllocationTime")
+        tka_col = _misa_chon_cot(cols_su, "TermlyAllocationAmount")
+        rem_col = _misa_chon_cot(cols_su, "RemaingAmount", "RemainingAmount")
+        alloc_col = _misa_chon_cot(cols_su, "AllocatedAmount")
+        if not (ma_col and id_col and rat_col):
+            raise HTTPException(
+                400, "CSDL MISA thiếu cột cần thiết trên bảng SUIncrement "
+                     "(SupplyCode/SupplyID/RemainingAllocationTime).")
+
+        sel = "SELECT [%s],[%s],[%s],ISNULL([%s],0)" % (id_col, ma_col, ten_col or ma_col, rat_col)
+        sel += (",ISNULL([%s],0)" % tka_col) if tka_col else ",0"
+        sel += (",ISNULL([%s],0)" % rem_col) if rem_col else ",0"
+        sel += " FROM SUIncrement WHERE ISNULL([%s],0) > 0" % rat_col
+        trang_thai = {}
+        for su_id, ma, ten, con_lai, tien_ky, so_du in cur.execute(sel).fetchall():
+            trang_thai[su_id] = {"ma": ma, "ten": ten, "con_lai": _snum(con_lai),
+                                 "tien_ky": _snum(tien_ky), "so_du": _snum(so_du)}
+        if not trang_thai:
+            return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
+                    "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                    "ghi_chu": "Không có CCDC nào còn kỳ phân bổ (RemainingAllocationTime > 0)."}
+
+        branch_id = _misa_branch_id(cur)
+        led_id_col = _misa_chon_cot(cols_led, "SupplyLedgerID")
+        next_led_id = 1
+        if led_id_col:
+            r0 = cur.execute("SELECT ISNULL(MAX([%s]),0) FROM SupplyLedger" % led_id_col).fetchone()
+            next_led_id = (r0[0] or 0) + 1
+        max_ro_sub = (cur.execute(
+            "SELECT ISNULL(MAX(RefOrderInSubSystem),0) FROM SupplyLedger").fetchone()[0] or 0)
+
+        ket = []
+        so_ct = max_so
+        for i in range(max(1, int(so_thang or 12))):
+            mm = m0 + i
+            yy = y0 + (mm - 1) // 12
+            mm = ((mm - 1) % 12) + 1
+            ngay_cuoi_thang = calendar.monthrange(yy, mm)[1]
+            ngay_pb = datetime.datetime(yy, mm, ngay_cuoi_thang)
+            for su_id, st in list(trang_thai.items()):
+                if st["con_lai"] <= 0:
+                    continue
+                tien_ky_thuc = st["so_du"] if st["con_lai"] <= 1 else st["tien_ky"]
+                so_ct += 1
+                refno = f"PBCC{so_ct:05d}"
+                led_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_led.values()}
+                if led_id_col:
+                    led_row[led_id_col] = next_led_id
+                    next_led_id += 1
+                _misa_gan(led_row, cols_led, str(su_id), "RefID")
+                _misa_gan(led_row, cols_led, su_id, "RefDetailID")
+                _misa_gan(led_row, cols_led, su_id, "SupplyID")
+                _misa_gan(led_row, cols_led, ref_type_pb, "RefType")
+                _misa_gan(led_row, cols_led, refno, "RefNo")
+                _misa_gan(led_row, cols_led, ngay_pb, "RefDate")
+                _misa_gan(led_row, cols_led, ngay_pb, "PostedDate")
+                _misa_gan(led_row, cols_led, f"Phân bổ chi phí CCDC tháng {mm} năm {yy}", "JournalMemo")
+                _misa_gan(led_row, cols_led, str(st["ten"] or "")[:255], "Description")
+                if cot_tien_pb:
+                    led_row[cot_tien_pb] = tien_ky_thuc
+                _misa_gan(led_row, cols_led, dob_pb if dob_pb is not None else 0, "DisplayOnBook")
+                _misa_gan(led_row, cols_led, branch_id, "BranchID")
+                _misa_gan(led_row, cols_led, 0, "RefOrder")
+                _misa_gan(led_row, cols_led, str(st["ma"])[:25], "SupplyCode")
+                _misa_gan(led_row, cols_led, str(st["ten"] or "")[:255], "SupplyName")
+                max_ro_sub += 1
+                _misa_gan(led_row, cols_led, max_ro_sub, "RefOrderInSubSystem")
+                if not preview:
+                    lc = list(led_row.keys())
+                    cur.execute("INSERT INTO SupplyLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [led_row[c] for c in lc])
+                    sets, params = ["[%s]=ISNULL([%s],0)-1" % (rat_col, rat_col)], []
+                    if alloc_col:
+                        sets.append("[%s]=ISNULL([%s],0)+?" % (alloc_col, alloc_col))
+                        params.append(tien_ky_thuc)
+                    if rem_col:
+                        sets.append("[%s]=ISNULL([%s],0)-?" % (rem_col, rem_col))
+                        params.append(tien_ky_thuc)
+                    params.append(su_id)
+                    cur.execute("UPDATE SUIncrement SET %s WHERE [%s]=?" %
+                               (",".join(sets), id_col), params)
+                ket.append({"thang": f"{mm:02d}/{yy}", "ma": st["ma"], "ten": st["ten"],
+                           "so_tien": tien_ky_thuc, "so_chung_tu": refno})
+                st["con_lai"] -= 1
+                st["so_du"] -= tien_ky_thuc
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_dong": len(ket), "danh_sach": ket,
+                "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                "hoc_duoc": {"ref_type": ref_type_pb, "display_on_book": dob_pb,
+                            "cot_so_tien": cot_tien_pb}}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, f"Lỗi phân bổ chi phí CCDC: {e}")
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/phan-bo-ccdc/{cid}")
+def misa_sql_phan_bo_ccdc(cid: int, preview: int = 1, database: str = "",
+                          tu_thang: str = "", so_thang: int = 12):
+    """Tự động phân bổ chi phí CCDC hàng tháng thẳng vào MISA (xem
+    _misa_phan_bo_ccdc). tu_thang: yyyy-mm, để trống = tự tiếp nối tháng kế
+    tiếp sau chứng từ PBCC gần nhất. so_thang: số tháng xử lý, mặc định 12."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_phan_bo_ccdc(cid, database, preview=bool(preview),
+                              tu_thang=tu_thang, so_thang=so_thang)
 
 
 # ============================================================
