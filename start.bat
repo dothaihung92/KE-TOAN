@@ -162,7 +162,12 @@ echo.
 "%PYEXE%" server.py
 REM Thoat code 0 = tu tat co chu dich (dong cua so phan mem -> server tu tat
 REM theo) -> dong luon cua so nay, KHONG dung lai cho bam phim. Thoat code
-REM khac 0 (loi/crash) -> van dung lai (pause) de nguoi dung doc duoc loi.
+REM khac 0 (loi/crash) -> van dung lai (pause) de nguoi dung doc duoc loi
+REM truoc khi dong.
 if errorlevel 1 (
     pause
 )
+REM "exit" (KHONG phai "exit /b") de DONG HAN cua so dong lenh/tab Windows
+REM Terminal - de script chay het file ma khong co "exit" thi cmd.exe van
+REM o lai man hinh nhap lenh (nhu truoc day van thay), du server da tu tat.
+exit
