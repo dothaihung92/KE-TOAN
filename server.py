@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.168"
+APP_BUILD = "2026-08-15.169"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16704,6 +16704,11 @@ def _misa_chan_doan_phan_bo_ccdc(cid, database):
                 return v.isoformat()
             if isinstance(v, float):
                 return round(v, 2)
+            if isinstance(v, (bytes, bytearray, memoryview)):
+                # cột nhị phân (timestamp/rowversion/varbinary...) không phải
+                # UTF-8 -> JSON encoder mặc định sẽ văng lỗi decode; đổi sang
+                # hex để vẫn xem/đọc được mà không lỗi.
+                return bytes(v).hex()
             return v
 
         ten_cot_su = ["SupplyCode", "SupplyName", "Amount", "AllocationTime",
