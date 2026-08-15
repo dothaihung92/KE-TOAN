@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.172"
+APP_BUILD = "2026-08-15.173"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16958,6 +16958,124 @@ def misa_sql_chan_doan_phan_bo_ccdc(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_phan_bo_ccdc(cid, database)
+
+
+def _misa_chan_doan_khau_hao_tscd(cid, database):
+    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC, không ghi/sửa gì) — dò tìm bảng THẬT lưu
+    'Tính khấu hao' TSCĐ hàng tháng trong MISA, TRƯỚC khi viết tính năng
+    tự động (rút kinh nghiệm từ Phân bổ chi phí CCDC: bảng ghi tăng
+    (FixedAssetLedger) KHÔNG phải nơi lưu số khấu hao hàng kỳ — nghiệp vụ
+    'Tính khấu hao' gần như chắc chắn có bộ bảng RIÊNG, cùng khuôn mẫu
+    header+chi tiết như SUAllocation/SUAllocationDetailExpense/
+    SUAllocationDetailTable/SUAllocationDetailPost đã dò ra cho CCDC, chỉ
+    đổi tiền tố SU->FA, Allocation->Depreciation). Tìm mọi bảng tên chứa
+    'FA'/'Depreciation' có cột số chứa ĐÚNG số tiền thật đã biết (đọc từ
+    ảnh chụp màn hình MISA người dùng gửi — chứng từ KH00030, tổng tháng
+    23.456.931, chi tiết TSCD001=2.075.606 / TSCD002=21.381.325), rồi dump
+    đầy đủ cột + dòng mẫu của các bảng khớp."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+
+        def _dep(v):
+            if hasattr(v, "isoformat"):
+                return v.isoformat()
+            if isinstance(v, float):
+                return round(v, 2)
+            if isinstance(v, (bytes, bytearray, memoryview)):
+                return bytes(v).hex()
+            return v
+
+        def _liet_ke_cot_day_du(bang):
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "WHERE c.object_id=OBJECT_ID(?) ORDER BY c.column_id", bang).fetchall()]
+            except Exception:
+                return []
+
+        def _liet_ke_cot_so(bang):
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "JOIN sys.types ty ON ty.user_type_id=c.user_type_id "
+                    "WHERE c.object_id=OBJECT_ID(?) AND ty.name IN "
+                    "('money','smallmoney','decimal','numeric','float','real',"
+                    "'int','bigint','smallint','tinyint') ORDER BY c.column_id",
+                    bang).fetchall()]
+            except Exception:
+                return []
+
+        try:
+            bang_ung_vien = [r[0] for r in cur.execute(
+                "SELECT name FROM sys.tables WHERE name LIKE 'FA%' OR "
+                "name LIKE '%Depreciation%' ORDER BY name").fetchall()]
+        except Exception:
+            bang_ung_vien = []
+
+        gia_tri_ct = [23456931]
+        gia_tri_tscd = [2075606, 21381325]
+        gia_tri_biet = gia_tri_ct + gia_tri_tscd
+
+        tim_thay = []
+        for bang in bang_ung_vien:
+            for cot in _liet_ke_cot_so(bang):
+                for gt in gia_tri_biet:
+                    try:
+                        n = cur.execute(
+                            "SELECT COUNT(*) FROM [%s] WHERE [%s]=?" % (bang, cot), gt).fetchone()[0]
+                        if n:
+                            tim_thay.append({"bang": bang, "cot": cot, "gia_tri_tim": gt, "so_dong_khop": n})
+                    except Exception:
+                        pass
+
+        # Đào sâu cấu trúc + dòng mẫu CHỈ những bảng đã khớp được ít nhất 1
+        # giá trị thật (tránh dump thừa các bảng không liên quan).
+        bang_khop = sorted(set(x["bang"] for x in tim_thay))
+        chi_tiet_bang = {}
+        for bang in bang_khop:
+            cols = _liet_ke_cot_day_du(bang)
+            cot_so = _liet_ke_cot_so(bang)
+            if not cols or not cot_so:
+                chi_tiet_bang[bang] = {"cot": cols, "dong": []}
+                continue
+            dks = " OR ".join("[%s]=?" % c for c in cot_so)
+            tham_so, dieu_kien_all = [], []
+            for gt in gia_tri_biet:
+                dieu_kien_all.append("(" + dks + ")")
+                tham_so.extend([gt] * len(cot_so))
+            sql = "SELECT TOP 12 [%s] FROM [%s] WHERE %s" % (
+                "],[".join(cols), bang, " OR ".join(dieu_kien_all))
+            dong = []
+            try:
+                for r in cur.execute(sql, tham_so).fetchall():
+                    dong.append(dict(zip(cols, [_dep(v) for v in r])))
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                chi_tiet_bang[bang] = {"cot": cols, "dong": [], "loi": str(e)}
+                continue
+            chi_tiet_bang[bang] = {"cot": cols, "dong": dong}
+
+        return {"database": database, "bang_ung_vien_theo_ten": bang_ung_vien,
+                "tim_thay_gia_tri": tim_thay, "chi_tiet_bang": chi_tiet_bang}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, đã dừng an toàn, không ghi/sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-khau-hao-tscd/{cid}")
+def misa_sql_chan_doan_khau_hao_tscd(cid: int, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_khau_hao_tscd."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_khau_hao_tscd(cid, database)
 
 
 # ============================================================
