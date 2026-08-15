@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.169"
+APP_BUILD = "2026-08-15.170"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16465,46 +16465,66 @@ def _misa_mau_dong_that(cur, table, dieu_kien_where, tham_so=()):
 
 
 def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
-    """Tự động tạo chứng từ 'Phân bổ chi phí CCDC' HÀNG THÁNG thẳng vào
-    SupplyLedger — giống hệt bấm 'Thêm' trên màn 'Công cụ dụng cụ > Phân bổ
-    chi phí' của MISA (mã PBCC00001...). Dựa trên trạng thái phân bổ CÒN LẠI
-    lưu sẵn trên SUIncrement (RemainingAllocationTime/RemaingAmount/
-    TermlyAllocationAmount — do _misa_ghi_tang_ccdc ghi lúc Ghi Tăng CCDC).
+    """Tự động tạo chứng từ 'Phân bổ chi phí CCDC' HÀNG THÁNG — giống hệt bấm
+    'Thêm' trên màn 'Công cụ dụng cụ > Phân bổ chi phí' của MISA (mã
+    PBCC00001...). ĐÃ SỬA sau khi đối chiếu dữ liệu THẬT (bản đầu đoán nhầm
+    SupplyLedger là nơi lưu số tiền — SAI, IncrementAmount/TermlyAllocationAmount
+    trên SupplyLedger LUÔN = 0 ở dòng PBCC thật): số tiền thật nằm ở 4 bảng
+    SUAllocation (chứng từ, cột TotalAmount) + SUAllocationDetailExpense +
+    SUAllocationDetailTable (chi tiết từng CCDC, cột AllocationAmount/
+    TotalAllocationAmount) + SUAllocationDetailPost (bút toán Nợ/Có tổng hợp
+    theo TK). SUIncrement.RemainingAllocationTime/RemaingAmount cũng LUÔN = 0
+    trên dữ liệu thật (không được MISA thật sự dùng để theo dõi số kỳ còn
+    lại) — nên số kỳ/tiền ĐÃ phân bổ được tính bằng cách ĐẾM/CỘNG DỒN chính
+    các dòng SUAllocationDetailExpense thật đã có cho từng CCDC, không tin
+    vào các cột đó trên SUIncrement. KHÔNG đụng vào SupplyLedger (để tránh
+    lặp lại sai lầm cũ khi chưa hiểu hết ý nghĩa thật của bảng đó).
 
-    KHÁC Ghi Tăng CCDC (đã qua nhiều lần thử thật trên MISA của người dùng):
-    đây là nghiệp vụ MỚI, CẤU TRÚC được HỌC TỰ ĐỘNG từ chính các dòng PBCC
-    THẬT đã có sẵn trong CSDL (RefNo LIKE 'PBCC%', do người dùng tự tạo tay
-    trên MISA trước đó) — không có dòng PBCC thật nào thì báo lỗi rõ, KHÔNG
-    đoán bừa RefType/cột số tiền. preview=True: chỉ tính toán, KHÔNG ghi gì
-    (rollback), trả về danh sách sẽ tạo để người dùng tự kiểm tra trước."""
+    preview=True: chỉ tính toán, KHÔNG ghi gì (rollback), trả về danh sách sẽ
+    tạo để người dùng tự kiểm tra trước."""
     import re
+    import uuid as _uuid
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
         cur = conn.cursor()
         cols_su = _misa_cot_bang_that(cur, "SUIncrement")
-        cols_led = _misa_cot_bang_that(cur, "SupplyLedger")
-        if not cols_su or not cols_led:
-            raise HTTPException(400, "Không tìm thấy bảng SUIncrement/SupplyLedger trong CSDL MISA đang kết nối.")
-        mau = _misa_mau_dong_that(cur, "SupplyLedger", "RefNo LIKE ?", ("PBCC%",))
-        if not mau:
+        cols_alloc = _misa_cot_bang_that(cur, "SUAllocation")
+        cols_exp = _misa_cot_bang_that(cur, "SUAllocationDetailExpense")
+        cols_tbl = _misa_cot_bang_that(cur, "SUAllocationDetailTable")
+        cols_post = _misa_cot_bang_that(cur, "SUAllocationDetailPost")
+        if not (cols_su and cols_alloc and cols_exp and cols_tbl and cols_post):
+            raise HTTPException(
+                400, "Không tìm thấy đủ bảng SUIncrement/SUAllocation/"
+                     "SUAllocationDetailExpense/SUAllocationDetailTable/"
+                     "SUAllocationDetailPost trong CSDL MISA đang kết nối.")
+
+        mau_alloc = _misa_mau_dong_that(cur, "SUAllocation", "RefNo LIKE ?", ("PBCC%",))
+        if not mau_alloc:
             raise HTTPException(
                 400, "Chưa có chứng từ 'Phân bổ chi phí CCDC' nào (mã bắt đầu bằng PBCC) "
                      "trong MISA để học cấu trúc — hãy vào MISA, mục 'Công cụ dụng cụ > "
                      "Phân bổ chi phí', tạo tay ít nhất 1 chứng từ rồi thử lại.")
-        ref_type_pb = mau.get("RefType")
-        dob_pb = mau.get("DisplayOnBook")
-        cot_tien_pb = None
-        for uv in ("IncrementAmount", "TermlyAllocationAmount", "Amount", "AllocationAmount"):
-            ten_that = _misa_chon_cot(cols_led, uv)
-            if ten_that and mau.get(ten_that):
-                cot_tien_pb = ten_that
-                break
-        if not cot_tien_pb:
-            cot_tien_pb = _misa_chon_cot(cols_led, "TermlyAllocationAmount")
+        mau_post = _misa_mau_dong_that(cur, "SUAllocationDetailPost", "1=1")
+        mau_tbl = _misa_mau_dong_that(cur, "SUAllocationDetailTable", "1=1")
+        if not mau_post or not mau_post.get("DebitAccount") or not mau_post.get("CreditAccount"):
+            raise HTTPException(
+                400, "Không học được TK Nợ/Có từ bút toán phân bổ CCDC thật "
+                     "(SUAllocationDetailPost) — hãy tạo tay ít nhất 1 chứng từ trên MISA rồi thử lại.")
+
+        ref_type_pb = mau_alloc.get("RefType")
+        dob_pb = mau_alloc.get("DisplayOnBook")
+        is_pf_pb = mau_alloc.get("IsPostedFinance", True)
+        is_pm_pb = mau_alloc.get("IsPostedManagement", False)
+        is_gsa_pb = mau_alloc.get("IsGetSupplyAllocated", True)
+        created_by_pb = mau_alloc.get("CreatedBy") or "ADMIN"
+        debit_mac_dinh = mau_post.get("DebitAccount")
+        credit_mac_dinh = mau_post.get("CreditAccount")
+        obj_mac_dinh = mau_tbl.get("AllocationObjectID") if mau_tbl else None
+        rate_mac_dinh = (mau_tbl.get("AllocationRate") if mau_tbl else None) or 100
 
         max_so = 0
-        for (refno,) in cur.execute("SELECT RefNo FROM SupplyLedger WHERE RefNo LIKE 'PBCC%'").fetchall():
+        for (refno,) in cur.execute("SELECT RefNo FROM SUAllocation WHERE RefNo LIKE 'PBCC%'").fetchall():
             m = re.search(r"(\d+)$", str(refno or ""))
             if m:
                 max_so = max(max_so, int(m.group(1)))
@@ -16512,7 +16532,7 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
         thang_bd = (tu_thang or "").strip()
         if not thang_bd:
             row_max_date = cur.execute(
-                "SELECT MAX(RefDate) FROM SupplyLedger WHERE RefNo LIKE 'PBCC%'").fetchone()
+                "SELECT MAX(RefDate) FROM SUAllocation WHERE RefNo LIKE 'PBCC%'").fetchone()
             last_date = row_max_date[0] if row_max_date else None
             if last_date:
                 y, m = last_date.year, last_date.month + 1
@@ -16531,36 +16551,45 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
         ma_col = _misa_chon_cot(cols_su, "SupplyCode")
         id_col = _misa_chon_cot(cols_su, "SupplyID", "RefID")
         ten_col = _misa_chon_cot(cols_su, "SupplyName")
-        rat_col = _misa_chon_cot(cols_su, "RemainingAllocationTime")
+        amt_col = _misa_chon_cot(cols_su, "Amount")
+        at_col = _misa_chon_cot(cols_su, "AllocationTime")
         tka_col = _misa_chon_cot(cols_su, "TermlyAllocationAmount")
-        rem_col = _misa_chon_cot(cols_su, "RemaingAmount", "RemainingAmount")
-        alloc_col = _misa_chon_cot(cols_su, "AllocatedAmount")
-        if not (ma_col and id_col and rat_col):
+        if not (ma_col and id_col and amt_col and at_col):
             raise HTTPException(
                 400, "CSDL MISA thiếu cột cần thiết trên bảng SUIncrement "
-                     "(SupplyCode/SupplyID/RemainingAllocationTime).")
+                     "(SupplyCode/SupplyID/Amount/AllocationTime).")
 
-        sel = "SELECT [%s],[%s],[%s],ISNULL([%s],0)" % (id_col, ma_col, ten_col or ma_col, rat_col)
+        sel = "SELECT [%s],[%s],[%s],ISNULL([%s],0),ISNULL([%s],0)" % (
+            id_col, ma_col, ten_col or ma_col, amt_col, at_col)
         sel += (",ISNULL([%s],0)" % tka_col) if tka_col else ",0"
-        sel += (",ISNULL([%s],0)" % rem_col) if rem_col else ",0"
-        sel += " FROM SUIncrement WHERE ISNULL([%s],0) > 0" % rat_col
+        sel += " FROM SUIncrement WHERE ISNULL([%s],0) > 0 ORDER BY [%s]" % (at_col, ma_col)
         trang_thai = {}
-        for su_id, ma, ten, con_lai, tien_ky, so_du in cur.execute(sel).fetchall():
-            trang_thai[su_id] = {"ma": ma, "ten": ten, "con_lai": _snum(con_lai),
-                                 "tien_ky": _snum(tien_ky), "so_du": _snum(so_du)}
+        for su_id, ma, ten, tong_tien, so_ky, tien_ky_dinh in cur.execute(sel).fetchall():
+            trang_thai[su_id] = {"ma": ma, "ten": ten, "tong_tien": _snum(tong_tien),
+                                 "so_ky": int(_snum(so_ky) or 0), "tien_ky_dinh": _snum(tien_ky_dinh)}
         if not trang_thai:
             return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
                     "thang_bat_dau": thang_bd, "so_thang": so_thang,
-                    "ghi_chu": "Không có CCDC nào còn kỳ phân bổ (RemainingAllocationTime > 0)."}
+                    "ghi_chu": "Không có CCDC nào có thời gian phân bổ (AllocationTime > 0)."}
+
+        # Số kỳ/tiền ĐÃ phân bổ THẬT — đếm/cộng dồn trực tiếp trên
+        # SUAllocationDetailExpense (đáng tin, KHÁC SUIncrement.RemainingAllocationTime
+        # đã xác nhận luôn = 0 trên dữ liệu thật).
+        for su_id, st in trang_thai.items():
+            r = cur.execute(
+                "SELECT COUNT(*), ISNULL(SUM(AllocationAmount),0) FROM "
+                "SUAllocationDetailExpense WHERE SupplyID=?", su_id).fetchone()
+            da_ky, da_tien = int(r[0] or 0), _snum(r[1] or 0)
+            st["con_lai_ky"] = st["so_ky"] - da_ky
+            st["con_lai_tien"] = st["tong_tien"] - da_tien
+        trang_thai = {k: v for k, v in trang_thai.items() if v["con_lai_ky"] > 0}
+        if not trang_thai:
+            return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
+                    "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                    "ghi_chu": "Không có CCDC nào còn kỳ phân bổ (đã phân bổ đủ số kỳ, "
+                               "tính từ số dòng thật trong SUAllocationDetailExpense)."}
 
         branch_id = _misa_branch_id(cur)
-        led_id_col = _misa_chon_cot(cols_led, "SupplyLedgerID")
-        next_led_id = 1
-        if led_id_col:
-            r0 = cur.execute("SELECT ISNULL(MAX([%s]),0) FROM SupplyLedger" % led_id_col).fetchone()
-            next_led_id = (r0[0] or 0) + 1
-        max_ro_sub = (cur.execute(
-            "SELECT ISNULL(MAX(RefOrderInSubSystem),0) FROM SupplyLedger").fetchone()[0] or 0)
 
         ket = []
         so_ct = max_so
@@ -16568,55 +16597,134 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             mm = m0 + i
             yy = y0 + (mm - 1) // 12
             mm = ((mm - 1) % 12) + 1
-            ngay_cuoi_thang = calendar.monthrange(yy, mm)[1]
-            ngay_pb = datetime.datetime(yy, mm, ngay_cuoi_thang)
-            for su_id, st in list(trang_thai.items()):
-                if st["con_lai"] <= 0:
-                    continue
-                tien_ky_thuc = st["so_du"] if st["con_lai"] <= 1 else st["tien_ky"]
-                so_ct += 1
-                refno = f"PBCC{so_ct:05d}"
-                led_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_led.values()}
-                if led_id_col:
-                    led_row[led_id_col] = next_led_id
-                    next_led_id += 1
-                _misa_gan(led_row, cols_led, str(su_id), "RefID")
-                _misa_gan(led_row, cols_led, su_id, "RefDetailID")
-                _misa_gan(led_row, cols_led, su_id, "SupplyID")
-                _misa_gan(led_row, cols_led, ref_type_pb, "RefType")
-                _misa_gan(led_row, cols_led, refno, "RefNo")
-                _misa_gan(led_row, cols_led, ngay_pb, "RefDate")
-                _misa_gan(led_row, cols_led, ngay_pb, "PostedDate")
-                _misa_gan(led_row, cols_led, f"Phân bổ chi phí CCDC tháng {mm} năm {yy}", "JournalMemo")
-                _misa_gan(led_row, cols_led, str(st["ten"] or "")[:255], "Description")
-                if cot_tien_pb:
-                    led_row[cot_tien_pb] = tien_ky_thuc
-                _misa_gan(led_row, cols_led, dob_pb if dob_pb is not None else 0, "DisplayOnBook")
-                _misa_gan(led_row, cols_led, branch_id, "BranchID")
-                _misa_gan(led_row, cols_led, 0, "RefOrder")
-                _misa_gan(led_row, cols_led, str(st["ma"])[:25], "SupplyCode")
-                _misa_gan(led_row, cols_led, str(st["ten"] or "")[:255], "SupplyName")
-                max_ro_sub += 1
-                _misa_gan(led_row, cols_led, max_ro_sub, "RefOrderInSubSystem")
+            ngay_cuoi_thang = datetime.datetime(yy, mm, calendar.monthrange(yy, mm)[1])
+            dong_thang = [(su_id, st) for su_id, st in trang_thai.items() if st["con_lai_ky"] > 0]
+            if not dong_thang:
+                break
+            so_ct += 1
+            refno = f"PBCC{so_ct:05d}"
+            alloc_id = str(_uuid.uuid4())
+            memo = f"Phân bổ chi phí CCDC tháng {mm} năm {yy}"
+            tong_ct = 0
+            nhom_post = {}   # (tk_no, obj_id) -> tổng tiền, gộp bút toán theo TK/đối tượng
+            for idx, (su_id, st) in enumerate(dong_thang, start=1):
+                tien_ky_thuc = round(st["con_lai_tien"] if st["con_lai_ky"] <= 1 else st["tien_ky_dinh"])
+                tong_ct += tien_ky_thuc
+
+                # Học TK chi phí/đối tượng phân bổ RIÊNG cho từng CCDC — ưu
+                # tiên bảng "Phân bổ theo đối tượng" lúc Ghi Tăng CCDC
+                # (SUIncrementDetailAllocation, có ngay từ khi tạo CCDC), sau
+                # đó mới tới dòng phân bổ thật gần nhất của CHÍNH CCDC này
+                # (nếu tháng trước đã từng phân bổ), cuối cùng mới dùng giá
+                # trị học chung (mau_tbl) làm dự phòng.
+                obj_id, rate, tk_no = obj_mac_dinh, rate_mac_dinh, None
+                try:
+                    r_ida = cur.execute(
+                        "SELECT TOP 1 ObjectID, AllocationRate, CostAccount FROM "
+                        "SUIncrementDetailAllocation WHERE SupplyID=?", su_id).fetchone()
+                except Exception:
+                    r_ida = None
+                if r_ida and r_ida[2]:
+                    obj_id = r_ida[0] or obj_id
+                    rate = r_ida[1] or rate
+                    tk_no = r_ida[2]
+                else:
+                    try:
+                        r_tbl = cur.execute(
+                            "SELECT TOP 1 AllocationObjectID, AllocationRate, CostAccount FROM "
+                            "SUAllocationDetailTable WHERE SupplyID=? ORDER BY RefDetailID DESC",
+                            su_id).fetchone()
+                    except Exception:
+                        r_tbl = None
+                    if r_tbl and r_tbl[2]:
+                        obj_id = r_tbl[0] or obj_id
+                        rate = r_tbl[1] or rate
+                        tk_no = r_tbl[2]
+                if not tk_no:
+                    tk_no = mau_tbl.get("CostAccount") if mau_tbl else debit_mac_dinh
+
+                exp_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_exp.values()}
+                _misa_gan(exp_row, cols_exp, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(exp_row, cols_exp, alloc_id, "RefID")
+                _misa_gan(exp_row, cols_exp, su_id, "SupplyID")
+                _misa_gan(exp_row, cols_exp, tien_ky_thuc, "TotalAllocationAmount")
+                _misa_gan(exp_row, cols_exp, tien_ky_thuc, "AllocationAmount")
+                _misa_gan(exp_row, cols_exp, max(round(st["con_lai_tien"]) - tien_ky_thuc, 0), "RemainingAmount")
+                _misa_gan(exp_row, cols_exp, idx, "SortOrder")
+
+                tbl_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tbl.values()}
+                _misa_gan(tbl_row, cols_tbl, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(tbl_row, cols_tbl, alloc_id, "RefID")
+                _misa_gan(tbl_row, cols_tbl, su_id, "SupplyID")
+                _misa_gan(tbl_row, cols_tbl, tien_ky_thuc, "TotalAllocationAmount")
+                _misa_gan(tbl_row, cols_tbl, obj_id, "AllocationObjectID")
+                _misa_gan(tbl_row, cols_tbl, rate, "AllocationRate")
+                _misa_gan(tbl_row, cols_tbl, tien_ky_thuc, "AllocationAmount")
+                _misa_gan(tbl_row, cols_tbl, tk_no, "CostAccount")
+                _misa_gan(tbl_row, cols_tbl, idx, "SortOrder")
+                _misa_gan(tbl_row, cols_tbl, False, "IsDetailBreak")
+
                 if not preview:
-                    lc = list(led_row.keys())
-                    cur.execute("INSERT INTO SupplyLedger ([%s]) VALUES (%s)" %
+                    lc = list(exp_row.keys())
+                    cur.execute("INSERT INTO SUAllocationDetailExpense ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
-                               [led_row[c] for c in lc])
-                    sets, params = ["[%s]=ISNULL([%s],0)-1" % (rat_col, rat_col)], []
-                    if alloc_col:
-                        sets.append("[%s]=ISNULL([%s],0)+?" % (alloc_col, alloc_col))
-                        params.append(tien_ky_thuc)
-                    if rem_col:
-                        sets.append("[%s]=ISNULL([%s],0)-?" % (rem_col, rem_col))
-                        params.append(tien_ky_thuc)
-                    params.append(su_id)
-                    cur.execute("UPDATE SUIncrement SET %s WHERE [%s]=?" %
-                               (",".join(sets), id_col), params)
+                               [exp_row[c] for c in lc])
+                    lc2 = list(tbl_row.keys())
+                    cur.execute("INSERT INTO SUAllocationDetailTable ([%s]) VALUES (%s)" %
+                               ("],[".join(lc2), ",".join(["?"] * len(lc2))),
+                               [tbl_row[c] for c in lc2])
+
+                key_nhom = (tk_no, obj_id)
+                nhom_post[key_nhom] = nhom_post.get(key_nhom, 0) + tien_ky_thuc
+
                 ket.append({"thang": f"{mm:02d}/{yy}", "ma": st["ma"], "ten": st["ten"],
-                           "so_tien": tien_ky_thuc, "so_chung_tu": refno})
-                st["con_lai"] -= 1
-                st["so_du"] -= tien_ky_thuc
+                           "so_tien": tien_ky_thuc, "so_chung_tu": refno, "tk_no": tk_no})
+                st["con_lai_ky"] -= 1
+                st["con_lai_tien"] -= tien_ky_thuc
+
+            alloc_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_alloc.values()}
+            _misa_gan(alloc_row, cols_alloc, alloc_id, "RefID")
+            _misa_gan(alloc_row, cols_alloc, ref_type_pb, "RefType")
+            _misa_gan(alloc_row, cols_alloc, ngay_cuoi_thang, "RefDate")
+            _misa_gan(alloc_row, cols_alloc, ngay_cuoi_thang, "PostedDate")
+            _misa_gan(alloc_row, cols_alloc, refno, "RefNo")
+            _misa_gan(alloc_row, cols_alloc, memo, "JournalMemo")
+            _misa_gan(alloc_row, cols_alloc, mm, "Month")
+            _misa_gan(alloc_row, cols_alloc, yy, "Year")
+            _misa_gan(alloc_row, cols_alloc, tong_ct, "TotalAmount")
+            _misa_gan(alloc_row, cols_alloc, branch_id, "BranchID")
+            _misa_gan(alloc_row, cols_alloc, bool(is_pm_pb), "IsPostedManagement")
+            _misa_gan(alloc_row, cols_alloc, dob_pb if dob_pb is not None else 0, "DisplayOnBook")
+            _misa_gan(alloc_row, cols_alloc, 0, "RefOrder")
+            _misa_gan(alloc_row, cols_alloc, datetime.datetime.now(), "CreatedDate")
+            _misa_gan(alloc_row, cols_alloc, created_by_pb, "CreatedBy")
+            _misa_gan(alloc_row, cols_alloc, datetime.datetime.now(), "ModifiedDate")
+            _misa_gan(alloc_row, cols_alloc, created_by_pb, "ModifiedBy")
+            _misa_gan(alloc_row, cols_alloc, bool(is_pf_pb), "IsPostedFinance")
+            _misa_gan(alloc_row, cols_alloc, bool(is_gsa_pb), "IsGetSupplyAllocated")
+
+            if not preview:
+                lc = list(alloc_row.keys())
+                cur.execute("INSERT INTO SUAllocation ([%s]) VALUES (%s)" %
+                           ("],[".join(lc), ",".join(["?"] * len(lc))),
+                           [alloc_row[c] for c in lc])
+                so_thu_tu = 0
+                for (tk_no, obj_id), tong_nhom in nhom_post.items():
+                    post_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_post.values()}
+                    _misa_gan(post_row, cols_post, str(_uuid.uuid4()), "RefDetailID")
+                    _misa_gan(post_row, cols_post, alloc_id, "RefID")
+                    _misa_gan(post_row, cols_post, memo, "Description")
+                    _misa_gan(post_row, cols_post, tk_no or debit_mac_dinh, "DebitAccount")
+                    _misa_gan(post_row, cols_post, credit_mac_dinh, "CreditAccount")
+                    _misa_gan(post_row, cols_post, tong_nhom, "Amount")
+                    _misa_gan(post_row, cols_post, obj_id, "OrganizationUnitID")
+                    _misa_gan(post_row, cols_post, False, "UnResonableCost")
+                    _misa_gan(post_row, cols_post, so_thu_tu, "SortOrder")
+                    so_thu_tu += 1
+                    lc = list(post_row.keys())
+                    cur.execute("INSERT INTO SUAllocationDetailPost ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [post_row[c] for c in lc])
         if preview:
             conn.rollback()
         else:
@@ -16624,7 +16732,7 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
         return {"preview": preview, "database": database, "so_dong": len(ket), "danh_sach": ket,
                 "thang_bat_dau": thang_bd, "so_thang": so_thang,
                 "hoc_duoc": {"ref_type": ref_type_pb, "display_on_book": dob_pb,
-                            "cot_so_tien": cot_tien_pb}}
+                            "tk_no_mac_dinh": debit_mac_dinh, "tk_co_mac_dinh": credit_mac_dinh}}
     except HTTPException:
         conn.rollback()
         raise
