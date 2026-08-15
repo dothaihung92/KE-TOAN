@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.176"
+APP_BUILD = "2026-08-15.177"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17435,6 +17435,22 @@ def _misa_chan_doan_to_khai_gtgt(cid, database, gia_tri_ct1=None, gia_tri_ct2=No
         except Exception:
             bang_ung_vien = []
 
+        def _liet_ke_cot_chu(bang):
+            """Cột kiểu CHỮ (nvarchar/varchar/char/nchar) — nhiều hệ thống
+            khai báo thuế lưu số tiền dưới dạng CHUỖI (kiểu EAV 'mã chỉ
+            tiêu' + 'giá trị chữ') thay vì cột số riêng từng chỉ tiêu, nên
+            dò số tiền thật CHỈ trên cột số có thể bỏ sót — cần dò thêm ở
+            đây."""
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "JOIN sys.types ty ON ty.user_type_id=c.user_type_id "
+                    "WHERE c.object_id=OBJECT_ID(?) AND ty.name IN "
+                    "('nvarchar','varchar','nchar','char','ntext','text') "
+                    "ORDER BY c.column_id", bang).fetchall()]
+            except Exception:
+                return []
+
         gia_tri_biet = [v for v in (gia_tri_ct1, gia_tri_ct2) if v]
         if not gia_tri_biet:
             gia_tri_biet = [614043260, 184761016]
@@ -17447,36 +17463,69 @@ def _misa_chan_doan_to_khai_gtgt(cid, database, gia_tri_ct1=None, gia_tri_ct2=No
                         n = cur.execute(
                             "SELECT COUNT(*) FROM [%s] WHERE [%s]=?" % (bang, cot), gt).fetchone()[0]
                         if n:
-                            tim_thay.append({"bang": bang, "cot": cot, "gia_tri_tim": gt, "so_dong_khop": n})
+                            tim_thay.append({"bang": bang, "cot": cot, "gia_tri_tim": gt,
+                                             "so_dong_khop": n, "kieu": "so"})
                     except Exception:
                         pass
+            for cot in _liet_ke_cot_chu(bang):
+                for gt in gia_tri_biet:
+                    for dang in (str(int(gt)), "%s.00" % int(gt), "%s.0000" % int(gt)):
+                        try:
+                            n = cur.execute(
+                                "SELECT COUNT(*) FROM [%s] WHERE [%s]=?" % (bang, cot), dang).fetchone()[0]
+                            if n:
+                                tim_thay.append({"bang": bang, "cot": cot, "gia_tri_tim": dang,
+                                                 "so_dong_khop": n, "kieu": "chu"})
+                                break
+                        except Exception:
+                            pass
 
-        bang_khop = sorted(set(x["bang"] for x in tim_thay))
+        # Bảng có tên chỉ rõ RẤT LIÊN QUAN (cấu trúc khai báo thuế chung —
+        # dạng "TADeclaration*"/"*GTGT_Detail*") thì dump LUÔN cấu trúc + vài
+        # dòng mẫu bất kể có khớp được giá trị hay không — vì rất có thể đây
+        # là hệ EAV (mã chỉ tiêu + giá trị) mà phép dò giá trị ở trên bỏ sót.
+        bang_uu_tien = [b for b in bang_ung_vien if
+                        b.startswith("TADeclaration") or "GTGT_Detail" in b or
+                        b == "PAVoucherDeduction" or b == "TA_01_GTGTDeclaration"]
+        bang_khop = sorted(set([x["bang"] for x in tim_thay] + bang_uu_tien))
         chi_tiet_bang = {}
         for bang in bang_khop:
             cols = _liet_ke_cot_day_du(bang)
-            cot_so = _liet_ke_cot_so(bang)
-            if not cols or not cot_so:
+            if not cols:
                 chi_tiet_bang[bang] = {"cot": cols, "dong": []}
                 continue
-            dks = " OR ".join("[%s]=?" % c for c in cot_so)
-            tham_so, dieu_kien_all = [], []
-            for gt in gia_tri_biet:
-                dieu_kien_all.append("(" + dks + ")")
-                tham_so.extend([gt] * len(cot_so))
-            sql = "SELECT TOP 12 [%s] FROM [%s] WHERE %s" % (
-                "],[".join(cols), bang, " OR ".join(dieu_kien_all))
+            cot_so = _liet_ke_cot_so(bang)
             dong = []
-            try:
-                for r in cur.execute(sql, tham_so).fetchall():
-                    dong.append(dict(zip(cols, [_dep(v) for v in r])))
-            except Exception as e:
+            if cot_so:
+                dks = " OR ".join("[%s]=?" % c for c in cot_so)
+                tham_so, dieu_kien_all = [], []
+                for gt in gia_tri_biet:
+                    dieu_kien_all.append("(" + dks + ")")
+                    tham_so.extend([gt] * len(cot_so))
+                sql = "SELECT TOP 12 [%s] FROM [%s] WHERE %s" % (
+                    "],[".join(cols), bang, " OR ".join(dieu_kien_all))
                 try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                chi_tiet_bang[bang] = {"cot": cols, "dong": [], "loi": str(e)}
-                continue
+                    for r in cur.execute(sql, tham_so).fetchall():
+                        dong.append(dict(zip(cols, [_dep(v) for v in r])))
+                except Exception as e:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+            if not dong:
+                # Không khớp được giá trị nào (hoặc không có cột số) — vẫn lấy
+                # TOP 8 dòng bất kỳ để xem CẤU TRÚC/mẫu dữ liệu thật.
+                try:
+                    sql2 = "SELECT TOP 8 [%s] FROM [%s]" % ("],[".join(cols), bang)
+                    for r in cur.execute(sql2).fetchall():
+                        dong.append(dict(zip(cols, [_dep(v) for v in r])))
+                except Exception as e:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    chi_tiet_bang[bang] = {"cot": cols, "dong": [], "loi": str(e)}
+                    continue
             chi_tiet_bang[bang] = {"cot": cols, "dong": dong}
 
         return {"database": database, "gia_tri_dung_de_do": gia_tri_biet,
