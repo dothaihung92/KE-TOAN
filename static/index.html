@@ -872,6 +872,7 @@
           <div style="font-size:18px;font-weight:700;color:#b06a00">Ghi Tăng TSCĐ</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Từ DM TSCĐ → form MISA ghi tăng</div>
           <button class="btn sm" style="background:#b06a00;margin-top:10px" onclick="event.stopPropagation();ghiTangImportMisa('tscd')" title="Ghi thẳng vào MISA (Tài sản cố định > Ghi tăng)">⬆ Import vào MISA</button>
+          <button class="btn sm" style="background:#7a4fb5;margin-top:6px" onclick="event.stopPropagation();khauHaoTscdMo()" title="Tự động tạo chứng từ Khấu hao TSCĐ hàng tháng thẳng vào MISA (Tài sản cố định > Tính khấu hao), mặc định 12 tháng, có thể tùy chỉnh">🤖 Tính khấu hao tự động</button>
           <button class="btn ghost sm" style="color:#666;margin-top:6px" onclick="event.stopPropagation();khauHaoTscdChanDoan()" title="Chỉ xem — dò tìm bảng THẬT lưu khấu hao TSCĐ hàng tháng trong MISA, để chuẩn bị tính năng Tính khấu hao tự động">🔬 Chẩn đoán dữ liệu khấu hao</button>
         </div>
         <div onclick="moXuatKho()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #1a7a7a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
@@ -4837,6 +4838,64 @@ async function phanBoCcdcGhi(thangBd,soThang){
     const d=await api(`/api/misa-sql/phan-bo-ccdc/${current}?${qs.toString()}`,{method:'POST'});
     document.getElementById('misaModal').style.display='none';
     toast(`✓ Đã ghi ${d.so_chung_tu||0} chứng từ Phân bổ chi phí CCDC (${d.so_dong||0} dòng CCDC) vào MISA. Mở MISA kiểm tra lại.`,'ok');
+  }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+function khauHaoTscdMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaModalBody').innerHTML=`
+    <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+      ⚠ Tính năng MỚI — cấu trúc được dò tự động từ chính chứng từ KH thật đã có sẵn trong MISA của bạn, CHƯA qua nhiều lần kiểm chứng thực tế như Ghi Tăng TSCĐ. Luôn bấm "Xem trước" và kiểm tra kỹ trước khi ghi thật. Chỉ chạy trên dữ liệu THỬ / đã sao lưu.</div>
+    <div class="hint" style="margin-bottom:10px">Tự động tạo chứng từ "Khấu hao TSCĐ" hàng tháng (giống bấm Thêm trên MISA), dựa theo số kỳ còn lại đã lưu cho từng tài sản (từ lúc Ghi Tăng TSCĐ). Để trống "Tháng bắt đầu" để tự tiếp nối ngay sau chứng từ KH gần nhất đã có trong MISA.</div>
+    <label style="font-size:13px;font-weight:600">Tháng bắt đầu (để trống = tự động)</label>
+    <input type="month" id="khtscdThangBd" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <label style="font-size:13px;font-weight:600">Số tháng xử lý</label>
+    <input type="number" id="khtscdSoThang" value="12" min="1" max="60" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#7a4fb5" onclick="khauHaoTscdXemTruoc()">🔎 Xem trước</button>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function khauHaoTscdXemTruoc(){
+  const thangBd=document.getElementById('khtscdThangBd').value||'';
+  const soThang=+document.getElementById('khtscdSoThang').value||12;
+  toast('Đang tính toán (xem trước)...','');
+  try{
+    const qs=new URLSearchParams({preview:'1',so_thang:soThang});
+    if(thangBd)qs.set('tu_thang',thangBd);
+    const pv=await api(`/api/misa-sql/khau-hao-tscd/${current}?${qs.toString()}`,{method:'POST'});
+    if(pv.ghi_chu){toast(pv.ghi_chu,'err');return}
+    const ds=(pv.danh_sach||[]).slice(0,500).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.thang||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_chung_tu||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ma||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ten||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.so_tien!=null?Number(x.so_tien).toLocaleString('vi-VN'):''}</td>
+    </tr>`).join('');
+    const tong=(pv.danh_sach||[]).reduce((s,x)=>s+(Number(x.so_tien)||0),0);
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+        ⚠ RỦI RO CAO: ghi vào <b>${misaEsc(pv.database||'?')}</b>. Mở MISA kiểm tra lại sau khi ghi. Chỉ chạy trên dữ liệu THỬ / đã sao lưu.</div>
+      <div style="margin-bottom:6px">Sẽ tạo <b style="color:#7a4fb5">${pv.so_chung_tu||0}</b> chứng từ (${pv.so_dong||0} dòng TSCĐ), tổng tiền <b>${tong.toLocaleString('vi-VN')}</b> — từ tháng <b>${misaEsc(pv.thang_bat_dau||'')}</b>, ${misaEsc(pv.so_thang||'')} tháng.</div>
+      <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Tháng</th><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Mã TSCĐ</th><th style="border:1px solid #eee;padding:2px 6px">Tên</th><th style="border:1px solid #eee;padding:2px 6px">Số tiền</th></tr>
+        ${ds||'<tr><td colspan="5" style="padding:10px;text-align:center;color:#999">Không có TSCĐ nào còn kỳ khấu hao trong khoảng này.</td></tr>'}</table></div>
+      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="btn ghost sm" onclick="khauHaoTscdMo()">← Sửa lại</button>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_dong>0?`<button class="btn sm" style="background:#a03a3a" onclick="khauHaoTscdGhi('${misaEsc(pv.thang_bat_dau||'')}',${+pv.so_thang||12})">⬆ Ghi ${pv.so_chung_tu||0} chứng từ vào MISA</button>`:''}
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function khauHaoTscdGhi(thangBd,soThang){
+  toast('Đang ghi vào MISA...','');
+  try{
+    const qs=new URLSearchParams({preview:'0',so_thang:soThang});
+    if(thangBd)qs.set('tu_thang',thangBd);
+    const d=await api(`/api/misa-sql/khau-hao-tscd/${current}?${qs.toString()}`,{method:'POST'});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã ghi ${d.so_chung_tu||0} chứng từ Khấu hao TSCĐ (${d.so_dong||0} dòng TSCĐ) vào MISA. Mở MISA kiểm tra lại.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 async function phanBoCcdcChanDoan(){

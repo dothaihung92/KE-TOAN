@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.173"
+APP_BUILD = "2026-08-15.174"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16958,6 +16958,311 @@ def misa_sql_chan_doan_phan_bo_ccdc(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_phan_bo_ccdc(cid, database)
+
+
+def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12):
+    """Tự động tạo chứng từ 'Khấu hao TSCĐ' HÀNG THÁNG — giống hệt bấm
+    'Thêm' trên màn 'Tài sản cố định > Tính khấu hao' của MISA (mã
+    KH00001...). CẤU TRÚC ĐÃ ĐƯỢC XÁC NHẬN qua chẩn đoán dữ liệu THẬT
+    (_misa_chan_doan_khau_hao_tscd) — SONG SONG CHÍNH XÁC với Phân bổ chi
+    phí CCDC (_misa_phan_bo_ccdc), chỉ đổi tiền tố SU->FA:
+    FADepreciation (chứng từ, cột TotalAmount) + FADepreciationDetail
+    (tổng hợp từng tài sản, cột MonthlyDepreciationAmount/
+    AmountResonableCost) + FADepreciationDetailAllocation (chi tiết TK chi
+    phí/đối tượng phân bổ từng tài sản, cột AllocationAmount) +
+    FADepreciationDetailPost (bút toán Nợ 642x/Có 2141 tổng hợp theo TK).
+    Số kỳ/tiền ĐÃ khấu hao được tính bằng cách ĐẾM/CỘNG DỒN chính các dòng
+    FADepreciationDetail thật đã có cho từng tài sản (bài học từ CCDC:
+    KHÔNG tin cột LifeTimeRemainingInMonth/AccumDepreciationAmount trên
+    FixedAsset — rất có thể cũng chỉ là giá trị lưu lúc Ghi Tăng, không
+    được MISA cập nhật sống).
+
+    preview=True: chỉ tính toán, KHÔNG ghi gì (rollback), trả về danh sách
+    sẽ tạo để người dùng tự kiểm tra trước."""
+    import re
+    import uuid as _uuid
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cols_fa = _misa_cot_bang_that(cur, "FixedAsset")
+        cols_dep = _misa_cot_bang_that(cur, "FADepreciation")
+        cols_det = _misa_cot_bang_that(cur, "FADepreciationDetail")
+        cols_da = _misa_cot_bang_that(cur, "FADepreciationDetailAllocation")
+        cols_post = _misa_cot_bang_that(cur, "FADepreciationDetailPost")
+        if not (cols_fa and cols_dep and cols_det and cols_da and cols_post):
+            raise HTTPException(
+                400, "Không tìm thấy đủ bảng FixedAsset/FADepreciation/"
+                     "FADepreciationDetail/FADepreciationDetailAllocation/"
+                     "FADepreciationDetailPost trong CSDL MISA đang kết nối.")
+
+        mau_dep = _misa_mau_dong_that(cur, "FADepreciation", "RefNo LIKE ?", ("KH%",))
+        if not mau_dep:
+            raise HTTPException(
+                400, "Chưa có chứng từ 'Khấu hao TSCĐ' nào (mã bắt đầu bằng KH) "
+                     "trong MISA để học cấu trúc — hãy vào MISA, mục 'Tài sản cố định > "
+                     "Tính khấu hao', tạo tay ít nhất 1 chứng từ rồi thử lại.")
+        mau_post = _misa_mau_dong_that(cur, "FADepreciationDetailPost", "1=1")
+        mau_da = _misa_mau_dong_that(cur, "FADepreciationDetailAllocation", "1=1")
+        if not mau_post or not mau_post.get("DebitAccount") or not mau_post.get("CreditAccount"):
+            raise HTTPException(
+                400, "Không học được TK Nợ/Có từ bút toán khấu hao TSCĐ thật "
+                     "(FADepreciationDetailPost) — hãy tạo tay ít nhất 1 chứng từ trên MISA rồi thử lại.")
+
+        ref_type_kh = mau_dep.get("RefType")
+        dob_kh = mau_dep.get("DisplayOnBook")
+        is_pf_kh = mau_dep.get("IsPostedFinance", True)
+        is_pm_kh = mau_dep.get("IsPostedManagement", False)
+        created_by_kh = mau_dep.get("CreatedBy") or "ADMIN"
+        debit_mac_dinh = mau_post.get("DebitAccount")
+        credit_mac_dinh = mau_post.get("CreditAccount")
+        obj_mac_dinh = mau_da.get("AllocationObjectID") if mau_da else None
+        rate_mac_dinh = (mau_da.get("AllocationRate") if mau_da else None) or 100
+
+        max_so = 0
+        for (refno,) in cur.execute("SELECT RefNo FROM FADepreciation WHERE RefNo LIKE 'KH%'").fetchall():
+            m = re.search(r"(\d+)$", str(refno or ""))
+            if m:
+                max_so = max(max_so, int(m.group(1)))
+
+        thang_bd = (tu_thang or "").strip()
+        if not thang_bd:
+            row_max_date = cur.execute(
+                "SELECT MAX(RefDate) FROM FADepreciation WHERE RefNo LIKE 'KH%'").fetchone()
+            last_date = row_max_date[0] if row_max_date else None
+            if last_date:
+                y, m = last_date.year, last_date.month + 1
+                if m > 12:
+                    y += 1
+                    m = 1
+                thang_bd = f"{y}-{m:02d}"
+            else:
+                now = datetime.datetime.now()
+                thang_bd = f"{now.year}-{now.month:02d}"
+        try:
+            y0, m0 = [int(x) for x in thang_bd.split("-")]
+        except Exception:
+            raise HTTPException(400, "Tháng bắt đầu không hợp lệ (đúng dạng yyyy-mm).")
+
+        ma_col = _misa_chon_cot(cols_fa, "FixedAssetCode")
+        id_col = _misa_chon_cot(cols_fa, "FixedAssetID", "RefID")
+        ten_col = _misa_chon_cot(cols_fa, "FixedAssetName")
+        amt_col = _misa_chon_cot(cols_fa, "OrgPrice", "OriginalPrice")
+        at_col = _misa_chon_cot(cols_fa, "LifeTimeInMonth", "LifeTime")
+        tka_col = _misa_chon_cot(cols_fa, "MonthlyDepreciationAmount", "DepreciationAmountMonth")
+        if not (ma_col and id_col and amt_col and at_col):
+            raise HTTPException(
+                400, "CSDL MISA thiếu cột cần thiết trên bảng FixedAsset "
+                     "(FixedAssetCode/FixedAssetID/OrgPrice/LifeTimeInMonth).")
+
+        sel = "SELECT [%s],[%s],[%s],ISNULL([%s],0),ISNULL([%s],0)" % (
+            id_col, ma_col, ten_col or ma_col, amt_col, at_col)
+        sel += (",ISNULL([%s],0)" % tka_col) if tka_col else ",0"
+        sel += " FROM FixedAsset WHERE ISNULL([%s],0) > 0 ORDER BY [%s]" % (at_col, ma_col)
+        trang_thai = {}
+        for fa_id, ma, ten, tong_tien, so_ky, tien_ky_dinh in cur.execute(sel).fetchall():
+            trang_thai[fa_id] = {"ma": ma, "ten": ten, "tong_tien": _snum(tong_tien),
+                                 "so_ky": int(_snum(so_ky) or 0), "tien_ky_dinh": _snum(tien_ky_dinh)}
+        if not trang_thai:
+            return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
+                    "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                    "ghi_chu": "Không có TSCĐ nào có thời gian sử dụng (LifeTimeInMonth > 0)."}
+
+        # Số kỳ/tiền ĐÃ khấu hao THẬT — đếm/cộng dồn trực tiếp trên
+        # FADepreciationDetail (đáng tin, KHÔNG dùng LifeTimeRemainingInMonth/
+        # AccumDepreciationAmount trên FixedAsset — bài học từ CCDC: các cột
+        # "còn lại" trên bảng chính thường chỉ là giá trị lúc Ghi Tăng, KHÔNG
+        # được MISA cập nhật sống theo từng kỳ khấu hao thật).
+        for fa_id, st in trang_thai.items():
+            r = cur.execute(
+                "SELECT COUNT(*), ISNULL(SUM(MonthlyDepreciationAmount),0) FROM "
+                "FADepreciationDetail WHERE FixedAssetID=?", fa_id).fetchone()
+            da_ky, da_tien = int(r[0] or 0), _snum(r[1] or 0)
+            st["con_lai_ky"] = st["so_ky"] - da_ky
+            st["con_lai_tien"] = st["tong_tien"] - da_tien
+        trang_thai = {k: v for k, v in trang_thai.items() if v["con_lai_ky"] > 0}
+        if not trang_thai:
+            return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
+                    "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                    "ghi_chu": "Không có TSCĐ nào còn kỳ khấu hao (đã khấu hao đủ số kỳ, "
+                               "tính từ số dòng thật trong FADepreciationDetail)."}
+
+        branch_id = _misa_branch_id(cur)
+
+        ket = []
+        so_ct = max_so
+        for i in range(max(1, int(so_thang or 12))):
+            mm = m0 + i
+            yy = y0 + (mm - 1) // 12
+            mm = ((mm - 1) % 12) + 1
+            ngay_cuoi_thang = datetime.datetime(yy, mm, calendar.monthrange(yy, mm)[1])
+            dong_thang = [(fa_id, st) for fa_id, st in trang_thai.items() if st["con_lai_ky"] > 0]
+            if not dong_thang:
+                break
+            so_ct += 1
+            refno = f"KH{so_ct:05d}"
+            dep_id = str(_uuid.uuid4())
+            memo = f"Khấu hao TSCĐ tháng {mm} năm {yy}"
+            tong_ct = 0
+            nhom_post = {}   # (tk_no, obj_id) -> tổng tiền, gộp bút toán theo TK/đối tượng
+            # Tính toán trước (chưa ghi gì) — cần TotalAmount của cả chứng từ
+            # TRƯỚC khi ghi dòng đầu FADepreciation, vì các bảng chi tiết có
+            # khoá ngoại RefID trỏ VỀ FADepreciation (bài học từ CCDC: ghi chi
+            # tiết trước dòng đầu -> lỗi FK, transaction tự rollback).
+            det_rows, da_rows = [], []
+            for idx, (fa_id, st) in enumerate(dong_thang, start=1):
+                tien_ky_thuc = round(st["con_lai_tien"] if st["con_lai_ky"] <= 1 else st["tien_ky_dinh"])
+                tong_ct += tien_ky_thuc
+
+                # Học TK chi phí/đối tượng phân bổ RIÊNG cho từng tài sản —
+                # ưu tiên bảng "Thiết lập phân bổ" lúc Ghi Tăng TSCĐ
+                # (FixedAssetDetailAllocation, có ngay từ khi tạo tài sản),
+                # sau đó mới tới dòng khấu hao thật gần nhất của CHÍNH tài
+                # sản này, cuối cùng mới dùng giá trị học chung (mau_da).
+                obj_id, rate, tk_no = obj_mac_dinh, rate_mac_dinh, None
+                try:
+                    r_ida = cur.execute(
+                        "SELECT TOP 1 ObjectID, AllocationRate, CostAccount FROM "
+                        "FixedAssetDetailAllocation WHERE FixedAssetID=?", fa_id).fetchone()
+                except Exception:
+                    r_ida = None
+                if r_ida and r_ida[2]:
+                    obj_id = r_ida[0] or obj_id
+                    rate = r_ida[1] or rate
+                    tk_no = r_ida[2]
+                else:
+                    try:
+                        r_da = cur.execute(
+                            "SELECT TOP 1 AllocationObjectID, AllocationRate, CostAccount FROM "
+                            "FADepreciationDetailAllocation WHERE FixedAssetID=? ORDER BY RefDetailID DESC",
+                            fa_id).fetchone()
+                    except Exception:
+                        r_da = None
+                    if r_da and r_da[2]:
+                        obj_id = r_da[0] or obj_id
+                        rate = r_da[1] or rate
+                        tk_no = r_da[2]
+                if not tk_no:
+                    tk_no = mau_da.get("CostAccount") if mau_da else debit_mac_dinh
+
+                det_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_det.values()}
+                _misa_gan(det_row, cols_det, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(det_row, cols_det, dep_id, "RefID")
+                _misa_gan(det_row, cols_det, fa_id, "FixedAssetID")
+                _misa_gan(det_row, cols_det, obj_id, "OrganizationUnitID")
+                _misa_gan(det_row, cols_det, tien_ky_thuc, "MonthlyDepreciationAmount")
+                _misa_gan(det_row, cols_det, tien_ky_thuc, "AmountResonableCost")
+                _misa_gan(det_row, cols_det, 0, "AmountUnResonableCost")
+                _misa_gan(det_row, cols_det, idx, "SortOrder")
+                det_rows.append(det_row)
+
+                da_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_da.values()}
+                _misa_gan(da_row, cols_da, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(da_row, cols_da, dep_id, "RefID")
+                _misa_gan(da_row, cols_da, fa_id, "FixedAssetID")
+                _misa_gan(da_row, cols_da, obj_id, "OrganizationUnitID")
+                _misa_gan(da_row, cols_da, tien_ky_thuc, "MonthlyDepreciationAmount")
+                _misa_gan(da_row, cols_da, obj_id, "AllocationObjectID")
+                _misa_gan(da_row, cols_da, tk_no, "CostAccount")
+                _misa_gan(da_row, cols_da, rate, "AllocationRate")
+                _misa_gan(da_row, cols_da, tien_ky_thuc, "AllocationAmount")
+                _misa_gan(da_row, cols_da, idx - 1, "SortOrder")
+                da_rows.append(da_row)
+
+                key_nhom = (tk_no, obj_id)
+                nhom_post[key_nhom] = nhom_post.get(key_nhom, 0) + tien_ky_thuc
+
+                ket.append({"thang": f"{mm:02d}/{yy}", "ma": st["ma"], "ten": st["ten"],
+                           "so_tien": tien_ky_thuc, "so_chung_tu": refno, "tk_no": tk_no})
+                st["con_lai_ky"] -= 1
+                st["con_lai_tien"] -= tien_ky_thuc
+
+            dep_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_dep.values()}
+            _misa_gan(dep_row, cols_dep, dep_id, "RefID")
+            _misa_gan(dep_row, cols_dep, ref_type_kh, "RefType")
+            _misa_gan(dep_row, cols_dep, ngay_cuoi_thang, "RefDate")
+            _misa_gan(dep_row, cols_dep, ngay_cuoi_thang, "PostedDate")
+            _misa_gan(dep_row, cols_dep, refno, "RefNo")
+            _misa_gan(dep_row, cols_dep, memo, "JournalMemo")
+            _misa_gan(dep_row, cols_dep, mm, "Month")
+            _misa_gan(dep_row, cols_dep, yy, "Year")
+            _misa_gan(dep_row, cols_dep, tong_ct, "TotalAmount")
+            _misa_gan(dep_row, cols_dep, branch_id, "BranchID")
+            _misa_gan(dep_row, cols_dep, bool(is_pm_kh), "IsPostedManagement")
+            _misa_gan(dep_row, cols_dep, dob_kh if dob_kh is not None else 0, "DisplayOnBook")
+            _misa_gan(dep_row, cols_dep, 0, "RefOrder")
+            _misa_gan(dep_row, cols_dep, datetime.datetime.now(), "CreatedDate")
+            _misa_gan(dep_row, cols_dep, created_by_kh, "CreatedBy")
+            _misa_gan(dep_row, cols_dep, datetime.datetime.now(), "ModifiedDate")
+            _misa_gan(dep_row, cols_dep, created_by_kh, "ModifiedBy")
+            _misa_gan(dep_row, cols_dep, bool(is_pf_kh), "IsPostedFinance")
+
+            if not preview:
+                # Ghi dòng ĐẦU FADepreciation TRƯỚC (đã đủ TotalAmount), rồi
+                # mới ghi các bảng chi tiết tham chiếu tới RefID đó — đúng
+                # thứ tự khoá ngoại.
+                lc = list(dep_row.keys())
+                cur.execute("INSERT INTO FADepreciation ([%s]) VALUES (%s)" %
+                           ("],[".join(lc), ",".join(["?"] * len(lc))),
+                           [dep_row[c] for c in lc])
+                for det_row in det_rows:
+                    lc = list(det_row.keys())
+                    cur.execute("INSERT INTO FADepreciationDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [det_row[c] for c in lc])
+                for da_row in da_rows:
+                    lc = list(da_row.keys())
+                    cur.execute("INSERT INTO FADepreciationDetailAllocation ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [da_row[c] for c in lc])
+                so_thu_tu = 0
+                for (tk_no, obj_id), tong_nhom in nhom_post.items():
+                    post_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_post.values()}
+                    _misa_gan(post_row, cols_post, str(_uuid.uuid4()), "RefDetailID")
+                    _misa_gan(post_row, cols_post, dep_id, "RefID")
+                    _misa_gan(post_row, cols_post, memo, "Description")
+                    _misa_gan(post_row, cols_post, tk_no or debit_mac_dinh, "DebitAccount")
+                    _misa_gan(post_row, cols_post, credit_mac_dinh, "CreditAccount")
+                    _misa_gan(post_row, cols_post, tong_nhom, "Amount")
+                    _misa_gan(post_row, cols_post, obj_id, "OrganizationUnitID")
+                    _misa_gan(post_row, cols_post, False, "UnResonableCost")
+                    _misa_gan(post_row, cols_post, so_thu_tu, "SortOrder")
+                    so_thu_tu += 1
+                    lc = list(post_row.keys())
+                    cur.execute("INSERT INTO FADepreciationDetailPost ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [post_row[c] for c in lc])
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_dong": len(ket),
+                "so_chung_tu": len(set(x["so_chung_tu"] for x in ket)), "danh_sach": ket,
+                "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                "hoc_duoc": {"ref_type": ref_type_kh, "display_on_book": dob_kh,
+                            "tk_no_mac_dinh": debit_mac_dinh, "tk_co_mac_dinh": credit_mac_dinh}}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, f"Lỗi tính khấu hao TSCĐ: {e}")
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/khau-hao-tscd/{cid}")
+def misa_sql_khau_hao_tscd(cid: int, preview: int = 1, database: str = "",
+                           tu_thang: str = "", so_thang: int = 12):
+    """Tự động tính khấu hao TSCĐ hàng tháng thẳng vào MISA (xem
+    _misa_khau_hao_tscd). tu_thang: yyyy-mm, để trống = tự tiếp nối tháng kế
+    tiếp sau chứng từ KH gần nhất. so_thang: số tháng xử lý, mặc định 12."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_khau_hao_tscd(cid, database, preview=bool(preview),
+                               tu_thang=tu_thang, so_thang=so_thang)
 
 
 def _misa_chan_doan_khau_hao_tscd(cid, database):
