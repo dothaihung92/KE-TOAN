@@ -16,6 +16,8 @@ import calendar
 import datetime
 import itertools
 import threading
+import subprocess
+import webbrowser
 import concurrent.futures as _cf
 from typing import Optional, List
 
@@ -34,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.160"
+APP_BUILD = "2026-07-27.161"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22447,8 +22449,58 @@ def _tim_duong_dan_trinh_duyet():
     return None
 
 
+# Tất cả cửa sổ app-mode ĐÃ MỞ (cửa sổ chính + các cửa sổ phụ như Đối Chiếu
+# Ngân Hàng mở qua /api/mo-cua-so-app) — đóng cửa sổ dòng lệnh sẽ đóng theo
+# HẾT các cửa sổ này. Riêng _trinh_duyet_proc (cửa sổ CHÍNH) mới là cửa sổ
+# mà đóng nó sẽ tắt luôn server (xem _cho_trinh_duyet_dong_roi_tat_server).
+_cua_so_app_da_mo = []
+_trinh_duyet_proc = None  # handle tiến trình cửa sổ app-mode CHÍNH (nếu mở được)
+
+
+def _mo_cua_so_app(url):
+    """Mở 1 URL của phần mềm ở cửa sổ app-mode RIÊNG (Edge/Chrome, không
+    tab/thanh địa chỉ) — dùng cho cả cửa sổ chính lúc khởi động lẫn các cửa
+    sổ phụ (vd Đối Chiếu Ngân Hàng) mở thêm sau đó. Trả về tiến trình đã mở
+    (None nếu không tìm được Edge/Chrome hoặc mở lỗi -> tự dự phòng mở tab
+    trình duyệt thường, không đóng theo cửa sổ dòng lệnh được)."""
+    exe = _tim_duong_dan_trinh_duyet()
+    if exe:
+        try:
+            # --user-data-dir RIÊNG (không dùng chung profile trình duyệt mặc
+            # định của người dùng) để không xung đột đăng nhập/tiện ích/tab
+            # đang mở sẵn, đồng thời GIỮ CỐ ĐỊNH (không phải thư mục tạm) để
+            # localStorage của công cụ Đối Chiếu Ngân Hàng không bị mất giữa
+            # các lần mở phần mềm.
+            thu_muc_profile = os.path.join(BASE_DIR, "data", "_browser_app")
+            proc = subprocess.Popen(
+                [exe, f"--app={url}", f"--user-data-dir={thu_muc_profile}",
+                 "--window-size=1400,900"])
+            _cua_so_app_da_mo.append(proc)
+            return proc
+        except Exception:
+            pass
+    webbrowser.open(url)  # dự phòng: không tìm thấy Edge/Chrome hoặc mở app-mode lỗi
+    return None
+
+
+@app.post("/api/mo-cua-so-app")
+async def mo_cua_so_app(request: Request):
+    """Mở 1 đường dẫn của phần mềm (vd '/doi-chieu-ngan-hang') ở cửa sổ
+    app-mode RIÊNG giống hệt cửa sổ chính (không tab/thanh địa chỉ) — gọi từ
+    nút bấm trong phần mềm THAY CHO window.open() (JS window.open() chỉ mở
+    được tab trình duyệt thường, không tạo được cửa sổ app-mode). Cửa sổ mở
+    ra sẽ tự đóng theo khi tắt cửa sổ dòng lệnh."""
+    body = await request.json()
+    duong_dan = str(body.get("duong_dan", "") or "")
+    if not duong_dan.startswith("/"):
+        raise HTTPException(400, "Đường dẫn không hợp lệ")
+    url = str(request.base_url).rstrip("/") + duong_dan
+    threading.Thread(target=_mo_cua_so_app, args=(url,), daemon=True).start()
+    return {"ok": True}
+
+
 if __name__ == "__main__":
-    import webbrowser, threading, socket, subprocess, sys
+    import socket, sys
 
     # Tự tìm cổng trống nếu 8686 đang bị chiếm
     def find_free_port(preferred=8686):
@@ -22466,34 +22518,17 @@ if __name__ == "__main__":
     PORT = find_free_port(8686)
     URL = f"http://127.0.0.1:{PORT}"
 
-    _trinh_duyet_proc = None  # handle tiến trình cửa sổ app-mode (nếu mở được)
-
     def open_browser():
         global _trinh_duyet_proc
         time.sleep(1.5)
-        exe = _tim_duong_dan_trinh_duyet()
-        if exe:
-            try:
-                # --user-data-dir RIÊNG (không dùng chung profile trình duyệt
-                # mặc định của người dùng) để không xung đột đăng nhập/tiện
-                # ích/tab đang mở sẵn, đồng thời GIỮ CỐ ĐỊNH (không phải thư
-                # mục tạm) để localStorage của công cụ Đối Chiếu Ngân Hàng
-                # không bị mất giữa các lần mở phần mềm.
-                thu_muc_profile = os.path.join(BASE_DIR, "data", "_browser_app")
-                _trinh_duyet_proc = subprocess.Popen(
-                    [exe, f"--app={URL}", f"--user-data-dir={thu_muc_profile}",
-                     "--window-size=1400,900"])
-                return
-            except Exception:
-                _trinh_duyet_proc = None
-        webbrowser.open(URL)  # dự phòng: không tìm thấy Edge/Chrome hoặc mở app-mode lỗi
+        _trinh_duyet_proc = _mo_cua_so_app(URL)
 
     threading.Thread(target=open_browser, daemon=True).start()
 
     def _cho_trinh_duyet_dong_roi_tat_server():
-        """Chạy nền: hễ cửa sổ trình duyệt (app-mode) bị đóng -> tự tắt luôn
-        server (đóng cửa sổ dòng lệnh theo). Không làm gì nếu không mở được
-        app-mode (không có handle để theo dõi)."""
+        """Chạy nền: hễ cửa sổ trình duyệt CHÍNH (app-mode) bị đóng -> tự tắt
+        luôn server (đóng cửa sổ dòng lệnh theo). Không làm gì nếu không mở
+        được app-mode (không có handle để theo dõi)."""
         time.sleep(3)  # chờ open_browser() kịp gán _trinh_duyet_proc
         proc = _trinh_duyet_proc
         if proc is None:
@@ -22506,10 +22541,10 @@ if __name__ == "__main__":
 
     def _dang_ky_dong_trinh_duyet_khi_tat_console():
         """Windows: khi cửa sổ dòng lệnh sắp đóng (bấm X, Ctrl+C, tắt máy,
-        đăng xuất...) -> chủ động đóng luôn cửa sổ trình duyệt app-mode đang
-        mở (tắt cửa sổ dòng lệnh theo thì trình duyệt tắt theo). Windows chỉ
-        cho vài giây để xử lý xong trước khi ép dừng tiến trình, nên chỉ gọi
-        terminate() (báo đóng, không chờ đóng xong) rồi trả về ngay."""
+        đăng xuất...) -> chủ động đóng luôn TẤT CẢ cửa sổ trình duyệt app-mode
+        đang mở (cửa sổ chính + các cửa sổ phụ như Đối Chiếu Ngân Hàng). Windows
+        chỉ cho vài giây để xử lý xong trước khi ép dừng tiến trình, nên chỉ
+        gọi terminate() (báo đóng, không chờ đóng xong) rồi trả về ngay."""
         if sys.platform != "win32":
             return
         try:
@@ -22517,12 +22552,12 @@ if __name__ == "__main__":
             HandlerRoutine = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_ulong)
 
             def _xu_ly(ma_su_kien):
-                proc = _trinh_duyet_proc
-                if proc is not None and proc.poll() is None:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
+                for proc in list(_cua_so_app_da_mo):
+                    if proc is not None and proc.poll() is None:
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
                 return 0  # chưa "xử lý xong" -> Windows tiếp tục đóng cửa sổ như bình thường
 
             global _console_ctrl_handler_ref

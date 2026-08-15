@@ -160,4 +160,9 @@ echo.
 echo  ====^> DE TAT PHAN MEM: dong cua so nay ^<====
 echo.
 "%PYEXE%" server.py
-pause
+REM Thoat code 0 = tu tat co chu dich (dong cua so phan mem -> server tu tat
+REM theo) -> dong luon cua so nay, KHONG dung lai cho bam phim. Thoat code
+REM khac 0 (loi/crash) -> van dung lai (pause) de nguoi dung doc duoc loi.
+if errorlevel 1 (
+    pause
+)
