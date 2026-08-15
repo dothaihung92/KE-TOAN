@@ -34,7 +34,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.159"
+APP_BUILD = "2026-07-27.160"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22426,8 +22426,29 @@ th{{background:#f0e6d2}}h2{{text-align:center;color:#c00}}</style></head><body>
         headers={"Content-Disposition": "attachment; filename=invoice.zip"})
 
 
+def _tim_duong_dan_trinh_duyet():
+    """Tìm đường dẫn Edge/Chrome đã cài trên máy để mở phần mềm ở CHẾ ĐỘ APP
+    (--app=URL) — 1 cửa sổ RIÊNG không có tab/thanh địa chỉ, trông y hệt 1
+    phần mềm desktop thật. Nhờ đó phần mềm có được HANDLE tiến trình của
+    đúng cửa sổ này -> biết chính xác khi nào cửa sổ bị đóng, và có thể chủ
+    động đóng nó — cho phép tắt trình duyệt <-> tắt cửa sổ dòng lệnh LUÔN
+    ĐÓNG THEO NHAU. Trả về None nếu máy không có Edge lẫn Chrome (khi đó
+    dùng webbrowser.open() thông thường, không đóng theo nhau được)."""
+    duong_dan_con = [r"Microsoft\Edge\Application\msedge.exe",
+                      r"Google\Chrome\Application\chrome.exe"]
+    for ten_bien in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+        goc = os.environ.get(ten_bien, "")
+        if not goc:
+            continue
+        for con in duong_dan_con:
+            duong_dan = os.path.join(goc, con)
+            if os.path.isfile(duong_dan):
+                return duong_dan
+    return None
+
+
 if __name__ == "__main__":
-    import webbrowser, threading, socket
+    import webbrowser, threading, socket, subprocess, sys
 
     # Tự tìm cổng trống nếu 8686 đang bị chiếm
     def find_free_port(preferred=8686):
@@ -22445,10 +22466,72 @@ if __name__ == "__main__":
     PORT = find_free_port(8686)
     URL = f"http://127.0.0.1:{PORT}"
 
+    _trinh_duyet_proc = None  # handle tiến trình cửa sổ app-mode (nếu mở được)
+
     def open_browser():
+        global _trinh_duyet_proc
         time.sleep(1.5)
-        webbrowser.open(URL)
+        exe = _tim_duong_dan_trinh_duyet()
+        if exe:
+            try:
+                # --user-data-dir RIÊNG (không dùng chung profile trình duyệt
+                # mặc định của người dùng) để không xung đột đăng nhập/tiện
+                # ích/tab đang mở sẵn, đồng thời GIỮ CỐ ĐỊNH (không phải thư
+                # mục tạm) để localStorage của công cụ Đối Chiếu Ngân Hàng
+                # không bị mất giữa các lần mở phần mềm.
+                thu_muc_profile = os.path.join(BASE_DIR, "data", "_browser_app")
+                _trinh_duyet_proc = subprocess.Popen(
+                    [exe, f"--app={URL}", f"--user-data-dir={thu_muc_profile}",
+                     "--window-size=1400,900"])
+                return
+            except Exception:
+                _trinh_duyet_proc = None
+        webbrowser.open(URL)  # dự phòng: không tìm thấy Edge/Chrome hoặc mở app-mode lỗi
+
     threading.Thread(target=open_browser, daemon=True).start()
+
+    def _cho_trinh_duyet_dong_roi_tat_server():
+        """Chạy nền: hễ cửa sổ trình duyệt (app-mode) bị đóng -> tự tắt luôn
+        server (đóng cửa sổ dòng lệnh theo). Không làm gì nếu không mở được
+        app-mode (không có handle để theo dõi)."""
+        time.sleep(3)  # chờ open_browser() kịp gán _trinh_duyet_proc
+        proc = _trinh_duyet_proc
+        if proc is None:
+            return
+        proc.wait()
+        print("\n[*] Đã đóng cửa sổ phần mềm — tự tắt server...")
+        os._exit(0)
+
+    threading.Thread(target=_cho_trinh_duyet_dong_roi_tat_server, daemon=True).start()
+
+    def _dang_ky_dong_trinh_duyet_khi_tat_console():
+        """Windows: khi cửa sổ dòng lệnh sắp đóng (bấm X, Ctrl+C, tắt máy,
+        đăng xuất...) -> chủ động đóng luôn cửa sổ trình duyệt app-mode đang
+        mở (tắt cửa sổ dòng lệnh theo thì trình duyệt tắt theo). Windows chỉ
+        cho vài giây để xử lý xong trước khi ép dừng tiến trình, nên chỉ gọi
+        terminate() (báo đóng, không chờ đóng xong) rồi trả về ngay."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            HandlerRoutine = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_ulong)
+
+            def _xu_ly(ma_su_kien):
+                proc = _trinh_duyet_proc
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                return 0  # chưa "xử lý xong" -> Windows tiếp tục đóng cửa sổ như bình thường
+
+            global _console_ctrl_handler_ref
+            _console_ctrl_handler_ref = HandlerRoutine(_xu_ly)
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_ctrl_handler_ref, True)
+        except Exception:
+            pass
+
+    _dang_ky_dong_trinh_duyet_khi_tat_console()
 
     print("=" * 55)
     print("  PHẦN MỀM QUẢN LÝ HÓA ĐƠN ĐIỆN TỬ ĐA CÔNG TY")
@@ -22456,6 +22539,6 @@ if __name__ == "__main__":
     print(f"  Đang chạy tại: {URL}")
     if PORT != 8686:
         print(f"  (Cổng 8686 bận nên tự chuyển sang {PORT})")
-    print("  (Đóng cửa sổ này để tắt phần mềm)")
+    print("  (Đóng cửa sổ này HOẶC đóng cửa sổ phần mềm để tắt)")
     print("=" * 55)
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
