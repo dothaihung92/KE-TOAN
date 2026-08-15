@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.161"
+APP_BUILD = "2026-07-27.162"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22474,7 +22474,7 @@ def _mo_cua_so_app(url):
             thu_muc_profile = os.path.join(BASE_DIR, "data", "_browser_app")
             proc = subprocess.Popen(
                 [exe, f"--app={url}", f"--user-data-dir={thu_muc_profile}",
-                 "--window-size=1400,900"])
+                 "--start-maximized"])
             _cua_so_app_da_mo.append(proc)
             return proc
         except Exception:
