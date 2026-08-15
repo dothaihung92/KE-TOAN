@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.177"
+APP_BUILD = "2026-08-15.178"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17551,6 +17551,109 @@ def misa_sql_chan_doan_to_khai_gtgt(cid: int, database: str = "",
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_to_khai_gtgt(cid, database, gia_tri_ct1=gia_tri_1 or None,
                                         gia_tri_ct2=gia_tri_2 or None)
+
+
+def _misa_chan_doan_but_toan_khau_tru(cid, database):
+    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC, không ghi/sửa gì) — tìm bảng THẬT lưu bút
+    toán 'Khấu trừ thuế GTGT' (Nợ 33311/Có 1331). Đối chiếu đợt chẩn đoán
+    trước: bảng lưu tờ khai 01/GTGT (TADeclaration*) là hệ khai báo thuế
+    RIÊNG, không liên quan gì tới bút toán kế toán — bút toán Nợ/Có gần
+    như chắc chắn nằm ở bảng SỔ CÁI CHUNG (GLVoucher/GLVoucherDetail, nơi
+    lưu mọi 'Phiếu kế toán khác' thủ công), KHÔNG phải bảng TA*. Thay vì
+    dò theo số tiền (số tiền đổi theo từng quý, khó biết trước), dò theo
+    CHÍNH VĂN BẢN DIỄN GIẢI 'Khấu trừ thuế' xuất hiện thật trên màn hình
+    MISA — tìm mọi cột KIỂU CHỮ trên các bảng tên chứa Voucher/GL/Journal
+    có dòng chứa cụm từ này."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+
+        def _dep(v):
+            if hasattr(v, "isoformat"):
+                return v.isoformat()
+            if isinstance(v, float):
+                return round(v, 2)
+            if isinstance(v, (bytes, bytearray, memoryview)):
+                return bytes(v).hex()
+            return v
+
+        def _liet_ke_cot_day_du(bang):
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "WHERE c.object_id=OBJECT_ID(?) ORDER BY c.column_id", bang).fetchall()]
+            except Exception:
+                return []
+
+        def _liet_ke_cot_chu(bang):
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "JOIN sys.types ty ON ty.user_type_id=c.user_type_id "
+                    "WHERE c.object_id=OBJECT_ID(?) AND ty.name IN "
+                    "('nvarchar','varchar','nchar','char','ntext','text') "
+                    "ORDER BY c.column_id", bang).fetchall()]
+            except Exception:
+                return []
+
+        try:
+            bang_ung_vien = [r[0] for r in cur.execute(
+                "SELECT name FROM sys.tables WHERE name LIKE '%GLVoucher%' OR "
+                "name LIKE '%Voucher%' OR name LIKE '%Journal%' "
+                "ORDER BY name").fetchall()]
+        except Exception:
+            bang_ung_vien = []
+
+        tim_thay = []
+        for bang in bang_ung_vien:
+            for cot in _liet_ke_cot_chu(bang):
+                try:
+                    n = cur.execute(
+                        "SELECT COUNT(*) FROM [%s] WHERE [%s] LIKE N'%%Khấu trừ thuế%%'" %
+                        (bang, cot)).fetchone()[0]
+                    if n:
+                        tim_thay.append({"bang": bang, "cot": cot, "so_dong_khop": n})
+                except Exception:
+                    pass
+
+        chi_tiet_bang = {}
+        for x in tim_thay:
+            bang, cot = x["bang"], x["cot"]
+            if bang in chi_tiet_bang:
+                continue
+            cols = _liet_ke_cot_day_du(bang)
+            dong = []
+            try:
+                sql = "SELECT TOP 8 [%s] FROM [%s] WHERE [%s] LIKE N'%%Khấu trừ thuế%%'" % (
+                    "],[".join(cols), bang, cot)
+                for r in cur.execute(sql).fetchall():
+                    dong.append(dict(zip(cols, [_dep(v) for v in r])))
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                chi_tiet_bang[bang] = {"cot": cols, "dong": [], "loi": str(e)}
+                continue
+            chi_tiet_bang[bang] = {"cot": cols, "dong": dong}
+
+        return {"database": database, "bang_ung_vien_theo_ten": bang_ung_vien,
+                "tim_thay_dien_giai": tim_thay, "chi_tiet_bang": chi_tiet_bang}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, đã dừng an toàn, không ghi/sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-but-toan-khau-tru/{cid}")
+def misa_sql_chan_doan_but_toan_khau_tru(cid: int, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_but_toan_khau_tru."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_but_toan_khau_tru(cid, database)
 
 
 # ============================================================
