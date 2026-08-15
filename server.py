@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.171"
+APP_BUILD = "2026-08-15.172"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16607,6 +16607,13 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             memo = f"Phân bổ chi phí CCDC tháng {mm} năm {yy}"
             tong_ct = 0
             nhom_post = {}   # (tk_no, obj_id) -> tổng tiền, gộp bút toán theo TK/đối tượng
+            # BƯỚC 1: TÍNH TOÁN TRƯỚC (chưa ghi gì) — cần biết TotalAmount của
+            # cả chứng từ TRƯỚC khi ghi dòng đầu SUAllocation (bước 2), vì các
+            # bảng chi tiết bên dưới có khoá ngoại RefID trỏ VỀ SUAllocation
+            # (đối chiếu dữ liệu thật: ghi chi tiết trước khi có dòng đầu ->
+            # lỗi FK_SUAllocationDetailExpense_SUAllocation, KHÔNG ghi được
+            # gì — transaction tự rollback nên không hỏng dữ liệu).
+            exp_rows, tbl_rows = [], []
             for idx, (su_id, st) in enumerate(dong_thang, start=1):
                 tien_ky_thuc = round(st["con_lai_tien"] if st["con_lai_ky"] <= 1 else st["tien_ky_dinh"])
                 tong_ct += tien_ky_thuc
@@ -16651,6 +16658,7 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                 _misa_gan(exp_row, cols_exp, tien_ky_thuc, "AllocationAmount")
                 _misa_gan(exp_row, cols_exp, max(round(st["con_lai_tien"]) - tien_ky_thuc, 0), "RemainingAmount")
                 _misa_gan(exp_row, cols_exp, idx, "SortOrder")
+                exp_rows.append(exp_row)
 
                 tbl_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tbl.values()}
                 _misa_gan(tbl_row, cols_tbl, str(_uuid.uuid4()), "RefDetailID")
@@ -16663,16 +16671,7 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                 _misa_gan(tbl_row, cols_tbl, tk_no, "CostAccount")
                 _misa_gan(tbl_row, cols_tbl, idx, "SortOrder")
                 _misa_gan(tbl_row, cols_tbl, False, "IsDetailBreak")
-
-                if not preview:
-                    lc = list(exp_row.keys())
-                    cur.execute("INSERT INTO SUAllocationDetailExpense ([%s]) VALUES (%s)" %
-                               ("],[".join(lc), ",".join(["?"] * len(lc))),
-                               [exp_row[c] for c in lc])
-                    lc2 = list(tbl_row.keys())
-                    cur.execute("INSERT INTO SUAllocationDetailTable ([%s]) VALUES (%s)" %
-                               ("],[".join(lc2), ",".join(["?"] * len(lc2))),
-                               [tbl_row[c] for c in lc2])
+                tbl_rows.append(tbl_row)
 
                 key_nhom = (tk_no, obj_id)
                 nhom_post[key_nhom] = nhom_post.get(key_nhom, 0) + tien_ky_thuc
@@ -16704,10 +16703,23 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             _misa_gan(alloc_row, cols_alloc, bool(is_gsa_pb), "IsGetSupplyAllocated")
 
             if not preview:
+                # BƯỚC 2: ghi dòng ĐẦU SUAllocation TRƯỚC (đã đủ TotalAmount
+                # tính ở bước 1), rồi mới ghi các bảng chi tiết tham chiếu tới
+                # RefID này — đúng thứ tự khoá ngoại.
                 lc = list(alloc_row.keys())
                 cur.execute("INSERT INTO SUAllocation ([%s]) VALUES (%s)" %
                            ("],[".join(lc), ",".join(["?"] * len(lc))),
                            [alloc_row[c] for c in lc])
+                for exp_row in exp_rows:
+                    lc = list(exp_row.keys())
+                    cur.execute("INSERT INTO SUAllocationDetailExpense ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [exp_row[c] for c in lc])
+                for tbl_row in tbl_rows:
+                    lc = list(tbl_row.keys())
+                    cur.execute("INSERT INTO SUAllocationDetailTable ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [tbl_row[c] for c in lc])
                 so_thu_tu = 0
                 for (tk_no, obj_id), tong_nhom in nhom_post.items():
                     post_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_post.values()}
