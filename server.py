@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-07-27.166"
+APP_BUILD = "2026-08-15.167"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16730,13 +16730,65 @@ def _misa_chan_doan_phan_bo_ccdc(cid, database):
 
         # Giá trị tiền THẬT đã biết chắc chắn (đọc từ ảnh chụp màn hình MISA
         # người dùng gửi) — dùng làm "vân tay" dò đúng bảng/cột lưu số tiền.
-        gia_tri_biet = [264773, 6555117, 231856, 137500, 6880830, 8145224]
+        gia_tri_biet_ct = [6555117, 6880830, 8145224]   # tổng tiền / chứng từ
+        gia_tri_biet_ccdc = [264773, 231856, 137500]     # tiền / từng CCDC / kỳ
+        gia_tri_biet = gia_tri_biet_ct + gia_tri_biet_ccdc
         do_tim = _misa_tim_bang_chua_so_tien(cur, gia_tri_biet)
+
+        # ==== GIAI ĐOẠN 2: đào sâu 4 bảng vừa lộ diện (SUAllocation /
+        # SUAllocationDetailExpense / SUAllocationDetailTable /
+        # SUAllocationDetailPost) — lấy TOÀN BỘ tên cột (kể cả cột identity,
+        # để thấy khoá chính/khoá ngoại) + vài dòng THẬT chứa đúng số tiền đã
+        # biết, để hiểu quan hệ header-chi tiết và cách MISA thật sự lưu.
+        def _liet_ke_cot_day_du(bang):
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "WHERE c.object_id=OBJECT_ID(?) ORDER BY c.column_id", bang).fetchall()]
+            except Exception:
+                return []
+
+        def _dong_khop_gia_tri(bang, cot_tien_list, gia_tri_list):
+            cols = _liet_ke_cot_day_du(bang)
+            if not cols or not cot_tien_list:
+                return {"cot": cols, "dong": []}
+            dks = " OR ".join("[%s]=?" % c for c in cot_tien_list)
+            tham_so = []
+            dieu_kien_all = []
+            for gt in gia_tri_list:
+                dieu_kien_all.append("(" + dks + ")")
+                tham_so.extend([gt] * len(cot_tien_list))
+            sql = "SELECT TOP 12 [%s] FROM [%s] WHERE %s" % (
+                "],[".join(cols), bang, " OR ".join(dieu_kien_all))
+            dong = []
+            try:
+                for r in cur.execute(sql, tham_so).fetchall():
+                    dong.append(dict(zip(cols, [_dep(v) for v in r])))
+            except Exception as e:
+                return {"cot": cols, "dong": [], "loi": str(e)}
+            return {"cot": cols, "dong": dong}
+
+        chi_tiet_bang = {}
+        for bang in ("SUAllocation",):
+            cols_b = _liet_ke_cot_day_du(bang)
+            cot_tien_b = [c for c in cols_b if c.lower() in
+                          ("totalamount", "amount", "totalallocationamount")]
+            chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, cot_tien_b or cols_b, gia_tri_biet_ct)
+        for bang in ("SUAllocationDetailExpense", "SUAllocationDetailTable"):
+            cols_b = _liet_ke_cot_day_du(bang)
+            cot_tien_b = [c for c in cols_b if c.lower() in
+                          ("totalallocationamount", "allocationamount", "amount")]
+            chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, cot_tien_b or cols_b, gia_tri_biet_ccdc)
+        for bang in ("SUAllocationDetailPost",):
+            cols_b = _liet_ke_cot_day_du(bang)
+            cot_tien_b = [c for c in cols_b if c.lower() in ("amount", "totalamount")]
+            chi_tiet_bang[bang] = _dong_khop_gia_tri(bang, cot_tien_b or cols_b, gia_tri_biet_ct)
 
         return {"database": database, "cot_su_increment_tim_duoc": cot_that_su,
                 "cot_supply_ledger_tim_duoc": cot_that_led,
                 "su_increment": su_rows[:500], "supply_ledger_pbcc": led_rows,
-                "do_tim_bang_so_tien_that": do_tim}
+                "do_tim_bang_so_tien_that": do_tim,
+                "chi_tiet_bang_allocation": chi_tiet_bang}
     finally:
         conn.close()
 
