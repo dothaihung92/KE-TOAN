@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.178"
+APP_BUILD = "2026-08-15.179"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17654,6 +17654,131 @@ def misa_sql_chan_doan_but_toan_khau_tru(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_but_toan_khau_tru(cid, database)
+
+
+def _misa_chan_doan_sau_gtgt_khau_tru(cid, database):
+    """CHẨN ĐOÁN SÂU đợt 3 (CHỈ ĐỌC) — 2 đợt trước đã xác định ĐÚNG bảng:
+    GLVoucher (RefType=4011) = bút toán 'Khấu trừ thuế GTGT'; TADeclaration
+    (RefType=5005/TemplateNo=01/GTGT) + TADeclarationDetail (EAV, ItemN =
+    chỉ tiêu ctN) = tờ khai 01/GTGT. Đợt này lấy ĐẦY ĐỦ (không phải mẫu
+    ngẫu nhiên): (1) TOÀN BỘ dòng chi tiết Nợ/Có (GLVoucherDetail) của các
+    chứng từ Khấu trừ thuế GTGT thật gần nhất — để biết chính xác cấu trúc
+    2 dòng Nợ 33311/Có 1331; (2) TOÀN BỘ dòng TADeclarationDetail +
+    TADeclarationGeneral của 1 tờ khai 01/GTGT thật gần nhất — để biết đủ
+    DANH SÁCH mã chỉ tiêu (ItemCode) cần điền cho 1 tờ khai hợp lệ (mẫu
+    ngẫu nhiên TOP 8 trước không đủ vì mỗi tờ khai có ~25-30 chỉ tiêu)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+
+        def _dep(v):
+            if hasattr(v, "isoformat"):
+                return v.isoformat()
+            if isinstance(v, float):
+                return round(v, 2)
+            if isinstance(v, (bytes, bytearray, memoryview)):
+                return bytes(v).hex()
+            return v
+
+        def _liet_ke_cot_day_du(bang):
+            try:
+                return [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c "
+                    "WHERE c.object_id=OBJECT_ID(?) ORDER BY c.column_id", bang).fetchall()]
+            except Exception:
+                return []
+
+        # ===== 1) GLVoucherDetail đầy đủ của các chứng từ Khấu trừ thuế
+        # GTGT (RefType=4011) gần nhất =====
+        cols_glv = _liet_ke_cot_day_du("GLVoucherDetail")
+        glv_dong = []
+        glvoucher_dong = []
+        try:
+            ref_ids = [r[0] for r in cur.execute(
+                "SELECT TOP 3 RefID FROM GLVoucher WHERE RefType=4011 "
+                "ORDER BY RefDate DESC").fetchall()]
+        except Exception:
+            ref_ids = []
+        cols_hdr = _liet_ke_cot_day_du("GLVoucher")
+        for rid in ref_ids:
+            if cols_hdr:
+                try:
+                    sql_h = "SELECT [%s] FROM GLVoucher WHERE RefID=?" % "],[".join(cols_hdr)
+                    r = cur.execute(sql_h, rid).fetchone()
+                    if r:
+                        glvoucher_dong.append(dict(zip(cols_hdr, [_dep(v) for v in r])))
+                except Exception:
+                    pass
+            if cols_glv:
+                try:
+                    sql_d = "SELECT [%s] FROM GLVoucherDetail WHERE RefID=?" % "],[".join(cols_glv)
+                    for r in cur.execute(sql_d, rid).fetchall():
+                        glv_dong.append(dict(zip(cols_glv, [_dep(v) for v in r])))
+                except Exception:
+                    pass
+
+        # ===== 2) TOÀN BỘ TADeclarationDetail + TADeclarationGeneral của 1
+        # tờ khai 01/GTGT (RefType=5005) gần nhất =====
+        cols_det = _liet_ke_cot_day_du("TADeclarationDetail")
+        cols_gen = _liet_ke_cot_day_du("TADeclarationGeneral")
+        cols_hdr2 = _liet_ke_cot_day_du("TADeclaration")
+        tk_hdr = None
+        tk_det, tk_gen = [], []
+        try:
+            r0 = cur.execute(
+                "SELECT TOP 1 RefID FROM TADeclaration WHERE RefType=5005 "
+                "ORDER BY FromDate DESC").fetchone()
+            tk_refid = r0[0] if r0 else None
+        except Exception:
+            tk_refid = None
+        if tk_refid:
+            if cols_hdr2:
+                try:
+                    sql_h2 = "SELECT [%s] FROM TADeclaration WHERE RefID=?" % "],[".join(cols_hdr2)
+                    r = cur.execute(sql_h2, tk_refid).fetchone()
+                    if r:
+                        tk_hdr = dict(zip(cols_hdr2, [_dep(v) for v in r]))
+                except Exception:
+                    pass
+            if cols_det:
+                try:
+                    sql_d2 = ("SELECT [%s] FROM TADeclarationDetail WHERE RefID=? "
+                             "ORDER BY ItemCode" % "],[".join(cols_det))
+                    for r in cur.execute(sql_d2, tk_refid).fetchall():
+                        tk_det.append(dict(zip(cols_det, [_dep(v) for v in r])))
+                except Exception:
+                    pass
+            if cols_gen:
+                try:
+                    sql_g2 = ("SELECT [%s] FROM TADeclarationGeneral WHERE RefID=? "
+                             "ORDER BY ItemCode" % "],[".join(cols_gen))
+                    for r in cur.execute(sql_g2, tk_refid).fetchall():
+                        tk_gen.append(dict(zip(cols_gen, [_dep(v) for v in r])))
+                except Exception:
+                    pass
+
+        return {"database": database,
+                "khau_tru_thue__glvoucher_header": glvoucher_dong,
+                "khau_tru_thue__glvoucherdetail_day_du": glv_dong,
+                "to_khai_gtgt__refid_dung": tk_refid,
+                "to_khai_gtgt__header": tk_hdr,
+                "to_khai_gtgt__declarationdetail_day_du": tk_det,
+                "to_khai_gtgt__declarationgeneral_day_du": tk_gen}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, đã dừng an toàn, không ghi/sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-sau-gtgt-khau-tru/{cid}")
+def misa_sql_chan_doan_sau_gtgt_khau_tru(cid: int, database: str = ""):
+    """CHẨN ĐOÁN SÂU đợt 3 (chỉ đọc) — xem _misa_chan_doan_sau_gtgt_khau_tru."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_sau_gtgt_khau_tru(cid, database)
 
 
 # ============================================================
