@@ -807,7 +807,9 @@
     </div>
     <input id="xkGanSearch" placeholder="🔎 Tìm theo tên hàng hoặc mã... (↑↓ chọn, Enter gắn mã)" oninput="xkVeDanhSachGan()" onkeydown="xkGanPhimO(event)"
            style="padding:10px 12px;font-size:15px;border:1px solid #ccc;border-radius:8px;width:100%;box-sizing:border-box;margin-bottom:10px">
+    <div class="hint" style="margin-bottom:6px">💡 Giữ <b>Ctrl</b> (hoặc <b>⌘</b>) rồi bấm để chọn NHIỀU mã cùng lúc — phần mềm sẽ dùng lần lượt các mã đã chọn để tách dòng xuất đủ số lượng.</div>
     <div id="xkGanList" style="overflow:auto;flex:1;border:1px solid #eee;border-radius:8px"></div>
+    <div id="xkGanNhieuBar" style="margin-top:10px"></div>
     <div style="margin-top:10px;text-align:right">
       <button class="btn ghost sm" onclick="xkDongGan()">Đóng</button>
     </div>
@@ -3831,7 +3833,7 @@ async function luuCaHaiBangKe(){
 }
 
 /* ----- XUẤT KHO ----- */
-let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1;
+let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1, xkGanChonNhieu=[];
 const XK_HEADERS=['Tồn kho','Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
                    'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho',
                    'Lợi nhuận','Tỷ lệ % Lãi/Lỗ'];
@@ -4538,6 +4540,7 @@ function xkGanChonDong(){
 }
 function xkMoGan(idx){
   xkGanIdx=idx;
+  xkGanChonNhieu=[];
   const r=xkRows[idx];
   document.getElementById('xkGanTenSp').innerHTML=`Tên bán: "${xkEsc(r.ten_sp)}"${r.sl?` — SL ${r.sl}`:''}`+
     (r.dvt?` — ĐVT: ${xkEsc(r.dvt)}`:'')+
@@ -4552,6 +4555,7 @@ function xkDongGan(){
   document.getElementById('xkGanModal').style.display='none';
   const idxDangGan=xkGanIdx;
   xkGanIdx=-1;
+  xkGanChonNhieu=[];
   // đóng modal (kể cả bấm Đóng/Esc, không chọn mã) vẫn focus lại ô vừa thao
   // tác trong lưới, tránh rơi mất focus khiến mũi tên cuộn khung thay vì di
   // chuyển ô — nếu dòng đó đã bị xoá/không còn thì querySelector không tìm
@@ -4587,11 +4591,12 @@ function xkVeDanhSachGan(){
   xkGanDanhSach=[...goiY, ...khac];
   xkGanHighlight=xkGanDanhSach.length?0:-1;
   const dong=(it,i)=>{
-    return `<div data-idx="${i}" onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}')"
+    const daChon=xkGanChonNhieu.includes(it.ma);
+    return `<div data-idx="${i}" onclick="xkChonMa('${xkEsc(it.ma).replace(/'/g,"\\'")}',event)"
       onmouseenter="xkGanHighlight=${i};xkGanCapNhatHighlight()"
-      style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0">
+      style="padding:12px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;${daChon?'background:#dff3e8;box-shadow:inset 0 0 0 2px #1a7a4a;':''}">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
-        <div style="font-weight:800;font-size:16px">${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
+        <div style="font-weight:800;font-size:16px">${daChon?'☑ ':''}${xkEsc(it.ma)} — ${xkEsc(it.ten)}</div>
         ${it.diem!=null?`<div style="font-size:13px;font-weight:700;color:${it.diem>=0.9?'#1a7a7a':'#b06a00'};white-space:nowrap">Khớp ${Math.round(it.diem*100)}%</div>`:''}
       </div>
       <div style="font-size:14px;color:var(--muted);margin-top:2px">ĐVT: ${xkEsc(it.dvt)||'—'} · Đơn giá: ${fmtVND(it.gia)} ·
@@ -4603,6 +4608,25 @@ function xkVeDanhSachGan(){
   html+=xkGanDanhSach.map((it,i)=>dong(it,i)).join('');
   box.innerHTML=html||'<div class="hint" style="padding:12px">Không tìm thấy</div>';
   xkGanCapNhatHighlight();
+  xkVeThanhChonNhieu();
+}
+// thanh hiện số mã đã Ctrl+chọn + nút xác nhận tách dòng (chỉ hiện khi có
+// ít nhất 1 mã đang được chọn kiểu đa chọn).
+function xkVeThanhChonNhieu(){
+  const bar=document.getElementById('xkGanNhieuBar'); if(!bar)return;
+  if(!xkGanChonNhieu.length){bar.innerHTML='';return}
+  const r=xkRows[xkGanIdx];
+  const tonConLai=xkTonConLaiMap(xkGanIdx);
+  const dsFull=[...xkGanDanhSach, ...xkTon];
+  const tong=xkGanChonNhieu.reduce((s,ma)=>{
+    const cl=tonConLai[ma]; const it=dsFull.find(x=>String(x.ma)===String(ma));
+    return s+Math.max(0,cl!=null?cl:(it?it.con_lai||it.ton||0:0));
+  },0);
+  const can=Number(r?.sl)||0;
+  bar.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:#eafbf1;border:1px solid #8fd9ac;border-radius:8px;padding:8px 12px;flex-wrap:wrap">
+    <span>Đã chọn <b>${xkGanChonNhieu.length}</b> mã — tổng tồn khả dụng <b style="color:${tong>=can?'#1a7a4a':'#b91c1c'}">${tong}</b> / cần <b>${can}</b></span>
+    <button class="btn sm" style="background:#1a7a4a" onclick="xkXacNhanGanNhieu()">✅ Xác nhận tách dòng</button>
+  </div>`;
 }
 // tô sáng dòng đang chọn (bàn phím hoặc rê chuột) trong danh sách gán mã
 function xkGanCapNhatHighlight(){
@@ -4630,8 +4654,18 @@ function xkGanPhimO(e){
     if(xkGanHighlight>=0&&xkGanHighlight<n)xkChonMa(xkGanDanhSach[xkGanHighlight].ma);}
   else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();xkDongGan();}
 }
-function xkChonMa(ma){
+function xkChonMa(ma,ev){
   if(xkGanIdx<0)return;
+  // giữ Ctrl/⌘ để CHỌN NHIỀU mã (tách dòng xuất theo nhiều mã cùng lúc) —
+  // hoặc đang có sẵn lựa chọn đa chọn từ trước thì mọi click tiếp theo cũng
+  // chỉ toggle thêm/bớt, không gắn ngay 1 mã đơn, tránh gắn nhầm khi đang
+  // dở chọn nhiều. Bấm "✅ Xác nhận tách dòng" ở thanh dưới để áp dụng.
+  if((ev&&(ev.ctrlKey||ev.metaKey))||xkGanChonNhieu.length){
+    const i=xkGanChonNhieu.indexOf(ma);
+    if(i>=0)xkGanChonNhieu.splice(i,1); else xkGanChonNhieu.push(ma);
+    xkVeDanhSachGan();
+    return;
+  }
   const r=xkRows[xkGanIdx];
   const tn=(r.goi_y||[]).find(g=>String(g.ma)===String(ma)) || xkTon.find(t=>String(t.ma)===String(ma));
   if(!tn)return;
@@ -4663,6 +4697,50 @@ function xkChonMa(ma){
   // để người dùng bấm mũi tên tiếp tục làm việc trong lưới ngay, không bị
   // rớt ra ngoài khiến mũi tên cuộn cả khung thay vì di chuyển ô.
   xkFocusO(idxVuaGan,'Mã hàng kho');
+}
+// Xác nhận tách dòng theo NHIỀU mã đã Ctrl+chọn: dùng LẦN LƯỢT đúng thứ tự
+// đã chọn (mã chọn trước dùng hết tồn trước mới sang mã sau) cho tới khi đủ
+// số lượng cần xuất — giống hệt cách "Dò mã hàng tự động" tách dòng khi 1 mã
+// không đủ tồn (server), chỉ khác là ở đây người dùng TỰ CHỌN đúng những mã
+// muốn dùng thay vì để phần mềm tự dò theo thứ tự trong Tồn kho.
+function xkXacNhanGanNhieu(){
+  if(xkGanIdx<0||!xkGanChonNhieu.length)return;
+  const r=xkRows[xkGanIdx];
+  const tonConLai=xkTonConLaiMap(xkGanIdx);
+  const dsFull=[...xkGanDanhSach, ...xkTon];
+  const chon=xkGanChonNhieu.map(ma=>{
+    const it=dsFull.find(x=>String(x.ma)===String(ma));
+    const cl=tonConLai[ma];
+    return {ma, ten:it?it.ten:'', dvt:it?it.dvt:'', gia:it?it.gia:'',
+            con_lai:Math.max(0, cl!=null?cl:(it?(it.con_lai??it.ton??0):0))};
+  });
+  const canXuat=Number(r.sl)||0;
+  const tongCoTon=chon.reduce((s,x)=>s+x.con_lai,0);
+  if(tongCoTon<=0){toast('Các mã đã chọn đều đã hết tồn','err');return}
+  const thieu=canXuat-tongCoTon;
+  if(!confirm(`Dùng ${chon.length} mã đã chọn để tách dòng xuất ${canXuat} ${r.dvt||''} — tổng tồn khả dụng ${tongCoTon}`+
+    (thieu>0?` (KHÔNG đủ, còn thiếu ${thieu} sẽ để 1 dòng trống chờ gán tiếp)`:'')+'. Tiếp tục?'))return;
+  const ttGoc=Number(r.tt)||0;
+  let conLai=canXuat, daDungTien=0;
+  const dongMoi=[];
+  chon.forEach(x=>{
+    if(conLai<=0||x.con_lai<=0)return;
+    const lay=Math.min(x.con_lai,conLai);
+    conLai-=lay;
+    const ttPhan=canXuat?(conLai<=0?Math.round(ttGoc-daDungTien):Math.round(ttGoc*lay/canXuat)):ttGoc;
+    daDungTien+=ttPhan;
+    dongMoi.push({...r, sl:lay, tt:ttPhan, ma:x.ma, ten_xk:x.ten, dvt_xk:x.dvt, gia_xk:x.gia,
+                  sl_kho:lay, mo_ho:false, thieu_ton:false});
+  });
+  if(conLai>0){
+    dongMoi.push({...r, sl:conLai, tt:Math.round(ttGoc-daDungTien),
+                  ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl_kho:'', mo_ho:true, thieu_ton:true});
+  }
+  xkRows.splice(xkGanIdx,1,...dongMoi);
+  const idxDau=xkGanIdx;
+  xkDongGan();
+  xkVeGrid();
+  xkFocusO(idxDau,'Mã hàng kho');
 }
 // focus lại đúng ô (theo tên cột) của 1 dòng trong lưới hiện tại — dùng sau
 // khi đóng modal/thao tác làm mất focus, để bàn phím (mũi tên, Enter...)
