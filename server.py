@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.195"
+APP_BUILD = "2026-08-16.196"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18573,6 +18573,17 @@ def misa_sql_kiem_tra_cheo_gtgt(cid: int, quy: int, nam: int, database: str = ""
 # (xác nhận qua thử nghiệm thật).
 _MISA_APPENDIXTYPE_BAN_RA_BKBR011 = "C508F7CA-FCE7-4F9F-B155-DD54A1F25115"
 _MISA_APPENDIXTYPE_MUA_VAO_BKMV012 = "C144B6D7-37F6-4C8F-ABBD-6A7693531DDB"
+# 2 AppendixTypeID CÒN LẠI luôn xuất hiện CÙNG 2 mã trên trong MỌI tờ khai
+# 01/GTGT thật đã dò (xác nhận qua 2 tờ khai thật khác kỳ, cùng công ty) —
+# chưa xác định rõ tên phụ lục tương ứng (không có TA_011/TA_012_Detail nào
+# tham chiếu tới, có thể là phụ lục 01-3/GTGT hoặc metadata nội bộ của MISA)
+# nhưng CẦN đính kèm đủ cả 4 thì mục [23]/[24]/[25] (mua vào) trên màn "Tờ
+# khai" mới hiện đúng số — thiếu 2 mã này (dù đã đính kèm đúng BKBR/BKMV)
+# vẫn khiến [23]/[24]/[25] hiện 0 dù TADeclarationDetail đã lưu đúng số và
+# tổng phụ lục BKMV-01-2 đã đúng (xác nhận qua thử nghiệm thật, kể cả sau
+# khi đóng mở lại tờ khai trong MISA).
+_MISA_APPENDIXTYPE_PHU_LUC_3 = "675C11FB-43CF-47EA-8C60-BF97C758F1E7"
+_MISA_APPENDIXTYPE_PHU_LUC_4 = "F146468B-DB0A-42EE-8F03-514CA9754D24"
 
 
 def _misa_nhom_ban_ra(vat_rate):
@@ -18732,13 +18743,17 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
       DeductionAmountLastPeriod+DeductionAmountThisPeriod trên mọi dòng
       thật đã đối chiếu).
 
-    Cũng ghi TADeclarationAppendix đánh dấu 2 phụ lục Bảng kê bán ra
-    (BKBR-01-1/GTGT, AppendixTypeID=_MISA_APPENDIXTYPE_BAN_RA_BKBR011) và
-    Bảng kê mua vào (BKMV-01-2/GTGT,
-    AppendixTypeID=_MISA_APPENDIXTYPE_MUA_VAO_BKMV012) — THIẾU bước này
-    khiến màn "Tờ khai" của MISA hiện toàn số 0 kèm cảnh báo "chênh lệch
-    với Sổ cái" dù TADeclarationDetail đã có đúng số (xác nhận qua thử
-    nghiệm thật, xem _misa_chan_doan_appendixtype_gtgt).
+    Cũng ghi TADeclarationAppendix đánh dấu ĐỦ 4 phụ lục — Bảng kê bán ra
+    (BKBR-01-1/GTGT, AppendixTypeID=_MISA_APPENDIXTYPE_BAN_RA_BKBR011), Bảng
+    kê mua vào (BKMV-01-2/GTGT, AppendixTypeID=
+    _MISA_APPENDIXTYPE_MUA_VAO_BKMV012), và 2 phụ lục chưa rõ tên
+    (_MISA_APPENDIXTYPE_PHU_LUC_3/4) — MỌI tờ khai 01/GTGT thật đã dò đều
+    có đủ 4 mã này (xác nhận qua 2 tờ khai thật khác kỳ). THIẾU dù chỉ 1
+    trong 4 khiến màn "Tờ khai" của MISA hiện sai/thiếu số dù
+    TADeclarationDetail và tổng phụ lục đã đúng — xác nhận qua thử nghiệm
+    thật: thiếu 2 mã "chưa rõ tên" khiến riêng mục [23]/[24]/[25] (mua vào)
+    hiện 0 dù đã đính kèm đúng BKBR/BKMV và dù đóng mở lại tờ khai
+    (xem _misa_chan_doan_appendixtype_gtgt, _misa_chan_doan_appendix_day_du_gtgt).
 
     Xác nhận thêm qua thử nghiệm thật: màn "Tờ khai" của MISA KHÔNG đọc
     thẳng TADeclarationDetail để hiển thị — nó TÍNH LẠI tổng từ chi tiết
@@ -18951,7 +18966,9 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             if cols_ta:
                 for appendix_id, appendix_type_id in (
                         (appendix_id_banra, _MISA_APPENDIXTYPE_BAN_RA_BKBR011),
-                        (appendix_id_muavao, _MISA_APPENDIXTYPE_MUA_VAO_BKMV012)):
+                        (appendix_id_muavao, _MISA_APPENDIXTYPE_MUA_VAO_BKMV012),
+                        (str(_uuid.uuid4()), _MISA_APPENDIXTYPE_PHU_LUC_3),
+                        (str(_uuid.uuid4()), _MISA_APPENDIXTYPE_PHU_LUC_4)):
                     a = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_ta.values()}
                     _misa_gan(a, cols_ta, appendix_id, "AppendixID")
                     _misa_gan(a, cols_ta, tk_id, "RefID")
