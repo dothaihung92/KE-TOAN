@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.197"
+APP_BUILD = "2026-08-16.198"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20238,6 +20238,8 @@ def _misa_tom_tat_buoc(r):
         phan.append(f"{r['so_chung_tu']} chứng từ")
     if r.get("so_dong") is not None and "danh_sach" in r:
         phan.append(f"{r['so_dong']} dòng")
+    if r.get("so_quy") is not None and "danh_sach" in r:
+        phan.append(f"{r['so_quy']} quý")
     if not phan and r.get("ghi_chu"):
         return r["ghi_chu"]
     return ", ".join(phan) or "xong"
@@ -20248,8 +20250,11 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True, bao=None,
     """Chạy lần lượt: 1) Danh mục KH/NCC  2) Bảng kê Đầu ra (Bán hàng)
     3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC (sinh từ Bảng kê Đầu vào đã lưu)
     4) Mua hàng Nhập kho/Không qua kho/Dịch vụ (Bảng kê Đầu vào đã lưu)
-    5) Ghi tăng CCDC/TSCĐ (Bảng kê Đầu vào đã lưu, TK Nợ 242x/211x)
-    6) Phân bổ chi phí CCDC tự động  7) Tính khấu hao TSCĐ tự động.
+    5) Ghi tăng CCDC/TSCĐ (Bảng kê Đầu vào đã lưu, TK Nợ 242x/211x),
+    Phân bổ chi phí CCDC tự động, Tính khấu hao TSCĐ tự động
+    6) Tờ khai GTGT + Khấu trừ tự động (BƯỚC CUỐI — chạy sau khi Bán
+    hàng/Mua hàng đã có dữ liệu, vì chỉ tiêu tờ khai tính trực tiếp từ 2
+    bảng đó).
     Chứng từ (Bán hàng/Mua hàng) LUÔN ghi ở trạng thái CHƯA GHI SỔ như mọi
     khi (không tự Ghi sổ bằng SQL — xem giải thích lý do an toàn ở nơi gọi
     API này); Ghi tăng CCDC/TSCĐ vẫn ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi
@@ -20257,7 +20262,8 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True, bao=None,
     bổ CCDC/Khấu hao TSCĐ tạo chứng từ hàng tháng theo khung tu_thang/
     den_thang (yyyy-mm) người dùng chọn — để trống cả 2 = mỗi bước tự chọn
     12 tháng kể từ chứng từ PBCC/KH gần nhất đã có (giống chạy riêng lẻ
-    từng nút "🤖 ... tự động").
+    từng nút "🤖 ... tự động"); bút toán Khấu trừ thuế GTGT ở bước 6 cũng
+    CHƯA GHI SỔ như Bán hàng/Mua hàng.
     bao(text): callback báo tiến độ từng bước (công ty nhiều dữ liệu chạy
     khá lâu — không có callback thì chạy âm thầm như cũ)."""
     if bao is None:
@@ -20337,6 +20343,12 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=True, bao=None,
     chay("5d. Tính khấu hao TSCĐ tự động",
          lambda: _misa_khau_hao_tscd(cid, database, preview=preview,
                                      tu_thang=tu_thang_kh, so_thang=so_thang_kh))
+
+    # Bước CUỐI CÙNG — chạy sau khi Bán hàng/Mua hàng đã có dữ liệu (chỉ
+    # tiêu tờ khai tính từ chính các bảng đó), theo yêu cầu đưa vào cuối
+    # luồng "Import tự động toàn bộ".
+    chay("6. Tờ khai GTGT + Khấu trừ tự động",
+         lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview))
 
     bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
