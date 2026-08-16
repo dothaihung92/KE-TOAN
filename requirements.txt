@@ -2,6 +2,7 @@ fastapi
 uvicorn
 requests
 openpyxl
+xlrd
 python-multipart
 ddddocr
 Pillow

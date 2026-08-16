@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.202"
+APP_BUILD = "2026-08-16.203"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11148,6 +11148,28 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
         })
     items.sort(key=lambda it: _xk_key_ngay(it["ngay"]))
 
+    # dòng đã "khoá" bởi Import tờ khai xuất khẩu (giá vốn lấy thẳng từ tờ
+    # khai hải quan thật, không liên quan Tồn kho nội bộ) -> giữ NGUYÊN vẹn,
+    # không cho Dò mã hàng tự động động vào / trừ tồn đè lên, khớp theo (Số
+    # HĐ, Tên chuẩn hoá) — bấm lại "Dò mã hàng tự động" không được xoá mất
+    # dữ liệu đã import từ tờ khai, giống hệt cách giữ mã đã gán tay bên dưới.
+    out_khoa = []
+    khoa = {}
+    for r in (giathanh_cu or []):
+        if not r.get("khoa_tokhai"):
+            continue
+        key = (str(r.get("sohd") or "").strip(), _chuan_ten_hang_xk(r.get("ten_sp")))
+        khoa.setdefault(key, r)
+    if khoa:
+        con_lai_items = []
+        for it in items:
+            key = (it["sohd"], _chuan_ten_hang_xk(it["ten_sp"]))
+            if key in khoa:
+                out_khoa.append(khoa[key])
+            else:
+                con_lai_items.append(it)
+        items = con_lai_items
+
     # gom mã đã gán trước đó theo khoá (Số HĐ, Tên chuẩn hoá) — chỉ giữ dòng
     # ĐẦU TIÊN gặp mỗi khoá (dòng bị TÁCH thành nhiều mã do thiếu tồn dùng
     # chung 1 khoá, không tái tạo đúng — để dò lại bình thường an toàn hơn).
@@ -11198,7 +11220,7 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
                    goi_y=goi_y_cho(ten_chuan, manh))
         return rec
 
-    out = []
+    out = list(out_khoa)
     for it in items:
         pre = giu_assign.get(id(it))
         if pre:
@@ -11308,6 +11330,169 @@ def _xk_hop_nhat_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu,
                       if (str(r.get("sohd") or "").strip(),
                           _chuan_ten_hang_xk(r.get("ten_sp"))) not in key_ctbr]
     return ket_qua + them_ngoai_ctbr
+
+def _vn_so_hq(v):
+    """Số kiểu VNĐ trên tờ khai hải quan ('4.380.936', '292.062,4', '11,2') ->
+    số thực; '' / '-' / rỗng -> ''."""
+    s = str(v if v is not None else "").strip()
+    if not s or s == "-":
+        return ""
+    s = s.replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        f = float(s)
+        return int(f) if f == int(f) else f
+    except Exception:
+        return ""
+
+def _rut_gon_mota_tokhai(s):
+    """Cắt phần đặc tả sau dấu phẩy đầu tiên (kích thước/xuất xứ/tình trạng...)
+    trong mô tả hàng hoá của tờ khai hải quan, chỉ giữ TÊN HÀNG cốt lõi trước
+    đó, để so khớp với Tên Sản Phẩm nội bộ (cách viết khác mô tả đầy đủ trên
+    tờ khai) chính xác hơn."""
+    return str(s or "").split(",")[0].strip()
+
+def _chuan_ten_tokhai(s):
+    """Chuẩn hoá tên hàng để so khớp tờ khai xuất khẩu <-> Tên Sản Phẩm nội
+    bộ: bỏ dấu, viết hoa, bỏ ký tự không phải chữ/số — KHÔNG bỏ nội dung
+    trong ngoặc như _chuan_ten_hang_xk (mô tả HQ đặt mã kiểu/màu/size NGAY
+    TRONG ngoặc, vd '(ASH30 - MTWT)' — đây lại là phần PHÂN BIỆT quan trọng
+    nhất giữa các dòng hàng gần giống nhau, bỏ đi sẽ mất khả năng phân biệt)."""
+    import re as _re_tk
+    return _re_tk.sub(r'[^A-Z0-9]', '', _khong_dau(s).upper())
+
+def _ma_trong_ngoac_tokhai(mo_ta):
+    """Trích các 'mã' ngắn (>=3 ký tự) trong ngoặc đơn của mô tả hàng hoá tờ
+    khai HQ (vd '(ASH30 - MTWT)' -> ['ASH30','MTWT']) — thường là mã kiểu/
+    màu/size dùng phân biệt các dòng hàng gần giống nhau, hay được công ty
+    dùng lại (dù viết khác cách) trong Tên Sản Phẩm nội bộ."""
+    import re as _re_tk
+    ra = []
+    for grp in _re_tk.findall(r'\(([^)]*)\)', str(mo_ta or "")):
+        for tok in _re_tk.split(r'[^A-Za-z0-9]+', grp):
+            tok = tok.strip().upper()
+            if len(tok) >= 3:
+                ra.append(tok)
+    return ra
+
+def _doc_to_khai_xuat_khau(content):
+    """Đọc file 'Tờ khai hàng hoá xuất khẩu (thông quan)' (.xls xuất từ
+    VNACCS/ECUS — nhiều trang in, mỗi dòng hàng là 1 khối lặp đánh dấu bằng ô
+    '<01>','<02>'... ở cột thứ 3 của sheet 'TKX') -> {so_to_khai, so_hoa_don,
+    hang:[{ten,dvt,sl,gia_vnd,tt_vnd}]}. LẤY GIÁ TRỊ VNĐ (Đơn giá/Trị giá
+    TÍNH THUẾ (S)) — không lấy Trị giá/Đơn giá hoá đơn bằng USD trên tờ khai,
+    theo đúng yêu cầu chỉ lấy thông tin Việt Nam đồng."""
+    import xlrd, re as _re_hq
+    book = xlrd.open_workbook(file_contents=content)
+    ten_sheet = "TKX" if "TKX" in book.sheet_names() else book.sheet_names()[0]
+    sh = book.sheet_by_name(ten_sheet)
+
+    def cell(r, c):
+        return sh.cell_value(r, c) if 0 <= r < sh.nrows and 0 <= c < sh.ncols else ""
+
+    def timo_nhan(r_tu, r_den, nhan):
+        """Tìm dòng có 1 ô == nhan trong [r_tu, r_den), trả (giá trị ô KHÔNG
+        RỖNG đầu tiên sau đó trên cùng dòng, chỉ-số-dòng)."""
+        for r in range(r_tu, min(r_den, sh.nrows)):
+            for c in range(sh.ncols):
+                if str(cell(r, c)).strip() == nhan:
+                    for c2 in range(c + 1, sh.ncols):
+                        v = cell(r, c2)
+                        if v not in ("", None):
+                            return v, r
+                    return None, r
+        return None, None
+
+    so_to_khai, _ = timo_nhan(0, 80, "Số tờ khai")
+    if isinstance(so_to_khai, float) and so_to_khai == int(so_to_khai):
+        so_to_khai = int(so_to_khai)
+    so_hoa_don = ""
+    for r in range(0, min(sh.nrows, 80)):
+        for c in range(sh.ncols):
+            if str(cell(r, c)).strip() == "Số hóa đơn":
+                rest = [str(cell(r, c2)).strip() for c2 in range(c + 1, sh.ncols)
+                        if cell(r, c2) not in ("", None, "-")]
+                so_hoa_don = "-".join(rest)
+                break
+        if so_hoa_don:
+            break
+
+    markers = [r for r in range(sh.nrows)
+               if isinstance(cell(r, 2), str) and _re_hq.match(r"^<\d+>$", str(cell(r, 2)).strip())]
+    hang = []
+    for i, m in enumerate(markers):
+        m_den = markers[i + 1] if i + 1 < len(markers) else sh.nrows
+        ten, _ = timo_nhan(m, m_den, "Mô tả hàng hóa")
+        if not ten:
+            continue
+        sl, r_sl = timo_nhan(m, m_den, "Số lượng (1)")
+        dvt = ""
+        if r_sl is not None:
+            vals_dong = [cell(r_sl, c) for c in range(sh.ncols) if cell(r_sl, c) not in ("", None)]
+            if vals_dong:
+                dvt = str(vals_dong[-1]).strip()
+        gia_vnd, _ = timo_nhan(m, m_den, "Đơn giá tính thuế")
+        tt_vnd, _ = timo_nhan(m, m_den, "Trị giá tính thuế (S)")
+        hang.append({"ten": str(ten).strip(), "dvt": dvt,
+                    "sl": _vn_so_hq(sl), "gia_vnd": _vn_so_hq(gia_vnd), "tt_vnd": _vn_so_hq(tt_vnd)})
+    return {"so_to_khai": str(so_to_khai or "").strip(), "so_hoa_don": so_hoa_don, "hang": hang}
+
+_XK_NGUONG_FUZZY_TOKHAI = 0.5
+
+def _xk_da_ghi_xuat(r):
+    """Dòng GIATHANH đã có dữ liệu xuất kho (mã hàng HOẶC giá vốn/SL kho đã
+    gán) hay chưa — dùng để KHÔNG GHI ĐÈ khi Import tờ khai xuất khẩu, theo
+    đúng yêu cầu chỉ xử lý dòng chưa có dữ liệu."""
+    return bool(str(r.get("ma") or "").strip()) or \
+        r.get("gia_xk") not in (None, "") or r.get("sl_kho") not in (None, "")
+
+def _xk_ghep_to_khai_xuat_khau(giathanh_rows, hang_list, so_hoa_don):
+    """Ghép từng dòng hàng của tờ khai xuất khẩu (Tên hàng/ĐVT/Số lượng/Đơn
+    giá VNĐ) vào ĐÚNG 1 dòng GIATHANH (Xuất Kho) theo tên gần giống nhất
+    (chuẩn hoá + tính điểm giống, dùng lại logic của Dò mã hàng tự động,
+    nhưng ngưỡng lỏng hơn — mô tả trên tờ khai hải quan viết đầy đủ/khác cách
+    công ty đặt Tên Sản Phẩm nội bộ). CHỈ điền vào dòng CHƯA có dữ liệu xuất
+    kho (_xk_da_ghi_xuat==False) — dòng đã có bỏ qua, không ghi đè. Nếu 'Số
+    hóa đơn' trên tờ khai khớp với 'Số HĐ' đang có sẵn trong GIATHANH thì ưu
+    tiên so khớp trong phạm vi các dòng cùng hoá đơn đó trước. Đánh dấu dòng
+    vừa gán bằng khoa_tokhai=True để 'Dò mã hàng tự động' sau này không đụng
+    vào (xem _gen_xk_giathanh)."""
+    so_hd_chuan = str(so_hoa_don or "").strip().upper()
+    theo_hd = [r for r in giathanh_rows
+              if so_hd_chuan and so_hd_chuan in str(r.get("sohd") or "").strip().upper()]
+    pham_vi = theo_hd or giathanh_rows
+
+    da_dung = set()
+    ket = []
+    for h in hang_list:
+        ten_chuan = _chuan_ten_tokhai(_rut_gon_mota_tokhai(h["ten"]))
+        ma_tokens = _ma_trong_ngoac_tokhai(h["ten"])
+        best, best_diem = None, 0.0
+        for r in pham_vi:
+            if id(r) in da_dung or _xk_da_ghi_xuat(r):
+                continue
+            ten_r_chuan = _chuan_ten_tokhai(r.get("ten_sp"))
+            diem = _diem_giong_ten_xk(ten_chuan, ten_r_chuan)
+            if _manh_xk(ten_chuan, ten_r_chuan):
+                diem += 1.0
+            # mã kiểu/màu/size trong ngoặc ('ASH30','MTWT'...) khớp NGUYÊN
+            # VẸN trong tên nội bộ -> tín hiệu phân biệt mạnh nhất giữa các
+            # dòng hàng gần giống nhau (khác đúng màu/size), ưu tiên tuyệt đối.
+            if ma_tokens and all(tok in ten_r_chuan for tok in ma_tokens):
+                diem += 2.0
+            if diem > best_diem:
+                best, best_diem = r, diem
+        if best and best_diem >= _XK_NGUONG_FUZZY_TOKHAI:
+            best["ten_xk"] = h["ten"]
+            best["dvt_xk"] = h["dvt"]
+            best["sl_kho"] = h["sl"]
+            best["gia_xk"] = h["gia_vnd"]
+            best["khoa_tokhai"] = True
+            da_dung.add(id(best))
+            ket.append({"ten": h["ten"], "sohd": best.get("sohd", ""), "trang_thai": "đã gắn"})
+        else:
+            ket.append({"ten": h["ten"], "sohd": "",
+                        "trang_thai": "không tìm được dòng phù hợp (đã có dữ liệu hoặc không khớp tên)"})
+    return ket
 
 XK_GIATHANH_XUAT_HEADERS = ["Tồn kho", "Số HĐ", "Ngày", "Tên Sản Phẩm", "ĐVT", "Số lượng",
     "Đơn giá", "Thành tiền", "Mã hàng kho", "Tên hàng xuất kho", "ĐVT kho", "SL kho",
@@ -11432,6 +11617,46 @@ async def xk_import_ton(cid: int, request: Request):
     data["xk_ton"] = ton_rows
     _ghi_du_lieu_cty(cid, data)
     return {"ok": True, "so_file": so_file_ok, "so_dong": len(ton_rows), "loi": loi[:5]}
+
+@app.post("/api/xk/import-tokhai-xuatkhau/{cid}")
+async def xk_import_tokhai_xuatkhau(cid: int, request: Request):
+    """Import 1 hoặc nhiều file 'Tờ khai hàng hoá xuất khẩu (thông quan)' (.xls
+    từ VNACCS/ECUS) -> lấy Tên hàng/ĐVT/Số lượng/Đơn giá (VNĐ THẬT theo tờ
+    khai hải quan, không phải giá vốn ước tính từ Tồn kho) của từng dòng hàng,
+    ghép vào ĐÚNG dòng GIATHANH (Xuất Kho) đang có theo tên gần giống nhất.
+    CHỈ điền vào dòng CHƯA có dữ liệu xuất kho (chưa gán mã/giá vốn/SL kho) —
+    dòng đã có SẴN dữ liệu trước đó thì BỎ QUA, không ghi đè, theo đúng yêu
+    cầu."""
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    data = _doc_du_lieu_cty(cid)
+    giathanh = data.get("xk_giathanh") or []
+    if not giathanh:
+        raise HTTPException(400, "Chưa có dữ liệu Xuất Kho (GIATHANH) — hãy 'Dò mã hàng tự động' hoặc Import giá thành trước khi import tờ khai xuất khẩu")
+    chi_tiet, loi, tong_hang = [], [], 0
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            tk = _doc_to_khai_xuat_khau(content)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})"); continue
+        if not tk["hang"]:
+            loi.append(f"{fn}: không thấy dòng hàng nào (không đúng mẫu 'Tờ khai hàng hoá xuất khẩu')")
+            continue
+        tong_hang += len(tk["hang"])
+        chi_tiet.extend(_xk_ghep_to_khai_xuat_khau(giathanh, tk["hang"], tk.get("so_hoa_don")))
+    if tong_hang == 0:
+        raise HTTPException(400, "Không đọc được dữ liệu từ file đã chọn. " + "; ".join(loi[:3]))
+    data["xk_giathanh"] = giathanh
+    _ghi_du_lieu_cty(cid, data)
+    so_gan = sum(1 for k in chi_tiet if k["trang_thai"] == "đã gắn")
+    return {"ok": True, "so_dong_to_khai": tong_hang, "so_gan": so_gan,
+            "so_khong_gan": len(chi_tiet) - so_gan, "chi_tiet": chi_tiet[:80], "loi": loi[:5]}
 
 @app.get("/api/xk/ton/{cid}")
 def xk_get_ton(cid: int):

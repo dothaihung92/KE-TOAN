@@ -4191,6 +4191,12 @@ function xkVeTrangChinh(){
           <div class="hint" style="margin-bottom:8px">Tự lấy từ dữ liệu Nhập Liệu đã import (sheet "Chi tiết BÁN RA" trong file bạn Import & tách dữ liệu ở màn Nhập Liệu) — không cần import lại.</div>
           <div id="xkSrcBadge" style="font-size:12px;margin-top:8px;color:var(--muted)">Đang tải...</div>
         </div>
+        <div style="flex:1;min-width:260px;border:1px solid #e0e0e0;border-radius:10px;padding:12px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px">3) Tờ khai xuất khẩu — giá vốn thật (VNĐ)</div>
+          <div class="hint" style="margin-bottom:8px">Import file "Tờ khai hàng hoá xuất khẩu (thông quan)" (.xls, xuất từ VNACCS/ECUS) — lấy Tên hàng/ĐVT/Số lượng/Đơn giá (VNĐ) từng dòng hàng, tự khớp tên gắn vào dòng CHƯA có dữ liệu xuất kho. Dòng đã có sẵn (đã gán mã/giá vốn) thì bỏ qua, không ghi đè.</div>
+          <button class="btn sm" style="background:#8a5d00" onclick="document.getElementById('xkFileToKhai').click()">📄 Import tờ khai xuất khẩu</button>
+          <input type="file" id="xkFileToKhai" accept=".xls,.xlsx" multiple style="display:none" onchange="xkImportToKhai(this)">
+        </div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🛠 Công cụ:</span>
@@ -4223,6 +4229,24 @@ async function xkImportTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã import ${d.so_dong} mã hàng tồn kho`,'ok');
+    xkTaiTrangThai();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
+}
+// Import "Tờ khai hàng hoá xuất khẩu (thông quan)" — lấy Tên hàng/ĐVT/Số
+// lượng/Đơn giá VNĐ thật của từng dòng hàng, tự khớp tên gắn vào dòng CHƯA
+// có dữ liệu xuất kho (server chỉ điền dòng trống, không ghi đè dòng đã có).
+async function xkImportToKhai(input){
+  const files=input.files; if(!files||!files.length)return;
+  toast('Đang đọc tờ khai xuất khẩu...','');
+  try{
+    const fd=new FormData(); for(const f of files)fd.append('files',f);
+    const r=await fetch(`/api/xk/import-tokhai-xuatkhau/${current}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    toast(`✓ Tờ khai có ${d.so_dong_to_khai} dòng hàng — đã gắn ${d.so_gan}`+
+      (d.so_khong_gan?`, ${d.so_khong_gan} dòng chưa khớp được (cần gán tay)`:''), d.so_gan?'ok':'err');
+    if(d.loi&&d.loi.length)toast(`⚠ ${d.loi.join('; ')}`,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
@@ -4456,7 +4480,10 @@ function xkRemapChiSoSauTach(moRong){
 // tô đỏ các dòng CHƯA có mã hàng (để dễ nhận biết cần gán tay)
 function xkToMauThieu(){
   xkRows.forEach((r,i)=>{
-    if(String(r.ma||'').trim())return;
+    // dòng đã gán mã hàng kho, HOẶC đã có giá vốn (vd gán từ tờ khai xuất
+    // khẩu — không có mã hàng nội bộ nhưng vẫn đã có đủ dữ liệu xuất kho)
+    // -> không còn "thiếu", không tô đỏ.
+    if(String(r.ma||'').trim() || r.gia_xk!=null&&r.gia_xk!=='')return;
     document.querySelectorAll(`#nlTableWrap td[data-r="${i}"]`).forEach(td=>{td.style.background='#fde8e8';});
   });
 }
@@ -4474,12 +4501,16 @@ function xkToDamTenBan(){
 function xkTongKet(){
   const el=document.getElementById('nlTongCong'); if(!el)return;
   if(!xkRows.length){el.innerHTML='<div class="hint" style="padding:4px 0">Chưa có dữ liệu — import Sheet TON rồi bấm "🔍 Dò mã hàng tự động".</div>';return}
-  const khop=xkRows.filter(r=>String(r.ma||'').trim()).length;
+  // dòng "đã có dữ liệu xuất kho" = đã gán mã hàng kho HOẶC đã có giá vốn
+  // (vd gán từ tờ khai xuất khẩu — không qua mã hàng nội bộ nhưng vẫn đủ dữ
+  // liệu để tính giá vốn/lợi nhuận).
+  const daCo=r=>String(r.ma||'').trim()||(r.gia_xk!=null&&r.gia_xk!=='');
+  const khop=xkRows.filter(daCo).length;
   let tBan=0, tKho=0, tSl=0, tSlGan=0;
   xkRows.forEach(r=>{
     tBan+=nlParseSo(r.tt);
     tSl+=nlParseSo(r.sl);
-    if(String(r.ma||'').trim()){
+    if(daCo(r)){
       const sl=nlParseSo((r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl);
       tSlGan+=sl;
       tKho+=sl*nlParseSo(r.gia_xk);
