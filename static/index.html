@@ -904,6 +904,7 @@
             <button class="btn ghost sm" style="color:#666" onclick="chanDoanSauGtgtKhauTru()" title="Chỉ xem — lấy ĐẦY ĐỦ chi tiết Nợ/Có bút toán khấu trừ + toàn bộ chỉ tiêu 1 tờ khai GTGT thật gần nhất (đợt chẩn đoán cuối trước khi viết logic ghi)">🔬 Chẩn đoán sâu GTGT+Khấu trừ (đợt cuối)</button>
             <button class="btn ghost sm" style="color:#666" onclick="misaUiChanDoanCuaSo()" title="Chỉ xem — dò cây điều khiển cửa sổ MISA THẬT đang mở (nút Thêm/Lấy dữ liệu/Cất...) để chuẩn bị tự động hoá 'Thêm tờ khai > Lấy dữ liệu > Cất' — theo yêu cầu để CHÍNH MISA tự tính, không tự tính lại. Cần mở sẵn MISA ở màn Thuế > TT80 trước khi bấm">🔬 Chẩn đoán cửa sổ MISA (tự động hoá)</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtKiemTraCheoMo()" title="Chỉ xem — tính thử chỉ tiêu 01/GTGT TRỰC TIẾP từ Mua vào/Bán ra đã có trong MISA (không qua Excel), so với 1 tờ khai THẬT đã có sẵn — kiểm chứng công thức trước khi dùng ghi tờ khai mới">🔬 Kiểm tra chéo công thức GTGT (từ MISA)</button>
+            <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanAppendixType()" title="Chỉ xem — tờ khai vừa ghi hiện toàn số 0 vì thiếu đánh dấu phụ lục BKBR-01-1/BKMV-01-2 đính kèm; dò đúng AppendixTypeID (GUID) của 2 phụ lục này từ dữ liệu thật để sửa">🔬 Chẩn đoán mã phụ lục GTGT</button>
           </div>
         </div>
       </div>
@@ -5056,6 +5057,20 @@ async function gtgtKiemTraCheoChay(){
       ${goiY}
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="gtgtKiemTraCheoMo()">← Thử quý khác</button>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function gtgtChanDoanAppendixType(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang dò dữ liệu (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-appendixtype-gtgt/${current}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (CHỈ ĐỌC, không sửa/ghi gì). Copy toàn bộ nội dung dưới đây gửi lại để hoàn tất việc ghi phụ lục đính kèm cho tờ khai GTGT.</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     misaModalNormal();document.getElementById('misaModal').style.display='flex';

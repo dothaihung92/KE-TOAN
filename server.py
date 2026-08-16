@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.187"
+APP_BUILD = "2026-08-15.188"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17779,6 +17779,65 @@ def misa_sql_chan_doan_sau_gtgt_khau_tru(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_sau_gtgt_khau_tru(cid, database)
+
+
+def _misa_chan_doan_appendixtype_gtgt(cid, database):
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không ghi gì) — tờ khai vừa ghi thật báo "chênh
+    lệch với Sổ cái" và hiện toàn số 0 trên màn 'Tờ khai' vì THIẾU đánh
+    dấu 2 phụ lục BKBR-01-1/GTGT (bán ra) và BKMV-01-2/GTGT (mua vào) đính
+    kèm (bảng TADeclarationAppendix — chưa ghi ở bản trước). Xác định
+    ĐÚNG AppendixTypeID (GUID) của mỗi phụ lục bằng cách: với MỌI dòng
+    TADeclarationAppendix thật đã có, xem AppendixID đó có được
+    TA_011GTGT_Detail (chi tiết bán ra) hay TA_012GTGT_Detail (chi tiết
+    mua vào) tham chiếu tới hay không — gộp theo AppendixTypeID để tìm ra
+    2 GUID cố định tương ứng 2 phụ lục."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        ban_ra_types, mua_vao_types = {}, {}
+        loi = None
+        try:
+            rows = cur.execute(
+                "SELECT AppendixID, AppendixTypeID FROM TADeclarationAppendix").fetchall()
+        except Exception as e:
+            rows = []
+            loi = str(e)
+        for appendix_id, appendix_type_id in rows:
+            try:
+                n_banra = cur.execute(
+                    "SELECT COUNT(*) FROM TA_011GTGT_Detail WHERE AppendixID=?",
+                    appendix_id).fetchone()[0]
+            except Exception:
+                n_banra = 0
+            try:
+                n_muavao = cur.execute(
+                    "SELECT COUNT(*) FROM TA_012GTGT_Detail WHERE AppendixID=?",
+                    appendix_id).fetchone()[0]
+            except Exception:
+                n_muavao = 0
+            key = str(appendix_type_id)
+            if n_banra:
+                ban_ra_types[key] = ban_ra_types.get(key, 0) + 1
+            if n_muavao:
+                mua_vao_types[key] = mua_vao_types.get(key, 0) + 1
+        return {"database": database, "loi": loi, "so_dong_appendix_that": len(rows),
+                "appendixtypeid_ung_voi_ban_ra_BKBR011": ban_ra_types,
+                "appendixtypeid_ung_voi_mua_vao_BKMV012": mua_vao_types}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, đã dừng an toàn, không ghi/sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-appendixtype-gtgt/{cid}")
+def misa_sql_chan_doan_appendixtype_gtgt(cid: int, database: str = ""):
+    """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_appendixtype_gtgt."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_appendixtype_gtgt(cid, database)
 
 
 # Mã chỉ tiêu MISA (TADeclarationDetail.ItemCode) -> tên biến chỉ tiêu đã
