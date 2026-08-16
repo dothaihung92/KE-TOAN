@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.209"
+APP_BUILD = "2026-08-16.210"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11035,6 +11035,32 @@ def _kich_thuoc_khop_xk(a, b):
     ka, kb = _trich_kich_thuoc_xk(a), _trich_kich_thuoc_xk(b)
     return bool(ka and kb and (ka & kb))
 
+def _ma_ngoac_gop_xk(ten):
+    """Gộp NGUYÊN mỗi cụm trong ngoặc đơn của tên hàng GỐC thành 1 mã liền
+    (vd '(ASH50-CT)' -> 'ASH50CT', '(ASH30 - MTWT)' -> 'ASH30MTWT') — mã
+    kiểu/màu ngắn (hậu tố 2 ký tự như 'CT','WT') thường nằm NGAY TRONG ngoặc
+    kèm mã chính, tách rời riêng ra dễ bị loại vì quá ngắn/nhầm lẫn (khác
+    _ma_trong_ngoac_tokhai — tách rời, dùng cho mô tả tờ khai hải quan nhiều
+    lớp) nên ở đây GIỮ NGUYÊN VẸN cả cụm rồi so khớp liên tục."""
+    import re as _re_g
+    ra = set()
+    for grp in _re_g.findall(r'\(([^)]*)\)', str(ten or "")):
+        tok = _re_g.sub(r'[^A-Za-z0-9]', '', _khong_dau(grp).upper())
+        if len(tok) >= 4:
+            ra.add(tok)
+    return ra
+
+def _ma_ngoac_khop_xk(a, b):
+    """True nếu tên GỐC a có 1 cụm-trong-ngoặc gộp liền (_ma_ngoac_gop_xk)
+    xuất hiện làm chuỗi con LIÊN TỤC trong tên GỐC b (không phân biệt hoa/
+    thường/dấu, không cần còn nguyên ngoặc ở phía b — vd 'ASH50CT' khớp cả
+    khi b viết 'ASH50 - CT' không có ngoặc)."""
+    ma_a = _ma_ngoac_gop_xk(a)
+    if not ma_a:
+        return False
+    b_chuan = _chuan_ten_tokhai(b)
+    return any(tok in b_chuan for tok in ma_a)
+
 def _kd2(s):
     """_khong_dau() rồi thay nốt 'đ'->'d' (NFD không tách được chữ Đ ra dấu riêng)."""
     return _khong_dau(s).replace("đ", "d")
@@ -11256,11 +11282,14 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
         sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
         tt_goc = it.get("tt")
         candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
-        # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') coi là 'mạnh' như
-        # trùng tên — tín hiệu chắc chắn nhất để nhận đúng mặt hàng dù phần
-        # tên chữ viết khác hẳn nhau (xem _trich_kich_thuoc_xk).
+        # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') hoặc cùng mã
+        # kiểu/màu trong ngoặc (vd '(ASH50-CT)' khớp 'ASH50 - CT') coi là
+        # 'mạnh' như trùng tên — tín hiệu chắc chắn để nhận đúng mặt hàng dù
+        # phần tên chữ viết khác hẳn nhau (xem _trich_kich_thuoc_xk /
+        # _ma_ngoac_khop_xk).
         manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])
-               or _kich_thuoc_khop_xk(it["ten_sp"], tn["ten"])]
+               or _kich_thuoc_khop_xk(it["ten_sp"], tn["ten"])
+               or _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"])]
         pool = manh
         if not pool:                                 # không có ứng viên 'mạnh' -> fuzzy chặt
             best, best_diem = None, 0.0
@@ -11599,10 +11628,11 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
         sl_can = _to_num(sl_kho)
         sl_can = sl_can if isinstance(sl_can, (int, float)) else 0
         candidates = [tn for tn in ton_list if tn["con_lai"] > 0] or ton_list
-        # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') coi là 'mạnh' như
-        # trùng tên — xem _trich_kich_thuoc_xk.
+        # cùng kích thước hoặc cùng mã kiểu/màu trong ngoặc coi là 'mạnh' như
+        # trùng tên — xem _trich_kich_thuoc_xk / _ma_ngoac_khop_xk.
         manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])
-               or _kich_thuoc_khop_xk(r.get("ten_sp"), tn["ten"])]
+               or _kich_thuoc_khop_xk(r.get("ten_sp"), tn["ten"])
+               or _ma_ngoac_khop_xk(r.get("ten_sp"), tn["ten"])]
         pool = manh
         if not pool:
             best, best_diem = None, 0.0
