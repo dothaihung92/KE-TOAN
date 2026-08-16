@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.191"
+APP_BUILD = "2026-08-16.192"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18461,6 +18461,136 @@ _MISA_APPENDIXTYPE_BAN_RA_BKBR011 = "C508F7CA-FCE7-4F9F-B155-DD54A1F25115"
 _MISA_APPENDIXTYPE_MUA_VAO_BKMV012 = "C144B6D7-37F6-4C8F-ABBD-6A7693531DDB"
 
 
+def _misa_nhom_ban_ra(vat_rate):
+    """Nhóm chỉ tiêu trên BKBR-01-1/GTGT theo thuế suất — form 01/GTGT chỉ có
+    3 nhóm thuế thật (0%/5%/10%), KHÔNG có nhóm 8% riêng: hóa đơn thuế suất
+    8% (giảm theo NĐ44...) vẫn xếp chung nhóm '14' (10%) — xác nhận qua dữ
+    liệu thật (TaxRate lưu danh nghĩa 10, TaxAmount đã lưu SẴN số thuế sau
+    giảm 2%, DeductionsTaxAmount lưu phần giảm riêng — copy nguyên 3 giá trị
+    này từ SAVoucherDetail nên không cần tự tính lại giảm trừ)."""
+    try:
+        v = round(_snum(vat_rate))
+    except Exception:
+        v = None
+    if v == 0:
+        return "12"
+    if v == 5:
+        return "13"
+    return "14"
+
+
+def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_ngay_sql,
+                                       ref_id, appendix_id_banra, appendix_id_muavao):
+    """Dựng danh sách dòng CHI TIẾT TỪNG HÓA ĐƠN cho 2 phụ lục BKBR-01-1
+    (bán ra, từ SAVoucher/SAVoucherDetail) và BKMV-01-2 (mua vào, từ
+    PUVoucher/PUVoucherDetail + PUService/PUServiceDetail) — thử nghiệm thật
+    cho thấy màn 'Tờ khai' của MISA tính lại tổng TỪ những dòng này (không
+    đọc thẳng TADeclarationDetail đã lưu), nên thiếu bước này thì tờ khai
+    hiện toàn số 0 dù chỉ tiêu chính đã đúng. Trả (rows_011, rows_012), mỗi
+    dòng gộp theo (chứng từ, thuế suất) — đúng cấu trúc thật đã dò được qua
+    _misa_chan_doan_chi_tiet_phu_luc_gtgt."""
+    rows_011, rows_012 = [], []
+    if cols_011:
+        try:
+            ban_ra = cur.execute(
+                "SELECT h.RefID, h.BranchID, h.InvNo, h.InvSeries, h.InvDate, "
+                "h.AccountObjectName, h.AccountObjectTaxCode, h.RefType, "
+                "h.IsReductionInvoice, d.VATRate, "
+                "SUM(d.Amount), SUM(d.VATAmount), SUM(d.DeductionsTaxAmount) "
+                "FROM SAVoucherDetail d JOIN SAVoucher h ON h.RefID=d.RefID "
+                "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? "
+                "GROUP BY h.RefID, h.BranchID, h.InvNo, h.InvSeries, h.InvDate, "
+                "h.AccountObjectName, h.AccountObjectTaxCode, h.RefType, "
+                "h.IsReductionInvoice, d.VATRate",
+                (tu_ngay_sql, den_ngay_sql)).fetchall()
+        except Exception:
+            ban_ra = []
+        dem_nhom = {}
+        for (vrid, branch_id, inv_no, inv_series, inv_date, ten, mst, ref_type,
+             is_giam, vat_rate, turnover, tax_amt, ded_tax) in ban_ra:
+            nhom = _misa_nhom_ban_ra(vat_rate)
+            dem_nhom[nhom] = dem_nhom.get(nhom, 0) + 1
+            r = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_011.values()}
+            _misa_gan(r, cols_011, str(_uuid.uuid4()), "RefDetailID")
+            _misa_gan(r, cols_011, ref_id, "RefID")
+            _misa_gan(r, cols_011, appendix_id_banra, "AppendixID")
+            _misa_gan(r, cols_011, vrid, "VoucherRefID")
+            _misa_gan(r, cols_011, inv_series, "InvSeries")
+            _misa_gan(r, cols_011, inv_no, "InvNo")
+            _misa_gan(r, cols_011, inv_date, "InvDate")
+            _misa_gan(r, cols_011, ten, "AccountObjectName")
+            _misa_gan(r, cols_011, mst, "CompanyTaxCode")
+            _misa_gan(r, cols_011, round(_snum(turnover)), "TurnOverAmount")
+            _misa_gan(r, cols_011, _snum(vat_rate) if vat_rate is not None else 0, "TaxRate")
+            _misa_gan(r, cols_011, round(_snum(tax_amt)), "TaxAmount")
+            _misa_gan(r, cols_011, nhom, "GroupName")
+            _misa_gan(r, cols_011, dem_nhom[nhom], "SortOrder")
+            _misa_gan(r, cols_011, ref_type, "VoucherRefType")
+            _misa_gan(r, cols_011, branch_id, "VoucherBranchID")
+            _misa_gan(r, cols_011, 0, "AmountDecimalDigits")
+            _misa_gan(r, cols_011, bool(is_giam), "IsReductionInvoice")
+            _misa_gan(r, cols_011, round(_snum(ded_tax)), "DeductionsTaxAmount")
+            _misa_gan(r, cols_011, 0, "ToolClickType")
+            rows_011.append(r)
+
+    if cols_012:
+        def _mua_vao(sql, tham_so, tien_to):
+            try:
+                return cur.execute(sql, tham_so).fetchall()
+            except Exception:
+                return []
+        mua_nk = _mua_vao(
+            "SELECT h.RefID, h.BranchID, h.RefType, h.AccountObjectID, "
+            "d.InvNo, d.InvSeries, d.InvDate, d.TaxAccountObjectName, "
+            "d.TaxAccountObjectTaxCode, d.VATRate, SUM(d.Amount), SUM(d.VATAmount) "
+            "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
+            "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? "
+            "GROUP BY h.RefID, h.BranchID, h.RefType, h.AccountObjectID, d.InvNo, "
+            "d.InvSeries, d.InvDate, d.TaxAccountObjectName, d.TaxAccountObjectTaxCode, "
+            "d.VATRate", (tu_ngay_sql, den_ngay_sql), "NK")
+        mua_dv = _mua_vao(
+            "SELECT h.RefID, h.BranchID, h.RefType, h.AccountObjectID, "
+            "d.InvNo, d.InvSeries, d.InvDate, d.TaxAccountObjectName, "
+            "d.TaxAccountObjectTaxCode, d.VATRate, SUM(d.Amount), SUM(d.VATAmount) "
+            "FROM PUServiceDetail d JOIN PUService h ON h.RefID=d.RefID "
+            "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? "
+            "GROUP BY h.RefID, h.BranchID, h.RefType, h.AccountObjectID, d.InvNo, "
+            "d.InvSeries, d.InvDate, d.TaxAccountObjectName, d.TaxAccountObjectTaxCode, "
+            "d.VATRate", (tu_ngay_sql, den_ngay_sql), "DV")
+        so_thu_tu = 0
+        for nguon, tien_to in ((mua_nk, "NK"), (mua_dv, "DV")):
+            for (vrid, branch_id, ref_type, acc_obj_id, inv_no, inv_series, inv_date,
+                 ten, mst, vat_rate, turnover, tax_amt) in nguon:
+                so_thu_tu += 1
+                voucher_ref_no = (tien_to + str(inv_no or "") + str(mst or ""))[:20]
+                r = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_012.values()}
+                _misa_gan(r, cols_012, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(r, cols_012, ref_id, "RefID")
+                _misa_gan(r, cols_012, appendix_id_muavao, "AppendixID")
+                _misa_gan(r, cols_012, vrid, "VoucherRefID")
+                _misa_gan(r, cols_012, "", "InvoiceTemplate")
+                _misa_gan(r, cols_012, inv_series, "InvSeries")
+                _misa_gan(r, cols_012, inv_no, "InvNo")
+                _misa_gan(r, cols_012, inv_date, "InvDate")
+                _misa_gan(r, cols_012, ten, "AccountObjectName")
+                _misa_gan(r, cols_012, mst, "CompanyTaxCode")
+                _misa_gan(r, cols_012, round(_snum(turnover)), "TurnOverAmount")
+                _misa_gan(r, cols_012, _snum(vat_rate) if vat_rate is not None else 0, "TaxRate")
+                _misa_gan(r, cols_012, round(_snum(tax_amt)), "TaxAmount")
+                _misa_gan(r, cols_012, so_thu_tu, "SortOrder")
+                _misa_gan(r, cols_012, ref_type, "VoucherRefType")
+                _misa_gan(r, cols_012, voucher_ref_no, "VoucherRefNo")
+                _misa_gan(r, cols_012, branch_id, "VoucherBranchID")
+                _misa_gan(r, cols_012, "01", "GroupName")
+                _misa_gan(r, cols_012, "1", "PurchasePurposeCode")
+                _misa_gan(r, cols_012, acc_obj_id, "AccountObjectID")
+                _misa_gan(r, cols_012, 0, "OriginRefType")
+                _misa_gan(r, cols_012, "", "InvestmentProjectCode")
+                _misa_gan(r, cols_012, False, "IsVoucherImport")
+                rows_012.append(r)
+    return rows_011, rows_012
+
+
 def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu_nam=None, so_quy=4):
     """Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán 'Khấu trừ thuế GTGT'
     (Nợ 33311/Có 1331) TỪNG QUÝ thẳng vào MISA. Chỉ tiêu ct23-ct36 tính
@@ -18495,13 +18625,23 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
     với Sổ cái" dù TADeclarationDetail đã có đúng số (xác nhận qua thử
     nghiệm thật, xem _misa_chan_doan_appendixtype_gtgt).
 
+    Xác nhận thêm qua thử nghiệm thật: màn "Tờ khai" của MISA KHÔNG đọc
+    thẳng TADeclarationDetail để hiển thị — nó TÍNH LẠI tổng từ chi tiết
+    TỪNG hóa đơn trong 2 phụ lục (TA_011GTGT_Detail bán ra/
+    TA_012GTGT_Detail mua vào — xem _misa_chan_doan_chi_tiet_phu_luc_gtgt).
+    Vì vậy _misa_dien_chi_tiet_hoa_don_gtgt cũng ghi đủ chi tiết từng hóa
+    đơn (từ SAVoucher/SAVoucherDetail bán ra; PUVoucher/PUVoucherDetail +
+    PUService/PUServiceDetail mua vào) vào 2 bảng này, gộp theo
+    (chứng từ, thuế suất) — kể cả hóa đơn giảm 2% thuế GTGT (copy nguyên
+    TaxRate/TaxAmount/DeductionsTaxAmount đã lưu sẵn trên SAVoucherDetail,
+    không tự tính lại phần giảm).
+
     GIỚI HẠN ĐÃ BIẾT: xem _misa_tinh_chi_tieu_gtgt_tu_misa (KCT/0% gộp
     chung, không ảnh hưởng số thuế thật). CHƯA ghi TADeclarationGeneral
-    (siêu dữ liệu chữ ký/mã hồ sơ...) và CHƯA điền chi tiết TỪNG hóa đơn
-    trong 2 phụ lục (TA_011GTGT_Detail/TA_012GTGT_Detail — chỉ đánh dấu
-    "đã đính kèm", tổng số vẫn lấy từ TADeclarationDetail) — người dùng
-    cần tự mở tờ khai trong MISA bổ sung nếu cần trước khi thật sự
-    ký/nộp.
+    (siêu dữ liệu chữ ký/mã hồ sơ...) — người dùng cần tự mở tờ khai trong
+    MISA bổ sung nếu cần trước khi thật sự ký/nộp. Cấu trúc ghi chi tiết
+    phụ lục MỚI xây dựng lần đầu (dựa trên dò 1 tờ khai thật), CHƯA qua
+    nhiều lần kiểm chứng thực tế như Ghi Tăng CCDC/TSCĐ.
 
     preview=True: chỉ tính toán, KHÔNG ghi gì (rollback)."""
     import re
@@ -18535,6 +18675,8 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
         cols_glv = _misa_cot_bang_that(cur, "GLVoucher")
         cols_glvd = _misa_cot_bang_that(cur, "GLVoucherDetail")
         cols_ta = _misa_cot_bang_that(cur, "TADeclarationAppendix")
+        cols_011 = _misa_cot_bang_that(cur, "TA_011GTGT_Detail")
+        cols_012 = _misa_cot_bang_that(cur, "TA_012GTGT_Detail")
         if not (cols_tk and cols_tkd and cols_glv and cols_glvd):
             raise HTTPException(
                 400, "Không tìm thấy đủ bảng TADeclaration/TADeclarationDetail/"
@@ -18689,14 +18831,23 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             _them_ct("Item42b", "0")
 
             appendix_rows = []
+            appendix_id_banra = str(_uuid.uuid4())
+            appendix_id_muavao = str(_uuid.uuid4())
             if cols_ta:
-                for appendix_type_id in (_MISA_APPENDIXTYPE_BAN_RA_BKBR011,
-                                          _MISA_APPENDIXTYPE_MUA_VAO_BKMV012):
+                for appendix_id, appendix_type_id in (
+                        (appendix_id_banra, _MISA_APPENDIXTYPE_BAN_RA_BKBR011),
+                        (appendix_id_muavao, _MISA_APPENDIXTYPE_MUA_VAO_BKMV012)):
                     a = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_ta.values()}
-                    _misa_gan(a, cols_ta, str(_uuid.uuid4()), "AppendixID")
+                    _misa_gan(a, cols_ta, appendix_id, "AppendixID")
                     _misa_gan(a, cols_ta, tk_id, "RefID")
                     _misa_gan(a, cols_ta, appendix_type_id, "AppendixTypeID")
                     appendix_rows.append(a)
+
+            chi_tiet_ban_ra, chi_tiet_mua_vao = [], []
+            if cols_ta:
+                chi_tiet_ban_ra, chi_tiet_mua_vao = _misa_dien_chi_tiet_hoa_don_gtgt(
+                    cur, cols_011, cols_012, tu_ngay_sql, den_ngay_sql,
+                    tk_id, appendix_id_banra, appendix_id_muavao)
 
             max_so_nvk += 1
             refno_moi = f"NVK{max_so_nvk}{suffix_mau}"
@@ -18773,13 +18924,23 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
                     lc = list(a.keys())
                     cur.execute("INSERT INTO TADeclarationAppendix ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
+                for d in chi_tiet_ban_ra:
+                    lc = list(d.keys())
+                    cur.execute("INSERT INTO TA_011GTGT_Detail ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
+                for d in chi_tiet_mua_vao:
+                    lc = list(d.keys())
+                    cur.execute("INSERT INTO TA_012GTGT_Detail ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
 
             da_co_tk.add(ky_hien_thi)
             da_co_glv.add(memo)
             ct22_hien_tai = ct["ct43"]
             ket.append({"ky": ky_hien_thi, "trang_thai": "sẽ tạo" if preview else "đã tạo",
                        "thue_dau_ra": output_amount, "thue_duoc_khau_tru": deduction_amount,
-                       "so_tien_khau_tru": tong_kt, "so_ct_khau_tru": refno_moi})
+                       "so_tien_khau_tru": tong_kt, "so_ct_khau_tru": refno_moi,
+                       "so_dong_hoa_don_ban_ra": len(chi_tiet_ban_ra),
+                       "so_dong_hoa_don_mua_vao": len(chi_tiet_mua_vao)})
 
         if preview:
             conn.rollback()
