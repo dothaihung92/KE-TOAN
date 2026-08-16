@@ -4710,7 +4710,13 @@ function xkKeyNgaySapXep(ngay){
 function xkSapXepNgay(){
   if(!xkRows.length){toast('Chưa có dữ liệu','err');return}
   xkTuNlRows();
-  xkRows.sort((a,b)=>xkKeyNgaySapXep(a.ngay).localeCompare(xkKeyNgaySapXep(b.ngay)));
+  // so sánh chuỗi THUẦN (không dùng localeCompare) để tránh mọi khác biệt do
+  // quy tắc collation theo ngôn ngữ máy người dùng — khoá đã chuẩn hoá về
+  // 'yyyy-mm-dd' nên so sánh < / > ký tự thường là đủ và luôn nhất quán.
+  xkRows.sort((a,b)=>{
+    const ka=xkKeyNgaySapXep(a.ngay), kb=xkKeyNgaySapXep(b.ngay);
+    return ka<kb?-1:(ka>kb?1:0);
+  });
   xkVeGrid();
   toast('✓ Đã sắp xếp theo Ngày tăng dần — bấm "💾 Lưu tạm" để lưu lại thứ tự này','ok');
 }
