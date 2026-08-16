@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.210"
+APP_BUILD = "2026-08-16.211"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11574,13 +11574,15 @@ def _xk_ghep_to_khai_xuat_khau(giathanh_rows, hang_list, so_hoa_don, so_to_khai=
 
 XK_GIATHANH_XUAT_HEADERS = ["Tồn kho", "Số HĐ", "Ngày", "Tên Sản Phẩm", "ĐVT", "Số lượng",
     "Đơn giá", "Thành tiền", "Mã hàng kho", "Tên hàng xuất kho", "ĐVT kho", "SL kho",
-    "Đơn Giá kho", "Thành Tiền kho"]
+    "Đơn Giá kho", "Thành Tiền kho", "Lợi nhuận", "Tỷ lệ % Lãi/Lỗ"]
 
 def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
     """Mirror hệt các cột hiển thị trên lưới màn hình Xuất Kho (giống hàm
     xkRowsToNl ở JS): Tồn kho CHẠY DẦN theo mã (trừ dần từ trên xuống), SL/Đơn
-    giá kho fallback về SL/-- bán khi dòng chưa gắn mã — để file xuất khớp
-    đúng những gì người dùng thấy trên màn hình."""
+    giá kho fallback về SL/-- bán khi dòng chưa gắn mã, Lợi nhuận = Thành
+    tiền BÁN - Thành Tiền kho (giá vốn) và Tỷ lệ % lãi/lỗ tính trên Thành
+    tiền BÁN — để file xuất khớp đúng những gì người dùng thấy trên màn
+    hình."""
     ton_map = {str(t.get("ma") or "").strip(): _to_num(t.get("ton")) or 0 for t in (ton_rows or [])}
     da_dung = {}
     out = []
@@ -11597,9 +11599,15 @@ def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
             sl_ban = _to_num(r.get("sl"))
             da_dung[ma] = da_dung.get(ma, 0) + (sl_ban if isinstance(sl_ban, (int, float)) else 0)
             ton = ton_map[ma] - da_dung[ma]
+        ban_n = _to_num(r.get("tt"))
+        loi_nhuan, ty_le = "", ""
+        if isinstance(ban_n, (int, float)) and tt_kho != "":
+            loi_nhuan = round(ban_n - tt_kho)
+            ty_le = f"{(loi_nhuan / ban_n * 100):.1f}%" if ban_n else ""
         out.append([ton, r.get("sohd", ""), r.get("ngay", ""), r.get("ten_sp", ""), r.get("dvt", ""),
                     r.get("sl", ""), r.get("dgia", ""), r.get("tt", ""),
-                    ma, r.get("ten_xk", ""), r.get("dvt_xk", ""), sl_kho, gia_xk, tt_kho])
+                    ma, r.get("ten_xk", ""), r.get("dvt_xk", ""), sl_kho, gia_xk, tt_kho,
+                    loi_nhuan, ty_le])
     return out
 
 def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
@@ -11960,16 +11968,25 @@ def xk_export_giathanh(cid: int):
         cell.value = h
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1A7A7A")
-    cot_tien = {7, 8, 13, 14}
+    cot_tien = {7, 8, 13, 14, 15}
     do_nhat = PatternFill("solid", fgColor="FDE8E8")
+    # lỗ (Lợi nhuận âm) tô đỏ ĐẬM hơn "chưa gắn mã" (nhạt) — tín hiệu tài
+    # chính cần chú ý ngay, ưu tiên hiển thị hơn nếu dòng rơi vào cả 2 trường hợp.
+    do_lo = PatternFill("solid", fgColor="FFC7CE")
+    font_lo = Font(color="9C0006")
     for ri, row in enumerate(rows, 2):
         chua_gan = not str(giathanh[ri - 2].get("ma") or "").strip()
+        bi_lo = isinstance(row[14], (int, float)) and row[14] < 0
         for ci, v in enumerate(row, 1):
             cell = ws.cell(ri, ci)
             cell.value = v
             if ci in cot_tien and isinstance(v, (int, float)):
                 cell.number_format = "#,##0"
-            if chua_gan:
+            if bi_lo:
+                cell.fill = do_lo
+                if ci in (15, 16):
+                    cell.font = font_lo
+            elif chua_gan:
                 cell.fill = do_nhat
     for c in range(1, len(XK_GIATHANH_XUAT_HEADERS) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 18
@@ -11993,9 +12010,10 @@ def xk_export_giathanh(cid: int):
     ws.cell(ri_tong, 8).value = round(t_ban)
     ws.cell(ri_tong, 12).value = t_sl_gan
     ws.cell(ri_tong, 14).value = round(t_kho)
-    for c in (6, 8, 12, 14):
+    ws.cell(ri_tong, 15).value = round(t_ban - t_kho)
+    for c in (6, 8, 12, 14, 15):
         ws.cell(ri_tong, c).font = Font(bold=True)
-        if c in (8, 14):
+        if c in (8, 14, 15):
             ws.cell(ri_tong, c).number_format = "#,##0"
     conn = db()
     comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
