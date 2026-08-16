@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.181"
+APP_BUILD = "2026-08-15.182"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17836,20 +17836,37 @@ def _misa_ui_lay_cua_so_dang_mo():
         return None, f"Không mở được Desktop UI Automation: {e}"
 
 
+_MISA_UI_LOAI_TRU_TIEU_DE = ("chrome", "token manager", "taskbar", "program manager",
+                             "nvidia", "hoa don dien tu", "claude")
+
+
 def _misa_ui_co_ve_la_misa(w):
     """Đoán 1 cửa sổ Windows đang mở CÓ THỂ là MISA SME — dò theo tiêu đề
     (không dấu, không phân biệt hoa/thường) chứa 'misa', hoặc nội dung bên
-    trong nhắc tới 'GTGT'/'Tờ khai'/'Thuế' (đề phòng tiêu đề cửa sổ không
-    ghi rõ MISA — chưa biết chắc trên máy thật)."""
+    trong nhắc tới 'GTGT'/'Tờ khai'/'Thuế'. Đối chiếu dữ liệu thật: MISA
+    SME.NET (WPF) KHÔNG luôn đặt tiêu đề cửa sổ rõ ràng — chỉ hiện tên
+    control mặc định 'MainWindow' (không đổi theo nội dung, không có chữ
+    'MISA' nào) — nên bất kỳ cửa sổ 'Window' nào có tiêu đề KHÔNG rỗng và
+    KHÔNG khớp danh sách ĐÃ BIẾT chắc chắn KHÔNG phải MISA (trình duyệt,
+    phần mềm quản lý token, các pane hệ thống...) cũng coi là ứng viên."""
     try:
         tieu_de = _khong_dau(w.window_text() or "").lower()
     except Exception:
+        return False
+    if not tieu_de:
         return False
     if "misa" in tieu_de:
         return True
     if any(k in tieu_de for k in ("gtgt", "to khai", "thue", "khau tru")):
         return True
-    return False
+    if any(k in tieu_de for k in _MISA_UI_LOAI_TRU_TIEU_DE):
+        return False
+    try:
+        if w.element_info.control_type != "Window":
+            return False
+    except Exception:
+        pass
+    return True
 
 
 def _misa_ui_dump_cay(w, sau_toi_da=5, so_luong_toi_da=400):
