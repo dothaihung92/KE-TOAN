@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.207"
+APP_BUILD = "2026-08-16.208"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11543,6 +11543,62 @@ def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
                     ma, r.get("ten_xk", ""), r.get("dvt_xk", ""), sl_kho, gia_xk, tt_kho])
     return out
 
+def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
+    """Dò mã hàng tự động TRỰC TIẾP trên GIATHANH đang có sẵn (khớp tên với
+    Tồn kho, trừ tồn tuần tự), dùng khi CHƯA có 'Chi tiết BÁN RA' nhưng
+    GIATHANH đã có dữ liệu từ nguồn khác (vd Import tờ khai xuất khẩu) —
+    không bắt buộc phải có Chi tiết BÁN RA mới dò mã được, cứ có dữ liệu
+    trong phần mềm là xử lý.
+
+    CHỈ gán thêm Mã hàng kho cho dòng CHƯA có mã — KHÔNG đụng tới Tên/ĐVT/
+    Đơn giá kho nếu dòng đó ĐÃ CÓ SẴN (vd giá vốn thật lấy từ tờ khai xuất
+    khẩu), chỉ điền thêm khi các ô đó đang trống. Dòng không tìm được tên
+    khớp hoặc tồn không đủ vẫn gán mã ứng viên gần nhất (giữ đơn giản, không
+    tách dòng phức tạp như dò mã từ Chi tiết BÁN RA)."""
+    hoc_ma = hoc_ma or {}
+    ton_list = [dict(it, con_lai=_to_num(it.get("ton")) or 0,
+                     ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
+                for it in (ton_rows or [])]
+    out = []
+    for r in giathanh_cu:
+        if str(r.get("ma") or "").strip():
+            out.append(r)
+            continue
+        ten_chuan = _chuan_ten_hang_xk(r.get("ten_sp"))
+        sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
+        sl_can = _to_num(sl_kho)
+        sl_can = sl_can if isinstance(sl_can, (int, float)) else 0
+        candidates = [tn for tn in ton_list if tn["con_lai"] > 0] or ton_list
+        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])]
+        pool = manh
+        if not pool:
+            best, best_diem = None, 0.0
+            for tn in candidates:
+                d = _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"])
+                if d > best_diem:
+                    best, best_diem = tn, d
+            if best and best_diem >= _XK_NGUONG_FUZZY:
+                pool = [best]
+        if not pool:
+            out.append(r)
+            continue
+        ma_hoc = hoc_ma.get(ten_chuan)
+        pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
+        if not pick:
+            pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
+        if not pick:
+            pick = pool[0]
+        pick["con_lai"] -= sl_can
+        rec = dict(r, ma=pick["ma"])
+        if not str(rec.get("ten_xk") or "").strip():
+            rec["ten_xk"] = pick["ten"]
+        if not str(rec.get("dvt_xk") or "").strip():
+            rec["dvt_xk"] = pick["dvt"]
+        if rec.get("gia_xk") in (None, ""):
+            rec["gia_xk"] = pick["gia"]
+        out.append(rec)
+    return out
+
 def _xk_cuoi_thang(ngay):
     """'dd/mm/yyyy' của NGÀY CUỐI THÁNG chứa ngày truyền vào (dd/mm/yyyy hoặc yyyy-mm-dd)."""
     import calendar
@@ -11694,9 +11750,12 @@ def xk_get_banra(cid: int):
 
 @app.post("/api/xk/tao-giathanh/{cid}")
 def xk_tao_giathanh(cid: int):
-    """Dò mã hàng tự động cho từng dòng bán ra, dựa theo TON đã import và
-    dữ liệu 'Chi tiết BÁN RA' đã lưu sẵn từ màn Nhập Liệu (Import & tách dữ
-    liệu -> Lưu cả 2 bảng kê). Áp lại các lựa chọn đã HỌC (từ lần người dùng
+    """Dò mã hàng tự động cho từng dòng, dựa theo TON đã import. Nếu đã có
+    dữ liệu 'Chi tiết BÁN RA' (Nhập Liệu) thì dựng lại GIATHANH từ đó như
+    trước. Nếu CHƯA có Chi tiết BÁN RA nhưng GIATHANH đã có sẵn dữ liệu từ
+    nguồn khác (vd Import tờ khai xuất khẩu) thì dò mã TRỰC TIẾP trên dữ
+    liệu đang có, không bắt buộc phải có Chi tiết BÁN RA — cứ có dữ liệu
+    trong phần mềm là xử lý. Áp lại các lựa chọn đã HỌC (từ lần người dùng
     tự gắn tay trước đó) cho những tên hàng có nhiều mã trùng tên (vd 1 mã do
     phần mềm sinh + 1 mã cũ đã có sẵn trong MISA). GIỮ NGUYÊN mã đã gán cho
     đúng dòng hóa đơn nếu GIATHANH đang có sẵn (gán tay/Import giá thành) —
@@ -11706,16 +11765,19 @@ def xk_tao_giathanh(cid: int):
     src = nhap_lieu_get(cid, "ctbr")
     if not ton_rows:
         raise HTTPException(400, "Chưa import Sheet TON (Tổng hợp tồn kho)")
-    if not src.get("rows"):
-        raise HTTPException(400, "Chưa có dữ liệu 'Chi tiết BÁN RA' — vào màn Nhập Liệu, Import & tách dữ liệu rồi Lưu cả 2 bảng kê từ file có sheet 'Chi tiết BÁN RA'")
     hoc_ma = data.get("xk_hoc_ma") or {}
     giathanh_cu = data.get("xk_giathanh") or []
-    # giu_ngoai_ctbr=False: KHÔNG cộng dồn dòng của KỲ CŨ không còn khớp
-    # 'Chi tiết BÁN RA' hiện tại — "Dò mã hàng tự động" phải phản ánh ĐÚNG dữ
-    # liệu Nhập Liệu ĐANG import, không giữ lại dữ liệu tháng/kỳ trước đã
-    # import khác (xem giải thích ở _xk_hop_nhat_giathanh).
-    giathanh = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
-                                     hoc_ma, giathanh_cu, giu_ngoai_ctbr=False)
+    if src.get("rows"):
+        # giu_ngoai_ctbr=False: KHÔNG cộng dồn dòng của KỲ CŨ không còn khớp
+        # 'Chi tiết BÁN RA' hiện tại — "Dò mã hàng tự động" phải phản ánh
+        # ĐÚNG dữ liệu Nhập Liệu ĐANG import, không giữ lại dữ liệu tháng/kỳ
+        # trước đã import khác (xem giải thích ở _xk_hop_nhat_giathanh).
+        giathanh = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
+                                         hoc_ma, giathanh_cu, giu_ngoai_ctbr=False)
+    elif giathanh_cu:
+        giathanh = _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma)
+    else:
+        raise HTTPException(400, "Chưa có dữ liệu gì để dò mã — hãy Import 'Chi tiết BÁN RA' (Nhập Liệu) hoặc Import tờ khai xuất khẩu trước")
     data["xk_giathanh"] = giathanh
     _ghi_du_lieu_cty(cid, data)
     so_khop = sum(1 for r in giathanh if r.get("ma"))
