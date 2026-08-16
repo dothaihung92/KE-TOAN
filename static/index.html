@@ -5043,11 +5043,17 @@ async function gtgtKiemTraCheoChay(){
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${misaEsc(String(x.gia_tri_tinh_moi??''))}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:center">${x.khop===true?'✓':x.khop===false?'✗ LỆCH':'—'}</td>
     </tr>`).join('');
+    const goiY=d.goi_y_mua_vao_thieu?`
+      <div style="margin-top:14px;background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 14px;font-size:12px;color:#8a5d00">
+        <b>⚠ Item23/24 (mua vào) lệch</b> — chênh giá trị ${misaEsc((d.goi_y_mua_vao_thieu.lech_gia_tri||0).toLocaleString('vi-VN'))}đ, chênh thuế ${misaEsc((d.goi_y_mua_vao_thieu.lech_thue||0).toLocaleString('vi-VN'))}đ. Đã dò thêm:
+        <pre style="max-height:30vh;overflow:auto;background:#fff;border:1px solid #eee;border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap;margin-top:6px">${misaEsc(JSON.stringify(d.goi_y_mua_vao_thieu,null,2))}</pre>
+      </div>`:'';
     document.getElementById('misaModalBody').innerHTML=`
       <div style="margin-bottom:8px;font-size:13px">Kết quả kiểm tra chéo — <b>${misaEsc(d.ky||'')}</b>: <span style="color:#1a7a4a;font-weight:700">${d.so_khop||0} khớp</span>, <span style="color:${d.so_lech?'#b91c1c':'#999'};font-weight:700">${d.so_lech||0} lệch</span>.</div>
-      <div style="max-height:55vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+      <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Chỉ tiêu</th><th style="border:1px solid #eee;padding:2px 6px">Số THẬT trong MISA</th><th style="border:1px solid #eee;padding:2px 6px">Số tính mới</th><th style="border:1px solid #eee;padding:2px 6px">Khớp?</th></tr>
         ${rows}</table></div>
+      ${goiY}
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="gtgtKiemTraCheoMo()">← Thử quý khác</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>

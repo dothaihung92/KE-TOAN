@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.185"
+APP_BUILD = "2026-08-15.186"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18213,7 +18213,47 @@ def _misa_chan_doan_kiem_tra_cheo_gtgt(cid, database, quy, nam):
                             "gia_tri_tinh_moi": gt_moi, "khop": khop})
         so_khop = sum(1 for x in so_sanh if x["khop"] is True)
         so_lech = sum(1 for x in so_sanh if x["khop"] is False)
-        return {"ky": ky_hien_thi, "so_khop": so_khop, "so_lech": so_lech, "so_sanh": so_sanh}
+
+        # Nếu Item23/24 (mua vào) LỆCH — dò thêm 2 hướng để tìm nguồn mua
+        # vào bị THIẾU: (1) GLVoucherDetail (Phiếu kế toán khác) có thể
+        # chứa dòng thuế GTGT mua vào ghi THỦ CÔNG, KHÔNG qua module Mua
+        # hàng chính thức (PUVoucher/PUService) nên bị bỏ sót; (2) dò giá
+        # trị CHÊNH LỆCH THẬT trên MỌI bảng số liệu (kỹ thuật đã dùng
+        # thành công để tìm SUAllocation/FADepreciation trước đây).
+        goi_y = None
+        muc23 = next((x for x in so_sanh if x["chi_tieu"] == "Item23"), None)
+        muc24 = next((x for x in so_sanh if x["chi_tieu"] == "Item24"), None)
+        if (muc23 and muc23["khop"] is False) or (muc24 and muc24["khop"] is False):
+            lech_ds = round(_snum(muc23["gia_tri_that_trong_misa"])) - muc23["gia_tri_tinh_moi"] if muc23 else 0
+            lech_thue = round(_snum(muc24["gia_tri_that_trong_misa"])) - muc24["gia_tri_tinh_moi"] if muc24 else 0
+            gl_rows = []
+            try:
+                sql_gl = ("SELECT d.RefID, d.Description, d.DebitAccount, d.CreditAccount, "
+                         "d.Amount, d.VATRate, d.VATAmount, h.RefNoFinance, h.RefDate, h.JournalMemo "
+                         "FROM GLVoucherDetail d JOIN GLVoucher h ON h.RefID=d.RefID "
+                         "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? "
+                         "AND d.VATRate IS NOT NULL AND ISNULL(d.VATAmount,0)<>0 "
+                         "AND d.DebitAccount LIKE '133%'")
+                for r2 in cur.execute(sql_gl, (tu_ngay, den_ngay)).fetchall():
+                    gl_rows.append({
+                        "RefID": str(r2[0]), "Description": r2[1], "DebitAccount": r2[2],
+                        "CreditAccount": r2[3], "Amount": _snum(r2[4]), "VATRate": r2[5],
+                        "VATAmount": _snum(r2[6]), "RefNoFinance": r2[7],
+                        "RefDate": r2[8].isoformat() if hasattr(r2[8], "isoformat") else r2[8],
+                        "JournalMemo": r2[9]})
+            except Exception as e:
+                gl_rows = [{"loi": str(e)}]
+            do_tim_gt = None
+            if lech_ds or lech_thue:
+                gia_tri_biet = [v for v in (round(lech_ds), round(lech_thue)) if v]
+                if gia_tri_biet:
+                    do_tim_gt = _misa_tim_bang_chua_so_tien(cur, gia_tri_biet)
+            goi_y = {"lech_gia_tri": lech_ds, "lech_thue": lech_thue,
+                    "glvoucherdetail_133_nghi_van": gl_rows,
+                    "do_tim_gia_tri_lech_khap_moi_bang": do_tim_gt}
+
+        return {"ky": ky_hien_thi, "so_khop": so_khop, "so_lech": so_lech, "so_sanh": so_sanh,
+                "goi_y_mua_vao_thieu": goi_y}
     finally:
         conn.close()
 
