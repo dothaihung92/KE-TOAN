@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.183"
+APP_BUILD = "2026-08-15.184"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17840,6 +17840,32 @@ _MISA_UI_LOAI_TRU_TIEU_DE = ("chrome", "token manager", "taskbar", "program mana
                              "nvidia", "hoa don dien tu", "claude")
 
 
+def _misa_ui_ten_tien_trinh(pid):
+    """Tên file .exe của 1 tiến trình theo PID — dùng để nhận diện cửa sổ
+    MISA CHẮC CHẮN hơn nhiều so với đoán theo tiêu đề (đối chiếu dữ liệu
+    thật: cửa sổ MISA hiện tiêu đề mặc định 'MainWindow', không có chữ
+    MISA nào, dễ đoán nhầm/bỏ sót — cửa sổ tiêu đề RỖNG cũng có thể chính
+    là MISA nếu bị bộ lọc theo tiêu đề loại bỏ oan). Trả None nếu không
+    đọc được (vd tiến trình chạy quyền admin, tiến trình này không đủ
+    quyền — TỰ NÓ cũng là 1 tín hiệu chẩn đoán hữu ích)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        h = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not h:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(260)
+            size = wintypes.DWORD(260)
+            ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+            return buf.value if ok else None
+        finally:
+            ctypes.windll.kernel32.CloseHandle(h)
+    except Exception:
+        return None
+
+
 def _misa_ui_co_ve_la_misa(w):
     """Đoán 1 cửa sổ Windows đang mở CÓ THỂ là MISA SME — dò theo tiêu đề
     (không dấu, không phân biệt hoa/thường) chứa 'misa', hoặc nội dung bên
@@ -17848,7 +17874,9 @@ def _misa_ui_co_ve_la_misa(w):
     control mặc định 'MainWindow' (không đổi theo nội dung, không có chữ
     'MISA' nào) — nên bất kỳ cửa sổ 'Window' nào có tiêu đề KHÔNG rỗng và
     KHÔNG khớp danh sách ĐÃ BIẾT chắc chắn KHÔNG phải MISA (trình duyệt,
-    phần mềm quản lý token, các pane hệ thống...) cũng coi là ứng viên."""
+    phần mềm quản lý token, các pane hệ thống...) cũng coi là ứng viên.
+    ĐÂY LÀ TÍN HIỆU DỰ PHÒNG — ưu tiên nhận diện theo TÊN TIẾN TRÌNH
+    (_misa_ui_ten_tien_trinh) đáng tin hơn nhiều, xem _misa_ui_chan_doan_cua_so."""
     try:
         tieu_de = _khong_dau(w.window_text() or "").lower()
     except Exception:
@@ -17936,72 +17964,123 @@ def _misa_ui_dang_admin():
 
 
 def _misa_ui_chan_doan_cua_so():
-    """CHẨN ĐOÁN (CHỈ ĐỌC, không bấm/gõ gì) — liệt kê mọi cửa sổ Windows
-    đang mở, dump cây điều khiển của cửa sổ NGHI LÀ MISA SME — để biết
-    CHÍNH XÁC tên nút "Thêm"/"Lấy dữ liệu"/"Cất"/các ô trong hộp thoại
-    "Chọn kỳ tính thuế" trên máy thật của người dùng, trước khi viết code
-    tự bấm. Người dùng cần MỞ SẴN MISA và đứng ở màn 'Thuế > TT80 - Tờ
-    khai thuế GTGT khấu trừ' trước khi chạy."""
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không bấm/gõ gì) — liệt kê MỌI cửa sổ Windows
+    top-level đang mở (KỂ CẢ tiêu đề rỗng — lần trước lọc theo tiêu đề có
+    thể đã bỏ oan đúng cửa sổ MISA thật), nhận diện theo TÊN TIẾN TRÌNH
+    (.exe) — đáng tin hơn nhiều so với đoán theo tiêu đề, vì MISA SME.NET
+    chỉ hiện tiêu đề mặc định 'MainWindow' không có chữ MISA nào (đã xác
+    nhận qua dữ liệu thật). Dump cây điều khiển của cửa sổ THEO ĐÚNG TIẾN
+    TRÌNH MISA (và số lượng con ngay cấp 1, để phân biệt cửa sổ THẬT SỰ
+    trống với cửa sổ bị chặn đọc)."""
     desk, loi = _misa_ui_lay_cua_so_dang_mo()
     if loi:
         return {"loi": loi}
+
     tat_ca = []
     try:
         for w in desk.windows():
             try:
                 if not w.is_visible():
                     continue
-                tieu_de = w.window_text()
-                if not tieu_de:
-                    continue
-                tat_ca.append({"tieu_de": tieu_de, "loai": w.element_info.control_type})
+                pid = None
+                try:
+                    pid = w.process_id()
+                except Exception:
+                    pass
+                ten_tt = _misa_ui_ten_tien_trinh(pid) if pid else None
+                so_con_cap1 = None
+                try:
+                    so_con_cap1 = len(w.children())
+                except Exception:
+                    so_con_cap1 = "lỗi"
+                rect = None
+                try:
+                    r = w.rectangle()
+                    rect = {"trai": r.left, "tren": r.top, "rong": r.width(), "cao": r.height()}
+                except Exception:
+                    pass
+                tat_ca.append({"tieu_de": w.window_text(), "loai": w.element_info.control_type,
+                              "pid": pid, "tien_trinh": ten_tt, "so_con_cap1": so_con_cap1,
+                              "kich_thuoc": rect})
             except Exception:
                 continue
     except Exception as e:
         return {"loi": f"Lỗi liệt kê cửa sổ: {e}"}
 
-    ung_vien = []
-    try:
-        for w in desk.windows():
-            try:
-                if w.is_visible() and _misa_ui_co_ve_la_misa(w):
-                    ung_vien.append(w)
-            except Exception:
-                continue
-    except Exception:
-        pass
+    # Ưu tiên nhận diện theo TÊN TIẾN TRÌNH chứa 'misa'; dự phòng theo tiêu
+    # đề (_misa_ui_co_ve_la_misa) nếu không tiến trình nào khớp (vd không
+    # đọc được tên tiến trình do quyền admin).
+    ung_vien_pid = set()
+    for x in tat_ca:
+        tt = (x.get("tien_trinh") or "").lower()
+        if "misa" in tt:
+            ung_vien_pid.add(x["pid"])
 
     chi_tiet = []
     co_cay_rong = False
-    for w in ung_vien[:4]:
-        try:
-            cay, loi_con = _misa_ui_dump_cay(w)
-            if not cay:
+    da_dump = set()
+    if ung_vien_pid:
+        for w in desk.windows():
+            try:
+                if not w.is_visible():
+                    continue
+                pid = w.process_id()
+                if pid not in ung_vien_pid or pid in da_dump:
+                    continue
+                da_dump.add(pid)
+                cay, loi_con = _misa_ui_dump_cay(w)
+                if len(cay) <= 1:
+                    co_cay_rong = True
+                chi_tiet.append({"tieu_de": w.window_text(), "pid": pid,
+                                 "cay_dieu_khien": cay, "loi_lay_con": loi_con})
+            except Exception as e:
                 co_cay_rong = True
-            chi_tiet.append({"tieu_de": w.window_text(), "cay_dieu_khien": cay, "loi_lay_con": loi_con})
-        except Exception as e:
-            co_cay_rong = True
-            chi_tiet.append({"tieu_de": w.window_text() if hasattr(w, "window_text") else "?",
-                             "loi": str(e)})
+                chi_tiet.append({"loi": str(e)})
+    else:
+        ung_vien = []
+        try:
+            for w in desk.windows():
+                try:
+                    if w.is_visible() and _misa_ui_co_ve_la_misa(w):
+                        ung_vien.append(w)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        for w in ung_vien[:4]:
+            try:
+                cay, loi_con = _misa_ui_dump_cay(w)
+                if len(cay) <= 1:
+                    co_cay_rong = True
+                chi_tiet.append({"tieu_de": w.window_text(),
+                                 "cay_dieu_khien": cay, "loi_lay_con": loi_con})
+            except Exception as e:
+                co_cay_rong = True
+                chi_tiet.append({"tieu_de": w.window_text() if hasattr(w, "window_text") else "?",
+                                 "loi": str(e)})
 
     dang_admin = _misa_ui_dang_admin()
     ghi_chu = None
     if co_cay_rong:
         if dang_admin is False:
-            ghi_chu = ("⚠ Tìm thấy đúng cửa sổ nhưng cây điều khiển RỖNG (0 con) — phần mềm này "
-                       "ĐANG KHÔNG chạy quyền Administrator (dang_admin=False). Nếu MISA SME đang chạy "
-                       "VỚI quyền Administrator (rất hay gặp với phần mềm kế toán), Windows sẽ CHẶN "
-                       "hoàn toàn việc đọc cây điều khiển từ tiến trình không phải admin — đây là giới "
-                       "hạn của Windows, không phải lỗi phần mềm. CÁCH SỬA: bấm chuột phải vào start.bat "
-                       "(hoặc icon phần mềm) → 'Run as administrator' → mở lại phần mềm này VỚI quyền "
-                       "Administrator (giống MISA), rồi thử chẩn đoán lại.")
+            ghi_chu = ("⚠ Cây điều khiển RỖNG (chỉ có chính cửa sổ, 0 con thật) — phần mềm này ĐANG "
+                       "KHÔNG chạy quyền Administrator (dang_admin=False). Nếu MISA SME đang chạy VỚI "
+                       "quyền Administrator (rất hay gặp với phần mềm kế toán), Windows sẽ CHẶN hoàn "
+                       "toàn việc đọc cây điều khiển từ tiến trình không phải admin — giới hạn của "
+                       "Windows, không phải lỗi phần mềm. CÁCH SỬA: chuột phải vào start.bat → 'Run as "
+                       "administrator' → mở lại phần mềm này VỚI quyền Administrator (giống MISA), rồi "
+                       "thử chẩn đoán lại. Kiểm tra thêm: xem trường 'tien_trinh' trong "
+                       "'tat_ca_cua_so_dang_mo' có đọc được tên .exe của MISA không — nếu ĐỀU là null, "
+                       "đó CŨNG là dấu hiệu quyền admin đang chặn.")
         else:
-            ghi_chu = ("⚠ Tìm thấy đúng cửa sổ nhưng cây điều khiển RỖNG (0 con) dù phần mềm này đã chạy "
-                       "quyền Administrator — có thể MISA đang ở trạng thái tối thiểu/che khuất, hoặc cửa "
-                       "sổ 'MainWindow' tìm được không phải MISA thật. Hãy đảm bảo MISA đang MỞ, HIỆN RÕ "
-                       "trên màn hình (không thu nhỏ) rồi thử lại.")
+            ghi_chu = ("⚠ Cây điều khiển RỖNG dù phần mềm này đã chạy quyền Administrator — có thể MISA "
+                       "đang ở trạng thái tối thiểu/che khuất, hoặc bản MISA này KHÔNG hỗ trợ UI "
+                       "Automation đầy đủ cho các control tự vẽ (custom-drawn) trong lưới/form. Hãy đảm "
+                       "bảo MISA đang MỞ, HIỆN RÕ trên màn hình (không thu nhỏ) rồi thử lại; nếu vẫn rỗng "
+                       "thì rất có thể phải chuyển hướng khác (không tự động hoá UI được).")
 
-    return {"tat_ca_cua_so_dang_mo": tat_ca, "cua_so_nghi_la_misa": chi_tiet,
+    return {"tat_ca_cua_so_dang_mo": tat_ca, "cua_so_misa_theo_tien_trinh": sorted(ung_vien_pid),
+            "cua_so_nghi_la_misa": chi_tiet,
             "phan_mem_nay_dang_chay_quyen_admin": dang_admin, "ghi_chu": ghi_chu}
 
 
