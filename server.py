@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.180"
+APP_BUILD = "2026-08-15.181"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17800,6 +17800,156 @@ _MISA_CT_TAGS_XML = ("ct21", "ct22", "ct23", "ct23a", "ct24", "ct24a", "ct25",
                      "ct26", "ct27", "ct28", "ct29", "ct30", "ct31", "ct32",
                      "ct32a", "ct33", "ct34", "ct35", "ct36", "ct37", "ct38",
                      "ct39a", "ct40a", "ct40b", "ct40", "ct41", "ct42", "ct43")
+
+
+# ============================================================
+#  TỰ ĐỘNG HOÁ CỬA SỔ MISA THẬT (Thêm tờ khai > Lấy dữ liệu > Cất) — theo
+#  ĐÚNG yêu cầu: KHÔNG tự tính chỉ tiêu (dù từ Excel bảng kê hay từ số cái
+#  MISA), để CHÍNH MISA tự tính bằng công cụ "Lấy dữ liệu" sẵn có của nó
+#  (đọc thẳng Mua vào/Bán ra MISA đang có) — giống hệt người dùng tự bấm
+#  tay. Đây là cửa sổ ứng dụng Windows THẬT (MISA SME.NET), KHÔNG phải
+#  trang web, nên phải dùng pywinauto (điều khiển UI Automation) — CÙNG kỹ
+#  thuật đã dùng cho hộp thoại nhập PIN chữ ký số (_dvc_nhap_pin_ky_so),
+#  KHÁC ở chỗ đây là điều khiển cả 1 CỬA SỔ ỨNG DỤNG lớn (nhiều nút/tab)
+#  chứ không phải 1 hộp thoại nhỏ. CHƯA BIẾT chính xác tên/automation_id
+#  từng nút trên máy thật của người dùng — nên làm CHẨN ĐOÁN (chỉ đọc,
+#  liệt kê cây điều khiển) TRƯỚC, giống hệt phương pháp đã dùng để dò cấu
+#  trúc CSDL MISA (SUAllocation/FADepreciation/TADeclaration...), chỉ khác
+#  đối tượng dò là UI thay vì bảng CSDL.
+# ============================================================
+def _misa_ui_import_pywinauto():
+    try:
+        from pywinauto import Desktop
+        return Desktop
+    except ImportError:
+        return None
+
+
+def _misa_ui_lay_cua_so_dang_mo():
+    Desktop = _misa_ui_import_pywinauto()
+    if not Desktop:
+        return None, ("Chưa cài thư viện pywinauto (cần để tự điều khiển cửa sổ MISA — "
+                      "đóng phần mềm, chạy lại start.bat để tự cài, rồi thử lại.")
+    try:
+        return Desktop(backend="uia"), None
+    except Exception as e:
+        return None, f"Không mở được Desktop UI Automation: {e}"
+
+
+def _misa_ui_co_ve_la_misa(w):
+    """Đoán 1 cửa sổ Windows đang mở CÓ THỂ là MISA SME — dò theo tiêu đề
+    (không dấu, không phân biệt hoa/thường) chứa 'misa', hoặc nội dung bên
+    trong nhắc tới 'GTGT'/'Tờ khai'/'Thuế' (đề phòng tiêu đề cửa sổ không
+    ghi rõ MISA — chưa biết chắc trên máy thật)."""
+    try:
+        tieu_de = _khong_dau(w.window_text() or "").lower()
+    except Exception:
+        return False
+    if "misa" in tieu_de:
+        return True
+    if any(k in tieu_de for k in ("gtgt", "to khai", "thue", "khau tru")):
+        return True
+    return False
+
+
+def _misa_ui_dump_cay(w, sau_toi_da=5, so_luong_toi_da=400):
+    """Dump cây điều khiển (control_type + text + automation_id) của 1 cửa
+    sổ, GIỚI HẠN độ sâu + số lượng để không tràn (cửa sổ MISA có thể có
+    hàng trăm/nghìn ô lưới) — CHỈ ĐỌC, không bấm/gõ gì."""
+    ket = []
+    dem = [0]
+
+    def _di(ctrl, sau):
+        if dem[0] >= so_luong_toi_da or sau > sau_toi_da:
+            return
+        try:
+            if not ctrl.is_visible():
+                return
+        except Exception:
+            pass
+        try:
+            loai = ctrl.element_info.control_type
+        except Exception:
+            loai = "?"
+        try:
+            text = (ctrl.window_text() or "").strip()
+        except Exception:
+            text = ""
+        try:
+            auto_id = ctrl.element_info.automation_id or ""
+        except Exception:
+            auto_id = ""
+        dang_chu_y = loai in ("Button", "Edit", "CheckBox", "RadioButton", "ComboBox",
+                              "TabItem", "MenuItem", "TreeItem", "Text")
+        if text or auto_id or dang_chu_y:
+            if text or auto_id:
+                dem[0] += 1
+                ket.append({"sau": sau, "loai": loai, "text": text[:80], "automation_id": auto_id})
+        try:
+            con = ctrl.children()
+        except Exception:
+            con = []
+        for c in con:
+            if dem[0] >= so_luong_toi_da:
+                break
+            _di(c, sau + 1)
+
+    _di(w, 0)
+    return ket
+
+
+def _misa_ui_chan_doan_cua_so():
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không bấm/gõ gì) — liệt kê mọi cửa sổ Windows
+    đang mở, dump cây điều khiển của cửa sổ NGHI LÀ MISA SME — để biết
+    CHÍNH XÁC tên nút "Thêm"/"Lấy dữ liệu"/"Cất"/các ô trong hộp thoại
+    "Chọn kỳ tính thuế" trên máy thật của người dùng, trước khi viết code
+    tự bấm. Người dùng cần MỞ SẴN MISA và đứng ở màn 'Thuế > TT80 - Tờ
+    khai thuế GTGT khấu trừ' trước khi chạy."""
+    desk, loi = _misa_ui_lay_cua_so_dang_mo()
+    if loi:
+        return {"loi": loi}
+    tat_ca = []
+    try:
+        for w in desk.windows():
+            try:
+                if not w.is_visible():
+                    continue
+                tieu_de = w.window_text()
+                if not tieu_de:
+                    continue
+                tat_ca.append({"tieu_de": tieu_de, "loai": w.element_info.control_type})
+            except Exception:
+                continue
+    except Exception as e:
+        return {"loi": f"Lỗi liệt kê cửa sổ: {e}"}
+
+    ung_vien = []
+    try:
+        for w in desk.windows():
+            try:
+                if w.is_visible() and _misa_ui_co_ve_la_misa(w):
+                    ung_vien.append(w)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    chi_tiet = []
+    for w in ung_vien[:4]:
+        try:
+            chi_tiet.append({"tieu_de": w.window_text(),
+                             "cay_dieu_khien": _misa_ui_dump_cay(w)})
+        except Exception as e:
+            chi_tiet.append({"tieu_de": w.window_text() if hasattr(w, "window_text") else "?",
+                             "loi": str(e)})
+
+    return {"tat_ca_cua_so_dang_mo": tat_ca, "cua_so_nghi_la_misa": chi_tiet}
+
+
+@app.get("/api/misa-ui/chan-doan-cua-so")
+def misa_ui_chan_doan_cua_so():
+    """CHẨN ĐOÁN cửa sổ MISA (chỉ đọc) — xem _misa_ui_chan_doan_cua_so."""
+    return _misa_ui_chan_doan_cua_so()
 
 
 def _misa_doc_chi_tieu_gtgt_tu_xml(duong_dan):

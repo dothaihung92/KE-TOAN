@@ -902,6 +902,7 @@
             <button class="btn ghost sm" style="color:#666" onclick="butToanKhauTruChanDoan()" title="Chỉ xem — dò tìm bảng THẬT lưu bút toán Khấu trừ thuế GTGT (Nợ 33311/Có 1331) trong MISA, để chuẩn bị tính năng tự động hạch toán">🔬 Chẩn đoán bút toán khấu trừ</button>
             <button class="btn sm" style="background:#7a4fb5" onclick="toKhaiKhauTruGtgtMo()" title="Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán Khấu trừ thuế GTGT (Nợ 33311/Có 1331) từng quý thẳng vào MISA">🤖 Tờ khai GTGT + Khấu trừ tự động</button>
             <button class="btn ghost sm" style="color:#666" onclick="chanDoanSauGtgtKhauTru()" title="Chỉ xem — lấy ĐẦY ĐỦ chi tiết Nợ/Có bút toán khấu trừ + toàn bộ chỉ tiêu 1 tờ khai GTGT thật gần nhất (đợt chẩn đoán cuối trước khi viết logic ghi)">🔬 Chẩn đoán sâu GTGT+Khấu trừ (đợt cuối)</button>
+            <button class="btn ghost sm" style="color:#666" onclick="misaUiChanDoanCuaSo()" title="Chỉ xem — dò cây điều khiển cửa sổ MISA THẬT đang mở (nút Thêm/Lấy dữ liệu/Cất...) để chuẩn bị tự động hoá 'Thêm tờ khai > Lấy dữ liệu > Cất' — theo yêu cầu để CHÍNH MISA tự tính, không tự tính lại. Cần mở sẵn MISA ở màn Thuế > TT80 trước khi bấm">🔬 Chẩn đoán cửa sổ MISA (tự động hoá)</button>
           </div>
         </div>
       </div>
@@ -4983,6 +4984,19 @@ async function chanDoanSauGtgtKhauTru(){
     const d=await api(`/api/misa-sql/chan-doan-sau-gtgt-khau-tru/${current}`,{method:'GET'});
     document.getElementById('misaModalBody').innerHTML=`
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò ĐẦY ĐỦ (CHỈ ĐỌC, không sửa/ghi gì) — database: <b>${misaEsc(d.database||'')}</b>. Copy toàn bộ nội dung dưới đây gửi lại để hoàn tất tính năng tự động tạo Tờ khai GTGT + hạch toán Khấu trừ thuế.</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaUiChanDoanCuaSo(){
+  toast('Đang dò cửa sổ MISA đang mở (chỉ xem, không bấm/gõ gì)...','');
+  try{
+    const d=await api(`/api/misa-ui/chan-doan-cua-so`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò cửa sổ MISA (CHỈ ĐỌC, không bấm/gõ gì). Copy toàn bộ nội dung dưới đây gửi lại để chuẩn bị tự động hoá "Thêm tờ khai > Lấy dữ liệu > Cất" trong MISA.</div>
       <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
