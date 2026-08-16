@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.213"
+APP_BUILD = "2026-08-16.214"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11722,6 +11722,35 @@ XUAT_KHO_HEADERS = [
     "Đối tượng", "Khoản mục CP", "Đơn vị", "Đối tượng THCP", "Công trình",
     "Đơn đặt hàng", "Hợp đồng bán", "CP không hợp lý", "Mã thống kê"]
 
+def _xk_kiem_tra_vuot_ton(ton_rows, giathanh_rows):
+    """Kiểm tra tổng SL kho đã gán cho mỗi Mã hàng kho (cộng dồn TẤT CẢ dòng
+    trong giathanh_rows, không phân biệt dòng nào tách/dòng nào gán tay) có
+    VƯỢT tồn kho thật (Sheet TON) hay không -> trả về list các mã bị vượt
+    kèm số đã gán/tồn thật/vượt bao nhiêu, sắp xếp vượt nhiều nhất lên đầu.
+    Dùng để CHẶN xuất file 'Xuất kho' khi dữ liệu chưa hợp lệ — đã xảy ra
+    thật: MISA từ chối ghi sổ NGUYÊN CẢ chứng từ vì chỉ 1 vài mã bị gán vượt
+    tồn (dữ liệu gán mã có thể đã bị vượt từ nhiều đợt Import tờ khai xuất
+    khẩu/Dò mã hàng tự động/gán tay khác nhau CỘNG DỒN LẠI, dù mỗi thao tác
+    lúc gán tưởng như hợp lệ riêng lẻ)."""
+    ton_map = {str(t.get("ma") or "").strip(): _to_num(t.get("ton")) or 0 for t in (ton_rows or [])}
+    da_dung = {}
+    for r in (giathanh_rows or []):
+        ma = str(r.get("ma") or "").strip()
+        if not ma:
+            continue
+        sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
+        sl_n = _to_num(sl_kho)
+        da_dung[ma] = da_dung.get(ma, 0) + (sl_n if isinstance(sl_n, (int, float)) else 0)
+    vuot = []
+    for ma, dung in da_dung.items():
+        if ma not in ton_map:
+            continue
+        ton = ton_map[ma]
+        if dung > ton:
+            vuot.append({"ma": ma, "da_gan": dung, "ton": ton, "vuot": round(dung - ton, 3)})
+    vuot.sort(key=lambda x: -x["vuot"])
+    return vuot
+
 def _gen_xuat_kho_rows(giathanh_rows):
     """Từ các dòng GIATHANH đã gắn mã (bỏ dòng chưa gắn) -> mảng dòng form MISA
     'Xuất kho'. Ngày hạch toán/chứng từ = CUỐI THÁNG của hoá đơn cuối cùng (mới
@@ -11931,12 +11960,25 @@ async def xk_luu_giathanh(cid: int, request: Request):
 
 @app.post("/api/xk/export/{cid}")
 def xk_export(cid: int):
-    """Xuất file 'Xuất kho' (form MISA) từ GIATHANH đã lưu (chỉ lấy dòng đã gắn mã)."""
+    """Xuất file 'Xuất kho' (form MISA) từ GIATHANH đã lưu (chỉ lấy dòng đã gắn mã).
+    CHẶN xuất nếu có mã hàng bị gán VƯỢT tồn kho thật — đã xảy ra thật: MISA
+    từ chối ghi sổ NGUYÊN CẢ chứng từ chỉ vì 1 vài mã bị vượt (dữ liệu có thể
+    đã bị gán vượt tồn từ nhiều đợt import/dò mã/gán tay CỘNG DỒN lại, dù mỗi
+    thao tác lúc gán tưởng như hợp lệ riêng lẻ) — xem _xk_kiem_tra_vuot_ton."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
     data = _doc_du_lieu_cty(cid)
     giathanh = data.get("xk_giathanh") or []
+    vuot = _xk_kiem_tra_vuot_ton(data.get("xk_ton") or [], giathanh)
+    if vuot:
+        chi_tiet = "; ".join(f"{v['ma']} (đã gán {v['da_gan']}, tồn {v['ton']}, vượt {v['vuot']})"
+                             for v in vuot[:10])
+        raise HTTPException(400, f"Có {len(vuot)} mã hàng bị gán VƯỢT tồn kho — MISA sẽ TỪ CHỐI ghi sổ "
+                                  f"nguyên cả chứng từ này nếu xuất. Hãy bấm \"↺ Gỡ mã hàng\" rồi "
+                                  f"\"🔍 Dò mã hàng tự động\" lại (hoặc \"✅ Kiểm tra tồn kho\" + \"💾 Lưu tạm\"), "
+                                  f"rồi xuất lại. Chi tiết: {chi_tiet}"
+                                  + (" ..." if len(vuot) > 10 else ""))
     out, so_ct = _gen_xuat_kho_rows(giathanh)
     if not out:
         raise HTTPException(400, "Chưa có dòng nào được gắn mã hàng để xuất")
