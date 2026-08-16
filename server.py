@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.199"
+APP_BUILD = "2026-08-16.200"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14577,7 +14577,13 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
     hàng riêng từng dòng, dùng 1 mã DÙNG CHUNG "BH" (tự tạo nếu chưa có,
     giống "MHDV" bên Mua hàng dịch vụ). CHƯA GHI SỔ, không đụng chứng từ đã
     ghi sổ của người dùng; ghi_de=True chỉ gỡ chứng từ do chính phần mềm tạo
-    (CustomField10=_PM_MARK) trùng số rồi ghi lại."""
+    (CustomField10=_PM_MARK) trùng số rồi ghi lại.
+    Hóa đơn (MST, Số hóa đơn) ĐÃ CÓ SẴN trong MISA — KỂ CẢ do người dùng tự
+    nhập tay, không chỉ chứng từ do CHÍNH phần mềm tạo trước đó — cũng tự
+    BỎ QUA, không ghi trùng (_da_co_hoa_don) — xác nhận qua thử nghiệm
+    thật: TRƯỚC ĐÂY chỉ kiểm tra trùng với chứng từ mang CustomField10=
+    _PM_MARK (do chính phần mềm tạo), nên 3 hóa đơn khách tự nhập tay
+    trong MISA (không có dấu _PM_MARK) đã bị ghi thêm 1 bản trùng."""
     import uuid as _uuid
     dl = nhap_lieu_get(cid, "out")
     header, rows = dl.get("header") or [], dl.get("rows") or []
@@ -14831,6 +14837,21 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     e["posted"] = True
         except Exception:
             pass
+        # Hóa đơn ĐÃ CÓ SẴN trong MISA nói chung (kể cả do NGƯỜI DÙNG tự nhập
+        # tay, KHÔNG chỉ chứng từ do CHÍNH phần mềm tạo như _pm_invoices ở
+        # trên) — khóa CÙNG kiểu (MST, Số hóa đơn) để tránh ghi TRÙNG hóa đơn
+        # khách đã tự nhập tay (xác nhận qua thử nghiệm thật: 3 hóa đơn khách
+        # tự nhập bị ghi thêm 1 bản trùng vì _pm_invoices chỉ biết chứng từ DO
+        # CHÍNH phần mềm tạo trước đó, không thấy được chứng từ người dùng
+        # tự nhập).
+        _da_co_hoa_don = set()
+        try:
+            for ax, invno in cur.execute(
+                    "SELECT ISNULL(AccountObjectTaxCode,''), ISNULL(InvNo,'') FROM SAVoucher "
+                    "WHERE ISNULL(InvNo,'')<>''").fetchall():
+                _da_co_hoa_don.add((_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower()))
+        except Exception:
+            pass
         ket = []
         them_ct = trung = bo_kh = go = so_ngay_loi = so_tien_0 = bo_tk = 0
         tk_thay = set()
@@ -14880,6 +14901,11 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 thang = str(int(p[1])) if p[1].isdigit() else p[1]
                 nam = p[2]
             bk = (mst_k, sohd.strip().lower())
+            if bk not in _pm_invoices and bk in _da_co_hoa_don:
+                trung += 1
+                ket.append({"so_hd": sohd, "kh_mst": mst,
+                            "trang_thai": "đã có sẵn trong MISA (không phải do phần mềm tạo, bỏ qua)"})
+                continue
             pm_e = _pm_invoices.get(bk)
             if pm_e and pm_e["posted"]:
                 trung += 1
@@ -18780,28 +18806,55 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
     import uuid as _uuid
 
     so_quy = max(1, int(so_quy or 4))
-    now = datetime.datetime.now()
-    if not tu_quy or not tu_nam:
-        tu_quy = (now.month - 1) // 3 + 1
-        tu_nam = now.year
-    else:
-        tu_quy, tu_nam = int(tu_quy), int(tu_nam)
-
-    theo_quy = []
-    for i in range(so_quy):
-        q = tu_quy + i
-        y = tu_nam + (q - 1) // 4
-        q = ((q - 1) % 4) + 1
-        thang_dau = (q - 1) * 3 + 1
-        thang_cuoi = thang_dau + 2
-        ngay_cuoi = calendar.monthrange(y, thang_cuoi)[1]
-        theo_quy.append({"quy": q, "nam": y, "thang_dau": thang_dau,
-                         "thang_cuoi": thang_cuoi, "ngay_cuoi": ngay_cuoi})
 
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
         cur = conn.cursor()
+
+        if not tu_quy or not tu_nam:
+            # Tự tiếp nối: tìm quý/năm LỚN NHẤT trong CÁC tờ khai 01/GTGT
+            # ĐÃ CÓ (DeclarationTerm "Quý N năm YYYY"), bắt đầu từ quý KẾ
+            # TIẾP — TRƯỚC ĐÂY bị lỗi mặc định về quý DƯƠNG LỊCH HIỆN TẠI
+            # (bỏ sót mọi quý còn thiếu giữa tờ khai cũ nhất và hiện tại,
+            # xác nhận qua thử nghiệm thật: có tờ khai thật ở Quý 2/2025
+            # nhưng phần mềm lại tạo thẳng Quý 3/2026, bỏ qua Quý 3-4/2025
+            # và Quý 1-2/2026). Chỉ dùng quý dương lịch hiện tại khi CHƯA
+            # có tờ khai 01/GTGT nào (không có điểm mốc để tiếp nối).
+            max_q_that, max_y_that = None, None
+            try:
+                for (term,) in cur.execute(
+                        "SELECT DeclarationTerm FROM TADeclaration WHERE RefType=5005").fetchall():
+                    m = re.match(r"Quý\s*(\d+)\s*năm\s*(\d+)", str(term or "").strip())
+                    if not m:
+                        continue
+                    q_t, y_t = int(m.group(1)), int(m.group(2))
+                    if max_y_that is None or (y_t, q_t) > (max_y_that, max_q_that):
+                        max_y_that, max_q_that = y_t, q_t
+            except Exception:
+                pass
+            if max_y_that is not None:
+                tu_quy, tu_nam = max_q_that + 1, max_y_that
+                if tu_quy > 4:
+                    tu_quy, tu_nam = 1, max_y_that + 1
+            else:
+                now = datetime.datetime.now()
+                tu_quy = (now.month - 1) // 3 + 1
+                tu_nam = now.year
+        else:
+            tu_quy, tu_nam = int(tu_quy), int(tu_nam)
+
+        theo_quy = []
+        for i in range(so_quy):
+            q = tu_quy + i
+            y = tu_nam + (q - 1) // 4
+            q = ((q - 1) % 4) + 1
+            thang_dau = (q - 1) * 3 + 1
+            thang_cuoi = thang_dau + 2
+            ngay_cuoi = calendar.monthrange(y, thang_cuoi)[1]
+            theo_quy.append({"quy": q, "nam": y, "thang_dau": thang_dau,
+                             "thang_cuoi": thang_cuoi, "ngay_cuoi": ngay_cuoi})
+
         cols_tk = _misa_cot_bang_that(cur, "TADeclaration")
         cols_tkd = _misa_cot_bang_that(cur, "TADeclarationDetail")
         cols_glv = _misa_cot_bang_that(cur, "GLVoucher")
