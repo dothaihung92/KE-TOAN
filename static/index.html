@@ -4193,7 +4193,7 @@ function xkVeTrangChinh(){
         </div>
         <div style="flex:1;min-width:260px;border:1px solid #e0e0e0;border-radius:10px;padding:12px">
           <div style="font-weight:700;font-size:13px;margin-bottom:4px">3) Tờ khai xuất khẩu — giá vốn thật (VNĐ)</div>
-          <div class="hint" style="margin-bottom:8px">Import file "Tờ khai hàng hoá xuất khẩu (thông quan)" (.xls, xuất từ VNACCS/ECUS) — lấy Tên hàng/ĐVT/Số lượng/Đơn giá (VNĐ) từng dòng hàng, tự khớp tên gắn vào dòng CHƯA có dữ liệu xuất kho. Dòng đã có sẵn (đã gán mã/giá vốn) thì bỏ qua, không ghi đè.</div>
+          <div class="hint" style="margin-bottom:8px">Import file "Tờ khai hàng hoá xuất khẩu (thông quan)" (.xls, xuất từ VNACCS/ECUS) — lấy Tên hàng/ĐVT/Số lượng/Đơn giá (VNĐ) từng dòng hàng, tự khớp tên gắn vào dòng CHƯA có dữ liệu xuất kho (dòng đã có sẵn thì bỏ qua, không ghi đè); dòng nào không khớp được thì tự tạo dòng mới. Import file này TRƯỚC cả Sheet TON/GIATHANH cũng được.</div>
           <button class="btn sm" style="background:#8a5d00" onclick="document.getElementById('xkFileToKhai').click()">📄 Import tờ khai xuất khẩu</button>
           <input type="file" id="xkFileToKhai" accept=".xls,.xlsx" multiple style="display:none" onchange="xkImportToKhai(this)">
         </div>
@@ -4244,8 +4244,8 @@ async function xkImportToKhai(input){
     const r=await fetch(`/api/xk/import-tokhai-xuatkhau/${current}`,{method:'POST',body:fd});
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
-    toast(`✓ Tờ khai có ${d.so_dong_to_khai} dòng hàng — đã gắn ${d.so_gan}`+
-      (d.so_khong_gan?`, ${d.so_khong_gan} dòng chưa khớp được (cần gán tay)`:''), d.so_gan?'ok':'err');
+    toast(`✓ Tờ khai có ${d.so_dong_to_khai} dòng hàng — khớp vào ${d.so_gan} dòng có sẵn`+
+      (d.so_moi?`, tạo mới ${d.so_moi} dòng`:''),'ok');
     if(d.loi&&d.loi.length)toast(`⚠ ${d.loi.join('; ')}`,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}

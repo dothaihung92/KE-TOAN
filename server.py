@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.203"
+APP_BUILD = "2026-08-16.204"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11415,6 +11415,8 @@ def _doc_to_khai_xuat_khau(content):
                 break
         if so_hoa_don:
             break
+    ngay_phat_hanh, _ = timo_nhan(0, 80, "Ngày phát hành")
+    ngay_phat_hanh = str(ngay_phat_hanh or "").strip().split(" ")[0]
 
     markers = [r for r in range(sh.nrows)
                if isinstance(cell(r, 2), str) and _re_hq.match(r"^<\d+>$", str(cell(r, 2)).strip())]
@@ -11434,7 +11436,8 @@ def _doc_to_khai_xuat_khau(content):
         tt_vnd, _ = timo_nhan(m, m_den, "Trị giá tính thuế (S)")
         hang.append({"ten": str(ten).strip(), "dvt": dvt,
                     "sl": _vn_so_hq(sl), "gia_vnd": _vn_so_hq(gia_vnd), "tt_vnd": _vn_so_hq(tt_vnd)})
-    return {"so_to_khai": str(so_to_khai or "").strip(), "so_hoa_don": so_hoa_don, "hang": hang}
+    return {"so_to_khai": str(so_to_khai or "").strip(), "so_hoa_don": so_hoa_don,
+            "ngay_phat_hanh": ngay_phat_hanh, "hang": hang}
 
 _XK_NGUONG_FUZZY_TOKHAI = 0.5
 
@@ -11445,7 +11448,7 @@ def _xk_da_ghi_xuat(r):
     return bool(str(r.get("ma") or "").strip()) or \
         r.get("gia_xk") not in (None, "") or r.get("sl_kho") not in (None, "")
 
-def _xk_ghep_to_khai_xuat_khau(giathanh_rows, hang_list, so_hoa_don):
+def _xk_ghep_to_khai_xuat_khau(giathanh_rows, hang_list, so_hoa_don, ngay_phat_hanh=""):
     """Ghép từng dòng hàng của tờ khai xuất khẩu (Tên hàng/ĐVT/Số lượng/Đơn
     giá VNĐ) vào ĐÚNG 1 dòng GIATHANH (Xuất Kho) theo tên gần giống nhất
     (chuẩn hoá + tính điểm giống, dùng lại logic của Dò mã hàng tự động,
@@ -11453,9 +11456,17 @@ def _xk_ghep_to_khai_xuat_khau(giathanh_rows, hang_list, so_hoa_don):
     công ty đặt Tên Sản Phẩm nội bộ). CHỈ điền vào dòng CHƯA có dữ liệu xuất
     kho (_xk_da_ghi_xuat==False) — dòng đã có bỏ qua, không ghi đè. Nếu 'Số
     hóa đơn' trên tờ khai khớp với 'Số HĐ' đang có sẵn trong GIATHANH thì ưu
-    tiên so khớp trong phạm vi các dòng cùng hoá đơn đó trước. Đánh dấu dòng
-    vừa gán bằng khoa_tokhai=True để 'Dò mã hàng tự động' sau này không đụng
-    vào (xem _gen_xk_giathanh)."""
+    tiên so khớp trong phạm vi các dòng cùng hoá đơn đó trước.
+
+    Dòng hàng nào KHÔNG khớp được dòng GIATHANH nào (kể cả khi GIATHANH đang
+    RỖNG — cho phép import tờ khai xuất khẩu TRƯỚC, chưa cần Dò mã hàng tự
+    động/Import giá thành trước như trước đây) -> TỰ TẠO 1 dòng MỚI thẳng từ
+    dữ liệu tờ khai (mutate giathanh_rows ngay tại chỗ, người gọi tự lưu lại).
+    Chỉ biết SL/ĐVT/Tên/giá vốn thật từ tờ khai — Đơn giá/Thành tiền BÁN để
+    trống (không có hoá đơn bán tương ứng, không tự bịa giá bán).
+
+    Đánh dấu dòng vừa gán/tạo bằng khoa_tokhai=True để 'Dò mã hàng tự động'
+    sau này không đụng vào (xem _gen_xk_giathanh)."""
     so_hd_chuan = str(so_hoa_don or "").strip().upper()
     theo_hd = [r for r in giathanh_rows
               if so_hd_chuan and so_hd_chuan in str(r.get("sohd") or "").strip().upper()]
@@ -11490,8 +11501,13 @@ def _xk_ghep_to_khai_xuat_khau(giathanh_rows, hang_list, so_hoa_don):
             da_dung.add(id(best))
             ket.append({"ten": h["ten"], "sohd": best.get("sohd", ""), "trang_thai": "đã gắn"})
         else:
-            ket.append({"ten": h["ten"], "sohd": "",
-                        "trang_thai": "không tìm được dòng phù hợp (đã có dữ liệu hoặc không khớp tên)"})
+            moi = {"khhdon": "", "sohd": so_hoa_don or "", "ngay": ngay_phat_hanh,
+                  "ten_sp": h["ten"], "dvt": h["dvt"], "sl": h["sl"], "dgia": "", "tt": "",
+                  "ma": "", "ten_xk": h["ten"], "dvt_xk": h["dvt"],
+                  "sl_kho": h["sl"], "gia_xk": h["gia_vnd"], "khoa_tokhai": True}
+            giathanh_rows.append(moi)
+            da_dung.add(id(moi))
+            ket.append({"ten": h["ten"], "sohd": so_hoa_don or "", "trang_thai": "dòng mới (tạo từ tờ khai)"})
     return ket
 
 XK_GIATHANH_XUAT_HEADERS = ["Tồn kho", "Số HĐ", "Ngày", "Tên Sản Phẩm", "ĐVT", "Số lượng",
@@ -11623,18 +11639,18 @@ async def xk_import_tokhai_xuatkhau(cid: int, request: Request):
     """Import 1 hoặc nhiều file 'Tờ khai hàng hoá xuất khẩu (thông quan)' (.xls
     từ VNACCS/ECUS) -> lấy Tên hàng/ĐVT/Số lượng/Đơn giá (VNĐ THẬT theo tờ
     khai hải quan, không phải giá vốn ước tính từ Tồn kho) của từng dòng hàng,
-    ghép vào ĐÚNG dòng GIATHANH (Xuất Kho) đang có theo tên gần giống nhất.
-    CHỈ điền vào dòng CHƯA có dữ liệu xuất kho (chưa gán mã/giá vốn/SL kho) —
-    dòng đã có SẴN dữ liệu trước đó thì BỎ QUA, không ghi đè, theo đúng yêu
-    cầu."""
+    ghép vào ĐÚNG dòng GIATHANH (Xuất Kho) đang có theo tên gần giống nhất —
+    dòng nào không khớp được (kể cả khi GIATHANH đang RỖNG, import tờ khai
+    xuất khẩu TRƯỚC khi 'Dò mã hàng tự động'/Import giá thành cũng được) thì
+    TỰ TẠO dòng mới thẳng từ tờ khai. CHỈ điền vào dòng CHƯA có dữ liệu xuất
+    kho (chưa gán mã/giá vốn/SL kho) — dòng đã có SẴN dữ liệu trước đó thì BỎ
+    QUA, không ghi đè, theo đúng yêu cầu."""
     form = await request.form()
     files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
     if not files:
         raise HTTPException(400, "Chưa chọn file")
     data = _doc_du_lieu_cty(cid)
     giathanh = data.get("xk_giathanh") or []
-    if not giathanh:
-        raise HTTPException(400, "Chưa có dữ liệu Xuất Kho (GIATHANH) — hãy 'Dò mã hàng tự động' hoặc Import giá thành trước khi import tờ khai xuất khẩu")
     chi_tiet, loi, tong_hang = [], [], 0
     for up in files:
         if up is None:
@@ -11649,14 +11665,16 @@ async def xk_import_tokhai_xuatkhau(cid: int, request: Request):
             loi.append(f"{fn}: không thấy dòng hàng nào (không đúng mẫu 'Tờ khai hàng hoá xuất khẩu')")
             continue
         tong_hang += len(tk["hang"])
-        chi_tiet.extend(_xk_ghep_to_khai_xuat_khau(giathanh, tk["hang"], tk.get("so_hoa_don")))
+        chi_tiet.extend(_xk_ghep_to_khai_xuat_khau(giathanh, tk["hang"], tk.get("so_hoa_don"),
+                                                    tk.get("ngay_phat_hanh", "")))
     if tong_hang == 0:
         raise HTTPException(400, "Không đọc được dữ liệu từ file đã chọn. " + "; ".join(loi[:3]))
     data["xk_giathanh"] = giathanh
     _ghi_du_lieu_cty(cid, data)
     so_gan = sum(1 for k in chi_tiet if k["trang_thai"] == "đã gắn")
-    return {"ok": True, "so_dong_to_khai": tong_hang, "so_gan": so_gan,
-            "so_khong_gan": len(chi_tiet) - so_gan, "chi_tiet": chi_tiet[:80], "loi": loi[:5]}
+    so_moi = sum(1 for k in chi_tiet if k["trang_thai"] == "dòng mới (tạo từ tờ khai)")
+    return {"ok": True, "so_dong_to_khai": tong_hang, "so_gan": so_gan, "so_moi": so_moi,
+            "chi_tiet": chi_tiet[:80], "loi": loi[:5]}
 
 @app.get("/api/xk/ton/{cid}")
 def xk_get_ton(cid: int):
