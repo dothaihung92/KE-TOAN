@@ -908,7 +908,7 @@
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối CSDL MISA (thử nghiệm)</button>
-            <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongMo()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động 8) Tờ khai GTGT + Khấu trừ tự động (bước cuối) — bước nào không có dữ liệu tự bỏ qua">🚀 Import tự động toàn bộ vào MISA</button>
+            <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongMo()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động 8) Tờ khai GTGT + Khấu trừ tự động (bước cuối) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có">🚀 Import tự động toàn bộ vào MISA</button>
           </div>
         </div>
       </div>
@@ -6416,7 +6416,7 @@ async function misaImportTuDongChay(preview){
   misaModalNormal();document.getElementById('misaModal').style.display='flex';
   const log=document.getElementById('misaImportLog');
   try{
-    const qs=new URLSearchParams({preview:preview?'1':'0'});
+    const qs=new URLSearchParams({preview:preview?'1':'0',ghi_de:'0'});
     if(misaImportTuThang)qs.set('tu_thang',misaImportTuThang);
     if(misaImportDenThang)qs.set('den_thang',misaImportDenThang);
     await api(`/api/misa-sql/import-tu-dong-start/${cid}?${qs.toString()}`,{method:'POST'});
@@ -6470,7 +6470,7 @@ function misaImportHienKetQua(d,preview){
 function misaImportTuDongMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   document.getElementById('misaModalBody').innerHTML=`
-    <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động 8) Tờ khai GTGT + Khấu trừ tự động (bước cuối) — bước nào không có dữ liệu tự bỏ qua.</div>
+    <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động 8) Tờ khai GTGT + Khấu trừ tự động (bước cuối) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có.</div>
     <label style="font-size:13px;font-weight:600">Bước 6-7 (Phân bổ CCDC / Khấu hao TSCĐ) — Từ tháng/năm (để trống = tự nối tiếp chứng từ gần nhất)</label>
     <input type="month" id="importTuThang" value="${misaEsc(misaImportTuThang)}" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
     <label style="font-size:13px;font-weight:600">Đến tháng/năm (để trống = chạy 12 tháng kể từ Từ tháng)</label>
