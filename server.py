@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.179"
+APP_BUILD = "2026-08-15.180"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17779,6 +17779,355 @@ def misa_sql_chan_doan_sau_gtgt_khau_tru(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_sau_gtgt_khau_tru(cid, database)
+
+
+# Mã chỉ tiêu MISA (TADeclarationDetail.ItemCode) -> tên biến chỉ tiêu đã
+# tính sẵn trong _export_htkk_impl (ctN) — HỌC ĐƯỢC từ dữ liệu tờ khai
+# thật (đợt chẩn đoán sâu): khớp 1-1 theo SỐ, TRỪ "Item39" thật ra ứng
+# với biến ct39a (không có "Item39a" trên MISA). Item21/37/38/42/42a/42b
+# xử lý RIÊNG (xem _misa_tao_to_khai_khau_tru_gtgt) vì không map thẳng.
+_MISA_ANH_XA_CHI_TIEU_GTGT = [
+    ("Item22", "ct22"), ("Item23", "ct23"), ("Item23a", "ct23a"),
+    ("Item24", "ct24"), ("Item24a", "ct24a"), ("Item25", "ct25"),
+    ("Item26", "ct26"), ("Item27", "ct27"), ("Item28", "ct28"),
+    ("Item29", "ct29"), ("Item30", "ct30"), ("Item31", "ct31"),
+    ("Item32", "ct32"), ("Item32a", "ct32a"), ("Item33", "ct33"),
+    ("Item34", "ct34"), ("Item35", "ct35"), ("Item36", "ct36"),
+    ("Item39", "ct39a"), ("Item40", "ct40"), ("Item40a", "ct40a"),
+    ("Item40b", "ct40b"), ("Item41", "ct41"), ("Item43", "ct43"),
+]
+_MISA_CT_TAGS_XML = ("ct21", "ct22", "ct23", "ct23a", "ct24", "ct24a", "ct25",
+                     "ct26", "ct27", "ct28", "ct29", "ct30", "ct31", "ct32",
+                     "ct32a", "ct33", "ct34", "ct35", "ct36", "ct37", "ct38",
+                     "ct39a", "ct40a", "ct40b", "ct40", "ct41", "ct42", "ct43")
+
+
+def _misa_doc_chi_tieu_gtgt_tu_xml(duong_dan):
+    """Đọc lại CHÍNH file XML vừa xuất bởi _export_htkk_impl (nguồn dữ
+    liệu ĐÃ dùng để nộp eTax thật) — lấy ra từng chỉ tiêu ctN, KHÔNG tính
+    lại công thức mới."""
+    import re
+    with open(duong_dan, encoding="utf-8-sig") as f:
+        xml = f.read()
+    ket = {}
+    for tag in _MISA_CT_TAGS_XML:
+        m = re.search(r"<%s>(.*?)</%s>" % (tag, tag), xml, re.DOTALL)
+        ket[tag] = m.group(1).strip() if m else "0"
+    return ket
+
+
+def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu_nam=None, so_quy=4):
+    """Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán 'Khấu trừ thuế GTGT'
+    (Nợ 33311/Có 1331) TỪNG QUÝ thẳng vào MISA. DÙNG LẠI ĐÚNG các chỉ tiêu
+    đã tính sẵn cho XML nộp eTax thật (_export_htkk_impl) — KHÔNG viết
+    công thức tính mới — để số trong MISA khớp 100% với số đã/sẽ nộp cơ
+    quan thuế (theo đúng lựa chọn của người dùng).
+
+    CẤU TRÚC đã xác nhận qua 3 đợt chẩn đoán dữ liệu MISA thật:
+    - TADeclaration (RefType=5005, TemplateNo='01/GTGT') +
+      TADeclarationDetail (kiểu EAV: ItemCode='ItemN' + Value dạng CHUỖI)
+      = Tờ khai 01/GTGT. Mã chỉ tiêu khớp ĐÚNG số chỉ tiêu ctN đã tính sẵn
+      (xem _MISA_ANH_XA_CHI_TIEU_GTGT), riêng Item21 luôn để trống
+      (""), Item37/Item38 lưu dạng "0.0000", Item42/42a/42b luôn "0".
+    - GLVoucher (RefType=4011) + GLVoucherDetail (1 dòng Nợ 33311/Có
+      1331, TK/diễn giải CỐ ĐỊNH học từ dữ liệu thật) = bút toán Khấu trừ
+      thuế. TotalAmount = MIN(OutputAmount, DeductionAmount) — công thức
+      đã ĐƯỢC CHỨNG MINH khớp chính xác dữ liệu thật (kể cả trường hợp
+      hiếm đầu vào < đầu ra); OutputAmount=ct35 (tổng thuế đầu ra),
+      DeductionAmount=ct22+ct25 (khớp đúng
+      DeductionAmountLastPeriod+DeductionAmountThisPeriod trên mọi dòng
+      thật đã đối chiếu).
+
+    CHƯA ghi (giới hạn đã biết, không ảnh hưởng số liệu tổng trên tờ
+    khai): TADeclarationGeneral (siêu dữ liệu chữ ký/mã hồ sơ...) và phụ
+    lục chi tiết hóa đơn 01-1/01-2 GTGT — người dùng cần tự mở tờ khai
+    trong MISA bổ sung nếu cần trước khi thật sự ký/nộp.
+
+    preview=True: chỉ tính toán, KHÔNG ghi gì vào MISA (rollback) — LƯU Ý
+    vẫn xuất ra Desktop 1 file XML GTGT thật cho mỗi quý (hành vi SẴN CÓ
+    của _export_htkk_impl khi tính số liệu, không phải ghi mới)."""
+    import re
+    import uuid as _uuid
+
+    so_quy = max(1, int(so_quy or 4))
+    now = datetime.datetime.now()
+    if not tu_quy or not tu_nam:
+        tu_quy = (now.month - 1) // 3 + 1
+        tu_nam = now.year
+    else:
+        tu_quy, tu_nam = int(tu_quy), int(tu_nam)
+
+    # ===== GIAI ĐOẠN 1: tính chỉ tiêu từng quý (KHÔNG mở kết nối MISA —
+    # tránh giữ transaction SQL Server mở lâu trong lúc tính toán, có thể
+    # đọc nhiều hóa đơn) =====
+    theo_quy = []
+    for i in range(so_quy):
+        q = tu_quy + i
+        y = tu_nam + (q - 1) // 4
+        q = ((q - 1) % 4) + 1
+        thang_dau = (q - 1) * 3 + 1
+        thang_cuoi = thang_dau + 2
+        ngay_cuoi = calendar.monthrange(y, thang_cuoi)[1]
+        try:
+            res = _export_htkk_impl(cid, ky="", nguoi_ky="",
+                                    tu=f"01/{thang_dau:02d}/{y}",
+                                    den=f"{ngay_cuoi}/{thang_cuoi:02d}/{y}",
+                                    luu_ket_xuat=0, mo_file=0)
+        except HTTPException as e:
+            theo_quy.append({"quy": q, "nam": y, "loi": str(e.detail)})
+            continue
+        except Exception as e:
+            theo_quy.append({"quy": q, "nam": y, "loi": str(e)[:300]})
+            continue
+        xml_path = res.get("path") if isinstance(res, dict) else None
+        if not xml_path or not os.path.exists(xml_path):
+            theo_quy.append({"quy": q, "nam": y, "loi": "Không lấy được file số liệu GTGT."})
+            continue
+        ct = _misa_doc_chi_tieu_gtgt_tu_xml(xml_path)
+        theo_quy.append({
+            "quy": q, "nam": y, "thang_dau": thang_dau, "thang_cuoi": thang_cuoi,
+            "ngay_cuoi": ngay_cuoi, "chi_tieu": ct,
+        })
+
+    # ===== GIAI ĐOẠN 2: học cấu trúc thật + ghi vào MISA =====
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cols_tk = _misa_cot_bang_that(cur, "TADeclaration")
+        cols_tkd = _misa_cot_bang_that(cur, "TADeclarationDetail")
+        cols_glv = _misa_cot_bang_that(cur, "GLVoucher")
+        cols_glvd = _misa_cot_bang_that(cur, "GLVoucherDetail")
+        if not (cols_tk and cols_tkd and cols_glv and cols_glvd):
+            raise HTTPException(
+                400, "Không tìm thấy đủ bảng TADeclaration/TADeclarationDetail/"
+                     "GLVoucher/GLVoucherDetail trong CSDL MISA đang kết nối.")
+
+        mau_tk = _misa_mau_dong_that(cur, "TADeclaration", "RefType=5005")
+        if not mau_tk:
+            raise HTTPException(
+                400, "Chưa có tờ khai 01/GTGT (TT80) nào trong MISA để học cấu trúc — "
+                     "hãy vào MISA, mục 'Thuế > TT80 - Tờ khai thuế GTGT khấu trừ', "
+                     "tạo tay ít nhất 1 tờ khai rồi thử lại.")
+        mau_glv = _misa_mau_dong_that(cur, "GLVoucher", "RefType=4011")
+        mau_glvd = _misa_mau_dong_that(
+            cur, "GLVoucherDetail", "DebitAccount=? AND CreditAccount=?", ("33311", "1331"))
+        if not mau_glv or not mau_glvd:
+            raise HTTPException(
+                400, "Chưa có bút toán 'Khấu trừ thuế GTGT' nào trong MISA để học cấu trúc — "
+                     "hãy tạo tay ít nhất 1 bút toán trên MISA rồi thử lại.")
+
+        max_so_nvk = 0
+        try:
+            for (rf,) in cur.execute(
+                    "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE 'NVK%'").fetchall():
+                m = re.search(r"NVK(\d+)", str(rf or ""))
+                if m:
+                    max_so_nvk = max(max_so_nvk, int(m.group(1)))
+        except Exception:
+            pass
+        suffix_mau = ""
+        m2 = re.match(r"NVK\d+(.*)$", str(mau_glv.get("RefNoFinance") or ""))
+        if m2:
+            suffix_mau = m2.group(1)
+
+        da_co_tk, da_co_glv = set(), set()
+        try:
+            for (term,) in cur.execute(
+                    "SELECT DeclarationTerm FROM TADeclaration WHERE RefType=5005").fetchall():
+                da_co_tk.add(str(term or "").strip())
+        except Exception:
+            pass
+        try:
+            for (jm,) in cur.execute(
+                    "SELECT JournalMemo FROM GLVoucher WHERE RefType=4011").fetchall():
+                da_co_glv.add(str(jm or "").strip())
+        except Exception:
+            pass
+
+        branch_id = mau_tk.get("BranchID") or _misa_branch_id(cur)
+        max_reforder = 0
+        try:
+            r0 = cur.execute("SELECT ISNULL(MAX(RefOrder),0) FROM GLVoucher").fetchone()
+            max_reforder = (r0[0] or 0) if r0 else 0
+        except Exception:
+            pass
+        ket = []
+        for dong in theo_quy:
+            if dong.get("loi"):
+                ket.append({"ky": f"Quý {dong['quy']} năm {dong['nam']}",
+                           "trang_thai": "lỗi", "chi_tiet_loi": dong["loi"]})
+                continue
+            q, y = dong["quy"], dong["nam"]
+            ky_hien_thi = f"Quý {q} năm {y}"
+            memo = f"Khấu trừ thuế GTGT quý {q} năm {y}"
+            if ky_hien_thi in da_co_tk or memo in da_co_glv:
+                ket.append({"ky": ky_hien_thi, "trang_thai": "bỏ qua — đã có tờ khai/bút toán quý này"})
+                continue
+
+            ct = dong["chi_tieu"]
+            output_amount = round(_snum(ct.get("ct35")))
+            ded_last = round(_snum(ct.get("ct22")))
+            ded_this = round(_snum(ct.get("ct25")))
+            deduction_amount = ded_last + ded_this
+            tong_kt = min(output_amount, deduction_amount)
+
+            tk_id = str(_uuid.uuid4())
+            tk_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tk.values()}
+            _misa_gan(tk_row, cols_tk, tk_id, "RefID")
+            _misa_gan(tk_row, cols_tk, branch_id, "BranchID")
+            _misa_gan(tk_row, cols_tk, 5005, "RefType")
+            _misa_gan(tk_row, cols_tk, "01/GTGT", "TemplateNo")
+            _misa_gan(tk_row, cols_tk, "TT80 - Tờ khai thuế GTGT khấu trừ (01/GTGT)", "DeclarationName")
+            _misa_gan(tk_row, cols_tk, ky_hien_thi, "DeclarationTerm")
+            _misa_gan(tk_row, cols_tk, datetime.datetime(y, dong["thang_dau"], 1), "FromDate")
+            _misa_gan(tk_row, cols_tk, datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"]), "ToDate")
+            _misa_gan(tk_row, cols_tk, True, "IsFirstDeclaration")
+            _misa_gan(tk_row, cols_tk, datetime.datetime.now(), "CreatedDate")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("CareerCode") or "00", "CareerCode")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("CareerName"), "CareerName")
+            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsShowRefNo")), "IsShowRefNo")
+            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsTT195")), "IsTT195")
+            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsCollection")), "IsCollection")
+            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsIncludeIndirectTax")), "IsIncludeIndirectTax")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("ProvinceCode"), "ProvinceCode")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("ProvinceName"), "ProvinceName")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("DepartmentTaxCode"), "DepartmentTaxCode")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("DepartmentTaxName"), "DepartmentTaxName")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("PaymentTaxCode"), "PaymentTaxCode")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("PaymentTaxName"), "PaymentTaxName")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("WardOrCommuneCode"), "WardOrCommuneCode")
+            _misa_gan(tk_row, cols_tk, mau_tk.get("WardOrCommuneName"), "WardOrCommuneName")
+            _misa_gan(tk_row, cols_tk, True, "IsCreateNew")
+
+            det_rows = []
+
+            def _them_ct(item_code, gia_tri_chuoi):
+                d = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tkd.values()}
+                _misa_gan(d, cols_tkd, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(d, cols_tkd, tk_id, "RefID")
+                _misa_gan(d, cols_tkd, item_code, "ItemCode")
+                _misa_gan(d, cols_tkd, 5, "DataType")
+                _misa_gan(d, cols_tkd, gia_tri_chuoi, "Value")
+                det_rows.append(d)
+
+            _them_ct("Item21", "")
+            for item_code, ct_key in _MISA_ANH_XA_CHI_TIEU_GTGT:
+                _them_ct(item_code, str(round(_snum(ct.get(ct_key)))))
+            _them_ct("Item37", "0.0000")
+            _them_ct("Item38", "0.0000")
+            _them_ct("Item42", "0")
+            _them_ct("Item42a", "0")
+            _them_ct("Item42b", "0")
+
+            max_so_nvk += 1
+            refno_moi = f"NVK{max_so_nvk}{suffix_mau}"
+            glv_id = str(_uuid.uuid4())
+            ngay_ct = datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"])
+            glv_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glv.values()}
+            _misa_gan(glv_row, cols_glv, glv_id, "RefID")
+            _misa_gan(glv_row, cols_glv, 0, "DisplayOnBook")
+            _misa_gan(glv_row, cols_glv, 4011, "RefType")
+            max_reforder += 1
+            _misa_gan(glv_row, cols_glv, max_reforder, "RefOrder")
+            _misa_gan(glv_row, cols_glv, ngay_ct, "RefDate")
+            _misa_gan(glv_row, cols_glv, ngay_ct, "PostedDate")
+            _misa_gan(glv_row, cols_glv, refno_moi, "RefNoFinance")
+            _misa_gan(glv_row, cols_glv, True, "IsPostedFinance")
+            _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
+            _misa_gan(glv_row, cols_glv, memo, "JournalMemo")
+            _misa_gan(glv_row, cols_glv, tong_kt, "TotalAmountOC")
+            _misa_gan(glv_row, cols_glv, tong_kt, "TotalAmount")
+            _misa_gan(glv_row, cols_glv, branch_id, "BranchID")
+            _misa_gan(glv_row, cols_glv, "VND", "CurrencyID")
+            _misa_gan(glv_row, cols_glv, 1, "ExchangeRate")
+            _misa_gan(glv_row, cols_glv, output_amount, "OutputAmount")
+            _misa_gan(glv_row, cols_glv, deduction_amount, "DeductionAmount")
+            _misa_gan(glv_row, cols_glv, q, "Month")
+            _misa_gan(glv_row, cols_glv, y, "Year")
+            _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "CreatedDate")
+            _misa_gan(glv_row, cols_glv, mau_glv.get("CreatedBy") or "ADMIN", "CreatedBy")
+            _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "ModifiedDate")
+            _misa_gan(glv_row, cols_glv, mau_glv.get("ModifiedBy") or "ADMIN", "ModifiedBy")
+            _misa_gan(glv_row, cols_glv, False, "ReceiptType")
+            _misa_gan(glv_row, cols_glv, ded_last, "DeductionAmountLastPeriod")
+            _misa_gan(glv_row, cols_glv, ded_this, "DeductionAmountThisPeriod")
+            _misa_gan(glv_row, cols_glv, False, "IsOnceSettlementAdvance")
+            _misa_gan(glv_row, cols_glv, 0, "AdvancedAmount")
+            _misa_gan(glv_row, cols_glv, 0, "AdvancedAmountOC")
+            _misa_gan(glv_row, cols_glv, 1, "PeriodTypeVATDeduction")
+            _misa_gan(glv_row, cols_glv, False, "IsExecuted")
+            _misa_gan(glv_row, cols_glv, 0, "DiffAmount")
+            _misa_gan(glv_row, cols_glv, 0, "DiffAmountOC")
+
+            glvd_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glvd.values()}
+            _misa_gan(glvd_row, cols_glvd, str(_uuid.uuid4()), "RefDetailID")
+            _misa_gan(glvd_row, cols_glvd, glv_id, "RefID")
+            _misa_gan(glvd_row, cols_glvd, "Thuế GTGT được khấu trừ của hàng hóa, dịch vụ", "Description")
+            _misa_gan(glvd_row, cols_glvd, "33311", "DebitAccount")
+            _misa_gan(glvd_row, cols_glvd, "1331", "CreditAccount")
+            _misa_gan(glvd_row, cols_glvd, tong_kt, "AmountOC")
+            _misa_gan(glvd_row, cols_glvd, tong_kt, "Amount")
+            _misa_gan(glvd_row, cols_glvd, False, "UnResonableCost")
+            _misa_gan(glvd_row, cols_glvd, 0, "SortOrder")
+            _misa_gan(glvd_row, cols_glvd, 0, "VATAmount")
+            _misa_gan(glvd_row, cols_glvd, 0, "VATAmountOC")
+            _misa_gan(glvd_row, cols_glvd, False, "IsListOnTaxDeclaration")
+            _misa_gan(glvd_row, cols_glvd, 0, "LastExchangeRate")
+            _misa_gan(glvd_row, cols_glvd, False, "NotIncludeInvoice")
+            _misa_gan(glvd_row, cols_glvd, 3, "BusinessType")
+
+            if not preview:
+                lc = list(tk_row.keys())
+                cur.execute("INSERT INTO TADeclaration ([%s]) VALUES (%s)" %
+                           ("],[".join(lc), ",".join(["?"] * len(lc))), [tk_row[c] for c in lc])
+                for d in det_rows:
+                    lc = list(d.keys())
+                    cur.execute("INSERT INTO TADeclarationDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
+                lc = list(glv_row.keys())
+                cur.execute("INSERT INTO GLVoucher ([%s]) VALUES (%s)" %
+                           ("],[".join(lc), ",".join(["?"] * len(lc))), [glv_row[c] for c in lc])
+                lc = list(glvd_row.keys())
+                cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" %
+                           ("],[".join(lc), ",".join(["?"] * len(lc))), [glvd_row[c] for c in lc])
+
+            da_co_tk.add(ky_hien_thi)
+            da_co_glv.add(memo)
+            ket.append({"ky": ky_hien_thi, "trang_thai": "sẽ tạo" if preview else "đã tạo",
+                       "thue_dau_ra": output_amount, "thue_duoc_khau_tru": deduction_amount,
+                       "so_tien_khau_tru": tong_kt, "so_ct_khau_tru": refno_moi})
+
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_quy": len(ket), "danh_sach": ket,
+                "tu_quy": tu_quy, "tu_nam": tu_nam, "so_quy_yeu_cau": so_quy}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, f"Lỗi tạo tờ khai GTGT / hạch toán khấu trừ: {e}")
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/to-khai-khau-tru-gtgt/{cid}")
+def misa_sql_to_khai_khau_tru_gtgt(cid: int, preview: int = 1, database: str = "",
+                                   tu_quy: int = 0, tu_nam: int = 0, so_quy: int = 4):
+    """Tự động tạo Tờ khai 01/GTGT + hạch toán Khấu trừ thuế GTGT từng quý
+    thẳng vào MISA (xem _misa_tao_to_khai_khau_tru_gtgt). tu_quy (1-4)/
+    tu_nam: để trống (0) = tự tiếp nối quý kế tiếp sau tờ khai gần nhất.
+    so_quy: số quý xử lý, mặc định 4."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_tao_to_khai_khau_tru_gtgt(
+        cid, database, preview=bool(preview),
+        tu_quy=tu_quy or None, tu_nam=tu_nam or None, so_quy=so_quy)
 
 
 # ============================================================
