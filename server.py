@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.196"
+APP_BUILD = "2026-08-16.197"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18719,7 +18719,9 @@ def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_n
 
 def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu_nam=None, so_quy=4):
     """Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán 'Khấu trừ thuế GTGT'
-    (Nợ 33311/Có 1331) TỪNG QUÝ thẳng vào MISA. Chỉ tiêu ct23-ct36 tính
+    (Nợ 33311/Có 1331) TỪNG QUÝ thẳng vào MISA — hạch toán CHỈ TẠO, KHÔNG tự
+    ghi sổ (IsPostedFinance=False, theo yêu cầu — người dùng tự kiểm tra rồi
+    bấm "Ghi sổ" trong MISA). Chỉ tiêu ct23-ct36 tính
     TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ SẴN trong MISA
     (_misa_tinh_chi_tieu_gtgt_tu_misa — KHÔNG qua Excel/eTax nữa, theo
     đúng yêu cầu "dùng dữ liệu trên MISA đã nhập"), ĐÃ KIỂM TRA CHÉO khớp
@@ -18994,7 +18996,9 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             _misa_gan(glv_row, cols_glv, ngay_ct, "RefDate")
             _misa_gan(glv_row, cols_glv, ngay_ct, "PostedDate")
             _misa_gan(glv_row, cols_glv, refno_moi, "RefNoFinance")
-            _misa_gan(glv_row, cols_glv, True, "IsPostedFinance")
+            # Theo yêu cầu: chỉ TẠO chứng từ khấu trừ, KHÔNG tự ghi sổ — để
+            # người dùng tự kiểm tra rồi bấm "Ghi sổ" trong MISA.
+            _misa_gan(glv_row, cols_glv, False, "IsPostedFinance")
             _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
             _misa_gan(glv_row, cols_glv, memo, "JournalMemo")
             _misa_gan(glv_row, cols_glv, tong_kt, "TotalAmountOC")
