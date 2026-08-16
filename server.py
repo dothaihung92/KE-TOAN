@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.184"
+APP_BUILD = "2026-08-15.185"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18102,6 +18102,132 @@ def _misa_doc_chi_tieu_gtgt_tu_xml(duong_dan):
         m = re.search(r"<%s>(.*?)</%s>" % (tag, tag), xml, re.DOTALL)
         ket[tag] = m.group(1).strip() if m else "0"
     return ket
+
+
+def _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay, den_ngay):
+    """Tính chỉ tiêu 01/GTGT TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ SẴN trong
+    MISA (SAVoucher+SAVoucherDetail bán ra; PUVoucher+PUVoucherDetail nhập
+    kho/không qua kho + PUService+PUServiceDetail dịch vụ mua vào) — KHÔNG
+    qua Excel bảng kê/eTax nữa, theo đúng yêu cầu ("dùng dữ liệu trên MISA
+    đã nhập"). CHỈ tính chứng từ ĐÃ GHI SỔ (IsPostedFinance=1), RefDate
+    trong [tu_ngay, den_ngay]. Trả ct23..ct36 (CHƯA gồm ct22/ct40.../ct43 —
+    những chỉ tiêu này cần số dư đầu kỳ CHUYỂN TỪ QUÝ TRƯỚC, tính ở hàm gọi).
+
+    GIỚI HẠN ĐÃ BIẾT (không ảnh hưởng số thuế phải nộp/được khấu trừ):
+    VATRate=0 trên SAVoucherDetail dùng CHUNG cho cả "chịu thuế 0%" LẪN
+    "không chịu thuế GTGT (KCT)" — chính hàm ghi Bán hàng của phần mềm
+    này (_misa_ghi_ban_hang, xem _chuan_thue_suat) cũng không phân biệt
+    được 2 trường hợp khi ghi, nên không thể tách lại từ dữ liệu đã ghi.
+    KHÔNG ảnh hưởng ct28/ct36/ct40/ct43 (số thuế thật) vì CẢ 2 nhóm đều
+    thuế = 0đ — chỉ ảnh hưởng cách chia doanh thu giữa dòng [26] (KCT) và
+    [29] (chịu thuế 0%) trên tờ khai (thông tin trình bày). Mặc định gộp
+    hết vào [29], để [26]=0."""
+    def _tong2(sql, tham_so):
+        r = cur.execute(sql, tham_so).fetchone()
+        v1 = _snum(r[0]) if r and r[0] is not None else 0
+        v2 = _snum(r[1]) if r and r[1] is not None else 0
+        return v1, v2
+
+    ds_mua1, thue_mua1 = _tong2(
+        "SELECT ISNULL(SUM(d.Amount),0), ISNULL(SUM(d.VATAmount),0) "
+        "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
+        "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=?",
+        (tu_ngay, den_ngay))
+    ds_mua2, thue_mua2 = _tong2(
+        "SELECT ISNULL(SUM(d.Amount),0), ISNULL(SUM(d.VATAmount),0) "
+        "FROM PUServiceDetail d JOIN PUService h ON h.RefID=d.RefID "
+        "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=?",
+        (tu_ngay, den_ngay))
+    ct23 = round(ds_mua1 + ds_mua2)
+    ct24 = round(thue_mua1 + thue_mua2)
+    ct23a, ct24a = 0, 0
+    ct25 = ct24
+
+    def _tong_ban(dieu_kien_rate, tham_so_rate=()):
+        sql = ("SELECT ISNULL(SUM(d.Amount),0), ISNULL(SUM(d.VATAmount),0) "
+               "FROM SAVoucherDetail d JOIN SAVoucher h ON h.RefID=d.RefID "
+               "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=?" +
+               (" AND " + dieu_kien_rate if dieu_kien_rate else ""))
+        return _tong2(sql, (tu_ngay, den_ngay) + tham_so_rate)
+
+    ds_0, _thue_0 = _tong_ban("ISNULL(d.VATRate,0)=0")
+    ds_5, thue_5 = _tong_ban("d.VATRate=5")
+    ds_810, thue_810 = _tong_ban("d.VATRate IN (8,10)")
+
+    ct26 = 0   # gộp hết vào ct29 — xem giới hạn KCT/0% ở trên
+    ct29 = round(ds_0)
+    ct30, ct31 = round(ds_5), round(thue_5)
+    ct32, ct33 = round(ds_810), round(thue_810)
+    ct32a = 0
+    ct27 = ct29 + ct30 + ct32
+    ct28 = ct31 + ct33
+    ct34 = ct26 + ct27
+    ct35 = ct28
+    ct36 = ct35 - ct25
+    return {"ct23": ct23, "ct23a": ct23a, "ct24": ct24, "ct24a": ct24a, "ct25": ct25,
+            "ct26": ct26, "ct27": ct27, "ct28": ct28, "ct29": ct29,
+            "ct30": ct30, "ct31": ct31, "ct32": ct32, "ct32a": ct32a, "ct33": ct33,
+            "ct34": ct34, "ct35": ct35, "ct36": ct36, "ct37": 0, "ct38": 0, "ct39a": 0}
+
+
+def _misa_chan_doan_kiem_tra_cheo_gtgt(cid, database, quy, nam):
+    """KIỂM TRA CHÉO (CHỈ ĐỌC, không ghi gì) — tính chỉ tiêu 01/GTGT TRỰC
+    TIẾP từ Mua vào/Bán ra đã có trong MISA (_misa_tinh_chi_tieu_gtgt_tu_misa)
+    cho 1 quý ĐÃ CÓ tờ khai thật trong MISA, rồi SO SÁNH với đúng số liệu
+    THẬT đã lưu (TADeclarationDetail) — để kiểm chứng công thức tính MỚI
+    trước khi dùng để ghi tờ khai mới. Chọn quý người dùng CHẮC CHẮN đã có
+    tờ khai thật trong MISA."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        thang_dau = (quy - 1) * 3 + 1
+        thang_cuoi = thang_dau + 2
+        ngay_cuoi = calendar.monthrange(nam, thang_cuoi)[1]
+        tu_ngay = datetime.datetime(nam, thang_dau, 1)
+        den_ngay = datetime.datetime(nam, thang_cuoi, ngay_cuoi, 23, 59, 59)
+        tinh_moi = _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay, den_ngay)
+
+        ky_hien_thi = f"Quý {quy} năm {nam}"
+        r = cur.execute(
+            "SELECT RefID FROM TADeclaration WHERE RefType=5005 AND DeclarationTerm=?",
+            ky_hien_thi).fetchone()
+        if not r:
+            return {"loi": f"Chưa có tờ khai thật cho {ky_hien_thi} trong MISA để đối chiếu — "
+                            f"chọn quý khác đã có tờ khai."}
+        refid = r[0]
+        that = {}
+        for item_code, val in cur.execute(
+                "SELECT ItemCode, Value FROM TADeclarationDetail WHERE RefID=?", refid).fetchall():
+            that[item_code] = val
+
+        so_sanh = []
+        for item_code, ct_key in _MISA_ANH_XA_CHI_TIEU_GTGT:
+            if ct_key not in tinh_moi:
+                continue
+            gt_that_raw = that.get(item_code)
+            gt_moi = tinh_moi[ct_key]
+            khop = None
+            if gt_that_raw not in (None, ""):
+                khop = (round(_snum(gt_that_raw)) == gt_moi)
+            so_sanh.append({"chi_tieu": item_code, "gia_tri_that_trong_misa": gt_that_raw,
+                            "gia_tri_tinh_moi": gt_moi, "khop": khop})
+        so_khop = sum(1 for x in so_sanh if x["khop"] is True)
+        so_lech = sum(1 for x in so_sanh if x["khop"] is False)
+        return {"ky": ky_hien_thi, "so_khop": so_khop, "so_lech": so_lech, "so_sanh": so_sanh}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/kiem-tra-cheo-gtgt/{cid}")
+def misa_sql_kiem_tra_cheo_gtgt(cid: int, quy: int, nam: int, database: str = ""):
+    """KIỂM TRA CHÉO (chỉ đọc) — xem _misa_chan_doan_kiem_tra_cheo_gtgt.
+    Chọn quy/nam của 1 quý ĐÃ CÓ tờ khai thật trong MISA để đối chiếu công
+    thức tính MỚI (trực tiếp từ Mua vào/Bán ra trong MISA) với số liệu
+    thật đã lưu."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_kiem_tra_cheo_gtgt(cid, database, quy, nam)
 
 
 def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu_nam=None, so_quy=4):

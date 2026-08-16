@@ -903,6 +903,7 @@
             <button class="btn sm" style="background:#7a4fb5" onclick="toKhaiKhauTruGtgtMo()" title="Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán Khấu trừ thuế GTGT (Nợ 33311/Có 1331) từng quý thẳng vào MISA">🤖 Tờ khai GTGT + Khấu trừ tự động</button>
             <button class="btn ghost sm" style="color:#666" onclick="chanDoanSauGtgtKhauTru()" title="Chỉ xem — lấy ĐẦY ĐỦ chi tiết Nợ/Có bút toán khấu trừ + toàn bộ chỉ tiêu 1 tờ khai GTGT thật gần nhất (đợt chẩn đoán cuối trước khi viết logic ghi)">🔬 Chẩn đoán sâu GTGT+Khấu trừ (đợt cuối)</button>
             <button class="btn ghost sm" style="color:#666" onclick="misaUiChanDoanCuaSo()" title="Chỉ xem — dò cây điều khiển cửa sổ MISA THẬT đang mở (nút Thêm/Lấy dữ liệu/Cất...) để chuẩn bị tự động hoá 'Thêm tờ khai > Lấy dữ liệu > Cất' — theo yêu cầu để CHÍNH MISA tự tính, không tự tính lại. Cần mở sẵn MISA ở màn Thuế > TT80 trước khi bấm">🔬 Chẩn đoán cửa sổ MISA (tự động hoá)</button>
+            <button class="btn ghost sm" style="color:#666" onclick="gtgtKiemTraCheoMo()" title="Chỉ xem — tính thử chỉ tiêu 01/GTGT TRỰC TIẾP từ Mua vào/Bán ra đã có trong MISA (không qua Excel), so với 1 tờ khai THẬT đã có sẵn — kiểm chứng công thức trước khi dùng ghi tờ khai mới">🔬 Kiểm tra chéo công thức GTGT (từ MISA)</button>
           </div>
         </div>
       </div>
@@ -4999,6 +5000,56 @@ async function misaUiChanDoanCuaSo(){
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò cửa sổ MISA (CHỈ ĐỌC, không bấm/gõ gì). Copy toàn bộ nội dung dưới đây gửi lại để chuẩn bị tự động hoá "Thêm tờ khai > Lấy dữ liệu > Cất" trong MISA.</div>
       <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
       <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function gtgtKiemTraCheoMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const namNay=new Date().getFullYear();
+  document.getElementById('misaModalBody').innerHTML=`
+    <div class="hint" style="margin-bottom:10px">Chọn 1 quý đã CHẮC CHẮN có tờ khai 01/GTGT thật trong MISA (vd quý gần nhất bạn đã tự lập) — công cụ sẽ tính lại chỉ tiêu TRỰC TIẾP từ Mua vào/Bán ra đã có trong MISA rồi so với số thật đã lưu, để kiểm chứng công thức trước khi dùng ghi tờ khai mới.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:120px">
+        <label style="font-size:13px;font-weight:600">Quý</label>
+        <select id="gtgtKtcQuy" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+          <option value="1">Quý 1</option><option value="2">Quý 2</option>
+          <option value="3">Quý 3</option><option value="4">Quý 4</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:120px">
+        <label style="font-size:13px;font-weight:600">Năm</label>
+        <input type="number" id="gtgtKtcNam" value="${namNay}" min="2015" max="2100" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+      </div>
+    </div>
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#2e5c8a" onclick="gtgtKiemTraCheoChay()">🔬 Kiểm tra</button>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function gtgtKiemTraCheoChay(){
+  const quy=document.getElementById('gtgtKtcQuy').value;
+  const nam=document.getElementById('gtgtKtcNam').value;
+  toast('Đang tính & đối chiếu (chỉ xem, không ghi gì)...','');
+  try{
+    const qs=new URLSearchParams({quy,nam});
+    const d=await api(`/api/misa-sql/kiem-tra-cheo-gtgt/${current}?${qs.toString()}`,{method:'GET'});
+    if(d.loi){toast(d.loi,'err');return}
+    const rows=(d.so_sanh||[]).map(x=>`<tr style="${x.khop===false?'background:#fde8e8':x.khop===true?'':'background:#fff8e1'}">
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.chi_tieu||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${misaEsc(String(x.gia_tri_that_trong_misa??''))}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${misaEsc(String(x.gia_tri_tinh_moi??''))}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:center">${x.khop===true?'✓':x.khop===false?'✗ LỆCH':'—'}</td>
+    </tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:13px">Kết quả kiểm tra chéo — <b>${misaEsc(d.ky||'')}</b>: <span style="color:#1a7a4a;font-weight:700">${d.so_khop||0} khớp</span>, <span style="color:${d.so_lech?'#b91c1c':'#999'};font-weight:700">${d.so_lech||0} lệch</span>.</div>
+      <div style="max-height:55vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Chỉ tiêu</th><th style="border:1px solid #eee;padding:2px 6px">Số THẬT trong MISA</th><th style="border:1px solid #eee;padding:2px 6px">Số tính mới</th><th style="border:1px solid #eee;padding:2px 6px">Khớp?</th></tr>
+        ${rows}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="gtgtKiemTraCheoMo()">← Thử quý khác</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
