@@ -905,6 +905,7 @@
             <button class="btn ghost sm" style="color:#666" onclick="misaUiChanDoanCuaSo()" title="Chỉ xem — dò cây điều khiển cửa sổ MISA THẬT đang mở (nút Thêm/Lấy dữ liệu/Cất...) để chuẩn bị tự động hoá 'Thêm tờ khai > Lấy dữ liệu > Cất' — theo yêu cầu để CHÍNH MISA tự tính, không tự tính lại. Cần mở sẵn MISA ở màn Thuế > TT80 trước khi bấm">🔬 Chẩn đoán cửa sổ MISA (tự động hoá)</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtKiemTraCheoMo()" title="Chỉ xem — tính thử chỉ tiêu 01/GTGT TRỰC TIẾP từ Mua vào/Bán ra đã có trong MISA (không qua Excel), so với 1 tờ khai THẬT đã có sẵn — kiểm chứng công thức trước khi dùng ghi tờ khai mới">🔬 Kiểm tra chéo công thức GTGT (từ MISA)</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanAppendixType()" title="Chỉ xem — tờ khai vừa ghi hiện toàn số 0 vì thiếu đánh dấu phụ lục BKBR-01-1/BKMV-01-2 đính kèm; dò đúng AppendixTypeID (GUID) của 2 phụ lục này từ dữ liệu thật để sửa">🔬 Chẩn đoán mã phụ lục GTGT</button>
+            <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanFull()" title="Chỉ xem — sau khi đã đính kèm phụ lục mà tờ khai VẪN hiện số 0, dò TOÀN BỘ tờ khai 01/GTGT trong CSDL: số chỉ tiêu đã ghi, số chỉ tiêu khác 0, số phụ lục đính kèm, số dòng hóa đơn chi tiết trong mỗi phụ lục — so tờ khai phần mềm tự ghi với tờ khai thật để tìm ra chỗ khác nhau">🔬 Chẩn đoán đầy đủ tờ khai GTGT</button>
           </div>
         </div>
       </div>
@@ -5076,12 +5077,26 @@ async function gtgtChanDoanAppendixType(){
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
+async function gtgtChanDoanFull(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang dò dữ liệu (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-to-khai-gtgt-full/${current}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò TOÀN BỘ tờ khai 01/GTGT trong CSDL (CHỈ ĐỌC, không sửa/ghi gì). Copy toàn bộ nội dung dưới đây gửi lại để tìm chỗ khác nhau giữa tờ khai phần mềm tự ghi và tờ khai thật.</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
 function toKhaiKhauTruGtgtMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   const namNay=new Date().getFullYear();
   document.getElementById('misaModalBody').innerHTML=`
     <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
-      ⚠ Tính năng MỚI — chỉ tiêu tờ khai tính TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ trong MISA (không qua Excel/eTax), đã kiểm tra chéo khớp với tờ khai thật qua nút "🔬 Kiểm tra chéo công thức GTGT" — nhưng cấu trúc ghi vào MISA CHƯA qua nhiều lần kiểm chứng thực tế như Ghi Tăng CCDC/TSCĐ. Đã tự đánh dấu 2 phụ lục Bảng kê bán ra/mua vào (BKBR-01-1, BKMV-01-2) đính kèm để MISA hiện đúng số trên màn "Tờ khai" — nhưng CHƯA điền chi tiết TỪNG hóa đơn trong 2 phụ lục đó (chỉ có tổng số ở tờ khai chính); nếu MISA vẫn báo "chênh lệch với sổ cái" hoặc hiện 0 sau khi thử lại, báo ngay để kiểm tra tiếp. Luôn bấm "Xem trước" và kiểm tra kỹ trước khi ghi thật. Chỉ chạy trên dữ liệu THỬ / đã sao lưu. Một số trường mô tả (chữ ký...) tự bổ sung trong MISA nếu cần trước khi nộp.</div>
+      ⚠ Tính năng MỚI — chỉ tiêu tờ khai tính TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ trong MISA (không qua Excel/eTax), đã kiểm tra chéo khớp với tờ khai thật qua nút "🔬 Kiểm tra chéo công thức GTGT" — nhưng cấu trúc ghi vào MISA CHƯA qua nhiều lần kiểm chứng thực tế như Ghi Tăng CCDC/TSCĐ. Đã tự đánh dấu 2 phụ lục Bảng kê bán ra/mua vào (BKBR-01-1, BKMV-01-2) đính kèm, nhưng thử nghiệm thật cho thấy màn "Tờ khai" VẪN hiện số 0 + báo "chênh lệch với Sổ cái" nếu chưa điền chi tiết TỪNG hóa đơn trong 2 phụ lục đó — đang tiếp tục xác minh (dùng nút "🔬 Chẩn đoán đầy đủ tờ khai GTGT" để so sánh). CHƯA nên coi là đáng tin cậy để nộp thật cho tới khi xác nhận xong. Luôn bấm "Xem trước" và kiểm tra kỹ trước khi ghi thật. Chỉ chạy trên dữ liệu THỬ / đã sao lưu.</div>
     <div class="hint" style="margin-bottom:10px">Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán "Khấu trừ thuế GTGT" (Nợ 33311/Có 1331) cho TỪNG QUÝ trong khoảng chọn. Để trống "Quý/Năm bắt đầu" để tự tiếp nối ngay sau tờ khai gần nhất đã có trong MISA.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <div style="flex:1;min-width:120px">
