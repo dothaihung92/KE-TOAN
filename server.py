@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.192"
+APP_BUILD = "2026-08-16.193"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18489,6 +18489,7 @@ def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_n
     hiện toàn số 0 dù chỉ tiêu chính đã đúng. Trả (rows_011, rows_012), mỗi
     dòng gộp theo (chứng từ, thuế suất) — đúng cấu trúc thật đã dò được qua
     _misa_chan_doan_chi_tiet_phu_luc_gtgt."""
+    import uuid as _uuid
     rows_011, rows_012 = [], []
     if cols_011:
         try:
