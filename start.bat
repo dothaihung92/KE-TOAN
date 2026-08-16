@@ -1,4 +1,9 @@
 @echo off
+REM Chuyen ve DUNG thu muc chua file start.bat nay — khi chay bang "Run as
+REM administrator", Windows co the tu doi thu muc lam viec ve System32,
+REM khien cac lenh phia duoi (pip install -r requirements.txt, python
+REM server.py...) tim nham file/thu muc va bao loi "khong tim thay".
+cd /d "%~dp0"
 chcp 65001 >nul
 title Phan mem Quan ly Hoa don dien tu
 color 0A
