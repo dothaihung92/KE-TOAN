@@ -906,6 +906,7 @@
             <button class="btn ghost sm" style="color:#666" onclick="gtgtKiemTraCheoMo()" title="Chỉ xem — tính thử chỉ tiêu 01/GTGT TRỰC TIẾP từ Mua vào/Bán ra đã có trong MISA (không qua Excel), so với 1 tờ khai THẬT đã có sẵn — kiểm chứng công thức trước khi dùng ghi tờ khai mới">🔬 Kiểm tra chéo công thức GTGT (từ MISA)</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanAppendixType()" title="Chỉ xem — tờ khai vừa ghi hiện toàn số 0 vì thiếu đánh dấu phụ lục BKBR-01-1/BKMV-01-2 đính kèm; dò đúng AppendixTypeID (GUID) của 2 phụ lục này từ dữ liệu thật để sửa">🔬 Chẩn đoán mã phụ lục GTGT</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanFull()" title="Chỉ xem — sau khi đã đính kèm phụ lục mà tờ khai VẪN hiện số 0, dò TOÀN BỘ tờ khai 01/GTGT trong CSDL: số chỉ tiêu đã ghi, số chỉ tiêu khác 0, số phụ lục đính kèm, số dòng hóa đơn chi tiết trong mỗi phụ lục — so tờ khai phần mềm tự ghi với tờ khai thật để tìm ra chỗ khác nhau">🔬 Chẩn đoán đầy đủ tờ khai GTGT</button>
+            <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanChiTietPhuLuc()" title="Chỉ xem — lấy TOÀN BỘ cột + dòng thật trong 2 bảng chi tiết hóa đơn của phụ lục (TA_011GTGT_Detail bán ra / TA_012GTGT_Detail mua vào) của 1 tờ khai theo Quý/Năm, để học đúng cấu trúc trước khi tự động điền chi tiết từng hóa đơn">🔬 Chẩn đoán chi tiết phụ lục GTGT</button>
           </div>
         </div>
       </div>
@@ -5091,6 +5092,35 @@ async function gtgtChanDoanFull(){
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
+function gtgtChanDoanChiTietPhuLucMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaModalBody').innerHTML=`
+    <div class="hint" style="margin-bottom:10px">Nhập đúng "Quý/Năm" như hiển thị trong MISA (vd: Quý 2 năm 2025) — ưu tiên chọn 1 tờ khai đã có SẴN dữ liệu chi tiết hóa đơn thật (không phải tờ khai phần mềm vừa tự ghi) để học đúng cấu trúc.</div>
+    <label style="font-size:13px;font-weight:600">Kỳ (Quý/Năm)</label>
+    <input type="text" id="gtgtChanDoanKy" value="Quý 2 năm 2025" placeholder="Quý 2 năm 2025" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#7a4fb5" onclick="gtgtChanDoanChiTietPhuLucChay()">Dò dữ liệu</button>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function gtgtChanDoanChiTietPhuLucChay(){
+  const ky=(document.getElementById('gtgtChanDoanKy').value||'').trim();
+  if(!ky){toast('Nhập kỳ (vd Quý 2 năm 2025)','err');return}
+  toast('Đang dò dữ liệu (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-chi-tiet-phu-luc-gtgt/${current}?ky=${encodeURIComponent(ky)}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò chi tiết phụ lục (CHỈ ĐỌC, không sửa/ghi gì). Copy toàn bộ nội dung dưới đây gửi lại để học đúng cấu trúc trước khi điền chi tiết hóa đơn.</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="gtgtChanDoanChiTietPhuLucMo()">← Dò kỳ khác</button>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function gtgtChanDoanChiTietPhuLuc(){gtgtChanDoanChiTietPhuLucMo()}
 function toKhaiKhauTruGtgtMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   const namNay=new Date().getFullYear();

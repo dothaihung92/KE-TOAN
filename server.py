@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.190"
+APP_BUILD = "2026-08-16.191"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17905,6 +17905,77 @@ def misa_sql_chan_doan_to_khai_gtgt_full(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_to_khai_gtgt_full(cid, database)
+
+
+def _misa_chan_doan_chi_tiet_phu_luc_gtgt(cid, database, ky):
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không ghi gì) — kết quả _misa_chan_doan_to_khai_gtgt_full
+    cho thấy: tờ khai phần mềm tự ghi CÓ chỉ tiêu khác 0 trong
+    TADeclarationDetail nhưng màn 'Tờ khai' vẫn hiện 0 — trong khi tờ khai
+    'Quý 2 năm 2025' (không phải phần mềm ghi) lại có 4 dòng hóa đơn bán ra
+    + 2 dòng mua vào TRONG PHỤ LỤC dù TADeclarationDetail của nó toàn '0'.
+    => nghi ngờ MISA hiển thị 'Tờ khai' bằng cách TÍNH LẠI từ chi tiết từng
+    hóa đơn trong phụ lục (TA_011GTGT_Detail/TA_012GTGT_Detail), KHÔNG đọc
+    thẳng TADeclarationDetail.Value. Hàm này dò 1 tờ khai theo DeclarationTerm
+    (ky), lấy TOÀN BỘ cột + TOÀN BỘ dòng thật đã có trong 2 bảng phụ lục chi
+    tiết đó — để học đúng schema/giá trị mẫu trước khi viết code điền dữ liệu
+    từng hóa đơn vào 2 bảng này."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        hdr = cur.execute(
+            "SELECT RefID FROM TADeclaration WHERE RefType=5005 AND DeclarationTerm=?",
+            ky).fetchone()
+        if not hdr:
+            raise HTTPException(400, f"Không tìm thấy tờ khai với kỳ '{ky}'.")
+        ref_id = hdr[0]
+        appendix_rows = cur.execute(
+            "SELECT AppendixID, AppendixTypeID FROM TADeclarationAppendix WHERE RefID=?",
+            ref_id).fetchall()
+
+        def _dump_bang(table, appendix_ids):
+            try:
+                cols = [r[0] for r in cur.execute(
+                    "SELECT name FROM sys.columns WHERE object_id=OBJECT_ID(?) "
+                    "ORDER BY column_id", table).fetchall()]
+            except Exception:
+                cols = []
+            if not cols or not appendix_ids:
+                return {"cot": cols, "dong": []}
+            dong = []
+            for aid in appendix_ids:
+                try:
+                    sql = "SELECT [%s] FROM %s WHERE AppendixID=?" % ("],[".join(cols), table)
+                    for r in cur.execute(sql, aid).fetchall():
+                        dong.append({c: (str(v) if v is not None else None) for c, v in zip(cols, r)})
+                except Exception:
+                    pass
+            return {"cot": cols, "dong": dong}
+
+        appendix_ids = [a[0] for a in appendix_rows]
+        return {
+            "database": database, "ky": ky, "ref_id": str(ref_id),
+            "phu_luc": [{"AppendixID": str(a), "AppendixTypeID": str(t)} for a, t in appendix_rows],
+            "TA_011GTGT_Detail_ban_ra": _dump_bang("TA_011GTGT_Detail", appendix_ids),
+            "TA_012GTGT_Detail_mua_vao": _dump_bang("TA_012GTGT_Detail", appendix_ids),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, đã dừng an toàn, không ghi/sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-chi-tiet-phu-luc-gtgt/{cid}")
+def misa_sql_chan_doan_chi_tiet_phu_luc_gtgt(cid: int, ky: str, database: str = ""):
+    """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_chi_tiet_phu_luc_gtgt."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    ky = (ky or "").strip()
+    if not ky:
+        raise HTTPException(400, "Thiếu tham số 'ky' (vd 'Quý 2 năm 2025').")
+    return _misa_chan_doan_chi_tiet_phu_luc_gtgt(cid, database, ky)
 
 
 # Mã chỉ tiêu MISA (TADeclarationDetail.ItemCode) -> tên biến chỉ tiêu đã
