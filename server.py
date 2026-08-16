@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.188"
+APP_BUILD = "2026-08-16.189"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18311,6 +18311,18 @@ def misa_sql_kiem_tra_cheo_gtgt(cid: int, quy: int, nam: int, database: str = ""
     return _misa_chan_doan_kiem_tra_cheo_gtgt(cid, database, quy, nam)
 
 
+# AppendixTypeID (GUID) của 2 phụ lục "Bảng kê bán ra" (BKBR-01-1/GTGT) /
+# "Bảng kê mua vào" (BKMV-01-2/GTGT) — HỌC ĐƯỢC từ dữ liệu MISA thật (dò
+# TADeclarationAppendix thật, đối chiếu AppendixID nào được TA_011GTGT_Detail
+# (bán ra) hay TA_012GTGT_Detail (mua vào) tham chiếu tới — xem
+# _misa_chan_doan_appendixtype_gtgt). ĐÂY LÀ HẰNG SỐ CỦA CHÍNH PHẦN MỀM
+# MISA (không đổi theo công ty) — thiếu đánh dấu 2 phụ lục này khiến màn
+# "Tờ khai" hiện toàn số 0 dù TADeclarationDetail đã có đúng số liệu
+# (xác nhận qua thử nghiệm thật).
+_MISA_APPENDIXTYPE_BAN_RA_BKBR011 = "C508F7CA-FCE7-4F9F-B155-DD54A1F25115"
+_MISA_APPENDIXTYPE_MUA_VAO_BKMV012 = "C144B6D7-37F6-4C8F-ABBD-6A7693531DDB"
+
+
 def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu_nam=None, so_quy=4):
     """Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán 'Khấu trừ thuế GTGT'
     (Nợ 33311/Có 1331) TỪNG QUÝ thẳng vào MISA. Chỉ tiêu ct23-ct36 tính
@@ -18337,11 +18349,21 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
       DeductionAmountLastPeriod+DeductionAmountThisPeriod trên mọi dòng
       thật đã đối chiếu).
 
+    Cũng ghi TADeclarationAppendix đánh dấu 2 phụ lục Bảng kê bán ra
+    (BKBR-01-1/GTGT, AppendixTypeID=_MISA_APPENDIXTYPE_BAN_RA_BKBR011) và
+    Bảng kê mua vào (BKMV-01-2/GTGT,
+    AppendixTypeID=_MISA_APPENDIXTYPE_MUA_VAO_BKMV012) — THIẾU bước này
+    khiến màn "Tờ khai" của MISA hiện toàn số 0 kèm cảnh báo "chênh lệch
+    với Sổ cái" dù TADeclarationDetail đã có đúng số (xác nhận qua thử
+    nghiệm thật, xem _misa_chan_doan_appendixtype_gtgt).
+
     GIỚI HẠN ĐÃ BIẾT: xem _misa_tinh_chi_tieu_gtgt_tu_misa (KCT/0% gộp
     chung, không ảnh hưởng số thuế thật). CHƯA ghi TADeclarationGeneral
-    (siêu dữ liệu chữ ký/mã hồ sơ...) và phụ lục chi tiết hóa đơn 01-1/
-    01-2 GTGT — người dùng cần tự mở tờ khai trong MISA bổ sung nếu cần
-    trước khi thật sự ký/nộp.
+    (siêu dữ liệu chữ ký/mã hồ sơ...) và CHƯA điền chi tiết TỪNG hóa đơn
+    trong 2 phụ lục (TA_011GTGT_Detail/TA_012GTGT_Detail — chỉ đánh dấu
+    "đã đính kèm", tổng số vẫn lấy từ TADeclarationDetail) — người dùng
+    cần tự mở tờ khai trong MISA bổ sung nếu cần trước khi thật sự
+    ký/nộp.
 
     preview=True: chỉ tính toán, KHÔNG ghi gì (rollback)."""
     import re
@@ -18374,6 +18396,7 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
         cols_tkd = _misa_cot_bang_that(cur, "TADeclarationDetail")
         cols_glv = _misa_cot_bang_that(cur, "GLVoucher")
         cols_glvd = _misa_cot_bang_that(cur, "GLVoucherDetail")
+        cols_ta = _misa_cot_bang_that(cur, "TADeclarationAppendix")
         if not (cols_tk and cols_tkd and cols_glv and cols_glvd):
             raise HTTPException(
                 400, "Không tìm thấy đủ bảng TADeclaration/TADeclarationDetail/"
@@ -18527,6 +18550,16 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             _them_ct("Item42a", "0")
             _them_ct("Item42b", "0")
 
+            appendix_rows = []
+            if cols_ta:
+                for appendix_type_id in (_MISA_APPENDIXTYPE_BAN_RA_BKBR011,
+                                          _MISA_APPENDIXTYPE_MUA_VAO_BKMV012):
+                    a = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_ta.values()}
+                    _misa_gan(a, cols_ta, str(_uuid.uuid4()), "AppendixID")
+                    _misa_gan(a, cols_ta, tk_id, "RefID")
+                    _misa_gan(a, cols_ta, appendix_type_id, "AppendixTypeID")
+                    appendix_rows.append(a)
+
             max_so_nvk += 1
             refno_moi = f"NVK{max_so_nvk}{suffix_mau}"
             glv_id = str(_uuid.uuid4())
@@ -18598,6 +18631,10 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
                 lc = list(glvd_row.keys())
                 cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" %
                            ("],[".join(lc), ",".join(["?"] * len(lc))), [glvd_row[c] for c in lc])
+                for a in appendix_rows:
+                    lc = list(a.keys())
+                    cur.execute("INSERT INTO TADeclarationAppendix ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
 
             da_co_tk.add(ky_hien_thi)
             da_co_glv.add(memo)
