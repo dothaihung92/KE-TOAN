@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.182"
+APP_BUILD = "2026-08-15.183"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17872,9 +17872,13 @@ def _misa_ui_co_ve_la_misa(w):
 def _misa_ui_dump_cay(w, sau_toi_da=5, so_luong_toi_da=400):
     """Dump cây điều khiển (control_type + text + automation_id) của 1 cửa
     sổ, GIỚI HẠN độ sâu + số lượng để không tràn (cửa sổ MISA có thể có
-    hàng trăm/nghìn ô lưới) — CHỈ ĐỌC, không bấm/gõ gì."""
+    hàng trăm/nghìn ô lưới) — CHỈ ĐỌC, không bấm/gõ gì. Trả kèm "loi_con"
+    nếu chính lần lấy children() ĐẦU TIÊN (của cửa sổ gốc) bị lỗi — KHÔNG
+    nuốt lỗi âm thầm nữa, vì cây rỗng hoàn toàn (0 con) thường là dấu hiệu
+    bị chặn quyền (UAC) chứ không phải cửa sổ thật sự trống."""
     ket = []
     dem = [0]
+    loi_con_goc = [None]
 
     def _di(ctrl, sau):
         if dem[0] >= so_luong_toi_da or sau > sau_toi_da:
@@ -17904,15 +17908,31 @@ def _misa_ui_dump_cay(w, sau_toi_da=5, so_luong_toi_da=400):
                 ket.append({"sau": sau, "loai": loai, "text": text[:80], "automation_id": auto_id})
         try:
             con = ctrl.children()
-        except Exception:
+        except Exception as e:
             con = []
+            if sau == 0:
+                loi_con_goc[0] = f"{type(e).__name__}: {e}"
         for c in con:
             if dem[0] >= so_luong_toi_da:
                 break
             _di(c, sau + 1)
 
     _di(w, 0)
-    return ket
+    return ket, loi_con_goc[0]
+
+
+def _misa_ui_dang_admin():
+    """Tiến trình phần mềm này (server.py) có đang chạy VỚI QUYỀN
+    ADMINISTRATOR không — UI Automation KHÔNG THỂ đọc được cây điều khiển
+    của 1 ứng dụng chạy quyền admin nếu tiến trình đang dò KHÔNG chạy
+    admin (Windows chặn theo thiết kế, không phải lỗi phần mềm) — đây là
+    nguyên nhân RẤT THƯỜNG GẶP khi tìm thấy đúng cửa sổ nhưng cây điều
+    khiển trả về HOÀN TOÀN RỖNG (0 con) như trường hợp vừa gặp."""
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return None
 
 
 def _misa_ui_chan_doan_cua_so():
@@ -17952,15 +17972,37 @@ def _misa_ui_chan_doan_cua_so():
         pass
 
     chi_tiet = []
+    co_cay_rong = False
     for w in ung_vien[:4]:
         try:
-            chi_tiet.append({"tieu_de": w.window_text(),
-                             "cay_dieu_khien": _misa_ui_dump_cay(w)})
+            cay, loi_con = _misa_ui_dump_cay(w)
+            if not cay:
+                co_cay_rong = True
+            chi_tiet.append({"tieu_de": w.window_text(), "cay_dieu_khien": cay, "loi_lay_con": loi_con})
         except Exception as e:
+            co_cay_rong = True
             chi_tiet.append({"tieu_de": w.window_text() if hasattr(w, "window_text") else "?",
                              "loi": str(e)})
 
-    return {"tat_ca_cua_so_dang_mo": tat_ca, "cua_so_nghi_la_misa": chi_tiet}
+    dang_admin = _misa_ui_dang_admin()
+    ghi_chu = None
+    if co_cay_rong:
+        if dang_admin is False:
+            ghi_chu = ("⚠ Tìm thấy đúng cửa sổ nhưng cây điều khiển RỖNG (0 con) — phần mềm này "
+                       "ĐANG KHÔNG chạy quyền Administrator (dang_admin=False). Nếu MISA SME đang chạy "
+                       "VỚI quyền Administrator (rất hay gặp với phần mềm kế toán), Windows sẽ CHẶN "
+                       "hoàn toàn việc đọc cây điều khiển từ tiến trình không phải admin — đây là giới "
+                       "hạn của Windows, không phải lỗi phần mềm. CÁCH SỬA: bấm chuột phải vào start.bat "
+                       "(hoặc icon phần mềm) → 'Run as administrator' → mở lại phần mềm này VỚI quyền "
+                       "Administrator (giống MISA), rồi thử chẩn đoán lại.")
+        else:
+            ghi_chu = ("⚠ Tìm thấy đúng cửa sổ nhưng cây điều khiển RỖNG (0 con) dù phần mềm này đã chạy "
+                       "quyền Administrator — có thể MISA đang ở trạng thái tối thiểu/che khuất, hoặc cửa "
+                       "sổ 'MainWindow' tìm được không phải MISA thật. Hãy đảm bảo MISA đang MỞ, HIỆN RÕ "
+                       "trên màn hình (không thu nhỏ) rồi thử lại.")
+
+    return {"tat_ca_cua_so_dang_mo": tat_ca, "cua_so_nghi_la_misa": chi_tiet,
+            "phan_mem_nay_dang_chay_quyen_admin": dang_admin, "ghi_chu": ghi_chu}
 
 
 @app.get("/api/misa-ui/chan-doan-cua-so")
