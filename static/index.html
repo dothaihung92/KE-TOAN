@@ -4213,6 +4213,7 @@ function xkVeTrangChinh(){
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
         <button class="btn ghost sm" onclick="xkSapXepNgay()">⬆ Sắp xếp theo Ngày</button>
         <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="xkXoaDuLieu()">🗑 Xoá dữ liệu</button>
+        <button class="btn ghost sm" style="color:#8a5d00;border-color:#e8b923" onclick="xkGoMa()" title="Dùng khi thấy Tồn kho (cột A) bị âm — gỡ mã rồi bấm Dò mã hàng tự động lại để gán sạch theo công thức đã sửa">↺ Gỡ mã hàng</button>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — <b>bấm đúp (double-click) vào ô "Mã hàng kho"</b> để mở bảng tìm & gán mã, hoặc bấm 1 lần rồi gõ thẳng mã như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. <b>Alt+L</b> Lọc | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
@@ -4695,6 +4696,21 @@ async function xkXoaDuLieu(){
     xkVeGrid();
     toast('🗑 Đã xoá dữ liệu Xuất Kho','ok');
   }catch(e){toast('Lỗi xoá: '+e.message,'err')}
+}
+// gỡ trắng Mã hàng kho đã gán (giữ nguyên Tên/ĐVT/SL/Đơn giá kho) — dùng khi
+// thấy cột "Tồn kho" bị ÂM do dữ liệu cũ lỡ gán mã vượt tồn qua nhiều đợt
+// import trước khi công thức được sửa; gỡ xong bấm lại "Dò mã hàng tự động".
+async function xkGoMa(){
+  if(!current)return;
+  if(!xkRows.length){toast('Chưa có dữ liệu','err');return}
+  if(!confirm('Gỡ trắng TOÀN BỘ Mã hàng kho đã gán (giữ nguyên Tên/ĐVT/SL/Đơn giá kho) rồi bấm lại "Dò mã hàng tự động"?'))return;
+  try{
+    const r=await fetch(`/api/xk/go-ma/${current}`,{method:'POST'});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    await xkTaiTrangThai();
+    toast(`↺ Đã gỡ mã ${d.so_go} dòng — bấm "Dò mã hàng tự động" để gán lại`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // khoá sắp xếp theo NGÀY tăng dần (dd/mm/yyyy hoặc yyyy-mm-dd) -> chuỗi
 // yyyy-mm-dd so sánh được trực tiếp bằng localeCompare, giống _xk_key_ngay

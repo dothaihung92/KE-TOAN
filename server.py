@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.211"
+APP_BUILD = "2026-08-16.212"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11619,13 +11619,28 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
 
     CHỈ gán thêm Mã hàng kho cho dòng CHƯA có mã — KHÔNG đụng tới Tên/ĐVT/
     Đơn giá kho nếu dòng đó ĐÃ CÓ SẴN (vd giá vốn thật lấy từ tờ khai xuất
-    khẩu), chỉ điền thêm khi các ô đó đang trống. Dòng không tìm được tên
-    khớp hoặc tồn không đủ vẫn gán mã ứng viên gần nhất (giữ đơn giản, không
-    tách dòng phức tạp như dò mã từ Chi tiết BÁN RA)."""
+    khẩu), chỉ điền thêm khi các ô đó đang trống. KHÔNG BAO GIỜ gán mã khiến
+    tồn kho âm — dòng không tìm được tên khớp HOẶC không mã nào còn đủ tồn
+    thì để trống Mã hàng kho (giữ đơn giản, không tách dòng phức tạp như dò
+    mã từ Chi tiết BÁN RA)."""
     hoc_ma = hoc_ma or {}
     ton_list = [dict(it, con_lai=_to_num(it.get("ton")) or 0,
                      ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
                 for it in (ton_rows or [])]
+    ton_by_ma = {tn["ma"]: tn for tn in ton_list}
+    # Trừ tồn TRƯỚC cho các dòng ĐÃ CÓ mã (từ lần dò/gán trước đó, có thể
+    # thuộc NHIỀU đợt Import tờ khai xuất khẩu khác nhau) — nếu không, mỗi
+    # lần bấm lại "Dò mã hàng tự động" đều tính lại từ tồn GỐC, không biết gì
+    # về phần đã dùng ở các lần trước -> gán CHỒNG lặp lại, ra tồn kho ÂM
+    # (đã xác nhận qua báo cáo thật, mã bị gán vượt tồn nhiều lần liên tiếp).
+    for r in giathanh_cu:
+        ma = str(r.get("ma") or "").strip()
+        tn = ton_by_ma.get(ma) if ma else None
+        if not tn:
+            continue
+        sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
+        sl_da_dung = _to_num(sl_kho)
+        tn["con_lai"] -= sl_da_dung if isinstance(sl_da_dung, (int, float)) else 0
     out = []
     for r in giathanh_cu:
         if str(r.get("ma") or "").strip():
@@ -11658,7 +11673,9 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
         if not pick:
             pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
         if not pick:
-            pick = pool[0]
+            # KHÔNG mã nào còn đủ tồn -> để trống, KHÔNG ép gán ra tồn kho âm.
+            out.append(r)
+            continue
         pick["con_lai"] -= sl_can
         rec = dict(r, ma=pick["ma"])
         if not str(rec.get("ten_xk") or "").strip():
@@ -11854,6 +11871,25 @@ def xk_tao_giathanh(cid: int):
     so_khop = sum(1 for r in giathanh if r.get("ma"))
     return {"rows": giathanh, "so_dong": len(giathanh), "so_khop": so_khop,
             "so_chua_khop": len(giathanh) - so_khop}
+
+@app.post("/api/xk/go-ma/{cid}")
+def xk_go_ma(cid: int):
+    """Gỡ (xoá trắng) TOÀN BỘ Mã hàng kho đã gán trên GIATHANH — GIỮ NGUYÊN
+    Tên hàng xuất kho/ĐVT kho/SL kho/Đơn giá kho (kể cả giá vốn thật lấy từ
+    tờ khai xuất khẩu, không mất). Dùng khi dữ liệu cũ đã lỡ gán mã vượt tồn
+    (tồn kho âm) do lỗi thuật toán TRƯỚC ĐÂY của "Dò mã hàng tự động" — gỡ
+    xong bấm "Dò mã hàng tự động" lại để gán lại sạch, đúng theo công thức
+    ĐÃ SỬA (không cho phép tồn kho âm)."""
+    data = _doc_du_lieu_cty(cid)
+    giathanh = data.get("xk_giathanh") or []
+    if not giathanh:
+        raise HTTPException(400, "Chưa có dữ liệu")
+    so_go = sum(1 for r in giathanh if str(r.get("ma") or "").strip())
+    for r in giathanh:
+        r["ma"] = ""
+    data["xk_giathanh"] = giathanh
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True, "so_dong": len(giathanh), "so_go": so_go}
 
 @app.get("/api/xk/giathanh/{cid}")
 def xk_get_giathanh(cid: int):
