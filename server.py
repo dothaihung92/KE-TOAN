@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.200"
+APP_BUILD = "2026-08-16.201"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20299,7 +20299,8 @@ def _misa_tom_tat_buoc(r):
 
 
 def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
-                         tu_thang=None, den_thang=None):
+                         tu_thang=None, den_thang=None,
+                         gtgt_tu_quy=None, gtgt_tu_nam=None, gtgt_den_quy=None, gtgt_den_nam=None):
     """Chạy lần lượt: 1) Danh mục KH/NCC  2) Bảng kê Đầu ra (Bán hàng)
     3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC (sinh từ Bảng kê Đầu vào đã lưu)
     4) Mua hàng Nhập kho/Không qua kho/Dịch vụ (Bảng kê Đầu vào đã lưu)
@@ -20317,6 +20318,10 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     12 tháng kể từ chứng từ PBCC/KH gần nhất đã có (giống chạy riêng lẻ
     từng nút "🤖 ... tự động"); bút toán Khấu trừ thuế GTGT ở bước 6 cũng
     CHƯA GHI SỔ như Bán hàng/Mua hàng.
+    gtgt_tu_quy/gtgt_tu_nam/gtgt_den_quy/gtgt_den_nam: khung Quý/Năm cho
+    bước 6 (Tờ khai GTGT) — để trống cả 4 = tự tiếp nối tờ khai thật gần
+    nhất (xem _misa_tao_to_khai_khau_tru_gtgt), chỉ trống "đến" = chạy 4
+    quý kể từ "từ".
     ghi_de mặc định TẮT (False) — chứng từ nào ĐÃ CÓ trong MISA (trùng với
     dữ liệu đang import, kể cả chứng từ CHƯA ghi sổ do chính đợt chạy
     trước tạo) sẽ tự BỎ QUA (đếm vào "so_trung"), KHÔNG ghi đè; chỉ ghi
@@ -20405,8 +20410,14 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     # Bước CUỐI CÙNG — chạy sau khi Bán hàng/Mua hàng đã có dữ liệu (chỉ
     # tiêu tờ khai tính từ chính các bảng đó), theo yêu cầu đưa vào cuối
     # luồng "Import tự động toàn bộ".
+    gtgt_so_quy = 4
+    if gtgt_tu_quy and gtgt_tu_nam and gtgt_den_quy and gtgt_den_nam:
+        gtgt_so_quy = max(1, (int(gtgt_den_nam) * 4 + int(gtgt_den_quy)) -
+                             (int(gtgt_tu_nam) * 4 + int(gtgt_tu_quy)) + 1)
     chay("6. Tờ khai GTGT + Khấu trừ tự động",
-         lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview))
+         lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview,
+                                                 tu_quy=gtgt_tu_quy, tu_nam=gtgt_tu_nam,
+                                                 so_quy=gtgt_so_quy))
 
     bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
@@ -20421,14 +20432,19 @@ MISA_IMPORT_JOBS = {}   # {cid: {"messages": [...], "running": bool, "result": d
 
 @app.post("/api/misa-sql/import-tu-dong-start/{cid}")
 def misa_sql_import_tu_dong_start(cid: int, preview: int = 1, database: str = "", ghi_de: int = 0,
-                                  tu_thang: str = "", den_thang: str = ""):
+                                  tu_thang: str = "", den_thang: str = "",
+                                  gtgt_tu_quy: str = "", gtgt_tu_nam: str = "",
+                                  gtgt_den_quy: str = "", gtgt_den_nam: str = ""):
     """Bắt đầu chạy NỀN toàn bộ luồng import vào MISA — xem
     _misa_import_tu_dong. ghi_de mặc định TẮT (0) cho luồng tự động này —
     chứng từ (Bán hàng/Mua hàng...) đã có sẵn trong MISA (trùng với dữ liệu
     đang import) sẽ tự BỎ QUA, không ghi đè; chỉ ghi thêm chứng từ CHƯA có.
     tu_thang/den_thang (yyyy-mm): khung tháng cho 2 bước Phân bổ chi phí
-    CCDC/Tính khấu hao TSCĐ tự động, để trống = tự chọn. Trả về ngay, trình
-    duyệt poll /api/misa-sql/import-tu-dong-status/{cid} để lấy tiến độ."""
+    CCDC/Tính khấu hao TSCĐ tự động, để trống = tự chọn.
+    gtgt_tu_quy/gtgt_tu_nam/gtgt_den_quy/gtgt_den_nam: khung Quý/Năm cho
+    bước Tờ khai GTGT + Khấu trừ, để trống cả 4 = tự tiếp nối tờ khai thật
+    gần nhất. Trả về ngay, trình duyệt poll
+    /api/misa-sql/import-tu-dong-status/{cid} để lấy tiến độ."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -20439,11 +20455,17 @@ def misa_sql_import_tu_dong_start(cid: int, preview: int = 1, database: str = ""
     def _bao(text):
         job["messages"].append({"text": text, "t": time.time()})
 
+    def _so_int(s):
+        s = (s or "").strip()
+        return int(s) if s.isdigit() else None
+
     def _chay_nen():
         try:
             job["result"] = _misa_import_tu_dong(
                 cid, database, preview=bool(preview), ghi_de=bool(ghi_de), bao=_bao,
-                tu_thang=tu_thang, den_thang=den_thang)
+                tu_thang=tu_thang, den_thang=den_thang,
+                gtgt_tu_quy=_so_int(gtgt_tu_quy), gtgt_tu_nam=_so_int(gtgt_tu_nam),
+                gtgt_den_quy=_so_int(gtgt_den_quy), gtgt_den_nam=_so_int(gtgt_den_nam))
         except Exception as e:
             _bao(f"✗ Lỗi không mong đợi — đã dừng: {str(e)[:300]}")
         finally:
