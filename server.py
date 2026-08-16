@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.208"
+APP_BUILD = "2026-08-16.209"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11009,6 +11009,32 @@ def _manh_xk(a, b):
         return False
     return a == b or a in b or b in a
 
+def _trich_kich_thuoc_xk(ten):
+    """Trích các cụm 'kích thước' dạng số/chữ ghép bằng 'x' trong tên hàng
+    GỐC (vd 'D47xH50', 'L28.5xW28.5xH16', '54x54x50', 'D41xH8') -> tập hợp
+    chuỗi đã chuẩn hoá (viết hoa, bỏ khoảng trắng, dấu ',' -> '.') để so
+    khớp. Chạy trên tên GỐC (không qua _chuan_ten_hang_xk) vì kích thước
+    thường nằm trong ngoặc (vd '(KT:D47xH50 cm)') — phần _chuan_ten_hang_xk
+    CẮT BỎ để so tên chính, nên phải trích riêng trước khi cắt.
+
+    Cùng 1 kích thước xuất hiện ở cả 2 tên là tín hiệu CHẮC CHẮN nhất để
+    nhận ra đúng mặt hàng, kể cả khi phần tên chữ viết khác hẳn nhau (vd
+    'Chân kê... Acacia Wooden Stand, Light brown' ở tên bán nhưng 'Chân đế'
+    trong Tồn kho — chỉ trùng đúng kích thước 'L28.5xW28.5xH16')."""
+    import re as _re_kt
+    ra = set()
+    for m in _re_kt.finditer(
+            r'[A-Za-z]?\d+(?:[.,]\d+)?(?:\s*[xX]\s*[A-Za-z]?\d+(?:[.,]\d+)?){1,4}', str(ten or "")):
+        tok = _re_kt.sub(r'\s+', '', m.group(0)).upper().replace(',', '.')
+        if tok:
+            ra.add(tok)
+    return ra
+
+def _kich_thuoc_khop_xk(a, b):
+    """True nếu 2 tên hàng GỐC cùng chứa ít nhất 1 cụm kích thước giống hệt."""
+    ka, kb = _trich_kich_thuoc_xk(a), _trich_kich_thuoc_xk(b)
+    return bool(ka and kb and (ka & kb))
+
 def _kd2(s):
     """_khong_dau() rồi thay nốt 'đ'->'d' (NFD không tách được chữ Đ ra dấu riêng)."""
     return _khong_dau(s).replace("đ", "d")
@@ -11230,7 +11256,11 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
         sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
         tt_goc = it.get("tt")
         candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
-        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])]
+        # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') coi là 'mạnh' như
+        # trùng tên — tín hiệu chắc chắn nhất để nhận đúng mặt hàng dù phần
+        # tên chữ viết khác hẳn nhau (xem _trich_kich_thuoc_xk).
+        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])
+               or _kich_thuoc_khop_xk(it["ten_sp"], tn["ten"])]
         pool = manh
         if not pool:                                 # không có ứng viên 'mạnh' -> fuzzy chặt
             best, best_diem = None, 0.0
@@ -11569,7 +11599,10 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
         sl_can = _to_num(sl_kho)
         sl_can = sl_can if isinstance(sl_can, (int, float)) else 0
         candidates = [tn for tn in ton_list if tn["con_lai"] > 0] or ton_list
-        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])]
+        # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') coi là 'mạnh' như
+        # trùng tên — xem _trich_kich_thuoc_xk.
+        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])
+               or _kich_thuoc_khop_xk(r.get("ten_sp"), tn["ten"])]
         pool = manh
         if not pool:
             best, best_diem = None, 0.0
