@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-15.186"
+APP_BUILD = "2026-08-15.187"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17796,10 +17796,6 @@ _MISA_ANH_XA_CHI_TIEU_GTGT = [
     ("Item39", "ct39a"), ("Item40", "ct40"), ("Item40a", "ct40a"),
     ("Item40b", "ct40b"), ("Item41", "ct41"), ("Item43", "ct43"),
 ]
-_MISA_CT_TAGS_XML = ("ct21", "ct22", "ct23", "ct23a", "ct24", "ct24a", "ct25",
-                     "ct26", "ct27", "ct28", "ct29", "ct30", "ct31", "ct32",
-                     "ct32a", "ct33", "ct34", "ct35", "ct36", "ct37", "ct38",
-                     "ct39a", "ct40a", "ct40b", "ct40", "ct41", "ct42", "ct43")
 
 
 # ============================================================
@@ -18090,20 +18086,6 @@ def misa_ui_chan_doan_cua_so():
     return _misa_ui_chan_doan_cua_so()
 
 
-def _misa_doc_chi_tieu_gtgt_tu_xml(duong_dan):
-    """Đọc lại CHÍNH file XML vừa xuất bởi _export_htkk_impl (nguồn dữ
-    liệu ĐÃ dùng để nộp eTax thật) — lấy ra từng chỉ tiêu ctN, KHÔNG tính
-    lại công thức mới."""
-    import re
-    with open(duong_dan, encoding="utf-8-sig") as f:
-        xml = f.read()
-    ket = {}
-    for tag in _MISA_CT_TAGS_XML:
-        m = re.search(r"<%s>(.*?)</%s>" % (tag, tag), xml, re.DOTALL)
-        ket[tag] = m.group(1).strip() if m else "0"
-    return ket
-
-
 def _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay, den_ngay):
     """Tính chỉ tiêu 01/GTGT TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ SẴN trong
     MISA (SAVoucher+SAVoucherDetail bán ra; PUVoucher+PUVoucherDetail nhập
@@ -18272,17 +18254,21 @@ def misa_sql_kiem_tra_cheo_gtgt(cid: int, quy: int, nam: int, database: str = ""
 
 def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu_nam=None, so_quy=4):
     """Tự động tạo Tờ khai 01/GTGT (TT80) + hạch toán 'Khấu trừ thuế GTGT'
-    (Nợ 33311/Có 1331) TỪNG QUÝ thẳng vào MISA. DÙNG LẠI ĐÚNG các chỉ tiêu
-    đã tính sẵn cho XML nộp eTax thật (_export_htkk_impl) — KHÔNG viết
-    công thức tính mới — để số trong MISA khớp 100% với số đã/sẽ nộp cơ
-    quan thuế (theo đúng lựa chọn của người dùng).
+    (Nợ 33311/Có 1331) TỪNG QUÝ thẳng vào MISA. Chỉ tiêu ct23-ct36 tính
+    TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ SẴN trong MISA
+    (_misa_tinh_chi_tieu_gtgt_tu_misa — KHÔNG qua Excel/eTax nữa, theo
+    đúng yêu cầu "dùng dữ liệu trên MISA đã nhập"), ĐÃ KIỂM TRA CHÉO khớp
+    100% với tờ khai thật (xem nút "🔬 Kiểm tra chéo công thức GTGT").
+    ct22 (số dư đầu kỳ) LẤY TỪ ct43 (còn được khấu trừ chuyển kỳ sau) của
+    quý LIỀN TRƯỚC — ưu tiên đọc từ tờ khai THẬT đã có trong MISA cho quý
+    đó, chỉ dùng số vừa tự tính khi quý trước đó CŨNG do đợt chạy này tạo.
 
-    CẤU TRÚC đã xác nhận qua 3 đợt chẩn đoán dữ liệu MISA thật:
+    CẤU TRÚC đã xác nhận qua nhiều đợt chẩn đoán dữ liệu MISA thật:
     - TADeclaration (RefType=5005, TemplateNo='01/GTGT') +
       TADeclarationDetail (kiểu EAV: ItemCode='ItemN' + Value dạng CHUỖI)
-      = Tờ khai 01/GTGT. Mã chỉ tiêu khớp ĐÚNG số chỉ tiêu ctN đã tính sẵn
-      (xem _MISA_ANH_XA_CHI_TIEU_GTGT), riêng Item21 luôn để trống
-      (""), Item37/Item38 lưu dạng "0.0000", Item42/42a/42b luôn "0".
+      = Tờ khai 01/GTGT. Mã chỉ tiêu khớp ĐÚNG số chỉ tiêu ctN (xem
+      _MISA_ANH_XA_CHI_TIEU_GTGT), riêng Item21 luôn để trống (""),
+      Item37/Item38 lưu dạng "0.0000", Item42/42a/42b luôn "0".
     - GLVoucher (RefType=4011) + GLVoucherDetail (1 dòng Nợ 33311/Có
       1331, TK/diễn giải CỐ ĐỊNH học từ dữ liệu thật) = bút toán Khấu trừ
       thuế. TotalAmount = MIN(OutputAmount, DeductionAmount) — công thức
@@ -18292,14 +18278,13 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
       DeductionAmountLastPeriod+DeductionAmountThisPeriod trên mọi dòng
       thật đã đối chiếu).
 
-    CHƯA ghi (giới hạn đã biết, không ảnh hưởng số liệu tổng trên tờ
-    khai): TADeclarationGeneral (siêu dữ liệu chữ ký/mã hồ sơ...) và phụ
-    lục chi tiết hóa đơn 01-1/01-2 GTGT — người dùng cần tự mở tờ khai
-    trong MISA bổ sung nếu cần trước khi thật sự ký/nộp.
+    GIỚI HẠN ĐÃ BIẾT: xem _misa_tinh_chi_tieu_gtgt_tu_misa (KCT/0% gộp
+    chung, không ảnh hưởng số thuế thật). CHƯA ghi TADeclarationGeneral
+    (siêu dữ liệu chữ ký/mã hồ sơ...) và phụ lục chi tiết hóa đơn 01-1/
+    01-2 GTGT — người dùng cần tự mở tờ khai trong MISA bổ sung nếu cần
+    trước khi thật sự ký/nộp.
 
-    preview=True: chỉ tính toán, KHÔNG ghi gì vào MISA (rollback) — LƯU Ý
-    vẫn xuất ra Desktop 1 file XML GTGT thật cho mỗi quý (hành vi SẴN CÓ
-    của _export_htkk_impl khi tính số liệu, không phải ghi mới)."""
+    preview=True: chỉ tính toán, KHÔNG ghi gì (rollback)."""
     import re
     import uuid as _uuid
 
@@ -18311,9 +18296,6 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
     else:
         tu_quy, tu_nam = int(tu_quy), int(tu_nam)
 
-    # ===== GIAI ĐOẠN 1: tính chỉ tiêu từng quý (KHÔNG mở kết nối MISA —
-    # tránh giữ transaction SQL Server mở lâu trong lúc tính toán, có thể
-    # đọc nhiều hóa đơn) =====
     theo_quy = []
     for i in range(so_quy):
         q = tu_quy + i
@@ -18322,28 +18304,9 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
         thang_dau = (q - 1) * 3 + 1
         thang_cuoi = thang_dau + 2
         ngay_cuoi = calendar.monthrange(y, thang_cuoi)[1]
-        try:
-            res = _export_htkk_impl(cid, ky="", nguoi_ky="",
-                                    tu=f"01/{thang_dau:02d}/{y}",
-                                    den=f"{ngay_cuoi}/{thang_cuoi:02d}/{y}",
-                                    luu_ket_xuat=0, mo_file=0)
-        except HTTPException as e:
-            theo_quy.append({"quy": q, "nam": y, "loi": str(e.detail)})
-            continue
-        except Exception as e:
-            theo_quy.append({"quy": q, "nam": y, "loi": str(e)[:300]})
-            continue
-        xml_path = res.get("path") if isinstance(res, dict) else None
-        if not xml_path or not os.path.exists(xml_path):
-            theo_quy.append({"quy": q, "nam": y, "loi": "Không lấy được file số liệu GTGT."})
-            continue
-        ct = _misa_doc_chi_tieu_gtgt_tu_xml(xml_path)
-        theo_quy.append({
-            "quy": q, "nam": y, "thang_dau": thang_dau, "thang_cuoi": thang_cuoi,
-            "ngay_cuoi": ngay_cuoi, "chi_tieu": ct,
-        })
+        theo_quy.append({"quy": q, "nam": y, "thang_dau": thang_dau,
+                         "thang_cuoi": thang_cuoi, "ngay_cuoi": ngay_cuoi})
 
-    # ===== GIAI ĐOẠN 2: học cấu trúc thật + ghi vào MISA =====
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
@@ -18406,20 +18369,51 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             max_reforder = (r0[0] or 0) if r0 else 0
         except Exception:
             pass
+
+        def _lay_item43_that(ky):
+            """Đọc [43] (còn được khấu trừ chuyển kỳ sau) THẬT đã lưu cho 1
+            quý, dùng làm số dư đầu kỳ [22] của quý KẾ TIẾP — None nếu quý
+            đó chưa có tờ khai thật trong MISA."""
+            try:
+                r = cur.execute(
+                    "SELECT d.Value FROM TADeclarationDetail d "
+                    "JOIN TADeclaration h ON h.RefID=d.RefID "
+                    "WHERE h.RefType=5005 AND h.DeclarationTerm=? AND d.ItemCode='Item43'",
+                    ky).fetchone()
+                return round(_snum(r[0])) if r and r[0] not in (None, "") else None
+            except Exception:
+                return None
+
+        q_truoc = tu_quy - 1
+        y_truoc = tu_nam
+        if q_truoc < 1:
+            q_truoc, y_truoc = 4, y_truoc - 1
+        ct22_hien_tai = _lay_item43_that(f"Quý {q_truoc} năm {y_truoc}") or 0
+
         ket = []
         for dong in theo_quy:
-            if dong.get("loi"):
-                ket.append({"ky": f"Quý {dong['quy']} năm {dong['nam']}",
-                           "trang_thai": "lỗi", "chi_tiet_loi": dong["loi"]})
-                continue
             q, y = dong["quy"], dong["nam"]
             ky_hien_thi = f"Quý {q} năm {y}"
             memo = f"Khấu trừ thuế GTGT quý {q} năm {y}"
             if ky_hien_thi in da_co_tk or memo in da_co_glv:
+                ct43_that = _lay_item43_that(ky_hien_thi)
+                if ct43_that is not None:
+                    ct22_hien_tai = ct43_that
                 ket.append({"ky": ky_hien_thi, "trang_thai": "bỏ qua — đã có tờ khai/bút toán quý này"})
                 continue
 
-            ct = dong["chi_tieu"]
+            tu_ngay_sql = datetime.datetime(y, dong["thang_dau"], 1)
+            den_ngay_sql = datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"], 23, 59, 59)
+            ct = _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay_sql, den_ngay_sql)
+            ct["ct22"] = ct22_hien_tai
+            con_lai = ct["ct36"] - ct["ct22"] + ct["ct37"] - ct["ct38"] - ct["ct39a"]
+            ct["ct40a"] = max(con_lai, 0)
+            ct["ct40b"] = 0
+            ct["ct40"] = max(ct["ct40a"] - ct["ct40b"], 0)
+            ct["ct41"] = max(-con_lai, 0)
+            ct["ct42"] = 0
+            ct["ct43"] = max(ct["ct41"] - ct["ct42"], 0)
+
             output_amount = round(_snum(ct.get("ct35")))
             ded_last = round(_snum(ct.get("ct22")))
             ded_this = round(_snum(ct.get("ct25")))
@@ -18548,6 +18542,7 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
 
             da_co_tk.add(ky_hien_thi)
             da_co_glv.add(memo)
+            ct22_hien_tai = ct["ct43"]
             ket.append({"ky": ky_hien_thi, "trang_thai": "sẽ tạo" if preview else "đã tạo",
                        "thue_dau_ra": output_amount, "thue_duoc_khau_tru": deduction_amount,
                        "so_tien_khau_tru": tong_kt, "so_ct_khau_tru": refno_moi})
