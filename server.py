@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.194"
+APP_BUILD = "2026-08-16.195"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17972,6 +17972,53 @@ def misa_sql_chan_doan_gia_tri_moi_nhat_gtgt(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_gia_tri_moi_nhat_gtgt(cid, database)
+
+
+def _misa_chan_doan_appendix_day_du_gtgt(cid, database, ky):
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không ghi gì) — [23]/[24]/[25] (mua vào) đã lưu
+    ĐÚNG số trong TADeclarationDetail và phụ lục BKMV-01-2 cũng tổng đúng,
+    nhưng màn 'Tờ khai' của MISA VẪN hiện 0 dù đã đóng mở lại — không còn
+    là lỗi cache. Lấy TOÀN BỘ cột (không chỉ AppendixID/AppendixTypeID) của
+    MỌI dòng TADeclarationAppendix cho 1 kỳ cụ thể, để so sánh CỘT-VỚI-CỘT
+    giữa 1 tờ khai THẬT đã có sẵn phụ lục hoạt động đúng (vd 'Quý 2 năm
+    2025' trong cùng CSDL này) và tờ khai phần mềm vừa tự ghi — tìm cột nào
+    khác nhau mà trước đó bỏ qua/để mặc định sai."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        hdr = cur.execute(
+            "SELECT RefID FROM TADeclaration WHERE RefType=5005 AND DeclarationTerm=?",
+            ky).fetchone()
+        if not hdr:
+            raise HTTPException(400, f"Không tìm thấy tờ khai với kỳ '{ky}'.")
+        ref_id = hdr[0]
+        cols = [r[0] for r in cur.execute(
+            "SELECT name FROM sys.columns WHERE object_id=OBJECT_ID('TADeclarationAppendix') "
+            "ORDER BY column_id").fetchall()]
+        dong = []
+        if cols:
+            sql = "SELECT [%s] FROM TADeclarationAppendix WHERE RefID=?" % "],[".join(cols)
+            for r in cur.execute(sql, ref_id).fetchall():
+                dong.append({c: (str(v) if v is not None else None) for c, v in zip(cols, r)})
+        return {"database": database, "ky": ky, "ref_id": str(ref_id), "cot": cols, "dong": dong}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, đã dừng an toàn, không ghi/sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-appendix-day-du-gtgt/{cid}")
+def misa_sql_chan_doan_appendix_day_du_gtgt(cid: int, ky: str, database: str = ""):
+    """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_appendix_day_du_gtgt."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    ky = (ky or "").strip()
+    if not ky:
+        raise HTTPException(400, "Thiếu tham số 'ky' (vd 'Quý 2 năm 2025').")
+    return _misa_chan_doan_appendix_day_du_gtgt(cid, database, ky)
 
 
 def _misa_chan_doan_chi_tiet_phu_luc_gtgt(cid, database, ky):

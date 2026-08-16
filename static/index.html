@@ -908,6 +908,7 @@
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanFull()" title="Chỉ xem — sau khi đã đính kèm phụ lục mà tờ khai VẪN hiện số 0, dò TOÀN BỘ tờ khai 01/GTGT trong CSDL: số chỉ tiêu đã ghi, số chỉ tiêu khác 0, số phụ lục đính kèm, số dòng hóa đơn chi tiết trong mỗi phụ lục — so tờ khai phần mềm tự ghi với tờ khai thật để tìm ra chỗ khác nhau">🔬 Chẩn đoán đầy đủ tờ khai GTGT</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanChiTietPhuLuc()" title="Chỉ xem — lấy TOÀN BỘ cột + dòng thật trong 2 bảng chi tiết hóa đơn của phụ lục (TA_011GTGT_Detail bán ra / TA_012GTGT_Detail mua vào) của 1 tờ khai theo Quý/Năm, để học đúng cấu trúc trước khi tự động điền chi tiết từng hóa đơn">🔬 Chẩn đoán chi tiết phụ lục GTGT</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanGiaTriMoiNhat()" title="Chỉ xem — bán ra đã hiện đúng số cả trên phụ lục lẫn Tờ khai, nhưng mua vào chỉ đúng ở Tổng cuối phụ lục còn [23]/[24]/[25] trên Tờ khai vẫn 0; lấy toàn bộ ItemCode/Value đã lưu thật của tờ khai MỚI NHẤT để xem có lưu đúng số hay MISA hiển thị sai">🔬 Chẩn đoán giá trị tờ khai mới nhất</button>
+            <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanAppendixDayDuMo()" title="Chỉ xem — dù đã đóng mở lại vẫn hiện 0, không còn là lỗi cache; lấy TOÀN BỘ cột TADeclarationAppendix (không chỉ AppendixID/AppendixTypeID) của 1 kỳ để so sánh cột-với-cột giữa tờ khai THẬT (phụ lục hoạt động đúng) và tờ khai phần mềm vừa tự ghi">🔬 Chẩn đoán đầy đủ TADeclarationAppendix</button>
           </div>
         </div>
       </div>
@@ -5131,6 +5132,34 @@ async function gtgtChanDoanGiaTriMoiNhat(){
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò tờ khai 01/GTGT MỚI NHẤT (CHỈ ĐỌC, không sửa/ghi gì). Copy toàn bộ nội dung dưới đây gửi lại để tìm chỗ khác nhau giữa bán ra (đã đúng) và mua vào (còn hiện 0 trên Tờ khai).</div>
       <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
       <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function gtgtChanDoanAppendixDayDuMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaModalBody').innerHTML=`
+    <div class="hint" style="margin-bottom:10px">Nhập "Quý/Năm" cần xem TOÀN BỘ cột TADeclarationAppendix. Nên chạy 2 lần: 1 lần với kỳ có tờ khai THẬT (phụ lục hoạt động đúng, vd "Quý 2 năm 2025"), 1 lần với kỳ phần mềm vừa tự ghi (vd "Quý 4 năm 2025") — rồi gửi CẢ 2 kết quả để so sánh cột-với-cột.</div>
+    <label style="font-size:13px;font-weight:600">Kỳ (Quý/Năm)</label>
+    <input type="text" id="gtgtChanDoanApKy" value="Quý 2 năm 2025" placeholder="Quý 2 năm 2025" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#7a4fb5" onclick="gtgtChanDoanAppendixDayDuChay()">Dò dữ liệu</button>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function gtgtChanDoanAppendixDayDuChay(){
+  const ky=(document.getElementById('gtgtChanDoanApKy').value||'').trim();
+  if(!ky){toast('Nhập kỳ (vd Quý 2 năm 2025)','err');return}
+  toast('Đang dò dữ liệu (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-appendix-day-du-gtgt/${current}?ky=${encodeURIComponent(ky)}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò TOÀN BỘ cột TADeclarationAppendix (CHỈ ĐỌC, không sửa/ghi gì). Copy toàn bộ nội dung dưới đây gửi lại — nhớ chạy thêm 1 lần với kỳ còn lại để so sánh.</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="gtgtChanDoanAppendixDayDuMo()">← Dò kỳ khác</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
