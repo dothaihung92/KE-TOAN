@@ -907,6 +907,7 @@
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanAppendixType()" title="Chỉ xem — tờ khai vừa ghi hiện toàn số 0 vì thiếu đánh dấu phụ lục BKBR-01-1/BKMV-01-2 đính kèm; dò đúng AppendixTypeID (GUID) của 2 phụ lục này từ dữ liệu thật để sửa">🔬 Chẩn đoán mã phụ lục GTGT</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanFull()" title="Chỉ xem — sau khi đã đính kèm phụ lục mà tờ khai VẪN hiện số 0, dò TOÀN BỘ tờ khai 01/GTGT trong CSDL: số chỉ tiêu đã ghi, số chỉ tiêu khác 0, số phụ lục đính kèm, số dòng hóa đơn chi tiết trong mỗi phụ lục — so tờ khai phần mềm tự ghi với tờ khai thật để tìm ra chỗ khác nhau">🔬 Chẩn đoán đầy đủ tờ khai GTGT</button>
             <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanChiTietPhuLuc()" title="Chỉ xem — lấy TOÀN BỘ cột + dòng thật trong 2 bảng chi tiết hóa đơn của phụ lục (TA_011GTGT_Detail bán ra / TA_012GTGT_Detail mua vào) của 1 tờ khai theo Quý/Năm, để học đúng cấu trúc trước khi tự động điền chi tiết từng hóa đơn">🔬 Chẩn đoán chi tiết phụ lục GTGT</button>
+            <button class="btn ghost sm" style="color:#666" onclick="gtgtChanDoanGiaTriMoiNhat()" title="Chỉ xem — bán ra đã hiện đúng số cả trên phụ lục lẫn Tờ khai, nhưng mua vào chỉ đúng ở Tổng cuối phụ lục còn [23]/[24]/[25] trên Tờ khai vẫn 0; lấy toàn bộ ItemCode/Value đã lưu thật của tờ khai MỚI NHẤT để xem có lưu đúng số hay MISA hiển thị sai">🔬 Chẩn đoán giá trị tờ khai mới nhất</button>
           </div>
         </div>
       </div>
@@ -5121,6 +5122,20 @@ async function gtgtChanDoanChiTietPhuLucChay(){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function gtgtChanDoanChiTietPhuLuc(){gtgtChanDoanChiTietPhuLucMo()}
+async function gtgtChanDoanGiaTriMoiNhat(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang dò dữ liệu (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-gia-tri-moi-nhat-gtgt/${current}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò tờ khai 01/GTGT MỚI NHẤT (CHỈ ĐỌC, không sửa/ghi gì). Copy toàn bộ nội dung dưới đây gửi lại để tìm chỗ khác nhau giữa bán ra (đã đúng) và mua vào (còn hiện 0 trên Tờ khai).</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
 function toKhaiKhauTruGtgtMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   const namNay=new Date().getFullYear();

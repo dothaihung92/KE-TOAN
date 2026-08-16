@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.193"
+APP_BUILD = "2026-08-16.194"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17905,6 +17905,73 @@ def misa_sql_chan_doan_to_khai_gtgt_full(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_to_khai_gtgt_full(cid, database)
+
+
+def _misa_chan_doan_gia_tri_moi_nhat_gtgt(cid, database):
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không ghi gì) — bán ra (BKBR-01-1) đã hiện đúng số
+    trên cả phụ lục lẫn màn "Tờ khai" ([27]/[28]...), nhưng mua vào
+    (BKMV-01-2) chỉ đúng số ở TỔNG cuối phụ lục — màn "Tờ khai" [23]/[24]/
+    [25] vẫn hiện 0. Lấy TOÀN BỘ ItemCode/Value đã lưu thật trong
+    TADeclarationDetail của tờ khai 01/GTGT MỚI NHẤT (theo CreatedDate) để
+    xem [23]/[24]/[25] có thật sự lưu đúng số hay MISA chỉ hiển thị sai
+    (đọc lệch bảng nào đó khi vẽ màn hình)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        hdr = cur.execute(
+            "SELECT TOP 1 RefID, DeclarationTerm, CreatedDate FROM TADeclaration "
+            "WHERE RefType=5005 ORDER BY CreatedDate DESC").fetchone()
+        if not hdr:
+            raise HTTPException(400, "Không tìm thấy tờ khai 01/GTGT nào.")
+        ref_id, ky, created = hdr
+        items = cur.execute(
+            "SELECT ItemCode, Value FROM TADeclarationDetail WHERE RefID=? ORDER BY ItemCode",
+            ref_id).fetchall()
+        appendix_rows = cur.execute(
+            "SELECT AppendixID, AppendixTypeID FROM TADeclarationAppendix WHERE RefID=?",
+            ref_id).fetchall()
+        phu_luc = []
+        for appendix_id, appendix_type_id in appendix_rows:
+            try:
+                n_banra = cur.execute(
+                    "SELECT COUNT(*), ISNULL(SUM(TurnOverAmount),0), ISNULL(SUM(TaxAmount),0) "
+                    "FROM TA_011GTGT_Detail WHERE AppendixID=?", appendix_id).fetchone()
+            except Exception:
+                n_banra = (0, 0, 0)
+            try:
+                n_muavao = cur.execute(
+                    "SELECT COUNT(*), ISNULL(SUM(TurnOverAmount),0), ISNULL(SUM(TaxAmount),0) "
+                    "FROM TA_012GTGT_Detail WHERE AppendixID=?", appendix_id).fetchone()
+            except Exception:
+                n_muavao = (0, 0, 0)
+            phu_luc.append({
+                "AppendixID": str(appendix_id), "AppendixTypeID": str(appendix_type_id),
+                "so_dong_ban_ra": n_banra[0], "tong_doanh_thu_ban_ra": _snum(n_banra[1]),
+                "tong_thue_ban_ra": _snum(n_banra[2]),
+                "so_dong_mua_vao": n_muavao[0], "tong_gia_tri_mua_vao": _snum(n_muavao[1]),
+                "tong_thue_mua_vao": _snum(n_muavao[2]),
+            })
+        return {
+            "database": database, "ky": ky, "ref_id": str(ref_id),
+            "created": str(created) if created else None,
+            "chi_tieu": [{"ItemCode": ic, "Value": v} for ic, v in items],
+            "phu_luc": phu_luc,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, đã dừng an toàn, không ghi/sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-gia-tri-moi-nhat-gtgt/{cid}")
+def misa_sql_chan_doan_gia_tri_moi_nhat_gtgt(cid: int, database: str = ""):
+    """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_gia_tri_moi_nhat_gtgt."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_gia_tri_moi_nhat_gtgt(cid, database)
 
 
 def _misa_chan_doan_chi_tiet_phu_luc_gtgt(cid, database, ky):
