@@ -3833,7 +3833,8 @@ async function luuCaHaiBangKe(){
 /* ----- XUẤT KHO ----- */
 let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1;
 const XK_HEADERS=['Tồn kho','Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
-                   'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho'];
+                   'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho',
+                   'Lợi nhuận','Tỷ lệ % Lãi/Lỗ'];
 function xkEsc(s){return String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function moXuatKho(){
   if(!current){toast('Chọn công ty trước','err');return}
@@ -4278,8 +4279,16 @@ function xkRowsToNl(){
       daDung[ma]=(daDung[ma]||0)+(nlParseSo(r.sl)||0);
       ton=String(tonMap[ma]-daDung[ma]);   // ép chuỗi: tránh số 0 hiện thành ô trống (0 là falsy)
     }
+    // Lợi nhuận = Thành tiền BÁN - Thành tiền XUẤT KHO (giá vốn); chỉ tính
+    // được khi đã có đủ cả 2 vế, và Tỷ lệ % lãi/lỗ tính trên doanh thu BÁN.
+    const banN=typeof r.tt==='number'?r.tt:parseFloat(r.tt);
+    let loiNhuan='', tyLe='';
+    if(!isNaN(banN)&&ttKho!==''){
+      loiNhuan=Math.round(banN-ttKho);
+      tyLe=banN?((loiNhuan/banN*100).toFixed(1)+'%'):'';
+    }
     return [ton, r.sohd||'', r.ngay||'', r.ten_sp||'', r.dvt||'', r.sl??'', r.dgia??'', r.tt??'',
-            r.ma||'', r.ten_xk||'', r.dvt_xk||'', slKho??'', giaKho??'', ttKho];
+            r.ma||'', r.ten_xk||'', r.dvt_xk||'', slKho??'', giaKho??'', ttKho, loiNhuan, tyLe];
   });
 }
 // gộp thay đổi tay trong lưới (nlRows) trở lại xkRows, giữ goi_y theo vị trí dòng.
@@ -5535,7 +5544,8 @@ function nlLaCotTien(idx){
   const t=String(nlHeader[idx]||'').toLowerCase();
   return t.includes('doanh số')||t.includes('thành tiền')||t.includes('thuế gtgt')||
          t.includes('chưa thuế')||t.includes('chưa vat')||t.includes('tiền thuế')||
-         t.includes('thuế nk')||t.includes('trị giá')||t.includes('tổng')||t.includes('đơn giá');
+         t.includes('thuế nk')||t.includes('trị giá')||t.includes('tổng')||t.includes('đơn giá')||
+         t.includes('lợi nhuận');
 }
 function nlParseSo(v){
   if(typeof v==='number')return v;
