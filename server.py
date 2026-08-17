@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.216"
+APP_BUILD = "2026-08-16.217"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6612,8 +6612,10 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
         try:
             so_lech_ban = int(resp_excel.headers.get("X-So-Lech-Ban", "0"))
             so_lech_mua = int(resp_excel.headers.get("X-So-Lech-Mua", "0"))
+            so_ts_lech_ban = int(resp_excel.headers.get("X-So-Ts-Lech-Ban", "0"))
+            so_ts_lech_mua = int(resp_excel.headers.get("X-So-Ts-Lech-Mua", "0"))
         except Exception:
-            so_lech_ban = so_lech_mua = 0
+            so_lech_ban = so_lech_mua = so_ts_lech_ban = so_ts_lech_mua = 0
         da_kiem_tra_doi_chieu = True
         if so_lech_ban or so_lech_mua:
             lech_doi_chieu_found = True
@@ -6628,6 +6630,24 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
                     f"'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet Đối chiếu).")
             cac_dong_lech.append(dong)
             msg(stage="warn", text=dong,
+                total_saved=total_saved, file_saved=file_saved,
+                file_thieu=file_thieu_tong,
+                tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
+                tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
+                loi_tra_cuu=co_loi, lech_doi_chieu=True)
+        if so_ts_lech_ban or so_ts_lech_mua:
+            lech_doi_chieu_found = True
+            ve_ts = []
+            if so_ts_lech_ban:
+                ve_ts.append(f"bán ra {so_ts_lech_ban}")
+            if so_ts_lech_mua:
+                ve_ts.append(f"mua vào {so_ts_lech_mua}")
+            dong_ts = (f"⚠ Sheet 'Đối chiếu' phát hiện {so_ts_lech_ban + so_ts_lech_mua} dòng hàng "
+                      f"({', '.join(ve_ts)}) có nhãn Thuế suất KHÔNG khớp Tiền thuế thật (thường do "
+                      f"hóa đơn giảm thuế NĐ44) — mục 'DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ' trong "
+                      f"sheet Đối chiếu.")
+            cac_dong_lech.append(dong_ts)
+            msg(stage="warn", text=dong_ts,
                 total_saved=total_saved, file_saved=file_saved,
                 file_thieu=file_thieu_tong,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
@@ -23598,6 +23618,15 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
 
     # Lưu tổng theo từng hóa đơn (để đối chiếu việc 4)
     ct_totals = {"purchase": {}, "sold": {}}
+    # Dòng hàng có nhãn "Thuế suất" KHÔNG khớp với "Tiền thuế GTGT" thật của
+    # hóa đơn (vd nhãn ghi 10% nhưng tiền thuế lại tính theo 8% — thường do
+    # hóa đơn được giảm thuế theo Nghị định 44 mà trường thuế suất trên XML
+    # vẫn ghi mức thuế suất DANH NGHĨA, không đồng bộ với tiền thuế ĐÃ GIẢM
+    # thực tế) — ghi nhận riêng để cảnh báo ở sheet Đối chiếu, vì kiểm tra
+    # theo TỔNG hóa đơn (Chi tiết vs Bảng kê) không phát hiện được loại lệch
+    # này (2 sheet vẫn CỘNG RA cùng 1 số tiền thuế, chỉ có NHÃN % hiển thị là
+    # sai/gây hiểu nhầm khi tra cứu theo nhóm thuế suất).
+    ts_lech_list = {"purchase": [], "sold": []}
 
     def phan_bo_chiet_khau(items, tgtcthue_hd=None):
         """Xử lý dòng hàng hóa đơn MUA VÀO — gồm CÁC LOẠI CHIẾT KHẤU THƯƠNG MẠI:
@@ -24132,6 +24161,21 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
                 cur["ds"] += ds if isinstance(ds, (int, float)) else 0
                 cur["thue"] += d["tien_thue"] if isinstance(d["tien_thue"], (int, float)) else 0
+                # đối chiếu nhãn "Thuế suất" với "Tiền thuế" THẬT của chính
+                # dòng này — lệch quá 0.5% Thành tiền (và > 10đ, tránh nhiễu
+                # làm tròn) thường là dấu hiệu hóa đơn giảm thuế NĐ44 (nhãn
+                # ghi thuế suất danh nghĩa nhưng tiền thuế đã tính theo mức
+                # giảm thực tế) hoặc dữ liệu hóa đơn có vấn đề khác.
+                rate_ts = _parse_thue_suat(d["ts_hien"])
+                if rate_ts and isinstance(ds, (int, float)) and isinstance(d["tien_thue"], (int, float)):
+                    ky_vong = round(ds * rate_ts)
+                    lech_ts = d["tien_thue"] - ky_vong
+                    if abs(lech_ts) > max(10, abs(ds) * 0.005):
+                        ts_lech_list[loai].append({
+                            "kh": r["khhdon"], "shd": r["shdon"], "ten": d["ten"],
+                            "ds": ds, "ts_hien": d["ts_hien"], "tien_thue": d["tien_thue"],
+                            "ky_vong": ky_vong, "lech": lech_ts,
+                            "ts_thuc_te": round((d["tien_thue"] / ds) * 100, 2) if ds else None})
 
         # ===== TỜ KHAI NHẬP KHẨU (chỉ cho MUA VÀO) =====
         if loai == "purchase":
@@ -24663,6 +24707,43 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     so_lech_ban = them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - BÁN RA (kiểm tra & điều chỉnh):", "sold")
     so_lech_mua = them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - MUA VÀO (kiểm tra & điều chỉnh):", "purchase")
 
+    # ===== DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ (kiểm tra riêng theo TỪNG
+    # DÒNG HÀNG, khác với "CHI TIẾT HÓA ĐƠN LỆCH" ở trên vốn chỉ so TỔNG cả
+    # hóa đơn — 1 dòng có nhãn thuế suất sai nhưng tiền thuế vẫn cộng đúng
+    # vào tổng hóa đơn (vd hóa đơn giảm thuế NĐ44: nhãn ghi 10% nhưng tiền
+    # thuế tính theo 8%) sẽ KHÔNG bị "CHI TIẾT HÓA ĐƠN LỆCH" phát hiện, vì
+    # tổng vẫn khớp — chỉ có nhãn % hiển thị/nhóm ở 'BK Bán ra'/'BK Mua vào'
+    # là sai) =====
+    def them_ds_lech_thue_suat(tieu_de, loai):
+        ds_lech = ts_lech_list[loai]
+        ws.append([])
+        ws.append([tieu_de])
+        ws.cell(ws.max_row, 1).font = Font(bold=True, size=11, color="C00000")
+        if not ds_lech:
+            ws.append(["", "✓ Không có dòng hàng nào lệch nhãn thuế suất"])
+            ws.cell(ws.max_row, 2).font = Font(color="1F6B4A")
+            return 0
+        ws.append(["Ký hiệu", "Số HĐ", "Tên hàng", "Thành tiền", "Thuế suất ghi trên HĐ",
+                   "Tiền thuế THẬT", "Tiền thuế nếu đúng nhãn", "Lệch", "Thuế suất thực tế (%)"])
+        hr = ws.max_row
+        for c in range(1, 10):
+            ws.cell(hr, c).font = Font(bold=True, color="FFFFFF")
+            ws.cell(hr, c).fill = PatternFill("solid", fgColor="C0392B")
+        for it in ds_lech:
+            ws.append([it["kh"], it["shd"], it["ten"], it["ds"], it["ts_hien"],
+                      it["tien_thue"], it["ky_vong"], it["lech"], it["ts_thuc_te"]])
+            rr = ws.max_row
+            for c in range(1, 10):
+                ws.cell(rr, c).font = Font(color="C00000")
+                if c in (4, 6, 7, 8):
+                    ws.cell(rr, c).number_format = "#,##0"
+        return len(ds_lech)
+
+    so_ts_lech_ban = them_ds_lech_thue_suat(
+        "DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ - BÁN RA (nhãn % có thể sai do NĐ44 hoặc lỗi dữ liệu):", "sold")
+    so_ts_lech_mua = them_ds_lech_thue_suat(
+        "DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ - MUA VÀO (nhãn % có thể sai do NĐ44 hoặc lỗi dữ liệu):", "purchase")
+
     # định dạng số cột C và F (kể cả ô công thức SUMIF/SUM ra số lẻ)
     for r in range(1, ws.max_row + 1):
         for cc in (3, 6):
@@ -24815,6 +24896,12 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # dùng đi kiểm tra lại, không phải tự mở từng file Excel ra xem mới biết.
     extra_headers["X-So-Lech-Ban"] = str(so_lech_ban)
     extra_headers["X-So-Lech-Mua"] = str(so_lech_mua)
+    # Số DÒNG HÀNG có nhãn "Thuế suất" không khớp "Tiền thuế" thật (thường do
+    # NĐ44) — kiểm tra RIÊNG với "X-So-Lech-*" ở trên: loại lệch này không lộ
+    # ra khi so TỔNG cả hóa đơn (Chi tiết vs Bảng kê vẫn cộng ra cùng 1 số
+    # tiền thuế), chỉ lộ khi so từng dòng hàng với chính nhãn % của nó.
+    extra_headers["X-So-Ts-Lech-Ban"] = str(so_ts_lech_ban)
+    extra_headers["X-So-Ts-Lech-Mua"] = str(so_ts_lech_mua)
     # LƯU LẠI cảnh báo vào công ty (không mất khi toast tự tắt/tải lại
     # trang) — TRƯỚC ĐÂY chỉ nút "Xuất Excel" đơn lẻ (không qua tra cứu
     # hàng loạt) HOÀN TOÀN không báo gì cho người dùng biết có hóa đơn lệch,
@@ -24831,6 +24918,17 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                  f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) giữa Chi tiết và "
                  f"Bảng kê — hãy mở file kiểm tra lại kỹ (mục 'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet "
                  f"Đối chiếu).")
+    if so_ts_lech_ban or so_ts_lech_mua:
+        ve_ts = []
+        if so_ts_lech_ban:
+            ve_ts.append(f"bán ra {so_ts_lech_ban}")
+        if so_ts_lech_mua:
+            ve_ts.append(f"mua vào {so_ts_lech_mua}")
+        _luu_loi_tra_cuu(
+            cid, f"⚠ Sheet 'Đối chiếu' phát hiện {so_ts_lech_ban + so_ts_lech_mua} dòng hàng "
+                 f"({', '.join(ve_ts)}) có nhãn Thuế suất KHÔNG khớp Tiền thuế thật (thường do hóa "
+                 f"đơn giảm thuế NĐ44) — hãy mở file kiểm tra mục 'DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN "
+                 f"THUẾ' trong sheet Đối chiếu.")
     return _resp_xuat(path, fname_x, extra=extra_headers)
 
 
