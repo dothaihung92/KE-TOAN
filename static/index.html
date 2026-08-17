@@ -4570,7 +4570,11 @@ function xkTonConLaiMap(boQuaIdx){
   xkRows.forEach((r,i)=>{
     if(i===boQuaIdx)return;
     const ma=String(r.ma||'').trim();
-    if(ma && (ma in map))map[ma]-=(Number(r.sl)||0);
+    // trừ theo SL KHO thật (fallback SL bán nếu trống) — KHÔNG lấy thẳng SL
+    // bán, để nhất quán với mọi chỗ tính tồn khác (xkRowsToNl/xkTongKet) và
+    // với cả dòng đã bị tách/sửa tay có SL kho khác SL bán.
+    const slKho=(r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl;
+    if(ma && (ma in map))map[ma]-=(nlParseSo(slKho)||0);
   });
   return map;
 }
