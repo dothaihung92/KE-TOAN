@@ -36,7 +36,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.214"
+APP_BUILD = "2026-08-16.215"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11903,12 +11903,17 @@ def xk_tao_giathanh(cid: int):
 
 @app.post("/api/xk/go-ma/{cid}")
 def xk_go_ma(cid: int):
-    """Gỡ (xoá trắng) TOÀN BỘ Mã hàng kho đã gán trên GIATHANH — GIỮ NGUYÊN
-    Tên hàng xuất kho/ĐVT kho/SL kho/Đơn giá kho (kể cả giá vốn thật lấy từ
-    tờ khai xuất khẩu, không mất). Dùng khi dữ liệu cũ đã lỡ gán mã vượt tồn
-    (tồn kho âm) do lỗi thuật toán TRƯỚC ĐÂY của "Dò mã hàng tự động" — gỡ
-    xong bấm "Dò mã hàng tự động" lại để gán lại sạch, đúng theo công thức
-    ĐÃ SỬA (không cho phép tồn kho âm)."""
+    """Gỡ (xoá trắng) TOÀN BỘ Mã hàng kho đã gán trên GIATHANH. Với dòng
+    khoa_tokhai=True (giá vốn THẬT lấy từ tờ khai xuất khẩu) — GIỮ NGUYÊN
+    Tên hàng xuất kho/ĐVT kho/SL kho/Đơn giá kho, chỉ gỡ mã. Với các dòng
+    CÒN LẠI (khớp mã qua Tồn kho, không phải dữ liệu thật từ tờ khai) — gỡ
+    TRẮNG LUÔN cả Tên hàng xuất kho/ĐVT kho/SL kho/Đơn giá kho, không chỉ mã:
+    đã xác nhận qua báo cáo thật — chỉ gỡ mã mà GIỮ NGUYÊN 'SL kho' cũ vẫn
+    khiến lần dò mã tiếp theo dùng lại đúng con số 'SL kho' có thể đã bị lệch
+    khỏi 'Số lượng' bán thật (dữ liệu cũ qua nhiều lần gán/tách trước đây) —
+    xuất kho vẫn vượt tồn dù mã mới gán ra đúng thuật toán. Gỡ sạch cả 2 để
+    'Dò mã hàng tự động' tính lại HOÀN TOÀN từ 'Số lượng' bán gốc (đáng tin
+    cậy) + Tồn kho hiện có, không kế thừa dữ liệu kho cũ có thể đã sai."""
     data = _doc_du_lieu_cty(cid)
     giathanh = data.get("xk_giathanh") or []
     if not giathanh:
@@ -11916,6 +11921,8 @@ def xk_go_ma(cid: int):
     so_go = sum(1 for r in giathanh if str(r.get("ma") or "").strip())
     for r in giathanh:
         r["ma"] = ""
+        if not r.get("khoa_tokhai"):
+            r["ten_xk"] = ""; r["dvt_xk"] = ""; r["gia_xk"] = ""; r["sl_kho"] = ""
     data["xk_giathanh"] = giathanh
     _ghi_du_lieu_cty(cid, data)
     return {"ok": True, "so_dong": len(giathanh), "so_go": so_go}
