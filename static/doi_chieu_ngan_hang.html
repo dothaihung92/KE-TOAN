@@ -1375,10 +1375,13 @@ async function exportUNT(rows, coName, bankAcct, accountNo, bankName, showToast,
       // NGUYÊN VĂN tên đang gõ trong ô "Nhà cung cấp/Khách hàng" của tờ khai đã gắn tại THỜI ĐIỂM
       // XUẤT (không dùng bản chụp cũ r.confirmedName lúc gắn). Chỉ dùng "KL" (mã hệ thống MISA cố
       // định = "Khách lẻ không lấy hoá đơn") làm mặc định khi THẬT SỰ không có tên nào khác — không
-      // dùng cho giao dịch chuyển khoản nội bộ (r.isInternal).
+      // dùng cho giao dịch chuyển khoản nội bộ (r.isInternal) hoặc gắn "[TM] Tiền
+      // Mặt" (r.isCash) — cả 2 đều không có đối tượng công nợ thật, để trống
+      // thay vì điền chữ "Nội bộ"/"Tiền mặt" (sai bản chất, MISA hiểu nhầm
+      // thành tên khách hàng/NCC).
       const linkedTk = r.confirmedToKhaiId ? (tokhaiList || []).find(t => t.id === r.confirmedToKhaiId) : null;
-      const objectName = r.isInternal ? "" : ((linkedTk && linkedTk.nhaCungCap) || r.confirmedName || "");
-      const maDoiTuong = r.confirmedMST || objectName || (hach === "131" && !r.isInternal ? "KL" : "");
+      const objectName = (r.isInternal || r.isCash) ? "" : ((linkedTk && linkedTk.nhaCungCap) || r.confirmedName || "");
+      const maDoiTuong = r.confirmedMST || objectName || (hach === "131" && !r.isInternal && !r.isCash ? "KL" : "");
       // Số tiền dùng để ghi sổ: nếu là TK USD và đã lấy được tỷ giá → dùng số VND đã quy đổi; nếu là
       // TK USD nhưng KHÔNG lấy được tỷ giá (lỗi mạng/không có dữ liệu ngày đó) → vẫn giữ số USD gốc
       // và cảnh báo cuối cùng để người dùng tự bổ sung tỷ giá, tránh xuất thiếu dòng.
@@ -1496,8 +1499,10 @@ async function exportUNC(rows, coName, bankAcct, accountNo, bankName, showToast,
       // NHƯNG giao dịch chuyển khoản NỘI BỘ (r.isInternal, confirmedName lúc này chỉ là nhãn tự sinh
       // "⇔ Nội bộ – Chuyển sang/Nhận từ..." chứ không phải tên đối tác thật) thì KHÔNG được điền vào
       // Mã đối tượng/Tên đối tượng — để trống, đúng bản chất là chuyển tiền giữa các TK của mình.
+      // Tương tự, gắn "[TM] Tiền Mặt" (r.isCash) cũng không có đối tượng công nợ
+      // thật — để trống thay vì điền chữ "Tiền mặt" (MISA hiểu nhầm thành tên NCC).
       const linkedTk = r.confirmedToKhaiId ? (tokhaiList || []).find(t => t.id === r.confirmedToKhaiId) : null;
-      const objectName = r.isInternal ? "" : ((linkedTk && linkedTk.nhaCungCap) || r.confirmedName || "");
+      const objectName = (r.isInternal || r.isCash) ? "" : ((linkedTk && linkedTk.nhaCungCap) || r.confirmedName || "");
       const maDoiTuong = r.confirmedMST || objectName;
       // Số tiền dùng để ghi sổ: nếu là TK USD và đã lấy được tỷ giá → dùng số VND đã quy đổi; nếu là
       // TK USD nhưng KHÔNG lấy được tỷ giá (lỗi mạng/không có dữ liệu ngày đó) → vẫn giữ số USD gốc
@@ -4212,6 +4217,12 @@ function ConfirmScreen({
     ...r.invMatches[0]
   } : null);
   const overrideRow = (id, mst, name, kw, hach) => {
+    // nút "[TM] Tiền Mặt" gọi onOverride(id,"","Tiền mặt","","1111") — đánh dấu
+    // riêng để khi xuất Excel KHÔNG điền chữ "Tiền mặt" vào Mã đối tượng/Tên đối
+    // tượng (giống cách xử lý giao dịch nội bộ r.isInternal), vì "1111" (tiền
+    // mặt tại quỹ) không có đối tượng công nợ thật, điền chữ "Tiền mặt" vào đó
+    // là sai bản chất và khiến MISA hiểu nhầm thành 1 khách hàng/NCC tên "Tiền mặt".
+    const isCash = hach === "1111" && name === "Tiền mặt" && !mst;
     setRowsH(prev => prev.map(r => {
       if (r.id !== id) return r;
       return {
@@ -4222,7 +4233,8 @@ function ConfirmScreen({
         confirmedLoai: r.tx.credit > 0 ? "DAURA" : "DAUVAO",
         manualConfirm: true,
         manualKw: kw || "",
-        confirmedHach: hach || (r.tx.debit > 0 ? "331" : "131")
+        confirmedHach: hach || (r.tx.debit > 0 ? "331" : "131"),
+        isCash
       };
     }));
     if (kw && kw.trim().length >= 3) {
