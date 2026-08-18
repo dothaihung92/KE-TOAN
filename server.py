@@ -7,9 +7,11 @@
 """
 import os
 import io
+import hmac
 import json
 import time
 import base64
+import hashlib
 import sqlite3
 import zipfile
 import calendar
@@ -36,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.218"
+APP_BUILD = "2026-08-16.219"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25864,6 +25866,265 @@ async def mo_cua_so_app(request: Request):
         raise HTTPException(400, "Đường dẫn không hợp lệ")
     url = str(request.base_url).rstrip("/") + duong_dan
     threading.Thread(target=_mo_cua_so_app, args=(url,), daemon=True).start()
+    return {"ok": True}
+
+
+# ============================================================
+# TÍCH HỢP SÀN THƯƠNG MẠI ĐIỆN TỬ (Shopee / Lazada / TikTok Shop)
+#  - Kết nối OAuth để lấy đơn hàng bán ra từ sàn, dùng làm nguồn "Chi tiết
+#    BÁN RA"/Xuất Kho (giống hệt cách "Import tờ khai xuất khẩu" đang làm).
+#  - App Key/Secret + access/refresh token lưu trong data công ty (JSON
+#    riêng từng công ty qua _doc_du_lieu_cty/_ghi_du_lieu_cty) — KHÔNG mã
+#    hoá, đúng quy ước bảo mật hiện có của phần mềm này (chạy cục bộ trên
+#    máy người dùng, ổ đĩa là ranh giới bảo mật — giống mật khẩu SQL MISA
+#    cũng lưu thẳng trong bảng companies).
+#  - redirect_uri CỐ ĐỊNH dùng cổng 8686 (find_free_port ưu tiên cổng này
+#    khi khởi động — xem __main__ bên dưới) — khi đăng ký App ở sàn, khai
+#    callback ĐÚNG các URL trong TMDT_CAU_HINH bên dưới.
+#  - CẢNH BÁO: URL/tham số API của Shopee/Lazada/TikTok Shop THAY ĐỔI theo
+#    thời gian và khác nhau theo khu vực (đặc biệt TikTok Shop) — code dưới
+#    đây viết theo tài liệu công khai tại thời điểm viết, CHƯA được test với
+#    tài khoản thật (không có sẵn App Key/Secret để test). Khi kết nối thật
+#    lần đầu mà lỗi, xem message lỗi trả về nguyên văn từ sàn (đã cố tình
+#    KHÔNG nuốt lỗi) để sửa lại đúng theo tài liệu/phản hồi thật.
+# ============================================================
+TMDT_CONG_MAC_DINH = 8686
+
+TMDT_CAU_HINH = {
+    "shopee": {
+        "ten": "Shopee",
+        "nhan_app_key": "Partner ID",
+        "nhan_app_secret": "Partner Key",
+        "trang_dang_ky": "https://open.shopee.com",
+    },
+    "lazada": {
+        "ten": "Lazada",
+        "nhan_app_key": "App Key",
+        "nhan_app_secret": "App Secret",
+        "trang_dang_ky": "https://open.lazada.com",
+    },
+    "tiktok": {
+        "ten": "TikTok Shop",
+        "nhan_app_key": "App Key",
+        "nhan_app_secret": "App Secret",
+        "trang_dang_ky": "https://partner.tiktokshop.com",
+    },
+}
+
+# cid đang chờ callback OAuth, theo từng sàn — phần mềm chạy 1 phiên/1 máy
+# nên dùng biến nhớ tạm ở server thay vì phải nhờ sàn vòng lại đúng "state"
+# (Shopee đặc biệt không có tham số state chuẩn OAuth2 như Lazada/TikTok).
+_TMDT_DANG_KET_NOI = {}
+
+
+def _tmdt_redirect_uri(san):
+    return f"http://127.0.0.1:{TMDT_CONG_MAC_DINH}/api/tmdt/{san}/callback"
+
+
+def _tmdt_du_lieu(cid):
+    data = _doc_du_lieu_cty(cid)
+    tmdt = data.setdefault("tmdt", {})
+    return data, tmdt
+
+
+def _tmdt_cfg_san(cid, san):
+    _, tmdt = _tmdt_du_lieu(cid)
+    return tmdt.get(san) or {}
+
+
+# ----- Shopee (Partner API v2) -----
+def _shopee_ky(partner_key, chuoi_goc):
+    return hmac.new(partner_key.encode(), chuoi_goc.encode(), hashlib.sha256).hexdigest()
+
+
+def _shopee_url_uy_quyen(cfg, redirect_uri):
+    partner_id = str(cfg["app_key"]).strip()
+    partner_key = str(cfg["app_secret"]).strip()
+    ts = int(time.time())
+    path = "/api/v2/shop/auth_partner"
+    sign = _shopee_ky(partner_key, f"{partner_id}{path}{ts}")
+    return (f"https://partner.shopeemobile.com{path}?partner_id={partner_id}"
+            f"&redirect={requests.utils.quote(redirect_uri, safe='')}&timestamp={ts}&sign={sign}")
+
+
+def _shopee_doi_token(cfg, code, shop_id):
+    partner_id = str(cfg["app_key"]).strip()
+    partner_key = str(cfg["app_secret"]).strip()
+    ts = int(time.time())
+    path = "/api/v2/auth/token/get"
+    sign = _shopee_ky(partner_key, f"{partner_id}{path}{ts}")
+    url = f"https://partner.shopeemobile.com{path}?partner_id={partner_id}&timestamp={ts}&sign={sign}"
+    body = {"code": code, "shop_id": int(shop_id), "partner_id": int(partner_id)}
+    r = requests.post(url, json=body, timeout=20)
+    return r.json()
+
+
+# ----- Lazada (Open Platform) -----
+def _lazada_ky(app_secret, api_path, params):
+    concat = api_path + "".join(f"{k}{v}" for k, v in sorted(params.items()))
+    return hmac.new(app_secret.encode(), concat.encode(), hashlib.sha256).hexdigest().upper()
+
+
+def _lazada_url_uy_quyen(cfg, redirect_uri):
+    app_key = str(cfg["app_key"]).strip()
+    return (f"https://auth.lazada.com/oauth/authorize?response_type=code&force_auth=true"
+            f"&redirect_uri={requests.utils.quote(redirect_uri, safe='')}&client_id={app_key}")
+
+
+def _lazada_doi_token(cfg, code):
+    app_key = str(cfg["app_key"]).strip()
+    app_secret = str(cfg["app_secret"]).strip()
+    path = "/auth/token/create"
+    ts = str(int(time.time() * 1000))
+    params = {"app_key": app_key, "code": code, "sign_method": "sha256", "timestamp": ts}
+    params["sign"] = _lazada_ky(app_secret, path, params)
+    r = requests.get(f"https://auth.lazada.com/rest{path}", params=params, timeout=20)
+    return r.json()
+
+
+# ----- TikTok Shop (Partner Center) -----
+# CẢNH BÁO RIÊNG: domain/luồng OAuth TikTok Shop khác nhau theo khu vực
+# (Global/US dùng auth.tiktok-shops.com, 1 số khu vực cũ dùng
+# services.tiktokshop.com) — cần đối chiếu lại đúng tài liệu ứng với tài
+# khoản Partner Center thật của bạn, rất có thể phải sửa lại URL dưới đây.
+def _tiktok_url_uy_quyen(cfg, redirect_uri):
+    app_key = str(cfg["app_key"]).strip()
+    return (f"https://auth.tiktok-shops.com/oauth/authorize?app_key={app_key}"
+            f"&redirect_uri={requests.utils.quote(redirect_uri, safe='')}")
+
+
+def _tiktok_doi_token(cfg, code):
+    app_key = str(cfg["app_key"]).strip()
+    app_secret = str(cfg["app_secret"]).strip()
+    url = "https://auth.tiktok-shops.com/api/v2/token/get"
+    params = {"app_key": app_key, "app_secret": app_secret,
+              "auth_code": code, "grant_type": "authorized_code"}
+    r = requests.get(url, params=params, timeout=20)
+    return r.json()
+
+
+_TMDT_HAM = {
+    "shopee": {"url": _shopee_url_uy_quyen, "doi_token": _shopee_doi_token},
+    "lazada": {"url": _lazada_url_uy_quyen, "doi_token": _lazada_doi_token},
+    "tiktok": {"url": _tiktok_url_uy_quyen, "doi_token": _tiktok_doi_token},
+}
+
+
+@app.get("/api/tmdt/trang-thai/{cid}")
+def tmdt_trang_thai(cid: int):
+    """Trạng thái kết nối cả 3 sàn cho 1 công ty — KHÔNG trả app_secret/token
+    thật ra ngoài, chỉ báo có/chưa để hiện đúng giao diện."""
+    _, tmdt = _tmdt_du_lieu(cid)
+    ket_qua = {}
+    for san, meta in TMDT_CAU_HINH.items():
+        cfg = tmdt.get(san) or {}
+        ket_qua[san] = {
+            "ten": meta["ten"],
+            "co_app": bool(cfg.get("app_key") and cfg.get("app_secret")),
+            "da_ket_noi": bool(cfg.get("access_token")),
+            "shop_id": cfg.get("shop_id", ""),
+            "shop_name": cfg.get("shop_name", ""),
+            "ket_noi_luc": cfg.get("ket_noi_luc", ""),
+        }
+    return ket_qua
+
+
+@app.post("/api/tmdt/{san}/luu-app/{cid}")
+async def tmdt_luu_app(san: str, cid: int, request: Request):
+    """Lưu App Key/Secret của 1 sàn cho công ty — KHÔNG đụng token đã có
+    (nếu trước đó đã kết nối, đổi lại App Key/Secret không tự xoá kết nối
+    cũ, tự người dùng bấm Kết nối lại nếu cần đổi cả App lẫn shop)."""
+    if san not in TMDT_CAU_HINH:
+        raise HTTPException(400, "Sàn không hợp lệ")
+    body = await request.json()
+    app_key = str(body.get("app_key") or "").strip()
+    app_secret = str(body.get("app_secret") or "").strip()
+    if not app_key or not app_secret:
+        raise HTTPException(400, f"Thiếu {TMDT_CAU_HINH[san]['nhan_app_key']}/{TMDT_CAU_HINH[san]['nhan_app_secret']}")
+    data, tmdt = _tmdt_du_lieu(cid)
+    cfg = tmdt.setdefault(san, {})
+    cfg["app_key"] = app_key
+    cfg["app_secret"] = app_secret
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True, "redirect_uri": _tmdt_redirect_uri(san)}
+
+
+@app.get("/api/tmdt/{san}/ket-noi-url/{cid}")
+def tmdt_ket_noi_url(san: str, cid: int):
+    """Trả URL uỷ quyền (authorize URL) của sàn để frontend mở tab mới —
+    người dùng đăng nhập + đồng ý trên chính trang của sàn, sàn tự điều
+    hướng trình duyệt về callback cục bộ khi xong."""
+    if san not in TMDT_CAU_HINH:
+        raise HTTPException(400, "Sàn không hợp lệ")
+    cfg = _tmdt_cfg_san(cid, san)
+    if not (cfg.get("app_key") and cfg.get("app_secret")):
+        raise HTTPException(400, f"Chưa nhập {TMDT_CAU_HINH[san]['nhan_app_key']}/{TMDT_CAU_HINH[san]['nhan_app_secret']}")
+    _TMDT_DANG_KET_NOI[san] = cid
+    try:
+        url = _TMDT_HAM[san]["url"](cfg, _tmdt_redirect_uri(san))
+    except Exception as e:
+        raise HTTPException(500, f"Không dựng được URL uỷ quyền: {e}")
+    return {"url": url}
+
+
+@app.get("/api/tmdt/{san}/callback", response_class=HTMLResponse)
+def tmdt_callback(san: str, code: str = "", shop_id: str = "", error: str = ""):
+    """Sàn điều hướng trình duyệt về đây sau khi người dùng đồng ý uỷ
+    quyền — đổi code lấy access_token/refresh_token rồi lưu lại, trả 1
+    trang HTML đơn giản để người dùng biết kết quả và đóng tab."""
+    def trang(tieu_de, mau, noi_dung):
+        return (f"<!doctype html><html><head><meta charset='utf-8'>"
+                f"<title>{tieu_de}</title></head>"
+                f"<body style='font-family:sans-serif;padding:40px;text-align:center'>"
+                f"<h2 style='color:{mau}'>{tieu_de}</h2><p>{noi_dung}</p>"
+                f"<p style='color:#888;font-size:13px'>Có thể đóng tab này và quay lại phần mềm.</p>"
+                f"</body></html>")
+    if san not in TMDT_CAU_HINH:
+        return HTMLResponse(trang("Sàn không hợp lệ", "#c00", san), status_code=400)
+    if error:
+        return HTMLResponse(trang("Kết nối bị huỷ/lỗi", "#c00", str(error)), status_code=400)
+    cid = _TMDT_DANG_KET_NOI.get(san)
+    if not cid:
+        return HTMLResponse(trang("Không xác định được công ty đang kết nối", "#c00",
+                                  "Hãy quay lại phần mềm, bấm \"Kết nối\" lại từ đầu."), status_code=400)
+    if not code:
+        return HTMLResponse(trang("Thiếu mã uỷ quyền (code)", "#c00",
+                                  "Sàn không trả về code — thử kết nối lại."), status_code=400)
+    cfg = _tmdt_cfg_san(cid, san)
+    try:
+        kq = _TMDT_HAM[san]["doi_token"](cfg, code, shop_id) if san == "shopee" else _TMDT_HAM[san]["doi_token"](cfg, code)
+    except Exception as e:
+        return HTMLResponse(trang("Lỗi khi đổi code lấy token", "#c00", str(e)), status_code=500)
+    if kq.get("error"):
+        return HTMLResponse(trang("Sàn từ chối", "#c00",
+                                  f"{kq.get('error')}: {kq.get('message', kq)}"), status_code=400)
+    data, tmdt = _tmdt_du_lieu(cid)
+    cfg2 = tmdt.setdefault(san, {})
+    cfg2["access_token"] = kq.get("access_token", "")
+    cfg2["refresh_token"] = kq.get("refresh_token", "")
+    cfg2["shop_id"] = shop_id or kq.get("shop_id", "") or cfg2.get("shop_id", "")
+    cfg2["ket_noi_luc"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    _ghi_du_lieu_cty(cid, data)
+    _TMDT_DANG_KET_NOI.pop(san, None)
+    return HTMLResponse(trang(f"✓ Đã kết nối {TMDT_CAU_HINH[san]['ten']} thành công",
+                              "#1a7a4a", "Quay lại phần mềm để tiếp tục lấy đơn hàng."))
+
+
+@app.post("/api/tmdt/{san}/ngat-ket-noi/{cid}")
+def tmdt_ngat_ket_noi(san: str, cid: int):
+    """Xoá access_token/refresh_token đã lưu (không xoá App Key/Secret) —
+    dùng khi muốn kết nối lại shop khác hoặc token bị sàn thu hồi."""
+    if san not in TMDT_CAU_HINH:
+        raise HTTPException(400, "Sàn không hợp lệ")
+    data, tmdt = _tmdt_du_lieu(cid)
+    cfg = tmdt.get(san)
+    if cfg:
+        cfg.pop("access_token", None)
+        cfg.pop("refresh_token", None)
+        cfg.pop("shop_id", None)
+        cfg.pop("shop_name", None)
+        cfg.pop("ket_noi_luc", None)
+        _ghi_du_lieu_cty(cid, data)
     return {"ok": True}
 
 

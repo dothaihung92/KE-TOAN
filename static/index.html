@@ -901,6 +901,12 @@
           <div style="font-size:18px;font-weight:700;color:#2e5c8a">Tờ khai GTGT + Khấu trừ</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Tự động tạo tờ khai 01/GTGT (TT80) + hạch toán khấu trừ từng quý</div>
         </div>
+        <div onclick="moTmdt()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #ee4d2d;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#fff3f0'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">🛒</div>
+          <div style="font-size:18px;font-weight:700;color:#ee4d2d">Hỗ trợ xuất hoá đơn TMĐT</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Kết nối Shopee/Lazada/TikTok Shop để tự động lấy đơn hàng</div>
+        </div>
       </div>
       <div style="margin-top:16px;background:#f0f7ff;border:2px solid #2e5c8a;border-radius:14px;padding:16px 20px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -3845,6 +3851,97 @@ function moXuatKho(){
   document.getElementById('nhapLieuContent').style.display='block';
   xkVeTrangChinh();
   xkTaiTrangThai();
+}
+/* ----- HỖ TRỢ XUẤT HOÁ ĐƠN TMĐT (Shopee/Lazada/TikTok Shop) ----- */
+const TMDT_SAN=[
+  {ma:'shopee', ten:'Shopee', mau:'#ee4d2d', icon:'🛍', nhanKey:'Partner ID', nhanSecret:'Partner Key', trangDangKy:'https://open.shopee.com'},
+  {ma:'lazada', ten:'Lazada', mau:'#0f146d', icon:'🅻', nhanKey:'App Key', nhanSecret:'App Secret', trangDangKy:'https://open.lazada.com'},
+  {ma:'tiktok', ten:'TikTok Shop', mau:'#000', icon:'🎵', nhanKey:'App Key', nhanSecret:'App Secret', trangDangKy:'https://partner.tiktokshop.com'},
+];
+let tmdtTrangThai={};
+function moTmdt(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  nlDMMode=null; nlSoMoi=0;
+  document.getElementById('nhapLieuHome').style.display='none';
+  document.getElementById('nhapLieuContent').style.display='block';
+  tmdtVeTrangChinh();
+  tmdtTaiTrangThai();
+}
+function tmdtVeTrangChinh(){
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="background:#fff;border-radius:12px;padding:18px;border:1px solid #e0e0e0">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;flex-wrap:wrap">
+        <h3 style="margin:0 0 6px;color:#ee4d2d">🛒 Hỗ trợ xuất hoá đơn TMĐT</h3>
+        <button class="btn ghost sm" onclick="tmdtTaiTrangThai()" title="Tải lại trạng thái kết nối (bấm sau khi vừa đồng ý uỷ quyền ở tab sàn)">🔄 Tải lại</button>
+      </div>
+      <div class="hint" style="margin-bottom:16px">Kết nối trực tiếp qua API của từng sàn để tự động lấy đơn hàng đã bán — dùng làm nguồn "Chi tiết BÁN RA"/Xuất Kho, giống hệt cách "Import tờ khai xuất khẩu" đang làm. Cần đăng ký App (lấy Key/Secret riêng) ở trang nhà phát triển của từng sàn trước — xem đường dẫn đăng ký ngay trong từng ô bên dưới.</div>
+      <div id="tmdtThe" style="display:flex;gap:16px;flex-wrap:wrap"></div>
+    </div>`;
+}
+async function tmdtTaiTrangThai(){
+  try{
+    tmdtTrangThai=await api(`/api/tmdt/trang-thai/${current}`);
+  }catch(e){tmdtTrangThai={}; toast('Lỗi tải trạng thái TMĐT: '+e.message,'err')}
+  const box=document.getElementById('tmdtThe'); if(!box)return;
+  box.innerHTML=TMDT_SAN.map(s=>tmdtHtmlThe(s)).join('');
+}
+function tmdtHtmlThe(s){
+  const tt=tmdtTrangThai[s.ma]||{};
+  const daKetNoi=!!tt.da_ket_noi;
+  return `<div style="flex:1;min-width:280px;border:2px solid ${s.mau};border-radius:12px;padding:18px;background:#fff">
+    <div style="font-size:17px;font-weight:800;color:${s.mau}">${s.icon} ${s.ten}</div>
+    <div style="font-size:12px;color:var(--muted);margin:4px 0 10px">Chưa có App? Đăng ký tại <a href="${s.trangDangKy}" target="_blank" style="color:${s.mau}">${s.trangDangKy}</a> để lấy ${s.nhanKey}/${s.nhanSecret}.</div>
+    ${daKetNoi?`
+      <div style="background:#eafbf1;border:1px solid #8fd9ac;border-radius:8px;padding:10px;font-size:13px;margin-bottom:10px">
+        ✓ Đã kết nối${tt.shop_id?` — Shop ID: <b>${xkEsc(tt.shop_id)}</b>`:''}${tt.ket_noi_luc?`<br>Lúc: ${xkEsc(tt.ket_noi_luc)}`:''}
+      </div>
+      <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="tmdtNgatKetNoi('${s.ma}')">Ngắt kết nối</button>
+      <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Đổi App Key/Secret</button>
+    `:`
+      <div id="tmdtForm_${s.ma}" style="display:${tt.co_app?'none':'block'}">
+        <input id="tmdtKey_${s.ma}" placeholder="${s.nhanKey}" style="width:100%;padding:8px;margin-bottom:6px;box-sizing:border-box">
+        <input id="tmdtSecret_${s.ma}" placeholder="${s.nhanSecret}" style="width:100%;padding:8px;margin-bottom:8px;box-sizing:border-box">
+        <button class="btn sm" style="background:${s.mau}" onclick="tmdtLuuApp('${s.ma}')">💾 Lưu App</button>
+      </div>
+      <div id="tmdtSauLuu_${s.ma}" style="display:${tt.co_app?'block':'none'}">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:8px">✓ Đã lưu ${s.nhanKey}/${s.nhanSecret}.</div>
+        <button class="btn sm" style="background:${s.mau}" onclick="tmdtKetNoi('${s.ma}')">🔗 Kết nối shop</button>
+        <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Sửa App Key/Secret</button>
+      </div>
+    `}
+  </div>`;
+}
+function tmdtMoForm(san){
+  const f=document.getElementById(`tmdtForm_${san}`), s2=document.getElementById(`tmdtSauLuu_${san}`);
+  if(f)f.style.display='block';
+  if(s2)s2.style.display='none';
+}
+async function tmdtLuuApp(san){
+  const app_key=(document.getElementById(`tmdtKey_${san}`).value||'').trim();
+  const app_secret=(document.getElementById(`tmdtSecret_${san}`).value||'').trim();
+  if(!app_key||!app_secret){toast('Nhập đủ Key/Secret','err');return}
+  try{
+    const r=await fetch(`/api/tmdt/${san}/luu-app/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_key,app_secret})});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    toast(`✓ Đã lưu — nhớ khai báo Redirect URL trong App: ${d.redirect_uri}`,'ok');
+    tmdtTaiTrangThai();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function tmdtKetNoi(san){
+  try{
+    const d=await api(`/api/tmdt/${san}/ket-noi-url/${current}`);
+    window.open(d.url,'_blank');
+    toast('Đã mở tab kết nối — sau khi đồng ý uỷ quyền trên trang sàn, quay lại đây bấm 🔄 để cập nhật trạng thái','');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function tmdtNgatKetNoi(san){
+  if(!confirm('Ngắt kết nối shop này? (không xoá App Key/Secret đã lưu)'))return;
+  try{
+    await fetch(`/api/tmdt/${san}/ngat-ket-noi/${current}`,{method:'POST'});
+    tmdtTaiTrangThai();
+    toast('Đã ngắt kết nối','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
