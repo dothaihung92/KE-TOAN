@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-16.219"
+APP_BUILD = "2026-08-16.220"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25921,7 +25921,39 @@ def _tmdt_redirect_uri(san):
     return f"http://127.0.0.1:{TMDT_CONG_MAC_DINH}/api/tmdt/{san}/callback"
 
 
+# ===== App Key/Secret: đăng ký DÙNG CHUNG cho mọi công ty (dịch vụ kế toán
+# quản lý nhiều công ty khách hàng, mỗi công ty có shop bán hàng RIÊNG trên
+# sàn, nhưng chỉ cần 1 App do dịch vụ kế toán đứng tên đăng ký với sàn) —
+# lưu ở 1 file cấu hình CHUNG (data/tmdt_app.json), KHÔNG theo từng công ty.
+# Access token/refresh token/shop_id sau khi kết nối MỚI lưu riêng theo
+# từng công ty (data công ty đó) vì mỗi công ty tự đăng nhập tài khoản bán
+# hàng CỦA HỌ để cấp quyền cho App khi bấm "Kết nối shop".
+TMDT_APP_PATH = os.path.join(DATA_DIR, "tmdt_app.json")
+
+
+def _tmdt_app_doc():
+    if os.path.isfile(TMDT_APP_PATH):
+        try:
+            with open(TMDT_APP_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _tmdt_app_ghi(data):
+    os.makedirs(os.path.dirname(TMDT_APP_PATH), exist_ok=True)
+    with open(TMDT_APP_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+
+
+def _tmdt_app_cfg(san):
+    return (_tmdt_app_doc() or {}).get(san) or {}
+
+
 def _tmdt_du_lieu(cid):
+    """Dữ liệu KẾT NỐI (access_token/refresh_token/shop_id...) riêng theo
+    công ty — KHÔNG chứa App Key/Secret (xem _tmdt_app_doc, dùng chung)."""
     data = _doc_du_lieu_cty(cid)
     tmdt = data.setdefault("tmdt", {})
     return data, tmdt
@@ -26010,17 +26042,33 @@ _TMDT_HAM = {
 }
 
 
+@app.get("/api/tmdt/app-trang-thai")
+def tmdt_app_trang_thai():
+    """Trạng thái App Key/Secret DÙNG CHUNG (không theo công ty) — chỉ báo
+    có/chưa, không trả secret thật ra ngoài."""
+    app_data = _tmdt_app_doc()
+    ket_qua = {}
+    for san, meta in TMDT_CAU_HINH.items():
+        cfg = app_data.get(san) or {}
+        ket_qua[san] = {"ten": meta["ten"], "co_app": bool(cfg.get("app_key") and cfg.get("app_secret")),
+                        "app_key": cfg.get("app_key", "")}
+    return ket_qua
+
+
 @app.get("/api/tmdt/trang-thai/{cid}")
 def tmdt_trang_thai(cid: int):
-    """Trạng thái kết nối cả 3 sàn cho 1 công ty — KHÔNG trả app_secret/token
-    thật ra ngoài, chỉ báo có/chưa để hiện đúng giao diện."""
+    """Trạng thái kết nối SHOP của 1 công ty cho cả 3 sàn — gộp cả trạng
+    thái App dùng chung (co_app) lẫn kết nối shop riêng của công ty này
+    (da_ket_noi/shop_id...) để frontend chỉ cần gọi 1 lần."""
+    app_data = _tmdt_app_doc()
     _, tmdt = _tmdt_du_lieu(cid)
     ket_qua = {}
     for san, meta in TMDT_CAU_HINH.items():
+        app_cfg = app_data.get(san) or {}
         cfg = tmdt.get(san) or {}
         ket_qua[san] = {
             "ten": meta["ten"],
-            "co_app": bool(cfg.get("app_key") and cfg.get("app_secret")),
+            "co_app": bool(app_cfg.get("app_key") and app_cfg.get("app_secret")),
             "da_ket_noi": bool(cfg.get("access_token")),
             "shop_id": cfg.get("shop_id", ""),
             "shop_name": cfg.get("shop_name", ""),
@@ -26029,11 +26077,12 @@ def tmdt_trang_thai(cid: int):
     return ket_qua
 
 
-@app.post("/api/tmdt/{san}/luu-app/{cid}")
-async def tmdt_luu_app(san: str, cid: int, request: Request):
-    """Lưu App Key/Secret của 1 sàn cho công ty — KHÔNG đụng token đã có
-    (nếu trước đó đã kết nối, đổi lại App Key/Secret không tự xoá kết nối
-    cũ, tự người dùng bấm Kết nối lại nếu cần đổi cả App lẫn shop)."""
+@app.post("/api/tmdt/{san}/luu-app")
+async def tmdt_luu_app(san: str, request: Request):
+    """Lưu App Key/Secret DÙNG CHUNG cho mọi công ty (đăng ký 1 lần dưới
+    tên dịch vụ kế toán, không phải theo từng công ty khách hàng) — việc
+    đăng nhập/cấp quyền cho TỪNG shop của TỪNG công ty làm riêng ở bước
+    "Kết nối shop" (xem tmdt_ket_noi_url/tmdt_callback)."""
     if san not in TMDT_CAU_HINH:
         raise HTTPException(400, "Sàn không hợp lệ")
     body = await request.json()
@@ -26041,24 +26090,26 @@ async def tmdt_luu_app(san: str, cid: int, request: Request):
     app_secret = str(body.get("app_secret") or "").strip()
     if not app_key or not app_secret:
         raise HTTPException(400, f"Thiếu {TMDT_CAU_HINH[san]['nhan_app_key']}/{TMDT_CAU_HINH[san]['nhan_app_secret']}")
-    data, tmdt = _tmdt_du_lieu(cid)
-    cfg = tmdt.setdefault(san, {})
-    cfg["app_key"] = app_key
-    cfg["app_secret"] = app_secret
-    _ghi_du_lieu_cty(cid, data)
+    app_data = _tmdt_app_doc()
+    app_data.setdefault(san, {})["app_key"] = app_key
+    app_data[san]["app_secret"] = app_secret
+    _tmdt_app_ghi(app_data)
     return {"ok": True, "redirect_uri": _tmdt_redirect_uri(san)}
 
 
 @app.get("/api/tmdt/{san}/ket-noi-url/{cid}")
 def tmdt_ket_noi_url(san: str, cid: int):
     """Trả URL uỷ quyền (authorize URL) của sàn để frontend mở tab mới —
-    người dùng đăng nhập + đồng ý trên chính trang của sàn, sàn tự điều
-    hướng trình duyệt về callback cục bộ khi xong."""
+    NGƯỜI PHỤ TRÁCH SHOP CỦA CÔNG TY NÀY đăng nhập bằng đúng tài khoản bán
+    hàng của công ty đó rồi đồng ý cấp quyền trên trang của sàn (App Key/
+    Secret vẫn là App dùng chung, chỉ có bước đăng nhập/cấp quyền này là
+    riêng theo từng shop) — sàn tự điều hướng trình duyệt về callback cục
+    bộ khi xong."""
     if san not in TMDT_CAU_HINH:
         raise HTTPException(400, "Sàn không hợp lệ")
-    cfg = _tmdt_cfg_san(cid, san)
+    cfg = _tmdt_app_cfg(san)
     if not (cfg.get("app_key") and cfg.get("app_secret")):
-        raise HTTPException(400, f"Chưa nhập {TMDT_CAU_HINH[san]['nhan_app_key']}/{TMDT_CAU_HINH[san]['nhan_app_secret']}")
+        raise HTTPException(400, f"Chưa đăng ký {TMDT_CAU_HINH[san]['nhan_app_key']}/{TMDT_CAU_HINH[san]['nhan_app_secret']} (App dùng chung)")
     _TMDT_DANG_KET_NOI[san] = cid
     try:
         url = _TMDT_HAM[san]["url"](cfg, _tmdt_redirect_uri(san))
@@ -26090,7 +26141,7 @@ def tmdt_callback(san: str, code: str = "", shop_id: str = "", error: str = ""):
     if not code:
         return HTMLResponse(trang("Thiếu mã uỷ quyền (code)", "#c00",
                                   "Sàn không trả về code — thử kết nối lại."), status_code=400)
-    cfg = _tmdt_cfg_san(cid, san)
+    cfg = _tmdt_app_cfg(san)
     try:
         kq = _TMDT_HAM[san]["doi_token"](cfg, code, shop_id) if san == "shopee" else _TMDT_HAM[san]["doi_token"](cfg, code)
     except Exception as e:

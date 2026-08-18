@@ -3890,23 +3890,23 @@ function tmdtHtmlThe(s){
   const daKetNoi=!!tt.da_ket_noi;
   return `<div style="flex:1;min-width:280px;border:2px solid ${s.mau};border-radius:12px;padding:18px;background:#fff">
     <div style="font-size:17px;font-weight:800;color:${s.mau}">${s.icon} ${s.ten}</div>
-    <div style="font-size:12px;color:var(--muted);margin:4px 0 10px">Chưa có App? Đăng ký tại <a href="${s.trangDangKy}" target="_blank" style="color:${s.mau}">${s.trangDangKy}</a> để lấy ${s.nhanKey}/${s.nhanSecret}.</div>
+    <div style="font-size:12px;color:var(--muted);margin:4px 0 10px">Chưa có App? Đăng ký tại <a href="${s.trangDangKy}" target="_blank" style="color:${s.mau}">${s.trangDangKy}</a> để lấy ${s.nhanKey}/${s.nhanSecret} — <b>chỉ cần đăng ký 1 lần, dùng chung cho mọi công ty</b> (mỗi công ty chỉ cần bấm "Kết nối shop" bằng tài khoản bán hàng riêng của công ty đó).</div>
     ${daKetNoi?`
       <div style="background:#eafbf1;border:1px solid #8fd9ac;border-radius:8px;padding:10px;font-size:13px;margin-bottom:10px">
-        ✓ Đã kết nối${tt.shop_id?` — Shop ID: <b>${xkEsc(tt.shop_id)}</b>`:''}${tt.ket_noi_luc?`<br>Lúc: ${xkEsc(tt.ket_noi_luc)}`:''}
+        ✓ Công ty này đã kết nối${tt.shop_id?` — Shop ID: <b>${xkEsc(tt.shop_id)}</b>`:''}${tt.ket_noi_luc?`<br>Lúc: ${xkEsc(tt.ket_noi_luc)}`:''}
       </div>
-      <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="tmdtNgatKetNoi('${s.ma}')">Ngắt kết nối</button>
-      <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Đổi App Key/Secret</button>
+      <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="tmdtNgatKetNoi('${s.ma}')">Ngắt kết nối công ty này</button>
+      <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Sửa App Key/Secret (chung)</button>
     `:`
       <div id="tmdtForm_${s.ma}" style="display:${tt.co_app?'none':'block'}">
         <input id="tmdtKey_${s.ma}" placeholder="${s.nhanKey}" style="width:100%;padding:8px;margin-bottom:6px;box-sizing:border-box">
         <input id="tmdtSecret_${s.ma}" placeholder="${s.nhanSecret}" style="width:100%;padding:8px;margin-bottom:8px;box-sizing:border-box">
-        <button class="btn sm" style="background:${s.mau}" onclick="tmdtLuuApp('${s.ma}')">💾 Lưu App</button>
+        <button class="btn sm" style="background:${s.mau}" onclick="tmdtLuuApp('${s.ma}')">💾 Lưu App (dùng chung)</button>
       </div>
       <div id="tmdtSauLuu_${s.ma}" style="display:${tt.co_app?'block':'none'}">
-        <div style="font-size:13px;color:var(--muted);margin-bottom:8px">✓ Đã lưu ${s.nhanKey}/${s.nhanSecret}.</div>
-        <button class="btn sm" style="background:${s.mau}" onclick="tmdtKetNoi('${s.ma}')">🔗 Kết nối shop</button>
-        <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Sửa App Key/Secret</button>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:8px">✓ Đã có ${s.nhanKey}/${s.nhanSecret} dùng chung — bấm nút dưới để kết nối SHOP CỦA CÔNG TY NÀY (đăng nhập bằng tài khoản bán hàng riêng của công ty này khi sàn hỏi).</div>
+        <button class="btn sm" style="background:${s.mau}" onclick="tmdtKetNoi('${s.ma}')">🔗 Kết nối shop công ty này</button>
+        <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Sửa App Key/Secret (chung)</button>
       </div>
     `}
   </div>`;
@@ -3921,7 +3921,7 @@ async function tmdtLuuApp(san){
   const app_secret=(document.getElementById(`tmdtSecret_${san}`).value||'').trim();
   if(!app_key||!app_secret){toast('Nhập đủ Key/Secret','err');return}
   try{
-    const r=await fetch(`/api/tmdt/${san}/luu-app/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_key,app_secret})});
+    const r=await fetch(`/api/tmdt/${san}/luu-app`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_key,app_secret})});
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã lưu — nhớ khai báo Redirect URL trong App: ${d.redirect_uri}`,'ok');
