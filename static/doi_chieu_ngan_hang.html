@@ -6380,7 +6380,10 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
     }
   };
   const inputStyle = { width: "100%", border: "1px solid transparent", background: "transparent", font: "inherit", fontSize: 13, padding: "5px 6px", borderRadius: 4, boxSizing: "border-box" };
-  const th = (label, w) => React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontSize: 12, color: "var(--text2)", borderBottom: "2px solid var(--border)", width: w, whiteSpace: "nowrap" } }, label);
+  // Dùng minWidth (không phải width) để cột được co giãn rộng ra theo nội dung thật (VD số tờ
+  // khai dài, nhiều số hoá đơn gộp 1 dòng cách nhau dấu phẩy) thay vì bị cắt cụt ("...") — bảng đã
+  // có overflow-x cuộn ngang nên rộng hơn không sao.
+  const th = (label, w) => React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontSize: 12, color: "var(--text2)", borderBottom: "2px solid var(--border)", minWidth: w, whiteSpace: "nowrap" } }, label);
   const td = (...children) => React.createElement("td", { style: { padding: "3px 6px", borderBottom: "1px solid #eee", fontSize: 13, verticalAlign: "top" } }, ...children);
 
   return React.createElement("div", {
@@ -6454,7 +6457,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                     }
                   })
                 ),
-                th(partnerLabel, 220), th("Tờ khai số", 110), th("Ngày TK", 115), th("Số hoá đơn", 130),
+                th(partnerLabel, 220), th("Tờ khai số", 160), th("Ngày TK", 115), th("Số hoá đơn", 220),
                 th("Trị giá HĐ", 110), th("NT", 50), th("Tỷ giá thuế", 100), th("Trị giá thuế (VND)", 130),
                 th("Ngày TT", 110), th("Trị giá TT (NT)", 120), th("Tỷ giá TT", 100), th("Đồng Việt Nam TT", 130),
                 th("VND", 110), th("NT", 90), th("", 100)
@@ -6489,10 +6492,10 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
               const payRow = (key, child) => React.createElement("div", { key, style: { display: "flex", alignItems: "center", gap: 2, marginBottom: 2 } }, child);
               return React.createElement("tr", { key: tk.id },
                 td(React.createElement("input", { type: "checkbox", checked: selectedTk.has(tk.id), onChange: () => toggleSelectTk(tk.id) })),
-                td(React.createElement("input", { style: inputStyle, value: tk.nhaCungCap||"", onChange: e => updateField(tk.id, "nhaCungCap", e.target.value) })),
-                td(React.createElement("input", { style: inputStyle, value: tk.toKhaiSo||"", onChange: e => updateField(tk.id, "toKhaiSo", e.target.value) })),
+                td(React.createElement("input", { style: inputStyle, title: tk.nhaCungCap||"", value: tk.nhaCungCap||"", onChange: e => updateField(tk.id, "nhaCungCap", e.target.value) })),
+                td(React.createElement("input", { style: inputStyle, title: tk.toKhaiSo||"", value: tk.toKhaiSo||"", onChange: e => updateField(tk.id, "toKhaiSo", e.target.value) })),
                 td(React.createElement("input", { style: inputStyle, value: tk.ngayToKhai||"", onChange: e => updateField(tk.id, "ngayToKhai", e.target.value), placeholder: "dd/mm/yyyy" })),
-                td(React.createElement("input", { style: inputStyle, value: tk.soHoaDon||"", onChange: e => updateField(tk.id, "soHoaDon", e.target.value) })),
+                td(React.createElement("input", { style: inputStyle, title: tk.soHoaDon||"", value: tk.soHoaDon||"", onChange: e => updateField(tk.id, "soHoaDon", e.target.value) })),
                 td(numInput(tk, "triGiaHoaDon")),
                 td(React.createElement("input", { style: { ...inputStyle, width: 50 }, value: tk.currency||"USD", onChange: e => updateField(tk.id, "currency", e.target.value.toUpperCase()) })),
                 td(numInput(tk, "tyGiaTinhThue")),
