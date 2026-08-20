@@ -2019,7 +2019,11 @@ function App() {
         return sp[resolvedAccId] || Object.values(sp).find(v => v && v.trim()) || "";
       } catch(e) { return ""; }
     })();
-    const fixedResults = sanitizeRows(autoFixZeroAmounts(s.results, rawSaokeForFix, s.currency || acc.currency || "VND"));
+    // Ghi đè currency từng dòng theo đúng tài khoản đang mở (xem comment ở nhánh switchTab tương
+    // tự) — dữ liệu phiên cũ có thể mang currency sai/thiếu trên từng dòng dù tài khoản là USD.
+    const accCurForFix = acc.currency || s.currency || "VND";
+    const resultsWithCur = s.results.map(r => ({...r, tx: {...r.tx, currency: accCurForFix}}));
+    const fixedResults = sanitizeRows(autoFixZeroAmounts(resultsWithCur, rawSaokeForFix, accCurForFix));
     setConfirmResults(fixedResults);
     setInputData(prev=>({...prev, activeAccountId: resolvedAccId, currency: acc.currency||"VND", accountLabel: acc.label||""}));
     const coInv = getCoInvoices(co.id);
@@ -4114,7 +4118,13 @@ function ConfirmScreen({
       }
     }
     if(s && s.results && s.results.length) {
-      const rawLoaded = s.results.map(r=>({...r}));
+      // Đồng bộ lại currency của TỪNG dòng theo đúng tài khoản (allAccounts) đang mở tab — dữ liệu
+      // cũ lưu từ trước khi có trường currency riêng theo dòng (hoặc từ 1 luồng ghép không gán) có
+      // thể mang currency sai/thiếu, khiến dòng hiện nhầm định dạng VND và MẤT ô nhập tỷ giá dù tài
+      // khoản rõ ràng là USD — cả phiên chỉ thuộc 1 tài khoản/1 loại tiền duy nhất nên luôn ghi đè
+      // an toàn theo tài khoản thay vì tin currency cũ lưu trên từng dòng.
+      const accCur = (allAccounts.find(a=>a.id===accId)||{}).currency || s.currency || "VND";
+      const rawLoaded = s.results.map(r=>({...r, tx:{...r.tx, currency:accCur}}));
       const rawFallback = s.rawSaoke || (() => {
         try {
           const id2 = LS.get("inputdata_" + co.id) || {};
@@ -6116,7 +6126,8 @@ filtered.map((r, idx) => /*#__PURE__*/React.createElement(ConfirmRow, {
     tokhaiSuggestions: tokhaiSuggestions[r.id],
     onAttachTokhai: attachTokhai,
     onOpenTokhaiPicker: openTokhaiPicker,
-    searchTerm: search
+    searchTerm: search,
+    accountCurrency: activeTabAcc ? activeTabAcc.currency : undefined
   }))), tokhaiModalOpen && /*#__PURE__*/React.createElement(ToKhaiModal, {
     kind: "NK",
     list: tokhaiList,
@@ -6747,7 +6758,8 @@ function ConfirmRow({
   tokhaiSuggestions,
   onAttachTokhai,
   onOpenTokhaiPicker,
-  searchTerm
+  searchTerm,
+  accountCurrency
 }) {
   // Close edit mode on global Esc event
   React.useEffect(() => {
@@ -6797,6 +6809,12 @@ function ConfirmRow({
   } : null);
   const isDebit = r.tx.debit > 0;
   const txAmt = Math.max(r.tx.debit || 0, r.tx.credit || 0);
+  // Đơn vị tiền tệ để HIỂN THỊ (định dạng số + hiện ô "Tỷ giá") ưu tiên lấy theo TÀI KHOẢN đang mở
+  // (accountCurrency, VD tab "USD") thay vì r.tx.currency của riêng dòng này — cả phiên đối chiếu
+  // luôn chỉ thuộc 1 tài khoản/1 loại tiền duy nhất, nhưng dữ liệu dòng cũ (từ trước khi có trường
+  // currency, hoặc từ 1 luồng ghép dữ liệu không gán currency) có thể thiếu/sai currency riêng lẻ,
+  // khiến dòng đó hiện nhầm định dạng VND và MẤT LUÔN ô nhập tỷ giá dù tài khoản rõ ràng là USD.
+  const cur = accountCurrency || r.tx.currency || "VND";
   const isAutoConfirmed = r.confirmed === "yes" && !r.manualConfirm;
   const score = r.t1_dict ? r.t1_dict.score : r.t2_nameAmt ? r.t2_nameAmt.score : 0;
   const tang = r.t1_dict ? "T1-Từ điển" : r.t2_nameAmt ? "T2-Số tiền" : "";
@@ -6972,11 +6990,11 @@ function ConfirmRow({
       fontWeight: 600,
       padding: "4px 10px"
     }
-  }, isDebit ? "Tiền ra: " + fmt(r.tx.debit, r.tx.currency) : "Tiền vào: " + fmt(r.tx.credit, r.tx.currency)),
+  }, isDebit ? "Tiền ra: " + fmt(r.tx.debit, cur) : "Tiền vào: " + fmt(r.tx.credit, cur)),
   // TK ngoại tệ (USD): tỷ giá quy đổi VND dùng khi xuất UNT/UNC. Tự lấy tỷ giá Vietcombank theo
   // ngày làm gợi ý (có thể lỗi do mạng/CORS khi mở file trực tiếp bằng file://) nhưng luôn cho sửa
   // tay — nhập tỷ giá thủ công không phụ thuộc mạng, chắc chắn đúng theo chứng từ thực tế.
-  r.tx.currency === "USD" && /*#__PURE__*/React.createElement("span", {
+  cur === "USD" && /*#__PURE__*/React.createElement("span", {
     style: {
       display: "inline-flex", alignItems: "center", gap: 4,
       background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 6,
@@ -7007,7 +7025,7 @@ function ConfirmRow({
       display: "inline-flex", alignItems: "center", gap: 6, marginLeft: 4
     }
   },
-    "⚠ Nhập: " + fmt(expectedAmt, r.tx.currency) + " / Hiện: " + fmt(storedAmt, r.tx.currency),
+    "⚠ Nhập: " + fmt(expectedAmt, cur) + " / Hiện: " + fmt(storedAmt, cur),
     onFixAmt && /*#__PURE__*/React.createElement("button", {
       onClick: e => { e.stopPropagation(); onFixAmt(r.id, expectedDebit, expectedCredit); },
       style: {
@@ -7098,7 +7116,7 @@ function ConfirmRow({
       /*#__PURE__*/React.createElement("div", { style: { fontWeight: 600, color: "var(--text)", fontSize: 13, wordBreak: "break-word", marginBottom: 3 } }, inv.ten_cty || "\u2014"),
       inv.mst && /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: "var(--blue)", fontFamily: "monospace", marginBottom: 3 } }, inv.mst),
       /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8, fontSize: 12, flexWrap: "wrap" } },
-        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#7c3aed" } }, fmt(inv.tong, r.tx.currency)),
+        /*#__PURE__*/React.createElement("span", { style: { fontWeight: 700, color: "#7c3aed" } }, fmt(inv.tong, cur)),
         inv.ngay && /*#__PURE__*/React.createElement("span", { style: { color: "var(--text3)" } }, "H\u0110: " + inv.ngay)
       )
     );
@@ -7173,7 +7191,7 @@ function ConfirmRow({
         fontWeight: 600,
         color: diff === 0 ? "var(--green-d)" : diffPct <= 2 ? "var(--green-d)" : "var(--amber)"
       }
-    }, diff === 0 ? "= Khop chinh xac" : "Lech " + fmt(diff, r.tx.currency) + " (" + diffPct + "%)"));
+    }, diff === 0 ? "= Khop chinh xac" : "Lech " + fmt(diff, cur) + " (" + diffPct + "%)"));
   })), r.nameMatches && r.nameMatches.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       flex: "1 1 200px",
@@ -7234,7 +7252,7 @@ function ConfirmRow({
       style: { display: "flex", alignItems: "center", gap: 6, fontWeight: 600, color: "#7c3aed", marginBottom: 3 }
     },
       "⇔ Khớp nội bộ: ",
-      fmt(Math.max(internalSuggestion.row.tx.debit||0, internalSuggestion.row.tx.credit||0), r.tx.currency),
+      fmt(Math.max(internalSuggestion.row.tx.debit||0, internalSuggestion.row.tx.credit||0), internalSuggestion.row.tx.currency || cur),
       " tại ", internalSuggestion.accLabel,
       /*#__PURE__*/React.createElement("span", {
         style: {
