@@ -1280,6 +1280,9 @@ function buildVoucherNo(prefix, date, seq, bankAcct, accountNo) {
 // ngày nghỉ). Đọc JSON linh hoạt theo nhiều tên trường có thể có vì API công khai của Vietcombank
 // không có tài liệu chính thức.
 const vcbRateCache = {};
+const vcbRateInFlight = {};  // {iso: Promise} — gộp các lệnh gọi TRÙNG ngày đang bay cùng lúc thành
+                              // 1 request DUY NHẤT (VD nhiều dòng cùng ngày tự động lấy tỷ giá lúc
+                              // vừa mở màn hình), tránh gọi API VCB lặp lại thừa.
 function toIsoDate(dateVN) {
   const m = String(dateVN || "").match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
   if (!m) return null;
@@ -1292,26 +1295,31 @@ function shiftIsoDate(iso, days) {
 }
 async function fetchVCBRateForIso(iso) {
   if (vcbRateCache[iso] !== undefined) return vcbRateCache[iso];
-  try {
-    const res = await fetch(`https://www.vietcombank.com.vn/api/exchangerates?date=${iso}`, { headers: { "Accept": "application/json" } });
-    if (!res.ok) { vcbRateCache[iso] = null; return null; }
-    const json = await res.json();
-    const list = json.Data || json.data || json.results || json.Results || [];
-    const num = v => { const n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
-    const item = list.find(x => {
-      const code = String(x.currencyCode || x.CurrencyCode || x.currency || x.Currency || "").toUpperCase();
-      return code === "USD";
-    });
-    if (!item) { vcbRateCache[iso] = null; return null; }
-    const buy = num(item.buy ?? item.Buy ?? item.buyTransfer ?? item.BuyTransfer ?? item.buy_transfer ?? item.transfer ?? item.Transfer ?? item.cash ?? item.Cash);
-    const sell = num(item.sell ?? item.Sell ?? item.sellTransfer ?? item.SellTransfer ?? item.sell_transfer);
-    const rate = (buy > 0 && sell > 0) ? { buy, sell } : null;
-    vcbRateCache[iso] = rate;
-    return rate;
-  } catch (e) {
-    vcbRateCache[iso] = null;
-    return null;
-  }
+  if (vcbRateInFlight[iso]) return vcbRateInFlight[iso];
+  const p = (async () => {
+    try {
+      const res = await fetch(`https://www.vietcombank.com.vn/api/exchangerates?date=${iso}`, { headers: { "Accept": "application/json" } });
+      if (!res.ok) { vcbRateCache[iso] = null; return null; }
+      const json = await res.json();
+      const list = json.Data || json.data || json.results || json.Results || [];
+      const num = v => { const n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+      const item = list.find(x => {
+        const code = String(x.currencyCode || x.CurrencyCode || x.currency || x.Currency || "").toUpperCase();
+        return code === "USD";
+      });
+      if (!item) { vcbRateCache[iso] = null; return null; }
+      const buy = num(item.buy ?? item.Buy ?? item.buyTransfer ?? item.BuyTransfer ?? item.buy_transfer ?? item.transfer ?? item.Transfer ?? item.cash ?? item.Cash);
+      const sell = num(item.sell ?? item.Sell ?? item.sellTransfer ?? item.SellTransfer ?? item.sell_transfer);
+      const rate = (buy > 0 && sell > 0) ? { buy, sell } : null;
+      vcbRateCache[iso] = rate;
+      return rate;
+    } catch (e) {
+      vcbRateCache[iso] = null;
+      return null;
+    }
+  })();
+  vcbRateInFlight[iso] = p;
+  try { return await p; } finally { delete vcbRateInFlight[iso]; }
 }
 // Lấy tỷ giá tại ngày giao dịch (dd/mm/yyyy) — lùi tối đa 7 ngày nếu không có (cuối tuần/lễ).
 async function fetchVCBRate(dateVN) {
@@ -6792,18 +6800,21 @@ function ConfirmRow({
     setEditTyGia(val);
     if (onSetTyGia) onSetTyGia(r.id, n > 0 ? n : undefined);
   };
-  const lookupTyGia = async () => {
+  // silent=true (tự động lúc mở dòng) -> không chen alert() (34 dòng lỗi mạng cùng lúc sẽ ra 34
+  // hộp thoại chặn màn hình); silent=false (bấm nút "🔄 VCB" tay) -> báo lỗi rõ ràng như cũ.
+  const applyTyGiaFromVCB = async silent => {
     setTyGiaLoading(true);
     try {
       const rate = await fetchVCBRate(r.tx.date);
-      if (!rate) { alert("Không lấy được tỷ giá VCB cho ngày " + r.tx.date + " — hãy tự nhập tỷ giá."); return; }
+      if (!rate) { if (!silent) alert("Không lấy được tỷ giá VCB cho ngày " + r.tx.date + " — hãy tự nhập tỷ giá."); return; }
       const used = r.tx.debit > 0 ? rate.sell : rate.buy;
       saveTyGia(String(used));
     } catch (e) {
-      alert("Lỗi lấy tỷ giá: " + (e.message || e));
+      if (!silent) alert("Lỗi lấy tỷ giá: " + (e.message || e));
     }
     setTyGiaLoading(false);
   };
+  const lookupTyGia = () => applyTyGiaFromVCB(false);
   const best = r.t1_dict || r.t2_nameAmt || (r.invMatches && r.invMatches[0] ? {
     ...r.invMatches[0]
   } : null);
@@ -6815,6 +6826,16 @@ function ConfirmRow({
   // currency, hoặc từ 1 luồng ghép dữ liệu không gán currency) có thể thiếu/sai currency riêng lẻ,
   // khiến dòng đó hiện nhầm định dạng VND và MẤT LUÔN ô nhập tỷ giá dù tài khoản rõ ràng là USD.
   const cur = accountCurrency || r.tx.currency || "VND";
+  // Tự động lấy tỷ giá VCB ngay khi dòng USD chưa có tỷ giá (không cần bấm "🔄 VCB") — chỉ thử 1
+  // LẦN cho mỗi dòng (autoTyGiaTried, ref không gây render lại) để không tự lặp lại gọi API mỗi khi
+  // dòng render lại vì lý do khác (VD tick chọn, gõ ô khác) hoặc khi mạng lỗi/không có tỷ giá ngày
+  // đó — người dùng vẫn có thể tự bấm "🔄 VCB" (thử lại) hoặc gõ tay như trước.
+  const autoTyGiaTried = React.useRef(false);
+  React.useEffect(() => {
+    if (cur !== "USD" || r.tyGia || editTyGia || autoTyGiaTried.current) return;
+    autoTyGiaTried.current = true;
+    applyTyGiaFromVCB(true);
+  }, [cur, r.tyGia, editTyGia]);
   const isAutoConfirmed = r.confirmed === "yes" && !r.manualConfirm;
   const score = r.t1_dict ? r.t1_dict.score : r.t2_nameAmt ? r.t2_nameAmt.score : 0;
   const tang = r.t1_dict ? "T1-Từ điển" : r.t2_nameAmt ? "T2-Số tiền" : "";
