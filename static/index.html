@@ -3839,7 +3839,7 @@ async function luuCaHaiBangKe(){
 }
 
 /* ----- XUẤT KHO ----- */
-let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1, xkGanChonNhieu=[];
+let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1, xkGanChonNhieu=[], xkGanGoiYTuoi=[];
 const XK_HEADERS=['Tồn kho','Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
                    'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho',
                    'Lợi nhuận','Tỷ lệ % Lãi/Lỗ'];
@@ -4449,6 +4449,91 @@ function xkManh(a,b){
   if(!a||!b)return false;
   return a===b||a.includes(b)||b.includes(a);
 }
+// cổng JS của _ma_ngoac_gop_xk/_ma_ngoac_khop_xk (server.py): mã kiểu/màu đặt NGAY
+// TRONG ngoặc của tên bán (VD '(BIL50-MTWT)') là tín hiệu CHẮC CHẮN để nhận đúng
+// mặt hàng dù phần chữ còn lại của tên bán/tên kho khác hẳn nhau (VD tên bán có thêm
+// mô tả "planter", "kích thước", "xuất xứ"... chen vào giữa khiến so khớp theo CHUỖI
+// LIÊN TỤC như xkManh() thất bại dù rõ ràng đúng mã) — ghép NGUYÊN cụm trong ngoặc
+// (không tách rời từng mã con) vì mã kiểu ngắn (VD hậu tố màu 'WT') hay đứng NGAY
+// cạnh mã chính, tách riêng dễ khớp nhầm.
+function xkMaNgoacGop(ten){
+  const ra=new Set();
+  const re=/\(([^)]*)\)/g; let m;
+  while((m=re.exec(String(ten||'')))){
+    const tok=xkChuanTen(m[1]);
+    if(tok.length>=4)ra.add(tok);
+  }
+  return ra;
+}
+// chuẩn hoá KHÔNG bỏ nội dung trong ngoặc (khác xkChuanTen) — dùng để so khớp mã
+// trong ngoặc của tên bán với tên hàng kho, vì tên kho thường KHÔNG còn dấu ngoặc
+// (VD tên bán '(BIL50-MTWT)' nhưng tên kho ghi thẳng 'BIL50 - MTWT').
+function xkChuanTenGiuNgoac(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+}
+function xkMaNgoacKhop(a,b){
+  const maA=xkMaNgoacGop(a);
+  if(!maA.size)return false;
+  const bChuan=xkChuanTenGiuNgoac(b);
+  for(const tok of maA)if(bChuan.includes(tok))return true;
+  return false;
+}
+// cổng JS của _trich_kich_thuoc_xk/_kich_thuoc_khop_xk: cụm "kích thước" dạng số/chữ
+// ghép bằng 'x' (VD 'D57xH50', '54x54x50') trùng nhau giữa 2 tên GỐC cũng là tín hiệu
+// chắc chắn để nhận đúng mặt hàng, độc lập với phần chữ còn lại.
+function xkKichThuocTrich(ten){
+  const ra=new Set();
+  const re=/[A-Za-z]?\d+(?:[.,]\d+)?(?:\s*[xX]\s*[A-Za-z]?\d+(?:[.,]\d+)?){1,4}/g;
+  let m;
+  while((m=re.exec(String(ten||'')))){
+    ra.add(m[0].replace(/\s+/g,'').toUpperCase().replace(/,/g,'.'));
+  }
+  return ra;
+}
+function xkKichThuocKhop(a,b){
+  const ka=xkKichThuocTrich(a), kb=xkKichThuocTrich(b);
+  if(!ka.size||!kb.size)return false;
+  for(const k of ka)if(kb.has(k))return true;
+  return false;
+}
+// điểm giống 2 chuỗi (0..1), thuật toán khối-khớp-dài-nhất-đệ-quy (Ratcliff/Obershelp)
+// — cổng JS của difflib.SequenceMatcher.ratio() bên server, dùng xếp hạng gợi ý theo
+// độ giống tên khi không có tín hiệu "mạnh" nào ở trên.
+function xkDiemGiong(a,b){
+  if(!a||!b)return 0;
+  function khoiKhop(x,y){
+    if(!x.length||!y.length)return 0;
+    let bestLen=0,bestI=0,bestJ=0,prev=new Array(y.length+1).fill(0);
+    for(let i=0;i<x.length;i++){
+      const cur=new Array(y.length+1).fill(0);
+      for(let j=0;j<y.length;j++){
+        if(x[i]===y[j]){
+          cur[j+1]=(prev[j]||0)+1;
+          if(cur[j+1]>bestLen){bestLen=cur[j+1];bestI=i-bestLen+1;bestJ=j-bestLen+1;}
+        }
+      }
+      prev=cur;
+    }
+    if(!bestLen)return 0;
+    return bestLen+khoiKhop(x.slice(0,bestI),y.slice(0,bestJ))+khoiKhop(x.slice(bestI+bestLen),y.slice(bestJ+bestLen));
+  }
+  return (2*khoiKhop(a,b))/(a.length+b.length);
+}
+// Gợi ý mã hàng kho TƯƠI cho 1 dòng — tính lại từ Tồn kho HIỆN CÓ mỗi lần mở bảng
+// gán mã, KHÔNG dùng r.goi_y đã lưu sẵn từ lúc "Dò mã hàng tự động" chạy lần đầu (có
+// thể lỗi thời/thiếu — VD lúc đó thiếu tín hiệu mã-trong-ngoặc/kích-thước nên bỏ sót
+// mã đúng, hoặc mã đã bị dòng khác dùng hết tồn tại THỜI ĐIỂM đó dù giờ đã còn hàng
+// trở lại sau khi người dùng sửa các dòng khác) — dùng ĐỦ 3 tín hiệu "mạnh" giống hệt
+// server (_manh_xk / _kich_thuoc_khop_xk / _ma_ngoac_khop_xk) để không bao giờ bỏ sót
+// mã rõ ràng đúng chỉ vì thiếu 1 tín hiệu.
+function xkTinhGoiYTuoi(r){
+  const tenChuan=xkChuanTen(r.ten_sp);
+  return xkTon.map(t=>{
+    const manh=xkManh(tenChuan,xkChuanTen(t.ten))||xkKichThuocKhop(r.ten_sp,t.ten)||xkMaNgoacKhop(r.ten_sp,t.ten);
+    const diem=Math.round(xkDiemGiong(tenChuan,xkChuanTen(t.ten))*1000)/1000;
+    return {ma:t.ma,ten:t.ten,dvt:t.dvt,gia:t.gia,manh,diem};
+  }).filter(s=>s.diem>0.3||s.manh).sort((a,b)=>(b.manh-a.manh)||(b.diem-a.diem)).slice(0,6);
+}
 // Fill Down riêng cho lưới Xuất Kho: sau khi fill xong, TỰ KIỂM TRA tồn kho.
 function xkFillDown(){
   nlFillDown();
@@ -4501,11 +4586,15 @@ function xkKiemTraTonLoi(){
       conThieu-=lay;
     };
     layTu(maCu);                          // 1) dùng nốt mã đang gán (nếu còn)
-    if(conThieu>0){                       // 2) dò các mã KHÁC cùng tên, LẤY THEO ĐÚNG THỨ TỰ
-      // xuất hiện trong file tồn kho (dùng hết mã đứng trước mới sang mã đứng
-      // sau) — không ưu tiên theo tồn nhiều/ít, giữ nguyên thứ tự xkTon.
+    if(conThieu>0){                       // 2) dò các mã KHÁC cùng tên (hoặc cùng mã
+      // kiểu/màu trong ngoặc, hoặc cùng kích thước — xem xkMaNgoacKhop/xkKichThuocKhop:
+      // tên bán nhiều khi chèn thêm mô tả ở giữa 2 tên khiến so trùng chuỗi liên tục
+      // như xkManh() thất bại dù rõ ràng đúng mã), LẤY THEO ĐÚNG THỨ TỰ xuất hiện
+      // trong file tồn kho (dùng hết mã đứng trước mới sang mã đứng sau) — không ưu
+      // tiên theo tồn nhiều/ít, giữ nguyên thứ tự xkTon.
       const tenChuan=xkChuanTen(r.ten_sp);
-      xkTon.filter(t=>!daThu.has(t.ma) && xkManh(tenChuan, xkChuanTen(t.ten)))
+      xkTon.filter(t=>!daThu.has(t.ma) &&
+          (xkManh(tenChuan, xkChuanTen(t.ten)) || xkKichThuocKhop(r.ten_sp, t.ten) || xkMaNgoacKhop(r.ten_sp, t.ten)))
         .forEach(t=>layTu(t.ma));
     }
     if(!phanBo.length){
@@ -4639,10 +4728,17 @@ function xkMoGan(idx){
   xkGanIdx=idx;
   xkGanChonNhieu=[];
   const r=xkRows[idx];
+  // tính lại gợi ý + cảnh báo hết tồn TƯƠI mỗi lần mở bảng (không dùng r.goi_y/
+  // r.thieu_ton lưu sẵn từ lúc dò mã tự động lần đầu — dễ lỗi thời, xem
+  // xkTinhGoiYTuoi()).
+  xkGanGoiYTuoi=xkTinhGoiYTuoi(r);
+  const tonConLai=xkTonConLaiMap(idx);
+  const canXuat=Number(r.sl)||0;
+  const coManDu=xkGanGoiYTuoi.some(g=>(tonConLai[g.ma]??0)>=canXuat);
   document.getElementById('xkGanTenSp').innerHTML=`Tên bán: "${xkEsc(r.ten_sp)}"${r.sl?` — SL ${r.sl}`:''}`+
     (r.dvt?` — ĐVT: ${xkEsc(r.dvt)}`:'')+
     (r.dgia!=null&&r.dgia!==''?` — Đơn giá bán: ${fmtVND(r.dgia)}`:'')+
-    (r.thieu_ton?'<br><span style="color:#b91c1c">⚠ Không mã nào còn đủ tồn cho số lượng này — chọn tạm nếu chấp nhận âm kho</span>':'');
+    (!coManDu?'<br><span style="color:#b91c1c">⚠ Không mã nào còn đủ tồn cho số lượng này — chọn tạm nếu chấp nhận âm kho</span>':'');
   document.getElementById('xkGanSearch').value='';
   xkVeDanhSachGan();
   document.getElementById('xkGanModal').style.display='flex';
@@ -4680,8 +4776,8 @@ function xkVeDanhSachGan(){
   const r=xkRows[xkGanIdx]; if(!r){box.innerHTML='';xkGanDanhSach=[];xkGanHighlight=-1;return}
   const tonConLai=xkTonConLaiMap(xkGanIdx);
   const q=(document.getElementById('xkGanSearch').value||'').toLowerCase().trim();
-  const goiY=(r.goi_y||[]).filter(g=>!q||`${g.ten} ${g.ma}`.toLowerCase().includes(q))
-    .map(g=>({...g, con_lai: tonConLai[g.ma]??g.con_lai, noibat:true}))
+  const goiY=xkGanGoiYTuoi.filter(g=>!q||`${g.ten} ${g.ma}`.toLowerCase().includes(q))
+    .map(g=>({...g, con_lai: tonConLai[g.ma]??0, noibat:true}))
     .filter(g=>g.con_lai>0);           // mã đã hết tồn thì không hiện gợi ý
   const goiYma=new Set(goiY.map(g=>g.ma));
   const khac=xkTon.filter(t=>!goiYma.has(t.ma)&&(!q||`${t.ten} ${t.ma}`.toLowerCase().includes(q))).slice(0,200)
