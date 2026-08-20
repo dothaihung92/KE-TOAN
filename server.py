@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-20.224"
+APP_BUILD = "2026-08-20.225"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11831,6 +11831,49 @@ async def xk_import_ton(cid: int, request: Request):
     data["xk_ton"] = ton_rows
     _ghi_du_lieu_cty(cid, data)
     return {"ok": True, "so_file": so_file_ok, "so_dong": len(ton_rows), "loi": loi[:5]}
+
+@app.post("/api/xk/cap-nhat-ton/{cid}")
+async def xk_cap_nhat_ton(cid: int, request: Request):
+    """Cập nhật SỐ LIỆU (SL/giá/tên/ĐVT) của Sheet TON theo mã hàng từ file mới
+    nhất — CHỈ GHI ĐÈ đúng những mã có trong file mới, GIỮ NGUYÊN các mã cũ mà
+    file mới không nhắc tới (khác '📥 Import Tồn Kho' — THAY THẾ TOÀN BỘ danh
+    sách, mã nào file mới thiếu sẽ bị mất). Không đụng tới GIATHANH (mã hàng
+    kho đã gắn cho từng dòng bán) — mã đã gắn giữ nguyên, chỉ số tồn/giá của mã
+    đó thay đổi theo file mới; chỉ bấm 'Dò mã hàng tự động'/'Kiểm tra tồn kho'
+    mới chạy lại việc gán mã."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    gop = {}
+    so_file_ok, loi = 0, []
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})"); continue
+        rows = _doc_file_ton_kho(wb)
+        if not rows:
+            loi.append(f"{fn}: không thấy cột 'Mã hàng'/'Tên hàng' (không đúng mẫu 'Tổng hợp tồn kho')")
+            continue
+        for it in rows:
+            gop[it["ma"]] = it            # file sau đè file trước (mới nhất thắng)
+        so_file_ok += 1
+    if not gop:
+        raise HTTPException(400, "Không đọc được dữ liệu tồn kho từ file đã chọn. " + "; ".join(loi[:3]))
+    data = _doc_du_lieu_cty(cid)
+    ton_theo_ma = {str(t.get("ma") or ""): t for t in (data.get("xk_ton") or [])}
+    so_moi = sum(1 for ma in gop if ma not in ton_theo_ma)
+    ton_theo_ma.update(gop)
+    data["xk_ton"] = list(ton_theo_ma.values())
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True, "so_file": so_file_ok, "so_cap_nhat": len(gop), "so_moi": so_moi,
+            "tong": len(data["xk_ton"]), "loi": loi[:5]}
 
 @app.post("/api/xk/import-tokhai-xuatkhau/{cid}")
 async def xk_import_tokhai_xuatkhau(cid: int, request: Request):

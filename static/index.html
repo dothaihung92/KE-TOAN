@@ -4283,6 +4283,9 @@ function xkVeTrangChinh(){
           <div class="hint" style="margin-bottom:8px">Import file "Tổng hợp tồn kho" xuất từ MISA (Mã hàng/Tên hàng/Cuối kỳ SL/GT).</div>
           <button class="btn sm" style="background:#1a7a7a" onclick="document.getElementById('xkFileTon').click()">📥 Import Tồn Kho</button>
           <input type="file" id="xkFileTon" accept=".xlsx" multiple style="display:none" onchange="xkImportTon(this)">
+          <button class="btn ghost sm" style="margin-left:6px" onclick="document.getElementById('xkFileCapNhatTon').click()"
+            title="Chỉ cập nhật lại SL/giá tồn kho theo mã hàng từ file mới — KHÔNG xoá mã cũ file mới không có, KHÔNG chạy lại việc gán mã hàng đã gán cho các dòng bán (chỉ 'Dò mã hàng tự động'/'Kiểm tra tồn kho' mới gán lại)">🔄 Cập nhật tồn kho</button>
+          <input type="file" id="xkFileCapNhatTon" accept=".xlsx" multiple style="display:none" onchange="xkCapNhatTon(this)">
           <div id="xkTonBadge" style="font-size:12px;margin-top:8px;color:var(--muted)">Đang tải...</div>
         </div>
         <div style="flex:1;min-width:260px;border:1px solid #e0e0e0;border-radius:10px;padding:12px">
@@ -4331,6 +4334,22 @@ async function xkImportTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã import ${d.so_dong} mã hàng tồn kho`,'ok');
+    xkTaiTrangThai();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
+}
+// Cập nhật tồn kho theo file MỚI — chỉ GHI ĐÈ đúng những mã có trong file (SL/giá/
+// tên/ĐVT), GIỮ NGUYÊN các mã cũ không có trong file mới (khác "Import Tồn Kho" ở
+// trên — thay thế TOÀN BỘ danh sách). Không đụng tới mã hàng ĐÃ GẮN cho các dòng
+// bán (xkRows) — chỉ "Dò mã hàng tự động"/"Kiểm tra tồn kho" mới chạy lại việc gán.
+async function xkCapNhatTon(input){
+  const files=input.files; if(!files||!files.length)return;
+  try{
+    const fd=new FormData(); for(const f of files)fd.append('files',f);
+    const r=await fetch(`/api/xk/cap-nhat-ton/${current}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    toast(`✓ Đã cập nhật ${d.so_cap_nhat} mã (thêm mới ${d.so_moi}) — tổng ${d.tong} mã, mã hàng đã gắn giữ nguyên`,'ok');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
@@ -4708,6 +4727,31 @@ function xkTongKet(){
     }
   });
   const tSlThieu=tSl-tSlGan;
+  // đang lọc (cột bất kỳ, VD lọc theo "Mã hàng kho") -> cộng riêng SL/thành tiền của
+  // ĐÚNG các dòng đang hiển thị sau lọc, để biết tổng số lượng của nhóm đang xem mà
+  // không phải cộng tay/xem hết cả bảng — nlLocDong() dùng CHUNG idx với xkRows vì
+  // nlRows luôn dựng 1-1 từ xkRows (xem xkRowsToNl).
+  const dangLoc=Object.keys(nlFilters||{}).some(ci=>nlFilters[ci]);
+  let locHtml='';
+  if(dangLoc){
+    const hienThi=nlLocDong();
+    let slLoc=0, ttLoc=0, slKhoLoc=0, ttKhoLoc=0;
+    hienThi.forEach(({idx})=>{
+      const r=xkRows[idx]; if(!r)return;
+      slLoc+=nlParseSo(r.sl); ttLoc+=nlParseSo(r.tt);
+      if(daCo(r)){
+        const sl=nlParseSo((r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl);
+        slKhoLoc+=sl; ttKhoLoc+=sl*nlParseSo(r.gia_xk);
+      }
+    });
+    locHtml=`<div style="display:flex;gap:22px;flex-wrap:wrap;background:#eef2ff;border-radius:8px;padding:8px 14px;margin-top:6px;font-size:13px">
+      <span>🔎 Đang lọc: <b>${hienThi.length}</b>/${xkRows.length} dòng</span>
+      <span>Tổng SL BÁN (lọc): <b style="color:#1a7a7a">${slLoc.toLocaleString('vi-VN')}</b></span>
+      <span>Tổng SL XUẤT KHO (lọc): <b style="color:#1a7a7a">${slKhoLoc.toLocaleString('vi-VN')}</b></span>
+      <span>Tổng thành tiền BÁN (lọc): <b style="color:#1f6b4a">${Math.round(ttLoc).toLocaleString('vi-VN')} đ</b></span>
+      <span>Tổng thành tiền XUẤT KHO (lọc): <b style="color:#8a5d00">${Math.round(ttKhoLoc).toLocaleString('vi-VN')} đ</b></span>
+    </div>`;
+  }
   el.innerHTML=`<div style="display:flex;gap:22px;flex-wrap:wrap;background:#f0f9f4;border-radius:8px;padding:10px 14px">
     <span>Số dòng: <b>${xkRows.length}</b> — đã gắn mã <b style="color:#1a7a7a">${khop}</b>,
       còn thiếu <b style="color:${xkRows.length-khop?'#b91c1c':'#1a7a7a'}">${xkRows.length-khop}</b></span>
@@ -4716,7 +4760,7 @@ function xkTongKet(){
       — Chưa xuất được: <b style="color:${tSlThieu?'#b91c1c':'#1a7a7a'}">${tSlThieu.toLocaleString('vi-VN')}</b></span>
     <span>Tổng thành tiền BÁN: <b style="color:#1f6b4a">${Math.round(tBan).toLocaleString('vi-VN')} đ</b></span>
     <span>Tổng thành tiền XUẤT KHO (giá vốn): <b style="color:#8a5d00">${Math.round(tKho).toLocaleString('vi-VN')} đ</b></span>
-    <span>Chênh lệch: <b>${Math.round(tBan-tKho).toLocaleString('vi-VN')} đ</b></span></div>`;
+    <span>Chênh lệch: <b>${Math.round(tBan-tKho).toLocaleString('vi-VN')} đ</b></span></div>${locHtml}`;
 }
 function xkGanChonDong(){
   const v=nlVungChonChuan();
