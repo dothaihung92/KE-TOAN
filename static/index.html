@@ -3750,6 +3750,9 @@ let nlDMMode=null;        // null=bảng kê; 'hh'/'nvl'=đang ở lưới Danh 
 let nlSoMoi=0;             // số dòng MỚI ở cuối lưới Danh mục (tô xanh), 0=không tô
 let nlFormulas={};    // lưu công thức: key "r_c" -> "=K5/J5"
 let nlUndoStack=[];   // stack undo: [{header, rows, formulas}]
+let nlRedoStack=[];   // stack "Lặp lại" (redo): cùng dạng {header, rows, formulas} —
+                       // nạp lại khi Undo, xoá sạch mỗi khi có thay đổi MỚI (nlLuuUndo)
+                       // vì lịch sử redo cũ không còn hợp lệ nữa (giống Excel/Word).
 let dmDaSua=false;    // đang ở lưới Danh mục (nlDMMode) và CÓ sửa/import chưa Lưu
 function nlLuuUndo(){
   if(nlDMMode)dmDaSua=true;   // mọi thay đổi trong lưới Danh mục -> đánh dấu chưa lưu
@@ -3759,6 +3762,7 @@ function nlLuuUndo(){
     formulas:Object.assign({},nlFormulas)
   });
   if(nlUndoStack.length>50)nlUndoStack.shift();
+  nlRedoStack=[];
 }
 // cảnh báo khi đóng/tải lại tab trong lúc Danh mục còn thay đổi chưa lưu
 window.addEventListener('beforeunload',(e)=>{
@@ -3766,10 +3770,21 @@ window.addEventListener('beforeunload',(e)=>{
 });
 function nlUndo(){
   if(!nlUndoStack.length){toast('Không có gì để Undo','err');return;}
+  nlRedoStack.push({header:nlHeader.slice(), rows:nlRows.map(r=>r.slice()), formulas:Object.assign({},nlFormulas)});
+  if(nlRedoStack.length>50)nlRedoStack.shift();
   const s=nlUndoStack.pop();
   nlHeader=s.header;nlRows=s.rows;nlFormulas=s.formulas;
   veGridNhapLieu();
   toast('↩ Undo','ok');
+}
+function nlRedo(){
+  if(!nlRedoStack.length){toast('Không có gì để Lặp lại','err');return;}
+  nlUndoStack.push({header:nlHeader.slice(), rows:nlRows.map(r=>r.slice()), formulas:Object.assign({},nlFormulas)});
+  if(nlUndoStack.length>50)nlUndoStack.shift();
+  const s=nlRedoStack.pop();
+  nlHeader=s.header;nlRows=s.rows;nlFormulas=s.formulas;
+  veGridNhapLieu();
+  toast('↪ Lặp lại','ok');
 }
 
 function moNhapLieu(){
@@ -4308,7 +4323,8 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" onclick="xkFillDown()" title="Ctrl+D">⬇ Fill Down</button>
         <button class="btn ghost sm" onclick="nlFillRight()" title="Ctrl+R">➡ Fill Right</button>
         <button class="btn ghost sm" onclick="xkKiemTraTon()" style="color:#8a5d00;border-color:#e8b923">✅ Kiểm tra tồn kho</button>
-        <button class="btn gold sm" onclick="xkLuu()">💾 Lưu tạm</button>
+        <button class="btn ghost sm" onclick="nlUndo()" title="Ctrl+Z">↩ Undo</button>
+        <button class="btn ghost sm" onclick="nlRedo()" title="Ctrl+Y">↪ Lặp lại</button>
         <button class="btn sm" style="background:#1a7a7a" onclick="xkXuatGiaThanh()">📊 Kết xuất giá thành</button>
         <button class="btn ghost sm" onclick="document.getElementById('xkFileGiaThanh').click()">📥 Import giá thành</button>
         <input type="file" id="xkFileGiaThanh" accept=".xlsx" multiple style="display:none" onchange="xkImportGiaThanh(this)">
@@ -4316,14 +4332,15 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" onclick="xkSapXepNgay()">⬆ Sắp xếp theo Ngày</button>
         <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="xkXoaDuLieu()">🗑 Xoá dữ liệu</button>
         <button class="btn ghost sm" style="color:#8a5d00;border-color:#e8b923" onclick="xkGoMa()" title="Dùng khi thấy Tồn kho (cột A) bị âm — gỡ mã + SL/Đơn giá kho (trừ dòng giá vốn thật từ tờ khai) rồi bấm Dò mã hàng tự động lại để tính sạch từ đầu">↺ Gỡ mã hàng</button>
+        <span id="xkAutoSaveBadge" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — <b>bấm đúp (double-click) vào ô "Mã hàng kho"</b> để mở bảng tìm & gán mã, hoặc bấm 1 lần rồi gõ thẳng mã như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. <b>Alt+L</b> Lọc | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — <b>bấm đúp (double-click) vào ô "Mã hàng kho"</b> để mở bảng tìm & gán mã, hoặc bấm 1 lần rồi gõ thẳng mã như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. Mọi thay đổi <b>tự động lưu</b>, không cần bấm nút Lưu. <b>Alt+L</b> Lọc | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo | <b>Ctrl+Y</b> Lặp lại.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
   nlFreezeCol=1; nlChon=null; nhapLieuLoaiHienTai='xk';
-  nlFilters={}; nlSnapTrong={}; nlFormulas={}; nlUndoStack=[];
+  nlFilters={}; nlSnapTrong={}; nlFormulas={}; nlUndoStack=[]; nlRedoStack=[];
   nlCanhBaoNo={}; nlIdxCotNo=-1; nlChiHienCanhBao=false;
 }
 async function xkImportTon(input){
@@ -5007,6 +5024,33 @@ async function xkLuu(){
     toast(`💾 Đã lưu (khớp ${d.so_khop}/${d.so_dong})`,'ok');
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
 }
+// ----- Tự động lưu Xuất Kho (thay cho nút "💾 Lưu tạm" đã bỏ) -----
+// nlVeTong() là điểm HỘI TỤ chung của MỌI thay đổi ở màn Xuất Kho (gõ ô, gán
+// mã, Fill Down/Right, Kiểm tra tồn kho, sắp xếp, Undo/Redo, import...) nên
+// lên lịch lưu ở đó — GOM (debounce) 1.5s sau lần thay đổi CUỐI CÙNG mới thực
+// sự gọi API lưu, tránh gọi liên tục khi đang gõ/sửa nhiều ô liền nhau.
+let xkAutoSaveTimer=null, xkDangLuuTuDong=false, xkCanLuuLai=false;
+function xkLichLuuTuDong(){
+  if(!current||nhapLieuLoaiHienTai!=='xk')return;
+  clearTimeout(xkAutoSaveTimer);
+  xkAutoSaveTimer=setTimeout(xkLuuTuDong,1500);
+}
+async function xkLuuTuDong(){
+  if(!current||nhapLieuLoaiHienTai!=='xk')return;
+  if(xkDangLuuTuDong){xkCanLuuLai=true;return}   // đang lưu dở dang -> đợi xong rồi lưu lại 1 lần nữa cho chắc
+  xkDangLuuTuDong=true;
+  const el=document.getElementById('xkAutoSaveBadge');
+  if(el)el.textContent='💾 Đang tự động lưu...';
+  try{
+    await fetch(`/api/xk/giathanh-luu/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:xkRows})});
+    if(el)el.textContent='✓ Đã tự động lưu lúc '+new Date().toLocaleTimeString('vi-VN');
+  }catch(e){
+    if(el)el.textContent='⚠ Lưu tự động lỗi — sẽ tự thử lại';
+  }finally{
+    xkDangLuuTuDong=false;
+    if(xkCanLuuLai){xkCanLuuLai=false;xkLichLuuTuDong();}
+  }
+}
 // xoá TOÀN BỘ dữ liệu GIATHANH (Xuất Kho) đang có trên màn hình lẫn đã lưu
 // trên server — KHÔNG đụng tới Sheet TON (tồn kho), chỉ để làm lại từ đầu
 // (vd sau khi test import tờ khai xuất khẩu ra dữ liệu chưa đúng ý).
@@ -5061,7 +5105,7 @@ function xkSapXepNgay(){
     return ka<kb?-1:(ka>kb?1:0);
   });
   xkVeGrid();
-  toast('✓ Đã sắp xếp theo Ngày tăng dần — bấm "💾 Lưu tạm" để lưu lại thứ tự này','ok');
+  toast('✓ Đã sắp xếp theo Ngày tăng dần — đang tự động lưu lại thứ tự này','ok');
 }
 // xuất TOÀN BỘ bảng giá thành (đủ cột BÁN & KHO, kể cả dòng chưa gắn mã) ra
 // Excel để xem/lưu trữ — khác với xkXuatFile() vốn chỉ xuất đúng form MISA
@@ -5742,7 +5786,7 @@ async function taiNhapLieu(){
     nlDamBaoNoCo();
     if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
     else if(nhapLieuLoaiHienTai==='out')nlTuDienNoCoRa();
-    nlFilters={};nlSnapTrong={};nlChon=null;nlFormulas={};nlUndoStack=[];nlChiHienCanhBao=false;
+    nlFilters={};nlSnapTrong={};nlChon=null;nlFormulas={};nlUndoStack=[];nlRedoStack=[];nlChiHienCanhBao=false;
     nlTinhCanhBaoNo();
     veGridNhapLieu();
     const info=document.getElementById('nlInfo');
@@ -6108,7 +6152,7 @@ function nlVeTong(){
   // riêng sẽ bị đè lại bởi tổng kết CHUNG (Tổng chưa VAT/Tổng VAT...) mỗi khi
   // các thao tác đó chạy. Đồng bộ lại xkRows từ lưới trước khi tính, để tổng
   // kết luôn khớp với dữ liệu mới sửa (kể cả gõ tay chưa Fill Down/Lưu).
-  if(nhapLieuLoaiHienTai==='xk'){xkTuNlRows();xkTongKet();return;}
+  if(nhapLieuLoaiHienTai==='xk'){xkTuNlRows();xkTongKet();xkLichLuuTuDong();return;}
   const el=document.getElementById('nlTongCong');if(!el)return;
   let ciDS=-1,ciThue=-1;
   nlHeader.forEach((h,i)=>{
@@ -6157,7 +6201,8 @@ function nlSuaO(td){
   }
 }
 function nlPhimO(e,td){
-  if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')){e.preventDefault();nlUndo();return;}
+  if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&(e.key==='z'||e.key==='Z')){e.preventDefault();nlUndo();return;}
+  if((e.ctrlKey||e.metaKey)&&((e.shiftKey&&(e.key==='z'||e.key==='Z'))||e.key==='y'||e.key==='Y')){e.preventDefault();nlRedo();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==='d'||e.key==='D')){e.preventDefault();
     if(nhapLieuLoaiHienTai==='xk')xkFillDown();else nlFillDown();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==='r'||e.key==='R')){e.preventDefault();nlFillRight();return;}
@@ -6254,7 +6299,8 @@ document.addEventListener('keydown',(e)=>{
   if(!(e.ctrlKey||e.metaKey||e.altKey)&&e.key!=='Escape')return;
   const k=e.key.toLowerCase();
   if(e.ctrlKey&&e.shiftKey&&k==='l'){e.preventDefault();nlBatFilter();}
-  if(e.ctrlKey&&k==='z'){e.preventDefault();nlUndo();}
+  if(e.ctrlKey&&!e.shiftKey&&k==='z'){e.preventDefault();nlUndo();}
+  if(e.ctrlKey&&((e.shiftKey&&k==='z')||k==='y')){e.preventDefault();nlRedo();}
   if(e.altKey&&k==='l'){e.preventDefault();nlBatFilter();}                 // Alt+L: Lọc
   if(e.altKey&&k==='g'&&nhapLieuLoaiHienTai==='xk'){e.preventDefault();xkGanChonDong();} // Alt+G: Gán mã
   if(e.key==='Escape'){
@@ -7568,7 +7614,7 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
     </div>`;
   nlHeader=headers.slice();
   nlRows=rows.map(r=>{const x=r.slice();while(x.length<nlHeader.length)x.push('');x.length=nlHeader.length;return x;});
-  nlFreezeCol=0;nlChon=null;nlFilters={};nlSnapTrong={};nlFormulas={};nlUndoStack=[];
+  nlFreezeCol=0;nlChon=null;nlFilters={};nlSnapTrong={};nlFormulas={};nlUndoStack=[];nlRedoStack=[];
   nlChiHienCanhBao=false;nlCanhBaoNo={};nlIdxCotNo=-1;
   dmDaSua=false;    // vừa nạp lại từ server -> chưa có gì thay đổi
   // Các dòng MỚI luôn được server nối vào CUỐI (all_rows = saved_rows + new_rows)
