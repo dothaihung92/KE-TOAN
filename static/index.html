@@ -4774,7 +4774,10 @@ function xkChonMa(ma,ev){
   const canXuat=Number(r.sl)||0;
   if(tonConLai!=null && tonConLai<=0){
     if(!confirm(`Mã ${tn.ma} hiện không còn tồn (đã dùng hết bởi dòng khác). Vẫn gắn mã này (âm kho)?`))return;
-    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
+    // gán mã MỚI cho CẢ dòng (không tách) -> SL kho phải khớp đúng SL bán của
+    // dòng, luôn GHI ĐÈ (không giữ sl_kho cũ) — tránh còn sót số cũ từ lần
+    // gán/dò mã trước đó (VD dò sai mã rồi người dùng tự sửa lại mã khác).
+    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.sl_kho=canXuat; r.mo_ho=false;
   }else if(tonConLai!=null && tonConLai<canXuat){
     // mã còn tồn NHƯNG không đủ số lượng cần xuất của dòng này — cảnh báo và
     // TỰ TÁCH: dòng hiện tại chỉ nhận đúng phần tồn còn, phần thiếu tách
@@ -4786,10 +4789,12 @@ function xkChonMa(ma,ev){
     const dongThieu={...r, sl:canXuat-tonConLai, tt:ttGoc-ttGan,
       ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl_kho:'', mo_ho:true, thieu_ton:true};
     r.sl=tonConLai; r.tt=ttGan;
-    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
+    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.sl_kho=tonConLai; r.mo_ho=false;
     xkRows.splice(xkGanIdx+1,0,dongThieu);
   }else{
-    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.mo_ho=false;
+    // đủ tồn cho CẢ dòng -> SL kho = SL bán, GHI ĐÈ sl_kho cũ (xem comment ở
+    // nhánh âm kho phía trên — cùng lý do).
+    r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.sl_kho=canXuat; r.mo_ho=false;
   }
   const idxVuaGan=xkGanIdx;
   xkDongGan();
