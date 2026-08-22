@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-20.228"
+APP_BUILD = "2026-08-20.229"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24187,12 +24187,23 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 ds = d["ds"]
                 dvt_out, sl_out, dgia_out = it.get("dvt", ""), d["sl"], d["dgia"]
                 ma_vt_out = it.get("ma_vt", "")
+                # Dòng CHIẾT KHẤU THƯƠNG MẠI/giảm NQ204 đứng riêng (_la_ck/_la_nq204 —
+                # đánh dấu ở phan_bo_chiet_khau() cho dòng thành tiền ÂM đứng độc lập,
+                # KHÔNG phải dòng hàng bị trừ CK vào giá) LUÔN hạch toán Nợ 6427 — BẤT
+                # KỂ TK Nợ đã học theo MST của NCC này (thường là hàng hóa, VD 1561): 1
+                # NCC có thể vừa bán hàng vừa xuất riêng dòng chiết khấu/hỗ trợ, không
+                # thể dùng CHUNG 1 TK Nợ cho MỌI dòng của họ như trước (học theo cả hóa
+                # đơn/cả MST) — đây chính là nguồn gốc hạch toán sai khi 1 NCC vừa bán
+                # hàng vừa có dòng CK/hỗ trợ trong CÙNG hoặc KHÁC hóa đơn.
+                no_line = no_r
+                if loai == "purchase" and (it.get("_la_ck") or it.get("_la_nq204")):
+                    no_line = "6427"
                 # HĐ hạch toán Nợ 6427: khi import vào MISA chỉ cần đổi MÃ
                 # HÀNG thành "MHDV" (mã dùng chung cho dòng chi phí quản lý
                 # DN); ĐVT/Số lượng/Đơn giá GIỮ NGUYÊN theo đúng hóa đơn gốc
                 # (trước đây ép luôn ĐVT="MHDV", SL=1 — không cần thiết và
                 # làm sai lệch số liệu gốc so với hóa đơn).
-                if loai == "purchase" and str(no_r or "").strip() == "6427":
+                if loai == "purchase" and str(no_line or "").strip() == "6427":
                     ma_vt_out = "MHDV"
                 append_row([
                     r["khhdon"], r["shdon"],
@@ -24202,7 +24213,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                     sl_out, dgia_out,
                     ds, d["ts_hien"], d["tien_thue"],
                     tt, kq,
-                ], no_r, co_r)
+                ], no_line, co_r)
                 cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
                 cur["ds"] += ds if isinstance(ds, (int, float)) else 0
                 cur["thue"] += d["tien_thue"] if isinstance(d["tien_thue"], (int, float)) else 0
