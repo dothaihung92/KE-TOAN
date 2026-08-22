@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-20.229"
+APP_BUILD = "2026-08-20.230"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9166,15 +9166,33 @@ def _ghi_du_lieu_cty(cid, data):
 
 def _init_hach_toan(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS hach_toan_no(
-        company_id INTEGER, mst_ncc TEXT, tk_no TEXT, updated_at TEXT,
-        UNIQUE(company_id, mst_ncc))""")
+        company_id INTEGER, mst_ncc TEXT, ten_chuan TEXT DEFAULT '', tk_no TEXT, updated_at TEXT,
+        UNIQUE(company_id, mst_ncc, ten_chuan))""")
+    # Migrate DB CŨ (trước khi có cột ten_chuan, học Nợ CHUNG 1 TK cho CẢ MST — cùng 1 NCC
+    # có khi xuất hàng hóa (156/1561) có khi xuất dịch vụ (6427)/TSCĐ (211)/CCDC-trả trước
+    # (242) thì học chung 1 TK theo MST là SAI với những dòng khác loại của cùng NCC đó) ->
+    # cột ten_chuan mới cho phép học RIÊNG theo từng mặt hàng/dịch vụ cụ thể của 1 NCC, giữ
+    # ten_chuan='' làm giá trị MẶC ĐỊNH dự phòng cho cả MST (xem _hoc_map_no/_get_map_no_item).
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(hach_toan_no)").fetchall()]
+    if "ten_chuan" not in cols:
+        conn.execute("ALTER TABLE hach_toan_no RENAME TO hach_toan_no_cu")
+        conn.execute("""CREATE TABLE hach_toan_no(
+            company_id INTEGER, mst_ncc TEXT, ten_chuan TEXT DEFAULT '', tk_no TEXT, updated_at TEXT,
+            UNIQUE(company_id, mst_ncc, ten_chuan))""")
+        conn.execute("""INSERT INTO hach_toan_no(company_id, mst_ncc, ten_chuan, tk_no, updated_at)
+            SELECT company_id, mst_ncc, '', tk_no, updated_at FROM hach_toan_no_cu""")
+        conn.execute("DROP TABLE hach_toan_no_cu")
+        conn.commit()
 
 def _get_map_no(cid):
-    """Trả về {mst_chuan: tk_no} đã học cho công ty này (DB ưu tiên, fallback file)."""
+    """Trả về {mst_chuan: tk_no} MẶC ĐỊNH theo MST (hàng ten_chuan='') đã học cho công ty
+    này (DB ưu tiên, fallback file) — dùng cho cảnh báo "Nợ lệch" phía client và làm giá trị
+    dự phòng khi không tìm được TK học riêng theo tên hàng (xem _get_map_no_item)."""
     conn = db()
     _init_hach_toan(conn)
     rows = conn.execute(
-        "SELECT mst_ncc, tk_no FROM hach_toan_no WHERE company_id=?", (cid,)).fetchall()
+        "SELECT mst_ncc, tk_no FROM hach_toan_no WHERE company_id=? AND (ten_chuan='' OR ten_chuan IS NULL)",
+        (cid,)).fetchall()
     conn.close()
     m = {r["mst_ncc"]: r["tk_no"] for r in rows if (r["tk_no"] or "").strip()}
     if not m:
@@ -9182,30 +9200,97 @@ def _get_map_no(cid):
         m = {k: v for k, v in (data.get("hach_toan_no", {}) or {}).items() if str(v).strip()}
     return m
 
-def _hoc_map_no(cid, mapping):
-    """Học/cập nhật {mst_chuan: tk_no} vào DB + ghi ra file dữ liệu công ty."""
-    mapping = {(_chuan_mst(k)): str(v).strip()
-               for k, v in (mapping or {}).items()
-               if _chuan_mst(k) and str(v).strip()}
-    if not mapping:
+def _get_map_no_item(cid):
+    """Trả về {(mst_chuan, ten_chuan_hang): tk_no} đã học RIÊNG theo từng mặt hàng/dịch vụ cụ
+    thể của từng NCC (DB ưu tiên, fallback file) — ưu tiên dùng trước _get_map_no() (mức MST)
+    khi tự điền TK Nợ cho 1 dòng hàng cụ thể, vì 1 NCC có thể vừa bán hàng hóa vừa xuất dịch
+    vụ/TSCĐ/CCDC nên KHÔNG thể dùng chung 1 TK cho mọi mặt hàng của họ."""
+    conn = db()
+    _init_hach_toan(conn)
+    rows = conn.execute(
+        "SELECT mst_ncc, ten_chuan, tk_no FROM hach_toan_no WHERE company_id=? AND ten_chuan<>''",
+        (cid,)).fetchall()
+    conn.close()
+    m = {(r["mst_ncc"], r["ten_chuan"]): r["tk_no"] for r in rows if (r["tk_no"] or "").strip()}
+    if not m:
+        data = _doc_du_lieu_cty(cid)
+        raw = data.get("hach_toan_no_item", {}) or {}
+        for k, v in raw.items():
+            if not str(v).strip():
+                continue
+            # key lưu file dạng "mst||ten_chuan" (JSON không cho phép key tuple)
+            parts = str(k).split("||", 1)
+            if len(parts) == 2:
+                m[(parts[0], parts[1])] = v
+    return m
+
+def _hoc_map_no(cid, dong_list):
+    """Học/cập nhật TK Nợ vào DB + ghi ra file dữ liệu công ty, từ danh sách dòng đã lưu ở
+    Bảng kê Đầu vào — dong_list: [{"mst":..., "ten":..., "tk":...}, ...] (ten = Tên hàng
+    hóa/dịch vụ GỐC của dòng, để tự chuẩn hóa/so khớp sau này).
+
+    Học 2 CẤP:
+    - RIÊNG theo (MST, tên hàng đã chuẩn hóa) — dòng SAU ghi đè dòng TRƯỚC (mới nhất thắng,
+      giống hành vi cũ) — cho phép 1 NCC có nhiều TK Nợ khác nhau theo TỪNG mặt hàng/dịch vụ.
+    - MẶC ĐỊNH theo MST (ten_chuan='') — dùng TK Nợ PHỔ BIẾN NHẤT (số lần xuất hiện nhiều
+      nhất) trong các dòng vừa lưu của MST đó, thay vì "dòng cuối thắng" như trước (dễ bị 1
+      dòng dịch vụ/TSCĐ lẻ tẻ đứng cuối bảng ghi đè mất giá trị mặc định đúng cho phần lớn
+      hàng hóa còn lại) — chỉ dùng làm DỰ PHÒNG khi gặp mặt hàng MỚI chưa từng học riêng."""
+    sach = []
+    for d in (dong_list or []):
+        mst = _chuan_mst(d.get("mst"))
+        tk = str(d.get("tk") or "").strip()
+        if mst and tk:
+            sach.append({"mst": mst, "ten": str(d.get("ten") or ""), "tk": tk})
+    if not sach:
         return
     conn = db()
     _init_hach_toan(conn)
     now = datetime.datetime.now().isoformat()
-    for mst, tk in mapping.items():
-        conn.execute("""INSERT INTO hach_toan_no(company_id, mst_ncc, tk_no, updated_at)
-            VALUES (?,?,?,?)
-            ON CONFLICT(company_id, mst_ncc) DO UPDATE SET
+
+    # cấp RIÊNG theo (mst, ten_chuan)
+    item_map = {}
+    for d in sach:
+        ten_chuan = _chuan_ten_hang_xk(d["ten"])
+        if ten_chuan:
+            item_map[(d["mst"], ten_chuan)] = d["tk"]   # dòng sau ghi đè dòng trước
+    for (mst, ten_chuan), tk in item_map.items():
+        conn.execute("""INSERT INTO hach_toan_no(company_id, mst_ncc, ten_chuan, tk_no, updated_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(company_id, mst_ncc, ten_chuan) DO UPDATE SET
                 tk_no=excluded.tk_no, updated_at=excluded.updated_at""",
-            (cid, mst, tk, now))
+            (cid, mst, ten_chuan, tk, now))
+
+    # cấp MẶC ĐỊNH theo mst (ten_chuan='') — TK phổ biến nhất trong các dòng vừa lưu
+    from collections import Counter
+    theo_mst = {}
+    for d in sach:
+        theo_mst.setdefault(d["mst"], []).append(d["tk"])
+    for mst, tks in theo_mst.items():
+        tk_pho_bien = Counter(tks).most_common(1)[0][0]
+        conn.execute("""INSERT INTO hach_toan_no(company_id, mst_ncc, ten_chuan, tk_no, updated_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(company_id, mst_ncc, ten_chuan) DO UPDATE SET
+                tk_no=excluded.tk_no, updated_at=excluded.updated_at""",
+            (cid, mst, "", tk_pho_bien, now))
     conn.commit()
-    # ghi TOÀN BỘ map từ DB ra file (đổi thư mục lưu vẫn đầy đủ lịch sử)
-    full = {r["mst_ncc"]: r["tk_no"] for r in conn.execute(
-        "SELECT mst_ncc, tk_no FROM hach_toan_no WHERE company_id=?", (cid,)).fetchall()
-        if (r["tk_no"] or "").strip()}
+
+    # ghi TOÀN BỘ map từ DB ra file (đổi thư mục lưu vẫn đầy đủ lịch sử) — 2 khoá riêng cho
+    # 2 cấp, giữ nguyên "hach_toan_no" (cấp MST) để không phá dữ liệu cache cũ.
+    all_rows = conn.execute(
+        "SELECT mst_ncc, ten_chuan, tk_no FROM hach_toan_no WHERE company_id=?", (cid,)).fetchall()
     conn.close()
+    theo_mst_full, theo_item_full = {}, {}
+    for r in all_rows:
+        if not (r["tk_no"] or "").strip():
+            continue
+        if r["ten_chuan"]:
+            theo_item_full[f"{r['mst_ncc']}||{r['ten_chuan']}"] = r["tk_no"]
+        else:
+            theo_mst_full[r["mst_ncc"]] = r["tk_no"]
     data = _doc_du_lieu_cty(cid)
-    data["hach_toan_no"] = full
+    data["hach_toan_no"] = theo_mst_full
+    data["hach_toan_no_item"] = theo_item_full
     _ghi_du_lieu_cty(cid, data)
 
 
@@ -9523,7 +9608,9 @@ async def nhap_lieu_save(cid: int, request: Request, loai: str = "in"):
     conn.commit()
     conn.close()
 
-    # HỌC tài khoản Nợ theo MST nhà cung cấp (chỉ với bảng kê ĐẦU VÀO)
+    # HỌC tài khoản Nợ theo MST nhà cung cấp + TỪNG mặt hàng/dịch vụ cụ thể (chỉ với bảng kê
+    # ĐẦU VÀO) — xem _hoc_map_no(): học RIÊNG theo (MST, tên hàng) để 1 NCC vừa bán hàng hóa
+    # vừa xuất dịch vụ/TSCĐ/CCDC không bị gán chung 1 TK Nợ cho mọi mặt hàng của họ.
     da_hoc = 0
     if loai == "in" and header and rows:
         hlow = [str(h or "").strip().lower() for h in header]
@@ -9533,21 +9620,23 @@ async def nhap_lieu_save(cid: int, request: Request, loai: str = "in"):
                     return i
             return -1
         i_mst = _tim_cot("mst bán", "mst ban", "mst")
+        i_ten = _tim_cot("tên hàng hóa/dịch vụ", "tên hàng hóa", "tên hàng")
         i_no = -1
         for i, h in enumerate(hlow):
             if h == "nợ" or h == "no":
                 i_no = i; break
-        mapping = {}
+        dong_hoc = []
         if i_mst >= 0 and i_no >= 0:
             for r in rows:
                 if i_mst < len(r) and i_no < len(r):
                     mst = _chuan_mst(r[i_mst])
                     tk = str(r[i_no] or "").strip()
+                    ten = str(r[i_ten]) if (i_ten >= 0 and i_ten < len(r)) else ""
                     if mst and tk:
-                        mapping[mst] = tk   # dòng sau ghi đè dòng trước (mới nhất thắng)
-        if mapping:
-            _hoc_map_no(cid, mapping)
-            da_hoc = len(mapping)
+                        dong_hoc.append({"mst": mst, "ten": ten, "tk": tk})
+        if dong_hoc:
+            _hoc_map_no(cid, dong_hoc)
+            da_hoc = len({d["mst"] for d in dong_hoc})
 
     # Ghi dữ liệu nhập liệu vào FILE riêng của công ty để dễ tìm/xử lý sau này
     data_cty = _doc_du_lieu_cty(cid)
@@ -23936,7 +24025,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         nd = (r["tdlap"] or "").split("T")[0]
         return nd  # yyyy-mm-dd so sánh chuỗi = đúng thứ tự thời gian
 
-    map_no_ht = _get_map_no(cid)  # {mst: tk_no} đã học -> tự điền cột Nợ
+    map_no_ht = _get_map_no(cid)          # {mst: tk_no} học MẶC ĐỊNH theo MST -> dự phòng
+    map_no_item = _get_map_no_item(cid)   # {(mst, ten_chuan): tk_no} học RIÊNG theo mặt hàng
+                                           # cụ thể -> ưu tiên dùng trước map_no_ht (xem Pass 2)
 
     def build_detail_sheet(sheet_name, loai):
         ws = wb.create_sheet(sheet_name)
@@ -24187,17 +24278,24 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 ds = d["ds"]
                 dvt_out, sl_out, dgia_out = it.get("dvt", ""), d["sl"], d["dgia"]
                 ma_vt_out = it.get("ma_vt", "")
-                # Dòng CHIẾT KHẤU THƯƠNG MẠI/giảm NQ204 đứng riêng (_la_ck/_la_nq204 —
-                # đánh dấu ở phan_bo_chiet_khau() cho dòng thành tiền ÂM đứng độc lập,
-                # KHÔNG phải dòng hàng bị trừ CK vào giá) LUÔN hạch toán Nợ 6427 — BẤT
-                # KỂ TK Nợ đã học theo MST của NCC này (thường là hàng hóa, VD 1561): 1
-                # NCC có thể vừa bán hàng vừa xuất riêng dòng chiết khấu/hỗ trợ, không
-                # thể dùng CHUNG 1 TK Nợ cho MỌI dòng của họ như trước (học theo cả hóa
-                # đơn/cả MST) — đây chính là nguồn gốc hạch toán sai khi 1 NCC vừa bán
-                # hàng vừa có dòng CK/hỗ trợ trong CÙNG hoặc KHÁC hóa đơn.
-                no_line = no_r
-                if loai == "purchase" and (it.get("_la_ck") or it.get("_la_nq204")):
+                # Xác định TK Nợ cho ĐÚNG dòng này (KHÔNG dùng chung 1 TK cho cả hóa đơn/cả
+                # MST như trước — 1 NCC có thể vừa bán hàng hóa (156/1561) vừa xuất dịch vụ
+                # (6427)/TSCĐ (211)/CCDC-trả trước (242) tùy mặt hàng), thứ tự ưu tiên:
+                #  1) Đã HỌC RIÊNG cho đúng (MST, tên hàng đã chuẩn hóa) này trước đây (người
+                #     dùng từng tự sửa/xác nhận TK Nợ cho đúng mặt hàng này) -> tin tưởng nhất.
+                #  2) Dòng CHIẾT KHẤU THƯƠNG MẠI/giảm NQ204 đứng riêng (_la_ck/_la_nq204 —
+                #     đánh dấu ở phan_bo_chiet_khau() cho dòng thành tiền ÂM đứng độc lập,
+                #     KHÔNG phải dòng hàng bị trừ CK vào giá) -> luôn 6427, tín hiệu cấu trúc
+                #     chắc chắn từ chính hóa đơn (TChat/STCKhau), không phải đoán mò.
+                #  3) TK Nợ MẶC ĐỊNH học theo MST (dự phòng khi mặt hàng này chưa từng gặp).
+                ten_chuan_dong = _chuan_ten_hang_xk(d["ten"])
+                no_hoc_rieng = map_no_item.get((_chuan_mst(r["nbmst"]), ten_chuan_dong)) if ten_chuan_dong else None
+                if loai == "purchase" and no_hoc_rieng:
+                    no_line = no_hoc_rieng
+                elif loai == "purchase" and (it.get("_la_ck") or it.get("_la_nq204")):
                     no_line = "6427"
+                else:
+                    no_line = no_r
                 # HĐ hạch toán Nợ 6427: khi import vào MISA chỉ cần đổi MÃ
                 # HÀNG thành "MHDV" (mã dùng chung cho dòng chi phí quản lý
                 # DN); ĐVT/Số lượng/Đơn giá GIỮ NGUYÊN theo đúng hóa đơn gốc
