@@ -371,6 +371,8 @@
     <p class="hint" style="margin-top:-6px">⚠ 3 mục trên PHẢI đúng theo đăng ký thuế của công ty (xem trên tờ khai HTKK đã nộp được lần gần nhất, hoặc hỏi kế toán) — nếu để trống hoặc sai, file "Kết xuất XML cho HTKK" có thể bị Cơ quan Thuế báo lỗi "Cơ quan thuế nơi nộp không là Cơ quan thuế quản lý".</p>
     <div class="field"><label>Tên người ký tờ khai <span style="font-weight:400;color:var(--muted)">(dùng khi Kết xuất XML GTGT/TNCN cho HTKK)</span></label><input id="m_nguoi_ky" placeholder="VD: Nguyễn Văn A"></div>
     <p class="hint" style="margin-top:-6px">Đã lưu sẵn ở đây thì lúc Kết xuất XML sẽ tự lấy tên này, không hỏi lại nữa.</p>
+    <div class="field"><label>TK Nợ mặc định <span style="font-weight:400;color:var(--muted)">(khi chưa học được TK Nợ nào cho NCC/mặt hàng)</span></label><input id="m_no_mac_dinh" placeholder="VD: 156 hoặc 1561 (thương mại), 6427 (dịch vụ)"></div>
+    <p class="hint" style="margin-top:-6px">Dùng khi tạo "Chi tiết MUA VÀO" — cột Nợ chỉ tự điền được cho NCC/mặt hàng đã từng gán tay trước đó; NCC/mặt hàng hoàn toàn mới sẽ dùng TK này thay vì để trống. Vẫn nên kiểm tra lại vì mỗi hóa đơn có thể khác loại.</p>
     <div class="field"><label>Tên đăng nhập trang Thuế <span style="font-weight:400;color:var(--muted)">(thường là MST)</span></label><input id="m_user" placeholder="Để trống sẽ dùng MST"></div>
     <div class="field"><label>Mật khẩu trang Thuế</label>
       <div style="display:flex;gap:6px">
@@ -1392,6 +1394,7 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_ma_cqt').value=edit?.ma_cqt_noi_nop||'';
   document.getElementById('m_ten_cqt').value=edit?.ten_cqt_noi_nop||'';
   document.getElementById('m_nguoi_ky').value=edit?.nguoi_ky||'';
+  document.getElementById('m_no_mac_dinh').value=edit?.no_mac_dinh||'';
   document.getElementById('m_user').value=edit?.username||'';
   document.getElementById('m_note').value=edit?.ghichu||'';
   document.getElementById('m_dir').value=edit?.save_dir||'';
@@ -2406,7 +2409,8 @@ async function saveCompany(){
     dia_chi:document.getElementById('m_dia_chi').value.trim(),
     ma_cqt_noi_nop:document.getElementById('m_ma_cqt').value.trim(),
     ten_cqt_noi_nop:document.getElementById('m_ten_cqt').value.trim(),
-    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim()};
+    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim(),
+    no_mac_dinh:document.getElementById('m_no_mac_dinh').value.trim()};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

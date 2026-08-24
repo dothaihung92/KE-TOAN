@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-23.233"
+APP_BUILD = "2026-08-23.234"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1460,6 +1460,15 @@ def init_db():
         # trước khi tra cứu thì mới lưu đúng vào thư mục đã cấu hình. Nay lưu
         # lại để tick 1 lần là áp dụng luôn cho các lần kết xuất sau.
         conn.execute("ALTER TABLE companies ADD COLUMN luu_ket_xuat_mac_dinh INTEGER DEFAULT 0")
+    if "no_mac_dinh" not in ccols:
+        # TK Nợ MẶC ĐỊNH riêng theo từng công ty — dùng làm TK Nợ dự phòng CUỐI CÙNG khi
+        # tạo "Chi tiết MUA VÀO" (export_excel) cho 1 dòng hàng CHƯA có TK Nợ học riêng
+        # theo mặt hàng (hach_toan_no, xem _get_map_no_item) lẫn theo MST NCC (_get_map_no)
+        # — trước đây những dòng này bị BỎ TRỐNG cột Nợ (đặc biệt hay gặp ở công ty/NCC
+        # MỚI, chưa có lịch sử học nào) buộc người dùng phải tự điền tay từng dòng. Mỗi
+        # công ty có ngành nghề khác nhau (thương mại thường Nợ 156/1561, dịch vụ thường
+        # Nợ 6427...) nên để RIÊNG theo từng công ty, không dùng chung 1 giá trị mặc định.
+        conn.execute("ALTER TABLE companies ADD COLUMN no_mac_dinh TEXT")
     # Migration: tách riêng phần HÀNG NHẬP KHẨU (tờ khai NK) trong dữ liệu import
     # để điền đúng chỉ tiêu [23a]/[24a] trên tờ khai 01/GTGT
     icols = [r[1] for r in conn.execute("PRAGMA table_info(imported_data)").fetchall()]
@@ -1792,7 +1801,7 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
@@ -1803,6 +1812,7 @@ def add_company(data: dict = Body(...)):
          (data.get("ma_cqt_noi_nop") or "").strip(),
          (data.get("ten_cqt_noi_nop") or "").strip(),
          (data.get("nguoi_ky") or "").strip(),
+         (data.get("no_mac_dinh") or "").strip(),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -1823,7 +1833,7 @@ def update_company(cid: int, data: dict = Body(...)):
     # Nếu password để trống -> GIỮ password cũ (không xóa)
     cur = conn.execute(
         "SELECT password, dvc_password, dvc_password2, dia_chi, ma_cqt_noi_nop, "
-        "ten_cqt_noi_nop, nguoi_ky FROM companies WHERE id=?", (cid,)).fetchone()
+        "ten_cqt_noi_nop, nguoi_ky, no_mac_dinh FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
@@ -1852,14 +1862,17 @@ def update_company(cid: int, data: dict = Body(...)):
     nguoi_ky = (data.get("nguoi_ky") or "").strip()
     if not nguoi_ky:
         nguoi_ky = (cur["nguoi_ky"] if cur and "nguoi_ky" in cur.keys() else "") or ""
+    no_mac_dinh = (data.get("no_mac_dinh") or "").strip()
+    if not no_mac_dinh:
+        no_mac_dinh = (cur["no_mac_dinh"] if cur and "no_mac_dinh" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=?, no_mac_dinh=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
          dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
-         dia_chi, ma_cqt, ten_cqt, nguoi_ky, cid)
+         dia_chi, ma_cqt, ten_cqt, nguoi_ky, no_mac_dinh, cid)
     )
     conn.commit()
     conn.close()
@@ -23756,6 +23769,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     map_no_ht = _get_map_no(cid)          # {mst: tk_no} học MẶC ĐỊNH theo MST -> dự phòng
     map_no_item = _get_map_no_item(cid)   # {(mst, ten_chuan): tk_no} học RIÊNG theo mặt hàng
                                            # cụ thể -> ưu tiên dùng trước map_no_ht (xem Pass 2)
+    # TK Nợ mặc định RIÊNG theo công ty (cấu hình ở "Sửa công ty") — dự phòng CUỐI CÙNG
+    # khi mặt hàng/NCC này CHƯA từng học được TK Nợ nào (VD công ty/NCC mới tinh) — mỗi
+    # công ty khác ngành nghề nên KHÔNG dùng chung 1 giá trị mặc định toàn hệ thống.
+    no_mac_dinh_cty = str((comp["no_mac_dinh"] if comp and "no_mac_dinh" in comp.keys() else "") or "").strip()
 
     def build_detail_sheet(sheet_name, loai):
         ws = wb.create_sheet(sheet_name)
@@ -23849,7 +23866,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             no_r = co_r = ""
             if loai == "purchase":
                 co_r = _co_theo_tong(r["tgtttbso"])
-                no_r = map_no_ht.get(_chuan_mst(r["nbmst"]), "")
+                no_r = map_no_ht.get(_chuan_mst(r["nbmst"]), "") or no_mac_dinh_cty
 
             if not items:
                 dang_nhap_ok = bool(client and client.token and not getattr(client, "_token_dead", False))
