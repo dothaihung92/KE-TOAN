@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-23.234"
+APP_BUILD = "2026-08-24.235"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24412,7 +24412,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 usd_out = _to_num(val.get("ds_nt")) if info.get("tygia") else ""
                 tygia_out = info.get("tygia") or ""
                 ws.append([stt, info["khmshdon"], info["khhdon"], info["shdon"],
-                           ngay, info["ten_nmua"] or "Khách lẻ", info["mst_nmua"],
+                           ngay, info["ten_nmua"] or "Khách lẻ", info["mst_nmua"] or "KL",
                            info["mat_hang"], _to_num(ds), _to_num(thue), tt, kq,
                            usd_out, tygia_out])
             else:
@@ -24422,7 +24422,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 mat_hang_txt = ("(Cả hóa đơn — không tách dòng hàng)" if (dang_nhap_ok_row and ds)
                                 else "(chưa lấy được file XML)")
                 ws.append([stt, "1", r["khhdon"], r["shdon"], ngay,
-                           "", r["nmmst"], mat_hang_txt,
+                           "", r["nmmst"] or "KL", mat_hang_txt,
                            ds, thue, tt, kq, "", ""])
             sub_ds += ds if isinstance(ds, (int, float)) else 0
             sub_thue += thue if isinstance(thue, (int, float)) else 0
