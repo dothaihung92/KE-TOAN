@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-24.236"
+APP_BUILD = "2026-08-24.237"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11124,14 +11124,28 @@ def _diem_giong_ten_xk(a, b):
         return 0.0
     return difflib.SequenceMatcher(None, a, b).ratio()
 
+_XK_DO_DAI_TOI_THIEU_MANH = 6  # xem giải thích ở _manh_xk
+
 def _manh_xk(a, b):
     """Ứng viên 'mạnh': tên ĐÃ chuẩn hoá trùng y hệt, hoặc 1 chuỗi nằm trong chuỗi kia
     (vd chỉ lệch hậu tố 'CM', dấu * hay -... — coi như CÙNG một mặt hàng).
     KHÔNG dùng cho các mặt hàng chỉ đơn thuần giống nhau về CHỮ (vd khác kích cỡ
-    160/180 ở cùng 1 vị trí) — loại đó phải qua ngưỡng fuzzy riêng, chặt hơn."""
+    160/180 ở cùng 1 vị trí) — loại đó phải qua ngưỡng fuzzy riêng, chặt hơn.
+
+    Chuỗi NGẮN quá thì phép "nằm trong" cực dễ trùng NGẪU NHIÊN — vd tên tồn
+    kho 'GỐI' chuẩn hoá còn 'GOI' (3 ký tự) tình cờ nằm trong '...48GOI' của
+    tên bán hoàn toàn khác ('Me-O Wet Food Tuna...48gói'), hay 'Ga' chuẩn hoá
+    'GA' (2 ký tự) nằm sẵn trong vô số tên có chữ 'gà' -> gán mã sai be bét dù
+    2 mặt hàng chẳng liên quan gì. Chỉ coi phép "nằm trong" là tín hiệu MẠNH
+    khi chuỗi ngắn hơn đủ dài (>= _XK_DO_DAI_TOI_THIEU_MANH ký tự) để gần như
+    chắc chắn không phải trùng tình cờ; chuỗi ngắn hơn ngưỡng này vẫn cho qua
+    nếu trùng Y HỆT (a == b)."""
     if not a or not b:
         return False
-    return a == b or a in b or b in a
+    if a == b:
+        return True
+    ngan, dai = (a, b) if len(a) <= len(b) else (b, a)
+    return len(ngan) >= _XK_DO_DAI_TOI_THIEU_MANH and ngan in dai
 
 def _trich_kich_thuoc_xk(ten):
     """Trích các cụm 'kích thước' dạng số/chữ ghép bằng 'x' trong tên hàng
