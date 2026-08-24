@@ -4436,7 +4436,12 @@ function xkRowsToNl(){
     const ma=String(r.ma||'').trim();
     let ton='';
     if(ma && (ma in tonMap)){
-      daDung[ma]=(daDung[ma]||0)+(nlParseSo(r.sl)||0);
+      // trừ theo SL KHO thật (fallback SL bán nếu trống) — KHÔNG lấy thẳng SL bán, để
+      // nhất quán với xkTonConLaiMap/xkTongKet. Dòng nào bị gán SL kho KHÁC SL bán (VD
+      // gán tay/tách dòng lỡ gán vượt) mà vẫn trừ theo SL bán sẽ khiến cột Tồn kho hiện
+      // SAI (còn dương/về 0) trong khi thực tế đã âm — đúng lỗi người dùng báo: mã đã
+      // gán vượt tồn 2 cái nhưng cột Tồn kho vẫn hiện "0" như còn đủ hàng.
+      daDung[ma]=(daDung[ma]||0)+(nlParseSo(slKho)||0);
       ton=String(tonMap[ma]-daDung[ma]);   // ép chuỗi: tránh số 0 hiện thành ô trống (0 là falsy)
     }
     // Lợi nhuận = Thành tiền BÁN - Thành tiền XUẤT KHO (giá vốn); chỉ tính
