@@ -4333,7 +4333,7 @@ function xkVeTrangChinh(){
         <span id="xkAutoSaveBadge" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
       </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — <b>bấm đúp (double-click) vào ô "Mã hàng kho"</b> để mở bảng tìm & gán mã, hoặc bấm 1 lần rồi gõ thẳng mã như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. Mọi thay đổi <b>tự động lưu</b>, không cần bấm nút Lưu. <b>Alt+L</b> Lọc | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo | <b>Ctrl+Y</b> Lặp lại.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — <b>bấm đúp (double-click) vào ô "Mã hàng kho"</b> để mở bảng tìm & gán mã, hoặc bấm 1 lần rồi gõ thẳng mã như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. Mọi thay đổi <b>tự động lưu</b>, không cần bấm nút Lưu. <b>Alt+L</b> Lọc | <b>Ctrl+L</b> Lọc/bỏ lọc dòng chưa gán Mã hàng kho | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo | <b>Ctrl+Y</b> Lặp lại.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
@@ -6063,9 +6063,9 @@ function veGridNhapLieu(){
       const fr=ci<nlFreezeCol;const sticky=fr?`left:${nlLeftOffset(ci)}px;z-index:5;`:'';
       const cur=nlFilters[ci]||'';
       html+=`<th style="position:sticky;${sticky}top:24px;background:#eef;padding:2px;border:1px solid #ccc">
-        <div style="display:flex;gap:2px">
-        <input value="${cur==='(trống)'?'':cur}" oninput="nlSetFilter(${ci},this.value)" placeholder="lọc..." style="width:70px;font-size:11px;padding:2px 4px;font-weight:400">
-        <button onclick="nlLocTrong(${ci})" title="Chỉ hiện dòng TRỐNG ở cột này" style="font-size:10px;padding:0 4px;border:1px solid #aac;background:${cur==='(trống)'?'#5a3e8a':'#fff'};color:${cur==='(trống)'?'#fff':'#333'};border-radius:3px;cursor:pointer">∅</button>
+        <div style="display:flex;gap:2px;width:100%">
+        <input value="${cur==='(trống)'?'':cur}" oninput="nlSetFilter(${ci},this.value)" placeholder="lọc..." style="flex:1;min-width:40px;width:0;font-size:11px;padding:2px 4px;font-weight:400;box-sizing:border-box">
+        <button onclick="nlLocTrong(${ci})" title="Chỉ hiện dòng TRỐNG ở cột này" style="flex:none;font-size:10px;padding:0 4px;border:1px solid #aac;background:${cur==='(trống)'?'#5a3e8a':'#fff'};color:${cur==='(trống)'?'#fff':'#333'};border-radius:3px;cursor:pointer">∅</button>
         </div></th>`;
     });
     html+='<th style="background:#eef;border:1px solid #ccc"></th></tr>';
@@ -6276,6 +6276,7 @@ document.addEventListener('keydown',(e)=>{
   if(e.ctrlKey&&e.shiftKey&&k==='l'){e.preventDefault();nlBatFilter();}
   if(e.ctrlKey&&!e.shiftKey&&k==='z'){e.preventDefault();nlUndo();}
   if(e.ctrlKey&&((e.shiftKey&&k==='z')||k==='y')){e.preventDefault();nlRedo();}
+  if(e.ctrlKey&&!e.shiftKey&&k==='l'&&nhapLieuLoaiHienTai==='xk'){e.preventDefault();xkLocTrongMaHangKho();} // Ctrl+L: lọc/bỏ lọc trống Mã hàng kho
   if(e.altKey&&k==='l'){e.preventDefault();nlBatFilter();}                 // Alt+L: Lọc
   if(e.altKey&&k==='g'&&nhapLieuLoaiHienTai==='xk'){e.preventDefault();xkGanChonDong();} // Alt+G: Gán mã
   if(e.key==='Escape'){
@@ -6462,6 +6463,18 @@ function nlLocTrong(ci){
     }
   }
   veGridNhapLieu();
+}
+// Ctrl+L (màn Xuất Kho): lọc nhanh CHỈ hiện các dòng CHƯA gán "Mã hàng kho" — bấm lại
+// lần nữa để bỏ lọc, giống hệt bấm nút "∅" ở cột đó nhưng khỏi cần bật thanh Lọc rồi
+// dò tay tới đúng cột trước. Bật sẵn thanh Lọc (nếu đang tắt) để người dùng thấy rõ
+// đang lọc theo cột nào, tránh tưởng nhầm bảng bị mất dữ liệu.
+function xkLocTrongMaHangKho(){
+  const ci=nlHeader.indexOf('Mã hàng kho');
+  if(ci<0)return;
+  const btn=document.getElementById('nlFilterBtn');
+  if(btn&&btn.dataset.on!=='1'){btn.dataset.on='1';btn.classList.add('gold');}
+  nlLocTrong(ci);
+  toast(nlFilters[ci]==='(trống)'?'🔎 Đang lọc: chỉ hiện dòng chưa gán Mã hàng kho (Ctrl+L để bỏ)':'✓ Đã bỏ lọc Mã hàng kho','ok');
 }
 async function nlLuu(){
   if(nlDMMode)return dmLuuGrid();
