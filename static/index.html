@@ -4612,10 +4612,12 @@ function xkTinhGoiYTuoi(r){
     return {ma:t.ma,ten:t.ten,dvt:t.dvt,gia:t.gia,manh,diem};
   }).filter(s=>s.diem>0.3||s.manh).sort((a,b)=>(b.manh-a.manh)||(b.diem-a.diem)).slice(0,6);
 }
-// Fill Down riêng cho lưới Xuất Kho: sau khi fill xong, TỰ KIỂM TRA tồn kho.
+// Fill Down riêng cho lưới Xuất Kho: CHỈ copy giá trị xuống các dòng đã chọn,
+// KHÔNG tự động dò/gán lại mã hàng nữa (trước đây tự gọi xkKiemTraTon() ngay
+// sau khi fill, dễ gán sai hàng loạt cho các dòng hết tồn mã vừa copy xuống
+// — người dùng bấm tay nút "Kiểm tra tồn kho" khi thực sự cần).
 function xkFillDown(){
   nlFillDown();
-  xkKiemTraTon();
 }
 // Kiểm tra & tự sửa theo tồn kho: với TỪNG dòng, dùng nốt phần còn lại của mã
 // đang gán (nếu có) trước; nếu KHÔNG đủ (hết tồn hoặc thiếu), tự DÒ các mã
