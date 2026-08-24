@@ -6084,7 +6084,7 @@ function veGridNhapLieu(){
     const sticky=fr?`position:sticky;left:${nlLeftOffset(ci)}px;z-index:5;`:'';
     const colLetter=nlIdxToCot(ci);
     html+=`<th oncontextmenu="nlMenuCot(event,${ci});return false" onclick="nlClickHeader(${ci})"
-      style="${sticky}position:sticky;top:0;z-index:${fr?5:2};background:${fr?'#244a73':'#2e5c8a'};color:#fff;padding:4px 8px;border:1px solid #ccc;white-space:nowrap;cursor:pointer;${fr?'min-width:'+FW+'px;max-width:'+FW+'px':''}"
+      style="${sticky}position:sticky;top:0;z-index:${fr?5:2};background:${fr?'#244a73':'#2e5c8a'};color:#fff;padding:4px 8px;border:1px solid #ccc;white-space:nowrap;cursor:pointer;${fr?'min-width:'+FW+'px;max-width:'+FW+'px;overflow:hidden;text-overflow:ellipsis':''}"
       ondblclick="nlDoiTenCot(${ci})" title="Cột ${colLetter} | Bấm: cố định | Bấm phải: đổi tên/xóa"><span style="font-size:10px;opacity:.7">${colLetter}</span> ${fr?'📌 ':''}${h||'(cột '+(ci+1)+')'}</th>`;
   });
   html+='<th style="position:sticky;top:0;background:#1f3a5a;color:#fff;padding:4px 6px;border:1px solid #ccc">⋯</th></tr>';
@@ -6119,7 +6119,7 @@ function veGridNhapLieu(){
       // cảnh báo hạch toán Nợ lệch (cột Nợ của dòng được gắn cờ)
       const canhBao=(ci===nlIdxCotNo&&nlCanhBaoNo[idx]);
       if(canhBao){bg='#ffe08a';extra='box-shadow:inset 0 0 0 2px #e8a200;';title=`title="⚠ MST này thường hạch toán Nợ ${nlCanhBaoNo[idx]} — dòng này ghi ${cell}. Kiểm tra lại hóa đơn."`;}
-      const sticky=fr?`position:sticky;left:${nlLeftOffset(ci)}px;z-index:1;min-width:${FW}px;max-width:${FW}px;`:'';
+      const sticky=fr?`position:sticky;left:${nlLeftOffset(ci)}px;z-index:1;min-width:${FW}px;max-width:${FW}px;overflow:hidden;text-overflow:ellipsis;`:'';
       html+=`<td contenteditable="true" data-r="${idx}" data-c="${ci}" ${title}
         onmousedown="nlMouseDown(event,${idx},${ci})" onmouseenter="nlMouseEnter(${idx},${ci})"
         onblur="nlSuaO(this)" onkeydown="nlPhimO(event,this)" ondblclick="nlDblClickO(event,${idx},${ci})"
