@@ -4336,6 +4336,12 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" style="color:#8a5d00;border-color:#e8b923" onclick="xkGoMa()" title="Dùng khi thấy Tồn kho (cột A) bị âm — gỡ mã + SL/Đơn giá kho (trừ dòng giá vốn thật từ tờ khai) rồi bấm Dò mã hàng tự động lại để tính sạch từ đầu">↺ Gỡ mã hàng</button>
         <span id="xkAutoSaveBadge" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
       </div>
+      <div id="xkDoMaTienDoBox" style="display:none;margin-bottom:8px">
+        <div style="font-size:12.5px;color:#5a3e8a;font-weight:600;margin-bottom:3px" id="xkDoMaTienDoText">Đang dò mã hàng...</div>
+        <div style="background:#eee;border-radius:6px;height:8px;overflow:hidden">
+          <div id="xkDoMaTienDoBar" style="background:#5a3e8a;height:100%;width:0%;transition:width .2s"></div>
+        </div>
+      </div>
       <div id="nlCanhBao" style="margin-bottom:6px"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Tên trùng nhiều mã sẽ tự lấy mã còn đủ tồn, không hỏi lại. Dòng <span style="color:#b91c1c;font-weight:700">màu đỏ</span> là dòng KHÔNG mã nào đủ tồn cho số lượng bán, hoặc không tìm thấy tên — <b>bấm đúp (double-click) vào ô "Mã hàng kho"</b> để mở bảng tìm & gán mã, hoặc bấm 1 lần rồi gõ thẳng mã như Excel rồi Fill Down/Ctrl+D — phần mềm tự điền Tên/ĐVT/Đơn giá kho theo mã. Nếu mã hết tồn, phần mềm tự dò mã KHÁC cùng tên còn hàng để gắn tiếp (tách dòng nếu cần) — bấm "✅ Kiểm tra tồn kho" bất cứ lúc nào để chạy lại việc này cho cả bảng. Mọi thay đổi <b>tự động lưu</b>, không cần bấm nút Lưu. <b>Alt+L</b> Lọc | <b>Ctrl+L</b> Lọc/bỏ lọc dòng chưa gán Mã hàng kho | <b>Ctrl+R</b> Fill Right | <b>Ctrl+Z</b> Undo | <b>Ctrl+Y</b> Lặp lại.</div>
       <div id="nlTableWrap" style="overflow:auto;max-height:56vh;border:1px solid #ddd;border-radius:8px"></div>
@@ -4412,9 +4418,29 @@ async function xkImportGiaThanh(input){
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
 }
+// Dò mã hàng có thể mất khá lâu với dữ liệu nhiều dòng (so khớp mờ/fuzzy từng dòng
+// bán với TOÀN BỘ mã hàng tồn kho) — hiện thanh tiến độ bằng cách vừa gọi API dò mã
+// (chạy nền ở server), vừa SONG SONG hỏi thăm tiến độ mỗi 500ms, để người dùng biết
+// đã xử lý tới đâu thay vì chỉ thấy 1 dòng "Đang dò mã hàng..." đứng yên không rõ còn
+// bao lâu — nhất là khi hàng hoá xuất nhiều (hàng nghìn dòng).
 async function xkDoMa(){
   if(!current)return;
-  toast('Đang dò mã hàng...','');
+  const box=document.getElementById('xkDoMaTienDoBox');
+  const text=document.getElementById('xkDoMaTienDoText');
+  const bar=document.getElementById('xkDoMaTienDoBar');
+  if(box){box.style.display='block';text.textContent='Đang dò mã hàng...';bar.style.width='0%';}
+  const capNhatTienDo=async()=>{
+    try{
+      const st=await api(`/api/xk/tao-giathanh-status/${current}`);
+      if(!box)return;
+      if(st.tong>0){
+        const pct=Math.min(100,Math.round(st.da_xu_ly/st.tong*100));
+        bar.style.width=pct+'%';
+        text.textContent=`Đang dò mã hàng: ${st.da_xu_ly.toLocaleString('vi-VN')}/${st.tong.toLocaleString('vi-VN')} dòng (${pct}%)...`;
+      }
+    }catch(e){}
+  };
+  const hen=setInterval(capNhatTienDo,500);
   try{
     const r=await fetch(`/api/xk/tao-giathanh/${current}`,{method:'POST'});
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
@@ -4423,6 +4449,7 @@ async function xkDoMa(){
     xkVeGrid();
     toast(`Đã dò xong: khớp ${d.so_khop}/${d.so_dong}, cần chọn tay ${d.so_chua_khop}`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
+  finally{clearInterval(hen);if(box)box.style.display='none';}
 }
 // chuyển xkRows (mảng object) -> nlHeader/nlRows để dùng chung lưới Excel của Nhập Liệu.
 // Cột "Tồn kho" tính CHẠY DẦN theo thứ tự từ trên xuống: dòng trên dùng mã nào

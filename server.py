@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-24.235"
+APP_BUILD = "2026-08-24.236"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11280,7 +11280,7 @@ def _xk_key_ngay(ngay):
         return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
     return s
 
-def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=None):
+def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=None, on_progress=None):
     """Ghép mã hàng (từ TON) cho từng dòng bán ra (Chi tiết BÁN RA), TRỪ TỒN
     tuần tự theo ngày tăng dần — mặt hàng nào hết tồn (<=0) sẽ KHÔNG gán nữa.
 
@@ -11397,7 +11397,10 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
         return rec
 
     out = list(out_khoa)
-    for it in items:
+    tong_items = len(items)
+    for _idx_pgs, it in enumerate(items):
+        if on_progress:
+            on_progress(_idx_pgs, tong_items)
         pre = giu_assign.get(id(it))
         if pre:
             out.append(pre)
@@ -11474,7 +11477,7 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
     return out
 
 def _xk_hop_nhat_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu,
-                          giu_ngoai_ctbr=True):
+                          giu_ngoai_ctbr=True, on_progress=None):
     """Chạy _gen_xk_giathanh() rồi (nếu giu_ngoai_ctbr) CỘNG THÊM nguyên vẹn
     các dòng trong giathanh_cu KHÔNG khớp bất kỳ dòng nào trong 'Chi tiết BÁN
     RA' (ctbr) hiện có (theo khoá Số HĐ + Tên sản phẩm). _gen_xk_giathanh()
@@ -11495,7 +11498,7 @@ def _xk_hop_nhat_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu,
     đã xác nhận qua báo cáo thật. "Dò mã hàng tự động" phải phản ánh ĐÚNG
     TRỌN VẸN dữ liệu Nhập Liệu ĐANG import (đúng bằng ctbr hiện tại), không
     tự cộng dồn dữ liệu KỲ CŨ không còn liên quan."""
-    ket_qua = _gen_xk_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu)
+    ket_qua = _gen_xk_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu, on_progress=on_progress)
     if not giu_ngoai_ctbr:
         return ket_qua
     col_ctbr = _xk_src_cols(ctbr_header or [])
@@ -11734,7 +11737,7 @@ def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
                     loi_nhuan, ty_le])
     return out
 
-def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
+def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
     """Dò mã hàng tự động TRỰC TIẾP trên GIATHANH đang có sẵn (khớp tên với
     Tồn kho, trừ tồn tuần tự), dùng khi CHƯA có 'Chi tiết BÁN RA' nhưng
     GIATHANH đã có dữ liệu từ nguồn khác (vd Import tờ khai xuất khẩu) —
@@ -11766,7 +11769,10 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None):
         sl_da_dung = _to_num(sl_kho)
         tn["con_lai"] -= sl_da_dung if isinstance(sl_da_dung, (int, float)) else 0
     out = []
-    for r in giathanh_cu:
+    tong_r = len(giathanh_cu)
+    for _idx_pgs, r in enumerate(giathanh_cu):
+        if on_progress:
+            on_progress(_idx_pgs, tong_r)
         if str(r.get("ma") or "").strip():
             out.append(r)
             continue
@@ -12032,6 +12038,13 @@ def xk_get_banra(cid: int):
     src = nhap_lieu_get(cid, "ctbr")
     return {"so_dong": len(src.get("rows") or []), "updated_at": src.get("updated_at", "")}
 
+# Tiến độ "Dò mã hàng tự động" (Xuất Kho) — {cid: {"da_xu_ly", "tong", "dang_chay"}}.
+# Route xk_tao_giathanh chạy đồng bộ (def thường, không phải async def) nên FastAPI/
+# Starlette tự chạy nó trong threadpool riêng — trong lúc nó còn chạy, request GET
+# trạng thái ở threadpool khác vẫn được phục vụ song song bình thường, không cần dựng
+# hẳn 1 hệ thống job nền/queue riêng chỉ để có thanh tiến độ.
+_XK_DOMA_TIEN_DO = {}
+
 @app.post("/api/xk/tao-giathanh/{cid}")
 def xk_tao_giathanh(cid: int):
     """Dò mã hàng tự động cho từng dòng, dựa theo TON đã import. Nếu đã có
@@ -12051,22 +12064,39 @@ def xk_tao_giathanh(cid: int):
         raise HTTPException(400, "Chưa import Sheet TON (Tổng hợp tồn kho)")
     hoc_ma = data.get("xk_hoc_ma") or {}
     giathanh_cu = data.get("xk_giathanh") or []
-    if src.get("rows"):
-        # giu_ngoai_ctbr=False: KHÔNG cộng dồn dòng của KỲ CŨ không còn khớp
-        # 'Chi tiết BÁN RA' hiện tại — "Dò mã hàng tự động" phải phản ánh
-        # ĐÚNG dữ liệu Nhập Liệu ĐANG import, không giữ lại dữ liệu tháng/kỳ
-        # trước đã import khác (xem giải thích ở _xk_hop_nhat_giathanh).
-        giathanh = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
-                                         hoc_ma, giathanh_cu, giu_ngoai_ctbr=False)
-    elif giathanh_cu:
-        giathanh = _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma)
-    else:
-        raise HTTPException(400, "Chưa có dữ liệu gì để dò mã — hãy Import 'Chi tiết BÁN RA' (Nhập Liệu) hoặc Import tờ khai xuất khẩu trước")
+    _XK_DOMA_TIEN_DO[cid] = {"da_xu_ly": 0, "tong": 0, "dang_chay": True}
+
+    def _bao_tien_do(i, n):
+        _XK_DOMA_TIEN_DO[cid] = {"da_xu_ly": i, "tong": n, "dang_chay": True}
+
+    try:
+        if src.get("rows"):
+            # giu_ngoai_ctbr=False: KHÔNG cộng dồn dòng của KỲ CŨ không còn khớp
+            # 'Chi tiết BÁN RA' hiện tại — "Dò mã hàng tự động" phải phản ánh
+            # ĐÚNG dữ liệu Nhập Liệu ĐANG import, không giữ lại dữ liệu tháng/kỳ
+            # trước đã import khác (xem giải thích ở _xk_hop_nhat_giathanh).
+            giathanh = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
+                                             hoc_ma, giathanh_cu, giu_ngoai_ctbr=False,
+                                             on_progress=_bao_tien_do)
+        elif giathanh_cu:
+            giathanh = _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma, on_progress=_bao_tien_do)
+        else:
+            raise HTTPException(400, "Chưa có dữ liệu gì để dò mã — hãy Import 'Chi tiết BÁN RA' (Nhập Liệu) hoặc Import tờ khai xuất khẩu trước")
+    finally:
+        if cid in _XK_DOMA_TIEN_DO:
+            _XK_DOMA_TIEN_DO[cid]["dang_chay"] = False
     data["xk_giathanh"] = giathanh
     _ghi_du_lieu_cty(cid, data)
     so_khop = sum(1 for r in giathanh if r.get("ma"))
     return {"rows": giathanh, "so_dong": len(giathanh), "so_khop": so_khop,
             "so_chua_khop": len(giathanh) - so_khop}
+
+@app.get("/api/xk/tao-giathanh-status/{cid}")
+def xk_tao_giathanh_status(cid: int):
+    """Tiến độ (đã xử lý/tổng số dòng) của lần 'Dò mã hàng tự động' gần nhất — để
+    client hiển thị thanh tiến độ trong lúc chờ (dữ liệu nhiều dòng có thể mất khá
+    lâu do phải so khớp mờ/fuzzy từng dòng bán với toàn bộ mã hàng tồn kho)."""
+    return _XK_DOMA_TIEN_DO.get(cid, {"da_xu_ly": 0, "tong": 0, "dang_chay": False})
 
 @app.post("/api/xk/go-ma/{cid}")
 def xk_go_ma(cid: int):
