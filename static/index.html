@@ -4515,9 +4515,17 @@ function xkChuanTen(s){
   return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase()
     .replace(/\([^)]*\)/g,'').replace(/[^A-Z0-9]/g,'');
 }
+// Cổng JS của _manh_xk (server.py) — PHẢI giữ nguyên ngưỡng độ dài tối thiểu
+// giống hệt bên server: chuỗi ngắn quá (vd tên kho 'Ga' chuẩn hoá 'GA' 2 ký
+// tự) dễ tình cờ nằm trong vô số tên bán khác chẳng liên quan (chữ 'gà' rất
+// phổ biến trong tên thức ăn thú cưng) -> gán sai hàng loạt, nhất là khi Fill
+// Down/Kiểm tra tồn kho tự dò lại mã KHÁC cho nhiều dòng cùng lúc.
+const XK_DO_DAI_TOI_THIEU_MANH=6;
 function xkManh(a,b){
   if(!a||!b)return false;
-  return a===b||a.includes(b)||b.includes(a);
+  if(a===b)return true;
+  const ngan=a.length<=b.length?a:b, dai=a.length<=b.length?b:a;
+  return ngan.length>=XK_DO_DAI_TOI_THIEU_MANH && dai.includes(ngan);
 }
 // cổng JS của _ma_ngoac_gop_xk/_ma_ngoac_khop_xk (server.py): mã kiểu/màu đặt NGAY
 // TRONG ngoặc của tên bán (VD '(BIL50-MTWT)') là tín hiệu CHẮC CHẮN để nhận đúng
