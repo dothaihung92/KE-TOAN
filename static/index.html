@@ -4484,6 +4484,15 @@ async function xkDoMa(){
   const text=document.getElementById('xkDoMaTienDoText');
   const bar=document.getElementById('xkDoMaTienDoBar');
   if(box){box.style.display='block';text.textContent='Đang dò mã hàng...';bar.style.width='0%';}
+  // Ẩn tạm tổng kết CŨ (vd "Số dòng: 6790") trong lúc đang dò — trước đây
+  // vẫn hiện nguyên số liệu CŨ song song với thanh tiến độ, mà thanh tiến độ
+  // đếm theo TỔNG SỐ DÒNG NGUỒN gốc (vd 6518, trước khi tách dòng do thiếu
+  // tồn) — 2 con số đo 2 thứ KHÁC NHAU (dòng nguồn trước khi tách vs dòng
+  // cuối cùng sau khi tách, số dòng chỉ TĂNG lên chứ không giảm) nên không
+  // bao giờ khớp nhau, khiến người dùng tưởng nhầm là lỗi/thiếu sót dữ liệu.
+  const tongKetEl=document.getElementById('nlTongCong');
+  const tongKetCu=tongKetEl?tongKetEl.innerHTML:'';
+  if(tongKetEl)tongKetEl.innerHTML='<div class="hint" style="padding:4px 0">⏳ Đang dò mã hàng — số dòng hiển thị bên dưới có thể TĂNG lên do tách dòng khi 1 mã không đủ tồn cho cả số lượng cần bán, sẽ cập nhật đúng khi xong...</div>';
   const capNhatTienDo=async()=>{
     try{
       const st=await api(`/api/xk/tao-giathanh-status/${current}`);
@@ -4491,7 +4500,7 @@ async function xkDoMa(){
       if(st.tong>0){
         const pct=Math.min(100,Math.round(st.da_xu_ly/st.tong*100));
         bar.style.width=pct+'%';
-        text.textContent=`Đang dò mã hàng: ${st.da_xu_ly.toLocaleString('vi-VN')}/${st.tong.toLocaleString('vi-VN')} dòng (${pct}%)...`;
+        text.textContent=`Đang dò mã hàng (theo ${st.tong.toLocaleString('vi-VN')} dòng nguồn, có thể tách thêm dòng): ${st.da_xu_ly.toLocaleString('vi-VN')}/${st.tong.toLocaleString('vi-VN')} dòng (${pct}%)...`;
       }
     }catch(e){}
   };
@@ -4503,7 +4512,10 @@ async function xkDoMa(){
     xkRows=d.rows||[];
     xkVeGrid();
     toast(`Đã dò xong: khớp ${d.so_khop}/${d.so_dong}, cần chọn tay ${d.so_chua_khop}`,'ok');
-  }catch(e){toast('Lỗi: '+e.message,'err')}
+  }catch(e){
+    toast('Lỗi: '+e.message,'err');
+    if(tongKetEl)tongKetEl.innerHTML=tongKetCu;   // xảy ra lỗi -> khôi phục tổng kết cũ (xkVeGrid không chạy được để tự vẽ lại)
+  }
   finally{clearInterval(hen);if(box)box.style.display='none';}
 }
 // chuyển xkRows (mảng object) -> nlHeader/nlRows để dùng chung lưới Excel của Nhập Liệu.
