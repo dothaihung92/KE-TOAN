@@ -71,12 +71,6 @@
   useRef
 } = React;
 
-// ── Auto-update: kiểm tra bản mới trên GitHub mỗi khi mở file ─────────────────
-// Tăng số này lên mỗi khi có thay đổi được đẩy lên GitHub, để app tự nhận biết
-// có bản mới hơn bản đang chạy trên máy người dùng.
-const APP_VERSION = "2026.08.25.01";
-const GITHUB_RAW_URL = "https://raw.githubusercontent.com/dothaihung92/NGANHANG/claude/bank-reconciliation-review-a1rpwp/KeToanAI_v4.html";
-
 // ── Kho dữ liệu (IndexedDB) ─────────────────────────────────────────────────
 // Trước đây dữ liệu lưu thẳng vào localStorage — trình duyệt (Chrome/Edge) giới
 // hạn CỨNG khoảng 5MB cho mỗi trang, dùng nhiều công ty/sao kê là đầy, ghi thêm
@@ -1814,9 +1808,6 @@ function App() {
   const [confirmResults, setConfirmResults] = useState([]);
   const [confirmRunId, setConfirmRunId] = useState(0); // increments on each new matching run → forces ConfirmScreen remount
   const [toast, setToast] = useState(null);
-  const [updateInfo, setUpdateInfo] = useState(null); // {content} khi phát hiện có bản mới trên GitHub
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [runningMsg, setRunningMsg] = useState("Đang phân tích...");
   const [apiKey, setApiKey] = useState(() => LS.get("api_key") || "");
   // FIX: Lift input state here so it survives tab switches
@@ -1837,67 +1828,6 @@ function App() {
       type
     });
     setTimeout(() => setToast(null), 2500);
-  };
-
-  // ── Auto-update: mỗi lần mở file, âm thầm kiểm tra bản mới trên GitHub ──────
-  // Không tự ý ghi đè file trên máy (trình duyệt không cho phép) — chỉ báo cho
-  // người dùng và cho phép tải bản mới bằng 1 cú nhấp, khỏi phải tự vào GitHub tìm file.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(GITHUB_RAW_URL + "?t=" + Date.now(), { cache: "no-store" });
-        if (!res.ok) return;
-        const text = await res.text();
-        const m = text.match(/const APP_VERSION\s*=\s*"([^"]+)"/);
-        const remoteVersion = m && m[1];
-        if (!cancelled && remoteVersion && remoteVersion !== APP_VERSION) {
-          setUpdateInfo({ version: remoteVersion, content: text });
-        }
-      } catch (e) { /* offline hoặc bị chặn CORS — bỏ qua, không làm phiền người dùng */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const downloadUpdate = async () => {
-    if (!updateInfo) return;
-    setUpdateBusy(true);
-    // Ưu tiên File System Access API: cho phép ghi ĐÈ thẳng lên đúng file cũ trên máy,
-    // khỏi phải tải về thư mục Downloads rồi tự di chuyển/đổi tên thủ công.
-    if (typeof window.showSaveFilePicker === "function") {
-      try {
-        const handle = await window.showSaveFilePicker({
-          suggestedName: "KeToanAI_v4.html",
-          types: [{ description: "HTML", accept: { "text/html": [".html"] } }]
-        });
-        const w = await handle.createWritable();
-        await w.write(updateInfo.content);
-        await w.close();
-        showToast("✓ Đã cập nhật file — hãy đóng tab này và mở lại file vừa lưu");
-        setUpdateDismissed(true);
-        setUpdateBusy(false);
-        return;
-      } catch (e) {
-        // Người dùng bấm Huỷ ở hộp thoại chọn file, hoặc trình duyệt chặn — rơi xuống tải thường
-        if (e && e.name === "AbortError") { setUpdateBusy(false); return; }
-      }
-    }
-    try {
-      const blob = new Blob([updateInfo.content], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "KeToanAI_v4.html";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      showToast("✓ Đã tải bản mới — hãy mở file vừa tải để dùng bản cập nhật");
-      setUpdateDismissed(true);
-    } catch (e) {
-      showToast("Không tải được bản mới, hãy thử lại", "err");
-    }
-    setUpdateBusy(false);
   };
 
   const saveCo = cos => {
@@ -2176,30 +2106,7 @@ function App() {
     setScreen("company");
   }) && null, /*#__PURE__*/React.createElement("div", {
     className: "main"
-  }, updateInfo && !updateDismissed && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "var(--amber-l, #fef5e4)",
-      border: "1px solid #e0c070",
-      borderRadius: 8,
-      padding: "8px 16px",
-      marginBottom: 16,
-      display: "flex",
-      alignItems: "center",
-      flexWrap: "wrap",
-      gap: 12,
-      fontSize: 12.5,
-      color: "#8a5c0a"
-    }
-  }, `🔄 Có bản cập nhật mới (v${updateInfo.version}) trên GitHub — bạn đang dùng v${APP_VERSION}`, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-amber",
-    disabled: updateBusy,
-    style: { height: 26, padding: "0 12px", fontSize: 12 },
-    onClick: downloadUpdate
-  }, updateBusy ? "Đang tải..." : "Tải bản mới"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline",
-    style: { height: 26, padding: "0 12px", fontSize: 12 },
-    onClick: () => setUpdateDismissed(true)
-  }, "Để sau")), screen === "home" && /*#__PURE__*/React.createElement(HomeScreen, {
+  }, screen === "home" && /*#__PURE__*/React.createElement(HomeScreen, {
     companies: companies,
     globalDict: globalDict,
     onAdd: co => {
