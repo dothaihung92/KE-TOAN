@@ -4580,6 +4580,17 @@ function ConfirmScreen({
   const [focusIdx, setFocusIdx] = useState(0);
   const listRef = React.useRef(null);
   const searchInputRef = React.useRef(null);
+  // Render TỪNG PHẦN danh sách (không render hết cả nghìn dòng 1 lúc) — công ty
+  // nhiều giao dịch (VD 967 dòng đang chờ) khiến trang load/thao tác rất chậm do
+  // phải dựng + so khớp lại toàn bộ cây DOM mỗi lần. showCount = số dòng ĐANG
+  // hiện; tự "mở rộng" theo focusIdx để điều hướng bàn phím (↑↓/Enter) không bao
+  // giờ bị chặn bởi dòng còn chưa được render.
+  const SHOW_STEP = 150;
+  const [showCount, setShowCount] = React.useState(SHOW_STEP);
+  React.useEffect(() => { setShowCount(SHOW_STEP); }, [filter, activeTabAccId]);
+  React.useEffect(() => {
+    setShowCount(c => (focusIdx + 30 >= c ? Math.max(c, focusIdx + SHOW_STEP) : c));
+  }, [focusIdx]);
 
   // Only auto-scroll when navigating with keyboard (Arrow keys), not on mouse click
   const keyboardNavRef = React.useRef(false);
@@ -4865,10 +4876,21 @@ function ConfirmScreen({
   // Gợi ý chuyển khoản nội bộ hiển thị thẳng trên từng dòng (không cần mở modal) — cùng logic dò
   // xuyên suốt các TK khác như openInternalModal, nhưng tính sẵn cho TẤT CẢ các dòng đang chờ xử lý.
   // Chỉ tính lại khi rows/danh sách TK thực sự đổi (không phải mỗi lần gõ ô tìm kiếm) để tránh giật lag.
+  // NHƯNG mỗi lần xác nhận 1 dòng, `rows` đổi THAM CHIẾU MẢNG (dù chỉ 1 phần tử thực sự đổi) khiến
+  // useMemo cũ tính lại TOÀN BỘ hàng trăm/nghìn dòng còn lại mỗi lần bấm — rất giật với sổ nhiều dòng.
+  // internalSuggCache lưu kết quả theo THAM CHIẾU OBJECT của từng dòng (r.map(...) giữ nguyên object
+  // cho dòng KHÔNG đổi) — dòng nào chưa từng đổi thì lấy lại kết quả cũ, không tính lại; cache được
+  // cấp MỚI (rỗng) khi danh sách TK khác/tab khác thực sự đổi để không bao giờ trả kết quả cũ sai.
+  const internalSuggCache = React.useMemo(() => new Map(), [co.accounts, activeTabAccId]);
   const internalSuggestions = React.useMemo(() => {
     const map = {};
     rows.forEach(r => {
       if (r.confirmed) return;
+      if (internalSuggCache.has(r)) {
+        const cached = internalSuggCache.get(r);
+        if (cached) map[r.id] = cached;
+        return;
+      }
       let best = null;
       for (const acc of internalModalOtherAccounts) {
         const scored = findInternalCandidatesFor(r, acc.id);
@@ -4876,10 +4898,11 @@ function ConfirmScreen({
           best = { accId: acc.id, accLabel: acc.label, accCurrency: acc.currency, row: scored[0].o, dayDiff: scored[0].dayDiff };
         }
       }
+      internalSuggCache.set(r, best);
       if (best) map[r.id] = best;
     });
     return map;
-  }, [rows, co.accounts, activeTabAccId]);
+  }, [rows, internalSuggCache]);
 
   const quickAcceptInternal = (rowId, sug) => {
     const txRow = rows.find(r => r.id === rowId);
@@ -4939,19 +4962,37 @@ function ConfirmScreen({
       return false;
     });
   };
+  // Cache theo THAM CHIẾU OBJECT của từng dòng — cùng lý do/cơ chế như internalSuggCache ở trên
+  // (tránh tính lại gợi ý tờ khai cho TOÀN BỘ dòng còn lại mỗi khi 1 dòng được xác nhận).
+  // fxClosedSig: findTokhaiSuggestions() còn phụ thuộc isTokhaiClosed(tk) — dò XUYÊN QUA `rows` tìm
+  // dòng đã "chốt" chênh lệch tỷ giá (fxSplit) cho tờ khai đó, KHÔNG phải qua tokhaiList/tokhaiXKList
+  // — nên riêng đổi fxSplit (applyFxDiff/editFxDiff) sẽ không tự làm mới cache theo 2 danh sách trên.
+  // Thêm chữ ký rẻ tiền (chỉ id các dòng đã fxSplit) làm khoá cache thứ 3: đổi fxSplit ở BẤT KỲ dòng
+  // nào → cache reset toàn bộ, đảm bảo tờ khai "vừa chốt" không còn bị gợi ý sai ở các dòng khác.
+  const fxClosedSig = React.useMemo(
+    () => rows.filter(r => r.fxSplit).map(r => r.id).sort().join(","),
+    [rows]
+  );
+  const tokhaiSuggCache = React.useMemo(() => new Map(), [tokhaiList, tokhaiXKList, fxClosedSig]);
   const tokhaiSuggestions = React.useMemo(() => {
     const map = {};
     rows.forEach(r => {
       if (r.confirmed) return;
+      if (tokhaiSuggCache.has(r)) {
+        const cached = tokhaiSuggCache.get(r);
+        if (cached) map[r.id] = cached;
+        return;
+      }
       // Đánh dấu _tkKind trên MỖI gợi ý (NK hay XK) — vì 1 dòng giao dịch có thể vừa gợi ý tờ khai
       // NK vừa gợi ý tờ khai XK (hiếm nhưng có thể xảy ra), cần biết đúng loại để gọi attachTokhai
       // (kind, rowId, tokhaiId) đúng danh sách khi người dùng bấm chọn.
       const sug = (r.tx.debit > 0 ? findTokhaiSuggestions("NK", r).map(tk => ({ ...tk, _tkKind: "NK" })) : [])
         .concat(r.tx.credit > 0 ? findTokhaiSuggestions("XK", r).map(tk => ({ ...tk, _tkKind: "XK" })) : []);
+      tokhaiSuggCache.set(r, sug.length ? sug : null);
       if (sug.length) map[r.id] = sug;
     });
     return map;
-  }, [rows, tokhaiList, tokhaiXKList]);
+  }, [rows, tokhaiSuggCache]);
   // 1 tờ khai có thể gắn với NHIỀU giao dịch thanh toán khác ngày (trả/thu cọc trước, trả/thu nốt
   // sau...) — mỗi lần gắn sẽ THÊM một lần thanh toán mới vào danh sách (payments), không ghi đè.
   const attachTokhai = (kind, rowId, tokhaiId) => {
@@ -6104,7 +6145,7 @@ internalModalFor&&internalModalRow&&React.createElement("div",{
   rows.length > 0 && filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {padding:"2rem",textAlign:"center",color:"var(--text2)",background:"#f8f8f8",borderRadius:8}
   }, "Kh\xF4ng c\xF3 giao d\u1ECBch n\xe0o."),
-filtered.map((r, idx) => /*#__PURE__*/React.createElement(ConfirmRow, {
+filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(ConfirmRow, {
     key: filter+"_"+r.id,
     row: r,
     onConfirm: confirmRow,
@@ -6129,7 +6170,14 @@ filtered.map((r, idx) => /*#__PURE__*/React.createElement(ConfirmRow, {
     onOpenTokhaiPicker: openTokhaiPicker,
     searchTerm: search,
     accountCurrency: activeTabAcc ? activeTabAcc.currency : undefined
-  }))), tokhaiModalOpen && /*#__PURE__*/React.createElement(ToKhaiModal, {
+  })), filtered.length > showCount && /*#__PURE__*/React.createElement("div", {
+    style: {textAlign:"center", padding:"14px 0"}
+  },
+    /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-outline",
+      onClick: () => setShowCount(c => c + SHOW_STEP)
+    }, "↻ Hiện th\xEAm " + Math.min(SHOW_STEP, filtered.length - showCount) + " d\xF2ng (đang hiện " + showCount + "/" + filtered.length + ")")
+  )), tokhaiModalOpen && /*#__PURE__*/React.createElement(ToKhaiModal, {
     kind: "NK",
     list: tokhaiList,
     onClose: () => { setTokhaiModalOpen(false); setTokhaiPickForRow(null); setSplitFlow(null); },
