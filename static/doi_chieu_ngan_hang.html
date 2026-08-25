@@ -74,15 +74,83 @@
 // ── Auto-update: kiểm tra bản mới trên GitHub mỗi khi mở file ─────────────────
 // Tăng số này lên mỗi khi có thay đổi được đẩy lên GitHub, để app tự nhận biết
 // có bản mới hơn bản đang chạy trên máy người dùng.
-const APP_VERSION = "2026.07.06.08";
+const APP_VERSION = "2026.08.25.01";
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/dothaihung92/NGANHANG/claude/bank-reconciliation-review-a1rpwp/KeToanAI_v4.html";
 
-// ── Storage ──────────────────────────────────────────────────────────────────
+// ── Kho dữ liệu (IndexedDB) ─────────────────────────────────────────────────
+// Trước đây dữ liệu lưu thẳng vào localStorage — trình duyệt (Chrome/Edge) giới
+// hạn CỨNG khoảng 5MB cho mỗi trang, dùng nhiều công ty/sao kê là đầy, ghi thêm
+// bị từ chối dù ổ cứng còn trống hàng trăm GB. Chuyển sang IndexedDB: vẫn lưu
+// TRÊN TRÌNH DUYỆT (không cần chọn thư mục) nhưng giới hạn dung lượng của nó
+// tính theo dung lượng ổ cứng còn trống (Chrome thường cho phép tới hơn nửa ổ
+// đĩa trống) — với dữ liệu kế toán coi như không giới hạn.
+const IDB_NAME = "ketoan_fs", IDB_VER = 2;
+const IDBKV = {
+  db: null,
+  _ready: null,
+  onError: null, // gán từ App để báo lỗi ghi đĩa hiếm gặp (đĩa THẬT SỰ hết chỗ)
+  open() {
+    if (this._ready) return this._ready;
+    this._ready = new Promise(resolve => {
+      try {
+        const r = indexedDB.open(IDB_NAME, IDB_VER);
+        r.onupgradeneeded = () => {
+          const db = r.result;
+          if (!db.objectStoreNames.contains("h")) db.createObjectStore("h");
+          if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+        };
+        r.onsuccess = () => { this.db = r.result; resolve(this.db); };
+        r.onerror = () => resolve(null);
+      } catch(e) { resolve(null); }
+    });
+    return this._ready;
+  },
+  async put(k, v) {
+    try {
+      const db = await this.open();
+      if (!db) throw new Error("no-db");
+      await new Promise((res, rej) => {
+        const req = db.transaction("kv", "readwrite").objectStore("kv").put(v, k);
+        req.onsuccess = res; req.onerror = () => rej(req.error);
+      });
+    } catch(e) { try { this.onError && this.onError(e); } catch(e2) {} }
+  },
+  async del(k) {
+    try {
+      const db = await this.open();
+      if (!db) return;
+      db.transaction("kv", "readwrite").objectStore("kv").delete(k);
+    } catch(e) {}
+  },
+  async loadAll() {
+    try {
+      const db = await this.open();
+      if (!db) return {};
+      return await new Promise(resolve => {
+        const out = {};
+        const req = db.transaction("kv", "readonly").objectStore("kv").openCursor();
+        req.onsuccess = e => {
+          const cur = e.target.result;
+          if (cur) { out[cur.key] = cur.value; cur.continue(); }
+          else resolve(out);
+        };
+        req.onerror = () => resolve(out);
+      });
+    } catch(e) { return {}; }
+  }
+};
+if (typeof window !== "undefined") window.__IDBKV = IDBKV;
+
+// LS giữ nguyên API đồng bộ get/set/del/scan (hàng trăm chỗ gọi rải khắp file)
+// — đọc/ghi qua bộ nhớ đệm RAM (__mem, nạp sẵn từ IndexedDB lúc khởi động ở
+// boot() cuối file) để không phải sửa lại từng nơi gọi thành async; mỗi lần
+// set/del đồng thời ghi NGẦM xuống IndexedDB phía sau (không chặn UI).
 const LS = {
+  __mem: Object.create(null),
   get: k => {
     try {
-      const v = localStorage.getItem(k);
-      return v ? JSON.parse(v) : null;
+      const v = LS.__mem[k];
+      return v != null ? JSON.parse(v) : null;
     } catch {
       return null;
     }
@@ -95,57 +163,45 @@ const LS = {
       if (k.indexOf("session_") === 0 && v && typeof v === "object" && !Array.isArray(v)) {
         v = { ...v, _savedAt: Date.now() };
       }
-      localStorage.setItem(k, JSON.stringify(v));
+      const str = JSON.stringify(v);
+      LS.__mem[k] = str;
+      IDBKV.put(k, str);
       try { if (window.__FS && window.__FS.handle) window.__FS.schedule(); } catch(e) {}
       return true;
     } catch(e) {
-      // Hết dung lượng → vẫn cố ghi ra file máy nếu đã liên kết
-      try { if (window.__FS && window.__FS.handle) window.__FS.schedule(); } catch(e2) {}
       return false;
     }
   },
   del: k => {
     try {
-      localStorage.removeItem(k);
+      delete LS.__mem[k];
+      IDBKV.del(k);
       try { if (window.__FS && window.__FS.handle) window.__FS.schedule(); } catch(e) {}
     } catch {}
   },
   // Scan keys by prefix
   scan: prefix => {
-    const keys = [];
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith(prefix)) keys.push(k);
-      }
-    } catch(e) {}
-    return keys;
+    try { return Object.keys(LS.__mem).filter(k => k.startsWith(prefix)); } catch(e) { return []; }
   }
 };
 
 // ── Lưu dữ liệu ra FILE TRÊN MÁY TÍNH (File System Access API) ────────────────
-// localStorage chỉ là bộ đệm nhanh; file trên máy là nơi lưu bền vững, không bị đầy.
+// Chỉ là bản SAO LƯU thêm 1 lớp (phòng khi người dùng xoá dữ liệu trình duyệt);
+// kho dữ liệu chính giờ đã là IndexedDB (bền, không giới hạn ~5MB nữa).
 const FS = {
   handle: null,
   timer: null,
   supported: (typeof window !== "undefined" && "showSaveFilePicker" in window),
   // Gom toàn bộ dữ liệu app thành 1 object
   gatherAll() {
-    const d = {};
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k) d[k] = localStorage.getItem(k);
-      }
-    } catch(e) {}
-    return d;
+    return { ...LS.__mem };
   },
-  // Khôi phục toàn bộ dữ liệu vào localStorage
-  restoreAll(d) {
+  // Khôi phục toàn bộ dữ liệu vào bộ nhớ + IndexedDB
+  async restoreAll(d) {
     try {
-      Object.entries(d || {}).forEach(([k, v]) => {
-        try { localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v)); } catch(e) {}
-      });
+      const entries = Object.entries(d || {});
+      entries.forEach(([k, v]) => { LS.__mem[k] = typeof v === "string" ? v : JSON.stringify(v); });
+      await Promise.all(entries.map(([k]) => IDBKV.put(k, LS.__mem[k])));
       return true;
     } catch(e) { return false; }
   },
@@ -168,20 +224,20 @@ const FS = {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.write(); }, 1200);
   },
-  // IndexedDB lưu handle để dùng lại sau khi tải lại trang
-  _idb(cb) {
-    try {
-      const r = indexedDB.open("ketoan_fs", 1);
-      r.onupgradeneeded = () => { try { r.result.createObjectStore("h"); } catch(e) {} };
-      r.onsuccess = () => cb(r.result);
-      r.onerror = () => cb(null);
-    } catch(e) { cb(null); }
-  },
+  // Lưu/đọc lại handle chọn file để dùng lại sau khi tải lại trang (chung 1 kết
+  // nối IndexedDB với IDBKV để tránh xung đột version khi mở cùng DB 2 nơi).
   saveHandle(h) {
-    this._idb(db => { if (!db) return; try { const t = db.transaction("h", "readwrite"); t.objectStore("h").put(h, "file"); } catch(e) {} });
+    IDBKV.open().then(db => { if (!db) return; try { db.transaction("h", "readwrite").objectStore("h").put(h, "file"); } catch(e) {} });
   },
   loadHandle(cb) {
-    this._idb(db => { if (!db) { cb(null); return; } try { const t = db.transaction("h", "readonly"); const g = t.objectStore("h").get("file"); g.onsuccess = () => cb(g.result || null); g.onerror = () => cb(null); } catch(e) { cb(null); } });
+    IDBKV.open().then(db => {
+      if (!db) { cb(null); return; }
+      try {
+        const g = db.transaction("h", "readonly").objectStore("h").get("file");
+        g.onsuccess = () => cb(g.result || null);
+        g.onerror = () => cb(null);
+      } catch(e) { cb(null); }
+    });
   }
 };
 if (typeof window !== "undefined") window.__FS = FS;
@@ -223,14 +279,13 @@ function getCoToKhai(coId, kind) {
   return LS.get((kind === "XK" ? "tokhaixk_" : "tokhai_") + coId) || [];
 }
 
-// Ước lượng dung lượng localStorage đang dùng (KB)
+// Ước lượng dung lượng đang dùng (KB) — chỉ để hiển thị thông tin, IndexedDB
+// không còn trần cứng ~5MB như localStorage nữa nên không cần cảnh báo "sắp đầy".
 function storageUsedKB() {
   try {
     let total = 0;
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      const v = localStorage.getItem(k) || "";
-      total += k.length + v.length;
+    for (const k in LS.__mem) {
+      total += k.length + (LS.__mem[k] || "").length;
     }
     return Math.round(total / 1024);
   } catch(e) { return 0; }
@@ -241,9 +296,7 @@ function cleanupOrphanStorage() {
     const cos = LS.get("companies") || [];
     const validIds = new Set(cos.map(c => c.id));
     const toDel = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k) continue;
+    for (const k in LS.__mem) {
       let coId = null;
       if (k.startsWith("inv_")) coId = k.slice(4);
       else if (k.startsWith("sesidx_")) coId = k.slice(7);
@@ -252,7 +305,7 @@ function cleanupOrphanStorage() {
       else if (k.startsWith("session_")) { const rest = k.slice(8); coId = rest.split("_")[0]; }
       if (coId && !validIds.has(coId)) toDel.push(k);
     }
-    toDel.forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
+    toDel.forEach(k => LS.del(k));
     return toDel.length;
   } catch(e) { return 0; }
 }
@@ -2386,7 +2439,7 @@ function BackupPanel() {
       const file = await h.getFile();
       const data = JSON.parse(await file.text());
       if (window.confirm("Kh\xF4i ph\u1EE5c d\u1EEF li\u1EC7u t\u1EEB file? D\u1EEF li\u1EC7u hi\u1EC7n t\u1EA1i tr\xEAn tr\xECnh duy\u1EC7t s\u1EBD b\u1ECB ghi \u0111\xE8.")) {
-        window.__FS.restoreAll(data);
+        await window.__FS.restoreAll(data);
         window.__FS.handle = h; window.__FS.saveHandle(h);
         alert("\u2713 \u0110\xE3 kh\xF4i ph\u1EE5c. Trang s\u1EBD t\u1EA3i l\u1EA1i.");
         location.reload();
@@ -2405,12 +2458,12 @@ function BackupPanel() {
     /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 6 } }, "\uD83D\uDCBE L\u01B0u v\xE0o m\xE1y t\xEDnh"),
     !supported && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "var(--red)", marginBottom: 6 } }, "C\u1EA7n Chrome/Edge m\u1EDBi \u0111\u1EC3 d\xF9ng."),
     linked && /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "var(--green-d)", marginBottom: 6 } }, "\u2713 \u0110ang l\u01B0u v\xE0o: ", name),
-    /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: usedKB > 4000 ? "var(--red)" : "var(--text3)", marginBottom: 6 } }, `\u0110\xE3 d\xF9ng ${usedKB} KB b\u1ED9 nh\u1EDB tr\xECnh duy\u1EC7t (localStorage)`, usedKB > 4000 && " \u2014 s\u1EAFp \u0111\u1EA7y, h\xE3y li\xEAn k\u1EBFt file / x\xF3a b\u1EDBt d\u1EEF li\u1EC7u c\u0169"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 10, color: "var(--text3)", marginBottom: 6 } }, `\u0110\xE3 d\xF9ng ${usedKB} KB \u2014 l\u01B0u tr\xEAn \u0111\u0129a (IndexedDB), kh\xF4ng gi\u1EDBi h\u1EA1n ~5MB nh\u01B0 tr\u01B0\u1EDBc n\u1EEFa`),
     /*#__PURE__*/React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
       /*#__PURE__*/React.createElement("button", { className: "btn btn-green", disabled: busy, style: { fontSize: 11 }, onClick: linked ? saveNowFile : linkFile }, linked ? "\uD83D\uDCBE L\u01B0u ngay v\xE0o file" : "\uD83D\uDD17 Ch\u1ECDn file tr\xEAn m\xE1y"),
       /*#__PURE__*/React.createElement("button", { className: "btn btn-outline", disabled: busy, style: { fontSize: 11 }, onClick: restoreFile }, "\uD83D\uDCC2 Kh\xF4i ph\u1EE5c t\u1EEB file")
     ),
-    /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", marginTop: 6, lineHeight: 1.5 } }, "Sau khi li\xEAn k\u1EBFt, m\u1ECDi thay \u0111\u1ED5i t\u1EF1 l\u01B0u v\xE0o file \u2014 kh\xF4ng lo \u0111\u1EA7y b\u1ED9 nh\u1EDB.")
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 9, color: "var(--text3)", marginTop: 6, lineHeight: 1.5 } }, "D\u1EEF li\u1EC7u \u0111\u00E3 l\u01B0u b\u1EC1n tr\u00EAn \u0111\u0129a (IndexedDB), kh\u00F4ng lo \u0111\u1EA7y b\u1ED9 nh\u1EDB. Li\u00EAn k\u1EBFt file ch\u1EC9 \u0111\u1EC3 th\xEAm 1 b\u1EA3n sao l\u01B0u ngo\xE0i tr\xECnh duy\u1EC7t, ph\xF2ng khi x\xF3a cache/g\u1EE1 tr\xECnh duy\u1EC7t.")
   );
 }
 
@@ -8287,6 +8340,37 @@ class AppErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
-ReactDOM.render(/*#__PURE__*/React.createElement(AppErrorBoundary, null, React.createElement(App, null)), document.getElementById("root"));</script>
+// ── Khởi động ────────────────────────────────────────────────────────────────
+// Nạp dữ liệu từ IndexedDB vào LS.__mem TRƯỚC khi render App — nhiều component
+// đọc LS.get(...) đồng bộ ngay ở lượt render đầu tiên (VD useState(() =>
+// LS.get("companies"))), nên phải có sẵn dữ liệu trong __mem trước đó.
+(async function boot() {
+  const root = document.getElementById("root");
+  root.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;color:#888;font-size:13px">Đang tải dữ liệu…</div>';
+  try {
+    const stored = await IDBKV.loadAll();
+    if (Object.keys(stored).length > 0) {
+      LS.__mem = stored;
+    } else {
+      // Di chuyển dữ liệu cũ 1 LẦN DUY NHẤT từ localStorage (bản trước còn giới
+      // hạn ~5MB) sang IndexedDB — chỉ chạy khi IndexedDB đang trống, nên không
+      // bao giờ ghi đè dữ liệu mới hơn đã có trong IndexedDB ở các lần mở sau.
+      const migrated = {};
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k) migrated[k] = localStorage.getItem(k);
+        }
+      } catch(e) {}
+      if (Object.keys(migrated).length > 0) {
+        LS.__mem = migrated;
+        await Promise.all(Object.entries(migrated).map(([k, v]) => IDBKV.put(k, v)));
+        try { localStorage.clear(); } catch(e) {}
+      }
+    }
+  } catch(e) {}
+  ReactDOM.render(/*#__PURE__*/React.createElement(AppErrorBoundary, null, React.createElement(App, null)), root);
+})();
+</script>
 </body>
 </html>
