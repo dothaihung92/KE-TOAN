@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.243"
+APP_BUILD = "2026-08-25.244"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11996,6 +11996,156 @@ async def xk_cap_nhat_ton(cid: int, request: Request):
     _ghi_du_lieu_cty(cid, data)
     return {"ok": True, "so_file": so_file_ok, "so_cap_nhat": len(gop), "so_moi": so_moi,
             "tong": len(data["xk_ton"]), "loi": loi[:5]}
+
+# Header CHUẨN dùng khi nguồn "ctbr" (Chi tiết BÁN RA, xem _xk_src_cols) đang
+# RỖNG — đúng khớp từng cụm "eqs" của _xk_src_cols() nên đọc lại luôn tìm
+# đúng cột dù dữ liệu tới từ nguồn nào (Nhập Liệu thường hay import bổ sung).
+_XK_CTBR_HEADER_CHUAN = ["Ký hiệu", "Số HĐ", "Ngày", "Tên hàng hóa/dịch vụ",
+                         "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"]
+
+def _doc_them_ban_hang(wb):
+    """Đọc file 'Chi tiết bán hàng' BỔ SUNG (nguồn NGOÀI Nhập Liệu thông
+    thường) -> (header, rows) để gộp thêm vào nguồn 'ctbr' hiện có. Ưu tiên
+    sheet ĐÚNG tên 'Chi tiết BÁN RA' (định dạng MISA export, xem
+    _doc_sheet_nhap_lieu — CÙNG hàm đang dùng cho lần import "Nhập Liệu"
+    thông thường, nên file cùng khuôn luôn đọc được y hệt); nếu không có sheet
+    đó, dò LINH HOẠT: quét từng sheet, tìm dòng tiêu đề (10 dòng đầu) có đủ
+    tối thiểu 2 cột 'Tên hàng' + 'Số lượng' (theo TÊN cột, xem _xk_src_cols)
+    — chấp nhận file KHÔNG đúng khuôn MISA, miễn có đủ 2 cột tối thiểu đó."""
+    kq = _doc_sheet_nhap_lieu(wb, "Chi tiết BÁN RA", "Ký hiệu")
+    if kq:
+        return kq
+    for ws in wb.worksheets:
+        for r in range(1, min(ws.max_row, 10) + 1):
+            header = [str(ws.cell(r, c).value or "").strip() for c in range(1, ws.max_column + 1)]
+            if not any(header):
+                continue
+            col = _xk_src_cols(header)
+            if col["ten"] < 0 or col["sl"] < 0:
+                continue
+            rows = []
+            for rr in range(r + 1, ws.max_row + 1):
+                vals = [ws.cell(rr, c).value for c in range(1, ws.max_column + 1)]
+                if all(v is None or str(v).strip() == "" for v in vals):
+                    continue
+                rows.append(["" if v is None else v for v in vals])
+            if rows:
+                return header, rows
+    return None
+
+def _xk_gop_them_ban_hang(cid, header_moi, rows_moi):
+    """Gộp THÊM rows_moi (đọc từ file 'Chi tiết bán hàng' bổ sung, header
+    RIÊNG của file đó — xem _doc_them_ban_hang) vào nguồn 'ctbr' hiện có
+    (nhap_lieu, dùng làm nguồn cho 'Dò mã hàng tự động' ở Xuất Kho) — KHÔNG
+    thay thế, chỉ APPEND. Ánh xạ field theo TÊN cột (_xk_src_cols) ở CẢ 2
+    phía (nguồn cũ & file mới) nên 2 header khác thứ tự/khác định dạng (miễn
+    cùng ý nghĩa) vẫn gộp đúng cột, không dựa vào vị trí cột thô. Nguồn cũ
+    đang RỖNG (công ty chưa từng Import & tách dữ liệu ở Nhập Liệu) thì dùng
+    thẳng header CHUẨN (_XK_CTBR_HEADER_CHUAN).
+
+    Bỏ qua dòng TRÙNG Y HỆT (Số HĐ + Tên hàng chuẩn hoá + Số lượng + Thành
+    tiền đều khớp) với dòng đã có sẵn (kể cả dòng vừa thêm trong CÙNG lần
+    import này) — tránh vô tình import lại cùng 1 file/dòng 2 lần làm tăng ảo
+    doanh số bán/số lượng cần xuất kho."""
+    cur = nhap_lieu_get(cid, "ctbr")
+    header_cu, rows_cu = cur.get("header") or [], cur.get("rows") or []
+    col_moi = _xk_src_cols(header_moi)
+
+    def gv(r, i):
+        return r[i] if (i is not None and 0 <= i < len(r)) else ""
+
+    if header_cu:
+        header_ra = header_cu
+        col_ra = _xk_src_cols(header_cu)
+    else:
+        header_ra = list(_XK_CTBR_HEADER_CHUAN)
+        col_ra = _xk_src_cols(header_ra)
+
+    def khoa_trung(sohd, ten, sl, tt):
+        return (str(sohd or "").strip().lower(), _chuan_ten_hang_xk(ten),
+                round(_to_num(sl) or 0, 3), round(_to_num(tt) or 0))
+
+    da_co = set()
+    for r in rows_cu:
+        da_co.add(khoa_trung(gv(r, col_ra["sohd"]), gv(r, col_ra["ten"]),
+                             gv(r, col_ra["sl"]), gv(r, col_ra["tt"])))
+
+    rows_them, so_trung = [], 0
+    for r in rows_moi:
+        ten = str(gv(r, col_moi["ten"]) or "").strip()
+        if not ten:
+            continue
+        khoa = khoa_trung(gv(r, col_moi["sohd"]), ten, gv(r, col_moi["sl"]), gv(r, col_moi["tt"]))
+        if khoa in da_co:
+            so_trung += 1
+            continue
+        da_co.add(khoa)
+        dong = ["" for _ in header_ra]
+        for key in ("kh", "sohd", "ngay", "ten", "dvt", "sl", "dgia", "tt"):
+            ci = col_ra.get(key, -1)
+            if ci >= 0 and ci < len(dong):
+                dong[ci] = gv(r, col_moi.get(key, -1))
+        rows_them.append(dong)
+
+    rows_ra = rows_cu + rows_them
+    conn = db()
+    conn.execute("""CREATE TABLE IF NOT EXISTS nhap_lieu (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, loai TEXT,
+        header_json TEXT, rows_json TEXT, updated_at TEXT,
+        UNIQUE(company_id, loai))""")
+    conn.execute("""INSERT INTO nhap_lieu (company_id, loai, header_json, rows_json, updated_at)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(company_id, loai) DO UPDATE SET
+            header_json=excluded.header_json, rows_json=excluded.rows_json,
+            updated_at=excluded.updated_at""",
+        (cid, "ctbr", json.dumps(header_ra, ensure_ascii=False),
+         json.dumps(rows_ra, ensure_ascii=False), datetime.datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    return len(rows_them), so_trung, len(rows_ra)
+
+@app.post("/api/xk/import-them-ban-hang/{cid}")
+async def xk_import_them_ban_hang(cid: int, request: Request):
+    """Import THÊM 1 hoặc nhiều file 'Chi tiết bán hàng' bổ sung (nguồn NGOÀI
+    Nhập Liệu thông thường — vd hoá đơn/dòng bán phát sinh riêng chưa nằm
+    trong lần Import & tách dữ liệu ở màn Nhập Liệu) — GỘP THÊM vào nguồn
+    'Chi tiết BÁN RA' (ctbr) hiện có, KHÔNG thay thế/xoá dữ liệu đã có (khác
+    '📥 Import giá thành' — THAY THẾ toàn bộ GIATHANH). Chấp nhận cả file đúng
+    khuôn MISA ('Chi tiết BÁN RA') lẫn file bất kỳ miễn có đủ cột Tên hàng/Số
+    lượng — xem _doc_them_ban_hang. Dòng trùng y hệt dữ liệu đã có bị bỏ qua
+    tự động (xem _xk_gop_them_ban_hang) — không sợ import nhầm 2 lần. Sau khi
+    import, bấm '🔍 Dò mã hàng tự động' như bình thường để các dòng mới này
+    cũng được gán mã hàng/trừ tồn kho."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    so_file_ok, loi = 0, []
+    tong_them, tong_trung = 0, 0
+    for up in files:
+        if up is None:
+            continue
+        fn = getattr(up, "filename", "file")
+        try:
+            content = await up.read()
+            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        except Exception as e:
+            loi.append(f"{fn}: không đọc được ({e})"); continue
+        kq = _doc_them_ban_hang(wb)
+        if not kq:
+            loi.append(f"{fn}: không tìm thấy cột 'Tên hàng'/'Số lượng' hoặc sheet 'Chi tiết BÁN RA' phù hợp")
+            continue
+        header_moi, rows_moi = kq
+        so_them, so_trung, _tong = _xk_gop_them_ban_hang(cid, header_moi, rows_moi)
+        tong_them += so_them
+        tong_trung += so_trung
+        so_file_ok += 1
+    if not so_file_ok:
+        raise HTTPException(400, "Không đọc được dữ liệu từ file đã chọn. " + "; ".join(loi[:3]))
+    cur = nhap_lieu_get(cid, "ctbr")
+    return {"ok": True, "so_file": so_file_ok, "so_dong_them": tong_them, "so_trung": tong_trung,
+            "tong": len(cur.get("rows") or []), "loi": loi[:5]}
 
 @app.post("/api/xk/import-tokhai-xuatkhau/{cid}")
 async def xk_import_tokhai_xuatkhau(cid: int, request: Request):

@@ -4307,7 +4307,9 @@ function xkVeTrangChinh(){
         </div>
         <div style="flex:1;min-width:260px;border:1px solid #e0e0e0;border-radius:10px;padding:12px">
           <div style="font-weight:700;font-size:13px;margin-bottom:4px">2) Sheet GIATHANH — nguồn Chi tiết bán ra</div>
-          <div class="hint" style="margin-bottom:8px">Tự lấy từ dữ liệu Nhập Liệu đã import (sheet "Chi tiết BÁN RA" trong file bạn Import & tách dữ liệu ở màn Nhập Liệu) — không cần import lại.</div>
+          <div class="hint" style="margin-bottom:8px">Tự lấy từ dữ liệu Nhập Liệu đã import (sheet "Chi tiết BÁN RA" trong file bạn Import & tách dữ liệu ở màn Nhập Liệu) — không cần import lại. Có thêm hàng bán phát sinh riêng (chưa nằm trong file Nhập Liệu đã import) thì dùng nút dưới đây để GỘP THÊM, không mất dữ liệu cũ.</div>
+          <button class="btn ghost sm" onclick="document.getElementById('xkFileThemBanHang').click()" title="Import thêm 1 file 'Chi tiết bán hàng' bổ sung (đúng khuôn MISA hoặc chỉ cần đủ cột Tên hàng/Số lượng) — GỘP THÊM vào nguồn hiện có, KHÔNG thay thế. Dòng trùng y hệt dữ liệu đã có sẽ tự bỏ qua, không sợ import nhầm 2 lần.">➕ Import thêm dữ liệu</button>
+          <input type="file" id="xkFileThemBanHang" accept=".xlsx" multiple style="display:none" onchange="xkImportThemBanHang(this)">
           <div id="xkSrcBadge" style="font-size:12px;margin-top:8px;color:var(--muted)">Đang tải...</div>
         </div>
         <div style="flex:1;min-width:260px;border:1px solid #e0e0e0;border-radius:10px;padding:12px">
@@ -4375,6 +4377,27 @@ async function xkCapNhatTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã cập nhật ${d.so_cap_nhat} mã (thêm mới ${d.so_moi}) — tổng ${d.tong} mã, mã hàng đã gắn giữ nguyên`,'ok');
+    xkTaiTrangThai();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
+}
+// Import THÊM 1 hoặc nhiều file "Chi tiết bán hàng" bổ sung (nguồn NGOÀI
+// Nhập Liệu thông thường) — GỘP THÊM vào nguồn "ctbr" hiện có (KHÔNG thay
+// thế như "Import giá thành"), rồi bấm "Dò mã hàng tự động" như bình thường
+// để các dòng mới cũng được gán mã/trừ tồn. Dòng trùng y hệt dữ liệu đã có
+// tự bỏ qua ở server (xem _xk_gop_them_ban_hang), không sợ lỡ import 2 lần.
+async function xkImportThemBanHang(input){
+  const files=input.files; if(!files||!files.length)return;
+  toast('Đang đọc file chi tiết bán hàng...','');
+  try{
+    const fd=new FormData(); for(const f of files)fd.append('files',f);
+    const r=await fetch(`/api/xk/import-them-ban-hang/${current}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+    const d=await r.json();
+    toast(`✓ Đã gộp thêm ${d.so_dong_them} dòng`+
+      (d.so_trung?` (bỏ qua ${d.so_trung} dòng trùng)`:'')+
+      ` — tổng nguồn hiện có ${d.tong} dòng. Bấm "🔍 Dò mã hàng tự động" để xử lý.`,'ok');
+    if(d.loi&&d.loi.length)toast(`⚠ ${d.loi.join('; ')}`,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
