@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.250"
+APP_BUILD = "2026-08-25.251"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11331,21 +11331,23 @@ def _kd2(s):
 def _doc_file_ton_kho(wb):
     """Đọc file 'Tổng hợp tồn kho' (báo cáo MISA, tiêu đề gộp ô 2 dòng: nhóm
     Đầu kỳ/Nhập kho/Xuất kho/Cuối kỳ ở dòng trên, Số lượng/Giá trị ở dòng dưới)
-    -> (list {ma,ten,dvt,ton,gia}, danh_sach_kho). Dò tiêu đề theo CHỮ, không
-    phụ thuộc cột.
+    -> (list {ma,ten,dvt,ton,gia,kho,kho_ro}, danh_sach_kho). Dò tiêu đề theo
+    CHỮ, không phụ thuộc cột.
 
     Báo cáo MISA có thể xuất theo NHIỀU KHO (mỗi kho 1 khối, ngăn bằng dòng
     'Tên kho : ...' không có Mã hàng) — số lượng tồn của CÙNG 1 mã ở các khối
-    khác nhau được CỘNG DỒN vào 1 con số duy nhất (vẫn giữ hành vi cũ, không
-    tách theo kho vì "Xuất kho" hiện chỉ ghi 1 kho cố định "HH" cho mọi dòng,
-    xem _gen_xuat_kho_rows — tách theo kho cần biết ĐÚNG kho nào ứng với "HH"
-    trong dữ liệu MISA thật, chưa có đủ thông tin để làm tự động, an toàn hơn
-    là báo cho người dùng biết). danh_sach_kho: tên các kho phát hiện được
-    (theo thứ tự xuất hiện) — CHỈ có ý nghĩa CẢNH BÁO khi có TỪ 2 KHO trở lên:
-    số "Tồn kho" tổng hợp này là CỘNG DỒN NHIỀU KHO, có thể VƯỢT số thực tế
-    khả dụng ở 1 kho cụ thể mà MISA áp dụng khi xuất kho bán hàng (đã xác
-    nhận qua báo cáo thật: phần mềm tính đủ tồn nhưng MISA từ chối vì kho
-    "KHODOVAT" cụ thể không đủ, dù tổng CÁC kho cộng lại thì đủ)."""
+    khác nhau vẫn được CỘNG DỒN vào 1 con số "ton" duy nhất (để hiển thị/kiểm
+    tra tổng), NHƯNG giờ có ghi thêm "kho" = tên kho THẬT SỰ chứa mã đó, nếu
+    mã CHỈ xuất hiện ở ĐÚNG 1 kho (trường hợp phổ biến — mỗi mã hàng thường
+    chỉ thuộc 1 kho cố định theo nhóm/ngành hàng, xem _gen_xuat_kho_rows dùng
+    lại để ghi ĐÚNG kho khi xuất, thay vì ghi cứng "HH" cho mọi dòng như
+    trước — đã xác nhận qua báo cáo thật: MISA từ chối ghi sổ vì hàng thuộc
+    kho "Kho Chó Mèo Có VAT" nhưng phần mềm lại ghi "HH"). "kho_ro"=False nếu
+    mã đó nằm RẢI RÁC ở nhiều kho khác nhau (hiếm, thật sự mơ hồ không biết
+    xuất từ kho nào) — lúc đó "kho"=None, xuất kho vẫn phải ghi tạm 1 giá trị
+    (xem _gen_xuat_kho_rows) nhưng KHÔNG chắc đúng, cần người dùng tự kiểm
+    tra lại. danh_sach_kho: tên các kho phát hiện được (theo thứ tự xuất
+    hiện) — dùng để CẢNH BÁO khi có TỪ 2 KHO trở lên (xem nơi gọi)."""
     ws = wb.worksheets[0]
     hdr_row = None
     for r in range(1, min(ws.max_row, 10) + 1):
@@ -11380,11 +11382,18 @@ def _doc_file_ton_kho(wb):
         return [], []
     gop = {}
     danh_sach_kho = []
+    kho_hien_tai = ""       # kho của khối đang đọc (cập nhật mỗi khi gặp dòng 'Tên kho : ...')
     for r in range(hdr_row + 2, ws.max_row + 1):
         ma = str(ws.cell(r, i_ma + 1).value or "").strip()
+        # phòng hờ 'Tổng cộng'/'Tổng số' lỡ rơi đúng vào cột Mã hàng (thường
+        # không xảy ra — dòng này thường KHÔNG có gì ở cột Mã hàng — nhưng
+        # không loại trừ khả năng layout khác, tránh tạo "mã hàng" giả).
+        if _kd2(ma) in ("tong cong", "tong so"):
+            ma = ""
         if not ma:
             # dò dòng 'Tên kho : ...' (khác dòng 'Tổng cộng' — không có chữ
-            # 'kho') để biết file này có phải xuất GỘP NHIỀU KHO hay không.
+            # 'kho') để biết file này có phải xuất GỘP NHIỀU KHO hay không,
+            # đồng thời cập nhật kho_hien_tai cho các dòng mã hàng tiếp theo.
             for c in range(1, ncol + 1):
                 v = str(ws.cell(r, c).value or "").strip()
                 if not v or ":" not in v:
@@ -11392,8 +11401,10 @@ def _doc_file_ton_kho(wb):
                 vkd = _kd2(v)
                 if "ten kho" in vkd or vkd.startswith("kho "):
                     ten_kho = v.split(":", 1)[1].strip()
-                    if ten_kho and ten_kho not in danh_sach_kho:
-                        danh_sach_kho.append(ten_kho)
+                    if ten_kho:
+                        kho_hien_tai = ten_kho
+                        if ten_kho not in danh_sach_kho:
+                            danh_sach_kho.append(ten_kho)
                     break
             continue               # bỏ dòng 'Tên kho : ...' / dòng tổng
         ten = str(ws.cell(r, i_ten + 1).value or "").strip()
@@ -11405,13 +11416,19 @@ def _doc_file_ton_kho(wb):
         if ma in gop:
             gop[ma]["ton"] += sl
             gop[ma]["gt"] += gt
+            if kho_hien_tai and kho_hien_tai not in gop[ma]["kho_set"]:
+                gop[ma]["kho_set"].add(kho_hien_tai)
         else:
-            gop[ma] = {"ma": ma, "ten": ten, "dvt": dvt, "ton": sl, "gt": gt}
+            gop[ma] = {"ma": ma, "ten": ten, "dvt": dvt, "ton": sl, "gt": gt,
+                      "kho_set": {kho_hien_tai} if kho_hien_tai else set()}
     out = []
     for it in gop.values():
         gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
+        kho_set = it["kho_set"]
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
-                    "ton": it["ton"], "gia": gia})
+                    "ton": it["ton"], "gia": gia,
+                    "kho": next(iter(kho_set)) if len(kho_set) == 1 else None,
+                    "kho_ro": len(kho_set) <= 1})
     return out, danh_sach_kho
 
 def _xk_src_cols(header):
@@ -12047,13 +12064,23 @@ def _xk_kiem_tra_vuot_ton(ton_rows, giathanh_rows):
     vuot.sort(key=lambda x: -x["vuot"])
     return vuot
 
-def _gen_xuat_kho_rows(giathanh_rows):
+def _gen_xuat_kho_rows(giathanh_rows, ton_rows=None):
     """Từ các dòng GIATHANH đã gắn mã (bỏ dòng chưa gắn) -> mảng dòng form MISA
     'Xuất kho'. Ngày hạch toán/chứng từ = CUỐI THÁNG của hoá đơn cuối cùng (mới
-    nhất) trong lô; Số chứng từ = 'XK T{tháng}/{năm}' theo tháng đó."""
+    nhất) trong lô; Số chứng từ = 'XK T{tháng}/{năm}' theo tháng đó.
+
+    Cột 'Kho' (AE): lấy ĐÚNG kho của từng mã hàng theo dữ liệu Sheet TON (xem
+    _doc_file_ton_kho — field 'kho', chỉ có khi mã đó CHỈ nằm ở đúng 1 kho
+    trong file 'Tổng hợp tồn kho' đã import); mã nào không xác định được kho
+    (chưa có Sheet TON, hoặc nằm rải rác nhiều kho) mới rơi về mặc định "HH"
+    như trước — TRƯỚC ĐÂY ghi cứng "HH" cho MỌI dòng bất kể mã đó thật sự
+    thuộc kho nào, khiến MISA từ chối ghi sổ khi hàng thật sự nằm ở kho khác
+    (đã xác nhận qua báo cáo thật: hàng thuộc "Kho Chó Mèo Có VAT" nhưng ghi
+    "HH", MISA báo vượt tồn kho "HH" dù kho đúng vẫn còn hàng)."""
     rows = [r for r in (giathanh_rows or []) if str(r.get("ma") or "").strip()]
     if not rows:
         return [], ""
+    ma_kho = {t.get("ma"): t.get("kho") for t in (ton_rows or []) if t.get("kho")}
     ngay_cuoi = max(rows, key=lambda r: _xk_key_ngay(r.get("ngay")))["ngay"]
     ngay_ht, thang, nam = _xk_cuoi_thang(ngay_cuoi)
     so_ct = f"XK T{thang}/{nam}"
@@ -12064,13 +12091,34 @@ def _gen_xuat_kho_rows(giathanh_rows):
         row[2] = ngay_ht; row[3] = ngay_ht; row[4] = so_ct
         row[27] = r.get("ma", "")                 # AB Mã hàng
         row[28] = r.get("ten_xk") or r.get("ten_sp", "")   # AC Tên hàng
-        row[30] = "HH"                             # AE Kho
+        row[30] = ma_kho.get(r.get("ma")) or "HH"  # AE Kho
         row[32] = "632"; row[33] = "1561"          # AG Nợ / AH Có
         row[34] = r.get("dvt_xk") or r.get("dvt", "")      # AI ĐVT
         sl_kho = r.get("sl_kho")
         row[35] = sl_kho if sl_kho not in (None, "", 0) else r.get("sl", "")  # AJ Số lượng
         out.append(row)
     return out, so_ct
+
+def _xk_canh_bao_kho_ton(danh_sach_kho, ton_rows):
+    """Cảnh báo sau khi Import/Cập nhật Tồn Kho khi file gồm TỪ 2 KHO trở lên
+    — xem _doc_file_ton_kho. Từ khi export dùng ĐÚNG kho của từng mã (field
+    'kho', xem _gen_xuat_kho_rows) thay vì ghi cứng 'HH', đa số mã hàng (CHỈ
+    thuộc 1 kho) đã tự động ĐÚNG — cảnh báo giờ chỉ còn cần nêu rõ những mã
+    THẬT SỰ mơ hồ (nằm rải rác ở NHIỀU kho khác nhau, 'kho_ro'=False) vì
+    những mã đó KHÔNG xác định được kho đúng để xuất, vẫn có rủi ro như cũ."""
+    if len(danh_sach_kho) <= 1:
+        return None
+    mo_ho = [t for t in (ton_rows or []) if not t.get("kho_ro", True)]
+    phan_mo_ho = ""
+    if mo_ho:
+        mau = ", ".join(f"{t.get('ma')} ({t.get('ten','')[:30]})" for t in mo_ho[:8])
+        phan_mo_ho = (f" Trong đó {len(mo_ho)} mã hàng nằm RẢI RÁC ở nhiều kho khác nhau (không xác "
+                      f"định được kho đúng để xuất, vẫn có thể bị MISA từ chối nếu vượt tồn ở 1 kho cụ "
+                      f"thể): {mau}{' ...' if len(mo_ho) > 8 else ''}.")
+    return (f"⚠ File tồn kho gồm {len(danh_sach_kho)} KHO khác nhau: "
+            f"{', '.join(danh_sach_kho[:8])}{' ...' if len(danh_sach_kho) > 8 else ''}. "
+            f"Mã hàng chỉ thuộc đúng 1 kho đã tự động xuất ĐÚNG kho đó."
+            f"{phan_mo_ho}")
 
 @app.post("/api/xk/import-ton/{cid}")
 async def xk_import_ton(cid: int, request: Request):
@@ -12108,15 +12156,7 @@ async def xk_import_ton(cid: int, request: Request):
     data = _doc_du_lieu_cty(cid)
     data["xk_ton"] = ton_rows
     _ghi_du_lieu_cty(cid, data)
-    canh_bao_kho = None
-    if len(danh_sach_kho) > 1:
-        canh_bao_kho = (f"⚠ File tồn kho gồm {len(danh_sach_kho)} KHO khác nhau: "
-                        f"{', '.join(danh_sach_kho[:8])}{' ...' if len(danh_sach_kho) > 8 else ''}. "
-                        f"Số 'Tồn kho' đang CỘNG DỒN cả {len(danh_sach_kho)} kho — nếu 'Xuất kho bán "
-                        f"hàng' trong MISA chỉ trừ ở 1 kho cụ thể, số này có thể VƯỢT quá số thực tế "
-                        f"khả dụng ở đúng kho đó dù tổng các kho vẫn đủ (đã gặp thật: MISA từ chối "
-                        f"ghi sổ vì 1 kho cụ thể không đủ). Nếu gặp lỗi tương tự, hãy xuất riêng báo "
-                        f"cáo 'Tổng hợp tồn kho' CHỈ CHO đúng 1 kho đang dùng để xuất bán rồi import lại.")
+    canh_bao_kho = _xk_canh_bao_kho_ton(danh_sach_kho, ton_rows)
     return {"ok": True, "so_file": so_file_ok, "so_dong": len(ton_rows), "loi": loi[:5],
             "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
 
@@ -12164,13 +12204,7 @@ async def xk_cap_nhat_ton(cid: int, request: Request):
     ton_theo_ma.update(gop)
     data["xk_ton"] = list(ton_theo_ma.values())
     _ghi_du_lieu_cty(cid, data)
-    canh_bao_kho = None
-    if len(danh_sach_kho) > 1:
-        canh_bao_kho = (f"⚠ File tồn kho gồm {len(danh_sach_kho)} KHO khác nhau: "
-                        f"{', '.join(danh_sach_kho[:8])}{' ...' if len(danh_sach_kho) > 8 else ''}. "
-                        f"Số 'Tồn kho' đang CỘNG DỒN cả {len(danh_sach_kho)} kho — nếu 'Xuất kho bán "
-                        f"hàng' trong MISA chỉ trừ ở 1 kho cụ thể, số này có thể VƯỢT quá số thực tế "
-                        f"khả dụng ở đúng kho đó dù tổng các kho vẫn đủ.")
+    canh_bao_kho = _xk_canh_bao_kho_ton(danh_sach_kho, data["xk_ton"])
     return {"ok": True, "so_file": so_file_ok, "so_cap_nhat": len(gop), "so_moi": so_moi,
             "tong": len(data["xk_ton"]), "loi": loi[:5],
             "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
@@ -12573,7 +12607,7 @@ def xk_export(cid: int):
                                   f"\"🔍 Dò mã hàng tự động\" lại (hoặc \"✅ Kiểm tra tồn kho\" + \"💾 Lưu tạm\"), "
                                   f"rồi xuất lại. Chi tiết: {chi_tiet}"
                                   + (" ..." if len(vuot) > 10 else ""))
-    out, so_ct = _gen_xuat_kho_rows(giathanh)
+    out, so_ct = _gen_xuat_kho_rows(giathanh, data.get("xk_ton") or [])
     if not out:
         raise HTTPException(400, "Chưa có dòng nào được gắn mã hàng để xuất")
     wb = openpyxl.Workbook()
