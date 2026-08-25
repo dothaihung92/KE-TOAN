@@ -4612,21 +4612,33 @@ function xkTinhGoiYTuoi(r){
     return {ma:t.ma,ten:t.ten,dvt:t.dvt,gia:t.gia,manh,diem};
   }).filter(s=>s.diem>0.3||s.manh).sort((a,b)=>(b.manh-a.manh)||(b.diem-a.diem)).slice(0,6);
 }
-// Fill Down riêng cho lưới Xuất Kho: CHỈ copy giá trị xuống các dòng đã chọn,
-// KHÔNG tự động dò/gán lại mã hàng nữa (trước đây tự gọi xkKiemTraTon() ngay
-// sau khi fill, dễ gán sai hàng loạt cho các dòng hết tồn mã vừa copy xuống
-// — người dùng bấm tay nút "Kiểm tra tồn kho" khi thực sự cần).
+// Fill Down riêng cho lưới Xuất Kho: copy giá trị xuống các dòng đã chọn, rồi
+// CHỈ dò/cập nhật tồn kho cho ĐÚNG các dòng vừa fill xuống đó (không đụng tới
+// bất kỳ dòng nào khác ngoài vùng đã bôi đen) — không cần bấm thêm nút
+// "Kiểm tra tồn kho". (Trước đây có 2 phiên bản: tự kiểm tra CẢ BẢNG — dễ gán
+// sai hàng loạt các dòng ngoài vùng chọn; rồi tắt hẳn tự động — phải bấm tay
+// nút riêng. Giờ tự động nhưng CHỈ trong đúng phạm vi vừa fill.)
 function xkFillDown(){
+  const v=nlVungChonChuan();
   nlFillDown();
+  if(!v)return;
+  const hienThi=new Set(nlLocDong().map(o=>o.idx));
+  const rSet=new Set();
+  for(let r=v.r1+1;r<=v.r2;r++){ if(hienThi.has(r)) rSet.add(r); }
+  if(rSet.size)xkKiemTraTon(rSet);
 }
 // Kiểm tra & tự sửa theo tồn kho: với TỪNG dòng, dùng nốt phần còn lại của mã
 // đang gán (nếu có) trước; nếu KHÔNG đủ (hết tồn hoặc thiếu), tự DÒ các mã
 // KHÁC cùng tên/gần tên trong Tồn kho còn hàng để gắn tiếp (ưu tiên mã còn
 // nhiều tồn hơn) — có thể tách thành nhiều dòng nếu phải dùng nhiều mã.
 // Chỉ để trống (kèm cảnh báo) phần THỰC SỰ không còn mã nào đủ đáp ứng.
-function xkKiemTraTon(){
+// rSet (tuỳ chọn): Set các chỉ số dòng (trong xkRows HIỆN TẠI) cần xử lý —
+// dùng khi chỉ muốn kiểm tra/dò lại 1 phạm vi (vd vừa Fill Down), các dòng
+// KHÁC ngoài rSet giữ NGUYÊN VẸN, không đụng tới. Bỏ trống (mặc định) ->
+// kiểm tra CẢ BẢNG như nút "✅ Kiểm tra tồn kho".
+function xkKiemTraTon(rSet){
   try{
-    xkKiemTraTonLoi();
+    xkKiemTraTonLoi(rSet);
   }catch(e){
     // đảm bảo lưới & tổng kết luôn được vẽ lại đúng bảng XK dù có lỗi bất ngờ,
     // tránh để lại tổng kết CŨ/SAI (kiểu tổng kết chung của lưới khác) trên màn hình
@@ -4634,11 +4646,23 @@ function xkKiemTraTon(){
     toast('Lỗi khi kiểm tra tồn kho: '+e.message,'err');
   }
 }
-function xkKiemTraTonLoi(){
+function xkKiemTraTonLoi(rSet){
   xkTuNlRows();
   const tongGocTruoc=xkRows.reduce((a,r)=>a+(Number(r.sl)||0),0);
   const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
   const daDung={};
+  // Nếu chỉ xử lý 1 phạm vi (rSet): trừ tồn TRƯỚC cho các dòng NGOÀI phạm vi
+  // theo đúng mã ĐANG gán (giữ nguyên, không tính lại) — để biết chính xác
+  // còn lại bao nhiêu tồn thật sự dành cho các dòng trong phạm vi, không cho
+  // chúng "cướp" tồn của các dòng khác đã gán từ trước.
+  if(rSet){
+    xkRows.forEach((r,i)=>{
+      if(rSet.has(i))return;
+      const ma=String(r.ma||'').trim();
+      const slDung=Number(r.sl)||0;
+      if(ma&&slDung>0)daDung[ma]=(daDung[ma]||0)+slDung;
+    });
+  }
   const ketQua=[];
   // moRong[chỉ số dòng CŨ] = {batDau, soDong} — dòng cũ đó đã "nở" thành
   // những dòng nào (chỉ số MỚI) sau khi tách — dùng để dịch lại vùng đang
@@ -4648,6 +4672,11 @@ function xkKiemTraTonLoi(){
   const moRong=[];
   let soCanhBao=0;
   xkRows.forEach((r,chiSoCu)=>{
+    if(rSet&&!rSet.has(chiSoCu)){          // ngoài phạm vi -> giữ NGUYÊN VẸN
+      moRong[chiSoCu]={batDau:ketQua.length, soDong:1};
+      ketQua.push(r);
+      return;
+    }
     const batDau=ketQua.length;
     const ghiMoRong=()=>{moRong[chiSoCu]={batDau, soDong:ketQua.length-batDau};};
     const maCu=String(r.ma||'').trim();
@@ -4708,8 +4737,9 @@ function xkKiemTraTonLoi(){
     toast(`⚠ CẢNH BÁO: tổng số lượng lệch ${(tongGocTruoc-tongGocSau).toLocaleString('vi-VN')} sau khi kiểm tra tồn kho — báo lại cho người phát triển`,'err');
   }
   xkVeGrid(moRong);
-  if(soCanhBao>0)toast(`⚠ Đã dò lại theo tồn kho — ${soCanhBao} dòng phải đổi/tách mã do hết tồn`,'err');
-  else toast('✓ Không có mã nào vượt tồn kho','ok');
+  const pham=rSet?` trong vùng vừa Fill Down (${rSet.size} dòng)`:'';
+  if(soCanhBao>0)toast(`⚠ Đã dò lại theo tồn kho${pham} — ${soCanhBao} dòng phải đổi/tách mã do hết tồn`,'err');
+  else toast(`✓ Không có mã nào vượt tồn kho${pham}`,'ok');
 }
 // moRong (tuỳ chọn): dịch lại vùng đang CHỌN (nlChon) và snapshot "lọc dòng
 // trống" (nlSnapTrong) sau khi các dòng bị TÁCH (xem xkKiemTraTonLoi) —
