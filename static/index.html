@@ -5812,11 +5812,11 @@ function moBangKe(loai){
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
-        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('nk')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần Danh mục Hàng hóa/NVL + KH/NCC đã import trước">⬆ Nhập kho vào MISA</button>
-        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('kqk')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần Danh mục TSCĐ/CCDC + KH/NCC đã import trước">⬆ Không qua kho vào MISA</button>
-        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
-        <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaDvtChungTu()" title="Sửa lại cột ĐVT trên các chứng từ Mua hàng/Dịch vụ CHƯA GHI SỔ do chính phần mềm tạo, nếu đang hiện GUID thô/sai (Danh mục đã đúng nhưng chứng từ cũ vẫn giữ ĐVT sai lúc ghi)">🔧 Sửa ĐVT chứng từ đã ghi</button>
-        <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaGiaTriNhapKho()" title="Sửa lại cột 'Giá trị nhập kho' (0 sai) trên các chứng từ Mua Hàng Nhập Kho/Không Qua Kho CHƯA GHI SỔ ghi trước đó — do trước đây bỏ sót không set tổng ở header">🔧 Sửa Giá trị nhập kho</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('nk')" title="Ghi thẳng vào MISA (PUVoucher, GHI SỔ LUÔN) — cần Danh mục Hàng hóa/NVL + KH/NCC đã import trước">⬆ Nhập kho vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('kqk')" title="Ghi thẳng vào MISA (PUVoucher, GHI SỔ LUÔN) — cần Danh mục TSCĐ/CCDC + KH/NCC đã import trước">⬆ Không qua kho vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, GHI SỔ LUÔN) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
+        <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaDvtChungTu()" title="Sửa lại cột ĐVT trên các chứng từ Mua hàng/Dịch vụ do chính phần mềm tạo (kể cả đã ghi sổ), nếu đang hiện GUID thô/sai (Danh mục đã đúng nhưng chứng từ cũ vẫn giữ ĐVT sai lúc ghi)">🔧 Sửa ĐVT chứng từ đã ghi</button>
+        <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaGiaTriNhapKho()" title="Sửa lại cột 'Giá trị nhập kho' (0 sai) trên các chứng từ Mua Hàng Nhập Kho/Không Qua Kho do chính phần mềm ghi trước đó (kể cả đã ghi sổ) — do trước đây bỏ sót không set tổng ở header">🔧 Sửa Giá trị nhập kho</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanDvt()" title="Chỉ xem — dò sâu 1 vài mã hàng cụ thể để tìm nguyên nhân gốc khi các nút sửa ở trên đều báo 'không có gì cần sửa' nhưng chứng từ MISA vẫn hiện GUID">🔬 Chẩn đoán sâu ĐVT</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
@@ -5834,7 +5834,7 @@ function moBangKe(loai){
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
-        <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, CHƯA ghi sổ) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, GHI SỔ LUÔN) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanBanHang()" title="Chỉ xem — dò sâu 1 vài Số chứng từ cụ thể khi ghi xong nhưng MISA không hiện Số hóa đơn/Khách hàng ở tab Hóa đơn">🔬 Chẩn đoán sâu Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaQuetKyBanHang()" title="Chỉ xem — quét TOÀN BỘ chứng từ Bán hàng trong 1 kỳ (vd T7/2026), so sánh chứng từ phần mềm tạo với chứng từ thật để biết lỗi thiếu Số hóa đơn chỉ do phần mềm hay do cả MISA">📋 Quét cả kỳ Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaDoCauTrucHoaDon()" title="Chỉ xem — dò TRIGGER/VIEW/bảng khác liên quan Số hóa đơn khi dữ liệu SAVoucher/SAInvoice đã đúng và đã Ghi sổ mà lưới MISA vẫn không hiện Số hóa đơn">🔍 Dò cấu trúc hóa đơn</button>
@@ -6645,7 +6645,8 @@ async function nlMuaHangKQK(btn){
 const MUA_HANG_TEN={nk:'Mua hàng nhập kho',kqk:'Mua hàng không qua kho',dv:'Mua hàng dịch vụ'};
 // Ghi chứng từ Mua hàng THẲNG vào MISA (PUVoucher/PUVoucherDetail) — RỦI RO CAO
 // NHẤT trong phần mềm vì đây là chứng từ kế toán thật. Lấy dữ liệu từ Bảng kê
-// đầu vào ĐÃ LƯU (không cần chọn lại). LUÔN ghi ở trạng thái CHƯA GHI SỔ —
+// đầu vào ĐÃ LƯU (không cần chọn lại). GHI SỔ LUÔN (chỉ đổi cờ trạng thái,
+// KHÔNG tự sinh bút toán Sổ Cái như MISA thật làm khi bấm "Ghi sổ" tay) —
 // mã hàng/NCC phải đã có sẵn trong MISA, thiếu thì bị bỏ qua (không đoán/tạo mới).
 async function muaHangImportMisa(loai){
   if(!current){toast('Chọn công ty trước','err');return}
@@ -6670,13 +6671,13 @@ async function muaHangImportMisa(loai){
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
         ⚠ RỦI RO CAO: đây là chứng từ <b>${MUA_HANG_TEN[loai]}</b> — Nợ/Có, thuế GTGT thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b>
-        ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng chứng từ trong MISA kiểm tra rồi tự bấm "Ghi sổ".
+        ở trạng thái <b>ĐÃ GHI SỔ</b> — CHỈ đổi cờ trạng thái, KHÔNG tự sinh bút toán Sổ Cái (GLVoucher) như MISA thật làm khi bấm "Ghi sổ" tay — nên tự đối chiếu lại Sổ Cái/báo cáo trong MISA định kỳ để chắc chắn không lệch.
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
       <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Mua hàng trong bảng)</span>`:''}</div>
       ${(pv.so_bo_qua_ncc>0||pv.so_bo_qua_mahang>0)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA, <b>${pv.so_bo_qua_mahang}</b> dòng do thiếu mã hàng — hãy import Danh mục Hàng hóa/NVL/TSCĐ/CCDC và KH/NCC trước, rồi chạy lại.</div>`:''}
       ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
-        Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (chưa ghi sổ) trong MISA — bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ đã ghi sổ).</div>`:''}
+        Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (do phần mềm tạo trước đó) trong MISA — bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ thật của khách).</div>`:''}
       ${pv.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có <b>${pv.so_ngay_loi}</b> chứng từ KHÔNG đọc được ngày từ dữ liệu gốc (cột tô đỏ ở dưới) → bị ghi tạm bằng NGÀY HÔM NAY. Nếu bộ lọc "Kỳ" trên MISA không bao gồm hôm nay, chứng từ sẽ KHÔNG hiện dù dữ liệu đúng — kiểm tra lại định dạng ngày trong Bảng kê đầu vào.</div>`:''}
       ${pv.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
@@ -6697,14 +6698,14 @@ async function muaHangImportMisa(loai){
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
-        ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
+        ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
       </div>`;
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
-// Sửa ĐVT trên CHỨNG TỪ ĐÃ GHI (Mua hàng/Dịch vụ, chưa ghi sổ, do chính
-// phần mềm tạo) — KHÁC "Quét & sửa ĐVT hỏng" ở khung Danh mục (chỉ sửa
+// Sửa ĐVT trên CHỨNG TỪ ĐÃ GHI (Mua hàng/Dịch vụ do chính phần mềm tạo, kể
+// cả đã ghi sổ) — KHÁC "Quét & sửa ĐVT hỏng" ở khung Danh mục (chỉ sửa
 // InventoryItem, không đụng chứng từ đã ghi). UnitID trên từng dòng chứng
 // từ là bản SAO chép lúc ghi, không tự cập nhật theo Danh mục sau đó — nên
 // dù Danh mục đã đúng ĐVT, chứng từ ghi TRƯỚC ĐÓ vẫn có thể còn ĐVT sai/
@@ -6721,11 +6722,11 @@ async function misaSuaDvtChungTu(){
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:10px">
         ⚠ Sắp SỬA dữ liệu trong database MISA: <b>${misaEsc(pv.database||'?')}</b><br>
-        Chỉ sửa CHỨNG TỪ CHƯA GHI SỔ do chính phần mềm tạo — không đụng chứng từ đã ghi sổ hoặc do MISA/người dùng tự tạo.</div>
+        Chỉ sửa CHỨNG TỪ do chính phần mềm tạo (kể cả đã ghi sổ) — không đụng chứng từ do MISA/người dùng tự tạo.</div>
       <div style="margin-bottom:6px">Sẽ sửa: <b style="color:#1a7a7a">${pv.so_sua}</b> dòng chứng từ</div>
       ${pv.so_da_ghi_so_khong_sua>0?`<div style="background:#fff0f0;border:1px solid #e8b0b0;border-radius:6px;padding:8px 12px;font-size:12px;color:#a03a3a;margin-bottom:8px">
-        ⚠ Phát hiện <b>${pv.so_da_ghi_so_khong_sua}</b> dòng chứng từ VẪN đang bị lệch ĐVT nhưng KHÔNG tự sửa được vì chứng từ đó <b>ĐÃ GHI SỔ</b> trong MISA
-        (phần mềm chỉ sửa chứng từ chưa ghi sổ, để không đụng vào dữ liệu đã vào sổ cái).
+        ⚠ Phát hiện <b>${pv.so_da_ghi_so_khong_sua}</b> dòng chứng từ VẪN đang bị lệch ĐVT nhưng KHÔNG tự sửa được vì chứng từ đó <b>ĐÃ GHI SỔ</b> và KHÔNG phải do phần mềm này tạo (chứng từ thật của khách/MISA)
+        — phần mềm chỉ tự sửa chứng từ do CHÍNH nó tạo, để không đụng vào dữ liệu thật của khách.
         Muốn sửa các dòng này: vào MISA bấm <b>"Bỏ ghi sổ"</b> chứng từ đó rồi bấm lại nút này, sau đó ghi sổ lại nếu cần.
         ${(pv.da_ghi_so_mau||[]).length?`<div style="margin-top:6px;max-height:20vh;overflow:auto"><table style="border-collapse:collapse;font-size:11.5px;width:100%">
           <tr style="background:#f7e3e3"><th style="border:1px solid #eed;padding:2px 6px">Số CT</th><th style="border:1px solid #eed;padding:2px 6px">Mã hàng</th><th style="border:1px solid #eed;padding:2px 6px">Loại</th></tr>
@@ -6755,7 +6756,8 @@ async function misaSuaDvtChungTuGhi(){
   }catch(e){toast('Lỗi sửa: '+e.message,'err')}
 }
 // Sửa lại "Giá trị nhập kho" (PUVoucher.TotalInwardAmount) trên chứng từ Mua
-// Hàng Nhập Kho/Không Qua Kho CHƯA GHI SỔ ghi TRƯỚC ĐÓ — do bản cũ của hàm
+// Hàng Nhập Kho/Không Qua Kho do phần mềm ghi TRƯỚC ĐÓ (chưa ghi sổ, hoặc do
+// chính phần mềm tạo dù đã ghi sổ) — do bản cũ của hàm
 // ghi chứng từ bỏ sót không set tổng này ở header (từng dòng chi tiết vẫn có
 // InwardAmount đúng), khiến cột "Giá trị nhập kho" luôn hiện 0.
 async function misaSuaGiaTriNhapKho(){
@@ -6770,10 +6772,10 @@ async function misaSuaGiaTriNhapKho(){
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:10px">
         ⚠ Sắp SỬA dữ liệu trong database MISA: <b>${misaEsc(pv.database||'?')}</b><br>
-        Chỉ sửa CHỨNG TỪ CHƯA GHI SỔ — không đụng chứng từ đã ghi sổ. Chỉ sửa đúng 1 cột "Giá trị nhập kho", không đụng số tiền/tài khoản nào khác.</div>
+        Chỉ sửa CHỨNG TỪ CHƯA GHI SỔ, hoặc do CHÍNH phần mềm này tạo — không đụng chứng từ thật của khách đã ghi sổ. Chỉ sửa đúng 1 cột "Giá trị nhập kho", không đụng số tiền/tài khoản nào khác.</div>
       <div style="margin-bottom:6px">Sẽ sửa: <b style="color:#1a7a7a">${pv.so_sua}</b> chứng từ</div>
       ${pv.so_sua===0?`<div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:6px;padding:8px 12px;font-size:12px;color:#264b8a">
-        Không có chứng từ nào cần sửa (Giá trị nhập kho đang đúng, hoặc chưa có chứng từ Nhập Kho/Không Qua Kho nào chưa ghi sổ).</div>`
+        Không có chứng từ nào cần sửa (Giá trị nhập kho đang đúng, hoặc chưa có chứng từ Nhập Kho/Không Qua Kho nào phù hợp).</div>`
       :`<div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Đang hiện</th><th style="border:1px solid #eee;padding:2px 6px">Sẽ sửa thành</th></tr>
         ${ds}</table></div>`}
@@ -7021,7 +7023,7 @@ function misaImportHienKetQua(d,preview){
   }).join('');
   document.getElementById('misaImportResult').innerHTML=`
     <table style="border-collapse:collapse;font-size:14.5px;width:100%;margin-top:12px">${rows}</table>
-    ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Bán hàng/Mua hàng vẫn ghi ở trạng thái <b>CHƯA GHI SỔ</b> như mọi khi — vào từng màn hình MISA (Bán hàng/Mua hàng...), chọn tất cả rồi bấm "Ghi sổ" hàng loạt.</div>'}`;
+    ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Bán hàng/Mua hàng đã ghi ở trạng thái <b>ĐÃ GHI SỔ</b> — chỉ đổi cờ trạng thái, KHÔNG tự sinh bút toán Sổ Cái như MISA thật làm khi bấm "Ghi sổ" tay, nên hãy tự đối chiếu lại Sổ Cái/báo cáo trong MISA định kỳ. Bút toán Khấu trừ thuế GTGT (bước Tờ khai GTGT) vẫn CHƯA GHI SỔ như trước.</div>'}`;
   foot.innerHTML=`
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
@@ -7483,7 +7485,7 @@ async function muaHangImportMisaGhi(loai,ghiDe){
     // không cần tự bấm nút "🔧 Sửa ĐVT chứng từ đã ghi" riêng nữa.
     const dmTxt=(d.so_dvt_hang_sua>0)?`, ${d.so_dvt_hang_sua} mã Danh mục`:'';
     const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
-    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt}${dvtTxt} — CHƯA GHI SỔ.`,'ok');
+    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt}${dvtTxt} — ĐÃ GHI SỔ.`,'ok');
     // TỰ KIỂM TRA: đối chiếu với đúng view + bộ lọc thật của màn hình MISA
     // "Mua hàng hóa, dịch vụ" — nếu có chứng từ bị lọc mất, hiện chẩn đoán
     // đích danh lý do từng dòng (mất khỏi view / PostedDate / chi nhánh / DisplayOnBook).
@@ -7567,13 +7569,13 @@ async function banHangImportMisa(){
     document.getElementById('misaModalBody').innerHTML=`
       <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
         ⚠ RỦI RO CAO: đây là chứng từ <b>Bán hàng</b> — Nợ/Có, thuế GTGT thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b>
-        ở trạng thái <b>CHƯA GHI SỔ</b> (không đụng sổ cái) — anh PHẢI mở từng chứng từ trong MISA kiểm tra rồi tự bấm "Ghi sổ".
+        ở trạng thái <b>ĐÃ GHI SỔ</b> — CHỈ đổi cờ trạng thái, KHÔNG tự sinh bút toán Sổ Cái (GLVoucher) như MISA thật làm khi bấm "Ghi sổ" tay — nên tự đối chiếu lại Sổ Cái/báo cáo trong MISA định kỳ để chắc chắn không lệch.
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
       <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Bán hàng trong bảng)</span>`:''}</div>
       ${pv.so_bo_qua_kh>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ Bỏ qua <b>${pv.so_bo_qua_kh}</b> hóa đơn do Khách hàng chưa có trong MISA — hãy import Khách hàng trước, rồi chạy lại.</div>`:''}
       ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
-        Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (chưa ghi sổ) trong MISA — bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ đã ghi sổ).</div>`:''}
+        Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (do phần mềm tạo trước đó) trong MISA — bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ thật của khách).</div>`:''}
       ${pv.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có <b>${pv.so_ngay_loi}</b> hóa đơn KHÔNG đọc được ngày từ dữ liệu gốc (cột tô đỏ ở dưới) → bị ghi tạm bằng NGÀY HÔM NAY. Nếu bộ lọc "Kỳ" trên MISA không bao gồm hôm nay, chứng từ sẽ KHÔNG hiện dù dữ liệu đúng.</div>`:''}
       ${pv.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
@@ -7590,7 +7592,7 @@ async function banHangImportMisa(){
         ${ds}</table></div>
       <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
-        ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="banHangImportMisaGhi(true)">♻ Ghi đè ${pv.so_trung} chứng từ (chưa ghi sổ)</button>`:''}
+        ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="banHangImportMisaGhi(true)">♻ Ghi đè ${pv.so_trung} chứng từ</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisaGhi(false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
       </div>`;
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
@@ -7604,7 +7606,7 @@ async function banHangImportMisaGhi(ghiDe){
     const dmTxt=(d.so_dvt_hang_sua>0)?`, ${d.so_dvt_hang_sua} mã Danh mục`:'';
     const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
     document.getElementById('misaModal').style.display='none';
-    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ Bán hàng vào MISA${goTxt}${dvtTxt} — CHƯA GHI SỔ.`,'ok');
+    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ Bán hàng vào MISA${goTxt}${dvtTxt} — ĐÃ GHI SỔ.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 // Liệt kê loại chứng từ (SYSRefType) của 1 bảng MISA — CHỈ ĐỌC. Dùng khi

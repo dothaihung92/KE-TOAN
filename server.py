@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-24.242"
+APP_BUILD = "2026-08-25.243"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13095,6 +13095,18 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
     tác động chứng từ CHƯA GHI SỔ (chưa vào sổ cái), vẫn có thể sửa/xóa tay
     bình thường trong MISA nếu cần.
 
+    CẬP NHẬT (từ khi GHI SỔ LUÔN — xem _PU_HEADER_DEFAULT): chứng từ do
+    CHÍNH phần mềm này tạo giờ mặc định ĐÃ GHI SỔ ngay từ đầu, nên nếu chỉ
+    giữ điều kiện "CHƯA GHI SỔ" thì công cụ sửa này sẽ KHÔNG BAO GIỜ còn sửa
+    được gì cho chứng từ tạo mới nữa (bị loại 100%) — MẤT hẳn lưới an toàn
+    này. Thêm lại điều kiện CustomField10=_PM_MARK làm lối vào THỨ HAI (OR),
+    riêng cho trường hợp này: (1) VẪN giữ nguyên "CHƯA GHI SỔ" cho MỌI chứng
+    từ khác (không phải do phần mềm tạo) — không đụng chứng từ thật của
+    khách dù đã/chưa ghi sổ; (2) CHỈ chứng từ mang dấu _PM_MARK (chắc chắn
+    do chính phần mềm này tạo, không phải khách tự nhập) mới được sửa dù
+    ĐÃ ghi sổ — vẫn CHỈ sửa đúng 1 trường ĐVT/UnitID như trên, không đụng gì
+    khác nên an toàn tương đương.
+
     CHẨN ĐOÁN VÒNG 1: dù bỏ CustomField10, người dùng vẫn báo bấm nút ra "0
     dòng cần sửa" trong khi chứng từ thật vẫn hiện GUID — nghi vấn ĐÃ GHI SỔ
     (IsPostedFinance/IsPostedManagement=1) bị loại bỏ (test thực tế: người
@@ -13120,14 +13132,18 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
         da_ghi_so = []   # lệch ĐVT nhưng bị loại vì ĐÃ GHI SỔ — chỉ để chẩn đoán
         rows_pv_all = cur.execute(
             "SELECT pvd.RefDetailID, pv.RefNoManagement, ii.InventoryItemCode, ii.UnitID, "
-            "ISNULL(pv.IsPostedFinance,0), ISNULL(pv.IsPostedManagement,0) "
+            "ISNULL(pv.IsPostedFinance,0), ISNULL(pv.IsPostedManagement,0), ISNULL(pv.CustomField10,'') "
             "FROM PUVoucherDetail pvd "
             "JOIN PUVoucher pv ON pv.RefID = pvd.RefID "
             "JOIN InventoryItem ii ON ii.InventoryItemID = pvd.InventoryItemID "
             "WHERE (pvd.UnitID IS NULL OR pvd.UnitID <> ii.UnitID "
             "OR pvd.MainUnitID IS NULL OR pvd.MainUnitID <> ii.UnitID)").fetchall()
-        for rid, rn, code, uid_moi, ptc, pql in rows_pv_all:
-            if ptc or pql:
+        for rid, rn, code, uid_moi, ptc, pql, mark in rows_pv_all:
+            # ĐÃ GHI SỔ nhưng do CHÍNH phần mềm này tạo (_PM_MARK) vẫn cho sửa —
+            # xem "CẬP NHẬT" ở docstring trên (từ khi GHI SỔ LUÔN, chứng từ phần
+            # mềm tạo mặc định ĐÃ GHI SỔ ngay, không còn rơi vào diện "chưa ghi
+            # sổ" như trước để lọt qua bước sửa này).
+            if (ptc or pql) and mark != _PM_MARK:
                 if len(da_ghi_so) < 200:
                     da_ghi_so.append({"so_ct": rn, "ma": code, "loai": "Mua hàng"})
                 continue
@@ -13137,13 +13153,13 @@ def _misa_sua_dvt_chung_tu_da_ghi(cid, database, preview=True):
                             uid_moi, uid_moi, rid)
         rows_ps_all = cur.execute(
             "SELECT psd.RefDetailID, ps.RefNoManagement, ii.InventoryItemCode, ii.UnitID, "
-            "ISNULL(ps.IsPostedFinance,0), ISNULL(ps.IsPostedManagement,0) "
+            "ISNULL(ps.IsPostedFinance,0), ISNULL(ps.IsPostedManagement,0), ISNULL(ps.CustomField10,'') "
             "FROM PUServiceDetail psd "
             "JOIN PUService ps ON ps.RefID = psd.RefID "
             "JOIN InventoryItem ii ON ii.InventoryItemID = psd.InventoryItemID "
             "WHERE (psd.UnitID IS NULL OR psd.UnitID <> ii.UnitID)").fetchall()
-        for rid, rn, code, uid_moi, ptc, pql in rows_ps_all:
-            if ptc or pql:
+        for rid, rn, code, uid_moi, ptc, pql, mark in rows_ps_all:
+            if (ptc or pql) and mark != _PM_MARK:
                 if len(da_ghi_so) < 200:
                     da_ghi_so.append({"so_ct": rn, "ma": code, "loai": "Dịch vụ"})
                 continue
@@ -13251,8 +13267,8 @@ def misa_sql_chan_doan_dvt(cid: int, ma: str, database: str = ""):
 
 def _misa_sua_gia_tri_nhap_kho_da_ghi(cid, database, preview=True):
     """Sửa lại PUVoucher.TotalInwardAmount (cột 'Giá trị nhập kho' trên màn
-    hình 'Mua hàng hóa, dịch vụ') cho các chứng từ CHƯA GHI SỔ (IsPostedFinance=0
-    AND IsPostedManagement=0) — MISA đọc cột này TRỰC TIẾP từ PUVoucher, KHÔNG
+    hình 'Mua hàng hóa, dịch vụ') cho các chứng từ CHƯA GHI SỔ, hoặc do CHÍNH
+    phần mềm này tạo (xem "CẬP NHẬT" bên dưới) — MISA đọc cột này TRỰC TIẾP từ PUVoucher, KHÔNG
     tự cộng lại từ PUVoucherDetail.InwardAmount của từng dòng. Hàm ghi chứng từ
     (_misa_ghi_mua_hang) trước đây bỏ sót không set TotalInwardAmount ở HEADER
     dù từng dòng chi tiết đã có InwardAmount đúng — khiến cột 'Giá trị nhập
@@ -13263,7 +13279,13 @@ def _misa_sua_gia_tri_nhap_kho_da_ghi(cid, database, preview=True):
 
     CHỈ sửa 1 cột TotalInwardAmount, không đụng số tiền/tài khoản/dữ liệu nào
     khác, không giới hạn CustomField10 (giống cách sửa ĐVT chứng từ đã ghi —
-    xem _misa_sua_dvt_chung_tu_da_ghi để biết lý do bỏ điều kiện đó)."""
+    xem _misa_sua_dvt_chung_tu_da_ghi để biết lý do bỏ điều kiện đó).
+
+    CẬP NHẬT (từ khi GHI SỔ LUÔN — xem _PU_HEADER_DEFAULT): thêm điều kiện
+    CustomField10=_PM_MARK làm lối vào THỨ HAI (OR với "chưa ghi sổ"), y hệt
+    _misa_sua_dvt_chung_tu_da_ghi — nếu không, chứng từ phần mềm tạo mới
+    (nay mặc định ĐÃ GHI SỔ) sẽ không bao giờ còn sửa được nữa dù lỗi có
+    tái phát."""
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
@@ -13272,9 +13294,11 @@ def _misa_sua_gia_tri_nhap_kho_da_ghi(cid, database, preview=True):
             "SELECT pv.RefID, pv.RefNoManagement, ISNULL(pv.TotalInwardAmount,0), "
             "ISNULL(SUM(pvd.InwardAmount),0) "
             "FROM PUVoucher pv JOIN PUVoucherDetail pvd ON pvd.RefID = pv.RefID "
-            "WHERE ISNULL(pv.IsPostedFinance,0)=0 AND ISNULL(pv.IsPostedManagement,0)=0 "
+            "WHERE (ISNULL(pv.IsPostedFinance,0)=0 AND ISNULL(pv.IsPostedManagement,0)=0) "
+            "OR ISNULL(pv.CustomField10,'')=? "
             "GROUP BY pv.RefID, pv.RefNoManagement, pv.TotalInwardAmount "
-            "HAVING ISNULL(pv.TotalInwardAmount,0) <> ISNULL(SUM(pvd.InwardAmount),0)"
+            "HAVING ISNULL(pv.TotalInwardAmount,0) <> ISNULL(SUM(pvd.InwardAmount),0)",
+            _PM_MARK
         ).fetchall()
         ket = []
         for rid, rn, cu, dung in rows:
@@ -13624,13 +13648,15 @@ def misa_sql_import_khncc(cid: int, preview: int = 1, database: str = ""):
 # ============================================================
 #  GHI CHỨNG TỪ MUA HÀNG THẲNG VÀO MISA (PUVoucher + PUVoucherDetail)
 #  ⚠ RỦI RO CAO NHẤT từ trước tới giờ — đây là chứng từ kế toán thật (Nợ
-#  152/156/242/211/6xx, Có 111/112/331, thuế GTGT đầu vào...). LUÔN ghi ở
-#  trạng thái CHƯA GHI SỔ (IsPostedFinance=IsPostedManagement=0), KHÔNG
-#  đụng tới GeneralLedger/GLVoucher — anh PHẢI mở từng chứng từ trong MISA
-#  kiểm tra rồi tự bấm "Ghi sổ". Mã hàng/NCC phải ĐÃ CÓ sẵn trong Danh mục
-#  MISA (từ các bước import trước) — dòng/chứng từ nào thiếu sẽ bị BỎ QUA,
-#  không tự đoán/tạo mới. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU, dùng lại
-#  đúng logic đã kiểm chứng khi xuất Excel theo mẫu MISA (_gen_mua_hang_*).
+#  152/156/242/211/6xx, Có 111/112/331, thuế GTGT đầu vào...). Theo yêu cầu,
+#  GHI SỔ LUÔN (IsPostedFinance=IsPostedManagement=1) — KHÔNG đụng tới
+#  GeneralLedger/GLVoucher (chỉ đổi cờ trạng thái trên PUVoucher/PUInvoice,
+#  KHÔNG tự sinh bút toán Sổ Cái như MISA thật làm khi bấm "Ghi sổ" tay) —
+#  anh nên tự đối chiếu lại Sổ Cái/báo cáo trong MISA định kỳ để chắc chắn
+#  không lệch. Mã hàng/NCC phải ĐÃ CÓ sẵn trong Danh mục MISA (từ các bước
+#  import trước) — dòng/chứng từ nào thiếu sẽ bị BỎ QUA, không tự đoán/tạo
+#  mới. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU, dùng lại đúng logic đã kiểm
+#  chứng khi xuất Excel theo mẫu MISA (_gen_mua_hang_*).
 # ============================================================
 _MUA_TEN = {"nk": "Mua hàng nhập kho", "kqk": "Mua hàng không qua kho",
             "dv": "Mua hàng dịch vụ"}
@@ -13713,7 +13739,14 @@ _PU_HEADER_DEFAULT = {
     "RefID": None, "BranchID": None, "RefDate": None, "PostedDate": None,
     "CABARefDate": None, "CABAPostedDate": None, "RefType": None,
     "RefNoFinance": None, "RefNoManagement": None, "CABARefNoManagement": None,
-    "CABARefNoFinance": None, "IsPostedFinance": 0, "IsPostedManagement": 0,
+    # GHI SỔ LUÔN theo yêu cầu (trước đây để 0 = chưa ghi sổ, bắt phải tự mở
+    # từng chứng từ trong MISA bấm "Ghi sổ" tay — nay bật thẳng để khỏi phải
+    # làm thêm bước đó). LƯU Ý: đây CHỈ đổi cờ trạng thái hiển thị trên
+    # PUVoucher, KHÔNG tự sinh bút toán Sổ Cái (GLVoucher/GLVoucherDetail)
+    # như khi bấm "Ghi sổ" thật trong MISA — người dùng đã được cảnh báo và
+    # chấp nhận rủi ro báo cáo/tờ khai trong MISA có thể lệch nếu không tự
+    # đối chiếu lại Sổ Cái.
+    "CABARefNoFinance": None, "IsPostedFinance": 1, "IsPostedManagement": 1,
     "IncludeInvoice": 0, "PUInvoiceRefID": None, "AccountObjectID": None,
     "AccountObjectName": None, "AccountObjectAddress": None,
     "AccountObjectBankAccount": None, "AccountObjectBankName": None,
@@ -13806,7 +13839,8 @@ _PU_DETAIL_DEFAULT = {
 _PU_INV_DEFAULT = {
     "RefID": None, "BranchID": None, "RefType": None, "RefDate": None,
     "PostedDate": None, "RefNoFinance": None, "RefNoManagement": None,
-    "IsPostedFinance": 0, "IsPostedManagement": 0, "IsImportPurchase": 0,
+    # GHI SỔ LUÔN, khớp với PUVoucher liên kết (xem giải thích ở _PU_HEADER_DEFAULT).
+    "IsPostedFinance": 1, "IsPostedManagement": 1, "IsImportPurchase": 0,
     "IncludeInvoice": 1, "AccountObjectID": None, "AccountObjectName": None,
     "AccountObjectAddress": None, "AccountObjectTaxCode": None,
     "JournalMemo": None, "EmployeeID": None, "InvTemplateNo": None,
@@ -13845,7 +13879,8 @@ _PU_INV_DET_DEFAULT = {
 _PU_SERVICE_DEFAULT = {
     "RefID": None, "BranchID": None, "RefDate": None, "PostedDate": None,
     "RefType": None, "RefNoFinance": None, "RefNoManagement": None,
-    "IsPostedFinance": 0, "IsPostedManagement": 0, "IsFreightService": 0,
+    # GHI SỔ LUÔN (xem giải thích ở _PU_HEADER_DEFAULT).
+    "IsPostedFinance": 1, "IsPostedManagement": 1, "IsFreightService": 0,
     "AccountObjectID": None, "AccountObjectName": None, "AccountObjectAddress": None,
     "AccountObjectBankAccount": None, "AccountObjectBankName": None,
     "AccountObjectContactname": None, "IdentificationNumber": None,
@@ -13906,7 +13941,8 @@ _PU_SERVICE_DET_DEFAULT = {
 _SA_VOUCHER_DEFAULT = {
     "RefID": None, "BranchID": None, "DisplayOnBook": 1, "RefType": None,
     "RefDate": None, "PostedDate": None, "RefNoFinance": None, "RefNoManagement": None,
-    "IsPostedFinance": 0, "IsPostedManagement": 0, "IncludeInvoice": 0,
+    # GHI SỔ LUÔN, hóa đơn Bán ra (xem giải thích ở _PU_HEADER_DEFAULT).
+    "IsPostedFinance": 1, "IsPostedManagement": 1, "IncludeInvoice": 0,
     "IsInvoiceExported": 0, "AccountObjectID": None, "AccountObjectName": None,
     "AccountObjectAddress": None, "Payer": None, "JournalMemo": None,
     "SupplierID": None, "SupplierName": None, "EmployeeID": None,
@@ -14440,7 +14476,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 trung += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
-                            "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                            "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
                 continue
             first = lines[0]
             mst = str(first[cfg["mst"]] or "").strip()
@@ -14802,9 +14838,10 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
     PUServiceDetail (KHÔNG phải PUVoucher — xác nhận qua cấu trúc CSDL thật:
     SYSRefType không có loại chứng từ nào chứa "dịch vụ" dưới MasterTableName
     ='PUVoucher'). Không có PUInvoice liên kết — thông tin hóa đơn nằm thẳng
-    trên PUServiceDetail. Không có Kho/ĐVT quy đổi. Cùng nguyên tắc an toàn
-    như _misa_ghi_mua_hang(): CHƯA GHI SỔ, không đụng chứng từ đã ghi sổ của
-    người dùng, ghi_de=True chỉ gỡ chứng từ do chính phần mềm tạo."""
+    trên PUServiceDetail. Không có Kho/ĐVT quy đổi. Cùng nguyên tắc như
+    _misa_ghi_mua_hang(): GHI SỔ LUÔN (xem _PU_HEADER_DEFAULT), không đụng
+    chứng từ đã ghi sổ của người dùng, ghi_de=True chỉ gỡ chứng từ do chính
+    phần mềm tạo."""
     import uuid as _uuid
     cfg = _MUA_COT["dv"]
     dl = nhap_lieu_get(cid, "in")
@@ -15049,7 +15086,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 trung += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines),
                             "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
-                            "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                            "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
                 continue
             first = lines[0]
             mst = str(first[cfg["mst"]] or "").strip()
@@ -15260,9 +15297,9 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
     kiểm chứng ở _gen_ban_hang (TK Có doanh thu=5111 cố định; TK Nợ=131 nếu
     tổng hóa đơn >= 5tr, ngược lại 1111 — tiền mặt). Vì bảng kê không có mã
     hàng riêng từng dòng, dùng 1 mã DÙNG CHUNG "BH" (tự tạo nếu chưa có,
-    giống "MHDV" bên Mua hàng dịch vụ). CHƯA GHI SỔ, không đụng chứng từ đã
-    ghi sổ của người dùng; ghi_de=True chỉ gỡ chứng từ do chính phần mềm tạo
-    (CustomField10=_PM_MARK) trùng số rồi ghi lại.
+    giống "MHDV" bên Mua hàng dịch vụ). GHI SỔ LUÔN (xem _PU_HEADER_DEFAULT),
+    không đụng chứng từ đã ghi sổ của người dùng; ghi_de=True chỉ gỡ chứng
+    từ do chính phần mềm tạo (CustomField10=_PM_MARK) trùng số rồi ghi lại.
     Hóa đơn (MST, Số hóa đơn) ĐÃ CÓ SẴN trong MISA — KỂ CẢ do người dùng tự
     nhập tay, không chỉ chứng từ do CHÍNH phần mềm tạo trước đó — cũng tự
     BỎ QUA, không ghi trùng (_da_co_hoa_don) — xác nhận qua thử nghiệm
@@ -15600,7 +15637,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             if pm_e and not ghi_de:
                 trung += 1
                 ket.append({"so_ct": pm_e["doc"], "so_hd": sohd,
-                            "trang_thai": "đã có (chưa ghi sổ, bỏ qua)"})
+                            "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
                 continue
             ghi_de_ct = bool(pm_e)
             if ghi_de_ct:
@@ -15782,13 +15819,12 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     "CustomField10": _PM_MARK,
                     # IsPosted trên SAInvoice là khái niệm ĐỘC LẬP với việc ghi
                     # sổ chứng từ SAVoucher — xác nhận qua đối chiếu 2 chứng từ
-                    # THẬT (BH00001 đã ghi sổ VÀ BH00002 CHƯA ghi sổ): CẢ HAI
-                    # đều có SAInvoice.IsPosted=True. Có vẻ đây là "hóa đơn đã
-                    # hoàn chỉnh/chốt", không phải "đã vào sổ cái" — để False
-                    # (như trước) khiến MISA không nhận diện được hóa đơn liên
-                    # kết dù SAVoucher vẫn đúng CHƯA GHI SỔ. Sửa = True không vi
-                    # phạm nguyên tắc an toàn (SAVoucher.IsPostedFinance vẫn
-                    # luôn False, sổ cái không hề bị đụng).
+                    # THẬT (BH00001 đã ghi sổ VÀ BH00002 CHƯA ghi sổ, thời điểm
+                    # đó): CẢ HAI đều có SAInvoice.IsPosted=True. Có vẻ đây là
+                    # "hóa đơn đã hoàn chỉnh/chốt", không phải "đã vào sổ cái"
+                    # — luôn = True bất kể SAVoucher.IsPostedFinance đang là gì
+                    # (nay mặc định = 1 luôn theo yêu cầu "ghi sổ luôn", xem
+                    # _PU_HEADER_DEFAULT — trước đây luôn = 0).
                     "IsPosted": True,
                     # các cột text để CHUỖI RỖNG như hóa đơn MISA thật
                     "PaymentMethod": "TM/CK", "Buyer": "", "PlaceOfDelivery": "",
@@ -15900,9 +15936,10 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
 @app.post("/api/misa-sql/import-ban-hang/{cid}")
 def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi_de: int = 0):
     """Ghi chứng từ Bán hàng (Bảng kê Đầu ra) thẳng vào MISA — xem
-    _misa_ghi_ban_hang. preview=1 -> chỉ xem trước, không ghi. LUÔN ghi ở
-    trạng thái CHƯA GHI SỔ. ghi_de=1 -> gỡ chứng từ chưa ghi sổ trùng số
-    (do chính phần mềm tạo) rồi ghi lại."""
+    _misa_ghi_ban_hang. preview=1 -> chỉ xem trước, không ghi. GHI SỔ LUÔN
+    (IsPostedFinance=IsPostedManagement=1) theo yêu cầu — xem giải thích rủi
+    ro ở _PU_HEADER_DEFAULT (không tự sinh bút toán Sổ Cái). ghi_de=1 -> gỡ
+    chứng từ trùng số (do chính phần mềm tạo trước đó) rồi ghi lại."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -16320,8 +16357,10 @@ def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: st
     """Ghi chứng từ Mua hàng (loai=nk/kqk/dv) thẳng vào MISA. nk/kqk ghi vào
     PUVoucher; dv (Mua hàng dịch vụ) ghi vào bảng RIÊNG PUService (khác hẳn
     PUVoucher — xác nhận qua SYSRefType thật). preview=1 -> chỉ xem trước,
-    không ghi. LUÔN ghi ở trạng thái CHƯA GHI SỔ. ghi_de=1 -> gỡ chứng từ
-    chưa ghi sổ trùng số rồi ghi lại."""
+    không ghi. GHI SỔ LUÔN (IsPostedFinance=IsPostedManagement=1) theo yêu
+    cầu — xem giải thích rủi ro ở _PU_HEADER_DEFAULT (không tự sinh bút toán
+    Sổ Cái). ghi_de=1 -> gỡ chứng từ trùng số (do chính phần mềm tạo trước
+    đó) rồi ghi lại."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -20722,24 +20761,26 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     6) Tờ khai GTGT + Khấu trừ tự động (BƯỚC CUỐI — chạy sau khi Bán
     hàng/Mua hàng đã có dữ liệu, vì chỉ tiêu tờ khai tính trực tiếp từ 2
     bảng đó).
-    Chứng từ (Bán hàng/Mua hàng) LUÔN ghi ở trạng thái CHƯA GHI SỔ như mọi
-    khi (không tự Ghi sổ bằng SQL — xem giải thích lý do an toàn ở nơi gọi
-    API này); Ghi tăng CCDC/TSCĐ vẫn ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi
-    tăng danh mục không sinh bút toán, không có tầng "Ghi sổ" riêng); Phân
-    bổ CCDC/Khấu hao TSCĐ tạo chứng từ hàng tháng theo khung tu_thang/
-    den_thang (yyyy-mm) người dùng chọn — để trống cả 2 = mỗi bước tự chọn
-    12 tháng kể từ chứng từ PBCC/KH gần nhất đã có (giống chạy riêng lẻ
-    từng nút "🤖 ... tự động"); bút toán Khấu trừ thuế GTGT ở bước 6 cũng
-    CHƯA GHI SỔ như Bán hàng/Mua hàng.
+    Chứng từ (Bán hàng/Mua hàng) GHI SỔ LUÔN (IsPostedFinance=
+    IsPostedManagement=1) theo yêu cầu — CHỈ đổi cờ trạng thái bằng SQL,
+    KHÔNG tự sinh bút toán Sổ Cái (GLVoucher/GLVoucherDetail) như khi bấm
+    "Ghi sổ" thật trong MISA, xem giải thích rủi ro ở _PU_HEADER_DEFAULT;
+    Ghi tăng CCDC/TSCĐ cũng ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi tăng danh
+    mục không sinh bút toán, không có tầng "Ghi sổ" riêng); Phân bổ CCDC/
+    Khấu hao TSCĐ tạo chứng từ hàng tháng theo khung tu_thang/den_thang
+    (yyyy-mm) người dùng chọn — để trống cả 2 = mỗi bước tự chọn 12 tháng kể
+    từ chứng từ PBCC/KH gần nhất đã có (giống chạy riêng lẻ từng nút "🤖 ...
+    tự động"); bút toán Khấu trừ thuế GTGT ở bước 6 vẫn CHƯA GHI SỔ như
+    trước (không thuộc phạm vi "hóa đơn Đầu vào/Đầu ra" — là bút toán kết
+    chuyển thuế riêng, chưa có yêu cầu đổi).
     gtgt_tu_quy/gtgt_tu_nam/gtgt_den_quy/gtgt_den_nam: khung Quý/Năm cho
     bước 6 (Tờ khai GTGT) — để trống cả 4 = tự tiếp nối tờ khai thật gần
     nhất (xem _misa_tao_to_khai_khau_tru_gtgt), chỉ trống "đến" = chạy 4
     quý kể từ "từ".
     ghi_de mặc định TẮT (False) — chứng từ nào ĐÃ CÓ trong MISA (trùng với
-    dữ liệu đang import, kể cả chứng từ CHƯA ghi sổ do chính đợt chạy
-    trước tạo) sẽ tự BỎ QUA (đếm vào "so_trung"), KHÔNG ghi đè; chỉ ghi
-    thêm chứng từ CHƯA có — theo đúng yêu cầu "chỉ xử lý những chứng từ
-    chưa có thôi".
+    dữ liệu đang import, kể cả chứng từ do chính đợt chạy trước tạo) sẽ tự
+    BỎ QUA (đếm vào "so_trung"), KHÔNG ghi đè; chỉ ghi thêm chứng từ CHƯA
+    có — theo đúng yêu cầu "chỉ xử lý những chứng từ chưa có thôi".
     bao(text): callback báo tiến độ từng bước (công ty nhiều dữ liệu chạy
     khá lâu — không có callback thì chạy âm thầm như cũ)."""
     if bao is None:
