@@ -972,7 +972,13 @@
       <label style="font-size:12px">Database công ty<br>
         <select id="msqlDb" onchange="misaSqlLoadBang()" style="min-width:220px;padding:6px;border:1px solid #ccc;border-radius:6px"></select></label>
       <label style="font-size:12px">Lọc tên bảng<br><input id="msqlLoc" oninput="misaSqlLocBang()" placeholder="vd: Voucher, Inventory..." style="width:200px;padding:6px;border:1px solid #ccc;border-radius:6px"></label>
+      <label style="font-size:12px">🔎 Tìm loại chứng từ theo tên (VD "ủy nhiệm chi", "báo nợ", "thu tiền")<br>
+        <div style="display:flex;gap:6px">
+          <input id="msqlTuKhoa" placeholder="vd: báo nợ" style="width:220px;padding:6px;border:1px solid #ccc;border-radius:6px" onkeydown="if(event.key==='Enter')misaSqlTimLoaiCT()">
+          <button class="btn sm" style="background:#2e5c8a" onclick="misaSqlTimLoaiCT()">Tìm</button>
+        </div></label>
     </div>
+    <div id="msqlTuKhoaKq" style="font-size:12px;margin-bottom:6px"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
       <button class="btn sm" style="background:#5a3e8a" onclick="misaSqlXuatCauTruc('loc')" title="Xuất cấu trúc các bảng đang lọc (hoặc bảng quan trọng nếu ô Lọc trống)">📄 Xuất cấu trúc (theo lọc / bảng quan trọng)</button>
       <button class="btn sm" style="background:#8a3e5a" onclick="misaSqlXuatCauTruc('tatca')" title="Xuất cấu trúc TẤT CẢ các bảng trong database">📦 Xuất cấu trúc TẤT CẢ bảng</button>
@@ -4214,6 +4220,29 @@ function misaSqlVeBang(){
     ds.map(b=>`<div onclick="misaSqlChonBang('${misaEsc(b.bang).replace(/'/g,"\\'")}')" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid #f2f2f2"
       onmouseover="this.style.background='#eef7f7'" onmouseout="this.style.background='#fff'">
       <b>${misaEsc(b.bang)}</b> <span style="color:#999">(${b.so_dong.toLocaleString('vi-VN')})</span></div>`).join('');
+}
+// Tìm loại chứng từ MISA (SYSRefType) theo TÊN trên MỌI bảng — dùng để dò xem
+// 1 loại chứng từ (VD "Ủy nhiệm chi"/"Báo Nợ" cho UNC, "Ủy nhiệm thu"/"Báo Có"
+// cho UNT) thực sự nằm ở bảng MISA nào TRƯỚC KHI viết code ghi thẳng vào bảng
+// đó — tránh đoán sai bảng khi build tính năng ghi mới (chỉ đọc, an toàn).
+async function misaSqlTimLoaiCT(){
+  const tuKhoa=(document.getElementById('msqlTuKhoa').value||'').trim();
+  const box=document.getElementById('msqlTuKhoaKq');
+  if(!tuKhoa){box.innerHTML='';return;}
+  box.innerHTML='<div style="color:#999">Đang tìm...</div>';
+  try{
+    const dbQ=msqlDbHienTai?`&database=${encodeURIComponent(msqlDbHienTai)}`:'';
+    const d=await api(`/api/misa-sql/liet-ke-reftype/${current}?tu_khoa=${encodeURIComponent(tuKhoa)}${dbQ}`,{method:'POST'});
+    const ds=d.danh_sach||[];
+    if(!ds.length){box.innerHTML=`<div style="color:#b91c1c">Không tìm thấy loại chứng từ nào chứa "${misaEsc(tuKhoa)}".</div>`;return;}
+    box.innerHTML=`<div style="color:#264b8a;margin-bottom:4px">${ds.length} kết quả — bấm tên bảng để xem cột & dữ liệu mẫu:</div>`+
+      '<table style="border-collapse:collapse;font-size:12px"><tr style="background:#f0f0f0">'+
+      '<th style="border:1px solid #ddd;padding:2px 6px">RefType</th><th style="border:1px solid #ddd;padding:2px 6px">Tên</th><th style="border:1px solid #ddd;padding:2px 6px">Bảng</th></tr>'+
+      ds.map(x=>`<tr><td style="border:1px solid #ddd;padding:2px 6px">${x.reftype}</td>
+        <td style="border:1px solid #ddd;padding:2px 6px">${misaEsc(x.ten)}</td>
+        <td style="border:1px solid #ddd;padding:2px 6px"><a href="#" onclick="misaSqlChonBang('${misaEsc(x.bang).replace(/'/g,"\\'")}');return false;">${misaEsc(x.bang)}</a></td></tr>`).join('')+
+      '</table>';
+  }catch(e){box.innerHTML=`<div style="color:#b91c1c">${misaEsc(e.message)}</div>`;}
 }
 async function misaSqlChonBang(bang){
   const box=document.getElementById('msqlChiTiet');
