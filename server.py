@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.248"
+APP_BUILD = "2026-08-25.249"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3970,13 +3970,18 @@ def _dvc_browser_download(drv, ma):
     raw = base64.b64decode(content) if content else b""
     return fname, raw
 
-def _dvc_browser_thongbao(drv, ma):
+def _dvc_browser_thongbao(drv, ma, loai=""):
     """Vào trang chi tiết hồ sơ, đọc idTbao rồi tải các thông báo (Tiếp nhận/Xác nhận).
-    Trả về (list[(fname, raw)], diag)."""
+    Trả về (list[(fname, raw)], diag). loai: '' cho hồ sơ nguồn DVC (từ
+    01/07/2025), 'ETAX' cho hồ sơ nguồn Thuế điện tử (trước đó) — PHẢI khớp
+    đúng nguồn của ma (xem _dvc_browser_download_tdt dùng cùng quy ước), nếu
+    không trang chi tiết mở SAI ngữ cảnh, không dò được idTbao nào dù thông
+    báo thật sự tồn tại trên cổng (đã xác nhận qua báo cáo thật: hồ sơ nguồn
+    TDT có Thông báo trên cổng nhưng gọi thiếu loai=ETAX báo 'không thấy')."""
     import time as _t
     out, diag = [], []
     try:
-        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=")
+        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
         _t.sleep(1.2)
         _dvc_wait_jquery(drv, 10)
         html = drv.page_source or ""
@@ -5175,11 +5180,21 @@ def _dvc_run_batch(batch_id, cids, body):
                     _tai_file_fn = _dvc_browser_download_tdt
                     _ten_file_fn = _ten_file_than_thien_tdt
                     nhan_nguon = "Thuế điện tử (trước 01/07/2025)"
+                    # Trang chi tiết hồ sơ nguồn Thuế điện tử BẮT BUỘC ?loai=ETAX
+                    # (xem _dvc_browser_download_tdt) — dùng để đọc idTbao trước
+                    # khi tải Thông báo (_dvc_browser_thongbao). Thiếu tham số
+                    # này, trang chi tiết mở SAI ngữ cảnh (mặc định của nguồn
+                    # DVC) nên KHÔNG dò được idTbao nào cho hồ sơ nguồn TDT dù
+                    # thông báo thật sự tồn tại trên cổng — đã xác nhận qua báo
+                    # cáo thật: hồ sơ GTGT Quý 1/2025 (nguồn TDT) có Thông báo
+                    # trên cổng nhưng phần mềm báo "không tìm thấy".
+                    _tb_loai = "ETAX"
                 else:
                     _tra_cuu_fn = _dvc_browser_tracuu
                     _tai_file_fn = _dvc_browser_download
                     _ten_file_fn = _ten_file_than_thien
                     nhan_nguon = "DVC (từ 01/07/2025)"
+                    _tb_loai = ""
                 # QUAN TRỌNG: ô tìm kiếm trên cổng lọc theo NGÀY NỘP HỒ SƠ, KHÔNG
                 # phải theo kỳ tính thuế của tờ khai (giống hệt vấn đề đã gặp và
                 # sửa ở _dvc_kiem_tra_da_nop_mot_loai) — tờ khai kỳ QUÝ luôn được
@@ -5279,7 +5294,7 @@ def _dvc_run_batch(batch_id, cids, body):
                             ten_goi = _ten_file_fn(rec.get("to_khai"), rec.get("ky"), mst, rec.get("lan_bs"))
                             try:
                                 if tai_tb:
-                                    tb_files, _ = _dvc_browser_thongbao(drv, ma)
+                                    tb_files, _ = _dvc_browser_thongbao(drv, ma, _tb_loai)
                                     so_tb = len(tb_files)
                                     if so_tb == 0:
                                         # KHÔNG chắc đây là lỗi (có thể CQT thật sự chưa
@@ -5334,7 +5349,7 @@ def _dvc_run_batch(batch_id, cids, body):
                                 break
                             try:
                                 if tai_tb:
-                                    tb_files, _ = _dvc_browser_thongbao(drv, ma)
+                                    tb_files, _ = _dvc_browser_thongbao(drv, ma, _tb_loai)
                                     for fn, raw in tb_files:
                                         if raw:
                                             _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
