@@ -4547,13 +4547,18 @@ function xkRowsToNl(){
 // Tên/ĐVT/Đơn giá kho theo đúng dữ liệu Tồn kho (không giữ chữ gõ/copy cũ).
 function xkTuNlRows(){
   const cu=xkRows;
+  // Map tra 1 lần thay vì xkTon.find() (quét tuyến tính) BÊN TRONG map() —
+  // với bảng lớn (vd 6518 dòng bán × 3072 mã tồn kho) find() lặp lại thành
+  // hàng chục triệu phép so khớp, góp phần làm trang treo (xem xkToMauThieu
+  // — cùng đợt sửa hiệu năng do dữ liệu lớn).
+  const tonByMa={}; xkTon.forEach(t=>{tonByMa[String(t.ma)]=t;});
   xkRows=nlRows.map((row,i)=>{
     const goc=cu[i]||{};
     const [ton,sohd,ngay,ten_sp,dvt,sl,dgia,tt,ma,ten_xk,dvt_xk,sl_kho,gia_xk]=row;
     const maMoi=String(ma||'').trim();
     let tenXkMoi='', dvtXkMoi='', giaXkMoi='';
     if(maMoi){
-      const tn=xkTon.find(t=>String(t.ma)===maMoi);
+      const tn=tonByMa[maMoi];
       if(tn){tenXkMoi=tn.ten; dvtXkMoi=tn.dvt; giaXkMoi=tn.gia;}
     }
     return {...goc,
@@ -4728,6 +4733,12 @@ function xkKiemTraTonLoi(rSet){
   xkTuNlRows();
   const tongGocTruoc=xkRows.reduce((a,r)=>a+(Number(r.sl)||0),0);
   const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
+  // Chuẩn hoá tên MỖI mã tồn kho 1 LẦN DUY NHẤT (cache thẳng lên object) thay
+  // vì tính lại xkChuanTen(t.ten) cho MỌI cặp (dòng bán, ứng viên) bên dưới —
+  // với dữ liệu lớn (vd 6518 dòng bán × 3072 mã tồn kho) tính lặp lại thành
+  // hàng chục triệu lần chuẩn hoá chuỗi dư thừa, góp phần làm trang treo
+  // (cùng đợt sửa hiệu năng do dữ liệu lớn, xem xkToMauThieu/xkTuNlRows).
+  xkTon.forEach(t=>{if(t.__chuan===undefined)t.__chuan=xkChuanTen(t.ten);});
   const daDung={};
   // Nếu chỉ xử lý 1 phạm vi (rSet): trừ tồn TRƯỚC cho các dòng NGOÀI phạm vi
   // theo đúng mã ĐANG gán (giữ nguyên, không tính lại) — để biết chính xác
@@ -4781,7 +4792,7 @@ function xkKiemTraTonLoi(rSet){
       // tiên theo tồn nhiều/ít, giữ nguyên thứ tự xkTon.
       const tenChuan=xkChuanTen(r.ten_sp);
       xkTon.filter(t=>!daThu.has(t.ma) &&
-          (xkManh(tenChuan, xkChuanTen(t.ten)) || xkKichThuocKhop(r.ten_sp, t.ten) || xkMaNgoacKhop(r.ten_sp, t.ten)))
+          (xkManh(tenChuan, t.__chuan) || xkKichThuocKhop(r.ten_sp, t.ten) || xkMaNgoacKhop(r.ten_sp, t.ten)))
         .forEach(t=>layTu(t.ma));
     }
     if(!phanBo.length){
@@ -4856,14 +4867,29 @@ function xkRemapChiSoSauTach(moRong){
     nlSnapTrong[ci]=moi;
   });
 }
-// tô đỏ các dòng CHƯA có mã hàng (để dễ nhận biết cần gán tay)
+// Tô đỏ các dòng CHƯA có mã hàng (để dễ nhận biết cần gán tay) — TRƯỚC ĐÂY
+// gọi querySelectorAll RIÊNG cho TỪNG dòng (document.querySelectorAll(`td
+// [data-r="${i}"]`) × N dòng), mỗi lần quét lại TOÀN BỘ bảng (N dòng × ~16
+// cột) để tìm đúng vài ô — với bảng lớn (vd 6518 dòng) thành N×(N×16) phép
+// so khớp DOM, làm trình duyệt treo "Trang không phản hồi" (đã xác nhận qua
+// báo cáo thật). Giờ chỉ quét bảng ĐÚNG 1 LẦN (querySelectorAll các <tr>),
+// rồi với mỗi <tr> chỉ tìm trong PHẠM VI CHÍNH dòng đó (~16 ô) — nhanh hơn
+// hẳn, không còn treo trang.
 function xkToMauThieu(){
-  xkRows.forEach((r,i)=>{
+  const wrap=document.getElementById('nlTableWrap');
+  if(!wrap)return;
+  const trs=wrap.querySelectorAll('table tbody tr');
+  trs.forEach(tr=>{
+    const cell=tr.querySelector('td[data-r]');
+    if(!cell)return;
+    const r=xkRows[+cell.dataset.r];
     // dòng đã gán mã hàng kho, HOẶC đã có giá vốn (vd gán từ tờ khai xuất
     // khẩu — không có mã hàng nội bộ nhưng vẫn đã có đủ dữ liệu xuất kho)
     // -> không còn "thiếu", không tô đỏ.
-    if(String(r.ma||'').trim() || r.gia_xk!=null&&r.gia_xk!=='')return;
-    document.querySelectorAll(`#nlTableWrap td[data-r="${i}"]`).forEach(td=>{td.style.background='#fde8e8';});
+    if(!r || String(r.ma||'').trim() || (r.gia_xk!=null&&r.gia_xk!==''))return;
+    for(const td of tr.children){
+      if(td.hasAttribute('data-r'))td.style.background='#fde8e8';
+    }
   });
 }
 // cột "Tên Sản Phẩm" (index 3) hiện to đậm hơn cho dễ đọc
