@@ -4386,9 +4386,27 @@ async function xkCapNhatTon(input){
 // thế như "Import giá thành"), rồi bấm "Dò mã hàng tự động" như bình thường
 // để các dòng mới cũng được gán mã/trừ tồn. Dòng trùng y hệt dữ liệu đã có
 // tự bỏ qua ở server (xem _xk_gop_them_ban_hang), không sợ lỡ import 2 lần.
+// Hiện thanh tiến độ giống hệt "Dò mã hàng tự động" (poll song song trong
+// lúc server xử lý — xem _xk_import_them_ban_hang_sync/xkDoMa) vì file dữ
+// liệu Nhập Liệu có thể nhiều dòng, không biết đã xử lý tới đâu nếu im lặng.
 async function xkImportThemBanHang(input){
   const files=input.files; if(!files||!files.length)return;
-  toast('Đang đọc file chi tiết bán hàng...','');
+  const box=document.getElementById('xkDoMaTienDoBox');
+  const text=document.getElementById('xkDoMaTienDoText');
+  const bar=document.getElementById('xkDoMaTienDoBar');
+  if(box){box.style.display='block';text.textContent='Đang đọc file chi tiết bán hàng...';bar.style.width='0%';}
+  const capNhatTienDo=async()=>{
+    try{
+      const st=await api(`/api/xk/import-them-ban-hang-status/${current}`);
+      if(!box)return;
+      if(st.tong>0){
+        const pct=Math.min(100,Math.round(st.da_xu_ly/st.tong*100));
+        bar.style.width=pct+'%';
+        text.textContent=`Đang import: ${st.da_xu_ly.toLocaleString('vi-VN')}/${st.tong.toLocaleString('vi-VN')} dòng (${pct}%)...`;
+      }
+    }catch(e){}
+  };
+  const hen=setInterval(capNhatTienDo,500);
   try{
     const fd=new FormData(); for(const f of files)fd.append('files',f);
     const r=await fetch(`/api/xk/import-them-ban-hang/${current}`,{method:'POST',body:fd});
@@ -4400,6 +4418,7 @@ async function xkImportThemBanHang(input){
     if(d.loi&&d.loi.length)toast(`⚠ ${d.loi.join('; ')}`,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
+  finally{clearInterval(hen);if(box)box.style.display='none';}
   input.value='';
 }
 // Import "Tờ khai hàng hoá xuất khẩu (thông quan)" — lấy Tên hàng/ĐVT/Số

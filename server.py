@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.244"
+APP_BUILD = "2026-08-25.245"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12033,7 +12033,7 @@ def _doc_them_ban_hang(wb):
                 return header, rows
     return None
 
-def _xk_gop_them_ban_hang(cid, header_moi, rows_moi):
+def _xk_gop_them_ban_hang(cid, header_moi, rows_moi, on_progress=None):
     """Gộp THÊM rows_moi (đọc từ file 'Chi tiết bán hàng' bổ sung, header
     RIÊNG của file đó — xem _doc_them_ban_hang) vào nguồn 'ctbr' hiện có
     (nhap_lieu, dùng làm nguồn cho 'Dò mã hàng tự động' ở Xuất Kho) — KHÔNG
@@ -12046,7 +12046,12 @@ def _xk_gop_them_ban_hang(cid, header_moi, rows_moi):
     Bỏ qua dòng TRÙNG Y HỆT (Số HĐ + Tên hàng chuẩn hoá + Số lượng + Thành
     tiền đều khớp) với dòng đã có sẵn (kể cả dòng vừa thêm trong CÙNG lần
     import này) — tránh vô tình import lại cùng 1 file/dòng 2 lần làm tăng ảo
-    doanh số bán/số lượng cần xuất kho."""
+    doanh số bán/số lượng cần xuất kho.
+
+    on_progress(i, n) (tuỳ chọn): callback báo tiến độ khi đối chiếu trùng
+    từng dòng rows_moi — dữ liệu Nhập Liệu nhiều dòng có thể mất chút thời
+    gian, xem xk_import_them_ban_hang (endpoint gọi hàm này qua thread riêng
+    để có thể vừa xử lý vừa trả tiến độ, giống 'Dò mã hàng tự động')."""
     cur = nhap_lieu_get(cid, "ctbr")
     header_cu, rows_cu = cur.get("header") or [], cur.get("rows") or []
     col_moi = _xk_src_cols(header_moi)
@@ -12071,7 +12076,10 @@ def _xk_gop_them_ban_hang(cid, header_moi, rows_moi):
                              gv(r, col_ra["sl"]), gv(r, col_ra["tt"])))
 
     rows_them, so_trung = [], 0
-    for r in rows_moi:
+    tong_r = len(rows_moi)
+    for _idx_pgs, r in enumerate(rows_moi):
+        if on_progress:
+            on_progress(_idx_pgs, tong_r)
         ten = str(gv(r, col_moi["ten"]) or "").strip()
         if not ten:
             continue
@@ -12104,6 +12112,46 @@ def _xk_gop_them_ban_hang(cid, header_moi, rows_moi):
     conn.close()
     return len(rows_them), so_trung, len(rows_ra)
 
+# Tiến độ Import thêm dữ liệu bán hàng (Xuất Kho) — {cid: {"da_xu_ly", "tong",
+# "dang_chay"}}, cùng kiểu với _XK_DOMA_TIEN_DO ("Dò mã hàng tự động").
+_XK_IMPORT_BOSUNG_TIEN_DO = {}
+
+def _xk_import_them_ban_hang_sync(cid, files_doc):
+    """Phần XỬ LÝ THẬT (đọc Excel + gộp) của xk_import_them_ban_hang — tách
+    riêng thành hàm THƯỜNG (không async) để chạy qua asyncio.to_thread() ở
+    endpoint gọi hàm này, y hệt lý do 'Dò mã hàng tự động' chạy ở threadpool
+    riêng: nhờ vậy request GET tiến độ ở luồng khác vẫn được phục vụ song
+    song trong lúc đang xử lý, cho phép hiện thanh tiến độ. files_doc: list
+    (filename, content_bytes) đã đọc sẵn (đọc file upload PHẢI await trong
+    endpoint async, không thể đọc trong luồng nền)."""
+    import openpyxl, io as _io
+    so_file_ok, loi = 0, []
+    tong_them, tong_trung = 0, 0
+    _XK_IMPORT_BOSUNG_TIEN_DO[cid] = {"da_xu_ly": 0, "tong": 0, "dang_chay": True}
+
+    def _bao_tien_do(i, n):
+        _XK_IMPORT_BOSUNG_TIEN_DO[cid] = {"da_xu_ly": i, "tong": n, "dang_chay": True}
+
+    try:
+        for fn, content in files_doc:
+            try:
+                wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+            except Exception as e:
+                loi.append(f"{fn}: không đọc được ({e})"); continue
+            kq = _doc_them_ban_hang(wb)
+            if not kq:
+                loi.append(f"{fn}: không tìm thấy cột 'Tên hàng'/'Số lượng' hoặc sheet 'Chi tiết BÁN RA' phù hợp")
+                continue
+            header_moi, rows_moi = kq
+            so_them, so_trung, _tong = _xk_gop_them_ban_hang(cid, header_moi, rows_moi, on_progress=_bao_tien_do)
+            tong_them += so_them
+            tong_trung += so_trung
+            so_file_ok += 1
+    finally:
+        if cid in _XK_IMPORT_BOSUNG_TIEN_DO:
+            _XK_IMPORT_BOSUNG_TIEN_DO[cid]["dang_chay"] = False
+    return so_file_ok, tong_them, tong_trung, loi
+
 @app.post("/api/xk/import-them-ban-hang/{cid}")
 async def xk_import_them_ban_hang(cid: int, request: Request):
     """Import THÊM 1 hoặc nhiều file 'Chi tiết bán hàng' bổ sung (nguồn NGOÀI
@@ -12115,37 +12163,37 @@ async def xk_import_them_ban_hang(cid: int, request: Request):
     lượng — xem _doc_them_ban_hang. Dòng trùng y hệt dữ liệu đã có bị bỏ qua
     tự động (xem _xk_gop_them_ban_hang) — không sợ import nhầm 2 lần. Sau khi
     import, bấm '🔍 Dò mã hàng tự động' như bình thường để các dòng mới này
-    cũng được gán mã hàng/trừ tồn kho."""
-    import openpyxl, io as _io
+    cũng được gán mã hàng/trừ tồn kho.
+
+    Đọc nội dung file (phải await) xong mới giao việc xử lý (đọc Excel + gộp,
+    CPU-bound) cho luồng nền qua asyncio.to_thread() — xem
+    _xk_import_them_ban_hang_sync — để trong lúc đó GET tiến độ vẫn trả lời
+    được, hiện thanh tiến độ như 'Dò mã hàng tự động'."""
+    import asyncio
     form = await request.form()
     files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
     if not files:
         raise HTTPException(400, "Chưa chọn file")
-    so_file_ok, loi = 0, []
-    tong_them, tong_trung = 0, 0
+    files_doc = []
     for up in files:
         if up is None:
             continue
         fn = getattr(up, "filename", "file")
-        try:
-            content = await up.read()
-            wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
-        except Exception as e:
-            loi.append(f"{fn}: không đọc được ({e})"); continue
-        kq = _doc_them_ban_hang(wb)
-        if not kq:
-            loi.append(f"{fn}: không tìm thấy cột 'Tên hàng'/'Số lượng' hoặc sheet 'Chi tiết BÁN RA' phù hợp")
-            continue
-        header_moi, rows_moi = kq
-        so_them, so_trung, _tong = _xk_gop_them_ban_hang(cid, header_moi, rows_moi)
-        tong_them += so_them
-        tong_trung += so_trung
-        so_file_ok += 1
+        content = await up.read()
+        files_doc.append((fn, content))
+    so_file_ok, tong_them, tong_trung, loi = await asyncio.to_thread(
+        _xk_import_them_ban_hang_sync, cid, files_doc)
     if not so_file_ok:
         raise HTTPException(400, "Không đọc được dữ liệu từ file đã chọn. " + "; ".join(loi[:3]))
     cur = nhap_lieu_get(cid, "ctbr")
     return {"ok": True, "so_file": so_file_ok, "so_dong_them": tong_them, "so_trung": tong_trung,
             "tong": len(cur.get("rows") or []), "loi": loi[:5]}
+
+@app.get("/api/xk/import-them-ban-hang-status/{cid}")
+def xk_import_them_ban_hang_status(cid: int):
+    """Tiến độ (đã xử lý/tổng số dòng) của lần 'Import thêm dữ liệu' bán hàng
+    gần nhất — poll từ frontend trong lúc đợi, xem _XK_IMPORT_BOSUNG_TIEN_DO."""
+    return _XK_IMPORT_BOSUNG_TIEN_DO.get(cid, {"da_xu_ly": 0, "tong": 0, "dang_chay": False})
 
 @app.post("/api/xk/import-tokhai-xuatkhau/{cid}")
 async def xk_import_tokhai_xuatkhau(cid: int, request: Request):
