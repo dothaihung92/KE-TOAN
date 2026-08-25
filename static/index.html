@@ -3856,7 +3856,7 @@ async function luuCaHaiBangKe(){
 }
 
 /* ----- XUẤT KHO ----- */
-let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1, xkGanChonNhieu=[], xkGanGoiYTuoi=[];
+let xkTon=[], xkRows=[], xkGanIdx=-1, xkGanDanhSach=[], xkGanHighlight=-1, xkGanChonNhieu=[], xkGanGoiYTuoi=[], xkGanXepHang=[];
 const XK_HEADERS=['Tồn kho','Số HĐ','Ngày','Tên Sản Phẩm','ĐVT','Số lượng','Đơn giá','Thành tiền',
                    'Mã hàng kho','Tên hàng xuất kho','ĐVT kho','SL kho','Đơn Giá kho','Thành Tiền kho',
                    'Lợi nhuận','Tỷ lệ % Lãi/Lỗ'];
@@ -4597,20 +4597,30 @@ function xkDiemGiong(a,b){
   }
   return (2*khoiKhop(a,b))/(a.length+b.length);
 }
-// Gợi ý mã hàng kho TƯƠI cho 1 dòng — tính lại từ Tồn kho HIỆN CÓ mỗi lần mở bảng
-// gán mã, KHÔNG dùng r.goi_y đã lưu sẵn từ lúc "Dò mã hàng tự động" chạy lần đầu (có
-// thể lỗi thời/thiếu — VD lúc đó thiếu tín hiệu mã-trong-ngoặc/kích-thước nên bỏ sót
-// mã đúng, hoặc mã đã bị dòng khác dùng hết tồn tại THỜI ĐIỂM đó dù giờ đã còn hàng
-// trở lại sau khi người dùng sửa các dòng khác) — dùng ĐỦ 3 tín hiệu "mạnh" giống hệt
-// server (_manh_xk / _kich_thuoc_khop_xk / _ma_ngoac_khop_xk) để không bao giờ bỏ sót
-// mã rõ ràng đúng chỉ vì thiếu 1 tín hiệu.
+// Xếp hạng TOÀN BỘ tồn kho theo độ giống tên với 1 dòng bán — tính lại từ Tồn
+// kho HIỆN CÓ mỗi lần mở bảng gán mã, KHÔNG dùng r.goi_y đã lưu sẵn từ lúc "Dò
+// mã hàng tự động" chạy lần đầu (có thể lỗi thời/thiếu — VD lúc đó thiếu tín
+// hiệu mã-trong-ngoặc/kích-thước nên bỏ sót mã đúng, hoặc mã đã bị dòng khác
+// dùng hết tồn tại THỜI ĐIỂM đó dù giờ đã còn hàng trở lại sau khi người dùng
+// sửa các dòng khác) — dùng ĐỦ 3 tín hiệu "mạnh" giống hệt server (_manh_xk /
+// _kich_thuoc_khop_xk / _ma_ngoac_khop_xk) để không bao giờ bỏ sót mã rõ ràng
+// đúng chỉ vì thiếu 1 tín hiệu.
+//
+// TRẢ VỀ CẢ DANH SÁCH (không lọc/cắt bớt, đã SẮP theo mạnh rồi tới điểm giống
+// giảm dần) — trước đây hàm này tự lọc "diem>0.3||manh" rồi cắt còn 6, khiến
+// phần "mã khác" hiển thị bên dưới (xkVeDanhSachGan) phải quay về DÙNG NGUYÊN
+// THỨ TỰ TRONG TỒN KHO (không liên quan gì tên bán) — mã gần giống tên nhất
+// mà lỡ không lọt top 6 bị chôn lẫn trong hàng nghìn mã không liên quan, đúng
+// như người dùng phản ánh. Lọc/cắt bớt cho khu vực "GỢI Ý PHÙ HỢP" giờ chuyển
+// sang xkMoGan(), còn khu vực "mã khác" dùng THẲNG danh sách đã xếp hạng này
+// (xem xkGanXepHang) nên luôn nổi mã giống tên nhất lên đầu, không còn ngẫu nhiên.
 function xkTinhGoiYTuoi(r){
   const tenChuan=xkChuanTen(r.ten_sp);
   return xkTon.map(t=>{
     const manh=xkManh(tenChuan,xkChuanTen(t.ten))||xkKichThuocKhop(r.ten_sp,t.ten)||xkMaNgoacKhop(r.ten_sp,t.ten);
     const diem=Math.round(xkDiemGiong(tenChuan,xkChuanTen(t.ten))*1000)/1000;
     return {ma:t.ma,ten:t.ten,dvt:t.dvt,gia:t.gia,manh,diem};
-  }).filter(s=>s.diem>0.3||s.manh).sort((a,b)=>(b.manh-a.manh)||(b.diem-a.diem)).slice(0,6);
+  }).sort((a,b)=>(b.manh-a.manh)||(b.diem-a.diem));
 }
 // Fill Down riêng cho lưới Xuất Kho: copy giá trị xuống các dòng đã chọn, rồi
 // CHỈ dò/cập nhật tồn kho cho ĐÚNG các dòng vừa fill xuống đó (không đụng tới
@@ -4865,8 +4875,12 @@ function xkMoGan(idx){
   const r=xkRows[idx];
   // tính lại gợi ý + cảnh báo hết tồn TƯƠI mỗi lần mở bảng (không dùng r.goi_y/
   // r.thieu_ton lưu sẵn từ lúc dò mã tự động lần đầu — dễ lỗi thời, xem
-  // xkTinhGoiYTuoi()).
-  xkGanGoiYTuoi=xkTinhGoiYTuoi(r);
+  // xkTinhGoiYTuoi()). xkGanXepHang = TOÀN BỘ tồn kho đã xếp hạng theo độ
+  // giống tên (mạnh trước, rồi điểm giảm dần); xkGanGoiYTuoi = phần ĐẦU của
+  // xếp hạng đó thật sự đủ tin cậy (mạnh hoặc điểm > 30%), tối đa 6 mã, hiện
+  // nổi bật riêng trong khu "GỢI Ý PHÙ HỢP" — xem xkVeDanhSachGan().
+  xkGanXepHang=xkTinhGoiYTuoi(r);
+  xkGanGoiYTuoi=xkGanXepHang.filter(s=>s.diem>0.3||s.manh).slice(0,6);
   const tonConLai=xkTonConLaiMap(idx);
   const canXuat=Number(r.sl)||0;
   const coManDu=xkGanGoiYTuoi.some(g=>(tonConLai[g.ma]??0)>=canXuat);
@@ -4915,8 +4929,12 @@ function xkVeDanhSachGan(){
     .map(g=>({...g, con_lai: tonConLai[g.ma]??0, noibat:true}))
     .filter(g=>g.con_lai>0);           // mã đã hết tồn thì không hiện gợi ý
   const goiYma=new Set(goiY.map(g=>g.ma));
-  const khac=xkTon.filter(t=>!goiYma.has(t.ma)&&(!q||`${t.ten} ${t.ma}`.toLowerCase().includes(q))).slice(0,200)
-    .map(t=>({...t, con_lai: tonConLai[t.ma]??t.ton, noibat:false}))
+  // Dùng xkGanXepHang (đã xếp hạng theo mạnh rồi tới độ giống tên giảm dần —
+  // xem xkTinhGoiYTuoi/xkMoGan) thay vì xkTon nguyên thứ tự tồn kho — để mã
+  // càng giống tên bán càng nổi lên TRÊN trong khu này, kể cả khi không đủ
+  // "mạnh"/điểm > 30% để lọt khu "GỢI Ý PHÙ HỢP" phía trên.
+  const khac=xkGanXepHang.filter(t=>!goiYma.has(t.ma)&&(!q||`${t.ten} ${t.ma}`.toLowerCase().includes(q))).slice(0,200)
+    .map(t=>({...t, con_lai: tonConLai[t.ma]??0, noibat:false}))
     .filter(t=>t.con_lai>0);           // mã đã hết tồn thì không hiện trong danh sách còn lại
   // gộp 1 mảng DUY NHẤT theo đúng thứ tự hiển thị để mũi tên lên/xuống + Enter
   // trong modal điều hướng/chọn được đúng dòng đang tô sáng (giống ô tìm kiếm gợi ý)
@@ -4936,8 +4954,18 @@ function xkVeDanhSachGan(){
     </div>`;
   };
   let html='';
-  if(goiY.length)html+=`<div style="padding:6px 14px;font-size:13px;color:#b06a00;background:#fff7e6;font-weight:800">GỢI Ý PHÙ HỢP</div>`;
-  html+=xkGanDanhSach.map((it,i)=>dong(it,i)).join('');
+  if(goiY.length){
+    html+=`<div style="padding:6px 14px;font-size:13px;color:#b06a00;background:#fff7e6;font-weight:800">GỢI Ý PHÙ HỢP</div>`;
+    html+=goiY.map((it,i)=>dong(it,i)).join('');
+  }
+  if(khac.length){
+    // luôn có tiêu đề riêng cho phần còn lại — TRÁNH để liền ngay dưới "GỢI Ý
+    // PHÙ HỢP" không phân cách, khiến người dùng tưởng nhầm CẢ danh sách bên
+    // dưới cũng là gợi ý đáng tin (trong khi đây là DANH SÁCH ĐẦY ĐỦ, chỉ mới
+    // xếp theo độ giống tên chứ chưa chắc đúng như khu gợi ý ở trên).
+    html+=`<div style="padding:6px 14px;font-size:13px;color:#555;background:#f3f4f6;font-weight:800">${goiY.length?'MÃ KHÁC (xếp theo độ giống tên)':'TẤT CẢ MÃ HÀNG (xếp theo độ giống tên)'}</div>`;
+    html+=khac.map((it,i)=>dong(it,i+goiY.length)).join('');
+  }
   box.innerHTML=html||'<div class="hint" style="padding:12px">Không tìm thấy</div>';
   xkGanCapNhatHighlight();
   xkVeThanhChonNhieu();
