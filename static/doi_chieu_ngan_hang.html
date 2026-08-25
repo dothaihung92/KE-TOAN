@@ -532,15 +532,33 @@ function parseSaoke(text, currency) {
     return { debit: 0, credit: 0, rawDebit: '', rawCredit: '' };
   };
 
+  // QUAN TRỌNG: trước đây lọc bỏ THẲNG mọi dòng có nội dung <=3 ký tự TRƯỚC KHI
+  // biết dòng đó có tiền hay không (VD nội dung bị cắt ngắn/viết tắt như "ATM",
+  // "GD"...) — khiến dòng CÓ TIỀN THẬT nhưng nội dung ngắn bị mất trắng khi
+  // import mà không hề báo (đã xác nhận qua ca thật: dòng "RTM..." 7.200.000đ
+  // biến mất dù các dòng "RTM..." khác cùng định dạng vẫn vào bình thường).
+  // Nay tính số tiền TRƯỚC, chỉ loại dòng KHÔNG có tiền VÀ nội dung quá ngắn —
+  // không bao giờ âm thầm bỏ 1 dòng đã xác định có debit/credit > 0.
   return data
-    .filter(r => r.length > 1 && (r[ni] || "").length > 3)
+    .filter(r => r.length > 1)
     .map(r => {
       const { debit, credit, rawDebit, rawCredit } = parseRow(r);
       // Store raw amount text so ConfirmRow can detect parsing errors
       const rawAmt = r.slice(2).map(c=>(c||"").trim()).filter(c=>c&&c!=="0").join("|");
       return { id: uid(), date: r[di]||"", desc: r[ni]||"", debit, credit, currency: currency||"VND", rawAmt, rawDebit: rawDebit||"", rawCredit: rawCredit||"" };
     })
-    .filter(r => r.desc.length > 3);
+    .filter(r => r.desc.length > 3 || r.debit > 0 || r.credit > 0);
+}
+// Đếm số mốc ngày (dd/mm/yyyy hoặc dd-mm-yyyy) xuất hiện trong văn bản sao kê
+// GỐC — dùng làm số ĐỐI CHIẾU độc lập với parseSaoke() (không dùng lại cùng 1
+// logic lọc cột nên phát hiện được cả lỗi Ở TẦNG KHÁC, VD nội dung 1 ô bị xuống
+// dòng làm parseTable() gộp/gãy nhầm dòng trước khi parseSaoke() kịp xử lý).
+// Chỉ mang tính THAM KHẢO (1 dòng có thể chứa nhiều mốc ngày trong nội dung,
+// VD "...INVOICE NGAY 11.06.2016...") nên khi lệch chỉ CẢNH BÁO "có thể", không
+// tự ý xoá/thêm dòng nào.
+function demMocNgaySaoke(text) {
+  const m = String(text || "").match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g);
+  return m ? m.length : 0;
 }
 function parseInv(text, currency) {
   const isUSD = (currency||"VND")==="USD";
@@ -3196,6 +3214,11 @@ function CompanyScreen({
   const sk = parseSaoke(saokeText, currency);
   const dv = parseInv(dvText, currency);
   const dr = parseInv(drText, currency);
+  // Đối chiếu số dòng: đếm mốc ngày trong văn bản GỐC (độc lập với bộ lọc cột
+  // của parseSaoke) — lệch nhiều so với số giao dịch nhận diện được là dấu hiệu
+  // có dòng bị bỏ sót khi import (xem demMocNgaySaoke()).
+  const skSoMocNgay = saokeText ? demMocNgaySaoke(saokeText) : 0;
+  const skCoTheThieu = saokeText && sk.length > 0 && skSoMocNgay > sk.length;
   const [importing, setImporting] = useState(false);
 
   // Read Excel file and auto-map sheets
@@ -3694,7 +3717,17 @@ function CompanyScreen({
       color: "var(--red)",
       marginTop: 6
     }
-  }, "\u26A0 Ch\u01B0a nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c d\xF2ng n\xE0o \u2014 ki\u1EC3m tra l\u1EA1i \u0111\u1ECBnh d\u1EA1ng (c\u1EA7n d\xF9ng Tab \u0111\u1EC3 ph\xE2n c\xE1ch c\u1ED9t)")), step === 2 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "\u26A0 Ch\u01B0a nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c d\xF2ng n\xE0o \u2014 ki\u1EC3m tra l\u1EA1i \u0111\u1ECBnh d\u1EA1ng (c\u1EA7n d\xF9ng Tab \u0111\u1EC3 ph\xE2n c\xE1ch c\u1ED9t)"), skCoTheThieu && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: "#8a5300",
+      background: "var(--amber-l)",
+      border: "1px solid #e0c070",
+      borderRadius: 6,
+      padding: "6px 10px",
+      marginTop: 6
+    }
+  }, "\u26A0 D\u1EEF li\u1EC7u d\xE1n v\xE0o c\xF3 kho\u1EA3ng ", /*#__PURE__*/React.createElement("strong", null, skSoMocNgay), " m\u1ED1c ng\xE0y nh\u01B0ng ph\u1EA7n m\u1EC1m ch\u1EC9 nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c ", /*#__PURE__*/React.createElement("strong", null, sk.length), " giao d\u1ECBch \u2014 c\xF3 th\u1EC3 c\xF2n d\xF2ng b\u1ECB b\u1ECF s\xF3t (ch\u00FA \u00FD: 1 giao d\u1ECBch v\u1EABn c\xF3 th\u1EC3 ch\u1EE9a nhi\u1EC1u h\u01A1n 1 m\u1ED1c ng\xE0y trong n\u1ED9i dung n\xEAn con s\u1ED1 n\xE0y ch\u1EC9 mang t\xEDnh tham kh\u1EA3o). H\xE3y \u0111\u1ED1i chi\u1EBFu l\u1EA1i s\u1ED1 d\xF2ng v\u1EDBi file g\u1ED1c tr\u01B0\u1EDBc khi ch\u1EA1y \u0111\u1ED1i chi\u1EBFu.")), step === 2 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: "var(--text2)",
