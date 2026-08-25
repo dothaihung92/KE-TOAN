@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.253"
+APP_BUILD = "2026-08-25.254"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11328,6 +11328,30 @@ def _kd2(s):
     """_khong_dau() rồi thay nốt 'đ'->'d' (NFD không tách được chữ Đ ra dấu riêng)."""
     return _khong_dau(s).replace("đ", "d")
 
+_RE_KHO_SFX = None
+
+def _bo_hau_to_kho(ten_kho):
+    """MISA tự chèn số lượng mã hàng vào cuối tên kho trên báo cáo 'Tổng hợp
+    tồn kho' (vd 'HH (195 )' -> tên kho thật chỉ là 'HH') — cắt bỏ hậu tố đó,
+    xem _doc_file_ton_kho."""
+    global _RE_KHO_SFX
+    if _RE_KHO_SFX is None:
+        import re as _re_kho
+        _RE_KHO_SFX = _re_kho.compile(r'\(\s*\d+\s*\)\s*$')
+    return _RE_KHO_SFX.sub("", ten_kho).strip()
+
+def _xk_ton_an_toan(it):
+    """Số lượng 'AN TOÀN' để đối chiếu vượt tồn cho 1 mã hàng — xem
+    _doc_file_ton_kho/_xk_kiem_tra_vuot_ton: mã chỉ ở 1 kho thì bằng 'ton'
+    như trước; mã rải rác NHIỀU kho khác nhau (kho_ro=False) thì dùng
+    'ton_kho_min' (kho ÍT NHẤT trong số các kho chứa mã đó) — tránh cho
+    Dò mã hàng tự động/Gán mã trực tiếp gán VƯỢT quá số thật sự khả dụng ở
+    đúng 1 kho MISA áp dụng khi xuất kho bán hàng (không biết chắc kho nào)."""
+    v = it.get("ton_kho_min")
+    if v not in (None, ""):
+        return _to_num(v) or 0
+    return _to_num(it.get("ton")) or 0
+
 def _doc_file_ton_kho(wb):
     """Đọc file 'Tổng hợp tồn kho' (báo cáo MISA, tiêu đề gộp ô 2 dòng: nhóm
     Đầu kỳ/Nhập kho/Xuất kho/Cuối kỳ ở dòng trên, Số lượng/Giá trị ở dòng dưới)
@@ -11401,6 +11425,10 @@ def _doc_file_ton_kho(wb):
                 vkd = _kd2(v)
                 if "ten kho" in vkd or vkd.startswith("kho "):
                     ten_kho = v.split(":", 1)[1].strip()
+                    # bỏ hậu tố "(NNN )" MISA tự chèn sau tên kho để đếm số mã
+                    # hàng trong kho đó (vd 'HH (195 )' -> 'HH') — KHÔNG phải
+                    # 1 phần thật của tên/mã kho, giữ lại sẽ ghi SAI khi xuất.
+                    ten_kho = _bo_hau_to_kho(ten_kho)
                     if ten_kho:
                         kho_hien_tai = ten_kho
                         if ten_kho not in danh_sach_kho:
@@ -11416,19 +11444,30 @@ def _doc_file_ton_kho(wb):
         if ma in gop:
             gop[ma]["ton"] += sl
             gop[ma]["gt"] += gt
-            if kho_hien_tai and kho_hien_tai not in gop[ma]["kho_set"]:
-                gop[ma]["kho_set"].add(kho_hien_tai)
+            gop[ma]["kho_qty"][kho_hien_tai] = gop[ma]["kho_qty"].get(kho_hien_tai, 0) + sl
         else:
             gop[ma] = {"ma": ma, "ten": ten, "dvt": dvt, "ton": sl, "gt": gt,
-                      "kho_set": {kho_hien_tai} if kho_hien_tai else set()}
+                      "kho_qty": {kho_hien_tai: sl} if kho_hien_tai else {}}
     out = []
     for it in gop.values():
         gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
-        kho_set = it["kho_set"]
+        kho_qty = it["kho_qty"]
+        # ton_kho_min: số lượng KHẢ DỤNG THẬT SỰ AN TOÀN để đối chiếu vượt tồn
+        # — mã CHỈ ở 1 kho thì bằng chính "ton" (không khác gì trước); mã RẢI
+        # RÁC nhiều kho thì lấy kho ÍT NHẤT (không biết chắc "Xuất kho bán
+        # hàng" sẽ trừ đúng kho nào trong số đó, nên phải giả định XẤU NHẤT —
+        # PHÒNG hơn dùng "ton" cộng dồn, dễ cho phép gán VƯỢT quá số thật sự
+        # có ở đúng 1 kho MISA áp dụng, xem _xk_kiem_tra_vuot_ton/tồn kho
+        # chạy dần phía JS — đã xác nhận qua báo cáo thật: mã 'MH215-0' tổng
+        # 210 (165 ở 'Kho Chó Mèo Có VAT' + 45 ở 'Kho Chó Mèo KO VAT') nhưng
+        # phần mềm cho gán tới 171 > 165 khả dụng thật ở kho đang dùng để
+        # xuất bán, không hề cảnh báo).
+        ton_kho_min = min(kho_qty.values()) if kho_qty else it["ton"]
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
                     "ton": it["ton"], "gia": gia,
-                    "kho": next(iter(kho_set)) if len(kho_set) == 1 else None,
-                    "kho_ro": len(kho_set) <= 1})
+                    "kho": next(iter(kho_qty)) if len(kho_qty) == 1 else None,
+                    "kho_ro": len(kho_qty) <= 1,
+                    "ton_kho_min": ton_kho_min})
     return out, danh_sach_kho
 
 def _xk_src_cols(header):
@@ -11489,7 +11528,7 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
 
-    ton_list = [dict(it, con_lai=_to_num(it.get("ton")) or 0,
+    ton_list = [dict(it, con_lai=_xk_ton_an_toan(it),
                      ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
                 for it in (ton_rows or [])]
     ton_by_ma = {tn["ma"]: tn for tn in ton_list}
@@ -11893,7 +11932,7 @@ def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
     tiền BÁN - Thành Tiền kho (giá vốn) và Tỷ lệ % lãi/lỗ tính trên Thành
     tiền BÁN — để file xuất khớp đúng những gì người dùng thấy trên màn
     hình."""
-    ton_map = {str(t.get("ma") or "").strip(): _to_num(t.get("ton")) or 0 for t in (ton_rows or [])}
+    ton_map = {str(t.get("ma") or "").strip(): _xk_ton_an_toan(t) for t in (ton_rows or [])}
     da_dung = {}
     out = []
     for r in (giathanh_rows or []):
@@ -11934,7 +11973,7 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
     thì để trống Mã hàng kho (giữ đơn giản, không tách dòng phức tạp như dò
     mã từ Chi tiết BÁN RA)."""
     hoc_ma = hoc_ma or {}
-    ton_list = [dict(it, con_lai=_to_num(it.get("ton")) or 0,
+    ton_list = [dict(it, con_lai=_xk_ton_an_toan(it),
                      ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
                 for it in (ton_rows or [])]
     ton_by_ma = {tn["ma"]: tn for tn in ton_list}
@@ -12044,8 +12083,17 @@ def _xk_kiem_tra_vuot_ton(ton_rows, giathanh_rows):
     thật: MISA từ chối ghi sổ NGUYÊN CẢ chứng từ vì chỉ 1 vài mã bị gán vượt
     tồn (dữ liệu gán mã có thể đã bị vượt từ nhiều đợt Import tờ khai xuất
     khẩu/Dò mã hàng tự động/gán tay khác nhau CỘNG DỒN LẠI, dù mỗi thao tác
-    lúc gán tưởng như hợp lệ riêng lẻ)."""
-    ton_map = {str(t.get("ma") or "").strip(): _to_num(t.get("ton")) or 0 for t in (ton_rows or [])}
+    lúc gán tưởng như hợp lệ riêng lẻ).
+
+    So với 'ton' (cộng dồn tất cả kho): mã nào rải rác NHIỀU kho khác nhau
+    (kho_ro=False, xem _doc_file_ton_kho) thì dùng 'ton_kho_min' (kho ÍT nhất
+    trong số các kho chứa mã đó) làm giới hạn thay vì 'ton' — vì "Xuất kho
+    bán hàng" chỉ trừ ở ĐÚNG 1 kho, không biết chắc kho nào nên phải giả
+    định XẤU NHẤT, tránh cho gán vượt quá số thật sự khả dụng ở đúng kho sẽ
+    dùng (đã xác nhận qua báo cáo thật: mã 'MH215-0' tổng 210 [165 kho A + 45
+    kho B] nhưng phần mềm cho gán tới 171 > 165 khả dụng thật ở kho đang
+    dùng để xuất bán mà không hề cảnh báo)."""
+    ton_map = {str(t.get("ma") or "").strip(): _xk_ton_an_toan(t) for t in (ton_rows or [])}
     da_dung = {}
     for r in (giathanh_rows or []):
         ma = str(r.get("ma") or "").strip()

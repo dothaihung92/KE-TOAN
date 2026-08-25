@@ -4518,12 +4518,23 @@ async function xkDoMa(){
   }
   finally{clearInterval(hen);if(box)box.style.display='none';}
 }
+// Số lượng "AN TOÀN" để đối chiếu vượt tồn cho 1 mã hàng — cổng JS của field
+// 'ton_kho_min' server trả về (xem _doc_file_ton_kho/_xk_kiem_tra_vuot_ton):
+// mã chỉ ở 1 kho thì bằng "ton" như trước; mã rải rác NHIỀU kho khác nhau
+// (không biết chắc "Xuất kho bán hàng" sẽ trừ đúng kho nào) thì lấy kho ÍT
+// NHẤT làm giới hạn — PHÒNG hơn dùng "ton" cộng dồn tất cả kho, tránh cho
+// gán vượt quá số thật sự khả dụng ở đúng 1 kho MISA áp dụng mà không cảnh
+// báo (đã xác nhận qua báo cáo thật: mã rải 2 kho 165+45=210 nhưng phần mềm
+// cho gán tới 171 > 165 khả dụng thật ở kho đang dùng để xuất bán).
+function xkTonAnToan(t){
+  return (t.ton_kho_min!=null && t.ton_kho_min!=='') ? t.ton_kho_min : t.ton;
+}
 // chuyển xkRows (mảng object) -> nlHeader/nlRows để dùng chung lưới Excel của Nhập Liệu.
 // Cột "Tồn kho" tính CHẠY DẦN theo thứ tự từ trên xuống: dòng trên dùng mã nào
 // thì trừ luôn vào tồn của mã đó, dòng dưới cùng mã sẽ thấy số đã bị trừ tiếp.
 function xkRowsToNl(){
   nlHeader=XK_HEADERS.slice();
-  const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
+  const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=xkTonAnToan(t);});
   const daDung={};
   nlRows=xkRows.map(r=>{
     const slKho=(r.sl_kho!=null&&r.sl_kho!=='')?r.sl_kho:r.sl;
@@ -4744,7 +4755,7 @@ function xkKiemTraTon(rSet){
 function xkKiemTraTonLoi(rSet){
   xkTuNlRows();
   const tongGocTruoc=xkRows.reduce((a,r)=>a+(Number(r.sl)||0),0);
-  const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=t.ton;});
+  const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=xkTonAnToan(t);});
   // Chuẩn hoá tên MỖI mã tồn kho 1 LẦN DUY NHẤT (cache thẳng lên object) thay
   // vì tính lại xkChuanTen(t.ten) cho MỌI cặp (dòng bán, ứng viên) bên dưới —
   // với dữ liệu lớn (vd 6518 dòng bán × 3072 mã tồn kho) tính lặp lại thành
@@ -5014,7 +5025,7 @@ function xkDongGan(){
 // những gì các dòng KHÁC (mọi dòng trừ dòng đang gán) đã dùng — không phải
 // tồn gốc tĩnh, để không gây hiểu lầm như trường hợp gán mã đã bị dòng khác dùng bớt.
 function xkTonConLaiMap(boQuaIdx){
-  const map={}; xkTon.forEach(t=>{map[t.ma]=t.ton;});
+  const map={}; xkTon.forEach(t=>{map[t.ma]=xkTonAnToan(t);});
   xkRows.forEach((r,i)=>{
     if(i===boQuaIdx)return;
     const ma=String(r.ma||'').trim();
