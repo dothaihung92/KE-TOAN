@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.245"
+APP_BUILD = "2026-08-25.246"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5184,8 +5184,16 @@ def _dvc_run_batch(batch_id, cids, body):
                     rows_tho, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu_tim, den_tim)
                 except Exception as e:
                     rows_tho, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+                # Giữ lại dòng NẰM TRỌN trong kỳ đang chọn, HOẶC dòng không suy
+                # được kỳ (_ky_khong_xac_dinh — vd Môn bài/TTĐB/Tài nguyên/BVMT/
+                # XNK và nhiều loại tờ khai khác không ghi kỳ theo dạng Quý/
+                # Tháng/Năm chuẩn) — CHỈ loại đúng những dòng suy được kỳ và
+                # kỳ đó THẬT SỰ khác (xem _ky_khong_xac_dinh để biết vì sao,
+                # nếu không thì tra cứu/tải hàng loạt chỉ ra đúng 4 loại GTGT/
+                # TNCN/BCTC/TNDN dù công ty còn nộp nhiều loại tờ khai khác).
                 rows = [r for r in rows_tho
-                        if _ky_dong_bo_trong_khoang(r.get("ky", ""), tu, den)]
+                        if _ky_dong_bo_trong_khoang(r.get("ky", ""), tu, den)
+                        or _ky_khong_xac_dinh(r.get("ky", ""))]
                 if rows_tho and not rows:
                     sdiag = list(sdiag) + [
                         f"tìm thấy {len(rows_tho)} dòng trong khoảng ngày nộp {tu_tim}-{den_tim} "
@@ -6069,6 +6077,24 @@ def _ky_dong_bo_trong_khoang(ky_text, tu_str, den_str):
     except Exception:
         return False
     return dt_req <= d1 and d2 <= dd_req
+
+
+def _ky_khong_xac_dinh(ky_text):
+    """True nếu KHÔNG suy được (tu, den) từ cột 'Kỳ' — _ky_text_ra_tu_den()
+    chỉ nhận diện đúng dạng Quý/Tháng/Năm (đủ cho GTGT/TNCN/BCTC/TNDN — 4 loại
+    có kỳ tính thuế theo mẫu chuẩn đó), CÒN RẤT NHIỀU loại tờ khai khác (Môn
+    bài, Tiêu thụ đặc biệt, Tài nguyên, Bảo vệ môi trường, Xuất nhập khẩu, các
+    tờ khai/phụ lục phát sinh theo TỪNG LẦN...) ghi kỳ ở dạng KHÁC hẳn (rỗng,
+    '-', ngày cụ thể, hoặc không có khái niệm 'kỳ' theo quý/tháng/năm) —
+    _ky_dong_bo_trong_khoang() trả False cho những dòng này (không suy được
+    khoảng để so sánh), khiến chúng bị loại khỏi kết quả y hệt như 1 dòng
+    CHẮC CHẮN thuộc kỳ khác, dù thực ra không hề biết kỳ của nó là gì. Dùng
+    hàm này để phân biệt 2 trường hợp — 'kỳ khác, chắc chắn ngoài phạm vi'
+    (loại bỏ đúng) khác với 'không xác định được kỳ' (PHẢI giữ lại, xem nơi
+    gọi — nếu không, tra cứu/tải hàng loạt sẽ chỉ ra đúng 4 loại GTGT/TNCN/
+    BCTC/TNDN dù công ty còn nộp nhiều loại tờ khai khác trong kỳ)."""
+    tu2, den2 = _ky_text_ra_tu_den(ky_text)
+    return tu2 is None or den2 is None
 
 
 def _phan_loai_trang_thai_cqt(trang_thai_text):
