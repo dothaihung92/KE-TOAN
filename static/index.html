@@ -4372,6 +4372,7 @@ async function xkImportTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã import ${d.so_dong} mã hàng tồn kho`,'ok');
+    if(d.canh_bao_kho)toast(d.canh_bao_kho,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
@@ -4388,6 +4389,7 @@ async function xkCapNhatTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã cập nhật ${d.so_cap_nhat} mã (thêm mới ${d.so_moi}) — tổng ${d.tong} mã, mã hàng đã gắn giữ nguyên`,'ok');
+    if(d.canh_bao_kho)toast(d.canh_bao_kho,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
@@ -4587,10 +4589,23 @@ function xkManh(a,b){
 // LIÊN TỤC như xkManh() thất bại dù rõ ràng đúng mã) — ghép NGUYÊN cụm trong ngoặc
 // (không tách rời từng mã con) vì mã kiểu ngắn (VD hậu tố màu 'WT') hay đứng NGAY
 // cạnh mã chính, tách riêng dễ khớp nhầm.
+// Cổng JS của _la_quy_cach_dong_goi_xk (server.py): cụm trong ngoặc CHỈ là
+// khối lượng/thể tích/quy cách đóng gói (vd '100g/gói', '500ml') KHÔNG phải
+// mã kiểu/màu — cực kỳ hay trùng NGẪU NHIÊN giữa các sản phẩm KHÁC NHAU
+// hoàn toàn (vd 'Gà sấy...(100g/gói)' khớp bừa 'BIO-MILK...100g/gói' dù 2
+// mặt hàng chẳng liên quan gì) nên PHẢI loại khỏi tín hiệu "mạnh" — y hệt lý
+// do đã sửa cho tên tồn kho ngắn kiểu "Ga"/"GỐI" ở xkManh().
+const XK_RE_QUY_CACH_DONG_GOI=/^\d+([.,]\d+)?\s*(g|gr|kg|ml|l|lit|cc)(\s*\/\s*(goi|tui|hop|chai|lon|vien|cai|thung|lo|bao|hu|vi))?$/;
+function xkLaQuyCachDongGoi(grp){
+  const kd=String(grp||'').normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .trim().toLowerCase().replace(/\s+/g,'');
+  return XK_RE_QUY_CACH_DONG_GOI.test(kd);
+}
 function xkMaNgoacGop(ten){
   const ra=new Set();
   const re=/\(([^)]*)\)/g; let m;
   while((m=re.exec(String(ten||'')))){
+    if(xkLaQuyCachDongGoi(m[1]))continue;
     const tok=xkChuanTen(m[1]);
     if(tok.length>=4)ra.add(tok);
   }

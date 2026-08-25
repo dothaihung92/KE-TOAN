@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.249"
+APP_BUILD = "2026-08-25.250"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11273,16 +11273,41 @@ def _kich_thuoc_khop_xk(a, b):
     ka, kb = _trich_kich_thuoc_xk(a), _trich_kich_thuoc_xk(b)
     return bool(ka and kb and (ka & kb))
 
+_RE_QUY_CACH_DONG_GOI_XK = None
+
+def _la_quy_cach_dong_goi_xk(grp):
+    """True nếu nội dung trong ngoặc CHỈ là mô tả khối lượng/thể tích/quy
+    cách đóng gói (vd '100g/gói', '500ml', '1kg', '250ml/chai') — KHÔNG phải
+    mã kiểu/màu phân biệt sản phẩm. Cực kỳ phổ biến TRÙNG NGẪU NHIÊN giữa các
+    sản phẩm KHÁC NHAU hoàn toàn chỉ vì cùng khối lượng đóng gói (vd 'Gà sấy
+    ... (100g/gói)' và 'BIO-MILK FOR PET - 100g/gói' — 2 mặt hàng chẳng liên
+    quan gì, chỉ tình cờ cùng đóng gói 100g/gói) — PHẢI loại khỏi tín hiệu
+    'mạnh' ở _ma_ngoac_gop_xk, nếu không sẽ gán mã sai be bét y hệt lỗi đã
+    gặp với tên tồn kho ngắn kiểu 'Ga'/'GỐI' (xem _manh_xk)."""
+    global _RE_QUY_CACH_DONG_GOI_XK
+    if _RE_QUY_CACH_DONG_GOI_XK is None:
+        import re as _re_qc
+        _RE_QUY_CACH_DONG_GOI_XK = _re_qc.compile(
+            r'^\d+([.,]\d+)?\s*(g|gr|kg|ml|l|lit|cc)'
+            r'(\s*/\s*(goi|tui|hop|chai|lon|vien|cai|thung|lo|bao|hu|vi))?$')
+    kd = _khong_dau(grp).strip().lower().replace(" ", "")
+    # replace(" ","") ở TRÊN rồi mới match — regex có \s* để phòng còn khoảng
+    # trắng lẻ tẻ dù đã xoá phần lớn, không ảnh hưởng nếu chuỗi đã sạch.
+    return bool(_RE_QUY_CACH_DONG_GOI_XK.match(kd))
+
 def _ma_ngoac_gop_xk(ten):
     """Gộp NGUYÊN mỗi cụm trong ngoặc đơn của tên hàng GỐC thành 1 mã liền
     (vd '(ASH50-CT)' -> 'ASH50CT', '(ASH30 - MTWT)' -> 'ASH30MTWT') — mã
     kiểu/màu ngắn (hậu tố 2 ký tự như 'CT','WT') thường nằm NGAY TRONG ngoặc
     kèm mã chính, tách rời riêng ra dễ bị loại vì quá ngắn/nhầm lẫn (khác
     _ma_trong_ngoac_tokhai — tách rời, dùng cho mô tả tờ khai hải quan nhiều
-    lớp) nên ở đây GIỮ NGUYÊN VẸN cả cụm rồi so khớp liên tục."""
+    lớp) nên ở đây GIỮ NGUYÊN VẸN cả cụm rồi so khớp liên tục. Bỏ qua cụm chỉ
+    là quy cách đóng gói (100g/gói, 500ml...) — xem _la_quy_cach_dong_goi_xk."""
     import re as _re_g
     ra = set()
     for grp in _re_g.findall(r'\(([^)]*)\)', str(ten or "")):
+        if _la_quy_cach_dong_goi_xk(grp):
+            continue
         tok = _re_g.sub(r'[^A-Za-z0-9]', '', _khong_dau(grp).upper())
         if len(tok) >= 4:
             ra.add(tok)
@@ -11306,7 +11331,21 @@ def _kd2(s):
 def _doc_file_ton_kho(wb):
     """Đọc file 'Tổng hợp tồn kho' (báo cáo MISA, tiêu đề gộp ô 2 dòng: nhóm
     Đầu kỳ/Nhập kho/Xuất kho/Cuối kỳ ở dòng trên, Số lượng/Giá trị ở dòng dưới)
-    -> list {ma,ten,dvt,ton,gia}. Dò tiêu đề theo CHỮ, không phụ thuộc cột."""
+    -> (list {ma,ten,dvt,ton,gia}, danh_sach_kho). Dò tiêu đề theo CHỮ, không
+    phụ thuộc cột.
+
+    Báo cáo MISA có thể xuất theo NHIỀU KHO (mỗi kho 1 khối, ngăn bằng dòng
+    'Tên kho : ...' không có Mã hàng) — số lượng tồn của CÙNG 1 mã ở các khối
+    khác nhau được CỘNG DỒN vào 1 con số duy nhất (vẫn giữ hành vi cũ, không
+    tách theo kho vì "Xuất kho" hiện chỉ ghi 1 kho cố định "HH" cho mọi dòng,
+    xem _gen_xuat_kho_rows — tách theo kho cần biết ĐÚNG kho nào ứng với "HH"
+    trong dữ liệu MISA thật, chưa có đủ thông tin để làm tự động, an toàn hơn
+    là báo cho người dùng biết). danh_sach_kho: tên các kho phát hiện được
+    (theo thứ tự xuất hiện) — CHỈ có ý nghĩa CẢNH BÁO khi có TỪ 2 KHO trở lên:
+    số "Tồn kho" tổng hợp này là CỘNG DỒN NHIỀU KHO, có thể VƯỢT số thực tế
+    khả dụng ở 1 kho cụ thể mà MISA áp dụng khi xuất kho bán hàng (đã xác
+    nhận qua báo cáo thật: phần mềm tính đủ tồn nhưng MISA từ chối vì kho
+    "KHODOVAT" cụ thể không đủ, dù tổng CÁC kho cộng lại thì đủ)."""
     ws = wb.worksheets[0]
     hdr_row = None
     for r in range(1, min(ws.max_row, 10) + 1):
@@ -11315,7 +11354,7 @@ def _doc_file_ton_kho(wb):
             hdr_row = r
             break
     if not hdr_row:
-        return []
+        return [], []
     ncol = ws.max_column
     top = [_kd2(ws.cell(hdr_row, c).value) for c in range(1, ncol + 1)]
     sub = [_kd2(ws.cell(hdr_row + 1, c).value) for c in range(1, ncol + 1)]
@@ -11338,12 +11377,25 @@ def _doc_file_ton_kho(wb):
     i_sl = find_combo("cuoi ky", "so luong")
     i_gt = find_combo("cuoi ky", "gia tri")
     if i_ma < 0 or i_ten < 0:
-        return []
+        return [], []
     gop = {}
+    danh_sach_kho = []
     for r in range(hdr_row + 2, ws.max_row + 1):
         ma = str(ws.cell(r, i_ma + 1).value or "").strip()
-        if not ma:               # bỏ dòng 'Tên kho : ...' / dòng tổng
-            continue
+        if not ma:
+            # dò dòng 'Tên kho : ...' (khác dòng 'Tổng cộng' — không có chữ
+            # 'kho') để biết file này có phải xuất GỘP NHIỀU KHO hay không.
+            for c in range(1, ncol + 1):
+                v = str(ws.cell(r, c).value or "").strip()
+                if not v or ":" not in v:
+                    continue
+                vkd = _kd2(v)
+                if "ten kho" in vkd or vkd.startswith("kho "):
+                    ten_kho = v.split(":", 1)[1].strip()
+                    if ten_kho and ten_kho not in danh_sach_kho:
+                        danh_sach_kho.append(ten_kho)
+                    break
+            continue               # bỏ dòng 'Tên kho : ...' / dòng tổng
         ten = str(ws.cell(r, i_ten + 1).value or "").strip()
         dvt = str(ws.cell(r, i_dvt + 1).value or "").strip() if i_dvt >= 0 else ""
         sl = _to_num(ws.cell(r, i_sl + 1).value) if i_sl >= 0 else 0
@@ -11360,7 +11412,7 @@ def _doc_file_ton_kho(wb):
         gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
                     "ton": it["ton"], "gia": gia})
-    return out
+    return out, danh_sach_kho
 
 def _xk_src_cols(header):
     """Tìm cột trong sheet nguồn 'Chi tiết BÁN RA'."""
@@ -12030,6 +12082,7 @@ async def xk_import_ton(cid: int, request: Request):
         raise HTTPException(400, "Chưa chọn file")
     gop = {}
     so_file_ok, loi = 0, []
+    danh_sach_kho = []
     for up in files:
         if up is None:
             continue
@@ -12039,12 +12092,15 @@ async def xk_import_ton(cid: int, request: Request):
             wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
         except Exception as e:
             loi.append(f"{fn}: không đọc được ({e})"); continue
-        rows = _doc_file_ton_kho(wb)
+        rows, kho_file = _doc_file_ton_kho(wb)
         if not rows:
             loi.append(f"{fn}: không thấy cột 'Mã hàng'/'Tên hàng' (không đúng mẫu 'Tổng hợp tồn kho')")
             continue
         for it in rows:
             gop[it["ma"]] = it            # file sau đè file trước (mới nhất thắng)
+        for k in kho_file:
+            if k not in danh_sach_kho:
+                danh_sach_kho.append(k)
         so_file_ok += 1
     if not gop:
         raise HTTPException(400, "Không đọc được dữ liệu tồn kho từ file đã chọn. " + "; ".join(loi[:3]))
@@ -12052,7 +12108,17 @@ async def xk_import_ton(cid: int, request: Request):
     data = _doc_du_lieu_cty(cid)
     data["xk_ton"] = ton_rows
     _ghi_du_lieu_cty(cid, data)
-    return {"ok": True, "so_file": so_file_ok, "so_dong": len(ton_rows), "loi": loi[:5]}
+    canh_bao_kho = None
+    if len(danh_sach_kho) > 1:
+        canh_bao_kho = (f"⚠ File tồn kho gồm {len(danh_sach_kho)} KHO khác nhau: "
+                        f"{', '.join(danh_sach_kho[:8])}{' ...' if len(danh_sach_kho) > 8 else ''}. "
+                        f"Số 'Tồn kho' đang CỘNG DỒN cả {len(danh_sach_kho)} kho — nếu 'Xuất kho bán "
+                        f"hàng' trong MISA chỉ trừ ở 1 kho cụ thể, số này có thể VƯỢT quá số thực tế "
+                        f"khả dụng ở đúng kho đó dù tổng các kho vẫn đủ (đã gặp thật: MISA từ chối "
+                        f"ghi sổ vì 1 kho cụ thể không đủ). Nếu gặp lỗi tương tự, hãy xuất riêng báo "
+                        f"cáo 'Tổng hợp tồn kho' CHỈ CHO đúng 1 kho đang dùng để xuất bán rồi import lại.")
+    return {"ok": True, "so_file": so_file_ok, "so_dong": len(ton_rows), "loi": loi[:5],
+            "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
 
 @app.post("/api/xk/cap-nhat-ton/{cid}")
 async def xk_cap_nhat_ton(cid: int, request: Request):
@@ -12070,6 +12136,7 @@ async def xk_cap_nhat_ton(cid: int, request: Request):
         raise HTTPException(400, "Chưa chọn file")
     gop = {}
     so_file_ok, loi = 0, []
+    danh_sach_kho = []
     for up in files:
         if up is None:
             continue
@@ -12079,12 +12146,15 @@ async def xk_cap_nhat_ton(cid: int, request: Request):
             wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
         except Exception as e:
             loi.append(f"{fn}: không đọc được ({e})"); continue
-        rows = _doc_file_ton_kho(wb)
+        rows, kho_file = _doc_file_ton_kho(wb)
         if not rows:
             loi.append(f"{fn}: không thấy cột 'Mã hàng'/'Tên hàng' (không đúng mẫu 'Tổng hợp tồn kho')")
             continue
         for it in rows:
             gop[it["ma"]] = it            # file sau đè file trước (mới nhất thắng)
+        for k in kho_file:
+            if k not in danh_sach_kho:
+                danh_sach_kho.append(k)
         so_file_ok += 1
     if not gop:
         raise HTTPException(400, "Không đọc được dữ liệu tồn kho từ file đã chọn. " + "; ".join(loi[:3]))
@@ -12094,8 +12164,16 @@ async def xk_cap_nhat_ton(cid: int, request: Request):
     ton_theo_ma.update(gop)
     data["xk_ton"] = list(ton_theo_ma.values())
     _ghi_du_lieu_cty(cid, data)
+    canh_bao_kho = None
+    if len(danh_sach_kho) > 1:
+        canh_bao_kho = (f"⚠ File tồn kho gồm {len(danh_sach_kho)} KHO khác nhau: "
+                        f"{', '.join(danh_sach_kho[:8])}{' ...' if len(danh_sach_kho) > 8 else ''}. "
+                        f"Số 'Tồn kho' đang CỘNG DỒN cả {len(danh_sach_kho)} kho — nếu 'Xuất kho bán "
+                        f"hàng' trong MISA chỉ trừ ở 1 kho cụ thể, số này có thể VƯỢT quá số thực tế "
+                        f"khả dụng ở đúng kho đó dù tổng các kho vẫn đủ.")
     return {"ok": True, "so_file": so_file_ok, "so_cap_nhat": len(gop), "so_moi": so_moi,
-            "tong": len(data["xk_ton"]), "loi": loi[:5]}
+            "tong": len(data["xk_ton"]), "loi": loi[:5],
+            "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
 
 # Header CHUẨN dùng khi nguồn "ctbr" (Chi tiết BÁN RA, xem _xk_src_cols) đang
 # RỖNG — đúng khớp từng cụm "eqs" của _xk_src_cols() nên đọc lại luôn tìm
