@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.247"
+APP_BUILD = "2026-08-25.248"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5096,6 +5096,18 @@ def _dvc_run_batch(batch_id, cids, body):
     tai_file = bool(body.get("tai_file"))       # có tải file tờ khai về không
     tai_tb = bool(body.get("tai_thong_bao", True))
     luu_pass = bool(body.get("luu", True))
+    # loai_ky='tuychon' ("Tùy chọn ngày"): tu_ngay/den_ngay là KHOẢNG NGÀY tự
+    # do người dùng muốn xem/tải TOÀN BỘ tờ khai nộp trong đó (đúng nghĩa ô
+    # tìm kiếm gốc trên cổng — lọc theo NGÀY NỘP), KHÔNG đại diện cho 1 "kỳ
+    # tính thuế" cụ thể nào — khác hẳn loai_ky='quy'/'thang'/'nam' (chọn từ
+    # dropdown), lúc đó tu_ngay/den_ngay CHÍNH LÀ kỳ tính thuế mong muốn, nên
+    # mới cần lọc thêm "kỳ của dòng phải nằm TRỌN trong khoảng" để loại các
+    # dòng của kỳ liền kề lỡ có ngày nộp rơi vào khoảng tìm mở rộng. Áp dụng
+    # bộ lọc kỳ đó cho CẢ chế độ Tùy chọn ngày là SAI: 1 tờ khai kỳ CŨ (vd
+    # Quý 3/2024) nhưng nộp BỔ SUNG muộn (ngày nộp rơi đúng trong khoảng tự
+    # do đang chọn) sẽ bị loại nhầm dù đúng là thứ người dùng đang muốn tìm —
+    # xem _xu_ly_1_cty (bien loc_theo_ky bên dưới).
+    loc_theo_ky = (body.get("loai_ky") or "").strip() != "tuychon"
     # Nguồn tra cứu: TỰ ĐỘNG chọn theo khoảng ngày (người dùng không cần tự
     # chọn) — "dvc" cho tờ khai TỪ 01/07/2025, "thuedientu" (tab cũ) cho tờ
     # khai TRƯỚC ngày đó; nếu khoảng ngày vắt qua mốc này, tra cứu CẢ 2.
@@ -5186,14 +5198,22 @@ def _dvc_run_batch(batch_id, cids, body):
                 #     liệu thật người dùng gửi: chọn Quý 2/2026 nhưng bảng kết quả
                 #     lại toàn tờ khai kỳ Quý 1/2026 và tờ khai quyết toán cả năm).
                 tu_tim, den_tim = tu, den
-                try:
-                    d2, m2, y2 = den.split("/")
-                    den_ngay_kt = datetime.date(int(y2), int(m2), int(d2))
-                    hom_nay_kt = datetime.date.today()
-                    if hom_nay_kt > den_ngay_kt:
-                        den_tim = hom_nay_kt.strftime("%d/%m/%Y")
-                except Exception:
-                    pass
+                # Mở rộng vùng tìm (ngày nộp) tới hôm nay CHỈ áp dụng khi chọn
+                # kỳ CỐ ĐỊNH (Quý/Tháng/Năm) — lý do mở rộng là để bắt tờ khai
+                # NỘP SAU khi kỳ đó đã kết thúc, không liên quan gì tới chế độ
+                # "Tùy chọn ngày" (ở đó tu/den CHÍNH LÀ khoảng ngày nộp người
+                # dùng muốn xem, không có "kỳ" nào để mở rộng theo — mở rộng
+                # thêm sẽ kéo vào cả tờ khai nộp SAU "đến ngày" mà người dùng
+                # không hề chọn).
+                if loc_theo_ky:
+                    try:
+                        d2, m2, y2 = den.split("/")
+                        den_ngay_kt = datetime.date(int(y2), int(m2), int(d2))
+                        hom_nay_kt = datetime.date.today()
+                        if hom_nay_kt > den_ngay_kt:
+                            den_tim = hom_nay_kt.strftime("%d/%m/%Y")
+                    except Exception:
+                        pass
                 try:
                     rows_tho, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu_tim, den_tim)
                 except Exception as e:
@@ -5205,9 +5225,16 @@ def _dvc_run_batch(batch_id, cids, body):
                 # kỳ đó THẬT SỰ khác (xem _ky_khong_xac_dinh để biết vì sao,
                 # nếu không thì tra cứu/tải hàng loạt chỉ ra đúng 4 loại GTGT/
                 # TNCN/BCTC/TNDN dù công ty còn nộp nhiều loại tờ khai khác).
-                rows = [r for r in rows_tho
-                        if _ky_dong_bo_trong_khoang(r.get("ky", ""), tu, den)
-                        or _ky_khong_xac_dinh(r.get("ky", ""))]
+                # loc_theo_ky=False ("Tùy chọn ngày"): KHÔNG lọc theo kỳ chút
+                # nào — tu/den ở chế độ này là khoảng NGÀY NỘP người dùng
+                # thật sự muốn xem, không phải 1 kỳ tính thuế cần khớp; lọc
+                # theo kỳ ở đây sẽ loại nhầm tờ khai kỳ CŨ nộp BỔ SUNG muộn
+                # (vd Quý 3/2024 nộp bổ sung ngày 20/04/2025, rơi đúng trong
+                # khoảng Tùy chọn ngày đang chọn) dù đó chính là thứ đang tìm.
+                rows = rows_tho if not loc_theo_ky else [
+                    r for r in rows_tho
+                    if _ky_dong_bo_trong_khoang(r.get("ky", ""), tu, den)
+                    or _ky_khong_xac_dinh(r.get("ky", ""))]
                 if rows_tho and not rows:
                     sdiag = list(sdiag) + [
                         f"tìm thấy {len(rows_tho)} dòng trong khoảng ngày nộp {tu_tim}-{den_tim} "
@@ -5254,6 +5281,16 @@ def _dvc_run_batch(batch_id, cids, body):
                                 if tai_tb:
                                     tb_files, _ = _dvc_browser_thongbao(drv, ma)
                                     so_tb = len(tb_files)
+                                    if so_tb == 0:
+                                        # KHÔNG chắc đây là lỗi (có thể CQT thật sự chưa
+                                        # phát hành thông báo cho hồ sơ này) — ghi chú NHẸ
+                                        # (không tính vào so_loi_tai) để người dùng tự đối
+                                        # chiếu lại trên cổng nếu thấy đáng ngờ, thay vì im
+                                        # lặng như trước (không cách nào biết vì sao thiếu).
+                                        item["so_khong_co_tb"] = item.get("so_khong_co_tb", 0) + 1
+                                        mau_tb = item.setdefault("khong_co_tb_mau", [])
+                                        if len(mau_tb) < _DVC_LOI_TAI_TOI_DA:
+                                            mau_tb.append(str(rec.get("to_khai") or ten_goi)[:80])
                                     for k, (fn, raw) in enumerate(tb_files, 1):
                                         if raw:
                                             ext = os.path.splitext(fn)[1] or ".xml"

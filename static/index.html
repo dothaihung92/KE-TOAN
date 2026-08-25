@@ -2303,6 +2303,7 @@ async function dvcbRun(force){
   const [tu,den]=dvcbKyToDates();
   if(!tu||!den){toast('Chọn kỳ tra cứu','err');return;}
   const body={cids,tu_ngay:tu,den_ngay:den,ky_label:dvcbKyLabel(),
+    loai_ky:document.getElementById('dvcb_loaiky').value,
     tai_file:document.getElementById('dvcb_taifile').checked,
     tai_thong_bao:document.getElementById('dvcb_tb').checked};
   const prog=document.getElementById('dvcbProgress');
@@ -2369,7 +2370,12 @@ async function dvcbPoll(){
         // đây bị nuốt lỗi im lặng, giờ hiện rõ lý do để biết vì sao thiếu file.
         const loiTai=it.so_loi_tai?`<div style="margin-left:14px;color:#b45309;font-size:12px">⚠ ${it.so_loi_tai} hồ sơ tra cứu thấy nhưng KHÔNG tải được file:`+
           (it.loi_tai_mau||[]).map(x=>`<div style="margin-left:14px">↳ ${x.to_khai||x.ma}: ${x.loi}</div>`).join('')+'</div>':'';
-        return `<div style="color:${c}">• ${it.ten}: ${it.trang_thai}${it.so_dong?` (${it.so_dong} dòng${it.so_file?', '+it.so_file+' file':''})`:''}</div>${dongBo}${chiTiet}${loiTai}`;
+        // Không tìm thấy Thông báo (tiếp nhận/xác nhận) — CHƯA CHẮC là lỗi
+        // (có thể CQT thật sự chưa phát hành), chỉ ghi chú nhẹ để tự đối
+        // chiếu lại trên cổng nếu thấy đáng ngờ.
+        const khongTb=it.so_khong_co_tb?`<div style="margin-left:14px;color:#8a8a8a;font-size:12px">ℹ ${it.so_khong_co_tb} hồ sơ không tìm thấy Thông báo (có thể CQT chưa phát hành):`+
+          (it.khong_co_tb_mau||[]).map(x=>`<div style="margin-left:14px">↳ ${x}</div>`).join('')+'</div>':'';
+        return `<div style="color:${c}">• ${it.ten}: ${it.trang_thai}${it.so_dong?` (${it.so_dong} dòng${it.so_file?', '+it.so_file+' file':''})`:''}</div>${dongBo}${chiTiet}${loiTai}${khongTb}`;
       }).join('')+'</div>';
   }
   if(!j.running){
