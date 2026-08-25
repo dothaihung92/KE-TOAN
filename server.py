@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.246"
+APP_BUILD = "2026-08-25.247"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5063,6 +5063,20 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
 DVC_TOKHAI_BATCH_SONG_SONG = 5    # "Tra cứu tờ khai thuế / tải tờ khai hàng loạt"
 DVC_TOKEN_BATCH_SONG_SONG = 3     # "Kiểm tra hạn Token"
 
+_DVC_LOI_TAI_TOI_DA = 10   # tối đa mẫu lỗi lưu lại/công ty — tránh phình job state
+
+def _dvc_ghi_loi_tai(item, ma, to_khai, loi):
+    """Ghi lại lý do 1 mã hồ sơ KHÔNG tải được file (lỗi API, hoặc API 'thành
+    công' nhưng trả rỗng — vd hồ sơ 'Bổ sung' không có link tải trên cổng dù
+    vẫn tra cứu thấy) — TRƯỚC ĐÂY các lỗi này bị 'except: pass' nuốt hoàn
+    toàn, không có cách nào biết VÌ SAO 1 tờ khai bị thiếu trong kết quả tải
+    hàng loạt (người dùng chỉ thấy thiếu file, không rõ lý do). item['loi_tai']
+    hiện ở khung tiến độ (xem dvcbPoll) để chẩn đoán."""
+    item["so_loi_tai"] = item.get("so_loi_tai", 0) + 1
+    mau = item.setdefault("loi_tai_mau", [])
+    if len(mau) < _DVC_LOI_TAI_TOI_DA:
+        mau.append({"ma": str(ma or "")[:30], "to_khai": str(to_khai or "")[:80], "loi": str(loi or "")[:200]})
+
 
 def _dvc_run_batch(batch_id, cids, body):
     """Chạy CÙNG LÚC tối đa DVC_TOKHAI_BATCH_SONG_SONG công ty (mỗi luồng
@@ -5249,8 +5263,14 @@ def _dvc_run_batch(batch_id, cids, body):
                                 if raw:
                                     ext = os.path.splitext(fn)[1] or ".zip"
                                     _dvc_luu_file(folder, f"{ten_goi}{ext}", raw); item["so_file"] += 1
-                            except Exception:
-                                pass
+                                else:
+                                    # KHÔNG NÉM lỗi (API trả "thành công" nhưng rỗng nội
+                                    # dung) — vẫn phải GHI LẠI để biết vì sao thiếu file,
+                                    # thay vì im lặng bỏ qua như trước (xem giải thích ở
+                                    # danh sách item['loi_tai_ho_so']).
+                                    _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), "API trả về rỗng (không có nội dung file)")
+                            except Exception as e:
+                                _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), str(e))
                             time.sleep(0.3)
                         # Các hồ sơ có ĐỦ dữ liệu dòng (nằm trong rows_tho, biết rõ
                         # cột "Kỳ") nhưng KHÔNG khớp đúng kỳ đang tra cứu (tu, den)
@@ -5284,8 +5304,10 @@ def _dvc_run_batch(batch_id, cids, body):
                                 fn, raw = _tai_file_fn(drv, ma)
                                 if raw:
                                     _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
-                            except Exception:
-                                pass
+                                else:
+                                    _dvc_ghi_loi_tai(item, ma, "", "API trả về rỗng (không có nội dung file)")
+                            except Exception as e:
+                                _dvc_ghi_loi_tai(item, ma, "", str(e))
                             time.sleep(0.3)
             item["chua_nop"] = not co_du_lieu_nguon_nao and not item.get("loi_tra_cuu")
 
