@@ -2331,7 +2331,8 @@ function App() {
     activeCo: activeCo,
     onSaveCo: saveCoDict,
     onSaveGl: saveGl,
-    showToast: showToast
+    showToast: showToast,
+    onBack: () => setScreen("company")
   }))));
 }
 
@@ -2356,7 +2357,7 @@ function Sidebar({
       paddingBottom: 10,
       borderBottom: "1px solid var(--border)"
     }
-  }, "\uD83D\uDCCA K\u1EBF To\xE1n AI"), [["home", "🏠 Trang chủ"], ["company", "🏢 Công ty KH", !activeCo], ["dict", "📚 Từ điển", !activeCo]].map(([k, lb, disabled]) => /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCCA K\u1EBF To\xE1n AI"), [["company", "🏢 Công ty KH", !activeCo], ["dict", "📚 Từ điển", !activeCo]].map(([k, lb, disabled]) => /*#__PURE__*/React.createElement("div", {
     key: k,
     className: `nav-item${screen === k ? " active" : ""}`,
     onClick: () => !disabled && onNav(k),
@@ -7900,7 +7901,8 @@ function DictScreen({
   activeCo,
   onSaveCo,
   onSaveGl,
-  showToast
+  showToast,
+  onBack
 }) {
   const [tab, setTab] = useState("co");
   const [form, setForm] = useState({
@@ -8013,7 +8015,11 @@ function DictScreen({
     a.download = `TuDien_${tab === "co" ? activeCo && activeCo.name || "cty" : "Chung"}.txt`;
     a.click();
   };
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", null, onBack && activeCo && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline sm",
+    style: { marginBottom: 10 },
+    onClick: onBack
+  }, "\u2190 Quay l\u1EA1i \u0111ang x\u1EED l\xFD ", activeCo.name), /*#__PURE__*/React.createElement("div", {
     className: "flex",
     style: {
       marginBottom: "1.25rem",
