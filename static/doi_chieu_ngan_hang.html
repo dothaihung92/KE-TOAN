@@ -2149,7 +2149,15 @@ function App() {
     const resultsWithCur = s.results.map(r => ({...r, tx: {...r.tx, currency: accCurForFix}}));
     const fixedResults = sanitizeRows(autoFixZeroAmounts(resultsWithCur, rawSaokeForFix, accCurForFix));
     setConfirmResults(fixedResults);
-    setInputData(prev=>({...prev, activeAccountId: resolvedAccId, currency: acc.currency||"VND", accountLabel: acc.label||""}));
+    // QUAN TRỌNG: khôi phục luôn rawSaokeForFix vào saokePer[resolvedAccId] —
+    // trước đây chỉ set activeAccountId/currency/accountLabel, không set lại
+    // saokePer, nên nếu người dùng quay lại Bước 1 (màn "company") sau khi
+    // resumeSession(), ô dán sao kê hiện TRỐNG (chỉ còn placeholder trông như
+    // có sẵn dữ liệu mẫu) dù tài khoản đó THỰC RA đã có đủ phiên đối chiếu —
+    // gây hiểu lầm "phần mềm mất/không nhận sao kê" dù dữ liệu vẫn còn nguyên
+    // trong phiên đã lưu.
+    setInputData(prev=>({...prev, activeAccountId: resolvedAccId, currency: acc.currency||"VND", accountLabel: acc.label||"",
+      saokePer: {...(prev.saokePer||{}), [resolvedAccId]: rawSaokeForFix || (prev.saokePer||{})[resolvedAccId] || ""}}));
     const coInv = getCoInvoices(co.id);
     setProcessData({
       invDV: (coInv.invDV && coInv.invDV.length) ? coInv.invDV : (s.invDV||[]),
@@ -2332,7 +2340,8 @@ function App() {
     invDV: processData && processData.invDV || [],
     invDR: processData && processData.invDR || [],
     activeAccountId: inputData.activeAccountId,
-    saveCoAccounts: saveCoAccounts
+    saveCoAccounts: saveCoAccounts,
+    onSyncSaokePer: (accId, raw) => setInputData(prev => ({...prev, saokePer: {...(prev.saokePer||{}), [accId]: raw}}))
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: screen === "dict" && activeCo ? "block" : "none"
@@ -4039,7 +4048,8 @@ function ConfirmScreen({
   invDV,
   invDR,
   activeAccountId,
-  saveCoAccounts
+  saveCoAccounts,
+  onSyncSaokePer
 }) {
   // ── Account tabs: all accounts with saved sessions ──
   const allAccounts = (co.accounts && co.accounts.length) ? co.accounts : [{id:null, label:"TK chính", currency:"VND"}];
@@ -4266,6 +4276,11 @@ function ConfirmScreen({
           return sp2[accId] || Object.values(sp2).find(v=>v&&v.trim()) || "";
         } catch(e) { return ""; }
       })();
+      // Đồng bộ lại saokePer[accId] ở App (Bước 1) — cùng lý do như resumeSession():
+      // tránh Bước 1 hiện TRỐNG (chỉ còn placeholder) cho tài khoản THỰC RA đã có
+      // đủ phiên đối chiếu, nếu người dùng chuyển tab ngay tại màn Xác nhận kết quả
+      // rồi sau đó quay lại Bước 1.
+      if (rawFallback && onSyncSaokePer) onSyncSaokePer(accId, rawFallback);
       const loaded = rematchPending(autoFixZeroAmounts(sanitizeRows(rawLoaded), rawFallback, s.currency||"VND"), invDV, invDR, coDict, globalDict, co && co.name);
       rowsCache.current[String(accId)] = loaded;
       currentTabIdRef.current = accId;
