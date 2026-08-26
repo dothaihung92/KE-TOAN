@@ -4613,6 +4613,19 @@ function ConfirmScreen({
   }, [focusIdx]);
   React.useEffect(() => {
     const handler = e => {
+      // F5: thay vì tải lại trang (mặc định trình duyệt), hiện thêm SHOW_STEP dòng
+      // tiếp theo trong danh sách đang lọc — tiện bấm liên tục để xem hết danh
+      // sách dài thay vì phải cuộn xuống tìm nút "Hiện thêm".
+      if (e.key === "F5") {
+        e.preventDefault();
+        if (filtered.length > showCount) {
+          setShowCount(c => c + SHOW_STEP);
+          showToast && showToast("↻ Đã hiện thêm — đang hiện " + Math.min(showCount + SHOW_STEP, filtered.length) + "/" + filtered.length + " dòng", "ok");
+        } else {
+          showToast && showToast("Đã hiện hết " + filtered.length + " dòng", "ok");
+        }
+        return;
+      }
       // Alt+F focus vào ô tìm nội dung thay vì mở tìm kiếm mặc định của trình duyệt
       if (e.altKey && (e.key === "f" || e.key === "F")) {
         e.preventDefault();
@@ -4691,7 +4704,7 @@ function ConfirmScreen({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [focusIdx, filtered, pickerFor, bulkSelected, bulkForm, search]);
+  }, [focusIdx, filtered, pickerFor, bulkSelected, bulkForm, search, showCount]);
   // Bỏ phần giờ nếu có (VD sao kê VietinBank ghi "15-07-2025 08:59:05") trước khi so khớp ngày —
   // nếu không, regex ngày sẽ không khớp và bị fallback sang new Date() (hiểu sai dd-mm-yyyy) → GD bị loại nhầm.
   const parseVNDateI = d => { if(!d)return null; const s=String(d).trim().split(/\s+/)[0]; const m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/); return m?new Date(m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0")):new Date(d); };
