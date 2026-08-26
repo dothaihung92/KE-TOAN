@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.013"
+APP_BUILD = "2026-08-26.014"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14112,12 +14112,13 @@ def misa_sql_import_khncc(cid: int, preview: int = 1, database: str = ""):
 # ============================================================
 #  GHI CHỨNG TỪ MUA HÀNG THẲNG VÀO MISA (PUVoucher + PUVoucherDetail)
 #  ⚠ RỦI RO CAO NHẤT từ trước tới giờ — đây là chứng từ kế toán thật (Nợ
-#  152/156/242/211/6xx, Có 111/112/331, thuế GTGT đầu vào...). Theo yêu cầu,
-#  GHI SỔ LUÔN (IsPostedFinance=IsPostedManagement=1) — KHÔNG đụng tới
-#  GeneralLedger/GLVoucher (chỉ đổi cờ trạng thái trên PUVoucher/PUInvoice,
-#  KHÔNG tự sinh bút toán Sổ Cái như MISA thật làm khi bấm "Ghi sổ" tay) —
-#  anh nên tự đối chiếu lại Sổ Cái/báo cáo trong MISA định kỳ để chắc chắn
-#  không lệch. Mã hàng/NCC phải ĐÃ CÓ sẵn trong Danh mục MISA (từ các bước
+#  152/156/242/211/6xx, Có 111/112/331, thuế GTGT đầu vào...). CHƯA GHI SỔ
+#  (IsPostedFinance=IsPostedManagement=0) — đã thử GHI SỔ LUÔN theo yêu cầu
+#  trước đây nhưng gây khó xóa/sửa lại nếu import nhầm (MISA từ chối xóa
+#  hàng loạt chứng từ đã ghi sổ trên Sổ quản trị, phải tự bỏ ghi từng cái)
+#  nên quay lại CHƯA GHI SỔ như bản gốc — người dùng tự mở từng chứng từ
+#  trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý. Mã hàng/NCC phải ĐÃ CÓ
+#  sẵn trong Danh mục MISA (từ các bước
 #  import trước) — dòng/chứng từ nào thiếu sẽ bị BỎ QUA, không tự đoán/tạo
 #  mới. Dữ liệu lấy từ Bảng kê đầu vào ĐÃ LƯU, dùng lại đúng logic đã kiểm
 #  chứng khi xuất Excel theo mẫu MISA (_gen_mua_hang_*).
@@ -14203,14 +14204,12 @@ _PU_HEADER_DEFAULT = {
     "RefID": None, "BranchID": None, "RefDate": None, "PostedDate": None,
     "CABARefDate": None, "CABAPostedDate": None, "RefType": None,
     "RefNoFinance": None, "RefNoManagement": None, "CABARefNoManagement": None,
-    # GHI SỔ LUÔN theo yêu cầu (trước đây để 0 = chưa ghi sổ, bắt phải tự mở
-    # từng chứng từ trong MISA bấm "Ghi sổ" tay — nay bật thẳng để khỏi phải
-    # làm thêm bước đó). LƯU Ý: đây CHỈ đổi cờ trạng thái hiển thị trên
-    # PUVoucher, KHÔNG tự sinh bút toán Sổ Cái (GLVoucher/GLVoucherDetail)
-    # như khi bấm "Ghi sổ" thật trong MISA — người dùng đã được cảnh báo và
-    # chấp nhận rủi ro báo cáo/tờ khai trong MISA có thể lệch nếu không tự
-    # đối chiếu lại Sổ Cái.
-    "CABARefNoFinance": None, "IsPostedFinance": 1, "IsPostedManagement": 1,
+    # CHƯA GHI SỔ theo yêu cầu (đã thử bật GHI SỔ LUÔN nhưng chứng từ được ghi
+    # sổ ngay khiến không xóa/sửa lại được trực tiếp trong MISA nếu import
+    # nhầm — muốn xóa phải tự bỏ ghi <Sổ quản trị> trước, MISA còn từ chối xóa
+    # hàng loạt) — quay lại để 0 như trước đây, người dùng tự mở từng chứng từ
+    # trong MISA bấm "Ghi sổ" khi đã kiểm tra xong.
+    "CABARefNoFinance": None, "IsPostedFinance": 0, "IsPostedManagement": 0,
     "IncludeInvoice": 0, "PUInvoiceRefID": None, "AccountObjectID": None,
     "AccountObjectName": None, "AccountObjectAddress": None,
     "AccountObjectBankAccount": None, "AccountObjectBankName": None,
@@ -14303,8 +14302,8 @@ _PU_DETAIL_DEFAULT = {
 _PU_INV_DEFAULT = {
     "RefID": None, "BranchID": None, "RefType": None, "RefDate": None,
     "PostedDate": None, "RefNoFinance": None, "RefNoManagement": None,
-    # GHI SỔ LUÔN, khớp với PUVoucher liên kết (xem giải thích ở _PU_HEADER_DEFAULT).
-    "IsPostedFinance": 1, "IsPostedManagement": 1, "IsImportPurchase": 0,
+    # CHƯA GHI SỔ, khớp với PUVoucher liên kết (xem giải thích ở _PU_HEADER_DEFAULT).
+    "IsPostedFinance": 0, "IsPostedManagement": 0, "IsImportPurchase": 0,
     "IncludeInvoice": 1, "AccountObjectID": None, "AccountObjectName": None,
     "AccountObjectAddress": None, "AccountObjectTaxCode": None,
     "JournalMemo": None, "EmployeeID": None, "InvTemplateNo": None,
@@ -14343,8 +14342,8 @@ _PU_INV_DET_DEFAULT = {
 _PU_SERVICE_DEFAULT = {
     "RefID": None, "BranchID": None, "RefDate": None, "PostedDate": None,
     "RefType": None, "RefNoFinance": None, "RefNoManagement": None,
-    # GHI SỔ LUÔN (xem giải thích ở _PU_HEADER_DEFAULT).
-    "IsPostedFinance": 1, "IsPostedManagement": 1, "IsFreightService": 0,
+    # CHƯA GHI SỔ (xem giải thích ở _PU_HEADER_DEFAULT).
+    "IsPostedFinance": 0, "IsPostedManagement": 0, "IsFreightService": 0,
     "AccountObjectID": None, "AccountObjectName": None, "AccountObjectAddress": None,
     "AccountObjectBankAccount": None, "AccountObjectBankName": None,
     "AccountObjectContactname": None, "IdentificationNumber": None,
@@ -14405,8 +14404,8 @@ _PU_SERVICE_DET_DEFAULT = {
 _SA_VOUCHER_DEFAULT = {
     "RefID": None, "BranchID": None, "DisplayOnBook": 1, "RefType": None,
     "RefDate": None, "PostedDate": None, "RefNoFinance": None, "RefNoManagement": None,
-    # GHI SỔ LUÔN, hóa đơn Bán ra (xem giải thích ở _PU_HEADER_DEFAULT).
-    "IsPostedFinance": 1, "IsPostedManagement": 1, "IncludeInvoice": 0,
+    # CHƯA GHI SỔ, hóa đơn Bán ra (xem giải thích ở _PU_HEADER_DEFAULT).
+    "IsPostedFinance": 0, "IsPostedManagement": 0, "IncludeInvoice": 0,
     "IsInvoiceExported": 0, "AccountObjectID": None, "AccountObjectName": None,
     "AccountObjectAddress": None, "Payer": None, "JournalMemo": None,
     "SupplierID": None, "SupplierName": None, "EmployeeID": None,
@@ -15303,7 +15302,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
     SYSRefType không có loại chứng từ nào chứa "dịch vụ" dưới MasterTableName
     ='PUVoucher'). Không có PUInvoice liên kết — thông tin hóa đơn nằm thẳng
     trên PUServiceDetail. Không có Kho/ĐVT quy đổi. Cùng nguyên tắc như
-    _misa_ghi_mua_hang(): GHI SỔ LUÔN (xem _PU_HEADER_DEFAULT), không đụng
+    _misa_ghi_mua_hang(): CHƯA GHI SỔ (xem _PU_HEADER_DEFAULT), không đụng
     chứng từ đã ghi sổ của người dùng, ghi_de=True chỉ gỡ chứng từ do chính
     phần mềm tạo."""
     import uuid as _uuid
@@ -15761,7 +15760,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
     kiểm chứng ở _gen_ban_hang (TK Có doanh thu=5111 cố định; TK Nợ=131 nếu
     tổng hóa đơn >= 5tr, ngược lại 1111 — tiền mặt). Vì bảng kê không có mã
     hàng riêng từng dòng, dùng 1 mã DÙNG CHUNG "BH" (tự tạo nếu chưa có,
-    giống "MHDV" bên Mua hàng dịch vụ). GHI SỔ LUÔN (xem _PU_HEADER_DEFAULT),
+    giống "MHDV" bên Mua hàng dịch vụ). CHƯA GHI SỔ (xem _PU_HEADER_DEFAULT),
     không đụng chứng từ đã ghi sổ của người dùng; ghi_de=True chỉ gỡ chứng
     từ do chính phần mềm tạo (CustomField10=_PM_MARK) trùng số rồi ghi lại.
     Hóa đơn (MST, Số hóa đơn) ĐÃ CÓ SẴN trong MISA — KỂ CẢ do người dùng tự
@@ -16400,10 +16399,11 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
 @app.post("/api/misa-sql/import-ban-hang/{cid}")
 def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi_de: int = 0):
     """Ghi chứng từ Bán hàng (Bảng kê Đầu ra) thẳng vào MISA — xem
-    _misa_ghi_ban_hang. preview=1 -> chỉ xem trước, không ghi. GHI SỔ LUÔN
-    (IsPostedFinance=IsPostedManagement=1) theo yêu cầu — xem giải thích rủi
-    ro ở _PU_HEADER_DEFAULT (không tự sinh bút toán Sổ Cái). ghi_de=1 -> gỡ
-    chứng từ trùng số (do chính phần mềm tạo trước đó) rồi ghi lại."""
+    _misa_ghi_ban_hang. preview=1 -> chỉ xem trước, không ghi. CHƯA GHI SỔ
+    (IsPostedFinance=IsPostedManagement=0, quay lại như trước — xem giải
+    thích ở _PU_HEADER_DEFAULT), người dùng tự bấm "Ghi sổ" trong MISA sau
+    khi kiểm tra. ghi_de=1 -> gỡ chứng từ trùng số (do chính phần mềm tạo
+    trước đó) rồi ghi lại."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -16821,10 +16821,10 @@ def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: st
     """Ghi chứng từ Mua hàng (loai=nk/kqk/dv) thẳng vào MISA. nk/kqk ghi vào
     PUVoucher; dv (Mua hàng dịch vụ) ghi vào bảng RIÊNG PUService (khác hẳn
     PUVoucher — xác nhận qua SYSRefType thật). preview=1 -> chỉ xem trước,
-    không ghi. GHI SỔ LUÔN (IsPostedFinance=IsPostedManagement=1) theo yêu
-    cầu — xem giải thích rủi ro ở _PU_HEADER_DEFAULT (không tự sinh bút toán
-    Sổ Cái). ghi_de=1 -> gỡ chứng từ trùng số (do chính phần mềm tạo trước
-    đó) rồi ghi lại."""
+    không ghi. CHƯA GHI SỔ (IsPostedFinance=IsPostedManagement=0, quay lại
+    như trước — xem giải thích ở _PU_HEADER_DEFAULT), người dùng tự bấm
+    "Ghi sổ" trong MISA sau khi kiểm tra. ghi_de=1 -> gỡ chứng từ trùng số
+    (do chính phần mềm tạo trước đó) rồi ghi lại."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
@@ -21281,11 +21281,11 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     6) Tờ khai GTGT + Khấu trừ tự động (BƯỚC CUỐI — chạy sau khi Bán
     hàng/Mua hàng đã có dữ liệu, vì chỉ tiêu tờ khai tính trực tiếp từ 2
     bảng đó).
-    Chứng từ (Bán hàng/Mua hàng) GHI SỔ LUÔN (IsPostedFinance=
-    IsPostedManagement=1) theo yêu cầu — CHỈ đổi cờ trạng thái bằng SQL,
-    KHÔNG tự sinh bút toán Sổ Cái (GLVoucher/GLVoucherDetail) như khi bấm
-    "Ghi sổ" thật trong MISA, xem giải thích rủi ro ở _PU_HEADER_DEFAULT;
-    Ghi tăng CCDC/TSCĐ cũng ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi tăng danh
+    Chứng từ (Bán hàng/Mua hàng) CHƯA GHI SỔ (IsPostedFinance=
+    IsPostedManagement=0, quay lại như trước sau khi thử GHI SỔ LUÔN gây
+    khó xóa/sửa chứng từ nhập nhầm trong MISA) — người dùng tự bấm "Ghi sổ"
+    trong MISA sau khi kiểm tra, xem giải thích ở _PU_HEADER_DEFAULT;
+    Ghi tăng CCDC/TSCĐ vẫn ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi tăng danh
     mục không sinh bút toán, không có tầng "Ghi sổ" riêng); Phân bổ CCDC/
     Khấu hao TSCĐ tạo chứng từ hàng tháng theo khung tu_thang/den_thang
     (yyyy-mm) người dùng chọn — để trống cả 2 = mỗi bước tự chọn 12 tháng kể
