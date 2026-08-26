@@ -4762,6 +4762,14 @@ function ConfirmScreen({
       hach: inv.hach_toan || f.hach || defHach || ""
     }));
   };
+  // Dòng đang sửa (fillEdit ở dòng, gọi qua onFillBulk) chỉ ĐỔ TẠM vào khung này để xem trước —
+  // nếu người dùng không hề tick chọn hàng loạt (bulkSelected rỗng) thì khung này chỉ đang "mượn"
+  // để hiển thị xem trước cho 1 dòng đang sửa, KHÔNG phải đang chờ áp dụng hàng loạt. Xử lý xong
+  // dòng đó (Lưu hoặc Huỷ sửa) mà vẫn để nguyên khung này thì viền đỏ "Đã chọn 0 dòng" cứ hiện mãi
+  // dù không còn ý nghĩa gì — tự xoá đi khi không có dòng nào đang thật sự được chọn hàng loạt.
+  const clearBulkPreview = () => {
+    if (!bulkSelected.size) setBulkForm({ mst: "", ten_cty: "", hach: "", kw: "" });
+  };
   const bulkConfirmSelected = () => {
     if (!bulkSelected.size) return;
     const mst = bulkForm.mst.trim();
@@ -6420,6 +6428,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     isSelected: bulkSelected.has(r.id),
     onToggleSelect: toggleBulkSelect,
     onFillBulk: fillBulkForm,
+    onClearBulkPreview: clearBulkPreview,
     onSetTyGia: setRowTyGia,
     tokhaiSuggestions: tokhaiSuggestions[r.id],
     onAttachTokhai: attachTokhai,
@@ -7059,6 +7068,7 @@ function ConfirmRow({
   internalSuggestion,
   onQuickInternal,
   onFillBulk,
+  onClearBulkPreview,
   onSetTyGia,
   tokhaiSuggestions,
   onAttachTokhai,
@@ -7181,6 +7191,7 @@ function ConfirmRow({
     setEditKw("");
     setEditKwGlobal("");
     setEditHach("");
+    if (onClearBulkPreview) onClearBulkPreview();
   };
   const saveBatch = () => {
     // Use whichever keyword is filled — company-specific takes priority, fallback to global kw
@@ -7201,6 +7212,7 @@ function ConfirmRow({
     setEditKw("");
     setEditKwGlobal("");
     setEditHach("");
+    if (onClearBulkPreview) onClearBulkPreview();
   };
   // ── Gợi ý số hoá đơn từ nội dung giao dịch ────────────────────────────────
   const invSuggestions = React.useMemo(() => {
@@ -8003,7 +8015,7 @@ function ConfirmRow({
       width: "100%"
     }
   }, "L\u01B0u & \xE1p h\xE0ng lo\u1EA1t")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setEditMode(false),
+    onClick: () => { setEditMode(false); if (onClearBulkPreview) onClearBulkPreview(); },
     style: {
       height: 28,
       borderRadius: 6,
