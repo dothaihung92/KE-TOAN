@@ -4893,7 +4893,16 @@ function ConfirmScreen({
   // Lọc ứng viên cho 1 tài khoản cụ thể: đúng chiều ngược dấu + lệch tối đa 7 ngày + KHỚP ĐÚNG SỐ TIỀN.
   // Chuyển khoản nội bộ giữa 2 TK của cùng công ty thì số tiền 2 bên luôn giống hệt nhau (trừ khi có phí
   // ngân hàng cộng thêm — trường hợp đó xử lý riêng bằng "Nhập khác"), nên không cần hiện các số tiền khác.
-  const findInternalCandidatesFor = (txRow, accId) => {
+  // otherRowsPreloaded (tuỳ chọn): truyền sẵn kết quả getOtherRows(accId) khi gọi
+  // hàm này LẶP LẠI nhiều lần cho CÙNG accId trong 1 lượt tính (VD useMemo
+  // internalSuggestions bên dưới, gọi cho HÀNG TRĂM/NGHÌN dòng chưa xác nhận) —
+  // getOtherRows() đọc + JSON.parse THẲNG từ localStorage mỗi lần gọi (cố ý,
+  // không cache, để luôn phản ánh đúng trạng thái mới nhất), nên gọi lặp lại
+  // hàng trăm/nghìn lần cho CÙNG 1 accId là tính lại dữ liệu giống hệt nhau vô
+  // ích — đủ để treo hẳn trang với công ty nhiều giao dịch (đã xác nhận qua báo
+  // lỗi "Trang không phản hồi" thật). Nơi gọi 1 lần/1 dòng (modal chọn nội bộ)
+  // vẫn để trống, tự gọi getOtherRows(accId) như cũ — không mất tính "mới nhất".
+  const findInternalCandidatesFor = (txRow, accId, otherRowsPreloaded) => {
     const myIsCredit = (txRow.tx.credit||0) > 0;
     const myAmt = Math.max(txRow.tx.debit||0, txRow.tx.credit||0);
     const txDate = parseVNDateI(txRow.tx.date);
@@ -4905,7 +4914,7 @@ function ConfirmScreen({
     const myCurrency = activeTabAcc ? activeTabAcc.currency : "VND";
     const crossCurrency = !!(otherAcc && otherAcc.currency && myCurrency && otherAcc.currency !== myCurrency);
     const myWords = crossCurrency ? new Set(normVN(txRow.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w))) : null;
-    const oRows = getOtherRows(accId).filter(o => {
+    const oRows = (otherRowsPreloaded || getOtherRows(accId)).filter(o => {
       // Chỉ loại các dòng đã CHẮC CHẮN xử lý xong (đã ghép nội bộ, hoặc đã gắn đúng hoá đơn/MST) —
       // KHÔNG loại các dòng chỉ mới bị gán tạm "Tiền mặt" (không MST, không phải nội bộ), vì đây
       // thường là trường hợp người dùng bấm Alt+T do lúc đó chưa có gợi ý, thực chất vẫn có thể là
@@ -5045,6 +5054,10 @@ function ConfirmScreen({
   const internalSuggCache = React.useMemo(() => new Map(), [co.accounts, activeTabAccId]);
   const internalSuggestions = React.useMemo(() => {
     const map = {};
+    // Đọc dữ liệu MỖI tài khoản khác đúng 1 LẦN cho cả lượt tính này (không phải
+    // 1 lần/1 dòng) — xem giải thích otherRowsPreloaded ở findInternalCandidatesFor.
+    const otherRowsByAcc = new Map();
+    internalModalOtherAccounts.forEach(acc => otherRowsByAcc.set(acc.id, getOtherRows(acc.id)));
     rows.forEach(r => {
       if (r.confirmed) return;
       if (internalSuggCache.has(r)) {
@@ -5054,7 +5067,7 @@ function ConfirmScreen({
       }
       let best = null;
       for (const acc of internalModalOtherAccounts) {
-        const scored = findInternalCandidatesFor(r, acc.id);
+        const scored = findInternalCandidatesFor(r, acc.id, otherRowsByAcc.get(acc.id));
         if (scored.length && (!best || scored[0].dayDiff < best.dayDiff)) {
           best = { accId: acc.id, accLabel: acc.label, accCurrency: acc.currency, row: scored[0].o, dayDiff: scored[0].dayDiff };
         }
