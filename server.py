@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.012"
+APP_BUILD = "2026-08-26.013"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19847,6 +19847,23 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             except Exception:
                 return None
 
+        def _lay_item_that(ky, item_code):
+            """Tổng quát hoá _lay_item43_that — đọc 1 chỉ tiêu BẤT KỲ (Item22/
+            Item25/Item35...) THẬT đã lưu cho 1 quý. Dùng khi tờ khai quý đó
+            ĐÃ CÓ SẴN trong MISA (không phải do đợt chạy này tạo) nhưng bút
+            toán 'Khấu trừ thuế GTGT' của quý đó lại CHƯA CÓ — phải hạch toán
+            ĐÚNG THEO SỐ ĐÃ KHAI (đọc lại), không tính lại từ đầu (dữ liệu Mua
+            vào/Bán ra trên MISA lúc này có thể đã khác lúc khai)."""
+            try:
+                r = cur.execute(
+                    "SELECT d.Value FROM TADeclarationDetail d "
+                    "JOIN TADeclaration h ON h.RefID=d.RefID "
+                    "WHERE h.RefType=5005 AND h.DeclarationTerm=? AND d.ItemCode=?",
+                    (ky, item_code)).fetchone()
+                return round(_snum(r[0])) if r and r[0] not in (None, "") else None
+            except Exception:
+                return None
+
         q_truoc = tu_quy - 1
         y_truoc = tu_nam
         if q_truoc < 1:
@@ -19858,190 +19875,229 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             q, y = dong["quy"], dong["nam"]
             ky_hien_thi = f"Quý {q} năm {y}"
             memo = f"Khấu trừ thuế GTGT quý {q} năm {y}"
-            if ky_hien_thi in da_co_tk or memo in da_co_glv:
+            tk_da_co = ky_hien_thi in da_co_tk
+            glv_da_co = memo in da_co_glv
+            if tk_da_co and glv_da_co:
                 ct43_that = _lay_item43_that(ky_hien_thi)
                 if ct43_that is not None:
                     ct22_hien_tai = ct43_that
-                ket.append({"ky": ky_hien_thi, "trang_thai": "bỏ qua — đã có tờ khai/bút toán quý này"})
+                ket.append({"ky": ky_hien_thi, "trang_thai": "bỏ qua — đã có tờ khai và bút toán quý này"})
                 continue
 
-            tu_ngay_sql = datetime.datetime(y, dong["thang_dau"], 1)
-            den_ngay_sql = datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"], 23, 59, 59)
-            ct = _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay_sql, den_ngay_sql)
-            ct["ct22"] = ct22_hien_tai
-            con_lai = ct["ct36"] - ct["ct22"] + ct["ct37"] - ct["ct38"] - ct["ct39a"]
-            ct["ct40a"] = max(con_lai, 0)
-            ct["ct40b"] = 0
-            ct["ct40"] = max(ct["ct40a"] - ct["ct40b"], 0)
-            ct["ct41"] = max(-con_lai, 0)
-            ct["ct42"] = 0
-            ct["ct43"] = max(ct["ct41"] - ct["ct42"], 0)
+            # QUAN TRỌNG: tờ khai và bút toán 'Khấu trừ thuế GTGT' là 2 thứ RIÊNG
+            # trong MISA — quý nào ĐÃ CÓ tờ khai (vd nhập tay, hoặc do 1 công cụ
+            # khác tạo) nhưng CHƯA CÓ bút toán khấu trừ vẫn phải được tạo bổ sung
+            # bút toán, KHÔNG được bỏ qua cả quý chỉ vì tờ khai đã tồn tại — trước
+            # đây điều kiện "hoặc" ở trên coi tờ khai đã có là đủ để bỏ qua LUÔN CẢ
+            # bút toán, khiến quý đó vĩnh viễn không bao giờ có bút toán khấu trừ dù
+            # chạy lại bao nhiêu lần.
+            tk_id = det_rows = appendix_rows = None
+            chi_tiet_ban_ra, chi_tiet_mua_vao = [], []
+            ct43_moi = None
+            if not tk_da_co:
+                tu_ngay_sql = datetime.datetime(y, dong["thang_dau"], 1)
+                den_ngay_sql = datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"], 23, 59, 59)
+                ct = _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay_sql, den_ngay_sql)
+                ct["ct22"] = ct22_hien_tai
+                con_lai = ct["ct36"] - ct["ct22"] + ct["ct37"] - ct["ct38"] - ct["ct39a"]
+                ct["ct40a"] = max(con_lai, 0)
+                ct["ct40b"] = 0
+                ct["ct40"] = max(ct["ct40a"] - ct["ct40b"], 0)
+                ct["ct41"] = max(-con_lai, 0)
+                ct["ct42"] = 0
+                ct["ct43"] = max(ct["ct41"] - ct["ct42"], 0)
+                ct43_moi = ct["ct43"]
 
-            output_amount = round(_snum(ct.get("ct35")))
-            ded_last = round(_snum(ct.get("ct22")))
-            ded_this = round(_snum(ct.get("ct25")))
+                output_amount = round(_snum(ct.get("ct35")))
+                ded_last = round(_snum(ct.get("ct22")))
+                ded_this = round(_snum(ct.get("ct25")))
+            else:
+                # Tờ khai quý này ĐÃ CÓ SẴN (không phải đợt chạy này tạo) — ĐỌC LẠI
+                # đúng số đã khai để hạch toán khớp 100% với tờ khai thật, KHÔNG
+                # tính lại từ Mua vào/Bán ra (dữ liệu MISA lúc này có thể đã khác
+                # lúc khai — xem _lay_item_that).
+                output_amount = round(_snum(_lay_item_that(ky_hien_thi, "Item35")) or 0)
+                ded_last = round(_snum(_lay_item_that(ky_hien_thi, "Item22")) or 0)
+                ded_this = round(_snum(_lay_item_that(ky_hien_thi, "Item25")) or 0)
+                ct43_moi = _lay_item_that(ky_hien_thi, "Item43")
+
             deduction_amount = ded_last + ded_this
             tong_kt = min(output_amount, deduction_amount)
 
-            tk_id = str(_uuid.uuid4())
-            tk_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tk.values()}
-            _misa_gan(tk_row, cols_tk, tk_id, "RefID")
-            _misa_gan(tk_row, cols_tk, branch_id, "BranchID")
-            _misa_gan(tk_row, cols_tk, 5005, "RefType")
-            _misa_gan(tk_row, cols_tk, "01/GTGT", "TemplateNo")
-            _misa_gan(tk_row, cols_tk, "TT80 - Tờ khai thuế GTGT khấu trừ (01/GTGT)", "DeclarationName")
-            _misa_gan(tk_row, cols_tk, ky_hien_thi, "DeclarationTerm")
-            _misa_gan(tk_row, cols_tk, datetime.datetime(y, dong["thang_dau"], 1), "FromDate")
-            _misa_gan(tk_row, cols_tk, datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"]), "ToDate")
-            _misa_gan(tk_row, cols_tk, True, "IsFirstDeclaration")
-            _misa_gan(tk_row, cols_tk, datetime.datetime.now(), "CreatedDate")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("CareerCode") or "00", "CareerCode")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("CareerName"), "CareerName")
-            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsShowRefNo")), "IsShowRefNo")
-            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsTT195")), "IsTT195")
-            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsCollection")), "IsCollection")
-            _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsIncludeIndirectTax")), "IsIncludeIndirectTax")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("ProvinceCode"), "ProvinceCode")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("ProvinceName"), "ProvinceName")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("DepartmentTaxCode"), "DepartmentTaxCode")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("DepartmentTaxName"), "DepartmentTaxName")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("PaymentTaxCode"), "PaymentTaxCode")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("PaymentTaxName"), "PaymentTaxName")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("WardOrCommuneCode"), "WardOrCommuneCode")
-            _misa_gan(tk_row, cols_tk, mau_tk.get("WardOrCommuneName"), "WardOrCommuneName")
-            _misa_gan(tk_row, cols_tk, True, "IsCreateNew")
+            if not tk_da_co:
+                tk_id = str(_uuid.uuid4())
+                tk_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tk.values()}
+                _misa_gan(tk_row, cols_tk, tk_id, "RefID")
+                _misa_gan(tk_row, cols_tk, branch_id, "BranchID")
+                _misa_gan(tk_row, cols_tk, 5005, "RefType")
+                _misa_gan(tk_row, cols_tk, "01/GTGT", "TemplateNo")
+                _misa_gan(tk_row, cols_tk, "TT80 - Tờ khai thuế GTGT khấu trừ (01/GTGT)", "DeclarationName")
+                _misa_gan(tk_row, cols_tk, ky_hien_thi, "DeclarationTerm")
+                _misa_gan(tk_row, cols_tk, datetime.datetime(y, dong["thang_dau"], 1), "FromDate")
+                _misa_gan(tk_row, cols_tk, datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"]), "ToDate")
+                _misa_gan(tk_row, cols_tk, True, "IsFirstDeclaration")
+                _misa_gan(tk_row, cols_tk, datetime.datetime.now(), "CreatedDate")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("CareerCode") or "00", "CareerCode")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("CareerName"), "CareerName")
+                _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsShowRefNo")), "IsShowRefNo")
+                _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsTT195")), "IsTT195")
+                _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsCollection")), "IsCollection")
+                _misa_gan(tk_row, cols_tk, bool(mau_tk.get("IsIncludeIndirectTax")), "IsIncludeIndirectTax")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("ProvinceCode"), "ProvinceCode")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("ProvinceName"), "ProvinceName")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("DepartmentTaxCode"), "DepartmentTaxCode")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("DepartmentTaxName"), "DepartmentTaxName")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("PaymentTaxCode"), "PaymentTaxCode")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("PaymentTaxName"), "PaymentTaxName")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("WardOrCommuneCode"), "WardOrCommuneCode")
+                _misa_gan(tk_row, cols_tk, mau_tk.get("WardOrCommuneName"), "WardOrCommuneName")
+                _misa_gan(tk_row, cols_tk, True, "IsCreateNew")
 
-            det_rows = []
+                det_rows = []
 
-            def _them_ct(item_code, gia_tri_chuoi):
-                d = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tkd.values()}
-                _misa_gan(d, cols_tkd, str(_uuid.uuid4()), "RefDetailID")
-                _misa_gan(d, cols_tkd, tk_id, "RefID")
-                _misa_gan(d, cols_tkd, item_code, "ItemCode")
-                _misa_gan(d, cols_tkd, 5, "DataType")
-                _misa_gan(d, cols_tkd, gia_tri_chuoi, "Value")
-                det_rows.append(d)
+                def _them_ct(item_code, gia_tri_chuoi):
+                    d = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tkd.values()}
+                    _misa_gan(d, cols_tkd, str(_uuid.uuid4()), "RefDetailID")
+                    _misa_gan(d, cols_tkd, tk_id, "RefID")
+                    _misa_gan(d, cols_tkd, item_code, "ItemCode")
+                    _misa_gan(d, cols_tkd, 5, "DataType")
+                    _misa_gan(d, cols_tkd, gia_tri_chuoi, "Value")
+                    det_rows.append(d)
 
-            _them_ct("Item21", "")
-            for item_code, ct_key in _MISA_ANH_XA_CHI_TIEU_GTGT:
-                _them_ct(item_code, str(round(_snum(ct.get(ct_key)))))
-            _them_ct("Item37", "0.0000")
-            _them_ct("Item38", "0.0000")
-            _them_ct("Item42", "0")
-            _them_ct("Item42a", "0")
-            _them_ct("Item42b", "0")
+                _them_ct("Item21", "")
+                for item_code, ct_key in _MISA_ANH_XA_CHI_TIEU_GTGT:
+                    _them_ct(item_code, str(round(_snum(ct.get(ct_key)))))
+                _them_ct("Item37", "0.0000")
+                _them_ct("Item38", "0.0000")
+                _them_ct("Item42", "0")
+                _them_ct("Item42a", "0")
+                _them_ct("Item42b", "0")
 
-            appendix_rows = []
-            appendix_id_banra = str(_uuid.uuid4())
-            appendix_id_muavao = str(_uuid.uuid4())
-            if cols_ta:
-                for appendix_id, appendix_type_id in (
-                        (appendix_id_banra, _MISA_APPENDIXTYPE_BAN_RA_BKBR011),
-                        (appendix_id_muavao, _MISA_APPENDIXTYPE_MUA_VAO_BKMV012),
-                        (str(_uuid.uuid4()), _MISA_APPENDIXTYPE_PHU_LUC_3),
-                        (str(_uuid.uuid4()), _MISA_APPENDIXTYPE_PHU_LUC_4)):
-                    a = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_ta.values()}
-                    _misa_gan(a, cols_ta, appendix_id, "AppendixID")
-                    _misa_gan(a, cols_ta, tk_id, "RefID")
-                    _misa_gan(a, cols_ta, appendix_type_id, "AppendixTypeID")
-                    appendix_rows.append(a)
+                appendix_rows = []
+                appendix_id_banra = str(_uuid.uuid4())
+                appendix_id_muavao = str(_uuid.uuid4())
+                if cols_ta:
+                    for appendix_id, appendix_type_id in (
+                            (appendix_id_banra, _MISA_APPENDIXTYPE_BAN_RA_BKBR011),
+                            (appendix_id_muavao, _MISA_APPENDIXTYPE_MUA_VAO_BKMV012),
+                            (str(_uuid.uuid4()), _MISA_APPENDIXTYPE_PHU_LUC_3),
+                            (str(_uuid.uuid4()), _MISA_APPENDIXTYPE_PHU_LUC_4)):
+                        a = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_ta.values()}
+                        _misa_gan(a, cols_ta, appendix_id, "AppendixID")
+                        _misa_gan(a, cols_ta, tk_id, "RefID")
+                        _misa_gan(a, cols_ta, appendix_type_id, "AppendixTypeID")
+                        appendix_rows.append(a)
 
-            chi_tiet_ban_ra, chi_tiet_mua_vao = [], []
-            if cols_ta:
-                chi_tiet_ban_ra, chi_tiet_mua_vao = _misa_dien_chi_tiet_hoa_don_gtgt(
-                    cur, cols_011, cols_012, tu_ngay_sql, den_ngay_sql,
-                    tk_id, appendix_id_banra, appendix_id_muavao)
+                if cols_ta:
+                    chi_tiet_ban_ra, chi_tiet_mua_vao = _misa_dien_chi_tiet_hoa_don_gtgt(
+                        cur, cols_011, cols_012, tu_ngay_sql, den_ngay_sql,
+                        tk_id, appendix_id_banra, appendix_id_muavao)
 
-            max_so_nvk += 1
-            refno_moi = f"NVK{max_so_nvk}{suffix_mau}"
-            glv_id = str(_uuid.uuid4())
-            ngay_ct = datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"])
-            glv_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glv.values()}
-            _misa_gan(glv_row, cols_glv, glv_id, "RefID")
-            _misa_gan(glv_row, cols_glv, 0, "DisplayOnBook")
-            _misa_gan(glv_row, cols_glv, 4011, "RefType")
-            max_reforder += 1
-            _misa_gan(glv_row, cols_glv, max_reforder, "RefOrder")
-            _misa_gan(glv_row, cols_glv, ngay_ct, "RefDate")
-            _misa_gan(glv_row, cols_glv, ngay_ct, "PostedDate")
-            _misa_gan(glv_row, cols_glv, refno_moi, "RefNoFinance")
-            # Theo yêu cầu: chỉ TẠO chứng từ khấu trừ, KHÔNG tự ghi sổ — để
-            # người dùng tự kiểm tra rồi bấm "Ghi sổ" trong MISA.
-            _misa_gan(glv_row, cols_glv, False, "IsPostedFinance")
-            _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
-            _misa_gan(glv_row, cols_glv, memo, "JournalMemo")
-            _misa_gan(glv_row, cols_glv, tong_kt, "TotalAmountOC")
-            _misa_gan(glv_row, cols_glv, tong_kt, "TotalAmount")
-            _misa_gan(glv_row, cols_glv, branch_id, "BranchID")
-            _misa_gan(glv_row, cols_glv, "VND", "CurrencyID")
-            _misa_gan(glv_row, cols_glv, 1, "ExchangeRate")
-            _misa_gan(glv_row, cols_glv, output_amount, "OutputAmount")
-            _misa_gan(glv_row, cols_glv, deduction_amount, "DeductionAmount")
-            _misa_gan(glv_row, cols_glv, q, "Month")
-            _misa_gan(glv_row, cols_glv, y, "Year")
-            _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "CreatedDate")
-            _misa_gan(glv_row, cols_glv, mau_glv.get("CreatedBy") or "ADMIN", "CreatedBy")
-            _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "ModifiedDate")
-            _misa_gan(glv_row, cols_glv, mau_glv.get("ModifiedBy") or "ADMIN", "ModifiedBy")
-            _misa_gan(glv_row, cols_glv, False, "ReceiptType")
-            _misa_gan(glv_row, cols_glv, ded_last, "DeductionAmountLastPeriod")
-            _misa_gan(glv_row, cols_glv, ded_this, "DeductionAmountThisPeriod")
-            _misa_gan(glv_row, cols_glv, False, "IsOnceSettlementAdvance")
-            _misa_gan(glv_row, cols_glv, 0, "AdvancedAmount")
-            _misa_gan(glv_row, cols_glv, 0, "AdvancedAmountOC")
-            _misa_gan(glv_row, cols_glv, 1, "PeriodTypeVATDeduction")
-            _misa_gan(glv_row, cols_glv, False, "IsExecuted")
-            _misa_gan(glv_row, cols_glv, 0, "DiffAmount")
-            _misa_gan(glv_row, cols_glv, 0, "DiffAmountOC")
+            refno_moi = None
+            glv_row = glvd_row = None
+            if not glv_da_co:
+                max_so_nvk += 1
+                refno_moi = f"NVK{max_so_nvk}{suffix_mau}"
+                glv_id = str(_uuid.uuid4())
+                ngay_ct = datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"])
+                glv_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glv.values()}
+                _misa_gan(glv_row, cols_glv, glv_id, "RefID")
+                _misa_gan(glv_row, cols_glv, 0, "DisplayOnBook")
+                _misa_gan(glv_row, cols_glv, 4011, "RefType")
+                max_reforder += 1
+                _misa_gan(glv_row, cols_glv, max_reforder, "RefOrder")
+                _misa_gan(glv_row, cols_glv, ngay_ct, "RefDate")
+                _misa_gan(glv_row, cols_glv, ngay_ct, "PostedDate")
+                _misa_gan(glv_row, cols_glv, refno_moi, "RefNoFinance")
+                # Theo yêu cầu: chỉ TẠO chứng từ khấu trừ, KHÔNG tự ghi sổ — để
+                # người dùng tự kiểm tra rồi bấm "Ghi sổ" trong MISA.
+                _misa_gan(glv_row, cols_glv, False, "IsPostedFinance")
+                _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
+                _misa_gan(glv_row, cols_glv, memo, "JournalMemo")
+                _misa_gan(glv_row, cols_glv, tong_kt, "TotalAmountOC")
+                _misa_gan(glv_row, cols_glv, tong_kt, "TotalAmount")
+                _misa_gan(glv_row, cols_glv, branch_id, "BranchID")
+                _misa_gan(glv_row, cols_glv, "VND", "CurrencyID")
+                _misa_gan(glv_row, cols_glv, 1, "ExchangeRate")
+                _misa_gan(glv_row, cols_glv, output_amount, "OutputAmount")
+                _misa_gan(glv_row, cols_glv, deduction_amount, "DeductionAmount")
+                _misa_gan(glv_row, cols_glv, q, "Month")
+                _misa_gan(glv_row, cols_glv, y, "Year")
+                _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "CreatedDate")
+                _misa_gan(glv_row, cols_glv, mau_glv.get("CreatedBy") or "ADMIN", "CreatedBy")
+                _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "ModifiedDate")
+                _misa_gan(glv_row, cols_glv, mau_glv.get("ModifiedBy") or "ADMIN", "ModifiedBy")
+                _misa_gan(glv_row, cols_glv, False, "ReceiptType")
+                _misa_gan(glv_row, cols_glv, ded_last, "DeductionAmountLastPeriod")
+                _misa_gan(glv_row, cols_glv, ded_this, "DeductionAmountThisPeriod")
+                _misa_gan(glv_row, cols_glv, False, "IsOnceSettlementAdvance")
+                _misa_gan(glv_row, cols_glv, 0, "AdvancedAmount")
+                _misa_gan(glv_row, cols_glv, 0, "AdvancedAmountOC")
+                _misa_gan(glv_row, cols_glv, 1, "PeriodTypeVATDeduction")
+                _misa_gan(glv_row, cols_glv, False, "IsExecuted")
+                _misa_gan(glv_row, cols_glv, 0, "DiffAmount")
+                _misa_gan(glv_row, cols_glv, 0, "DiffAmountOC")
 
-            glvd_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glvd.values()}
-            _misa_gan(glvd_row, cols_glvd, str(_uuid.uuid4()), "RefDetailID")
-            _misa_gan(glvd_row, cols_glvd, glv_id, "RefID")
-            _misa_gan(glvd_row, cols_glvd, "Thuế GTGT được khấu trừ của hàng hóa, dịch vụ", "Description")
-            _misa_gan(glvd_row, cols_glvd, "33311", "DebitAccount")
-            _misa_gan(glvd_row, cols_glvd, "1331", "CreditAccount")
-            _misa_gan(glvd_row, cols_glvd, tong_kt, "AmountOC")
-            _misa_gan(glvd_row, cols_glvd, tong_kt, "Amount")
-            _misa_gan(glvd_row, cols_glvd, False, "UnResonableCost")
-            _misa_gan(glvd_row, cols_glvd, 0, "SortOrder")
-            _misa_gan(glvd_row, cols_glvd, 0, "VATAmount")
-            _misa_gan(glvd_row, cols_glvd, 0, "VATAmountOC")
-            _misa_gan(glvd_row, cols_glvd, False, "IsListOnTaxDeclaration")
-            _misa_gan(glvd_row, cols_glvd, 0, "LastExchangeRate")
-            _misa_gan(glvd_row, cols_glvd, False, "NotIncludeInvoice")
-            _misa_gan(glvd_row, cols_glvd, 3, "BusinessType")
+                glvd_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glvd.values()}
+                _misa_gan(glvd_row, cols_glvd, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(glvd_row, cols_glvd, glv_id, "RefID")
+                _misa_gan(glvd_row, cols_glvd, "Thuế GTGT được khấu trừ của hàng hóa, dịch vụ", "Description")
+                _misa_gan(glvd_row, cols_glvd, "33311", "DebitAccount")
+                _misa_gan(glvd_row, cols_glvd, "1331", "CreditAccount")
+                _misa_gan(glvd_row, cols_glvd, tong_kt, "AmountOC")
+                _misa_gan(glvd_row, cols_glvd, tong_kt, "Amount")
+                _misa_gan(glvd_row, cols_glvd, False, "UnResonableCost")
+                _misa_gan(glvd_row, cols_glvd, 0, "SortOrder")
+                _misa_gan(glvd_row, cols_glvd, 0, "VATAmount")
+                _misa_gan(glvd_row, cols_glvd, 0, "VATAmountOC")
+                _misa_gan(glvd_row, cols_glvd, False, "IsListOnTaxDeclaration")
+                _misa_gan(glvd_row, cols_glvd, 0, "LastExchangeRate")
+                _misa_gan(glvd_row, cols_glvd, False, "NotIncludeInvoice")
+                _misa_gan(glvd_row, cols_glvd, 3, "BusinessType")
 
             if not preview:
-                lc = list(tk_row.keys())
-                cur.execute("INSERT INTO TADeclaration ([%s]) VALUES (%s)" %
-                           ("],[".join(lc), ",".join(["?"] * len(lc))), [tk_row[c] for c in lc])
-                for d in det_rows:
-                    lc = list(d.keys())
-                    cur.execute("INSERT INTO TADeclarationDetail ([%s]) VALUES (%s)" %
-                               ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
-                lc = list(glv_row.keys())
-                cur.execute("INSERT INTO GLVoucher ([%s]) VALUES (%s)" %
-                           ("],[".join(lc), ",".join(["?"] * len(lc))), [glv_row[c] for c in lc])
-                lc = list(glvd_row.keys())
-                cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" %
-                           ("],[".join(lc), ",".join(["?"] * len(lc))), [glvd_row[c] for c in lc])
-                for a in appendix_rows:
-                    lc = list(a.keys())
-                    cur.execute("INSERT INTO TADeclarationAppendix ([%s]) VALUES (%s)" %
-                               ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
-                for d in chi_tiet_ban_ra:
-                    lc = list(d.keys())
-                    cur.execute("INSERT INTO TA_011GTGT_Detail ([%s]) VALUES (%s)" %
-                               ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
-                for d in chi_tiet_mua_vao:
-                    lc = list(d.keys())
-                    cur.execute("INSERT INTO TA_012GTGT_Detail ([%s]) VALUES (%s)" %
-                               ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
+                if not tk_da_co:
+                    lc = list(tk_row.keys())
+                    cur.execute("INSERT INTO TADeclaration ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [tk_row[c] for c in lc])
+                    for d in det_rows:
+                        lc = list(d.keys())
+                        cur.execute("INSERT INTO TADeclarationDetail ([%s]) VALUES (%s)" %
+                                   ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
+                    for a in appendix_rows:
+                        lc = list(a.keys())
+                        cur.execute("INSERT INTO TADeclarationAppendix ([%s]) VALUES (%s)" %
+                                   ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
+                    for d in chi_tiet_ban_ra:
+                        lc = list(d.keys())
+                        cur.execute("INSERT INTO TA_011GTGT_Detail ([%s]) VALUES (%s)" %
+                                   ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
+                    for d in chi_tiet_mua_vao:
+                        lc = list(d.keys())
+                        cur.execute("INSERT INTO TA_012GTGT_Detail ([%s]) VALUES (%s)" %
+                                   ("],[".join(lc), ",".join(["?"] * len(lc))), [d[c] for c in lc])
+                if not glv_da_co:
+                    lc = list(glv_row.keys())
+                    cur.execute("INSERT INTO GLVoucher ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [glv_row[c] for c in lc])
+                    lc = list(glvd_row.keys())
+                    cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [glvd_row[c] for c in lc])
 
-            da_co_tk.add(ky_hien_thi)
-            da_co_glv.add(memo)
-            ct22_hien_tai = ct["ct43"]
-            ket.append({"ky": ky_hien_thi, "trang_thai": "sẽ tạo" if preview else "đã tạo",
+            if not tk_da_co:
+                da_co_tk.add(ky_hien_thi)
+            if not glv_da_co:
+                da_co_glv.add(memo)
+            ct22_hien_tai = ct43_moi if ct43_moi is not None else ct22_hien_tai
+            if not tk_da_co and not glv_da_co:
+                trang_thai = "sẽ tạo" if preview else "đã tạo"
+            elif tk_da_co and not glv_da_co:
+                trang_thai = ("sẽ tạo bút toán (tờ khai đã có sẵn)" if preview
+                              else "đã tạo bút toán (tờ khai đã có sẵn)")
+            else:
+                trang_thai = ("sẽ tạo tờ khai (bút toán đã có sẵn)" if preview
+                              else "đã tạo tờ khai (bút toán đã có sẵn)")
+            ket.append({"ky": ky_hien_thi, "trang_thai": trang_thai,
                        "thue_dau_ra": output_amount, "thue_duoc_khau_tru": deduction_amount,
                        "so_tien_khau_tru": tong_kt, "so_ct_khau_tru": refno_moi,
                        "so_dong_hoa_don_ban_ra": len(chi_tiet_ban_ra),
