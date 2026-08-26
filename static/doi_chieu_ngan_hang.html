@@ -1961,14 +1961,24 @@ function App() {
     setScreen("company");
   };
 
-  // Chỉ còn lo trường hợp CHƯA CÓ công ty tương ứng (deep-link nhưng chưa tìm
-  // thấy — dl.found null) — trường hợp ĐÃ CÓ đã được mở sẵn NGAY TỪ initial
-  // state (screen/activeCo/coDict/inputData ở trên) nên không cần effect nữa,
-  // xem _dcnhDocDeepLink() ở đầu file để hiểu lý do (tránh HomeScreen kịp
-  // render 1 khung hình rồi mới điều hướng đi).
+  // 2 việc còn lại cho deep-link (initial state ở trên đã lo phần "tránh
+  // HomeScreen" — cả 2 nhánh dưới đây đều bắt đầu từ screen="company", không
+  // đụng lại HomeScreen):
+  // 1) ĐÃ CÓ công ty (dl.found) — nếu công ty đó CÒN PHIÊN ĐỐI CHIẾU DỞ
+  //    (results đã lưu), "Tiếp tục" phải vào THẲNG màn "Xác nhận kết quả"
+  //    (đang xử lý dở dòng nào thấy dòng đó), không phải quay lại màn nhập
+  //    sao kê Bước 1 — dùng lại ĐÚNG resumeSession() (cùng hàm nút "Tiếp tục"
+  //    ở Trang chủ cũ) để khỏi viết lại logic tìm/khôi phục phiên. Nếu công ty
+  //    chưa có phiên nào (mới toanh) thì resumeSession() trả false, cứ để yên
+  //    ở màn "company" (Bước 1) đã set sẵn từ initial state — đúng ý.
+  // 2) CHƯA CÓ công ty (dl.found null) — tự tạo mới rồi mở vào Bước 1.
   React.useEffect(() => {
     const dl = _dcnhDocDeepLink();
-    if (!dl || dl.found) return;
+    if (!dl) return;
+    if (dl.found) {
+      resumeSession(dl.found);
+      return;
+    }
     try {
       const nc = {
         name: dl.qTen || dl.qMst,
