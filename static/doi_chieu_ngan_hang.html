@@ -1887,6 +1887,16 @@ function _dcnhBoSungSaokePer(co) {
     const saokePer = {...(existing.saokePer || {})};
     let changed = false;
     const accounts = (co.accounts && co.accounts.length) ? co.accounts : [{id: null}];
+    // TỰ SỬA dữ liệu hỏng do lỗi CŨ (đã sửa ở resumeSession): khi không xác định được tài
+    // khoản của phiên đang khôi phục, resolvedAccId từng bị rơi về null rồi dùng làm khoá
+    // object (saokePer[null] → JS tự ép thành chuỗi "null"), khiến sao kê của 1 phiên mồ côi
+    // bị "dán" vào tab đầu tiên hiện ra. Nếu công ty có NHIỀU tài khoản thật (accounts có id
+    // thật, không thể nào là chuỗi "null"), xoá khoá rác "null" này đi — không có tài khoản
+    // nào tên "null" nên khoá đó chắc chắn là rác, giữ lại chỉ gây hiểu nhầm dữ liệu trùng.
+    if (accounts.length > 1 && saokePer.hasOwnProperty("null")) {
+      delete saokePer["null"];
+      changed = true;
+    }
     accounts.forEach(acc => {
       if (saokePer[acc.id] && saokePer[acc.id].trim()) return; // đã có sẵn, không đụng
       const key = acc.id ? co.id + "_" + acc.id : co.id;
@@ -2187,6 +2197,16 @@ function App() {
     if (!s || !s.results || !s.results.length) return false;
     // Use accountId from session if accId not provided
     const resolvedAccId = accId || s.accountId || null;
+    // AN TOÀN: nếu công ty có NHIỀU tài khoản nhưng không xác định được phiên tìm được
+    // thuộc tài khoản nào (phiên cũ/hỏng không gắn accountId) — TUYỆT ĐỐI không đoán bừa.
+    // Trước đây resolvedAccId rơi về null rồi bị dùng làm khoá object (saokePer[null] →
+    // tự động ép thành chuỗi "null"), khiến dữ liệu phiên đó bị "dán" vào BẤT KỲ tab nào
+    // đang hiện mặc định khi activeAccountId rỗng (thường là tab ĐẦU TIÊN trong danh sách,
+    // vd 1121-Vietinbank) — dù dữ liệu thật ra thuộc 1 tài khoản khác hoặc đã mồ côi.
+    if (!resolvedAccId && co.accounts && co.accounts.length > 1) {
+      try { showToast("Không xác định được phiên thuộc tài khoản nào — vui lòng mở đúng tab tài khoản cần tiếp tục", "warn"); } catch(e) {}
+      return false;
+    }
     const acc = (co.accounts||[]).find(a=>a.id===resolvedAccId)||{label:"TK chính",currency:"VND"};
     setActiveCo(co);
     setCoDict(LS.get("dict_" + co.id) || []);
