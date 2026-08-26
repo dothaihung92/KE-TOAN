@@ -883,22 +883,35 @@ async function runMatching(saoke, invDV, invDR, coDict, globalDict, apiKey, onPr
   for (const tx of saoke) {
     let best = null,
       bs = 0;
-    for (const d of [...coDict, ...globalDict]) {
+    // Dò RIÊNG coDict trước rồi mới globalDict (đúng thứ tự ưu tiên như cũ khi
+    // gộp [...coDict, ...globalDict]) — nhưng tách 2 vòng để đánh dấu ĐÚNG
+    // nguồn khớp (_tuDienRieng) trên gợi ý, xem giải thích autoConfirm dưới.
+    for (const d of coDict) {
       const s = scoreKw(d.keyword, tx.desc, ownWords);
-      if (s > bs) {
-        bs = s;
-        best = {
-          ...d,
-          score: s
-        };
-      }
+      if (s > bs) { bs = s; best = { ...d, score: s, _tuDienRieng: true }; }
+    }
+    for (const d of globalDict) {
+      const s = scoreKw(d.keyword, tx.desc, ownWords);
+      if (s > bs) { bs = s; best = { ...d, score: s, _tuDienRieng: false }; }
     }
     const t1 = bs === 1 ? best : null; // Chỉ khớp ĐÚNG 100% keyword, không dùng fuzzy
-    // Không tự động xác nhận nữa — kể cả khớp 100% từ điển cũng chỉ hiện gợi ý (t1_dict), người dùng
-    // phải tự bấm "✓ Đúng" để xác nhận. Tránh trường hợp từ khoá học nhầm khiến hạch toán tự động
-    // sai công ty mà người dùng không để ý (VD nội dung "CTY CHÂU BẢO HOÀNG" bị gán nhầm cho 1 công
-    // ty hoàn toàn khác trong từ điển).
-    const autoConfirm = {
+    // Khớp 100% từ điển CHUNG (dùng chung mọi công ty, rủi ro cao hơn — từ khoá
+    // học nhầm ở công ty khác có thể gán sai công ty này) vẫn CHỈ hiện gợi ý
+    // (t1_dict), người dùng phải tự bấm "✓ Đúng" để xác nhận, y như trước.
+    // Khớp 100% từ điển RIÊNG của chính công ty này (do người dùng tự xây dựng/
+    // xác nhận riêng cho công ty này, đáng tin hơn hẳn) thì TỰ ĐỘNG hạch toán —
+    // theo yêu cầu khôi phục lại tự động hạch toán, nhưng CHỈ cho từ điển riêng
+    // để tránh đúng rủi ro đã gặp trước đây (VD "CTY CHÂU BẢO HOÀNG" bị gán
+    // nhầm cho 1 công ty hoàn toàn khác qua từ điển CHUNG).
+    const autoOwn = t1 && t1._tuDienRieng;
+    const autoConfirm = autoOwn ? {
+      confirmed: "yes",
+      confirmedMST: t1.mst || "",
+      confirmedName: t1.ten_cty || "",
+      confirmedLoai: tx.credit > 0 ? "DAURA" : "DAUVAO",
+      confirmedHach: t1.hach_toan || (tx.debit > 0 ? "331" : "131"),
+      manualConfirm: false
+    } : {
       confirmed: null,
       confirmedMST: null,
       confirmedName: null,
@@ -1042,16 +1055,20 @@ function rematchPending(rows, invDV, invDR, coDict, globalDict, coName) {
       // nhưng sao kê ngân hàng ghi tắt "TNHH") — bỏ qua cả 2 dạng để không làm loãng điểm khớp tên.
       "TRACH", "NHIEM", "HUU", "HAN", "MOT", "VIEN", "DOANH", "NGHIEP"]);
   const ownWords = new Set(normVN(coName || "").split(" ").filter(w => w.length >= 3));
-  const allDict = [...(coDict||[]), ...(globalDict||[])];
   return rows.map(r => {
     if (r.confirmed === "yes") return r;
     // Dò lại Tầng 1 (từ điển) bằng scoreKw đã sửa (chặn từ khoá chung chung/trùng tên chủ TK) — để
     // các dòng đã có t1_dict SAI từ lần xử lý cũ (trước khi có bản vá) cũng được tự sửa lại, không
-    // cần dán lại sao kê.
+    // cần dán lại sao kê. Dò RIÊNG coDict trước rồi globalDict (như runMatching) để đánh dấu đúng
+    // nguồn khớp (_tuDienRieng) — quyết định có tự động hạch toán hay chỉ hiện gợi ý (xem dưới).
     let bs = 0, best = null;
-    for (const d of allDict) {
+    for (const d of (coDict||[])) {
       const s = scoreKw(d.keyword, r.tx.desc, ownWords);
-      if (s > bs) { bs = s; best = { ...d, score: s }; }
+      if (s > bs) { bs = s; best = { ...d, score: s, _tuDienRieng: true }; }
+    }
+    for (const d of (globalDict||[])) {
+      const s = scoreKw(d.keyword, r.tx.desc, ownWords);
+      if (s > bs) { bs = s; best = { ...d, score: s, _tuDienRieng: false }; }
     }
     const t1_dict = bs === 1 ? best : null;
     const pool = getPool(r.tx);
@@ -1083,6 +1100,20 @@ function rematchPending(rows, invDV, invDR, coDict, globalDict, coName) {
         seenMST.add(key);
         return true;
       }).slice(0, 5).map(x => x.inv);
+    }
+    // Khớp 100% từ điển RIÊNG của chính công ty này (kể cả khớp mới do vừa thêm
+    // hoá đơn/từ khoá, hoặc dò lại lúc mở phiên cũ) thì tự động hạch toán — cùng
+    // logic/lý do như runMatching(); từ điển CHUNG vẫn chỉ hiện gợi ý như cũ.
+    if (t1_dict && t1_dict._tuDienRieng) {
+      return {
+        ...r, t1_dict, t2_nameAmt, invMatches, nameMatches,
+        confirmed: "yes",
+        confirmedMST: t1_dict.mst || "",
+        confirmedName: t1_dict.ten_cty || "",
+        confirmedLoai: r.tx.credit > 0 ? "DAURA" : "DAUVAO",
+        confirmedHach: t1_dict.hach_toan || (r.tx.debit > 0 ? "331" : "131"),
+        manualConfirm: false
+      };
     }
     return { ...r, t1_dict, t2_nameAmt, invMatches, nameMatches };
   });
