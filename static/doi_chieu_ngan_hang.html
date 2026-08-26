@@ -2168,6 +2168,14 @@ function App() {
     for (const k of keysToTry) {
       const candidate = LS.get("session_" + k);
       if (candidate && candidate.results && candidate.results.length) {
+        // QUAN TRỌNG: nếu đã biết chính xác accId cần mở (bấm "Tiếp tục" từ 1 tài
+        // khoản cụ thể), CHỈ nhận phiên thuộc ĐÚNG tài khoản đó (candidate.accountId
+        // trùng, hoặc phiên kiểu cũ không gắn accountId). Thiếu điều kiện này thì khi
+        // tài khoản đang mở đã bị xoá dữ liệu riêng (session_coId_accId không còn),
+        // vòng lặp sẽ rơi xuống các key khác trong session index — vốn có thể là
+        // dữ liệu của MỘT TÀI KHOẢN KHÁC trong cùng công ty (VD 1121-ACB) — và hiển
+        // thị nhầm dữ liệu đó dưới tên tài khoản đang mở (VD 1121-Vietinbank).
+        if (accId && candidate.accountId && candidate.accountId !== accId) continue;
         s = candidate; key = k; break;
       }
     }
