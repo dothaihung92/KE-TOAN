@@ -1846,13 +1846,37 @@ function MSTLookupBtn({
   }, errMsg));
 }
 
+// Đọc ?ten=&mst= trên URL (mở TỪ Nhập Liệu của phần mềm chính, xem
+// moDoiChieuNganHangCty() trong index.html) — gọi ngay lúc KHỞI TẠO STATE của
+// App (useState lazy initializer), KHÔNG phải trong useEffect sau khi mount.
+// Trước đây screen mặc định "home" rồi mới đổi màn qua effect (chạy SAU lượt
+// render đầu) — HomeScreen (có thể rất chậm với nhiều công ty dữ liệu lớn, xem
+// activityMap trong HomeScreen) vẫn kịp mount+tính toán 1 lần trước khi bị
+// điều hướng đi, đủ gây "Trang không phản hồi". Tính trước ở đây để screen bắt
+// đầu ĐÚNG màn ngay từ khung hình đầu tiên, HomeScreen không bao giờ phải
+// render dù chỉ 1 lần trên đường link thẳng vào 1 công ty.
+function _dcnhDocDeepLink() {
+  try {
+    const qs = new URLSearchParams(window.location.search);
+    const qMst = (qs.get("mst") || "").trim();
+    const qTen = (qs.get("ten") || "").trim();
+    if (!qMst && !qTen) return null;
+    const list = LS.get("companies") || [];
+    const found = list.find(c => qMst && c.mst && c.mst.trim() === qMst) || null;
+    return { qMst, qTen, found };
+  } catch (e) { return null; }
+}
+
 // ── App Root ──────────────────────────────────────────────────────────────────
 function App() {
-  const [screen, setScreen] = useState("home");
+  const [screen, setScreen] = useState(() => _dcnhDocDeepLink() ? "company" : "home");
   const [companies, setCompanies] = useState(() => LS.get("companies") || []);
   const [globalDict, setGlobalDict] = useState(() => LS.get("dict_global") || []);
-  const [activeCo, setActiveCo] = useState(null);
-  const [coDict, setCoDict] = useState([]);
+  const [activeCo, setActiveCo] = useState(() => { const dl = _dcnhDocDeepLink(); return dl ? dl.found : null; });
+  const [coDict, setCoDict] = useState(() => {
+    const dl = _dcnhDocDeepLink();
+    return (dl && dl.found) ? (LS.get("dict_" + dl.found.id) || []) : [];
+  });
   const [processData, setProcessData] = useState(null);
   const [confirmResults, setConfirmResults] = useState([]);
   const [confirmRunId, setConfirmRunId] = useState(0); // increments on each new matching run → forces ConfirmScreen remount
@@ -1860,16 +1884,38 @@ function App() {
   const [runningMsg, setRunningMsg] = useState("Đang phân tích...");
   const [apiKey, setApiKey] = useState(() => LS.get("api_key") || "");
   // FIX: Lift input state here so it survives tab switches
-  const [inputData, setInputData] = useState({
-    saokePer: {},    // saokeText per account: {accId: text}
-    dvText: "",
-    drText: "",
-    importMode: "paste",
-    importInfo: null,
-    step: 1,
-    currency: "VND",
-    accountLabel: "",
-    activeAccountId: null
+  // Deep-link vào thẳng 1 công ty (dl.found): khôi phục luôn dữ liệu đã lưu
+  // (saokePer/dvText/drText) + _coId ngay từ đầu — CÙNG logic openCompany()
+  // dùng khi bấm mở công ty từ HomeScreen, chỉ khác là chạy lúc khởi tạo state
+  // thay vì qua effect (xem _dcnhDocDeepLink() ở trên).
+  const [inputData, setInputData] = useState(() => {
+    const dl = _dcnhDocDeepLink();
+    if (dl && dl.found) {
+      const saved = LS.get("inputdata_" + dl.found.id);
+      return {
+        saokePer: saved ? (saved.saokePer || {}) : {},
+        dvText: saved ? (saved.dvText || "") : "",
+        drText: saved ? (saved.drText || "") : "",
+        importMode: "paste",
+        importInfo: null,
+        step: 1,
+        currency: "VND",
+        accountLabel: "",
+        activeAccountId: null,
+        _coId: dl.found.id
+      };
+    }
+    return {
+      saokePer: {},    // saokeText per account: {accId: text}
+      dvText: "",
+      drText: "",
+      importMode: "paste",
+      importInfo: null,
+      step: 1,
+      currency: "VND",
+      accountLabel: "",
+      activeAccountId: null
+    };
   });
   const showToast = (msg, type = "ok") => {
     setToast({
@@ -1913,35 +1959,27 @@ function App() {
     setScreen("company");
   };
 
-  // ── Mở thẳng vào 1 công ty khi được gọi TỪ phần mềm chính (Nhập Liệu → nút
-  // "Đối Chiếu Ngân Hàng") — URL kèm ?ten=...&mst=... của công ty đang chọn bên
-  // đó. Khớp theo MST (đáng tin cậy, không đổi theo tên viết tắt/dấu) với danh
-  // sách công ty ĐANG CÓ SẴN trong công cụ này (2 công cụ độc lập, không dùng
-  // chung 1 danh sách công ty) — có thì mở luôn, chưa có thì tự tạo mới rồi mở,
-  // để không bắt người dùng phải tạo lại công ty thủ công ở đây lần đầu dùng.
+  // Chỉ còn lo trường hợp CHƯA CÓ công ty tương ứng (deep-link nhưng chưa tìm
+  // thấy — dl.found null) — trường hợp ĐÃ CÓ đã được mở sẵn NGAY TỪ initial
+  // state (screen/activeCo/coDict/inputData ở trên) nên không cần effect nữa,
+  // xem _dcnhDocDeepLink() ở đầu file để hiểu lý do (tránh HomeScreen kịp
+  // render 1 khung hình rồi mới điều hướng đi).
   React.useEffect(() => {
+    const dl = _dcnhDocDeepLink();
+    if (!dl || dl.found) return;
     try {
-      const qs = new URLSearchParams(window.location.search);
-      const qMst = (qs.get("mst") || "").trim();
-      const qTen = (qs.get("ten") || "").trim();
-      if (!qMst && !qTen) return;
-      const found = (companies || []).find(c => qMst && c.mst && c.mst.trim() === qMst);
-      if (found) {
-        openCompany(found);
-      } else {
-        const nc = {
-          name: qTen || qMst,
-          mst: qMst,
-          note: "",
-          accounts: [{ id: "acc_" + uid().slice(0, 8), label: "TK chính", currency: "VND" }],
-          id: uid(),
-          created: new Date().toLocaleDateString("vi-VN")
-        };
-        const list = [...(companies || []), nc];
-        saveCo(list);
-        openCompany(nc);
-        showToast("✓ Đã tạo công ty \"" + nc.name + "\" trong Đối Chiếu Ngân Hàng");
-      }
+      const nc = {
+        name: dl.qTen || dl.qMst,
+        mst: dl.qMst,
+        note: "",
+        accounts: [{ id: "acc_" + uid().slice(0, 8), label: "TK chính", currency: "VND" }],
+        id: uid(),
+        created: new Date().toLocaleDateString("vi-VN")
+      };
+      const list = [...(companies || []), nc];
+      saveCo(list);
+      openCompany(nc);
+      showToast("✓ Đã tạo công ty \"" + nc.name + "\" trong Đối Chiếu Ngân Hàng");
     } catch (e) {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2491,23 +2529,40 @@ function HomeScreen({
   // đó, công ty nào có phiên vừa lưu GẦN ĐÂY NHẤT (_savedAt, tự đóng dấu ở LS.set) đứng trước tiên,
   // đúng ý "công ty đang xử lý gần nhất hiện đầu tiên". Công ty không có dữ liệu dở thì vẫn theo
   // tiêu chí sắp xếp đã chọn (tên/mới/số từ khoá) như cũ.
-  const lastActivityOf = co => {
-    const sessions = getCoSessions(co);
-    if (!sessions.length) return -1;
-    return Math.max(...sessions.map(s => (s.session && s.session._savedAt) || 0));
-  };
+  // QUAN TRỌNG: trước đây gọi getCoSessions() (đọc/JSON.parse TOÀN BỘ session — có thể rất lớn với
+  // công ty nhiều giao dịch) NGAY TRONG comparator của .sort() — với N công ty, sort() gọi comparator
+  // tới O(N log N) lần, mỗi lần lại parse lại dữ liệu của CẢ 2 công ty đang so sánh, và toàn bộ phép
+  // tính này chạy lại mỗi lần HomeScreen RE-RENDER (kể cả gõ ô tìm kiếm) — gây treo trang thật sự
+  // (đã xác nhận qua báo lỗi "Trang không phản hồi") khi có nhiều công ty dữ liệu lớn. Nay tính
+  // TRƯỚC 1 LẦN cho mỗi công ty (useMemo, chỉ tính lại khi danh sách công ty đổi — HomeScreen tự
+  // mount lại mỗi lần vào "Trang chủ" nên vẫn luôn tính mới mỗi lần ghé thăm), sort() chỉ tra bảng
+  // đã tính sẵn — không còn parse lại dữ liệu trong lúc so sánh.
+  const activityMap = React.useMemo(() => {
+    const m = new Map();
+    companies.forEach(co => {
+      const sessions = getCoSessions(co);
+      m.set(co.id, sessions.length ? Math.max(...sessions.map(s => (s.session && s.session._savedAt) || 0)) : -1);
+    });
+    return m;
+  }, [companies]);
+  const kwCountMap = React.useMemo(() => {
+    if (sortBy !== "kwcount") return null;
+    const m = new Map();
+    companies.forEach(co => m.set(co.id, (LS.get("dict_" + co.id) || []).length));
+    return m;
+  }, [companies, sortBy]);
   const filtered = companies.filter(co => {
     const q = search.toLowerCase().trim();
     if (!q) return true;
     return co.name.toLowerCase().includes(q) || (co.mst || "").includes(q) || (co.note || "").toLowerCase().includes(q);
   }).sort((a, b) => {
-    const aAct = lastActivityOf(a), bAct = lastActivityOf(b);
+    const aAct = activityMap.get(a.id) ?? -1, bAct = activityMap.get(b.id) ?? -1;
     const aWip = aAct >= 0 ? 1 : 0, bWip = bAct >= 0 ? 1 : 0;
     if (aWip !== bWip) return bWip - aWip;
     if (aWip && bWip && aAct !== bAct) return bAct - aAct;
     if (sortBy === "name") return a.name.localeCompare(b.name, "vi");
     if (sortBy === "recent") return b.created.localeCompare(a.created);
-    if (sortBy === "kwcount") return (LS.get("dict_" + b.id) || []).length - (LS.get("dict_" + a.id) || []).length;
+    if (sortBy === "kwcount") return (kwCountMap.get(b.id) || 0) - (kwCountMap.get(a.id) || 0);
     return 0;
   });
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {

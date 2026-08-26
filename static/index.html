@@ -909,6 +909,7 @@
           <div style="font-size:38px;margin-bottom:8px">🏦</div>
           <div style="font-size:18px;font-weight:700;color:#1f6b4a">Đối Chiếu Ngân Hàng</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Đối chiếu sao kê ngân hàng với hoá đơn đầu vào/đầu ra</div>
+          <div id="dcnhTrangThaiBox" style="margin-top:10px" onclick="event.stopPropagation()"></div>
         </div>
       </div>
       <div style="margin-top:16px;background:#f0f7ff;border:2px solid #2e5c8a;border-radius:14px;padding:16px 20px">
@@ -3830,7 +3831,116 @@ function moNhapLieu(){
   nlChung={in:null,out:null,ctbr:null};
   document.getElementById('nlChungInfo').textContent='';
   capNhatBadge();
+  dcnhCapNhatThe();
 }
+
+// ── Cầu nối ĐỌC/XOÁ (không đụng luồng xử lý) CSDL IndexedDB của công cụ "Đối
+// Chiếu Ngân Hàng" (cùng gốc/origin — server phục vụ cả 2 trang, xem
+// doi_chieu_ngan_hang.html/LS+IDBKV) — CHỈ dùng để hiện badge "còn dữ liệu
+// chưa hoàn thành"/"Tiếp tục"/"Xoá" ngay tại thẻ Nhập Liệu, KHÔNG đọc/ghi gì
+// khác. 2 công cụ vẫn hoàn toàn độc lập, đây chỉ là 1 lớp mỏng xem trạng thái.
+function _dcnhOpenDb(){
+  return new Promise(resolve=>{
+    try{
+      const r=indexedDB.open('ketoan_fs',2);
+      r.onupgradeneeded=()=>{ const db=r.result; if(!db.objectStoreNames.contains('h'))db.createObjectStore('h'); if(!db.objectStoreNames.contains('kv'))db.createObjectStore('kv'); };
+      r.onsuccess=()=>resolve(r.result);
+      r.onerror=()=>resolve(null);
+    }catch(e){resolve(null);}
+  });
+}
+function _dcnhKvGet(db,key){
+  return new Promise(resolve=>{
+    if(!db){resolve(null);return;}
+    try{
+      const req=db.transaction('kv','readonly').objectStore('kv').get(key);
+      req.onsuccess=()=>{ try{resolve(req.result!=null?JSON.parse(req.result):null);}catch(e){resolve(null);} };
+      req.onerror=()=>resolve(null);
+    }catch(e){resolve(null);}
+  });
+}
+// Xoá mọi key có tiền tố `prefix` — dùng cho cả key lẻ (VD "inputdata_<id>",
+// khớp đúng chính nó) lẫn nhóm key nhiều tài khoản (VD "session_<id>_<accId>").
+function _dcnhKvDelPrefix(db,prefix){
+  return new Promise(resolve=>{
+    if(!db){resolve();return;}
+    try{
+      const range=IDBKeyRange.bound(prefix, prefix+'\uffff');
+      const req=db.transaction('kv','readwrite').objectStore('kv').openCursor(range);
+      req.onsuccess=e=>{ const cur=e.target.result; if(cur){ cur.delete(); cur.continue(); } else resolve(); };
+      req.onerror=()=>resolve();
+    }catch(e){resolve();}
+  });
+}
+// Tìm công ty (theo MST) trong Đối Chiếu Ngân Hàng + xem có dữ liệu sao kê nào
+// đang dở (results.length>0) hay không — dừng ngay khi thấy 1 tài khoản có dữ
+// liệu, không cần đọc hết mọi tài khoản.
+async function dcnhTrangThaiCty(mst){
+  mst=(mst||'').trim();
+  if(!mst)return null;
+  const db=await _dcnhOpenDb();
+  if(!db)return null;
+  const list=await _dcnhKvGet(db,'companies')||[];
+  const co=list.find(c=>c.mst&&c.mst.trim()===mst);
+  if(!co)return null;
+  return await new Promise(resolve=>{
+    try{
+      const range=IDBKeyRange.bound('session_'+co.id, 'session_'+co.id+'\uffff');
+      const req=db.transaction('kv','readonly').objectStore('kv').openCursor(range);
+      req.onsuccess=e=>{
+        const cur=e.target.result;
+        if(cur){
+          let has=false;
+          try{ const s=JSON.parse(cur.value); has=!!(s&&s.results&&s.results.length); }catch(err){}
+          if(has){ resolve({co,hasData:true}); return; }
+          cur.continue();
+        } else resolve({co,hasData:false});
+      };
+      req.onerror=()=>resolve({co,hasData:false});
+    }catch(e){resolve({co,hasData:false});}
+  });
+}
+// Xoá dữ liệu sao kê/đối chiếu ĐÃ NHẬP của 1 công ty trong Đối Chiếu Ngân Hàng
+// — GIỮ NGUYÊN công ty + từ điển riêng (dict_<id>) + tờ khai NK/XK, đúng như
+// nút "Xoá dữ liệu đã nhập" trong chính công cụ đó (clearCompanyInputData).
+async function dcnhXoaDuLieuCty(coId){
+  const db=await _dcnhOpenDb();
+  if(!db)return;
+  await _dcnhKvDelPrefix(db,'session_'+coId);
+  await _dcnhKvDelPrefix(db,'sesidx_'+coId);
+  await _dcnhKvDelPrefix(db,'inputdata_'+coId);
+  await _dcnhKvDelPrefix(db,'inv_'+coId);
+}
+async function dcnhCapNhatThe(){
+  const box=document.getElementById('dcnhTrangThaiBox');
+  if(!box)return;
+  box.innerHTML='';
+  const co=companies.find(c=>c.id===current);
+  if(!co)return;
+  let st;
+  try{ st=await dcnhTrangThaiCty(co.mst); }catch(e){ st=null; }
+  if(!st||!st.hasData)return;
+  box.innerHTML=`
+    <div style="font-size:11.5px;color:#b06a00;background:#fff8e1;border:1px solid #e8b923;border-radius:6px;padding:4px 8px;margin-bottom:6px">⚠ Dữ liệu chưa hoàn thành</div>
+    <div style="display:flex;gap:6px;justify-content:center">
+      <button class="btn sm" style="background:#1f6b4a" onclick="event.stopPropagation();moDoiChieuNganHangCty()">▶ Tiếp tục</button>
+      <button class="btn ghost sm" style="color:#a03a3a;border-color:#e39a9a" onclick="event.stopPropagation();dcnhXoaTuThe('${st.co.id}')">🗑 Xoá</button>
+    </div>`;
+}
+async function dcnhXoaTuThe(coId){
+  if(!confirm('Xoá dữ liệu sao kê/đối chiếu ngân hàng đang dở của công ty này?\nGiữ nguyên từ điển riêng đã học. Không thể hoàn tác.'))return;
+  await dcnhXoaDuLieuCty(coId);
+  toast('✓ Đã xoá dữ liệu Đối Chiếu Ngân Hàng đang dở','ok');
+  dcnhCapNhatThe();
+}
+// Cửa sổ Đối Chiếu Ngân Hàng mở RIÊNG (moCuaSoApp) — khi người dùng quay lại
+// cửa sổ chính (VD sau khi xử lý xong bên đó rồi chuyển qua), tự làm mới badge
+// nếu đang đứng ở đúng màn Nhập Liệu, không cần bấm ra vào lại mới thấy cập nhật.
+window.addEventListener('focus', () => {
+  try {
+    if (document.getElementById('nhapLieuScreen')?.style.display === 'block') dcnhCapNhatThe();
+  } catch(e) {}
+});
 function dongNhapLieu(){
   if((nlChung.in||nlChung.out)){if(!confirm('Dữ liệu vừa import chưa lưu sẽ mất. Thoát?'))return;}
   if(nlDMMode&&dmDaSua&&!confirm('Danh mục vừa sửa/import CHƯA LƯU sẽ mất. Vẫn thoát?'))return;
