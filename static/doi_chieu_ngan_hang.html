@@ -1881,6 +1881,40 @@ function App() {
     });
     setScreen("company");
   };
+
+  // ── Mở thẳng vào 1 công ty khi được gọi TỪ phần mềm chính (Nhập Liệu → nút
+  // "Đối Chiếu Ngân Hàng") — URL kèm ?ten=...&mst=... của công ty đang chọn bên
+  // đó. Khớp theo MST (đáng tin cậy, không đổi theo tên viết tắt/dấu) với danh
+  // sách công ty ĐANG CÓ SẴN trong công cụ này (2 công cụ độc lập, không dùng
+  // chung 1 danh sách công ty) — có thì mở luôn, chưa có thì tự tạo mới rồi mở,
+  // để không bắt người dùng phải tạo lại công ty thủ công ở đây lần đầu dùng.
+  React.useEffect(() => {
+    try {
+      const qs = new URLSearchParams(window.location.search);
+      const qMst = (qs.get("mst") || "").trim();
+      const qTen = (qs.get("ten") || "").trim();
+      if (!qMst && !qTen) return;
+      const found = (companies || []).find(c => qMst && c.mst && c.mst.trim() === qMst);
+      if (found) {
+        openCompany(found);
+      } else {
+        const nc = {
+          name: qTen || qMst,
+          mst: qMst,
+          note: "",
+          accounts: [{ id: "acc_" + uid().slice(0, 8), label: "TK chính", currency: "VND" }],
+          id: uid(),
+          created: new Date().toLocaleDateString("vi-VN")
+        };
+        const list = [...(companies || []), nc];
+        saveCo(list);
+        openCompany(nc);
+        showToast("✓ Đã tạo công ty \"" + nc.name + "\" trong Đối Chiếu Ngân Hàng");
+      }
+    } catch (e) {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const startProcess = data => {
     setProcessData(data);
     setScreen("running");

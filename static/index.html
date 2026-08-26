@@ -235,9 +235,6 @@
       <button class="btn" style="width:100%;font-size:14.5px;padding:10px;white-space:nowrap" onclick="openBatchModal();toggleHoTroKeKhai()">🚀 Tra cứu hoá đơn hàng loạt</button>
       <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moNopToKhai();toggleHoTroKeKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
     </div>
-    <div style="padding:0 12px 8px">
-      <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#1f6b4a" onclick="moDoiChieuNganHang()">🏦 Đối Chiếu Ngân Hàng</button>
-    </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
     </div>
@@ -907,6 +904,12 @@
           <div style="font-size:18px;font-weight:700;color:#ee4d2d">Hỗ trợ xuất hoá đơn TMĐT</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Kết nối Shopee/Lazada/TikTok Shop để tự động lấy đơn hàng</div>
         </div>
+        <div onclick="moDoiChieuNganHangCty()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #1f6b4a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">🏦</div>
+          <div style="font-size:18px;font-weight:700;color:#1f6b4a">Đối Chiếu Ngân Hàng</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Đối chiếu sao kê ngân hàng với hoá đơn đầu vào/đầu ra</div>
+        </div>
       </div>
       <div style="margin-top:16px;background:#f0f7ff;border:2px solid #2e5c8a;border-radius:14px;padding:16px 20px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -1048,7 +1051,18 @@ async function moCuaSoApp(duongDan){
     window.open(duongDan,'_blank');
   }
 }
-function moDoiChieuNganHang(){ moCuaSoApp('/doi-chieu-ngan-hang'); }
+// Mở công cụ Đối Chiếu Ngân Hàng (nút trong Nhập Liệu) — kèm tên+MST của công
+// ty ĐANG CHỌN qua query string, để công cụ đó (ứng dụng React độc lập, tự
+// quản lý danh sách công ty riêng qua IndexedDB) tự mở/tạo đúng công ty này,
+// khỏi phải chọn/tạo lại thủ công như trước (xem effect đọc ?ten=&mst= trong
+// doi_chieu_ngan_hang.html).
+function moDoiChieuNganHangCty(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const co=companies.find(c=>c.id===current);
+  if(!co){toast('Không tìm thấy công ty','err');return}
+  const qs=new URLSearchParams({ten:co.ten||'',mst:co.mst||''});
+  moCuaSoApp('/doi-chieu-ngan-hang?'+qs.toString());
+}
 
 /* ---------- GIẤY PHÉP SỬ DỤNG ---------- */
 let licenseBatBuoc=false, licenseDaLoadApp=false;

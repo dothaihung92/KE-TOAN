@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-25.255"
+APP_BUILD = "2026-08-26.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1663,10 +1663,16 @@ def home():
 
 @app.get("/doi-chieu-ngan-hang", response_class=HTMLResponse)
 def doi_chieu_ngan_hang():
-    """Công cụ Đối chiếu ngân hàng — ứng dụng React ĐỘC LẬP (nguyên bản, KHÔNG
-    sửa gì), tự quản lý dữ liệu qua localStorage của trình duyệt, không dùng
-    chung dữ liệu/API với phần mềm chính. Phục vụ y nguyên qua route riêng để
-    tránh xung đột biến/CSS với index.html (2 ứng dụng JS hoàn toàn tách biệt)."""
+    """Công cụ Đối chiếu ngân hàng — ứng dụng React ĐỘC LẬP, tự quản lý dữ liệu
+    riêng qua IndexedDB của trình duyệt (KHÔNG dùng chung CSDL/API với phần
+    mềm chính). Phục vụ qua route riêng để tránh xung đột biến/CSS với
+    index.html (2 ứng dụng JS hoàn toàn tách biệt).
+    Mở từ nút "Đối Chiếu Ngân Hàng" trong màn Nhập Liệu của TỪNG công ty (xem
+    moDoiChieuNganHangCty() trong index.html) kèm query string ?ten=&mst= của
+    công ty đang chọn bên đó — doi_chieu_ngan_hang.html tự khớp/tạo đúng công
+    ty đó theo MST rồi mở thẳng vào, không bắt người dùng chọn/tạo lại thủ
+    công. 2 công cụ vẫn KHÔNG chung 1 danh sách công ty — chỉ khớp qua MST lúc
+    mở link."""
     duong_dan = os.path.join(BASE_DIR, "static", "doi_chieu_ngan_hang.html")
     if not os.path.isfile(duong_dan):
         raise HTTPException(
