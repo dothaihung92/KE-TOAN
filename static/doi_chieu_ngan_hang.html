@@ -1863,9 +1863,14 @@ function _dcnhDocDeepLink() {
     const qMst = (qs.get("mst") || "").trim();
     const qTen = (qs.get("ten") || "").trim();
     if (!qMst && !qTen) return null;
+    // resume=1: bấm nút "▶ Tiếp tục" riêng (Nhập Liệu) — mới vào THẲNG màn Xác
+    // nhận kết quả nếu còn phiên dở. Bấm nguyên thẻ "Đối Chiếu Ngân Hàng" thì
+    // KHÔNG kèm resume — mở bình thường vào Bước 1, không tự nhảy vào xử lý dở
+    // dang (người dùng có thể chỉ đang mở xem, không hẳn muốn tiếp tục ngay).
+    const qResume = qs.get("resume") === "1";
     const list = LS.get("companies") || [];
     const found = list.find(c => qMst && c.mst && c.mst.trim() === qMst) || null;
-    return { qMst, qTen, found };
+    return { qMst, qTen, qResume, found };
   } catch (e) { return null; }
 }
 
@@ -1964,19 +1969,20 @@ function App() {
   // 2 việc còn lại cho deep-link (initial state ở trên đã lo phần "tránh
   // HomeScreen" — cả 2 nhánh dưới đây đều bắt đầu từ screen="company", không
   // đụng lại HomeScreen):
-  // 1) ĐÃ CÓ công ty (dl.found) — nếu công ty đó CÒN PHIÊN ĐỐI CHIẾU DỞ
-  //    (results đã lưu), "Tiếp tục" phải vào THẲNG màn "Xác nhận kết quả"
-  //    (đang xử lý dở dòng nào thấy dòng đó), không phải quay lại màn nhập
-  //    sao kê Bước 1 — dùng lại ĐÚNG resumeSession() (cùng hàm nút "Tiếp tục"
-  //    ở Trang chủ cũ) để khỏi viết lại logic tìm/khôi phục phiên. Nếu công ty
-  //    chưa có phiên nào (mới toanh) thì resumeSession() trả false, cứ để yên
-  //    ở màn "company" (Bước 1) đã set sẵn từ initial state — đúng ý.
+  // 1) ĐÃ CÓ công ty (dl.found) VÀ có yêu cầu resume (dl.qResume — bấm riêng
+  //    nút "▶ Tiếp tục", không phải bấm nguyên thẻ) — nếu công ty đó CÒN PHIÊN
+  //    ĐỐI CHIẾU DỞ (results đã lưu), vào THẲNG màn "Xác nhận kết quả" (đang xử
+  //    lý dở dòng nào thấy dòng đó) — dùng lại ĐÚNG resumeSession() (cùng hàm
+  //    nút "Tiếp tục" ở Trang chủ cũ) để khỏi viết lại logic tìm/khôi phục
+  //    phiên. Bấm NGUYÊN THẺ (không kèm resume) thì KHÔNG tự nhảy vào xử lý dở
+  //    dang — cứ để yên ở màn "company" (Bước 1) đã set sẵn từ initial state,
+  //    giống hệt mở 1 công ty bình thường (người dùng có thể chỉ đang mở xem).
   // 2) CHƯA CÓ công ty (dl.found null) — tự tạo mới rồi mở vào Bước 1.
   React.useEffect(() => {
     const dl = _dcnhDocDeepLink();
     if (!dl) return;
     if (dl.found) {
-      resumeSession(dl.found);
+      if (dl.qResume) resumeSession(dl.found);
       return;
     }
     try {
