@@ -895,16 +895,18 @@ async function runMatching(saoke, invDV, invDR, coDict, globalDict, apiKey, onPr
       if (s > bs) { bs = s; best = { ...d, score: s, _tuDienRieng: false }; }
     }
     const t1 = bs === 1 ? best : null; // Chỉ khớp ĐÚNG 100% keyword, không dùng fuzzy
-    // Khớp 100% từ điển CHUNG (dùng chung mọi công ty, rủi ro cao hơn — từ khoá
-    // học nhầm ở công ty khác có thể gán sai công ty này) vẫn CHỈ hiện gợi ý
-    // (t1_dict), người dùng phải tự bấm "✓ Đúng" để xác nhận, y như trước.
-    // Khớp 100% từ điển RIÊNG của chính công ty này (do người dùng tự xây dựng/
-    // xác nhận riêng cho công ty này, đáng tin hơn hẳn) thì TỰ ĐỘNG hạch toán —
-    // theo yêu cầu khôi phục lại tự động hạch toán, nhưng CHỈ cho từ điển riêng
-    // để tránh đúng rủi ro đã gặp trước đây (VD "CTY CHÂU BẢO HOÀNG" bị gán
-    // nhầm cho 1 công ty hoàn toàn khác qua từ điển CHUNG).
-    const autoOwn = t1 && t1._tuDienRieng;
-    const autoConfirm = autoOwn ? {
+    // Khớp 100% BẤT KỲ từ điển nào (riêng hoặc chung) đều TỰ ĐỘNG hạch toán —
+    // theo yêu cầu rõ ràng của người dùng ("tự động hạch toán theo từ điển đã
+    // gắn", không phân biệt riêng/chung nữa). Rủi ro cũ (VD "CTY CHÂU BẢO
+    // HOÀNG" bị gán nhầm công ty qua từ điển CHUNG học sai) vẫn còn — người
+    // dùng đã được báo trước và tự chọn đánh đổi lấy tốc độ; xem lịch sử ở
+    // _tuDienRieng nếu sau này cần khoanh vùng lại rủi ro theo nguồn khớp.
+    // Với từ khoá dạng MÃ GIAO DỊCH CHUNG (không gắn MST/tên công ty, VD "RTM"
+    // -> chỉ có hạch toán 1111) — vẫn tự động hạch toán TK đó, nhưng
+    // confirmedMST/confirmedName để TRỐNG đúng như dữ liệu từ điển (không tự
+    // suy đoán khách hàng); người dùng có thể bấm "Chọn HĐ"/sửa tay MST sau
+    // nếu cần xác định đúng đối tác cho dòng đó.
+    const autoConfirm = t1 ? {
       confirmed: "yes",
       confirmedMST: t1.mst || "",
       confirmedName: t1.ten_cty || "",
@@ -1101,10 +1103,10 @@ function rematchPending(rows, invDV, invDR, coDict, globalDict, coName) {
         return true;
       }).slice(0, 5).map(x => x.inv);
     }
-    // Khớp 100% từ điển RIÊNG của chính công ty này (kể cả khớp mới do vừa thêm
-    // hoá đơn/từ khoá, hoặc dò lại lúc mở phiên cũ) thì tự động hạch toán — cùng
-    // logic/lý do như runMatching(); từ điển CHUNG vẫn chỉ hiện gợi ý như cũ.
-    if (t1_dict && t1_dict._tuDienRieng) {
+    // Khớp 100% BẤT KỲ từ điển nào (riêng hoặc chung — kể cả khớp mới do vừa
+    // thêm hoá đơn/từ khoá, hoặc dò lại lúc mở phiên cũ) thì tự động hạch toán
+    // — cùng logic/lý do như runMatching().
+    if (t1_dict) {
       return {
         ...r, t1_dict, t2_nameAmt, invMatches, nameMatches,
         confirmed: "yes",
