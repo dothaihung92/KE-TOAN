@@ -1874,6 +1874,43 @@ function _dcnhDocDeepLink() {
   } catch (e) { return null; }
 }
 
+// Bổ sung saokePer[accId] còn THIẾU (dù đã có sẵn phiên/session với rawSaoke)
+// cho TẤT CẢ tài khoản của 1 công ty, rồi ghi lại xuống LS ("inputdata_"+coId)
+// nếu có thay đổi — đảm bảo Bước 1 luôn hiện đúng dữ liệu đã nhập, KHÔNG PHỤ
+// THUỘC đường vào (bấm nguyên thẻ / bấm riêng "Tiếp tục" / mở lại cửa sổ mới
+// sau khi đã đóng...). resumeSession() chỉ tự sửa cho 1 accId cụ thể LÚC ĐANG
+// MỞ; hàm này chạy NGAY LÚC KHỞI TẠO STATE (trước khi biết sẽ mở tab nào) nên
+// phải quét hết mọi tài khoản 1 lượt.
+function _dcnhBoSungSaokePer(co) {
+  try {
+    const existing = LS.get("inputdata_" + co.id) || {};
+    const saokePer = {...(existing.saokePer || {})};
+    let changed = false;
+    const accounts = (co.accounts && co.accounts.length) ? co.accounts : [{id: null}];
+    accounts.forEach(acc => {
+      if (saokePer[acc.id] && saokePer[acc.id].trim()) return; // đã có sẵn, không đụng
+      const key = acc.id ? co.id + "_" + acc.id : co.id;
+      let s = LS.get("session_" + key);
+      if (!s || !s.results || !s.results.length) {
+        const idx = getSessionIndex(co.id);
+        for (const k of idx) {
+          const candidate = LS.get("session_" + k);
+          if (candidate && candidate.results && candidate.results.length &&
+              (candidate.accountId === acc.id || k === key)) { s = candidate; break; }
+        }
+      }
+      if (s && s.rawSaoke && s.rawSaoke.trim()) {
+        saokePer[acc.id] = s.rawSaoke;
+        changed = true;
+      }
+    });
+    if (changed) LS.set("inputdata_" + co.id, {...existing, saokePer});
+    return saokePer;
+  } catch (e) {
+    try { return (LS.get("inputdata_" + co.id) || {}).saokePer || {}; } catch (e2) { return {}; }
+  }
+}
+
 // ── App Root ──────────────────────────────────────────────────────────────────
 function App() {
   const [screen, setScreen] = useState(() => _dcnhDocDeepLink() ? "company" : "home");
@@ -1900,7 +1937,7 @@ function App() {
     if (dl && dl.found) {
       const saved = LS.get("inputdata_" + dl.found.id);
       return {
-        saokePer: saved ? (saved.saokePer || {}) : {},
+        saokePer: _dcnhBoSungSaokePer(dl.found),
         dvText: saved ? (saved.dvText || "") : "",
         drText: saved ? (saved.drText || "") : "",
         importMode: "paste",
@@ -2162,8 +2199,14 @@ function App() {
     // có sẵn dữ liệu mẫu) dù tài khoản đó THỰC RA đã có đủ phiên đối chiếu —
     // gây hiểu lầm "phần mềm mất/không nhận sao kê" dù dữ liệu vẫn còn nguyên
     // trong phiên đã lưu.
+    // PHẢI ghi luôn xuống LS ("inputdata_"+co.id) — không chỉ setInputData
+    // (chỉ đổi state trong bộ nhớ của CỬA SỔ ĐANG MỞ). Mỗi lần bấm thẻ/nút mở
+    // lại công cụ này là 1 CỬA SỔ MỚI (moCuaSoApp), tự đọc lại "inputdata_"
+    // TỪ ĐẦU — không ghi xuống LS thì cửa sổ mới vẫn thấy Bước 1 trống y hệt.
+    const savedSaokePer = {...(LS.get("inputdata_" + co.id) || {}).saokePer, [resolvedAccId]: rawSaokeForFix || ((LS.get("inputdata_" + co.id) || {}).saokePer || {})[resolvedAccId] || ""};
+    LS.set("inputdata_" + co.id, {...(LS.get("inputdata_" + co.id) || {}), saokePer: savedSaokePer});
     setInputData(prev=>({...prev, activeAccountId: resolvedAccId, currency: acc.currency||"VND", accountLabel: acc.label||"",
-      saokePer: {...(prev.saokePer||{}), [resolvedAccId]: rawSaokeForFix || (prev.saokePer||{})[resolvedAccId] || ""}}));
+      saokePer: savedSaokePer}));
     const coInv = getCoInvoices(co.id);
     setProcessData({
       invDV: (coInv.invDV && coInv.invDV.length) ? coInv.invDV : (s.invDV||[]),
