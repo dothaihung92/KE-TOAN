@@ -2164,19 +2164,24 @@ function App() {
       if (!keysToTry.includes(k)) keysToTry.push(k);
     });
 
+    // Thu thập TẤT CẢ phiên hợp lệ (đúng accId nếu có chỉ định), rồi chọn phiên được LƯU
+    // GẦN ĐÂY NHẤT (_savedAt — LS.set tự đóng dấu mỗi lần lưu session, xem LS.set ở trên) —
+    // KHÔNG lấy phiên đầu tiên gặp trong mảng như trước. Thứ tự trong keysToTry/session
+    // index phản ánh lần lưu ĐẦU TIÊN trong lịch sử của công ty (tài khoản nào xử lý sớm
+    // nhất luôn đứng đầu), không phải tài khoản người dùng VỪA làm việc. Hậu quả trước đây:
+    // bấm "Tiếp tục" (không chỉ định accId cụ thể — gọi từ thẻ ở Nhập Liệu) luôn mở cố định
+    // về 1 tài khoản (tài khoản có phiên tạo sớm nhất, VD 1121-Vietinbank) và hiển thị dữ
+    // liệu của nó — kể cả khi tài khoản đó đã bị xoá riêng nhưng vẫn còn lẫn trong session
+    // index, hoặc khi tài khoản người dùng thực sự vừa xử lý (VD 1121-ACB) mới hơn nhiều.
     let s = null, key = null;
     for (const k of keysToTry) {
       const candidate = LS.get("session_" + k);
       if (candidate && candidate.results && candidate.results.length) {
-        // QUAN TRỌNG: nếu đã biết chính xác accId cần mở (bấm "Tiếp tục" từ 1 tài
-        // khoản cụ thể), CHỈ nhận phiên thuộc ĐÚNG tài khoản đó (candidate.accountId
-        // trùng, hoặc phiên kiểu cũ không gắn accountId). Thiếu điều kiện này thì khi
-        // tài khoản đang mở đã bị xoá dữ liệu riêng (session_coId_accId không còn),
-        // vòng lặp sẽ rơi xuống các key khác trong session index — vốn có thể là
-        // dữ liệu của MỘT TÀI KHOẢN KHÁC trong cùng công ty (VD 1121-ACB) — và hiển
-        // thị nhầm dữ liệu đó dưới tên tài khoản đang mở (VD 1121-Vietinbank).
+        // Nếu đã biết chính xác accId cần mở, CHỈ nhận phiên thuộc ĐÚNG tài khoản đó
+        // (candidate.accountId trùng, hoặc phiên kiểu cũ không gắn accountId) — tránh lấy
+        // nhầm dữ liệu của MỘT TÀI KHOẢN KHÁC trong cùng công ty.
         if (accId && candidate.accountId && candidate.accountId !== accId) continue;
-        s = candidate; key = k; break;
+        if (!s || (candidate._savedAt || 0) > (s._savedAt || 0)) { s = candidate; key = k; }
       }
     }
     if (!s || !s.results || !s.results.length) return false;
