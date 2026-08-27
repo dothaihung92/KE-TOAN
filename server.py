@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.016"
+APP_BUILD = "2026-08-26.017"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20133,6 +20133,222 @@ def misa_sql_to_khai_khau_tru_gtgt(cid: int, preview: int = 1, database: str = "
     return _misa_tao_to_khai_khau_tru_gtgt(
         cid, database, preview=bool(preview),
         tu_quy=tu_quy or None, tu_nam=tu_nam or None, so_quy=so_quy)
+
+
+# ============================================================
+#  GHI ỦY NHIỆM THU (UNT — thu tiền KH, bảng BADeposit/BADepositDetail) /
+#  ỦY NHIỆM CHI (UNC — chi tiền NCC, bảng BAWithDraw/BAWithDrawDetail)
+#  THẲNG VÀO MISA — dữ liệu lấy từ các dòng ĐÃ XÁC NHẬN trên màn Đối Chiếu
+#  Ngân Hàng (doi_chieu_ngan_hang.html — app RIÊNG, lưu trong IndexedDB của
+#  TRÌNH DUYỆT, KHÔNG đi qua server này bình thường), gửi thẳng lên đây
+#  bằng đúng nội dung ĐÃ TÍNH SẴN theo cùng logic "Xuất UNT/Xuất UNC" (tách
+#  BHXH, quy đổi tỷ giá USD, loại dòng nội bộ...) — endpoint này CHỈ ghi
+#  chứng từ, KHÔNG tự tính lại nghiệp vụ.
+#  ⚠ KHÁC MỌI writer khác trong file: BADeposit/BAWithDraw CHƯA từng được
+#  chẩn đoán cấu trúc thật qua nhiều vòng đối chiếu dữ liệu như PUVoucher/
+#  SAVoucher/GLVoucher/FixedAsset — chỉ mới xác nhận qua _misa_doi_tuong_thanh_toan
+#  (đọc, không ghi) rằng bảng cần AccountObjectID THẬT (khác PUVoucher/
+#  SAVoucher chỉ cần tên chữ). Vì vậy dùng kỹ thuật AN TOÀN NHẤT hiện có:
+#  NHÂN BẢN một dòng THẬT (_misa_mau_dong_that) làm khung, chỉ ghi đè đúng
+#  các trường của giao dịch mới — không tự đoán/liệt kê cứng từng cột như
+#  _PU_HEADER_DEFAULT (tránh lặp bài học "DisplayOnBook=3 làm chứng từ biến
+#  mất khỏi màn hình" đã gặp ở nhiều bảng khác với 1 bảng CHƯA hề kiểm
+#  chứng). LUÔN "Xem trước" và đối chiếu kỹ trong MISA — khuyên chạy thử
+#  1-2 giao dịch trước khi tin dùng cho cả lô.
+# ============================================================
+def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False):
+    """Ghi UNT (loai='unt', BADeposit/BADepositDetail) hoặc UNC (loai='unc',
+    BAWithDraw/BAWithDrawDetail) thẳng vào MISA.
+    giao_dich: list các dict {so_ct, ngay (dd/mm/yyyy), mst, ten_doi_tuong,
+    dien_giai, tk_doi_ung (mã TK Nợ/Có đối ứng, vd '131'/'331'), so_tien}.
+    Dòng nào KHÔNG tìm được đối tượng khớp MST trong Danh mục MISA (Đối
+    tượng) sẽ BỊ BỎ QUA (đếm vào so_bo_qua_kh) — KHÔNG tự tạo mới như "KL"/
+    "BH" bên Mua hàng/Bán hàng, vì thu/chi ngân hàng bắt buộc phải khớp
+    ĐÚNG đối tượng công nợ đã có, không có khái niệm "khách lẻ" tương đương
+    an toàn ở đây.
+    Dòng nào trùng so_ct với chứng từ CHÍNH phần mềm này đã ghi trước đó
+    (CustomField10 đánh dấu, nếu bảng có cột này) sẽ tự BỎ QUA (so_trung),
+    trừ khi ghi_de=True.
+    CHƯA GHI SỔ (IsPostedFinance=IsPostedManagement=0) — người dùng tự bấm
+    "Ghi sổ" trong MISA sau khi kiểm tra."""
+    import uuid as _uuid
+    if loai not in ("unt", "unc"):
+        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
+    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
+    tk_cot = "CreditAccount" if loai == "unt" else "DebitAccount"
+    hach_mac_dinh = "131" if loai == "unt" else "331"
+
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cols_m = _misa_cot_bang_that(cur, master_tbl)
+        cols_d = _misa_cot_bang_that(cur, detail_tbl)
+        if not cols_m or not cols_d:
+            raise HTTPException(
+                400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl} trong CSDL MISA đang kết nối.")
+        mau_m = _misa_mau_dong_that(cur, master_tbl, "1=1")
+        mau_d = _misa_mau_dong_that(cur, detail_tbl, f"{tk_cot} LIKE ?", (hach_mac_dinh + "%",))
+        if not mau_m or not mau_d:
+            ten_ct = "Ủy nhiệm thu (thu tiền)" if loai == "unt" else "Ủy nhiệm chi (chi tiền)"
+            raise HTTPException(
+                400, f"Chưa có chứng từ '{ten_ct}' nào trong MISA để học cấu trúc (đồng bộ Ngân hàng "
+                     f"điện tử hoặc tự nhập tay ít nhất 1 chứng từ rồi thử lại).")
+        branch_id = mau_m.get("BranchID") or _misa_branch_id(cur)
+
+        # Danh mục Đối tượng — map MST (chuẩn hoá) -> (AccountObjectID, tên trong MISA)
+        doi_tuong = {}
+        for aid, taxcode, code, name in cur.execute(
+                "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
+                "FROM AccountObject").fetchall():
+            if taxcode:
+                doi_tuong[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, str(name or ""))
+
+        co_cf10 = "customfield10" in cols_m
+        da_co = set()
+        if co_cf10:
+            try:
+                for (rn,) in cur.execute(
+                        f"SELECT RefNoFinance FROM {master_tbl} WHERE ISNULL(CustomField10,'')=?",
+                        _PM_MARK).fetchall():
+                    if rn:
+                        da_co.add(str(rn).strip())
+            except Exception:
+                pass
+
+        max_reforder = 0
+        ro_col = _misa_chon_cot(cols_m, "RefOrder")
+        if ro_col:
+            try:
+                r0 = cur.execute(f"SELECT ISNULL(MAX([{ro_col}]),0) FROM {master_tbl}").fetchone()
+                max_reforder = (r0[0] or 0) if r0 else 0
+            except Exception:
+                pass
+
+        m_cols_that = {name for name, _ in cols_m.values()}
+        d_cols_that = {name for name, _ in cols_d.values()}
+        now = datetime.datetime.now()
+        them = trung = bo_qua_kh = 0
+        ket = []
+        for gd in (giao_dich or []):
+            so_ct = str(gd.get("so_ct") or "").strip()
+            so_tien = round(_snum(gd.get("so_tien")))
+            if not so_ct or so_tien <= 0:
+                continue
+            if so_ct in da_co and not ghi_de:
+                trung += 1
+                ket.append({"so_ct": so_ct, "trang_thai": "bỏ qua — đã có"})
+                continue
+            mst = _misa_khncc_chuan_mst(gd.get("mst") or "")
+            ten = str(gd.get("ten_doi_tuong") or "").strip()
+            dt = doi_tuong.get(mst.lower()) if mst else None
+            if not dt:
+                bo_qua_kh += 1
+                ket.append({"so_ct": so_ct,
+                           "trang_thai": f"bỏ qua — không tìm thấy đối tượng MST '{mst or gd.get('mst') or ''}' "
+                                         f"trong Danh mục MISA"})
+                continue
+            aid, ten_misa = dt
+            ngay_dt = _misa_doc_ngay(gd.get("ngay")) or now
+            hach = str(gd.get("tk_doi_ung") or hach_mac_dinh).strip()
+            dien_giai = str(gd.get("dien_giai") or "")[:255]
+
+            # Nhân bản dòng THẬT làm khung (chỉ chiếu qua các cột được phép ghi — bỏ
+            # identity/rowversion/computed đã loại ở _misa_cot_bang_that), rồi ghi đè
+            # đúng phần thuộc về giao dịch mới.
+            m_row = {c: mau_m.get(c) for c in m_cols_that}
+            m_id = str(_uuid.uuid4())
+            _misa_gan(m_row, cols_m, m_id, "RefID")
+            _misa_gan(m_row, cols_m, branch_id, "BranchID")
+            _misa_gan(m_row, cols_m, ngay_dt, "RefDate")
+            _misa_gan(m_row, cols_m, ngay_dt, "PostedDate")
+            _misa_gan(m_row, cols_m, so_ct, "RefNoFinance")
+            _misa_gan(m_row, cols_m, so_ct, "RefNoManagement")
+            _misa_gan(m_row, cols_m, aid, "AccountObjectID")
+            _misa_gan(m_row, cols_m, ten_misa or ten, "AccountObjectName")
+            _misa_gan(m_row, cols_m, dien_giai, "JournalMemo")
+            max_reforder += 1
+            _misa_gan(m_row, cols_m, max_reforder, "RefOrder")
+            _misa_gan(m_row, cols_m, so_tien, "TotalAmountOC")
+            _misa_gan(m_row, cols_m, so_tien, "TotalAmount")
+            # CHƯA GHI SỔ theo đúng nguyên tắc chung (xem _PU_HEADER_DEFAULT) — người
+            # dùng tự kiểm tra rồi bấm "Ghi sổ" trong MISA.
+            _misa_gan(m_row, cols_m, False, "IsPostedFinance")
+            _misa_gan(m_row, cols_m, False, "IsPostedManagement")
+            _misa_gan(m_row, cols_m, now, "CreatedDate")
+            _misa_gan(m_row, cols_m, now, "ModifiedDate")
+            if co_cf10:
+                _misa_gan(m_row, cols_m, _PM_MARK, "CustomField10")
+
+            d_row = {c: mau_d.get(c) for c in d_cols_that}
+            _misa_gan(d_row, cols_d, str(_uuid.uuid4()), "RefDetailID", "BADepositDetailID", "BAWithDrawDetailID")
+            _misa_gan(d_row, cols_d, m_id, "RefID")
+            _misa_gan(d_row, cols_d, aid, "AccountObjectID")
+            _misa_gan(d_row, cols_d, dien_giai, "Description")
+            _misa_gan(d_row, cols_d, hach, tk_cot)
+            _misa_gan(d_row, cols_d, so_tien, "Amount")
+            _misa_gan(d_row, cols_d, so_tien, "AmountOC")
+
+            if not preview:
+                lc = list(m_row.keys())
+                cur.execute("INSERT INTO %s ([%s]) VALUES (%s)" %
+                           (master_tbl, "],[".join(lc), ",".join(["?"] * len(lc))),
+                           [m_row[c] for c in lc])
+                lc = list(d_row.keys())
+                cur.execute("INSERT INTO %s ([%s]) VALUES (%s)" %
+                           (detail_tbl, "],[".join(lc), ",".join(["?"] * len(lc))),
+                           [d_row[c] for c in lc])
+
+            da_co.add(so_ct)
+            them += 1
+            ket.append({"so_ct": so_ct, "ten_doi_tuong": ten_misa or ten, "so_tien": so_tien,
+                       "trang_thai": "sẽ tạo" if preview else "đã tạo"})
+
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"database": database, "preview": preview, "loai": loai,
+               "so_them": them, "so_trung": trung, "so_bo_qua_kh": bo_qua_kh,
+               "danh_sach": ket}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, f"Lỗi ghi {'UNT' if loai == 'unt' else 'UNC'}: {e}")
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/import-unt-unc")
+def misa_sql_import_unt_unc(body: dict = Body(...)):
+    """Ghi UNT/UNC thẳng vào MISA — gọi từ màn Đối Chiếu Ngân Hàng
+    (doi_chieu_ngan_hang.html), KHÔNG theo cid trên URL như các endpoint
+    MISA khác vì app đó chỉ biết MST công ty (lưu trong IndexedDB riêng
+    của trình duyệt, không có cid của KE-TOAN chính) — tự dò cid qua MST.
+    body: {mst, database?, loai: 'unt'|'unc', preview?, ghi_de?,
+    giao_dich: [{so_ct, ngay, mst, ten_doi_tuong, dien_giai, tk_doi_ung,
+    so_tien}, ...]}."""
+    mst = (body.get("mst") or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN — "
+                                 f"hãy thêm công ty này ở màn 'Công ty KH' trước.")
+    cid = comp["id"]
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này. Vào Nhập Liệu "
+                                 "công ty này > '🗄 Kết nối CSDL MISA', kết nối tới dữ liệu THỬ trước.")
+    loai = (body.get("loai") or "").strip().lower()
+    preview = bool(body.get("preview", True))
+    ghi_de = bool(body.get("ghi_de", False))
+    giao_dich = body.get("giao_dich") or []
+    return _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=preview, ghi_de=ghi_de)
 
 
 # ============================================================

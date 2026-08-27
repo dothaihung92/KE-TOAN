@@ -1692,6 +1692,120 @@ async function exportUNC(rows, coName, bankAcct, accountNo, bankName, showToast,
   }
 }
 
+// ── Dựng danh sách giao dịch UNT/UNC để GỬI THẲNG vào MISA qua server (khác exportUNT/exportUNC
+// ở trên vốn XUẤT FILE EXCEL để người dùng tự import tay trong MISA) — CÙNG logic lọc/tách BHXH/quy
+// đổi tỷ giá USD như exportUNT/exportUNC (cố tình lặp lại thay vì refactor chung, để KHÔNG đụng vào
+// 2 hàm xuất Excel đã dùng/kiểm chứng lâu nay — tránh rủi ro làm hỏng chức năng đang chạy tốt).
+async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, showToast) {
+  const isUnt = loai === "unt";
+  const confirmed = rows.filter(r => r.confirmed === "yes" &&
+    ((isUnt ? r.tx.credit : r.tx.debit) || 0) > 0 && r.confirmedHach !== "X");
+  const usdRows = confirmed.filter(r => r.tx.currency === "USD");
+  let vndOf = new Map(), fxFailed = [];
+  const usdManual = usdRows.filter(r => r.tyGia > 0);
+  const usdNeedFetch = usdRows.filter(r => !(r.tyGia > 0));
+  usdManual.forEach(r => vndOf.set(r.id, Math.round((r.tx.debit || r.tx.credit || 0) * r.tyGia)));
+  if (usdNeedFetch.length) {
+    if (showToast) showToast(`Đang lấy tỷ giá Vietcombank cho ${usdNeedFetch.length} giao dịch USD...`, "ok");
+    const conv = await convertUsdRowsToVnd(usdNeedFetch);
+    conv.vndOf.forEach((v, k) => vndOf.set(k, v));
+    fxFailed = conv.failed;
+  }
+  const giaoDich = [];
+  confirmed.forEach((r, i) => {
+    const origIdx = rows.indexOf(r);
+    const seq = (origIdx >= 0 ? origIdx : i) + 1;
+    const hachMacDinh = isUnt ? "131" : "331";
+    const hach = r.confirmedHach || hachMacDinh;
+    const linkedTk = r.confirmedToKhaiId ? (tokhaiList || []).find(t => t.id === r.confirmedToKhaiId) : null;
+    const objectName = (r.isInternal || r.isCash) ? "" : ((linkedTk && linkedTk.nhaCungCap) || r.confirmedName || "");
+    // Bỏ qua giao dịch không có đối tượng (nội bộ/tiền mặt) hoặc "KL" (khách lẻ, chỉ có ý nghĩa khi
+    // XUẤT EXCEL để MISA tự nhận — server import thẳng SQL không tạo "khách lẻ", phải có MST thật
+    // khớp đối tượng đã có trong Danh mục MISA mới ghi được, xem _misa_ghi_thu_chi).
+    if (r.isInternal || r.isCash) return;
+    const mst = r.confirmedMST || "";
+    if (!mst) return;
+    const vndAmt = r.tx.currency === "USD" ? vndOf.get(r.id) : undefined;
+    const bookAmt = vndAmt !== undefined ? vndAmt : ((isUnt ? r.tx.credit : r.tx.debit) || 0);
+    const soCtGoc = buildVoucherNo(loai.toUpperCase(), r.tx.date, seq, bankAcct, accountNo);
+    if (r.isBhxh) {
+      const amt = bookAmt;
+      const base = Math.round(amt / 0.32);
+      const p1 = Math.round(base * 0.255);
+      const p2 = Math.round(base * 0.045);
+      const p3 = amt - p1 - p2;
+      const parts = [
+        { hach: "3383", amt: p1, label: "BHXH 25.5%" },
+        { hach: "3384", amt: p2, label: "BHYT 4.5%" },
+        { hach: "3386", amt: p3, label: "BHTN 2%" }
+      ];
+      parts.forEach((p, idx) => {
+        giaoDich.push({
+          so_ct: buildVoucherNo(loai.toUpperCase(), r.tx.date, `${seq}.${idx+1}`, bankAcct, accountNo),
+          ngay: r.tx.date, mst, ten_doi_tuong: objectName,
+          dien_giai: `${r.tx.desc || ""} [${p.label}]`.slice(0, 255),
+          tk_doi_ung: p.hach, so_tien: p.amt
+        });
+      });
+      return;
+    }
+    giaoDich.push({
+      so_ct: soCtGoc, ngay: r.tx.date, mst, ten_doi_tuong: objectName,
+      dien_giai: (r.tx.desc || "").slice(0, 255), tk_doi_ung: hach, so_tien: bookAmt
+    });
+  });
+  return { giaoDich, fxFailed };
+}
+
+// ── Import UNT/UNC THẲNG VÀO MISA (ghi SQL trực tiếp qua server — KHÁC exportUNT/exportUNC vốn chỉ
+// xuất file Excel để tự import tay) — xem _misa_ghi_thu_chi ở server.py. Tính năng MỚI, CHƯA qua
+// nhiều lần kiểm chứng thực tế như các chức năng import khác (Mua hàng/Bán hàng/GTGT) — luôn hiện rõ
+// cảnh báo + bắt "Xem trước" trước khi ghi thật, đúng nguyên tắc chung của mọi chức năng ghi MISA.
+async function importThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, accountNo, showToast) {
+  if (!coMst) { alert("Công ty chưa có MST — không thể import vào MISA."); return; }
+  const { giaoDich, fxFailed } = await buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, showToast);
+  const tenLoai = loai === "unt" ? "thu tiền (UNT)" : "chi tiền (UNC)";
+  if (!giaoDich.length) {
+    alert(`Không có giao dịch ${loai === "unt" ? "tiền vào" : "tiền ra"} đã xác nhận (có MST đối tượng, `
+      + `không phải nội bộ/tiền mặt) để import vào MISA.`);
+    return;
+  }
+  const goi = async preview => {
+    const res = await fetch("/api/misa-sql/import-unt-unc", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mst: coMst, loai, preview, giao_dich: giaoDich })
+    });
+    return res.json();
+  };
+  try {
+    if (showToast) showToast(`Đang xem trước ${giaoDich.length} giao dịch ${tenLoai}...`, "ok");
+    const pv = await goi(true);
+    if (pv.detail) { alert("Lỗi: " + pv.detail); return; }
+    let msg = `⚠ RỦI RO CAO — ghi thẳng vào CSDL MISA đang kết nối (${pv.database}). Chức năng MỚI, `
+      + `CHƯA qua nhiều lần kiểm chứng thực tế như Mua hàng/Bán hàng/Khấu trừ thuế GTGT — hãy mở lại `
+      + `từng chứng từ trong MISA kiểm tra thật kỹ sau khi ghi. Khuyên thử với 1-2 giao dịch trước khi `
+      + `tin dùng cho cả lô. Chỉ chạy trên dữ liệu THỬ / đã sao lưu.\n\n`
+      + `Sẽ tạo ${pv.so_them} chứng từ ${tenLoai}.\n`;
+    if (pv.so_trung) msg += `Bỏ qua ${pv.so_trung} giao dịch đã có (trùng số chứng từ, chạy lại không ghi trùng).\n`;
+    if (pv.so_bo_qua_kh) msg += `Bỏ qua ${pv.so_bo_qua_kh} giao dịch không tìm thấy đối tượng khớp MST `
+      + `trong Danh mục MISA (Đối tượng) — cần thêm đối tượng đó vào MISA trước.\n`;
+    if (fxFailed.length) msg += `\n⚠ ${fxFailed.length} giao dịch USD chưa lấy được tỷ giá — KHÔNG nằm `
+      + `trong danh sách gửi lần này (tự bổ sung tỷ giá trên màn hình rồi chạy lại).\n`;
+    if (!pv.so_them) { alert(msg); return; }
+    msg += `\nBấm OK để GHI THẬT ${pv.so_them} chứng từ vào MISA (chưa ghi sổ — tự bấm "Ghi sổ" trong `
+      + `MISA sau khi kiểm tra). Bấm Huỷ để dừng lại, không ghi gì.`;
+    if (!confirm(msg)) return;
+    if (showToast) showToast("Đang ghi vào MISA...", "ok");
+    const real = await goi(false);
+    if (real.detail) { alert("Lỗi ghi: " + real.detail); return; }
+    if (showToast) showToast(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA (chưa ghi sổ)`, "ok");
+    else alert(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA (chưa ghi sổ).`);
+  } catch (e) {
+    alert(`Lỗi import ${tenLoai} vào MISA: ` + e.message);
+    console.error(e);
+  }
+}
+
 // ── Xuất hạch toán LÃI/LỖ chênh lệch tỷ giá riêng (Phiếu kế toán khác) ──────────────────────────
 // Theo đúng mẫu "Chứng từ nghiệp vụ khác" của MISA — dùng cho khoản điều chỉnh KHÔNG phát sinh tiền
 // qua ngân hàng (chỉ là bút toán sổ sách), nên tách khỏi UNC/UNT để không ghi trùng/lệch số tiền chi
@@ -5981,7 +6095,21 @@ function ConfirmScreen({
     onClick:()=>exportUNC(rows, co&&co.name||"export", (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
       (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label),
       (activeTabAcc&&activeTabAcc.bankName) || suggestBankName(activeTabAcc&&activeTabAcc.label), showToast, [...tokhaiList, ...tokhaiXKList])
-  }, "\uD83D\uDCE5 Xu\u1EA5t UNC"), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDCE5 Xu\u1EA5t UNC"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{borderColor:"#2e5c8a",color:"#2e5c8a"},
+    title:"Ghi ch\u1EE9ng t\u1EEB thu ti\u1EC1n (ti\u1EC1n v\u00E0o) TH\u1EB2NG v\u00E0o CSDL MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 kh\u00F4ng c\u1EA7n import tay file Excel. T\u00EDnh n\u0103ng M\u1EDAI, lu\u00F4n hi\u1EC7n xem tr\u01B0\u1EDBc tr\u01B0\u1EDBc khi ghi th\u1EADt.",
+    onClick:()=>importThuChiVaoMisa(rows, "unt", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
+      (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
+      (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast)
+  }, "\uD83D\uDCE5 Import UNT v\xE0o MISA"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{borderColor:"#2e5c8a",color:"#2e5c8a"},
+    title:"Ghi ch\u1EE9ng t\u1EEB chi ti\u1EC1n g\u1EEDi (ti\u1EC1n ra) TH\u1EB2NG v\u00E0o CSDL MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 kh\u00F4ng c\u1EA7n import tay file Excel. T\u00EDnh n\u0103ng M\u1EDAI, lu\u00F4n hi\u1EC7n xem tr\u01B0\u1EDBc tr\u01B0\u1EDBc khi ghi th\u1EADt.",
+    onClick:()=>importThuChiVaoMisa(rows, "unc", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
+      (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
+      (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast)
+  }, "\uD83D\uDCE5 Import UNC v\xE0o MISA"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-green",
     onClick: handleSaveAndLearn
   }, "\u2713 L\u01B0u & h\u1ECDc"))), addMode && /*#__PURE__*/React.createElement("div", {
