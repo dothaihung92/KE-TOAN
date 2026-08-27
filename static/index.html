@@ -7251,6 +7251,7 @@ function misaTomTatBuoc(r){
 let misaImportRunId=0;   // để lượt chạy MỚI (vd bấm "Xác nhận chạy thật") tự
                           // dừng vòng poll của lượt CŨ, tránh 2 vòng poll ghi đè nhau
 let misaImportTuThang='', misaImportDenThang='';   // khung tháng cho bước Phân bổ CCDC/Khấu hao TSCĐ
+let misaImportTuQuy='', misaImportTuNam='', misaImportDenQuy='', misaImportDenNam='';   // khung quý/năm cho bước Tờ khai GTGT + Khấu trừ
 async function misaImportTuDongChay(preview){
   const runId=++misaImportRunId;
   const cid=current;
@@ -7272,6 +7273,10 @@ async function misaImportTuDongChay(preview){
     const qs=new URLSearchParams({preview:preview?'1':'0',ghi_de:'0'});
     if(misaImportTuThang)qs.set('tu_thang',misaImportTuThang);
     if(misaImportDenThang)qs.set('den_thang',misaImportDenThang);
+    if(misaImportTuQuy)qs.set('tu_quy',misaImportTuQuy);
+    if(misaImportTuNam)qs.set('tu_nam',misaImportTuNam);
+    if(misaImportDenQuy)qs.set('den_quy',misaImportDenQuy);
+    if(misaImportDenNam)qs.set('den_nam',misaImportDenNam);
     await api(`/api/misa-sql/import-tu-dong-start/${cid}?${qs.toString()}`,{method:'POST'});
   }catch(e){
     log.textContent='✗ Lỗi: '+e.message;
@@ -7324,19 +7329,45 @@ function misaImportTuDongMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   document.getElementById('misaModalBody').innerHTML=`
     <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ + Phân bổ chi phí CCDC tự động + Tính khấu hao TSCĐ tự động 6) Tờ khai GTGT + Khấu trừ tự động (BƯỚC CUỐI) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có. Chứng từ Mua hàng/Bán hàng đã tự ghi <b>Sổ Tài chính</b>; riêng bút toán "Khấu trừ thuế GTGT" ở bước 6 LUÔN <b>CHƯA ghi sổ</b> — tự mở trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>
-    <label style="font-size:13px;font-weight:600">Bước 6-7 (Phân bổ CCDC / Khấu hao TSCĐ) — Từ tháng/năm (để trống = tự nối tiếp chứng từ gần nhất)</label>
+    <label style="font-size:13px;font-weight:600">Bước 5 (Phân bổ CCDC / Khấu hao TSCĐ) — Từ tháng/năm (để trống = tự nối tiếp chứng từ gần nhất)</label>
     <input type="month" id="importTuThang" value="${misaEsc(misaImportTuThang)}" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
     <label style="font-size:13px;font-weight:600">Đến tháng/năm (để trống = chạy 12 tháng kể từ Từ tháng)</label>
     <input type="month" id="importDenThang" value="${misaEsc(misaImportDenThang)}" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <label style="font-size:13px;font-weight:600">Bước 6 (Tờ khai GTGT + Khấu trừ) — Từ quý/năm (để trống = tự nối tiếp tờ khai gần nhất)</label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <select id="importTuQuy" style="flex:1;min-width:100px;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+        <option value="">— tự động —</option>
+        <option value="1">Quý 1</option><option value="2">Quý 2</option>
+        <option value="3">Quý 3</option><option value="4">Quý 4</option>
+      </select>
+      <input type="number" id="importTuNam" placeholder="Năm" min="2015" max="2100" style="flex:1;min-width:100px;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    </div>
+    <label style="font-size:13px;font-weight:600">Đến quý/năm (để trống = chạy 4 quý kể từ Từ quý/năm)</label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <select id="importDenQuy" style="flex:1;min-width:100px;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+        <option value="">— —</option>
+        <option value="1">Quý 1</option><option value="2">Quý 2</option>
+        <option value="3">Quý 3</option><option value="4">Quý 4</option>
+      </select>
+      <input type="number" id="importDenNam" placeholder="Năm" min="2015" max="2100" style="flex:1;min-width:100px;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    </div>
     <div style="text-align:right">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
       <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongBatDau()">▶ Bắt đầu (Xem trước)</button>
     </div>`;
+  document.getElementById('importTuQuy').value=misaImportTuQuy||'';
+  document.getElementById('importTuNam').value=misaImportTuNam||'';
+  document.getElementById('importDenQuy').value=misaImportDenQuy||'';
+  document.getElementById('importDenNam').value=misaImportDenNam||'';
   misaModalNormal();document.getElementById('misaModal').style.display='flex';
 }
 function misaImportTuDongBatDau(){
   misaImportTuThang=document.getElementById('importTuThang').value||'';
   misaImportDenThang=document.getElementById('importDenThang').value||'';
+  misaImportTuQuy=document.getElementById('importTuQuy').value||'';
+  misaImportTuNam=document.getElementById('importTuNam').value||'';
+  misaImportDenQuy=document.getElementById('importDenQuy').value||'';
+  misaImportDenNam=document.getElementById('importDenNam').value||'';
   misaImportTuDongChay(true);
 }
 // ===== Đối chiếu công nợ (Giai đoạn 1: Tổng hợp công nợ theo kỳ, đọc thẳng MISA)
