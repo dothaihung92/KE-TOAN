@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.002"
+APP_BUILD = "2026-08-27.003"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20155,7 +20155,116 @@ def misa_sql_to_khai_khau_tru_gtgt(cid: int, preview: int = 1, database: str = "
 #  mất khỏi màn hình" đã gặp ở nhiều bảng khác với 1 bảng CHƯA hề kiểm
 #  chứng). LUÔN "Xem trước" và đối chiếu kỹ trong MISA — khuyên chạy thử
 #  1-2 giao dịch trước khi tin dùng cho cả lô.
+#  Nếu KHÔNG còn chứng từ THẬT nào để nhân bản (vd người dùng đã xoá sạch dữ liệu Ngân hàng
+#  trong MISA) — theo yêu cầu người dùng, KHÔNG chặn lại nữa: dùng khung DỰ PHÒNG dựng từ cấu
+#  trúc CHUẨN sản phẩm MISA (_misa_khung_ghi_so_du_phong) thay vì báo lỗi bắt nhập tay 1 chứng
+#  từ trước. Rủi ro cao hơn nhân bản (1 số trường như ReasonTypeID sẽ để trống) — LUÔN "Xem
+#  trước" và đối chiếu kỹ trong MISA sau khi ghi.
 # ============================================================
+def _misa_bank_account_du_phong(cur):
+    """Dò 1 TK ngân hàng THẬT bất kỳ đã cấu hình trong Danh mục MISA (bảng BankAccount) — dùng
+    khi hoàn toàn không có giao dịch Ngân hàng nào (UNT/UNC) để học BankAccountID/BankName (vd
+    người dùng đã xoá sạch). Hầu hết công ty vừa/nhỏ chỉ có 1-2 TK ngân hàng nên lấy đại diện
+    dòng đầu tiên là hợp lý; TỰ DÒ tên cột thật qua _misa_cot_bang_that/_misa_chon_cot, không
+    đoán bừa tên cột."""
+    try:
+        cols_ba = _misa_cot_bang_that(cur, "BankAccount")
+        id_col = _misa_chon_cot(cols_ba, "BankAccountID")
+        if not id_col:
+            return None, None
+        name_col = _misa_chon_cot(cols_ba, "BankName", "BankAccountName")
+        sel = f"[{id_col}]" + (f",[{name_col}]" if name_col else "")
+        row = cur.execute(f"SELECT TOP 1 {sel} FROM BankAccount").fetchone()
+        if not row:
+            return None, None
+        return row[0], (row[1] if name_col else None)
+    except Exception:
+        return None, None
+
+
+def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl):
+    """Khung ghi sổ DỰ PHÒNG khi KHÔNG còn chứng từ Ủy nhiệm thu/chi THẬT nào trong MISA để
+    nhân bản học cấu trúc (vd người dùng đã xoá sạch) — dùng cấu trúc CHUẨN sản phẩm MISA
+    (RefType/CurrencyID/ExchangeRate/DisplayOnBook/BAType/ListTableName/RefTypeName — các
+    trường HỆ THỐNG giống nhau ở mọi công ty, đã xác nhận qua chẩn đoán thật) làm khung, CHỈ
+    tra cứu ĐỘNG BranchID (bảng OrganizationUnit) + 1 TK ngân hàng bất kỳ đã cấu hình (bảng
+    BankAccount) — 2 bảng này LUÔN có sẵn trong MISA bất kể đã từng ghi Thu/Chi hay chưa.
+    Trả về (mau_m, mau_d, mau_gl, mau_aol, mau_bdwl, mau_cfl) — mọi cột không được gán tường
+    minh giữ giá trị mặc định AN TOÀN theo kiểu dữ liệu (_misa_gia_tri_mac_dinh), KHÔNG đoán
+    bừa (đặc biệt ReasonTypeID — danh mục lý do thu/chi do từng công ty tự đặt, để trống thay
+    vì đoán 1 mã có thể sai/không tồn tại)."""
+    def _dong_trong(cols):
+        return {name: _misa_gia_tri_mac_dinh(sqltype) for name, sqltype in cols.values()}
+
+    branch_id = _misa_branch_id(cur)
+    bank_id, bank_name = _misa_bank_account_du_phong(cur)
+    hach_mac_dinh = "131" if loai == "unt" else "331"
+    tk_no_mac_dinh, tk_co_mac_dinh = ("1121", hach_mac_dinh) if loai == "unt" else (hach_mac_dinh, "1121")
+
+    mau_m = _dong_trong(cols_m)
+    _misa_gan(mau_m, cols_m, 1500 if loai == "unt" else 1510, "RefType")
+    _misa_gan(mau_m, cols_m, branch_id, "BranchID")
+    _misa_gan(mau_m, cols_m, bank_id, "BankAccountID")
+    _misa_gan(mau_m, cols_m, bank_name, "BankName")
+    _misa_gan(mau_m, cols_m, "VND", "CurrencyID")
+    _misa_gan(mau_m, cols_m, 1, "ExchangeRate")
+    _misa_gan(mau_m, cols_m, 0, "DisplayOnBook")
+    _misa_gan(mau_m, cols_m, None, "ReasonTypeID")
+    _misa_gan(mau_m, cols_m, "ADMIN", "CreatedBy")
+    _misa_gan(mau_m, cols_m, "ADMIN", "ModifiedBy")
+
+    mau_d = _dong_trong(cols_d)
+    if loai == "unt":
+        _misa_gan(mau_d, cols_d, "1121", "DebitAccount")
+    else:
+        _misa_gan(mau_d, cols_d, "1121", "CreditAccount")
+
+    g1 = _dong_trong(cols_gl)
+    _misa_gan(g1, cols_gl, tk_no_mac_dinh, "AccountNumber")
+    _misa_gan(g1, cols_gl, tk_co_mac_dinh, "CorrespondingAccountNumber")
+    _misa_gan(g1, cols_gl, 1, "EntryType")
+    _misa_gan(g1, cols_gl, 1, "DebitAmountOC")
+    g2 = _dong_trong(cols_gl)
+    _misa_gan(g2, cols_gl, tk_co_mac_dinh, "AccountNumber")
+    _misa_gan(g2, cols_gl, tk_no_mac_dinh, "CorrespondingAccountNumber")
+    _misa_gan(g2, cols_gl, 2, "EntryType")
+    _misa_gan(g2, cols_gl, 1, "CreditAmountOC")
+    mau_gl = [g1, g2]
+
+    mau_aol = _dong_trong(cols_aol)
+    _misa_gan(mau_aol, cols_aol, hach_mac_dinh, "AccountNumber")
+    _misa_gan(mau_aol, cols_aol, "1121", "CorrespondingAccountNumber")
+    if loai == "unt":
+        _misa_gan(mau_aol, cols_aol, 2, "EntryType")
+        _misa_gan(mau_aol, cols_aol, 1, "CreditAmountOC")
+    else:
+        _misa_gan(mau_aol, cols_aol, 1, "EntryType")
+        _misa_gan(mau_aol, cols_aol, 1, "DebitAmountOC")
+
+    mau_bdwl = None
+    if cols_bdwl:
+        mau_bdwl = _dong_trong(cols_bdwl)
+        _misa_gan(mau_bdwl, cols_bdwl, branch_id, "BranchID")
+        _misa_gan(mau_bdwl, cols_bdwl, bank_id, "BankAccountID")
+        _misa_gan(mau_bdwl, cols_bdwl, bank_name, "BankName")
+        _misa_gan(mau_bdwl, cols_bdwl, "VND", "CurrencyID")
+        _misa_gan(mau_bdwl, cols_bdwl, 1, "ExchangeRate")
+        _misa_gan(mau_bdwl, cols_bdwl, 0, "DisplayOnBook")
+        _misa_gan(mau_bdwl, cols_bdwl, 0 if loai == "unt" else 1, "BAType")
+        _misa_gan(mau_bdwl, cols_bdwl, "BADeposit" if loai == "unt" else "BAWithDraw", "ListTableName")
+        _misa_gan(mau_bdwl, cols_bdwl, "Thu tiền gửi" if loai == "unt" else "Ủy nhiệm chi", "RefTypeName")
+        _misa_gan(mau_bdwl, cols_bdwl, "ADMIN", "CreatedBy")
+        _misa_gan(mau_bdwl, cols_bdwl, "ADMIN", "ModifiedBy")
+
+    mau_cfl = None
+    if cols_cfl:
+        mau_cfl = _dong_trong(cols_cfl)
+        _misa_gan(mau_cfl, cols_cfl, False, "IsPostToManagementBook")
+        _misa_gan(mau_cfl, cols_cfl, True, "IsUpdateRedundant")
+
+    return mau_m, mau_d, mau_gl, mau_aol, mau_bdwl, mau_cfl
+
+
 def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False):
     """Ghi UNT (loai='unt', BADeposit/BADepositDetail) hoặc UNC (loai='unc',
     BAWithDraw/BAWithDrawDetail) thẳng vào MISA.
@@ -20233,12 +20342,11 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             ref_id_mau = mau_d.get("RefID") if mau_d else ref_id_mau
         if not mau_m:
             mau_m = _misa_mau_dong_that(cur, master_tbl, "1=1")
-        if not mau_m or not mau_d:
-            ten_ct = "Ủy nhiệm thu (thu tiền)" if loai == "unt" else "Ủy nhiệm chi (chi tiền)"
-            raise HTTPException(
-                400, f"Chưa có chứng từ '{ten_ct}' nào trong MISA để học cấu trúc (đồng bộ Ngân hàng "
-                     f"điện tử hoặc tự nhập tay ít nhất 1 chứng từ rồi thử lại).")
-        branch_id = mau_m.get("BranchID") or _misa_branch_id(cur)
+        # KHÔNG còn chặn nữa khi thiếu chứng từ THẬT (vd người dùng đã xoá sạch) — dùng khung
+        # DỰ PHÒNG dựng từ cấu trúc CHUẨN sản phẩm MISA (_misa_khung_ghi_so_du_phong) thay vì
+        # báo lỗi bắt nhập tay trước. Xem giải thích đầy đủ ở đầu mục UNT/UNC.
+        dung_khung_du_phong = not mau_m or not mau_d
+        branch_id = (mau_m.get("BranchID") if mau_m else None) or _misa_branch_id(cur)
 
         # QUAN TRỌNG (xác nhận qua chẩn đoán thật, đợt 2 — xem _misa_chan_doan_unt_unc): ghi
         # BADeposit/BAWithDraw với IsPostedFinance=True vẫn KHÔNG hiện trên MISA nếu thiếu 2
@@ -20246,65 +20354,79 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         # UNC) và AccountObjectLedger (1 dòng, đúng vế công nợ 131/331 — "sổ chi tiết công nợ
         # theo đối tượng"). Đây là những gì "Ghi sổ" THẬT của MISA tự sinh thêm, không chỉ đổi cờ
         # trên BADeposit/BAWithDraw. Học mẫu 2 bảng này từ ĐÚNG giao dịch thật vừa dùng làm mẫu
-        # Master/Detail ở trên (cùng RefID) để chắc chắn đúng "chất" — không có mẫu thì vẫn ghi
-        # BADeposit/BAWithDraw bình thường (không chặn), nhưng báo rõ để người dùng biết trước.
-        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
-        cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
-        mau_gl = []
-        mau_aol = None
-        if ref_id_mau and cols_gl:
-            try:
-                gl_cols_list = [name for name, _ in cols_gl.values()]
-                sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % (
-                    "],[".join(gl_cols_list))
-                for row in cur.execute(sql, (ref_id_mau,)).fetchall():
-                    mau_gl.append(dict(zip(gl_cols_list, row)))
-            except Exception:
-                mau_gl = []
-        if ref_id_mau and cols_aol:
-            try:
-                aol_cols_list = [name for name, _ in cols_aol.values()]
-                sql = "SELECT [%s] FROM AccountObjectLedger WHERE RefID=?" % (
-                    "],[".join(aol_cols_list))
-                row = cur.execute(sql, (ref_id_mau,)).fetchone()
-                if row:
-                    mau_aol = dict(zip(aol_cols_list, row))
-            except Exception:
-                mau_aol = None
+        # Master/Detail ở trên (cùng RefID) để chắc chắn đúng "chất".
         # QUAN TRỌNG (xác nhận qua chẩn đoán TOÀN DIỆN đợt 3 — quét mọi bảng có cột RefID trong
         # toàn database): dù đã có đủ GeneralLedger/AccountObjectLedger (số dư/Sổ chi tiết các
         # tài khoản đã khớp thật), màn LIỆT KÊ "Ngân hàng > Thu, chi tiền" VẪN không hiện chứng
         # từ — vì màn đó đọc từ bảng RIÊNG BADepositWithdrawList (tên khớp thẳng với "Thu, Chi
         # tiền" — gộp chung UNT+UNC vào 1 bảng, phân biệt qua cột ListTableName='BADeposit'/
-        # 'BAWithDraw'), KHÔNG đọc trực tiếp từ BADeposit/BAWithDraw. Học mẫu từ ĐÚNG chứng từ
-        # thật đã dùng làm mẫu ở trên. CustomFieldLedger cũng thiếu (1 dòng/chứng từ, mọi cột
-        # CustomField đều rỗng ở mẫu thật) — ghi kèm cho đủ, dù không chắc có bắt buộc để hiện
-        # trên màn hình hay không (không ảnh hưởng gì nếu thiếu, ghi thêm cho khớp đúng như "Ghi
-        # sổ" thật). KHÔNG ghi MSC_AudittingLog (nhật ký thao tác người dùng thật — LoginName/
-        # ComputerName/ComputerIP/UserID gắn với phiên đăng nhập thật, giả mạo dòng nhật ký này
-        # không cần thiết cho hiển thị và không trung thực).
+        # 'BAWithDraw'), KHÔNG đọc trực tiếp từ BADeposit/BAWithDraw. CustomFieldLedger cũng
+        # thiếu — ghi kèm cho đủ. KHÔNG ghi MSC_AudittingLog (nhật ký thao tác người dùng thật —
+        # gắn với phiên đăng nhập thật, giả mạo dòng nhật ký này không cần thiết và không trung
+        # thực).
+        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+        cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
         cols_bdwl = _misa_cot_bang_that(cur, "BADepositWithdrawList")
         cols_cfl = _misa_cot_bang_that(cur, "CustomFieldLedger")
-        mau_bdwl = None
-        mau_cfl = None
-        if ref_id_mau and cols_bdwl:
-            try:
-                bdwl_cols_list = [name for name, _ in cols_bdwl.values()]
-                row = cur.execute("SELECT [%s] FROM BADepositWithdrawList WHERE RefID=?" %
-                                  ("],[".join(bdwl_cols_list)), (ref_id_mau,)).fetchone()
-                if row:
-                    mau_bdwl = dict(zip(bdwl_cols_list, row))
-            except Exception:
-                mau_bdwl = None
-        if ref_id_mau and cols_cfl:
-            try:
-                cfl_cols_list = [name for name, _ in cols_cfl.values()]
-                row = cur.execute("SELECT [%s] FROM CustomFieldLedger WHERE RefID=?" %
-                                  ("],[".join(cfl_cols_list)), (ref_id_mau,)).fetchone()
-                if row:
-                    mau_cfl = dict(zip(cfl_cols_list, row))
-            except Exception:
-                mau_cfl = None
+        if dung_khung_du_phong:
+            mau_m, mau_d, mau_gl, mau_aol, mau_bdwl, mau_cfl = _misa_khung_ghi_so_du_phong(
+                cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl)
+            branch_id = mau_m.get("BranchID") or branch_id
+        else:
+            mau_gl = []
+            mau_aol = None
+            if ref_id_mau and cols_gl:
+                try:
+                    gl_cols_list = [name for name, _ in cols_gl.values()]
+                    sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % (
+                        "],[".join(gl_cols_list))
+                    for row in cur.execute(sql, (ref_id_mau,)).fetchall():
+                        mau_gl.append(dict(zip(gl_cols_list, row)))
+                except Exception:
+                    mau_gl = []
+            if ref_id_mau and cols_aol:
+                try:
+                    aol_cols_list = [name for name, _ in cols_aol.values()]
+                    sql = "SELECT [%s] FROM AccountObjectLedger WHERE RefID=?" % (
+                        "],[".join(aol_cols_list))
+                    row = cur.execute(sql, (ref_id_mau,)).fetchone()
+                    if row:
+                        mau_aol = dict(zip(aol_cols_list, row))
+                except Exception:
+                    mau_aol = None
+            mau_bdwl = None
+            mau_cfl = None
+            if ref_id_mau and cols_bdwl:
+                try:
+                    bdwl_cols_list = [name for name, _ in cols_bdwl.values()]
+                    row = cur.execute("SELECT [%s] FROM BADepositWithdrawList WHERE RefID=?" %
+                                      ("],[".join(bdwl_cols_list)), (ref_id_mau,)).fetchone()
+                    if row:
+                        mau_bdwl = dict(zip(bdwl_cols_list, row))
+                except Exception:
+                    mau_bdwl = None
+            if ref_id_mau and cols_cfl:
+                try:
+                    cfl_cols_list = [name for name, _ in cols_cfl.values()]
+                    row = cur.execute("SELECT [%s] FROM CustomFieldLedger WHERE RefID=?" %
+                                      ("],[".join(cfl_cols_list)), (ref_id_mau,)).fetchone()
+                    if row:
+                        mau_cfl = dict(zip(cfl_cols_list, row))
+                except Exception:
+                    mau_cfl = None
+            # Không tìm được mẫu THẬT cho GL/AOL/BDWL (nhưng vẫn có mẫu Master/Detail) — dùng
+            # khung dự phòng CHỈ cho phần còn thiếu, không đụng mau_m/mau_d đã học được.
+            if len(mau_gl) != 2 or mau_aol is None or mau_bdwl is None:
+                _, _, mau_gl_dp, mau_aol_dp, mau_bdwl_dp, mau_cfl_dp = _misa_khung_ghi_so_du_phong(
+                    cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl)
+                if len(mau_gl) != 2:
+                    mau_gl = mau_gl_dp
+                if mau_aol is None:
+                    mau_aol = mau_aol_dp
+                if mau_bdwl is None:
+                    mau_bdwl = mau_bdwl_dp
+                if mau_cfl is None:
+                    mau_cfl = mau_cfl_dp
         co_ban_ghi_so_cai = len(mau_gl) == 2 and mau_aol is not None and mau_bdwl is not None
 
         # Danh mục Đối tượng — map MST (chuẩn hoá) -> (AccountObjectID, tên, mã ĐT, MST trong MISA)
@@ -20681,10 +20803,20 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                               ("],[".join(cfl_cols_list)), (ref_id_mau,)).fetchone()
             if row:
                 mau_cfl = dict(zip(cfl_cols_list, row))
+        # KHÔNG còn chặn nữa khi thiếu chứng từ THẬT để học mẫu (vd người dùng đã xoá sạch) —
+        # dùng khung DỰ PHÒNG dựng từ cấu trúc CHUẨN sản phẩm MISA cho phần còn thiếu (xem
+        # _misa_khung_ghi_so_du_phong, giải thích đầy đủ ở _misa_ghi_thu_chi).
         if len(mau_gl) != 2 or mau_aol is None or mau_bdwl is None:
-            raise HTTPException(
-                400, "Chưa tìm được chứng từ THẬT nào (không do phần mềm ghi) để học cấu trúc "
-                     "GeneralLedger/AccountObjectLedger/BADepositWithdrawList — chưa thể sửa bổ sung.")
+            _, _, mau_gl_dp, mau_aol_dp, mau_bdwl_dp, mau_cfl_dp = _misa_khung_ghi_so_du_phong(
+                cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl)
+            if len(mau_gl) != 2:
+                mau_gl = mau_gl_dp
+            if mau_aol is None:
+                mau_aol = mau_aol_dp
+            if mau_bdwl is None:
+                mau_bdwl = mau_bdwl_dp
+            if mau_cfl is None:
+                mau_cfl = mau_cfl_dp
 
         max_reforder = 0
         try:
