@@ -1819,32 +1819,58 @@ async function chanDoanUntUncMisa(coMst, loai) {
     const pmRows = data.chung_tu_do_pm_ghi || [];
     const thatRows = data.chung_tu_that_de_doi_chieu || [];
     console.log("Chẩn đoán UNT/UNC (đầy đủ):", data);
-    alert(`Tổng số dòng trong bảng ${data.master_tbl}: ${data.tong_so_dong_master}\n`
-      + `Số chứng từ do phần mềm ghi tìm thấy: ${pmRows.length}\n`
-      + `Số chứng từ THẬT (không do phần mềm ghi) để đối chiếu: ${thatRows.length}\n\n`
-      + `Bấm OK để xem TỪNG cột khác nhau giữa 1 chứng từ phần mềm ghi và 1 chứng từ thật `
-      + `(nếu có) — đây là chỗ nhiều khả năng gây ra lỗi không hiện trên MISA nhất.`);
+
+    const lines = [];
+    lines.push(`Chẩn đoán ${loai.toUpperCase()} — ${new Date().toLocaleString("vi-VN")}`);
+    lines.push(`Database: ${data.database}`);
+    lines.push(`Bảng: ${data.master_tbl} / ${data.detail_tbl}`);
+    lines.push(`Tổng số dòng trong bảng ${data.master_tbl}: ${data.tong_so_dong_master}`);
+    lines.push(`Số chứng từ do phần mềm ghi tìm thấy: ${pmRows.length}`);
+    lines.push(`Số chứng từ THẬT (không do phần mềm ghi) để đối chiếu: ${thatRows.length}`);
+    lines.push("");
+
     if (pmRows.length && thatRows.length) {
       const pm = pmRows[0], that = thatRows[0];
       const keys = Array.from(new Set([...Object.keys(pm), ...Object.keys(that)])).sort();
       const diffs = keys.filter(k => JSON.stringify(pm[k]) !== JSON.stringify(that[k]));
-      let dmsg = `--- KHÁC NHAU giữa 1 chứng từ PHẦN MỀM ghi và 1 chứng từ THẬT (${diffs.length} cột) ---\n\n`;
-      diffs.forEach(k => { dmsg += `${k}:\n  phần mềm = ${JSON.stringify(pm[k])}\n  thật     = ${JSON.stringify(that[k])}\n\n`; });
-      alert(dmsg || "Không có cột nào khác nhau (lạ — kiểm tra lại).");
+      lines.push(`=== KHÁC NHAU giữa 1 chứng từ PHẦN MỀM ghi và 1 chứng từ THẬT (${diffs.length} cột) ===`);
+      diffs.forEach(k => {
+        lines.push(`${k}:`);
+        lines.push(`  phần mềm = ${JSON.stringify(pm[k])}`);
+        lines.push(`  thật     = ${JSON.stringify(that[k])}`);
+      });
+      lines.push("");
     } else if (pmRows.length) {
-      alert("Không tìm thấy chứng từ THẬT nào để đối chiếu (mọi chứng từ trong bảng đều do phần mềm ghi) — không so sánh được.");
+      lines.push("Không tìm thấy chứng từ THẬT nào để đối chiếu (mọi chứng từ trong bảng đều do phần mềm ghi).");
+      lines.push("");
     }
-    // In riêng từng dòng phần mềm đã ghi (đầy đủ mọi cột, không cắt bớt) — mỗi dòng 1 alert để không bị giới hạn độ dài.
+
     pmRows.forEach((r, i) => {
-      let m = `--- Chứng từ phần mềm ghi #${i + 1}/${pmRows.length} (${data.master_tbl}) ---\n\n`;
-      Object.keys(r).forEach(k => { m += `${k}: ${JSON.stringify(r[k])}\n`; });
-      alert(m);
+      lines.push(`=== Chứng từ phần mềm ghi #${i + 1}/${pmRows.length} (${data.master_tbl}) ===`);
+      Object.keys(r).forEach(k => lines.push(`${k}: ${JSON.stringify(r[k])}`));
+      lines.push("");
     });
     (data.chi_tiet_do_pm_ghi || []).forEach((r, i) => {
-      let m = `--- Chi tiết phần mềm ghi #${i + 1} (${data.detail_tbl}) ---\n\n`;
-      Object.keys(r).forEach(k => { m += `${k}: ${JSON.stringify(r[k])}\n`; });
-      alert(m);
+      lines.push(`=== Chi tiết phần mềm ghi #${i + 1} (${data.detail_tbl}) ===`);
+      Object.keys(r).forEach(k => lines.push(`${k}: ${JSON.stringify(r[k])}`));
+      lines.push("");
     });
+    thatRows.forEach((r, i) => {
+      lines.push(`=== Chứng từ THẬT (đối chiếu) #${i + 1}/${thatRows.length} (${data.master_tbl}) ===`);
+      Object.keys(r).forEach(k => lines.push(`${k}: ${JSON.stringify(r[k])}`));
+      lines.push("");
+    });
+
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chan_doan_${loai}_${new Date().toLocaleDateString("vi-VN").replace(/\//g, "-")}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    alert(`Đã tải file chan_doan_${loai}_....txt — mở file này (Notepad) và gửi lại toàn bộ nội dung để kiểm tra tiếp.`);
   } catch (e) {
     alert("Lỗi chẩn đoán: " + e.message);
   }
