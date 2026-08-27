@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.022"
+APP_BUILD = "2026-08-26.023"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20217,13 +20217,47 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                      f"điện tử hoặc tự nhập tay ít nhất 1 chứng từ rồi thử lại).")
         branch_id = mau_m.get("BranchID") or _misa_branch_id(cur)
 
-        # Danh mục Đối tượng — map MST (chuẩn hoá) -> (AccountObjectID, tên trong MISA)
+        # QUAN TRỌNG (xác nhận qua chẩn đoán thật, đợt 2 — xem _misa_chan_doan_unt_unc): ghi
+        # BADeposit/BAWithDraw với IsPostedFinance=True vẫn KHÔNG hiện trên MISA nếu thiếu 2
+        # bảng "sổ cái" — GeneralLedger (2 dòng, ghi kép Nợ/Có — 1121↔131 cho UNT, 331↔1121 cho
+        # UNC) và AccountObjectLedger (1 dòng, đúng vế công nợ 131/331 — "sổ chi tiết công nợ
+        # theo đối tượng"). Đây là những gì "Ghi sổ" THẬT của MISA tự sinh thêm, không chỉ đổi cờ
+        # trên BADeposit/BAWithDraw. Học mẫu 2 bảng này từ ĐÚNG giao dịch thật vừa dùng làm mẫu
+        # Master/Detail ở trên (cùng RefID) để chắc chắn đúng "chất" — không có mẫu thì vẫn ghi
+        # BADeposit/BAWithDraw bình thường (không chặn), nhưng báo rõ để người dùng biết trước.
+        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+        cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
+        mau_gl = []
+        mau_aol = None
+        if ref_id_mau and cols_gl:
+            try:
+                gl_cols_list = [name for name, _ in cols_gl.values()]
+                sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % (
+                    "],[".join(gl_cols_list))
+                for row in cur.execute(sql, (ref_id_mau,)).fetchall():
+                    mau_gl.append(dict(zip(gl_cols_list, row)))
+            except Exception:
+                mau_gl = []
+        if ref_id_mau and cols_aol:
+            try:
+                aol_cols_list = [name for name, _ in cols_aol.values()]
+                sql = "SELECT [%s] FROM AccountObjectLedger WHERE RefID=?" % (
+                    "],[".join(aol_cols_list))
+                row = cur.execute(sql, (ref_id_mau,)).fetchone()
+                if row:
+                    mau_aol = dict(zip(aol_cols_list, row))
+            except Exception:
+                mau_aol = None
+        co_ban_ghi_so_cai = len(mau_gl) == 2 and mau_aol is not None
+
+        # Danh mục Đối tượng — map MST (chuẩn hoá) -> (AccountObjectID, tên, mã ĐT, MST trong MISA)
         doi_tuong = {}
         for aid, taxcode, code, name in cur.execute(
                 "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
                 "FROM AccountObject").fetchall():
             if taxcode:
-                doi_tuong[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, str(name or ""))
+                doi_tuong[_misa_khncc_chuan_mst(taxcode).lower()] = (
+                    aid, str(name or ""), str(code or ""), str(taxcode or ""))
 
         co_cf10 = "customfield10" in cols_m
         da_co = set()
@@ -20269,7 +20303,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                            "trang_thai": f"bỏ qua — không tìm thấy đối tượng MST '{mst or gd.get('mst') or ''}' "
                                          f"trong Danh mục MISA"})
                 continue
-            aid, ten_misa = dt
+            aid, ten_misa, ma_dt_misa, mst_misa = dt
             ngay_dt = _misa_doc_ngay(gd.get("ngay")) or now
             hach = str(gd.get("tk_doi_ung") or hach_mac_dinh).strip()
             dien_giai = str(gd.get("dien_giai") or "")[:255]
@@ -20308,14 +20342,90 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             if co_cf10:
                 _misa_gan(m_row, cols_m, _PM_MARK, "CustomField10")
 
+            d_id = str(_uuid.uuid4())
             d_row = {c: mau_d.get(c) for c in d_cols_that}
-            _misa_gan(d_row, cols_d, str(_uuid.uuid4()), "RefDetailID", "BADepositDetailID", "BAWithDrawDetailID")
+            _misa_gan(d_row, cols_d, d_id, "RefDetailID", "BADepositDetailID", "BAWithDrawDetailID")
             _misa_gan(d_row, cols_d, m_id, "RefID")
             _misa_gan(d_row, cols_d, aid, "AccountObjectID")
             _misa_gan(d_row, cols_d, dien_giai, "Description")
             _misa_gan(d_row, cols_d, hach, tk_cot)
             _misa_gan(d_row, cols_d, so_tien, "Amount")
             _misa_gan(d_row, cols_d, so_tien, "AmountOC")
+
+            # Nhân bản 2 dòng GeneralLedger (ghi kép Nợ/Có) + 1 dòng AccountObjectLedger (vế
+            # công nợ 131/331) từ ĐÚNG giao dịch thật đã dùng làm mẫu Master/Detail — xem giải
+            # thích ở chỗ học mẫu (mau_gl/mau_aol) phía trên. Giữ nguyên AccountNumber/
+            # CorrespondingAccountNumber/EntryType của mẫu (quyết định TK Nợ/TK Có của MỖI dòng),
+            # chỉ đổi số tiền đúng theo hướng Nợ/Có đã có sẵn ở mẫu — không tự đoán chiều.
+            gl_rows = []
+            for mgl in mau_gl:
+                g = dict(mgl)
+                for c in list(g.keys()):
+                    if c not in {name for name, _ in cols_gl.values()}:
+                        del g[c]
+                _misa_gan(g, cols_gl, m_id, "RefID")
+                _misa_gan(g, cols_gl, d_id, "RefDetailID")
+                _misa_gan(g, cols_gl, ngay_dt, "RefDate")
+                _misa_gan(g, cols_gl, ngay_dt, "RefDate1")
+                _misa_gan(g, cols_gl, ngay_dt, "PostedDate")
+                _misa_gan(g, cols_gl, so_ct, "RefNo")
+                _misa_gan(g, cols_gl, so_ct, "RefNo1")
+                _misa_gan(g, cols_gl, so_ct, "RefNo2")
+                _misa_gan(g, cols_gl, dien_giai, "JournalMemo")
+                _misa_gan(g, cols_gl, dien_giai, "Description")
+                _misa_gan(g, cols_gl, aid, "AccountObjectID")
+                _misa_gan(g, cols_gl, ten_misa or ten, "AccountObjectName")
+                _misa_gan(g, cols_gl, ten_misa or ten, "AccountObjectNameDI")
+                _misa_gan(g, cols_gl, ma_dt_misa, "AccountObjectCode")
+                _misa_gan(g, cols_gl, mst_misa, "AccountObjectTaxCode")
+                _misa_gan(g, cols_gl, branch_id, "BranchID")
+                _misa_gan(g, cols_gl, max_reforder, "RefOrder")
+                if _snum(mgl.get("DebitAmountOC")) > 0:
+                    _misa_gan(g, cols_gl, so_tien, "DebitAmountOC")
+                    _misa_gan(g, cols_gl, so_tien, "DebitAmount")
+                    _misa_gan(g, cols_gl, 0, "CreditAmountOC")
+                    _misa_gan(g, cols_gl, 0, "CreditAmount")
+                else:
+                    _misa_gan(g, cols_gl, so_tien, "CreditAmountOC")
+                    _misa_gan(g, cols_gl, so_tien, "CreditAmount")
+                    _misa_gan(g, cols_gl, 0, "DebitAmountOC")
+                    _misa_gan(g, cols_gl, 0, "DebitAmount")
+                gl_rows.append(g)
+
+            aol_row = None
+            if mau_aol is not None:
+                a = dict(mau_aol)
+                for c in list(a.keys()):
+                    if c not in {name for name, _ in cols_aol.values()}:
+                        del a[c]
+                _misa_gan(a, cols_aol, m_id, "RefID")
+                _misa_gan(a, cols_aol, d_id, "RefDetailID")
+                _misa_gan(a, cols_aol, branch_id, "BranchID")
+                _misa_gan(a, cols_aol, ngay_dt, "RefDate")
+                _misa_gan(a, cols_aol, ngay_dt, "PostedDate")
+                _misa_gan(a, cols_aol, so_ct, "RefNo")
+                _misa_gan(a, cols_aol, dien_giai, "JournalMemo")
+                _misa_gan(a, cols_aol, dien_giai, "Description")
+                _misa_gan(a, cols_aol, aid, "AccountObjectID")
+                _misa_gan(a, cols_aol, ma_dt_misa, "AccountObjectCode")
+                _misa_gan(a, cols_aol, ten_misa or ten, "AccountObjectName")
+                _misa_gan(a, cols_aol, ten_misa or ten, "AccountObjectNameDI")
+                _misa_gan(a, cols_aol, mst_misa, "AccountObjectTaxCode")
+                _misa_gan(a, cols_aol, max_reforder, "RefOrder")
+                aol_account = str(mau_aol.get("AccountNumber") or hach)
+                if _snum(mau_aol.get("DebitAmountOC")) > 0:
+                    _misa_gan(a, cols_aol, so_tien, "DebitAmountOC")
+                    _misa_gan(a, cols_aol, so_tien, "DebitAmount")
+                    _misa_gan(a, cols_aol, 0, "CreditAmountOC")
+                    _misa_gan(a, cols_aol, 0, "CreditAmount")
+                else:
+                    _misa_gan(a, cols_aol, so_tien, "CreditAmountOC")
+                    _misa_gan(a, cols_aol, so_tien, "CreditAmount")
+                    _misa_gan(a, cols_aol, 0, "DebitAmountOC")
+                    _misa_gan(a, cols_aol, 0, "DebitAmount")
+                _misa_gan(a, cols_aol, f"{m_id}#{aid}#{aol_account}", "PayKeyID")
+                _misa_gan(a, cols_aol, f"{m_id}#{aid}#{aol_account}", "DebtKeyID")
+                aol_row = a
 
             if not preview:
                 lc = list(m_row.keys())
@@ -20326,11 +20436,22 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 cur.execute("INSERT INTO %s ([%s]) VALUES (%s)" %
                            (detail_tbl, "],[".join(lc), ",".join(["?"] * len(lc))),
                            [d_row[c] for c in lc])
+                for g in gl_rows:
+                    lc = list(g.keys())
+                    cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [g[c] for c in lc])
+                if aol_row is not None:
+                    lc = list(aol_row.keys())
+                    cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [aol_row[c] for c in lc])
 
             da_co.add(so_ct)
             them += 1
             ket.append({"so_ct": so_ct, "ten_doi_tuong": ten_misa or ten, "so_tien": so_tien,
-                       "trang_thai": "sẽ tạo" if preview else "đã tạo"})
+                       "trang_thai": "sẽ tạo" if preview else "đã tạo",
+                       "co_ghi_so_cai": co_ban_ghi_so_cai})
 
         if preview:
             conn.rollback()
@@ -20338,7 +20459,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             conn.commit()
         return {"database": database, "preview": preview, "loai": loai,
                "so_them": them, "so_trung": trung, "so_bo_qua_kh": bo_qua_kh,
-               "danh_sach": ket}
+               "co_ghi_so_cai": co_ban_ghi_so_cai, "danh_sach": ket}
     except HTTPException:
         conn.rollback()
         raise
@@ -20381,35 +20502,166 @@ def misa_sql_import_unt_unc(body: dict = Body(...)):
 
 def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
     """Sửa chứng từ UNT/UNC do CHÍNH phần mềm này ghi TRƯỚC KHI phát hiện ra
-    lỗi IsPostedFinance=False khiến chứng từ không hiện trên màn "Thu, chi
-    tiền" (xem _misa_ghi_thu_chi) — CHỈ đổi cờ IsPostedFinance 0->1 cho
-    đúng các chứng từ mang CustomField10=_PM_MARK VÀ đang IsPostedFinance=0
-    (không đụng chứng từ nào khác, kể cả IsPostedManagement vẫn giữ
-    nguyên). Không ghi/xoá gì khác."""
-    master_tbl = "BADeposit" if loai == "unt" else "BAWithDraw"
+    2 lỗi khiến chứng từ không hiện trên màn "Thu, chi tiền": (1)
+    IsPostedFinance=False, (2) thiếu 2 dòng GeneralLedger (ghi kép Nợ/Có) +
+    1 dòng AccountObjectLedger (sổ chi tiết công nợ) — xem _misa_ghi_thu_chi.
+    Với MỖI chứng từ mang CustomField10=_PM_MARK: đổi IsPostedFinance 0->1
+    (nếu đang 0) VÀ tạo bổ sung đúng 2 dòng GeneralLedger + 1 dòng
+    AccountObjectLedger còn thiếu (bỏ qua nếu GeneralLedger đã có sẵn —
+    không tạo trùng). Không đụng chứng từ nào khác, không xoá gì."""
+    import uuid as _uuid
+    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
+    tk_cot = "CreditAccount" if loai == "unt" else "DebitAccount"
+    hach_mac_dinh = "131" if loai == "unt" else "331"
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
         cur = conn.cursor()
         cols_m = _misa_cot_bang_that(cur, master_tbl)
+        cols_d = _misa_cot_bang_that(cur, detail_tbl)
+        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+        cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
         if "customfield10" not in cols_m:
             raise HTTPException(400, f"Bảng {master_tbl} không có cột CustomField10 — không thể "
                                      f"phân biệt chứng từ do phần mềm ghi.")
-        rows = cur.execute(
-            f"SELECT RefID, RefNoFinance FROM {master_tbl} "
-            f"WHERE ISNULL(CustomField10,'')=? AND ISNULL(IsPostedFinance,0)=0",
-            _PM_MARK).fetchall()
-        if not preview:
-            cur.execute(
-                f"UPDATE {master_tbl} SET IsPostedFinance=1 "
-                f"WHERE ISNULL(CustomField10,'')=? AND ISNULL(IsPostedFinance,0)=0",
-                _PM_MARK)
-            conn.commit()
-        else:
+        m_cols_list = [name for name, _ in cols_m.values()]
+        d_cols_list = [name for name, _ in cols_d.values()]
+
+        # Học mẫu GeneralLedger/AccountObjectLedger từ 1 chứng từ THẬT (không do phần mềm ghi) —
+        # cùng kỹ thuật với _misa_ghi_thu_chi.
+        mau_d = _misa_mau_dong_that(cur, detail_tbl, f"{tk_cot} LIKE ?", (hach_mac_dinh + "%",))
+        ref_id_mau = mau_d.get("RefID") if mau_d else None
+        mau_gl, mau_aol = [], None
+        if ref_id_mau and cols_gl:
+            gl_cols_list = [name for name, _ in cols_gl.values()]
+            sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % ("],[".join(gl_cols_list))
+            for row in cur.execute(sql, (ref_id_mau,)).fetchall():
+                mau_gl.append(dict(zip(gl_cols_list, row)))
+        if ref_id_mau and cols_aol:
+            aol_cols_list = [name for name, _ in cols_aol.values()]
+            sql = "SELECT [%s] FROM AccountObjectLedger WHERE RefID=?" % ("],[".join(aol_cols_list))
+            row = cur.execute(sql, (ref_id_mau,)).fetchone()
+            if row:
+                mau_aol = dict(zip(aol_cols_list, row))
+        if len(mau_gl) != 2 or mau_aol is None:
+            raise HTTPException(
+                400, "Chưa tìm được chứng từ THẬT nào (không do phần mềm ghi) để học cấu trúc "
+                     "GeneralLedger/AccountObjectLedger — chưa thể sửa bổ sung.")
+
+        max_reforder = 0
+        try:
+            r0 = cur.execute(f"SELECT ISNULL(MAX(RefOrder),0) FROM {master_tbl}").fetchone()
+            max_reforder = (r0[0] or 0) if r0 else 0
+        except Exception:
+            pass
+
+        # Toàn bộ chứng từ do phần mềm ghi (bất kể IsPostedFinance đang là gì — lần sửa trước có
+        # thể đã đổi cờ nhưng vẫn còn thiếu GeneralLedger/AccountObjectLedger).
+        sql = "SELECT [%s] FROM %s WHERE ISNULL(CustomField10,'')=?" % ("],[".join(m_cols_list), master_tbl)
+        m_broken_rows = [dict(zip(m_cols_list, r)) for r in cur.execute(sql, (_PM_MARK,)).fetchall()]
+
+        ket = []
+        so_sua = 0
+        for m in m_broken_rows:
+            rid = m.get("RefID")
+            ref_no = m.get("RefNoFinance")
+            da_co_gl = cur.execute("SELECT COUNT(*) FROM GeneralLedger WHERE RefID=?", (rid,)).fetchone()[0]
+            if da_co_gl >= 2:
+                continue  # đã đủ, không đụng
+            d_row = cur.execute(
+                "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(d_cols_list), detail_tbl),
+                (rid,)).fetchone()
+            if not d_row:
+                ket.append({"ref_no": ref_no, "loi": f"không tìm thấy dòng {detail_tbl} tương ứng"})
+                continue
+            d = dict(zip(d_cols_list, d_row))
+            d_id = _misa_chon_cot(cols_d, "RefDetailID", "BADepositDetailID", "BAWithDrawDetailID")
+            d_id_val = d.get(d_id) if d_id else None
+            aid = m.get("AccountObjectID")
+            ten_misa = m.get("AccountObjectName") or ""
+            ngay_dt = m.get("RefDate")
+            dien_giai = m.get("JournalMemo") or ""
+            so_tien = _snum(m.get("TotalAmountOC") or m.get("TotalAmount"))
+            ma_dt_misa, mst_misa = "", ""
+            if aid:
+                row_ao = cur.execute(
+                    "SELECT AccountObjectCode, CompanyTaxCode FROM AccountObject WHERE AccountObjectID=?",
+                    (aid,)).fetchone()
+                if row_ao:
+                    ma_dt_misa, mst_misa = str(row_ao[0] or ""), str(row_ao[1] or "")
+
+            gl_rows = []
+            for mgl in mau_gl:
+                g = {c: mgl.get(c) for c in [name for name, _ in cols_gl.values()]}
+                _misa_gan(g, cols_gl, rid, "RefID")
+                _misa_gan(g, cols_gl, d_id_val, "RefDetailID")
+                _misa_gan(g, cols_gl, ngay_dt, "RefDate")
+                _misa_gan(g, cols_gl, ngay_dt, "RefDate1")
+                _misa_gan(g, cols_gl, ngay_dt, "PostedDate")
+                _misa_gan(g, cols_gl, ref_no, "RefNo")
+                _misa_gan(g, cols_gl, ref_no, "RefNo1")
+                _misa_gan(g, cols_gl, ref_no, "RefNo2")
+                _misa_gan(g, cols_gl, dien_giai, "JournalMemo")
+                _misa_gan(g, cols_gl, dien_giai, "Description")
+                _misa_gan(g, cols_gl, aid, "AccountObjectID")
+                _misa_gan(g, cols_gl, ten_misa, "AccountObjectName")
+                _misa_gan(g, cols_gl, ten_misa, "AccountObjectNameDI")
+                _misa_gan(g, cols_gl, ma_dt_misa, "AccountObjectCode")
+                _misa_gan(g, cols_gl, mst_misa, "AccountObjectTaxCode")
+                _misa_gan(g, cols_gl, m.get("BranchID"), "BranchID")
+                _misa_gan(g, cols_gl, max_reforder, "RefOrder")
+                if _snum(mgl.get("DebitAmountOC")) > 0:
+                    _misa_gan(g, cols_gl, so_tien, "DebitAmountOC"); _misa_gan(g, cols_gl, so_tien, "DebitAmount")
+                    _misa_gan(g, cols_gl, 0, "CreditAmountOC"); _misa_gan(g, cols_gl, 0, "CreditAmount")
+                else:
+                    _misa_gan(g, cols_gl, so_tien, "CreditAmountOC"); _misa_gan(g, cols_gl, so_tien, "CreditAmount")
+                    _misa_gan(g, cols_gl, 0, "DebitAmountOC"); _misa_gan(g, cols_gl, 0, "DebitAmount")
+                gl_rows.append(g)
+
+            a = {c: mau_aol.get(c) for c in [name for name, _ in cols_aol.values()]}
+            _misa_gan(a, cols_aol, rid, "RefID")
+            _misa_gan(a, cols_aol, d_id_val, "RefDetailID")
+            _misa_gan(a, cols_aol, m.get("BranchID"), "BranchID")
+            _misa_gan(a, cols_aol, ngay_dt, "RefDate")
+            _misa_gan(a, cols_aol, ngay_dt, "PostedDate")
+            _misa_gan(a, cols_aol, ref_no, "RefNo")
+            _misa_gan(a, cols_aol, dien_giai, "JournalMemo")
+            _misa_gan(a, cols_aol, dien_giai, "Description")
+            _misa_gan(a, cols_aol, aid, "AccountObjectID")
+            _misa_gan(a, cols_aol, ma_dt_misa, "AccountObjectCode")
+            _misa_gan(a, cols_aol, ten_misa, "AccountObjectName")
+            _misa_gan(a, cols_aol, ten_misa, "AccountObjectNameDI")
+            _misa_gan(a, cols_aol, mst_misa, "AccountObjectTaxCode")
+            _misa_gan(a, cols_aol, max_reforder, "RefOrder")
+            aol_account = str(mau_aol.get("AccountNumber") or hach_mac_dinh)
+            if _snum(mau_aol.get("DebitAmountOC")) > 0:
+                _misa_gan(a, cols_aol, so_tien, "DebitAmountOC"); _misa_gan(a, cols_aol, so_tien, "DebitAmount")
+                _misa_gan(a, cols_aol, 0, "CreditAmountOC"); _misa_gan(a, cols_aol, 0, "CreditAmount")
+            else:
+                _misa_gan(a, cols_aol, so_tien, "CreditAmountOC"); _misa_gan(a, cols_aol, so_tien, "CreditAmount")
+                _misa_gan(a, cols_aol, 0, "DebitAmountOC"); _misa_gan(a, cols_aol, 0, "DebitAmount")
+            _misa_gan(a, cols_aol, f"{rid}#{aid}#{aol_account}", "PayKeyID")
+            _misa_gan(a, cols_aol, f"{rid}#{aid}#{aol_account}", "DebtKeyID")
+
+            if not preview:
+                cur.execute(f"UPDATE {master_tbl} SET IsPostedFinance=1 WHERE RefID=?", (rid,))
+                for g in gl_rows:
+                    lc = list(g.keys())
+                    cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [g[c] for c in lc])
+                lc = list(a.keys())
+                cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
+                           ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
+
+            so_sua += 1
+            ket.append({"ref_no": ref_no})
+
+        if preview:
             conn.rollback()
+        else:
+            conn.commit()
         return {"database": database, "loai": loai, "preview": preview,
-               "so_se_sua": len(rows),
-               "danh_sach": [{"ref_no": rn} for _, rn in rows]}
+               "so_se_sua": so_sua, "danh_sach": ket}
     except HTTPException:
         conn.rollback()
         raise

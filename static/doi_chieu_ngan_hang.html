@@ -1807,10 +1807,11 @@ async function importThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, acco
   }
 }
 
-// ── Sửa chứng từ UNT/UNC CŨ (đã ghi trước khi phát hiện lỗi IsPostedFinance=False khiến không hiện
-// trên MISA — xem _misa_ghi_thu_chi/_misa_sua_ghi_so_unt_unc_cu) — CHỈ đổi cờ IsPostedFinance 0->1
-// cho đúng chứng từ do phần mềm ghi, không đụng gì khác. Không cần dùng cho chứng từ ghi MỚI (đã
-// tự đúng ngay từ đầu), chỉ cần chạy 1 LẦN cho các chứng từ ghi trước khi có bản vá này.
+// ── Sửa chứng từ UNT/UNC CŨ (đã ghi trước khi phát hiện đủ 2 lỗi khiến không hiện trên MISA:
+// IsPostedFinance=False VÀ thiếu GeneralLedger/AccountObjectLedger — xem
+// _misa_ghi_thu_chi/_misa_sua_ghi_so_unt_unc_cu) — đổi cờ IsPostedFinance 0->1 VÀ tạo bổ sung đúng
+// 2 dòng GeneralLedger + 1 dòng AccountObjectLedger còn thiếu cho chứng từ do phần mềm ghi, không
+// đụng gì khác. Không cần dùng cho chứng từ ghi MỚI (đã tự đúng ngay từ đầu), chỉ cần chạy 1 LẦN.
 async function suaGhiSoUntUncCu(coMst, loai) {
   if (!coMst) { alert("Công ty chưa có MST."); return; }
   const tenLoai = loai === "unt" ? "UNT (thu tiền)" : "UNC (chi tiền)";
@@ -1824,12 +1825,12 @@ async function suaGhiSoUntUncCu(coMst, loai) {
     };
     const pv = await goi(true);
     if (pv.detail) { alert("Lỗi: " + pv.detail); return; }
-    if (!pv.so_se_sua) { alert(`Không có chứng từ ${tenLoai} nào cần sửa (mọi chứng từ do phần mềm ghi đều đã ghi sổ tài chính).`); return; }
+    if (!pv.so_se_sua) { alert(`Không có chứng từ ${tenLoai} nào cần sửa (mọi chứng từ do phần mềm ghi đã có đủ Sổ Cái).`); return; }
     const dsMsg = pv.danh_sach.slice(0, 20).map(x => "  " + x.ref_no).join("\n")
       + (pv.danh_sach.length > 20 ? `\n  ...và ${pv.danh_sach.length - 20} chứng từ khác` : "");
-    if (!confirm(`Sẽ đổi ${pv.so_se_sua} chứng từ ${tenLoai} (do phần mềm ghi trước đây) sang ĐÃ GHI `
-      + `SỔ TÀI CHÍNH để hiện đúng trên MISA:\n${dsMsg}\n\nKHÔNG đụng Sổ quản trị, không ghi/xoá gì `
-      + `khác. Bấm OK để sửa thật, Huỷ để dừng lại.`)) return;
+    if (!confirm(`Sẽ sửa ${pv.so_se_sua} chứng từ ${tenLoai} (do phần mềm ghi trước đây) — ghi bổ `
+      + `sung 2 dòng Sổ Cái + 1 dòng sổ chi tiết công nợ còn thiếu để hiện đúng trên MISA:\n${dsMsg}`
+      + `\n\nKHÔNG đụng Sổ quản trị, không xoá gì. Bấm OK để sửa thật, Huỷ để dừng lại.`)) return;
     const real = await goi(false);
     if (real.detail) { alert("Lỗi sửa: " + real.detail); return; }
     alert(`✓ Đã sửa ${real.so_se_sua} chứng từ ${tenLoai}. Mở lại màn "Thu, chi tiền" trong MISA, bấm "Lấy dữ liệu" để kiểm tra.`);
