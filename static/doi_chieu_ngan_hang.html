@@ -1792,17 +1792,49 @@ async function importThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, acco
     if (fxFailed.length) msg += `\n⚠ ${fxFailed.length} giao dịch USD chưa lấy được tỷ giá — KHÔNG nằm `
       + `trong danh sách gửi lần này (tự bổ sung tỷ giá trên màn hình rồi chạy lại).\n`;
     if (!pv.so_them) { alert(msg); return; }
-    msg += `\nBấm OK để GHI THẬT ${pv.so_them} chứng từ vào MISA (chưa ghi sổ — tự bấm "Ghi sổ" trong `
-      + `MISA sau khi kiểm tra). Bấm Huỷ để dừng lại, không ghi gì.`;
+    msg += `\nBấm OK để GHI THẬT ${pv.so_them} chứng từ vào MISA (ghi luôn Sổ tài chính để hiện `
+      + `đúng trên màn "Thu, chi tiền" — Sổ quản trị vẫn để chưa ghi, nên vẫn xoá/sửa lại được `
+      + `bình thường trong MISA nếu ghi nhầm). Bấm Huỷ để dừng lại, không ghi gì.`;
     if (!confirm(msg)) return;
     if (showToast) showToast("Đang ghi vào MISA...", "ok");
     const real = await goi(false);
     if (real.detail) { alert("Lỗi ghi: " + real.detail); return; }
-    if (showToast) showToast(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA (chưa ghi sổ)`, "ok");
-    else alert(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA (chưa ghi sổ).`);
+    if (showToast) showToast(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA`, "ok");
+    else alert(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA.`);
   } catch (e) {
     alert(`Lỗi import ${tenLoai} vào MISA: ` + e.message);
     console.error(e);
+  }
+}
+
+// ── Sửa chứng từ UNT/UNC CŨ (đã ghi trước khi phát hiện lỗi IsPostedFinance=False khiến không hiện
+// trên MISA — xem _misa_ghi_thu_chi/_misa_sua_ghi_so_unt_unc_cu) — CHỈ đổi cờ IsPostedFinance 0->1
+// cho đúng chứng từ do phần mềm ghi, không đụng gì khác. Không cần dùng cho chứng từ ghi MỚI (đã
+// tự đúng ngay từ đầu), chỉ cần chạy 1 LẦN cho các chứng từ ghi trước khi có bản vá này.
+async function suaGhiSoUntUncCu(coMst, loai) {
+  if (!coMst) { alert("Công ty chưa có MST."); return; }
+  const tenLoai = loai === "unt" ? "UNT (thu tiền)" : "UNC (chi tiền)";
+  try {
+    const goi = async preview => {
+      const res = await fetch("/api/misa-sql/sua-ghi-so-unt-unc", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mst: coMst, loai, preview })
+      });
+      return res.json();
+    };
+    const pv = await goi(true);
+    if (pv.detail) { alert("Lỗi: " + pv.detail); return; }
+    if (!pv.so_se_sua) { alert(`Không có chứng từ ${tenLoai} nào cần sửa (mọi chứng từ do phần mềm ghi đều đã ghi sổ tài chính).`); return; }
+    const dsMsg = pv.danh_sach.slice(0, 20).map(x => "  " + x.ref_no).join("\n")
+      + (pv.danh_sach.length > 20 ? `\n  ...và ${pv.danh_sach.length - 20} chứng từ khác` : "");
+    if (!confirm(`Sẽ đổi ${pv.so_se_sua} chứng từ ${tenLoai} (do phần mềm ghi trước đây) sang ĐÃ GHI `
+      + `SỔ TÀI CHÍNH để hiện đúng trên MISA:\n${dsMsg}\n\nKHÔNG đụng Sổ quản trị, không ghi/xoá gì `
+      + `khác. Bấm OK để sửa thật, Huỷ để dừng lại.`)) return;
+    const real = await goi(false);
+    if (real.detail) { alert("Lỗi sửa: " + real.detail); return; }
+    alert(`✓ Đã sửa ${real.so_se_sua} chứng từ ${tenLoai}. Mở lại màn "Thu, chi tiền" trong MISA, bấm "Lấy dữ liệu" để kiểm tra.`);
+  } catch (e) {
+    alert(`Lỗi sửa ${tenLoai}: ` + e.message);
   }
 }
 
@@ -6189,7 +6221,17 @@ function ConfirmScreen({
     style:{fontSize:11,color:"#7a4fb5",borderColor:"#c4b0f0"},
     title:"Ch\u1EC9 \u0110\u1ECCC \u2014 li\u1EC7t k\u00EA chi ti\u1EBFt ch\u1EE9ng t\u1EEB UNC ph\u1EA7n m\u1EC1m \u0111\u00E3 ghi v\u00E0o MISA \u0111\u1EC3 ki\u1EC3m tra v\u00EC sao kh\u00F4ng hi\u1EC7n tr\u00EAn m\u00E0n Thu, chi ti\u1EC1n",
     onClick:()=>chanDoanUntUncMisa(co&&co.mst, "unc")
-  }, "\uD83D\uDD2C Ch\u1EA9n \u0111o\xE1n UNC"), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDD2C Ch\u1EA9n \u0111o\xE1n UNC"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{fontSize:11,color:"#a05a00",borderColor:"#e8c48a"},
+    title:"Ch\u1EC9 c\u1EA7n ch\u1EA1y 1 L\u1EA6N cho ch\u1EE9ng t\u1EEB UNT \u0111\xE3 ghi TR\u01AF\u1EDBC khi c\xF3 b\u1EA3n v\xE1 (kh\xF4ng hi\u1EC7n tr\xEAn MISA) \u2014 ch\u1EC9 \u0111\u1ED5i c\u1EDD IsPostedFinance, kh\xF4ng \u0111\u1EE5ng g\xEC kh\xE1c",
+    onClick:()=>suaGhiSoUntUncCu(co&&co.mst, "unt")
+  }, "\uD83D\uDD27 S\u1EEDa UNT c\u0169"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{fontSize:11,color:"#a05a00",borderColor:"#e8c48a"},
+    title:"Ch\u1EC9 c\u1EA7n ch\u1EA1y 1 L\u1EA6N cho ch\u1EE9ng t\u1EEB UNC \u0111\xE3 ghi TR\u01AF\u1EDBC khi c\xF3 b\u1EA3n v\xE1 (kh\xF4ng hi\u1EC7n tr\xEAn MISA) \u2014 ch\u1EC9 \u0111\u1ED5i c\u1EDD IsPostedFinance, kh\xF4ng \u0111\u1EE5ng g\xEC kh\xE1c",
+    onClick:()=>suaGhiSoUntUncCu(co&&co.mst, "unc")
+  }, "\uD83D\uDD27 S\u1EEDa UNC c\u0169"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-green",
     onClick: handleSaveAndLearn
   }, "\u2713 L\u01B0u & h\u1ECDc"))), addMode && /*#__PURE__*/React.createElement("div", {

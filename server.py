@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.020"
+APP_BUILD = "2026-08-26.021"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20169,8 +20169,11 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
     Dòng nào trùng so_ct với chứng từ CHÍNH phần mềm này đã ghi trước đó
     (CustomField10 đánh dấu, nếu bảng có cột này) sẽ tự BỎ QUA (so_trung),
     trừ khi ghi_de=True.
-    CHƯA GHI SỔ (IsPostedFinance=IsPostedManagement=0) — người dùng tự bấm
-    "Ghi sổ" trong MISA sau khi kiểm tra."""
+    IsPostedFinance=True (khác mọi writer khác trong file — xác nhận qua chẩn đoán thật:
+    BADeposit/BAWithDraw với IsPostedFinance=False không hiện trên màn "Thu, chi tiền" của
+    MISA dù đã ghi đúng vào CSDL), IsPostedManagement=False (giữ nguyên chưa ghi Sổ quản trị,
+    tránh vướng "phải bỏ ghi Sổ quản trị mới xoá được" nếu ghi nhầm — xem chi tiết ở chỗ gán 2
+    cờ này bên dưới)."""
     import uuid as _uuid
     if loai not in ("unt", "unc"):
         raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
@@ -20289,9 +20292,16 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             _misa_gan(m_row, cols_m, max_reforder, "RefOrder")
             _misa_gan(m_row, cols_m, so_tien, "TotalAmountOC")
             _misa_gan(m_row, cols_m, so_tien, "TotalAmount")
-            # CHƯA GHI SỔ theo đúng nguyên tắc chung (xem _PU_HEADER_DEFAULT) — người
-            # dùng tự kiểm tra rồi bấm "Ghi sổ" trong MISA.
-            _misa_gan(m_row, cols_m, False, "IsPostedFinance")
+            # KHÁC MỌI writer khác trong file (Mua hàng/Bán hàng/GTGT đều để CHƯA GHI SỔ) —
+            # xác nhận qua chẩn đoán thật (_misa_chan_doan_unt_unc, đối chiếu 1 chứng từ THẬT):
+            # BADeposit/BAWithDraw với IsPostedFinance=False KHÔNG hiện trên màn "Ngân hàng >
+            # Thu, chi tiền" của MISA dù đã ghi thành công vào CSDL (mọi cột khác đều khớp bản
+            # thật, CHỈ khác đúng ở đây) — có vẻ màn này chỉ liệt kê giao dịch ngân hàng ĐÃ GHI
+            # SỔ TÀI CHÍNH (hợp lý về nghiệp vụ: tiền đã thật sự qua ngân hàng thì không có khái
+            # niệm "nháp" như chứng từ mua/bán). Vẫn giữ IsPostedManagement=False (khớp đúng
+            # chứng từ thật đối chiếu được — Sổ tài chính/Sổ quản trị là 2 cờ ĐỘC LẬP) để tránh
+            # lặp lại vướng mắc "phải bỏ ghi Sổ quản trị mới xoá được" nếu ghi nhầm.
+            _misa_gan(m_row, cols_m, True, "IsPostedFinance")
             _misa_gan(m_row, cols_m, False, "IsPostedManagement")
             _misa_gan(m_row, cols_m, now, "CreatedDate")
             _misa_gan(m_row, cols_m, now, "ModifiedDate")
@@ -20367,6 +20377,72 @@ def misa_sql_import_unt_unc(body: dict = Body(...)):
     ghi_de = bool(body.get("ghi_de", False))
     giao_dich = body.get("giao_dich") or []
     return _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=preview, ghi_de=ghi_de)
+
+
+def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
+    """Sửa chứng từ UNT/UNC do CHÍNH phần mềm này ghi TRƯỚC KHI phát hiện ra
+    lỗi IsPostedFinance=False khiến chứng từ không hiện trên màn "Thu, chi
+    tiền" (xem _misa_ghi_thu_chi) — CHỈ đổi cờ IsPostedFinance 0->1 cho
+    đúng các chứng từ mang CustomField10=_PM_MARK VÀ đang IsPostedFinance=0
+    (không đụng chứng từ nào khác, kể cả IsPostedManagement vẫn giữ
+    nguyên). Không ghi/xoá gì khác."""
+    master_tbl = "BADeposit" if loai == "unt" else "BAWithDraw"
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cols_m = _misa_cot_bang_that(cur, master_tbl)
+        if "customfield10" not in cols_m:
+            raise HTTPException(400, f"Bảng {master_tbl} không có cột CustomField10 — không thể "
+                                     f"phân biệt chứng từ do phần mềm ghi.")
+        rows = cur.execute(
+            f"SELECT RefID, RefNoFinance FROM {master_tbl} "
+            f"WHERE ISNULL(CustomField10,'')=? AND ISNULL(IsPostedFinance,0)=0",
+            _PM_MARK).fetchall()
+        if not preview:
+            cur.execute(
+                f"UPDATE {master_tbl} SET IsPostedFinance=1 "
+                f"WHERE ISNULL(CustomField10,'')=? AND ISNULL(IsPostedFinance,0)=0",
+                _PM_MARK)
+            conn.commit()
+        else:
+            conn.rollback()
+        return {"database": database, "loai": loai, "preview": preview,
+               "so_se_sua": len(rows),
+               "danh_sach": [{"ref_no": rn} for _, rn in rows]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, f"Lỗi sửa chứng từ {'UNT' if loai == 'unt' else 'UNC'} cũ: {e}")
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/sua-ghi-so-unt-unc")
+def misa_sql_sua_ghi_so_unt_unc(body: dict = Body(...)):
+    """Sửa cờ IsPostedFinance cho chứng từ UNT/UNC CŨ do phần mềm đã ghi
+    TRƯỚC KHI sửa lỗi không hiện trên MISA (xem
+    _misa_sua_ghi_so_unt_unc_cu). body: {mst, database?, loai: 'unt'|'unc',
+    preview?}."""
+    mst = (body.get("mst") or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    loai = (body.get("loai") or "").strip().lower()
+    if loai not in ("unt", "unc"):
+        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
+    preview = bool(body.get("preview", True))
+    return _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=preview)
 
 
 def _misa_chan_doan_unt_unc(cid, database, loai):
