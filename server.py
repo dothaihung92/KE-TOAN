@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.007"
+APP_BUILD = "2026-08-27.008"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20910,9 +20910,23 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             # đúng): PHẢI kiểm tra riêng, không được gộp vào điều kiện "đã đủ cả 3" phía dưới — nếu
             # không, chứng từ đã có đủ GeneralLedger/AccountObjectLedger/BADepositWithdrawList từ
             # đợt sửa trước sẽ bị coi là "không cần sửa" và bỏ qua luôn, không bao giờ backfill được
-            # BankName.
-            can_sua_bank = ("bankname" in cols_m and "bankaccountid" in cols_m
-                             and not m.get("BankName") and m.get("BankAccountID"))
+            # BankName. Đợt 5 (sửa xong BankName ở Master nhưng bấm XEM VẪN lỗi y hệt): dò lại
+            # chẩn đoán thấy BADepositWithdrawList (bảng màn XEM/LIỆT KÊ thật sự đọc) CŨNG bị để
+            # trống BankName y hệt Master, do backfill trước chỉ sửa Master — kiểm tra + sửa RIÊNG
+            # cả cột BankName của BADepositWithdrawList.
+            can_sua_bank_m = ("bankname" in cols_m and "bankaccountid" in cols_m
+                              and not m.get("BankName") and m.get("BankAccountID"))
+            can_sua_bank_bdwl = False
+            if cols_bdwl and da_co_bdwl >= 1 and "bankname" in cols_bdwl:
+                try:
+                    r_bdwl = cur.execute(
+                        "SELECT BankName, BankAccountID FROM BADepositWithdrawList WHERE RefID=?",
+                        (rid,)).fetchone()
+                    if r_bdwl and not r_bdwl[0] and r_bdwl[1]:
+                        can_sua_bank_bdwl = True
+                except Exception:
+                    pass
+            can_sua_bank = can_sua_bank_m or can_sua_bank_bdwl
             if da_co_gl >= 2 and da_co_bdwl >= 1 and da_co_cfl >= 1 and not can_sua_bank:
                 continue  # đã đủ cả 3 + BankName đúng, không đụng
             d_row = cur.execute(
@@ -21042,8 +21056,12 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                 if can_sua_bank:
                     _, ten_ngan_hang_dp, _ = _misa_bank_account_du_phong(cur)
                     if ten_ngan_hang_dp:
-                        cur.execute(f"UPDATE {master_tbl} SET BankName=? WHERE RefID=?",
-                                   (ten_ngan_hang_dp, rid))
+                        if can_sua_bank_m:
+                            cur.execute(f"UPDATE {master_tbl} SET BankName=? WHERE RefID=?",
+                                       (ten_ngan_hang_dp, rid))
+                        if can_sua_bank_bdwl:
+                            cur.execute("UPDATE BADepositWithdrawList SET BankName=? WHERE RefID=?",
+                                       (ten_ngan_hang_dp, rid))
 
             so_sua += 1
             ket.append({"ref_no": ref_no})
