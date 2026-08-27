@@ -1893,6 +1893,23 @@ async function chanDoanUntUncMisa(coMst, loai) {
       lines.push("");
     });
 
+    // Dò thêm 2 bảng "sổ cái" (GeneralLedger/AccountObjectLedger) — nếu chứng từ THẬT có dòng ở
+    // đây còn chứng từ phần mềm ghi thì KHÔNG, đây rất có thể là bảng còn thiếu khi "Ghi sổ" thật.
+    ["GeneralLedger", "AccountObjectLedger"].forEach(tenBang => {
+      const cuaThat = data[`${tenBang}_cua_chung_tu_that`] || [];
+      const cuaPm = data[`${tenBang}_cua_chung_tu_pm_ghi`] || [];
+      lines.push(`=== ${tenBang}: chứng từ THẬT có ${cuaThat.length} dòng, chứng từ phần mềm ghi có ${cuaPm.length} dòng ===`);
+      cuaThat.forEach((r, i) => {
+        lines.push(`--- ${tenBang} của chứng từ THẬT #${i + 1} ---`);
+        if (r && typeof r === "object") Object.keys(r).forEach(k => lines.push(`${k}: ${JSON.stringify(r[k])}`));
+      });
+      cuaPm.forEach((r, i) => {
+        lines.push(`--- ${tenBang} của chứng từ PHẦN MỀM ghi #${i + 1} ---`);
+        if (r && typeof r === "object") Object.keys(r).forEach(k => lines.push(`${k}: ${JSON.stringify(r[k])}`));
+      });
+      lines.push("");
+    });
+
     const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

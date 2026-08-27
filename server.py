@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.021"
+APP_BUILD = "2026-08-26.022"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20454,7 +20454,13 @@ def _misa_chan_doan_unt_unc(cid, database, loai):
     BADeposit/BAWithDraw (bảng chưa từng chẩn đoán trước đây). Liệt kê ĐẦY
     ĐỦ mọi cột của 1 chứng từ DO PHẦN MỀM GHI (CustomField10=_PM_MARK) và 1
     chứng từ THẬT (không do phần mềm ghi, nếu có) để so sánh — người dùng
-    gửi lại kết quả để tìm đúng cột gây khác biệt."""
+    gửi lại kết quả để tìm đúng cột gây khác biệt.
+    Đợt 2 (sau khi sửa IsPostedFinance=True vẫn chưa hiện): dò thêm
+    GeneralLedger/AccountObjectLedger theo RefID — AccountObjectLedger đã
+    xác nhận (ở phần Đối chiếu công nợ) "chỉ có dữ liệu cho chứng từ ĐÃ GHI
+    SỔ", nên nếu chứng từ THẬT có dòng ở 2 bảng này còn chứng từ phần mềm
+    ghi thì KHÔNG, nhiều khả năng "Ghi sổ" thật của MISA còn phải ghi
+    thêm 2 bảng này (không chỉ đổi cờ trên BADeposit/BAWithDraw là đủ)."""
     master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
 
     def _dep(v):
@@ -20512,6 +20518,21 @@ def _misa_chan_doan_unt_unc(cid, database, loai):
 
         ket["chung_tu_that_de_doi_chieu"] = _doc_day_du(
             master_tbl, "ISNULL(CustomField10,'')<>?", (_PM_MARK,), 2)
+
+        # Dò thêm 2 bảng "sổ cái"/"sổ chi tiết công nợ theo đối tượng" (GeneralLedger/
+        # AccountObjectLedger — đã xác nhận dùng ở phần Đối chiếu công nợ: AccountObjectLedger
+        # "chỉ có dữ liệu cho chứng từ ĐÃ GHI SỔ") — nếu chứng từ THẬT có dòng ở 2 bảng này còn
+        # chứng từ phần mềm ghi thì KHÔNG, rất có thể đây là bảng "Ghi sổ" thật của MISA còn
+        # phải ghi thêm (không chỉ đổi cờ IsPostedFinance trên BADeposit/BAWithDraw là đủ).
+        that_ids = [r.get("RefID") for r in ket["chung_tu_that_de_doi_chieu"]
+                    if isinstance(r, dict) and r.get("RefID")]
+        pm_ids = [r.get("RefID") for r in ket["chung_tu_do_pm_ghi"]
+                  if isinstance(r, dict) and r.get("RefID")]
+        for ten_bang in ("GeneralLedger", "AccountObjectLedger"):
+            ket[f"{ten_bang}_cua_chung_tu_that"] = (
+                _doc_day_du(ten_bang, "RefID=?", (that_ids[0],), 5) if that_ids else [])
+            ket[f"{ten_bang}_cua_chung_tu_pm_ghi"] = (
+                _doc_day_du(ten_bang, "RefID=?", (pm_ids[0],), 5) if pm_ids else [])
 
         return ket
     finally:
