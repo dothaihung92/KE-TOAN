@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.010"
+APP_BUILD = "2026-08-27.011"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20290,7 +20290,13 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     def _ghi_de_chung_gl_aol(row, cols):
         # Các cột NOT NULL đã xác nhận qua lỗi ghi thật (ExchangeRateOperator) — mẫu thật luôn
         # có giá trị cố định, khung rỗng mặc định để None nên PHẢI gán tường minh, không thể bỏ
-        # qua như các cột nullable khác.
+        # qua như các cột nullable khác. RefType (đợt 7 — lỗi ẩn từ đầu, xác nhận qua dump thật:
+        # GeneralLedger/AccountObjectLedger/BADepositWithdrawList do phần mềm ghi luôn có
+        # RefType=0 vì hàm ghi trước giờ KHÔNG BAO GIỜ gán tường minh, dựa hoàn toàn vào nhân bản
+        # đúng mẫu — khung rỗng mặc định 0 cho cột int nên bị lộ ra ngay khi không có mẫu thật;
+        # RefType=0 rất có thể khiến màn XEM/XOÁ của MISA không nhận diện đúng loại chứng từ,
+        # gây lỗi ép kiểu khi tra cứu dữ liệu liên quan) PHẢI gán đúng = RefType của Master.
+        _misa_gan(row, cols, 1500 if loai == "unt" else 1510, "RefType")
         _misa_gan(row, cols, "VND", "CurrencyID")
         _misa_gan(row, cols, 1, "ExchangeRate")
         _misa_gan(row, cols, 1, "MainConvertRate")
@@ -20330,6 +20336,7 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     mau_bdwl = None
     if cols_bdwl:
         mau_bdwl = _dong_trong(cols_bdwl)
+        _misa_gan(mau_bdwl, cols_bdwl, 1500 if loai == "unt" else 1510, "RefType")
         _misa_gan(mau_bdwl, cols_bdwl, branch_id, "BranchID")
         _misa_gan(mau_bdwl, cols_bdwl, bank_id, "BankAccountID")
         _misa_gan(mau_bdwl, cols_bdwl, bank_name, "BankName")
@@ -20631,6 +20638,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                         del g[c]
                 _misa_gan(g, cols_gl, m_id, "RefID")
                 _misa_gan(g, cols_gl, d_id, "RefDetailID")
+                _misa_gan(g, cols_gl, 1500 if loai == "unt" else 1510, "RefType")
                 _misa_gan(g, cols_gl, ngay_dt, "RefDate")
                 _misa_gan(g, cols_gl, ngay_dt, "RefDate1")
                 _misa_gan(g, cols_gl, ngay_dt, "PostedDate")
@@ -20666,6 +20674,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                         del a[c]
                 _misa_gan(a, cols_aol, m_id, "RefID")
                 _misa_gan(a, cols_aol, d_id, "RefDetailID")
+                _misa_gan(a, cols_aol, 1500 if loai == "unt" else 1510, "RefType")
                 _misa_gan(a, cols_aol, branch_id, "BranchID")
                 _misa_gan(a, cols_aol, ngay_dt, "RefDate")
                 _misa_gan(a, cols_aol, ngay_dt, "PostedDate")
@@ -20699,6 +20708,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             if mau_bdwl is not None:
                 b = {c: mau_bdwl.get(c) for c in [name for name, _ in cols_bdwl.values()]}
                 _misa_gan(b, cols_bdwl, m_id, "RefID")
+                _misa_gan(b, cols_bdwl, 1500 if loai == "unt" else 1510, "RefType")
                 _misa_gan(b, cols_bdwl, ngay_dt, "RefDate")
                 _misa_gan(b, cols_bdwl, ngay_dt, "PostedDate")
                 _misa_gan(b, cols_bdwl, so_ct, "RefNoFinance")
@@ -20917,6 +20927,36 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
         sql = "SELECT [%s] FROM %s WHERE ISNULL(CustomField10,'')=?" % ("],[".join(m_cols_list), master_tbl)
         m_broken_rows = [dict(zip(m_cols_list, r)) for r in cur.execute(sql, (_PM_MARK,)).fetchall()]
 
+        # Đợt 7: sửa RefType SAI (=0) trên GeneralLedger/AccountObjectLedger/BADepositWithdrawList
+        # ĐÃ GHI TỪ TRƯỚC — bug từ đầu, các hàm ghi 3 bảng này chưa bao giờ gán RefType tường minh,
+        # chỉ dựa vào nhân bản đúng mẫu; nếu mẫu học được lúc đó (RefID có thể đã bị xoá) lại có
+        # RefType sai, lỗi bị "đóng băng" mãi mãi vì logic phía dưới chỉ THÊM dòng còn thiếu, KHÔNG
+        # BAO GIỜ sửa dòng đã có sẵn. Xác nhận qua chẩn đoán thật: RefType=0 ở phần mềm ghi trong
+        # khi chứng từ thật luôn là 1500 (UNT)/1510 (UNC) — rất có thể khiến màn XEM/XOÁ của MISA
+        # không nhận diện đúng loại chứng từ, gây lỗi ép kiểu DBNull->String khi tra cứu dữ liệu
+        # liên quan. Sửa bằng 1 câu UPDATE...FROM...JOIN duy nhất cho mỗi bảng — không cần lặp
+        # từng dòng, an toàn chạy lại nhiều lần.
+        ref_type_dung = 1500 if loai == "unt" else 1510
+        so_sua_reftype = 0
+        for ten_bang_rt, cols_rt in (("GeneralLedger", cols_gl), ("AccountObjectLedger", cols_aol),
+                                     ("BADepositWithdrawList", cols_bdwl)):
+            if not cols_rt or "reftype" not in cols_rt:
+                continue
+            try:
+                r0 = cur.execute(
+                    f"SELECT COUNT(*) FROM {ten_bang_rt} t JOIN {master_tbl} m ON m.RefID = t.RefID "
+                    f"WHERE ISNULL(m.CustomField10,'')=? AND ISNULL(t.RefType,-1)<>?",
+                    (_PM_MARK, ref_type_dung)).fetchone()
+                so_rt = (r0[0] or 0) if r0 else 0
+                so_sua_reftype += so_rt
+                if not preview and so_rt:
+                    cur.execute(
+                        f"UPDATE t SET t.RefType=? FROM {ten_bang_rt} t JOIN {master_tbl} m "
+                        f"ON m.RefID = t.RefID WHERE ISNULL(m.CustomField10,'')=? AND ISNULL(t.RefType,-1)<>?",
+                        (ref_type_dung, _PM_MARK, ref_type_dung))
+            except Exception:
+                pass
+
         ket = []
         so_sua = 0
         for m in m_broken_rows:
@@ -20997,6 +21037,7 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             for mgl in mau_gl:
                 g = {c: mgl.get(c) for c in [name for name, _ in cols_gl.values()]}
                 _misa_gan(g, cols_gl, rid, "RefID")
+                _misa_gan(g, cols_gl, 1500 if loai == "unt" else 1510, "RefType")
                 _misa_gan(g, cols_gl, d_id_val, "RefDetailID")
                 _misa_gan(g, cols_gl, ngay_dt, "RefDate")
                 _misa_gan(g, cols_gl, ngay_dt, "RefDate1")
@@ -21023,6 +21064,7 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
 
             a = {c: mau_aol.get(c) for c in [name for name, _ in cols_aol.values()]}
             _misa_gan(a, cols_aol, rid, "RefID")
+            _misa_gan(a, cols_aol, 1500 if loai == "unt" else 1510, "RefType")
             _misa_gan(a, cols_aol, d_id_val, "RefDetailID")
             _misa_gan(a, cols_aol, m.get("BranchID"), "BranchID")
             _misa_gan(a, cols_aol, ngay_dt, "RefDate")
@@ -21050,6 +21092,7 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             if mau_bdwl is not None:
                 b = {c: mau_bdwl.get(c) for c in [name for name, _ in cols_bdwl.values()]}
                 _misa_gan(b, cols_bdwl, rid, "RefID")
+                _misa_gan(b, cols_bdwl, 1500 if loai == "unt" else 1510, "RefType")
                 _misa_gan(b, cols_bdwl, ngay_dt, "RefDate")
                 _misa_gan(b, cols_bdwl, ngay_dt, "PostedDate")
                 _misa_gan(b, cols_bdwl, ref_no, "RefNoFinance")
@@ -21122,7 +21165,7 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
         else:
             conn.commit()
         return {"database": database, "loai": loai, "preview": preview,
-               "so_se_sua": so_sua, "danh_sach": ket}
+               "so_se_sua": so_sua, "so_sua_reftype": so_sua_reftype, "danh_sach": ket}
     except HTTPException:
         conn.rollback()
         raise

@@ -1825,15 +1825,24 @@ async function suaGhiSoUntUncCu(coMst, loai) {
     };
     const pv = await goi(true);
     if (pv.detail) { alert("Lỗi: " + pv.detail); return; }
-    if (!pv.so_se_sua) { alert(`Không có chứng từ ${tenLoai} nào cần sửa (mọi chứng từ do phần mềm ghi đã có đủ Sổ Cái).`); return; }
+    if (!pv.so_se_sua && !pv.so_sua_reftype) {
+      alert(`Không có chứng từ ${tenLoai} nào cần sửa (mọi chứng từ do phần mềm ghi đã có đủ Sổ Cái, đúng BankName/ReasonTypeID/RefType).`);
+      return;
+    }
     const dsMsg = pv.danh_sach.slice(0, 20).map(x => "  " + x.ref_no).join("\n")
       + (pv.danh_sach.length > 20 ? `\n  ...và ${pv.danh_sach.length - 20} chứng từ khác` : "");
-    if (!confirm(`Sẽ sửa ${pv.so_se_sua} chứng từ ${tenLoai} (do phần mềm ghi trước đây) — ghi bổ `
-      + `sung 2 dòng Sổ Cái + 1 dòng sổ chi tiết công nợ còn thiếu để hiện đúng trên MISA:\n${dsMsg}`
-      + `\n\nKHÔNG đụng Sổ quản trị, không xoá gì. Bấm OK để sửa thật, Huỷ để dừng lại.`)) return;
+    let msg = `Sẽ sửa ${pv.so_se_sua} chứng từ ${tenLoai} (do phần mềm ghi trước đây) — ghi bổ `
+      + `sung 2 dòng Sổ Cái + 1 dòng sổ chi tiết công nợ / BankName / ReasonTypeID còn thiếu để hiện đúng trên MISA`;
+    if (pv.so_sua_reftype) msg += `,\nvà sửa RefType sai (=0) trên ${pv.so_sua_reftype} dòng Sổ Cái/BADepositWithdrawList đã ghi từ trước (bug ẩn từ đầu — có thể là nguyên nhân lỗi XEM/XOÁ)`;
+    msg += pv.danh_sach.length ? `:\n${dsMsg}` : ".";
+    msg += `\n\nKHÔNG đụng Sổ quản trị, không xoá gì. Bấm OK để sửa thật, Huỷ để dừng lại.`;
+    if (!confirm(msg)) return;
     const real = await goi(false);
     if (real.detail) { alert("Lỗi sửa: " + real.detail); return; }
-    alert(`✓ Đã sửa ${real.so_se_sua} chứng từ ${tenLoai}. Mở lại màn "Thu, chi tiền" trong MISA, bấm "Lấy dữ liệu" để kiểm tra.`);
+    let doneMsg = `✓ Đã sửa ${real.so_se_sua} chứng từ ${tenLoai}`;
+    if (real.so_sua_reftype) doneMsg += ` + sửa RefType sai trên ${real.so_sua_reftype} dòng`;
+    doneMsg += `. Mở lại màn "Thu, chi tiền" trong MISA, bấm "Lấy dữ liệu" để kiểm tra.`;
+    alert(doneMsg);
   } catch (e) {
     alert(`Lỗi sửa ${tenLoai}: ` + e.message);
   }
