@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.012"
+APP_BUILD = "2026-08-27.013"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21485,6 +21485,119 @@ def misa_sql_chan_doan_unt_unc_toan_dien(mst: str, loai: str, database: str = ""
     if loai not in ("unt", "unc"):
         raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
     return _misa_chan_doan_unt_unc_toan_dien(cid, database, loai)
+
+
+def _misa_chan_doan_1_chung_tu(cid, database, loai, so_ct):
+    """CHẨN ĐOÁN 1 CHỨNG TỪ CỤ THỂ (CHỈ ĐỌC) — đợt 9: các đợt chẩn đoán trước lấy MẪU NGẪU
+    NHIÊN (TOP 1/TOP 3, không ORDER BY) trong số chứng từ do phần mềm ghi để so sánh — không
+    kiểm soát được có ĐÚNG chứng từ người dùng đang bấm XEM hay không. Sau khi đã xác nhận
+    SYSVoucherTemplate/VoucherTypeCategoryRefType (bảng cấu hình chung, không theo từng chứng
+    từ) đã có sẵn đầy đủ dòng cho RefType=1500(UNT)/1510(UNC) với 5 giá trị VoucherType hợp lệ
+    (khớp ReasonTypeID) — rất có thể ĐÚNG chứng từ đang xem lại có ReasonTypeID không nằm trong
+    5 giá trị đó (dù không null/0 — 2 lỗi trước chỉ sửa null/0, KHÔNG kiểm tra giá trị có hợp lệ
+    hay không). Tra theo so_ct (RefNoFinance) — người dùng cung cấp CHÍNH XÁC số chứng từ đang
+    bấm Xem bị lỗi — dump đầy đủ Master/Detail/GeneralLedger/AccountObjectLedger/
+    BADepositWithdrawList/CustomFieldLedger CỦA ĐÚNG chứng từ đó, đối chiếu ReasonTypeID (cả ở
+    Master lẫn BADepositWithdrawList) với danh sách VoucherType hợp lệ trong SYSVoucherTemplate."""
+    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
+    ref_type_dung = 1500 if loai == "unt" else 1510
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+
+        def _dep(v):
+            if hasattr(v, "isoformat"):
+                return v.isoformat()
+            if isinstance(v, float):
+                return round(v, 2)
+            if isinstance(v, (bytes, bytearray, memoryview)):
+                return bytes(v).hex()
+            return v
+
+        def _doc_1(bang, dieu_kien, tham_so):
+            try:
+                cols = [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c WHERE c.object_id=OBJECT_ID(?) "
+                    "ORDER BY c.column_id", bang).fetchall()]
+                if not cols:
+                    return None
+                sql = "SELECT [%s] FROM %s WHERE %s" % ("],[".join(cols), bang, dieu_kien)
+                row = cur.execute(sql, tham_so).fetchone()
+                return dict(zip(cols, [_dep(v) for v in row])) if row else None
+            except Exception as e:
+                return {"loi": str(e)}
+
+        def _doc_nhieu(bang, dieu_kien, tham_so):
+            try:
+                cols = [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c WHERE c.object_id=OBJECT_ID(?) "
+                    "ORDER BY c.column_id", bang).fetchall()]
+                if not cols:
+                    return []
+                sql = "SELECT [%s] FROM %s WHERE %s" % ("],[".join(cols), bang, dieu_kien)
+                rows = cur.execute(sql, tham_so).fetchall()
+                return [dict(zip(cols, [_dep(v) for v in r])) for r in rows]
+            except Exception as e:
+                return [{"loi": str(e)}]
+
+        m = _doc_1(master_tbl, "RefNoFinance=?", (so_ct,))
+        if not m or "loi" in m:
+            raise HTTPException(400, f"Không tìm thấy chứng từ '{so_ct}' trong bảng {master_tbl}.")
+        rid = m.get("RefID")
+
+        d = _doc_nhieu(detail_tbl, "RefID=?", (rid,))
+        gl = _doc_nhieu("GeneralLedger", "RefID=?", (rid,))
+        aol = _doc_nhieu("AccountObjectLedger", "RefID=?", (rid,))
+        bdwl = _doc_1("BADepositWithdrawList", "RefID=?", (rid,))
+        cfl = _doc_nhieu("CustomFieldLedger", "RefID=?", (rid,))
+
+        voucher_type_hop_le = []
+        try:
+            voucher_type_hop_le = sorted({r[0] for r in cur.execute(
+                "SELECT DISTINCT VoucherType FROM SYSVoucherTemplate WHERE RefType=?",
+                (ref_type_dung,)).fetchall() if r[0] is not None})
+        except Exception:
+            pass
+
+        reason_m = m.get("ReasonTypeID")
+        reason_bdwl = bdwl.get("ReasonTypeID") if isinstance(bdwl, dict) else None
+        return {
+            "database": database, "loai": loai, "so_ct": so_ct, "ref_id": str(rid),
+            "ref_type_dung": ref_type_dung,
+            "voucher_type_hop_le_trong_sysvouchertemplate": voucher_type_hop_le,
+            "reason_type_id_master": reason_m,
+            "reason_type_id_master_hop_le": reason_m in voucher_type_hop_le if voucher_type_hop_le else None,
+            "reason_type_id_bdwl": reason_bdwl,
+            "reason_type_id_bdwl_hop_le": reason_bdwl in voucher_type_hop_le if voucher_type_hop_le else None,
+            "master": m, "chi_tiet": d, "general_ledger": gl, "account_object_ledger": aol,
+            "bdwl": bdwl, "custom_field_ledger": cfl,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-1-chung-tu")
+def misa_sql_chan_doan_1_chung_tu(mst: str, loai: str, so_ct: str, database: str = ""):
+    """CHẨN ĐOÁN 1 CHỨNG TỪ CỤ THỂ (chỉ đọc) — xem _misa_chan_doan_1_chung_tu."""
+    mst = (mst or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    so_ct = (so_ct or "").strip()
+    if not so_ct:
+        raise HTTPException(400, "Thiếu số chứng từ.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    loai = (loai or "").strip().lower()
+    if loai not in ("unt", "unc"):
+        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
+    return _misa_chan_doan_1_chung_tu(cid, database, loai, so_ct)
 
 
 def _misa_chan_doan_template_chung_tu(cid, database, loai):
