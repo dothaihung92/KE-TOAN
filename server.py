@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.004"
+APP_BUILD = "2026-08-27.005"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21130,13 +21130,42 @@ def _misa_chan_doan_unt_unc(cid, database, loai):
         ket["chung_tu_that_de_doi_chieu"] = _doc_day_du(
             master_tbl, "ISNULL(CustomField10,'')<>?", (_PM_MARK,), 2)
 
+        # Đợt 4 (sau khi đã hiện trên màn LIỆT KÊ nhưng bấm XEM 1 chứng từ do phần mềm ghi thì
+        # MISA báo lỗi ".NET Conversion from type 'DBNull' to type 'String' is not valid" — CHỈ
+        # xảy ra với chứng từ phần mềm ghi, chứng từ thật bấm xem bình thường, xác nhận đây là 1
+        # cột nào đó phần mềm để trống mà lẽ ra phải có giá trị): trước giờ CHƯA từng dump dòng
+        # Chi tiết (BADepositDetail) của chứng từ THẬT để so sánh — chỉ so chứng từ Master. Bổ
+        # sung dump này để tìm đúng cột khác biệt.
+        that_ids = [r.get("RefID") for r in ket["chung_tu_that_de_doi_chieu"]
+                    if isinstance(r, dict) and r.get("RefID")]
+        ket["chi_tiet_that_de_doi_chieu"] = []
+        for tid in that_ids[:2]:
+            try:
+                cols_d2 = [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c WHERE c.object_id=OBJECT_ID(?) "
+                    "ORDER BY c.column_id", detail_tbl).fetchall()]
+                sql = "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(cols_d2), detail_tbl)
+                rows = cur.execute(sql, (tid,)).fetchall()
+                ket["chi_tiet_that_de_doi_chieu"].extend(
+                    [dict(zip(cols_d2, [_dep(v) for v in r])) for r in rows])
+            except Exception as e:
+                ket["chi_tiet_that_de_doi_chieu"].append({"loi": str(e)})
+
+        if ket["chi_tiet_do_pm_ghi"] and ket["chi_tiet_that_de_doi_chieu"] and \
+                isinstance(ket["chi_tiet_do_pm_ghi"][0], dict) and isinstance(ket["chi_tiet_that_de_doi_chieu"][0], dict):
+            pm_d = ket["chi_tiet_do_pm_ghi"][0]
+            that_d = ket["chi_tiet_that_de_doi_chieu"][0]
+            keys_d = sorted(set(pm_d.keys()) | set(that_d.keys()))
+            ket["chi_tiet_khac_nhau"] = {
+                k: {"phan_mem": pm_d.get(k), "that": that_d.get(k)}
+                for k in keys_d if pm_d.get(k) != that_d.get(k)
+            }
+
         # Dò thêm 2 bảng "sổ cái"/"sổ chi tiết công nợ theo đối tượng" (GeneralLedger/
         # AccountObjectLedger — đã xác nhận dùng ở phần Đối chiếu công nợ: AccountObjectLedger
         # "chỉ có dữ liệu cho chứng từ ĐÃ GHI SỔ") — nếu chứng từ THẬT có dòng ở 2 bảng này còn
         # chứng từ phần mềm ghi thì KHÔNG, rất có thể đây là bảng "Ghi sổ" thật của MISA còn
         # phải ghi thêm (không chỉ đổi cờ IsPostedFinance trên BADeposit/BAWithDraw là đủ).
-        that_ids = [r.get("RefID") for r in ket["chung_tu_that_de_doi_chieu"]
-                    if isinstance(r, dict) and r.get("RefID")]
         pm_ids = [r.get("RefID") for r in ket["chung_tu_do_pm_ghi"]
                   if isinstance(r, dict) and r.get("RefID")]
         for ten_bang in ("GeneralLedger", "AccountObjectLedger",

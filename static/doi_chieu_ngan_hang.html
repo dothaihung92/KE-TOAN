@@ -1893,6 +1893,21 @@ async function chanDoanUntUncMisa(coMst, loai) {
       Object.keys(r).forEach(k => lines.push(`${k}: ${JSON.stringify(r[k])}`));
       lines.push("");
     });
+    (data.chi_tiet_that_de_doi_chieu || []).forEach((r, i) => {
+      lines.push(`=== Chi tiết THẬT (đối chiếu) #${i + 1} (${data.detail_tbl}) ===`);
+      Object.keys(r).forEach(k => lines.push(`${k}: ${JSON.stringify(r[k])}`));
+      lines.push("");
+    });
+    if (data.chi_tiet_khac_nhau) {
+      const diffKeys = Object.keys(data.chi_tiet_khac_nhau);
+      lines.push(`=== KHÁC NHAU giữa Chi tiết PHẦN MỀM ghi và Chi tiết THẬT (${diffKeys.length} cột) ===`);
+      diffKeys.forEach(k => {
+        lines.push(`${k}:`);
+        lines.push(`  phần mềm = ${JSON.stringify(data.chi_tiet_khac_nhau[k].phan_mem)}`);
+        lines.push(`  thật     = ${JSON.stringify(data.chi_tiet_khac_nhau[k].that)}`);
+      });
+      lines.push("");
+    }
 
     // Dò thêm 2 bảng "sổ cái" (GeneralLedger/AccountObjectLedger) — nếu chứng từ THẬT có dòng ở
     // đây còn chứng từ phần mềm ghi thì KHÔNG, đây rất có thể là bảng còn thiếu khi "Ghi sổ" thật.
