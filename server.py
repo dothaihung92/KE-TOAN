@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.009"
+APP_BUILD = "2026-08-27.010"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20225,6 +20225,25 @@ def _ten_tk_ke_toan_du_phong(ma_tk):
     return _TEN_TK_KE_TOAN_CHUAN.get(str(ma_tk), f"Tài khoản {ma_tk}")
 
 
+def _misa_reason_type_du_phong(cur, master_tbl):
+    """Dò 1 giá trị ReasonTypeID THẬT bất kỳ đã dùng trong {master_tbl} — đây là danh mục "Lý do
+    thu/chi" do TỪNG CÔNG TY tự đặt (không có danh sách chuẩn chung như tài khoản kế toán), nên
+    không thể hardcode. Đợt 6 (đã sửa BankName ở cả Master lẫn BADepositWithdrawList, chẩn đoán
+    tự động không còn tìm thấy cột nvarchar nào null khác biệt, NHƯNG bấm XEM/XOÁ vẫn báo lỗi
+    "Conversion from type 'DBNull' to type 'String' is not valid" y hệt): ReasonTypeID là cột
+    int nên công cụ chẩn đoán trước đó (chỉ so cột nvarchar) BỎ SÓT — nếu ReasonTypeID để NULL,
+    màn XEM/XOÁ của MISA rất có thể JOIN sang bảng "Lý do thu/chi" để lấy TÊN hiển thị, JOIN với
+    NULL trả về NULL cho tên đó, gây đúng lỗi ép kiểu DBNull->String khi hiển thị. Mượn từ 1 dòng
+    bất kỳ (thật hoặc phần mềm ghi khác) đã có giá trị hợp lệ, thay vì để trống."""
+    try:
+        row = cur.execute(
+            f"SELECT TOP 1 ReasonTypeID FROM {master_tbl} WHERE ReasonTypeID IS NOT NULL "
+            f"AND ReasonTypeID<>0").fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl):
     """Khung ghi sổ DỰ PHÒNG khi KHÔNG còn chứng từ Ủy nhiệm thu/chi THẬT nào trong MISA để
     nhân bản học cấu trúc (vd người dùng đã xoá sạch) — dùng cấu trúc CHUẨN sản phẩm MISA
@@ -20233,9 +20252,11 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     tra cứu ĐỘNG BranchID (bảng OrganizationUnit) + 1 TK ngân hàng bất kỳ đã cấu hình (bảng
     BankAccount) — 2 bảng này LUÔN có sẵn trong MISA bất kể đã từng ghi Thu/Chi hay chưa.
     Trả về (mau_m, mau_d, mau_gl, mau_aol, mau_bdwl, mau_cfl) — mọi cột không được gán tường
-    minh giữ giá trị mặc định AN TOÀN theo kiểu dữ liệu (_misa_gia_tri_mac_dinh), KHÔNG đoán
-    bừa (đặc biệt ReasonTypeID — danh mục lý do thu/chi do từng công ty tự đặt, để trống thay
-    vì đoán 1 mã có thể sai/không tồn tại)."""
+    minh giữ giá trị mặc định AN TOÀN theo kiểu dữ liệu (_misa_gia_tri_mac_dinh). ReasonTypeID
+    (danh mục lý do thu/chi do từng công ty tự đặt, không hardcode được) MƯỢN từ 1 dòng bất kỳ
+    đã có sẵn (_misa_reason_type_du_phong) thay vì để trống — xác nhận qua lỗi thật: để NULL
+    khiến màn XEM/XOÁ của MISA báo lỗi DBNull->String (rất có thể do JOIN sang bảng "Lý do thu/
+    chi" lấy tên hiển thị, NULL không JOIN được)."""
     def _dong_trong(cols):
         return {name: _misa_gia_tri_mac_dinh(sqltype) for name, sqltype in cols.values()}
 
@@ -20243,6 +20264,8 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     bank_id, bank_name, bank_so = _misa_bank_account_du_phong(cur)
     hach_mac_dinh = "131" if loai == "unt" else "331"
     tk_no_mac_dinh, tk_co_mac_dinh = ("1121", hach_mac_dinh) if loai == "unt" else (hach_mac_dinh, "1121")
+    master_tbl_dp = "BADeposit" if loai == "unt" else "BAWithDraw"
+    reason_id_dp = _misa_reason_type_du_phong(cur, master_tbl_dp)
 
     mau_m = _dong_trong(cols_m)
     _misa_gan(mau_m, cols_m, 1500 if loai == "unt" else 1510, "RefType")
@@ -20252,7 +20275,7 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     _misa_gan(mau_m, cols_m, "VND", "CurrencyID")
     _misa_gan(mau_m, cols_m, 1, "ExchangeRate")
     _misa_gan(mau_m, cols_m, 0, "DisplayOnBook")
-    _misa_gan(mau_m, cols_m, None, "ReasonTypeID")
+    _misa_gan(mau_m, cols_m, reason_id_dp, "ReasonTypeID")
     _misa_gan(mau_m, cols_m, "ADMIN", "CreatedBy")
     _misa_gan(mau_m, cols_m, "ADMIN", "ModifiedBy")
 
@@ -20313,6 +20336,7 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
         _misa_gan(mau_bdwl, cols_bdwl, "VND", "CurrencyID")
         _misa_gan(mau_bdwl, cols_bdwl, 1, "ExchangeRate")
         _misa_gan(mau_bdwl, cols_bdwl, 0, "DisplayOnBook")
+        _misa_gan(mau_bdwl, cols_bdwl, reason_id_dp, "ReasonTypeID")
         _misa_gan(mau_bdwl, cols_bdwl, 0 if loai == "unt" else 1, "BAType")
         _misa_gan(mau_bdwl, cols_bdwl, "BADeposit" if loai == "unt" else "BAWithDraw", "ListTableName")
         _misa_gan(mau_bdwl, cols_bdwl, "Thu tiền gửi" if loai == "unt" else "Ủy nhiệm chi", "RefTypeName")
@@ -20927,8 +20951,26 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                 except Exception:
                     pass
             can_sua_bank = can_sua_bank_m or can_sua_bank_bdwl
-            if da_co_gl >= 2 and da_co_bdwl >= 1 and da_co_cfl >= 1 and not can_sua_bank:
-                continue  # đã đủ cả 3 + BankName đúng, không đụng
+            # Đợt 6 (đã sửa BankName ở cả 2 bảng nhưng bấm XEM/XOÁ VẪN báo lỗi y hệt — chẩn đoán
+            # tự động không tìm thêm cột nvarchar nào null khác biệt): ReasonTypeID là cột INT nên
+            # công cụ chẩn đoán (chỉ so nvarchar) bỏ sót — để NULL (Master) hoặc 0 (BADepositWithdrawList,
+            # giá trị mặc định số khi không gán) rất có thể khiến JOIN sang bảng "Lý do thu/chi"
+            # trả về NULL cho tên hiển thị, gây đúng lỗi ép kiểu khi XEM/XOÁ — xem
+            # _misa_reason_type_du_phong.
+            can_sua_reason_m = "reasontypeid" in cols_m and not m.get("ReasonTypeID")
+            can_sua_reason_bdwl = False
+            if cols_bdwl and da_co_bdwl >= 1 and "reasontypeid" in cols_bdwl:
+                try:
+                    r_reason = cur.execute(
+                        "SELECT ReasonTypeID FROM BADepositWithdrawList WHERE RefID=?", (rid,)).fetchone()
+                    if r_reason and not r_reason[0]:
+                        can_sua_reason_bdwl = True
+                except Exception:
+                    pass
+            can_sua_reason = can_sua_reason_m or can_sua_reason_bdwl
+            if (da_co_gl >= 2 and da_co_bdwl >= 1 and da_co_cfl >= 1
+                    and not can_sua_bank and not can_sua_reason):
+                continue  # đã đủ cả 3 + BankName + ReasonTypeID đúng, không đụng
             d_row = cur.execute(
                 "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(d_cols_list), detail_tbl),
                 (rid,)).fetchone()
@@ -21062,6 +21104,15 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                         if can_sua_bank_bdwl:
                             cur.execute("UPDATE BADepositWithdrawList SET BankName=? WHERE RefID=?",
                                        (ten_ngan_hang_dp, rid))
+                if can_sua_reason:
+                    reason_id_dp = _misa_reason_type_du_phong(cur, master_tbl)
+                    if reason_id_dp:
+                        if can_sua_reason_m:
+                            cur.execute(f"UPDATE {master_tbl} SET ReasonTypeID=? WHERE RefID=?",
+                                       (reason_id_dp, rid))
+                        if can_sua_reason_bdwl:
+                            cur.execute("UPDATE BADepositWithdrawList SET ReasonTypeID=? WHERE RefID=?",
+                                       (reason_id_dp, rid))
 
             so_sua += 1
             ket.append({"ref_no": ref_no})
@@ -21255,8 +21306,20 @@ def _misa_chan_doan_unt_unc(cid, database, loai):
             cuaPm = ket.get(khoa_pm) or []
             if cuaThat and cuaPm and isinstance(cuaThat[0], dict) and isinstance(cuaPm[0], dict):
                 that0, pm0 = cuaThat[0], cuaPm[0]
-                nghi_van = {k: that0[k] for k in that0
-                           if pm0.get(k) is None and that0.get(k) is not None and isinstance(that0.get(k), str)}
+                # Ngoài cột nvarchar bị để trống (đợt 4/5), cột int dạng "...ID"/"...TypeID" (kiểu
+                # khoá ngoại tới 1 bảng danh mục — vd ReasonTypeID, đợt 6: để 0/null khiến JOIN sang
+                # bảng danh mục trả về NULL cho tên hiển thị, cũng gây đúng lỗi ép kiểu khi XEM) mà
+                # phần mềm ghi để trống/0 trong khi chứng từ thật có giá trị khác 0 CŨNG đáng ngờ.
+                nghi_van = {}
+                for k, that_v in that0.items():
+                    pm_v = pm0.get(k)
+                    if that_v is None:
+                        continue
+                    if pm_v is None and isinstance(that_v, str):
+                        nghi_van[k] = that_v
+                    elif (k.lower().endswith("id") and isinstance(that_v, int) and that_v != 0
+                          and (pm_v is None or pm_v == 0)):
+                        nghi_van[k] = that_v
                 if nghi_van:
                     ket["nghi_van_null_gay_loi_xem"][ten_bang] = nghi_van
 
