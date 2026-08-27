@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.017"
+APP_BUILD = "2026-08-26.018"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20187,8 +20187,26 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         if not cols_m or not cols_d:
             raise HTTPException(
                 400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl} trong CSDL MISA đang kết nối.")
-        mau_m = _misa_mau_dong_that(cur, master_tbl, "1=1")
+        # Học mẫu Detail TRƯỚC (lọc đúng TK 131/331 — chắc chắn đúng "chất" giao dịch), rồi lấy ĐÚNG
+        # dòng Master của CÙNG chứng từ đó (qua RefID) làm mẫu — KHÔNG lấy "1 dòng master bất kỳ" độc
+        # lập với Detail, vì BADeposit/BAWithDraw rất có thể còn chứa nhiều LOẠI giao dịch khác (vd nộp/
+        # rút tiền mặt, không phải Ủy nhiệm thu/chi chuyển khoản) share chung 1 bảng — nếu mẫu Master
+        # học được lại thuộc loại KHÁC (thiếu/khác cột phân biệt loại), chứng từ ghi ra rất có thể bị
+        # lệch "loại chứng từ" và không hiện đúng chỗ trên màn "Thu, chi tiền" dù đã ghi được vào CSDL.
         mau_d = _misa_mau_dong_that(cur, detail_tbl, f"{tk_cot} LIKE ?", (hach_mac_dinh + "%",))
+        mau_m = None
+        ref_id_mau = mau_d.get("RefID") if mau_d else None
+        if ref_id_mau:
+            try:
+                cols_m_list = [name for name, _ in cols_m.values()]
+                sql = "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(cols_m_list), master_tbl)
+                row = cur.execute(sql, (ref_id_mau,)).fetchone()
+                if row:
+                    mau_m = dict(zip(cols_m_list, row))
+            except Exception:
+                mau_m = None
+        if not mau_m:
+            mau_m = _misa_mau_dong_that(cur, master_tbl, "1=1")
         if not mau_m or not mau_d:
             ten_ct = "Ủy nhiệm thu (thu tiền)" if loai == "unt" else "Ủy nhiệm chi (chi tiền)"
             raise HTTPException(
@@ -20349,6 +20367,102 @@ def misa_sql_import_unt_unc(body: dict = Body(...)):
     ghi_de = bool(body.get("ghi_de", False))
     giao_dich = body.get("giao_dich") or []
     return _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=preview, ghi_de=ghi_de)
+
+
+def _misa_chan_doan_unt_unc(cid, database, loai):
+    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC) — sau khi ghi UNT/UNC qua _misa_ghi_thu_chi,
+    người dùng báo chứng từ có TỒN TẠI trong CSDL (dò trùng theo
+    CustomField10 tìm thấy) nhưng KHÔNG hiện trên màn "Thu, chi tiền" của
+    MISA — giống bài học 'DisplayOnBook=3 làm chứng từ biến mất khỏi màn
+    hình' đã gặp ở PUVoucher/FixedAsset, nhưng CHƯA rõ nguyên nhân cụ thể ở
+    BADeposit/BAWithDraw (bảng chưa từng chẩn đoán trước đây). Liệt kê ĐẦY
+    ĐỦ mọi cột của 1 chứng từ DO PHẦN MỀM GHI (CustomField10=_PM_MARK) và 1
+    chứng từ THẬT (không do phần mềm ghi, nếu có) để so sánh — người dùng
+    gửi lại kết quả để tìm đúng cột gây khác biệt."""
+    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
+
+    def _dep(v):
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        if isinstance(v, float):
+            return round(v, 2)
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            return bytes(v).hex()
+        return v
+
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+
+        def _doc_day_du(bang, dieu_kien, tham_so=(), top=3):
+            try:
+                cols = [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c WHERE c.object_id=OBJECT_ID(?) "
+                    "ORDER BY c.column_id", bang).fetchall()]
+                if not cols:
+                    return {"loi": f"không thấy bảng {bang}"}
+                sql = "SELECT TOP %d [%s] FROM %s WHERE %s" % (
+                    top, "],[".join(cols), bang, dieu_kien)
+                rows = cur.execute(sql, tham_so).fetchall()
+                return [dict(zip(cols, [_dep(v) for v in r])) for r in rows]
+            except Exception as e:
+                return {"loi": str(e)}
+
+        ket = {"database": database, "loai": loai, "master_tbl": master_tbl, "detail_tbl": detail_tbl}
+        try:
+            r0 = cur.execute(f"SELECT COUNT(*) FROM {master_tbl}").fetchone()
+            ket["tong_so_dong_master"] = (r0[0] or 0) if r0 else 0
+        except Exception as e:
+            ket["tong_so_dong_master"] = f"lỗi: {e}"
+
+        ket["chung_tu_do_pm_ghi"] = _doc_day_du(
+            master_tbl, "ISNULL(CustomField10,'')=?", (_PM_MARK,), 3)
+        try:
+            mids = [r.get("RefID") for r in ket["chung_tu_do_pm_ghi"] if isinstance(r, dict) and r.get("RefID")]
+        except Exception:
+            mids = []
+        ket["chi_tiet_do_pm_ghi"] = []
+        for mid in mids[:3]:
+            try:
+                cols_d = [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c WHERE c.object_id=OBJECT_ID(?) "
+                    "ORDER BY c.column_id", detail_tbl).fetchall()]
+                sql = "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(cols_d), detail_tbl)
+                rows = cur.execute(sql, (mid,)).fetchall()
+                ket["chi_tiet_do_pm_ghi"].extend(
+                    [dict(zip(cols_d, [_dep(v) for v in r])) for r in rows])
+            except Exception as e:
+                ket["chi_tiet_do_pm_ghi"].append({"loi": str(e)})
+
+        ket["chung_tu_that_de_doi_chieu"] = _doc_day_du(
+            master_tbl, "ISNULL(CustomField10,'')<>?", (_PM_MARK,), 2)
+
+        return ket
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-unt-unc")
+def misa_sql_chan_doan_unt_unc(mst: str, loai: str, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_unt_unc. Query bằng mst
+    (không phải cid) vì gọi từ màn Đối Chiếu Ngân Hàng, giống
+    /api/misa-sql/import-unt-unc."""
+    mst = (mst or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    loai = (loai or "").strip().lower()
+    if loai not in ("unt", "unc"):
+        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
+    return _misa_chan_doan_unt_unc(cid, database, loai)
 
 
 # ============================================================
