@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.005"
+APP_BUILD = "2026-08-27.006"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20162,17 +20162,43 @@ def misa_sql_to_khai_khau_tru_gtgt(cid: int, preview: int = 1, database: str = "
 #  trước" và đối chiếu kỹ trong MISA sau khi ghi.
 # ============================================================
 def _misa_bank_account_du_phong(cur):
-    """Dò 1 TK ngân hàng THẬT bất kỳ đã cấu hình trong Danh mục MISA (bảng BankAccount) — dùng
-    khi hoàn toàn không có giao dịch Ngân hàng nào (UNT/UNC) để học BankAccountID/BankName (vd
-    người dùng đã xoá sạch). Hầu hết công ty vừa/nhỏ chỉ có 1-2 TK ngân hàng nên lấy đại diện
-    dòng đầu tiên là hợp lý; TỰ DÒ tên cột thật qua _misa_cot_bang_that/_misa_chon_cot, không
-    đoán bừa tên cột."""
+    """Dò 1 TK ngân hàng THẬT bất kỳ để học BankAccountID/BankName — dùng khi hoàn toàn không có
+    mẫu thật (vd người dùng đã xoá sạch). Lỗi thật đã gặp: dò qua bảng Danh mục BankAccount không
+    tìm đúng tên cột lưu tên ngân hàng ở CSDL này (BankName trả None dù BankAccountID vẫn đúng),
+    khiến BADeposit/BAWithDraw.BankName bị để trống — màn XEM chi tiết của MISA báo lỗi ép kiểu
+    "Conversion from type 'DBNull' to type 'String' is not valid" (đã xác nhận CHỈ xảy ra với
+    chứng từ phần mềm ghi, chứng từ thật xem bình thường). SỬA: ưu tiên MƯỢN TRỰC TIẾP
+    BankAccountID/BankName từ 1 dòng BADeposit/BAWithDraw bất kỳ đã có sẵn — đáng tin cậy hơn hẳn
+    vì đây CHÍNH XÁC là 2 cột mà BADeposit/BAWithDraw cần, không phụ thuộc tên cột của bảng Danh
+    mục BankAccount. Chỉ dò bảng BankAccount làm phương án cuối khi BADeposit/BAWithDraw hoàn
+    toàn trống (không còn dòng nào, kể cả do phần mềm ghi)."""
+    for tbl in ("BADeposit", "BAWithDraw"):
+        try:
+            row = cur.execute(
+                f"SELECT TOP 1 BankAccountID, BankName FROM {tbl} "
+                f"WHERE BankAccountID IS NOT NULL AND BankName IS NOT NULL").fetchone()
+            if row and row[0]:
+                so = None
+                try:
+                    cols_ba = _misa_cot_bang_that(cur, "BankAccount")
+                    id_col = _misa_chon_cot(cols_ba, "BankAccountID")
+                    so_col = _misa_chon_cot(cols_ba, "AccountNumber", "BankAccountNumber")
+                    if id_col and so_col:
+                        r2 = cur.execute(
+                            f"SELECT TOP 1 [{so_col}] FROM BankAccount WHERE [{id_col}]=?",
+                            (row[0],)).fetchone()
+                        so = r2[0] if r2 else None
+                except Exception:
+                    so = None
+                return row[0], row[1], so
+        except Exception:
+            continue
     try:
         cols_ba = _misa_cot_bang_that(cur, "BankAccount")
         id_col = _misa_chon_cot(cols_ba, "BankAccountID")
         if not id_col:
             return None, None, None
-        name_col = _misa_chon_cot(cols_ba, "BankName", "BankAccountName")
+        name_col = _misa_chon_cot(cols_ba, "BankName", "BankAccountName", "BankFullName")
         so_col = _misa_chon_cot(cols_ba, "AccountNumber", "BankAccountNumber")
         cot_them = [c for c in (name_col, so_col) if c]
         sel = f"[{id_col}]" + ("," + ",".join(f"[{c}]" for c in cot_them) if cot_them else "")
@@ -20793,6 +20819,24 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                                      f"phân biệt chứng từ do phần mềm ghi.")
         m_cols_list = [name for name, _ in cols_m.values()]
         d_cols_list = [name for name, _ in cols_d.values()]
+
+        # Đợt 4 (sau khi đã hiện trên màn LIỆT KÊ nhưng bấm XEM 1 chứng từ do phần mềm ghi thì
+        # MISA báo lỗi .NET "Conversion from type 'DBNull' to type 'String' is not valid" — chỉ
+        # xảy ra với chứng từ phần mềm ghi, xác nhận do 1 số chứng từ được ghi qua khung DỰ PHÒNG
+        # lúc chưa dò đúng cột tên ngân hàng, để trống BankName dù BankAccountID vẫn đúng): backfill
+        # BankName còn thiếu bằng cách mượn từ 1 dòng khác CÙNG BankAccountID đã có sẵn BankName
+        # (kể cả dòng phần mềm ghi khác, không nhất thiết chứng từ thật) — 1 câu UPDATE, an toàn
+        # chạy lại nhiều lần (WHERE BankName IS NULL nên không đụng dòng đã đúng).
+        if not preview and "bankname" in cols_m and "bankaccountid" in cols_m:
+            try:
+                cur.execute(
+                    f"UPDATE {master_tbl} SET BankName = ("
+                    f"SELECT TOP 1 b2.BankName FROM {master_tbl} b2 "
+                    f"WHERE b2.BankAccountID = {master_tbl}.BankAccountID AND b2.BankName IS NOT NULL) "
+                    f"WHERE BankName IS NULL AND BankAccountID IS NOT NULL "
+                    f"AND ISNULL(CustomField10,'')=?", (_PM_MARK,))
+            except Exception:
+                pass
 
         # Học mẫu GeneralLedger/AccountObjectLedger từ 1 chứng từ THẬT (không do phần mềm ghi) —
         # lọc TRỰC TIẾP CustomField10 qua JOIN với Master (không dùng _misa_mau_dong_that's "TOP 5
