@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.006"
+APP_BUILD = "2026-08-27.007"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20820,24 +20820,6 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
         m_cols_list = [name for name, _ in cols_m.values()]
         d_cols_list = [name for name, _ in cols_d.values()]
 
-        # Đợt 4 (sau khi đã hiện trên màn LIỆT KÊ nhưng bấm XEM 1 chứng từ do phần mềm ghi thì
-        # MISA báo lỗi .NET "Conversion from type 'DBNull' to type 'String' is not valid" — chỉ
-        # xảy ra với chứng từ phần mềm ghi, xác nhận do 1 số chứng từ được ghi qua khung DỰ PHÒNG
-        # lúc chưa dò đúng cột tên ngân hàng, để trống BankName dù BankAccountID vẫn đúng): backfill
-        # BankName còn thiếu bằng cách mượn từ 1 dòng khác CÙNG BankAccountID đã có sẵn BankName
-        # (kể cả dòng phần mềm ghi khác, không nhất thiết chứng từ thật) — 1 câu UPDATE, an toàn
-        # chạy lại nhiều lần (WHERE BankName IS NULL nên không đụng dòng đã đúng).
-        if not preview and "bankname" in cols_m and "bankaccountid" in cols_m:
-            try:
-                cur.execute(
-                    f"UPDATE {master_tbl} SET BankName = ("
-                    f"SELECT TOP 1 b2.BankName FROM {master_tbl} b2 "
-                    f"WHERE b2.BankAccountID = {master_tbl}.BankAccountID AND b2.BankName IS NOT NULL) "
-                    f"WHERE BankName IS NULL AND BankAccountID IS NOT NULL "
-                    f"AND ISNULL(CustomField10,'')=?", (_PM_MARK,))
-            except Exception:
-                pass
-
         # Học mẫu GeneralLedger/AccountObjectLedger từ 1 chứng từ THẬT (không do phần mềm ghi) —
         # lọc TRỰC TIẾP CustomField10 qua JOIN với Master (không dùng _misa_mau_dong_that's "TOP 5
         # không ORDER BY" — không đáng tin cậy một khi số dòng phần mềm đã ghi áp đảo số dòng thật,
@@ -20921,8 +20903,18 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                                       (rid,)).fetchone()[0] if cols_bdwl else 1)
             da_co_cfl = (cur.execute("SELECT COUNT(*) FROM CustomFieldLedger WHERE RefID=?",
                                      (rid,)).fetchone()[0] if cols_cfl else 1)
-            if da_co_gl >= 2 and da_co_bdwl >= 1 and da_co_cfl >= 1:
-                continue  # đã đủ cả 3, không đụng
+            # Đợt 4 (sau khi đã hiện trên màn LIỆT KÊ nhưng bấm XEM 1 chứng từ do phần mềm ghi thì
+            # MISA báo lỗi .NET "Conversion from type 'DBNull' to type 'String' is not valid" — chỉ
+            # xảy ra với chứng từ phần mềm ghi, xác nhận do 1 số chứng từ được ghi qua khung DỰ
+            # PHÒNG lúc chưa dò đúng cột tên ngân hàng, để trống BankName dù BankAccountID vẫn
+            # đúng): PHẢI kiểm tra riêng, không được gộp vào điều kiện "đã đủ cả 3" phía dưới — nếu
+            # không, chứng từ đã có đủ GeneralLedger/AccountObjectLedger/BADepositWithdrawList từ
+            # đợt sửa trước sẽ bị coi là "không cần sửa" và bỏ qua luôn, không bao giờ backfill được
+            # BankName.
+            can_sua_bank = ("bankname" in cols_m and "bankaccountid" in cols_m
+                             and not m.get("BankName") and m.get("BankAccountID"))
+            if da_co_gl >= 2 and da_co_bdwl >= 1 and da_co_cfl >= 1 and not can_sua_bank:
+                continue  # đã đủ cả 3 + BankName đúng, không đụng
             d_row = cur.execute(
                 "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(d_cols_list), detail_tbl),
                 (rid,)).fetchone()
@@ -21047,6 +21039,11 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                     lc = list(f.keys())
                     cur.execute("INSERT INTO CustomFieldLedger ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))), [f[c] for c in lc])
+                if can_sua_bank:
+                    _, ten_ngan_hang_dp, _ = _misa_bank_account_du_phong(cur)
+                    if ten_ngan_hang_dp:
+                        cur.execute(f"UPDATE {master_tbl} SET BankName=? WHERE RefID=?",
+                                   (ten_ngan_hang_dp, rid))
 
             so_sua += 1
             ket.append({"ref_no": ref_no})
