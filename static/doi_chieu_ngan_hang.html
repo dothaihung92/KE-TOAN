@@ -1862,6 +1862,21 @@ async function chanDoanUntUncMisa(coMst, loai) {
     lines.push(`Số chứng từ THẬT (không do phần mềm ghi) để đối chiếu: ${thatRows.length}`);
     lines.push("");
 
+    const nghiVan = data.nghi_van_null_gay_loi_xem || {};
+    const nghiVanBang = Object.keys(nghiVan);
+    lines.push(`=== NGHI VẤN gây lỗi "Conversion from type 'DBNull' to type 'String'" khi XEM (${nghiVanBang.length} bảng có cột trống) ===`);
+    if (nghiVanBang.length) {
+      nghiVanBang.forEach(tenBang => {
+        lines.push(`Bảng ${tenBang}:`);
+        Object.keys(nghiVan[tenBang]).forEach(k => {
+          lines.push(`  ${k} — thật có giá trị "${nghiVan[tenBang][k]}", phần mềm ghi để TRỐNG (null)`);
+        });
+      });
+    } else {
+      lines.push("  (không tìm thấy cột nvarchar nào bị trống khác biệt — xem kỹ toàn bộ dump bên dưới)");
+    }
+    lines.push("");
+
     if (pmRows.length && thatRows.length) {
       const pm = pmRows[0], that = thatRows[0];
       const keys = Array.from(new Set([...Object.keys(pm), ...Object.keys(that)])).sort();

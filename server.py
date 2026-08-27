@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.008"
+APP_BUILD = "2026-08-27.009"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21233,6 +21233,32 @@ def _misa_chan_doan_unt_unc(cid, database, loai):
                 _doc_day_du(ten_bang, "RefID=?", (that_ids[0],), 5) if that_ids else [])
             ket[f"{ten_bang}_cua_chung_tu_pm_ghi"] = (
                 _doc_day_du(ten_bang, "RefID=?", (pm_ids[0],), 5) if pm_ids else [])
+
+        # Đợt 5 (đã sửa BankName ở CẢ Master lẫn BADepositWithdrawList nhưng bấm XEM VẪN báo lỗi
+        # "Conversion from type 'DBNull' to type 'String' is not valid" y hệt — rất có thể còn 1
+        # cột nvarchar khác cũng bị để trống mà mắt thường chưa soát hết qua từng bảng dump dài):
+        # TỰ ĐỘNG so sánh CHÍNH XÁC cột nào null ở phần mềm ghi mà KHÔNG null ở chứng từ thật, cho
+        # MỌI bảng liên quan (GeneralLedger/AccountObjectLedger/BADepositWithdrawList/
+        # CustomFieldLedger) — đúng chữ ký lỗi (.NET ép kiểu DBNull->String chỉ crash khi giá trị
+        # thật sự NULL, không phải do sai giá trị) — không cần soát tay từng dòng dump nữa.
+        ket["nghi_van_null_gay_loi_xem"] = {}
+        cap_bang_can_soat = [
+            (master_tbl, "chung_tu_that_de_doi_chieu", "chung_tu_do_pm_ghi"),
+            (detail_tbl, "chi_tiet_that_de_doi_chieu", "chi_tiet_do_pm_ghi"),
+            ("GeneralLedger", "GeneralLedger_cua_chung_tu_that", "GeneralLedger_cua_chung_tu_pm_ghi"),
+            ("AccountObjectLedger", "AccountObjectLedger_cua_chung_tu_that", "AccountObjectLedger_cua_chung_tu_pm_ghi"),
+            ("BADepositWithdrawList", "BADepositWithdrawList_cua_chung_tu_that", "BADepositWithdrawList_cua_chung_tu_pm_ghi"),
+            ("CustomFieldLedger", "CustomFieldLedger_cua_chung_tu_that", "CustomFieldLedger_cua_chung_tu_pm_ghi"),
+        ]
+        for ten_bang, khoa_that, khoa_pm in cap_bang_can_soat:
+            cuaThat = ket.get(khoa_that) or []
+            cuaPm = ket.get(khoa_pm) or []
+            if cuaThat and cuaPm and isinstance(cuaThat[0], dict) and isinstance(cuaPm[0], dict):
+                that0, pm0 = cuaThat[0], cuaPm[0]
+                nghi_van = {k: that0[k] for k in that0
+                           if pm0.get(k) is None and that0.get(k) is not None and isinstance(that0.get(k), str)}
+                if nghi_van:
+                    ket["nghi_van_null_gay_loi_xem"][ten_bang] = nghi_van
 
         return ket
     finally:
