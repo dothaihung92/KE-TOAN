@@ -920,7 +920,7 @@
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối CSDL MISA (thử nghiệm)</button>
-            <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongMo()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động 8) Tờ khai GTGT + Khấu trừ tự động (bước cuối) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có">🚀 Import tự động toàn bộ vào MISA</button>
+            <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongMo()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ + Phân bổ chi phí CCDC + Tính khấu hao TSCĐ tự động 6) Tờ khai GTGT + Khấu trừ tự động (bước cuối, hạch toán khấu trừ để CHƯA ghi sổ) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có">🚀 Import tự động toàn bộ vào MISA</button>
           </div>
         </div>
       </div>
@@ -7313,7 +7313,7 @@ function misaImportHienKetQua(d,preview){
   }).join('');
   document.getElementById('misaImportResult').innerHTML=`
     <table style="border-collapse:collapse;font-size:14.5px;width:100%;margin-top:12px">${rows}</table>
-    ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Mua hàng (Nhập kho/Không qua kho/Dịch vụ) và Bán hàng đã tự ghi <b>Sổ Tài chính</b> (không ghi Sổ quản trị, giống Ngân hàng) — hiện đúng trên màn hình MISA và xoá được bình thường nếu ghi nhầm.</div>'}`;
+    ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Mua hàng (Nhập kho/Không qua kho/Dịch vụ) và Bán hàng đã tự ghi <b>Sổ Tài chính</b> (không ghi Sổ quản trị, giống Ngân hàng) — hiện đúng trên màn hình MISA và xoá được bình thường nếu ghi nhầm. Riêng bút toán "Khấu trừ thuế GTGT" (bước 6) LUÔN <b>CHƯA ghi sổ</b> — tự mở trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>'}`;
   foot.innerHTML=`
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
@@ -7323,7 +7323,7 @@ function misaImportHienKetQua(d,preview){
 function misaImportTuDongMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   document.getElementById('misaModalBody').innerHTML=`
-    <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ 6) Phân bổ chi phí CCDC tự động 7) Tính khấu hao TSCĐ tự động (bước cuối) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có. Riêng "Tờ khai GTGT + Khấu trừ" không nằm trong luồng này — chạy riêng qua thẻ "🧾 Tờ khai GTGT + Khấu trừ" ở Nhập Liệu.</div>
+    <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ + Phân bổ chi phí CCDC tự động + Tính khấu hao TSCĐ tự động 6) Tờ khai GTGT + Khấu trừ tự động (BƯỚC CUỐI) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có. Chứng từ Mua hàng/Bán hàng đã tự ghi <b>Sổ Tài chính</b>; riêng bút toán "Khấu trừ thuế GTGT" ở bước 6 LUÔN <b>CHƯA ghi sổ</b> — tự mở trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>
     <label style="font-size:13px;font-weight:600">Bước 6-7 (Phân bổ CCDC / Khấu hao TSCĐ) — Từ tháng/năm (để trống = tự nối tiếp chứng từ gần nhất)</label>
     <input type="month" id="importTuThang" value="${misaEsc(misaImportTuThang)}" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
     <label style="font-size:13px;font-weight:600">Đến tháng/năm (để trống = chạy 12 tháng kể từ Từ tháng)</label>

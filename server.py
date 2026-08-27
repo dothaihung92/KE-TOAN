@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.021"
+APP_BUILD = "2026-08-27.022"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23535,20 +23535,19 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     4) Mua hàng Nhập kho/Không qua kho/Dịch vụ (Bảng kê Đầu vào đã lưu)
     5) Ghi tăng CCDC/TSCĐ (Bảng kê Đầu vào đã lưu, TK Nợ 242x/211x),
     Phân bổ chi phí CCDC tự động, Tính khấu hao TSCĐ tự động.
-    KHÔNG còn bước "Tờ khai GTGT + Khấu trừ" trong luồng này theo yêu cầu —
-    bỏ ra khỏi "Import tự động toàn bộ" (vẫn chạy riêng được qua nút/thẻ
-    "Tờ khai GTGT + Khấu trừ" độc lập — xem toKhaiKhauTruGtgtMo() ở
-    index.html / _misa_tao_to_khai_khau_tru_gtgt).
-    Chứng từ (Bán hàng/Mua hàng) CHƯA GHI SỔ (IsPostedFinance=
-    IsPostedManagement=0, quay lại như trước sau khi thử GHI SỔ LUÔN gây
-    khó xóa/sửa chứng từ nhập nhầm trong MISA) — người dùng tự bấm "Ghi sổ"
-    trong MISA sau khi kiểm tra, xem giải thích ở _PU_HEADER_DEFAULT;
+    6) Tờ khai GTGT + Khấu trừ (BƯỚC CUỐI CÙNG, theo yêu cầu — trước đây bỏ
+    ra khỏi luồng này, nay thêm lại) — xem _misa_tao_to_khai_khau_tru_gtgt.
+    Chứng từ (Bán hàng/Mua hàng) đã tự ghi Sổ Tài chính (IsPostedFinance=True,
+    IsPostedManagement vẫn False — xem _misa_ghi_mua_hang/_misa_ghi_ban_hang),
     Ghi tăng CCDC/TSCĐ vẫn ghi ĐÃ GHI SỔ như thiết kế sẵn có (ghi tăng danh
     mục không sinh bút toán, không có tầng "Ghi sổ" riêng); Phân bổ CCDC/
     Khấu hao TSCĐ tạo chứng từ hàng tháng theo khung tu_thang/den_thang
     (yyyy-mm) người dùng chọn — để trống cả 2 = mỗi bước tự chọn 12 tháng kể
     từ chứng từ PBCC/KH gần nhất đã có (giống chạy riêng lẻ từng nút "🤖 ...
-    tự động").
+    tự động"). Riêng bút toán "Khấu trừ thuế GTGT" (bước 6) LUÔN CHƯA GHI SỔ
+    (IsPostedFinance=False, theo đúng yêu cầu — người dùng tự kiểm tra rồi
+    bấm "Ghi sổ" trong MISA khi ưng ý), KHÁC các bước 2/4 ở trên — xem giải
+    thích ở _misa_tao_to_khai_khau_tru_gtgt.
     ghi_de mặc định TẮT (False) — chứng từ nào ĐÃ CÓ trong MISA (trùng với
     dữ liệu đang import, kể cả chứng từ do chính đợt chạy trước tạo) sẽ tự
     BỎ QUA (đếm vào "so_trung"), KHÔNG ghi đè; chỉ ghi thêm chứng từ CHƯA
@@ -23632,6 +23631,16 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     chay("5d. Tính khấu hao TSCĐ tự động",
          lambda: _misa_khau_hao_tscd(cid, database, preview=preview,
                                      tu_thang=tu_thang_kh, so_thang=so_thang_kh))
+
+    # BƯỚC CUỐI CÙNG (theo yêu cầu) — Tờ khai 01/GTGT + hạch toán "Khấu trừ thuế GTGT".
+    # Chạy SAU CÙNG vì chỉ tiêu tờ khai tính TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ SẴN trong
+    # MISA (_misa_tinh_chi_tieu_gtgt_tu_misa) — phải có đủ chứng từ Bán hàng/Mua hàng (bước
+    # 2/4) và đã ghi Sổ Tài chính thì số liệu tính chỉ tiêu mới đúng. tu_quy/tu_nam để
+    # None = tự tiếp nối quý kế tiếp sau tờ khai gần nhất đã có trong MISA. Hạch toán khấu
+    # trừ LUÔN chưa ghi sổ (IsPostedFinance=False) — xem _misa_tao_to_khai_khau_tru_gtgt.
+    chay("6. Tờ khai GTGT + Khấu trừ",
+         lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview,
+                                                 tu_quy=None, tu_nam=None, so_quy=4))
 
     bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
