@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.023"
+APP_BUILD = "2026-08-26.024"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20190,24 +20190,43 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         if not cols_m or not cols_d:
             raise HTTPException(
                 400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl} trong CSDL MISA đang kết nối.")
-        # Học mẫu Detail TRƯỚC (lọc đúng TK 131/331 — chắc chắn đúng "chất" giao dịch), rồi lấy ĐÚNG
-        # dòng Master của CÙNG chứng từ đó (qua RefID) làm mẫu — KHÔNG lấy "1 dòng master bất kỳ" độc
-        # lập với Detail, vì BADeposit/BAWithDraw rất có thể còn chứa nhiều LOẠI giao dịch khác (vd nộp/
-        # rút tiền mặt, không phải Ủy nhiệm thu/chi chuyển khoản) share chung 1 bảng — nếu mẫu Master
-        # học được lại thuộc loại KHÁC (thiếu/khác cột phân biệt loại), chứng từ ghi ra rất có thể bị
-        # lệch "loại chứng từ" và không hiện đúng chỗ trên màn "Thu, chi tiền" dù đã ghi được vào CSDL.
-        mau_d = _misa_mau_dong_that(cur, detail_tbl, f"{tk_cot} LIKE ?", (hach_mac_dinh + "%",))
+        # Tìm 1 RefID THẬT (KHÔNG do phần mềm ghi) mà Detail của nó khớp đúng TK 131/331 — lọc
+        # TRỰC TIẾP CustomField10 qua JOIN với Master, KHÔNG dùng _misa_mau_dong_that's "TOP 5
+        # không ORDER BY" (không đáng tin cậy một khi số dòng phần mềm đã ghi áp đảo số dòng thật
+        # trong bảng — xác nhận qua thực tế: sau khi phần mềm ghi 43 dòng UNT, "TOP 5" ngẫu nhiên
+        # có thể toàn rơi vào dòng phần mềm đã ghi, khiến mẫu học được lại là chính dòng lỗi cần
+        # sửa, không có GeneralLedger để học theo). CustomField10 trên Master đáng tin cậy hơn hẳn
+        # vì có filter tường minh, không phụ thuộc thứ tự vật lý ngẫu nhiên của SQL Server.
+        ref_id_mau = None
+        try:
+            sql = ("SELECT TOP 1 d.RefID FROM %s d JOIN %s m ON m.RefID = d.RefID "
+                   "WHERE d.%s LIKE ? AND ISNULL(m.CustomField10,'')<>?") % (detail_tbl, master_tbl, tk_cot)
+            row = cur.execute(sql, (hach_mac_dinh + "%", _PM_MARK)).fetchone()
+            if row:
+                ref_id_mau = row[0]
+        except Exception:
+            ref_id_mau = None
+        mau_d = None
         mau_m = None
-        ref_id_mau = mau_d.get("RefID") if mau_d else None
         if ref_id_mau:
             try:
+                cols_d_list = [name for name, _ in cols_d.values()]
+                row = cur.execute("SELECT [%s] FROM %s WHERE RefID=?" %
+                                  ("],[".join(cols_d_list), detail_tbl), (ref_id_mau,)).fetchone()
+                if row:
+                    mau_d = dict(zip(cols_d_list, row))
                 cols_m_list = [name for name, _ in cols_m.values()]
-                sql = "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(cols_m_list), master_tbl)
-                row = cur.execute(sql, (ref_id_mau,)).fetchone()
+                row = cur.execute("SELECT [%s] FROM %s WHERE RefID=?" %
+                                  ("],[".join(cols_m_list), master_tbl), (ref_id_mau,)).fetchone()
                 if row:
                     mau_m = dict(zip(cols_m_list, row))
             except Exception:
-                mau_m = None
+                pass
+        # Dự phòng cuối (chỉ khi JOIN trên không tìm được gì, vd Master không có cột CustomField10)
+        # — quay lại heuristic cũ.
+        if not mau_d:
+            mau_d = _misa_mau_dong_that(cur, detail_tbl, f"{tk_cot} LIKE ?", (hach_mac_dinh + "%",))
+            ref_id_mau = mau_d.get("RefID") if mau_d else ref_id_mau
         if not mau_m:
             mau_m = _misa_mau_dong_that(cur, master_tbl, "1=1")
         if not mau_m or not mau_d:
@@ -20528,9 +20547,21 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
         d_cols_list = [name for name, _ in cols_d.values()]
 
         # Học mẫu GeneralLedger/AccountObjectLedger từ 1 chứng từ THẬT (không do phần mềm ghi) —
-        # cùng kỹ thuật với _misa_ghi_thu_chi.
-        mau_d = _misa_mau_dong_that(cur, detail_tbl, f"{tk_cot} LIKE ?", (hach_mac_dinh + "%",))
-        ref_id_mau = mau_d.get("RefID") if mau_d else None
+        # lọc TRỰC TIẾP CustomField10 qua JOIN với Master (không dùng _misa_mau_dong_that's "TOP 5
+        # không ORDER BY" — không đáng tin cậy một khi số dòng phần mềm đã ghi áp đảo số dòng thật,
+        # dễ học nhầm chính dòng lỗi cần sửa làm mẫu — xem giải thích ở _misa_ghi_thu_chi).
+        ref_id_mau = None
+        try:
+            sql = ("SELECT TOP 1 d.RefID FROM %s d JOIN %s m ON m.RefID = d.RefID "
+                   "WHERE d.%s LIKE ? AND ISNULL(m.CustomField10,'')<>?") % (detail_tbl, master_tbl, tk_cot)
+            row = cur.execute(sql, (hach_mac_dinh + "%", _PM_MARK)).fetchone()
+            if row:
+                ref_id_mau = row[0]
+        except Exception:
+            ref_id_mau = None
+        if not ref_id_mau:
+            mau_d_fb = _misa_mau_dong_that(cur, detail_tbl, f"{tk_cot} LIKE ?", (hach_mac_dinh + "%",))
+            ref_id_mau = mau_d_fb.get("RefID") if mau_d_fb else None
         mau_gl, mau_aol = [], None
         if ref_id_mau and cols_gl:
             gl_cols_list = [name for name, _ in cols_gl.values()]
