@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.019"
+APP_BUILD = "2026-08-27.020"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14959,13 +14959,18 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         cols_gl = cols_aol = cols_cfl = cols_invl = cols_purl = cols_inout = {}
         acc_ten = {}   # AccountNumber -> AccountName (tên TK hiển thị)
         so_du_kho = {}  # (InventoryItemID, StockID) -> [SL luỹ kế, Tiền luỹ kế] TRƯỚC dòng đang xét
-        if loai == "nk":
+        if loai in ("nk", "kqk"):
             cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
             cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
             cols_cfl = _misa_cot_bang_that(cur, "CustomFieldLedger")
-            cols_invl = _misa_cot_bang_that(cur, "InventoryLedger")
             cols_purl = _misa_cot_bang_that(cur, "PurchaseLedger")
-            cols_inout = _misa_cot_bang_that(cur, "INInwardOutwardList")
+            if loai == "nk":
+                # Sổ Kho (InventoryLedger/INInwardOutwardList) CHỈ áp dụng cho Nhập kho — đối
+                # chiếu qua chẩn đoán thật: chứng từ Không qua kho (RefType=312) đã ghi Sổ Tài
+                # chính KHÔNG hề có dòng nào ở 2 bảng này (đúng nghĩa "không qua kho" — không có
+                # chuyển động vật lý trong kho để ghi Sổ Kho).
+                cols_invl = _misa_cot_bang_that(cur, "InventoryLedger")
+                cols_inout = _misa_cot_bang_that(cur, "INInwardOutwardList")
             try:
                 for an, anm in cur.execute("SELECT AccountNumber, AccountName FROM Account").fetchall():
                     if an:
@@ -14976,7 +14981,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # AccountObjectLedger/CustomFieldLedger) đều dò được cột — nếu thiếu bất kỳ bảng nào
         # (CSDL MISA phiên bản khác/tuỳ biến khác), TUYỆT ĐỐI không được đặt IsPostedFinance=True
         # mà không có sổ đi kèm (đúng lỗi gốc đã gặp: "đã ghi sổ" nhưng thiếu bảng phụ trợ).
-        co_the_ghi_so_tai_chinh = loai == "nk" and bool(cols_gl) and bool(cols_aol) and bool(cols_cfl)
+        co_the_ghi_so_tai_chinh = loai in ("nk", "kqk") and bool(cols_gl) and bool(cols_aol) and bool(cols_cfl)
+        # Sổ Kho CHỈ ghi khi loai='nk' VÀ dò được đủ 2 bảng — biến riêng để không lẫn với cờ
+        # tổng co_the_ghi_so_tai_chinh (KQK vẫn ghi Sổ Tài chính bình thường, chỉ không có Sổ Kho).
+        co_the_ghi_so_kho = loai == "nk" and bool(cols_invl) and bool(cols_inout)
 
         def so_du_kho_truoc(iid, sid, truoc_ngay):
             """Số dư luỹ kế (SL, Tiền) của 1 mặt hàng tại 1 kho TRƯỚC 1 mốc thời gian — chỉ
@@ -15401,9 +15409,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     _misa_gan(cf, cols_cfl, True, "IsUpdateRedundant")
                     cfl_rows.append(cf)
 
-                    # InventoryLedger (Sổ kho) — xem cảnh báo về InwardQuantityBalance/
-                    # InwardAmountBalance ở khối chú thích trước vòng lặp "for doc in order".
-                    if m["stock_id"] and m["iid"] and cols_invl:
+                    # InventoryLedger (Sổ kho) — CHỈ loai='nk' (xem co_the_ghi_so_kho). Cảnh báo về
+                    # InwardQuantityBalance/InwardAmountBalance ở khối chú thích trước vòng lặp
+                    # "for doc in order".
+                    if co_the_ghi_so_kho and m["stock_id"] and m["iid"]:
                         sl_truoc, tien_truoc = so_du_kho_truoc(m["iid"], m["stock_id"], ngay_dt)
                         sl_sau = sl_truoc + m["sl"]
                         tien_sau = tien_truoc + m["tt"]
@@ -15526,7 +15535,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         _misa_gan(pl, cols_purl, 0, "FreightAmount")
                         purl_rows.append(pl)
 
-                if cols_inout:
+                if co_the_ghi_so_kho and cols_inout:
                     header_lower = {k.lower(): v for k, v in header_cols.items()}
                     inout_row = {}
                     for lc, (real_name, t) in cols_inout.items():
@@ -15730,10 +15739,11 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
                 "FROM AccountObject").fetchall():
             nm = str(name or "")
+            ma_dt = str(code or "")
             if taxcode:
-                ncc[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm)
+                ncc[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm, ma_dt)
             if code:
-                ncc[str(code).strip().lower()] = (aid, nm)
+                ncc[str(code).strip().lower()] = (aid, nm, ma_dt)
         hang = {}
         for iid, code, uid, ten_h in cur.execute(
                 "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
@@ -15931,6 +15941,31 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             if t2 and t2 != t:
                 tk_thay.add("%s→%s" % (t, t2))
             return t2
+
+        # GHI SỔ TÀI CHÍNH TRỰC TIẾP (như Ngân hàng UNT/UNC + Mua hàng nhập kho/không qua
+        # kho) — đúng cấu trúc dò được qua _misa_chan_doan_ghi_so_tai_chinh trên 1 chứng từ
+        # THẬT đã ghi Sổ Tài chính (RefType=330, "Chứng từ mua dịch vụ chưa thanh toán").
+        # KHÁC PUVoucher (nk/kqk): DetailPostOrder của cặp thuế GTGT là 2 (không phải 5), và
+        # PayKeyID/DebtKeyID của AccountObjectLedger có thêm InvNo+InvDate (không chỉ RefID#
+        # AccountObjectID#AccountNumber) — chép ĐÚNG định dạng thật đã dò được, không đoán
+        # theo mẫu PUVoucher. Ngoài ra PUService còn ghi thêm bảng TaxLedger (không có ở
+        # PUVoucher) — "Bảng kê hóa đơn mua dịch vụ" dùng cho Tờ khai GTGT.
+        cols_gl = cols_aol = cols_cfl = cols_purl = cols_taxl = {}
+        acc_ten = {}
+        if True:
+            cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+            cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
+            cols_cfl = _misa_cot_bang_that(cur, "CustomFieldLedger")
+            cols_purl = _misa_cot_bang_that(cur, "PurchaseLedger")
+            cols_taxl = _misa_cot_bang_that(cur, "TaxLedger")
+            try:
+                for an, anm in cur.execute("SELECT AccountNumber, AccountName FROM Account").fetchall():
+                    if an:
+                        acc_ten[str(an).strip()] = anm
+            except Exception:
+                pass
+        co_the_ghi_so_tai_chinh = bool(cols_gl) and bool(cols_aol) and bool(cols_cfl)
+
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
@@ -15958,7 +15993,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 for rid in unposted_docs[k_doc]["refids"]:
                     cur.execute("DELETE FROM PUServiceDetail WHERE RefID=?", rid)
                     cur.execute("DELETE FROM PUService WHERE RefID=?", rid)
-            acc_obj_id, ten_ncc_misa = ncc[mst_k]
+            acc_obj_id, ten_ncc_misa, ma_dt_misa = ncc[mst_k]
             valid_lines = []
             for r in lines:
                 ma = str(r[cfg["ma"]] or "").strip()
@@ -16009,6 +16044,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             ref_id = str(_uuid.uuid4())
             total_amount = total_vat = 0
             detail_rows = []
+            line_meta = []   # song song detail_rows — dữ liệu phụ để ghi GL/AOL/CFL/PurchaseLedger/TaxLedger
             for idx, (r, (iid, uid, ten_h)) in enumerate(valid_lines, 1):
                 uid = sua_dvt(r, iid, uid)
                 sl = _num0(r[cfg["sl"]])
@@ -16048,6 +16084,13 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                     "EInvoiceItemName": mo_ta[:255] if mo_ta else None,
                     "SortOrder": idx,
                 }))
+                line_meta.append({
+                    "ma": str(r[cfg["ma"]] or "MHDV").strip(), "ten_h": ten_h or "",
+                    "sl": sl, "dgia": dgia, "tt": tt,
+                    "ts": ts, "tthue": tthue, "tk_thue": tk_thue, "no_acc": no_acc, "co_acc": co_acc,
+                    "iid": iid, "uid": uid, "mo_ta": mo_ta,
+                    "inv_no": str(r[cfg["sohd"]] or "")[:25] if cfg["sohd"] is not None else None,
+                })
             # DisplayOnBook phải thuộc (0,2) — xem giải thích ở _misa_ghi_mua_hang
             dob = hoc_dob if hoc_dob in (0, 2) else 0
             ten_ncc_dg = ten_ncc_misa or str(first[cfg["ten_ncc"]] or "")
@@ -16071,6 +16114,245 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "RefOrder": max_reforder + them_ct + 1,
                 "CustomField10": _PM_MARK,
             })
+            ref_order_ct = header_cols["RefOrder"]
+            if co_the_ghi_so_tai_chinh:
+                header_cols["IsPostedFinance"] = True
+
+            gl_rows, aol_rows, cfl_rows, purl_rows, taxl_rows = [], [], [], [], []
+            if co_the_ghi_so_tai_chinh:
+                inv_date_str = ngay_dt.strftime("%Y-%m-%d 00:00:00.000")
+                for i, d in enumerate(detail_rows):
+                    m = line_meta[i]
+                    idx_line = i + 1
+                    desc_goods = m["mo_ta"]
+                    desc_vat = ("Thuế GTGT - %s" % m["mo_ta"])[:255]
+                    inv_no_line = m["inv_no"]
+
+                    def _gl(acc_no, corr_no, debit_amt, credit_amt, entry_type, dpo, desc):
+                        g = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_gl.values()}
+                        _misa_gan(g, cols_gl, ref_id, "RefID")
+                        _misa_gan(g, cols_gl, d["RefDetailID"], "RefDetailID")
+                        _misa_gan(g, cols_gl, ref_type, "RefType")
+                        _misa_gan(g, cols_gl, doc[:20], "RefNo")
+                        _misa_gan(g, cols_gl, doc[:20], "RefNo1")
+                        _misa_gan(g, cols_gl, doc[:20], "RefNo2")
+                        _misa_gan(g, cols_gl, ngay_dt, "RefDate")
+                        _misa_gan(g, cols_gl, ngay_dt, "RefDate1")
+                        _misa_gan(g, cols_gl, ngay_dt, "PostedDate")
+                        _misa_gan(g, cols_gl, inv_no_line, "InvNo")
+                        _misa_gan(g, cols_gl, ngay_dt, "InvDate")
+                        _misa_gan(g, cols_gl, "VND", "CurrencyID")
+                        _misa_gan(g, cols_gl, 1, "ExchangeRate")
+                        _misa_gan(g, cols_gl, acc_no, "AccountNumber")
+                        _misa_gan(g, cols_gl, corr_no, "CorrespondingAccountNumber")
+                        _misa_gan(g, cols_gl, acc_ten.get(acc_no), "AccountName")
+                        _misa_gan(g, cols_gl, debit_amt, "DebitAmountOC")
+                        _misa_gan(g, cols_gl, debit_amt, "DebitAmount")
+                        _misa_gan(g, cols_gl, credit_amt, "CreditAmountOC")
+                        _misa_gan(g, cols_gl, credit_amt, "CreditAmount")
+                        _misa_gan(g, cols_gl, dien_giai, "JournalMemo")
+                        _misa_gan(g, cols_gl, desc, "Description")
+                        _misa_gan(g, cols_gl, acc_obj_id, "AccountObjectID")
+                        _misa_gan(g, cols_gl, ten_ncc_dg, "AccountObjectName")
+                        _misa_gan(g, cols_gl, ten_ncc_dg, "AccountObjectNameDI")
+                        _misa_gan(g, cols_gl, ma_dt_misa, "AccountObjectCode")
+                        _misa_gan(g, cols_gl, mst, "AccountObjectTaxCode")
+                        _misa_gan(g, cols_gl, branch_id, "BranchID")
+                        _misa_gan(g, cols_gl, False, "UnResonableCost")
+                        _misa_gan(g, cols_gl, False, "IsPostToManagementBook")
+                        _misa_gan(g, cols_gl, idx_line, "SortOrder")
+                        _misa_gan(g, cols_gl, ref_order_ct, "RefOrder")
+                        _misa_gan(g, cols_gl, m["iid"], "InventoryItemID")
+                        _misa_gan(g, cols_gl, m["ma"], "InventoryItemCode")
+                        _misa_gan(g, cols_gl, m["ten_h"], "InventoryItemName")
+                        _misa_gan(g, cols_gl, False, "IsUpdateRedundant")
+                        _misa_gan(g, cols_gl, ref_type_ten, "RefTypeName")
+                        _misa_gan(g, cols_gl, m["uid"], "UnitID")
+                        _misa_gan(g, cols_gl, m["sl"], "Quantity")
+                        _misa_gan(g, cols_gl, m["dgia"], "UnitPriceOC")
+                        _misa_gan(g, cols_gl, m["dgia"], "UnitPrice")
+                        _misa_gan(g, cols_gl, m["uid"] and 1, "MainConvertRate")
+                        _misa_gan(g, cols_gl, "*", "ExchangeRateOperator")
+                        _misa_gan(g, cols_gl, entry_type, "EntryType")
+                        _misa_gan(g, cols_gl, dpo, "DetailPostOrder")
+                        _misa_gan(g, cols_gl, False, "IsPostedForCashOutDiff")
+                        return g
+
+                    # DetailPostOrder của Mua hàng dịch vụ: cặp giá trị=1, cặp thuế=2 (KHÁC
+                    # PUVoucher nk/kqk dùng 5 cho cặp thuế — đúng dữ liệu thật đã dò được).
+                    gl_rows.append(_gl(m["no_acc"], m["co_acc"], m["tt"], 0, 1, 1, desc_goods))
+                    gl_rows.append(_gl(m["co_acc"], m["no_acc"], 0, m["tt"], 2, 1, desc_goods))
+                    if m["tk_thue"]:
+                        gl_rows.append(_gl(m["tk_thue"], m["co_acc"], m["tthue"], 0, 1, 2, desc_vat))
+                        gl_rows.append(_gl(m["co_acc"], m["tk_thue"], 0, m["tthue"], 2, 2, desc_vat))
+
+                    def _aol(corr_no, credit_amt, dpo, desc):
+                        a = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_aol.values()}
+                        _misa_gan(a, cols_aol, branch_id, "BranchID")
+                        _misa_gan(a, cols_aol, ref_id, "RefID")
+                        _misa_gan(a, cols_aol, d["RefDetailID"], "RefDetailID")
+                        _misa_gan(a, cols_aol, 2, "EntryType")
+                        _misa_gan(a, cols_aol, ref_type, "RefType")
+                        _misa_gan(a, cols_aol, doc[:20], "RefNo")
+                        _misa_gan(a, cols_aol, ngay_dt, "RefDate")
+                        _misa_gan(a, cols_aol, ngay_dt, "PostedDate")
+                        _misa_gan(a, cols_aol, inv_no_line, "InvNo")
+                        _misa_gan(a, cols_aol, ngay_dt, "InvDate")
+                        _misa_gan(a, cols_aol, m["co_acc"], "AccountNumber")
+                        _misa_gan(a, cols_aol, acc_ten.get(m["co_acc"]), "AccountName")
+                        _misa_gan(a, cols_aol, corr_no, "CorrespondingAccountNumber")
+                        _misa_gan(a, cols_aol, 1, "ExchangeRate")
+                        _misa_gan(a, cols_aol, "VND", "CurrencyID")
+                        _misa_gan(a, cols_aol, m["uid"], "UnitID")
+                        _misa_gan(a, cols_aol, m["dgia"], "UnitPriceOC")
+                        _misa_gan(a, cols_aol, m["dgia"], "UnitPrice")
+                        _misa_gan(a, cols_aol, m["sl"], "Quantity")
+                        _misa_gan(a, cols_aol, 0, "DebitAmountOC")
+                        _misa_gan(a, cols_aol, 0, "DebitAmount")
+                        _misa_gan(a, cols_aol, credit_amt, "CreditAmountOC")
+                        _misa_gan(a, cols_aol, credit_amt, "CreditAmount")
+                        _misa_gan(a, cols_aol, dien_giai, "JournalMemo")
+                        _misa_gan(a, cols_aol, desc, "Description")
+                        _misa_gan(a, cols_aol, acc_obj_id, "AccountObjectID")
+                        _misa_gan(a, cols_aol, ma_dt_misa, "AccountObjectCode")
+                        _misa_gan(a, cols_aol, ten_ncc_dg, "AccountObjectName")
+                        _misa_gan(a, cols_aol, ten_ncc_dg, "AccountObjectNameDI")
+                        _misa_gan(a, cols_aol, mst, "AccountObjectTaxCode")
+                        _misa_gan(a, cols_aol, m["iid"], "InventoryItemID")
+                        _misa_gan(a, cols_aol, m["ma"], "InventoryItemCode")
+                        _misa_gan(a, cols_aol, m["ten_h"], "InventoryItemName")
+                        _misa_gan(a, cols_aol, ref_type_ten, "RefTypeName")
+                        _misa_gan(a, cols_aol, False, "IsPostToManagementBook")
+                        _misa_gan(a, cols_aol, ref_order_ct, "RefOrder")
+                        _misa_gan(a, cols_aol, idx_line, "SortOrder")
+                        _misa_gan(a, cols_aol, False, "IsUpdateRedundant")
+                        _misa_gan(a, cols_aol, m["uid"] and 1, "MainConvertRate")
+                        _misa_gan(a, cols_aol, "*", "ExchangeRateOperator")
+                        _misa_gan(a, cols_aol, dpo, "DetailPostOrder")
+                        # PayKeyID/DebtKeyID của Mua hàng dịch vụ CÓ THÊM InvNo+InvDate — KHÁC
+                        # định dạng đơn giản "RefID#AccountObjectID#AccountNumber" của PUVoucher
+                        # (đúng dữ liệu thật đã dò được, không đoán theo mẫu Mua hàng nhập kho).
+                        pay_key = "%s#%s#%s#%s#" % (ref_id, acc_obj_id, inv_no_line or "", inv_date_str)
+                        debt_key = "%s#%s#%s#%s#%s#" % (ref_id, acc_obj_id, m["co_acc"], inv_no_line or "", inv_date_str)
+                        _misa_gan(a, cols_aol, pay_key, "PayKeyID")
+                        _misa_gan(a, cols_aol, debt_key, "DebtKeyID")
+                        return a
+
+                    aol_rows.append(_aol(m["no_acc"], m["tt"], 1, desc_goods))
+                    if m["tk_thue"]:
+                        aol_rows.append(_aol(m["tk_thue"], m["tthue"], 2, desc_vat))
+
+                    cf = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_cfl.values()}
+                    _misa_gan(cf, cols_cfl, str(_uuid.uuid4()), "CustomFieldLegerID", "CustomFieldLedgerID")
+                    _misa_gan(cf, cols_cfl, d["RefDetailID"], "RefDetailID")
+                    _misa_gan(cf, cols_cfl, ref_id, "RefID")
+                    _misa_gan(cf, cols_cfl, False, "IsPostToManagementBook")
+                    _misa_gan(cf, cols_cfl, branch_id, "BranchID")
+                    _misa_gan(cf, cols_cfl, ngay_dt, "PostedDate")
+                    _misa_gan(cf, cols_cfl, True, "IsUpdateRedundant")
+                    cfl_rows.append(cf)
+
+                    if cols_purl:
+                        pl = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_purl.values()}
+                        _misa_gan(pl, cols_purl, d["RefDetailID"], "RefDetailID")
+                        _misa_gan(pl, cols_purl, ref_id, "RefID")
+                        _misa_gan(pl, cols_purl, branch_id, "BranchID")
+                        _misa_gan(pl, cols_purl, ngay_dt, "PostedDate")
+                        _misa_gan(pl, cols_purl, ngay_dt, "RefDate")
+                        _misa_gan(pl, cols_purl, ref_type, "RefType")
+                        _misa_gan(pl, cols_purl, doc[:20], "RefNo")
+                        _misa_gan(pl, cols_purl, dien_giai, "JournalMemo")
+                        _misa_gan(pl, cols_purl, m["iid"], "InventoryItemID")
+                        _misa_gan(pl, cols_purl, m["mo_ta"], "Description")
+                        _misa_gan(pl, cols_purl, m["no_acc"], "DebitAccount")
+                        _misa_gan(pl, cols_purl, m["co_acc"], "CreditAccount")
+                        _misa_gan(pl, cols_purl, m["uid"], "UnitID")
+                        _misa_gan(pl, cols_purl, m["dgia"], "UnitPrice")
+                        _misa_gan(pl, cols_purl, m["sl"], "PurchaseQuantity")
+                        _misa_gan(pl, cols_purl, m["tt"], "PurchaseAmountOC")
+                        _misa_gan(pl, cols_purl, m["tt"], "PurchaseAmount")
+                        _misa_gan(pl, cols_purl, 0, "DiscountRate")
+                        _misa_gan(pl, cols_purl, 0, "DiscountAmountOC")
+                        _misa_gan(pl, cols_purl, 0, "DiscountAmount")
+                        _misa_gan(pl, cols_purl, m["ts"], "VATRate")
+                        _misa_gan(pl, cols_purl, m["tthue"], "VATAmount")
+                        _misa_gan(pl, cols_purl, m["tthue"], "VATAmountOC")
+                        _misa_gan(pl, cols_purl, m["tk_thue"], "VATAccount")
+                        _misa_gan(pl, cols_purl, 0, "ReturnQuantity")
+                        _misa_gan(pl, cols_purl, 0, "ReturnAmountOC")
+                        _misa_gan(pl, cols_purl, 0, "ReturnAmount")
+                        _misa_gan(pl, cols_purl, 0, "ReduceAmountOC")
+                        _misa_gan(pl, cols_purl, 0, "ReduceAmount")
+                        _misa_gan(pl, cols_purl, ngay_dt, "InvDate")
+                        _misa_gan(pl, cols_purl, inv_no_line, "InvNo")
+                        _misa_gan(pl, cols_purl, "VND", "CurrencyID")
+                        _misa_gan(pl, cols_purl, 1, "ExchangeRate")
+                        _misa_gan(pl, cols_purl, m["uid"], "MainUnitID")
+                        _misa_gan(pl, cols_purl, m["dgia"], "MainUnitPrice")
+                        _misa_gan(pl, cols_purl, m["uid"] and 1, "MainConvertRate")
+                        _misa_gan(pl, cols_purl, m["sl"], "MainQuantity")
+                        _misa_gan(pl, cols_purl, "*", "ExchangeRateOperator")
+                        _misa_gan(pl, cols_purl, False, "IsPostToManagementBook")
+                        _misa_gan(pl, cols_purl, acc_obj_id, "AccountObjectID")
+                        _misa_gan(pl, cols_purl, ten_ncc_dg, "AccountObjectName")
+                        _misa_gan(pl, cols_purl, mst, "AccountObjectTaxCode")
+                        _misa_gan(pl, cols_purl, idx_line, "SortOrder")
+                        _misa_gan(pl, cols_purl, ref_order_ct, "RefOrder")
+                        _misa_gan(pl, cols_purl, m["ma"], "InventoryItemCode")
+                        _misa_gan(pl, cols_purl, m["ten_h"], "InventoryItemName")
+                        _misa_gan(pl, cols_purl, ma_dt_misa, "AccountObjectCode")
+                        _misa_gan(pl, cols_purl, False, "IsUpdateRedundant")
+                        _misa_gan(pl, cols_purl, ten_ncc_dg, "AccountObjectNameDI")
+                        _misa_gan(pl, cols_purl, ref_type_ten, "RefTypeName")
+                        _misa_gan(pl, cols_purl, 0, "ReturnMainQuantity")
+                        _misa_gan(pl, cols_purl, m["dgia"], "UnitPriceOC")
+                        _misa_gan(pl, cols_purl, m["dgia"], "MainUnitPriceOC")
+                        _misa_gan(pl, cols_purl, 1, "IncludeInvoice")
+                        purl_rows.append(pl)
+
+                    # TaxLedger — RIÊNG của Mua hàng dịch vụ (không có ở PUVoucher nk/kqk, xem
+                    # chú thích ở đầu khối này) — "Bảng kê hóa đơn mua vào" dùng cho Tờ khai GTGT.
+                    if cols_taxl and m["tk_thue"]:
+                        tl = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_taxl.values()}
+                        _misa_gan(tl, cols_taxl, ref_id, "RefID")
+                        _misa_gan(tl, cols_taxl, d["RefDetailID"], "RefDetailID")
+                        _misa_gan(tl, cols_taxl, m["tk_thue"], "VATAccount")
+                        _misa_gan(tl, cols_taxl, 0, "TaxType")
+                        _misa_gan(tl, cols_taxl, m["mo_ta"], "Description")
+                        _misa_gan(tl, cols_taxl, m["tthue"], "VATAmountOC")
+                        _misa_gan(tl, cols_taxl, m["tthue"], "VATAmount")
+                        _misa_gan(tl, cols_taxl, m["ts"], "VATRate")
+                        _misa_gan(tl, cols_taxl, m["tt"], "TurnOverAmountOC")
+                        _misa_gan(tl, cols_taxl, m["tt"], "TurnOverAmount")
+                        _misa_gan(tl, cols_taxl, ngay_dt, "InvDate")
+                        _misa_gan(tl, cols_taxl, inv_no_line, "InvNo")
+                        _misa_gan(tl, cols_taxl, acc_obj_id, "AccountObjectID")
+                        _misa_gan(tl, cols_taxl, ten_ncc_dg, "AccountObjectName")
+                        _misa_gan(tl, cols_taxl, ten_ncc_dg, "AccountObjectNameDI")
+                        _misa_gan(tl, cols_taxl, mst, "CompanyTaxCode")
+                        _misa_gan(tl, cols_taxl, branch_id, "BranchID")
+                        _misa_gan(tl, cols_taxl, hoc_purpose, "PurchasePurposeID")
+                        _misa_gan(tl, cols_taxl, idx_line, "SortOrder")
+                        _misa_gan(tl, cols_taxl, ref_order_ct, "RefOrder")
+                        _misa_gan(tl, cols_taxl, ref_type, "RefType")
+                        _misa_gan(tl, cols_taxl, ngay_dt, "RefDate")
+                        _misa_gan(tl, cols_taxl, ngay_dt, "PostedDate")
+                        _misa_gan(tl, cols_taxl, doc[:20], "RefNo")
+                        _misa_gan(tl, cols_taxl, ma_dt_misa, "AccountObjectCode")
+                        _misa_gan(tl, cols_taxl, False, "IsUpdateRedundant")
+                        _misa_gan(tl, cols_taxl, False, "IsPostToManagementBook")
+                        _misa_gan(tl, cols_taxl, False, "NotInVATDeclaration")
+                        _misa_gan(tl, cols_taxl, ngay_dt, "OriginInvoicePostedDate")
+                        _misa_gan(tl, cols_taxl, ref_type, "OriginInvoiceRefType")
+                        _misa_gan(tl, cols_taxl, ref_id, "OriginInvoiceRefID")
+                        _misa_gan(tl, cols_taxl, doc[:20], "OriginInvoiceRefNo")
+                        _misa_gan(tl, cols_taxl, ngay_dt, "OriginInvoiceRefDate")
+                        _misa_gan(tl, cols_taxl, dien_giai, "OriginInvoiceJournalMemo")
+                        _misa_gan(tl, cols_taxl, dien_giai, "JournalMemo")
+                        _misa_gan(tl, cols_taxl, ref_type, "OriginRefType")
+                        _misa_gan(tl, cols_taxl, ref_id, "OriginRefID")
+                        taxl_rows.append(tl)
+
             if not preview:
                 hc = list(header_cols.keys())
                 cur.execute("INSERT INTO PUService ([%s]) VALUES (%s)" %
@@ -16081,6 +16363,26 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                     cur.execute("INSERT INTO PUServiceDetail ([%s]) VALUES (%s)" %
                                ("],[".join(dc), ",".join(["?"] * len(dc))),
                                [d[c] for c in dc])
+                for g in gl_rows:
+                    gc = list(g.keys())
+                    cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(gc), ",".join(["?"] * len(gc))), [g[c] for c in gc])
+                for a in aol_rows:
+                    ac = list(a.keys())
+                    cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(ac), ",".join(["?"] * len(ac))), [a[c] for c in ac])
+                for cf in cfl_rows:
+                    cfc = list(cf.keys())
+                    cur.execute("INSERT INTO CustomFieldLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(cfc), ",".join(["?"] * len(cfc))), [cf[c] for c in cfc])
+                for pl in purl_rows:
+                    plc = list(pl.keys())
+                    cur.execute("INSERT INTO PurchaseLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(plc), ",".join(["?"] * len(plc))), [pl[c] for c in plc])
+                for tl in taxl_rows:
+                    tlc = list(tl.keys())
+                    cur.execute("INSERT INTO TaxLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(tlc), ",".join(["?"] * len(tlc))), [tl[c] for c in tlc])
             them_ct += 1
             them_dong += len(detail_rows)
             if ghi_de_ct:
@@ -16090,11 +16392,13 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             tien_0 = total_amount == 0
             if tien_0:
                 so_tien_0 += 1
-            st = ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct \
-                else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
+            hau_to_so = " (đã ghi Sổ Tài chính)" if co_the_ghi_so_tai_chinh else " (CHƯA ghi sổ)"
+            st = ("sẽ ghi đè" if preview else "đã ghi đè" + hau_to_so) if ghi_de_ct \
+                else ("sẽ thêm" if preview else "đã thêm" + hau_to_so)
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
                         "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
                         "loai_ct_misa": ref_type_ten, "trang_thai": st, "ref_id": ref_id,
+                        "da_ghi_so_tai_chinh": co_the_ghi_so_tai_chinh,
                         "ngay_ct": ngay_dt.strftime("%d/%m/%Y"), "ngay_loi": ngay_loi,
                         "ngay_goc": ngay_str, "tien_0": tien_0})
         tong_pu = cur.execute("SELECT COUNT(*) FROM PUService").fetchone()[0]
@@ -16178,15 +16482,16 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
     try:
         cur = conn.cursor()
         branch_id = _misa_branch_id(cur)
-        kh = {}   # mst/mã (lower) -> (AccountObjectID, tên trong MISA)
+        kh = {}   # mst/mã (lower) -> (AccountObjectID, tên trong MISA, mã ĐT trong MISA)
         for aid, taxcode, code, name in cur.execute(
                 "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
                 "FROM AccountObject").fetchall():
             nm = str(name or "")
+            ma_dt = str(code or "")
             if taxcode:
-                kh[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm)
+                kh[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm, ma_dt)
             if code:
-                kh[str(code).strip().lower()] = (aid, nm)
+                kh[str(code).strip().lower()] = (aid, nm, ma_dt)
         # Mã "KL" (Khách lẻ — dùng chung cho khách không có MST/không phải
         # công ty) PHẢI có sẵn trong Danh mục Đối tượng MISA thì mới ghi
         # được — tự tạo NGAY nếu chưa có, giống bài học "BH"/"MHDV" (quên tự
@@ -16205,7 +16510,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                         "SELECT TOP 1 AccountObjectID FROM AccountObject WHERE AccountObjectCode=?",
                         "KL").fetchone()
                     kl_id = row_kl[0] if row_kl else kl_id
-            kh["kl"] = (kl_id, "Khách lẻ")
+            kh["kl"] = (kl_id, "Khách lẻ", "KL")
         hang = {}
         for iid, code, uid, ten_h in cur.execute(
                 "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
@@ -16434,6 +16739,33 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
         ket = []
         them_ct = trung = bo_kh = go = so_ngay_loi = so_tien_0 = bo_tk = 0
         tk_thay = set()
+
+        # GHI SỔ TÀI CHÍNH TRỰC TIẾP (như Ngân hàng UNT/UNC + Mua hàng) — đúng cấu trúc dò
+        # được qua _misa_chan_doan_ghi_so_tai_chinh trên 1 chứng từ THẬT đã ghi Sổ Tài chính
+        # (RefType=3531, "Bán hàng hóa, dịch vụ trong nước - Tiền mặt"). Chứng từ thật đó là
+        # bán TIỀN MẶT (TK Nợ 1111) nên KHÔNG có dòng AccountObjectLedger nào (không cần
+        # theo dõi công nợ khi thu tiền ngay) nhưng CÓ dòng CAReceiptPaymentList (bảng liệt
+        # kê thu/chi tiền — giống BADepositWithdrawList của Ngân hàng). Phần mềm này LUÔN ghi
+        # TK Nợ=131 (công nợ phải thu — xem hằng số tk_no phía trên, không đổi theo ngưỡng
+        # 5tr nữa), tức LUÔN ở chiều NGƯỢC LẠI với mẫu thật đã dò được — suy ra đối xứng theo
+        # đúng nguyên tắc kế toán (giống công nợ 331 bên Mua hàng luôn có AccountObjectLedger):
+        # LUÔN ghi AccountObjectLedger cho TK 131, KHÔNG ghi CAReceiptPaymentList (không có
+        # tiền thật vào ngay). ĐÂY LÀ SUY LUẬN CHƯA CÓ MẪU THẬT TK 131 ĐỂ ĐỐI CHIẾU TRỰC TIẾP
+        # — cần người dùng xác nhận lại "Tổng hợp công nợ phải thu" sau khi test.
+        cols_gl = cols_aol = cols_cfl = cols_sll = {}
+        acc_ten = {}
+        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+        cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
+        cols_cfl = _misa_cot_bang_that(cur, "CustomFieldLedger")
+        cols_sll = _misa_cot_bang_that(cur, "SaleLedger")
+        try:
+            for an, anm in cur.execute("SELECT AccountNumber, AccountName FROM Account").fetchall():
+                if an:
+                    acc_ten[str(an).strip()] = anm
+        except Exception:
+            pass
+        co_the_ghi_so_tai_chinh = bool(cols_gl) and bool(cols_aol) and bool(cols_cfl)
+
         for r in rows:
             sohd = str(gv(r, col["sohd"]) or "").strip()
             if not sohd:
@@ -16459,7 +16791,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                                           "bỏ qua — khách không có MST, chưa có mã \"KL\" (Khách lẻ) "
                                           "trong Danh mục Đối tượng MISA — tự tạo mã KL rồi chạy lại")})
                 continue
-            acc_obj_id, ten_kh_misa = kh[mst_k]
+            acc_obj_id, ten_kh_misa, ma_dt_misa = kh[mst_k]
             # Vẫn giữ TÊN NGƯỜI MUA THẬT trên từng hóa đơn (khác nhau mỗi
             # dòng) thay vì luôn hiện tên đăng ký của mã KL (vd "Khách lẻ")
             # — không mất thông tin người mua thật dù dùng chung 1 mã.
@@ -16656,6 +16988,202 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 # các cột text để CHUỖI RỖNG như chứng từ MISA thật, không NULL
                 "AccountObjectAddress": "", "Payer": "", "ShippingAddress": "",
             })
+            ref_order_ct = header_cols["RefOrder"]
+            if co_the_ghi_so_tai_chinh:
+                # IsPostedFinance=True (Sổ Tài chính) nhưng KHÔNG đụng IsPostedManagement
+                # (giữ nguyên False mặc định của _SA_VOUCHER_DEFAULT) — đúng công thức Ngân
+                # hàng/Mua hàng: tránh vướng "phải bỏ ghi Sổ quản trị mới xoá được".
+                header_cols["IsPostedFinance"] = True
+
+            gl_rows, aol_rows, cfl_rows, sll_rows = [], [], [], []
+            if co_the_ghi_so_tai_chinh:
+                desc_dt = mo_ta[:255]
+                desc_vat = ("Thuế GTGT - %s" % mo_ta)[:255]
+
+                def _gl(acc_no, corr_no, debit_amt, credit_amt, entry_type, dpo, desc):
+                    g = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_gl.values()}
+                    _misa_gan(g, cols_gl, ref_id, "RefID")
+                    _misa_gan(g, cols_gl, detail_id, "RefDetailID")
+                    _misa_gan(g, cols_gl, ref_type, "RefType")
+                    _misa_gan(g, cols_gl, doc, "RefNo")
+                    _misa_gan(g, cols_gl, doc, "RefNo1")
+                    _misa_gan(g, cols_gl, doc, "RefNo2")
+                    _misa_gan(g, cols_gl, ngay_dt, "RefDate")
+                    _misa_gan(g, cols_gl, ngay_dt, "RefDate1")
+                    _misa_gan(g, cols_gl, ngay_dt, "PostedDate")
+                    _misa_gan(g, cols_gl, sohd[:25], "InvNo")
+                    _misa_gan(g, cols_gl, ngay_dt, "InvDate")
+                    _misa_gan(g, cols_gl, "VND", "CurrencyID")
+                    _misa_gan(g, cols_gl, 1, "ExchangeRate")
+                    _misa_gan(g, cols_gl, acc_no, "AccountNumber")
+                    _misa_gan(g, cols_gl, corr_no, "CorrespondingAccountNumber")
+                    _misa_gan(g, cols_gl, acc_ten.get(acc_no), "AccountName")
+                    _misa_gan(g, cols_gl, debit_amt, "DebitAmountOC")
+                    _misa_gan(g, cols_gl, debit_amt, "DebitAmount")
+                    _misa_gan(g, cols_gl, credit_amt, "CreditAmountOC")
+                    _misa_gan(g, cols_gl, credit_amt, "CreditAmount")
+                    _misa_gan(g, cols_gl, dien_giai, "JournalMemo")
+                    _misa_gan(g, cols_gl, desc, "Description")
+                    _misa_gan(g, cols_gl, acc_obj_id, "AccountObjectID")
+                    _misa_gan(g, cols_gl, ten_kh_misa, "AccountObjectName")
+                    _misa_gan(g, cols_gl, ten_kh_misa, "AccountObjectNameDI")
+                    _misa_gan(g, cols_gl, ma_dt_misa, "AccountObjectCode")
+                    _misa_gan(g, cols_gl, mst, "AccountObjectTaxCode")
+                    _misa_gan(g, cols_gl, branch_id, "BranchID")
+                    _misa_gan(g, cols_gl, False, "UnResonableCost")
+                    _misa_gan(g, cols_gl, False, "IsPostToManagementBook")
+                    _misa_gan(g, cols_gl, 1, "SortOrder")
+                    _misa_gan(g, cols_gl, ref_order_ct, "RefOrder")
+                    _misa_gan(g, cols_gl, iid_bh, "InventoryItemID")
+                    _misa_gan(g, cols_gl, "BH", "InventoryItemCode")
+                    _misa_gan(g, cols_gl, ten_bh, "InventoryItemName")
+                    _misa_gan(g, cols_gl, False, "IsUpdateRedundant")
+                    _misa_gan(g, cols_gl, ref_type_ten, "RefTypeName")
+                    _misa_gan(g, cols_gl, uid_bh, "UnitID")
+                    _misa_gan(g, cols_gl, 1, "Quantity")
+                    _misa_gan(g, cols_gl, ds, "UnitPriceOC")
+                    _misa_gan(g, cols_gl, ds, "UnitPrice")
+                    _misa_gan(g, cols_gl, 1, "MainConvertRate")
+                    _misa_gan(g, cols_gl, "*", "ExchangeRateOperator")
+                    _misa_gan(g, cols_gl, entry_type, "EntryType")
+                    _misa_gan(g, cols_gl, dpo, "DetailPostOrder")
+                    _misa_gan(g, cols_gl, False, "IsPostedForCashOutDiff")
+                    return g
+
+                # DetailPostOrder Bán hàng: cặp doanh thu=1, cặp thuế=3 (KHÁC Mua hàng nk/kqk=5
+                # và Mua hàng dịch vụ=2 — đúng dữ liệu thật đã dò được cho RefType=3531).
+                gl_rows.append(_gl(tk_no_dc, tk_co_dc, ds, 0, 1, 1, desc_dt))
+                gl_rows.append(_gl(tk_co_dc, tk_no_dc, 0, ds, 2, 1, desc_dt))
+                # VAT pair Bán hàng ghép với TK NỢ (tk_no_dc) — KHÁC Mua hàng ghép với TK CÓ
+                # (đúng bản chất kế toán: thuế đầu ra tính trên khoản THU, thuế đầu vào tính
+                # trên khoản CHI — xem chi tiết ở chú thích trước vòng lặp "for r in rows").
+                if thue:
+                    gl_rows.append(_gl("33311", tk_no_dc, 0, 0, 2, 3, desc_vat))
+                    gl_rows.append(_gl(tk_no_dc, "33311", 0, 0, 1, 3, desc_vat))
+
+                # AccountObjectLedger — LUÔN ghi cho TK 131 (công nợ phải thu, phần mềm này
+                # luôn dùng TK Nợ=131) — xem cảnh báo "SUY LUẬN CHƯA CÓ MẪU THẬT" ở trên.
+                def _aol(corr_no, debit_amt, dpo, desc):
+                    a = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_aol.values()}
+                    _misa_gan(a, cols_aol, branch_id, "BranchID")
+                    _misa_gan(a, cols_aol, ref_id, "RefID")
+                    _misa_gan(a, cols_aol, detail_id, "RefDetailID")
+                    _misa_gan(a, cols_aol, 1, "EntryType")
+                    _misa_gan(a, cols_aol, ref_type, "RefType")
+                    _misa_gan(a, cols_aol, doc, "RefNo")
+                    _misa_gan(a, cols_aol, ngay_dt, "RefDate")
+                    _misa_gan(a, cols_aol, ngay_dt, "PostedDate")
+                    _misa_gan(a, cols_aol, sohd[:25], "InvNo")
+                    _misa_gan(a, cols_aol, ngay_dt, "InvDate")
+                    _misa_gan(a, cols_aol, tk_no_dc, "AccountNumber")
+                    _misa_gan(a, cols_aol, acc_ten.get(tk_no_dc), "AccountName")
+                    _misa_gan(a, cols_aol, corr_no, "CorrespondingAccountNumber")
+                    _misa_gan(a, cols_aol, 1, "ExchangeRate")
+                    _misa_gan(a, cols_aol, "VND", "CurrencyID")
+                    _misa_gan(a, cols_aol, uid_bh, "UnitID")
+                    _misa_gan(a, cols_aol, ds, "UnitPriceOC")
+                    _misa_gan(a, cols_aol, ds, "UnitPrice")
+                    _misa_gan(a, cols_aol, 1, "Quantity")
+                    _misa_gan(a, cols_aol, debit_amt, "DebitAmountOC")
+                    _misa_gan(a, cols_aol, debit_amt, "DebitAmount")
+                    _misa_gan(a, cols_aol, 0, "CreditAmountOC")
+                    _misa_gan(a, cols_aol, 0, "CreditAmount")
+                    _misa_gan(a, cols_aol, dien_giai, "JournalMemo")
+                    _misa_gan(a, cols_aol, desc, "Description")
+                    _misa_gan(a, cols_aol, acc_obj_id, "AccountObjectID")
+                    _misa_gan(a, cols_aol, ma_dt_misa, "AccountObjectCode")
+                    _misa_gan(a, cols_aol, ten_kh_misa, "AccountObjectName")
+                    _misa_gan(a, cols_aol, ten_kh_misa, "AccountObjectNameDI")
+                    _misa_gan(a, cols_aol, mst, "AccountObjectTaxCode")
+                    _misa_gan(a, cols_aol, iid_bh, "InventoryItemID")
+                    _misa_gan(a, cols_aol, "BH", "InventoryItemCode")
+                    _misa_gan(a, cols_aol, ten_bh, "InventoryItemName")
+                    _misa_gan(a, cols_aol, ref_type_ten, "RefTypeName")
+                    _misa_gan(a, cols_aol, False, "IsPostToManagementBook")
+                    _misa_gan(a, cols_aol, ref_order_ct, "RefOrder")
+                    _misa_gan(a, cols_aol, 1, "SortOrder")
+                    _misa_gan(a, cols_aol, False, "IsUpdateRedundant")
+                    _misa_gan(a, cols_aol, 1, "MainConvertRate")
+                    _misa_gan(a, cols_aol, "*", "ExchangeRateOperator")
+                    _misa_gan(a, cols_aol, dpo, "DetailPostOrder")
+                    key = "%s#%s#%s" % (ref_id, acc_obj_id, tk_no_dc)
+                    _misa_gan(a, cols_aol, key, "PayKeyID")
+                    _misa_gan(a, cols_aol, key, "DebtKeyID")
+                    return a
+
+                aol_rows.append(_aol(tk_co_dc, ds, 1, desc_dt))
+                if thue:
+                    aol_rows.append(_aol("33311", thue, 3, desc_vat))
+
+                cf = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_cfl.values()}
+                _misa_gan(cf, cols_cfl, str(_uuid.uuid4()), "CustomFieldLegerID", "CustomFieldLedgerID")
+                _misa_gan(cf, cols_cfl, detail_id, "RefDetailID")
+                _misa_gan(cf, cols_cfl, ref_id, "RefID")
+                _misa_gan(cf, cols_cfl, False, "IsPostToManagementBook")
+                _misa_gan(cf, cols_cfl, branch_id, "BranchID")
+                _misa_gan(cf, cols_cfl, ngay_dt, "PostedDate")
+                _misa_gan(cf, cols_cfl, True, "IsUpdateRedundant")
+                cfl_rows.append(cf)
+
+                if cols_sll:
+                    sl_row = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_sll.values()}
+                    _misa_gan(sl_row, cols_sll, branch_id, "BranchID")
+                    _misa_gan(sl_row, cols_sll, ref_id, "RefID")
+                    _misa_gan(sl_row, cols_sll, detail_id, "RefDetailID")
+                    _misa_gan(sl_row, cols_sll, ref_type, "RefType")
+                    _misa_gan(sl_row, cols_sll, doc, "RefNo")
+                    _misa_gan(sl_row, cols_sll, ngay_dt, "RefDate")
+                    _misa_gan(sl_row, cols_sll, ngay_dt, "PostedDate")
+                    _misa_gan(sl_row, cols_sll, "VND", "CurrencyID")
+                    _misa_gan(sl_row, cols_sll, 1, "ExchangeRate")
+                    _misa_gan(sl_row, cols_sll, ngay_dt, "InvDate")
+                    _misa_gan(sl_row, cols_sll, sohd[:25], "InvNo")
+                    _misa_gan(sl_row, cols_sll, dien_giai, "JournalMemo")
+                    _misa_gan(sl_row, cols_sll, iid_bh, "InventoryItemID")
+                    _misa_gan(sl_row, cols_sll, mo_ta, "Description")
+                    _misa_gan(sl_row, cols_sll, tk_no_dc, "DebitAccount")
+                    _misa_gan(sl_row, cols_sll, tk_co_dc, "CreditAccount")
+                    _misa_gan(sl_row, cols_sll, uid_bh, "UnitID")
+                    _misa_gan(sl_row, cols_sll, ds, "UnitPrice")
+                    _misa_gan(sl_row, cols_sll, 1, "SaleQuantity")
+                    _misa_gan(sl_row, cols_sll, ds, "SaleAmountOC")
+                    _misa_gan(sl_row, cols_sll, ds, "SaleAmount")
+                    _misa_gan(sl_row, cols_sll, 0, "DiscountRate")
+                    _misa_gan(sl_row, cols_sll, 0, "DiscountAmountOC")
+                    _misa_gan(sl_row, cols_sll, 0, "DiscountAmount")
+                    _misa_gan(sl_row, cols_sll, rate, "VATRate")
+                    _misa_gan(sl_row, cols_sll, thue, "VATAmountOC")
+                    _misa_gan(sl_row, cols_sll, thue, "VATAmount")
+                    _misa_gan(sl_row, cols_sll, "33311", "VATAccount")
+                    _misa_gan(sl_row, cols_sll, 0, "ReturnQuantity")
+                    _misa_gan(sl_row, cols_sll, 0, "ReturnAmountOC")
+                    _misa_gan(sl_row, cols_sll, 0, "ReturnAmount")
+                    _misa_gan(sl_row, cols_sll, 0, "ReduceAmountOC")
+                    _misa_gan(sl_row, cols_sll, 0, "ReduceAmount")
+                    _misa_gan(sl_row, cols_sll, False, "IsPromotion")
+                    _misa_gan(sl_row, cols_sll, uid_bh, "MainUnitID")
+                    _misa_gan(sl_row, cols_sll, ds, "MainUnitPrice")
+                    _misa_gan(sl_row, cols_sll, 1, "MainConvertRate")
+                    _misa_gan(sl_row, cols_sll, 1, "MainQuantity")
+                    _misa_gan(sl_row, cols_sll, "*", "ExchangeRateOperator")
+                    _misa_gan(sl_row, cols_sll, False, "IsPostToManagementBook")
+                    _misa_gan(sl_row, cols_sll, acc_obj_id, "AccountObjectID")
+                    _misa_gan(sl_row, cols_sll, ten_kh_misa, "AccountObjectName")
+                    _misa_gan(sl_row, cols_sll, 1, "SortOrder")
+                    _misa_gan(sl_row, cols_sll, ref_order_ct, "RefOrder")
+                    _misa_gan(sl_row, cols_sll, "BH", "InventoryItemCode")
+                    _misa_gan(sl_row, cols_sll, ten_bh, "InventoryItemName")
+                    _misa_gan(sl_row, cols_sll, ma_dt_misa, "AccountObjectCode")
+                    _misa_gan(sl_row, cols_sll, False, "IsUpdateRedundant")
+                    _misa_gan(sl_row, cols_sll, ten_kh_misa, "AccountObjectNameDI")
+                    _misa_gan(sl_row, cols_sll, ref_type_ten, "RefTypeName")
+                    _misa_gan(sl_row, cols_sll, 0, "ReturnMainQuantity")
+                    _misa_gan(sl_row, cols_sll, ds, "ReceiptAmountOC")
+                    _misa_gan(sl_row, cols_sll, ds, "ReceiptAmount")
+                    _misa_gan(sl_row, cols_sll, ds, "UnitPriceOC")
+                    _misa_gan(sl_row, cols_sll, ds, "MainUnitPriceOC")
+                    sll_rows.append(sl_row)
+
             inv_header = inv_detail = sa_invoice_ref_row = None
             if inv_reftype:
                 inv_header = dict(_SA_INVOICE_DEFAULT, **{
@@ -16741,6 +17269,24 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     cur.execute("INSERT INTO SAInvoiceReference ([%s]) VALUES (%s)" %
                                ("],[".join(rc), ",".join(["?"] * len(rc))),
                                [sa_invoice_ref_row[c] for c in rc])
+                # Ghi Sổ Tài chính trực tiếp (GeneralLedger/AccountObjectLedger/CustomFieldLedger/
+                # SaleLedger) — SAU SAVoucherDetail (tham chiếu RefDetailID của nó).
+                for g in gl_rows:
+                    gc = list(g.keys())
+                    cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(gc), ",".join(["?"] * len(gc))), [g[c] for c in gc])
+                for a in aol_rows:
+                    ac = list(a.keys())
+                    cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(ac), ",".join(["?"] * len(ac))), [a[c] for c in ac])
+                for cf in cfl_rows:
+                    cfc = list(cf.keys())
+                    cur.execute("INSERT INTO CustomFieldLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(cfc), ",".join(["?"] * len(cfc))), [cf[c] for c in cfc])
+                for sl_row in sll_rows:
+                    slc = list(sl_row.keys())
+                    cur.execute("INSERT INTO SaleLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(slc), ",".join(["?"] * len(slc))), [sl_row[c] for c in slc])
             them_ct += 1
             if ghi_de_ct:
                 go += 1
@@ -16748,11 +17294,13 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 so_ngay_loi += 1
             if ds + thue == 0:
                 so_tien_0 += 1
-            st = ("sẽ ghi đè" if preview else "đã ghi đè") if ghi_de_ct \
-                else ("sẽ thêm" if preview else "đã thêm (CHƯA ghi sổ)")
+            hau_to_so = " (đã ghi Sổ Tài chính)" if co_the_ghi_so_tai_chinh else " (CHƯA ghi sổ)"
+            st = ("sẽ ghi đè" if preview else "đã ghi đè" + hau_to_so) if ghi_de_ct \
+                else ("sẽ thêm" if preview else "đã thêm" + hau_to_so)
             ket.append({"so_ct": doc, "so_hd": sohd, "kh": ten_kh_misa, "tong_tien": ds,
                         "tien_thue": thue, "ref_type": ref_type, "loai_ct_misa": ref_type_ten,
-                        "trang_thai": st, "ngay_ct": ngay_dt.strftime("%d/%m/%Y"),
+                        "trang_thai": st, "da_ghi_so_tai_chinh": co_the_ghi_so_tai_chinh,
+                        "ngay_ct": ngay_dt.strftime("%d/%m/%Y"),
                         "ngay_loi": ngay_loi, "ngay_goc": ngay_str, "tien_0": ds + thue == 0})
         tong_sa = cur.execute("SELECT COUNT(*) FROM SAVoucher").fetchone()[0]
         if preview:
