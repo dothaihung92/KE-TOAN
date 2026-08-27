@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.016"
+APP_BUILD = "2026-08-27.017"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16889,17 +16889,61 @@ def _misa_chan_doan_ghi_so_tai_chinh(cid, database, master_tbl, detail_tbl, tu_k
                           "".join(" AND rt.RefTypeName LIKE ?" for _ in tu_khoa) + ")")
             tk_params = (master_tbl,) + tuple("%" + k + "%" for k in tu_khoa)
 
+        # Luôn dump danh sách CỘT + kiểu + có bắt buộc (NOT NULL, không default) hay không của
+        # Master/Detail/GeneralLedger/AccountObjectLedger — DÙ có tìm được mẫu THẬT hay không, để
+        # vẫn có đủ thông tin dựng logic ghi kiểu "khung dự phòng" (như đã làm cho Ngân hàng khi
+        # không có mẫu) nếu công ty này 100% chứng từ hiện có đều do phần mềm tạo (không có
+        # chứng từ THẬT/MISA tự ghi nào để học).
+        def _cot_chi_tiet(bang):
+            try:
+                rows = cur.execute(
+                    "SELECT c.name, ty.name, c.is_nullable, "
+                    "(CASE WHEN dc.definition IS NULL THEN 0 ELSE 1 END) "
+                    "FROM sys.columns c JOIN sys.types ty ON ty.user_type_id=c.user_type_id "
+                    "LEFT JOIN sys.default_constraints dc ON dc.parent_object_id=c.object_id "
+                    "AND dc.parent_column_id=c.column_id "
+                    "WHERE c.object_id=OBJECT_ID(?) AND ty.name<>'timestamp' "
+                    "AND c.is_computed=0 AND c.is_identity=0 ORDER BY c.column_id", bang).fetchall()
+                return [{"cot": n, "kieu": t, "bat_buoc": (not nu) and (not co_default)}
+                        for n, t, nu, co_default in rows]
+            except Exception as e:
+                return {"loi": str(e)}
+
         ket = {"database": database, "master_tbl": master_tbl, "detail_tbl": detail_tbl}
+        ket["cot_master"] = _cot_chi_tiet(master_tbl)
+        ket["cot_detail"] = _cot_chi_tiet(detail_tbl)
+        ket["cot_generalledger"] = _cot_chi_tiet("GeneralLedger")
+        ket["cot_accountobjectledger"] = _cot_chi_tiet("AccountObjectLedger")
+
+        # Tìm 1 chứng từ đã ghi Sổ Tài chính để học mẫu GeneralLedger/AccountObjectLedger — ưu
+        # tiên chứng từ THẬT (CustomField10<>_PM_MARK), nhưng nếu công ty này KHÔNG CÓ chứng từ
+        # thật nào (100% do phần mềm tạo — xác nhận qua vòng chẩn đoán trước), vẫn CHẤP NHẬN
+        # chứng từ do CHÍNH phần mềm này tạo nhưng đã được người dùng TỰ TAY bấm "Ghi sổ" trong
+        # MISA sau đó — GeneralLedger/AccountObjectLedger của nó vẫn do MISA thật tự sinh ra
+        # (không phải phần mềm tự đoán), vẫn là mẫu đáng tin cậy để học cấu trúc.
         ref_id_posted = ref_id_unposted = None
-        try:
-            row = cur.execute(
-                f"SELECT TOP 1 m.RefID FROM {master_tbl} m WHERE ISNULL(m.IsPostedFinance,0)=1 "
-                f"AND ISNULL(m.CustomField10,'')<>?" + loc_tu_khoa + " ORDER BY m.PostedDate DESC",
-                (_PM_MARK,) + tk_params).fetchone()
-            if row:
-                ref_id_posted = row[0]
-        except Exception as e:
-            ket["loi_tim_da_ghi_so"] = str(e)[:300]
+        nguon_mau = None
+        # 3 nấc nới lỏng dần: (1) chứng từ THẬT đúng loại -> (2) bất kỳ nguồn nào (kể cả phần
+        # mềm tạo rồi người dùng tự ghi sổ tay) đúng loại -> (3) bất kỳ nguồn nào, BỎ LUÔN lọc
+        # từ khoá loại (phòng khi RefTypeName thật đặt tên khác "nhập kho"/"không qua kho").
+        nac_thang = [
+            (" AND ISNULL(m.CustomField10,'')<>?", (_PM_MARK,) + tk_params, "chung_tu_that", loc_tu_khoa),
+            ("", tk_params, "phan_mem_tao_nhung_da_tu_ghi_so_tay", loc_tu_khoa),
+            ("", (), "bat_ky_loai_nao_da_ghi_so", ""),
+        ]
+        for dk_cf10, tham_so, nhan_nguon, dk_tu_khoa in nac_thang:
+            if ref_id_posted:
+                break
+            try:
+                row = cur.execute(
+                    f"SELECT TOP 1 m.RefID FROM {master_tbl} m WHERE ISNULL(m.IsPostedFinance,0)=1"
+                    + dk_cf10 + dk_tu_khoa + " ORDER BY m.PostedDate DESC", tham_so).fetchone()
+                if row:
+                    ref_id_posted = row[0]
+                    nguon_mau = nhan_nguon
+            except Exception as e:
+                ket["loi_tim_da_ghi_so"] = str(e)[:300]
+        ket["nguon_mau_da_ghi_so"] = nguon_mau
         try:
             row = cur.execute(
                 f"SELECT TOP 1 m.RefID FROM {master_tbl} m WHERE ISNULL(m.IsPostedFinance,0)=0 "
@@ -16912,7 +16956,7 @@ def _misa_chan_doan_ghi_so_tai_chinh(cid, database, master_tbl, detail_tbl, tu_k
 
         for nhan, rid in (("da_ghi_so_tai_chinh", ref_id_posted), ("chua_ghi_so", ref_id_unposted)):
             if not rid:
-                ket[f"{nhan}_ghi_chu"] = "Không tìm thấy chứng từ THẬT nào ở trạng thái này."
+                ket[f"{nhan}_ghi_chu"] = "Không tìm thấy chứng từ nào ở trạng thái này."
                 continue
             ket[f"{nhan}_master"] = _doc_day_du(master_tbl, "RefID=?", (rid,), 1)
             ket[f"{nhan}_detail"] = _doc_day_du(detail_tbl, "RefID=?", (rid,), 20)
