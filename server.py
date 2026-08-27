@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.024"
+APP_BUILD = "2026-08-26.025"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20843,6 +20843,99 @@ def misa_sql_chan_doan_unt_unc(mst: str, loai: str, database: str = ""):
     if loai not in ("unt", "unc"):
         raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
     return _misa_chan_doan_unt_unc(cid, database, loai)
+
+
+def _misa_chan_doan_unt_unc_toan_dien(cid, database, loai):
+    """CHẨN ĐOÁN TOÀN DIỆN (CHỈ ĐỌC) — sau khi đã xác nhận GeneralLedger/
+    AccountObjectLedger đúng (số dư/Sổ chi tiết các tài khoản đã khớp thật)
+    nhưng màn hình LIỆT KÊ "Ngân hàng > Thu, chi tiền" vẫn không hiện chứng
+    từ do phần mềm ghi — dò TOÀN BỘ database tìm MỌI bảng có cột RefID,
+    đếm số dòng khớp RefID của 1 chứng từ THẬT (đã hiện đúng) so với 1
+    chứng từ do phần mềm ghi (không hiện) — bảng nào chứng từ thật có dòng
+    mà chứng từ phần mềm ghi thì KHÔNG chính là bảng còn thiếu, không cần
+    đoán tên bảng trước như 2 đợt chẩn đoán trước (GeneralLedger/
+    AccountObjectLedger)."""
+    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
+    tk_cot = "CreditAccount" if loai == "unt" else "DebitAccount"
+    hach_mac_dinh = "131" if loai == "unt" else "331"
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cols_m = _misa_cot_bang_that(cur, master_tbl)
+        cols_d = _misa_cot_bang_that(cur, detail_tbl)
+        if not cols_m or not cols_d:
+            raise HTTPException(400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl}.")
+
+        ref_id_that = None
+        try:
+            sql = ("SELECT TOP 1 d.RefID FROM %s d JOIN %s m ON m.RefID = d.RefID "
+                   "WHERE d.%s LIKE ? AND ISNULL(m.CustomField10,'')<>?") % (detail_tbl, master_tbl, tk_cot)
+            row = cur.execute(sql, (hach_mac_dinh + "%", _PM_MARK)).fetchone()
+            if row:
+                ref_id_that = row[0]
+        except Exception:
+            pass
+        ref_id_pm = None
+        try:
+            row = cur.execute(
+                f"SELECT TOP 1 RefID FROM {master_tbl} WHERE ISNULL(CustomField10,'')=?",
+                _PM_MARK).fetchone()
+            if row:
+                ref_id_pm = row[0]
+        except Exception:
+            pass
+        if not ref_id_that or not ref_id_pm:
+            raise HTTPException(400, "Không tìm đủ 1 chứng từ thật + 1 chứng từ phần mềm để so sánh.")
+
+        # Mọi bảng có cột tên "RefID" trong toàn database.
+        try:
+            tables_with_refid = [r[0] for r in cur.execute(
+                "SELECT t.name FROM sys.tables t JOIN sys.columns c ON c.object_id = t.object_id "
+                "WHERE c.name = 'RefID' ORDER BY t.name").fetchall()]
+        except Exception as e:
+            raise HTTPException(400, f"Không dò được danh sách bảng: {e}")
+
+        ket_bang = []
+        for tbl in tables_with_refid:
+            try:
+                r1 = cur.execute(f"SELECT COUNT(*) FROM [{tbl}] WHERE RefID=?", (ref_id_that,)).fetchone()
+                so_that = (r1[0] or 0) if r1 else 0
+                r2 = cur.execute(f"SELECT COUNT(*) FROM [{tbl}] WHERE RefID=?", (ref_id_pm,)).fetchone()
+                so_pm = (r2[0] or 0) if r2 else 0
+                if so_that > 0 or so_pm > 0:
+                    ket_bang.append({"bang": tbl, "so_dong_that": so_that, "so_dong_pm": so_pm,
+                                     "con_thieu": so_that > 0 and so_pm == 0})
+            except Exception as e:
+                ket_bang.append({"bang": tbl, "loi": str(e)})
+
+        return {"database": database, "loai": loai, "master_tbl": master_tbl,
+               "ref_id_that": str(ref_id_that), "ref_id_pm": str(ref_id_pm),
+               "so_bang_co_cot_refid": len(tables_with_refid),
+               "bang_lien_quan": ket_bang,
+               "bang_con_thieu": [b["bang"] for b in ket_bang if b.get("con_thieu")]}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-unt-unc-toan-dien")
+def misa_sql_chan_doan_unt_unc_toan_dien(mst: str, loai: str, database: str = ""):
+    """CHẨN ĐOÁN TOÀN DIỆN (chỉ đọc) — xem _misa_chan_doan_unt_unc_toan_dien."""
+    mst = (mst or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    loai = (loai or "").strip().lower()
+    if loai not in ("unt", "unc"):
+        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
+    return _misa_chan_doan_unt_unc_toan_dien(cid, database, loai)
 
 
 # ============================================================
