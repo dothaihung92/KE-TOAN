@@ -2022,6 +2022,73 @@ async function chanDoanToanDienUntUncMisa(coMst, loai) {
   }
 }
 
+// ── Chẩn đoán TEMPLATE CHỨNG TỪ (chỉ đọc) — đợt 8: sau khi đã sửa RefType=0 trên GL/AOL/BDWL,
+// màn LIỆT KÊ đã hiện đúng, nhưng bấm XEM 1 chứng từ do phần mềm ghi vẫn báo lỗi .NET khác —
+// "Conversion from type 'DBNull' to type 'Integer'" tại MISA.SME.UI.BA.frmBADepositDetail.
+// GetVoucherTypeTemplate() (tra "mẫu chứng từ" theo RefType khi mở form XEM — không liên kết
+// qua RefID của từng chứng từ như các bảng đã kiểm trước, nên phải dò riêng theo TÊN bảng chứa
+// "Template"/"VoucherType" — xem _misa_chan_doan_template_chung_tu ở server.py).
+async function chanDoanTemplateChungTuMisa(coMst, loai) {
+  if (!coMst) { alert("Công ty chưa có MST."); return; }
+  try {
+    const res = await fetch(`/api/misa-sql/chan-doan-template-chung-tu?mst=${encodeURIComponent(coMst)}&loai=${loai}`);
+    const data = await res.json();
+    if (data.detail) { alert("Lỗi: " + data.detail); return; }
+    console.log("Chẩn đoán template chứng từ:", data);
+
+    const lines = [];
+    lines.push(`Chẩn đoán TEMPLATE CHỨNG TỪ ${loai.toUpperCase()} — ${new Date().toLocaleString("vi-VN")}`);
+    lines.push(`Database: ${data.database}`);
+    lines.push(`RefType đúng cần tìm: ${data.ref_type_dung}`);
+    lines.push(`BranchID công ty: ${data.branch_id}`);
+    lines.push(`Số bảng nghi vấn (tên chứa "Template"/"VoucherType"): ${data.so_bang_nghi_van}`);
+    lines.push("");
+
+    (data.bang || []).forEach(b => {
+      if (b.loi) {
+        lines.push(`=== Bảng ${b.bang}: LỖI - ${b.loi} ===`);
+        lines.push("");
+        return;
+      }
+      lines.push(`=== Bảng ${b.bang} (${b.tong_so_dong} dòng, có cột RefType: ${b.co_cot_reftype}, có cột BranchID: ${b.co_cot_branchid}) ===`);
+      lines.push(`Cột: ${(b.cot || []).join(", ")}`);
+      lines.push("");
+      if (b.co_cot_reftype) {
+        const khop = b.dong_khop_reftype_hien_tai || [];
+        lines.push(`--- Dòng khớp RefType=${data.ref_type_dung} (${khop.length} dòng) ---`);
+        khop.forEach((r, i) => {
+          lines.push(`  Dòng #${i + 1}:`);
+          Object.keys(r).forEach(k => lines.push(`    ${k}: ${JSON.stringify(r[k])}`));
+        });
+        lines.push("");
+      }
+      lines.push(`--- Toàn bộ nội dung bảng ---`);
+      if (typeof b.toan_bo_dong === "string") {
+        lines.push(`  ${b.toan_bo_dong}`);
+      } else {
+        (b.toan_bo_dong || []).forEach((r, i) => {
+          lines.push(`  Dòng #${i + 1}:`);
+          Object.keys(r).forEach(k => lines.push(`    ${k}: ${JSON.stringify(r[k])}`));
+        });
+      }
+      lines.push("");
+    });
+
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chan_doan_template_${loai}_${new Date().toLocaleDateString("vi-VN").replace(/\//g, "-")}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    alert(`Đã tải file chan_doan_template_${loai}_....txt — mở file này (Notepad) và gửi lại toàn bộ nội dung để kiểm tra tiếp.`);
+  } catch (e) {
+    alert("Lỗi chẩn đoán template: " + e.message);
+  }
+}
+
 // ── Xuất hạch toán LÃI/LỖ chênh lệch tỷ giá riêng (Phiếu kế toán khác) ──────────────────────────
 // Theo đúng mẫu "Chứng từ nghiệp vụ khác" của MISA — dùng cho khoản điều chỉnh KHÔNG phát sinh tiền
 // qua ngân hàng (chỉ là bút toán sổ sách), nên tách khỏi UNC/UNT để không ghi trùng/lệch số tiền chi
@@ -6355,7 +6422,17 @@ function ConfirmScreen({
     style:{fontSize:11,color:"#7a4fb5",borderColor:"#c4b0f0"},
     title:"Ch\u1EC9 \u0110\u1ECCC \u2014 qu\u00E9t TO\u00C0N B\u1ED8 database t\u00ECm m\u1ECDi b\u1EA3ng c\u00F3 c\u1ED9t RefID, so s\u00E1nh 1 ch\u1EE9ng t\u1EEB UNC th\u1EADt v\u1EDBi 1 ch\u1EE9ng t\u1EEB UNC ph\u1EA7n m\u1EC1m ghi \u0111\u1EC3 t\u1EF1 t\u00ECm b\u1EA3ng c\u00F2n thi\u1EBFu (d\u00F9ng khi \u0111\u00E3 s\u1EEDa GeneralLedger/AccountObjectLedger \u0111\u00FAng m\u00E0 v\u1EABn kh\u00F4ng hi\u1EC7n tr\u00EAn MISA)",
     onClick:()=>chanDoanToanDienUntUncMisa(co&&co.mst, "unc")
-  }, "\uD83D\uDD2C Ch\u1EA9n \u0111o\xE1n to\xE0n di\u1EC7n UNC"), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDD2C Ch\u1EA9n \u0111o\xE1n to\xE0n di\u1EC7n UNC"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{fontSize:11,color:"#7a4fb5",borderColor:"#c4b0f0"},
+    title:"Ch\u1EC9 \u0110\u1ECCC \u2014 d\u00F2 b\u1EA3ng \"template/m\u1EABu ch\u1EE9ng t\u1EEB\" (d\u00F9ng khi m\u00E0n LI\u1EC6T K\u00CA \u0111\u00E3 hi\u1EC7n \u0111\u00FAng nh\u01B0ng b\u1EA5m XEM b\u00E1o l\u1ED7i .NET DBNull->Integer t\u1EA1i GetVoucherTypeTemplate)",
+    onClick:()=>chanDoanTemplateChungTuMisa(co&&co.mst, "unt")
+  }, "\uD83D\uDD2C Ch\u1EA9n \u0111o\xE1n template UNT"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{fontSize:11,color:"#7a4fb5",borderColor:"#c4b0f0"},
+    title:"Ch\u1EC9 \u0110\u1ECCC \u2014 d\u00F2 b\u1EA3ng \"template/m\u1EABu ch\u1EE9ng t\u1EEB\" (d\u00F9ng khi m\u00E0n LI\u1EC6T K\u00CA \u0111\u00E3 hi\u1EC7n \u0111\u00FAng nh\u01B0ng b\u1EA5m XEM b\u00E1o l\u1ED7i .NET DBNull->Integer t\u1EA1i GetVoucherTypeTemplate)",
+    onClick:()=>chanDoanTemplateChungTuMisa(co&&co.mst, "unc")
+  }, "\uD83D\uDD2C Ch\u1EA9n \u0111o\xE1n template UNC"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-green",
     onClick: handleSaveAndLearn
   }, "\u2713 L\u01B0u & h\u1ECDc"))), addMode && /*#__PURE__*/React.createElement("div", {

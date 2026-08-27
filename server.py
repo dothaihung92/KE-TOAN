@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.011"
+APP_BUILD = "2026-08-27.012"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21485,6 +21485,105 @@ def misa_sql_chan_doan_unt_unc_toan_dien(mst: str, loai: str, database: str = ""
     if loai not in ("unt", "unc"):
         raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
     return _misa_chan_doan_unt_unc_toan_dien(cid, database, loai)
+
+
+def _misa_chan_doan_template_chung_tu(cid, database, loai):
+    """CHẨN ĐOÁN TEMPLATE CHỨNG TỪ (CHỈ ĐỌC) — đợt 8: sau khi đã sửa RefType=0 trên GL/AOL/
+    BDWL (đã hiện đúng trên màn LIỆT KÊ), bấm XEM 1 chứng từ do phần mềm ghi vẫn báo lỗi .NET,
+    NHƯNG lần này khác — "Conversion from type 'DBNull' to type 'Integer'" (không phải String
+    như trước), với full stack trace chỉ thẳng: MISA.SME.UI.BA.frmBADepositDetail.
+    GetVoucherTypeTemplate() <- ProcessForLayoutTemplate() <- ChangeFormContextByRefType() <-
+    set_RefType(). Đây là bước MISA tra cứu "mẫu/template chứng từ" cấu hình theo loại chứng từ
+    khi mở form XEM — hoàn toàn khác các bảng đã kiểm (BADeposit/BADepositDetail/GeneralLedger/
+    AccountObjectLedger/BADepositWithdrawList/CustomFieldLedger, đều liên kết qua cột RefID của
+    CHÍNH chứng từ) — bảng "template" này rất có thể là 1 bảng CẤU HÌNH CHUNG (không có cột RefID
+    liên kết tới từng chứng từ, mà tra theo RefType/BranchID toàn công ty), nên công cụ chẩn đoán
+    TOÀN DIỆN trước đó (chỉ quét bảng có cột RefID) không thể tìm ra. Dò TÊN bảng có chứa
+    "Template" hoặc "VoucherType" trong toàn database, dump đầy đủ cấu trúc + nội dung (thường là
+    bảng cấu hình nhỏ) để tìm đúng bảng và dòng cấu hình còn thiếu cho RefType 1500 (UNT)/1510
+    (UNC)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+
+        def _dep(v):
+            if hasattr(v, "isoformat"):
+                return v.isoformat()
+            if isinstance(v, float):
+                return round(v, 2)
+            if isinstance(v, (bytes, bytearray, memoryview)):
+                return bytes(v).hex()
+            return v
+
+        try:
+            ten_bang_nghi_van = [r[0] for r in cur.execute(
+                "SELECT name FROM sys.tables WHERE name LIKE '%Template%' OR name LIKE '%VoucherType%' "
+                "ORDER BY name").fetchall()]
+        except Exception as e:
+            raise HTTPException(400, f"Không dò được danh sách bảng: {e}")
+
+        ref_type_dung = 1500 if loai == "unt" else 1510
+        branch_id = _misa_branch_id(cur)
+
+        ket_bang = []
+        for tbl in ten_bang_nghi_van:
+            try:
+                cols = [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c WHERE c.object_id=OBJECT_ID(?) "
+                    "ORDER BY c.column_id", tbl).fetchall()]
+                if not cols:
+                    continue
+                r0 = cur.execute(f"SELECT COUNT(*) FROM [{tbl}]").fetchone()
+                tong_so_dong = (r0[0] or 0) if r0 else 0
+                dong_mau = []
+                if tong_so_dong <= 200:
+                    sql = "SELECT [%s] FROM [%s]" % ("],[".join(cols), tbl)
+                    rows = cur.execute(sql).fetchall()
+                    dong_mau = [dict(zip(cols, [_dep(v) for v in r])) for r in rows]
+                dong_khop_reftype = []
+                if "RefType" in cols:
+                    try:
+                        sql2 = "SELECT [%s] FROM [%s] WHERE RefType=?" % ("],[".join(cols), tbl)
+                        rows2 = cur.execute(sql2, (ref_type_dung,)).fetchall()
+                        dong_khop_reftype = [dict(zip(cols, [_dep(v) for v in r])) for r in rows2]
+                    except Exception:
+                        pass
+                ket_bang.append({
+                    "bang": tbl, "cot": cols, "tong_so_dong": tong_so_dong,
+                    "co_cot_reftype": "RefType" in cols, "co_cot_branchid": "BranchID" in cols,
+                    "dong_khop_reftype_hien_tai": dong_khop_reftype,
+                    "toan_bo_dong": dong_mau if tong_so_dong <= 200 else
+                        f"({tong_so_dong} dòng — quá nhiều, không dump hết)",
+                })
+            except Exception as e:
+                ket_bang.append({"bang": tbl, "loi": str(e)})
+
+        return {"database": database, "loai": loai, "ref_type_dung": ref_type_dung,
+               "branch_id": str(branch_id) if branch_id else None,
+               "so_bang_nghi_van": len(ten_bang_nghi_van), "bang": ket_bang}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-template-chung-tu")
+def misa_sql_chan_doan_template_chung_tu(mst: str, loai: str, database: str = ""):
+    """CHẨN ĐOÁN TEMPLATE CHỨNG TỪ (chỉ đọc) — xem _misa_chan_doan_template_chung_tu."""
+    mst = (mst or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    loai = (loai or "").strip().lower()
+    if loai not in ("unt", "unc"):
+        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
+    return _misa_chan_doan_template_chung_tu(cid, database, loai)
 
 
 # ============================================================
