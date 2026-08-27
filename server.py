@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.013"
+APP_BUILD = "2026-08-27.014"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20225,16 +20225,37 @@ def _ten_tk_ke_toan_du_phong(ma_tk):
     return _TEN_TK_KE_TOAN_CHUAN.get(str(ma_tk), f"Tài khoản {ma_tk}")
 
 
-def _misa_reason_type_du_phong(cur, master_tbl):
-    """Dò 1 giá trị ReasonTypeID THẬT bất kỳ đã dùng trong {master_tbl} — đây là danh mục "Lý do
-    thu/chi" do TỪNG CÔNG TY tự đặt (không có danh sách chuẩn chung như tài khoản kế toán), nên
-    không thể hardcode. Đợt 6 (đã sửa BankName ở cả Master lẫn BADepositWithdrawList, chẩn đoán
-    tự động không còn tìm thấy cột nvarchar nào null khác biệt, NHƯNG bấm XEM/XOÁ vẫn báo lỗi
-    "Conversion from type 'DBNull' to type 'String' is not valid" y hệt): ReasonTypeID là cột
-    int nên công cụ chẩn đoán trước đó (chỉ so cột nvarchar) BỎ SÓT — nếu ReasonTypeID để NULL,
-    màn XEM/XOÁ của MISA rất có thể JOIN sang bảng "Lý do thu/chi" để lấy TÊN hiển thị, JOIN với
-    NULL trả về NULL cho tên đó, gây đúng lỗi ép kiểu DBNull->String khi hiển thị. Mượn từ 1 dòng
-    bất kỳ (thật hoặc phần mềm ghi khác) đã có giá trị hợp lệ, thay vì để trống."""
+def _misa_reason_type_du_phong(cur, master_tbl, ref_type_dung=None):
+    """Dò 1 giá trị ReasonTypeID HỢP LỆ — đây là danh mục "Lý do thu/chi" do TỪNG CÔNG TY tự đặt
+    (không có danh sách chuẩn chung như tài khoản kế toán), nên không thể hardcode.
+    Đợt 6 (đã sửa BankName): ReasonTypeID là cột int nên công cụ chẩn đoán trước đó (chỉ so cột
+    nvarchar) BỎ SÓT — để NULL/0 khiến màn XEM/XOÁ của MISA báo lỗi ép kiểu.
+    Đợt 9 (đã sửa null/0 nhưng lỗi vẫn còn ở 1 chứng từ cụ thể — xác nhận qua chẩn đoán trực
+    tiếp bảng SYSVoucherTemplate của MISA): cột này thực chất khớp với cột VoucherType trong
+    SYSVoucherTemplate (bảng "mẫu chứng từ" theo RefType MISA dùng ở
+    frmBADepositDetail.GetVoucherTypeTemplate() — lỗi ép kiểu DBNull->Integer xảy ra khi
+    RefType+ReasonTypeID không khớp được dòng nào ở đó, kể cả khi ReasonTypeID khác NULL/0
+    nhưng KHÔNG phải 1 trong các giá trị VoucherType hợp lệ) — vì vậy ưu tiên mượn giá trị đã
+    được XÁC NHẬN có mặt trong SYSVoucherTemplate cho ĐÚNG RefType đang ghi, thay vì mượn bất kỳ
+    giá trị non-null/non-zero nào (dòng thật dùng làm mẫu có thể tự nó cũng bị lỗi này)."""
+    if ref_type_dung is not None:
+        try:
+            row = cur.execute(
+                f"SELECT TOP 1 t.ReasonTypeID FROM {master_tbl} t WHERE t.ReasonTypeID IN ("
+                f"SELECT DISTINCT VoucherType FROM SYSVoucherTemplate WHERE RefType=?)",
+                (ref_type_dung,)).fetchone()
+            if row and row[0]:
+                return row[0]
+        except Exception:
+            pass
+        try:
+            row = cur.execute(
+                "SELECT TOP 1 VoucherType FROM SYSVoucherTemplate WHERE RefType=? "
+                "AND VoucherType IS NOT NULL", (ref_type_dung,)).fetchone()
+            if row and row[0]:
+                return row[0]
+        except Exception:
+            pass
     try:
         row = cur.execute(
             f"SELECT TOP 1 ReasonTypeID FROM {master_tbl} WHERE ReasonTypeID IS NOT NULL "
@@ -20242,6 +20263,45 @@ def _misa_reason_type_du_phong(cur, master_tbl):
         return row[0] if row else None
     except Exception:
         return None
+
+
+def _misa_reason_type_hop_le(cur, ref_type_dung, gia_tri):
+    """Kiểm tra 1 giá trị ReasonTypeID có thật sự khớp 1 dòng VoucherType trong SYSVoucherTemplate
+    theo ĐÚNG RefType hay không — đợt 9, xác nhận qua lỗi thật: ReasonTypeID khác NULL/0 vẫn có
+    thể KHÔNG hợp lệ (không phải giá trị nào SYSVoucherTemplate công nhận cho RefType này), vẫn
+    gây lỗi ép kiểu DBNull->Integer y hệt khi XEM. Không kiểm tra được (lỗi truy vấn) thì coi như
+    hợp lệ — tránh vòng lặp thay thế sai."""
+    if not gia_tri:
+        return False
+    try:
+        row = cur.execute(
+            "SELECT COUNT(*) FROM SYSVoucherTemplate WHERE RefType=? AND VoucherType=?",
+            (ref_type_dung, gia_tri)).fetchone()
+        return bool(row and row[0])
+    except Exception:
+        return True
+
+
+def _misa_dam_bao_hop_le_ngan_hang_ly_do(cur, loai, master_tbl, row, cols):
+    """Đảm bảo BankAccountID/BankName/ReasonTypeID luôn hợp lệ trên 1 dòng Master hoặc
+    BADepositWithdrawList — GỌI KHÔNG ĐIỀU KIỆN sau khi dựng dòng, dù đã nhân bản từ chứng từ
+    THẬT (không chỉ khung dự phòng _misa_khung_ghi_so_du_phong). Xác nhận qua lỗi thật (đợt 9):
+    dòng THẬT dùng làm mẫu (lọc qua JOIN chỉ đảm bảo "không do phần mềm ghi", KHÔNG đảm bảo bản
+    thân nó đầy đủ/đúng dữ liệu) có thể tự nó đã thiếu BankAccountID/BankName hoặc mang
+    ReasonTypeID không hợp lệ — nhân bản nguyên trạng sẽ kế thừa luôn chỗ thiếu/sai đó, khiến
+    XEM/XOÁ chứng từ báo lỗi ép kiểu dù mọi cấu trúc/số liệu kế toán khác đều đúng."""
+    if "bankaccountid" in cols and (not row.get("BankAccountID") or not row.get("BankName")):
+        bid, bname, _ = _misa_bank_account_du_phong(cur)
+        if bid:
+            _misa_gan(row, cols, bid, "BankAccountID")
+        if bname:
+            _misa_gan(row, cols, bname, "BankName")
+    if "reasontypeid" in cols:
+        ref_type_dung = 1500 if loai == "unt" else 1510
+        if not _misa_reason_type_hop_le(cur, ref_type_dung, row.get("ReasonTypeID")):
+            rid_dp = _misa_reason_type_du_phong(cur, master_tbl, ref_type_dung)
+            if rid_dp:
+                _misa_gan(row, cols, rid_dp, "ReasonTypeID")
 
 
 def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl):
@@ -20265,7 +20325,7 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     hach_mac_dinh = "131" if loai == "unt" else "331"
     tk_no_mac_dinh, tk_co_mac_dinh = ("1121", hach_mac_dinh) if loai == "unt" else (hach_mac_dinh, "1121")
     master_tbl_dp = "BADeposit" if loai == "unt" else "BAWithDraw"
-    reason_id_dp = _misa_reason_type_du_phong(cur, master_tbl_dp)
+    reason_id_dp = _misa_reason_type_du_phong(cur, master_tbl_dp, 1500 if loai == "unt" else 1510)
 
     mau_m = _dong_trong(cols_m)
     _misa_gan(mau_m, cols_m, 1500 if loai == "unt" else 1510, "RefType")
@@ -20614,6 +20674,10 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             _misa_gan(m_row, cols_m, now, "ModifiedDate")
             if co_cf10:
                 _misa_gan(m_row, cols_m, _PM_MARK, "CustomField10")
+            # Đợt 9 — GỌI KHÔNG ĐIỀU KIỆN dù đã nhân bản từ chứng từ THẬT (không chỉ khung dự
+            # phòng): chứng từ thật dùng làm mẫu có thể tự nó thiếu BankAccountID/BankName hoặc
+            # mang ReasonTypeID không hợp lệ — xem _misa_dam_bao_hop_le_ngan_hang_ly_do.
+            _misa_dam_bao_hop_le_ngan_hang_ly_do(cur, loai, master_tbl, m_row, cols_m)
 
             d_id = str(_uuid.uuid4())
             d_row = {c: mau_d.get(c) for c in d_cols_that}
@@ -20726,6 +20790,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 _misa_gan(b, cols_bdwl, now, "ModifiedDate")
                 if "customfield10" in cols_bdwl:
                     _misa_gan(b, cols_bdwl, _PM_MARK, "CustomField10")
+                _misa_dam_bao_hop_le_ngan_hang_ly_do(cur, loai, master_tbl, b, cols_bdwl)
                 bdwl_row = b
 
             cfl_row = None
@@ -20978,32 +21043,35 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             # chẩn đoán thấy BADepositWithdrawList (bảng màn XEM/LIỆT KÊ thật sự đọc) CŨNG bị để
             # trống BankName y hệt Master, do backfill trước chỉ sửa Master — kiểm tra + sửa RIÊNG
             # cả cột BankName của BADepositWithdrawList.
+            # Đợt 9 (đã sửa BankName/ReasonTypeID null-0 ở 2 đợt trước nhưng lỗi vẫn còn ở 1
+            # chứng từ MỚI GHI — xác nhận qua chẩn đoán trực tiếp): 2 lỗi còn sót — (1)
+            # can_sua_bank_m/bdwl trước đây BẮT BUỘC BankAccountID đã có sẵn mới chịu sửa
+            # BankName, nên chứng từ thiếu CẢ HAI (nhân bản từ 1 chứng từ THẬT tự nó cũng thiếu,
+            # không riêng gì khung dự phòng) không bao giờ được sửa; (2) chỉ kiểm tra
+            # ReasonTypeID null/0, KHÔNG kiểm tra giá trị khác 0 có thật sự hợp lệ trong
+            # SYSVoucherTemplate hay không (MISA GetVoucherTypeTemplate() cần khớp đúng dòng đó
+            # mới không lỗi ép kiểu khi XEM).
             can_sua_bank_m = ("bankname" in cols_m and "bankaccountid" in cols_m
-                              and not m.get("BankName") and m.get("BankAccountID"))
+                              and (not m.get("BankName") or not m.get("BankAccountID")))
             can_sua_bank_bdwl = False
             if cols_bdwl and da_co_bdwl >= 1 and "bankname" in cols_bdwl:
                 try:
                     r_bdwl = cur.execute(
                         "SELECT BankName, BankAccountID FROM BADepositWithdrawList WHERE RefID=?",
                         (rid,)).fetchone()
-                    if r_bdwl and not r_bdwl[0] and r_bdwl[1]:
+                    if r_bdwl and (not r_bdwl[0] or not r_bdwl[1]):
                         can_sua_bank_bdwl = True
                 except Exception:
                     pass
             can_sua_bank = can_sua_bank_m or can_sua_bank_bdwl
-            # Đợt 6 (đã sửa BankName ở cả 2 bảng nhưng bấm XEM/XOÁ VẪN báo lỗi y hệt — chẩn đoán
-            # tự động không tìm thêm cột nvarchar nào null khác biệt): ReasonTypeID là cột INT nên
-            # công cụ chẩn đoán (chỉ so nvarchar) bỏ sót — để NULL (Master) hoặc 0 (BADepositWithdrawList,
-            # giá trị mặc định số khi không gán) rất có thể khiến JOIN sang bảng "Lý do thu/chi"
-            # trả về NULL cho tên hiển thị, gây đúng lỗi ép kiểu khi XEM/XOÁ — xem
-            # _misa_reason_type_du_phong.
-            can_sua_reason_m = "reasontypeid" in cols_m and not m.get("ReasonTypeID")
+            can_sua_reason_m = "reasontypeid" in cols_m and not _misa_reason_type_hop_le(
+                cur, ref_type_dung, m.get("ReasonTypeID"))
             can_sua_reason_bdwl = False
             if cols_bdwl and da_co_bdwl >= 1 and "reasontypeid" in cols_bdwl:
                 try:
                     r_reason = cur.execute(
                         "SELECT ReasonTypeID FROM BADepositWithdrawList WHERE RefID=?", (rid,)).fetchone()
-                    if r_reason and not r_reason[0]:
+                    if r_reason and not _misa_reason_type_hop_le(cur, ref_type_dung, r_reason[0]):
                         can_sua_reason_bdwl = True
                 except Exception:
                     pass
@@ -21139,16 +21207,23 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                     cur.execute("INSERT INTO CustomFieldLedger ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))), [f[c] for c in lc])
                 if can_sua_bank:
-                    _, ten_ngan_hang_dp, _ = _misa_bank_account_du_phong(cur)
-                    if ten_ngan_hang_dp:
-                        if can_sua_bank_m:
+                    bank_id_dp, ten_ngan_hang_dp, _ = _misa_bank_account_du_phong(cur)
+                    if can_sua_bank_m:
+                        if bank_id_dp and "bankaccountid" in cols_m:
+                            cur.execute(f"UPDATE {master_tbl} SET BankAccountID=? WHERE RefID=?",
+                                       (bank_id_dp, rid))
+                        if ten_ngan_hang_dp:
                             cur.execute(f"UPDATE {master_tbl} SET BankName=? WHERE RefID=?",
                                        (ten_ngan_hang_dp, rid))
-                        if can_sua_bank_bdwl:
+                    if can_sua_bank_bdwl:
+                        if bank_id_dp:
+                            cur.execute("UPDATE BADepositWithdrawList SET BankAccountID=? WHERE RefID=?",
+                                       (bank_id_dp, rid))
+                        if ten_ngan_hang_dp:
                             cur.execute("UPDATE BADepositWithdrawList SET BankName=? WHERE RefID=?",
                                        (ten_ngan_hang_dp, rid))
                 if can_sua_reason:
-                    reason_id_dp = _misa_reason_type_du_phong(cur, master_tbl)
+                    reason_id_dp = _misa_reason_type_du_phong(cur, master_tbl, ref_type_dung)
                     if reason_id_dp:
                         if can_sua_reason_m:
                             cur.execute(f"UPDATE {master_tbl} SET ReasonTypeID=? WHERE RefID=?",
