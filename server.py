@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.020"
+APP_BUILD = "2026-08-27.021"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16171,7 +16171,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                         _misa_gan(g, cols_gl, m["sl"], "Quantity")
                         _misa_gan(g, cols_gl, m["dgia"], "UnitPriceOC")
                         _misa_gan(g, cols_gl, m["dgia"], "UnitPrice")
-                        _misa_gan(g, cols_gl, m["uid"] and 1, "MainConvertRate")
+                        _misa_gan(g, cols_gl, (1 if m["uid"] else 0), "MainConvertRate")
                         _misa_gan(g, cols_gl, "*", "ExchangeRateOperator")
                         _misa_gan(g, cols_gl, entry_type, "EntryType")
                         _misa_gan(g, cols_gl, dpo, "DetailPostOrder")
@@ -16226,7 +16226,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                         _misa_gan(a, cols_aol, ref_order_ct, "RefOrder")
                         _misa_gan(a, cols_aol, idx_line, "SortOrder")
                         _misa_gan(a, cols_aol, False, "IsUpdateRedundant")
-                        _misa_gan(a, cols_aol, m["uid"] and 1, "MainConvertRate")
+                        _misa_gan(a, cols_aol, (1 if m["uid"] else 0), "MainConvertRate")
                         _misa_gan(a, cols_aol, "*", "ExchangeRateOperator")
                         _misa_gan(a, cols_aol, dpo, "DetailPostOrder")
                         # PayKeyID/DebtKeyID của Mua hàng dịch vụ CÓ THÊM InvNo+InvDate — KHÁC
@@ -16289,7 +16289,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                         _misa_gan(pl, cols_purl, 1, "ExchangeRate")
                         _misa_gan(pl, cols_purl, m["uid"], "MainUnitID")
                         _misa_gan(pl, cols_purl, m["dgia"], "MainUnitPrice")
-                        _misa_gan(pl, cols_purl, m["uid"] and 1, "MainConvertRate")
+                        _misa_gan(pl, cols_purl, (1 if m["uid"] else 0), "MainConvertRate")
                         _misa_gan(pl, cols_purl, m["sl"], "MainQuantity")
                         _misa_gan(pl, cols_purl, "*", "ExchangeRateOperator")
                         _misa_gan(pl, cols_purl, False, "IsPostToManagementBook")
