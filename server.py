@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.001"
+APP_BUILD = "2026-08-27.002"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20173,7 +20173,11 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
     BADeposit/BAWithDraw với IsPostedFinance=False không hiện trên màn "Thu, chi tiền" của
     MISA dù đã ghi đúng vào CSDL), IsPostedManagement=False (giữ nguyên chưa ghi Sổ quản trị,
     tránh vướng "phải bỏ ghi Sổ quản trị mới xoá được" nếu ghi nhầm — xem chi tiết ở chỗ gán 2
-    cờ này bên dưới)."""
+    cờ này bên dưới).
+    Ngoài BADeposit/BAWithDraw/BADepositDetail/BAWithDrawDetail/GeneralLedger/
+    AccountObjectLedger, còn ghi thêm BADepositWithdrawList (bảng nguồn LƯỚI liệt kê "Thu, chi
+    tiền" — xác nhận qua chẩn đoán TOÀN DIỆN đợt 3, quét mọi bảng có cột RefID trong toàn
+    database) và CustomFieldLedger (đủ cho khớp "Ghi sổ" thật, không chắc bắt buộc)."""
     import uuid as _uuid
     if loai not in ("unt", "unc"):
         raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
@@ -20267,7 +20271,41 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                     mau_aol = dict(zip(aol_cols_list, row))
             except Exception:
                 mau_aol = None
-        co_ban_ghi_so_cai = len(mau_gl) == 2 and mau_aol is not None
+        # QUAN TRỌNG (xác nhận qua chẩn đoán TOÀN DIỆN đợt 3 — quét mọi bảng có cột RefID trong
+        # toàn database): dù đã có đủ GeneralLedger/AccountObjectLedger (số dư/Sổ chi tiết các
+        # tài khoản đã khớp thật), màn LIỆT KÊ "Ngân hàng > Thu, chi tiền" VẪN không hiện chứng
+        # từ — vì màn đó đọc từ bảng RIÊNG BADepositWithdrawList (tên khớp thẳng với "Thu, Chi
+        # tiền" — gộp chung UNT+UNC vào 1 bảng, phân biệt qua cột ListTableName='BADeposit'/
+        # 'BAWithDraw'), KHÔNG đọc trực tiếp từ BADeposit/BAWithDraw. Học mẫu từ ĐÚNG chứng từ
+        # thật đã dùng làm mẫu ở trên. CustomFieldLedger cũng thiếu (1 dòng/chứng từ, mọi cột
+        # CustomField đều rỗng ở mẫu thật) — ghi kèm cho đủ, dù không chắc có bắt buộc để hiện
+        # trên màn hình hay không (không ảnh hưởng gì nếu thiếu, ghi thêm cho khớp đúng như "Ghi
+        # sổ" thật). KHÔNG ghi MSC_AudittingLog (nhật ký thao tác người dùng thật — LoginName/
+        # ComputerName/ComputerIP/UserID gắn với phiên đăng nhập thật, giả mạo dòng nhật ký này
+        # không cần thiết cho hiển thị và không trung thực).
+        cols_bdwl = _misa_cot_bang_that(cur, "BADepositWithdrawList")
+        cols_cfl = _misa_cot_bang_that(cur, "CustomFieldLedger")
+        mau_bdwl = None
+        mau_cfl = None
+        if ref_id_mau and cols_bdwl:
+            try:
+                bdwl_cols_list = [name for name, _ in cols_bdwl.values()]
+                row = cur.execute("SELECT [%s] FROM BADepositWithdrawList WHERE RefID=?" %
+                                  ("],[".join(bdwl_cols_list)), (ref_id_mau,)).fetchone()
+                if row:
+                    mau_bdwl = dict(zip(bdwl_cols_list, row))
+            except Exception:
+                mau_bdwl = None
+        if ref_id_mau and cols_cfl:
+            try:
+                cfl_cols_list = [name for name, _ in cols_cfl.values()]
+                row = cur.execute("SELECT [%s] FROM CustomFieldLedger WHERE RefID=?" %
+                                  ("],[".join(cfl_cols_list)), (ref_id_mau,)).fetchone()
+                if row:
+                    mau_cfl = dict(zip(cfl_cols_list, row))
+            except Exception:
+                mau_cfl = None
+        co_ban_ghi_so_cai = len(mau_gl) == 2 and mau_aol is not None and mau_bdwl is not None
 
         # Danh mục Đối tượng — map MST (chuẩn hoá) -> (AccountObjectID, tên, mã ĐT, MST trong MISA)
         doi_tuong = {}
@@ -20446,6 +20484,41 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 _misa_gan(a, cols_aol, f"{m_id}#{aid}#{aol_account}", "DebtKeyID")
                 aol_row = a
 
+            # Nhân bản BADepositWithdrawList (bảng nguồn LƯỚI liệt kê "Thu, chi tiền" — xem giải
+            # thích ở chỗ học mẫu mau_bdwl phía trên) + CustomFieldLedger từ ĐÚNG chứng từ thật.
+            bdwl_row = None
+            if mau_bdwl is not None:
+                b = {c: mau_bdwl.get(c) for c in [name for name, _ in cols_bdwl.values()]}
+                _misa_gan(b, cols_bdwl, m_id, "RefID")
+                _misa_gan(b, cols_bdwl, ngay_dt, "RefDate")
+                _misa_gan(b, cols_bdwl, ngay_dt, "PostedDate")
+                _misa_gan(b, cols_bdwl, so_ct, "RefNoFinance")
+                _misa_gan(b, cols_bdwl, so_ct, "RefNoManagement")
+                _misa_gan(b, cols_bdwl, True, "IsPostedFinance")
+                _misa_gan(b, cols_bdwl, False, "IsPostedManagement")
+                _misa_gan(b, cols_bdwl, aid, "AccountObjectID")
+                _misa_gan(b, cols_bdwl, ten_misa or ten, "AccountObjectName")
+                _misa_gan(b, cols_bdwl, branch_id, "BranchID")
+                _misa_gan(b, cols_bdwl, dien_giai, "JournalMemo")
+                _misa_gan(b, cols_bdwl, so_tien, "TotalAmountOC")
+                _misa_gan(b, cols_bdwl, so_tien, "TotalAmount")
+                _misa_gan(b, cols_bdwl, max_reforder, "RefOrder")
+                _misa_gan(b, cols_bdwl, now, "CreatedDate")
+                _misa_gan(b, cols_bdwl, now, "ModifiedDate")
+                if "customfield10" in cols_bdwl:
+                    _misa_gan(b, cols_bdwl, _PM_MARK, "CustomField10")
+                bdwl_row = b
+
+            cfl_row = None
+            if mau_cfl is not None:
+                f = {c: mau_cfl.get(c) for c in [name for name, _ in cols_cfl.values()]}
+                _misa_gan(f, cols_cfl, str(_uuid.uuid4()), "CustomFieldLegerID", "CustomFieldLedgerID")
+                _misa_gan(f, cols_cfl, m_id, "RefID")
+                _misa_gan(f, cols_cfl, d_id, "RefDetailID")
+                _misa_gan(f, cols_cfl, branch_id, "BranchID")
+                _misa_gan(f, cols_cfl, ngay_dt, "PostedDate")
+                cfl_row = f
+
             if not preview:
                 lc = list(m_row.keys())
                 cur.execute("INSERT INTO %s ([%s]) VALUES (%s)" %
@@ -20465,6 +20538,16 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                     cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
                                [aol_row[c] for c in lc])
+                if bdwl_row is not None:
+                    lc = list(bdwl_row.keys())
+                    cur.execute("INSERT INTO BADepositWithdrawList ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [bdwl_row[c] for c in lc])
+                if cfl_row is not None:
+                    lc = list(cfl_row.keys())
+                    cur.execute("INSERT INTO CustomFieldLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [cfl_row[c] for c in lc])
 
             da_co.add(so_ct)
             them += 1
@@ -20527,7 +20610,13 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
     Với MỖI chứng từ mang CustomField10=_PM_MARK: đổi IsPostedFinance 0->1
     (nếu đang 0) VÀ tạo bổ sung đúng 2 dòng GeneralLedger + 1 dòng
     AccountObjectLedger còn thiếu (bỏ qua nếu GeneralLedger đã có sẵn —
-    không tạo trùng). Không đụng chứng từ nào khác, không xoá gì."""
+    không tạo trùng), CỘNG THÊM 1 dòng BADepositWithdrawList (đợt 3 — bảng
+    nguồn LƯỚI liệt kê "Thu, chi tiền", xem _misa_ghi_thu_chi) + 1 dòng
+    CustomFieldLedger nếu còn thiếu — kiểm tra RIÊNG từng bảng (không gộp
+    chung 1 điều kiện "đã đủ" như trước, vì các chứng từ đã sửa ở đợt 2
+    (có GeneralLedger/AccountObjectLedger) vẫn có thể còn thiếu
+    BADepositWithdrawList của đợt 3 này). Không đụng chứng từ nào khác,
+    không xoá gì."""
     import uuid as _uuid
     master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
     tk_cot = "CreditAccount" if loai == "unt" else "DebitAccount"
@@ -20574,10 +20663,28 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             row = cur.execute(sql, (ref_id_mau,)).fetchone()
             if row:
                 mau_aol = dict(zip(aol_cols_list, row))
-        if len(mau_gl) != 2 or mau_aol is None:
+        # Đợt 3 (sau khi GeneralLedger/AccountObjectLedger đã đúng nhưng màn "Thu, chi tiền"
+        # VẪN không hiện — xem chẩn đoán TOÀN DIỆN): học thêm mẫu BADepositWithdrawList (bảng
+        # nguồn LƯỚI liệt kê) + CustomFieldLedger từ ĐÚNG chứng từ thật đã dùng làm mẫu ở trên.
+        cols_bdwl = _misa_cot_bang_that(cur, "BADepositWithdrawList")
+        cols_cfl = _misa_cot_bang_that(cur, "CustomFieldLedger")
+        mau_bdwl, mau_cfl = None, None
+        if ref_id_mau and cols_bdwl:
+            bdwl_cols_list = [name for name, _ in cols_bdwl.values()]
+            row = cur.execute("SELECT [%s] FROM BADepositWithdrawList WHERE RefID=?" %
+                              ("],[".join(bdwl_cols_list)), (ref_id_mau,)).fetchone()
+            if row:
+                mau_bdwl = dict(zip(bdwl_cols_list, row))
+        if ref_id_mau and cols_cfl:
+            cfl_cols_list = [name for name, _ in cols_cfl.values()]
+            row = cur.execute("SELECT [%s] FROM CustomFieldLedger WHERE RefID=?" %
+                              ("],[".join(cfl_cols_list)), (ref_id_mau,)).fetchone()
+            if row:
+                mau_cfl = dict(zip(cfl_cols_list, row))
+        if len(mau_gl) != 2 or mau_aol is None or mau_bdwl is None:
             raise HTTPException(
                 400, "Chưa tìm được chứng từ THẬT nào (không do phần mềm ghi) để học cấu trúc "
-                     "GeneralLedger/AccountObjectLedger — chưa thể sửa bổ sung.")
+                     "GeneralLedger/AccountObjectLedger/BADepositWithdrawList — chưa thể sửa bổ sung.")
 
         max_reforder = 0
         try:
@@ -20597,8 +20704,12 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             rid = m.get("RefID")
             ref_no = m.get("RefNoFinance")
             da_co_gl = cur.execute("SELECT COUNT(*) FROM GeneralLedger WHERE RefID=?", (rid,)).fetchone()[0]
-            if da_co_gl >= 2:
-                continue  # đã đủ, không đụng
+            da_co_bdwl = (cur.execute("SELECT COUNT(*) FROM BADepositWithdrawList WHERE RefID=?",
+                                      (rid,)).fetchone()[0] if cols_bdwl else 1)
+            da_co_cfl = (cur.execute("SELECT COUNT(*) FROM CustomFieldLedger WHERE RefID=?",
+                                     (rid,)).fetchone()[0] if cols_cfl else 1)
+            if da_co_gl >= 2 and da_co_bdwl >= 1 and da_co_cfl >= 1:
+                continue  # đã đủ cả 3, không đụng
             d_row = cur.execute(
                 "SELECT [%s] FROM %s WHERE RefID=?" % ("],[".join(d_cols_list), detail_tbl),
                 (rid,)).fetchone()
@@ -20674,15 +20785,55 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             _misa_gan(a, cols_aol, f"{rid}#{aid}#{aol_account}", "PayKeyID")
             _misa_gan(a, cols_aol, f"{rid}#{aid}#{aol_account}", "DebtKeyID")
 
+            b = None
+            if mau_bdwl is not None:
+                b = {c: mau_bdwl.get(c) for c in [name for name, _ in cols_bdwl.values()]}
+                _misa_gan(b, cols_bdwl, rid, "RefID")
+                _misa_gan(b, cols_bdwl, ngay_dt, "RefDate")
+                _misa_gan(b, cols_bdwl, ngay_dt, "PostedDate")
+                _misa_gan(b, cols_bdwl, ref_no, "RefNoFinance")
+                _misa_gan(b, cols_bdwl, m.get("RefNoManagement"), "RefNoManagement")
+                _misa_gan(b, cols_bdwl, True, "IsPostedFinance")
+                _misa_gan(b, cols_bdwl, False, "IsPostedManagement")
+                _misa_gan(b, cols_bdwl, aid, "AccountObjectID")
+                _misa_gan(b, cols_bdwl, ten_misa, "AccountObjectName")
+                _misa_gan(b, cols_bdwl, m.get("BranchID"), "BranchID")
+                _misa_gan(b, cols_bdwl, dien_giai, "JournalMemo")
+                _misa_gan(b, cols_bdwl, so_tien, "TotalAmountOC")
+                _misa_gan(b, cols_bdwl, so_tien, "TotalAmount")
+                _misa_gan(b, cols_bdwl, max_reforder, "RefOrder")
+                _misa_gan(b, cols_bdwl, m.get("CreatedDate"), "CreatedDate")
+                _misa_gan(b, cols_bdwl, m.get("ModifiedDate"), "ModifiedDate")
+                if "customfield10" in cols_bdwl:
+                    _misa_gan(b, cols_bdwl, _PM_MARK, "CustomField10")
+
+            f = None
+            if mau_cfl is not None:
+                f = {c: mau_cfl.get(c) for c in [name for name, _ in cols_cfl.values()]}
+                _misa_gan(f, cols_cfl, str(_uuid.uuid4()), "CustomFieldLegerID", "CustomFieldLedgerID")
+                _misa_gan(f, cols_cfl, rid, "RefID")
+                _misa_gan(f, cols_cfl, d_id_val, "RefDetailID")
+                _misa_gan(f, cols_cfl, m.get("BranchID"), "BranchID")
+                _misa_gan(f, cols_cfl, ngay_dt, "PostedDate")
+
             if not preview:
                 cur.execute(f"UPDATE {master_tbl} SET IsPostedFinance=1 WHERE RefID=?", (rid,))
-                for g in gl_rows:
-                    lc = list(g.keys())
-                    cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
-                               ("],[".join(lc), ",".join(["?"] * len(lc))), [g[c] for c in lc])
-                lc = list(a.keys())
-                cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
-                           ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
+                if da_co_gl < 2:
+                    for g in gl_rows:
+                        lc = list(g.keys())
+                        cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
+                                   ("],[".join(lc), ",".join(["?"] * len(lc))), [g[c] for c in lc])
+                    lc = list(a.keys())
+                    cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
+                if b is not None and da_co_bdwl < 1:
+                    lc = list(b.keys())
+                    cur.execute("INSERT INTO BADepositWithdrawList ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [b[c] for c in lc])
+                if f is not None and da_co_cfl < 1:
+                    lc = list(f.keys())
+                    cur.execute("INSERT INTO CustomFieldLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))), [f[c] for c in lc])
 
             so_sua += 1
             ket.append({"ref_no": ref_no})
