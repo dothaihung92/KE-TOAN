@@ -6088,9 +6088,9 @@ function moBangKe(loai){
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
-        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('nk')" title="Ghi thẳng vào MISA (PUVoucher, GHI SỔ LUÔN) — cần Danh mục Hàng hóa/NVL + KH/NCC đã import trước">⬆ Nhập kho vào MISA</button>
-        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('kqk')" title="Ghi thẳng vào MISA (PUVoucher, GHI SỔ LUÔN) — cần Danh mục TSCĐ/CCDC + KH/NCC đã import trước">⬆ Không qua kho vào MISA</button>
-        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, GHI SỔ LUÔN) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('nk')" title="Ghi thẳng vào MISA (PUVoucher) — TỰ GHI Sổ Tài chính (không ghi Sổ quản trị, giống Ngân hàng) — cần Danh mục Hàng hóa/NVL + KH/NCC đã import trước">⬆ Nhập kho vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('kqk')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ — tự mở trong MISA bấm Ghi sổ khi ưng ý) — cần Danh mục TSCĐ/CCDC + KH/NCC đã import trước">⬆ Không qua kho vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUVoucher, CHƯA ghi sổ — tự mở trong MISA bấm Ghi sổ khi ưng ý) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
         <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaDvtChungTu()" title="Sửa lại cột ĐVT trên các chứng từ Mua hàng/Dịch vụ do chính phần mềm tạo (kể cả đã ghi sổ), nếu đang hiện GUID thô/sai (Danh mục đã đúng nhưng chứng từ cũ vẫn giữ ĐVT sai lúc ghi)">🔧 Sửa ĐVT chứng từ đã ghi</button>
         <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaGiaTriNhapKho()" title="Sửa lại cột 'Giá trị nhập kho' (0 sai) trên các chứng từ Mua Hàng Nhập Kho/Không Qua Kho do chính phần mềm ghi trước đó (kể cả đã ghi sổ) — do trước đây bỏ sót không set tổng ở header">🔧 Sửa Giá trị nhập kho</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanDvt()" title="Chỉ xem — dò sâu 1 vài mã hàng cụ thể để tìm nguyên nhân gốc khi các nút sửa ở trên đều báo 'không có gì cần sửa' nhưng chứng từ MISA vẫn hiện GUID">🔬 Chẩn đoán sâu ĐVT</button>
@@ -6113,7 +6113,7 @@ function moBangKe(loai){
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
-        <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, GHI SỔ LUÔN) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, CHƯA ghi sổ — tự mở trong MISA bấm Ghi sổ khi ưng ý) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanBanHang()" title="Chỉ xem — dò sâu 1 vài Số chứng từ cụ thể khi ghi xong nhưng MISA không hiện Số hóa đơn/Khách hàng ở tab Hóa đơn">🔬 Chẩn đoán sâu Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanGhiSoTaiChinh('ban')" title="Chỉ xem — dò 1 chứng từ Bán hàng THẬT đã ghi Sổ Tài chính để học cấu trúc ghi sổ (chuẩn bị cho tính năng tự ghi Sổ Tài chính giống Ngân hàng — vừa hiện đúng vừa xoá được)">🔬 Chẩn đoán ghi sổ Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaQuetKyBanHang()" title="Chỉ xem — quét TOÀN BỘ chứng từ Bán hàng trong 1 kỳ (vd T7/2026), so sánh chứng từ phần mềm tạo với chứng từ thật để biết lỗi thiếu Số hóa đơn chỉ do phần mềm hay do cả MISA">📋 Quét cả kỳ Bán hàng</button>
@@ -7313,7 +7313,7 @@ function misaImportHienKetQua(d,preview){
   }).join('');
   document.getElementById('misaImportResult').innerHTML=`
     <table style="border-collapse:collapse;font-size:14.5px;width:100%;margin-top:12px">${rows}</table>
-    ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Bán hàng/Mua hàng đã ghi ở trạng thái <b>CHƯA GHI SỔ</b> — hãy tự mở lại từng chứng từ trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>'}`;
+    ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Mua hàng <b>Nhập kho</b> đã tự ghi <b>Sổ Tài chính</b> (không ghi Sổ quản trị, giống Ngân hàng). Chứng từ Bán hàng/Mua hàng Không qua kho/Dịch vụ hiện vẫn ở trạng thái <b>CHƯA GHI SỔ</b> — tự mở lại từng chứng từ trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>'}`;
   foot.innerHTML=`
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
