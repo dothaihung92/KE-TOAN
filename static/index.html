@@ -6094,6 +6094,9 @@ function moBangKe(loai){
         <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaDvtChungTu()" title="Sửa lại cột ĐVT trên các chứng từ Mua hàng/Dịch vụ do chính phần mềm tạo (kể cả đã ghi sổ), nếu đang hiện GUID thô/sai (Danh mục đã đúng nhưng chứng từ cũ vẫn giữ ĐVT sai lúc ghi)">🔧 Sửa ĐVT chứng từ đã ghi</button>
         <button class="btn ghost sm" style="color:#a03a3a;border-color:#e8b0b0" onclick="misaSuaGiaTriNhapKho()" title="Sửa lại cột 'Giá trị nhập kho' (0 sai) trên các chứng từ Mua Hàng Nhập Kho/Không Qua Kho do chính phần mềm ghi trước đó (kể cả đã ghi sổ) — do trước đây bỏ sót không set tổng ở header">🔧 Sửa Giá trị nhập kho</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanDvt()" title="Chỉ xem — dò sâu 1 vài mã hàng cụ thể để tìm nguyên nhân gốc khi các nút sửa ở trên đều báo 'không có gì cần sửa' nhưng chứng từ MISA vẫn hiện GUID">🔬 Chẩn đoán sâu ĐVT</button>
+        <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanGhiSoTaiChinh('mua_nk')" title="Chỉ xem — dò 1 chứng từ Mua hàng nhập kho THẬT đã ghi Sổ Tài chính để học cấu trúc ghi sổ (chuẩn bị cho tính năng tự ghi Sổ Tài chính giống Ngân hàng — vừa hiện đúng vừa xoá được)">🔬 Chẩn đoán ghi sổ NK</button>
+        <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanGhiSoTaiChinh('mua_kqk')" title="Chỉ xem — dò 1 chứng từ Mua hàng không qua kho THẬT đã ghi Sổ Tài chính để học cấu trúc ghi sổ">🔬 Chẩn đoán ghi sổ KQK</button>
+        <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanGhiSoTaiChinh('mua_dv')" title="Chỉ xem — dò 1 chứng từ Mua hàng dịch vụ THẬT đã ghi Sổ Tài chính để học cấu trúc ghi sổ">🔬 Chẩn đoán ghi sổ DV</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">📚 Danh mục:</span>
@@ -6112,6 +6115,7 @@ function moBangKe(loai){
         <span style="font-size:12px;color:#999;min-width:84px">🗄 MISA:</span>
         <button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisa()" title="Ghi thẳng vào MISA (SAVoucher, GHI SỔ LUÔN) — cần Khách hàng đã import trước. Mỗi dòng Bảng kê = 1 hóa đơn = 1 chứng từ">⬆ Bán hàng vào MISA</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanBanHang()" title="Chỉ xem — dò sâu 1 vài Số chứng từ cụ thể khi ghi xong nhưng MISA không hiện Số hóa đơn/Khách hàng ở tab Hóa đơn">🔬 Chẩn đoán sâu Bán hàng</button>
+        <button class="btn ghost sm" style="color:#666" onclick="misaChanDoanGhiSoTaiChinh('ban')" title="Chỉ xem — dò 1 chứng từ Bán hàng THẬT đã ghi Sổ Tài chính để học cấu trúc ghi sổ (chuẩn bị cho tính năng tự ghi Sổ Tài chính giống Ngân hàng — vừa hiện đúng vừa xoá được)">🔬 Chẩn đoán ghi sổ Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaQuetKyBanHang()" title="Chỉ xem — quét TOÀN BỘ chứng từ Bán hàng trong 1 kỳ (vd T7/2026), so sánh chứng từ phần mềm tạo với chứng từ thật để biết lỗi thiếu Số hóa đơn chỉ do phần mềm hay do cả MISA">📋 Quét cả kỳ Bán hàng</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaDoCauTrucHoaDon()" title="Chỉ xem — dò TRIGGER/VIEW/bảng khác liên quan Số hóa đơn khi dữ liệu SAVoucher/SAInvoice đã đúng và đã Ghi sổ mà lưới MISA vẫn không hiện Số hóa đơn">🔍 Dò cấu trúc hóa đơn</button>
         <button class="btn ghost sm" style="color:#666" onclick="misaXemDinhNghiaView()" title="Chỉ xem — lấy nguyên văn SQL định nghĩa 1 vài VIEW nghi vấn (vd View_SAVoucher, View_SAVoucherInvoiceReference) để biết điều kiện thật MISA cần để hiện Số hóa đơn">📜 Xem định nghĩa VIEW</button>
@@ -7093,6 +7097,20 @@ async function misaChanDoanBanHang(){
   toast('Đang dò...','');
   try{
     const d=await api(`/api/misa-sql/chan-doan-ban-hang/${current}?so_ct=${encodeURIComponent(soCt)}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b></div>
+      <pre style="max-height:60vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11.5px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaChanDoanGhiSoTaiChinh(loai){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang dò...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-ghi-so-tai-chinh/${current}?loai=${loai}`,{method:'GET'});
     document.getElementById('misaModalBody').innerHTML=`
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (chỉ đọc, không sửa gì) — database: <b>${misaEsc(d.database||'')}</b></div>
       <pre style="max-height:60vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11.5px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>

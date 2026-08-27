@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.015"
+APP_BUILD = "2026-08-27.016"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16832,6 +16832,137 @@ def misa_sql_import_mua_hang(cid: int, loai: str, preview: int = 1, database: st
     if loai == "dv":
         return _misa_ghi_mua_hang_dv(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
     return _misa_ghi_mua_hang(cid, database, loai, preview=bool(preview), ghi_de=bool(ghi_de))
+
+
+# ============================================================
+#  CHẨN ĐOÁN (CHỈ ĐỌC) chuẩn bị áp dụng công thức ghi Sổ Tài chính trực tiếp
+#  qua SQL cho Mua hàng/Bán hàng — ĐÚNG công thức đã tìm ra và xác nhận hoạt
+#  động tốt cho Ngân hàng UNT/UNC (IsPostedFinance=True, IsPostedManagement=
+#  False: hiện đúng trên màn hình VÀ xoá được, không bị MISA chặn "đã ghi sổ
+#  Sổ quản trị"). Mua/Bán hàng phức tạp hơn Ngân hàng nhiều (nhiều dòng Nợ/Có
+#  kèm thuế GTGT, Mua hàng nhập kho còn có thể liên quan Sổ Kho riêng) nên
+#  KHÔNG thể đoán bừa cấu trúc ghi sổ như Ngân hàng — phải dò đúng 1 chứng từ
+#  THẬT (người dùng tự ghi sổ trong MISA, KHÔNG phải do phần mềm này ghi) đã
+#  ghi Sổ Tài chính để học cấu trúc trước khi viết logic ghi.
+# ============================================================
+def _misa_chan_doan_ghi_so_tai_chinh(cid, database, master_tbl, detail_tbl, tu_khoa=None):
+    """Tìm 1 chứng từ THẬT đã ghi Sổ Tài chính (IsPostedFinance=1) + 1 chứng
+    từ THẬT CHƯA ghi sổ (nếu có) để đối chiếu, dump đầy đủ Master+Detail, rồi
+    quét TOÀN BỘ database tìm mọi bảng có cột RefID và dump nội dung các bảng
+    có dữ liệu khớp RefID chứng từ đã ghi sổ (đúng cách đã tìm ra
+    BADepositWithdrawList/CustomFieldLedger cho Ngân hàng trước đây). tu_khoa
+    (nếu có): lọc theo từ khoá trong SYSRefType.RefTypeName — cần cho
+    PUVoucher vì cả Mua hàng nhập kho lẫn không qua kho đều dùng CHUNG bảng
+    này, phải phân biệt qua RefType."""
+    def _dep(v):
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        if isinstance(v, float):
+            return round(v, 2)
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            return bytes(v).hex()
+        return v
+
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+
+        def _doc_day_du(bang, dieu_kien, tham_so=(), top=20):
+            try:
+                cols = [r[0] for r in cur.execute(
+                    "SELECT c.name FROM sys.columns c WHERE c.object_id=OBJECT_ID(?) "
+                    "ORDER BY c.column_id", bang).fetchall()]
+                if not cols:
+                    return {"loi": f"không thấy bảng {bang}"}
+                sql = "SELECT TOP %d [%s] FROM %s WHERE %s" % (
+                    top, "],[".join(cols), bang, dieu_kien)
+                rows = cur.execute(sql, tham_so).fetchall()
+                return [dict(zip(cols, [_dep(v) for v in r])) for r in rows]
+            except Exception as e:
+                return {"loi": str(e)}
+
+        loc_tu_khoa = ""
+        tk_params = ()
+        if tu_khoa:
+            loc_tu_khoa = (" AND EXISTS (SELECT 1 FROM SYSRefType rt WHERE rt.RefType=m.RefType "
+                          "AND rt.MasterTableName=? " +
+                          "".join(" AND rt.RefTypeName LIKE ?" for _ in tu_khoa) + ")")
+            tk_params = (master_tbl,) + tuple("%" + k + "%" for k in tu_khoa)
+
+        ket = {"database": database, "master_tbl": master_tbl, "detail_tbl": detail_tbl}
+        ref_id_posted = ref_id_unposted = None
+        try:
+            row = cur.execute(
+                f"SELECT TOP 1 m.RefID FROM {master_tbl} m WHERE ISNULL(m.IsPostedFinance,0)=1 "
+                f"AND ISNULL(m.CustomField10,'')<>?" + loc_tu_khoa + " ORDER BY m.PostedDate DESC",
+                (_PM_MARK,) + tk_params).fetchone()
+            if row:
+                ref_id_posted = row[0]
+        except Exception as e:
+            ket["loi_tim_da_ghi_so"] = str(e)[:300]
+        try:
+            row = cur.execute(
+                f"SELECT TOP 1 m.RefID FROM {master_tbl} m WHERE ISNULL(m.IsPostedFinance,0)=0 "
+                f"AND ISNULL(m.CustomField10,'')<>?" + loc_tu_khoa,
+                (_PM_MARK,) + tk_params).fetchone()
+            if row:
+                ref_id_unposted = row[0]
+        except Exception:
+            pass
+
+        for nhan, rid in (("da_ghi_so_tai_chinh", ref_id_posted), ("chua_ghi_so", ref_id_unposted)):
+            if not rid:
+                ket[f"{nhan}_ghi_chu"] = "Không tìm thấy chứng từ THẬT nào ở trạng thái này."
+                continue
+            ket[f"{nhan}_master"] = _doc_day_du(master_tbl, "RefID=?", (rid,), 1)
+            ket[f"{nhan}_detail"] = _doc_day_du(detail_tbl, "RefID=?", (rid,), 20)
+
+        if ref_id_posted:
+            try:
+                tables_with_refid = [r[0] for r in cur.execute(
+                    "SELECT t.name FROM sys.tables t JOIN sys.columns c ON c.object_id = t.object_id "
+                    "WHERE c.name = 'RefID' ORDER BY t.name").fetchall()]
+            except Exception as e:
+                tables_with_refid = []
+                ket["loi_quet_bang"] = str(e)[:300]
+            ket["bang_lien_quan"] = {}
+            for tbl in tables_with_refid:
+                if tbl in (master_tbl, detail_tbl):
+                    continue
+                try:
+                    r1 = cur.execute(f"SELECT COUNT(*) FROM [{tbl}] WHERE RefID=?",
+                                     (ref_id_posted,)).fetchone()
+                    so_dong = (r1[0] or 0) if r1 else 0
+                    if so_dong > 0:
+                        ket["bang_lien_quan"][tbl] = {
+                            "so_dong": so_dong,
+                            "du_lieu": _doc_day_du(tbl, "RefID=?", (ref_id_posted,), 20)}
+                except Exception as e:
+                    ket["bang_lien_quan"][tbl] = {"loi": str(e)[:200]}
+        return ket
+    finally:
+        conn.close()
+
+
+_CHAN_DOAN_GHI_SO_BANG = {
+    "mua_nk": ("PUVoucher", "PUVoucherDetail", ["mua", "nhập kho"]),
+    "mua_kqk": ("PUVoucher", "PUVoucherDetail", ["mua", "không qua kho"]),
+    "mua_dv": ("PUService", "PUServiceDetail", None),
+    "ban": ("SAVoucher", "SAVoucherDetail", None),
+}
+
+
+@app.get("/api/misa-sql/chan-doan-ghi-so-tai-chinh/{cid}")
+def misa_sql_chan_doan_ghi_so_tai_chinh(cid: int, loai: str, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_ghi_so_tai_chinh. loai:
+    'mua_nk' / 'mua_kqk' / 'mua_dv' / 'ban'."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    bang = _CHAN_DOAN_GHI_SO_BANG.get((loai or "").strip().lower())
+    if not bang:
+        raise HTTPException(400, "loai phải là 'mua_nk', 'mua_kqk', 'mua_dv' hoặc 'ban'")
+    return _misa_chan_doan_ghi_so_tai_chinh(cid, database, bang[0], bang[1], tu_khoa=bang[2])
 
 
 # ============ GHI TĂNG TSCĐ / CCDC THẲNG VÀO MISA (FixedAsset / SUIncrement) ==
