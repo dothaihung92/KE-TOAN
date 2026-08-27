@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-26.025"
+APP_BUILD = "2026-08-27.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20743,7 +20743,15 @@ def _misa_chan_doan_unt_unc(cid, database, loai):
     xác nhận (ở phần Đối chiếu công nợ) "chỉ có dữ liệu cho chứng từ ĐÃ GHI
     SỔ", nên nếu chứng từ THẬT có dòng ở 2 bảng này còn chứng từ phần mềm
     ghi thì KHÔNG, nhiều khả năng "Ghi sổ" thật của MISA còn phải ghi
-    thêm 2 bảng này (không chỉ đổi cờ trên BADeposit/BAWithDraw là đủ)."""
+    thêm 2 bảng này (không chỉ đổi cờ trên BADeposit/BAWithDraw là đủ).
+    Đợt 3 (sau khi GeneralLedger/AccountObjectLedger đã đúng — số dư khớp
+    thật — nhưng màn LIỆT KÊ "Thu, chi tiền" VẪN không hiện): công cụ chẩn
+    đoán TOÀN DIỆN (_misa_chan_doan_unt_unc_toan_dien, quét mọi bảng có cột
+    RefID trong toàn database) tìm ra thêm 3 bảng còn thiếu:
+    BADepositWithdrawList (tên khớp thẳng với "Thu, Chi tiền" — rất có thể
+    chính là bảng nguồn của LƯỚI liệt kê màn hình này), CustomFieldLedger,
+    MSC_AudittingLog — dò thêm đầy đủ cột của cả 3 bảng này theo RefID để
+    học cấu trúc và viết logic ghi bổ sung."""
     master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
 
     def _dep(v):
@@ -20811,7 +20819,8 @@ def _misa_chan_doan_unt_unc(cid, database, loai):
                     if isinstance(r, dict) and r.get("RefID")]
         pm_ids = [r.get("RefID") for r in ket["chung_tu_do_pm_ghi"]
                   if isinstance(r, dict) and r.get("RefID")]
-        for ten_bang in ("GeneralLedger", "AccountObjectLedger"):
+        for ten_bang in ("GeneralLedger", "AccountObjectLedger",
+                         "BADepositWithdrawList", "CustomFieldLedger", "MSC_AudittingLog"):
             ket[f"{ten_bang}_cua_chung_tu_that"] = (
                 _doc_day_du(ten_bang, "RefID=?", (that_ids[0],), 5) if that_ids else [])
             ket[f"{ten_bang}_cua_chung_tu_pm_ghi"] = (

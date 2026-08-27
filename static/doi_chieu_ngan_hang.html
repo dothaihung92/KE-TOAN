@@ -1896,7 +1896,7 @@ async function chanDoanUntUncMisa(coMst, loai) {
 
     // Dò thêm 2 bảng "sổ cái" (GeneralLedger/AccountObjectLedger) — nếu chứng từ THẬT có dòng ở
     // đây còn chứng từ phần mềm ghi thì KHÔNG, đây rất có thể là bảng còn thiếu khi "Ghi sổ" thật.
-    ["GeneralLedger", "AccountObjectLedger"].forEach(tenBang => {
+    ["GeneralLedger", "AccountObjectLedger", "BADepositWithdrawList", "CustomFieldLedger", "MSC_AudittingLog"].forEach(tenBang => {
       const cuaThat = data[`${tenBang}_cua_chung_tu_that`] || [];
       const cuaPm = data[`${tenBang}_cua_chung_tu_pm_ghi`] || [];
       lines.push(`=== ${tenBang}: chứng từ THẬT có ${cuaThat.length} dòng, chứng từ phần mềm ghi có ${cuaPm.length} dòng ===`);
