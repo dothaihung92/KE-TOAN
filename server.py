@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.003"
+APP_BUILD = "2026-08-27.004"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20171,15 +20171,32 @@ def _misa_bank_account_du_phong(cur):
         cols_ba = _misa_cot_bang_that(cur, "BankAccount")
         id_col = _misa_chon_cot(cols_ba, "BankAccountID")
         if not id_col:
-            return None, None
+            return None, None, None
         name_col = _misa_chon_cot(cols_ba, "BankName", "BankAccountName")
-        sel = f"[{id_col}]" + (f",[{name_col}]" if name_col else "")
+        so_col = _misa_chon_cot(cols_ba, "AccountNumber", "BankAccountNumber")
+        cot_them = [c for c in (name_col, so_col) if c]
+        sel = f"[{id_col}]" + ("," + ",".join(f"[{c}]" for c in cot_them) if cot_them else "")
         row = cur.execute(f"SELECT TOP 1 {sel} FROM BankAccount").fetchone()
         if not row:
-            return None, None
-        return row[0], (row[1] if name_col else None)
+            return None, None, None
+        gia_tri = {"id": row[0]}
+        for i, c in enumerate(cot_them, start=1):
+            gia_tri[c] = row[i]
+        return gia_tri["id"], (gia_tri.get(name_col) if name_col else None), (gia_tri.get(so_col) if so_col else None)
     except Exception:
-        return None, None
+        return None, None, None
+
+
+_TEN_TK_KE_TOAN_CHUAN = {
+    "1121": "Tiền Việt Nam", "131": "Phải thu của khách hàng", "331": "Phải trả cho người bán",
+}
+
+
+def _ten_tk_ke_toan_du_phong(ma_tk):
+    """Tên tài khoản kế toán CHUẨN (Thông tư 200/133) cho các mã TK hệ thống dùng ở đây (1121/
+    131/331) — dùng khi không có mẫu thật để lấy đúng tên MISA đã đặt sẵn; TK khác (người dùng tự
+    đổi tk_doi_ung sang mã con) trả về nhãn chung chung thay vì đoán sai."""
+    return _TEN_TK_KE_TOAN_CHUAN.get(str(ma_tk), f"Tài khoản {ma_tk}")
 
 
 def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl):
@@ -20197,7 +20214,7 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
         return {name: _misa_gia_tri_mac_dinh(sqltype) for name, sqltype in cols.values()}
 
     branch_id = _misa_branch_id(cur)
-    bank_id, bank_name = _misa_bank_account_du_phong(cur)
+    bank_id, bank_name, bank_so = _misa_bank_account_du_phong(cur)
     hach_mac_dinh = "131" if loai == "unt" else "331"
     tk_no_mac_dinh, tk_co_mac_dinh = ("1121", hach_mac_dinh) if loai == "unt" else (hach_mac_dinh, "1121")
 
@@ -20219,27 +20236,47 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     else:
         _misa_gan(mau_d, cols_d, "1121", "CreditAccount")
 
+    ten_ref_type = "Thu tiền gửi" if loai == "unt" else "Ủy nhiệm chi"
+
+    def _ghi_de_chung_gl_aol(row, cols):
+        # Các cột NOT NULL đã xác nhận qua lỗi ghi thật (ExchangeRateOperator) — mẫu thật luôn
+        # có giá trị cố định, khung rỗng mặc định để None nên PHẢI gán tường minh, không thể bỏ
+        # qua như các cột nullable khác.
+        _misa_gan(row, cols, "VND", "CurrencyID")
+        _misa_gan(row, cols, 1, "ExchangeRate")
+        _misa_gan(row, cols, 1, "MainConvertRate")
+        _misa_gan(row, cols, "*", "ExchangeRateOperator")
+        _misa_gan(row, cols, ten_ref_type, "RefTypeName")
+        _misa_gan(row, cols, bank_id, "BankAccountID")
+        _misa_gan(row, cols, bank_so, "BankAccountNumber")
+
     g1 = _dong_trong(cols_gl)
     _misa_gan(g1, cols_gl, tk_no_mac_dinh, "AccountNumber")
     _misa_gan(g1, cols_gl, tk_co_mac_dinh, "CorrespondingAccountNumber")
+    _misa_gan(g1, cols_gl, _ten_tk_ke_toan_du_phong(tk_no_mac_dinh), "AccountName")
     _misa_gan(g1, cols_gl, 1, "EntryType")
     _misa_gan(g1, cols_gl, 1, "DebitAmountOC")
+    _ghi_de_chung_gl_aol(g1, cols_gl)
     g2 = _dong_trong(cols_gl)
     _misa_gan(g2, cols_gl, tk_co_mac_dinh, "AccountNumber")
     _misa_gan(g2, cols_gl, tk_no_mac_dinh, "CorrespondingAccountNumber")
+    _misa_gan(g2, cols_gl, _ten_tk_ke_toan_du_phong(tk_co_mac_dinh), "AccountName")
     _misa_gan(g2, cols_gl, 2, "EntryType")
     _misa_gan(g2, cols_gl, 1, "CreditAmountOC")
+    _ghi_de_chung_gl_aol(g2, cols_gl)
     mau_gl = [g1, g2]
 
     mau_aol = _dong_trong(cols_aol)
     _misa_gan(mau_aol, cols_aol, hach_mac_dinh, "AccountNumber")
     _misa_gan(mau_aol, cols_aol, "1121", "CorrespondingAccountNumber")
+    _misa_gan(mau_aol, cols_aol, _ten_tk_ke_toan_du_phong(hach_mac_dinh), "AccountName")
     if loai == "unt":
         _misa_gan(mau_aol, cols_aol, 2, "EntryType")
         _misa_gan(mau_aol, cols_aol, 1, "CreditAmountOC")
     else:
         _misa_gan(mau_aol, cols_aol, 1, "EntryType")
         _misa_gan(mau_aol, cols_aol, 1, "DebitAmountOC")
+    _ghi_de_chung_gl_aol(mau_aol, cols_aol)
 
     mau_bdwl = None
     if cols_bdwl:
