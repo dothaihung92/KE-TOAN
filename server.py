@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.025"
+APP_BUILD = "2026-08-27.026"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22001,6 +22001,48 @@ def misa_sql_import_unt_unc(body: dict = Body(...)):
     ghi_de = bool(body.get("ghi_de", False))
     giao_dich = body.get("giao_dich") or []
     return _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=preview, ghi_de=ghi_de)
+
+
+def _misa_danh_sach_mst_doi_tuong(cid, database):
+    """Trả về TẬP HỢP MST (đã chuẩn hoá qua _misa_khncc_chuan_mst, viết thường)
+    đang có trong Danh mục Đối tượng (bảng AccountObject) của CSDL MISA đang
+    kết nối — chỉ đọc, không ghi gì. Dùng cho màn Đối Chiếu Ngân Hàng để tự
+    kiểm tra TRƯỚC (không cần bấm "Import UNT/UNC vào MISA" mới biết) giao
+    dịch nào có MST KHÔNG khớp đối tượng nào trong MISA, sẽ bị bỏ qua nếu
+    import (xem _misa_ghi_thu_chi, bo_qua_kh)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        ds = set()
+        for (taxcode,) in cur.execute(
+                "SELECT CompanyTaxCode FROM AccountObject WHERE CompanyTaxCode IS NOT NULL "
+                "AND CompanyTaxCode<>''").fetchall():
+            if taxcode:
+                ds.add(_misa_khncc_chuan_mst(taxcode).lower())
+        return {"database": database, "ds_mst": sorted(ds)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/danh-sach-mst-doi-tuong")
+def misa_sql_danh_sach_mst_doi_tuong(mst: str, database: str = ""):
+    """Danh sách MST đang có trong Danh mục Đối tượng MISA — xem
+    _misa_danh_sach_mst_doi_tuong. Gọi từ doi_chieu_ngan_hang.html (KHÔNG
+    theo cid trên URL, giống /api/misa-sql/import-unt-unc — tự dò cid qua
+    MST công ty)."""
+    mst = (mst or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    return _misa_danh_sach_mst_doi_tuong(cid, database)
 
 
 def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):

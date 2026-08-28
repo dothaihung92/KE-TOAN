@@ -4404,6 +4404,30 @@ function ConfirmScreen({
   // Kết quả xem trước Import UNT/UNC vào MISA — hiện qua ImportMisaModal (thay confirm()/alert() cũ).
   const [misaImportState, setMisaImportState] = useState(null);
   const [misaImportBusy, setMisaImportBusy] = useState(false);
+  // Tập MST (đã chuẩn hoá) đang có trong Danh mục Đối tượng MISA — null = CHƯA dò (bấm "🔍 Kiểm tra
+  // MST với MISA" mới có), Set = đã dò xong. Cho phép lọc trước các giao dịch sẽ KHÔNG import được
+  // (MST không khớp đối tượng nào) ngay trên màn chính, không cần mở modal Import UNT/UNC mới thấy.
+  const [misaMstSet, setMisaMstSet] = useState(null);
+  const [misaMstChecking, setMisaMstChecking] = useState(false);
+  const checkMstMisa = async () => {
+    if (!(co && co.mst)) { showToast && showToast("Công ty chưa có MST", "err"); return; }
+    setMisaMstChecking(true);
+    try {
+      const res = await fetch(`/api/misa-sql/danh-sach-mst-doi-tuong?mst=${encodeURIComponent(co.mst)}`);
+      const d = await res.json();
+      if (d.detail) { showToast ? showToast("Lỗi: " + d.detail, "err") : alert("Lỗi: " + d.detail); return; }
+      setMisaMstSet(new Set(d.ds_mst || []));
+      showToast && showToast(`✓ Đã dò ${(d.ds_mst || []).length} MST trong Danh mục Đối tượng MISA`, "ok");
+    } catch (e) {
+      showToast ? showToast("Lỗi dò MST: " + e.message, "err") : alert("Lỗi dò MST: " + e.message);
+    } finally {
+      setMisaMstChecking(false);
+    }
+  };
+  const normMstJs = s => String(s || "").trim().toLowerCase().replace(/[-. ]/g, "");
+  const isMstErrorRow = r => !!misaMstSet && r.confirmed === "yes" && !r.isInternal && !r.isCash
+    && !!r.confirmedMST && !misaMstSet.has(normMstJs(r.confirmedMST));
+  const mstErrorCount = misaMstSet ? rows.filter(isMstErrorRow).length : 0;
   const [tokhaiXKPickForRow, setTokhaiXKPickForRow] = useState(null);
   React.useEffect(() => { setTokhaiList(getCoToKhai(co.id, "NK")); setTokhaiXKList(getCoToKhai(co.id, "XK")); }, [co.id]);
   const saveTokhaiList = list => { setTokhaiList(list); saveCoToKhai(co.id, list, "NK"); };
@@ -5086,6 +5110,7 @@ function ConfirmScreen({
     if (filter === "namematch" && !isNameMatchRow(r)) return false;
     if (filter === "amtmatch" && !isAmtMatchRow(r)) return false;
     if (filter === "internalsug" && !isInternalSuggestRow(r)) return false;
+    if (filter === "msterror" && !isMstErrorRow(r)) return false;
     if (hachFilter && r.confirmedHach !== hachFilter) return false;
     if (search && !r.tx.desc.toLowerCase().includes(search.toLowerCase()) && !(r.confirmedName || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -6284,6 +6309,13 @@ function ConfirmScreen({
     title:"Ch\u1EC9 c\u1EA7n ch\u1EA1y 1 L\u1EA6N cho ch\u1EE9ng t\u1EEB UNC \u0111\xE3 ghi TR\u01AF\u1EDBC khi c\xF3 b\u1EA3n v\xE1 (kh\xF4ng hi\u1EC7n tr\xEAn MISA) \u2014 t\u1EF1 b\u1ED5 sung GeneralLedger/AccountObjectLedger/BADepositWithdrawList/CustomFieldLedger c\xF2n thi\u1EBFu (kh\xF4ng t\u1EA1o tr\xF9ng), kh\xF4ng \u0111\u1EE5ng g\xEC kh\xE1c",
     onClick:()=>suaGhiSoUntUncCu(co&&co.mst, "unc")
   }, "\uD83D\uDD27 S\u1EEDa UNC c\u0169"),
+  /*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{fontSize:11,color:"#666"},
+    disabled: misaMstChecking,
+    title:"D\u00F2 tr\u01B0\u1EDBc (ch\u1EC9 \u0111\u1ECDc, kh\u00F4ng ghi g\u00EC) danh s\u00E1ch MST \u0111ang c\u00F3 trong Danh m\u1EE5c \u0110\u1ED1i t\u01B0\u1EE3ng c\u1EE7a MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 hi\u1EC7n th\u00EAm m\u1EE5c \"L\u1ED7i MST\" b\u00EAn tr\u00EAn \u0111\u1EC3 l\u1ECDc \u0111\u00FAng c\u00E1c giao d\u1ECBch s\u1EBD KH\u00D4NG import \u0111\u01B0\u1EE3c (MST kh\u00F4ng kh\u1EDBp \u0111\u1ED1i t\u01B0\u1EE3ng n\u00E0o trong MISA), kh\u00F4ng c\u1EA7n b\u1EA5m Import UNT/UNC m\u1EDBi th\u1EA5y",
+    onClick: checkMstMisa
+  }, misaMstChecking ? "\u23F3 \u0110ang d\u00F2..." : "\uD83D\uDD0D Ki\u1EC3m tra MST v\u1EDBi MISA"),
   /*#__PURE__*/React.createElement("button", {
     className: "btn btn-green",
     onClick: handleSaveAndLearn
@@ -6454,7 +6486,7 @@ function ConfirmScreen({
       gap: 6,
       flexWrap: "wrap"
     }
-  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
+  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : []), ...(misaMstSet !== null && mstErrorCount > 0 ? [["msterror", "🚫 Lỗi MST " + mstErrorCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
     key: v,
     className: `tab${filter === v ? " active" : ""}`,
     onClick: () => { setFilter(v); setFocusIdx(0); clearBulkSelection(); },
