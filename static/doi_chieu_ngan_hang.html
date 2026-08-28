@@ -1938,8 +1938,15 @@ function SoDuMisaModal({ d, onClose }) {
             d.chi_o_pm === undefined && React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 8 } },
               "Chưa có chứng từ nào đã xác nhận cho TK này để đối chiếu chi tiết — hãy xác nhận (bấm Đúng) các giao dịch trước rồi đối chiếu lại."),
             d.chi_o_pm !== undefined && !d.chi_o_pm.length && !d.chi_o_misa.length && !d.lech_so_tien.length &&
-              React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 8 } },
-              "Đối chiếu từng chứng từ Thu/Chi trong kỳ không thấy lệch — chênh lệch có thể đến từ số dư TRƯỚC kỳ sao kê này (giao dịch cũ hơn), hoặc còn giao dịch CHƯA xác nhận (bấm Đúng) trong phần mềm."),
+              (d.so_du_dau_ky_misa !== undefined
+                ? (Math.abs(d.phat_sinh_ky_pm - d.phat_sinh_ky_misa) < 1
+                    ? React.createElement("div", { style: { background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8, padding: "10px 14px", marginBottom: 8, fontSize: 12.5, color: "#9a3412" } },
+                        React.createElement("div", { style: { fontWeight: 600, marginBottom: 4 } }, "🔎 Không có chứng từ nào trong kỳ bị lệch — phát sinh trong kỳ KHỚP TUYỆT ĐỐI giữa phần mềm và MISA (" + fmt(d.phat_sinh_ky_pm, "VND") + ")."),
+                        React.createElement("div", null, "Vậy chênh lệch " + fmt(Math.abs(d.lech), "VND") + " đến từ SỐ DƯ ĐẦU KỲ (trước ngày bắt đầu sao kê) trong MISA: " + React.createElement("b", null, fmt(d.so_du_dau_ky_misa, "VND")) + " — hãy kiểm tra lại số dư đầu kỳ THẬT theo sao kê ngân hàng có đúng bằng số này không (thường do các giao dịch từ KỲ TRƯỚC chưa từng đối chiếu)."))
+                    : React.createElement("div", { style: { background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8, padding: "10px 14px", marginBottom: 8, fontSize: 12.5, color: "#9a3412" } },
+                        "Không có chứng từ cụ thể nào lệch, nhưng phát sinh trong kỳ theo phần mềm (" + fmt(d.phat_sinh_ky_pm, "VND") + ") KHÁC với MISA (" + fmt(d.phat_sinh_ky_misa, "VND") + ") — có thể còn giao dịch CHƯA xác nhận (bấm Đúng) trong phần mềm chưa được tính vào đối chiếu này."))
+                : React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 8 } },
+                    "Đối chiếu từng chứng từ Thu/Chi trong kỳ không thấy lệch — chênh lệch có thể đến từ số dư TRƯỚC kỳ sao kê này (giao dịch cũ hơn), hoặc còn giao dịch CHƯA xác nhận (bấm Đúng) trong phần mềm.")),
             nhomLoi("pm", "#dc2626", "🚫 Chứng từ phần mềm có, MISA KHÔNG thấy", d.chi_o_pm,
               x => React.createElement(React.Fragment, null,
                 React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
@@ -4439,9 +4446,18 @@ function ConfirmScreen({
   const [rows,setRows]=useState(results.map(r=>({...r})));
   // Số dư cuối kỳ theo sao kê ngân hàng THẬT (người tự nhập từ bản sao kê, KHÔNG parse tự động từ
   // dữ liệu dán vào — nhiều mẫu sao kê không có cột Số dư riêng) — dùng để đối chiếu với MISA (xem
-  // nút "🔍 Đối chiếu số dư với MISA"). Không lưu localStorage (gõ lại mỗi lần đối chiếu là đủ, tránh
-  // rủi ro hiện nhầm số dư của TK khác nếu quên xoá khi chuyển tab) — chỉ reset về rỗng khi đổi tab.
-  const [soDuCuoiKy, setSoDuCuoiKy] = useState("");
+  // nút "⚖ Đối chiếu số dư với MISA"). LƯU vào đúng session localStorage của tài khoản đang mở (cùng
+  // key với results) — nhớ lại khi đổi tab qua lại/mở lại trình duyệt, và TỰ XOÁ khi xử lý sao kê MỚI
+  // cho tài khoản đó (finishProcess ghi đè nguyên object session mới, không giữ field này lại).
+  const soDuKeyFor = accId => "session_" + (accId ? co.id + "_" + accId : co.id);
+  const loadSoDuCuoiKy = accId => { const s = LS.get(soDuKeyFor(accId)); return (s && s.soDuCuoiKy) || ""; };
+  const [soDuCuoiKy, setSoDuCuoiKyState] = useState(() => loadSoDuCuoiKy(activeTabAccId));
+  const setSoDuCuoiKy = val => {
+    setSoDuCuoiKyState(val);
+    const key = soDuKeyFor(activeTabAccId);
+    const existing = LS.get(key) || {};
+    LS.set(key, { ...existing, soDuCuoiKy: val });
+  };
 
   // ── Tờ Khai Hải quan NK/XK: dùng chung cho cả công ty, để gợi ý/gắn vào GD thanh toán ─────────
   const [tokhaiList, setTokhaiList] = useState(() => getCoToKhai(co.id, "NK"));
@@ -4521,7 +4537,10 @@ function ConfirmScreen({
       // MISA nếu chứng từ đó đã import bằng chính phần mềm này.
       const { giaoDich: gdUnt } = await buildThuChiGiaoDich(rows, "unt", [...tokhaiList, ...tokhaiXKList], misaAcct, accountNo, showToast);
       const { giaoDich: gdUnc } = await buildThuChiGiaoDich(rows, "unc", [...tokhaiList, ...tokhaiXKList], misaAcct, accountNo, showToast);
-      const giaoDichPm = [...gdUnt, ...gdUnc].map(g => ({ so_ct: g.so_ct, so_tien: g.so_tien }));
+      const giaoDichPm = [
+        ...gdUnt.map(g => ({ so_ct: g.so_ct, so_tien: g.so_tien, loai: "unt" })),
+        ...gdUnc.map(g => ({ so_ct: g.so_ct, so_tien: g.so_tien, loai: "unc" }))
+      ];
       const res = await fetch("/api/misa-sql/doi-chieu-so-du-nh", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4688,7 +4707,7 @@ function ConfirmScreen({
       const fr=rematchPending(applyP(rowsCache.current[cacheKey]).map(r=>({...r})),invDV,invDR,coDict,globalDict,co&&co.name);rowsCache.current[cacheKey]=fr;setRows(fr);
       currentTabIdRef.current = accId; // cập nhật ref ngay, tránh lưu nhầm tab
       setActiveTabAccId(accId);
-      setSoDuCuoiKy("");
+      setSoDuCuoiKyState(loadSoDuCuoiKy(accId));
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -4734,7 +4753,7 @@ function ConfirmScreen({
       currentTabIdRef.current = accId;
       setRows(loaded);
       setActiveTabAccId(accId);
-      setSoDuCuoiKy("");
+      setSoDuCuoiKyState(loadSoDuCuoiKy(accId));
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -4743,7 +4762,7 @@ function ConfirmScreen({
       currentTabIdRef.current = accId;
       setRows([]);
       setActiveTabAccId(accId);
-      setSoDuCuoiKy("");
+      setSoDuCuoiKyState(loadSoDuCuoiKy(accId));
       setFilter("all");
       setSearch("");
       setPickerFor(null);

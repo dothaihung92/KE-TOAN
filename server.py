@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.030"
+APP_BUILD = "2026-08-27.031"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22035,7 +22035,11 @@ def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_v
     chính phần mềm này — lấy đúng dòng Sổ Cái có AccountNumber=TK ngân hàng (vế còn lại là 131/331,
     không lấy). Trả 3 nhóm: chi_o_pm (phần mềm có, MISA không thấy — có thể MISA đã xoá/chưa import),
     chi_o_misa (MISA có, phần mềm không gửi lên — có thể người dùng tự ghi tay trong MISA, hoặc TK
-    này bị dùng chung cho sao kê khác), lech_so_tien (có ở CẢ HAI nhưng số tiền khác nhau)."""
+    này bị dùng chung cho sao kê khác), lech_so_tien (có ở CẢ HAI nhưng số tiền khác nhau).
+    Khi lệch VÀ có tu_ngay, tính thêm so_du_dau_ky_misa (số dư TK này trong MISA tính đến TRƯỚC
+    tu_ngay) + phat_sinh_ky_misa (phát sinh ròng trong đúng khoảng tu_ngay..den_ngay theo MISA) —
+    2 số này cộng lại phải BẰNG so_du_misa (chỉ để người dùng tự đối chiếu xem lệch có phải do số dư
+    ĐẦU kỳ - tức phát sinh từ TRƯỚC khoảng sao kê đang xem - hay do phát sinh NGAY TRONG kỳ)."""
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
@@ -22048,7 +22052,19 @@ def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_v
         ket = {"database": database, "account_number": account_number,
                "so_du_misa": so_du_misa, "so_du_ky_vong": so_du_ky_vong,
                "lech": lech, "khop": abs(lech) < 1}
-        if abs(lech) < 1 or not giao_dich_pm:
+        if abs(lech) < 1:
+            return ket
+        if tu_ngay:
+            try:
+                r0 = cur.execute(
+                    "SELECT ISNULL(SUM(DebitAmount),0)-ISNULL(SUM(CreditAmount),0) FROM GeneralLedger "
+                    "WHERE AccountNumber=? AND RefDate<?", (account_number, tu_ngay)).fetchone()
+                so_du_dau_ky_misa = float(r0[0]) if r0 and r0[0] is not None else 0.0
+                ket["so_du_dau_ky_misa"] = so_du_dau_ky_misa
+                ket["phat_sinh_ky_misa"] = round(so_du_misa - so_du_dau_ky_misa)
+            except Exception:
+                pass
+        if not giao_dich_pm:
             return ket
         # Đối chiếu chi tiết chứng từ — lấy đúng dòng Sổ Cái (GeneralLedger) của TK ngân hàng này
         # trong khoảng ngày (xem giải thích ở docstring — KHÔNG dùng BADeposit/BAWithDraw).
@@ -22068,10 +22084,17 @@ def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_v
         except Exception:
             pass
         ds_pm = {}
+        phat_sinh_ky_pm = 0
         for gd in giao_dich_pm:
             so_ct = str(gd.get("so_ct") or "").strip()
-            if so_ct:
-                ds_pm[so_ct] = round(_snum(gd.get("so_tien")))
+            if not so_ct:
+                continue
+            so_tien = round(_snum(gd.get("so_tien")))
+            ds_pm[so_ct] = so_tien
+            # unt (thu tiền) làm TĂNG số dư TK ngân hàng, unc (chi tiền) làm GIẢM — để so được
+            # "phát sinh ròng trong kỳ" 2 bên phần mềm/MISA (bổ sung cho so_du_dau_ky_misa ở trên).
+            phat_sinh_ky_pm += -so_tien if gd.get("loai") == "unc" else so_tien
+        ket["phat_sinh_ky_pm"] = phat_sinh_ky_pm
         chi_o_pm = [{"so_ct": k, "so_tien": v} for k, v in ds_pm.items() if k not in ds_misa]
         chi_o_misa = [{"so_ct": k, "so_tien": v} for k, v in ds_misa.items() if k not in ds_pm]
         lech_so_tien = [{"so_ct": k, "so_tien_pm": ds_pm[k], "so_tien_misa": ds_misa[k]}
