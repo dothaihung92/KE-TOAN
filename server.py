@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.046"
+APP_BUILD = "2026-08-27.047"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18808,6 +18808,60 @@ def _misa_mau_dong_that(cur, table, dieu_kien_where, tham_so=()):
         return dict(zip(cols, best))
     except Exception:
         return {}
+
+
+def _misa_chan_doan_so_theo_doi_ccdc(cid, database):
+    """CHỈ ĐỌC — chẩn đoán vì sao 'Sổ theo dõi CCDC' trong MISA vẫn hiện "Giá
+    trị đã phân bổ = 0"/"Số kỳ còn lại" y hệt lúc Ghi tăng dù đã chạy
+    _misa_phan_bo_ccdc thật (build đã UPDATE lại SUIncrement.RemainingAllocationTime/
+    AllocatedAmount/RemaingAmount). Trả về: (1) TOÀN BỘ cột trên SUIncrement có tên
+    chứa 'remain'/'alloc'/'amount' (không đoán bừa 3 tên cột cũ nữa — liệt kê hết
+    để so khớp bằng mắt với số liệu Sổ theo dõi), (2) giá trị THẬT hiện tại của các
+    cột đó cho từng CCDC, (3) đếm+tổng thật từ SUAllocationDetailExpense theo đúng
+    SupplyID — để xác nhận dòng chi tiết có được ghi đúng SupplyID hay không."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cols_su = _misa_cot_bang_that(cur, "SUIncrement")
+        if not cols_su:
+            raise HTTPException(400, "Không tìm thấy bảng SUIncrement trong CSDL MISA đang kết nối.")
+        id_col = _misa_chon_cot(cols_su, "SupplyID", "RefID")
+        ma_col = _misa_chon_cot(cols_su, "SupplyCode")
+        cot_lien_quan = [real for low, (real, _t) in cols_su.items()
+                         if any(k in low for k in ("remain", "alloc", "amount"))]
+        if id_col not in cot_lien_quan:
+            cot_lien_quan = [id_col] + cot_lien_quan
+        if ma_col not in cot_lien_quan:
+            cot_lien_quan = [ma_col] + cot_lien_quan
+        sql = "SELECT [%s] FROM SUIncrement WHERE [%s] LIKE 'CCDC%%'" % (
+            "],[".join(cot_lien_quan), ma_col)
+        rows = cur.execute(sql).fetchall()
+        ket = []
+        for r in rows:
+            d = dict(zip(cot_lien_quan, r))
+            su_id = d.get(id_col)
+            cnt, tong = 0, 0
+            try:
+                rr = cur.execute(
+                    "SELECT COUNT(*), ISNULL(SUM(AllocationAmount),0) FROM "
+                    "SUAllocationDetailExpense WHERE SupplyID=?", su_id).fetchone()
+                cnt, tong = int(rr[0] or 0), float(rr[1] or 0)
+            except Exception:
+                pass
+            d["_so_dong_SUAllocationDetailExpense_that"] = cnt
+            d["_tong_AllocationAmount_that"] = tong
+            ket.append({k: (str(v) if v is not None else None) for k, v in d.items()})
+        return {"database": database, "cot_da_kiem_tra": cot_lien_quan, "danh_sach": ket}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-so-theo-doi-ccdc/{cid}")
+def misa_sql_chan_doan_so_theo_doi_ccdc(cid: int, database: str = ""):
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_so_theo_doi_ccdc(cid, database)
 
 
 def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):

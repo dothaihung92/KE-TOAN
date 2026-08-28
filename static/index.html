@@ -5648,11 +5648,26 @@ function phanBoCcdcMo(){
     <input type="month" id="pbccThangBd" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
     <label style="font-size:13px;font-weight:600">Số tháng xử lý</label>
     <input type="number" id="pbccSoThang" value="12" min="1" max="60" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
-    <div style="text-align:right">
+    <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn ghost sm" onclick="chanDoanSoTheoDoiCcdc()" title="CHỈ ĐỌC — dò xem 'Sổ theo dõi CCDC' đọc đúng cột nào trên SUIncrement">🔬 Chẩn đoán Sổ theo dõi CCDC</button>
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
       <button class="btn sm" style="background:#7a4fb5" onclick="phanBoCcdcXemTruoc()">🔎 Xem trước</button>
     </div>`;
   misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function chanDoanSoTheoDoiCcdc(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang dò dữ liệu (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-so-theo-doi-ccdc/${current}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả dò (CHỈ ĐỌC, không sửa/ghi gì) — database: <b>${misaEsc(d.database||'')}</b>. Copy toàn bộ nội dung dưới đây gửi lại để tìm đúng cột "Sổ theo dõi CCDC" thật sự đọc.</div>
+      <pre style="max-height:65vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function phanBoCcdcXemTruoc(){
   const thangBd=document.getElementById('pbccThangBd').value||'';
