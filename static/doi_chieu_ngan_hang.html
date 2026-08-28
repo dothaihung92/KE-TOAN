@@ -1879,6 +1879,90 @@ function ImportMisaModal({ state, busy, onClose, onConfirm }) {
   ));
 }
 
+// Modal hiện kết quả đối chiếu số dư cuối kỳ TK ngân hàng (phần mềm ↔ MISA) — xem
+// _misa_doi_chieu_so_du_nh ở server.py. Khớp thì hiện xanh, lệch thì hiện đỏ + (nếu có đủ dữ liệu
+// đối chiếu chi tiết) 3 mục xổ ra được: chứng từ chỉ có ở phần mềm / chỉ có ở MISA / có ở cả 2 nhưng
+// lệch số tiền — đúng chứng từ cần người dùng tự kiểm tra lại.
+function SoDuMisaModal({ d, onClose }) {
+  const [open, setOpen] = useState({ pm: false, misa: false, lech: false });
+  React.useEffect(() => {
+    const h = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+  const nhomLoi = (key, mau, tieuDe, ds, render) => ds && ds.length > 0 && React.createElement("div", { style: { marginBottom: 8 } },
+    React.createElement("div", {
+      onClick: () => setOpen(s => ({ ...s, [key]: !s[key] })),
+      style: {
+        cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+        background: mau + "18", border: "1px solid " + mau + "80", borderRadius: 8,
+        padding: "8px 12px", color: mau, fontWeight: 600, fontSize: 13
+      }
+    },
+      React.createElement("span", null, tieuDe + " (" + ds.length + ")"),
+      React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 400 } }, open[key] ? "▲ Ẩn" : "▼ Xem")
+    ),
+    open[key] && React.createElement("div", {
+      style: { marginTop: 6, maxHeight: 200, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8 }
+    }, ds.map((x, i) => React.createElement("div", {
+      key: i,
+      style: { padding: "6px 10px", fontSize: 12, borderBottom: i < ds.length - 1 ? "1px solid var(--border)" : "none" }
+    }, render(x))))
+  );
+  return React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
+    onClick: onClose
+  }, React.createElement("div", {
+    style: { background: "#fff", borderRadius: 12, width: "96vw", maxWidth: 640, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.3)" },
+    onClick: e => e.stopPropagation()
+  },
+    React.createElement("div", { style: { padding: "14px 18px", borderBottom: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontWeight: 700, fontSize: 16 } }, "⚖ Đối chiếu số dư TK " + (d.account_number || "")),
+      React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginTop: 2 } }, "CSDL đang kết nối: " + (d.database || ""))
+    ),
+    React.createElement("div", { style: { padding: "16px 18px", overflow: "auto", flex: 1 } },
+      React.createElement("div", { style: { display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" } },
+        React.createElement("div", { style: { flex: "1 1 160px", background: "#f7f7f7", borderRadius: 8, padding: "8px 12px" } },
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text2)" } }, "Số dư theo sao kê"),
+          React.createElement("div", { style: { fontSize: 17, fontWeight: 700 } }, fmt(d.so_du_ky_vong, "VND"))),
+        React.createElement("div", { style: { flex: "1 1 160px", background: "#f7f7f7", borderRadius: 8, padding: "8px 12px" } },
+          React.createElement("div", { style: { fontSize: 11, color: "var(--text2)" } }, "Số dư trong MISA"),
+          React.createElement("div", { style: { fontSize: 17, fontWeight: 700 } }, fmt(d.so_du_misa, "VND")))
+      ),
+      d.khop
+        ? React.createElement("div", { style: { background: "#f0fdf4", border: "1px solid var(--green)", borderRadius: 8, padding: "10px 14px", color: "var(--green-d)", fontWeight: 600, marginBottom: 8 } },
+            "✓ Khớp — số dư TK này trong MISA đúng với sao kê.")
+        : React.createElement("div", null,
+            React.createElement("div", { style: { background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", color: "#dc2626", fontWeight: 600, marginBottom: 8 } },
+              "⚠ Lệch " + fmt(Math.abs(d.lech), "VND") + " — MISA đang " + (d.lech > 0 ? "CAO hơn" : "THẤP hơn") + " sao kê."),
+            d.chi_o_pm === undefined && React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 8 } },
+              "Chưa có chứng từ nào đã xác nhận cho TK này để đối chiếu chi tiết — hãy xác nhận (bấm Đúng) các giao dịch trước rồi đối chiếu lại."),
+            d.chi_o_pm !== undefined && !d.chi_o_pm.length && !d.chi_o_misa.length && !d.lech_so_tien.length &&
+              React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 8 } },
+              "Đối chiếu từng chứng từ Thu/Chi trong kỳ không thấy lệch — chênh lệch có thể đến từ số dư TRƯỚC kỳ sao kê này (giao dịch cũ hơn), hoặc còn giao dịch CHƯA xác nhận (bấm Đúng) trong phần mềm."),
+            nhomLoi("pm", "#dc2626", "🚫 Chứng từ phần mềm có, MISA KHÔNG thấy", d.chi_o_pm,
+              x => React.createElement(React.Fragment, null,
+                React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
+                React.createElement("div", { style: { color: "var(--text2)" } }, fmt(x.so_tien, "VND") + " — chưa import hoặc đã bị xoá trong MISA"))),
+            nhomLoi("misa", "#a05a00", "📋 Chứng từ có trong MISA, phần mềm không gửi", d.chi_o_misa,
+              x => React.createElement(React.Fragment, null,
+                React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
+                React.createElement("div", { style: { color: "var(--text2)" } }, fmt(x.so_tien, "VND") + " — có thể do người dùng tự ghi tay trong MISA"))),
+            nhomLoi("lech", "#7c3aed", "⚠ Lệch số tiền giữa 2 bên", d.lech_so_tien,
+              x => React.createElement(React.Fragment, null,
+                React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
+                React.createElement("div", { style: { color: "var(--text2)" } }, "Phần mềm: " + fmt(x.so_tien_pm, "VND") + " — MISA: " + fmt(x.so_tien_misa, "VND"))))
+          )
+    ),
+    React.createElement("div", { style: { padding: "12px 18px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end" } },
+      React.createElement("button", {
+        onClick: onClose,
+        style: { height: 34, padding: "0 18px", borderRadius: 6, border: "1px solid var(--border)", background: "#fff", cursor: "pointer", fontSize: 13 }
+      }, "Đóng")
+    )
+  ));
+}
+
 // ── Xuất hạch toán LÃI/LỖ chênh lệch tỷ giá riêng (Phiếu kế toán khác) ──────────────────────────
 // Theo đúng mẫu "Chứng từ nghiệp vụ khác" của MISA — dùng cho khoản điều chỉnh KHÔNG phát sinh tiền
 // qua ngân hàng (chỉ là bút toán sổ sách), nên tách khỏi UNC/UNT để không ghi trùng/lệch số tiền chi
@@ -4353,6 +4437,11 @@ function ConfirmScreen({
 
   // ── State và refs phải khai báo trước useEffect sử dụng chúng ──────────────
   const [rows,setRows]=useState(results.map(r=>({...r})));
+  // Số dư cuối kỳ theo sao kê ngân hàng THẬT (người tự nhập từ bản sao kê, KHÔNG parse tự động từ
+  // dữ liệu dán vào — nhiều mẫu sao kê không có cột Số dư riêng) — dùng để đối chiếu với MISA (xem
+  // nút "🔍 Đối chiếu số dư với MISA"). Không lưu localStorage (gõ lại mỗi lần đối chiếu là đủ, tránh
+  // rủi ro hiện nhầm số dư của TK khác nếu quên xoá khi chuyển tab) — chỉ reset về rỗng khi đổi tab.
+  const [soDuCuoiKy, setSoDuCuoiKy] = useState("");
 
   // ── Tờ Khai Hải quan NK/XK: dùng chung cho cả công ty, để gợi ý/gắn vào GD thanh toán ─────────
   const [tokhaiList, setTokhaiList] = useState(() => getCoToKhai(co.id, "NK"));
@@ -4393,6 +4482,62 @@ function ConfirmScreen({
   const isMstErrorRow = r => !!misaMstSet && r.confirmed === "yes" && !r.isInternal && !r.isCash
     && !!r.confirmedMST && !misaMstSet.has(normMstJs(r.confirmedMST)) && !(misaMaSet && misaMaSet.has(normMaJs(r.confirmedMST)));
   const mstErrorCount = misaMstSet ? rows.filter(isMstErrorRow).length : 0;
+  // ── Đối chiếu số dư cuối kỳ TK ngân hàng với MISA ───────────────────────────────────────────────
+  const [misaBalanceChecking, setMisaBalanceChecking] = useState(false);
+  const [misaBalanceResult, setMisaBalanceResult] = useState(null);
+  const dateRangeOfRows = () => {
+    let minD = null, maxD = null, minS = "", maxS = "";
+    rows.forEach(r => {
+      const s = (r.tx.date || "").trim();
+      const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+      if (!m) return;
+      const d = new Date(+m[3], +m[2] - 1, +m[1]);
+      if (!minD || d < minD) { minD = d; minS = s; }
+      if (!maxD || d > maxD) { maxD = d; maxS = s; }
+    });
+    return { tuNgay: minS, denNgay: maxS };
+  };
+  const doiChieuSoDuMisa = async () => {
+    if (!(co && co.mst)) { showToast && showToast("Công ty chưa có MST", "err"); return; }
+    const soDuNum = parseNum(soDuCuoiKy);
+    if (!soDuCuoiKy || !(soDuNum >= 0)) {
+      showToast ? showToast("Nhập số dư cuối kỳ theo sao kê trước khi đối chiếu", "err")
+                : alert("Nhập số dư cuối kỳ theo sao kê trước khi đối chiếu");
+      return;
+    }
+    const { tuNgay, denNgay } = dateRangeOfRows();
+    if (!denNgay) {
+      showToast ? showToast("Chưa có giao dịch nào để xác định ngày cuối kỳ", "err")
+                : alert("Chưa có giao dịch nào để xác định ngày cuối kỳ");
+      return;
+    }
+    const misaAcct = (activeTabAcc && activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc && activeTabAcc.label, activeTabAcc && activeTabAcc.currency, []);
+    const accountNo = (activeTabAcc && activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc && activeTabAcc.label);
+    setMisaBalanceChecking(true);
+    setMisaBalanceResult(null);
+    try {
+      // Dựng lại ĐÚNG danh sách chứng từ (so_ct/so_tien) mà phần mềm đã/sẽ ghi cho TK này — cùng công
+      // thức buildVoucherNo dùng lúc Import UNT/UNC thật, để khớp được với RefNoFinance thật trong
+      // MISA nếu chứng từ đó đã import bằng chính phần mềm này.
+      const { giaoDich: gdUnt } = await buildThuChiGiaoDich(rows, "unt", [...tokhaiList, ...tokhaiXKList], misaAcct, accountNo, showToast);
+      const { giaoDich: gdUnc } = await buildThuChiGiaoDich(rows, "unc", [...tokhaiList, ...tokhaiXKList], misaAcct, accountNo, showToast);
+      const giaoDichPm = [...gdUnt, ...gdUnc].map(g => ({ so_ct: g.so_ct, so_tien: g.so_tien }));
+      const res = await fetch("/api/misa-sql/doi-chieu-so-du-nh", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mst: co.mst, account_number: misaAcct, tu_ngay: tuNgay, den_ngay: denNgay,
+          so_du_ky_vong: soDuNum, giao_dich_pm: giaoDichPm
+        })
+      });
+      const d = await res.json();
+      if (d.detail) { showToast ? showToast("Lỗi: " + d.detail, "err") : alert("Lỗi: " + d.detail); return; }
+      setMisaBalanceResult({ ...d, account_number: misaAcct });
+    } catch (e) {
+      showToast ? showToast("Lỗi đối chiếu số dư: " + e.message, "err") : alert("Lỗi đối chiếu số dư: " + e.message);
+    } finally {
+      setMisaBalanceChecking(false);
+    }
+  };
   const [tokhaiXKPickForRow, setTokhaiXKPickForRow] = useState(null);
   React.useEffect(() => { setTokhaiList(getCoToKhai(co.id, "NK")); setTokhaiXKList(getCoToKhai(co.id, "XK")); }, [co.id]);
   const saveTokhaiList = list => { setTokhaiList(list); saveCoToKhai(co.id, list, "NK"); };
@@ -4543,6 +4688,7 @@ function ConfirmScreen({
       const fr=rematchPending(applyP(rowsCache.current[cacheKey]).map(r=>({...r})),invDV,invDR,coDict,globalDict,co&&co.name);rowsCache.current[cacheKey]=fr;setRows(fr);
       currentTabIdRef.current = accId; // cập nhật ref ngay, tránh lưu nhầm tab
       setActiveTabAccId(accId);
+      setSoDuCuoiKy("");
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -4588,6 +4734,7 @@ function ConfirmScreen({
       currentTabIdRef.current = accId;
       setRows(loaded);
       setActiveTabAccId(accId);
+      setSoDuCuoiKy("");
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -4596,6 +4743,7 @@ function ConfirmScreen({
       currentTabIdRef.current = accId;
       setRows([]);
       setActiveTabAccId(accId);
+      setSoDuCuoiKy("");
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -6271,6 +6419,20 @@ function ConfirmScreen({
     title:"D\u00F2 tr\u01B0\u1EDBc (ch\u1EC9 \u0111\u1ECDc, kh\u00F4ng ghi g\u00EC) danh s\u00E1ch MST \u0111ang c\u00F3 trong Danh m\u1EE5c \u0110\u1ED1i t\u01B0\u1EE3ng c\u1EE7a MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 hi\u1EC7n th\u00EAm m\u1EE5c \"L\u1ED7i MST\" b\u00EAn tr\u00EAn \u0111\u1EC3 l\u1ECDc \u0111\u00FAng c\u00E1c giao d\u1ECBch s\u1EBD KH\u00D4NG import \u0111\u01B0\u1EE3c (MST kh\u00F4ng kh\u1EDBp \u0111\u1ED1i t\u01B0\u1EE3ng n\u00E0o trong MISA), kh\u00F4ng c\u1EA7n b\u1EA5m Import UNT/UNC m\u1EDBi th\u1EA5y",
     onClick: checkMstMisa
   }, misaMstChecking ? "\u23F3 \u0110ang d\u00F2..." : "\uD83D\uDD0D Ki\u1EC3m tra MST v\u1EDBi MISA"),
+  /*#__PURE__*/React.createElement("input", {
+    value: soDuCuoiKy,
+    onChange: e => setSoDuCuoiKy(e.target.value),
+    placeholder: "S\u1ED1 d\u01B0 cu\u1ED1i k\u1EF3 theo sao k\u00EA",
+    title: "S\u1ED1 d\u01B0 cu\u1ED1i k\u1EF3 TH\u1EACT theo sao k\u00EA ng\u00E2n h\u00E0ng (t\u1EF1 l\u1EA5y t\u1EEB d\u00F2ng t\u1ED5ng k\u1EBFt/s\u1ED1 d\u01B0 cu\u1ED1i tr\u00EAn sao k\u00EA) \u2014 d\u00F9ng \u0111\u1EC3 \u0111\u1ED1i chi\u1EBFu v\u1EDBi s\u1ED1 d\u01B0 TK n\u00E0y trong MISA",
+    style: { height: 30, width: 190, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 12 }
+  }),
+  /*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{fontSize:11,color:"#7c3aed",borderColor:"#d4c5f9"},
+    disabled: misaBalanceChecking,
+    title:"So s\u1ED1 d\u01B0 cu\u1ED1i k\u1EF3 nh\u1EADp \u1EDF \u00F4 b\u00EAn tr\u00E1i v\u1EDBi s\u1ED1 d\u01B0 TK n\u00E0y TRONG MISA (t\u00EDnh t\u1EEB S\u1ED5 C\u00E1i, lu\u1EF9 k\u1EBF \u0111\u1EBFn ng\u00E0y cu\u1ED1i c\u00F9ng c\u1EE7a sao k\u00EA) \u2014 n\u1EBFu l\u1EC7ch, t\u1EF1 \u0111\u1ED1i chi\u1EBFu ti\u1EBFp t\u1EEBng ch\u1EE9ng t\u1EEB Thu/Chi \u0111\u1EC3 t\u00ECm \u0111\u00FAng l\u1EC7nh g\u00E2y l\u1EC7ch",
+    onClick: doiChieuSoDuMisa
+  }, misaBalanceChecking ? "\u23F3 \u0110ang \u0111\u1ED1i chi\u1EBFu..." : "\u2696 \u0110\u1ED1i chi\u1EBFu s\u1ED1 d\u01B0 v\u1EDBi MISA"),
   /*#__PURE__*/React.createElement("button", {
     className: "btn btn-green",
     onClick: handleSaveAndLearn
@@ -6793,6 +6955,9 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
       setMisaImportBusy(false);
       if (real) setMisaImportState(null);
     }
+  }), misaBalanceResult && /*#__PURE__*/React.createElement(SoDuMisaModal, {
+    d: misaBalanceResult,
+    onClose: () => setMisaBalanceResult(null)
   }));
 }
 

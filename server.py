@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.028"
+APP_BUILD = "2026-08-27.029"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22013,6 +22013,100 @@ def misa_sql_import_unt_unc(body: dict = Body(...)):
     ghi_de = bool(body.get("ghi_de", False))
     giao_dich = body.get("giao_dich") or []
     return _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=preview, ghi_de=ghi_de)
+
+
+def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_vong,
+                              tu_ngay=None, giao_dich_pm=None):
+    """Đối chiếu số dư cuối kỳ 1 TK ngân hàng giữa phần mềm và MISA — CHỈ ĐỌC, không ghi gì.
+    account_number: mã TK MISA (VD '1121', '1121-MB') — số dư MISA tính bằng công thức chuẩn của TK
+    loại Tài sản (Nợ): SUM(DebitAmount)-SUM(CreditAmount) trong GeneralLedger WHERE AccountNumber=?
+    AND RefDate<=den_ngay (luỹ kế từ giao dịch đầu tiên — không cần biết số dư đầu kỳ riêng, vì đã
+    gộp sẵn trong luỹ kế Sổ Cái). den_ngay/tu_ngay: datetime (đã parse qua _misa_doc_ngay).
+    so_du_ky_vong: số dư cuối kỳ theo sao kê ngân hàng thật (người dùng nhập/dán vào từ Kế Toán AI).
+    Nếu lệch (>=1 đồng, tránh làm tròn) VÀ có giao_dich_pm (danh sách chứng từ phần mềm đã xác nhận
+    cho TK này, [{so_ct, so_tien}]) thì đối chiếu THÊM với chứng từ Thu/Chi tiền THẬT (BADeposit/
+    BAWithDraw, TK này, trong khoảng tu_ngay..den_ngay nếu có tu_ngay) để tìm ĐÚNG lệnh nào gây lệch —
+    khớp theo RefNoFinance (Số chứng từ, phần mềm tự sinh qua buildVoucherNo lúc build giao_dich, nên
+    khớp được CHÍNH XÁC với so_ct phần mềm gửi lên nếu chứng từ đó đã import bằng chính phần mềm này).
+    Trả 3 nhóm: chi_o_pm (phần mềm có, MISA không thấy — có thể MISA đã xoá/chưa import),
+    chi_o_misa (MISA có, phần mềm không gửi lên — có thể người dùng tự ghi tay trong MISA, hoặc TK
+    này bị dùng chung cho sao kê khác), lech_so_tien (có ở CẢ HAI nhưng số tiền khác nhau)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        row = cur.execute(
+            "SELECT ISNULL(SUM(DebitAmount),0)-ISNULL(SUM(CreditAmount),0) FROM GeneralLedger "
+            "WHERE AccountNumber=? AND RefDate<=?", (account_number, den_ngay)).fetchone()
+        so_du_misa = float(row[0]) if row and row[0] is not None else 0.0
+        so_du_ky_vong = _snum(so_du_ky_vong)
+        lech = round(so_du_misa - so_du_ky_vong)
+        ket = {"database": database, "account_number": account_number,
+               "so_du_misa": so_du_misa, "so_du_ky_vong": so_du_ky_vong,
+               "lech": lech, "khop": abs(lech) < 1}
+        if abs(lech) < 1 or not giao_dich_pm:
+            return ket
+        # Đối chiếu chi tiết chứng từ Thu/Chi (BADeposit/BAWithDraw) của TK này trong khoảng ngày.
+        ds_misa = {}
+        for master_tbl, tk_cot in (("BADeposit", "CreditAccount"), ("BAWithDraw", "DebitAccount")):
+            try:
+                sql = f"SELECT RefNoFinance, TotalAmount FROM {master_tbl} WHERE {tk_cot}=?"
+                params = [account_number]
+                if tu_ngay:
+                    sql += " AND RefDate>=?"
+                    params.append(tu_ngay)
+                sql += " AND RefDate<=?"
+                params.append(den_ngay)
+                for rn, amt in cur.execute(sql, params).fetchall():
+                    if rn:
+                        ds_misa[str(rn).strip()] = float(amt or 0)
+            except Exception:
+                pass
+        ds_pm = {}
+        for gd in giao_dich_pm:
+            so_ct = str(gd.get("so_ct") or "").strip()
+            if so_ct:
+                ds_pm[so_ct] = round(_snum(gd.get("so_tien")))
+        chi_o_pm = [{"so_ct": k, "so_tien": v} for k, v in ds_pm.items() if k not in ds_misa]
+        chi_o_misa = [{"so_ct": k, "so_tien": v} for k, v in ds_misa.items() if k not in ds_pm]
+        lech_so_tien = [{"so_ct": k, "so_tien_pm": ds_pm[k], "so_tien_misa": ds_misa[k]}
+                        for k in ds_pm if k in ds_misa and abs(ds_pm[k] - ds_misa[k]) >= 1]
+        ket.update({"chi_o_pm": chi_o_pm, "chi_o_misa": chi_o_misa, "lech_so_tien": lech_so_tien})
+        return ket
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/doi-chieu-so-du-nh")
+def misa_sql_doi_chieu_so_du_nh(body: dict = Body(...)):
+    """Đối chiếu số dư cuối kỳ TK ngân hàng — xem _misa_doi_chieu_so_du_nh. Gọi
+    từ doi_chieu_ngan_hang.html (KHÔNG theo cid trên URL, giống
+    /api/misa-sql/import-unt-unc — tự dò cid qua MST công ty).
+    body: {mst, database?, account_number, tu_ngay?, den_ngay (dd/mm/yyyy),
+    so_du_ky_vong, giao_dich_pm?: [{so_ct, so_tien}]}."""
+    mst = (body.get("mst") or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    account_number = (body.get("account_number") or "").strip()
+    if not account_number:
+        raise HTTPException(400, "Thiếu mã tài khoản MISA (VD '1121').")
+    den_ngay = _misa_doc_ngay(body.get("den_ngay"))
+    if not den_ngay:
+        raise HTTPException(400, "Thiếu/sai ngày cuối kỳ cần đối chiếu (dd/mm/yyyy).")
+    den_ngay = den_ngay.replace(hour=23, minute=59, second=59)
+    tu_ngay = _misa_doc_ngay(body.get("tu_ngay"))
+    giao_dich_pm = body.get("giao_dich_pm") or []
+    return _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay,
+                                    body.get("so_du_ky_vong"), tu_ngay=tu_ngay,
+                                    giao_dich_pm=giao_dich_pm)
 
 
 def _misa_danh_sach_mst_doi_tuong(cid, database):
