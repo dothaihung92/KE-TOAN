@@ -1719,9 +1719,9 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
     const hach = r.confirmedHach || hachMacDinh;
     const linkedTk = r.confirmedToKhaiId ? (tokhaiList || []).find(t => t.id === r.confirmedToKhaiId) : null;
     const objectName = (r.isInternal || r.isCash) ? "" : ((linkedTk && linkedTk.nhaCungCap) || r.confirmedName || "");
-    // Bỏ qua giao dịch không có đối tượng (nội bộ/tiền mặt) hoặc "KL" (khách lẻ, chỉ có ý nghĩa khi
-    // XUẤT EXCEL để MISA tự nhận — server import thẳng SQL không tạo "khách lẻ", phải có MST thật
-    // khớp đối tượng đã có trong Danh mục MISA mới ghi được, xem _misa_ghi_thu_chi).
+    // Bỏ qua giao dịch không có đối tượng (nội bộ/tiền mặt). "MST" gửi đi có thể là MST thuế thật
+    // HOẶC mã đối tượng dạng chữ (VD "KL" - Khách lẻ) — server tự khớp theo MST trước, không có thì
+    // thử lại theo Mã đối tượng đã có sẵn trong Danh mục MISA (xem _misa_ghi_thu_chi/doi_tuong_theo_ma).
     if (r.isInternal || r.isCash) return;
     const mst = r.confirmedMST || "";
     if (!mst) return;
@@ -4363,10 +4363,14 @@ function ConfirmScreen({
   // Kết quả xem trước Import UNT/UNC vào MISA — hiện qua ImportMisaModal (thay confirm()/alert() cũ).
   const [misaImportState, setMisaImportState] = useState(null);
   const [misaImportBusy, setMisaImportBusy] = useState(false);
-  // Tập MST (đã chuẩn hoá) đang có trong Danh mục Đối tượng MISA — null = CHƯA dò (bấm "🔍 Kiểm tra
-  // MST với MISA" mới có), Set = đã dò xong. Cho phép lọc trước các giao dịch sẽ KHÔNG import được
-  // (MST không khớp đối tượng nào) ngay trên màn chính, không cần mở modal Import UNT/UNC mới thấy.
+  // Tập MST + tập Mã đối tượng (đã chuẩn hoá) đang có trong Danh mục Đối tượng MISA — null = CHƯA dò
+  // (bấm "🔍 Kiểm tra MST với MISA" mới có), Set = đã dò xong. Cho phép lọc trước các giao dịch sẽ
+  // KHÔNG import được ngay trên màn chính, không cần mở modal Import UNT/UNC mới thấy. Khớp theo MST
+  // TRƯỚC, không có thì thử theo Mã đối tượng — vì có dòng "MST" thực ra được gán mã đối tượng dạng
+  // chữ (VD "KL" - Khách lẻ, không có MST thuế thật) chứ không phải MST, giống hệt cách
+  // _misa_ghi_thu_chi khớp lúc ghi thật (xem doi_tuong/doi_tuong_theo_ma ở server.py).
   const [misaMstSet, setMisaMstSet] = useState(null);
+  const [misaMaSet, setMisaMaSet] = useState(null);
   const [misaMstChecking, setMisaMstChecking] = useState(false);
   const checkMstMisa = async () => {
     if (!(co && co.mst)) { showToast && showToast("Công ty chưa có MST", "err"); return; }
@@ -4376,7 +4380,8 @@ function ConfirmScreen({
       const d = await res.json();
       if (d.detail) { showToast ? showToast("Lỗi: " + d.detail, "err") : alert("Lỗi: " + d.detail); return; }
       setMisaMstSet(new Set(d.ds_mst || []));
-      showToast && showToast(`✓ Đã dò ${(d.ds_mst || []).length} MST trong Danh mục Đối tượng MISA`, "ok");
+      setMisaMaSet(new Set(d.ds_ma || []));
+      showToast && showToast(`✓ Đã dò ${(d.ds_mst || []).length} MST + ${(d.ds_ma || []).length} mã đối tượng trong MISA`, "ok");
     } catch (e) {
       showToast ? showToast("Lỗi dò MST: " + e.message, "err") : alert("Lỗi dò MST: " + e.message);
     } finally {
@@ -4384,8 +4389,9 @@ function ConfirmScreen({
     }
   };
   const normMstJs = s => String(s || "").trim().toLowerCase().replace(/[-. ]/g, "");
+  const normMaJs = s => String(s || "").trim().toLowerCase();
   const isMstErrorRow = r => !!misaMstSet && r.confirmed === "yes" && !r.isInternal && !r.isCash
-    && !!r.confirmedMST && !misaMstSet.has(normMstJs(r.confirmedMST));
+    && !!r.confirmedMST && !misaMstSet.has(normMstJs(r.confirmedMST)) && !(misaMaSet && misaMaSet.has(normMaJs(r.confirmedMST)));
   const mstErrorCount = misaMstSet ? rows.filter(isMstErrorRow).length : 0;
   const [tokhaiXKPickForRow, setTokhaiXKPickForRow] = useState(null);
   React.useEffect(() => { setTokhaiList(getCoToKhai(co.id, "NK")); setTokhaiXKList(getCoToKhai(co.id, "XK")); }, [co.id]);
