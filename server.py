@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.045"
+APP_BUILD = "2026-08-27.046"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19107,6 +19107,38 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                     cur.execute("INSERT INTO SUAllocationDetailPost ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
                                [post_row[c] for c in lc])
+        if not preview:
+            # Sổ theo dõi CCDC trong MISA (Công cụ dụng cụ > Sổ theo dõi CCDC) đọc
+            # TRỰC TIẾP các cột RemainingAllocationTime/AllocatedAmount/RemaingAmount
+            # trên CHÍNH bảng SUIncrement để hiện "Số kỳ phân bổ còn lại"/"Giá trị đã
+            # phân bổ"/"Giá trị còn lại" — KHÁC với cách _misa_phan_bo_ccdc tự tính
+            # TotalAmount chứng từ (đọc SUAllocationDetailExpense thật, đáng tin hơn
+            # cho MỤC ĐÍCH TÍNH TOÁN của hàm này). Xác nhận qua ảnh chụp Sổ theo dõi
+            # CCDC thật của người dùng: dù đã có đủ chứng từ PBCC, lưới này vẫn hiện
+            # "Giá trị đã phân bổ = 0"/"Số kỳ còn lại" y hệt lúc Ghi tăng — vì các cột
+            # này chỉ được ghi 1 LẦN lúc Ghi tăng CCDC (_misa_ghi_tang_ccdc) rồi KHÔNG
+            # BAO GIỜ được cập nhật lại. st["con_lai_ky"]/st["con_lai_tien"] ở đây đã
+            # là số ĐÚNG sau khi trừ hết các kỳ (kể cả kỳ đã có TỪ TRƯỚC lần chạy này)
+            # — ghi lại luôn, kể cả CCDC không có phát sinh gì trong lần chạy này, để
+            # tự "chữa lành" dữ liệu cũ còn sai từ các lần chạy trước khi có bản sửa này.
+            ral_col = _misa_chon_cot(cols_su, "RemainingAllocationTime")
+            aa_col = _misa_chon_cot(cols_su, "AllocatedAmount")
+            ra_col = _misa_chon_cot(cols_su, "RemaingAmount", "RemainingAmount")
+            if ral_col or aa_col or ra_col:
+                for su_id, st in trang_thai.items():
+                    sets, vals = [], []
+                    if ral_col:
+                        sets.append("[%s]=?" % ral_col)
+                        vals.append(max(int(st["con_lai_ky"]), 0))
+                    if aa_col:
+                        sets.append("[%s]=?" % aa_col)
+                        vals.append(max(round(st["tong_tien"] - st["con_lai_tien"]), 0))
+                    if ra_col:
+                        sets.append("[%s]=?" % ra_col)
+                        vals.append(max(round(st["con_lai_tien"]), 0))
+                    vals.append(su_id)
+                    cur.execute("UPDATE SUIncrement SET %s WHERE [%s]=?" %
+                               (",".join(sets), id_col), vals)
         if preview:
             conn.rollback()
         else:
@@ -19472,6 +19504,32 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
                     cur.execute("INSERT INTO FADepreciationDetailPost ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
                                [post_row[c] for c in lc])
+        if not preview:
+            # Sổ theo dõi TSCĐ trong MISA đọc TRỰC TIẾP các cột LifeTimeRemainingInMonth/
+            # AccumDepreciationAmount/RemainingAmount trên CHÍNH bảng FixedAsset để hiện
+            # "Số kỳ khấu hao còn lại"/"Hao mòn luỹ kế"/"Giá trị còn lại" — các cột này chỉ
+            # được ghi 1 LẦN lúc Ghi tăng TSCĐ (_misa_ghi_tang_tscd) rồi KHÔNG BAO GIỜ được
+            # cập nhật lại (bài học giống hệt CCDC — xem _misa_phan_bo_ccdc). Ghi lại theo
+            # đúng st["con_lai_ky"]/st["con_lai_tien"] đã tính đúng ở trên (kể cả TSCĐ không
+            # phát sinh gì trong lần chạy này, để tự "chữa" dữ liệu cũ còn sai).
+            ral_col = _misa_chon_cot(cols_fa, "LifeTimeRemainingInMonth", "LifeTimeRemaining")
+            aa_col = _misa_chon_cot(cols_fa, "AccumDepreciationAmount", "AccumulatedDepreciationAmount")
+            ra_col = _misa_chon_cot(cols_fa, "RemainingAmount")
+            if ral_col or aa_col or ra_col:
+                for fa_id, st in trang_thai.items():
+                    sets, vals = [], []
+                    if ral_col:
+                        sets.append("[%s]=?" % ral_col)
+                        vals.append(max(int(st["con_lai_ky"]), 0))
+                    if aa_col:
+                        sets.append("[%s]=?" % aa_col)
+                        vals.append(max(round(st["tong_tien"] - st["con_lai_tien"]), 0))
+                    if ra_col:
+                        sets.append("[%s]=?" % ra_col)
+                        vals.append(max(round(st["con_lai_tien"]), 0))
+                    vals.append(fa_id)
+                    cur.execute("UPDATE FixedAsset SET %s WHERE [%s]=?" %
+                               (",".join(sets), id_col), vals)
         if preview:
             conn.rollback()
         else:
