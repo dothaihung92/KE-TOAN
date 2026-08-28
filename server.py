@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.048"
+APP_BUILD = "2026-08-27.049"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18808,6 +18808,63 @@ def _misa_mau_dong_that(cur, table, dieu_kien_where, tham_so=()):
         return dict(zip(cols, best))
     except Exception:
         return {}
+
+
+def _misa_chan_doan_v2_so_theo_doi_ccdc(cid, database):
+    """CHỈ ĐỌC — vòng 2: chẩn đoán trước đó xác nhận SUIncrement.RemainingAllocationTime/
+    AllocatedAmount/RemaingAmount ĐÃ được ghi đúng số (khớp số chứng từ PBCC thật đã
+    tạo), nhưng lưới 'Sổ theo dõi CCDC' trên MISA VẪN hiện y hệt lúc Ghi tăng — nghĩa
+    là lưới đó KHÔNG đọc trực tiếp các cột này (hoặc đọc theo ĐIỀU KIỆN khác mà chứng
+    từ PBCC do phần mềm tạo không thoả). Dò tiếp theo 2 hướng: (1) cờ trạng thái
+    (IsPostedFinance/IsPostedManagement/IsGetSupplyAllocated/DisplayOnBook) của CHÍNH
+    các chứng từ PBCC đã tạo — so với cờ mà Ghi tăng CCDC dùng (LUÔN IsPostedManagement=1,
+    xem _misa_ghi_tang_ccdc) để xem có lệch không; (2) liệt kê mọi VIEW/PROCEDURE/FUNCTION
+    trong CSDL có tên chứa Supply/CCDC/Alloc kèm định nghĩa THẬT (nếu quyền đọc cho phép)
+    — MISA có thể tính lưới này qua 1 đối tượng SQL riêng thay vì đọc thẳng cột."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        co_ct = []
+        try:
+            rows = cur.execute(
+                "SELECT RefNo, IsPostedFinance, IsPostedManagement, IsGetSupplyAllocated, "
+                "DisplayOnBook, RefType FROM SUAllocation WHERE RefNo LIKE 'PBCC%' "
+                "ORDER BY RefNo").fetchall()
+            for refno, pf, pm, gsa, dob, rt in rows:
+                co_ct.append({"so_ct": refno, "IsPostedFinance": str(pf), "IsPostedManagement": str(pm),
+                             "IsGetSupplyAllocated": str(gsa), "DisplayOnBook": str(dob), "RefType": str(rt)})
+        except Exception as e:
+            co_ct = [{"loi": str(e)}]
+        doi_tuong = []
+        try:
+            rows = cur.execute(
+                "SELECT o.name, o.type_desc, OBJECT_DEFINITION(o.object_id) FROM sys.objects o "
+                "WHERE o.type IN ('V','P','TF','IF','FN') AND (o.name LIKE '%Supply%' "
+                "OR o.name LIKE '%CCDC%' OR o.name LIKE '%Alloc%' OR o.name LIKE 'SU%')").fetchall()
+            for name, type_desc, defi in rows:
+                doi_tuong.append({"ten": name, "loai": type_desc,
+                                 "dinh_nghia": (defi or "(không đọc được định nghĩa — thiếu quyền?)")[:6000]})
+        except Exception as e:
+            doi_tuong = [{"loi": str(e)}]
+        bang_supply = []
+        try:
+            bang_supply = [r[0] for r in cur.execute(
+                "SELECT name FROM sys.tables WHERE name LIKE '%Supply%' OR name LIKE 'SU%' "
+                "ORDER BY name").fetchall()]
+        except Exception:
+            pass
+        return {"database": database, "co_kien_pbcc_that": co_ct,
+                "doi_tuong_sql_lien_quan": doi_tuong, "bang_lien_quan": bang_supply}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-v2-so-theo-doi-ccdc/{cid}")
+def misa_sql_chan_doan_v2_so_theo_doi_ccdc(cid: int, database: str = ""):
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_v2_so_theo_doi_ccdc(cid, database)
 
 
 def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
