@@ -1879,47 +1879,6 @@ function ImportMisaModal({ state, busy, onClose, onConfirm }) {
   ));
 }
 
-// ── Sửa chứng từ UNT/UNC CŨ (đã ghi trước khi phát hiện đủ 2 lỗi khiến không hiện trên MISA:
-// IsPostedFinance=False VÀ thiếu GeneralLedger/AccountObjectLedger — xem
-// _misa_ghi_thu_chi/_misa_sua_ghi_so_unt_unc_cu) — đổi cờ IsPostedFinance 0->1 VÀ tạo bổ sung đúng
-// 2 dòng GeneralLedger + 1 dòng AccountObjectLedger còn thiếu cho chứng từ do phần mềm ghi, không
-// đụng gì khác. Không cần dùng cho chứng từ ghi MỚI (đã tự đúng ngay từ đầu), chỉ cần chạy 1 LẦN.
-async function suaGhiSoUntUncCu(coMst, loai) {
-  if (!coMst) { alert("Công ty chưa có MST."); return; }
-  const tenLoai = loai === "unt" ? "UNT (thu tiền)" : "UNC (chi tiền)";
-  try {
-    const goi = async preview => {
-      const res = await fetch("/api/misa-sql/sua-ghi-so-unt-unc", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mst: coMst, loai, preview })
-      });
-      return res.json();
-    };
-    const pv = await goi(true);
-    if (pv.detail) { alert("Lỗi: " + pv.detail); return; }
-    if (!pv.so_se_sua && !pv.so_sua_reftype) {
-      alert(`Không có chứng từ ${tenLoai} nào cần sửa (mọi chứng từ do phần mềm ghi đã có đủ Sổ Cái, đúng BankName/ReasonTypeID/RefType).`);
-      return;
-    }
-    const dsMsg = pv.danh_sach.slice(0, 20).map(x => "  " + x.ref_no).join("\n")
-      + (pv.danh_sach.length > 20 ? `\n  ...và ${pv.danh_sach.length - 20} chứng từ khác` : "");
-    let msg = `Sẽ sửa ${pv.so_se_sua} chứng từ ${tenLoai} (do phần mềm ghi trước đây) — ghi bổ `
-      + `sung 2 dòng Sổ Cái + 1 dòng sổ chi tiết công nợ / BankName / ReasonTypeID còn thiếu để hiện đúng trên MISA`;
-    if (pv.so_sua_reftype) msg += `,\nvà sửa RefType sai (=0) trên ${pv.so_sua_reftype} dòng Sổ Cái/BADepositWithdrawList đã ghi từ trước (bug ẩn từ đầu — có thể là nguyên nhân lỗi XEM/XOÁ)`;
-    msg += pv.danh_sach.length ? `:\n${dsMsg}` : ".";
-    msg += `\n\nKHÔNG đụng Sổ quản trị, không xoá gì. Bấm OK để sửa thật, Huỷ để dừng lại.`;
-    if (!confirm(msg)) return;
-    const real = await goi(false);
-    if (real.detail) { alert("Lỗi sửa: " + real.detail); return; }
-    let doneMsg = `✓ Đã sửa ${real.so_se_sua} chứng từ ${tenLoai}`;
-    if (real.so_sua_reftype) doneMsg += ` + sửa RefType sai trên ${real.so_sua_reftype} dòng`;
-    doneMsg += `. Mở lại màn "Thu, chi tiền" trong MISA, bấm "Lấy dữ liệu" để kiểm tra.`;
-    alert(doneMsg);
-  } catch (e) {
-    alert(`Lỗi sửa ${tenLoai}: ` + e.message);
-  }
-}
-
 // ── Xuất hạch toán LÃI/LỖ chênh lệch tỷ giá riêng (Phiếu kế toán khác) ──────────────────────────
 // Theo đúng mẫu "Chứng từ nghiệp vụ khác" của MISA — dùng cho khoản điều chỉnh KHÔNG phát sinh tiền
 // qua ngân hàng (chỉ là bút toán sổ sách), nên tách khỏi UNC/UNT để không ghi trùng/lệch số tiền chi
@@ -6298,17 +6257,7 @@ function ConfirmScreen({
       setMisaImportBusy(false);
       if(st)setMisaImportState(st);
     }
-  }, "\uD83D\uDCE5 Import UNC v\xE0o MISA"),/*#__PURE__*/React.createElement("button",{
-    className:"btn btn-outline",
-    style:{fontSize:11,color:"#a05a00",borderColor:"#e8c48a"},
-    title:"Ch\u1EC9 c\u1EA7n ch\u1EA1y 1 L\u1EA6N cho ch\u1EE9ng t\u1EEB UNT \u0111\xE3 ghi TR\u01AF\u1EDBC khi c\xF3 b\u1EA3n v\xE1 (kh\xF4ng hi\u1EC7n tr\xEAn MISA) \u2014 t\u1EF1 b\u1ED5 sung GeneralLedger/AccountObjectLedger/BADepositWithdrawList/CustomFieldLedger c\xF2n thi\u1EBFu (kh\xF4ng t\u1EA1o tr\xF9ng), kh\xF4ng \u0111\u1EE5ng g\xEC kh\xE1c",
-    onClick:()=>suaGhiSoUntUncCu(co&&co.mst, "unt")
-  }, "\uD83D\uDD27 S\u1EEDa UNT c\u0169"),/*#__PURE__*/React.createElement("button",{
-    className:"btn btn-outline",
-    style:{fontSize:11,color:"#a05a00",borderColor:"#e8c48a"},
-    title:"Ch\u1EC9 c\u1EA7n ch\u1EA1y 1 L\u1EA6N cho ch\u1EE9ng t\u1EEB UNC \u0111\xE3 ghi TR\u01AF\u1EDBC khi c\xF3 b\u1EA3n v\xE1 (kh\xF4ng hi\u1EC7n tr\xEAn MISA) \u2014 t\u1EF1 b\u1ED5 sung GeneralLedger/AccountObjectLedger/BADepositWithdrawList/CustomFieldLedger c\xF2n thi\u1EBFu (kh\xF4ng t\u1EA1o tr\xF9ng), kh\xF4ng \u0111\u1EE5ng g\xEC kh\xE1c",
-    onClick:()=>suaGhiSoUntUncCu(co&&co.mst, "unc")
-  }, "\uD83D\uDD27 S\u1EEDa UNC c\u0169"),
+  }, "\uD83D\uDCE5 Import UNC v\xE0o MISA"),
   /*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
     style:{fontSize:11,color:"#666"},
