@@ -1758,53 +1758,125 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
 }
 
 // ── Import UNT/UNC THẲNG VÀO MISA (ghi SQL trực tiếp qua server — KHÁC exportUNT/exportUNC vốn chỉ
-// xuất file Excel để tự import tay) — xem _misa_ghi_thu_chi ở server.py. Tính năng MỚI, CHƯA qua
-// nhiều lần kiểm chứng thực tế như các chức năng import khác (Mua hàng/Bán hàng/GTGT) — luôn hiện rõ
-// cảnh báo + bắt "Xem trước" trước khi ghi thật, đúng nguyên tắc chung của mọi chức năng ghi MISA.
-async function importThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, accountNo, showToast) {
-  if (!coMst) { alert("Công ty chưa có MST — không thể import vào MISA."); return; }
+// xuất file Excel để tự import tay) — xem _misa_ghi_thu_chi ở server.py. Tách làm 2 bước: xem trước
+// (previewThuChiVaoMisa, gọi API preview=true, KHÔNG ghi gì) trả kết quả cho ImportMisaModal hiện —
+// gồm số sẽ tạo + danh sách giao dịch LỖI (không tìm thấy đối tượng khớp MST trong MISA) để người
+// dùng bấm xem — và ghi thật (commitThuChiVaoMisa, gọi lại API với preview=false) khi người dùng bấm
+// xác nhận trong modal. Trước đây dùng confirm()/alert() của trình duyệt kèm đoạn cảnh báo rủi ro dài
+// dòng — không bấm vào xem được danh sách lỗi, đã bỏ theo yêu cầu, chỉ còn số liệu cần thiết.
+async function previewThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, accountNo, showToast) {
+  if (!coMst) { alert("Công ty chưa có MST — không thể import vào MISA."); return null; }
   const { giaoDich, fxFailed } = await buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, showToast);
   const tenLoai = loai === "unt" ? "thu tiền (UNT)" : "chi tiền (UNC)";
   if (!giaoDich.length) {
     alert(`Không có giao dịch ${loai === "unt" ? "tiền vào" : "tiền ra"} đã xác nhận (có MST đối tượng, `
       + `không phải nội bộ/tiền mặt) để import vào MISA.`);
-    return;
+    return null;
   }
-  const goi = async preview => {
-    const res = await fetch("/api/misa-sql/import-unt-unc", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mst: coMst, loai, preview, giao_dich: giaoDich })
-    });
-    return res.json();
-  };
   try {
     if (showToast) showToast(`Đang xem trước ${giaoDich.length} giao dịch ${tenLoai}...`, "ok");
-    const pv = await goi(true);
-    if (pv.detail) { alert("Lỗi: " + pv.detail); return; }
-    let msg = `⚠ RỦI RO CAO — ghi thẳng vào CSDL MISA đang kết nối (${pv.database}). Chức năng MỚI, `
-      + `CHƯA qua nhiều lần kiểm chứng thực tế như Mua hàng/Bán hàng/Khấu trừ thuế GTGT — hãy mở lại `
-      + `từng chứng từ trong MISA kiểm tra thật kỹ sau khi ghi. Khuyên thử với 1-2 giao dịch trước khi `
-      + `tin dùng cho cả lô. Chỉ chạy trên dữ liệu THỬ / đã sao lưu.\n\n`
-      + `Sẽ tạo ${pv.so_them} chứng từ ${tenLoai}.\n`;
-    if (pv.so_trung) msg += `Bỏ qua ${pv.so_trung} giao dịch đã có (trùng số chứng từ, chạy lại không ghi trùng).\n`;
-    if (pv.so_bo_qua_kh) msg += `Bỏ qua ${pv.so_bo_qua_kh} giao dịch không tìm thấy đối tượng khớp MST `
-      + `trong Danh mục MISA (Đối tượng) — cần thêm đối tượng đó vào MISA trước.\n`;
-    if (fxFailed.length) msg += `\n⚠ ${fxFailed.length} giao dịch USD chưa lấy được tỷ giá — KHÔNG nằm `
-      + `trong danh sách gửi lần này (tự bổ sung tỷ giá trên màn hình rồi chạy lại).\n`;
-    if (!pv.so_them) { alert(msg); return; }
-    msg += `\nBấm OK để GHI THẬT ${pv.so_them} chứng từ vào MISA (ghi luôn Sổ tài chính để hiện `
-      + `đúng trên màn "Thu, chi tiền" — Sổ quản trị vẫn để chưa ghi, nên vẫn xoá/sửa lại được `
-      + `bình thường trong MISA nếu ghi nhầm). Bấm Huỷ để dừng lại, không ghi gì.`;
-    if (!confirm(msg)) return;
-    if (showToast) showToast("Đang ghi vào MISA...", "ok");
-    const real = await goi(false);
-    if (real.detail) { alert("Lỗi ghi: " + real.detail); return; }
-    if (showToast) showToast(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA`, "ok");
-    else alert(`✓ Đã ghi ${real.so_them} chứng từ ${tenLoai} vào MISA.`);
+    const res = await fetch("/api/misa-sql/import-unt-unc", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mst: coMst, loai, preview: true, giao_dich: giaoDich })
+    });
+    const pv = await res.json();
+    if (pv.detail) { alert("Lỗi: " + pv.detail); return null; }
+    return { loai, tenLoai, coMst, giaoDich, fxFailed, pv };
   } catch (e) {
-    alert(`Lỗi import ${tenLoai} vào MISA: ` + e.message);
+    alert(`Lỗi xem trước ${tenLoai} vào MISA: ` + e.message);
     console.error(e);
+    return null;
   }
+}
+async function commitThuChiVaoMisa(state, showToast) {
+  try {
+    if (showToast) showToast("Đang ghi vào MISA...", "ok");
+    const res = await fetch("/api/misa-sql/import-unt-unc", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mst: state.coMst, loai: state.loai, preview: false, giao_dich: state.giaoDich })
+    });
+    const real = await res.json();
+    if (real.detail) { alert("Lỗi ghi: " + real.detail); return null; }
+    if (showToast) showToast(`✓ Đã ghi ${real.so_them} chứng từ ${state.tenLoai} vào MISA`, "ok");
+    return real;
+  } catch (e) {
+    alert(`Lỗi ghi ${state.tenLoai} vào MISA: ` + e.message);
+    console.error(e);
+    return null;
+  }
+}
+// Modal hiện kết quả xem trước import UNT/UNC — thay cho confirm()/alert() cũ. Chỉ hiện số liệu cần
+// thiết (sẽ tạo bao nhiêu, bỏ qua trùng bao nhiêu) + 1 mục RIÊNG cho giao dịch LỖI (không tìm thấy
+// đối tượng khớp MST trong Danh mục MISA — giao dịch đó sẽ KHÔNG import được), bấm vào mới xổ ra
+// danh sách chi tiết từng giao dịch lỗi để người dùng biết cần bổ sung đối tượng nào trong MISA.
+function ImportMisaModal({ state, busy, onClose, onConfirm }) {
+  const [showErrors, setShowErrors] = useState(false);
+  React.useEffect(() => {
+    const h = e => { if (e.key === "Escape" && !busy) onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose, busy]);
+  const { pv, tenLoai, fxFailed } = state;
+  const loiRows = (pv.danh_sach || []).filter(x => (x.trang_thai || "").includes("không tìm thấy đối tượng"));
+  return React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
+    onClick: () => { if (!busy) onClose(); }
+  }, React.createElement("div", {
+    style: { background: "#fff", borderRadius: 12, width: "96vw", maxWidth: 640, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.3)" },
+    onClick: e => e.stopPropagation()
+  },
+    React.createElement("div", { style: { padding: "14px 18px", borderBottom: "1px solid var(--border)" } },
+      React.createElement("div", { style: { fontWeight: 700, fontSize: 16 } }, "📥 Import " + tenLoai + " vào MISA"),
+      React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginTop: 2 } }, "CSDL đang kết nối: " + (pv.database || ""))
+    ),
+    React.createElement("div", { style: { padding: "16px 18px", overflow: "auto", flex: 1 } },
+      React.createElement("div", { style: { fontSize: 14, marginBottom: 8 } },
+        "Sẽ tạo ", React.createElement("b", null, pv.so_them), " chứng từ ", tenLoai, "."),
+      pv.so_trung > 0 && React.createElement("div", { style: { fontSize: 13, color: "var(--text2)", marginBottom: 8 } },
+        pv.so_trung + " giao dịch đã có trong MISA — tự bỏ qua, không ghi trùng."),
+      loiRows.length > 0 && React.createElement("div", {
+        style: { marginBottom: 8 }
+      },
+        React.createElement("div", {
+          onClick: () => setShowErrors(s => !s),
+          style: {
+            cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+            background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8,
+            padding: "8px 12px", color: "#dc2626", fontWeight: 600, fontSize: 13
+          }
+        },
+          React.createElement("span", null, "🚫"),
+          React.createElement("span", null, loiRows.length + " giao dịch lỗi — không tìm thấy đối tượng khớp MST trong MISA (sẽ KHÔNG import)"),
+          React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 400 } }, showErrors ? "▲ Ẩn" : "▼ Xem")
+        ),
+        showErrors && React.createElement("div", {
+          style: { marginTop: 6, maxHeight: 220, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8 }
+        },
+          loiRows.map((x, i) => React.createElement("div", {
+            key: i,
+            style: { padding: "6px 10px", fontSize: 12, borderBottom: i < loiRows.length - 1 ? "1px solid var(--border)" : "none" }
+          },
+            React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
+            React.createElement("div", { style: { color: "var(--text2)" } }, x.trang_thai)
+          ))
+        )
+      ),
+      fxFailed.length > 0 && React.createElement("div", { style: { fontSize: 12, color: "var(--amber)", marginBottom: 8 } },
+        "⚠ " + fxFailed.length + " giao dịch USD chưa lấy được tỷ giá — không nằm trong danh sách gửi lần này."),
+      React.createElement("div", { style: { fontSize: 11, color: "var(--text3)" } },
+        "Nhớ mở lại chứng từ trong MISA kiểm tra sau khi ghi.")
+    ),
+    React.createElement("div", { style: { padding: "12px 18px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end", gap: 8 } },
+      React.createElement("button", {
+        onClick: onClose, disabled: busy,
+        style: { height: 34, padding: "0 14px", borderRadius: 6, border: "1px solid var(--border)", background: "#fff", cursor: busy ? "default" : "pointer", fontSize: 13 }
+      }, "Huỷ"),
+      React.createElement("button", {
+        onClick: onConfirm, disabled: busy || !pv.so_them,
+        style: { height: 34, padding: "0 18px", borderRadius: 6, border: "none", background: (busy || !pv.so_them) ? "#ccc" : "#2e5c8a", color: "#fff", fontWeight: 700, cursor: (busy || !pv.so_them) ? "not-allowed" : "pointer", fontSize: 13 }
+      }, busy ? "Đang ghi..." : `✓ Ghi thật ${pv.so_them} chứng từ vào MISA`)
+    )
+  ));
 }
 
 // ── Sửa chứng từ UNT/UNC CŨ (đã ghi trước khi phát hiện đủ 2 lỗi khiến không hiện trên MISA:
@@ -4329,6 +4401,9 @@ function ConfirmScreen({
   const [tokhaiPickForRow, setTokhaiPickForRow] = useState(null); // rowId khi mở bảng ở chế độ "chọn"
   const [tokhaiXKList, setTokhaiXKList] = useState(() => getCoToKhai(co.id, "XK"));
   const [tokhaiXKModalOpen, setTokhaiXKModalOpen] = useState(false);
+  // Kết quả xem trước Import UNT/UNC vào MISA — hiện qua ImportMisaModal (thay confirm()/alert() cũ).
+  const [misaImportState, setMisaImportState] = useState(null);
+  const [misaImportBusy, setMisaImportBusy] = useState(false);
   const [tokhaiXKPickForRow, setTokhaiXKPickForRow] = useState(null);
   React.useEffect(() => { setTokhaiList(getCoToKhai(co.id, "NK")); setTokhaiXKList(getCoToKhai(co.id, "XK")); }, [co.id]);
   const saveTokhaiList = list => { setTokhaiList(list); saveCoToKhai(co.id, list, "NK"); };
@@ -4809,6 +4884,145 @@ function ConfirmScreen({
   };
   // ── /Picker helpers ──────────────────────────────────────────────
 
+  // Bỏ phần giờ nếu có (VD sao kê VietinBank ghi "15-07-2025 08:59:05") trước khi so khớp ngày —
+  // nếu không, regex ngày sẽ không khớp và bị fallback sang new Date() (hiểu sai dd-mm-yyyy) → GD bị loại nhầm.
+  const parseVNDateI = d => { if(!d)return null; const s=String(d).trim().split(/\s+/)[0]; const m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/); return m?new Date(m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0")):new Date(d); };
+  // Tìm ĐÚNG key session của 1 tài khoản trong LS — không chỉ thử key ghép chuẩn "coId_accId" mà
+  // còn quét toàn bộ session index của công ty khi key chuẩn không có dữ liệu (VD tài khoản đó được
+  // lưu từ trước khi hỗ trợ nhiều TK, chỉ dưới key "coId" đơn thuần). Dùng chung cho MỌI chỗ đọc/ghi
+  // dữ liệu "tài khoản kia" (gợi ý nội bộ + ghi dấu X) để không bao giờ lệch key giữa đọc và ghi.
+  const resolveSessionKeyFor = accId => {
+    const ls = accId ? co.id+"_"+accId : co.id;
+    if (LS.get("session_"+ls)) return ls;
+    const idx = getSessionIndex(co.id);
+    for (const key2 of idx) {
+      const candidate = LS.get("session_"+key2);
+      if (candidate && candidate.results && candidate.results.length &&
+          (candidate.accountId === accId || key2 === ls)) return key2;
+    }
+    return ls;
+  };
+  // Luôn đọc TRỰC TIẾP từ LocalStorage (không dùng cache trong bộ nhớ) — vì gợi ý chuyển tiền nội
+  // bộ cần phản ánh đúng trạng thái MỚI NHẤT của tài khoản kia (VD vừa xác nhận Tiền mặt/hoá đơn ở
+  // đó), tránh trường hợp bộ nhớ đệm cũ khiến gợi ý không hiện dù dữ liệu thực tế đã đúng.
+  const getOtherRows = accId => {
+    const k=String(accId);
+    const ls=resolveSessionKeyFor(accId);
+    let s=LS.get("session_"+ls);
+    if(!s||!s.results||!s.results.length){
+      const idx=getSessionIndex(co.id);
+      for(const key2 of idx){
+        const candidate=LS.get("session_"+key2);
+        if(candidate&&candidate.results&&candidate.results.length&&
+           (candidate.accountId===accId||key2===ls)){ s=candidate; break; }
+      }
+    }
+    if(s&&s.results&&s.results.length){ rowsCache.current[k]=s.results; return s.results; }
+    if(rowsCache.current[k]&&rowsCache.current[k].length>0) return rowsCache.current[k];
+    return [];
+  };
+  // Lọc ứng viên cho 1 tài khoản cụ thể: đúng chiều ngược dấu + lệch tối đa 7 ngày + KHỚP ĐÚNG SỐ TIỀN.
+  // Chuyển khoản nội bộ giữa 2 TK của cùng công ty thì số tiền 2 bên luôn giống hệt nhau (trừ khi có phí
+  // ngân hàng cộng thêm — trường hợp đó xử lý riêng bằng "Nhập khác"), nên không cần hiện các số tiền khác.
+  // otherRowsPreloaded (tuỳ chọn): truyền sẵn kết quả getOtherRows(accId) khi gọi
+  // hàm này LẶP LẠI nhiều lần cho CÙNG accId trong 1 lượt tính (VD useMemo
+  // internalSuggestions bên dưới, gọi cho HÀNG TRĂM/NGHÌN dòng chưa xác nhận) —
+  // getOtherRows() đọc + JSON.parse THẲNG từ localStorage mỗi lần gọi (cố ý,
+  // không cache, để luôn phản ánh đúng trạng thái mới nhất), nên gọi lặp lại
+  // hàng trăm/nghìn lần cho CÙNG 1 accId là tính lại dữ liệu giống hệt nhau vô
+  // ích — đủ để treo hẳn trang với công ty nhiều giao dịch (đã xác nhận qua báo
+  // lỗi "Trang không phản hồi" thật). Nơi gọi 1 lần/1 dòng (modal chọn nội bộ)
+  // vẫn để trống, tự gọi getOtherRows(accId) như cũ — không mất tính "mới nhất".
+  const findInternalCandidatesFor = (txRow, accId, otherRowsPreloaded) => {
+    const myIsCredit = (txRow.tx.credit||0) > 0;
+    const myAmt = Math.max(txRow.tx.debit||0, txRow.tx.credit||0);
+    const txDate = parseVNDateI(txRow.tx.date);
+    // TK đích khác loại tiền (VD TK VND ↔ TK USD, kiểu "mua ngoại tệ thanh toán") thì không thể so
+    // khớp đúng số tiền (một bên là VND, bên kia là USD, số không bao giờ bằng nhau) — chuyển sang so
+    // khớp theo ngày sát nhau (≤3 ngày) + nội dung diễn giải trùng nhiều từ đặc trưng (VD cùng số hoá
+    // đơn/tên đối tác) để vẫn nhận diện được, tránh ghép nhầm do chỉ so ngày không thôi.
+    const otherAcc = (co.accounts||[]).find(a => a.id === accId);
+    const myCurrency = activeTabAcc ? activeTabAcc.currency : "VND";
+    const crossCurrency = !!(otherAcc && otherAcc.currency && myCurrency && otherAcc.currency !== myCurrency);
+    const myWords = crossCurrency ? new Set(normVN(txRow.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w))) : null;
+    const oRows = (otherRowsPreloaded || getOtherRows(accId)).filter(o => {
+      // Chỉ loại các dòng đã CHẮC CHẮN xử lý xong (đã ghép nội bộ, hoặc đã gắn đúng hoá đơn/MST) —
+      // KHÔNG loại các dòng chỉ mới bị gán tạm "Tiền mặt" (không MST, không phải nội bộ), vì đây
+      // thường là trường hợp người dùng bấm Alt+T do lúc đó chưa có gợi ý, thực chất vẫn có thể là
+      // chuyển khoản nội bộ và cần được gợi ý lại để sửa.
+      if (o.confirmed === "yes" && (o.isInternal || o.confirmedMST)) return false;
+      if (o.confirmed === "no") return false;
+      if (myIsCredit ? !((o.tx.debit||0) > 0) : !((o.tx.credit||0) > 0)) return false;
+      const oAmt = Math.max(o.tx.debit||0, o.tx.credit||0);
+      if (crossCurrency) {
+        if (!(oAmt > 0)) return false;
+        if (!txDate || !o.tx.date || Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) > 3) return false;
+        const oWords = normVN(o.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w));
+        if (!oWords.length || !myWords.size) return false;
+        const overlap = oWords.filter(w => myWords.has(w)).length;
+        return overlap / Math.max(myWords.size, oWords.length) >= 0.4;
+      }
+      if (!(myAmt > 0 && oAmt > 0 && Math.abs(oAmt - myAmt) < 1)) return false;
+      if (!txDate || !o.tx.date) return true;
+      return Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) <= 7;
+    });
+    return oRows.map(o => {
+      let dayDiff = Infinity;
+      if (txDate && o.tx.date) dayDiff = Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000);
+      return { o, dayDiff };
+    }).sort((a, b) => a.dayDiff - b.dayDiff);
+  };
+  const internalSuggCache = React.useMemo(() => new Map(), [co.accounts, activeTabAccId]);
+  const internalSuggestions = React.useMemo(() => {
+    const map = {};
+    // Đọc dữ liệu MỖI tài khoản khác đúng 1 LẦN cho cả lượt tính này (không phải
+    // 1 lần/1 dòng) — xem giải thích otherRowsPreloaded ở findInternalCandidatesFor.
+    const otherRowsByAcc = new Map();
+    internalModalOtherAccounts.forEach(acc => otherRowsByAcc.set(acc.id, getOtherRows(acc.id)));
+    rows.forEach(r => {
+      // Vẫn tính cho dòng ĐÃ tự động gắn qua từ khoá từ điển (r.confirmed==="yes" && !manualConfirm)
+      // nhưng CHƯA được kiểm tra đối chiếu nội bộ (!_internalChecked) — để phát hiện trường hợp từ
+      // khoá khớp NHẦM một giao dịch thực chất là chuyển tiền nội bộ (xem effect bên dưới, tự "gỡ"
+      // xác nhận tự động khi phát hiện xung đột này). Dòng đã xác nhận TAY (manualConfirm) hoặc đã
+      // kiểm tra rồi thì bỏ qua như cũ, khỏi tính lại vô ích.
+      if (r.confirmed === "no") return;
+      if (r.confirmed === "yes" && (r.manualConfirm || r._internalChecked)) return;
+      if (internalSuggCache.has(r)) {
+        const cached = internalSuggCache.get(r);
+        if (cached) map[r.id] = cached;
+        return;
+      }
+      let best = null;
+      for (const acc of internalModalOtherAccounts) {
+        const scored = findInternalCandidatesFor(r, acc.id, otherRowsByAcc.get(acc.id));
+        if (scored.length && (!best || scored[0].dayDiff < best.dayDiff)) {
+          best = { accId: acc.id, accLabel: acc.label, accCurrency: acc.currency, row: scored[0].o, dayDiff: scored[0].dayDiff };
+        }
+      }
+      internalSuggCache.set(r, best);
+      if (best) map[r.id] = best;
+    });
+    return map;
+  }, [rows, internalSuggCache]);
+  // Tự "gỡ" xác nhận tự động (Tầng 1 — khớp từ khoá từ điển) khi phát hiện giao dịch đó CŨNG khớp
+  // gợi ý chuyển tiền nội bộ (internalSuggestions, tính ở trên) — từ khoá từ điển có thể khớp NHẦM
+  // (VD tên/mã trong diễn giải chuyển khoản nội bộ trùng 1 phần với từ khoá đã gắn cho 1 NCC/KH),
+  // nên KHÔNG được tự động gắn trong trường hợp này — trả dòng về "Chờ" để người dùng tự xem cả 2
+  // gợi ý (nội bộ + từ điển, vẫn còn nguyên t1_dict) rồi tự chọn đúng, thay vì tự ý gắn sai đối
+  // tượng. Đánh dấu _internalChecked để chỉ kiểm tra 1 LẦN/dòng (khỏi tính lại vô ích mỗi lần render
+  // — dòng đã gỡ về "Chờ" sẽ tự rơi vào luồng xử lý dòng "Chờ" bình thường, không lặp lại nữa).
+  React.useEffect(() => {
+    const toFlag = rows.filter(r => r.confirmed === "yes" && !r.manualConfirm && !r._internalChecked);
+    if (!toFlag.length) return;
+    const conflictIds = new Set(toFlag.filter(r => internalSuggestions[r.id]).map(r => r.id));
+    setRowsH(prev => prev.map(r => {
+      if (!toFlag.some(x => x.id === r.id)) return r;
+      if (conflictIds.has(r.id)) {
+        return { ...r, confirmed: null, confirmedMST: null, confirmedName: null, confirmedLoai: null, confirmedHach: null, _internalChecked: true };
+      }
+      return { ...r, _internalChecked: true };
+    }));
+  }, [rows, internalSuggestions]);
   // Rows with amount mismatch — declared BEFORE filtered so it can be used inside filter callback
   const isMismatchRow = r => {
     const storedAmt = Math.max(r.tx.debit||0, r.tx.credit||0);
@@ -4852,6 +5066,15 @@ function ConfirmScreen({
   // Danh sách các mã hạch toán đã dùng (để lọc theo đúng 1 mã, VD lọc riêng "331" hoặc "1111")
   const usedHachCodes = [...new Set(rows.filter(r => r.confirmed === "yes" && r.confirmedHach).map(r => r.confirmedHach))].sort();
 
+  // 3 mục lọc riêng theo NGUỒN gợi ý (chỉ tính dòng CHƯA xác nhận — dòng đã xác nhận rồi thì gợi ý
+  // không còn ý nghĩa để lọc/xử lý tiếp) — bấm vào chỉ hiện đúng các dòng thuộc mục đó để xử lý nhanh.
+  const isNameMatchRow = r => !r.confirmed && r.nameMatches && r.nameMatches.length > 0;
+  const nameMatchCount = rows.filter(isNameMatchRow).length;
+  const isAmtMatchRow = r => !r.confirmed && r.invMatches && r.invMatches.length > 0;
+  const amtMatchCount = rows.filter(isAmtMatchRow).length;
+  const isInternalSuggestRow = r => !r.confirmed && !!internalSuggestions[r.id];
+  const internalSuggestCount = rows.filter(isInternalSuggestRow).length;
+
   const filtered = rows.filter(r => {
     if (filter === "pending" && r.confirmed) return false; // truthy = any confirmed state
     if (filter === "manual" && (r.confirmed !== "yes" || !r.manualConfirm)) return false;
@@ -4860,6 +5083,9 @@ function ConfirmScreen({
     if (filter === "mismatch" && !isMismatchRow(r)) return false;
     if (filter === "missingmst" && !isMissingMstRow(r)) return false;
     if (filter === "wronghach" && !isWrongDirectionHachRow(r)) return false;
+    if (filter === "namematch" && !isNameMatchRow(r)) return false;
+    if (filter === "amtmatch" && !isAmtMatchRow(r)) return false;
+    if (filter === "internalsug" && !isInternalSuggestRow(r)) return false;
     if (hachFilter && r.confirmedHach !== hachFilter) return false;
     if (search && !r.tx.desc.toLowerCase().includes(search.toLowerCase()) && !(r.confirmedName || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -5099,94 +5325,6 @@ function ConfirmScreen({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [focusIdx, filtered, pickerFor, bulkSelected, bulkForm, search, showCount]);
-  // Bỏ phần giờ nếu có (VD sao kê VietinBank ghi "15-07-2025 08:59:05") trước khi so khớp ngày —
-  // nếu không, regex ngày sẽ không khớp và bị fallback sang new Date() (hiểu sai dd-mm-yyyy) → GD bị loại nhầm.
-  const parseVNDateI = d => { if(!d)return null; const s=String(d).trim().split(/\s+/)[0]; const m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/); return m?new Date(m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0")):new Date(d); };
-  // Tìm ĐÚNG key session của 1 tài khoản trong LS — không chỉ thử key ghép chuẩn "coId_accId" mà
-  // còn quét toàn bộ session index của công ty khi key chuẩn không có dữ liệu (VD tài khoản đó được
-  // lưu từ trước khi hỗ trợ nhiều TK, chỉ dưới key "coId" đơn thuần). Dùng chung cho MỌI chỗ đọc/ghi
-  // dữ liệu "tài khoản kia" (gợi ý nội bộ + ghi dấu X) để không bao giờ lệch key giữa đọc và ghi.
-  const resolveSessionKeyFor = accId => {
-    const ls = accId ? co.id+"_"+accId : co.id;
-    if (LS.get("session_"+ls)) return ls;
-    const idx = getSessionIndex(co.id);
-    for (const key2 of idx) {
-      const candidate = LS.get("session_"+key2);
-      if (candidate && candidate.results && candidate.results.length &&
-          (candidate.accountId === accId || key2 === ls)) return key2;
-    }
-    return ls;
-  };
-  // Luôn đọc TRỰC TIẾP từ LocalStorage (không dùng cache trong bộ nhớ) — vì gợi ý chuyển tiền nội
-  // bộ cần phản ánh đúng trạng thái MỚI NHẤT của tài khoản kia (VD vừa xác nhận Tiền mặt/hoá đơn ở
-  // đó), tránh trường hợp bộ nhớ đệm cũ khiến gợi ý không hiện dù dữ liệu thực tế đã đúng.
-  const getOtherRows = accId => {
-    const k=String(accId);
-    const ls=resolveSessionKeyFor(accId);
-    let s=LS.get("session_"+ls);
-    if(!s||!s.results||!s.results.length){
-      const idx=getSessionIndex(co.id);
-      for(const key2 of idx){
-        const candidate=LS.get("session_"+key2);
-        if(candidate&&candidate.results&&candidate.results.length&&
-           (candidate.accountId===accId||key2===ls)){ s=candidate; break; }
-      }
-    }
-    if(s&&s.results&&s.results.length){ rowsCache.current[k]=s.results; return s.results; }
-    if(rowsCache.current[k]&&rowsCache.current[k].length>0) return rowsCache.current[k];
-    return [];
-  };
-  // Lọc ứng viên cho 1 tài khoản cụ thể: đúng chiều ngược dấu + lệch tối đa 7 ngày + KHỚP ĐÚNG SỐ TIỀN.
-  // Chuyển khoản nội bộ giữa 2 TK của cùng công ty thì số tiền 2 bên luôn giống hệt nhau (trừ khi có phí
-  // ngân hàng cộng thêm — trường hợp đó xử lý riêng bằng "Nhập khác"), nên không cần hiện các số tiền khác.
-  // otherRowsPreloaded (tuỳ chọn): truyền sẵn kết quả getOtherRows(accId) khi gọi
-  // hàm này LẶP LẠI nhiều lần cho CÙNG accId trong 1 lượt tính (VD useMemo
-  // internalSuggestions bên dưới, gọi cho HÀNG TRĂM/NGHÌN dòng chưa xác nhận) —
-  // getOtherRows() đọc + JSON.parse THẲNG từ localStorage mỗi lần gọi (cố ý,
-  // không cache, để luôn phản ánh đúng trạng thái mới nhất), nên gọi lặp lại
-  // hàng trăm/nghìn lần cho CÙNG 1 accId là tính lại dữ liệu giống hệt nhau vô
-  // ích — đủ để treo hẳn trang với công ty nhiều giao dịch (đã xác nhận qua báo
-  // lỗi "Trang không phản hồi" thật). Nơi gọi 1 lần/1 dòng (modal chọn nội bộ)
-  // vẫn để trống, tự gọi getOtherRows(accId) như cũ — không mất tính "mới nhất".
-  const findInternalCandidatesFor = (txRow, accId, otherRowsPreloaded) => {
-    const myIsCredit = (txRow.tx.credit||0) > 0;
-    const myAmt = Math.max(txRow.tx.debit||0, txRow.tx.credit||0);
-    const txDate = parseVNDateI(txRow.tx.date);
-    // TK đích khác loại tiền (VD TK VND ↔ TK USD, kiểu "mua ngoại tệ thanh toán") thì không thể so
-    // khớp đúng số tiền (một bên là VND, bên kia là USD, số không bao giờ bằng nhau) — chuyển sang so
-    // khớp theo ngày sát nhau (≤3 ngày) + nội dung diễn giải trùng nhiều từ đặc trưng (VD cùng số hoá
-    // đơn/tên đối tác) để vẫn nhận diện được, tránh ghép nhầm do chỉ so ngày không thôi.
-    const otherAcc = (co.accounts||[]).find(a => a.id === accId);
-    const myCurrency = activeTabAcc ? activeTabAcc.currency : "VND";
-    const crossCurrency = !!(otherAcc && otherAcc.currency && myCurrency && otherAcc.currency !== myCurrency);
-    const myWords = crossCurrency ? new Set(normVN(txRow.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w))) : null;
-    const oRows = (otherRowsPreloaded || getOtherRows(accId)).filter(o => {
-      // Chỉ loại các dòng đã CHẮC CHẮN xử lý xong (đã ghép nội bộ, hoặc đã gắn đúng hoá đơn/MST) —
-      // KHÔNG loại các dòng chỉ mới bị gán tạm "Tiền mặt" (không MST, không phải nội bộ), vì đây
-      // thường là trường hợp người dùng bấm Alt+T do lúc đó chưa có gợi ý, thực chất vẫn có thể là
-      // chuyển khoản nội bộ và cần được gợi ý lại để sửa.
-      if (o.confirmed === "yes" && (o.isInternal || o.confirmedMST)) return false;
-      if (o.confirmed === "no") return false;
-      if (myIsCredit ? !((o.tx.debit||0) > 0) : !((o.tx.credit||0) > 0)) return false;
-      const oAmt = Math.max(o.tx.debit||0, o.tx.credit||0);
-      if (crossCurrency) {
-        if (!(oAmt > 0)) return false;
-        if (!txDate || !o.tx.date || Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) > 3) return false;
-        const oWords = normVN(o.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w));
-        if (!oWords.length || !myWords.size) return false;
-        const overlap = oWords.filter(w => myWords.has(w)).length;
-        return overlap / Math.max(myWords.size, oWords.length) >= 0.4;
-      }
-      if (!(myAmt > 0 && oAmt > 0 && Math.abs(oAmt - myAmt) < 1)) return false;
-      if (!txDate || !o.tx.date) return true;
-      return Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) <= 7;
-    });
-    return oRows.map(o => {
-      let dayDiff = Infinity;
-      if (txDate && o.tx.date) dayDiff = Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000);
-      return { o, dayDiff };
-    }).sort((a, b) => a.dayDiff - b.dayDiff);
-  };
   const loadInternalCandidates = (rowId, accId) => {
     if(!accId||!rowId){setInternalModalCandidates([]);return;}
     const txRow=rows.find(r=>r.id===rowId); if(!txRow)return;
@@ -5297,32 +5435,6 @@ function ConfirmScreen({
   // internalSuggCache lưu kết quả theo THAM CHIẾU OBJECT của từng dòng (r.map(...) giữ nguyên object
   // cho dòng KHÔNG đổi) — dòng nào chưa từng đổi thì lấy lại kết quả cũ, không tính lại; cache được
   // cấp MỚI (rỗng) khi danh sách TK khác/tab khác thực sự đổi để không bao giờ trả kết quả cũ sai.
-  const internalSuggCache = React.useMemo(() => new Map(), [co.accounts, activeTabAccId]);
-  const internalSuggestions = React.useMemo(() => {
-    const map = {};
-    // Đọc dữ liệu MỖI tài khoản khác đúng 1 LẦN cho cả lượt tính này (không phải
-    // 1 lần/1 dòng) — xem giải thích otherRowsPreloaded ở findInternalCandidatesFor.
-    const otherRowsByAcc = new Map();
-    internalModalOtherAccounts.forEach(acc => otherRowsByAcc.set(acc.id, getOtherRows(acc.id)));
-    rows.forEach(r => {
-      if (r.confirmed) return;
-      if (internalSuggCache.has(r)) {
-        const cached = internalSuggCache.get(r);
-        if (cached) map[r.id] = cached;
-        return;
-      }
-      let best = null;
-      for (const acc of internalModalOtherAccounts) {
-        const scored = findInternalCandidatesFor(r, acc.id, otherRowsByAcc.get(acc.id));
-        if (scored.length && (!best || scored[0].dayDiff < best.dayDiff)) {
-          best = { accId: acc.id, accLabel: acc.label, accCurrency: acc.currency, row: scored[0].o, dayDiff: scored[0].dayDiff };
-        }
-      }
-      internalSuggCache.set(r, best);
-      if (best) map[r.id] = best;
-    });
-    return map;
-  }, [rows, internalSuggCache]);
 
   const quickAcceptInternal = (rowId, sug) => {
     const txRow = rows.find(r => r.id === rowId);
@@ -6141,16 +6253,26 @@ function ConfirmScreen({
     className:"btn btn-outline",
     style:{borderColor:"#2e5c8a",color:"#2e5c8a"},
     title:"Ghi ch\u1EE9ng t\u1EEB thu ti\u1EC1n (ti\u1EC1n v\u00E0o) TH\u1EB2NG v\u00E0o CSDL MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 kh\u00F4ng c\u1EA7n import tay file Excel. T\u00EDnh n\u0103ng M\u1EDAI, lu\u00F4n hi\u1EC7n xem tr\u01B0\u1EDBc tr\u01B0\u1EDBc khi ghi th\u1EADt.",
-    onClick:()=>importThuChiVaoMisa(rows, "unt", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
-      (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
-      (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast)
+    onClick:async()=>{
+      setMisaImportBusy(true);
+      const st=await previewThuChiVaoMisa(rows, "unt", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
+        (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
+        (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast);
+      setMisaImportBusy(false);
+      if(st)setMisaImportState(st);
+    }
   }, "\uD83D\uDCE5 Import UNT v\xE0o MISA"),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
     style:{borderColor:"#2e5c8a",color:"#2e5c8a"},
     title:"Ghi ch\u1EE9ng t\u1EEB chi ti\u1EC1n g\u1EEDi (ti\u1EC1n ra) TH\u1EB2NG v\u00E0o CSDL MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 kh\u00F4ng c\u1EA7n import tay file Excel. T\u00EDnh n\u0103ng M\u1EDAI, lu\u00F4n hi\u1EC7n xem tr\u01B0\u1EDBc tr\u01B0\u1EDBc khi ghi th\u1EADt.",
-    onClick:()=>importThuChiVaoMisa(rows, "unc", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
-      (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
-      (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast)
+    onClick:async()=>{
+      setMisaImportBusy(true);
+      const st=await previewThuChiVaoMisa(rows, "unc", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
+        (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
+        (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast);
+      setMisaImportBusy(false);
+      if(st)setMisaImportState(st);
+    }
   }, "\uD83D\uDCE5 Import UNC v\xE0o MISA"),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
     style:{fontSize:11,color:"#a05a00",borderColor:"#e8c48a"},
@@ -6332,7 +6454,7 @@ function ConfirmScreen({
       gap: 6,
       flexWrap: "wrap"
     }
-  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
+  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
     key: v,
     className: `tab${filter === v ? " active" : ""}`,
     onClick: () => { setFilter(v); setFocusIdx(0); clearBulkSelection(); },
@@ -6673,6 +6795,16 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
         (activeTabAcc && activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc && activeTabAcc.label, activeTabAcc && activeTabAcc.currency, []),
         (activeTabAcc && activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc && activeTabAcc.label));
       setFxPreviewOpen(false);
+    }
+  }), misaImportState && /*#__PURE__*/React.createElement(ImportMisaModal, {
+    state: misaImportState,
+    busy: misaImportBusy,
+    onClose: () => { if (!misaImportBusy) setMisaImportState(null); },
+    onConfirm: async () => {
+      setMisaImportBusy(true);
+      const real = await commitThuChiVaoMisa(misaImportState, showToast);
+      setMisaImportBusy(false);
+      if (real) setMisaImportState(null);
     }
   }));
 }
