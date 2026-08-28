@@ -1723,7 +1723,7 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
   // từ UNT/UNC thật sự import (nội bộ/tiền mặt không cần chứng từ ngân hàng riêng; thiếu MST thì
   // không xác định được đối tượng để ghi) — tránh hiểu nhầm là phần mềm "import thiếu"/có lỗi.
   let boQuaNoiBo = { soLuong: 0, tongTien: 0, danhSach: [] }, boQuaTienMat = { soLuong: 0, tongTien: 0, danhSach: [] },
-      boQuaThieuMst = { soLuong: 0, tongTien: 0, danhSach: [] }, boQuaKhacTk = { soLuong: 0, tongTien: 0, danhSach: [] };
+      boQuaThieuMst = { soLuong: 0, tongTien: 0, danhSach: [] };
   confirmed.forEach((r, i) => {
     const origIdx = rows.indexOf(r);
     const seq = (origIdx >= 0 ? origIdx : i) + 1;
@@ -1744,12 +1744,12 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
     const mst = r.confirmedMST || "";
     // Chỉ thật sự COI LÀ LỖI (cần Chọn HĐ/gán MST) khi hạch toán 131 (phải thu) hoặc 331 (phải trả)
     // — đây mới là quan hệ công nợ THẬT với 1 đối tượng cụ thể. Hạch toán khác (chi phí trực tiếp
-    // TK 6xx/8xx, phí ngân hàng...) không có NCC/KH cụ thể để gán MST — KHÔNG coi là lỗi (theo đúng
-    // yêu cầu), nhưng vẫn KHÔNG tạo được chứng từ UNT/UNC (MISA vẫn cần Đối tượng cho mọi phiếu Thu/
-    // Chi — xem _misa_ghi_thu_chi) nên vẫn phải loại khỏi giaoDich, chỉ khác là hiện thông tin (không
-    // phải cảnh báo đỏ) để người dùng biết những dòng này chưa tạo được, không phải phần mềm bỏ sót.
+    // TK 6xx/8xx, phí ngân hàng, rút tiền mặt TK 1111...) không có NCC/KH cụ thể để gán MST — KHÔNG
+    // coi là lỗi VÀ vẫn tạo chứng từ bình thường (KHÔNG loại khỏi giaoDich) — xác nhận qua chẩn đoán
+    // chứng từ THẬT (_misa_chan_doan_chi_khac_131_331): MISA CHO PHÉP để trống Đối tượng với loại
+    // hạch toán này, server (_misa_ghi_thu_chi) đã tự xử lý AccountObjectID=NULL cho đúng trường
+    // hợp này rồi, không cần loại trừ ở đây nữa.
     if (!mst && (hach === "131" || hach === "331")) { boQuaThieuMst.soLuong++; boQuaThieuMst.tongTien += amtGoc; boQuaThieuMst.danhSach.push({ id: r.id, ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
-    if (!mst) { boQuaKhacTk.soLuong++; boQuaKhacTk.tongTien += amtGoc; boQuaKhacTk.danhSach.push({ id: r.id, ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc, hach }); return; }
     const vndAmt = r.tx.currency === "USD" ? vndOf.get(r.id) : undefined;
     const bookAmt = vndAmt !== undefined ? vndAmt : ((isUnt ? r.tx.credit : r.tx.debit) || 0);
     const soCtGoc = buildVoucherNo(loai.toUpperCase(), r.tx.date, seq, bankAcct, accountNo);
@@ -1779,7 +1779,7 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
       dien_giai: (r.tx.desc || "").slice(0, 255), tk_doi_ung: hach, so_tien: bookAmt, rowId: r.id
     });
   });
-  return { giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk };
+  return { giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst };
 }
 
 // ── Import UNT/UNC THẲNG VÀO MISA (ghi SQL trực tiếp qua server — KHÁC exportUNT/exportUNC vốn chỉ
@@ -1791,16 +1791,16 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
 // dòng — không bấm vào xem được danh sách lỗi, đã bỏ theo yêu cầu, chỉ còn số liệu cần thiết.
 async function previewThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, accountNo, showToast) {
   if (!coMst) { alert("Công ty chưa có MST — không thể import vào MISA."); return null; }
-  const { giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk } =
+  const { giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst } =
     await buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, showToast);
   const tenLoai = loai === "unt" ? "thu tiền (UNT)" : "chi tiền (UNC)";
   if (!giaoDich.length) {
-    let msg = `Không có giao dịch ${loai === "unt" ? "tiền vào" : "tiền ra"} đã xác nhận (có MST đối tượng, `
-      + `không phải nội bộ/tiền mặt) để import vào MISA.`;
-    if (boQuaNoiBo.soLuong || boQuaTienMat.soLuong || boQuaThieuMst.soLuong || boQuaKhacTk.soLuong) {
+    let msg = `Không có giao dịch ${loai === "unt" ? "tiền vào" : "tiền ra"} đã xác nhận (không phải nội bộ/tiền mặt, `
+      + `và nếu hạch toán 131/331 thì phải có MST) để import vào MISA.`;
+    if (boQuaNoiBo.soLuong || boQuaTienMat.soLuong || boQuaThieuMst.soLuong) {
       msg += `\n\n(Trong số đã xác nhận: ${boQuaNoiBo.soLuong} giao dịch chuyển khoản nội bộ, `
-        + `${boQuaTienMat.soLuong} giao dịch tiền mặt/rút-nộp tiền mặt, ${boQuaKhacTk.soLuong} giao dịch hạch toán khác 131/331 (không cần MST), `
-        + `${boQuaThieuMst.soLuong} giao dịch thiếu MST (hạch toán 131/331) — cả 4 loại này KHÔNG cần/KHÔNG thể tạo chứng từ UNT/UNC.)`;
+        + `${boQuaTienMat.soLuong} giao dịch tiền mặt/rút-nộp tiền mặt, `
+        + `${boQuaThieuMst.soLuong} giao dịch thiếu MST (hạch toán 131/331) — 3 loại này KHÔNG cần/KHÔNG thể tạo chứng từ UNT/UNC.)`;
     }
     alert(msg);
     return null;
@@ -1813,7 +1813,7 @@ async function previewThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, acc
     });
     const pv = await res.json();
     if (pv.detail) { alert("Lỗi: " + pv.detail); return null; }
-    return { loai, tenLoai, coMst, giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk, pv, accountNo };
+    return { loai, tenLoai, coMst, giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, pv, accountNo };
   } catch (e) {
     alert(`Lỗi xem trước ${tenLoai} vào MISA: ` + e.message);
     console.error(e);
@@ -1849,30 +1849,14 @@ function ImportMisaModal({ state, busy, onClose, onConfirm, onLoc }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose, busy]);
-  const { pv, tenLoai, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk, giaoDich, coMst, loai } = state;
-  // Chẩn đoán (chỉ đọc) — dò 1 chứng từ Thu/Chi THẬT (do người dùng tự ghi tay trong MISA, khác
-  // 131/331) để xem MISA có thật sự yêu cầu Đối tượng cho loại chứng từ này không, và nếu có thì
-  // dùng đối tượng gì — trả lời trực tiếp câu hỏi "sao vẫn không import được" cho nhóm "khactk".
-  const [chanDoan, setChanDoan] = useState(null);
-  const [dangChanDoan, setDangChanDoan] = useState(false);
-  const chayChanDoanKhacTk = async () => {
-    setDangChanDoan(true);
-    try {
-      const res = await fetch(`/api/misa-sql/chan-doan-chi-khac-131-331?mst=${encodeURIComponent(coMst)}&loai=${loai}`);
-      setChanDoan(await res.json());
-    } catch (e) {
-      setChanDoan({ tim_thay: false, ghi_chu: "Lỗi: " + e.message });
-    } finally {
-      setDangChanDoan(false);
-    }
-  };
+  const { pv, tenLoai, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, giaoDich } = state;
   // Map so_ct -> id dòng gốc (giaoDich mang theo rowId lúc build) — để nút "Lọc trên bảng chính" ở
   // dưới nhảy đúng tới các dòng bị SERVER báo lỗi (loiRows, chỉ có so_ct chứ không có id dòng).
   const soCtToRowId = {};
   (giaoDich || []).forEach(g => { if (g.so_ct && g.rowId) soCtToRowId[g.so_ct] = g.rowId; });
   const loiRows = (pv.danh_sach || []).filter(x => (x.trang_thai || "").includes("không tìm thấy đối tượng"));
   const loiRowIds = loiRows.map(x => soCtToRowId[x.so_ct]).filter(Boolean);
-  const coBoQuaKhac = (boQuaNoiBo && boQuaNoiBo.soLuong) || (boQuaTienMat && boQuaTienMat.soLuong) || (boQuaThieuMst && boQuaThieuMst.soLuong) || (boQuaKhacTk && boQuaKhacTk.soLuong);
+  const coBoQuaKhac = (boQuaNoiBo && boQuaNoiBo.soLuong) || (boQuaTienMat && boQuaTienMat.soLuong) || (boQuaThieuMst && boQuaThieuMst.soLuong);
   const nutLoc = (ids, nhan) => ids.length > 0 && onLoc && React.createElement("button", {
     onClick: e => { e.stopPropagation(); onLoc(ids, nhan); },
     style: {
@@ -1932,27 +1916,6 @@ function ImportMisaModal({ state, busy, onClose, onConfirm, onLoc }) {
         React.createElement("div", { style: { fontWeight: 600, marginBottom: 5 } }, "Giao dịch đã xác nhận nhưng KHÔNG cần tạo UNT/UNC (bấm để xem danh sách):"),
         hangBoQua("noibo", boQuaNoiBo, "⇔", "chuyển khoản nội bộ — không có đối tượng công nợ, không cần chứng từ ngân hàng riêng"),
         hangBoQua("tienmat", boQuaTienMat, "💵", "tiền mặt/rút-nộp tiền mặt — không phải thanh toán cho đối tượng cụ thể"),
-        hangBoQua("khactk", boQuaKhacTk, "ℹ️", "hạch toán khác 131/331 — không cần MST, nhưng MISA vẫn cần Đối tượng cho mọi phiếu Thu/Chi nên KHÔNG tạo được chứng từ riêng (không phải lỗi, chỉ là chưa tạo được qua đường này)"),
-        boQuaKhacTk && boQuaKhacTk.soLuong > 0 && React.createElement("div", { style: { marginTop: 4, marginLeft: 24 } },
-          React.createElement("button", {
-            onClick: chayChanDoanKhacTk, disabled: dangChanDoan,
-            style: { fontSize: 11, padding: "3px 9px", borderRadius: 5, border: "1px solid var(--border)", background: "#fff", color: "var(--text2)", cursor: "pointer" }
-          }, dangChanDoan ? "⏳ Đang dò..." : "🔬 Xem 1 chứng từ tương tự đã ghi tay trong MISA"),
-          chanDoan && React.createElement("div", { style: { marginTop: 6, fontSize: 11.5, background: "#fff", border: "1px solid var(--border)", borderRadius: 6, padding: 8, maxHeight: 200, overflow: "auto" } },
-            !chanDoan.tim_thay
-              ? React.createElement("div", { style: { color: "var(--text2)" } }, chanDoan.ghi_chu || chanDoan.detail || "Không có kết quả.")
-              : chanDoan.ket_qua.map((x, i) => React.createElement("div", {
-                  key: i, style: { paddingBottom: 6, marginBottom: 6, borderBottom: i < chanDoan.ket_qua.length - 1 ? "1px solid var(--border)" : "none" }
-                },
-                  React.createElement("div", null, React.createElement("b", null, x.so_ct || "?"), " — TK đối ứng ", x.tk_doi_ung, " — ", fmt(x.so_tien, "VND")),
-                  React.createElement("div", { style: { color: "var(--text2)" } }, x.dien_giai || x.journal_memo || ""),
-                  React.createElement("div", { style: { color: x.co_account_object_id ? "#1a7a4a" : "#a05a00", fontWeight: 600 } },
-                    x.co_account_object_id
-                      ? "Có Đối tượng: " + (x.account_object ? `${x.account_object.ma} - ${x.account_object.ten} (MST: ${x.account_object.mst || "trống"})` : "(không tra được thông tin)")
-                      : "KHÔNG có Đối tượng (AccountObjectID trống) — MISA cho phép để trống với loại chứng từ này")
-                ))
-          )
-        ),
         hangBoQua("thieumst", boQuaThieuMst, "🚫", "THIẾU MST (hạch toán 131/331) — cần bấm \"Chọn HĐ\"/sửa tay MST cho các dòng này trước", "#dc2626")
       ),
       loiRows.length > 0 && React.createElement("div", {

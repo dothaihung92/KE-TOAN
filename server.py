@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.039"
+APP_BUILD = "2026-08-27.040"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21580,11 +21580,16 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
     hàng KHÁC — xác nhận qua phản ánh thật: "Tài khoản chi" trên UNC hiện SAI ngân hàng dù số tiền/
     đối tượng đều đúng). Không khớp được (để trống hoặc TK đó chưa có trong Danh mục MISA) thì vẫn
     dùng cách cũ (mượn từ mẫu/dò TK bất kỳ) như trước, không chặn ghi.
-    Dòng nào KHÔNG tìm được đối tượng khớp MST trong Danh mục MISA (Đối
-    tượng) sẽ BỊ BỎ QUA (đếm vào so_bo_qua_kh) — KHÔNG tự tạo mới như "KL"/
-    "BH" bên Mua hàng/Bán hàng, vì thu/chi ngân hàng bắt buộc phải khớp
-    ĐÚNG đối tượng công nợ đã có, không có khái niệm "khách lẻ" tương đương
-    an toàn ở đây.
+    Chỉ BẮT BUỘC khớp đối tượng (AccountObjectID) khi tk_doi_ung là "131" (phải thu) hoặc "331"
+    (phải trả) — quan hệ công nợ THẬT với 1 đối tượng cụ thể, không tìm được thì BỊ BỎ QUA (đếm vào
+    so_bo_qua_kh), KHÔNG tự tạo mới như "KL"/"BH" bên Mua hàng/Bán hàng vì không có khái niệm "khách
+    lẻ" tương đương an toàn ở đây. Hạch toán KHÁC 131/331 (VD rút tiền mặt TK 1111, phí ngân hàng TK
+    515/6xx...) thì AccountObjectID để TRỐNG (NULL), KHÔNG bỏ qua — xác nhận qua chẩn đoán thật, đối
+    chiếu chứng từ THẬT người dùng tự ghi tay trong MISA (VD "NTTK00001" TK đối ứng 515, "UNC00001"
+    TK đối ứng 1111): các chứng từ này CÓ THẬT với AccountObjectID trống, MISA vẫn xem/ghi sổ bình
+    thường. Dòng AOL
+    (AccountObjectLedger, "Sổ chi tiết công nợ theo đối tượng") cũng tự bỏ qua khi không có đối
+    tượng — không có công nợ với ai thì không có gì để ghi vào sổ công nợ chi tiết.
     Dòng nào trùng so_ct với chứng từ CHÍNH phần mềm này đã ghi trước đó
     (CustomField10 đánh dấu, nếu bảng có cột này) sẽ tự BỎ QUA (so_trung),
     trừ khi ghi_de=True.
@@ -21796,20 +21801,28 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             mst_goc = str(gd.get("mst") or "").strip()
             mst = _misa_khncc_chuan_mst(mst_goc)
             ten = str(gd.get("ten_doi_tuong") or "").strip()
+            hach = str(gd.get("tk_doi_ung") or hach_mac_dinh).strip()
             # Thử khớp MST thuế thật trước; MST không khớp gì (hoặc không phải dạng MST, VD "KL" —
             # mã đối tượng Khách lẻ do phần mềm tự gán) thì thử lại theo Mã đối tượng (AccountObjectCode).
             dt = doi_tuong.get(mst.lower()) if mst else None
             if not dt and mst_goc:
                 dt = doi_tuong_theo_ma.get(mst_goc.lower())
-            if not dt:
+            # CHỈ bắt buộc phải khớp được đối tượng khi hạch toán là 131 (phải thu)/331 (phải trả) —
+            # quan hệ công nợ THẬT với 1 đối tượng cụ thể. Hạch toán khác (rút tiền mặt TK 1111, phí
+            # ngân hàng TK 515/6xx...) xác nhận qua chẩn đoán thật, đối chiếu chứng từ THẬT do người
+            # dùng tự ghi tay: AccountObjectID để TRỐNG (NULL) vẫn
+            # ghi sổ/xem bình thường trong MISA — không cần đối tượng cho loại chứng từ này.
+            if not dt and hach in ("131", "331"):
                 bo_qua_kh += 1
                 ket.append({"so_ct": so_ct,
                            "trang_thai": f"bỏ qua — không tìm thấy đối tượng MST '{mst or gd.get('mst') or ''}' "
                                          f"trong Danh mục MISA"})
                 continue
-            aid, ten_misa, ma_dt_misa, mst_misa = dt
+            if dt:
+                aid, ten_misa, ma_dt_misa, mst_misa = dt
+            else:
+                aid, ten_misa, ma_dt_misa, mst_misa = None, ten, "", ""
             ngay_dt = _misa_doc_ngay(gd.get("ngay")) or now
-            hach = str(gd.get("tk_doi_ung") or hach_mac_dinh).strip()
             dien_giai = str(gd.get("dien_giai") or "")[:255]
 
             # Nhân bản dòng THẬT làm khung (chỉ chiếu qua các cột được phép ghi — bỏ
@@ -21909,8 +21922,13 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                     _misa_gan(g, cols_gl, 0, "DebitAmount")
                 gl_rows.append(g)
 
+            # Bỏ qua dòng AccountObjectLedger ("Sổ chi tiết công nợ theo đối tượng") khi KHÔNG có đối
+            # tượng (aid=None, hạch toán khác 131/331) — không có công nợ với ai thì không có gì để
+            # ghi vào sổ công nợ chi tiết; ghi AccountObjectID=NULL vào bảng CHUYÊN theo dõi đối
+            # tượng này rủi ro hơn nhiều so với để trống hẳn (chưa kiểm chứng bảng này có cho NULL
+            # không, khác với BADeposit/BAWithDraw đã xác nhận qua chẩn đoán thật).
             aol_row = None
-            if mau_aol is not None:
+            if mau_aol is not None and aid:
                 a = dict(mau_aol)
                 for c in list(a.keys()):
                     if c not in {name for name, _ in cols_aol.values()}:
@@ -22239,87 +22257,6 @@ def misa_sql_danh_sach_mst_doi_tuong(mst: str, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
     return _misa_danh_sach_mst_doi_tuong(cid, database)
-
-
-def _misa_chan_doan_chi_khac_131_331(cid, database, loai):
-    """CHẨN ĐOÁN (chỉ đọc, không ghi gì) — tìm tối đa 5 chứng từ Thu/Chi tiền THẬT (do người dùng tự
-    ghi tay trong MISA trước đây, KHÔNG phải phần mềm này ghi) có hạch toán ĐỐI ỨNG KHÁC 131/331 (VD
-    rút tiền mặt TK 1111, phí ngân hàng TK 6425/6427...) để xem MISA thật sự có yêu cầu
-    AccountObjectID cho loại chứng từ này không, và nếu có thì dùng đối tượng gì — trả lời câu hỏi
-    "công ty vẫn ghi được loại chứng từ này qua UNT/UNC thật hay không, cần Đối tượng gì" thay vì đoán
-    (_misa_ghi_thu_chi hiện BẮT BUỘC AccountObjectID khớp MST/Mã đối tượng cho MỌI chứng từ, kể cả
-    hạch toán khác 131/331 — cần dữ liệu thật để biết có nên nới lỏng yêu cầu này hay không)."""
-    if loai not in ("unt", "unc"):
-        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
-    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
-    tk_cot = "CreditAccount" if loai == "unt" else "DebitAccount"
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        cols_m = _misa_cot_bang_that(cur, master_tbl)
-        cols_d = _misa_cot_bang_that(cur, detail_tbl)
-        if not cols_m or not cols_d:
-            raise HTTPException(400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl} trong CSDL MISA đang kết nối.")
-        m_cols = [name for name, _ in cols_m.values()]
-        d_cols = [name for name, _ in cols_d.values()]
-        co_cf10 = "customfield10" in cols_m
-        sql = ("SELECT TOP 5 d.RefID FROM %s d JOIN %s m ON m.RefID = d.RefID "
-               "WHERE d.%s NOT LIKE '131%%' AND d.%s NOT LIKE '331%%' AND ISNULL(d.%s,'')<>''"
-               ) % (detail_tbl, master_tbl, tk_cot, tk_cot, tk_cot)
-        params = ()
-        if co_cf10:
-            sql += " AND ISNULL(m.CustomField10,'')<>?"
-            params = (_PM_MARK,)
-        rows = cur.execute(sql, params).fetchall()
-        if not rows:
-            return {"database": database, "loai": loai, "tim_thay": False,
-                    "ghi_chu": "Không tìm thấy chứng từ THẬT nào có hạch toán đối ứng khác 131/331 "
-                               "trong CSDL — có thể công ty CHƯA từng tự ghi loại chứng từ này (VD "
-                               "rút tiền mặt/phí ngân hàng) qua Thu/Chi tiền (UNT/UNC) trong MISA."}
-        ket = []
-        for (ref_id,) in rows:
-            d_row = cur.execute("SELECT [%s] FROM %s WHERE RefID=?" %
-                                ("],[".join(d_cols), detail_tbl), (ref_id,)).fetchone()
-            m_row = cur.execute("SELECT [%s] FROM %s WHERE RefID=?" %
-                                ("],[".join(m_cols), master_tbl), (ref_id,)).fetchone()
-            d_dict = dict(zip(d_cols, d_row)) if d_row else {}
-            m_dict = dict(zip(m_cols, m_row)) if m_row else {}
-            aid = d_dict.get("AccountObjectID")
-            obj_info = None
-            if aid:
-                r2 = cur.execute(
-                    "SELECT AccountObjectCode, AccountObjectName, CompanyTaxCode "
-                    "FROM AccountObject WHERE AccountObjectID=?", (aid,)).fetchone()
-                if r2:
-                    obj_info = {"ma": r2[0], "ten": r2[1], "mst": r2[2]}
-            ket.append({
-                "so_ct": m_dict.get("RefNoFinance") or m_dict.get("RefNoManagement"),
-                "tk_doi_ung": d_dict.get(tk_cot), "so_tien": d_dict.get("Amount"),
-                "dien_giai": d_dict.get("Description"), "journal_memo": m_dict.get("JournalMemo"),
-                "co_account_object_id": bool(aid), "account_object": obj_info
-            })
-        return {"database": database, "loai": loai, "tim_thay": True, "ket_qua": ket}
-    finally:
-        conn.close()
-
-
-@app.get("/api/misa-sql/chan-doan-chi-khac-131-331")
-def misa_sql_chan_doan_chi_khac_131_331(mst: str, loai: str, database: str = ""):
-    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_chi_khac_131_331. Gọi từ
-    doi_chieu_ngan_hang.html (KHÔNG theo cid trên URL — tự dò cid qua MST)."""
-    mst = (mst or "").strip()
-    if not mst:
-        raise HTTPException(400, "Thiếu MST công ty.")
-    conn = db()
-    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
-    conn.close()
-    if not comp:
-        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
-    cid = comp["id"]
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    if not database:
-        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
-    return _misa_chan_doan_chi_khac_131_331(cid, database, loai)
 
 
 def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
