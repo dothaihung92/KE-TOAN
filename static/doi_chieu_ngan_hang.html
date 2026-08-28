@@ -4568,6 +4568,31 @@ function ConfirmScreen({
     const existing = LS.get(key) || {};
     LS.set(key, { ...existing, soDuCuoiKy: val });
   };
+  // Số dư ĐẦU kỳ theo sao kê THẬT (người tự nhập, cùng cơ chế lưu/xoá với soDuCuoiKy) — dùng để TỰ
+  // KIỂM TRA (không cần MISA, không cần mạng) rằng sao kê đã nhập ĐỦ dữ liệu: Đầu kỳ + tổng phát sinh
+  // của TẤT CẢ giao dịch đã nhập cho TK này phải khớp với Cuối kỳ đã nhập — nếu lệch, chắc chắn còn
+  // sót/thiếu giao dịch trong file sao kê đã tải lên (thiếu trang, thiếu dòng...), PHÁT HIỆN ĐƯỢC
+  // NGAY trước cả khi đối chiếu với MISA (đối chiếu MISA không phát hiện được lỗi này nếu giao dịch
+  // thiếu đó cũng chưa từng được import vào MISA — cả 2 bên cùng thiếu nên nhìn như "khớp").
+  const loadSoDuDauKy = accId => { const s = LS.get(soDuKeyFor(accId)); return (s && s.soDuDauKy) || ""; };
+  const [soDuDauKy, setSoDuDauKyState] = useState(() => loadSoDuDauKy(activeTabAccId));
+  const setSoDuDauKy = val => {
+    setSoDuDauKyState(val);
+    const key = soDuKeyFor(activeTabAccId);
+    const existing = LS.get(key) || {};
+    LS.set(key, { ...existing, soDuDauKy: val });
+  };
+  // Tự kiểm tra NỘI BỘ (không cần MISA): Đầu kỳ (nhập tay) + tổng phát sinh của TẤT CẢ giao dịch đã
+  // nhập cho TK này (rows — không phân biệt đã xác nhận hay chưa, vì đây là kiểm tra ĐÃ NHẬP ĐỦ file
+  // sao kê hay chưa) có khớp với Cuối kỳ (nhập tay) không — chỉ tính khi người dùng đã điền cả 2 ô.
+  const soDuTuKiemTra = (() => {
+    const dauNum = parseNum(soDuDauKy), cuoiNum = parseNum(soDuCuoiKy);
+    if (!soDuDauKy || !soDuCuoiKy || !(dauNum >= 0) || !(cuoiNum >= 0)) return null;
+    const phatSinh = rows.reduce((s, r) => s + ((r.tx.credit || 0) - (r.tx.debit || 0)), 0);
+    const kyVong = dauNum + phatSinh;
+    const lech = Math.round((cuoiNum - kyVong) * 100) / 100;
+    return { phatSinh, kyVong, lech, khop: Math.abs(lech) < 1 };
+  })();
 
   // ── Tờ Khai Hải quan NK/XK: dùng chung cho cả công ty, để gợi ý/gắn vào GD thanh toán ─────────
   const [tokhaiList, setTokhaiList] = useState(() => getCoToKhai(co.id, "NK"));
@@ -4854,6 +4879,7 @@ function ConfirmScreen({
       currentTabIdRef.current = accId; // cập nhật ref ngay, tránh lưu nhầm tab
       setActiveTabAccId(accId);
       setSoDuCuoiKyState(loadSoDuCuoiKy(accId));
+      setSoDuDauKyState(loadSoDuDauKy(accId));
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -4900,6 +4926,7 @@ function ConfirmScreen({
       setRows(loaded);
       setActiveTabAccId(accId);
       setSoDuCuoiKyState(loadSoDuCuoiKy(accId));
+      setSoDuDauKyState(loadSoDuDauKy(accId));
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -4909,6 +4936,7 @@ function ConfirmScreen({
       setRows([]);
       setActiveTabAccId(accId);
       setSoDuCuoiKyState(loadSoDuCuoiKy(accId));
+      setSoDuDauKyState(loadSoDuDauKy(accId));
       setFilter("all");
       setSearch("");
       setPickerFor(null);
@@ -6586,12 +6614,31 @@ function ConfirmScreen({
     onClick: checkMstMisa
   }, misaMstChecking ? "\u23F3 \u0110ang d\u00F2..." : "\uD83D\uDD0D Ki\u1EC3m tra MST v\u1EDBi MISA"),
   /*#__PURE__*/React.createElement("input", {
+    value: soDuDauKy,
+    onChange: e => setSoDuDauKy(e.target.value),
+    placeholder: "S\u1ED1 d\u01B0 \u0110\u1EA6U k\u1EF3 theo sao k\u00EA",
+    title: "S\u1ED1 d\u01B0 \u0110\u1EA6U k\u1EF3 TH\u1EACT theo sao k\u00EA ng\u00E2n h\u00E0ng (tr\u01B0\u1EDBc giao d\u1ECBch \u0111\u1EA7u ti\u00EAn) \u2014 \u0111i\u1EC1n c\u00F9ng \u00F4 \u0110\u1EA7u k\u1EF3 v\u00E0 Cu\u1ED1i k\u1EF3 \u0111\u1EC3 ph\u1EA7n m\u1EC1m T\u1EF0 KI\u1EC2M TRA (\u0111\u1EA7u k\u1EF3 + t\u1ED5ng ph\u00E1t sinh c\u00E1c d\u00F2ng \u0111\u00E3 nh\u1EADp = cu\u1ED1i k\u1EF3) xem b\u1EA1n \u0111\u00E3 nh\u1EADp \u0110\u1EE6 sao k\u00EA ch\u01B0a \u2014 KH\u00D4NG c\u1EA7n MISA",
+    style: { height: 30, width: 175, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 12 }
+  }),
+  /*#__PURE__*/React.createElement("input", {
     value: soDuCuoiKy,
     onChange: e => setSoDuCuoiKy(e.target.value),
     placeholder: "S\u1ED1 d\u01B0 cu\u1ED1i k\u1EF3 theo sao k\u00EA",
     title: "S\u1ED1 d\u01B0 cu\u1ED1i k\u1EF3 TH\u1EACT theo sao k\u00EA ng\u00E2n h\u00E0ng (t\u1EF1 l\u1EA5y t\u1EEB d\u00F2ng t\u1ED5ng k\u1EBFt/s\u1ED1 d\u01B0 cu\u1ED1i tr\u00EAn sao k\u00EA) \u2014 d\u00F9ng \u0111\u1EC3 \u0111\u1ED1i chi\u1EBFu v\u1EDBi s\u1ED1 d\u01B0 TK n\u00E0y trong MISA",
     style: { height: 30, width: 190, padding: "0 8px", borderRadius: 6, border: "1px solid var(--border)", fontSize: 12 }
   }),
+  soDuTuKiemTra && /*#__PURE__*/React.createElement("span", {
+    title: soDuTuKiemTra.khop
+      ? "Kh\u1EDBp: \u0110\u1EA7u k\u1EF3 + ph\u00E1t sinh c\u00E1c d\u00F2ng \u0111\u00E3 nh\u1EADp (" + fmt(soDuTuKiemTra.phatSinh, "VND") + ") = " + fmt(soDuTuKiemTra.kyVong, "VND") + ", \u0111\u00FAng b\u1EB1ng Cu\u1ED1i k\u1EF3 b\u1EA1n nh\u1EADp \u2014 sao k\u00EA \u0111\u00E3 nh\u1EADp \u0110\u1EE6, kh\u00F4ng thi\u1EBFu d\u00F2ng n\u00E0o."
+      : "L\u1EC7ch " + fmt(Math.abs(soDuTuKiemTra.lech), "VND") + " gi\u1EEFa (\u0110\u1EA7u k\u1EF3 + ph\u00E1t sinh c\u00E1c d\u00F2ng \u0111\u00E3 nh\u1EADp = " + fmt(soDuTuKiemTra.kyVong, "VND") + ") v\u00E0 Cu\u1ED1i k\u1EF3 b\u1EA1n nh\u1EADp (" + fmt(parseNum(soDuCuoiKy), "VND") + ") \u2014 R\u1EA4T C\u00D3 TH\u1EC2 b\u1EA1n \u0111\u00E3 nh\u1EADp THI\u1EBEU/S\u00D3T giao d\u1ECBch trong file sao k\u00EA (thi\u1EBFu trang, thi\u1EBFu d\u00F2ng...) \u2014 h\u00E3y ki\u1EC3m tra l\u1EA1i file sao k\u00EA g\u1ED1c tr\u01B0\u1EDBc khi \u0111\u1ED1i chi\u1EBFu ti\u1EBFp v\u1EDBi MISA.",
+    style: {
+      display: "inline-flex", alignItems: "center", height: 30, padding: "0 10px", borderRadius: 6,
+      fontSize: 11.5, fontWeight: 600, cursor: "help",
+      background: soDuTuKiemTra.khop ? "#f0fdf4" : "#fee2e2",
+      border: "1px solid " + (soDuTuKiemTra.khop ? "var(--green)" : "#fca5a5"),
+      color: soDuTuKiemTra.khop ? "var(--green-d)" : "#dc2626"
+    }
+  }, soDuTuKiemTra.khop ? "\u2713 \u0110\u00E3 nh\u1EADp \u0111\u1EE7 sao k\u00EA" : "\u26A0 C\u00F3 th\u1EC3 thi\u1EBFu sao k\u00EA \u2014 l\u1EC7ch " + fmt(Math.abs(soDuTuKiemTra.lech), "VND")),
   /*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
     style:{fontSize:11,color:"#7c3aed",borderColor:"#d4c5f9"},
