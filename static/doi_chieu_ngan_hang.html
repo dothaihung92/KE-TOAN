@@ -1974,14 +1974,26 @@ function ImportMisaModal({ state, busy, onClose, onConfirm, onLoc }) {
 // _misa_doi_chieu_so_du_nh ở server.py. Khớp thì hiện xanh, lệch thì hiện đỏ + (nếu có đủ dữ liệu
 // đối chiếu chi tiết) 3 mục xổ ra được: chứng từ chỉ có ở phần mềm / chỉ có ở MISA / có ở cả 2 nhưng
 // lệch số tiền — đúng chứng từ cần người dùng tự kiểm tra lại.
-function SoDuMisaModal({ d, onClose }) {
+function SoDuMisaModal({ d, onClose, onLoc }) {
   const [open, setOpen] = useState({ pm: false, misa: false, lech: false });
   React.useEffect(() => {
     const h = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
-  const nhomLoi = (key, mau, tieuDe, ds, render) => ds && ds.length > 0 && React.createElement("div", { style: { marginBottom: 8 } },
+  // Cho bấm "Lọc trên bảng chính" nhảy thẳng tới đúng các dòng của 1 nhóm lỗi (VD "chưa được import")
+  // — dùng chung soCtToRowId đã dựng lúc gọi API đối chiếu (giống cơ chế ở ImportMisaModal).
+  const nutLoc = (ds, nhan) => {
+    const ids = (ds || []).map(x => d.soCtToRowId && d.soCtToRowId[x.so_ct]).filter(Boolean);
+    return ids.length > 0 && onLoc && React.createElement("button", {
+      onClick: e => { e.stopPropagation(); onLoc(ids, nhan); },
+      style: {
+        fontSize: 11, padding: "2px 9px", borderRadius: 5, border: "1px solid #fff",
+        background: "rgba(255,255,255,.35)", color: "inherit", cursor: "pointer", fontWeight: 600, marginLeft: 8
+      }
+    }, "🔎 Lọc trên bảng chính");
+  };
+  const nhomLoi = (key, mau, tieuDe, ds, render, nhan) => ds && ds.length > 0 && React.createElement("div", { style: { marginBottom: 8 } },
     React.createElement("div", {
       onClick: () => setOpen(s => ({ ...s, [key]: !s[key] })),
       style: {
@@ -1991,6 +2003,7 @@ function SoDuMisaModal({ d, onClose }) {
       }
     },
       React.createElement("span", null, tieuDe + " (" + ds.length + ")"),
+      nutLoc(ds, nhan),
       React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 400 } }, open[key] ? "▲ Ẩn" : "▼ Xem")
     ),
     open[key] && React.createElement("div", {
@@ -2044,15 +2057,18 @@ function SoDuMisaModal({ d, onClose }) {
             nhomLoi("pm", "#dc2626", "🚫 Chứng từ phần mềm có, MISA KHÔNG thấy", d.chi_o_pm,
               x => React.createElement(React.Fragment, null,
                 React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
-                React.createElement("div", { style: { color: "var(--text2)" } }, fmt(x.so_tien, "VND") + " — chưa import hoặc đã bị xoá trong MISA"))),
+                React.createElement("div", { style: { color: "var(--text2)" } }, fmt(x.so_tien, "VND") + " — chưa import hoặc đã bị xoá trong MISA")),
+              "chưa được import vào MISA"),
             nhomLoi("misa", "#a05a00", "📋 Chứng từ có trong MISA, phần mềm không gửi", d.chi_o_misa,
               x => React.createElement(React.Fragment, null,
                 React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
-                React.createElement("div", { style: { color: "var(--text2)" } }, fmt(x.so_tien, "VND") + " — có thể do người dùng tự ghi tay trong MISA"))),
+                React.createElement("div", { style: { color: "var(--text2)" } }, fmt(x.so_tien, "VND") + " — có thể do người dùng tự ghi tay trong MISA")),
+              "có trong MISA nhưng phần mềm không gửi"),
             nhomLoi("lech", "#7c3aed", "⚠ Lệch số tiền giữa 2 bên", d.lech_so_tien,
               x => React.createElement(React.Fragment, null,
                 React.createElement("div", { style: { fontWeight: 600 } }, x.so_ct),
-                React.createElement("div", { style: { color: "var(--text2)" } }, "Phần mềm: " + fmt(x.so_tien_pm, "VND") + " — MISA: " + fmt(x.so_tien_misa, "VND"))))
+                React.createElement("div", { style: { color: "var(--text2)" } }, "Phần mềm: " + fmt(x.so_tien_pm, "VND") + " — MISA: " + fmt(x.so_tien_misa, "VND"))),
+              "lệch số tiền giữa phần mềm và MISA")
           )
     ),
     React.createElement("div", { style: { padding: "12px 18px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "flex-end" } },
@@ -4568,6 +4584,7 @@ function ConfirmScreen({
   const [locTuModal, setLocTuModal] = useState(null);
   const locTuModalVaoBang = (ids, nhan) => {
     setMisaImportState(null);
+    setMisaBalanceResult(null);
     setLocTuModal(new Set(ids));
     setFilter("all");
     setFocusIdx(0);
@@ -4665,6 +4682,11 @@ function ConfirmScreen({
         ...gdUnt.map(g => ({ so_ct: g.so_ct, so_tien: g.so_tien, loai: "unt" })),
         ...gdUnc.map(g => ({ so_ct: g.so_ct, so_tien: g.so_tien, loai: "unc" }))
       ];
+      // Giữ lại map so_ct -> id dòng gốc (rowId) để SoDuMisaModal cho bấm "Lọc trên bảng chính" nhảy
+      // thẳng tới đúng các dòng "chưa được import" (chi_o_pm) hoặc "lệch số tiền" (lech_so_tien) —
+      // giống cơ chế đã có ở ImportMisaModal (soCtToRowId).
+      const soCtToRowId = {};
+      [...gdUnt, ...gdUnc].forEach(g => { if (g.so_ct && g.rowId) soCtToRowId[g.so_ct] = g.rowId; });
       const res = await fetch("/api/misa-sql/doi-chieu-so-du-nh", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4674,7 +4696,7 @@ function ConfirmScreen({
       });
       const d = await res.json();
       if (d.detail) { showToast ? showToast("Lỗi: " + d.detail, "err") : alert("Lỗi: " + d.detail); return; }
-      setMisaBalanceResult({ ...d, account_number: misaAcct });
+      setMisaBalanceResult({ ...d, account_number: misaAcct, soCtToRowId });
     } catch (e) {
       showToast ? showToast("Lỗi đối chiếu số dư: " + e.message, "err") : alert("Lỗi đối chiếu số dư: " + e.message);
     } finally {
@@ -7108,6 +7130,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     }
   }), misaBalanceResult && /*#__PURE__*/React.createElement(SoDuMisaModal, {
     d: misaBalanceResult,
+    onLoc: locTuModalVaoBang,
     onClose: () => setMisaBalanceResult(null)
   }));
 }
