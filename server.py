@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.037"
+APP_BUILD = "2026-08-27.038"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22181,6 +22181,87 @@ def misa_sql_danh_sach_mst_doi_tuong(mst: str, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
     return _misa_danh_sach_mst_doi_tuong(cid, database)
+
+
+def _misa_chan_doan_chi_khac_131_331(cid, database, loai):
+    """CHẨN ĐOÁN (chỉ đọc, không ghi gì) — tìm tối đa 5 chứng từ Thu/Chi tiền THẬT (do người dùng tự
+    ghi tay trong MISA trước đây, KHÔNG phải phần mềm này ghi) có hạch toán ĐỐI ỨNG KHÁC 131/331 (VD
+    rút tiền mặt TK 1111, phí ngân hàng TK 6425/6427...) để xem MISA thật sự có yêu cầu
+    AccountObjectID cho loại chứng từ này không, và nếu có thì dùng đối tượng gì — trả lời câu hỏi
+    "công ty vẫn ghi được loại chứng từ này qua UNT/UNC thật hay không, cần Đối tượng gì" thay vì đoán
+    (_misa_ghi_thu_chi hiện BẮT BUỘC AccountObjectID khớp MST/Mã đối tượng cho MỌI chứng từ, kể cả
+    hạch toán khác 131/331 — cần dữ liệu thật để biết có nên nới lỏng yêu cầu này hay không)."""
+    if loai not in ("unt", "unc"):
+        raise HTTPException(400, "loai phải là 'unt' hoặc 'unc'")
+    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
+    tk_cot = "CreditAccount" if loai == "unt" else "DebitAccount"
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cols_m = _misa_cot_bang_that(cur, master_tbl)
+        cols_d = _misa_cot_bang_that(cur, detail_tbl)
+        if not cols_m or not cols_d:
+            raise HTTPException(400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl} trong CSDL MISA đang kết nối.")
+        m_cols = [name for name, _ in cols_m.values()]
+        d_cols = [name for name, _ in cols_d.values()]
+        co_cf10 = "customfield10" in cols_m
+        sql = ("SELECT TOP 5 d.RefID FROM %s d JOIN %s m ON m.RefID = d.RefID "
+               "WHERE d.%s NOT LIKE '131%%' AND d.%s NOT LIKE '331%%' AND ISNULL(d.%s,'')<>''"
+               ) % (detail_tbl, master_tbl, tk_cot, tk_cot, tk_cot)
+        params = ()
+        if co_cf10:
+            sql += " AND ISNULL(m.CustomField10,'')<>?"
+            params = (_PM_MARK,)
+        rows = cur.execute(sql, params).fetchall()
+        if not rows:
+            return {"database": database, "loai": loai, "tim_thay": False,
+                    "ghi_chu": "Không tìm thấy chứng từ THẬT nào có hạch toán đối ứng khác 131/331 "
+                               "trong CSDL — có thể công ty CHƯA từng tự ghi loại chứng từ này (VD "
+                               "rút tiền mặt/phí ngân hàng) qua Thu/Chi tiền (UNT/UNC) trong MISA."}
+        ket = []
+        for (ref_id,) in rows:
+            d_row = cur.execute("SELECT [%s] FROM %s WHERE RefID=?" %
+                                ("],[".join(d_cols), detail_tbl), (ref_id,)).fetchone()
+            m_row = cur.execute("SELECT [%s] FROM %s WHERE RefID=?" %
+                                ("],[".join(m_cols), master_tbl), (ref_id,)).fetchone()
+            d_dict = dict(zip(d_cols, d_row)) if d_row else {}
+            m_dict = dict(zip(m_cols, m_row)) if m_row else {}
+            aid = d_dict.get("AccountObjectID")
+            obj_info = None
+            if aid:
+                r2 = cur.execute(
+                    "SELECT AccountObjectCode, AccountObjectName, CompanyTaxCode "
+                    "FROM AccountObject WHERE AccountObjectID=?", (aid,)).fetchone()
+                if r2:
+                    obj_info = {"ma": r2[0], "ten": r2[1], "mst": r2[2]}
+            ket.append({
+                "so_ct": m_dict.get("RefNoFinance") or m_dict.get("RefNoManagement"),
+                "tk_doi_ung": d_dict.get(tk_cot), "so_tien": d_dict.get("Amount"),
+                "dien_giai": d_dict.get("Description"), "journal_memo": m_dict.get("JournalMemo"),
+                "co_account_object_id": bool(aid), "account_object": obj_info
+            })
+        return {"database": database, "loai": loai, "tim_thay": True, "ket_qua": ket}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-chi-khac-131-331")
+def misa_sql_chan_doan_chi_khac_131_331(mst: str, loai: str, database: str = ""):
+    """CHẨN ĐOÁN SÂU (chỉ đọc) — xem _misa_chan_doan_chi_khac_131_331. Gọi từ
+    doi_chieu_ngan_hang.html (KHÔNG theo cid trên URL — tự dò cid qua MST)."""
+    mst = (mst or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    return _misa_chan_doan_chi_khac_131_331(cid, database, loai)
 
 
 def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):

@@ -1849,7 +1849,23 @@ function ImportMisaModal({ state, busy, onClose, onConfirm, onLoc }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose, busy]);
-  const { pv, tenLoai, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk, giaoDich } = state;
+  const { pv, tenLoai, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk, giaoDich, coMst, loai } = state;
+  // Chẩn đoán (chỉ đọc) — dò 1 chứng từ Thu/Chi THẬT (do người dùng tự ghi tay trong MISA, khác
+  // 131/331) để xem MISA có thật sự yêu cầu Đối tượng cho loại chứng từ này không, và nếu có thì
+  // dùng đối tượng gì — trả lời trực tiếp câu hỏi "sao vẫn không import được" cho nhóm "khactk".
+  const [chanDoan, setChanDoan] = useState(null);
+  const [dangChanDoan, setDangChanDoan] = useState(false);
+  const chayChanDoanKhacTk = async () => {
+    setDangChanDoan(true);
+    try {
+      const res = await fetch(`/api/misa-sql/chan-doan-chi-khac-131-331?mst=${encodeURIComponent(coMst)}&loai=${loai}`);
+      setChanDoan(await res.json());
+    } catch (e) {
+      setChanDoan({ tim_thay: false, ghi_chu: "Lỗi: " + e.message });
+    } finally {
+      setDangChanDoan(false);
+    }
+  };
   // Map so_ct -> id dòng gốc (giaoDich mang theo rowId lúc build) — để nút "Lọc trên bảng chính" ở
   // dưới nhảy đúng tới các dòng bị SERVER báo lỗi (loiRows, chỉ có so_ct chứ không có id dòng).
   const soCtToRowId = {};
@@ -1917,6 +1933,26 @@ function ImportMisaModal({ state, busy, onClose, onConfirm, onLoc }) {
         hangBoQua("noibo", boQuaNoiBo, "⇔", "chuyển khoản nội bộ — không có đối tượng công nợ, không cần chứng từ ngân hàng riêng"),
         hangBoQua("tienmat", boQuaTienMat, "💵", "tiền mặt/rút-nộp tiền mặt — không phải thanh toán cho đối tượng cụ thể"),
         hangBoQua("khactk", boQuaKhacTk, "ℹ️", "hạch toán khác 131/331 — không cần MST, nhưng MISA vẫn cần Đối tượng cho mọi phiếu Thu/Chi nên KHÔNG tạo được chứng từ riêng (không phải lỗi, chỉ là chưa tạo được qua đường này)"),
+        boQuaKhacTk && boQuaKhacTk.soLuong > 0 && React.createElement("div", { style: { marginTop: 4, marginLeft: 24 } },
+          React.createElement("button", {
+            onClick: chayChanDoanKhacTk, disabled: dangChanDoan,
+            style: { fontSize: 11, padding: "3px 9px", borderRadius: 5, border: "1px solid var(--border)", background: "#fff", color: "var(--text2)", cursor: "pointer" }
+          }, dangChanDoan ? "⏳ Đang dò..." : "🔬 Xem 1 chứng từ tương tự đã ghi tay trong MISA"),
+          chanDoan && React.createElement("div", { style: { marginTop: 6, fontSize: 11.5, background: "#fff", border: "1px solid var(--border)", borderRadius: 6, padding: 8, maxHeight: 200, overflow: "auto" } },
+            !chanDoan.tim_thay
+              ? React.createElement("div", { style: { color: "var(--text2)" } }, chanDoan.ghi_chu || chanDoan.detail || "Không có kết quả.")
+              : chanDoan.ket_qua.map((x, i) => React.createElement("div", {
+                  key: i, style: { paddingBottom: 6, marginBottom: 6, borderBottom: i < chanDoan.ket_qua.length - 1 ? "1px solid var(--border)" : "none" }
+                },
+                  React.createElement("div", null, React.createElement("b", null, x.so_ct || "?"), " — TK đối ứng ", x.tk_doi_ung, " — ", fmt(x.so_tien, "VND")),
+                  React.createElement("div", { style: { color: "var(--text2)" } }, x.dien_giai || x.journal_memo || ""),
+                  React.createElement("div", { style: { color: x.co_account_object_id ? "#1a7a4a" : "#a05a00", fontWeight: 600 } },
+                    x.co_account_object_id
+                      ? "Có Đối tượng: " + (x.account_object ? `${x.account_object.ma} - ${x.account_object.ten} (MST: ${x.account_object.mst || "trống"})` : "(không tra được thông tin)")
+                      : "KHÔNG có Đối tượng (AccountObjectID trống) — MISA cho phép để trống với loại chứng từ này")
+                ))
+          )
+        ),
         hangBoQua("thieumst", boQuaThieuMst, "🚫", "THIẾU MST (hạch toán 131/331) — cần bấm \"Chọn HĐ\"/sửa tay MST cho các dòng này trước", "#dc2626")
       ),
       loiRows.length > 0 && React.createElement("div", {
