@@ -4525,8 +4525,13 @@ function ConfirmScreen({
   };
   const normMstJs = s => String(s || "").trim().toLowerCase().replace(/[-. ]/g, "");
   const normMaJs = s => String(s || "").trim().toLowerCase();
+  // Lỗi MST = giao dịch ĐÃ xác nhận, KHÔNG phải nội bộ/tiền mặt (đúng tập sẽ gửi vào MISA khi Import
+  // UNT/UNC — xem buildThuChiGiaoDich), mà MST hoặc THIẾU HẲN hoặc KHÔNG khớp MST/Mã đối tượng nào
+  // trong MISA — gộp chung 2 trường hợp vào 1 chỗ để khớp ĐÚNG với "thiếu MST" mà Import UNT/UNC báo
+  // (trước đây chỉ bắt trường hợp MST SAI, không bắt trường hợp MST TRỐNG, khiến 2 nơi báo lệch nhau:
+  // "Kiểm tra MST" báo ổn nhưng Import UNC vẫn báo "thiếu MST" cho đúng các dòng chưa gán MST).
   const isMstErrorRow = r => !!misaMstSet && r.confirmed === "yes" && !r.isInternal && !r.isCash
-    && !!r.confirmedMST && !misaMstSet.has(normMstJs(r.confirmedMST)) && !(misaMaSet && misaMaSet.has(normMaJs(r.confirmedMST)));
+    && (!r.confirmedMST || (!misaMstSet.has(normMstJs(r.confirmedMST)) && !(misaMaSet && misaMaSet.has(normMaJs(r.confirmedMST)))));
   const mstErrorCount = misaMstSet ? rows.filter(isMstErrorRow).length : 0;
   // ── Đối chiếu số dư cuối kỳ TK ngân hàng với MISA ───────────────────────────────────────────────
   const [misaBalanceChecking, setMisaBalanceChecking] = useState(false);
@@ -6465,7 +6470,7 @@ function ConfirmScreen({
     className:"btn btn-outline",
     style:{fontSize:11,color:"#666"},
     disabled: misaMstChecking,
-    title:"D\u00F2 tr\u01B0\u1EDBc (ch\u1EC9 \u0111\u1ECDc, kh\u00F4ng ghi g\u00EC) danh s\u00E1ch MST \u0111ang c\u00F3 trong Danh m\u1EE5c \u0110\u1ED1i t\u01B0\u1EE3ng c\u1EE7a MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 hi\u1EC7n th\u00EAm m\u1EE5c \"L\u1ED7i MST\" b\u00EAn tr\u00EAn \u0111\u1EC3 l\u1ECDc \u0111\u00FAng c\u00E1c giao d\u1ECBch s\u1EBD KH\u00D4NG import \u0111\u01B0\u1EE3c (MST kh\u00F4ng kh\u1EDBp \u0111\u1ED1i t\u01B0\u1EE3ng n\u00E0o trong MISA), kh\u00F4ng c\u1EA7n b\u1EA5m Import UNT/UNC m\u1EDBi th\u1EA5y",
+    title:"D\u00F2 tr\u01B0\u1EDBc (ch\u1EC9 \u0111\u1ECDc, kh\u00F4ng ghi g\u00EC) danh s\u00E1ch MST \u0111ang c\u00F3 trong Danh m\u1EE5c \u0110\u1ED1i t\u01B0\u1EE3ng c\u1EE7a MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 hi\u1EC7n th\u00EAm m\u1EE5c \"Thi\u1EBFu/l\u1ED7i MST\" b\u00EAn tr\u00EAn \u0111\u1EC3 l\u1ECDc \u0111\u00FAng c\u00E1c giao d\u1ECBch s\u1EBD KH\u00D4NG import \u0111\u01B0\u1EE3c (MST thi\u1EBFu h\u1EB3n HO\u1EB6C kh\u00F4ng kh\u1EDBp \u0111\u1ED1i t\u01B0\u1EE3ng n\u00E0o trong MISA), kh\u00F4ng c\u1EA7n b\u1EA5m Import UNT/UNC m\u1EDBi th\u1EA5y",
     onClick: checkMstMisa
   }, misaMstChecking ? "\u23F3 \u0110ang d\u00F2..." : "\uD83D\uDD0D Ki\u1EC3m tra MST v\u1EDBi MISA"),
   /*#__PURE__*/React.createElement("input", {
@@ -6652,7 +6657,7 @@ function ConfirmScreen({
       gap: 6,
       flexWrap: "wrap"
     }
-  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : []), ...(misaMstSet !== null && mstErrorCount > 0 ? [["msterror", "🚫 Lỗi MST " + mstErrorCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
+  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : []), ...(misaMstSet !== null && mstErrorCount > 0 ? [["msterror", "🚫 Thiếu/lỗi MST " + mstErrorCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
     key: v,
     className: `tab${filter === v ? " active" : ""}`,
     onClick: () => { setFilter(v); setFocusIdx(0); clearBulkSelection(); },
