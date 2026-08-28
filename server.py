@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.049"
+APP_BUILD = "2026-08-27.050"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18810,78 +18810,30 @@ def _misa_mau_dong_that(cur, table, dieu_kien_where, tham_so=()):
         return {}
 
 
-def _misa_chan_doan_v2_so_theo_doi_ccdc(cid, database):
-    """CHỈ ĐỌC — vòng 2: chẩn đoán trước đó xác nhận SUIncrement.RemainingAllocationTime/
-    AllocatedAmount/RemaingAmount ĐÃ được ghi đúng số (khớp số chứng từ PBCC thật đã
-    tạo), nhưng lưới 'Sổ theo dõi CCDC' trên MISA VẪN hiện y hệt lúc Ghi tăng — nghĩa
-    là lưới đó KHÔNG đọc trực tiếp các cột này (hoặc đọc theo ĐIỀU KIỆN khác mà chứng
-    từ PBCC do phần mềm tạo không thoả). Dò tiếp theo 2 hướng: (1) cờ trạng thái
-    (IsPostedFinance/IsPostedManagement/IsGetSupplyAllocated/DisplayOnBook) của CHÍNH
-    các chứng từ PBCC đã tạo — so với cờ mà Ghi tăng CCDC dùng (LUÔN IsPostedManagement=1,
-    xem _misa_ghi_tang_ccdc) để xem có lệch không; (2) liệt kê mọi VIEW/PROCEDURE/FUNCTION
-    trong CSDL có tên chứa Supply/CCDC/Alloc kèm định nghĩa THẬT (nếu quyền đọc cho phép)
-    — MISA có thể tính lưới này qua 1 đối tượng SQL riêng thay vì đọc thẳng cột."""
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        co_ct = []
-        try:
-            rows = cur.execute(
-                "SELECT RefNo, IsPostedFinance, IsPostedManagement, IsGetSupplyAllocated, "
-                "DisplayOnBook, RefType FROM SUAllocation WHERE RefNo LIKE 'PBCC%' "
-                "ORDER BY RefNo").fetchall()
-            for refno, pf, pm, gsa, dob, rt in rows:
-                co_ct.append({"so_ct": refno, "IsPostedFinance": str(pf), "IsPostedManagement": str(pm),
-                             "IsGetSupplyAllocated": str(gsa), "DisplayOnBook": str(dob), "RefType": str(rt)})
-        except Exception as e:
-            co_ct = [{"loi": str(e)}]
-        doi_tuong = []
-        try:
-            rows = cur.execute(
-                "SELECT o.name, o.type_desc, OBJECT_DEFINITION(o.object_id) FROM sys.objects o "
-                "WHERE o.type IN ('V','P','TF','IF','FN') AND (o.name LIKE '%Supply%' "
-                "OR o.name LIKE '%CCDC%' OR o.name LIKE '%Alloc%' OR o.name LIKE 'SU%')").fetchall()
-            for name, type_desc, defi in rows:
-                doi_tuong.append({"ten": name, "loai": type_desc,
-                                 "dinh_nghia": (defi or "(không đọc được định nghĩa — thiếu quyền?)")[:6000]})
-        except Exception as e:
-            doi_tuong = [{"loi": str(e)}]
-        bang_supply = []
-        try:
-            bang_supply = [r[0] for r in cur.execute(
-                "SELECT name FROM sys.tables WHERE name LIKE '%Supply%' OR name LIKE 'SU%' "
-                "ORDER BY name").fetchall()]
-        except Exception:
-            pass
-        return {"database": database, "co_kien_pbcc_that": co_ct,
-                "doi_tuong_sql_lien_quan": doi_tuong, "bang_lien_quan": bang_supply}
-    finally:
-        conn.close()
-
-
-@app.get("/api/misa-sql/chan-doan-v2-so-theo-doi-ccdc/{cid}")
-def misa_sql_chan_doan_v2_so_theo_doi_ccdc(cid: int, database: str = ""):
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    if not database:
-        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
-    return _misa_chan_doan_v2_so_theo_doi_ccdc(cid, database)
-
-
 def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
     """Tự động tạo chứng từ 'Phân bổ chi phí CCDC' HÀNG THÁNG — giống hệt bấm
     'Thêm' trên màn 'Công cụ dụng cụ > Phân bổ chi phí' của MISA (mã
-    PBCC00001...). ĐÃ SỬA sau khi đối chiếu dữ liệu THẬT (bản đầu đoán nhầm
-    SupplyLedger là nơi lưu số tiền — SAI, IncrementAmount/TermlyAllocationAmount
-    trên SupplyLedger LUÔN = 0 ở dòng PBCC thật): số tiền thật nằm ở 4 bảng
-    SUAllocation (chứng từ, cột TotalAmount) + SUAllocationDetailExpense +
+    PBCC00001...). ĐÃ SỬA sau khi đối chiếu dữ liệu THẬT: số tiền chứng từ
+    nằm ở 4 bảng SUAllocation (chứng từ, cột TotalAmount) + SUAllocationDetailExpense +
     SUAllocationDetailTable (chi tiết từng CCDC, cột AllocationAmount/
     TotalAllocationAmount) + SUAllocationDetailPost (bút toán Nợ/Có tổng hợp
-    theo TK). SUIncrement.RemainingAllocationTime/RemaingAmount cũng LUÔN = 0
-    trên dữ liệu thật (không được MISA thật sự dùng để theo dõi số kỳ còn
-    lại) — nên số kỳ/tiền ĐÃ phân bổ được tính bằng cách ĐẾM/CỘNG DỒN chính
-    các dòng SUAllocationDetailExpense thật đã có cho từng CCDC, không tin
-    vào các cột đó trên SUIncrement. KHÔNG đụng vào SupplyLedger (để tránh
-    lặp lại sai lầm cũ khi chưa hiểu hết ý nghĩa thật của bảng đó).
+    theo TK) — số kỳ/tiền ĐÃ phân bổ (dùng để TÍNH TOÁN preview/kỳ tiếp theo)
+    được đếm/cộng dồn chính các dòng SUAllocationDetailExpense thật đã có,
+    không tin vào SUIncrement.RemainingAllocationTime/RemaingAmount (luôn=0,
+    không phải nơi MISA lưu số liệu này).
+    RIÊNG màn "Sổ theo dõi CCDC" (Proc_SU_SelectAll_View_Supply đọc thật từ
+    MISA — xác nhận qua đọc trực tiếp định nghĩa stored procedure) lại tính
+    "Số kỳ còn lại"/"Giá trị đã phân bổ"/"Giá trị còn lại" SỐNG bằng cách
+    CỘNG DỒN chính bảng SupplyLedger theo SupplyID (IncrementAllocationTime/
+    DecrementAllocationTime cho số kỳ, AllocationAmount cho tiền đã phân bổ)
+    — KHÁC hẳn với cách _misa_phan_bo_ccdc tự tính preview ở trên. Nên MỖI
+    LẦN ghi chứng từ PBCC thật (preview=False), phải ghi THÊM 1 dòng
+    SupplyLedger (RefType=453 — xác nhận qua comment thật trong
+    Proc_SU_Get_SUAllocationExpenseByDateRange: "--453 Phân bổ chi phí CCDC")
+    cho mỗi CCDC mỗi tháng, với DecrementAllocationTime=1 (trừ đúng 1 kỳ) và
+    AllocationAmount=số tiền phân bổ tháng đó — giống hệt cách _misa_ghi_tang_ccdc
+    đã ghi SupplyLedger cho "Ghi tăng" (RefType=450) — nếu không, "Sổ theo
+    dõi CCDC" vẫn hiện y hệt lúc Ghi tăng dù chứng từ PBCC đã có đủ và đúng.
 
     preview=True: chỉ tính toán, KHÔNG ghi gì (rollback), trả về danh sách sẽ
     tạo để người dùng tự kiểm tra trước."""
@@ -18896,11 +18848,23 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
         cols_exp = _misa_cot_bang_that(cur, "SUAllocationDetailExpense")
         cols_tbl = _misa_cot_bang_that(cur, "SUAllocationDetailTable")
         cols_post = _misa_cot_bang_that(cur, "SUAllocationDetailPost")
+        cols_led = _misa_cot_bang_that(cur, "SupplyLedger")
         if not (cols_su and cols_alloc and cols_exp and cols_tbl and cols_post):
             raise HTTPException(
                 400, "Không tìm thấy đủ bảng SUIncrement/SUAllocation/"
                      "SUAllocationDetailExpense/SUAllocationDetailTable/"
                      "SUAllocationDetailPost trong CSDL MISA đang kết nối.")
+        # RefOrderInSubSystem của SupplyLedger — dòng thật đánh số riêng trong
+        # phân hệ CCDC (khác RefOrder chung), ghi tiếp nối MAX hiện có — giống
+        # hệt cách _misa_ghi_tang_ccdc đã làm cho dòng Ghi tăng.
+        max_ro_sub = 0
+        if cols_led:
+            try:
+                r_sub = cur.execute(
+                    "SELECT ISNULL(MAX(RefOrderInSubSystem),0) FROM SupplyLedger").fetchone()
+                max_ro_sub = (r_sub[0] or 0) if r_sub else 0
+            except Exception:
+                pass
 
         # Ưu tiên HỌC từ chứng từ PBCC thật đã có (đáng tin nhất — đúng cách công
         # ty này đang dùng); KHÔNG CÒN bắt buộc phải có sẵn ít nhất 1 chứng từ nữa
@@ -18999,6 +18963,20 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             da_ky, da_tien = int(r[0] or 0), _snum(r[1] or 0)
             st["con_lai_ky"] = st["so_ky"] - da_ky
             st["con_lai_tien"] = st["tong_tien"] - da_tien
+            # Học BranchID/OrganizationUnitID THẬT từ dòng SupplyLedger đã có sẵn của
+            # CHÍNH CCDC này (dòng Ghi tăng — RefType=450/_SU_LEDGER_REFTYPE) để ghi
+            # đúng dòng SupplyLedger cho từng lần phân bổ tháng (xem "Sổ theo dõi CCDC"
+            # đọc SỐNG từ SupplyLedger, không phải SUIncrement — xem docstring hàm này).
+            st["led_branch"], st["led_ou"] = None, None
+            if cols_led:
+                try:
+                    r_led = cur.execute(
+                        "SELECT TOP 1 BranchID, OrganizationUnitID FROM SupplyLedger "
+                        "WHERE SupplyID=? ORDER BY RefType DESC", su_id).fetchone()
+                    if r_led:
+                        st["led_branch"], st["led_ou"] = r_led[0], r_led[1]
+                except Exception:
+                    pass
         trang_thai = {k: v for k, v in trang_thai.items() if v["con_lai_ky"] > 0}
         if not trang_thai:
             return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
@@ -19040,7 +19018,7 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             # (đối chiếu dữ liệu thật: ghi chi tiết trước khi có dòng đầu ->
             # lỗi FK_SUAllocationDetailExpense_SUAllocation, KHÔNG ghi được
             # gì — transaction tự rollback nên không hỏng dữ liệu).
-            exp_rows, tbl_rows = [], []
+            exp_rows, tbl_rows, led_rows = [], [], []
             for idx, (su_id, st) in enumerate(dong_thang, start=1):
                 tien_ky_thuc = round(st["con_lai_tien"] if st["con_lai_ky"] <= 1 else st["tien_ky_dinh"])
                 tong_ct += tien_ky_thuc
@@ -19077,8 +19055,9 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                 if not tk_no:
                     tk_no = mau_tbl.get("CostAccount") if mau_tbl else debit_mac_dinh
 
+                exp_detail_id = str(_uuid.uuid4())
                 exp_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_exp.values()}
-                _misa_gan(exp_row, cols_exp, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(exp_row, cols_exp, exp_detail_id, "RefDetailID")
                 _misa_gan(exp_row, cols_exp, alloc_id, "RefID")
                 _misa_gan(exp_row, cols_exp, su_id, "SupplyID")
                 _misa_gan(exp_row, cols_exp, tien_ky_thuc, "TotalAllocationAmount")
@@ -19086,6 +19065,35 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                 _misa_gan(exp_row, cols_exp, max(round(st["con_lai_tien"]) - tien_ky_thuc, 0), "RemainingAmount")
                 _misa_gan(exp_row, cols_exp, idx, "SortOrder")
                 exp_rows.append(exp_row)
+
+                # Dòng SỔ CÁI CCDC (SupplyLedger, RefType=453 "Phân bổ chi phí CCDC") —
+                # chính là dòng "Sổ theo dõi CCDC" thật sự cộng dồn để hiện "Số kỳ còn
+                # lại"/"Giá trị đã phân bổ" (xem docstring hàm này) — KHÔNG ghi dòng
+                # này thì lưới đó vẫn đứng yên y hệt lúc Ghi tăng dù chứng từ PBCC đã
+                # có đủ. DecrementAllocationTime=1 trừ đúng 1 kỳ; AllocationAmount=
+                # số tiền phân bổ tháng này — cộng dồn đúng công thức MISA thật dùng.
+                if cols_led:
+                    led_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_led.values()}
+                    max_ro_sub += 1
+                    _misa_gan(led_row, cols_led, alloc_id, "RefID")
+                    _misa_gan(led_row, cols_led, exp_detail_id, "RefDetailID")
+                    _misa_gan(led_row, cols_led, su_id, "SupplyID")
+                    _misa_gan(led_row, cols_led, 453, "RefType")
+                    _misa_gan(led_row, cols_led, refno, "RefNo")
+                    _misa_gan(led_row, cols_led, ngay_cuoi_thang, "RefDate")
+                    _misa_gan(led_row, cols_led, ngay_cuoi_thang, "PostedDate")
+                    _misa_gan(led_row, cols_led, memo, "JournalMemo")
+                    _misa_gan(led_row, cols_led, ("Phân bổ chi phí CCDC - %s" % st["ten"])[:500], "Description")
+                    _misa_gan(led_row, cols_led, 1, "DecrementAllocationTime")
+                    _misa_gan(led_row, cols_led, tien_ky_thuc, "AllocationAmount")
+                    _misa_gan(led_row, cols_led, st["led_branch"] or branch_id, "BranchID")
+                    _misa_gan(led_row, cols_led, st["led_ou"], "OrganizationUnitID")
+                    _misa_gan(led_row, cols_led, str(st["ma"])[:25], "SupplyCode")
+                    _misa_gan(led_row, cols_led, str(st["ten"])[:255], "SupplyName")
+                    _misa_gan(led_row, cols_led, idx - 1, "SortOrder")
+                    _misa_gan(led_row, cols_led, 0, "RefOrder")
+                    _misa_gan(led_row, cols_led, max_ro_sub, "RefOrderInSubSystem")
+                    led_rows.append(led_row)
 
                 tbl_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_tbl.values()}
                 _misa_gan(tbl_row, cols_tbl, str(_uuid.uuid4()), "RefDetailID")
@@ -19147,6 +19155,11 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                     cur.execute("INSERT INTO SUAllocationDetailTable ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
                                [tbl_row[c] for c in lc])
+                for led_row in led_rows:
+                    lc = list(led_row.keys())
+                    cur.execute("INSERT INTO SupplyLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [led_row[c] for c in lc])
                 so_thu_tu = 0
                 for (tk_no, obj_id), tong_nhom in nhom_post.items():
                     post_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_post.values()}
