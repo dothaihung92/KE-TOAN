@@ -1716,8 +1716,8 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
   // để hiện rõ trong ImportMisaModal TẠI SAO "Tổng tiền ra/vào" trên màn xác nhận CAO HƠN số chứng
   // từ UNT/UNC thật sự import (nội bộ/tiền mặt không cần chứng từ ngân hàng riêng; thiếu MST thì
   // không xác định được đối tượng để ghi) — tránh hiểu nhầm là phần mềm "import thiếu"/có lỗi.
-  let boQuaNoiBo = { soLuong: 0, tongTien: 0 }, boQuaTienMat = { soLuong: 0, tongTien: 0 },
-      boQuaThieuMst = { soLuong: 0, tongTien: 0 };
+  let boQuaNoiBo = { soLuong: 0, tongTien: 0, danhSach: [] }, boQuaTienMat = { soLuong: 0, tongTien: 0, danhSach: [] },
+      boQuaThieuMst = { soLuong: 0, tongTien: 0, danhSach: [] };
   confirmed.forEach((r, i) => {
     const origIdx = rows.indexOf(r);
     const seq = (origIdx >= 0 ? origIdx : i) + 1;
@@ -1729,10 +1729,12 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
     // Bỏ qua giao dịch không có đối tượng (nội bộ/tiền mặt). "MST" gửi đi có thể là MST thuế thật
     // HOẶC mã đối tượng dạng chữ (VD "KL" - Khách lẻ) — server tự khớp theo MST trước, không có thì
     // thử lại theo Mã đối tượng đã có sẵn trong Danh mục MISA (xem _misa_ghi_thu_chi/doi_tuong_theo_ma).
-    if (r.isInternal) { boQuaNoiBo.soLuong++; boQuaNoiBo.tongTien += amtGoc; return; }
-    if (r.isCash) { boQuaTienMat.soLuong++; boQuaTienMat.tongTien += amtGoc; return; }
+    // Ghi kèm danhSach (ngày/diễn giải/số tiền — CHƯA có so_ct vì chỉ sinh cho dòng ĐƯỢC gửi đi) để
+    // ImportMisaModal hiện được ĐÚNG danh sách giao dịch bị loại, không chỉ mỗi số lượng/tổng tiền.
+    if (r.isInternal) { boQuaNoiBo.soLuong++; boQuaNoiBo.tongTien += amtGoc; boQuaNoiBo.danhSach.push({ ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
+    if (r.isCash) { boQuaTienMat.soLuong++; boQuaTienMat.tongTien += amtGoc; boQuaTienMat.danhSach.push({ ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
     const mst = r.confirmedMST || "";
-    if (!mst) { boQuaThieuMst.soLuong++; boQuaThieuMst.tongTien += amtGoc; return; }
+    if (!mst) { boQuaThieuMst.soLuong++; boQuaThieuMst.tongTien += amtGoc; boQuaThieuMst.danhSach.push({ ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
     const vndAmt = r.tx.currency === "USD" ? vndOf.get(r.id) : undefined;
     const bookAmt = vndAmt !== undefined ? vndAmt : ((isUnt ? r.tx.credit : r.tx.debit) || 0);
     const soCtGoc = buildVoucherNo(loai.toUpperCase(), r.tx.date, seq, bankAcct, accountNo);
@@ -1826,6 +1828,7 @@ async function commitThuChiVaoMisa(state, showToast) {
 // danh sách chi tiết từng giao dịch lỗi để người dùng biết cần bổ sung đối tượng nào trong MISA.
 function ImportMisaModal({ state, busy, onClose, onConfirm }) {
   const [showErrors, setShowErrors] = useState(false);
+  const [openBoQua, setOpenBoQua] = useState({ noibo: false, tienmat: false, thieumst: false });
   React.useEffect(() => {
     const h = e => { if (e.key === "Escape" && !busy) onClose(); };
     window.addEventListener("keydown", h);
@@ -1834,6 +1837,27 @@ function ImportMisaModal({ state, busy, onClose, onConfirm }) {
   const { pv, tenLoai, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst } = state;
   const loiRows = (pv.danh_sach || []).filter(x => (x.trang_thai || "").includes("không tìm thấy đối tượng"));
   const coBoQuaKhac = (boQuaNoiBo && boQuaNoiBo.soLuong) || (boQuaTienMat && boQuaTienMat.soLuong) || (boQuaThieuMst && boQuaThieuMst.soLuong);
+  // Hàng "N giao dịch ... (X đồng)" bấm vào xổ ra ĐÚNG danh sách ngày/diễn giải/số tiền của nhóm đó —
+  // dùng chung cho cả 3 nhóm bị loại (nội bộ/tiền mặt/thiếu MST).
+  const hangBoQua = (key, nhom, icon, nhan, mau) => nhom && nhom.soLuong > 0 && React.createElement("div", { style: { marginBottom: 4 } },
+    React.createElement("div", {
+      onClick: () => setOpenBoQua(s => ({ ...s, [key]: !s[key] })),
+      style: { cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: mau || "inherit" }
+    },
+      React.createElement("span", null, icon + " " + nhom.soLuong + " giao dịch " + nhan + " (" + fmt(nhom.tongTien, "VND") + ")"),
+      React.createElement("span", { style: { fontSize: 11, fontWeight: 400, color: "var(--text3)" } }, openBoQua[key] ? " ▲ Ẩn" : " ▼ Xem")
+    ),
+    openBoQua[key] && React.createElement("div", {
+      style: { marginTop: 4, marginLeft: 4, maxHeight: 160, overflow: "auto", border: "1px solid var(--border)", borderRadius: 6 }
+    }, nhom.danhSach.map((x, i) => React.createElement("div", {
+      key: i,
+      style: { padding: "5px 8px", fontSize: 11.5, borderBottom: i < nhom.danhSach.length - 1 ? "1px solid var(--border)" : "none" }
+    },
+      React.createElement("span", { style: { color: "var(--text2)" } }, x.ngay + " — "),
+      React.createElement("span", null, x.dienGiai || "(không có diễn giải)"),
+      React.createElement("span", { style: { float: "right", fontWeight: 600 } }, fmt(x.soTien, "VND"))
+    )))
+  );
   return React.createElement("div", {
     style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 320, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
     onClick: () => { if (!busy) onClose(); }
@@ -1856,13 +1880,10 @@ function ImportMisaModal({ state, busy, onClose, onConfirm }) {
       coBoQuaKhac && React.createElement("div", {
         style: { fontSize: 12, color: "var(--text2)", marginBottom: 8, background: "#f7f7f7", borderRadius: 8, padding: "8px 12px" }
       },
-        React.createElement("div", { style: { fontWeight: 600, marginBottom: 3 } }, "Giao dịch đã xác nhận nhưng KHÔNG cần tạo UNT/UNC:"),
-        boQuaNoiBo && boQuaNoiBo.soLuong > 0 && React.createElement("div", null,
-          "⇔ " + boQuaNoiBo.soLuong + " giao dịch chuyển khoản nội bộ (" + fmt(boQuaNoiBo.tongTien, "VND") + ") — không có đối tượng công nợ, không cần chứng từ ngân hàng riêng."),
-        boQuaTienMat && boQuaTienMat.soLuong > 0 && React.createElement("div", null,
-          "💵 " + boQuaTienMat.soLuong + " giao dịch tiền mặt (" + fmt(boQuaTienMat.tongTien, "VND") + ") — không phải giao dịch qua ngân hàng."),
-        boQuaThieuMst && boQuaThieuMst.soLuong > 0 && React.createElement("div", { style: { color: "#dc2626" } },
-          "🚫 " + boQuaThieuMst.soLuong + " giao dịch THIẾU MST (" + fmt(boQuaThieuMst.tongTien, "VND") + ") — chưa xác định được đối tượng, cần bấm \"Chọn HĐ\"/sửa tay MST cho các dòng này trước.")
+        React.createElement("div", { style: { fontWeight: 600, marginBottom: 5 } }, "Giao dịch đã xác nhận nhưng KHÔNG cần tạo UNT/UNC (bấm để xem danh sách):"),
+        hangBoQua("noibo", boQuaNoiBo, "⇔", "chuyển khoản nội bộ — không có đối tượng công nợ, không cần chứng từ ngân hàng riêng"),
+        hangBoQua("tienmat", boQuaTienMat, "💵", "tiền mặt — không phải giao dịch qua ngân hàng"),
+        hangBoQua("thieumst", boQuaThieuMst, "🚫", "THIẾU MST — cần bấm \"Chọn HĐ\"/sửa tay MST cho các dòng này trước", "#dc2626")
       ),
       loiRows.length > 0 && React.createElement("div", {
         style: { marginBottom: 8 }
