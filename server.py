@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.043"
+APP_BUILD = "2026-08-27.044"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18081,6 +18081,21 @@ def _misa_dvsd_map(cur):
 _FA_LEDGER_REFTYPE = 250   # Ghi tăng TSCĐ
 _SU_LEDGER_REFTYPE = 450   # Ghi tăng CCDC
 
+# TK Có MẶC ĐỊNH khi phân bổ CCDC/khấu hao TSCĐ — dùng CHỈ KHI không học được
+# từ chứng từ PBCC/KH thật nào đã có trong MISA (xem _misa_phan_bo_ccdc/
+# _misa_khau_hao_tscd). KHÁC các hằng số RefType ở trên (mã kỹ thuật nội bộ
+# MISA, không thể suy luận) — 2 TK này là TK CHUẨN theo Chế độ kế toán VN
+# (Thông tư 133/200): phân bổ CCDC luôn Có 242 "Chi phí trả trước", khấu hao
+# TSCĐ luôn Có 214x "Hao mòn TSCĐ" — không phụ thuộc cách công ty đặt TK chi
+# phí Nợ (627/641/642...). TK Nợ mặc định (khi không học được GÌ, kể cả từ
+# CostAccount học riêng theo từng CCDC/TSCĐ lúc Ghi tăng) dùng 642 "Chi phí
+# QLDN" làm phỏng đoán hợp lý nhất cho SME — LUÔN hiện trong "hoc_duoc" ở kết
+# quả xem trước để người dùng tự kiểm tra/sửa tay trong MISA nếu công ty
+# phân loại chi phí khác trước khi bấm "Xác nhận chạy thật".
+_CCDC_CO_MAC_DINH = "242"
+_TSCD_CO_MAC_DINH = "214"
+_PHAN_BO_NO_MAC_DINH = "642"
+
 def _misa_hoc_reftype(cur, table, tu_khoa):
     """Học RefType + DisplayOnBook PHỔ BIẾN NHẤT từ bản ghi ĐANG CÓ Ý NGHĨA
     (RefType<>0 — RefType=0 là "Phi chứng từ", giá trị mặc định rỗng của SQL
@@ -18830,27 +18845,36 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                      "SUAllocationDetailExpense/SUAllocationDetailTable/"
                      "SUAllocationDetailPost trong CSDL MISA đang kết nối.")
 
+        # Ưu tiên HỌC từ chứng từ PBCC thật đã có (đáng tin nhất — đúng cách công
+        # ty này đang dùng); KHÔNG CÒN bắt buộc phải có sẵn ít nhất 1 chứng từ nữa
+        # — nếu chưa có, tự dò RefType/DisplayOnBook qua SYSRefType (dữ liệu HỆ
+        # THỐNG có sẵn trong MISA, không phụ thuộc công ty đã phát sinh chứng từ
+        # hay chưa — xem _misa_hoc_reftype, đã dùng ổn định cho Ghi tăng CCDC/TSCĐ
+        # ở trên), và TK Nợ/Có dùng hằng số chuẩn kế toán khi không học được gì
+        # (xem _CCDC_CO_MAC_DINH/_PHAN_BO_NO_MAC_DINH) — theo đúng yêu cầu "không
+        # cần phải có ít nhất 1 chứng từ mà import vào luôn".
         mau_alloc = _misa_mau_dong_that(cur, "SUAllocation", "RefNo LIKE ?", ("PBCC%",))
-        if not mau_alloc:
-            raise HTTPException(
-                400, "Chưa có chứng từ 'Phân bổ chi phí CCDC' nào (mã bắt đầu bằng PBCC) "
-                     "trong MISA để học cấu trúc — hãy vào MISA, mục 'Công cụ dụng cụ > "
-                     "Phân bổ chi phí', tạo tay ít nhất 1 chứng từ rồi thử lại.")
         mau_post = _misa_mau_dong_that(cur, "SUAllocationDetailPost", "1=1")
         mau_tbl = _misa_mau_dong_that(cur, "SUAllocationDetailTable", "1=1")
-        if not mau_post or not mau_post.get("DebitAccount") or not mau_post.get("CreditAccount"):
-            raise HTTPException(
-                400, "Không học được TK Nợ/Có từ bút toán phân bổ CCDC thật "
-                     "(SUAllocationDetailPost) — hãy tạo tay ít nhất 1 chứng từ trên MISA rồi thử lại.")
 
-        ref_type_pb = mau_alloc.get("RefType")
-        dob_pb = mau_alloc.get("DisplayOnBook")
-        is_pf_pb = mau_alloc.get("IsPostedFinance", True)
-        is_pm_pb = mau_alloc.get("IsPostedManagement", False)
-        is_gsa_pb = mau_alloc.get("IsGetSupplyAllocated", True)
-        created_by_pb = mau_alloc.get("CreatedBy") or "ADMIN"
-        debit_mac_dinh = mau_post.get("DebitAccount")
-        credit_mac_dinh = mau_post.get("CreditAccount")
+        ref_type_pb = mau_alloc.get("RefType") if mau_alloc else None
+        dob_pb = mau_alloc.get("DisplayOnBook") if mau_alloc else None
+        if ref_type_pb is None:
+            ref_type_pb, hoc_dob = _misa_hoc_reftype(cur, "SUAllocation", "phân bổ")
+            if dob_pb is None:
+                dob_pb = hoc_dob
+        if ref_type_pb is None:
+            raise HTTPException(
+                400, "Không xác định được loại chứng từ (RefType) cho 'Phân bổ chi phí "
+                     "CCDC' — CSDL MISA đang kết nối thiếu dữ liệu hệ thống SYSRefType cho "
+                     "bảng SUAllocation. Hãy vào MISA, mục 'Công cụ dụng cụ > Phân bổ chi "
+                     "phí', tạo tay ít nhất 1 chứng từ rồi thử lại.")
+        is_pf_pb = mau_alloc.get("IsPostedFinance", True) if mau_alloc else True
+        is_pm_pb = mau_alloc.get("IsPostedManagement", False) if mau_alloc else False
+        is_gsa_pb = mau_alloc.get("IsGetSupplyAllocated", True) if mau_alloc else True
+        created_by_pb = (mau_alloc.get("CreatedBy") if mau_alloc else None) or "ADMIN"
+        debit_mac_dinh = (mau_post.get("DebitAccount") if mau_post else None) or _PHAN_BO_NO_MAC_DINH
+        credit_mac_dinh = (mau_post.get("CreditAccount") if mau_post else None) or _CCDC_CO_MAC_DINH
         obj_mac_dinh = mau_tbl.get("AllocationObjectID") if mau_tbl else None
         rate_mac_dinh = (mau_tbl.get("AllocationRate") if mau_tbl else None) or 100
 
@@ -19173,26 +19197,33 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
                      "FADepreciationDetail/FADepreciationDetailAllocation/"
                      "FADepreciationDetailPost trong CSDL MISA đang kết nối.")
 
+        # Ưu tiên HỌC từ chứng từ KH thật đã có (đáng tin nhất); KHÔNG CÒN bắt buộc
+        # phải có sẵn ít nhất 1 chứng từ nữa — nếu chưa có, tự dò RefType/DisplayOnBook
+        # qua SYSRefType (giống hệt cách Ghi tăng CCDC/TSCĐ ở trên đã ổn định), TK
+        # Nợ/Có dùng hằng số chuẩn kế toán khi không học được gì (xem
+        # _TSCD_CO_MAC_DINH/_PHAN_BO_NO_MAC_DINH) — theo đúng yêu cầu "không cần
+        # phải có ít nhất 1 chứng từ mà import vào luôn".
         mau_dep = _misa_mau_dong_that(cur, "FADepreciation", "RefNo LIKE ?", ("KH%",))
-        if not mau_dep:
-            raise HTTPException(
-                400, "Chưa có chứng từ 'Khấu hao TSCĐ' nào (mã bắt đầu bằng KH) "
-                     "trong MISA để học cấu trúc — hãy vào MISA, mục 'Tài sản cố định > "
-                     "Tính khấu hao', tạo tay ít nhất 1 chứng từ rồi thử lại.")
         mau_post = _misa_mau_dong_that(cur, "FADepreciationDetailPost", "1=1")
         mau_da = _misa_mau_dong_that(cur, "FADepreciationDetailAllocation", "1=1")
-        if not mau_post or not mau_post.get("DebitAccount") or not mau_post.get("CreditAccount"):
-            raise HTTPException(
-                400, "Không học được TK Nợ/Có từ bút toán khấu hao TSCĐ thật "
-                     "(FADepreciationDetailPost) — hãy tạo tay ít nhất 1 chứng từ trên MISA rồi thử lại.")
 
-        ref_type_kh = mau_dep.get("RefType")
-        dob_kh = mau_dep.get("DisplayOnBook")
-        is_pf_kh = mau_dep.get("IsPostedFinance", True)
-        is_pm_kh = mau_dep.get("IsPostedManagement", False)
-        created_by_kh = mau_dep.get("CreatedBy") or "ADMIN"
-        debit_mac_dinh = mau_post.get("DebitAccount")
-        credit_mac_dinh = mau_post.get("CreditAccount")
+        ref_type_kh = mau_dep.get("RefType") if mau_dep else None
+        dob_kh = mau_dep.get("DisplayOnBook") if mau_dep else None
+        if ref_type_kh is None:
+            ref_type_kh, hoc_dob = _misa_hoc_reftype(cur, "FADepreciation", "khấu hao")
+            if dob_kh is None:
+                dob_kh = hoc_dob
+        if ref_type_kh is None:
+            raise HTTPException(
+                400, "Không xác định được loại chứng từ (RefType) cho 'Khấu hao TSCĐ' — "
+                     "CSDL MISA đang kết nối thiếu dữ liệu hệ thống SYSRefType cho bảng "
+                     "FADepreciation. Hãy vào MISA, mục 'Tài sản cố định > Tính khấu hao', "
+                     "tạo tay ít nhất 1 chứng từ rồi thử lại.")
+        is_pf_kh = mau_dep.get("IsPostedFinance", True) if mau_dep else True
+        is_pm_kh = mau_dep.get("IsPostedManagement", False) if mau_dep else False
+        created_by_kh = (mau_dep.get("CreatedBy") if mau_dep else None) or "ADMIN"
+        debit_mac_dinh = (mau_post.get("DebitAccount") if mau_post else None) or _PHAN_BO_NO_MAC_DINH
+        credit_mac_dinh = (mau_post.get("CreditAccount") if mau_post else None) or _TSCD_CO_MAC_DINH
         obj_mac_dinh = mau_da.get("AllocationObjectID") if mau_da else None
         rate_mac_dinh = (mau_da.get("AllocationRate") if mau_da else None) or 100
 
