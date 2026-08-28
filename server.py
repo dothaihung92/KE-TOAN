@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.038"
+APP_BUILD = "2026-08-27.039"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21278,6 +21278,38 @@ def misa_sql_to_khai_khau_tru_gtgt(cid: int, preview: int = 1, database: str = "
 #  từ trước. Rủi ro cao hơn nhân bản (1 số trường như ReasonTypeID sẽ để trống) — LUÔN "Xem
 #  trước" và đối chiếu kỹ trong MISA sau khi ghi.
 # ============================================================
+def _misa_bank_account_theo_so(cur, so_tk):
+    """Dò ĐÚNG 1 TK ngân hàng trong Danh mục MISA (bảng BankAccount) khớp SỐ TÀI KHOẢN so_tk (so
+    khớp sau khi bỏ khoảng trắng/gạch ngang, không phân biệt hoa/thường) — trả (BankAccountID,
+    BankName) hoặc (None, None) nếu không tìm thấy. Dùng để ghi ĐÚNG TK ngân hàng người dùng đã
+    cấu hình cho tài khoản đang đối chiếu (Kế Toán AI) vào chứng từ UNT/UNC, THAY VÌ chỉ mượn
+    BankAccountID/BankName từ 1 chứng từ mẫu THẬT bất kỳ (_misa_bank_account_du_phong) — mẫu đó có
+    thể thuộc TK ngân hàng KHÁC với TK đang import, khiến chứng từ MISA hiện sai "Tài khoản chi/
+    nhận" (xác nhận qua phản ánh thật: chứng từ ghi đúng tiền/đối tượng nhưng Tài khoản chi hiện
+    nhầm sang TK ngân hàng khác của công ty)."""
+    if not so_tk:
+        return None, None
+    import re as _re_ba
+    so_chuan = _re_ba.sub(r"[\s\-]", "", str(so_tk)).lower()
+    if not so_chuan:
+        return None, None
+    try:
+        cols_ba = _misa_cot_bang_that(cur, "BankAccount")
+        id_col = _misa_chon_cot(cols_ba, "BankAccountID")
+        so_col = _misa_chon_cot(cols_ba, "AccountNumber", "BankAccountNumber")
+        name_col = _misa_chon_cot(cols_ba, "BankName", "BankAccountName", "BankFullName")
+        if not id_col or not so_col:
+            return None, None
+        sel = f"[{id_col}],[{so_col}]" + (f",[{name_col}]" if name_col else "")
+        for row in cur.execute(f"SELECT {sel} FROM BankAccount").fetchall():
+            so_db = _re_ba.sub(r"[\s\-]", "", str(row[1] or "")).lower()
+            if so_db and so_db == so_chuan:
+                return row[0], (row[2] if name_col and len(row) > 2 else None)
+    except Exception:
+        pass
+    return None, None
+
+
 def _misa_bank_account_du_phong(cur):
     """Dò 1 TK ngân hàng THẬT bất kỳ để học BankAccountID/BankName — dùng khi hoàn toàn không có
     mẫu thật (vd người dùng đã xoá sạch). Lỗi thật đã gặp: dò qua bảng Danh mục BankAccount không
@@ -21536,11 +21568,18 @@ def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, co
     return mau_m, mau_d, mau_gl, mau_aol, mau_bdwl, mau_cfl
 
 
-def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False):
+def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False, so_tk_ngan_hang=None):
     """Ghi UNT (loai='unt', BADeposit/BADepositDetail) hoặc UNC (loai='unc',
     BAWithDraw/BAWithDrawDetail) thẳng vào MISA.
     giao_dich: list các dict {so_ct, ngay (dd/mm/yyyy), mst, ten_doi_tuong,
     dien_giai, tk_doi_ung (mã TK Nợ/Có đối ứng, vd '131'/'331'), so_tien}.
+    so_tk_ngan_hang: SỐ TÀI KHOẢN ngân hàng THẬT của TK đang đối chiếu (Kế Toán AI, người dùng đã tự
+    cấu hình qua "Sửa mã TK MISA + Tên NH + Số TK") — nếu khớp được đúng 1 TK trong Danh mục
+    BankAccount của MISA (_misa_bank_account_theo_so), BankAccountID/BankName của MỌI chứng từ ghi
+    lần này sẽ dùng ĐÚNG TK đó, THAY VÌ chỉ mượn từ 1 chứng từ mẫu THẬT bất kỳ (có thể thuộc TK ngân
+    hàng KHÁC — xác nhận qua phản ánh thật: "Tài khoản chi" trên UNC hiện SAI ngân hàng dù số tiền/
+    đối tượng đều đúng). Không khớp được (để trống hoặc TK đó chưa có trong Danh mục MISA) thì vẫn
+    dùng cách cũ (mượn từ mẫu/dò TK bất kỳ) như trước, không chặn ghi.
     Dòng nào KHÔNG tìm được đối tượng khớp MST trong Danh mục MISA (Đối
     tượng) sẽ BỊ BỎ QUA (đếm vào so_bo_qua_kh) — KHÔNG tự tạo mới như "KL"/
     "BH" bên Mua hàng/Bán hàng, vì thu/chi ngân hàng bắt buộc phải khớp
@@ -21574,6 +21613,9 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         if not cols_m or not cols_d:
             raise HTTPException(
                 400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl} trong CSDL MISA đang kết nối.")
+        # Dò ĐÚNG TK ngân hàng khớp số TK người dùng đã cấu hình (xem giải thích ở docstring) — chỉ
+        # 1 LẦN cho cả lượt ghi này, áp dụng cho MỌI chứng từ tạo ra bên dưới.
+        bank_id_dung, bank_name_dung = _misa_bank_account_theo_so(cur, so_tk_ngan_hang)
         # Tìm 1 RefID THẬT (KHÔNG do phần mềm ghi) mà Detail của nó khớp đúng TK 131/331 — lọc
         # TRỰC TIẾP CustomField10 qua JOIN với Master, KHÔNG dùng _misa_mau_dong_that's "TOP 5
         # không ORDER BY" (không đáng tin cậy một khi số dòng phần mềm đã ghi áp đảo số dòng thật
@@ -21807,6 +21849,14 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             # phòng): chứng từ thật dùng làm mẫu có thể tự nó thiếu BankAccountID/BankName hoặc
             # mang ReasonTypeID không hợp lệ — xem _misa_dam_bao_hop_le_ngan_hang_ly_do.
             _misa_dam_bao_hop_le_ngan_hang_ly_do(cur, loai, master_tbl, m_row, cols_m)
+            # GHI ĐÈ BankAccountID/BankName bằng ĐÚNG TK ngân hàng đang đối chiếu nếu dò được (xem
+            # so_tk_ngan_hang ở docstring) — chứng từ mẫu THẬT dùng để nhân bản có thể thuộc TK
+            # ngân hàng KHÁC, nên phải ghi đè LUÔN dù m_row đã có sẵn giá trị (không chỉ điền khi
+            # thiếu như _misa_dam_bao_hop_le_ngan_hang_ly_do ở trên).
+            if bank_id_dung:
+                _misa_gan(m_row, cols_m, bank_id_dung, "BankAccountID")
+                if bank_name_dung:
+                    _misa_gan(m_row, cols_m, bank_name_dung, "BankName")
 
             d_id = str(_uuid.uuid4())
             d_row = {c: mau_d.get(c) for c in d_cols_that}
@@ -21920,6 +21970,10 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 if "customfield10" in cols_bdwl:
                     _misa_gan(b, cols_bdwl, _PM_MARK, "CustomField10")
                 _misa_dam_bao_hop_le_ngan_hang_ly_do(cur, loai, master_tbl, b, cols_bdwl)
+                if bank_id_dung:
+                    _misa_gan(b, cols_bdwl, bank_id_dung, "BankAccountID")
+                    if bank_name_dung:
+                        _misa_gan(b, cols_bdwl, bank_name_dung, "BankName")
                 bdwl_row = b
 
             cfl_row = None
@@ -21991,7 +22045,9 @@ def misa_sql_import_unt_unc(body: dict = Body(...)):
     (doi_chieu_ngan_hang.html), KHÔNG theo cid trên URL như các endpoint
     MISA khác vì app đó chỉ biết MST công ty (lưu trong IndexedDB riêng
     của trình duyệt, không có cid của KE-TOAN chính) — tự dò cid qua MST.
-    body: {mst, database?, loai: 'unt'|'unc', preview?, ghi_de?,
+    body: {mst, database?, loai: 'unt'|'unc', preview?, ghi_de?, so_tk_ngan_hang?
+    (số TK ngân hàng THẬT của TK đang đối chiếu, để ghi ĐÚNG "Tài khoản chi/nhận"
+    trên chứng từ — xem _misa_ghi_thu_chi),
     giao_dich: [{so_ct, ngay, mst, ten_doi_tuong, dien_giai, tk_doi_ung,
     so_tien}, ...]}."""
     mst = (body.get("mst") or "").strip()
@@ -22012,7 +22068,9 @@ def misa_sql_import_unt_unc(body: dict = Body(...)):
     preview = bool(body.get("preview", True))
     ghi_de = bool(body.get("ghi_de", False))
     giao_dich = body.get("giao_dich") or []
-    return _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=preview, ghi_de=ghi_de)
+    so_tk_ngan_hang = (body.get("so_tk_ngan_hang") or "").strip() or None
+    return _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=preview, ghi_de=ghi_de,
+                             so_tk_ngan_hang=so_tk_ngan_hang)
 
 
 def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_vong,

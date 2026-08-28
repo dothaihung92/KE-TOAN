@@ -1809,11 +1809,11 @@ async function previewThuChiVaoMisa(rows, loai, coMst, tokhaiList, bankAcct, acc
     if (showToast) showToast(`Đang xem trước ${giaoDich.length} giao dịch ${tenLoai}...`, "ok");
     const res = await fetch("/api/misa-sql/import-unt-unc", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mst: coMst, loai, preview: true, giao_dich: giaoDich })
+      body: JSON.stringify({ mst: coMst, loai, preview: true, giao_dich: giaoDich, so_tk_ngan_hang: accountNo || "" })
     });
     const pv = await res.json();
     if (pv.detail) { alert("Lỗi: " + pv.detail); return null; }
-    return { loai, tenLoai, coMst, giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk, pv };
+    return { loai, tenLoai, coMst, giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, boQuaKhacTk, pv, accountNo };
   } catch (e) {
     alert(`Lỗi xem trước ${tenLoai} vào MISA: ` + e.message);
     console.error(e);
@@ -1825,7 +1825,7 @@ async function commitThuChiVaoMisa(state, showToast) {
     if (showToast) showToast("Đang ghi vào MISA...", "ok");
     const res = await fetch("/api/misa-sql/import-unt-unc", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mst: state.coMst, loai: state.loai, preview: false, giao_dich: state.giaoDich })
+      body: JSON.stringify({ mst: state.coMst, loai: state.loai, preview: false, giao_dich: state.giaoDich, so_tk_ngan_hang: state.accountNo || "" })
     });
     const real = await res.json();
     if (real.detail) { alert("Lỗi ghi: " + real.detail); return null; }
