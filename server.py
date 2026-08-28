@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.050"
+APP_BUILD = "2026-08-27.051"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19308,6 +19308,11 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
         cols_det = _misa_cot_bang_that(cur, "FADepreciationDetail")
         cols_da = _misa_cot_bang_that(cur, "FADepreciationDetailAllocation")
         cols_post = _misa_cot_bang_that(cur, "FADepreciationDetailPost")
+        # Sổ theo dõi TSCĐ (giống hệt CCDC) KHÔNG đọc cột tĩnh trên FixedAsset mà
+        # đọc bảng FixedAssetLedger — xem _misa_ghi_tang_tscd (đã ghi dòng "Ghi
+        # tăng" vào đây, RefType=250). Áp dụng lại đúng bài học đó cho "Tính khấu
+        # hao": mỗi kỳ khấu hao cũng phải ghi thêm 1 dòng FixedAssetLedger.
+        cols_led = _misa_cot_bang_that(cur, "FixedAssetLedger")
         if not (cols_fa and cols_dep and cols_det and cols_da and cols_post):
             raise HTTPException(
                 400, "Không tìm thấy đủ bảng FixedAsset/FADepreciation/"
@@ -19339,6 +19344,50 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
         is_pf_kh = mau_dep.get("IsPostedFinance", True) if mau_dep else True
         is_pm_kh = mau_dep.get("IsPostedManagement", False) if mau_dep else False
         created_by_kh = (mau_dep.get("CreatedBy") if mau_dep else None) or "ADMIN"
+
+        # RefType của dòng SỔ CÁI khấu hao ghi vào FixedAssetLedger — PHẢI dò AN
+        # TOÀN, KHÔNG được dùng _misa_hoc_reftype thẳng trên FixedAssetLedger:
+        # bảng này LUÔN có sẵn các dòng "Ghi tăng" (RefType=250, xem
+        # _FA_LEDGER_REFTYPE, do _misa_ghi_tang_tscd ghi) nên phép học "đa số"
+        # sẽ luôn trả NHẦM về 250 nếu công ty chưa từng tự bấm "Tính khấu hao"
+        # tay trên MISA (đúng bài học rút ra từ CCDC: không tin số đông nếu số
+        # đông đó lại chính là 1 loại chứng từ KHÁC đã biết trước). Thứ tự ưu
+        # tiên: (1) dòng RefType THẬT khác 250 đã có sẵn trong FixedAssetLedger
+        # — đáng tin nhất, chỉ có nếu công ty đã từng khấu hao tay; (2) dò theo
+        # từ khoá "khấu hao" trong SYSRefType (dữ liệu HỆ THỐNG của MISA, luôn
+        # có sẵn dù công ty chưa phát sinh gì — đúng kỹ thuật đã dùng ổn định
+        # cho CCDC, RefType=4501/453); (3) chỉ khi CẢ HAI đều thất bại (gần như
+        # không thể vì SYSRefType luôn có dữ liệu) mới dùng suy đoán CUỐI CÙNG
+        # theo đúng quy luật lệch quan sát được ở CCDC (Ghi tăng 450 -> Phân bổ
+        # 453, lệch +3) áp dụng tương tự cho TSCĐ (Ghi tăng 250 -> Khấu hao
+        # 253) — CHƯA có bằng chứng thật xác nhận, chỉ dùng khi bí đường.
+        led_rt_gt = None
+        if cols_led:
+            try:
+                _cnt_ledgt = {}
+                for (rt,) in cur.execute(
+                        "SELECT RefType FROM FixedAssetLedger WHERE RefType<>0").fetchall():
+                    _cnt_ledgt[rt] = _cnt_ledgt.get(rt, 0) + 1
+                if _cnt_ledgt:
+                    led_rt_gt = max(_cnt_ledgt.items(), key=lambda kv: kv[1])[0]
+            except Exception:
+                pass
+        if led_rt_gt is None:
+            led_rt_gt = _FA_LEDGER_REFTYPE
+        led_rt_kh = None
+        if cols_led:
+            try:
+                r_kh = cur.execute(
+                    "SELECT DISTINCT RefType FROM FixedAssetLedger WHERE RefType<>0 AND RefType<>?",
+                    led_rt_gt).fetchone()
+                if r_kh:
+                    led_rt_kh = r_kh[0]
+            except Exception:
+                pass
+        if led_rt_kh is None:
+            led_rt_kh, _rtn_kh = _misa_pu_reftype(cur, ("khấu hao",), master_table="FixedAssetLedger")
+        if led_rt_kh is None:
+            led_rt_kh = _FA_LEDGER_REFTYPE + 3
         debit_mac_dinh = (mau_post.get("DebitAccount") if mau_post else None) or _PHAN_BO_NO_MAC_DINH
         credit_mac_dinh = (mau_post.get("CreditAccount") if mau_post else None) or _TSCD_CO_MAC_DINH
         obj_mac_dinh = mau_da.get("AllocationObjectID") if mau_da else None
@@ -19422,6 +19471,15 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
 
         branch_id = _misa_branch_id(cur)
 
+        max_ro_sub = 0
+        if cols_led:
+            try:
+                r_sub = cur.execute(
+                    "SELECT ISNULL(MAX(RefOrderInSubSystem),0) FROM FixedAssetLedger").fetchone()
+                max_ro_sub = (r_sub[0] or 0) if r_sub else 0
+            except Exception:
+                pass
+
         ket = []
         so_ct = max_so
         for i in range(max(1, int(so_thang or 12))):
@@ -19451,7 +19509,7 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
             # TRƯỚC khi ghi dòng đầu FADepreciation, vì các bảng chi tiết có
             # khoá ngoại RefID trỏ VỀ FADepreciation (bài học từ CCDC: ghi chi
             # tiết trước dòng đầu -> lỗi FK, transaction tự rollback).
-            det_rows, da_rows = [], []
+            det_rows, da_rows, led_rows = [], [], []
             for idx, (fa_id, st) in enumerate(dong_thang, start=1):
                 tien_ky_thuc = round(st["con_lai_tien"] if st["con_lai_ky"] <= 1 else st["tien_ky_dinh"])
                 tong_ct += tien_ky_thuc
@@ -19487,8 +19545,9 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
                 if not tk_no:
                     tk_no = mau_da.get("CostAccount") if mau_da else debit_mac_dinh
 
+                det_detail_id = str(_uuid.uuid4())
                 det_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_det.values()}
-                _misa_gan(det_row, cols_det, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(det_row, cols_det, det_detail_id, "RefDetailID")
                 _misa_gan(det_row, cols_det, dep_id, "RefID")
                 _misa_gan(det_row, cols_det, fa_id, "FixedAssetID")
                 _misa_gan(det_row, cols_det, obj_id, "OrganizationUnitID")
@@ -19518,6 +19577,45 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
                            "so_tien": tien_ky_thuc, "so_chung_tu": refno, "tk_no": tk_no})
                 st["con_lai_ky"] -= 1
                 st["con_lai_tien"] -= tien_ky_thuc
+
+                # Dòng SỔ CÁI khấu hao (FixedAssetLedger) — SONG SONG với dòng
+                # SupplyLedger đã xác nhận đúng bên CCDC (RefType=453, đọc SỐNG
+                # mỗi lần mở "Sổ theo dõi CCDC"): FixedAssetLedger không có cột
+                # dạng Increment/Decrement như SupplyLedger mà lưu THẲNG giá trị
+                # "còn lại" (LifeTimeRemainingInMonth/AccumDepreciationAmount/
+                # RemainingAmount) giống hệt ý nghĩa các cột đó trên chính dòng
+                # "Ghi tăng" đã ghi trước đó (_misa_ghi_tang_tscd) — nên mỗi kỳ
+                # khấu hao ghi thêm 1 dòng SNAPSHOT mới với giá trị SAU khi trừ
+                # kỳ này, để "Sổ theo dõi TSCĐ" (nếu đọc dòng MỚI NHẤT theo
+                # RefDate/RefOrderInSubSystem thay vì cột tĩnh trên FixedAsset,
+                # đúng bài học rút ra từ CCDC) hiện đúng tiến độ khấu hao.
+                if cols_led:
+                    max_ro_sub += 1
+                    led_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_led.values()}
+                    _misa_gan(led_row, cols_led, dep_id, "RefID")
+                    _misa_gan(led_row, cols_led, det_detail_id, "RefDetailID")
+                    _misa_gan(led_row, cols_led, fa_id, "FixedAssetID")
+                    _misa_gan(led_row, cols_led, led_rt_kh, "RefType")
+                    _misa_gan(led_row, cols_led, refno, "RefNo")
+                    _misa_gan(led_row, cols_led, ngay_cuoi_thang, "RefDate")
+                    _misa_gan(led_row, cols_led, ngay_cuoi_thang, "PostedDate")
+                    _misa_gan(led_row, cols_led, obj_id, "OrganizationUnitID")
+                    _misa_gan(led_row, cols_led, st["so_ky"], "LifeTimeInMonth")
+                    _misa_gan(led_row, cols_led, max(st["con_lai_ky"], 0), "LifeTimeRemainingInMonth")
+                    _misa_gan(led_row, cols_led, tien_ky_thuc, "MonthlyDepreciationAmount")
+                    _misa_gan(led_row, cols_led, st["tong_tien"], "OriginDepreciationAmount")
+                    _tich_luy_kh = max(round(st["tong_tien"] - st["con_lai_tien"]), 0)
+                    _misa_gan(led_row, cols_led, _tich_luy_kh, "AccumDepreciationAmount")
+                    _misa_gan(led_row, cols_led, _tich_luy_kh, "TotalDepreciationAmount")
+                    _misa_gan(led_row, cols_led, max(round(st["con_lai_tien"]), 0), "RemainingAmount")
+                    _misa_gan(led_row, cols_led, tk_no or debit_mac_dinh, "DepreciationAccount")
+                    _misa_gan(led_row, cols_led, memo, "JournalMemo")
+                    _misa_gan(led_row, cols_led, branch_id, "BranchID")
+                    _misa_gan(led_row, cols_led, 0, "RefOrder")
+                    _misa_gan(led_row, cols_led, max_ro_sub, "RefOrderInSubSystem")
+                    _misa_gan(led_row, cols_led, str(st["ma"])[:25], "FixedAssetCode")
+                    _misa_gan(led_row, cols_led, str(st["ten"])[:128], "FixedAssetName")
+                    led_rows.append(led_row)
 
             dep_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_dep.values()}
             _misa_gan(dep_row, cols_dep, dep_id, "RefID")
@@ -19557,6 +19655,11 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
                     cur.execute("INSERT INTO FADepreciationDetailAllocation ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
                                [da_row[c] for c in lc])
+                for led_row in led_rows:
+                    lc = list(led_row.keys())
+                    cur.execute("INSERT INTO FixedAssetLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(lc), ",".join(["?"] * len(lc))),
+                               [led_row[c] for c in lc])
                 so_thu_tu = 0
                 for (tk_no, obj_id), tong_nhom in nhom_post.items():
                     post_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_post.values()}
