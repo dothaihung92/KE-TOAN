@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.029"
+APP_BUILD = "2026-08-27.030"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22024,11 +22024,16 @@ def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_v
     gộp sẵn trong luỹ kế Sổ Cái). den_ngay/tu_ngay: datetime (đã parse qua _misa_doc_ngay).
     so_du_ky_vong: số dư cuối kỳ theo sao kê ngân hàng thật (người dùng nhập/dán vào từ Kế Toán AI).
     Nếu lệch (>=1 đồng, tránh làm tròn) VÀ có giao_dich_pm (danh sách chứng từ phần mềm đã xác nhận
-    cho TK này, [{so_ct, so_tien}]) thì đối chiếu THÊM với chứng từ Thu/Chi tiền THẬT (BADeposit/
-    BAWithDraw, TK này, trong khoảng tu_ngay..den_ngay nếu có tu_ngay) để tìm ĐÚNG lệnh nào gây lệch —
-    khớp theo RefNoFinance (Số chứng từ, phần mềm tự sinh qua buildVoucherNo lúc build giao_dich, nên
-    khớp được CHÍNH XÁC với so_ct phần mềm gửi lên nếu chứng từ đó đã import bằng chính phần mềm này).
-    Trả 3 nhóm: chi_o_pm (phần mềm có, MISA không thấy — có thể MISA đã xoá/chưa import),
+    cho TK này, [{so_ct, so_tien}]) thì đối chiếu THÊM với GeneralLedger — CHỨ KHÔNG PHẢI BADeposit/
+    BAWithDraw (2 bảng đó không có cột lưu thẳng mã TK ngân hàng: CreditAccount/DebitAccount trên
+    BADepositDetail/BAWithDrawDetail thực ra lưu TK ĐỐI ỨNG 131/331, không phải TK ngân hàng — xác
+    nhận qua ca thật: đối chiếu báo "74 chứng từ MISA không thấy" dù màn Import UNT/UNC cùng lúc báo
+    "đã có trong MISA, bỏ qua" cho ĐÚNG các chứng từ đó, tức là chứng từ có thật, chỉ do dò sai cột).
+    GeneralLedger.AccountNumber đã CHẮC CHẮN đúng (dùng chung với công thức tính số dư ở trên, khớp
+    đúng số dư "Bảng cân đối tài khoản" thật của MISA) và RefNo = Số chứng từ (so_ct) phần mềm tự
+    sinh qua buildVoucherNo, nên khớp CHÍNH XÁC được với so_ct gửi lên nếu chứng từ đó đã import bằng
+    chính phần mềm này — lấy đúng dòng Sổ Cái có AccountNumber=TK ngân hàng (vế còn lại là 131/331,
+    không lấy). Trả 3 nhóm: chi_o_pm (phần mềm có, MISA không thấy — có thể MISA đã xoá/chưa import),
     chi_o_misa (MISA có, phần mềm không gửi lên — có thể người dùng tự ghi tay trong MISA, hoặc TK
     này bị dùng chung cho sao kê khác), lech_so_tien (có ở CẢ HAI nhưng số tiền khác nhau)."""
     conn = _misa_sql_connect(cid, database=database)
@@ -22045,22 +22050,23 @@ def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_v
                "lech": lech, "khop": abs(lech) < 1}
         if abs(lech) < 1 or not giao_dich_pm:
             return ket
-        # Đối chiếu chi tiết chứng từ Thu/Chi (BADeposit/BAWithDraw) của TK này trong khoảng ngày.
+        # Đối chiếu chi tiết chứng từ — lấy đúng dòng Sổ Cái (GeneralLedger) của TK ngân hàng này
+        # trong khoảng ngày (xem giải thích ở docstring — KHÔNG dùng BADeposit/BAWithDraw).
         ds_misa = {}
-        for master_tbl, tk_cot in (("BADeposit", "CreditAccount"), ("BAWithDraw", "DebitAccount")):
-            try:
-                sql = f"SELECT RefNoFinance, TotalAmount FROM {master_tbl} WHERE {tk_cot}=?"
-                params = [account_number]
-                if tu_ngay:
-                    sql += " AND RefDate>=?"
-                    params.append(tu_ngay)
-                sql += " AND RefDate<=?"
-                params.append(den_ngay)
-                for rn, amt in cur.execute(sql, params).fetchall():
-                    if rn:
-                        ds_misa[str(rn).strip()] = float(amt or 0)
-            except Exception:
-                pass
+        try:
+            sql = ("SELECT RefNo, DebitAmount, CreditAmount FROM GeneralLedger "
+                   "WHERE AccountNumber=?")
+            params = [account_number]
+            if tu_ngay:
+                sql += " AND RefDate>=?"
+                params.append(tu_ngay)
+            sql += " AND RefDate<=?"
+            params.append(den_ngay)
+            for rn, dr, cr in cur.execute(sql, params).fetchall():
+                if rn:
+                    ds_misa[str(rn).strip()] = float(dr or 0) or float(cr or 0)
+        except Exception:
+            pass
         ds_pm = {}
         for gd in giao_dich_pm:
             so_ct = str(gd.get("so_ct") or "").strip()
