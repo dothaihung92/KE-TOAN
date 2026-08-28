@@ -1729,12 +1729,13 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
     // Bỏ qua giao dịch không có đối tượng (nội bộ/tiền mặt). "MST" gửi đi có thể là MST thuế thật
     // HOẶC mã đối tượng dạng chữ (VD "KL" - Khách lẻ) — server tự khớp theo MST trước, không có thì
     // thử lại theo Mã đối tượng đã có sẵn trong Danh mục MISA (xem _misa_ghi_thu_chi/doi_tuong_theo_ma).
-    // Ghi kèm danhSach (ngày/diễn giải/số tiền — CHƯA có so_ct vì chỉ sinh cho dòng ĐƯỢC gửi đi) để
-    // ImportMisaModal hiện được ĐÚNG danh sách giao dịch bị loại, không chỉ mỗi số lượng/tổng tiền.
-    if (r.isInternal) { boQuaNoiBo.soLuong++; boQuaNoiBo.tongTien += amtGoc; boQuaNoiBo.danhSach.push({ ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
-    if (r.isCash) { boQuaTienMat.soLuong++; boQuaTienMat.tongTien += amtGoc; boQuaTienMat.danhSach.push({ ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
+    // Ghi kèm danhSach (id dòng + ngày/diễn giải/số tiền — CHƯA có so_ct vì chỉ sinh cho dòng ĐƯỢC
+    // gửi đi) để ImportMisaModal hiện được ĐÚNG danh sách giao dịch bị loại (không chỉ số lượng/tổng
+    // tiền) VÀ cho bấm "Lọc trên bảng chính" để nhảy thẳng tới đúng các dòng đó mà sửa (dùng r.id).
+    if (r.isInternal) { boQuaNoiBo.soLuong++; boQuaNoiBo.tongTien += amtGoc; boQuaNoiBo.danhSach.push({ id: r.id, ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
+    if (r.isCash) { boQuaTienMat.soLuong++; boQuaTienMat.tongTien += amtGoc; boQuaTienMat.danhSach.push({ id: r.id, ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
     const mst = r.confirmedMST || "";
-    if (!mst) { boQuaThieuMst.soLuong++; boQuaThieuMst.tongTien += amtGoc; boQuaThieuMst.danhSach.push({ ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
+    if (!mst) { boQuaThieuMst.soLuong++; boQuaThieuMst.tongTien += amtGoc; boQuaThieuMst.danhSach.push({ id: r.id, ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
     const vndAmt = r.tx.currency === "USD" ? vndOf.get(r.id) : undefined;
     const bookAmt = vndAmt !== undefined ? vndAmt : ((isUnt ? r.tx.credit : r.tx.debit) || 0);
     const soCtGoc = buildVoucherNo(loai.toUpperCase(), r.tx.date, seq, bankAcct, accountNo);
@@ -1754,14 +1755,14 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
           so_ct: buildVoucherNo(loai.toUpperCase(), r.tx.date, `${seq}.${idx+1}`, bankAcct, accountNo),
           ngay: r.tx.date, mst, ten_doi_tuong: objectName,
           dien_giai: `${r.tx.desc || ""} [${p.label}]`.slice(0, 255),
-          tk_doi_ung: p.hach, so_tien: p.amt
+          tk_doi_ung: p.hach, so_tien: p.amt, rowId: r.id
         });
       });
       return;
     }
     giaoDich.push({
       so_ct: soCtGoc, ngay: r.tx.date, mst, ten_doi_tuong: objectName,
-      dien_giai: (r.tx.desc || "").slice(0, 255), tk_doi_ung: hach, so_tien: bookAmt
+      dien_giai: (r.tx.desc || "").slice(0, 255), tk_doi_ung: hach, so_tien: bookAmt, rowId: r.id
     });
   });
   return { giaoDich, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst };
@@ -1826,7 +1827,7 @@ async function commitThuChiVaoMisa(state, showToast) {
 // thiết (sẽ tạo bao nhiêu, bỏ qua trùng bao nhiêu) + 1 mục RIÊNG cho giao dịch LỖI (không tìm thấy
 // đối tượng khớp MST trong Danh mục MISA — giao dịch đó sẽ KHÔNG import được), bấm vào mới xổ ra
 // danh sách chi tiết từng giao dịch lỗi để người dùng biết cần bổ sung đối tượng nào trong MISA.
-function ImportMisaModal({ state, busy, onClose, onConfirm }) {
+function ImportMisaModal({ state, busy, onClose, onConfirm, onLoc }) {
   const [showErrors, setShowErrors] = useState(false);
   const [openBoQua, setOpenBoQua] = useState({ noibo: false, tienmat: false, thieumst: false });
   React.useEffect(() => {
@@ -1834,18 +1835,36 @@ function ImportMisaModal({ state, busy, onClose, onConfirm }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose, busy]);
-  const { pv, tenLoai, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst } = state;
+  const { pv, tenLoai, fxFailed, boQuaNoiBo, boQuaTienMat, boQuaThieuMst, giaoDich } = state;
+  // Map so_ct -> id dòng gốc (giaoDich mang theo rowId lúc build) — để nút "Lọc trên bảng chính" ở
+  // dưới nhảy đúng tới các dòng bị SERVER báo lỗi (loiRows, chỉ có so_ct chứ không có id dòng).
+  const soCtToRowId = {};
+  (giaoDich || []).forEach(g => { if (g.so_ct && g.rowId) soCtToRowId[g.so_ct] = g.rowId; });
   const loiRows = (pv.danh_sach || []).filter(x => (x.trang_thai || "").includes("không tìm thấy đối tượng"));
+  const loiRowIds = loiRows.map(x => soCtToRowId[x.so_ct]).filter(Boolean);
   const coBoQuaKhac = (boQuaNoiBo && boQuaNoiBo.soLuong) || (boQuaTienMat && boQuaTienMat.soLuong) || (boQuaThieuMst && boQuaThieuMst.soLuong);
-  // Hàng "N giao dịch ... (X đồng)" bấm vào xổ ra ĐÚNG danh sách ngày/diễn giải/số tiền của nhóm đó —
-  // dùng chung cho cả 3 nhóm bị loại (nội bộ/tiền mặt/thiếu MST).
+  const nutLoc = (ids, nhan) => ids.length > 0 && onLoc && React.createElement("button", {
+    onClick: e => { e.stopPropagation(); onLoc(ids, nhan); },
+    style: {
+      fontSize: 11, padding: "2px 9px", borderRadius: 5, border: "1px solid #7c3aed",
+      background: "#fff", color: "#7c3aed", cursor: "pointer", fontWeight: 600, marginLeft: 8
+    }
+  }, "🔎 Lọc trên bảng chính");
+  // Hàng "N giao dịch ... (X đồng)" bấm vào xổ ra ĐÚNG danh sách ngày/diễn giải/số tiền của nhóm đó,
+  // kèm nút "Lọc trên bảng chính" nhảy thẳng tới đúng các dòng đó để sửa — dùng chung cho cả 3 nhóm
+  // bị loại (nội bộ/tiền mặt/thiếu MST).
   const hangBoQua = (key, nhom, icon, nhan, mau) => nhom && nhom.soLuong > 0 && React.createElement("div", { style: { marginBottom: 4 } },
     React.createElement("div", {
-      onClick: () => setOpenBoQua(s => ({ ...s, [key]: !s[key] })),
-      style: { cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: mau || "inherit" }
+      style: { display: "flex", alignItems: "center", gap: 6 }
     },
-      React.createElement("span", null, icon + " " + nhom.soLuong + " giao dịch " + nhan + " (" + fmt(nhom.tongTien, "VND") + ")"),
-      React.createElement("span", { style: { fontSize: 11, fontWeight: 400, color: "var(--text3)" } }, openBoQua[key] ? " ▲ Ẩn" : " ▼ Xem")
+      React.createElement("span", {
+        onClick: () => setOpenBoQua(s => ({ ...s, [key]: !s[key] })),
+        style: { cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: mau || "inherit" }
+      },
+        icon + " " + nhom.soLuong + " giao dịch " + nhan + " (" + fmt(nhom.tongTien, "VND") + ")",
+        React.createElement("span", { style: { fontSize: 11, fontWeight: 400, color: "var(--text3)" } }, openBoQua[key] ? " ▲ Ẩn" : " ▼ Xem")
+      ),
+      nutLoc(nhom.danhSach.map(x => x.id), nhan)
     ),
     openBoQua[key] && React.createElement("div", {
       style: { marginTop: 4, marginLeft: 4, maxHeight: 160, overflow: "auto", border: "1px solid var(--border)", borderRadius: 6 }
@@ -1898,6 +1917,7 @@ function ImportMisaModal({ state, busy, onClose, onConfirm }) {
         },
           React.createElement("span", null, "🚫"),
           React.createElement("span", null, loiRows.length + " giao dịch lỗi — không tìm thấy đối tượng khớp MST trong MISA (sẽ KHÔNG import)"),
+          nutLoc(loiRowIds, "lỗi MST"),
           React.createElement("span", { style: { marginLeft: "auto", fontSize: 11, fontWeight: 400 } }, showErrors ? "▲ Ẩn" : "▼ Xem")
         ),
         showErrors && React.createElement("div", {
@@ -4519,6 +4539,18 @@ function ConfirmScreen({
   // Kết quả xem trước Import UNT/UNC vào MISA — hiện qua ImportMisaModal (thay confirm()/alert() cũ).
   const [misaImportState, setMisaImportState] = useState(null);
   const [misaImportBusy, setMisaImportBusy] = useState(false);
+  // Lọc RIÊNG (chồng lên tab đang chọn) tới ĐÚNG các dòng bấm "Lọc trên bảng chính" từ ImportMisaModal
+  // (VD "N giao dịch thiếu MST") — Set các id dòng, null = không lọc riêng. Bấm bất kỳ tab nào ở trên
+  // cũng tự bỏ lọc riêng này (xem chỗ set filter), tránh chồng chéo gây khó hiểu.
+  const [locTuModal, setLocTuModal] = useState(null);
+  const locTuModalVaoBang = (ids, nhan) => {
+    setMisaImportState(null);
+    setLocTuModal(new Set(ids));
+    setFilter("all");
+    setFocusIdx(0);
+    clearBulkSelection();
+    showToast && showToast(`Đang lọc ${ids.length} giao dịch ${nhan}`, "ok");
+  };
   // Tập MST + tập Mã đối tượng (đã chuẩn hoá) đang có trong Danh mục Đối tượng MISA — null = CHƯA dò
   // (bấm "🔍 Kiểm tra MST với MISA" mới có), Set = đã dò xong. Cho phép lọc trước các giao dịch sẽ
   // KHÔNG import được ngay trên màn chính, không cần mở modal Import UNT/UNC mới thấy. Khớp theo MST
@@ -5299,6 +5331,7 @@ function ConfirmScreen({
     if (filter === "amtmatch" && !isAmtMatchRow(r)) return false;
     if (filter === "internalsug" && !isInternalSuggestRow(r)) return false;
     if (filter === "msterror" && !isMstErrorRow(r)) return false;
+    if (locTuModal && !locTuModal.has(r.id)) return false;
     if (hachFilter && r.confirmedHach !== hachFilter) return false;
     if (search && !r.tx.desc.toLowerCase().includes(search.toLowerCase()) && !(r.confirmedName || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -6681,7 +6714,7 @@ function ConfirmScreen({
   }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : []), ...(misaMstSet !== null && mstErrorCount > 0 ? [["msterror", "🚫 Thiếu/lỗi MST " + mstErrorCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
     key: v,
     className: `tab${filter === v ? " active" : ""}`,
-    onClick: () => { setFilter(v); setFocusIdx(0); clearBulkSelection(); },
+    onClick: () => { setFilter(v); setLocTuModal(null); setFocusIdx(0); clearBulkSelection(); },
     style: {
       fontSize: 12,
       padding: "5px 11px"
@@ -6719,7 +6752,13 @@ function ConfirmScreen({
       color: "var(--text3)",
       alignSelf: "center"
     }
-  }, filtered.length, "/", rows.length))), filtered.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, filtered.length, "/", rows.length), locTuModal && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setLocTuModal(null),
+    style: {
+      fontSize: 11, padding: "3px 10px", borderRadius: 12, border: "1px solid #7c3aed",
+      background: "#f5f0ff", color: "#7c3aed", cursor: "pointer", fontWeight: 600
+    }
+  }, "🔎 Đang lọc riêng từ Import — ✕ Bỏ lọc"))), filtered.length > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
       color: "var(--text3)",
@@ -7024,6 +7063,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     state: misaImportState,
     busy: misaImportBusy,
     onClose: () => { if (!misaImportBusy) setMisaImportState(null); },
+    onLoc: locTuModalVaoBang,
     onConfirm: async () => {
       setMisaImportBusy(true);
       const real = await commitThuChiVaoMisa(misaImportState, showToast);
