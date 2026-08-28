@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.044"
+APP_BUILD = "2026-08-27.045"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18909,6 +18909,7 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
         amt_col = _misa_chon_cot(cols_su, "Amount")
         at_col = _misa_chon_cot(cols_su, "AllocationTime")
         tka_col = _misa_chon_cot(cols_su, "TermlyAllocationAmount")
+        rd_col = _misa_chon_cot(cols_su, "RefDate")
         if not (ma_col and id_col and amt_col and at_col):
             raise HTTPException(
                 400, "CSDL MISA thiếu cột cần thiết trên bảng SUIncrement "
@@ -18917,11 +18918,15 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
         sel = "SELECT [%s],[%s],[%s],ISNULL([%s],0),ISNULL([%s],0)" % (
             id_col, ma_col, ten_col or ma_col, amt_col, at_col)
         sel += (",ISNULL([%s],0)" % tka_col) if tka_col else ",0"
+        sel += (",[%s]" % rd_col) if rd_col else ",NULL"
         sel += " FROM SUIncrement WHERE ISNULL([%s],0) > 0 ORDER BY [%s]" % (at_col, ma_col)
         trang_thai = {}
-        for su_id, ma, ten, tong_tien, so_ky, tien_ky_dinh in cur.execute(sel).fetchall():
+        for su_id, ma, ten, tong_tien, so_ky, tien_ky_dinh, ngay_gt in cur.execute(sel).fetchall():
+            # ngay_gt (RefDate = ngày ghi tăng CCDC thật) — dùng để KHÔNG phân bổ lùi về
+            # trước ngày CCDC này thật sự tồn tại (xem chỗ dựng dong_thang bên dưới).
             trang_thai[su_id] = {"ma": ma, "ten": ten, "tong_tien": _snum(tong_tien),
-                                 "so_ky": int(_snum(so_ky) or 0), "tien_ky_dinh": _snum(tien_ky_dinh)}
+                                 "so_ky": int(_snum(so_ky) or 0), "tien_ky_dinh": _snum(tien_ky_dinh),
+                                 "ngay_gt": ngay_gt}
         if not trang_thai:
             return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
                     "thang_bat_dau": thang_bd, "so_thang": so_thang,
@@ -18953,8 +18958,18 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             yy = y0 + (mm - 1) // 12
             mm = ((mm - 1) % 12) + 1
             ngay_cuoi_thang = datetime.datetime(yy, mm, calendar.monthrange(yy, mm)[1])
-            dong_thang = [(su_id, st) for su_id, st in trang_thai.items() if st["con_lai_ky"] > 0]
+            # CHỈ phân bổ cho CCDC đã GHI TĂNG trước/trong tháng này (ngay_gt <=
+            # ngay_cuoi_thang) — xác nhận qua dữ liệu thật: CCDC ghi tăng THÁNG SAU
+            # (vd 30/06) vẫn bị phân bổ NGƯỢC về các tháng TRƯỚC (01-05) khi nó còn
+            # chưa hề tồn tại, nếu không lọc theo ngày ghi tăng ở đây.
+            dong_thang = [(su_id, st) for su_id, st in trang_thai.items()
+                          if st["con_lai_ky"] > 0 and (not st["ngay_gt"] or st["ngay_gt"] <= ngay_cuoi_thang)]
             if not dong_thang:
+                # Còn CCDC CHƯA tới hạn ghi tăng (ghi tăng ở tháng sau) — sang tháng kế
+                # tiếp để thử lại, KHÔNG dừng hẳn (dừng hẳn chỉ khi THẬT SỰ không còn
+                # CCDC nào cần phân bổ nữa, xem điều kiện break bên dưới).
+                if any(st["con_lai_ky"] > 0 for st in trang_thai.values()):
+                    continue
                 break
             so_ct += 1
             refno = f"PBCC{so_ct:05d}"
@@ -19258,6 +19273,10 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
         amt_col = _misa_chon_cot(cols_fa, "OrgPrice", "OriginalPrice")
         at_col = _misa_chon_cot(cols_fa, "LifeTimeInMonth", "LifeTime")
         tka_col = _misa_chon_cot(cols_fa, "MonthlyDepreciationAmount", "DepreciationAmountMonth")
+        # Ngày bắt đầu tính khấu hao THẬT của từng tài sản — ưu tiên StartDepreciationDate/
+        # DepreciationDate (đúng ý nghĩa "bắt đầu khấu hao", có thể khác ngày ghi tăng), không
+        # có thì mới lùi về RefDate (ngày ghi tăng).
+        rd_col = _misa_chon_cot(cols_fa, "StartDepreciationDate", "DepreciationDate", "RefDate")
         if not (ma_col and id_col and amt_col and at_col):
             raise HTTPException(
                 400, "CSDL MISA thiếu cột cần thiết trên bảng FixedAsset "
@@ -19266,11 +19285,15 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
         sel = "SELECT [%s],[%s],[%s],ISNULL([%s],0),ISNULL([%s],0)" % (
             id_col, ma_col, ten_col or ma_col, amt_col, at_col)
         sel += (",ISNULL([%s],0)" % tka_col) if tka_col else ",0"
+        sel += (",[%s]" % rd_col) if rd_col else ",NULL"
         sel += " FROM FixedAsset WHERE ISNULL([%s],0) > 0 ORDER BY [%s]" % (at_col, ma_col)
         trang_thai = {}
-        for fa_id, ma, ten, tong_tien, so_ky, tien_ky_dinh in cur.execute(sel).fetchall():
+        for fa_id, ma, ten, tong_tien, so_ky, tien_ky_dinh, ngay_kh in cur.execute(sel).fetchall():
+            # ngay_kh (ngày bắt đầu khấu hao thật) — dùng để KHÔNG khấu hao lùi về trước khi
+            # tài sản này thật sự tồn tại (xem chỗ dựng dong_thang bên dưới).
             trang_thai[fa_id] = {"ma": ma, "ten": ten, "tong_tien": _snum(tong_tien),
-                                 "so_ky": int(_snum(so_ky) or 0), "tien_ky_dinh": _snum(tien_ky_dinh)}
+                                 "so_ky": int(_snum(so_ky) or 0), "tien_ky_dinh": _snum(tien_ky_dinh),
+                                 "ngay_kh": ngay_kh}
         if not trang_thai:
             return {"preview": preview, "database": database, "so_dong": 0, "danh_sach": [],
                     "thang_bat_dau": thang_bd, "so_thang": so_thang,
@@ -19304,8 +19327,17 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
             yy = y0 + (mm - 1) // 12
             mm = ((mm - 1) % 12) + 1
             ngay_cuoi_thang = datetime.datetime(yy, mm, calendar.monthrange(yy, mm)[1])
-            dong_thang = [(fa_id, st) for fa_id, st in trang_thai.items() if st["con_lai_ky"] > 0]
+            # CHỈ khấu hao cho TSCĐ đã tới ngày bắt đầu khấu hao trong/trước tháng này
+            # (ngay_kh <= ngay_cuoi_thang) — xác nhận qua dữ liệu thật: TSCĐ ghi tăng
+            # THÁNG SAU vẫn bị khấu hao NGƯỢC về các tháng TRƯỚC khi nó còn chưa tồn
+            # tại, nếu không lọc theo ngày ở đây (giống bài học ở Phân bổ CCDC).
+            dong_thang = [(fa_id, st) for fa_id, st in trang_thai.items()
+                          if st["con_lai_ky"] > 0 and (not st["ngay_kh"] or st["ngay_kh"] <= ngay_cuoi_thang)]
             if not dong_thang:
+                # Còn TSCĐ CHƯA tới hạn bắt đầu khấu hao (ghi tăng ở tháng sau) — sang
+                # tháng kế tiếp để thử lại, KHÔNG dừng hẳn.
+                if any(st["con_lai_ky"] > 0 for st in trang_thai.values()):
+                    continue
                 break
             so_ct += 1
             refno = f"KH{so_ct:05d}"
