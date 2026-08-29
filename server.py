@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.060"
+APP_BUILD = "2026-08-27.061"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23144,10 +23144,14 @@ def _misa_doi_tuong_thanh_toan(cur, loai, account_object_id=None):
     # Kèm Diễn giải/Ghi chú THẬT của chứng từ (đọc lại từ AccountObjectLedger
     # — cùng nguồn đã xác nhận đúng cho màn 'Chi tiết công nợ') — dùng để so
     # khớp nội dung chuyển khoản với tên đối tượng đang gắn, phát hiện khả
-    # năng gắn NHẦM đối tượng (xem _misa_ten_khop_mo_ta).
+    # năng gắn NHẦM đối tượng (xem _misa_ten_khop_mo_ta). Kèm luôn Số chứng
+    # từ (b.RefNoFinance — ĐÚNG cột đã xác nhận UNT/UNC ghi vào, xem
+    # _misa_ghi_unt_unc) để người dùng tự tìm/mở lại đúng chứng từ đó trong
+    # MISA khi cần kiểm tra/sửa tay.
     sql = ("SELECT bd.AccountObjectID, b.RefDate, bd.Amount, bd.RefID, "
           "(SELECT TOP 1 ISNULL(Description,'') FROM AccountObjectLedger WHERE RefID=b.RefID), "
-          "(SELECT TOP 1 ISNULL(JournalMemo,'') FROM AccountObjectLedger WHERE RefID=b.RefID) "
+          "(SELECT TOP 1 ISNULL(JournalMemo,'') FROM AccountObjectLedger WHERE RefID=b.RefID), "
+          "ISNULL(b.RefNoFinance,'') "
           "FROM %s bd JOIN %s b ON bd.RefID = b.RefID "
           "WHERE bd.AccountObjectID IS NOT NULL AND bd.%s LIKE ? AND bd.Amount > 0"
           % (detail, master, tk_cot))
@@ -23157,10 +23161,10 @@ def _misa_doi_tuong_thanh_toan(cur, loai, account_object_id=None):
         params.append(account_object_id)
     rows = cur.execute(sql, params).fetchall()
     doi_tuong = {}
-    for aoid, refdate, tien, refid, mota, memo in rows:
+    for aoid, refdate, tien, refid, mota, memo, so_ct in rows:
         doi_tuong.setdefault(str(aoid), []).append(
             {"ref_id": str(refid), "date": refdate, "so_tien": float(tien or 0), "nguon": "ngan_hang",
-             "mo_ta": ((str(mota or "") + " " + str(memo or "")).strip())})
+             "mo_ta": ((str(mota or "") + " " + str(memo or "")).strip()), "so_ct": str(so_ct or "")})
     return doi_tuong
 
 
@@ -23674,6 +23678,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                         "dieu_chinh_ngay": _misa_ngay_str(dieu_chinh_da_dung[0]["date"]),
                         "thanh_toan_that_ref_id": str(tt["ref_id"]),
                         "thanh_toan_that_ngay": _misa_ngay_str(tt["date"]),
+                        "thanh_toan_that_so_ct": (tt.get("so_ct") or "").strip(),
                     })
                     da_dung_mo_coi.add(id(tt))
                     break
@@ -23710,6 +23715,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
             nghi_sai_doi_tuong.append({
                 "ma": ma, "ten": ten, "account_object_id": aoid, "ref_id": str(tt["ref_id"]),
                 "ngay": _misa_ngay_str(tt["date"]), "so_tien": round(tt["so_tien"]), "mo_ta": mo_ta,
+                "so_ct": (tt.get("so_ct") or "").strip(),
             })
 
         ung_vien_b = [(aoid2, ma2, ten2, hd2) for aoid2, ma2, ten2, hd2 in tat_ca_hd_treo
@@ -23719,6 +23725,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
             goi_y_chuyen.append({
                 "tu_ma": ma, "tu_ten": ten, "tu_account_object_id": aoid,
                 "tt_ref_id": str(tt["ref_id"]), "tt_ngay": _misa_ngay_str(tt["date"]),
+                "tt_so_ct": (tt.get("so_ct") or "").strip(),
                 "den_ma": ma2, "den_ten": ten2, "den_account_object_id": aoid2,
                 "inv_no": hd2["inv_no"], "inv_date": _misa_ngay_str(hd2["inv_date"]),
                 "so_tien": round(tt["so_tien"]), "mo_ta": (tt.get("mo_ta") or "").strip(),

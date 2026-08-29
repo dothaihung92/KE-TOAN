@@ -946,6 +946,24 @@
   </div>
 </div>
 
+<!-- MODAL Chi tiết 1 giao dịch thanh toán (khoản chưa khớp hóa đơn nào) —
+     nổi TRÊN misaModal (z-index cao hơn) để bấm 1 dòng trong bảng "Nghi ngờ
+     gắn nhầm đối tượng"/"trùng khớp đối tượng khác"/"thu 2 lần" xem đủ
+     thông tin (Số chứng từ, ngày, số tiền, nội dung CK) mà TỰ tìm/mở đúng
+     giao dịch đó trong MISA để sửa — phần mềm KHÔNG điều khiển được MISA
+     desktop từ xa nên không "mở thẳng" được, chỉ cung cấp đủ thông tin để
+     người dùng tự tìm bằng đúng Số chứng từ. -->
+<div id="misaGdModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:800;align-items:center;justify-content:center" onclick="if(event.target===this)misaGdDong()">
+  <div style="width:min(520px,92vw);background:#fff;border-radius:12px;padding:20px">
+    <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:10px">
+      <div style="font-weight:800;font-size:16px;color:#2e5c8a">🔎 Chi tiết giao dịch</div>
+      <button class="btn ghost sm" onclick="misaGdDong()">✕</button>
+    </div>
+    <div id="misaGdBody" style="font-size:13.5px;line-height:1.8"></div>
+    <div style="margin-top:14px;text-align:right"><button class="btn ghost sm" onclick="misaGdDong()">Đóng</button></div>
+  </div>
+</div>
+
 <!-- MODAL Kết nối CSDL MISA (SQL Server) — CHỈ ĐỌC / khám phá cấu trúc -->
 <div id="misaSqlModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:710;align-items:center;justify-content:center">
   <div style="width:min(920px,97vw);max-height:92vh;display:flex;flex-direction:column;background:#fff;border-radius:12px;padding:18px">
@@ -7339,11 +7357,42 @@ function misaModalFull(){
   b.style.width='98vw';b.style.maxWidth='98vw';
   b.style.height='94vh';b.style.maxHeight='94vh';
 }
+// Chi tiết 1 giao dịch thanh toán chưa khớp hóa đơn nào — gom đủ tên
+// trường có thể có tùy bảng nguồn (nghi_sai_doi_tuong dùng ma/ten/ngay/
+// so_ct; goi_y_chuyen dùng tu_ma/tu_ten/tt_ngay/tt_so_ct; thu_2_lan dùng
+// ma/ten/thanh_toan_that_ngay/thanh_toan_that_so_ct) — không mở thẳng
+// được MISA (không có cách điều khiển app desktop từ xa), chỉ đưa đủ
+// thông tin (đặc biệt Số chứng từ) để người dùng tự tìm bằng chức năng
+// Tìm kiếm của MISA rồi tự sửa.
+function misaGdXem(it){
+  if(!it)return;
+  const rows=[
+    ['Mã đối tượng đang gắn', it.ma||it.tu_ma||''],
+    ['Tên', it.ten||it.tu_ten||''],
+    ['Số chứng từ', it.so_ct||it.tt_so_ct||it.thanh_toan_that_so_ct||'(không đọc được — tự tìm theo ngày + số tiền)'],
+    ['Ngày', it.ngay||it.tt_ngay||it.thanh_toan_that_ngay||''],
+    ['Số tiền', (it.so_tien||0).toLocaleString('vi-VN')+'đ'],
+    ['Nội dung chuyển khoản', it.mo_ta||'(trống)'],
+  ];
+  document.getElementById('misaGdBody').innerHTML=`
+    <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin-bottom:10px">
+      Phần mềm không thể mở thẳng MISA — hãy dùng chức năng Tìm kiếm trong MISA (màn "Ngân hàng &gt; Thu, chi tiền"), gõ đúng <b>Số chứng từ</b> bên dưới để mở và tự sửa lại đối tượng cho đúng.
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      ${rows.map(([k,v])=>`<tr><td style="padding:4px 8px;color:var(--muted);white-space:nowrap;vertical-align:top">${misaEsc(k)}</td><td style="padding:4px 8px;font-weight:600;word-break:break-all">${misaEsc(String(v))}</td></tr>`).join('')}
+    </table>`;
+  document.getElementById('misaGdModal').style.display='flex';
+}
+function misaGdDong(){
+  document.getElementById('misaGdModal').style.display='none';
+}
 // Esc trong misaModal: nếu đang ở màn có "lối về" (vd Chi tiết công nợ ->
 // Tổng hợp công nợ) thì Esc quay lại thay vì đóng hẳn cửa sổ.
 let misaModalEscBack=null;
 document.addEventListener('keydown',(e)=>{
   if(e.key!=='Escape')return;
+  const gd=document.getElementById('misaGdModal');
+  if(gd&&gd.style.display==='flex'){e.preventDefault();e.stopPropagation();misaGdDong();return;}
   const m=document.getElementById('misaModal');
   if(!m||m.style.display!=='flex')return;
   e.preventDefault();e.stopPropagation();
@@ -7471,6 +7520,7 @@ async function misaChiTietCongNo(loai,accountObjectId){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function misaBuTruMo(loai){
+  misaModalFull();
   document.getElementById('misaModalBody').innerHTML=`
     <div style="font-weight:800;font-size:16px;color:#7a4fb5;margin-bottom:10px">🩹 Đối chiếu công nợ 3 tầng — ${loai==='kh'?'Khách hàng':'Nhà cung cấp'}</div>
     <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 14px;font-size:13px;color:#8a5d00;margin-bottom:12px">
@@ -7549,8 +7599,8 @@ async function misaBuTruTim(loai){
     misaBuTruNghiSaiHienTai=d.nghi_sai_doi_tuong||[];
     const tns=document.getElementById('misaBuTruNghiSai');
     if(misaBuTruNghiSaiHienTai.length){
-      const rowsns=misaBuTruNghiSaiHienTai.map(it=>`
-        <tr>
+      const rowsns=misaBuTruNghiSaiHienTai.map((it,i)=>`
+        <tr onclick="misaGdXem(misaBuTruNghiSaiHienTai[${i}])" style="cursor:pointer" title="Bấm để xem chi tiết giao dịch">
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ma)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ngay)}</td>
@@ -7558,7 +7608,7 @@ async function misaBuTruTim(loai){
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mo_ta)}</td>
         </tr>`).join('');
       tns.innerHTML=`
-        <details style="margin-bottom:8px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#8a5d00">🔎 Nghi ngờ gắn nhầm đối tượng — nội dung CK không khớp tên (${misaBuTruNghiSaiHienTai.length})</summary>
+        <details style="margin-bottom:8px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#8a5d00">🔎 Nghi ngờ gắn nhầm đối tượng — nội dung CK không khớp tên (${misaBuTruNghiSaiHienTai.length}) — bấm 1 dòng để xem chi tiết giao dịch</summary>
           <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin:6px 0">
             Khoản thanh toán CHƯA khớp hóa đơn nào, nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai).
           </div>
@@ -7583,6 +7633,7 @@ async function misaBuTruTim(loai){
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.tt_ngay||'')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><button class="btn ghost sm" style="padding:2px 8px" onclick="misaGdXem(misaBuTruGoiYChuyenHienTai[${i}])">🔎 Xem</button></td>
         </tr>`).join('');
       tgy.innerHTML=`
         <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
@@ -7593,7 +7644,7 @@ async function misaBuTruTim(loai){
           <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
             <th style="padding:5px 8px;border:1px solid #eee">Đang gắn (sai)</th><th style="padding:5px 8px;border:1px solid #eee">Nên gắn (đúng)</th>
             <th style="padding:5px 8px;border:1px solid #eee">Số HĐ đích</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
-            <th style="padding:5px 8px;border:1px solid #eee">Ngày TT</th></tr>${rowsgy}
+            <th style="padding:5px 8px;border:1px solid #eee">Ngày TT</th><th style="padding:5px 8px;border:1px solid #eee"></th></tr>${rowsgy}
         </table></div>
         <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#1a7a4a;margin-top:10px">
           Khuyên dùng: xuất Excel đúng mẫu "Chứng từ nghiệp vụ khác" rồi Import qua chức năng gốc của MISA — MISA tự tra đúng đối tượng theo Mã, an toàn hơn ghi thẳng SQL (phải tự học tên cột lưu đối tượng, có thể học sai/không đủ dữ liệu để học).
@@ -7617,6 +7668,7 @@ async function misaBuTruTim(loai){
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.dieu_chinh_ngay||'')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.thanh_toan_that_ngay||'')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><button class="btn ghost sm" style="padding:2px 8px" onclick="misaGdXem(misaBuTru2LanHienTai[${i}])">🔎 Xem</button></td>
         </tr>`).join('');
       t2l.innerHTML=`
         <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
@@ -7627,7 +7679,8 @@ async function misaBuTruTim(loai){
           <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
             <th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
             <th style="padding:5px 8px;border:1px solid #eee">Số HĐ</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
-            <th style="padding:5px 8px;border:1px solid #eee">Ngày điều chỉnh (cũ)</th><th style="padding:5px 8px;border:1px solid #eee">Ngày CK thật (mới)</th></tr>${rows2l}
+            <th style="padding:5px 8px;border:1px solid #eee">Ngày điều chỉnh (cũ)</th><th style="padding:5px 8px;border:1px solid #eee">Ngày CK thật (mới)</th>
+            <th style="padding:5px 8px;border:1px solid #eee"></th></tr>${rows2l}
         </table></div>
         <div style="margin-top:10px;text-align:right">
           <button class="btn sm" style="background:#b91c1c" onclick="misaBuTruDao2Lan('${loai}')">↩ Tự động đảo bút toán (sửa công nợ)</button>
