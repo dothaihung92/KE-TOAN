@@ -7545,7 +7545,62 @@ async function misaBuTruTim(loai){
         ${d.khong_ro.map(x=>`<div style="margin:6px 0;padding:6px 10px;background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;font-size:12px">
           <b>${misaEsc(x.ma)} — ${misaEsc(x.ten)}</b>: TT ngày ${misaEsc(x.ngay_thanh_toan)}, ${x.so_tien.toLocaleString('vi-VN')}đ — ${misaEsc(x.loai_vuong)}${x.ung_vien?': '+x.ung_vien.map(u=>`HĐ ${misaEsc(u.inv_no)} (${u.so_tien.toLocaleString('vi-VN')}đ)`).join(', '):''}
         </div>`).join('')||'<div style="color:#999;font-size:12.5px">Không có</div>'}</details>`;
-    kq.innerHTML=out+'<div id="misaBuTru2Lan"></div><div id="misaBuTruTang3"></div>';
+    kq.innerHTML=out+'<div id="misaBuTruNghiSai"></div><div id="misaBuTruGoiYChuyen"></div><div id="misaBuTru2Lan"></div><div id="misaBuTruTang3"></div>';
+    misaBuTruNghiSaiHienTai=d.nghi_sai_doi_tuong||[];
+    const tns=document.getElementById('misaBuTruNghiSai');
+    if(misaBuTruNghiSaiHienTai.length){
+      const rowsns=misaBuTruNghiSaiHienTai.map(it=>`
+        <tr>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ma)}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ngay)}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mo_ta)}</td>
+        </tr>`).join('');
+      tns.innerHTML=`
+        <details style="margin-bottom:8px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#8a5d00">🔎 Nghi ngờ gắn nhầm đối tượng — nội dung CK không khớp tên (${misaBuTruNghiSaiHienTai.length})</summary>
+          <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin:6px 0">
+            Khoản thanh toán CHƯA khớp hóa đơn nào, nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai).
+          </div>
+          <div style="max-height:22vh;overflow:auto">
+          <table style="border-collapse:collapse;font-size:12px;width:100%">
+            <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
+              <th style="padding:5px 8px;border:1px solid #eee">Ngày</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
+              <th style="padding:5px 8px;border:1px solid #eee">Nội dung CK</th></tr>${rowsns}
+          </table></div>
+        </details>`;
+    }else{
+      tns.innerHTML='';
+    }
+    misaBuTruGoiYChuyenHienTai=d.goi_y_chuyen||[];
+    const tgy=document.getElementById('misaBuTruGoiYChuyen');
+    if(misaBuTruGoiYChuyenHienTai.length){
+      const rowsgy=misaBuTruGoiYChuyenHienTai.map((it,i)=>`
+        <tr>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><input type="checkbox" class="buTruGoiYChk" data-i="${i}" checked></td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.tu_ma)} — ${misaEsc(it.tu_ten)}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.den_ma)} — ${misaEsc(it.den_ten)}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.tt_ngay||'')}</td>
+        </tr>`).join('');
+      tgy.innerHTML=`
+        <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
+          ⚠ Phát hiện <b>${misaBuTruGoiYChuyenHienTai.length}</b> khoản thanh toán CHƯA khớp hóa đơn nào, nhưng trùng CHÍNH XÁC số tiền với 1 hóa đơn CÒN TREO của ĐÚNG 1 đối tượng KHÁC — rất có thể bị gắn nhầm mã KH/NCC. Bấm "Tự động chuyển công nợ" để tạo bút toán chuyển đúng đối tượng (không xóa/sửa chứng từ gốc).
+        </div>
+        <div style="max-height:24vh;overflow:auto">
+        <table style="border-collapse:collapse;font-size:12.5px;width:100%">
+          <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
+            <th style="padding:5px 8px;border:1px solid #eee">Đang gắn (sai)</th><th style="padding:5px 8px;border:1px solid #eee">Nên gắn (đúng)</th>
+            <th style="padding:5px 8px;border:1px solid #eee">Số HĐ đích</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
+            <th style="padding:5px 8px;border:1px solid #eee">Ngày TT</th></tr>${rowsgy}
+        </table></div>
+        <div style="margin-top:10px;text-align:right">
+          <button class="btn sm" style="background:#b91c1c" onclick="misaBuTruChuyenDoiTuong('${loai}')">↪ Tự động chuyển công nợ (sửa đối tượng)</button>
+        </div>`;
+    }else{
+      tgy.innerHTML='';
+    }
     misaBuTru2LanHienTai=d.thu_2_lan||[];
     const t2l=document.getElementById('misaBuTru2Lan');
     if(misaBuTru2LanHienTai.length){
@@ -7632,6 +7687,8 @@ async function misaBuTruDonPhieuLoi(loai){
 }
 let misaBuTruDsXacNhan=[];
 let misaBuTru2LanHienTai=[];
+let misaBuTruNghiSaiHienTai=[];
+let misaBuTruGoiYChuyenHienTai=[];
 function misaBuTruDsChon(){
   return [...document.querySelectorAll('.buTruChk:checked')].map(c=>misaBuTruDsHienTai[+c.dataset.i]);
 }
@@ -7644,6 +7701,18 @@ async function misaBuTruDao2Lan(loai){
     const d=await api(`/api/misa-sql/dao-dieu-chinh-cong-no/${current}?loai=${loai}&preview=0`,
       {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
     toast(`✓ Đã tạo ${d.so_dong} bút toán đảo — công nợ sẽ về đúng số dư, chạy lại đối chiếu để kiểm tra.`,'ok');
+    misaBuTruTim(loai);
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaBuTruChuyenDoiTuong(loai){
+  const ds=[...document.querySelectorAll('.buTruGoiYChk:checked')].map(c=>misaBuTruGoiYChuyenHienTai[+c.dataset.i]);
+  if(!ds.length){toast('Chưa chọn dòng nào','err');return}
+  if(!confirm(`Tạo bút toán CHUYỂN công nợ cho ${ds.length} khoản (gắn lại đúng đối tượng, không xóa/sửa chứng từ gốc)?`))return;
+  toast('Đang tạo bút toán chuyển công nợ...','');
+  try{
+    const d=await api(`/api/misa-sql/chuyen-cong-no-sai-doi-tuong/${current}?loai=${loai}&preview=0`,
+      {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
+    toast(`✓ Đã tạo ${d.so_dong} bút toán chuyển công nợ — chạy lại đối chiếu để kiểm tra.`,'ok');
     misaBuTruTim(loai);
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
