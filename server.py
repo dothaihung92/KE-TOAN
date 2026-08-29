@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.062"
+APP_BUILD = "2026-08-27.063"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22599,20 +22599,31 @@ def _misa_sua_doi_tuong_giao_dich(cid, database, loai, ref_id, account_object_id
                            (account_object_id_moi, ref_id))
             so_bang_sua += 1
 
+        # GeneralLedger KHÔNG có cột "DebitAccount"/"CreditAccount" — khác hẳn
+        # AccountObjectLedger/BADepositDetail/GLVoucherDetail. Mỗi DÒNG
+        # GeneralLedger chỉ ghi TK của CHÍNH dòng đó qua cột "AccountNumber"
+        # (TK đối ứng của dòng kia nằm ở "CorrespondingAccountNumber", chiều
+        # Nợ/Có qua "EntryType"/DebitAmount-CreditAmount) — xác nhận qua
+        # chính code ghi UNT/UNC thật (_misa_ghi_thu_chi: "Giữ nguyên
+        # AccountNumber/CorrespondingAccountNumber/EntryType của mẫu — quyết
+        # định TK Nợ/TK Có của MỖI dòng"). Lọc theo AccountNumber LIKE
+        # '131%'/'331%' để CHỈ sửa đúng dòng công nợ, không đụng dòng ngân
+        # hàng (1121) của CÙNG chứng từ.
         cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
         col_gl_aid = _misa_chon_cot(cols_gl, "AccountObjectID")
-        if col_gl_aid:
+        col_gl_acc = _misa_chon_cot(cols_gl, "AccountNumber")
+        if col_gl_aid and col_gl_acc:
             sets, vals = ["[%s]=?" % col_gl_aid], [account_object_id_moi]
             for cand, v in (("AccountObjectName", ten_moi), ("AccountObjectNameDI", ten_moi),
                             ("AccountObjectCode", ma_moi)):
                 c = _misa_chon_cot(cols_gl, cand)
                 if c:
                     sets.append("[%s]=?" % c); vals.append(v)
-            vals.extend([ref_id, tk_hach + "%", tk_hach + "%"])
+            vals.extend([ref_id, tk_hach + "%"])
             if not preview:
                 cur.execute(
-                    "UPDATE GeneralLedger SET %s WHERE RefID=? AND "
-                    "(DebitAccount LIKE ? OR CreditAccount LIKE ?)" % ",".join(sets), vals)
+                    "UPDATE GeneralLedger SET %s WHERE RefID=? AND [%s] LIKE ?" %
+                    (",".join(sets), col_gl_acc), vals)
             so_bang_sua += 1
 
         cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
