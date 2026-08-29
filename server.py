@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.056"
+APP_BUILD = "2026-08-27.057"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23310,13 +23310,30 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
                     # thanh toán RIÊNG bằng 1 kênh khác ngoài sao kê ngân
                     # hàng công ty (vd chuyển khoản cá nhân), nên KHÔNG BAO
                     # GIỜ có thể là hóa đơn mà khoản chuyển khoản NGÀY TRƯỚC
-                    # đó trả cho. Nếu sau khi loại các hóa đơn "chưa tồn tại"
-                    # này còn lại ĐÚNG 1 hóa đơn — khớp thẳng, khỏi báo
-                    # "không rõ"; hóa đơn bị loại vẫn treo bình thường ở
-                    # Tầng 3 chờ người dùng tự xử lý.
+                    # đó trả cho.
                     binh_thuong = [hd for hd in ung_vien if hd["inv_date"] and hd["inv_date"] <= tt["date"]]
                     if binh_thuong:
-                        ung_vien = binh_thuong
+                        # Nhiều hóa đơn CÙNG giá trị, CÙNG "bình thường" (đã
+                        # tồn tại trước ngày TT) — hóa đơn trùng giá trị
+                        # nhưng khác số là chuyện BÌNH THƯỜNG (vd mua lặp
+                        # cùng số lượng/mặt hàng nhiều lần), KHÔNG phải dấu
+                        # hiệu bất thường cần người dùng tự kiểm tra. Không
+                        # có thông tin nào khác để phân biệt nên khớp theo
+                        # đúng nguyên tắc kế toán chuẩn FIFO (hàng vào trước
+                        # ra trước) — hóa đơn CŨ NHẤT trong các ứng viên
+                        # "bình thường" được ưu tiên khớp trước (hds đã sắp
+                        # theo ngày hóa đơn tăng dần nên binh_thuong cũng
+                        # theo đúng thứ tự đó — lấy phần tử đầu). CHỈ áp dụng
+                        # FIFO trong nhóm "bình thường" — hóa đơn xuất SAU
+                        # ngày TT (không có trong binh_thuong) không bao giờ
+                        # được chọn dù FIFO, vẫn phải loại hẳn như trước.
+                        ung_vien = binh_thuong[:1]
+                    # else: KHÔNG hóa đơn nào "bình thường" (toàn bộ ứng viên
+                    # đều xuất SAU ngày TT, chỉ lọt vào nhờ độ nới) — trường
+                    # hợp này VẪN thật sự mơ hồ (không phải "trùng giá trị
+                    # bình thường" nữa mà là "thanh toán đến trước cả hóa đơn
+                    # xuất"), giữ nguyên hành vi cũ: báo "không rõ", không
+                    # đoán bừa.
                 if len(ung_vien) == 1:
                     danh_dau_ca_hoa_don(ung_vien[0])
                     tt["matched"] = True
@@ -23326,7 +23343,7 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
                                   "so_tien": round(ung_vien[0]["so_tien"]),
                                   "ngay_thanh_toan": _misa_ngay_str(tt["date"])})
                 elif len(ung_vien) > 1 and ghi_khong_ro:
-                    khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều hóa đơn trùng giá trị",
+                    khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Thanh toán đến TRƯỚC cả hóa đơn (trùng giá trị nhiều hóa đơn tương lai)",
                                      "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
                                      "so_tien": round(tt["so_tien"]),
                                      "ung_vien": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
@@ -23512,8 +23529,9 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     [ngày hóa đơn - 7 ngày, ngày hóa đơn + cua_so_thang tháng] (thanh toán
     quá xa ngày hóa đơn thì không tính, dù trùng số tiền — coi là trùng
     ngẫu nhiên). Nếu CHỈ 1 hóa đơn khớp đúng số tiền trong cửa sổ đó -> ghi
-    nhận khớp. Nếu NHIỀU hóa đơn cùng khớp (trùng giá trị) -> đưa vào
-    'không rõ', không đoán bừa hóa đơn nào.
+    nhận khớp. Nếu NHIỀU hóa đơn cùng khớp (trùng giá trị, khác số hóa đơn —
+    chuyện BÌNH THƯỜNG, không phải dấu hiệu bất thường) -> tự khớp hóa đơn
+    CŨ NHẤT theo nguyên tắc FIFO, không còn báo 'không rõ' nữa.
 
     Tầng 2 — khớp TỔ HỢP nhiều hóa đơn cộng lại đúng bằng 1 khoản thanh
     toán (tối đa max_to_hop hóa đơn/tổ hợp, tránh bùng nổ tổ hợp). Chỉ tự
