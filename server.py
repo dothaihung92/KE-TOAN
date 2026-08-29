@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.068"
+APP_BUILD = "2026-08-27.069"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24241,17 +24241,31 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
             if len(ung_vien_ten) == 1:
                 cot_dt = ung_vien_ten[0]
 
-        # Quét ĐÚNG tiền tố CỦA CHÍNH mình (DCTR/DCTH) — KHÔNG dùng wildcard
-        # rộng 'DC%' (bài học từ ảnh chụp thật người dùng báo: bút toán ghi
-        # ra bị gán nhầm RefType "Chiết khấu thương mại (bán hàng)" vì công
-        # ty này có sẵn 1 dãy số chứng từ KHÁC cũng bắt đầu bằng "DC" — chiết
-        # khấu thương mại, không liên quan — 'DC%' khớp lẫn cả 2 dãy).
+        # Dò mẫu qua NỘI DUNG DIỄN GIẢI (JournalMemo) — KHÔNG dò qua tiền tố
+        # số chứng từ (RefNoFinance): 2 lỗi thật đã gặp lần lượt với cách dò
+        # tiền tố — (1) wildcard rộng 'DC%' khớp lẫn dãy số KHÁC của công ty
+        # (vd Chiết khấu thương mại, ảnh chụp MISA hiện nhầm "Nghiệp vụ" =
+        # "Chiết khấu thương mại (bán hàng)"); (2) thu hẹp cứng về 'DCTR%'/
+        # 'DCTH%' lại BỎ SÓT chứng từ THẬT của chính công ty này — vốn được
+        # đánh số 'DCCN...' (do phiên bản CŨ HƠN của _xuat_excel_dieu_chinh_cong_no
+        # sinh ra, xác nhận qua ảnh chụp MISA thật của người dùng) khiến câu
+        # lệnh trả về RỖNG (lỗi "Không xác định được loại chứng từ"). Diễn
+        # giải (JournalMemo) do CHÍNH phần mềm này sinh ra luôn bắt đầu cố
+        # định "Điều chỉnh công nợ treo..." bất kể phiên bản nào đặt số
+        # chứng từ theo tiền tố gì — dò theo đó ổn định hơn hẳn, không phụ
+        # thuộc lịch sử đổi quy ước đặt số qua các bản.
         mau_glv = _misa_mau_dong_that(
             cur, "GLVoucher",
-            "ISNULL(RefNoFinance,'') LIKE 'DCTR%' OR ISNULL(RefNoFinance,'') LIKE 'DCTH%'")
+            "ISNULL(JournalMemo,'') LIKE N'Điều chỉnh công nợ treo%'")
         ref_type = mau_glv.get("RefType") if mau_glv else None
         if ref_type is None:
-            ref_type, _n = _misa_pu_reftype(cur, ("khac",), master_table="GLVoucher")
+            # "khác" PHẢI có dấu — SYSRefType.RefTypeName lưu tiếng Việt có
+            # dấu (vd "Chứng từ nghiệp vụ khác"), so sánh chuỗi thường KHÔNG
+            # tự bỏ dấu; viết "khac" (không dấu) trước đây khiến điều kiện
+            # luôn SAI, dò rơi thẳng vào lỗi "thiếu dữ liệu SYSRefType" dù dữ
+            # liệu vẫn có — chỉ lộ ra khi mau_glv cũng None (công ty chưa có
+            # mẫu JournalMemo nào khớp).
+            ref_type, _n = _misa_pu_reftype(cur, ("khác",), master_table="GLVoucher")
         if ref_type is None:
             raise HTTPException(
                 400, "Không xác định được loại chứng từ (RefType) cho 'Nghiệp vụ khác' — CSDL MISA "
@@ -25039,17 +25053,26 @@ def _misa_chuyen_cong_no_sai_doi_tuong(cid, database, loai, danh_sach, preview=T
             # phân biệt (chưa có mẫu nào có đối tượng ở đúng bên còn lại).
             cot_no = cot_co = None
 
-        # Wildcard rộng 'DC%' khớp lẫn dãy số chứng từ KHÁC của công ty (vd
-        # 'DCTM...' — Chiết khấu thương mại) — xác nhận qua lỗi thật ở
-        # _misa_ghi_bu_tru_treo (ảnh chụp MISA hiện nhầm "Nghiệp vụ" =
-        # "Chiết khấu thương mại (bán hàng)"); thu hẹp đúng 2 tiền tố của
-        # họ "Điều chỉnh công nợ" (DCTR/DCTH).
+        # Dò mẫu qua NỘI DUNG DIỄN GIẢI (JournalMemo), KHÔNG qua tiền tố số
+        # chứng từ — xem giải thích đầy đủ ở _misa_ghi_bu_tru_treo (2 lỗi
+        # thật đã gặp lần lượt: wildcard rộng 'DC%' khớp lẫn dãy KHÁC của
+        # công ty vd Chiết khấu thương mại; thu hẹp cứng 'DCTR%'/'DCTH%' lại
+        # bỏ sót chứng từ THẬT đánh số 'DCCN...' của phiên bản CŨ HƠN). Nhận
+        # cả 2 họ diễn giải do CHÍNH phần mềm này sinh ra (ổn định qua mọi
+        # phiên bản đặt số chứng từ, không phụ thuộc tiền tố).
         mau_glv = _misa_mau_dong_that(
             cur, "GLVoucher",
-            "ISNULL(RefNoFinance,'') LIKE 'DCTR%' OR ISNULL(RefNoFinance,'') LIKE 'DCTH%'")
+            "ISNULL(JournalMemo,'') LIKE N'Điều chỉnh công nợ treo%' "
+            "OR ISNULL(JournalMemo,'') LIKE N'Chuyển công nợ:%'")
         ref_type = mau_glv.get("RefType") if mau_glv else None
         if ref_type is None:
-            ref_type, _n = _misa_pu_reftype(cur, ("khac",), master_table="GLVoucher")
+            # "khác" PHẢI có dấu — SYSRefType.RefTypeName lưu tiếng Việt có
+            # dấu (vd "Chứng từ nghiệp vụ khác"), so sánh chuỗi thường KHÔNG
+            # tự bỏ dấu; viết "khac" (không dấu) trước đây khiến điều kiện
+            # luôn SAI, dò rơi thẳng vào lỗi "thiếu dữ liệu SYSRefType" dù dữ
+            # liệu vẫn có — chỉ lộ ra khi mau_glv cũng None (công ty chưa có
+            # mẫu JournalMemo nào khớp).
+            ref_type, _n = _misa_pu_reftype(cur, ("khác",), master_table="GLVoucher")
         if ref_type is None:
             raise HTTPException(
                 400, "Không xác định được loại chứng từ (RefType) cho 'Nghiệp vụ khác' — CSDL MISA "
