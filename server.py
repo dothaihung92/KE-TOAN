@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.066"
+APP_BUILD = "2026-08-27.067"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24136,16 +24136,25 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
     định, KHÔNG có tầng cache tương tự (dùng chung kỹ thuật đã kiểm chứng ở
     _misa_dao_dieu_chinh_cong_no/_misa_chuyen_cong_no_sai_doi_tuong).
 
-    Học cột 'Đối tượng' thật trên GLVoucherDetail bằng cách so khớp GIÁ TRỊ
-    với account_object_id đã biết chắc chắn trên các dòng có TK công nợ
-    (131/331) thật — KHÔNG đoán tên cột cố định (mỗi bản MISA có thể khác
-    nhau); nếu chưa học được thì vẫn ghi bút toán (đúng TK Nợ/Có/số tiền)
-    nhưng bỏ trống đối tượng, người dùng tự gán tay trên MISA.
+    Học cột 'Đối tượng' thật trên GLVoucherDetail theo 2 bước, ưu tiên cách
+    chắc chắn nhất trước:
+      1) So khớp GIÁ TRỊ với account_object_id đã biết chắc chắn trên các
+         dòng có TK công nợ (131/331) thật — không đoán tên cột.
+      2) Nếu công ty CHƯA TỪNG tạo chứng từ Nghiệp vụ khác nào có gắn đối
+         tượng ở TK 131/331 (không có dòng nào để so khớp GIÁ TRỊ — hay
+         gặp ở công ty lần đầu dùng tính năng này), dự phòng bằng quy ước
+         ĐẶT TÊN đã XÁC NHẬN CÓ THẬT trên CHÍNH bảng GLVoucherDetail này
+         (2 cột TK Nợ/TK Có tên là DebitAccount/CreditAccount — xem
+         cols_glvd) — cột 'Đối tượng' cùng phía nhiều khả năng theo cùng
+         quy ước Debit*/Credit*, chỉ nhận nếu tìm ra ĐÚNG 1 cột khớp tên
+         (không ăn may khi có nhiều/không có ứng viên).
+    Nếu CẢ 2 CÁCH đều không học được thì vẫn ghi bút toán (đúng TK Nợ/Có/
+    số tiền) nhưng bỏ trống đối tượng, người dùng tự gán tay trên MISA.
 
-    LUÔN ghi CHƯA GHI SỔ (IsPostedFinance=0, đánh dấu CustomField10=
-    _PM_MARK) — người dùng tự kiểm tra trên MISA rồi Ghi sổ hàng loạt; xem
-    _misa_don_phieu_bu_tru_loi để gỡ các chứng từ ghi thử CHƯA GHI SỔ này
-    khi muốn đổi sang cách khác."""
+    Ghi ĐÃ GHI SỔ ngay (IsPostedFinance=1, giống các bút toán 'Đảo'/
+    'Chuyển công nợ' cùng họ) — vẫn đánh dấu CustomField10=_PM_MARK để
+    truy vết; xem _misa_don_phieu_bu_tru_loi để gỡ các chứng từ CHƯA GHI
+    SỔ còn sót lại từ bản cũ (trước khi đổi sang ghi sổ trực tiếp)."""
     import re
     import uuid as _uuid
     if loai not in ("kh", "ncc"):
@@ -24199,6 +24208,15 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
                         break
             except Exception:
                 cot_dt = None
+        if not cot_dt and obj_cols:
+            # Không có dòng mẫu nào để học qua GIÁ TRỊ (công ty chưa từng
+            # gắn đối tượng ở TK 131/331 trên chứng từ Nghiệp vụ khác) — dự
+            # phòng bằng quy ước đặt tên Debit*/Credit* đã XÁC NHẬN CÓ THẬT
+            # trên CHÍNH bảng này (DebitAccount/CreditAccount).
+            goi_y = "debit" if tk_cot_dt == "DebitAccount" else "credit"
+            ung_vien_ten = [c for c in obj_cols if goi_y in c.lower()]
+            if len(ung_vien_ten) == 1:
+                cot_dt = ung_vien_ten[0]
 
         mau_glv = _misa_mau_dong_that(cur, "GLVoucher", "ISNULL(RefNoFinance,'') LIKE 'DC%'")
         ref_type = mau_glv.get("RefType") if mau_glv else None
@@ -24256,7 +24274,7 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
                 _misa_gan(glv_row, cols_glv, ngay_dt, "RefDate")
                 _misa_gan(glv_row, cols_glv, ngay_dt, "PostedDate")
                 _misa_gan(glv_row, cols_glv, so_ct, "RefNoFinance")
-                _misa_gan(glv_row, cols_glv, False, "IsPostedFinance")
+                _misa_gan(glv_row, cols_glv, True, "IsPostedFinance")
                 _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
                 _misa_gan(glv_row, cols_glv, memo, "JournalMemo")
                 _misa_gan(glv_row, cols_glv, so_tien, "TotalAmountOC")
@@ -24323,10 +24341,11 @@ async def misa_sql_ghi_bu_tru_treo(cid: int, request: Request, loai: str = "kh",
 
 def _misa_don_phieu_bu_tru_loi(cid, database, loai):
     """Gỡ các chứng từ Nghiệp vụ khác CHƯA GHI SỔ do _misa_ghi_bu_tru_treo
-    tạo (CustomField10=_PM_MARK, bảng GLVoucher/GLVoucherDetail) — dùng khi
-    chuyển sang cách khác (xuất Excel 'Nghiệp vụ khác' để import) và không
-    cần các chứng từ đã ghi thử qua SQL nữa, tránh trùng/rác. KHÔNG BAO GIỜ
-    đụng chứng từ đã ghi sổ."""
+    tạo (CustomField10=_PM_MARK, bảng GLVoucher/GLVoucherDetail) — chỉ còn
+    tác dụng với chứng từ ghi thử từ BẢN CŨ (trước khi đổi sang ghi sổ
+    trực tiếp, IsPostedFinance=1) hoặc lỗi bất thường; dùng khi muốn dọn
+    sạch trước khi chuyển sang cách khác (xuất Excel 'Nghiệp vụ khác' để
+    import). KHÔNG BAO GIỜ đụng chứng từ đã ghi sổ."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     conn = _misa_sql_connect(cid, database=database)

@@ -7800,7 +7800,7 @@ async function misaBuTruXuatExcel(loai){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaBuTruDonPhieuLoi(loai){
-  if(!confirm('Gỡ toàn bộ chứng từ Nghiệp vụ khác CHƯA GHI SỔ do phần mềm ghi thử qua SQL trước đó (loại '+(loai==='kh'?'Khách hàng':'Nhà cung cấp')+')? Không đụng chứng từ đã ghi sổ.'))return;
+  if(!confirm('Gỡ toàn bộ chứng từ Nghiệp vụ khác CHƯA GHI SỔ do phần mềm ghi thử qua SQL từ bản cũ (loại '+(loai==='kh'?'Khách hàng':'Nhà cung cấp')+')? Không đụng chứng từ đã ghi sổ (từ bản mới trở đi luôn ghi sổ ngay nên sẽ không gỡ được).'))return;
   toast('Đang gỡ...','');
   try{
     const d=await api(`/api/misa-sql/don-phieu-bu-tru-loi/${current}?loai=${loai}`,{method:'POST'});
@@ -7880,7 +7880,7 @@ async function misaBuTruGhiChay(loai, ds, preview){
       </tr>`).join('');
     box.innerHTML=`
       <div style="background:${preview?'#fff8e1':'#eafaf0'};border:1px solid ${preview?'#e8b923':'#7ac9a0'};border-radius:8px;padding:8px 12px;font-size:12.5px;color:${preview?'#8a5d00':'#1a7a4a'};margin-bottom:8px;text-align:left">
-        ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} chứng từ Nghiệp vụ khác (${loai==='kh'?'Nợ 1111/Có 131':'Nợ 331/Có 1111'}), luôn ở trạng thái CHƯA GHI SỔ.`:`✓ Đã ghi ${d.so_ghi} chứng từ Nghiệp vụ khác (CHƯA GHI SỔ)${d.hoc_duoc_cot_doi_tuong?'':' — CHƯA gán được đối tượng (cần gán tay trên MISA)'} — vào MISA: Nghiệp vụ khác, kiểm tra rồi Ghi sổ.`}
+        ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} chứng từ Nghiệp vụ khác (${loai==='kh'?'Nợ 1111/Có 131':'Nợ 331/Có 1111'}), ghi sổ luôn.`:`✓ Đã ghi sổ ${d.so_ghi} chứng từ Nghiệp vụ khác${d.hoc_duoc_cot_doi_tuong?'':' — CHƯA gán được đối tượng (cần gán tay trên MISA)'} — vào MISA: Nghiệp vụ khác để kiểm tra.`}
       </div>
       <table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left">
         <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">Mã</th><th style="padding:4px 8px;border:1px solid #eee">Tên</th><th style="padding:4px 8px;border:1px solid #eee">Số CT</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr>
