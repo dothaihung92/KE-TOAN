@@ -7586,7 +7586,7 @@ async function misaBuTruTim(loai){
         </tr>`).join('');
       tgy.innerHTML=`
         <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
-          ⚠ Phát hiện <b>${misaBuTruGoiYChuyenHienTai.length}</b> khoản thanh toán CHƯA khớp hóa đơn nào, nhưng trùng CHÍNH XÁC số tiền với 1 hóa đơn CÒN TREO của ĐÚNG 1 đối tượng KHÁC — rất có thể bị gắn nhầm mã KH/NCC. Bấm "Tự động chuyển công nợ" để tạo bút toán chuyển đúng đối tượng (không xóa/sửa chứng từ gốc).
+          ⚠ Phát hiện <b>${misaBuTruGoiYChuyenHienTai.length}</b> khoản thanh toán CHƯA khớp hóa đơn nào, nhưng trùng CHÍNH XÁC số tiền với 1 hóa đơn CÒN TREO của ĐÚNG 1 đối tượng KHÁC — rất có thể bị gắn nhầm mã KH/NCC.
         </div>
         <div style="max-height:24vh;overflow:auto">
         <table style="border-collapse:collapse;font-size:12.5px;width:100%">
@@ -7595,8 +7595,12 @@ async function misaBuTruTim(loai){
             <th style="padding:5px 8px;border:1px solid #eee">Số HĐ đích</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
             <th style="padding:5px 8px;border:1px solid #eee">Ngày TT</th></tr>${rowsgy}
         </table></div>
-        <div style="margin-top:10px;text-align:right">
-          <button class="btn sm" style="background:#b91c1c" onclick="misaBuTruChuyenDoiTuong('${loai}')">↪ Tự động chuyển công nợ (sửa đối tượng)</button>
+        <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#1a7a4a;margin-top:10px">
+          Khuyên dùng: xuất Excel đúng mẫu "Chứng từ nghiệp vụ khác" rồi Import qua chức năng gốc của MISA — MISA tự tra đúng đối tượng theo Mã, an toàn hơn ghi thẳng SQL (phải tự học tên cột lưu đối tượng, có thể học sai/không đủ dữ liệu để học).
+        </div>
+        <div style="margin-top:10px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn ghost sm" onclick="misaBuTruChuyenDoiTuong('${loai}')">↪ (Ít khuyên dùng) Ghi thẳng bút toán qua SQL</button>
+          <button class="btn sm" style="background:#1a7a4a" onclick="misaBuTruXuatExcelChuyen('${loai}')">📥 Xuất Excel "Nghiệp vụ khác" (khuyên dùng)</button>
         </div>`;
     }else{
       tgy.innerHTML='';
@@ -7700,7 +7704,12 @@ async function misaBuTruDao2Lan(loai){
   try{
     const d=await api(`/api/misa-sql/dao-dieu-chinh-cong-no/${current}?loai=${loai}&preview=0`,
       {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
-    toast(`✓ Đã tạo ${d.so_dong} bút toán đảo — công nợ sẽ về đúng số dư, chạy lại đối chiếu để kiểm tra.`,'ok');
+    if(d.so_da_tao>0){
+      toast(`✓ Đã tạo ${d.so_da_tao}/${d.so_dong} bút toán đảo — công nợ sẽ về đúng số dư, chạy lại đối chiếu để kiểm tra.`,'ok');
+    }else{
+      const ly_do=(d.danh_sach||[]).map(x=>x.trang_thai).find(t=>t&&t.startsWith('bỏ qua'))||'không rõ lý do';
+      toast(`⚠ KHÔNG tạo được bút toán nào (${ly_do}) — thử dùng "Xuất Excel Nghiệp vụ khác" ở mục "Tầng 3" thay vào (an toàn hơn, không cần tự học cấu trúc bảng).`,'err');
+    }
     misaBuTruTim(loai);
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
@@ -7712,8 +7721,24 @@ async function misaBuTruChuyenDoiTuong(loai){
   try{
     const d=await api(`/api/misa-sql/chuyen-cong-no-sai-doi-tuong/${current}?loai=${loai}&preview=0`,
       {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
-    toast(`✓ Đã tạo ${d.so_dong} bút toán chuyển công nợ — chạy lại đối chiếu để kiểm tra.`,'ok');
+    if(d.so_da_tao>0){
+      toast(`✓ Đã tạo ${d.so_da_tao}/${d.so_dong} bút toán chuyển công nợ — chạy lại đối chiếu để kiểm tra.`,'ok');
+    }else{
+      toast(`⚠ KHÔNG tạo được bút toán nào — CSDL MISA chưa từng có chứng từ nào gắn đối tượng đủ ở CẢ 2 bên Nợ/Có để tự học cấu trúc bảng. Hãy dùng nút "Xuất Excel Nghiệp vụ khác" thay vào (an toàn hơn, MISA tự tra đối tượng theo Mã, không cần học cấu trúc bảng).`,'err');
+    }
     misaBuTruTim(loai);
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function misaBuTruXuatExcelChuyen(loai){
+  const ds=[...document.querySelectorAll('.buTruGoiYChk:checked')].map(c=>misaBuTruGoiYChuyenHienTai[+c.dataset.i]);
+  if(!ds.length){toast('Chưa chọn dòng nào','err');return}
+  toast('Đang xuất Excel...','');
+  try{
+    const r=await fetch(`/api/misa-sql/xuat-chuyen-cong-no/${current}?loai=${loai}`,{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Xuất thất bại')}
+    await xuatFile(r,`ChuyenCongNo_${loai}.xlsx`);
+    toast(`✓ Đã xuất Excel ${ds.length} dòng chuyển công nợ — vào MISA: Nghiệp vụ khác > Import Excel để nạp.`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaBuTruXemTruoc(loai){

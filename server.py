@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.059"
+APP_BUILD = "2026-08-27.060"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24369,6 +24369,119 @@ async def misa_xuat_dieu_chinh_cong_no(cid: int, request: Request, loai: str = "
     return _resp_xuat(path, fname, {"X-So-Dong": str(so_dong)})
 
 
+def _xuat_excel_chuyen_cong_no(cid, loai, danh_sach, database=None):
+    """Xuất file Excel đúng mẫu 'Chứng từ nghiệp vụ khác' của MISA — mỗi
+    dòng trong danh_sach (lấy từ 'goi_y_chuyen' của /api/misa-sql/doi-chieu-3-tang)
+    thành 1 bút toán CHUYỂN CÔNG NỢ giữa 2 đối tượng: TK Nợ = TK Có = CHÍNH
+    tài khoản công nợ (131 cho kh, 331 cho ncc) — Nợ gắn đối tượng ĐÍCH
+    (đúng, nhận lại khoản thanh toán) / Có gắn đối tượng NGUỒN (sai, trả về
+    đúng số dư gốc) — đúng nghiệp vụ 'chuyển đổi công nợ giữa 2 đối tượng'
+    chuẩn kế toán, trên CÙNG 1 dòng.
+
+    Dùng ĐÚNG mẫu Import Excel GỐC của MISA — cột 'Đối tượng Nợ'/'Đối tượng
+    Có' nhận MÃ đối tượng (vd '0317826028', không phải GUID nội bộ), MISA
+    TỰ tra đúng AccountObjectID khi Import — KHÔNG cần tự học/đoán tên cột
+    GUID nào lưu đối tượng như khi ghi thẳng SQL (_misa_chuyen_cong_no_sai_doi_tuong)
+    — AN TOÀN HƠN HẲN, tránh rủi ro gắn thiếu/sai đối tượng do đoán sai cấu
+    trúc bảng; đi qua ĐÚNG luồng ứng dụng thật của MISA."""
+    import re
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    prefix = "CDTH" if loai == "kh" else "CDTR"
+    tk_ke_toan = "131" if loai == "kh" else "331"
+    seq = {}
+    if database:
+        try:
+            conn = _misa_sql_connect(cid, database=database)
+            try:
+                cur = conn.cursor()
+                for (rf,) in cur.execute(
+                        "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?",
+                        prefix + "%").fetchall():
+                    m = re.match(r"^%s(\d+)/T(\d+)/(\d+)$" % re.escape(prefix), str(rf or "").strip())
+                    if m:
+                        mk = (int(m.group(2)), int(m.group(3)))
+                        seq[mk] = max(seq.get(mk, 0), int(m.group(1)))
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Chứng từ nghiệp vụ khác"
+    for c, h in enumerate(_GLVOUCHER_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    r = 2
+    for it in danh_sach:
+        so_tien = _to_num(it.get("so_tien")) or 0
+        if so_tien <= 0:
+            continue
+        tu_ma = str(it.get("tu_ma") or "").strip()
+        den_ma = str(it.get("den_ma") or "").strip()
+        if not (tu_ma and den_ma):
+            continue
+        try:
+            ngay_dt = datetime.datetime.strptime(str(it.get("tt_ngay") or "")[:10], "%Y-%m-%d")
+        except Exception:
+            ngay_dt = datetime.datetime.now()
+        mk = (ngay_dt.month, ngay_dt.year)
+        seq[mk] = seq.get(mk, 0) + 1
+        so_ct = ("%s%03d/T%s/%s" % (prefix, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
+        dien_giai = ("Chuyển công nợ khoản TT ngày %s từ %s sang %s (HĐ %s)" % (
+            it.get("tt_ngay"), it.get("tu_ten"), it.get("den_ten"), it.get("inv_no")))[:500]
+        row = [""] * len(_GLVOUCHER_HEADERS)
+        row[1] = ngay_dt.strftime("%d/%m/%Y")
+        row[2] = ngay_dt.strftime("%d/%m/%Y")
+        row[3] = so_ct
+        row[4] = dien_giai
+        row[6] = "VND"
+        row[7] = 1
+        row[8] = dien_giai
+        row[9] = tk_ke_toan
+        row[10] = tk_ke_toan
+        row[11] = so_tien
+        row[12] = so_tien
+        row[13] = den_ma   # Đối tượng Nợ = đích (đúng)
+        row[14] = tu_ma    # Đối tượng Có = nguồn (sai)
+        for c, v in enumerate(row, 1):
+            cell = ws.cell(r, c)
+            cell.value = v
+            if c == 12 or c == 13:
+                cell.number_format = "#,##0"
+        r += 1
+    for c in range(1, len(_GLVOUCHER_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 18
+    ws.freeze_panes = "A2"
+    fname = "ChuyenCongNo_%s_%s.xlsx" % (loai, datetime.datetime.now().strftime("%d%m%Y_%H%M"))
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(), (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return path, r - 2
+
+
+@app.post("/api/misa-sql/xuat-chuyen-cong-no/{cid}")
+async def misa_xuat_chuyen_cong_no(cid: int, request: Request, loai: str = "kh"):
+    if loai not in ("kh", "ncc"):
+        raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
+    body = await request.json()
+    danh_sach = body.get("danh_sach") or []
+    if not danh_sach:
+        raise HTTPException(400, "Danh sách trống — không có gì để xuất.")
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    path, so_dong = _xuat_excel_chuyen_cong_no(cid, loai, danh_sach, database=database or None)
+    fname = os.path.basename(path)
+    return _resp_xuat(path, fname, {"X-So-Dong": str(so_dong)})
+
+
 def _misa_dao_dieu_chinh_cong_no(cid, database, loai, danh_sach, preview=True):
     """Tự động ĐẢO LẠI bút toán 'Điều chỉnh công nợ treo' đã tạo SAI trước
     đó (coi hóa đơn như đã thu/chi tiền mặt — xem _xuat_excel_dieu_chinh_cong_no)
@@ -24520,7 +24633,9 @@ def _misa_dao_dieu_chinh_cong_no(cid, database, loai, danh_sach, preview=True):
             conn.rollback()
         else:
             conn.commit()
-        return {"preview": preview, "database": database, "so_dong": len(ket), "danh_sach": ket}
+        so_da_tao = sum(1 for x in ket if x.get("trang_thai") in ("sẽ tạo", "đã tạo"))
+        return {"preview": preview, "database": database, "so_dong": len(ket), "so_da_tao": so_da_tao,
+                "danh_sach": ket}
     except HTTPException:
         conn.rollback()
         raise
@@ -24711,8 +24826,9 @@ def _misa_chuyen_cong_no_sai_doi_tuong(cid, database, loai, danh_sach, preview=T
             conn.rollback()
         else:
             conn.commit()
-        return {"preview": preview, "database": database, "so_dong": len(ket), "danh_sach": ket,
-                "hoc_duoc_cot_doi_tuong": bool(cot_no and cot_co)}
+        so_da_tao = sum(1 for x in ket if x.get("trang_thai") in ("sẽ tạo", "đã tạo"))
+        return {"preview": preview, "database": database, "so_dong": len(ket), "so_da_tao": so_da_tao,
+                "danh_sach": ket, "hoc_duoc_cot_doi_tuong": bool(cot_no and cot_co)}
     except HTTPException:
         conn.rollback()
         raise
