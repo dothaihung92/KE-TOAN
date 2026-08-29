@@ -7275,6 +7275,7 @@ function misaImportHienKetQua(d,preview){
     return;
   }
   const rows=(d.cac_buoc||[]).map(b=>{
+    if(b.doi_chieu)return '';   // hiện riêng ở khối misaDoiChieuKetQua bên dưới, không trộn vào bảng chung
     let mau='#1a7a7a',trangThai;
     if(b.bo_qua){mau='#999';trangThai='Bỏ qua — '+b.bo_qua;}
     else if(b.loi){mau='#b91c1c';trangThai='Lỗi — '+b.loi;}
@@ -7282,19 +7283,92 @@ function misaImportHienKetQua(d,preview){
     return `<tr><td style="padding:7px 10px;border:1px solid #eee;font-weight:600">${misaEsc(b.ten)}</td>
       <td style="padding:7px 10px;border:1px solid #eee;color:${mau}">${misaEsc(trangThai)}</td></tr>`;
   }).join('');
+  const buocDoiChieu=(d.cac_buoc||[]).find(b=>b.doi_chieu||('ten' in b && b.ten==='7. Đối chiếu tổng giá trị & VAT' && b.loi));
   document.getElementById('misaImportResult').innerHTML=`
     <table style="border-collapse:collapse;font-size:14.5px;width:100%;margin-top:12px">${rows}</table>
+    <div id="misaDoiChieuKetQua" style="margin-top:12px"></div>
     ${preview?'':'<div style="margin-top:10px;font-size:14.5px;color:#2e5c8a">Chứng từ Mua hàng (Nhập kho/Không qua kho/Dịch vụ) và Bán hàng đã tự ghi <b>Sổ Tài chính</b> (không ghi Sổ quản trị, giống Ngân hàng) — hiện đúng trên màn hình MISA và xoá được bình thường nếu ghi nhầm. Riêng bút toán "Khấu trừ thuế GTGT" (bước 6) LUÔN <b>CHƯA ghi sổ</b> — tự mở trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>'}`;
+  if(buocDoiChieu)misaDoiChieuVe(buocDoiChieu);
   foot.innerHTML=`
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">${preview?'Hủy':'Đóng'}</button>
       ${preview?'<button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongChay(false)">✔ Xác nhận chạy thật</button>':''}
     </div>`;
 }
+function misaDoiChieuVe(b){
+  const box=document.getElementById('misaDoiChieuKetQua');
+  if(!box)return;
+  if(b.loi){
+    box.innerHTML=`<div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:13px;color:#b91c1c">⚠ Không đối chiếu được: ${misaEsc(b.loi)}</div>`;
+    return;
+  }
+  const dc=b.doi_chieu;
+  const phan=(nhan,d)=>{
+    const coLoi=d.thieu.length+d.lech.length>0;
+    const mau=coLoi?'#b91c1c':'#1a7a4a';
+    const rowsThieu=d.thieu.map(x=>`<tr>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.mst)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.so_hd)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.ngay||'')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${x.doanh_so_nguon.toLocaleString('vi-VN')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${x.thue_nguon.toLocaleString('vi-VN')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;color:#b91c1c;font-weight:600">THIẾU trong MISA</td>
+      </tr>`).join('');
+    const rowsLech=d.lech.map(x=>`<tr>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.mst)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.so_hd)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.ngay||'')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${x.doanh_so_nguon.toLocaleString('vi-VN')} / MISA ${x.doanh_so_misa.toLocaleString('vi-VN')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${x.thue_nguon.toLocaleString('vi-VN')} / MISA ${x.thue_misa.toLocaleString('vi-VN')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;color:#b91c1c;font-weight:600">LỆCH ${x.chenh_lech>0?'+':''}${x.chenh_lech.toLocaleString('vi-VN')}đ</td>
+      </tr>`).join('');
+    return `
+      <details ${coLoi?'open':''} style="margin-bottom:8px">
+        <summary style="cursor:pointer;font-weight:700;font-size:13.5px;color:${mau}">
+          ${coLoi?'⚠':'✓'} ${nhan} — khớp ${d.khop}/${d.tong_hd_nguon}${d.thieu.length?`, thiếu ${d.thieu.length}`:''}${d.lech.length?`, lệch ${d.lech.length}`:''}
+        </summary>
+        ${coLoi?`
+        <div style="max-height:26vh;overflow:auto;margin-top:6px">
+        <table style="border-collapse:collapse;font-size:12.5px;width:100%">
+          <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">MST</th><th style="padding:4px 8px;border:1px solid #eee">Số HĐ</th>
+            <th style="padding:4px 8px;border:1px solid #eee">Ngày</th><th style="padding:4px 8px;border:1px solid #eee">Doanh số (nguồn/MISA)</th>
+            <th style="padding:4px 8px;border:1px solid #eee">Thuế GTGT (nguồn/MISA)</th><th style="padding:4px 8px;border:1px solid #eee">Ghi chú</th></tr>
+          ${rowsThieu}${rowsLech}
+        </table></div>`:`<div style="font-size:12.5px;color:#1a7a4a;margin-top:4px">Tất cả ${d.tong_hd_nguon} hóa đơn đã khớp đúng số tiền/VAT với dữ liệu tra cứu gốc.</div>`}
+      </details>`;
+  };
+  const canhBaoCot=[];
+  if(!dc.doc_duoc.ban_hang)canhBaoCot.push('Bán hàng (SAVoucher)');
+  if(!dc.doc_duoc.mua_hang_nk_kqk)canhBaoCot.push('Mua hàng Nhập kho/Không qua kho (PUInvoice)');
+  if(!dc.doc_duoc.mua_hang_dv)canhBaoCot.push('Mua hàng Dịch vụ (PUServiceDetail)');
+  box.innerHTML=`
+    <div style="font-weight:700;font-size:14px;margin-bottom:6px">🔎 Đối chiếu tổng giá trị & VAT — so với dữ liệu hóa đơn đã tra cứu</div>
+    ${phan('Bán hàng',dc.ban_hang)}
+    ${phan('Mua hàng',dc.mua_hang)}
+    ${canhBaoCot.length?`<div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin-top:6px">⚠ Không dò được đủ cột trên CSDL MISA cho: ${misaEsc(canhBaoCot.join(', '))} — phần đó CHƯA đối chiếu được, không phải đã khớp.</div>`:''}`;
+}
+async function misaDoiChieuDocLap(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang đối chiếu...</div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  try{
+    const dc=await api(`/api/misa-sql/doi-chieu-import/${current}`);
+    document.getElementById('misaModalBody').innerHTML=`<div id="misaDoiChieuKetQua"></div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaDoiChieuVe({doi_chieu:dc});
+  }catch(e){
+    document.getElementById('misaModalBody').innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>
+      <div style="margin-top:14px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+  }
+}
 function misaImportTuDongMo(){
   if(!current){toast('Chọn công ty trước','err');return}
   document.getElementById('misaModalBody').innerHTML=`
-    <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ + Phân bổ chi phí CCDC tự động + Tính khấu hao TSCĐ tự động 6) Tờ khai GTGT + Khấu trừ tự động (BƯỚC CUỐI) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có. Chứng từ Mua hàng/Bán hàng đã tự ghi <b>Sổ Tài chính</b>; riêng bút toán "Khấu trừ thuế GTGT" ở bước 6 LUÔN <b>CHƯA ghi sổ</b> — tự mở trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>
+    <div class="hint" style="margin-bottom:10px">Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ + Phân bổ chi phí CCDC tự động + Tính khấu hao TSCĐ tự động 6) Tờ khai GTGT + Khấu trừ tự động 7) Đối chiếu tổng giá trị & VAT đã ghi vào MISA so với dữ liệu hóa đơn đã tra cứu (chỉ đọc, tự hiện hóa đơn thiếu/lệch nếu có) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có. Chứng từ Mua hàng/Bán hàng đã tự ghi <b>Sổ Tài chính</b>; riêng bút toán "Khấu trừ thuế GTGT" ở bước 6 LUÔN <b>CHƯA ghi sổ</b> — tự mở trong MISA kiểm tra rồi bấm "Ghi sổ" khi ưng ý.</div>
     <label style="font-size:13px;font-weight:600">Bước 5 (Phân bổ CCDC / Khấu hao TSCĐ) — Từ tháng/năm (để trống = tự nối tiếp chứng từ gần nhất)</label>
     <input type="month" id="importTuThang" value="${misaEsc(misaImportTuThang)}" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
     <label style="font-size:13px;font-weight:600">Đến tháng/năm (để trống = chạy 12 tháng kể từ Từ tháng)</label>
@@ -7319,6 +7393,7 @@ function misaImportTuDongMo(){
     </div>
     <div style="text-align:right">
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn ghost sm" onclick="misaDoiChieuDocLap()">🔎 Chỉ đối chiếu tổng giá trị & VAT</button>
       <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongBatDau()">▶ Bắt đầu (Xem trước)</button>
     </div>`;
   document.getElementById('importTuQuy').value=misaImportTuQuy||'';

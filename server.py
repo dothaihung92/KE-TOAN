@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.070"
+APP_BUILD = "2026-08-27.071"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25361,8 +25361,190 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
          lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview,
                                                  tu_quy=tu_quy, tu_nam=tu_nam, so_quy=so_quy_kh))
 
+    # BƯỚC 7 — CHỈ ĐỌC, không phụ thuộc preview: đối chiếu lại TOÀN BỘ hóa
+    # đơn đã tra cứu (nguồn đáng tin cậy nhất) với dữ liệu THẬT sự đã có
+    # trong MISA ngay sau khi chạy xong 6 bước trên — phát hiện hóa đơn nào
+    # bị THIẾU (rớt ở đâu đó trong khâu Bảng kê Đầu ra/Đầu vào hoặc lúc ghi
+    # vào MISA) hoặc LỆCH số tiền/VAT so với dữ liệu gốc, theo đúng yêu cầu
+    # "so sánh đã khớp với nhau hết chưa, có chênh lệch thì hiện ra".
+    bao("▶ Đang xử lý: 7. Đối chiếu tổng giá trị & VAT...")
+    try:
+        dc = _misa_doi_chieu_import_toan_bo(cid, database)
+        buoc.append({"ten": "7. Đối chiếu tổng giá trị & VAT", "doi_chieu": dc})
+        bh, mh = dc["ban_hang"], dc["mua_hang"]
+        bao("✓ 7. Đối chiếu tổng giá trị & VAT — Bán hàng: khớp %d/%d (thiếu %d, lệch %d); "
+            "Mua hàng: khớp %d/%d (thiếu %d, lệch %d)" %
+            (bh["khop"], bh["tong_hd_nguon"], len(bh["thieu"]), len(bh["lech"]),
+             mh["khop"], mh["tong_hd_nguon"], len(mh["thieu"]), len(mh["lech"])))
+    except Exception as e:
+        buoc.append({"ten": "7. Đối chiếu tổng giá trị & VAT", "loi": str(e)[:300]})
+        bao(f"✗ Lỗi: 7. Đối chiếu tổng giá trị & VAT — {str(e)[:300]}")
+
     bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
+
+
+def _misa_doi_chieu_import_toan_bo(cid, database):
+    """CHỈ ĐỌC — đối chiếu TOÀN BỘ hóa đơn ĐÃ TRA CỨU (bảng invoices, dữ
+    liệu GỐC từ Tổng cục Thuế — nguồn đáng tin cậy nhất, KHÔNG phụ thuộc
+    Bảng kê Đầu ra/Đầu vào của khung Nhập Liệu, vì bảng đó là dữ liệu
+    TRUNG GIAN người dùng có thể chỉnh tay/thiếu sót khi import file) với
+    dữ liệu ĐÃ GHI trong MISA — khóa theo (MST đối tác, Số hóa đơn), so
+    sánh Doanh số (chưa thuế) + Thuế GTGT. Phát hiện 2 loại lệch:
+      - THIẾU: có trong dữ liệu tra cứu (và KHÔNG bị thay thế/hủy/không đủ
+        điều kiện cấp mã — coi như hợp lệ, không tính là lỗi thiếu) nhưng
+        KHÔNG tìm thấy trong MISA — dùng để bắt đúng lỗi kiểu 'hóa đơn số
+        29 bị sót' (rớt ở khâu Bảng kê Đầu ra/Đầu vào hoặc lúc ghi vào
+        MISA, không phải do Tổng cục Thuế không có).
+      - LỆCH: có ở CẢ 2 nơi nhưng số tiền/VAT khác nhau quá 2.000đ (bù
+        làm tròn) — có thể do sửa tay 1 bên, hoặc hóa đơn bị gộp/tách sai
+        lúc ghi.
+
+    Nguồn so sánh ở MISA cho từng loại (đã xác nhận đúng cột qua chính
+    logic ghi — xem _misa_ghi_ban_hang/_misa_ghi_mua_hang/_misa_ghi_mua_hang_dv):
+      - Bán hàng: SAVoucher — TotalAmount đã GỒM VAT (=doanh số+thuế), phải
+        trừ TotalVATAmount ra mới ra doanh số để so cho đúng chiều.
+      - Mua hàng Nhập kho/Không qua kho: PUInvoice (bảng hóa đơn LIÊN KẾT
+        RIÊNG, KHÔNG phải PUVoucher) — TotalTurnoverAmount đã KHÔNG gồm VAT.
+      - Mua hàng Dịch vụ: PUServiceDetail (InvNo/MST nằm ở DÒNG chi tiết,
+        không phải header PUService vì 1 hóa đơn có thể tách nhiều dòng
+        theo TK chi phí khác nhau) — CỘNG DỒN theo (MST, Số hóa đơn).
+    Bảng nào KHÔNG dò được đủ cột (CSDL MISA phiên bản khác) thì BỎ QUA
+    hẳn loại đó (không báo nhầm "thiếu" hàng loạt vì không đọc được dữ
+    liệu MISA) — đánh dấu trong doc_duoc để giao diện tự biết mà cảnh báo."""
+    import json as _json
+    conn = db()
+    rows = conn.execute(
+        "SELECT loai, nbmst, nmmst, shdon, tdlap, tgtcthue, tgtthue, tthai, raw "
+        "FROM invoices WHERE company_id=?", (cid,)).fetchall()
+    conn.close()
+
+    def _hd_hop_le(r):
+        tt = str(r["tthai"] or "").strip()
+        if tt in ("4", "6"):
+            return False
+        if _mo_ta_trang_thai(tt) in ("Hóa đơn đã bị thay thế", "Hóa đơn hủy",
+                                     "Hóa đơn đã bị xóa bỏ", "Hóa đơn xóa bỏ"):
+            return False
+        try:
+            raw = _json.loads(r["raw"]) if r["raw"] else {}
+        except Exception:
+            raw = {}
+        kq = str(raw.get("ttxly", "") or "").strip().lower()
+        if kq == "4" or "không đủ điều kiện" in kq or "không đủ điều kiện" in _mo_ta_ket_qua(
+                raw.get("ttxly", "")).lower():
+            return False
+        return True
+
+    nguon = {"sold": {}, "purchase": {}}
+    for r in rows:
+        loai = r["loai"]
+        if loai not in nguon or not _hd_hop_le(r):
+            continue
+        sohd = str(r["shdon"] or "").strip()
+        if not sohd:
+            continue
+        mst_doi_tac = r["nmmst"] if loai == "sold" else r["nbmst"]
+        k = (_misa_khncc_chuan_mst(mst_doi_tac).lower(), sohd.lower())
+        e = nguon[loai].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
+                                       "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
+        e["ds"] += _snum(r["tgtcthue"])
+        e["thue"] += _snum(r["tgtthue"])
+
+    misa = {"sold": {}, "purchase": {}}
+    doc_duoc = {"ban_hang": False, "mua_hang_nk_kqk": False, "mua_hang_dv": False}
+    conn2 = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn2.cursor()
+
+        cols_sav = _misa_cot_bang_that(cur, "SAVoucher")
+        if cols_sav:
+            c_mst = _misa_chon_cot(cols_sav, "AccountObjectTaxCode")
+            c_inv = _misa_chon_cot(cols_sav, "InvNo")
+            c_tot = _misa_chon_cot(cols_sav, "TotalAmount")
+            c_vat = _misa_chon_cot(cols_sav, "TotalVATAmount")
+            if c_mst and c_inv and c_tot and c_vat:
+                doc_duoc["ban_hang"] = True
+                sql = "SELECT [%s],[%s],[%s],[%s] FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
+                    c_mst, c_inv, c_tot, c_vat, c_inv)
+                for mst, inv, tot, vat in cur.execute(sql).fetchall():
+                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                    e = misa["sold"].setdefault(k, {"ds": 0.0, "thue": 0.0})
+                    v = _snum(vat)
+                    e["thue"] += v
+                    e["ds"] += _snum(tot) - v
+
+        cols_pui = _misa_cot_bang_that(cur, "PUInvoice")
+        if cols_pui:
+            c_mst = _misa_chon_cot(cols_pui, "AccountObjectTaxCode")
+            c_inv = _misa_chon_cot(cols_pui, "InvNo")
+            c_tot = _misa_chon_cot(cols_pui, "TotalTurnoverAmount")
+            c_vat = _misa_chon_cot(cols_pui, "TotalVATAmount")
+            if c_mst and c_inv and c_tot and c_vat:
+                doc_duoc["mua_hang_nk_kqk"] = True
+                sql = "SELECT [%s],[%s],[%s],[%s] FROM PUInvoice WHERE ISNULL([%s],'')<>''" % (
+                    c_mst, c_inv, c_tot, c_vat, c_inv)
+                for mst, inv, tot, vat in cur.execute(sql).fetchall():
+                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                    e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
+                    e["ds"] += _snum(tot)
+                    e["thue"] += _snum(vat)
+
+        cols_psd = _misa_cot_bang_that(cur, "PUServiceDetail")
+        if cols_psd:
+            c_mst = _misa_chon_cot(cols_psd, "TaxAccountObjectTaxCode")
+            c_inv = _misa_chon_cot(cols_psd, "InvNo")
+            c_amt = _misa_chon_cot(cols_psd, "Amount")
+            c_vat = _misa_chon_cot(cols_psd, "VATAmount")
+            if c_mst and c_inv and c_amt and c_vat:
+                doc_duoc["mua_hang_dv"] = True
+                sql = "SELECT [%s],[%s],[%s],[%s] FROM PUServiceDetail WHERE ISNULL([%s],'')<>''" % (
+                    c_mst, c_inv, c_amt, c_vat, c_inv)
+                for mst, inv, amt, vat in cur.execute(sql).fetchall():
+                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                    e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
+                    e["ds"] += _snum(amt)
+                    e["thue"] += _snum(vat)
+    finally:
+        conn2.close()
+
+    DUNG_SAI = 2000   # đ — bù làm tròn/phí ngân hàng nhỏ, KHÔNG báo lỗi
+    ket = {}
+    ten_loai = {"sold": "ban_hang", "purchase": "mua_hang"}
+    for loai in ("sold", "purchase"):
+        thieu, lech, khop = [], [], 0
+        for k, ng in nguon[loai].items():
+            m = misa[loai].get(k)
+            if m is None:
+                thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
+                             "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
+                continue
+            d_ds = round(ng["ds"]) - round(m["ds"])
+            d_thue = round(ng["thue"]) - round(m["thue"])
+            if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
+                lech.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
+                            "doanh_so_nguon": round(ng["ds"]), "doanh_so_misa": round(m["ds"]),
+                            "thue_nguon": round(ng["thue"]), "thue_misa": round(m["thue"]),
+                            "chenh_lech": d_ds + d_thue})
+            else:
+                khop += 1
+        thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+        lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+        ket[ten_loai[loai]] = {"tong_hd_nguon": len(nguon[loai]), "khop": khop,
+                               "thieu": thieu, "lech": lech}
+
+    return {"ban_hang": ket["ban_hang"], "mua_hang": ket["mua_hang"], "doc_duoc": doc_duoc}
+
+
+@app.get("/api/misa-sql/doi-chieu-import/{cid}")
+def misa_sql_doi_chieu_import(cid: int, database: str = ""):
+    """Chạy RIÊNG bước 7 (đối chiếu tổng giá trị & VAT) — không cần chạy
+    lại toàn bộ Import tự động, dùng để kiểm tra lại bất cứ lúc nào."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_doi_chieu_import_toan_bo(cid, database)
 
 
 # Job chạy NỀN cho "Import tự động toàn bộ" — công ty nhiều dữ liệu (nhiều
