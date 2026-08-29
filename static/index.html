@@ -7545,7 +7545,37 @@ async function misaBuTruTim(loai){
         ${d.khong_ro.map(x=>`<div style="margin:6px 0;padding:6px 10px;background:#fde8e8;border:1px solid #f5b5b5;border-radius:6px;font-size:12px">
           <b>${misaEsc(x.ma)} — ${misaEsc(x.ten)}</b>: TT ngày ${misaEsc(x.ngay_thanh_toan)}, ${x.so_tien.toLocaleString('vi-VN')}đ — ${misaEsc(x.loai_vuong)}${x.ung_vien?': '+x.ung_vien.map(u=>`HĐ ${misaEsc(u.inv_no)} (${u.so_tien.toLocaleString('vi-VN')}đ)`).join(', '):''}
         </div>`).join('')||'<div style="color:#999;font-size:12.5px">Không có</div>'}</details>`;
-    kq.innerHTML=out+'<div id="misaBuTruTang3"></div>';
+    kq.innerHTML=out+'<div id="misaBuTru2Lan"></div><div id="misaBuTruTang3"></div>';
+    misaBuTru2LanHienTai=d.thu_2_lan||[];
+    const t2l=document.getElementById('misaBuTru2Lan');
+    if(misaBuTru2LanHienTai.length){
+      const rows2l=misaBuTru2LanHienTai.map((it,i)=>`
+        <tr>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><input type="checkbox" class="buTru2LanChk" data-i="${i}" checked></td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ma)}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.dieu_chinh_ngay||'')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.thanh_toan_that_ngay||'')}</td>
+        </tr>`).join('');
+      t2l.innerHTML=`
+        <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
+          ⚠ Phát hiện <b>${misaBuTru2LanHienTai.length}</b> hóa đơn bị tính THU/CHI 2 LẦN: đã có bút toán "Điều chỉnh công nợ treo" (coi như thu/chi tiền mặt) TRƯỚC ĐÓ, nhưng sau đó lại có 1 khoản chuyển khoản ngân hàng THẬT trùng khớp không khớp được hóa đơn nào — nhiều khả năng bút toán điều chỉnh cũ đã ghi SAI (ghi vội khi hóa đơn chưa thật sự được trả). Bấm "Tự động đảo bút toán" để tạo bút toán NGƯỢC (không xóa bút toán cũ, giữ dấu vết), đưa công nợ về đúng số dư.
+        </div>
+        <div style="max-height:26vh;overflow:auto">
+        <table style="border-collapse:collapse;font-size:12.5px;width:100%">
+          <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
+            <th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
+            <th style="padding:5px 8px;border:1px solid #eee">Số HĐ</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
+            <th style="padding:5px 8px;border:1px solid #eee">Ngày điều chỉnh (cũ)</th><th style="padding:5px 8px;border:1px solid #eee">Ngày CK thật (mới)</th></tr>${rows2l}
+        </table></div>
+        <div style="margin-top:10px;text-align:right">
+          <button class="btn sm" style="background:#b91c1c" onclick="misaBuTruDao2Lan('${loai}')">↩ Tự động đảo bút toán (sửa công nợ)</button>
+        </div>`;
+    }else{
+      t2l.innerHTML='';
+    }
     misaBuTruDsHienTai=d.tang3;
     const t3=document.getElementById('misaBuTruTang3');
     if(!misaBuTruDsHienTai.length){
@@ -7601,8 +7631,21 @@ async function misaBuTruDonPhieuLoi(loai){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 let misaBuTruDsXacNhan=[];
+let misaBuTru2LanHienTai=[];
 function misaBuTruDsChon(){
   return [...document.querySelectorAll('.buTruChk:checked')].map(c=>misaBuTruDsHienTai[+c.dataset.i]);
+}
+async function misaBuTruDao2Lan(loai){
+  const ds=[...document.querySelectorAll('.buTru2LanChk:checked')].map(c=>misaBuTru2LanHienTai[+c.dataset.i]);
+  if(!ds.length){toast('Chưa chọn dòng nào','err');return}
+  if(!confirm(`Tạo bút toán ĐẢO cho ${ds.length} hóa đơn (không xóa bút toán cũ, chỉ tạo thêm bút toán ngược để đưa công nợ về đúng số dư)?`))return;
+  toast('Đang tạo bút toán đảo...','');
+  try{
+    const d=await api(`/api/misa-sql/dao-dieu-chinh-cong-no/${current}?loai=${loai}&preview=0`,
+      {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
+    toast(`✓ Đã tạo ${d.so_dong} bút toán đảo — công nợ sẽ về đúng số dư, chạy lại đối chiếu để kiểm tra.`,'ok');
+    misaBuTruTim(loai);
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaBuTruXemTruoc(loai){
   const ds=misaBuTruDsChon();
