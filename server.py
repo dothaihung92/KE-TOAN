@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.061"
+APP_BUILD = "2026-08-27.062"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22506,6 +22506,176 @@ def misa_sql_doi_chieu_so_du_nh(body: dict = Body(...)):
     return _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay,
                                     body.get("so_du_ky_vong"), tu_ngay=tu_ngay,
                                     giao_dich_pm=giao_dich_pm)
+
+
+@app.get("/api/misa-sql/tim-doi-tuong/{cid}")
+def misa_sql_tim_doi_tuong(cid: int, q: str = "", database: str = ""):
+    """Tìm nhanh Khách hàng/NCC trong Danh mục Đối tượng MISA theo MST/Mã/
+    Tên (LIKE, không phân biệt hoa/thường) — dùng cho ô tự tìm khi sửa lại
+    đối tượng của 1 giao dịch bị gắn nhầm (xem _misa_sua_doi_tuong_giao_dich).
+    CHỈ ĐỌC."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"ket_qua": []}
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        like = "%%%s%%" % q
+        rows = cur.execute(
+            "SELECT TOP 20 AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectName,''), "
+            "ISNULL(CompanyTaxCode,'') FROM AccountObject WHERE AccountObjectCode LIKE ? OR "
+            "AccountObjectName LIKE ? OR CompanyTaxCode LIKE ?", (like, like, like)).fetchall()
+        return {"ket_qua": [{"id": str(r[0]), "ma": r[1], "ten": r[2], "mst": r[3]} for r in rows]}
+    finally:
+        conn.close()
+
+
+def _misa_sua_doi_tuong_giao_dich(cid, database, loai, ref_id, account_object_id_moi, preview=True):
+    """Sửa lại ĐÚNG đối tượng (KH/NCC) của 1 giao dịch UNT/UNC (BADeposit/
+    BAWithDraw) ĐÃ CÓ SẴN trong MISA — vd 1 khoản chuyển khoản bị gắn nhầm
+    mã KH/NCC (xem 'nghi_sai_doi_tuong'/'goi_y_chuyen' của
+    _misa_doi_chieu_3_tang). Cập nhật TRỰC TIẾP AccountObjectID (+ tên/mã
+    đối tượng ở các cột lưu trùng lặp/denormalize) trên TẤT CẢ bảng THẬT SỰ
+    lưu thông tin đối tượng của 1 giao dịch UNT/UNC — ĐÃ XÁC NHẬN đủ 5 bảng
+    qua chính code ghi UNT/UNC (_misa_ghi_thu_chi, đã qua nhiều đợt chẩn
+    đoán thật với dữ liệu khách hàng): BADeposit/BAWithDraw (master),
+    BADepositDetail/BAWithDrawDetail (detail), GeneralLedger (CHỈ dòng
+    131/331, KHÔNG đụng dòng 1121 ngân hàng của CÙNG chứng từ),
+    AccountObjectLedger (sổ chi tiết công nợ theo đối tượng),
+    BADepositWithdrawList (bảng nguồn LƯỚI 'Ngân hàng > Thu, chi tiền' mà
+    MISA thực sự hiển thị, KHÔNG đọc thẳng BADeposit/BAWithDraw). Sửa THIẾU
+    dù chỉ 1 trong 5 bảng này sẽ khiến các màn MISA hiện SAI/KHÔNG NHẤT
+    QUÁN với nhau — đúng bài học rút ra nhiều lần trong suốt session này:
+    MISA denormalize dữ liệu ra nhiều bảng riêng cho từng màn hình, sửa
+    thiếu 1 bảng là KHÔNG đủ.
+
+    Từng bảng chỉ sửa NẾU thật sự có cột AccountObjectID (dùng
+    _misa_chon_cot dò cột thật, không đoán tên cố định) — bảng nào không có
+    (khác phiên bản MISA) thì tự bỏ qua bảng đó, không báo lỗi cả lượt.
+
+    preview=True: chỉ tính toán (rollback), trả về số bảng SẼ sửa + tên/mã
+    đối tượng mới để người dùng tự xác nhận trước khi ghi thật."""
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        if loai not in ("kh", "ncc"):
+            raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
+        if not ref_id:
+            raise HTTPException(400, "Thiếu ref_id của giao dịch cần sửa.")
+        master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "kh" else ("BAWithDraw", "BAWithDrawDetail")
+        tk_hach = "131" if loai == "kh" else "331"
+
+        row = cur.execute(
+            "SELECT ISNULL(AccountObjectCode,''), ISNULL(AccountObjectName,'') FROM AccountObject "
+            "WHERE AccountObjectID=?", account_object_id_moi).fetchone()
+        if not row:
+            raise HTTPException(400, "Không tìm thấy đối tượng mới trong Danh mục Đối tượng MISA.")
+        ma_moi, ten_moi = row
+
+        so_bang_sua = 0
+
+        cols_m = _misa_cot_bang_that(cur, master_tbl)
+        col_m_aid = _misa_chon_cot(cols_m, "AccountObjectID")
+        if col_m_aid:
+            col_m_aname = _misa_chon_cot(cols_m, "AccountObjectName")
+            sets, vals = ["[%s]=?" % col_m_aid], [account_object_id_moi]
+            if col_m_aname:
+                sets.append("[%s]=?" % col_m_aname); vals.append(ten_moi)
+            vals.append(ref_id)
+            if not preview:
+                cur.execute("UPDATE %s SET %s WHERE RefID=?" % (master_tbl, ",".join(sets)), vals)
+            so_bang_sua += 1
+
+        cols_d = _misa_cot_bang_that(cur, detail_tbl)
+        col_d_aid = _misa_chon_cot(cols_d, "AccountObjectID")
+        if col_d_aid:
+            if not preview:
+                cur.execute("UPDATE %s SET [%s]=? WHERE RefID=?" % (detail_tbl, col_d_aid),
+                           (account_object_id_moi, ref_id))
+            so_bang_sua += 1
+
+        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+        col_gl_aid = _misa_chon_cot(cols_gl, "AccountObjectID")
+        if col_gl_aid:
+            sets, vals = ["[%s]=?" % col_gl_aid], [account_object_id_moi]
+            for cand, v in (("AccountObjectName", ten_moi), ("AccountObjectNameDI", ten_moi),
+                            ("AccountObjectCode", ma_moi)):
+                c = _misa_chon_cot(cols_gl, cand)
+                if c:
+                    sets.append("[%s]=?" % c); vals.append(v)
+            vals.extend([ref_id, tk_hach + "%", tk_hach + "%"])
+            if not preview:
+                cur.execute(
+                    "UPDATE GeneralLedger SET %s WHERE RefID=? AND "
+                    "(DebitAccount LIKE ? OR CreditAccount LIKE ?)" % ",".join(sets), vals)
+            so_bang_sua += 1
+
+        cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
+        col_aol_aid = _misa_chon_cot(cols_aol, "AccountObjectID")
+        if col_aol_aid:
+            sets, vals = ["[%s]=?" % col_aol_aid], [account_object_id_moi]
+            for cand, v in (("AccountObjectName", ten_moi), ("AccountObjectNameDI", ten_moi),
+                            ("AccountObjectCode", ma_moi)):
+                c = _misa_chon_cot(cols_aol, cand)
+                if c:
+                    sets.append("[%s]=?" % c); vals.append(v)
+            vals.append(ref_id)
+            if not preview:
+                cur.execute("UPDATE AccountObjectLedger SET %s WHERE RefID=?" % ",".join(sets), vals)
+            so_bang_sua += 1
+
+        cols_bdwl = _misa_cot_bang_that(cur, "BADepositWithdrawList")
+        col_b_aid = _misa_chon_cot(cols_bdwl, "AccountObjectID")
+        if col_b_aid:
+            col_b_aname = _misa_chon_cot(cols_bdwl, "AccountObjectName")
+            sets, vals = ["[%s]=?" % col_b_aid], [account_object_id_moi]
+            if col_b_aname:
+                sets.append("[%s]=?" % col_b_aname); vals.append(ten_moi)
+            vals.append(ref_id)
+            if not preview:
+                cur.execute("UPDATE BADepositWithdrawList SET %s WHERE RefID=?" % ",".join(sets), vals)
+            so_bang_sua += 1
+
+        if so_bang_sua == 0:
+            raise HTTPException(
+                400, "Không tìm thấy bảng nào có cột AccountObjectID để sửa — CSDL MISA đang kết nối "
+                     "có thể khác cấu trúc chuẩn.")
+
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_bang_sua": so_bang_sua,
+                "ma_moi": ma_moi, "ten_moi": ten_moi}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, f"Lỗi sửa đối tượng giao dịch: {e}")
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/sua-doi-tuong-giao-dich/{cid}")
+async def misa_sua_doi_tuong_giao_dich(cid: int, request: Request, preview: int = 1):
+    body = await request.json()
+    loai = body.get("loai")
+    ref_id = body.get("ref_id")
+    account_object_id_moi = body.get("account_object_id_moi")
+    if not (loai and ref_id and account_object_id_moi):
+        raise HTTPException(400, "Thiếu loai/ref_id/account_object_id_moi.")
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_sua_doi_tuong_giao_dich(cid, database, loai, ref_id, account_object_id_moi,
+                                        preview=bool(preview))
 
 
 def _misa_danh_sach_mst_doi_tuong(cid, database):

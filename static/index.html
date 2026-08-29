@@ -7359,13 +7359,18 @@ function misaModalFull(){
 }
 // Chi tiết 1 giao dịch thanh toán chưa khớp hóa đơn nào — gom đủ tên
 // trường có thể có tùy bảng nguồn (nghi_sai_doi_tuong dùng ma/ten/ngay/
-// so_ct; goi_y_chuyen dùng tu_ma/tu_ten/tt_ngay/tt_so_ct; thu_2_lan dùng
-// ma/ten/thanh_toan_that_ngay/thanh_toan_that_so_ct) — không mở thẳng
-// được MISA (không có cách điều khiển app desktop từ xa), chỉ đưa đủ
-// thông tin (đặc biệt Số chứng từ) để người dùng tự tìm bằng chức năng
-// Tìm kiếm của MISA rồi tự sửa.
-function misaGdXem(it){
+// so_ct/ref_id; goi_y_chuyen dùng tu_ma/tu_ten/tt_ngay/tt_so_ct/tt_ref_id;
+// thu_2_lan dùng ma/ten/thanh_toan_that_ngay/thanh_toan_that_so_ct/
+// thanh_toan_that_ref_id) — kèm Ô TỰ TÌM + SỬA LẠI đúng đối tượng, ghi
+// THẲNG vào MISA (xem _misa_sua_doi_tuong_giao_dich) — không mở thẳng được
+// MISA (không có cách điều khiển app desktop từ xa) nhưng sửa được ngay
+// tại đây, khỏi cần mở tay trong MISA nữa.
+let misaGdLoai=null, misaGdRefId=null, misaGdChon=null, misaGdTimTimer=null;
+function misaGdXem(it, loai){
   if(!it)return;
+  misaGdLoai=loai;
+  misaGdRefId=it.ref_id||it.tt_ref_id||it.thanh_toan_that_ref_id||null;
+  misaGdChon=null;
   const rows=[
     ['Mã đối tượng đang gắn', it.ma||it.tu_ma||''],
     ['Tên', it.ten||it.tu_ten||''],
@@ -7375,16 +7380,67 @@ function misaGdXem(it){
     ['Nội dung chuyển khoản', it.mo_ta||'(trống)'],
   ];
   document.getElementById('misaGdBody').innerHTML=`
-    <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin-bottom:10px">
-      Phần mềm không thể mở thẳng MISA — hãy dùng chức năng Tìm kiếm trong MISA (màn "Ngân hàng &gt; Thu, chi tiền"), gõ đúng <b>Số chứng từ</b> bên dưới để mở và tự sửa lại đối tượng cho đúng.
-    </div>
-    <table style="width:100%;border-collapse:collapse">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
       ${rows.map(([k,v])=>`<tr><td style="padding:4px 8px;color:var(--muted);white-space:nowrap;vertical-align:top">${misaEsc(k)}</td><td style="padding:4px 8px;font-weight:600;word-break:break-all">${misaEsc(String(v))}</td></tr>`).join('')}
-    </table>`;
+    </table>
+    ${misaGdRefId?`
+    <div style="border-top:1px solid #eee;padding-top:10px">
+      <label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Sửa lại ĐÚNG đối tượng (gõ mã/tên/MST để tìm) — ghi thẳng vào MISA</label>
+      <input id="misaGdTimO" type="text" placeholder="Gõ ít nhất 2 ký tự..." style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:6px" oninput="misaGdTimGoi()">
+      <div id="misaGdKetQua" style="max-height:22vh;overflow:auto;border:1px solid #eee;border-radius:6px;margin-top:6px;display:none"></div>
+      <div id="misaGdDaChon" style="margin-top:8px"></div>
+      <div style="margin-top:10px;text-align:right">
+        <button id="misaGdBtnLuu" class="btn sm" style="background:#b91c1c" disabled onclick="misaGdLuu()">💾 Lưu đối tượng mới vào MISA</button>
+      </div>
+    </div>`:`
+    <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00">
+      Không đọc được mã giao dịch (RefID) của khoản này — không thể sửa trực tiếp tại đây, hãy tự tìm theo Ngày + Số tiền trong MISA.
+    </div>`}`;
   document.getElementById('misaGdModal').style.display='flex';
 }
 function misaGdDong(){
   document.getElementById('misaGdModal').style.display='none';
+}
+function misaGdTimGoi(){
+  clearTimeout(misaGdTimTimer);
+  misaGdTimTimer=setTimeout(misaGdTim, 300);
+}
+async function misaGdTim(){
+  const q=(document.getElementById('misaGdTimO')||{}).value||'';
+  const kq=document.getElementById('misaGdKetQua');
+  if(!kq)return;
+  if(q.trim().length<2){kq.style.display='none';kq.innerHTML='';return}
+  try{
+    const d=await api(`/api/misa-sql/tim-doi-tuong/${current}?q=${encodeURIComponent(q.trim())}`);
+    const ds=d.ket_qua||[];
+    if(!ds.length){kq.style.display='block';kq.innerHTML=`<div style="padding:8px;color:#999;font-size:12.5px">Không tìm thấy</div>`;return}
+    kq.style.display='block';
+    kq.innerHTML=ds.map(o=>`<div onclick='misaGdChonDT(${JSON.stringify(o)})' style="padding:6px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f2f2f2" onmouseover="this.style.background='#f7f7f7'" onmouseout="this.style.background=''"><b>${misaEsc(o.ma)}</b> — ${misaEsc(o.ten)}${o.mst?' (MST '+misaEsc(o.mst)+')':''}</div>`).join('');
+  }catch(e){kq.style.display='block';kq.innerHTML=`<div style="padding:8px;color:#b91c1c;font-size:12.5px">Lỗi: ${misaEsc(e.message)}</div>`}
+}
+function misaGdChonDT(o){
+  misaGdChon=o;
+  document.getElementById('misaGdKetQua').style.display='none';
+  document.getElementById('misaGdTimO').value='';
+  document.getElementById('misaGdDaChon').innerHTML=`<div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:6px;padding:6px 10px;font-size:12.5px;color:#1a7a4a">✓ Sẽ gắn lại vào: <b>${misaEsc(o.ma)} — ${misaEsc(o.ten)}</b></div>`;
+  document.getElementById('misaGdBtnLuu').disabled=false;
+}
+async function misaGdLuu(){
+  if(!misaGdChon||!misaGdRefId||!misaGdLoai)return;
+  if(!confirm(`Ghi THẲNG vào MISA: gắn lại giao dịch này sang đối tượng "${misaGdChon.ma} — ${misaGdChon.ten}"?`))return;
+  const btn=document.getElementById('misaGdBtnLuu');
+  btn.disabled=true;btn.textContent='Đang lưu...';
+  try{
+    const d=await api(`/api/misa-sql/sua-doi-tuong-giao-dich/${current}?preview=0`,
+      {method:'POST', headers:{'Content-Type':'application/json'},
+       body:JSON.stringify({loai:misaGdLoai, ref_id:misaGdRefId, account_object_id_moi:misaGdChon.id})});
+    toast(`✓ Đã sửa lại đối tượng (${d.so_bang_sua} bảng) — chạy lại đối chiếu để kiểm tra.`,'ok');
+    misaGdDong();
+    if(typeof misaBuTruTim==='function')misaBuTruTim(misaGdLoai);
+  }catch(e){
+    toast('Lỗi: '+e.message,'err');
+    btn.disabled=false;btn.textContent='💾 Lưu đối tượng mới vào MISA';
+  }
 }
 // Esc trong misaModal: nếu đang ở màn có "lối về" (vd Chi tiết công nợ ->
 // Tổng hợp công nợ) thì Esc quay lại thay vì đóng hẳn cửa sổ.
@@ -7600,7 +7656,7 @@ async function misaBuTruTim(loai){
     const tns=document.getElementById('misaBuTruNghiSai');
     if(misaBuTruNghiSaiHienTai.length){
       const rowsns=misaBuTruNghiSaiHienTai.map((it,i)=>`
-        <tr onclick="misaGdXem(misaBuTruNghiSaiHienTai[${i}])" style="cursor:pointer" title="Bấm để xem chi tiết giao dịch">
+        <tr onclick="misaGdXem(misaBuTruNghiSaiHienTai[${i}],'${loai}')" style="cursor:pointer" title="Bấm để xem chi tiết giao dịch">
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ma)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ngay)}</td>
@@ -7633,7 +7689,7 @@ async function misaBuTruTim(loai){
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.tt_ngay||'')}</td>
-          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><button class="btn ghost sm" style="padding:2px 8px" onclick="misaGdXem(misaBuTruGoiYChuyenHienTai[${i}])">🔎 Xem</button></td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><button class="btn ghost sm" style="padding:2px 8px" onclick="misaGdXem(misaBuTruGoiYChuyenHienTai[${i}],'${loai}')">🔎 Xem</button></td>
         </tr>`).join('');
       tgy.innerHTML=`
         <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
@@ -7668,7 +7724,7 @@ async function misaBuTruTim(loai){
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.dieu_chinh_ngay||'')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.thanh_toan_that_ngay||'')}</td>
-          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><button class="btn ghost sm" style="padding:2px 8px" onclick="misaGdXem(misaBuTru2LanHienTai[${i}])">🔎 Xem</button></td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><button class="btn ghost sm" style="padding:2px 8px" onclick="misaGdXem(misaBuTru2LanHienTai[${i}],'${loai}')">🔎 Xem</button></td>
         </tr>`).join('');
       t2l.innerHTML=`
         <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
