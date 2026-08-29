@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.053"
+APP_BUILD = "2026-08-27.054"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23165,9 +23165,11 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
                    truoc_ngay=7):
     """Chạy Tầng 1 (khớp 1-1 chính xác) + Tầng 2 (khớp tổ hợp nhiều hóa đơn,
     kể cả hóa đơn KHÔNG liên tiếp — ví dụ HĐ 1;2;5 mà bỏ qua 3;4, vì khách/NCC
-    gộp nhiều hóa đơn để thanh toán 1 cục) — MUTATE cờ 'matched' trên từng hóa
-    đơn (hd)/khoản thanh toán (tt) ngay trong doi_tuong_hd/doi_tuong_tt, trả về
-    (tang1, tang2, khong_ro).
+    gộp nhiều hóa đơn để thanh toán 1 cục — VÀ CHIỀU NGƯỢC LẠI: 1 hóa đơn
+    được trả bằng nhiều khoản thanh toán riêng lẻ cộng lại, ví dụ 1 hóa đơn
+    18.900.000đ trả bằng 2 UNC 10.000.000đ + 8.900.000đ) — MUTATE cờ 'matched'
+    trên từng hóa đơn (hd)/khoản thanh toán (tt) ngay trong doi_tuong_hd/
+    doi_tuong_tt, trả về (tang1, tang2, khong_ro).
 
     Tầng 2 xử lý các khoản thanh toán THEO THỨ TỰ NGÀY (sớm nhất trước, đúng
     kiểu kế toán đối chiếu 'từ trên xuống, cộng dồn'), với 2 bước cho MỖI
@@ -23364,6 +23366,44 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
                 khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp DÒNG hóa đơn cùng khớp",
                                  "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
                                  "so_tien": round(tt["so_tien"])})
+
+        # Tầng 2c — CHIỀU NGƯỢC LẠI với Tầng 2 ở trên: 1 hóa đơn được trả
+        # bằng NHIỀU khoản thanh toán riêng lẻ cộng lại (không khoản nào
+        # khớp riêng lẻ, chỉ TỔNG mới đúng) — Tầng 2 ở trên chỉ xử lý chiều
+        # "nhiều hóa đơn -> 1 khoản thanh toán", không xử lý chiều này nên
+        # hóa đơn cứ báo "treo" mãi dù đã trả đủ. Xác nhận qua đối chiếu sổ
+        # cái 331 thật: 1 hóa đơn 18.900.000đ được trả bằng 2 UNC riêng biệt
+        # (10.000.000đ ngày X + 8.900.000đ ngày Y), không UNC nào khớp 1-1
+        # hay lọt vào tổ hợp Tầng 2 ở trên. Dùng lại đúng tim_to_hop (chỉ
+        # cần đối tượng có "so_tien", tt cũng có sẵn) nhưng đảo vai trò: tìm
+        # tổ hợp THANH TOÁN khớp 1 hóa đơn thay vì tổ hợp hóa đơn khớp 1
+        # thanh toán.
+        for hd in hds:
+            if hd["matched"] or hd["phan_dung"]:
+                continue
+            ung_vien_tt2 = [tt for tt in tts if not tt["matched"] and trong_cua_so(hd, tt)]
+            to_hop_tt2 = []
+            if 2 <= len(ung_vien_tt2) <= 20:
+                to_hop_tt2 = tim_to_hop(ung_vien_tt2, hd["so_tien"], 1)
+                if not to_hop_tt2 and dung_sai > 1:
+                    to_hop_tt2 = tim_to_hop(ung_vien_tt2, hd["so_tien"], dung_sai)
+            if len(to_hop_tt2) == 1:
+                combo_tt = sorted(to_hop_tt2[0], key=lambda t: t["date"] or ngay_xa)
+                for tt in combo_tt:
+                    tt["matched"] = True
+                danh_dau_ca_hoa_don(hd)
+                tong_tt = sum(t["so_tien"] for t in combo_tt)
+                lech = round(tong_tt - hd["so_tien"])
+                tang2.append({"ma": ma, "ten": ten,
+                              "ngay_thanh_toan": " + ".join(_misa_ngay_str(t["date"]) for t in combo_tt),
+                              "so_tien": round(tong_tt), "lech": lech,
+                              "hoa_don": [{"inv_no": hd["inv_no"], "inv_date": _misa_ngay_str(hd["inv_date"]),
+                                          "so_tien": round(hd["so_tien"])}]})
+            elif len(to_hop_tt2) > 1:
+                khong_ro.append({"ma": ma, "ten": ten,
+                                 "loai_vuong": "Nhiều tổ hợp thanh toán cùng khớp 1 hóa đơn (HĐ %s)" % hd["inv_no"],
+                                 "ngay_thanh_toan": _misa_ngay_str(hd["inv_date"]),
+                                 "so_tien": round(hd["so_tien"])})
 
         # Tầng 2b — Tạm ứng/Ứng trước: 1 (hoặc nhiều) khoản thanh toán đến
         # TRƯỚC mà Tầng 1/2 không khớp được hóa đơn/tổ hợp nào gần đó, rồi
