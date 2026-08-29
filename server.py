@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.052"
+APP_BUILD = "2026-08-27.053"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23125,6 +23125,42 @@ def _misa_doi_tuong_thanh_toan(cur, loai, account_object_id=None):
     return doi_tuong
 
 
+def _misa_doi_tuong_dieu_chinh_tien_mat(cur, tk_prefix, loai, account_object_id=None):
+    """Các khoản GIẢM công nợ KHÔNG qua ngân hàng — TK đối ứng 111x (tiền
+    mặt) — đọc TRỰC TIẾP từ AccountObjectLedger (sổ cái đối tượng, ghi MỌI
+    chứng từ chạm TK 131/331 bất kể module nào, không riêng gì BADeposit/
+    BAWithDraw). Bao gồm cả bút toán 'Điều chỉnh công nợ treo' mà CHÍNH công
+    cụ này xuất Excel cho người dùng Import (xem _xuat_excel_dieu_chinh_cong_no
+    — Nợ 331/Có 1111 cho NCC, Nợ 1111/Có 131 cho KH) — và mọi khoản thu/chi
+    tiền mặt khác người dùng tự ghi tay (kể cả trường hợp trả bằng chuyển
+    khoản CÁ NHÂN ngoài tài khoản công ty, được kế toán hạch toán tay qua
+    TK 1111 coi như tiền mặt).
+
+    BÀI HỌC rút ra từ báo cáo thật của người dùng: hóa đơn ĐÃ được điều
+    chỉnh xong (đã Import Excel vào MISA, có bút toán DCCN.../Txx/2025 hẳn
+    hoi trong sổ cái 331) vẫn cứ hiện lại ở Tầng 3 mỗi lần chạy lại đối
+    chiếu — vì _misa_doi_tuong_thanh_toan CHỈ đọc bảng BAWithDraw/BADeposit
+    (thanh toán NGÂN HÀNG thật), hoàn toàn không nhìn thấy bút toán tiền mặt
+    này. Lọc CorrespondingAccountNumber bắt đầu '111' (tiền mặt) để PHÂN
+    BIỆT với '112' (tiền gửi ngân hàng — đã lấy riêng qua BAWithDraw/
+    BADeposit ở trên) — tránh đếm trùng 1 khoản thanh toán ngân hàng 2 lần
+    (ngân hàng ghi sổ vẫn có dòng AccountObjectLedger riêng của nó)."""
+    phat_sinh_col = "CreditAmount" if loai == "kh" else "DebitAmount"
+    sql = ("SELECT AccountObjectID, RefDate, %s, RefID FROM AccountObjectLedger "
+          "WHERE AccountNumber LIKE ? AND AccountObjectID IS NOT NULL AND %s > 0 "
+          "AND ISNULL(CorrespondingAccountNumber,'') LIKE '111%%'" % (phat_sinh_col, phat_sinh_col))
+    params = [tk_prefix + "%"]
+    if account_object_id:
+        sql += " AND AccountObjectID = ?"
+        params.append(account_object_id)
+    rows = cur.execute(sql, params).fetchall()
+    doi_tuong = {}
+    for aoid, refdate, tien, refid in rows:
+        doi_tuong.setdefault(str(aoid), []).append(
+            {"ref_id": str(refid), "date": refdate, "so_tien": float(tien or 0)})
+    return doi_tuong
+
+
 def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dung_sai=20_000,
                    truoc_ngay=7):
     """Chạy Tầng 1 (khớp 1-1 chính xác) + Tầng 2 (khớp tổ hợp nhiều hóa đơn,
@@ -23404,9 +23440,11 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     xác nhận khi có ĐÚNG 1 tổ hợp khớp; nhiều tổ hợp cùng khớp -> 'không rõ'.
 
     Tầng 3 — hóa đơn còn lại (không khớp được ở tầng 1/2 với bất kỳ khoản
-    thanh toán ngân hàng nào), giá trị < nguong -> coi là hóa đơn tiền mặt
-    bị lỡ ghi công nợ, đưa ra để xuất Excel điều chỉnh (Nợ/Có 1111 đối ứng
-    131/331)."""
+    thanh toán ngân hàng NÀO, kể cả các khoản 'điều chỉnh tiền mặt' —
+    _misa_doi_tuong_dieu_chinh_tien_mat — đã gộp CHUNG vào Tầng 1/2 ở trên,
+    nên hóa đơn ĐÃ được Import Excel điều chỉnh xong sẽ không còn lặp lại ở
+    đây nữa), giá trị < nguong -> coi là hóa đơn tiền mặt bị lỡ ghi công nợ,
+    đưa ra để xuất Excel điều chỉnh (Nợ/Có 1111 đối ứng 131/331)."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     tk_prefix = "131" if loai == "kh" else "331"
@@ -23415,6 +23453,9 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         cur = conn.cursor()
         doi_tuong_hd = _misa_doi_tuong_hoa_don(cur, tk_prefix, loai)
         doi_tuong_tt = _misa_doi_tuong_thanh_toan(cur, loai)
+        doi_tuong_dc = _misa_doi_tuong_dieu_chinh_tien_mat(cur, tk_prefix, loai)
+        for aoid, ds in doi_tuong_dc.items():
+            doi_tuong_tt.setdefault(aoid, []).extend(ds)
     finally:
         conn.close()
 
@@ -23517,6 +23558,10 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
             "ORDER BY RefDate, RefID, PostedDate", account_object_id, tk_prefix + "%").fetchall()
         doi_tuong_hd = _misa_doi_tuong_hoa_don(cur, tk_prefix, loai, account_object_id=account_object_id)
         doi_tuong_tt = _misa_doi_tuong_thanh_toan(cur, loai, account_object_id=account_object_id)
+        doi_tuong_dc = _misa_doi_tuong_dieu_chinh_tien_mat(cur, tk_prefix, loai,
+                                                           account_object_id=account_object_id)
+        for aoid, ds in doi_tuong_dc.items():
+            doi_tuong_tt.setdefault(aoid, []).extend(ds)
     finally:
         conn.close()
 
