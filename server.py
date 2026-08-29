@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.054"
+APP_BUILD = "2026-08-27.055"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24058,7 +24058,7 @@ _GLVOUCHER_HEADERS = [
 ]
 
 
-def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach):
+def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None):
     """Xuất file Excel đúng mẫu 'Chứng từ nghiệp vụ khác' của MISA — mỗi
     dòng trong danh_sach (lấy từ tang3 của /api/misa-sql/doi-chieu-3-tang,
     người dùng có thể bỏ bớt) thành 1 bút toán điều chỉnh công nợ về 0: loai='ncc' -> Nợ
@@ -24066,10 +24066,41 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach):
     cột 'Đối tượng Nợ'; loai='kh' -> Nợ 1111/Có 131 (coi như đã thu tiền
     mặt), đối tượng gán ở cột 'Đối tượng Có' — đúng TK có gắn đối tượng
     trong từng bút toán. Ngày chứng từ/hạch toán lấy theo ĐÚNG ngày hóa đơn
-    gốc (không phải hôm nay) để bút toán nằm đúng kỳ phát sinh công nợ."""
+    gốc (không phải hôm nay) để bút toán nằm đúng kỳ phát sinh công nợ.
+
+    Số chứng từ dùng TIỀN TỐ RIÊNG theo loai — 'DCTR' (Điều Chỉnh phải TRả —
+    công nợ đầu VÀO/NCC) và 'DCTH' (Điều Chỉnh phải THu — công nợ đầu RA/KH)
+    — để 2 chiều KHÔNG BAO GIỜ trùng số chứng từ với nhau (trước đây cả 2
+    dùng chung tiền tố 'DCCN' + đếm lại từ 1 mỗi lần xuất). Nếu có
+    database (kết nối MISA thật), còn tự dò số chứng từ ĐANG DÙNG CAO NHẤT
+    trong CHÍNH MISA (bảng GLVoucher.RefNoFinance — đã xác nhận đúng cột này
+    ở tính năng 'Khấu trừ thuế GTGT' cùng dùng chung bảng GLVoucher, xem
+    max_so_nvk phía trên) rồi đánh số TIẾP NỐI, không đếm lại từ 1 — tránh
+    đúng lỗi 'Số chứng từ đã tồn tại' khi người dùng xuất/Import nhiều đợt
+    khác nhau (mỗi đợt trước đây đều tự đếm lại từ 1, dễ trùng số của đợt
+    trước đã Import xong)."""
+    import re
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
+    prefix = "DCTR" if loai == "ncc" else "DCTH"
+    seq = {}
+    if database:
+        try:
+            conn = _misa_sql_connect(cid, database=database)
+            try:
+                cur = conn.cursor()
+                for (rf,) in cur.execute(
+                        "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?",
+                        prefix + "%").fetchall():
+                    m = re.match(r"^%s(\d+)/T(\d+)/(\d+)$" % re.escape(prefix), str(rf or "").strip())
+                    if m:
+                        mk = (int(m.group(2)), int(m.group(3)))
+                        seq[mk] = max(seq.get(mk, 0), int(m.group(1)))
+            finally:
+                conn.close()
+        except Exception:
+            pass   # không kết nối được MISA -> vẫn xuất Excel bình thường, đánh số từ 1
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Chứng từ nghiệp vụ khác"
@@ -24078,7 +24109,6 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach):
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
         ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
     tk_no, tk_co = ("331", "1111") if loai == "ncc" else ("1111", "131")
-    seq = {}
     r = 2
     for it in danh_sach:
         so_tien = _to_num(it.get("so_tien")) or 0
@@ -24093,7 +24123,7 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach):
             ngay_dt = datetime.datetime.now()
         mk = (ngay_dt.month, ngay_dt.year)
         seq[mk] = seq.get(mk, 0) + 1
-        so_ct = ("DCCN%03d/T%s/%s" % (seq[mk], ngay_dt.month, ngay_dt.year))[:20]
+        so_ct = ("%s%03d/T%s/%s" % (prefix, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
         dien_giai = ("Điều chỉnh công nợ treo HĐ %s - %s" % (inv_no, ten)).strip(" -")
         row = [""] * len(_GLVOUCHER_HEADERS)
         row[1] = ngay_dt.strftime("%d/%m/%Y")
@@ -24141,7 +24171,8 @@ async def misa_xuat_dieu_chinh_cong_no(cid: int, request: Request, loai: str = "
     danh_sach = body.get("danh_sach") or []
     if not danh_sach:
         raise HTTPException(400, "Danh sách trống — không có gì để xuất.")
-    path, so_dong = _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach)
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    path, so_dong = _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=database or None)
     fname = os.path.basename(path)
     return _resp_xuat(path, fname, {"X-So-Dong": str(so_dong)})
 
