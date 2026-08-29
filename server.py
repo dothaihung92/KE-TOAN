@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.063"
+APP_BUILD = "2026-08-27.064"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23890,13 +23890,35 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
             if not hd["matched"] and not hd["phan_dung"]:
                 tat_ca_hd_treo.append((aoid, d["ma"], d["ten"], hd))
 
+    # Cửa sổ ngày dùng để gợi ý "hóa đơn gần" cho mục nghi_sai_doi_tuong —
+    # ĐÚNG cùng công thức trong_cua_so của _misa_khop_1_2 (không truy cập
+    # trực tiếp được vì đó là closure nội bộ) — chỉ để HIỂN THỊ tham khảo
+    # cho người dùng tự so sánh, KHÔNG dùng để tự động khớp/sửa gì.
+    cua_so_hien_thi = datetime.timedelta(days=30 * int(cua_so_thang))
+    dem_truoc_hien_thi = datetime.timedelta(days=max(0, int(truoc_ngay or 0)))
+
     for aoid, ma, ten, tt in tat_ca_mo_coi:
         mo_ta = (tt.get("mo_ta") or "").strip()
         if mo_ta and not _misa_ten_khop_mo_ta(ten, mo_ta):
+            # Hóa đơn CÒN TREO của CHÍNH đối tượng đang gắn, gần ngày khoản
+            # thanh toán này (cùng cửa sổ ngày đang dùng cho khớp Tầng 1) —
+            # cho người dùng thấy NGAY số tiền/ngày hóa đơn + chênh lệch so
+            # với khoản thanh toán, để tự phán đoán có thật sự gắn nhầm hay
+            # chỉ là chưa khớp được vì lệch chút ít (phí NH, làm tròn...).
+            hd_gan = sorted(
+                [hd for hd in doi_tuong_hd.get(aoid, {}).get("hoa_don", [])
+                 if not hd["matched"] and hd["inv_date"]
+                 and (hd["inv_date"] - dem_truoc_hien_thi) <= tt["date"] <= (hd["inv_date"] + cua_so_hien_thi)],
+                key=lambda h: h["inv_date"])
+            tong_tien_hd = sum(h["so_tien"] for h in hd_gan)
             nghi_sai_doi_tuong.append({
                 "ma": ma, "ten": ten, "account_object_id": aoid, "ref_id": str(tt["ref_id"]),
                 "ngay": _misa_ngay_str(tt["date"]), "so_tien": round(tt["so_tien"]), "mo_ta": mo_ta,
                 "so_ct": (tt.get("so_ct") or "").strip(),
+                "hoa_don_gan": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
+                                "so_tien": round(h["so_tien"])} for h in hd_gan],
+                "tong_tien_hd": round(tong_tien_hd),
+                "chenh_lech": round(tt["so_tien"] - tong_tien_hd) if hd_gan else None,
             })
 
         ung_vien_b = [(aoid2, ma2, ten2, hd2) for aoid2, ma2, ten2, hd2 in tat_ca_hd_treo

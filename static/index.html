@@ -7655,24 +7655,37 @@ async function misaBuTruTim(loai){
     misaBuTruNghiSaiHienTai=d.nghi_sai_doi_tuong||[];
     const tns=document.getElementById('misaBuTruNghiSai');
     if(misaBuTruNghiSaiHienTai.length){
-      const rowsns=misaBuTruNghiSaiHienTai.map((it,i)=>`
+      const rowsns=misaBuTruNghiSaiHienTai.map((it,i)=>{
+        const hdGan=it.hoa_don_gan||[];
+        const hdText=hdGan.length?hdGan.map(h=>`HĐ ${misaEsc(h.inv_no)} (${misaEsc(h.inv_date)}): ${h.so_tien.toLocaleString('vi-VN')}đ`).join('; ')
+          :'<span style="color:#999">(không có HĐ nào gần ngày này)</span>';
+        const chenh=it.chenh_lech;
+        const chenhText=(chenh===null||chenh===undefined)?'—':`${chenh>0?'+':''}${chenh.toLocaleString('vi-VN')}`;
+        const chenhColor=(chenh===null||chenh===undefined)?'#999':(Math.abs(chenh)<=20000?'#1a7a4a':'#b91c1c');
+        return `
         <tr onclick="misaGdXem(misaBuTruNghiSaiHienTai[${i}],'${loai}')" style="cursor:pointer" title="Bấm để xem chi tiết giao dịch">
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ma)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ngay)}</td>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mo_ta)}</td>
-        </tr>`).join('');
+          <td style="padding:5px 8px;border:1px solid #eee">${hdText}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.tong_tien_hd?it.tong_tien_hd.toLocaleString('vi-VN'):'—'}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:right;color:${chenhColor};font-weight:600">${chenhText}</td>
+        </tr>`;}).join('');
       tns.innerHTML=`
         <details style="margin-bottom:8px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#8a5d00">🔎 Nghi ngờ gắn nhầm đối tượng — nội dung CK không khớp tên (${misaBuTruNghiSaiHienTai.length}) — bấm 1 dòng để xem chi tiết giao dịch</summary>
           <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin:6px 0">
-            Khoản thanh toán CHƯA khớp hóa đơn nào, nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai).
+            Khoản thanh toán CHƯA khớp hóa đơn nào, nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai). Cột "Hóa đơn gần"/"Tổng tiền HĐ"/"Chênh lệch" liệt kê hóa đơn CÒN TREO của CHÍNH đối tượng đang gắn, gần ngày khoản thanh toán này (chỉ để bạn tham khảo so sánh, KHÔNG dùng để tự khớp).
           </div>
           <div style="max-height:22vh;overflow:auto">
           <table style="border-collapse:collapse;font-size:12px;width:100%">
             <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
               <th style="padding:5px 8px;border:1px solid #eee">Ngày</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
-              <th style="padding:5px 8px;border:1px solid #eee">Nội dung CK</th></tr>${rowsns}
+              <th style="padding:5px 8px;border:1px solid #eee">Nội dung CK</th>
+              <th style="padding:5px 8px;border:1px solid #eee">Hóa đơn gần (còn treo)</th>
+              <th style="padding:5px 8px;border:1px solid #eee">Tổng tiền HĐ</th>
+              <th style="padding:5px 8px;border:1px solid #eee">Chênh lệch</th></tr>${rowsns}
           </table></div>
         </details>`;
     }else{
