@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.055"
+APP_BUILD = "2026-08-27.056"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23268,142 +23268,182 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
         for tt in tts:
             tt["matched"] = False
 
-        # Tầng 1 — khớp 1-1 chính xác
-        for tt in tts:
-            ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)
-                       and abs(hd["so_tien"] - tt["so_tien"]) <= 1]
-            if len(ung_vien) > 1:
-                # Nhiều hóa đơn TRÙNG giá trị lọt vào cùng lúc — thường vì ô
-                # "cho thanh toán TRƯỚC ngày HĐ" (mặc định 7 ngày) nới cho cả
-                # hóa đơn xuất SAU ngày thanh toán lọt vào làm ứng viên. Về
-                # bản chất kế toán, 1 khoản thanh toán thật hầu như luôn trả
-                # cho hóa đơn ĐÃ TỒN TẠI (ngày HĐ <= ngày TT) — hóa đơn xuất
-                # SAU ngày thanh toán chỉ lọt vào nhờ độ nới đó, không phải vì
-                # thật sự được trả bằng khoản này. Xác nhận qua đối chiếu sổ
-                # cái 331 thật của khách hàng: 1 khoản chuyển khoản ngân hàng
-                # trùng giá trị với 2 hóa đơn (1 hóa đơn XUẤT TRƯỚC, 1 hóa đơn
-                # XUẤT SAU ngày chuyển khoản) — hóa đơn xuất SAU thực chất
-                # được thanh toán RIÊNG bằng 1 kênh khác ngoài sao kê ngân
-                # hàng công ty (vd chuyển khoản cá nhân), nên KHÔNG BAO GIỜ có
-                # thể là hóa đơn mà khoản chuyển khoản NGÀY TRƯỚC đó trả cho.
-                # Nếu sau khi loại các hóa đơn "chưa tồn tại" này còn lại
-                # ĐÚNG 1 hóa đơn — khớp thẳng, khỏi báo "không rõ"; hóa đơn bị
-                # loại vẫn treo bình thường ở Tầng 3 chờ người dùng tự xử lý.
-                binh_thuong = [hd for hd in ung_vien if hd["inv_date"] and hd["inv_date"] <= tt["date"]]
-                if binh_thuong:
-                    ung_vien = binh_thuong
-            if len(ung_vien) == 1:
-                danh_dau_ca_hoa_don(ung_vien[0])
-                tt["matched"] = True
-                tang1.append({"ma": ma, "ten": ten, "inv_no": ung_vien[0]["inv_no"],
-                              "inv_date": _misa_ngay_str(ung_vien[0]["inv_date"]),
-                              "so_tien": round(ung_vien[0]["so_tien"]),
-                              "ngay_thanh_toan": _misa_ngay_str(tt["date"])})
-            elif len(ung_vien) > 1:
-                khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều hóa đơn trùng giá trị",
-                                 "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
-                                 "so_tien": round(tt["so_tien"]),
-                                 "ung_vien": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
-                                              "so_tien": round(h["so_tien"])} for h in ung_vien]})
+        def mot_vong(ghi_khong_ro):
+            """1 LƯỢT khớp Tầng 1 (1-1) + Tầng 2 (a: tổ hợp hóa đơn, b: tổ
+            hợp dòng) + Tầng 2c (tổ hợp thanh toán) — trả True nếu lượt này
+            khớp thêm được gì mới. PHẢI chạy LẶP LẠI nhiều lượt (xem vòng
+            while gọi hàm này bên dưới): 1 lượt SAU có thể GIẢI TỎA 1 trường
+            hợp "không rõ" của lượt TRƯỚC — ví dụ 2 hóa đơn trùng giá trị
+            cùng là ứng viên của 1 khoản thanh toán (ban đầu không rõ hóa
+            đơn nào), nhưng nếu 1 trong 2 hóa đơn đó sau đó tự khớp RIÊNG
+            được với 1 tổ hợp thanh toán khác ở Tầng 2c, hóa đơn còn lại chỉ
+            còn ĐÚNG 1 ứng viên — hết mơ hồ, phải khớp được ở lượt kế tiếp.
+            Xác nhận đúng bài học từ báo cáo thật: 2 hóa đơn cùng giá trị
+            (BH008/BH006), 1 trong 2 khoản thanh toán trùng giá trị y hệt cả
+            2 hóa đơn -> "không rõ" ở lượt 1; nhưng hóa đơn kia lại khớp
+            được bằng tổ hợp (tạm ứng + thanh toán khác) ở Tầng 2c cùng lượt
+            -> hóa đơn còn lại đáng lẽ phải tự khớp XONG ở lượt 2, không
+            được ghi "không rõ"/bỏ treo nhầm. ghi_khong_ro=False khi còn
+            đang lặp (tránh ghi "không rõ" SỚM rồi bỏ sót do trạng thái còn
+            đổi tiếp ở lượt sau); chỉ bật True ở lượt CUỐI cùng, khi trạng
+            thái đã ổn định (không còn gì đổi thêm)."""
+            changed = False
 
-        # Tầng 2 — xét khoản thanh toán CHƯA khớp ở tầng 1, THEO THỨ TỰ NGÀY
-        for tt in tts:
-            if tt["matched"]:
-                continue
-
-            # (a) tổ hợp các hóa đơn NGUYÊN (chưa bị tách dở phần nào)
-            ung_vien_hd = [hd for hd in hds if not hd["matched"] and not hd["phan_dung"]
-                          and trong_cua_so(hd, tt)]
-            to_hop_khop = []
-            if 2 <= len(ung_vien_hd) <= 20:
-                to_hop_khop = tim_to_hop(ung_vien_hd, tt["so_tien"], 1)
-                if not to_hop_khop and dung_sai > 1:
-                    to_hop_khop = tim_to_hop(ung_vien_hd, tt["so_tien"], dung_sai)
-            if len(to_hop_khop) == 1:
-                for hd in to_hop_khop[0]:
-                    danh_dau_ca_hoa_don(hd)
-                tt["matched"] = True
-                lech = round(tt["so_tien"] - sum(h["so_tien"] for h in to_hop_khop[0]))
-                tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
-                              "so_tien": round(tt["so_tien"]), "lech": lech,
-                              "hoa_don": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
-                                          "so_tien": round(h["so_tien"])} for h in to_hop_khop[0]]})
-                continue
-            elif len(to_hop_khop) > 1:
-                khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp hóa đơn cùng khớp",
-                                 "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
-                                 "so_tien": round(tt["so_tien"])})
-                continue
-
-            # (b) không có tổ hợp hóa đơn NGUYÊN nào khớp -> thử khớp theo
-            # TỪNG THÀNH PHẦN (giá trị/thuế GTGT riêng), cho phép TÁCH hóa
-            # đơn — ví dụ HĐ A + HĐ B (trọn) + 1 dòng GIÁ TRỊ (không kèm
-            # thuế) của HĐ C, phần thuế GTGT của HĐ C còn lại chờ khoản
-            # thanh toán sau.
-            ung_vien_hd2 = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)]
-            don_vi = []
-            for hd in ung_vien_hd2:
-                don_vi.extend(thanh_phan_con_lai(hd))
-            if not (2 <= len(don_vi) <= 16):
-                continue   # quá nhiều thành phần -> không dò, tránh bùng nổ tổ hợp
-            to_hop_dong = tim_to_hop(don_vi, tt["so_tien"], 1)
-            if not to_hop_dong and dung_sai > 1:
-                to_hop_dong = tim_to_hop(don_vi, tt["so_tien"], dung_sai)
-            if len(to_hop_dong) == 1:
-                combo = to_hop_dong[0]
-                for dv in combo:
-                    danh_dau_dung(dv["hd"], dv["phan"])
-                tt["matched"] = True
-                lech = round(tt["so_tien"] - sum(dv["so_tien"] for dv in combo))
-                tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
-                              "so_tien": round(tt["so_tien"]), "lech": lech,
-                              "hoa_don": [{"inv_no": dv["hd"]["inv_no"],
-                                          "inv_date": _misa_ngay_str(dv["hd"]["inv_date"]),
-                                          "so_tien": round(dv["so_tien"]),
-                                          "phan": None if dv["phan"] == "full" else dv["phan"]}
-                                         for dv in combo]})
-            elif len(to_hop_dong) > 1:
-                khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp DÒNG hóa đơn cùng khớp",
-                                 "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
-                                 "so_tien": round(tt["so_tien"])})
-
-        # Tầng 2c — CHIỀU NGƯỢC LẠI với Tầng 2 ở trên: 1 hóa đơn được trả
-        # bằng NHIỀU khoản thanh toán riêng lẻ cộng lại (không khoản nào
-        # khớp riêng lẻ, chỉ TỔNG mới đúng) — Tầng 2 ở trên chỉ xử lý chiều
-        # "nhiều hóa đơn -> 1 khoản thanh toán", không xử lý chiều này nên
-        # hóa đơn cứ báo "treo" mãi dù đã trả đủ. Xác nhận qua đối chiếu sổ
-        # cái 331 thật: 1 hóa đơn 18.900.000đ được trả bằng 2 UNC riêng biệt
-        # (10.000.000đ ngày X + 8.900.000đ ngày Y), không UNC nào khớp 1-1
-        # hay lọt vào tổ hợp Tầng 2 ở trên. Dùng lại đúng tim_to_hop (chỉ
-        # cần đối tượng có "so_tien", tt cũng có sẵn) nhưng đảo vai trò: tìm
-        # tổ hợp THANH TOÁN khớp 1 hóa đơn thay vì tổ hợp hóa đơn khớp 1
-        # thanh toán.
-        for hd in hds:
-            if hd["matched"] or hd["phan_dung"]:
-                continue
-            ung_vien_tt2 = [tt for tt in tts if not tt["matched"] and trong_cua_so(hd, tt)]
-            to_hop_tt2 = []
-            if 2 <= len(ung_vien_tt2) <= 20:
-                to_hop_tt2 = tim_to_hop(ung_vien_tt2, hd["so_tien"], 1)
-                if not to_hop_tt2 and dung_sai > 1:
-                    to_hop_tt2 = tim_to_hop(ung_vien_tt2, hd["so_tien"], dung_sai)
-            if len(to_hop_tt2) == 1:
-                combo_tt = sorted(to_hop_tt2[0], key=lambda t: t["date"] or ngay_xa)
-                for tt in combo_tt:
+            # Tầng 1 — khớp 1-1 chính xác
+            for tt in tts:
+                if tt["matched"]:
+                    continue
+                ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)
+                           and abs(hd["so_tien"] - tt["so_tien"]) <= 1]
+                if len(ung_vien) > 1:
+                    # Nhiều hóa đơn TRÙNG giá trị lọt vào cùng lúc — thường vì
+                    # ô "cho thanh toán TRƯỚC ngày HĐ" (mặc định 7 ngày) nới
+                    # cho cả hóa đơn xuất SAU ngày thanh toán lọt vào làm ứng
+                    # viên. Về bản chất kế toán, 1 khoản thanh toán thật hầu
+                    # như luôn trả cho hóa đơn ĐÃ TỒN TẠI (ngày HĐ <= ngày
+                    # TT) — hóa đơn xuất SAU ngày thanh toán chỉ lọt vào nhờ
+                    # độ nới đó, không phải vì thật sự được trả bằng khoản
+                    # này. Xác nhận qua đối chiếu sổ cái 331 thật của khách
+                    # hàng: 1 khoản chuyển khoản ngân hàng trùng giá trị với
+                    # 2 hóa đơn (1 hóa đơn XUẤT TRƯỚC, 1 hóa đơn XUẤT SAU
+                    # ngày chuyển khoản) — hóa đơn xuất SAU thực chất được
+                    # thanh toán RIÊNG bằng 1 kênh khác ngoài sao kê ngân
+                    # hàng công ty (vd chuyển khoản cá nhân), nên KHÔNG BAO
+                    # GIỜ có thể là hóa đơn mà khoản chuyển khoản NGÀY TRƯỚC
+                    # đó trả cho. Nếu sau khi loại các hóa đơn "chưa tồn tại"
+                    # này còn lại ĐÚNG 1 hóa đơn — khớp thẳng, khỏi báo
+                    # "không rõ"; hóa đơn bị loại vẫn treo bình thường ở
+                    # Tầng 3 chờ người dùng tự xử lý.
+                    binh_thuong = [hd for hd in ung_vien if hd["inv_date"] and hd["inv_date"] <= tt["date"]]
+                    if binh_thuong:
+                        ung_vien = binh_thuong
+                if len(ung_vien) == 1:
+                    danh_dau_ca_hoa_don(ung_vien[0])
                     tt["matched"] = True
-                danh_dau_ca_hoa_don(hd)
-                tong_tt = sum(t["so_tien"] for t in combo_tt)
-                lech = round(tong_tt - hd["so_tien"])
-                tang2.append({"ma": ma, "ten": ten,
-                              "ngay_thanh_toan": " + ".join(_misa_ngay_str(t["date"]) for t in combo_tt),
-                              "so_tien": round(tong_tt), "lech": lech,
-                              "hoa_don": [{"inv_no": hd["inv_no"], "inv_date": _misa_ngay_str(hd["inv_date"]),
-                                          "so_tien": round(hd["so_tien"])}]})
-            elif len(to_hop_tt2) > 1:
-                khong_ro.append({"ma": ma, "ten": ten,
-                                 "loai_vuong": "Nhiều tổ hợp thanh toán cùng khớp 1 hóa đơn (HĐ %s)" % hd["inv_no"],
-                                 "ngay_thanh_toan": _misa_ngay_str(hd["inv_date"]),
-                                 "so_tien": round(hd["so_tien"])})
+                    changed = True
+                    tang1.append({"ma": ma, "ten": ten, "inv_no": ung_vien[0]["inv_no"],
+                                  "inv_date": _misa_ngay_str(ung_vien[0]["inv_date"]),
+                                  "so_tien": round(ung_vien[0]["so_tien"]),
+                                  "ngay_thanh_toan": _misa_ngay_str(tt["date"])})
+                elif len(ung_vien) > 1 and ghi_khong_ro:
+                    khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều hóa đơn trùng giá trị",
+                                     "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                     "so_tien": round(tt["so_tien"]),
+                                     "ung_vien": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
+                                                  "so_tien": round(h["so_tien"])} for h in ung_vien]})
+
+            # Tầng 2 — xét khoản thanh toán CHƯA khớp ở tầng 1, THEO THỨ TỰ NGÀY
+            for tt in tts:
+                if tt["matched"]:
+                    continue
+
+                # (a) tổ hợp các hóa đơn NGUYÊN (chưa bị tách dở phần nào)
+                ung_vien_hd = [hd for hd in hds if not hd["matched"] and not hd["phan_dung"]
+                              and trong_cua_so(hd, tt)]
+                to_hop_khop = []
+                if 2 <= len(ung_vien_hd) <= 20:
+                    to_hop_khop = tim_to_hop(ung_vien_hd, tt["so_tien"], 1)
+                    if not to_hop_khop and dung_sai > 1:
+                        to_hop_khop = tim_to_hop(ung_vien_hd, tt["so_tien"], dung_sai)
+                if len(to_hop_khop) == 1:
+                    for hd in to_hop_khop[0]:
+                        danh_dau_ca_hoa_don(hd)
+                    tt["matched"] = True
+                    changed = True
+                    lech = round(tt["so_tien"] - sum(h["so_tien"] for h in to_hop_khop[0]))
+                    tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                  "so_tien": round(tt["so_tien"]), "lech": lech,
+                                  "hoa_don": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
+                                              "so_tien": round(h["so_tien"])} for h in to_hop_khop[0]]})
+                    continue
+                elif len(to_hop_khop) > 1:
+                    if ghi_khong_ro:
+                        khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp hóa đơn cùng khớp",
+                                         "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                         "so_tien": round(tt["so_tien"])})
+                    continue
+
+                # (b) không có tổ hợp hóa đơn NGUYÊN nào khớp -> thử khớp theo
+                # TỪNG THÀNH PHẦN (giá trị/thuế GTGT riêng), cho phép TÁCH hóa
+                # đơn — ví dụ HĐ A + HĐ B (trọn) + 1 dòng GIÁ TRỊ (không kèm
+                # thuế) của HĐ C, phần thuế GTGT của HĐ C còn lại chờ khoản
+                # thanh toán sau.
+                ung_vien_hd2 = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)]
+                don_vi = []
+                for hd in ung_vien_hd2:
+                    don_vi.extend(thanh_phan_con_lai(hd))
+                if not (2 <= len(don_vi) <= 16):
+                    continue   # quá nhiều thành phần -> không dò, tránh bùng nổ tổ hợp
+                to_hop_dong = tim_to_hop(don_vi, tt["so_tien"], 1)
+                if not to_hop_dong and dung_sai > 1:
+                    to_hop_dong = tim_to_hop(don_vi, tt["so_tien"], dung_sai)
+                if len(to_hop_dong) == 1:
+                    combo = to_hop_dong[0]
+                    for dv in combo:
+                        danh_dau_dung(dv["hd"], dv["phan"])
+                    tt["matched"] = True
+                    changed = True
+                    lech = round(tt["so_tien"] - sum(dv["so_tien"] for dv in combo))
+                    tang2.append({"ma": ma, "ten": ten, "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                  "so_tien": round(tt["so_tien"]), "lech": lech,
+                                  "hoa_don": [{"inv_no": dv["hd"]["inv_no"],
+                                              "inv_date": _misa_ngay_str(dv["hd"]["inv_date"]),
+                                              "so_tien": round(dv["so_tien"]),
+                                              "phan": None if dv["phan"] == "full" else dv["phan"]}
+                                             for dv in combo]})
+                elif len(to_hop_dong) > 1:
+                    if ghi_khong_ro:
+                        khong_ro.append({"ma": ma, "ten": ten, "loai_vuong": "Nhiều tổ hợp DÒNG hóa đơn cùng khớp",
+                                         "ngay_thanh_toan": _misa_ngay_str(tt["date"]),
+                                         "so_tien": round(tt["so_tien"])})
+
+            # Tầng 2c — CHIỀU NGƯỢC LẠI với Tầng 2 ở trên: 1 hóa đơn được trả
+            # bằng NHIỀU khoản thanh toán riêng lẻ cộng lại (không khoản nào
+            # khớp riêng lẻ, chỉ TỔNG mới đúng) — Tầng 2 ở trên chỉ xử lý
+            # chiều "nhiều hóa đơn -> 1 khoản thanh toán", không xử lý chiều
+            # này nên hóa đơn cứ báo "treo" mãi dù đã trả đủ. Xác nhận qua
+            # đối chiếu sổ cái 331 thật: 1 hóa đơn 18.900.000đ được trả bằng
+            # 2 UNC riêng biệt (10.000.000đ ngày X + 8.900.000đ ngày Y),
+            # không UNC nào khớp 1-1 hay lọt vào tổ hợp Tầng 2 ở trên. Dùng
+            # lại đúng tim_to_hop (chỉ cần đối tượng có "so_tien", tt cũng
+            # có sẵn) nhưng đảo vai trò: tìm tổ hợp THANH TOÁN khớp 1 hóa
+            # đơn thay vì tổ hợp hóa đơn khớp 1 thanh toán.
+            for hd in hds:
+                if hd["matched"] or hd["phan_dung"]:
+                    continue
+                ung_vien_tt2 = [tt for tt in tts if not tt["matched"] and trong_cua_so(hd, tt)]
+                to_hop_tt2 = []
+                if 2 <= len(ung_vien_tt2) <= 20:
+                    to_hop_tt2 = tim_to_hop(ung_vien_tt2, hd["so_tien"], 1)
+                    if not to_hop_tt2 and dung_sai > 1:
+                        to_hop_tt2 = tim_to_hop(ung_vien_tt2, hd["so_tien"], dung_sai)
+                if len(to_hop_tt2) == 1:
+                    combo_tt = sorted(to_hop_tt2[0], key=lambda t: t["date"] or ngay_xa)
+                    for tt in combo_tt:
+                        tt["matched"] = True
+                    danh_dau_ca_hoa_don(hd)
+                    changed = True
+                    tong_tt = sum(t["so_tien"] for t in combo_tt)
+                    lech = round(tong_tt - hd["so_tien"])
+                    tang2.append({"ma": ma, "ten": ten,
+                                  "ngay_thanh_toan": " + ".join(_misa_ngay_str(t["date"]) for t in combo_tt),
+                                  "so_tien": round(tong_tt), "lech": lech,
+                                  "hoa_don": [{"inv_no": hd["inv_no"], "inv_date": _misa_ngay_str(hd["inv_date"]),
+                                              "so_tien": round(hd["so_tien"])}]})
+                elif len(to_hop_tt2) > 1 and ghi_khong_ro:
+                    khong_ro.append({"ma": ma, "ten": ten,
+                                     "loai_vuong": "Nhiều tổ hợp thanh toán cùng khớp 1 hóa đơn (HĐ %s)" % hd["inv_no"],
+                                     "ngay_thanh_toan": _misa_ngay_str(hd["inv_date"]),
+                                     "so_tien": round(hd["so_tien"])})
+            return changed
+
+        # Lặp mot_vong tới khi ỔN ĐỊNH (không còn khớp thêm được gì) rồi mới
+        # chạy 1 lượt CUỐI có ghi "không rõ" — đúng lý do đã giải thích trong
+        # docstring của mot_vong ở trên (bài học rút ra từ ca BH008/BH006).
+        for _lan in range(30):
+            if not mot_vong(False):
+                break
+        mot_vong(True)
 
         # Tầng 2b — Tạm ứng/Ứng trước: 1 (hoặc nhiều) khoản thanh toán đến
         # TRƯỚC mà Tầng 1/2 không khớp được hóa đơn/tổ hợp nào gần đó, rồi
