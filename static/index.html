@@ -7862,8 +7862,9 @@ async function misaBuTruXuatExcelChuyen(loai){
 async function misaBuTruXemTruoc(loai){
   const ds=misaBuTruDsChon();
   if(!ds.length){toast('Chưa chọn dòng nào','err');return}
+  if(!confirm(`Ghi thẳng ${ds.length} chứng từ Nghiệp vụ khác qua SQL (${loai==='kh'?'Nợ 1111/Có 131':'Nợ 331/Có 1111'}), ghi sổ luôn?`))return;
   misaBuTruDsXacNhan=ds;
-  misaBuTruGhiChay(loai, ds, true);
+  misaBuTruGhiChay(loai, ds, false);
 }
 async function misaBuTruGhiChay(loai, ds, preview){
   const box=document.getElementById('misaBuTruXacNhan');
