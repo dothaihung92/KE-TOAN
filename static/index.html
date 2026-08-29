@@ -7778,11 +7778,11 @@ async function misaBuTruTim(loai){
           <th style="padding:5px 8px;border:1px solid #eee">Số tiền</th></tr>${rows}
       </table></div>
       <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#1a7a4a;margin-top:12px">
-        Khuyên dùng: xuất Excel đúng mẫu "Chứng từ nghiệp vụ khác" rồi Import qua chức năng gốc của MISA — an toàn hơn ghi thẳng SQL (MISA có tầng cache riêng cho Quỹ Thu/Chi tiền không tự cập nhật khi ghi thẳng SQL).
+        Khuyên dùng: xuất Excel đúng mẫu "Chứng từ nghiệp vụ khác" rồi Import qua chức năng gốc của MISA — MISA tự kiểm tra/tra đúng đối tượng khi Import, an toàn hơn ghi thẳng SQL (phải tự học tên cột lưu đối tượng, có thể học sai/không đủ dữ liệu để học).
       </div>
       <div id="misaBuTruXacNhan" style="margin-top:10px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-        <button class="btn ghost sm" style="color:#b91c1c;border-color:#f5b5b5" onclick="misaBuTruDonPhieuLoi('${loai}')">🧹 Gỡ phiếu SQL đã ghi thử trước đó</button>
-        <button class="btn ghost sm" onclick="misaBuTruXemTruoc('${loai}')">⬆ (Ít khuyên dùng) Ghi thẳng phiếu Thu/Chi tiền mặt qua SQL</button>
+        <button class="btn ghost sm" style="color:#b91c1c;border-color:#f5b5b5" onclick="misaBuTruDonPhieuLoi('${loai}')">🧹 Gỡ chứng từ SQL đã ghi thử trước đó</button>
+        <button class="btn ghost sm" onclick="misaBuTruXemTruoc('${loai}')">⬆ (Ít khuyên dùng) Ghi thẳng chứng từ Nghiệp vụ khác qua SQL</button>
         <button class="btn sm" style="background:#1a7a4a" onclick="misaBuTruXuatExcel('${loai}')">📥 Xuất Excel "Nghiệp vụ khác" (khuyên dùng)</button>
       </div>`;
   }catch(e){kq.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
@@ -7800,7 +7800,7 @@ async function misaBuTruXuatExcel(loai){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function misaBuTruDonPhieuLoi(loai){
-  if(!confirm('Gỡ toàn bộ phiếu Thu/Chi tiền mặt CHƯA GHI SỔ do phần mềm ghi thử qua SQL trước đó (loại '+(loai==='kh'?'Khách hàng':'Nhà cung cấp')+')? Không đụng phiếu đã ghi sổ.'))return;
+  if(!confirm('Gỡ toàn bộ chứng từ Nghiệp vụ khác CHƯA GHI SỔ do phần mềm ghi thử qua SQL trước đó (loại '+(loai==='kh'?'Khách hàng':'Nhà cung cấp')+')? Không đụng chứng từ đã ghi sổ.'))return;
   toast('Đang gỡ...','');
   try{
     const d=await api(`/api/misa-sql/don-phieu-bu-tru-loi/${current}?loai=${loai}`,{method:'POST'});
@@ -7880,87 +7880,16 @@ async function misaBuTruGhiChay(loai, ds, preview){
       </tr>`).join('');
     box.innerHTML=`
       <div style="background:${preview?'#fff8e1':'#eafaf0'};border:1px solid ${preview?'#e8b923':'#7ac9a0'};border-radius:8px;padding:8px 12px;font-size:12.5px;color:${preview?'#8a5d00':'#1a7a4a'};margin-bottom:8px;text-align:left">
-        ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} phiếu ${loai==='kh'?'Thu':'Chi'} tiền mặt, luôn ở trạng thái CHƯA GHI SỔ.`:`✓ Đã ghi ${d.so_ghi} phiếu ${loai==='kh'?'Thu':'Chi'} tiền mặt (CHƯA GHI SỔ) — vào MISA kiểm tra rồi Ghi sổ.`}
+        ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} chứng từ Nghiệp vụ khác (${loai==='kh'?'Nợ 1111/Có 131':'Nợ 331/Có 1111'}), luôn ở trạng thái CHƯA GHI SỔ.`:`✓ Đã ghi ${d.so_ghi} chứng từ Nghiệp vụ khác (CHƯA GHI SỔ)${d.hoc_duoc_cot_doi_tuong?'':' — CHƯA gán được đối tượng (cần gán tay trên MISA)'} — vào MISA: Nghiệp vụ khác, kiểm tra rồi Ghi sổ.`}
       </div>
       <table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left">
         <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">Mã</th><th style="padding:4px 8px;border:1px solid #eee">Tên</th><th style="padding:4px 8px;border:1px solid #eee">Số CT</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr>
         ${rows}
       </table>
-      ${!preview?`<div id="misaBuTruChanDoan" style="margin-top:10px"></div>`:''}
       <div style="margin-top:10px;text-align:right">
         <button class="btn ghost sm" onclick="misaBuTruMo('${loai}')">${preview?'Hủy':'Đóng'}</button>
-        ${preview?`<button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruGhiChay('${loai}', misaBuTruDsXacNhan, false)">✔ Xác nhận ghi thật</button>`
-                 :`<button class="btn ghost sm" style="color:#b91c1c;border-color:#f5b5b5" onclick="misaBuTruChanDoan('${loai}')">🩺 Không thấy phiếu trên MISA? Chẩn đoán</button>`}
+        ${preview?`<button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruGhiChay('${loai}', misaBuTruDsXacNhan, false)">✔ Xác nhận ghi thật</button>`:''}
       </div>`;
-  }catch(e){box.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
-}
-async function misaBuTruChanDoan(loai){
-  const box=document.getElementById('misaBuTruChanDoan');
-  box.innerHTML=`<span class="spin"></span> Đang đọc toàn bộ cột phiếu vừa ghi để so sánh...`;
-  try{
-    const d=await api(`/api/misa-sql/chan-doan-bu-tru/${current}?loai=${loai}`);
-    if(!d.cua_minh||!d.cua_minh.length){
-      box.innerHTML=`<div style="color:#b91c1c">Không tìm thấy dòng nào trong bảng ${misaEsc(d.bang)} có CustomField10 đánh dấu của phần mềm — có thể đã bị xoá hoặc ghi vào database khác. Kiểm tra lại tên database đang kết nối.</div>`;
-      return;
-    }
-    const cuaMinh=d.cua_minh[0];
-    const that=d.that||{};
-    const cotKhacBiet=Object.keys(cuaMinh).filter(k=>d.that && String(cuaMinh[k])!==String(that[k]??''));
-    const rows=Object.keys(cuaMinh).map(k=>{
-      const khac=d.that && cotKhacBiet.includes(k);
-      return `<tr style="${khac?'background:#fde8e8':''}">
-        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace;${khac?'font-weight:700;color:#b91c1c':''}">${misaEsc(k)}</td>
-        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(cuaMinh[k]??'NULL')}</td>
-        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${d.that?misaEsc(that[k]??'NULL'):'<i style="color:#999">— công ty chưa có phiếu thật nào —</i>'}</td>
-      </tr>`;
-    }).join('');
-    const reftypeCuaMinh=+cuaMinh.RefType;
-    const rtRows=(d.cac_reftype||[]).map(rt=>`<tr style="${rt.reftype===reftypeCuaMinh?'background:#fff3cd;font-weight:700':''}">
-        <td style="padding:3px 8px;border:1px solid #eee">${rt.reftype}${rt.reftype===reftypeCuaMinh?' ← phần mềm đang dùng':''}</td>
-        <td style="padding:3px 8px;border:1px solid #eee">${misaEsc(rt.ten||'')}</td>
-        <td style="padding:3px 8px;border:1px solid #eee;text-align:right">${rt.so_dong_that}</td>
-      </tr>`).join('');
-    const chiTietRows=(d.chi_tiet||[]).map(ct=>Object.keys(ct).map(k=>`<tr>
-        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(k)}</td>
-        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(ct[k]??'NULL')}</td>
-      </tr>`).join('')).join('');
-    const chiNhanhRows=(d.chi_nhanh||[]).map(cn=>`<tr style="${cn.id===String(cuaMinh.BranchID)?'background:#fff3cd;font-weight:700':''}">
-        <td style="padding:3px 8px;border:1px solid #eee;font-family:monospace">${misaEsc(cn.id)}${cn.id===String(cuaMinh.BranchID)?' ← phiếu đang dùng':''}</td>
-        <td style="padding:3px 8px;border:1px solid #eee">${misaEsc(cn.ten||'')}</td>
-        <td style="padding:3px 8px;border:1px solid #eee;text-align:center">${cn.co_cha?'Có':'Gốc'}</td>
-      </tr>`).join('');
-    box.innerHTML=`
-      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#8a5d00;margin-bottom:8px">
-        Bảng <b>${misaEsc(d.bang)}</b>: có <b>${d.so_dong_cua_minh}</b> dòng phần mềm đã tạo. So sánh TOÀN BỘ cột dòng gần nhất (cột tô đỏ = khác với phiếu thật) — chụp màn hình gửi lại để xác định đúng cột gây lỗi không hiện trên lưới MISA.
-      </div>
-      <div style="background:${d.trong_view===0?'#fde8e8':'#eafaf0'};border:1px solid ${d.trong_view===0?'#f5b5b5':'#7ac9a0'};border-radius:8px;padding:10px 14px;font-size:13px;font-weight:700;color:${d.trong_view===0?'#b91c1c':'#1a7a4a'};margin-bottom:10px">
-        Kiểm tra thẳng View_CAReceiptPayment (view mà lưới MISA đọc): ${d.trong_view===0?'❌ Phiếu KHÔNG có trong view này → đây là nguyên nhân chính, xem SQL view bên dưới để biết chặn ở đâu.':d.trong_view>0?`✓ Phiếu CÓ trong view (${d.trong_view} dòng) — vậy lưới MISA lọc theo tiêu chí khác (Kỳ/Chi nhánh trên giao diện), thử đổi bộ lọc trên MISA.`:'Không kiểm tra được: '+misaEsc(String(d.trong_view))}
-      </div>
-      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700">TK đã xác nhận có thật trong Danh mục Kế toán: ${(d.tk_that_co||[]).map(misaEsc).join(', ')||'<span style="color:#b91c1c">(không tìm thấy TK nào trong 331/1111/131/1121 — nghi TK không khớp)</span>'}</div>
-      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700;margin-top:8px">Chi nhánh (BranchID) — dòng tô vàng là chi nhánh phiếu đang dùng:</div>
-      <div style="max-height:16vh;overflow:auto;margin-bottom:10px">
-      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
-        <tr style="background:#f0f0f0"><th style="padding:3px 8px;border:1px solid #eee">ID</th><th style="padding:3px 8px;border:1px solid #eee">Tên</th><th style="padding:3px 8px;border:1px solid #eee">Có chi nhánh cha?</th></tr>
-        ${chiNhanhRows}
-      </table></div>
-      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700;margin-top:8px">Bảng chi tiết (${misaEsc(d.bang)}Detail) của phiếu gần nhất — ${d.chi_tiet&&d.chi_tiet.length?d.chi_tiet.length+' dòng':'<span style="color:#b91c1c">KHÔNG CÓ DÒNG CHI TIẾT NÀO — đây có thể là nguyên nhân</span>'}:</div>
-      <div style="max-height:22vh;overflow:auto;margin-bottom:10px">
-      <table style="border-collapse:collapse;font-size:11.5px;width:100%">${chiTietRows||''}</table></div>
-      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700">Định nghĩa SQL thật của View_CAReceiptPayment (đọc trực tiếp từ MISA — xem WHERE/JOIN để biết chặn ở đâu):</div>
-      <div style="max-height:26vh;overflow:auto;margin-bottom:10px;background:#0b1f1f;border-radius:8px;padding:10px 12px">
-        <pre style="color:#c9f7e6;font-size:11px;white-space:pre-wrap;margin:0;font-family:ui-monospace,Consolas,monospace">${misaEsc(d.view_sql||'(không lấy được)')}</pre>
-      </div>
-      <div style="margin-bottom:4px;font-size:12.5px;font-weight:700">Các RefType khả dĩ cho bảng ${misaEsc(d.bang)} (cột "Số dòng thật" cao = MISA thật đang dùng loại đó cho Quỹ):</div>
-      <div style="max-height:22vh;overflow:auto;margin-bottom:10px">
-      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
-        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="padding:3px 8px;border:1px solid #eee">RefType</th><th style="padding:3px 8px;border:1px solid #eee">Tên</th><th style="padding:3px 8px;border:1px solid #eee">Số dòng thật</th></tr>
-        ${rtRows}
-      </table></div>
-      <div style="max-height:40vh;overflow:auto">
-      <table style="border-collapse:collapse;font-size:11.5px;width:100%">
-        <tr style="background:#f0f0f0;position:sticky;top:0"><th style="padding:3px 8px;border:1px solid #eee">Cột</th><th style="padding:3px 8px;border:1px solid #eee">Phiếu phần mềm tạo</th><th style="padding:3px 8px;border:1px solid #eee">Phiếu thật (nếu có)</th></tr>
-        ${rows}
-      </table></div>`;
   }catch(e){box.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
 }
 async function misaXemSAInvoiceReference(){

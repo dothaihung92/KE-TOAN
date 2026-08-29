@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.065"
+APP_BUILD = "2026-08-27.066"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24118,73 +24118,119 @@ def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str
 
 
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
-    """Ghi phiếu Thu tiền mặt (loai='kh': Nợ 1111/Có 131, bảng CAReceipt/
-    CAReceiptDetail) hoặc Chi tiền mặt (loai='ncc': Nợ 331/Có 1111, bảng
-    CAPayment/CAPaymentDetail) để tất toán các hóa đơn 'treo' NGƯỜI DÙNG ĐÃ
-    XÁC NHẬN ở bước đối chiếu 3 tầng (_misa_doi_chieu_3_tang, tầng 3) — coi
-    như thu/chi tiền mặt ngay lúc phát sinh nhưng trước đó lỡ ghi công nợ.
-    LUÔN ghi CHƯA GHI
-    SỔ (như mọi chứng từ khác phần mềm tạo) — không tự ghi sổ bằng SQL vì
-    không tái tạo đủ các bảng sổ cái/công nợ phụ trợ mà thao tác Ghi sổ thật
-    của MISA cập nhật; người dùng tự kiểm tra rồi Ghi sổ hàng loạt trong
-    MISA."""
+    """Ghi TRỰC TIẾP qua SQL 1 bút toán 'Điều chỉnh công nợ treo' — chứng
+    từ NGHIỆP VỤ KHÁC của MISA (bảng GLVoucher/GLVoucherDetail) — cho mỗi
+    hóa đơn treo NGƯỜI DÙNG ĐÃ XÁC NHẬN ở bước đối chiếu 3 tầng
+    (_misa_doi_chieu_3_tang, tầng 3): loai='kh' -> Nợ 1111/Có 131 (coi như
+    đã thu tiền mặt); loai='ncc' -> Nợ 331/Có 1111 (coi như đã chi tiền
+    mặt) — ĐÚNG cùng nghiệp vụ kế toán và cùng tiền tố số chứng từ
+    DCTR/DCTH với bản Excel (_xuat_excel_dieu_chinh_cong_no) để 2 cách
+    KHÔNG BAO GIỜ trùng số với nhau.
+
+    TRƯỚC ĐÂY ghi thẳng vào CAReceipt/CAPayment (Phiếu Thu/Chi tiền mặt) —
+    đã xác nhận bảng này có 1 tầng cache riêng của MISA
+    (CAReceiptPaymentList/View_CAReceiptPayment) KHÔNG tự cập nhật khi ghi
+    thẳng SQL, khiến phiếu ghi "thành công" (không lỗi) nhưng KHÔNG hiện
+    trên lưới Quỹ > Thu, chi tiền (người dùng báo lỗi thực tế). Đổi sang
+    ghi thẳng GLVoucher/GLVoucherDetail — bảng này đã xác nhận ghi thẳng ổn
+    định, KHÔNG có tầng cache tương tự (dùng chung kỹ thuật đã kiểm chứng ở
+    _misa_dao_dieu_chinh_cong_no/_misa_chuyen_cong_no_sai_doi_tuong).
+
+    Học cột 'Đối tượng' thật trên GLVoucherDetail bằng cách so khớp GIÁ TRỊ
+    với account_object_id đã biết chắc chắn trên các dòng có TK công nợ
+    (131/331) thật — KHÔNG đoán tên cột cố định (mỗi bản MISA có thể khác
+    nhau); nếu chưa học được thì vẫn ghi bút toán (đúng TK Nợ/Có/số tiền)
+    nhưng bỏ trống đối tượng, người dùng tự gán tay trên MISA.
+
+    LUÔN ghi CHƯA GHI SỔ (IsPostedFinance=0, đánh dấu CustomField10=
+    _PM_MARK) — người dùng tự kiểm tra trên MISA rồi Ghi sổ hàng loạt; xem
+    _misa_don_phieu_bu_tru_loi để gỡ các chứng từ ghi thử CHƯA GHI SỔ này
+    khi muốn đổi sang cách khác."""
+    import re
+    import uuid as _uuid
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     if not danh_sach:
         raise HTTPException(400, "Danh sách trống — không có gì để ghi.")
-    import uuid as _uuid
-    master_table = "CAReceipt" if loai == "kh" else "CAPayment"
-    detail_table = master_table + "Detail"
-    tk_congno = "131" if loai == "kh" else "331"
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
         cur = conn.cursor()
-        branch_id = _misa_branch_id(cur)
-        cols_m = _misa_cot_bang_that(cur, master_table)
-        cols_d = _misa_cot_bang_that(cur, detail_table)
-        if not cols_m or not cols_d:
+        cols_glv = _misa_cot_bang_that(cur, "GLVoucher")
+        cols_glvd = _misa_cot_bang_that(cur, "GLVoucherDetail")
+        if not (cols_glv and cols_glvd):
             raise HTTPException(
-                400, "Không tìm thấy bảng %s/%s trong CSDL MISA đang kết nối."
-                % (master_table, detail_table))
-        # Gỡ các phiếu CHƯA GHI SỔ do CHÍNH phần mềm tạo ở lần chạy TRƯỚC
-        # (CustomField10=_PM_MARK) trước khi ghi lại — tránh tồn đọng phiếu
-        # ghi nhầm RefType (rác) mỗi lần người dùng chạy lại sau khi sửa
-        # tham số. KHÔNG BAO GIỜ đụng phiếu đã ghi sổ (IsPostedFinance=1),
-        # dù phiếu đó do phần mềm tạo trước đó.
+                400, "Không tìm thấy bảng GLVoucher/GLVoucherDetail trong CSDL MISA đang kết nối.")
+
+        tk_no, tk_co = ("1111", "131") if loai == "kh" else ("331", "1111")
+        tk_ke_toan = "131" if loai == "kh" else "331"
+        tk_cot_dt = "CreditAccount" if loai == "kh" else "DebitAccount"
+
+        # Gỡ các chứng từ CHƯA GHI SỔ do CHÍNH phần mềm tạo ở lần chạy TRƯỚC
+        # (CustomField10=_PM_MARK) trước khi ghi lại — tránh tồn đọng chứng
+        # từ ghi thử (rác) mỗi lần người dùng chạy lại sau khi sửa tham số.
+        # KHÔNG BAO GIỜ đụng chứng từ đã ghi sổ (IsPostedFinance=1).
         if not preview:
             try:
                 cur.execute(
-                    "DELETE FROM %s WHERE RefID IN (SELECT RefID FROM %s "
-                    "WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0)"
-                    % (detail_table, master_table), _PM_MARK)
+                    "DELETE FROM GLVoucherDetail WHERE RefID IN (SELECT RefID FROM GLVoucher "
+                    "WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0)", _PM_MARK)
                 cur.execute(
-                    "DELETE FROM %s WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0"
-                    % master_table, _PM_MARK)
+                    "DELETE FROM GLVoucher WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0",
+                    _PM_MARK)
             except Exception:
                 pass
-        reftype_rows = cur.execute(
-            "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=?",
-            master_table).fetchall()
-        if not reftype_rows:
-            raise HTTPException(400, "Không tìm thấy RefType cho bảng %s trong SYSRefType." % master_table)
-        # Ưu tiên đúng loại "trả nhà cung cấp"/"của khách hàng" (vd RefType
-        # 1021 "Phiếu chi trả tiền nhà cung cấp") — xác nhận qua chẩn đoán
-        # thật: lọc theo "tiền mặt" đơn thuần từng trúng nhầm RefType 1023
-        # "Chi tiền mặt nộp thuế TNCN" (tên cũng có chữ "tiền mặt" nhưng SAI
-        # hẳn mục đích — Quỹ MISA không hiện phiếu ghi nhầm loại này).
-        tu_khoa_dung = "nhà cung cấp" if loai == "ncc" else "khách hàng"
-        tu_khoa_loai_tru = ("thuế", "lương", "bảo hiểm", "nhập khẩu", "tạm ứng")
-        reftype = next(
-            (int(r[0]) for r in reftype_rows if tu_khoa_dung in str(r[1] or "").lower()),
-            next((int(r[0]) for r in reftype_rows
-                  if "tiền mặt" in str(r[1] or "").lower()
-                  and not any(k in str(r[1] or "").lower() for k in tu_khoa_loai_tru)),
-                 int(reftype_rows[0][0])))
-        max_reforder_row = cur.execute("SELECT MAX(RefOrder) FROM %s" % master_table).fetchone()
-        reforder = int(max_reforder_row[0] or 0) if max_reforder_row else 0
-        now = datetime.datetime.now()
+
+        id_hop_le = {str(it.get("account_object_id") or "").strip().lower()
+                    for it in danh_sach if it.get("account_object_id")}
+        obj_cols = [real for low, (real, t) in cols_glvd.items()
+                   if "object" in low and "unique" in str(t or "").lower()]
+        cot_dt = None
+        if obj_cols and id_hop_le:
+            try:
+                sql = "SELECT TOP 500 [%s] FROM GLVoucherDetail WHERE %s LIKE ?" % (
+                    "],[".join(obj_cols), tk_cot_dt)
+                for row in cur.execute(sql, tk_ke_toan + "%").fetchall():
+                    for c, v in zip(obj_cols, row):
+                        if v is not None and str(v).strip().lower() in id_hop_le:
+                            cot_dt = c
+                            break
+                    if cot_dt:
+                        break
+            except Exception:
+                cot_dt = None
+
+        mau_glv = _misa_mau_dong_that(cur, "GLVoucher", "ISNULL(RefNoFinance,'') LIKE 'DC%'")
+        ref_type = mau_glv.get("RefType") if mau_glv else None
+        if ref_type is None:
+            ref_type, _n = _misa_pu_reftype(cur, ("khac",), master_table="GLVoucher")
+        if ref_type is None:
+            raise HTTPException(
+                400, "Không xác định được loại chứng từ (RefType) cho 'Nghiệp vụ khác' — CSDL MISA "
+                     "đang kết nối thiếu dữ liệu hệ thống SYSRefType. Hãy tạo tay 1 chứng từ 'Nghiệp "
+                     "vụ khác' trên MISA rồi thử lại.")
+
+        max_reforder = 0
+        try:
+            r0 = cur.execute("SELECT ISNULL(MAX(RefOrder),0) FROM GLVoucher").fetchone()
+            max_reforder = (r0[0] or 0) if r0 else 0
+        except Exception:
+            pass
+
+        branch_id = _misa_branch_id(cur)
+        prefix = "DCTR" if loai == "ncc" else "DCTH"
         seq = {}
+        try:
+            for (rf,) in cur.execute(
+                    "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?", prefix + "%").fetchall():
+                m = re.match(r"^%s(\d+)/T(\d+)/(\d+)$" % re.escape(prefix), str(rf or "").strip())
+                if m:
+                    mk = (int(m.group(2)), int(m.group(3)))
+                    seq[mk] = max(seq.get(mk, 0), int(m.group(1)))
+        except Exception:
+            pass
+
+        now = datetime.datetime.now()
         so_ghi = 0
         ket_qua = []
         for it in danh_sach:
@@ -24198,53 +24244,50 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
                 ngay_dt = now
             mk = (ngay_dt.month, ngay_dt.year)
             seq[mk] = seq.get(mk, 0) + 1
-            prefix = "PTMT" if loai == "kh" else "PCMT"
             so_ct = ("%s%03d/T%s/%s" % (prefix, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
-            memo = ("Thu tiền mặt bù công nợ treo HĐ %s" if loai == "kh"
-                   else "Chi tiền mặt bù công nợ treo HĐ %s") % (it.get("inv_no") or "")
-            reforder += 1
-            refid = str(_uuid.uuid4())
+            memo = ("Điều chỉnh công nợ treo HĐ %s - %s" %
+                    (it.get("inv_no") or "", it.get("ten") or "")).strip(" -")[:500]
             if not preview:
-                row_m = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_m.values()}
-                _misa_gan(row_m, cols_m, refid, "RefID")
-                _misa_gan(row_m, cols_m, reftype, "RefType")
-                _misa_gan(row_m, cols_m, ngay_dt, "RefDate")
-                _misa_gan(row_m, cols_m, ngay_dt, "PostedDate")
-                _misa_gan(row_m, cols_m, so_ct, "RefNoFinance")
-                _misa_gan(row_m, cols_m, False, "IsPostedFinance")
-                _misa_gan(row_m, cols_m, False, "IsPostedManagement")
-                _misa_gan(row_m, cols_m, aoid, "AccountObjectID")
-                _misa_gan(row_m, cols_m, memo, "JournalMemo")
-                _misa_gan(row_m, cols_m, "VND", "CurrencyID")
-                _misa_gan(row_m, cols_m, 1, "ExchangeRate")
-                _misa_gan(row_m, cols_m, so_tien, "TotalAmountOC")
-                _misa_gan(row_m, cols_m, so_tien, "TotalAmount")
-                _misa_gan(row_m, cols_m, branch_id, "BranchID")
-                _misa_gan(row_m, cols_m, 0, "DisplayOnBook")
-                _misa_gan(row_m, cols_m, reforder, "RefOrder")
-                _misa_gan(row_m, cols_m, now, "CreatedDate")
-                _misa_gan(row_m, cols_m, "PhanMem", "CreatedBy")
-                _misa_gan(row_m, cols_m, _PM_MARK, "CustomField10")
-                cs = list(row_m.keys())
-                cur.execute("INSERT INTO %s ([%s]) VALUES (%s)" %
-                           (master_table, "],[".join(cs), ",".join(["?"] * len(cs))),
-                           [row_m[c] for c in cs])
+                glv_id = str(_uuid.uuid4())
+                glv_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glv.values()}
+                _misa_gan(glv_row, cols_glv, glv_id, "RefID")
+                _misa_gan(glv_row, cols_glv, ref_type, "RefType")
+                _misa_gan(glv_row, cols_glv, 0, "DisplayOnBook")
+                _misa_gan(glv_row, cols_glv, ngay_dt, "RefDate")
+                _misa_gan(glv_row, cols_glv, ngay_dt, "PostedDate")
+                _misa_gan(glv_row, cols_glv, so_ct, "RefNoFinance")
+                _misa_gan(glv_row, cols_glv, False, "IsPostedFinance")
+                _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
+                _misa_gan(glv_row, cols_glv, memo, "JournalMemo")
+                _misa_gan(glv_row, cols_glv, so_tien, "TotalAmountOC")
+                _misa_gan(glv_row, cols_glv, so_tien, "TotalAmount")
+                _misa_gan(glv_row, cols_glv, branch_id, "BranchID")
+                _misa_gan(glv_row, cols_glv, "VND", "CurrencyID")
+                _misa_gan(glv_row, cols_glv, 1, "ExchangeRate")
+                max_reforder += 1
+                _misa_gan(glv_row, cols_glv, max_reforder, "RefOrder")
+                _misa_gan(glv_row, cols_glv, now, "CreatedDate")
+                _misa_gan(glv_row, cols_glv, "PhanMem", "CreatedBy")
+                _misa_gan(glv_row, cols_glv, _PM_MARK, "CustomField10")
+                cs = list(glv_row.keys())
+                cur.execute("INSERT INTO GLVoucher ([%s]) VALUES (%s)" %
+                           ("],[".join(cs), ",".join(["?"] * len(cs))), [glv_row[c] for c in cs])
 
-                row_d = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_d.values()}
-                _misa_gan(row_d, cols_d, str(_uuid.uuid4()), "RefDetailID")
-                _misa_gan(row_d, cols_d, refid, "RefID")
-                _misa_gan(row_d, cols_d, memo, "Description")
-                _misa_gan(row_d, cols_d, "1111" if loai == "kh" else tk_congno, "DebitAccount")
-                _misa_gan(row_d, cols_d, tk_congno if loai == "kh" else "1111", "CreditAccount")
-                _misa_gan(row_d, cols_d, so_tien, "AmountOC")
-                _misa_gan(row_d, cols_d, so_tien, "Amount")
-                _misa_gan(row_d, cols_d, aoid, "AccountObjectID")
-                _misa_gan(row_d, cols_d, 1, "SortOrder")
-                _misa_gan(row_d, cols_d, False, "UnResonableCost")
-                cs = list(row_d.keys())
-                cur.execute("INSERT INTO %s ([%s]) VALUES (%s)" %
-                           (detail_table, "],[".join(cs), ",".join(["?"] * len(cs))),
-                           [row_d[c] for c in cs])
+                glvd_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glvd.values()}
+                _misa_gan(glvd_row, cols_glvd, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(glvd_row, cols_glvd, glv_id, "RefID")
+                _misa_gan(glvd_row, cols_glvd, memo, "Description")
+                _misa_gan(glvd_row, cols_glvd, tk_no, "DebitAccount")
+                _misa_gan(glvd_row, cols_glvd, tk_co, "CreditAccount")
+                _misa_gan(glvd_row, cols_glvd, so_tien, "AmountOC")
+                _misa_gan(glvd_row, cols_glvd, so_tien, "Amount")
+                _misa_gan(glvd_row, cols_glvd, False, "UnResonableCost")
+                _misa_gan(glvd_row, cols_glvd, 0, "SortOrder")
+                if cot_dt:
+                    glvd_row[cot_dt] = aoid
+                cs = list(glvd_row.keys())
+                cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" %
+                           ("],[".join(cs), ",".join(["?"] * len(cs))), [glvd_row[c] for c in cs])
             so_ghi += 1
             ket_qua.append({"mst": it.get("mst"), "ten": it.get("ten"), "inv_no": it.get("inv_no"),
                             "so_tien": so_tien, "so_ct": so_ct})
@@ -24252,7 +24295,8 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
             conn.rollback()
         else:
             conn.commit()
-        return {"preview": preview, "loai": loai, "so_ghi": so_ghi, "danh_sach": ket_qua}
+        return {"preview": preview, "loai": loai, "so_ghi": so_ghi, "danh_sach": ket_qua,
+                "hoc_duoc_cot_doi_tuong": bool(cot_dt)}
     except HTTPException:
         conn.rollback()
         raise
@@ -24278,25 +24322,23 @@ async def misa_sql_ghi_bu_tru_treo(cid: int, request: Request, loai: str = "kh",
 
 
 def _misa_don_phieu_bu_tru_loi(cid, database, loai):
-    """Gỡ các phiếu CHƯA GHI SỔ do _misa_ghi_bu_tru_treo tạo (CustomField10=
-    _PM_MARK) — dùng khi chuyển sang cách khác (xuất Excel 'Nghiệp vụ khác'
-    để import) và không cần các phiếu Thu/Chi tiền mặt đã ghi thử qua SQL
-    nữa, tránh trùng/rác. KHÔNG BAO GIỜ đụng phiếu đã ghi sổ."""
+    """Gỡ các chứng từ Nghiệp vụ khác CHƯA GHI SỔ do _misa_ghi_bu_tru_treo
+    tạo (CustomField10=_PM_MARK, bảng GLVoucher/GLVoucherDetail) — dùng khi
+    chuyển sang cách khác (xuất Excel 'Nghiệp vụ khác' để import) và không
+    cần các chứng từ đã ghi thử qua SQL nữa, tránh trùng/rác. KHÔNG BAO GIỜ
+    đụng chứng từ đã ghi sổ."""
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
-    master_table = "CAReceipt" if loai == "kh" else "CAPayment"
-    detail_table = master_table + "Detail"
     conn = _misa_sql_connect(cid, database=database)
     conn.autocommit = False
     try:
         cur = conn.cursor()
         cur.execute(
-            "DELETE FROM %s WHERE RefID IN (SELECT RefID FROM %s "
-            "WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0)"
-            % (detail_table, master_table), _PM_MARK)
+            "DELETE FROM GLVoucherDetail WHERE RefID IN (SELECT RefID FROM GLVoucher "
+            "WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0)", _PM_MARK)
         so_xoa = cur.execute(
-            "DELETE FROM %s OUTPUT deleted.RefID WHERE CustomField10=? "
-            "AND ISNULL(IsPostedFinance,0)=0" % master_table, _PM_MARK).rowcount
+            "DELETE FROM GLVoucher OUTPUT deleted.RefID WHERE CustomField10=? "
+            "AND ISNULL(IsPostedFinance,0)=0", _PM_MARK).rowcount
         conn.commit()
         return {"so_xoa": so_xoa}
     except Exception as e:
@@ -24313,110 +24355,6 @@ def misa_sql_don_phieu_bu_tru_loi(cid: int, loai: str = "kh", database: str = ""
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_don_phieu_bu_tru_loi(cid, database, loai)
-
-
-def _misa_chan_doan_bu_tru(cid, database, loai="ncc"):
-    """CHẨN ĐOÁN (CHỈ ĐỌC) — dùng khi phiếu Thu/Chi tiền mặt do
-    _misa_ghi_bu_tru_treo tạo (CustomField10=_PM_MARK) ghi "thành công"
-    (không lỗi SQL) nhưng KHÔNG hiện trên lưới MISA 'Quỹ > Thu, chi tiền'.
-    Lấy TOÀN BỘ cột (SELECT *, không chọn lọc — tránh bỏ sót cột khác biệt
-    thật) của phiếu phần mềm vừa tạo, đối chiếu song song với 1 phiếu THẬT
-    (không do phần mềm tạo, nếu công ty có sẵn) để tìm đúng cột gây khác
-    biệt (RefType/BranchID/DisplayOnBook/IsPostedCashBookFinance...)."""
-    if loai not in ("kh", "ncc"):
-        raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
-    master_table = "CAReceipt" if loai == "kh" else "CAPayment"
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT TOP 3 * FROM %s WHERE CustomField10=? ORDER BY CreatedDate DESC"
-                   % master_table, _PM_MARK)
-        cols = [c[0] for c in cur.description]
-        cua_minh = [dict(zip(cols, r)) for r in cur.fetchall()]
-        cur.execute("SELECT COUNT(*) FROM %s WHERE CustomField10=?" % master_table, _PM_MARK)
-        so_dong_cua_minh = cur.fetchone()[0]
-        cur.execute("SELECT TOP 1 * FROM %s WHERE ISNULL(CustomField10,'')<>? "
-                   "ORDER BY CreatedDate DESC" % master_table, _PM_MARK)
-        r = cur.fetchone()
-        that = dict(zip([c[0] for c in cur.description], r)) if r else None
-        # TOÀN BỘ RefType khả dĩ (tra SYSRefType) — RefType phần mềm đang
-        # chọn CÓ THỂ không đúng loại "Chi/Thu tiền mặt" thật MISA cần (view
-        # Quỹ đọc dữ liệu có khả năng lọc/derive theo RefType, xem CAType ở
-        # View_CAReceiptPayment) — liệt kê hết để đối chiếu bằng mắt.
-        cac_reftype = [{"reftype": int(rt), "ten": tn} for rt, tn in cur.execute(
-            "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName=?",
-            master_table).fetchall()]
-        # Đếm số dòng THẬT (không do phần mềm tạo) theo từng RefType — RefType
-        # nào có nhiều dòng thật nhất mới chắc chắn là loại MISA thật sự dùng
-        # cho lưới Quỹ, thay vì suy đoán qua tên.
-        dem_reftype_that = {int(rt): n for rt, n in cur.execute(
-            "SELECT RefType, COUNT(*) FROM %s WHERE ISNULL(CustomField10,'')<>? "
-            "GROUP BY RefType" % master_table, _PM_MARK).fetchall()}
-        for it in cac_reftype:
-            it["so_dong_that"] = dem_reftype_that.get(it["reftype"], 0)
-        cac_reftype.sort(key=lambda x: -x["so_dong_that"])
-        # Bảng CHI TIẾT (Nợ/Có/Số tiền) của phiếu vừa tạo — kiểm tra riêng vì
-        # trước đây chỉ soi bảng master, có thể dòng chi tiết bị thiếu/sai
-        # (vd DebitAccount/CreditAccount không khớp Account thật) khiến view
-        # Quỹ không đủ dữ liệu xác định đây là phiếu tiền mặt.
-        detail_table = master_table + "Detail"
-        chi_tiet = []
-        if cua_minh:
-            cur.execute("SELECT * FROM %s WHERE RefID=?" % detail_table, cua_minh[0]["RefID"])
-            dcols = [c[0] for c in cur.description]
-            chi_tiet = [dict(zip(dcols, r)) for r in cur.fetchall()]
-        # Danh sách TK thật có trong Danh mục Kế toán — kiểm tra "331"/"1111"
-        # có đúng khớp AccountNumber thật không (có thể cần hậu tố NCC/NH).
-        tk_that = [str(a) for (a,) in cur.execute(
-            "SELECT AccountNumber FROM Account WHERE AccountNumber IN (?,?,?,?)",
-            "331", "1111", "131", "1121").fetchall()]
-        # Lấy THẲNG định nghĩa SQL thật của view mà lưới "Quỹ > Thu, chi
-        # tiền" nhiều khả năng đọc qua (View_CAReceiptPayment) — thay vì tiếp
-        # tục đoán cột nào gây lọc mất, đọc đúng JOIN/WHERE thật MISA dùng.
-        view_sql = None
-        trong_view = None
-        try:
-            row_v = cur.execute(
-                "SELECT OBJECT_DEFINITION(OBJECT_ID('View_CAReceiptPayment'))").fetchone()
-            view_sql = row_v[0] if row_v else None
-        except Exception as e:
-            view_sql = "(không đọc được định nghĩa view: %s)" % str(e)[:200]
-        if cua_minh:
-            try:
-                row_c = cur.execute(
-                    "SELECT COUNT(*) FROM View_CAReceiptPayment WHERE RefID=?",
-                    cua_minh[0]["RefID"]).fetchone()
-                trong_view = int(row_c[0]) if row_c else 0
-            except Exception as e:
-                trong_view = "(lỗi: %s)" % str(e)[:200]
-        # Chi nhánh (BranchID) đang dùng có khớp đúng 1 OrganizationUnit thật
-        # không — liệt kê hết để so, vì view có cột OrganizationUnitName
-        # NOTNULL (nghi vấn INNER JOIN theo BranchID).
-        chi_nhanh = [{"id": str(oid), "ten": ten, "co_cha": pid is not None} for oid, ten, pid in
-                    cur.execute("SELECT OrganizationUnitID, OrganizationUnitName, ParentID "
-                               "FROM OrganizationUnit").fetchall()]
-    finally:
-        conn.close()
-
-    def don_gian(d):
-        if not d:
-            return d
-        return {k: (str(v) if v is not None else None) for k, v in d.items()}
-
-    return {"loai": loai, "bang": master_table, "so_dong_cua_minh": so_dong_cua_minh,
-            "cua_minh": [don_gian(x) for x in cua_minh], "that": don_gian(that),
-            "cac_reftype": cac_reftype, "chi_tiet": [don_gian(x) for x in chi_tiet],
-            "tk_that_co": tk_that, "view_sql": view_sql, "trong_view": trong_view,
-            "chi_nhanh": chi_nhanh}
-
-
-@app.get("/api/misa-sql/chan-doan-bu-tru/{cid}")
-def misa_sql_chan_doan_bu_tru(cid: int, loai: str = "ncc", database: str = ""):
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    if not database:
-        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
-                                 "kết nối tới dữ liệu THỬ trước.")
-    return _misa_chan_doan_bu_tru(cid, database, loai=loai)
 
 
 # ============================================================
