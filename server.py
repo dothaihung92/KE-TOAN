@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.051"
+APP_BUILD = "2026-08-27.052"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23234,6 +23234,26 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
         for tt in tts:
             ung_vien = [hd for hd in hds if not hd["matched"] and trong_cua_so(hd, tt)
                        and abs(hd["so_tien"] - tt["so_tien"]) <= 1]
+            if len(ung_vien) > 1:
+                # Nhiều hóa đơn TRÙNG giá trị lọt vào cùng lúc — thường vì ô
+                # "cho thanh toán TRƯỚC ngày HĐ" (mặc định 7 ngày) nới cho cả
+                # hóa đơn xuất SAU ngày thanh toán lọt vào làm ứng viên. Về
+                # bản chất kế toán, 1 khoản thanh toán thật hầu như luôn trả
+                # cho hóa đơn ĐÃ TỒN TẠI (ngày HĐ <= ngày TT) — hóa đơn xuất
+                # SAU ngày thanh toán chỉ lọt vào nhờ độ nới đó, không phải vì
+                # thật sự được trả bằng khoản này. Xác nhận qua đối chiếu sổ
+                # cái 331 thật của khách hàng: 1 khoản chuyển khoản ngân hàng
+                # trùng giá trị với 2 hóa đơn (1 hóa đơn XUẤT TRƯỚC, 1 hóa đơn
+                # XUẤT SAU ngày chuyển khoản) — hóa đơn xuất SAU thực chất
+                # được thanh toán RIÊNG bằng 1 kênh khác ngoài sao kê ngân
+                # hàng công ty (vd chuyển khoản cá nhân), nên KHÔNG BAO GIỜ có
+                # thể là hóa đơn mà khoản chuyển khoản NGÀY TRƯỚC đó trả cho.
+                # Nếu sau khi loại các hóa đơn "chưa tồn tại" này còn lại
+                # ĐÚNG 1 hóa đơn — khớp thẳng, khỏi báo "không rõ"; hóa đơn bị
+                # loại vẫn treo bình thường ở Tầng 3 chờ người dùng tự xử lý.
+                binh_thuong = [hd for hd in ung_vien if hd["inv_date"] and hd["inv_date"] <= tt["date"]]
+                if binh_thuong:
+                    ung_vien = binh_thuong
             if len(ung_vien) == 1:
                 danh_dau_ca_hoa_don(ung_vien[0])
                 tt["matched"] = True
