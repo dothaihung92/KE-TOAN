@@ -7655,37 +7655,24 @@ async function misaBuTruTim(loai){
     misaBuTruNghiSaiHienTai=d.nghi_sai_doi_tuong||[];
     const tns=document.getElementById('misaBuTruNghiSai');
     if(misaBuTruNghiSaiHienTai.length){
-      const rowsns=misaBuTruNghiSaiHienTai.map((it,i)=>{
-        const hdGan=it.hoa_don_gan||[];
-        const hdText=hdGan.length?hdGan.map(h=>`HĐ ${misaEsc(h.inv_no)} (${misaEsc(h.inv_date)}): ${h.so_tien.toLocaleString('vi-VN')}đ`).join('; ')
-          :'<span style="color:#999">(không có HĐ nào gần ngày này)</span>';
-        const chenh=it.chenh_lech;
-        const chenhText=(chenh===null||chenh===undefined)?'—':`${chenh>0?'+':''}${chenh.toLocaleString('vi-VN')}`;
-        const chenhColor=(chenh===null||chenh===undefined)?'#999':(Math.abs(chenh)<=20000?'#1a7a4a':'#b91c1c');
-        return `
+      const rowsns=misaBuTruNghiSaiHienTai.map((it,i)=>`
         <tr onclick="misaGdXem(misaBuTruNghiSaiHienTai[${i}],'${loai}')" style="cursor:pointer" title="Bấm để xem chi tiết giao dịch">
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ma)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ngay)}</td>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mo_ta)}</td>
-          <td style="padding:5px 8px;border:1px solid #eee">${hdText}</td>
-          <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.tong_tien_hd?it.tong_tien_hd.toLocaleString('vi-VN'):'—'}</td>
-          <td style="padding:5px 8px;border:1px solid #eee;text-align:right;color:${chenhColor};font-weight:600">${chenhText}</td>
-        </tr>`;}).join('');
+        </tr>`).join('');
       tns.innerHTML=`
         <details style="margin-bottom:8px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#8a5d00">🔎 Nghi ngờ gắn nhầm đối tượng — nội dung CK không khớp tên (${misaBuTruNghiSaiHienTai.length}) — bấm 1 dòng để xem chi tiết giao dịch</summary>
           <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin:6px 0">
-            Khoản thanh toán CHƯA khớp hóa đơn nào, nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai). Cột "Hóa đơn gần"/"Tổng tiền HĐ"/"Chênh lệch" liệt kê hóa đơn CÒN TREO của CHÍNH đối tượng đang gắn, gần ngày khoản thanh toán này (chỉ để bạn tham khảo so sánh, KHÔNG dùng để tự khớp).
+            Khoản thanh toán CHƯA khớp hóa đơn nào, nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai).
           </div>
           <div style="max-height:22vh;overflow:auto">
           <table style="border-collapse:collapse;font-size:12px;width:100%">
             <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
               <th style="padding:5px 8px;border:1px solid #eee">Ngày</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
-              <th style="padding:5px 8px;border:1px solid #eee">Nội dung CK</th>
-              <th style="padding:5px 8px;border:1px solid #eee">Hóa đơn gần (còn treo)</th>
-              <th style="padding:5px 8px;border:1px solid #eee">Tổng tiền HĐ</th>
-              <th style="padding:5px 8px;border:1px solid #eee">Chênh lệch</th></tr>${rowsns}
+              <th style="padding:5px 8px;border:1px solid #eee">Nội dung CK</th></tr>${rowsns}
           </table></div>
         </details>`;
     }else{
@@ -7694,16 +7681,23 @@ async function misaBuTruTim(loai){
     misaBuTruGoiYChuyenHienTai=d.goi_y_chuyen||[];
     const tgy=document.getElementById('misaBuTruGoiYChuyen');
     if(misaBuTruGoiYChuyenHienTai.length){
-      const rowsgy=misaBuTruGoiYChuyenHienTai.map((it,i)=>`
+      const rowsgy=misaBuTruGoiYChuyenHienTai.map((it,i)=>{
+        const chenh=it.chenh_lech;
+        const chenhText=(chenh===null||chenh===undefined)?'—':`${chenh>0?'+':''}${chenh.toLocaleString('vi-VN')}`;
+        const chenhColor=(chenh===null||chenh===undefined)?'#999':(Math.abs(chenh)<=20000?'#1a7a4a':'#b91c1c');
+        return `
         <tr>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><input type="checkbox" class="buTruGoiYChk" data-i="${i}" checked></td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.tu_ma)} — ${misaEsc(it.tu_ten)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.den_ma)} — ${misaEsc(it.den_ten)}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_date||'')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${(it.hd_so_tien||0).toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
+          <td style="padding:5px 8px;border:1px solid #eee;text-align:right;color:${chenhColor};font-weight:600">${chenhText}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.tt_ngay||'')}</td>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><button class="btn ghost sm" style="padding:2px 8px" onclick="misaGdXem(misaBuTruGoiYChuyenHienTai[${i}],'${loai}')">🔎 Xem</button></td>
-        </tr>`).join('');
+        </tr>`;}).join('');
       tgy.innerHTML=`
         <div style="background:#fde8e8;border:1px solid #f5b5b5;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#b91c1c;margin-bottom:8px">
           ⚠ Phát hiện <b>${misaBuTruGoiYChuyenHienTai.length}</b> khoản thanh toán CHƯA khớp hóa đơn nào, nhưng trùng CHÍNH XÁC số tiền với 1 hóa đơn CÒN TREO của ĐÚNG 1 đối tượng KHÁC — rất có thể bị gắn nhầm mã KH/NCC.
@@ -7712,7 +7706,9 @@ async function misaBuTruTim(loai){
         <table style="border-collapse:collapse;font-size:12.5px;width:100%">
           <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
             <th style="padding:5px 8px;border:1px solid #eee">Đang gắn (sai)</th><th style="padding:5px 8px;border:1px solid #eee">Nên gắn (đúng)</th>
-            <th style="padding:5px 8px;border:1px solid #eee">Số HĐ đích</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
+            <th style="padding:5px 8px;border:1px solid #eee">Số HĐ đích</th><th style="padding:5px 8px;border:1px solid #eee">Ngày HĐ</th>
+            <th style="padding:5px 8px;border:1px solid #eee">Số tiền HĐ</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền TT</th>
+            <th style="padding:5px 8px;border:1px solid #eee">Chênh lệch</th>
             <th style="padding:5px 8px;border:1px solid #eee">Ngày TT</th><th style="padding:5px 8px;border:1px solid #eee"></th></tr>${rowsgy}
         </table></div>
         <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#1a7a4a;margin-top:10px">
