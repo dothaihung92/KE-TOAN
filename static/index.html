@@ -7880,7 +7880,7 @@ async function misaBuTruGhiChay(loai, ds, preview){
       </tr>`).join('');
     box.innerHTML=`
       <div style="background:${preview?'#fff8e1':'#eafaf0'};border:1px solid ${preview?'#e8b923':'#7ac9a0'};border-radius:8px;padding:8px 12px;font-size:12.5px;color:${preview?'#8a5d00':'#1a7a4a'};margin-bottom:8px;text-align:left">
-        ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} chứng từ Nghiệp vụ khác (${loai==='kh'?'Nợ 1111/Có 131':'Nợ 331/Có 1111'}), ghi sổ luôn.`:`✓ Đã ghi sổ ${d.so_ghi} chứng từ Nghiệp vụ khác${d.hoc_duoc_cot_doi_tuong?'':' — CHƯA gán được đối tượng (cần gán tay trên MISA)'} — vào MISA: Nghiệp vụ khác để kiểm tra.`}
+        ${preview?`⚠ XEM TRƯỚC — sẽ ghi ${d.so_ghi} chứng từ Nghiệp vụ khác (${loai==='kh'?'Nợ 1111/Có 131':'Nợ 331/Có 1111'}), ghi sổ luôn.`:`✓ Đã ghi sổ ${d.so_ghi} chứng từ Nghiệp vụ khác${d.hoc_duoc_cot_doi_tuong?'':' — CHƯA gán được đối tượng (cần gán tay trên MISA)'}${d.hoc_duoc_so_cai?'':' — ⚠ CHƯA ghi được Sổ Cái/Sổ chi tiết công nợ (công ty chưa có mẫu chứng từ Nghiệp vụ khác thật nào để học theo — công nợ CHƯA cập nhật, hóa đơn sẽ còn hiện treo)'} — vào MISA: Nghiệp vụ khác để kiểm tra.`}
       </div>
       <table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left">
         <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">Mã</th><th style="padding:4px 8px;border:1px solid #eee">Tên</th><th style="padding:4px 8px;border:1px solid #eee">Số CT</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr>

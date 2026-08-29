@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.067"
+APP_BUILD = "2026-08-27.068"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24154,7 +24154,30 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
     Ghi ĐÃ GHI SỔ ngay (IsPostedFinance=1, giống các bút toán 'Đảo'/
     'Chuyển công nợ' cùng họ) — vẫn đánh dấu CustomField10=_PM_MARK để
     truy vết; xem _misa_don_phieu_bu_tru_loi để gỡ các chứng từ CHƯA GHI
-    SỔ còn sót lại từ bản cũ (trước khi đổi sang ghi sổ trực tiếp)."""
+    SỔ còn sót lại từ bản cũ (trước khi đổi sang ghi sổ trực tiếp).
+
+    BÀI HỌC rút ra từ báo cáo thật của người dùng (chứng từ hiện đủ trên
+    MISA, "đã ghi sổ", nhưng hóa đơn liên quan VẪN hiện lại ở Tầng 3 mỗi
+    lần chạy lại đối chiếu — ĐÚNG bài học cũ đã gặp ở _misa_ghi_thu_chi):
+    chỉ đổi cờ IsPostedFinance=1 qua SQL KHÔNG tự sinh ra 2 bảng "sổ cái"
+    GeneralLedger (ghi kép Nợ/Có) + AccountObjectLedger (sổ chi tiết công
+    nợ theo đối tượng) — đây là những gì "Ghi sổ" THẬT của MISA tự sinh
+    thêm; thiếu 2 bảng này thì _misa_doi_tuong_dieu_chinh_tien_mat (đọc
+    TRỰC TIẾP từ AccountObjectLedger) không thấy gì, hóa đơn vẫn treo mãi
+    dù chứng từ NVK trông có vẻ đã xong. Đã bổ sung ghi kèm 2 dòng
+    GeneralLedger + 1 dòng AccountObjectLedger, học mẫu từ 1 chứng từ
+    THẬT (không do phần mềm này tạo) — nếu KHÔNG tìm được mẫu (công ty
+    chưa từng ghi sổ 1 chứng từ Nghiệp vụ khác đơn giản/1 dòng nào), CHỈ
+    ghi GLVoucher/GLVoucherDetail và trả về hoc_duoc_so_cai=False để
+    người dùng biết công nợ CHƯA thực sự cập nhật, không im lặng báo
+    "thành công" nửa vời.
+
+    Cũng sửa lỗi RefType học SAI: trước đây dò mẫu qua wildcard rộng
+    "RefNoFinance LIKE 'DC%'", khớp lẫn cả dãy số chứng từ KHÁC của công
+    ty (vd 'DCTM...' — Chiết khấu thương mại, không liên quan) — xác nhận
+    qua ảnh chụp thật người dùng báo (cột "Nghiệp vụ" trên MISA hiện
+    "Chiết khấu thương mại (bán hàng)" cho chứng từ điều chỉnh công nợ
+    treo). Đã thu hẹp đúng về 2 tiền tố CỦA CHÍNH mình (DCTR%/DCTH%)."""
     import re
     import uuid as _uuid
     if loai not in ("kh", "ncc"):
@@ -24218,7 +24241,14 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
             if len(ung_vien_ten) == 1:
                 cot_dt = ung_vien_ten[0]
 
-        mau_glv = _misa_mau_dong_that(cur, "GLVoucher", "ISNULL(RefNoFinance,'') LIKE 'DC%'")
+        # Quét ĐÚNG tiền tố CỦA CHÍNH mình (DCTR/DCTH) — KHÔNG dùng wildcard
+        # rộng 'DC%' (bài học từ ảnh chụp thật người dùng báo: bút toán ghi
+        # ra bị gán nhầm RefType "Chiết khấu thương mại (bán hàng)" vì công
+        # ty này có sẵn 1 dãy số chứng từ KHÁC cũng bắt đầu bằng "DC" — chiết
+        # khấu thương mại, không liên quan — 'DC%' khớp lẫn cả 2 dãy).
+        mau_glv = _misa_mau_dong_that(
+            cur, "GLVoucher",
+            "ISNULL(RefNoFinance,'') LIKE 'DCTR%' OR ISNULL(RefNoFinance,'') LIKE 'DCTH%'")
         ref_type = mau_glv.get("RefType") if mau_glv else None
         if ref_type is None:
             ref_type, _n = _misa_pu_reftype(cur, ("khac",), master_table="GLVoucher")
@@ -24227,6 +24257,54 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
                 400, "Không xác định được loại chứng từ (RefType) cho 'Nghiệp vụ khác' — CSDL MISA "
                      "đang kết nối thiếu dữ liệu hệ thống SYSRefType. Hãy tạo tay 1 chứng từ 'Nghiệp "
                      "vụ khác' trên MISA rồi thử lại.")
+
+        # QUAN TRỌNG — bài học CŨ đã gặp ở Ngân hàng (_misa_ghi_thu_chi): ghi
+        # Master/Detail với IsPostedFinance=True vẫn KHÔNG đủ để MISA hiện
+        # đúng số dư/công nợ — còn thiếu 2 bảng "sổ cái" GeneralLedger (ghi
+        # kép Nợ/Có) + AccountObjectLedger (sổ chi tiết công nợ theo đối
+        # tượng) mà "Ghi sổ" THẬT của MISA tự sinh thêm, KHÔNG tự có chỉ vì
+        # đổi cờ IsPostedFinance qua SQL. Áp dụng ĐÚNG bài học đó cho
+        # GLVoucher (trước đây bỏ sót — đây chính là lý do hóa đơn vẫn hiện
+        # lại ở Tầng 3 dù chứng từ NVK đã "ghi sổ" xong): học mẫu
+        # GeneralLedger (2 dòng ghi kép) từ 1 chứng từ Nghiệp vụ khác THẬT
+        # (không do phần mềm này tạo) đã ghi sổ, CHỈ 1 dòng chi tiết (đúng
+        # cấu trúc bút toán đơn giản của chính mình, tránh học nhầm mẫu
+        # nhiều dòng) — và mẫu AccountObjectLedger từ BẤT KỲ dòng công nợ
+        # (131/331) thật nào có gắn đối tượng (không cần CÙNG chứng từ —
+        # cấu trúc cột dùng chung cho toàn bảng, không riêng gì GLVoucher).
+        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+        cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
+        mau_gl = []
+        mau_aol = None
+        try:
+            row0 = cur.execute(
+                "SELECT TOP 1 gv.RefID FROM GLVoucher gv WHERE ISNULL(gv.CustomField10,'')<>? "
+                "AND ISNULL(gv.IsPostedFinance,0)=1 AND (SELECT COUNT(*) FROM GLVoucherDetail gd "
+                "WHERE gd.RefID=gv.RefID)=1 ORDER BY gv.CreatedDate DESC", _PM_MARK).fetchone()
+            ref_id_mau_gl = row0[0] if row0 else None
+        except Exception:
+            ref_id_mau_gl = None
+        if ref_id_mau_gl and cols_gl:
+            try:
+                gl_cols_list = [name for name, _ in cols_gl.values()]
+                sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % (
+                    "],[".join(gl_cols_list))
+                for row in cur.execute(sql, ref_id_mau_gl).fetchall():
+                    mau_gl.append(dict(zip(gl_cols_list, row)))
+            except Exception:
+                mau_gl = []
+        if cols_aol:
+            try:
+                aol_cols_list = [name for name, _ in cols_aol.values()]
+                sql = ("SELECT TOP 1 [%s] FROM AccountObjectLedger WHERE AccountNumber LIKE ? "
+                       "AND AccountObjectID IS NOT NULL ORDER BY RefDate DESC" %
+                       "],[".join(aol_cols_list))
+                row = cur.execute(sql, tk_ke_toan + "%").fetchone()
+                if row:
+                    mau_aol = dict(zip(aol_cols_list, row))
+            except Exception:
+                mau_aol = None
+        co_mau_so_cai = len(mau_gl) == 2 and mau_aol is not None
 
         max_reforder = 0
         try:
@@ -24291,8 +24369,9 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
                 cur.execute("INSERT INTO GLVoucher ([%s]) VALUES (%s)" %
                            ("],[".join(cs), ",".join(["?"] * len(cs))), [glv_row[c] for c in cs])
 
+                glvd_id = str(_uuid.uuid4())
                 glvd_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glvd.values()}
-                _misa_gan(glvd_row, cols_glvd, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(glvd_row, cols_glvd, glvd_id, "RefDetailID")
                 _misa_gan(glvd_row, cols_glvd, glv_id, "RefID")
                 _misa_gan(glvd_row, cols_glvd, memo, "Description")
                 _misa_gan(glvd_row, cols_glvd, tk_no, "DebitAccount")
@@ -24306,6 +24385,94 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
                 cs = list(glvd_row.keys())
                 cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" %
                            ("],[".join(cs), ",".join(["?"] * len(cs))), [glvd_row[c] for c in cs])
+
+                # Ghi kèm 2 dòng GeneralLedger + 1 dòng AccountObjectLedger —
+                # xem giải thích ở khối "QUAN TRỌNG" phía trên (nếu KHÔNG có
+                # mẫu thật thì bỏ qua, chỉ có GLVoucher/GLVoucherDetail —
+                # đánh cờ hoc_duoc_so_cai=False để người dùng biết công nợ
+                # CHƯA thực sự cập nhật, không im lặng báo "thành công" nửa
+                # vời).
+                if co_mau_so_cai:
+                    tk_doi_ung_aol = tk_no if tk_ke_toan == tk_co else tk_co
+                    gl_rows = []
+                    for mgl in mau_gl:
+                        g = dict(mgl)
+                        for c in list(g.keys()):
+                            if c not in {name for name, _ in cols_gl.values()}:
+                                del g[c]
+                        la_no = _snum(mgl.get("DebitAmountOC")) > 0 or _snum(mgl.get("DebitAmount")) > 0
+                        tk_dong_nay = tk_no if la_no else tk_co
+                        tk_doi_ung = tk_co if la_no else tk_no
+                        _misa_gan(g, cols_gl, glv_id, "RefID")
+                        _misa_gan(g, cols_gl, glvd_id, "RefDetailID")
+                        _misa_gan(g, cols_gl, ngay_dt, "RefDate")
+                        _misa_gan(g, cols_gl, ngay_dt, "RefDate1")
+                        _misa_gan(g, cols_gl, ngay_dt, "PostedDate")
+                        _misa_gan(g, cols_gl, so_ct, "RefNo")
+                        _misa_gan(g, cols_gl, so_ct, "RefNo1")
+                        _misa_gan(g, cols_gl, so_ct, "RefNo2")
+                        _misa_gan(g, cols_gl, so_ct, "RefNoFinance")
+                        _misa_gan(g, cols_gl, memo, "JournalMemo")
+                        _misa_gan(g, cols_gl, memo, "Description")
+                        _misa_gan(g, cols_gl, tk_dong_nay, "AccountNumber")
+                        _misa_gan(g, cols_gl, tk_doi_ung, "CorrespondingAccountNumber")
+                        _misa_gan(g, cols_gl, aoid, "AccountObjectID")
+                        _misa_gan(g, cols_gl, branch_id, "BranchID")
+                        max_reforder += 1
+                        _misa_gan(g, cols_gl, max_reforder, "RefOrder")
+                        if la_no:
+                            _misa_gan(g, cols_gl, so_tien, "DebitAmountOC")
+                            _misa_gan(g, cols_gl, so_tien, "DebitAmount")
+                            _misa_gan(g, cols_gl, 0, "CreditAmountOC")
+                            _misa_gan(g, cols_gl, 0, "CreditAmount")
+                        else:
+                            _misa_gan(g, cols_gl, so_tien, "CreditAmountOC")
+                            _misa_gan(g, cols_gl, so_tien, "CreditAmount")
+                            _misa_gan(g, cols_gl, 0, "DebitAmountOC")
+                            _misa_gan(g, cols_gl, 0, "DebitAmount")
+                        gl_rows.append(g)
+
+                    a = dict(mau_aol)
+                    for c in list(a.keys()):
+                        if c not in {name for name, _ in cols_aol.values()}:
+                            del a[c]
+                    _misa_gan(a, cols_aol, glv_id, "RefID")
+                    _misa_gan(a, cols_aol, glvd_id, "RefDetailID")
+                    _misa_gan(a, cols_aol, ngay_dt, "RefDate")
+                    _misa_gan(a, cols_aol, ngay_dt, "PostedDate")
+                    _misa_gan(a, cols_aol, so_ct, "RefNo")
+                    _misa_gan(a, cols_aol, so_ct, "RefNoFinance")
+                    _misa_gan(a, cols_aol, memo, "JournalMemo")
+                    _misa_gan(a, cols_aol, memo, "Description")
+                    _misa_gan(a, cols_aol, tk_ke_toan, "AccountNumber")
+                    _misa_gan(a, cols_aol, tk_doi_ung_aol, "CorrespondingAccountNumber")
+                    _misa_gan(a, cols_aol, aoid, "AccountObjectID")
+                    _misa_gan(a, cols_aol, it.get("mst"), "AccountObjectCode")
+                    _misa_gan(a, cols_aol, it.get("ten"), "AccountObjectName")
+                    _misa_gan(a, cols_aol, it.get("ten"), "AccountObjectNameDI")
+                    _misa_gan(a, cols_aol, branch_id, "BranchID")
+                    max_reforder += 1
+                    _misa_gan(a, cols_aol, max_reforder, "RefOrder")
+                    _misa_gan(a, cols_aol, f"{glv_id}#{aoid}#{tk_ke_toan}", "PayKeyID")
+                    _misa_gan(a, cols_aol, f"{glv_id}#{aoid}#{tk_ke_toan}", "DebtKeyID")
+                    if tk_ke_toan == tk_no:
+                        _misa_gan(a, cols_aol, so_tien, "DebitAmountOC")
+                        _misa_gan(a, cols_aol, so_tien, "DebitAmount")
+                        _misa_gan(a, cols_aol, 0, "CreditAmountOC")
+                        _misa_gan(a, cols_aol, 0, "CreditAmount")
+                    else:
+                        _misa_gan(a, cols_aol, so_tien, "CreditAmountOC")
+                        _misa_gan(a, cols_aol, so_tien, "CreditAmount")
+                        _misa_gan(a, cols_aol, 0, "DebitAmountOC")
+                        _misa_gan(a, cols_aol, 0, "DebitAmount")
+
+                    for g in gl_rows:
+                        cs = list(g.keys())
+                        cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
+                                   ("],[".join(cs), ",".join(["?"] * len(cs))), [g[c] for c in cs])
+                    cs = list(a.keys())
+                    cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
+                               ("],[".join(cs), ",".join(["?"] * len(cs))), [a[c] for c in cs])
             so_ghi += 1
             ket_qua.append({"mst": it.get("mst"), "ten": it.get("ten"), "inv_no": it.get("inv_no"),
                             "so_tien": so_tien, "so_ct": so_ct})
@@ -24314,7 +24481,7 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
         else:
             conn.commit()
         return {"preview": preview, "loai": loai, "so_ghi": so_ghi, "danh_sach": ket_qua,
-                "hoc_duoc_cot_doi_tuong": bool(cot_dt)}
+                "hoc_duoc_cot_doi_tuong": bool(cot_dt), "hoc_duoc_so_cai": co_mau_so_cai}
     except HTTPException:
         conn.rollback()
         raise
@@ -24872,7 +25039,14 @@ def _misa_chuyen_cong_no_sai_doi_tuong(cid, database, loai, danh_sach, preview=T
             # phân biệt (chưa có mẫu nào có đối tượng ở đúng bên còn lại).
             cot_no = cot_co = None
 
-        mau_glv = _misa_mau_dong_that(cur, "GLVoucher", "ISNULL(RefNoFinance,'') LIKE 'DC%'")
+        # Wildcard rộng 'DC%' khớp lẫn dãy số chứng từ KHÁC của công ty (vd
+        # 'DCTM...' — Chiết khấu thương mại) — xác nhận qua lỗi thật ở
+        # _misa_ghi_bu_tru_treo (ảnh chụp MISA hiện nhầm "Nghiệp vụ" =
+        # "Chiết khấu thương mại (bán hàng)"); thu hẹp đúng 2 tiền tố của
+        # họ "Điều chỉnh công nợ" (DCTR/DCTH).
+        mau_glv = _misa_mau_dong_that(
+            cur, "GLVoucher",
+            "ISNULL(RefNoFinance,'') LIKE 'DCTR%' OR ISNULL(RefNoFinance,'') LIKE 'DCTH%'")
         ref_type = mau_glv.get("RefType") if mau_glv else None
         if ref_type is None:
             ref_type, _n = _misa_pu_reftype(cur, ("khac",), master_table="GLVoucher")
