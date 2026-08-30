@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.078"
+APP_BUILD = "2026-08-27.079"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16771,8 +16771,18 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 if not invno:
                     continue
                 bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower())
-                kh = str(invkh or "").strip().lower()
-                e = _pm_invoices.setdefault(bk, {}).setdefault(kh, {"refids": [], "doc": rn, "posted": False})
+                # QUAN TRỌNG: KHÔNG được đặt tên biến này là "kh" — trùng tên
+                # với dict tra cứu Khách hàng "kh" (AccountObjectID theo MST)
+                # dựng ở đầu hàm. Bug THẬT đã xảy ra: khi SAVoucher CÓ ít
+                # nhất 1 dòng do phần mềm tạo trước đó (CustomField10=
+                # _PM_MARK — chắc chắn có sau vài lần chạy), vòng lặp này
+                # GHI ĐÈ "kh" thành 1 CHUỖI (Ký hiệu HĐ của dòng cuối), làm
+                # "mst_k not in kh" ở vòng ghi chính bên dưới biến thành so
+                # sánh CHUỖI CON thay vì tra cứu dict -> gần như MỌI khách
+                # hàng đều bị báo sai "chưa có trong MISA", 0 chứng từ được
+                # ghi dù dữ liệu hoàn toàn hợp lệ.
+                kh_pm = str(invkh or "").strip().lower()
+                e = _pm_invoices.setdefault(bk, {}).setdefault(kh_pm, {"refids": [], "doc": rn, "posted": False})
                 e["refids"].append(refid)
                 if pf or pm:
                     e["posted"] = True
