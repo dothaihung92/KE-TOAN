@@ -7689,6 +7689,12 @@ async function misaChiTietCongNo(loai,accountObjectId){
 }
 function misaBuTruMo(loai){
   if(!current){toast('Chọn công ty trước','err');return}
+  // Giữ lại "Từ ngày"/"Đến ngày" đã gõ khi chuyển tab Khách hàng/Nhà cung
+  // cấp — đọc lại từ input CŨ (nếu màn đang mở, trước khi bị vẽ đè) lưu
+  // vào biến cấp module, để đỡ phải gõ lại mỗi lần đổi tab.
+  const tuElCu=document.getElementById('buTruTu'), denElCu=document.getElementById('buTruDen');
+  if(tuElCu)misaDoiChieuTu=tuElCu.value||'';
+  if(denElCu)misaDoiChieuDen=denElCu.value||'';
   misaBuTruLoaiHienTai=loai;
   misaModalEscBack=null;
   misaModalFull();
@@ -7696,9 +7702,12 @@ function misaBuTruMo(loai){
   document.getElementById('misaModalBody').innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:10px">${misaBuTruTabs(loai)}</div>
     <div style="font-weight:800;font-size:16px;color:#7a4fb5;margin-bottom:10px">🩹 Đối chiếu công nợ 3 tầng — ${loai==='kh'?'Khách hàng':'Nhà cung cấp'}</div>
-    <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 14px;font-size:13px;color:#8a5d00;margin-bottom:12px">
+    <details style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 14px;font-size:13px;color:#8a5d00;margin-bottom:12px">
+      <summary style="cursor:pointer;font-weight:600">ℹ️ Tầng 1/2/3 là gì? (bấm để xem)</summary>
+      <div style="margin-top:6px">
       <b>Tầng 1</b>: khớp 1-1 chính xác từng khoản thanh toán NH thật (đã nhập MISA) với từng hóa đơn, chỉ xét hóa đơn có ngày gần khoản thanh toán (trong cửa sổ bên dưới). <b>Tầng 2</b>: khớp 1 khoản thanh toán với TỔ HỢP nhiều hóa đơn cộng lại đúng số tiền. Cả 2 tầng chỉ liệt kê để biết, KHÔNG ghi gì. <b>Tầng 3</b>: hóa đơn còn lại không khớp được khoản nào, PHẢI thỏa CẢ 2 điều kiện — giá trị dưới ngưỡng VÀ quá hạn hơn N tháng, tính ĐẾN "Đến ngày" nếu có nhập (không phải lúc nào cũng tính từ hôm nay — tránh mọi hóa đơn cũ trong khung ngày đều bị coi là quá hạn chỉ vì báo cáo được chạy rất lâu SAU kỳ đang xem) — đề xuất xuất Excel điều chỉnh về 0. <b>Ngoại lệ</b>: hóa đơn 🎯 "Độ tin cậy cao" (các hóa đơn phát sinh SAU của cùng đối tượng đã khớp thanh toán đủ, riêng hóa đơn này thì chưa) vẫn hiện dù CHƯA quá hạn — dấu hiệu đó tự nó đã đủ mạnh, không cần đợi thời gian.
-    </div>
+      </div>
+    </details>
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:14px">
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Hóa đơn từ ngày</label>
         <input type="date" id="buTruTu" min="2000-01-01" max="2099-12-31" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
@@ -7716,7 +7725,10 @@ function misaBuTruMo(loai){
         <input type="number" id="buTruTruocNgay" value="7" min="0" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruTim('${loai}')">🔍 Chạy đối chiếu</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">Hóa đơn từ ngày/Đến ngày áp dụng cho CẢ 3 TẦNG — chỉ hóa đơn trong khung này mới được xét (đã điền sẵn theo khung bạn chọn ở màn Tổng hợp công nợ, có thể tự đổi). Khoản thanh toán ngân hàng không bị giới hạn theo khung này. Riêng Tầng 3 LUÔN áp dụng THÊM điều kiện "quá hạn hơn N tháng" (dù đã có khung ngày) — 2 điều kiện của Tầng 3 (giá trị dưới ngưỡng + quá hạn) phải cùng thỏa mãn, không phải chọn 1 trong 2. Mốc tính quá hạn là "Đến ngày" (nếu có nhập) — quá hạn TÍNH ĐẾN thời điểm báo cáo đang xem, không tính từ lúc bạn bấm chạy (nếu bấm chạy rất lâu sau kỳ báo cáo, mọi hóa đơn cũ trong khung sẽ không bị coi là quá hạn oan chỉ vì đã cách "hôm nay" quá lâu). Để trống "Đến ngày" thì mới tính quá hạn từ hôm nay như trước. Tầng 2 dò MỌI tổ hợp hóa đơn (kể cả không liên tiếp, ví dụ HĐ 1;2;5) cộng lại khớp 1 khoản thanh toán, xử lý THEO THỨ TỰ NGÀY; nếu không có tổ hợp hóa đơn NGUYÊN nào khớp, phần mềm thử khớp theo TỪNG THÀNH PHẦN (giá trị hàng hóa/thuế GTGT riêng) — cho phép 1 hóa đơn bị TÁCH giữa 2 lần thanh toán. Ưu tiên khớp tuyệt đối; chỉ khi không có tổ hợp khớp tuyệt đối mới chấp nhận lệch tối đa theo ô "cho lệch tối đa" (bù phí chuyển khoản). Ô "Cho thanh toán TRƯỚC ngày HĐ" (mặc định 7 ngày) — TĂNG số này có thể giúp khớp thêm được vài trường hợp thanh toán ghi sổ trước ngày hóa đơn, nhưng với NCC có nhiều hóa đơn giá trị GIỐNG/GẦN NHAU lặp hàng tháng (điện, nước, thuê mặt bằng...), tăng quá nhiều dễ làm NHIỀU khoản thanh toán khác rơi vào "Không rõ" — nên tăng dần từng chút và so sánh kết quả.</div>
+    <details style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">
+      <summary style="cursor:pointer">ℹ️ Giải thích thêm các ô nhập (bấm để xem)</summary>
+      <div style="margin-top:4px">Hóa đơn từ ngày/Đến ngày áp dụng cho CẢ 3 TẦNG — chỉ hóa đơn trong khung này mới được xét (đã điền sẵn theo khung bạn chọn ở màn Tổng hợp công nợ, có thể tự đổi). Khoản thanh toán ngân hàng không bị giới hạn theo khung này. Riêng Tầng 3 LUÔN áp dụng THÊM điều kiện "quá hạn hơn N tháng" (dù đã có khung ngày) — 2 điều kiện của Tầng 3 (giá trị dưới ngưỡng + quá hạn) phải cùng thỏa mãn, không phải chọn 1 trong 2. Mốc tính quá hạn là "Đến ngày" (nếu có nhập) — quá hạn TÍNH ĐẾN thời điểm báo cáo đang xem, không tính từ lúc bạn bấm chạy (nếu bấm chạy rất lâu sau kỳ báo cáo, mọi hóa đơn cũ trong khung sẽ không bị coi là quá hạn oan chỉ vì đã cách "hôm nay" quá lâu). Để trống "Đến ngày" thì mới tính quá hạn từ hôm nay như trước. Tầng 2 dò MỌI tổ hợp hóa đơn (kể cả không liên tiếp, ví dụ HĐ 1;2;5) cộng lại khớp 1 khoản thanh toán, xử lý THEO THỨ TỰ NGÀY; nếu không có tổ hợp hóa đơn NGUYÊN nào khớp, phần mềm thử khớp theo TỪNG THÀNH PHẦN (giá trị hàng hóa/thuế GTGT riêng) — cho phép 1 hóa đơn bị TÁCH giữa 2 lần thanh toán. Ưu tiên khớp tuyệt đối; chỉ khi không có tổ hợp khớp tuyệt đối mới chấp nhận lệch tối đa theo ô "cho lệch tối đa" (bù phí chuyển khoản). Ô "Cho thanh toán TRƯỚC ngày HĐ" (mặc định 7 ngày) — TĂNG số này có thể giúp khớp thêm được vài trường hợp thanh toán ghi sổ trước ngày hóa đơn, nhưng với NCC có nhiều hóa đơn giá trị GIỐNG/GẦN NHAU lặp hàng tháng (điện, nước, thuê mặt bằng...), tăng quá nhiều dễ làm NHIỀU khoản thanh toán khác rơi vào "Không rõ" — nên tăng dần từng chút và so sánh kết quả.</div>
+    </details>
     <div id="misaBuTruKetQua"></div>
     <div style="margin-top:12px;text-align:right">
       <button class="btn ghost sm" onclick="misaDoiChieuChay('${loai}')">← Quay lại tổng hợp công nợ</button>
