@@ -7418,6 +7418,24 @@ function misaImportTuDongBatDau(){
 // + Đề xuất bù công nợ treo (Giai đoạn 2) =====
 let misaBuTruDsHienTai=[];
 let misaDoiChieuTu='', misaDoiChieuDen='';
+// input type="date" của trình duyệt có 1 "bẫy" hay gặp: gõ năm chỉ 2 chữ
+// số (vd "25" thay vì "2025") KHÔNG được tự mở rộng thành 2025 — trình
+// duyệt lưu thẳng thành năm 0025 (chuỗi "0025-12-31"), khiến MỌI so sánh
+// ngày với dữ liệu thật (2025) đều sai lệch cả ~2000 năm -> lọc rỗng hết
+// dữ liệu, hiện "Không có dữ liệu" dù MISA có đủ. misaDoiChieuTu/Den còn
+// bị GIỮ LẠI (biến cấp module) nên 1 lần gõ nhầm sẽ kéo dài sang MỌI màn
+// dùng chung khung ngày này (Tổng hợp công nợ, Chi tiết công nợ, Đối
+// chiếu 3 tầng) cho tới khi tự sửa lại. Chặn ngay tại đây thay vì để lọt
+// xuống API rồi trả về rỗng khó hiểu.
+function misaNgayHopLe(dateStr, tenO){
+  if(!dateStr)return true;   // để trống = không lọc theo ngày, hợp lệ
+  const nam=parseInt(String(dateStr).slice(0,4),10);
+  if(!nam||nam<1900){
+    toast(`Năm trong ô "${tenO}" không hợp lệ (${dateStr}) — có thể bạn gõ nhầm chỉ 2 số năm (vd "25") thay vì đủ 4 số (2025). Sửa lại ô ngày rồi thử lại.`,'err');
+    return false;
+  }
+  return true;
+}
 // Kích thước khung misaModal: mặc định vừa phải (min(1040px,96vw)), nhưng
 // 2 màn "Tổng hợp công nợ"/"Chi tiết công nợ" bảng nhiều cột/dòng nên cần
 // full màn hình + chữ to hơn mới dễ nhìn — misaModalFull() phóng to, các
@@ -7541,6 +7559,7 @@ async function misaDoiChieuChay(loai){
   const tuEl=document.getElementById('doiChieuTu'), denEl=document.getElementById('doiChieuDen');
   if(tuEl)misaDoiChieuTu=tuEl.value||'';
   if(denEl)misaDoiChieuDen=denEl.value||'';
+  if(!misaNgayHopLe(misaDoiChieuTu,'Từ ngày')||!misaNgayHopLe(misaDoiChieuDen,'Đến ngày'))return;
   misaModalEscBack=null;
   document.getElementById('misaModalBody').innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang đọc công nợ từ MISA...</div>`;
   misaModalNormal();document.getElementById('misaModal').style.display='flex';
@@ -7570,9 +7589,9 @@ async function misaDoiChieuChay(loai){
       ${misaDoiChieuTabs(loai)}
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin:10px 0">
         <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Từ ngày</label>
-          <input type="date" id="doiChieuTu" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+          <input type="date" id="doiChieuTu" min="2000-01-01" max="2099-12-31" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
         <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Đến ngày</label>
-          <input type="date" id="doiChieuDen" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+          <input type="date" id="doiChieuDen" min="2000-01-01" max="2099-12-31" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
         <button class="btn sm" style="background:#2e5c8a" onclick="misaDoiChieuChay('${loai}')">Lọc</button>
       </div>
       <div style="background:#f0f7ff;border:1px solid #2e5c8a;border-radius:8px;padding:12px 16px;font-size:15px;color:#2e5c8a;margin-bottom:10px">
@@ -7662,9 +7681,9 @@ function misaBuTruMo(loai){
     </div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:14px">
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Hóa đơn từ ngày</label>
-        <input type="date" id="buTruTu" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+        <input type="date" id="buTruTu" min="2000-01-01" max="2099-12-31" value="${misaEsc(misaDoiChieuTu)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Đến ngày</label>
-        <input type="date" id="buTruDen" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+        <input type="date" id="buTruDen" min="2000-01-01" max="2099-12-31" value="${misaEsc(misaDoiChieuDen)}" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Cửa sổ ngày khớp thanh toán (tháng sau HĐ)</label>
         <input type="number" id="buTruCuaSoThang" value="3" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: và quá hạn hơn (tháng, tính đến ngày cuối khung)</label>
@@ -7711,6 +7730,7 @@ async function misaBuTruTim(loai){
   const truocNgay=document.getElementById('buTruTruocNgay').value||7;
   const tuNgay=document.getElementById('buTruTu').value||'';
   const denNgay=document.getElementById('buTruDen').value||'';
+  if(!misaNgayHopLe(tuNgay,'Hóa đơn từ ngày')||!misaNgayHopLe(denNgay,'Đến ngày'))return;
   const kq=document.getElementById('misaBuTruKetQua');
   kq.innerHTML=`<div style="text-align:center;padding:20px"><span class="spin"></span> Đang đối chiếu 3 tầng (có thể mất chút thời gian nếu nhiều hóa đơn)...</div>`;
   try{
