@@ -7750,18 +7750,17 @@ async function misaBuTruTim(loai){
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ngay)}</td>
           <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
           <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mo_ta)}</td>
-          <td style="padding:5px 8px;border:1px solid #eee;${it.da_khop?'color:#1a7a4a':'color:#b91c1c;font-weight:600'}">${it.da_khop?'Đã khớp số tiền':'Chưa khớp'}</td>
         </tr>`).join('');
       tns.innerHTML=`
         <details style="margin-bottom:8px" open><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#8a5d00">🔎 Nghi ngờ gắn nhầm đối tượng — nội dung CK không khớp tên (${misaBuTruNghiSaiHienTai.length}) — bấm 1 dòng để xem chi tiết giao dịch</summary>
           <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:8px 12px;font-size:12px;color:#8a5d00;margin:6px 0">
-            Nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai). Cột "Trạng thái" cho biết khoản đó ĐÃ khớp trùng số tiền với 1 hóa đơn nào đó chưa — <b>khớp đúng số tiền KHÔNG có nghĩa là khớp đúng đối tượng</b>, vẫn có thể bị gắn nhầm dù đã "khớp".
+            Khoản thanh toán CHƯA khớp hóa đơn nào, nội dung chuyển khoản KHÔNG hề nhắc tới tên đối tượng đang gắn — chỉ là CẢNH BÁO để bạn tự kiểm tra, phần mềm KHÔNG tự sửa (chưa đủ chắc chắn thuộc về ai).
           </div>
           <div style="max-height:22vh;overflow:auto">
           <table style="border-collapse:collapse;font-size:12px;width:100%">
             <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
               <th style="padding:5px 8px;border:1px solid #eee">Ngày</th><th style="padding:5px 8px;border:1px solid #eee">Số tiền</th>
-              <th style="padding:5px 8px;border:1px solid #eee">Nội dung CK</th><th style="padding:5px 8px;border:1px solid #eee">Trạng thái</th></tr>${rowsns}
+              <th style="padding:5px 8px;border:1px solid #eee">Nội dung CK</th></tr>${rowsns}
           </table></div>
         </details>`;
     }else{
