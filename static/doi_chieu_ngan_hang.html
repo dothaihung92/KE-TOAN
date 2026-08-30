@@ -2707,11 +2707,6 @@ function App() {
       setScreen(s);
       if (s === "home") setActiveCo(null);
       window._onNavHome = null;
-    },
-    apiKey: apiKey,
-    onApiKey: k => {
-      setApiKey(k);
-      LS.set("api_key", k);
     }
   }), screen === "confirm" && (window._onNavHome = () => {
     setScreen("company");
@@ -2831,12 +2826,8 @@ function App() {
 function Sidebar({
   screen,
   activeCo,
-  onNav,
-  apiKey,
-  onApiKey
+  onNav
 }) {
-  const [showKey, setShowKey] = useState(false);
-  const [keyInput, setKeyInput] = useState(apiKey);
   return /*#__PURE__*/React.createElement("div", {
     className: "sidebar"
   }, /*#__PURE__*/React.createElement("div", {
@@ -2848,7 +2839,7 @@ function Sidebar({
       paddingBottom: 10,
       borderBottom: "1px solid var(--border)"
     }
-  }, "\uD83D\uDCCA K\u1EBF To\xE1n AI"), [["company", "🏢 Công ty KH", !activeCo], ["dict", "📚 Từ điển", !activeCo]].map(([k, lb, disabled]) => /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDCCA K\u1EBF To\xE1n AI"), [["company", "🏢 Nhập liệu", !activeCo], ["dict", "📚 Từ điển", !activeCo]].map(([k, lb, disabled]) => /*#__PURE__*/React.createElement("div", {
     key: k,
     className: `nav-item${screen === k ? " active" : ""}`,
     onClick: () => !disabled && onNav(k),
@@ -2862,69 +2853,7 @@ function Sidebar({
       color: "var(--text3)",
       marginLeft: 4
     }
-  }, "(ch\u1ECDn cty)"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: "auto",
-      paddingTop: "1rem",
-      borderTop: "1px solid var(--border)",
-      marginTop: "2rem"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: "var(--text3)",
-      marginBottom: 6
-    }
-  }, "Claude API Key"), !showKey ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      marginBottom: 6,
-      color: apiKey ? "var(--green)" : "var(--amber)"
-    }
-  }, apiKey ? "✓ Đã cấu hình" : "⚠ Chưa có (chỉ dùng từ điển)"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline",
-    style: {
-      width: "100%",
-      fontSize: 12
-    },
-    onClick: () => setShowKey(true)
-  }, apiKey ? "Đổi API Key" : "+ Thêm API Key")) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("input", {
-    type: "password",
-    value: keyInput,
-    onChange: e => setKeyInput(e.target.value),
-    placeholder: "sk-ant-...",
-    style: {
-      width: "100%",
-      marginBottom: 6,
-      fontSize: 12
-    }
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "flex"
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-green",
-    style: {
-      flex: 1,
-      fontSize: 11
-    },
-    onClick: () => {
-      onApiKey(keyInput);
-      setShowKey(false);
-    }
-  }, "L\u01B0u"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-outline",
-    style: {
-      flex: 1,
-      fontSize: 11
-    },
-    onClick: () => setShowKey(false)
-  }, "Hu\u1EF7"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 10,
-      color: "var(--text3)",
-      marginTop: 8,
-      lineHeight: 1.5
-    }
-  }, "Key l\u01B0u trong tr\xECnh duy\u1EC7t n\xE0y.", /*#__PURE__*/React.createElement("br", null), "L\u1EA5y t\u1EA1i: console.anthropic.com")),
+  }, "(ch\u1ECDn cty)"))),
   /*#__PURE__*/React.createElement(BackupPanel, null));
 }
 
@@ -5793,7 +5722,11 @@ function ConfirmScreen({
   const txAmtOf = (kind, tx) => kind === "XK" ? (tx.credit || 0) : (tx.debit || 0);
   // Tờ khai đã "chốt" (đã hạch toán lãi/lỗ chênh lệch tỷ giá cho lần thanh toán cuối) coi như đã
   // thanh toán xong hẳn — không cần gợi ý nữa dù có giao dịch nào khác trùng số tiền/số hoá đơn.
+  // Ưu tiên đọc p.fxSplit (LƯU BỀN ngay trên tk.payments, sống sót qua các lần đổi/nhập lại dữ liệu
+  // sao kê) — p.rowId chỉ còn ĐÚNG trong CHÍNH phiên sao kê lúc gắn, dò qua `rows` (r.fxSplit) chỉ
+  // dùng làm phương án dự phòng cho tờ khai đã chốt TRƯỚC khi có trường p.fxSplit này.
   const isTokhaiClosed = tk => tkPayments(tk).some(p => {
+    if (p.fxSplit) return true;
     const pr = rows.find(rr => rr.id === p.rowId);
     return pr && pr.fxSplit;
   });
@@ -5964,8 +5897,16 @@ function ConfirmScreen({
     const diff = bankVND - taxVND;
     if (!diff) { showToast("Không có chênh lệch để hạch toán"); return; }
     const fxKind = fxKindFromDiff(kind, diff);
-    setRowsH(prev => prev.map(r => r.id !== rowId ? r : {
-      ...r, fxSplit: { kind: fxKind, diff: Math.abs(diff) }
+    const fxSplit = { kind: fxKind, diff: Math.abs(diff) };
+    setRowsH(prev => prev.map(r => r.id !== rowId ? r : { ...r, fxSplit }));
+    // LƯU BỀN vào tk.payments[cuối] (không chỉ r.fxSplit trên rows, vốn mất trắng khi đổi/nhập lại
+    // dữ liệu sao kê sau này) — để isTokhaiClosed() vẫn nhận đúng tờ khai này đã "chốt" xuyên suốt
+    // các lần đổi dữ liệu sao kê khác nhau.
+    const list = tokhaiListOf(kind);
+    saveTokhaiListOf(kind)(list.map(tk => {
+      const payments = tkPayments(tk);
+      if (!payments.length || payments[payments.length - 1].rowId !== rowId) return tk;
+      return { ...tk, payments: payments.map((p, i) => i === payments.length - 1 ? { ...p, fxSplit } : p) };
     }));
     showToast("✓ Đã hạch toán chênh lệch tỷ giá " + (fxKind === "gain" ? "LÃI (515)" : "LỖ (635)") + ": " + fmt(Math.abs(diff), "VND"));
   };
@@ -5973,16 +5914,28 @@ function ConfirmScreen({
   // không cần phải bấm "Xuất lãi/lỗ đã chọn" mới có chỗ chỉnh sửa như trước. signedVal ÂM = LÃI
   // (515), DƯƠNG = LỖ (635) — quy ước NÀY GIỮ NGUYÊN cho cả NK/XK vì là người dùng tự gõ trực tiếp
   // ý định (lãi/lỗ), không phải suy ra từ diff nên không cần đảo chiều. Giá trị 0 = bỏ hạch toán.
-  const editFxDiff = (rowId, signedVal) => {
+  const editFxDiff = (kind, tkId, signedVal) => {
     const val = Math.round(signedVal || 0);
-    if (!val) {
-      setRowsH(prev => prev.map(r => r.id !== rowId ? r : { ...r, fxSplit: undefined }));
-      showToast("Đã bỏ hạch toán chênh lệch tỷ giá (bằng 0)", "warn");
-      return;
+    const list = tokhaiListOf(kind);
+    const tk = list.find(t => t.id === tkId);
+    if (!tk) return;
+    const payments = tkPayments(tk);
+    if (!payments.length) return;
+    const lastIdx = payments.length - 1;
+    const lastPayment = payments[lastIdx];
+    const fxSplit = val ? { kind: val < 0 ? "gain" : "loss", diff: Math.abs(val) } : undefined;
+    if (lastPayment.rowId) {
+      setRowsH(prev => prev.map(r => r.id !== lastPayment.rowId ? r : { ...r, fxSplit }));
     }
-    const kind = val < 0 ? "gain" : "loss";
-    setRowsH(prev => prev.map(r => r.id !== rowId ? r : { ...r, fxSplit: { kind, diff: Math.abs(val) } }));
-    showToast("✓ Đã sửa chênh lệch tỷ giá " + (kind === "gain" ? "LÃI (515)" : "LỖ (635)") + ": " + fmt(Math.abs(val), "VND"));
+    // LƯU BỀN vào tk.payments[cuối] — lý do như applyFxDiff phía trên.
+    saveTokhaiListOf(kind)(list.map(t => t.id !== tkId ? t : {
+      ...t, payments: tkPayments(t).map((p, i) => i === lastIdx ? { ...p, fxSplit } : p)
+    }));
+    if (!val) {
+      showToast("Đã bỏ hạch toán chênh lệch tỷ giá (bằng 0)", "warn");
+    } else {
+      showToast("✓ Đã sửa chênh lệch tỷ giá " + (fxSplit.kind === "gain" ? "LÃI (515)" : "LỖ (635)") + ": " + fmt(Math.abs(val), "VND"));
+    }
   };
   // Xuất lãi/lỗ tỷ giá CHỈ CHO CÁC TỜ KHAI ĐÃ TICK CHỌN trong bảng. Trước đây chỉ xuất đúng những
   // dòng ĐÃ BẤM "⚖ HT Lãi/Lỗ" riêng lẻ trước đó — nên chọn nhiều tờ khai nhưng chưa kịp bấm tay
@@ -5990,24 +5943,34 @@ function ConfirmScreen({
   // (chưa bấm), rồi hiện màn XEM TRƯỚC cho sửa tay trước khi thật sự xuất file.
   const exportFxDiffForTk = (kind, tkIds) => {
     let workingRows = rows;
+    let updatedList = tokhaiListOf(kind);
+    let listChanged = false;
     const rowIds = new Set();
     tkIds.forEach(tkId => {
-      const tk = tokhaiListOf(kind).find(t => t.id === tkId);
+      const tk = updatedList.find(t => t.id === tkId);
       if (!tk) return;
       const payments = tkPayments(tk);
       if (!payments.length) return;
-      const lastRowId = payments[payments.length - 1].rowId;
+      const lastIdx = payments.length - 1;
+      const lastRowId = payments[lastIdx].rowId;
       const lastRow = workingRows.find(r => r.id === lastRowId);
       if (lastRow && !lastRow.fxSplit) {
         const diff = tkTotalPaidVND(tk) - tkTaxVND(tk);
         if (diff) {
           const fxKind = fxKindFromDiff(kind, diff);
-          workingRows = workingRows.map(r => r.id === lastRowId ? { ...r, fxSplit: { kind: fxKind, diff: Math.abs(diff) } } : r);
+          const fxSplit = { kind: fxKind, diff: Math.abs(diff) };
+          workingRows = workingRows.map(r => r.id === lastRowId ? { ...r, fxSplit } : r);
+          // LƯU BỀN vào tk.payments[cuối] — lý do như applyFxDiff phía trên.
+          updatedList = updatedList.map(t => t.id !== tkId ? t : {
+            ...t, payments: tkPayments(t).map((p, i) => i === lastIdx ? { ...p, fxSplit } : p)
+          });
+          listChanged = true;
         }
       }
       payments.forEach(p => rowIds.add(p.rowId));
     });
     if (workingRows !== rows) setRowsH(() => workingRows);
+    if (listChanged) saveTokhaiListOf(kind)(updatedList);
     const preview = buildFxDiffPreview(workingRows, rowIds);
     if (!preview.length) { showToast("Không có chênh lệch nào để hạch toán trong các tờ khai đã chọn", "warn"); return; }
     setFxPreviewRows(preview);
@@ -7498,8 +7461,11 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
               // sửa tay trực tiếp signedVal (ÂM = lãi 515, DƯƠNG = lỗ 635) ngay tại đây.
               const lastPayment = payments.length ? payments[payments.length - 1] : null;
               const lastRow = lastPayment ? rowsById[lastPayment.rowId] : null;
-              const booked = !!(lastRow && lastRow.fxSplit);
-              const signedVal = booked ? (lastRow.fxSplit.kind === "gain" ? -lastRow.fxSplit.diff : lastRow.fxSplit.diff) : chenhLech;
+              // Ưu tiên đọc lastPayment.fxSplit (LƯU BỀN trên tk.payments, sống sót qua các lần đổi
+              // dữ liệu sao kê) — lastRow.fxSplit chỉ dùng làm dự phòng cho dữ liệu cũ chưa có trường này.
+              const fxInfo = (lastPayment && lastPayment.fxSplit) || (lastRow && lastRow.fxSplit);
+              const booked = !!fxInfo;
+              const signedVal = booked ? (fxInfo.kind === "gain" ? -fxInfo.diff : fxInfo.diff) : chenhLech;
               const payRow = (key, child) => React.createElement("div", { key, style: { display: "flex", alignItems: "center", gap: 2, marginBottom: 2 } }, child);
               return React.createElement("tr", { key: tk.id },
                 td(React.createElement("input", { type: "checkbox", checked: selectedTk.has(tk.id), onChange: () => toggleSelectTk(tk.id) })),
@@ -7541,7 +7507,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                         if (v == null) return;
                         const neg = /^\s*-/.test(v);
                         const parsed = parseNum(v, false) * (neg ? -1 : 1);
-                        onEditFxDiff && lastRow && onEditFxDiff(lastRow.id, parsed);
+                        onEditFxDiff && onEditFxDiff(kind, tk.id, parsed);
                       },
                       title: "Sửa tay số tiền chênh lệch đã hạch toán — số ÂM = LÃI (515, xanh), số DƯƠNG = LỖ (635, đỏ)",
                       style: { width: 110, fontWeight: 700, fontSize: 13, color: signedVal < 0 ? "var(--green-d)" : signedVal > 0 ? "#dc2626" : "inherit", border: "1px solid var(--border)", borderRadius: 4, padding: "3px 5px" }
