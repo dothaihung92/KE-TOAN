@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.083"
+APP_BUILD = "2026-08-27.084"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24017,9 +24017,27 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                 continue
             if hd["inv_date"] > han:
                 continue
+            # ĐỘ TIN CẬY CAO (chỉ là GỢI Ý — vẫn cần người dùng tự xác nhận
+            # trước khi ghi, KHÔNG tự động ghi bất kỳ bút toán nào): TẤT CẢ
+            # hóa đơn PHÁT SINH SAU hóa đơn treo này (cùng đối tượng) đều
+            # ĐÃ khớp thanh toán đủ (Tầng 1/2) — dấu hiệu mạnh cho thấy hóa
+            # đơn treo này (thường là hóa đơn CŨ NHẤT còn lại của đối
+            # tượng) thực ra RẤT CÓ THỂ cũng đã được thanh toán (có thể
+            # bằng tiền mặt/cách khác không qua ngân hàng nên MISA không
+            # có dữ liệu để tự khớp) — xác nhận đúng mẫu báo cáo thật
+            # người dùng gửi (NCC S-MART: 2 hóa đơn phát sinh SAU đã khớp
+            # NGÂN HÀNG đúng số tiền, chỉ hóa đơn ĐẦU TIÊN còn treo không
+            # khoản nào khớp). Không có hóa đơn nào phát sinh sau (hóa đơn
+            # treo này là hóa đơn MỚI NHẤT hoặc duy nhất) -> KHÔNG đủ dấu
+            # hiệu, để tin_cay_cao=False (an toàn, không suy đoán khi
+            # thiếu bằng chứng).
+            hd_sau = [h2 for h2 in d["hoa_don"] if h2 is not hd and h2["inv_date"]
+                     and h2["inv_date"] > hd["inv_date"]]
+            tin_cay_cao = bool(hd_sau) and all(h2["matched"] for h2 in hd_sau)
             tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
                           "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
-                          "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"])})
+                          "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"]),
+                          "tin_cay_cao": tin_cay_cao})
 
     # ⚠ Phát hiện THU/CHI 2 LẦN cho CÙNG 1 hóa đơn: hóa đơn đã được coi là
     # khớp NHỜ 1 khoản "điều chỉnh" (nguon='dieu_chinh' — bút toán tiền mặt
@@ -24157,7 +24175,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     tang1.sort(key=lambda x: (x["ma"], x["inv_date"]))
     tang2.sort(key=lambda x: (x["ma"], x["ngay_thanh_toan"]))
     tam_ung.sort(key=lambda x: (x["ma"], x["tu_ngay"]))
-    tang3.sort(key=lambda x: (x["mst"], x["inv_date"]))
+    tang3.sort(key=lambda x: (not x["tin_cay_cao"], x["mst"], x["inv_date"]))
     return {"loai": loai, "database": database, "cua_so_thang": cua_so_thang, "tu_ngay": tu_ngay,
             "den_ngay": den_ngay,
             "thang_qua_han": thang_qua_han, "nguong": nguong, "dung_sai": dung_sai,

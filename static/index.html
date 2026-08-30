@@ -7838,23 +7838,26 @@ async function misaBuTruTim(loai){
       t3.innerHTML=`<div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:12px;color:#1a7a4a;margin-top:8px">🩹 Tầng 3: không có hóa đơn treo nào khớp điều kiện.</div>`;
       return;
     }
+    const soTinCayCao=misaBuTruDsHienTai.filter(it=>it.tin_cay_cao).length;
     const rows=misaBuTruDsHienTai.map((it,i)=>`
-      <tr>
+      <tr style="${it.tin_cay_cao?'background:#eafaf0':''}">
         <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><input type="checkbox" class="buTruChk" data-i="${i}" checked></td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mst)}</td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_date||'')}</td>
         <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
+        <td style="padding:5px 8px;border:1px solid #eee;text-align:center" title="${it.tin_cay_cao?'Các hóa đơn PHÁT SINH SAU của đối tượng này đã khớp thanh toán ngân hàng đủ — rất có thể hóa đơn này cũng đã được thanh toán (có thể bằng tiền mặt/cách khác MISA chưa có dữ liệu)':'Chưa có dấu hiệu để suy đoán, cần bạn tự kiểm tra kỹ hơn'}">${it.tin_cay_cao?'🎯 Cao':'—'}</td>
       </tr>`).join('');
     t3.innerHTML=`
       <div style="margin-bottom:6px;font-size:13px;margin-top:8px">🩹 Tầng 3 — Tìm thấy <b>${misaBuTruDsHienTai.length}</b> hóa đơn treo — bỏ tick dòng nào không muốn xử lý:</div>
+      ${soTinCayCao>0?`<div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#1a7a4a;margin-bottom:8px">🎯 <b>${soTinCayCao}</b> hóa đơn được đánh dấu "Độ tin cậy cao" (tô nền xanh) — các hóa đơn PHÁT SINH SAU của cùng đối tượng đó đã khớp thanh toán ngân hàng đủ, rất có thể hóa đơn treo này cũng đã được thanh toán (bằng tiền mặt hoặc cách khác MISA chưa có dữ liệu để tự khớp). Đây CHỈ là gợi ý dựa trên dấu hiệu gián tiếp — vẫn cần bạn tự xác nhận trước khi xử lý, phần mềm KHÔNG tự động ghi bất kỳ bút toán nào.</div>`:''}
       <div style="max-height:34vh;overflow:auto">
       <table style="border-collapse:collapse;font-size:12.5px;width:100%">
         <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
           <th style="padding:5px 8px;border:1px solid #eee">Mã</th><th style="padding:5px 8px;border:1px solid #eee">Tên</th>
           <th style="padding:5px 8px;border:1px solid #eee">Số HĐ</th><th style="padding:5px 8px;border:1px solid #eee">Ngày</th>
-          <th style="padding:5px 8px;border:1px solid #eee">Số tiền</th></tr>${rows}
+          <th style="padding:5px 8px;border:1px solid #eee">Số tiền</th><th style="padding:5px 8px;border:1px solid #eee">Độ tin cậy</th></tr>${rows}
       </table></div>
       <div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:10px 14px;font-size:12.5px;color:#1a7a4a;margin-top:12px">
         Khuyên dùng: xuất Excel đúng mẫu "Chứng từ nghiệp vụ khác" rồi Import qua chức năng gốc của MISA — MISA tự kiểm tra/tra đúng đối tượng khi Import, an toàn hơn ghi thẳng SQL (phải tự học tên cột lưu đối tượng, có thể học sai/không đủ dữ liệu để học).
