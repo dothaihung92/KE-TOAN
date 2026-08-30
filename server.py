@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.077"
+APP_BUILD = "2026-08-27.078"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25517,24 +25517,29 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
          lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview,
                                                  tu_quy=tu_quy, tu_nam=tu_nam, so_quy=so_quy_kh))
 
-    # BƯỚC 7 — CHỈ ĐỌC, không phụ thuộc preview: đối chiếu lại TOÀN BỘ hóa
-    # đơn đã tra cứu (nguồn đáng tin cậy nhất) với dữ liệu THẬT sự đã có
-    # trong MISA ngay sau khi chạy xong 6 bước trên — phát hiện hóa đơn nào
-    # bị THIẾU (rớt ở đâu đó trong khâu Bảng kê Đầu ra/Đầu vào hoặc lúc ghi
-    # vào MISA) hoặc LỆCH số tiền/VAT so với dữ liệu gốc, theo đúng yêu cầu
-    # "so sánh đã khớp với nhau hết chưa, có chênh lệch thì hiện ra".
-    bao("▶ Đang xử lý: 7. Đối chiếu tổng giá trị & VAT...")
-    try:
-        dc = _misa_doi_chieu_import_toan_bo(cid, database)
-        buoc.append({"ten": "7. Đối chiếu tổng giá trị & VAT", "doi_chieu": dc})
-        bh, mh = dc["ban_hang"], dc["mua_hang"]
-        bao("✓ 7. Đối chiếu tổng giá trị & VAT — Bán hàng: khớp %d/%d (thiếu %d, lệch %d); "
-            "Mua hàng: khớp %d/%d (thiếu %d, lệch %d)" %
-            (bh["khop"], bh["tong_hd_nguon"], len(bh["thieu"]), len(bh["lech"]),
-             mh["khop"], mh["tong_hd_nguon"], len(mh["thieu"]), len(mh["lech"])))
-    except Exception as e:
-        buoc.append({"ten": "7. Đối chiếu tổng giá trị & VAT", "loi": str(e)[:300]})
-        bao(f"✗ Lỗi: 7. Đối chiếu tổng giá trị & VAT — {str(e)[:300]}")
+    # BƯỚC 7 — CHỈ ĐỌC: đối chiếu lại TOÀN BỘ hóa đơn đã tra cứu (nguồn
+    # đáng tin cậy nhất) với dữ liệu THẬT sự đã có trong MISA — phát hiện
+    # hóa đơn nào bị THIẾU (rớt ở đâu đó trong khâu Bảng kê Đầu ra/Đầu vào
+    # hoặc lúc ghi vào MISA) hoặc LỆCH số tiền/VAT so với dữ liệu gốc, theo
+    # đúng yêu cầu "so sánh đã khớp với nhau hết chưa, có chênh lệch thì
+    # hiện ra". CHỈ chạy khi preview=False (đã THẬT SỰ ghi vào MISA) — lúc
+    # đang preview (Xem trước) MISA CHƯA có dữ liệu thật nào cả (mới chỉ
+    # tính toán "Sẽ ghi bao nhiêu"), nên đối chiếu lúc này LUÔN báo sai
+    # hàng loạt "thiếu" dù chưa hề có lỗi gì — không có giá trị tham khảo,
+    # chỉ gây hiểu nhầm (đúng phản hồi người dùng báo lại).
+    if not preview:
+        bao("▶ Đang xử lý: 7. Đối chiếu tổng giá trị & VAT...")
+        try:
+            dc = _misa_doi_chieu_import_toan_bo(cid, database)
+            buoc.append({"ten": "7. Đối chiếu tổng giá trị & VAT", "doi_chieu": dc})
+            bh, mh = dc["ban_hang"], dc["mua_hang"]
+            bao("✓ 7. Đối chiếu tổng giá trị & VAT — Bán hàng: khớp %d/%d (thiếu %d, lệch %d); "
+                "Mua hàng: khớp %d/%d (thiếu %d, lệch %d)" %
+                (bh["khop"], bh["tong_hd_nguon"], len(bh["thieu"]), len(bh["lech"]),
+                 mh["khop"], mh["tong_hd_nguon"], len(mh["thieu"]), len(mh["lech"])))
+        except Exception as e:
+            buoc.append({"ten": "7. Đối chiếu tổng giá trị & VAT", "loi": str(e)[:300]})
+            bao(f"✗ Lỗi: 7. Đối chiếu tổng giá trị & VAT — {str(e)[:300]}")
 
     bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
