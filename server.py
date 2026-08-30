@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.076"
+APP_BUILD = "2026-08-27.077"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25545,8 +25545,23 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     liệu GỐC từ Tổng cục Thuế — nguồn đáng tin cậy nhất, KHÔNG phụ thuộc
     Bảng kê Đầu ra/Đầu vào của khung Nhập Liệu, vì bảng đó là dữ liệu
     TRUNG GIAN người dùng có thể chỉnh tay/thiếu sót khi import file) với
-    dữ liệu ĐÃ GHI trong MISA — khóa theo (MST đối tác, Số hóa đơn), so
-    sánh Doanh số (chưa thuế) + Thuế GTGT. Phát hiện 2 loại lệch:
+    dữ liệu ĐÃ GHI trong MISA, so sánh Doanh số (chưa thuế) + Thuế GTGT.
+
+    KIỂM TRA TỔNG TRƯỚC (theo yêu cầu người dùng, sau nhiều lần cố khớp
+    CHÍNH XÁC từng hóa đơn 1-1 vẫn báo sai "THIẾU" vì Ký hiệu HĐ/Số hóa
+    đơn ghi lệch ĐỊNH DẠNG giữa nguồn và MISA — trong khi TỔNG số liệu
+    thực ra vẫn đúng): với MỖI loại (Bán hàng/Mua hàng) tính TỔNG doanh số
+    + TỔNG thuế GTGT của toàn bộ hóa đơn nguồn so với TỔNG của MISA.
+      - Nếu TỔNG đã khớp (chênh ≤ 2.000đ/loại, bù làm tròn) -> coi là ĐÃ
+        ĐỦ, "thieu"/"lech" trả về RỖNG (không hiện gì cho người dùng) —
+        vì mục tiêu thật sự là phát hiện SAI SỐ, không phải ép khớp từng
+        hóa đơn (việc đó dễ báo nhầm do khóa ghép lệch định dạng).
+      - Nếu TỔNG LỆCH mới chạy tiếp bước khớp TỪNG hóa đơn (khóa (MST, Số
+        hóa đơn), Ký hiệu HĐ hỗ trợ phân biệt khi trùng) để KHOANH VÙNG
+        đúng hóa đơn nào gây lệch — kết quả bước này giúp người dùng tìm
+        chứ không phải kết luận cuối cùng (có thể vẫn sai lệch định dạng
+        khóa đâu đó, nhưng chỉ ĐÁNG xem khi tổng đã thật sự lệch).
+    Phát hiện 2 loại (chỉ khi tổng lệch):
       - THIẾU: có trong dữ liệu tra cứu (và KHÔNG bị thay thế/hủy/không đủ
         điều kiện cấp mã — coi như hợp lệ, không tính là lỗi thiếu) nhưng
         KHÔNG tìm thấy trong MISA — dùng để bắt đúng lỗi kiểu 'hóa đơn số
@@ -25735,43 +25750,99 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     DUNG_SAI = 2000   # đ — bù làm tròn/phí ngân hàng nhỏ, KHÔNG báo lỗi
     ket = {}
 
-    # ---- Bán hàng: khớp theo group (MST, Số hóa đơn) trước; nếu group có
-    # nhiều hóa đơn/dòng thì dùng Ký hiệu để ghép ĐÚNG cặp (ưu tiên khớp Ký
-    # hiệu y hệt, nếu không có thì ghép với dòng CHƯA CHẮC CHẮN khác Ký
-    # hiệu — xem docstring, tránh cả 2 lỗi từng gặp).
-    thieu, lech, khop = [], [], 0
-    tong_nguon_sold = 0
-    for gk, ng_list in nguon["sold"].items():
-        tong_nguon_sold += len(ng_list)
-        ms_list = list(misa["sold"].get(gk, []))   # copy để pop dần, tránh ghép trùng
-        # ĐÚNG như docstring: group không có gì để phân biệt (chỉ 1 hóa đơn
-        # nguồn, tối đa 1 dòng MISA cùng MST+Số HĐ) -> ứng viên duy nhất
-        # LUÔN được chọn, KHÔNG đòi hỏi Ký hiệu HĐ phải trùng (Ký hiệu chỉ
-        # dùng để gỡ rối khi có NHIỀU hóa đơn/dòng trùng Số HĐ — không áp
-        # dụng ở đây). Bắt buộc Ký hiệu khớp trong trường hợp group-1-dòng
-        # từng gây báo sai "THIẾU" cho hóa đơn ĐÃ CÓ trong MISA nhưng Ký
-        # hiệu ghi nhận lệch định dạng/thiếu ký tự so với dữ liệu tra cứu
-        # gốc (vd "1C25TKK" ở nguồn vs "C25TKK" trong MISA).
-        single = len(ng_list) == 1 and len(ms_list) <= 1
-        for ng in ng_list:
-            idx = None
-            if single:
-                idx = 0 if ms_list else None
-            else:
-                for i, ms in enumerate(ms_list):
-                    if ms["kyhieu"] and ng["kyhieu"] and ms["kyhieu"] == ng["kyhieu"]:
-                        idx = i
-                        break
-                if idx is None:
+    def _khop_tong(a, b):
+        return abs(round(a) - round(b)) <= DUNG_SAI
+
+    # ---- Bán hàng ----
+    # QUAN TRỌNG (theo yêu cầu người dùng, sau nhiều lần khớp TỪNG hóa đơn
+    # vẫn báo sai "THIẾU" vì Ký hiệu HĐ/Số hóa đơn ghi lệch định dạng giữa
+    # nguồn và MISA dù tổng tiền vẫn ĐÚNG — việc cố khớp CHÍNH XÁC từng
+    # hóa đơn 1-1 hóa ra kém tin cậy hơn chính mục tiêu ban đầu của bảng
+    # đối chiếu): kiểm tra TỔNG doanh số + tổng thuế GTGT của CẢ LOẠI
+    # trước. Nếu tổng đã khớp -> COI NHƯ ĐÃ ĐỦ, không hiện gì (không cần
+    # cố khớp từng hóa đơn, tránh báo nhầm "thiếu" do lệch định dạng khóa
+    # trong khi số liệu tổng thể thực ra đã đúng). CHỈ khi tổng LỆCH mới
+    # chạy tiếp bước khớp từng hóa đơn (Ký hiệu HĐ + Số hóa đơn) để tìm ra
+    # ĐÚNG hóa đơn nào gây lệch, giúp người dùng khoanh vùng kiểm tra.
+    ng_flat_sold = [e for lst in nguon["sold"].values() for e in lst]
+    ms_flat_sold = [e for lst in misa["sold"].values() for e in lst]
+    tong_ds_nguon = sum(e["ds"] for e in ng_flat_sold)
+    tong_thue_nguon = sum(e["thue"] for e in ng_flat_sold)
+    tong_ds_misa = sum(e["ds"] for e in ms_flat_sold)
+    tong_thue_misa = sum(e["thue"] for e in ms_flat_sold)
+    tong_khop = _khop_tong(tong_ds_nguon, tong_ds_misa) and _khop_tong(tong_thue_nguon, tong_thue_misa)
+
+    if tong_khop:
+        thieu, lech, khop = [], [], len(ng_flat_sold)
+    else:
+        # ---- khớp theo group (MST, Số hóa đơn) trước; nếu group có nhiều
+        # hóa đơn/dòng thì dùng Ký hiệu để ghép ĐÚNG cặp (ưu tiên khớp Ký
+        # hiệu y hệt, nếu không có thì ghép với dòng CHƯA CHẮC CHẮN khác Ký
+        # hiệu — xem docstring, tránh cả 2 lỗi từng gặp).
+        thieu, lech, khop = [], [], 0
+        for gk, ng_list in nguon["sold"].items():
+            ms_list = list(misa["sold"].get(gk, []))   # copy để pop dần, tránh ghép trùng
+            # Group không có gì để phân biệt (chỉ 1 hóa đơn nguồn, tối đa 1
+            # dòng MISA cùng MST+Số HĐ) -> ứng viên duy nhất LUÔN được
+            # chọn, KHÔNG đòi hỏi Ký hiệu HĐ phải trùng.
+            single = len(ng_list) == 1 and len(ms_list) <= 1
+            for ng in ng_list:
+                idx = None
+                if single:
+                    idx = 0 if ms_list else None
+                else:
                     for i, ms in enumerate(ms_list):
-                        if not _ky_hieu_chac_chan_khac(ng["kyhieu"], ms["kyhieu"]):
+                        if ms["kyhieu"] and ng["kyhieu"] and ms["kyhieu"] == ng["kyhieu"]:
                             idx = i
                             break
-            if idx is None:
+                    if idx is None:
+                        for i, ms in enumerate(ms_list):
+                            if not _ky_hieu_chac_chan_khac(ng["kyhieu"], ms["kyhieu"]):
+                                idx = i
+                                break
+                if idx is None:
+                    thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
+                                 "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
+                    continue
+                m = ms_list.pop(idx)
+                d_ds = round(ng["ds"]) - round(m["ds"])
+                d_thue = round(ng["thue"]) - round(m["thue"])
+                if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
+                    lech.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
+                                "doanh_so_nguon": round(ng["ds"]), "doanh_so_misa": round(m["ds"]),
+                                "thue_nguon": round(ng["thue"]), "thue_misa": round(m["thue"]),
+                                "chenh_lech": d_ds + d_thue})
+                else:
+                    khop += 1
+        thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+        lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+    ket["ban_hang"] = {"tong_hd_nguon": len(ng_flat_sold), "khop": khop, "thieu": thieu, "lech": lech,
+                       "tong_khop": tong_khop, "tong_ds_nguon": round(tong_ds_nguon),
+                       "tong_thue_nguon": round(tong_thue_nguon), "tong_ds_misa": round(tong_ds_misa),
+                       "tong_thue_misa": round(tong_thue_misa)}
+
+    # ---- Mua hàng ---- (cùng nguyên tắc: kiểm tra tổng trước, chỉ khớp
+    # từng hóa đơn khi tổng lệch — khóa phẳng (MST, Số hóa đơn) như cũ vì
+    # MISA chưa ghi InvSeries cho PUInvoice/PUServiceDetail).
+    ng_flat_purchase = list(nguon["purchase"].values())
+    ms_flat_purchase = list(misa["purchase"].values())
+    tong_ds_nguon_p = sum(e["ds"] for e in ng_flat_purchase)
+    tong_thue_nguon_p = sum(e["thue"] for e in ng_flat_purchase)
+    tong_ds_misa_p = sum(e["ds"] for e in ms_flat_purchase)
+    tong_thue_misa_p = sum(e["thue"] for e in ms_flat_purchase)
+    tong_khop_p = (_khop_tong(tong_ds_nguon_p, tong_ds_misa_p) and
+                   _khop_tong(tong_thue_nguon_p, tong_thue_misa_p))
+
+    if tong_khop_p:
+        thieu, lech, khop = [], [], len(ng_flat_purchase)
+    else:
+        thieu, lech, khop = [], [], 0
+        for k, ng in nguon["purchase"].items():
+            m = misa["purchase"].get(k)
+            if m is None:
                 thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
                              "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
                 continue
-            m = ms_list.pop(idx)
             d_ds = round(ng["ds"]) - round(m["ds"])
             d_thue = round(ng["thue"]) - round(m["thue"])
             if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
@@ -25781,32 +25852,12 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             "chenh_lech": d_ds + d_thue})
             else:
                 khop += 1
-    thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-    lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-    ket["ban_hang"] = {"tong_hd_nguon": tong_nguon_sold, "khop": khop, "thieu": thieu, "lech": lech}
-
-    # ---- Mua hàng: khóa phẳng (MST, Số hóa đơn) như cũ — MISA chưa ghi
-    # InvSeries cho PUInvoice/PUServiceDetail nên chưa thể nhóm theo Ký hiệu.
-    thieu, lech, khop = [], [], 0
-    for k, ng in nguon["purchase"].items():
-        m = misa["purchase"].get(k)
-        if m is None:
-            thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
-                         "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
-            continue
-        d_ds = round(ng["ds"]) - round(m["ds"])
-        d_thue = round(ng["thue"]) - round(m["thue"])
-        if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
-            lech.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
-                        "doanh_so_nguon": round(ng["ds"]), "doanh_so_misa": round(m["ds"]),
-                        "thue_nguon": round(ng["thue"]), "thue_misa": round(m["thue"]),
-                        "chenh_lech": d_ds + d_thue})
-        else:
-            khop += 1
-    thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-    lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-    ket["mua_hang"] = {"tong_hd_nguon": len(nguon["purchase"]), "khop": khop,
-                       "thieu": thieu, "lech": lech}
+        thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+        lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+    ket["mua_hang"] = {"tong_hd_nguon": len(ng_flat_purchase), "khop": khop, "thieu": thieu,
+                       "lech": lech, "tong_khop": tong_khop_p, "tong_ds_nguon": round(tong_ds_nguon_p),
+                       "tong_thue_nguon": round(tong_thue_nguon_p), "tong_ds_misa": round(tong_ds_misa_p),
+                       "tong_thue_misa": round(tong_thue_misa_p)}
 
     return {"ban_hang": ket["ban_hang"], "mua_hang": ket["mua_hang"], "doc_duoc": doc_duoc}
 
