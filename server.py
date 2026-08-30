@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.073"
+APP_BUILD = "2026-08-27.074"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13933,6 +13933,23 @@ def _misa_khncc_dinh_dang_mst(s):
         return s[:10] + "-" + s[10:]
     return s
 
+def _ky_hieu_chac_chan_khac(kh_moi, kh_da_co):
+    """True CHỈ khi CẢ 2 Ký hiệu HĐ đều CÓ GIÁ TRỊ THẬT (không rỗng) và
+    KHÁC NHAU — đây là dấu hiệu DUY NHẤT đủ tin cậy để kết luận 2 hóa đơn
+    trùng Số hóa đơn là 2 hóa đơn KHÁC NHAU (Số hóa đơn chỉ duy nhất TRONG
+    PHẠM VI 1 Ký hiệu — hết năm/quyển lại đánh số lại từ đầu ở Ký hiệu
+    MỚI). Nếu 1 bên/cả 2 bên rỗng (không đủ dữ liệu để phân biệt — vd cột
+    "Ký hiệu HĐ" không đọc được từ Bảng kê Đầu ra, hoặc InvSeries chưa
+    được ghi khi tạo chứng từ) thì PHẢI coi là CÓ THỂ trùng (an toàn hơn):
+    dùng chung cho cả khóa chống ghi trùng khi ghi Bán hàng
+    (_misa_ghi_ban_hang) VÀ khóa so khớp của bảng đối chiếu tổng giá trị &
+    VAT (_misa_doi_chieu_import_toan_bo) — xác nhận qua 2 lỗi thật lần
+    lượt gặp phải: (1) khóa CHỈ (MST, Số HĐ) gộp nhầm 2 hóa đơn THẬT SỰ
+    khác nhau (khác Ký hiệu) làm 1; (2) ngược lại, bắt CỨNG phải luôn có
+    Ký hiệu lại báo nhầm hóa đơn ĐÃ CÓ trong MISA là "thiếu"/ghi trùng chỉ
+    vì 1 bên không đọc được Ký hiệu."""
+    return bool(kh_moi) and bool(kh_da_co) and kh_moi != kh_da_co
+
 def _misa_thu_thap_khncc(cid):
     """Thu thập MST + tên + vai trò (NCC/KH) từ hóa đơn mua vào/bán ra đã
     lưu (bảng invoices — tra cứu qua mạng) VÀ từ Bảng kê Đầu vào/Đầu ra đã
@@ -16741,10 +16758,9 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
         # Chỉ kết luận "chắc chắn là 2 hóa đơn khác nhau" khi CẢ 2 Ký hiệu
         # đều CÓ GIÁ TRỊ THẬT và KHÁC NHAU; còn lại (1 bên/cả 2 bên rỗng —
         # không đủ dữ liệu để phân biệt) vẫn coi là CÓ THỂ trùng như hành vi
-        # AN TOÀN cũ, tránh ghi trùng khi không chắc chắn.
-        def _ky_hieu_chac_chan_khac(kh_moi, kh_da_co):
-            return bool(kh_moi) and bool(kh_da_co) and kh_moi != kh_da_co
-
+        # AN TOÀN cũ, tránh ghi trùng khi không chắc chắn — xem
+        # _ky_hieu_chac_chan_khac (dùng chung với bảng đối chiếu tổng giá
+        # trị & VAT, _misa_doi_chieu_import_toan_bo).
         _pm_invoices = {}   # (mst_lower, sohd_lower) -> {kyhieu_lower: {"refids","doc","posted"}}
         try:
             for refid, rn, ax, invno, invkh, pf, pm in cur.execute(
@@ -25553,20 +25569,28 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     hẳn loại đó (không báo nhầm "thiếu" hàng loạt vì không đọc được dữ
     liệu MISA) — đánh dấu trong doc_duoc để giao diện tự biết mà cảnh báo.
 
-    QUAN TRỌNG — khóa Bán hàng PHẢI có Ký hiệu HĐ (khhdon/InvSeries), KHÔNG
-    CHỈ (MST, Số hóa đơn): xác nhận qua đúng lỗi thật người dùng báo — 1
-    khách hàng có 2 hóa đơn KHÁC NHAU hoàn toàn (khác ngày, khác số tiền)
-    nhưng CÙNG Số hóa đơn=29 vì khác Ký hiệu (Số hóa đơn chỉ duy nhất
-    TRONG PHẠM VI 1 Ký hiệu, hết năm/quyển lại đánh số lại từ đầu) — khóa
-    thiếu Ký hiệu khiến 2 hóa đơn nguồn bị CỘNG DỒN nhầm vào chung 1 mục,
-    trong khi MISA (đã fix _misa_ghi_ban_hang cùng đợt) chỉ ghi được 1
-    trong 2 do bị coi nhầm là trùng — hiện SAI thành "LỆCH" thay vì đúng
-    ra phải là "THIẾU" 1 hóa đơn. Mua hàng (PUInvoice/PUServiceDetail)
-    CHƯA ghi được InvSeries khi tạo chứng từ (giới hạn hiện tại của
-    _misa_ghi_mua_hang/_misa_ghi_mua_hang_dv) nên TẠM giữ khóa (MST, Số
-    hóa đơn) như cũ cho mua hàng — thêm Ký hiệu vào khóa nguồn mà phía
-    MISA không có sẽ gây báo "thiếu" sai cho các hóa đơn trùng số HĐ nhưng
-    khác Ký hiệu (cùng giới hạn, không làm nó tệ hơn hiện trạng)."""
+    QUAN TRỌNG — Bán hàng khớp theo (MST, Số hóa đơn) trước, Ký hiệu HĐ
+    (khhdon/InvSeries) CHỈ dùng để PHÂN BIỆT khi CÓ NHIỀU hóa đơn/dòng
+    MISA cùng (MST, Số hóa đơn) — xem _ky_hieu_chac_chan_khac (dùng CHUNG
+    với khóa chống ghi trùng của _misa_ghi_ban_hang). Đã từng thử 2 cách
+    cứng nhắc, cả 2 đều gây lỗi thật:
+      (1) Khóa CHỈ (MST, Số HĐ): 1 khách hàng có 2 hóa đơn KHÁC NHAU hoàn
+          toàn (khác ngày/tiền) nhưng CÙNG Số hóa đơn=29 vì khác Ký hiệu
+          (Số hóa đơn chỉ duy nhất TRONG PHẠM VI 1 Ký hiệu) — bị CỘNG DỒN
+          nhầm vào chung 1 mục nguồn, so với 1 dòng MISA ra "LỆCH" sai
+          thay vì đúng ra là "THIẾU" 1 hóa đơn.
+      (2) Bắt CỨNG khóa phải luôn có Ký hiệu: hóa đơn ĐÃ CÓ trong MISA
+          nhưng Ký hiệu đọc ra khác nhau (vd 1 bên rỗng vì Khách lẻ/không
+          có cột Ký hiệu) bị coi "khác hóa đơn" → báo SAI thành "THIẾU"
+          dù người dùng xác nhận đã có trong MISA.
+    Cách ĐÚNG: nhóm theo (MST, Số hóa đơn) trước; nếu group chỉ có 1 hóa
+    đơn nguồn và ≤1 dòng MISA thì khớp thẳng, KHÔNG cần Ký hiệu. Chỉ khi
+    group có NHIỀU hóa đơn/dòng mới cần Ký hiệu để ghép ĐÚNG cặp — ưu tiên
+    khớp Ký hiệu giống hệt, nếu không có thì ghép với dòng CHƯA CHẮC CHẮN
+    khác Ký hiệu (1 bên rỗng) — chỉ báo "THIẾU" khi THẬT SỰ không còn dòng
+    MISA nào phù hợp. Mua hàng (PUInvoice/PUServiceDetail) CHƯA ghi được
+    InvSeries khi tạo chứng từ (giới hạn hiện tại) nên giữ khóa (MST, Số
+    hóa đơn) đơn thuần, không nhóm theo Ký hiệu."""
     import json as _json
     conn = db()
     rows = conn.execute(
@@ -25591,6 +25615,9 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             return False
         return True
 
+    # sold: nhóm theo (MST, Số hóa đơn) -> DANH SÁCH entry (1 entry/Ký hiệu
+    # khác nhau trong group) — xem docstring. purchase: giữ khóa phẳng
+    # (MST, Số hóa đơn) như cũ (MISA chưa ghi InvSeries cho mua hàng).
     nguon = {"sold": {}, "purchase": {}}
     for r in rows:
         loai = r["loai"]
@@ -25600,16 +25627,24 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         if not sohd:
             continue
         mst_doi_tac = r["nmmst"] if loai == "sold" else r["nbmst"]
-        # Bán hàng PHẢI có Ký hiệu HĐ trong khóa (xem giải thích ở docstring
-        # — Số hóa đơn không duy nhất toàn cục, chỉ duy nhất trong 1 Ký
-        # hiệu); Mua hàng TẠM chưa thêm vì MISA chưa ghi InvSeries.
+        mst_k = _misa_khncc_chuan_mst(mst_doi_tac).lower()
         if loai == "sold":
             kyhieu_ng = str(r["khhdon"] or "").strip().lower()
-            k = (_misa_khncc_chuan_mst(mst_doi_tac).lower(), sohd.lower(), kyhieu_ng)
+            gk = (mst_k, sohd.lower())
+            lst = nguon["sold"].setdefault(gk, [])
+            e = None
+            for it in lst:
+                if it["kyhieu"] == kyhieu_ng:
+                    e = it
+                    break
+            if e is None:
+                e = {"kyhieu": kyhieu_ng, "so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
+                     "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0}
+                lst.append(e)
         else:
-            k = (_misa_khncc_chuan_mst(mst_doi_tac).lower(), sohd.lower())
-        e = nguon[loai].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
-                                       "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
+            k = (mst_k, sohd.lower())
+            e = nguon["purchase"].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
+                                                  "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
         e["ds"] += _snum(r["tgtcthue"])
         e["thue"] += _snum(r["tgtthue"])
 
@@ -25631,9 +25666,17 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 sql = "SELECT [%s],[%s],[%s],[%s],[%s] FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
                     c_mst, c_inv, c_kh, c_tot, c_vat, c_inv)
                 for mst, inv, kh, tot, vat in cur.execute(sql).fetchall():
-                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower(),
-                        str(kh or "").strip().lower())
-                    e = misa["sold"].setdefault(k, {"ds": 0.0, "thue": 0.0})
+                    gk = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                    kh_n = str(kh or "").strip().lower()
+                    lst = misa["sold"].setdefault(gk, [])
+                    e = None
+                    for it in lst:
+                        if it["kyhieu"] == kh_n:
+                            e = it
+                            break
+                    if e is None:
+                        e = {"kyhieu": kh_n, "ds": 0.0, "thue": 0.0}
+                        lst.append(e)
                     v = _snum(vat)
                     e["thue"] += v
                     e["ds"] += _snum(tot) - v
@@ -25674,15 +25717,32 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
 
     DUNG_SAI = 2000   # đ — bù làm tròn/phí ngân hàng nhỏ, KHÔNG báo lỗi
     ket = {}
-    ten_loai = {"sold": "ban_hang", "purchase": "mua_hang"}
-    for loai in ("sold", "purchase"):
-        thieu, lech, khop = [], [], 0
-        for k, ng in nguon[loai].items():
-            m = misa[loai].get(k)
-            if m is None:
+
+    # ---- Bán hàng: khớp theo group (MST, Số hóa đơn) trước; nếu group có
+    # nhiều hóa đơn/dòng thì dùng Ký hiệu để ghép ĐÚNG cặp (ưu tiên khớp Ký
+    # hiệu y hệt, nếu không có thì ghép với dòng CHƯA CHẮC CHẮN khác Ký
+    # hiệu — xem docstring, tránh cả 2 lỗi từng gặp).
+    thieu, lech, khop = [], [], 0
+    tong_nguon_sold = 0
+    for gk, ng_list in nguon["sold"].items():
+        tong_nguon_sold += len(ng_list)
+        ms_list = list(misa["sold"].get(gk, []))   # copy để pop dần, tránh ghép trùng
+        for ng in ng_list:
+            idx = None
+            for i, ms in enumerate(ms_list):
+                if ms["kyhieu"] and ng["kyhieu"] and ms["kyhieu"] == ng["kyhieu"]:
+                    idx = i
+                    break
+            if idx is None:
+                for i, ms in enumerate(ms_list):
+                    if not _ky_hieu_chac_chan_khac(ng["kyhieu"], ms["kyhieu"]):
+                        idx = i
+                        break
+            if idx is None:
                 thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
                              "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
                 continue
+            m = ms_list.pop(idx)
             d_ds = round(ng["ds"]) - round(m["ds"])
             d_thue = round(ng["thue"]) - round(m["thue"])
             if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
@@ -25692,10 +25752,32 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             "chenh_lech": d_ds + d_thue})
             else:
                 khop += 1
-        thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-        lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-        ket[ten_loai[loai]] = {"tong_hd_nguon": len(nguon[loai]), "khop": khop,
-                               "thieu": thieu, "lech": lech}
+    thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+    lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+    ket["ban_hang"] = {"tong_hd_nguon": tong_nguon_sold, "khop": khop, "thieu": thieu, "lech": lech}
+
+    # ---- Mua hàng: khóa phẳng (MST, Số hóa đơn) như cũ — MISA chưa ghi
+    # InvSeries cho PUInvoice/PUServiceDetail nên chưa thể nhóm theo Ký hiệu.
+    thieu, lech, khop = [], [], 0
+    for k, ng in nguon["purchase"].items():
+        m = misa["purchase"].get(k)
+        if m is None:
+            thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
+                         "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
+            continue
+        d_ds = round(ng["ds"]) - round(m["ds"])
+        d_thue = round(ng["thue"]) - round(m["thue"])
+        if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
+            lech.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
+                        "doanh_so_nguon": round(ng["ds"]), "doanh_so_misa": round(m["ds"]),
+                        "thue_nguon": round(ng["thue"]), "thue_misa": round(m["thue"]),
+                        "chenh_lech": d_ds + d_thue})
+        else:
+            khop += 1
+    thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+    lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+    ket["mua_hang"] = {"tong_hd_nguon": len(nguon["purchase"]), "khop": khop,
+                       "thieu": thieu, "lech": lech}
 
     return {"ban_hang": ket["ban_hang"], "mua_hang": ket["mua_hang"], "doc_duoc": doc_duoc}
 
