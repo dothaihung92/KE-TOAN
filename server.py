@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.074"
+APP_BUILD = "2026-08-27.075"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25727,17 +25727,29 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     for gk, ng_list in nguon["sold"].items():
         tong_nguon_sold += len(ng_list)
         ms_list = list(misa["sold"].get(gk, []))   # copy để pop dần, tránh ghép trùng
+        # ĐÚNG như docstring: group không có gì để phân biệt (chỉ 1 hóa đơn
+        # nguồn, tối đa 1 dòng MISA cùng MST+Số HĐ) -> ứng viên duy nhất
+        # LUÔN được chọn, KHÔNG đòi hỏi Ký hiệu HĐ phải trùng (Ký hiệu chỉ
+        # dùng để gỡ rối khi có NHIỀU hóa đơn/dòng trùng Số HĐ — không áp
+        # dụng ở đây). Bắt buộc Ký hiệu khớp trong trường hợp group-1-dòng
+        # từng gây báo sai "THIẾU" cho hóa đơn ĐÃ CÓ trong MISA nhưng Ký
+        # hiệu ghi nhận lệch định dạng/thiếu ký tự so với dữ liệu tra cứu
+        # gốc (vd "1C25TKK" ở nguồn vs "C25TKK" trong MISA).
+        single = len(ng_list) == 1 and len(ms_list) <= 1
         for ng in ng_list:
             idx = None
-            for i, ms in enumerate(ms_list):
-                if ms["kyhieu"] and ng["kyhieu"] and ms["kyhieu"] == ng["kyhieu"]:
-                    idx = i
-                    break
-            if idx is None:
+            if single:
+                idx = 0 if ms_list else None
+            else:
                 for i, ms in enumerate(ms_list):
-                    if not _ky_hieu_chac_chan_khac(ng["kyhieu"], ms["kyhieu"]):
+                    if ms["kyhieu"] and ng["kyhieu"] and ms["kyhieu"] == ng["kyhieu"]:
                         idx = i
                         break
+                if idx is None:
+                    for i, ms in enumerate(ms_list):
+                        if not _ky_hieu_chac_chan_khac(ng["kyhieu"], ms["kyhieu"]):
+                            idx = i
+                            break
             if idx is None:
                 thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
                              "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
