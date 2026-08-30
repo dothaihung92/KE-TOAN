@@ -7670,9 +7670,9 @@ function misaBuTruMo(loai){
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: và quá hạn hơn (tháng, tính đến ngày cuối khung)</label>
         <input type="number" id="buTruThangQuaHan" value="10" min="1" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 3: giá trị hóa đơn dưới (đ)</label>
-        <input type="number" id="buTruNguong" value="5000000" step="100000" style="width:140px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+        <input type="text" inputmode="numeric" id="buTruNguong" value="5.000.000" oninput="misaDinhDangSoInput(this)" style="width:140px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Tầng 2: cho lệch tối đa (đ, phí NH)</label>
-        <input type="number" id="buTruDungSai" value="20000" step="1000" min="0" style="width:120px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
+        <input type="text" inputmode="numeric" id="buTruDungSai" value="20.000" oninput="misaDinhDangSoInput(this)" style="width:120px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Cho thanh toán TRƯỚC ngày HĐ tối đa (ngày)</label>
         <input type="number" id="buTruTruocNgay" value="7" min="0" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruTim('${loai}')">🔍 Chạy đối chiếu</button>
@@ -7693,11 +7693,21 @@ function misaBuTruBangDon(rows,cols){
   return `<div style="max-height:24vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
     <tr style="background:#f0f0f0;position:sticky;top:0">${th}</tr>${tr}</table></div>`;
 }
+// Nhập số tiền có dấu chấm ngăn cách hàng nghìn (vd "20.000.000") ngay khi
+// gõ — bỏ mọi ký tự không phải số rồi định dạng lại bằng toLocaleString.
+function misaDinhDangSoInput(el){
+  const digits=(el.value||'').replace(/\D/g,'');
+  el.value=digits?Number(digits).toLocaleString('vi-VN'):'';
+}
+function misaSoTuChuoi(s){
+  const n=parseInt(String(s||'').replace(/\D/g,''),10);
+  return isNaN(n)?0:n;
+}
 async function misaBuTruTim(loai){
   const cuaSoThang=document.getElementById('buTruCuaSoThang').value||3;
   const thangQuaHan=document.getElementById('buTruThangQuaHan').value||10;
-  const nguong=document.getElementById('buTruNguong').value||5000000;
-  const dungSai=document.getElementById('buTruDungSai').value||20000;
+  const nguong=misaSoTuChuoi(document.getElementById('buTruNguong').value)||5000000;
+  const dungSai=misaSoTuChuoi(document.getElementById('buTruDungSai').value)||20000;
   const truocNgay=document.getElementById('buTruTruocNgay').value||7;
   const tuNgay=document.getElementById('buTruTu').value||'';
   const denNgay=document.getElementById('buTruDen').value||'';
