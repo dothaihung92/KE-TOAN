@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.072"
+APP_BUILD = "2026-08-27.073"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16716,21 +16716,36 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             pass
         # Nhận diện chứng từ ĐÃ TỪNG được CHÍNH phần mềm ghi cho ĐÚNG hóa đơn
         # này để "Ghi đè" thay thế đúng chỗ — khóa theo (MST khách hàng, Số
-        # hóa đơn, Ký hiệu HĐ), KHÔNG theo "Số chứng từ" (Số chứng từ giờ
-        # luôn sinh SỐ MỚI tiếp nối MISA — xem seq_thang ở trên — nên không
-        # còn ổn định giữa 2 lần chạy để dùng làm khóa nhận diện "đã ghi
-        # trước đó" được nữa).
+        # hóa đơn), KHÔNG theo "Số chứng từ" (Số chứng từ giờ luôn sinh SỐ
+        # MỚI tiếp nối MISA — xem seq_thang ở trên — nên không còn ổn định
+        # giữa 2 lần chạy để dùng làm khóa nhận diện "đã ghi trước đó" được
+        # nữa).
         #
-        # BẮT BUỘC phải có Ký hiệu HĐ trong khóa — xác nhận qua lỗi thật
-        # người dùng báo (bảng đối chiếu tổng giá trị & VAT): 1 khách hàng
-        # (MST 0314263169) có 2 hóa đơn KHÁC NHAU HOÀN TOÀN nhưng CÙNG "Số
-        # hóa đơn"=29 (Số hóa đơn chỉ duy nhất TRONG PHẠM VI 1 Ký hiệu/Mẫu
-        # số — hết năm/hết quyển lại đánh số lại từ đầu ở Ký hiệu MỚI, vd
-        # 1C25TKK và 1C26TKK) — khóa cũ chỉ (MST, Số HĐ) khiến hóa đơn ghi
-        # SAU bị coi là "trùng" với hóa đơn KHÁC đã ghi trước (khác ký hiệu,
-        # khác ngày, khác số tiền) và bị BỎ QUA hoàn toàn, không ghi vào
-        # MISA — đúng nguyên nhân "hóa đơn số 29 ngày 19/11/2025 bị sót".
-        _pm_invoices = {}   # (mst_lower, sohd_lower, kyhieu_lower) -> {"refids", "doc", "posted"}
+        # Ký hiệu HĐ CHỈ dùng để PHÂN BIỆT khi CẢ 2 BÊN đều CÓ Ký hiệu THẬT
+        # (không rỗng) và KHÁC NHAU — xác nhận qua lỗi thật người dùng báo
+        # (bảng đối chiếu tổng giá trị & VAT): 1 khách hàng (MST 0314263169)
+        # có 2 hóa đơn KHÁC NHAU HOÀN TOÀN nhưng CÙNG "Số hóa đơn"=29 (Số
+        # hóa đơn chỉ duy nhất TRONG PHẠM VI 1 Ký hiệu/Mẫu số — hết năm/hết
+        # quyển lại đánh số lại từ đầu ở Ký hiệu MỚI, vd 1C25TKK và 1C26TKK)
+        # — khóa CŨ chỉ (MST, Số HĐ) khiến hóa đơn ghi SAU bị coi là "trùng"
+        # với hóa đơn KHÁC đã ghi trước, bị BỎ QUA hoàn toàn.
+        #
+        # NHƯNG bắt CỨNG khóa PHẢI luôn có Ký hiệu HĐ (thử ngay sau khi sửa
+        # lần trước) lại gây lỗi MỚI, NGƯỢC LẠI: khi cột "Ký hiệu HĐ" không
+        # dò được từ Bảng kê Đầu ra hiện tại (vd header khác, hoặc đợt
+        # trước đã ghi vào MISA bằng phiên bản/nguồn dữ liệu không có cột
+        # này) — Ký hiệu đọc ra "" trong khi MISA đã có sẵn Ký hiệu THẬT —
+        # bị coi là 2 ký hiệu "khác nhau" (rỗng ≠ thật) nên KHÔNG nhận ra là
+        # trùng nữa, ghi THÊM BẢN MỚI cho TOÀN BỘ hóa đơn đã có (204 chứng
+        # từ bị ghi trùng thay vì bỏ qua) — người dùng đã báo đúng lỗi này.
+        # Chỉ kết luận "chắc chắn là 2 hóa đơn khác nhau" khi CẢ 2 Ký hiệu
+        # đều CÓ GIÁ TRỊ THẬT và KHÁC NHAU; còn lại (1 bên/cả 2 bên rỗng —
+        # không đủ dữ liệu để phân biệt) vẫn coi là CÓ THỂ trùng như hành vi
+        # AN TOÀN cũ, tránh ghi trùng khi không chắc chắn.
+        def _ky_hieu_chac_chan_khac(kh_moi, kh_da_co):
+            return bool(kh_moi) and bool(kh_da_co) and kh_moi != kh_da_co
+
+        _pm_invoices = {}   # (mst_lower, sohd_lower) -> {kyhieu_lower: {"refids","doc","posted"}}
         try:
             for refid, rn, ax, invno, invkh, pf, pm in cur.execute(
                     "SELECT RefID, RefNoManagement, ISNULL(AccountObjectTaxCode,''), "
@@ -16739,29 +16754,54 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     "FROM SAVoucher WHERE ISNULL(CustomField10,'')=?", _PM_MARK).fetchall():
                 if not invno:
                     continue
-                bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower(), str(invkh).strip().lower())
-                e = _pm_invoices.setdefault(bk, {"refids": [], "doc": rn, "posted": False})
+                bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower())
+                kh = str(invkh or "").strip().lower()
+                e = _pm_invoices.setdefault(bk, {}).setdefault(kh, {"refids": [], "doc": rn, "posted": False})
                 e["refids"].append(refid)
                 if pf or pm:
                     e["posted"] = True
         except Exception:
             pass
+
+        def _pm_tim_khop(bk, kh_moi):
+            """Tìm bản ghi phần mềm ĐÃ TẠO TRƯỚC phù hợp với hóa đơn ĐANG
+            XÉT (kh_moi) — ưu tiên khớp ĐÚNG Ký hiệu, nếu không có thì lấy
+            bản ghi CHƯA CHẮC là khác (Ký hiệu 1 trong 2 bên rỗng) — bỏ
+            qua HẲN các bản ghi CHẮC CHẮN khác Ký hiệu."""
+            grp = _pm_invoices.get(bk)
+            if not grp:
+                return None
+            if kh_moi in grp:
+                return grp[kh_moi]
+            for kh_cu, e in grp.items():
+                if not _ky_hieu_chac_chan_khac(kh_moi, kh_cu):
+                    return e
+            return None
+
         # Hóa đơn ĐÃ CÓ SẴN trong MISA nói chung (kể cả do NGƯỜI DÙNG tự nhập
         # tay, KHÔNG chỉ chứng từ do CHÍNH phần mềm tạo như _pm_invoices ở
-        # trên) — khóa CÙNG kiểu (MST, Số hóa đơn, Ký hiệu HĐ) để tránh ghi
-        # TRÙNG hóa đơn khách đã tự nhập tay (xác nhận qua thử nghiệm thật:
-        # 3 hóa đơn khách tự nhập bị ghi thêm 1 bản trùng vì _pm_invoices
-        # chỉ biết chứng từ DO CHÍNH phần mềm tạo trước đó, không thấy được
-        # chứng từ người dùng tự nhập).
-        _da_co_hoa_don = set()
+        # trên) — khóa CÙNG kiểu (MST, Số hóa đơn) để tránh ghi TRÙNG hóa
+        # đơn khách đã tự nhập tay (xác nhận qua thử nghiệm thật: 3 hóa đơn
+        # khách tự nhập bị ghi thêm 1 bản trùng vì _pm_invoices chỉ biết
+        # chứng từ DO CHÍNH phần mềm tạo trước đó, không thấy được chứng từ
+        # người dùng tự nhập).
+        _da_co_hoa_don = {}   # (mst_lower, sohd_lower) -> set các Ký hiệu HĐ đã thấy
         try:
             for ax, invno, invkh in cur.execute(
                     "SELECT ISNULL(AccountObjectTaxCode,''), ISNULL(InvNo,''), ISNULL(InvSeries,'') "
                     "FROM SAVoucher WHERE ISNULL(InvNo,'')<>''").fetchall():
-                _da_co_hoa_don.add((_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower(),
-                                    str(invkh).strip().lower()))
+                bk = (_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower())
+                _da_co_hoa_don.setdefault(bk, set()).add(str(invkh or "").strip().lower())
         except Exception:
             pass
+
+        def _da_co_khop(bk, kh_moi):
+            """True nếu (MST, Số HĐ) này ĐÃ CÓ trong MISA và KHÔNG chắc
+            chắn là hóa đơn khác Ký hiệu (xem _ky_hieu_chac_chan_khac)."""
+            kh_da_co = _da_co_hoa_don.get(bk)
+            if kh_da_co is None:
+                return False
+            return any(not _ky_hieu_chac_chan_khac(kh_moi, kh_cu) for kh_cu in kh_da_co)
         ket = []
         them_ct = trung = bo_kh = go = so_ngay_loi = so_tien_0 = bo_tk = 0
         tk_thay = set()
@@ -16837,13 +16877,14 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             if len(p) == 3:
                 thang = str(int(p[1])) if p[1].isdigit() else p[1]
                 nam = p[2]
-            bk = (mst_k, sohd.strip().lower(), kyhieu.strip().lower())
-            if bk not in _pm_invoices and bk in _da_co_hoa_don:
+            bk = (mst_k, sohd.strip().lower())
+            kh_moi = kyhieu.strip().lower()
+            pm_e = _pm_tim_khop(bk, kh_moi)
+            if pm_e is None and _da_co_khop(bk, kh_moi):
                 trung += 1
                 ket.append({"so_hd": sohd, "kh_mst": mst,
                             "trang_thai": "đã có sẵn trong MISA (không phải do phần mềm tạo, bỏ qua)"})
                 continue
-            pm_e = _pm_invoices.get(bk)
             if pm_e and pm_e["posted"]:
                 trung += 1
                 ket.append({"so_ct": pm_e["doc"], "so_hd": sohd,
@@ -19012,6 +19053,34 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
 
         branch_id = _misa_branch_id(cur)
 
+        # AN TOÀN KHÔNG PHỤ THUỘC "tháng bắt đầu" — chặn TẠI ĐÂY việc tạo
+        # trùng (CCDC, tháng) đã có SUAllocationDetailExpense thật, dùng
+        # ĐÚNG cột Month/Year có thật trên SUAllocation (xem alloc_row bên
+        # dưới) — xác nhận qua lỗi thật người dùng báo: bấm "Import tự động
+        # toàn bộ" lần 2 (Từ tháng/năm trên khung nhập vẫn còn giữ giá trị
+        # lần chạy TRƯỚC do form KHÔNG tự xoá) tạo THÊM 1 bộ chứng từ PBCC
+        # trùng y hệt tháng 5+6/2026 đã có. Trước đây chỉ dựa vào tháng bắt
+        # đầu tính lùi từ MAX(RefDate)+1 khi để trống — không tự vệ được
+        # nếu tháng bắt đầu bị truyền lại (dù cố ý hay do form còn nhớ giá
+        # trị cũ); giờ LUÔN kiểm tra thật trước khi tạo, không tin riêng
+        # tham số đầu vào.
+        da_phan_bo_thang = set()   # (SupplyID, năm, tháng) ĐÃ có SUAllocationDetailExpense thật
+        try:
+            col_thang_a = _misa_chon_cot(cols_alloc, "Month")
+            col_nam_a = _misa_chon_cot(cols_alloc, "Year")
+            col_refid_a = _misa_chon_cot(cols_alloc, "RefID")
+            col_refid_e = _misa_chon_cot(cols_exp, "RefID")
+            col_supply_e = _misa_chon_cot(cols_exp, "SupplyID")
+            if col_thang_a and col_nam_a and col_refid_a and col_refid_e and col_supply_e:
+                sql_da_pb = ("SELECT e.[%s], a.[%s], a.[%s] FROM SUAllocationDetailExpense e "
+                            "JOIN SUAllocation a ON a.[%s]=e.[%s]" %
+                            (col_supply_e, col_nam_a, col_thang_a, col_refid_a, col_refid_e))
+                for su_id, nam_e, thang_e in cur.execute(sql_da_pb).fetchall():
+                    if nam_e is not None and thang_e is not None:
+                        da_phan_bo_thang.add((su_id, int(nam_e), int(thang_e)))
+        except Exception:
+            da_phan_bo_thang = set()
+
         ket = []
         so_ct = max_so
         for i in range(max(1, int(so_thang or 12))):
@@ -19022,9 +19091,20 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
             # CHỈ phân bổ cho CCDC đã GHI TĂNG trước/trong tháng này (ngay_gt <=
             # ngay_cuoi_thang) — xác nhận qua dữ liệu thật: CCDC ghi tăng THÁNG SAU
             # (vd 30/06) vẫn bị phân bổ NGƯỢC về các tháng TRƯỚC (01-05) khi nó còn
-            # chưa hề tồn tại, nếu không lọc theo ngày ghi tăng ở đây.
+            # chưa hề tồn tại, nếu không lọc theo ngày ghi tăng ở đây. CŨNG loại
+            # CCDC ĐÃ CÓ SUAllocationDetailExpense thật cho ĐÚNG tháng này rồi
+            # (da_phan_bo_thang) — tránh tạo trùng khi tháng bắt đầu bị lặp lại.
             dong_thang = [(su_id, st) for su_id, st in trang_thai.items()
-                          if st["con_lai_ky"] > 0 and (not st["ngay_gt"] or st["ngay_gt"] <= ngay_cuoi_thang)]
+                          if st["con_lai_ky"] > 0 and (not st["ngay_gt"] or st["ngay_gt"] <= ngay_cuoi_thang)
+                          and (su_id, yy, mm) not in da_phan_bo_thang]
+            bi_bo_qua_trung = [su_id for su_id, st in trang_thai.items()
+                               if st["con_lai_ky"] > 0 and (not st["ngay_gt"] or st["ngay_gt"] <= ngay_cuoi_thang)
+                               and (su_id, yy, mm) in da_phan_bo_thang]
+            for su_id in bi_bo_qua_trung:
+                ket.append({"ma": trang_thai[su_id]["ma"], "ten": trang_thai[su_id]["ten"],
+                           "thang": f"{mm:02d}/{yy}", "so_tien": 0, "so_chung_tu": None, "tk_no": None,
+                           "trang_thai": "bỏ qua — tháng %02d/%s CCDC này đã có chứng từ Phân bổ "
+                                        "thật trong MISA rồi (tránh tạo trùng)" % (mm, yy)})
             if not dong_thang:
                 # Còn CCDC CHƯA tới hạn ghi tăng (ghi tăng ở tháng sau) — sang tháng kế
                 # tiếp để thử lại, KHÔNG dừng hẳn (dừng hẳn chỉ khi THẬT SỰ không còn
@@ -19240,8 +19320,8 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_dong": len(ket),
-                "so_chung_tu": len(set(x["so_chung_tu"] for x in ket)), "danh_sach": ket,
-                "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                "so_chung_tu": len({x["so_chung_tu"] for x in ket if x.get("so_chung_tu")}),
+                "danh_sach": ket, "thang_bat_dau": thang_bd, "so_thang": so_thang,
                 "hoc_duoc": {"ref_type": ref_type_pb, "display_on_book": dob_pb,
                             "tk_no_mac_dinh": debit_mac_dinh, "tk_co_mac_dinh": credit_mac_dinh}}
     except HTTPException:
@@ -19506,6 +19586,29 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
             except Exception:
                 pass
 
+        # AN TOÀN KHÔNG PHỤ THUỘC "tháng bắt đầu" — giống hệt bài học ở
+        # _misa_phan_bo_ccdc (đúng lỗi thật người dùng báo: bấm "Import tự
+        # động toàn bộ" lần 2 với Từ tháng/năm vẫn còn giữ giá trị lần chạy
+        # TRƯỚC do form không tự xoá, tạo THÊM 1 bộ chứng từ trùng). Chặn
+        # TẠI ĐÂY việc tạo trùng (TSCĐ, tháng) đã có FADepreciationDetail
+        # thật, dùng ĐÚNG cột Month/Year có thật trên FADepreciation.
+        da_khau_hao_thang = set()   # (FixedAssetID, năm, tháng) ĐÃ có FADepreciationDetail thật
+        try:
+            col_thang_d = _misa_chon_cot(cols_dep, "Month")
+            col_nam_d = _misa_chon_cot(cols_dep, "Year")
+            col_refid_d = _misa_chon_cot(cols_dep, "RefID")
+            col_refid_e = _misa_chon_cot(cols_det, "RefID")
+            col_fa_e = _misa_chon_cot(cols_det, "FixedAssetID")
+            if col_thang_d and col_nam_d and col_refid_d and col_refid_e and col_fa_e:
+                sql_da_kh = ("SELECT e.[%s], a.[%s], a.[%s] FROM FADepreciationDetail e "
+                            "JOIN FADepreciation a ON a.[%s]=e.[%s]" %
+                            (col_fa_e, col_nam_d, col_thang_d, col_refid_d, col_refid_e))
+                for fa_id, nam_e, thang_e in cur.execute(sql_da_kh).fetchall():
+                    if nam_e is not None and thang_e is not None:
+                        da_khau_hao_thang.add((fa_id, int(nam_e), int(thang_e)))
+        except Exception:
+            da_khau_hao_thang = set()
+
         ket = []
         so_ct = max_so
         for i in range(max(1, int(so_thang or 12))):
@@ -19516,9 +19619,20 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
             # CHỈ khấu hao cho TSCĐ đã tới ngày bắt đầu khấu hao trong/trước tháng này
             # (ngay_kh <= ngay_cuoi_thang) — xác nhận qua dữ liệu thật: TSCĐ ghi tăng
             # THÁNG SAU vẫn bị khấu hao NGƯỢC về các tháng TRƯỚC khi nó còn chưa tồn
-            # tại, nếu không lọc theo ngày ở đây (giống bài học ở Phân bổ CCDC).
+            # tại, nếu không lọc theo ngày ở đây (giống bài học ở Phân bổ CCDC). CŨNG
+            # loại TSCĐ ĐÃ CÓ FADepreciationDetail thật cho ĐÚNG tháng này rồi
+            # (da_khau_hao_thang) — tránh tạo trùng khi tháng bắt đầu bị lặp lại.
             dong_thang = [(fa_id, st) for fa_id, st in trang_thai.items()
-                          if st["con_lai_ky"] > 0 and (not st["ngay_kh"] or st["ngay_kh"] <= ngay_cuoi_thang)]
+                          if st["con_lai_ky"] > 0 and (not st["ngay_kh"] or st["ngay_kh"] <= ngay_cuoi_thang)
+                          and (fa_id, yy, mm) not in da_khau_hao_thang]
+            bi_bo_qua_trung = [fa_id for fa_id, st in trang_thai.items()
+                               if st["con_lai_ky"] > 0 and (not st["ngay_kh"] or st["ngay_kh"] <= ngay_cuoi_thang)
+                               and (fa_id, yy, mm) in da_khau_hao_thang]
+            for fa_id in bi_bo_qua_trung:
+                ket.append({"ma": trang_thai[fa_id]["ma"], "ten": trang_thai[fa_id]["ten"],
+                           "thang": f"{mm:02d}/{yy}", "so_tien": 0, "so_chung_tu": None, "tk_no": None,
+                           "trang_thai": "bỏ qua — tháng %02d/%s TSCĐ này đã có chứng từ Khấu hao "
+                                        "thật trong MISA rồi (tránh tạo trùng)" % (mm, yy)})
             if not dong_thang:
                 # Còn TSCĐ CHƯA tới hạn bắt đầu khấu hao (ghi tăng ở tháng sau) — sang
                 # tháng kế tiếp để thử lại, KHÔNG dừng hẳn.
@@ -19734,8 +19848,8 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
         else:
             conn.commit()
         return {"preview": preview, "database": database, "so_dong": len(ket),
-                "so_chung_tu": len(set(x["so_chung_tu"] for x in ket)), "danh_sach": ket,
-                "thang_bat_dau": thang_bd, "so_thang": so_thang,
+                "so_chung_tu": len({x["so_chung_tu"] for x in ket if x.get("so_chung_tu")}),
+                "danh_sach": ket, "thang_bat_dau": thang_bd, "so_thang": so_thang,
                 "hoc_duoc": {"ref_type": ref_type_kh, "display_on_book": dob_kh,
                             "tk_no_mac_dinh": debit_mac_dinh, "tk_co_mac_dinh": credit_mac_dinh}}
     except HTTPException:
