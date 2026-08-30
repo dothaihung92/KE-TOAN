@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.071"
+APP_BUILD = "2026-08-27.072"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9950,13 +9950,17 @@ def _gen_mua_hang_dv(cid, header, rows):
     i_tt = tim(("thành tiền",), ("thành tiền",))
     i_no = tim(("nợ",), ())
     i_co = tim(("có",), ())
+    i_kh = tim(("ký hiệu",), ("ký hiệu",))
 
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
 
     soct_seen, soct_cache = {}, {}
-    def so_chung_tu(sohd, mst_disp, ngay):
-        return _so_ct_unique_memo("DV", ngay, mst_disp, (sohd, mst_disp, ngay),
+    def so_chung_tu(sohd, mst_disp, ngay, kyhieu):
+        # Khóa PHẢI có Ký hiệu HĐ — xem giải thích ở _gen_mua_hang_nk (Số
+        # hóa đơn chỉ duy nhất trong phạm vi 1 Ký hiệu, thiếu Ký hiệu trong
+        # khóa sẽ gộp NHẦM 2 hóa đơn KHÁC NHAU thành 1 chứng từ).
+        return _so_ct_unique_memo("DV", ngay, mst_disp, (sohd, mst_disp, ngay, kyhieu),
                                   soct_seen, soct_cache)
     out = []
     for r in rows:
@@ -9968,7 +9972,8 @@ def _gen_mua_hang_dv(cid, header, rows):
         ngay = str(gv(r, i_ngay) or "")
         sohd = gv(r, i_so)
         ten = gv(r, i_ten)
-        soct = so_chung_tu(sohd, mst_disp, ngay)
+        kyhieu = str(gv(r, i_kh) or "").strip()
+        soct = so_chung_tu(sohd, mst_disp, ngay, kyhieu)
         tt_val = _to_num(gv(r, i_tt))
         row_vals = {
             1: 0, 2: 1, 3: 1,
@@ -9981,6 +9986,7 @@ def _gen_mua_hang_dv(cid, header, rows):
             22: tt_val, 23: tt_val,
             28: _chuan_thue_suat(gv(r, i_ts)), 29: _to_num(gv(r, i_tthue)),
             31: "1331",
+            33: kyhieu,
             34: sohd, 35: ngay, 36: "1",
             37: mst_disp, 38: gv(r, i_nb), 39: mst_disp,
             42: sohd, 43: soct,
@@ -10687,8 +10693,13 @@ def _gen_mua_hang_nk(cid, header, rows):
         mst = _dinh_dang_mst(gv(r, col["mst"])) if not la_nk else str(gv(r, col["mst"]) or "").strip()
         ngay = str(gv(r, col["ngay"]) or "")
         mst_raw = gv(r, col["mst"])
-        # cùng 1 hóa đơn (số HĐ+MST+ngày) -> dùng lại đúng 1 số phiếu nhập
-        so_phieu = _so_ct_unique_memo("NK", ngay, mst_raw, (sohd, mst_raw, ngay),
+        # cùng 1 hóa đơn (số HĐ+MST+ngày+KÝ HIỆU) -> dùng lại đúng 1 số phiếu
+        # nhập — PHẢI có Ký hiệu HĐ trong khóa: Số hóa đơn chỉ duy nhất
+        # TRONG PHẠM VI 1 Ký hiệu (hết năm/quyển lại đánh số lại từ đầu ở Ký
+        # hiệu MỚI), thiếu Ký hiệu trong khóa sẽ gộp NHẦM 2 hóa đơn KHÁC
+        # NHAU cùng NCC/ngày/số HĐ trùng nhau thành 1 chứng từ — xác nhận
+        # qua đúng lỗi thật đã gặp bên Bán hàng (_misa_ghi_ban_hang).
+        so_phieu = _so_ct_unique_memo("NK", ngay, mst_raw, (sohd, mst_raw, ngay, kyhieu),
                                        so_phieu_seen, so_phieu_cache)
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
         nk_ts = _so_pct(gv(r, col["nk_ts"])) if col["nk_ts"] >= 0 else 0  # "3%"->3
@@ -10842,7 +10853,9 @@ def _gen_mua_hang_kqk(cid, header, rows):
         # trong cùng 1 tháng bị dồn chung vào 1 chứng từ. Các dòng cùng 1 hóa
         # đơn vẫn dùng chung 1 số (nhớ qua so_phieu_cache).
         mst_raw = gv(r, col["mst"])
-        so_ct = _so_ct_unique_memo("MHKQK", ngay, mst_raw, (sohd, mst_raw, ngay),
+        # Khóa PHẢI có Ký hiệu HĐ — xem giải thích ở _gen_mua_hang_nk (Số hóa
+        # đơn chỉ duy nhất trong phạm vi 1 Ký hiệu).
+        so_ct = _so_ct_unique_memo("MHKQK", ngay, mst_raw, (sohd, mst_raw, ngay, kyhieu),
                                     so_phieu_seen, so_phieu_cache)
         rate = _dm_rate(gv(r, col["ts"]))
         nk_tg = _to_num(gv(r, col["nk_tg"])) or 0
@@ -16703,18 +16716,30 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             pass
         # Nhận diện chứng từ ĐÃ TỪNG được CHÍNH phần mềm ghi cho ĐÚNG hóa đơn
         # này để "Ghi đè" thay thế đúng chỗ — khóa theo (MST khách hàng, Số
-        # hóa đơn), KHÔNG theo "Số chứng từ" (Số chứng từ giờ luôn sinh SỐ MỚI
-        # tiếp nối MISA — xem seq_thang ở trên — nên không còn ổn định giữa 2
-        # lần chạy để dùng làm khóa nhận diện "đã ghi trước đó" được nữa).
-        _pm_invoices = {}   # (mst_lower, sohd_lower) -> {"refids", "doc", "posted"}
+        # hóa đơn, Ký hiệu HĐ), KHÔNG theo "Số chứng từ" (Số chứng từ giờ
+        # luôn sinh SỐ MỚI tiếp nối MISA — xem seq_thang ở trên — nên không
+        # còn ổn định giữa 2 lần chạy để dùng làm khóa nhận diện "đã ghi
+        # trước đó" được nữa).
+        #
+        # BẮT BUỘC phải có Ký hiệu HĐ trong khóa — xác nhận qua lỗi thật
+        # người dùng báo (bảng đối chiếu tổng giá trị & VAT): 1 khách hàng
+        # (MST 0314263169) có 2 hóa đơn KHÁC NHAU HOÀN TOÀN nhưng CÙNG "Số
+        # hóa đơn"=29 (Số hóa đơn chỉ duy nhất TRONG PHẠM VI 1 Ký hiệu/Mẫu
+        # số — hết năm/hết quyển lại đánh số lại từ đầu ở Ký hiệu MỚI, vd
+        # 1C25TKK và 1C26TKK) — khóa cũ chỉ (MST, Số HĐ) khiến hóa đơn ghi
+        # SAU bị coi là "trùng" với hóa đơn KHÁC đã ghi trước (khác ký hiệu,
+        # khác ngày, khác số tiền) và bị BỎ QUA hoàn toàn, không ghi vào
+        # MISA — đúng nguyên nhân "hóa đơn số 29 ngày 19/11/2025 bị sót".
+        _pm_invoices = {}   # (mst_lower, sohd_lower, kyhieu_lower) -> {"refids", "doc", "posted"}
         try:
-            for refid, rn, ax, invno, pf, pm in cur.execute(
+            for refid, rn, ax, invno, invkh, pf, pm in cur.execute(
                     "SELECT RefID, RefNoManagement, ISNULL(AccountObjectTaxCode,''), "
-                    "ISNULL(InvNo,''), ISNULL(IsPostedFinance,0), ISNULL(IsPostedManagement,0) "
+                    "ISNULL(InvNo,''), ISNULL(InvSeries,''), ISNULL(IsPostedFinance,0), "
+                    "ISNULL(IsPostedManagement,0) "
                     "FROM SAVoucher WHERE ISNULL(CustomField10,'')=?", _PM_MARK).fetchall():
                 if not invno:
                     continue
-                bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower())
+                bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower(), str(invkh).strip().lower())
                 e = _pm_invoices.setdefault(bk, {"refids": [], "doc": rn, "posted": False})
                 e["refids"].append(refid)
                 if pf or pm:
@@ -16723,17 +16748,18 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             pass
         # Hóa đơn ĐÃ CÓ SẴN trong MISA nói chung (kể cả do NGƯỜI DÙNG tự nhập
         # tay, KHÔNG chỉ chứng từ do CHÍNH phần mềm tạo như _pm_invoices ở
-        # trên) — khóa CÙNG kiểu (MST, Số hóa đơn) để tránh ghi TRÙNG hóa đơn
-        # khách đã tự nhập tay (xác nhận qua thử nghiệm thật: 3 hóa đơn khách
-        # tự nhập bị ghi thêm 1 bản trùng vì _pm_invoices chỉ biết chứng từ DO
-        # CHÍNH phần mềm tạo trước đó, không thấy được chứng từ người dùng
-        # tự nhập).
+        # trên) — khóa CÙNG kiểu (MST, Số hóa đơn, Ký hiệu HĐ) để tránh ghi
+        # TRÙNG hóa đơn khách đã tự nhập tay (xác nhận qua thử nghiệm thật:
+        # 3 hóa đơn khách tự nhập bị ghi thêm 1 bản trùng vì _pm_invoices
+        # chỉ biết chứng từ DO CHÍNH phần mềm tạo trước đó, không thấy được
+        # chứng từ người dùng tự nhập).
         _da_co_hoa_don = set()
         try:
-            for ax, invno in cur.execute(
-                    "SELECT ISNULL(AccountObjectTaxCode,''), ISNULL(InvNo,'') FROM SAVoucher "
-                    "WHERE ISNULL(InvNo,'')<>''").fetchall():
-                _da_co_hoa_don.add((_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower()))
+            for ax, invno, invkh in cur.execute(
+                    "SELECT ISNULL(AccountObjectTaxCode,''), ISNULL(InvNo,''), ISNULL(InvSeries,'') "
+                    "FROM SAVoucher WHERE ISNULL(InvNo,'')<>''").fetchall():
+                _da_co_hoa_don.add((_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower(),
+                                    str(invkh).strip().lower()))
         except Exception:
             pass
         ket = []
@@ -16811,7 +16837,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             if len(p) == 3:
                 thang = str(int(p[1])) if p[1].isdigit() else p[1]
                 nam = p[2]
-            bk = (mst_k, sohd.strip().lower())
+            bk = (mst_k, sohd.strip().lower(), kyhieu.strip().lower())
             if bk not in _pm_invoices and bk in _da_co_hoa_don:
                 trung += 1
                 ket.append({"so_hd": sohd, "kh_mst": mst,
@@ -25411,11 +25437,26 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         theo TK chi phí khác nhau) — CỘNG DỒN theo (MST, Số hóa đơn).
     Bảng nào KHÔNG dò được đủ cột (CSDL MISA phiên bản khác) thì BỎ QUA
     hẳn loại đó (không báo nhầm "thiếu" hàng loạt vì không đọc được dữ
-    liệu MISA) — đánh dấu trong doc_duoc để giao diện tự biết mà cảnh báo."""
+    liệu MISA) — đánh dấu trong doc_duoc để giao diện tự biết mà cảnh báo.
+
+    QUAN TRỌNG — khóa Bán hàng PHẢI có Ký hiệu HĐ (khhdon/InvSeries), KHÔNG
+    CHỈ (MST, Số hóa đơn): xác nhận qua đúng lỗi thật người dùng báo — 1
+    khách hàng có 2 hóa đơn KHÁC NHAU hoàn toàn (khác ngày, khác số tiền)
+    nhưng CÙNG Số hóa đơn=29 vì khác Ký hiệu (Số hóa đơn chỉ duy nhất
+    TRONG PHẠM VI 1 Ký hiệu, hết năm/quyển lại đánh số lại từ đầu) — khóa
+    thiếu Ký hiệu khiến 2 hóa đơn nguồn bị CỘNG DỒN nhầm vào chung 1 mục,
+    trong khi MISA (đã fix _misa_ghi_ban_hang cùng đợt) chỉ ghi được 1
+    trong 2 do bị coi nhầm là trùng — hiện SAI thành "LỆCH" thay vì đúng
+    ra phải là "THIẾU" 1 hóa đơn. Mua hàng (PUInvoice/PUServiceDetail)
+    CHƯA ghi được InvSeries khi tạo chứng từ (giới hạn hiện tại của
+    _misa_ghi_mua_hang/_misa_ghi_mua_hang_dv) nên TẠM giữ khóa (MST, Số
+    hóa đơn) như cũ cho mua hàng — thêm Ký hiệu vào khóa nguồn mà phía
+    MISA không có sẽ gây báo "thiếu" sai cho các hóa đơn trùng số HĐ nhưng
+    khác Ký hiệu (cùng giới hạn, không làm nó tệ hơn hiện trạng)."""
     import json as _json
     conn = db()
     rows = conn.execute(
-        "SELECT loai, nbmst, nmmst, shdon, tdlap, tgtcthue, tgtthue, tthai, raw "
+        "SELECT loai, nbmst, nmmst, khhdon, shdon, tdlap, tgtcthue, tgtthue, tthai, raw "
         "FROM invoices WHERE company_id=?", (cid,)).fetchall()
     conn.close()
 
@@ -25445,7 +25486,14 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         if not sohd:
             continue
         mst_doi_tac = r["nmmst"] if loai == "sold" else r["nbmst"]
-        k = (_misa_khncc_chuan_mst(mst_doi_tac).lower(), sohd.lower())
+        # Bán hàng PHẢI có Ký hiệu HĐ trong khóa (xem giải thích ở docstring
+        # — Số hóa đơn không duy nhất toàn cục, chỉ duy nhất trong 1 Ký
+        # hiệu); Mua hàng TẠM chưa thêm vì MISA chưa ghi InvSeries.
+        if loai == "sold":
+            kyhieu_ng = str(r["khhdon"] or "").strip().lower()
+            k = (_misa_khncc_chuan_mst(mst_doi_tac).lower(), sohd.lower(), kyhieu_ng)
+        else:
+            k = (_misa_khncc_chuan_mst(mst_doi_tac).lower(), sohd.lower())
         e = nguon[loai].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
                                        "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
         e["ds"] += _snum(r["tgtcthue"])
@@ -25461,14 +25509,16 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         if cols_sav:
             c_mst = _misa_chon_cot(cols_sav, "AccountObjectTaxCode")
             c_inv = _misa_chon_cot(cols_sav, "InvNo")
+            c_kh = _misa_chon_cot(cols_sav, "InvSeries")
             c_tot = _misa_chon_cot(cols_sav, "TotalAmount")
             c_vat = _misa_chon_cot(cols_sav, "TotalVATAmount")
-            if c_mst and c_inv and c_tot and c_vat:
+            if c_mst and c_inv and c_kh and c_tot and c_vat:
                 doc_duoc["ban_hang"] = True
-                sql = "SELECT [%s],[%s],[%s],[%s] FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
-                    c_mst, c_inv, c_tot, c_vat, c_inv)
-                for mst, inv, tot, vat in cur.execute(sql).fetchall():
-                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                sql = "SELECT [%s],[%s],[%s],[%s],[%s] FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
+                    c_mst, c_inv, c_kh, c_tot, c_vat, c_inv)
+                for mst, inv, kh, tot, vat in cur.execute(sql).fetchall():
+                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower(),
+                        str(kh or "").strip().lower())
                     e = misa["sold"].setdefault(k, {"ds": 0.0, "thue": 0.0})
                     v = _snum(vat)
                     e["thue"] += v
