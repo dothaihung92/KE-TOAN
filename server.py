@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.085"
+APP_BUILD = "2026-08-27.086"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23927,6 +23927,15 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     để giới hạn PHẠM VI hóa đơn được xét ở cả 3 tầng như trên, KHÔNG thay
     thế điều kiện quá hạn của riêng Tầng 3.
 
+    NGOẠI LỆ (theo yêu cầu người dùng) — hóa đơn "tin_cay_cao" (xem bên
+    dưới: TẤT CẢ hóa đơn PHÁT SINH SAU của cùng đối tượng đã khớp thanh
+    toán ngân hàng đủ, riêng hóa đơn này thì chưa) BỎ QUA điều kiện (1)
+    quá hạn — dấu hiệu "các hóa đơn sau đã trả, hóa đơn này thì chưa" tự
+    nó đã đủ mạnh để gợi ý xử lý ngay, không cần đợi đủ thời gian quá hạn
+    như tiêu chí Tầng 3 gốc. Điều kiện (2) giá trị < nguong vẫn áp dụng
+    kể cả với hóa đơn tin_cay_cao (Tầng 3 vẫn chỉ nhắm tới các khoản GIÁ
+    TRỊ NHỎ có thể xử lý bằng điều chỉnh tiền mặt).
+
     MỐC tính "quá hạn": den_ngay (nếu có nhập và không ở tương lai) — hay
     nói cách khác 'quá hạn TÍNH ĐẾN thời điểm báo cáo (den_ngay)', KHÔNG
     PHẢI luôn luôn tính từ lúc CHẠY báo cáo (có thể là rất lâu SAU kỳ đang
@@ -24015,8 +24024,6 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                 continue
             if not hd["inv_date"]:
                 continue
-            if hd["inv_date"] > han:
-                continue
             # ĐỘ TIN CẬY CAO (chỉ là GỢI Ý — vẫn cần người dùng tự xác nhận
             # trước khi ghi, KHÔNG tự động ghi bất kỳ bút toán nào): TẤT CẢ
             # hóa đơn PHÁT SINH SAU hóa đơn treo này (cùng đối tượng) đều
@@ -24034,6 +24041,16 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
             hd_sau = [h2 for h2 in d["hoa_don"] if h2 is not hd and h2["inv_date"]
                      and h2["inv_date"] > hd["inv_date"]]
             tin_cay_cao = bool(hd_sau) and all(h2["matched"] for h2 in hd_sau)
+            # Theo đúng yêu cầu người dùng: trường hợp "độ tin cậy cao" này
+            # KHÔNG phụ thuộc điều kiện "quá hạn hơn N tháng" nữa — dấu
+            # hiệu "các hóa đơn PHÁT SINH SAU đã thanh toán đủ, hóa đơn này
+            # thì chưa" tự nó đã đủ mạnh để gợi ý xử lý, kể cả khi hóa đơn
+            # còn khá MỚI (chưa quá hạn theo mốc thời gian thông thường) —
+            # CHỈ hóa đơn KHÔNG có dấu hiệu này mới cần đợi đủ điều kiện
+            # quá hạn như Tầng 3 gốc (giá trị nhỏ + để lâu mới coi là bị
+            # lỡ ghi công nợ).
+            if not tin_cay_cao and hd["inv_date"] > han:
+                continue
             tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
                           "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
                           "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"]),
