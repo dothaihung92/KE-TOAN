@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.080"
+APP_BUILD = "2026-08-27.081"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24047,7 +24047,11 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     #       hàng CODE LEAP đang gắn — nên được Tầng 1 coi là "khớp" và
     #       trước đây KHÔNG được đưa vào diện kiểm tra nội dung CK (chỉ xét
     #       khoản CHƯA khớp), bỏ lọt khả năng gắn nhầm dù nội dung CK rất
-    #       đáng ngờ.
+    #       đáng ngờ. NHƯNG chỉ soát các đối tượng có SỐ DƯ CUỐI KỲ còn LỆCH
+    #       (theo yêu cầu người dùng) — đối tượng đã "về không" hết (số dư ~
+    #       0, tổng hóa đơn = tổng đã thu/chi) thì bỏ qua HẲN, không cần soi
+    #       từng khoản nữa dù nội dung CK không khớp tên: về TỔNG THỂ vẫn
+    #       đúng, có gắn nhầm 1 khoản thì cũng đã tự bù trừ ra số dư đúng.
     #   (b) goi_y_chuyen — khoản đó CÒN CHƯA khớp được gì và trùng CHÍNH
     #       XÁC số tiền với 1 hóa đơn CÒN TREO (chưa khớp gì) của ĐÚNG 1
     #       đối tượng KHÁC duy nhất (nếu nhiều đối tượng khác cùng khớp số
@@ -24056,15 +24060,35 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     #       gợi ý chuyển sang) — các trường hợp CHỈ 1 ứng viên này được TỰ
     #       ĐỘNG áp dụng (auto_ap_dung=True) theo đúng yêu cầu người dùng;
     #       xem _misa_chuyen_cong_no_sai_doi_tuong để ghi thật.
+    # Số dư cuối kỳ mỗi đối tượng = tổng hóa đơn (Nợ 131/331) - tổng đã thu/chi
+    # (Có, gồm CẢ ngân hàng lẫn điều chỉnh tiền mặt) — ĐÚNG yêu cầu người
+    # dùng: chỉ cần soi chi tiết (cảnh báo gắn nhầm đối tượng) khi số dư của
+    # đối tượng đó CÒN LỆCH; đối tượng đã "về không" hết (số dư ~0, mọi hóa
+    # đơn coi như đã thu đủ) thì KHÔNG cần kiểm tra chi tiết từng khoản nữa
+    # dù nội dung CK không khớp tên — về TỔNG THỂ đối tượng đó vẫn đúng, dù
+    # có gắn nhầm 1 khoản thì cũng đã tự bù trừ ra số dư đúng, không có gì
+    # cần người dùng xử lý thêm ở đối tượng đó.
+    so_du_cuoi_ky = {}
+    for aoid, d in doi_tuong_hd.items():
+        tong_hd = sum(hd["so_tien"] for hd in d["hoa_don"])
+        tong_tt = sum(tt["so_tien"] for tt in doi_tuong_tt.get(aoid, []))
+        so_du_cuoi_ky[aoid] = tong_hd - tong_tt
+
     nghi_sai_doi_tuong = []
     goi_y_chuyen = []
     tat_ca_tt_ngan_hang = []   # (aoid, ma, ten, tt) — TẤT CẢ khoản NH (khớp hoặc chưa) — soát nội dung CK
     tat_ca_mo_coi = []    # (aoid, ma, ten, tt) — CHỈ khoản CHƯA khớp — dùng cho gợi ý chuyển đối tượng
     tat_ca_hd_treo = []   # (aoid, ma, ten, hd)
     for aoid, d in doi_tuong_hd.items():
+        # Số dư đã về 0 (trong dung sai) -> đối tượng này ĐÃ khớp đủ tổng
+        # thể, bỏ qua HẲN việc soát nội dung CK cho các khoản của đối tượng
+        # này (vẫn giữ nguyên trong tat_ca_mo_coi/tat_ca_hd_treo để KHÔNG
+        # ảnh hưởng gợi ý chuyển đối tượng của các đối tượng KHÁC).
+        da_khop_tong = abs(so_du_cuoi_ky.get(aoid, 0)) <= dung_sai
         for tt in doi_tuong_tt.get(aoid, []):
             if tt.get("nguon") == "ngan_hang":
-                tat_ca_tt_ngan_hang.append((aoid, d["ma"], d["ten"], tt))
+                if not da_khop_tong:
+                    tat_ca_tt_ngan_hang.append((aoid, d["ma"], d["ten"], tt))
                 if not tt["matched"]:
                     tat_ca_mo_coi.append((aoid, d["ma"], d["ten"], tt))
         for hd in d["hoa_don"]:
