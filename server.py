@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.082"
+APP_BUILD = "2026-08-27.083"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23919,13 +23919,24 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     tính từ ngày hóa đơn đã xử lý việc đó.
 
     Tầng 3 LUÔN áp dụng ĐỦ 2 điều kiện CÙNG LÚC (AND, không phải 1-trong-2):
-    (1) quá hạn hơn thang_qua_han tháng tính từ HÔM NAY — CẢ KHI đã nhập
-    khung tu_ngay/den_ngay (trước đây 2 điều kiện này bị coi là loại trừ
-    nhau — có khung ngày thì bỏ hẳn điều kiện quá hạn, khiến hóa đơn còn
-    khá mới trong khung ngày vẫn lọt vào Tầng 3 dù chưa thực sự quá hạn);
+    (1) quá hạn hơn thang_qua_han tháng — CẢ KHI đã nhập khung tu_ngay/
+    den_ngay (trước đây 2 điều kiện này bị coi là loại trừ nhau — có
+    khung ngày thì bỏ hẳn điều kiện quá hạn, khiến hóa đơn còn khá mới
+    trong khung ngày vẫn lọt vào Tầng 3 dù chưa thực sự quá hạn);
     (2) giá trị hóa đơn < nguong. Khung tu_ngay/den_ngay (nếu có) CHỈ dùng
     để giới hạn PHẠM VI hóa đơn được xét ở cả 3 tầng như trên, KHÔNG thay
     thế điều kiện quá hạn của riêng Tầng 3.
+
+    MỐC tính "quá hạn": den_ngay (nếu có nhập và không ở tương lai) — hay
+    nói cách khác 'quá hạn TÍNH ĐẾN thời điểm báo cáo (den_ngay)', KHÔNG
+    PHẢI luôn luôn tính từ lúc CHẠY báo cáo (có thể là rất lâu SAU kỳ đang
+    xem). Xác nhận qua phản hồi thật: chọn khung 01/01/2025-31/12/2025 để
+    xem công nợ TÍNH ĐẾN cuối 2025, nhưng chạy báo cáo vào giữa 2026 — nếu
+    lấy mốc 'hôm nay' (2026) thì MỌI hóa đơn 2025 (kể cả hóa đơn tháng
+    11-12/2025, còn khá MỚI so với chính den_ngay đang xem) đều nghiễm
+    nhiên bị coi là 'quá hạn hơn 3 tháng' chỉ vì đã cách NGÀY CHẠY BÁO CÁO
+    gần 1 năm — sai bản chất. Không nhập den_ngay (hoặc den_ngay ở tương
+    lai, vô nghĩa cho việc tính quá hạn) thì lùi về mốc 'hôm nay' như cũ.
 
     Tầng 1 — khớp 1-1 chính xác: mỗi khoản thanh toán ngân hàng thật (đã
     nhập vào MISA — xem _misa_doi_tuong_thanh_toan) so số tiền với TỪNG hóa
@@ -23985,7 +23996,18 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     # THÊM (AND), không còn bị bỏ qua chỉ vì đã có khung ngày — 2 điều
     # kiện (khung ngày, nếu có + quá hạn N tháng) phải cùng thỏa mãn,
     # không phải 1-trong-2 (xem docstring).
-    han = datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han))
+    #
+    # MỐC tính "quá hạn": Đến ngày (nếu có nhập VÀ không ở tương lai) —
+    # KHÔNG phải lúc nào cũng "hôm nay". Xác nhận qua phản hồi thật của
+    # người dùng: chọn khung 01/01/2025-31/12/2025 (xem công nợ TÍNH ĐẾN
+    # cuối 2025) nhưng chạy báo cáo vào 2026 — nếu lấy mốc "hôm nay"
+    # (2026) thì MỌI hóa đơn năm 2025 đều nghiễm nhiên "quá hạn hơn 3
+    # tháng" (vì đã cách hôn nay gần 1 năm), kể cả hóa đơn tháng 11-12/2025
+    # còn khá MỚI so với chính "Đến ngày" đang xem — sai bản chất "quá hạn
+    # TÍNH ĐẾN thời điểm báo cáo". Không nhập Đến ngày (hoặc Đến ngày ở
+    # tương lai, vô nghĩa) thì lùi về mốc "hôm nay" như cũ.
+    moc_qua_han = den_dt if (den_dt and den_dt <= datetime.datetime.now()) else datetime.datetime.now()
+    han = moc_qua_han - datetime.timedelta(days=30 * int(thang_qua_han))
     tang3 = []
     for aoid, d in doi_tuong_hd.items():
         for hd in d["hoa_don"]:
@@ -24227,8 +24249,11 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     # nguong + quá hạn hơn N tháng — LUÔN áp dụng CẢ 2 (AND), không bỏ qua
     # điều kiện quá hạn dù đã có lọc theo tu_ngay/den_ngay (xem docstring
     # _misa_doi_chieu_3_tang — khung ngày chỉ giới hạn PHẠM VI xét, không
-    # thay thế điều kiện quá hạn riêng của Tầng 3).
-    han3 = datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han))
+    # thay thế điều kiện quá hạn riêng của Tầng 3). MỐC tính quá hạn là
+    # Đến ngày (nếu có, không ở tương lai) — KHÔNG phải luôn "hôm nay",
+    # cùng lý do đã sửa ở _misa_doi_chieu_3_tang.
+    moc_qua_han3 = den_dt if (den_dt and den_dt <= datetime.datetime.now()) else datetime.datetime.now()
+    han3 = moc_qua_han3 - datetime.timedelta(days=30 * int(thang_qua_han))
     tang3_ref_ids = {
         hd["ref_id"] for hd in d["hoa_don"]
         if not hd["matched"] and hd["so_tien"] < nguong and hd["inv_date"]
