@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.075"
+APP_BUILD = "2026-08-27.076"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25590,7 +25590,14 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     khác Ký hiệu (1 bên rỗng) — chỉ báo "THIẾU" khi THẬT SỰ không còn dòng
     MISA nào phù hợp. Mua hàng (PUInvoice/PUServiceDetail) CHƯA ghi được
     InvSeries khi tạo chứng từ (giới hạn hiện tại) nên giữ khóa (MST, Số
-    hóa đơn) đơn thuần, không nhóm theo Ký hiệu."""
+    hóa đơn) đơn thuần, không nhóm theo Ký hiệu.
+
+    Số hóa đơn dùng để GHÉP KHÓA còn được chuẩn hóa bỏ số 0 ở đầu (vd '12'
+    so với '0000012') qua _chuan_shd() — CÙNG kiểu chuẩn hóa _chuan_ma() đã
+    dùng ở chỗ gộp hóa đơn 2 hệ thống Thuế và chỗ so khớp file hóa đơn đã
+    tải (xem trên) — vì dữ liệu tra cứu Thuế và MISA đôi khi lệch định
+    dạng số 0 ở đầu dù CÙNG 1 hóa đơn thật (bug từng gặp: báo sai "THIẾU"
+    dù hóa đơn đã ghi đúng trong MISA)."""
     import json as _json
     conn = db()
     rows = conn.execute(
@@ -25615,6 +25622,15 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             return False
         return True
 
+    def _chuan_shd(v):
+        """Bỏ số 0 ở đầu khi ghép khóa (Số hóa đơn đôi khi lệch định dạng
+        '12' so với '0000012' giữa dữ liệu tra cứu Thuế và MISA — CÙNG mẫu
+        chuẩn hóa _chuan_ma() đã dùng ở chỗ gộp hóa đơn 2 hệ thống và các
+        chỗ so khớp file hóa đơn đã tải, xem trên). Chỉ dùng để GHÉP KHÓA,
+        KHÔNG dùng để hiển thị (giữ nguyên số gốc cho người dùng)."""
+        s = str(v or "").strip()
+        return (s.lstrip("0") or "0") if s else ""
+
     # sold: nhóm theo (MST, Số hóa đơn) -> DANH SÁCH entry (1 entry/Ký hiệu
     # khác nhau trong group) — xem docstring. purchase: giữ khóa phẳng
     # (MST, Số hóa đơn) như cũ (MISA chưa ghi InvSeries cho mua hàng).
@@ -25626,11 +25642,12 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         sohd = str(r["shdon"] or "").strip()
         if not sohd:
             continue
+        sohd_k = _chuan_shd(sohd)
         mst_doi_tac = r["nmmst"] if loai == "sold" else r["nbmst"]
         mst_k = _misa_khncc_chuan_mst(mst_doi_tac).lower()
         if loai == "sold":
             kyhieu_ng = str(r["khhdon"] or "").strip().lower()
-            gk = (mst_k, sohd.lower())
+            gk = (mst_k, sohd_k.lower())
             lst = nguon["sold"].setdefault(gk, [])
             e = None
             for it in lst:
@@ -25642,7 +25659,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                      "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0}
                 lst.append(e)
         else:
-            k = (mst_k, sohd.lower())
+            k = (mst_k, sohd_k.lower())
             e = nguon["purchase"].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
                                                   "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
         e["ds"] += _snum(r["tgtcthue"])
@@ -25666,7 +25683,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 sql = "SELECT [%s],[%s],[%s],[%s],[%s] FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
                     c_mst, c_inv, c_kh, c_tot, c_vat, c_inv)
                 for mst, inv, kh, tot, vat in cur.execute(sql).fetchall():
-                    gk = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                    gk = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     kh_n = str(kh or "").strip().lower()
                     lst = misa["sold"].setdefault(gk, [])
                     e = None
@@ -25692,7 +25709,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 sql = "SELECT [%s],[%s],[%s],[%s] FROM PUInvoice WHERE ISNULL([%s],'')<>''" % (
                     c_mst, c_inv, c_tot, c_vat, c_inv)
                 for mst, inv, tot, vat in cur.execute(sql).fetchall():
-                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                    k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
                     e["ds"] += _snum(tot)
                     e["thue"] += _snum(vat)
@@ -25708,7 +25725,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 sql = "SELECT [%s],[%s],[%s],[%s] FROM PUServiceDetail WHERE ISNULL([%s],'')<>''" % (
                     c_mst, c_inv, c_amt, c_vat, c_inv)
                 for mst, inv, amt, vat in cur.execute(sql).fetchall():
-                    k = (_misa_khncc_chuan_mst(mst).lower(), str(inv or "").strip().lower())
+                    k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
                     e["ds"] += _snum(amt)
                     e["thue"] += _snum(vat)
