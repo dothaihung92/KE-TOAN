@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.081"
+APP_BUILD = "2026-08-27.082"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23916,8 +23916,16 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     kỳ nào) lọc TRƯỚC hết danh sách HÓA ĐƠN được xét ở CẢ 3 TẦNG, theo ngày
     hóa đơn. Khoản THANH TOÁN không bị giới hạn theo khung này — thanh toán
     có thể tới sau kỳ báo cáo mà vẫn hợp lệ, do cửa sổ khớp (cua_so_thang)
-    tính từ ngày hóa đơn đã xử lý việc đó. Không nhập ngày nào thì tầng 3
-    dùng 'quá hạn hơn thang_qua_han tháng tính từ hôm nay' như mặc định cũ.
+    tính từ ngày hóa đơn đã xử lý việc đó.
+
+    Tầng 3 LUÔN áp dụng ĐỦ 2 điều kiện CÙNG LÚC (AND, không phải 1-trong-2):
+    (1) quá hạn hơn thang_qua_han tháng tính từ HÔM NAY — CẢ KHI đã nhập
+    khung tu_ngay/den_ngay (trước đây 2 điều kiện này bị coi là loại trừ
+    nhau — có khung ngày thì bỏ hẳn điều kiện quá hạn, khiến hóa đơn còn
+    khá mới trong khung ngày vẫn lọt vào Tầng 3 dù chưa thực sự quá hạn);
+    (2) giá trị hóa đơn < nguong. Khung tu_ngay/den_ngay (nếu có) CHỈ dùng
+    để giới hạn PHẠM VI hóa đơn được xét ở cả 3 tầng như trên, KHÔNG thay
+    thế điều kiện quá hạn của riêng Tầng 3.
 
     Tầng 1 — khớp 1-1 chính xác: mỗi khoản thanh toán ngân hàng thật (đã
     nhập vào MISA — xem _misa_doi_tuong_thanh_toan) so số tiền với TỪNG hóa
@@ -23973,9 +23981,11 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                                             dung_sai=dung_sai, truoc_ngay=truoc_ngay)
 
     # Tầng 3 — hóa đơn đã được lọc đúng khung Từ ngày/Đến ngày ở bước đầu
-    # (nếu có nhập); không nhập ngày nào thì dùng "quá hạn hơn N tháng".
-    han = None if (tu_dt or den_dt) else (
-        datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han)))
+    # (nếu có nhập), NHƯNG điều kiện "quá hạn hơn N tháng" LUÔN áp dụng
+    # THÊM (AND), không còn bị bỏ qua chỉ vì đã có khung ngày — 2 điều
+    # kiện (khung ngày, nếu có + quá hạn N tháng) phải cùng thỏa mãn,
+    # không phải 1-trong-2 (xem docstring).
+    han = datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han))
     tang3 = []
     for aoid, d in doi_tuong_hd.items():
         for hd in d["hoa_don"]:
@@ -23983,7 +23993,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                 continue
             if not hd["inv_date"]:
                 continue
-            if han is not None and hd["inv_date"] > han:
+            if hd["inv_date"] > han:
                 continue
             tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
                           "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
@@ -24214,14 +24224,15 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
                                             dung_sai=dung_sai, truoc_ngay=truoc_ngay)
     # Tiêu chí TẦNG 3 y hệt _misa_doi_chieu_3_tang: chưa khớp + giá trị dưới
-    # nguong + đủ điều kiện quá hạn (nếu có lọc theo tu_ngay/den_ngay thì bỏ
-    # qua điều kiện quá hạn, giống hệt logic gốc).
-    han3 = None if (tu_dt or den_dt) else (
-        datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han)))
+    # nguong + quá hạn hơn N tháng — LUÔN áp dụng CẢ 2 (AND), không bỏ qua
+    # điều kiện quá hạn dù đã có lọc theo tu_ngay/den_ngay (xem docstring
+    # _misa_doi_chieu_3_tang — khung ngày chỉ giới hạn PHẠM VI xét, không
+    # thay thế điều kiện quá hạn riêng của Tầng 3).
+    han3 = datetime.datetime.now() - datetime.timedelta(days=30 * int(thang_qua_han))
     tang3_ref_ids = {
         hd["ref_id"] for hd in d["hoa_don"]
         if not hd["matched"] and hd["so_tien"] < nguong and hd["inv_date"]
-        and (han3 is None or hd["inv_date"] <= han3)
+        and hd["inv_date"] <= han3
     }
     so_treo = len(tang3_ref_ids)
 
