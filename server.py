@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-27.090"
+APP_BUILD = "2026-08-31.091"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -31089,6 +31089,66 @@ def _shopee_doi_token(cfg, code, shop_id):
     return r.json()
 
 
+def _shopee_lam_moi_token(cfg, refresh_token, shop_id):
+    """Làm mới access_token bằng refresh_token (access_token Shopee chỉ sống
+    ~4 giờ, refresh_token sống ~30 ngày) — endpoint này KÝ KIỂU "public"
+    (partner_id+path+timestamp, KHÔNG có access_token trong chuỗi ký), giống
+    hệt _shopee_doi_token, khác với _shopee_goi_api_shop bên dưới."""
+    partner_id = str(cfg["app_key"]).strip()
+    partner_key = str(cfg["app_secret"]).strip()
+    ts = int(time.time())
+    path = "/api/v2/auth/access_token/get"
+    sign = _shopee_ky(partner_key, f"{partner_id}{path}{ts}")
+    url = f"https://partner.shopeemobile.com{path}?partner_id={partner_id}&timestamp={ts}&sign={sign}"
+    body = {"refresh_token": refresh_token, "partner_id": int(partner_id), "shop_id": int(shop_id)}
+    r = requests.post(url, json=body, timeout=20)
+    return r.json()
+
+
+def _shopee_goi_api_shop(cfg, shop_cfg, path, params_bo_sung=None, method="GET"):
+    """Gọi 1 API "shop-level" (cần access_token + shop_id) của Partner API v2
+    — ví dụ get_order_list/get_order_detail. CÁCH KÝ KHÁC lúc lấy/làm mới
+    token: chuỗi gốc ký THÊM access_token+shop_id vào cuối
+    (partner_id+path+timestamp+access_token+shop_id)."""
+    partner_id = str(cfg["app_key"]).strip()
+    partner_key = str(cfg["app_secret"]).strip()
+    access_token = str(shop_cfg.get("access_token") or "").strip()
+    shop_id = str(shop_cfg.get("shop_id") or "").strip()
+    if not access_token or not shop_id:
+        raise RuntimeError("Chưa kết nối shop (thiếu access_token/shop_id)")
+    ts = int(time.time())
+    sign = _shopee_ky(partner_key, f"{partner_id}{path}{ts}{access_token}{shop_id}")
+    params = {"partner_id": partner_id, "timestamp": ts, "access_token": access_token,
+              "shop_id": shop_id, "sign": sign}
+    params.update(params_bo_sung or {})
+    url = f"https://partner.shopeemobile.com{path}"
+    r = requests.get(url, params=params, timeout=20) if method == "GET" else requests.post(url, params=params, timeout=20)
+    return r.json()
+
+
+def _shopee_dam_bao_token_con_han(cid, cfg):
+    """Tự làm mới access_token nếu đã hết hạn (hoặc sắp hết hạn trong 5 phút
+    tới) bằng refresh_token đang lưu, ghi lại data công ty nếu làm mới thành
+    công. KHÔNG raise nếu làm mới lỗi — để lỗi thật hiện ra rõ ràng khi gọi
+    API order ngay sau đó (dễ debug hơn báo lỗi mập mờ ở đây)."""
+    data, tmdt = _tmdt_du_lieu(cid)
+    shop_cfg = tmdt.setdefault("shopee", {})
+    het_han_luc = shop_cfg.get("token_het_han", 0)
+    if not shop_cfg.get("refresh_token") or time.time() < het_han_luc - 300:
+        return shop_cfg
+    try:
+        kq = _shopee_lam_moi_token(cfg, shop_cfg["refresh_token"], shop_cfg.get("shop_id"))
+    except Exception:
+        return shop_cfg
+    if kq.get("error"):
+        return shop_cfg
+    shop_cfg["access_token"] = kq.get("access_token", shop_cfg.get("access_token", ""))
+    shop_cfg["refresh_token"] = kq.get("refresh_token", shop_cfg.get("refresh_token", ""))
+    shop_cfg["token_het_han"] = time.time() + int(kq.get("expire_in", 14400))
+    _ghi_du_lieu_cty(cid, data)
+    return shop_cfg
+
+
 # ----- Lazada (Open Platform) -----
 def _lazada_ky(app_secret, api_path, params):
     concat = api_path + "".join(f"{k}{v}" for k, v in sorted(params.items()))
@@ -31252,6 +31312,7 @@ def tmdt_callback(san: str, code: str = "", shop_id: str = "", error: str = ""):
     cfg2["access_token"] = kq.get("access_token", "")
     cfg2["refresh_token"] = kq.get("refresh_token", "")
     cfg2["shop_id"] = shop_id or kq.get("shop_id", "") or cfg2.get("shop_id", "")
+    cfg2["token_het_han"] = time.time() + int(kq.get("expire_in", 14400))
     cfg2["ket_noi_luc"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     _ghi_du_lieu_cty(cid, data)
     _TMDT_DANG_KET_NOI.pop(san, None)
@@ -31275,6 +31336,77 @@ def tmdt_ngat_ket_noi(san: str, cid: int):
         cfg.pop("ket_noi_luc", None)
         _ghi_du_lieu_cty(cid, data)
     return {"ok": True}
+
+
+def _shopee_ngay_ve_ts(chuoi_ngay):
+    """'dd/mm/yyyy' -> unix timestamp 00:00:00 (giờ máy chủ) — trả None nếu
+    rỗng/không hợp lệ, dùng làm time_from/time_to cho get_order_list."""
+    if not chuoi_ngay:
+        return None
+    try:
+        return int(datetime.datetime.strptime(chuoi_ngay.strip(), "%d/%m/%Y").timestamp())
+    except Exception:
+        return None
+
+
+@app.get("/api/tmdt/shopee/don-hang/{cid}")
+def tmdt_shopee_don_hang(cid: int, tu_ngay: str = "", den_ngay: str = ""):
+    """Lấy danh sách đơn hàng bán ra qua Shopee Partner API v2
+    (get_order_list + get_order_detail) — dùng để THỬ xem luồng kết nối đã
+    lấy được dữ liệu bán hàng thật hay chưa. CHƯA gộp tự động vào "Chi tiết
+    BÁN RA"/Xuất Kho (làm sau khi xác nhận luồng này chạy đúng với tài khoản
+    thật — xem cảnh báo ở đầu khối TÍCH HỢP SÀN TMĐT, code Shopee viết theo
+    tài liệu công khai, CHƯA test với Partner ID/Key thật). Mặc định lấy 15
+    ngày gần nhất — đúng bằng giới hạn tối đa 1 lần gọi của Shopee cho
+    time_range_field=create_time."""
+    cfg = _tmdt_app_cfg("shopee")
+    if not (cfg.get("app_key") and cfg.get("app_secret")):
+        raise HTTPException(400, "Chưa đăng ký Partner ID/Partner Key (App dùng chung)")
+    shop_cfg = _shopee_dam_bao_token_con_han(cid, cfg)
+    if not shop_cfg.get("access_token") or not shop_cfg.get("shop_id"):
+        raise HTTPException(400, "Công ty này chưa kết nối shop Shopee")
+
+    time_to = _shopee_ngay_ve_ts(den_ngay) or int(time.time())
+    time_from = _shopee_ngay_ve_ts(tu_ngay) or (time_to - 15 * 86400)
+    if time_to - time_from > 15 * 86400:
+        time_from = time_to - 15 * 86400
+
+    order_sn_list = []
+    cursor = ""
+    for _ in range(10):  # chặn tối đa 10 trang (~1000 đơn)/lần gọi, tránh treo lâu
+        kq = _shopee_goi_api_shop(cfg, shop_cfg, "/api/v2/order/get_order_list", {
+            "time_range_field": "create_time", "time_from": time_from, "time_to": time_to,
+            "page_size": 100, "cursor": cursor,
+        })
+        if kq.get("error"):
+            raise HTTPException(400, f"Shopee từ chối (get_order_list): {kq.get('error')}: {kq.get('message', kq)}")
+        resp = kq.get("response") or {}
+        order_sn_list += [o.get("order_sn") for o in resp.get("order_list", []) if o.get("order_sn")]
+        if not resp.get("more") or not resp.get("next_cursor"):
+            break
+        cursor = resp["next_cursor"]
+
+    if not order_sn_list:
+        return {"tong_don": 0, "don_hang": []}
+
+    don_hang = []
+    for i in range(0, len(order_sn_list), 50):  # get_order_detail tối đa 50 order_sn/lần
+        kq = _shopee_goi_api_shop(cfg, shop_cfg, "/api/v2/order/get_order_detail", {
+            "order_sn_list": ",".join(order_sn_list[i:i + 50]),
+            "response_optional_fields": "item_list,total_amount,order_status,create_time,currency,buyer_username",
+        })
+        if kq.get("error"):
+            raise HTTPException(400, f"Shopee từ chối (get_order_detail): {kq.get('error')}: {kq.get('message', kq)}")
+        for o in (kq.get("response") or {}).get("order_list", []):
+            don_hang.append({
+                "ma_don": o.get("order_sn", ""),
+                "trang_thai": o.get("order_status", ""),
+                "ngay_tao": datetime.datetime.fromtimestamp(o["create_time"]).strftime("%d/%m/%Y %H:%M") if o.get("create_time") else "",
+                "tong_tien": o.get("total_amount", 0),
+                "tien_te": o.get("currency", ""),
+                "so_san_pham": len(o.get("item_list") or []),
+            })
+    return {"tong_don": len(don_hang), "don_hang": don_hang}
 
 
 if __name__ == "__main__":

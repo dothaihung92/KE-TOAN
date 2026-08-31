@@ -4079,6 +4079,16 @@ function tmdtHtmlThe(s){
       </div>
       <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="tmdtNgatKetNoi('${s.ma}')">Ngắt kết nối công ty này</button>
       <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Sửa App Key/Secret (chung)</button>
+      ${s.ma==='shopee'?`
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #ddd">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Thử lấy đơn hàng bán ra (tối đa 15 ngày/lần, để trống = 15 ngày gần nhất):</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="tmdtTuNgay_shopee" placeholder="Từ dd/mm/yyyy" style="flex:1;min-width:0;padding:6px;box-sizing:border-box">
+          <input id="tmdtDenNgay_shopee" placeholder="Đến dd/mm/yyyy" style="flex:1;min-width:0;padding:6px;box-sizing:border-box">
+        </div>
+        <button class="btn sm" style="background:${s.mau}" onclick="tmdtShopeeLayDonHang()">📦 Lấy đơn hàng (thử)</button>
+        <div id="tmdtShopeeKq" style="margin-top:10px"></div>
+      </div>`:''}
     `:`
       <div id="tmdtForm_${s.ma}" style="display:${tt.co_app?'none':'block'}">
         <input id="tmdtKey_${s.ma}" placeholder="${s.nhanKey}" style="width:100%;padding:8px;margin-bottom:6px;box-sizing:border-box">
@@ -4124,6 +4134,25 @@ async function tmdtNgatKetNoi(san){
     tmdtTaiTrangThai();
     toast('Đã ngắt kết nối','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function tmdtShopeeLayDonHang(){
+  const tu=(document.getElementById('tmdtTuNgay_shopee').value||'').trim();
+  const den=(document.getElementById('tmdtDenNgay_shopee').value||'').trim();
+  const box=document.getElementById('tmdtShopeeKq');
+  box.innerHTML='<div class="hint">Đang lấy dữ liệu...</div>';
+  try{
+    const qs=new URLSearchParams();
+    if(tu)qs.set('tu_ngay',tu);
+    if(den)qs.set('den_ngay',den);
+    const d=await api(`/api/tmdt/shopee/don-hang/${current}?${qs.toString()}`);
+    if(!d.tong_don){box.innerHTML='<div class="hint">Không có đơn hàng nào trong khoảng thời gian này.</div>';return}
+    box.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:6px">Tìm thấy ${d.tong_don} đơn hàng:</div>
+      <div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr style="background:#f7f7f7"><th style="padding:6px;text-align:left">Mã đơn</th><th style="padding:6px;text-align:left">Ngày tạo</th><th style="padding:6px;text-align:left">Trạng thái</th><th style="padding:6px;text-align:right">Tổng tiền</th><th style="padding:6px;text-align:right">SP</th></tr>
+        ${d.don_hang.map(o=>`<tr><td style="padding:6px">${xkEsc(o.ma_don)}</td><td style="padding:6px">${xkEsc(o.ngay_tao)}</td><td style="padding:6px">${xkEsc(o.trang_thai)}</td><td style="padding:6px;text-align:right">${Number(o.tong_tien||0).toLocaleString('vi-VN')} ${xkEsc(o.tien_te)}</td><td style="padding:6px;text-align:right">${o.so_san_pham}</td></tr>`).join('')}
+      </table></div>`;
+  }catch(e){box.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${xkEsc(e.message)}</div>`}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
