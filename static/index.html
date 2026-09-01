@@ -7335,6 +7335,7 @@ function misaDoiChieuVe(b){
   const phan=(nhan,d)=>{
     const coLoi=!d.tong_khop;
     const mau=coLoi?'#b91c1c':'#1a7a4a';
+    const soLuongLech=d.thieu.length+d.lech.length;
     const tongDong=`<div style="font-size:12px;color:#666;margin-top:2px">Tổng doanh số: nguồn ${d.tong_ds_nguon.toLocaleString('vi-VN')}đ / MISA ${d.tong_ds_misa.toLocaleString('vi-VN')}đ — Tổng thuế GTGT: nguồn ${d.tong_thue_nguon.toLocaleString('vi-VN')}đ / MISA ${d.tong_thue_misa.toLocaleString('vi-VN')}đ</div>`;
     const rowsThieu=d.thieu.map(x=>`<tr>
         <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.mst)}</td>
@@ -7355,7 +7356,7 @@ function misaDoiChieuVe(b){
     return `
       <details ${coLoi?'open':''} style="margin-bottom:8px">
         <summary style="cursor:pointer;font-weight:700;font-size:13.5px;color:${mau}">
-          ${coLoi?'⚠':'✓'} ${nhan} — ${coLoi?'TỔNG LỆCH':'tổng đã khớp'} (${d.tong_hd_nguon} hóa đơn)
+          ${coLoi?'⚠':'✓'} ${nhan} — ${coLoi?`TỔNG LỆCH (${soLuongLech}/${d.tong_hd_nguon} hóa đơn thiếu/lệch)`:`tổng đã khớp (${d.tong_hd_nguon} hóa đơn)`}
         </summary>
         ${tongDong}
         ${coLoi?`
