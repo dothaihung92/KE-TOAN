@@ -7335,6 +7335,7 @@ function misaDoiChieuVe(b){
   const phan=(nhan,d)=>{
     const coLoi=!d.tong_khop;
     const mau=coLoi?'#b91c1c':'#1a7a4a';
+    const dThua=d.thua||[];
     const soLuongLech=d.thieu.length+d.lech.length;
     const tongDong=`<div style="font-size:12px;color:#666;margin-top:2px">Tổng doanh số: nguồn ${d.tong_ds_nguon.toLocaleString('vi-VN')}đ / MISA ${d.tong_ds_misa.toLocaleString('vi-VN')}đ — Tổng thuế GTGT: nguồn ${d.tong_thue_nguon.toLocaleString('vi-VN')}đ / MISA ${d.tong_thue_misa.toLocaleString('vi-VN')}đ</div>`;
     const rowsThieu=d.thieu.map(x=>`<tr>
@@ -7353,20 +7354,28 @@ function misaDoiChieuVe(b){
         <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${x.thue_nguon.toLocaleString('vi-VN')} / MISA ${x.thue_misa.toLocaleString('vi-VN')}</td>
         <td style="padding:4px 8px;border:1px solid #eee;color:#b91c1c;font-weight:600">LỆCH ${x.chenh_lech>0?'+':''}${x.chenh_lech.toLocaleString('vi-VN')}đ</td>
       </tr>`).join('');
+    const rowsThua=dThua.map(x=>`<tr>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.mst)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.so_hd)}</td>
+        <td style="padding:4px 8px;border:1px solid #eee">—</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">MISA ${x.doanh_so_misa.toLocaleString('vi-VN')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;text-align:right">MISA ${x.thue_misa.toLocaleString('vi-VN')}</td>
+        <td style="padding:4px 8px;border:1px solid #eee;color:#8a5d00;font-weight:600">THỪA trong MISA (không có trong nguồn tra cứu)</td>
+      </tr>`).join('');
     return `
       <details ${coLoi?'open':''} style="margin-bottom:8px">
         <summary style="cursor:pointer;font-weight:700;font-size:13.5px;color:${mau}">
-          ${coLoi?'⚠':'✓'} ${nhan} — ${coLoi?`TỔNG LỆCH (${soLuongLech}/${d.tong_hd_nguon} hóa đơn thiếu/lệch)`:`tổng đã khớp (${d.tong_hd_nguon} hóa đơn)`}
+          ${coLoi?'⚠':'✓'} ${nhan} — ${coLoi?`TỔNG LỆCH (${soLuongLech}/${d.tong_hd_nguon} hóa đơn thiếu/lệch${dThua.length?` + ${dThua.length} hóa đơn thừa trong MISA`:''})`:`tổng đã khớp (${d.tong_hd_nguon} hóa đơn)`}
         </summary>
         ${tongDong}
         ${coLoi?`
-        <div style="font-size:12px;color:#8a5d00;margin-top:4px">Tổng số liệu 2 bên KHÔNG khớp — dò từng hóa đơn để khoanh vùng (kết quả dò dưới đây chỉ mang tính GỢI Ý, có thể không hoàn toàn chính xác nếu khóa Số hóa đơn/Ký hiệu HĐ ghi lệch định dạng giữa 2 bên):</div>
+        <div style="font-size:12px;color:#8a5d00;margin-top:4px">Tổng số liệu 2 bên KHÔNG khớp — dò từng hóa đơn để khoanh vùng (kết quả dò dưới đây chỉ mang tính GỢI Ý, có thể không hoàn toàn chính xác nếu khóa Số hóa đơn/Ký hiệu HĐ ghi lệch định dạng giữa 2 bên). Dòng "THỪA trong MISA" là hóa đơn CÓ trong MISA nhưng KHÔNG có trong dữ liệu tra cứu — có thể là hóa đơn giấy/không qua hóa đơn điện tử (bình thường), hoặc ghi trùng/ghi nhầm (cần kiểm tra lại):</div>
         <div style="max-height:26vh;overflow:auto;margin-top:6px">
         <table style="border-collapse:collapse;font-size:12.5px;width:100%">
           <tr style="background:#f0f0f0"><th style="padding:4px 8px;border:1px solid #eee">MST</th><th style="padding:4px 8px;border:1px solid #eee">Số HĐ</th>
             <th style="padding:4px 8px;border:1px solid #eee">Ngày</th><th style="padding:4px 8px;border:1px solid #eee">Doanh số (nguồn/MISA)</th>
             <th style="padding:4px 8px;border:1px solid #eee">Thuế GTGT (nguồn/MISA)</th><th style="padding:4px 8px;border:1px solid #eee">Ghi chú</th></tr>
-          ${rowsThieu}${rowsLech}
+          ${rowsThieu}${rowsLech}${rowsThua}
         </table></div>`:`<div style="font-size:12.5px;color:#1a7a4a;margin-top:4px">Tổng doanh số + thuế GTGT đã khớp với dữ liệu tra cứu gốc, không cần kiểm tra từng hóa đơn.</div>`}
       </details>`;
   };

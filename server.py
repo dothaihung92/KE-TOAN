@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.100"
+APP_BUILD = "2026-08-31.101"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26076,13 +26076,14 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     tong_khop = _khop_tong(tong_ds_nguon, tong_ds_misa) and _khop_tong(tong_thue_nguon, tong_thue_misa)
 
     if tong_khop:
-        thieu, lech, khop = [], [], len(ng_flat_sold)
+        thieu, lech, thua, khop = [], [], [], len(ng_flat_sold)
     else:
         # ---- khớp theo group (MST, Số hóa đơn) trước; nếu group có nhiều
         # hóa đơn/dòng thì dùng Ký hiệu để ghép ĐÚNG cặp (ưu tiên khớp Ký
         # hiệu y hệt, nếu không có thì ghép với dòng CHƯA CHẮC CHẮN khác Ký
         # hiệu — xem docstring, tránh cả 2 lỗi từng gặp).
         thieu, lech, khop = [], [], 0
+        da_khop_id = set()   # id() các dòng MISA đã ghép — phần còn lại cuối vòng lặp là "THỪA trong MISA"
         for gk, ng_list in nguon["sold"].items():
             ms_list = list(misa["sold"].get(gk, []))   # copy để pop dần, tránh ghép trùng
             # Group không có gì để phân biệt (chỉ 1 hóa đơn nguồn, tối đa 1
@@ -26126,6 +26127,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                                  "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
                     continue
                 m = ms_list.pop(idx)
+                da_khop_id.add(id(m))
                 d_ds = round(ng["ds"]) - round(m["ds"])
                 d_thue = round(ng["thue"]) - round(m["thue"])
                 if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
@@ -26137,8 +26139,19 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                     khop += 1
         thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
         lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+        # THỪA trong MISA — dòng MISA nào KHÔNG được ghép với bất kỳ hóa đơn
+        # nguồn nào ở vòng lặp trên (id không nằm trong da_khop_id) — TRƯỚC
+        # ĐÂY hoàn toàn không phát hiện được chiều này (vòng lặp chỉ duyệt
+        # theo nguồn, không bao giờ biết MISA có dòng THỪA không khớp gì cả),
+        # nên dù danh sách "thieu"/"lech" đã trống, TỔNG vẫn có thể lệch mà
+        # không rõ vì sao — xác nhận đúng qua phản hồi người dùng: tổng Mua
+        # hàng vẫn lệch ~1 tỷ dù không còn hóa đơn nào báo thiếu/lệch cả.
+        thua = [{"mst": gk[0], "so_hd": gk[1],
+                "doanh_so_misa": round(e["ds"]), "thue_misa": round(e["thue"])}
+               for gk, lst in misa["sold"].items() for e in lst if id(e) not in da_khop_id]
+        thua.sort(key=lambda x: (x["mst"], x["so_hd"]))
     ket["ban_hang"] = {"tong_hd_nguon": len(ng_flat_sold), "khop": khop, "thieu": thieu, "lech": lech,
-                       "tong_khop": tong_khop, "tong_ds_nguon": round(tong_ds_nguon),
+                       "thua": thua, "tong_khop": tong_khop, "tong_ds_nguon": round(tong_ds_nguon),
                        "tong_thue_nguon": round(tong_thue_nguon), "tong_ds_misa": round(tong_ds_misa),
                        "tong_thue_misa": round(tong_thue_misa)}
 
@@ -26155,15 +26168,17 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                    _khop_tong(tong_thue_nguon_p, tong_thue_misa_p))
 
     if tong_khop_p:
-        thieu, lech, khop = [], [], len(ng_flat_purchase)
+        thieu, lech, thua, khop = [], [], [], len(ng_flat_purchase)
     else:
         thieu, lech, khop = [], [], 0
+        da_khop_key = set()
         for k, ng in nguon["purchase"].items():
             m = misa["purchase"].get(k)
             if m is None:
                 thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
                              "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
                 continue
+            da_khop_key.add(k)
             d_ds = round(ng["ds"]) - round(m["ds"])
             d_thue = round(ng["thue"]) - round(m["thue"])
             if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
@@ -26175,8 +26190,15 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 khop += 1
         thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
         lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
+        # THỪA trong MISA — xem giải thích đầy đủ ở nhánh Bán hàng phía trên
+        # (vòng lặp chỉ duyệt theo nguồn nên trước đây KHÔNG BAO GIỜ phát
+        # hiện được chiều "MISA có nhưng nguồn không có", dù đây chính là
+        # nguyên nhân khiến TỔNG vẫn lệch dù danh sách thiếu/lệch đã trống).
+        thua = [{"mst": k[0], "so_hd": k[1], "doanh_so_misa": round(m["ds"]), "thue_misa": round(m["thue"])}
+               for k, m in misa["purchase"].items() if k not in da_khop_key]
+        thua.sort(key=lambda x: (x["mst"], x["so_hd"]))
     ket["mua_hang"] = {"tong_hd_nguon": len(ng_flat_purchase), "khop": khop, "thieu": thieu,
-                       "lech": lech, "tong_khop": tong_khop_p, "tong_ds_nguon": round(tong_ds_nguon_p),
+                       "lech": lech, "thua": thua, "tong_khop": tong_khop_p, "tong_ds_nguon": round(tong_ds_nguon_p),
                        "tong_thue_nguon": round(tong_thue_nguon_p), "tong_ds_misa": round(tong_ds_misa_p),
                        "tong_thue_misa": round(tong_thue_misa_p)}
 
