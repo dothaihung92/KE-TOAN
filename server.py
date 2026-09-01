@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.093"
+APP_BUILD = "2026-08-31.094"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25706,6 +25706,17 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     hẳn loại đó (không báo nhầm "thiếu" hàng loạt vì không đọc được dữ
     liệu MISA) — đánh dấu trong doc_duoc để giao diện tự biết mà cảnh báo.
 
+    LỌC THEO KHUNG NGÀY của chính dữ liệu nguồn (RefDate/InvDate trên MISA,
+    nới thêm 1 ngày mỗi đầu tránh lệch giờ biên) trước khi đọc SAVoucher/
+    PUInvoice/PUServiceDetail — xác nhận đúng qua phản hồi người dùng: công
+    ty đã dùng MISA hạch toán TỪ TRƯỚC khi dùng phần mềm này, nên MISA có sẵn
+    RẤT NHIỀU dữ liệu bán/mua hàng cũ không liên quan gì tới đợt tra cứu/
+    import hiện tại (VD nguồn chỉ có tháng 8/2026 nhưng MISA có dữ liệu từ
+    2023) — nếu so TOÀN BỘ lịch sử MISA, tổng luôn lệch (dù phần MỚI import
+    đã ghi đủ), khiến bước kiểm tra TỔNG mất tác dụng, phải chạy khớp từng
+    hóa đơn dù không cần thiết. Không lọc gì nếu nguồn loại đó rỗng (giữ hành
+    vi cũ) hoặc CSDL MISA không dò được cột ngày phù hợp.
+
     QUAN TRỌNG — Bán hàng khớp theo (MST, Số hóa đơn) trước, Ký hiệu HĐ
     (khhdon/InvSeries) CHỈ dùng để PHÂN BIỆT khi CÓ NHIỀU hóa đơn/dòng
     MISA cùng (MST, Số hóa đơn) — xem _ky_hieu_chac_chan_khac (dùng CHUNG
@@ -25772,6 +25783,16 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     # khác nhau trong group) — xem docstring. purchase: giữ khóa phẳng
     # (MST, Số hóa đơn) như cũ (MISA chưa ghi InvSeries cho mua hàng).
     nguon = {"sold": {}, "purchase": {}}
+    # Khung ngày [min,max] của CHÍNH dữ liệu nguồn (theo Ngày lập) cho từng
+    # loại — dùng để LỌC BỚT phía MISA theo cùng khung này khi truy vấn bên
+    # dưới, tránh so TOÀN BỘ lịch sử MISA (có thể đã dùng từ trước, nhiều năm
+    # dữ liệu không liên quan gì tới đợt tra cứu/import hiện tại) với chỉ 1
+    # khoảng thời gian hẹp của nguồn — xác nhận đúng qua phản hồi người dùng:
+    # tổng MISA cao gấp ~9 lần tổng nguồn vì MISA có sẵn dữ liệu cũ từ trước,
+    # khiến bước kiểm tra TỔNG gần như luôn báo lệch (dù thực ra phần MỚI đã
+    # ghi đủ), phải chạy tiếp bước khớp từng hóa đơn tốn công một cách không
+    # cần thiết.
+    pham_vi_ngay = {"sold": [None, None], "purchase": [None, None]}
     for r in rows:
         loai = r["loai"]
         if loai not in nguon or not _hd_hop_le(r):
@@ -25782,6 +25803,13 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         sohd_k = _chuan_shd(sohd)
         mst_doi_tac = r["nmmst"] if loai == "sold" else r["nbmst"]
         mst_k = _misa_khncc_chuan_mst(mst_doi_tac).lower()
+        ngay_dt_ng = _misa_doc_ngay((r["tdlap"] or "").split("T")[0])
+        if ngay_dt_ng:
+            lo, hi = pham_vi_ngay[loai]
+            if lo is None or ngay_dt_ng < lo:
+                pham_vi_ngay[loai][0] = ngay_dt_ng
+            if hi is None or ngay_dt_ng > hi:
+                pham_vi_ngay[loai][1] = ngay_dt_ng
         if loai == "sold":
             kyhieu_ng = str(r["khhdon"] or "").strip().lower()
             gk = (mst_k, sohd_k.lower())
@@ -25802,6 +25830,20 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         e["ds"] += _snum(r["tgtcthue"])
         e["thue"] += _snum(r["tgtthue"])
 
+    def _khung_ngay(loai):
+        """Khung ngày lọc phía MISA cho 1 loại — nới thêm 1 ngày mỗi đầu để
+        tránh loại nhầm hóa đơn nằm SÁT biên do lệch giờ/timezone giữa
+        "Ngày lập" (nguồn) và RefDate/InvDate (MISA). None,None nếu nguồn
+        loại đó rỗng (không lọc gì — giữ hành vi cũ, tránh loại sạch dữ liệu
+        MISA khi không có gì để so)."""
+        lo, hi = pham_vi_ngay[loai]
+        if lo is None or hi is None:
+            return None, None
+        return lo - datetime.timedelta(days=1), hi + datetime.timedelta(days=1)
+
+    tu_ngay_sold, den_ngay_sold = _khung_ngay("sold")
+    tu_ngay_purchase, den_ngay_purchase = _khung_ngay("purchase")
+
     misa = {"sold": {}, "purchase": {}}
     doc_duoc = {"ban_hang": False, "mua_hang_nk_kqk": False, "mua_hang_dv": False}
     conn2 = _misa_sql_connect(cid, database=database)
@@ -25815,11 +25857,17 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             c_kh = _misa_chon_cot(cols_sav, "InvSeries")
             c_tot = _misa_chon_cot(cols_sav, "TotalAmount")
             c_vat = _misa_chon_cot(cols_sav, "TotalVATAmount")
+            c_ngay = _misa_chon_cot(cols_sav, "RefDate", "InvDate")
             if c_mst and c_inv and c_kh and c_tot and c_vat:
                 doc_duoc["ban_hang"] = True
                 sql = "SELECT [%s],[%s],[%s],[%s],[%s] FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
                     c_mst, c_inv, c_kh, c_tot, c_vat, c_inv)
-                for mst, inv, kh, tot, vat in cur.execute(sql).fetchall():
+                tham_so = ()
+                if c_ngay and tu_ngay_sold and den_ngay_sold:
+                    sql += " AND [%s]>=? AND [%s]<=?" % (c_ngay, c_ngay)
+                    tham_so = (tu_ngay_sold, den_ngay_sold)
+                for mst, inv, kh, tot, vat in (
+                        cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
                     gk = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     kh_n = str(kh or "").strip().lower()
                     lst = misa["sold"].setdefault(gk, [])
@@ -25841,11 +25889,17 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             c_inv = _misa_chon_cot(cols_pui, "InvNo")
             c_tot = _misa_chon_cot(cols_pui, "TotalTurnoverAmount")
             c_vat = _misa_chon_cot(cols_pui, "TotalVATAmount")
+            c_ngay = _misa_chon_cot(cols_pui, "RefDate", "InvDate")
             if c_mst and c_inv and c_tot and c_vat:
                 doc_duoc["mua_hang_nk_kqk"] = True
                 sql = "SELECT [%s],[%s],[%s],[%s] FROM PUInvoice WHERE ISNULL([%s],'')<>''" % (
                     c_mst, c_inv, c_tot, c_vat, c_inv)
-                for mst, inv, tot, vat in cur.execute(sql).fetchall():
+                tham_so = ()
+                if c_ngay and tu_ngay_purchase and den_ngay_purchase:
+                    sql += " AND [%s]>=? AND [%s]<=?" % (c_ngay, c_ngay)
+                    tham_so = (tu_ngay_purchase, den_ngay_purchase)
+                for mst, inv, tot, vat in (
+                        cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
                     k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
                     e["ds"] += _snum(tot)
@@ -25857,11 +25911,17 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             c_inv = _misa_chon_cot(cols_psd, "InvNo")
             c_amt = _misa_chon_cot(cols_psd, "Amount")
             c_vat = _misa_chon_cot(cols_psd, "VATAmount")
+            c_ngay = _misa_chon_cot(cols_psd, "InvDate", "RefDate")
             if c_mst and c_inv and c_amt and c_vat:
                 doc_duoc["mua_hang_dv"] = True
                 sql = "SELECT [%s],[%s],[%s],[%s] FROM PUServiceDetail WHERE ISNULL([%s],'')<>''" % (
                     c_mst, c_inv, c_amt, c_vat, c_inv)
-                for mst, inv, amt, vat in cur.execute(sql).fetchall():
+                tham_so = ()
+                if c_ngay and tu_ngay_purchase and den_ngay_purchase:
+                    sql += " AND [%s]>=? AND [%s]<=?" % (c_ngay, c_ngay)
+                    tham_so = (tu_ngay_purchase, den_ngay_purchase)
+                for mst, inv, amt, vat in (
+                        cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
                     k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
                     e["ds"] += _snum(amt)
