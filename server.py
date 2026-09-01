@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.099"
+APP_BUILD = "2026-08-31.100"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25931,6 +25931,25 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                                                   "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
         e["ds"] += _snum(r["tgtcthue"])
         e["thue"] += _snum(r["tgtthue"])
+
+    # Loại bỏ hẳn các nhóm hóa đơn nguồn CỘNG DỒN RA ĐÚNG 0đ (cả doanh số lẫn
+    # thuế) khỏi đối chiếu — thường là hóa đơn điều chỉnh/hàng khuyến mãi 0đ
+    # không có giá trị thật để hạch toán, nên KHÔNG CẦN có trong MISA — xác
+    # nhận đúng qua phản hồi người dùng: 4 hóa đơn báo "THIẾU trong MISA" sau
+    # khi đã đối chiếu đúng hàng loạt hóa đơn khác đều hiện Doanh số/Thuế GTGT
+    # = 0đ ở CẢ 2 CỘT (nguồn lẫn MISA) — không có gì để mất, báo "thiếu" chỉ
+    # gây hoang mang không cần thiết. KHÔNG lọc hóa đơn có giá trị THẬT dù chỉ
+    # 1 trong 2 (ds hoặc thue) khác 0 — chỉ loại khi CẢ HAI cùng bằng 0.
+    for gk in list(nguon["sold"].keys()):
+        con_lai = [e for e in nguon["sold"][gk] if round(e["ds"]) != 0 or round(e["thue"]) != 0]
+        if con_lai:
+            nguon["sold"][gk] = con_lai
+        else:
+            del nguon["sold"][gk]
+    for gk in list(nguon["purchase"].keys()):
+        e = nguon["purchase"][gk]
+        if round(e["ds"]) == 0 and round(e["thue"]) == 0:
+            del nguon["purchase"][gk]
 
     def _khung_ngay(loai):
         """Khung ngày lọc phía MISA cho 1 loại — nới thêm 1 ngày mỗi đầu để
