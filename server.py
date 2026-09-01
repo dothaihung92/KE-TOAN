@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.101"
+APP_BUILD = "2026-08-31.102"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25965,6 +25965,26 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     tu_ngay_sold, den_ngay_sold = _khung_ngay("sold")
     tu_ngay_purchase, den_ngay_purchase = _khung_ngay("purchase")
 
+    def _dung_ky_that(ngay_hien, loai):
+        """Khác _khung_ngay (dùng khung CÓ NỚI THÊM 1 ngày mỗi đầu để LẤY dữ
+        liệu MISA, tránh sót hóa đơn sát biên) — hàm này dùng khung SÁT (không
+        nới) để LỌC dòng "THỪA trong MISA" — xác nhận đúng qua phản hồi người
+        dùng: hóa đơn "thừa" hiện ra thật ra KHÁC KỲ đang import (vd đúng ngày
+        biên do phần nới thêm kéo vào), không nên báo "thừa" (chưa từng định
+        so sánh với kỳ này) mà chỉ nên dùng để KHỚP hóa đơn nguồn sát biên
+        (mục đích gốc của phần nới). Không lọc được (thiếu ngày, hoặc nguồn
+        rỗng không có mốc) thì GIỮ HIỆN (an toàn — vẫn cho người dùng tự xem
+        thay vì âm thầm giấu đi)."""
+        if not ngay_hien:
+            return True
+        dt = _misa_doc_ngay(ngay_hien)
+        if not dt:
+            return True
+        lo, hi = pham_vi_ngay[loai]
+        if lo is None or hi is None:
+            return True
+        return lo <= dt <= hi
+
     misa = {"sold": {}, "purchase": {}}
     doc_duoc = {"ban_hang": False, "mua_hang_nk_kqk": False, "mua_hang_dv": False}
     conn2 = _misa_sql_connect(cid, database=database)
@@ -25981,14 +26001,22 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             c_ngay = _misa_chon_cot(cols_sav, "RefDate", "InvDate")
             if c_mst and c_inv and c_kh and c_tot and c_vat:
                 doc_duoc["ban_hang"] = True
-                sql = "SELECT [%s],[%s],[%s],[%s],[%s] FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
-                    c_mst, c_inv, c_kh, c_tot, c_vat, c_inv)
+                # SELECT THÊM cột ngày (nếu dò được) — CHỈ dùng để HIỂN THỊ ở
+                # dòng "THỪA trong MISA" bên dưới (trước đây không lấy về nên
+                # không có ngày để hiện, người dùng không tự xác minh được có
+                # đúng "khác kỳ đang import" như phản hồi hay không) — KHÔNG
+                # ảnh hưởng gì tới việc lọc theo khung ngày ở trên (đã lọc
+                # đúng bằng tham số ?/? trong WHERE, cột này chỉ để XEM LẠI).
+                cot_chon = [c_mst, c_inv, c_kh, c_tot, c_vat] + ([c_ngay] if c_ngay else [])
+                sql = "SELECT %s FROM SAVoucher WHERE ISNULL([%s],'')<>''" % (
+                    ",".join("[%s]" % c for c in cot_chon), c_inv)
                 tham_so = ()
                 if c_ngay and tu_ngay_sold and den_ngay_sold:
                     sql += " AND [%s]>=? AND [%s]<=?" % (c_ngay, c_ngay)
                     tham_so = (tu_ngay_sold, den_ngay_sold)
-                for mst, inv, kh, tot, vat in (
-                        cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
+                for row in (cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
+                    mst, inv, kh, tot, vat = row[0], row[1], row[2], row[3], row[4]
+                    ngay_dt = row[5] if c_ngay else None
                     gk = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     kh_n = str(kh or "").strip().lower()
                     lst = misa["sold"].setdefault(gk, [])
@@ -25998,7 +26026,11 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             e = it
                             break
                     if e is None:
-                        e = {"kyhieu": kh_n, "ds": 0.0, "thue": 0.0}
+                        try:
+                            ngay_hien = ngay_dt.strftime("%d/%m/%Y") if ngay_dt else ""
+                        except Exception:
+                            ngay_hien = ""
+                        e = {"kyhieu": kh_n, "ds": 0.0, "thue": 0.0, "ngay": ngay_hien}
                         lst.append(e)
                     v = _snum(vat)
                     e["thue"] += v
@@ -26013,16 +26045,25 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             c_ngay = _misa_chon_cot(cols_pui, "RefDate", "InvDate")
             if c_mst and c_inv and c_tot and c_vat:
                 doc_duoc["mua_hang_nk_kqk"] = True
-                sql = "SELECT [%s],[%s],[%s],[%s] FROM PUInvoice WHERE ISNULL([%s],'')<>''" % (
-                    c_mst, c_inv, c_tot, c_vat, c_inv)
+                # SELECT thêm cột ngày (nếu dò được) — chỉ để HIỂN THỊ ở dòng
+                # "THỪA trong MISA", xem giải thích đầy đủ ở nhánh SAVoucher.
+                cot_chon = [c_mst, c_inv, c_tot, c_vat] + ([c_ngay] if c_ngay else [])
+                sql = "SELECT %s FROM PUInvoice WHERE ISNULL([%s],'')<>''" % (
+                    ",".join("[%s]" % c for c in cot_chon), c_inv)
                 tham_so = ()
                 if c_ngay and tu_ngay_purchase and den_ngay_purchase:
                     sql += " AND [%s]>=? AND [%s]<=?" % (c_ngay, c_ngay)
                     tham_so = (tu_ngay_purchase, den_ngay_purchase)
-                for mst, inv, tot, vat in (
-                        cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
+                for row in (cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
+                    mst, inv, tot, vat = row[0], row[1], row[2], row[3]
+                    ngay_dt = row[4] if c_ngay else None
                     k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
-                    e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
+                    e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0, "ngay": ""})
+                    if not e["ngay"]:
+                        try:
+                            e["ngay"] = ngay_dt.strftime("%d/%m/%Y") if ngay_dt else ""
+                        except Exception:
+                            pass
                     e["ds"] += _snum(tot)
                     e["thue"] += _snum(vat)
 
@@ -26035,16 +26076,23 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             c_ngay = _misa_chon_cot(cols_psd, "InvDate", "RefDate")
             if c_mst and c_inv and c_amt and c_vat:
                 doc_duoc["mua_hang_dv"] = True
-                sql = "SELECT [%s],[%s],[%s],[%s] FROM PUServiceDetail WHERE ISNULL([%s],'')<>''" % (
-                    c_mst, c_inv, c_amt, c_vat, c_inv)
+                cot_chon = [c_mst, c_inv, c_amt, c_vat] + ([c_ngay] if c_ngay else [])
+                sql = "SELECT %s FROM PUServiceDetail WHERE ISNULL([%s],'')<>''" % (
+                    ",".join("[%s]" % c for c in cot_chon), c_inv)
                 tham_so = ()
                 if c_ngay and tu_ngay_purchase and den_ngay_purchase:
                     sql += " AND [%s]>=? AND [%s]<=?" % (c_ngay, c_ngay)
                     tham_so = (tu_ngay_purchase, den_ngay_purchase)
-                for mst, inv, amt, vat in (
-                        cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
+                for row in (cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
+                    mst, inv, amt, vat = row[0], row[1], row[2], row[3]
+                    ngay_dt = row[4] if c_ngay else None
                     k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
-                    e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0})
+                    e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0, "ngay": ""})
+                    if not e["ngay"]:
+                        try:
+                            e["ngay"] = ngay_dt.strftime("%d/%m/%Y") if ngay_dt else ""
+                        except Exception:
+                            pass
                     e["ds"] += _snum(amt)
                     e["thue"] += _snum(vat)
     finally:
@@ -26146,10 +26194,11 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         # nên dù danh sách "thieu"/"lech" đã trống, TỔNG vẫn có thể lệch mà
         # không rõ vì sao — xác nhận đúng qua phản hồi người dùng: tổng Mua
         # hàng vẫn lệch ~1 tỷ dù không còn hóa đơn nào báo thiếu/lệch cả.
-        thua = [{"mst": gk[0], "so_hd": gk[1],
+        thua = [{"mst": gk[0], "so_hd": gk[1], "ngay": e.get("ngay", ""),
                 "doanh_so_misa": round(e["ds"]), "thue_misa": round(e["thue"])}
-               for gk, lst in misa["sold"].items() for e in lst if id(e) not in da_khop_id]
-        thua.sort(key=lambda x: (x["mst"], x["so_hd"]))
+               for gk, lst in misa["sold"].items() for e in lst
+               if id(e) not in da_khop_id and _dung_ky_that(e.get("ngay", ""), "sold")]
+        thua.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
     ket["ban_hang"] = {"tong_hd_nguon": len(ng_flat_sold), "khop": khop, "thieu": thieu, "lech": lech,
                        "thua": thua, "tong_khop": tong_khop, "tong_ds_nguon": round(tong_ds_nguon),
                        "tong_thue_nguon": round(tong_thue_nguon), "tong_ds_misa": round(tong_ds_misa),
@@ -26194,9 +26243,11 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         # (vòng lặp chỉ duyệt theo nguồn nên trước đây KHÔNG BAO GIỜ phát
         # hiện được chiều "MISA có nhưng nguồn không có", dù đây chính là
         # nguyên nhân khiến TỔNG vẫn lệch dù danh sách thiếu/lệch đã trống).
-        thua = [{"mst": k[0], "so_hd": k[1], "doanh_so_misa": round(m["ds"]), "thue_misa": round(m["thue"])}
-               for k, m in misa["purchase"].items() if k not in da_khop_key]
-        thua.sort(key=lambda x: (x["mst"], x["so_hd"]))
+        thua = [{"mst": k[0], "so_hd": k[1], "ngay": m.get("ngay", ""),
+                "doanh_so_misa": round(m["ds"]), "thue_misa": round(m["thue"])}
+               for k, m in misa["purchase"].items()
+               if k not in da_khop_key and _dung_ky_that(m.get("ngay", ""), "purchase")]
+        thua.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
     ket["mua_hang"] = {"tong_hd_nguon": len(ng_flat_purchase), "khop": khop, "thieu": thieu,
                        "lech": lech, "thua": thua, "tong_khop": tong_khop_p, "tong_ds_nguon": round(tong_ds_nguon_p),
                        "tong_thue_nguon": round(tong_thue_nguon_p), "tong_ds_misa": round(tong_ds_misa_p),

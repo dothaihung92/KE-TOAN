@@ -7357,7 +7357,7 @@ function misaDoiChieuVe(b){
     const rowsThua=dThua.map(x=>`<tr>
         <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.mst)}</td>
         <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.so_hd)}</td>
-        <td style="padding:4px 8px;border:1px solid #eee">—</td>
+        <td style="padding:4px 8px;border:1px solid #eee">${misaEsc(x.ngay||'')}</td>
         <td style="padding:4px 8px;border:1px solid #eee;text-align:right">MISA ${x.doanh_so_misa.toLocaleString('vi-VN')}</td>
         <td style="padding:4px 8px;border:1px solid #eee;text-align:right">MISA ${x.thue_misa.toLocaleString('vi-VN')}</td>
         <td style="padding:4px 8px;border:1px solid #eee;color:#8a5d00;font-weight:600">THỪA trong MISA (không có trong nguồn tra cứu)</td>
