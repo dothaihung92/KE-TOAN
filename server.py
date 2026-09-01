@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.097"
+APP_BUILD = "2026-08-31.098"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13933,6 +13933,17 @@ def _misa_khncc_dinh_dang_mst(s):
         return s[:10] + "-" + s[10:]
     return s
 
+def _chuan_shd(v):
+    """Bỏ số 0 ở đầu khi ghép khóa (Số hóa đơn đôi khi lệch định dạng '12' so
+    với '0000012' giữa dữ liệu tra cứu Thuế và MISA — CÙNG mẫu chuẩn hóa
+    _chuan_ma() đã dùng ở chỗ gộp hóa đơn 2 hệ thống và các chỗ so khớp file
+    hóa đơn đã tải). Chỉ dùng để GHÉP KHÓA, KHÔNG dùng để hiển thị (giữ
+    nguyên số gốc cho người dùng). Ở MODULE-LEVEL (không nested trong
+    _misa_doi_chieu_import_toan_bo như trước) để _misa_ghi_mua_hang/
+    _misa_ghi_mua_hang_dv cũng dùng được khi đối chiếu theo (MST, Số HĐ)."""
+    s = str(v or "").strip()
+    return (s.lstrip("0") or "0") if s else ""
+
 def _ky_hieu_chac_chan_khac(kh_moi, kh_da_co):
     """True CHỈ khi CẢ 2 Ký hiệu HĐ đều CÓ GIÁ TRỊ THẬT (không rỗng) và
     KHÁC NHAU — đây là dấu hiệu DUY NHẤT đủ tin cậy để kết luận 2 hóa đơn
@@ -15037,9 +15048,47 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 so_du_kho[key] = [sl0, tien0]
             return so_du_kho[key]
 
+        # ĐỐI CHIẾU THEO NỘI DUNG HÓA ĐƠN (MST NCC + Số HĐ), KHÔNG CHỈ THEO
+        # "Số chứng từ" (RefNoManagement) — "Số chứng từ" phần mềm tự đặt
+        # theo (tiền tố+năm+MST NCC) rồi đánh số thứ tự "-2","-3"... theo THỨ
+        # TỰ XỬ LÝ trong lần tạo Bảng kê Đầu vào ĐANG CÓ, không neo theo hóa
+        # đơn cụ thể nào — mỗi khi Bảng kê Đầu vào có thêm hóa đơn mới (đặc
+        # biệt nếu hóa đơn mới có ngày SỚM HƠN hóa đơn cũ cùng NCC), thứ tự
+        # xử lý xáo trộn khiến hậu tố bị GÁN LẠI cho hóa đơn khác — chứng từ
+        # ĐÃ GHI trước đó (mang "Số chứng từ" theo lần tính CŨ) không còn
+        # khớp "Số chứng từ" tính lại lần này, trong khi hóa đơn MỚI lại vô
+        # tình trùng đúng "Số chứng từ" đó — khiến hóa đơn mới bị coi nhầm là
+        # "đã có" (bỏ qua, không ghi) dù chưa từng được ghi vào MISA — xác
+        # nhận đúng qua phản hồi người dùng: "Sẽ ghi: 0" dù hóa đơn Mua vào
+        # vẫn thiếu thật trong MISA. Nên KIỂM TRA THÊM theo (MST NCC, Số HĐ)
+        # thật — bền vững hơn hẳn "Số chứng từ" tự đặt, dùng chính bảng
+        # PUInvoice mà _misa_doi_chieu_import_toan_bo cũng đang đối chiếu —
+        # hóa đơn nào khớp coi là ĐÃ CÓ dù "Số chứng từ" có trùng nhầm hay
+        # không; ngược lại KHÔNG khớp thì vẫn cho ghi dù "Số chứng từ" tính
+        # ra trùng tình cờ với 1 hóa đơn khác (chỉ trùng NHÃN hiển thị, không
+        # mất dữ liệu — khác hẳn bị bỏ qua hoàn toàn như lỗi cũ).
+        da_co_theo_hd = set()
+        if loai in ("nk", "kqk"):
+            try:
+                for hd_mst, hd_inv in cur.execute(
+                        "SELECT AccountObjectTaxCode, InvNo FROM PUInvoice").fetchall():
+                    da_co_theo_hd.add((_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower()))
+            except Exception:
+                pass
+
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
+            first = lines[0]
+            mst = str(first[cfg["mst"]] or "").strip()
+            mst_k = mst.lower()
+            sohd_ct = str(first[cfg["sohd"]] or "").strip() if cfg.get("sohd") is not None else ""
+            hd_key = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
+            if sohd_ct and hd_key in da_co_theo_hd:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                            "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
+                continue
             if k_doc in posted_refno:
                 trung += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines),
@@ -15051,9 +15100,6 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                             "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
                             "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
                 continue
-            first = lines[0]
-            mst = str(first[cfg["mst"]] or "").strip()
-            mst_k = mst.lower()
             if mst_k not in ncc:
                 bo_ncc += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
@@ -15996,9 +16042,31 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 pass
         co_the_ghi_so_tai_chinh = bool(cols_gl) and bool(cols_aol) and bool(cols_cfl)
 
+        # ĐỐI CHIẾU THEO NỘI DUNG HÓA ĐƠN (MST NCC + Số HĐ) — xem giải thích
+        # đầy đủ ở _misa_ghi_mua_hang (nk/kqk); ở đây dùng PUServiceDetail vì
+        # InvNo/MST nằm THẲNG trên dòng chi tiết, không có PUInvoice liên kết
+        # riêng cho Mua hàng dịch vụ.
+        da_co_theo_hd = set()
+        try:
+            for hd_mst, hd_inv in cur.execute(
+                    "SELECT TaxAccountObjectTaxCode, InvNo FROM PUServiceDetail").fetchall():
+                da_co_theo_hd.add((_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower()))
+        except Exception:
+            pass
+
         for doc in order:
             lines = groups[doc]
             k_doc = doc.strip().lower()
+            first = lines[0]
+            mst = str(first[cfg["mst"]] or "").strip()
+            mst_k = mst.lower()
+            sohd_ct = str(first[cfg["sohd"]] or "").strip() if cfg.get("sohd") is not None else ""
+            hd_key = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
+            if sohd_ct and hd_key in da_co_theo_hd:
+                trung += 1
+                ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                            "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
+                continue
             if k_doc in posted_refno:
                 trung += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines),
@@ -16010,9 +16078,6 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                             "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
                             "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
                 continue
-            first = lines[0]
-            mst = str(first[cfg["mst"]] or "").strip()
-            mst_k = mst.lower()
             if mst_k not in ncc:
                 bo_ncc += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
@@ -25770,14 +25835,9 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             return False
         return True
 
-    def _chuan_shd(v):
-        """Bỏ số 0 ở đầu khi ghép khóa (Số hóa đơn đôi khi lệch định dạng
-        '12' so với '0000012' giữa dữ liệu tra cứu Thuế và MISA — CÙNG mẫu
-        chuẩn hóa _chuan_ma() đã dùng ở chỗ gộp hóa đơn 2 hệ thống và các
-        chỗ so khớp file hóa đơn đã tải, xem trên). Chỉ dùng để GHÉP KHÓA,
-        KHÔNG dùng để hiển thị (giữ nguyên số gốc cho người dùng)."""
-        s = str(v or "").strip()
-        return (s.lstrip("0") or "0") if s else ""
+    # _chuan_shd giờ ở MODULE-LEVEL (xem gần _misa_khncc_chuan_mst) — dùng
+    # chung với _misa_ghi_mua_hang/_misa_ghi_mua_hang_dv, không định nghĩa
+    # lại ở đây nữa.
 
     # sold: nhóm theo (MST, Số hóa đơn) -> DANH SÁCH entry (1 entry/Ký hiệu
     # khác nhau trong group) — xem docstring. purchase: giữ khóa phẳng
