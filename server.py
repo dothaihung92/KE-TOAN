@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.094"
+APP_BUILD = "2026-08-31.095"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25803,6 +25803,20 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         sohd_k = _chuan_shd(sohd)
         mst_doi_tac = r["nmmst"] if loai == "sold" else r["nbmst"]
         mst_k = _misa_khncc_chuan_mst(mst_doi_tac).lower()
+        # Người mua LẺ đôi khi hóa đơn điện tử ghi MÃ ĐỊNH DANH CÁ NHÂN (CCCD,
+        # ĐÚNG 12 số) vào "MST người mua" thay vì để trống — KHÁC HẲN MST
+        # doanh nghiệp thật (10 hoặc 13 số, không bao giờ đúng 12 số) — quy
+        # ước NÀY ĐÃ CÓ SẴN trong phần mềm ở 2 chỗ khác (_misa_ghi_khncc khi
+        # ghi CompanyTaxCode, và cột "Mã số thuế" lúc xuất Excel Danh mục
+        # NCC): coi 12 số là KHÔNG PHẢI MST thật, ghi/coi như trống. Bên ghi
+        # Bán hàng (_misa_ghi_ban_hang) cũng theo đúng quy ước này nên gộp
+        # các hóa đơn này vào chung mã "KL" (Khách lẻ, MST rỗng) trên MISA —
+        # nếu đối chiếu KHÔNG áp cùng quy ước, nguồn sẽ tính khóa theo CCCD
+        # trong khi MISA lưu khóa rỗng, khiến hóa đơn ĐÃ CÓ TRONG MISA bị báo
+        # nhầm "THIẾU" (xác nhận đúng qua ảnh chụp màn hình người dùng gửi —
+        # hóa đơn Số HĐ 6942 đã có trong MISA dưới mã "KL" nhưng bị báo thiếu).
+        if mst_k.isdigit() and len(mst_k) == 12:
+            mst_k = ""
         ngay_dt_ng = _misa_doc_ngay((r["tdlap"] or "").split("T")[0])
         if ngay_dt_ng:
             lo, hi = pham_vi_ngay[loai]
