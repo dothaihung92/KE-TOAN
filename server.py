@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.091"
+APP_BUILD = "2026-08-31.092"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21366,13 +21366,14 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
                 400, "Chưa có tờ khai 01/GTGT (TT80) nào trong MISA để học cấu trúc — "
                      "hãy vào MISA, mục 'Thuế > TT80 - Tờ khai thuế GTGT khấu trừ', "
                      "tạo tay ít nhất 1 tờ khai rồi thử lại.")
-        mau_glv = _misa_mau_dong_that(cur, "GLVoucher", "RefType=4011")
-        mau_glvd = _misa_mau_dong_that(
-            cur, "GLVoucherDetail", "DebitAccount=? AND CreditAccount=?", ("33311", "1331"))
-        if not mau_glv or not mau_glvd:
-            raise HTTPException(
-                400, "Chưa có bút toán 'Khấu trừ thuế GTGT' nào trong MISA để học cấu trúc — "
-                     "hãy tạo tay ít nhất 1 bút toán trên MISA rồi thử lại.")
+        # mau_glv CHỈ dùng để mượn CreatedBy/ModifiedBy (đã có fallback "ADMIN"
+        # bên dưới) và suffix số chứng từ (mau_glv.get("RefNoFinance")) — MỌI
+        # trường nghiệp vụ khác của glv_row/glvd_row bên dưới đều gán TƯỜNG
+        # MINH bằng cấu trúc CHUẨN của MISA (RefType=4011, DebitAccount=33311/
+        # CreditAccount=1331 cố định...), KHÔNG sao chép từ mau_glv/mau_glvd —
+        # nên không cần bắt buộc phải có sẵn 1 bút toán thật mới tạo được;
+        # thiếu thì coi như {} (dùng thẳng cấu trúc chuẩn, không suffix riêng).
+        mau_glv = _misa_mau_dong_that(cur, "GLVoucher", "RefType=4011") or {}
 
         max_so_nvk = 0
         try:
