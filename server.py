@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.095"
+APP_BUILD = "2026-08-31.096"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -29050,6 +29050,16 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # công ty khác ngành nghề nên KHÔNG dùng chung 1 giá trị mặc định toàn hệ thống.
     no_mac_dinh_cty = str((comp["no_mac_dinh"] if comp and "no_mac_dinh" in comp.keys() else "") or "").strip()
 
+    # Hóa đơn MUA VÀO bị bộ lọc _hop_le_mua (trong build_detail_sheet) LOẠI
+    # KHỎI Excel vì MST người mua không khớp công ty — TRƯỚC ĐÂY âm thầm loại
+    # bỏ, không báo gì cả, khiến người dùng thấy hóa đơn "biến mất" khỏi Bảng
+    # kê Đầu vào (dù vẫn còn trong dữ liệu tra cứu gốc) mà không biết vì sao —
+    # xác nhận đúng qua phản hồi người dùng: hóa đơn có thật trong dữ liệu tra
+    # cứu nhưng không có trong Bảng kê Đầu vào lẫn MISA. Gom lại đây để báo rõ
+    # bên dưới (X-So-Loai-Mst-Mua + _luu_loi_tra_cuu), giúp người dùng tự biết
+    # cần bổ sung "MST khác" hay hóa đơn đó thật sự của công ty khác.
+    hd_loai_mst_mua = []
+
     def build_detail_sheet(sheet_name, loai):
         ws = wb.create_sheet(sheet_name)
         # Việc 9: Chi tiết MUA VÀO bỏ Người mua/MST mua; BÁN RA bỏ Người bán/MST bán
@@ -29102,7 +29112,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 if not nm:
                     return True
                 nmc = _chuan_mst(nm)
-                return nmc[:10] == mst_cty_goc or nmc in mst_khac_set
+                if nmc[:10] == mst_cty_goc or nmc in mst_khac_set:
+                    return True
+                hd_loai_mst_mua.append({
+                    "so_hd": str(r["shdon"] or "").strip(),
+                    "mst_tren_hd": nm,
+                    "ngay": (r["tdlap"] or "").split("T")[0],
+                })
+                return False
             loai_rows = [r for r in loai_rows if _hop_le_mua(r)]
         # BÁN RA: KHÔNG lọc theo MST người bán nữa — trang Thuế tra cứu "bán ra"
         # đã CHỈ trả về đúng hóa đơn của công ty đang đăng nhập (không có rủi ro
@@ -30077,6 +30094,12 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # tiền thuế), chỉ lộ khi so từng dòng hàng với chính nhãn % của nó.
     extra_headers["X-So-Ts-Lech-Ban"] = str(so_ts_lech_ban)
     extra_headers["X-So-Ts-Lech-Mua"] = str(so_ts_lech_mua)
+    # Số hóa đơn MUA VÀO bị LOẠI KHỎI Excel vì MST người mua không khớp công
+    # ty (_hop_le_mua) — báo rõ để người dùng tự biết cần bổ sung "MST khác"
+    # (nếu hóa đơn đó thật sự của công ty, chỉ khác biến thể MST) hay đúng là
+    # hóa đơn của công ty khác (giữ loại bỏ là đúng) — thay vì hóa đơn lặng lẽ
+    # "biến mất" khỏi Bảng kê Đầu vào mà không rõ lý do.
+    extra_headers["X-So-Loai-Mst-Mua"] = str(len(hd_loai_mst_mua))
     # LƯU LẠI cảnh báo vào công ty (không mất khi toast tự tắt/tải lại
     # trang) — TRƯỚC ĐÂY chỉ nút "Xuất Excel" đơn lẻ (không qua tra cứu
     # hàng loạt) HOÀN TOÀN không báo gì cho người dùng biết có hóa đơn lệch,
@@ -30093,6 +30116,17 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                  f"{so_lech_ban + so_lech_mua} hóa đơn LỆCH ({', '.join(ve_lech)}) giữa Chi tiết và "
                  f"Bảng kê — hãy mở file kiểm tra lại kỹ (mục 'CHI TIẾT HÓA ĐƠN LỆCH' trong sheet "
                  f"Đối chiếu).")
+    if hd_loai_mst_mua:
+        vi_du = "; ".join(f"Số HĐ {x['so_hd']} ngày {x['ngay']} (MST trên HĐ: {x['mst_tren_hd']})"
+                          for x in hd_loai_mst_mua[:5])
+        them = f" và {len(hd_loai_mst_mua) - 5} hóa đơn khác" if len(hd_loai_mst_mua) > 5 else ""
+        _luu_loi_tra_cuu(
+            cid, f"⚠ Đã LOẠI {len(hd_loai_mst_mua)} hóa đơn MUA VÀO khỏi Excel (không có trong "
+                 f"'Chi tiết MUA VÀO'/Bảng kê Đầu vào) vì MST người mua ghi trên hóa đơn KHÁC MST "
+                 f"công ty đang xem — nếu ĐÚNG là hóa đơn của công ty này (chỉ khác biến thể MST, vd "
+                 f"MST hộ kinh doanh cũ/chi nhánh), hãy vào 'Sửa công ty' khai báo thêm ở 'MST khác' "
+                 f"rồi xuất lại Excel; nếu đúng là hóa đơn của công ty khác thì bỏ qua cảnh báo này. "
+                 f"Ví dụ: {vi_du}{them}.")
     if so_ts_lech_ban or so_ts_lech_mua:
         ve_ts = []
         if so_ts_lech_ban:

@@ -8714,11 +8714,16 @@ async function exportExcel(btn){
     // phải rời trang rồi quay lại mới thấy.
     const soLechBan=parseInt(r.headers.get('X-So-Lech-Ban')||'0');
     const soLechMua=parseInt(r.headers.get('X-So-Lech-Mua')||'0');
-    if(soLechBan||soLechMua){
+    // Hóa đơn Mua vào bị loại khỏi Excel vì MST người mua không khớp công ty
+    // (_hop_le_mua, server.py) — trước đây "biến mất" âm thầm khỏi Bảng kê
+    // Đầu vào, giờ server đã lưu cảnh báo, chỉ cần vẽ lại banner + toast.
+    const soLoaiMstMua=parseInt(r.headers.get('X-So-Loai-Mst-Mua')||'0');
+    if(soLechBan||soLechMua||soLoaiMstMua){
       await loadCompanies();
       const c=companies.find(x=>x.id===current);
       if(c)renderFetchErrorBanner(c);
-      toast(`⚠ Phát hiện ${soLechBan+soLechMua} hóa đơn LỆCH giữa Chi tiết và Bảng kê — xem chi tiết ở banner phía trên`,'err');
+      if(soLechBan||soLechMua)toast(`⚠ Phát hiện ${soLechBan+soLechMua} hóa đơn LỆCH giữa Chi tiết và Bảng kê — xem chi tiết ở banner phía trên`,'err');
+      if(soLoaiMstMua)toast(`⚠ ${soLoaiMstMua} hóa đơn Mua vào bị loại khỏi Excel vì MST người mua khác MST công ty — xem chi tiết ở banner phía trên`,'err');
     }
     // Không lưu được vào 'Thư mục lưu file kết xuất' đã cấu hình (vd đường
     // dẫn quá dài, OneDrive đang khoá...) — báo NGAY bằng toast lỗi, tránh để
