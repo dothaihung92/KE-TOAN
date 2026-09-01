@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.098"
+APP_BUILD = "2026-08-31.099"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15068,11 +15068,13 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # ra trùng tình cờ với 1 hóa đơn khác (chỉ trùng NHÃN hiển thị, không
         # mất dữ liệu — khác hẳn bị bỏ qua hoàn toàn như lỗi cũ).
         da_co_theo_hd = set()
+        co_du_lieu_doi_chieu_hd = False
         if loai in ("nk", "kqk"):
             try:
                 for hd_mst, hd_inv in cur.execute(
                         "SELECT AccountObjectTaxCode, InvNo FROM PUInvoice").fetchall():
                     da_co_theo_hd.add((_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower()))
+                co_du_lieu_doi_chieu_hd = True
             except Exception:
                 pass
 
@@ -15084,28 +15086,47 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             mst_k = mst.lower()
             sohd_ct = str(first[cfg["sohd"]] or "").strip() if cfg.get("sohd") is not None else ""
             hd_key = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
-            if sohd_ct and hd_key in da_co_theo_hd:
-                trung += 1
-                ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
-                            "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
-                continue
-            if k_doc in posted_refno:
-                trung += 1
-                ket.append({"so_ct": doc, "so_dong": len(lines),
-                            "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
-                continue
-            if k_doc in unposted_docs and not ghi_de:
-                trung += 1
-                ket.append({"so_ct": doc, "so_dong": len(lines),
-                            "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
-                            "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
-                continue
+            # ĐỐI CHIẾU ĐƯỢC theo nội dung hóa đơn thật (có đọc được PUInvoice
+            # VÀ dòng này có Số HĐ) -> TIN HẲN kết quả này, KHÔNG dùng "Số
+            # chứng từ" (k_doc) để xét trùng/ghi đè nữa cho dòng này — nếu vẫn
+            # dùng SONG SONG cả 2 cách, hóa đơn content-check xác nhận MỚI vẫn
+            # có thể bị check "Số chứng từ" (dễ trùng nhầm do đổi thứ tự, xem
+            # giải thích ở trên) chặn lại y hệt lỗi cũ, hoặc tệ hơn — ghi_de_ct
+            # tưởng nhầm là bản ghi CŨ CỦA CHÍNH MÌNH rồi XÓA MẤT 1 chứng từ
+            # KHÁC không liên quan trước khi ghi (mất dữ liệu thật). Chỉ khi
+            # KHÔNG đối chiếu được (CSDL MISA không có bảng PUInvoice, hoặc
+            # dòng thiếu Số HĐ) mới rơi về cách cũ (Số chứng từ) như trước.
+            doi_chieu_duoc = co_du_lieu_doi_chieu_hd and bool(sohd_ct)
+            if doi_chieu_duoc:
+                if hd_key in da_co_theo_hd:
+                    trung += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                                "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
+                    continue
+            else:
+                if k_doc in posted_refno:
+                    trung += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines),
+                                "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                    continue
+                if k_doc in unposted_docs and not ghi_de:
+                    trung += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines),
+                                "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
+                                "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
+                    continue
             if mst_k not in ncc:
                 bo_ncc += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
                             "trang_thai": "bỏ qua — NCC (MST %s) chưa có trong MISA" % mst})
                 continue
-            ghi_de_ct = k_doc in unposted_docs   # chứng từ cũ (chưa ghi sổ) cần gỡ ghi lại
+            # ghi_de_ct (gỡ ghi lại bản CŨ CỦA CHÍNH MÌNH) CHỈ áp dụng khi
+            # KHÔNG đối chiếu được theo nội dung — đối chiếu được thì đã chắc
+            # chắn đây là hóa đơn MỚI (không match da_co_theo_hd ở trên), "Số
+            # chứng từ" trùng k_doc với 1 bản ghi unposted lúc này CHỈ LÀ
+            # TRÙNG NHÃN tình cờ (không phải bản ghi cũ của CHÍNH hóa đơn
+            # này) — KHÔNG được xóa nhầm bản ghi đó.
+            ghi_de_ct = (not doi_chieu_duoc) and (k_doc in unposted_docs)
             if ghi_de_ct and not preview:
                 for rid in unposted_docs[k_doc]["refids"]:
                     # dò HÓA ĐƠN đã tạo kèm (link 2 chiều: PUInvoiceDetail.
@@ -16047,10 +16068,12 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         # InvNo/MST nằm THẲNG trên dòng chi tiết, không có PUInvoice liên kết
         # riêng cho Mua hàng dịch vụ.
         da_co_theo_hd = set()
+        co_du_lieu_doi_chieu_hd = False
         try:
             for hd_mst, hd_inv in cur.execute(
                     "SELECT TaxAccountObjectTaxCode, InvNo FROM PUServiceDetail").fetchall():
                 da_co_theo_hd.add((_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower()))
+            co_du_lieu_doi_chieu_hd = True
         except Exception:
             pass
 
@@ -16062,28 +16085,33 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             mst_k = mst.lower()
             sohd_ct = str(first[cfg["sohd"]] or "").strip() if cfg.get("sohd") is not None else ""
             hd_key = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
-            if sohd_ct and hd_key in da_co_theo_hd:
-                trung += 1
-                ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
-                            "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
-                continue
-            if k_doc in posted_refno:
-                trung += 1
-                ket.append({"so_ct": doc, "so_dong": len(lines),
-                            "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
-                continue
-            if k_doc in unposted_docs and not ghi_de:
-                trung += 1
-                ket.append({"so_ct": doc, "so_dong": len(lines),
-                            "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
-                            "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
-                continue
+            # Xem giải thích đầy đủ (vì sao KHÔNG dùng song song cả 2 cách,
+            # ghi_de_ct chỉ áp dụng khi không đối chiếu được) ở _misa_ghi_mua_hang.
+            doi_chieu_duoc = co_du_lieu_doi_chieu_hd and bool(sohd_ct)
+            if doi_chieu_duoc:
+                if hd_key in da_co_theo_hd:
+                    trung += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                                "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
+                    continue
+            else:
+                if k_doc in posted_refno:
+                    trung += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines),
+                                "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
+                    continue
+                if k_doc in unposted_docs and not ghi_de:
+                    trung += 1
+                    ket.append({"so_ct": doc, "so_dong": len(lines),
+                                "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
+                                "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
+                    continue
             if mst_k not in ncc:
                 bo_ncc += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
                             "trang_thai": "bỏ qua — NCC (MST %s) chưa có trong MISA" % mst})
                 continue
-            ghi_de_ct = k_doc in unposted_docs
+            ghi_de_ct = (not doi_chieu_duoc) and (k_doc in unposted_docs)
             if ghi_de_ct and not preview:
                 for rid in unposted_docs[k_doc]["refids"]:
                     cur.execute("DELETE FROM PUServiceDetail WHERE RefID=?", rid)
