@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.096"
+APP_BUILD = "2026-08-31.097"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25991,11 +25991,29 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                         if ms["kyhieu"] and ng["kyhieu"] and ms["kyhieu"] == ng["kyhieu"]:
                             idx = i
                             break
-                    if idx is None:
-                        for i, ms in enumerate(ms_list):
-                            if not _ky_hieu_chac_chan_khac(ng["kyhieu"], ms["kyhieu"]):
-                                idx = i
-                                break
+                    if idx is None and ms_list:
+                        # KHÔNG còn loại bớt ứng viên theo _ky_hieu_chac_chan_khac
+                        # nữa (TRƯỚC ĐÂY loại ứng viên có Ký hiệu "chắc chắn
+                        # khác" — nhưng 2 hệ thống (tra cứu Thuế vs MISA) có
+                        # thể ghi Ký hiệu CÙNG 1 hóa đơn thật KHÁC ĐỊNH DẠNG
+                        # (không rỗng ở cả 2 bên nhưng viết khác nhau), khiến
+                        # hàm này KẾT LUẬN NHẦM "chắc chắn khác" rồi loại thẳng
+                        # ứng viên ĐÚNG, báo oan "THIẾU" dù hóa đơn có sẵn —
+                        # xác nhận qua phản hồi người dùng: sau khi nhóm đúng
+                        # khách lẻ theo MST rỗng (nhiều hóa đơn cùng Số HĐ dồn
+                        # chung 1 group), số hóa đơn báo "THIẾU" lại TĂNG thay
+                        # vì giảm — đúng dấu hiệu bước lọc Ký hiệu loại nhầm).
+                        # Ký hiệu giờ CHỈ còn dùng làm ưu tiên số 1 (khớp Y HỆT
+                        # ở nhánh trên) — khi không khớp Y HỆT, tin vào SỐ TIỀN
+                        # GẦN NGUỒN NHẤT trong TOÀN BỘ ứng viên còn lại của
+                        # group hơn là loại bớt theo Ký hiệu hay lấy ứng viên
+                        # ĐẦU TIÊN theo thứ tự trả về (không liên quan gì tới
+                        # đúng/sai cặp ghép) — ghép sai vẫn hiện ra rõ ràng ở
+                        # cột "LỆCH" (chênh lệch số tiền lớn) cho người dùng tự
+                        # xem, còn hơn báo nhầm "THIẾU" (nghe như hoàn toàn
+                        # không có) cho 1 hóa đơn thật ra ĐÃ CÓ trong MISA.
+                        idx = min(range(len(ms_list)), key=lambda i: abs(ms_list[i]["ds"] - ng["ds"]) +
+                                                                     abs(ms_list[i]["thue"] - ng["thue"]))
                 if idx is None:
                     thieu.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
                                  "doanh_so_nguon": round(ng["ds"]), "thue_nguon": round(ng["thue"])})
