@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.112"
+APP_BUILD = "2026-08-31.113"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25860,6 +25860,35 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
          lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=ghi_de))
     chay("4c. Dịch vụ vào MISA",
          lambda: _misa_ghi_mua_hang_dv(cid, database, preview=preview, ghi_de=ghi_de))
+
+    # BƯỚC 4x (TỰ SỬA) — nếu bước 4a/4b/4c còn bỏ qua chứng từ vì THIẾU MÃ
+    # HÀNG (chứng từ chỉ toàn dòng hàng MỚI mà bước 3 đáng lẽ đã Import
+    # xong), thử lại ĐÚNG 1 LẦN: chạy lại Danh mục Hàng hóa/NVL rồi ghi lại
+    # Mua hàng — xác nhận đúng ca thật người dùng báo cáo: 4/7 hóa đơn cùng
+    # 1 NCC bị bỏ qua HOÀN TOÀN vì toàn sản phẩm mới, nhà cung cấp vẫn có
+    # sẵn trong MISA (3 hóa đơn khác cùng NCC vẫn ghi được) — nếu vì lý do
+    # nào đó (chạy riêng lẻ từng nút thay vì "🚀 Import tự động toàn bộ",
+    # hoặc bước 3 bị lỗi/bỏ qua giữa chừng) mã hàng MỚI chưa kịp có trong
+    # MISA lúc bước 4 chạy, vòng thử lại này sẽ TỰ bổ sung Danh mục rồi ghi
+    # nốt các chứng từ còn thiếu — không cần người dùng tự phát hiện rồi bấm
+    # lại từng nút theo đúng thứ tự. CHỈ thử lại khi ĐANG GHI THẬT (không
+    # preview — Xem trước không tạo ra mã hàng mới nào để thử lại) và có
+    # dấu hiệu thật sự bỏ qua vì thiếu mã hàng (tránh chạy lại vô ích).
+    if not preview:
+        buoc_4 = buoc[-3:] if len(buoc) >= 3 else []
+        so_bo_qua_mahang_4 = sum(
+            (b.get("ket_qua") or {}).get("so_bo_qua_mahang") or 0 for b in buoc_4)
+        if so_bo_qua_mahang_4 > 0:
+            bao(f"↻ Phát hiện {so_bo_qua_mahang_4} dòng còn thiếu mã hàng sau bước 4 — "
+                f"tự chạy lại Danh mục Hàng hóa/NVL rồi ghi lại Mua hàng...")
+            chay("3a (thử lại). Danh mục Hàng hóa", lambda: _lam_danh_muc("hh"))
+            chay("3b (thử lại). Danh mục NVL", lambda: _lam_danh_muc("nvl"))
+            chay("4a (thử lại). Nhập kho vào MISA",
+                 lambda: _misa_ghi_mua_hang(cid, database, "nk", preview=preview, ghi_de=ghi_de))
+            chay("4b (thử lại). Không qua kho vào MISA",
+                 lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=ghi_de))
+            chay("4c (thử lại). Dịch vụ vào MISA",
+                 lambda: _misa_ghi_mua_hang_dv(cid, database, preview=preview, ghi_de=ghi_de))
 
     chay("5a. Ghi tăng CCDC",
          lambda: _misa_ghi_tang_ccdc(cid, database, preview=preview, ghi_de=ghi_de))
