@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.120"
+APP_BUILD = "2026-08-31.121"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11556,6 +11556,102 @@ def _xk_key_ngay(ngay):
         return f"{p[2]}-{p[1].zfill(2)}-{p[0].zfill(2)}"
     return s
 
+def _xk_goi_y_ma(ten_chuan, manh, ton_list):
+    """Gợi ý tối đa 6 mã hàng GẦN ĐÚNG nhất (ưu tiên 'mạnh' rồi điểm giống
+    tên) cho 1 mặt hàng KHÔNG dò được mã chắc chắn — để người dùng tự chọn."""
+    manh_ma = {tn["ma"] for tn in manh}
+    scored = sorted(
+        ({"ma": tn["ma"], "ten": tn["ten"], "dvt": tn["dvt"], "gia": tn["gia"],
+          "con_lai": tn["con_lai"], "manh": tn["ma"] in manh_ma,
+          "diem": round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 3)}
+         for tn in ton_list), key=lambda x: (-x["manh"], -x["diem"]))
+    return [s for s in scored[:6] if s["diem"] > 0.3 or s["manh"]]
+
+
+def _xk_gan_1_muc(it, ton_list, hoc_ma):
+    """Gán mã hàng (khớp tên/kích thước/mã trong ngoặc với Tồn kho — xem
+    _manh_xk/_kich_thuoc_khop_xk/_ma_ngoac_khop_xk — TÁCH DÒNG nếu 1 mã
+    không đủ tồn cho hết số lượng) cho 1 mục bán hàng (dict có ten_sp/sl/
+    tt/...) — SỬA ton_list TẠI CHỖ (trừ tồn ngay khi gán), TRẢ VỀ list 1
+    (gán được nguyên dòng, hoặc không tìm được mã nào) hoặc NHIỀU dict
+    record (tách dòng). Logic DÙNG CHUNG giữa _gen_xk_giathanh (dò mã từ
+    Chi tiết bán ra) và _xk_gan_ma_lo_moi (dò mã cho lô dữ liệu Nhập Liệu
+    MỚI vừa gộp thêm, xem _xk_gop_them_ban_hang) — cả 2 đều cần đúng 1 cách
+    gán/tách dòng như nhau, tách hàm riêng để khỏi lệch hành vi giữa 2
+    luồng khi 1 bên sửa mà quên sửa bên kia."""
+    ten_chuan = _chuan_ten_hang_xk(it["ten_sp"])
+    sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
+    tt_goc = it.get("tt")
+    candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
+    # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') hoặc cùng mã kiểu/
+    # màu trong ngoặc (vd '(ASH50-CT)' khớp 'ASH50 - CT') coi là 'mạnh' như
+    # trùng tên — tín hiệu chắc chắn để nhận đúng mặt hàng dù phần tên chữ
+    # viết khác hẳn nhau (xem _trich_kich_thuoc_xk / _ma_ngoac_khop_xk).
+    manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])
+           or _kich_thuoc_khop_xk(it["ten_sp"], tn["ten"])
+           or _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"])]
+    pool = manh
+    if not pool:                                 # không có ứng viên 'mạnh' -> fuzzy chặt
+        best, best_diem = None, 0.0
+        for tn in candidates:
+            d = _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"])
+            if d > best_diem:
+                best, best_diem = tn, d
+        if best and best_diem >= _XK_NGUONG_FUZZY:
+            pool = [best]
+    if not pool:                                  # không tìm thấy tên nào khớp
+        rec = dict(it, sl=sl_can)
+        rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
+                   goi_y=_xk_goi_y_ma(ten_chuan, manh, ton_list))
+        return [rec]
+    # Nhiều mã trùng/gần trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ có sẵn
+    # trong MISA cho cùng sản phẩm) -> LẤY LUÔN mã còn đủ tồn cho số lượng
+    # bán, KHÔNG hỏi lại — ưu tiên mã đã HỌC trước đó nếu vẫn đủ tồn, rồi đến
+    # mã XUẤT HIỆN TRƯỚC theo đúng thứ tự trong file tồn kho (pool đã giữ
+    # nguyên thứ tự đó) — dùng HẾT mã đứng trước rồi mới chuyển sang mã
+    # đứng sau, không ưu tiên theo tồn nhiều/ít.
+    ma_hoc = hoc_ma.get(ten_chuan)
+    pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
+    if not pick:
+        pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
+    if pick:
+        pick["con_lai"] -= sl_can
+        rec = dict(it)
+        rec.update(ma=pick["ma"], ten_xk=pick["ten"], dvt_xk=pick["dvt"],
+                   gia_xk=pick["gia"], goi_y=[], mo_ho=False, thieu_ton=False)
+        return [rec]
+    # KHÔNG mã đơn nào đủ cả số lượng -> TÁCH DÒNG: cộng dồn nhiều mã lại,
+    # LẤY THEO ĐÚNG THỨ TỰ xuất hiện trong file tồn kho (dùng hết mã đứng
+    # trước mới lấy tới mã đứng sau) cho đến khi đủ số lượng bán; phần còn
+    # thiếu (nếu tổng tồn cả nhóm vẫn không đủ) tách thành 1 dòng riêng để
+    # trống, kèm gợi ý, cho người dùng tự gắn mã khác.
+    out = []
+    can_lay = sl_can
+    da_dung_tien = 0
+    for tn in pool:
+        if can_lay <= 0 or tn["con_lai"] <= 0:
+            continue
+        lay = min(tn["con_lai"], can_lay)
+        tn["con_lai"] -= lay
+        can_lay -= lay
+        if isinstance(tt_goc, (int, float)) and sl_can:
+            tt_phan = round(tt_goc - da_dung_tien) if can_lay <= 0 else round(tt_goc * lay / sl_can)
+        else:
+            tt_phan = tt_goc
+        da_dung_tien += tt_phan if isinstance(tt_phan, (int, float)) else 0
+        rec = dict(it, sl=lay, tt=tt_phan)
+        rec.update(ma=tn["ma"], ten_xk=tn["ten"], dvt_xk=tn["dvt"], gia_xk=tn["gia"],
+                   goi_y=[], mo_ho=False, thieu_ton=False)
+        out.append(rec)
+    if can_lay > 0:                                # vẫn còn thiếu sau khi gộp cả nhóm
+        tt_thieu = round(tt_goc - da_dung_tien) if isinstance(tt_goc, (int, float)) else tt_goc
+        rec = dict(it, sl=can_lay, tt=tt_thieu)
+        rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
+                   goi_y=_xk_goi_y_ma(ten_chuan, manh, ton_list))
+        out.append(rec)
+    return out
+
+
 def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=None, on_progress=None):
     """Ghép mã hàng (từ TON) cho từng dòng bán ra (Chi tiết BÁN RA), TRỪ TỒN
     tuần tự theo ngày tăng dần — mặt hàng nào hết tồn (<=0) sẽ KHÔNG gán nữa.
@@ -11657,21 +11753,6 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
                    goi_y=[], mo_ho=False, thieu_ton=False)
         giu_assign[id(it)] = rec
 
-    def goi_y_cho(ten_chuan, manh):
-        manh_ma = {tn["ma"] for tn in manh}
-        scored = sorted(
-            ({"ma": tn["ma"], "ten": tn["ten"], "dvt": tn["dvt"], "gia": tn["gia"],
-              "con_lai": tn["con_lai"], "manh": tn["ma"] in manh_ma,
-              "diem": round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 3)}
-             for tn in ton_list), key=lambda x: (-x["manh"], -x["diem"]))
-        return [s for s in scored[:6] if s["diem"] > 0.3 or s["manh"]]
-
-    def dong_trong(it, sl_thieu, ten_chuan, manh):
-        rec = dict(it, sl=sl_thieu)
-        rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
-                   goi_y=goi_y_cho(ten_chuan, manh))
-        return rec
-
     out = list(out_khoa)
     tong_items = len(items)
     for _idx_pgs, it in enumerate(items):
@@ -11681,75 +11762,7 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
         if pre:
             out.append(pre)
             continue
-        ten_chuan = _chuan_ten_hang_xk(it["ten_sp"])
-        sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
-        tt_goc = it.get("tt")
-        candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
-        # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') hoặc cùng mã
-        # kiểu/màu trong ngoặc (vd '(ASH50-CT)' khớp 'ASH50 - CT') coi là
-        # 'mạnh' như trùng tên — tín hiệu chắc chắn để nhận đúng mặt hàng dù
-        # phần tên chữ viết khác hẳn nhau (xem _trich_kich_thuoc_xk /
-        # _ma_ngoac_khop_xk).
-        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])
-               or _kich_thuoc_khop_xk(it["ten_sp"], tn["ten"])
-               or _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"])]
-        pool = manh
-        if not pool:                                 # không có ứng viên 'mạnh' -> fuzzy chặt
-            best, best_diem = None, 0.0
-            for tn in candidates:
-                d = _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"])
-                if d > best_diem:
-                    best, best_diem = tn, d
-            if best and best_diem >= _XK_NGUONG_FUZZY:
-                pool = [best]
-        if not pool:                                  # không tìm thấy tên nào khớp
-            out.append(dong_trong(it, sl_can, ten_chuan, manh))
-            continue
-        # Nhiều mã trùng/gần trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ có sẵn
-        # trong MISA cho cùng sản phẩm) -> LẤY LUÔN mã còn đủ tồn cho số lượng
-        # bán, KHÔNG hỏi lại — ưu tiên mã đã HỌC trước đó nếu vẫn đủ tồn, rồi đến
-        # mã XUẤT HIỆN TRƯỚC theo đúng thứ tự trong file tồn kho (pool đã giữ
-        # nguyên thứ tự đó) — dùng HẾT mã đứng trước rồi mới chuyển sang mã
-        # đứng sau, không ưu tiên theo tồn nhiều/ít.
-        ma_hoc = hoc_ma.get(ten_chuan)
-        pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
-        if not pick:
-            pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
-        if pick:
-            pick["con_lai"] -= sl_can
-            rec = dict(it)
-            rec.update(ma=pick["ma"], ten_xk=pick["ten"], dvt_xk=pick["dvt"],
-                       gia_xk=pick["gia"], goi_y=[], mo_ho=False, thieu_ton=False)
-            out.append(rec)
-            continue
-        # KHÔNG mã đơn nào đủ cả số lượng -> TÁCH DÒNG: cộng dồn nhiều mã lại,
-        # LẤY THEO ĐÚNG THỨ TỰ xuất hiện trong file tồn kho (dùng hết mã đứng
-        # trước mới lấy tới mã đứng sau) cho đến khi đủ số lượng bán; phần còn
-        # thiếu (nếu tổng tồn cả nhóm vẫn không đủ) tách thành 1 dòng riêng để
-        # trống, kèm gợi ý, cho người dùng tự gắn mã khác.
-        can_lay = sl_can
-        da_dung_tien = 0
-        for tn in pool:
-            if can_lay <= 0 or tn["con_lai"] <= 0:
-                continue
-            lay = min(tn["con_lai"], can_lay)
-            tn["con_lai"] -= lay
-            can_lay -= lay
-            if isinstance(tt_goc, (int, float)) and sl_can:
-                tt_phan = round(tt_goc - da_dung_tien) if can_lay <= 0 else round(tt_goc * lay / sl_can)
-            else:
-                tt_phan = tt_goc
-            da_dung_tien += tt_phan if isinstance(tt_phan, (int, float)) else 0
-            rec = dict(it, sl=lay, tt=tt_phan)
-            rec.update(ma=tn["ma"], ten_xk=tn["ten"], dvt_xk=tn["dvt"], gia_xk=tn["gia"],
-                       goi_y=[], mo_ho=False, thieu_ton=False)
-            out.append(rec)
-        if can_lay > 0:                                # vẫn còn thiếu sau khi gộp cả nhóm
-            tt_thieu = round(tt_goc - da_dung_tien) if isinstance(tt_goc, (int, float)) else tt_goc
-            rec = dict(it, sl=can_lay, tt=tt_thieu)
-            rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
-                       goi_y=goi_y_cho(ten_chuan, manh))
-            out.append(rec)
+        out.extend(_xk_gan_1_muc(it, ton_list, hoc_ma))
     return out
 
 def _xk_hop_nhat_giathanh(ton_rows, ctbr_header, ctbr_rows, hoc_ma, giathanh_cu,
@@ -12024,8 +12037,15 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
     Đơn giá kho nếu dòng đó ĐÃ CÓ SẴN (vd giá vốn thật lấy từ tờ khai xuất
     khẩu), chỉ điền thêm khi các ô đó đang trống. KHÔNG BAO GIỜ gán mã khiến
     tồn kho âm — dòng không tìm được tên khớp HOẶC không mã nào còn đủ tồn
-    thì để trống Mã hàng kho (giữ đơn giản, không tách dòng phức tạp như dò
-    mã từ Chi tiết BÁN RA)."""
+    thì để trống Mã hàng kho.
+
+    CŨNG TÁCH DÒNG (xem _xk_gan_1_muc) khi 1 mã không đủ SL kho cho hết 1
+    dòng — trước đây hàm này để trống hẳn (không tách) nên '↺ Gỡ mã hàng' +
+    'Dò mã hàng tự động' (tính lại HOÀN TOÀN từ đầu) lại kém hơn dò từ Chi
+    tiết bán ra; nay ĐÃ dùng chung logic tách dòng nên không còn lệch nữa.
+    Dòng tách giữ NGUYÊN 'sl' (Số lượng bán gốc, không đổi) — CHỈ ghi phần
+    số lượng đã tách vào 'sl_kho' (đúng đúng ý nghĩa cột này: số lượng THỰC
+    XUẤT KHO cho dòng đó, có thể khác 'sl' khi phải tách nhiều mã)."""
     hoc_ma = hoc_ma or {}
     ton_list = [dict(it, con_lai=_xk_ton_an_toan(it),
                      ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
@@ -12052,45 +12072,28 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
         if str(r.get("ma") or "").strip():
             out.append(r)
             continue
-        ten_chuan = _chuan_ten_hang_xk(r.get("ten_sp"))
         sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
         sl_can = _to_num(sl_kho)
         sl_can = sl_can if isinstance(sl_can, (int, float)) else 0
-        candidates = [tn for tn in ton_list if tn["con_lai"] > 0] or ton_list
-        # cùng kích thước hoặc cùng mã kiểu/màu trong ngoặc coi là 'mạnh' như
-        # trùng tên — xem _trich_kich_thuoc_xk / _ma_ngoac_khop_xk.
-        manh = [tn for tn in candidates if _manh_xk(ten_chuan, tn["ten_chuan"])
-               or _kich_thuoc_khop_xk(r.get("ten_sp"), tn["ten"])
-               or _ma_ngoac_khop_xk(r.get("ten_sp"), tn["ten"])]
-        pool = manh
-        if not pool:
-            best, best_diem = None, 0.0
-            for tn in candidates:
-                d = _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"])
-                if d > best_diem:
-                    best, best_diem = tn, d
-            if best and best_diem >= _XK_NGUONG_FUZZY:
-                pool = [best]
-        if not pool:
+        ket = _xk_gan_1_muc({"ten_sp": r.get("ten_sp"), "sl": sl_can, "tt": r.get("tt")},
+                            ton_list, hoc_ma)
+        if len(ket) == 1 and not ket[0].get("ma"):
+            # Không tìm được tên khớp HOẶC không mã nào còn đủ tồn -> để
+            # trống, KHÔNG ép gán ra tồn kho âm — giữ NGUYÊN dòng gốc.
             out.append(r)
             continue
-        ma_hoc = hoc_ma.get(ten_chuan)
-        pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
-        if not pick:
-            pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
-        if not pick:
-            # KHÔNG mã nào còn đủ tồn -> để trống, KHÔNG ép gán ra tồn kho âm.
-            out.append(r)
-            continue
-        pick["con_lai"] -= sl_can
-        rec = dict(r, ma=pick["ma"])
-        if not str(rec.get("ten_xk") or "").strip():
-            rec["ten_xk"] = pick["ten"]
-        if not str(rec.get("dvt_xk") or "").strip():
-            rec["dvt_xk"] = pick["dvt"]
-        if rec.get("gia_xk") in (None, ""):
-            rec["gia_xk"] = pick["gia"]
-        out.append(rec)
+        for k in ket:
+            rec = dict(r, ma=k.get("ma", ""), sl_kho=k.get("sl"), tt=k.get("tt", r.get("tt")),
+                       mo_ho=k.get("mo_ho", False), thieu_ton=k.get("thieu_ton", False),
+                       goi_y=k.get("goi_y", []))
+            if k.get("ma"):
+                if not str(rec.get("ten_xk") or "").strip():
+                    rec["ten_xk"] = k.get("ten_xk", "")
+                if not str(rec.get("dvt_xk") or "").strip():
+                    rec["dvt_xk"] = k.get("dvt_xk", "")
+                if rec.get("gia_xk") in (None, ""):
+                    rec["gia_xk"] = k.get("gia_xk", "")
+            out.append(rec)
     return out
 
 def _xk_cuoi_thang(ngay):
@@ -12391,20 +12394,62 @@ def _doc_them_ban_hang(wb):
                 return header, rows
     return None
 
+def _xk_gan_ma_lo_moi(ton_rows, giathanh_hien_co, items_moi, hoc_ma):
+    """Gán mã hàng (kèm tách dòng, xem _xk_gan_1_muc) cho 1 LÔ mục bán hàng
+    MỚI (items_moi — dict có ten_sp/sl/tt/..., đã sắp theo ngày tăng dần),
+    trong khi vẫn tôn trọng tồn kho đã bị các dòng GIATHANH ĐANG CÓ SẴN
+    (giathanh_hien_co — có thể do lô import trước/gán tay/Import giá thành/
+    Import tờ khai xuất khẩu) tiêu thụ mất — trừ tồn TRƯỚC cho những dòng đã
+    có mã trong giathanh_hien_co (bất kể có khớp items_moi hay không, KHÁC
+    _gen_xk_giathanh chỉ trừ tồn trước cho dòng KHỚP nguồn hiện tại) rồi mới
+    gán cho items_moi, để không vô tình gán mã đã hết tồn thật (đã bị dòng
+    khác dùng trước) — dùng khi GỘP DẦN từng lô Chi tiết bán ra mới vào bảng
+    Xuất Kho thay vì dựng lại toàn bộ mỗi lần (xem _xk_gop_them_ban_hang)."""
+    ton_list = [dict(it, con_lai=_xk_ton_an_toan(it),
+                     ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
+                for it in (ton_rows or [])]
+    ton_by_ma = {tn["ma"]: tn for tn in ton_list}
+    for r in (giathanh_hien_co or []):
+        ma = str(r.get("ma") or "").strip()
+        tn = ton_by_ma.get(ma) if ma else None
+        if not tn:
+            continue
+        sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
+        sl_da_dung = _to_num(sl_kho)
+        tn["con_lai"] -= sl_da_dung if isinstance(sl_da_dung, (int, float)) else 0
+    out = []
+    for it in items_moi:
+        out.extend(_xk_gan_1_muc(it, ton_list, hoc_ma))
+    return out
+
+
 def _xk_gop_them_ban_hang(cid, header_moi, rows_moi, on_progress=None):
     """Gộp THÊM rows_moi (đọc từ file 'Chi tiết bán hàng' bổ sung, header
     RIÊNG của file đó — xem _doc_them_ban_hang) vào nguồn 'ctbr' hiện có
-    (nhap_lieu, dùng làm nguồn cho 'Dò mã hàng tự động' ở Xuất Kho) — KHÔNG
-    thay thế, chỉ APPEND. Ánh xạ field theo TÊN cột (_xk_src_cols) ở CẢ 2
-    phía (nguồn cũ & file mới) nên 2 header khác thứ tự/khác định dạng (miễn
-    cùng ý nghĩa) vẫn gộp đúng cột, không dựa vào vị trí cột thô. Nguồn cũ
-    đang RỖNG (công ty chưa từng Import & tách dữ liệu ở Nhập Liệu) thì dùng
-    thẳng header CHUẨN (_XK_CTBR_HEADER_CHUAN).
+    (nhap_lieu, dùng làm nguồn cho Xuất Kho) — KHÔNG thay thế, chỉ APPEND.
+    Ánh xạ field theo TÊN cột (_xk_src_cols) ở CẢ 2 phía (nguồn cũ & file
+    mới) nên 2 header khác thứ tự/khác định dạng (miễn cùng ý nghĩa) vẫn
+    gộp đúng cột, không dựa vào vị trí cột thô. Nguồn cũ đang RỖNG (công ty
+    chưa từng Import & tách dữ liệu ở Nhập Liệu) thì dùng thẳng header
+    CHUẨN (_XK_CTBR_HEADER_CHUAN).
 
     Bỏ qua dòng TRÙNG Y HỆT (Số HĐ + Tên hàng chuẩn hoá + Số lượng + Thành
     tiền đều khớp) với dòng đã có sẵn (kể cả dòng vừa thêm trong CÙNG lần
     import này) — tránh vô tình import lại cùng 1 file/dòng 2 lần làm tăng ảo
     doanh số bán/số lượng cần xuất kho.
+
+    Đồng thời tự GÁN MÃ HÀNG (kèm tách dòng, xem _xk_gan_ma_lo_moi) NGAY cho
+    đúng phần rows_them vừa thêm rồi APPEND vào CUỐI bảng Xuất Kho
+    (data['xk_giathanh']) — KHÔNG đụng tới các dòng đã có sẵn trong đó
+    (giữ nguyên mã đã gán/dữ liệu đã Import giá thành/Import tờ khai xuất
+    khẩu/tự Xoá dữ liệu trước đó). Theo đúng yêu cầu: (1) không import gì
+    thêm thì Xuất Kho vẫn xử lý đúng dữ liệu đã có từ đầu; (2) đã Xoá dữ
+    liệu Xuất Kho rồi import dữ liệu mới thì KHÔNG bị lần gộp Chi tiết bán
+    ra sau đó lôi ngược dữ liệu cũ về; (3) thêm dữ liệu (không xoá) thì dữ
+    liệu mới được thêm vào CUỐI bảng Xuất Kho, sẵn sàng để 'Dò mã hàng tự
+    động' xử lý tiếp phần còn thiếu (mã chưa dò được do lúc import chưa đủ
+    Sheet TON, ví dụ) — xem xk_tao_giathanh (không còn tự rebuild lại toàn
+    bộ từ ctbr mỗi lần bấm nữa, chỉ xử lý ĐÚNG dữ liệu đang có trong bảng).
 
     on_progress(i, n) (tuỳ chọn): callback báo tiến độ khi đối chiếu trùng
     từng dòng rows_moi — dữ liệu Nhập Liệu nhiều dòng có thể mất chút thời
@@ -12468,6 +12513,33 @@ def _xk_gop_them_ban_hang(cid, header_moi, rows_moi, on_progress=None):
          json.dumps(rows_ra, ensure_ascii=False), datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
+
+    if rows_them:
+        items_moi = []
+        for r in rows_them:
+            ten = str(gv(r, col_ra["ten"]) or "").strip()
+            items_moi.append({
+                "khhdon": str(gv(r, col_ra["kh"]) or ""), "sohd": str(gv(r, col_ra["sohd"]) or ""),
+                "ngay": str(gv(r, col_ra["ngay"]) or ""), "ten_sp": ten,
+                "dvt": str(gv(r, col_ra["dvt"]) or ""), "sl": _to_num(gv(r, col_ra["sl"])) or 0,
+                "dgia": _to_num(gv(r, col_ra["dgia"])), "tt": _to_num(gv(r, col_ra["tt"])),
+            })
+        items_moi.sort(key=lambda it: _xk_key_ngay(it["ngay"]))
+        data_cty = _doc_du_lieu_cty(cid)
+        giathanh_cu = data_cty.get("xk_giathanh") or []
+        ton_rows = data_cty.get("xk_ton") or []
+        hoc_ma = data_cty.get("xk_hoc_ma") or {}
+        if ton_rows:
+            moi_gt = _xk_gan_ma_lo_moi(ton_rows, giathanh_cu, items_moi, hoc_ma)
+        else:
+            # Chưa import Sheet TON -> chưa có gì để dò, thêm nguyên các
+            # dòng CHƯA gán mã vào cuối bảng, chờ 'Dò mã hàng tự động' xử lý
+            # sau khi có Sheet TON.
+            moi_gt = [dict(it, ma="", ten_xk="", dvt_xk="", gia_xk="", goi_y=[],
+                          mo_ho=False, thieu_ton=False) for it in items_moi]
+        data_cty["xk_giathanh"] = giathanh_cu + moi_gt
+        _ghi_du_lieu_cty(cid, data_cty)
+
     return len(rows_them), so_trung, len(rows_ra)
 
 
@@ -12648,19 +12720,29 @@ _XK_DOMA_TIEN_DO = {}
 
 @app.post("/api/xk/tao-giathanh/{cid}")
 def xk_tao_giathanh(cid: int):
-    """Dò mã hàng tự động cho từng dòng, dựa theo TON đã import. Nếu đã có
-    dữ liệu 'Chi tiết BÁN RA' (Nhập Liệu) thì dựng lại GIATHANH từ đó như
-    trước. Nếu CHƯA có Chi tiết BÁN RA nhưng GIATHANH đã có sẵn dữ liệu từ
-    nguồn khác (vd Import tờ khai xuất khẩu) thì dò mã TRỰC TIẾP trên dữ
-    liệu đang có, không bắt buộc phải có Chi tiết BÁN RA — cứ có dữ liệu
-    trong phần mềm là xử lý. Áp lại các lựa chọn đã HỌC (từ lần người dùng
-    tự gắn tay trước đó) cho những tên hàng có nhiều mã trùng tên (vd 1 mã do
-    phần mềm sinh + 1 mã cũ đã có sẵn trong MISA). GIỮ NGUYÊN mã đã gán cho
-    đúng dòng hóa đơn nếu GIATHANH đang có sẵn (gán tay/Import giá thành) —
-    bấm lại nút này không xóa mất phần đã làm trước đó."""
+    """Dò mã hàng tự động — CHỈ xử lý ĐÚNG dữ liệu ĐANG CÓ trong bảng Xuất
+    Kho (GIATHANH), KHÔNG còn tự rebuild/gộp lại từ 'Chi tiết BÁN RA' (ctbr,
+    Nhập Liệu) mỗi lần bấm nữa (dữ liệu ctbr mới đã được tự gán mã + thêm
+    vào CUỐI bảng Xuất Kho ngay lúc Import & Lưu/'➕ Import thêm dữ liệu' rồi
+    — xem _xk_gop_them_ban_hang/_xk_gan_ma_lo_moi). Theo đúng 3 yêu cầu:
+    (1) không import gì thêm thì vẫn xử lý đúng dữ liệu đã có sẵn từ đầu
+    như trước giờ; (2) đã Xoá dữ liệu Xuất Kho rồi import dữ liệu mới (vd
+    '📥 Import giá thành') thì CHỈ xử lý đúng dữ liệu mới đó, KHÔNG tự động
+    lôi lại dữ liệu cũ đã import từ Nhập Liệu; (3) thêm dữ liệu (không xoá)
+    thì phần mềm đã tự thêm vào cuối bảng lúc import, bấm nút này chỉ để
+    gán mã cho phần CÒN THIẾU (dòng nào lúc import chưa đủ Sheet TON/chưa
+    khớp được tên).
+
+    Tương thích ngược & bootstrap: nếu GIATHANH đang HOÀN TOÀN RỖNG (công ty
+    CHƯA từng dùng Xuất Kho, hoặc VỪA Xoá dữ liệu và CHƯA import gì mới) mà
+    'Chi tiết BÁN RA' (ctbr) đã có sẵn dữ liệu (từ Import & Lưu Bảng kê Đầu
+    ra trước đây) — nạp TOÀN BỘ ctbr vào GIATHANH 1 LẦN DUY NHẤT trước khi
+    gán mã, coi như 'lấy dữ liệu import từ đầu' đúng yêu cầu (1). Chỉ gán
+    thêm Mã hàng kho cho dòng CHƯA có mã — GIỮ NGUYÊN mã đã gán/dữ liệu đã
+    Import giá thành/Import tờ khai xuất khẩu trước đó, bấm lại nút này
+    không xoá mất phần đã làm."""
     data = _doc_du_lieu_cty(cid)
     ton_rows = data.get("xk_ton") or []
-    src = nhap_lieu_get(cid, "ctbr")
     if not ton_rows:
         raise HTTPException(400, "Chưa import Sheet TON (Tổng hợp tồn kho)")
     hoc_ma = data.get("xk_hoc_ma") or {}
@@ -12670,19 +12752,16 @@ def xk_tao_giathanh(cid: int):
     def _bao_tien_do(i, n):
         _XK_DOMA_TIEN_DO[cid] = {"da_xu_ly": i, "tong": n, "dang_chay": True}
 
-    try:
+    if not giathanh_cu:
+        src = nhap_lieu_get(cid, "ctbr")
         if src.get("rows"):
-            # giu_ngoai_ctbr=False: KHÔNG cộng dồn dòng của KỲ CŨ không còn khớp
-            # 'Chi tiết BÁN RA' hiện tại — "Dò mã hàng tự động" phải phản ánh
-            # ĐÚNG dữ liệu Nhập Liệu ĐANG import, không giữ lại dữ liệu tháng/kỳ
-            # trước đã import khác (xem giải thích ở _xk_hop_nhat_giathanh).
-            giathanh = _xk_hop_nhat_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
-                                             hoc_ma, giathanh_cu, giu_ngoai_ctbr=False,
-                                             on_progress=_bao_tien_do)
-        elif giathanh_cu:
-            giathanh = _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma, on_progress=_bao_tien_do)
-        else:
-            raise HTTPException(400, "Chưa có dữ liệu gì để dò mã — hãy Import 'Chi tiết BÁN RA' (Nhập Liệu) hoặc Import tờ khai xuất khẩu trước")
+            giathanh_cu = _gen_xk_giathanh(ton_rows, src.get("header") or [], src.get("rows") or [],
+                                           hoc_ma, [], on_progress=_bao_tien_do)
+    if not giathanh_cu:
+        _XK_DOMA_TIEN_DO[cid]["dang_chay"] = False
+        raise HTTPException(400, "Chưa có dữ liệu gì để dò mã — hãy Import 'Chi tiết BÁN RA' (Nhập Liệu) hoặc Import tờ khai xuất khẩu trước")
+    try:
+        giathanh = _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma, on_progress=_bao_tien_do)
     finally:
         if cid in _XK_DOMA_TIEN_DO:
             _XK_DOMA_TIEN_DO[cid]["dang_chay"] = False
