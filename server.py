@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.105"
+APP_BUILD = "2026-08-31.106"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14048,6 +14048,36 @@ def _chuan_shd(v):
     s = str(v or "").strip()
     return (s.lstrip("0") or "0") if s else ""
 
+_MISA_GIO_GHI_NHAP = 10   # xem _misa_gio_nhap_co_dinh
+
+def _misa_gio_nhap_co_dinh(dt):
+    """Gán GIỜ CỐ ĐỊNH (mặc định 10:00:00) cho ngày chứng từ Mua hàng/Nhập
+    kho khi ghi thẳng vào MISA (_misa_ghi_mua_hang/_misa_ghi_mua_hang_dv) —
+    tránh để giờ mặc định là NỬA ĐÊM (00:00:00, do ngày lấy từ dữ liệu chỉ có
+    phần NGÀY, không có giờ) hoặc GIỜ THẬT lúc script chạy (nhánh rơi về
+    'now' khi không đọc được ngày).
+
+    Xác nhận đúng qua báo cáo thật + ảnh chụp màn hình MISA của người dùng:
+    chứng từ "Mua hàng nhập kho" do phần mềm ghi (CHƯA GHI SỔ) khi người
+    dùng bấm "Ghi sổ" trong MISA thì MISA hiện hộp thoại "Điều chỉnh thời
+    gian nhập/xuất kho" — GIỜ hiển thị trong hộp thoại đó KHÔNG BẢO TOÀN giờ
+    phần mềm đã ghi, mà lấy giờ THẬT lúc người dùng bấm "Ghi sổ" trong MISA.
+    Vì chứng từ "Xuất kho bán hàng" (file Excel người dùng tự import vào
+    MISA, xem XUAT_KHO_HEADERS — không có cột giờ) thường được ghi sổ VÀO
+    CUỐI NGÀY (người dùng gộp xuất kho cả tháng vào cuối tháng), trong khi
+    chứng từ Nhập kho có thể được ghi sổ BẤT KỲ LÚC NÀO trong ngày (kể cả
+    SAU thời điểm ghi sổ Xuất kho, dù về nghiệp vụ hàng phải nhập trước) —
+    khiến MISA tính tồn kho lúc ghi sổ Xuất kho KHÔNG thấy phần Nhập kho đó,
+    từ chối ghi sổ dù tồn thực tế đủ (đã xác nhận qua ảnh MISA: 'Số lượng
+    tồn trong kho... là: 122,00' đúng bằng tồn ĐẦU KỲ, chưa cộng phần Nhập
+    kho chưa ghi sổ). Đặt SẴN giờ 10:00:00 (buổi sáng, chắc chắn trước cuối
+    ngày) cho chứng từ Nhập kho khi GHI vào MISA — theo yêu cầu người dùng,
+    đã tự kiểm chứng trên MISA thật là đặt giờ cố định buổi sáng giúp tránh
+    đúng tình huống này."""
+    if dt is None:
+        return dt
+    return dt.replace(hour=_MISA_GIO_GHI_NHAP, minute=0, second=0, microsecond=0)
+
 def _ky_hieu_chac_chan_khac(kh_moi, kh_da_co):
     """True CHỈ khi CẢ 2 Ký hiệu HĐ đều CÓ GIÁ TRỊ THẬT (không rỗng) và
     KHÁC NHAU — đây là dấu hiệu DUY NHẤT đủ tin cậy để kết luận 2 hóa đơn
@@ -15299,7 +15329,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             # dữ liệu là hóa đơn năm 2025 nhưng ghi nhầm thành ngày hôm nay) -
             # đánh dấu lại để báo rõ trong kết quả.
             ngay_loi = ngay_dt is None
-            ngay_dt = ngay_dt or now
+            ngay_dt = _misa_gio_nhap_co_dinh(ngay_dt or now)
             co_tk = str(first[cfg["co"]] or "").strip()
             # ƯU TIÊN dò RefType theo ĐÚNG loại (nk/kqk/dv) + phương thức
             # thanh toán của TỪNG CHỨNG TỪ (_misa_pu_reftype đã phân biệt
@@ -16255,7 +16285,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 except Exception:
                     pass
             ngay_loi = ngay_dt is None
-            ngay_dt = ngay_dt or now
+            ngay_dt = _misa_gio_nhap_co_dinh(ngay_dt or now)
             co_tk = str(first[cfg["co"]] or "").strip()
             # ƯU TIÊN dò RefType theo ĐÚNG phương thức thanh toán của TỪNG
             # chứng từ (xem giải thích ở nhánh Mua hàng nhập kho/không qua
