@@ -919,7 +919,8 @@
             <div style="font-size:13px;color:var(--muted);margin-top:4px">Kết nối thẳng vào cơ sở dữ liệu MISA để import Danh mục Hàng hóa/NVL/CCDC trực tiếp — không cần thao tác Excel.</div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối CSDL MISA (thử nghiệm)</button>
+            <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="misaSqlMo()">🗄 Kết nối dữ liệu MISA</button>
+            <span id="misaSqlBadge" style="font-size:15px;font-weight:800;align-self:center"></span>
             <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongMo()" title="Chạy lần lượt: 1) Danh mục KH/NCC 2) Bảng kê Đầu ra (Bán hàng) 3) Danh mục Hàng hóa/NVL/TSCĐ/CCDC 4) Nhập kho/Không qua kho/Dịch vụ 5) Ghi tăng CCDC/TSCĐ + Phân bổ chi phí CCDC + Tính khấu hao TSCĐ tự động 6) Tờ khai GTGT + Khấu trừ tự động (bước cuối, hạch toán khấu trừ để CHƯA ghi sổ) — bước nào không có dữ liệu tự bỏ qua; chứng từ ĐÃ CÓ trong MISA (trùng dữ liệu đang import) cũng tự bỏ qua, KHÔNG ghi đè, chỉ ghi thêm chứng từ chưa có">🚀 Import tự động toàn bộ vào MISA</button>
           </div>
         </div>
@@ -3984,6 +3985,23 @@ async function capNhatBadge(){
       if(el)el.innerHTML=(d.rows&&d.rows.length)?`<b style="color:#1f6b4a">✓ Đã lưu ${d.rows.length} dòng</b>`:(loai==='in'?'Hóa đơn mua vào':'Hóa đơn bán ra');
     }catch{}
   }
+  misaSqlCapNhatBadge();
+}
+// Chấm tròn ✓ xanh/✕ đỏ cạnh nút "Kết nối dữ liệu MISA" — "đã kết nối" = đã
+// lưu cấu hình ĐỦ để tự kết nối lại (server + database + có mật khẩu/dùng
+// Windows Authentication), khớp đúng điều kiện misaSqlMo() dùng để tự động
+// kết nối lại khi mở modal — KHÔNG thử kết nối SQL Server thật mỗi lần vào
+// màn Nhập Liệu (tốn thời gian/dễ lỗi mạng khi chỉ cần xem trạng thái đã lưu).
+async function misaSqlCapNhatBadge(){
+  const el=document.getElementById('misaSqlBadge');
+  if(!el||!current)return;
+  try{
+    const d=await api(`/api/misa-sql/trang-thai/${current}`);
+    const c=d.cfg||{};
+    const daKetNoi=!!(c.server&&c.database&&(c.trusted||c.co_mat_khau));
+    el.innerHTML=daKetNoi?'<span style="color:#1f6b4a" title="Đã lưu cấu hình kết nối MISA">✓</span>'
+                         :'<span style="color:#b91c1c" title="Chưa kết nối dữ liệu MISA">✕</span>';
+  }catch{el.innerHTML='';}
 }
 async function nhapLieuImportChung(input){
   const files=input.files;
@@ -4383,6 +4401,7 @@ async function misaSqlLoadBang(){
   msqlCfgDb=db;
   try{
     await misaSqlLuu();                 // lưu database đã chọn để lần sau tự vào
+    misaSqlCapNhatBadge();              // cập nhật ✓/✕ ngay, không cần đóng mở lại modal
     const d=await api(`/api/misa-sql/bang/${current}?database=${encodeURIComponent(db)}`,{method:'POST'});
     msqlBangCache=d.bang||[];
     misaSqlVeBang();
