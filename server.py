@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.104"
+APP_BUILD = "2026-08-31.105"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11371,6 +11371,19 @@ def _xk_ton_an_toan(it):
         return _to_num(v) or 0
     return _to_num(it.get("ton")) or 0
 
+def _xk_dau_ky_an_toan(it):
+    """Tồn ĐẦU KỲ 'an toàn' (cùng nguyên tắc _xk_ton_an_toan, áp cho cột Đầu
+    kỳ thay vì Cuối kỳ) — dùng RIÊNG để CẢNH BÁO (không dùng để chặn xuất/gán
+    mã như _xk_ton_an_toan, xem _xk_kiem_tra_vuot_ton): số lượng chắc chắn
+    ĐÃ GHI SỔ trong MISA TRƯỚC kỳ này, không phụ thuộc việc chứng từ Nhập
+    kho trong kỳ đã được ghi sổ hay chưa — xác nhận qua báo cáo thật: MISA
+    từ chối ghi sổ Xuất kho vì chỉ thấy đúng số Đầu kỳ khả dụng dù Cuối kỳ
+    báo cáo (đã cộng cả Nhập kho trong kỳ) vẫn còn thừa nhiều."""
+    v = it.get("dau_ky_kho_min")
+    if v not in (None, ""):
+        return _to_num(v) or 0
+    return _to_num(it.get("dau_ky")) or 0
+
 def _doc_file_ton_kho(wb):
     """Đọc file 'Tổng hợp tồn kho' (báo cáo MISA, tiêu đề gộp ô 2 dòng: nhóm
     Đầu kỳ/Nhập kho/Xuất kho/Cuối kỳ ở dòng trên, Số lượng/Giá trị ở dòng dưới)
@@ -11421,6 +11434,18 @@ def _doc_file_ton_kho(wb):
     i_dvt = next((i for i, v in enumerate(top) if v == "dvt" or "don vi tinh" in v), -1)
     i_sl = find_combo("cuoi ky", "so luong")
     i_gt = find_combo("cuoi ky", "gia tri")
+    # Cột "Đầu kỳ - Số lượng" — dùng để CẢNH BÁO RIÊNG (xem _xk_dau_ky_an_toan/
+    # _xk_kiem_tra_vuot_ton): tồn "Cuối kỳ" đã CỘNG DỒN cả phần "Nhập kho"
+    # trong kỳ, nhưng nếu chứng từ Nhập kho đó CHƯA được ghi sổ trong MISA
+    # tại thời điểm ghi sổ "Xuất kho" thì MISA CHỈ tính đúng số ĐÃ GHI SỔ
+    # trước đó (thường là tồn Đầu kỳ) — xác nhận đúng qua báo cáo thật: MISA
+    # từ chối ghi sổ "XK T7/2026" vì mã HH00143-8 "Số lượng tồn trong kho...
+    # là: 122,00" — ĐÚNG BẰNG tồn Đầu kỳ trên báo cáo (122), trong khi tồn
+    # Cuối kỳ báo cáo tới 902 (122 đầu kỳ + 780 nhập trong kỳ) — kiểm tra
+    # theo "Cuối kỳ" (vốn dùng đúng cho việc KHÔNG gán vượt quá tổng tồn vật
+    # lý CẢ KỲ) không bắt được rủi ro này vì 537 < 902 vẫn "hợp lệ" theo nghĩa
+    # đó, nhưng MISA lại từ chối vì phần Nhập kho chưa kịp ghi sổ.
+    i_sl_dk = find_combo("dau ky", "so luong")
     if i_ma < 0 or i_ten < 0:
         return [], []
     gop = {}
@@ -11460,17 +11485,23 @@ def _doc_file_ton_kho(wb):
         gt = _to_num(ws.cell(r, i_gt + 1).value) if i_gt >= 0 else 0
         sl = sl if isinstance(sl, (int, float)) else 0
         gt = gt if isinstance(gt, (int, float)) else 0
+        sl_dk = _to_num(ws.cell(r, i_sl_dk + 1).value) if i_sl_dk >= 0 else 0
+        sl_dk = sl_dk if isinstance(sl_dk, (int, float)) else 0
         if ma in gop:
             gop[ma]["ton"] += sl
             gop[ma]["gt"] += gt
+            gop[ma]["dau_ky"] += sl_dk
             gop[ma]["kho_qty"][kho_hien_tai] = gop[ma]["kho_qty"].get(kho_hien_tai, 0) + sl
+            gop[ma]["dau_ky_qty"][kho_hien_tai] = gop[ma]["dau_ky_qty"].get(kho_hien_tai, 0) + sl_dk
         else:
-            gop[ma] = {"ma": ma, "ten": ten, "dvt": dvt, "ton": sl, "gt": gt,
-                      "kho_qty": {kho_hien_tai: sl} if kho_hien_tai else {}}
+            gop[ma] = {"ma": ma, "ten": ten, "dvt": dvt, "ton": sl, "gt": gt, "dau_ky": sl_dk,
+                      "kho_qty": {kho_hien_tai: sl} if kho_hien_tai else {},
+                      "dau_ky_qty": {kho_hien_tai: sl_dk} if kho_hien_tai else {}}
     out = []
     for it in gop.values():
         gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
         kho_qty = it["kho_qty"]
+        dau_ky_qty = it["dau_ky_qty"]
         # ton_kho_min: số lượng KHẢ DỤNG THẬT SỰ AN TOÀN để đối chiếu vượt tồn
         # — mã CHỈ ở 1 kho thì bằng chính "ton" (không khác gì trước); mã RẢI
         # RÁC nhiều kho thì lấy kho ÍT NHẤT (không biết chắc "Xuất kho bán
@@ -11482,11 +11513,15 @@ def _doc_file_ton_kho(wb):
         # phần mềm cho gán tới 171 > 165 khả dụng thật ở kho đang dùng để
         # xuất bán, không hề cảnh báo).
         ton_kho_min = min(kho_qty.values()) if kho_qty else it["ton"]
+        # dau_ky_kho_min: cùng nguyên tắc ton_kho_min, áp cho tồn ĐẦU KỲ (xem
+        # _xk_dau_ky_an_toan) — mã rải rác nhiều kho lấy kho ÍT NHẤT.
+        dau_ky_kho_min = min(dau_ky_qty.values()) if dau_ky_qty else it["dau_ky"]
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
                     "ton": it["ton"], "gia": gia,
                     "kho": next(iter(kho_qty)) if len(kho_qty) == 1 else None,
                     "kho_ro": len(kho_qty) <= 1,
-                    "ton_kho_min": ton_kho_min})
+                    "ton_kho_min": ton_kho_min,
+                    "dau_ky": it["dau_ky"], "dau_ky_kho_min": dau_ky_kho_min})
     return out, danh_sach_kho
 
 def _xk_src_cols(header):
@@ -12131,6 +12166,50 @@ def _xk_kiem_tra_vuot_ton(ton_rows, giathanh_rows):
     vuot.sort(key=lambda x: -x["vuot"])
     return vuot
 
+def _xk_canh_bao_dau_ky(ton_rows, giathanh_rows):
+    """CẢNH BÁO (KHÔNG chặn xuất, khác _xk_kiem_tra_vuot_ton) các mã hàng đã
+    gán VƯỢT tồn ĐẦU KỲ (dù vẫn TRONG tồn Cuối kỳ, nên không bị _xk_kiem_tra_
+    vuot_ton chặn) — MISA tính tồn khả dụng THEO THỜI ĐIỂM ghi sổ, nên nếu
+    chứng từ Nhập kho của kỳ này CHƯA được ghi sổ trong MISA lúc ghi sổ
+    "Xuất kho", phần Nhập kho đó KHÔNG được tính vào tồn khả dụng — MISA có
+    thể từ chối ghi sổ dù tổng tồn CẢ KỲ (đầu kỳ + nhập kho) vẫn còn đủ.
+
+    Xác nhận đúng qua báo cáo thật người dùng gửi: MISA từ chối ghi sổ "XK
+    T7/2026" vì mã HH00143-8 "Số lượng tồn trong kho... là: 122,00" — ĐÚNG
+    BẰNG tồn Đầu kỳ (122) trên báo cáo 'Tổng hợp tồn kho', trong khi Cuối kỳ
+    báo cáo tới 902 (122 đầu kỳ + 780 nhập trong kỳ, chưa chắc đã ghi sổ) —
+    _xk_kiem_tra_vuot_ton (so với Cuối kỳ) không bắt được rủi ro này vì số
+    đã gán (537) < 902 vẫn "hợp lệ" theo nghĩa tổng tồn cả kỳ.
+
+    CHỈ mang tính CẢNH BÁO/nhắc nhở (không đủ dữ liệu để biết CHẮC CHẮN
+    chứng từ Nhập kho nào đã ghi sổ ở MISA hay chưa — đó là trạng thái sống
+    bên trong MISA, file Excel tồn kho không thể hiện) — không chặn xuất
+    file như _xk_kiem_tra_vuot_ton, để tránh chặn nhầm những trường hợp
+    Nhập kho ĐÃ ghi sổ đầy đủ (bình thường mỗi tháng bán ra vẫn vượt tồn
+    đầu kỳ, được bù bằng hàng nhập trong tháng — không phải lỗi)."""
+    ton_map = {str(t.get("ma") or "").strip(): (_xk_ton_an_toan(t), _xk_dau_ky_an_toan(t))
+               for t in (ton_rows or [])}
+    da_dung = {}
+    for r in (giathanh_rows or []):
+        ma = str(r.get("ma") or "").strip()
+        if not ma:
+            continue
+        sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
+        sl_n = _to_num(sl_kho)
+        da_dung[ma] = da_dung.get(ma, 0) + (sl_n if isinstance(sl_n, (int, float)) else 0)
+    canh_bao = []
+    for ma, dung in da_dung.items():
+        if ma not in ton_map:
+            continue
+        ton, dau_ky = ton_map[ma]
+        if dung > ton:
+            continue    # đã bị _xk_kiem_tra_vuot_ton chặn hẳn, khỏi cảnh báo trùng
+        if dung > dau_ky:
+            canh_bao.append({"ma": ma, "da_gan": dung, "dau_ky": dau_ky,
+                             "vuot_dau_ky": round(dung - dau_ky, 3)})
+    canh_bao.sort(key=lambda x: -x["vuot_dau_ky"])
+    return canh_bao
+
 def _gen_xuat_kho_rows(giathanh_rows, ton_rows=None):
     """Từ các dòng GIATHANH đã gắn mã (bỏ dòng chưa gắn) -> mảng dòng form MISA
     'Xuất kho'. Ngày hạch toán/chứng từ = CUỐI THÁNG của hoá đơn cuối cùng (mới
@@ -12659,7 +12738,15 @@ def xk_export(cid: int):
     CHẶN xuất nếu có mã hàng bị gán VƯỢT tồn kho thật — đã xảy ra thật: MISA
     từ chối ghi sổ NGUYÊN CẢ chứng từ chỉ vì 1 vài mã bị vượt (dữ liệu có thể
     đã bị gán vượt tồn từ nhiều đợt import/dò mã/gán tay CỘNG DỒN lại, dù mỗi
-    thao tác lúc gán tưởng như hợp lệ riêng lẻ) — xem _xk_kiem_tra_vuot_ton."""
+    thao tác lúc gán tưởng như hợp lệ riêng lẻ) — xem _xk_kiem_tra_vuot_ton.
+
+    NGOÀI RA (không chặn, chỉ cảnh báo — xem _xk_canh_bao_dau_ky): mã hàng
+    vượt tồn ĐẦU KỲ dù vẫn trong tồn Cuối kỳ (đã cộng cả Nhập kho trong kỳ)
+    vẫn có thể bị MISA từ chối ghi sổ nếu chứng từ Nhập kho đó CHƯA được ghi
+    sổ trong MISA tại thời điểm ghi sổ Xuất kho — xác nhận qua báo cáo thật:
+    MISA từ chối ghi sổ vì mã HH00143-8 chỉ còn 122 khả dụng (đúng bằng tồn
+    Đầu kỳ) dù Cuối kỳ báo cáo tới 902, và _xk_kiem_tra_vuot_ton (so Cuối kỳ)
+    không bắt được vì số đã gán (537) < 902."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -12715,8 +12802,25 @@ def xk_export(cid: int):
                 pass
     tong = len(giathanh)
     so_bo_qua = tong - len(out)
+    # Cảnh báo RIÊNG (không chặn xuất, khác 'vuot' ở trên) các mã hàng vượt
+    # tồn ĐẦU KỲ dù vẫn trong tồn Cuối kỳ — xem _xk_canh_bao_dau_ky: rủi ro
+    # MISA từ chối ghi sổ nếu Nhập kho trong kỳ chưa kịp ghi sổ, dù tổng tồn
+    # cả kỳ vẫn đủ (đã xác nhận qua báo cáo thật người dùng gửi).
+    canh_bao_dau_ky = _xk_canh_bao_dau_ky(data.get("xk_ton") or [], giathanh)
+    if canh_bao_dau_ky:
+        vi_du = "; ".join(f"{x['ma']} (đã gán {x['da_gan']}, tồn đầu kỳ {x['dau_ky']})"
+                          for x in canh_bao_dau_ky[:5])
+        them = f" và {len(canh_bao_dau_ky) - 5} mã khác" if len(canh_bao_dau_ky) > 5 else ""
+        _luu_loi_tra_cuu(
+            cid, f"⚠ {len(canh_bao_dau_ky)} mã hàng trong file Xuất kho vừa tạo có số lượng gán VƯỢT "
+                 f"tồn ĐẦU KỲ (dù vẫn trong tồn cuối kỳ đã cộng cả nhập kho trong kỳ) — MISA tính tồn "
+                 f"khả dụng THEO THỜI ĐIỂM ghi sổ, nên nếu chứng từ Nhập kho của kỳ này CHƯA được ghi "
+                 f"sổ trong MISA, MISA có thể TỪ CHỐI ghi sổ Xuất kho dù tổng tồn cả kỳ vẫn đủ. Hãy "
+                 f"đảm bảo TẤT CẢ chứng từ Nhập kho trong kỳ đã được ghi sổ TRƯỚC khi ghi sổ file Xuất "
+                 f"kho này. Ví dụ: {vi_du}{them}.")
     return _resp_xuat(path, fname,
-                      {"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua)})
+                      {"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua),
+                       "X-So-Canh-Bao-Dau-Ky": str(len(canh_bao_dau_ky))})
 
 @app.post("/api/xk/export-giathanh/{cid}")
 def xk_export_giathanh(cid: int):
