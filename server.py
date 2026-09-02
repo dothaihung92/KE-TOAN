@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.110"
+APP_BUILD = "2026-08-31.111"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26019,6 +26019,43 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     # chung với _misa_ghi_mua_hang/_misa_ghi_mua_hang_dv, không định nghĩa
     # lại ở đây nữa.
 
+    # KỲ ĐANG LÀM VIỆC — lấy khung ngày [min,max] từ CHÍNH Bảng kê Đầu ra/Đầu
+    # vào ĐÃ LƯU (nhap_lieu 'out'/'in', dữ liệu người dùng vừa tra cứu/import
+    # cho đợt HIỆN TẠI), dùng để LỌC BỚT bảng "invoices" trước khi đối chiếu —
+    # bảng đó TÍCH LŨY mọi lần tra cứu từ trước tới nay (không tự xóa dữ liệu
+    # kỳ cũ), nếu không lọc thì hóa đơn của các kỳ KHÔNG LIÊN QUAN cũng bị gộp
+    # chung vào đối chiếu — xác nhận đúng qua phản hồi người dùng: import dữ
+    # liệu quý 2/2026 (Bảng kê Đầu vào lưu 534 dòng, đúng tháng 4-6/2026) mà
+    # "Đối chiếu tổng giá trị & VAT" lại hiện hàng loạt hóa đơn ngày 2025-07
+    # đến 2025-09 — kiểm tra chéo với chính Bảng kê Đầu vào Q2/2026 vừa lưu
+    # thì HOÀN TOÀN không có các MST/Số HĐ đó, chứng tỏ đó là dữ liệu tra cứu
+    # CŨ còn sót lại trong bảng invoices từ đợt trước, không phải kỳ hiện tại
+    # đang làm việc. CHỈ lọc khi Bảng kê ĐÃ LƯU có dữ liệu — nếu chưa từng lưu
+    # (rỗng) thì GIỮ NGUYÊN hành vi cũ (dùng toàn bộ invoices, an toàn cho
+    # người dùng chưa qua bước Bảng kê Đầu ra/Đầu vào).
+    def _khung_ngay_nhap_lieu(loai_nl):
+        header, nl_rows = _doc_nhap_lieu(cid, loai_nl)
+        if not nl_rows:
+            return None, None
+        hlow = [str(h or "").strip().lower() for h in header]
+        i_ngay = next((i for i, h in enumerate(hlow) if h in ("ngày", "ngay")), -1)
+        if i_ngay < 0:
+            return None, None
+        lo = hi = None
+        for r_nl in nl_rows:
+            if i_ngay >= len(r_nl):
+                continue
+            dt = _misa_doc_ngay(str(r_nl[i_ngay] or ""))
+            if not dt:
+                continue
+            if lo is None or dt < lo:
+                lo = dt
+            if hi is None or dt > hi:
+                hi = dt
+        return lo, hi
+
+    ky_lam_viec = {"sold": _khung_ngay_nhap_lieu("out"), "purchase": _khung_ngay_nhap_lieu("in")}
+
     # sold: nhóm theo (MST, Số hóa đơn) -> DANH SÁCH entry (1 entry/Ký hiệu
     # khác nhau trong group) — xem docstring. purchase: giữ khóa phẳng
     # (MST, Số hóa đơn) như cũ (MISA chưa ghi InvSeries cho mua hàng).
@@ -26058,6 +26095,11 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         if mst_k.isdigit() and len(mst_k) == 12:
             mst_k = ""
         ngay_dt_ng = _misa_doc_ngay((r["tdlap"] or "").split("T")[0])
+        # Bỏ qua hóa đơn NẰM NGOÀI kỳ Bảng kê ĐÃ LƯU (xem ky_lam_viec ở trên)
+        # — không thuộc đợt đang làm việc, không tính vào đối chiếu.
+        ky_lo, ky_hi = ky_lam_viec[loai]
+        if ky_lo is not None and ky_hi is not None and ngay_dt_ng and not (ky_lo <= ngay_dt_ng <= ky_hi):
+            continue
         if ngay_dt_ng:
             lo, hi = pham_vi_ngay[loai]
             if lo is None or ngay_dt_ng < lo:
