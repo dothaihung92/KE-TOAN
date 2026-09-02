@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.115"
+APP_BUILD = "2026-08-31.116"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15223,7 +15223,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             toàn, coi như hiện rõ, giữ hành vi cũ).
 
             la_cua_pm (chứng từ DO CHÍNH phần mềm tạo, an toàn để tự xóa/ghi
-            lại) nhận diện qua 2 dấu hiệu (OR, chỉ cần 1 đúng): (1)
+            lại) nhận diện qua 3 dấu hiệu (OR, chỉ cần 1 đúng): (1)
             CustomField10=_PM_MARK — đánh dấu chuẩn hiện tại; (2) "Số chứng
             từ" (RefNoManagement) của PUVoucher liên kết TRÙNG Y HỆT với "Số
             chứng từ" phần mềm VỪA tính lại cho ĐÚNG hóa đơn (MST, Số HĐ)
@@ -15233,20 +15233,35 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             mất khi MISA/người dùng sửa) nhưng "Số chứng từ" vẫn đúng NGUYÊN
             VĂN công thức phần mềm tự sinh (tiền tố+năm+MST NCC[+hậu tố]) —
             không có lý do nào 1 người TỰ TAY gõ trùng khớp CHÍNH XÁC công
-            thức này (đặc biệt là dán đúng MST 10 số của NCC vào giữa),
-            nên coi là bằng chứng đủ tin cậy để xác nhận nguồn gốc phần mềm."""
+            thức này (đặc biệt là dán đúng MST 10 số của NCC vào giữa), nên
+            coi là bằng chứng đủ tin cậy để xác nhận nguồn gốc phần mềm; (3)
+            PUInvoice hoàn toàn KHÔNG liên kết được với PUVoucher nào (không
+            có dòng PUInvoiceDetail nào trỏ tới, hoặc PUVoucherRefID NULL) —
+            xác nhận đúng qua báo cáo thật: bấm "Ghi đè" vẫn báo "Đã ghi 0
+            chứng từ" dù đã nhận diện đúng RefNoManagement ở lần sửa trước —
+            hóa ra 1 số bản ghi lỗi CÒN NẶNG HƠN (không chỉ ẩn mà HOÀN TOÀN
+            không có chứng từ Mua hàng liên kết nào cả, có thể do 1 lần ghi
+            trước đó tạo PUInvoice xong thì lỗi/dừng giữa chừng trước khi
+            kịp tạo PUVoucher) — trường hợp này KHÔNG có PUVoucher nào để so
+            RefNoManagement/CustomField10 nữa, nhưng 1 hóa đơn THẬT SỰ (do
+            người dùng/MISA tạo bình thường) KHÔNG BAO GIỜ tồn tại mà thiếu
+            hẳn chứng từ Mua hàng đi kèm — nên coi CHẮC CHẮN là rác/lỗi, an
+            toàn để dọn khi người dùng chủ động bấm "Ghi đè"."""
             try:
                 row_lk = cur.execute(
                     "SELECT TOP 1 PUVoucherRefID FROM PUInvoiceDetail WHERE RefID=?",
                     inv_refid).fetchone()
                 pu_refid = row_lk[0] if row_lk else None
                 if not pu_refid:
-                    return False, None, False
+                    return False, None, True
                 row_pv = cur.execute(
                     "SELECT PostedDate, BranchID, ISNULL(DisplayOnBook,0), ISNULL(CustomField10,''), "
                     "ISNULL(RefNoManagement,'') FROM PUVoucher WHERE RefID=?", pu_refid).fetchone()
                 if not row_pv:
-                    return False, pu_refid, False
+                    # PUVoucherRefID trỏ tới 1 PUVoucher KHÔNG CÒN TỒN TẠI —
+                    # cùng lý do với nhánh "không pu_refid" ở trên, chắc chắn
+                    # là rác/lỗi, an toàn dọn khi bấm "Ghi đè".
+                    return False, pu_refid, True
                 pd, br, dob, mark, refno = row_pv
                 hien_ro = (pd is not None and str(br).upper() == str(branch_id).upper()
                           and dob in (0, 2))
@@ -15288,7 +15303,12 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         # mềm tạo trước đó (CustomField10=_PM_MARK) — dữ liệu
                         # KHÁC (khách tự nhập/hệ thống khác) tuyệt đối không
                         # đụng, chỉ báo cho người dùng tự kiểm tra trong MISA.
-                        if la_cua_pm_an and ghi_de and not preview and pu_refid_an:
+                        if la_cua_pm_an and ghi_de and not preview:
+                            # pu_refid_an có thể là None (hóa đơn không liên
+                            # kết được PUVoucher nào — xem _hd_da_co_hien_ro,
+                            # dấu hiệu (3)) — KHÔNG bắt buộc phải có pu_refid
+                            # mới cho dọn, chỉ cần bỏ qua các lệnh xóa PUVoucher*
+                            # (không có gì để xóa) và vẫn xóa PUInvoice bên dưới.
                             ghi_de_hd_an = True
                         else:
                             trung += 1
@@ -15309,9 +15329,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         continue
                 if ghi_de_hd_an and not preview:
                     try:
-                        cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", pu_refid_an)
-                        cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", pu_refid_an)
-                        cur.execute("DELETE FROM PUVoucher WHERE RefID=?", pu_refid_an)
+                        if pu_refid_an:   # None nếu hóa đơn không liên kết PUVoucher nào (không có gì để xóa)
+                            cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", pu_refid_an)
+                            cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", pu_refid_an)
+                            cur.execute("DELETE FROM PUVoucher WHERE RefID=?", pu_refid_an)
                         cur.execute("DELETE FROM PUInvoiceDetail WHERE RefID=?", da_co_theo_hd[hd_key])
                         cur.execute("DELETE FROM PUInvoice WHERE RefID=?", da_co_theo_hd[hd_key])
                     except Exception:
