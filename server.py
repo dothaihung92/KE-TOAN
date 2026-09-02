@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.103"
+APP_BUILD = "2026-08-31.104"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25810,28 +25810,46 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     hóa đơn dù không cần thiết. Không lọc gì nếu nguồn loại đó rỗng (giữ hành
     vi cũ) hoặc CSDL MISA không dò được cột ngày phù hợp.
 
-    QUAN TRỌNG — Bán hàng khớp theo (MST, Số hóa đơn) trước, Ký hiệu HĐ
-    (khhdon/InvSeries) CHỈ dùng để PHÂN BIỆT khi CÓ NHIỀU hóa đơn/dòng
-    MISA cùng (MST, Số hóa đơn) — xem _ky_hieu_chac_chan_khac (dùng CHUNG
-    với khóa chống ghi trùng của _misa_ghi_ban_hang). Đã từng thử 2 cách
-    cứng nhắc, cả 2 đều gây lỗi thật:
-      (1) Khóa CHỈ (MST, Số HĐ): 1 khách hàng có 2 hóa đơn KHÁC NHAU hoàn
-          toàn (khác ngày/tiền) nhưng CÙNG Số hóa đơn=29 vì khác Ký hiệu
-          (Số hóa đơn chỉ duy nhất TRONG PHẠM VI 1 Ký hiệu) — bị CỘNG DỒN
-          nhầm vào chung 1 mục nguồn, so với 1 dòng MISA ra "LỆCH" sai
-          thay vì đúng ra là "THIẾU" 1 hóa đơn.
-      (2) Bắt CỨNG khóa phải luôn có Ký hiệu: hóa đơn ĐÃ CÓ trong MISA
-          nhưng Ký hiệu đọc ra khác nhau (vd 1 bên rỗng vì Khách lẻ/không
-          có cột Ký hiệu) bị coi "khác hóa đơn" → báo SAI thành "THIẾU"
-          dù người dùng xác nhận đã có trong MISA.
-    Cách ĐÚNG: nhóm theo (MST, Số hóa đơn) trước; nếu group chỉ có 1 hóa
-    đơn nguồn và ≤1 dòng MISA thì khớp thẳng, KHÔNG cần Ký hiệu. Chỉ khi
-    group có NHIỀU hóa đơn/dòng mới cần Ký hiệu để ghép ĐÚNG cặp — ưu tiên
-    khớp Ký hiệu giống hệt, nếu không có thì ghép với dòng CHƯA CHẮC CHẮN
-    khác Ký hiệu (1 bên rỗng) — chỉ báo "THIẾU" khi THẬT SỰ không còn dòng
-    MISA nào phù hợp. Mua hàng (PUInvoice/PUServiceDetail) CHƯA ghi được
-    InvSeries khi tạo chứng từ (giới hạn hiện tại) nên giữ khóa (MST, Số
-    hóa đơn) đơn thuần, không nhóm theo Ký hiệu.
+    QUAN TRỌNG — Bán hàng khớp theo Số hóa đơn (CHUẨN HÓA qua _chuan_shd)
+    ĐƠN THUẦN, KHÔNG còn dùng MST người mua làm khóa nhóm nữa (xem lịch sử
+    bên dưới) — Ký hiệu HĐ (khhdon/InvSeries) CHỈ dùng để PHÂN BIỆT khi CÓ
+    NHIỀU hóa đơn/dòng cùng Số hóa đơn (trường hợp công ty dùng nhiều Ký
+    hiệu song song, ví dụ Mẫu bán lẻ/Mẫu bán buôn, mỗi Ký hiệu tự đánh số
+    riêng từ đầu). Đã từng thử NHIỀU cách, đều gây lỗi thật:
+      (1) Khóa CHỈ Số HĐ (không Ký hiệu, không MST): 1 khách hàng có 2 hóa
+          đơn KHÁC NHAU hoàn toàn (khác ngày/tiền) nhưng CÙNG Số hóa đơn=29
+          vì khác Ký hiệu (Số hóa đơn chỉ duy nhất TRONG PHẠM VI 1 Ký hiệu)
+          — bị CỘNG DỒN nhầm vào chung 1 mục nguồn, so với 1 dòng MISA ra
+          "LỆCH" sai thay vì đúng ra là "THIẾU" 1 hóa đơn.
+      (2) Bắt CỨNG khóa phải luôn có Ký hiệu TRÙNG: hóa đơn ĐÃ CÓ trong
+          MISA nhưng Ký hiệu đọc ra khác nhau (vd 1 bên rỗng vì Khách lẻ/
+          không có cột Ký hiệu) bị coi "khác hóa đơn" → báo SAI thành
+          "THIẾU" dù người dùng xác nhận đã có trong MISA.
+      (3) Khóa (MST, Số HĐ) [Ký hiệu chỉ để phân biệt khi trùng] — TỪNG
+          dùng cách này, tưởng đúng vì tránh được lỗi (1)/(2), nhưng vỡ lẽ
+          qua Bảng kê Bán hàng THẬT người dùng gửi: MST người mua ghi trên
+          MISA (AccountObjectTaxCode của danh mục Khách hàng) KHÔNG ĐÁNG
+          TIN CẬY để so khớp — hơn nửa số hóa đơn (1.403/2.461, toàn khách
+          lẻ "KL") có MST ghi KHÔNG NHẤT QUÁN giữa 2 hệ thống: nguồn (tra
+          cứu Thuế) luôn có CCCD/MST thật trên từng hóa đơn (đã làm trống
+          nếu là CCCD 12 số theo quy ước), còn MISA thì TÙY DÒNG — có dòng
+          để trống, có dòng lại lưu nguyên CCCD hoặc mã cũ khác — khiến
+          khóa theo MST liên tục lệch dù CÙNG 1 hóa đơn thật, báo sai HÀNG
+          LOẠT cả "thiếu" (nguồn) lẫn "thừa" (MISA) cho CÙNG 1 hóa đơn.
+    Cách ĐÚNG: Số hóa đơn đã DUY NHẤT trong PHẠM VI 1 Ký hiệu theo quy định
+    hóa đơn điện tử — không cần MST để định danh 1 hóa đơn Bán hàng, MST
+    người mua chỉ còn dùng để HIỂN THỊ cho người dùng, không tham gia khóa
+    ghép. Nhóm theo Số hóa đơn trước; nếu group chỉ có 1 hóa đơn nguồn và
+    ≤1 dòng MISA thì khớp thẳng, KHÔNG cần Ký hiệu. Chỉ khi group có NHIỀU
+    hóa đơn/dòng (trùng Số hóa đơn ở nhiều Ký hiệu) mới cần Ký hiệu để ghép
+    ĐÚNG cặp — ưu tiên khớp Ký hiệu giống hệt, nếu không có thì ghép với
+    dòng CHƯA CHẮC CHẮN khác Ký hiệu (1 bên rỗng), tin vào số tiền gần nhất
+    trong toàn bộ ứng viên còn lại — chỉ báo "THIẾU" khi THẬT SỰ không còn
+    dòng MISA nào phù hợp. Mua hàng (PUInvoice/PUServiceDetail) CHƯA ghi
+    được InvSeries khi tạo chứng từ (giới hạn hiện tại) nên giữ khóa (MST,
+    Số hóa đơn) đơn thuần — bên mua có nhiều nhà cung cấp khác nhau nên MST
+    người bán vẫn cần thiết để tránh trùng số hóa đơn giữa các NCC khác
+    nhau, KHÔNG áp dụng lý do bỏ MST như Bán hàng ở trên.
 
     Số hóa đơn dùng để GHÉP KHÓA còn được chuẩn hóa bỏ số 0 ở đầu (vd '12'
     so với '0000012') qua _chuan_shd() — CÙNG kiểu chuẩn hóa _chuan_ma() đã
@@ -25914,7 +25932,21 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 pham_vi_ngay[loai][1] = ngay_dt_ng
         if loai == "sold":
             kyhieu_ng = str(r["khhdon"] or "").strip().lower()
-            gk = (mst_k, sohd_k.lower())
+            # Khóa nhóm CHỈ theo Số hóa đơn (không còn kèm MST người mua) —
+            # xác nhận đúng qua Bảng kê Bán hàng THẬT của người dùng: MST
+            # người mua ghi ở MISA (AccountObjectTaxCode trên danh mục Khách
+            # hàng) không đáng tin cậy để so khớp — khách lẻ "KL" đôi khi
+            # lưu CCCD, đôi khi để trống hẳn tùy dòng, còn khách doanh nghiệp
+            # đôi khi lưu MST cũ/định dạng khác — 1.403/2.461 hóa đơn trong
+            # Bảng kê THẬT là khách "KL" nên khóa theo MST cực kỳ mong manh
+            # (đúng bằng số hóa đơn báo sai "thiếu/thừa" observed). Trong khi
+            # đó Số hóa đơn ĐÃ DUY NHẤT trong PHẠM VI 1 Ký hiệu theo quy định
+            # hóa đơn điện tử — dùng (Ký hiệu, Số hóa đơn) làm khóa đủ để
+            # định danh CHÍNH XÁC 1 hóa đơn thật, không cần MST. Ký hiệu vẫn
+            # dùng để phân biệt khi 1 Số hóa đơn trùng ở NHIỀU Ký hiệu khác
+            # nhau (xem nhánh khớp bên dưới), y hệt cơ chế cũ — chỉ khác là
+            # nhóm NGOÀI không còn phụ thuộc MST nữa.
+            gk = sohd_k.lower()
             lst = nguon["sold"].setdefault(gk, [])
             e = None
             for it in lst:
@@ -26017,7 +26049,9 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 for row in (cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
                     mst, inv, kh, tot, vat = row[0], row[1], row[2], row[3], row[4]
                     ngay_dt = row[5] if c_ngay else None
-                    gk = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
+                    # Khóa CHỈ theo Số hóa đơn — xem giải thích đầy đủ ở chỗ
+                    # dựng nguon["sold"] phía trên (bỏ MST khỏi khóa nhóm).
+                    gk = _chuan_shd(inv).lower()
                     kh_n = str(kh or "").strip().lower()
                     lst = misa["sold"].setdefault(gk, [])
                     e = None
@@ -26030,7 +26064,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             ngay_hien = ngay_dt.strftime("%d/%m/%Y") if ngay_dt else ""
                         except Exception:
                             ngay_hien = ""
-                        e = {"kyhieu": kh_n, "ds": 0.0, "thue": 0.0, "ngay": ngay_hien}
+                        e = {"kyhieu": kh_n, "so_hd": str(inv or ""), "mst": mst or "",
+                             "ds": 0.0, "thue": 0.0, "ngay": ngay_hien}
                         lst.append(e)
                     v = _snum(vat)
                     e["thue"] += v
@@ -26194,7 +26229,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         # nên dù danh sách "thieu"/"lech" đã trống, TỔNG vẫn có thể lệch mà
         # không rõ vì sao — xác nhận đúng qua phản hồi người dùng: tổng Mua
         # hàng vẫn lệch ~1 tỷ dù không còn hóa đơn nào báo thiếu/lệch cả.
-        thua = [{"mst": gk[0], "so_hd": gk[1], "ngay": e.get("ngay", ""),
+        thua = [{"mst": e.get("mst", ""), "so_hd": e.get("so_hd", gk), "ngay": e.get("ngay", ""),
                 "doanh_so_misa": round(e["ds"]), "thue_misa": round(e["thue"])}
                for gk, lst in misa["sold"].items() for e in lst
                if id(e) not in da_khop_id and _dung_ky_that(e.get("ngay", ""), "sold")
