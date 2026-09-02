@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.118"
+APP_BUILD = "2026-08-31.119"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26242,6 +26242,24 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         return lo, hi
 
     ky_lam_viec = {"sold": _khung_ngay_nhap_lieu("out"), "purchase": _khung_ngay_nhap_lieu("in")}
+    # 1 trong 2 loại KHÔNG xác định được kỳ riêng (chưa Import & Lưu đúng
+    # Bảng kê của loại đó trong PHẦN MỀM — dù đã nhập tay/import thẳng vào
+    # MISA rồi, KHÁC với việc lưu Bảng kê ở màn Nhập Liệu của phần mềm này)
+    # nhưng loại KIA lại CÓ kỳ rõ ràng — dùng CHUNG kỳ đó cho cả 2 loại thay
+    # vì bỏ lọc hẳn: người dùng làm việc theo TỪNG ĐỢT (vd "quý 2/2026") áp
+    # dụng cho CẢ Bán hàng lẫn Mua hàng cùng lúc (xem "🚀 Import tự động
+    # toàn bộ" xử lý chung 1 lượt cho cả 2), không phải common để lệch kỳ
+    # nhau — xác nhận đúng qua phản hồi người dùng: Mua hàng đã có Bảng kê
+    # Đầu vào Q2/2026 lọc đúng, nhưng Bán hàng (chưa lưu Bảng kê Đầu ra
+    # trong phần mềm dù đã có hóa đơn thật trong MISA) vẫn rơi về so TOÀN
+    # BỘ invoices, lộ lại đúng 9 hóa đơn nguồn CŨ (2025-07 đến 2025-09,
+    # tổng chỉ 105.757đ — rõ ràng là dữ liệu thử/tồn đọng, không phải kỳ
+    # đang làm việc) — "phần mềm đang check khác thời điểm quý 2/2026...
+    # kiểm tra theo dữ liệu import thôi".
+    if ky_lam_viec["sold"] == (None, None) and ky_lam_viec["purchase"] != (None, None):
+        ky_lam_viec["sold"] = ky_lam_viec["purchase"]
+    elif ky_lam_viec["purchase"] == (None, None) and ky_lam_viec["sold"] != (None, None):
+        ky_lam_viec["purchase"] = ky_lam_viec["sold"]
 
     # sold: nhóm theo (MST, Số hóa đơn) -> DANH SÁCH entry (1 entry/Ký hiệu
     # khác nhau trong group) — xem docstring. purchase: giữ khóa phẳng
