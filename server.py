@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.113"
+APP_BUILD = "2026-08-31.114"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15201,16 +15201,44 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # không; ngược lại KHÔNG khớp thì vẫn cho ghi dù "Số chứng từ" tính
         # ra trùng tình cờ với 1 hóa đơn khác (chỉ trùng NHÃN hiển thị, không
         # mất dữ liệu — khác hẳn bị bỏ qua hoàn toàn như lỗi cũ).
-        da_co_theo_hd = set()
+        da_co_theo_hd = {}   # (mst,invno) -> PUInvoice.RefID
         co_du_lieu_doi_chieu_hd = False
         if loai in ("nk", "kqk"):
             try:
-                for hd_mst, hd_inv in cur.execute(
-                        "SELECT AccountObjectTaxCode, InvNo FROM PUInvoice").fetchall():
-                    da_co_theo_hd.add((_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower()))
+                for hd_refid, hd_mst, hd_inv in cur.execute(
+                        "SELECT RefID, AccountObjectTaxCode, InvNo FROM PUInvoice").fetchall():
+                    da_co_theo_hd[(_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower())] = hd_refid
                 co_du_lieu_doi_chieu_hd = True
             except Exception:
                 pass
+
+        def _hd_da_co_hien_ro(inv_refid):
+            """Hóa đơn ĐÃ CÓ trong PUInvoice (khớp MST+Số HĐ) không có nghĩa
+            chứng từ Mua hàng liên kết THẬT SỰ hiện trên màn hình MISA — xác
+            nhận đúng qua báo cáo thật: nhiều hóa đơn khớp PUInvoice (nên bị
+            coi "đã có, bỏ qua") nhưng KHÔNG có mặt trong danh sách "Mua hàng
+            hóa, dịch vụ" người dùng xuất từ MISA — PUVoucher liên kết bị lỗi/
+            ẩn (view/bộ lọc, xem _misa_tu_kiem_tra_muahang). Trả (hien_ro,
+            pu_refid, la_cua_pm) — hien_ro=None nếu không kiểm tra được (an
+            toàn, coi như hiện rõ, giữ hành vi cũ)."""
+            try:
+                row_lk = cur.execute(
+                    "SELECT TOP 1 PUVoucherRefID FROM PUInvoiceDetail WHERE RefID=?",
+                    inv_refid).fetchone()
+                pu_refid = row_lk[0] if row_lk else None
+                if not pu_refid:
+                    return False, None, False
+                row_pv = cur.execute(
+                    "SELECT PostedDate, BranchID, ISNULL(DisplayOnBook,0), ISNULL(CustomField10,'') "
+                    "FROM PUVoucher WHERE RefID=?", pu_refid).fetchone()
+                if not row_pv:
+                    return False, pu_refid, False
+                pd, br, dob, mark = row_pv
+                hien_ro = (pd is not None and str(br).upper() == str(branch_id).upper()
+                          and dob in (0, 2))
+                return hien_ro, pu_refid, (str(mark) == _PM_MARK)
+            except Exception:
+                return None, None, False
 
         for doc in order:
             lines = groups[doc]
@@ -15231,12 +15259,47 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             # KHÔNG đối chiếu được (CSDL MISA không có bảng PUInvoice, hoặc
             # dòng thiếu Số HĐ) mới rơi về cách cũ (Số chứng từ) như trước.
             doi_chieu_duoc = co_du_lieu_doi_chieu_hd and bool(sohd_ct)
+            ghi_de_hd_an = False
             if doi_chieu_duoc:
                 if hd_key in da_co_theo_hd:
-                    trung += 1
-                    ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
-                                "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
-                    continue
+                    hien_ro, pu_refid_an, la_cua_pm_an = _hd_da_co_hien_ro(da_co_theo_hd[hd_key])
+                    if hien_ro is False:
+                        # ĐÃ CÓ trong PUInvoice nhưng KHÔNG hiện trên màn Mua
+                        # hàng MISA thật — KHÔNG được báo yên tâm "đã có, bỏ
+                        # qua" (người dùng cứ tưởng đã ghi, hóa đơn "biến
+                        # mất" khỏi báo cáo mà không ai biết). Chỉ TỰ xóa +
+                        # ghi lại khi ĐÚNG là bản ghi lỗi/ẩn DO CHÍNH phần
+                        # mềm tạo trước đó (CustomField10=_PM_MARK) — dữ liệu
+                        # KHÁC (khách tự nhập/hệ thống khác) tuyệt đối không
+                        # đụng, chỉ báo cho người dùng tự kiểm tra trong MISA.
+                        if la_cua_pm_an and ghi_de and not preview and pu_refid_an:
+                            ghi_de_hd_an = True
+                        else:
+                            trung += 1
+                            ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                                        "trang_thai": (
+                                            "⚠ đã có trong dữ liệu (PUInvoice) nhưng KHÔNG hiện trên "
+                                            "màn hình Mua hàng MISA (view/bộ lọc chi nhánh-PostedDate-"
+                                            "DisplayOnBook)"
+                                            + (" — bấm \"Ghi đè\" để phần mềm tự xóa bản lỗi (do chính "
+                                               "phần mềm tạo) rồi ghi lại đúng" if la_cua_pm_an else
+                                               " — chứng từ này KHÔNG do phần mềm tạo, phần mềm KHÔNG tự "
+                                               "sửa, hãy tự kiểm tra lại trong MISA"))})
+                            continue
+                    else:
+                        trung += 1
+                        ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                                    "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
+                        continue
+                if ghi_de_hd_an and not preview:
+                    try:
+                        cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", pu_refid_an)
+                        cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", pu_refid_an)
+                        cur.execute("DELETE FROM PUVoucher WHERE RefID=?", pu_refid_an)
+                        cur.execute("DELETE FROM PUInvoiceDetail WHERE RefID=?", da_co_theo_hd[hd_key])
+                        cur.execute("DELETE FROM PUInvoice WHERE RefID=?", da_co_theo_hd[hd_key])
+                    except Exception:
+                        pass
             else:
                 if k_doc in posted_refno:
                     trung += 1
