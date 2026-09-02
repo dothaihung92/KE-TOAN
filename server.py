@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.111"
+APP_BUILD = "2026-08-31.112"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15290,16 +15290,30 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                             pass
             acc_obj_id, ten_ncc_misa, ma_dt_misa = ncc[mst_k]
             valid_lines = []
+            # Ghi lại TÊN HÀNG của các dòng thiếu mã hàng (không trùng lặp) —
+            # để báo CỤ THỂ sản phẩm nào cần bổ sung/re-import Danh mục thay
+            # vì chỉ nói chung chung "thiếu mã hàng" — xác nhận đúng ca thật:
+            # 4-5 hóa đơn bị bỏ qua HOÀN TOÀN vì TOÀN BỘ dòng là sản phẩm MỚI
+            # (mã tự sinh theo tên hàng ở _gen_mua_hang_nk CHƯA từng Import
+            # Danh mục Hàng hóa vào MISA) — nhà cung cấp vẫn có trong MISA
+            # (các hóa đơn KHÁC cùng NCC vẫn ghi bình thường), chỉ riêng dòng
+            # hàng MỚI này chưa có mã trong MISA nên bị bỏ qua im lặng.
+            ten_thieu_ma = []
             for r in lines:
                 ma = str(r[cfg["ma"]] or "").strip()
                 mk = ma.lower()
                 if mk not in hang:
                     bo_mahang += 1
+                    ten_h = str(r[cfg["ten"]] or "").strip()
+                    if ten_h and ten_h not in ten_thieu_ma:
+                        ten_thieu_ma.append(ten_h)
                     continue
                 valid_lines.append((r, hang[mk]))
             if not valid_lines:
+                vi_du = "; ".join(ten_thieu_ma[:3]) + (" ..." if len(ten_thieu_ma) > 3 else "")
                 ket.append({"so_ct": doc, "so_dong": len(lines),
-                            "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"})
+                            "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"
+                                          + (f" (vd: {vi_du})" if vi_du else "")})
                 continue
             # TK Nợ/Có phải tồn tại trong danh mục Account MISA (FK) — TK
             # không rút được về TK cha thì bỏ qua chứng từ, báo rõ lý do.
@@ -16252,16 +16266,24 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                     cur.execute("DELETE FROM PUService WHERE RefID=?", rid)
             acc_obj_id, ten_ncc_misa, ma_dt_misa = ncc[mst_k]
             valid_lines = []
+            # Xem giải thích ở _misa_ghi_mua_hang (nk/kqk) — báo rõ TÊN dịch
+            # vụ nào thiếu mã thay vì chỉ nói chung chung.
+            ten_thieu_ma = []
             for r in lines:
                 ma = str(r[cfg["ma"]] or "").strip()
                 mk = ma.lower()
                 if mk not in hang:
                     bo_mahang += 1
+                    ten_h = str(r[cfg["ten"]] or "").strip()
+                    if ten_h and ten_h not in ten_thieu_ma:
+                        ten_thieu_ma.append(ten_h)
                     continue
                 valid_lines.append((r, hang[mk]))
             if not valid_lines:
+                vi_du = "; ".join(ten_thieu_ma[:3]) + (" ..." if len(ten_thieu_ma) > 3 else "")
                 ket.append({"so_ct": doc, "so_dong": len(lines),
-                            "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"})
+                            "trang_thai": "bỏ qua — tất cả dòng đều thiếu mã hàng trong MISA"
+                                          + (f" (vd: {vi_du})" if vi_du else "")})
                 continue
             if tk_set:
                 tk_loi = set()
