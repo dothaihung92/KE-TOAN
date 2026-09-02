@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.119"
+APP_BUILD = "2026-08-31.120"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12469,6 +12469,37 @@ def _xk_gop_them_ban_hang(cid, header_moi, rows_moi, on_progress=None):
     conn.commit()
     conn.close()
     return len(rows_them), so_trung, len(rows_ra)
+
+
+@app.post("/api/nhap-lieu/save-ctbr-gop/{cid}")
+async def nhap_lieu_save_ctbr_gop(cid: int, request: Request):
+    """Lưu dữ liệu 'Chi tiết BÁN RA' (ctbr, nguồn Xuất Kho) đọc được từ luồng
+    Import & Lưu THÔNG THƯỜNG ở màn Nhập Liệu (Bảng kê Đầu ra) — GỘP THÊM
+    vào ctbr đã có (_xk_gop_them_ban_hang), KHÔNG thay thế/xoá dữ liệu ctbr
+    của các lần Import & Lưu TRƯỚC đó.
+
+    Sửa lỗi: 'in'/'out' (Bảng kê Đầu vào/Đầu ra) đúng là "mỗi lần Lưu = 1 bộ
+    MỚI thay thế bộ cũ" (đại diện đúng kỳ đang làm việc hiện tại, xem
+    nhap_lieu_save) — nhưng trước đây JS (luuCaHaiBangKe) lại LƯU CTBR CÙNG
+    KIỂU THAY THẾ đó (gọi thẳng /api/nhap-lieu/save?loai=ctbr), trong khi
+    ctbr PHẢI tích luỹ qua nhiều lần Import & Lưu khác nhau (đúng thiết kế
+    đã có sẵn cho nút '➕ Import thêm dữ liệu' ở Xuất Kho, xem
+    _xk_gop_them_ban_hang) — vì Xuất Kho cần dữ liệu bán ra của TOÀN BỘ các
+    đợt đã import để trừ tồn kho tuần tự đúng, không phải chỉ đợt gần nhất.
+    Import nhiều đợt (vd file Quý 1/2026 rồi file Quý 2/2026) trước đây làm
+    MẤT dữ liệu Xuất Kho của đợt import trước — đúng lỗi người dùng báo cáo:
+    "tôi import dữ liệu từ tháng 1/2026 - tháng 6/2026 để xử lý kho nhưng
+    phần mềm chỉ lấy dữ liệu từ quý 2/2026 thôi... nếu import như thế nào
+    thì sẽ xử lý những dữ liệu import chứ không phải theo kỳ nhập liệu"."""
+    body = await request.json()
+    header = body.get("header") or []
+    rows = body.get("rows") or []
+    if not rows:
+        cur = nhap_lieu_get(cid, "ctbr")
+        return {"ok": True, "so_dong_them": 0, "so_trung": 0, "tong": len(cur.get("rows") or [])}
+    so_them, so_trung, tong = _xk_gop_them_ban_hang(cid, header, rows)
+    return {"ok": True, "so_dong_them": so_them, "so_trung": so_trung, "tong": tong}
+
 
 # Tiến độ Import thêm dữ liệu bán hàng (Xuất Kho) — {cid: {"da_xu_ly", "tong",
 # "dang_chay"}}, cùng kiểu với _XK_DOMA_TIEN_DO ("Dò mã hàng tự động").
