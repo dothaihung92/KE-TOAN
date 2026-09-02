@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.102"
+APP_BUILD = "2026-08-31.103"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26197,7 +26197,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         thua = [{"mst": gk[0], "so_hd": gk[1], "ngay": e.get("ngay", ""),
                 "doanh_so_misa": round(e["ds"]), "thue_misa": round(e["thue"])}
                for gk, lst in misa["sold"].items() for e in lst
-               if id(e) not in da_khop_id and _dung_ky_that(e.get("ngay", ""), "sold")]
+               if id(e) not in da_khop_id and _dung_ky_that(e.get("ngay", ""), "sold")
+               and (round(e["ds"]) != 0 or round(e["thue"]) != 0)]
         thua.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
     ket["ban_hang"] = {"tong_hd_nguon": len(ng_flat_sold), "khop": khop, "thieu": thieu, "lech": lech,
                        "thua": thua, "tong_khop": tong_khop, "tong_ds_nguon": round(tong_ds_nguon),
@@ -26246,7 +26247,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         thua = [{"mst": k[0], "so_hd": k[1], "ngay": m.get("ngay", ""),
                 "doanh_so_misa": round(m["ds"]), "thue_misa": round(m["thue"])}
                for k, m in misa["purchase"].items()
-               if k not in da_khop_key and _dung_ky_that(m.get("ngay", ""), "purchase")]
+               if k not in da_khop_key and _dung_ky_that(m.get("ngay", ""), "purchase")
+               and (round(m["ds"]) != 0 or round(m["thue"]) != 0)]
         thua.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
     ket["mua_hang"] = {"tong_hd_nguon": len(ng_flat_purchase), "khop": khop, "thieu": thieu,
                        "lech": lech, "thua": thua, "tong_khop": tong_khop_p, "tong_ds_nguon": round(tong_ds_nguon_p),
