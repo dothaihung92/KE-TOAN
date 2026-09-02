@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.117"
+APP_BUILD = "2026-08-31.118"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26520,6 +26520,16 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     tong_ds_misa = sum(e["ds"] for e in ms_flat_sold)
     tong_thue_misa = sum(e["thue"] for e in ms_flat_sold)
     tong_khop = _khop_tong(tong_ds_nguon, tong_ds_misa) and _khop_tong(tong_thue_nguon, tong_thue_misa)
+    # KHÔNG CÓ hóa đơn nguồn nào (chưa tra cứu/chưa lưu Bảng kê Đầu ra cho
+    # loại này) -> KHÔNG có gì để đối chiếu — coi như "đã khớp" (không phải
+    # THẬT SỰ khớp, mà là KHÔNG ÁP DỤNG được phép so sánh), tránh báo "TỔNG
+    # LỆCH" giả kèm hàng trăm/nghìn hóa đơn "THỪA" chính là TOÀN BỘ lịch sử
+    # MISA (không lọc được theo khung ngày vì nguồn không có mốc ngày nào cả)
+    # — xác nhận đúng qua phản hồi người dùng: nguồn 0đ nhưng báo "934 hóa
+    # đơn thừa trong MISA" ngày trải dài 2023-2025, hoàn toàn không liên
+    # quan gì tới đợt đang làm việc, chỉ là MISA có sẵn dữ liệu từ trước.
+    if not ng_flat_sold:
+        tong_khop = True
 
     if tong_khop:
         thieu, lech, thua, khop = [], [], [], len(ng_flat_sold)
@@ -26614,6 +26624,10 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     tong_thue_misa_p = sum(e["thue"] for e in ms_flat_purchase)
     tong_khop_p = (_khop_tong(tong_ds_nguon_p, tong_ds_misa_p) and
                    _khop_tong(tong_thue_nguon_p, tong_thue_misa_p))
+    # KHÔNG CÓ hóa đơn nguồn nào — xem giải thích chi tiết ở nhánh Bán hàng
+    # bên trên (cùng lý do, áp dụng riêng cho Mua hàng).
+    if not ng_flat_purchase:
+        tong_khop_p = True
 
     if tong_khop_p:
         thieu, lech, thua, khop = [], [], [], len(ng_flat_purchase)
