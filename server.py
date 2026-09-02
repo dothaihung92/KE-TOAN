@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.106"
+APP_BUILD = "2026-08-31.107"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16712,8 +16712,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
     ĐÃ LƯU (nhap_lieu 'out') — MỖI DÒNG trong bảng kê = 1 hóa đơn = 1 chứng từ
     (khác Mua hàng: bảng kê Đầu ra không có nhiều dòng chi tiết theo mã hàng
     cho 1 hóa đơn, chỉ có 1 dòng doanh thu/hóa đơn), dùng ĐÚNG công thức đã
-    kiểm chứng ở _gen_ban_hang (TK Có doanh thu=5111 cố định; TK Nợ=131 nếu
-    tổng hóa đơn >= 5tr, ngược lại 1111 — tiền mặt). Vì bảng kê không có mã
+    kiểm chứng ở _gen_ban_hang (TK Có doanh thu=5111 cố định; TK Nợ=131 LUÔN
+    — công nợ, không phân biệt giá trị hóa đơn nữa, xem NGUONG_5TR). Vì bảng kê không có mã
     hàng riêng từng dòng, dùng 1 mã DÙNG CHUNG "BH" (tự tạo nếu chưa có,
     giống "MHDV" bên Mua hàng dịch vụ). CHƯA GHI SỔ (xem _PU_HEADER_DEFAULT),
     không đụng chứng từ đã ghi sổ của người dùng; ghi_de=True chỉ gỡ chứng
@@ -29524,7 +29524,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             ikey = (str(r["khhdon"]), str(r["shdon"]).lstrip("0") or "0")
             ngay_fmt = _fmt_ngay(r["tdlap"])
 
-            # Hạch toán MUA VÀO: Có theo tổng HĐ (>=5tr->331, <5tr->1111); Nợ học theo MST
+            # Hạch toán MUA VÀO: Có LUÔN 331 (công nợ, xem _co_theo_tong — không
+            # còn phân biệt theo tổng HĐ nữa); Nợ học theo MST.
             no_r = co_r = ""
             if loai == "purchase":
                 co_r = _co_theo_tong(r["tgtttbso"])

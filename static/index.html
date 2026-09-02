@@ -6320,9 +6320,13 @@ function nlDamBaoNoCo(){
   if(!hLow.includes('có')){nlHeader.push('Có');nlRows.forEach(r=>r.push(''));}
   nlRows.forEach(r=>{while(r.length<nlHeader.length)r.push('');r.length=nlHeader.length;});
 }
-// Bảng kê ĐẦU RA: Nợ mặc định 5111; Có LUÔN 131 (công nợ) — hóa đơn đầu ra
-// luôn hạch toán qua công nợ, không phân biệt giá trị nữa (đồng bộ với
-// _gen_ban_hang/_misa_ghi_ban_hang phía server).
+// Bảng kê ĐẦU RA: Nợ mặc định 5111 (chỉ điền ô TRỐNG — TK doanh thu có thể
+// khác nhau theo loại hàng); Có LUÔN 131 (công nợ) — hóa đơn đầu ra luôn
+// hạch toán qua công nợ, không phân biệt giá trị nữa (đồng bộ với
+// _gen_ban_hang/_misa_ghi_ban_hang phía server). "Có" GHI ĐÈ LUÔN (không chỉ
+// điền ô trống) — xác nhận đúng qua ảnh chụp người dùng gửi: hóa đơn Import
+// từ file ngoài/bản cũ có sẵn "Có"=1111 (tiền mặt) không được nhánh "chỉ điền
+// ô trống" sửa lại, hạch toán sai chính sách LUÔN công nợ đã chốt.
 function nlTuDienNoCoRa(){
   const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
   const iNo=hLow.findIndex(h=>h==='nợ'||h==='no');
@@ -6330,12 +6334,13 @@ function nlTuDienNoCoRa(){
   if(iNo<0&&iCo<0)return;
   nlRows.forEach(r=>{
     if(iNo>=0&&!String(r[iNo]||'').trim())r[iNo]='5111';
-    if(iCo>=0&&!String(r[iCo]||'').trim())r[iCo]='131';
+    if(iCo>=0)r[iCo]='131';
   });
 }
-// Tự điền Nợ (theo MST đã học) + Có LUÔN 331 (công nợ) cho ô còn TRỐNG — hóa
-// đơn đầu vào luôn hạch toán qua công nợ, không phân biệt giá trị nữa (đồng
-// bộ với _co_theo_tong phía server).
+// Tự điền Nợ (theo MST đã học, chỉ ô TRỐNG — TK chi phí/kho khác nhau theo
+// hàng hóa) + Có LUÔN 331 (công nợ, GHI ĐÈ LUÔN không chỉ ô trống — cùng lý do
+// nlTuDienNoCoRa ở trên) cho hóa đơn đầu vào — đồng bộ với _co_theo_tong phía
+// server.
 async function nlTuDienNoCo(){
   const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
   const idx=(pred)=>hLow.findIndex(pred);
@@ -6355,10 +6360,10 @@ async function nlTuDienNoCo(){
       }
     });
   }
-  // 2) Có: luôn 331 (công nợ)
+  // 2) Có: luôn 331 (công nợ) — GHI ĐÈ LUÔN, không chỉ điền ô trống.
   if(iCo>=0){
     nlRows.forEach(r=>{
-      if(!String(r[iCo]||'').trim())r[iCo]='331';
+      r[iCo]='331';
     });
   }
 }
