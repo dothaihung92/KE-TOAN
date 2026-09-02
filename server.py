@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.116"
+APP_BUILD = "2026-08-31.117"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14823,7 +14823,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         flat = _gen_mua_hang_dv(cid, header, rows)
     if not flat:
         return {"preview": preview, "database": database, "so_chungtu": 0, "so_dong": 0,
-                "so_trung": 0, "so_bo_qua_ncc": 0, "so_bo_qua_mahang": 0, "danh_sach": [],
+                "so_trung": 0, "so_bo_qua_ncc": 0, "so_bo_qua_mahang": 0, "so_bo_qua_an_pm": 0,
+                "danh_sach": [],
                 "ghi_chu": "Không có dòng nào phù hợp (%s) trong Bảng kê đầu vào." % _MUA_TEN[loai]}
     # gom các dòng theo Số chứng từ / Số phiếu nhập -> 1 nhóm = 1 PUVoucher
     groups, order = {}, []
@@ -15092,6 +15093,13 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         now = datetime.datetime.now()
         ket = []
         them_ct = them_dong = trung = bo_ncc = bo_mahang = go = so_ngay_loi = so_tien_0 = 0
+        # đếm riêng chứng từ "đã có trong PUInvoice nhưng ẨN khỏi màn Mua
+        # hàng MISA thật, XÁC NHẬN ĐÚNG là do chính phần mềm tạo" nhưng
+        # KHÔNG được tự dọn ở lượt này vì ghi_de đang tắt — dùng để
+        # _misa_import_tu_dong biết mà TỰ chạy lại với ghi_de=True (dọn dẹp
+        # AN TOÀN, đã xác nhận nguồn gốc phần mềm) thay vì bắt người dùng tự
+        # phát hiện rồi bấm "Ghi đè" tay — xem _hd_da_co_hien_ro.
+        bo_qua_an_pm = 0
         so_hoa_don = 0        # số hóa đơn (PUInvoice) tạo kèm chứng từ
         thieu_kho = set()     # mã kho trong form nhưng CHƯA có trong MISA
         bo_tk = 0             # chứng từ bỏ qua vì TK Nợ/Có không có trong MISA
@@ -15312,6 +15320,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                             ghi_de_hd_an = True
                         else:
                             trung += 1
+                            if la_cua_pm_an:
+                                bo_qua_an_pm += 1
                             ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
                                         "trang_thai": (
                                             "⚠ đã có trong dữ liệu (PUInvoice) nhưng KHÔNG hiện trên "
@@ -16022,6 +16032,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
+                "so_bo_qua_an_pm": bo_qua_an_pm,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
                 "kho_moi": sorted(kho_moi),
@@ -25989,6 +26000,31 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
                  lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=ghi_de))
             chay("4c (thử lại). Dịch vụ vào MISA",
                  lambda: _misa_ghi_mua_hang_dv(cid, database, preview=preview, ghi_de=ghi_de))
+
+    # BƯỚC 4y (TỰ SỬA) — nếu bước 4 còn chứng từ khớp PUInvoice (MST+Số HĐ)
+    # nhưng ẨN khỏi màn hình Mua hàng MISA (view/bộ lọc chi nhánh-PostedDate-
+    # DisplayOnBook) mà ĐÃ XÁC NHẬN đúng nguồn gốc do CHÍNH phần mềm tạo
+    # (CustomField10/Số chứng từ khớp công thức, hoặc hoàn toàn không liên
+    # kết PUVoucher nào — xem _hd_da_co_hien_ro), tự chạy lại Mua hàng với
+    # ghi_de=True (ÉP BẬT, bất kể ghi_de gốc là gì) — AN TOÀN vì đã xác nhận
+    # nguồn gốc phần mềm ở bước phân tích, không phải "Ghi đè" mù quáng —
+    # xác nhận đúng ca thật người dùng báo cáo: "🚀 Import tự động toàn bộ"
+    # mặc định ghi_de=False (đúng thiết kế, tránh xóa nhầm dữ liệu THẬT khi
+    # chạy hàng loạt không giám sát) nên KHÔNG tự dọn được các bản ghi lỗi
+    # này, khiến hóa đơn "biến mất" khỏi MISA mà không ai biết phải tự bấm
+    # "Ghi đè" tay từng loại chứng từ mới xử lý được — nay xử lý LUÔN trong
+    # 1 lượt chạy tự động, không cần thao tác tay nữa.
+    if not preview:
+        buoc_4y = buoc[-3:] if len(buoc) >= 3 else []
+        so_bo_qua_an_pm_4 = sum(
+            (b.get("ket_qua") or {}).get("so_bo_qua_an_pm") or 0 for b in buoc_4y)
+        if so_bo_qua_an_pm_4 > 0:
+            bao(f"↻ Phát hiện {so_bo_qua_an_pm_4} chứng từ đã có trong PUInvoice nhưng ẨN khỏi màn "
+                f"hình Mua hàng MISA (xác nhận đúng nguồn gốc phần mềm) — tự dọn dẹp rồi ghi lại...")
+            chay("4a (tự dọn bản ẩn). Nhập kho vào MISA",
+                 lambda: _misa_ghi_mua_hang(cid, database, "nk", preview=preview, ghi_de=True))
+            chay("4b (tự dọn bản ẩn). Không qua kho vào MISA",
+                 lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=True))
 
     chay("5a. Ghi tăng CCDC",
          lambda: _misa_ghi_tang_ccdc(cid, database, preview=preview, ghi_de=ghi_de))
