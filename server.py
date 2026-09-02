@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.114"
+APP_BUILD = "2026-08-31.115"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15212,7 +15212,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             except Exception:
                 pass
 
-        def _hd_da_co_hien_ro(inv_refid):
+        def _hd_da_co_hien_ro(inv_refid, k_doc_hien_tai):
             """Hóa đơn ĐÃ CÓ trong PUInvoice (khớp MST+Số HĐ) không có nghĩa
             chứng từ Mua hàng liên kết THẬT SỰ hiện trên màn hình MISA — xác
             nhận đúng qua báo cáo thật: nhiều hóa đơn khớp PUInvoice (nên bị
@@ -15220,7 +15220,21 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             hóa, dịch vụ" người dùng xuất từ MISA — PUVoucher liên kết bị lỗi/
             ẩn (view/bộ lọc, xem _misa_tu_kiem_tra_muahang). Trả (hien_ro,
             pu_refid, la_cua_pm) — hien_ro=None nếu không kiểm tra được (an
-            toàn, coi như hiện rõ, giữ hành vi cũ)."""
+            toàn, coi như hiện rõ, giữ hành vi cũ).
+
+            la_cua_pm (chứng từ DO CHÍNH phần mềm tạo, an toàn để tự xóa/ghi
+            lại) nhận diện qua 2 dấu hiệu (OR, chỉ cần 1 đúng): (1)
+            CustomField10=_PM_MARK — đánh dấu chuẩn hiện tại; (2) "Số chứng
+            từ" (RefNoManagement) của PUVoucher liên kết TRÙNG Y HỆT với "Số
+            chứng từ" phần mềm VỪA tính lại cho ĐÚNG hóa đơn (MST, Số HĐ)
+            đang xét ở lượt chạy này — dấu hiệu PHỤ, xác nhận đúng qua báo
+            cáo thật: có bản ghi lỗi/ẩn KHÔNG có CustomField10 (có thể do
+            phiên bản phần mềm CŨ trước khi có quy ước đánh dấu, hoặc bị xoá
+            mất khi MISA/người dùng sửa) nhưng "Số chứng từ" vẫn đúng NGUYÊN
+            VĂN công thức phần mềm tự sinh (tiền tố+năm+MST NCC[+hậu tố]) —
+            không có lý do nào 1 người TỰ TAY gõ trùng khớp CHÍNH XÁC công
+            thức này (đặc biệt là dán đúng MST 10 số của NCC vào giữa),
+            nên coi là bằng chứng đủ tin cậy để xác nhận nguồn gốc phần mềm."""
             try:
                 row_lk = cur.execute(
                     "SELECT TOP 1 PUVoucherRefID FROM PUInvoiceDetail WHERE RefID=?",
@@ -15229,14 +15243,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 if not pu_refid:
                     return False, None, False
                 row_pv = cur.execute(
-                    "SELECT PostedDate, BranchID, ISNULL(DisplayOnBook,0), ISNULL(CustomField10,'') "
-                    "FROM PUVoucher WHERE RefID=?", pu_refid).fetchone()
+                    "SELECT PostedDate, BranchID, ISNULL(DisplayOnBook,0), ISNULL(CustomField10,''), "
+                    "ISNULL(RefNoManagement,'') FROM PUVoucher WHERE RefID=?", pu_refid).fetchone()
                 if not row_pv:
                     return False, pu_refid, False
-                pd, br, dob, mark = row_pv
+                pd, br, dob, mark, refno = row_pv
                 hien_ro = (pd is not None and str(br).upper() == str(branch_id).upper()
                           and dob in (0, 2))
-                return hien_ro, pu_refid, (str(mark) == _PM_MARK)
+                la_cua_pm = (str(mark) == _PM_MARK
+                            or str(refno or "").strip().lower() == k_doc_hien_tai)
+                return hien_ro, pu_refid, la_cua_pm
             except Exception:
                 return None, None, False
 
@@ -15262,7 +15278,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             ghi_de_hd_an = False
             if doi_chieu_duoc:
                 if hd_key in da_co_theo_hd:
-                    hien_ro, pu_refid_an, la_cua_pm_an = _hd_da_co_hien_ro(da_co_theo_hd[hd_key])
+                    hien_ro, pu_refid_an, la_cua_pm_an = _hd_da_co_hien_ro(da_co_theo_hd[hd_key], k_doc)
                     if hien_ro is False:
                         # ĐÃ CÓ trong PUInvoice nhưng KHÔNG hiện trên màn Mua
                         # hàng MISA thật — KHÔNG được báo yên tâm "đã có, bỏ
