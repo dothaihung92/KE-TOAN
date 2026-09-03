@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.133"
+APP_BUILD = "2026-08-31.134"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -256,6 +256,35 @@ def _tygia_ngoai_te(dvtte, tgia):
     if not isinstance(tg, (int, float)) or tg <= 0:
         return None
     return tg
+
+
+def _quy_doi_ngoai_te_tu_inv(inv):
+    """Hóa đơn NGOẠI TỆ (USD...) -> quy đổi tgtcthue/tgtthue/tgtttbso ra VNĐ
+    (nhân tỷ giá) — trang Thuế (hoadondientu.gdt.gov.vn) trả các cột này
+    theo NGUYÊN TỆ GỐC (chưa quy đổi) cho hóa đơn ngoại tệ, giống hệt cấp độ
+    'chi tiết dòng hàng' (dvtte/tgia — xem _parse_json_invoice_detail/
+    _parse_xml_invoice, cùng field name). Dùng đúng công thức đó ở đây để
+    bảng invoices (dùng cho Đối chiếu tổng giá trị & VAT, Tờ khai GTGT Tạm
+    tính...) không bị lưu SAI đơn vị cho hóa đơn ngoại tệ — thiếu bước quy
+    đổi này khiến 'nguồn' (tra cứu Thuế) hiện số NGUYÊN TỆ nhỏ (vd USD),
+    trong khi MISA (đã ghi ĐÚNG VNĐ quy đổi qua Bảng kê Đầu ra) hiện số VNĐ
+    lớn hơn hàng chục nghìn lần — đúng tỷ giá USD/VNĐ thật, KHÔNG phải lỗi
+    ghi MISA — gây báo nhầm 'THIẾU'/'LỆCH' hàng loạt cho đúng hóa đơn đã ghi
+    đủ. Nhận dict `inv` (1 mục JSON trả về từ trang Thuế, dạng list hoặc
+    detail — CÙNG field name 'dvtte'/'tgia'), trả (tgtcthue, tgtthue,
+    tgtttbso) đã quy đổi nếu là ngoại tệ, nguyên giá trị gốc nếu là VNĐ hoặc
+    không đọc được tỷ giá (an toàn, không đụng hóa đơn VNĐ bình thường)."""
+    dvtte = inv.get("dvtte", "") or ""
+    tygia = _tygia_ngoai_te(dvtte, inv.get("tgia", ""))
+    tgtcthue, tgtthue, tgtttbso = inv.get("tgtcthue"), inv.get("tgtthue"), inv.get("tgtttbso")
+    if tygia:
+        if isinstance(_to_num(tgtcthue), (int, float)):
+            tgtcthue = _to_num(tgtcthue) * tygia
+        if isinstance(_to_num(tgtthue), (int, float)):
+            tgtthue = _to_num(tgtthue) * tygia
+        if isinstance(_to_num(tgtttbso), (int, float)):
+            tgtttbso = _to_num(tgtttbso) * tygia
+    return tgtcthue, tgtthue, tgtttbso
 
 
 def _gop_hoa_don_trung_he_thong(rows):
@@ -7256,6 +7285,15 @@ def _run_fetch_job(cid: int, body: dict):
                     _km_vi_du_lech = []
                     for inv in invs:
                         try:
+                            # Hóa đơn NGOẠI TỆ (USD...) -> trang Thuế trả
+                            # tgtcthue/tgtthue/tgtttbso theo NGUYÊN TỆ GỐC (chưa
+                            # quy đổi VNĐ) — quy đổi TRƯỚC (xem
+                            # _quy_doi_ngoai_te_tu_inv), nếu không "nguồn" lưu
+                            # số USD nhỏ trong khi MISA đã ghi ĐÚNG số VNĐ quy
+                            # đổi lớn hơn hàng chục nghìn lần (đúng tỷ giá thật)
+                            # -> Đối chiếu tổng giá trị & VAT báo nhầm "THIẾU"/
+                            # "LỆCH" hàng loạt cho hóa đơn đã ghi đủ.
+                            tgtcthue_ngt, tgtthue_ngt, tgtttbso_ngt = _quy_doi_ngoai_te_tu_inv(inv)
                             # Hóa đơn bán hàng (Mẫu số 2 — hộ/cá nhân kinh doanh
                             # KHÔNG chịu VAT) trang Thuế trả tgtcthue (tiền hàng
                             # CHƯA thuế) = 0/rỗng vì không tách thuế, CHỈ có tổng
@@ -7266,8 +7304,8 @@ def _run_fetch_job(cid: int, body: dict):
                             # hóa đơn không VAT (tgtthue=0), tiền CHƯA thuế PHẢI
                             # BẰNG tổng tiền thanh toán -> lấy tgtttbso làm dự
                             # phòng khi tgtcthue rỗng/0.
-                            tgtcthue_v = _to_num(inv.get("tgtcthue"))
-                            tgtttbso_v = _to_num(inv.get("tgtttbso"))
+                            tgtcthue_v = _to_num(tgtcthue_ngt)
+                            tgtttbso_v = _to_num(tgtttbso_ngt)
                             if not tgtcthue_v and tgtttbso_v:
                                 tgtcthue_v = tgtttbso_v
                             # Trạng thái KHÔNG đổi so với lần tra cứu trước -> giữ lại
@@ -7304,7 +7342,7 @@ def _run_fetch_job(cid: int, body: dict):
                                 inv.get("nbmst"), inv.get("nbten"), inv.get("nmmst"),
                                 str(inv.get("khmshdon", "")), inv.get("khhdon"), str(inv.get("shdon", "")),
                                 inv.get("tdlap"),
-                                tgtcthue_v, inv.get("tgtthue"), inv.get("tgtttbso"),
+                                tgtcthue_v, tgtthue_ngt, tgtttbso_ngt,
                                 str(inv.get("tthai", "")),
                                 json.dumps(inv, ensure_ascii=False),
                                 dj_giu_lai,
@@ -26542,6 +26580,15 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     if not preview:
         bao("▶ Đang xử lý: 7. Đối chiếu tổng giá trị & VAT...")
         try:
+            # Tự sửa (best-effort) hóa đơn ngoại tệ CÒN SÓT giá trị chưa quy
+            # đổi tỷ giá từ TRƯỚC khi có fix (xem _sua_hoa_don_ngoai_te_da_luu)
+            # TRƯỚC khi đối chiếu — tránh báo nhầm "THIẾU"/"LỆCH" hàng loạt cho
+            # hóa đơn ngoại tệ đã ghi ĐÚNG vào MISA. Lỗi thì bỏ qua lặng lẽ,
+            # không làm gián đoạn bước đối chiếu.
+            try:
+                _sua_hoa_don_ngoai_te_da_luu(cid)
+            except Exception:
+                pass
             dc = _misa_doi_chieu_import_toan_bo(cid, database)
             buoc.append({"ten": "7. Đối chiếu tổng giá trị & VAT", "doi_chieu": dc})
             bh, mh = dc["ban_hang"], dc["mua_hang"]
@@ -26555,6 +26602,62 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
 
     bao("✅ Xem trước xong — chưa ghi gì." if preview else "✅ Đã chạy xong toàn bộ.")
     return {"database": database, "preview": preview, "cac_buoc": buoc}
+
+
+def _sua_hoa_don_ngoai_te_da_luu(cid):
+    """SỬA LẠI (backfill) invoices.tgtcthue/tgtthue/tgtttbso cho hóa đơn
+    NGOẠI TỆ (USD...) đã LƯU TRƯỚC khi có fix quy đổi tỷ giá ở bước tra cứu
+    (xem _quy_doi_ngoai_te_tu_inv, áp dụng từ bản vá này) — vẫn còn giữ
+    NGUYÊN TỆ GỐC (chưa nhân tỷ giá) trong DB, khiến Đối chiếu tổng giá trị
+    & VAT báo nhầm "THIẾU"/"LỆCH" hàng loạt cho hóa đơn đã ghi ĐÚNG vào
+    MISA (xác nhận đúng qua phản hồi người dùng: hóa đơn Bán hàng USD, tỷ
+    lệ MISA/nguồn ~25.800-26.100 lần, đúng tỷ giá USD/VNĐ thật, KHÔNG phải
+    lỗi ghi MISA).
+
+    Tính lại TỪ 'raw' (JSON GỐC trang Thuế trả về lúc tra cứu, KHÔNG BAO GIỜ
+    bị đổi sau đó) chứ KHÔNG tính tiếp từ giá trị tgtcthue/tgtthue/tgtttbso
+    ĐANG LƯU — nên AN TOÀN chạy lại nhiều lần (idempotent): hóa đơn đã sửa
+    đúng rồi (hoặc vốn là VNĐ, không có tỷ giá) sẽ tính ra ĐÚNG giá trị cũ,
+    không bị nhân tỷ giá thêm lần nữa. CHỈ UPDATE dòng nào giá trị mới THẬT
+    SỰ khác giá trị đang lưu (> 1đ, tránh ghi thừa do sai số làm tròn)."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, tgtcthue, tgtthue, tgtttbso, raw FROM invoices WHERE company_id=?",
+        (cid,)).fetchall()
+    so_sua = 0
+    vi_du = []
+    for r in rows:
+        try:
+            inv = json.loads(r["raw"]) if r["raw"] else None
+        except Exception:
+            inv = None
+        if not isinstance(inv, dict):
+            continue
+        tgtcthue_ngt, tgtthue_ngt, tgtttbso_ngt = _quy_doi_ngoai_te_tu_inv(inv)
+        tgtcthue_v = _to_num(tgtcthue_ngt)
+        tgtttbso_v = _to_num(tgtttbso_ngt)
+        if not tgtcthue_v and tgtttbso_v:
+            tgtcthue_v = tgtttbso_v
+        cu = (_to_num(r["tgtcthue"]) or 0, _to_num(r["tgtthue"]) or 0, _to_num(r["tgtttbso"]) or 0)
+        moi = (tgtcthue_v or 0, _to_num(tgtthue_ngt) or 0, _to_num(tgtttbso_ngt) or 0)
+        if any(abs(c - m) > 1 for c, m in zip(cu, moi)):
+            conn.execute("UPDATE invoices SET tgtcthue=?, tgtthue=?, tgtttbso=? WHERE id=?",
+                        (moi[0], moi[1], moi[2], r["id"]))
+            so_sua += 1
+            if len(vi_du) < 5:
+                vi_du.append({"id": r["id"], "dvtte": inv.get("dvtte"), "tgia": inv.get("tgia"),
+                             "cu": cu, "moi": moi})
+    conn.commit()
+    conn.close()
+    return {"so_hoa_don_xet": len(rows), "so_sua": so_sua, "vi_du": vi_du}
+
+
+@app.post("/api/hoa-don/sua-ngoai-te/{cid}")
+def hoa_don_sua_ngoai_te(cid: int):
+    """Sửa LẠI (backfill) hóa đơn ngoại tệ đã lưu SAI đơn vị (chưa quy đổi
+    tỷ giá) từ TRƯỚC khi có fix — xem _sua_hoa_don_ngoai_te_da_luu. An toàn
+    gọi lại nhiều lần (idempotent)."""
+    return _sua_hoa_don_ngoai_te_da_luu(cid)
 
 
 def _misa_doi_chieu_import_toan_bo(cid, database):
@@ -27177,6 +27280,12 @@ def misa_sql_doi_chieu_import(cid: int, database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
+    # Tự sửa (best-effort) hóa đơn ngoại tệ còn sót giá trị chưa quy đổi tỷ
+    # giá trước khi đối chiếu — xem giải thích ở _misa_import_tu_dong.
+    try:
+        _sua_hoa_don_ngoai_te_da_luu(cid)
+    except Exception:
+        pass
     return _misa_doi_chieu_import_toan_bo(cid, database)
 
 
