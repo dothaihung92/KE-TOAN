@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.121"
+APP_BUILD = "2026-08-31.122"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12850,13 +12850,14 @@ def xk_export(cid: int):
     đã bị gán vượt tồn từ nhiều đợt import/dò mã/gán tay CỘNG DỒN lại, dù mỗi
     thao tác lúc gán tưởng như hợp lệ riêng lẻ) — xem _xk_kiem_tra_vuot_ton.
 
-    NGOÀI RA (không chặn, chỉ cảnh báo — xem _xk_canh_bao_dau_ky): mã hàng
-    vượt tồn ĐẦU KỲ dù vẫn trong tồn Cuối kỳ (đã cộng cả Nhập kho trong kỳ)
-    vẫn có thể bị MISA từ chối ghi sổ nếu chứng từ Nhập kho đó CHƯA được ghi
-    sổ trong MISA tại thời điểm ghi sổ Xuất kho — xác nhận qua báo cáo thật:
-    MISA từ chối ghi sổ vì mã HH00143-8 chỉ còn 122 khả dụng (đúng bằng tồn
-    Đầu kỳ) dù Cuối kỳ báo cáo tới 902, và _xk_kiem_tra_vuot_ton (so Cuối kỳ)
-    không bắt được vì số đã gán (537) < 902."""
+    KHÔNG còn cảnh báo riêng "vượt tồn ĐẦU KỲ" (xem _xk_canh_bao_dau_ky, vẫn
+    giữ hàm lại nhưng không gọi ở đây nữa) — theo đúng yêu cầu người dùng
+    "chỉ thông báo khi mã hàng nào bị âm tồn kho thôi": cảnh báo đầu kỳ chỉ
+    là suy đoán rủi ro (MISA CÓ THỂ từ chối nếu Nhập kho trong kỳ CHƯA ghi
+    sổ — không chắc chắn, và với công ty nhập/xuất liên tục thường trực thì
+    số mã bị "vượt đầu kỳ" rất nhiều dù không phải lỗi thật, gây nhiễu quá
+    mức). Chỉ CHẶN xuất khi thật sự âm tồn kho (vượt tồn Cuối kỳ, tính đủ cả
+    Nhập kho trong kỳ) — xem _xk_kiem_tra_vuot_ton ngay trên."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -12912,25 +12913,11 @@ def xk_export(cid: int):
                 pass
     tong = len(giathanh)
     so_bo_qua = tong - len(out)
-    # Cảnh báo RIÊNG (không chặn xuất, khác 'vuot' ở trên) các mã hàng vượt
-    # tồn ĐẦU KỲ dù vẫn trong tồn Cuối kỳ — xem _xk_canh_bao_dau_ky: rủi ro
-    # MISA từ chối ghi sổ nếu Nhập kho trong kỳ chưa kịp ghi sổ, dù tổng tồn
-    # cả kỳ vẫn đủ (đã xác nhận qua báo cáo thật người dùng gửi).
-    canh_bao_dau_ky = _xk_canh_bao_dau_ky(data.get("xk_ton") or [], giathanh)
-    if canh_bao_dau_ky:
-        vi_du = "; ".join(f"{x['ma']} (đã gán {x['da_gan']}, tồn đầu kỳ {x['dau_ky']})"
-                          for x in canh_bao_dau_ky[:5])
-        them = f" và {len(canh_bao_dau_ky) - 5} mã khác" if len(canh_bao_dau_ky) > 5 else ""
-        _luu_loi_tra_cuu(
-            cid, f"⚠ {len(canh_bao_dau_ky)} mã hàng trong file Xuất kho vừa tạo có số lượng gán VƯỢT "
-                 f"tồn ĐẦU KỲ (dù vẫn trong tồn cuối kỳ đã cộng cả nhập kho trong kỳ) — MISA tính tồn "
-                 f"khả dụng THEO THỜI ĐIỂM ghi sổ, nên nếu chứng từ Nhập kho của kỳ này CHƯA được ghi "
-                 f"sổ trong MISA, MISA có thể TỪ CHỐI ghi sổ Xuất kho dù tổng tồn cả kỳ vẫn đủ. Hãy "
-                 f"đảm bảo TẤT CẢ chứng từ Nhập kho trong kỳ đã được ghi sổ TRƯỚC khi ghi sổ file Xuất "
-                 f"kho này. Ví dụ: {vi_du}{them}.")
+    # KHÔNG còn cảnh báo riêng "vượt tồn ĐẦU KỲ" nữa — xem docstring hàm
+    # này. _xk_canh_bao_dau_ky vẫn giữ lại (không xoá) nhưng không gọi ở
+    # đây, chỉ chặn thật sự khi âm tồn kho (đã kiểm tra ở 'vuot' phía trên).
     return _resp_xuat(path, fname,
-                      {"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua),
-                       "X-So-Canh-Bao-Dau-Ky": str(len(canh_bao_dau_ky))})
+                      {"X-So-Dong": str(len(out)), "X-Bo-Qua": str(so_bo_qua)})
 
 @app.post("/api/xk/export-giathanh/{cid}")
 def xk_export_giathanh(cid: int):

@@ -5575,18 +5575,12 @@ async function xkXuatFile(){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const sd=r.headers.get('X-So-Dong')||'';
     const bq=r.headers.get('X-Bo-Qua')||'0';
-    // Mã hàng vượt tồn ĐẦU KỲ (không chặn xuất, khác lỗi 400 vượt tồn cuối
-    // kỳ) — MISA vẫn có thể từ chối ghi sổ nếu Nhập kho trong kỳ chưa ghi sổ
-    // (xem _xk_canh_bao_dau_ky, server.py) — chỉ cảnh báo bằng banner/toast.
-    const cbDauKy=parseInt(r.headers.get('X-So-Canh-Bao-Dau-Ky')||'0');
+    // KHÔNG còn cảnh báo "vượt tồn ĐẦU KỲ" nữa (theo yêu cầu: chỉ thông báo
+    // khi mã hàng nào bị ÂM tồn kho thôi — đã CHẶN xuất hẳn ở server nếu có
+    // mã âm tồn, xem xk_export/_xk_kiem_tra_vuot_ton, sẽ rơi vào catch bên
+    // dưới).
     await xuatFile(r,'XuatKho.xlsx');
     toast(`📤 Đã xuất ${sd} dòng`+(bq!=='0'?` (bỏ qua ${bq} dòng chưa gắn mã)`:''),'ok');
-    if(cbDauKy){
-      await loadCompanies();
-      const c=companies.find(x=>x.id===current);
-      if(c)renderFetchErrorBanner(c);
-      toast(`⚠ ${cbDauKy} mã hàng vượt tồn ĐẦU KỲ — hãy ghi sổ HẾT chứng từ Nhập kho trong kỳ trước khi ghi sổ file Xuất kho này, nếu không MISA có thể từ chối. Xem chi tiết ở banner phía trên`,'err');
-    }
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 
