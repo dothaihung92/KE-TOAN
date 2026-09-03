@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.138"
+APP_BUILD = "2026-08-31.139"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13443,6 +13443,94 @@ def misa_sql_cot(cid: int, database: str = "", bang: str = ""):
         return {"ok": True, "database": database, "bang": bang, "cot": out}
     finally:
         conn.close()
+
+
+def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không sửa/ghi gì) — cho 1 hóa đơn Mua hàng cụ thể
+    (MST NCC + Số HĐ) bị "Sẽ ghi: 0 chứng từ, bỏ qua (đã có)" dù thực tế
+    KHÔNG có trong danh sách MISA export — trả ĐÚNG dữ liệu THẬT mà
+    _misa_ghi_mua_hang/_misa_ghi_mua_hang_dv nhìn thấy khi quyết định "đã
+    có hay chưa": cột NGÀY có dò được không (c_ngay), và TOÀN BỘ ứng viên
+    (RefID/ngày) đang khớp (MST,Số HĐ) này trong PUInvoice (nk/kqk) hoặc
+    PUServiceDetail (dv) — để biết CHÍNH XÁC vì sao bị coi 'đã có': cột
+    ngày không dò được (fallback tin bất kỳ ứng viên nào, không xét ngày)
+    hay có ứng viên khác thật sự nằm trong khoảng ~400 ngày (khớp đúng ý
+    thiết kế) hay ngoài khoảng đó (bug, cần báo lại)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        mst_k = _misa_khncc_chuan_mst(mst).lower()
+        sohd_k = _chuan_shd(sohd).lower()
+        ket = {"mst_nhap": mst, "sohd_nhap": sohd, "mst_chuan_hoa": mst_k, "sohd_chuan_hoa": sohd_k}
+        if loai in ("nk", "kqk"):
+            cols = _misa_cot_bang_that(cur, "PUInvoice")
+            c_ngay = _misa_chon_cot(cols, "RefDate", "InvDate")
+            ket["bang"] = "PUInvoice"
+            ket["cot_thuc_te"] = sorted({v[0] for v in cols.values()})
+            ket["cot_ngay_dung"] = c_ngay
+            sql = ("SELECT RefID, AccountObjectTaxCode, InvNo" +
+                  (", [%s]" % c_ngay if c_ngay else "") + " FROM PUInvoice")
+            ung_vien = []
+            for row in cur.execute(sql).fetchall():
+                mst_raw, inv_raw = row[1], row[2]
+                if (_misa_khncc_chuan_mst(mst_raw).lower() == mst_k and
+                        _chuan_shd(inv_raw).lower() == sohd_k):
+                    ngay_v = row[3] if c_ngay and len(row) > 3 else None
+                    ung_vien.append({"RefID": row[0], "AccountObjectTaxCode_that": mst_raw,
+                                     "InvNo_that": inv_raw,
+                                     "Ngay": ngay_v.isoformat() if hasattr(ngay_v, "isoformat") else ngay_v})
+            ket["so_ung_vien_khop_mst_sohd"] = len(ung_vien)
+            ket["ung_vien"] = ung_vien
+        else:
+            cols = _misa_cot_bang_that(cur, "PUServiceDetail")
+            c_ngay = _misa_chon_cot(cols, "InvDate", "RefDate")
+            ket["bang"] = "PUServiceDetail"
+            ket["cot_thuc_te"] = sorted({v[0] for v in cols.values()})
+            ket["cot_ngay_dung"] = c_ngay
+            sql = ("SELECT TaxAccountObjectTaxCode, InvNo" +
+                  (", [%s]" % c_ngay if c_ngay else "") + " FROM PUServiceDetail")
+            ung_vien = []
+            for row in cur.execute(sql).fetchall():
+                mst_raw, inv_raw = row[0], row[1]
+                if (_misa_khncc_chuan_mst(mst_raw).lower() == mst_k and
+                        _chuan_shd(inv_raw).lower() == sohd_k):
+                    ngay_v = row[2] if c_ngay and len(row) > 2 else None
+                    ung_vien.append({"TaxAccountObjectTaxCode_that": mst_raw, "InvNo_that": inv_raw,
+                                     "Ngay": ngay_v.isoformat() if hasattr(ngay_v, "isoformat") else ngay_v})
+            ket["so_ung_vien_khop_mst_sohd"] = len(ung_vien)
+            ket["ung_vien"] = ung_vien
+
+        if not ket["cot_ngay_dung"]:
+            ket["ket_luan"] = ("KHÔNG dò được cột ngày phù hợp (%s) trên bảng %s — CSDL MISA này có thể "
+                              "dùng tên cột khác. Vì không xét ngày được nên MỌI ứng viên khớp (MST,Số "
+                              "HĐ) đều bị coi là 'đã có' (giữ hành vi CŨ, chưa áp dụng được fix lọc theo "
+                              "ngày) — cần bổ sung đúng tên cột ngày thật (xem 'cot_thuc_te' ở trên)."
+                              % ("RefDate/InvDate" if loai in ("nk", "kqk") else "InvDate/RefDate", ket["bang"]))
+        elif not ket["ung_vien"]:
+            ket["ket_luan"] = ("KHÔNG tìm thấy ứng viên nào khớp (MST,Số HĐ) này trong %s — hóa đơn "
+                              "THẬT SỰ chưa có trong MISA. Nếu 'Import tự động toàn bộ'/'⬆ ... vào MISA' "
+                              "vẫn báo 'đã có, bỏ qua' cho ĐÚNG hóa đơn này thì có khả năng đang chạy "
+                              "build CŨ (chưa cập nhật) — thử khởi động lại phần mềm." % ket["bang"])
+        else:
+            ket["ket_luan"] = ("Tìm thấy %d ứng viên khớp (MST,Số HĐ) — xem cột 'Ngay' của từng ứng viên "
+                              "trong 'ung_vien': nếu ngày CÁCH XA hóa đơn đang xét (khác năm) mà vẫn bị "
+                              "coi 'đã có' thì đây LÀ BUG cần báo lại kèm ảnh này." % ket["so_ung_vien_khop_mst_sohd"])
+        return ket
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-da-co-mua-hang/{cid}")
+def misa_sql_chan_doan_da_co_mua_hang(cid: int, loai: str, mst: str, sohd: str, database: str = ""):
+    """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_vi_sao_da_co_mua_hang. loai:
+    nk/kqk/dv. Dùng khi 1 hóa đơn cụ thể bị báo 'đã có, bỏ qua' trong Mua
+    hàng dù thực tế KHÔNG có trong MISA (đối chiếu bằng file export)."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    if loai not in ("nk", "kqk", "dv"):
+        raise HTTPException(400, "loai phải là nk/kqk/dv")
+    return _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd)
 
 
 @app.post("/api/misa-sql/xem/{cid}")

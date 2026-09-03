@@ -6199,6 +6199,7 @@ function moBangKe(loai){
         <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('nk')" title="Ghi thẳng vào MISA (PUVoucher) — TỰ GHI Sổ Tài chính (không ghi Sổ quản trị, giống Ngân hàng) — cần Danh mục Hàng hóa/NVL + KH/NCC đã import trước">⬆ Nhập kho vào MISA</button>
         <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('kqk')" title="Ghi thẳng vào MISA (PUVoucher) — TỰ GHI Sổ Tài chính (không ghi Sổ quản trị, giống Ngân hàng) — cần Danh mục TSCĐ/CCDC + KH/NCC đã import trước">⬆ Không qua kho vào MISA</button>
         <button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisa('dv')" title="Ghi thẳng vào MISA (PUService) — TỰ GHI Sổ Tài chính (không ghi Sổ quản trị, giống Ngân hàng) — cần mã 'MHDV' + KH/NCC đã có trong MISA">⬆ Dịch vụ vào MISA</button>
+        <button class="btn ghost sm" onclick="muaHangChanDoanDaCoMo()" title="Kiểm tra 1 hóa đơn cụ thể vì sao bị báo 'đã có, bỏ qua' dù thực tế chưa có trong MISA">🔍 Vì sao "đã có"?</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">📚 Danh mục:</span>
@@ -7085,6 +7086,44 @@ async function muaHangImportMisa(loai){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="muaHangImportMisaGhi('${loai}',true)">♻ Ghi đè ${pv.so_trung} chứng từ</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="muaHangImportMisaGhi('${loai}',false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function muaHangChanDoanDaCoMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('misaModalBody').innerHTML=`
+    <div class="hint" style="margin-bottom:10px">Kiểm tra 1 hóa đơn Mua hàng cụ thể (MST NCC + Số HĐ) đang bị báo "đã có, bỏ qua" dù thực tế KHÔNG có trong MISA — chỉ đọc, không sửa/ghi gì.</div>
+    <label style="font-size:13px;font-weight:600">Loại</label>
+    <select id="cdMuaHangLoai" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+      <option value="nk">Nhập kho</option><option value="kqk">Không qua kho</option><option value="dv">Dịch vụ</option>
+    </select>
+    <label style="font-size:13px;font-weight:600">MST NCC</label>
+    <input type="text" id="cdMuaHangMst" placeholder="vd 0110269067" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <label style="font-size:13px;font-weight:600">Số hóa đơn</label>
+    <input type="text" id="cdMuaHangSohd" placeholder="vd 1145469" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#2e5c8a" onclick="muaHangChanDoanDaCoChay()">🔍 Kiểm tra</button>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function muaHangChanDoanDaCoChay(){
+  const loai=document.getElementById('cdMuaHangLoai').value;
+  const mst=document.getElementById('cdMuaHangMst').value.trim();
+  const sohd=document.getElementById('cdMuaHangSohd').value.trim();
+  if(!mst||!sohd){toast('Nhập đủ MST NCC và Số hóa đơn','err');return}
+  toast('Đang kiểm tra (chỉ đọc, không sửa gì)...','');
+  try{
+    const qs=new URLSearchParams({loai,mst,sohd});
+    const d=await api(`/api/misa-sql/chan-doan-da-co-mua-hang/${current}?${qs.toString()}`,{method:'GET'});
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả kiểm tra (CHỈ ĐỌC, không sửa/ghi gì).</div>
+      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px;font-weight:600">${misaEsc(d.ket_luan||'')}</div>
+      <pre style="max-height:50vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="muaHangChanDoanDaCoMo()">← Kiểm tra hóa đơn khác</button>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
