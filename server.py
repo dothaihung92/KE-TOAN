@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.125"
+APP_BUILD = "2026-08-31.126"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13712,14 +13712,26 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
     (không thêm hậu tố '-thuế suất' như mã tự sinh).
 
     Khoá so khớp (ky_tu = nospaces(Tên)+ĐVT) Y HỆT _gen_danh_muc để tương
-    thích — ĐVT lấy từ Unit.UnitName qua UnitID trên InventoryItem. CHỈ
-    THÊM cho tên hàng CHƯA có trong bản đồ, KHÔNG ghi đè map hiện có — mã
-    tự sinh trước đây CÓ THỂ đã dùng trong chứng từ đã ghi sổ, đổi map bây
-    giờ sẽ làm hoá đơn CŨ (đã ghi mã tự sinh) và hoá đơn MỚI (nếu đổi sang
-    mã MISA) không còn nhất quán; giữ nguyên để hoá đơn MỚI vẫn theo đúng
-    mã đã dùng quen, không có gì sai (phần mềm đã tự xử lý đúng việc "1 sản
-    phẩm nhiều mã" ở khâu Xuất Kho, xem _xk_gan_1_muc). Chỉ lọc InventoryItem
+    thích — ĐVT lấy từ Unit.UnitName qua UnitID trên InventoryItem. Tên
+    hàng CHƯA có trong bản đồ -> THÊM mới. Tên hàng ĐÃ có trong bản đồ
+    nhưng đang trỏ tới mã TỰ SINH của chính phần mềm (khuôn 'HH00000'/
+    'NVL00000', xem _tu_sinh bên dưới) -> GHI ĐÈ bằng mã THẬT có sẵn trong
+    MISA (mã tự sinh chỉ là placeholder tạm, không nên giữ khi đã biết mã
+    thật) — ĐÃ XÁC NHẬN QUA THỬ NGHIỆM THẬT: công ty đã Sinh Danh mục cho
+    HẦU HẾT các mặt hàng từ trước (mã tự sinh đã có sẵn trong bản đồ cho
+    gần như MỌI tên hàng) khiến lần đồng bộ ĐẦU TIÊN báo "học 0 mã mới" dù
+    MISA có sẵn 541 mã — vì quy tắc "chỉ thêm, không ghi đè" (bản đầu tiên)
+    chặn đứng chính những trường hợp CẦN sửa nhất. Tên hàng ĐÃ trỏ tới 1 mã
+    KHÔNG theo khuôn tự sinh (tức đã là mã MISA thật, có thể do lần đồng bộ
+    trước) thì GIỮ NGUYÊN, không đổi qua đổi lại. Chỉ lọc InventoryItem
     theo đúng TK kho của loai (_MISA_INV_ACC) để không lẫn danh mục khác.
+
+    LƯU Ý: ghi đè bản đồ CHỈ ảnh hưởng hoá đơn MỚI xử lý TỪ SAU thời điểm
+    đồng bộ — KHÔNG đụng tới các dòng ĐÃ LƯU trong Danh mục (store['rows'])
+    hay chứng từ ĐÃ GHI vào MISA trước đó (vẫn giữ nguyên mã tự sinh cũ,
+    không có gì sai — phần mềm đã tự xử lý đúng việc "1 sản phẩm nhiều mã"
+    ở khâu Xuất Kho, xem _xk_gan_1_muc); chỉ là TỪ NAY hoá đơn mới sẽ đi
+    thẳng vào đúng mã MISA thật thay vì tiếp tục cộng dồn vào mã tự sinh.
 
     Xác nhận đúng qua báo cáo thật: MISA 'Tổng hợp tồn kho' có 3 mã KHÁC
     NHAU cho CÙNG tên 'Chậu Polystone D35xH45 cm - Matte Black' (HH00063-8
@@ -13753,22 +13765,32 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
     finally:
         conn.close()
 
+    def _tu_sinh(ma):
+        ma = str(ma or "")
+        return ma.startswith(prefix) and ma[len(prefix):].isdigit()
+
     data = _doc_du_lieu_cty(cid)
     store = data.get("dm_" + loai, {}) or {}
     keymap = dict(store.get("map", {}))
-    so_them = 0
-    vi_du = []
+    so_them = so_thay = 0
+    vi_du_them, vi_du_thay = [], []
     for ky_tu, ma_misa in misa_map.items():
-        if ky_tu in keymap:
-            continue
-        keymap[ky_tu] = ma_misa
-        so_them += 1
-        if len(vi_du) < 10:
-            vi_du.append({"ky_tu": ky_tu, "ma": ma_misa})
+        cu = keymap.get(ky_tu)
+        if cu is None:
+            keymap[ky_tu] = ma_misa
+            so_them += 1
+            if len(vi_du_them) < 10:
+                vi_du_them.append({"ky_tu": ky_tu, "ma": ma_misa})
+        elif cu != ma_misa and _tu_sinh(cu) and not _tu_sinh(ma_misa):
+            keymap[ky_tu] = ma_misa
+            so_thay += 1
+            if len(vi_du_thay) < 10:
+                vi_du_thay.append({"ky_tu": ky_tu, "ma_cu": cu, "ma_moi": ma_misa})
     store["map"] = keymap
     data["dm_" + loai] = store
     _ghi_du_lieu_cty(cid, data)
-    return {"so_ma_misa": len(misa_map), "so_them_moi": so_them, "vi_du": vi_du}
+    return {"so_ma_misa": len(misa_map), "so_them_moi": so_them, "so_thay_the": so_thay,
+            "vi_du": vi_du_them, "vi_du_thay_the": vi_du_thay}
 
 
 @app.post("/api/danh-muc-hang/dong-bo-misa/{cid}")

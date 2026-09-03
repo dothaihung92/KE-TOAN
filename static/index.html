@@ -8493,20 +8493,23 @@ async function dmQuetSuaDvtGhi(){
   }catch(e){toast('Lỗi sửa: '+e.message,'err')}
 }
 // Đồng bộ mã hàng ĐÃ CÓ SẴN trong MISA (kể cả mã tạo trước khi dùng phần
-// mềm này, vd 'MH316') vào bản đồ tên->mã của phần mềm — CHỈ cập nhật bản
-// đồ dùng cho lần "Sinh Danh mục" SAU (dòng CHƯA từng gặp), KHÔNG đụng tới
-// dữ liệu đã lưu/đã ghi vào MISA trước đó (xem _misa_dong_bo_danh_muc_tu_misa).
-// Việc này giờ đã TỰ ĐỘNG chạy mỗi lần mở Danh mục/Import tự động toàn bộ
-// (xem _tu_dong_bo_danh_muc_misa, server.py) — nút này chỉ để chạy LẠI
-// ngay lập tức (vd vừa tạo/sửa mã trong MISA, không cần đóng mở lại màn).
+// mềm này, vd 'MH316') vào bản đồ tên->mã của phần mềm — cập nhật bản đồ
+// dùng cho lần "Sinh Danh mục" SAU: THÊM cho tên hàng CHƯA từng gặp, và
+// THAY cho tên hàng đang trỏ mã TỰ SINH (placeholder 'HH00000') bằng đúng
+// mã thật trong MISA — KHÔNG đụng tới dữ liệu đã lưu/đã ghi vào MISA
+// trước đó (xem _misa_dong_bo_danh_muc_tu_misa). Việc này giờ đã TỰ ĐỘNG
+// chạy mỗi lần mở Danh mục/Import tự động toàn bộ (xem
+// _tu_dong_bo_danh_muc_misa, server.py) — nút này chỉ để chạy LẠI ngay
+// lập tức (vd vừa tạo/sửa mã trong MISA, không cần đóng mở lại màn).
 async function dmDongBoMisa(){
   if(!['hh','nvl'].includes(nlDMMode)){toast('Chức năng này cho DM Hàng hóa / NVL','err');return}
   toast('Đang đồng bộ mã hàng có sẵn trong MISA...','');
   try{
     const d=await api(`/api/danh-muc-hang/dong-bo-misa/${current}?loai=${nlDMMode}`,{method:'POST'});
-    toast(`✓ Đã học ${d.so_them_moi} mã hàng có sẵn trong MISA (tổng ${d.so_ma_misa} mã cùng loại trong MISA) — `+
-      (d.so_them_moi>0?`từ nay tên hàng trùng sẽ tự dùng lại đúng mã này, không sinh mã mới trùng lặp nữa.`
-        :`không có tên hàng mới nào cần học thêm.`)+
+    const soThayThe=d.so_thay_the||0;
+    toast(`✓ Đã học ${d.so_them_moi} mã mới, thay ${soThayThe} mã tự sinh bằng mã MISA thật (tổng ${d.so_ma_misa} mã cùng loại trong MISA) — `+
+      ((d.so_them_moi>0||soThayThe>0)?`từ nay tên hàng trùng sẽ tự dùng lại đúng mã này, không sinh mã mới trùng lặp nữa.`
+        :`không có gì mới cần học/thay thêm.`)+
       ` Bấm lại "Sinh Danh mục" từ bảng kê để áp dụng cho các hoá đơn sắp xử lý.`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
