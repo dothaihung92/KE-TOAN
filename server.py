@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.141"
+APP_BUILD = "2026-08-31.142"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13569,10 +13569,50 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
                             f"xét MST/Số HĐ) dù dữ liệu Bảng kê Đầu vào vẫn còn nguyên — ĐÂY LÀ BUG cần sửa "
                             f"gấp, không phải do đã có sẵn trong MISA.")
                 if not ket["so_ct_cua_hoa_don"]:
-                    ket["canh_bao_gop_nham"] = (
-                        "KHÔNG tìm thấy dòng nào trong Bảng kê Đầu vào hiện tại khớp đúng (MST,Số HĐ) này "
-                        "ở bước sinh dữ liệu Mua hàng — kiểm tra lại đúng công ty/kỳ đang mở, hoặc hóa đơn "
-                        "có thể đã bị sửa/xoá khỏi Bảng kê Đầu vào so với lúc trước.")
+                    # Không khớp khi xét CẢ (MST,Số HĐ) — dò thêm CHỈ theo Số HĐ
+                    # (bỏ qua MST) trên DỮ LIỆU THÔ rows_in (TRƯỚC lọc TK Nợ) để
+                    # phân biệt: (a) MST trên Bảng kê Đầu vào bị LỆCH ĐỊNH DẠNG so
+                    # với MST đang tra (vd có hậu tố chi nhánh '-001' mà
+                    # _dinh_dang_mst thêm cho MST 13 số, trong khi MST đối chiếu
+                    # chỉ có 10 số gốc) hay (b) hóa đơn thật sự không có ở đây.
+                    hlow_raw = [str(h or "").strip().lower() for h in header_in]
+                    def _tim_cot_tho(eqs, contains):
+                        for i, h in enumerate(hlow_raw):
+                            if h in eqs:
+                                return i
+                        for i, h in enumerate(hlow_raw):
+                            if any(k in h for k in contains):
+                                return i
+                        return -1
+                    i_so_raw = _tim_cot_tho(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn"))
+                    i_mst_raw = _tim_cot_tho(("mst bán", "mst"), ("mst",))
+                    i_no_raw = _tim_cot_tho(("nợ",), ())
+                    dong_theo_sohd = []
+                    if i_so_raw >= 0:
+                        for r in rows_in:
+                            shd_r = r[i_so_raw] if i_so_raw < len(r) else ""
+                            if _chuan_shd(str(shd_r or "")).lower() == sohd_k:
+                                mst_r = r[i_mst_raw] if (0 <= i_mst_raw < len(r)) else ""
+                                no_r = r[i_no_raw] if (0 <= i_no_raw < len(r)) else ""
+                                dong_theo_sohd.append({
+                                    "mst_tho_trong_bang_ke": mst_r,
+                                    "mst_da_dinh_dang": _dinh_dang_mst(mst_r),
+                                    "no_tk": no_r,
+                                })
+                    ket["dong_khop_theo_so_hd_rieng"] = dong_theo_sohd
+                    if dong_theo_sohd:
+                        ket["canh_bao_gop_nham"] = (
+                            f"CÓ {len(dong_theo_sohd)} dòng trong Bảng kê Đầu vào khớp ĐÚNG Số HĐ '{sohd}' "
+                            f"nhưng MST KHÔNG khớp '{mst}' — xem 'dong_khop_theo_so_hd_rieng' để biết MST "
+                            f"THẬT đang lưu trong bảng là gì. Khả năng cao đây là LỆCH ĐỊNH DẠNG/GIÁ TRỊ MST "
+                            f"(vd hậu tố chi nhánh '-001', hoặc gõ thiếu/dư số) giữa MST đang tra và MST trên "
+                            f"Bảng kê Đầu vào — KHÔNG phải lỗi phần mềm, cần đối chiếu lại đúng MST trên hóa "
+                            f"đơn gốc rồi sửa lại 1 trong 2 nơi cho khớp.")
+                    else:
+                        ket["canh_bao_gop_nham"] = (
+                            "KHÔNG tìm thấy dòng nào trong Bảng kê Đầu vào hiện tại khớp đúng (MST,Số HĐ) này "
+                            "ở bước sinh dữ liệu Mua hàng — kiểm tra lại đúng công ty/kỳ đang mở, hoặc hóa đơn "
+                            "có thể đã bị sửa/xoá khỏi Bảng kê Đầu vào so với lúc trước.")
         except Exception as e:
             ket["loi_kiem_tra_gop_nhom"] = str(e)[:300]
         return ket
