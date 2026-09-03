@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.136"
+APP_BUILD = "2026-08-31.137"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17588,23 +17588,67 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
         # khách tự nhập bị ghi thêm 1 bản trùng vì _pm_invoices chỉ biết
         # chứng từ DO CHÍNH phần mềm tạo trước đó, không thấy được chứng từ
         # người dùng tự nhập).
-        _da_co_hoa_don = {}   # (mst_lower, sohd_lower) -> set các Ký hiệu HĐ đã thấy
+        # Cột NGÀY của SAVoucher (nếu dò được) — dùng để loại bớt khớp NHẦM
+        # với hóa đơn LỊCH SỬ không liên quan trong _da_co_khop bên dưới (xem
+        # giải thích ở đó). None nếu không dò được cột nào phù hợp — khi đó
+        # GIỮ NGUYÊN hành vi cũ (không xét ngày, an toàn cho schema MISA
+        # khác không có cột này).
+        c_ngay_sav = _misa_chon_cot(_misa_cot_bang_that(cur, "SAVoucher"), "RefDate", "InvDate")
+        _da_co_hoa_don = {}   # (mst_lower, sohd_lower) -> [(ky_hieu_lower, ngay_dt|None), ...]
         try:
-            for ax, invno, invkh in cur.execute(
-                    "SELECT ISNULL(AccountObjectTaxCode,''), ISNULL(InvNo,''), ISNULL(InvSeries,'') "
-                    "FROM SAVoucher WHERE ISNULL(InvNo,'')<>''").fetchall():
-                bk = (_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower())
-                _da_co_hoa_don.setdefault(bk, set()).add(str(invkh or "").strip().lower())
+            sql_dch = ("SELECT ISNULL(AccountObjectTaxCode,''), ISNULL(InvNo,''), ISNULL(InvSeries,'')" +
+                      (", [%s]" % c_ngay_sav if c_ngay_sav else "") +
+                      " FROM SAVoucher WHERE ISNULL(InvNo,'')<>''")
+            for row_dch in cur.execute(sql_dch).fetchall():
+                # LỖI TỪNG DÒNG (vd thiếu cột ngày do driver/schema lạ) CHỈ bỏ
+                # qua đúng dòng đó — KHÔNG được để làm hỏng/bỏ dở cả danh sách
+                # (nếu 1 lỗi giữa chừng làm _da_co_hoa_don dựng THIẾU, mọi hóa
+                # đơn còn lại sau đó bị coi nhầm "chưa có" -> ghi TRÙNG hàng
+                # loạt, còn nguy hiểm hơn cả lỗi đang sửa ở đây).
+                try:
+                    ax, invno, invkh = row_dch[0], row_dch[1], row_dch[2]
+                    ngay_cu = row_dch[3] if c_ngay_sav and len(row_dch) > 3 else None
+                    bk = (_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower())
+                    _da_co_hoa_don.setdefault(bk, []).append((str(invkh or "").strip().lower(), ngay_cu))
+                except Exception:
+                    pass
         except Exception:
             pass
 
-        def _da_co_khop(bk, kh_moi):
+        def _da_co_khop(bk, kh_moi, ngay_dt_moi=None):
             """True nếu (MST, Số HĐ) này ĐÃ CÓ trong MISA và KHÔNG chắc
-            chắn là hóa đơn khác Ký hiệu (xem _ky_hieu_chac_chan_khac)."""
+            chắn là hóa đơn khác Ký hiệu (xem _ky_hieu_chac_chan_khac).
+
+            Khi Ký hiệu KHÔNG khớp Y HỆT (phải dùng nhánh "chưa chắc chắn
+            khác", 1 trong 2 bên rỗng) VÀ dò được ngày cả 2 phía -> đòi
+            thêm NGÀY phải gần nhau (trong khoảng ~400 ngày) mới coi là
+            cùng 1 hóa đơn — tránh khớp NHẦM với hóa đơn LỊCH SỬ hoàn toàn
+            không liên quan: MST rỗng (khách lẻ) dồn chung 1 nhóm "kl" theo
+            Số HĐ ở TRÊN, nên hóa đơn khách lẻ Số HĐ nhỏ (1, 2...) của kỳ
+            ĐANG import RẤT DỄ trùng số với 1 hóa đơn khách lẻ hoàn toàn
+            KHÁC ở kỳ RẤT XA trong quá khứ (MISA có sẵn dữ liệu từ TRƯỚC
+            khi dùng phần mềm này) — xác nhận đúng qua phản hồi người dùng
+            + Đối chiếu tổng giá trị & VAT: hóa đơn Số HĐ 1/2 (Khách lẻ)
+            tháng 1/2026 bị "Import tự động toàn bộ" báo NHẦM 'đã có sẵn
+            trong MISA' (0 chứng từ được ghi) trong khi đối chiếu xác nhận
+            CHẮC CHẮN không hề có bên MISA. Ký hiệu khớp Y HỆT thì tin
+            tưởng hoàn toàn, KHÔNG xét ngày (vẫn đúng thiết kế cũ)."""
             kh_da_co = _da_co_hoa_don.get(bk)
             if kh_da_co is None:
                 return False
-            return any(not _ky_hieu_chac_chan_khac(kh_moi, kh_cu) for kh_cu in kh_da_co)
+            for kh_cu, ngay_cu in kh_da_co:
+                if kh_moi and kh_cu == kh_moi:
+                    return True   # cùng 1 Ký hiệu THẬT (không rỗng) -> tin tưởng hoàn toàn
+                if _ky_hieu_chac_chan_khac(kh_moi, kh_cu):
+                    continue
+                if ngay_dt_moi and ngay_cu:
+                    try:
+                        if abs((ngay_dt_moi - ngay_cu).days) > 400:
+                            continue
+                    except Exception:
+                        pass
+                return True
+            return False
         ket = []
         them_ct = trung = bo_kh = go = so_ngay_loi = so_tien_0 = bo_tk = 0
         tk_thay = set()
@@ -17683,7 +17727,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             bk = (mst_k, sohd.strip().lower())
             kh_moi = kyhieu.strip().lower()
             pm_e = _pm_tim_khop(bk, kh_moi)
-            if pm_e is None and _da_co_khop(bk, kh_moi):
+            if pm_e is None and _da_co_khop(bk, kh_moi, None if ngay_loi else ngay_dt):
                 trung += 1
                 ket.append({"so_hd": sohd, "kh_mst": mst,
                             "trang_thai": "đã có sẵn trong MISA (không phải do phần mềm tạo, bỏ qua)"})
