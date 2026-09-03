@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.128"
+APP_BUILD = "2026-08-31.129"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10160,12 +10160,30 @@ def _gen_danh_muc_ts(cid, loai, header, rows):
     # dòng MỚI đẩy lên TRÊN, dòng cũ (đã lưu) xếp phía DƯỚI
     return new_rows + saved_rows, len(new_rows)
 
+def _dm_ky_tu(ten, dvt):
+    """Khoá so khớp Tên hàng+ĐVT dùng cho Danh mục Hàng hóa/NVL (dò tên hàng
+    đã có mã — cả trong bản đồ tự học của phần mềm LẪN mã có sẵn trong MISA,
+    xem _gen_danh_muc/_misa_dong_bo_danh_muc_tu_misa) — bỏ khoảng trắng thừa
+    rồi viết HOA toàn bộ (Python .upper() xử lý đúng cả ký tự có dấu tiếng
+    Việt) để KHÔNG PHÂN BIỆT chữ hoa/thường.
+
+    Xác nhận đúng qua báo cáo thật: MISA lưu tên hàng KHÔNG NHẤT QUÁN chữ
+    hoa/thường giữa các mã — có mã lưu tên toàn chữ HOA ('CHẬU POLYSTONE
+    WILV24 - MTWT'), có mã chỉ viết hoa chữ đầu mỗi từ gốc nhưng để sót hậu
+    tố ('Chậu Polystone Auc60L'), trong khi bảng kê luôn dùng đúng 1 kiểu
+    riêng của nó ('Chậu Polystone WILV24 - MTWT') — so khớp PHÂN BIỆT hoa/
+    thường (bản trước) khiến 44/255 mặt hàng ĐÃ CÓ mã trong MISA vẫn bị tự
+    sinh thêm mã HH0000X mới trùng lặp dù đúng cùng sản phẩm."""
+    return ("".join(str(ten or "").split()) + str(dvt or "")).upper()
+
+
 def _gen_danh_muc(cid, loai, header, rows):
     """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL ('nvl', Nợ 152).
-    Mã = base (theo Ký tự=nospaces(Tên)+ĐVT) + '-' + thuế suất (vd HH00001-8) —
-    TRỪ KHI base là mã CÓ SẴN thật trong MISA đã học qua
-    _misa_dong_bo_danh_muc_tu_misa (dùng NGUYÊN VẸN, không thêm hậu tố).
-    Cột Kho mặc định HH/NVL. Nối tiếp + không lặp dòng. Trả (all_rows, so_moi)."""
+    Mã = base (theo Ký tự=_dm_ky_tu(Tên,ĐVT), KHÔNG phân biệt hoa/thường) +
+    '-' + thuế suất (vd HH00001-8) — TRỪ KHI base là mã CÓ SẴN thật trong
+    MISA đã học qua _misa_dong_bo_danh_muc_tu_misa (dùng NGUYÊN VẸN, không
+    thêm hậu tố). Cột Kho mặc định HH/NVL. Nối tiếp + không lặp dòng. Trả
+    (all_rows, so_moi)."""
     if _dm_la_ts(loai):
         return _gen_danh_muc_ts(cid, loai, header, rows)
     prefix = "HH" if loai == "hh" else "NVL"
@@ -10185,14 +10203,18 @@ def _gen_danh_muc(cid, loai, header, rows):
         return r[i] if 0 <= i < len(r) else ""
 
     def rk(row):
-        # Khoá theo Ký tự (ky_tu — tên+ĐVT, ỔN ĐỊNH) chứ KHÔNG theo Mã hàng
-        # (mã CÓ THỂ đổi khi _misa_dong_bo_danh_muc_tu_misa thay mã tự sinh
-        # bằng mã thật trong MISA cho cùng ky_tu — nếu khoá theo mã, mọi dòng
-        # ĐÃ LƯU trước đó sẽ KHÔNG còn khớp lại được (mã mới != mã cũ đã lưu)
-        # nên bị hiểu nhầm là "dòng MỚI" toàn bộ, dù thực ra chỉ là mã đã đổi
-        # — đã xác nhận qua báo cáo thật: 141/141 dòng đột nhiên báo "mới"
-        # ngay sau khi đồng bộ, dù dữ liệu bảng kê không đổi gì cả).
-        return f"{gv(row,DM_I_KY)}|{gv(row,DM_I_HD)}|{gv(row,DM_I_NGAY)}|{gv(row,DM_I_TT)}"
+        # Khoá theo Ký tự TÍNH LẠI TỪ Tên+ĐVT (_dm_ky_tu, ỔN ĐỊNH) — KHÔNG
+        # đọc thẳng cột Ký tự đã lưu (có thể LỖI THỜI nếu công thức _dm_ky_tu
+        # từng đổi, vd thêm chuẩn hoá hoa/thường — đọc thẳng cột cũ sẽ lệch
+        # với ky_tu MỚI tính cho dòng vừa xử lý, y hệt lỗi đã gặp) — và KHÔNG
+        # theo Mã hàng (mã CÓ THỂ đổi khi _misa_dong_bo_danh_muc_tu_misa thay
+        # mã tự sinh bằng mã thật trong MISA cho cùng ky_tu — nếu khoá theo
+        # mã, mọi dòng ĐÃ LƯU trước đó sẽ KHÔNG còn khớp lại được nên bị hiểu
+        # nhầm là "dòng MỚI" toàn bộ, dù thực ra chỉ là mã đã đổi — đã xác
+        # nhận qua báo cáo thật: 141/141 dòng đột nhiên báo "mới" ngay sau
+        # khi đồng bộ, dù dữ liệu bảng kê không đổi gì cả).
+        ky = _dm_ky_tu(gv(row, DM_I_TEN), gv(row, DM_I_DVT))
+        return f"{ky}|{gv(row,DM_I_HD)}|{gv(row,DM_I_NGAY)}|{gv(row,DM_I_TT)}"
 
     seen = set(rk(r) for r in saved_rows if len(r) >= 10)
     new_rows = []
@@ -10204,7 +10226,7 @@ def _gen_danh_muc(cid, loai, header, rows):
         dvt = str(gv(r, col["dvt"]) or "").strip()
         if not ten:
             continue
-        ky_tu = "".join(ten.split()) + dvt
+        ky_tu = _dm_ky_tu(ten, dvt)
         if ky_tu in keymap:
             base = keymap[ky_tu]
         else:
@@ -10250,7 +10272,13 @@ def _luu_danh_muc(cid, loai, dm_rows):
         ma = str(r[0]) if r else ""
         base = ma.split("-")[0] if ma else ""
         if not _dm_la_ts(loai):
-            ky = str(r[DM_I_KY]) if len(r) > DM_I_KY else ""
+            # Tính LẠI ky_tu từ Tên+ĐVT (_dm_ky_tu) thay vì đọc thẳng cột Ký
+            # tự đã lưu — TỰ SỬA những dòng có cột Ký tự lỗi thời/lệch chuẩn
+            # hoá (vd lưu từ bản phần mềm cũ trước khi có chuẩn hoá hoa/
+            # thường, hoặc dòng vừa nạp từ "👁 Xem danh mục MISA" chưa chắc
+            # cùng công thức) — luôn nhất quán với ky_tu MỚI mà _gen_danh_muc
+            # dùng để tra bản đồ.
+            ky = _dm_ky_tu(r[DM_I_TEN], r[DM_I_DVT]) if len(r) > DM_I_DVT else ""
             if ky and base:
                 keymap[ky] = base
         if base.startswith(prefix) and base[len(prefix):].isdigit():
@@ -10393,7 +10421,7 @@ def _nhap_danh_muc(cid, loai, wb):
                 ma = f"{base}-{rate}"
                 so_moi += 1
             ten_to_base[tc] = base
-            ky_tu = "".join(ten.split()) + dvt
+            ky_tu = _dm_ky_tu(ten, dvt)
             kho_val = str(gv(r, col["kho"]) or "").strip() if col["kho"] >= 0 else ""
             newrow = [ma, ten, dvt, rate, ky_tu, sl, dgia, tt, sohd, ngay, kho_val or kho_md]
 
@@ -13767,7 +13795,7 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
             if str(acc or "").strip() not in accs:
                 continue
             dvt = unit_ten.get(str(unit_id or "").strip(), "")
-            ky_tu = "".join(name.split()) + dvt
+            ky_tu = _dm_ky_tu(name, dvt)
             misa_map.setdefault(ky_tu, code)
     finally:
         conn.close()
@@ -13849,7 +13877,7 @@ def _misa_doc_toan_bo_danh_muc(cid, database, loai="hh"):
             if str(acc or "").strip() not in accs:
                 continue
             dvt = unit_ten.get(str(unit_id or "").strip(), "")
-            ky_tu = "".join(name.split()) + dvt
+            ky_tu = _dm_ky_tu(name, dvt)
             rate = tax if isinstance(tax, (int, float)) else ""
             rows.append([code, name, dvt, rate, ky_tu, "", "", "", "", "", kho])
     finally:
