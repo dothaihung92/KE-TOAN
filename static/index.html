@@ -4029,7 +4029,7 @@ async function luuCaHaiBangKe(){
     let tong=0;
     if(nlChung.in){await fetch(`/api/nhap-lieu/save/${current}?loai=in`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.in)});tong+=nlChung.in.so_dong||0;}
     if(nlChung.out){await fetch(`/api/nhap-lieu/save/${current}?loai=out`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.out)});tong+=nlChung.out.so_dong||0;}
-    if(nlChung.ctbr&&nlChung.ctbr.so_dong){await fetch(`/api/nhap-lieu/save-ctbr-gop/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.ctbr)});}
+    if(nlChung.ctbr&&nlChung.ctbr.so_dong){await fetch(`/api/nhap-lieu/save/${current}?loai=ctbr`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.ctbr)});}
     const co=companies.find(c=>c.id===current);
     toast(`💾 Đã lưu ${tong} dòng cho ${co?co.ten:'công ty'}`,'ok');
     nlChung={in:null,out:null,ctbr:null};

@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.132"
+APP_BUILD = "2026-08-31.133"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9708,7 +9708,23 @@ async def nhap_lieu_import_nhan_vien(cid: int, request: Request):
 
 @app.post("/api/nhap-lieu/save/{cid}")
 async def nhap_lieu_save(cid: int, request: Request, loai: str = "in"):
-    """Lưu bộ dữ liệu Nhập Liệu của công ty (mỗi công ty 1 bộ/loại, import đè lên)."""
+    """Lưu bộ dữ liệu Nhập Liệu của công ty (mỗi công ty 1 bộ/loại, import đè lên
+    — "1 lần Lưu = 1 kỳ MỚI thay thế kỳ cũ", giống 'in'(Đầu vào)/'out'(Đầu ra)).
+
+    loai='ctbr' (Chi tiết BÁN RA, nguồn Xuất Kho — lưu qua luồng '💾 Lưu' bình
+    thường ở màn Nhập Liệu, xem luuCaHaiBangKe): CŨNG thay thế hoàn toàn (KHÔNG
+    gộp) — nếu công ty cần TÍCH LUỸ dữ liệu bán ra qua NHIỀU đợt import khác kỳ
+    (vd xử lý liền Quý 1+Quý 2/2026) thì dùng nút RIÊNG '➕ Import thêm dữ liệu'
+    ở màn Xuất Kho (xem _xk_gop_them_ban_hang) — đó mới là luồng GỘP THÊM,
+    không đụng dữ liệu ctbr đã lưu qua '💾 Lưu'. Người dùng báo cáo đúng lỗi
+    ngược: đang xử lý dữ liệu CHỈ tháng 8 (import qua '💾 Lưu' bình thường,
+    KHÔNG dùng 'Import thêm dữ liệu') nhưng Xuất Kho vẫn còn dữ liệu tháng 7 cũ
+    — vì trước đây '💾 Lưu' của ctbr bị đổi sang gọi nhầm sang luồng GỘP (xem
+    lịch sử nhap_lieu_save_ctbr_gop) để giải quyết 1 ca khác (tích luỹ nhiều kỳ)
+    — nay tách rõ: '💾 Lưu' luôn LÀ kỳ hiện tại (thay thế), CHỈ nút riêng
+    'Import thêm dữ liệu' mới gộp. Thay ctbr xong RESET LUÔN 'xk_giathanh' (chỉ
+    khi có rows mới) để 'Dò mã hàng tự động' lần sau tự dựng lại TỪ ĐẦU đúng
+    dữ liệu ctbr vừa thay (không còn sót dòng của kỳ cũ đã thay thế)."""
     body = await request.json()
     header = body.get("header", [])
     rows = body.get("rows", [])
@@ -9762,6 +9778,12 @@ async def nhap_lieu_save(cid: int, request: Request, loai: str = "in"):
     data_cty[f"nhap_lieu_{loai}"] = {
         "header": header, "rows": rows,
         "updated_at": datetime.datetime.now().isoformat()}
+    if loai == "ctbr" and rows:
+        # ctbr vừa được THAY THẾ hoàn toàn (không gộp, xem docstring trên) ->
+        # xk_giathanh (đã dựng từ ctbr CŨ, có thể còn dòng của kỳ trước) không
+        # còn khớp với ctbr MỚI -> xoá để lần "Dò mã hàng tự động" kế tiếp tự
+        # bootstrap lại TỪ ĐẦU đúng dữ liệu vừa thay (xem xk_tao_giathanh).
+        data_cty["xk_giathanh"] = []
     _ghi_du_lieu_cty(cid, data_cty)
 
     file_du_lieu = _du_lieu_cty_path(cid) or ""
@@ -12635,24 +12657,23 @@ def _xk_gop_them_ban_hang(cid, header_moi, rows_moi, on_progress=None):
 
 @app.post("/api/nhap-lieu/save-ctbr-gop/{cid}")
 async def nhap_lieu_save_ctbr_gop(cid: int, request: Request):
-    """Lưu dữ liệu 'Chi tiết BÁN RA' (ctbr, nguồn Xuất Kho) đọc được từ luồng
-    Import & Lưu THÔNG THƯỜNG ở màn Nhập Liệu (Bảng kê Đầu ra) — GỘP THÊM
-    vào ctbr đã có (_xk_gop_them_ban_hang), KHÔNG thay thế/xoá dữ liệu ctbr
-    của các lần Import & Lưu TRƯỚC đó.
+    """Lưu dữ liệu 'Chi tiết BÁN RA' (ctbr, nguồn Xuất Kho) đọc được từ file —
+    GỘP THÊM vào ctbr đã có (_xk_gop_them_ban_hang), KHÔNG thay thế/xoá dữ
+    liệu ctbr của các lần trước. Dùng cho ĐÚNG 1 luồng: nút '➕ Import thêm
+    dữ liệu' ở màn Xuất Kho — khi công ty cần TÍCH LUỸ dữ liệu bán ra của
+    NHIỀU kỳ khác nhau cùng lúc (vd Quý 1 rồi Quý 2/2026) để trừ tồn kho
+    tuần tự đúng cho TOÀN BỘ các đợt, không phải chỉ đợt gần nhất.
 
-    Sửa lỗi: 'in'/'out' (Bảng kê Đầu vào/Đầu ra) đúng là "mỗi lần Lưu = 1 bộ
-    MỚI thay thế bộ cũ" (đại diện đúng kỳ đang làm việc hiện tại, xem
-    nhap_lieu_save) — nhưng trước đây JS (luuCaHaiBangKe) lại LƯU CTBR CÙNG
-    KIỂU THAY THẾ đó (gọi thẳng /api/nhap-lieu/save?loai=ctbr), trong khi
-    ctbr PHẢI tích luỹ qua nhiều lần Import & Lưu khác nhau (đúng thiết kế
-    đã có sẵn cho nút '➕ Import thêm dữ liệu' ở Xuất Kho, xem
-    _xk_gop_them_ban_hang) — vì Xuất Kho cần dữ liệu bán ra của TOÀN BỘ các
-    đợt đã import để trừ tồn kho tuần tự đúng, không phải chỉ đợt gần nhất.
-    Import nhiều đợt (vd file Quý 1/2026 rồi file Quý 2/2026) trước đây làm
-    MẤT dữ liệu Xuất Kho của đợt import trước — đúng lỗi người dùng báo cáo:
-    "tôi import dữ liệu từ tháng 1/2026 - tháng 6/2026 để xử lý kho nhưng
-    phần mềm chỉ lấy dữ liệu từ quý 2/2026 thôi... nếu import như thế nào
-    thì sẽ xử lý những dữ liệu import chứ không phải theo kỳ nhập liệu"."""
+    PHÂN BIỆT RÕ với '💾 Lưu' (nhap_lieu_save, loai='ctbr') ở màn Nhập Liệu:
+    đó là luồng THAY THẾ (mỗi lần Lưu = 1 kỳ MỚI, giống 'in'/'out') — dùng khi
+    xử lý ĐÚNG 1 kỳ hiện tại (vd "chỉ có dữ liệu tháng 8"), không được lẫn dữ
+    liệu kỳ trước. Từng có lúc 2 luồng bị GỘP LÀM 1 (mọi lần '💾 Lưu' ctbr đều
+    tích luỹ) để sửa 1 báo cáo thật ("import Quý 1 rồi Quý 2 nhưng phần mềm
+    chỉ lấy Quý 2") — nhưng lại gây ĐÚNG lỗi ngược ở 1 công ty khác: xử lý
+    riêng tháng 8 (chỉ dùng '💾 Lưu' bình thường, KHÔNG bấm 'Import thêm dữ
+    liệu') mà Xuất Kho vẫn còn sót dữ liệu tháng 7 cũ. Nay tách lại đúng theo
+    Ý ĐỊNH người dùng thể hiện qua ĐÚNG nút họ bấm: '💾 Lưu' luôn là kỳ hiện
+    tại (thay thế); CHỈ bấm '➕ Import thêm dữ liệu' mới có nghĩa tích luỹ."""
     body = await request.json()
     header = body.get("header") or []
     rows = body.get("rows") or []
