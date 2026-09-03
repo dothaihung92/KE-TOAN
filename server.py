@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.131"
+APP_BUILD = "2026-08-31.132"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21798,6 +21798,103 @@ def misa_sql_kiem_tra_cheo_gtgt(cid: int, quy: int, nam: int, database: str = ""
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_chan_doan_kiem_tra_cheo_gtgt(cid, database, quy, nam)
+
+
+def _misa_chan_doan_vi_sao_thue_dau_ra_0(cid, database, quy, nam):
+    """CHẨN ĐOÁN (CHỈ ĐỌC, không ghi/sửa gì) — Tờ khai GTGT tính Thuế đầu ra
+    ([35]) CHỈ từ SAVoucher/SAVoucherDetail có IsPostedFinance=1 (ĐÃ GHI SỔ
+    Tài chính trong MISA — xem _misa_tinh_chi_tieu_gtgt_tu_misa). Người dùng
+    "nhập đầy đủ" hóa đơn Bán hàng vào MISA (Lập hóa đơn) KHÔNG đồng nghĩa
+    đã "Ghi sổ" — đây là 2 bước RIÊNG trong MISA, chứng từ mới Lập/Lưu mà
+    chưa bấm 'Ghi sổ' vẫn có IsPostedFinance=0, KHÔNG được tính vào tờ khai
+    thật (kể cả trên chính MISA) — đúng như MISA thật cũng không tính.
+    Hàm này đếm SAVoucher trong đúng khoảng ngày của 1 quý, TÁCH RIÊNG theo
+    IsPostedFinance, để xác định NGAY nguyên nhân Thuế đầu ra=0 là do (a)
+    hoàn toàn KHÔNG có hóa đơn Bán hàng nào trong quý đó, hay (b) CÓ hóa đơn
+    nhưng CHƯA ghi sổ (liệt kê mẫu để người dùng biết đích danh hóa đơn nào
+    cần vào MISA bấm 'Ghi sổ')."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        thang_dau = (quy - 1) * 3 + 1
+        thang_cuoi = thang_dau + 2
+        ngay_cuoi = calendar.monthrange(nam, thang_cuoi)[1]
+        tu_ngay = datetime.datetime(nam, thang_dau, 1)
+        den_ngay = datetime.datetime(nam, thang_cuoi, ngay_cuoi, 23, 59, 59)
+
+        def _tom_tat(dieu_kien_posted):
+            sql = (
+                "SELECT COUNT(DISTINCT h.RefID), ISNULL(SUM(d.Amount),0), ISNULL(SUM(d.VATAmount),0) "
+                "FROM SAVoucherDetail d JOIN SAVoucher h ON h.RefID=d.RefID "
+                "WHERE h.RefDate>=? AND h.RefDate<=? AND " + dieu_kien_posted)
+            r = cur.execute(sql, (tu_ngay, den_ngay)).fetchone()
+            return {"so_chung_tu": (r[0] or 0) if r else 0,
+                    "tong_tien_hang": _snum(r[1]) if r else 0,
+                    "tong_thue_gtgt": _snum(r[2]) if r else 0}
+
+        da_ghi_so = _tom_tat("h.IsPostedFinance=1")
+        chua_ghi_so = _tom_tat("(h.IsPostedFinance=0 OR h.IsPostedFinance IS NULL)")
+
+        mau_chua_ghi_so = []
+        try:
+            sql_mau = (
+                "SELECT DISTINCT TOP 15 h.RefID, h.RefNoFinance, h.RefDate, h.AccountObjectName, "
+                "h.InvNo, h.IsPostedFinance "
+                "FROM SAVoucherDetail d JOIN SAVoucher h ON h.RefID=d.RefID "
+                "WHERE h.RefDate>=? AND h.RefDate<=? AND (h.IsPostedFinance=0 OR h.IsPostedFinance IS NULL) "
+                "ORDER BY h.RefDate")
+            for r2 in cur.execute(sql_mau, (tu_ngay, den_ngay)).fetchall():
+                mau_chua_ghi_so.append({
+                    "RefNoFinance": r2[1], "RefDate": r2[2].isoformat() if hasattr(r2[2], "isoformat") else r2[2],
+                    "AccountObjectName": r2[3], "InvNo": r2[4], "IsPostedFinance": r2[5]})
+        except Exception:
+            pass
+
+        # Đối chứng: tổng TOÀN BỘ SAVoucher (không lọc ngày) để phát hiện
+        # trường hợp hóa đơn có nhưng RefDate lưu SAI/khác kỳ mong đợi.
+        tong_khong_loc_ngay = {"so_chung_tu": 0}
+        try:
+            r3 = cur.execute("SELECT COUNT(DISTINCT RefID) FROM SAVoucher").fetchone()
+            tong_khong_loc_ngay["so_chung_tu"] = (r3[0] or 0) if r3 else 0
+        except Exception:
+            pass
+
+        ket_luan = None
+        if da_ghi_so["so_chung_tu"] == 0 and chua_ghi_so["so_chung_tu"] == 0:
+            ket_luan = ("KHÔNG có hóa đơn Bán hàng nào (RefDate) rơi vào quý này trong MISA — "
+                        "kiểm tra lại đúng quý/năm, hoặc hóa đơn thật sự chưa được nhập cho quý này.")
+        elif da_ghi_so["so_chung_tu"] == 0 and chua_ghi_so["so_chung_tu"] > 0:
+            ket_luan = (f"CÓ {chua_ghi_so['so_chung_tu']} hóa đơn Bán hàng trong quý này nhưng TOÀN BỘ CHƯA "
+                        f"GHI SỔ (IsPostedFinance=0) — đây là lý do Thuế đầu ra=0: vào MISA, mở từng hóa đơn "
+                        f"(xem danh sách mẫu dưới) và bấm 'Ghi sổ' (hoặc chọn nhiều dòng, Ghi sổ hàng loạt), "
+                        f"sau đó chạy lại Tờ khai GTGT.")
+        else:
+            ket_luan = "Đã có hóa đơn ghi sổ trong quý này — nếu Thuế đầu ra vẫn hiện 0/sai, cần chẩn đoán thêm."
+
+        return {"database": database, "ky": f"Quý {quy} năm {nam}",
+                "tu_ngay": tu_ngay.isoformat(), "den_ngay": den_ngay.isoformat(),
+                "da_ghi_so": da_ghi_so, "chua_ghi_so": chua_ghi_so,
+                "mau_hoa_don_chua_ghi_so": mau_chua_ghi_so,
+                "tong_savoucher_toan_bo_khong_loc_ngay": tong_khong_loc_ngay,
+                "ket_luan": ket_luan}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Lỗi chẩn đoán (chỉ đọc, không sửa gì): {e}")
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/chan-doan-vi-sao-thue-dau-ra-0/{cid}")
+def misa_sql_chan_doan_vi_sao_thue_dau_ra_0(cid: int, quy: int, nam: int, database: str = ""):
+    """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_vi_sao_thue_dau_ra_0. Dùng
+    khi màn xem trước Tờ khai GTGT báo 'Thuế đầu ra: 0' cho 1 quý dù MISA đã
+    có nhập Bán hàng — cho biết ngay là do KHÔNG có hóa đơn hay CÓ nhưng
+    CHƯA ghi sổ (liệt kê mẫu hóa đơn cụ thể)."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_vi_sao_thue_dau_ra_0(cid, database, quy, nam)
 
 
 # AppendixTypeID (GUID) của 2 phụ lục "Bảng kê bán ra" (BKBR-01-1/GTGT) /

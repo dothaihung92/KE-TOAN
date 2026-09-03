@@ -6094,7 +6094,7 @@ async function toKhaiKhauTruGtgtXemTruoc(){
     const ds=(pv.danh_sach||[]).map(x=>`<tr>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.ky||'')}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.trang_thai||'')}${x.chi_tiet_loi?': '+misaEsc(x.chi_tiet_loi):''}</td>
-      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.thue_dau_ra!=null?Number(x.thue_dau_ra).toLocaleString('vi-VN'):''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.thue_dau_ra!=null?Number(x.thue_dau_ra).toLocaleString('vi-VN'):''}${x.thue_dau_ra===0?` <button class="btn ghost sm" style="padding:1px 5px;font-size:10.5px" onclick="gtgtChanDoanDauRa0('${misaEsc(x.ky||'')}')">🔍 Vì sao 0?</button>`:''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${x.thue_duoc_khau_tru!=null?Number(x.thue_duoc_khau_tru).toLocaleString('vi-VN'):''}</td>
       <td style="border:1px solid #eee;padding:2px 6px;text-align:right;font-weight:700">${x.so_tien_khau_tru!=null?Number(x.so_tien_khau_tru).toLocaleString('vi-VN'):''}</td>
       <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct_khau_tru||'')}</td>
@@ -6111,6 +6111,44 @@ async function toKhaiKhauTruGtgtXemTruoc(){
         <button class="btn ghost sm" onclick="toKhaiKhauTruGtgtMo()">← Sửa lại</button>
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${soSeTao>0?`<button class="btn sm" style="background:#a03a3a" onclick="toKhaiKhauTruGtgtGhi('${tuQuy}','${tuNam}',${soQuy})">⬆ Ghi ${soSeTao} tờ khai + bút toán vào MISA</button>`:''}
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function gtgtChanDoanDauRa0(ky){
+  const m=/Quý\s*(\d+)\s*năm\s*(\d+)/.exec(ky||'');
+  if(!m){toast('Không đọc được quý/năm từ "'+ky+'"','err');return}
+  toast('Đang dò nguyên nhân Thuế đầu ra = 0 (chỉ xem, không sửa gì)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-vi-sao-thue-dau-ra-0/${current}?quy=${m[1]}&nam=${m[2]}`,{method:'GET'});
+    const mauRows=(d.mau_hoa_don_chua_ghi_so||[]).map(r=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(r.RefNoFinance||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(String(r.RefDate||'').slice(0,10))}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(r.AccountObjectName||'')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(r.InvNo||'')}</td>
+    </tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="margin-bottom:8px;font-size:12.5px;color:#666">Chẩn đoán CHỈ ĐỌC (không sửa/ghi gì) — <b>${misaEsc(d.ky||'')}</b>, database: <b>${misaEsc(d.database||'')}</b>.</div>
+      <div style="background:#fff8e1;border:1px solid #f0d78c;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px;font-weight:600">${misaEsc(d.ket_luan||'')}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:12.5px">
+        <div style="flex:1;min-width:150px;border:1px solid #eee;border-radius:6px;padding:8px">
+          <div style="color:#666">Hóa đơn ĐÃ ghi sổ</div>
+          <div style="font-size:18px;font-weight:700">${d.da_ghi_so?.so_chung_tu||0}</div>
+          <div>Thuế GTGT: ${Number(d.da_ghi_so?.tong_thue_gtgt||0).toLocaleString('vi-VN')}</div>
+        </div>
+        <div style="flex:1;min-width:150px;border:1px solid #eee;border-radius:6px;padding:8px">
+          <div style="color:#a03a3a">Hóa đơn CHƯA ghi sổ</div>
+          <div style="font-size:18px;font-weight:700;color:#a03a3a">${d.chua_ghi_so?.so_chung_tu||0}</div>
+          <div>Thuế GTGT: ${Number(d.chua_ghi_so?.tong_thue_gtgt||0).toLocaleString('vi-VN')}</div>
+        </div>
+      </div>
+      ${mauRows?`<div style="font-size:12.5px;font-weight:600;margin-bottom:4px">Mẫu hóa đơn CHƯA ghi sổ (vào MISA bấm "Ghi sổ" cho các hóa đơn này):</div>
+      <div style="max-height:30vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Ngày</th><th style="border:1px solid #eee;padding:2px 6px">Khách hàng</th><th style="border:1px solid #eee;padding:2px 6px">Số HĐ</th></tr>
+        ${mauRows}</table></div>`:''}
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="toKhaiKhauTruGtgtMo()">← Về Tờ khai GTGT</button>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
