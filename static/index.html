@@ -7096,6 +7096,7 @@ function muaHangChanDoanDaCoMo(){
     <div class="hint" style="margin-bottom:10px">Kiểm tra 1 hóa đơn Mua hàng cụ thể (MST NCC + Số HĐ) đang bị báo "đã có, bỏ qua" dù thực tế KHÔNG có trong MISA — chỉ đọc, không sửa/ghi gì.</div>
     <label style="font-size:13px;font-weight:600">Loại</label>
     <select id="cdMuaHangLoai" style="width:100%;padding:8px;margin:4px 0 10px;box-sizing:border-box">
+      <option value="auto">Chưa biết loại nào (tự kiểm tra cả 3)</option>
       <option value="nk">Nhập kho</option><option value="kqk">Không qua kho</option><option value="dv">Dịch vụ</option>
     </select>
     <label style="font-size:13px;font-weight:600">MST NCC</label>
@@ -7117,9 +7118,16 @@ async function muaHangChanDoanDaCoChay(){
   try{
     const qs=new URLSearchParams({loai,mst,sohd});
     const d=await api(`/api/misa-sql/chan-doan-da-co-mua-hang/${current}?${qs.toString()}`,{method:'GET'});
+    let tomTat='';
+    if(loai==='auto'){
+      const ten={nk:'Nhập kho',kqk:'Không qua kho',dv:'Dịch vụ'};
+      tomTat=['nk','kqk','dv'].map(l=>`<div style="margin-bottom:6px"><b>${ten[l]}:</b> ${misaEsc((d[l]||{}).ket_luan||'')}</div>`).join('');
+    }else{
+      tomTat=misaEsc(d.ket_luan||'');
+    }
     document.getElementById('misaModalBody').innerHTML=`
       <div style="margin-bottom:8px;font-size:12.5px;color:#666">Kết quả kiểm tra (CHỈ ĐỌC, không sửa/ghi gì).</div>
-      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px;font-weight:600">${misaEsc(d.ket_luan||'')}</div>
+      <div style="background:#fff8e1;border:1px solid #e8b923;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px;font-weight:600">${tomTat}</div>
       <pre style="max-height:50vh;overflow:auto;background:#f7f7f7;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap">${misaEsc(JSON.stringify(d,null,2))}</pre>
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="muaHangChanDoanDaCoMo()">← Kiểm tra hóa đơn khác</button>

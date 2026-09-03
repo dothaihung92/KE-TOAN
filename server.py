@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.143"
+APP_BUILD = "2026-08-31.144"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13643,13 +13643,19 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
 @app.get("/api/misa-sql/chan-doan-da-co-mua-hang/{cid}")
 def misa_sql_chan_doan_da_co_mua_hang(cid: int, loai: str, mst: str, sohd: str, database: str = ""):
     """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_vi_sao_da_co_mua_hang. loai:
-    nk/kqk/dv. Dùng khi 1 hóa đơn cụ thể bị báo 'đã có, bỏ qua' trong Mua
-    hàng dù thực tế KHÔNG có trong MISA (đối chiếu bằng file export)."""
+    nk/kqk/dv, hoặc 'auto' (chưa biết đúng loại nào — tự chạy cả 3 loại,
+    dùng khi từ danh sách "thiếu" của Đối chiếu tổng giá trị & VAT chỉ có
+    MST+Số HĐ, không biết hóa đơn đó là Nhập kho/Không qua kho/Dịch vụ).
+    Dùng khi 1 hóa đơn cụ thể bị báo 'đã có, bỏ qua' trong Mua hàng dù
+    thực tế KHÔNG có trong MISA (đối chiếu bằng file export)."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    if loai == "auto":
+        return {l: _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, l, mst, sohd)
+                for l in ("nk", "kqk", "dv")}
     if loai not in ("nk", "kqk", "dv"):
-        raise HTTPException(400, "loai phải là nk/kqk/dv")
+        raise HTTPException(400, "loai phải là nk/kqk/dv/auto")
     return _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd)
 
 
