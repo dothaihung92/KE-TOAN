@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.140"
+APP_BUILD = "2026-08-31.141"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13524,11 +13524,13 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
         # ghi, nên hóa đơn bị gộp sẽ "biến mất" (không tự đứng riêng để ghi
         # được nữa) dù dữ liệu gốc vẫn còn nguyên trong Bảng kê Đầu vào.
         try:
-            dl = _doc_du_lieu_cty(cid).get(f"nhap_lieu_in", {})
+            # Đọc ĐÚNG NGUỒN mà _misa_ghi_mua_hang/_misa_ghi_mua_hang_dv (và
+            # cả lưới Bảng kê Đầu vào trên màn hình) thật sự dùng — bảng SQL
+            # nhap_lieu — KHÔNG được đọc file JSON (_doc_du_lieu_cty) trước,
+            # vì file đó có thể cũ/lệch so với bảng SQL đang hiển thị, gây
+            # báo nhầm "không tìm thấy" dù hóa đơn rõ ràng có trên màn hình.
+            dl = nhap_lieu_get(cid, "in")
             header_in, rows_in = dl.get("header") or [], dl.get("rows") or []
-            if not rows_in:
-                dl2 = nhap_lieu_get(cid, "in")
-                header_in, rows_in = dl2.get("header") or [], dl2.get("rows") or []
             if rows_in:
                 if loai == "dv":
                     flat = _gen_mua_hang_dv(cid, header_in, rows_in)
