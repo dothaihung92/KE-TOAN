@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.126"
+APP_BUILD = "2026-08-31.127"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10185,7 +10185,14 @@ def _gen_danh_muc(cid, loai, header, rows):
         return r[i] if 0 <= i < len(r) else ""
 
     def rk(row):
-        return f"{gv(row,DM_I_MA)}|{gv(row,DM_I_HD)}|{gv(row,DM_I_NGAY)}|{gv(row,DM_I_TT)}"
+        # Khoá theo Ký tự (ky_tu — tên+ĐVT, ỔN ĐỊNH) chứ KHÔNG theo Mã hàng
+        # (mã CÓ THỂ đổi khi _misa_dong_bo_danh_muc_tu_misa thay mã tự sinh
+        # bằng mã thật trong MISA cho cùng ky_tu — nếu khoá theo mã, mọi dòng
+        # ĐÃ LƯU trước đó sẽ KHÔNG còn khớp lại được (mã mới != mã cũ đã lưu)
+        # nên bị hiểu nhầm là "dòng MỚI" toàn bộ, dù thực ra chỉ là mã đã đổi
+        # — đã xác nhận qua báo cáo thật: 141/141 dòng đột nhiên báo "mới"
+        # ngay sau khi đồng bộ, dù dữ liệu bảng kê không đổi gì cả).
+        return f"{gv(row,DM_I_KY)}|{gv(row,DM_I_HD)}|{gv(row,DM_I_NGAY)}|{gv(row,DM_I_TT)}"
 
     seen = set(rk(r) for r in saved_rows if len(r) >= 10)
     new_rows = []
