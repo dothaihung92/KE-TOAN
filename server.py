@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.139"
+APP_BUILD = "2026-08-31.140"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13508,13 +13508,71 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
                               % ("RefDate/InvDate" if loai in ("nk", "kqk") else "InvDate/RefDate", ket["bang"]))
         elif not ket["ung_vien"]:
             ket["ket_luan"] = ("KHÔNG tìm thấy ứng viên nào khớp (MST,Số HĐ) này trong %s — hóa đơn "
-                              "THẬT SỰ chưa có trong MISA. Nếu 'Import tự động toàn bộ'/'⬆ ... vào MISA' "
-                              "vẫn báo 'đã có, bỏ qua' cho ĐÚNG hóa đơn này thì có khả năng đang chạy "
-                              "build CŨ (chưa cập nhật) — thử khởi động lại phần mềm." % ket["bang"])
+                              "THẬT SỰ chưa có trong MISA." % ket["bang"])
         else:
             ket["ket_luan"] = ("Tìm thấy %d ứng viên khớp (MST,Số HĐ) — xem cột 'Ngay' của từng ứng viên "
                               "trong 'ung_vien': nếu ngày CÁCH XA hóa đơn đang xét (khác năm) mà vẫn bị "
                               "coi 'đã có' thì đây LÀ BUG cần báo lại kèm ảnh này." % ket["so_ung_vien_khop_mst_sohd"])
+
+        # Kiểm tra thêm: hóa đơn này có thật sự XUẤT HIỆN trong danh sách
+        # NHÓM CHỨNG TỪ (theo "Số CT" tự sinh) mà _misa_ghi_mua_hang/
+        # _misa_ghi_mua_hang_dv thực sự dùng để ghi hay không — nếu KHÔNG có
+        # ứng viên "đã có" (ca 2 ở trên) NHƯNG "⬆ ... vào MISA" vẫn không
+        # ghi được, khả năng cao hóa đơn bị GỘP NHẦM vào nhóm của 1 hóa đơn
+        # KHÁC (2 hóa đơn khác nhau vô tình tính ra CÙNG 1 "Số CT") — dòng
+        # đầu của nhóm ("first") mới là dòng được dùng để xét MST/Số HĐ khi
+        # ghi, nên hóa đơn bị gộp sẽ "biến mất" (không tự đứng riêng để ghi
+        # được nữa) dù dữ liệu gốc vẫn còn nguyên trong Bảng kê Đầu vào.
+        try:
+            dl = _doc_du_lieu_cty(cid).get(f"nhap_lieu_in", {})
+            header_in, rows_in = dl.get("header") or [], dl.get("rows") or []
+            if not rows_in:
+                dl2 = nhap_lieu_get(cid, "in")
+                header_in, rows_in = dl2.get("header") or [], dl2.get("rows") or []
+            if rows_in:
+                if loai == "dv":
+                    flat = _gen_mua_hang_dv(cid, header_in, rows_in)
+                elif loai == "nk":
+                    flat = _gen_mua_hang_nk(cid, header_in, rows_in)
+                else:
+                    flat = _gen_mua_hang_kqk(cid, header_in, rows_in)
+                cfg = _MUA_COT[loai]
+                nhom_theo_doc = {}
+                for r in flat:
+                    doc = str(r[cfg["doc"]] or "").strip()
+                    if doc:
+                        nhom_theo_doc.setdefault(doc, []).append(r)
+                # Tìm TẤT CẢ dòng phẳng thật sự thuộc hóa đơn (mst,sohd) đang
+                # xét (dò TRỰC TIẾP theo mst/sohd của TỪNG DÒNG, không qua
+                # nhóm) — rồi xem CÁC DÒNG ĐÓ đã bị nhóm vào "Số CT" nào.
+                doc_cua_hoa_don = set()
+                for r in flat:
+                    r_mst = _misa_khncc_chuan_mst(str(r[cfg["mst"]] or "")).lower()
+                    r_sohd = _chuan_shd(str(r[cfg["sohd"]] or "")).lower() if cfg.get("sohd") is not None else ""
+                    if r_mst == mst_k and r_sohd == sohd_k:
+                        doc_cua_hoa_don.add(str(r[cfg["doc"]] or "").strip())
+                ket["so_dong_flat_thuoc_hoa_don"] = sum(
+                    1 for r in flat
+                    if _misa_khncc_chuan_mst(str(r[cfg["mst"]] or "")).lower() == mst_k and
+                    (_chuan_shd(str(r[cfg["sohd"]] or "")).lower() if cfg.get("sohd") is not None else "") == sohd_k)
+                ket["so_ct_cua_hoa_don"] = sorted(doc_cua_hoa_don)
+                for doc in doc_cua_hoa_don:
+                    nhom = nhom_theo_doc.get(doc, [])
+                    mst_khac_trong_nhom = sorted({str(r[cfg["mst"]] or "").strip() for r in nhom} - {mst})
+                    if mst_khac_trong_nhom:
+                        ket["canh_bao_gop_nham"] = (
+                            f"Số CT '{doc}' bị GỘP CHUNG với NCC KHÁC ({', '.join(mst_khac_trong_nhom)}) — "
+                            f"nếu dòng ĐẦU TIÊN của nhóm này không phải của NCC {mst}, hóa đơn {mst}/Số HĐ "
+                            f"{sohd} sẽ 'biến mất' khỏi bước kiểm tra/ghi (chỉ dòng đầu nhóm được dùng để "
+                            f"xét MST/Số HĐ) dù dữ liệu Bảng kê Đầu vào vẫn còn nguyên — ĐÂY LÀ BUG cần sửa "
+                            f"gấp, không phải do đã có sẵn trong MISA.")
+                if not ket["so_ct_cua_hoa_don"]:
+                    ket["canh_bao_gop_nham"] = (
+                        "KHÔNG tìm thấy dòng nào trong Bảng kê Đầu vào hiện tại khớp đúng (MST,Số HĐ) này "
+                        "ở bước sinh dữ liệu Mua hàng — kiểm tra lại đúng công ty/kỳ đang mở, hoặc hóa đơn "
+                        "có thể đã bị sửa/xoá khỏi Bảng kê Đầu vào so với lúc trước.")
+        except Exception as e:
+            ket["loi_kiem_tra_gop_nhom"] = str(e)[:300]
         return ket
     finally:
         conn.close()
