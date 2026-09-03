@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.122"
+APP_BUILD = "2026-08-31.123"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11604,12 +11604,22 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
         rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
                    goi_y=_xk_goi_y_ma(ten_chuan, manh, ton_list))
         return [rec]
-    # Nhiều mã trùng/gần trùng tên (vd 1 mã do phần mềm sinh + 1 mã cũ có sẵn
-    # trong MISA cho cùng sản phẩm) -> LẤY LUÔN mã còn đủ tồn cho số lượng
-    # bán, KHÔNG hỏi lại — ưu tiên mã đã HỌC trước đó nếu vẫn đủ tồn, rồi đến
-    # mã XUẤT HIỆN TRƯỚC theo đúng thứ tự trong file tồn kho (pool đã giữ
-    # nguyên thứ tự đó) — dùng HẾT mã đứng trước rồi mới chuyển sang mã
-    # đứng sau, không ưu tiên theo tồn nhiều/ít.
+    # Nhiều ứng viên 'mạnh' (vd 1 mã do phần mềm sinh + 1 mã cũ có sẵn trong
+    # MISA cho CÙNG sản phẩm, HOẶC NHIỀU MÀU/KIỂU khác nhau NHƯNG CÙNG kích
+    # thước — vd '(D35xH45 cm) Gloss White' dễ lẫn với ton 'D35xH45 cm -
+    # Gloss Yellow'/'... Gloss White' vì _kich_thuoc_khop_xk/_ma_ngoac_khop_xk
+    # CHỈ so khớp kích thước/mã trong ngoặc, KHÔNG so cả tên nên không tự
+    # phân biệt được màu) -> sắp lại theo ĐIỂM GIỐNG TÊN CHUẨN HOÁ (bắt được
+    # cả phần mô tả màu/kiểu dáng KHÔNG nằm trong ngoặc, vd 'Gloss White' so
+    # với 'Gloss Yellow' điểm giống thấp hơn hẳn) GIẢM DẦN trước khi chọn —
+    # ĐIỂM BẰNG NHAU (vd cùng 1 sản phẩm, chỉ khác mã, không có gì để phân
+    # biệt thêm) thì sort ỔN ĐỊNH GIỮ NGUYÊN thứ tự xuất hiện trong file tồn
+    # kho như trước. Xác nhận đúng qua báo cáo thật: 'Chậu ... Gloss WHITE
+    # (D35xH45cm)...' bị gán nhầm 'Chậu Polystone D35xH45 cm - Gloss Yellow'
+    # (đúng ra phải là '... - Gloss White'), '... MATTE WHITE (D34xH30cm)...'
+    # bị gán nhầm 'Chậu Polystone D34xH30 cm - Gloss Orange' (đúng ra '...
+    # - Matte White') — chỉ vì cùng kích thước, mã sai đứng trước trong file.
+    pool = sorted(pool, key=lambda tn: -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2))
     ma_hoc = hoc_ma.get(ten_chuan)
     pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
     if not pick:
