@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.142"
+APP_BUILD = "2026-08-31.143"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13587,6 +13587,8 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
                     i_so_raw = _tim_cot_tho(("số hđ",), ("số hđ", "số hoá đơn", "số hóa đơn"))
                     i_mst_raw = _tim_cot_tho(("mst bán", "mst"), ("mst",))
                     i_no_raw = _tim_cot_tho(("nợ",), ())
+                    ket["cot_dv_da_do"] = {"i_so_hd": i_so_raw, "i_mst": i_mst_raw, "i_no_tk": i_no_raw,
+                                           "header_goc": list(header_in)}
                     dong_theo_sohd = []
                     if i_so_raw >= 0:
                         for r in rows_in:
@@ -13597,10 +13599,18 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
                                 dong_theo_sohd.append({
                                     "mst_tho_trong_bang_ke": mst_r,
                                     "mst_da_dinh_dang": _dinh_dang_mst(mst_r),
+                                    "mst_khop": _misa_khncc_chuan_mst(str(mst_r or "")).lower() == mst_k,
                                     "no_tk": no_r,
+                                    "no_tk_hop_le_6xx": str(no_r or "").strip().startswith("6"),
+                                    "toan_bo_dong": list(r),
                                 })
                     ket["dong_khop_theo_so_hd_rieng"] = dong_theo_sohd
-                    if dong_theo_sohd:
+                    if not dong_theo_sohd:
+                        ket["canh_bao_gop_nham"] = (
+                            "KHÔNG tìm thấy dòng nào trong Bảng kê Đầu vào hiện tại khớp đúng (MST,Số HĐ) này "
+                            "ở bước sinh dữ liệu Mua hàng — kiểm tra lại đúng công ty/kỳ đang mở, hoặc hóa đơn "
+                            "có thể đã bị sửa/xoá khỏi Bảng kê Đầu vào so với lúc trước.")
+                    elif not all(d["mst_khop"] for d in dong_theo_sohd):
                         ket["canh_bao_gop_nham"] = (
                             f"CÓ {len(dong_theo_sohd)} dòng trong Bảng kê Đầu vào khớp ĐÚNG Số HĐ '{sohd}' "
                             f"nhưng MST KHÔNG khớp '{mst}' — xem 'dong_khop_theo_so_hd_rieng' để biết MST "
@@ -13608,11 +13618,21 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
                             f"(vd hậu tố chi nhánh '-001', hoặc gõ thiếu/dư số) giữa MST đang tra và MST trên "
                             f"Bảng kê Đầu vào — KHÔNG phải lỗi phần mềm, cần đối chiếu lại đúng MST trên hóa "
                             f"đơn gốc rồi sửa lại 1 trong 2 nơi cho khớp.")
+                    elif not all(d["no_tk_hop_le_6xx"] for d in dong_theo_sohd):
+                        ket["canh_bao_gop_nham"] = (
+                            f"MST và Số HĐ ĐÃ KHỚP ĐÚNG ({len(dong_theo_sohd)} dòng) nhưng cột 'Nợ' (TK Nợ) của "
+                            f"(các) dòng này đang TRỐNG hoặc KHÔNG bắt đầu bằng '6' (xem 'no_tk' trong "
+                            f"'dong_khop_theo_so_hd_rieng') — _gen_mua_hang_dv CHỈ lấy dòng có TK Nợ là chi phí "
+                            f"6xx nên dòng này bị loại khỏi danh sách ứng viên ghi 'Mua hàng dịch vụ' dù dữ liệu "
+                            f"vẫn còn nguyên trên Bảng kê Đầu vào — vào lưới Bảng kê Đầu vào kiểm tra/điền lại "
+                            f"đúng TK Nợ (6xx) cho dòng Số HĐ '{sohd}' rồi thử ghi lại. Nếu 'i_no_tk' ở "
+                            f"'cot_dv_da_do' = -1 nghĩa là KHÔNG dò được cột 'Nợ' trong header thật (xem "
+                            f"'header_goc') — có thể đây mới là lỗi phần mềm (tên cột khác 'Nợ').")
                     else:
                         ket["canh_bao_gop_nham"] = (
-                            "KHÔNG tìm thấy dòng nào trong Bảng kê Đầu vào hiện tại khớp đúng (MST,Số HĐ) này "
-                            "ở bước sinh dữ liệu Mua hàng — kiểm tra lại đúng công ty/kỳ đang mở, hoặc hóa đơn "
-                            "có thể đã bị sửa/xoá khỏi Bảng kê Đầu vào so với lúc trước.")
+                            f"MST, Số HĐ và TK Nợ (6xx) đều ĐÃ KHỚP ĐÚNG ({len(dong_theo_sohd)} dòng) mà vẫn "
+                            f"không đứng riêng thành 1 Số CT nào (xem 'toan_bo_dong' để tự đối chiếu thêm) — "
+                            f"cần kiểm tra thêm 'Có' hoặc dữ liệu khác của dòng này.")
         except Exception as e:
             ket["loi_kiem_tra_gop_nhom"] = str(e)[:300]
         return ket
