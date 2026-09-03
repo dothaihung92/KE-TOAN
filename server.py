@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.130"
+APP_BUILD = "2026-08-31.131"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10603,7 +10603,7 @@ def _gen_vthh_from_grid(cid, header, rows):
         dvt = str(gv(r, col["dvt"]) or "").strip()
         if not ten:
             continue
-        ky = "".join(ten.split()) + dvt
+        ky = _dm_ky_tu(ten, dvt)
         if ky in maps[grp]:
             base = maps[grp][ky]
         else:
@@ -10611,7 +10611,11 @@ def _gen_vthh_from_grid(cid, header, rows):
             maps[grp][ky] = base
             nexts[grp] += 1
         rate = _dm_rate(gv(r, col["ts"]))
-        ma = f"{base}-{rate}"            # mã đầy đủ kèm thuế suất (vd HH00001-8)
+        pfx = prefixes[grp]
+        if base.startswith(pfx) and base[len(pfx):].isdigit():
+            ma = f"{base}-{rate}"        # mã đầy đủ kèm thuế suất (vd HH00001-8)
+        else:
+            ma = base                    # mã CÓ SẴN thật trong MISA -> dùng nguyên vẹn
         if ma in seen_ma:
             continue                       # lọc trùng theo mã
         seen_ma.add(ma)
@@ -10750,7 +10754,7 @@ def _gen_mua_hang_nk(cid, header, rows):
         dvt = str(gv(r, col["dvt"]) or "").strip()
         if not ten:
             continue
-        ky = "".join(ten.split()) + dvt
+        ky = _dm_ky_tu(ten, dvt)
         if ky in maps[grp]:
             base = maps[grp][ky]
         else:
@@ -10758,7 +10762,11 @@ def _gen_mua_hang_nk(cid, header, rows):
             maps[grp][ky] = base
             nexts[grp] += 1
         rate = _dm_rate(gv(r, col["ts"]))
-        ma = f"{base}-{rate}"
+        pfx = prefixes[grp]
+        if base.startswith(pfx) and base[len(pfx):].isdigit():
+            ma = f"{base}-{rate}"
+        else:
+            ma = base            # mã CÓ SẴN thật trong MISA -> dùng nguyên vẹn
         kyhieu = str(gv(r, col["kh"]) or "").strip()
         la_nk = kyhieu.upper() == "TKNK"        # tờ khai nhập khẩu
         sohd = str(gv(r, col["sohd"]) or "").strip()
