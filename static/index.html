@@ -8508,7 +8508,7 @@ async function dmDongBoMisa(){
   try{
     const d=await api(`/api/danh-muc-hang/dong-bo-misa/${current}?loai=${nlDMMode}`,{method:'POST'});
     const soThayThe=d.so_thay_the||0;
-    toast(`✓ Đã học ${d.so_them_moi} mã mới, thay ${soThayThe} mã tự sinh bằng mã MISA thật (tổng ${d.so_ma_misa} mã cùng loại trong MISA) — `+
+    toast(`✓ Đã học ${d.so_them_moi} mã mới, thay ${soThayThe} mã tự sinh bằng mã MISA thật (đối chiếu tổng ${d.so_ma_misa} mã đang có trong MISA, không lọc theo TK vì mã cũ thường chưa gán TK kho) — `+
       ((d.so_them_moi>0||soThayThe>0)?`từ nay tên hàng trùng sẽ tự dùng lại đúng mã này, không sinh mã mới trùng lặp nữa.`
         :`không có gì mới cần học/thay thêm.`)+
       ` Bấm lại "Sinh Danh mục" từ bảng kê để áp dụng cho các hoá đơn sắp xử lý.`,'ok');
@@ -8539,7 +8539,7 @@ async function dmXemMisa(){
     dmDaSua=true;
     veGridNhapLieu();
     document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng — `+
-      `<b style="color:#264b8a">+${them} mã vừa nạp thêm từ MISA</b> (tổng ${d.so_dong} mã cùng loại đang có trong MISA).`;
+      `<b style="color:#264b8a">+${them} mã vừa nạp thêm từ MISA</b> (tổng ${d.so_dong} mã đang có trong MISA — không lọc riêng theo loại, MISA có thể lẫn cả NVL/CCDC/TSCĐ).`;
     toast(`✓ Đã hiện thêm ${them} mã hàng có sẵn trong MISA vào cuối lưới`+
       (them<d.so_dong?` (${d.so_dong-them} mã còn lại đã có sẵn trong lưới, bỏ qua trùng)`:'')+
       `. Bấm "💾 Lưu" nếu muốn ghi nhớ luôn vào Danh mục.`,'ok');

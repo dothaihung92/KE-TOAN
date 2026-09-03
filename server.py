@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.129"
+APP_BUILD = "2026-08-31.130"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13758,8 +13758,19 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
     MISA có sẵn 541 mã — vì quy tắc "chỉ thêm, không ghi đè" (bản đầu tiên)
     chặn đứng chính những trường hợp CẦN sửa nhất. Tên hàng ĐÃ trỏ tới 1 mã
     KHÔNG theo khuôn tự sinh (tức đã là mã MISA thật, có thể do lần đồng bộ
-    trước) thì GIỮ NGUYÊN, không đổi qua đổi lại. Chỉ lọc InventoryItem
-    theo đúng TK kho của loai (_MISA_INV_ACC) để không lẫn danh mục khác.
+    trước) thì GIỮ NGUYÊN, không đổi qua đổi lại.
+
+    KHÔNG lọc InventoryItem theo TK kho (InventoryAccount) nữa — TRƯỚC ĐÂY
+    lọc theo _MISA_INV_ACC ('1561'/'156' cho hh...) để không lẫn danh mục
+    khác, nhưng xác nhận qua báo cáo thật: mã hàng CÓ SẴN tạo TRƯỚC khi
+    dùng phần mềm này (vd 'MH225'/'MH553' cho CÙNG tên 'Chậu Polystone
+    ASH30 - MTWT', xem MISA > Mua hàng > Vật tư hàng hóa) thường CHƯA từng
+    được gán 'Tài khoản kho' (InventoryAccount để TRỐNG/NULL) dù đúng Tính
+    chất 'Vật tư hàng hóa' — lọc theo TK khiến các mã CŨ kiểu này (chính là
+    những mã CẦN đồng bộ nhất) bị loại hết, "0/không mã nào khớp" dù tên
+    trùng y hệt. Rủi ro khớp NHẦM sang danh mục khác (vd TSCĐ/CCDC trùng
+    tên) chấp nhận được — vẫn LUÔN là 1 mã CÓ THẬT trong MISA (không tạo gì
+    sai), tốt hơn hẳn so với tự sinh thêm 1 mã HH0000X trùng lặp mới.
 
     LƯU Ý: ghi đè bản đồ CHỈ ảnh hưởng hoá đơn MỚI xử lý TỪ SAU thời điểm
     đồng bộ — KHÔNG đụng tới các dòng ĐÃ LƯU trong Danh mục (store['rows'])
@@ -13773,7 +13784,6 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
     do phần mềm tự sinh, MH316/MH613 có sẵn từ trước) — phần mềm không biết
     MH316/MH613 đã tồn tại nên tự sinh thêm HH00063-8 mới trùng lặp."""
     prefix = "HH" if loai == "hh" else "NVL"
-    accs = {"1561", "156"} if loai == "hh" else {"152"}
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
@@ -13785,14 +13795,12 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
         except Exception:
             pass
         misa_map = {}   # ky_tu -> mã MISA (mã XUẤT HIỆN TRƯỚC trong kết quả được giữ)
-        for code, name, acc, unit_id in cur.execute(
-                "SELECT InventoryItemCode, InventoryItemName, InventoryAccount, UnitID "
+        for code, name, unit_id in cur.execute(
+                "SELECT InventoryItemCode, InventoryItemName, UnitID "
                 "FROM InventoryItem").fetchall():
             code = str(code or "").strip()
             name = str(name or "").strip()
             if not code or not name:
-                continue
-            if str(acc or "").strip() not in accs:
                 continue
             dvt = unit_ten.get(str(unit_id or "").strip(), "")
             ky_tu = _dm_ky_tu(name, dvt)
@@ -13843,18 +13851,21 @@ def danh_muc_hang_dong_bo_misa(cid: int, loai: str = "hh", database: str = ""):
 
 
 def _misa_doc_toan_bo_danh_muc(cid, database, loai="hh"):
-    """Đọc TOÀN BỘ mã hàng ĐANG CÓ SẴN trong MISA (InventoryItem, lọc đúng
-    TK kho của loai — xem _MISA_INV_ACC) để HIỂN THỊ lên lưới Danh mục cho
-    người dùng xem/đối chiếu trực tiếp (theo đúng yêu cầu: 'xem toàn bộ mã
-    trong MISA ngay trên lưới này') — CHỈ ĐỌC, khác hẳn
-    _misa_dong_bo_danh_muc_tu_misa (chỉ âm thầm cập nhật bản đồ tên->mã
-    dùng NGẦM cho lần sinh mã sau, không hiển thị được gì cho người dùng
-    xem trực tiếp). Trả mỗi dòng ĐÚNG 11 cột như _gen_danh_muc (Mã hàng/
-    Mặt hàng/ĐVT/Thuế suất/Ký tự/SL/Đơn giá/Thành tiền/Hoá đơn/Ngày Hoá
-    Đơn/Kho) để ghép thẳng vào lưới đang có — SL/Đơn giá/Thành tiền/Hoá
-    đơn/Ngày Hoá Đơn để TRỐNG (không gắn với 1 hoá đơn cụ thể nào, đây là
-    dữ liệu Danh mục THUẦN từ MISA, không phải từ Bảng kê)."""
-    accs = {"1561", "156"} if loai == "hh" else {"152"}
+    """Đọc TOÀN BỘ mã hàng ĐANG CÓ SẴN trong MISA (InventoryItem) để HIỂN
+    THỊ lên lưới Danh mục cho người dùng xem/đối chiếu trực tiếp (theo
+    đúng yêu cầu: 'xem toàn bộ mã trong MISA ngay trên lưới này') — CHỈ
+    ĐỌC, khác hẳn _misa_dong_bo_danh_muc_tu_misa (chỉ âm thầm cập nhật bản
+    đồ tên->mã dùng NGẦM cho lần sinh mã sau, không hiển thị được gì cho
+    người dùng xem trực tiếp). Trả mỗi dòng ĐÚNG 11 cột như _gen_danh_muc
+    (Mã hàng/Mặt hàng/ĐVT/Thuế suất/Ký tự/SL/Đơn giá/Thành tiền/Hoá đơn/
+    Ngày Hoá Đơn/Kho) để ghép thẳng vào lưới đang có — SL/Đơn giá/Thành
+    tiền/Hoá đơn/Ngày Hoá Đơn để TRỐNG (không gắn với 1 hoá đơn cụ thể
+    nào, đây là dữ liệu Danh mục THUẦN từ MISA, không phải từ Bảng kê).
+
+    KHÔNG lọc theo TK kho (InventoryAccount) — xem lý do ở
+    _misa_dong_bo_danh_muc_tu_misa (mã hàng CÓ SẴN tạo TRƯỚC khi dùng phần
+    mềm này thường CHƯA từng gán TK kho, lọc theo TK sẽ loại mất chính
+    những mã cần xem/đối chiếu nhất)."""
     kho = "HH" if loai == "hh" else "NVL"
     conn = _misa_sql_connect(cid, database=database)
     try:
@@ -13867,14 +13878,12 @@ def _misa_doc_toan_bo_danh_muc(cid, database, loai="hh"):
         except Exception:
             pass
         rows = []
-        for code, name, acc, unit_id, tax in cur.execute(
-                "SELECT InventoryItemCode, InventoryItemName, InventoryAccount, UnitID, TaxRate "
+        for code, name, unit_id, tax in cur.execute(
+                "SELECT InventoryItemCode, InventoryItemName, UnitID, TaxRate "
                 "FROM InventoryItem").fetchall():
             code = str(code or "").strip()
             name = str(name or "").strip()
             if not code or not name:
-                continue
-            if str(acc or "").strip() not in accs:
                 continue
             dvt = unit_ten.get(str(unit_id or "").strip(), "")
             ky_tu = _dm_ky_tu(name, dvt)
