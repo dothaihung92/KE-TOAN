@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.144"
+APP_BUILD = "2026-08-31.145"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13454,7 +13454,7 @@ def _misa_chan_doan_vi_sao_da_co_mua_hang(cid, database, loai, mst, sohd):
     (RefID/ngày) đang khớp (MST,Số HĐ) này trong PUInvoice (nk/kqk) hoặc
     PUServiceDetail (dv) — để biết CHÍNH XÁC vì sao bị coi 'đã có': cột
     ngày không dò được (fallback tin bất kỳ ứng viên nào, không xét ngày)
-    hay có ứng viên khác thật sự nằm trong khoảng ~400 ngày (khớp đúng ý
+    hay có ứng viên khác thật sự nằm trong khoảng ~90 ngày (khớp đúng ý
     thiết kế) hay ngoài khoảng đó (bug, cần báo lại)."""
     conn = _misa_sql_connect(cid, database=database)
     try:
@@ -15875,7 +15875,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
 
         def _hd_khop_gan_ngay(hd_key, ngay_dt_moi):
             """Trả RefID PUInvoice khớp (MST, Số HĐ) VÀ đủ gần ngày (trong
-            khoảng ~400 ngày) với hóa đơn ĐANG XÉT — None nếu không có ứng
+            khoảng ~90 ngày) với hóa đơn ĐANG XÉT — None nếu không có ứng
             viên nào hợp lệ (coi như CHƯA CÓ, an toàn cho ghi tiếp). Không
             xác định được ngày (1 trong 2 phía, hoặc không dò được cột ngày
             PUInvoice) thì GIỮ HÀNH VI CŨ — tin ứng viên ĐẦU TIÊN, không đòi
@@ -15886,7 +15886,17 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             Đầu vào bị "Import tự động toàn bộ" báo NHẦM 'đã có sẵn trong
             MISA' (0 chứng từ được ghi) vì trùng (MST, Số HĐ) với hóa đơn
             HOÀN TOÀN KHÁC của CÙNG NCC ở kỳ RẤT XA trong quá khứ MISA đã
-            có sẵn từ trước."""
+            có sẵn từ trước.
+
+            NGƯỠNG ban đầu chọn 400 ngày rồi phải HẠ xuống 90: xác nhận qua
+            đúng 1 ca thật khác (Số HĐ '41', NCC 3603122733) — hóa đơn MISA
+            cũ ngày 2025-01-10 và hóa đơn nguồn thật ngày 2026-01-08 cách
+            nhau ĐÚNG 363 ngày (2 hóa đơn HOÀN TOÀN KHÁC NHAU của CÙNG 1 NCC,
+            trùng số hóa đơn do NCC đó đánh số lại theo NĂM) — 400 ngày vẫn
+            đủ rộng để khớp NHẦM 2 hóa đơn cách nhau gần đúng 1 năm, đúng
+            kiểu trùng số hay gặp nhất (numbering theo năm). 90 ngày đủ rộng
+            cho hạch toán trễ vài tháng nhưng luôn LOẠI được mọi cặp cách
+            nhau cỡ 1 năm."""
             ung_vien = da_co_theo_hd.get(hd_key)
             if not ung_vien:
                 return None
@@ -15896,7 +15906,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 if not ngay_cu:
                     return refid
                 try:
-                    if abs((ngay_dt_moi - ngay_cu).days) <= 400:
+                    if abs((ngay_dt_moi - ngay_cu).days) <= 90:
                         return refid
                 except Exception:
                     return refid
@@ -17042,10 +17052,13 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             pass
 
         def _hd_gan_ngay_dv(hd_key, ngay_dt_moi):
-            """True nếu (MST,Số HĐ) khớp VÀ đủ gần ngày (~400 ngày) — xem
+            """True nếu (MST,Số HĐ) khớp VÀ đủ gần ngày (~90 ngày) — xem
             _hd_khop_gan_ngay ở _misa_ghi_mua_hang (cùng nguyên tắc, đây là
             bản rút gọn không cần trả RefID vì Mua hàng dịch vụ không có
-            PUInvoice/PUVoucher riêng để dò 'ẩn'/tự dọn)."""
+            PUInvoice/PUVoucher riêng để dò 'ẩn'/tự dọn). Ngưỡng hạ từ 400
+            xuống 90 ngày — xem giải thích chi tiết + ca thật đã gặp ở
+            _hd_khop_gan_ngay (400 ngày vẫn đủ rộng để khớp nhầm 2 hóa đơn
+            KHÁC NHAU cách nhau ~1 năm do NCC đánh số hóa đơn lại theo năm)."""
             ung_vien = da_co_theo_hd.get(hd_key)
             if not ung_vien:
                 return False
@@ -17055,7 +17068,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 if not ngay_cu:
                     return True
                 try:
-                    if abs((ngay_dt_moi - ngay_cu).days) <= 400:
+                    if abs((ngay_dt_moi - ngay_cu).days) <= 90:
                         return True
                 except Exception:
                     return True
@@ -17936,7 +17949,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
 
             Khi Ký hiệu KHÔNG khớp Y HỆT (phải dùng nhánh "chưa chắc chắn
             khác", 1 trong 2 bên rỗng) VÀ dò được ngày cả 2 phía -> đòi
-            thêm NGÀY phải gần nhau (trong khoảng ~400 ngày) mới coi là
+            thêm NGÀY phải gần nhau (trong khoảng ~90 ngày) mới coi là
             cùng 1 hóa đơn — tránh khớp NHẦM với hóa đơn LỊCH SỬ hoàn toàn
             không liên quan: MST rỗng (khách lẻ) dồn chung 1 nhóm "kl" theo
             Số HĐ ở TRÊN, nên hóa đơn khách lẻ Số HĐ nhỏ (1, 2...) của kỳ
@@ -17947,7 +17960,13 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             tháng 1/2026 bị "Import tự động toàn bộ" báo NHẦM 'đã có sẵn
             trong MISA' (0 chứng từ được ghi) trong khi đối chiếu xác nhận
             CHẮC CHẮN không hề có bên MISA. Ký hiệu khớp Y HỆT thì tin
-            tưởng hoàn toàn, KHÔNG xét ngày (vẫn đúng thiết kế cũ)."""
+            tưởng hoàn toàn, KHÔNG xét ngày (vẫn đúng thiết kế cũ).
+
+            Ngưỡng hạ từ 400 xuống 90 ngày — xem giải thích + ca thật đã
+            gặp (Mua hàng, Số HĐ '41') ở _hd_khop_gan_ngay: 400 ngày vẫn đủ
+            rộng để khớp nhầm 2 hóa đơn KHÁC NHAU cách nhau ~1 năm (kiểu
+            trùng số hay gặp nhất khi NCC/khách hàng đánh số lại theo năm),
+            cùng rủi ro áp dụng cho Bán hàng ở đây."""
             kh_da_co = _da_co_hoa_don.get(bk)
             if kh_da_co is None:
                 return False
@@ -17958,7 +17977,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                     continue
                 if ngay_dt_moi and ngay_cu:
                     try:
-                        if abs((ngay_dt_moi - ngay_cu).days) > 400:
+                        if abs((ngay_dt_moi - ngay_cu).days) > 90:
                             continue
                     except Exception:
                         pass
