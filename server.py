@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.137"
+APP_BUILD = "2026-08-31.138"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15626,16 +15626,67 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # không; ngược lại KHÔNG khớp thì vẫn cho ghi dù "Số chứng từ" tính
         # ra trùng tình cờ với 1 hóa đơn khác (chỉ trùng NHÃN hiển thị, không
         # mất dữ liệu — khác hẳn bị bỏ qua hoàn toàn như lỗi cũ).
-        da_co_theo_hd = {}   # (mst,invno) -> PUInvoice.RefID
+        # (mst,invno) -> [(PUInvoice.RefID, RefDate|None), ...] — NHIỀU ứng
+        # viên/khóa (không chỉ 1) vì cùng 1 NCC có thể trùng Số HĐ ở NHIỀU kỳ
+        # RẤT XA nhau (PUInvoice chưa ghi được InvSeries để phân biệt — xem
+        # docstring hàm — nên khóa chỉ còn (MST,Số HĐ) đơn thuần, DỄ trùng
+        # nhầm với hóa đơn CÙNG NCC nhưng hoàn toàn khác kỳ, có sẵn trong
+        # MISA từ TRƯỚC khi dùng phần mềm này) — dùng ngày để chọn ĐÚNG ứng
+        # viên gần kỳ đang ghi, xem _hd_khop_gan_ngay bên dưới.
+        da_co_theo_hd = {}
         co_du_lieu_doi_chieu_hd = False
+        # Dò cột NGÀY TRƯỚC, NGOÀI try/except của vòng lặp query bên dưới —
+        # _misa_chon_cot/_misa_cot_bang_that tự an toàn (trả None/{} khi lỗi,
+        # không raise), nên KHÔNG được gộp chung try/except với phần đọc dữ
+        # liệu PUInvoice: gộp chung sẽ khiến 1 lỗi bất kỳ ở đây (dù hiếm) làm
+        # co_du_lieu_doi_chieu_hd không bao giờ được bật lên True, tắt LUÔN
+        # toàn bộ cơ chế đối chiếu theo nội dung hóa đơn (rơi về "Số chứng
+        # từ" dễ trùng nhầm — đúng lỗi gốc đã sửa ở nơi khác).
+        c_ngay_pui = _misa_chon_cot(_misa_cot_bang_that(cur, "PUInvoice"), "RefDate", "InvDate")
         if loai in ("nk", "kqk"):
             try:
-                for hd_refid, hd_mst, hd_inv in cur.execute(
-                        "SELECT RefID, AccountObjectTaxCode, InvNo FROM PUInvoice").fetchall():
-                    da_co_theo_hd[(_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower())] = hd_refid
+                sql_hd = ("SELECT RefID, AccountObjectTaxCode, InvNo" +
+                         (", [%s]" % c_ngay_pui if c_ngay_pui else "") + " FROM PUInvoice")
+                for row_hd in cur.execute(sql_hd).fetchall():
+                    try:
+                        hd_refid, hd_mst, hd_inv = row_hd[0], row_hd[1], row_hd[2]
+                        ngay_hd_cu = row_hd[3] if c_ngay_pui and len(row_hd) > 3 else None
+                        k = (_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower())
+                        da_co_theo_hd.setdefault(k, []).append((hd_refid, ngay_hd_cu))
+                    except Exception:
+                        pass
                 co_du_lieu_doi_chieu_hd = True
             except Exception:
                 pass
+
+        def _hd_khop_gan_ngay(hd_key, ngay_dt_moi):
+            """Trả RefID PUInvoice khớp (MST, Số HĐ) VÀ đủ gần ngày (trong
+            khoảng ~400 ngày) với hóa đơn ĐANG XÉT — None nếu không có ứng
+            viên nào hợp lệ (coi như CHƯA CÓ, an toàn cho ghi tiếp). Không
+            xác định được ngày (1 trong 2 phía, hoặc không dò được cột ngày
+            PUInvoice) thì GIỮ HÀNH VI CŨ — tin ứng viên ĐẦU TIÊN, không đòi
+            hỏi gì thêm (an toàn cho CSDL MISA phiên bản khác không có cột
+            ngày phù hợp). Xem giải thích đầy đủ ở _da_co_khop (Bán hàng,
+            cùng nguyên tắc) — xác nhận đúng qua Đối chiếu tổng giá trị &
+            VAT + dữ liệu thật: 27 hóa đơn Mua hàng ĐÃ CÓ ĐỦ trong Bảng kê
+            Đầu vào bị "Import tự động toàn bộ" báo NHẦM 'đã có sẵn trong
+            MISA' (0 chứng từ được ghi) vì trùng (MST, Số HĐ) với hóa đơn
+            HOÀN TOÀN KHÁC của CÙNG NCC ở kỳ RẤT XA trong quá khứ MISA đã
+            có sẵn từ trước."""
+            ung_vien = da_co_theo_hd.get(hd_key)
+            if not ung_vien:
+                return None
+            if not ngay_dt_moi or not c_ngay_pui:
+                return ung_vien[0][0]
+            for refid, ngay_cu in ung_vien:
+                if not ngay_cu:
+                    return refid
+                try:
+                    if abs((ngay_dt_moi - ngay_cu).days) <= 400:
+                        return refid
+                except Exception:
+                    return refid
+            return None
 
         def _hd_da_co_hien_ro(inv_refid, k_doc_hien_tai):
             """Hóa đơn ĐÃ CÓ trong PUInvoice (khớp MST+Số HĐ) không có nghĩa
@@ -15704,6 +15755,13 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             mst_k = mst.lower()
             sohd_ct = str(first[cfg["sohd"]] or "").strip() if cfg.get("sohd") is not None else ""
             hd_key = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
+            ngay_dt_hd = None
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    ngay_dt_hd = datetime.datetime.strptime(str(first[cfg["ngayct"]] or "").strip(), fmt)
+                    break
+                except Exception:
+                    pass
             # ĐỐI CHIẾU ĐƯỢC theo nội dung hóa đơn thật (có đọc được PUInvoice
             # VÀ dòng này có Số HĐ) -> TIN HẲN kết quả này, KHÔNG dùng "Số
             # chứng từ" (k_doc) để xét trùng/ghi đè nữa cho dòng này — nếu vẫn
@@ -15716,9 +15774,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             # dòng thiếu Số HĐ) mới rơi về cách cũ (Số chứng từ) như trước.
             doi_chieu_duoc = co_du_lieu_doi_chieu_hd and bool(sohd_ct)
             ghi_de_hd_an = False
+            refid_khop = _hd_khop_gan_ngay(hd_key, ngay_dt_hd) if doi_chieu_duoc else None
             if doi_chieu_duoc:
-                if hd_key in da_co_theo_hd:
-                    hien_ro, pu_refid_an, la_cua_pm_an = _hd_da_co_hien_ro(da_co_theo_hd[hd_key], k_doc)
+                if refid_khop is not None:
+                    hien_ro, pu_refid_an, la_cua_pm_an = _hd_da_co_hien_ro(refid_khop, k_doc)
                     if hien_ro is False:
                         # ĐÃ CÓ trong PUInvoice nhưng KHÔNG hiện trên màn Mua
                         # hàng MISA thật — KHÔNG được báo yên tâm "đã có, bỏ
@@ -15760,8 +15819,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                             cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", pu_refid_an)
                             cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", pu_refid_an)
                             cur.execute("DELETE FROM PUVoucher WHERE RefID=?", pu_refid_an)
-                        cur.execute("DELETE FROM PUInvoiceDetail WHERE RefID=?", da_co_theo_hd[hd_key])
-                        cur.execute("DELETE FROM PUInvoice WHERE RefID=?", da_co_theo_hd[hd_key])
+                        cur.execute("DELETE FROM PUInvoiceDetail WHERE RefID=?", refid_khop)
+                        cur.execute("DELETE FROM PUInvoice WHERE RefID=?", refid_khop)
                     except Exception:
                         pass
             else:
@@ -16742,16 +16801,51 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         # ĐỐI CHIẾU THEO NỘI DUNG HÓA ĐƠN (MST NCC + Số HĐ) — xem giải thích
         # đầy đủ ở _misa_ghi_mua_hang (nk/kqk); ở đây dùng PUServiceDetail vì
         # InvNo/MST nằm THẲNG trên dòng chi tiết, không có PUInvoice liên kết
-        # riêng cho Mua hàng dịch vụ.
-        da_co_theo_hd = set()
+        # riêng cho Mua hàng dịch vụ. (mst,invno) -> [ngay|None, ...] — NHIỀU
+        # ngày/khóa (không phải bool) vì cùng NCC có thể trùng Số HĐ ở NHIỀU
+        # kỳ RẤT XA nhau (PUServiceDetail chưa ghi InvSeries để phân biệt) —
+        # dùng ngày để loại bớt khớp NHẦM với hóa đơn hoàn toàn khác kỳ, xem
+        # _hd_gan_ngay_dv (cùng nguyên tắc _hd_khop_gan_ngay ở _misa_ghi_mua_hang).
+        da_co_theo_hd = {}
         co_du_lieu_doi_chieu_hd = False
+        # Dò cột NGÀY TRƯỚC, NGOÀI try/except đọc dữ liệu — xem giải thích ở
+        # _misa_ghi_mua_hang (cùng nguyên tắc: KHÔNG được để 1 lỗi hiếm ở
+        # bước dò cột làm tắt LUÔN toàn bộ cơ chế đối chiếu theo nội dung).
+        c_ngay_psd = _misa_chon_cot(_misa_cot_bang_that(cur, "PUServiceDetail"), "InvDate", "RefDate")
         try:
-            for hd_mst, hd_inv in cur.execute(
-                    "SELECT TaxAccountObjectTaxCode, InvNo FROM PUServiceDetail").fetchall():
-                da_co_theo_hd.add((_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower()))
+            sql_hd_dv = ("SELECT TaxAccountObjectTaxCode, InvNo" +
+                        (", [%s]" % c_ngay_psd if c_ngay_psd else "") + " FROM PUServiceDetail")
+            for row_hd in cur.execute(sql_hd_dv).fetchall():
+                try:
+                    hd_mst, hd_inv = row_hd[0], row_hd[1]
+                    ngay_hd_cu = row_hd[2] if c_ngay_psd and len(row_hd) > 2 else None
+                    k = (_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower())
+                    da_co_theo_hd.setdefault(k, []).append(ngay_hd_cu)
+                except Exception:
+                    pass
             co_du_lieu_doi_chieu_hd = True
         except Exception:
             pass
+
+        def _hd_gan_ngay_dv(hd_key, ngay_dt_moi):
+            """True nếu (MST,Số HĐ) khớp VÀ đủ gần ngày (~400 ngày) — xem
+            _hd_khop_gan_ngay ở _misa_ghi_mua_hang (cùng nguyên tắc, đây là
+            bản rút gọn không cần trả RefID vì Mua hàng dịch vụ không có
+            PUInvoice/PUVoucher riêng để dò 'ẩn'/tự dọn)."""
+            ung_vien = da_co_theo_hd.get(hd_key)
+            if not ung_vien:
+                return False
+            if not ngay_dt_moi or not c_ngay_psd:
+                return True
+            for ngay_cu in ung_vien:
+                if not ngay_cu:
+                    return True
+                try:
+                    if abs((ngay_dt_moi - ngay_cu).days) <= 400:
+                        return True
+                except Exception:
+                    return True
+            return False
 
         for doc in order:
             lines = groups[doc]
@@ -16761,11 +16855,18 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             mst_k = mst.lower()
             sohd_ct = str(first[cfg["sohd"]] or "").strip() if cfg.get("sohd") is not None else ""
             hd_key = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
+            ngay_dt_hd = None
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    ngay_dt_hd = datetime.datetime.strptime(str(first[cfg["ngayct"]] or "").strip(), fmt)
+                    break
+                except Exception:
+                    pass
             # Xem giải thích đầy đủ (vì sao KHÔNG dùng song song cả 2 cách,
             # ghi_de_ct chỉ áp dụng khi không đối chiếu được) ở _misa_ghi_mua_hang.
             doi_chieu_duoc = co_du_lieu_doi_chieu_hd and bool(sohd_ct)
             if doi_chieu_duoc:
-                if hd_key in da_co_theo_hd:
+                if _hd_gan_ngay_dv(hd_key, ngay_dt_hd):
                     trung += 1
                     ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
                                 "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
