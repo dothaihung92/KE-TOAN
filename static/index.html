@@ -8326,7 +8326,8 @@ function moDanhMucGrid(loai,headers,rows,soMoi){
         <input type="file" id="dmImportFile" accept=".xlsx" style="display:none" onchange="dmImportDanhMuc(this)">
         ${['hh','nvl','tscd','ccdc'].includes(loai)?`<button class="btn sm" style="background:#b06a00" onclick="dmImportMisa()" title="Ghi danh mục thẳng vào MISA (Danh mục > Vật tư hàng hóa, tính chất Vật tư hàng hóa)">⬆ Import vào MISA</button>
         <button class="btn ghost sm" style="color:#b06a00;border-color:#e8b923" onclick="dmQuetSuaDvt()" title="Quét mã đã có trong MISA, tự sửa ĐVT bị hỏng liên kết (hiện GUID thô, mở báo lỗi)">🔧 Quét & sửa ĐVT hỏng</button>`:''}
-        ${['hh','nvl'].includes(loai)?`<button class="btn ghost sm" style="color:#1f6b4a;border-color:#8fd9ac" onclick="dmDongBoMisa()" title="Học lại mã hàng ĐÃ CÓ SẴN trong MISA (kể cả mã tạo trước khi dùng phần mềm này) theo đúng tên hàng trùng — để lần Sinh Danh mục sau không tự sinh mã mới trùng lặp cho sản phẩm đã có mã rồi">🔄 Đồng bộ mã có sẵn trong MISA</button>`:''}
+        ${['hh','nvl'].includes(loai)?`<button class="btn ghost sm" style="color:#1f6b4a;border-color:#8fd9ac" onclick="dmDongBoMisa()" title="Học lại mã hàng ĐÃ CÓ SẴN trong MISA (kể cả mã tạo trước khi dùng phần mềm này) theo đúng tên hàng trùng — để lần Sinh Danh mục sau không tự sinh mã mới trùng lặp cho sản phẩm đã có mã rồi">🔄 Đồng bộ mã có sẵn trong MISA</button>
+        <button class="btn ghost sm" style="color:#264b8a;border-color:#b8ccef" onclick="dmXemMisa()" title="Nạp thêm vào lưới TOÀN BỘ mã hàng đang có sẵn trong MISA (không chỉ mã từ bảng kê) để xem/đối chiếu trực tiếp — chỉ để XEM, không phải dữ liệu từ hoá đơn nên cột SL/Đơn giá/Thành tiền/Hoá đơn để trống">👁 Xem danh mục MISA</button>`:''}
         <button class="btn ghost sm" onclick="quayLaiBangKeIn()">← Về bảng kê</button>
       </div>
       <div id="nlInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
@@ -8511,6 +8512,37 @@ async function dmDongBoMisa(){
       ((d.so_them_moi>0||soThayThe>0)?`từ nay tên hàng trùng sẽ tự dùng lại đúng mã này, không sinh mã mới trùng lặp nữa.`
         :`không có gì mới cần học/thay thêm.`)+
       ` Bấm lại "Sinh Danh mục" từ bảng kê để áp dụng cho các hoá đơn sắp xử lý.`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Nạp thêm vào lưới TOÀN BỘ mã hàng ĐANG CÓ SẴN trong MISA (không chỉ mã
+// từ bảng kê đang xử lý) để xem/đối chiếu trực tiếp ngay trên lưới Danh
+// mục — CHỈ ĐỂ XEM (SL/Đơn giá/Thành tiền/Hoá đơn để trống vì không gắn
+// với 1 hoá đơn cụ thể nào), khác "🔄 Đồng bộ" (chỉ âm thầm cập nhật bản
+// đồ, không hiện được gì lên lưới). Bỏ qua mã ĐÃ CÓ SẴN trong lưới đang mở
+// (so theo Mã hàng) để không nhân đôi dòng. Vẫn phải bấm "💾 Lưu" nếu muốn
+// ghi nhớ luôn các dòng vừa xem thêm vào Danh mục.
+async function dmXemMisa(){
+  if(!['hh','nvl'].includes(nlDMMode)){toast('Chức năng này cho DM Hàng hóa / NVL','err');return}
+  toast('Đang tải danh mục từ MISA...','');
+  try{
+    const d=await api(`/api/danh-muc-hang/xem-misa/${current}?loai=${nlDMMode}`);
+    const maDaCo=new Set(nlRows.map(r=>String(r[0]||'').trim().toLowerCase()).filter(Boolean));
+    let them=0;
+    for(const r of (d.rows||[])){
+      const ma=String(r[0]||'').trim().toLowerCase();
+      if(!ma||maDaCo.has(ma))continue;
+      maDaCo.add(ma);
+      const x=r.slice();while(x.length<nlHeader.length)x.push('');x.length=nlHeader.length;
+      nlRows.push(x);
+      them++;
+    }
+    dmDaSua=true;
+    veGridNhapLieu();
+    document.getElementById('nlInfo').innerHTML=`Tổng <b>${nlRows.length}</b> mặt hàng — `+
+      `<b style="color:#264b8a">+${them} mã vừa nạp thêm từ MISA</b> (tổng ${d.so_dong} mã cùng loại đang có trong MISA).`;
+    toast(`✓ Đã hiện thêm ${them} mã hàng có sẵn trong MISA vào cuối lưới`+
+      (them<d.so_dong?` (${d.so_dong-them} mã còn lại đã có sẵn trong lưới, bỏ qua trùng)`:'')+
+      `. Bấm "💾 Lưu" nếu muốn ghi nhớ luôn vào Danh mục.`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function dmXuatGrid(){

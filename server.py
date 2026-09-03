@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.127"
+APP_BUILD = "2026-08-31.128"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13812,6 +13812,62 @@ def danh_muc_hang_dong_bo_misa(cid: int, loai: str = "hh", database: str = ""):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
     return _misa_dong_bo_danh_muc_tu_misa(cid, database, loai)
+
+
+def _misa_doc_toan_bo_danh_muc(cid, database, loai="hh"):
+    """Đọc TOÀN BỘ mã hàng ĐANG CÓ SẴN trong MISA (InventoryItem, lọc đúng
+    TK kho của loai — xem _MISA_INV_ACC) để HIỂN THỊ lên lưới Danh mục cho
+    người dùng xem/đối chiếu trực tiếp (theo đúng yêu cầu: 'xem toàn bộ mã
+    trong MISA ngay trên lưới này') — CHỈ ĐỌC, khác hẳn
+    _misa_dong_bo_danh_muc_tu_misa (chỉ âm thầm cập nhật bản đồ tên->mã
+    dùng NGẦM cho lần sinh mã sau, không hiển thị được gì cho người dùng
+    xem trực tiếp). Trả mỗi dòng ĐÚNG 11 cột như _gen_danh_muc (Mã hàng/
+    Mặt hàng/ĐVT/Thuế suất/Ký tự/SL/Đơn giá/Thành tiền/Hoá đơn/Ngày Hoá
+    Đơn/Kho) để ghép thẳng vào lưới đang có — SL/Đơn giá/Thành tiền/Hoá
+    đơn/Ngày Hoá Đơn để TRỐNG (không gắn với 1 hoá đơn cụ thể nào, đây là
+    dữ liệu Danh mục THUẦN từ MISA, không phải từ Bảng kê)."""
+    accs = {"1561", "156"} if loai == "hh" else {"152"}
+    kho = "HH" if loai == "hh" else "NVL"
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        unit_ten = {}
+        try:
+            for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+                if uid:
+                    unit_ten[str(uid).strip()] = str(uname or "").strip()
+        except Exception:
+            pass
+        rows = []
+        for code, name, acc, unit_id, tax in cur.execute(
+                "SELECT InventoryItemCode, InventoryItemName, InventoryAccount, UnitID, TaxRate "
+                "FROM InventoryItem").fetchall():
+            code = str(code or "").strip()
+            name = str(name or "").strip()
+            if not code or not name:
+                continue
+            if str(acc or "").strip() not in accs:
+                continue
+            dvt = unit_ten.get(str(unit_id or "").strip(), "")
+            ky_tu = "".join(name.split()) + dvt
+            rate = tax if isinstance(tax, (int, float)) else ""
+            rows.append([code, name, dvt, rate, ky_tu, "", "", "", "", "", kho])
+    finally:
+        conn.close()
+    rows.sort(key=lambda r: str(r[0] or ""))
+    return rows
+
+
+@app.get("/api/danh-muc-hang/xem-misa/{cid}")
+def danh_muc_hang_xem_misa(cid: int, loai: str = "hh", database: str = ""):
+    """Xem TOÀN BỘ mã hàng đang có sẵn trong MISA — xem _misa_doc_toan_bo_danh_muc."""
+    if loai not in ("hh", "nvl"):
+        raise HTTPException(400, "Chỉ hỗ trợ xem cho Danh mục Hàng hóa/NVL.")
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    rows = _misa_doc_toan_bo_danh_muc(cid, database, loai)
+    return {"rows": rows, "so_dong": len(rows)}
 
 
 def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
