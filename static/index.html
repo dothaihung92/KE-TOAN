@@ -8496,6 +8496,9 @@ async function dmQuetSuaDvtGhi(){
 // mềm này, vd 'MH316') vào bản đồ tên->mã của phần mềm — CHỈ cập nhật bản
 // đồ dùng cho lần "Sinh Danh mục" SAU (dòng CHƯA từng gặp), KHÔNG đụng tới
 // dữ liệu đã lưu/đã ghi vào MISA trước đó (xem _misa_dong_bo_danh_muc_tu_misa).
+// Việc này giờ đã TỰ ĐỘNG chạy mỗi lần mở Danh mục/Import tự động toàn bộ
+// (xem _tu_dong_bo_danh_muc_misa, server.py) — nút này chỉ để chạy LẠI
+// ngay lập tức (vd vừa tạo/sửa mã trong MISA, không cần đóng mở lại màn).
 async function dmDongBoMisa(){
   if(!['hh','nvl'].includes(nlDMMode)){toast('Chức năng này cho DM Hàng hóa / NVL','err');return}
   toast('Đang đồng bộ mã hàng có sẵn trong MISA...','');

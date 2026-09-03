@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.124"
+APP_BUILD = "2026-08-31.125"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10444,10 +10444,35 @@ def _xuat_dm_excel(rows, ten_sheet, fname, cid, loai="hh"):
     return path
 
 
+def _tu_dong_bo_danh_muc_misa(cid, loai):
+    """TỰ ĐỘNG đồng bộ mã hàng có sẵn trong MISA (_misa_dong_bo_danh_muc_tu_misa)
+    trước khi sinh Danh mục, nếu công ty ĐÃ cấu hình kết nối MISA SQL — để
+    tên hàng nào đã có mã sẵn trong MISA (kể cả mã tạo TRƯỚC khi dùng phần
+    mềm này) tự dùng lại đúng mã đó, không tự sinh mã mới trùng lặp, KHÔNG
+    cần người dùng tự bấm nút '🔄 Đồng bộ mã có sẵn trong MISA' mỗi lần —
+    đúng yêu cầu: 'những lần import dữ liệu mới sẽ dò trong danh mục hàng
+    hoá nếu có tên hàng giống mã hàng đã tạo trước đó thì lấy mã đó còn
+    nếu không có sẽ tạo mã mới'. CHỈ áp dụng hh/nvl (xem _gen_danh_muc_ts —
+    TSCĐ/CCDC dùng cơ chế riêng). Bỏ qua LẶNG LẼ (không chặn/báo lỗi) nếu
+    chưa cấu hình MISA SQL hoặc kết nối lỗi — sinh Danh mục vẫn phải chạy
+    được bình thường dù không có/không kết nối được MISA lúc này."""
+    if loai not in ("hh", "nvl"):
+        return
+    try:
+        database = (_misa_sql_cfg(cid).get("database") or "").strip()
+        if database:
+            _misa_dong_bo_danh_muc_tu_misa(cid, database, loai)
+    except Exception:
+        pass
+
+
 @app.post("/api/danh-muc-hang/{cid}")
 async def danh_muc_hang(cid: int, request: Request, loai: str = "hh"):
-    """Sinh Danh mục Hàng hóa/NVL từ lưới Nhập Liệu (để mở lưới chỉnh sửa)."""
+    """Sinh Danh mục Hàng hóa/NVL từ lưới Nhập Liệu (để mở lưới chỉnh sửa) —
+    xem _tu_dong_bo_danh_muc_misa (tự đồng bộ mã có sẵn trong MISA trước khi
+    sinh, nếu đã cấu hình kết nối)."""
     body = await request.json()
+    _tu_dong_bo_danh_muc_misa(cid, loai)
     all_rows, so_moi = _gen_danh_muc(cid, loai, body.get("header", []),
                                      body.get("rows", []))
     return {"headers": _dm_headers(loai), "rows": all_rows,
@@ -26154,6 +26179,11 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     def _lam_danh_muc(loai):
         if not rows_in:
             raise HTTPException(400, "Chưa có Bảng kê Đầu vào đã lưu.")
+        try:
+            if loai in ("hh", "nvl"):
+                _misa_dong_bo_danh_muc_tu_misa(cid, database, loai)
+        except Exception:
+            pass
         all_rows, so_moi = _gen_danh_muc(cid, loai, header_in, rows_in)
         if not all_rows:
             raise HTTPException(400, "Không có mã nào thuộc danh mục này trong Bảng kê Đầu vào.")
