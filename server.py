@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.123"
+APP_BUILD = "2026-08-31.124"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10162,7 +10162,9 @@ def _gen_danh_muc_ts(cid, loai, header, rows):
 
 def _gen_danh_muc(cid, loai, header, rows):
     """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL ('nvl', Nợ 152).
-    Mã = base (theo Ký tự=nospaces(Tên)+ĐVT) + '-' + thuế suất (vd HH00001-8).
+    Mã = base (theo Ký tự=nospaces(Tên)+ĐVT) + '-' + thuế suất (vd HH00001-8) —
+    TRỪ KHI base là mã CÓ SẴN thật trong MISA đã học qua
+    _misa_dong_bo_danh_muc_tu_misa (dùng NGUYÊN VẸN, không thêm hậu tố).
     Cột Kho mặc định HH/NVL. Nối tiếp + không lặp dòng. Trả (all_rows, so_moi)."""
     if _dm_la_ts(loai):
         return _gen_danh_muc_ts(cid, loai, header, rows)
@@ -10203,7 +10205,17 @@ def _gen_danh_muc(cid, loai, header, rows):
             keymap[ky_tu] = base
             next_n += 1
         rate = _dm_rate(gv(r, col["ts"]))
-        ma = f"{base}-{rate}"
+        if base.startswith(prefix) and base[len(prefix):].isdigit():
+            ma = f"{base}-{rate}"
+        else:
+            # 'base' là mã CÓ SẴN THẬT trong MISA (đồng bộ từ MISA — xem
+            # _misa_dong_bo_danh_muc_tu_misa, dùng cho tên hàng đã có mã
+            # riêng từ TRƯỚC khi dùng phần mềm này, vd 'MH316') -> dùng
+            # NGUYÊN VẸN mã đó, KHÔNG thêm hậu tố '-thuế suất': hậu tố này
+            # chỉ dành cho mã TỰ SINH của phần mềm (định dạng 'HH00001'),
+            # mã có sẵn trong MISA đã là 1 mã InventoryItem hoàn chỉnh, thêm
+            # hậu tố vào sẽ ra mã KHÔNG TỒN TẠI (vd 'MH316-8' sai hẳn).
+            ma = base
         sl = _to_num(gv(r, col["sl"]))
         dgia = _to_num(gv(r, col["dgia"]))
         tt = _to_num(gv(r, col["tt"]))
@@ -13662,6 +13674,90 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
         raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
     finally:
         conn.close()
+
+
+def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
+    """Đồng bộ mã hàng ĐÃ CÓ SẴN trong MISA (bảng InventoryItem — kể cả mã
+    tạo TỪ TRƯỚC khi dùng phần mềm này, vd 'MH316', 'MH607' người dùng/kế
+    toán tự tạo tay hoặc từ hệ thống khác) vào bản đồ tên->mã của phần mềm
+    (data['dm_hh'/'dm_nvl']['map'], xem _gen_danh_muc) — để lần "Sinh Danh
+    mục" tiếp theo gặp ĐÚNG tên hàng đó sẽ TỰ DÙNG LẠI mã có sẵn trong MISA,
+    KHÔNG tự sinh thêm mã 'HH0000X'/'NVL0000X' MỚI trùng lặp với mã đã tồn
+    tại — _gen_danh_muc đã được sửa để dùng NGUYÊN VẸN mã học được ở đây
+    (không thêm hậu tố '-thuế suất' như mã tự sinh).
+
+    Khoá so khớp (ky_tu = nospaces(Tên)+ĐVT) Y HỆT _gen_danh_muc để tương
+    thích — ĐVT lấy từ Unit.UnitName qua UnitID trên InventoryItem. CHỈ
+    THÊM cho tên hàng CHƯA có trong bản đồ, KHÔNG ghi đè map hiện có — mã
+    tự sinh trước đây CÓ THỂ đã dùng trong chứng từ đã ghi sổ, đổi map bây
+    giờ sẽ làm hoá đơn CŨ (đã ghi mã tự sinh) và hoá đơn MỚI (nếu đổi sang
+    mã MISA) không còn nhất quán; giữ nguyên để hoá đơn MỚI vẫn theo đúng
+    mã đã dùng quen, không có gì sai (phần mềm đã tự xử lý đúng việc "1 sản
+    phẩm nhiều mã" ở khâu Xuất Kho, xem _xk_gan_1_muc). Chỉ lọc InventoryItem
+    theo đúng TK kho của loai (_MISA_INV_ACC) để không lẫn danh mục khác.
+
+    Xác nhận đúng qua báo cáo thật: MISA 'Tổng hợp tồn kho' có 3 mã KHÁC
+    NHAU cho CÙNG tên 'Chậu Polystone D35xH45 cm - Matte Black' (HH00063-8
+    do phần mềm tự sinh, MH316/MH613 có sẵn từ trước) — phần mềm không biết
+    MH316/MH613 đã tồn tại nên tự sinh thêm HH00063-8 mới trùng lặp."""
+    prefix = "HH" if loai == "hh" else "NVL"
+    accs = {"1561", "156"} if loai == "hh" else {"152"}
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        unit_ten = {}
+        try:
+            for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
+                if uid:
+                    unit_ten[str(uid).strip()] = str(uname or "").strip()
+        except Exception:
+            pass
+        misa_map = {}   # ky_tu -> mã MISA (mã XUẤT HIỆN TRƯỚC trong kết quả được giữ)
+        for code, name, acc, unit_id in cur.execute(
+                "SELECT InventoryItemCode, InventoryItemName, InventoryAccount, UnitID "
+                "FROM InventoryItem").fetchall():
+            code = str(code or "").strip()
+            name = str(name or "").strip()
+            if not code or not name:
+                continue
+            if str(acc or "").strip() not in accs:
+                continue
+            dvt = unit_ten.get(str(unit_id or "").strip(), "")
+            ky_tu = "".join(name.split()) + dvt
+            misa_map.setdefault(ky_tu, code)
+    finally:
+        conn.close()
+
+    data = _doc_du_lieu_cty(cid)
+    store = data.get("dm_" + loai, {}) or {}
+    keymap = dict(store.get("map", {}))
+    so_them = 0
+    vi_du = []
+    for ky_tu, ma_misa in misa_map.items():
+        if ky_tu in keymap:
+            continue
+        keymap[ky_tu] = ma_misa
+        so_them += 1
+        if len(vi_du) < 10:
+            vi_du.append({"ky_tu": ky_tu, "ma": ma_misa})
+    store["map"] = keymap
+    data["dm_" + loai] = store
+    _ghi_du_lieu_cty(cid, data)
+    return {"so_ma_misa": len(misa_map), "so_them_moi": so_them, "vi_du": vi_du}
+
+
+@app.post("/api/danh-muc-hang/dong-bo-misa/{cid}")
+def danh_muc_hang_dong_bo_misa(cid: int, loai: str = "hh", database: str = ""):
+    """Đồng bộ mã hàng có sẵn trong MISA vào bản đồ tên->mã của phần mềm —
+    xem _misa_dong_bo_danh_muc_tu_misa. CHỈ áp dụng loai='hh'/'nvl' (khớp
+    đúng phạm vi _gen_danh_muc — TSCĐ/CCDC dùng cơ chế sinh mã riêng, xem
+    _gen_danh_muc_ts, chưa hỗ trợ đồng bộ kiểu này)."""
+    if loai not in ("hh", "nvl"):
+        raise HTTPException(400, "Chỉ hỗ trợ đồng bộ cho Danh mục Hàng hóa/NVL.")
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_dong_bo_danh_muc_tu_misa(cid, database, loai)
 
 
 def _misa_quet_sua_dvt_hang_hoa(cid, database, dm_rows, preview=True):
