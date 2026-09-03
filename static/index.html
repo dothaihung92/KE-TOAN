@@ -7462,6 +7462,7 @@ async function misaDoiChieuDocLap(){
     document.getElementById('misaModalBody').innerHTML=`<div id="misaDoiChieuKetQua"></div>
       <div style="margin-top:14px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+        <button class="btn sm" style="background:#1a7a4a" onclick="misaDoiChieuXuatExcel()">📥 Kết xuất Excel</button>
       </div>`;
     misaDoiChieuVe({doi_chieu:dc});
   }catch(e){
@@ -7470,6 +7471,17 @@ async function misaDoiChieuDocLap(){
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;
   }
+}
+async function misaDoiChieuXuatExcel(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang kết xuất Excel...','');
+  try{
+    const r=await fetch(`/api/misa-sql/doi-chieu-import-xuat/${current}`);
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Kết xuất thất bại')}
+    const soDong=r.headers.get('X-So-Dong')||'0';
+    await xuatFile(r,`DoiChieu_GiaTriVAT_${current}.xlsx`);
+    toast(`✓ Đã kết xuất ${soDong} dòng thiếu/lệch/thừa (Bán hàng + Mua hàng) ra Excel.`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function misaImportTuDongMo(){
   if(!current){toast('Chọn công ty trước','err');return}

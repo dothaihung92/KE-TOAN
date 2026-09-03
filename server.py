@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.134"
+APP_BUILD = "2026-08-31.135"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27287,6 +27287,92 @@ def misa_sql_doi_chieu_import(cid: int, database: str = ""):
     except Exception:
         pass
     return _misa_doi_chieu_import_toan_bo(cid, database)
+
+
+_DOI_CHIEU_XUAT_HEADERS = ["Loại", "Trạng thái", "MST", "Số HĐ", "Ngày",
+                           "Doanh số nguồn", "Doanh số MISA", "Thuế GTGT nguồn",
+                           "Thuế GTGT MISA", "Chênh lệch"]
+
+def _doi_chieu_xuat_rows(dc):
+    """Gộp 3 danh sách (thiếu/lệch/thừa) của CẢ Bán hàng lẫn Mua hàng từ kết
+    quả _misa_doi_chieu_import_toan_bo thành các dòng phẳng để xuất Excel —
+    dùng chung cho cả xuất trực tiếp lẫn kèm trong file kết quả Import tự
+    động, đúng thứ tự cột _DOI_CHIEU_XUAT_HEADERS."""
+    rows = []
+    for nhan, d in (("Bán hàng", dc.get("ban_hang") or {}), ("Mua hàng", dc.get("mua_hang") or {})):
+        for x in d.get("thieu") or []:
+            rows.append([nhan, "THIẾU trong MISA", x.get("mst", ""), x.get("so_hd", ""), x.get("ngay", ""),
+                        x.get("doanh_so_nguon", 0), "", x.get("thue_nguon", 0), "", ""])
+        for x in d.get("lech") or []:
+            rows.append([nhan, "LỆCH", x.get("mst", ""), x.get("so_hd", ""), x.get("ngay", ""),
+                        x.get("doanh_so_nguon", 0), x.get("doanh_so_misa", 0),
+                        x.get("thue_nguon", 0), x.get("thue_misa", 0), x.get("chenh_lech", 0)])
+        for x in d.get("thua") or []:
+            rows.append([nhan, "THỪA trong MISA (không có trong nguồn tra cứu)", x.get("mst", ""),
+                        x.get("so_hd", ""), x.get("ngay", ""), "", x.get("doanh_so_misa", 0),
+                        "", x.get("thue_misa", 0), ""])
+    return rows
+
+
+@app.get("/api/misa-sql/doi-chieu-import-xuat/{cid}")
+def misa_sql_doi_chieu_import_xuat(cid: int, database: str = ""):
+    """Kết xuất Excel danh sách hóa đơn THIẾU/LỆCH/THỪA từ Đối chiếu tổng
+    giá trị & VAT (Bán hàng + Mua hàng gộp 1 file, 1 dòng/hóa đơn) — để
+    người dùng tự dò/kiểm tra ngoài phần mềm, đúng yêu cầu: "chỗ kiểm tra
+    hãy thêm nút kết xuất excel để dò check lệch đầu vào và đầu ra". Tự sửa
+    (best-effort) hóa đơn ngoại tệ trước khi xuất, giống hệt
+    misa_sql_doi_chieu_import."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    try:
+        _sua_hoa_don_ngoai_te_da_luu(cid)
+    except Exception:
+        pass
+    dc = _misa_doi_chieu_import_toan_bo(cid, database)
+    rows = _doi_chieu_xuat_rows(dc)
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Đối chiếu"
+    for c, h in enumerate(_DOI_CHIEU_XUAT_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    mau_trang_thai = {"THIẾU trong MISA": "FDE8E8", "LỆCH": "FDE8E8",
+                      "THỪA trong MISA (không có trong nguồn tra cứu)": "FFF3CD"}
+    for r, row in enumerate(rows, 2):
+        for c, v in enumerate(row, 1):
+            cell = ws.cell(r, c)
+            cell.value = v
+            if c in (3, 4):
+                cell.number_format = "@"
+        fill = mau_trang_thai.get(row[1])
+        if fill:
+            ws.cell(r, 2).fill = PatternFill("solid", fgColor=fill)
+    for c in range(1, len(_DOI_CHIEU_XUAT_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.column_dimensions["B"].width = 40
+    ws.freeze_panes = "A2"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"DoiChieu_GiaTriVAT_{mst}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    import shutil
+    for d in (_get_desktop_dir(),
+              (_du_lieu_cty_path(cid) and os.path.dirname(_du_lieu_cty_path(cid)))):
+        if d and os.path.isdir(d):
+            try:
+                shutil.copy(path, os.path.join(d, fname))
+            except Exception:
+                pass
+    return _resp_xuat(path, fname, {"X-So-Dong": str(len(rows))})
 
 
 # Job chạy NỀN cho "Import tự động toàn bộ" — công ty nhiều dữ liệu (nhiều
