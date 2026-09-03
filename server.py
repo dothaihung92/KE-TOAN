@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.135"
+APP_BUILD = "2026-08-31.136"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27252,6 +27252,50 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             "chenh_lech": d_ds + d_thue})
             else:
                 khop += 1
+
+        # Cứu vãn (salvage) theo Số hóa đơn ĐƠN THUẦN (bỏ MST) cho các dòng
+        # còn lại ở "thiếu" — xác nhận đúng qua dữ liệu thật (file người dùng
+        # xuất): CÙNG 1 NCC (1 MST) có tới 11 hóa đơn xuất hiện Y HỆT ở CẢ
+        # "thiếu" (nguồn có, theo khóa MST+Số HĐ không tìm thấy bên MISA)
+        # LẪN "thừa" (MISA có, không khớp khóa nào bên nguồn) — ĐÚNG cùng Số
+        # HĐ, ĐÚNG cùng số tiền tuyệt đối — chứng tỏ hóa đơn ĐÃ CÓ ĐỦ ở cả 2
+        # bên, chỉ là MST bị lệch định dạng giữa nguồn (tra cứu Thuế) và
+        # MISA (NCC do người dùng tự nhập tay) cho ĐÚNG NCC này, khiến khóa
+        # ghép (MST, Số HĐ) không khớp — dù Số hóa đơn (đã DUY NHẤT trong
+        # phạm vi 1 NCC theo quy định) đủ để định danh khi kết hợp số tiền.
+        # CHỈ ghép khi Số HĐ đó có ĐÚNG 1 ứng viên ở CẢ 2 phía (không mơ hồ)
+        # — nếu nhiều ứng viên trùng Số HĐ ở 1 trong 2 phía thì bỏ qua, để
+        # nguyên "thiếu"/"thừa" cho người dùng tự kiểm tra (an toàn hơn ghép
+        # nhầm 2 NCC khác nhau tình cờ trùng Số HĐ).
+        if thieu:
+            misa_con_lai = {k: m for k, m in misa["purchase"].items() if k not in da_khop_key}
+            theo_sohd_ng, theo_sohd_ms = {}, {}
+            for it in thieu:
+                theo_sohd_ng.setdefault(_chuan_shd(it["so_hd"]).lower(), []).append(it)
+            for k, m in misa_con_lai.items():
+                theo_sohd_ms.setdefault(k[1], []).append((k, m))
+            thieu_con_lai, da_ghep_ms = [], set()
+            for it in thieu:
+                gk_sohd = _chuan_shd(it["so_hd"]).lower()
+                ung_vien_ng = theo_sohd_ng.get(gk_sohd, [])
+                ung_vien_ms = [x for x in theo_sohd_ms.get(gk_sohd, []) if x[0] not in da_ghep_ms]
+                if len(ung_vien_ng) != 1 or len(ung_vien_ms) != 1:
+                    thieu_con_lai.append(it)
+                    continue
+                k_ms, m = ung_vien_ms[0]
+                da_ghep_ms.add(k_ms)
+                da_khop_key.add(k_ms)
+                d_ds = round(it["doanh_so_nguon"]) - round(m["ds"])
+                d_thue = round(it["thue_nguon"]) - round(m["thue"])
+                if abs(d_ds) > DUNG_SAI or abs(d_thue) > DUNG_SAI:
+                    lech.append({"mst": it["mst"], "so_hd": it["so_hd"], "ngay": it["ngay"],
+                                "doanh_so_nguon": it["doanh_so_nguon"], "doanh_so_misa": round(m["ds"]),
+                                "thue_nguon": it["thue_nguon"], "thue_misa": round(m["thue"]),
+                                "chenh_lech": d_ds + d_thue})
+                else:
+                    khop += 1
+            thieu = thieu_con_lai
+
         thieu.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
         lech.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
         # THỪA trong MISA — xem giải thích đầy đủ ở nhánh Bán hàng phía trên
