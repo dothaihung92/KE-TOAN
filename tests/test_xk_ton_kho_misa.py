@@ -1,0 +1,119 @@
+import os
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+"""Regression test: nút '🔄 Cập nhật tồn kho' (Xuất Kho) chỉnh lại để LẤY
+TRỰC TIẾP tồn kho từ MISA (bảng InventoryLedger — đúng Sổ Kho MISA dùng để
+lên báo cáo 'Tổng hợp tồn kho') THAY VÌ bắt buộc phải import file Excel thủ
+công như trước — kèm chọn khoảng thời gian (Từ/Đến) và chọn Mã kho.
+
+Test hàm THUẦN _misa_lay_danh_sach_kho (đọc bảng Stock, dùng để hiển thị ô
+chọn Mã kho) và _misa_lay_ton_kho (tính tồn kho theo InventoryLedger, TRẢ VỀ
+ĐÚNG cấu trúc như _doc_file_ton_kho để dùng lại nguyên các hàm/luồng Xuất
+Kho hiện có — _xk_ton_an_toan/_xk_dau_ky_an_toan/_xk_canh_bao_kho_ton...)."""
+import sys
+sys.path.insert(0, _REPO_ROOT)
+import server
+
+
+class FakeCursor:
+    def __init__(self, stock_rows=None, ledger_rows=None):
+        self._stock_rows = stock_rows or []
+        self._ledger_rows = ledger_rows or []
+        self.last_sql = None
+        self.last_params = None
+
+    def execute(self, sql, params=None):
+        self.last_sql = sql
+        self.last_params = params
+        return self
+
+    def fetchall(self):
+        if "FROM Stock" in self.last_sql:
+            return self._stock_rows
+        if "FROM InventoryLedger" in self.last_sql:
+            return self._ledger_rows
+        return []
+
+
+class FakeConn:
+    def __init__(self, cur):
+        self._cur = cur
+
+    def cursor(self):
+        return self._cur
+
+    def close(self):
+        pass
+
+
+orig_connect = server._misa_sql_connect
+try:
+    # ===== _misa_lay_danh_sach_kho: đọc đúng bảng Stock, an toàn khi lỗi =====
+    curA = FakeCursor(stock_rows=[("HH", "Hàng Hóa"), ("NVL", None)])
+    server._misa_sql_connect = lambda cid, database=None: FakeConn(curA)
+    dsA = server._misa_lay_danh_sach_kho(1, "TESTDB")
+    assert dsA == [{"ma": "HH", "ten": "Hàng Hóa"}, {"ma": "NVL", "ten": "NVL"}], (
+        f"_misa_lay_danh_sach_kho phải đọc đúng Mã/Tên kho từ bảng Stock (Tên trống thì lấy tạm Mã) — được {dsA}")
+    print("PASS ca A: _misa_lay_danh_sach_kho đọc đúng danh sách Kho từ MISA (Stock).")
+
+    def _connect_loi(cid, database=None):
+        raise Exception("không kết nối được MISA")
+    server._misa_sql_connect = _connect_loi
+    assert server._misa_lay_danh_sach_kho(1, "TESTDB") == [], "Kết nối lỗi -> PHẢI trả [] an toàn, không raise"
+    assert server._misa_lay_danh_sach_kho(1, "") == [], "Chưa cấu hình database -> PHẢI trả [] an toàn"
+    print("PASS ca B: _misa_lay_danh_sach_kho trả [] an toàn khi MISA chưa kết nối được.")
+
+    # ===== _misa_lay_ton_kho: TẤT CẢ kho, KHÔNG chọn Từ ngày (Đầu kỳ = 0) =====
+    # HH00009-8 chỉ ở kho "HH" (kho_ro=True) — HH00099-1 rải rác 2 kho "HH"+"NVL" (kho_ro=False).
+    ledger_c2 = [
+        ("HH00009-8", "Chậu ABC", "Cái", "HH", "Hàng Hóa", 0, 5, 500000),
+        ("HH00099-1", "Chậu XYZ", "Cái", "HH", "Hàng Hóa", 0, 3, 150000),
+        ("HH00099-1", "Chậu XYZ", "Cái", "NVL", "NVL", 0, 2, 100000),
+    ]
+    cur2 = FakeCursor(ledger_rows=ledger_c2)
+    server._misa_sql_connect = lambda cid, database=None: FakeConn(cur2)
+    rows2, kho2 = server._misa_lay_ton_kho(1, "TESTDB", tu_ngay=None, den_ngay="2026-09-04", ma_kho_list=None)
+    assert cur2.last_params == ["2026-09-05"], (
+        f"KHÔNG chọn Từ ngày -> KHÔNG được có tham số Đầu kỳ, chỉ 1 tham số Đến ngày+1 (Cuối kỳ CỘNG DỒN "
+        f"đến hết ngày đã chọn) — được {cur2.last_params}")
+    by_ma2 = {r["ma"]: r for r in rows2}
+    assert by_ma2["HH00009-8"]["ton"] == 5 and by_ma2["HH00009-8"]["kho_ro"] is True
+    assert by_ma2["HH00009-8"]["kho"] == "Hàng Hóa" and by_ma2["HH00009-8"]["ton_kho_min"] == 5
+    assert by_ma2["HH00009-8"]["gia"] == 100000
+    assert by_ma2["HH00099-1"]["ton"] == 5 and by_ma2["HH00099-1"]["kho_ro"] is False, (
+        "Mã rải rác 2 kho khác nhau PHẢI kho_ro=False (mơ hồ), giống hệt _doc_file_ton_kho")
+    assert by_ma2["HH00099-1"]["ton_kho_min"] == 2, "ton_kho_min PHẢI lấy kho ÍT NHẤT (2), không phải tổng (5)"
+    assert by_ma2["HH00099-1"]["gia"] == 50000
+    assert "Hàng Hóa" in kho2 and "NVL" in kho2
+    print("PASS ca 2: _misa_lay_ton_kho (TẤT CẢ kho, không chọn Từ ngày) tính đúng Cuối kỳ + kho_ro/ton_kho_min, "
+          "giống hệt cấu trúc _doc_file_ton_kho.")
+
+    # ===== Có chọn Từ ngày -> Đầu kỳ CỘNG DỒN đúng, tham số Đầu kỳ đi TRƯỚC tham số Cuối kỳ =====
+    ledger_c3 = [("HH00009-8", "Chậu ABC", "Cái", "HH", "Hàng Hóa", 20, 5, 500000)]
+    cur3 = FakeCursor(ledger_rows=ledger_c3)
+    server._misa_sql_connect = lambda cid, database=None: FakeConn(cur3)
+    rows3, _ = server._misa_lay_ton_kho(1, "TESTDB", tu_ngay="2026-01-01", den_ngay="2026-09-04", ma_kho_list=None)
+    assert cur3.last_params == ["2026-01-01", "2026-09-05"], (
+        f"Có chọn Từ ngày -> tham số PHẢI là [Từ ngày (Đầu kỳ, KHÔNG +1), Đến ngày+1 (Cuối kỳ)] — "
+        f"được {cur3.last_params}")
+    assert rows3[0]["dau_ky"] == 20 and rows3[0]["dau_ky_kho_min"] == 20
+    print("PASS ca 3: _misa_lay_ton_kho có chọn Từ ngày tính đúng tồn Đầu kỳ, tham số SQL đúng thứ tự.")
+
+    # ===== Lọc theo Mã kho đã chọn -> WHERE có StockCode IN (...), tham số nối đúng SAU tham số ngày =====
+    ledger_c4 = [("HH00009-8", "Chậu ABC", "Cái", "HH", "Hàng Hóa", 0, 5, 500000)]
+    cur4 = FakeCursor(ledger_rows=ledger_c4)
+    server._misa_sql_connect = lambda cid, database=None: FakeConn(cur4)
+    rows4, _ = server._misa_lay_ton_kho(1, "TESTDB", tu_ngay=None, den_ngay="2026-09-04", ma_kho_list=["HH", "NVL"])
+    assert "StockCode IN" in cur4.last_sql, f"Có chọn Mã kho -> SQL PHẢI lọc WHERE StockCode IN (...) — được {cur4.last_sql}"
+    assert cur4.last_params == ["2026-09-05", "HH", "NVL"], (
+        f"Tham số Mã kho đã chọn PHẢI nối SAU tham số ngày, đúng thứ tự đã chọn — được {cur4.last_params}")
+    print("PASS ca 4: _misa_lay_ton_kho lọc đúng theo danh sách Mã kho đã chọn.")
+
+    # ===== An toàn khi MISA lỗi kết nối / chưa cấu hình database =====
+    server._misa_sql_connect = _connect_loi
+    assert server._misa_lay_ton_kho(1, "TESTDB") == ([], []), "Kết nối lỗi -> PHẢI trả ([], []) an toàn, không raise"
+    assert server._misa_lay_ton_kho(1, "") == ([], []), "Chưa cấu hình database -> PHẢI trả ([], []) an toàn"
+    print("PASS ca 5: _misa_lay_ton_kho trả ([], []) an toàn khi MISA chưa kết nối được.")
+
+    print("\nTẤT CẢ TEST PASS")
+finally:
+    server._misa_sql_connect = orig_connect

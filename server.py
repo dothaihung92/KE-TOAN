@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.155"
+APP_BUILD = "2026-08-31.156"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11691,6 +11691,136 @@ def _doc_file_ton_kho(wb):
                     "dau_ky": it["dau_ky"], "dau_ky_kho_min": dau_ky_kho_min})
     return out, danh_sach_kho
 
+def _misa_lay_danh_sach_kho(cid, database):
+    """CHỈ ĐỌC — trả [{ma,ten}] toàn bộ Kho (bảng Stock) đang có trong MISA,
+    để hiển thị ô chọn Mã kho khi 'Cập nhật tồn kho' lấy trực tiếp từ MISA
+    (xem _misa_lay_ton_kho). Trả [] AN TOÀN (không raise) nếu chưa cấu hình/
+    kết nối được MISA."""
+    if not database:
+        return []
+    try:
+        conn = _misa_sql_connect(cid, database=database)
+    except Exception:
+        return []
+    try:
+        cur = conn.cursor()
+        ra = []
+        for scode, sname in cur.execute(
+                "SELECT StockCode, StockName FROM Stock ORDER BY StockCode").fetchall():
+            if scode:
+                ra.append({"ma": str(scode).strip(), "ten": str(sname or scode).strip()})
+        return ra
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+def _misa_lay_ton_kho(cid, database, tu_ngay=None, den_ngay=None, ma_kho_list=None):
+    """CHỈ ĐỌC — tính TRỰC TIẾP tồn kho từ MISA (bảng InventoryLedger: đúng
+    nguồn Sổ Kho mà MISA dùng để lên báo cáo 'Tổng hợp tồn kho' — cách cộng
+    dồn SUM(InwardQuantity-OutwardQuantity) theo mốc RefDate NÀY đã được xác
+    nhận khớp đúng số liệu MISA báo cáo qua so_du_kho_truoc() ở luồng Ghi Sổ
+    Kho trực tiếp, xem chú thích ở đó) -> (rows CÙNG cấu trúc với
+    _doc_file_ton_kho, danh_sach_kho) — để dùng lại NGUYÊN các hàm/luồng
+    Xuất Kho hiện có (_xk_ton_an_toan/_xk_dau_ky_an_toan/_xk_canh_bao_kho_ton
+    ...) mà không cần sửa gì thêm.
+
+    den_ngay (yyyy-mm-dd) là mốc 'Cuối kỳ' — CỘNG DỒN toàn bộ giao dịch có
+    RefDate TRONG NGÀY đó trở về trước (< den_ngay+1 ngày); bỏ trống thì mặc
+    định hôm nay. tu_ngay (yyyy-mm-dd) là mốc 'Đầu kỳ' — CỘNG DỒN toàn bộ
+    giao dịch TRƯỚC ngày đó (< tu_ngay, KHÔNG gồm chính ngày đó, đúng nghĩa
+    'số dư đầu kỳ'); bỏ trống thì Đầu kỳ luôn = 0 (không dùng để cảnh báo).
+    ma_kho_list (list mã kho StockCode) lọc CHỈ những kho đó — bỏ trống lấy
+    TẤT CẢ kho. Trả ([], []) AN TOÀN (không raise) nếu chưa cấu hình/kết nối/
+    thiếu bảng."""
+    if not database:
+        return [], []
+    from datetime import date as _date, timedelta as _timedelta
+    try:
+        den = _date.fromisoformat((den_ngay or "").strip()) if den_ngay else _date.today()
+    except Exception:
+        den = _date.today()
+    den_ke_tiep = (den + _timedelta(days=1)).isoformat()
+    tu = None
+    if tu_ngay:
+        try:
+            tu = _date.fromisoformat(tu_ngay.strip()).isoformat()
+        except Exception:
+            tu = None
+    try:
+        conn = _misa_sql_connect(cid, database=database)
+    except Exception:
+        return [], []
+    try:
+        cur = conn.cursor()
+        cols_sel = ["ii.InventoryItemCode", "ii.InventoryItemName", "u.UnitName",
+                    "s.StockCode", "s.StockName"]
+        params = []
+        if tu:
+            cols_sel.append("SUM(CASE WHEN il.RefDate < ? THEN il.InwardQuantity-il.OutwardQuantity ELSE 0 END)")
+            params.append(tu)
+        else:
+            cols_sel.append("0")
+        cols_sel.append("SUM(il.InwardQuantity-il.OutwardQuantity)")
+        cols_sel.append("SUM(il.InwardAmount-il.OutwardAmount)")
+        where = ["il.RefDate < ?"]
+        params.append(den_ke_tiep)
+        if ma_kho_list:
+            ph = ",".join("?" for _ in ma_kho_list)
+            where.append(f"s.StockCode IN ({ph})")
+            params.extend(ma_kho_list)
+        sql = (
+            "SELECT " + ", ".join(cols_sel) + " FROM InventoryLedger il "
+            "JOIN InventoryItem ii ON ii.InventoryItemID = il.InventoryItemID "
+            "LEFT JOIN Unit u ON u.UnitID = ii.UnitID "
+            "LEFT JOIN Stock s ON s.StockID = il.StockID "
+            "WHERE " + " AND ".join(where) + " "
+            "GROUP BY ii.InventoryItemCode, ii.InventoryItemName, u.UnitName, s.StockCode, s.StockName"
+        )
+        sql_rows = cur.execute(sql, params).fetchall()
+    except Exception:
+        return [], []
+    finally:
+        conn.close()
+    gop = {}
+    danh_sach_kho = []
+    for ma, ten, dvt, kho_ma, kho_ten, dau_ky_sl, ton_sl, ton_gt in sql_rows:
+        ma = str(ma or "").strip()
+        if not ma:
+            continue
+        ten_kho = str(kho_ten or kho_ma or "").strip()
+        dau_ky_sl = _to_num(dau_ky_sl) or 0
+        ton_sl = _to_num(ton_sl) or 0
+        ton_gt = _to_num(ton_gt) or 0
+        if ten_kho and ten_kho not in danh_sach_kho:
+            danh_sach_kho.append(ten_kho)
+        if ma in gop:
+            it = gop[ma]
+            it["ton"] += ton_sl
+            it["gt"] += ton_gt
+            it["dau_ky"] += dau_ky_sl
+            it["kho_qty"][ten_kho] = it["kho_qty"].get(ten_kho, 0) + ton_sl
+            it["dau_ky_qty"][ten_kho] = it["dau_ky_qty"].get(ten_kho, 0) + dau_ky_sl
+        else:
+            gop[ma] = {"ma": ma, "ten": str(ten or "").strip(), "dvt": str(dvt or "").strip(),
+                      "ton": ton_sl, "gt": ton_gt, "dau_ky": dau_ky_sl,
+                      "kho_qty": {ten_kho: ton_sl} if ten_kho else {},
+                      "dau_ky_qty": {ten_kho: dau_ky_sl} if ten_kho else {}}
+    out = []
+    for it in gop.values():
+        gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
+        kho_qty = it["kho_qty"]
+        dau_ky_qty = it["dau_ky_qty"]
+        ton_kho_min = min(kho_qty.values()) if kho_qty else it["ton"]
+        dau_ky_kho_min = min(dau_ky_qty.values()) if dau_ky_qty else it["dau_ky"]
+        out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
+                    "ton": it["ton"], "gia": gia,
+                    "kho": next(iter(kho_qty)) if len(kho_qty) == 1 else None,
+                    "kho_ro": len(kho_qty) <= 1,
+                    "ton_kho_min": ton_kho_min,
+                    "dau_ky": it["dau_ky"], "dau_ky_kho_min": dau_ky_kho_min})
+    return out, danh_sach_kho
+
 def _xk_src_cols(header):
     """Tìm cột trong sheet nguồn 'Chi tiết BÁN RA'."""
     hlow = [str(h or "").strip().lower() for h in header]
@@ -12660,6 +12790,47 @@ async def xk_cap_nhat_ton(cid: int, request: Request):
     return {"ok": True, "so_file": so_file_ok, "so_cap_nhat": len(gop), "so_moi": so_moi,
             "tong": len(data["xk_ton"]), "loi": loi[:5],
             "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
+
+@app.get("/api/xk/misa-danh-sach-kho/{cid}")
+async def xk_misa_danh_sach_kho(cid: int):
+    """Danh sách Kho (Stock) đang có trong MISA, để hiển thị ô chọn Mã kho
+    trước khi 'Cập nhật tồn kho' lấy trực tiếp từ MISA (xem
+    _misa_lay_danh_sach_kho/xk_cap_nhat_ton_misa)."""
+    db_misa = (_misa_sql_cfg(cid).get("database") or "").strip()
+    if not db_misa:
+        raise HTTPException(400, "Chưa cấu hình kết nối MISA SQL cho công ty này (mục 🔗 Kết nối MISA).")
+    danh_sach = _misa_lay_danh_sach_kho(cid, db_misa)
+    return {"ok": True, "danh_sach": danh_sach}
+
+@app.post("/api/xk/cap-nhat-ton-misa/{cid}")
+async def xk_cap_nhat_ton_misa(cid: int, tu: str = "", den: str = "", kho: str = ""):
+    """Cập nhật SỐ LIỆU Sheet TON — LẤY TRỰC TIẾP TỪ MISA (tính từ Sổ Kho
+    InventoryLedger, xem _misa_lay_ton_kho) THAY VÌ phải import file 'Tổng
+    hợp tồn kho' thủ công. CÙNG kiểu 'cập nhật' (ghi đè đúng mã lấy được,
+    giữ nguyên mã cũ không nhắc tới) như xk_cap_nhat_ton — KHÔNG đụng tới
+    GIATHANH (mã hàng đã gắn cho dòng bán giữ nguyên).
+    tu/den (yyyy-mm-dd, có thể bỏ trống — den mặc định hôm nay) = khoảng thời
+    gian; kho = danh sách Mã kho cách nhau bởi dấu phẩy (bỏ trống = TẤT CẢ
+    kho)."""
+    db_misa = (_misa_sql_cfg(cid).get("database") or "").strip()
+    if not db_misa:
+        raise HTTPException(400, "Chưa cấu hình kết nối MISA SQL cho công ty này (mục 🔗 Kết nối MISA).")
+    ma_kho_list = [k.strip() for k in (kho or "").split(",") if k.strip()] or None
+    rows, danh_sach_kho = _misa_lay_ton_kho(cid, db_misa, tu_ngay=tu or None, den_ngay=den or None,
+                                            ma_kho_list=ma_kho_list)
+    if not rows:
+        raise HTTPException(400, "Không lấy được dữ liệu tồn kho từ MISA (kiểm tra lại kết nối MISA SQL, "
+                                 "hoặc khoảng thời gian/kho đã chọn không có giao dịch nào).")
+    gop = {it["ma"]: it for it in rows}
+    data = _doc_du_lieu_cty(cid)
+    ton_theo_ma = {str(t.get("ma") or ""): t for t in (data.get("xk_ton") or [])}
+    so_moi = sum(1 for ma in gop if ma not in ton_theo_ma)
+    ton_theo_ma.update(gop)
+    data["xk_ton"] = list(ton_theo_ma.values())
+    _ghi_du_lieu_cty(cid, data)
+    canh_bao_kho = _xk_canh_bao_kho_ton(danh_sach_kho, data["xk_ton"])
+    return {"ok": True, "so_cap_nhat": len(gop), "so_moi": so_moi,
+            "tong": len(data["xk_ton"]), "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
 
 # Header CHUẨN dùng khi nguồn "ctbr" (Chi tiết BÁN RA, xem _xk_src_cols) đang
 # RỖNG — đúng khớp từng cụm "eqs" của _xk_src_cols() nên đọc lại luôn tìm

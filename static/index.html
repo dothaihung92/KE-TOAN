@@ -4536,8 +4536,8 @@ function xkVeTrangChinh(){
           <div class="hint" style="margin-bottom:8px">Import file "Tổng hợp tồn kho" xuất từ MISA (Mã hàng/Tên hàng/Cuối kỳ SL/GT).</div>
           <button class="btn sm" style="background:#1a7a7a" onclick="document.getElementById('xkFileTon').click()">📥 Import Tồn Kho</button>
           <input type="file" id="xkFileTon" accept=".xlsx" multiple style="display:none" onchange="xkImportTon(this)">
-          <button class="btn ghost sm" style="margin-left:6px" onclick="document.getElementById('xkFileCapNhatTon').click()"
-            title="Chỉ cập nhật lại SL/giá tồn kho theo mã hàng từ file mới — KHÔNG xoá mã cũ file mới không có, KHÔNG chạy lại việc gán mã hàng đã gán cho các dòng bán (chỉ 'Dò mã hàng tự động'/'Kiểm tra tồn kho' mới gán lại)">🔄 Cập nhật tồn kho</button>
+          <button class="btn ghost sm" style="margin-left:6px" onclick="xkCapNhatTonMisaMo()"
+            title="Tự động lấy tồn kho TRỰC TIẾP từ MISA (chọn khoảng thời gian + Mã kho, không cần import file Excel thủ công). Chỉ cập nhật lại SL/giá tồn kho theo mã hàng lấy được — KHÔNG xoá mã cũ không có trong kết quả, KHÔNG chạy lại việc gán mã hàng đã gán cho các dòng bán (chỉ 'Dò mã hàng tự động'/'Kiểm tra tồn kho' mới gán lại)">🔄 Cập nhật tồn kho</button>
           <input type="file" id="xkFileCapNhatTon" accept=".xlsx" multiple style="display:none" onchange="xkCapNhatTon(this)">
           <div id="xkTonBadge" style="font-size:12px;margin-top:8px;color:var(--muted)">Đang tải...</div>
         </div>
@@ -4618,6 +4618,61 @@ async function xkCapNhatTon(input){
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
+}
+// Cập nhật tồn kho LẤY TRỰC TIẾP TỪ MISA (Sổ Kho InventoryLedger, xem
+// _misa_lay_ton_kho) — mở modal chọn khoảng thời gian (Từ/Đến) + Mã kho rồi
+// gọi /api/xk/cap-nhat-ton-misa, KHÔNG cần import file Excel "Tổng hợp tồn
+// kho" thủ công như trước nữa. Giữ nguyên nút "Chọn file Excel..." bên dưới
+// làm phương án dự phòng (dùng lại xkCapNhatTon/xkFileCapNhatTon cũ) cho
+// máy chưa cấu hình/kết nối được MISA SQL.
+async function xkCapNhatTonMisaMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const hom_nay=new Date().toISOString().slice(0,10);
+  document.getElementById('misaModalBody').innerHTML=`
+    <div style="font-weight:700;font-size:15px;color:#1a7a7a;margin-bottom:8px">🔄 Cập nhật tồn kho từ MISA</div>
+    <div class="hint" style="margin-bottom:10px">Tính trực tiếp từ Sổ Kho MISA (không cần import file Excel) — chỉ CẬP NHẬT lại SL/giá tồn kho theo mã hàng lấy được, giữ nguyên mã cũ không có trong khoảng đã chọn; mã hàng đã gắn cho dòng bán không đổi.</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="field" style="flex:1;min-width:160px"><label>Từ ngày (bỏ trống = Đầu kỳ tính 0)</label><input type="date" id="xkMisaTonTu"></div>
+      <div class="field" style="flex:1;min-width:160px"><label>Đến ngày</label><input type="date" id="xkMisaTonDen" value="${hom_nay}"></div>
+    </div>
+    <div style="margin-bottom:6px;font-size:13px;font-weight:600">Mã kho <span style="font-weight:400;color:var(--muted)">(bỏ trống/chọn hết = TẤT CẢ kho)</span></div>
+    <div id="xkMisaTonKhoBox" style="border:1px solid #ddd;border-radius:8px;padding:8px;max-height:180px;overflow:auto;margin-bottom:10px;font-size:13px">Đang tải danh sách kho...</div>
+    <div style="text-align:right;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;color:var(--muted)">Không kết nối được MISA? <a href="#" onclick="document.getElementById('misaModal').style.display='none';document.getElementById('xkFileCapNhatTon').click();return false">Chọn file Excel thủ công</a></span>
+      <span>
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        <button class="btn sm" style="background:#1a7a7a" onclick="xkCapNhatTonMisaChay()">🔄 Lấy tồn kho từ MISA</button>
+      </span>
+    </div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  try{
+    const d=await api(`/api/xk/misa-danh-sach-kho/${current}`);
+    const ds=d.danh_sach||[];
+    const box=document.getElementById('xkMisaTonKhoBox');
+    if(!box)return;
+    if(!ds.length){box.innerHTML='<span style="color:var(--muted)">Không thấy Kho nào trong MISA (bỏ trống = lấy TẤT CẢ, không lọc theo kho).</span>';return}
+    box.innerHTML=ds.map(k=>`<label style="display:inline-flex;align-items:center;gap:4px;margin:2px 10px 2px 0">
+      <input type="checkbox" class="xkMisaTonKhoChk" value="${misaEsc(k.ma)}" checked>${misaEsc(k.ten)} <span style="color:var(--muted)">(${misaEsc(k.ma)})</span></label>`).join('');
+  }catch(e){
+    const box=document.getElementById('xkMisaTonKhoBox');
+    if(box)box.innerHTML=`<span style="color:#c00">Lỗi tải danh sách kho: ${misaEsc(e.message)} — vẫn có thể bấm "Lấy tồn kho từ MISA" để lấy TẤT CẢ kho.</span>`;
+  }
+}
+async function xkCapNhatTonMisaChay(){
+  const tu=document.getElementById('xkMisaTonTu')?.value||'';
+  const den=document.getElementById('xkMisaTonDen')?.value||'';
+  const khoChon=[...document.querySelectorAll('.xkMisaTonKhoChk:checked')].map(c=>c.value);
+  const khoTat=document.querySelectorAll('.xkMisaTonKhoChk').length;
+  const kho=(khoChon.length&&khoChon.length<khoTat)?khoChon.join(','):'';
+  toast('Đang lấy tồn kho từ MISA...','');
+  try{
+    const qs=new URLSearchParams({tu,den,kho});
+    const d=await api(`/api/xk/cap-nhat-ton-misa/${current}?${qs.toString()}`,{method:'POST'});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã lấy ${d.so_cap_nhat} mã tồn kho từ MISA (thêm mới ${d.so_moi}) — tổng ${d.tong} mã, mã hàng đã gắn giữ nguyên`,'ok');
+    if(d.canh_bao_kho)toast(d.canh_bao_kho,'err');
+    xkTaiTrangThai();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Import THÊM 1 hoặc nhiều file "Chi tiết bán hàng" bổ sung (nguồn NGOÀI
 // Nhập Liệu thông thường) — GỘP THÊM vào nguồn "ctbr" hiện có (KHÔNG thay
