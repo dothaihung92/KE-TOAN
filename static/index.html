@@ -4671,7 +4671,7 @@ async function xkCapNhatTonMisaMo(){
   const kyOpts=XK_KY_BAO_CAO.map(([k,t])=>`<option value="${k}" ${k==='dauthangdenhientai'?'selected':''}>${t}</option>`).join('');
   document.getElementById('misaModalBody').innerHTML=`
     <div style="font-weight:700;font-size:15px;color:#1a7a7a;margin-bottom:8px">🔄 Cập nhật tồn kho từ MISA</div>
-    <div class="hint" style="margin-bottom:10px">Tính trực tiếp từ Sổ Kho MISA (không cần import file Excel) — chỉ CẬP NHẬT lại SL/giá tồn kho theo mã hàng lấy được, giữ nguyên mã cũ không có trong khoảng đã chọn; mã hàng đã gắn cho dòng bán không đổi.</div>
+    <div class="hint" style="margin-bottom:10px">Tính trực tiếp từ Sổ Kho MISA (không cần import file Excel). <b>Không chọn kho (TẤT CẢ)</b>: THAY THẾ TOÀN BỘ Sheet TON bằng đúng kết quả cho Kỳ báo cáo đang chọn (đổi Kỳ báo cáo rồi lấy lại sẽ ra ĐÚNG số mã của khoảng thời gian mới, không cộng dồn với lần lấy trước). <b>Có chọn riêng 1/nhiều kho</b>: chỉ cập nhật đúng kho đó, giữ nguyên dữ liệu các kho khác. Mã hàng đã gắn cho dòng bán không đổi.</div>
     <div class="field" style="margin-bottom:10px;max-width:260px"><label>Kỳ báo cáo</label>
       <select id="xkMisaKyBaoCao" onchange="xkKyBaoCaoDoi()">${kyOpts}</select></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
@@ -4713,7 +4713,8 @@ async function xkCapNhatTonMisaChay(){
     const qs=new URLSearchParams({tu,den,kho});
     const d=await api(`/api/xk/cap-nhat-ton-misa/${current}?${qs.toString()}`,{method:'POST'});
     document.getElementById('misaModal').style.display='none';
-    toast(`✓ Đã lấy ${d.so_cap_nhat} mã tồn kho từ MISA (thêm mới ${d.so_moi}) — tổng ${d.tong} mã, mã hàng đã gắn giữ nguyên`,'ok');
+    const bocXoa=d.so_xoa?` — đã bỏ ${d.so_xoa} mã không còn thuộc Kỳ báo cáo này`:'';
+    toast(`✓ Đã lấy ${d.so_cap_nhat} mã tồn kho từ MISA (thêm mới ${d.so_moi})${bocXoa} — tổng ${d.tong} mã, mã hàng đã gắn giữ nguyên`,'ok');
     if(d.canh_bao_kho)toast(d.canh_bao_kho,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}

@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.161"
+APP_BUILD = "2026-08-31.162"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12862,12 +12862,27 @@ async def xk_misa_danh_sach_kho(cid: int):
 async def xk_cap_nhat_ton_misa(cid: int, tu: str = "", den: str = "", kho: str = ""):
     """Cập nhật SỐ LIỆU Sheet TON — LẤY TRỰC TIẾP TỪ MISA (tính từ Sổ Kho
     InventoryLedger, xem _misa_lay_ton_kho) THAY VÌ phải import file 'Tổng
-    hợp tồn kho' thủ công. CÙNG kiểu 'cập nhật' (ghi đè đúng mã lấy được,
-    giữ nguyên mã cũ không nhắc tới) như xk_cap_nhat_ton — KHÔNG đụng tới
-    GIATHANH (mã hàng đã gắn cho dòng bán giữ nguyên).
+    hợp tồn kho' thủ công. KHÔNG đụng tới GIATHANH (mã hàng đã gắn cho dòng
+    bán giữ nguyên).
     tu/den (yyyy-mm-dd, có thể bỏ trống — den mặc định hôm nay) = khoảng thời
     gian; kho = danh sách Mã kho cách nhau bởi dấu phẩy (bỏ trống = TẤT CẢ
-    kho)."""
+    kho).
+
+    KHÔNG chọn kho (TẤT CẢ) -> THAY THẾ TOÀN BỘ Sheet TON bằng đúng kết quả
+    MISA vừa trả về cho khoảng thời gian đã chọn (giống '📥 Import Tồn Kho')
+    — vì kết quả TẤT CẢ kho đã là bức tranh ĐẦY ĐỦ cho đúng Kỳ báo cáo đó,
+    KHÔNG có lý do giữ lại dữ liệu của 1 lần lấy TRƯỚC với Kỳ báo cáo khác.
+    Xác nhận đúng qua báo cáo thật: người dùng đổi Kỳ báo cáo (thời gian
+    rộng hơn) bấm Lấy tồn kho từ MISA -> 247 mã tăng lên 713 mã (đúng, thời
+    gian rộng hơn thấy nhiều mã hơn) — nhưng ĐỔI LẠI Kỳ báo cáo hẹp hơn
+    (Năm 2024) bấm lại thì VẪN giữ nguyên 713 mã (SAI — phải về lại đúng
+    247 mã của đúng khoảng thời gian đang chọn) vì kiểu 'cập nhật' (merge,
+    giữ mã cũ không nhắc tới) TRƯỚC ĐÂY không hề xoá bớt — mỗi lần chọn lại
+    Kỳ báo cáo càng chọn càng CỘNG DỒN, không bao giờ giảm xuống đúng.
+    CÓ chọn riêng 1/nhiều kho cụ thể -> vẫn dùng kiểu 'cập nhật' (merge, ghi
+    đè đúng mã lấy được, GIỮ NGUYÊN mã cũ không nhắc tới) như xk_cap_nhat_ton
+    — vì lúc đó chỉ lấy ĐÚNG PHẠM VI kho đã chọn, KHÔNG được xoá mất dữ liệu
+    của các kho KHÁC không nằm trong lần lấy này."""
     db_misa = (_misa_sql_cfg(cid).get("database") or "").strip()
     if not db_misa:
         raise HTTPException(400, "Chưa cấu hình kết nối MISA SQL cho công ty này (mục 🔗 Kết nối MISA).")
@@ -12879,13 +12894,22 @@ async def xk_cap_nhat_ton_misa(cid: int, tu: str = "", den: str = "", kho: str =
                                  "hoặc khoảng thời gian/kho đã chọn không có giao dịch nào).")
     gop = {it["ma"]: it for it in rows}
     data = _doc_du_lieu_cty(cid)
-    ton_theo_ma = {str(t.get("ma") or ""): t for t in (data.get("xk_ton") or [])}
-    so_moi = sum(1 for ma in gop if ma not in ton_theo_ma)
-    ton_theo_ma.update(gop)
-    data["xk_ton"] = list(ton_theo_ma.values())
+    ton_cu = {str(t.get("ma") or ""): t for t in (data.get("xk_ton") or [])}
+    so_moi = sum(1 for ma in gop if ma not in ton_cu)
+    if ma_kho_list:
+        # Chỉ lấy riêng 1 vài kho -> MERGE, giữ nguyên mã cũ thuộc kho KHÁC.
+        ton_cu.update(gop)
+        data["xk_ton"] = list(ton_cu.values())
+        so_xoa = 0
+    else:
+        # TẤT CẢ kho -> THAY THẾ TOÀN BỘ bằng đúng kết quả vừa lấy (bức
+        # tranh đầy đủ cho đúng Kỳ báo cáo đang chọn, không cộng dồn lần
+        # lấy trước với thời gian khác).
+        so_xoa = sum(1 for ma in ton_cu if ma not in gop)
+        data["xk_ton"] = list(gop.values())
     _ghi_du_lieu_cty(cid, data)
     canh_bao_kho = _xk_canh_bao_kho_ton(danh_sach_kho, data["xk_ton"])
-    return {"ok": True, "so_cap_nhat": len(gop), "so_moi": so_moi,
+    return {"ok": True, "so_cap_nhat": len(gop), "so_moi": so_moi, "so_xoa": so_xoa,
             "tong": len(data["xk_ton"]), "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
 
 # Header CHUẨN dùng khi nguồn "ctbr" (Chi tiết BÁN RA, xem _xk_src_cols) đang
