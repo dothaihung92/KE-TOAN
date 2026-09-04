@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.146"
+APP_BUILD = "2026-08-31.147"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27145,32 +27145,88 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     rows = conn.execute(
         "SELECT loai, nbmst, nmmst, khhdon, shdon, tdlap, tgtcthue, tgtthue, tthai, raw, detail_json "
         "FROM invoices WHERE company_id=?", (cid,)).fetchall()
+    _save_dir_row = conn.execute(
+        "SELECT save_dir FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
+
+    # Chỉ số file XML/ZIP hóa đơn ĐÃ TẢI trên máy (giống hệt cách "Xuất Excel"
+    # dựng — xem "XÂY INDEX FILE" ở hàm xuất Bảng kê) — khoá theo (Ký hiệu, Số
+    # hóa đơn CHUẨN HÓA bỏ số 0 đầu, 10 số đầu MST người bán). Đa số hóa đơn
+    # CÓ FILE trên máy nhưng KHÔNG có detail_json (chỉ hóa đơn "không mã"/lỗi
+    # tải file mới có detail_json — xem _dam_bao_du_chi_tiet_hoa_don), nên CHỈ
+    # đọc detail_json thôi bỏ sót phần lớn hóa đơn thật cần bù "Tổng tiền phí".
+    _save_dir = (_save_dir_row["save_dir"] or "").strip() if _save_dir_row else ""
+    _file_idx, _file_idx2 = {}, {}
+    if _save_dir and os.path.isdir(_save_dir):
+        for _rootdir, _d, _files in os.walk(_save_dir):
+            for _fn in _files:
+                _low = _fn.lower()
+                if not (_low.endswith(".zip") or _low.endswith(".xml")):
+                    continue
+                _name = _fn.rsplit(".", 1)[0]
+                _parts = _name.split("_")
+                if len(_parts) < 2:
+                    continue
+                _f_khh, _f_sho = _parts[0], _parts[1].lstrip("0") or "0"
+                _path = os.path.join(_rootdir, _fn)
+
+                def _uu_tien_xml(prev, low=_low):
+                    return prev is None or (prev.lower().endswith(".zip") and low.endswith(".xml"))
+                if len(_parts) >= 3:
+                    _key = (_f_khh, _f_sho, _chuan_mst(_parts[2])[:10])
+                    if _uu_tien_xml(_file_idx.get(_key)):
+                        _file_idx[_key] = _path
+                else:
+                    _key2 = (_f_khh, _f_sho)
+                    if _uu_tien_xml(_file_idx2.get(_key2)):
+                        _file_idx2[_key2] = _path
+
+    def _tim_file_hoa_don(r):
+        khh = str(r["khhdon"] or "").strip()
+        sho = str(r["shdon"] or "").strip().lstrip("0") or "0"
+        mst = _chuan_mst(r["nbmst"])[:10]
+        return _file_idx.get((khh, sho, mst)) or _file_idx2.get((khh, sho))
 
     def _tong_tien_phi_cua_hd(r):
         """'Tổng tiền phí' (phí sân bay/thu hộ, phí dịch vụ... KHÔNG chịu VAT,
         nằm RIÊNG ngoài DSHHDVu/tgtcthue trên hóa đơn — xem _lay_tong_tien_phi_json/
-        _lay_tong_tien_phi_xml) của 1 hóa đơn NGUỒN, đọc từ detail_json ĐÃ LƯU
-        (nếu có) — cộng thêm vào doanh số nguồn để KHỚP ĐÚNG với Bảng kê Đầu
-        ra/Đầu vào và MISA (2 nơi đó ĐÃ cộng khoản phí này khi dựng dữ liệu từ
-        cùng detail_json, xem _parse_xml_invoice/_parse_detail_json) — xác nhận
-        đúng qua ca thật: hóa đơn Traveloka Số HĐ 6470 có dòng "Tổng tiền phí"
-        150.000đ (KCT) tách riêng khỏi tiền vé 3.102.315đ, Bảng kê Đầu vào VÀ
-        MISA đều đúng tổng 3.252.315đ nhưng "invoices.tgtcthue" (từ API DANH
-        SÁCH của Thuế) chỉ có 3.102.315đ (không gồm khoản phí) -> Đối chiếu
-        báo sai "LỆCH -150.000đ" dù cả 2 nơi đều đã ghi đúng, chỉ riêng nguồn
-        đối chiếu bị thiếu."""
+        _lay_tong_tien_phi_xml) của 1 hóa đơn NGUỒN — cộng thêm vào doanh số
+        nguồn để KHỚP ĐÚNG với Bảng kê Đầu ra/Đầu vào và MISA (2 nơi đó ĐÃ
+        cộng khoản phí này khi dựng dữ liệu từ CHI TIẾT hóa đơn, xem
+        _parse_xml_invoice/_parse_detail_json) — xác nhận đúng qua ca thật:
+        hóa đơn Traveloka Số HĐ 6470 có dòng "Tổng tiền phí" 150.000đ (KCT)
+        tách riêng khỏi tiền vé 3.102.315đ, Bảng kê Đầu vào VÀ MISA đều đúng
+        tổng 3.252.315đ nhưng "invoices.tgtcthue" (từ API DANH SÁCH của Thuế)
+        chỉ có 3.102.315đ (không gồm khoản phí) -> Đối chiếu báo sai "LỆCH
+        -150.000đ" dù cả 2 nơi đều đã ghi đúng, chỉ riêng nguồn đối chiếu
+        bị thiếu.
+
+        Thử LẦN LƯỢT 2 nguồn chi tiết (đa số hóa đơn CHỈ có 1 trong 2, không
+        cả hai — xem giải thích ở trên):
+          (1) detail_json đã lưu trong DB (hóa đơn "không mã"/lỗi tải file).
+          (2) file XML/ZIP đã tải trên máy (ĐA SỐ hóa đơn bình thường — file
+              tải xong thì KHÔNG lưu detail_json nữa, xem
+              _dam_bao_du_chi_tiet_hoa_don)."""
         dj = r["detail_json"]
-        if not dj:
-            return 0
-        try:
-            detail = _json.loads(dj)
-        except Exception:
-            return 0
-        try:
-            return _lay_tong_tien_phi_json(detail) or 0
-        except Exception:
-            return 0
+        if dj:
+            try:
+                v = _lay_tong_tien_phi_json(_json.loads(dj))
+                if v:
+                    return v
+            except Exception:
+                pass
+        fpath = _tim_file_hoa_don(r)
+        if fpath:
+            try:
+                with open(fpath, "rb") as f:
+                    data = f.read()
+                data = _extract_invoice_xml(data)
+                import xml.etree.ElementTree as _ET
+                root = _ET.fromstring(data)
+                return _lay_tong_tien_phi_xml(root) or 0
+            except Exception:
+                pass
+        return 0
 
     def _hd_hop_le(r):
         tt = str(r["tthai"] or "").strip()
