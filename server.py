@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.150"
+APP_BUILD = "2026-08-31.151"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12196,7 +12196,19 @@ def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
     giá kho fallback về SL/-- bán khi dòng chưa gắn mã, Lợi nhuận = Thành
     tiền BÁN - Thành Tiền kho (giá vốn) và Tỷ lệ % lãi/lỗ tính trên Thành
     tiền BÁN — để file xuất khớp đúng những gì người dùng thấy trên màn
-    hình."""
+    hình.
+
+    QUAN TRỌNG — cột "Tồn kho" chạy dần PHẢI trừ theo SL KHO (sl_kho, số
+    lượng THỰC XUẤT từ ĐÚNG mã đó của dòng này), TUYỆT ĐỐI KHÔNG được trừ
+    theo 'sl' (Số lượng BÁN gốc trên hóa đơn) — 1 dòng bán bị TÁCH DÒNG
+    (không đủ tồn ở 1 mã, xem _xk_gan_1_muc/_xk_gan_ma_truc_tiep) sinh ra
+    NHIỀU dòng CÙNG giữ nguyên 'sl' gốc (vd bán 30, tách 2 dòng vẫn mỗi dòng
+    'sl'=30) nhưng 'sl_kho' mỗi dòng mới ĐÚNG là phần thực xuất riêng của mã
+    đó (vd 20 và 10) — nếu trừ theo 'sl' sẽ trừ NHẦM 30 cho CẢ 2 dòng (tổng
+    60) dù mã đó chỉ thực xuất đúng 30, khiến "Tồn kho" hiển thị ÂM SAI dù
+    việc gán mã (con_lai trong _xk_gan_1_muc) chưa hề vượt tồn thật — xác
+    nhận đúng qua báo cáo thật + ảnh chụp file Excel xuất ra, cột Tồn kho
+    hiện âm (-26, -20, -4...) ngay sau khi bấm 'Dò mã hàng tự động'."""
     ton_map = {str(t.get("ma") or "").strip(): _xk_ton_an_toan(t) for t in (ton_rows or [])}
     da_dung = {}
     out = []
@@ -12210,8 +12222,7 @@ def _gen_giathanh_export_rows(ton_rows, giathanh_rows):
         ma = str(r.get("ma") or "").strip()
         ton = ""
         if ma and ma in ton_map:
-            sl_ban = _to_num(r.get("sl"))
-            da_dung[ma] = da_dung.get(ma, 0) + (sl_ban if isinstance(sl_ban, (int, float)) else 0)
+            da_dung[ma] = da_dung.get(ma, 0) + (sl_n if isinstance(sl_n, (int, float)) else 0)
             ton = ton_map[ma] - da_dung[ma]
         ban_n = _to_num(r.get("tt"))
         loi_nhuan, ty_le = "", ""
