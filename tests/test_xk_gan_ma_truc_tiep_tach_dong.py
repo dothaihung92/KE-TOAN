@@ -6,7 +6,14 @@ có, dùng bởi xk_tao_giathanh khi bảng Xuất Kho KHÔNG rỗng — và b�
 hỗ trợ TÁCH DÒNG (1 dòng cần nhiều mã mới đủ SL kho) giống hệt dò mã từ Chi
 tiết bán ra (_gen_xk_giathanh) — trước khi sửa, hàm này chỉ gán được đúng 1
 mã, dòng nào cần tách phải để trống hẳn (kém hơn), khiến sau khi '↺ Gỡ mã
-hàng' rồi 'Dò mã hàng tự động' lại RA KẾT QUẢ TỆ HƠN trước khi gỡ."""
+hàng' rồi 'Dò mã hàng tự động' lại RA KẾT QUẢ TỆ HƠN trước khi gỡ.
+
+CẬP NHẬT: trước đây test này khẳng định 'sl' (Số lượng) phải GIỮ NGUYÊN số
+gốc (5) trên CẢ 2 dòng tách — nhưng đúng đây chính là lỗi người dùng báo lại
+sau đó kèm ảnh chụp file thật (D36xH20 cm - LIGHT GREY, bán 144, tách
+138+6 nhưng CẢ 2 dòng đều hiện 'Số lượng'=144, cộng dồn sai gấp đôi). Đã
+sửa lại: mỗi dòng tách PHẢI ghi ĐÚNG phần số lượng CÒN LẠI của riêng nó vào
+'sl' (giống hệt 'sl_kho'), xem test_xk_tach_dong_so_luong_dung.py."""
 import sys
 sys.path.insert(0, _REPO_ROOT)
 import server
@@ -35,9 +42,10 @@ ma2 = next(r for r in ket if r["ma"] == "MA2")
 assert ma1["sl_kho"] == 3 and ma2["sl_kho"] == 2, (
     f"Tách phải đúng 3 (MA1, hết tồn) + 2 (MA2, bù thiếu), ghi vào 'sl_kho' — được MA1.sl_kho={ma1['sl_kho']}, "
     f"MA2.sl_kho={ma2['sl_kho']}")
-assert ma1["sl"] == 5 and ma2["sl"] == 5, (
-    f"'sl' (Số lượng bán GỐC) phải GIỮ NGUYÊN =5 trên CẢ 2 dòng tách (không đổi theo phần tách, khác "
-    f"'sl_kho') — được MA1.sl={ma1['sl']}, MA2.sl={ma2['sl']}")
+assert ma1["sl"] == 3 and ma2["sl"] == 2, (
+    f"'sl' (Số lượng) PHẢI đúng bằng phần CÒN LẠI đã tách của từng dòng (giống hệt 'sl_kho'), KHÔNG được "
+    f"giữ nguyên số gốc 5 trên cả 2 dòng (lỗi thật đã báo cáo, xem test_xk_tach_dong_so_luong_dung.py) — "
+    f"được MA1.sl={ma1['sl']}, MA2.sl={ma2['sl']}")
 assert ma1["sohd"] == "H1" and ma2["sohd"] == "H1", "Cả 2 dòng tách phải giữ đúng Số HĐ gốc H1"
 
 print("PASS: _xk_gan_ma_truc_tiep (dùng cho 'Dò mã hàng tự động' xử lý trực tiếp GIATHANH đang có, và "

@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.153"
+APP_BUILD = "2026-08-31.154"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12293,9 +12293,15 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
     dòng — trước đây hàm này để trống hẳn (không tách) nên '↺ Gỡ mã hàng' +
     'Dò mã hàng tự động' (tính lại HOÀN TOÀN từ đầu) lại kém hơn dò từ Chi
     tiết bán ra; nay ĐÃ dùng chung logic tách dòng nên không còn lệch nữa.
-    Dòng tách giữ NGUYÊN 'sl' (Số lượng bán gốc, không đổi) — CHỈ ghi phần
-    số lượng đã tách vào 'sl_kho' (đúng đúng ý nghĩa cột này: số lượng THỰC
-    XUẤT KHO cho dòng đó, có thể khác 'sl' khi phải tách nhiều mã)."""
+    Mỗi dòng tách được ghi ĐÚNG phần số lượng của riêng nó vào CẢ 'sl' (Số
+    lượng) lẫn 'sl_kho' (giống hệt _gen_xk_giathanh/_xk_gan_1_muc khi tách
+    dòng lần đầu) — KHÔNG còn giữ nguyên 'sl' gốc (Số lượng TRƯỚC khi tách)
+    cho mọi dòng con như trước, vì sẽ khiến cột 'Số lượng' hiện SAI trên
+    từng dòng đã tách (cả dòng đã gán MỘT PHẦN lẫn dòng còn thiếu đều hiện
+    y hệt số lượng gốc, cộng dồn ra gấp đôi/nhiều lần số thật đã bán) trong
+    khi 'Thành tiền' vẫn đã tách đúng tỉ lệ — xác nhận đúng qua báo cáo
+    thật + ảnh chụp file: hóa đơn bán 144, tách 138+6 nhưng cả 2 dòng đều
+    hiện 'Số lượng' = 144."""
     hoc_ma = hoc_ma or {}
     ton_list = [dict(it, con_lai=_xk_ton_an_toan(it),
                      ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
@@ -12364,7 +12370,18 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
             continue
         dang_sua_ma_sai = _idx_pgs in dong_ngo
         for k in ket:
-            rec = dict(r, ma=k.get("ma", ""), sl_kho=k.get("sl"), tt=k.get("tt", r.get("tt")),
+            # "sl" (Số lượng) PHẢI đúng bằng phần đã tách của DÒNG NÀY
+            # (k.get("sl")), CÙNG giá trị với "sl_kho" — KHÔNG được giữ
+            # nguyên 'sl' gốc của dòng nguồn (Số lượng bán TRƯỚC KHI tách,
+            # vd 144) cho MỌI dòng con sau khi tách, nếu không cột "Số
+            # lượng" hiện SAI trên từng dòng tách (144 ở CẢ dòng đã gán 138
+            # lẫn dòng còn thiếu 6, cộng lại thành 288 — sai gấp đôi số
+            # lượng thật đã bán) trong khi "Thành tiền" lại ĐÃ tách đúng tỉ
+            # lệ — xác nhận đúng qua báo cáo thật + ảnh chụp file kèm theo:
+            # "D36xH20 cm - LIGHT GREY" bán 144, gán 138 cho 1 mã còn thiếu
+            # 6 tách dòng riêng, nhưng CẢ 2 dòng đều hiện "Số lượng" = 144.
+            rec = dict(r, ma=k.get("ma", ""), sl=k.get("sl", r.get("sl")), sl_kho=k.get("sl"),
+                       tt=k.get("tt", r.get("tt")),
                        mo_ho=k.get("mo_ho", False), thieu_ton=k.get("thieu_ton", False),
                        goi_y=k.get("goi_y", []))
             if k.get("ma"):
