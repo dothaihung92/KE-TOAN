@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.151"
+APP_BUILD = "2026-08-31.152"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11808,10 +11808,28 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
     pool = sorted(pool, key=lambda tn: (
         not _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"]),
         -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2)))
-    ma_hoc = hoc_ma.get(ten_chuan)
-    pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
-    if not pick:
-        pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
+    # hoc_ma (mã đã "học" từ lần dò/gán TRƯỚC) CHỈ được ưu tiên khi đầu bảng
+    # (top, đã sắp theo _ma_ngoac_khop_xk rồi điểm giống tên) KHÔNG có tín
+    # hiệu mã-trong-ngoặc CHẮC CHẮN — nếu top ĐÃ khớp chắc chắn qua
+    # _ma_ngoac_khop_xk (và còn đủ tồn), PHẢI tin thuật toán hơn hoc_ma, bất
+    # kể hoc_ma nói gì. hoc_ma có thể đã "học" NHẦM từ 1 lần dò mã LỖI TRƯỚC
+    # ĐÓ (trước khi có bước ưu tiên _ma_ngoac_khop_xk ở trên) — nếu cứ tin
+    # tuyệt đối, sửa xong thuật toán vẫn KHÔNG hết lỗi vì hoc_ma cũ đè lên,
+    # dòng sai lại kéo tồn của dòng ĐÚNG khác xuống theo (tách dòng dây
+    # chuyền). Xác nhận đúng qua báo cáo thật: cùng 1 file kết xuất giá
+    # thành, hóa đơn ĐÃ đúng ở kích thước 'D210xH62' (chưa từng học nhầm)
+    # nhưng VẪN sai ở 'D180xH50'/'D150xH47'/'D120xH40' (đã học nhầm mã màu
+    # từ lần dò trước, xem hoc_ma học lại mù quáng ở xk_import_giathanh) —
+    # cùng 1 thuật toán, chỉ khác đã có hoc_ma cũ hay chưa.
+    top = pool[0]
+    top_chac_chan = _ma_ngoac_khop_xk(it["ten_sp"], top["ten"]) and top["con_lai"] >= sl_can
+    if top_chac_chan:
+        pick = top
+    else:
+        ma_hoc = hoc_ma.get(ten_chuan)
+        pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
+        if not pick:
+            pick = next((tn for tn in pool if tn["con_lai"] >= sl_can), None)
     if pick:
         pick["con_lai"] -= sl_can
         rec = dict(it)
