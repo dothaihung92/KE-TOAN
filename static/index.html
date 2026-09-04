@@ -6184,6 +6184,7 @@ function moBangKe(loai){
         <button class="btn gold sm" onclick="nlLuu()">💾 Lưu</button>
         <button class="btn ghost sm" onclick="document.getElementById('nlImportFile').click()">📥 Import Excel</button>
         <input type="file" id="nlImportFile" accept=".xlsx" multiple style="display:none" onchange="nlImportVaoBang(this)">
+        <button class="btn ghost sm" onclick="nlXuatExcel()">📤 Xuất Excel</button>
         <button class="btn ghost sm" onclick="xoaNhapLieu()" style="color:#c00">🗑 Xóa bộ</button>
       </div>
       ${loai==='in'?`
