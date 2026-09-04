@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.160"
+APP_BUILD = "2026-08-31.161"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12529,6 +12529,27 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
         ket = _xk_gan_1_muc({"ten_sp": r.get("ten_sp"), "sl": sl_can, "tt": r.get("tt")},
                             ton_list, hoc_ma)
         if len(ket) == 1 and not ket[0].get("ma"):
+            if _idx_pgs in dong_ngo:
+                # Mã CŨ đang RÁC (không tồn tại trong Tồn kho hiện có,
+                # xem dong_ngo phía trên) VÀ dò lại cũng KHÔNG đủ tin cậy để
+                # tự gán (vd tên bán/tên kho viết khác hẳn nhau, điểm giống
+                # tên chưa đạt ngưỡng "mạnh") -> PHẢI XOÁ mã rác đi, để
+                # TRỐNG (mờ hồ, có gợi ý cho người dùng tự chọn) — TUYỆT ĐỐI
+                # không được giữ nguyên mã rác cũ chỉ vì "để trống thì
+                # giống dòng gốc": mã rác gây MISA từ chối ghi sổ (coi tồn
+                # kho = 0) mà KHÔNG hiện gì bất thường trên lưới để người
+                # dùng biết mà tự sửa — khác dòng CHƯA TỪNG có mã (không ở
+                # trong dong_ngo) thì giữ nguyên là ĐÚNG vì có gì để mất đâu
+                # — xác nhận đúng qua báo cáo thật: dòng "GẠCH ỐP LÁT
+                # 600*1200MM" (mã cũ rác "Gạch men 600x1200 mm") dò lại chỉ
+                # đạt điểm giống tên 0.743 (chưa đạt ngưỡng "mạnh" để tự
+                # gán) nên bị nhánh này giữ NGUYÊN mã rác thay vì xoá, xuất
+                # ra file rồi ghi vào MISA VẪN bị từ chối y hệt như trước.
+                rec = dict(r, ma="", ten_xk="", dvt_xk="", gia_xk="", sl_kho="",
+                           mo_ho=ket[0].get("mo_ho", True), thieu_ton=ket[0].get("thieu_ton", False),
+                           goi_y=ket[0].get("goi_y", []))
+                out.append(rec)
+                continue
             # Không tìm được tên khớp HOẶC không mã nào còn đủ tồn -> để
             # trống, KHÔNG ép gán ra tồn kho âm — giữ NGUYÊN dòng gốc.
             out.append(r)
