@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.145"
+APP_BUILD = "2026-08-31.146"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27143,9 +27143,34 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     import json as _json
     conn = db()
     rows = conn.execute(
-        "SELECT loai, nbmst, nmmst, khhdon, shdon, tdlap, tgtcthue, tgtthue, tthai, raw "
+        "SELECT loai, nbmst, nmmst, khhdon, shdon, tdlap, tgtcthue, tgtthue, tthai, raw, detail_json "
         "FROM invoices WHERE company_id=?", (cid,)).fetchall()
     conn.close()
+
+    def _tong_tien_phi_cua_hd(r):
+        """'Tổng tiền phí' (phí sân bay/thu hộ, phí dịch vụ... KHÔNG chịu VAT,
+        nằm RIÊNG ngoài DSHHDVu/tgtcthue trên hóa đơn — xem _lay_tong_tien_phi_json/
+        _lay_tong_tien_phi_xml) của 1 hóa đơn NGUỒN, đọc từ detail_json ĐÃ LƯU
+        (nếu có) — cộng thêm vào doanh số nguồn để KHỚP ĐÚNG với Bảng kê Đầu
+        ra/Đầu vào và MISA (2 nơi đó ĐÃ cộng khoản phí này khi dựng dữ liệu từ
+        cùng detail_json, xem _parse_xml_invoice/_parse_detail_json) — xác nhận
+        đúng qua ca thật: hóa đơn Traveloka Số HĐ 6470 có dòng "Tổng tiền phí"
+        150.000đ (KCT) tách riêng khỏi tiền vé 3.102.315đ, Bảng kê Đầu vào VÀ
+        MISA đều đúng tổng 3.252.315đ nhưng "invoices.tgtcthue" (từ API DANH
+        SÁCH của Thuế) chỉ có 3.102.315đ (không gồm khoản phí) -> Đối chiếu
+        báo sai "LỆCH -150.000đ" dù cả 2 nơi đều đã ghi đúng, chỉ riêng nguồn
+        đối chiếu bị thiếu."""
+        dj = r["detail_json"]
+        if not dj:
+            return 0
+        try:
+            detail = _json.loads(dj)
+        except Exception:
+            return 0
+        try:
+            return _lay_tong_tien_phi_json(detail) or 0
+        except Exception:
+            return 0
 
     def _hd_hop_le(r):
         tt = str(r["tthai"] or "").strip()
@@ -27304,7 +27329,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             k = (mst_k, sohd_k.lower())
             e = nguon["purchase"].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
                                                   "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
-        e["ds"] += _snum(r["tgtcthue"])
+        e["ds"] += _snum(r["tgtcthue"]) + _tong_tien_phi_cua_hd(r)
         e["thue"] += _snum(r["tgtthue"])
 
     # Loại bỏ hẳn các nhóm hóa đơn nguồn CỘNG DỒN RA ĐÚNG 0đ (cả doanh số lẫn
