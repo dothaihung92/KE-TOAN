@@ -4512,7 +4512,22 @@ async function xkTaiTrangThai(){
     const t=await api(`/api/xk/ton/${current}`);
     xkTon=t.rows||[];
     const elTon=document.getElementById('xkTonBadge');
-    if(elTon)elTon.innerHTML=xkTon.length?`<b style="color:#1a7a7a">✓ Đã có ${xkTon.length} mã hàng tồn kho</b>`:'Chưa import';
+    if(elTon){
+      if(xkTon.length){
+        // Tổng giá trị tồn CUỐI KỲ = tổng(Số lượng tồn × Đơn giá) từng mã —
+        // đúng cách MISA tính "Giá trị" ở báo cáo Tổng hợp tồn kho (Cuối kỳ
+        // Số lượng × giá vốn bình quân của đúng mã đó), không phải giá bán.
+        const tongGiaTri=xkTon.reduce((s,t)=>{
+          const ton=typeof t.ton==='number'?t.ton:parseFloat(t.ton);
+          const gia=typeof t.gia==='number'?t.gia:parseFloat(t.gia);
+          return s+((!isNaN(ton)&&!isNaN(gia))?ton*gia:0);
+        },0);
+        elTon.innerHTML=`<b style="color:#1a7a7a">✓ Đã có ${xkTon.length} mã hàng tồn kho</b><br>`
+          +`Tổng giá trị tồn cuối kỳ: <b>${Math.round(tongGiaTri).toLocaleString('vi-VN')} đ</b>`;
+      }else{
+        elTon.innerHTML='Chưa import';
+      }
+    }
   }catch{}
   try{
     const b=await api(`/api/xk/banra/${current}`);
