@@ -4630,7 +4630,10 @@ async function xkCapNhatTon(input){
 // tháng đến hiện tại/Quý này/Đầu quý đến hiện tại/Năm này/Đầu năm đến hiện
 // tại) — chọn 1 mục (khác "Tùy chọn") thì TỰ ĐỘNG tính điền Từ ngày/Đến
 // ngày y hệt MISA tự tính, khỏi phải tự bấm lịch dò ngày đầu tuần/đầu
-// tháng/đầu quý/đầu năm.
+// tháng/đầu quý/đầu năm — CHỈ ĐIỀN SẴN, ô Từ/Đến ngày VẪN sửa tay được bình
+// thường sau đó (KHÔNG khoá readonly — người dùng phản hồi cần tự chỉnh lại
+// sau khi chọn Kỳ báo cáo, giống hệt combobox 'Từ'/'Đến' của MISA vẫn gõ
+// tay được dù đã chọn Kỳ báo cáo dựng sẵn).
 const XK_KY_BAO_CAO=[
   ["tuychon","Tùy chọn"],["homnay","Hôm nay"],
   ["tuannay","Tuần này"],["dautuandenhientai","Đầu tuần đến hiện tại"],
@@ -4643,7 +4646,7 @@ function xkKyBaoCaoDoi(){
   const kieu=document.getElementById('xkMisaKyBaoCao')?.value;
   const tuEl=document.getElementById('xkMisaTonTu'), denEl=document.getElementById('xkMisaTonDen');
   if(!tuEl||!denEl)return;
-  if(!kieu||kieu==='tuychon'){tuEl.readOnly=false;denEl.readOnly=false;tuEl.style.background='';denEl.style.background='';return}
+  if(!kieu||kieu==='tuychon')return;
   const now=new Date(), y=now.getFullYear(), m=now.getMonth(), ngay=now.getDate();
   let tu=new Date(y,m,ngay), den=new Date(y,m,ngay);
   if(kieu==='tuannay'||kieu==='dautuandenhientai'){
@@ -4662,7 +4665,6 @@ function xkKyBaoCaoDoi(){
     den=(kieu==='namnay')?new Date(y,11,31):new Date(y,m,ngay);
   }
   tuEl.value=xkFmtNgayVN(tu);denEl.value=xkFmtNgayVN(den);
-  tuEl.readOnly=true;denEl.readOnly=true;tuEl.style.background='#f3f3f3';denEl.style.background='#f3f3f3';
 }
 async function xkCapNhatTonMisaMo(){
   if(!current){toast('Chọn công ty trước','err');return}
