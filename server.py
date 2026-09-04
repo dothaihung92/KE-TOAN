@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.152"
+APP_BUILD = "2026-08-31.153"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11961,6 +11961,29 @@ def _gen_xk_giathanh(ton_rows, src_header, src_rows, hoc_ma=None, giathanh_cu=No
         sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
         if not tn or tn["con_lai"] < sl_can:
             continue
+        # Mã CŨ (giữ từ lần dò trước) có thể ĐÃ GÁN SAI — vd học/gán nhầm
+        # màu ở 1 lần dò LỖI TRƯỚC (trước khi có bước ưu tiên
+        # _ma_ngoac_khop_xk ở _xk_gan_1_muc) — CHỈ giữ mã cũ khi CHÍNH nó
+        # cũng khớp chắc chắn mã-trong-ngoặc, HOẶC không còn ứng viên nào
+        # khác khớp chắc chắn hơn. Nếu có 1 mã KHÁC (còn đủ tồn) khớp mã
+        # trong ngoặc CHẮC CHẮN đúng với dòng này mà mã cũ lại KHÔNG, bỏ
+        # qua việc giữ mã cũ, để dò lại bình thường qua _xk_gan_1_muc (đúng
+        # thuật toán mới đã sửa) — nếu không, "Dò mã hàng tự động" cứ giữ
+        # MÃI mã sai qua nhiều lần bấm dù thuật toán đã sửa đúng, vì cơ chế
+        # "giữ mã cũ" (bảo vệ lựa chọn TAY của người dùng khi bấm lại) vô
+        # tình bảo vệ luôn cả mã SAI do CHÍNH phần mềm tự gán nhầm trước đó.
+        # Xác nhận đúng qua báo cáo thật: '(D180xH50 cm - MTBK)' vẫn gán
+        # nhầm 'Chậu Polystone D180xH50 cm - MTWT' y hệt cũ dù đã cập nhật
+        # bản có _ma_ngoac_khop_xk, vì dòng đó ĐÃ CÓ SẴN mã sai trong file
+        # giathanh_cu (từ lần dò lỗi trước) nên bị giữ nguyên, không hề
+        # được _xk_gan_1_muc đánh giá lại.
+        if not _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"]):
+            co_ma_khac_chac_chan = any(
+                t2["ma"] != giu["ma"] and t2["con_lai"] >= sl_can
+                and _ma_ngoac_khop_xk(it["ten_sp"], t2["ten"])
+                for t2 in ton_list)
+            if co_ma_khac_chac_chan:
+                continue
         tn["con_lai"] -= sl_can
         rec = dict(it)
         rec.update(ma=giu["ma"], ten_xk=giu["ten_xk"] or tn["ten"],
@@ -12278,12 +12301,42 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
                      ten_chuan=_chuan_ten_hang_xk(it.get("ten")))
                 for it in (ton_rows or [])]
     ton_by_ma = {tn["ma"]: tn for tn in ton_list}
-    # Trừ tồn TRƯỚC cho các dòng ĐÃ CÓ mã (từ lần dò/gán trước đó, có thể
-    # thuộc NHIỀU đợt Import tờ khai xuất khẩu khác nhau) — nếu không, mỗi
-    # lần bấm lại "Dò mã hàng tự động" đều tính lại từ tồn GỐC, không biết gì
-    # về phần đã dùng ở các lần trước -> gán CHỒNG lặp lại, ra tồn kho ÂM
-    # (đã xác nhận qua báo cáo thật, mã bị gán vượt tồn nhiều lần liên tiếp).
-    for r in giathanh_cu:
+    # Dòng ĐÃ CÓ mã (từ lần dò/gán trước đó) có thể ĐÃ GÁN SAI — vd học/gán
+    # nhầm màu ở 1 lần dò LỖI TRƯỚC (trước khi có bước ưu tiên
+    # _ma_ngoac_khop_xk ở _xk_gan_1_muc) — hàm này TRƯỚC ĐÂY luôn giữ NGUYÊN
+    # mọi dòng đã có mã (chỉ xử lý dòng trống), nên bấm lại "Dò mã hàng tự
+    # động" KHÔNG BAO GIỜ tự sửa được mã sai cũ, dù thuật toán đã sửa đúng —
+    # xác nhận đúng qua báo cáo thật: '(D180xH50 cm - MTBK)' vẫn gán nhầm
+    # 'Chậu Polystone D180xH50 cm - MTWT' y hệt cũ sau khi cập nhật bản có
+    # _ma_ngoac_khop_xk, vì dòng đó ĐÃ CÓ SẴN mã sai trong GIATHANH (từ lần
+    # dò lỗi trước) nên bị hàm này (nút "Dò mã hàng tự động" THẬT SỰ đang
+    # gọi khi GIATHANH đã có dữ liệu — KHÁC _gen_xk_giathanh) giữ nguyên,
+    # không hề đưa qua _xk_gan_1_muc để đánh giá lại.
+    # CHỈ coi mã cũ là ĐÁNG NGỜ (sẽ dò lại) khi CHÍNH nó KHÔNG khớp chắc
+    # chắn mã-trong-ngoặc (_ma_ngoac_khop_xk) MÀ có 1 mã KHÁC khớp chắc
+    # chắn hơn — không đụng tới các dòng còn lại (giữ nguyên hành vi cũ),
+    # tránh dò lại tràn lan những dòng KHÔNG có gì để nghi ngờ.
+    dong_ngo = set()
+    for idx_r, r in enumerate(giathanh_cu):
+        ma = str(r.get("ma") or "").strip()
+        tn = ton_by_ma.get(ma) if ma else None
+        if not tn:
+            continue
+        ten_sp = r.get("ten_sp")
+        if _ma_ngoac_khop_xk(ten_sp, tn["ten"]):
+            continue
+        if any(t2["ma"] != ma and _ma_ngoac_khop_xk(ten_sp, t2["ten"]) for t2 in ton_list):
+            dong_ngo.add(idx_r)
+    # Trừ tồn TRƯỚC cho các dòng ĐÃ CÓ mã VÀ KHÔNG bị nghi ngờ (từ lần dò/
+    # gán trước đó, có thể thuộc NHIỀU đợt Import tờ khai xuất khẩu khác
+    # nhau) — nếu không, mỗi lần bấm lại "Dò mã hàng tự động" đều tính lại
+    # từ tồn GỐC, không biết gì về phần đã dùng ở các lần trước -> gán
+    # CHỒNG lặp lại, ra tồn kho ÂM (đã xác nhận qua báo cáo thật, mã bị gán
+    # vượt tồn nhiều lần liên tiếp). Dòng bị nghi ngờ KHÔNG trừ ở đây — sẽ
+    # trừ lại đúng khi _xk_gan_1_muc đánh giá lại bên dưới.
+    for idx_r, r in enumerate(giathanh_cu):
+        if idx_r in dong_ngo:
+            continue
         ma = str(r.get("ma") or "").strip()
         tn = ton_by_ma.get(ma) if ma else None
         if not tn:
@@ -12296,7 +12349,7 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
     for _idx_pgs, r in enumerate(giathanh_cu):
         if on_progress:
             on_progress(_idx_pgs, tong_r)
-        if str(r.get("ma") or "").strip():
+        if str(r.get("ma") or "").strip() and _idx_pgs not in dong_ngo:
             out.append(r)
             continue
         sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
@@ -12309,16 +12362,22 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
             # trống, KHÔNG ép gán ra tồn kho âm — giữ NGUYÊN dòng gốc.
             out.append(r)
             continue
+        dang_sua_ma_sai = _idx_pgs in dong_ngo
         for k in ket:
             rec = dict(r, ma=k.get("ma", ""), sl_kho=k.get("sl"), tt=k.get("tt", r.get("tt")),
                        mo_ho=k.get("mo_ho", False), thieu_ton=k.get("thieu_ton", False),
                        goi_y=k.get("goi_y", []))
             if k.get("ma"):
-                if not str(rec.get("ten_xk") or "").strip():
+                # Dòng ĐANG SỬA LẠI mã cũ SAI (dong_ngo) -> PHẢI cập nhật LUÔN
+                # Tên/ĐVT/Đơn giá kho theo mã MỚI, không giữ chữ CŨ (của mã
+                # sai trước đó) — nếu chỉ điền khi trống như dòng mới gán lần
+                # đầu, "Mã hàng kho" đổi đúng nhưng "Tên hàng xuất kho" vẫn
+                # hiện tên của mã SAI cũ, tạo ra 1 chỗ lệch nhìn còn rối hơn.
+                if dang_sua_ma_sai or not str(rec.get("ten_xk") or "").strip():
                     rec["ten_xk"] = k.get("ten_xk", "")
-                if not str(rec.get("dvt_xk") or "").strip():
+                if dang_sua_ma_sai or not str(rec.get("dvt_xk") or "").strip():
                     rec["dvt_xk"] = k.get("dvt_xk", "")
-                if rec.get("gia_xk") in (None, ""):
+                if dang_sua_ma_sai or rec.get("gia_xk") in (None, ""):
                     rec["gia_xk"] = k.get("gia_xk", "")
             out.append(rec)
     return out
