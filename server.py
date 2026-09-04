@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.148"
+APP_BUILD = "2026-08-31.149"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9523,6 +9523,21 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
     conn.commit()
     conn.close()
 
+    # Tự động gắn MST người mua (out)/MST bán (in) cho dòng đang trống/'KL'
+    # NGAY LÚC IMPORT — khỏi cần bấm thêm nút nào (theo đúng yêu cầu người
+    # dùng). Best-effort: tra thêm Danh mục Đối tượng MISA nếu đã kết nối
+    # được (khớp đúng mã đối tượng); KHÔNG kết nối được vẫn áp dụng nhánh
+    # 'khách lẻ'->KL / còn lại->tự lấy TÊN làm mã, KHÔNG chặn import.
+    try:
+        db_misa = (_misa_sql_cfg(cid).get("database") or "").strip()
+        doi_tuong_map = _misa_lay_doi_tuong_map(cid, db_misa) if db_misa else {}
+        if header_out and rows_out:
+            rows_out, _tk = _gan_mst_theo_ten_doi_tuong_rows(header_out, rows_out, "out", doi_tuong_map)
+        if header_in and rows_in:
+            rows_in, _tk = _gan_mst_theo_ten_doi_tuong_rows(header_in, rows_in, "in", doi_tuong_map)
+    except Exception:
+        pass
+
     return {"ok": True, "so_file": so_file_ok,
             "in": {"header": header_in, "rows": rows_in, "so_dong": len(rows_in)},
             "out": {"header": header_out, "rows": rows_out, "so_dong": len(rows_out)},
@@ -9576,6 +9591,18 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
             if str(r[0] or "").strip().upper() == "TỔNG CỘNG":
                 continue
             rows.append(["" if c is None else c for c in r])
+
+    # Tự động gắn MST người mua (out)/MST bán (in) cho dòng đang trống/'KL'
+    # NGAY LÚC IMPORT — xem giải thích ở nhap_lieu_import (cùng cơ chế,
+    # best-effort, không chặn import nếu MISA chưa kết nối được).
+    try:
+        if header and rows:
+            db_misa = (_misa_sql_cfg(cid).get("database") or "").strip()
+            doi_tuong_map = _misa_lay_doi_tuong_map(cid, db_misa) if db_misa else {}
+            rows, _tk = _gan_mst_theo_ten_doi_tuong_rows(header, rows, loai, doi_tuong_map)
+    except Exception:
+        pass
+
     return {"ok": True, "header": header, "rows": rows, "so_dong": len(rows), "loi": loi[:5]}
 
 
@@ -14926,108 +14953,89 @@ def _chuan_ten_doi_tuong(s):
 _TU_KHOA_KHACH_LE = ("khách lẻ", "khach le", "người tiêu dùng", "nguoi tieu dung")
 
 
-def _misa_gan_mst_theo_ten_doi_tuong(cid, database, loai):
-    """CHỈ ĐỌC Danh mục Đối tượng MISA (AccountObject) — KHÔNG ghi/sửa gì
-    trong MISA lẫn Bảng kê đã lưu (trả về header/rows ĐỀ XUẤT để màn Nhập
-    Liệu tự nạp vào lưới, người dùng bấm 'Lưu' mới thật sự ghi đè).
-
-    Theo đúng yêu cầu người dùng (ảnh chụp lưới Bảng kê Đầu ra: khách nước
-    ngoài có TÊN riêng biệt như 'JUST ADD PLANTS'/'FlowerVine' — hóa đơn
-    xuất khẩu KHÔNG có MST — nhưng trước đây MỌI dòng thiếu MST đều bị dồn
-    CHUNG vào 1 mã 'KL', làm mất khả năng phân biệt từng khách/NCC thật):
-      - Tên chứa 'khách lẻ'/'người tiêu dùng' (không phân biệt hoa/thường,
-        không dấu) -> gắn 'KL' (bucket dùng chung, không cần định danh riêng).
-      - Ngược lại -> tra Danh mục Đối tượng MISA theo TÊN (chuẩn hóa khoảng
-        trắng, không phân biệt hoa/thường) -> khớp thì lấy MÃ ĐỐI TƯỢNG
-        (AccountObjectCode) gắn vào; KHÔNG khớp (vd tờ khai nhập/xuất khẩu,
-        đối tác CHƯA có trong Danh mục MISA) -> tự lấy CHÍNH TÊN đó làm mã
-        (cắt tối đa 50 ký tự — đúng giới hạn cột AccountObjectCode) để mỗi
-        khách/NCC vẫn có 1 mã RIÊNG BIỆT thay vì bị gộp lẫn vào 'KL'.
+def _gan_mst_theo_ten_doi_tuong_rows(header, rows, loai, doi_tuong_map):
+    """Biến đổi THUẦN (không đụng DB/MISA) — gắn MST người mua (loai='out')/
+    MST bán (loai='in') cho DÒNG đang trống hoặc đang gộp chung 'KL':
+      - Tên chứa 'khách lẻ'/'người tiêu dùng' -> gắn 'KL' (bucket dùng
+        chung, không cần định danh riêng).
+      - Ngược lại -> tra doi_tuong_map (tên chuẩn hóa -> mã đối tượng MISA,
+        xem _misa_lay_doi_tuong_map) -> khớp thì lấy MÃ ĐỐI TƯỢNG gắn vào;
+        KHÔNG khớp (vd tờ khai nhập/xuất khẩu, đối tác CHƯA có trong Danh
+        mục MISA, hoặc doi_tuong_map rỗng vì chưa kết nối được MISA lúc
+        import) -> tự lấy CHÍNH TÊN đó làm mã (cắt tối đa 50 ký tự — đúng
+        giới hạn cột AccountObjectCode) để mỗi khách/NCC vẫn có 1 mã RIÊNG
+        BIỆT thay vì bị gộp lẫn vào 'KL' — xác nhận đúng qua ảnh chụp lưới
+        Bảng kê Đầu ra người dùng gửi: khách nước ngoài có TÊN riêng biệt
+        (JUST ADD PLANTS, FlowerVine...) trên hóa đơn xuất khẩu KHÔNG có
+        MST, nhưng trước đây MỌI dòng thiếu MST đều bị dồn CHUNG vào 1 mã
+        'KL', mất khả năng phân biệt từng khách/NCC thật.
     CHỈ động vào dòng có MST HIỆN TẠI đang TRỐNG hoặc đúng bằng 'KL' — dòng
     đã có MST/mã thật (số hoặc mã khác) giữ NGUYÊN, không đụng tới.
-
-    loai='out' -> cột 'Tên người mua'/'MST người mua' (Bảng kê Đầu ra).
-    loai='in'  -> cột 'Người bán'/'MST bán' (Bảng kê Đầu vào — áp dụng cho
-    CẢ tờ khai nhập khẩu lẫn hóa đơn mua vào thường thiếu MST)."""
-    if loai not in ("in", "out"):
-        raise HTTPException(400, "loai phải là in/out")
-    dl = nhap_lieu_get(cid, loai)
-    header, rows = dl.get("header") or [], dl.get("rows") or []
-    if not rows:
-        raise HTTPException(400, "Chưa có Bảng kê đã lưu — Import & Lưu trước.")
+    Trả về (rows_moi, thong_ke)."""
+    thong_ke = {"so_giu_nguyen": 0, "so_gan_kl": 0, "so_gan_tu_danh_muc_misa": 0, "so_gan_theo_ten": 0}
     if loai == "out":
         col = _bh_cols(header)
         i_ten, i_mst = col["nguoimua"], col["mst"]
-        ten_cot_loi = "Tên người mua/MST người mua"
     else:
         col = _nk_cols(header)
         i_ten, i_mst = col["nb"], col["mst"]
-        ten_cot_loi = "Người bán/MST bán"
     if i_ten < 0 or i_mst < 0:
-        raise HTTPException(400, f"Không dò được cột {ten_cot_loi} trên Bảng kê — kiểm tra lại tiêu đề cột.")
+        return rows, thong_ke
 
-    conn = _misa_sql_connect(cid, database=database)
-    try:
-        cur = conn.cursor()
-        doi_tuong = {}   # tên chuẩn hóa -> mã đối tượng (AccountObjectCode)
-        for row_dt in cur.execute(
-                "SELECT AccountObjectCode, AccountObjectName FROM AccountObject").fetchall():
-            code, name = row_dt[0], row_dt[1]
-            if name and code:
-                doi_tuong.setdefault(_chuan_ten_doi_tuong(name), str(code).strip())
-    finally:
-        conn.close()
-
-    so_kl = so_tu_misa = so_dung_ten = so_giu_nguyen = 0
     rows_moi = []
-    mau_thay_doi = []
     for r in rows:
         r = list(r)
         mst_hien = str((r[i_mst] if i_mst < len(r) else "") or "").strip()
         ten = str((r[i_ten] if i_ten < len(r) else "") or "").strip()
         if mst_hien and mst_hien.strip().upper() != "KL":
-            so_giu_nguyen += 1
+            thong_ke["so_giu_nguyen"] += 1
             rows_moi.append(r)
             continue
         ten_chuan = _chuan_ten_doi_tuong(ten)
         if not ten or any(tk in ten_chuan for tk in _TU_KHOA_KHACH_LE):
             mst_moi = "KL"
-            so_kl += 1
+            thong_ke["so_gan_kl"] += 1
         else:
-            ma_misa = doi_tuong.get(ten_chuan)
+            ma_misa = doi_tuong_map.get(ten_chuan)
             if ma_misa:
                 mst_moi = ma_misa[:50]
-                so_tu_misa += 1
+                thong_ke["so_gan_tu_danh_muc_misa"] += 1
             else:
                 mst_moi = ten[:50]
-                so_dung_ten += 1
+                thong_ke["so_gan_theo_ten"] += 1
         if mst_moi != mst_hien:
             while len(r) <= i_mst:
                 r.append("")
             r[i_mst] = mst_moi
-            if len(mau_thay_doi) < 30:
-                mau_thay_doi.append({"ten": ten, "mst_cu": mst_hien, "mst_moi": mst_moi})
         rows_moi.append(r)
-
-    return {
-        "loai": loai, "header": header, "rows": rows_moi,
-        "so_dong": len(rows_moi), "so_giu_nguyen": so_giu_nguyen,
-        "so_gan_kl": so_kl, "so_gan_tu_danh_muc_misa": so_tu_misa,
-        "so_gan_theo_ten": so_dung_ten, "mau_thay_doi": mau_thay_doi,
-    }
+    return rows_moi, thong_ke
 
 
-@app.get("/api/misa-sql/gan-mst-danh-muc/{cid}")
-def misa_sql_gan_mst_danh_muc(cid: int, loai: str, database: str = ""):
-    """CHỈ ĐỌC Danh mục Đối tượng MISA — xem _misa_gan_mst_theo_ten_doi_tuong.
-    Trả về header/rows ĐỀ XUẤT (đã gắn MST người mua/MST bán cho dòng đang
-    trống/đang 'KL' theo tên khớp Danh mục MISA) để màn Nhập Liệu tự nạp vào
-    lưới — CHƯA lưu gì, người dùng cần bấm 'Lưu' để áp dụng thật."""
-    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+def _misa_lay_doi_tuong_map(cid, database):
+    """CHỈ ĐỌC — trả {tên chuẩn hóa: mã đối tượng} từ Danh mục Đối tượng
+    MISA (AccountObject, không phân biệt IsVendor/IsCustomer vì 1 đối tượng
+    có thể vừa là NCC vừa là KH). Trả {} (RỖNG, an toàn) nếu chưa cấu hình/
+    kết nối được MISA — gọi ở bước IMPORT Bảng kê (best-effort, KHÔNG được
+    làm hỏng/chặn import chỉ vì MISA chưa kết nối lúc đó)."""
     if not database:
-        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
-                                 "kết nối tới dữ liệu THỬ trước.")
-    return _misa_gan_mst_theo_ten_doi_tuong(cid, database, loai)
+        return {}
+    try:
+        conn = _misa_sql_connect(cid, database=database)
+    except Exception:
+        return {}
+    try:
+        cur = conn.cursor()
+        m = {}
+        for row_dt in cur.execute(
+                "SELECT AccountObjectCode, AccountObjectName FROM AccountObject").fetchall():
+            code, name = row_dt[0], row_dt[1]
+            if name and code:
+                m.setdefault(_chuan_ten_doi_tuong(name), str(code).strip())
+        return m
+    except Exception:
+        return {}
+    finally:
+        conn.close()
 
 
 # ============================================================
