@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.149"
+APP_BUILD = "2026-08-31.150"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11786,7 +11786,28 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
     # (đúng ra phải là '... - Gloss White'), '... MATTE WHITE (D34xH30cm)...'
     # bị gán nhầm 'Chậu Polystone D34xH30 cm - Gloss Orange' (đúng ra '...
     # - Matte White') — chỉ vì cùng kích thước, mã sai đứng trước trong file.
-    pool = sorted(pool, key=lambda tn: -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2))
+    #
+    # ƯU TIÊN TRƯỚC ĐIỂM GIỐNG TÊN: khớp mã kiểu/màu TRONG NGOẶC
+    # (_ma_ngoac_khop_xk) khi có — chuỗi trong ngoặc GỘP CẢ kích thước LẪN mã
+    # màu viết tắt liền nhau (vd '(D210xH62 cm - MTBK)' -> 'D210XH62CMMTBK'),
+    # nên khi tên tồn kho có ĐÚNG cả kích thước lẫn hậu tố mã màu khớp NGUYÊN
+    # VẸN cụm đó thì chắc chắn hơn hẳn so khớp ĐIỂM GIỐNG TÊN (vốn tính trên
+    # TOÀN BỘ chuỗi đã CHUẨN HOÁ — mà _chuan_ten_hang_xk lại CẮT BỎ hẳn nội
+    # dung trong ngoặc trước khi so, nên KHÔNG hề thấy được mã màu viết tắt
+    # 'MTBK' nằm trong đó, dễ hoà điểm hoặc thua nhầm ứng viên sai màu có
+    # cùng kích thước). Xác nhận đúng qua báo cáo thật: 'Chậu nhựa-Polystone
+    # planter (D210xH62 cm - MTBK)-MATTE BLACK,kích thước:210x210x62(cm)...'
+    # bị gán nhầm 'Chậu Polystone D210xH62 cm - MTWT' dù có sẵn đúng mã
+    # 'Chậu Polystone D210xH62 cm - MTBK' trong Tồn kho — cả 2 mã đều 'mạnh'
+    # (cùng khớp kích thước 'D210XH62' qua _kich_thuoc_khop_xk) và gần như
+    # HOÀ ĐIỂM giống tên (khác nhau đúng 2 ký tự cuối 'BK'/'WT' trong chuỗi
+    # tồn kho ~27 ký tự, không đủ trọng số để phân biệt so với toàn bộ tên
+    # hàng ~75 ký tự) — chỉ _ma_ngoac_khop_xk (so đúng cụm liền
+    # 'D210XH62CMMTBK') mới phân biệt được đúng chỗ 'MTBK' khớp còn 'MTWT'
+    # thì không.
+    pool = sorted(pool, key=lambda tn: (
+        not _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"]),
+        -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2)))
     ma_hoc = hoc_ma.get(ten_chuan)
     pick = next((tn for tn in pool if tn["ma"] == ma_hoc and tn["con_lai"] >= sl_can), None)
     if not pick:
