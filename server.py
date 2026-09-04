@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.159"
+APP_BUILD = "2026-08-31.160"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12501,7 +12501,26 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
     for _idx_pgs, r in enumerate(giathanh_cu):
         if on_progress:
             on_progress(_idx_pgs, tong_r)
-        if str(r.get("ma") or "").strip() and _idx_pgs not in dong_ngo:
+        ma_hien = str(r.get("ma") or "").strip()
+        if ma_hien and _idx_pgs not in dong_ngo:
+            # Mã ĐANG ĐÚNG (không bị nghi ngờ) — vẫn LUÔN đồng bộ lại "ĐVT
+            # kho" theo đúng Tồn kho hiện có (ĐVT là thuộc tính CỐ ĐỊNH của
+            # 1 mã hàng trong Danh mục MISA, không đổi theo từng lần bán —
+            # khác "sl"/"gia_xk" có thể hợp lý khác nhau theo từng lần) —
+            # nếu không, dòng đã gán ĐÚNG mã từ TRƯỚC khi ĐVT của mã đó
+            # từng bị lưu sai/cũ (vd Tồn kho được Cập nhật lại sau) sẽ giữ
+            # mãi ĐVT cũ dù mã vẫn đúng, không được coi là "đáng ngờ" nên
+            # không đi qua nhánh sửa dvt_xk phía dưới — xác nhận đúng qua
+            # yêu cầu người dùng: "đơn vị tính cũng phải lấy đúng trong
+            # misa hãy kiểm tra lại".
+            tn_hien = ton_by_ma.get(ma_hien)
+            dvt_ton = str((tn_hien or {}).get("dvt") or "").strip()
+            # CHỈ ghi đè khi Tồn kho có ĐVT rõ ràng (khác rỗng) — file/CSDL
+            # tồn kho bị thiếu cột ĐVT ở 1 vài mã (dữ liệu MISA lỗi) không
+            # được phép XOÁ MẤT dvt_xk đang có sẵn (an toàn hơn, tránh mất
+            # dữ liệu tốt vì nguồn tham chiếu tạm thời rỗng).
+            if dvt_ton and str(r.get("dvt_xk") or "").strip() != dvt_ton:
+                r = dict(r, dvt_xk=dvt_ton)
             out.append(r)
             continue
         sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
