@@ -4625,15 +4625,56 @@ async function xkCapNhatTon(input){
 // kho" thủ công như trước nữa. Giữ nguyên nút "Chọn file Excel..." bên dưới
 // làm phương án dự phòng (dùng lại xkCapNhatTon/xkFileCapNhatTon cũ) cho
 // máy chưa cấu hình/kết nối được MISA SQL.
+// Danh sách "Kỳ báo cáo" GIỐNG HỆT tên trong hộp thoại "Tổng hợp tồn kho"
+// của MISA (Tùy chọn/Hôm nay/Tuần này/Đầu tuần đến hiện tại/Tháng này/Đầu
+// tháng đến hiện tại/Quý này/Đầu quý đến hiện tại/Năm này/Đầu năm đến hiện
+// tại) — chọn 1 mục (khác "Tùy chọn") thì TỰ ĐỘNG tính điền Từ ngày/Đến
+// ngày y hệt MISA tự tính, khỏi phải tự bấm lịch dò ngày đầu tuần/đầu
+// tháng/đầu quý/đầu năm.
+const XK_KY_BAO_CAO=[
+  ["tuychon","Tùy chọn"],["homnay","Hôm nay"],
+  ["tuannay","Tuần này"],["dautuandenhientai","Đầu tuần đến hiện tại"],
+  ["thangnay","Tháng này"],["dauthangdenhientai","Đầu tháng đến hiện tại"],
+  ["quynay","Quý này"],["dauquydenhientai","Đầu quý đến hiện tại"],
+  ["namnay","Năm này"],["daunamdenhientai","Đầu năm đến hiện tại"],
+];
+function xkFmtNgayVN(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function xkKyBaoCaoDoi(){
+  const kieu=document.getElementById('xkMisaKyBaoCao')?.value;
+  const tuEl=document.getElementById('xkMisaTonTu'), denEl=document.getElementById('xkMisaTonDen');
+  if(!tuEl||!denEl)return;
+  if(!kieu||kieu==='tuychon'){tuEl.readOnly=false;denEl.readOnly=false;tuEl.style.background='';denEl.style.background='';return}
+  const now=new Date(), y=now.getFullYear(), m=now.getMonth(), ngay=now.getDate();
+  let tu=new Date(y,m,ngay), den=new Date(y,m,ngay);
+  if(kieu==='tuannay'||kieu==='dautuandenhientai'){
+    const dow=(now.getDay()+6)%7;                       // 0=Thứ 2 (đầu tuần kiểu VN)
+    tu=new Date(y,m,ngay-dow);
+    den=(kieu==='tuannay')?new Date(y,m,ngay-dow+6):new Date(y,m,ngay);
+  }else if(kieu==='thangnay'||kieu==='dauthangdenhientai'){
+    tu=new Date(y,m,1);
+    den=(kieu==='thangnay')?new Date(y,m+1,0):new Date(y,m,ngay);
+  }else if(kieu==='quynay'||kieu==='dauquydenhientai'){
+    const q=Math.floor(m/3);
+    tu=new Date(y,q*3,1);
+    den=(kieu==='quynay')?new Date(y,q*3+3,0):new Date(y,m,ngay);
+  }else if(kieu==='namnay'||kieu==='daunamdenhientai'){
+    tu=new Date(y,0,1);
+    den=(kieu==='namnay')?new Date(y,11,31):new Date(y,m,ngay);
+  }
+  tuEl.value=xkFmtNgayVN(tu);denEl.value=xkFmtNgayVN(den);
+  tuEl.readOnly=true;denEl.readOnly=true;tuEl.style.background='#f3f3f3';denEl.style.background='#f3f3f3';
+}
 async function xkCapNhatTonMisaMo(){
   if(!current){toast('Chọn công ty trước','err');return}
-  const hom_nay=new Date().toISOString().slice(0,10);
+  const kyOpts=XK_KY_BAO_CAO.map(([k,t])=>`<option value="${k}" ${k==='dauthangdenhientai'?'selected':''}>${t}</option>`).join('');
   document.getElementById('misaModalBody').innerHTML=`
     <div style="font-weight:700;font-size:15px;color:#1a7a7a;margin-bottom:8px">🔄 Cập nhật tồn kho từ MISA</div>
     <div class="hint" style="margin-bottom:10px">Tính trực tiếp từ Sổ Kho MISA (không cần import file Excel) — chỉ CẬP NHẬT lại SL/giá tồn kho theo mã hàng lấy được, giữ nguyên mã cũ không có trong khoảng đã chọn; mã hàng đã gắn cho dòng bán không đổi.</div>
+    <div class="field" style="margin-bottom:10px;max-width:260px"><label>Kỳ báo cáo</label>
+      <select id="xkMisaKyBaoCao" onchange="xkKyBaoCaoDoi()">${kyOpts}</select></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
       <div class="field" style="flex:1;min-width:160px"><label>Từ ngày (bỏ trống = Đầu kỳ tính 0)</label><input type="date" id="xkMisaTonTu"></div>
-      <div class="field" style="flex:1;min-width:160px"><label>Đến ngày</label><input type="date" id="xkMisaTonDen" value="${hom_nay}"></div>
+      <div class="field" style="flex:1;min-width:160px"><label>Đến ngày</label><input type="date" id="xkMisaTonDen"></div>
     </div>
     <div style="margin-bottom:6px;font-size:13px;font-weight:600">Mã kho <span style="font-weight:400;color:var(--muted)">(bỏ trống/chọn hết = TẤT CẢ kho)</span></div>
     <div id="xkMisaTonKhoBox" style="border:1px solid #ddd;border-radius:8px;padding:8px;max-height:180px;overflow:auto;margin-bottom:10px;font-size:13px">Đang tải danh sách kho...</div>
@@ -4644,6 +4685,7 @@ async function xkCapNhatTonMisaMo(){
         <button class="btn sm" style="background:#1a7a7a" onclick="xkCapNhatTonMisaChay()">🔄 Lấy tồn kho từ MISA</button>
       </span>
     </div>`;
+  xkKyBaoCaoDoi();
   misaModalNormal();document.getElementById('misaModal').style.display='flex';
   try{
     const d=await api(`/api/xk/misa-danh-sach-kho/${current}`);
