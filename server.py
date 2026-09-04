@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.158"
+APP_BUILD = "2026-08-31.159"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12455,8 +12455,24 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
     dong_ngo = set()
     for idx_r, r in enumerate(giathanh_cu):
         ma = str(r.get("ma") or "").strip()
-        tn = ton_by_ma.get(ma) if ma else None
+        if not ma:
+            continue
+        tn = ton_by_ma.get(ma)
         if not tn:
+            # Mã đang có KHÔNG khớp với bất kỳ mã nào trong Tồn kho hiện có
+            # (vd còn sót lại TÊN hàng bị gán nhầm vào ô Mã hàng kho từ 1
+            # lỗi rất cũ, hoặc mã đã đổi/xoá trong MISA từ lần dò trước) ->
+            # CHẮC CHẮN sai, PHẢI dò lại từ đầu qua _xk_gan_1_muc — trước
+            # đây bị "continue" bỏ qua ở đây khiến dòng không bao giờ được
+            # đưa vào dong_ngo, nên bị giữ NGUYÊN vĩnh viễn dù "Mã hàng kho"
+            # là rác — xác nhận đúng qua báo cáo thật: MISA từ chối ghi sổ
+            # "Không thể xuất vật tư, hàng hóa <Gạch men 600x1200 mm - Gạch
+            # men 600x1200 mm>... Số lượng tồn... là: 0,00" vì "Mã hàng kho"
+            # đang là chính TÊN hàng ("Gạch men 600x1200 mm") thay vì mã
+            # thật "HH00087-8" (đang còn tồn 79,2 trong Tồn kho) — bấm lại
+            # "Dò mã hàng tự động" nhiều lần vẫn không tự sửa được vì thiếu
+            # đúng chỗ này.
+            dong_ngo.add(idx_r)
             continue
         ten_sp = r.get("ten_sp")
         if _ma_ngoac_khop_xk(ten_sp, tn["ten"]):
