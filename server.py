@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.173"
+APP_BUILD = "2026-08-31.174"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11620,10 +11620,16 @@ def _doc_file_ton_kho(wb):
     kho_hien_tai = ""       # kho của khối đang đọc (cập nhật mỗi khi gặp dòng 'Tên kho : ...')
     for r in range(hdr_row + 2, ws.max_row + 1):
         ma = str(ws.cell(r, i_ma + 1).value or "").strip()
-        # phòng hờ 'Tổng cộng'/'Tổng số' lỡ rơi đúng vào cột Mã hàng (thường
-        # không xảy ra — dòng này thường KHÔNG có gì ở cột Mã hàng — nhưng
-        # không loại trừ khả năng layout khác, tránh tạo "mã hàng" giả).
-        if _kd2(ma) in ("tong cong", "tong so"):
+        # phòng hờ 'Tổng cộng'/'Tổng số'/'Số dòng = N' (dòng TỔNG CỘNG CUỐI
+        # FILE của báo cáo MISA, ghi ĐÈ THẲNG vào cột "Mã hàng" chứ không để
+        # trống như dòng 'Tên kho :...') lỡ rơi đúng vào cột Mã hàng — nếu
+        # không loại, dòng này bị coi là 1 "mã hàng" thật với Cuối kỳ SL/GT
+        # = TỔNG CỦA CẢ FILE, cộng dồn tiếp vào tổng chung -> tồn cuối kỳ báo
+        # ra gần như GẤP ĐÔI số thật. Xác nhận đúng qua file thật người dùng
+        # gửi (TONG_HOP_TON_KHO.xlsx): dòng cuối "Số dòng = 1543" nằm lẫn
+        # trong khối kho cuối cùng, cộng thêm nguyên 5.874.257.303đ (đúng
+        # bằng tổng CẢ FILE) vào khối đó.
+        if _kd2(ma) in ("tong cong", "tong so") or _kd2(ma).startswith("so dong"):
             ma = ""
         if not ma:
             # dò dòng 'Tên kho : ...' (khác dòng 'Tổng cộng' — không có chữ
