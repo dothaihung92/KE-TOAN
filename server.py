@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.188"
+APP_BUILD = "2026-08-31.189"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12749,7 +12749,7 @@ def _xk_canh_bao_dau_ky(ton_rows, giathanh_rows):
     canh_bao.sort(key=lambda x: -x["vuot_dau_ky"])
     return canh_bao
 
-def _gen_xuat_kho_rows(giathanh_rows, ton_rows=None):
+def _gen_xuat_kho_rows(giathanh_rows, ton_rows=None, ten_sang_ma_kho=None):
     """Từ các dòng GIATHANH đã gắn mã (bỏ dòng chưa gắn) -> mảng dòng form MISA
     'Xuất kho'. Ngày hạch toán/chứng từ = CUỐI THÁNG của hoá đơn cuối cùng (mới
     nhất) trong lô; Số chứng từ = 'XK T{tháng}/{năm}' theo tháng đó.
@@ -12761,7 +12761,18 @@ def _gen_xuat_kho_rows(giathanh_rows, ton_rows=None):
     như trước — TRƯỚC ĐÂY ghi cứng "HH" cho MỌI dòng bất kể mã đó thật sự
     thuộc kho nào, khiến MISA từ chối ghi sổ khi hàng thật sự nằm ở kho khác
     (đã xác nhận qua báo cáo thật: hàng thuộc "Kho Chó Mèo Có VAT" nhưng ghi
-    "HH", MISA báo vượt tồn kho "HH" dù kho đúng vẫn còn hàng)."""
+    "HH", MISA báo vượt tồn kho "HH" dù kho đúng vẫn còn hàng).
+
+    field 'kho' trong Sheet TON luôn là TÊN kho (đọc từ dòng 'Tên kho : ...'
+    của báo cáo Excel MISA, hoặc Stock.StockName ưu tiên hơn StockCode khi lấy
+    trực tiếp từ SQL — xem _doc_file_ton_kho/_misa_lay_ton_kho) — nhưng cột
+    'Kho (*)' trên form Excel 'Xuất kho' MISA yêu cầu đúng MÃ kho (StockCode,
+    vd 'HH'/'KHOCHOMEOKOVAT'), KHÔNG PHẢI tên đầy đủ (vd 'Kho Chó Mèo KO
+    VAT') — xác nhận đúng qua file người dùng gửi: ghi tên đầy đủ vào cột
+    này. ten_sang_ma_kho (tuỳ chọn, {tên kho (lower): mã kho}, lấy từ bảng
+    Stock thật qua _misa_lay_danh_sach_kho) dùng để đổi tên -> mã đúng; không
+    có mapping (chưa cấu hình kết nối SQL MISA) thì đành giữ nguyên tên như
+    cũ, còn hơn để trống."""
     rows = [r for r in (giathanh_rows or []) if str(r.get("ma") or "").strip()]
     if not rows:
         return [], ""
@@ -12776,7 +12787,8 @@ def _gen_xuat_kho_rows(giathanh_rows, ton_rows=None):
         row[2] = ngay_ht; row[3] = ngay_ht; row[4] = so_ct
         row[27] = r.get("ma", "")                 # AB Mã hàng
         row[28] = r.get("ten_xk") or r.get("ten_sp", "")   # AC Tên hàng
-        row[30] = ma_kho.get(r.get("ma")) or "HH"  # AE Kho
+        ten_kho = ma_kho.get(r.get("ma")) or "HH"
+        row[30] = (ten_sang_ma_kho or {}).get(str(ten_kho).strip().lower()) or ten_kho  # AE Kho (mã, không phải tên)
         row[32] = "632"; row[33] = "1561"          # AG Nợ / AH Có
         row[34] = r.get("dvt_xk") or r.get("dvt", "")      # AI ĐVT
         sl_kho = r.get("sl_kho")
@@ -13477,7 +13489,21 @@ def xk_export(cid: int):
                                   f"\"🔍 Dò mã hàng tự động\" lại (hoặc \"✅ Kiểm tra tồn kho\" + \"💾 Lưu tạm\"), "
                                   f"rồi xuất lại. Chi tiết: {chi_tiet}"
                                   + (" ..." if len(vuot) > 10 else ""))
-    out, so_ct = _gen_xuat_kho_rows(giathanh, data.get("xk_ton") or [])
+    # đổi TÊN kho (Sheet TON lưu tên, xem _gen_xuat_kho_rows) -> ĐÚNG MÃ kho
+    # thật (StockCode) trước khi xuất — cột 'Kho (*)' của form MISA cần mã,
+    # không phải tên đầy đủ. Best-effort: chưa cấu hình kết nối SQL MISA (vd
+    # công ty chỉ dùng Import Tồn Kho từ Excel) thì bỏ qua, vẫn xuất được như
+    # cũ (giữ nguyên tên) thay vì chặn hẳn export.
+    ten_sang_ma_kho = {}
+    try:
+        db_misa_xk = (_misa_sql_cfg(cid).get("database") or "").strip()
+        if db_misa_xk:
+            for k in _misa_lay_danh_sach_kho(cid, db_misa_xk):
+                if k.get("ten") and k.get("ma"):
+                    ten_sang_ma_kho[str(k["ten"]).strip().lower()] = k["ma"]
+    except Exception:
+        pass
+    out, so_ct = _gen_xuat_kho_rows(giathanh, data.get("xk_ton") or [], ten_sang_ma_kho)
     if not out:
         raise HTTPException(400, "Chưa có dòng nào được gắn mã hàng để xuất")
     wb = openpyxl.Workbook()
