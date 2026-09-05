@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.190"
+APP_BUILD = "2026-08-31.191"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10828,6 +10828,13 @@ def _nk_cols(header):
         "nk_tg": find(("trị giá tính thuế nk",), ("trị giá tính thuế nk",)),
         "nk_ts": find(("thuế suất nk",), ("thuế suất nk",)),
         "nk_thue": find(("tiền thuế nk",), ("tiền thuế nk",)),
+        # cột TÙY CHỌN — người dùng tự thêm cột "Là phí" vào Bảng kê Đầu vào
+        # rồi gõ tay 1 dấu hiệu (vd 'x') cho dòng cần đánh dấu là phí (vận
+        # chuyển/bốc xếp/kéo lắp...) đi kèm hóa đơn hàng hóa — xem
+        # _gen_mua_hang_nk, không tạo -1 nếu cột không tồn tại (an toàn,
+        # KHÔNG match nhầm cột "Chi phí mua hàng"/"Trị giá tính thuế..." nào
+        # khác vì chỉ khớp CHÍNH XÁC cụm "là phí").
+        "la_phi": find(("là phí",), ("là phí",)),
     }
 
 def _gen_mua_hang_nk(cid, header, rows):
@@ -10845,9 +10852,59 @@ def _gen_mua_hang_nk(cid, header, rows):
     def gv(r, i):
         return r[i] if 0 <= i < len(r) else ""
 
+    # "Là phí" (tuỳ chọn) — dòng phí (vận chuyển/bốc xếp/kéo lắp... đi kèm
+    # hóa đơn hàng hóa) người dùng tự đánh dấu KHÔNG được tạo thành 1 mã
+    # hàng riêng nữa (mã "rác" chỉ dùng đúng 1 lần, không tái sử dụng được)
+    # — PHÂN BỔ (theo tỷ lệ Thành tiền) thẳng vào TẤT CẢ dòng hàng hóa CÙNG
+    # hóa đơn (cùng Số HĐ+MST+Ngày+Ký hiệu, giống khóa gộp "Số phiếu nhập"
+    # ở dưới) rồi bỏ hẳn dòng phí đó — đúng yêu cầu người dùng: hóa đơn
+    # 22619 có dòng "Phí kéo lầu bồn" 111.111đ đi kèm dòng "Bồn Inox Đại
+    # Thành" — "cộng dòn phí vào mặt hàng luôn vì phí này tôi cũng sẽ cộng
+    # thẳng vào tiền hàng".
+    phi_them = {}      # chỉ số dòng (trong "rows") -> (thêm Thành tiền, thêm Tiền thuế GTGT)
+    bo_qua_phi = set()  # chỉ số dòng "Là phí" -> không tạo dòng MISA riêng nữa
+    if col["la_phi"] >= 0:
+        theo_hd = {}
+        for idx, r in enumerate(rows):
+            no_r = str(gv(r, col["no"]) or "").strip()
+            if no_r not in ("1561", "156", "152"):
+                continue
+            key = (str(gv(r, col["sohd"]) or "").strip(), gv(r, col["mst"]),
+                   str(gv(r, col["ngay"]) or ""), str(gv(r, col["kh"]) or "").strip())
+            nhom = theo_hd.setdefault(key, {"hang": [], "phi_tt": 0, "phi_thue": 0})
+            danh_dau = str(gv(r, col["la_phi"]) or "").strip().lower()
+            if danh_dau and danh_dau not in ("0", "false", "không", "khong"):
+                nhom["phi_tt"] += _to_num(gv(r, col["tt"])) or 0
+                nhom["phi_thue"] += _to_num(gv(r, col["tthue"])) or 0
+                bo_qua_phi.add(idx)
+            else:
+                nhom["hang"].append((idx, _to_num(gv(r, col["tt"])) or 0))
+        for nhom in theo_hd.values():
+            hang = nhom["hang"]
+            # không có dòng hàng hóa nào để phân bổ vào (hóa đơn CHỈ có dòng
+            # phí) -> đành bỏ qua, KHÔNG xóa mất tiền phí (an toàn hơn để
+            # nguyên dòng phí đó tạo mã hàng riêng như trước, còn hơn mất
+            # trắng số tiền không phân bổ được vào đâu).
+            if not hang or (not nhom["phi_tt"] and not nhom["phi_thue"]):
+                continue
+            tong_tt_hang = sum(tt for _, tt in hang)
+            da_dung_tt = da_dung_thue = 0
+            for i, (idx, tt) in enumerate(hang):
+                if i == len(hang) - 1:   # dòng CUỐI nhận phần dư để tổng khớp tuyệt đối
+                    them_tt = round(nhom["phi_tt"] - da_dung_tt)
+                    them_thue = round(nhom["phi_thue"] - da_dung_thue)
+                else:
+                    ty_le = (tt / tong_tt_hang) if tong_tt_hang else (1 / len(hang))
+                    them_tt = round(nhom["phi_tt"] * ty_le)
+                    them_thue = round(nhom["phi_thue"] * ty_le)
+                da_dung_tt += them_tt; da_dung_thue += them_thue
+                phi_them[idx] = (them_tt, them_thue)
+
     so_phieu_seen, so_phieu_cache = {}, {}
     out = []
-    for r in rows:
+    for idx, r in enumerate(rows):
+        if idx in bo_qua_phi:
+            continue
         no = str(gv(r, col["no"]) or "").strip()
         if no in ("1561", "156"):
             grp = "hh"
@@ -10907,11 +10964,18 @@ def _gen_mua_hang_nk(cid, header, rows):
         row[23] = no                             # TK kho
         row[24] = str(gv(r, col["co"]) or "")    # TK công nợ/tiền
         row[25] = dvt                            # ĐVT
-        row[26] = _to_num(gv(r, col["sl"]))      # Số lượng
-        row[27] = _to_num(gv(r, col["dgia"]))    # Đơn giá
-        row[28] = _to_num(gv(r, col["tt"]))      # Thành tiền
+        sl = _to_num(gv(r, col["sl"]))
+        them_tt, them_thue = phi_them.get(idx, (0, 0))
+        tt = (_to_num(gv(r, col["tt"])) or 0) + them_tt
+        row[26] = sl                             # Số lượng
+        # Đơn giá tính LẠI theo Thành tiền MỚI (đã cộng phí phân bổ) / Số
+        # lượng — giữ đúng Đơn giá × Số lượng = Thành tiền, tránh lệch giá
+        # vốn nhập kho khi phí đã cộng thẳng vào Thành tiền mà Đơn giá vẫn
+        # giữ giá gốc CHƯA cộng phí.
+        row[27] = (tt / sl) if (them_tt and sl) else _to_num(gv(r, col["dgia"]))
+        row[28] = tt                             # Thành tiền
         row[34] = rate                           # % thuế GTGT
-        row[35] = _to_num(gv(r, col["tthue"]))   # Tiền thuế GTGT
+        row[35] = (_to_num(gv(r, col["tthue"])) or 0) + them_thue   # Tiền thuế GTGT
         if la_nk:
             row[37] = 1331                        # TKĐƯ thuế GTGT
             row[38] = 33312                       # TK thuế GTGT (nhập khẩu)
