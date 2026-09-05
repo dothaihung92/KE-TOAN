@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.185"
+APP_BUILD = "2026-08-31.186"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16213,9 +16213,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # "Kho" của Bảng kê, để trống thì mặc định "HH" (xem tra_kho bên trên
         # — trước đây để trống thành StockID=None, có thể gây lỗi MISA
         # "Failed to enable constraints" khi mở chứng từ).
-        hoc_kho_gan_nhat = {}   # mã hàng (lower) -> "kho" gần nhất đã dùng để nhập (StockCode
-                                 # văn bản NẾU hoc_kho_la_ma=True, hoặc thẳng StockID nếu False)
-        hoc_kho_la_ma = True
+        # hoc_kho_ma: mã hàng (lower) -> mã Kho StockCode (VĂN BẢN, cần qua
+        # tra_kho() để ra StockID) — ưu tiên, bền với GUID-churn (mã hàng bị
+        # xóa+tạo lại). hoc_kho_id: mã hàng (lower) -> StockID (GUID, dùng
+        # THẲNG, không qua tra_kho()) — DỰ PHÒNG cho mã KHÔNG tra được qua
+        # hoc_kho_ma (cột InventoryItemCode/StockCode không tồn tại trên
+        # InventoryLedger THẬT của người dùng, HOẶC có cột nhưng dòng lịch sử
+        # cũ lưu NULL — 2 ca THẬT khác nhau, cả 2 đều khiến hoc_kho_ma rỗng
+        # cho mã đó dù lịch sử Nhập kho vẫn còn nguyên qua GUID).
+        hoc_kho_ma = {}
+        hoc_kho_id = {}
         if cfg.get("kho") is not None:
             try:
                 # Tra theo InventoryItemCode/StockCode (CỘT VĂN BẢN, lưu SẴN
@@ -16234,7 +16241,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 # "hang" (cả Danh mục MISA, có thể tới hàng ngàn mã) làm danh
                 # sách IN (...) — SQL Server giới hạn CỨNG 2100 tham số/câu
                 # lệnh, danh mục lớn (vd 1468+ mã) thừa sức vượt giới hạn này
-                # khiến CẢ CÂU LỆNH LỖI, bị except nuốt mất, hoc_kho_gan_nhat
+                # khiến CẢ CÂU LỆNH LỖI, bị except nuốt mất, hoc_kho_ma/hoc_kho_id
                 # rỗng cho MỌI mã (không riêng gì mã đang lỗi), fix coi như vô
                 # tác dụng hoàn toàn — xác nhận đúng qua báo cáo thật: build
                 # đã lên .181 nhưng mã 'HH4610-0' vẫn nhập nhầm vào kho 'HH'
@@ -16257,27 +16264,29 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                                     _c_ma_ct, _c_kho_ct, _c_ma_ct, _c_ma_ct, ph, _c_ma_ct, _c_ma_ct),
                                 ma_trong_dot).fetchall():
                             mk = str(ma_h or "").strip().lower()
-                            if mk and stock_code_h and mk not in hoc_kho_gan_nhat:
-                                hoc_kho_gan_nhat[mk] = stock_code_h
-                    else:
-                        # DỰ PHÒNG: InventoryLedger THẬT của người dùng KHÔNG có
-                        # cột văn bản InventoryItemCode/StockCode (khác giả định
-                        # ban đầu) — câu SQL trên sẽ báo lỗi "Invalid column
-                        # name", bị except bên dưới nuốt mất, hoc_kho_gan_nhat
-                        # coi như RỖNG cho MỌI mã — xác nhận đúng qua ca thật: mã
-                        # 'MH1269-0' đã có lịch sử nhập kho 'Kho Chó Mèo KO VAT'
-                        # từ trước (17/10/2025, 22/12/2025) nhưng hóa đơn MỚI
-                        # (09/07/2026, cùng đợt import .184) vẫn bị rơi về mặc
-                        # định 'HH' dù không hề bị xóa/tạo lại mã hàng. Quay lại
-                        # tra theo InventoryItemID/StockID (GUID, CHẮC CHẮN tồn
-                        # tại vì cả pipeline ghi InventoryLedger phụ thuộc 2 cột
-                        # này) như bản .181-.183 — vẫn còn lỗi GUID-churn với mã
-                        # bị xóa+tạo lại, nhưng đúng cho đa số trường hợp thông
-                        # thường (mã hàng KHÔNG bị xóa) thay vì mất tác dụng
-                        # hoàn toàn với MỌI mã như hiện tại.
+                            if mk and stock_code_h and mk not in hoc_kho_ma:
+                                hoc_kho_ma[mk] = stock_code_h
+                    # DỰ PHÒNG BỔ SUNG — chạy CHO MỌI MÃ CÒN THIẾU sau bước
+                    # trên (KHÔNG "else" độc quyền như trước): InventoryLedger
+                    # THẬT có thể KHÔNG có cột InventoryItemCode/StockCode
+                    # (Invalid column name -> lỗi cả câu, hoc_kho_ma rỗng cho
+                    # MỌI mã), HOẶC CÓ cột nhưng dòng lịch sử cũ lưu NULL cho
+                    # riêng vài mã (câu SQL vẫn chạy được, chỉ THIẾU đúng mã
+                    # đó) — xác nhận đúng qua ca thật: mã 'MH1269-0' đã có
+                    # lịch sử nhập kho 'Kho Chó Mèo KO VAT' từ trước (17/10 +
+                    # 22/12/2025) nhưng hóa đơn MỚI (09/07/2026, đúng đợt
+                    # import .185) VẪN bị rơi về mặc định 'HH' dù không hề bị
+                    # xóa/tạo lại mã hàng lẫn không hề thiếu cột trên bảng —
+                    # cột CÓ tồn tại nhưng dòng lịch sử cũ chưa từng được ghi
+                    # StockCode (từ trước khi có bản vá này). Tra thêm qua
+                    # InventoryItemID/StockID (GUID, CHẮC CHẮN tồn tại vì cả
+                    # pipeline ghi InventoryLedger phụ thuộc 2 cột này) như
+                    # bản .181-.183 cho riêng những mã hoc_kho_ma chưa có.
+                    ma_con_thieu = [m for m in ma_trong_dot if m.strip().lower() not in hoc_kho_ma]
+                    if ma_con_thieu:
                         iid_to_ma = {}
-                        for m in ma_trong_dot:
-                            ml = m.lower()
+                        for m in ma_con_thieu:
+                            ml = m.strip().lower()
                             info = hang.get(ml)
                             if info and info[0]:
                                 iid_to_ma[info[0]] = ml
@@ -16292,9 +16301,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                                     "ON il.InventoryItemID=mx.InventoryItemID AND il.RefDate=mx.md "
                                     "WHERE il.InwardQuantity>0" % ph2, iid_set).fetchall():
                                 mk = iid_to_ma.get(iid_h)
-                                if mk and stock_id_h and mk not in hoc_kho_gan_nhat:
-                                    hoc_kho_gan_nhat[mk] = stock_id_h
-                            hoc_kho_la_ma = False
+                                if mk and stock_id_h and mk not in hoc_kho_id:
+                                    hoc_kho_id[mk] = stock_id_h
             except Exception:
                 pass   # không tra được lịch sử -> an toàn, rơi về cách cũ (đọc cột "Kho" của dòng)
         # danh mục TÀI KHOẢN thật của MISA — các cột TK trên PUVoucherDetail
@@ -17032,40 +17040,40 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 if cfg.get("kho") is not None:
                     total_inward += tt
                 # Kho: ƯU TIÊN kho GẦN NHẤT đã dùng để nhập mã hàng này (xem
-                # hoc_kho_gan_nhat ở trên — giữ nhất quán 1 mã hàng luôn về
-                # đúng 1 kho); mã CHƯA có lịch sử mới tra theo cột "Kho" của
+                # hoc_kho_ma/hoc_kho_id ở trên — giữ nhất quán 1 mã hàng luôn
+                # về đúng 1 kho); mã CHƯA có lịch sử mới tra theo cột "Kho" của
                 # form (vd 'HH'/'NVL'), còn trống thì mặc định "HH" — trước
                 # đây để trống thành StockID=None, 1 nguyên nhân MISA báo
                 # "Failed to enable constraints" khi mở chứng từ nhập kho.
-                # QUAN TRỌNG: sau khi quyết định xong, GHI LUÔN vào
-                # hoc_kho_gan_nhat[iid] — mã hàng HOÀN TOÀN MỚI (chưa từng có
-                # lịch sử TRƯỚC lượt ghi này) vẫn có thể xuất hiện ở NHIỀU
-                # chứng từ KHÁC NHAU trong CÙNG 1 lượt "Ghi vào MISA" (vd 2
-                # hóa đơn khác ngày của cùng NCC, mỗi hóa đơn tự ghi cột "Kho"
-                # khác nhau trong Bảng kê) — nếu không cập nhật ngay, mỗi
-                # chứng từ trong CÙNG lượt sẽ tự tra riêng theo cột "Kho" của
-                # chính nó (vì hoc_kho_gan_nhat chỉ tính 1 LẦN DUY NHẤT lúc
-                # đầu, dựa trên lịch sử TRƯỚC lượt này — mã mới chưa có gì để
-                # tra) — VẪN bị tách vào nhiều kho khác nhau NGAY TRONG lượt
-                # ghi hiện tại, đúng lỗi thật đã gặp (chứng từ 20/01/2026 ghi
-                # khác kho với chứng từ 25/12/2025, dù CÙNG 1 lượt vừa ghi).
+                # QUAN TRỌNG: sau khi quyết định xong, GHI LUÔN vào hoc_kho_ma
+                # — mã hàng HOÀN TOÀN MỚI (chưa từng có lịch sử TRƯỚC lượt ghi
+                # này) vẫn có thể xuất hiện ở NHIỀU chứng từ KHÁC NHAU trong
+                # CÙNG 1 lượt "Ghi vào MISA" (vd 2 hóa đơn khác ngày của cùng
+                # NCC, mỗi hóa đơn tự ghi cột "Kho" khác nhau trong Bảng kê) —
+                # nếu không cập nhật ngay, mỗi chứng từ trong CÙNG lượt sẽ tự
+                # tra riêng theo cột "Kho" của chính nó (vì hoc_kho_ma/hoc_kho_id
+                # chỉ tính 1 LẦN DUY NHẤT lúc đầu, dựa trên lịch sử TRƯỚC lượt
+                # này — mã mới chưa có gì để tra) — VẪN bị tách vào nhiều kho
+                # khác nhau NGAY TRONG lượt ghi hiện tại, đúng lỗi thật đã gặp
+                # (chứng từ 20/01/2026 ghi khác kho với chứng từ 25/12/2025,
+                # dù CÙNG 1 lượt vừa ghi).
                 stock_id = None
                 if cfg.get("kho") is not None:
                     ma_ct_kho = str(r[cfg["ma"]] or "").strip()
                     mk_kho = ma_ct_kho.lower()
-                    if hoc_kho_la_ma:
-                        kho_text = hoc_kho_gan_nhat.get(mk_kho) or r[cfg["kho"]] or "HH"
-                        stock_id = tra_kho(kho_text)
-                        if mk_kho and stock_id:
-                            hoc_kho_gan_nhat.setdefault(mk_kho, kho_text)
+                    if mk_kho in hoc_kho_id:
+                        # DỰ PHÒNG (tra qua InventoryItemID/StockID GUID — xem
+                        # chú thích ở khối xây hoc_kho_ma/hoc_kho_id phía trên)
+                        # — lưu THẲNG StockID, không qua tra_kho() nữa.
+                        stock_id = hoc_kho_id[mk_kho]
                     else:
-                        # DỰ PHÒNG (bảng InventoryLedger thật không có cột
-                        # InventoryItemCode/StockCode — xem chú thích ở khối
-                        # xây hoc_kho_gan_nhat phía trên) — hoc_kho_gan_nhat
-                        # lưu THẲNG StockID (GUID), không qua tra_kho() nữa.
-                        stock_id = hoc_kho_gan_nhat.get(mk_kho) or tra_kho(r[cfg["kho"]]) or tra_kho("HH")
-                        if mk_kho and stock_id:
-                            hoc_kho_gan_nhat.setdefault(mk_kho, stock_id)
+                        kho_text = hoc_kho_ma.get(mk_kho) or r[cfg["kho"]] or "HH"
+                        stock_id = tra_kho(kho_text)
+                    if mk_kho and stock_id:
+                        if mk_kho in hoc_kho_id:
+                            hoc_kho_id.setdefault(mk_kho, stock_id)
+                        else:
+                            hoc_kho_ma.setdefault(mk_kho, kho_text)
                 mo_ta = ten_h or str(r[cfg["ten"]] or "")
                 detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,

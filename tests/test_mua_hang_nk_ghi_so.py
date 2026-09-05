@@ -943,3 +943,53 @@ print("PASS: Test 12 — khi InventoryLedger THẬT không có cột văn bản 
 TABLES["InventoryLedger"] = cols_invl   # khôi phục bảng đầy đủ cho các lượt chạy khác
 
 print("\nALL DONE (test 12)")
+
+# --- Test 13: đúng ca thật người dùng vừa báo lại NGAY SAU khi build .185
+# (Test 12) lên máy, VẪN sai — lần này mã 'MH1269-0' (đã xóa + import lại
+# đúng trên bản .185) vẫn bị ghi vào kho HH. Khác Test 12: ở đây bảng
+# InventoryLedger THẬT CÓ đủ cột InventoryItemCode/StockCode (câu SQL round
+# 4 chạy được, không lỗi) — nhưng CÁC DÒNG LỊCH SỬ CŨ (ghi trước khi bản vá
+# này populate StockCode) lại lưu StockCode = NULL cho ĐÚNG mã đang cần tra
+# — round 4/Test 12 (bản .185) coi "câu SQL chạy được" = luôn tin tưởng kết
+# quả, không có phương án dự phòng khi CÓ cột nhưng GIÁ TRỊ rỗng cho 1 mã cụ
+# thể (khác Test 12 là lỗi Ở CẤP CÂU LỆNH/cột không tồn tại) — hoc_kho_ma
+# thiếu đúng mã này, rơi về mặc định 'HH'.
+class FakeCursor13(FakeCursor):
+    def fetchall(self):
+        sql = self._last_sql
+        if sql.startswith("SELECT il.[InventoryItemCode], il.[StockCode] FROM InventoryLedger il"):
+            # Câu SQL văn bản CHẠY ĐƯỢC (cột tồn tại) nhưng dòng lịch sử cũ
+            # của 'MH216-0' lưu StockCode=NULL (ghi từ trước khi có cột này).
+            return [("MH216-0", None)]
+        if sql.startswith("SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il"):
+            # DỰ PHÒNG bổ sung phải được gọi CHO ĐÚNG mã còn thiếu ('MH216-0')
+            # — lịch sử THẬT vẫn tra được qua GUID (mã không hề bị xóa/tạo lại).
+            return [("iid-1", "sid-1")]
+        return super().fetchall()
+
+
+cur13 = FakeCursor13()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur13)
+flat13 = [
+    mk_row("NK-901", "09/07/2026", "2026031150934", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 15, 333000, 4995000, "1561", "331",
+           0, 0, "1331", None, "HH"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat13
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r13 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result13:", {k: r13[k] for k in ("so_chungtu",)})
+assert r13["so_chungtu"] == 1, f"Chứng từ NK-901 phải được ghi bình thường — got {r13}"
+pvd13 = cur13.inserted["PUVoucherDetail"]
+assert len(pvd13) == 1 and pvd13[0]["StockID"] == "sid-1", (
+    f"Mã 'MH216-0' ĐÃ CÓ lịch sử Nhập kho vào kho 'sid-1' — dù bảng InventoryLedger THẬT có đủ cột "
+    f"InventoryItemCode/StockCode nhưng dòng lịch sử cũ lại lưu StockCode=NULL cho đúng mã này (câu SQL "
+    f"round 4 CHẠY ĐƯỢC nhưng không trả được kho), PHẢI tự rơi về tra bổ sung theo InventoryItemID/StockID "
+    f"(GUID) để VẪN ghi đúng kho cũ, KHÔNG được rơi về kho mặc định 'HH' của dòng Bảng kê — được {pvd13}")
+print("PASS: Test 13 — khi InventoryLedger THẬT có đủ cột văn bản nhưng dòng lịch sử cũ lưu StockCode=NULL "
+      "cho 1 mã cụ thể (khác Test 12 là thiếu cột ở cấp bảng), phần mềm vẫn tự tra bổ sung qua "
+      "InventoryItemID/StockID (GUID) cho riêng mã đó thay vì rơi về kho mặc định 'HH' — đúng ca thật vừa "
+      "báo lại (mã 'MH1269-0' đã xóa+import lại đúng bản .185 nhưng vẫn sai).")
+
+print("\nALL DONE (test 13)")
