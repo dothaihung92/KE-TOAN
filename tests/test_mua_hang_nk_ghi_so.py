@@ -506,3 +506,54 @@ print("PASS: Test 5 — mặt hàng ĐÃ CÓ tồn trước (SUM SQL trả decim
       "dồn đúng 10+45.92=55.92.")
 
 print("\nALL DONE (test 5)")
+
+# --- Test 6: đúng lỗi THẬT người dùng báo cáo — bấm "⬆ Nhập kho vào MISA"
+# ra "Sẽ thêm: 0 chứng từ ... (hiện có 696 chứng từ Mua hàng trong bảng)"
+# khiến người dùng tưởng 696 chứng từ trong Bảng kê Đầu vào của MÌNH mà
+# không hiểu sao không thêm được cái nào — "696" thật ra là tong_trong_bang
+# = COUNT(*) FROM PUVoucher, tức TOÀN BỘ số chứng từ Mua hàng ĐANG CÓ SẴN
+# trong CSDL MISA (kể cả dữ liệu MISA có TỪ TRƯỚC khi dùng phần mềm này,
+# không liên quan gì Bảng kê đang xử lý) — hoàn toàn không phải "696 chứng
+# từ trong Bảng kê" như tên field/nhãn cũ khiến người ta hiểu lầm. Thêm
+# field tong_dang_xu_ly = ĐÚNG số chứng từ (nhóm theo Số chứng từ) có trong
+# Bảng kê Đầu vào ĐANG được xử lý ở LƯỢT NÀY — phải KHÁC tong_trong_bang
+# khi MISA đã có sẵn dữ liệu lịch sử không liên quan.
+cur6 = FakeCursor()
+# Mô phỏng MISA đã có sẵn 5 chứng từ Mua hàng LỊCH SỬ không liên quan gì
+# tới Bảng kê đang xử lý (vd nhập tay/hệ thống khác từ TRƯỚC khi dùng phần
+# mềm này) -> tong_trong_bang (COUNT(*) FROM PUVoucher) phải tính CẢ 5 dòng
+# này, không liên quan gì số chứng từ trong Bảng kê đang xử lý.
+cur6.inserted["PUVoucher"] = [{"RefID": f"lich-su-{i}"} for i in range(5)]
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur6)
+flat6 = [
+    # Chứng từ 1: mã hàng CÓ trong danh mục -> "sẽ thêm" bình thường.
+    mk_row("NK-201", "01/02/2026", "600", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 5, 36750, 183750, "1561", "331",
+           0, 0, "1331", None, "KHOCHINH"),
+    # Chứng từ 2: mã hàng KHÔNG có trong danh mục -> "bỏ qua — thiếu mã hàng"
+    # (KHÔNG được ghi PUVoucher nào, vẫn phải tính vào tong_dang_xu_ly).
+    mk_row("NK-202", "02/02/2026", "601", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MAMOI-999", "Sản phẩm mới chưa có mã", "Cái", 3, 10000, 30000, "1561", "331",
+           0, 0, "1331", None, "KHOCHINH"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat6
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r6 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result6:", {k: r6[k] for k in ("so_chungtu", "so_bo_qua_mahang", "tong_trong_bang", "tong_dang_xu_ly")})
+assert r6["so_chungtu"] == 1 and r6["so_bo_qua_mahang"] == 1
+assert r6["tong_dang_xu_ly"] == 2, (
+    f"tong_dang_xu_ly PHẢI đúng bằng số chứng từ (2: NK-201 + NK-202) đang có trong Bảng kê Đầu vào ĐANG "
+    f"xử lý ở lượt này — got {r6['tong_dang_xu_ly']}")
+assert r6["tong_trong_bang"] == 6, (
+    f"tong_trong_bang (COUNT(*) FROM PUVoucher) PHẢI đúng bằng TOÀN BỘ chứng từ Mua hàng ĐANG CÓ trong "
+    f"MISA (5 chứng từ lịch sử có sẵn + 1 chứng từ vừa ghi mới NK-201) — got {r6['tong_trong_bang']}")
+assert r6["tong_dang_xu_ly"] != r6["tong_trong_bang"], (
+    "2 con số PHẢI khác nhau trong ca này để chứng minh chúng đo 2 thứ HOÀN TOÀN KHÁC NHAU — đúng lỗi thật "
+    "đã báo cáo: nhãn cũ '(hiện có N chứng từ Mua hàng trong bảng)' dùng NHẦM tong_trong_bang (696, tổng "
+    "toàn bộ lịch sử MISA) khiến người dùng tưởng đó là số chứng từ trong CHÍNH Bảng kê của mình.")
+print("PASS: Test 6 — tong_dang_xu_ly (đúng số chứng từ trong Bảng kê đang xử lý, ở đây =2) giờ TÁCH RIÊNG "
+      "khỏi tong_trong_bang (tổng toàn bộ PUVoucher đã có sẵn trong MISA, ở đây =6) — không còn nhầm lẫn "
+      "khiến người dùng tưởng có hàng trăm chứng từ trong Bảng kê của mình mà 'Sẽ thêm: 0' không rõ lý do.")
+
+print("\nALL DONE (test 6)")

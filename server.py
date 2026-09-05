@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.167"
+APP_BUILD = "2026-08-31.168"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17248,7 +17248,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
                 "so_dvt_sua": so_dvt_sua, "so_dvt_hang_sua": so_dvt_hang_sua,
                 "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
-                "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
+                "tong_trong_bang": tong_pu, "tong_dang_xu_ly": len(order),
+                "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
                 "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
@@ -18077,7 +18078,8 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
                 "so_dvt_sua": so_dvt_sua, "so_dvt_hang_sua": so_dvt_hang_sua,
                 "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
-                "tong_trong_bang": tong_pu, "loai_ct_dang_co": loai_ct_dang_co,
+                "tong_trong_bang": tong_pu, "tong_dang_xu_ly": len(order),
+                "loai_ct_dang_co": loai_ct_dang_co,
                 "tu_kiem_tra": tu_kiem_tra,
                 "hoc_mau": (hoc["refname"] if hoc else None),
                 "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
@@ -19080,7 +19082,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
                 "so_dvt_hang_sua": so_dvt_hang_sua, "so_dvt_chungtu_sua": so_dvt_chungtu_sua,
-                "tong_trong_bang": tong_sa, "loai_ct_dang_co": loai_ct_dang_co,
+                "tong_trong_bang": tong_sa, "tong_dang_xu_ly": len(rows),
+                "loai_ct_dang_co": loai_ct_dang_co,
                 "hoc_mau": (hoc["refname"] if hoc else None),
                 "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
                 "mau_that": mau_that,

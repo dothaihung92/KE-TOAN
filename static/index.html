@@ -7217,7 +7217,8 @@ async function muaHangImportMisa(loai){
         ⚠ RỦI RO CAO: đây là chứng từ <b>${MUA_HANG_TEN[loai]}</b> — Nợ/Có, thuế GTGT thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b>
         ở trạng thái <b>ĐÃ GHI SỔ</b> — CHỈ đổi cờ trạng thái, KHÔNG tự sinh bút toán Sổ Cái (GLVoucher) như MISA thật làm khi bấm "Ghi sổ" tay — nên tự đối chiếu lại Sổ Cái/báo cáo trong MISA định kỳ để chắc chắn không lệch.
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
-      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Mua hàng trong bảng)</span>`:''}</div>
+      <div style="margin-bottom:2px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_dang_xu_ly!=null?` <span style="color:#999">(tổng ${pv.tong_dang_xu_ly} chứng từ ${MUA_HANG_TEN[loai]} trong Bảng kê đang xử lý)</span>`:''}</div>
+      ${pv.tong_trong_bang!=null?`<div style="margin-bottom:6px;font-size:11.5px;color:#999">ℹ️ Riêng MISA hiện có sẵn <b>${pv.tong_trong_bang}</b> chứng từ Mua hàng nói chung (toàn bộ lịch sử) — số này KHÔNG liên quan tới số chứng từ bạn đang import, chỉ để tham khảo.</div>`:''}
       ${(pv.so_bo_qua_ncc>0||pv.so_bo_qua_mahang>0)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA, <b>${pv.so_bo_qua_mahang}</b> dòng do thiếu mã hàng — hãy import Danh mục Hàng hóa/NVL/TSCĐ/CCDC và KH/NCC trước, rồi chạy lại.</div>`:''}
       ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
@@ -8475,7 +8476,8 @@ async function banHangImportMisa(){
         ⚠ RỦI RO CAO: đây là chứng từ <b>Bán hàng</b> — Nợ/Có, thuế GTGT thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b>
         ở trạng thái <b>ĐÃ GHI SỔ</b> — CHỈ đổi cờ trạng thái, KHÔNG tự sinh bút toán Sổ Cái (GLVoucher) như MISA thật làm khi bấm "Ghi sổ" tay — nên tự đối chiếu lại Sổ Cái/báo cáo trong MISA định kỳ để chắc chắn không lệch.
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
-      <div style="margin-bottom:6px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_trong_bang!=null?` <span style="color:#999">(hiện có ${pv.tong_trong_bang} chứng từ Bán hàng trong bảng)</span>`:''}</div>
+      <div style="margin-bottom:2px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_dang_xu_ly!=null?` <span style="color:#999">(tổng ${pv.tong_dang_xu_ly} chứng từ Bán hàng trong Bảng kê đang xử lý)</span>`:''}</div>
+      ${pv.tong_trong_bang!=null?`<div style="margin-bottom:6px;font-size:11.5px;color:#999">ℹ️ Riêng MISA hiện có sẵn <b>${pv.tong_trong_bang}</b> chứng từ Bán hàng nói chung (toàn bộ lịch sử) — số này KHÔNG liên quan tới số chứng từ bạn đang import, chỉ để tham khảo.</div>`:''}
       ${pv.so_bo_qua_kh>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ Bỏ qua <b>${pv.so_bo_qua_kh}</b> hóa đơn do Khách hàng chưa có trong MISA — hãy import Khách hàng trước, rồi chạy lại.</div>`:''}
       ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
