@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.170"
+APP_BUILD = "2026-08-31.171"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -28033,6 +28033,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     conn2 = _misa_sql_connect(cid, database=database)
     try:
         cur = conn2.cursor()
+        branch_id = _misa_branch_id(cur)
 
         cols_sav = _misa_cot_bang_that(cur, "SAVoucher")
         if cols_sav:
@@ -28094,12 +28095,34 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 # SELECT thêm cột ngày (nếu dò được) — chỉ để HIỂN THỊ ở dòng
                 # "THỪA trong MISA", xem giải thích đầy đủ ở nhánh SAVoucher.
                 cot_chon = [c_mst, c_inv, c_tot, c_vat] + ([c_ngay] if c_ngay else [])
-                sql = "SELECT %s FROM PUInvoice WHERE ISNULL([%s],'')<>''" % (
-                    ",".join("[%s]" % c for c in cot_chon), c_inv)
-                tham_so = ()
+                # CHỈ TÍNH những PUInvoice THẬT SỰ "hiện rõ trên MISA" (có
+                # PUVoucher liên kết ĐÃ ghi sổ, đúng chi nhánh, không bị ẩn
+                # theo DisplayOnBook) — y hệt điều kiện _hd_da_co_hien_ro dùng
+                # khi ghi/ghi đè. Xác nhận đúng qua báo cáo thật: người dùng tự
+                # kiểm tra TỔNG trên chính màn hình "Mua hàng hóa, dịch vụ" của
+                # MISA (chỉ hiện chứng từ hiện rõ) RA ĐÚNG số nguồn, nhưng bảng
+                # đối chiếu của phần mềm báo "TỔNG LỆCH" cao hơn — vì trước đây
+                # câu SELECT này cộng dồn CẢ những PUInvoice có PUVoucher bị ẩn/
+                # lỗi (tồn đọng từ những lần ghi trước bị lỗi giữa chừng, xem
+                # _hd_da_co_hien_ro) — những bản ghi đó KHÔNG hiện trên MISA
+                # nên người dùng không thấy, nhưng vẫn bị tính vào tổng MISA ở
+                # đây khiến báo LỆCH oan dù thực chất dữ liệu đã khớp. KHÔNG
+                # lọc nếu không dò được BranchID gốc (an toàn, giữ hành vi cũ).
+                where_hien_ro = ""
+                tham_so_hienro = ()
+                if branch_id is not None:
+                    where_hien_ro = (
+                        " AND EXISTS (SELECT 1 FROM PUInvoiceDetail pid "
+                        "JOIN PUVoucher pv ON pv.RefID=pid.PUVoucherRefID "
+                        "WHERE pid.RefID=PUInvoice.RefID AND pv.PostedDate IS NOT NULL "
+                        "AND pv.BranchID=? AND ISNULL(pv.DisplayOnBook,0) IN (0,2))")
+                    tham_so_hienro = (branch_id,)
+                sql = "SELECT %s FROM PUInvoice WHERE ISNULL([%s],'')<>''%s" % (
+                    ",".join("[%s]" % c for c in cot_chon), c_inv, where_hien_ro)
+                tham_so = tham_so_hienro
                 if c_ngay and tu_ngay_purchase and den_ngay_purchase:
                     sql += " AND [%s]>=? AND [%s]<=?" % (c_ngay, c_ngay)
-                    tham_so = (tu_ngay_purchase, den_ngay_purchase)
+                    tham_so = tham_so + (tu_ngay_purchase, den_ngay_purchase)
                 for row in (cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
                     mst, inv, tot, vat = row[0], row[1], row[2], row[3]
                     ngay_dt = row[4] if c_ngay else None

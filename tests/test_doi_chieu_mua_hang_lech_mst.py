@@ -30,6 +30,9 @@ class FakeCursor:
         self.last_params = params
         return self
 
+    def fetchone(self):
+        return None
+
     def fetchall(self):
         sql = self.last_sql
         if "sys.columns" in sql:
