@@ -689,9 +689,9 @@ print("\nALL DONE (test 7)")
 class FakeCursor8(FakeCursor):
     def fetchall(self):
         sql = self._last_sql
-        if sql.startswith("SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il"):
-            # mã 'MH216-0' (iid-1) đã từng Nhập kho vào 'KHOCHINH' (sid-1) trước đó.
-            return [("iid-1", "sid-1")]
+        if sql.startswith("SELECT il.InventoryItemCode, il.StockCode FROM InventoryLedger il"):
+            # mã 'MH216-0' đã từng Nhập kho vào 'KHOCHINH' trước đó.
+            return [("MH216-0", "KHOCHINH")]
         return super().fetchall()
 
 
@@ -739,13 +739,13 @@ class FakeCursor9(FakeCursor):
             return [("iid-1", "MH216-0", "uid-cai", "Que gặm hương bò 120g"),
                     ("iid-2", "MH217-0", "uid-cai", "Que gặm hương phô mai 120g"),
                     ("iid-3", "CCDC072", "uid-cai", "Máy lạnh NAGAKAWA NIS-C09R2U51")] + extra
-        if sql.startswith("SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il"):
+        if sql.startswith("SELECT il.InventoryItemCode, il.StockCode FROM InventoryLedger il"):
             # Mô phỏng ĐÚNG giới hạn thật của SQL Server (2100 tham số/lệnh) —
             # nếu câu truy vấn lỡ nhét CẢ Danh mục (1503 mã, x2 nếu còn IN
             # trùng lặp = 3006 tham số) sẽ VỠ ở đây, đúng lỗi thật đã gặp.
             if len(self._last_params) > 2100:
                 raise Exception("Đã tạo quá nhiều tham số, tối đa cho phép là 2100.")
-            return [("iid-1", "sid-1")]
+            return [("MH216-0", "KHOCHINH")]
         return super().fetchall()
 
 
@@ -813,3 +813,67 @@ print("PASS: Test 10 — mã hàng hoàn toàn mới xuất hiện ở nhiều c
       "quán cho các chứng từ sau trong cùng lượt, đúng ca thật vừa báo lại (MH1561-8/MH1562-8).")
 
 print("\nALL DONE (test 10)")
+
+# --- Test 11: đúng lỗi THẬT người dùng vừa báo lại LẦN NỮA (build .183 đã
+# lên nhưng mã 'MH1561-8'/'MH1562-8' vẫn ghi sai kho, dù chứng từ 25/12/2025
+# CŨ trong MISA đã có đúng kho 'KHODOKOVAT') — nguyên nhân round 3 của fix
+# KHÔNG lộ ra: mã hàng này rất có thể đã bị XÓA khỏi Danh mục InventoryItem
+# rồi TỰ ĐỘNG TẠO LẠI (qua _misa_ghi_hang_hoa, vì lúc nạp "hang" không còn
+# thấy mã này nữa) — mã tạo LẠI mang GUID (InventoryItemID) HOÀN TOÀN MỚI,
+# KHÁC hẳn GUID cũ mà chứng từ 25/12/2025 đã dùng khi ghi InventoryLedger.
+# hoc_kho_gan_nhat (round 2/3, tra theo InventoryItemID) tra theo GUID MỚI
+# này -> KHÔNG BAO GIỜ khớp được với lịch sử cũ (khác GUID) dù ĐÚNG cùng 1
+# mã hàng — coi như "mã hoàn toàn mới", mất tác dụng NGAY CẢ KHI lịch sử
+# thật vẫn còn nguyên trong InventoryLedger. Fix round 4: tra theo
+# InventoryItemCode (CỘT VĂN BẢN, lưu sẵn ngay trên InventoryLedger, không
+# phụ thuộc InventoryItemID còn hay đổi) — phải khớp đúng bất kể GUID hiện
+# tại của mã hàng là gì.
+class FakeCursor11(FakeCursor):
+    def fetchall(self):
+        sql = self._last_sql
+        if sql.startswith("SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName"):
+            # "hang" KHÔNG còn thấy 'MH1561-8' nữa (đã bị xóa khỏi Danh mục
+            # trước đó) -> _misa_ghi_hang_hoa sẽ TỰ TẠO LẠI với GUID MỚI —
+            # ghép thêm InventoryItem VỪA tự tạo (self.inserted) để lượt NẠP
+            # LẠI "hang" sau khi tự tạo thấy được ngay, giống FakeCursor6.
+            co_san = [("iid-1", "MH216-0", "uid-cai", "Que gặm hương bò 120g")]
+            moi = [(r["InventoryItemID"], r["InventoryItemCode"], r["UnitID"], r["InventoryItemName"])
+                   for r in self.inserted.get("InventoryItem", [])]
+            return co_san + moi
+        if sql.startswith("SELECT il.InventoryItemCode, il.StockCode FROM InventoryLedger il"):
+            # Lịch sử THẬT vẫn còn nguyên trong InventoryLedger (chứng từ
+            # 25/12/2025 cũ, gắn với GUID CŨ đã bị xóa) — CHỈ còn nhận diện
+            # được qua đúng CODE văn bản 'MH1561-8', không còn GUID nào khớp.
+            return [("MH1561-8", "KHODOKOVAT")]
+        return super().fetchall()
+
+
+cur11 = FakeCursor11()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur11)
+flat11 = [
+    mk_row("NK-701", "20/01/2026", "70", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH1561-8", "Cát đậu phụ cho mèo đi vệ sinh Catsme", "Túi", 30, 45500, 1365000, "1561", "331",
+           0, 0, "1331", None, "KHODOVAT"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat11
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r11 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result11:", {k: r11[k] for k in ("so_chungtu", "so_tu_tao_mahang")})
+assert r11["so_chungtu"] == 1, f"Chứng từ NK-701 phải được ghi bình thường — got {r11}"
+pvd11 = cur11.inserted["PUVoucherDetail"]
+moi_dm11 = next(x for x in cur11.inserted["InventoryItem"] if x["InventoryItemCode"] == "MH1561-8")
+assert len(pvd11) == 1, f"Phải có đúng 1 dòng PUVoucherDetail — got {pvd11}"
+stock_id_ghi = pvd11[0]["StockID"]
+stock_moi_tao = [s for s in cur11.inserted["Stock"] if "KHODOKOVAT" in s.values()]
+assert stock_moi_tao and stock_id_ghi == stock_moi_tao[0]["StockID"], (
+    f"Mã 'MH1561-8' dù VỪA bị xóa+tự tạo lại (GUID InventoryItemID hoàn toàn MỚI, khác GUID chứng từ "
+    f"25/12/2025 cũ đã dùng) VẪN PHẢI ghi vào ĐÚNG kho 'KHODOKOVAT' theo lịch sử THẬT (tra theo CODE văn "
+    f"bản, không phụ thuộc GUID) — KHÔNG được ghi nhầm sang 'KHODOVAT' (cột Kho của chính dòng Bảng kê) "
+    f"— được StockID={stock_id_ghi}, các Stock đã tạo: {cur11.inserted['Stock']}")
+print("PASS: Test 11 — mã hàng dù bị xóa khỏi Danh mục rồi tự tạo lại (GUID InventoryItemID hoàn toàn "
+      "mới) vẫn tra ĐÚNG kho lịch sử thật qua CODE văn bản (không phụ thuộc GUID), không còn ghi nhầm "
+      "kho — đúng ca thật vừa báo lại (MH1561-8/MH1562-8, chứng từ 25/12/2025 cũ có kho đúng nhưng chứng "
+      "từ 20/01/2026 vẫn ghi sai trước fix này).")
+
+print("\nALL DONE (test 11)")
