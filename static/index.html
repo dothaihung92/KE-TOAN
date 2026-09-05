@@ -7509,8 +7509,21 @@ function misaTomTatBuoc(r){
   if(r.so_chung_tu!=null)phan.push(`${r.so_chung_tu} chứng từ`);
   if(r.so_dong!=null&&r.danh_sach!=null)phan.push(`${r.so_dong} dòng`);
   if(r.so_quy!=null&&r.danh_sach!=null)phan.push(`${r.so_quy} quý`);
+  // Số chứng từ/dòng BỊ BỎ QUA vì thiếu NCC/mã hàng trong Danh mục MISA (xem
+  // _misa_ghi_mua_hang) — TRƯỚC ĐÂY chỉ hiện cảnh báo này ở nút "⬆ Nhập kho
+  // vào MISA" bấm TAY riêng lẻ, còn chạy qua "🚀 Import tự động toàn bộ" thì
+  // dòng tóm tắt chỉ hiện "✓ Đã ghi: N chứng từ, M dòng" — im lặng bỏ qua
+  // phần thiếu, khiến người dùng KHÔNG BIẾT có dữ liệu bị bỏ sót cho tới khi
+  // chạy riêng bước Đối chiếu Giá trị/VAT sau đó mới thấy "LỆCH" mà không rõ
+  // nguyên nhân — nay hiện ngay tại đây để biết NGAY lúc chạy, không cần đợi
+  // đối chiếu mới phát hiện.
+  if(r.so_bo_qua_ncc!=null&&r.so_bo_qua_ncc>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_ncc} chứng từ do thiếu NCC/KH trong Danh mục`);
+  if(r.so_bo_qua_mahang!=null&&r.so_bo_qua_mahang>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_mahang} dòng do thiếu mã hàng trong Danh mục`);
   if(!phan.length&&r.ghi_chu)return r.ghi_chu;
   return phan.join(', ')||'xong';
+}
+function misaBuocCoBoQuaThieuDanhMuc(r){
+  return !!(r&&((r.so_bo_qua_ncc!=null&&r.so_bo_qua_ncc>0)||(r.so_bo_qua_mahang!=null&&r.so_bo_qua_mahang>0)));
 }
 let misaImportRunId=0;   // để lượt chạy MỚI (vd bấm "Xác nhận chạy thật") tự
                           // dừng vòng poll của lượt CŨ, tránh 2 vòng poll ghi đè nhau
@@ -7577,7 +7590,10 @@ function misaImportHienKetQua(d,preview){
     let mau='#1a7a7a',trangThai;
     if(b.bo_qua){mau='#999';trangThai='Bỏ qua — '+b.bo_qua;}
     else if(b.loi){mau='#b91c1c';trangThai='Lỗi — '+b.loi;}
-    else{trangThai=(preview?'Sẽ ghi: ':'✓ Đã ghi: ')+misaTomTatBuoc(b.ket_qua);}
+    else{
+      trangThai=(preview?'Sẽ ghi: ':'✓ Đã ghi: ')+misaTomTatBuoc(b.ket_qua);
+      if(misaBuocCoBoQuaThieuDanhMuc(b.ket_qua))mau='#8a5d00';   // vàng cảnh báo — có dòng/chứng từ bị bỏ sót
+    }
     return `<tr><td style="padding:7px 10px;border:1px solid #eee;font-weight:600">${misaEsc(b.ten)}</td>
       <td style="padding:7px 10px;border:1px solid #eee;color:${mau}">${misaEsc(trangThai)}</td></tr>`;
   }).join('');
