@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.181"
+APP_BUILD = "2026-08-31.182"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16216,7 +16216,18 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         hoc_kho_gan_nhat = {}   # InventoryItemID -> StockID (kho gần nhất đã nhập)
         if cfg.get("kho") is not None:
             try:
-                iid_set = list({v[0] for v in hang.values() if v and v[0]})
+                # CHỈ tra cho đúng những mã hàng THẬT SỰ có mặt trong Bảng kê
+                # Đầu vào đang xử lý ở lượt này (flat) — KHÔNG dùng TOÀN BỘ
+                # "hang" (cả Danh mục MISA, có thể tới hàng ngàn mã) làm danh
+                # sách IN (...) — SQL Server giới hạn CỨNG 2100 tham số/câu
+                # lệnh, danh mục lớn (vd 1468+ mã) thừa sức vượt giới hạn này
+                # khiến CẢ CÂU LỆNH LỖI, bị except nuốt mất, hoc_kho_gan_nhat
+                # rỗng cho MỌI mã (không riêng gì mã đang lỗi), fix coi như vô
+                # tác dụng hoàn toàn — xác nhận đúng qua báo cáo thật: build
+                # đã lên .181 nhưng mã 'HH4610-0' vẫn nhập nhầm vào kho 'HH'
+                # dù đã có kho 'Kho Chó Mèo KO VAT' từ trước.
+                ma_trong_dot = {str(r[cfg["ma"]] or "").strip().lower() for r in flat}
+                iid_set = list({hang[m][0] for m in ma_trong_dot if m in hang and hang[m][0]})
                 if iid_set:
                     ph = ",".join("?" * len(iid_set))
                     for iid_h, stock_id_h in cur.execute(
@@ -16225,8 +16236,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                             "WHERE InventoryItemID IN (%s) AND InwardQuantity>0 "
                             "GROUP BY InventoryItemID) mx "
                             "ON il.InventoryItemID=mx.InventoryItemID AND il.RefDate=mx.md "
-                            "WHERE il.InventoryItemID IN (%s) AND il.InwardQuantity>0"
-                            % (ph, ph), iid_set + iid_set).fetchall():
+                            "WHERE il.InwardQuantity>0" % ph, iid_set).fetchall():
                         if iid_h not in hoc_kho_gan_nhat:
                             hoc_kho_gan_nhat[iid_h] = stock_id_h
             except Exception:

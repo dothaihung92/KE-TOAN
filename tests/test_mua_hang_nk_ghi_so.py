@@ -714,3 +714,58 @@ print("PASS: Test 8 — mã hàng ĐÃ CÓ lịch sử Nhập kho trước đó 
       "tránh lặp lại ca thật 'HH4610-0' tồn ở 2 kho khác nhau.")
 
 print("\nALL DONE (test 8)")
+
+# --- Test 9: đúng lỗi THẬT người dùng vừa báo lại (build .181 đã lên nhưng
+# mã 'HH4610-0' VẪN nhập nhầm vào kho 'HH' dù đã có kho 'Kho Chó Mèo KO VAT'
+# từ trước) — nguyên nhân round 1 của fix (Test 8) không lộ ra: câu truy
+# vấn "kho gần nhất" TRƯỚC ĐÂY dùng TOÀN BỘ "hang" (cả Danh mục MISA, công
+# ty thật có 1468+ mã) làm danh sách IN (...) — SQL Server giới hạn CỨNG
+# 2100 tham số/câu lệnh, danh mục lớn thừa sức vượt ngưỡng này khiến CẢ CÂU
+# LỆNH LỖI (bị except nuốt mất), hoc_kho_gan_nhat rỗng cho MỌI mã — fix coi
+# như vô tác dụng với bất kỳ công ty nào có Danh mục đủ lớn (đúng thực tế
+# hầu hết công ty dùng phần mềm này). Test 8 (chỉ 3 mã trong "hang") không
+# đủ lớn để lộ ra bug này.
+class FakeCursor9(FakeCursor):
+    def fetchall(self):
+        sql = self._last_sql
+        if sql.startswith("SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName"):
+            # Danh mục LỚN — mô phỏng đúng quy mô công ty thật (1468+ mã hàng),
+            # MH216-0 nằm lẫn trong đó.
+            extra = [(f"iid-extra-{i}", f"EXTRA{i}", "uid-cai", f"Hàng thêm {i}") for i in range(1500)]
+            return [("iid-1", "MH216-0", "uid-cai", "Que gặm hương bò 120g"),
+                    ("iid-2", "MH217-0", "uid-cai", "Que gặm hương phô mai 120g"),
+                    ("iid-3", "CCDC072", "uid-cai", "Máy lạnh NAGAKAWA NIS-C09R2U51")] + extra
+        if sql.startswith("SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il"):
+            # Mô phỏng ĐÚNG giới hạn thật của SQL Server (2100 tham số/lệnh) —
+            # nếu câu truy vấn lỡ nhét CẢ Danh mục (1503 mã, x2 nếu còn IN
+            # trùng lặp = 3006 tham số) sẽ VỠ ở đây, đúng lỗi thật đã gặp.
+            if len(self._last_params) > 2100:
+                raise Exception("Đã tạo quá nhiều tham số, tối đa cho phép là 2100.")
+            return [("iid-1", "sid-1")]
+        return super().fetchall()
+
+
+cur9 = FakeCursor9()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur9)
+flat9 = [
+    mk_row("NK-501", "05/02/2026", "900", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 5, 36750, 183750, "1561", "331",
+           0, 0, "1331", None, "KHOKHAC"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat9
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r9 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result9:", {k: r9[k] for k in ("so_chungtu",)})
+assert r9["so_chungtu"] == 1, f"Chứng từ NK-501 phải được ghi bình thường — got {r9}"
+pvd9 = cur9.inserted["PUVoucherDetail"]
+assert len(pvd9) == 1 and pvd9[0]["StockID"] == "sid-1", (
+    f"Câu truy vấn 'kho gần nhất' PHẢI chỉ tra đúng mã hàng có trong Bảng kê đang xử lý (1 mã), KHÔNG "
+    f"được nhét CẢ Danh mục MISA (1503 mã) vào IN (...) — nếu không sẽ VỠ giới hạn tham số SQL Server, "
+    f"khiến toàn bộ tính năng vô tác dụng dù Danh mục công ty đủ lớn (đúng ca thật đã báo lại sau round 1 "
+    f"của fix) — được {pvd9}")
+print("PASS: Test 9 — câu truy vấn 'kho gần nhất' chỉ tra đúng mã hàng trong Bảng kê đang xử lý (không "
+      "nhét cả Danh mục MISA lớn vào IN), không còn vỡ giới hạn tham số SQL Server với công ty có Danh "
+      "mục lớn (1468+ mã) như ca thật vừa báo lại.")
+
+print("\nALL DONE (test 9)")
