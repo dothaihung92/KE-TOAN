@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.172"
+APP_BUILD = "2026-08-31.173"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -28214,8 +28214,18 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     ms_flat_sold = [e for lst in misa["sold"].values() for e in lst]
     tong_ds_nguon = sum(e["ds"] for e in ng_flat_sold)
     tong_thue_nguon = sum(e["thue"] for e in ng_flat_sold)
-    tong_ds_misa = sum(e["ds"] for e in ms_flat_sold)
-    tong_thue_misa = sum(e["thue"] for e in ms_flat_sold)
+    # CHỈ cộng vào TỔNG những dòng MISA "đúng kỳ" (_dung_ky_that, khung SÁT
+    # không nới) — GIỐNG HỆT điều kiện đã dùng để lọc "THỪA trong MISA" bên
+    # dưới. TRƯỚC ĐÂY khung lấy dữ liệu (SQL, có nới ±1 ngày biên) RỘNG HƠN
+    # khung xét "thừa" — khiến 1 hóa đơn MISA nằm ĐÚNG trong phần nới biên
+    # (thật ra khác kỳ đang đối chiếu) vẫn bị cộng vào TỔNG (gây báo "TỔNG
+    # LỆCH" oan) nhưng lại KHÔNG hiện ra ở dòng "THỪA" nào để người dùng dò
+    # (đúng lỗi thật: "TỔNG LỆCH" báo ra nhưng bảng khoanh vùng bên dưới
+    # trống trơn, "0/115 hóa đơn thiếu/lệch") — nay TỔNG và "THỪA" dùng
+    # CHUNG 1 điều kiện, nhất quán: đã loại khỏi "thừa" thì cũng loại khỏi
+    # TỔNG luôn, không còn lệch số liệu không rõ nguyên nhân.
+    tong_ds_misa = sum(e["ds"] for e in ms_flat_sold if _dung_ky_that(e.get("ngay", ""), "sold"))
+    tong_thue_misa = sum(e["thue"] for e in ms_flat_sold if _dung_ky_that(e.get("ngay", ""), "sold"))
     tong_khop = _khop_tong(tong_ds_nguon, tong_ds_misa) and _khop_tong(tong_thue_nguon, tong_thue_misa)
     # KHÔNG CÓ hóa đơn nguồn nào (chưa tra cứu/chưa lưu Bảng kê Đầu ra cho
     # loại này) -> KHÔNG có gì để đối chiếu — coi như "đã khớp" (không phải
@@ -28317,8 +28327,15 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
     ms_flat_purchase = list(misa["purchase"].values())
     tong_ds_nguon_p = sum(e["ds"] for e in ng_flat_purchase)
     tong_thue_nguon_p = sum(e["thue"] for e in ng_flat_purchase)
-    tong_ds_misa_p = sum(e["ds"] for e in ms_flat_purchase)
-    tong_thue_misa_p = sum(e["thue"] for e in ms_flat_purchase)
+    # CHỈ cộng vào TỔNG những dòng MISA "đúng kỳ" (_dung_ky_that) — xem giải
+    # thích đầy đủ ở nhánh Bán hàng phía trên (cùng lý do, đây chính là ca
+    # thật người dùng báo cáo: "TỔNG LỆCH" Mua hàng nhưng bảng khoanh vùng
+    # "0/115 hóa đơn thiếu/lệch" trống trơn — vì hóa đơn gây lệch nằm ĐÚNG
+    # trong phần nới biên ±1 ngày của khung lấy dữ liệu SQL, khác kỳ đang
+    # đối chiếu nên bị loại khỏi "thừa" nhưng TRƯỚC ĐÂY vẫn bị cộng vào TỔNG).
+    tong_ds_misa_p = sum(e["ds"] for e in ms_flat_purchase if _dung_ky_that(e.get("ngay", ""), "purchase"))
+    tong_thue_misa_p = sum(e["thue"] for e in ms_flat_purchase
+                            if _dung_ky_that(e.get("ngay", ""), "purchase"))
     tong_khop_p = (_khop_tong(tong_ds_nguon_p, tong_ds_misa_p) and
                    _khop_tong(tong_thue_nguon_p, tong_thue_misa_p))
     # KHÔNG CÓ hóa đơn nguồn nào — xem giải thích chi tiết ở nhánh Bán hàng
