@@ -5218,6 +5218,24 @@ function xkKiemTraTonLoi(rSet){
   if(soCanhBao>0)toast(`⚠ Đã dò lại theo tồn kho${pham} — ${soCanhBao} dòng phải đổi/tách mã do hết tồn`,'err');
   else toast(`✓ Không có mã nào vượt tồn kho${pham}`,'ok');
 }
+// Dựng moRong cho ca ĐƠN GIẢN: đúng 1 dòng cũ (idxCu) được thay bằng soDongMoi
+// dòng mới NGAY TẠI vị trí cũ, các dòng khác giữ nguyên số dòng (chỉ dịch số
+// thứ tự nếu đứng SAU idxCu) — dùng chung cho xkChonMa (gán 1 mã tay bị tách
+// do thiếu tồn) và xkXacNhanGanNhieu (tách theo nhiều mã đã Ctrl+chọn), y hệt
+// xkKiemTraTonLoi đã làm cho "Kiểm tra tồn kho" tự động — thiếu bước này thì
+// nlSnapTrong (bộ lọc "chỉ hiện dòng chưa gán" đang ghim) vẫn giữ NGUYÊN chỉ
+// số CŨ trong khi các dòng sau đã dịch xuống, khiến sau khi tách bộ lọc hiện
+// sai/thiếu dòng — đúng lỗi thật đã báo: "chọn 1 mã mà sẽ bị tách dòng...
+// phần mềm sẽ bỏ lọc hiển thị... không có hiện lọc như trước".
+function xkMoRongDonGian(soDongCu,idxCu,soDongMoi){
+  const moRong=[];
+  for(let i=0;i<soDongCu;i++){
+    if(i<idxCu)moRong[i]={batDau:i,soDong:1};
+    else if(i===idxCu)moRong[i]={batDau:i,soDong:soDongMoi};
+    else moRong[i]={batDau:i+soDongMoi-1,soDong:1};
+  }
+  return moRong;
+}
 // moRong (tuỳ chọn): dịch lại vùng đang CHỌN (nlChon) và snapshot "lọc dòng
 // trống" (nlSnapTrong) sau khi các dòng bị TÁCH (xem xkKiemTraTonLoi) —
 // truyền vào khi vừa tách dòng, bỏ trống khi chỉ vẽ lại bình thường.
@@ -5513,6 +5531,8 @@ function xkChonMa(ma,ev){
   if(!tn)return;
   const tonConLai=xkTonConLaiMap(xkGanIdx)[tn.ma];
   const canXuat=Number(r.sl)||0;
+  const soDongCuTruocTach=xkRows.length;   // dùng để dịch lại bộ lọc "chưa gán" nếu bị tách — xem xkMoRongDonGian
+  let biTach=false;
   if(tonConLai!=null && tonConLai<=0){
     if(!confirm(`Mã ${tn.ma} hiện không còn tồn (đã dùng hết bởi dòng khác). Vẫn gắn mã này (âm kho)?`))return;
     // gán mã MỚI cho CẢ dòng (không tách) -> SL kho phải khớp đúng SL bán của
@@ -5532,6 +5552,7 @@ function xkChonMa(ma,ev){
     r.sl=tonConLai; r.tt=ttGan;
     r.ma=tn.ma; r.ten_xk=tn.ten; r.dvt_xk=tn.dvt; r.gia_xk=tn.gia; r.sl_kho=tonConLai; r.mo_ho=false;
     xkRows.splice(xkGanIdx+1,0,dongThieu);
+    biTach=true;
   }else{
     // đủ tồn cho CẢ dòng -> SL kho = SL bán, GHI ĐÈ sl_kho cũ (xem comment ở
     // nhánh âm kho phía trên — cùng lý do).
@@ -5539,7 +5560,11 @@ function xkChonMa(ma,ev){
   }
   const idxVuaGan=xkGanIdx;
   xkDongGan();
-  xkVeGrid();
+  // dòng bị TÁCH thành 2 (thiếu tồn) -> phải dịch lại chỉ số của bộ lọc
+  // "chưa gán" (nlSnapTrong) theo đúng vị trí MỚI, giống hệt xkKiemTraTonLoi
+  // đã làm cho "Kiểm tra tồn kho" tự động — thiếu bước này bộ lọc bị lệch/mất
+  // ngay sau khi tách 1 dòng bằng tay, đúng lỗi thật đã báo.
+  xkVeGrid(biTach?xkMoRongDonGian(soDongCuTruocTach,idxVuaGan,2):null);
   // đóng bảng gán mã xong focus lại đúng ô "Mã hàng kho" của dòng vừa gắn,
   // để người dùng bấm mũi tên tiếp tục làm việc trong lưới ngay, không bị
   // rớt ra ngoài khiến mũi tên cuộn cả khung thay vì di chuyển ô.
@@ -5583,10 +5608,13 @@ function xkXacNhanGanNhieu(){
     dongMoi.push({...r, sl:conLai, tt:Math.round(ttGoc-daDungTien),
                   ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl_kho:'', mo_ho:true, thieu_ton:true});
   }
+  const soDongCuTruocTach=xkRows.length;   // xem xkMoRongDonGian
   xkRows.splice(xkGanIdx,1,...dongMoi);
   const idxDau=xkGanIdx;
   xkDongGan();
-  xkVeGrid();
+  // dịch lại chỉ số bộ lọc "chưa gán" (nlSnapTrong) theo đúng vị trí MỚI sau
+  // khi 1 dòng tách thành dongMoi.length dòng — xem chú thích ở xkChonMa.
+  xkVeGrid(dongMoi.length>1?xkMoRongDonGian(soDongCuTruocTach,idxDau,dongMoi.length):null);
   xkFocusO(idxDau,'Mã hàng kho');
 }
 // focus lại đúng ô (theo tên cột) của 1 dòng trong lưới hiện tại — dùng sau
