@@ -156,12 +156,16 @@ cols_inventoryitem = C("InventoryItemID", "InventoryItemCode", "InventoryItemNam
     "SalePrice3", "FixedSalePrice", "FixedUnitPrice", "IsUnitPriceAfterTax",
     "IsSystem", "Inactive", "IsPromotion", "VAT43Type", "CreatedDate")
 cols_unit = C("UnitID", "UnitName", "Description", "Inactive")
+# Cột Stock — cần cho tra_kho() (tự tạo Kho mới khi chưa có) trong _misa_ghi_mua_hang.
+cols_stock = C("StockID", "StockCode", "StockName", "Description", "Inactive", "CreatedDate",
+    "CreatedBy", "InventoryAccount", "BranchID")
 
 TABLES = {
     "PUVoucher": cols_puvoucher, "PUVoucherDetail": cols_puvoucherdetail,
     "GeneralLedger": cols_gl, "AccountObjectLedger": cols_aol, "CustomFieldLedger": cols_cfl,
     "InventoryLedger": cols_invl, "PurchaseLedger": cols_purl, "INInwardOutwardList": cols_inout,
     "PUInvoice": cols_puinvoice, "InventoryItem": cols_inventoryitem, "Unit": cols_unit,
+    "Stock": cols_stock,
 }
 
 class FakeCursor:
@@ -769,3 +773,43 @@ print("PASS: Test 9 — câu truy vấn 'kho gần nhất' chỉ tra đúng mã 
       "mục lớn (1468+ mã) như ca thật vừa báo lại.")
 
 print("\nALL DONE (test 9)")
+
+# --- Test 10: đúng lỗi THẬT người dùng vừa báo lại — mã 'MH1561-8' HOÀN
+# TOÀN MỚI (chưa từng có lịch sử Nhập kho nào TRƯỚC lượt ghi này — Đầu kỳ =
+# 0 ở CẢ 2 kho, xem ảnh chụp "Tổng hợp tồn kho") nhưng XUẤT HIỆN Ở 2 CHỨNG
+# TỪ KHÁC NHAU (khác ngày, khác Số phiếu nhập) NGAY TRONG CÙNG 1 lượt "Ghi
+# vào MISA" — chứng từ 25/12/2025 ghi cột Kho = 'KHODOKOVAT', chứng từ
+# 20/01/2026 (Bảng kê tự ghi cột Kho khác = 'KHODOVAT') lại ghi SAI sang kho
+# khác — vì hoc_kho_gan_nhat (tra 1 LẦN DUY NHẤT lúc đầu, dựa lịch sử TRƯỚC
+# lượt ghi) không có gì để tra cho mã hoàn toàn mới, mỗi chứng từ trong CÙNG
+# lượt tự đọc riêng cột Kho của chính nó — bị tách kho NGAY TRONG 1 lượt ghi
+# dù không hề có chứng từ "ghi trước" nào khác trong MISA.
+cur10 = FakeCursor()   # hoàn toàn KHÔNG có lịch sử InventoryLedger nào (mã hoàn toàn mới)
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur10)
+flat10 = [
+    mk_row("NK-601", "25/12/2025", "1000", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 90, 36750, 3307500, "1561", "331",
+           0, 0, "1331", None, "KHODOKOVAT"),
+    mk_row("NK-602", "20/01/2026", "1001", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 30, 36750, 1102500, "1561", "331",
+           0, 0, "1331", None, "KHODOVAT"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat10
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r10 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result10:", {k: r10[k] for k in ("so_chungtu",)})
+assert r10["so_chungtu"] == 2, f"Cả 2 chứng từ (NK-601, NK-602) phải được ghi bình thường — got {r10}"
+pvd10 = cur10.inserted["PUVoucherDetail"]
+assert len(pvd10) == 2, f"Phải có đúng 2 dòng PUVoucherDetail (1 chứng từ 1 dòng) — got {pvd10}"
+stock_ids10 = {p["StockID"] for p in pvd10}
+assert len(stock_ids10) == 1, (
+    f"Mã 'MH216-0' hoàn toàn MỚI xuất hiện ở CẢ 2 chứng từ TRONG CÙNG 1 lượt ghi — dù cột Kho của Bảng "
+    f"kê ghi khác nhau ('KHODOKOVAT' vs 'KHODOVAT'), CẢ 2 dòng PHẢI ghi CÙNG 1 StockID (kho quyết định ở "
+    f"chứng từ ghi TRƯỚC trong lượt này phải được dùng lại cho chứng từ ghi SAU, không tự tách kho ngay "
+    f"trong 1 lượt) — được StockID khác nhau: {stock_ids10}")
+print("PASS: Test 10 — mã hàng hoàn toàn mới xuất hiện ở nhiều chứng từ khác nhau TRONG CÙNG 1 lượt ghi "
+      "không còn bị tách vào 2 kho khác nhau — kho quyết định ở chứng từ đầu tiên được dùng lại nhất "
+      "quán cho các chứng từ sau trong cùng lượt, đúng ca thật vừa báo lại (MH1561-8/MH1562-8).")
+
+print("\nALL DONE (test 10)")

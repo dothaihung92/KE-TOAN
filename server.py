@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.182"
+APP_BUILD = "2026-08-31.183"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16981,9 +16981,23 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 # form (vd 'HH'/'NVL'), còn trống thì mặc định "HH" — trước
                 # đây để trống thành StockID=None, 1 nguyên nhân MISA báo
                 # "Failed to enable constraints" khi mở chứng từ nhập kho.
+                # QUAN TRỌNG: sau khi quyết định xong, GHI LUÔN vào
+                # hoc_kho_gan_nhat[iid] — mã hàng HOÀN TOÀN MỚI (chưa từng có
+                # lịch sử TRƯỚC lượt ghi này) vẫn có thể xuất hiện ở NHIỀU
+                # chứng từ KHÁC NHAU trong CÙNG 1 lượt "Ghi vào MISA" (vd 2
+                # hóa đơn khác ngày của cùng NCC, mỗi hóa đơn tự ghi cột "Kho"
+                # khác nhau trong Bảng kê) — nếu không cập nhật ngay, mỗi
+                # chứng từ trong CÙNG lượt sẽ tự tra riêng theo cột "Kho" của
+                # chính nó (vì hoc_kho_gan_nhat chỉ tính 1 LẦN DUY NHẤT lúc
+                # đầu, dựa trên lịch sử TRƯỚC lượt này — mã mới chưa có gì để
+                # tra) — VẪN bị tách vào nhiều kho khác nhau NGAY TRONG lượt
+                # ghi hiện tại, đúng lỗi thật đã gặp (chứng từ 20/01/2026 ghi
+                # khác kho với chứng từ 25/12/2025, dù CÙNG 1 lượt vừa ghi).
                 stock_id = None
                 if cfg.get("kho") is not None:
                     stock_id = hoc_kho_gan_nhat.get(iid) or tra_kho(r[cfg["kho"]]) or tra_kho("HH")
+                    if iid and stock_id:
+                        hoc_kho_gan_nhat.setdefault(iid, stock_id)
                 mo_ta = ten_h or str(r[cfg["ten"]] or "")
                 detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
