@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.180"
+APP_BUILD = "2026-08-31.181"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16196,6 +16196,41 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         dich = hang.get(str(ma_that).strip().lower())
                         if dich:
                             hang[ma_ct_lower] = dich
+        # Kho GẦN NHẤT đã dùng để Nhập kho cho TỪNG mã hàng (InventoryItemID)
+        # — CHỈ áp dụng loại có Kho thật (nk, cfg["kho"] khác None; "kqk"
+        # không qua kho không có khái niệm này). Mục đích: 1 mã hàng PHẢI
+        # luôn nhập về CÙNG 1 kho qua các lần mua khác nhau — trước đây mỗi
+        # dòng chỉ đọc THẲNG cột "Kho" của chính Bảng kê Đầu vào đang xử lý
+        # (tra_kho(r[cfg["kho"]])), không hề biết mã đó đã từng nhập kho nào
+        # trước đó — nếu cột "Kho" ghi khác nhau giữa các lần (dữ liệu nguồn
+        # không nhất quán, hoặc lần sau để trống rơi về mặc định khác lần
+        # trước), CÙNG 1 mã hàng bị tách nhập vào NHIỀU kho khác nhau trong
+        # MISA — xác nhận đúng qua báo cáo thật: mã 'HH4610-0' có tồn ở CẢ
+        # kho 'HH' LẪN 'Kho Chó Mèo KO VAT', khiến Xuất Kho không xác định
+        # được kho đúng để xuất (_xk_canh_bao_kho_ton). Từ nay mã ĐÃ CÓ lịch
+        # sử Nhập kho -> LUÔN dùng lại ĐÚNG kho gần nhất đó, bỏ qua cột "Kho"
+        # của dòng đang xử lý; mã CHƯA CÓ lịch sử (lần đầu nhập) mới dùng cột
+        # "Kho" của Bảng kê, để trống thì mặc định "HH" (xem tra_kho bên trên
+        # — trước đây để trống thành StockID=None, có thể gây lỗi MISA
+        # "Failed to enable constraints" khi mở chứng từ).
+        hoc_kho_gan_nhat = {}   # InventoryItemID -> StockID (kho gần nhất đã nhập)
+        if cfg.get("kho") is not None:
+            try:
+                iid_set = list({v[0] for v in hang.values() if v and v[0]})
+                if iid_set:
+                    ph = ",".join("?" * len(iid_set))
+                    for iid_h, stock_id_h in cur.execute(
+                            "SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il "
+                            "INNER JOIN (SELECT InventoryItemID, MAX(RefDate) AS md FROM InventoryLedger "
+                            "WHERE InventoryItemID IN (%s) AND InwardQuantity>0 "
+                            "GROUP BY InventoryItemID) mx "
+                            "ON il.InventoryItemID=mx.InventoryItemID AND il.RefDate=mx.md "
+                            "WHERE il.InventoryItemID IN (%s) AND il.InwardQuantity>0"
+                            % (ph, ph), iid_set + iid_set).fetchall():
+                        if iid_h not in hoc_kho_gan_nhat:
+                            hoc_kho_gan_nhat[iid_h] = stock_id_h
+            except Exception:
+                pass   # không tra được lịch sử -> an toàn, rơi về cách cũ (đọc cột "Kho" của dòng)
         # danh mục TÀI KHOẢN thật của MISA — các cột TK trên PUVoucherDetail
         # có FK sang Account.AccountNumber; xem _misa_tk_fallback
         tk_set = set()
@@ -16930,12 +16965,15 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 total_import_tax += nk_thue
                 if cfg.get("kho") is not None:
                     total_inward += tt
-                # Kho: tra StockID theo cột "Kho" của form (vd 'HH'/'NVL') —
-                # thiếu kho là 1 nguyên nhân MISA báo "Failed to enable
-                # constraints" khi mở chứng từ nhập kho
+                # Kho: ƯU TIÊN kho GẦN NHẤT đã dùng để nhập mã hàng này (xem
+                # hoc_kho_gan_nhat ở trên — giữ nhất quán 1 mã hàng luôn về
+                # đúng 1 kho); mã CHƯA có lịch sử mới tra theo cột "Kho" của
+                # form (vd 'HH'/'NVL'), còn trống thì mặc định "HH" — trước
+                # đây để trống thành StockID=None, 1 nguyên nhân MISA báo
+                # "Failed to enable constraints" khi mở chứng từ nhập kho.
                 stock_id = None
                 if cfg.get("kho") is not None:
-                    stock_id = tra_kho(r[cfg["kho"]])
+                    stock_id = hoc_kho_gan_nhat.get(iid) or tra_kho(r[cfg["kho"]]) or tra_kho("HH")
                 mo_ta = ten_h or str(r[cfg["ten"]] or "")
                 detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,

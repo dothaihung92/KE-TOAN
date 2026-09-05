@@ -672,3 +672,45 @@ print("PASS: Test 7 — mã hàng thiếu ('MH1084') nhưng TÊN đã trùng v�
       "sẵn.")
 
 print("\nALL DONE (test 7)")
+
+# --- Test 8: đúng yêu cầu người dùng SAU khi phát hiện mã 'HH4610-0' bị tồn
+# ở CẢ 2 kho khác nhau trong MISA ("Kho HH" + "Kho Chó Mèo KO VAT") khiến
+# Xuất Kho không xác định được kho đúng — "nếu mã hàng này đã có từ trước
+# thì xem mã hàng này được gắn vào kho nào thì lấy đúng mã kho đó. còn mã
+# nào chưa có thì cứ gắn mã kho là HH". Mã 'MH216-0' (iid-1) ĐÃ CÓ lịch sử
+# Nhập kho TRƯỚC ĐÓ vào kho 'KHOCHINH' (sid-1) — dòng Bảng kê Đầu vào MỚI
+# ghi cột "Kho" = "KHOKHAC" (kho KHÁC) -> PHẢI vẫn ghi vào ĐÚNG kho cũ
+# 'KHOCHINH' (sid-1), KHÔNG được tạo/dùng kho 'KHOKHAC' mới, để 1 mã hàng
+# không bị tách tồn ra nhiều kho qua các lần nhập khác nhau.
+class FakeCursor8(FakeCursor):
+    def fetchall(self):
+        sql = self._last_sql
+        if sql.startswith("SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il"):
+            # mã 'MH216-0' (iid-1) đã từng Nhập kho vào 'KHOCHINH' (sid-1) trước đó.
+            return [("iid-1", "sid-1")]
+        return super().fetchall()
+
+
+cur8 = FakeCursor8()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur8)
+flat8 = [
+    mk_row("NK-401", "04/02/2026", "800", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 10, 36750, 367500, "1561", "331",
+           0, 0, "1331", None, "KHOKHAC"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat8
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r8 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result8:", {k: r8[k] for k in ("so_chungtu",)})
+assert r8["so_chungtu"] == 1, f"Chứng từ NK-401 phải được ghi bình thường — got {r8}"
+pvd8 = cur8.inserted["PUVoucherDetail"]
+assert len(pvd8) == 1 and pvd8[0]["StockID"] == "sid-1", (
+    f"Mã 'MH216-0' ĐÃ CÓ lịch sử Nhập kho vào 'KHOCHINH' (sid-1) TRƯỚC ĐÓ -> dòng MỚI PHẢI vẫn ghi vào "
+    f"ĐÚNG kho cũ đó, KHÔNG được đổi sang kho 'KHOKHAC' dù cột Kho của Bảng kê Đầu vào ghi khác — được "
+    f"{pvd8}")
+print("PASS: Test 8 — mã hàng ĐÃ CÓ lịch sử Nhập kho trước đó luôn dùng lại ĐÚNG kho gần nhất, không bị "
+      "tách tồn ra kho khác dù dòng Bảng kê Đầu vào mới ghi cột Kho khác đi — đúng yêu cầu người dùng, "
+      "tránh lặp lại ca thật 'HH4610-0' tồn ở 2 kho khác nhau.")
+
+print("\nALL DONE (test 8)")
