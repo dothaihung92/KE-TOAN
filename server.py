@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.168"
+APP_BUILD = "2026-08-31.169"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14295,6 +14295,19 @@ _MISA_INV_ACC = {
 _MISA_INV_TEN = {"hh": "Hàng hóa", "nvl": "Nguyên vật liệu",
                  "tscd": "TSCĐ", "ccdc": "CCDC"}
 
+
+def _misa_loai_dm_theo_tk(tk):
+    """Suy ra loai Danh mục (hh/nvl/tscd/ccdc, xem _MISA_INV_ACC) theo TK Nợ
+    của 1 dòng Bảng kê Đầu vào — dùng khi TỰ ĐỘNG tạo mã hàng MỚI vào đúng
+    Danh mục MISA (đúng InventoryAccount) lúc ghi Nhập kho/Không qua kho,
+    xem _misa_ghi_mua_hang. Mặc định 'hh' nếu không khớp tiền tố TK nào
+    (đa số trường hợp Nhập kho là hàng hóa 1561/156)."""
+    tk = str(tk or "").strip()
+    for key, (_inv, _cogs, _sale, prefix) in _MISA_INV_ACC.items():
+        if tk.startswith(prefix.rstrip("%")):
+            return key
+    return "hh"
+
 def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
     """Thêm các mã (Danh mục Hàng hóa/NVL/TSCĐ/CCDC của phần mềm) vào bảng
     InventoryItem của MISA (Danh mục > Vật tư hàng hóa), tính chất luôn là
@@ -15989,6 +16002,52 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "FROM InventoryItem").fetchall():
             if code:
                 hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        # TỰ ĐỘNG TẠO mã hàng MỚI vào Danh mục MISA (InventoryItem) cho mã
+        # hàng CÓ trong Bảng kê Đầu vào nhưng CHƯA CÓ trong MISA — trước đây
+        # chỉ IM LẶNG BỎ QUA cả dòng ("bỏ qua — tất cả dòng đều thiếu mã
+        # hàng"), khiến hóa đơn bị THIẾU/LỆCH khi đối chiếu dù chỉ cần thêm
+        # đúng mã hàng đó vào Danh mục là ghi được bình thường — người dùng
+        # yêu cầu: "chỉnh lại sao cho vừa chỉnh tay vừa import phải xử lý
+        # được các vấn đề này... phải xử lý được bằng import tự động vào
+        # misa để không bị lỗi thiếu nữa" — tức KHÔNG bắt buộc phải tự tay
+        # chạy riêng "🏷 DM Hàng Hóa" trước, "⬆ Nhập kho vào MISA" tự lo
+        # luôn. Dùng LẠI nguyên hàm _misa_ghi_hang_hoa (đã kiểm chứng — cùng
+        # cách ghi ĐÚNG TK kho/tính chất/ĐVT như khi bấm tay "⬆ Import vào
+        # MISA" ở màn Danh mục Hàng Hóa), chạy trên KẾT NỐI/transaction
+        # RIÊNG tự commit ngay — không ảnh hưởng gì tới transaction ghi Nhập
+        # kho đang mở ở conn/cur — rồi NẠP LẠI "hang" để dùng luôn trong
+        # cùng lượt ghi này, không cần bấm thêm nút nào khác. CHỈ tạo thật
+        # khi preview=False (đang bấm Ghi/Ghi đè thật) — lúc preview chỉ
+        # ĐẾM số mã sẽ tự tạo để báo trước cho người dùng xem.
+        thieu_theo_loai = {}   # loai_dm -> {ma_lower: [ma, ten, dvt]}
+        for r in flat:
+            ma_ct = str(r[cfg["ma"]] or "").strip()
+            if not ma_ct or ma_ct.lower() in hang:
+                continue
+            loai_dm = _misa_loai_dm_theo_tk(r[cfg["no"]])
+            nhom = thieu_theo_loai.setdefault(loai_dm, {})
+            if ma_ct.lower() not in nhom:
+                nhom[ma_ct.lower()] = [ma_ct, str(r[cfg["ten"]] or "").strip(),
+                                       str(r[cfg["dvt"]] or "").strip() if cfg.get("dvt") is not None else ""]
+        so_tu_tao_mahang = 0
+        if thieu_theo_loai:
+            if preview:
+                so_tu_tao_mahang = sum(len(v) for v in thieu_theo_loai.values())
+            else:
+                for loai_dm, nhom in thieu_theo_loai.items():
+                    try:
+                        kq_dm = _misa_ghi_hang_hoa(cid, database, list(nhom.values()),
+                                                   preview=False, loai=loai_dm)
+                        so_tu_tao_mahang += kq_dm.get("so_them", 0)
+                    except Exception:
+                        pass   # lỗi tạo Danh mục KHÔNG được làm hỏng cả lượt ghi Nhập kho
+                if so_tu_tao_mahang:
+                    hang = {}
+                    for iid, code, uid, ten_h in cur.execute(
+                            "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
+                            "FROM InventoryItem").fetchall():
+                        if code:
+                            hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
         # danh mục TÀI KHOẢN thật của MISA — các cột TK trên PUVoucherDetail
         # có FK sang Account.AccountNumber; xem _misa_tk_fallback
         tk_set = set()
@@ -17241,7 +17300,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
-                "so_bo_qua_an_pm": bo_qua_an_pm,
+                "so_bo_qua_an_pm": bo_qua_an_pm, "so_tu_tao_mahang": so_tu_tao_mahang,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
                 "kho_moi": sorted(kho_moi),

@@ -7219,8 +7219,10 @@ async function muaHangImportMisa(loai){
         Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
       <div style="margin-bottom:2px">Sẽ thêm: <b style="color:#1a7a7a">${pv.so_chungtu}</b> chứng từ (${pv.so_dong} dòng) — bỏ qua (đã có): <b>${pv.so_trung}</b>${pv.tong_dang_xu_ly!=null?` <span style="color:#999">(tổng ${pv.tong_dang_xu_ly} chứng từ ${MUA_HANG_TEN[loai]} trong Bảng kê đang xử lý)</span>`:''}</div>
       ${pv.tong_trong_bang!=null?`<div style="margin-bottom:6px;font-size:11.5px;color:#999">ℹ️ Riêng MISA hiện có sẵn <b>${pv.tong_trong_bang}</b> chứng từ Mua hàng nói chung (toàn bộ lịch sử) — số này KHÔNG liên quan tới số chứng từ bạn đang import, chỉ để tham khảo.</div>`:''}
-      ${(pv.so_bo_qua_ncc>0||pv.so_bo_qua_mahang>0)?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
-        ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA, <b>${pv.so_bo_qua_mahang}</b> dòng do thiếu mã hàng — hãy import Danh mục Hàng hóa/NVL/TSCĐ/CCDC và KH/NCC trước, rồi chạy lại.</div>`:''}
+      ${pv.so_tu_tao_mahang>0?`<div style="background:#e8f6ee;border:1px solid #9dd6b5;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3c;margin-bottom:8px">
+        ✓ Sẽ TỰ ĐỘNG tạo <b>${pv.so_tu_tao_mahang}</b> mã hàng mới vào Danh mục MISA (đúng TK kho theo TK Nợ của dòng) trước khi ghi — không cần tự tay chạy riêng "🏷 DM Hàng Hóa" nữa (dòng nào cột Mã hàng đang để trống vẫn không tự tạo được, xem lại sau khi ghi).</div>`:''}
+      ${pv.so_bo_qua_ncc>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ Bỏ qua <b>${pv.so_bo_qua_ncc}</b> chứng từ do NCC chưa có trong MISA — hãy import Danh mục KH/NCC trước, rồi chạy lại.</div>`:''}
       ${pv.so_trung>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         Có <b>${pv.so_trung}</b> chứng từ ĐÃ CÓ (do phần mềm tạo trước đó) trong MISA — bấm <b>"Ghi đè"</b> để gỡ rồi ghi lại (KHÔNG đụng chứng từ thật của khách).</div>`:''}
       ${pv.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
@@ -7518,8 +7520,9 @@ function misaTomTatBuoc(r){
   // chạy riêng bước Đối chiếu Giá trị/VAT sau đó mới thấy "LỆCH" mà không rõ
   // nguyên nhân — nay hiện ngay tại đây để biết NGAY lúc chạy, không cần đợi
   // đối chiếu mới phát hiện.
+  if(r.so_tu_tao_mahang!=null&&r.so_tu_tao_mahang>0)phan.push(`✓ tự tạo ${r.so_tu_tao_mahang} mã hàng mới vào Danh mục`);
   if(r.so_bo_qua_ncc!=null&&r.so_bo_qua_ncc>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_ncc} chứng từ do thiếu NCC/KH trong Danh mục`);
-  if(r.so_bo_qua_mahang!=null&&r.so_bo_qua_mahang>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_mahang} dòng do thiếu mã hàng trong Danh mục`);
+  if(r.so_bo_qua_mahang!=null&&r.so_bo_qua_mahang>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_mahang} dòng do cột Mã hàng trống trong Bảng kê`);
   if(!phan.length&&r.ghi_chu)return r.ghi_chu;
   return phan.join(', ')||'xong';
 }
@@ -8390,7 +8393,8 @@ async function muaHangImportMisaGhi(loai,ghiDe){
     // không cần tự bấm nút "🔧 Sửa ĐVT chứng từ đã ghi" riêng nữa.
     const dmTxt=(d.so_dvt_hang_sua>0)?`, ${d.so_dvt_hang_sua} mã Danh mục`:'';
     const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
-    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt}${dvtTxt} — ĐÃ GHI SỔ.`,'ok');
+    const tuTaoTxt=(d.so_tu_tao_mahang>0)?` — đã tự tạo ${d.so_tu_tao_mahang} mã hàng mới vào Danh mục MISA`:'';
+    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt}${dvtTxt}${tuTaoTxt} — ĐÃ GHI SỔ.`,'ok');
     // TỰ KIỂM TRA: đối chiếu với đúng view + bộ lọc thật của màn hình MISA
     // "Mua hàng hóa, dịch vụ" — nếu có chứng từ bị lọc mất, hiện chẩn đoán
     // đích danh lý do từng dòng (mất khỏi view / PostedDate / chi nhánh / DisplayOnBook).
@@ -8434,6 +8438,12 @@ async function muaHangImportMisaGhi(loai,ghiDe){
         ⚠ Bỏ qua ${d.so_bo_qua_tk} chứng từ vì TK Nợ/Có không có trong danh mục tài khoản MISA.</div>`:''}
       ${d.so_dvt_sua>0?`<div style="background:#e8f6ee;border:1px solid #9dd6b5;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3c;margin-bottom:8px">
         ✓ Đã tự sửa ${d.so_dvt_sua} dòng ĐVT hỏng liên kết trong danh mục hàng (trước đây MISA hiện GUID thô ở cột ĐVT).</div>`:''}
+      ${d.so_tu_tao_mahang>0?`<div style="background:#e8f6ee;border:1px solid #9dd6b5;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3c;margin-bottom:8px">
+        ✓ Đã tự động tạo ${d.so_tu_tao_mahang} mã hàng mới vào Danh mục MISA (đúng TK kho) trước khi ghi chứng từ.</div>`:''}
+      ${d.so_bo_qua_ncc>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ Bỏ qua ${d.so_bo_qua_ncc} chứng từ do NCC chưa có trong MISA — import Danh mục KH/NCC rồi chạy lại.</div>`:''}
+      ${d.so_bo_qua_mahang>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
+        ⚠ Còn ${d.so_bo_qua_mahang} dòng bị bỏ qua vì cột Mã hàng đang để trống trong Bảng kê (không tự tạo được Danh mục vì không có mã) — kiểm tra lại rồi Import lại Bảng kê.</div>`:''}
       ${d.so_ngay_loi>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">
         ⚠ Có ${d.so_ngay_loi} chứng từ không đọc được ngày gốc, đã ghi tạm bằng NGÀY HÔM NAY — kiểm tra bộ lọc "Kỳ" trên MISA có bao gồm hôm nay không.</div>`:''}
       ${d.so_tien_0>0?`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:6px;padding:6px 10px;font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:8px">

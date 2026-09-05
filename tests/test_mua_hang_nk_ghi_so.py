@@ -40,9 +40,17 @@ ns['_MUA_COT'] = {
                 la_nk_col=1, kho=None),
 }
 
+ns['_MISA_INV_ACC'] = {
+    "hh":   ("1561", "632", "5111", "156%"),
+    "nvl":  ("152",  "632", "5111", "152%"),
+    "tscd": ("211",  "632", "5111", "211%"),
+    "ccdc": ("153",  "632", "5111", "153%"),
+}
+
 names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_misa_gan',
          '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_tk_fallback', '_misa_unit_hong',
-         '_misa_pu_reftype', '_num0', '_chuan_shd', '_misa_gio_nhap_co_dinh', '_misa_ghi_mua_hang']
+         '_misa_pu_reftype', '_num0', '_chuan_shd', '_misa_gio_nhap_co_dinh',
+         '_misa_loai_dm_theo_tk', '_misa_ghi_hang_hoa', '_misa_ghi_mua_hang']
 for n in names:
     exec(extract_fn(n), ns)
 
@@ -140,12 +148,20 @@ cols_inout = C("RefID", "RefDate", "PostedDate", "RefType", "RefNoFinance", "IsP
     "AccountObjectContactName", "CurrencyID", "ExchangeRate", "RefOrder")
 
 cols_puinvoice = C("RefID", "AccountObjectTaxCode", "InvNo", "RefDate", "InvDate")
+# Cột InventoryItem/Unit — cần cho _misa_ghi_hang_hoa (TỰ ĐỘNG tạo mã hàng mới
+# vào Danh mục MISA khi thiếu mã hàng lúc ghi Nhập kho, xem _misa_ghi_mua_hang).
+cols_inventoryitem = C("InventoryItemID", "InventoryItemCode", "InventoryItemName", "InventoryItemType",
+    "UnitID", "InventoryAccount", "COGSAccount", "SaleAccount", "TaxRate",
+    "MinimumStock", "PurchaseDiscountRate", "UnitPrice", "SalePrice1", "SalePrice2",
+    "SalePrice3", "FixedSalePrice", "FixedUnitPrice", "IsUnitPriceAfterTax",
+    "IsSystem", "Inactive", "IsPromotion", "VAT43Type", "CreatedDate")
+cols_unit = C("UnitID", "UnitName", "Description", "Inactive")
 
 TABLES = {
     "PUVoucher": cols_puvoucher, "PUVoucherDetail": cols_puvoucherdetail,
     "GeneralLedger": cols_gl, "AccountObjectLedger": cols_aol, "CustomFieldLedger": cols_cfl,
     "InventoryLedger": cols_invl, "PurchaseLedger": cols_purl, "INInwardOutwardList": cols_inout,
-    "PUInvoice": cols_puinvoice,
+    "PUInvoice": cols_puinvoice, "InventoryItem": cols_inventoryitem, "Unit": cols_unit,
 }
 
 class FakeCursor:
@@ -518,7 +534,39 @@ print("\nALL DONE (test 5)")
 # field tong_dang_xu_ly = ĐÚNG số chứng từ (nhóm theo Số chứng từ) có trong
 # Bảng kê Đầu vào ĐANG được xử lý ở LƯỢT NÀY — phải KHÁC tong_trong_bang
 # khi MISA đã có sẵn dữ liệu lịch sử không liên quan.
-cur6 = FakeCursor()
+#
+# ĐỒNG THỜI test luôn tính năng người dùng yêu cầu tiếp theo: "chỉnh lại
+# sao cho vừa chỉnh tay vừa import phải xử lý được các vấn đề này... phải
+# xử lý được bằng import tự động vào misa để không bị lỗi thiếu nữa" — mã
+# hàng CHƯA CÓ trong Danh mục MISA (nguyên nhân hóa đơn bị "THIẾU"/"LỆCH"
+# khi đối chiếu Giá trị/VAT) giờ được _misa_ghi_mua_hang TỰ ĐỘNG tạo luôn
+# vào Danh mục MISA (dùng lại _misa_ghi_hang_hoa, đúng TK kho suy theo TK
+# Nợ của dòng qua _misa_loai_dm_theo_tk) rồi GHI TIẾP chứng từ đó bình
+# thường trong CÙNG 1 lượt bấm "⬆ Nhập kho vào MISA" — KHÔNG còn phải tự
+# tay chạy riêng "🏷 DM Hàng Hóa" trước rồi mới quay lại ghi Nhập kho.
+class FakeCursor6(FakeCursor):
+    """FakeCursor cơ bản trả DANH SÁCH InventoryItem CỐ ĐỊNH (bỏ qua
+    self.inserted) cho đúng SELECT mà _misa_ghi_mua_hang dùng để nạp 'hang'
+    — ĐÚNG cho Test 1-5 (không mã nào được tạo mới giữa chừng) nhưng SAI cho
+    Test 6: sau khi _misa_ghi_hang_hoa TỰ TẠO mã mới (INSERT INTO
+    InventoryItem, COMMIT qua kết nối riêng), _misa_ghi_mua_hang phải NẠP
+    LẠI đúng danh sách MỚI NHẤT (kể cả mã vừa tự tạo) mới dùng được ngay
+    trong CÙNG lượt ghi — ghép thêm self.inserted['InventoryItem'] vào danh
+    sách cố định để mô phỏng đúng hành vi SQL Server thật (đọc lại thấy
+    ngay dữ liệu vừa COMMIT từ kết nối khác)."""
+    def fetchall(self):
+        sql = self._last_sql
+        if sql.startswith("SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName"):
+            co_san = [("iid-1", "MH216-0", "uid-cai", "Que gặm hương bò 120g"),
+                      ("iid-2", "MH217-0", "uid-cai", "Que gặm hương phô mai 120g"),
+                      ("iid-3", "CCDC072", "uid-cai", "Máy lạnh NAGAKAWA NIS-C09R2U51")]
+            moi = [(r["InventoryItemID"], r["InventoryItemCode"], r["UnitID"], r["InventoryItemName"])
+                   for r in self.inserted.get("InventoryItem", [])]
+            return co_san + moi
+        return super().fetchall()
+
+
+cur6 = FakeCursor6()
 # Mô phỏng MISA đã có sẵn 5 chứng từ Mua hàng LỊCH SỬ không liên quan gì
 # tới Bảng kê đang xử lý (vd nhập tay/hệ thống khác từ TRƯỚC khi dùng phần
 # mềm này) -> tong_trong_bang (COUNT(*) FROM PUVoucher) phải tính CẢ 5 dòng
@@ -530,8 +578,10 @@ flat6 = [
     mk_row("NK-201", "01/02/2026", "600", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
            "MH216-0", "Que gặm hương bò 120g", "Cái", 5, 36750, 183750, "1561", "331",
            0, 0, "1331", None, "KHOCHINH"),
-    # Chứng từ 2: mã hàng KHÔNG có trong danh mục -> "bỏ qua — thiếu mã hàng"
-    # (KHÔNG được ghi PUVoucher nào, vẫn phải tính vào tong_dang_xu_ly).
+    # Chứng từ 2: mã hàng KHÔNG có trong Danh mục MISA -> PHẢI được TỰ ĐỘNG
+    # tạo vào Danh mục (TK kho 1561, đúng TK Nợ của dòng) rồi ghi TIẾP chứng
+    # từ này bình thường trong CÙNG lượt, KHÔNG còn bị "bỏ qua — thiếu mã
+    # hàng" như trước.
     mk_row("NK-202", "02/02/2026", "601", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
            "MAMOI-999", "Sản phẩm mới chưa có mã", "Cái", 3, 10000, 30000, "1561", "331",
            0, 0, "1331", None, "KHOCHINH"),
@@ -540,20 +590,28 @@ ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat6
 exec(extract_fn('_misa_ghi_mua_hang'), ns)
 _misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
 r6 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
-print("Result6:", {k: r6[k] for k in ("so_chungtu", "so_bo_qua_mahang", "tong_trong_bang", "tong_dang_xu_ly")})
-assert r6["so_chungtu"] == 1 and r6["so_bo_qua_mahang"] == 1
+print("Result6:", {k: r6[k] for k in ("so_chungtu", "so_bo_qua_mahang", "so_tu_tao_mahang",
+                                       "tong_trong_bang", "tong_dang_xu_ly")})
+assert r6["so_chungtu"] == 2, (
+    f"Cả 2 chứng từ (kể cả NK-202 với mã hàng lúc đầu chưa có) PHẢI được ghi — mã hàng thiếu phải được TỰ "
+    f"ĐỘNG tạo vào Danh mục MISA trước rồi ghi tiếp, KHÔNG được để 'bỏ qua' như trước — got {r6}")
+assert r6["so_bo_qua_mahang"] == 0, f"Không còn dòng nào bị bỏ qua vì thiếu mã hàng — got {r6}"
+assert r6["so_tu_tao_mahang"] == 1, f"Phải tự tạo đúng 1 mã hàng mới (MAMOI-999) vào Danh mục MISA — got {r6}"
 assert r6["tong_dang_xu_ly"] == 2, (
     f"tong_dang_xu_ly PHẢI đúng bằng số chứng từ (2: NK-201 + NK-202) đang có trong Bảng kê Đầu vào ĐANG "
     f"xử lý ở lượt này — got {r6['tong_dang_xu_ly']}")
-assert r6["tong_trong_bang"] == 6, (
+assert r6["tong_trong_bang"] == 7, (
     f"tong_trong_bang (COUNT(*) FROM PUVoucher) PHẢI đúng bằng TOÀN BỘ chứng từ Mua hàng ĐANG CÓ trong "
-    f"MISA (5 chứng từ lịch sử có sẵn + 1 chứng từ vừa ghi mới NK-201) — got {r6['tong_trong_bang']}")
+    f"MISA (5 chứng từ lịch sử có sẵn + 2 chứng từ vừa ghi mới NK-201/NK-202) — got {r6['tong_trong_bang']}")
 assert r6["tong_dang_xu_ly"] != r6["tong_trong_bang"], (
     "2 con số PHẢI khác nhau trong ca này để chứng minh chúng đo 2 thứ HOÀN TOÀN KHÁC NHAU — đúng lỗi thật "
     "đã báo cáo: nhãn cũ '(hiện có N chứng từ Mua hàng trong bảng)' dùng NHẦM tong_trong_bang (696, tổng "
     "toàn bộ lịch sử MISA) khiến người dùng tưởng đó là số chứng từ trong CHÍNH Bảng kê của mình.")
-print("PASS: Test 6 — tong_dang_xu_ly (đúng số chứng từ trong Bảng kê đang xử lý, ở đây =2) giờ TÁCH RIÊNG "
-      "khỏi tong_trong_bang (tổng toàn bộ PUVoucher đã có sẵn trong MISA, ở đây =6) — không còn nhầm lẫn "
-      "khiến người dùng tưởng có hàng trăm chứng từ trong Bảng kê của mình mà 'Sẽ thêm: 0' không rõ lý do.")
+moi_dm = next(r for r in cur6.inserted["InventoryItem"] if r["InventoryItemCode"] == "MAMOI-999")
+assert moi_dm["InventoryAccount"] == "1561", (
+    f"Mã hàng tự tạo PHẢI đúng TK kho suy theo TK Nợ của dòng (1561 -> Hàng hóa) — got {moi_dm}")
+print("PASS: Test 6 — tong_dang_xu_ly/tong_trong_bang tách riêng đúng (2 vs 7, không còn nhầm lẫn); mã hàng "
+      "thiếu (MAMOI-999) được TỰ ĐỘNG tạo vào Danh mục MISA đúng TK kho rồi ghi tiếp chứng từ NK-202 bình "
+      "thường trong CÙNG 1 lượt bấm 'Nhập kho vào MISA', không cần tự tay chạy riêng DM Hàng Hóa trước.")
 
 print("\nALL DONE (test 6)")
