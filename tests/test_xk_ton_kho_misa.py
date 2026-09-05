@@ -87,6 +87,31 @@ try:
     print("PASS ca 2: _misa_lay_ton_kho (TẤT CẢ kho, không chọn Từ ngày) tính đúng Cuối kỳ + kho_ro/ton_kho_min, "
           "giống hệt cấu trúc _doc_file_ton_kho.")
 
+    # ===== Ca 2b: đúng ca thật người dùng báo cáo (mã 'HH1690-0') — SQL GROUP
+    # BY theo (mã, StockCode) trả 1 DÒNG RIÊNG cho kho CŨ đã hết sạch hàng từ
+    # trước (Cuối kỳ = 0 tại kho đó) dù mã THẬT SỰ chỉ còn ở ĐÚNG 1 kho hiện
+    # tại — KHÔNG được báo "rải rác nhiều kho" chỉ vì còn 1 dòng lịch sử 0
+    # đơn vị ở kho cũ (xác nhận đúng qua báo cáo thật: chính màn hình "Tổng
+    # hợp tồn kho" của MISA lọc riêng mã 'HH1690-0' CHỈ hiện đúng 1 kho 'HH'). =====
+    ledger_c2b = [
+        ("HH1690-0", "Nekko cá ngừ rắc tôm và sò điệp", "Thùng", "HH", "HH", 0, 6, 3836160),
+        # dòng SQL RIÊNG cho kho CŨ (StockCode khác) — đã hết sạch (Cuối kỳ = 0
+        # tại kho này) do phát sinh Sổ Kho TỪ TRƯỚC đây, không còn liên quan.
+        ("HH1690-0", "Nekko cá ngừ rắc tôm và sò điệp", "Thùng", "KHOCU", "Kho Chó Mèo Có VAT", 0, 0, 0),
+    ]
+    cur2b = FakeCursor(ledger_rows=ledger_c2b)
+    server._misa_sql_connect = lambda cid, database=None: FakeConn(cur2b)
+    rows2b, _ = server._misa_lay_ton_kho(1, "TESTDB", tu_ngay=None, den_ngay="2026-08-31", ma_kho_list=None)
+    by_ma2b = {r["ma"]: r for r in rows2b}
+    r2b = by_ma2b["HH1690-0"]
+    assert r2b["kho_ro"] is True and r2b["kho"] == "HH", (
+        f"Mã 'HH1690-0' CHỈ THẬT SỰ còn ở kho 'HH' (kho cũ 'Kho Chó Mèo Có VAT' đã hết sạch, Cuối kỳ=0) "
+        f"-> PHẢI kho_ro=True, kho='HH' — KHÔNG được báo rải rác nhiều kho chỉ vì 1 dòng lịch sử 0 đơn vị "
+        f"— được {r2b}")
+    assert r2b["ton_kho_min"] == 6, f"ton_kho_min PHẢI đúng bằng 6 (kho HH), không bị kéo về 0 bởi kho cũ đã hết — được {r2b}"
+    print("PASS ca 2b: _misa_lay_ton_kho không còn báo nhầm 'rải rác nhiều kho' cho mã chỉ còn 1 kho thật "
+          "sự có hàng, dù SQL trả thêm dòng lịch sử 0 đơn vị ở kho cũ đã hết sạch.")
+
     # ===== Có chọn Từ ngày -> Đầu kỳ CỘNG DỒN đúng, tham số Đầu kỳ đi TRƯỚC tham số Cuối kỳ =====
     ledger_c3 = [("HH00009-8", "Chậu ABC", "Cái", "HH", "Hàng Hóa", 20, 5, 500000)]
     cur3 = FakeCursor(ledger_rows=ledger_c3)

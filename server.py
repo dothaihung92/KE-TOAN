@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.179"
+APP_BUILD = "2026-08-31.180"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11839,7 +11839,21 @@ def _misa_lay_ton_kho(cid, database, tu_ngay=None, den_ngay=None, ma_kho_list=No
         if not it["ton"] and not it["dau_ky"]:
             continue
         gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
-        kho_qty = it["kho_qty"]
+        # Loại kho có số lượng CUỐI KỲ = 0 khỏi kho_qty trước khi xét
+        # kho_ro/ton_kho_min — SQL GROUP BY theo (mã, StockCode) trả về 1
+        # DÒNG RIÊNG cho MỖI kho mã đó TỪNG có phát sinh Sổ Kho (kể cả từ
+        # RẤT LÂU trước Kỳ báo cáo đang chọn, cần cộng dồn hết mới tính đúng
+        # Cuối kỳ) — 1 kho CŨ đã hết sạch hàng từ trước (0 đơn vị tại đây)
+        # vẫn tạo ra 1 khoá trong kho_qty dù không còn ý nghĩa gì cho việc
+        # XUẤT hôm nay, khiến mã hàng CHỈ THẬT SỰ còn ở ĐÚNG 1 kho bị báo
+        # nhầm "rải rác nhiều kho" (kho_ro=False) — xác nhận đúng qua báo
+        # cáo thật: mã 'HH1690-0' phần mềm báo rải rác nhiều kho, nhưng
+        # chính báo cáo 'Tổng hợp tồn kho' của MISA (cả file Excel lẫn màn
+        # hình MISA lọc riêng mã này) CHỈ hiện đúng 1 kho 'HH'. Không lọc
+        # dau_ky_qty tương tự vì Đầu kỳ = 0 tại 1 kho hoàn toàn có thể là
+        # BÌNH THƯỜNG (kho đó mới bắt đầu nhập trong kỳ), không phải dấu
+        # hiệu "kho cũ đã hết".
+        kho_qty = {k: v for k, v in it["kho_qty"].items() if v}
         dau_ky_qty = it["dau_ky_qty"]
         ton_kho_min = min(kho_qty.values()) if kho_qty else it["ton"]
         dau_ky_kho_min = min(dau_ky_qty.values()) if dau_ky_qty else it["dau_ky"]
