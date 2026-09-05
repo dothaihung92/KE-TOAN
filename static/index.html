@@ -6904,6 +6904,19 @@ document.addEventListener('keydown',(e)=>{
     else{dongNhapLieu();}
   }
 });
+// Ctrl+N ở màn hình chính (đã chọn công ty, CHƯA vào Nhập Liệu) -> vào
+// thẳng Nhập Liệu, khỏi phải bấm chuột — theo yêu cầu người dùng. LƯU Ý:
+// Ctrl+N là phím tắt "Cửa sổ mới" mà Chrome/Edge/Firefox tự giữ riêng ở
+// mức trình duyệt — trang web KHÔNG thể chặn được (preventDefault không có
+// tác dụng với tổ hợp này ở hầu hết trình duyệt), nên vẫn có thể mở thêm 1
+// cửa sổ trình duyệt mới CÙNG LÚC với việc vào Nhập Liệu, tùy trình duyệt.
+document.addEventListener('keydown',(e)=>{
+  if(!(e.ctrlKey||e.metaKey)||e.key.toLowerCase()!=='n')return;
+  const nlScreen=document.getElementById('nhapLieuScreen');
+  if(nlScreen&&nlScreen.style.display!=='none')return;   // đã ở trong Nhập Liệu rồi thì thôi, để phím tắt riêng của màn đó xử lý
+  e.preventDefault();
+  moNhapLieu();
+});
 function nlCapNhatHighlight(){
   // cập nhật style ô trực tiếp (không re-render → không mất focus sửa)
   const tbl=document.getElementById('nlTable');
