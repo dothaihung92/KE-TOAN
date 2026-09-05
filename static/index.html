@@ -7521,6 +7521,7 @@ function misaTomTatBuoc(r){
   // nguyên nhân — nay hiện ngay tại đây để biết NGAY lúc chạy, không cần đợi
   // đối chiếu mới phát hiện.
   if(r.so_tu_tao_mahang!=null&&r.so_tu_tao_mahang>0)phan.push(`✓ tự tạo ${r.so_tu_tao_mahang} mã hàng mới vào Danh mục`);
+  if(r.so_dung_ma_trung_ten!=null&&r.so_dung_ma_trung_ten>0)phan.push(`✓ dùng lại ${r.so_dung_ma_trung_ten} mã có sẵn (trùng tên), không tạo mã mới`);
   if(r.so_bo_qua_ncc!=null&&r.so_bo_qua_ncc>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_ncc} chứng từ do thiếu NCC/KH trong Danh mục`);
   if(r.so_bo_qua_mahang!=null&&r.so_bo_qua_mahang>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_mahang} dòng do cột Mã hàng trống trong Bảng kê`);
   if(!phan.length&&r.ghi_chu)return r.ghi_chu;
@@ -8394,7 +8395,8 @@ async function muaHangImportMisaGhi(loai,ghiDe){
     const dmTxt=(d.so_dvt_hang_sua>0)?`, ${d.so_dvt_hang_sua} mã Danh mục`:'';
     const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
     const tuTaoTxt=(d.so_tu_tao_mahang>0)?` — đã tự tạo ${d.so_tu_tao_mahang} mã hàng mới vào Danh mục MISA`:'';
-    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt}${dvtTxt}${tuTaoTxt} — ĐÃ GHI SỔ.`,'ok');
+    const trungTenTxt=(d.so_dung_ma_trung_ten>0)?` — đã dùng lại ${d.so_dung_ma_trung_ten} mã có sẵn (trùng tên) thay vì tạo mã mới`:'';
+    toast(`✓ Đã ghi ${d.so_chungtu} chứng từ (${d.so_dong} dòng) vào MISA${goTxt}${dvtTxt}${tuTaoTxt}${trungTenTxt} — ĐÃ GHI SỔ.`,'ok');
     // TỰ KIỂM TRA: đối chiếu với đúng view + bộ lọc thật của màn hình MISA
     // "Mua hàng hóa, dịch vụ" — nếu có chứng từ bị lọc mất, hiện chẩn đoán
     // đích danh lý do từng dòng (mất khỏi view / PostedDate / chi nhánh / DisplayOnBook).
@@ -8440,6 +8442,8 @@ async function muaHangImportMisaGhi(loai,ghiDe){
         ✓ Đã tự sửa ${d.so_dvt_sua} dòng ĐVT hỏng liên kết trong danh mục hàng (trước đây MISA hiện GUID thô ở cột ĐVT).</div>`:''}
       ${d.so_tu_tao_mahang>0?`<div style="background:#e8f6ee;border:1px solid #9dd6b5;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3c;margin-bottom:8px">
         ✓ Đã tự động tạo ${d.so_tu_tao_mahang} mã hàng mới vào Danh mục MISA (đúng TK kho) trước khi ghi chứng từ.</div>`:''}
+      ${d.so_dung_ma_trung_ten>0?`<div style="background:#e8f6ee;border:1px solid #9dd6b5;border-radius:6px;padding:6px 10px;font-size:12px;color:#1a6b3c;margin-bottom:8px">
+        ✓ Đã dùng lại ${d.so_dung_ma_trung_ten} mã hàng CÓ SẴN trong MISA (trùng tên với mã đang thiếu trong Bảng kê) thay vì tạo mã mới trùng lặp.</div>`:''}
       ${d.so_bo_qua_ncc>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">
         ⚠ Bỏ qua ${d.so_bo_qua_ncc} chứng từ do NCC chưa có trong MISA — import Danh mục KH/NCC rồi chạy lại.</div>`:''}
       ${d.so_bo_qua_mahang>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin-bottom:8px">

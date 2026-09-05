@@ -50,7 +50,7 @@ ns['_MISA_INV_ACC'] = {
 names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_misa_gan',
          '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_tk_fallback', '_misa_unit_hong',
          '_misa_pu_reftype', '_num0', '_chuan_shd', '_misa_gio_nhap_co_dinh',
-         '_misa_loai_dm_theo_tk', '_misa_ghi_hang_hoa', '_misa_ghi_mua_hang']
+         '_misa_loai_dm_theo_tk', '_dm_ky_tu', '_misa_ghi_hang_hoa', '_misa_ghi_mua_hang']
 for n in names:
     exec(extract_fn(n), ns)
 
@@ -615,3 +615,60 @@ print("PASS: Test 6 — tong_dang_xu_ly/tong_trong_bang tách riêng đúng (2 v
       "thường trong CÙNG 1 lượt bấm 'Nhập kho vào MISA', không cần tự tay chạy riêng DM Hàng Hóa trước.")
 
 print("\nALL DONE (test 6)")
+
+# --- Test 7: đúng ca thật người dùng báo cáo (5/9/2026, công ty TNHH THƯƠNG
+# MẠI PHẨM LỢI) — "phần mềm phải lấy đúng mã đã có từ trước nếu tên hàng
+# giống chứ không cần tạo thêm mã". Dòng Bảng kê ghi mã 'MH1084' (đã bị xóa
+# khỏi MISA, không còn trong Danh mục) cho hàng "Nekko cá ngừ thanh cua kèm
+# nước sốt 70g (gói)" — nhưng MISA VẪN CÒN mã KHÁC 'MH1084-0' (Vật tư hàng
+# hóa) cho CHÍNH XÁC cùng tên đó. Trước fix, _misa_ghi_mua_hang tự tạo THÊM
+# mã 'MH1084' mới (trùng lặp, dù tính chất đúng Vật tư hàng hóa) — SAI, phải
+# DÙNG LẠI 'MH1084-0' có sẵn, không tạo gì cả.
+class FakeCursor7(FakeCursor):
+    def fetchall(self):
+        sql = self._last_sql
+        if sql.startswith("SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName"):
+            return [("iid-1", "MH216-0", "uid-cai", "Que gặm hương bò 120g"),
+                    ("iid-2", "MH217-0", "uid-cai", "Que gặm hương phô mai 120g"),
+                    ("iid-3", "CCDC072", "uid-cai", "Máy lạnh NAGAKAWA NIS-C09R2U51"),
+                    ("iid-1084-0", "MH1084-0", "uid-cai",
+                     "Nekko cá ngừ  thanh cua kèm nước sốt 70g (gói)")]
+        if sql.startswith("SELECT InventoryItemCode, InventoryItemName, InventoryItemType, UnitID"):
+            return [("MH216-0", "Que gặm hương bò 120g", 1, "uid-cai"),
+                    ("MH217-0", "Que gặm hương phô mai 120g", 1, "uid-cai"),
+                    ("CCDC072", "Máy lạnh NAGAKAWA NIS-C09R2U51", 1, "uid-cai"),
+                    ("MH1084-0", "Nekko cá ngừ  thanh cua kèm nước sốt 70g (gói)", 1, "uid-cai")]
+        return super().fetchall()
+
+
+cur7 = FakeCursor7()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur7)
+flat7 = [
+    mk_row("NK-301", "03/02/2026", "700", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH1084", "Nekko cá ngừ  thanh cua kèm nước sốt 70g (gói)", "Cái", 9, 639360, 5754240,
+           "1561", "331", 0, 0, "1331", None, "KHOCHINH"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat7
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r7 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result7:", {k: r7[k] for k in ("so_chungtu", "so_bo_qua_mahang", "so_tu_tao_mahang",
+                                       "so_dung_ma_trung_ten")})
+assert r7["so_chungtu"] == 1, f"Chứng từ NK-301 phải được ghi bình thường — got {r7}"
+assert r7["so_tu_tao_mahang"] == 0, (
+    f"KHÔNG được tự tạo mã mới nào — 'MH1084-0' đã có sẵn CÙNG tên, phải dùng lại, không tạo 'MH1084' "
+    f"trùng lặp — got {r7}")
+assert r7["so_dung_ma_trung_ten"] == 1, (
+    f"Phải báo đúng 1 lần dùng lại mã có sẵn (trùng tên) thay vì tạo mới — got {r7}")
+assert cur7.inserted["InventoryItem"] == [], (
+    f"KHÔNG được tạo InventoryItem mới nào (mã 'MH1084' phải được coi là trùng tên với 'MH1084-0' đã có "
+    f"sẵn, không tạo thêm) — got {cur7.inserted['InventoryItem']}")
+pvd7 = cur7.inserted["PUVoucherDetail"]
+assert len(pvd7) == 1 and pvd7[0]["InventoryItemID"] == "iid-1084-0", (
+    f"Dòng chứng từ phải ghi ĐÚNG InventoryItemID của mã có sẵn 'MH1084-0' (iid-1084-0), KHÔNG được tạo/"
+    f"dùng 1 InventoryItemID khác cho 'MH1084' — got {pvd7}")
+print("PASS: Test 7 — mã hàng thiếu ('MH1084') nhưng TÊN đã trùng với mã KHÁC có sẵn ('MH1084-0') -> dùng "
+      "lại đúng mã có sẵn đó, KHÔNG tạo mã mới trùng lặp; dòng chứng từ ghi đúng InventoryItemID của mã có "
+      "sẵn.")
+
+print("\nALL DONE (test 7)")

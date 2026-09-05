@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.176"
+APP_BUILD = "2026-08-31.177"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14326,22 +14326,53 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
     conn.autocommit = False
     try:
         cur = conn.cursor()
-        # mã hàng đã tồn tại + TÊN trong MISA (để bỏ qua, và đối chiếu tên lệch)
-        existing = {}   # ma_lower -> tên trong MISA
-        for code, name in cur.execute(
-                "SELECT InventoryItemCode, InventoryItemName FROM InventoryItem").fetchall():
-            if code:
-                existing[str(code).strip().lower()] = str(name or "")
 
         def _norm_ten(s):
             return " ".join(str(s or "").split()).lower()
         # đơn vị tính hiện có {tên_lower: UnitID} — BỎ QUA Unit tên RÁC (chuỗi
         # GUID thay vì tên thật, xem _misa_unit_hong) để không lỡ khớp/tái sử
         # dụng bản ghi hỏng; dvt trùng tên với Unit rác sẽ tự tạo Unit MỚI sạch.
+        # unit_ten_theo_id: chiều NGƯỢC (UnitID -> tên) — dùng để tính Ký tự
+        # (_dm_ky_tu) của TỪNG mã InventoryItem đã có sẵn, xem existing_ten.
         units = {}
+        unit_ten_theo_id = {}
         for uid, uname in cur.execute("SELECT UnitID, UnitName FROM Unit").fetchall():
             if uname and not _misa_unit_hong(uname):
                 units[str(uname).strip().lower()] = uid
+            if uname:
+                unit_ten_theo_id[str(uid).strip()] = str(uname).strip()
+        # mã hàng đã tồn tại + TÊN trong MISA (để bỏ qua, và đối chiếu tên lệch)
+        existing = {}   # ma_lower -> tên trong MISA
+        # existing_ten: Ký tự (Tên+ĐVT, _dm_ky_tu — CHUẨN so trùng dùng chung
+        # toàn phần mềm) -> (mã CÓ SẴN, có phải tính chất "Vật tư hàng hóa"
+        # hay không) — để KHÔNG tạo mã MỚI trùng lặp khi CÙNG tên đã có SẴN 1
+        # mã KHÁC trong MISA (đúng yêu cầu người dùng: "phải lấy đúng mã đã
+        # có từ trước nếu tên hàng giống chứ không cần tạo thêm mã" — xác
+        # nhận đúng qua ca thật: xóa 'MH1084' (Thành phẩm) trong MISA rồi
+        # import tự động lại, dù 'MH1084-0' (Vật tư hàng hóa, ĐÚNG mã) vẫn
+        # còn nguyên cho CÙNG tên "Nekko cá ngừ...", phần mềm vẫn tự tạo lại
+        # y hệt mã văn bản 'MH1084' đã ghi cứng trong dòng Danh mục/Bảng kê
+        # cũ — vì bước tạo TRƯỚC ĐÂY chỉ kiểm tra ĐÚNG mã đó có hay không,
+        # không hề kiểm tra có mã KHÁC nào cùng tên đã tồn tại sẵn. Khi 1 tên
+        # có nhiều mã (khác tính chất), ưu tiên mã tính chất "Vật tư hàng
+        # hóa" — cùng nguyên tắc _misa_dong_bo_danh_muc_tu_misa.
+        existing_ten = {}
+        for code, name, item_type_c, unit_id_c in cur.execute(
+                "SELECT InventoryItemCode, InventoryItemName, InventoryItemType, UnitID "
+                "FROM InventoryItem").fetchall():
+            code = str(code or "").strip()
+            name_s = str(name or "").strip()
+            if not code:
+                continue
+            existing[code.lower()] = name_s
+            if not name_s:
+                continue
+            dvt_c = unit_ten_theo_id.get(str(unit_id_c or "").strip(), "")
+            ky_tu_c = _dm_ky_tu(name_s, dvt_c)
+            la_vthh_c = (item_type_c == 1)
+            hien_co = existing_ten.get(ky_tu_c)
+            if hien_co is None or (la_vthh_c and not hien_co[1]):
+                existing_ten[ky_tu_c] = (code, la_vthh_c)
         # 'Tính chất' (InventoryItemType) = 1 (Vật tư, hàng hóa) cho cả 3 danh
         # mục Hàng hóa/NVL/CCDC. Trước đây dò theo dữ liệu có sẵn trong MISA
         # (mã nào cùng TK kho thì lấy tính chất đó) nhưng có công ty đã lỡ gắn
@@ -14360,7 +14391,8 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
         now = datetime.datetime.now()
 
         ket = []
-        them = trung = dv_moi = lech_ten = 0
+        them = trung = dv_moi = lech_ten = trung_ten = 0
+        ma_thay_the = {}   # mã CHƯA có (k) -> mã THẬT đã có sẵn cùng tên, DÙNG LẠI thay vì tạo mới
         seen = set()
         for r in dm_rows:
             ma = str((r[0] if len(r) > 0 else "") or "").strip()
@@ -14381,6 +14413,19 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
                     lech_ten += 1
                 ket.append({"ma": ma, "ten": ten, "ten_misa": ten_misa, "lech_ten": lech,
                             "trang_thai": "đã có — KHÁC TÊN" if lech else "đã có (bỏ qua)"})
+                continue
+            # Mã CHƯA có, nhưng TÊN (+ĐVT) đã trùng với 1 mã KHÁC có sẵn
+            # trong MISA -> DÙNG LẠI mã đó, KHÔNG tạo thêm mã mới trùng tên
+            # (xem existing_ten ở trên).
+            ky_tu_moi = _dm_ky_tu(ten, dvt)
+            trung_ten_ma = existing_ten.get(ky_tu_moi)
+            if trung_ten_ma:
+                ma_that = trung_ten_ma[0]
+                trung_ten += 1
+                ma_thay_the[k] = ma_that
+                ket.append({"ma": ma, "ten": ten, "ma_that": ma_that,
+                            "trang_thai": "trùng tên với mã có sẵn '%s' — dùng lại mã đó, "
+                                          "không tạo mã mới" % ma_that})
                 continue
             # đơn vị tính -> UnitID (tạo mới nếu chưa có)
             unit_id = None
@@ -14429,6 +14474,7 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
             conn.commit()
         return {"preview": preview, "database": database, "so_them": them, "so_trung": trung,
                 "so_lech_ten": lech_ten, "so_don_vi_moi": dv_moi, "item_type": item_type,
+                "so_trung_ten": trung_ten, "ma_thay_the": ma_thay_the,
                 "danh_sach": ket[:1000]}
     except HTTPException:
         conn.rollback()
@@ -16077,6 +16123,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 nhom[ma_ct.lower()] = [ma_ct, str(r[cfg["ten"]] or "").strip(),
                                        str(r[cfg["dvt"]] or "").strip() if cfg.get("dvt") is not None else ""]
         so_tu_tao_mahang = 0
+        so_dung_ma_trung_ten = 0
+        ma_thay_the_gop = {}   # mã văn bản (lower) trong Bảng kê -> mã THẬT đã có sẵn cùng tên trong MISA
         if thieu_theo_loai:
             if preview:
                 so_tu_tao_mahang = sum(len(v) for v in thieu_theo_loai.values())
@@ -16086,15 +16134,27 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         kq_dm = _misa_ghi_hang_hoa(cid, database, list(nhom.values()),
                                                    preview=False, loai=loai_dm)
                         so_tu_tao_mahang += kq_dm.get("so_them", 0)
+                        so_dung_ma_trung_ten += kq_dm.get("so_trung_ten", 0)
+                        ma_thay_the_gop.update(kq_dm.get("ma_thay_the") or {})
                     except Exception:
                         pass   # lỗi tạo Danh mục KHÔNG được làm hỏng cả lượt ghi Nhập kho
-                if so_tu_tao_mahang:
+                if so_tu_tao_mahang or ma_thay_the_gop:
                     hang = {}
                     for iid, code, uid, ten_h in cur.execute(
                             "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
                             "FROM InventoryItem").fetchall():
                         if code:
                             hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+                    # Mã văn bản trong Bảng kê (vd 'MH1084', đã xóa/chưa từng
+                    # có trong MISA) TRÙNG TÊN với 1 mã KHÁC đã có sẵn (vd
+                    # 'MH1084-0') -> ALIAS thẳng sang đúng InventoryItemID của
+                    # mã có sẵn đó, để các dòng dùng đúng mã hàng THẬT khi ghi
+                    # Nhập kho bên dưới, KHÔNG bị lạc mất chỉ vì tự tạo/dùng
+                    # nhầm theo đúng VĂN BẢN mã cũ đã lưu (xem _misa_ghi_hang_hoa).
+                    for ma_ct_lower, ma_that in ma_thay_the_gop.items():
+                        dich = hang.get(str(ma_that).strip().lower())
+                        if dich:
+                            hang[ma_ct_lower] = dich
         # danh mục TÀI KHOẢN thật của MISA — các cột TK trên PUVoucherDetail
         # có FK sang Account.AccountNumber; xem _misa_tk_fallback
         tk_set = set()
@@ -17364,6 +17424,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "so_bo_qua_an_pm": bo_qua_an_pm, "so_tu_tao_mahang": so_tu_tao_mahang,
+                "so_dung_ma_trung_ten": so_dung_ma_trung_ten,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_hoa_don": so_hoa_don, "thieu_kho": sorted(thieu_kho),
                 "kho_moi": sorted(kho_moi),
