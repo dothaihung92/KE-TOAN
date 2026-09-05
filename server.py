@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.177"
+APP_BUILD = "2026-08-31.178"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11689,8 +11689,17 @@ def _doc_file_ton_kho(wb):
         # dau_ky_kho_min: cùng nguyên tắc ton_kho_min, áp cho tồn ĐẦU KỲ (xem
         # _xk_dau_ky_an_toan) — mã rải rác nhiều kho lấy kho ÍT NHẤT.
         dau_ky_kho_min = min(dau_ky_qty.values()) if dau_ky_qty else it["dau_ky"]
+        # "gia_tri": TỔNG giá trị THẬT (chưa làm tròn) của mã này, cộng dồn
+        # nguyên vẹn từ cột "Giá trị" của file — KHÁC "gia" (đơn giá bình
+        # quân đã LÀM TRÒN để hiển thị/tính giá vốn từng dòng xuất). Badge
+        # "Tổng giá trị tồn cuối kỳ" PHẢI cộng "gia_tri" (chính xác), KHÔNG
+        # được tính lại bằng ton*gia (đơn giá đã làm tròn) — xác nhận đúng
+        # qua báo cáo thật: file "Số dòng = 1497", tổng THẬT 5.831.242.503đ,
+        # nhưng cộng ton*gia (đơn giá làm tròn) của ~1469 mã lại dôi lên
+        # 5.836.267.522đ — sai lệch ~5 triệu chỉ vì làm tròn đơn giá TỪNG mã
+        # rồi mới nhân lại, cộng dồn qua hàng ngàn mã.
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
-                    "ton": it["ton"], "gia": gia,
+                    "ton": it["ton"], "gia": gia, "gia_tri": it["gt"],
                     "kho": next(iter(kho_qty)) if len(kho_qty) == 1 else None,
                     "kho_ro": len(kho_qty) <= 1,
                     "ton_kho_min": ton_kho_min,
@@ -11819,8 +11828,11 @@ def _misa_lay_ton_kho(cid, database, tu_ngay=None, den_ngay=None, ma_kho_list=No
         dau_ky_qty = it["dau_ky_qty"]
         ton_kho_min = min(kho_qty.values()) if kho_qty else it["ton"]
         dau_ky_kho_min = min(dau_ky_qty.values()) if dau_ky_qty else it["dau_ky"]
+        # "gia_tri": TỔNG giá trị THẬT (chưa làm tròn) — xem giải thích đầy
+        # đủ ở _doc_file_ton_kho (cùng lý do/cùng field, chỉ khác nguồn dữ
+        # liệu là SUM SQL thay vì cộng dồn từ file Excel).
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
-                    "ton": it["ton"], "gia": gia,
+                    "ton": it["ton"], "gia": gia, "gia_tri": it["gt"],
                     "kho": next(iter(kho_qty)) if len(kho_qty) == 1 else None,
                     "kho_ro": len(kho_qty) <= 1,
                     "ton_kho_min": ton_kho_min,

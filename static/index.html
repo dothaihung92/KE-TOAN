@@ -4532,11 +4532,18 @@ async function xkTaiTrangThai(){
     const elTon=document.getElementById('xkTonBadge');
     if(elTon){
       if(xkTon.length){
-        // Tổng giá trị tồn CUỐI KỲ = tổng(Số lượng tồn × Đơn giá) từng mã —
-        // đúng cách MISA tính "Giá trị" ở báo cáo Tổng hợp tồn kho (Cuối kỳ
-        // Số lượng × giá vốn bình quân của đúng mã đó), không phải giá bán.
+        // Tổng giá trị tồn CUỐI KỲ = cộng dồn "gia_tri" (giá trị THẬT, chưa
+        // làm tròn, xem _doc_file_ton_kho/_misa_lay_ton_kho) — KHÔNG tính
+        // lại bằng ton×gia (gia là đơn giá bình quân ĐÃ LÀM TRÒN để hiển
+        // thị/tính giá vốn từng dòng xuất) vì nhân lại như vậy cộng dồn sai
+        // lệch qua hàng ngàn mã (xác nhận đúng qua báo cáo thật: lệch ~5
+        // triệu đồng so với tổng thật của báo cáo MISA). Dòng CŨ (import từ
+        // trước khi có field này) không có "gia_tri" -> tạm dùng ton×gia
+        // làm phương án dự phòng, không lỗi.
         const tongGiaTri=xkTon.reduce((s,t)=>{
           const ton=typeof t.ton==='number'?t.ton:parseFloat(t.ton);
+          const giaTri=typeof t.gia_tri==='number'?t.gia_tri:parseFloat(t.gia_tri);
+          if(!isNaN(giaTri))return s+giaTri;
           const gia=typeof t.gia==='number'?t.gia:parseFloat(t.gia);
           return s+((!isNaN(ton)&&!isNaN(gia))?ton*gia:0);
         },0);
