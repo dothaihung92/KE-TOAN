@@ -52,15 +52,19 @@ class FakeCursor:
         if "FROM InventoryItem" in self.last_sql:
             return [
                 # Đã có sẵn trong MISA TỪ TRƯỚC (mã KHÔNG theo khuôn tự sinh
-                # 'HH00000') cho ĐÚNG 2 tên hàng bị báo cáo gán trùng.
-                ("MH613", "Chậu Polystone D35xH45 cm - Matte Black", "U1"),
-                ("MH607", "Chậu Polystone D34xH30 cm - Matte White", "U1"),
+                # 'HH00000') cho ĐÚNG 2 tên hàng bị báo cáo gán trùng. Cột thứ
+                # 4 (InventoryItemType) = 1 "Vật tư, hàng hóa" — tính chất
+                # ĐÚNG cho cả 3 mã ở đây (xem test_dong_bo_danh_muc_uu_tien_vthh.py
+                # cho ca ưu tiên tính chất khi có mã Thành phẩm trùng tên).
+                ("MH613", "Chậu Polystone D35xH45 cm - Matte Black", "U1", 1),
+                ("MH607", "Chậu Polystone D34xH30 cm - Matte White", "U1", 1),
                 # Mã cũ TỪNG rất phổ biến trong dữ liệu thật: KHÔNG có
                 # InventoryAccount (nay hàm KHÔNG còn lọc theo TK nên vẫn
                 # PHẢI đọc được — xem _misa_doc_toan_bo_danh_muc/
                 # _misa_dong_bo_danh_muc_tu_misa, đã bỏ cột InventoryAccount
-                # khỏi câu SELECT, đây chỉ còn (code, name, unit_id) 3 cột).
-                ("MH225", "Chậu Polystone ASH30 - MTWT", "U1"),
+                # khỏi câu SELECT, đây chỉ còn (code, name, unit_id, item_type)
+                # 4 cột).
+                ("MH225", "Chậu Polystone ASH30 - MTWT", "U1", 1),
             ]
         return []
 

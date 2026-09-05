@@ -33,7 +33,7 @@ class FakeCursor:
         if "FROM Unit" in self.last_sql:
             return [("U1", "Cái")]
         if "FROM InventoryItem" in self.last_sql:
-            return [("MH613", "Chậu Polystone D35xH45 cm - Matte Black", "U1")]
+            return [("MH613", "Chậu Polystone D35xH45 cm - Matte Black", "U1", 1)]
         return []
 
 

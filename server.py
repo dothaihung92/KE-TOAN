@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.174"
+APP_BUILD = "2026-08-31.175"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14498,9 +14498,22 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
                     unit_ten[str(uid).strip()] = str(uname or "").strip()
         except Exception:
             pass
-        misa_map = {}   # ky_tu -> mã MISA (mã XUẤT HIỆN TRƯỚC trong kết quả được giữ)
-        for code, name, unit_id in cur.execute(
-                "SELECT InventoryItemCode, InventoryItemName, UnitID "
+        # ky_tu -> mã MISA đang giữ + tính chất mã đó có phải "Vật tư, hàng
+        # hóa" (InventoryItemType=1 — ĐÚNG tính chất Hàng hóa/NVL/CCDC của
+        # phần mềm luôn tạo/dùng, xem _misa_ghi_hang_hoa) hay không — ƯU TIÊN
+        # mã type=1 khi CÙNG 1 tên (ĐVT) có nhiều mã KHÁC tính chất trong MISA
+        # (vd 'Thành phẩm' — hàng công ty tự sản xuất ra, KHÔNG phải hàng đi
+        # MUA). TRƯỚC ĐÂY chỉ giữ "mã xuất hiện TRƯỚC trong kết quả SQL" (SELECT
+        # không ORDER BY -> thứ tự trả về của SQL Server KHÔNG đảm bảo, hoàn
+        # toàn ngẫu nhiên/tuỳ máy chủ) — xác nhận đúng qua báo cáo thật: 'Nekko
+        # cá ngừ...' có CẢ mã 'MH1084' (Thành phẩm, do công ty tự lập trước đó
+        # để theo dõi hàng tự đóng gói/gia công) LẪN 'MH1084-0' (Vật tư hàng
+        # hóa, đúng loại NHẬP/MUA) — phần mềm lấy nhầm 'MH1084' (Thành phẩm)
+        # để ghi mã hàng cho hóa đơn MUA, dù 'MH1084-0' mới đúng.
+        misa_map = {}
+        misa_map_vthh = {}
+        for code, name, unit_id, item_type in cur.execute(
+                "SELECT InventoryItemCode, InventoryItemName, UnitID, InventoryItemType "
                 "FROM InventoryItem").fetchall():
             code = str(code or "").strip()
             name = str(name or "").strip()
@@ -14508,7 +14521,13 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
                 continue
             dvt = unit_ten.get(str(unit_id or "").strip(), "")
             ky_tu = _dm_ky_tu(name, dvt)
-            misa_map.setdefault(ky_tu, code)
+            la_vthh = (item_type == 1)
+            if ky_tu not in misa_map:
+                misa_map[ky_tu] = code
+                misa_map_vthh[ky_tu] = la_vthh
+            elif la_vthh and not misa_map_vthh[ky_tu]:
+                misa_map[ky_tu] = code
+                misa_map_vthh[ky_tu] = True
     finally:
         conn.close()
 
