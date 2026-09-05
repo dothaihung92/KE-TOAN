@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.175"
+APP_BUILD = "2026-08-31.176"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14512,6 +14512,12 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
         # để ghi mã hàng cho hóa đơn MUA, dù 'MH1084-0' mới đúng.
         misa_map = {}
         misa_map_vthh = {}
+        # Tính chất (type=1 "Vật tư, hàng hóa" hay không) của TỪNG mã MISA
+        # (không chỉ mã THẮNG theo ky_tu) — dùng để phát hiện bản đồ đã học
+        # TỪ TRƯỚC (lần đồng bộ CŨ, trước khi có ưu tiên tính chất ở trên)
+        # đang trỏ nhầm 1 mã THẬT nhưng SAI tính chất (vd 'Thành phẩm'), xem
+        # dưới.
+        code_type1 = {}
         for code, name, unit_id, item_type in cur.execute(
                 "SELECT InventoryItemCode, InventoryItemName, UnitID, InventoryItemType "
                 "FROM InventoryItem").fetchall():
@@ -14522,6 +14528,7 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
             dvt = unit_ten.get(str(unit_id or "").strip(), "")
             ky_tu = _dm_ky_tu(name, dvt)
             la_vthh = (item_type == 1)
+            code_type1[code] = code_type1.get(code, False) or la_vthh
             if ky_tu not in misa_map:
                 misa_map[ky_tu] = code
                 misa_map_vthh[ky_tu] = la_vthh
@@ -14547,7 +14554,22 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
             so_them += 1
             if len(vi_du_them) < 10:
                 vi_du_them.append({"ky_tu": ky_tu, "ma": ma_misa})
-        elif cu != ma_misa and _tu_sinh(cu) and not _tu_sinh(ma_misa):
+            continue
+        if cu == ma_misa:
+            continue
+        # (1) mã ĐANG GIỮ là mã TỰ SINH (placeholder 'HH00000'/'NVL00000')
+        # -> luôn thay bằng mã MISA thật, như cũ. (2) mã ĐANG GIỮ là mã THẬT
+        # nhưng SAI tính chất (không phải 'Vật tư, hàng hóa') trong khi mã
+        # MỚI tìm được ĐÚNG tính chất -> cũng phải thay, KHÔNG được coi "đã
+        # là mã thật nên bỏ qua" như trước — xác nhận đúng qua báo cáo thật:
+        # bản đồ đã lỡ học nhầm 'MH1084' (Thành phẩm) TỪ LẦN ĐỒNG BỘ TRƯỚC
+        # (khi chưa có ưu tiên tính chất) — lần đồng bộ SAU đó dù đã sửa cách
+        # CHỌN mã mới (misa_map) vẫn báo "học 0 mã mới, thay 0 mã" vì quy tắc
+        # ghi đè CŨ chỉ áp dụng cho mã tự sinh, không áp dụng cho mã thật đã
+        # lỡ sai tính chất — khiến người dùng xoá/import lại vẫn không hết.
+        neu_tu_sinh = _tu_sinh(cu) and not _tu_sinh(ma_misa)
+        neu_sai_tinh_chat = misa_map_vthh.get(ky_tu) and not code_type1.get(cu, False)
+        if neu_tu_sinh or neu_sai_tinh_chat:
             keymap[ky_tu] = ma_misa
             so_thay += 1
             if len(vi_du_thay) < 10:

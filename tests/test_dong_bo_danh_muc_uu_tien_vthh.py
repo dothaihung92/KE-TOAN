@@ -20,7 +20,17 @@ hóa" có sẵn.
 
 Fix: khi CÙNG 1 tên (Ký tự) có NHIỀU mã KHÁC tính chất, ưu tiên GIỮ/ĐỔI
 SANG mã InventoryItemType=1 ("Vật tư, hàng hóa") — bất kể thứ tự SQL trả
-về."""
+về.
+
+Test 2 (da_hoc_sai_tu_truoc): đúng NGUYÊN VĂN phản hồi người dùng SAU round
+1 của fix — "vẫn còn hiện và đã thử xoá hết import tự động lại vẫn còn":
+công ty này đã CHẠY "Đồng bộ" TỪ TRƯỚC (khi CHƯA có ưu tiên tính chất),
+bản đồ (keymap) ĐÃ LỠ học "MH1084" (Thành phẩm) rồi — round 1 chỉ sửa cách
+CHỌN mã mới (misa_map) nhưng vòng ghi đè bản đồ CŨ chỉ chịu thay khi mã
+đang giữ là mã TỰ SINH placeholder ('HH00000'), KHÔNG áp dụng cho mã ĐÃ LÀ
+mã thật (dù sai tính chất) -> đồng bộ lại báo "học 0 mã mới, thay 0 mã",
+Sinh Danh mục lại vẫn ra "MH1084" y hệt. Fix thêm: ghi đè cả khi mã đang
+giữ là mã thật nhưng SAI tính chất (không phải Vật tư hàng hóa)."""
 import sys, sqlite3, os, tempfile
 sys.path.insert(0, _REPO_ROOT)
 import server
@@ -90,6 +100,35 @@ try:
             f"'Thành phẩm' — hàng tự sản xuất, không phải hàng mua) — được {ma_hoc}")
         print(f"PASS [{thu_tu}]: đồng bộ ưu tiên đúng mã 'MH1084-0' (Vật tư hàng hóa), không lấy nhầm "
               f"'MH1084' (Thành phẩm) dù thứ tự SQL trả về khác nhau.")
+
+    # ===== Test 2: bản đồ ĐÃ LỠ học "MH1084" (Thành phẩm) TỪ TRƯỚC (lần đồng
+    # bộ CŨ, trước khi có ưu tiên tính chất) — đồng bộ LẠI phải TỰ SỬA, không
+    # còn báo "học 0 mã mới, thay 0 mã" như phản hồi thật của người dùng. =====
+    conn = db_factory()
+    conn.execute("DROP TABLE IF EXISTS companies")
+    conn.execute("""CREATE TABLE companies (id INTEGER PRIMARY KEY, mst TEXT,
+        save_dir TEXT, data_dir TEXT)""")
+    conn.execute("INSERT INTO companies VALUES (1,'0317009837','','')")
+    conn.commit()
+    conn.close()
+    ky_tu = server._dm_ky_tu("Nekko cá ngừ thanh cua kèm nước sốt 70g (gói)", "Thùng")
+    data = server._doc_du_lieu_cty(1)
+    data["dm_hh"] = {"map": {ky_tu: "MH1084"}}   # bản đồ CŨ, đã lỡ học sai
+    server._ghi_du_lieu_cty(1, data)
+
+    cur2 = FakeCursor("thanh_pham_truoc")
+    server._misa_sql_connect = lambda cid, database=None, _c=cur2: FakeConn(_c)
+    kq2 = server._misa_dong_bo_danh_muc_tu_misa(1, "TESTDB", "hh")
+    print("[da_hoc_sai_tu_truoc] Kết quả đồng bộ:", kq2)
+    assert kq2["so_thay_the"] == 1, (
+        f"Bản đồ ĐÃ học sai 'MH1084' (Thành phẩm) từ trước PHẢI được đồng bộ SỬA LẠI thành 'MH1084-0' "
+        f"(Vật tư hàng hóa) — KHÔNG được báo 'thay 0 mã' như phản hồi thật của người dùng ('vẫn còn hiện "
+        f"và đã thử xoá hết import tự động lại vẫn còn') — được {kq2}")
+    data2 = server._doc_du_lieu_cty(1)
+    assert data2["dm_hh"]["map"].get(ky_tu) == "MH1084-0", (
+        f"Bản đồ sau đồng bộ phải đúng 'MH1084-0' — được {data2['dm_hh']['map'].get(ky_tu)}")
+    print("PASS [da_hoc_sai_tu_truoc]: bản đồ đã lỡ học sai mã 'Thành phẩm' từ TRƯỚC round 1 của fix nay "
+          "được đồng bộ tự sửa lại đúng, không còn kẹt mãi ở mã sai dù xoá/import lại nhiều lần.")
 
     print("\nTẤT CẢ TEST PASS")
 finally:
