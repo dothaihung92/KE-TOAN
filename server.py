@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.165"
+APP_BUILD = "2026-08-31.166"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16315,7 +16315,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         "WHERE InventoryItemID=? AND StockID=? AND RefDate<?",
                         (iid, sid, truoc_ngay)).fetchone()
                     if row:
-                        sl0, tien0 = (row[0] or 0), (row[1] or 0)
+                        # ÉP về float — SQL Server SUM trên cột DECIMAL trả về qua pyodbc
+                        # là decimal.Decimal, trong khi m["sl"]/m["tt"] (số lượng/tiền tự
+                        # tính ở Python) luôn là float -> Decimal + float ném lỗi
+                        # "unsupported operand type(s) for +: 'decimal.Decimal' and
+                        # 'float'" ngay khi cộng dồn số dư (sl_sau = sl_truoc + m["sl"]),
+                        # khiến "Nhập kho vào MISA" luôn bị lỗi hoàn tác không ghi được gì
+                        # mỗi khi mặt hàng ĐÃ có giao dịch Sổ Kho từ trước (đã xác nhận qua
+                        # báo cáo lỗi thật: "unsupported operand type(s) for +:
+                        # 'decimal.Decimal' and 'float'" ở bước "4a. Nhập kho vào MISA").
+                        sl0, tien0 = float(row[0] or 0), float(row[1] or 0)
                 except Exception:
                     pass
                 so_du_kho[key] = [sl0, tien0]

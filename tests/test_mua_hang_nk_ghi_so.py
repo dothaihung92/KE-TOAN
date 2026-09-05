@@ -443,3 +443,66 @@ print("PASS: Test 4 — hóa đơn Số HĐ '326' (NCC 0313093362) KHÔNG còn b
       "HĐ của CÙNG NCC nhưng từ gần 4 năm trước trong PUInvoice — đã ghi đúng, không còn bỏ qua nhầm.")
 
 print("\nALL DONE (test 4)")
+
+# --- Test 5: đúng lỗi THẬT người dùng báo cáo — "4a. Nhập kho vào MISA" bị
+# "Lỗi — Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): unsupported
+# operand type(s) for +: 'decimal.Decimal' and 'float'". Nguyên nhân: mặt
+# hàng ĐÃ CÓ giao dịch Sổ Kho (InventoryLedger) TỪ TRƯỚC ngày chứng từ mới
+# -> so_du_kho_truoc() phải chạy SUM(...) THẬT qua SQL Server, kết quả trả
+# về qua pyodbc là decimal.Decimal (không phải int/float như FakeCursor cơ
+# bản ở Test 1-4 lỡ mô phỏng, luôn = 0 nên chưa từng lộ lỗi này) — cộng
+# Decimal + float (m["sl"]/m["tt"], luôn là float) ném TypeError, khiến
+# GHI VÀO MISA THẤT BẠI HOÀN TOÀN (đã hoàn tác) mỗi khi mặt hàng ĐÃ có tồn
+# kho trước đó — đúng trường hợp PHỔ BIẾN NHẤT trong thực tế (hiếm khi 1
+# mặt hàng nhập kho lần ĐẦU TIÊN).
+import decimal
+
+
+class FakeCursor5(FakeCursor):
+    def fetchone(self):
+        row = super().fetchone()
+        if row is not None and self._last_sql and \
+                "ISNULL(SUM(InwardQuantity-OutwardQuantity),0)" in self._last_sql:
+            # Mô phỏng ĐÚNG kiểu dữ liệu pyodbc trả về cho SUM trên cột DECIMAL
+            # của SQL Server thật — decimal.Decimal, không phải int/float.
+            return tuple(decimal.Decimal(str(v)) for v in row)
+        return row
+
+
+cur5 = FakeCursor5()
+# Mặt hàng MH216-0 (iid-1) tại kho KHOCHINH (sid-1) ĐÃ CÓ tồn TRƯỚC đó (SL 10,
+# tiền 367.500) từ chứng từ khác/ghi trực tiếp trong MISA trước ngày chứng từ mới.
+cur5.inventory_ledger_existing = [
+    ("iid-1", "sid-1", datetime.datetime(2026, 1, 1), 10, 0, 367500, 0),
+]
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur5)
+flat5 = [
+    # sl/tt CỐ Ý là số lẻ (float thật, khác Test 1-4 dùng số nguyên tình cờ
+    # không lộ lỗi Decimal+int vẫn cộng được bình thường) — khớp đúng dữ
+    # liệu Excel/Bảng kê thật đi qua _to_num() (trả float khi không phải số
+    # nguyên tròn, xem server.py:_to_num) trước khi tới đây.
+    mk_row("NK-777", "05/01/2026", "500", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 45.92, 36750, 1687560.5, "1561", "331",
+           0, 0, "1331", None, "KHOCHINH"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat5
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r5 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result5:", r5["danh_sach"])
+assert r5["danh_sach"][0]["trang_thai"] == "đã thêm (đã ghi Sổ Tài chính)", (
+    f"Mặt hàng ĐÃ CÓ tồn trước đó (buộc so_du_kho_truoc() chạy SUM SQL thật, trả về decimal.Decimal) "
+    f"PHẢI ghi vào MISA THÀNH CÔNG bình thường, KHÔNG được lỗi 'unsupported operand type(s) for +: "
+    f"decimal.Decimal and float' (đã hoàn tác, không ghi gì) — đúng lỗi thật đã báo cáo ở bước "
+    f"'4a. Nhập kho vào MISA' — got {r5['danh_sach'][0]}")
+invl5 = cur5.inserted["InventoryLedger"]
+assert len(invl5) == 1
+assert invl5[0]["InwardQuantityBalance"] == 10 + 45.92, (
+    f"Số dư luỹ kế PHẢI cộng đúng tồn TRƯỚC (10, kiểu Decimal) + SL nhập mới (45.92, kiểu float) = 55.92 — "
+    f"got {invl5[0]['InwardQuantityBalance']}")
+assert invl5[0]["InwardAmountBalance"] == 367500 + 1687560.5
+print("PASS: Test 5 — mặt hàng ĐÃ CÓ tồn trước (SUM SQL trả decimal.Decimal) ghi vào MISA THÀNH CÔNG, "
+      "không còn lỗi 'unsupported operand type(s) for +: decimal.Decimal and float', số dư luỹ kế cộng "
+      "dồn đúng 10+45.92=55.92.")
+
+print("\nALL DONE (test 5)")
