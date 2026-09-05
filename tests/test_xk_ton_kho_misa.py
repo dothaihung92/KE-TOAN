@@ -108,6 +108,29 @@ try:
         f"Tham số Mã kho đã chọn PHẢI nối SAU tham số ngày, đúng thứ tự đã chọn — được {cur4.last_params}")
     print("PASS ca 4: _misa_lay_ton_kho lọc đúng theo danh sách Mã kho đã chọn.")
 
+    # ===== Ca 4b: đúng lỗi thật người dùng báo cáo — chọn Kỳ báo cáo (vd 2
+    # tháng) ra "Đã có 7427 mã hàng tồn kho" trong khi báo cáo Excel CÙNG kỳ
+    # của chính MISA chỉ có 1497 dòng. Nguyên nhân: SUM SQL cộng dồn TOÀN BỘ
+    # lịch sử InventoryLedger (cần để tính đúng Cuối kỳ) kể cả mã ĐÃ HẾT
+    # SẠCH tồn từ lâu (Đầu kỳ=0, Cuối kỳ=0 — không có gì để dùng) — phải bị
+    # loại khỏi kết quả, KHÔNG được tính là "1 mã hàng tồn kho". Mã có Đầu kỳ
+    # KHÁC 0 dù Cuối kỳ = 0 (xuất hết trong kỳ) vẫn PHẢI giữ lại (còn ý nghĩa
+    # báo cáo, không phải "hàng ma"). =====
+    ledger_c4b = [
+        ("HH00009-8", "Chậu ABC", "Cái", "HH", "Hàng Hóa", 0, 5, 500000),   # bình thường, còn tồn
+        ("MA-CU-HET", "Hàng cũ đã hết từ lâu", "Cái", "HH", "Hàng Hóa", 0, 0, 0),   # "hàng ma": 0 đầu kỳ, 0 cuối kỳ
+        ("MA-XUAT-HET", "Hàng có đầu kỳ, xuất hết trong kỳ", "Cái", "HH", "Hàng Hóa", 10, 0, 0),  # đầu kỳ > 0
+    ]
+    cur4b = FakeCursor(ledger_rows=ledger_c4b)
+    server._misa_sql_connect = lambda cid, database=None: FakeConn(cur4b)
+    rows4b, _ = server._misa_lay_ton_kho(1, "TESTDB", tu_ngay="2026-01-01", den_ngay="2026-09-04", ma_kho_list=None)
+    ma_con_lai = {r["ma"] for r in rows4b}
+    assert ma_con_lai == {"HH00009-8", "MA-XUAT-HET"}, (
+        f"'MA-CU-HET' (Đầu kỳ=0 VÀ Cuối kỳ=0 — không còn gì để dùng) PHẢI bị loại khỏi kết quả; "
+        f"'HH00009-8' (còn tồn) và 'MA-XUAT-HET' (có Đầu kỳ, dù Cuối kỳ=0) PHẢI vẫn giữ lại — được {ma_con_lai}")
+    print("PASS ca 4b: _misa_lay_ton_kho loại đúng mã 'hàng ma' (Đầu kỳ=0 VÀ Cuối kỳ=0, không dùng được), "
+          "không còn báo số mã hàng tồn kho bị thổi phồng sai so với báo cáo Excel MISA cùng kỳ.")
+
     # ===== An toàn khi MISA lỗi kết nối / chưa cấu hình database =====
     server._misa_sql_connect = _connect_loi
     assert server._misa_lay_ton_kho(1, "TESTDB") == ([], []), "Kết nối lỗi -> PHẢI trả ([], []) an toàn, không raise"

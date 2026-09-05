@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.178"
+APP_BUILD = "2026-08-31.179"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11823,6 +11823,21 @@ def _misa_lay_ton_kho(cid, database, tu_ngay=None, den_ngay=None, ma_kho_list=No
                       "dau_ky_qty": {ten_kho: dau_ky_sl} if ten_kho else {}}
     out = []
     for it in gop.values():
+        # Mã hàng KHÔNG có tồn ở CẢ 2 mốc Đầu kỳ LẪN Cuối kỳ (== 0) -> không
+        # còn gì để "xuất" (Xuất Kho luôn từ chối gán số lượng > 0 cho mã tồn
+        # 0, xem _xk_kiem_tra_vuot_ton), bỏ qua hẳn khỏi kết quả — KHÁC
+        # _doc_file_ton_kho (đọc file Excel, báo cáo MISA tự loại các mã này
+        # rồi nên không cần lọc lại) — đường LẤY TRỰC TIẾP TỪ SQL ở đây tự
+        # cộng dồn TOÀN BỘ lịch sử InventoryLedger của mã đó (cần thiết để
+        # tính đúng số dư Cuối kỳ), kể cả mã đã ngừng dùng/hết hàng từ nhiều
+        # năm trước không còn liên quan gì tới Kỳ báo cáo đang chọn — xác
+        # nhận đúng qua báo cáo thật: chọn kỳ 2 tháng (01/07-31/08/2026) ra
+        # tới 7427 "mã hàng tồn kho" trong khi báo cáo Excel CÙNG kỳ của
+        # chính MISA chỉ có 1497 dòng — hàng ngàn mã dư ra đều là mã cũ đã
+        # hết sạch tồn (Đầu kỳ=0, Cuối kỳ=0), không có gì để dùng nhưng vẫn
+        # chiếm chỗ trong Sheet TON, làm sai lệch số "Đã có N mã hàng".
+        if not it["ton"] and not it["dau_ky"]:
+            continue
         gia = round(it["gt"] / it["ton"]) if it["ton"] else 0
         kho_qty = it["kho_qty"]
         dau_ky_qty = it["dau_ky_qty"]
