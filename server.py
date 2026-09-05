@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.186"
+APP_BUILD = "2026-08-31.187"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12794,12 +12794,17 @@ def _xk_canh_bao_kho_ton(danh_sach_kho, ton_rows):
     if len(danh_sach_kho) <= 1:
         return None
     mo_ho = [t for t in (ton_rows or []) if not t.get("kho_ro", True)]
-    phan_mo_ho = ""
-    if mo_ho:
-        mau = ", ".join(f"{t.get('ma')} ({t.get('ten','')[:30]})" for t in mo_ho[:8])
-        phan_mo_ho = (f" Trong đó {len(mo_ho)} mã hàng nằm RẢI RÁC ở nhiều kho khác nhau (không xác "
-                      f"định được kho đúng để xuất, vẫn có thể bị MISA từ chối nếu vượt tồn ở 1 kho cụ "
-                      f"thể): {mau}{' ...' if len(mo_ho) > 8 else ''}.")
+    # KHÔNG còn mã nào thật sự mơ hồ (mọi mã đều CHỈ thuộc đúng 1 kho) -> hết
+    # rủi ro thật cần cảnh báo, không cần hiện banner nữa (trước đây hiện
+    # banner CHUNG CHUNG dù không có mã nào cần chú ý, gây hiểu nhầm phần
+    # mềm vẫn còn lỗi dù đã xử lý đúng — xác nhận đúng phản hồi người dùng
+    # sau khi các mã hàng đã được sửa về đúng 1 kho nhất quán).
+    if not mo_ho:
+        return None
+    mau = ", ".join(f"{t.get('ma')} ({t.get('ten','')[:30]})" for t in mo_ho[:8])
+    phan_mo_ho = (f" Trong đó {len(mo_ho)} mã hàng nằm RẢI RÁC ở nhiều kho khác nhau (không xác "
+                  f"định được kho đúng để xuất, vẫn có thể bị MISA từ chối nếu vượt tồn ở 1 kho cụ "
+                  f"thể): {mau}{' ...' if len(mo_ho) > 8 else ''}.")
     return (f"⚠ File tồn kho gồm {len(danh_sach_kho)} KHO khác nhau: "
             f"{', '.join(danh_sach_kho[:8])}{' ...' if len(danh_sach_kho) > 8 else ''}. "
             f"Mã hàng chỉ thuộc đúng 1 kho đã tự động xuất ĐÚNG kho đó."
