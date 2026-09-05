@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.189"
+APP_BUILD = "2026-08-31.190"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9248,14 +9248,32 @@ def _so_ct_unique(prefix, ngay, mst, seen):
     """Như _so_ct_theo_nam_mst() nhưng LUÔN DUY NHẤT: nếu trùng với dòng
     trước (cùng NCC, cùng năm) -> cắt bớt để chừa chỗ thêm số thứ tự
     '-2','-3'... vẫn giữ tổng tối đa 20 ký tự (MISA yêu cầu mỗi chứng từ
-    phải có số duy nhất). 'seen' là dict đếm dùng chung cho cả lượt xuất."""
+    phải có số duy nhất).
+
+    QUAN TRỌNG: 'seen' theo dõi ĐÚNG NHỮNG CHUỖI ĐÃ CẤP RA (không phải đếm
+    theo base gốc như trước) — trước đây đếm collision RIÊNG cho từng base
+    gốc rồi mới cắt bớt base để chèn hậu tố, nên 2 base KHÁC NHAU nhưng chỉ
+    khác nhau ở ĐÚNG PHẦN BỊ CẮT (vd MST đơn vị trực thuộc '...-002' và
+    '...-003', cùng 20 ký tự, chỉ khác ký tự CUỐI) mà CÙNG rơi vào bậc
+    collision thứ N (vd cả 2 đều là hóa đơn thứ 2 trong năm của MST gốc đó)
+    sẽ bị cắt về ĐÚNG 1 chuỗi giống hệt nhau — gộp NHẦM 2 hóa đơn HOÀN TOÀN
+    KHÁC NHAU (khác Số HĐ, khác ngày, khác chi nhánh) vào chung 1 chứng từ,
+    "nuốt mất" 1 hóa đơn (không có chứng từ riêng) và cộng dồn sai tiền vào
+    hóa đơn còn lại — xác nhận đúng qua báo cáo thật: hóa đơn 1030 (MST
+    '3700152194-002', 14/05/2025) và 1696 (MST '3700152194-003', 06/11/2025)
+    CÙNG ra chuỗi 'NK20253700152194-0-2', khiến 1696 "biến mất" khỏi MISA
+    còn 1030 bị cộng dồn nhầm thêm 15.068.561đ của 1696. Giờ kiểm tra ĐÚNG
+    chuỗi cuối cùng đã cấp (không phải base gốc) trước khi trả về, tăng dần
+    hậu tố tới khi THẬT SỰ chưa ai dùng."""
     base = _so_ct_theo_nam_mst(prefix, ngay, mst)
-    n = seen.get(base, 0) + 1
-    seen[base] = n
-    if n == 1:
-        return base
-    suf = f"-{n}"
-    return base[: max(0, 20 - len(suf))] + suf
+    cand = base
+    n = 1
+    while cand in seen:
+        n += 1
+        suf = f"-{n}"
+        cand = base[: max(0, 20 - len(suf))] + suf
+    seen[cand] = True
+    return cand
 
 def _so_ct_unique_memo(prefix, ngay, mst, invoice_key, seen, cache):
     """Như _so_ct_unique() nhưng NHỚ theo invoice_key: các dòng cùng 1 hóa
