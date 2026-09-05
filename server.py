@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.169"
+APP_BUILD = "2026-08-31.170"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16570,36 +16570,46 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             if doi_chieu_duoc:
                 if refid_khop is not None:
                     hien_ro, pu_refid_an, la_cua_pm_an = _hd_da_co_hien_ro(refid_khop, k_doc)
-                    if hien_ro is False:
+                    # ĐÃ CÓ trong PUInvoice (dù đang hiện rõ bình thường trên
+                    # MISA hay đang ẩn/lỗi) nhưng DO CHÍNH phần mềm tạo trước
+                    # đó (la_cua_pm_an) — bấm "Ghi đè" thì AN TOÀN để tự xóa +
+                    # ghi lại. TRƯỚC ĐÂY nhánh "hiện rõ bình thường" (else ở
+                    # dưới) LUÔN coi là "đã có, bỏ qua" — HOÀN TOÀN không xét
+                    # cờ ghi_de — khiến bấm "Ghi đè N chứng từ" báo "Đã ghi 0
+                    # chứng từ" cho MỌI chứng từ THẬT SỰ hiện rõ trên MISA (đa
+                    # số trường hợp) dù nội dung bên trong đang THIẾU/SAI (vd
+                    # bị "LỆCH" do lúc ghi lần trước thiếu mã hàng, 1 số dòng
+                    # bị bỏ qua) — xác nhận đúng qua báo cáo thật: bấm "♻ Ghi
+                    # đè 21 chứng từ" (toàn bộ đều "khớp theo MST NCC + Số
+                    # HĐ, bỏ qua" — tức hiện rõ bình thường) vẫn ra "Đã ghi 0
+                    # chứng từ (0 dòng)".
+                    if la_cua_pm_an and ghi_de and not preview:
+                        # pu_refid_an có thể là None (hóa đơn không liên
+                        # kết được PUVoucher nào — xem _hd_da_co_hien_ro,
+                        # dấu hiệu (3)) — KHÔNG bắt buộc phải có pu_refid
+                        # mới cho dọn, chỉ cần bỏ qua các lệnh xóa PUVoucher*
+                        # (không có gì để xóa) và vẫn xóa PUInvoice bên dưới.
+                        ghi_de_hd_an = True
+                    elif hien_ro is False:
                         # ĐÃ CÓ trong PUInvoice nhưng KHÔNG hiện trên màn Mua
                         # hàng MISA thật — KHÔNG được báo yên tâm "đã có, bỏ
                         # qua" (người dùng cứ tưởng đã ghi, hóa đơn "biến
-                        # mất" khỏi báo cáo mà không ai biết). Chỉ TỰ xóa +
-                        # ghi lại khi ĐÚNG là bản ghi lỗi/ẩn DO CHÍNH phần
-                        # mềm tạo trước đó (CustomField10=_PM_MARK) — dữ liệu
-                        # KHÁC (khách tự nhập/hệ thống khác) tuyệt đối không
-                        # đụng, chỉ báo cho người dùng tự kiểm tra trong MISA.
-                        if la_cua_pm_an and ghi_de and not preview:
-                            # pu_refid_an có thể là None (hóa đơn không liên
-                            # kết được PUVoucher nào — xem _hd_da_co_hien_ro,
-                            # dấu hiệu (3)) — KHÔNG bắt buộc phải có pu_refid
-                            # mới cho dọn, chỉ cần bỏ qua các lệnh xóa PUVoucher*
-                            # (không có gì để xóa) và vẫn xóa PUInvoice bên dưới.
-                            ghi_de_hd_an = True
-                        else:
-                            trung += 1
-                            if la_cua_pm_an:
-                                bo_qua_an_pm += 1
-                            ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
-                                        "trang_thai": (
-                                            "⚠ đã có trong dữ liệu (PUInvoice) nhưng KHÔNG hiện trên "
-                                            "màn hình Mua hàng MISA (view/bộ lọc chi nhánh-PostedDate-"
-                                            "DisplayOnBook)"
-                                            + (" — bấm \"Ghi đè\" để phần mềm tự xóa bản lỗi (do chính "
-                                               "phần mềm tạo) rồi ghi lại đúng" if la_cua_pm_an else
-                                               " — chứng từ này KHÔNG do phần mềm tạo, phần mềm KHÔNG tự "
-                                               "sửa, hãy tự kiểm tra lại trong MISA"))})
-                            continue
+                        # mất" khỏi báo cáo mà không ai biết). Dữ liệu KHÁC
+                        # (khách tự nhập/hệ thống khác) tuyệt đối không đụng,
+                        # chỉ báo cho người dùng tự kiểm tra trong MISA.
+                        trung += 1
+                        if la_cua_pm_an:
+                            bo_qua_an_pm += 1
+                        ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                                    "trang_thai": (
+                                        "⚠ đã có trong dữ liệu (PUInvoice) nhưng KHÔNG hiện trên "
+                                        "màn hình Mua hàng MISA (view/bộ lọc chi nhánh-PostedDate-"
+                                        "DisplayOnBook)"
+                                        + (" — bấm \"Ghi đè\" để phần mềm tự xóa bản lỗi (do chính "
+                                           "phần mềm tạo) rồi ghi lại đúng" if la_cua_pm_an else
+                                           " — chứng từ này KHÔNG do phần mềm tạo, phần mềm KHÔNG tự "
+                                           "sửa, hãy tự kiểm tra lại trong MISA"))})
+                        continue
                     else:
                         trung += 1
                         ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
@@ -17241,7 +17251,13 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 so_hoa_don += 1
             them_ct += 1
             them_dong += len(detail_rows)
-            if ghi_de_ct:
+            # ghi_de_hd_an (ghi đè bằng đối chiếu NỘI DUNG hóa đơn — xem
+            # nhánh doi_chieu_duoc ở trên) là 1 kiểu "ghi đè" KHÁC ghi_de_ct
+            # (ghi đè theo "Số chứng từ" trùng nhãn) nhưng CÙNG Ý NGHĨA cho
+            # người xem kết quả — gộp cả 2 khi báo "đã ghi đè"/đếm go, để
+            # không hiện nhầm "đã thêm" cho 1 chứng từ THẬT RA là ghi đè.
+            da_ghi_de = ghi_de_ct or ghi_de_hd_an
+            if da_ghi_de:
                 go += 1
             if ngay_loi:
                 so_ngay_loi += 1
@@ -17249,7 +17265,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             if tien_0:
                 so_tien_0 += 1
             hau_to_so = " (đã ghi Sổ Tài chính)" if co_the_ghi_so_tai_chinh else " (CHƯA ghi sổ)"
-            st = ("sẽ ghi đè" if preview else "đã ghi đè" + hau_to_so) if ghi_de_ct \
+            st = ("sẽ ghi đè" if preview else "đã ghi đè" + hau_to_so) if da_ghi_de \
                 else ("sẽ thêm" if preview else "đã thêm" + hau_to_so)
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
                         "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
