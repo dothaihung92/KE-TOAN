@@ -689,7 +689,7 @@ print("\nALL DONE (test 7)")
 class FakeCursor8(FakeCursor):
     def fetchall(self):
         sql = self._last_sql
-        if sql.startswith("SELECT il.InventoryItemCode, il.StockCode FROM InventoryLedger il"):
+        if sql.startswith("SELECT il.[InventoryItemCode], il.[StockCode] FROM InventoryLedger il"):
             # mã 'MH216-0' đã từng Nhập kho vào 'KHOCHINH' trước đó.
             return [("MH216-0", "KHOCHINH")]
         return super().fetchall()
@@ -739,7 +739,7 @@ class FakeCursor9(FakeCursor):
             return [("iid-1", "MH216-0", "uid-cai", "Que gặm hương bò 120g"),
                     ("iid-2", "MH217-0", "uid-cai", "Que gặm hương phô mai 120g"),
                     ("iid-3", "CCDC072", "uid-cai", "Máy lạnh NAGAKAWA NIS-C09R2U51")] + extra
-        if sql.startswith("SELECT il.InventoryItemCode, il.StockCode FROM InventoryLedger il"):
+        if sql.startswith("SELECT il.[InventoryItemCode], il.[StockCode] FROM InventoryLedger il"):
             # Mô phỏng ĐÚNG giới hạn thật của SQL Server (2100 tham số/lệnh) —
             # nếu câu truy vấn lỡ nhét CẢ Danh mục (1503 mã, x2 nếu còn IN
             # trùng lặp = 3006 tham số) sẽ VỠ ở đây, đúng lỗi thật đã gặp.
@@ -840,7 +840,7 @@ class FakeCursor11(FakeCursor):
             moi = [(r["InventoryItemID"], r["InventoryItemCode"], r["UnitID"], r["InventoryItemName"])
                    for r in self.inserted.get("InventoryItem", [])]
             return co_san + moi
-        if sql.startswith("SELECT il.InventoryItemCode, il.StockCode FROM InventoryLedger il"):
+        if sql.startswith("SELECT il.[InventoryItemCode], il.[StockCode] FROM InventoryLedger il"):
             # Lịch sử THẬT vẫn còn nguyên trong InventoryLedger (chứng từ
             # 25/12/2025 cũ, gắn với GUID CŨ đã bị xóa) — CHỈ còn nhận diện
             # được qua đúng CODE văn bản 'MH1561-8', không còn GUID nào khớp.
@@ -877,3 +877,69 @@ print("PASS: Test 11 — mã hàng dù bị xóa khỏi Danh mục rồi tự t�
       "từ 20/01/2026 vẫn ghi sai trước fix này).")
 
 print("\nALL DONE (test 11)")
+
+# --- Test 12: đúng ca thật người dùng vừa báo lại NGAY SAU khi build .184
+# (round 4) lên máy — mã 'MH1269-0' (hóa đơn NCC CÔNG TY CỔ PHẦN IPP, nhập
+# ngày 09/07/2026, thuộc ĐÚNG đợt import 01/07-31/08/2026 vừa chạy) KHÔNG
+# hề bị xóa/tạo lại (GUID InventoryItemID vẫn nguyên), ĐÃ có lịch sử Nhập
+# kho cũ (17/10/2025 + 22/12/2025) vào kho "Kho Chó Mèo KO VAT" — nhưng hóa
+# đơn MỚI vẫn bị ghi nhầm vào kho mặc định "HH". Nguyên nhân: round 4 (Test
+# 11) đổi hẳn sang tra InventoryLedger.InventoryItemCode/StockCode (2 CỘT
+# VĂN BẢN) nhưng GIẢ ĐỊNH SAI là 2 cột này LUÔN tồn tại trên bảng
+# InventoryLedger THẬT của MỌI người dùng — bảng InventoryLedger thật của
+# người dùng này KHÔNG có 2 cột đó, khiến câu SQL báo lỗi "Invalid column
+# name", bị except (dòng "không tra được lịch sử -> an toàn...") nuốt mất,
+# hoc_kho_gan_nhat RỖNG cho MỌI mã — kể cả mã CHƯA từng bị xóa/tạo lại —
+# tính năng "kho gần nhất" mất tác dụng HOÀN TOÀN, không chỉ riêng ca
+# GUID-churn của Test 11.
+cols_invl_khong_co_cot_van_ban = C(
+    "InventoryLedgerID", "RefID", "RefDetailID", "RefType", "RefNo", "RefDate",
+    "PostedDate", "AccountNumber", "CorrespondingAccountNumber", "StockID", "InventoryItemID",
+    "UnitID", "UnitPrice", "InwardQuantity", "OutwardQuantity", "InwardAmount", "OutwardAmount",
+    "InwardQuantityBalance", "InwardAmountBalance", "JournalMemo", "Description", "BranchID",
+    "MainUnitID", "MainUnitPrice", "MainInwardQuantity", "MainOutwardQuantity",
+    "MainConvertRate", "ExchangeRateOperator", "IsPromotion", "IsPostToManagementBook",
+    "SortOrder", "RefOrder", "IsUnUpdateOutwardPrice", "AccountName", "AccountObjectID",
+    "AccountObjectCode", "AccountObjectName", "AccountObjectNameDI", "IsUpdateRedundant",
+    "RefTypeName", "UnUpdateOutwardPriceType", "InOutWardType", "INRefOrder", "CurrencyID",
+    "ExchangeRate", "IsInward", "InventoryResaleTypeID", "RefNoFinance")
+TABLES["InventoryLedger"] = cols_invl_khong_co_cot_van_ban   # mô phỏng bảng thật KHÔNG có cột văn bản
+
+
+class FakeCursor12(FakeCursor):
+    def fetchall(self):
+        sql = self._last_sql
+        if sql.startswith("SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il"):
+            # Lịch sử THẬT (17/10/2025 + 22/12/2025) vẫn còn nguyên, tra được
+            # qua GUID (mã KHÔNG hề bị xóa/tạo lại) — sid-1 = kho đã dùng.
+            return [("iid-1", "sid-1")]
+        return super().fetchall()
+
+
+cur12 = FakeCursor12()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur12)
+flat12 = [
+    mk_row("NK-801", "09/07/2026", "2026031150933", "0313093362", "CÔNG TY TNHH DOGGYMAN VIỆT NAM",
+           "MH216-0", "Que gặm hương bò 120g", "Cái", 15, 333000, 4995000, "1561", "331",
+           0, 0, "1331", None, "HH"),
+]
+ns['_gen_mua_hang_nk'] = lambda cid, header, rows: flat12
+exec(extract_fn('_misa_ghi_mua_hang'), ns)
+_misa_ghi_mua_hang = ns['_misa_ghi_mua_hang']
+r12 = _misa_ghi_mua_hang(1, "TESTDB", "nk", preview=False, ghi_de=False)
+print("Result12:", {k: r12[k] for k in ("so_chungtu",)})
+assert r12["so_chungtu"] == 1, f"Chứng từ NK-801 phải được ghi bình thường — got {r12}"
+pvd12 = cur12.inserted["PUVoucherDetail"]
+assert len(pvd12) == 1 and pvd12[0]["StockID"] == "sid-1", (
+    f"Mã 'MH216-0' ĐÃ CÓ lịch sử Nhập kho vào kho 'sid-1' (KHÔNG hề bị xóa/tạo lại) — dù bảng "
+    f"InventoryLedger THẬT không có cột văn bản InventoryItemCode/StockCode (khiến câu SQL round 4 lỗi), "
+    f"PHẢI tự rơi về tra theo InventoryItemID/StockID (GUID) để VẪN ghi đúng kho cũ, KHÔNG được rơi về "
+    f"kho mặc định 'HH' của dòng Bảng kê — được {pvd12}")
+print("PASS: Test 12 — khi InventoryLedger THẬT không có cột văn bản InventoryItemCode/StockCode (khác "
+      "giả định round 4), phần mềm tự rơi về tra 'kho gần nhất' qua InventoryItemID/StockID (GUID) thay vì "
+      "mất tác dụng hoàn toàn — đúng ca thật vừa báo lại (mã 'MH1269-0' có lịch sử ổn định nhưng vẫn bị "
+      "ghi nhầm vào kho mặc định 'HH').")
+
+TABLES["InventoryLedger"] = cols_invl   # khôi phục bảng đầy đủ cho các lượt chạy khác
+
+print("\nALL DONE (test 12)")

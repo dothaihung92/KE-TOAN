@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.184"
+APP_BUILD = "2026-08-31.185"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16213,20 +16213,21 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         # "Kho" của Bảng kê, để trống thì mặc định "HH" (xem tra_kho bên trên
         # — trước đây để trống thành StockID=None, có thể gây lỗi MISA
         # "Failed to enable constraints" khi mở chứng từ).
-        hoc_kho_gan_nhat = {}   # mã hàng (lower) -> mã Kho (StockCode) gần nhất đã dùng để nhập
+        hoc_kho_gan_nhat = {}   # mã hàng (lower) -> "kho" gần nhất đã dùng để nhập (StockCode
+                                 # văn bản NẾU hoc_kho_la_ma=True, hoặc thẳng StockID nếu False)
+        hoc_kho_la_ma = True
         if cfg.get("kho") is not None:
             try:
                 # Tra theo InventoryItemCode/StockCode (CỘT VĂN BẢN, lưu SẴN
                 # trên chính InventoryLedger — xem chỗ ghi InventoryLedger ở
-                # dưới, luôn kèm 2 cột này) — KHÔNG tra theo InventoryItemID
-                # (GUID) như round trước: nếu mã hàng từng bị XÓA khỏi Danh
-                # mục InventoryItem rồi TỰ TẠO LẠI (vd người dùng xóa tay
-                # trong MISA, hoặc bị mất do lỗi cũ) sẽ ra GUID MỚI hoàn toàn
-                # khác GUID cũ đã dùng khi nhập kho trước đó — tra theo GUID
-                # sẽ KHÔNG BAO GIỜ khớp được với lịch sử cũ (coi như "mã hoàn
-                # toàn mới", mất hết tác dụng của tính năng) dù đúng cùng 1
-                # mã hàng — tra theo CODE văn bản không bị ảnh hưởng bởi GUID
-                # có đổi hay không, luôn khớp đúng lịch sử THẬT của mã đó.
+                # dưới, luôn kèm 2 cột này NẾU bảng THẬT của người dùng có cột
+                # đó) — KHÔNG tra theo InventoryItemID (GUID) như round trước:
+                # nếu mã hàng từng bị XÓA khỏi Danh mục InventoryItem rồi TỰ
+                # TẠO LẠI (vd người dùng xóa tay trong MISA) sẽ ra GUID MỚI
+                # hoàn toàn khác GUID cũ đã dùng khi nhập kho trước đó — tra
+                # theo GUID sẽ KHÔNG khớp được với lịch sử cũ (coi như "mã
+                # hoàn toàn mới") dù đúng cùng 1 mã hàng — tra theo CODE văn
+                # bản không bị ảnh hưởng bởi GUID có đổi hay không.
                 #
                 # CHỈ tra cho đúng những mã hàng THẬT SỰ có mặt trong Bảng kê
                 # Đầu vào đang xử lý ở lượt này (flat) — KHÔNG dùng TOÀN BỘ
@@ -16242,16 +16243,58 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                                      if str(r[cfg["ma"]] or "").strip()})
                 if ma_trong_dot:
                     ph = ",".join("?" * len(ma_trong_dot))
-                    for ma_h, stock_code_h in cur.execute(
-                            "SELECT il.InventoryItemCode, il.StockCode FROM InventoryLedger il "
-                            "INNER JOIN (SELECT InventoryItemCode, MAX(RefDate) AS md FROM InventoryLedger "
-                            "WHERE InventoryItemCode IN (%s) AND InwardQuantity>0 "
-                            "GROUP BY InventoryItemCode) mx "
-                            "ON il.InventoryItemCode=mx.InventoryItemCode AND il.RefDate=mx.md "
-                            "WHERE il.InwardQuantity>0" % ph, ma_trong_dot).fetchall():
-                        mk = str(ma_h or "").strip().lower()
-                        if mk and stock_code_h and mk not in hoc_kho_gan_nhat:
-                            hoc_kho_gan_nhat[mk] = stock_code_h
+                    _cols_invl_som = _misa_cot_bang_that(cur, "InventoryLedger")
+                    _c_ma_ct = _misa_chon_cot(_cols_invl_som, "InventoryItemCode")
+                    _c_kho_ct = _misa_chon_cot(_cols_invl_som, "StockCode")
+                    if _c_ma_ct and _c_kho_ct:
+                        for ma_h, stock_code_h in cur.execute(
+                                "SELECT il.[%s], il.[%s] FROM InventoryLedger il "
+                                "INNER JOIN (SELECT [%s] AS ma_ct, MAX(RefDate) AS md FROM InventoryLedger "
+                                "WHERE [%s] IN (%s) AND InwardQuantity>0 "
+                                "GROUP BY [%s]) mx "
+                                "ON il.[%s]=mx.ma_ct AND il.RefDate=mx.md "
+                                "WHERE il.InwardQuantity>0" % (
+                                    _c_ma_ct, _c_kho_ct, _c_ma_ct, _c_ma_ct, ph, _c_ma_ct, _c_ma_ct),
+                                ma_trong_dot).fetchall():
+                            mk = str(ma_h or "").strip().lower()
+                            if mk and stock_code_h and mk not in hoc_kho_gan_nhat:
+                                hoc_kho_gan_nhat[mk] = stock_code_h
+                    else:
+                        # DỰ PHÒNG: InventoryLedger THẬT của người dùng KHÔNG có
+                        # cột văn bản InventoryItemCode/StockCode (khác giả định
+                        # ban đầu) — câu SQL trên sẽ báo lỗi "Invalid column
+                        # name", bị except bên dưới nuốt mất, hoc_kho_gan_nhat
+                        # coi như RỖNG cho MỌI mã — xác nhận đúng qua ca thật: mã
+                        # 'MH1269-0' đã có lịch sử nhập kho 'Kho Chó Mèo KO VAT'
+                        # từ trước (17/10/2025, 22/12/2025) nhưng hóa đơn MỚI
+                        # (09/07/2026, cùng đợt import .184) vẫn bị rơi về mặc
+                        # định 'HH' dù không hề bị xóa/tạo lại mã hàng. Quay lại
+                        # tra theo InventoryItemID/StockID (GUID, CHẮC CHẮN tồn
+                        # tại vì cả pipeline ghi InventoryLedger phụ thuộc 2 cột
+                        # này) như bản .181-.183 — vẫn còn lỗi GUID-churn với mã
+                        # bị xóa+tạo lại, nhưng đúng cho đa số trường hợp thông
+                        # thường (mã hàng KHÔNG bị xóa) thay vì mất tác dụng
+                        # hoàn toàn với MỌI mã như hiện tại.
+                        iid_to_ma = {}
+                        for m in ma_trong_dot:
+                            ml = m.lower()
+                            info = hang.get(ml)
+                            if info and info[0]:
+                                iid_to_ma[info[0]] = ml
+                        iid_set = list(iid_to_ma.keys())
+                        if iid_set:
+                            ph2 = ",".join("?" * len(iid_set))
+                            for iid_h, stock_id_h in cur.execute(
+                                    "SELECT il.InventoryItemID, il.StockID FROM InventoryLedger il "
+                                    "INNER JOIN (SELECT InventoryItemID, MAX(RefDate) AS md FROM InventoryLedger "
+                                    "WHERE InventoryItemID IN (%s) AND InwardQuantity>0 "
+                                    "GROUP BY InventoryItemID) mx "
+                                    "ON il.InventoryItemID=mx.InventoryItemID AND il.RefDate=mx.md "
+                                    "WHERE il.InwardQuantity>0" % ph2, iid_set).fetchall():
+                                mk = iid_to_ma.get(iid_h)
+                                if mk and stock_id_h and mk not in hoc_kho_gan_nhat:
+                                    hoc_kho_gan_nhat[mk] = stock_id_h
+                            hoc_kho_la_ma = False
             except Exception:
                 pass   # không tra được lịch sử -> an toàn, rơi về cách cũ (đọc cột "Kho" của dòng)
         # danh mục TÀI KHOẢN thật của MISA — các cột TK trên PUVoucherDetail
@@ -17010,10 +17053,19 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 if cfg.get("kho") is not None:
                     ma_ct_kho = str(r[cfg["ma"]] or "").strip()
                     mk_kho = ma_ct_kho.lower()
-                    kho_text = hoc_kho_gan_nhat.get(mk_kho) or r[cfg["kho"]] or "HH"
-                    stock_id = tra_kho(kho_text)
-                    if mk_kho and stock_id:
-                        hoc_kho_gan_nhat.setdefault(mk_kho, kho_text)
+                    if hoc_kho_la_ma:
+                        kho_text = hoc_kho_gan_nhat.get(mk_kho) or r[cfg["kho"]] or "HH"
+                        stock_id = tra_kho(kho_text)
+                        if mk_kho and stock_id:
+                            hoc_kho_gan_nhat.setdefault(mk_kho, kho_text)
+                    else:
+                        # DỰ PHÒNG (bảng InventoryLedger thật không có cột
+                        # InventoryItemCode/StockCode — xem chú thích ở khối
+                        # xây hoc_kho_gan_nhat phía trên) — hoc_kho_gan_nhat
+                        # lưu THẲNG StockID (GUID), không qua tra_kho() nữa.
+                        stock_id = hoc_kho_gan_nhat.get(mk_kho) or tra_kho(r[cfg["kho"]]) or tra_kho("HH")
+                        if mk_kho and stock_id:
+                            hoc_kho_gan_nhat.setdefault(mk_kho, stock_id)
                 mo_ta = ten_h or str(r[cfg["ten"]] or "")
                 detail_rows.append(dict(_PU_DETAIL_DEFAULT, **{
                     "RefDetailID": str(_uuid.uuid4()), "RefID": ref_id, "InventoryItemID": iid,
