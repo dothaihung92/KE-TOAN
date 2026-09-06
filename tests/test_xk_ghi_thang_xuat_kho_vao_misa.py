@@ -66,9 +66,14 @@ cols_inoutwarddetail = C("RefDetailID", "RefID", "InventoryItemID", "Description
     "ExchangeRateOperator", "SortOrder", "IsPromotion")
 cols_inventoryitem = C("InventoryItemID", "InventoryItemCode", "UnitID", "InventoryItemName")
 cols_stock = C("StockID", "StockCode", "StockName")
+cols_ininoutlist = C("RefID", "RefDate", "PostedDate", "RefType", "RefNoFinance", "RefNoManagement",
+    "IsPostedFinance", "IsPostedManagement", "DisplayOnBook", "BranchID", "RefOrder", "CreatedDate",
+    "CreatedBy", "ModifiedDate", "ModifiedBy", "CustomField10", "ListTableName", "INType", "RefTypeName",
+    "TotalAmountFinance", "TotalAmountManagement", "TotalAmount", "TotalAmountOC")
 
 TABLES = {"INOutward": cols_inoutward, "INOutwardDetail": cols_inoutwarddetail,
-          "InventoryItem": cols_inventoryitem, "Stock": cols_stock}
+          "InventoryItem": cols_inventoryitem, "Stock": cols_stock,
+          "INInwardOutwardList": cols_ininoutlist}
 ns['_misa_cot_bang_that'] = lambda cur, table: {c.lower(): (c, t) for c, t in TABLES.get(table, [])}
 
 
@@ -175,6 +180,18 @@ assert det[0]["Quantity"] == 10 and det[0]["UnitPriceFinance"] == 100000 and det
 assert det[1]["InventoryItemID"] == "iid-mh02" and det[1]["AmountFinance"] == 250000
 print("PASS 1: ghi đúng INOutward/INOutwardDetail — Số CT/TK Nợ 632-Có 1561/tổng tiền khớp ảnh chụp MISA thật, CHƯA ghi sổ.")
 
+# ----- Test 1b (đúng lỗi thật người dùng vừa báo "chưa thấy phiếu xk"): PHẢI
+# ghi kèm 1 dòng INInwardOutwardList — bảng RIÊNG nguồn cho lưới MISA "Kho >
+# Nhập, xuất kho" hiển thị (khác InventoryLedger/Sổ Kho tính giá vốn, KHÔNG
+# ghi) — CÙNG RefID với INOutward, ListTableName='INOutward', INType=1. -----
+iol = cur1.inserted["INInwardOutwardList"]
+assert len(iol) == 1, f"PHẢI ghi đúng 1 dòng INInwardOutwardList (thiếu bảng này khiến chứng từ ghi đúng vào INOutward nhưng KHÔNG hiện trên lưới MISA) — got {len(iol)}"
+assert iol[0]["RefID"] == h["RefID"], "INInwardOutwardList.RefID phải TRÙNG với INOutward.RefID vừa ghi"
+assert iol[0]["ListTableName"] == "INOutward" and iol[0]["INType"] == 1
+assert iol[0]["RefNoFinance"] == "XK T12/2024" and iol[0]["TotalAmountFinance"] == 1250000
+assert iol[0]["IsPostedFinance"] is False, "phải sao chép ĐÚNG trạng thái CHƯA GHI SỔ từ header INOutward"
+print("PASS 1b: ghi kèm đúng 1 dòng INInwardOutwardList (cùng RefID, ListTableName='INOutward', INType=1) — đúng lỗi thật 'chưa thấy phiếu xk' đã báo.")
+
 # ----- Test 2: mã hàng KHÔNG có trong Danh mục Vật tư MISA -> BỎ QUA dòng
 # đó (không chặn hẳn cả chứng từ), báo lại đúng số lượng bị bỏ qua. -----
 cur2 = FakeCursor()
@@ -239,7 +256,11 @@ r6a = _chay(cur6, GIATHANH_CO_BAN, TON_CO_BAN, ghi_de=False)
 assert r6a.get("da_ton_tai") is True and len(cur6.inserted["INOutward"]) == 0, f"got {r6a}"
 r6b = _chay(cur6, GIATHANH_CO_BAN, TON_CO_BAN, ghi_de=True)
 assert r6b.get("da_ghi_de") is True and len(cur6.inserted["INOutward"]) == 1
+assert len(cur6.inserted["INInwardOutwardList"]) == 1, "ghi_de vẫn phải ghi lại đúng 1 dòng INInwardOutwardList mới"
 assert ("INOutward", "refid-cu") in cur6.deleted and ("INOutwardDetail", "refid-cu") in cur6.deleted
-print("PASS 6: Số chứng từ trùng do CHÍNH phần mềm tạo trước đó — ghi_de=False chỉ báo đã tồn tại (không ghi), ghi_de=True xoá + ghi lại đúng.")
+assert ("INInwardOutwardList", "refid-cu") in cur6.deleted, (
+    "ghi_de PHẢI xoá luôn dòng INInwardOutwardList CŨ (RefID cũ) — nếu không sẽ để lại dòng RÁC trỏ tới "
+    "1 RefID đã bị xoá, có thể khiến lưới MISA hiện lỗi/dòng hỏng")
+print("PASS 6: Số chứng từ trùng do CHÍNH phần mềm tạo trước đó — ghi_de=False chỉ báo đã tồn tại (không ghi), ghi_de=True xoá + ghi lại đúng CẢ INInwardOutwardList.")
 
 print("\nTẤT CẢ TEST PASS")

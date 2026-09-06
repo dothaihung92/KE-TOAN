@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.198"
+APP_BUILD = "2026-08-31.199"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20404,16 +20404,29 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
     từ = "XK T{tháng}/{năm}" — ĐÚNG quy ước đã xác nhận ở _gen_xuat_kho_rows,
     để 2 luồng xuất Excel/ghi thẳng luôn cho CÙNG 1 kết quả).
 
-    KHÔNG ghi Sổ Kho (InventoryLedger/INInwardOutwardList) và CHƯA GHI SỔ
-    Tài chính (IsPostedFinance=False) — khác Mua hàng nhập kho (nơi đã dò
-    được cấu trúc InventoryLedger đầy đủ qua chứng từ RefType=302 ĐÃ ghi sổ
-    thật để đối chiếu số dư luỹ kế): CHÍNH chứng từ "XK T12/2024" thật ở trên
-    cũng có IsPostedInventoryBookFinance=False dù đã IsPostedFinance=True —
-    nghĩa là MISA tách RIÊNG bước "ghi Sổ Kho" (tính giá vốn xuất/cộng dồn
-    tồn luỹ kế) khỏi bước tạo chứng từ, chưa đủ dữ liệu để tính ĐÚNG số dư
-    luỹ kế đó cho chiều xuất — an toàn hơn là để trống, người dùng tự bấm
-    "Ghi sổ" trong MISA (MISA sẽ tự tính lại Sổ Kho lúc đó), giống mọi hàm
-    _misa_ghi_* khác luôn để CHƯA GHI SỔ theo mặc định.
+    KHÔNG ghi Sổ Kho (InventoryLedger — bảng số dư luỹ kế/giá vốn thật) và
+    CHƯA GHI SỔ Tài chính (IsPostedFinance=False) — khác Mua hàng nhập kho
+    (nơi đã dò được cấu trúc InventoryLedger đầy đủ qua chứng từ RefType=302
+    ĐÃ ghi sổ thật để đối chiếu số dư luỹ kế): CHÍNH chứng từ "XK T12/2024"
+    thật ở trên cũng có IsPostedInventoryBookFinance=False dù đã
+    IsPostedFinance=True — nghĩa là MISA tách RIÊNG bước "ghi Sổ Kho" (tính
+    giá vốn xuất/cộng dồn tồn luỹ kế) khỏi bước tạo chứng từ, chưa đủ dữ
+    liệu để tính ĐÚNG số dư luỹ kế đó cho chiều xuất — an toàn hơn là để
+    trống, người dùng tự bấm "Ghi sổ" trong MISA (MISA sẽ tự tính lại Sổ Kho
+    lúc đó), giống mọi hàm _misa_ghi_* khác luôn để CHƯA GHI SỔ theo mặc
+    định.
+
+    CÓ ghi INInwardOutwardList (khác InventoryLedger ở trên — đây là bảng
+    RIÊNG nguồn cho chính LƯỚI "Kho > Nhập, xuất kho" hiển thị, ListTableName
+    phân biệt Nhập/Xuất, xem cấu hình ConfigListTableID GeneralTableName=
+    'INInwardOutwardList'/ListTableName='INOutward'/Description='Danh sách
+    Nhập, xuất kho') — THIẾU bảng này khiến chứng từ ghi ĐÚNG vào INOutward/
+    INOutwardDetail (dò lại bằng SQL vẫn thấy) nhưng KHÔNG hiện trên lưới
+    MISA — đúng lỗi thật người dùng báo "chưa thấy phiếu xk" sau khi ghi —
+    ĐÚNG bài học đã áp dụng cho Mua hàng nhập kho (PUVoucher cũng ghi kèm
+    INInwardOutwardList vì cùng lý do, xem _misa_ghi_mua_hang) nhưng bị BỎ
+    SÓT khi viết hàm này ban đầu vì lúc đó chưa dò được mẫu dữ liệu thật có
+    ListTableName='INOutward' để đối chiếu chắc chắn.
 
     "Đơn giá vốn"/"Tiền vốn" (UnitPriceFinance/AmountFinance) lấy từ gia_xk
     (giá bình quân trong Sheet TON đã import/dò — CHÍNH giá đã hiển thị cho
@@ -20508,6 +20521,10 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
                     "thong_bao": f"Chứng từ \"{so_ct}\" do phần mềm này tạo trước đó đã có trong MISA — "
                                  f"bấm \"Ghi đè\" nếu muốn xoá và ghi lại theo dữ liệu GIATHANH hiện tại."}
         if da_co and da_co[1] and ghi_de and not preview:
+            try:
+                cur.execute("DELETE FROM INInwardOutwardList WHERE RefID=?", da_co[0])
+            except Exception:
+                pass
             cur.execute("DELETE FROM INOutwardDetail WHERE RefID=?", da_co[0])
             cur.execute("DELETE FROM INOutward WHERE RefID=?", da_co[0])
 
@@ -20591,6 +20608,27 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
         _misa_gan(h, cols_h, now, "INRefOrder")
         _misa_gan(h, cols_h, _PM_MARK, "CustomField10")
 
+        # INInwardOutwardList — bảng RIÊNG nguồn cho lưới "Kho > Nhập, xuất
+        # kho" (xem docstring hàm này) — sao chép mọi trường TÊN TRÙNG với
+        # header INOutward vừa dựng (RefID/RefDate/PostedDate/RefNoFinance/
+        # IsPostedFinance/BranchID/RefOrder/CreatedDate/CustomField10...),
+        # CHỈ ghi đè riêng ListTableName/INType/RefTypeName/Total... — ĐÚNG
+        # cách _misa_ghi_mua_hang đã làm cho chiều Nhập kho (inout_row).
+        inout_row = None
+        cols_inout = _misa_cot_bang_that(cur, "INInwardOutwardList")
+        if cols_inout:
+            header_lower = {k.lower(): v for k, v in h.items()}
+            inout_row = {}
+            for lc, (real_name, t) in cols_inout.items():
+                inout_row[real_name] = header_lower.get(lc, _misa_gia_tri_mac_dinh(t))
+            _misa_gan(inout_row, cols_inout, "INOutward", "ListTableName")
+            _misa_gan(inout_row, cols_inout, 1, "INType")
+            _misa_gan(inout_row, cols_inout, ref_type_ten, "RefTypeName")
+            _misa_gan(inout_row, cols_inout, total_amount, "TotalAmountFinance")
+            _misa_gan(inout_row, cols_inout, total_amount, "TotalAmountManagement")
+            _misa_gan(inout_row, cols_inout, total_amount, "TotalAmount")
+            _misa_gan(inout_row, cols_inout, total_amount, "TotalAmountOC")
+
         if not preview:
             hc = list(h.keys())
             cur.execute("INSERT INTO INOutward ([%s]) VALUES (%s)" %
@@ -20599,6 +20637,10 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
                 dc = list(d.keys())
                 cur.execute("INSERT INTO INOutwardDetail ([%s]) VALUES (%s)" %
                            ("],[".join(dc), ",".join(["?"] * len(dc))), [d[c] for c in dc])
+            if inout_row:
+                ioc = list(inout_row.keys())
+                cur.execute("INSERT INTO INInwardOutwardList ([%s]) VALUES (%s)" %
+                           ("],[".join(ioc), ",".join(["?"] * len(ioc))), [inout_row[c] for c in ioc])
             conn.commit()
         else:
             conn.rollback()
