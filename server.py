@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.196"
+APP_BUILD = "2026-08-31.197"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19600,6 +19600,20 @@ def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi
     return _misa_ghi_ban_hang(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
 
 
+@app.post("/api/misa-sql/import-xuat-kho/{cid}")
+def misa_sql_import_xuat_kho(cid: int, preview: int = 1, database: str = "", ghi_de: int = 0):
+    """Ghi chứng từ Xuất kho (GIATHANH đã gắn mã) thẳng vào MISA — xem
+    _misa_ghi_xuat_kho. preview=1 -> chỉ xem trước, không ghi. CHƯA GHI SỔ
+    (IsPostedFinance=IsPostedManagement=0), người dùng tự bấm "Ghi sổ" trong
+    MISA sau khi kiểm tra. ghi_de=1 -> gỡ chứng từ trùng "Số chứng từ" (do
+    chính phần mềm tạo trước đó) rồi ghi lại."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    return _misa_ghi_xuat_kho(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+
+
 def _misa_sua_thieu_sainvoicereference(cid, database, preview=True):
     """GHI (trừ preview=True) — bổ sung bảng SAInvoiceReference còn THIẾU cho
     các chứng từ Bán hàng DO PHẦN MỀM NÀY tạo TRƯỚC KHI phát hiện lỗi (build
@@ -20370,6 +20384,239 @@ def _misa_hoc_reftype(cur, table, tu_khoa):
         rt, _rtn = _misa_pu_reftype(cur, tu_khoa, master_table=table)
         hoc_rt = rt
     return hoc_rt, hoc_dob
+
+def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
+    """Ghi chứng từ 'Xuất kho' (màn MISA Kho > Nhập, xuất kho > Xuất kho) THẲNG
+    vào MISA (bảng RIÊNG INOutward/INOutwardDetail) — theo yêu cầu "thêm nút
+    import thẳng xuất kho vào misa. import giống như hình" kèm ảnh chụp màn
+    hình MISA (Ngày hạch toán/chứng từ, Số chứng từ "XK T12/2024", Tổng tiền
+    568.750.526, TK Nợ 632/Có 1561...).
+
+    Cấu trúc INOutward/INOutwardDetail xác nhận ĐÚNG 1:1 qua chính chứng từ
+    THẬT "XK T12/2024" (TotalAmountFinance=568750526.0000, RefType=2020,
+    DebitAccount=632/CreditAccount=1561 trên dòng chi tiết) trong file cấu
+    trúc CSDL người dùng gửi ("📄 Xuất cấu trúc TẤT CẢ bảng") — khớp đúng ảnh
+    chụp màn hình, không phải đoán bừa tên bảng/cột.
+
+    Dữ liệu lấy từ GIATHANH đã lưu (đã gắn mã, CÙNG NGUỒN với "🗂 Xuất file
+    Xuất Kho" — xem _gen_xuat_kho_rows), gộp thành 1 chứng từ DUY NHẤT/lần
+    bấm (Ngày hạch toán = CUỐI THÁNG của hoá đơn mới nhất trong lô, Số chứng
+    từ = "XK T{tháng}/{năm}" — ĐÚNG quy ước đã xác nhận ở _gen_xuat_kho_rows,
+    để 2 luồng xuất Excel/ghi thẳng luôn cho CÙNG 1 kết quả).
+
+    KHÔNG ghi Sổ Kho (InventoryLedger/INInwardOutwardList) và CHƯA GHI SỔ
+    Tài chính (IsPostedFinance=False) — khác Mua hàng nhập kho (nơi đã dò
+    được cấu trúc InventoryLedger đầy đủ qua chứng từ RefType=302 ĐÃ ghi sổ
+    thật để đối chiếu số dư luỹ kế): CHÍNH chứng từ "XK T12/2024" thật ở trên
+    cũng có IsPostedInventoryBookFinance=False dù đã IsPostedFinance=True —
+    nghĩa là MISA tách RIÊNG bước "ghi Sổ Kho" (tính giá vốn xuất/cộng dồn
+    tồn luỹ kế) khỏi bước tạo chứng từ, chưa đủ dữ liệu để tính ĐÚNG số dư
+    luỹ kế đó cho chiều xuất — an toàn hơn là để trống, người dùng tự bấm
+    "Ghi sổ" trong MISA (MISA sẽ tự tính lại Sổ Kho lúc đó), giống mọi hàm
+    _misa_ghi_* khác luôn để CHƯA GHI SỔ theo mặc định.
+
+    "Đơn giá vốn"/"Tiền vốn" (UnitPriceFinance/AmountFinance) lấy từ gia_xk
+    (giá bình quân trong Sheet TON đã import/dò — CHÍNH giá đã hiển thị cho
+    người dùng suốt luồng Kiểm tra tồn kho/Gán mã hàng kho, không phải số
+    mới suy đoán); mã nào thiếu gia_xk thì để 0 (không chặn ghi, người dùng
+    tự sửa giá vốn lại trong MISA nếu cần).
+
+    Mã hàng/Kho PHẢI đã có sẵn trong Danh mục MISA (InventoryItem/Stock) —
+    KHÔNG tự tạo mới cho Xuất kho (khác Mua hàng nhập kho, nơi tự tạo Kho
+    thiếu là hợp lý vì đang NHẬP hàng mới vào; Xuất kho là lấy hàng ĐANG CÓ
+    ra khỏi 1 kho có thật, tự tạo 1 kho rỗng để "xuất" từ đó là vô nghĩa và
+    có thể gây âm tồn kho ở kho ảo) — mã/kho nào không khớp được thì BỎ QUA
+    dòng đó, báo lại số lượng bị bỏ qua để người dùng tự xử lý, không chặn
+    hẳn cả chứng từ."""
+    import uuid
+    data = _doc_du_lieu_cty(cid)
+    giathanh = data.get("xk_giathanh") or []
+    ton_rows = data.get("xk_ton") or []
+    vuot = _xk_kiem_tra_vuot_ton(ton_rows, giathanh)
+    if vuot:
+        chi_tiet = "; ".join(f"{v['ma']} (đã gán {v['da_gan']}, tồn {v['ton']}, vượt {v['vuot']})"
+                             for v in vuot[:10])
+        raise HTTPException(400, f"Có {len(vuot)} mã hàng bị gán VƯỢT tồn kho — MISA sẽ TỪ CHỐI ghi sổ "
+                                  f"nguyên cả chứng từ này nếu ghi. Hãy bấm \"↺ Gỡ mã hàng\" rồi "
+                                  f"\"🔍 Dò mã hàng tự động\" lại (hoặc \"✅ Kiểm tra tồn kho\" + \"💾 Lưu "
+                                  f"tạm\"), rồi ghi lại. Chi tiết: {chi_tiet}" + (" ..." if len(vuot) > 10 else ""))
+    rows = [r for r in giathanh if str(r.get("ma") or "").strip()]
+    if not rows:
+        raise HTTPException(400, "Chưa có dòng nào được gắn mã hàng để ghi — bấm \"🔍 Dò mã hàng tự động\" "
+                                  "hoặc gán mã tay trước.")
+    ma_kho_ten = {t.get("ma"): t.get("kho") for t in ton_rows if t.get("kho")}
+    ngay_cuoi = max(rows, key=lambda r: _xk_key_ngay(r.get("ngay")))["ngay"]
+    ngay_ht_s, thang, nam = _xk_cuoi_thang(ngay_cuoi)
+    if not ngay_ht_s:
+        raise HTTPException(400, "Không xác định được ngày hạch toán từ dữ liệu GIATHANH.")
+    ngay_ht = _misa_doc_ngay(ngay_ht_s)
+    so_ct = f"XK T{thang}/{nam}"
+
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        branch_id = _misa_branch_id(cur)
+        cols_h = _misa_cot_bang_that(cur, "INOutward")
+        cols_d = _misa_cot_bang_that(cur, "INOutwardDetail")
+        if not cols_h or not cols_d:
+            raise HTTPException(400, "Không dò được cấu trúc bảng INOutward/INOutwardDetail trên CSDL MISA này "
+                                      "(có thể phiên bản MISA khác) — chưa ghi được.")
+
+        hang = {}
+        for iid, code, uid, ten_h in cur.execute(
+                "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
+                "FROM InventoryItem").fetchall():
+            if code:
+                hang[str(code).strip().lower()] = (iid, uid, str(ten_h or ""))
+        kho_by_ten = {}
+        for sid, scode, sname in cur.execute("SELECT StockID, StockCode, StockName FROM Stock").fetchall():
+            if scode:
+                kho_by_ten[str(scode).strip().lower()] = sid
+            if sname:
+                kho_by_ten.setdefault(str(sname).strip().lower(), sid)
+
+        ref_type, ref_type_ten = 2020, "Xuất kho bán hàng"
+        try:
+            rt_rows = cur.execute(
+                "SELECT RefType, RefTypeName FROM SYSRefType WHERE MasterTableName='INOutward'").fetchall()
+            if rt_rows:
+                best = next((r for r in rt_rows if "bán" in str(r[1] or "").lower()), rt_rows[0])
+                ref_type, ref_type_ten = int(best[0]), (best[1] or ref_type_ten)
+        except Exception:
+            pass
+
+        # trùng "Số chứng từ" — CHỈ coi an toàn để Ghi đè nếu chứng từ trùng số
+        # đó là do CHÍNH phần mềm tạo trước đó (CustomField10=_PM_MARK) — chứng
+        # từ THẬT của khách trùng số thì chặn hẳn, giống mọi hàm _misa_ghi_* khác.
+        c_cf10 = _misa_chon_cot(cols_h, "CustomField10")
+        da_co = None
+        try:
+            sel_mark = ("[%s]" % c_cf10) if c_cf10 else "NULL"
+            for refid, mark in cur.execute(
+                    "SELECT RefID, ISNULL(%s,'') FROM INOutward WHERE RefNoFinance=? OR RefNoManagement=?"
+                    % sel_mark, so_ct, so_ct).fetchall():
+                da_co = (refid, mark == _PM_MARK)
+                break
+        except Exception:
+            pass
+        if da_co and not da_co[1]:
+            raise HTTPException(400, f"Số chứng từ \"{so_ct}\" đã tồn tại trong MISA (không phải do phần mềm "
+                                      f"này tạo) — KHÔNG ghi đè để tránh mất dữ liệu thật của bạn.")
+        if da_co and da_co[1] and not ghi_de:
+            return {"preview": preview, "database": database, "da_ton_tai": True, "so_ct": so_ct,
+                    "thong_bao": f"Chứng từ \"{so_ct}\" do phần mềm này tạo trước đó đã có trong MISA — "
+                                 f"bấm \"Ghi đè\" nếu muốn xoá và ghi lại theo dữ liệu GIATHANH hiện tại."}
+        if da_co and da_co[1] and ghi_de and not preview:
+            cur.execute("DELETE FROM INOutwardDetail WHERE RefID=?", da_co[0])
+            cur.execute("DELETE FROM INOutward WHERE RefID=?", da_co[0])
+
+        max_reforder = 0
+        try:
+            row_mr = cur.execute("SELECT MAX(RefOrder) FROM INOutward").fetchone()
+            max_reforder = int(row_mr[0] or 0) if row_mr and row_mr[0] is not None else 0
+        except Exception:
+            pass
+
+        ref_id = str(uuid.uuid4())
+        now = datetime.datetime.now()
+        bo_thieu_ma, bo_thieu_kho = set(), set()
+        detail_rows = []
+        idx_line = 0
+        total_amount = 0.0
+        for r in rows:
+            ma = str(r.get("ma") or "").strip()
+            m = hang.get(ma.lower())
+            if not m:
+                bo_thieu_ma.add(ma)
+                continue
+            iid, uid, ten_h_misa = m
+            ten_kho = ma_kho_ten.get(r.get("ma")) or ""
+            sid = kho_by_ten.get(str(ten_kho).strip().lower())
+            if not sid:
+                bo_thieu_kho.add(ma)
+                continue
+            sl_kho = r.get("sl_kho")
+            sl = _to_num(sl_kho if sl_kho not in (None, "", 0) else r.get("sl"))
+            if not sl:
+                continue
+            gia = _to_num(r.get("gia_xk")) or 0.0
+            tien = round(sl * gia, 0) if gia else 0.0
+            idx_line += 1
+            total_amount += tien
+            d = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_d.values()}
+            _misa_gan(d, cols_d, str(uuid.uuid4()), "RefDetailID")
+            _misa_gan(d, cols_d, ref_id, "RefID")
+            _misa_gan(d, cols_d, iid, "InventoryItemID")
+            _misa_gan(d, cols_d, r.get("ten_xk") or r.get("ten_sp") or ten_h_misa, "Description")
+            _misa_gan(d, cols_d, sid, "StockID")
+            _misa_gan(d, cols_d, "632", "DebitAccount")
+            _misa_gan(d, cols_d, "1561", "CreditAccount")
+            _misa_gan(d, cols_d, uid, "UnitID")
+            _misa_gan(d, cols_d, uid, "MainUnitID")
+            _misa_gan(d, cols_d, sl, "Quantity")
+            _misa_gan(d, cols_d, sl, "MainQuantity")
+            _misa_gan(d, cols_d, gia, "UnitPriceFinance")
+            _misa_gan(d, cols_d, gia, "MainUnitPriceFinance")
+            _misa_gan(d, cols_d, tien, "AmountFinance")
+            _misa_gan(d, cols_d, 1, "MainConvertRate")
+            _misa_gan(d, cols_d, "*", "ExchangeRateOperator")
+            _misa_gan(d, cols_d, idx_line, "SortOrder")
+            detail_rows.append(d)
+        if not detail_rows:
+            raise HTTPException(400, "Không có dòng nào ghi được"
+                + (f" — {len(bo_thieu_ma)} mã hàng chưa có trong Danh mục Vật tư MISA ({', '.join(sorted(bo_thieu_ma)[:10])})"
+                   if bo_thieu_ma else "")
+                + (f" — {len(bo_thieu_kho)} mã chưa xác định được kho trong MISA ({', '.join(sorted(bo_thieu_kho)[:10])})"
+                   if bo_thieu_kho else "") + ".")
+
+        h = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_h.values()}
+        _misa_gan(h, cols_h, ref_id, "RefID")
+        _misa_gan(h, cols_h, 0, "DisplayOnBook")
+        _misa_gan(h, cols_h, ref_type, "RefType")
+        _misa_gan(h, cols_h, ngay_ht, "RefDate")
+        _misa_gan(h, cols_h, ngay_ht, "PostedDate")
+        _misa_gan(h, cols_h, so_ct[:20], "RefNoFinance")
+        _misa_gan(h, cols_h, so_ct[:20], "RefNoManagement")
+        _misa_gan(h, cols_h, False, "IsPostedFinance")
+        _misa_gan(h, cols_h, False, "IsPostedManagement")
+        _misa_gan(h, cols_h, total_amount, "TotalAmountFinance")
+        _misa_gan(h, cols_h, total_amount, "TotalAmountManagement")
+        _misa_gan(h, cols_h, branch_id, "BranchID")
+        _misa_gan(h, cols_h, False, "IsPostedInventoryBookFinance")
+        _misa_gan(h, cols_h, False, "IsPostedInventoryBookManagement")
+        _misa_gan(h, cols_h, max_reforder + 1, "RefOrder")
+        _misa_gan(h, cols_h, now, "CreatedDate")
+        _misa_gan(h, cols_h, now, "ModifiedDate")
+        _misa_gan(h, cols_h, now, "INRefOrder")
+        _misa_gan(h, cols_h, _PM_MARK, "CustomField10")
+
+        if not preview:
+            hc = list(h.keys())
+            cur.execute("INSERT INTO INOutward ([%s]) VALUES (%s)" %
+                       ("],[".join(hc), ",".join(["?"] * len(hc))), [h[c] for c in hc])
+            for d in detail_rows:
+                dc = list(d.keys())
+                cur.execute("INSERT INTO INOutwardDetail ([%s]) VALUES (%s)" %
+                           ("],[".join(dc), ",".join(["?"] * len(dc))), [d[c] for c in dc])
+            conn.commit()
+        else:
+            conn.rollback()
+        return {"preview": preview, "database": database, "so_ct": so_ct,
+                "so_dong": len(detail_rows), "tong_tien": total_amount,
+                "ref_type": ref_type, "loai_ct_misa": ref_type_ten,
+                "so_bo_qua_mahang": len(bo_thieu_ma), "ma_bo_qua": sorted(bo_thieu_ma)[:20],
+                "so_bo_qua_kho": len(bo_thieu_kho), "kho_bo_qua_ma": sorted(bo_thieu_kho)[:20],
+                "da_ghi_de": bool(da_co and da_co[1] and ghi_de),
+                "ngay_ct": ngay_ht_s}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi Xuất kho vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
 
 def _misa_ghi_tang_tscd(cid, database, preview=True, ghi_de=False):
     """Ghi tăng TSCĐ thẳng vào bảng FixedAsset — mỗi dòng Excel = 1 tài sản =
