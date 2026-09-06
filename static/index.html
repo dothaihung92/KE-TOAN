@@ -4631,6 +4631,12 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" style="color:#8a5d00;border-color:#e8b923" onclick="xkGoMa()" title="Dùng khi thấy Tồn kho (cột A) bị âm — gỡ mã + SL/Đơn giá kho (trừ dòng giá vốn thật từ tờ khai) rồi bấm Dò mã hàng tự động lại để tính sạch từ đầu">↺ Gỡ mã hàng</button>
         <span id="xkAutoSaveBadge" style="font-size:12px;color:var(--muted);margin-left:auto"></span>
       </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;color:#999;min-width:84px">🎯 Gán theo %:</span>
+        ${[90,80,70,60,50].map(p=>
+          `<button class="btn ghost sm" style="color:#5a3e8a;border-color:#c9b8e8" onclick="xkGanMaTheoTyLe(${p})" title="Chỉ áp dụng cho dòng CHƯA có Mã hàng kho — lấy gợi ý khớp tên CAO NHẤT nếu tỷ lệ khớp ≥ ${p}%, dòng đã có mã rồi thì bỏ qua nguyên vẹn, không chạy lại">≥${p}%</button>`
+        ).join('')}
+      </div>
       <div id="xkDoMaTienDoBox" style="display:none;margin-bottom:8px">
         <div style="font-size:12.5px;color:#5a3e8a;font-weight:600;margin-bottom:3px" id="xkDoMaTienDoText">Đang dò mã hàng...</div>
         <div style="background:#eee;border-radius:6px;height:8px;overflow:hidden">
@@ -5234,6 +5240,96 @@ function xkKiemTraTonLoi(rSet){
   const pham=rSet?` trong vùng vừa Fill Down (${rSet.size} dòng)`:'';
   if(soCanhBao>0)toast(`⚠ Đã dò lại theo tồn kho${pham} — ${soCanhBao} dòng phải đổi/tách mã do hết tồn`,'err');
   else toast(`✓ Không có mã nào vượt tồn kho${pham}`,'ok');
+}
+// Gán mã hàng theo NGƯỠNG TỶ LỆ KHỚP TÊN (nút "🎯 Gán theo %: ≥90/80/70/60/
+// 50%") — theo đúng yêu cầu người dùng: "Dò mã hàng tự động" (xkDoMa, chạy
+// TRƯỚC, giữ nguyên hành vi cũ) chỉ gán khi khớp CHẮC CHẮN (manh/kích thước/
+// ngoặc); dòng nào SAU ĐÓ vẫn còn TRỐNG (chưa đủ tin cậy để tự gán) mới cần
+// người dùng chủ động hạ dần ngưỡng — CHỈ xử lý dòng ĐANG TRỐNG mã (r.ma
+// rỗng), dòng ĐÃ CÓ mã rồi (dù do Dò mã hàng tự động hay tự tay gán) GIỮ
+// NGUYÊN VẸN, KHÔNG chạy lại/không đụng tới — đúng yêu cầu: "mặt hàng nào đã
+// gắn mã rồi thì không cần phải chạy lại chỉ chạy các dòng chưa gắn mã hàng
+// thôi". Dùng ĐÚNG danh sách gợi ý (goi_y, đã tính sẵn theo từng dòng khi Dò
+// mã hàng tự động/import — xem _xk_goi_y_ma phía server, field "diem" hiển
+// thị y hệt "Khớp XX%" trong bảng "Gán mã hàng kho") — lấy gợi ý ĐIỂM CAO
+// NHẤT đạt ngưỡng, tự tách dòng nếu mã đó không đủ tồn cho cả số lượng cần
+// bán (cùng cơ chế "layTu" như xkKiemTraTonLoi).
+function xkGanMaTheoTyLe(pctThreshold){
+  if(!xkRows.length){toast('Chưa có dữ liệu — bấm "🔍 Dò mã hàng tự động" trước','err');return}
+  xkTuNlRows();
+  const tongGocTruoc=xkRows.reduce((a,r)=>a+(Number(r.sl)||0),0);
+  const tonMap={}; xkTon.forEach(t=>{tonMap[t.ma]=xkTonAnToan(t);});
+  const daDung={};
+  // trừ tồn TRƯỚC cho MỌI dòng ĐÃ CÓ mã (giữ nguyên, không đụng) — để dòng
+  // mới được gán ở đây không "cướp" mất tồn của dòng đã gán từ trước.
+  xkRows.forEach(r=>{
+    const ma=String(r.ma||'').trim();
+    const slDung=Number(r.sl)||0;
+    if(ma&&slDung>0)daDung[ma]=(daDung[ma]||0)+slDung;
+  });
+  const ketQua=[];
+  const moRong=[];
+  let soGan=0, soTachDong=0;
+  xkRows.forEach((r,chiSoCu)=>{
+    const maCu=String(r.ma||'').trim();
+    if(maCu){                              // ĐÃ CÓ mã -> giữ NGUYÊN VẸN, không chạy lại
+      moRong[chiSoCu]={batDau:ketQua.length, soDong:1};
+      ketQua.push(r);
+      return;
+    }
+    const batDau=ketQua.length;
+    const ghiMoRong=()=>{moRong[chiSoCu]={batDau, soDong:ketQua.length-batDau};};
+    const ungVien=(r.goi_y||[]).filter(g=>((g.diem||0)*100)>=pctThreshold);
+    if(!ungVien.length){                   // không có gợi ý nào đạt ngưỡng -> để nguyên (vẫn trống)
+      ketQua.push(r);
+      ghiMoRong();
+      return;
+    }
+    const tongGoc=Number(r.sl)||0, ttGoc=Number(r.tt)||0;
+    let conThieu=tongGoc;
+    const phanBo=[];
+    for(const g of ungVien){               // ungVien đã sắp xếp điểm CAO -> THẤP từ server
+      if(conThieu<=0)break;
+      const ma=g.ma;
+      if(!(ma in tonMap))continue;
+      const conLai=tonMap[ma]-(daDung[ma]||0);
+      if(conLai<=0)continue;
+      const lay=Math.min(conLai, conThieu);
+      daDung[ma]=(daDung[ma]||0)+lay;
+      phanBo.push({ma, lay});
+      conThieu-=lay;
+    }
+    if(!phanBo.length){                    // ứng viên đạt ngưỡng nhưng hết tồn hết cả -> để nguyên
+      ketQua.push(r);
+      ghiMoRong();
+      return;
+    }
+    soGan++;
+    if(phanBo.length>1 || conThieu>0)soTachDong++;
+    let ttDaDung=0;
+    phanBo.forEach((p,i)=>{
+      const tn=xkTon.find(t=>t.ma===p.ma);
+      const laCuoi=(i===phanBo.length-1 && conThieu<=0);
+      const tt=laCuoi?Math.round(ttGoc-ttDaDung):Math.round(ttGoc*p.lay/(tongGoc||1));
+      ttDaDung+=tt;
+      ketQua.push({...r, ma:p.ma, ten_xk:tn?tn.ten:'', dvt_xk:tn?tn.dvt:'', gia_xk:tn?tn.gia:'',
+        sl:p.lay, sl_kho:p.lay, tt, mo_ho:false, thieu_ton:false});
+    });
+    if(conThieu>0){                        // vẫn còn thiếu dù đã dùng hết ứng viên đạt ngưỡng
+      ketQua.push({...r, ma:'', ten_xk:'', dvt_xk:'', gia_xk:'', sl:conThieu, sl_kho:'',
+        tt:Math.round(ttGoc-ttDaDung), mo_ho:true, thieu_ton:true});
+    }
+    ghiMoRong();
+  });
+  xkRows=ketQua;
+  const tongGocSau=xkRows.reduce((a,r)=>a+(Number(r.sl)||0),0);
+  if(Math.abs(tongGocSau-tongGocTruoc)>0.001){
+    toast(`⚠ CẢNH BÁO: tổng số lượng lệch ${(tongGocTruoc-tongGocSau).toLocaleString('vi-VN')} sau khi gán mã theo tỷ lệ — báo lại cho người phát triển`,'err');
+  }
+  xkVeGrid(moRong);
+  toast(soGan>0
+    ?`✓ Đã tự gán ${soGan} dòng (khớp ≥${pctThreshold}%)${soTachDong?`, ${soTachDong} dòng phải tách do thiếu tồn`:''} — dòng đã có mã từ trước giữ nguyên, không chạy lại`
+    :`Không có dòng trống nào đạt tỷ lệ khớp ≥${pctThreshold}%`, soGan>0?'ok':'err');
 }
 // Dựng moRong cho ca ĐƠN GIẢN: đúng 1 dòng cũ (idxCu) được thay bằng soDongMoi
 // dòng mới NGAY TẠI vị trí cũ, các dòng khác giữ nguyên số dòng (chỉ dịch số
