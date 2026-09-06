@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.204"
+APP_BUILD = "2026-08-31.205"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25316,6 +25316,73 @@ def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_v
         return ket
     finally:
         conn.close()
+
+
+def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
+    """CHỈ ĐỌC — lấy danh sách Tài khoản ngân hàng THẬT trong Danh mục MISA
+    (bảng BankAccount, JOIN Bank lấy đúng Tên ngân hàng — BankAccount.
+    BankName thường để NULL, tên ngân hàng thật nằm ở bảng Bank riêng qua
+    BankID, xác nhận qua dữ liệu thật) — dùng cho nút "🔄 Đồng bộ TK NH với
+    MISA" ở doi_chieu_ngan_hang.html (Kế Toán AI): tự điền Số TK/Tên ngân
+    hàng/Chủ tài khoản thay vì người dùng phải tự gõ tay từng cái."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        cols_ba = _misa_cot_bang_that(cur, "BankAccount")
+        c_so = _misa_chon_cot(cols_ba, "BankAccountNumber", "AccountNumber")
+        c_ten = _misa_chon_cot(cols_ba, "BankName", "BankAccountName", "BankFullName")
+        c_chu = _misa_chon_cot(cols_ba, "AccountHolder")
+        c_bankid = _misa_chon_cot(cols_ba, "BankID")
+        c_inactive = _misa_chon_cot(cols_ba, "Inactive")
+        if not c_so:
+            return {"danh_sach": []}
+        cot = ["[%s]" % c_so, "[%s]" % c_ten if c_ten else "NULL",
+               "[%s]" % c_chu if c_chu else "NULL", "[%s]" % c_bankid if c_bankid else "NULL",
+               "[%s]" % c_inactive if c_inactive else "0"]
+        sql = "SELECT %s FROM BankAccount" % ", ".join(cot)
+        ten_ngan_hang_theo_id = {}
+        if c_bankid:
+            try:
+                cols_b = _misa_cot_bang_that(cur, "Bank")
+                b_id = _misa_chon_cot(cols_b, "BankID")
+                b_ten = _misa_chon_cot(cols_b, "BankName")
+                if b_id and b_ten:
+                    for bid, bten in cur.execute("SELECT [%s],[%s] FROM Bank" % (b_id, b_ten)).fetchall():
+                        if bid:
+                            ten_ngan_hang_theo_id[str(bid)] = bten
+            except Exception:
+                pass
+        ra = []
+        for so_tk, ten_raw, chu, bank_id, inactive in cur.execute(sql).fetchall():
+            if not so_tk:
+                continue
+            ten = ten_raw or ten_ngan_hang_theo_id.get(str(bank_id) if bank_id else "") or ""
+            ra.append({"so_tk": str(so_tk).strip(), "ten_ngan_hang": str(ten or "").strip(),
+                       "chu_tai_khoan": str(chu or "").strip(), "inactive": bool(inactive)})
+        return {"danh_sach": ra}
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/danh-sach-tk-ngan-hang")
+def misa_sql_danh_sach_tk_ngan_hang(body: dict = Body(...)):
+    """CHỈ ĐỌC — xem _misa_danh_sach_tai_khoan_ngan_hang. Gọi từ
+    doi_chieu_ngan_hang.html (KHÔNG theo cid trên URL, giống
+    /api/misa-sql/doi-chieu-so-du-nh — tự dò cid qua MST công ty).
+    body: {mst, database?}."""
+    mst = (body.get("mst") or "").strip()
+    if not mst:
+        raise HTTPException(400, "Thiếu MST công ty.")
+    conn = db()
+    comp = conn.execute("SELECT id FROM companies WHERE mst=?", (mst,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, f"Không tìm thấy công ty có MST {mst} trong KE-TOAN.")
+    cid = comp["id"]
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA cho công ty này.")
+    return _misa_danh_sach_tai_khoan_ngan_hang(cid, database)
 
 
 @app.post("/api/misa-sql/doi-chieu-so-du-nh")
