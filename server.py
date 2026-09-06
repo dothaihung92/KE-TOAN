@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.192"
+APP_BUILD = "2026-08-31.193"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -28624,10 +28624,26 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                     c_amt_pvd = _misa_chon_cot(cols_pvd, "Amount")
                     c_vat_pvd = _misa_chon_cot(cols_pvd, "VATAmount")
                     if c_refid_pui and c_amt_pvd and c_vat_pvd:
+                        # PUInvoiceDetail có NHIỀU DÒNG cho CÙNG 1 hóa đơn (1
+                        # dòng/mặt hàng), TẤT CẢ cùng trỏ PUVoucherRefID về
+                        # ĐÚNG 1 PUVoucher (chứng từ) — JOIN THẲNG pid với pvd
+                        # theo PUVoucherRefID (không qua DISTINCT trước) sẽ
+                        # nhân chéo: N dòng PUInvoiceDetail × N dòng
+                        # PUVoucherDetail của CÙNG voucher đó = N×N cặp, GROUP
+                        # BY pid.RefID gộp lại thành 1 nhóm nhưng cộng dồn
+                        # SUM(Amount) qua N×N cặp thay vì đúng N dòng thật —
+                        # với hóa đơn 2 dòng ra ĐÚNG GẤP 2 LẦN số thật (đã xác
+                        # nhận qua báo cáo thật: HÀNG LOẠT hóa đơn báo "LỆCH"
+                        # với MISA = ĐÚNG GẤP ĐÔI doanh số/thuế nguồn, ngay sau
+                        # khi thêm bước tính "tổng thật theo PUVoucherDetail"
+                        # ở bản .192). Fix: DISTINCT (RefID, PUVoucherRefID)
+                        # TRƯỚC khi join, để mỗi cặp hóa đơn-chứng từ chỉ tính
+                        # ĐÚNG 1 LẦN dù PUInvoiceDetail có bao nhiêu dòng.
                         for rid, samt, svat in cur.execute(
-                                "SELECT pid.RefID, SUM(pvd.[%s]), SUM(pvd.[%s]) "
-                                "FROM PUInvoiceDetail pid JOIN PUVoucherDetail pvd "
-                                "ON pvd.RefID=pid.PUVoucherRefID GROUP BY pid.RefID" % (
+                                "SELECT d.RefID, SUM(pvd.[%s]), SUM(pvd.[%s]) "
+                                "FROM (SELECT DISTINCT RefID, PUVoucherRefID FROM PUInvoiceDetail) d "
+                                "JOIN PUVoucherDetail pvd ON pvd.RefID=d.PUVoucherRefID "
+                                "GROUP BY d.RefID" % (
                                     c_amt_pvd, c_vat_pvd)).fetchall():
                             sum_pvd[rid] = (_snum(samt), _snum(svat))
                 except Exception:

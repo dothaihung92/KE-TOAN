@@ -69,7 +69,7 @@ class FakeCursor:
             if table == "PUVoucherDetail":
                 return [("Amount", "money"), ("VATAmount", "money")]
             return []
-        if "GROUP BY pid.RefID" in sql:
+        if "FROM (SELECT DISTINCT RefID, PUVoucherRefID FROM PUInvoiceDetail)" in sql:
             # tổng THẬT theo Chi tiết (PUVoucherDetail) đang liên kết — ĐÃ
             # ĐÚNG sau khi người dùng tự xóa dòng phí thừa ngay trên MISA.
             return [("rid-22619", 5537037, 442963)]
