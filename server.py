@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.205"
+APP_BUILD = "2026-08-31.206"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25324,10 +25324,39 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
     BankName thường để NULL, tên ngân hàng thật nằm ở bảng Bank riêng qua
     BankID, xác nhận qua dữ liệu thật) — dùng cho nút "🔄 Đồng bộ TK NH với
     MISA" ở doi_chieu_ngan_hang.html (Kế Toán AI): tự điền Số TK/Tên ngân
-    hàng/Chủ tài khoản thay vì người dùng phải tự gõ tay từng cái."""
+    hàng/Chủ tài khoản thay vì người dùng phải tự gõ tay từng cái.
+
+    KÈM ma_tk_vnd/ma_tk_usd: mã hạch toán KẾ TOÁN THẬT (TK 1121x/1122x) lấy
+    từ Hệ thống tài khoản MISA (bảng Account) — xác nhận đúng qua báo cáo
+    thật: công ty CHỈ có ĐÚNG 1 tài khoản con "1121" (Tiền Việt Nam) cho TẤT
+    CẢ tài khoản ngân hàng VND, KHÔNG tách theo từng ngân hàng — trước đây
+    frontend tự ĐOÁN mã bằng cách ghép hậu tố chữ cái từ tên/tên ngân hàng
+    (vd "1121-NG" từ "Ngân hàng...") nên ra SAI (MISA không hề có TK con
+    đó, khiến "Đối chiếu số dư TK" không khớp được gì). CHỈ trả về mã khi
+    DUY NHẤT 1 mã tồn tại (không mơ hồ) — công ty có NHIỀU TK con 112x thật
+    (tách theo ngân hàng) thì để None, frontend giữ nguyên cách đoán/để
+    người dùng tự nhập như cũ (an toàn hơn đoán sai khi có thể có nhiều lựa
+    chọn)."""
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
+        ma_tk_vnd = ma_tk_usd = None
+        try:
+            ds_vnd, ds_usd = set(), set()
+            for (an,) in cur.execute(
+                    "SELECT AccountNumber FROM Account WHERE AccountNumber LIKE '1121%' "
+                    "OR AccountNumber LIKE '1122%'").fetchall():
+                an = str(an or "").strip()
+                if an.startswith("1121"):
+                    ds_vnd.add(an)
+                elif an.startswith("1122"):
+                    ds_usd.add(an)
+            if len(ds_vnd) == 1:
+                ma_tk_vnd = next(iter(ds_vnd))
+            if len(ds_usd) == 1:
+                ma_tk_usd = next(iter(ds_usd))
+        except Exception:
+            pass
         cols_ba = _misa_cot_bang_that(cur, "BankAccount")
         c_so = _misa_chon_cot(cols_ba, "BankAccountNumber", "AccountNumber")
         c_ten = _misa_chon_cot(cols_ba, "BankName", "BankAccountName", "BankFullName")
@@ -25359,7 +25388,7 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
             ten = ten_raw or ten_ngan_hang_theo_id.get(str(bank_id) if bank_id else "") or ""
             ra.append({"so_tk": str(so_tk).strip(), "ten_ngan_hang": str(ten or "").strip(),
                        "chu_tai_khoan": str(chu or "").strip(), "inactive": bool(inactive)})
-        return {"danh_sach": ra}
+        return {"danh_sach": ra, "ma_tk_vnd": ma_tk_vnd, "ma_tk_usd": ma_tk_usd}
     finally:
         conn.close()
 

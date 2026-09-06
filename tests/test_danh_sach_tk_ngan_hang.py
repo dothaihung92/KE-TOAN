@@ -30,9 +30,10 @@ TABLES = {
 
 
 class FakeCursor:
-    def __init__(self, bank_accounts, banks):
+    def __init__(self, bank_accounts, banks, account_numbers=()):
         self.bank_accounts = bank_accounts   # [(BankAccountID, BankAccountNumber, BankID, BankName, Inactive, AccountHolder)]
         self.banks = banks                   # [(BankID, BankName)]
+        self.account_numbers = account_numbers   # Hệ thống tài khoản MISA (TK 1121x/1122x thật)
 
     def execute(self, sql, *params):
         self._last_sql = sql
@@ -42,6 +43,8 @@ class FakeCursor:
         sql = self._last_sql
         if 'sys.columns' in sql and 'sys.types' in sql:
             return []
+        if sql.startswith("SELECT AccountNumber FROM Account WHERE AccountNumber LIKE '1121%'"):
+            return [(an,) for an in self.account_numbers]
         if sql.startswith("SELECT [BankAccountNumber], [BankName], [AccountHolder], [BankID], [Inactive] FROM BankAccount"):
             return [(bid_num, bname, holder, bank_id, inactive)
                      for (_id, bid_num, bank_id, bname, inactive, holder) in self.bank_accounts]
@@ -125,5 +128,45 @@ by_so = {x["so_tk"]: x for x in r3["danh_sach"]}
 assert by_so["999888777"]["inactive"] is True
 assert by_so["934594948"]["inactive"] is False
 print("PASS 3: trả về đủ cả tài khoản Inactive, đúng cờ inactive cho từng tài khoản.")
+
+# ----- Test 4 (đúng lỗi thật vừa báo): công ty CHỈ có ĐÚNG 1 TK con "1121"
+# (không tách theo từng ngân hàng) -> ma_tk_vnd PHẢI đúng "1121", KHÔNG
+# được để frontend tự đoán ra "1121-NG"/"1121-TK" (mã không hề tồn tại
+# trong Hệ thống tài khoản thật, khiến Đối chiếu số dư TK không khớp được
+# gì). -----
+cur4 = FakeCursor(
+    bank_accounts=[("id1", "934594948", "bankid-acb", None, False, None)],
+    banks=[("bankid-acb", "Ngân hàng TMCP Á Châu")],
+    account_numbers=["1121"])
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur4)
+r4 = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
+assert r4["ma_tk_vnd"] == "1121", f"Công ty chỉ có đúng 1 TK con '1121' thì PHẢI trả về đúng '1121' — got {r4['ma_tk_vnd']}"
+assert r4["ma_tk_usd"] is None
+print("PASS 4: công ty chỉ có đúng 1 TK con '1121' (không tách theo ngân hàng) -> trả về đúng '1121', không đoán sai thành '1121-NG'/'1121-TK'.")
+
+# ----- Test 5: công ty có NHIỀU TK con 112x thật (tách theo từng ngân
+# hàng) -> KHÔNG đoán, để None (an toàn hơn đoán sai khi có nhiều lựa
+# chọn). -----
+cur5 = FakeCursor(
+    bank_accounts=[("id1", "934594948", "bankid-acb", None, False, None)],
+    banks=[("bankid-acb", "Ngân hàng TMCP Á Châu")],
+    account_numbers=["1121ACB", "1121VCB", "1122"])
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur5)
+r5 = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
+assert r5["ma_tk_vnd"] is None, f"Có NHIỀU TK con 1121x thật -> không đoán, phải None — got {r5['ma_tk_vnd']}"
+assert r5["ma_tk_usd"] == "1122", f"Chỉ 1 TK con '1122' (USD) -> vẫn phải trả đúng — got {r5['ma_tk_usd']}"
+print("PASS 5: có nhiều TK con 1121x thật (tách theo ngân hàng) -> ma_tk_vnd=None (không đoán bừa); TK USD riêng vẫn trả đúng vì chỉ có 1.")
+
+# ----- Test 6: không có TK con 112x nào (Hệ thống tài khoản trống/lỗi
+# truy vấn) -> không crash, cả 2 đều None. -----
+cur6 = FakeCursor(
+    bank_accounts=[("id1", "934594948", "bankid-acb", None, False, None)],
+    banks=[("bankid-acb", "Ngân hàng TMCP Á Châu")],
+    account_numbers=[])
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur6)
+r6 = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
+assert r6["ma_tk_vnd"] is None and r6["ma_tk_usd"] is None
+assert len(r6["danh_sach"]) == 1, "vẫn phải trả đúng danh sách Tài khoản ngân hàng dù không dò được TK con 112x"
+print("PASS 6: không có TK con 112x nào vẫn không crash, danh sách Tài khoản ngân hàng vẫn trả đúng.")
 
 print("\nTẤT CẢ TEST PASS")

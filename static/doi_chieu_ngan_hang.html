@@ -3472,6 +3472,59 @@ function suggestAccountNo(label) {
   return nums.reduce((a, b) => (b.length > a.length ? b : a), nums[0]);
 }
 
+// Hàm THUẦN (không đụng React state/DOM/fetch) tính kết quả đồng bộ TK NH
+// với MISA — tách riêng khỏi syncFromMisa() để test được độc lập. Theo
+// yêu cầu người dùng "hãy thêm nút đồng bộ TK NH với misa khi nhấn vào
+// phần mềm sẽ tự lấy thông tin tài khoản để nhập vào phần mềm luôn", và 2
+// lỗi thật đã báo sau đó:
+//  1) "Mã hạch toán MISA phần mềm lấy sai số tài khoản số đúng chỉ có
+//     1121" — ƯU TIÊN dùng ĐÚNG mã TK con 112x THẬT (maTkVnd/maTkUsd, chỉ
+//     có khi công ty CHỈ có đúng 1 mã, không mơ hồ) thay vì tự đoán hậu
+//     tố chữ cái từ tên (suggestMisaAcct, có thể ra mã KHÔNG hề tồn tại
+//     trong MISA như "1121-NG").
+//  2) "tài khoản chính mặc định hãy bỏ đi không cần phải hiện vì đã có
+//     thêm tài khoản rồi" — bỏ TK "TK chính" mặc định (chưa gắn Số TK/Tên
+//     ngân hàng thật, CHƯA có dữ liệu sao kê nào — coDuLieuSaoKe(a) trả
+//     true nếu có) khi đã đồng bộ được ÍT NHẤT 1 TK thật từ MISA.
+function dongBoTaiKhoanNganHang(accounts, dsMisaRaw, maTkVnd, maTkUsd, coDuLieuSaoKe) {
+  const dsMisa = (dsMisaRaw || []).filter(x => !x.inactive);
+  const chuanSo = s => String(s || "").replace(/[\s\-]/g, "").toLowerCase();
+  const maTkThatTheoTienTe = cur => cur === "USD" ? maTkUsd : maTkVnd;
+  let soMoi = 0, soCapNhat = 0, soDaXoa = 0;
+  const existingMisaAccts = accounts.map(a => a.misaAcct || "");
+  let updated = accounts.map(a => {
+    const match = dsMisa.find(m => chuanSo(m.so_tk) === chuanSo(a.accountNo));
+    if (!match) return a;
+    const maThat = maTkThatTheoTienTe(a.currency);
+    const tenMoi = match.ten_ngan_hang && match.ten_ngan_hang !== a.bankName ? match.ten_ngan_hang : a.bankName;
+    const misaAcctMoi = maThat && maThat !== a.misaAcct ? maThat : a.misaAcct;
+    if (tenMoi === a.bankName && misaAcctMoi === a.misaAcct) return a;
+    soCapNhat++;
+    return { ...a, bankName: tenMoi, misaAcct: misaAcctMoi };
+  });
+  dsMisa.forEach(m => {
+    const daCo = updated.some(a => chuanSo(a.accountNo) === chuanSo(m.so_tk));
+    if (daCo) return;
+    const label = (m.ten_ngan_hang ? m.ten_ngan_hang + " " : "") + m.so_tk;
+    const misaAcct = maTkVnd || suggestMisaAcct(label, "VND", [...existingMisaAccts, ...updated.map(a => a.misaAcct || "")]);
+    updated = [...updated, {
+      id: "acc_" + Math.random().toString(36).slice(2, 10), label, currency: "VND",
+      misaAcct, bankName: m.ten_ngan_hang || "", accountNo: m.so_tk
+    }];
+    soMoi++;
+  });
+  if (soMoi > 0) {
+    updated = updated.filter(a => {
+      const laMacDinhTrong = a.label === "TK chính" && !a.accountNo && !a.bankName;
+      if (!laMacDinhTrong) return true;
+      if (coDuLieuSaoKe && coDuLieuSaoKe(a)) return true;   // đã có sao kê nhập -> giữ lại, không xoá
+      soDaXoa++;
+      return false;
+    });
+  }
+  return { updated, soMoi, soCapNhat, soDaXoa };
+}
+
 function AccountTabs({co, activeAccountId, currency, onSelect, onSave, showToast}) {
   const accounts = (co.accounts && co.accounts.length) ? co.accounts : [{id:"main",label:"TK chính",currency:"VND"}];
   const [showAdd, setShowAdd] = useState(false);
@@ -3491,11 +3544,9 @@ function AccountTabs({co, activeAccountId, currency, onSelect, onSave, showToast
   // tài khoản để nhập vào phần mềm luôn": lấy danh sách Tài khoản ngân
   // hàng THẬT từ Danh mục MISA (bảng BankAccount, xem
   // _misa_danh_sach_tai_khoan_ngan_hang) rồi tự điền — KHÔNG bắt gõ tay
-  // từng Số TK/Tên ngân hàng. So khớp theo Số TK (bỏ khoảng trắng/gạch
-  // ngang, không phân biệt hoa/thường — cùng cách _misa_bank_account_theo_so
-  // đã dùng): TK đã có trong danh sách CHỈ cập nhật Tên ngân hàng/Chủ tài
-  // khoản (không đụng nhãn/mã hạch toán MISA người dùng đã tự đặt), TK
-  // MISA nào CHƯA có thì tự thêm mới.
+  // từng Số TK/Tên ngân hàng/Mã hạch toán. Phần MERGE thuần logic (không
+  // đụng React/DOM/fetch) tách riêng ở dongBoTaiKhoanNganHang() để test
+  // độc lập được — xem chú thích đầy đủ ở đó.
   const syncFromMisa = async () => {
     if (!co.mst) { showToast ? showToast("Công ty chưa có MST, không đồng bộ được", "err") : alert("Công ty chưa có MST"); return; }
     setSyncing(true);
@@ -3506,37 +3557,19 @@ function AccountTabs({co, activeAccountId, currency, onSelect, onSave, showToast
       });
       const d = await res.json();
       if (d.detail) { showToast ? showToast("Lỗi: " + d.detail, "err") : alert("Lỗi: " + d.detail); return; }
-      const dsMisa = (d.danh_sach || []).filter(x => !x.inactive);
-      if (!dsMisa.length) { showToast ? showToast("MISA chưa có Tài khoản ngân hàng nào (Danh mục > Ngân hàng > Tài khoản ngân hàng)", "err") : alert("MISA chưa có Tài khoản ngân hàng nào"); return; }
-      const chuanSo = s => String(s || "").replace(/[\s\-]/g, "").toLowerCase();
-      let soMoi = 0, soCapNhat = 0;
-      const existingMisaAccts = accounts.map(a => a.misaAcct || "");
-      let updated = accounts.map(a => {
-        const match = dsMisa.find(m => chuanSo(m.so_tk) === chuanSo(a.accountNo));
-        if (!match) return a;
-        if (match.ten_ngan_hang && match.ten_ngan_hang !== a.bankName) {
-          soCapNhat++;
-          return { ...a, bankName: match.ten_ngan_hang };
-        }
-        return a;
-      });
-      dsMisa.forEach(m => {
-        const daCo = updated.some(a => chuanSo(a.accountNo) === chuanSo(m.so_tk));
-        if (daCo) return;
-        const label = (m.ten_ngan_hang ? m.ten_ngan_hang + " " : "") + m.so_tk;
-        const misaAcct = suggestMisaAcct(label, "VND", [...existingMisaAccts, ...updated.map(a => a.misaAcct || "")]);
-        updated = [...updated, {
-          id: "acc_" + Math.random().toString(36).slice(2, 10), label, currency: "VND",
-          misaAcct, bankName: m.ten_ngan_hang || "", accountNo: m.so_tk
-        }];
-        soMoi++;
-      });
+      if (!(d.danh_sach || []).some(x => !x.inactive)) { showToast ? showToast("MISA chưa có Tài khoản ngân hàng nào (Danh mục > Ngân hàng > Tài khoản ngân hàng)", "err") : alert("MISA chưa có Tài khoản ngân hàng nào"); return; }
+      const { updated, soMoi, soCapNhat, soDaXoa } = dongBoTaiKhoanNganHang(
+        accounts, d.danh_sach, d.ma_tk_vnd, d.ma_tk_usd,
+        a => !!LS.get("session_" + co.id + "_" + a.id));
       if (!soMoi && !soCapNhat) {
-        showToast ? showToast(`✓ Đã có đủ ${dsMisa.length} Tài khoản ngân hàng từ MISA, không có gì mới`, "ok") : null;
+        showToast ? showToast(`✓ Đã có đủ Tài khoản ngân hàng từ MISA, không có gì mới`, "ok") : null;
         return;
       }
       onSave(updated);
-      showToast ? showToast(`✓ Đã đồng bộ MISA: ${soMoi ? `thêm ${soMoi} TK mới` : ""}${soMoi && soCapNhat ? ", " : ""}${soCapNhat ? `cập nhật ${soCapNhat} TK` : ""}`, "ok") : null;
+      if (updated.length && !updated.some(a => a.id === activeAccountId)) onSelect(updated[0]);
+      const phanText = [soMoi ? `thêm ${soMoi} TK mới` : "", soCapNhat ? `cập nhật ${soCapNhat} TK` : "",
+        soDaXoa ? `bỏ ${soDaXoa} TK mặc định trống` : ""].filter(Boolean).join(", ");
+      showToast ? showToast(`✓ Đã đồng bộ MISA: ${phanText}`, "ok") : null;
     } catch (e) {
       showToast ? showToast("Lỗi đồng bộ TK NH với MISA: " + e.message, "err") : alert("Lỗi: " + e.message);
     } finally {
