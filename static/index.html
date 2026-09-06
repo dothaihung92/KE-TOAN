@@ -8770,7 +8770,8 @@ async function xkGhiThangMisa(){
         ⚠ RỦI RO CAO: đây là chứng từ <b>Xuất kho</b> — trừ tồn kho thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b> ở
         trạng thái <b>CHƯA GHI SỔ</b> (tự bấm "Ghi sổ" trong MISA sau khi kiểm tra lại) — KHÔNG ghi Sổ Kho
         (InventoryLedger), MISA sẽ tự tính lại lúc Ghi sổ. Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
-      <div style="margin-bottom:2px">Số chứng từ: <b>${misaEsc(pv.so_ct||'')}</b> — <b style="color:#1a7a7a">${pv.so_dong}</b> dòng, tổng tiền vốn <b>${pv.tong_tien!=null?Number(pv.tong_tien).toLocaleString('vi-VN'):0}</b> đ, loại chứng từ MISA: <span style="color:#666">${misaEsc(pv.loai_ct_misa||'')}</span></div>
+      <div style="margin-bottom:2px">Số chứng từ: <b>${misaEsc(pv.so_ct||'')}</b> — <b style="color:#1a7a7a">${pv.so_dong}</b> dòng, loại chứng từ MISA: <span style="color:#666">${misaEsc(pv.loai_ct_misa||'')}</span></div>
+      <div style="font-size:12px;color:#999;margin-bottom:8px">ℹ️ Không ghi Đơn giá/Thành tiền (để trống, giống hệt file "🗂 Xuất file Xuất Kho") — bấm <b>"Tính giá xuất kho"</b> trong MISA sau khi ghi để MISA tự tính đúng theo phương pháp giá vốn công ty đang dùng.</div>
       ${pv.so_bo_qua_mahang>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin:8px 0">
         ⚠ Bỏ qua <b>${pv.so_bo_qua_mahang}</b> mã hàng chưa có trong Danh mục Vật tư MISA: ${misaEsc((pv.ma_bo_qua||[]).join(', '))}${pv.so_bo_qua_mahang>(pv.ma_bo_qua||[]).length?' ...':''}</div>`:''}
       ${pv.so_bo_qua_kho>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin:8px 0">
@@ -8787,7 +8788,7 @@ async function xkGhiThangMisaGhi(ghiDe){
   try{
     const d=await api(`/api/misa-sql/import-xuat-kho/${current}?preview=0&ghi_de=${ghiDe?1:0}`,{method:'POST'});
     document.getElementById('misaModal').style.display='none';
-    toast(`✓ Đã ghi chứng từ "${d.so_ct}" (${d.so_dong} dòng) vào MISA — CHƯA GHI SỔ, tự kiểm tra + bấm "Ghi sổ" trong MISA.`,'ok');
+    toast(`✓ Đã ghi chứng từ "${d.so_ct}" (${d.so_dong} dòng) vào MISA — CHƯA GHI SỔ, tự kiểm tra rồi bấm "Ghi sổ" + "Tính giá xuất kho" trong MISA.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 // Liệt kê loại chứng từ (SYSRefType) của 1 bảng MISA — CHỈ ĐỌC. Dùng khi

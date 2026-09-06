@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.201"
+APP_BUILD = "2026-08-31.202"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20473,11 +20473,17 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
     SÓT khi viết hàm này ban đầu vì lúc đó chưa dò được mẫu dữ liệu thật có
     ListTableName='INOutward' để đối chiếu chắc chắn.
 
-    "Đơn giá vốn"/"Tiền vốn" (UnitPriceFinance/AmountFinance) lấy từ gia_xk
-    (giá bình quân trong Sheet TON đã import/dò — CHÍNH giá đã hiển thị cho
-    người dùng suốt luồng Kiểm tra tồn kho/Gán mã hàng kho, không phải số
-    mới suy đoán); mã nào thiếu gia_xk thì để 0 (không chặn ghi, người dùng
-    tự sửa giá vốn lại trong MISA nếu cần).
+    "Đơn giá vốn"/"Tiền vốn" (UnitPriceFinance/AmountFinance) CỐ Ý để 0,
+    KHÔNG tự tính từ gia_xk (giá bình quân THAM KHẢO trong Sheet TON) —
+    theo yêu cầu người dùng "chỉ cần import vào misa giống file thôi không
+    cần phải hiện đơn giá thành tiền để tôi nhấn vào tính giá xuất kho để
+    misa tự tính": xác nhận đúng qua chính file Excel "🗂 Xuất file Xuất
+    Kho" phần mềm đã xuất từ trước (_gen_xuat_kho_rows) — 2 cột đó LUÔN để
+    TRỐNG trên file, để MISA tự tính khi bấm "Tính giá xuất kho" (đúng
+    phương pháp giá vốn công ty đang cấu hình, có thể khác gia_xk chỉ là
+    số tham khảo từ báo cáo tồn kho cũ) — ghi thẳng SQL phải khớp ĐÚNG hành
+    vi đó thay vì tự đoán giá vốn. TotalAmountFinance/TotalAmountManagement
+    của header vì vậy cũng luôn = 0 (tổng của các dòng chi tiết, đều = 0).
 
     Mã hàng/Kho PHẢI đã có sẵn trong Danh mục MISA (InventoryItem/Stock) —
     KHÔNG tự tạo mới cho Xuất kho (khác Mua hàng nhập kho, nơi tự tạo Kho
@@ -20602,10 +20608,7 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
             sl = _to_num(sl_kho if sl_kho not in (None, "", 0) else r.get("sl"))
             if not sl:
                 continue
-            gia = _to_num(r.get("gia_xk")) or 0.0
-            tien = round(sl * gia, 0) if gia else 0.0
             idx_line += 1
-            total_amount += tien
             d = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_d.values()}
             _misa_gan(d, cols_d, str(uuid.uuid4()), "RefDetailID")
             _misa_gan(d, cols_d, ref_id, "RefID")
@@ -20618,9 +20621,18 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
             _misa_gan(d, cols_d, uid, "MainUnitID")
             _misa_gan(d, cols_d, sl, "Quantity")
             _misa_gan(d, cols_d, sl, "MainQuantity")
-            _misa_gan(d, cols_d, gia, "UnitPriceFinance")
-            _misa_gan(d, cols_d, gia, "MainUnitPriceFinance")
-            _misa_gan(d, cols_d, tien, "AmountFinance")
+            # Đơn giá vốn/Tiền vốn (UnitPriceFinance/AmountFinance) CỐ Ý để 0
+            # (KHÔNG tự tính từ gia_xk) — theo đúng yêu cầu người dùng "chỉ
+            # cần import vào misa giống file thôi không cần phải hiện đơn giá
+            # thành tiền để tôi nhấn vào tính giá xuất kho để misa tự tính":
+            # xác nhận đúng qua chính file Excel "🗂 Xuất file Xuất Kho" phần
+            # mềm đã xuất từ trước (_gen_xuat_kho_rows) — 2 cột "Đơn giá vốn"/
+            # "Tiền vốn" trên đó LUÔN để TRỐNG, để MISA tự tính khi người dùng
+            # bấm "Tính giá xuất kho" (theo đúng phương pháp giá vốn công ty
+            # đang cấu hình — bình quân gia quyền/FIFO...) — ghi thẳng SQL
+            # phải khớp ĐÚNG hành vi đó, không tự đoán giá vốn (gia_xk chỉ là
+            # giá bình quân THAM KHẢO từ báo cáo tồn kho cũ, có thể không
+            # khớp đúng phương pháp tính giá vốn thật MISA đang dùng).
             _misa_gan(d, cols_d, 1, "MainConvertRate")
             _misa_gan(d, cols_d, "*", "ExchangeRateOperator")
             _misa_gan(d, cols_d, idx_line, "SortOrder")

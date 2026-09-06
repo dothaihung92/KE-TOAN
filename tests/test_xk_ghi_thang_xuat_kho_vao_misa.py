@@ -49,22 +49,25 @@ ns['_MISA_GIO_GHI_XUAT'] = 23   # xem _misa_gio_xuat_co_dinh (server.py)
 def C(*names):
     return [(n, "nvarchar") for n in names]
 
+def D(*names):
+    return [(n, "decimal") for n in names]
+
 cols_inoutward = C("RefID", "DisplayOnBook", "RefType", "RefDate", "PostedDate",
     "RefNoFinance", "RefNoManagement", "InvTemplateNo", "InvSeries", "InvNo",
     "IsPostedFinance", "IsPostedManagement", "AccountObjectID", "AccountObjectName",
-    "TotalAmountFinance", "TotalAmountManagement", "BranchID",
+    "BranchID",
     "IsPostedInventoryBookFinance", "IsPostedInventoryBookManagement",
     "InventoryPostedDate", "RefOrder", "CreatedDate", "CreatedBy", "ModifiedDate",
     "ModifiedBy", "CustomField10", "AssemblyRefID", "INRefOrder", "isBranchIssued",
     "IsSaleWithOutward", "IsInvoiceReplace", "RefIDMshop", "RefNoMshop",
     "IsGetForInvoice", "OrganizationUnitID", "InvoiceSystem", "InvoiceCode",
-    "IsProcessInvoiceError", "InvReplaceType")
+    "IsProcessInvoiceError", "InvReplaceType") + D("TotalAmountFinance", "TotalAmountManagement")
 cols_inoutwarddetail = C("RefDetailID", "RefID", "InventoryItemID", "Description",
-    "StockID", "DebitAccount", "CreditAccount", "UnitID", "Quantity",
-    "UnitPriceFinance", "UnitPriceManagement", "AmountFinance", "AmountManagement",
-    "IsUnUpdateOutwardPrice", "UnResonableCost", "MainUnitID", "MainUnitPriceFinance",
-    "MainUnitPriceManagement", "MainConvertRate", "MainQuantity",
-    "ExchangeRateOperator", "SortOrder", "IsPromotion")
+    "StockID", "DebitAccount", "CreditAccount", "UnitID",
+    "IsUnUpdateOutwardPrice", "UnResonableCost", "MainUnitID",
+    "ExchangeRateOperator", "SortOrder", "IsPromotion") + D(
+    "Quantity", "UnitPriceFinance", "UnitPriceManagement", "AmountFinance", "AmountManagement",
+    "MainUnitPriceFinance", "MainUnitPriceManagement", "MainConvertRate", "MainQuantity")
 cols_inventoryitem = C("InventoryItemID", "InventoryItemCode", "UnitID", "InventoryItemName")
 cols_stock = C("StockID", "StockCode", "StockName")
 cols_ininoutlist = C("RefID", "RefDate", "PostedDate", "RefType", "RefNoFinance", "RefNoManagement",
@@ -163,7 +166,12 @@ cur1 = FakeCursor()
 r1 = _chay(cur1, GIATHANH_CO_BAN, TON_CO_BAN)
 assert r1["so_ct"] == "XK T12/2024", f"Số chứng từ phải 'XK T12/2024' (cuối tháng của ngày mới nhất 31/12/2024) — got {r1['so_ct']}"
 assert r1["so_dong"] == 2 and r1["so_bo_qua_mahang"] == 0 and r1["so_bo_qua_kho"] == 0
-assert r1["tong_tien"] == 10 * 100000 + 5 * 50000 == 1250000, f"got {r1['tong_tien']}"
+# Đơn giá vốn/Tiền vốn CỐ Ý luôn = 0 (KHÔNG tự tính từ gia_xk, dù
+# GIATHANH_CO_BAN CÓ sẵn gia_xk=100000/50000) — đúng yêu cầu người dùng
+# "không cần phải hiện đơn giá thành tiền để tôi nhấn vào tính giá xuất
+# kho để misa tự tính", khớp đúng file Excel "Xuất file Xuất Kho" cũ (2
+# cột đó luôn để TRỐNG, để MISA tự tính khi bấm "Tính giá xuất kho").
+assert r1["tong_tien"] == 0, f"tong_tien phải luôn = 0 (không tự tính giá vốn) — got {r1['tong_tien']}"
 h = cur1.inserted["INOutward"][0]
 assert h["RefNoFinance"] == "XK T12/2024" and h["RefType"] == 2020
 assert h["IsPostedFinance"] is False and h["IsPostedManagement"] is False, (
@@ -171,7 +179,7 @@ assert h["IsPostedFinance"] is False and h["IsPostedManagement"] is False, (
 assert h["IsPostedInventoryBookFinance"] is False, (
     "KHÔNG được tự nhận đã ghi Sổ Kho — đúng chứng từ THẬT 'XK T12/2024' cũng "
     "IsPostedInventoryBookFinance=False dù IsPostedFinance=True")
-assert h["TotalAmountFinance"] == 1250000
+assert h["TotalAmountFinance"] == 0, f"TotalAmountFinance phải = 0 (tổng các dòng đều 0) — got {h['TotalAmountFinance']}"
 assert h["CustomField10"] == "HDDT-AUTO"
 assert h["RefDate"].hour == 23 and h["PostedDate"].hour == 23, (
     "RefDate/PostedDate PHẢI giờ CỐ ĐỊNH CUỐI NGÀY (23:00, sau giờ 10:00 của Nhập kho) — đúng lỗi thật "
@@ -180,9 +188,12 @@ det = sorted(cur1.inserted["INOutwardDetail"], key=lambda d: d["SortOrder"])
 assert len(det) == 2
 assert det[0]["InventoryItemID"] == "iid-mh01" and det[0]["StockID"] == "sid-hh"
 assert det[0]["DebitAccount"] == "632" and det[0]["CreditAccount"] == "1561"
-assert det[0]["Quantity"] == 10 and det[0]["UnitPriceFinance"] == 100000 and det[0]["AmountFinance"] == 1000000
-assert det[1]["InventoryItemID"] == "iid-mh02" and det[1]["AmountFinance"] == 250000
-print("PASS 1: ghi đúng INOutward/INOutwardDetail — Số CT/TK Nợ 632-Có 1561/tổng tiền khớp ảnh chụp MISA thật, CHƯA ghi sổ.")
+assert det[0]["Quantity"] == 10, f"got {det[0]['Quantity']}"
+assert det[0]["UnitPriceFinance"] == 0 and det[0]["AmountFinance"] == 0, (
+    f"Đơn giá vốn/Tiền vốn PHẢI = 0 dù gia_xk=100000 có sẵn trên dòng GIATHANH — để MISA tự tính khi bấm "
+    f"'Tính giá xuất kho' — got UnitPriceFinance={det[0]['UnitPriceFinance']}, AmountFinance={det[0]['AmountFinance']}")
+assert det[1]["InventoryItemID"] == "iid-mh02" and det[1]["AmountFinance"] == 0
+print("PASS 1: ghi đúng INOutward/INOutwardDetail — Số CT/TK Nợ 632-Có 1561 khớp ảnh chụp MISA thật, CHƯA ghi sổ, Đơn giá/Thành tiền để trống (0) cho MISA tự tính.")
 
 # ----- Test 1b (đúng lỗi thật người dùng vừa báo "chưa thấy phiếu xk"): PHẢI
 # ghi kèm 1 dòng INInwardOutwardList — bảng RIÊNG nguồn cho lưới MISA "Kho >
@@ -192,7 +203,7 @@ iol = cur1.inserted["INInwardOutwardList"]
 assert len(iol) == 1, f"PHẢI ghi đúng 1 dòng INInwardOutwardList (thiếu bảng này khiến chứng từ ghi đúng vào INOutward nhưng KHÔNG hiện trên lưới MISA) — got {len(iol)}"
 assert iol[0]["RefID"] == h["RefID"], "INInwardOutwardList.RefID phải TRÙNG với INOutward.RefID vừa ghi"
 assert iol[0]["ListTableName"] == "INOutward" and iol[0]["INType"] == 1
-assert iol[0]["RefNoFinance"] == "XK T12/2024" and iol[0]["TotalAmountFinance"] == 1250000
+assert iol[0]["RefNoFinance"] == "XK T12/2024" and iol[0]["TotalAmountFinance"] == 0
 assert iol[0]["IsPostedFinance"] is False, "phải sao chép ĐÚNG trạng thái CHƯA GHI SỔ từ header INOutward"
 print("PASS 1b: ghi kèm đúng 1 dòng INInwardOutwardList (cùng RefID, ListTableName='INOutward', INType=1) — đúng lỗi thật 'chưa thấy phiếu xk' đã báo.")
 
