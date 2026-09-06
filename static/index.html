@@ -6892,7 +6892,22 @@ function nlPhimO(e,td){
       nr=hienThi[vtMoi];
     }
     const next=document.querySelector(`td[data-r="${nr}"][data-c="${nc}"]`);
-    if(next){td.blur();nlChon={r1:nr,c1:nc,r2:nr,c2:nc};nlCapNhatHighlight();next.focus();}
+    if(next){
+      td.blur();
+      if(e.shiftKey){
+        // Shift + mũi tên: MỞ RỘNG vùng chọn giống Excel — giữ nguyên góc
+        // neo (r1,c1) đã có (từ ô vừa đứng lúc bắt đầu bấm Shift), chỉ dời
+        // góc còn lại (r2,c2) sang ô mới; không có vùng chọn nào trước đó
+        // (vd Tab tới ô mà chưa từng bấm chuột) thì lấy chính ô hiện tại
+        // làm neo.
+        if(!nlChon)nlChon={r1:r,c1:c,r2:r,c2:c};
+        nlChon.r2=nr;nlChon.c2=nc;
+      }else{
+        nlChon={r1:nr,c1:nc,r2:nr,c2:nc};
+      }
+      nlCapNhatHighlight();
+      next.focus();
+    }
     return;
   }
   if(e.key==='Enter'){e.preventDefault();
