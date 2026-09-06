@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.191"
+APP_BUILD = "2026-08-31.192"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9556,11 +9556,23 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
     except Exception:
         pass
 
+    # Cảnh báo NGAY LÚC IMPORT nếu tổng "Thành tiền" của 1 hóa đơn trong
+    # Bảng kê Đầu vào lệch so với chính hóa đơn đó ở dữ liệu ĐÃ TRA CỨU (vd
+    # sửa tay cộng dồn phí vào hàng rồi quên xóa dòng phí gốc — xem
+    # _canh_bao_lech_gia_tri_hoa_don_in) — best-effort, lỗi gì cũng bỏ qua,
+    # không chặn import.
+    canh_bao_lech_hd = []
+    try:
+        if header_in and rows_in:
+            canh_bao_lech_hd = _canh_bao_lech_gia_tri_hoa_don_in(cid, header_in, rows_in)
+    except Exception:
+        pass
+
     return {"ok": True, "so_file": so_file_ok,
             "in": {"header": header_in, "rows": rows_in, "so_dong": len(rows_in)},
             "out": {"header": header_out, "rows": rows_out, "so_dong": len(rows_out)},
             "ctbr": {"header": header_ctbr, "rows": rows_ctbr, "so_dong": len(rows_ctbr)},
-            "loi": loi[:5]}
+            "loi": loi[:5], "canh_bao_lech_hoa_don": canh_bao_lech_hd}
 
 
 @app.post("/api/nhap-lieu/import-bang-ke/{cid}")
@@ -28025,6 +28037,90 @@ def hoa_don_sua_ngoai_te(cid: int):
     return _sua_hoa_don_ngoai_te_da_luu(cid)
 
 
+def _canh_bao_lech_gia_tri_hoa_don_in(cid, header_in, rows_in):
+    """Đối chiếu tổng "Thành tiền" theo TỪNG hóa đơn trong Bảng kê Đầu vào
+    (header_in/rows_in — sheet "Chi tiết MUA VÀO" vừa import) với giá trị
+    THẬT của chính hóa đơn đó (invoices.tgtcthue — dữ liệu GỐC đã tra cứu từ
+    Tổng cục Thuế, đáng tin cậy nhất, xem _misa_doi_chieu_import_toan_bo) —
+    phát hiện SỚM ngay lúc import (thay vì phải đợi tới bước "Đối chiếu tổng
+    giá trị & VAT" sau khi đã ghi vào MISA) các trường hợp Bảng kê bị SỬA TAY
+    sai lệch giá trị so với hóa đơn gốc.
+
+    Xác nhận đúng qua ca thật người dùng báo: hóa đơn Số HĐ 22619 có dòng
+    "Phí kéo lầu bồn" (111.111đ) — người dùng tự tay CỘNG DỒN phí vào Thành
+    tiền của dòng "Bồn Inox" (sửa từ 5.425.926 thành 5.537.037, đúng bằng
+    TgTCThue của CẢ hóa đơn) rồi QUÊN XÓA dòng phí gốc — Bảng kê thành ra có
+    tổng 5.648.148đ (dư đúng 111.111đ so với hóa đơn gốc 5.537.037đ). Việc
+    này chỉ lộ ra SAU KHI ghi vào MISA, qua "Đối chiếu tổng giá trị & VAT" —
+    yêu cầu người dùng: phát hiện NGAY lúc import Bảng kê, hiện thông báo bấm
+    vào là nhảy tới đúng hóa đơn đó để xử lý luôn, đỡ phải ghi vào MISA rồi
+    mới phát hiện.
+
+    Trả về list [{"mst", "so_hd", "khhdon", "ngay", "tong_bang_ke",
+    "tong_hoa_don_goc", "chenh_lech", "dong": [chỉ số dòng trong rows_in]}]
+    — CHỈ báo khi hóa đơn đó ĐÃ CÓ trong "invoices" (đã tra cứu — có ground
+    truth để so) VÀ lệch > 500đ (bỏ qua chênh lệch làm tròn/chiết khấu nhỏ
+    không đáng kể, tránh nhiễu)."""
+    col = _nk_cols(header_in)
+    if col["sohd"] < 0 or col["mst"] < 0 or col["tt"] < 0:
+        return []
+    conn = db()
+    try:
+        hd_rows = conn.execute(
+            "SELECT nbmst, shdon, khhdon, tdlap, tgtcthue, detail_json FROM invoices "
+            "WHERE company_id=? AND loai='purchase'", (cid,)).fetchall()
+    except Exception:
+        return []
+    finally:
+        conn.close()
+    hd_map = {}
+    for r in hd_rows:
+        mst_k = _misa_khncc_chuan_mst(r["nbmst"]).lower()
+        sohd_k = _chuan_shd(r["shdon"]).lower()
+        if not mst_k or not sohd_k:
+            continue
+        tong = _to_num(r["tgtcthue"]) or 0
+        try:
+            dj = json.loads(r["detail_json"]) if r["detail_json"] else None
+            if dj:
+                tong += _lay_tong_tien_phi_json(dj) or 0
+        except Exception:
+            pass
+        # trùng khóa (nhiều bản ghi lịch sử tra cứu cùng 1 hóa đơn) -> lấy
+        # bản CÓ giá trị (khác 0), ưu tiên bản đầu tiên gặp nếu tất cả = 0.
+        if (mst_k, sohd_k) not in hd_map or tong:
+            hd_map[(mst_k, sohd_k)] = {
+                "tong": tong, "khhdon": r["khhdon"] or "",
+                "ngay": (r["tdlap"] or "").split("T")[0]}
+
+    nhom = {}   # (mst_k, sohd_k) -> {"tong": tổng Thành tiền Bảng kê, "dong": [idx,...]}
+    for idx, r in enumerate(rows_in):
+        def gv(i):
+            return r[i] if 0 <= i < len(r) else ""
+        sohd = str(gv(col["sohd"]) or "").strip()
+        mst = gv(col["mst"])
+        if not sohd or not mst:
+            continue
+        mst_k = _misa_khncc_chuan_mst(mst).lower()
+        sohd_k = _chuan_shd(sohd).lower()
+        k = (mst_k, sohd_k)
+        if k not in hd_map:
+            continue
+        n = nhom.setdefault(k, {"tong": 0.0, "dong": []})
+        n["tong"] += _to_num(gv(col["tt"])) or 0
+        n["dong"].append(idx)
+
+    ket = []
+    for k, n in nhom.items():
+        goc = hd_map[k]
+        chenh = round(n["tong"] - goc["tong"])
+        if abs(chenh) > 500:
+            ket.append({"mst": k[0], "so_hd": k[1], "khhdon": goc["khhdon"], "ngay": goc["ngay"],
+                        "tong_bang_ke": round(n["tong"]), "tong_hoa_don_goc": round(goc["tong"]),
+                        "chenh_lech": chenh, "dong": n["dong"]})
+    return ket
+
+
 def _misa_doi_chieu_import_toan_bo(cid, database):
     """CHỈ ĐỌC — đối chiếu TOÀN BỘ hóa đơn ĐÃ TRA CỨU (bảng invoices, dữ
     liệu GỐC từ Tổng cục Thuế — nguồn đáng tin cậy nhất, KHÔNG phụ thuộc
@@ -28501,11 +28597,48 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             c_tot = _misa_chon_cot(cols_pui, "TotalTurnoverAmount")
             c_vat = _misa_chon_cot(cols_pui, "TotalVATAmount")
             c_ngay = _misa_chon_cot(cols_pui, "RefDate", "InvDate")
+            c_refid_pui = _misa_chon_cot(cols_pui, "RefID")
             if c_mst and c_inv and c_tot and c_vat:
                 doc_duoc["mua_hang_nk_kqk"] = True
+                # PUInvoice.TotalTurnoverAmount/TotalVATAmount là 2 CỘT LƯU
+                # SẴN (ghi 1 LẦN lúc phần mềm này TẠO chứng từ) — MISA KHÔNG
+                # tự tính lại 2 cột này nếu người dùng SAU ĐÓ tự tay SỬA/XÓA
+                # dòng "Chi tiết" (PUVoucherDetail) NGAY TRÊN MISA UI — xác
+                # nhận đúng qua báo cáo thật: hóa đơn 22619 có dòng "Phí kéo
+                # lầu bồn" thừa (do người dùng tự cộng dồn tay vào tiền hàng
+                # rồi quên xóa dòng phí, xem _gen_mua_hang_nk/"Là phí" phía
+                # trên) — người dùng đã tự xóa dòng phí thừa NGAY TRÊN MISA
+                # (màn "Chi tiết" chỉ còn đúng 1 dòng, "Tổng tiền hàng" hiện
+                # ĐÚNG 5.537.037) nhưng "Đối chiếu tổng giá trị & VAT" VẪN
+                # báo LỆCH -120.000đ vì PUInvoice.TotalTurnoverAmount vẫn giữ
+                # nguyên số CŨ 5.648.148 (không tự cập nhật theo Chi tiết
+                # mới). Tính thêm TỔNG THẬT theo PUVoucherDetail đang liên
+                # kết (qua PUInvoiceDetail.PUVoucherRefID) — nếu có VÀ khác
+                # số PUInvoice đang lưu (>1đ, bù làm tròn), DÙNG số TỔNG THẬT
+                # này thay thế (phản ánh đúng "Chi tiết" người dùng đang thấy
+                # trên MISA ngay lúc đối chiếu, không bị "đóng băng" theo số
+                # lúc ghi ban đầu).
+                sum_pvd = {}
+                try:
+                    cols_pvd = _misa_cot_bang_that(cur, "PUVoucherDetail")
+                    c_amt_pvd = _misa_chon_cot(cols_pvd, "Amount")
+                    c_vat_pvd = _misa_chon_cot(cols_pvd, "VATAmount")
+                    if c_refid_pui and c_amt_pvd and c_vat_pvd:
+                        for rid, samt, svat in cur.execute(
+                                "SELECT pid.RefID, SUM(pvd.[%s]), SUM(pvd.[%s]) "
+                                "FROM PUInvoiceDetail pid JOIN PUVoucherDetail pvd "
+                                "ON pvd.RefID=pid.PUVoucherRefID GROUP BY pid.RefID" % (
+                                    c_amt_pvd, c_vat_pvd)).fetchall():
+                            sum_pvd[rid] = (_snum(samt), _snum(svat))
+                except Exception:
+                    sum_pvd = {}
                 # SELECT thêm cột ngày (nếu dò được) — chỉ để HIỂN THỊ ở dòng
                 # "THỪA trong MISA", xem giải thích đầy đủ ở nhánh SAVoucher.
-                cot_chon = [c_mst, c_inv, c_tot, c_vat] + ([c_ngay] if c_ngay else [])
+                cot_chon = [c_mst, c_inv, c_tot, c_vat]
+                if c_ngay:
+                    cot_chon.append(c_ngay)
+                if c_refid_pui and sum_pvd:
+                    cot_chon.append(c_refid_pui)
                 # CHỈ TÍNH những PUInvoice THẬT SỰ "hiện rõ trên MISA" (chứng
                 # từ liên kết lọt đúng View_PUVoucherService — view CHÍNH màn
                 # hình "Mua hàng hóa, dịch vụ" của MISA dùng, xem
@@ -28537,7 +28670,15 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                     tham_so = tham_so + (tu_ngay_purchase, den_ngay_purchase)
                 for row in (cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
                     mst, inv, tot, vat = row[0], row[1], row[2], row[3]
-                    ngay_dt = row[4] if c_ngay else None
+                    idx = 4
+                    ngay_dt = None
+                    if c_ngay:
+                        ngay_dt = row[idx]; idx += 1
+                    ds_v, thue_v = _snum(tot), _snum(vat)
+                    if c_refid_pui and sum_pvd and idx < len(row):
+                        thuc = sum_pvd.get(row[idx])
+                        if thuc and (abs(thuc[0] - ds_v) > 1 or abs(thuc[1] - thue_v) > 1):
+                            ds_v, thue_v = thuc
                     k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0, "ngay": ""})
                     if not e["ngay"]:
@@ -28545,8 +28686,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             e["ngay"] = ngay_dt.strftime("%d/%m/%Y") if ngay_dt else ""
                         except Exception:
                             pass
-                    e["ds"] += _snum(tot)
-                    e["thue"] += _snum(vat)
+                    e["ds"] += ds_v
+                    e["thue"] += thue_v
 
         cols_psd = _misa_cot_bang_that(cur, "PUServiceDetail")
         if cols_psd:

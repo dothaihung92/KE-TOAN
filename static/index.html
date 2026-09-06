@@ -4036,6 +4036,23 @@ async function nhapLieuImportChung(input){
       (d.ctbr&&d.ctbr.so_dong?`, <b>Chi tiết BÁN RA ${d.ctbr.so_dong} dòng</b> (dùng cho Xuất Kho)`:'')+
       `. Bấm 💾 Lưu cả 2 bảng kê.`;
     if(d.loi&&d.loi.length)info+=`<br><span style="color:#c00">⚠ ${d.loi.join('; ')}</span>`;
+    // Hóa đơn trong Bảng kê Đầu vào có tổng "Thành tiền" LỆCH so với chính
+    // hóa đơn đó ở dữ liệu ĐÃ TRA CỨU (vd sửa tay cộng dồn phí vào hàng rồi
+    // quên xóa dòng phí gốc — xem _canh_bao_lech_gia_tri_hoa_don_in) — bấm
+    // vào từng dòng để lọc thẳng tới đúng hóa đơn đó mà xử lý, đúng yêu cầu
+    // người dùng: "phần mềm sẽ hiện thông báo... nhấn vào sẽ hiện đúng hoá
+    // đơn này để xử lý".
+    if(d.canh_bao_lech_hoa_don&&d.canh_bao_lech_hoa_don.length){
+      const ds=d.canh_bao_lech_hoa_don.map(c=>
+        `<div style="margin:2px 0"><a href="javascript:void(0)" onclick="nlXuLyLechHoaDon('${xkEsc(c.so_hd).replace(/'/g,"\\'")}')" `+
+        `style="color:#a03a3a;font-weight:700;text-decoration:underline">Số HĐ ${xkEsc(c.so_hd)}</a> `+
+        `(MST ${xkEsc(c.mst)}, ${xkEsc(c.ngay||'')}) — Bảng kê ghi ${c.tong_bang_ke.toLocaleString('vi-VN')}đ, `+
+        `hóa đơn gốc ${c.tong_hoa_don_goc.toLocaleString('vi-VN')}đ, lệch ${c.chenh_lech>0?'+':''}${c.chenh_lech.toLocaleString('vi-VN')}đ</div>`
+      ).join('');
+      info+=`<div style="margin-top:8px;padding:8px;background:#fff0f0;border:1px solid #e0a0a0;border-radius:6px">`+
+        `⚠ <b>${d.canh_bao_lech_hoa_don.length} hóa đơn</b> trong Bảng kê Đầu vào có tổng tiền LỆCH so với hóa đơn gốc đã tra cứu `+
+        `(có thể do sửa tay nhầm) — bấm vào để lọc tới đúng hóa đơn xử lý:${ds}</div>`;
+    }
     document.getElementById('nlChungInfo').innerHTML=info;
     toast(`Đã tách: vào ${d.in.so_dong}, ra ${d.out.so_dong} dòng. Nhớ Lưu!`,'ok');
   }catch(e){document.getElementById('nlChungInfo').textContent='';toast('Lỗi: '+e.message,'err');}
@@ -6398,7 +6415,26 @@ function moBangKe(loai){
       <div id="nlTongCong" style="margin-top:10px;font-size:14px;font-weight:600"></div>
     </div>`;
   nlFreezeCol=0;nlChon=null;
-  taiNhapLieu();
+  return taiNhapLieu();
+}
+// Bấm vào cảnh báo "hóa đơn lệch giá trị" (xem nhapLieuImportChung) — lưu
+// tạm Bảng kê Đầu vào (nếu chưa lưu) rồi mở màn Bảng kê Đầu vào, lọc thẳng
+// tới đúng Số HĐ đó để người dùng xử lý ngay, khỏi phải tự dò tay.
+async function nlXuLyLechHoaDon(soHd){
+  try{
+    if(nlChung.in){
+      await fetch(`/api/nhap-lieu/save/${current}?loai=in`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nlChung.in)});
+      nlChung.in=null;
+      capNhatBadge();
+    }
+    await moBangKe('in');
+    const ciSoHd=nlHeader.findIndex(h=>String(h||'').trim().toLowerCase()==='số hđ');
+    if(ciSoHd<0){toast('Không tìm thấy cột "Số HĐ" trong Bảng kê','err');return;}
+    const btn=document.getElementById('nlFilterBtn');
+    if(btn&&btn.dataset.on!=='1'){btn.dataset.on='1';btn.classList.add('gold');}
+    nlSetFilter(ciSoHd, String(soHd));
+    toast(`🔎 Đã lọc tới Số HĐ ${soHd} — kiểm tra lại giá trị Thành tiền`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function taiNhapLieu(){
   try{
