@@ -5671,7 +5671,7 @@ function ConfirmScreen({
         // Enter lại đi theo nhánh xác nhận "trống" (dùng gợi ý tự động, có thể không có) khiến MST đã
         // nhập bị bỏ qua — phải bấm "Lưu GD này thôi" mới thực sự lưu.
         if (bulkSelected.size >= 1) { bulkConfirmSelected(); }
-        else if (filtered[focusIdx]) confirmRow(filtered[focusIdx].id, "yes", null, null, null, "");
+        else if (filtered[focusIdx]) { confirmRow(filtered[focusIdx].id, "yes", null, null, null, ""); clearBulkPreview(); }
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
         keyboardNavRef.current = true;
@@ -5681,7 +5681,7 @@ function ConfirmScreen({
         keyboardNavRef.current = true;
         setFocusIdx(i => Math.max(i - 1, 0));
       } else if (e.key === "n" || e.key === "N") {
-        if (filtered[focusIdx]) confirmRow(filtered[focusIdx].id, "no", null, null, null, "");
+        if (filtered[focusIdx]) { confirmRow(filtered[focusIdx].id, "no", null, null, null, ""); clearBulkPreview(); }
       }
     };
     window.addEventListener("keydown", handler);
@@ -8494,7 +8494,7 @@ function ConfirmRow({
       borderRadius: 5
     }
   }, "\u2713 T\u1EF1 \u0111\u1ED9ng x\xE1c nh\u1EADn") : /*#__PURE__*/React.createElement("button", {
-    onClick: () => onConfirm(r.id, "yes", null, null, null, ""),
+    onClick: () => { onConfirm(r.id, "yes", null, null, null, ""); if (onClearBulkPreview) onClearBulkPreview(); },
     style: {
       height: 30,
       borderRadius: 7,
@@ -8623,7 +8623,7 @@ function ConfirmRow({
     r.isInternal?"\u21D4 N\u1ED9i b\u1ED9 \u2713":"\u21D4 N\u1ED9i b\u1ED9"),
   /*#__PURE__*/React.createElement("button",{onClick:()=>onOverride(r.id,"","Ti\u1EC1n m\u1EB7t","","1111"),title:"Alt+T - H\u1EA1ch to\xE1n 1111 (ti\u1EC1n m\u1EB7t)",style:{height:30,borderRadius:7,border:"1px solid #2563eb",background:r.confirmed==="yes"&&r.confirmedHach==="1111"?"#2563eb":"#fff",color:r.confirmed==="yes"&&r.confirmedHach==="1111"?"#fff":"#2563eb",fontSize:11,cursor:"pointer",fontWeight:500}},"[TM] Ti\u1EC1n M\u1EB7t"),
   !isAutoConfirmed && /*#__PURE__*/React.createElement("button",{
-    onClick:()=>onConfirm(r.id,"no",null,null,null,""),
+    onClick:()=>{onConfirm(r.id,"no",null,null,null,"");if(onClearBulkPreview)onClearBulkPreview();},
     style: {
       height: 30,
       borderRadius: 7,
