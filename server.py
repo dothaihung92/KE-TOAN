@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.200"
+APP_BUILD = "2026-08-31.201"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11792,8 +11792,21 @@ def _doc_file_ton_kho(wb):
         # nhưng cộng ton*gia (đơn giá làm tròn) của ~1469 mã lại dôi lên
         # 5.836.267.522đ — sai lệch ~5 triệu chỉ vì làm tròn đơn giá TỪNG mã
         # rồi mới nhân lại, cộng dồn qua hàng ngàn mã.
+        #
+        # ÉP về 0 khi Cuối kỳ Số lượng = 0 (hết sạch hàng) — MISA tự làm
+        # tròn "Giá trị" mỗi dòng Xuất kho riêng lẻ (giá vốn bình quân) rồi
+        # cộng dồn, nên khi 1 mã bị xuất HẾT trong kỳ, phần dư làm tròn đó
+        # dồn lại thành "Giá trị Cuối kỳ" LỆCH ÂM vài đồng dù Số lượng đã
+        # đúng 0 — xác nhận qua báo cáo thật (TONG_HOP_TON_KHO.xlsx): 15 mã
+        # (vd 'HH00008-10' Cuối kỳ SL=0 nhưng Giá trị=-2, 'MH451' SL=0 Giá
+        # trị=-461) — về mặt số học, tồn=0 thì giá trị PHẢI đúng 0, không
+        # thể "âm giá trị" mà không còn hàng — giữ nguyên số âm đó sẽ làm
+        # sai badge "Tổng giá trị tồn cuối kỳ" (trừ nhầm vài trăm đến vài
+        # nghìn đồng/mã) và có thể hiện "-2đ"/"-461đ" gây hiểu lầm là lỗi
+        # thật khi xem lại từng mã.
+        gia_tri = it["gt"] if it["ton"] else 0
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
-                    "ton": it["ton"], "gia": gia, "gia_tri": it["gt"],
+                    "ton": it["ton"], "gia": gia, "gia_tri": gia_tri,
                     "kho": next(iter(kho_qty)) if len(kho_qty) == 1 else None,
                     "kho_ro": len(kho_qty) <= 1,
                     "ton_kho_min": ton_kho_min,
@@ -11953,9 +11966,13 @@ def _misa_lay_ton_kho(cid, database, tu_ngay=None, den_ngay=None, ma_kho_list=No
         dau_ky_kho_min = min(dau_ky_qty.values()) if dau_ky_qty else it["dau_ky"]
         # "gia_tri": TỔNG giá trị THẬT (chưa làm tròn) — xem giải thích đầy
         # đủ ở _doc_file_ton_kho (cùng lý do/cùng field, chỉ khác nguồn dữ
-        # liệu là SUM SQL thay vì cộng dồn từ file Excel).
+        # liệu là SUM SQL thay vì cộng dồn từ file Excel). ÉP về 0 khi tồn
+        # (SL) = 0 — cùng lý do đã sửa ở _doc_file_ton_kho (tồn=0 thì giá
+        # trị PHẢI đúng 0, không thể còn dư "âm giá trị" vài đồng do làm
+        # tròn cộng dồn) — phòng ngừa nếu SUM SQL cũng lệch tương tự.
+        gia_tri = it["gt"] if it["ton"] else 0
         out.append({"ma": it["ma"], "ten": it["ten"], "dvt": it["dvt"],
-                    "ton": it["ton"], "gia": gia, "gia_tri": it["gt"],
+                    "ton": it["ton"], "gia": gia, "gia_tri": gia_tri,
                     "kho": next(iter(kho_qty)) if len(kho_qty) == 1 else None,
                     "kho_ro": len(kho_qty) <= 1,
                     "ton_kho_min": ton_kho_min,
