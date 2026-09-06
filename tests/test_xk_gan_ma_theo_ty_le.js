@@ -1,14 +1,25 @@
-// Regression test (Node) cho tính năng MỚI theo yêu cầu người dùng: "thêm
-// nút dò mã mã hàng tự động với tỷ lệ khớp 90%; 80%; 70%; 60%; 50%... mặt
-// hàng nào đã gắn mã rồi thì không cần phải chạy lại chỉ chạy các dòng chưa
-// gắn mã hàng thôi."
+// Regression test (Node) cho tính năng nút "🎯 Gán theo %: ≥90/80/70/60/50%"
+// ở màn Xuất Kho, theo yêu cầu người dùng: "thêm nút dò mã mã hàng tự động
+// với tỷ lệ khớp 90%; 80%; 70%; 60%; 50%... mặt hàng nào đã gắn mã rồi thì
+// không cần phải chạy lại chỉ chạy các dòng chưa gắn mã hàng thôi."
 //
-// Test trích hàm xkGanMaTheoTyLe() từ static/index.html, mô phỏng tối thiểu
-// các hàm/biến phụ thuộc (xkRows, xkTon, xkTonAnToan, xkTuNlRows, xkVeGrid,
-// toast) rồi gọi trực tiếp với các ngưỡng khác nhau, xác nhận:
-//  1) Dòng ĐÃ CÓ mã giữ NGUYÊN VẸN (không đụng, dù gợi ý khác điểm cao hơn).
-//  2) Dòng TRỐNG mã CHỈ được gán khi gợi ý điểm cao nhất đạt ĐÚNG ngưỡng.
-//  3) Gán đúng, tự tách dòng khi mã gợi ý không đủ tồn cho cả số lượng cần.
+// ROUND 2 (fix lỗi thật vừa báo lại): dòng "Gạch ốp lát 40*40 cm" bấm nút
+// "≥60%" KHÔNG gán được gì, dù bấm đúp mở bảng "Gán mã hàng kho" TAY lại
+// hiện rõ ràng nhiều mã "Khớp 67%"/"Khớp 64%" còn tồn hàng trăm (vd MH288
+// còn 390). Nguyên nhân: round 1 dùng r.goi_y (field lưu SẴN từ server lúc
+// Dò mã hàng tự động/import lần đầu — CHỈ có đúng 1 ứng viên, đã hết sạch
+// tồn từ lâu) thay vì tính lại "tươi" theo tồn kho HIỆN TẠI như modal tay
+// vẫn làm (xkTinhGoiYTuoi — xem chú thích gốc ở xkMoGan). Fix: dùng đúng
+// xkTinhGoiYTuoi(r) (cùng nguồn "Khớp XX%" với modal tay) thay vì r.goi_y.
+//
+// Test trích các hàm liên quan TỪ static/index.html (không stub thuật toán
+// so khớp/điểm giống — dùng NGUYÊN VẸN xkManh/xkKichThuocKhop/xkMaNgoacKhop/
+// xkDiemGiong/xkChuanTen/xkTinhGoiYTuoi thật, chỉ stub phần không liên quan
+// tới thuật toán như toast/xkVeGrid) để xác nhận:
+//  1) r.goi_y (dù có, dù điểm cao) bị BỎ QUA hoàn toàn — không dùng để gán.
+//  2) Ứng viên tính TƯƠI từ xkTon (đúng tồn kho hiện tại) được dùng để gán,
+//     y hệt điểm % mà modal "Gán mã hàng kho" tay sẽ hiển thị.
+//  3) Dòng ĐÃ CÓ mã vẫn giữ nguyên vẹn (không đổi từ round 1).
 const fs = require('fs');
 const path = require('path');
 const REPO_ROOT = path.dirname(__dirname);
@@ -28,72 +39,93 @@ function extractFn(src, name) {
   return src.slice(start, end);
 }
 
-const srcFn = extractFn(html, 'xkGanMaTheoTyLe');
+const FN_NAMES = ['xkChuanTen', 'xkManh', 'xkMaNgoacGop', 'xkMaNgoacKhop', 'xkKichThuocTrich', 'xkKichThuocKhop',
+                   'xkDiemGiong', 'xkTinhGoiYTuoi', 'xkGanMaTheoTyLe'];
+const srcAll = FN_NAMES.map(n => extractFn(html, n)).join('\n');
 
 function assert(cond, msg) {
   if (!cond) { console.error('FAIL: ' + msg); process.exitCode = 1; throw new Error(msg); }
 }
+
+const XK_DO_DAI_TOI_THIEU_MANH = 6;   // hằng số dùng bởi xkManh() — xem static/index.html
 
 function runWith(xkRowsInput, xkTonInput, pct) {
   var xkRows = xkRowsInput;
   var xkTon = xkTonInput;
   var toastCalls = [];
   function toast(msg, kind) { toastCalls.push({ msg, kind }); }
-  function xkTuNlRows() {}          // no-op: xkRows đã ở đúng dạng object sẵn trong test
-  function xkVeGrid(moRong) {}      // no-op: chỉ cần xác nhận nội dung xkRows sau khi hàm chạy xong
+  function xkTuNlRows() {}
+  function xkVeGrid(moRong) {}
   function xkTonAnToan(t) { return (t.ton_kho_min != null && t.ton_kho_min !== '') ? t.ton_kho_min : t.ton; }
 
-  eval(srcFn);
+  eval(srcAll);
   xkGanMaTheoTyLe(pct);
   return { xkRows, toastCalls };
 }
 
-// ----- Test 1: dòng ĐÃ CÓ mã giữ nguyên vẹn, không chạy lại -----
+// ----- Test 1: r.goi_y (stale, hết tồn) BỊ BỎ QUA — dùng ứng viên TƯƠI từ
+// xkTon (còn tồn) thay thế — đúng ca thật "Gạch ốp lát 40*40 cm". -----
+{
+  const tenBan = 'Gạch ốp lát 40*40 cm';
+  const xkRowsInput = [
+    { sl: 164.29, tt: 18893350, ten_sp: tenBan, ma: '',
+      // r.goi_y CŨ (từ lúc Dò mã hàng tự động lần đầu) — điểm rất cao
+      // nhưng mã đó GIỜ đã hết sạch tồn — PHẢI bị bỏ qua hoàn toàn.
+      goi_y: [{ ma: 'MA-CU-HET-HANG', diem: 0.99, ten: tenBan, dvt: 'Thùng', gia: 115000 }] },
+  ];
+  const xkTonInput = [
+    // vẫn còn trong tồn kho (mã cũ đã dùng hết, KHÔNG có trong xkTon nữa —
+    // mô phỏng đúng ca thật: mã r.goi_y trỏ tới không còn/không đủ tồn).
+    { ma: 'MH288', ten: 'Gạch 40 x 40', dvt: 'Thùng', gia: 115605, ton: 390 },
+    { ma: 'MH143', ten: 'Gạch PR.40.40_A1', dvt: 'Thùng', gia: 73080, ton: 41 },
+  ];
+  // Tính điểm THẬT (giống hệt thuật toán modal tay) để biết chính xác ngưỡng
+  // nào ứng viên MH288 đạt được, không đoán mò con số.
+  const xkChuanTenTest = eval('(' + extractFn(html, 'xkChuanTen') + ')');
+  const diemGiongTest = eval('(' + extractFn(html, 'xkDiemGiong') + ')');
+  const diemMH288 = diemGiongTest(xkChuanTenTest(tenBan), xkChuanTenTest('Gạch 40 x 40'));
+  const nguongDuoi = Math.max(1, Math.floor(diemMH288 * 100) - 5);   // chắc chắn ĐẠT
+  const nguongTren = Math.min(99, Math.ceil(diemMH288 * 100) + 20);  // chắc chắn KHÔNG đạt
+
+  const kqDat = runWith(xkRowsInput, xkTonInput, nguongDuoi);
+  const ganDuoc = kqDat.xkRows.find(r => r.ma === 'MH288');
+  assert(ganDuoc, `Ngưỡng ${nguongDuoi}% (dưới điểm thật ${Math.round(diemMH288*100)}% của MH288) PHẢI gán được MH288 (tính TƯƠI từ xkTon, KHÔNG dùng r.goi_y đã hết tồn) — got ${JSON.stringify(kqDat.xkRows)}`);
+  assert(!kqDat.xkRows.some(r => r.ma === 'MA-CU-HET-HANG'),
+    'KHÔNG được dùng mã "MA-CU-HET-HANG" từ r.goi_y (stale, đã hết tồn) — chỉ dùng ứng viên tính tươi từ xkTon');
+
+  const kqKhongDat = runWith(xkRowsInput, xkTonInput, nguongTren);
+  assert(!kqKhongDat.xkRows.some(r => r.ma), `Ngưỡng ${nguongTren}% (trên điểm thật ${Math.round(diemMH288*100)}% của MH288) KHÔNG được gán gì — got ${JSON.stringify(kqKhongDat.xkRows)}`);
+
+  console.log(`PASS 1: điểm thật MH288="${Math.round(diemMH288*100)}%" — dùng đúng ứng viên tính TƯƠI từ tồn kho hiện tại (KHÔNG dùng r.goi_y lỗi thời đã hết tồn), đúng ca thật "Gạch ốp lát 40*40 cm" vừa báo lại.`);
+}
+
+// ----- Test 2: dòng ĐÃ CÓ mã vẫn giữ nguyên vẹn (không đổi từ round 1) -----
 {
   const xkRowsInput = [
-    { sl: 5, tt: 500000, ten_sp: 'Hàng A', ma: 'MA-CU', goi_y: [{ ma: 'MA-KHAC', diem: 0.99 }] },
+    { sl: 5, tt: 500000, ten_sp: 'Hàng A', ma: 'MA-CU', goi_y: [] },
   ];
   const xkTonInput = [
     { ma: 'MA-CU', ten: 'Hàng A', dvt: 'Cái', gia: 100000, ton: 100 },
-    { ma: 'MA-KHAC', ten: 'Hàng A bản khác', dvt: 'Cái', gia: 90000, ton: 100 },
+    { ma: 'MA-KHAC', ten: 'Hàng A phiên bản khác', dvt: 'Cái', gia: 90000, ton: 100 },
   ];
-  const { xkRows } = runWith(xkRowsInput, xkTonInput, 50);
+  const { xkRows } = runWith(xkRowsInput, xkTonInput, 10);
   assert(xkRows.length === 1 && xkRows[0].ma === 'MA-CU',
-    'Dòng đã có mã "MA-CU" phải giữ NGUYÊN, KHÔNG được đổi sang gợi ý khác dù điểm cao hơn — được ' + JSON.stringify(xkRows));
-  console.log('PASS 1: dòng đã có mã giữ nguyên vẹn, không chạy lại.');
+    'Dòng đã có mã "MA-CU" phải giữ NGUYÊN, không đụng tới — được ' + JSON.stringify(xkRows));
+  console.log('PASS 2: dòng đã có mã giữ nguyên vẹn, không chạy lại.');
 }
 
-// ----- Test 2: dòng trống mã chỉ gán khi đạt ĐÚNG ngưỡng -----
+// ----- Test 3: tự tách dòng khi mã tính tươi đạt ngưỡng nhưng không đủ tồn -----
 {
-  const xkRowsInput = [
-    { sl: 5, tt: 500000, ten_sp: 'Hàng B', ma: '', goi_y: [{ ma: 'MB', diem: 0.75 }] },
-  ];
-  const xkTonInput = [{ ma: 'MB', ten: 'Hàng B', dvt: 'Cái', gia: 100000, ton: 100 }];
-
-  const kq90 = runWith(xkRowsInput, xkTonInput, 90);
-  assert(kq90.xkRows.length === 1 && !kq90.xkRows[0].ma,
-    'Gợi ý điểm 75% KHÔNG đạt ngưỡng 90% -> dòng phải VẪN TRỐNG mã — được ' + JSON.stringify(kq90.xkRows));
-
-  const kq70 = runWith(xkRowsInput, xkTonInput, 70);
-  assert(kq70.xkRows.length === 1 && kq70.xkRows[0].ma === 'MB' && kq70.xkRows[0].sl === 5,
-    'Gợi ý điểm 75% ĐẠT ngưỡng 70% -> dòng phải được gán mã "MB", đủ nguyên SL=5 — được ' + JSON.stringify(kq70.xkRows));
-  console.log('PASS 2: chỉ gán khi gợi ý đạt đúng ngưỡng phần trăm, không gán khi dưới ngưỡng.');
-}
-
-// ----- Test 3: tự tách dòng khi mã gợi ý không đủ tồn -----
-{
-  const xkRowsInput = [
-    { sl: 10, tt: 1000000, ten_sp: 'Hàng C', ma: '', goi_y: [{ ma: 'MC', diem: 0.95 }] },
-  ];
-  const xkTonInput = [{ ma: 'MC', ten: 'Hàng C', dvt: 'Cái', gia: 100000, ton: 6 }];   // chỉ còn 6, cần 10
+  const tenBan = 'Hàng C mẫu XYZ';
+  const xkRowsInput = [{ sl: 10, tt: 1000000, ten_sp: tenBan, ma: '', goi_y: [] }];
+  const xkTonInput = [{ ma: 'MC', ten: tenBan, dvt: 'Cái', gia: 100000, ton: 6 }];  // khớp 100%, chỉ còn 6, cần 10
   const { xkRows } = runWith(xkRowsInput, xkTonInput, 90);
   assert(xkRows.length === 2, 'Phải tách thành 2 dòng (6 gán được + 4 còn thiếu) — được ' + JSON.stringify(xkRows));
   const ganDuoc = xkRows.find(r => r.ma === 'MC');
   const conThieu = xkRows.find(r => !r.ma);
   assert(ganDuoc && ganDuoc.sl === 6, 'Dòng gán được phải đúng SL=6 (hết tồn) — được ' + JSON.stringify(ganDuoc));
-  assert(conThieu && conThieu.sl === 4, 'Dòng còn thiếu phải đúng SL=4 (10-6), vẫn trống mã để xử lý tiếp — được ' + JSON.stringify(conThieu));
-  assert(ganDuoc.sl + conThieu.sl === 10, 'Tổng SL sau tách phải bảo toàn đúng 10 — được ' + (ganDuoc.sl + conThieu.sl));
-  console.log('PASS 3: tự tách dòng đúng khi mã gợi ý không đủ tồn cho cả số lượng cần, bảo toàn tổng SL.');
+  assert(conThieu && conThieu.sl === 4, 'Dòng còn thiếu phải đúng SL=4 (10-6) — được ' + JSON.stringify(conThieu));
+  console.log('PASS 3: tự tách dòng đúng khi mã tính tươi đạt ngưỡng nhưng không đủ tồn, bảo toàn tổng SL.');
 }
 
 console.log('\nTẤT CẢ TEST PASS');

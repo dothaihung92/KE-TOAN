@@ -5249,11 +5249,21 @@ function xkKiemTraTonLoi(rSet){
 // rỗng), dòng ĐÃ CÓ mã rồi (dù do Dò mã hàng tự động hay tự tay gán) GIỮ
 // NGUYÊN VẸN, KHÔNG chạy lại/không đụng tới — đúng yêu cầu: "mặt hàng nào đã
 // gắn mã rồi thì không cần phải chạy lại chỉ chạy các dòng chưa gắn mã hàng
-// thôi". Dùng ĐÚNG danh sách gợi ý (goi_y, đã tính sẵn theo từng dòng khi Dò
-// mã hàng tự động/import — xem _xk_goi_y_ma phía server, field "diem" hiển
-// thị y hệt "Khớp XX%" trong bảng "Gán mã hàng kho") — lấy gợi ý ĐIỂM CAO
-// NHẤT đạt ngưỡng, tự tách dòng nếu mã đó không đủ tồn cho cả số lượng cần
-// bán (cùng cơ chế "layTu" như xkKiemTraTonLoi).
+// thôi".
+//
+// QUAN TRỌNG: dùng xkTinhGoiYTuoi(r) tính lại gợi ý TƯƠI ngay lúc bấm nút —
+// KHÔNG dùng r.goi_y (field lưu SẴN từ server lúc Dò mã hàng tự động/import
+// lần đầu, xem _xk_goi_y_ma) — xác nhận đúng qua báo cáo thật: dòng "Gạch ốp
+// lát 40*40 cm" bấm "≥60%" KHÔNG gán được gì, trong khi bấm đúp mở bảng "Gán
+// mã hàng kho" tay lại hiện RÕ RÀNG nhiều mã "Khớp 67%"/"Khớp 64%" còn tồn
+// hàng trăm (vd MH288 còn 390) — vì r.goi_y CHỈ có đúng 1 ứng viên (đã hết
+// sạch tồn, "Còn lại: ~0" — số 2.8e-14 là rác làm tròn dấu phẩy động) tính
+// từ LÚC dò mã ban đầu, không cập nhật lại khi tồn kho các mã khác đã trống/
+// đầy trở lại do các dòng khác được gán/tách sau đó — y hệt lý do modal tay
+// đã đổi sang tính "tươi" mỗi lần mở (xem chú thích ở xkMoGan/xkTinhGoiYTuoi:
+// "KHÔNG dùng r.goi_y đã lưu sẵn... có thể lỗi thời/thiếu"). Nút "Gán theo
+// %" giờ dùng ĐÚNG cùng 1 nguồn tính điểm "Khớp XX%" với bảng gán tay, để
+// không còn bỏ sót mã đã hiện rõ ràng đủ % trong bảng đó.
 function xkGanMaTheoTyLe(pctThreshold){
   if(!xkRows.length){toast('Chưa có dữ liệu — bấm "🔍 Dò mã hàng tự động" trước','err');return}
   xkTuNlRows();
@@ -5279,7 +5289,7 @@ function xkGanMaTheoTyLe(pctThreshold){
     }
     const batDau=ketQua.length;
     const ghiMoRong=()=>{moRong[chiSoCu]={batDau, soDong:ketQua.length-batDau};};
-    const ungVien=(r.goi_y||[]).filter(g=>((g.diem||0)*100)>=pctThreshold);
+    const ungVien=xkTinhGoiYTuoi(r).filter(g=>((g.diem||0)*100)>=pctThreshold);
     if(!ungVien.length){                   // không có gợi ý nào đạt ngưỡng -> để nguyên (vẫn trống)
       ketQua.push(r);
       ghiMoRong();
