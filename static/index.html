@@ -4627,6 +4627,7 @@ function xkVeTrangChinh(){
         <input type="file" id="xkFileGiaThanh" accept=".xlsx" multiple style="display:none" onchange="xkImportGiaThanh(this)">
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
         <button class="btn sm" style="background:#a03a3a" onclick="xkGhiThangMisa()" title="Ghi thẳng vào MISA (INOutward — màn 'Kho &gt; Nhập, xuất kho &gt; Xuất kho') — CHƯA GHI SỔ, tự bấm 'Ghi sổ' trong MISA sau khi kiểm tra">⬆ Xuất kho vào MISA</button>
+        <button class="btn ghost sm" onclick="xkChanDoanSoKho()" title="Chẩn đoán CHỈ ĐỌC: kiểm tra bảng Sổ Kho (InventoryLedger) của các chứng từ Xuất kho đang có trong MISA — dùng khi 'Tính giá xuất kho' chạy xong mà chứng từ vẫn 0đ">🔎 Chẩn đoán Sổ Kho</button>
         <button class="btn ghost sm" onclick="xkSapXepNgay()">⬆ Sắp xếp theo Ngày</button>
         <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="xkXoaDuLieu()">🗑 Xoá dữ liệu</button>
         <button class="btn ghost sm" style="color:#8a5d00;border-color:#e8b923" onclick="xkGoMa()" title="Dùng khi thấy Tồn kho (cột A) bị âm — gỡ mã + SL/Đơn giá kho (trừ dòng giá vốn thật từ tờ khai) rồi bấm Dò mã hàng tự động lại để tính sạch từ đầu">↺ Gỡ mã hàng</button>
@@ -8809,6 +8810,42 @@ async function misaXemLoaiChungTu(database,masterTable){
       <div style="max-height:50vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0;position:sticky;top:0"><th style="border:1px solid #eee;padding:2px 6px">RefType</th><th style="border:1px solid #eee;padding:2px 6px">Tên</th></tr>
         ${rows}</table></div>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Chẩn đoán CHỈ ĐỌC — tìm dữ liệu THẬT trên bảng Sổ Kho (InventoryLedger)
+// cho các chứng từ Xuất kho đã có trong MISA, phục vụ điều tra lỗi thật:
+// Ghi sổ + Tính giá xuất kho chạy xong "hoàn thành" nhưng chứng từ do phần
+// mềm ghi vẫn 0đ — xem _misa_chan_doan_so_kho_xuat_kho (server.py).
+async function xkChanDoanSoKho(){
+  toast('Đang kiểm tra Sổ Kho (chỉ đọc)...','');
+  try{
+    const d=await api(`/api/misa-sql/chan-doan-so-kho-xuat-kho/${current}`);
+    const dongMau=(d.dong_mau||[]).map(r=>`<tr>${(d.cot||[]).map((c,i)=>
+      `<td style="border:1px solid #eee;padding:2px 6px;white-space:nowrap">${misaEsc(String(r[i]??''))}</td>`).join('')}</tr>`).join('');
+    const dongGia=(d.ct_xuat_kho_da_co_gia||[]).map(x=>`<tr>
+      <td style="border:1px solid #eee;padding:2px 6px">${misaEsc(x.so_ct)}</td>
+      <td style="border:1px solid #eee;padding:2px 6px;text-align:right">${Number(x.tong_tien||0).toLocaleString('vi-VN')}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${x.da_ghi_so?'✓':''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${x.da_ghi_so_kho?'✓':''}</td>
+      <td style="border:1px solid #eee;padding:2px 6px">${x.do_phan_mem_tao?'phần mềm':'khách tự nhập/import'}</td></tr>`).join('');
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#eef4ff;border:1px solid #b8ccef;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#264b8a;margin-bottom:10px">
+        🔎 Chẩn đoán CHỈ ĐỌC — tổng <b>${d.tong_so_ct_xuat_kho_da_co??'?'}</b> chứng từ Xuất kho (INOutward) đang có,
+        trong đó <b>${d.so_dong_so_kho_cua_xuat_kho??'?'}</b> dòng Sổ Kho (InventoryLedger) gắn với chúng.
+        ${d.so_dong_so_kho_cua_xuat_kho===0?'<br><b style="color:#a03a3a">-> 0 dòng: XÁC NHẬN đúng nghi vấn — Sổ Kho KHÔNG có gì để "Tính giá xuất kho" tính cho bất kỳ chứng từ Xuất kho nào (kể cả chứng từ thật của bạn), không chỉ riêng chứng từ phần mềm ghi.</b>':''}
+      </div>
+      ${(d.cot||[]).length?`<div style="font-weight:700;font-size:12.5px;margin-bottom:4px">Mẫu dòng Sổ Kho thật (mới nhất, tối đa 5 dòng):</div>
+      <div style="max-height:30vh;overflow:auto;margin-bottom:10px"><table style="border-collapse:collapse;font-size:11px;width:100%">
+        <tr style="background:#f0f0f0;position:sticky;top:0">${d.cot.map(c=>`<th style="border:1px solid #eee;padding:2px 6px;white-space:nowrap">${misaEsc(c)}</th>`).join('')}</tr>
+        ${dongMau}</table></div>`:''}
+      ${(d.ct_xuat_kho_da_co_gia||[]).length?`<div style="font-weight:700;font-size:12.5px;margin-bottom:4px">Chứng từ Xuất kho ĐÃ có giá (Tổng tiền &gt; 0), để so sánh chéo:</div>
+      <div style="max-height:20vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+        <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Đã ghi sổ</th><th style="border:1px solid #eee;padding:2px 6px">Đã ghi Sổ Kho</th><th style="border:1px solid #eee;padding:2px 6px">Do ai tạo</th></tr>
+        ${dongGia}</table></div>`:'<div class="hint">Chưa có chứng từ Xuất kho nào có giá &gt; 0.</div>'}
       <div style="margin-top:12px;text-align:right">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button>
       </div>`;

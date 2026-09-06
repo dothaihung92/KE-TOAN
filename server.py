@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.202"
+APP_BUILD = "2026-08-31.203"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19650,6 +19650,85 @@ def misa_sql_import_xuat_kho(cid: int, preview: int = 1, database: str = "", ghi
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     return _misa_ghi_xuat_kho(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+
+
+def _misa_chan_doan_so_kho_xuat_kho(cid, database):
+    """CHẨN ĐOÁN SÂU (CHỈ ĐỌC, không ghi/sửa gì) — theo báo cáo thật người
+    dùng vừa gặp: bấm "Ghi sổ" cho chứng từ Xuất kho do phần mềm ghi (thành
+    công, không lỗi), rồi bấm "Tính giá xuất kho" trong MISA (chạy xong,
+    báo "Quá trình Tính giá xuất kho đã hoàn thành") nhưng Đơn giá/Thành
+    tiền của chứng từ đó VẪN = 0 — nghi vấn hàng đầu: _misa_ghi_xuat_kho
+    hiện KHÔNG ghi bảng InventoryLedger (Sổ Kho) cho chứng từ Xuất kho (cố
+    ý bỏ qua từ đầu vì CHƯA có dữ liệu mẫu THẬT cho chiều XUẤT để đối chiếu
+    — khác Mua hàng nhập kho, đã dò được mẫu InventoryLedger RefType=302
+    thật để tham chiếu) — nếu "Tính giá xuất kho" của MISA hoạt động bằng
+    cách quét các dòng InventoryLedger CHƯA có giá rồi tính/ghi lại, thì
+    chứng từ do phần mềm tạo (không có dòng Sổ Kho nào) sẽ không có gì để
+    tính, đúng y hệt hiện tượng đã báo.
+
+    Hàm này tìm CÁC DÒNG InventoryLedger THẬT đã có sẵn trong CSDL, gắn với
+    BẤT KỲ chứng từ INOutward nào (không chỉ đúng 1 GUID cụ thể) — kể cả
+    chứng từ Xuất kho THẬT do người dùng tự nhập tay/import Excel qua MISA
+    (đã Ghi sổ + Tính giá xuất kho thành công từ trước, vd 'XK T12/2024')
+    — để lấy ĐÚNG cấu trúc/giá trị các cột đặc thù chiều XUẤT (InOutWardType,
+    IsInward, OutwardQuantity/OutwardAmount, InwardQuantityBalance/
+    InwardAmountBalance SAU khi trừ...) làm căn cứ ĐÁNG TIN CẬY để sau này
+    bổ sung ghi InventoryLedger cho _misa_ghi_xuat_kho, thay vì đoán bừa
+    (rủi ro cao nhất nếu ghi sai bảng này — ảnh hưởng trực tiếp giá vốn/tồn
+    kho thật)."""
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        ket = {}
+        try:
+            ket["tong_so_ct_xuat_kho_da_co"] = cur.execute(
+                "SELECT COUNT(*) FROM INOutward").fetchone()[0]
+        except Exception as e:
+            ket["loi_dem_ct_xuat_kho"] = str(e)[:300]
+        try:
+            ket["so_dong_so_kho_cua_xuat_kho"] = cur.execute(
+                "SELECT COUNT(*) FROM InventoryLedger il "
+                "WHERE il.RefID IN (SELECT RefID FROM INOutward)").fetchone()[0]
+        except Exception as e:
+            ket["loi_dem_so_kho"] = str(e)[:300]
+        try:
+            cur.execute(
+                "SELECT TOP 5 il.* FROM InventoryLedger il "
+                "WHERE il.RefID IN (SELECT RefID FROM INOutward) "
+                "ORDER BY il.PostedDate DESC")
+            cols = [d[0] for d in cur.description]
+            rows = []
+            for r in cur.fetchall():
+                rows.append([(v.isoformat() if hasattr(v, "isoformat") else
+                              (str(v) if v is not None else None)) for v in r])
+            ket["cot"] = cols
+            ket["dong_mau"] = rows
+        except Exception as e:
+            ket["loi_lay_mau"] = str(e)[:300]
+        # chứng từ Xuất kho CÓ giá (AmountFinance > 0) — để biết chứng từ
+        # nào đã được "Tính giá xuất kho" thành công, phục vụ so sánh chéo.
+        try:
+            cur.execute(
+                "SELECT TOP 5 o.RefNoFinance, o.TotalAmountFinance, o.IsPostedFinance, "
+                "o.IsPostedInventoryBookFinance, ISNULL(o.CustomField10,'') "
+                "FROM INOutward o WHERE o.TotalAmountFinance > 0 ORDER BY o.ModifiedDate DESC")
+            ket["ct_xuat_kho_da_co_gia"] = [
+                {"so_ct": r[0], "tong_tien": _snum(r[1]), "da_ghi_so": bool(r[2]),
+                 "da_ghi_so_kho": bool(r[3]), "do_phan_mem_tao": r[4] == _PM_MARK}
+                for r in cur.fetchall()]
+        except Exception as e:
+            ket["loi_ct_da_co_gia"] = str(e)[:300]
+        return ket
+    finally:
+        conn.close()
+
+@app.get("/api/misa-sql/chan-doan-so-kho-xuat-kho/{cid}")
+def misa_sql_chan_doan_so_kho_xuat_kho(cid: int, database: str = ""):
+    """CHẨN ĐOÁN (chỉ đọc) — xem _misa_chan_doan_so_kho_xuat_kho."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_chan_doan_so_kho_xuat_kho(cid, database)
 
 
 def _misa_sua_thieu_sainvoicereference(cid, database, preview=True):
