@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.199"
+APP_BUILD = "2026-08-31.200"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15385,6 +15385,27 @@ def _misa_gio_nhap_co_dinh(dt):
         return dt
     return dt.replace(hour=_MISA_GIO_GHI_NHAP, minute=0, second=0, microsecond=0)
 
+_MISA_GIO_GHI_XUAT = 23   # xem _misa_gio_xuat_co_dinh — PHẢI SAU _MISA_GIO_GHI_NHAP (10h) trong ngày
+
+def _misa_gio_xuat_co_dinh(dt):
+    """Gán GIỜ CỐ ĐỊNH (mặc định 23:00:00, cuối ngày) cho ngày chứng từ Xuất
+    kho khi ghi thẳng vào MISA (_misa_ghi_xuat_kho) — ĐÚNG lỗi thật người
+    dùng vừa báo: Nhập kho (Mua hàng) và Xuất kho CÙNG ngày 31/12 nhưng
+    Xuất kho bị MISA từ chối Ghi sổ vì "quá số lượng tồn trong kho" (2 mã
+    MH574/MH569 mới nhập CÙNG ngày). Nguyên nhân: _misa_ghi_xuat_kho trước
+    đây để RefDate/PostedDate lấy NGUYÊN giờ 00:00:00 (nửa đêm — ngày chỉ
+    có phần NGÀY, không có giờ) trong khi Nhập kho (_misa_gio_nhap_co_dinh)
+    đã được đặt SẴN 10:00:00 sáng — khiến Xuất kho (00:00) bị coi là XẢY RA
+    TRƯỚC Nhập kho (10:00) cùng ngày, nên lúc tính tồn khả dụng để Xuất kho
+    chưa cộng được phần Nhập kho cùng ngày. Đặt Xuất kho về giờ CUỐI NGÀY
+    (23:00, sau cả 10:00 của Nhập kho) để bảo đảm mọi Nhập kho CÙNG NGÀY
+    luôn được tính vào tồn TRƯỚC khi Xuất kho, đúng thứ tự nghiệp vụ thật
+    (nhập trước, xuất sau) — cùng nguyên tắc/cơ chế đã áp dụng cho Nhập
+    kho, chỉ đổi chiều giờ cho đúng thứ tự Nhập -> Xuất trong ngày."""
+    if dt is None:
+        return dt
+    return dt.replace(hour=_MISA_GIO_GHI_XUAT, minute=0, second=0, microsecond=0)
+
 def _ky_hieu_chac_chan_khac(kh_moi, kh_da_co):
     """True CHỈ khi CẢ 2 Ký hiệu HĐ đều CÓ GIÁ TRỊ THẬT (không rỗng) và
     KHÁC NHAU — đây là dấu hiệu DUY NHẤT đủ tin cậy để kết luận 2 hóa đơn
@@ -20402,7 +20423,14 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
     Xuất Kho" — xem _gen_xuat_kho_rows), gộp thành 1 chứng từ DUY NHẤT/lần
     bấm (Ngày hạch toán = CUỐI THÁNG của hoá đơn mới nhất trong lô, Số chứng
     từ = "XK T{tháng}/{năm}" — ĐÚNG quy ước đã xác nhận ở _gen_xuat_kho_rows,
-    để 2 luồng xuất Excel/ghi thẳng luôn cho CÙNG 1 kết quả).
+    để 2 luồng xuất Excel/ghi thẳng luôn cho CÙNG 1 kết quả). GIỜ của RefDate/
+    PostedDate đặt CỐ ĐỊNH CUỐI NGÀY (23:00, xem _misa_gio_xuat_co_dinh) —
+    khi Nhập kho (Mua hàng) VÀ Xuất kho CÙNG 1 ngày (vd cuối tháng), Nhập
+    kho đã được đặt SẴN 10:00 sáng (_misa_gio_nhap_co_dinh) nên Xuất kho
+    PHẢI muộn hơn mới được MISA tính đủ tồn vừa nhập cùng ngày khi Ghi sổ
+    — đúng lỗi thật đã báo: MISA từ chối Ghi sổ "quá số lượng tồn trong
+    kho" cho 2 mã vừa nhập cùng ngày 31/12 vì trước đây Xuất kho lấy giờ
+    mặc định 00:00:00 (nửa đêm — SỚM HƠN cả giờ Nhập kho 10:00 cùng ngày).
 
     KHÔNG ghi Sổ Kho (InventoryLedger — bảng số dư luỹ kế/giá vốn thật) và
     CHƯA GHI SỔ Tài chính (IsPostedFinance=False) — khác Mua hàng nhập kho
@@ -20462,7 +20490,7 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
     ngay_ht_s, thang, nam = _xk_cuoi_thang(ngay_cuoi)
     if not ngay_ht_s:
         raise HTTPException(400, "Không xác định được ngày hạch toán từ dữ liệu GIATHANH.")
-    ngay_ht = _misa_doc_ngay(ngay_ht_s)
+    ngay_ht = _misa_gio_xuat_co_dinh(_misa_doc_ngay(ngay_ht_s))
     so_ct = f"XK T{thang}/{nam}"
 
     conn = _misa_sql_connect(cid, database=database)

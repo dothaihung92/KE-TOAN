@@ -41,9 +41,10 @@ ns = {'datetime': datetime, 'HTTPException': FakeHTTPException, '_PM_MARK': 'HDD
 names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_misa_gan',
          '_misa_branch_id', '_to_num', '_xk_ton_an_toan', '_xk_dau_ky_an_toan',
          '_xk_kiem_tra_vuot_ton', '_xk_key_ngay', '_xk_cuoi_thang', '_misa_doc_ngay',
-         '_misa_ghi_xuat_kho']
+         '_misa_gio_xuat_co_dinh', '_misa_ghi_xuat_kho']
 for n in names:
     exec(extract_fn(n), ns)
+ns['_MISA_GIO_GHI_XUAT'] = 23   # xem _misa_gio_xuat_co_dinh (server.py)
 
 def C(*names):
     return [(n, "nvarchar") for n in names]
@@ -172,6 +173,9 @@ assert h["IsPostedInventoryBookFinance"] is False, (
     "IsPostedInventoryBookFinance=False dù IsPostedFinance=True")
 assert h["TotalAmountFinance"] == 1250000
 assert h["CustomField10"] == "HDDT-AUTO"
+assert h["RefDate"].hour == 23 and h["PostedDate"].hour == 23, (
+    "RefDate/PostedDate PHẢI giờ CỐ ĐỊNH CUỐI NGÀY (23:00, sau giờ 10:00 của Nhập kho) — đúng lỗi thật "
+    "'quá số lượng tồn trong kho' khi Nhập/Xuất kho CÙNG ngày — got " + str(h["RefDate"]))
 det = sorted(cur1.inserted["INOutwardDetail"], key=lambda d: d["SortOrder"])
 assert len(det) == 2
 assert det[0]["InventoryItemID"] == "iid-mh01" and det[0]["StockID"] == "sid-hh"
