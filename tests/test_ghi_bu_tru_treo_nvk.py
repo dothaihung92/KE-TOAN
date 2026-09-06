@@ -48,7 +48,7 @@ COLUMNS = {
                         ("Description", "nvarchar"), ("DebitAccount", "nvarchar"), ("CreditAccount", "nvarchar"),
                         ("AmountOC", "money"), ("Amount", "money"), ("UnResonableCost", "bit"),
                         ("SortOrder", "int"), ("CreditObjectID", "uniqueidentifier"),
-                        ("DebitObjectID", "uniqueidentifier")],
+                        ("DebitObjectID", "uniqueidentifier"), ("BusinessType", "int")],
     "GeneralLedger": [("RefID", "uniqueidentifier"), ("RefDetailID", "uniqueidentifier"), ("RefType", "int"),
                       ("RefDate", "datetime"), ("RefDate1", "datetime"), ("PostedDate", "datetime"),
                       ("RefNo", "nvarchar"), ("RefNo1", "nvarchar"), ("RefNo2", "nvarchar"),
@@ -231,6 +231,10 @@ glvd = [row for tbl, row in cur.written if tbl == "GLVoucherDetail"][0]
 assert glvd["DebitAccount"] == "1111" and glvd["CreditAccount"] == "131", glvd
 assert glvd["CreditObjectID"] == AOID_KH, "Đối tượng KH phải gắn ở BÊN CÓ (TK 131, tài khoản công nợ)"
 assert glvd["Amount"] == 2656500
+assert glvd["BusinessType"] is None, (
+    f"BusinessType PHẢI = NULL (ép rõ, không để mặc định 0 của kiểu int) — MISA hiện BusinessType=0 "
+    f"thành 'Chiết khấu thương mại (bán hàng)', làm sai cột 'Nghiệp vụ' của chứng từ 'Điều chỉnh công "
+    f"nợ treo' — got {glvd['BusinessType']}")
 assert glv["RefType"] == 4501, "RefType phải HỌC từ mẫu chứng từ DC% có sẵn, không đoán"
 assert glv["IsPostedFinance"] is True, "Phải GHI SỔ NGAY (không để CHƯA GHI SỔ) theo đúng yêu cầu"
 assert glv["CustomField10"] == "HDDT-AUTO", "Vẫn đánh dấu để truy vết dù đã ghi sổ ngay"
@@ -367,5 +371,71 @@ print("PASS: công ty lần đầu dùng tính năng (chưa từng có chứng t
       "dự phòng dò qua SYSRefType với từ khóa 'khác' CÓ DẤU dò ĐÚNG (trước đây gọi 'khac' KHÔNG dấu, "
       "không bao giờ khớp được RefTypeName tiếng Việt có dấu, rơi thẳng vào lỗi 'thiếu dữ liệu "
       "SYSRefType' dù dữ liệu thật vẫn có — đúng lỗi thực tế người dùng vừa báo).")
+
+# ── Test 7 (ĐÚNG lỗi thật vừa báo, kèm ảnh chụp MISA): CSDL THẬT của công ty
+# này KHÔNG hề có cột "DebitObjectID"/"CreditObjectID" như 2 công ty trước —
+# quy ước THẬT ở đây (xác nhận qua "📄 Xuất cấu trúc TẤT CẢ bảng") là bên CÓ
+# có tiền tố RÕ RÀNG ("CreditAccountObjectID"), còn bên NỢ dùng tên CHUNG
+# không tiền tố ("AccountObjectID") — kèm 1 cột KHÔNG LIÊN QUAN khác cũng có
+# chữ "Object" ("TaxAccountObjectID", đối tượng THUẾ, khác hẳn đối tượng
+# công nợ Nợ/Có). Không có dòng mẫu nào để học qua GIÁ TRỊ (lần đầu dùng
+# tính năng) -> quy ước tên "debit"/"credit" cũ (round trước) hoàn toàn
+# KHÔNG tìm ra cột nào chứa "debit" -> "Đối tượng Nợ" bị bỏ trống dù ghi
+# "thành công" không báo lỗi gì — ĐÚNG hiện tượng đã báo (TK Nợ 331 không
+# có Đối tượng Nợ trên MISA, chứng từ NVK không báo lỗi gì).
+GLVD_REAL_ASYMMETRIC = [
+    ("RefDetailID", "uniqueidentifier"), ("RefID", "uniqueidentifier"), ("Description", "nvarchar"),
+    ("DebitAccount", "nvarchar"), ("CreditAccount", "nvarchar"), ("AmountOC", "money"), ("Amount", "money"),
+    ("UnResonableCost", "bit"), ("SortOrder", "int"),
+    ("AccountObjectID", "uniqueidentifier"),          # bên NỢ — KHÔNG có tiền tố "Debit"
+    ("CreditAccountObjectID", "uniqueidentifier"),    # bên CÓ — CÓ tiền tố "Credit"
+    ("TaxAccountObjectID", "uniqueidentifier"),       # đối tượng THUẾ — KHÔNG liên quan Nợ/Có
+    ("BusinessType", "int"),
+]
+
+
+class FakeCursorSoDoThat(FakeCursor):
+    """Mô phỏng ĐÚNG cấu trúc CSDL thật vừa xác nhận qua file cấu trúc:
+    GLVoucherDetail dùng AccountObjectID (Nợ, không tiền tố)/
+    CreditAccountObjectID (Có)/TaxAccountObjectID (thuế, không liên quan) —
+    KHÔNG có DebitObjectID/CreditObjectID như 2 công ty ở các test trước.
+    Lần đầu dùng tính năng — không có dòng mẫu nào để học qua GIÁ TRỊ."""
+    def execute(self, sql, params=()):
+        if "sys.columns c" in sql and "sys.types ty" in sql:
+            p = params if isinstance(params, (tuple, list)) else (params,) if params != () else ()
+            table = p[0]
+            self._result = GLVD_REAL_ASYMMETRIC if table == "GLVoucherDetail" else COLUMNS.get(table, [])
+            return self
+        if "SELECT TOP 500 [" in sql and ("CreditAccount LIKE" in sql or "DebitAccount LIKE" in sql):
+            self._result = []   # không có dòng mẫu nào để học qua GIÁ TRỊ (lần đầu dùng tính năng)
+            return self
+        return super().execute(sql, params)
+
+
+cur7 = FakeCursorSoDoThat()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur7)
+r7 = _misa_ghi_bu_tru_treo(1, "TESTDB", "ncc", danh_sach_ncc, preview=False)
+assert r7["hoc_duoc_cot_doi_tuong"] is True, (
+    f"PHẢI học được cột 'Đối tượng Nợ' dù CSDL thật KHÔNG có cột nào chứa chữ 'debit' (chỉ có "
+    f"'AccountObjectID' không tiền tố + 'CreditAccountObjectID' + 'TaxAccountObjectID') — đúng lỗi "
+    f"thật vừa báo (TK Nợ 331 không có Đối tượng Nợ, không báo lỗi gì) — got {r7}")
+glvd7 = [row for tbl, row in cur7.written if tbl == "GLVoucherDetail"][0]
+assert glvd7.get("AccountObjectID") == AOID_NCC, (
+    f"PHẢI gán đúng đối tượng NCC vào cột 'AccountObjectID' (cột chung/không tiền tố dùng cho bên NỢ "
+    f"ở CSDL thật này) — got {glvd7}")
+assert glvd7.get("CreditAccountObjectID") in (None, ""), "KHÔNG được gán nhầm sang cột bên CÓ"
+assert glvd7.get("TaxAccountObjectID") in (None, ""), (
+    "KHÔNG được nhầm cột 'TaxAccountObjectID' (đối tượng THUẾ, khác hẳn đối tượng công nợ Nợ/Có) — "
+    "phải tự loại trừ đúng cột này khi dự phòng theo tên")
+assert glvd7.get("BusinessType") is None, (
+    "BusinessType PHẢI = NULL — ĐÚNG lỗi thật khác cũng thấy trên CHÍNH ảnh chụp: cột 'Nghiệp vụ' của "
+    "chứng từ hiện sai thành 'Chiết khấu thương mại (bán hàng)' vì bị bỏ mặc định 0")
+print("PASS: Test 7 — ĐÚNG cấu trúc CSDL thật vừa xác nhận (AccountObjectID không tiền tố cho bên NỢ, "
+      "KHÔNG có DebitObjectID) — tự học đúng cột 'Đối tượng Nợ' = AccountObjectID, không nhầm sang cột "
+      "'Có'/cột 'Thuế' không liên quan, và BusinessType được ép NULL đúng — sửa đúng CẢ 2 hiện tượng đã "
+      "báo (thiếu Đối tượng Nợ TK 331 + sai nhãn 'Nghiệp vụ' thành Chiết khấu thương mại) trên CÙNG 1 "
+      "ảnh chụp MISA thật.")
+
+
 
 print("\nALL DONE")

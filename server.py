@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.207"
+APP_BUILD = "2026-08-31.208"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27285,6 +27285,23 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
             ung_vien_ten = [c for c in obj_cols if goi_y in c.lower()]
             if len(ung_vien_ten) == 1:
                 cot_dt = ung_vien_ten[0]
+            elif goi_y == "debit":
+                # ĐÚNG lỗi thật vừa báo (TK Nợ 331 luôn bỏ trống "Đối tượng
+                # Nợ" dù ghi đúng số tiền/tài khoản, không báo lỗi gì): xác
+                # nhận qua file cấu trúc CSDL thật — CSDL này KHÔNG hề có
+                # cột nào chứa chữ "debit" trên GLVoucherDetail; quy ước
+                # thật ở đây là bên CÓ có tiền tố RÕ RÀNG ("CreditAccount
+                # ObjectID"), còn bên NỢ dùng tên CHUNG/mặc định không tiền
+                # tố (cột thật "AccountObjectID") — KHÁC quy ước đối xứng
+                # Debit*/Credit* đã xác nhận ở công ty khác (DebitObjectID/
+                # CreditObjectID). Dự phòng thêm 1 bước: cột "chung" (không
+                # chứa "credit") — loại bỏ cả cột "tax" (TaxAccountObjectID
+                # là đối tượng THUẾ, khác hẳn đối tượng công nợ Nợ/Có) —
+                # CHỈ nhận nếu tìm ra ĐÚNG 1 cột khớp (không ăn may).
+                ung_vien_chung = [c for c in obj_cols
+                                 if "credit" not in c.lower() and "tax" not in c.lower()]
+                if len(ung_vien_chung) == 1:
+                    cot_dt = ung_vien_chung[0]
 
         # Dò mẫu qua NỘI DUNG DIỄN GIẢI (JournalMemo) — KHÔNG dò qua tiền tố
         # số chứng từ (RefNoFinance): 2 lỗi thật đã gặp lần lượt với cách dò
@@ -27439,6 +27456,15 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
                 _misa_gan(glvd_row, cols_glvd, so_tien, "Amount")
                 _misa_gan(glvd_row, cols_glvd, False, "UnResonableCost")
                 _misa_gan(glvd_row, cols_glvd, 0, "SortOrder")
+                # BusinessType (cột "Nghiệp vụ" hiện trên lưới Chi tiết MISA)
+                # — ĐÚNG lỗi thật vừa báo (kèm ảnh chụp): cột này NULL trên
+                # mọi dòng THẬT (xác nhận qua file cấu trúc CSDL), nhưng
+                # _misa_gia_tri_mac_dinh ép TẤT CẢ cột kiểu int về 0 khi
+                # không có mặt trong dict gán tường minh — MISA hiển thị
+                # BusinessType=0 thành "Chiết khấu thương mại (bán hàng)",
+                # khiến chứng từ "Điều chỉnh công nợ treo" hiện SAI "Nghiệp
+                # vụ" dù số tiền/tài khoản/RefType vẫn đúng. Ép rõ về NULL.
+                _misa_gan(glvd_row, cols_glvd, None, "BusinessType")
                 if cot_dt:
                     glvd_row[cot_dt] = aoid
                 cs = list(glvd_row.keys())
