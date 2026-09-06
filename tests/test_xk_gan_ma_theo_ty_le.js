@@ -12,14 +12,24 @@
 // vẫn làm (xkTinhGoiYTuoi — xem chú thích gốc ở xkMoGan). Fix: dùng đúng
 // xkTinhGoiYTuoi(r) (cùng nguồn "Khớp XX%" với modal tay) thay vì r.goi_y.
 //
+// ROUND 3 (theo yêu cầu người dùng "hãy chỉnh lại dò theo % hãy so khớp
+// thêm đvt nữa"): chỉ so khớp TÊN không đủ an toàn — 1 mã TÊN giống hệt
+// nhưng bán/tồn theo ĐƠN VỊ khác hẳn (vd "M2" thay vì "Thùng") vẫn có thể bị
+// tự gán nhầm dù điểm % rất cao, làm sai cả tồn kho lẫn giá vốn (Số lượng/
+// Đơn giá 2 đơn vị không tương đương). Nay "Gán theo %" THÊM điều kiện ĐVT
+// phải khớp (sau chuẩn hoá — xem xkChuanDvt) mới tự gán; ĐVT thiếu ở 1 bên
+// (không rõ để so) thì KHÔNG chặn, vẫn gán bình thường như trước.
+//
 // Test trích các hàm liên quan TỪ static/index.html (không stub thuật toán
 // so khớp/điểm giống — dùng NGUYÊN VẸN xkManh/xkKichThuocKhop/xkMaNgoacKhop/
-// xkDiemGiong/xkChuanTen/xkTinhGoiYTuoi thật, chỉ stub phần không liên quan
-// tới thuật toán như toast/xkVeGrid) để xác nhận:
+// xkDiemGiong/xkChuanTen/xkChuanDvt/xkTinhGoiYTuoi thật, chỉ stub phần
+// không liên quan tới thuật toán như toast/xkVeGrid) để xác nhận:
 //  1) r.goi_y (dù có, dù điểm cao) bị BỎ QUA hoàn toàn — không dùng để gán.
 //  2) Ứng viên tính TƯƠI từ xkTon (đúng tồn kho hiện tại) được dùng để gán,
 //     y hệt điểm % mà modal "Gán mã hàng kho" tay sẽ hiển thị.
 //  3) Dòng ĐÃ CÓ mã vẫn giữ nguyên vẹn (không đổi từ round 1).
+//  4) Mã khớp TÊN đủ % nhưng ĐVT khác hẳn bị loại, không tự gán nhầm đơn vị.
+//  5) ĐVT thiếu ở 1 bên không chặn gán (an toàn với dữ liệu thiếu).
 const fs = require('fs');
 const path = require('path');
 const REPO_ROOT = path.dirname(__dirname);
@@ -39,8 +49,8 @@ function extractFn(src, name) {
   return src.slice(start, end);
 }
 
-const FN_NAMES = ['xkChuanTen', 'xkManh', 'xkMaNgoacGop', 'xkMaNgoacKhop', 'xkKichThuocTrich', 'xkKichThuocKhop',
-                   'xkDiemGiong', 'xkTinhGoiYTuoi', 'xkGanMaTheoTyLe'];
+const FN_NAMES = ['xkChuanTen', 'xkChuanDvt', 'xkManh', 'xkMaNgoacGop', 'xkMaNgoacKhop', 'xkKichThuocTrich',
+                   'xkKichThuocKhop', 'xkDiemGiong', 'xkTinhGoiYTuoi', 'xkGanMaTheoTyLe'];
 const srcAll = FN_NAMES.map(n => extractFn(html, n)).join('\n');
 
 function assert(cond, msg) {
@@ -126,6 +136,32 @@ function runWith(xkRowsInput, xkTonInput, pct) {
   assert(ganDuoc && ganDuoc.sl === 6, 'Dòng gán được phải đúng SL=6 (hết tồn) — được ' + JSON.stringify(ganDuoc));
   assert(conThieu && conThieu.sl === 4, 'Dòng còn thiếu phải đúng SL=4 (10-6) — được ' + JSON.stringify(conThieu));
   console.log('PASS 3: tự tách dòng đúng khi mã tính tươi đạt ngưỡng nhưng không đủ tồn, bảo toàn tổng SL.');
+}
+
+// ----- ROUND 3 (theo yêu cầu người dùng "dò theo % hãy so khớp thêm đvt
+// nữa"): Test 4 — mã TÊN khớp 100% nhưng ĐVT khác hẳn (Thùng vs M2) -> PHẢI
+// bị loại, KHÔNG tự gán dù điểm tên rất cao và còn thừa tồn. -----
+{
+  const tenBan = 'Sơn chống thấm ABC';
+  const xkRowsInput = [{ sl: 5, tt: 500000, ten_sp: tenBan, dvt: 'Thùng', ma: '', goi_y: [] }];
+  const xkTonInput = [{ ma: 'SCT01', ten: tenBan, dvt: 'M2', gia: 100000, ton: 100 }];
+  const { xkRows } = runWith(xkRowsInput, xkTonInput, 90);
+  assert(xkRows.length === 1 && !xkRows[0].ma,
+    'Mã "SCT01" khớp TÊN 100% nhưng ĐVT khác (Thùng/M2) PHẢI bị loại, không tự gán — được ' + JSON.stringify(xkRows));
+  console.log('PASS 4: mã khớp tên 100% nhưng ĐVT khác (Thùng vs M2) bị loại đúng, không tự gán nhầm đơn vị.');
+}
+
+// ----- Test 5: ĐVT THIẾU ở 1 trong 2 bên (không rõ để so) -> KHÔNG loại,
+// vẫn gán bình thường theo % tên như trước (an toàn, không chặn nhầm chỉ vì
+// thiếu dữ liệu ĐVT). -----
+{
+  const tenBan = 'Sơn chống thấm XYZ';
+  const xkRowsInput = [{ sl: 5, tt: 500000, ten_sp: tenBan, dvt: 'Thùng', ma: '', goi_y: [] }];
+  const xkTonInput = [{ ma: 'SXY01', ten: tenBan, dvt: '', gia: 100000, ton: 100 }];  // ĐVT tồn kho rỗng/chưa có
+  const { xkRows } = runWith(xkRowsInput, xkTonInput, 90);
+  assert(xkRows.length === 1 && xkRows[0].ma === 'SXY01',
+    'ĐVT tồn kho rỗng (không rõ để so) KHÔNG được chặn gán — được ' + JSON.stringify(xkRows));
+  console.log('PASS 5: ĐVT thiếu ở 1 bên không chặn gán, vẫn gán bình thường theo % tên như trước.');
 }
 
 console.log('\nTẤT CẢ TEST PASS');
