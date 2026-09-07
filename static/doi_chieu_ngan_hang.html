@@ -3429,6 +3429,28 @@ function suggestMisaAcct(label, currency, existingCodes) {
   return suggestion;
 }
 
+// Hàm THUẦN (không đụng React state) tính lại danh sách accounts sau khi đổi
+// tiền tệ 1 TK (nút toggle VND<->USD trên tab) — tách riêng khỏi
+// updateCurrency() để test được độc lập, theo đúng mẫu đã dùng cho
+// dongBoTaiKhoanNganHang(). Theo lỗi thật đã báo: "tài khoản ngoại tệ Mã
+// hạch toán MISA bị sai" — TK USD 24449247 vẫn hiện "1121" (mã VND) sau khi
+// đổi tiền tệ, vì trước đây chỉ đổi currency, không đụng gì tới misaAcct.
+// PHẢI đổi luôn Mã hạch toán MISA sang đúng tiền tệ MỚI nếu mã hiện tại
+// đang khớp tiền tệ CŨ (tự sinh hoặc gõ tay theo tiền tệ cũ, prefix
+// "1121"/"1122") hoặc còn để trống — mã đã gõ tay khác hẳn 2 tiền tệ (không
+// khớp tiền tệ cũ) thì GIỮ NGUYÊN, coi là người dùng chủ động tuỳ chỉnh.
+function doiTienTeTaiKhoan(accounts, accId, cur) {
+  const acc = (accounts || []).find(a => a.id === accId);
+  const oldBase = acc && acc.currency === "USD" ? "1122" : "1121";
+  return (accounts || []).map(a => {
+    if (a.id !== accId) return a;
+    const misaAcct = (!a.misaAcct || a.misaAcct.startsWith(oldBase))
+      ? suggestMisaAcct(a.label, cur, accounts.filter(x => x.id !== accId).map(x => x.misaAcct || ""))
+      : a.misaAcct;
+    return { ...a, currency: cur, misaAcct };
+  });
+}
+
 // Tên đầy đủ các ngân hàng phổ biến, đoán từ mã viết tắt xuất hiện trong tên tài khoản (VD nhãn
 // "1121-VIETIN-11600294" → đoán ngân hàng "VietinBank") — dùng để điền sẵn ô "Tên ngân hàng", vẫn
 // cho người dùng tự sửa lại nếu đoán sai hoặc là ngân hàng không có trong danh sách.
@@ -3623,9 +3645,9 @@ function AccountTabs({co, activeAccountId, currency, onSelect, onSave, showToast
   };
 
   const updateCurrency = (accId, cur) => {
-    const updated = accounts.map(a=>a.id===accId?{...a,currency:cur}:a);
+    const updated = doiTienTeTaiKhoan(accounts, accId, cur);
     onSave(updated);
-    if(activeAccountId===accId) onSelect({...activeAcc, currency:cur});
+    if(activeAccountId===accId) onSelect(updated.find(a=>a.id===accId) || {...activeAcc, currency:cur});
   };
 
   const startEditLabel = (acc, e) => {
