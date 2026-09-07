@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.213"
+APP_BUILD = "2026-08-31.214"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20729,6 +20729,11 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
         detail_rows = []
         idx_line = 0
         total_amount = 0.0
+        # SL đã xuất CỘNG DỒN theo từng mã (trong CHÍNH chứng từ này) — dùng
+        # để tính Thành tiền CỘNG DỒN rồi lấy HIỆU (round(sl_sau*gia) -
+        # round(sl_truoc*gia)) thay vì làm tròn round(sl*gia) riêng TỪNG
+        # dòng — xem giải thích đầy đủ ở khối tính gia_von/tien_von bên dưới.
+        sl_da_dung_theo_ma = {}
         for r in rows:
             ma = str(r.get("ma") or "").strip()
             m = hang.get(ma.lower())
@@ -20765,8 +20770,24 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
             # liệu tồn kho tham chiếu thì để 0 như cũ — an toàn hơn đoán khi
             # thiếu dữ liệu, không chặn ghi cả chứng từ chỉ vì thiếu giá 1
             # vài mã.
+            #
+            # Thành tiền tính theo HIỆU SỐ CỘNG DỒN (round(sl_sau*gia) -
+            # round(sl_truoc*gia)), KHÔNG làm tròn round(sl*gia) riêng lẻ
+            # từng dòng — đúng ca thật người dùng báo lại (mã 'MH297', ảnh
+            # chụp MISA "Tổng hợp tồn kho": Đầu kỳ 20/7.800.000đ + Nhập
+            # 10/4.100.000đ = pool 30 đơn vị/11.900.000đ CHẴN, nhưng Cuối kỳ
+            # Giá trị vẫn lệch DÔI +1đ dù Đơn giá đã tính chính xác 4 số
+            # thập phân — vì mã này có NHIỀU dòng GIATHANH khác nhau CÙNG
+            # xuất trong 1 chứng từ, mỗi dòng làm tròn round(sl*gia) RIÊNG
+            # LẺ rồi cộng lại vẫn có thể dôi/hụt 1 vài đồng do làm tròn nhiều
+            # lần). Cách CỘNG DỒN rồi lấy hiệu bảo đảm TỔNG Thành tiền của
+            # TẤT CẢ dòng cùng 1 mã trong chứng từ này LUÔN khớp CHÍNH XÁC
+            # round(tổng_sl_mã_đó * gia), không còn lệch dù chia bao nhiêu dòng.
             gia_von = ma_gia_ton.get(ma) or 0
-            tien_von = round(sl * gia_von) if gia_von else 0
+            sl_truoc = sl_da_dung_theo_ma.get(ma, 0)
+            sl_sau = sl_truoc + sl
+            sl_da_dung_theo_ma[ma] = sl_sau
+            tien_von = (round(sl_sau * gia_von) - round(sl_truoc * gia_von)) if gia_von else 0
             _misa_gan(d, cols_d, gia_von, "UnitPriceFinance")
             _misa_gan(d, cols_d, gia_von, "MainUnitPriceFinance")
             _misa_gan(d, cols_d, tien_von, "AmountFinance")

@@ -336,4 +336,36 @@ print("PASS 8: Đơn giá vốn tính CHÍNH XÁC từ gia_tri/ton (giữ phần
       "khi nhân số lượng — đúng ca thật 'MH390' MISA từng hiện sai 394.651đ/5.919.765đ (lệch dôi 7đ khi cộng "
       "dồn qua nhiều lần xuất trong kỳ), nay tính đúng 5.919.767đ cho đúng phần đóng góp của 15 đơn vị.")
 
+# ----- Test 9 (đúng ca thật người dùng báo lại LẦN 2 kèm ảnh MISA "Tổng hợp
+# tồn kho" tháng 6/2026): mã 'MH297' Đầu kỳ 20/7.800.000đ + Nhập 10/4.100.000đ
+# = pool 30 đơn vị/11.900.000đ CHẴN (giá bình quân 396.666,6667đ) nhưng
+# Cuối kỳ Giá trị vẫn lệch DÔI +1đ (Xuất kho Giá trị=11.900.001) DÙ Đơn giá
+# đã tính chính xác 4 số thập phân — vì mã này có NHIỀU dòng GIATHANH khác
+# nhau CÙNG xuất trong 1 chứng từ (nhiều hoá đơn bán cùng mã), mỗi dòng làm
+# tròn round(sl*gia) RIÊNG LẺ rồi cộng lại vẫn dôi/hụt 1 đồng do làm tròn
+# nhiều lần -> PHẢI tính Thành tiền theo HIỆU SỐ CỘNG DỒN để tổng luôn khớp
+# CHÍNH XÁC round(tổng_sl*gia), không phụ thuộc chia bao nhiêu dòng. -----
+cur9 = FakeCursor()
+ton9 = [{"ma": "MH01", "ton": 30, "kho": "Kho Hàng Hóa", "gia": 396667, "gia_tri": 11900000}]
+giathanh9 = [
+    {"ma": "MH01", "ten_xk": "Chậu Polystone ASH40 - MTBK", "dvt_xk": "Cái",
+     "sl_kho": 10, "sl": 10, "ngay": "10/06/2026"},
+    {"ma": "MH01", "ten_xk": "Chậu Polystone ASH40 - MTBK", "dvt_xk": "Cái",
+     "sl_kho": 10, "sl": 10, "ngay": "20/06/2026"},
+    {"ma": "MH01", "ten_xk": "Chậu Polystone ASH40 - MTBK", "dvt_xk": "Cái",
+     "sl_kho": 10, "sl": 10, "ngay": "30/06/2026"},
+]
+r9 = _chay(cur9, giathanh9, ton9)
+det9 = sorted(cur9.inserted["INOutwardDetail"], key=lambda d: d["SortOrder"])
+assert len(det9) == 3, f"Phải ghi đủ 3 dòng cùng mã MH01 (mô phỏng 'MH297' bị chia nhiều hoá đơn) — got {len(det9)}"
+tong_tien_von_ma = sum(d["AmountFinance"] for d in det9)
+assert tong_tien_von_ma == 11900000, (
+    f"TỔNG Thành tiền của 3 dòng CÙNG mã trong CHÍNH chứng từ này PHẢI khớp CHÍNH XÁC pool thật "
+    f"11.900.000đ (đúng lỗi thật 'MH297' bị dôi +1đ thành 11.900.001đ khi làm tròn TỪNG dòng riêng lẻ) — "
+    f"got {tong_tien_von_ma} (từng dòng: {[d['AmountFinance'] for d in det9]})")
+assert r9["tong_tien"] == 11900000, f"tong_tien header cũng phải khớp CHÍNH XÁC 11.900.000đ — got {r9['tong_tien']}"
+print("PASS 9: nhiều dòng CÙNG mã trong 1 chứng từ (mô phỏng đúng ca thật 'MH297' bị chia nhiều hoá đơn) "
+      "tính Thành tiền theo hiệu số cộng dồn — TỔNG luôn khớp CHÍNH XÁC pool thật 11.900.000đ, không còn "
+      "lệch dôi 1đ như trước dù làm tròn nhiều lần.")
+
 print("\nTẤT CẢ TEST PASS")
