@@ -4634,7 +4634,7 @@ function xkVeTrangChinh(){
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;color:#999;min-width:84px">🎯 Gán theo %:</span>
         ${[90,80,70,60,50].map(p=>
-          `<button class="btn ghost sm" style="color:#5a3e8a;border-color:#c9b8e8" onclick="xkGanMaTheoTyLe(${p})" title="Chỉ áp dụng cho dòng CHƯA có Mã hàng kho — lấy gợi ý khớp tên đạt tỷ lệ khớp ≥ ${p}%, ưu tiên mã có Đơn giá kho gần Đơn giá bán nhất (loại mã lệch giá quá 30% nếu đã biết giá bán), dòng đã có mã rồi thì bỏ qua nguyên vẹn, không chạy lại">≥${p}%</button>`
+          `<button class="btn ghost sm" style="color:#5a3e8a;border-color:#c9b8e8" onclick="xkGanMaTheoTyLe(${p})" title="Chỉ áp dụng cho dòng CHƯA có Mã hàng kho — lấy gợi ý khớp tên đạt tỷ lệ khớp ≥ ${p}%, ưu tiên mã khớp tên cao nhất trước (loại mã lệch giá quá 30% so với Đơn giá bán nếu đã biết giá cả 2 bên), dòng đã có mã rồi thì bỏ qua nguyên vẹn, không chạy lại">≥${p}%</button>`
         ).join('')}
       </div>
       <div id="xkDoMaTienDoBox" style="display:none;margin-bottom:8px">
@@ -5269,15 +5269,14 @@ function xkKiemTraTonLoi(rSet){
 // phải khớp đvt nữa mà chỉ cần gần giống tên") — quay lại chỉ lọc theo %
 // khớp tên như bản gốc.
 //
-// THÊM lọc/ưu tiên theo ĐƠN GIÁ (theo yêu cầu người dùng "chọn đơn giá gần
-// giống với tên hàng nhất đừng chêch lệch giá bán quá nhiều chỉ cho phép
-// +- chêch lệch 30%"): giữa nhiều mã cùng đạt ngưỡng % tên, ưu tiên mã có
-// Đơn giá kho (gia_xk) GẦN với Đơn giá bán (r.dgia) nhất — vừa giúp chọn
-// đúng biến thể cụ thể khi nhiều mã trùng tên gần giống (khác giá vì khác
-// quy cách/chất lượng), vừa CHẶN hẳn mã có giá lệch quá xa (>30% so với
-// giá bán — dấu hiệu gán nhầm hàng khác dù tên nghe giống). Chỉ áp dụng
-// khi CẢ 2 giá đều có (không chặn/không sắp lại khi thiếu dữ liệu giá,
-// giữ nguyên thứ tự theo % tên như cũ — an toàn hơn đoán khi thiếu dữ liệu).
+// THÊM lọc theo ĐƠN GIÁ (theo yêu cầu người dùng: "không phải ưu tiên chọn
+// mã có giá gần giá bán nhất mà ưu tiên khớp tên hàng sau đó mới dò đơn
+// giá được phép chệch lệch không quá 30%") — thứ tự ƯU TIÊN VẪN LÀ khớp
+// tên (điểm % cao nhất trước, y hệt bản gốc, KHÔNG sắp lại theo giá); giá
+// CHỈ dùng để LỌC BỎ mã lệch quá xa (>30% so với Đơn giá bán — dấu hiệu
+// gán nhầm hàng khác dù tên nghe giống), không dùng để đổi thứ tự ưu tiên
+// giữa các mã còn lại. Mã KHÔNG có giá kho (chưa rõ để so) thì KHÔNG bị
+// chặn, giữ nguyên như cũ — an toàn hơn đoán khi thiếu dữ liệu.
 function xkGanMaTheoTyLe(pctThreshold){
   if(!xkRows.length){toast('Chưa có dữ liệu — bấm "🔍 Dò mã hàng tự động" trước','err');return}
   xkTuNlRows();
@@ -5306,19 +5305,12 @@ function xkGanMaTheoTyLe(pctThreshold){
     let ungVien=xkTinhGoiYTuoi(r).filter(g=>((g.diem||0)*100)>=pctThreshold);
     const giaBan=Number(r.dgia)||0;
     if(giaBan>0){
-      // Chặn mã lệch giá quá 30% so với giá bán (mã KHÔNG có giá kho — chưa
-      // rõ để so — thì KHÔNG chặn, giữ nguyên như cũ, an toàn hơn đoán).
+      // CHỈ lọc bỏ mã lệch giá quá 30% so với giá bán — GIỮ NGUYÊN thứ tự
+      // ưu tiên theo % khớp tên đã sắp sẵn (không sắp lại theo giá). Mã
+      // KHÔNG có giá kho — chưa rõ để so — thì KHÔNG chặn, giữ nguyên như cũ.
       ungVien=ungVien.filter(g=>{
         const giaKho=Number(g.gia)||0;
         return !(giaKho>0) || Math.abs(giaKho-giaBan)/giaBan<=0.3;
-      });
-      // Trong số còn lại, ưu tiên mã có giá kho GẦN giá bán nhất (mã chưa rõ
-      // giá kho xếp sau cùng, không tranh chỗ ưu tiên với mã đã xác nhận
-      // giá hợp lý) — ổn định thứ tự bằng độ lệch giá tăng dần.
-      ungVien=ungVien.slice().sort((a,b)=>{
-        const da=(Number(a.gia)||0)>0?Math.abs(Number(a.gia)-giaBan)/giaBan:Infinity;
-        const db=(Number(b.gia)||0)>0?Math.abs(Number(b.gia)-giaBan)/giaBan:Infinity;
-        return da-db;
       });
     }
     if(!ungVien.length){                   // không có gợi ý nào đạt ngưỡng -> để nguyên (vẫn trống)
@@ -5329,7 +5321,7 @@ function xkGanMaTheoTyLe(pctThreshold){
     const tongGoc=Number(r.sl)||0, ttGoc=Number(r.tt)||0;
     let conThieu=tongGoc;
     const phanBo=[];
-    for(const g of ungVien){               // ungVien đã sắp xếp điểm CAO -> THẤP (hoặc theo độ lệch giá nếu có giá bán)
+    for(const g of ungVien){               // ungVien đã sắp xếp điểm khớp tên CAO -> THẤP (lọc theo giá, không đổi thứ tự)
       if(conThieu<=0)break;
       const ma=g.ma;
       if(!(ma in tonMap))continue;

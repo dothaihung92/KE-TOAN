@@ -15,16 +15,18 @@
 // ROUND 3 (theo yêu cầu người dùng "hãy chỉnh lại dò theo % hãy so khớp
 // thêm đvt nữa"): thêm điều kiện ĐVT phải khớp mới tự gán.
 //
-// ROUND 4 (theo yêu cầu người dùng mới nhất, ĐẢO NGƯỢC round 3: "chỉnh lại
-// gắn theo % không cần phải khớp đvt nữa mà chỉ cần gần giống tên và sau đó
-// chọn đơn giá gần giống với tên hàng nhất đừng chêch lệch giá bán quá
-// nhiều chỉ cho phép +- chêch lệch 30%"): BỎ hẳn điều kiện ĐVT (không còn
-// chặn theo ĐVT nữa) — quay lại chỉ lọc theo % khớp tên như bản gốc; THÊM
-// lọc/ưu tiên theo ĐƠN GIÁ: chặn hẳn mã lệch Đơn giá kho > 30% so với Đơn
-// giá bán (r.dgia) khi CẢ 2 giá đều biết, và giữa các mã còn lại ưu tiên mã
-// có giá GẦN giá bán nhất (không chỉ điểm % tên cao nhất) — vừa chọn đúng
-// biến thể cụ thể khi nhiều mã trùng tên gần giống (khác giá vì khác quy
-// cách), vừa chặn mã lệch giá quá xa dù tên nghe giống (dấu hiệu gán nhầm).
+// ROUND 4 (theo yêu cầu người dùng, ĐẢO NGƯỢC round 3: "chỉnh lại gắn theo %
+// không cần phải khớp đvt nữa mà chỉ cần gần giống tên và sau đó chọn đơn giá
+// gần giống với tên hàng nhất đừng chêch lệch giá bán quá nhiều chỉ cho phép
+// +- chêch lệch 30%"): BỎ hẳn điều kiện ĐVT — quay lại chỉ lọc theo % khớp
+// tên như bản gốc.
+//
+// ROUND 5 (làm rõ lại theo yêu cầu người dùng: "không phải ưu tiên chọn mã
+// có giá gần giá bán nhất mà ưu tiên khớp tên hàng sau đó mới dò đơn giá đc
+// phép chệch lệch không quá 30%"): THỨ TỰ ƯU TIÊN VẪN LÀ % khớp tên (cao
+// nhất trước, y hệt bản gốc, KHÔNG sắp lại theo độ lệch giá) — Đơn giá kho
+// (r.gia) CHỈ dùng để LỌC BỎ mã lệch quá 30% so với Đơn giá bán (r.dgia) khi
+// CẢ 2 giá đều biết, không dùng để đổi thứ tự ưu tiên giữa các mã còn lại.
 //
 // Test trích các hàm liên quan TỪ static/index.html (không stub thuật toán
 // so khớp/điểm giống — dùng NGUYÊN VẸN xkManh/xkKichThuocKhop/xkMaNgoacKhop/
@@ -37,8 +39,12 @@
 //  4) Mã khớp TÊN 100% nhưng ĐVT khác hẳn KHÔNG còn bị chặn nữa (đảo ngược
 //     round 3 — chỉ còn chặn theo giá, không phải theo ĐVT).
 //  5) Mã lệch Đơn giá kho > 30% so với Đơn giá bán bị loại, dù tên khớp cao.
-//  6) Giữa nhiều mã cùng đạt ngưỡng %, ưu tiên gán mã có giá GẦN giá bán
-//     nhất trước (không phải mã điểm % tên cao nhất).
+//  6) Giữa nhiều mã cùng đạt ngưỡng % và cùng trong khoảng ±30% giá, VẪN ưu
+//     tiên gán mã có ĐIỂM % TÊN CAO NHẤT trước (KHÔNG sắp lại theo độ lệch
+//     giá) — giá chỉ LỌC, không dùng để đổi thứ tự ưu tiên.
+//  6b) Khi mã điểm % tên cao nhất bị LOẠI vì lệch giá > 30%, mã điểm thấp
+//     hơn (nhưng còn trong 30%) mới được chọn — do bị lọc, không phải do ưu
+//     tiên theo giá.
 //  7) Thiếu dữ liệu giá (giá bán HOẶC giá kho) thì KHÔNG chặn/không đổi thứ
 //     tự — an toàn với dữ liệu thiếu, giữ nguyên hành vi cũ.
 const fs = require('fs');
@@ -176,8 +182,9 @@ function runWith(xkRowsInput, xkTonInput, pct) {
   console.log('PASS 5: mã khớp tên 100% nhưng lệch giá > 30% so với giá bán bị loại đúng, không tự gán nhầm hàng khác.');
 }
 
-// ----- Test 6: nhiều mã CÙNG đạt ngưỡng % tên -> ưu tiên gán mã có Đơn giá
-// kho GẦN Đơn giá bán nhất TRƯỚC (không phải mã điểm % tên cao nhất). -----
+// ----- Test 6: nhiều mã CÙNG đạt ngưỡng % tên và CÙNG trong khoảng ±30% giá
+// -> VẪN ưu tiên gán mã có ĐIỂM % TÊN CAO NHẤT trước (giá chỉ lọc, không
+// dùng để sắp lại thứ tự ưu tiên) — theo yêu cầu làm rõ lại của người dùng. -----
 {
   const tenBan = 'Bồn cầu AC-989VN/BW1';
   const tenGanDung = 'Bồn cầu AC-989VN/BW1 hàng nhập khẩu chính hãng';   // tên dài hơn -> điểm % thấp hơn 1.0
@@ -187,16 +194,43 @@ function runWith(xkRowsInput, xkTonInput, pct) {
   const nguong = Math.max(1, Math.floor(diemGanDung * 100) - 5);   // đủ thấp để CẢ 2 mã cùng đạt ngưỡng
   const xkRowsInput = [{ sl: 2, tt: 9400000, ten_sp: tenBan, dgia: 4700000, ma: '', goi_y: [] }];
   const xkTonInput = [
-    // Điểm % tên CAO NHẤT (khớp tuyệt đối 100%) nhưng giá LỆCH XA giá bán.
+    // Điểm % tên CAO NHẤT (khớp tuyệt đối 100%), giá lệch ~23% (vẫn <= 30%,
+    // KHÔNG bị lọc).
     { ma: 'BC-DIEM-CAO-GIA-XA', ten: tenBan, dvt: 'Bộ', gia: 5800000, ton: 100 },
-    // Điểm % tên THẤP HƠN (tên dài hơn) nhưng giá RẤT GẦN giá bán.
+    // Điểm % tên THẤP HƠN (tên dài hơn), giá rất gần (~1%) nhưng KHÔNG được
+    // ưu tiên chỉ vì giá gần hơn — điểm tên vẫn quyết định thứ tự.
     { ma: 'BC-DIEM-THAP-GIA-GAN', ten: tenGanDung, dvt: 'Bộ', gia: 4650000, ton: 100 },
   ];
   const { xkRows } = runWith(xkRowsInput, xkTonInput, nguong);
-  assert(xkRows.length === 1 && xkRows[0].ma === 'BC-DIEM-THAP-GIA-GAN',
-    `Phải ưu tiên gán mã có giá GẦN giá bán nhất (BC-DIEM-THAP-GIA-GAN, lệch ~1%) trước mã điểm % tên `
-    + `cao nhất nhưng giá lệch xa hơn (BC-DIEM-CAO-GIA-XA, lệch ~23%) — được ${JSON.stringify(xkRows)}`);
-  console.log('PASS 6: giữa nhiều mã cùng đạt ngưỡng %, ưu tiên đúng mã có Đơn giá kho gần Đơn giá bán nhất, không phải mã điểm % tên cao nhất.');
+  assert(xkRows.length === 1 && xkRows[0].ma === 'BC-DIEM-CAO-GIA-XA',
+    `Phải ưu tiên gán mã có ĐIỂM % TÊN CAO NHẤT (BC-DIEM-CAO-GIA-XA, khớp tuyệt đối, giá lệch ~23% `
+    + `vẫn trong 30%) — KHÔNG được ưu tiên mã điểm tên thấp hơn chỉ vì giá gần hơn (BC-DIEM-THAP-GIA-GAN) `
+    + `— được ${JSON.stringify(xkRows)}`);
+  console.log('PASS 6: giữa nhiều mã cùng đạt ngưỡng % và cùng trong 30% giá, vẫn ưu tiên đúng mã điểm % tên cao nhất, giá không dùng để sắp lại thứ tự.');
+}
+
+// ----- Test 6b: khi mã điểm % tên CAO NHẤT bị LOẠI vì lệch giá > 30%, mã
+// điểm thấp hơn (còn trong 30%) mới được chọn — do bị LỌC, không phải do ưu
+// tiên theo giá. -----
+{
+  const tenBan = 'Bồn cầu AC-989VN/BW1';
+  const tenGanDung = 'Bồn cầu AC-989VN/BW1 hàng nhập khẩu chính hãng';
+  const xkChuanTenTest = eval('(' + extractFn(html, 'xkChuanTen') + ')');
+  const diemGiongTest = eval('(' + extractFn(html, 'xkDiemGiong') + ')');
+  const diemGanDung = diemGiongTest(xkChuanTenTest(tenBan), xkChuanTenTest(tenGanDung));
+  const nguong = Math.max(1, Math.floor(diemGanDung * 100) - 5);
+  const xkRowsInput = [{ sl: 2, tt: 9400000, ten_sp: tenBan, dgia: 4700000, ma: '', goi_y: [] }];
+  const xkTonInput = [
+    // Điểm % tên CAO NHẤT nhưng giá lệch 38% (> 30%) -> PHẢI bị loại.
+    { ma: 'BC-DIEM-CAO-GIA-LOAI', ten: tenBan, dvt: 'Bộ', gia: 6500000, ton: 100 },
+    // Điểm % tên thấp hơn, giá lệch ~1% (trong 30%) -> mã còn lại duy nhất.
+    { ma: 'BC-DIEM-THAP-GIA-ON', ten: tenGanDung, dvt: 'Bộ', gia: 4650000, ton: 100 },
+  ];
+  const { xkRows } = runWith(xkRowsInput, xkTonInput, nguong);
+  assert(xkRows.length === 1 && xkRows[0].ma === 'BC-DIEM-THAP-GIA-ON',
+    `Mã điểm % tên cao nhất (BC-DIEM-CAO-GIA-LOAI) lệch giá 38% > 30% phải bị LỌC BỎ, còn lại `
+    + `BC-DIEM-THAP-GIA-ON (trong 30%) được chọn — được ${JSON.stringify(xkRows)}`);
+  console.log('PASS 6b: mã điểm % tên cao nhất bị loại do lệch giá > 30%, mã còn lại (trong 30%) mới được chọn.');
 }
 
 // ----- Test 7: THIẾU dữ liệu giá (giá bán HOẶC giá kho) -> KHÔNG chặn/không
