@@ -17,7 +17,18 @@ test_xk_ton_gia_tri_chinh_xac.py) — khiến badge bị trừ nhầm và mã đ
 "-2đ"/"-461đ" dù thực chất tồn = 0.
 
 Fix: ép "gia_tri" về ĐÚNG 0 khi tồn (Số lượng Cuối kỳ) = 0 — bất kể "Giá
-trị" gốc trong file dương/âm bao nhiêu, tồn 0 thì giá trị PHẢI 0."""
+trị" gốc trong file dương/âm bao nhiêu, tồn 0 thì giá trị PHẢI 0.
+
+XÁC NHẬN LẠI (file TONG_HOP_TON_KHO.xlsx THỨ 2 người dùng gửi, yêu cầu
+"kiểm tra lại xuất kho bị âm mà tồn số lượng 0 ... đừng để bị âm hay bị
+thừa vài trăm đồng khi tồn kho 0 đồng thì thành tiền cũng phải 0 đồng"):
+file này có 14 mã Cuối kỳ SL=0 với Giá trị lệch CẢ ÂM (vd 'MH297' Giá
+trị=-10, 'MH36' Giá trị=-40) LẪN DƯƠNG/THỪA (vd 'MH390' Giá trị=+7,
+'TPVT00200' Giá trị=+24) — test gốc phía trên chỉ có ví dụ ÂM, test dưới
+đây (test_gia_tri_thua_duong_khi_het_hang_bi_ep_ve_0) bổ sung đúng ca
+THỪA/DƯƠNG bằng số liệu THẬT của mã 'MH390' để khoá cả 2 chiều — xác
+nhận qua mô phỏng trực tiếp trên file thật: cả 14 mã đều được ép đúng
+về gia_tri=0/gia=0 với code hiện tại, không cần sửa gì thêm."""
 import sys
 sys.path.insert(0, _REPO_ROOT)
 import server
@@ -67,6 +78,40 @@ def test_gia_tri_am_khi_het_hang_bi_ep_ve_0():
           "kho hay hiện '-2đ' gây hiểu lầm; mã còn tồn thật không bị đụng tới.")
 
 
+def test_gia_tri_thua_duong_khi_het_hang_bi_ep_ve_0():
+    """Ca THỪA/DƯƠNG (khác ca ÂM ở trên) — đúng số liệu THẬT mã 'MH390' trong
+    file TONG_HOP_TON_KHO.xlsx thứ 2: Đầu kỳ 33/12.870.000đ, Nhập 10/4.100.000đ,
+    Xuất 43/16.969.993đ (MISA làm tròn HỤT 7đ so với 12.870.000+4.100.000=
+    16.970.000) -> Cuối kỳ SL=0 nhưng Giá trị DÔI (+7) — cùng bản chất lỗi làm
+    tròn cộng dồn của MISA như ca âm, chỉ khác dấu, PHẢI ép về 0 y hệt."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Báo cáo"
+    ws.append(["TỔNG HỢP TỒN KHO"])
+    ws.append(["Tháng 6 năm 2026"])
+    ws.append([None, "Mã hàng", "Tên hàng", "ĐVT", "Đầu kỳ", None, "Nhập kho", None,
+               "Xuất kho", None, "Cuối kỳ", None])
+    ws.append([None, None, None, None, "Số lượng", "Giá trị", "Số lượng", "Giá trị",
+               "Số lượng", "Giá trị", "Số lượng", "Giá trị"])
+    ws.append(["Tên kho : Hàng Hóa (1 )", None, None, None, 33, 12870000, 10, 4100000, 43, 16969993, 0, 7])
+    ws.append([None, "MH390", "Chậu Polystone ASH40 - MTWT", "Cái", 33, 12870000, 10, 4100000, 43, 16969993, 0, 7])
+    ws.append(["Số dòng = 1", None, None, None, 33, 12870000, 10, 4100000, 43, 16969993, 0, 7])
+
+    rows, danh_sach_kho = server._doc_file_ton_kho(wb)
+    by_ma = {r["ma"]: r for r in rows}
+
+    mh390 = by_ma["MH390"]
+    assert mh390["ton"] == 0, f"Cuối kỳ Số lượng phải đúng 0 (hết sạch hàng) — được {mh390['ton']}"
+    assert mh390["gia_tri"] == 0, (
+        f"'gia_tri' PHẢI bị ép về 0 khi tồn=0 dù file gốc ghi THỪA +7đ (lỗi làm tròn cộng dồn của MISA, "
+        f"ngược dấu với ca ÂM ở test trên) — được {mh390['gia_tri']}")
+    assert mh390["gia"] == 0, f"'gia' (đơn giá bình quân) khi tồn=0 vẫn phải là 0 như cũ — được {mh390['gia']}"
+    print("PASS: mã hết sạch hàng (Cuối kỳ SL=0) có Giá trị DÔI/THỪA do làm tròn cộng dồn của MISA (đúng "
+          "ca thật 'MH390' Giá trị=+7đ) cũng được ép về ĐÚNG 0, không chỉ riêng ca âm.")
+
+
 test_gia_tri_am_khi_het_hang_bi_ep_ve_0()
+test_gia_tri_thua_duong_khi_het_hang_bi_ep_ve_0()
 
 print("\nTẤT CẢ TEST PASS")
