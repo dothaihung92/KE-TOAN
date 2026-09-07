@@ -26,17 +26,25 @@ TABLES = {
     "BankAccount": C("BankAccountID", "BankAccountNumber", "BankID", "BankName", "Address",
                       "Description", "Inactive", "AccountHolder"),
     "Bank": C("BankID", "BankCode", "BankName"),
+    "BADeposit": C("RefID", "BankAccountID"),
+    "BADepositDetail": C("RefDetailID", "RefID", "DebitAccount"),
+    "BAWithDraw": C("RefID", "BankAccountID"),
+    "BAWithDrawDetail": C("RefDetailID", "RefID", "CreditAccount"),
 }
 
 
 class FakeCursor:
-    def __init__(self, bank_accounts, banks, account_numbers=()):
+    def __init__(self, bank_accounts, banks, account_numbers=(), ma_hach_toan_theo_id=None):
         self.bank_accounts = bank_accounts   # [(BankAccountID, BankAccountNumber, BankID, BankName, Inactive, AccountHolder)]
         self.banks = banks                   # [(BankID, BankName)]
         self.account_numbers = account_numbers   # Hệ thống tài khoản MISA (TK 1121x/1122x thật)
+        # {BankAccountID: [mã đã dùng, lặp lại theo tần suất]} — mô phỏng lịch sử chứng từ Thu/Chi
+        # tiền gửi THẬT (gộp CẢ BADeposit lẫn BAWithDraw, không cần phân biệt trong test này).
+        self.ma_hach_toan_theo_id = ma_hach_toan_theo_id or {}
 
     def execute(self, sql, *params):
         self._last_sql = sql
+        self._last_params = params[0] if len(params) == 1 else params
         return self
 
     def fetchall(self):
@@ -45,11 +53,18 @@ class FakeCursor:
             return []
         if sql.startswith("SELECT AccountNumber FROM Account WHERE AccountNumber LIKE '1121%'"):
             return [(an,) for an in self.account_numbers]
-        if sql.startswith("SELECT [BankAccountNumber], [BankName], [AccountHolder], [BankID], [Inactive] FROM BankAccount"):
-            return [(bid_num, bname, holder, bank_id, inactive)
+        if sql.startswith("SELECT [BankAccountID], [BankAccountNumber], [BankName], [AccountHolder], [BankID], [Inactive] FROM BankAccount"):
+            return [(_id, bid_num, bname, holder, bank_id, inactive)
                      for (_id, bid_num, bank_id, bname, inactive, holder) in self.bank_accounts]
         if sql.startswith("SELECT [BankID],[BankName] FROM Bank"):
             return self.banks
+        if "FROM BADeposit h JOIN BADepositDetail d" in sql or "FROM BAWithDraw h JOIN BAWithDrawDetail d" in sql:
+            bank_account_id = self._last_params[0] if isinstance(self._last_params, tuple) else self._last_params
+            ds = self.ma_hach_toan_theo_id.get(bank_account_id, [])
+            dem = {}
+            for ma in ds:
+                dem[ma] = dem.get(ma, 0) + 1
+            return list(dem.items())
         return []
 
 
@@ -75,7 +90,7 @@ def extract_fn(name):
     return src[idx:i+1] + '\n'.join(body)
 
 
-for n in ('_misa_chon_cot', '_misa_danh_sach_tai_khoan_ngan_hang'):
+for n in ('_misa_chon_cot', '_misa_hoc_ma_hach_toan_theo_bankaccount', '_misa_danh_sach_tai_khoan_ngan_hang'):
     exec(extract_fn(n), ns)
 _misa_danh_sach_tai_khoan_ngan_hang = ns['_misa_danh_sach_tai_khoan_ngan_hang']
 
@@ -168,5 +183,49 @@ r6 = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
 assert r6["ma_tk_vnd"] is None and r6["ma_tk_usd"] is None
 assert len(r6["danh_sach"]) == 1, "vẫn phải trả đúng danh sách Tài khoản ngân hàng dù không dò được TK con 112x"
 print("PASS 6: không có TK con 112x nào vẫn không crash, danh sách Tài khoản ngân hàng vẫn trả đúng.")
+
+# ----- Test 7 (đúng lỗi thật vừa báo, kèm ảnh Hệ thống tài khoản MISA có 2
+# mã con "11221"/"11222" cùng dưới "1122"): công ty có NHIỀU TK ngoại tệ
+# dùng NHIỀU mã con 1122x KHÁC NHAU -> ma_tk_usd ở mức CÔNG TY = None (mơ
+# hồ), NHƯNG mỗi TK ngân hàng CỤ THỂ (dò qua lịch sử Thu/Chi tiền gửi THẬT
+# của ĐÚNG BankAccountID) PHẢI trả đúng "ma_hach_toan" RIÊNG của nó, KHÔNG
+# lẫn lộn giữa 2 TK — "hãy lấy số tài khoản trong misa để gắn chứ phần mềm
+# không tự gắn tài khoản đúng 11221". -----
+cur7 = FakeCursor(
+    bank_accounts=[
+        ("id-usd1", "24449247", "bankid-acb", None, False, None),
+        ("id-usd2", "362698698", "bankid-acb", None, False, None),
+    ],
+    banks=[("bankid-acb", "Ngân hàng TMCP Á Châu")],
+    account_numbers=["1121", "11221", "11222"],   # 2 mã con 1122x -> mơ hồ ở mức công ty
+    ma_hach_toan_theo_id={
+        "id-usd1": ["11221", "11221", "11221"],   # TK 24449247 LUÔN dùng đúng 11221
+        "id-usd2": ["11222", "11222"],            # TK 362698698 LUÔN dùng đúng 11222
+    })
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur7)
+r7 = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
+assert r7["ma_tk_usd"] is None, f"Có nhiều TK con 1122x thật (11221/11222) -> ở mức CÔNG TY phải None (mơ hồ) — got {r7['ma_tk_usd']}"
+by_so7 = {x["so_tk"]: x for x in r7["danh_sach"]}
+assert by_so7["24449247"]["ma_hach_toan"] == "11221", (
+    f"TK '24449247' PHẢI học đúng riêng mã '11221' từ lịch sử Thu/Chi tiền gửi THẬT của ĐÚNG "
+    f"BankAccountID đó, KHÔNG được lẫn sang '11222' của TK khác — got {by_so7['24449247']}")
+assert by_so7["362698698"]["ma_hach_toan"] == "11222", (
+    f"TK '362698698' PHẢI học đúng riêng mã '11222' — got {by_so7['362698698']}")
+print("PASS 7: công ty có nhiều TK ngoại tệ dùng nhiều mã con 1122x khác nhau (11221/11222) — mỗi TK "
+      "học ĐÚNG mã riêng của mình qua lịch sử Thu/Chi tiền gửi thật, không còn lẫn lộn/gắn sai.")
+
+# ----- Test 8: TK MỚI, chưa từng phát sinh chứng từ Thu/Chi nào (không có
+# lịch sử) -> KHÔNG có field "ma_hach_toan" (an toàn hơn đoán khi thiếu dữ
+# liệu, để frontend rơi về ma_tk_vnd/ma_tk_usd/suggestMisaAcct như cũ). -----
+cur8 = FakeCursor(
+    bank_accounts=[("id-moi", "111222333", "bankid-acb", None, False, None)],
+    banks=[("bankid-acb", "Ngân hàng TMCP Á Châu")],
+    account_numbers=["1121"],
+    ma_hach_toan_theo_id={})
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur8)
+r8 = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
+assert "ma_hach_toan" not in r8["danh_sach"][0], (
+    f"TK chưa có lịch sử chứng từ nào thì KHÔNG được có field 'ma_hach_toan' (tránh gán bừa) — got {r8['danh_sach'][0]}")
+print("PASS 8: TK mới chưa có lịch sử chứng từ nào -> không có 'ma_hach_toan', an toàn hơn đoán khi thiếu dữ liệu.")
 
 print("\nTẤT CẢ TEST PASS")

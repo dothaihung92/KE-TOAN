@@ -117,4 +117,50 @@ function assert(cond, msg) {
   console.log('PASS 6: TK có nhãn khác "TK chính" (dù rỗng accountNo) không bị tự ý bỏ.');
 }
 
+// ----- Test 7 (đúng lỗi thật MỚI, ảnh Hệ thống tài khoản MISA có 2 mã con
+// "11221"/"11222" cùng dưới "1122"): "hãy lấy số tài khoản trong misa để
+// gắn chứ phần mềm không tự gắn tài khoản đúng 11221" — công ty có NHIỀU
+// TK ngoại tệ dùng NHIỀU mã con 1122x KHÁC NHAU -> maTkUsd (mức công ty)
+// = null (mơ hồ), nhưng mỗi dòng dsMisa nay có field "ma_hach_toan" RIÊNG
+// (học từ lịch sử Thu/Chi tiền gửi thật của ĐÚNG BankAccountID, xem server.
+// py) -> TK MỚI thêm PHẢI ưu tiên dùng ĐÚNG mã riêng đó, tự đặt luôn
+// currency="USD" (vì mã học được là 1122x), KHÔNG rơi về suggestMisaAcct. -----
+{
+  const accounts = [];
+  const dsMisa = [
+    { so_tk: '24449247', ten_ngan_hang: 'Ngân hàng TMCP Á Châu', inactive: false, ma_hach_toan: '11221' },
+    { so_tk: '362698698', ten_ngan_hang: 'Ngân hàng TMCP Á Châu', inactive: false, ma_hach_toan: '11222' },
+  ];
+  const { updated, soMoi } = dongBoTaiKhoanNganHang(accounts, dsMisa, null, null, () => false);
+  assert(soMoi === 2, `phải thêm đúng 2 TK mới — got soMoi=${soMoi}`);
+  const tk1 = updated.find(a => a.accountNo === '24449247');
+  const tk2 = updated.find(a => a.accountNo === '362698698');
+  assert(tk1.misaAcct === '11221' && tk1.currency === 'USD', (
+    `TK '24449247' PHẢI dùng ĐÚNG mã riêng '11221' học từ lịch sử thật (KHÔNG rơi về suggestMisaAcct chung `
+    + `'1122'), và tự đặt currency='USD' — got misaAcct='${tk1.misaAcct}', currency='${tk1.currency}'`));
+  assert(tk2.misaAcct === '11222' && tk2.currency === 'USD', (
+    `TK '362698698' PHẢI dùng ĐÚNG mã riêng '11222', KHÔNG lẫn sang '11221' của TK khác — got `
+    + `misaAcct='${tk2.misaAcct}', currency='${tk2.currency}'`));
+  console.log("PASS 7: TK MỚI thêm ưu tiên đúng 'ma_hach_toan' RIÊNG học từ lịch sử thật (11221/11222), không còn gắn nhầm/rơi về đoán chung, tự đặt currency=USD đúng.");
+}
+
+// ----- Test 8: TK ĐÃ CÓ SẴN (misaAcct SAI cũ, vd '1121' của VND do nhầm)
+// -> khi đồng bộ lại, ma_hach_toan riêng của dòng dsMisa PHẢI ưu tiên sửa
+// đúng lại, kể cả maTkVnd/maTkUsd mức công ty đều null (mơ hồ). -----
+{
+  const accounts = [
+    { id: 'acc1', label: 'USD', currency: 'USD', misaAcct: '1121', accountNo: '24449247' },
+  ];
+  const dsMisa = [
+    { so_tk: '24449247', ten_ngan_hang: 'Ngân hàng TMCP Á Châu', inactive: false, ma_hach_toan: '11221' },
+  ];
+  const { updated, soCapNhat } = dongBoTaiKhoanNganHang(accounts, dsMisa, null, null, () => false);
+  assert(soCapNhat === 1, `phải đếm 1 TK được cập nhật — got soCapNhat=${soCapNhat}`);
+  const acc1 = updated.find(a => a.id === 'acc1');
+  assert(acc1.misaAcct === '11221', (
+    `misaAcct SAI cũ '1121' PHẢI được sửa đúng lại thành '11221' (ưu tiên ma_hach_toan riêng của TK, dù `
+    + `maTkVnd/maTkUsd mức công ty đều mơ hồ/null) — got '${acc1.misaAcct}'`));
+  console.log("PASS 8: TK đã có sẵn với misaAcct sai cũ được ưu tiên sửa đúng theo 'ma_hach_toan' riêng học từ lịch sử thật, dù không có mã chung ở mức công ty.");
+}
+
 console.log('\nTẤT CẢ TEST PASS');

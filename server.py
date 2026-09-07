@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.215"
+APP_BUILD = "2026-08-31.216"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25417,9 +25417,21 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
     (vd "1121-NG" từ "Ngân hàng...") nên ra SAI (MISA không hề có TK con
     đó, khiến "Đối chiếu số dư TK" không khớp được gì). CHỈ trả về mã khi
     DUY NHẤT 1 mã tồn tại (không mơ hồ) — công ty có NHIỀU TK con 112x thật
-    (tách theo ngân hàng) thì để None, frontend giữ nguyên cách đoán/để
-    người dùng tự nhập như cũ (an toàn hơn đoán sai khi có thể có nhiều lựa
-    chọn)."""
+    (tách theo ngân hàng) thì để None ở mức CÔNG TY.
+
+    MỖI DÒNG trong "danh_sach" còn kèm THÊM "ma_hach_toan" (nếu học được) —
+    mã hạch toán RIÊNG của ĐÚNG tài khoản ngân hàng đó (xem
+    _misa_hoc_ma_hach_toan_theo_bankaccount), tra qua lịch sử chứng từ Thu/
+    Chi tiền gửi THẬT đã ghi cho ĐÚNG BankAccountID này — giải quyết đúng
+    trường hợp công ty có NHIỀU tài khoản NGOẠI TỆ khác nhau dùng NHIỀU mã
+    con 1122x KHÁC NHAU (vd "11221"/"11222", ma_tk_usd ở mức công ty sẽ là
+    None vì mơ hồ) nhưng ĐÚNG tài khoản ngân hàng cụ thể đang đồng bộ lại
+    CHỈ dùng 1 mã DUY NHẤT xuyên suốt lịch sử — xác nhận đúng qua yêu cầu
+    người dùng "hãy lấy số tài khoản trong misa để gắn chứ phần mềm không
+    tự gắn tài khoản đúng 11221" (kèm ảnh Hệ thống tài khoản MISA thật có 2
+    mã con "11221"/"11222" cùng dưới "1122"). Không có lịch sử (TK mới) thì
+    không có field này — frontend rơi về ma_tk_vnd/ma_tk_usd rồi suggestMisaAcct
+    như cũ (an toàn hơn đoán khi thiếu dữ liệu)."""
     conn = _misa_sql_connect(cid, database=database)
     try:
         cur = conn.cursor()
@@ -25441,6 +25453,7 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
         except Exception:
             pass
         cols_ba = _misa_cot_bang_that(cur, "BankAccount")
+        c_id = _misa_chon_cot(cols_ba, "BankAccountID")
         c_so = _misa_chon_cot(cols_ba, "BankAccountNumber", "AccountNumber")
         c_ten = _misa_chon_cot(cols_ba, "BankName", "BankAccountName", "BankFullName")
         c_chu = _misa_chon_cot(cols_ba, "AccountHolder")
@@ -25448,7 +25461,8 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
         c_inactive = _misa_chon_cot(cols_ba, "Inactive")
         if not c_so:
             return {"danh_sach": []}
-        cot = ["[%s]" % c_so, "[%s]" % c_ten if c_ten else "NULL",
+        cot = ["[%s]" % c_id if c_id else "NULL", "[%s]" % c_so,
+               "[%s]" % c_ten if c_ten else "NULL",
                "[%s]" % c_chu if c_chu else "NULL", "[%s]" % c_bankid if c_bankid else "NULL",
                "[%s]" % c_inactive if c_inactive else "0"]
         sql = "SELECT %s FROM BankAccount" % ", ".join(cot)
@@ -25465,15 +25479,65 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
             except Exception:
                 pass
         ra = []
-        for so_tk, ten_raw, chu, bank_id, inactive in cur.execute(sql).fetchall():
+        for bank_account_id, so_tk, ten_raw, chu, bank_id, inactive in cur.execute(sql).fetchall():
             if not so_tk:
                 continue
             ten = ten_raw or ten_ngan_hang_theo_id.get(str(bank_id) if bank_id else "") or ""
-            ra.append({"so_tk": str(so_tk).strip(), "ten_ngan_hang": str(ten or "").strip(),
-                       "chu_tai_khoan": str(chu or "").strip(), "inactive": bool(inactive)})
+            item = {"so_tk": str(so_tk).strip(), "ten_ngan_hang": str(ten or "").strip(),
+                    "chu_tai_khoan": str(chu or "").strip(), "inactive": bool(inactive)}
+            # Mã hạch toán RIÊNG của ĐÚNG tài khoản ngân hàng này (học từ lịch
+            # sử chứng từ Thu/Chi tiền gửi THẬT đã có — xem
+            # _misa_hoc_ma_hach_toan_theo_bankaccount) — ĐÁNG TIN CẬY hơn hẳn
+            # ma_tk_vnd/ma_tk_usd (chỉ suy ra khi CẢ CÔNG TY có ĐÚNG 1 mã con
+            # duy nhất): công ty có NHIỀU TK ngoại tệ khác nhau (vd 2 TK USD
+            # cùng dùng 2 mã con KHÁC NHAU "11221"/"11222" dưới TK cha "1122"
+            # — xác nhận đúng qua ảnh chụp Hệ thống tài khoản MISA thật) thì
+            # ma_tk_usd ở trên sẽ là None (mơ hồ, không suy ra được công ty
+            # dùng mã nào), NHƯNG ĐÚNG TK ngân hàng cụ thể này lại CHỈ dùng 1
+            # mã DUY NHẤT xuyên suốt lịch sử — tra được chính xác qua chính
+            # BankAccountID của nó, giải quyết đúng yêu cầu người dùng "hãy
+            # lấy số tài khoản trong misa để gắn chứ phần mềm không tự gắn
+            # tài khoản đúng 11221".
+            if bank_account_id:
+                ma_rieng = _misa_hoc_ma_hach_toan_theo_bankaccount(cur, bank_account_id)
+                if ma_rieng:
+                    item["ma_hach_toan"] = ma_rieng
+            ra.append(item)
         return {"danh_sach": ra, "ma_tk_vnd": ma_tk_vnd, "ma_tk_usd": ma_tk_usd}
     finally:
         conn.close()
+
+
+def _misa_hoc_ma_hach_toan_theo_bankaccount(cur, bank_account_id):
+    """CHỈ ĐỌC — học mã hạch toán (1121x/1122x) THẬT đã dùng cho ĐÚNG 1 tài
+    khoản ngân hàng cụ thể (BankAccountID), tra qua lịch sử chứng từ Thu/Chi
+    tiền gửi THẬT đã ghi vào MISA — BADeposit/BADepositDetail (Thu, mã hạch
+    toán nằm ở DebitAccount) và BAWithDraw/BAWithDrawDetail (Chi, mã hạch
+    toán nằm ở CreditAccount), CẢ 2 chiều PHẢI dùng CHUNG 1 mã cho cùng 1 TK
+    ngân hàng — gộp lại đếm tần suất, lấy mã xuất hiện NHIỀU NHẤT (đề phòng
+    vài chứng từ cũ gõ nhầm/khác thường). Trả None nếu chưa có chứng từ nào
+    (TK mới, chưa phát sinh) — an toàn hơn đoán khi thiếu dữ liệu."""
+    try:
+        dem = {}
+        for tbl_h, tbl_d, cot_ma in (("BADeposit", "BADepositDetail", "DebitAccount"),
+                                      ("BAWithDraw", "BAWithDrawDetail", "CreditAccount")):
+            try:
+                rows = cur.execute(
+                    "SELECT d.[%s], COUNT(*) FROM %s h JOIN %s d ON d.RefID=h.RefID "
+                    "WHERE h.BankAccountID=? AND d.[%s] IS NOT NULL "
+                    "GROUP BY d.[%s]" % (cot_ma, tbl_h, tbl_d, cot_ma, cot_ma),
+                    bank_account_id).fetchall()
+            except Exception:
+                continue
+            for ma, so_luong in rows:
+                ma = str(ma or "").strip()
+                if ma:
+                    dem[ma] = dem.get(ma, 0) + int(so_luong or 0)
+        if not dem:
+            return None
+        return max(dem.items(), key=lambda kv: kv[1])[0]
+    except Exception:
+        return None
 
 
 @app.post("/api/misa-sql/danh-sach-tk-ngan-hang")

@@ -3497,7 +3497,7 @@ function suggestAccountNo(label) {
 // Hàm THUẦN (không đụng React state/DOM/fetch) tính kết quả đồng bộ TK NH
 // với MISA — tách riêng khỏi syncFromMisa() để test được độc lập. Theo
 // yêu cầu người dùng "hãy thêm nút đồng bộ TK NH với misa khi nhấn vào
-// phần mềm sẽ tự lấy thông tin tài khoản để nhập vào phần mềm luôn", và 2
+// phần mềm sẽ tự lấy thông tin tài khoản để nhập vào phần mềm luôn", và 3
 // lỗi thật đã báo sau đó:
 //  1) "Mã hạch toán MISA phần mềm lấy sai số tài khoản số đúng chỉ có
 //     1121" — ƯU TIÊN dùng ĐÚNG mã TK con 112x THẬT (maTkVnd/maTkUsd, chỉ
@@ -3508,6 +3508,16 @@ function suggestAccountNo(label) {
 //     thêm tài khoản rồi" — bỏ TK "TK chính" mặc định (chưa gắn Số TK/Tên
 //     ngân hàng thật, CHƯA có dữ liệu sao kê nào — coDuLieuSaoKe(a) trả
 //     true nếu có) khi đã đồng bộ được ÍT NHẤT 1 TK thật từ MISA.
+//  3) "hãy lấy số tài khoản trong misa để gắn chứ phần mềm không tự gắn
+//     tài khoản đúng 11221" — công ty có NHIỀU TK ngoại tệ khác nhau dùng
+//     NHIỀU mã con 1122x KHÁC NHAU (vd "11221"/"11222" cùng dưới "1122")
+//     -> maTkUsd ở mức CÔNG TY sẽ là None (mơ hồ). ƯU TIÊN CAO NHẤT mã
+//     "ma_hach_toan" RIÊNG của TỪNG TK (m.ma_hach_toan, học từ lịch sử
+//     chứng từ Thu/Chi tiền gửi THẬT của ĐÚNG BankAccountID đó — xem
+//     _misa_hoc_ma_hach_toan_theo_bankaccount server.py) — trước cả
+//     maTkVnd/maTkUsd (chỉ đúng khi công ty không mơ hồ). TK MỚI học được
+//     mã con 1122x (ngoại tệ) thì tự đặt currency="USD" luôn thay vì mặc
+//     định "VND" như trước.
 function dongBoTaiKhoanNganHang(accounts, dsMisaRaw, maTkVnd, maTkUsd, coDuLieuSaoKe) {
   const dsMisa = (dsMisaRaw || []).filter(x => !x.inactive);
   const chuanSo = s => String(s || "").replace(/[\s\-]/g, "").toLowerCase();
@@ -3517,7 +3527,7 @@ function dongBoTaiKhoanNganHang(accounts, dsMisaRaw, maTkVnd, maTkUsd, coDuLieuS
   let updated = accounts.map(a => {
     const match = dsMisa.find(m => chuanSo(m.so_tk) === chuanSo(a.accountNo));
     if (!match) return a;
-    const maThat = maTkThatTheoTienTe(a.currency);
+    const maThat = match.ma_hach_toan || maTkThatTheoTienTe(a.currency);
     const tenMoi = match.ten_ngan_hang && match.ten_ngan_hang !== a.bankName ? match.ten_ngan_hang : a.bankName;
     const misaAcctMoi = maThat && maThat !== a.misaAcct ? maThat : a.misaAcct;
     if (tenMoi === a.bankName && misaAcctMoi === a.misaAcct) return a;
@@ -3528,9 +3538,11 @@ function dongBoTaiKhoanNganHang(accounts, dsMisaRaw, maTkVnd, maTkUsd, coDuLieuS
     const daCo = updated.some(a => chuanSo(a.accountNo) === chuanSo(m.so_tk));
     if (daCo) return;
     const label = (m.ten_ngan_hang ? m.ten_ngan_hang + " " : "") + m.so_tk;
-    const misaAcct = maTkVnd || suggestMisaAcct(label, "VND", [...existingMisaAccts, ...updated.map(a => a.misaAcct || "")]);
+    const currency = m.ma_hach_toan && m.ma_hach_toan.startsWith("1122") ? "USD" : "VND";
+    const misaAcct = m.ma_hach_toan || maTkThatTheoTienTe(currency)
+      || suggestMisaAcct(label, currency, [...existingMisaAccts, ...updated.map(a => a.misaAcct || "")]);
     updated = [...updated, {
-      id: "acc_" + Math.random().toString(36).slice(2, 10), label, currency: "VND",
+      id: "acc_" + Math.random().toString(36).slice(2, 10), label, currency,
       misaAcct, bankName: m.ten_ngan_hang || "", accountNo: m.so_tk
     }];
     soMoi++;
