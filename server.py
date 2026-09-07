@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.210"
+APP_BUILD = "2026-08-31.211"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12891,11 +12891,18 @@ def _gen_xuat_kho_rows(giathanh_rows, ton_rows=None, ten_sang_ma_kho=None):
     ngay_cuoi = max(rows, key=lambda r: _xk_key_ngay(r.get("ngay")))["ngay"]
     ngay_ht, thang, nam = _xk_cuoi_thang(ngay_cuoi)
     so_ct = f"XK T{thang}/{nam}"
+    # Giờ hạch toán CỐ ĐỊNH cuối ngày 23:59:00 (theo yêu cầu người dùng) —
+    # cùng lý do với _misa_gio_xuat_co_dinh ở đường ghi thẳng SQL: nếu chỉ
+    # ghi "dd/mm/yyyy" (không giờ), MISA có thể xem giờ mặc định 00:00:00,
+    # đứng TRƯỚC các phiếu Nhập kho CÙNG NGÀY (thường ghi giờ trong ngày) về
+    # mặt thời gian, khiến MISA từ chối ghi sổ vì "quá số lượng tồn trong
+    # kho" dù tổng cả tháng vẫn đủ hàng.
+    ngay_ht_gio = f"{ngay_ht} 23:59:00" if ngay_ht else ngay_ht
     out = []
     for r in rows:
         row = [""] * len(XUAT_KHO_HEADERS)
         row[0] = 0
-        row[2] = ngay_ht; row[3] = ngay_ht; row[4] = so_ct
+        row[2] = ngay_ht_gio; row[3] = ngay_ht_gio; row[4] = so_ct
         row[27] = r.get("ma", "")                 # AB Mã hàng
         row[28] = r.get("ten_xk") or r.get("ten_sp", "")   # AC Tên hàng
         ten_kho = ma_kho.get(r.get("ma")) or "HH"
@@ -13624,7 +13631,7 @@ def xk_export(cid: int):
         ws.cell(1, c).value = h
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
         ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
-    cot_text = {5, 28, 31, 33, 34, 35}     # số CT, mã hàng, kho, TK nợ/có, ĐVT
+    cot_text = {3, 4, 5, 28, 31, 33, 34, 35}   # ngày HT/CT (kèm giờ), số CT, mã hàng, kho, TK nợ/có, ĐVT
     cot_tien = {36, 37, 38, 39, 40}
     for ri, row in enumerate(out, 2):
         for ci, v in enumerate(row, 1):
