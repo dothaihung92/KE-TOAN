@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.212"
+APP_BUILD = "2026-08-31.213"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20560,11 +20560,26 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
     ListTableName='INOutward' để đối chiếu chắc chắn.
 
     "Đơn giá vốn"/"Tiền vốn" (UnitPriceFinance/AmountFinance) NAY TỰ TÍNH
-    trực tiếp từ Đơn giá tồn kho MISA (field "gia" trong Sheet TON — lấy
-    ĐÚNG từ báo cáo "Tổng hợp tồn kho"/SQL MISA thật, xem _doc_file_ton_kho/
-    _misa_lay_ton_kho) NHÂN với số lượng xuất — theo yêu cầu người dùng mới
-    nhất: "hãy làm nút import file xuất kho vào misa luôn lưu ý hãy lấy
-    đúng theo đơn giá trong tồn kho của misa để tính ra thành tiền".
+    trực tiếp từ Đơn giá tồn kho MISA (gia_tri/ton, TÍNH CHÍNH XÁC — GIỮ
+    phần thập phân, xem ma_gia_ton — KHÔNG dùng field "gia" trong Sheet TON
+    vì field đó đã bị _doc_file_ton_kho/_misa_lay_ton_kho làm tròn về số
+    nguyên để hiển thị) NHÂN với số lượng xuất — theo yêu cầu người dùng
+    mới nhất: "hãy làm nút import file xuất kho vào misa luôn lưu ý hãy
+    lấy đúng theo đơn giá trong tồn kho của misa để tính ra thành tiền".
+
+    SỬA LẦN 2 (đúng ca thật người dùng báo lại kèm ảnh MISA "Xuất kho bán
+    hàng XK T6/2026": "nghĩa là số lượng tồn kho đã về 0 nhưng thành tiền
+    bị âm hoặc bị thừa"): lần đầu dùng field "gia" (ĐÃ làm tròn số nguyên,
+    vd 394.651đ thay vì 394.651,1627907...đ thật) nhân số lượng cho TỪNG
+    lần xuất — khi 1 mã bị xuất qua NHIỀU lần trong cùng kỳ (vd mã 'MH390'
+    tổng 43 đơn vị, Đầu kỳ 33/12.870.000đ + Nhập 10/4.100.000đ = pool thật
+    16.970.000đ), phần dư làm tròn TỪNG lần cộng dồn lại ra lệch DÔI/HỤT
+    vài đến vài trăm đồng so với pool thật (xác nhận đúng: 394.651 x 15 =
+    5.919.765 đúng như MISA hiện, nhưng dùng giá CHÍNH XÁC 394.651,1627907
+    x 15 = 5.919.767 mới đúng phần đóng góp thật của 15 đơn vị đó vào pool
+    16.970.000đ). Nay tính Đơn giá CHÍNH XÁC (gia_tri/ton, giữ 4 chữ số
+    thập phân) và CHỈ làm tròn ĐÚNG 1 LẦN ở bước "Thành tiền"=SL×Đơn giá
+    cuối cùng — giảm tối đa phần dư cộng dồn qua nhiều lần xuất cùng kỳ.
 
     ĐẢO NGƯỢC quyết định trước đó (để trống, chờ MISA tự "Tính giá xuất
     kho") — vì đã xác nhận qua điều tra thật (_misa_chan_doan_so_kho_xuat_
@@ -20609,8 +20624,28 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
         raise HTTPException(400, "Chưa có dòng nào được gắn mã hàng để ghi — bấm \"🔍 Dò mã hàng tự động\" "
                                   "hoặc gán mã tay trước.")
     ma_kho_ten = {t.get("ma"): t.get("kho") for t in ton_rows if t.get("kho")}
-    ma_gia_ton = {str(t.get("ma") or "").strip(): _to_num(t.get("gia"))
-                  for t in ton_rows if _to_num(t.get("gia"))}
+    # Đơn giá CHÍNH XÁC (gia_tri/ton, CHƯA làm tròn) — KHÔNG dùng field "gia"
+    # (đã bị _doc_file_ton_kho/_misa_lay_ton_kho làm tròn VỀ SỐ NGUYÊN để
+    # hiển thị) — xác nhận đúng qua báo cáo thật: mã 'MH390' (Đầu kỳ 33/
+    # 12.870.000đ, Nhập 10/4.100.000đ -> giá bình quân CHÍNH XÁC 16.970.000/
+    # 43=394.651,1627907...đ) bị phần mềm ghi Đơn giá LÀM TRÒN 394.651đ x 15
+    # = 5.919.765đ vào MISA, cộng dồn qua nhiều lần xuất trong kỳ (43 đơn vị)
+    # ra lệch DÔI 7đ so với tổng giá trị pool thật (16.970.000đ) — ĐÚNG lỗi
+    # thật người dùng báo (ảnh chụp MISA "Xuất kho bán hàng" XK T6/2026, dòng
+    # MH390 Đơn giá 394.651/Thành tiền 5.919.765) khớp 100% phép tính làm
+    # tròn sai này — "Tồn kho về 0 mà Thành tiền bị âm/thừa vài trăm đồng".
+    # Dùng "gia_tri" (giá trị TỔNG chưa làm tròn, xem _doc_file_ton_kho) chia
+    # "ton" ra đơn giá CHÍNH XÁC (giữ nguyên phần thập phân), chỉ làm tròn
+    # ĐÚNG 1 LẦN DUY NHẤT ở bước tính "Thành tiền" cuối cùng (sl*giá) — giảm
+    # tối đa phần dư làm tròn cộng dồn qua nhiều lần xuất trong cùng 1 kỳ.
+    ma_gia_ton = {}
+    for t in ton_rows:
+        ma_t = str(t.get("ma") or "").strip()
+        ton_t = _to_num(t.get("ton"))
+        if ma_t and isinstance(ton_t, (int, float)) and ton_t:
+            gia_tri_t = _to_num(t.get("gia_tri"))
+            gia_tri_t = gia_tri_t if isinstance(gia_tri_t, (int, float)) else 0
+            ma_gia_ton[ma_t] = round(gia_tri_t / ton_t, 4)
     ngay_cuoi = max(rows, key=lambda r: _xk_key_ngay(r.get("ngay")))["ngay"]
     ngay_ht_s, thang, nam = _xk_cuoi_thang(ngay_cuoi)
     if not ngay_ht_s:
@@ -20724,11 +20759,12 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
             _misa_gan(d, cols_d, sl, "Quantity")
             _misa_gan(d, cols_d, sl, "MainQuantity")
             # Đơn giá vốn/Tiền vốn (UnitPriceFinance/AmountFinance) LẤY ĐÚNG
-            # Đơn giá tồn kho MISA (Sheet TON, field "gia") — xem docstring
-            # hàm này (theo yêu cầu người dùng mới nhất, đảo ngược quyết định
-            # để trống trước đó). Mã chưa có "gia" tham chiếu (chưa có dữ
-            # liệu tồn kho) thì để 0 như cũ — an toàn hơn đoán khi thiếu dữ
-            # liệu, không chặn ghi cả chứng từ chỉ vì thiếu giá 1 vài mã.
+            # Đơn giá tồn kho MISA, tính CHÍNH XÁC (gia_tri/ton, GIỮ phần
+            # thập phân — xem ma_gia_ton phía trên, KHÔNG dùng field "gia"
+            # đã làm tròn số nguyên) — xem docstring hàm này. Mã chưa có dữ
+            # liệu tồn kho tham chiếu thì để 0 như cũ — an toàn hơn đoán khi
+            # thiếu dữ liệu, không chặn ghi cả chứng từ chỉ vì thiếu giá 1
+            # vài mã.
             gia_von = ma_gia_ton.get(ma) or 0
             tien_von = round(sl * gia_von) if gia_von else 0
             _misa_gan(d, cols_d, gia_von, "UnitPriceFinance")

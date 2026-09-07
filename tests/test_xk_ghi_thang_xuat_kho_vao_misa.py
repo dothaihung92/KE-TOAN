@@ -156,8 +156,8 @@ GIATHANH_CO_BAN = [
      "gia_xk": 50000, "ngay": "31/12/2024"},
 ]
 TON_CO_BAN = [
-    {"ma": "MH01", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 120000},
-    {"ma": "MH02", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 45000},
+    {"ma": "MH01", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 120000, "gia_tri": 12000000},
+    {"ma": "MH02", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 45000, "gia_tri": 4500000},
 ]
 
 
@@ -293,20 +293,47 @@ assert ("INInwardOutwardList", "refid-cu") in cur6.deleted, (
     "1 RefID đã bị xoá, có thể khiến lưới MISA hiện lỗi/dòng hỏng")
 print("PASS 6: Số chứng từ trùng do CHÍNH phần mềm tạo trước đó — ghi_de=False chỉ báo đã tồn tại (không ghi), ghi_de=True xoá + ghi lại đúng CẢ INInwardOutwardList.")
 
-# ----- Test 7: mã hàng CHƯA có "gia" trong Sheet TON (chưa có dữ liệu tồn
-# kho tham chiếu) -> Đơn giá/Thành tiền dòng đó để 0 (an toàn hơn đoán),
-# KHÔNG chặn ghi cả chứng từ, các mã khác có "gia" vẫn tính đúng bình thường. -----
+# ----- Test 7: mã hàng CHƯA có "gia_tri" trong Sheet TON (chưa có dữ liệu
+# giá trị tồn kho tham chiếu, dù vẫn có SL) -> Đơn giá/Thành tiền dòng đó
+# để 0 (an toàn hơn đoán), KHÔNG chặn ghi cả chứng từ, mã khác có đủ dữ
+# liệu vẫn tính đúng bình thường. -----
 cur7 = FakeCursor()
-ton7 = [{"ma": "MH01", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 120000},
-        {"ma": "MH02", "ton": 100, "kho": "Kho Hàng Hóa"}]   # MH02 KHÔNG có "gia"
+ton7 = [{"ma": "MH01", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 120000, "gia_tri": 12000000},
+        {"ma": "MH02", "ton": 100, "kho": "Kho Hàng Hóa"}]   # MH02 KHÔNG có "gia_tri"
 r7 = _chay(cur7, GIATHANH_CO_BAN, ton7)
 assert r7["so_dong"] == 2, f"Vẫn phải ghi đủ 2 dòng, không chặn vì thiếu giá 1 mã — got {r7}"
 det7 = sorted(cur7.inserted["INOutwardDetail"], key=lambda d: d["SortOrder"])
 assert det7[0]["UnitPriceFinance"] == 120000 and det7[0]["AmountFinance"] == 1200000, (
-    f"MH01 có 'gia' trong tồn kho vẫn phải tính đúng — got {det7[0]}")
+    f"MH01 có 'gia_tri' trong tồn kho vẫn phải tính đúng — got {det7[0]}")
 assert det7[1]["UnitPriceFinance"] == 0 and det7[1]["AmountFinance"] == 0, (
-    f"MH02 THIẾU 'gia' trong tồn kho -> Đơn giá/Thành tiền PHẢI để 0 (an toàn hơn đoán), không lỗi — got {det7[1]}")
+    f"MH02 THIẾU 'gia_tri' trong tồn kho -> Đơn giá/Thành tiền PHẢI để 0 (an toàn hơn đoán), không lỗi — got {det7[1]}")
 assert r7["tong_tien"] == 1200000, f"tong_tien chỉ cộng dòng có giá (MH01) — got {r7['tong_tien']}"
 print("PASS 7: mã thiếu 'gia' trong Sheet TON để Đơn giá/Thành tiền = 0 an toàn, không chặn ghi cả chứng từ, mã khác vẫn tính đúng.")
+
+# ----- Test 8 (đúng ca thật người dùng báo lại kèm ảnh MISA "Xuất kho bán
+# hàng XK T6/2026"): PHẢI dùng Đơn giá CHÍNH XÁC (gia_tri/ton, giữ phần
+# thập phân) chứ KHÔNG dùng "gia" đã làm tròn số nguyên — tránh lệch DÔI/
+# HỤT khi 1 mã bị xuất qua nhiều lần trong cùng kỳ. -----
+cur8 = FakeCursor()
+# Đúng số liệu THẬT mã 'MH390': Đầu kỳ 33/12.870.000đ + Nhập 10/4.100.000đ
+# = pool 43 đơn vị/16.970.000đ -> Đơn giá bình quân CHÍNH XÁC 394.651,1627907...đ
+# (KHÁC "gia" đã làm tròn 394.651đ mà MISA đang hiện sai trong ảnh chụp).
+ton8 = [{"ma": "MH01", "ton": 43, "kho": "Kho Hàng Hóa", "gia": 394651, "gia_tri": 16970000}]
+giathanh8 = [{"ma": "MH01", "ten_xk": "Chậu Polystone ASH40 - MTWT", "dvt_xk": "Cái",
+              "sl_kho": 15, "sl": 15, "ngay": "30/06/2026"}]
+r8 = _chay(cur8, giathanh8, ton8)
+det8 = cur8.inserted["INOutwardDetail"][0]
+assert det8["UnitPriceFinance"] == 394651.1628, (
+    f"Đơn giá vốn PHẢI dùng giá CHÍNH XÁC gia_tri/ton=16970000/43=394651,1627907... (làm tròn 4 số thập "
+    f"phân để lưu = 394651.1628), KHÔNG được dùng 'gia' đã làm tròn số nguyên 394651 (đúng lỗi thật đã báo: "
+    f"MISA hiện Đơn giá 394.651/Thành tiền 5.919.765 cho 15 đơn vị, cộng dồn qua nhiều lần xuất trong kỳ ra "
+    f"lệch dôi 7đ so với pool thật) — got {det8['UnitPriceFinance']}")
+assert det8["AmountFinance"] == 5919767, (
+    f"Thành tiền PHẢI = round(15*394651,1627907...) = 5919767 (ĐÚNG phần đóng góp thật của 15 đơn vị vào "
+    f"pool 16.970.000đ), KHÔNG được = 5919765 (làm tròn giá TRƯỚC rồi mới nhân, đúng số sai MISA đang hiện "
+    f"trong ảnh chụp thật) — got {det8['AmountFinance']}")
+print("PASS 8: Đơn giá vốn tính CHÍNH XÁC từ gia_tri/ton (giữ phần thập phân), không còn làm tròn giá TRƯỚC "
+      "khi nhân số lượng — đúng ca thật 'MH390' MISA từng hiện sai 394.651đ/5.919.765đ (lệch dôi 7đ khi cộng "
+      "dồn qua nhiều lần xuất trong kỳ), nay tính đúng 5.919.767đ cho đúng phần đóng góp của 15 đơn vị.")
 
 print("\nTẤT CẢ TEST PASS")
