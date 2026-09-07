@@ -116,17 +116,36 @@ assert r1["danh_sach"][0]["ten_ngan_hang"] == "Ngân hàng TMCP Á Châu", (
 assert r1["danh_sach"][0]["inactive"] is False
 print("PASS 1: BankAccount.BankName=NULL vẫn ra đúng tên ngân hàng thật qua JOIN bảng Bank riêng.")
 
-# ----- Test 2: BankAccount.BankName CÓ SẴN (một số CSDL khác có thể set
-# trực tiếp) -> dùng luôn, không cần JOIN. -----
+# ----- Test 2 (ĐẢO NGƯỢC ưu tiên, đúng lỗi thật vừa báo "Tên ngân hàng
+# đang hiển thị sai" kèm ảnh MISA thật): dù BankAccount.BankName CÓ SẴN
+# giá trị, JOIN Bank qua BankID vẫn PHẢI ưu tiên hơn — vì cột SQL tên
+# "BankName" ở 1 số CSDL MISA thật KHÔNG thật sự chứa tên ngân hàng (có
+# thể bị dùng để lưu dữ liệu khác kiểu "Chi nhánh", vd "VND"/"USD" — xác
+# nhận đúng qua ảnh chụp MISA thật: TK "28686828" Tên ngân hàng THẬT="Ngân
+# hàng TMCP Á Châu" nhưng cột BankName lại có giá trị "VND"). Bank.BankName
+# (qua BankID) mới là nguồn ĐÚNG mà chính màn hình MISA dùng hiển thị. -----
 cur2 = FakeCursor(
-    bank_accounts=[("id2", "11600294", "bankid-vcb", "Vietcombank", False, "CÔNG TY ABC")],
+    bank_accounts=[("id2", "11600294", "bankid-vcb", "VND", False, "CÔNG TY ABC")],
     banks=[("bankid-vcb", "Ngân hàng TMCP Ngoại thương Việt Nam")])
 ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur2)
 r2 = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
-assert r2["danh_sach"][0]["ten_ngan_hang"] == "Vietcombank", (
-    f"Có sẵn BankAccount.BankName thì dùng luôn (ưu tiên hơn JOIN) — got {r2['danh_sach'][0]}")
+assert r2["danh_sach"][0]["ten_ngan_hang"] == "Ngân hàng TMCP Ngoại thương Việt Nam", (
+    f"PHẢI ưu tiên Bank.BankName qua JOIN BankID (đúng tên ngân hàng thật MISA hiển thị), KHÔNG được dùng "
+    f"thẳng BankAccount.BankName='VND' (dữ liệu kiểu Chi nhánh, không phải tên ngân hàng) — got {r2['danh_sach'][0]}")
 assert r2["danh_sach"][0]["chu_tai_khoan"] == "CÔNG TY ABC"
-print("PASS 2: BankAccount.BankName có sẵn được dùng trực tiếp, đúng Chủ tài khoản.")
+print("PASS 2: BankAccount.BankName='VND' (dữ liệu Chi nhánh, không phải tên NH thật) bị bỏ qua đúng, ưu tiên Bank.BankName qua JOIN BankID ra đúng tên ngân hàng thật.")
+
+# ----- Test 2b: BankID KHÔNG resolve được qua bảng Bank (JOIN thất bại) ->
+# fallback về BankAccount.BankName trực tiếp như phương án dự phòng cuối. -----
+cur2b = FakeCursor(
+    bank_accounts=[("id2b", "22222222", "bankid-khong-ton-tai", "Ngân hàng ABC", False, None)],
+    banks=[("bankid-vcb", "Ngân hàng TMCP Ngoại thương Việt Nam")])
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur2b)
+r2b = _misa_danh_sach_tai_khoan_ngan_hang(1, "TESTDB")
+assert r2b["danh_sach"][0]["ten_ngan_hang"] == "Ngân hàng ABC", (
+    f"BankID không JOIN được (không có trong bảng Bank) -> PHẢI fallback về BankAccount.BankName trực tiếp "
+    f"— got {r2b['danh_sach'][0]}")
+print("PASS 2b: BankID không JOIN được thì fallback đúng về BankAccount.BankName trực tiếp.")
 
 # ----- Test 3: nhiều tài khoản, có tài khoản Inactive (ngừng theo dõi) —
 # vẫn trả về đầy đủ (để phần mềm tự lọc/hiển thị), không tự ý bỏ qua. -----

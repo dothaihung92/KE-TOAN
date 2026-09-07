@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.216"
+APP_BUILD = "2026-08-31.217"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25403,11 +25403,24 @@ def _misa_doi_chieu_so_du_nh(cid, database, account_number, den_ngay, so_du_ky_v
 
 def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
     """CHỈ ĐỌC — lấy danh sách Tài khoản ngân hàng THẬT trong Danh mục MISA
-    (bảng BankAccount, JOIN Bank lấy đúng Tên ngân hàng — BankAccount.
-    BankName thường để NULL, tên ngân hàng thật nằm ở bảng Bank riêng qua
-    BankID, xác nhận qua dữ liệu thật) — dùng cho nút "🔄 Đồng bộ TK NH với
-    MISA" ở doi_chieu_ngan_hang.html (Kế Toán AI): tự điền Số TK/Tên ngân
-    hàng/Chủ tài khoản thay vì người dùng phải tự gõ tay từng cái.
+    (bảng BankAccount, JOIN Bank lấy đúng Tên ngân hàng qua BankID) — dùng
+    cho nút "🔄 Đồng bộ TK NH với MISA" ở doi_chieu_ngan_hang.html (Kế Toán
+    AI): tự điền Số TK/Tên ngân hàng/Chủ tài khoản thay vì người dùng phải
+    tự gõ tay từng cái.
+
+    ƯU TIÊN Bank.BankName (qua JOIN BankID) HƠN BankAccount.BankName trực
+    tiếp, KHÔNG NGƯỢC LẠI như trước — đúng lỗi thật đã báo "Tên ngân hàng
+    đang hiển thị sai" kèm ảnh chụp: TK "28686828" trong MISA thật hiện Tên
+    ngân hàng="Ngân hàng TMCP Á Châu" (đúng, cột "Tên ngân hàng" MISA luôn
+    lấy qua Bank.BankName/BankID) nhưng "Chi nhánh"="VND" — phần mềm trước
+    đây ưu tiên đọc thẳng BankAccount.BankName (cột SQL tên "BankName" theo
+    schema) làm "Tên ngân hàng", nhưng ở CSDL công ty này cột đó lại đang
+    được dùng để lưu dữ liệu kiểu "Chi nhánh" ("VND"/"USD", không phải tên
+    ngân hàng thật) — ra sai "Tên ngân hàng"="VND" thay vì "Ngân hàng TMCP
+    Á Châu". Bank.BankName (qua BankID) mới ĐÚNG NGUỒN THẬT SỰ mà chính màn
+    hình "Tài khoản ngân hàng" của MISA dùng để hiển thị cột "Tên ngân
+    hàng" — ưu tiên nguồn đó trước, chỉ dùng BankAccount.BankName trực tiếp
+    làm phương án DỰ PHÒNG khi không có BankID/không JOIN được.
 
     KÈM ma_tk_vnd/ma_tk_usd: mã hạch toán KẾ TOÁN THẬT (TK 1121x/1122x) lấy
     từ Hệ thống tài khoản MISA (bảng Account) — xác nhận đúng qua báo cáo
@@ -25482,7 +25495,7 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
         for bank_account_id, so_tk, ten_raw, chu, bank_id, inactive in cur.execute(sql).fetchall():
             if not so_tk:
                 continue
-            ten = ten_raw or ten_ngan_hang_theo_id.get(str(bank_id) if bank_id else "") or ""
+            ten = ten_ngan_hang_theo_id.get(str(bank_id) if bank_id else "") or ten_raw or ""
             item = {"so_tk": str(so_tk).strip(), "ten_ngan_hang": str(ten or "").strip(),
                     "chu_tai_khoan": str(chu or "").strip(), "inactive": bool(inactive)}
             # Mã hạch toán RIÊNG của ĐÚNG tài khoản ngân hàng này (học từ lịch
