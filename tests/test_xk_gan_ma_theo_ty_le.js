@@ -13,23 +13,34 @@
 // xkTinhGoiYTuoi(r) (cùng nguồn "Khớp XX%" với modal tay) thay vì r.goi_y.
 //
 // ROUND 3 (theo yêu cầu người dùng "hãy chỉnh lại dò theo % hãy so khớp
-// thêm đvt nữa"): chỉ so khớp TÊN không đủ an toàn — 1 mã TÊN giống hệt
-// nhưng bán/tồn theo ĐƠN VỊ khác hẳn (vd "M2" thay vì "Thùng") vẫn có thể bị
-// tự gán nhầm dù điểm % rất cao, làm sai cả tồn kho lẫn giá vốn (Số lượng/
-// Đơn giá 2 đơn vị không tương đương). Nay "Gán theo %" THÊM điều kiện ĐVT
-// phải khớp (sau chuẩn hoá — xem xkChuanDvt) mới tự gán; ĐVT thiếu ở 1 bên
-// (không rõ để so) thì KHÔNG chặn, vẫn gán bình thường như trước.
+// thêm đvt nữa"): thêm điều kiện ĐVT phải khớp mới tự gán.
+//
+// ROUND 4 (theo yêu cầu người dùng mới nhất, ĐẢO NGƯỢC round 3: "chỉnh lại
+// gắn theo % không cần phải khớp đvt nữa mà chỉ cần gần giống tên và sau đó
+// chọn đơn giá gần giống với tên hàng nhất đừng chêch lệch giá bán quá
+// nhiều chỉ cho phép +- chêch lệch 30%"): BỎ hẳn điều kiện ĐVT (không còn
+// chặn theo ĐVT nữa) — quay lại chỉ lọc theo % khớp tên như bản gốc; THÊM
+// lọc/ưu tiên theo ĐƠN GIÁ: chặn hẳn mã lệch Đơn giá kho > 30% so với Đơn
+// giá bán (r.dgia) khi CẢ 2 giá đều biết, và giữa các mã còn lại ưu tiên mã
+// có giá GẦN giá bán nhất (không chỉ điểm % tên cao nhất) — vừa chọn đúng
+// biến thể cụ thể khi nhiều mã trùng tên gần giống (khác giá vì khác quy
+// cách), vừa chặn mã lệch giá quá xa dù tên nghe giống (dấu hiệu gán nhầm).
 //
 // Test trích các hàm liên quan TỪ static/index.html (không stub thuật toán
 // so khớp/điểm giống — dùng NGUYÊN VẸN xkManh/xkKichThuocKhop/xkMaNgoacKhop/
-// xkDiemGiong/xkChuanTen/xkChuanDvt/xkTinhGoiYTuoi thật, chỉ stub phần
-// không liên quan tới thuật toán như toast/xkVeGrid) để xác nhận:
+// xkDiemGiong/xkChuanTen/xkTinhGoiYTuoi thật, chỉ stub phần không liên quan
+// tới thuật toán như toast/xkVeGrid) để xác nhận:
 //  1) r.goi_y (dù có, dù điểm cao) bị BỎ QUA hoàn toàn — không dùng để gán.
 //  2) Ứng viên tính TƯƠI từ xkTon (đúng tồn kho hiện tại) được dùng để gán,
 //     y hệt điểm % mà modal "Gán mã hàng kho" tay sẽ hiển thị.
 //  3) Dòng ĐÃ CÓ mã vẫn giữ nguyên vẹn (không đổi từ round 1).
-//  4) Mã khớp TÊN đủ % nhưng ĐVT khác hẳn bị loại, không tự gán nhầm đơn vị.
-//  5) ĐVT thiếu ở 1 bên không chặn gán (an toàn với dữ liệu thiếu).
+//  4) Mã khớp TÊN 100% nhưng ĐVT khác hẳn KHÔNG còn bị chặn nữa (đảo ngược
+//     round 3 — chỉ còn chặn theo giá, không phải theo ĐVT).
+//  5) Mã lệch Đơn giá kho > 30% so với Đơn giá bán bị loại, dù tên khớp cao.
+//  6) Giữa nhiều mã cùng đạt ngưỡng %, ưu tiên gán mã có giá GẦN giá bán
+//     nhất trước (không phải mã điểm % tên cao nhất).
+//  7) Thiếu dữ liệu giá (giá bán HOẶC giá kho) thì KHÔNG chặn/không đổi thứ
+//     tự — an toàn với dữ liệu thiếu, giữ nguyên hành vi cũ.
 const fs = require('fs');
 const path = require('path');
 const REPO_ROOT = path.dirname(__dirname);
@@ -49,7 +60,7 @@ function extractFn(src, name) {
   return src.slice(start, end);
 }
 
-const FN_NAMES = ['xkChuanTen', 'xkChuanDvt', 'xkManh', 'xkMaNgoacGop', 'xkMaNgoacKhop', 'xkKichThuocTrich',
+const FN_NAMES = ['xkChuanTen', 'xkManh', 'xkMaNgoacGop', 'xkMaNgoacKhop', 'xkKichThuocTrich',
                    'xkKichThuocKhop', 'xkDiemGiong', 'xkTinhGoiYTuoi', 'xkGanMaTheoTyLe'];
 const srcAll = FN_NAMES.map(n => extractFn(html, n)).join('\n');
 
@@ -138,30 +149,74 @@ function runWith(xkRowsInput, xkTonInput, pct) {
   console.log('PASS 3: tự tách dòng đúng khi mã tính tươi đạt ngưỡng nhưng không đủ tồn, bảo toàn tổng SL.');
 }
 
-// ----- ROUND 3 (theo yêu cầu người dùng "dò theo % hãy so khớp thêm đvt
-// nữa"): Test 4 — mã TÊN khớp 100% nhưng ĐVT khác hẳn (Thùng vs M2) -> PHẢI
-// bị loại, KHÔNG tự gán dù điểm tên rất cao và còn thừa tồn. -----
+// ----- ROUND 4 (đảo ngược round 3, theo yêu cầu người dùng "không cần phải
+// khớp đvt nữa"): Test 4 — mã TÊN khớp 100% nhưng ĐVT khác hẳn (Thùng vs M2)
+// KHÔNG còn bị chặn — chỉ chặn theo giá (test sau), không phải theo ĐVT. -----
 {
   const tenBan = 'Sơn chống thấm ABC';
-  const xkRowsInput = [{ sl: 5, tt: 500000, ten_sp: tenBan, dvt: 'Thùng', ma: '', goi_y: [] }];
+  const xkRowsInput = [{ sl: 5, tt: 500000, ten_sp: tenBan, dvt: 'Thùng', ma: '', goi_y: [] }];  // KHÔNG có dgia
   const xkTonInput = [{ ma: 'SCT01', ten: tenBan, dvt: 'M2', gia: 100000, ton: 100 }];
   const { xkRows } = runWith(xkRowsInput, xkTonInput, 90);
-  assert(xkRows.length === 1 && !xkRows[0].ma,
-    'Mã "SCT01" khớp TÊN 100% nhưng ĐVT khác (Thùng/M2) PHẢI bị loại, không tự gán — được ' + JSON.stringify(xkRows));
-  console.log('PASS 4: mã khớp tên 100% nhưng ĐVT khác (Thùng vs M2) bị loại đúng, không tự gán nhầm đơn vị.');
+  assert(xkRows.length === 1 && xkRows[0].ma === 'SCT01',
+    'Mã "SCT01" khớp TÊN 100% — ĐVT khác (Thùng/M2) KHÔNG còn bị chặn (đảo ngược round 3) — được ' + JSON.stringify(xkRows));
+  console.log('PASS 4: mã khớp tên 100% dù ĐVT khác (Thùng vs M2) vẫn ĐƯỢC gán — điều kiện ĐVT đã bỏ theo yêu cầu mới.');
 }
 
-// ----- Test 5: ĐVT THIẾU ở 1 trong 2 bên (không rõ để so) -> KHÔNG loại,
-// vẫn gán bình thường theo % tên như trước (an toàn, không chặn nhầm chỉ vì
-// thiếu dữ liệu ĐVT). -----
+// ----- Test 5 (theo yêu cầu người dùng "đừng chêch lệch giá bán quá nhiều
+// chỉ cho phép +- chêch lệch 30%"): mã khớp TÊN 100% nhưng Đơn giá kho lệch
+// > 30% so với Đơn giá bán -> PHẢI bị loại, không tự gán nhầm hàng khác. -----
+{
+  const tenBan = 'Bồn cầu AC-989VN/BW1';
+  const xkRowsInput = [{ sl: 3, tt: 14100000, ten_sp: tenBan, dgia: 4700000, ma: '', goi_y: [] }];
+  const xkTonInput = [{ ma: 'BC-LECH', ten: tenBan, dvt: 'Bộ', gia: 6500000, ton: 100 }];  // lệch 38% > 30%
+  const { xkRows } = runWith(xkRowsInput, xkTonInput, 90);
+  assert(xkRows.length === 1 && !xkRows[0].ma,
+    'Mã "BC-LECH" khớp TÊN 100% nhưng Đơn giá kho (6.500.000) lệch 38% so Đơn giá bán (4.700.000) — vượt '
+    + '30% cho phép — PHẢI bị loại, không tự gán — được ' + JSON.stringify(xkRows));
+  console.log('PASS 5: mã khớp tên 100% nhưng lệch giá > 30% so với giá bán bị loại đúng, không tự gán nhầm hàng khác.');
+}
+
+// ----- Test 6: nhiều mã CÙNG đạt ngưỡng % tên -> ưu tiên gán mã có Đơn giá
+// kho GẦN Đơn giá bán nhất TRƯỚC (không phải mã điểm % tên cao nhất). -----
+{
+  const tenBan = 'Bồn cầu AC-989VN/BW1';
+  const tenGanDung = 'Bồn cầu AC-989VN/BW1 hàng nhập khẩu chính hãng';   // tên dài hơn -> điểm % thấp hơn 1.0
+  const xkChuanTenTest = eval('(' + extractFn(html, 'xkChuanTen') + ')');
+  const diemGiongTest = eval('(' + extractFn(html, 'xkDiemGiong') + ')');
+  const diemGanDung = diemGiongTest(xkChuanTenTest(tenBan), xkChuanTenTest(tenGanDung));
+  const nguong = Math.max(1, Math.floor(diemGanDung * 100) - 5);   // đủ thấp để CẢ 2 mã cùng đạt ngưỡng
+  const xkRowsInput = [{ sl: 2, tt: 9400000, ten_sp: tenBan, dgia: 4700000, ma: '', goi_y: [] }];
+  const xkTonInput = [
+    // Điểm % tên CAO NHẤT (khớp tuyệt đối 100%) nhưng giá LỆCH XA giá bán.
+    { ma: 'BC-DIEM-CAO-GIA-XA', ten: tenBan, dvt: 'Bộ', gia: 5800000, ton: 100 },
+    // Điểm % tên THẤP HƠN (tên dài hơn) nhưng giá RẤT GẦN giá bán.
+    { ma: 'BC-DIEM-THAP-GIA-GAN', ten: tenGanDung, dvt: 'Bộ', gia: 4650000, ton: 100 },
+  ];
+  const { xkRows } = runWith(xkRowsInput, xkTonInput, nguong);
+  assert(xkRows.length === 1 && xkRows[0].ma === 'BC-DIEM-THAP-GIA-GAN',
+    `Phải ưu tiên gán mã có giá GẦN giá bán nhất (BC-DIEM-THAP-GIA-GAN, lệch ~1%) trước mã điểm % tên `
+    + `cao nhất nhưng giá lệch xa hơn (BC-DIEM-CAO-GIA-XA, lệch ~23%) — được ${JSON.stringify(xkRows)}`);
+  console.log('PASS 6: giữa nhiều mã cùng đạt ngưỡng %, ưu tiên đúng mã có Đơn giá kho gần Đơn giá bán nhất, không phải mã điểm % tên cao nhất.');
+}
+
+// ----- Test 7: THIẾU dữ liệu giá (giá bán HOẶC giá kho) -> KHÔNG chặn/không
+// đổi thứ tự — an toàn với dữ liệu thiếu, giữ nguyên hành vi cũ theo % tên. -----
 {
   const tenBan = 'Sơn chống thấm XYZ';
-  const xkRowsInput = [{ sl: 5, tt: 500000, ten_sp: tenBan, dvt: 'Thùng', ma: '', goi_y: [] }];
-  const xkTonInput = [{ ma: 'SXY01', ten: tenBan, dvt: '', gia: 100000, ton: 100 }];  // ĐVT tồn kho rỗng/chưa có
-  const { xkRows } = runWith(xkRowsInput, xkTonInput, 90);
-  assert(xkRows.length === 1 && xkRows[0].ma === 'SXY01',
-    'ĐVT tồn kho rỗng (không rõ để so) KHÔNG được chặn gán — được ' + JSON.stringify(xkRows));
-  console.log('PASS 5: ĐVT thiếu ở 1 bên không chặn gán, vẫn gán bình thường theo % tên như trước.');
+  // 7a: dòng bán KHÔNG có dgia (giá bán) -> không lọc/không sắp lại theo giá.
+  const xkRowsInputA = [{ sl: 5, tt: 500000, ten_sp: tenBan, ma: '', goi_y: [] }];
+  const xkTonInputA = [{ ma: 'SXY01', ten: tenBan, dvt: 'Thùng', gia: 999999999, ton: 100 }];  // giá kho "vô lý" cũng không sao vì không có giá bán để so
+  const { xkRows: xkRowsA } = runWith(xkRowsInputA, xkTonInputA, 90);
+  assert(xkRowsA.length === 1 && xkRowsA[0].ma === 'SXY01',
+    'Thiếu Đơn giá bán (r.dgia) thì KHÔNG được chặn/lọc theo giá, vẫn gán bình thường theo % tên — được ' + JSON.stringify(xkRowsA));
+
+  // 7b: có dgia nhưng mã tồn kho THIẾU giá kho (gia=0/rỗng) -> không bị chặn.
+  const xkRowsInputB = [{ sl: 5, tt: 500000, ten_sp: tenBan, dgia: 4700000, ma: '', goi_y: [] }];
+  const xkTonInputB = [{ ma: 'SXY02', ten: tenBan, dvt: 'Thùng', gia: 0, ton: 100 }];
+  const { xkRows: xkRowsB } = runWith(xkRowsInputB, xkTonInputB, 90);
+  assert(xkRowsB.length === 1 && xkRowsB[0].ma === 'SXY02',
+    'Mã tồn kho thiếu Đơn giá kho (chưa rõ để so) KHÔNG được chặn — được ' + JSON.stringify(xkRowsB));
+  console.log('PASS 7: thiếu dữ liệu giá (giá bán hoặc giá kho) ở 1 trong 2 bên không chặn/không đổi thứ tự, an toàn với dữ liệu thiếu.');
 }
 
 console.log('\nTẤT CẢ TEST PASS');
