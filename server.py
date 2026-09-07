@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.211"
+APP_BUILD = "2026-08-31.212"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20559,17 +20559,31 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
     SÓT khi viết hàm này ban đầu vì lúc đó chưa dò được mẫu dữ liệu thật có
     ListTableName='INOutward' để đối chiếu chắc chắn.
 
-    "Đơn giá vốn"/"Tiền vốn" (UnitPriceFinance/AmountFinance) CỐ Ý để 0,
-    KHÔNG tự tính từ gia_xk (giá bình quân THAM KHẢO trong Sheet TON) —
-    theo yêu cầu người dùng "chỉ cần import vào misa giống file thôi không
-    cần phải hiện đơn giá thành tiền để tôi nhấn vào tính giá xuất kho để
-    misa tự tính": xác nhận đúng qua chính file Excel "🗂 Xuất file Xuất
-    Kho" phần mềm đã xuất từ trước (_gen_xuat_kho_rows) — 2 cột đó LUÔN để
-    TRỐNG trên file, để MISA tự tính khi bấm "Tính giá xuất kho" (đúng
-    phương pháp giá vốn công ty đang cấu hình, có thể khác gia_xk chỉ là
-    số tham khảo từ báo cáo tồn kho cũ) — ghi thẳng SQL phải khớp ĐÚNG hành
-    vi đó thay vì tự đoán giá vốn. TotalAmountFinance/TotalAmountManagement
-    của header vì vậy cũng luôn = 0 (tổng của các dòng chi tiết, đều = 0).
+    "Đơn giá vốn"/"Tiền vốn" (UnitPriceFinance/AmountFinance) NAY TỰ TÍNH
+    trực tiếp từ Đơn giá tồn kho MISA (field "gia" trong Sheet TON — lấy
+    ĐÚNG từ báo cáo "Tổng hợp tồn kho"/SQL MISA thật, xem _doc_file_ton_kho/
+    _misa_lay_ton_kho) NHÂN với số lượng xuất — theo yêu cầu người dùng mới
+    nhất: "hãy làm nút import file xuất kho vào misa luôn lưu ý hãy lấy
+    đúng theo đơn giá trong tồn kho của misa để tính ra thành tiền".
+
+    ĐẢO NGƯỢC quyết định trước đó (để trống, chờ MISA tự "Tính giá xuất
+    kho") — vì đã xác nhận qua điều tra thật (_misa_chan_doan_so_kho_xuat_
+    kho): "Tính giá xuất kho" của MISA hoạt động dựa trên bảng Sổ Kho
+    (InventoryLedger) mà hàm này KHÔNG ghi (rủi ro cao nhất nếu đoán sai
+    cấu trúc bảng đó), nên chứng từ do phần mềm tạo không có gì để MISA
+    tính, Đơn giá/Thành tiền cứ mãi 0đ dù bấm "Tính giá xuất kho" báo "đã
+    hoàn thành". Thay vì ghi liều InventoryLedger, dùng ĐÚNG giá đã có sẵn
+    (đáng tin cậy — cùng nguồn dữ liệu MISA, xác nhận qua mẫu chứng từ THẬT
+    "XK T12/2024" đã Ghi sổ: UnitPriceFinance=445000/AmountFinance=5340000
+    cho 12 đơn vị, tức Đơn giá vốn = giá bình quân giống hệt cách tính
+    trong Sheet TON) — AN TOÀN hơn (không đụng InventoryLedger) mà vẫn ra
+    đúng Đơn giá/Thành tiền hiển thị trên chứng từ.
+
+    Mã hàng chưa có "gia" trong Sheet TON (chưa có dữ liệu tồn kho tham
+    chiếu) thì Đơn giá/Thành tiền để 0 như cũ (an toàn hơn đoán khi thiếu
+    dữ liệu) — KHÔNG chặn ghi cả chứng từ chỉ vì thiếu giá 1 vài mã.
+    UnitPriceManagement/AmountManagement (giá quản trị) vẫn để 0 — đúng
+    mẫu chứng từ thật ở trên cũng để 0 phía quản trị.
 
     Mã hàng/Kho PHẢI đã có sẵn trong Danh mục MISA (InventoryItem/Stock) —
     KHÔNG tự tạo mới cho Xuất kho (khác Mua hàng nhập kho, nơi tự tạo Kho
@@ -20595,6 +20609,8 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
         raise HTTPException(400, "Chưa có dòng nào được gắn mã hàng để ghi — bấm \"🔍 Dò mã hàng tự động\" "
                                   "hoặc gán mã tay trước.")
     ma_kho_ten = {t.get("ma"): t.get("kho") for t in ton_rows if t.get("kho")}
+    ma_gia_ton = {str(t.get("ma") or "").strip(): _to_num(t.get("gia"))
+                  for t in ton_rows if _to_num(t.get("gia"))}
     ngay_cuoi = max(rows, key=lambda r: _xk_key_ngay(r.get("ngay")))["ngay"]
     ngay_ht_s, thang, nam = _xk_cuoi_thang(ngay_cuoi)
     if not ngay_ht_s:
@@ -20707,18 +20723,18 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
             _misa_gan(d, cols_d, uid, "MainUnitID")
             _misa_gan(d, cols_d, sl, "Quantity")
             _misa_gan(d, cols_d, sl, "MainQuantity")
-            # Đơn giá vốn/Tiền vốn (UnitPriceFinance/AmountFinance) CỐ Ý để 0
-            # (KHÔNG tự tính từ gia_xk) — theo đúng yêu cầu người dùng "chỉ
-            # cần import vào misa giống file thôi không cần phải hiện đơn giá
-            # thành tiền để tôi nhấn vào tính giá xuất kho để misa tự tính":
-            # xác nhận đúng qua chính file Excel "🗂 Xuất file Xuất Kho" phần
-            # mềm đã xuất từ trước (_gen_xuat_kho_rows) — 2 cột "Đơn giá vốn"/
-            # "Tiền vốn" trên đó LUÔN để TRỐNG, để MISA tự tính khi người dùng
-            # bấm "Tính giá xuất kho" (theo đúng phương pháp giá vốn công ty
-            # đang cấu hình — bình quân gia quyền/FIFO...) — ghi thẳng SQL
-            # phải khớp ĐÚNG hành vi đó, không tự đoán giá vốn (gia_xk chỉ là
-            # giá bình quân THAM KHẢO từ báo cáo tồn kho cũ, có thể không
-            # khớp đúng phương pháp tính giá vốn thật MISA đang dùng).
+            # Đơn giá vốn/Tiền vốn (UnitPriceFinance/AmountFinance) LẤY ĐÚNG
+            # Đơn giá tồn kho MISA (Sheet TON, field "gia") — xem docstring
+            # hàm này (theo yêu cầu người dùng mới nhất, đảo ngược quyết định
+            # để trống trước đó). Mã chưa có "gia" tham chiếu (chưa có dữ
+            # liệu tồn kho) thì để 0 như cũ — an toàn hơn đoán khi thiếu dữ
+            # liệu, không chặn ghi cả chứng từ chỉ vì thiếu giá 1 vài mã.
+            gia_von = ma_gia_ton.get(ma) or 0
+            tien_von = round(sl * gia_von) if gia_von else 0
+            _misa_gan(d, cols_d, gia_von, "UnitPriceFinance")
+            _misa_gan(d, cols_d, gia_von, "MainUnitPriceFinance")
+            _misa_gan(d, cols_d, tien_von, "AmountFinance")
+            total_amount += tien_von
             _misa_gan(d, cols_d, 1, "MainConvertRate")
             _misa_gan(d, cols_d, "*", "ExchangeRateOperator")
             _misa_gan(d, cols_d, idx_line, "SortOrder")
@@ -20741,7 +20757,10 @@ def _misa_ghi_xuat_kho(cid, database, preview=True, ghi_de=False):
         _misa_gan(h, cols_h, False, "IsPostedFinance")
         _misa_gan(h, cols_h, False, "IsPostedManagement")
         _misa_gan(h, cols_h, total_amount, "TotalAmountFinance")
-        _misa_gan(h, cols_h, total_amount, "TotalAmountManagement")
+        # TotalAmountManagement (giá quản trị) để 0 — đúng mẫu chứng từ thật
+        # "XK T12/2024" đã Ghi sổ cũng để 0 phía quản trị dù Finance đã có
+        # giá trị thật (xem docstring hàm này).
+        _misa_gan(h, cols_h, 0, "TotalAmountManagement")
         _misa_gan(h, cols_h, branch_id, "BranchID")
         _misa_gan(h, cols_h, False, "IsPostedInventoryBookFinance")
         _misa_gan(h, cols_h, False, "IsPostedInventoryBookManagement")

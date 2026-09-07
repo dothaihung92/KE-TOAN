@@ -4626,6 +4626,7 @@ function xkVeTrangChinh(){
         <button class="btn ghost sm" onclick="document.getElementById('xkFileGiaThanh').click()">📥 Import giá thành</button>
         <input type="file" id="xkFileGiaThanh" accept=".xlsx" multiple style="display:none" onchange="xkImportGiaThanh(this)">
         <button class="btn sm" style="background:#2e5c8a" onclick="xkXuatFile()">📤 Xuất file Xuất Kho</button>
+        <button class="btn sm" style="background:#a03a3a" onclick="xkGhiThangMisa()" title="Ghi thẳng vào MISA (INOutward — màn 'Kho &gt; Nhập, xuất kho &gt; Xuất kho'), Đơn giá/Thành tiền tính ĐÚNG từ Đơn giá tồn kho MISA — CHƯA GHI SỔ, tự bấm 'Ghi sổ' trong MISA sau khi kiểm tra">⬆ Xuất kho vào MISA</button>
         <button class="btn ghost sm" onclick="xkSapXepNgay()">⬆ Sắp xếp theo Ngày</button>
         <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="xkXoaDuLieu()">🗑 Xoá dữ liệu</button>
         <button class="btn ghost sm" style="color:#8a5d00;border-color:#e8b923" onclick="xkGoMa()" title="Dùng khi thấy Tồn kho (cột A) bị âm — gỡ mã + SL/Đơn giá kho (trừ dòng giá vốn thật từ tờ khai) rồi bấm Dò mã hàng tự động lại để tính sạch từ đầu">↺ Gỡ mã hàng</button>
@@ -8742,6 +8743,56 @@ async function banHangImportMisaGhi(ghiDe){
     const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
     document.getElementById('misaModal').style.display='none';
     toast(`✓ Đã ghi ${d.so_chungtu} chứng từ Bán hàng vào MISA${goTxt}${dvtTxt} — ĐÃ GHI SỔ.`,'ok');
+  }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+}
+// Ghi chứng từ XUẤT KHO (GIATHANH đã gắn mã) THẲNG vào MISA (bảng RIÊNG
+// INOutward/INOutwardDetail — màn MISA "Kho > Nhập, xuất kho > Xuất kho"),
+// CÙNG NGUỒN dữ liệu với "📤 Xuất file Xuất Kho" (_gen_xuat_kho_rows) — chỉ
+// khác là ghi thẳng qua SQL thay vì xuất Excel rồi tự Import tay trong MISA.
+// Đơn giá/Thành tiền TỰ TÍNH từ Đơn giá tồn kho MISA (theo yêu cầu người
+// dùng "hãy lấy đúng theo đơn giá trong tồn kho của misa để tính ra thành
+// tiền") — xem _misa_ghi_xuat_kho (server.py).
+async function xkGhiThangMisa(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  toast('Đang kiểm tra (xem trước)...','');
+  try{
+    const pv=await api(`/api/misa-sql/import-xuat-kho/${current}?preview=1`,{method:'POST'});
+    if(pv.da_ton_tai){
+      document.getElementById('misaModalBody').innerHTML=`
+        <div style="background:#fff4e6;border:1px solid #f0c088;border-radius:8px;padding:10px 12px;font-size:13px;color:#8a5300">
+          ${misaEsc(pv.thong_bao||'Chứng từ đã tồn tại.')}
+        </div>
+        <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+          <button class="btn sm" style="background:#8a5300" onclick="xkGhiThangMisaGhi(true)">♻ Ghi đè "${misaEsc(pv.so_ct||'')}"</button>
+        </div>`;
+      misaModalNormal();document.getElementById('misaModal').style.display='flex';
+      return;
+    }
+    document.getElementById('misaModalBody').innerHTML=`
+      <div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:10px">
+        ⚠ RỦI RO CAO: đây là chứng từ <b>Xuất kho</b> — trừ tồn kho thật. Ghi vào <b>${misaEsc(pv.database||'?')}</b> ở
+        trạng thái <b>CHƯA GHI SỔ</b> (tự bấm "Ghi sổ" trong MISA sau khi kiểm tra lại) — KHÔNG ghi Sổ Kho
+        (InventoryLedger), MISA sẽ tự tính lại lúc Ghi sổ. Chỉ chạy trên <b>dữ liệu THỬ / đã sao lưu</b>.</div>
+      <div style="margin-bottom:2px">Số chứng từ: <b>${misaEsc(pv.so_ct||'')}</b> — <b style="color:#1a7a7a">${pv.so_dong}</b> dòng, Tổng tiền vốn <b>${Number(pv.tong_tien||0).toLocaleString('vi-VN')}</b>đ, loại chứng từ MISA: <span style="color:#666">${misaEsc(pv.loai_ct_misa||'')}</span></div>
+      <div style="font-size:12px;color:#999;margin-bottom:8px">ℹ️ Đơn giá/Thành tiền tính ĐÚNG từ Đơn giá tồn kho MISA (Sheet TON) — mã nào chưa có giá tồn kho tham chiếu sẽ để 0đ cho dòng đó.</div>
+      ${pv.so_bo_qua_mahang>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin:8px 0">
+        ⚠ Bỏ qua <b>${pv.so_bo_qua_mahang}</b> mã hàng chưa có trong Danh mục Vật tư MISA: ${misaEsc((pv.ma_bo_qua||[]).join(', '))}${pv.so_bo_qua_mahang>(pv.ma_bo_qua||[]).length?' ...':''}</div>`:''}
+      ${pv.so_bo_qua_kho>0?`<div style="background:#fff4e6;border:1px solid #f0c088;border-radius:6px;padding:6px 10px;font-size:12px;color:#8a5300;margin:8px 0">
+        ⚠ Bỏ qua <b>${pv.so_bo_qua_kho}</b> mã hàng chưa xác định được Kho trong MISA: ${misaEsc((pv.kho_bo_qua_ma||[]).join(', '))}${pv.so_bo_qua_kho>(pv.kho_bo_qua_ma||[]).length?' ...':''}</div>`:''}
+      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+        ${pv.so_dong>0?`<button class="btn sm" style="background:#a03a3a" onclick="xkGhiThangMisaGhi(false)">⬆ Ghi vào MISA</button>`:''}
+      </div>`;
+    misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function xkGhiThangMisaGhi(ghiDe){
+  toast('Đang ghi vào MISA...','');
+  try{
+    const d=await api(`/api/misa-sql/import-xuat-kho/${current}?preview=0&ghi_de=${ghiDe?1:0}`,{method:'POST'});
+    document.getElementById('misaModal').style.display='none';
+    toast(`✓ Đã ghi chứng từ "${d.so_ct}" (${d.so_dong} dòng, ${Number(d.tong_tien||0).toLocaleString('vi-VN')}đ) vào MISA — CHƯA GHI SỔ, tự kiểm tra rồi bấm "Ghi sổ" trong MISA.`,'ok');
   }catch(e){toast('Lỗi ghi: '+e.message,'err')}
 }
 // Liệt kê loại chứng từ (SYSRefType) của 1 bảng MISA — CHỈ ĐỌC. Dùng khi

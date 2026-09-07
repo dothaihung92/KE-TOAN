@@ -3,7 +3,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import sys, datetime
 src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 
-# Regression test cho tính năng MỚI "ghi thẳng Xuất kho vào MISA" (bảng RIÊNG
+# Regression test cho tính năng "ghi thẳng Xuất kho vào MISA" (bảng RIÊNG
 # INOutward/INOutwardDetail — MÀN MISA "Kho > Nhập, xuất kho > Xuất kho"),
 # theo đúng yêu cầu người dùng: "hãy thêm nút import thẳng xuất kho vào misa.
 # import giống như hình" kèm ảnh chụp màn hình MISA (Ngày hạch toán/chứng
@@ -14,6 +14,15 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 # bảng") — xác nhận khớp 1:1 với chính chứng từ thật "XK T12/2024" (RefType=
 # 2020, TotalAmountFinance=568750526.0000, DebitAccount=632/CreditAccount=
 # 1561 trên INOutwardDetail) đang có trong CSDL đó.
+#
+# ROUND 2 (theo yêu cầu người dùng mới nhất, ĐẢO NGƯỢC quyết định trước đó để
+# trống Đơn giá/Thành tiền: "hãy làm nút import file xuất kho vào misa luôn
+# lưu ý hãy lấy đúng theo đơn giá trong tồn kho của misa để tính ra thành
+# tiền"): UnitPriceFinance/AmountFinance/MainUnitPriceFinance nay TỰ TÍNH từ
+# Đơn giá tồn kho MISA (Sheet TON, field "gia" — KHÔNG dùng gia_xk trên dòng
+# GIATHANH) x Số lượng xuất — vì "Tính giá xuất kho" của MISA không tính ra
+# gì cho chứng từ phần mềm tạo (không ghi InventoryLedger — quá rủi ro để
+# đoán cấu trúc bảng đó), dùng ĐÚNG giá tồn kho đã có sẵn an toàn hơn.
 
 def extract_fn(name):
     idx = src.index('def ' + name + '(')
@@ -147,8 +156,8 @@ GIATHANH_CO_BAN = [
      "gia_xk": 50000, "ngay": "31/12/2024"},
 ]
 TON_CO_BAN = [
-    {"ma": "MH01", "ton": 100, "kho": "Kho Hàng Hóa"},
-    {"ma": "MH02", "ton": 100, "kho": "Kho Hàng Hóa"},
+    {"ma": "MH01", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 120000},
+    {"ma": "MH02", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 45000},
 ]
 
 
@@ -166,12 +175,14 @@ cur1 = FakeCursor()
 r1 = _chay(cur1, GIATHANH_CO_BAN, TON_CO_BAN)
 assert r1["so_ct"] == "XK T12/2024", f"Số chứng từ phải 'XK T12/2024' (cuối tháng của ngày mới nhất 31/12/2024) — got {r1['so_ct']}"
 assert r1["so_dong"] == 2 and r1["so_bo_qua_mahang"] == 0 and r1["so_bo_qua_kho"] == 0
-# Đơn giá vốn/Tiền vốn CỐ Ý luôn = 0 (KHÔNG tự tính từ gia_xk, dù
-# GIATHANH_CO_BAN CÓ sẵn gia_xk=100000/50000) — đúng yêu cầu người dùng
-# "không cần phải hiện đơn giá thành tiền để tôi nhấn vào tính giá xuất
-# kho để misa tự tính", khớp đúng file Excel "Xuất file Xuất Kho" cũ (2
-# cột đó luôn để TRỐNG, để MISA tự tính khi bấm "Tính giá xuất kho").
-assert r1["tong_tien"] == 0, f"tong_tien phải luôn = 0 (không tự tính giá vốn) — got {r1['tong_tien']}"
+# Đơn giá vốn/Tiền vốn nay TỰ TÍNH từ Đơn giá TỒN KHO MISA (Sheet TON,
+# field "gia" = 120000/45000) x Số lượng xuất (10/5) — KHÔNG dùng gia_xk
+# (100000/50000) có sẵn trên dòng GIATHANH, để chứng minh đúng nguồn dữ
+# liệu dùng là tồn kho MISA, không phải giá tham khảo trên dòng bán —
+# theo yêu cầu người dùng "lấy đúng theo đơn giá trong tồn kho của misa
+# để tính ra thành tiền". MH01: 10*120000=1200000; MH02: 5*45000=225000;
+# tổng 1425000.
+assert r1["tong_tien"] == 1425000, f"tong_tien phải = 1200000+225000=1425000 (tính từ Đơn giá tồn kho) — got {r1['tong_tien']}"
 h = cur1.inserted["INOutward"][0]
 assert h["RefNoFinance"] == "XK T12/2024" and h["RefType"] == 2020
 assert h["IsPostedFinance"] is False and h["IsPostedManagement"] is False, (
@@ -179,7 +190,10 @@ assert h["IsPostedFinance"] is False and h["IsPostedManagement"] is False, (
 assert h["IsPostedInventoryBookFinance"] is False, (
     "KHÔNG được tự nhận đã ghi Sổ Kho — đúng chứng từ THẬT 'XK T12/2024' cũng "
     "IsPostedInventoryBookFinance=False dù IsPostedFinance=True")
-assert h["TotalAmountFinance"] == 0, f"TotalAmountFinance phải = 0 (tổng các dòng đều 0) — got {h['TotalAmountFinance']}"
+assert h["TotalAmountFinance"] == 1425000, f"TotalAmountFinance phải = tổng Thành tiền vốn các dòng — got {h['TotalAmountFinance']}"
+assert h["TotalAmountManagement"] == 0, (
+    f"TotalAmountManagement (giá quản trị) PHẢI = 0 — đúng mẫu chứng từ thật 'XK T12/2024' cũng để 0 phía "
+    f"quản trị dù Finance đã có giá trị thật — got {h['TotalAmountManagement']}")
 assert h["CustomField10"] == "HDDT-AUTO"
 assert h["RefDate"].hour == 23 and h["PostedDate"].hour == 23, (
     "RefDate/PostedDate PHẢI giờ CỐ ĐỊNH CUỐI NGÀY (23:00, sau giờ 10:00 của Nhập kho) — đúng lỗi thật "
@@ -189,11 +203,12 @@ assert len(det) == 2
 assert det[0]["InventoryItemID"] == "iid-mh01" and det[0]["StockID"] == "sid-hh"
 assert det[0]["DebitAccount"] == "632" and det[0]["CreditAccount"] == "1561"
 assert det[0]["Quantity"] == 10, f"got {det[0]['Quantity']}"
-assert det[0]["UnitPriceFinance"] == 0 and det[0]["AmountFinance"] == 0, (
-    f"Đơn giá vốn/Tiền vốn PHẢI = 0 dù gia_xk=100000 có sẵn trên dòng GIATHANH — để MISA tự tính khi bấm "
-    f"'Tính giá xuất kho' — got UnitPriceFinance={det[0]['UnitPriceFinance']}, AmountFinance={det[0]['AmountFinance']}")
-assert det[1]["InventoryItemID"] == "iid-mh02" and det[1]["AmountFinance"] == 0
-print("PASS 1: ghi đúng INOutward/INOutwardDetail — Số CT/TK Nợ 632-Có 1561 khớp ảnh chụp MISA thật, CHƯA ghi sổ, Đơn giá/Thành tiền để trống (0) cho MISA tự tính.")
+assert det[0]["UnitPriceFinance"] == 120000 and det[0]["AmountFinance"] == 1200000, (
+    f"Đơn giá vốn PHẢI lấy ĐÚNG từ Đơn giá tồn kho MISA (120000), KHÔNG phải gia_xk=100000 trên dòng "
+    f"GIATHANH — got UnitPriceFinance={det[0]['UnitPriceFinance']}, AmountFinance={det[0]['AmountFinance']}")
+assert det[0]["MainUnitPriceFinance"] == 120000, f"MainUnitPriceFinance phải khớp UnitPriceFinance — got {det[0]['MainUnitPriceFinance']}"
+assert det[1]["InventoryItemID"] == "iid-mh02" and det[1]["UnitPriceFinance"] == 45000 and det[1]["AmountFinance"] == 225000
+print("PASS 1: ghi đúng INOutward/INOutwardDetail — Số CT/TK Nợ 632-Có 1561 khớp ảnh chụp MISA thật, CHƯA ghi sổ, Đơn giá/Thành tiền tính ĐÚNG từ Đơn giá tồn kho MISA.")
 
 # ----- Test 1b (đúng lỗi thật người dùng vừa báo "chưa thấy phiếu xk"): PHẢI
 # ghi kèm 1 dòng INInwardOutwardList — bảng RIÊNG nguồn cho lưới MISA "Kho >
@@ -203,7 +218,7 @@ iol = cur1.inserted["INInwardOutwardList"]
 assert len(iol) == 1, f"PHẢI ghi đúng 1 dòng INInwardOutwardList (thiếu bảng này khiến chứng từ ghi đúng vào INOutward nhưng KHÔNG hiện trên lưới MISA) — got {len(iol)}"
 assert iol[0]["RefID"] == h["RefID"], "INInwardOutwardList.RefID phải TRÙNG với INOutward.RefID vừa ghi"
 assert iol[0]["ListTableName"] == "INOutward" and iol[0]["INType"] == 1
-assert iol[0]["RefNoFinance"] == "XK T12/2024" and iol[0]["TotalAmountFinance"] == 0
+assert iol[0]["RefNoFinance"] == "XK T12/2024" and iol[0]["TotalAmountFinance"] == 1425000
 assert iol[0]["IsPostedFinance"] is False, "phải sao chép ĐÚNG trạng thái CHƯA GHI SỔ từ header INOutward"
 print("PASS 1b: ghi kèm đúng 1 dòng INInwardOutwardList (cùng RefID, ListTableName='INOutward', INType=1) — đúng lỗi thật 'chưa thấy phiếu xk' đã báo.")
 
@@ -277,5 +292,21 @@ assert ("INInwardOutwardList", "refid-cu") in cur6.deleted, (
     "ghi_de PHẢI xoá luôn dòng INInwardOutwardList CŨ (RefID cũ) — nếu không sẽ để lại dòng RÁC trỏ tới "
     "1 RefID đã bị xoá, có thể khiến lưới MISA hiện lỗi/dòng hỏng")
 print("PASS 6: Số chứng từ trùng do CHÍNH phần mềm tạo trước đó — ghi_de=False chỉ báo đã tồn tại (không ghi), ghi_de=True xoá + ghi lại đúng CẢ INInwardOutwardList.")
+
+# ----- Test 7: mã hàng CHƯA có "gia" trong Sheet TON (chưa có dữ liệu tồn
+# kho tham chiếu) -> Đơn giá/Thành tiền dòng đó để 0 (an toàn hơn đoán),
+# KHÔNG chặn ghi cả chứng từ, các mã khác có "gia" vẫn tính đúng bình thường. -----
+cur7 = FakeCursor()
+ton7 = [{"ma": "MH01", "ton": 100, "kho": "Kho Hàng Hóa", "gia": 120000},
+        {"ma": "MH02", "ton": 100, "kho": "Kho Hàng Hóa"}]   # MH02 KHÔNG có "gia"
+r7 = _chay(cur7, GIATHANH_CO_BAN, ton7)
+assert r7["so_dong"] == 2, f"Vẫn phải ghi đủ 2 dòng, không chặn vì thiếu giá 1 mã — got {r7}"
+det7 = sorted(cur7.inserted["INOutwardDetail"], key=lambda d: d["SortOrder"])
+assert det7[0]["UnitPriceFinance"] == 120000 and det7[0]["AmountFinance"] == 1200000, (
+    f"MH01 có 'gia' trong tồn kho vẫn phải tính đúng — got {det7[0]}")
+assert det7[1]["UnitPriceFinance"] == 0 and det7[1]["AmountFinance"] == 0, (
+    f"MH02 THIẾU 'gia' trong tồn kho -> Đơn giá/Thành tiền PHẢI để 0 (an toàn hơn đoán), không lỗi — got {det7[1]}")
+assert r7["tong_tien"] == 1200000, f"tong_tien chỉ cộng dòng có giá (MH01) — got {r7['tong_tien']}"
+print("PASS 7: mã thiếu 'gia' trong Sheet TON để Đơn giá/Thành tiền = 0 an toàn, không chặn ghi cả chứng từ, mã khác vẫn tính đúng.")
 
 print("\nTẤT CẢ TEST PASS")
