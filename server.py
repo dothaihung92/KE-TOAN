@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.217"
+APP_BUILD = "2026-08-31.218"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26845,11 +26845,26 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
     KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng).
 
-    tu_ngay/den_ngay (nếu có — ĐÚNG khung người dùng tự nhập, không cố định
-    kỳ nào) lọc TRƯỚC hết danh sách HÓA ĐƠN được xét ở CẢ 3 TẦNG, theo ngày
-    hóa đơn. Khoản THANH TOÁN không bị giới hạn theo khung này — thanh toán
-    có thể tới sau kỳ báo cáo mà vẫn hợp lệ, do cửa sổ khớp (cua_so_thang)
-    tính từ ngày hóa đơn đã xử lý việc đó.
+    den_ngay (nếu có) lọc TRƯỚC hết danh sách HÓA ĐƠN được xét ở CẢ 3 TẦNG,
+    theo ngày hóa đơn <= den_ngay. Khoản THANH TOÁN không bị giới hạn theo
+    khung này — thanh toán có thể tới sau kỳ báo cáo mà vẫn hợp lệ, do cửa
+    sổ khớp (cua_so_thang) tính từ ngày hóa đơn đã xử lý việc đó.
+
+    CÔNG NỢ TREO TỪ TRƯỚC KỲ (tu_ngay KHÔNG còn dùng để LOẠI hóa đơn nữa —
+    theo báo cáo thật kèm ảnh chụp MISA "Tổng hợp công nợ phải thu": 1
+    khách hàng có Số dư ĐẦU KỲ Nợ 13.595.900đ, KHÔNG phát sinh gì suốt cả
+    năm, vẫn còn nguyên Số dư CUỐI KỲ y hệt — nghĩa là hóa đơn gốc phát
+    sinh khoản nợ này nằm TRƯỚC "Từ ngày" đang chọn, nhưng vẫn còn TREO
+    (chưa thu) tính đến "Đến ngày" — người dùng báo "phần mềm không xử lý
+    phần treo này"): TRƯỚC ĐÂY tu_ngay lọc bỏ hẳn các hóa đơn này khỏi CẢ 3
+    TẦNG (hóa đơn phát sinh trước "Từ ngày" không được xét ở tầng nào), nên
+    khoản treo này hoàn toàn VÔ HÌNH trong báo cáo đối chiếu — không hiện
+    ở Tầng 1/2 (đã khớp) LẪN Tầng 3 (treo, cần xử lý). Nay CHỈ lọc theo
+    "Đến ngày" (hóa đơn tính đến ngày đó) — hóa đơn cũ đã khớp thanh toán
+    từ lâu vẫn hiện đúng ở Tầng 1/2 (không hại gì thêm); hóa đơn cũ CÒN
+    TREO (như ca thật trên) nay ĐÚNG sẽ lọt vào Tầng 3 nếu đủ điều kiện
+    quá hạn + giá trị nhỏ, đúng bản chất "công nợ treo từ kỳ trước mang
+    sang" cần được xử lý.
 
     Tầng 3 LUÔN áp dụng ĐỦ 2 điều kiện CÙNG LÚC (AND, không phải 1-trong-2):
     (1) quá hạn hơn thang_qua_han tháng — CẢ KHI đã nhập khung tu_ngay/
@@ -26914,20 +26929,18 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     finally:
         conn.close()
 
-    # Lọc HÓA ĐƠN theo ĐÚNG khung Từ ngày/Đến ngày người dùng nhập — áp dụng
-    # cho CẢ 3 TẦNG (không chỉ tầng 3), đúng khung bất kỳ người dùng gõ vào,
-    # không cố định 1 kỳ nào. Khoản THANH TOÁN không bị giới hạn theo khung
+    # Lọc HÓA ĐƠN CHỈ theo Đến ngày (mốc trên) — KHÔNG còn loại bỏ hóa đơn
+    # trước Từ ngày (tu_ngay) nữa, xem giải thích ở "CÔNG NỢ TREO TỪ TRƯỚC KỲ"
+    # trong docstring hàm này. Khoản THANH TOÁN không bị giới hạn theo khung
     # này — thanh toán có thể tới sau kỳ báo cáo mà vẫn hợp lệ (cửa sổ khớp
     # cua_so_thang bên dưới đã xử lý việc đó, tính từ ngày hóa đơn).
     tu_dt = _misa_doc_ngay(tu_ngay) if tu_ngay else None
     den_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
     if den_dt:
         den_dt = den_dt.replace(hour=23, minute=59, second=59)
-    if tu_dt or den_dt:
+    if den_dt:
         for d in doi_tuong_hd.values():
-            d["hoa_don"] = [hd for hd in d["hoa_don"] if hd["inv_date"]
-                            and (not tu_dt or hd["inv_date"] >= tu_dt)
-                            and (not den_dt or hd["inv_date"] <= den_dt)]
+            d["hoa_don"] = [hd for hd in d["hoa_don"] if hd["inv_date"] and hd["inv_date"] <= den_dt]
 
     tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
@@ -27201,10 +27214,14 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
             break
 
     d = doi_tuong_hd.get(str(account_object_id), {"ma": ma, "ten": ten, "hoa_don": []})
-    if tu_dt or den_dt:
-        d["hoa_don"] = [hd for hd in d["hoa_don"] if hd["inv_date"]
-                        and (not tu_dt or hd["inv_date"] >= tu_dt)
-                        and (not den_dt or hd["inv_date"] <= den_dt)]
+    # CHỈ lọc theo Đến ngày — KHÔNG loại hóa đơn trước Từ ngày (tu_ngay) nữa
+    # (xem giải thích "CÔNG NỢ TREO TỪ TRƯỚC KỲ" ở docstring _misa_doi_chieu_
+    # 3_tang, cùng lý do/cùng ca thật): cần biết ĐÚNG trạng thái khớp/treo
+    # của các hóa đơn CŨ góp vào "Số dư đầu kỳ" bên dưới, để tô đỏ đúng dòng
+    # đó khi phần đầu kỳ THỰC SỰ còn treo (chưa khớp thanh toán nào) chứ
+    # không phải lúc nào cũng để treo=False như trước.
+    if den_dt:
+        d["hoa_don"] = [hd for hd in d["hoa_don"] if hd["inv_date"] and hd["inv_date"] <= den_dt]
     tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2({str(account_object_id): d}, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
                                             dung_sai=dung_sai, truoc_ngay=truoc_ngay)
@@ -27232,9 +27249,21 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     du_dau = (du_dau_no - du_dau_co) if loai == "kh" else (du_dau_co - du_dau_no)
     so_du = du_dau
 
+    # Dòng "Số dư đầu kỳ" gộp TỪ hóa đơn CŨ (trước Từ ngày) — tô đỏ (treo)
+    # nếu CÓ ÍT NHẤT 1 hóa đơn góp vào số dư này thật sự vẫn đang treo (rơi
+    # vào tang3_ref_ids ở trên, tính TRÊN d["hoa_don"] đã KHÔNG còn bị tu_dt
+    # loại bỏ) — đúng ca thật đã báo: khách hàng có Số dư đầu kỳ Nợ
+    # 13.595.900đ, không phát sinh gì suốt kỳ, TRƯỚC ĐÂY dòng này luôn
+    # treo=False (không hề được xét vì hóa đơn gốc bị tu_dt loại khỏi
+    # d["hoa_don"] trước khi tính tang3_ref_ids) dù thực chất vẫn còn treo
+    # nguyên — người dùng báo "phần mềm không xử lý phần treo này".
+    treo_dau_ky = bool(tu_dt) and any(
+        hd["inv_date"] and hd["inv_date"] < tu_dt and hd["ref_id"] in tang3_ref_ids
+        for hd in d["hoa_don"])
+
     dong = [{"ngay_hach_toan": "", "ngay_chung_tu": "", "so_chung_tu": "", "so_hoa_don": "",
             "dien_giai": "Số dư đầu kỳ", "tk_doi_ung": "", "ps_no": 0, "ps_co": 0,
-            "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": False}]
+            "du_no": round(max(so_du, 0)), "du_co": round(max(-so_du, 0)), "treo": treo_dau_ky}]
 
     # Dòng thuộc 1 HÓA ĐƠN (có Số hóa đơn) gộp còn tối đa 2 dòng hiển thị —
     # "Giá trị hàng hóa/dịch vụ" (mọi dòng không phải thuế cộng lại) và
