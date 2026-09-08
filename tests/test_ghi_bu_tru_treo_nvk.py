@@ -207,7 +207,7 @@ class FakeConn:
 
 ns = {'datetime': datetime, 'HTTPException': FakeHTTPException}
 for fn in ("_misa_cot_bang_that", "_misa_gia_tri_mac_dinh", "_misa_chon_cot", "_misa_gan",
-           "_misa_mau_dong_that", "_misa_branch_id", "_misa_pu_reftype", "_snum",
+           "_misa_mau_dong_that", "_misa_branch_id", "_misa_pu_reftype", "_snum", "_misa_doc_ngay",
            "_misa_ghi_bu_tru_treo"):
     exec(extract_fn(fn), ns)
 ns['_to_num'] = lambda v: float(v) if v not in (None, '') else 0
@@ -437,5 +437,41 @@ print("PASS: Test 7 — ĐÚNG cấu trúc CSDL thật vừa xác nhận (Accoun
       "ảnh chụp MISA thật.")
 
 
+
+# ── Test 8 (theo yêu cầu người dùng: "nếu tôi để từ ngày đến ngày ở khác
+# năm hoá đơn ví dụ hoá đơn đó treo ở 2024 mà qua 2025 mới xử lý thì ngày
+# bút toán điều chỉnh sẽ ở 2025 chứ không phải ở 2024") — hóa đơn treo từ
+# 2024 nhưng có den_ngay="2025-06-15" (Đến ngày của khung Đối chiếu công
+# nợ 3 tầng đang xử lý) -> RefDate/PostedDate + số chứng từ PHẢI nằm ở
+# 2025, KHÔNG PHẢI ở 2024 (ngày hóa đơn gốc). ──
+cur8 = FakeCursor()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur8)
+danh_sach_treo_cu = [
+    {"account_object_id": AOID_KH, "mst": "0402196345", "ten": "CÔNG TY TNHH TRAVEL BUDDY",
+     "inv_no": "9", "inv_date": "2024-08-20", "so_tien": 1200000},
+]
+r8 = _misa_ghi_bu_tru_treo(1, "TESTDB", "kh", danh_sach_treo_cu, preview=False, den_ngay="2025-06-15")
+assert r8["danh_sach"][0]["so_ct"].endswith("/T6/2025"), (
+    f"Số chứng từ phải đánh theo tháng/năm ĐANG xử lý (T6/2025, từ den_ngay), không phải T8/2024 (ngày "
+    f"hóa đơn gốc) — got {r8['danh_sach'][0]['so_ct']}")
+glv8 = [row for tbl, row in cur8.written if tbl == "GLVoucher"][0]
+assert glv8["RefDate"] == datetime.datetime(2025, 6, 15) and glv8["PostedDate"] == datetime.datetime(2025, 6, 15), (
+    f"RefDate/PostedDate PHẢI = 15/06/2025 (den_ngay, đúng kỳ ĐANG xử lý), KHÔNG được lấy ngày hóa đơn "
+    f"gốc 20/08/2024 — đúng yêu cầu người dùng 'hoá đơn đó treo ở 2024 mà qua 2025 mới xử lý thì ngày "
+    f"bút toán điều chỉnh sẽ ở 2025' — got RefDate={glv8['RefDate']}, PostedDate={glv8['PostedDate']}")
+print("PASS: Test 8 — có 'den_ngay' (Đến ngày của khung đang xử lý) -> ngày bút toán + số chứng từ lấy "
+      "đúng theo kỳ ĐANG xử lý (2025), không còn bị ghi lùi vào đúng năm hóa đơn gốc (2024) khi xử lý "
+      "công nợ treo khác kỳ với hóa đơn.")
+
+# ── Test 9: KHÔNG có den_ngay -> vẫn giữ hành vi CŨ (lấy đúng ngày hóa đơn
+# gốc), không bị ảnh hưởng bởi thay đổi này. ──
+cur9 = FakeCursor()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur9)
+r9 = _misa_ghi_bu_tru_treo(1, "TESTDB", "kh", danh_sach_treo_cu, preview=False)
+glv9 = [row for tbl, row in cur9.written if tbl == "GLVoucher"][0]
+assert glv9["RefDate"] == datetime.datetime(2024, 8, 20), (
+    f"KHÔNG có den_ngay -> phải giữ hành vi CŨ, lấy đúng ngày hóa đơn gốc (20/08/2024) — got "
+    f"{glv9['RefDate']}")
+print("PASS: Test 9 — không nhập 'den_ngay' vẫn giữ nguyên hành vi cũ (lấy đúng ngày hóa đơn gốc).")
 
 print("\nALL DONE")

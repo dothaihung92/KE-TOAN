@@ -64,6 +64,7 @@ ns['_GLVOUCHER_HEADERS'] = [
     "Ngày hóa đơn", "Ký hiệu HĐ", "Số hóa đơn", "Nhóm HHDV mua vào", "Mã đối tượng thuế",
     "Tên đối tượng thuế", "Mã số thuế đối tượng thuế",
 ]
+exec(extract_fn('_misa_doc_ngay'), ns)
 exec(extract_fn('_xuat_excel_dieu_chinh_cong_no'), ns)
 _xuat_excel_dieu_chinh_cong_no = ns['_xuat_excel_dieu_chinh_cong_no']
 
@@ -101,5 +102,44 @@ assert so_ct_kh.startswith("DCTH"), f"Công nợ đầu RA (kh) phải dùng ti�
 assert so_ct_1.startswith("DCTR") and so_ct_kh.startswith("DCTH") and so_ct_1[:4] != so_ct_kh[:4]
 print(f"PASS: đầu vào (ncc) dùng tiền tố 'DCTR' ({so_ct_1}), đầu ra (kh) dùng tiền tố 'DCTH' ({so_ct_kh}) "
       "— 2 chiều KHÔNG BAO GIỜ trùng số chứng từ với nhau.")
+
+# ── Test den_ngay (theo yêu cầu người dùng: "nếu tôi để từ ngày đến ngày ở
+# khác năm hoá đơn ví dụ hoá đơn đó treo ở 2024 mà qua 2025 mới xử lý thì
+# ngày bút toán điều chỉnh sẽ ở 2025 chứ không phải ở 2024") — hóa đơn ngày
+# 2024 nhưng đang xử lý ở khung 'Đến ngày' 2025 -> Ngày chứng từ/hạch toán
+# PHẢI nằm ở 2025 (dùng den_ngay), KHÔNG PHẢI ở 2024 (ngày hóa đơn gốc). ──
+cur3 = FakeCursor()
+cur3._result = []
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur3)
+danh_sach_treo_cu = [
+    {"mst": "222", "ten": "KH TREO CŨ", "inv_no": "5", "inv_date": "2024-08-20", "so_tien": 1200000},
+]
+path3, _ = _xuat_excel_dieu_chinh_cong_no(1, "kh", danh_sach_treo_cu, database="TESTDB", den_ngay="2025-06-15")
+wb3 = openpyxl.load_workbook(path3)
+ws3 = wb3.active
+ngay_ct = ws3.cell(2, 2).value
+ngay_ht = ws3.cell(2, 3).value
+so_ct3 = ws3.cell(2, 4).value
+assert ngay_ct == "15/06/2025" and ngay_ht == "15/06/2025", (
+    f"Hóa đơn ngày 20/08/2024 nhưng xử lý ở khung 'Đến ngày' 15/06/2025 -> Ngày chứng từ/hạch toán PHẢI "
+    f"= 15/06/2025 (đúng kỳ ĐANG xử lý), KHÔNG được lấy ngày hóa đơn gốc 20/08/2024 — got "
+    f"ngay_ct={ngay_ct!r}, ngay_ht={ngay_ht!r}")
+assert so_ct3.endswith("/T6/2025"), f"Số chứng từ phải đánh theo tháng/năm ĐANG xử lý (T6/2025), không phải T8/2024 — got {so_ct3}"
+print("PASS: có 'den_ngay' (Đến ngày của khung đang xử lý) -> Ngày chứng từ/hạch toán và số chứng từ "
+      "lấy đúng theo kỳ ĐANG xử lý (2025), không còn bị ghi lùi vào đúng năm hóa đơn gốc (2024) khi xử "
+      "lý công nợ treo khác kỳ với hóa đơn.")
+
+# ── Test: KHÔNG có den_ngay -> vẫn giữ hành vi CŨ (lấy đúng ngày hóa đơn
+# gốc), không bị ảnh hưởng bởi thay đổi này. ──
+cur4 = FakeCursor()
+cur4._result = []
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur4)
+path4, _ = _xuat_excel_dieu_chinh_cong_no(1, "kh", danh_sach_treo_cu, database="TESTDB")
+wb4 = openpyxl.load_workbook(path4)
+ws4 = wb4.active
+assert ws4.cell(2, 2).value == "20/08/2024", (
+    f"KHÔNG có den_ngay -> phải giữ hành vi CŨ, lấy đúng ngày hóa đơn gốc (20/08/2024) — got "
+    f"{ws4.cell(2, 2).value!r}")
+print("PASS: không nhập 'den_ngay' vẫn giữ nguyên hành vi cũ (lấy đúng ngày hóa đơn gốc).")
 
 print("\nALL DONE")

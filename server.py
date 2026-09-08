@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.218"
+APP_BUILD = "2026-08-31.219"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27351,7 +27351,7 @@ def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str
                                   nguong=nguong, thang_qua_han=thang_qua_han)
 
 
-def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
+def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay=None):
     """Ghi TRỰC TIẾP qua SQL 1 bút toán 'Điều chỉnh công nợ treo' — chứng
     từ NGHIỆP VỤ KHÁC của MISA (bảng GLVoucher/GLVoucherDetail) — cho mỗi
     hóa đơn treo NGƯỜI DÙNG ĐÃ XÁC NHẬN ở bước đối chiếu 3 tầng
@@ -27411,7 +27411,20 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
     ty (vd 'DCTM...' — Chiết khấu thương mại, không liên quan) — xác nhận
     qua ảnh chụp thật người dùng báo (cột "Nghiệp vụ" trên MISA hiện
     "Chiết khấu thương mại (bán hàng)" cho chứng từ điều chỉnh công nợ
-    treo). Đã thu hẹp đúng về 2 tiền tố CỦA CHÍNH mình (DCTR%/DCTH%)."""
+    treo). Đã thu hẹp đúng về 2 tiền tố CỦA CHÍNH mình (DCTR%/DCTH%).
+
+    den_ngay (nếu có — 'Đến ngày' của khung Đối chiếu công nợ 3 tầng đang
+    chạy, yyyy-mm-dd/dd/mm/yyyy): NGÀY BÚT TOÁN ĐIỀU CHỈNH (RefDate/
+    PostedDate + số chứng từ DCTR/DCTH đánh theo tháng/năm) — theo yêu cầu
+    người dùng "nếu tôi để từ ngày đến ngày ở khác năm hoá đơn ví dụ hoá
+    đơn đó treo ở 2024 mà qua 2025 mới xử lý thì ngày bút toán điều chỉnh
+    sẽ ở 2025 chứ không phải ở 2024": TRƯỚC ĐÂY luôn lấy ĐÚNG ngày hóa đơn
+    gốc (it["inv_date"]) làm ngày bút toán — hợp lý khi xử lý CÙNG kỳ phát
+    sinh, nhưng SAI khi hóa đơn treo từ 1 năm/kỳ CŨ được xử lý ở 1 kỳ SAU
+    (bút toán bị ghi lùi vào đúng năm hóa đơn cũ thay vì năm đang thực sự
+    xử lý). Nay ưu tiên "Đến ngày" (mốc thời điểm đang xử lý/báo cáo) làm
+    ngày bút toán khi có nhập; KHÔNG có den_ngay thì vẫn dùng ngày hóa đơn
+    gốc như cũ (giữ nguyên hành vi mặc định)."""
     import re
     import uuid as _uuid
     if loai not in ("kh", "ncc"):
@@ -27592,6 +27605,11 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
             pass
 
         now = datetime.datetime.now()
+        # "Đến ngày" của khung đang xử lý (nếu có) — ưu tiên làm NGÀY BÚT
+        # TOÁN thay vì luôn lấy đúng ngày hóa đơn gốc, xem giải thích
+        # den_ngay ở docstring hàm này (đúng ca thật: hóa đơn treo từ 2024
+        # xử lý ở kỳ 2025 thì bút toán phải nằm ở 2025, không phải 2024).
+        den_ngay_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
         so_ghi = 0
         ket_qua = []
         for it in danh_sach:
@@ -27599,10 +27617,13 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
             so_tien = _to_num(it.get("so_tien")) or 0
             if not aoid or so_tien <= 0:
                 continue
-            try:
-                ngay_dt = datetime.datetime.fromisoformat(str(it.get("inv_date"))[:19])
-            except Exception:
-                ngay_dt = now
+            if den_ngay_dt:
+                ngay_dt = den_ngay_dt
+            else:
+                try:
+                    ngay_dt = datetime.datetime.fromisoformat(str(it.get("inv_date"))[:19])
+                except Exception:
+                    ngay_dt = now
             mk = (ngay_dt.month, ngay_dt.year)
             seq[mk] = seq.get(mk, 0) + 1
             so_ct = ("%s%03d/T%s/%s" % (prefix, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
@@ -27768,16 +27789,19 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True):
 
 @app.post("/api/misa-sql/ghi-bu-tru-treo/{cid}")
 async def misa_sql_ghi_bu_tru_treo(cid: int, request: Request, loai: str = "kh", preview: int = 1,
-                                   database: str = ""):
+                                   database: str = "", den_ngay: str = ""):
     """body: {danh_sach: [...]} — lấy từ /api/misa-sql/de-xuat-bu-tru (có thể
-    người dùng bỏ bớt dòng không muốn ghi)."""
+    người dùng bỏ bớt dòng không muốn ghi). den_ngay (query, tùy chọn): 'Đến
+    ngày' của khung Đối chiếu công nợ 3 tầng — dùng làm ngày bút toán thay
+    vì ngày hóa đơn gốc khi xử lý khác kỳ với hóa đơn, xem _misa_ghi_bu_tru_treo."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
     body = await request.json()
     danh_sach = body.get("danh_sach") or []
-    return _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=bool(preview))
+    return _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=bool(preview),
+                                 den_ngay=den_ngay or None)
 
 
 def _misa_don_phieu_bu_tru_loi(cid, database, loai):
@@ -27838,15 +27862,24 @@ _GLVOUCHER_HEADERS = [
 ]
 
 
-def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None):
+def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None, den_ngay=None):
     """Xuất file Excel đúng mẫu 'Chứng từ nghiệp vụ khác' của MISA — mỗi
     dòng trong danh_sach (lấy từ tang3 của /api/misa-sql/doi-chieu-3-tang,
     người dùng có thể bỏ bớt) thành 1 bút toán điều chỉnh công nợ về 0: loai='ncc' -> Nợ
     331 (giảm phải trả)/Có 1111 (coi như đã chi tiền mặt), đối tượng gán ở
     cột 'Đối tượng Nợ'; loai='kh' -> Nợ 1111/Có 131 (coi như đã thu tiền
     mặt), đối tượng gán ở cột 'Đối tượng Có' — đúng TK có gắn đối tượng
-    trong từng bút toán. Ngày chứng từ/hạch toán lấy theo ĐÚNG ngày hóa đơn
-    gốc (không phải hôm nay) để bút toán nằm đúng kỳ phát sinh công nợ.
+    trong từng bút toán.
+
+    Ngày chứng từ/hạch toán ưu tiên lấy theo den_ngay ('Đến ngày' của khung
+    Đối chiếu công nợ 3 tầng đang xử lý, nếu có) — theo yêu cầu người dùng
+    "nếu tôi để từ ngày đến ngày ở khác năm hoá đơn ví dụ hoá đơn đó treo ở
+    2024 mà qua 2025 mới xử lý thì ngày bút toán điều chỉnh sẽ ở 2025 chứ
+    không phải ở 2024": TRƯỚC ĐÂY LUÔN lấy đúng ngày hóa đơn gốc (không
+    phải hôm nay) để bút toán nằm đúng kỳ phát sinh công nợ — hợp lý khi xử
+    lý CÙNG kỳ, nhưng SAI khi hóa đơn treo từ 1 kỳ CŨ được xử lý ở 1 kỳ SAU
+    (bút toán bị ghi lùi vào đúng năm hóa đơn cũ). Không có den_ngay thì vẫn
+    dùng ngày hóa đơn gốc như cũ (giữ nguyên hành vi mặc định).
 
     Số chứng từ dùng TIỀN TỐ RIÊNG theo loai — 'DCTR' (Điều Chỉnh phải TRả —
     công nợ đầu VÀO/NCC) và 'DCTH' (Điều Chỉnh phải THu — công nợ đầu RA/KH)
@@ -27889,6 +27922,7 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None):
         ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
         ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
     tk_no, tk_co = ("331", "1111") if loai == "ncc" else ("1111", "131")
+    den_ngay_dt = _misa_doc_ngay(den_ngay) if den_ngay else None
     r = 2
     for it in danh_sach:
         so_tien = _to_num(it.get("so_tien")) or 0
@@ -27897,10 +27931,13 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None):
         ma = str(it.get("mst") or it.get("ma") or "").strip()
         ten = str(it.get("ten") or "").strip()
         inv_no = str(it.get("inv_no") or "").strip()
-        try:
-            ngay_dt = datetime.datetime.strptime(str(it.get("inv_date") or "")[:10], "%Y-%m-%d")
-        except Exception:
-            ngay_dt = datetime.datetime.now()
+        if den_ngay_dt:
+            ngay_dt = den_ngay_dt
+        else:
+            try:
+                ngay_dt = datetime.datetime.strptime(str(it.get("inv_date") or "")[:10], "%Y-%m-%d")
+            except Exception:
+                ngay_dt = datetime.datetime.now()
         mk = (ngay_dt.month, ngay_dt.year)
         seq[mk] = seq.get(mk, 0) + 1
         so_ct = ("%s%03d/T%s/%s" % (prefix, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
@@ -27944,7 +27981,7 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None):
 
 
 @app.post("/api/misa-sql/xuat-dieu-chinh-cong-no/{cid}")
-async def misa_xuat_dieu_chinh_cong_no(cid: int, request: Request, loai: str = "ncc"):
+async def misa_xuat_dieu_chinh_cong_no(cid: int, request: Request, loai: str = "ncc", den_ngay: str = ""):
     if loai not in ("kh", "ncc"):
         raise HTTPException(400, "loai phải là 'kh' hoặc 'ncc'.")
     body = await request.json()
@@ -27952,7 +27989,8 @@ async def misa_xuat_dieu_chinh_cong_no(cid: int, request: Request, loai: str = "
     if not danh_sach:
         raise HTTPException(400, "Danh sách trống — không có gì để xuất.")
     database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
-    path, so_dong = _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=database or None)
+    path, so_dong = _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=database or None,
+                                                   den_ngay=den_ngay or None)
     fname = os.path.basename(path)
     return _resp_xuat(path, fname, {"X-So-Dong": str(so_dong)})
 

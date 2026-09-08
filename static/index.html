@@ -8491,7 +8491,12 @@ async function misaBuTruXuatExcel(loai){
   if(!ds.length){toast('Chưa chọn dòng nào','err');return}
   toast('Đang xuất Excel...','');
   try{
-    const r=await fetch(`/api/misa-sql/xuat-dieu-chinh-cong-no/${current}?loai=${loai}`,{
+    // "Đến ngày" của khung đang đối chiếu -> dùng làm ngày bút toán điều
+    // chỉnh (thay vì luôn lấy đúng ngày hóa đơn gốc) khi hóa đơn treo
+    // thuộc kỳ/năm KHÁC với lúc đang xử lý — xem giải thích ở
+    // _xuat_excel_dieu_chinh_cong_no (server.py).
+    const denNgayBuTru=document.getElementById('buTruDen')?.value||'';
+    const r=await fetch(`/api/misa-sql/xuat-dieu-chinh-cong-no/${current}?loai=${loai}&den_ngay=${encodeURIComponent(denNgayBuTru)}`,{
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Xuất thất bại')}
     await xuatFile(r,`DieuChinhCongNo_${loai}.xlsx`);
@@ -8561,7 +8566,11 @@ async function misaBuTruGhiChay(loai, ds, preview){
   const box=document.getElementById('misaBuTruXacNhan');
   box.innerHTML=`<span class="spin"></span> Đang ${preview?'kiểm tra':'ghi'}...`;
   try{
-    const d=await api(`/api/misa-sql/ghi-bu-tru-treo/${current}?loai=${loai}&preview=${preview?1:0}`,{
+    // "Đến ngày" của khung đang đối chiếu -> dùng làm ngày bút toán điều
+    // chỉnh khi hóa đơn treo thuộc kỳ/năm KHÁC với lúc đang xử lý — xem
+    // giải thích ở _misa_ghi_bu_tru_treo (server.py).
+    const denNgayBuTru=document.getElementById('buTruDen')?.value||'';
+    const d=await api(`/api/misa-sql/ghi-bu-tru-treo/${current}?loai=${loai}&preview=${preview?1:0}&den_ngay=${encodeURIComponent(denNgayBuTru)}`,{
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({danh_sach:ds})});
     const rows=(d.danh_sach||[]).map(r=>`<tr>
