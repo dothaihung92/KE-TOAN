@@ -1757,7 +1757,12 @@ async function buildThuChiGiaoDich(rows, loai, tokhaiList, bankAcct, accountNo, 
     // KHÔNG coi là lỗi VÀ vẫn tạo chứng từ bình thường (KHÔNG loại khỏi giaoDich) — xác nhận qua
     // chứng từ THẬT trong MISA của khách hàng: MISA CHO PHÉP để trống Đối tượng với loại hạch toán
     // này, server (_misa_ghi_thu_chi) đã tự xử lý AccountObjectID=NULL cho đúng trường hợp này rồi.
-    if (!mst && (hach === "131" || hach === "331")) { boQuaThieuMst.soLuong++; boQuaThieuMst.tongTien += amtGoc; boQuaThieuMst.danhSach.push({ id: r.id, ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
+    // Dòng đã "Tách BHXH" (r.isBhxh) LUÔN phải bỏ qua điều kiện này dù confirmedHach vẫn đang giữ
+    // giá trị mặc định 131/331 (nút "🔀 BHXH ✓" không đổi confirmedHach) — hạch toán THẬT của dòng
+    // này là 3383/3384/3386 (bảo hiểm phải nộp cho cơ quan BHXH), KHÔNG PHẢI 131/331, nên không cần
+    // MST đối tượng — đúng báo cáo thật: phần mềm báo "THIẾU MST (hạch toán 131/331)" cho các dòng
+    // BHXH đã tách dù chúng KHÔNG hề hạch toán 131/331.
+    if (!r.isBhxh && !mst && (hach === "131" || hach === "331")) { boQuaThieuMst.soLuong++; boQuaThieuMst.tongTien += amtGoc; boQuaThieuMst.danhSach.push({ id: r.id, ngay: r.tx.date, dienGiai: r.tx.desc || "", soTien: amtGoc }); return; }
     const vndAmt = r.tx.currency === "USD" ? vndOf.get(r.id) : undefined;
     const bookAmt = vndAmt !== undefined ? vndAmt : ((isUnt ? r.tx.credit : r.tx.debit) || 0);
     const soCtGoc = buildVoucherNo(loai.toUpperCase(), r.tx.date, seq, bankAcct, accountNo);
@@ -5438,7 +5443,11 @@ function ConfirmScreen({
   // nhập thiếu, cần cảnh báo để rà lại thay vì phát hiện lúc xuất UNT/UNC.
   // Bỏ qua GD đã gắn Tờ khai NK: nhà cung cấp nước ngoài không có MST Việt Nam nên thiếu MST ở đây
   // là bình thường, không phải thiếu sót cần cảnh báo.
-  const isMissingMstRow = r => r.confirmed === "yes" && (r.confirmedHach === "131" || r.confirmedHach === "331") && !r.confirmedMST && !r.confirmedToKhaiId;
+  // Bỏ qua dòng đã "Tách BHXH" (r.isBhxh) — hạch toán THẬT của dòng này là 3383/3384/3386 (bảo hiểm
+  // phải nộp), KHÔNG PHẢI 131/331, dù confirmedHach vẫn đang giữ giá trị mặc định 131/331 (nút "🔀
+  // BHXH ✓" không đổi confirmedHach) — xem cùng lý do ở buildThuChiGiaoDich (đúng báo cáo thật:
+  // phần mềm báo "cần MST" cho các dòng BHXH đã tách dù chúng không hạch toán 131/331).
+  const isMissingMstRow = r => r.confirmed === "yes" && !r.isBhxh && (r.confirmedHach === "131" || r.confirmedHach === "331") && !r.confirmedMST && !r.confirmedToKhaiId;
   const missingMstCount = rows.filter(isMissingMstRow).length;
 
   // Phát hiện hạch toán ngược chiều dòng tiền — dấu hiệu chọn nhầm hạch toán:
