@@ -90,7 +90,8 @@ def extract_fn(name):
     return src[idx:i+1] + '\n'.join(body)
 
 
-for n in ('_misa_chon_cot', '_misa_hoc_ma_hach_toan_theo_bankaccount', '_misa_danh_sach_tai_khoan_ngan_hang'):
+for n in ('_misa_chon_cot', '_misa_hoc_ma_hach_toan_theo_bankaccount', '_misa_ma_hach_toan_theo_danh_muc',
+          '_misa_danh_sach_tai_khoan_ngan_hang'):
     exec(extract_fn(n), ns)
 _misa_danh_sach_tai_khoan_ngan_hang = ns['_misa_danh_sach_tai_khoan_ngan_hang']
 

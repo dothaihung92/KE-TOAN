@@ -23,7 +23,7 @@ names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_mi
          '_misa_mau_dong_that', '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_doc_ngay',
          '_snum', '_to_num', '_misa_bank_account_du_phong', '_misa_reason_type_du_phong',
          '_misa_reason_type_hop_le', '_misa_dam_bao_hop_le_ngan_hang_ly_do',
-         '_misa_bank_account_theo_so', '_misa_hoc_ma_hach_toan_theo_bankaccount', '_misa_ghi_thu_chi']
+         '_misa_bank_account_theo_so', '_misa_hoc_ma_hach_toan_theo_bankaccount', '_misa_ma_hach_toan_theo_danh_muc', '_misa_ghi_thu_chi']
 
 class FakeHTTPException(Exception):
     def __init__(self, code, msg):
@@ -295,7 +295,13 @@ _orig_fetchall = FakeCursor.fetchall
 def patched_fetchall(self):
     sql = self._last_sql
     if "FROM BankAccount" in sql:
-        return [("bank-mb", "123334488", "MB Bank"), ("bank-tcb", "122334488", "Techcombank")]
+        return [("bank-mb", "123334488", "MB Bank"), ("bank-tcb", "122334488", "Techcombank"),
+                ("bank-new", "999888777", "VCB Mới")]
+    if "FROM Account WHERE AccountNumber LIKE" in sql:
+        # Hệ thống tài khoản (Danh mục) MISA thật — có sẵn CẢ mã của TK MỚI dù TK đó
+        # CHƯA TỪNG có chứng từ Thu/Chi tiền gửi nào (khác BADeposit/BAWithDraw ở dưới).
+        return [("1121",), ("1121-MB-123334488",), ("1121-TCB-122334488",),
+                ("1121-VCB-999888777",)]
     if "BADeposit h JOIN BADepositDetail d" in sql and "BankAccountID=?" in sql:
         bank_id = self._last_params[0]
         return {"bank-mb": [("1121-MB-123334488", 5)],
@@ -370,6 +376,32 @@ assert "1121-TCB-122334488" not in gl_by_acc_mb, (
 print("PASS: TK MB (123334488) -> GeneralLedger ghi đúng mã riêng 1121-MB-123334488 — 2 TK VND con "
       "KHÔNG còn bị dồn lẫn vào 1 mã như lỗi thật đã báo kèm ảnh 'Bảng cân đối tài khoản' (chỉ hiện "
       "đúng 1 dòng '1121-MB-123334488', hoàn toàn thiếu dòng '1121-TCB-122334488').")
+
+# ── Regression test cho lỗi thật LẦN 2, sau khi đã áp bản vá học-qua-lịch-sử
+# ở trên: "đã xoá hết import lại nhưng vẫn bị" — TK ngân hàng "bank-new"
+# (999888777) đã có sẵn TK con "1121-VCB-999888777" trong Hệ thống tài
+# khoản MISA (Account) NHƯNG CHƯA TỪNG có 1 chứng từ Thu/Chi tiền gửi nào
+# (BADeposit/BAWithDraw rỗng cho bank_id "bank-new" — xem patched_fetchall)
+# -> _misa_hoc_ma_hach_toan_theo_bankaccount không có gì để học, PHẢI rơi về
+# _misa_ma_hach_toan_theo_danh_muc (dò thẳng Danh mục theo số TK) để vẫn ghi
+# đúng mã, KHÔNG được rơi lại về mã "1121" của chứng từ mẫu như lỗi cũ.
+before_gl3 = len(cur.inserted["GeneralLedger"])
+giao_dich_new = [{"so_ct": "UNT-NEW-VCB-001", "ngay": "15/03/2026", "mst": "0317009837",
+                   "ten_doi_tuong": "CONG TY ABC", "dien_giai": "Thu tien TK moi",
+                   "tk_doi_ung": "131", "so_tien": 1000000}]
+r_new = _misa_ghi_thu_chi(1, "TESTDB", "unt", giao_dich_new, preview=False, ghi_de=False,
+                           so_tk_ngan_hang="999888777")
+assert r_new["so_them"] == 1, f"expected 1 created (TK moi, chua co lich su), got {r_new}"
+new_gl_new = cur.inserted["GeneralLedger"][before_gl3:]
+gl_by_acc_new = {dict(zip(gl_cols, p))["AccountNumber"]: dict(zip(gl_cols, p)) for p in new_gl_new}
+assert "1121-VCB-999888777" in gl_by_acc_new, (
+    f"TK ngân hàng MỚI (999888777), CHƯA TỪNG có chứng từ Thu/Chi tiền gửi nào -> vẫn PHẢI dò được mã "
+    f"'1121-VCB-999888777' qua Hệ thống tài khoản (Danh mục) MISA, KHÔNG được rơi lại về mã '1121' của "
+    f"chứng từ mẫu — got {list(gl_by_acc_new)}")
+print("PASS: TK ngân hàng MỚI (999888777, chưa từng có chứng từ Thu/Chi tiền gửi nào) -> vẫn ghi đúng "
+      "mã riêng '1121-VCB-999888777' nhờ dò thẳng Hệ thống tài khoản MISA (_misa_ma_hach_toan_theo_danh_muc), "
+      "đúng lỗi thật đã báo LẦN 2 'đã xoá hết import lại nhưng vẫn bị' — TK mới chưa có lịch sử để học qua "
+      "chứng từ thì phải có phương án dự phòng đọc thẳng Danh mục.")
 
 FakeCursor.fetchall = _orig_fetchall
 

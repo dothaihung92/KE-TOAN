@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.221"
+APP_BUILD = "2026-08-31.222"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24863,6 +24863,13 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         # CHỨNG TỪ MẪU (mau_d/mau_gl, học ngẫu nhiên/bất kỳ từ CSDL) làm mã hạch toán vế ngân hàng,
         # không hề gắn đúng theo BankAccountID thật sự đang ghi.
         ma_hach_toan_nh = _misa_hoc_ma_hach_toan_theo_bankaccount(cur, bank_id_dung) if bank_id_dung else None
+        # TK ngân hàng MỚI (đã có sẵn TK con 112x trong Danh mục nhưng CHƯA TỪNG có chứng từ Thu/
+        # Chi tiền gửi nào để học ở trên) -> dò thẳng Hệ thống tài khoản MISA theo so_tk_ngan_hang
+        # (xem _misa_ma_hach_toan_theo_danh_muc) — đúng lỗi thật đã báo LẦN 2 sau khi đã áp bản vá
+        # học-qua-lịch-sử ở trên: "đã xoá hết import lại nhưng vẫn bị" (TK TCB chưa từng có chứng từ
+        # thật nào để học, nên bản vá trước không đủ).
+        if not ma_hach_toan_nh and so_tk_ngan_hang:
+            ma_hach_toan_nh = _misa_ma_hach_toan_theo_danh_muc(cur, so_tk_ngan_hang)
         # Tìm 1 RefID THẬT (KHÔNG do phần mềm ghi) mà Detail của nó khớp đúng TK 131/331 — lọc
         # TRỰC TIẾP CustomField10 qua JOIN với Master, KHÔNG dùng _misa_mau_dong_that's "TOP 5
         # không ORDER BY" (không đáng tin cậy một khi số dòng phần mềm đã ghi áp đảo số dòng thật
@@ -25559,6 +25566,10 @@ def _misa_danh_sach_tai_khoan_ngan_hang(cid, database):
             # tài khoản đúng 11221".
             if bank_account_id:
                 ma_rieng = _misa_hoc_ma_hach_toan_theo_bankaccount(cur, bank_account_id)
+                # TK ngân hàng MỚI, chưa từng có chứng từ Thu/Chi tiền gửi nào -> dò thẳng Hệ
+                # thống tài khoản MISA theo đúng số TK (xem _misa_ma_hach_toan_theo_danh_muc).
+                if not ma_rieng:
+                    ma_rieng = _misa_ma_hach_toan_theo_danh_muc(cur, item["so_tk"])
                 if ma_rieng:
                     item["ma_hach_toan"] = ma_rieng
             ra.append(item)
@@ -25597,6 +25608,47 @@ def _misa_hoc_ma_hach_toan_theo_bankaccount(cur, bank_account_id):
         return max(dem.items(), key=lambda kv: kv[1])[0]
     except Exception:
         return None
+
+
+def _misa_ma_hach_toan_theo_danh_muc(cur, so_tk):
+    """CHỈ ĐỌC — dò mã hạch toán 112x (TK con VND/ngoại tệ) khớp ĐÚNG với SỐ
+    TÀI KHOẢN NGÂN HÀNG so_tk, đọc THẲNG Hệ thống tài khoản MISA thật (bảng
+    Account) — KHÔNG qua lịch sử chứng từ như _misa_hoc_ma_hach_toan_theo_bankaccount.
+    Dùng làm phương án DỰ PHÒNG cho hàm đó: TK ngân hàng MỚI thêm vào MISA
+    (đã có sẵn TK con 112x tương ứng trong Danh mục, vd "1121-TCB-122334488")
+    nhưng CHƯA TỪNG có 1 chứng từ Thu/Chi tiền gửi nào ghi đúng — hàm kia trả
+    None (không có gì để học), khiến _misa_ghi_thu_chi vẫn rơi về giữ nguyên
+    mã 112x của chứng từ MẪU ngẫu nhiên như lỗi cũ — xác nhận đúng qua báo
+    cáo thật: đã xoá hết import lại nhưng "Bảng cân đối tài khoản" VẪN không
+    có dòng "1121-TCB-122334488" (vì TK này chưa từng có bất kỳ giao dịch
+    nào để _misa_hoc_ma_hach_toan_theo_bankaccount học). Khớp bằng cách so
+    HẬU TỐ sau dấu '-' CUỐI CÙNG của từng AccountNumber "1121%"/"1122%" với
+    so_tk (chuẩn hoá bỏ khoảng trắng/gạch ngang) — đúng quy ước đặt mã của
+    MISA (vd "1121-TCB-122334488" hậu tố "122334488" = đúng số TK ngân
+    hàng). Trả None nếu không khớp DUY NHẤT 1 mã (không có, hoặc mơ hồ nhiều
+    mã cùng khớp — an toàn hơn đoán khi mơ hồ)."""
+    if not so_tk:
+        return None
+    import re as _re_mhdm
+    so_chuan = _re_mhdm.sub(r"[\s\-]", "", str(so_tk)).lower()
+    if not so_chuan:
+        return None
+    try:
+        khop = []
+        for (an,) in cur.execute(
+                "SELECT AccountNumber FROM Account WHERE AccountNumber LIKE '1121%' "
+                "OR AccountNumber LIKE '1122%'").fetchall():
+            an = str(an or "").strip()
+            if not an or "-" not in an:
+                continue
+            hau_to = _re_mhdm.sub(r"[\s\-]", "", an.rsplit("-", 1)[-1]).lower()
+            if hau_to and hau_to == so_chuan:
+                khop.append(an)
+        if len(khop) == 1:
+            return khop[0]
+    except Exception:
+        pass
+    return None
 
 
 @app.post("/api/misa-sql/danh-sach-tk-ngan-hang")
