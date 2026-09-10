@@ -22,7 +22,8 @@ def extract_fn(name):
 names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_misa_gan',
          '_misa_mau_dong_that', '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_doc_ngay',
          '_snum', '_to_num', '_misa_bank_account_du_phong', '_misa_reason_type_du_phong',
-         '_misa_reason_type_hop_le', '_misa_dam_bao_hop_le_ngan_hang_ly_do', '_misa_ghi_thu_chi']
+         '_misa_reason_type_hop_le', '_misa_dam_bao_hop_le_ngan_hang_ly_do',
+         '_misa_bank_account_theo_so', '_misa_hoc_ma_hach_toan_theo_bankaccount', '_misa_ghi_thu_chi']
 
 class FakeHTTPException(Exception):
     def __init__(self, code, msg):
@@ -42,7 +43,7 @@ cols_badeposit = [("RefID","uniqueidentifier"),("BranchID","uniqueidentifier"),(
     ("ModifiedDate","datetime"),("CustomField10","nvarchar")]
 cols_badepositdetail = [("BADepositDetailID","uniqueidentifier"),("RefID","uniqueidentifier"),
     ("AccountObjectID","uniqueidentifier"),("Description","nvarchar"),("CreditAccount","nvarchar"),
-    ("Amount","money"),("AmountOC","money")]
+    ("DebitAccount","nvarchar"),("Amount","money"),("AmountOC","money")]
 cols_generalledger = [("GeneralLedgerID","int"),("RefID","uniqueidentifier"),("RefDetailID","uniqueidentifier"),
     ("RefNo","nvarchar"),("RefNo1","nvarchar"),("RefNo2","nvarchar"),("RefDate","datetime"),("RefDate1","datetime"),
     ("PostedDate","datetime"),("AccountNumber","nvarchar"),("CorrespondingAccountNumber","nvarchar"),
@@ -268,5 +269,108 @@ cfl_d = dict(zip(cfl_cols, cfl_inserts[0]))
 print(f"CustomFieldLedger row: RefID={cfl_d.get('RefID')} IsUpdateRedundant={cfl_d.get('IsUpdateRedundant')}")
 assert cfl_d["IsUpdateRedundant"] is True
 print("PASS: BADepositWithdrawList + CustomFieldLedger correctly written")
+
+# ── Regression test cho lỗi thật người dùng báo kèm 3 ảnh chụp MISA: "Hệ
+# thống tài khoản" có 2 TK con VND riêng biệt "1121-MB-123334488" (số TK
+# "123334488") và "1121-TCB-122334488" (số TK "122334488"), nhưng "Bảng cân
+# đối tài khoản" CHỈ hiện đúng 1 dòng "1121-MB-123334488" dồn hết phát sinh —
+# hoàn toàn KHÔNG có dòng "1121-TCB-122334488" dù đã ghi nhiều giao dịch cho
+# TK đó. Nguyên nhân: vế 112x của Detail/GeneralLedger luôn GIỮ NGUYÊN mã của
+# chứng từ MẪU (ở đây là "1121", mượn ngẫu nhiên), không hề gắn đúng theo
+# BankAccountID/so_tk_ngan_hang thật đang đối chiếu.
+# Giả lập thêm: danh mục BankAccount (khớp so_tk_ngan_hang -> BankAccountID)
+# và lịch sử Thu/Chi tiền gửi THẬT riêng của từng TK (để
+# _misa_hoc_ma_hach_toan_theo_bankaccount học đúng mã riêng từng bên).
+cols_bankaccount = [("BankAccountID", "uniqueidentifier"), ("AccountNumber", "nvarchar"),
+                     ("BankName", "nvarchar")]
+
+def fake_cot_bang_that2(cur, table):
+    m = {"BADeposit": cols_badeposit, "BADepositDetail": cols_badepositdetail,
+         "GeneralLedger": cols_generalledger, "AccountObjectLedger": cols_accountobjectledger,
+         "BADepositWithdrawList": cols_bdwl, "CustomFieldLedger": cols_cfl,
+         "BankAccount": cols_bankaccount}
+    return {c.lower(): (c, t) for c, t in m.get(table, [])}
+
+_orig_fetchall = FakeCursor.fetchall
+def patched_fetchall(self):
+    sql = self._last_sql
+    if "FROM BankAccount" in sql:
+        return [("bank-mb", "123334488", "MB Bank"), ("bank-tcb", "122334488", "Techcombank")]
+    if "BADeposit h JOIN BADepositDetail d" in sql and "BankAccountID=?" in sql:
+        bank_id = self._last_params[0]
+        return {"bank-mb": [("1121-MB-123334488", 5)],
+                "bank-tcb": [("1121-TCB-122334488", 3)]}.get(bank_id, [])
+    if "BAWithDraw h JOIN BAWithDrawDetail d" in sql and "BankAccountID=?" in sql:
+        bank_id = self._last_params[0]
+        return {"bank-mb": [("1121-MB-123334488", 2)],
+                "bank-tcb": [("1121-TCB-122334488", 1)]}.get(bank_id, [])
+    return _orig_fetchall(self)
+
+FakeCursor.fetchall = patched_fetchall
+
+# d_row là dict dựng từ 1 SET cột thật (d_cols_that trong server.py) nên thứ tự key
+# KHÔNG cố định theo cols_badepositdetail — bắt đúng thứ tự cột thật sự dùng để INSERT
+# bằng cách đọc lại từ chính câu SQL "INSERT INTO ... ([c1],[c2],...) VALUES (...)".
+import re as _re_test
+_orig_execute = FakeCursor.execute
+def patched_execute(self, sql, *params):
+    if sql.startswith("INSERT INTO"):
+        table = sql.split(" ")[2]
+        m = _re_test.search(r"\(\[(.*?)\]\)\s*VALUES", sql)
+        if m:
+            if not hasattr(self, "insert_cols"):
+                self.insert_cols = {}
+            self.insert_cols.setdefault(table, []).append(m.group(1).split("],["))
+    return _orig_execute(self, sql, *params)
+FakeCursor.execute = patched_execute
+cur.insert_cols = {}
+
+ns['_misa_cot_bang_that'] = fake_cot_bang_that2
+exec(extract_fn('_misa_ghi_thu_chi'), ns)
+_misa_ghi_thu_chi = ns['_misa_ghi_thu_chi']
+
+before_gl = len(cur.inserted["GeneralLedger"])
+before_d = len(cur.inserted["BADepositDetail"])
+before_d_cols = len(cur.insert_cols.get("BADepositDetail", []))
+giao_dich_tcb = [{"so_ct": "UNT-TCB-001", "ngay": "15/03/2026", "mst": "0317009837",
+                   "ten_doi_tuong": "CONG TY ABC", "dien_giai": "Thu tien TCB",
+                   "tk_doi_ung": "131", "so_tien": 2000000}]
+r_tcb = _misa_ghi_thu_chi(1, "TESTDB", "unt", giao_dich_tcb, preview=False, ghi_de=False,
+                           so_tk_ngan_hang="122334488")
+assert r_tcb["so_them"] == 1, f"expected 1 created (TK TCB), got {r_tcb}"
+new_gl_tcb = cur.inserted["GeneralLedger"][before_gl:]
+gl_by_acc_tcb = {dict(zip(gl_cols, p))["AccountNumber"]: dict(zip(gl_cols, p)) for p in new_gl_tcb}
+assert "1121-TCB-122334488" in gl_by_acc_tcb, (
+    f"TK ngân hàng đang đối chiếu là 122334488 (Techcombank) -> GeneralLedger PHẢI học đúng mã riêng "
+    f"'1121-TCB-122334488', KHÔNG được giữ mã '1121' của chứng từ mẫu — got {list(gl_by_acc_tcb)}")
+assert gl_by_acc_tcb["1121-TCB-122334488"]["DebitAmountOC"] == 2000000
+assert gl_by_acc_tcb["131"]["CorrespondingAccountNumber"] == "1121-TCB-122334488"
+new_d_tcb = cur.inserted["BADepositDetail"][before_d:]
+bdd_cols_tcb = cur.insert_cols["BADepositDetail"][before_d_cols]
+d_tcb = dict(zip(bdd_cols_tcb, new_d_tcb[0]))
+assert d_tcb["DebitAccount"] == "1121-TCB-122334488", (
+    f"BADepositDetail (vế ngân hàng) cũng phải ghi đúng mã riêng của TK TCB — got {d_tcb.get('DebitAccount')}")
+print("PASS: TK Techcombank (122334488) -> GeneralLedger/BADepositDetail ghi đúng mã riêng "
+      "1121-TCB-122334488, KHÔNG còn bị giữ mã '1121' của chứng từ mẫu ngẫu nhiên.")
+
+before_gl2 = len(cur.inserted["GeneralLedger"])
+giao_dich_mb = [{"so_ct": "UNT-MB-001", "ngay": "15/03/2026", "mst": "0317009837",
+                  "ten_doi_tuong": "CONG TY ABC", "dien_giai": "Thu tien MB",
+                  "tk_doi_ung": "131", "so_tien": 3000000}]
+r_mb = _misa_ghi_thu_chi(1, "TESTDB", "unt", giao_dich_mb, preview=False, ghi_de=False,
+                          so_tk_ngan_hang="123334488")
+assert r_mb["so_them"] == 1, f"expected 1 created (TK MB), got {r_mb}"
+new_gl_mb = cur.inserted["GeneralLedger"][before_gl2:]
+gl_by_acc_mb = {dict(zip(gl_cols, p))["AccountNumber"]: dict(zip(gl_cols, p)) for p in new_gl_mb}
+assert "1121-MB-123334488" in gl_by_acc_mb, (
+    f"TK ngân hàng đang đối chiếu là 123334488 (MB) -> GeneralLedger PHẢI học đúng mã riêng "
+    f"'1121-MB-123334488' — got {list(gl_by_acc_mb)}")
+assert "1121-TCB-122334488" not in gl_by_acc_mb, (
+    "Giao dịch của TK MB KHÔNG được lẫn mã 1121-TCB-... của TK Techcombank")
+print("PASS: TK MB (123334488) -> GeneralLedger ghi đúng mã riêng 1121-MB-123334488 — 2 TK VND con "
+      "KHÔNG còn bị dồn lẫn vào 1 mã như lỗi thật đã báo kèm ảnh 'Bảng cân đối tài khoản' (chỉ hiện "
+      "đúng 1 dòng '1121-MB-123334488', hoàn toàn thiếu dòng '1121-TCB-122334488').")
+
+FakeCursor.fetchall = _orig_fetchall
 
 print("\nALL DONE")

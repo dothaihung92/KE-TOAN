@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.220"
+APP_BUILD = "2026-08-31.221"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24800,6 +24800,18 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
     hàng KHÁC — xác nhận qua phản ánh thật: "Tài khoản chi" trên UNC hiện SAI ngân hàng dù số tiền/
     đối tượng đều đúng). Không khớp được (để trống hoặc TK đó chưa có trong Danh mục MISA) thì vẫn
     dùng cách cũ (mượn từ mẫu/dò TK bất kỳ) như trước, không chặn ghi.
+
+    CŨNG học/ghi đè ĐÚNG mã hạch toán 112x RIÊNG của bank_id_dung ở trên (ma_hach_toan_nh, qua
+    _misa_hoc_ma_hach_toan_theo_bankaccount) vào vế ngân hàng của Detail/GeneralLedger/
+    AccountObjectLedger — KHÁC hẳn BankAccountID/BankName (chỉ là METADATA hiển thị "Tài khoản chi/
+    nhận") ở trên: đây là MÃ KẾ TOÁN thật sự quyết định số dư hiện ở Bảng cân đối tài khoản. Công ty
+    có NHIỀU TK VND/con 112x khác nhau (vd "1121-MB-..."/"1121-TCB-...") thì TRƯỚC ĐÂY vế 112x luôn
+    GIỮ NGUYÊN mã của chứng từ MẪU (mượn ngẫu nhiên/bất kỳ từ CSDL), khiến MỌI giao dịch ghi qua phần
+    mềm — bất kể đang đối chiếu TK ngân hàng nào — đều dồn hết vào ĐÚNG 1 mã 112x của chứng từ mẫu đó
+    trên Bảng cân đối tài khoản — xác nhận qua báo cáo thật kèm ảnh chụp: "Bảng cân đối tài khoản"
+    chỉ hiện đúng 1 dòng "1121-MB-123334488" dồn hết phát sinh, hoàn toàn không có dòng
+    "1121-TCB-122334488" dù đã ghi nhiều giao dịch cho TK đó. Không học được (TK ngân hàng đó chưa
+    có lịch sử Thu/Chi tiền gửi nào) thì vẫn giữ nguyên mã của chứng từ mẫu như cũ.
     Chỉ BẮT BUỘC khớp đối tượng (AccountObjectID) khi tk_doi_ung là "131" (phải thu) hoặc "331"
     (phải trả) — quan hệ công nợ THẬT với 1 đối tượng cụ thể, không tìm được thì BỊ BỎ QUA (đếm vào
     so_bo_qua_kh), KHÔNG tự tạo mới như "KL"/"BH" bên Mua hàng/Bán hàng vì không có khái niệm "khách
@@ -24841,6 +24853,16 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         # Dò ĐÚNG TK ngân hàng khớp số TK người dùng đã cấu hình (xem giải thích ở docstring) — chỉ
         # 1 LẦN cho cả lượt ghi này, áp dụng cho MỌI chứng từ tạo ra bên dưới.
         bank_id_dung, bank_name_dung = _misa_bank_account_theo_so(cur, so_tk_ngan_hang)
+        # Mã hạch toán 112x RIÊNG của ĐÚNG tài khoản ngân hàng đang đối chiếu (vd "1121-MB-..."
+        # khác "1121-TCB-...") — học qua lịch sử Thu/Chi tiền gửi THẬT của ĐÚNG BankAccountID này
+        # (dùng lại _misa_hoc_ma_hach_toan_theo_bankaccount, xem giải thích đầy đủ ở đó và ở nơi gọi
+        # bên dưới) — xác nhận đúng lỗi thật đã báo kèm ảnh chụp "Bảng cân đối tài khoản" MISA: công
+        # ty có 2 TK VND "1121-MB-123334488"/"1121-TCB-122334488" nhưng MỌI giao dịch UNT/UNC ghi
+        # thẳng qua phần mềm (bất kể đang đối chiếu TK nào) đều CHỈ hiện dồn vào "1121-MB-123334488"
+        # trong Bảng cân đối tài khoản — vì trước đây d_row/GeneralLedger GIỮ NGUYÊN mã 112x của
+        # CHỨNG TỪ MẪU (mau_d/mau_gl, học ngẫu nhiên/bất kỳ từ CSDL) làm mã hạch toán vế ngân hàng,
+        # không hề gắn đúng theo BankAccountID thật sự đang ghi.
+        ma_hach_toan_nh = _misa_hoc_ma_hach_toan_theo_bankaccount(cur, bank_id_dung) if bank_id_dung else None
         # Tìm 1 RefID THẬT (KHÔNG do phần mềm ghi) mà Detail của nó khớp đúng TK 131/331 — lọc
         # TRỰC TIẾP CustomField10 qua JOIN với Master, KHÔNG dùng _misa_mau_dong_that's "TOP 5
         # không ORDER BY" (không đáng tin cậy một khi số dòng phần mềm đã ghi áp đảo số dòng thật
@@ -25098,6 +25120,12 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             _misa_gan(d_row, cols_d, aid, "AccountObjectID")
             _misa_gan(d_row, cols_d, dien_giai, "Description")
             _misa_gan(d_row, cols_d, hach, tk_cot)
+            # Vế NGÂN HÀNG (112x) của dòng chi tiết — cột CÒN LẠI khác tk_cot (DebitAccount cho UNT,
+            # CreditAccount cho UNC) — ghi đè ĐÚNG mã hạch toán riêng của TK ngân hàng đang đối chiếu
+            # (ma_hach_toan_nh) nếu học được, thay vì giữ nguyên mã 112x của chứng từ mẫu ngẫu nhiên.
+            if ma_hach_toan_nh:
+                cot_ngan_hang = "DebitAccount" if loai == "unt" else "CreditAccount"
+                _misa_gan(d_row, cols_d, ma_hach_toan_nh, cot_ngan_hang)
             _misa_gan(d_row, cols_d, so_tien, "Amount")
             _misa_gan(d_row, cols_d, so_tien, "AmountOC")
 
@@ -25106,6 +25134,14 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             # thích ở chỗ học mẫu (mau_gl/mau_aol) phía trên. Giữ nguyên AccountNumber/
             # CorrespondingAccountNumber/EntryType của mẫu (quyết định TK Nợ/TK Có của MỖI dòng),
             # chỉ đổi số tiền đúng theo hướng Nợ/Có đã có sẵn ở mẫu — không tự đoán chiều.
+            #
+            # RIÊNG vế NGÂN HÀNG (mã bắt đầu "112", vd "1121"/"1121-MB-..."/"1121-TCB-...") thì GHI
+            # ĐÈ đúng ma_hach_toan_nh (mã hạch toán RIÊNG của ĐÚNG TK ngân hàng đang đối chiếu, xem
+            # giải thích ở nơi tính ma_hach_toan_nh phía trên) — KHÔNG được giữ nguyên mã 112x của
+            # chứng từ mẫu (có thể thuộc TK ngân hàng KHÁC hẳn) — đúng lỗi thật đã báo: mọi giao dịch
+            # UNT/UNC ghi qua phần mềm đều dồn hết vào "1121-MB-..." trên Bảng cân đối tài khoản dù
+            # đang đối chiếu TK "1121-TCB-...". Vế 131/331 (đối tượng công nợ) không đổi vì mã đó
+            # không phụ thuộc TK ngân hàng nào.
             gl_rows = []
             for mgl in mau_gl:
                 g = dict(mgl)
@@ -25130,6 +25166,11 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 _misa_gan(g, cols_gl, mst_misa, "AccountObjectTaxCode")
                 _misa_gan(g, cols_gl, branch_id, "BranchID")
                 _misa_gan(g, cols_gl, max_reforder, "RefOrder")
+                if ma_hach_toan_nh:
+                    if str(g.get("AccountNumber") or "").startswith("112"):
+                        _misa_gan(g, cols_gl, ma_hach_toan_nh, "AccountNumber")
+                    if str(g.get("CorrespondingAccountNumber") or "").startswith("112"):
+                        _misa_gan(g, cols_gl, ma_hach_toan_nh, "CorrespondingAccountNumber")
                 if _snum(mgl.get("DebitAmountOC")) > 0:
                     _misa_gan(g, cols_gl, so_tien, "DebitAmountOC")
                     _misa_gan(g, cols_gl, so_tien, "DebitAmount")
@@ -25168,6 +25209,11 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 _misa_gan(a, cols_aol, ten_misa or ten, "AccountObjectNameDI")
                 _misa_gan(a, cols_aol, mst_misa, "AccountObjectTaxCode")
                 _misa_gan(a, cols_aol, max_reforder, "RefOrder")
+                # CorrespondingAccountNumber (vế ngân hàng 112x đối ứng với 131/331) — cùng lý do
+                # ghi đè đúng ma_hach_toan_nh như GeneralLedger phía trên, tránh Sổ chi tiết công nợ
+                # ghi sai TK ngân hàng đối ứng của chứng từ mẫu.
+                if ma_hach_toan_nh and str(a.get("CorrespondingAccountNumber") or "").startswith("112"):
+                    _misa_gan(a, cols_aol, ma_hach_toan_nh, "CorrespondingAccountNumber")
                 aol_account = str(mau_aol.get("AccountNumber") or hach)
                 if _snum(mau_aol.get("DebitAmountOC")) > 0:
                     _misa_gan(a, cols_aol, so_tien, "DebitAmountOC")

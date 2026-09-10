@@ -28,7 +28,8 @@ names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_mi
          '_misa_mau_dong_that', '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_doc_ngay',
          '_snum', '_to_num', '_misa_bank_account_du_phong', '_ten_tk_ke_toan_du_phong',
          '_misa_reason_type_du_phong', '_misa_reason_type_hop_le',
-         '_misa_dam_bao_hop_le_ngan_hang_ly_do', '_misa_khung_ghi_so_du_phong', '_misa_ghi_thu_chi']
+         '_misa_dam_bao_hop_le_ngan_hang_ly_do', '_misa_khung_ghi_so_du_phong',
+         '_misa_bank_account_theo_so', '_misa_hoc_ma_hach_toan_theo_bankaccount', '_misa_ghi_thu_chi']
 
 class FakeHTTPException(Exception):
     def __init__(self, code, msg):
