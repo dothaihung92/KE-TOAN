@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.223"
+APP_BUILD = "2026-08-31.224"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27063,6 +27063,23 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     han = moc_qua_han - datetime.timedelta(days=30 * int(thang_qua_han))
     tang3 = []
     for aoid, d in doi_tuong_hd.items():
+        # Mã "KL" (Khách lẻ) là mã DÙNG CHUNG cho HÀNG NGHÌN khách hàng THẬT
+        # KHÁC NHAU không có MST (xem _misa_ghi_ban_hang) — hoàn toàn KHÔNG
+        # phải 1 đối tượng công nợ thật. Tầng 3 coi "aoid" là 1 người duy
+        # nhất (hóa đơn 'quá hạn'/'độ tin cậy cao' đều so sánh CHÉO giữa các
+        # hóa đơn CÙNG aoid), nên khi gộp chung vào "KL" thì các hóa đơn của
+        # HÀNG TRĂM khách lẻ KHÁC NHAU bị so khớp/loại trừ LẪN NHAU như thể
+        # cùng 1 người — sinh ra hàng nghìn gợi ý "treo" ảo, xác nhận đúng
+        # qua báo cáo thật: chạy "Ghi bù trừ treo" tạo tới ~3.600 chứng từ
+        # "Điều chỉnh công nợ treo ... - Khách Lẻ" cho 1 mã KL DUY NHẤT,
+        # khiến "Tổng hợp/Chi tiết công nợ phải thu" của KL bị lệch hẳn số
+        # dư (kèm ảnh chụp MISA thật). Bỏ hẳn "KL" khỏi Tầng 3 — dùng
+        # "Đối chiếu công nợ 3 tầng" cho khách lẻ dùng chung mã là VÔ NGHĨA
+        # (không có 1 đối tượng công nợ thật để đối chiếu), người dùng cần
+        # xử lý khách lẻ theo cách khác (tách mã riêng từng khách nếu cần
+        # theo dõi công nợ, hoặc chấp nhận không đối chiếu KL).
+        if str(d.get("ma") or "").strip().upper() == "KL":
+            continue
         for hd in d["hoa_don"]:
             if hd["matched"] or hd["so_tien"] >= nguong:
                 continue
@@ -27715,6 +27732,13 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
             so_tien = _to_num(it.get("so_tien")) or 0
             if not aoid or so_tien <= 0:
                 continue
+            # Chặn LẦN CUỐI mã "KL" (Khách lẻ, dùng chung cho hàng nghìn khách
+            # KHÁC NHAU) lọt vào đây — dù _misa_doi_chieu_3_tang đã bỏ hẳn KL
+            # khỏi Tầng 3, vẫn kiểm tra lại ở chính nơi GHI SỔ (an toàn hơn,
+            # đề phòng danh_sach gửi lên từ 1 bản ghi/cache CŨ trước khi có
+            # bản vá) — xem giải thích đầy đủ ở _misa_doi_chieu_3_tang.
+            if str(it.get("mst") or "").strip().upper() == "KL":
+                continue
             if den_ngay_dt:
                 ngay_dt = den_ngay_dt
             else:
@@ -28027,6 +28051,11 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None, den_ngay
         if so_tien <= 0:
             continue
         ma = str(it.get("mst") or it.get("ma") or "").strip()
+        # Chặn LẦN CUỐI mã "KL" (Khách lẻ, dùng chung cho hàng nghìn khách
+        # KHÁC NHAU) — xem giải thích đầy đủ ở _misa_doi_chieu_3_tang/
+        # _misa_ghi_bu_tru_treo (cùng lý do, áp dụng cho đường xuất Excel).
+        if ma.upper() == "KL":
+            continue
         ten = str(it.get("ten") or "").strip()
         inv_no = str(it.get("inv_no") or "").strip()
         if den_ngay_dt:
