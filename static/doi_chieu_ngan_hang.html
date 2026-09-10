@@ -2314,6 +2314,20 @@ function _dcnhBoSungSaokePer(co) {
   }
 }
 
+// Ngày 1 giao dịch (r.tx.date) THƯỜNG ở "dd/mm/yyyy" (đa số sao kê dán tay) NHƯNG một số nguồn
+// tự động (VD giao dịch QR chuyển khoản nhanh) lại lưu "yyyy-mm-dd" — nhận diện năm là phần có 4
+// chữ số để tự suy ra thứ tự dd/mm/yyyy hay yyyy/mm/dd, trả về {dd, mm, yyyy} hoặc null nếu không
+// nhận diện được cả 2 dạng.
+function parseFlexVNDate(s) {
+  const p = String(s || "").trim().split(/[\/\-.]/);
+  if (p.length !== 3) return null;
+  let dd, mm, yyyy;
+  if (p[0].length === 4) { yyyy = +p[0]; mm = +p[1]; dd = +p[2]; }
+  else { dd = +p[0]; mm = +p[1]; yyyy = +p[2]; }
+  if (!(yyyy > 999 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31)) return null;
+  return { dd, mm, yyyy };
+}
+
 // ── App Root ──────────────────────────────────────────────────────────────────
 function App() {
   const [screen, setScreen] = useState(() => _dcnhDocDeepLink() ? "company" : "home");
@@ -4740,9 +4754,13 @@ function ConfirmScreen({
     let minD = null, maxD = null, minS = "", maxS = "";
     rows.forEach(r => {
       const s = (r.tx.date || "").trim();
-      const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
-      if (!m) return;
-      const d = new Date(+m[3], +m[2] - 1, +m[1]);
+      // Trước đây CHỈ nhận "dd/mm/yyyy" — TK ngân hàng có giao dịch lưu "yyyy-mm-dd" (VD chuyển
+      // khoản nhanh qua QR) bị coi như "không đọc được ngày" cho MỌI dòng, dù đã có hàng trăm giao
+      // dịch, khiến báo nhầm "Chưa có giao dịch nào để xác định ngày cuối kỳ" — dùng parseFlexVNDate
+      // (nhận cả 2 dạng) thay vì tự so khớp regex hẹp ở đây.
+      const p = parseFlexVNDate(s);
+      if (!p) return;
+      const d = new Date(p.yyyy, p.mm - 1, p.dd);
       if (!minD || d < minD) { minD = d; minS = s; }
       if (!maxD || d > maxD) { maxD = d; maxS = s; }
     });
