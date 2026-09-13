@@ -18,12 +18,18 @@ def extract_fn(name):
         body.append(ln)
     return src[idx:i+1] + '\n'.join(body)
 
-# ── Regression test cho yêu cầu người dùng kèm 2 ảnh chụp màn hình: dữ liệu
-# công ty (hạch toán, danh mục...) đang lưu RẢI RÁC mỗi công ty 1 thư mục
-# riêng (Thư mục lưu DỮ LIỆU công ty), khó quản lý — nay gộp lại dùng CHUNG
-# 1 thư mục cho TẤT CẢ công ty (mỗi công ty vẫn 1 file DuLieu_<MST>.json
-# riêng), tự động gom dữ liệu cũ về khi đặt đường dẫn mới, và file dữ liệu
-# công ty giờ có thêm thông tin công ty đã điền vào phần mềm ("_cty_info").
+# ── Regression test cho yêu cầu người dùng: dữ liệu công ty (hạch toán,
+# danh mục...) đang lưu RẢI RÁC mỗi công ty 1 thư mục riêng, khó quản lý.
+# Theo phản hồi tiếp theo của người dùng ("tôi không thấy đường dẫn lưu
+# file DỮ LIỆU công ty? hãy để chung với đường dẫn Thư mục lưu file XML/
+# PDF và tự tạo folder là DU LIEU CTY"): KHÔNG cần ô nhập riêng nào nữa —
+# mặc định dữ liệu công ty TỰ ĐỘNG nằm trong thư mục con "DU LIEU CTY"
+# ngay bên trong "Thư mục lưu file XML/PDF" (save_dir) đã có sẵn của công
+# ty đó. Vẫn giữ tuỳ chọn "Thư mục dữ liệu chung" (global_data_dir) cho ai
+# muốn gộp MỌI công ty vào đúng 1 thư mục khác duy nhất — ưu tiên cao hơn
+# mặc định tự động ở trên khi đã cấu hình, và tự động gom dữ liệu cũ về
+# khi đặt đường dẫn mới. File dữ liệu công ty cũng có thêm thông tin công
+# ty đã điền vào phần mềm ("_cty_info").
 tmp_root = tempfile.mkdtemp(prefix="ketoan_test_")
 DB_PATH = os.path.join(tmp_root, "app.db")
 DATA_DIR = os.path.join(tmp_root, "data_dir_default")
@@ -62,11 +68,16 @@ _doc_du_lieu_cty = ns['_doc_du_lieu_cty']
 _ghi_du_lieu_cty = ns['_ghi_du_lieu_cty']
 
 # ── Dựng 2 công ty với dữ liệu CŨ rải rác (đúng hiện trạng người dùng báo):
-# công ty A dùng data_dir riêng, công ty B chỉ có save_dir (không có data_dir).
+# công ty A dùng data_dir riêng (bản cũ, hiếm — ô này đã bỏ khỏi giao
+# diện); công ty B chỉ có "Thư mục lưu file XML/PDF" (save_dir), KHÔNG có
+# data_dir -> theo đúng yêu cầu người dùng "để chung với đường dẫn Thư mục
+# lưu file XML/PDF và tự tạo folder là DU LIEU CTY", dữ liệu công ty B phải
+# tự động nằm ở save_dir/"DU LIEU CTY"/.
 tmpA = os.path.join(tmp_root, "cty_A_datadir")
 tmpB_save = os.path.join(tmp_root, "cty_B_savedir")
+tmpB_data = os.path.join(tmpB_save, "DU LIEU CTY")
 os.makedirs(tmpA, exist_ok=True)
-os.makedirs(tmpB_save, exist_ok=True)
+os.makedirs(tmpB_data, exist_ok=True)
 
 conn = db()
 conn.execute("INSERT INTO companies (id, ten, mst, save_dir, data_dir) VALUES (1,?,?,?,?)",
@@ -78,16 +89,19 @@ conn.close()
 
 with open(os.path.join(tmpA, "DuLieu_0301111222.json"), "w", encoding="utf-8") as f:
     json.dump({"note": "A-old"}, f)
-with open(os.path.join(tmpB_save, "DuLieu_0302222333.json"), "w", encoding="utf-8") as f:
+with open(os.path.join(tmpB_data, "DuLieu_0302222333.json"), "w", encoding="utf-8") as f:
     json.dump({"note": "B-old"}, f)
 
 # ── Test 1: CHƯA cấu hình thư mục chung -> vẫn lùi về đúng thư mục RIÊNG
 # kiểu cũ của từng công ty (không phá vỡ cài đặt hiện có). ──
 assert _du_lieu_cty_path(1) == os.path.join(tmpA, "DuLieu_0301111222.json"), (
     f"Chưa có thư mục chung -> công ty A phải dùng đúng data_dir riêng cũ — got {_du_lieu_cty_path(1)}")
-assert _du_lieu_cty_path(2) == os.path.join(tmpB_save, "DuLieu_0302222333.json"), (
-    f"Chưa có thư mục chung -> công ty B (không có data_dir) phải lùi về save_dir — got {_du_lieu_cty_path(2)}")
-print("PASS 1: chưa cấu hình thư mục chung -> mỗi công ty vẫn dùng đúng thư mục riêng kiểu cũ.")
+assert _du_lieu_cty_path(2) == os.path.join(tmpB_data, "DuLieu_0302222333.json"), (
+    f"Chưa có thư mục chung -> công ty B (không có data_dir) phải TỰ ĐỘNG dùng thư mục con "
+    f"'DU LIEU CTY' ngay trong Thư mục lưu file XML/PDF (save_dir) — got {_du_lieu_cty_path(2)}")
+print("PASS 1: chưa cấu hình thư mục chung -> công ty A dùng đúng data_dir riêng cũ; công ty B (không có "
+      "data_dir) tự động dùng thư mục con 'DU LIEU CTY' ngay trong Thư mục lưu file XML/PDF — không cần "
+      "gõ thêm đường dẫn nào.")
 
 # ── Test 2: đặt thư mục CHUNG -> _du_lieu_cty_path của MỌI công ty đổi
 # sang đúng thư mục chung đó (mỗi công ty vẫn 1 file riêng theo MST). ──
@@ -110,7 +124,7 @@ with open(os.path.join(tmp_shared, "DuLieu_0302222333.json"), encoding="utf-8") 
     assert json.load(f) == {"note": "B-old"}, "Nội dung file gom về của công ty B phải khớp bản gốc"
 assert os.path.isfile(os.path.join(tmpA, "DuLieu_0301111222.json")), (
     "File GỐC của công ty A KHÔNG được xoá sau khi gom (chỉ sao chép, an toàn)")
-assert os.path.isfile(os.path.join(tmpB_save, "DuLieu_0302222333.json")), (
+assert os.path.isfile(os.path.join(tmpB_data, "DuLieu_0302222333.json")), (
     "File GỐC của công ty B KHÔNG được xoá sau khi gom (chỉ sao chép, an toàn)")
 print("PASS 3: tự động gom đúng 2 file dữ liệu cũ (A, B) về thư mục chung, giữ nguyên nội dung, KHÔNG xoá bản gốc.")
 

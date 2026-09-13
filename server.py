@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.225"
+APP_BUILD = "2026-08-31.226"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9330,17 +9330,24 @@ def _co_theo_tong(tong):
     return "331"
 
 def _thu_muc_du_lieu_rieng_cu(comp):
-    """Thư mục dữ liệu THEO KIỂU CŨ (trước khi có 'Thư mục dữ liệu CHUNG')
-    của 1 công ty — ưu tiên data_dir riêng của công ty đó, rồi save_dir,
-    cuối cùng mặc định data/cong_ty/. Dùng làm phương án DỰ PHÒNG cho
-    _du_lieu_cty_path khi CHƯA cấu hình thư mục chung, và để dò vị trí file
-    CŨ lúc gom về thư mục chung (xem _gom_du_lieu_cty_ve_thu_muc_chung)."""
+    """Thư mục dữ liệu RIÊNG của 1 công ty khi CHƯA cấu hình 'Thư mục dữ
+    liệu chung' (global_data_dir) — ưu tiên data_dir NẾU người dùng từng tự
+    gõ tay (bản cũ, hiếm gặp — ô này đã bỏ khỏi giao diện), rồi TỰ ĐỘNG dùng
+    thư mục con "DU LIEU CTY" ngay TRONG "Thư mục lưu file XML/PDF"
+    (save_dir) của công ty đó — theo đúng yêu cầu người dùng "để chung với
+    đường dẫn Thư mục lưu file XML/PDF và tự tạo folder là DU LIEU CTY":
+    không cần thêm ô nhập nào cả, chỉ cần đã điền "Thư mục lưu file XML/
+    PDF" là dữ liệu hạch toán/danh mục tự động nằm gọn NGAY BÊN TRONG đó,
+    dễ tìm/quản lý. Công ty CHƯA điền cả 2 thì lùi về mặc định
+    data/cong_ty/. Dùng làm phương án MẶC ĐỊNH cho _du_lieu_cty_path (khi
+    chưa cấu hình thư mục chung) và để dò vị trí file lúc gom về thư mục
+    chung (xem _gom_du_lieu_cty_ve_thu_muc_chung)."""
     dd = (comp["data_dir"] or "").strip() if "data_dir" in comp.keys() else ""
     sd = (comp["save_dir"] or "").strip()
     if dd:
         return dd
-    if sd and os.path.isdir(sd):
-        return sd
+    if sd:
+        return os.path.join(sd, "DU LIEU CTY")
     return os.path.join(DATA_DIR, "cong_ty")
 
 def _du_lieu_cty_path(cid):
