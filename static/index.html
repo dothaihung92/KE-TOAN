@@ -237,7 +237,6 @@
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
-      <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px;margin-top:6px" onclick="moGlobalDataDirModal()">📂 Thư mục dữ liệu chung</button>
     </div>
     <div id="adminBtnWrap" style="display:none;padding:0 12px 8px">
       <button class="btn gold" style="width:100%;font-size:14px;padding:10px" onclick="moAdminModal()">👑 Quản lý user</button>
@@ -369,8 +368,6 @@
     <p class="hint" style="margin-top:-6px">⚠ 3 mục trên PHẢI đúng theo đăng ký thuế của công ty (xem trên tờ khai HTKK đã nộp được lần gần nhất, hoặc hỏi kế toán) — nếu để trống hoặc sai, file "Kết xuất XML cho HTKK" có thể bị Cơ quan Thuế báo lỗi "Cơ quan thuế nơi nộp không là Cơ quan thuế quản lý".</p>
     <div class="field"><label>Tên người ký tờ khai <span style="font-weight:400;color:var(--muted)">(dùng khi Kết xuất XML GTGT/TNCN cho HTKK)</span></label><input id="m_nguoi_ky" placeholder="VD: Nguyễn Văn A"></div>
     <p class="hint" style="margin-top:-6px">Đã lưu sẵn ở đây thì lúc Kết xuất XML sẽ tự lấy tên này, không hỏi lại nữa.</p>
-    <div class="field"><label>TK Nợ mặc định <span style="font-weight:400;color:var(--muted)">(khi chưa học được TK Nợ nào cho NCC/mặt hàng)</span></label><input id="m_no_mac_dinh" placeholder="VD: 156 hoặc 1561 (thương mại), 6427 (dịch vụ)"></div>
-    <p class="hint" style="margin-top:-6px">Dùng khi tạo "Chi tiết MUA VÀO" — cột Nợ chỉ tự điền được cho NCC/mặt hàng đã từng gán tay trước đó; NCC/mặt hàng hoàn toàn mới sẽ dùng TK này thay vì để trống. Vẫn nên kiểm tra lại vì mỗi hóa đơn có thể khác loại.</p>
     <div class="field"><label>Tên đăng nhập trang Thuế <span style="font-weight:400;color:var(--muted)">(thường là MST)</span></label><input id="m_user" placeholder="Để trống sẽ dùng MST"></div>
     <div class="field"><label>Mật khẩu trang Thuế</label>
       <div style="display:flex;gap:6px">
@@ -394,25 +391,11 @@
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
     <div class="field"><label>Thư mục lưu file KẾT XUẤT <span style="font-weight:400;color:var(--muted)">(tự tạo cấu trúc Năm/Quý (hoặc Năm/Tháng nếu công ty đã tự tổ chức thư mục theo tháng) — chỉ dùng khi tick "Lưu file kết xuất" lúc tra cứu)</span></label><input id="m_exportdir" placeholder="VD: D:\\OneDrive\\...\\BAO CAO QUY"></div>
     <p class="hint">📁 Ví dụ: chọn kỳ Quý 2/2026 + tick "Lưu file kết xuất" → phần mềm tự tạo <b>…\BAO CAO QUY\2026\Quý 2\</b> và lưu file Excel vào đó (tạo đủ cả 4 quý nếu thiếu). Nếu bên trong thư mục Năm đã có sẵn thư mục "THANG N" (công ty kê khai theo tháng) thì phần mềm tự lưu theo THÁNG (tạo đủ 12 tháng) thay vì theo Quý.</p>
-    <p class="hint">📂 Dữ liệu công ty (hạch toán, danh mục...) TỰ ĐỘNG lưu vào thư mục con "DU LIEU CTY" ngay TRONG "Thư mục lưu file XML/PDF" ở trên — không cần gõ thêm đường dẫn nào. Muốn gộp dữ liệu MỌI công ty vào 1 thư mục khác duy nhất (thay vì mỗi công ty 1 nơi cạnh XML/PDF riêng)? Dùng nút "📂 Thư mục dữ liệu chung" bên thanh trái.</p>
+    <p class="hint">📂 Dữ liệu công ty (hạch toán, danh mục...) TỰ ĐỘNG lưu vào thư mục con "DU LIEU CTY" ngay TRONG "Thư mục lưu file XML/PDF" ở trên — không cần gõ thêm đường dẫn nào.</p>
     <p class="hint">🔒 Thông tin lưu cục bộ trên máy bạn (SQLite), không gửi đi đâu khác ngoài trang Tổng cục Thuế khi đăng nhập.</p>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
       <button class="btn" id="coSaveBtn" onclick="saveCompany()">Lưu</button>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL THƯ MỤC DỮ LIỆU CHUNG (hạch toán, danh mục... — dùng CHUNG cho TẤT CẢ công ty) -->
-<div class="modal-bg" id="globalDataDirModal">
-  <div class="modal" style="width:min(560px,94vw);max-width:560px">
-    <h3>📂 Thư mục dữ liệu chung</h3>
-    <p class="hint" style="margin-top:0">Trước đây mỗi công ty lưu dữ liệu (hạch toán, danh mục...) ở 1 thư mục RIÊNG, rải rác khó quản lý. Đặt 1 thư mục ở đây — TẤT CẢ công ty sẽ cùng lưu vào đây (mỗi công ty vẫn 1 file <code>DuLieu_&lt;MST&gt;.json</code> riêng, an toàn hơn dồn chung 1 file). Dữ liệu CŨ đang rải rác sẽ được TỰ ĐỘNG sao chép (không xoá bản gốc) về đây khi bạn lưu đường dẫn mới.</p>
-    <div class="field"><label>Thư mục dữ liệu chung</label><input id="gdd_thumuc" placeholder="VD: D:\\DuLieuKeToan"></div>
-    <p class="hint">Để trống rồi Lưu = huỷ dùng thư mục chung, mỗi công ty quay lại dùng thư mục riêng như trước (không xoá file nào).</p>
-    <div class="modal-actions">
-      <button class="btn ghost" onclick="dongGlobalDataDirModal()">Hủy</button>
-      <button class="btn" onclick="luuGlobalDataDir()">Lưu</button>
     </div>
   </div>
 </div>
@@ -1463,7 +1446,6 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_ma_cqt').value=edit?.ma_cqt_noi_nop||'';
   document.getElementById('m_ten_cqt').value=edit?.ten_cqt_noi_nop||'';
   document.getElementById('m_nguoi_ky').value=edit?.nguoi_ky||'';
-  document.getElementById('m_no_mac_dinh').value=edit?.no_mac_dinh||'';
   document.getElementById('m_user').value=edit?.username||'';
   document.getElementById('m_note').value=edit?.ghichu||'';
   document.getElementById('m_dir').value=edit?.save_dir||'';
@@ -2497,8 +2479,7 @@ async function saveCompany(){
     dia_chi:document.getElementById('m_dia_chi').value.trim(),
     ma_cqt_noi_nop:document.getElementById('m_ma_cqt').value.trim(),
     ten_cqt_noi_nop:document.getElementById('m_ten_cqt').value.trim(),
-    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim(),
-    no_mac_dinh:document.getElementById('m_no_mac_dinh').value.trim()};
+    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim()};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -3813,28 +3794,6 @@ async function xoaFileTai(){
     if(r.so_file>0)toast(`✓ Đã xóa ${r.so_file} file, giải phóng ${r.dung_luong_mb} MB`,'ok');
     else toast('Không có file nào để xóa','ok');
   }catch(e){toast('Lỗi xóa file: '+e.message,'err')}
-}
-async function moGlobalDataDirModal(){
-  document.getElementById('gdd_thumuc').value='';
-  try{
-    const r=await api('/api/settings/global-data-dir');
-    document.getElementById('gdd_thumuc').value=r.thu_muc||'';
-  }catch(e){}
-  document.getElementById('globalDataDirModal').style.display='flex';
-}
-function dongGlobalDataDirModal(){
-  document.getElementById('globalDataDirModal').style.display='none';
-}
-async function luuGlobalDataDir(){
-  const thuMuc=document.getElementById('gdd_thumuc').value.trim();
-  try{
-    const r=await api('/api/settings/global-data-dir',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({thu_muc:thuMuc})});
-    dongGlobalDataDirModal();
-    if(!thuMuc)toast('✓ Đã huỷ thư mục dữ liệu chung — mỗi công ty dùng lại thư mục riêng như trước','ok');
-    else if(r.so_gom>0)toast(`✓ Đã đặt thư mục dữ liệu chung, tự gom ${r.so_gom} công ty về đây`,'ok');
-    else toast('✓ Đã đặt thư mục dữ liệu chung','ok');
-  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function exportCongTy(){
   try{

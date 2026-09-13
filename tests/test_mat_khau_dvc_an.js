@@ -3,10 +3,13 @@
 // đây là input type="text" (hiện chữ rõ ràng, khác hẳn ô "Mật khẩu trang
 // Thuế" đã ẩn bằng type="password" + nút "👁 Hiện" từ trước).
 //
-// Đồng thời xác nhận ô "Thư mục lưu DỮ LIỆU công ty" (per-công ty, id
-// "m_datadir") đã bị BỎ khỏi form sửa/thêm công ty — nay dùng CHUNG 1 thư
-// mục cho tất cả công ty (xem test_thu_muc_du_lieu_chung.py), không còn
-// cài đặt riêng từng công ty ở modal này nữa.
+// Đồng thời xác nhận ô "Thư mục lưu DỮ LIỆU công ty" theo TỪNG công ty (id
+// "m_datadir") đã bị BỎ khỏi form sửa/thêm công ty — dữ liệu công ty nay
+// TỰ ĐỘNG nằm trong thư mục con "DU LIEU CTY" ngay trong "Thư mục lưu
+// file XML/PDF" (xem test_thu_muc_du_lieu_chung.py). Nút "📂 Thư mục dữ
+// liệu chung" toàn app (thử nghiệm ở bản trước) cũng đã bị BỎ theo yêu cầu
+// người dùng "không cần dùng tới nữa". Và ô "TK Nợ mặc định" cũng đã bị bỏ
+// theo yêu cầu người dùng "hãy bỏ dòng TK Nợ mặc định".
 const fs = require('fs');
 const path = require('path');
 const REPO_ROOT = path.dirname(__dirname);
@@ -36,14 +39,29 @@ function assert(cond, msg) {
   console.log('PASS 2: có nút "👁 Hiện" riêng cho cả 2 ô mật khẩu Dịch vụ công (vẫn xem lại được khi cần, không chỉ ẩn cứng).');
 }
 
-// ----- Test 3: ô "Thư mục lưu DỮ LIỆU công ty" theo TỪNG công ty (id m_datadir) đã bị bỏ khỏi modal -- nay dùng thư mục CHUNG. -----
+// ----- Test 3: ô "Thư mục lưu DỮ LIỆU công ty" theo TỪNG công ty (id m_datadir) đã bị bỏ khỏi modal — dữ liệu công ty nay tự động nằm cạnh Thư mục lưu file XML/PDF, không cấu hình gì thêm. -----
 {
   assert(!html.includes('id="m_datadir"'), (
     'Ô "Thư mục lưu DỮ LIỆU công ty" theo TỪNG công ty (m_datadir) phải được bỏ khỏi modal Thêm/Sửa công ty '
-    + '— nay đã gộp thành 1 thư mục CHUNG cho tất cả công ty (nút "📂 Thư mục dữ liệu chung").'));
-  assert(html.includes('moGlobalDataDirModal()'), 'Phải có nút mở modal Thư mục dữ liệu chung (moGlobalDataDirModal)');
-  assert(html.includes("api('/api/settings/global-data-dir')"), 'Phải gọi đúng API GET thư mục dữ liệu chung khi mở modal');
-  console.log('PASS 3: ô thư mục dữ liệu riêng từng công ty đã được thay bằng 1 thư mục CHUNG duy nhất cho tất cả công ty.');
+    + '— dữ liệu công ty nay tự động nằm trong thư mục con "DU LIEU CTY" cạnh Thư mục lưu file XML/PDF.'));
+  console.log('PASS 3: ô thư mục dữ liệu riêng từng công ty đã được bỏ — dữ liệu tự động nằm cạnh Thư mục lưu file XML/PDF.');
+}
+
+// ----- Test 4 (đúng yêu cầu "bỏ thư mục dữ liệu chung đi vì không cần dùng tới nữa"): nút/modal "Thư mục dữ liệu chung" toàn app đã bị bỏ hẳn. -----
+{
+  assert(!html.includes('moGlobalDataDirModal') && !html.includes('globalDataDirModal')
+    && !html.includes('luuGlobalDataDir') && !html.includes('/api/settings/global-data-dir'), (
+    'Nút/modal "📂 Thư mục dữ liệu chung" (toàn app) phải được bỏ hẳn theo yêu cầu người dùng '
+    + '"bỏ thư mục dữ liệu chung đi vì không cần dùng tới nữa".'));
+  console.log('PASS 4: nút/modal "Thư mục dữ liệu chung" toàn app đã được bỏ hẳn.');
+}
+
+// ----- Test 5 (đúng yêu cầu "hãy bỏ dòng TK Nợ mặc định"): ô "TK Nợ mặc định" đã bị bỏ khỏi modal Thêm/Sửa công ty. -----
+{
+  assert(!html.includes('id="m_no_mac_dinh"') && !html.includes('TK Nợ mặc định'), (
+    'Ô "TK Nợ mặc định" phải được bỏ khỏi modal Thêm/Sửa công ty theo yêu cầu người dùng '
+    + '"hãy bỏ dòng TK Nợ mặc định".'));
+  console.log('PASS 5: ô "TK Nợ mặc định" đã được bỏ khỏi modal Thêm/Sửa công ty.');
 }
 
 console.log('\nTẤT CẢ TEST PASS');

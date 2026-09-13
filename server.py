@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.227"
+APP_BUILD = "2026-08-31.228"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1900,13 +1900,13 @@ def update_company(cid: int, data: dict = Body(...)):
     no_mac_dinh = (data.get("no_mac_dinh") or "").strip()
     if not no_mac_dinh:
         no_mac_dinh = (cur["no_mac_dinh"] if cur and "no_mac_dinh" in cur.keys() else "") or ""
-    # data_dir: KHÔNG còn ô nhập riêng từng công ty trên giao diện nữa (đã
-    # gộp thành "Thư mục dữ liệu CHUNG" — xem global_data_dir/
-    # _du_lieu_cty_path) — nếu request không gửi kèm (hoặc gửi rỗng) thì
-    # GIỮ giá trị cũ, KHÔNG xoá — cùng lý do với password/địa chỉ ở trên:
-    # trước đây field bị bỏ khỏi payload (vd do form không còn ô này) sẽ bị
-    # ghi đè thành rỗng, làm mất luôn đường dẫn dữ liệu CŨ của công ty đó
-    # (vẫn cần để dò/gom dữ liệu cũ khi cấu hình thư mục chung).
+    # data_dir: KHÔNG còn ô nhập riêng trên giao diện nữa (dữ liệu công ty
+    # nay TỰ ĐỘNG nằm trong thư mục con "DU LIEU CTY" ngay trong save_dir —
+    # xem _thu_muc_du_lieu_rieng_cu/_du_lieu_cty_path) — nếu request không
+    # gửi kèm (hoặc gửi rỗng) thì GIỮ giá trị cũ, KHÔNG xoá — cùng lý do với
+    # password/địa chỉ ở trên: trước đây field bị bỏ khỏi payload (vd do
+    # form không còn ô này) sẽ bị ghi đè thành rỗng, làm mất luôn đường dẫn
+    # data_dir CŨ (bản cũ, hiếm gặp) của công ty đó nếu ai từng gõ tay.
     data_dir = (data.get("data_dir") or "").strip()
     if not data_dir:
         data_dir = (cur["data_dir"] if cur and "data_dir" in cur.keys() else "") or ""
@@ -5793,33 +5793,6 @@ def set_pin_nop_to_khai(body: dict = Body(...)):
     return {"ok": True, "pin": pin}
 
 
-@app.get("/api/settings/global-data-dir")
-def get_global_data_dir():
-    """Thư mục dữ liệu (hạch toán, danh mục...) DÙNG CHUNG cho TẤT CẢ công
-    ty — xem _du_lieu_cty_path. Trống = chưa cấu hình, mỗi công ty vẫn dùng
-    thư mục riêng kiểu cũ (data_dir/save_dir)."""
-    return {"thu_muc": _get_setting("global_data_dir", "")}
-
-
-@app.post("/api/settings/global-data-dir")
-def set_global_data_dir(body: dict = Body(...)):
-    """Đặt thư mục dữ liệu DÙNG CHUNG cho TẤT CẢ công ty, rồi TỰ ĐỘNG gom
-    (sao chép, không xoá bản gốc) dữ liệu từng công ty đang rải rác ở thư
-    mục riêng kiểu cũ về đúng thư mục này — xem _gom_du_lieu_cty_ve_thu_muc_chung.
-    Để trống = huỷ thư mục chung, mỗi công ty lùi về dùng thư mục riêng như
-    trước (KHÔNG xoá file nào)."""
-    folder = (body.get("thu_muc") or "").strip()
-    so_gom = 0
-    if folder:
-        try:
-            os.makedirs(folder, exist_ok=True)
-        except Exception as e:
-            raise HTTPException(400, f"Không tạo/ghi được thư mục này: {e}")
-        so_gom = _gom_du_lieu_cty_ve_thu_muc_chung(folder)
-    _set_setting("global_data_dir", folder)
-    return {"ok": True, "thu_muc": folder, "so_gom": so_gom}
-
-
 @app.post("/api/dvc/nop-to-khai/{cid}")
 def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
     """TỰ ĐỘNG hết mức: đăng nhập (hoặc DÙNG LẠI phiên trình duyệt đã đăng
@@ -9330,18 +9303,15 @@ def _co_theo_tong(tong):
     return "331"
 
 def _thu_muc_du_lieu_rieng_cu(comp):
-    """Thư mục dữ liệu RIÊNG của 1 công ty khi CHƯA cấu hình 'Thư mục dữ
-    liệu chung' (global_data_dir) — ưu tiên data_dir NẾU người dùng từng tự
-    gõ tay (bản cũ, hiếm gặp — ô này đã bỏ khỏi giao diện), rồi TỰ ĐỘNG dùng
-    thư mục con "DU LIEU CTY" ngay TRONG "Thư mục lưu file XML/PDF"
-    (save_dir) của công ty đó — theo đúng yêu cầu người dùng "để chung với
-    đường dẫn Thư mục lưu file XML/PDF và tự tạo folder là DU LIEU CTY":
-    không cần thêm ô nhập nào cả, chỉ cần đã điền "Thư mục lưu file XML/
-    PDF" là dữ liệu hạch toán/danh mục tự động nằm gọn NGAY BÊN TRONG đó,
-    dễ tìm/quản lý. Công ty CHƯA điền cả 2 thì lùi về mặc định
-    data/cong_ty/. Dùng làm phương án MẶC ĐỊNH cho _du_lieu_cty_path (khi
-    chưa cấu hình thư mục chung) và để dò vị trí file lúc gom về thư mục
-    chung (xem _gom_du_lieu_cty_ve_thu_muc_chung).
+    """Thư mục dữ liệu RIÊNG của 1 công ty — ưu tiên data_dir NẾU người
+    dùng từng tự gõ tay (bản cũ, hiếm gặp — ô này đã bỏ khỏi giao diện),
+    rồi TỰ ĐỘNG dùng thư mục con "DU LIEU CTY" ngay TRONG "Thư mục lưu
+    file XML/PDF" (save_dir) của công ty đó — theo đúng yêu cầu người dùng
+    "để chung với đường dẫn Thư mục lưu file XML/PDF và tự tạo folder là
+    DU LIEU CTY": không cần thêm ô nhập nào cả, chỉ cần đã điền "Thư mục
+    lưu file XML/PDF" là dữ liệu hạch toán/danh mục tự động nằm gọn NGAY
+    BÊN TRONG đó, dễ tìm/quản lý. Công ty CHƯA điền cả 2 thì lùi về mặc
+    định data/cong_ty/. Dùng làm phương án MẶC ĐỊNH cho _du_lieu_cty_path.
 
     TỰ ĐỘNG SAO CHÉP (không xoá bản gốc) file dữ liệu công ty ĐÃ DÙNG PHẦN
     MỀM TỪ TRƯỚC — trước bản vá thư mục con "DU LIEU CTY" này, dữ liệu công
@@ -9373,62 +9343,23 @@ def _thu_muc_du_lieu_rieng_cu(comp):
     return os.path.join(DATA_DIR, "cong_ty")
 
 def _du_lieu_cty_path(cid):
-    """File dữ liệu riêng của công ty (hạch toán, danh mục...). ƯU TIÊN thư
-    mục dữ liệu CHUNG (cấu hình 1 LẦN cho TẤT CẢ công ty — xem
-    _get_setting('global_data_dir')) — theo đúng yêu cầu người dùng "dữ
-    liệu các công ty đang lưu riêng từ thư mục như vậy khó quản lý ... tất
-    cả công ty sẽ lưu chung 1 file 1 đường dẫn": mỗi công ty vẫn có 1 file
-    DuLieu_<MST>.json RIÊNG (an toàn hơn dồn hết vào 1 file DUY NHẤT — lỗi/
-    hỏng file của 1 công ty không kéo theo mất dữ liệu công ty khác) nhưng
-    TẤT CẢ cùng nằm chung 1 THƯ MỤC, không còn rải rác mỗi công ty 1 nơi
-    như trước. CHƯA cấu hình thư mục chung (global_data_dir rỗng — người
-    dùng chưa nâng cấp) thì lùi về CÁCH CŨ (_thu_muc_du_lieu_rieng_cu) để
-    không phá vỡ cài đặt hiện có."""
+    """File dữ liệu riêng của công ty (hạch toán, danh mục...) — xem
+    _thu_muc_du_lieu_rieng_cu: TỰ ĐỘNG nằm trong thư mục con "DU LIEU CTY"
+    ngay bên trong "Thư mục lưu file XML/PDF" (save_dir) của công ty đó,
+    không cần cấu hình gì thêm."""
     conn = db()
     comp = conn.execute(
         "SELECT mst, save_dir, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     if not comp:
         return None
-    try:
-        thu_muc_chung = _get_setting("global_data_dir", "").strip()
-    except Exception:
-        thu_muc_chung = ""   # CSDL cũ/thử nghiệm chưa có bảng app_settings -> lùi về thư mục riêng như cũ
-    thu_muc = thu_muc_chung or _thu_muc_du_lieu_rieng_cu(comp)
+    thu_muc = _thu_muc_du_lieu_rieng_cu(comp)
     try:
         os.makedirs(thu_muc, exist_ok=True)
     except Exception:
         return None
     mst = _chuan_mst(comp["mst"]) or str(cid)
     return os.path.join(thu_muc, f"DuLieu_{mst}.json")
-
-def _gom_du_lieu_cty_ve_thu_muc_chung(thu_muc_moi):
-    """Tự động SAO CHÉP (KHÔNG xoá bản gốc — an toàn, đặt lại/xoá thư mục
-    chung là huỷ được ngay nếu gom nhầm) file dữ liệu DuLieu_<MST>.json của
-    TỪNG công ty đang rải rác ở thư mục RIÊNG kiểu CŨ (data_dir/save_dir/
-    mặc định — xem _thu_muc_du_lieu_rieng_cu) về ĐÚNG thư mục dữ liệu CHUNG
-    vừa cấu hình — theo đúng yêu cầu người dùng "tự động gộm khi đặt đường
-    dẫn mới". CHỈ sao chép khi file ĐÍCH CHƯA CÓ SẴN (không ghi đè dữ liệu
-    đã có ở thư mục chung — đề phòng gọi lại nhiều lần, hoặc thư mục chung
-    đã có sẵn dữ liệu MỚI HƠN từ máy khác). Trả về số công ty đã gom được."""
-    import shutil
-    conn = db()
-    rows = conn.execute("SELECT id, mst, save_dir, data_dir FROM companies").fetchall()
-    conn.close()
-    so_gom = 0
-    for comp in rows:
-        try:
-            thu_muc_cu = _thu_muc_du_lieu_rieng_cu(comp)
-            mst = _chuan_mst(comp["mst"]) or str(comp["id"])
-            nguon = os.path.join(thu_muc_cu, f"DuLieu_{mst}.json")
-            dich = os.path.join(thu_muc_moi, f"DuLieu_{mst}.json")
-            if (os.path.isfile(nguon) and os.path.realpath(nguon) != os.path.realpath(dich)
-                    and not os.path.isfile(dich)):
-                shutil.copy2(nguon, dich)
-                so_gom += 1
-        except Exception:
-            continue
-    return so_gom
 
 def _doc_du_lieu_cty(cid):
     p = _du_lieu_cty_path(cid)
