@@ -5430,8 +5430,9 @@ function ConfirmScreen({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [co.accounts, activeTabAccId, rows]);
-  const internalSuggestions = React.useMemo(() => {
+  const internalSuggestionsFull = React.useMemo(() => {
     const map = {};
+    const debug = {};
     // Đọc dữ liệu MỖI tài khoản khác đúng 1 LẦN cho cả lượt tính này (không phải
     // 1 lần/1 dòng) — xem giải thích otherRowsPreloaded ở findInternalCandidatesFor.
     const otherRowsByAcc = new Map();
@@ -5450,17 +5451,25 @@ function ConfirmScreen({
         return;
       }
       let best = null;
+      // Gộp lý do bị loại từ TẤT CẢ tài khoản khác đã thử — để hiện kèm ngay dưới dòng khi không tìm
+      // được ứng viên nào, người dùng biết ngay bước lọc nào đang chặn mà không cần mở modal.
+      const dbgAgg = {};
       for (const acc of internalModalOtherAccounts) {
-        const scored = findInternalCandidatesFor(r, acc.id, otherRowsByAcc.get(acc.id));
+        const dbg = {};
+        const scored = findInternalCandidatesFor(r, acc.id, otherRowsByAcc.get(acc.id), dbg);
         if (scored.length && (!best || scored[0].dayDiff < best.dayDiff)) {
           best = { accId: acc.id, accLabel: acc.label, accCurrency: acc.currency, row: scored[0].o, dayDiff: scored[0].dayDiff };
         }
+        for (const k in dbg) { if (typeof dbg[k] === "number") dbgAgg[k] = (dbgAgg[k]||0) + dbg[k]; }
       }
       internalSuggCache.set(r, best);
       if (best) map[r.id] = best;
+      else debug[r.id] = dbgAgg;
     });
-    return map;
+    return { map, debug };
   }, [rows, internalSuggCache]);
+  const internalSuggestions = internalSuggestionsFull.map;
+  const internalNoMatchDebug = internalSuggestionsFull.debug;
   // Tự "gỡ" xác nhận tự động (Tầng 1 — khớp từ khoá từ điển) khi phát hiện giao dịch đó CŨNG khớp
   // gợi ý chuyển tiền nội bộ (internalSuggestions, tính ở trên) — từ khoá từ điển có thể khớp NHẦM
   // (VD tên/mã trong diễn giải chuyển khoản nội bộ trùng 1 phần với từ khoá đã gắn cho 1 NCC/KH),
@@ -7291,6 +7300,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     invPool: getInvPool(r),
     internalSuggestion: internalSuggestions[r.id],
     internalOtherAccSummary,
+    internalNoMatchDebug: internalNoMatchDebug[r.id],
     onQuickInternal: quickAcceptInternal,
     onPickInvById: (rowId, inv) => assignInvoice(rowId, inv, r.tx.debit>0?"331":"131"),
     isFocused: idx === focusIdx,
@@ -7955,6 +7965,7 @@ function ConfirmRow({
   onToggleSelect,
   internalSuggestion,
   internalOtherAccSummary,
+  internalNoMatchDebug,
   onQuickInternal,
   onFillBulk,
   onClearBulkPreview,
@@ -8541,7 +8552,24 @@ function ConfirmRow({
       style: { display: "block", marginTop: 2, color: "#aaa" }
     }, "(⇔ Nội bộ: " + internalOtherAccSummary.map(s =>
       (s.currency === "USD" ? "$ " : "₫ ") + s.label + " có " + s.total + " GD (" + s.chua + " chưa xử lý)"
-    ).join(", ") + ")")
+    ).join(", ") + ")"),
+    // Lý do CỤ THỂ khiến tất cả GD ở TK kia bị loại (nếu TK kia có GD nhưng không GD nào lọt qua bộ
+    // lọc) — hiện NGAY tại dòng, không cần bấm mở modal "⇔ Nội bộ" mới thấy chi tiết này.
+    internalNoMatchDebug && /*#__PURE__*/(() => {
+      const d = internalNoMatchDebug;
+      const parts = [];
+      if (d.saiChieuTien) parts.push(d.saiChieuTien + " sai chiều tiền");
+      if (d.saiSoTien) parts.push(d.saiSoTien + " sai số tiền");
+      if (d.saiNgay) parts.push(d.saiNgay + " lệch ngày quá xa");
+      if (d.khongCoTu) parts.push(d.khongCoTu + " không đọc được diễn giải");
+      if (d.saiTuKhoa) parts.push(d.saiTuKhoa + " diễn giải không đủ giống nhau");
+      if (d.saiSoTienNhung) parts.push(d.saiSoTienNhung + " diễn giải giống nhưng SỐ TIỀN không khớp");
+      if (d.daXuLy) parts.push(d.daXuLy + " đã xử lý (loại ra)");
+      if (d.daKhongKhop) parts.push(d.daKhongKhop + " đã đánh dấu không khớp");
+      return parts.length > 0 && React.createElement("span", {
+        style: { display: "block", marginTop: 2, color: "#c00" }
+      }, "(Lý do bị loại: " + parts.join(", ") + ")");
+    })()
   ), displayMST && /*#__PURE__*/React.createElement("button", {
     onClick: () => setAddDictMode(!addDictMode),
     style: {
