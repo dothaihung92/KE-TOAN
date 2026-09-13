@@ -5381,35 +5381,48 @@ function ConfirmScreen({
     // "BAN 5500 USD..." trên TK VND thì 5500 chính là số USD cần khớp với oAmt bên TK USD.
     const myDescAmts = crossCurrency ? extractDescAmounts(txRow.tx.desc) : null;
     if (debugOut) { debugOut.crossCurrency = crossCurrency; debugOut.myWordsCount = myWords ? myWords.size : null; debugOut.myDescAmts = myDescAmts; }
+    // wantSamples (chỉ modal bật, KHÔNG bật ở lượt tính hàng loạt cho toàn bộ dòng — tránh tốn bộ nhớ/
+    // thời gian vô ích) — ghi lại vài GD gần ngày nhất kèm ĐÚNG lý do bị loại, để xem trực tiếp GD nào
+    // lẽ ra phải khớp mà không khớp, thay vì chỉ có con số tổng.
+    const sample = (o, reason) => {
+      if (!debugOut || !debugOut.wantSamples) return;
+      if (!debugOut.samples) debugOut.samples = [];
+      let dd = null;
+      if (txDate && o.tx.date) { const od = parseVNDateI(o.tx.date); if (od) dd = Math.abs((txDate - od) / 86400000); }
+      if (dd !== null && dd > 10) return; // chỉ lấy mẫu GD gần ngày (±10 ngày), tránh liệt kê hết cả năm
+      debugOut.samples.push({ date: o.tx.date, desc: o.tx.desc, debit: o.tx.debit, credit: o.tx.credit, dayDiff: dd, reason });
+    };
     const oRows = (otherRowsPreloaded || getOtherRows(accId)).filter(o => {
       // Chỉ loại các dòng đã CHẮC CHẮN xử lý xong (đã ghép nội bộ, hoặc đã gắn đúng hoá đơn/MST) —
       // KHÔNG loại các dòng chỉ mới bị gán tạm "Tiền mặt" (không MST, không phải nội bộ), vì đây
       // thường là trường hợp người dùng bấm Alt+T do lúc đó chưa có gợi ý, thực chất vẫn có thể là
       // chuyển khoản nội bộ và cần được gợi ý lại để sửa.
-      if (o.confirmed === "yes" && (o.isInternal || o.confirmedMST)) { if(debugOut)debugOut.daXuLy=(debugOut.daXuLy||0)+1; return false; }
-      if (o.confirmed === "no") { if(debugOut)debugOut.daKhongKhop=(debugOut.daKhongKhop||0)+1; return false; }
-      if (myIsCredit ? !((o.tx.debit||0) > 0) : !((o.tx.credit||0) > 0)) { if(debugOut)debugOut.saiChieuTien=(debugOut.saiChieuTien||0)+1; return false; }
+      if (o.confirmed === "yes" && (o.isInternal || o.confirmedMST)) { if(debugOut)debugOut.daXuLy=(debugOut.daXuLy||0)+1; sample(o,"đã xử lý"); return false; }
+      if (o.confirmed === "no") { if(debugOut)debugOut.daKhongKhop=(debugOut.daKhongKhop||0)+1; sample(o,"đã không khớp"); return false; }
+      if (myIsCredit ? !((o.tx.debit||0) > 0) : !((o.tx.credit||0) > 0)) { if(debugOut)debugOut.saiChieuTien=(debugOut.saiChieuTien||0)+1; sample(o,"sai chiều tiền"); return false; }
       const oAmt = Math.max(o.tx.debit||0, o.tx.credit||0);
       if (crossCurrency) {
-        if (!(oAmt > 0)) { if(debugOut)debugOut.oAmt0=(debugOut.oAmt0||0)+1; return false; }
-        if (!txDate || !o.tx.date || Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) > 3) { if(debugOut)debugOut.saiNgay=(debugOut.saiNgay||0)+1; return false; }
+        if (!(oAmt > 0)) { if(debugOut)debugOut.oAmt0=(debugOut.oAmt0||0)+1; sample(o,"số tiền = 0"); return false; }
+        if (!txDate || !o.tx.date || Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) > 3) { if(debugOut)debugOut.saiNgay=(debugOut.saiNgay||0)+1; sample(o,"lệch ngày > 3"); return false; }
         const oWords = normVN(o.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w));
-        if (!oWords.length || !myWords.size) { if(debugOut)debugOut.khongCoTu=(debugOut.khongCoTu||0)+1; return false; }
+        if (!oWords.length || !myWords.size) { if(debugOut)debugOut.khongCoTu=(debugOut.khongCoTu||0)+1; sample(o,"không đọc được diễn giải"); return false; }
         const overlap = oWords.filter(w => myWords.has(w)).length;
-        if (overlap / Math.max(myWords.size, oWords.length) < 0.4) { if(debugOut)debugOut.saiTuKhoa=(debugOut.saiTuKhoa||0)+1; return false; }
+        if (overlap / Math.max(myWords.size, oWords.length) < 0.4) { if(debugOut)debugOut.saiTuKhoa=(debugOut.saiTuKhoa||0)+1; sample(o,`từ khoá chỉ trùng ${overlap}/${Math.max(myWords.size,oWords.length)}`); return false; }
         // Diễn giải cùng khuôn mẫu (VD đều "BÁN ... USD CHO ACB TY GIA ...") có thể trùng phần lớn TỪ
         // dù số tiền hoàn toàn khác nhau — nếu tách được số tiền cụ thể từ diễn giải, số đó BẮT BUỘC
         // phải khớp đúng số tiền thật (oAmt) của vế bên kia thì mới nhận là ứng viên, tránh gợi ý nhầm
         // 1 GD 3.000 USD/12.000 USD cho 1 GD 5.500 USD chỉ vì câu chữ giống nhau.
         if (myDescAmts.length) {
           const tol = Math.max(1, oAmt * 0.005);
-          if (!myDescAmts.some(n => Math.abs(n - oAmt) <= tol)) { if(debugOut)debugOut.saiSoTienNhung=(debugOut.saiSoTienNhung||0)+1; return false; }
+          if (!myDescAmts.some(n => Math.abs(n - oAmt) <= tol)) { if(debugOut)debugOut.saiSoTienNhung=(debugOut.saiSoTienNhung||0)+1; sample(o,`số tiền ${oAmt} không khớp số nhúng trong diễn giải [${myDescAmts.join(",")}]`); return false; }
         }
+        sample(o, "PASS");
         return true;
       }
-      if (!(myAmt > 0 && oAmt > 0 && Math.abs(oAmt - myAmt) < 1)) { if(debugOut)debugOut.saiSoTien=(debugOut.saiSoTien||0)+1; return false; }
-      if (!txDate || !o.tx.date) return true;
-      if (Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) > 7) { if(debugOut)debugOut.saiNgay=(debugOut.saiNgay||0)+1; return false; }
+      if (!(myAmt > 0 && oAmt > 0 && Math.abs(oAmt - myAmt) < 1)) { if(debugOut)debugOut.saiSoTien=(debugOut.saiSoTien||0)+1; sample(o,"sai số tiền"); return false; }
+      if (!txDate || !o.tx.date) { sample(o,"PASS"); return true; }
+      if (Math.abs((txDate - parseVNDateI(o.tx.date)) / 86400000) > 7) { if(debugOut)debugOut.saiNgay=(debugOut.saiNgay||0)+1; sample(o,"lệch ngày > 7"); return false; }
+      sample(o, "PASS");
       return true;
     });
     return oRows.map(o => {
@@ -5801,7 +5814,7 @@ function ConfirmScreen({
     if(!accId||!rowId){setInternalModalCandidates([]);setInternalModalDebug(null);return;}
     const txRow=rows.find(r=>r.id===rowId); if(!txRow)return;
     const otherRows = getOtherRows(accId);
-    const stageDebug = {};
+    const stageDebug = { wantSamples: true };
     const scored = findInternalCandidatesFor(txRow, accId, otherRows, stageDebug).slice(0, 20);
     const cands = scored.map(x=>x.o);
     setInternalModalCandidates(cands);
@@ -7225,7 +7238,18 @@ internalModalFor&&internalModalRow&&React.createElement("div",{
                   }
                 }
               }
-              return React.createElement("div",{style:{padding:"24px",textAlign:"center",color:"#888",fontSize:12,fontStyle:"italic"}},emptyMsg);
+              const samples=internalModalDebug&&internalModalDebug.stage&&internalModalDebug.stage.samples;
+              return React.createElement("div",{style:{padding:"14px"}},
+                React.createElement("div",{style:{textAlign:"center",color:"#888",fontSize:12,fontStyle:"italic",marginBottom:samples&&samples.length?10:0}},emptyMsg),
+                samples&&samples.length>0&&React.createElement("div",{style:{fontSize:11}},
+                  React.createElement("div",{style:{fontWeight:600,color:"#555",marginBottom:4}},`Các GD gần ngày nhất ở TK kia (${samples.length}) và lý do bị loại:`),
+                  samples.slice(0,15).sort((a,b)=>(a.dayDiff??999)-(b.dayDiff??999)).map((s,i)=>React.createElement("div",{key:i,style:{padding:"5px 8px",borderBottom:"1px solid #f0ecfa",background:i%2===0?"#faf8ff":"#fff"}},
+                    React.createElement("div",{style:{fontWeight:600,color:"#333",wordBreak:"break-word"}},s.date+" — "+s.desc),
+                    React.createElement("div",{style:{color:"#888"}},"Nợ: "+(s.debit||0)+" / Có: "+(s.credit||0)+(s.dayDiff!=null?" — lệch "+Math.round(s.dayDiff)+" ngày":"")),
+                    React.createElement("div",{style:{color:s.reason==="PASS"?"#16a34a":"#c00",fontWeight:600}},s.reason)
+                  ))
+                )
+              );
             }
             const pd=d=>{if(!d)return null;const m=String(d).match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);return m?new Date(m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0")):new Date(d);};
             return disp.map((cand,ci)=>{
