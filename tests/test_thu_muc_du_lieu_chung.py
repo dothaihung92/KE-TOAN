@@ -92,6 +92,20 @@ with open(os.path.join(tmpA, "DuLieu_0301111222.json"), "w", encoding="utf-8") a
 with open(os.path.join(tmpB_data, "DuLieu_0302222333.json"), "w", encoding="utf-8") as f:
     json.dump({"note": "B-old"}, f)
 
+# ── Công ty C: đúng ca ĐÃ DÙNG PHẦN MỀM TỪ TRƯỚC bản vá "DU LIEU CTY" —
+# dữ liệu đang nằm THẲNG trong save_dir (KHÔNG có thư mục con "DU LIEU
+# CTY" nào cả, chưa hề tồn tại) — mô phỏng đúng câu hỏi người dùng đặt ra:
+# "những cty đã lưu trước đó có cần phải chỉnh lại đường dẫn lưu không?"
+tmpC_save = os.path.join(tmp_root, "cty_C_savedir_cu")
+os.makedirs(tmpC_save, exist_ok=True)
+conn = db()
+conn.execute("INSERT INTO companies (id, ten, mst, save_dir, data_dir) VALUES (3,?,?,?,?)",
+             ("CONG TY C", "0303333444", tmpC_save, ""))
+conn.commit()
+conn.close()
+with open(os.path.join(tmpC_save, "DuLieu_0303333444.json"), "w", encoding="utf-8") as f:
+    json.dump({"note": "C-old-bare-savedir", "hach_toan": ["da co san"]}, f)
+
 # ── Test 1: CHƯA cấu hình thư mục chung -> vẫn lùi về đúng thư mục RIÊNG
 # kiểu cũ của từng công ty (không phá vỡ cài đặt hiện có). ──
 assert _du_lieu_cty_path(1) == os.path.join(tmpA, "DuLieu_0301111222.json"), (
@@ -102,6 +116,28 @@ assert _du_lieu_cty_path(2) == os.path.join(tmpB_data, "DuLieu_0302222333.json")
 print("PASS 1: chưa cấu hình thư mục chung -> công ty A dùng đúng data_dir riêng cũ; công ty B (không có "
       "data_dir) tự động dùng thư mục con 'DU LIEU CTY' ngay trong Thư mục lưu file XML/PDF — không cần "
       "gõ thêm đường dẫn nào.")
+
+# ── Test 1b (đúng câu hỏi người dùng "những cty đã lưu trước đó có cần
+# chỉnh lại đường dẫn không?"): công ty C đã có dữ liệu THẬT nằm thẳng
+# trong save_dir (kiểu CŨ, trước khi có thư mục con "DU LIEU CTY") ->
+# _du_lieu_cty_path PHẢI tự động sao chép dữ liệu đó vào đúng vị trí MỚI
+# (không cần người dùng tự làm gì, không mất dữ liệu), và đọc lại đúng nội
+# dung cũ ở vị trí mới. ──
+duong_dan_c = _du_lieu_cty_path(3)
+assert duong_dan_c == os.path.join(tmpC_save, "DU LIEU CTY", "DuLieu_0303333444.json"), (
+    f"Công ty C phải dùng đúng thư mục con DU LIEU CTY mới — got {duong_dan_c}")
+assert os.path.isfile(duong_dan_c), (
+    "Dữ liệu CŨ (nằm thẳng trong save_dir, trước khi có thư mục con) PHẢI được TỰ ĐỘNG sao chép sang vị "
+    "trí mới — người dùng KHÔNG cần tự chỉnh lại đường dẫn cho công ty đã dùng phần mềm từ trước")
+du_lieu_c = _doc_du_lieu_cty(3)
+assert du_lieu_c.get("hach_toan") == ["da co san"], (
+    f"Đọc lại đúng nội dung dữ liệu CŨ ở vị trí MỚI, không bị mất/trống — got {du_lieu_c}")
+assert os.path.isfile(os.path.join(tmpC_save, "DuLieu_0303333444.json")), (
+    "File GỐC (kiểu cũ, nằm thẳng trong save_dir) KHÔNG được xoá sau khi tự động sao chép — an toàn, "
+    "giữ lại làm bản dự phòng")
+print("PASS 1b: công ty ĐÃ DÙNG PHẦN MỀM TỪ TRƯỚC (dữ liệu nằm thẳng trong Thư mục lưu file XML/PDF, chưa "
+      "có thư mục con DU LIEU CTY) được TỰ ĐỘNG sao chép dữ liệu sang đúng vị trí mới ngay lần đọc/ghi "
+      "đầu tiên sau khi nâng cấp — người dùng KHÔNG cần tự chỉnh lại đường dẫn, không mất dữ liệu cũ.")
 
 # ── Test 2: đặt thư mục CHUNG -> _du_lieu_cty_path của MỌI công ty đổi
 # sang đúng thư mục chung đó (mỗi công ty vẫn 1 file riêng theo MST). ──
@@ -117,16 +153,18 @@ print("PASS 2: đặt thư mục dữ liệu CHUNG -> TẤT CẢ công ty cùng 
 # CŨ đang rải rác về thư mục chung — KHÔNG xoá bản gốc, giữ nguyên nội
 # dung. ──
 so_gom = _gom_du_lieu_cty_ve_thu_muc_chung(tmp_shared)
-assert so_gom == 2, f"Phải gom được đúng 2 công ty (A + B) — got {so_gom}"
+assert so_gom == 3, f"Phải gom được đúng 3 công ty (A + B + C) — got {so_gom}"
 with open(os.path.join(tmp_shared, "DuLieu_0301111222.json"), encoding="utf-8") as f:
     assert json.load(f) == {"note": "A-old"}, "Nội dung file gom về của công ty A phải khớp bản gốc"
 with open(os.path.join(tmp_shared, "DuLieu_0302222333.json"), encoding="utf-8") as f:
     assert json.load(f) == {"note": "B-old"}, "Nội dung file gom về của công ty B phải khớp bản gốc"
+with open(os.path.join(tmp_shared, "DuLieu_0303333444.json"), encoding="utf-8") as f:
+    assert json.load(f).get("hach_toan") == ["da co san"], "Nội dung file gom về của công ty C phải khớp bản gốc (đã tự sao chép ở Test 1b)"
 assert os.path.isfile(os.path.join(tmpA, "DuLieu_0301111222.json")), (
     "File GỐC của công ty A KHÔNG được xoá sau khi gom (chỉ sao chép, an toàn)")
 assert os.path.isfile(os.path.join(tmpB_data, "DuLieu_0302222333.json")), (
     "File GỐC của công ty B KHÔNG được xoá sau khi gom (chỉ sao chép, an toàn)")
-print("PASS 3: tự động gom đúng 2 file dữ liệu cũ (A, B) về thư mục chung, giữ nguyên nội dung, KHÔNG xoá bản gốc.")
+print("PASS 3: tự động gom đúng 3 file dữ liệu cũ (A, B, C) về thư mục chung, giữ nguyên nội dung, KHÔNG xoá bản gốc.")
 
 # ── Test 4: gọi gom LẦN 2 (mô phỏng lỡ bấm lưu lại) -> KHÔNG ghi đè dữ
 # liệu đã có sẵn ở thư mục chung (đề phòng thư mục chung đã có dữ liệu MỚI

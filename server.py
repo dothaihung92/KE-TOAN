@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.226"
+APP_BUILD = "2026-08-31.227"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9341,13 +9341,35 @@ def _thu_muc_du_lieu_rieng_cu(comp):
     dễ tìm/quản lý. Công ty CHƯA điền cả 2 thì lùi về mặc định
     data/cong_ty/. Dùng làm phương án MẶC ĐỊNH cho _du_lieu_cty_path (khi
     chưa cấu hình thư mục chung) và để dò vị trí file lúc gom về thư mục
-    chung (xem _gom_du_lieu_cty_ve_thu_muc_chung)."""
+    chung (xem _gom_du_lieu_cty_ve_thu_muc_chung).
+
+    TỰ ĐỘNG SAO CHÉP (không xoá bản gốc) file dữ liệu công ty ĐÃ DÙNG PHẦN
+    MỀM TỪ TRƯỚC — trước bản vá thư mục con "DU LIEU CTY" này, dữ liệu công
+    ty (không có data_dir riêng) nằm THẲNG trong save_dir
+    (DuLieu_<MST>.json ngay tại đó, không có thư mục con) — nếu đổi thẳng
+    sang thư mục con mới mà không gom, phần mềm sẽ "không thấy" dữ liệu cũ
+    đó nữa (coi như trống, ghi đè mất dấu vết cũ), dù thực ra dữ liệu vẫn
+    còn nguyên chỉ khác đúng 1 cấp thư mục — nguy hiểm cho công ty đã dùng
+    phần mềm lâu. Chỉ sao chép khi file MỚI (trong thư mục con) CHƯA CÓ
+    (không ghi đè)."""
     dd = (comp["data_dir"] or "").strip() if "data_dir" in comp.keys() else ""
     sd = (comp["save_dir"] or "").strip()
     if dd:
         return dd
     if sd:
-        return os.path.join(sd, "DU LIEU CTY")
+        thu_muc_moi = os.path.join(sd, "DU LIEU CTY")
+        try:
+            mst = _chuan_mst(comp["mst"]) if "mst" in comp.keys() else ""
+            if mst:
+                file_cu = os.path.join(sd, f"DuLieu_{mst}.json")
+                file_moi = os.path.join(thu_muc_moi, f"DuLieu_{mst}.json")
+                if os.path.isfile(file_cu) and not os.path.isfile(file_moi):
+                    import shutil
+                    os.makedirs(thu_muc_moi, exist_ok=True)
+                    shutil.copy2(file_cu, file_moi)
+        except Exception:
+            pass
+        return thu_muc_moi
     return os.path.join(DATA_DIR, "cong_ty")
 
 def _du_lieu_cty_path(cid):
