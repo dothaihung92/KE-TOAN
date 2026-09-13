@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.228"
+APP_BUILD = "2026-08-31.229"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9101,12 +9101,23 @@ def clear_downloads(scope: str = "temp"):
     conn = db()
     rows = conn.execute("SELECT save_dir, data_dir FROM companies").fetchall()
     conn.close()
-    # tập data_dir để loại trừ tuyệt đối (phòng khi save_dir == data_dir hoặc lồng nhau)
+    # Tập thư mục dữ liệu (data_dir riêng NẾU có — bản cũ, hiếm gặp — hoặc thư
+    # mục con "DU LIEU CTY" TỰ ĐỘNG nằm ngay trong save_dir, xem
+    # _thu_muc_du_lieu_rieng_cu) để loại trừ TUYỆT ĐỐI khỏi lượt xóa "nhẹ máy"
+    # này — đúng lỗi thật đã xác nhận: từ khi dữ liệu công ty (DuLieu_<MST>.json,
+    # đuôi .json cũng nằm trong danh sách EXT bị xóa ở dưới) chuyển vào thư mục
+    # con NGAY TRONG save_dir, nút "Xóa file đã tải" (chỉ loại trừ đúng data_dir
+    # RIÊNG khai báo tay, không biết gì về thư mục con tự động mới này) sẽ xoá
+    # NHẦM LUÔN dữ liệu hạch toán/danh mục thật của công ty nếu không loại trừ
+    # thêm ở đây — người dùng cảnh báo trước khi việc này thực sự xảy ra.
     data_dirs = set()
     for d in rows:
         dd = (d["data_dir"] or "").strip() if "data_dir" in d.keys() else ""
+        sd_d = (d["save_dir"] or "").strip()
         if dd:
             data_dirs.add(os.path.realpath(dd))
+        elif sd_d:
+            data_dirs.add(os.path.realpath(os.path.join(sd_d, "DU LIEU CTY")))
 
     seen = set()
     for d in rows:

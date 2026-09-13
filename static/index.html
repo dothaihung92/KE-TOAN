@@ -3787,7 +3787,7 @@ async function xoaFileTai(){
     `• File hóa đơn XML/PDF (mua_vào, bán_ra)\n`+
     `• File tờ khai đã tải (ToKhai_DaNop)\n`+
     `• File Excel đã xuất (.xlsx) và file .json nằm trong thư mục này\n\n`+
-    `✅ TUYỆT ĐỐI KHÔNG đụng tới "Thư mục lưu DỮ LIỆU" (data_dir) hay bất kỳ thư mục nào khác.\n\nTiếp tục?`;
+    `✅ TUYỆT ĐỐI KHÔNG đụng tới thư mục con "DU LIEU CTY" (dữ liệu hạch toán, danh mục...) hay bất kỳ thư mục nào khác.\n\nTiếp tục?`;
   if(!confirm(msg))return;
   try{
     const r=await api('/api/clear-downloads?scope=all',{method:'POST'});
