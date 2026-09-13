@@ -43,7 +43,7 @@ const stopSrc = html.slice(stopStart, stopEnd);
 const normVNSrc = extractBraceBlock('function normVN(s) {');
 const parseVNDateISrc = extractBraceBlock('const parseVNDateI = d => {');
 const extractDescAmountsSrc = extractBraceBlock('const extractDescAmounts = desc => {');
-const findInternalCandidatesForSrc = extractBraceBlock('const findInternalCandidatesFor = (txRow, accId, otherRowsPreloaded) => {');
+const findInternalCandidatesForSrc = extractBraceBlock('const findInternalCandidatesFor = (txRow, accId, otherRowsPreloaded, debugOut) => {');
 
 // Chạy trong 1 hàm bọc riêng (new Function) nhận co/activeTabAcc làm tham số — findInternalCandidatesFor
 // đọc 2 biến này qua closure (không phải tham số của chính nó) trong file gốc, nên phải "giả lập" đúng
@@ -121,6 +121,32 @@ function makeRow(id, debit, credit, date, desc, confirmed) {
   const ids = scored.map(s => s.o.id);
   assert(ids.includes('u5'), `Diễn giải không có số tiền cụ thể vẫn phải gợi ý theo % từ trùng như cũ — got candidates: ${ids}`);
   console.log('PASS 3: diễn giải không nhúng số tiền cụ thể vẫn gợi ý bình thường theo % từ trùng (không hồi quy).');
+}
+
+// ----- Test 4 (chẩn đoán mới thêm): khi truyền debugOut, hàm PHẢI ghi lại đúng lý do loại từng GD
+// bị loại — dùng để hiện chi tiết trong modal khi người dùng báo "vẫn không thấy gợi ý" nhưng không
+// rõ vì sao (VD báo cáo thật: TK kia CÓ dữ liệu nhưng vẫn hiện "không tìm thấy GD nào khớp"). Đảm bảo
+// debugOut không làm thay đổi kết quả thật (candidates) khi có/không truyền vào. -----
+{
+  const co = { accounts: [{ id: 'usdAcc', currency: 'USD' }] };
+  const activeTabAcc = { currency: 'VND' };
+  const findInternalCandidatesFor = factory(co, activeTabAcc);
+
+  const myRow = makeRow('vnd4', 0, 143605000, '14/01/2026', 'BAN 5500 USD CHO ACB TY GIA 26110');
+  const uSai3000 = makeRow('u1', 3000, 0, '14/01/2026', 'BAN 3000 USD CHO ACB TY GIA 26100');
+  const uDaXuLy = makeRow('u6', 5500, 0, '14/01/2026', 'BAN 5500 USD CHO ACB TY GIA 26110', 'yes');
+  uDaXuLy.isInternal = true;
+
+  const debugOut = {};
+  const scored = findInternalCandidatesFor(myRow, 'usdAcc', [uSai3000, uDaXuLy], debugOut);
+  assert(scored.length === 0, `Ca này cố tình không có ứng viên hợp lệ nào — got: ${scored.map(s=>s.o.id)}`);
+  assert(debugOut.saiSoTienNhung === 1, `debugOut phải ghi nhận đúng 1 GD bị loại do diễn giải giống nhưng sai số tiền (u1) — got saiSoTienNhung=${debugOut.saiSoTienNhung}`);
+  assert(debugOut.daXuLy === 1, `debugOut phải ghi nhận đúng 1 GD bị loại do đã xử lý (u6, isInternal=true) — got daXuLy=${debugOut.daXuLy}`);
+
+  // Không truyền debugOut vẫn phải ra kết quả giống hệt (không bị ảnh hưởng bởi việc thêm tham số mới)
+  const scoredNoDebug = findInternalCandidatesFor(myRow, 'usdAcc', [uSai3000, uDaXuLy]);
+  assert(scoredNoDebug.length === scored.length, 'Không truyền debugOut vẫn phải ra cùng kết quả như có truyền');
+  console.log('PASS 4: debugOut ghi đúng lý do loại từng GD (phục vụ chẩn đoán), không ảnh hưởng kết quả thật.');
 }
 
 console.log(process.exitCode ? 'CÓ TEST FAIL' : 'TẤT CẢ TEST PASS');
