@@ -5121,8 +5121,12 @@ function ConfirmScreen({
     const isCash = hach === "1111" && name === "Tiền mặt" && !mst;
     setRowsH(prev => prev.map(r => {
       if (r.id !== id) return r;
+      // Xoá cờ "chuyển khoản nội bộ" cũ khi dòng đi qua luồng override thường — xem giải thích đầy đủ
+      // ở clearInternal trong confirmRow() (cùng lý do: tránh dòng bị kẹt "đã xử lý" nội bộ vĩnh viễn
+      // dù đã được xử lý lại theo hướng khác).
       return {
         ...r,
+        isInternal: false, internalAccId: null, internalAccLabel: "", internalSkip: false,
         confirmed: "yes",
         confirmedMST: mst,
         confirmedName: name,
@@ -5170,10 +5174,19 @@ function ConfirmScreen({
   };
   const confirmRow = (id, val, mst, name, loai, kw) => setRowsH(prev => prev.map(r => {
     if (r.id !== id) return r;
+    // Luôn XOÁ cờ "chuyển khoản nội bộ" (isInternal/internalAccId...) khi dòng đi qua luồng xác nhận
+    // THƯỜNG (Đúng/Không khớp/gán hoá đơn) — 1 dòng không thể VỪA là placeholder "vế bên kia" của 1 GD
+    // nội bộ VỪA được xác nhận theo hướng khác cùng lúc. Thiếu bước này, 1 dòng từng bị gán NHẦM làm
+    // "vế bên kia" (VD do gợi ý nội bộ sai trước đây) rồi được xử lý lại theo hướng khác sẽ bị KẸT vĩnh
+    // viễn ở trạng thái "đã xử lý" trong mọi lần dò gợi ý nội bộ sau này (dù không còn hạch toán thật
+    // nào cho nó) — đúng ca thật đã gặp: dòng hiện "Khong co goi y" (không có hoá đơn/MST nào) nhưng
+    // vẫn bị loại khỏi ứng viên nội bộ vì isInternal cũ chưa từng được xoá.
+    const clearInternal = { isInternal: false, internalAccId: null, internalAccLabel: "", internalSkip: false };
     // "Không khớp" (val !== "yes") không được mang theo MST/tên/hạch toán của gợi ý bị từ chối
     if (val !== "yes") {
       return {
         ...r,
+        ...clearInternal,
         confirmed: val,
         confirmedMST: "",
         confirmedName: "",
@@ -5189,11 +5202,12 @@ function ConfirmScreen({
     const dictHach = b && b.hach_toan || "";
     return {
       ...r,
+      ...clearInternal,
       confirmed: val,
       confirmedMST: mst || b && b.mst || "",
       confirmedName: name || b && b.ten_cty || "",
       confirmedLoai: loai || b && b.loai || (r.tx.credit > 0 ? "DAURA" : "DAUVAO"),
-      confirmedHach: r.confirmedHach || dictHach || defaultHach,
+      confirmedHach: (r.confirmedHach && r.confirmedHach !== "X" ? r.confirmedHach : "") || dictHach || defaultHach,
       manualConfirm: true,
       manualKw: kw || ""
     };
