@@ -741,6 +741,34 @@ function extractForeignAmt(desc, currency) {
     return 0;
   }
 }
+// Tính bankAmt (số ngoại tệ)/bankRate (tỷ giá)/bankVND (số VND quy đổi) khi gắn 1 GD ngân hàng vào 1
+// tờ khai — xử lý ĐÚNG 2 trường hợp, tránh lẫn lộn số ngoại tệ với số VND (đúng lỗi thật đã báo: gắn
+// GD từ TK USD vào tờ khai, phần mềm lấy thẳng số USD (VD 9,172.54) làm luôn "Đồng Việt Nam TT" —
+// khiến chênh lệch tính ra sai lệch hàng trăm triệu vì so VND thật với 1 số USD tưởng nhầm là VND):
+// (1) GD ngân hàng đang ở TK VND (row.tx.currency rỗng/"VND"): số tiền GD CHÍNH LÀ bankVND — còn số
+//     ngoại tệ (bankAmt) không có sẵn, phải dò trong nội dung diễn giải (sao kê VND ghi kèm số ngoại
+//     tệ dạng text, VD "USD 7,447.50").
+// (2) GD ngân hàng đang ở TK NGOẠI TỆ CÙNG LOẠI với tờ khai (VD TK USD, tờ khai USD): số tiền GD
+//     CHÍNH LÀ bankAmt luôn (đã đúng ngoại tệ, KHÔNG được dò trong text — dò kiểu này từng bắt nhầm
+//     số phí ngân hàng nhỏ ghi trong diễn giải, VD "PHI NN:USD8." bị hiểu lầm là số tiền $8 thay vì
+//     $9,172.54 thật) — bankVND phải QUY ĐỔI qua tỷ giá THẬT của đúng GD đó (row.tyGia — tỷ giá VCB
+//     người dùng đã tự nhập/lấy ở màn hình đối chiếu chính, ô "Tỷ giá" ngay dưới mỗi dòng TK ngoại
+//     tệ), TUYỆT ĐỐI không được dùng thẳng số ngoại tệ làm số VND.
+function computeBankPayment(row, tk) {
+  const rowCcy = (row.tx.currency || "VND").toUpperCase();
+  const tkCcy = (tk.currency || "USD").toUpperCase();
+  if (rowCcy !== "VND" && rowCcy === tkCcy) {
+    const bankAmt = Math.max(row.tx.debit || 0, row.tx.credit || 0);
+    const rate = row.tyGia > 0 ? row.tyGia : 0;
+    const bankVND = rate > 0 ? Math.round(bankAmt * rate) : bankAmt;
+    return { bankAmt, bankRate: rate, bankVND, missingRate: !(rate > 0) };
+  }
+  const bankVND = Math.max(row.tx.debit || 0, row.tx.credit || 0);
+  const remainForeignEst = tk.tyGiaTinhThue > 0 ? Math.round((tkTaxVND(tk) - tkTotalPaidVND(tk)) / tk.tyGiaTinhThue * 100) / 100 : 0;
+  const bankAmt = extractForeignAmt(row.tx.desc, tk.currency) || remainForeignEst || 0;
+  const bankRate = bankAmt > 0 ? Math.round(bankVND / bankAmt) : 0;
+  return { bankAmt, bankRate, bankVND, missingRate: false };
+}
 function parseToKhaiWorkbook(wb, kind) {
   // File tờ khai NK thường có sheet tên "TKN"; tờ khai XK theo cùng quy ước hải quan là "TKX" —
   // nếu không tìm thấy đúng tên sheet (một số file export ra tên khác) thì lấy sheet đầu tiên.
@@ -6046,17 +6074,16 @@ function ConfirmScreen({
       ...r, confirmed: "yes", confirmedName: tk.nhaCungCap || r.confirmedName,
       confirmedHach: r.confirmedHach || defaultHachOf(kind), manualConfirm: true, confirmedToKhaiId: tk.id
     }));
-    const bankVND = Math.max(row.tx.debit || 0, row.tx.credit || 0);
-    const remainForeignEst = tk.tyGiaTinhThue > 0 ? Math.round((tkTaxVND(tk) - tkTotalPaidVND(tk)) / tk.tyGiaTinhThue * 100) / 100 : 0;
-    const bankAmt = extractForeignAmt(row.tx.desc, tk.currency) || remainForeignEst || 0;
-    const bankRate = bankAmt > 0 ? Math.round(bankVND / bankAmt) : 0;
+    const { bankAmt, bankRate, bankVND, missingRate } = computeBankPayment(row, tk);
     const existingPayments = tkPayments(tk).filter(p => p.rowId !== rowId);
     const newPayments = [...existingPayments, { rowId, bankDate: row.tx.date, bankAmt, bankRate, bankVND }];
     saveTokhaiListOf(kind)(list.map(t => t.id !== tk.id ? t : {
       ...t, payments: newPayments,
       linkedRowId: undefined, bankDate: undefined, bankAmt: undefined, bankRate: undefined, bankVND: undefined
     }));
-    showToast("✓ Đã gắn tờ khai " + tk.toKhaiSo + " vào giao dịch (lần TT thứ " + newPayments.length + ")");
+    showToast(missingRate
+      ? "✓ Đã gắn tờ khai " + tk.toKhaiSo + " — ⚠ GD ngân hàng này CHƯA CÓ tỷ giá VCB (ô \"Tỷ giá\" dưới dòng TK ngoại tệ ở màn hình chính), đang tạm tính VND = ngoại tệ nên chênh lệch có thể SAI. Hãy nhập tỷ giá VCB cho GD đó rồi gắn lại."
+      : "✓ Đã gắn tờ khai " + tk.toKhaiSo + " vào giao dịch (lần TT thứ " + newPayments.length + ")", missingRate ? "warn" : "ok");
     setTokhaiPickForRowOf(kind)(null);
     setTokhaiModalOpenOf(kind)(false);
   };
@@ -6073,7 +6100,15 @@ function ConfirmScreen({
     allocations.forEach(a => {
       const tk = updatedList.find(t => t.id === a.tokhaiId);
       if (!tk) return;
-      const bankAmt = tk.tyGiaTinhThue > 0 ? Math.round((a.amtVND / tk.tyGiaTinhThue) * 100) / 100 : (extractForeignAmt(row.tx.desc, tk.currency) || 0);
+      // Ưu tiên quy đổi qua tyGiaTinhThue của tờ khai (đã biết chắc số VND phân bổ) — chỉ dò trong
+      // diễn giải (extractForeignAmt) khi KHÔNG có tyGiaTinhThue VÀ dòng ngân hàng đang ở TK VND (dò
+      // trong text chỉ đáng tin khi số ngoại tệ không có sẵn sẵn trên chính dòng đó); dòng ngân hàng
+      // đang ở TK NGOẠI TỆ cùng loại thì lấy thẳng số tiền GD, không dò text (tránh bắt nhầm số phí
+      // ngân hàng nhỏ ghi kèm trong diễn giải, VD "PHI NN:USD8.").
+      const rowCcySplit = (row.tx.currency || "VND").toUpperCase();
+      const bankAmt = tk.tyGiaTinhThue > 0 ? Math.round((a.amtVND / tk.tyGiaTinhThue) * 100) / 100
+        : rowCcySplit !== "VND" && rowCcySplit === (tk.currency || "USD").toUpperCase() ? Math.max(row.tx.debit || 0, row.tx.credit || 0)
+        : (extractForeignAmt(row.tx.desc, tk.currency) || 0);
       const bankRate = bankAmt > 0 ? Math.round(a.amtVND / bankAmt) : 0;
       const existingPayments = tkPayments(tk).filter(p => p.rowId !== rowId);
       const newPayments = [...existingPayments, { rowId, bankDate: row.tx.date, bankAmt, bankRate, bankVND: a.amtVND }];
@@ -7641,7 +7676,12 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
   // Dùng minWidth (không phải width) để cột được co giãn rộng ra theo nội dung thật (VD số tờ
   // khai dài, nhiều số hoá đơn gộp 1 dòng cách nhau dấu phẩy) thay vì bị cắt cụt ("...") — bảng đã
   // có overflow-x cuộn ngang nên rộng hơn không sao.
-  const th = (label, w) => React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontSize: 12, color: "var(--text2)", borderBottom: "2px solid var(--border)", minWidth: w, whiteSpace: "nowrap" } }, label);
+  // 3 dòng đầu bảng (nhóm cột, tên cột, ô lọc từng cột) đều "dính" (sticky) khi cuộn dọc — xếp chồng
+  // đúng thứ tự bằng "top" cộng dồn theo chiều cao TỪNG dòng phía trên (28px cho dòng nhóm cột, 34px
+  // cho dòng tên cột) để không đè lên nhau/hở khoảng trống. zIndex tăng dần theo dòng SAU (đứng trên
+  // dòng TRƯỚC khi cuộn) — dòng dữ liệu (tbody) không đặt sticky/zIndex nên luôn nằm dưới cùng.
+  const STICKY_ROW1_H = 28, STICKY_ROW2_H = 34;
+  const th = (label, w) => React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontSize: 12, color: "var(--text2)", borderBottom: "2px solid var(--border)", minWidth: w, whiteSpace: "nowrap", position: "sticky", top: STICKY_ROW1_H, zIndex: 3, background: "#fff" } }, label);
   const td = (...children) => React.createElement("td", { style: { padding: "3px 6px", borderBottom: "1px solid #eee", fontSize: 13, verticalAlign: "top" } }, ...children);
 
   return React.createElement("div", {
@@ -7696,15 +7736,15 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
         : React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
             React.createElement("thead", null,
               React.createElement("tr", null,
-                React.createElement("th", { style: { padding: "4px 8px" } }, ""),
-                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff" } }, isXK ? "TỜ KHAI HẢI QUAN XK" : "TỜ KHAI HẢI QUAN NK"),
-                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff" } }, "TRỊ GIÁ"),
-                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#1d4ed8", background: "#eef2ff" } }, "CHỨNG TỪ NGÂN HÀNG"),
-                React.createElement("th", { colSpan: 2, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff" } }, "CHÊNH LỆCH"),
-                React.createElement("th", { style: { padding: "4px 8px" } }, "")
+                React.createElement("th", { style: { padding: "4px 8px", position: "sticky", top: 0, zIndex: 3, background: "#fff" } }, ""),
+                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, isXK ? "TỜ KHAI HẢI QUAN XK" : "TỜ KHAI HẢI QUAN NK"),
+                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, "TRỊ GIÁ"),
+                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#1d4ed8", background: "#eef2ff", position: "sticky", top: 0, zIndex: 3 } }, "CHỨNG TỪ NGÂN HÀNG"),
+                React.createElement("th", { colSpan: 2, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, "CHÊNH LỆCH"),
+                React.createElement("th", { style: { padding: "4px 8px", position: "sticky", top: 0, zIndex: 3, background: "#fff" } }, "")
               ),
               React.createElement("tr", null,
-                React.createElement("th", { style: { padding: "4px 8px" } },
+                React.createElement("th", { style: { padding: "4px 8px", position: "sticky", top: STICKY_ROW1_H, zIndex: 3, background: "#fff" } },
                   React.createElement("input", {
                     type: "checkbox",
                     title: "Chọn tất cả (đang lọc)",
@@ -7723,15 +7763,17 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
               // Dòng lọc riêng TỪNG CỘT — chỉ đặt cho các cột dữ liệu gốc (không đặt cho cột tính
               // toán/mảng nhiều dòng như Chứng từ NH, Chênh lệch, Hạch toán).
               React.createElement("tr", { style: { background: "#fafafa" } },
-                React.createElement("td", { style: { padding: "3px 6px" } }),
-                React.createElement("td", { style: { padding: "3px 6px" } }, colFilterInput("nhaCungCap")),
-                React.createElement("td", { style: { padding: "3px 6px" } }, colFilterInput("toKhaiSo")),
-                React.createElement("td", { style: { padding: "3px 6px" } }, colFilterInput("ngayToKhai")),
-                React.createElement("td", { style: { padding: "3px 6px" } }, colFilterInput("soHoaDon")),
-                React.createElement("td", { style: { padding: "3px 6px" } }, colFilterInput("triGiaHoaDon")),
-                React.createElement("td", { style: { padding: "3px 6px" } }, colFilterInput("currency")),
-                React.createElement("td", { style: { padding: "3px 6px" } }, colFilterInput("tyGiaTinhThue")),
-                React.createElement("td", { colSpan: 8, style: { padding: "3px 6px" } })
+                (() => { const stTd = { padding: "3px 6px", position: "sticky", top: STICKY_ROW1_H + STICKY_ROW2_H, zIndex: 3, background: "#fafafa" }; return [
+                React.createElement("td", { key: "c0", style: stTd }),
+                React.createElement("td", { key: "c1", style: stTd }, colFilterInput("nhaCungCap")),
+                React.createElement("td", { key: "c2", style: stTd }, colFilterInput("toKhaiSo")),
+                React.createElement("td", { key: "c3", style: stTd }, colFilterInput("ngayToKhai")),
+                React.createElement("td", { key: "c4", style: stTd }, colFilterInput("soHoaDon")),
+                React.createElement("td", { key: "c5", style: stTd }, colFilterInput("triGiaHoaDon")),
+                React.createElement("td", { key: "c6", style: stTd }, colFilterInput("currency")),
+                React.createElement("td", { key: "c7", style: stTd }, colFilterInput("tyGiaTinhThue")),
+                React.createElement("td", { key: "c8", colSpan: 8, style: stTd })
+                ]; })()
               )
             ),
             React.createElement("tbody", null, filtered.map(tk => {
