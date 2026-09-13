@@ -5053,6 +5053,10 @@ function ConfirmScreen({
   const [internalModalOtherRowId, setInternalModalOtherRowId] = useState(null);
   const [internalModalCandidates, setInternalModalCandidates] = useState([]);
   const [internalModalSearch, setInternalModalSearch] = useState("");
+  // Thông tin chẩn đoán khi KHÔNG tìm được ứng viên nào — phân biệt "TK kia chưa có/còn ít dữ liệu"
+  // (cần tải sao kê TK đó lên hoặc dữ liệu chưa lưu) với "có dữ liệu nhưng không GD nào khớp ngày/số
+  // tiền" (cần chọn TK khác/kiểm tra lại), thay vì 1 câu thông báo chung chung không biết đường sửa.
+  const [internalModalDebug, setInternalModalDebug] = useState(null);
 
   // Thêm dữ liệu sao kê khi đang làm việc
   const [addMode, setAddMode] = useState(false);
@@ -5769,11 +5773,16 @@ function ConfirmScreen({
     return () => window.removeEventListener("keydown", handler);
   }, [focusIdx, filtered, pickerFor, bulkSelected, bulkForm, search, showCount]);
   const loadInternalCandidates = (rowId, accId) => {
-    if(!accId||!rowId){setInternalModalCandidates([]);return;}
+    if(!accId||!rowId){setInternalModalCandidates([]);setInternalModalDebug(null);return;}
     const txRow=rows.find(r=>r.id===rowId); if(!txRow)return;
-    const scored = findInternalCandidatesFor(txRow, accId).slice(0, 20);
+    const otherRows = getOtherRows(accId);
+    const scored = findInternalCandidatesFor(txRow, accId, otherRows).slice(0, 20);
     const cands = scored.map(x=>x.o);
     setInternalModalCandidates(cands);
+    setInternalModalDebug({
+      total: otherRows.length,
+      chua: otherRows.filter(o => o.confirmed !== "yes" && o.confirmed !== "no").length,
+    });
     // Đã lọc đúng số tiền rồi — chỉ cần lấy GD gần ngày nhất làm lựa chọn mặc định
     if (scored.length) setInternalModalOtherRowId(scored[0].o.id);
     else setInternalModalOtherRowId(null);
@@ -5820,10 +5829,10 @@ function ConfirmScreen({
     setInternalModalFor(rowId);setInternalModalAccId(aid);
     setInternalModalHach(getDefaultHach(aid));
     setInternalModalSkip(txRow?txRow.tx.debit>0:false);
-    setInternalModalOtherRowId(null);setInternalModalCandidates([]);setInternalModalSearch("");
+    setInternalModalOtherRowId(null);setInternalModalCandidates([]);setInternalModalSearch("");setInternalModalDebug(null);
     if(aid)loadInternalCandidates(rowId,aid);
   };
-  const closeInternalModal = () => {setInternalModalFor(null);setInternalModalCandidates([]);setInternalModalSearch("");};
+  const closeInternalModal = () => {setInternalModalFor(null);setInternalModalCandidates([]);setInternalModalSearch("");setInternalModalDebug(null);};
   const internalTransferRow = (id, accId, accLabel, accCurrency, hach, isSkip, otherRowId) => {
     const myLabel=activeTabAcc?activeTabAcc.label:"",myCur=activeTabAcc?activeTabAcc.currency:"";
     const lT=`\u21D4 N\u1ED9i b\u1ED9 \u2013 ${isSkip?"Chuy\u1EC3n sang":"Nh\u1EADn t\u1EEB"} ${accLabel} (${accCurrency})`;
@@ -7164,7 +7173,21 @@ internalModalFor&&internalModalRow&&React.createElement("div",{
         React.createElement("div",{style:{flex:1,overflowY:"auto",border:"1px solid #e2d9f3",borderRadius:6}},
           (()=>{const q=internalModalSearch.toLowerCase();
             const disp=internalModalCandidates.filter(c=>!q||(c.tx.desc||"").toLowerCase().includes(q));
-            if(!disp.length)return React.createElement("div",{style:{padding:"24px",textAlign:"center",color:"#888",fontSize:12,fontStyle:"italic"}},internalModalCandidates.length===0?"Không tìm thấy GD nào khớp đúng số tiền (± 7 ngày) ở TK này — thử chọn TK khác":"Không có kết quả khớp với từ khoá lọc");
+            if(!disp.length){
+              let emptyMsg="Không tìm thấy GD nào khớp đúng số tiền (± 7 ngày) ở TK này — thử chọn TK khác";
+              if(internalModalCandidates.length!==0){
+                emptyMsg="Không có kết quả khớp với từ khoá lọc";
+              }else if(internalModalDebug){
+                if(internalModalDebug.total===0){
+                  emptyMsg="TK này CHƯA CÓ dữ liệu giao dịch nào (0 GD) — hãy tải/dán sao kê của TK này vào trước, hoặc kiểm tra đã lưu dữ liệu TK này chưa";
+                }else if(internalModalDebug.chua===0){
+                  emptyMsg=`TK này có ${internalModalDebug.total} GD nhưng TẤT CẢ đã được xử lý (xác nhận/không khớp) từ trước — không còn GD nào để khớp nội bộ nữa`;
+                }else{
+                  emptyMsg=`TK này có ${internalModalDebug.total} GD (${internalModalDebug.chua} GD chưa xử lý) nhưng không có GD nào khớp đúng ngày (±3-7 ngày)/số tiền với GD đang xét — thử chọn TK khác hoặc kiểm tra lại ngày/số tiền`;
+                }
+              }
+              return React.createElement("div",{style:{padding:"24px",textAlign:"center",color:"#888",fontSize:12,fontStyle:"italic"}},emptyMsg);
+            }
             const pd=d=>{if(!d)return null;const m=String(d).match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);return m?new Date(m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0")):new Date(d);};
             return disp.map((cand,ci)=>{
               const isSel=internalModalOtherRowId===cand.id;
