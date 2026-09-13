@@ -5350,6 +5350,14 @@ function ConfirmScreen({
   // ích — đủ để treo hẳn trang với công ty nhiều giao dịch (đã xác nhận qua báo
   // lỗi "Trang không phản hồi" thật). Nơi gọi 1 lần/1 dòng (modal chọn nội bộ)
   // vẫn để trống, tự gọi getOtherRows(accId) như cũ — không mất tính "mới nhất".
+  // Rút các cụm số trông giống SỐ TIỀN (>=100, bỏ số quá nhỏ kiểu ngày/tháng/thứ tự) trong diễn giải
+  // — dùng để so khớp chéo tiền tệ bên dưới. Sao kê ngân hàng khi ghi nhận GD bán/mua ngoại tệ nội bộ
+  // thường nhúng thẳng số lượng ngoại tệ vào diễn giải (VD "BAN 5500 USD CHO ACB TY GIA 26110"),
+  // nên số này gần như luôn khớp ĐÚNG với số tiền thật của vế bên kia (đang ở đúng loại tiền đó).
+  const extractDescAmounts = desc => {
+    const matches = String(desc || "").match(/\d[\d.,]*\d|\d/g) || [];
+    return matches.map(m => Number(m.replace(/[.,]/g, ""))).filter(n => n >= 100);
+  };
   const findInternalCandidatesFor = (txRow, accId, otherRowsPreloaded) => {
     const myIsCredit = (txRow.tx.credit||0) > 0;
     const myAmt = Math.max(txRow.tx.debit||0, txRow.tx.credit||0);
@@ -5362,6 +5370,9 @@ function ConfirmScreen({
     const myCurrency = activeTabAcc ? activeTabAcc.currency : "VND";
     const crossCurrency = !!(otherAcc && otherAcc.currency && myCurrency && otherAcc.currency !== myCurrency);
     const myWords = crossCurrency ? new Set(normVN(txRow.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w))) : null;
+    // Số tiền (ở đúng loại tiền của TK kia) nhúng trong diễn giải của chính GD đang xét — VD desc
+    // "BAN 5500 USD..." trên TK VND thì 5500 chính là số USD cần khớp với oAmt bên TK USD.
+    const myDescAmts = crossCurrency ? extractDescAmounts(txRow.tx.desc) : null;
     const oRows = (otherRowsPreloaded || getOtherRows(accId)).filter(o => {
       // Chỉ loại các dòng đã CHẮC CHẮN xử lý xong (đã ghép nội bộ, hoặc đã gắn đúng hoá đơn/MST) —
       // KHÔNG loại các dòng chỉ mới bị gán tạm "Tiền mặt" (không MST, không phải nội bộ), vì đây
@@ -5377,7 +5388,16 @@ function ConfirmScreen({
         const oWords = normVN(o.tx.desc).split(" ").filter(w => w.length >= 3 && !STOP.has(w));
         if (!oWords.length || !myWords.size) return false;
         const overlap = oWords.filter(w => myWords.has(w)).length;
-        return overlap / Math.max(myWords.size, oWords.length) >= 0.4;
+        if (overlap / Math.max(myWords.size, oWords.length) < 0.4) return false;
+        // Diễn giải cùng khuôn mẫu (VD đều "BÁN ... USD CHO ACB TY GIA ...") có thể trùng phần lớn TỪ
+        // dù số tiền hoàn toàn khác nhau — nếu tách được số tiền cụ thể từ diễn giải, số đó BẮT BUỘC
+        // phải khớp đúng số tiền thật (oAmt) của vế bên kia thì mới nhận là ứng viên, tránh gợi ý nhầm
+        // 1 GD 3.000 USD/12.000 USD cho 1 GD 5.500 USD chỉ vì câu chữ giống nhau.
+        if (myDescAmts.length) {
+          const tol = Math.max(1, oAmt * 0.005);
+          if (!myDescAmts.some(n => Math.abs(n - oAmt) <= tol)) return false;
+        }
+        return true;
       }
       if (!(myAmt > 0 && oAmt > 0 && Math.abs(oAmt - myAmt) < 1)) return false;
       if (!txDate || !o.tx.date) return true;
