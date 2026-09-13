@@ -237,6 +237,7 @@
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
+      <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px;margin-top:6px" onclick="moGlobalDataDirModal()">📂 Thư mục dữ liệu chung</button>
     </div>
     <div id="adminBtnWrap" style="display:none;padding:0 12px 8px">
       <button class="btn gold" style="width:100%;font-size:14px;padding:10px" onclick="moAdminModal()">👑 Quản lý user</button>
@@ -378,18 +379,40 @@
       </div>
     </div>
     <div class="field"><label>Mật khẩu Dịch vụ công 1 <span style="font-weight:400;color:var(--muted)">(dichvucong.gdt.gov.vn — tài khoản …-QL)</span></label>
-      <input id="m_dvc1" type="text" placeholder="Mật khẩu chính để tải tờ khai đã nộp"></div>
+      <div style="display:flex;gap:6px">
+        <input id="m_dvc1" type="password" placeholder="Mật khẩu chính để tải tờ khai đã nộp" style="flex:1">
+        <button type="button" class="btn ghost sm" onclick="toggleDvc1Pass()" id="dvc1Toggle" style="white-space:nowrap">👁 Hiện</button>
+      </div>
+    </div>
     <div class="field"><label>Mật khẩu Dịch vụ công 2 <span style="font-weight:400;color:var(--muted)">(dự phòng — thử khi mật khẩu 1 sai)</span></label>
-      <input id="m_dvc2" type="text" placeholder="Để trống nếu không có"></div>
+      <div style="display:flex;gap:6px">
+        <input id="m_dvc2" type="password" placeholder="Để trống nếu không có" style="flex:1">
+        <button type="button" class="btn ghost sm" onclick="toggleDvc2Pass()" id="dvc2Toggle" style="white-space:nowrap">👁 Hiện</button>
+      </div>
+    </div>
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
-    <div class="field"><label>Thư mục lưu DỮ LIỆU công ty <span style="font-weight:400;color:var(--muted)">(hạch toán, danh mục... — để trống = dùng thư mục XML/PDF ở trên)</span></label><input id="m_datadir" placeholder="VD: D:\\DuLieuKeToan\\CongTyABC"></div>
     <div class="field"><label>Thư mục lưu file KẾT XUẤT <span style="font-weight:400;color:var(--muted)">(tự tạo cấu trúc Năm/Quý (hoặc Năm/Tháng nếu công ty đã tự tổ chức thư mục theo tháng) — chỉ dùng khi tick "Lưu file kết xuất" lúc tra cứu)</span></label><input id="m_exportdir" placeholder="VD: D:\\OneDrive\\...\\BAO CAO QUY"></div>
     <p class="hint">📁 Ví dụ: chọn kỳ Quý 2/2026 + tick "Lưu file kết xuất" → phần mềm tự tạo <b>…\BAO CAO QUY\2026\Quý 2\</b> và lưu file Excel vào đó (tạo đủ cả 4 quý nếu thiếu). Nếu bên trong thư mục Năm đã có sẵn thư mục "THANG N" (công ty kê khai theo tháng) thì phần mềm tự lưu theo THÁNG (tạo đủ 12 tháng) thay vì theo Quý.</p>
+    <p class="hint">📂 Thư mục lưu DỮ LIỆU công ty (hạch toán, danh mục...) nay dùng CHUNG cho tất cả công ty — cấu hình 1 lần ở nút "📂 Thư mục dữ liệu chung" bên thanh trái, không cài riêng từng công ty ở đây nữa.</p>
     <p class="hint">🔒 Thông tin lưu cục bộ trên máy bạn (SQLite), không gửi đi đâu khác ngoài trang Tổng cục Thuế khi đăng nhập.</p>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
       <button class="btn" id="coSaveBtn" onclick="saveCompany()">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL THƯ MỤC DỮ LIỆU CHUNG (hạch toán, danh mục... — dùng CHUNG cho TẤT CẢ công ty) -->
+<div class="modal-bg" id="globalDataDirModal">
+  <div class="modal" style="width:min(560px,94vw);max-width:560px">
+    <h3>📂 Thư mục dữ liệu chung</h3>
+    <p class="hint" style="margin-top:0">Trước đây mỗi công ty lưu dữ liệu (hạch toán, danh mục...) ở 1 thư mục RIÊNG, rải rác khó quản lý. Đặt 1 thư mục ở đây — TẤT CẢ công ty sẽ cùng lưu vào đây (mỗi công ty vẫn 1 file <code>DuLieu_&lt;MST&gt;.json</code> riêng, an toàn hơn dồn chung 1 file). Dữ liệu CŨ đang rải rác sẽ được TỰ ĐỘNG sao chép (không xoá bản gốc) về đây khi bạn lưu đường dẫn mới.</p>
+    <div class="field"><label>Thư mục dữ liệu chung</label><input id="gdd_thumuc" placeholder="VD: D:\\DuLieuKeToan"></div>
+    <p class="hint">Để trống rồi Lưu = huỷ dùng thư mục chung, mỗi công ty quay lại dùng thư mục riêng như trước (không xoá file nào).</p>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="dongGlobalDataDirModal()">Hủy</button>
+      <button class="btn" onclick="luuGlobalDataDir()">Lưu</button>
     </div>
   </div>
 </div>
@@ -1444,7 +1467,6 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_user').value=edit?.username||'';
   document.getElementById('m_note').value=edit?.ghichu||'';
   document.getElementById('m_dir').value=edit?.save_dir||'';
-  document.getElementById('m_datadir').value=edit?.data_dir||'';
   document.getElementById('m_exportdir').value=edit?.export_dir||'';
   // lấy mật khẩu thật để điền sẵn (để sửa cho đúng)
   let pass='',dvc1='',dvc2='';
@@ -1459,6 +1481,16 @@ async function openCompanyModal(edit=null){
 function closeCompanyModal(){document.getElementById('coModal').classList.remove('show')}
 function togglePass(){
   const inp=document.getElementById('m_pass'),btn=document.getElementById('passToggle');
+  if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
+  else{inp.type='password';btn.textContent='👁 Hiện';}
+}
+function toggleDvc1Pass(){
+  const inp=document.getElementById('m_dvc1'),btn=document.getElementById('dvc1Toggle');
+  if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
+  else{inp.type='password';btn.textContent='👁 Hiện';}
+}
+function toggleDvc2Pass(){
+  const inp=document.getElementById('m_dvc2'),btn=document.getElementById('dvc2Toggle');
   if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
   else{inp.type='password';btn.textContent='👁 Hiện';}
 }
@@ -2458,7 +2490,6 @@ async function dvcbCancel(){if(dvcbId!=null){try{await api(`/api/dvc/batch-cance
 async function saveCompany(){
   const body={ten:m_ten.value.trim(),mst:m_mst.value.trim(),username:m_user.value.trim(),
     password:m_pass.value,ghichu:m_note.value.trim(),save_dir:m_dir.value.trim(),
-    data_dir:document.getElementById('m_datadir').value.trim(),
     export_dir:document.getElementById('m_exportdir').value.trim(),
     dvc_password:document.getElementById('m_dvc1').value.trim(),
     dvc_password2:document.getElementById('m_dvc2').value.trim(),
@@ -3782,6 +3813,28 @@ async function xoaFileTai(){
     if(r.so_file>0)toast(`✓ Đã xóa ${r.so_file} file, giải phóng ${r.dung_luong_mb} MB`,'ok');
     else toast('Không có file nào để xóa','ok');
   }catch(e){toast('Lỗi xóa file: '+e.message,'err')}
+}
+async function moGlobalDataDirModal(){
+  document.getElementById('gdd_thumuc').value='';
+  try{
+    const r=await api('/api/settings/global-data-dir');
+    document.getElementById('gdd_thumuc').value=r.thu_muc||'';
+  }catch(e){}
+  document.getElementById('globalDataDirModal').style.display='flex';
+}
+function dongGlobalDataDirModal(){
+  document.getElementById('globalDataDirModal').style.display='none';
+}
+async function luuGlobalDataDir(){
+  const thuMuc=document.getElementById('gdd_thumuc').value.trim();
+  try{
+    const r=await api('/api/settings/global-data-dir',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({thu_muc:thuMuc})});
+    dongGlobalDataDirModal();
+    if(!thuMuc)toast('✓ Đã huỷ thư mục dữ liệu chung — mỗi công ty dùng lại thư mục riêng như trước','ok');
+    else if(r.so_gom>0)toast(`✓ Đã đặt thư mục dữ liệu chung, tự gom ${r.so_gom} công ty về đây`,'ok');
+    else toast('✓ Đã đặt thư mục dữ liệu chung','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function exportCongTy(){
   try{

@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-08-31.224"
+APP_BUILD = "2026-08-31.225"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1868,7 +1868,7 @@ def update_company(cid: int, data: dict = Body(...)):
     # Nếu password để trống -> GIỮ password cũ (không xóa)
     cur = conn.execute(
         "SELECT password, dvc_password, dvc_password2, dia_chi, ma_cqt_noi_nop, "
-        "ten_cqt_noi_nop, nguoi_ky, no_mac_dinh FROM companies WHERE id=?", (cid,)).fetchone()
+        "ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
@@ -1900,11 +1900,21 @@ def update_company(cid: int, data: dict = Body(...)):
     no_mac_dinh = (data.get("no_mac_dinh") or "").strip()
     if not no_mac_dinh:
         no_mac_dinh = (cur["no_mac_dinh"] if cur and "no_mac_dinh" in cur.keys() else "") or ""
+    # data_dir: KHÔNG còn ô nhập riêng từng công ty trên giao diện nữa (đã
+    # gộp thành "Thư mục dữ liệu CHUNG" — xem global_data_dir/
+    # _du_lieu_cty_path) — nếu request không gửi kèm (hoặc gửi rỗng) thì
+    # GIỮ giá trị cũ, KHÔNG xoá — cùng lý do với password/địa chỉ ở trên:
+    # trước đây field bị bỏ khỏi payload (vd do form không còn ô này) sẽ bị
+    # ghi đè thành rỗng, làm mất luôn đường dẫn dữ liệu CŨ của công ty đó
+    # (vẫn cần để dò/gom dữ liệu cũ khi cấu hình thư mục chung).
+    data_dir = (data.get("data_dir") or "").strip()
+    if not data_dir:
+        data_dir = (cur["data_dir"] if cur and "data_dir" in cur.keys() else "") or ""
     conn.execute(
         "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=?, no_mac_dinh=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
-         data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
+         data_dir, (data.get("export_dir") or "").strip(),
          dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
          dia_chi, ma_cqt, ten_cqt, nguoi_ky, no_mac_dinh, cid)
@@ -5783,6 +5793,33 @@ def set_pin_nop_to_khai(body: dict = Body(...)):
     return {"ok": True, "pin": pin}
 
 
+@app.get("/api/settings/global-data-dir")
+def get_global_data_dir():
+    """Thư mục dữ liệu (hạch toán, danh mục...) DÙNG CHUNG cho TẤT CẢ công
+    ty — xem _du_lieu_cty_path. Trống = chưa cấu hình, mỗi công ty vẫn dùng
+    thư mục riêng kiểu cũ (data_dir/save_dir)."""
+    return {"thu_muc": _get_setting("global_data_dir", "")}
+
+
+@app.post("/api/settings/global-data-dir")
+def set_global_data_dir(body: dict = Body(...)):
+    """Đặt thư mục dữ liệu DÙNG CHUNG cho TẤT CẢ công ty, rồi TỰ ĐỘNG gom
+    (sao chép, không xoá bản gốc) dữ liệu từng công ty đang rải rác ở thư
+    mục riêng kiểu cũ về đúng thư mục này — xem _gom_du_lieu_cty_ve_thu_muc_chung.
+    Để trống = huỷ thư mục chung, mỗi công ty lùi về dùng thư mục riêng như
+    trước (KHÔNG xoá file nào)."""
+    folder = (body.get("thu_muc") or "").strip()
+    so_gom = 0
+    if folder:
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except Exception as e:
+            raise HTTPException(400, f"Không tạo/ghi được thư mục này: {e}")
+        so_gom = _gom_du_lieu_cty_ve_thu_muc_chung(folder)
+    _set_setting("global_data_dir", folder)
+    return {"ok": True, "thu_muc": folder, "so_gom": so_gom}
+
+
 @app.post("/api/dvc/nop-to-khai/{cid}")
 def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
     """TỰ ĐỘNG hết mức: đăng nhập (hoặc DÙNG LẠI phiên trình duyệt đã đăng
@@ -9292,32 +9329,77 @@ def _co_theo_tong(tong):
     này."""
     return "331"
 
+def _thu_muc_du_lieu_rieng_cu(comp):
+    """Thư mục dữ liệu THEO KIỂU CŨ (trước khi có 'Thư mục dữ liệu CHUNG')
+    của 1 công ty — ưu tiên data_dir riêng của công ty đó, rồi save_dir,
+    cuối cùng mặc định data/cong_ty/. Dùng làm phương án DỰ PHÒNG cho
+    _du_lieu_cty_path khi CHƯA cấu hình thư mục chung, và để dò vị trí file
+    CŨ lúc gom về thư mục chung (xem _gom_du_lieu_cty_ve_thu_muc_chung)."""
+    dd = (comp["data_dir"] or "").strip() if "data_dir" in comp.keys() else ""
+    sd = (comp["save_dir"] or "").strip()
+    if dd:
+        return dd
+    if sd and os.path.isdir(sd):
+        return sd
+    return os.path.join(DATA_DIR, "cong_ty")
+
 def _du_lieu_cty_path(cid):
-    """File dữ liệu riêng của công ty (hạch toán, sau này thêm hàng hóa...).
-    Ưu tiên thư mục data_dir (riêng cho dữ liệu); nếu trống thì dùng save_dir;
-    cuối cùng là data/cong_ty/."""
+    """File dữ liệu riêng của công ty (hạch toán, danh mục...). ƯU TIÊN thư
+    mục dữ liệu CHUNG (cấu hình 1 LẦN cho TẤT CẢ công ty — xem
+    _get_setting('global_data_dir')) — theo đúng yêu cầu người dùng "dữ
+    liệu các công ty đang lưu riêng từ thư mục như vậy khó quản lý ... tất
+    cả công ty sẽ lưu chung 1 file 1 đường dẫn": mỗi công ty vẫn có 1 file
+    DuLieu_<MST>.json RIÊNG (an toàn hơn dồn hết vào 1 file DUY NHẤT — lỗi/
+    hỏng file của 1 công ty không kéo theo mất dữ liệu công ty khác) nhưng
+    TẤT CẢ cùng nằm chung 1 THƯ MỤC, không còn rải rác mỗi công ty 1 nơi
+    như trước. CHƯA cấu hình thư mục chung (global_data_dir rỗng — người
+    dùng chưa nâng cấp) thì lùi về CÁCH CŨ (_thu_muc_du_lieu_rieng_cu) để
+    không phá vỡ cài đặt hiện có."""
     conn = db()
     comp = conn.execute(
         "SELECT mst, save_dir, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     if not comp:
         return None
-    # data_dir do người dùng chỉ định riêng -> tạo nếu chưa có
-    dd = (comp["data_dir"] or "").strip() if "data_dir" in comp.keys() else ""
-    sd = (comp["save_dir"] or "").strip()
-    thu_muc = ""
-    if dd:
-        thu_muc = dd
-    elif sd and os.path.isdir(sd):
-        thu_muc = sd
-    else:
-        thu_muc = os.path.join(DATA_DIR, "cong_ty")
+    try:
+        thu_muc_chung = _get_setting("global_data_dir", "").strip()
+    except Exception:
+        thu_muc_chung = ""   # CSDL cũ/thử nghiệm chưa có bảng app_settings -> lùi về thư mục riêng như cũ
+    thu_muc = thu_muc_chung or _thu_muc_du_lieu_rieng_cu(comp)
     try:
         os.makedirs(thu_muc, exist_ok=True)
     except Exception:
         return None
     mst = _chuan_mst(comp["mst"]) or str(cid)
     return os.path.join(thu_muc, f"DuLieu_{mst}.json")
+
+def _gom_du_lieu_cty_ve_thu_muc_chung(thu_muc_moi):
+    """Tự động SAO CHÉP (KHÔNG xoá bản gốc — an toàn, đặt lại/xoá thư mục
+    chung là huỷ được ngay nếu gom nhầm) file dữ liệu DuLieu_<MST>.json của
+    TỪNG công ty đang rải rác ở thư mục RIÊNG kiểu CŨ (data_dir/save_dir/
+    mặc định — xem _thu_muc_du_lieu_rieng_cu) về ĐÚNG thư mục dữ liệu CHUNG
+    vừa cấu hình — theo đúng yêu cầu người dùng "tự động gộm khi đặt đường
+    dẫn mới". CHỈ sao chép khi file ĐÍCH CHƯA CÓ SẴN (không ghi đè dữ liệu
+    đã có ở thư mục chung — đề phòng gọi lại nhiều lần, hoặc thư mục chung
+    đã có sẵn dữ liệu MỚI HƠN từ máy khác). Trả về số công ty đã gom được."""
+    import shutil
+    conn = db()
+    rows = conn.execute("SELECT id, mst, save_dir, data_dir FROM companies").fetchall()
+    conn.close()
+    so_gom = 0
+    for comp in rows:
+        try:
+            thu_muc_cu = _thu_muc_du_lieu_rieng_cu(comp)
+            mst = _chuan_mst(comp["mst"]) or str(comp["id"])
+            nguon = os.path.join(thu_muc_cu, f"DuLieu_{mst}.json")
+            dich = os.path.join(thu_muc_moi, f"DuLieu_{mst}.json")
+            if (os.path.isfile(nguon) and os.path.realpath(nguon) != os.path.realpath(dich)
+                    and not os.path.isfile(dich)):
+                shutil.copy2(nguon, dich)
+                so_gom += 1
+        except Exception:
+            continue
+    return so_gom
 
 def _doc_du_lieu_cty(cid):
     p = _du_lieu_cty_path(cid)
@@ -9330,9 +9412,27 @@ def _doc_du_lieu_cty(cid):
     return {}
 
 def _ghi_du_lieu_cty(cid, data):
+    """Ghi file dữ liệu riêng của công ty — LUÔN kèm theo snapshot mới nhất
+    thông tin công ty (bảng companies: tên, MST, mật khẩu trang Thuế/Dịch
+    vụ công, thư mục...) vào khoá "_cty_info", theo đúng yêu cầu người dùng
+    "file này lưu tất cả thông tin cty đã điền thông tin vào phần mềm
+    luôn" — để khi xem/backup/copy file DuLieu_<MST>.json ở thư mục dữ liệu
+    CHUNG là có đủ CẢ thông tin công ty LẪN dữ liệu hạch toán/danh mục,
+    không cần mở riêng CSDL SQLite của phần mềm nữa. Làm NGAY TRONG hàm ghi
+    dùng chung này (không sửa từng nơi gọi _ghi_du_lieu_cty ở khắp file) để
+    LUÔN đúng/mới nhất mà không phải sửa hàng chục chỗ gọi hàm này."""
     p = _du_lieu_cty_path(cid)
     if not p:
         return
+    try:
+        conn = db()
+        comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+        conn.close()
+        if comp:
+            data = dict(data)
+            data["_cty_info"] = dict(comp)
+    except Exception:
+        pass
     try:
         with open(p, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
