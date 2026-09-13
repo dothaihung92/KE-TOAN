@@ -5414,6 +5414,17 @@ function ConfirmScreen({
     }).sort((a, b) => a.dayDiff - b.dayDiff);
   };
   const internalSuggCache = React.useMemo(() => new Map(), [co.accounts, activeTabAccId]);
+  // Tóm tắt SỐ LƯỢNG GD hiện có ở MỖI tài khoản khác (không phụ thuộc dòng đang xét) — dùng để hiện
+  // kèm khi 1 dòng KHÔNG có gợi ý nội bộ, để người dùng biết ngay TK kia đang trống dữ liệu (cần tải
+  // sao kê TK đó lên/lưu lại) hay có dữ liệu nhưng thật sự không khớp, thay vì chỉ 1 câu chung chung.
+  const internalOtherAccSummary = React.useMemo(() => {
+    return internalModalOtherAccounts.map(acc => {
+      const oRows = getOtherRows(acc.id);
+      const chua = oRows.filter(o => o.confirmed !== "yes" && o.confirmed !== "no").length;
+      return { accId: acc.id, label: acc.label, currency: acc.currency, total: oRows.length, chua };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [co.accounts, activeTabAccId, rows]);
   const internalSuggestions = React.useMemo(() => {
     const map = {};
     // Đọc dữ liệu MỖI tài khoản khác đúng 1 LẦN cho cả lượt tính này (không phải
@@ -7260,6 +7271,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     onFixAmt: fixAmtRow,
     invPool: getInvPool(r),
     internalSuggestion: internalSuggestions[r.id],
+    internalOtherAccSummary,
     onQuickInternal: quickAcceptInternal,
     onPickInvById: (rowId, inv) => assignInvoice(rowId, inv, r.tx.debit>0?"331":"131"),
     isFocused: idx === focusIdx,
@@ -7923,6 +7935,7 @@ function ConfirmRow({
   isSelected,
   onToggleSelect,
   internalSuggestion,
+  internalOtherAccSummary,
   onQuickInternal,
   onFillBulk,
   onClearBulkPreview,
@@ -8501,7 +8514,16 @@ function ConfirmRow({
       fontStyle: "italic",
       padding: "4px 0 8px"
     }
-  }, "Khong co goi y - dung \"Chon HD\" hoac \"Nhap khac\""), displayMST && /*#__PURE__*/React.createElement("button", {
+  },
+    "Khong co goi y - dung \"Chon HD\" hoac \"Nhap khac\"",
+    // Kèm số GD hiện có ở (các) TK khác — để biết ngay TK kia đang trống dữ liệu (chưa tải/lưu sao kê)
+    // hay có dữ liệu nhưng thật sự không có GD nào khớp, thay vì chỉ 1 câu chung chung khó đoán vì sao.
+    internalOtherAccSummary && internalOtherAccSummary.length > 0 && /*#__PURE__*/React.createElement("span", {
+      style: { display: "block", marginTop: 2, color: "#aaa" }
+    }, "(⇔ Nội bộ: " + internalOtherAccSummary.map(s =>
+      (s.currency === "USD" ? "$ " : "₫ ") + s.label + " có " + s.total + " GD (" + s.chua + " chưa xử lý)"
+    ).join(", ") + ")")
+  ), displayMST && /*#__PURE__*/React.createElement("button", {
     onClick: () => setAddDictMode(!addDictMode),
     style: {
       fontSize: 11,
