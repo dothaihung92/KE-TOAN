@@ -70,8 +70,8 @@ class FakeConn1:
 ns = {'datetime': datetime, 'itertools': itertools, 'HTTPException': FakeHTTPException}
 for fn in ("_misa_ngay_str", "_misa_la_dong_thue", "_misa_doc_ngay", "_misa_bo_dau",
            "_misa_ten_khop_mo_ta", "_misa_doi_tuong_hoa_don",
-           "_misa_doi_tuong_thanh_toan", "_misa_doi_tuong_dieu_chinh_tien_mat", "_misa_khop_1_2",
-           "_misa_doi_chieu_3_tang"):
+           "_misa_doi_tuong_thanh_toan", "_misa_doi_tuong_dieu_chinh_tien_mat", "_hd_so_trong_mo_ta",
+           "_misa_khop_1_2", "_misa_doi_chieu_3_tang"):
     exec(extract_fn(fn), ns)
 ns['_MISA_TU_DEM_TEN_CTY'] = {
     "CONG", "TY", "TNHH", "CO", "PHAN", "MTV", "MOT", "THANH", "VIEN", "TRACH",

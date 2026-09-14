@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-14.241"
+APP_BUILD = "2026-09-14.242"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26879,6 +26879,28 @@ def _misa_doi_tuong_dieu_chinh_tien_mat(cur, tk_prefix, loai, account_object_id=
     return doi_tuong
 
 
+def _hd_so_trong_mo_ta(inv_no, mo_ta):
+    """True nếu số hóa đơn (vd '5947') xuất hiện như 1 CỤM SỐ riêng biệt
+    trong nội dung/diễn giải thanh toán ngân hàng (mo_ta — Description +
+    JournalMemo) — ví dụ UNC ghi 'tt hd nuoc 5947 - cty...'. Đây là dấu
+    hiệu khách/NCC ghi RÕ trả cho hóa đơn nào, đáng tin hơn hẳn cửa sổ ngày
+    (trong_cua_so) — dùng để cứu các ca hóa đơn có khoản thanh toán thật
+    nhưng thanh toán đến MUỘN hơn cửa sổ mặc định (vd hóa đơn xuất
+    19/03, khoản chuyển khoản ghi rõ số hóa đơn nhưng mãi 24/06 mới trả —
+    ngoài cửa sổ 3 tháng mặc định — vẫn phải khớp đúng, không được rơi
+    'treo' oan). So khớp theo PHẦN SỐ THUẦN của inv_no (bỏ ký tự không phải
+    số, bỏ số 0 đứng đầu) để không phụ thuộc định dạng hiển thị (vd
+    '0005947' so với '5947' vẫn khớp) và cho phép mo_ta ghi kèm số 0 đứng
+    đầu. Bỏ qua số hóa đơn quá ngắn (<3 chữ số sau khi rút gọn) để tránh
+    trùng ngẫu nhiên với số khác lẫn trong mô tả (số tài khoản, mã GD...)."""
+    import re as _re_hdmt
+    so = _re_hdmt.sub(r'\D', '', str(inv_no or ''))
+    so = so.lstrip('0') or so
+    if len(so) < 3:
+        return False
+    return bool(_re_hdmt.search(r'(?<!\d)0*' + _re_hdmt.escape(so) + r'(?!\d)', str(mo_ta or '')))
+
+
 def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dung_sai=20_000,
                    truoc_ngay=7):
     """Chạy Tầng 1 (khớp 1-1 chính xác) + Tầng 2 (khớp tổ hợp nhiều hóa đơn,
@@ -27007,6 +27029,32 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
             đổi tiếp ở lượt sau); chỉ bật True ở lượt CUỐI cùng, khi trạng
             thái đã ổn định (không còn gì đổi thêm)."""
             changed = False
+
+            # Tầng 0 — khớp theo SỐ HÓA ĐƠN được ghi RÕ trong nội dung/diễn
+            # giải thanh toán (mo_ta), KHÔNG giới hạn cửa sổ ngày (xem
+            # _hd_so_trong_mo_ta) — chạy TRƯỚC Tầng 1 vì đây là bằng chứng
+            # chắc chắn hơn khoảng ngày phỏng đoán. Ca thật xác nhận: HĐ
+            # 5947 (CTY CP TM SATORI) xuất 19/03, khoản chuyển khoản ghi
+            # "tt hd nuoc 5947..." nhưng tới 24/06 mới trả — ngoài cửa sổ 3
+            # tháng mặc định của trong_cua_so() nên vẫn rơi treo nhầm ở
+            # Tầng 3 dù đã ghi rõ số hóa đơn trong nội dung chuyển khoản.
+            # Vẫn bắt buộc số tiền khớp (trong dung_sai) để không đoán bừa
+            # chỉ dựa 1 mình số hóa đơn trùng ngẫu nhiên trong mô tả.
+            for tt in tts:
+                if tt["matched"] or not tt.get("mo_ta"):
+                    continue
+                ung_vien_mt = [hd for hd in hds if not hd["matched"] and not hd["phan_dung"]
+                              and _hd_so_trong_mo_ta(hd["inv_no"], tt["mo_ta"])
+                              and abs(hd["so_tien"] - tt["so_tien"]) <= max(dung_sai, 1)]
+                if len(ung_vien_mt) == 1:
+                    danh_dau_ca_hoa_don(ung_vien_mt[0])
+                    ung_vien_mt[0]["da_dung_tt"].append(tt)
+                    tt["matched"] = True
+                    changed = True
+                    tang1.append({"ma": ma, "ten": ten, "inv_no": ung_vien_mt[0]["inv_no"],
+                                  "inv_date": _misa_ngay_str(ung_vien_mt[0]["inv_date"]),
+                                  "so_tien": round(ung_vien_mt[0]["so_tien"]),
+                                  "ngay_thanh_toan": _misa_ngay_str(tt["date"])})
 
             # Tầng 1 — khớp 1-1 chính xác
             for tt in tts:
