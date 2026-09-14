@@ -7397,6 +7397,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     }, "↻ Hiện th\xEAm " + Math.min(SHOW_STEP, filtered.length - showCount) + " d\xF2ng (đang hiện " + showCount + "/" + filtered.length + ")")
   )), tokhaiModalOpen && /*#__PURE__*/React.createElement(ToKhaiModal, {
     kind: "NK",
+    coId: co.id,
     list: tokhaiList,
     onClose: () => { setTokhaiModalOpen(false); setTokhaiPickForRow(null); setSplitFlow(null); },
     onSave: saveTokhaiList,
@@ -7418,6 +7419,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     showToast
   }), tokhaiXKModalOpen && /*#__PURE__*/React.createElement(ToKhaiModal, {
     kind: "XK",
+    coId: co.id,
     list: tokhaiXKList,
     onClose: () => { setTokhaiXKModalOpen(false); setTokhaiXKPickForRow(null); setSplitFlowXK(null); },
     onSave: saveTokhaiXKList,
@@ -7526,10 +7528,49 @@ function FxDiffPreviewModal({ rows, onClose, onExport }) {
 
 // ── Bảng quản lý Tờ khai Hải quan NK: xem/sửa tay/nhập từ file tờ khai/xoá, và (khi mở ở chế độ
 // "chọn cho 1 giao dịch") cho chọn 1 tờ khai để gắn thẳng vào GD thanh toán đang xem trên sao kê ──
-function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, pickForRowDesc, onPick, onPickSplit, splitRemainingVND, splitInProgress, onApplyFxDiff, onEditFxDiff, bankRows, onExportFxDiff, showToast }) {
+function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, pickForRowDesc, onPick, onPickSplit, splitRemainingVND, splitInProgress, onApplyFxDiff, onEditFxDiff, bankRows, onExportFxDiff, showToast, coId }) {
   const isXK = kind === "XK";
   // Đối tác luôn hiển thị nhãn "Khách hàng" (cả tờ NK lẫn XK) — CÙNG 1 trường dữ liệu tk.nhaCungCap.
   const partnerLabel = "Khách hàng";
+  // Nhãn cột mã đối tượng MISA: tờ XK bán hàng cho KHÁCH HÀNG, tờ NK mua hàng từ NHÀ CUNG CẤP — MISA
+  // dùng CHUNG 1 bảng AccountObject cho cả 2 (không phân biệt IsVendor/IsCustomer), chỉ khác nhãn hiện
+  // cho người dùng dễ hiểu đúng vai trò của đối tượng trong từng loại tờ khai.
+  const maDoiTuongLabel = isXK ? "Mã khách hàng" : "Mã NCC";
+  // Popup tìm nhanh Mã KH/NCC trong Danh mục Đối tượng MISA theo tên/MST (giống ô tìm đối tượng khi
+  // sửa lại 1 giao dịch bị gắn nhầm ở màn "Đối chiếu 3 tầng") — chọn xong tự điền cả mã lẫn đúng tên
+  // theo MISA vào tờ khai, để khi xuất chứng từ MISA dùng đúng mã đối tượng thay vì chỉ có tên chữ.
+  const [dtSearchTk, setDtSearchTk] = useState(null);
+  const [dtSearchQuery, setDtSearchQuery] = useState("");
+  const [dtSearchResults, setDtSearchResults] = useState([]);
+  const [dtSearchLoading, setDtSearchLoading] = useState(false);
+  const [dtSearchErr, setDtSearchErr] = useState("");
+  const dtSearchTimer = React.useRef(null);
+  const openDtSearch = tk => { setDtSearchTk(tk); setDtSearchQuery(""); setDtSearchResults([]); setDtSearchErr(""); };
+  const closeDtSearch = () => { setDtSearchTk(null); setDtSearchQuery(""); setDtSearchResults([]); setDtSearchErr(""); clearTimeout(dtSearchTimer.current); };
+  const onDtSearchInput = q => {
+    setDtSearchQuery(q);
+    clearTimeout(dtSearchTimer.current);
+    if (q.trim().length < 2) { setDtSearchResults([]); setDtSearchErr(""); return; }
+    dtSearchTimer.current = setTimeout(async () => {
+      setDtSearchLoading(true); setDtSearchErr("");
+      try {
+        const res = await fetch(`/api/misa-sql/tim-doi-tuong/${coId}?q=${encodeURIComponent(q.trim())}`);
+        const d = await res.json();
+        if (!res.ok) { setDtSearchErr(d && d.detail ? d.detail : "Lỗi tìm đối tượng MISA"); setDtSearchResults([]); }
+        else setDtSearchResults(d.ket_qua || []);
+      } catch (e) {
+        setDtSearchErr("Lỗi kết nối: " + (e && e.message ? e.message : e));
+        setDtSearchResults([]);
+      }
+      setDtSearchLoading(false);
+    }, 300);
+  };
+  const pickDoiTuong = o => {
+    if (!dtSearchTk) return;
+    onSave(list.map(t => t.id !== dtSearchTk.id ? t : { ...t, maDoiTuong: o.ma, nhaCungCap: o.ten || t.nhaCungCap }));
+    showToast && showToast(`✓ Đã gắn ${maDoiTuongLabel}: ${o.ma} — ${o.ten}`);
+    closeDtSearch();
+  };
   // Số tiền tự gõ tay cho từng tờ khai khi gối đầu (VD tổng 5.000$ nhưng muốn gắn đúng 3.000$ cho
   // lô 1 dù công nợ còn thiếu khác con số đó) — key theo tk.id, reset mỗi khi đổi giao dịch đang chọn.
   const [splitAmt, setSplitAmt] = useState({});
@@ -7639,7 +7680,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
     onSave(list.filter(tk => tk.id !== id));
   };
   const addBlank = () => {
-    onSave([...list, { id: uid(), toKhaiSo: "", ngayToKhai: "", nhaCungCap: "", soHoaDon: "", ngayHoaDon: "", triGiaHoaDon: 0, currency: "USD", tyGiaTinhThue: 0, ghiChu: "", created: new Date().toLocaleDateString("vi-VN") }]);
+    onSave([...list, { id: uid(), toKhaiSo: "", ngayToKhai: "", nhaCungCap: "", maDoiTuong: "", soHoaDon: "", ngayHoaDon: "", triGiaHoaDon: 0, currency: "USD", tyGiaTinhThue: 0, ghiChu: "", created: new Date().toLocaleDateString("vi-VN") }]);
   };
   // Esc để đóng khung — giống các popup khác trong phần mềm.
   React.useEffect(() => {
@@ -7684,7 +7725,8 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
   const th = (label, w) => React.createElement("th", { style: { padding: "8px 10px", textAlign: "left", fontSize: 12, color: "var(--text2)", borderBottom: "2px solid var(--border)", minWidth: w, whiteSpace: "nowrap", position: "sticky", top: STICKY_ROW1_H, zIndex: 3, background: "#fff" } }, label);
   const td = (...children) => React.createElement("td", { style: { padding: "3px 6px", borderBottom: "1px solid #eee", fontSize: 13, verticalAlign: "top" } }, ...children);
 
-  return React.createElement("div", {
+  return React.createElement(React.Fragment, null,
+  React.createElement("div", {
     style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
     onClick: onClose
   }, React.createElement("div", {
@@ -7737,7 +7779,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
             React.createElement("thead", null,
               React.createElement("tr", null,
                 React.createElement("th", { style: { padding: "4px 8px", position: "sticky", top: 0, zIndex: 3, background: "#fff" } }, ""),
-                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, isXK ? "TỜ KHAI HẢI QUAN XK" : "TỜ KHAI HẢI QUAN NK"),
+                React.createElement("th", { colSpan: 5, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, isXK ? "TỜ KHAI HẢI QUAN XK" : "TỜ KHAI HẢI QUAN NK"),
                 React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, "TRỊ GIÁ"),
                 React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#1d4ed8", background: "#eef2ff", position: "sticky", top: 0, zIndex: 3 } }, "CHỨNG TỪ NGÂN HÀNG"),
                 React.createElement("th", { colSpan: 2, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, "CHÊNH LỆCH"),
@@ -7755,7 +7797,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                     }
                   })
                 ),
-                th(partnerLabel, 220), th("Tờ khai số", 160), th("Ngày TK", 115), th("Số hoá đơn", 220),
+                th(partnerLabel, 220), th(maDoiTuongLabel, 120), th("Tờ khai số", 160), th("Ngày TK", 115), th("Số hoá đơn", 220),
                 th("Trị giá HĐ", 110), th("NT", 50), th("Tỷ giá thuế", 100), th("Trị giá thuế (VND)", 130),
                 th("Ngày TT", 110), th("Trị giá TT (NT)", 120), th("Tỷ giá TT", 100), th("Đồng Việt Nam TT", 130),
                 th("VND", 110), th("NT", 90), th("", 100)
@@ -7766,6 +7808,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                 (() => { const stTd = { padding: "3px 6px", position: "sticky", top: STICKY_ROW1_H + STICKY_ROW2_H, zIndex: 3, background: "#fafafa" }; return [
                 React.createElement("td", { key: "c0", style: stTd }),
                 React.createElement("td", { key: "c1", style: stTd }, colFilterInput("nhaCungCap")),
+                React.createElement("td", { key: "c1b", style: stTd }, colFilterInput("maDoiTuong")),
                 React.createElement("td", { key: "c2", style: stTd }, colFilterInput("toKhaiSo")),
                 React.createElement("td", { key: "c3", style: stTd }, colFilterInput("ngayToKhai")),
                 React.createElement("td", { key: "c4", style: stTd }, colFilterInput("soHoaDon")),
@@ -7796,6 +7839,14 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
               return React.createElement("tr", { key: tk.id },
                 td(React.createElement("input", { type: "checkbox", checked: selectedTk.has(tk.id), onChange: () => toggleSelectTk(tk.id) })),
                 td(React.createElement("input", { style: inputStyle, title: tk.nhaCungCap||"", value: tk.nhaCungCap||"", onChange: e => updateField(tk.id, "nhaCungCap", e.target.value) })),
+                td(React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 2 } },
+                  React.createElement("input", { style: { ...inputStyle, width: 70 }, title: tk.maDoiTuong||"", value: tk.maDoiTuong||"", onChange: e => updateField(tk.id, "maDoiTuong", e.target.value) }),
+                  React.createElement("button", {
+                    onClick: () => openDtSearch(tk),
+                    title: `Tìm ${maDoiTuongLabel} trong MISA theo tên/MST`,
+                    style: { flexShrink: 0, width: 22, height: 22, borderRadius: 4, border: "1px solid var(--border)", background: "#fff", cursor: "pointer", fontSize: 11, padding: 0 }
+                  }, "🔍")
+                )),
                 td(React.createElement("input", { style: inputStyle, title: tk.toKhaiSo||"", value: tk.toKhaiSo||"", onChange: e => updateField(tk.id, "toKhaiSo", e.target.value) })),
                 td(React.createElement("input", { style: inputStyle, value: tk.ngayToKhai||"", onChange: e => updateField(tk.id, "ngayToKhai", e.target.value), placeholder: "dd/mm/yyyy" })),
                 td(React.createElement("input", { style: inputStyle, title: tk.soHoaDon||"", value: tk.soHoaDon||"", onChange: e => updateField(tk.id, "soHoaDon", e.target.value) })),
@@ -7871,7 +7922,45 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
             }))
           )
     )
-  ));
+  )),
+  dtSearchTk && React.createElement("div", {
+    style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 },
+    onClick: closeDtSearch
+  }, React.createElement("div", {
+    style: { background: "#fff", borderRadius: 10, width: "min(480px,94vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,.3)" },
+    onClick: e => e.stopPropagation()
+  },
+    React.createElement("div", { style: { padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" } },
+      React.createElement("div", { style: { fontWeight: 700, fontSize: 14 } }, `Tìm ${maDoiTuongLabel} trong MISA`),
+      React.createElement("button", { onClick: closeDtSearch, style: { background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#888" } }, "×")
+    ),
+    React.createElement("div", { style: { padding: "10px 16px 4px" } },
+      React.createElement("div", { style: { fontSize: 12, color: "var(--text2)", marginBottom: 6 } }, "Đang tìm cho: ", React.createElement("strong", null, dtSearchTk.nhaCungCap || "(chưa có tên)")),
+      React.createElement("input", {
+        autoFocus: true,
+        value: dtSearchQuery,
+        onChange: e => onDtSearchInput(e.target.value),
+        placeholder: "Gõ tên/mã/MST — ít nhất 2 ký tự...",
+        style: { width: "100%", height: 34, fontSize: 13, borderRadius: 6, border: "1px solid var(--border)", padding: "0 10px", boxSizing: "border-box" }
+      })
+    ),
+    React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: "4px 16px 16px" } },
+      dtSearchLoading && React.createElement("div", { style: { padding: 10, color: "#888", fontSize: 12 } }, "Đang tìm..."),
+      dtSearchErr && React.createElement("div", { style: { padding: 10, color: "#dc2626", fontSize: 12 } }, dtSearchErr),
+      !dtSearchLoading && !dtSearchErr && dtSearchQuery.trim().length >= 2 && dtSearchResults.length === 0 &&
+        React.createElement("div", { style: { padding: 10, color: "#888", fontSize: 12 } }, "Không tìm thấy đối tượng nào khớp."),
+      dtSearchResults.map(o => React.createElement("div", {
+        key: o.id,
+        onClick: () => pickDoiTuong(o),
+        style: { padding: "8px 10px", cursor: "pointer", borderBottom: "1px solid #f2f2f2", fontSize: 13, borderRadius: 6 },
+        onMouseOver: e => e.currentTarget.style.background = "#f7f7f7",
+        onMouseOut: e => e.currentTarget.style.background = ""
+      },
+        React.createElement("strong", null, o.ma), " — ", o.ten,
+        o.mst && React.createElement("span", { style: { color: "#888" } }, " (MST " + o.mst + ")")
+      ))
+    )
+  )));
 }
 function PickerInvRow({
   inv,
