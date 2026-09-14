@@ -6082,6 +6082,51 @@ function ConfirmScreen({
   }, [rows, tokhaiSuggCache]);
   // 1 tờ khai có thể gắn với NHIỀU giao dịch thanh toán khác ngày (trả/thu cọc trước, trả/thu nốt
   // sau...) — mỗi lần gắn sẽ THÊM một lần thanh toán mới vào danh sách (payments), không ghi đè.
+  // Đưa 1 dòng ĐÃ XÁC NHẬN (bất kỳ cách nào — Đúng/Không khớp/gán hoá đơn/gán tờ khai/nội bộ/tiền
+  // mặt) TRỞ VỀ "Chờ" (chưa xử lý) — xoá sạch mọi thông tin đã gắn để nhập lại từ đầu. Đồng thời quét
+  // + dọn sạch MỌI payment (ở CẢ 2 danh sách tờ khai NK lẫn XK) đang trỏ rowId này — không dựa vào
+  // r.confirmedToKhaiId (không lưu kèm biết chắc thuộc danh sách NK hay XK) mà quét thẳng payments
+  // thật, tránh để lại "payment mồ côi" (rowId trỏ tới 1 GD đã bỏ gắn nhưng payment vẫn còn trong
+  // tk.payments, làm sai lệch tổng đã thanh toán/chênh lệch của tờ khai đó). Dùng CHUNG cho cả nút
+  // "↩ Quay lại chờ" (ConfirmRow, đúng yêu cầu: "1 giao dịch gắn sai... chọn nút quay lại mục chờ sẽ
+  // xoá thông tin đã gắn") lẫn khi bỏ gắn 1 lần thanh toán ở bảng Tờ khai (removePayment).
+  const unlinkRow = (id) => {
+    ["NK", "XK"].forEach(kind => {
+      const list = tokhaiListOf(kind);
+      let changed = false;
+      const next = list.map(tk => {
+        const payments = tkPayments(tk);
+        if (!payments.some(p => p.rowId === id) && tk.linkedRowId !== id) return tk;
+        changed = true;
+        return {
+          ...tk,
+          payments: payments.filter(p => p.rowId !== id),
+          linkedRowId: undefined, bankDate: undefined, bankAmt: undefined, bankRate: undefined, bankVND: undefined
+        };
+      });
+      if (changed) saveTokhaiListOf(kind)(next);
+    });
+    setRowsH(prev => prev.map(r => r.id !== id ? r : {
+      ...r,
+      confirmed: "",
+      confirmedMST: "",
+      confirmedName: "",
+      confirmedLoai: null,
+      confirmedHach: "",
+      confirmedInvId: "",
+      confirmedToKhaiId: undefined,
+      manualConfirm: false,
+      manualKw: "",
+      isInternal: false,
+      internalAccId: null,
+      internalAccLabel: "",
+      internalSkip: false,
+      isCash: false,
+      t1_dict: undefined,
+      fxSplit: undefined,
+    }));
+    showToast("↩ Đã đưa về Chờ — xoá thông tin đã gắn, có thể nhập lại");
+  };
   const attachTokhai = (kind, rowId, tokhaiId) => {
     const list = tokhaiListOf(kind);
     const tk = list.find(t => t.id === tokhaiId);
@@ -7407,6 +7452,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     tokhaiSuggestions: tokhaiSuggestions[r.id],
     onAttachTokhai: attachTokhai,
     onOpenTokhaiPicker: openTokhaiPicker,
+    onResetPending: unlinkRow,
     searchTerm: search,
     accountCurrency: activeTabAcc ? activeTabAcc.currency : undefined
   })), filtered.length > showCount && /*#__PURE__*/React.createElement("div", {
@@ -7437,6 +7483,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     onEditFxDiff: editFxDiff,
     bankRows: rows,
     onExportFxDiff: tkIds => exportFxDiffForTk("NK", tkIds),
+    onUnlinkRow: unlinkRow,
     showToast
   }), tokhaiXKModalOpen && /*#__PURE__*/React.createElement(ToKhaiModal, {
     kind: "XK",
@@ -7459,6 +7506,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     onEditFxDiff: editFxDiff,
     bankRows: rows,
     onExportFxDiff: tkIds => exportFxDiffForTk("XK", tkIds),
+    onUnlinkRow: unlinkRow,
     showToast
   }), fxPreviewOpen && /*#__PURE__*/React.createElement(FxDiffPreviewModal, {
     rows: fxPreviewRows,
@@ -7549,7 +7597,7 @@ function FxDiffPreviewModal({ rows, onClose, onExport }) {
 
 // ── Bảng quản lý Tờ khai Hải quan NK: xem/sửa tay/nhập từ file tờ khai/xoá, và (khi mở ở chế độ
 // "chọn cho 1 giao dịch") cho chọn 1 tờ khai để gắn thẳng vào GD thanh toán đang xem trên sao kê ──
-function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, pickForRowDesc, onPick, onPickSplit, splitRemainingVND, splitInProgress, onApplyFxDiff, onEditFxDiff, bankRows, onExportFxDiff, showToast, coId }) {
+function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, pickForRowDesc, onPick, onPickSplit, splitRemainingVND, splitInProgress, onApplyFxDiff, onEditFxDiff, bankRows, onExportFxDiff, showToast, coId, onUnlinkRow }) {
   const isXK = kind === "XK";
   // Đối tác luôn hiển thị nhãn "Khách hàng" (cả tờ NK lẫn XK) — CÙNG 1 trường dữ liệu tk.nhaCungCap.
   const partnerLabel = "Khách hàng";
@@ -7714,12 +7762,19 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
       return { ...tk, payments, linkedRowId: undefined, bankDate: undefined, bankAmt: undefined, bankRate: undefined, bankVND: undefined };
     }));
   };
+  // Bỏ gắn 1 lần thanh toán khỏi tờ khai — PHẢI đồng thời đưa GD ngân hàng tương ứng (payment.rowId)
+  // TRỞ VỀ "Chờ" (qua onUnlinkRow), nếu không GD đó vẫn kẹt ở trạng thái "đã xác nhận" (confirmed=
+  // yes/confirmedToKhaiId cũ) dù tờ khai không còn payment nào trỏ tới nó nữa — đúng báo cáo thật:
+  // "khi đã bỏ chọn giao dịch thanh toán thì giao dịch đó hãy quay lại mục chờ chưa xử lý".
   const removePayment = (tkId, idx) => {
-    onSave(list.map(tk => {
-      if (tk.id !== tkId) return tk;
-      const payments = tkPayments(tk).filter((_, i) => i !== idx);
-      return { ...tk, payments, linkedRowId: undefined, bankDate: undefined, bankAmt: undefined, bankRate: undefined, bankVND: undefined };
+    const tk = list.find(t => t.id === tkId);
+    const removedRowId = tk ? (tkPayments(tk)[idx] || {}).rowId : null;
+    onSave(list.map(t => {
+      if (t.id !== tkId) return t;
+      const payments = tkPayments(t).filter((_, i) => i !== idx);
+      return { ...t, payments, linkedRowId: undefined, bankDate: undefined, bankAmt: undefined, bankRate: undefined, bankVND: undefined };
     }));
+    if (removedRowId && onUnlinkRow) onUnlinkRow(removedRowId);
   };
   const numInputPay = (tk, idx, field, w) => {
     const key = tk.id + "_p" + idx + "_" + field;
@@ -8201,6 +8256,7 @@ function ConfirmRow({
   tokhaiSuggestions,
   onAttachTokhai,
   onOpenTokhaiPicker,
+  onResetPending,
   searchTerm,
   accountCurrency
 }) {
@@ -9035,7 +9091,11 @@ function ConfirmRow({
       fontSize: 12,
       cursor: "pointer"
     }
-  }, "\u2717 Kh\xF4ng kh\u1EDBp")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "\u2717 Kh\xF4ng kh\u1EDBp"), r.confirmed === "yes" && onResetPending && /*#__PURE__*/React.createElement("button", {
+    onClick: () => { if (window.confirm("\u0110\u01B0a giao d\u1ECBch n\u00E0y v\u1EC1 \"Ch\u1EDD\" \u2014 xo\u00E1 TO\u00C0N B\u1ED8 th\u00F4ng tin \u0111\u00E3 g\u1EAFn (m\u00E3 \u0111\u1ED1i t\u01B0\u1EE3ng, ho\u00E1 \u0111\u01A1n, t\u1EDD khai, n\u1ED9i b\u1ED9...) \u0111\u1EC3 nh\u1EADp l\u1EA1i t\u1EEB \u0111\u1EA7u?")) { onResetPending(r.id); if (onClearBulkPreview) onClearBulkPreview(); } },
+    title: "G\u1EAFn sai/ch\u1ECDn nh\u1EA7m? \u0110\u01B0a v\u1EC1 \"Ch\u1EDD\" \u0111\u1EC3 xo\u00E1 th\u00F4ng tin \u0111\u00E3 g\u1EAFn v\u00E0 nh\u1EADp l\u1EA1i",
+    style: { height: 30, borderRadius: 7, border: "1px solid var(--amber)", background: "#fff", color: "var(--amber)", fontSize: 11, cursor: "pointer", fontWeight: 500 }
+  }, "\u21A9 Quay l\u1EA1i ch\u1EDD")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: "var(--amber)",
