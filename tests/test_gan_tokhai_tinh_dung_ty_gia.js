@@ -38,6 +38,7 @@ const tkTaxVNDSrc = extractBraceBlock('function tkTaxVND(tk) {');
 const tkPaymentsSrc = extractBraceBlock('function tkPayments(tk) {');
 const tkTotalPaidVNDSrc = extractBraceBlock('function tkTotalPaidVND(tk) {');
 const extractForeignAmtSrc = extractBraceBlock('function extractForeignAmt(desc, currency) {');
+const rowAmountVNDSrc = extractBraceBlock('function rowAmountVND(row) {');
 const computeBankPaymentSrc = extractBraceBlock('function computeBankPayment(row, tk) {');
 
 const factory = new Function(`
@@ -46,6 +47,7 @@ ${tkTaxVNDSrc}
 ${tkPaymentsSrc}
 ${tkTotalPaidVNDSrc}
 ${extractForeignAmtSrc}
+${rowAmountVNDSrc}
 ${computeBankPaymentSrc}
 return computeBankPayment;
 `);

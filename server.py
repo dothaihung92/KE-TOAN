@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-14.238"
+APP_BUILD = "2026-09-14.239"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25798,6 +25798,31 @@ def misa_sql_tim_doi_tuong(cid: int, q: str = "", database: str = ""):
             "ISNULL(CompanyTaxCode,'') FROM AccountObject WHERE AccountObjectCode LIKE ? OR "
             "AccountObjectName LIKE ? OR CompanyTaxCode LIKE ?", (like, like, like)).fetchall()
         return {"ket_qua": [{"id": str(r[0]), "ma": r[1], "ten": r[2], "mst": r[3]} for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.get("/api/misa-sql/toan-bo-doi-tuong/{cid}")
+def misa_sql_toan_bo_doi_tuong(cid: int, database: str = ""):
+    """Trả TOÀN BỘ Danh mục Đối tượng MISA (mã + tên, không lọc theo từ khoá)
+    — dùng để phần mềm TỰ ĐỘNG khớp tên khách hàng/NCC nước ngoài (không có
+    MST, không thể tra theo MST như _misa_danh_sach_mst_doi_tuong) trên Tờ
+    khai Hải quan XK/NK với đúng mã đối tượng đã có sẵn trong MISA — khớp
+    theo TÊN đã chuẩn hoá (gộp khoảng trắng thừa, không phân biệt hoa/thường,
+    giữ nguyên dấu tiếng Việt), làm ở phía trình duyệt (xem hàm chuanTenDoiTuong
+    trong doi_chieu_ngan_hang.html) để không phải gọi mạng riêng cho từng
+    dòng tờ khai. CHỈ ĐỌC."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
+                                 "kết nối tới dữ liệu THỬ trước.")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectName,'') "
+            "FROM AccountObject").fetchall()
+        return {"ds": [{"id": str(r[0]), "ma": r[1], "ten": r[2]} for r in rows if r[1] and r[2]]}
     finally:
         conn.close()
 

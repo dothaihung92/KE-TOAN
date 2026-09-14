@@ -723,6 +723,11 @@ function tkTotalPaidVND(tk) {
 // So khớp gợi ý Tờ khai Hải quan (NK/XK) với nội dung giao dịch — chỉ giữ chữ/số, bỏ khoảng
 // trắng/dấu câu để so khớp không phân biệt định dạng gõ khác nhau.
 function tkCore(s) { return String(s || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase(); }
+// Chuẩn hoá TÊN khách hàng/NCC để tự động khớp với Danh mục Đối tượng MISA (gộp khoảng trắng thừa,
+// không phân biệt hoa/thường, GIỮ NGUYÊN dấu tiếng Việt) — PHẢI giống hệt hàm _chuan_ten_doi_tuong()
+// bên server.py để so khớp đúng (server chuẩn hoá TRƯỚC khi trả map, đây chuẩn hoá lại tên trên tờ
+// khai theo CÙNG công thức rồi mới so khớp).
+function chuanTenDoiTuong(s) { return String(s || "").trim().split(/\s+/).join(" ").toLowerCase(); }
 // Nội dung sao kê thường ghi kèm số tiền ngoại tệ đã thanh toán (VD "USD 7,447.50" hay
 // "7477.50USD") — dò lấy ra để so khớp gợi ý và điền sẵn cột "Trị giá TT (NT)".
 function extractForeignAmt(desc, currency) {
@@ -754,13 +759,25 @@ function extractForeignAmt(desc, currency) {
 //     $9,172.54 thật) — bankVND phải QUY ĐỔI qua tỷ giá THẬT của đúng GD đó (row.tyGia — tỷ giá VCB
 //     người dùng đã tự nhập/lấy ở màn hình đối chiếu chính, ô "Tỷ giá" ngay dưới mỗi dòng TK ngoại
 //     tệ), TUYỆT ĐỐI không được dùng thẳng số ngoại tệ làm số VND.
+// Số tiền 1 GD ngân hàng QUY RA VND — GD ở TK VND thì lấy thẳng số tiền; GD ở TK NGOẠI TỆ (USD...)
+// thì PHẢI nhân với tỷ giá VCB đã nhập trên dòng đó (row.tyGia, ô "Tỷ giá" dưới mỗi dòng TK ngoại tệ
+// ở màn hình đối chiếu chính) — TUYỆT ĐỐI không được lấy thẳng số ngoại tệ làm số VND (đúng lỗi thật
+// đã gặp 2 lần: gắn tờ khai đơn lẻ VÀ "gối đầu" (nhiều tờ khai cho 1 GD) đều từng lấy thẳng số USD
+// tính làm số VND, khiến chênh lệch/số tiền phân bổ sai lệch hàng trăm triệu). Trả về số ngoại tệ gốc
+// (chưa quy đổi) nếu GD ngoại tệ mà CHƯA có tỷ giá — nơi gọi tự quyết định có cảnh báo hay không.
+function rowAmountVND(row) {
+  const amt = Math.max(row.tx.debit || 0, row.tx.credit || 0);
+  const ccy = (row.tx.currency || "VND").toUpperCase();
+  if (ccy === "VND") return amt;
+  return row.tyGia > 0 ? Math.round(amt * row.tyGia) : amt;
+}
 function computeBankPayment(row, tk) {
   const rowCcy = (row.tx.currency || "VND").toUpperCase();
   const tkCcy = (tk.currency || "USD").toUpperCase();
   if (rowCcy !== "VND" && rowCcy === tkCcy) {
     const bankAmt = Math.max(row.tx.debit || 0, row.tx.credit || 0);
     const rate = row.tyGia > 0 ? row.tyGia : 0;
-    const bankVND = rate > 0 ? Math.round(bankAmt * rate) : bankAmt;
+    const bankVND = rowAmountVND(row);
     return { bankAmt, bankRate: rate, bankVND, missingRate: !(rate > 0) };
   }
   const bankVND = Math.max(row.tx.debit || 0, row.tx.credit || 0);
@@ -6144,7 +6161,11 @@ function ConfirmScreen({
     if (!row || !tk) return;
     const splitFlowCur = splitFlowOf(kind);
     const inFlow = splitFlowCur && splitFlowCur.rowId === rowId;
-    const remainingVND = inFlow ? splitFlowCur.remainingVND : Math.max(row.tx.debit || 0, row.tx.credit || 0);
+    const rowCcy = (row.tx.currency || "VND").toUpperCase();
+    if (!inFlow && rowCcy !== "VND" && !(row.tyGia > 0)) {
+      showToast("⚠ GD ngân hàng này CHƯA CÓ tỷ giá VCB (ô \"Tỷ giá\" dưới dòng TK ngoại tệ ở màn hình chính) — đang tạm phân bổ theo đúng số ngoại tệ nên có thể SAI. Hãy nhập tỷ giá VCB cho GD đó rồi gối đầu lại.", "warn");
+    }
+    const remainingVND = inFlow ? splitFlowCur.remainingVND : rowAmountVND(row);
     const tkBalance = Math.max(0, tkTaxVND(tk) - tkTotalPaidVND(tk));
     const suggested = tkBalance > 0 ? Math.min(remainingVND, tkBalance) : remainingVND;
     let allocAmt = (customAmt != null && customAmt !== "") ? Math.max(0, Math.min(parseNum(customAmt, false) || 0, remainingVND)) : suggested;
@@ -7409,7 +7430,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     splitRemainingVND: tokhaiPickForRow
       ? (splitFlow && splitFlow.rowId === tokhaiPickForRow
         ? splitFlow.remainingVND
-        : (() => { const pr = rows.find(r => r.id === tokhaiPickForRow); return pr ? Math.max(pr.tx.debit || 0, pr.tx.credit || 0) : null; })())
+        : (() => { const pr = rows.find(r => r.id === tokhaiPickForRow); return pr ? rowAmountVND(pr) : null; })())
       : null,
     splitInProgress: !!(splitFlow && splitFlow.rowId === tokhaiPickForRow),
     onApplyFxDiff: (rowId, taxVND, bankVND) => applyFxDiff("NK", rowId, taxVND, bankVND),
@@ -7431,7 +7452,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     splitRemainingVND: tokhaiXKPickForRow
       ? (splitFlowXK && splitFlowXK.rowId === tokhaiXKPickForRow
         ? splitFlowXK.remainingVND
-        : (() => { const pr = rows.find(r => r.id === tokhaiXKPickForRow); return pr ? Math.max(pr.tx.debit || 0, pr.tx.credit || 0) : null; })())
+        : (() => { const pr = rows.find(r => r.id === tokhaiXKPickForRow); return pr ? rowAmountVND(pr) : null; })())
       : null,
     splitInProgress: !!(splitFlowXK && splitFlowXK.rowId === tokhaiXKPickForRow),
     onApplyFxDiff: (rowId, taxVND, bankVND) => applyFxDiff("XK", rowId, taxVND, bankVND),
@@ -7565,6 +7586,44 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
       setDtSearchLoading(false);
     }, 300);
   };
+  // Tự động gắn Mã KH/NCC theo TÊN — khách/NCC nước ngoài trên tờ khai XK/NK thường KHÔNG có MST
+  // (không tra được theo MST như các màn MISA khác), nên phải khớp theo tên đã chuẩn hoá. Tải TOÀN
+  // BỘ danh mục đối tượng MISA đúng 1 LẦN khi mở bảng (không phải gọi mạng riêng cho từng dòng), rồi
+  // tự khớp CHÍNH XÁC tên → gắn mã cho MỌI dòng đang trống Mã KH/NCC. Im lặng bỏ qua (không báo lỗi)
+  // nếu chưa kết nối MISA — đây chỉ là tiện ích tự động, không bắt buộc.
+  const [misaObjMap, setMisaObjMap] = useState(null);
+  const misaObjFetchedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!coId || misaObjFetchedRef.current) return;
+    misaObjFetchedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/misa-sql/toan-bo-doi-tuong/${coId}`);
+        if (!res.ok) { setMisaObjMap(new Map()); return; }
+        const d = await res.json();
+        const map = new Map();
+        (d.ds || []).forEach(o => {
+          const key = chuanTenDoiTuong(o.ten);
+          if (key && !map.has(key)) map.set(key, o);
+        });
+        setMisaObjMap(map);
+      } catch (e) {
+        setMisaObjMap(new Map());
+      }
+    })();
+  }, [coId]);
+  React.useEffect(() => {
+    if (!misaObjMap || !misaObjMap.size) return;
+    let changed = false;
+    const next = list.map(tk => {
+      if (tk.maDoiTuong || !tk.nhaCungCap) return tk;
+      const hit = misaObjMap.get(chuanTenDoiTuong(tk.nhaCungCap));
+      if (!hit) return tk;
+      changed = true;
+      return { ...tk, maDoiTuong: hit.ma };
+    });
+    if (changed) onSave(next);
+  }, [misaObjMap, list]);
   const pickDoiTuong = o => {
     if (!dtSearchTk) return;
     onSave(list.map(t => t.id !== dtSearchTk.id ? t : { ...t, maDoiTuong: o.ma, nhaCungCap: o.ten || t.nhaCungCap }));
