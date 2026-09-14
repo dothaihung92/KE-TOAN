@@ -234,6 +234,7 @@
       <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff;white-space:nowrap" onclick="moDVCBatch();toggleHoTroKeKhai()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
       <button class="btn" style="width:100%;font-size:14.5px;padding:10px;white-space:nowrap" onclick="openBatchModal();toggleHoTroKeKhai()">🚀 Tra cứu hoá đơn hàng loạt</button>
       <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moNopToKhai();toggleHoTroKeKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
+      <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moHDNModal();toggleHoTroKeKhai()">🧾 Soạn nháp hoá đơn nhanh (từ file/nội dung khách gửi)</button>
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
@@ -422,6 +423,55 @@
       <button class="btn ghost" onclick="dongDVCModal()">Đóng</button>
       <button class="btn ghost" id="dvcTestBtn" onclick="dvcTestLogin()">Thử đăng nhập</button>
       <button class="btn" id="dvcTaiBtn" onclick="dvcTaiBaoCao()">Tải về máy</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL SOẠN NHÁP HOÁ ĐƠN NHANH (từ file Excel/nội dung khách gửi qua Zalo) -->
+<div class="modal-bg" id="hdnModal">
+  <div class="modal" style="width:min(900px,96vw);max-width:900px;max-height:92vh;display:flex;flex-direction:column">
+    <h3 style="margin-top:0">🧾 Soạn nháp hoá đơn nhanh</h3>
+    <p class="hint" style="margin-top:0">Dán nội dung khách gửi (Zalo/tin nhắn) hoặc nhập file Excel khách gửi — phần mềm tự dò tên/MST/địa chỉ và bảng hàng hoá để điền sẵn, bạn xem lại/sửa rồi tự phát hành hoá đơn thật qua đúng hệ thống hoá đơn điện tử công ty đang dùng (MISA meInvoice/Viettel S-Invoice/VNPT...). <b>Phần mềm KHÔNG tự phát hành hoá đơn</b> — chỉ hỗ trợ soạn nháp cho nhanh.</p>
+    <div style="overflow:auto;flex:1;padding-right:4px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <div class="field" style="flex:1;min-width:280px">
+          <label>📋 Dán nội dung khách gửi</label>
+          <textarea id="hdn_paste" rows="4" placeholder="VD: Công ty TNHH ABC&#10;MST: 0312345678&#10;Địa chỉ: 123 Nguyễn Huệ, Q1&#10;(bảng hàng hoá vẫn phải tự thêm dòng bên dưới — dán nội dung chỉ dò được tên/MST/địa chỉ)" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:13.5px;box-sizing:border-box"></textarea>
+          <button type="button" class="btn ghost sm" style="margin-top:6px" onclick="hdnPhanTichPaste()">🔍 Phân tích nội dung đã dán</button>
+        </div>
+        <div class="field" style="flex:1;min-width:220px">
+          <label>📥 Hoặc nhập file Excel khách gửi</label>
+          <button type="button" class="btn ghost" style="width:100%" onclick="document.getElementById('hdn_file').click()">📥 Chọn file Excel (.xlsx)</button>
+          <input type="file" id="hdn_file" accept=".xlsx,.xls" style="display:none" onchange="hdnChonFile(this)">
+          <p class="hint" style="margin:6px 0 0">File PDF: mở file, bấm chọn hết nội dung (Ctrl+A → Ctrl+C) rồi dán vào ô bên trái.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div class="field" style="flex:2;min-width:220px"><label>Tên khách hàng</label><input id="hdn_ten" placeholder="Tên công ty/khách hàng"></div>
+        <div class="field" style="flex:1;min-width:150px"><label>Mã số thuế</label><input id="hdn_mst" placeholder="MST"></div>
+      </div>
+      <div class="field"><label>Địa chỉ</label><input id="hdn_diachi" placeholder="Địa chỉ"></div>
+      <div class="field"><label>Hàng hóa/dịch vụ</label>
+        <table style="width:100%;border-collapse:collapse;font-size:13px" id="hdn_bang">
+          <thead><tr style="background:var(--green-l,#eef6f0)">
+            <th style="padding:5px 6px;text-align:left;width:34%">Tên hàng hóa/dịch vụ</th>
+            <th style="padding:5px 6px;text-align:left;width:10%">ĐVT</th>
+            <th style="padding:5px 6px;text-align:left;width:12%">Số lượng</th>
+            <th style="padding:5px 6px;text-align:left;width:16%">Đơn giá</th>
+            <th style="padding:5px 6px;text-align:left;width:18%">Thành tiền</th>
+            <th style="padding:5px 6px;width:6%"></th>
+          </tr></thead>
+          <tbody id="hdn_bang_body"></tbody>
+        </table>
+        <button type="button" class="btn ghost sm" style="margin-top:6px" onclick="hdnThemDong()">➕ Thêm dòng</button>
+      </div>
+      <div class="field"><label>Ghi chú</label><input id="hdn_ghichu" placeholder="Tuỳ chọn"></div>
+      <div style="text-align:right;font-weight:700;font-size:15px;margin-top:4px">Tổng cộng: <span id="hdn_tong">0đ</span></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="hdnDongModal()">Đóng</button>
+      <button class="btn ghost" onclick="hdnLamMoi()">🗑 Làm nháp mới</button>
+      <button class="btn" onclick="hdnXuatExcel()">⬇ Xuất Excel</button>
     </div>
   </div>
 </div>
@@ -9417,6 +9467,130 @@ async function deleteCompany(id){
   current=null;document.getElementById('workspace').style.display='none';
   document.getElementById('emptyState').style.display='flex';
   await loadCompanies();toast('Đã xóa','ok');
+}
+
+/* ---------- HOÁ ĐƠN NHANH (soạn nháp hoá đơn từ file Excel/nội dung khách gửi qua Zalo) ----------
+   CHỈ hỗ trợ soạn NHÁP (dò tên/MST/địa chỉ + bảng hàng hoá theo heuristic, không có mẫu cố định vì
+   mỗi khách gửi 1 kiểu khác nhau) để người dùng xem lại/sửa rồi TỰ phát hành hoá đơn thật qua đúng hệ
+   thống hoá đơn điện tử công ty đang dùng — KHÔNG tự động phát hành (đúng lựa chọn người dùng đã
+   chọn: "Hỗ trợ điền sẵn, người dùng bấm xác nhận rồi gửi"). State chỉ tồn tại trong phiên làm việc
+   (không lưu lại), vì đây là công cụ soạn nhanh dùng ngay rồi xuất Excel, không phải nơi lưu trữ lâu
+   dài. */
+let hdnItems = [];
+function moHDNModal(){
+  if(!current){ toast('Chưa chọn công ty','err'); return; }
+  document.getElementById('hdnModal').classList.add('show');
+  hdnRenderBang();
+}
+function hdnDongModal(){
+  document.getElementById('hdnModal').classList.remove('show');
+}
+function hdnLamMoi(){
+  document.getElementById('hdn_paste').value='';
+  document.getElementById('hdn_ten').value='';
+  document.getElementById('hdn_mst').value='';
+  document.getElementById('hdn_diachi').value='';
+  document.getElementById('hdn_ghichu').value='';
+  hdnItems=[];
+  hdnRenderBang();
+}
+function hdnPhanTichPaste(){
+  const txt=document.getElementById('hdn_paste').value||'';
+  if(!txt.trim()){ toast('Chưa dán nội dung nào','err'); return; }
+  const lines=txt.split(/\r?\n/);
+  const LABELS={
+    mst:[/mã số thuế\s*:?\s*/i,/ma so thue\s*:?\s*/i,/^mst\s*:?\s*/i],
+    ten:[/tên công ty\s*:?\s*/i,/tên khách hàng\s*:?\s*/i,/khách hàng\s*:?\s*/i,/đơn vị mua\s*:?\s*/i,/^công ty\s*:?\s*/i],
+    diaChi:[/địa chỉ\s*:?\s*/i,/đ\/c\s*:?\s*/i,/d\/c\s*:?\s*/i],
+  };
+  const found={};
+  for(const line of lines){
+    const t=line.trim();
+    if(!t)continue;
+    for(const field in LABELS){
+      if(found[field])continue;
+      for(const re of LABELS[field]){
+        if(re.test(t)){ found[field]=t.replace(re,'').trim(); break; }
+      }
+    }
+  }
+  // Nếu không dò được tên công ty qua nhãn, thử lấy dòng ĐẦU TIÊN không rỗng và KHÔNG chỉ toàn chữ
+  // số (tránh lấy nhầm dòng số điện thoại/MST không kèm nhãn làm tên) — khách thường gõ tên công ty
+  // lên đầu tin nhắn mà không kèm nhãn "Tên công ty:".
+  if(!found.ten){
+    const first=lines.map(l=>l.trim()).find(l=>l && !/^[\d\s.\-+()]+$/.test(l));
+    if(first) found.ten=first;
+  }
+  if(found.mst) document.getElementById('hdn_mst').value=found.mst;
+  if(found.ten) document.getElementById('hdn_ten').value=found.ten;
+  if(found.diaChi) document.getElementById('hdn_diachi').value=found.diaChi;
+  toast(found.mst||found.ten||found.diaChi ? '✓ Đã điền thông tin dò được — bạn xem lại giúp' : 'Không dò được tên/MST/địa chỉ trong nội dung — bạn tự điền tay giúp','ok');
+}
+async function hdnChonFile(input){
+  const file=input.files&&input.files[0];
+  if(!file)return;
+  input.value='';
+  toast('Đang đọc file...','');
+  try{
+    const fd=new FormData(); fd.append('file',file);
+    const r=await fetch('/api/hoa-don-nhanh/doc-excel',{method:'POST',body:fd});
+    const d=await r.json();
+    if(!r.ok){ toast('Lỗi: '+(d.detail||'không đọc được file'),'err'); return; }
+    if(d.ten) document.getElementById('hdn_ten').value=d.ten;
+    if(d.mst) document.getElementById('hdn_mst').value=d.mst;
+    if(d.diaChi) document.getElementById('hdn_diachi').value=d.diaChi;
+    if(d.items && d.items.length){ hdnItems=d.items.map(it=>({...it})); }
+    hdnRenderBang();
+    toast(`✓ Đã đọc file — ${d.items?d.items.length:0} dòng hàng hoá, bạn xem lại giúp`,'ok');
+  }catch(e){ toast('Lỗi đọc file: '+e.message,'err'); }
+}
+function hdnThemDong(){
+  hdnItems.push({ten:'',dvt:'',sl:0,dgia:0,thanhTien:0});
+  hdnRenderBang();
+}
+function hdnXoaDong(idx){
+  hdnItems.splice(idx,1);
+  hdnRenderBang();
+}
+function hdnSuaDong(idx,field,val){
+  const it=hdnItems[idx]; if(!it)return;
+  if(field==='ten'||field==='dvt'){ it[field]=val; return; }
+  const n=parseFloat(String(val).replace(/,/g,''))||0;
+  it[field]=n;
+  if(field==='sl'||field==='dgia') it.thanhTien=Math.round((it.sl||0)*(it.dgia||0)*100)/100;
+  hdnRenderBang();
+}
+function hdnRenderBang(){
+  const tbody=document.getElementById('hdn_bang_body');
+  if(!tbody)return;
+  tbody.innerHTML=hdnItems.map((it,i)=>`
+    <tr>
+      <td style="padding:3px"><input value="${misaEsc(it.ten||'')}" oninput="hdnSuaDong(${i},'ten',this.value)" style="width:100%;box-sizing:border-box;padding:4px;border:1px solid var(--line);border-radius:5px"></td>
+      <td style="padding:3px"><input value="${misaEsc(it.dvt||'')}" oninput="hdnSuaDong(${i},'dvt',this.value)" style="width:100%;box-sizing:border-box;padding:4px;border:1px solid var(--line);border-radius:5px"></td>
+      <td style="padding:3px"><input value="${it.sl||0}" oninput="hdnSuaDong(${i},'sl',this.value)" style="width:100%;box-sizing:border-box;padding:4px;border:1px solid var(--line);border-radius:5px"></td>
+      <td style="padding:3px"><input value="${it.dgia||0}" oninput="hdnSuaDong(${i},'dgia',this.value)" style="width:100%;box-sizing:border-box;padding:4px;border:1px solid var(--line);border-radius:5px"></td>
+      <td style="padding:3px"><input value="${it.thanhTien||0}" oninput="hdnSuaDong(${i},'thanhTien',this.value)" style="width:100%;box-sizing:border-box;padding:4px;border:1px solid var(--line);border-radius:5px"></td>
+      <td style="padding:3px;text-align:center"><button type="button" onclick="hdnXoaDong(${i})" style="border:none;background:transparent;color:#c00;cursor:pointer;font-size:14px">✕</button></td>
+    </tr>`).join('');
+  const tong=hdnItems.reduce((s,it)=>s+(parseFloat(it.thanhTien)||0),0);
+  const tongEl=document.getElementById('hdn_tong');
+  if(tongEl) tongEl.textContent=fmtVND(tong)+'đ';
+}
+async function hdnXuatExcel(){
+  const ten=document.getElementById('hdn_ten').value.trim();
+  if(!ten && !hdnItems.length){ toast('Chưa có thông tin gì để xuất','err'); return; }
+  const body={
+    ten, mst:document.getElementById('hdn_mst').value.trim(),
+    diaChi:document.getElementById('hdn_diachi').value.trim(),
+    ghiChu:document.getElementById('hdn_ghichu').value.trim(),
+    items:hdnItems,
+  };
+  try{
+    const r=await fetch('/api/hoa-don-nhanh/xuat-excel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); toast('Lỗi: '+(d.detail||'xuất thất bại'),'err'); return; }
+    await xuatFile(r,`HoaDon_Nhap_${(ten||'KhachHang').slice(0,30)}.xlsx`);
+    toast('✓ Đã xuất file Excel hoá đơn nháp','ok');
+  }catch(e){ toast('Lỗi xuất file: '+e.message,'err'); }
 }
 
 /* ---------- HELPERS ---------- */

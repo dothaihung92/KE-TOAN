@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-14.240"
+APP_BUILD = "2026-09-14.241"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -8862,6 +8862,207 @@ def companies_template():
     path = os.path.join(DOWNLOAD_DIR, "Mau_DanhSach_CongTy.xlsx")
     wb.save(path)
     return _resp_xuat(path, "Mau_DanhSach_CongTy.xlsx")
+
+
+# ============================================================
+#  HOÁ ĐƠN NHANH — hỗ trợ soạn nháp hoá đơn từ file Excel/nội dung khách gửi
+#  qua Zalo (dò TÊN/MST/ĐỊA CHỈ + bảng hàng hoá theo heuristic, KHÔNG có mẫu
+#  cố định vì mỗi khách gửi 1 kiểu khác nhau). CHỈ hỗ trợ điền sẵn để người
+#  dùng xem lại/sửa rồi tự phát hành thật qua đúng đơn vị hoá đơn điện tử
+#  công ty đang dùng (MISA meInvoice/Viettel S-Invoice/VNPT.../khác nhau
+#  theo từng công ty) — KHÔNG tự động phát hành, đúng lựa chọn người dùng.
+# ============================================================
+def _hdn_so(v):
+    """Chuyển 1 ô số (number thật, hoặc text tự do kiểu '1.234,56'/'1,234.56') thành float — không
+    đoán được hết mọi định dạng khách gõ tay nên trả 0 khi không chắc, KHÔNG raise lỗi (người dùng tự
+    sửa lại trên giao diện, không được làm hỏng cả lượt đọc chỉ vì 1 ô số lạ)."""
+    if v is None or v == "":
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(" ", "")
+    if not s:
+        return 0.0
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".") else s.replace(",", "")
+    elif "," in s:
+        parts = s.split(",")
+        s = s.replace(",", ".") if len(parts) == 2 and len(parts[-1]) in (1, 2) else s.replace(",", "")
+    elif "." in s:
+        # Chỉ có dấu '.' — nhiều dấu chấm (VD "1.750.000") hoặc phần sau dấu chấm cuối đúng 3 chữ số
+        # (VD "1.750") gần như chắc chắn là phân cách hàng nghìn kiểu VN (VNĐ không có số lẻ thập
+        # phân); ngược lại (1 dấu chấm, phần sau 1-2 chữ số, VD "1750000.5") coi là số thập phân chuẩn.
+        parts = s.split(".")
+        if len(parts) > 2 or len(parts[-1]) == 3:
+            s = s.replace(".", "")
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
+
+_HDN_LABELS_DAU = {
+    "mst": ["mã số thuế", "ma so thue", "mst"],
+    "ten": ["tên công ty", "ten cong ty", "tên khách hàng", "ten khach hang", "khách hàng",
+            "khach hang", "đơn vị mua", "don vi mua", "tên đơn vị", "ten don vi", "tên bên mua",
+            "ten ben mua", "công ty"],
+    "diaChi": ["địa chỉ", "dia chi", "đ/c", "d/c"],
+}
+_HDN_LABELS_HANG = {
+    "ten": ["tên hàng hóa", "ten hang hoa", "tên hàng hoá", "tên hàng", "ten hang", "sản phẩm",
+            "san pham", "hàng hóa", "hang hoa", "hàng hoá", "mô tả", "mo ta", "nội dung", "noi dung"],
+    "dvt": ["đơn vị tính", "don vi tinh", "đvt", "dvt", "đơn vị", "don vi"],
+    "sl": ["số lượng", "so luong", "sl"],
+    "dgia": ["đơn giá", "don gia"],
+    "thanhTien": ["thành tiền", "thanh tien", "tổng tiền", "tong tien"],
+}
+
+
+def _doc_hoa_don_nhanh_tu_excel(wb):
+    """Đọc 1 file Excel khách gửi (đơn hàng/thông tin đặt hàng qua Zalo) — DÒ heuristic (không có mẫu
+    cố định). Ưu tiên sheet có NHIỀU Ô CÓ DỮ LIỆU NHẤT (khách có thể gửi kèm sheet trống/sheet phụ).
+    Trả {ten, mst, diaChi, items:[{ten, dvt, sl, dgia, thanhTien}]} — CHỈ dò tốt nhất có thể, người
+    dùng vẫn phải tự xem lại/sửa trên giao diện trước khi dùng thật."""
+    ws = wb.active
+    best_ws, best_n = ws, 0
+    for s in wb.worksheets:
+        n = sum(1 for row in s.iter_rows() for c in row if c is not None and c != "")
+        if n > best_n:
+            best_ws, best_n = s, n
+    ws = best_ws if best_n > 0 else ws
+    grid = [list(row) for row in ws.iter_rows(values_only=True)]
+    nrows = len(grid)
+
+    def norm(v):
+        return str(v or "").strip().lower()
+
+    found = {}
+    for r in range(nrows):
+        row = grid[r]
+        for c in range(len(row)):
+            cell_norm = norm(row[c])
+            if not cell_norm:
+                continue
+            for field, labels in _HDN_LABELS_DAU.items():
+                if field in found:
+                    continue
+                for lb in labels:
+                    if cell_norm.startswith(lb):
+                        rest = str(row[c])[len(lb):].strip(" :\t-–")
+                        if rest:
+                            found[field] = rest
+                        else:
+                            right = row[c + 1] if c + 1 < len(row) else None
+                            below = grid[r + 1][c] if r + 1 < nrows and c < len(grid[r + 1]) else None
+                            val = right if (right not in (None, "")) else below
+                            if val not in (None, ""):
+                                found[field] = str(val).strip()
+                        break
+                if field in found:
+                    break
+
+    header_row, col_map = -1, {}
+    for r in range(nrows):
+        row = grid[r]
+        row_cols = {}
+        for c in range(len(row)):
+            cell_norm = norm(row[c])
+            if not cell_norm:
+                continue
+            for field, labels in _HDN_LABELS_HANG.items():
+                if field in row_cols:
+                    continue
+                if any(lb in cell_norm for lb in labels):
+                    row_cols[field] = c
+        if len(row_cols) >= 2 and "ten" in row_cols:
+            header_row, col_map = r, row_cols
+            break
+
+    items = []
+    if header_row >= 0:
+        for r in range(header_row + 1, nrows):
+            row = grid[r]
+            ten_col = col_map["ten"]
+            ten = str(row[ten_col]).strip() if ten_col < len(row) and row[ten_col] not in (None, "") else ""
+            if not ten:
+                continue
+            dvt = str(row[col_map["dvt"]]).strip() if "dvt" in col_map and col_map["dvt"] < len(row) and row[col_map["dvt"]] is not None else ""
+            sl = _hdn_so(row[col_map["sl"]]) if "sl" in col_map and col_map["sl"] < len(row) else 0.0
+            dgia = _hdn_so(row[col_map["dgia"]]) if "dgia" in col_map and col_map["dgia"] < len(row) else 0.0
+            thanh_tien = _hdn_so(row[col_map["thanhTien"]]) if "thanhTien" in col_map and col_map["thanhTien"] < len(row) else 0.0
+            if not thanh_tien:
+                thanh_tien = round(sl * dgia, 2)
+            items.append({"ten": ten, "dvt": dvt, "sl": sl, "dgia": dgia, "thanhTien": thanh_tien})
+
+    return {"ten": found.get("ten", ""), "mst": found.get("mst", ""), "diaChi": found.get("diaChi", ""), "items": items}
+
+
+@app.post("/api/hoa-don-nhanh/doc-excel")
+async def hoa_don_nhanh_doc_excel(request: Request):
+    """Đọc 1 file Excel khách gửi qua Zalo, dò TÊN/MST/ĐỊA CHỈ + bảng hàng hoá — trả về JSON để điền
+    sẵn form soạn nháp hoá đơn (xem _doc_hoa_don_nhanh_tu_excel). CHỈ ĐỌC, không ghi gì."""
+    import openpyxl, io as _io
+    form = await request.form()
+    up = form.get("file")
+    if up is None:
+        raise HTTPException(400, "Chưa chọn file Excel")
+    content = await up.read()
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file Excel: {e}")
+    return _doc_hoa_don_nhanh_tu_excel(wb)
+
+
+@app.post("/api/hoa-don-nhanh/xuat-excel")
+async def hoa_don_nhanh_xuat_excel(request: Request):
+    """Xuất bản nháp hoá đơn (đã soạn/sửa trên giao diện) ra file Excel gọn để tham khảo/nhập tay vào
+    đúng hệ thống hoá đơn điện tử công ty đang dùng (mỗi công ty có thể dùng nhà cung cấp khác nhau
+    nên KHÔNG tự phát hành thẳng — đúng lựa chọn người dùng đã chọn)."""
+    import openpyxl, re
+    from openpyxl.styles import Font, PatternFill
+    body = await request.json()
+    ten = (body.get("ten") or "").strip()
+    mst = (body.get("mst") or "").strip()
+    dia_chi = (body.get("diaChi") or "").strip()
+    ghi_chu = (body.get("ghiChu") or "").strip()
+    items = body.get("items") or []
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hoá đơn nháp"
+    ws.append(["Tên khách hàng", ten])
+    ws.append(["Mã số thuế", mst])
+    ws.append(["Địa chỉ", dia_chi])
+    if ghi_chu:
+        ws.append(["Ghi chú", ghi_chu])
+    for c in (1,):
+        for r in range(1, ws.max_row + 1):
+            ws.cell(r, c).font = Font(bold=True)
+    ws.append([])
+    header_row_idx = ws.max_row + 1
+    headers = ["STT", "Tên hàng hóa/dịch vụ", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        ws.cell(header_row_idx, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(header_row_idx, c).fill = PatternFill("solid", fgColor="1F6B4A")
+    tong = 0.0
+    for i, it in enumerate(items, 1):
+        sl = float(it.get("sl") or 0)
+        dgia = float(it.get("dgia") or 0)
+        thanh_tien = float(it.get("thanhTien") or (sl * dgia))
+        tong += thanh_tien
+        ws.append([i, it.get("ten") or "", it.get("dvt") or "", sl, dgia, thanh_tien])
+    tong_row_idx = ws.max_row + 1
+    ws.cell(tong_row_idx, 5, "Tổng cộng").font = Font(bold=True)
+    ws.cell(tong_row_idx, 6, round(tong, 2)).font = Font(bold=True)
+    widths = [6, 40, 10, 12, 16, 18]
+    for i, w in enumerate(widths):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = w
+    fname = "HoaDon_Nhap_%s.xlsx" % (ten[:30].strip() or "KhachHang")
+    fname = re.sub(r'[\\/:*?"<>|]', "_", fname)
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    return _resp_xuat(path, fname)
 
 
 def _parse_tokhai_nhap(wb):
