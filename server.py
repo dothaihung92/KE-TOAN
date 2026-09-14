@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-14.242"
+APP_BUILD = "2026-09-14.243"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -27385,6 +27385,30 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         for d in doi_tuong_hd.values():
             d["hoa_don"] = [hd for hd in d["hoa_don"] if hd["inv_date"] and hd["inv_date"] <= den_dt]
 
+    # Số dư cuối kỳ mỗi đối tượng = tổng hóa đơn (Nợ 131/331, đã lọc theo Đến
+    # ngày ở trên) - tổng đã thu/chi (Có, gồm CẢ ngân hàng lẫn điều chỉnh
+    # tiền mặt, KHÔNG lọc theo ngày — kể cả khoản CHƯA khớp được với hóa đơn
+    # cụ thể nào) — tính TRƯỚC khi khớp Tầng 1/2 vì chỉ phụ thuộc tổng phát
+    # sinh thô, không phụ thuộc kết quả khớp chi tiết. Dùng để CHẶN Tầng 3
+    # tạo "Điều chỉnh công nợ treo" cho cả đối tượng đã hết nợ/dư về TỔNG
+    # THỂ (xem chặn ở vòng lặp Tầng 3 bên dưới) — theo đúng phản hồi người
+    # dùng: "miễn có thanh toán đủ và số dư trong kỳ không còn nợ ... phần
+    # mềm không cần làm điều chỉnh, vì không phải nội dung thanh toán nào
+    # cũng có ghi rõ số hóa đơn" — ca thật SATORI/HĐ 5947: dù thuật toán
+    # khớp CHI TIẾT (Tầng 1/2, kể cả khớp theo số hóa đơn trong mô tả ở
+    # _hd_so_trong_mo_ta) không xác định được CHÍNH XÁC khoản nào trả cho
+    # hóa đơn nào, tổng thanh toán của đối tượng vẫn ĐÃ vượt tổng hóa đơn từ
+    # lâu — chỉ cần nhìn TỔNG THỂ là đủ biết không còn nợ thật, không cần
+    # khớp được từng khoản cụ thể mới kết luận. Cũng tự động xử lý đúng nợ
+    # ĐẦU KỲ đã được trả bù trong các kỳ sau (tổng thanh toán không giới hạn
+    # theo ngày nên vẫn cộng đủ): nếu đã trả bù xong thì không cần điều
+    # chỉnh; nếu vẫn thật sự chưa trả thì vẫn lọt Tầng 3 như trước.
+    so_du_cuoi_ky = {}
+    for aoid, d in doi_tuong_hd.items():
+        tong_hd = sum(hd["so_tien"] for hd in d["hoa_don"])
+        tong_tt = sum(tt["so_tien"] for tt in doi_tuong_tt.get(aoid, []))
+        so_du_cuoi_ky[aoid] = tong_hd - tong_tt
+
     tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
                                             dung_sai=dung_sai, truoc_ngay=truoc_ngay)
@@ -27424,6 +27448,15 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         # xử lý khách lẻ theo cách khác (tách mã riêng từng khách nếu cần
         # theo dõi công nợ, hoặc chấp nhận không đối chiếu KL).
         if str(d.get("ma") or "").strip().upper() == "KL":
+            continue
+        # Đối tượng đã hết nợ (hoặc dư) theo SỐ DƯ TỔNG THỂ (so_du_cuoi_ky
+        # tính ở trên, TRƯỚC khi khớp Tầng 1/2) -> KHÔNG tạo "Điều chỉnh
+        # công nợ treo" cho BẤT KỲ hóa đơn nào của đối tượng này nữa, dù
+        # thuật toán khớp chi tiết không xác định được khoản thanh toán nào
+        # trả cho đúng hóa đơn nào (kể cả các hóa đơn "tin_cay_cao" — nếu
+        # tổng thể đã đủ/thừa thì chắc chắn không còn khoản nào thật sự
+        # treo). Xem giải thích đầy đủ ở chỗ tính so_du_cuoi_ky bên trên.
+        if so_du_cuoi_ky.get(aoid, 0.0) <= dung_sai:
             continue
         for hd in d["hoa_don"]:
             if hd["matched"] or hd["so_tien"] >= nguong:
@@ -27537,11 +27570,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     # dù nội dung CK không khớp tên — về TỔNG THỂ đối tượng đó vẫn đúng, dù
     # có gắn nhầm 1 khoản thì cũng đã tự bù trừ ra số dư đúng, không có gì
     # cần người dùng xử lý thêm ở đối tượng đó.
-    so_du_cuoi_ky = {}
-    for aoid, d in doi_tuong_hd.items():
-        tong_hd = sum(hd["so_tien"] for hd in d["hoa_don"])
-        tong_tt = sum(tt["so_tien"] for tt in doi_tuong_tt.get(aoid, []))
-        so_du_cuoi_ky[aoid] = tong_hd - tong_tt
+    # (so_du_cuoi_ky đã tính sẵn ở trên, TRƯỚC khi khớp Tầng 1/2, để dùng
+    # chung cho cả việc chặn Tầng 3 lẫn phần soát "gắn nhầm đối tượng" này.)
 
     nghi_sai_doi_tuong = []
     goi_y_chuyen = []
@@ -27694,7 +27724,16 @@ def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None,
     # cùng lý do đã sửa ở _misa_doi_chieu_3_tang.
     moc_qua_han3 = den_dt if (den_dt and den_dt <= datetime.datetime.now()) else datetime.datetime.now()
     han3 = moc_qua_han3 - datetime.timedelta(days=30 * int(thang_qua_han))
-    tang3_ref_ids = {
+    # Số dư cuối kỳ TỔNG THỂ của đối tượng (tổng hóa đơn - tổng đã thu/chi,
+    # KHÔNG giới hạn theo ngày) — y hệt _misa_doi_chieu_3_tang: đối tượng đã
+    # hết nợ/dư về tổng thể thì KHÔNG tô đỏ "treo" hóa đơn nào nữa, dù thuật
+    # toán khớp chi tiết không xác định được khoản nào trả cho hóa đơn nào
+    # (không phải nội dung chuyển khoản nào cũng ghi rõ số hóa đơn để so
+    # khớp từng khoản).
+    tong_hd_ct = sum(hd["so_tien"] for hd in d["hoa_don"])
+    tong_tt_ct = sum(tt["so_tien"] for tt in doi_tuong_tt.get(str(account_object_id), []))
+    da_het_no_tong_the = (tong_hd_ct - tong_tt_ct) <= dung_sai
+    tang3_ref_ids = set() if da_het_no_tong_the else {
         hd["ref_id"] for hd in d["hoa_don"]
         if not hd["matched"] and hd["so_tien"] < nguong and hd["inv_date"]
         and hd["inv_date"] <= han3
