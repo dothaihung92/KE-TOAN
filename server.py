@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.253"
+APP_BUILD = "2026-09-15.254"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32702,18 +32702,31 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
 
-    conn = db()
-    try:
-        conn.execute(
-            "INSERT INTO mst_status_cache(mst, trang_thai_goc, canh_bao, checked_at) VALUES(?,?,?,?) "
-            "ON CONFLICT(mst) DO UPDATE SET trang_thai_goc=excluded.trang_thai_goc, "
-            "canh_bao=excluded.canh_bao, checked_at=excluded.checked_at",
-            (mst_c, trang_thai_goc,
-             (1 if canh_bao is True else (0 if canh_bao is False else None)),
-             datetime.datetime.now().isoformat()))
-        conn.commit()
-    finally:
-        conn.close()
+    # CHỈ lưu cache khi THẬT SỰ gọi API thành công (thanh_cong=True) — trước
+    # đây lưu cache CẢ KHI THẤT BẠI (lỗi mạng/HTTP lỗi/hết ngân sách), khiến
+    # 1 MST lỡ gặp lỗi 1 lần bị "kẹt cứng" ở trạng thái trống suốt
+    # _MST_CACHE_NGAY (14) ngày — lần xuất Excel SAU đọc trúng cache "trống"
+    # đó, tưởng đã tra rồi nên KHÔNG thử lại nữa, dù còn nguyên ngân sách
+    # thời gian — đúng ca thật người dùng báo: log xuất Excel LẦN 2 chỉ mất
+    # 0.4 giây cho 234 MST (quá nhanh so với gọi mạng thật), vẫn còn ĐÚNG 34
+    # MST không dò được y hệt lần trước — vì 34 MST đó đã bị lưu cache
+    # "trống" từ lần 1, "sẽ tự bổ sung ở lần xuất Excel sau" KHÔNG XẢY RA
+    # THẬT như đã hứa. Không lưu gì khi thất bại -> lần gọi SAU (dù trong
+    # cùng 1 lượt xuất hay lượt xuất kế tiếp) sẽ coi là CHƯA tra, thử lại
+    # bình thường thay vì bị khóa cứng.
+    if thanh_cong:
+        conn = db()
+        try:
+            conn.execute(
+                "INSERT INTO mst_status_cache(mst, trang_thai_goc, canh_bao, checked_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(mst) DO UPDATE SET trang_thai_goc=excluded.trang_thai_goc, "
+                "canh_bao=excluded.canh_bao, checked_at=excluded.checked_at",
+                (mst_c, trang_thai_goc,
+                 (1 if canh_bao is True else (0 if canh_bao is False else None)),
+                 datetime.datetime.now().isoformat()))
+            conn.commit()
+        finally:
+            conn.close()
     ket_qua = {"trang_thai": trang_thai_goc, "canh_bao": canh_bao}
     if ly_do_loi:
         ket_qua["ly_do_loi"] = ly_do_loi

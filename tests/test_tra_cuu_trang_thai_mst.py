@@ -315,6 +315,49 @@ assert "HTTP 401" in (r13.get("ly_do_loi") or ""), (
 print("PASS 13: HTTP lỗi (vd 401 sai client-id/api-key) -> canh_bao=None (không suy đoán), vẫn tính "
       "vào bộ đếm lỗi liên tiếp, VÀ trả kèm ly_do_loi ghi rõ 'HTTP 401' để chẩn đoán đúng nguyên nhân.")
 
+# ===== Test 13b (ca thật người dùng báo — CỰC KỲ QUAN TRỌNG, bug thật): lượt tra THẤT
+# BẠI (lỗi mạng/HTTP lỗi) KHÔNG được lưu vào cache DB — trước đây LUÔN lưu cache dù
+# thành công hay thất bại, khiến 1 MST lỡ gặp lỗi 1 lần bị "kẹt cứng" ở trạng thái trống
+# suốt 14 ngày (lần xuất Excel SAU đọc trúng cache "trống" đó, KHÔNG thử lại nữa dù còn
+# nguyên ngân sách thời gian) — đúng log thật người dùng gửi: xuất Excel LẦN 2 chỉ mất
+# 0.4 giây cho 234 MST (quá nhanh, toàn cache hit) nhưng VẪN ĐÚNG 34 MST không dò được y
+# hệt lần 1, và KHÔNG hề in ra "VÍ DỤ LỖI GẶP PHẢI" nào (vì được trả thẳng từ cache, không
+# hề thử gọi mạng lại trong lượt 2) — "sẽ tự bổ sung ở lần xuất Excel sau" đã KHÔNG XẢY RA
+# THẬT như đã hứa với người dùng. =====
+conn13b = _fresh_db()
+conn13b.execute("DELETE FROM mst_status_cache")
+conn13b.commit()
+conn13b.close()
+_fake_requests.next_exc = None
+_fake_requests.next_status = 401
+_fake_requests.next_data = {"message": "Unauthorized"}
+_fake_requests.calls.clear()
+mst_that_bai = "0319998888"
+r13b_lan1 = _tra_cuu_trang_thai_mst(mst_that_bai, timeout=1)   # lượt 1: thất bại (401)
+assert r13b_lan1["canh_bao"] is None
+conn13b2 = _fresh_db()
+row13b = conn13b2.execute(
+    "SELECT * FROM mst_status_cache WHERE mst=?", (ns['_chuan_mst'](mst_that_bai)[:10],)).fetchone()
+conn13b2.close()
+assert row13b is None, (
+    f"Lượt tra THẤT BẠI KHÔNG được lưu vào bảng mst_status_cache (để lần sau còn thử lại được) "
+    f"— got 1 dòng cache: {dict(row13b) if row13b else None}")
+# Lượt 2 (mô phỏng lần xuất Excel SAU, MST này giờ đã hoạt động bình thường trở lại) ->
+# PHẢI thử gọi mạng lại THẬT SỰ (không bị "kẹt cứng" trả về cache trống của lượt 1).
+_fake_requests.calls.clear()
+_fake_requests.next_status = 200
+_fake_requests.next_data = {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}
+r13b_lan2 = _tra_cuu_trang_thai_mst(mst_that_bai, timeout=1)
+assert r13b_lan2["canh_bao"] is False, (
+    f"Lượt 2 (lần xuất Excel SAU) PHẢI thử gọi mạng lại thật sự, không bị kẹt ở kết quả trống của "
+    f"lượt 1 thất bại trước đó — got {r13b_lan2}")
+assert len(_fake_requests.calls) == 1, (
+    f"Lượt 2 phải THẬT SỰ gọi mạng (không được coi là 'đã tra rồi' từ cache của lượt 1 thất bại) "
+    f"— got {len(_fake_requests.calls)} lượt gọi")
+print("PASS 13b: lượt tra THẤT BẠI (lỗi mạng/HTTP lỗi) KHÔNG bị lưu vào cache 14 ngày — lần xuất Excel "
+      "SAU vẫn thử tra lại thật sự (đúng như đã hứa 'sẽ tự bổ sung ở lần xuất Excel sau'), không còn bị "
+      "kẹt cứng ở trạng thái trống.")
+
 # ===== Test 14-15: chi_dung_cache — ca thật người dùng báo tiếp "chạy lâu quá" với
 # bảng kê ~992 hóa đơn nhiều trăm nhà cung cấp khác nhau: export_excel giới hạn
 # _MST_NGAN_SACH_GIAY giây cho việc tra MST MỚI, hết ngân sách thì gọi với
