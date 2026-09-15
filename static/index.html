@@ -2969,6 +2969,13 @@ async function doAutoLogin(){
       if(cc.startsWith('data:')) imgBox.innerHTML=`<img src="${cc}" style="max-height:42px">`;
       else if(cc.includes('<svg')) imgBox.innerHTML=cc;
       const png=await svgCaptchaToPng(d.content);
+      // Nghỉ thêm ~0.8-1.8s SAU khi có captcha, TRƯỚC khi gửi mã đoán được —
+      // mô phỏng thời gian người thật "đọc + gõ" captcha (4-6 ký tự); nếu
+      // gửi gần như NGAY LẬP TỨC sau khi có captcha (như trước đây, chỉ mất
+      // vài chục-vài trăm mili-giây để OCR + vẽ ảnh), tốc độ phản xạ "siêu
+      // nhân" đó tự nó cũng là 1 dấu hiệu hành vi bot rõ ràng, góp phần vào
+      // lỗi 403 "Hệ thống phát hiện hành vi không hợp lệ" đã gặp thật.
+      await new Promise(r=>setTimeout(r,800+Math.random()*1000));
       const r=await api(`/api/solve-login/${current}`,{method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({ckey:d.key,image:png})});

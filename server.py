@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.264"
+APP_BUILD = "2026-09-15.265"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -426,6 +426,16 @@ class GDTClient:
                       "AppleWebKit/537.36 (KHTML, like Gecko) "
                       "Chrome/120.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
+        # Origin/Referer/Accept-Language: trình duyệt thật gọi API này LUÔN
+        # kèm sẵn (XHR từ chính trang hoadondientu.gdt.gov.vn), thiếu 2 header
+        # này là dấu hiệu dễ nhận ra của request KHÔNG xuất phát từ trình
+        # duyệt thật — WAF F5 BIG-IP ASM thường dùng để chấm điểm "hành vi
+        # không hợp lệ" (cùng nhóm lỗi 403 "Hệ thống phát hiện hành vi không
+        # hợp lệ" người dùng đã gặp thật, cùng với tần suất gọi bất thường
+        # đã sửa ở _tu_dong_dang_nhap()/doAutoLogin()).
+        "Origin": "https://hoadondientu.gdt.gov.vn",
+        "Referer": "https://hoadondientu.gdt.gov.vn/",
+        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
     }
 
     def __init__(self):
@@ -443,7 +453,13 @@ class GDTClient:
             from curl_cffi import requests as _cffi
             self.session = _cffi.Session(impersonate="chrome")
             self.impersonate = True
-            self.session.headers.update({"Accept": self.HEADERS["Accept"]})
+            # CHỈ ghi đè Accept/Origin/Referer/Accept-Language — CỐ Ý không
+            # đụng vào User-Agent khi đang impersonate: curl_cffi tự quản lý
+            # User-Agent khớp ĐÚNG với vân tay TLS/JA3 nó đang giả lập, ghi
+            # đè bằng chuỗi UA cố định ở trên có thể làm LỆCH giữa UA khai
+            # báo và vân tay TLS thật (chính bản thân sự lệch đó lại là 1
+            # dấu hiệu bot khác, phản tác dụng).
+            self.session.headers.update({k: v for k, v in self.HEADERS.items() if k != "User-Agent"})
         except Exception:
             self.session = requests.Session()
             self.session.headers.update(self.HEADERS)
@@ -2417,6 +2433,11 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
             continue
         if progress:
             progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: đã đoán mã, đang đăng nhập...")
+        # Nghỉ thêm 1 chút SAU khi giải xong captcha, TRƯỚC khi gửi đăng nhập
+        # — mô phỏng thời gian người thật "đọc + gõ" captcha, tránh gửi NGAY
+        # LẬP TỨC sau khi có captcha (tốc độ phản xạ "siêu nhân" cũng là 1
+        # dấu hiệu hành vi bot, góp phần vào lỗi 403 đã gặp thật).
+        time.sleep(0.8 + random.random() * 1.0)
         try:
             client.login(
                 username=comp["username"] or comp["mst"],

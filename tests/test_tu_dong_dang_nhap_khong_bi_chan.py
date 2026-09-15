@@ -128,9 +128,13 @@ print("PASS 1: hệ thống Thuế chặn hẳn (lỗi 'hành vi không hợp l�
       "không thử tiếp vô ích, thông báo rõ đã bị tạm chặn.")
 
 # ===== Test 2: nghỉ ngẫu nhiên TRƯỚC mỗi lần thử lại (không nghỉ ở lần đầu)
-# — sai captcha liên tục cả 3 lần (lỗi THƯỜNG, không phải bị chặn) -> phải
-# thử ĐỦ cả 3 lần (không dừng sớm), và phải nghỉ ĐÚNG 2 lần (trước lần 2 và
-# lần 3), mỗi lần nghỉ tối thiểu 1.2 giây. =====
+# CỘNG THÊM nghỉ "đọc + gõ captcha" SAU khi giải xong captcha, TRƯỚC khi gửi
+# đăng nhập (mỗi lần giải captcha thành công đều có, kể cả lần đầu) — sai
+# captcha liên tục cả 3 lần (lỗi THƯỜNG, không phải bị chặn) -> phải thử ĐỦ
+# cả 3 lần (không dừng sớm); tổng số lần nghỉ = 2 (khoảng cách giữa các lần
+# thử, KHÔNG có trước lần đầu) + 3 (nghỉ đọc+gõ, có ở CẢ 3 lần vì lần nào
+# cũng giải được captcha) = 5, mỗi lần nghỉ tối thiểu 0.8 giây (mức thấp
+# nhất trong 2 loại nghỉ). =====
 loi_sai_ma = Exception("Sai mã 'AB12': đăng nhập thất bại")
 _client_hien_tai["c"] = _FakeClient([loi_sai_ma, loi_sai_ma, loi_sai_ma])
 _fake_time.sleeps.clear()
@@ -139,25 +143,31 @@ assert ok2 is False
 assert _client_hien_tai["c"].so_lan_goi_login == 3, (
     f"Lỗi sai captcha THƯỜNG (không phải bị chặn WAF) -> phải thử ĐỦ cả 3 lần như cấu hình — got "
     f"{_client_hien_tai['c'].so_lan_goi_login}")
-assert len(_fake_time.sleeps) == 2, (
-    f"Phải nghỉ ĐÚNG 2 lần (trước lần thử thứ 2 và thứ 3, KHÔNG nghỉ trước lần đầu tiên) — got "
-    f"{_fake_time.sleeps}")
-assert all(s >= 1.2 for s in _fake_time.sleeps), (
-    f"Mỗi lần nghỉ phải tối thiểu 1.2 giây (né hệ thống Thuế coi là hành vi bot do tần suất đăng nhập "
-    f"bất thường) — got {_fake_time.sleeps}")
-print("PASS 2: lỗi sai captcha thường (không phải bị chặn) -> vẫn thử đủ số lần cấu hình, có nghỉ "
-      "đúng 2 lần (trước lần 2 và 3) mỗi lần tối thiểu 1.2s để né bị coi là hành vi bot.")
+assert len(_fake_time.sleeps) == 5, (
+    f"Phải nghỉ ĐÚNG 5 lần (2 lần giữa các lượt thử [trước lần 2, trước lần 3] CỘNG 3 lần đọc+gõ "
+    f"captcha [1 lần/lượt thử, cả 3 lượt đều giải được captcha]) — got {_fake_time.sleeps}")
+assert all(s >= 0.8 for s in _fake_time.sleeps), (
+    f"Mỗi lần nghỉ phải tối thiểu 0.8 giây (né hệ thống Thuế coi là hành vi bot do tần suất đăng nhập "
+    f"bất thường VÀ tốc độ phản xạ 'siêu nhân') — got {_fake_time.sleeps}")
+assert sum(1 for s in _fake_time.sleeps if s >= 1.2) == 2, (
+    f"Trong đó phải có ĐÚNG 2 lần nghỉ >= 1.2s (khoảng cách GIỮA các lượt thử) — got {_fake_time.sleeps}")
+print("PASS 2: lỗi sai captcha thường (không phải bị chặn) -> vẫn thử đủ số lần cấu hình, có nghỉ cả "
+      "giữa các lượt thử (>=1.2s) LẪN sau khi giải captcha trước khi gửi đăng nhập (>=0.8s, mô phỏng "
+      "thời gian đọc+gõ) để né bị coi là hành vi bot.")
 
 # ===== Test 3 (không hồi quy): thành công ở lần thử thứ 2 -> trả về đúng
-# kết quả thành công như hành vi cũ, vẫn có nghỉ đúng 1 lần trước lần 2. =====
+# kết quả thành công như hành vi cũ; tổng nghỉ = 1 (giữa lượt 1 và 2) + 2
+# (đọc+gõ, cả 2 lượt đều giải được captcha) = 3. =====
 _client_hien_tai["c"] = _FakeClient([loi_sai_ma, None])
 _fake_time.sleeps.clear()
 ok3, msg3, so_lan_thu3, tried3 = _tu_dong_dang_nhap(3, so_lan=5)
 assert ok3 is True, f"Thành công ở lần 2 -> phải trả về ok=True — got {ok3}, msg={msg3}"
 assert so_lan_thu3 == 2
-assert len(_fake_time.sleeps) == 1, f"Phải nghỉ đúng 1 lần (trước lần thử thứ 2) — got {_fake_time.sleeps}"
+assert len(_fake_time.sleeps) == 3, (
+    f"Phải nghỉ đúng 3 lần (1 lần giữa lượt 1-2, cộng 2 lần đọc+gõ captcha ở cả 2 lượt) — got "
+    f"{_fake_time.sleeps}")
 assert _client_hien_tai["c"]._token_dead is False, "Đăng nhập thành công phải 'hồi sinh' client (_token_dead=False)"
 print("PASS 3: đăng nhập thành công ở lần thử thứ 2 -> vẫn hoạt động đúng như trước (không hồi quy), "
-      "có nghỉ đúng 1 lần trước lần thử thứ 2.")
+      "có nghỉ đủ cả 2 loại (giữa lượt + đọc/gõ captcha).")
 
 print("\nALL DONE")
