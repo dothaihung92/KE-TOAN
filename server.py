@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.258"
+APP_BUILD = "2026-09-15.259"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32791,18 +32791,31 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         except Exception:
             pass
 
-    het_han_muc = chi_dung_cache or (so_lan_that_bai_lien_tiep is not None
-                                     and so_lan_that_bai_lien_tiep[0] >= 5)
+    bo_dem_da_toi_han = (so_lan_that_bai_lien_tiep is not None and so_lan_that_bai_lien_tiep[0] >= 5)
+    het_han_muc = chi_dung_cache or bo_dem_da_toi_han
     if het_han_muc:
         # Đã hết ngân sách thời gian CHO LƯỢT NÀY, hoặc đã lỗi liên tiếp quá
-        # nhiều lần (vd sai client-id/api-key, hoặc API không phản hồi) ->
-        # khỏi thử mạng nữa, để cache cũ (nếu có, dù quá hạn) làm dự phòng
-        # thay vì không có gì.
+        # nhiều lần (cả XInvoice lẫn masothue.com dự phòng đều không tra
+        # được — vd hết hạn mức gói API/masothue.com tạm thời chặn do gọi
+        # dồn dập) -> khỏi thử mạng nữa, để cache cũ (nếu có, dù quá hạn) làm
+        # dự phòng thay vì không có gì. GHI RÕ ly_do_loi (trước đây bỏ trống
+        # hoàn toàn ở nhánh này) để người dùng còn biết được VÌ SAO các MST
+        # này vẫn chưa dò được (đúng câu hỏi người dùng "sao vẫn còn?") thay
+        # vì không thấy dòng "VÍ DỤ LỖI GẶP PHẢI" nào trong log dù vẫn còn
+        # MST trống.
         if row:
             canh_bao_cu = row["canh_bao"]
-            return {"trang_thai": row["trang_thai_goc"] or "",
-                    "canh_bao": bool(canh_bao_cu) if canh_bao_cu is not None else None}
-        return {"trang_thai": "", "canh_bao": None}
+            ket_qua = {"trang_thai": row["trang_thai_goc"] or "",
+                      "canh_bao": bool(canh_bao_cu) if canh_bao_cu is not None else None}
+        else:
+            ket_qua = {"trang_thai": "", "canh_bao": None}
+        if not ket_qua["trang_thai"]:
+            ket_qua["ly_do_loi"] = ("Hết ngân sách thời gian tra MST mới trong lượt xuất Excel này"
+                                    if chi_dung_cache else
+                                    "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả XInvoice lẫn masothue.com "
+                                    "dự phòng đều không tra được) để tránh treo lâu — sẽ tự thử lại ở "
+                                    "lượt xuất Excel sau")
+        return ket_qua
 
     # Nghỉ 1 chút TRƯỚC mỗi lượt gọi API thật (không áp dụng cho cache
     # hit/MST không hợp lệ ở trên) — hạn chế bắn dồn dập hàng trăm request
@@ -32860,6 +32873,14 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # được trong 1 lượt xuất Excel).
     if not thanh_cong:
         ly_do_loi_xinvoice = ly_do_loi
+        # Nghỉ thêm 1 chút TRƯỚC lượt gọi masothue.com dự phòng — khi các
+        # key XInvoice đã hết hạn mức, TẤT CẢ MST trong lượt xuất Excel này
+        # đều rơi vào nhánh dự phòng gần như CÙNG LÚC (kể cả đang chạy song
+        # song nhiều luồng), dễ bắn dồn dập vào masothue.com (trang công
+        # khai, không phải API trả phí, dễ bị tự chặn/giới hạn tốc độ khi
+        # thấy nhiều request liên tiếp từ cùng nguồn) nếu không nghỉ riêng
+        # trước lượt gọi này.
+        time.sleep(_MST_API_NGHI_GIUA_LUOT)
         thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_mt = _tra_cuu_masothue(mst_c, timeout)
         if thanh_cong:
             ly_do_loi = None

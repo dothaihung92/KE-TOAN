@@ -472,8 +472,12 @@ assert r14["canh_bao"] is None
 assert len(_fake_requests.calls) == 0, (
     f"chi_dung_cache=True (đã hết ngân sách thời gian) + MST chưa từng tra -> TUYỆT ĐỐI không được gọi "
     f"mạng — got {len(_fake_requests.calls)} lượt gọi")
+assert "ngân sách thời gian" in (r14.get("ly_do_loi") or ""), (
+    f"PHẢI kèm ly_do_loi ghi rõ nguyên nhân 'hết ngân sách thời gian' — để người dùng biết TẠI SAO MST "
+    f"này vẫn chưa dò được (đúng câu hỏi người dùng 'sao vẫn còn?') thay vì im lặng không rõ lý do "
+    f"— got {r14}")
 print("PASS 14: hết ngân sách thời gian (chi_dung_cache=True) + MST chưa từng tra -> để trống, không "
-      "gọi mạng thêm (không làm treo lâu cả lượt xuất Excel).")
+      "gọi mạng thêm (không làm treo lâu cả lượt xuất Excel), kèm ly_do_loi ghi rõ nguyên nhân.")
 
 # Test 15: chi_dung_cache=True + MST ĐÃ có cache (dù cache đã QUÁ HẠN _MST_CACHE_NGAY
 # ngày) -> vẫn dùng cache cũ đó làm dự phòng (còn hơn để trống), KHÔNG gọi mạng.
@@ -687,6 +691,34 @@ assert row22 is None, (
 print("PASS 22: dự phòng masothue.com trả về nội dung không khớp tình trạng nào -> coi là thất bại an "
       "toàn (canh_bao=None), KHÔNG lưu cache để còn thử lại lần sau.")
 _fake_requests.next_responses = None
+
+# ===== Test 23 (người dùng hỏi lại "sao vẫn còn?" sau khi thấy log báo N MST
+# chưa lấy được tình trạng nhưng KHÔNG có dòng "VÍ DỤ LỖI GẶP PHẢI" nào —
+# nguyên nhân: các MST đó rơi vào bộ đếm lỗi liên tiếp (circuit breaker) đã
+# kích hoạt, nhánh này TRƯỚC ĐÂY hoàn toàn không ghi ly_do_loi, nên
+# _prefetch_trang_thai_mst() không có gì để hiện làm ví dụ) — giờ nhánh này
+# PHẢI kèm ly_do_loi rõ ràng để _prefetch_trang_thai_mst() còn hiện được
+# "VÍ DỤ LỖI GẶP PHẢI" giải thích đúng nguyên nhân cho người dùng. =====
+conn23 = _fresh_db()
+conn23.execute("DELETE FROM mst_status_cache")
+conn23.commit()
+conn23.close()
+_set_xinvoice_keys([{"client_id": "keyF-id", "api_key": "keyF-secret"}])
+dem_loi23 = [5]   # mô phỏng bộ đếm ĐÃ đạt ngưỡng 5 lỗi liên tiếp từ các MST trước đó
+_fake_requests.calls.clear()
+r23 = _tra_cuu_trang_thai_mst("0321111118", timeout=1, so_lan_that_bai_lien_tiep=dem_loi23)
+assert r23["canh_bao"] is None
+assert len(_fake_requests.calls) == 0, (
+    f"Bộ đếm lỗi liên tiếp đã đạt ngưỡng -> KHÔNG được gọi mạng nữa (cả XInvoice lẫn masothue.com) "
+    f"— got {len(_fake_requests.calls)} lượt gọi")
+assert "5 lỗi liên tiếp" in (r23.get("ly_do_loi") or ""), (
+    f"PHẢI kèm ly_do_loi ghi rõ đã dừng do 5 lỗi liên tiếp — để _prefetch_trang_thai_mst() còn hiện "
+    f"được 'VÍ DỤ LỖI GẶP PHẢI' giải thích đúng nguyên nhân cho người dùng (trước đây nhánh này im "
+    f"lặng hoàn toàn, khiến log báo còn N MST chưa dò được nhưng KHÔNG có ví dụ lỗi nào kèm theo, "
+    f"người dùng phải hỏi lại 'sao vẫn còn?') — got {r23}")
+print("PASS 23: bộ đếm lỗi liên tiếp đã đạt ngưỡng (circuit breaker) -> giờ vẫn kèm ly_do_loi rõ ràng "
+      "('đã dừng gọi mạng sau 5 lỗi liên tiếp') thay vì im lặng, để người dùng biết đúng nguyên nhân "
+      "khi thấy MST còn trống.")
 
 os.unlink(_tmp_db.name)
 print("\nALL DONE")
