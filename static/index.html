@@ -2951,8 +2951,15 @@ async function doAutoLogin(){
   const btn2=document.getElementById('loginBtn');
   btn2.disabled=true;
   const MAX=6;
-  let done=false, lastErr='', daThuFixOcr=false;
+  let done=false, lastErr='', daThuFixOcr=false, biChanWaf=false;
   for(let i=1;i<=MAX && !done;i++){
+    // Nghỉ ngẫu nhiên (~1.2-2.4s) TRƯỚC mỗi lần thử lại (không nghỉ ở lần
+    // đầu) — trước đây bắn liên tiếp 6 lần gần như tức thời (lấy captcha
+    // mới + đăng nhập ngay, không hề nghỉ), khiến hệ thống Thuế coi là hành
+    // vi bot (tần suất đăng nhập/giây bất thường so với người thật gõ tay)
+    // -> chặn hẳn với lỗi "Hệ thống phát hiện hành vi không hợp lệ. Yêu cầu
+    // đã bị chặn." (403) — đúng ca thật người dùng gặp.
+    if(i>1)await new Promise(r=>setTimeout(r,1200+Math.random()*1200));
     btn.innerHTML=`<span class="spin"></span> Lần ${i}/${MAX}...`;btn.disabled=true;
     try{
       const d=await api(`/api/captcha/${current}`);  // lấy captcha mới
@@ -2985,9 +2992,25 @@ async function doAutoLogin(){
           else{lastErr=fx.message||lastErr;break;}
         }catch(e2){lastErr=e2.message||lastErr;break;}
       }
+      // Hệ thống Thuế đã CHẶN HẲN (WAF phát hiện hành vi bất thường) -> dừng
+      // NGAY, KHÔNG thử tiếp (thử tiếp trong lúc đang bị chặn chỉ tổ kéo dài
+      // thời gian bị chặn, vô ích) — báo rõ để người dùng biết cần CHỜ rồi
+      // thử lại, hoặc dùng "Lấy mã" để tự nhập tay (chậm hơn nhưng không bị
+      // coi là hành vi bot).
+      if(/hành vi không hợp lệ|đã bị chặn/i.test(lastErr)){
+        biChanWaf=true;
+        break;
+      }
     }
   }
-  if(!done){toast('Tự đăng nhập thất bại: '+lastErr,'err');loadCaptcha();}
+  if(!done){
+    if(biChanWaf){
+      toast('⚠ Hệ thống Thuế đã TẠM CHẶN do phát hiện đăng nhập tự động quá nhanh — vui lòng đợi vài phút rồi thử lại, hoặc bấm "Lấy mã" để tự nhập captcha bằng tay (chậm hơn nhưng không bị chặn).','err');
+    }else{
+      toast('Tự đăng nhập thất bại: '+lastErr,'err');
+    }
+    loadCaptcha();
+  }
   btn.innerHTML='🤖 Tự đăng nhập';btn.disabled=false;btn2.disabled=false;
 }
 

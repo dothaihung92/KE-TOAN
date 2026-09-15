@@ -10,6 +10,7 @@ import io
 import hmac
 import json
 import time
+import random
 import base64
 import hashlib
 import sqlite3
@@ -38,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.263"
+APP_BUILD = "2026-09-15.264"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2392,6 +2393,14 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
     last_err = ""
     tried = []
     for lan in range(1, so_lan + 1):
+        # Nghỉ ngẫu nhiên TRƯỚC mỗi lần thử lại (không nghỉ ở lần đầu) — bắn
+        # liên tiếp nhiều lượt gần như tức thời (lấy captcha mới + đăng nhập
+        # ngay) khiến hệ thống Thuế coi là hành vi bot (tần suất đăng nhập/
+        # giây bất thường so với người thật gõ tay), dẫn tới bị chặn hẳn với
+        # lỗi "Hệ thống phát hiện hành vi không hợp lệ. Yêu cầu đã bị chặn."
+        # (403) — đúng ca thật người dùng gặp qua nút "🤖 Tự đăng nhập".
+        if lan > 1:
+            time.sleep(1.2 + random.random() * 1.2)
         if progress:
             progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan} (đang giải captcha)...")
         try:
@@ -2423,6 +2432,13 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
             return True, f"Đăng nhập tự động thành công (lần {lan})", lan, tried
         except Exception as e:
             last_err = str(e)
+            # Hệ thống Thuế đã CHẶN HẲN (WAF phát hiện hành vi bất thường) ->
+            # dừng NGAY, KHÔNG thử tiếp (thử tiếp trong lúc đang bị chặn chỉ
+            # tổ kéo dài thời gian bị chặn, vô ích).
+            if "hành vi không hợp lệ" in last_err or "đã bị chặn" in last_err:
+                return (False,
+                       f"Hệ thống Thuế đã TẠM CHẶN do phát hiện đăng nhập tự động quá nhanh — "
+                       f"vui lòng đợi vài phút rồi thử lại. Lỗi: {last_err}", lan, tried)
             if progress:
                 progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: sai mã/lỗi đăng nhập, thử lại...")
             continue
