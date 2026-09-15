@@ -298,5 +298,49 @@ assert dem_loi2[0] == 1, f"HTTP lỗi vẫn phải tính vào bộ đếm lỗi 
 print("PASS 13: HTTP lỗi (vd 401 sai client-id/api-key) -> canh_bao=None (không suy đoán), vẫn tính "
       "vào bộ đếm lỗi liên tiếp.")
 
+# ===== Test 14-15: chi_dung_cache — ca thật người dùng báo tiếp "chạy lâu quá" với
+# bảng kê ~992 hóa đơn nhiều trăm nhà cung cấp khác nhau: export_excel giới hạn
+# _MST_NGAN_SACH_GIAY giây cho việc tra MST MỚI, hết ngân sách thì gọi với
+# chi_dung_cache=True — CHỈ dùng cache đã có (kể cả quá hạn), TUYỆT ĐỐI không gọi
+# mạng thêm, để cả lượt xuất Excel không bị "treo" vô hạn theo số lượng nhà cung
+# cấp khác nhau. =====
+_fake_requests.next_exc = None
+_fake_requests.next_status = 200
+
+# Test 14: chi_dung_cache=True + MST CHƯA từng có cache -> KHÔNG gọi mạng, trả
+# canh_bao=None (để trống, không suy đoán) — không chặn xuất Excel.
+conn14 = _fresh_db()
+conn14.execute("DELETE FROM mst_status_cache")
+conn14.commit()
+conn14.close()
+_fake_requests.calls.clear()
+r14 = _tra_cuu_trang_thai_mst("0316888888", timeout=1, chi_dung_cache=True)
+assert r14["canh_bao"] is None
+assert len(_fake_requests.calls) == 0, (
+    f"chi_dung_cache=True (đã hết ngân sách thời gian) + MST chưa từng tra -> TUYỆT ĐỐI không được gọi "
+    f"mạng — got {len(_fake_requests.calls)} lượt gọi")
+print("PASS 14: hết ngân sách thời gian (chi_dung_cache=True) + MST chưa từng tra -> để trống, không "
+      "gọi mạng thêm (không làm treo lâu cả lượt xuất Excel).")
+
+# Test 15: chi_dung_cache=True + MST ĐÃ có cache (dù cache đã QUÁ HẠN _MST_CACHE_NGAY
+# ngày) -> vẫn dùng cache cũ đó làm dự phòng (còn hơn để trống), KHÔNG gọi mạng.
+_fake_requests.calls.clear()
+_fake_requests.next_data = {"status": "Người nộp thuế đã bị khóa mã số thuế"}
+r15a = _tra_cuu_trang_thai_mst("0316999999", timeout=1)   # tra bình thường trước để có cache
+assert r15a["canh_bao"] is True
+qua_han15 = (datetime.datetime.now() - datetime.timedelta(days=ns['_MST_CACHE_NGAY'] + 5)).isoformat()
+conn15 = _fresh_db()
+conn15.execute("UPDATE mst_status_cache SET checked_at=? WHERE mst=?", (qua_han15, "0316999999"))
+conn15.commit()
+conn15.close()
+_fake_requests.calls.clear()
+r15b = _tra_cuu_trang_thai_mst("0316999999", timeout=1, chi_dung_cache=True)
+assert r15b["canh_bao"] is True, (
+    f"chi_dung_cache=True nhưng ĐÃ có cache cũ (dù quá hạn) -> phải dùng cache cũ làm dự phòng, "
+    f"không được để trống — got {r15b}")
+assert len(_fake_requests.calls) == 0, "chi_dung_cache=True TUYỆT ĐỐI không được gọi mạng dù cache quá hạn"
+print("PASS 15: hết ngân sách thời gian nhưng MST đã có cache cũ (dù quá hạn 14 ngày) -> vẫn dùng cache "
+      "cũ làm dự phòng thay vì để trống, không gọi mạng thêm.")
+
 os.unlink(_tmp_db.name)
 print("\nALL DONE")
