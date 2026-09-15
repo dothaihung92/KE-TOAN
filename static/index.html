@@ -482,11 +482,17 @@
   <div class="modal" style="width:min(520px,96vw);max-width:520px">
     <h3 style="margin-top:0">🔑 Cấu hình API tra cứu tình trạng MST</h3>
     <p class="hint" style="margin-top:0">Khi xuất Excel, phần mềm tự dò tình trạng hoạt động của MST đối tác (đang hoạt động / bị khoá MST / chờ xác minh địa chỉ kinh doanh...) qua API của <b>XInvoice</b>, thêm cột "Trạng thái MST" và tô đỏ dòng cần chú ý. Cần đăng ký lấy <b>Client ID</b> và <b>API Key</b> tại <a href="https://xinvoice.vn/apis/tra-cuu-ma-so-thue" target="_blank" rel="noopener">xinvoice.vn</a> rồi nhập vào đây. Chưa nhập thì phần mềm vẫn xuất Excel bình thường, chỉ là chưa có cột này. Có thể thêm <b>nhiều cặp Client ID/API Key</b> — mỗi gói free tier có hạn mức riêng, khi cặp đang dùng hết hạn mức phần mềm sẽ <b>tự động chuyển sang cặp kế tiếp</b>.</p>
-    <div id="xinv_keys_list"></div>
-    <button type="button" class="btn ghost" style="margin:2px 0 12px" onclick="themXInvoiceKeyRow()">➕ Thêm cặp key khác</button>
+    <div id="xinv_summary" style="display:none;background:var(--green-l);border-radius:8px;padding:12px 14px;margin-bottom:10px">
+      <div id="xinv_summary_txt" style="font-weight:600;color:var(--green-d)"></div>
+      <button type="button" class="btn ghost sm" style="margin-top:8px" onclick="xinvSuaKey()">✏️ Sửa / thêm bớt key</button>
+    </div>
+    <div id="xinv_edit_area">
+      <div id="xinv_keys_list"></div>
+      <button type="button" class="btn ghost" style="margin:2px 0 12px" onclick="themXInvoiceKeyRow()">➕ Thêm cặp key khác</button>
+    </div>
     <div class="modal-actions">
       <button class="btn ghost" onclick="dongXInvoiceModal()">Đóng</button>
-      <button class="btn" onclick="luuXInvoiceModal()">💾 Lưu</button>
+      <button class="btn" id="xinv_luu_btn" onclick="luuXInvoiceModal()">💾 Lưu</button>
     </div>
   </div>
 </div>
@@ -2572,6 +2578,17 @@ async function luuTuyChonKetXuat(id,bat){
     const c=companies.find(x=>x.id===id);if(c)c.luu_ket_xuat_mac_dinh=bat?1:0;
   }catch(e){}
 }
+async function luuTuyChonTraMst(id,bat){
+  // Ghi nhớ tick "Tra cứu tình trạng MST" RIÊNG cho công ty này — tick 1 lần
+  // là nhớ luôn, khỏi phải tick lại mỗi lần trước khi xuất Excel. Đúng yêu
+  // cầu người dùng: "khi nào tick vào thì mới cho chạy tra cứu này còn
+  // không tíck thì không cần chạy".
+  try{
+    await api(`/api/company/${id}/tra-mst`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({bat})});
+    const c=companies.find(x=>x.id===id);if(c)c.tra_mst_mac_dinh=bat?1:0;
+  }catch(e){}
+}
 async function selectCompany(id){
   fetchPollCancel=true;  // ngừng THEO DÕI vòng poll tra cứu công ty trước ở
                           // giao diện (KHÔNG hủy job trên server — job đó vẫn
@@ -2759,6 +2776,10 @@ function renderWorkspace(c,online){
     <label class="chk" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px">
       <input type="checkbox" id="cLuuKetXuat" ${c.luu_ket_xuat_mac_dinh?'checked':''} onchange="luuTuyChonKetXuat(${c.id},this.checked)">
       <span>💾 <b>Lưu file kết xuất</b> — áp dụng cho cả khi bấm <b>Xuất Excel</b>/<b>Kết xuất XML</b> thủ công LẪN khi tự động kết xuất ngay sau khi <b>Tra cứu hóa đơn</b> xong: nếu tick thì lưu vào <b>Thư mục lưu file kết xuất</b> của công ty theo cấu trúc Năm/Quý; không tick thì lưu ra Desktop như thường. <b>Đã tick 1 lần sẽ được nhớ</b> cho các lần sau, khỏi phải tick lại.</span>
+    </label>
+    <label class="chk" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px">
+      <input type="checkbox" id="cTraMst" ${c.tra_mst_mac_dinh?'checked':''} onchange="luuTuyChonTraMst(${c.id},this.checked)">
+      <span>🔍 <b>Tra cứu tình trạng MST</b> khi xuất Excel — tick thì mới dò tình trạng hoạt động (đang hoạt động/bị khóa MST/chờ xác minh...) của từng nhà cung cấp qua API bên ngoài (XInvoice/masothue.com), thêm cột "Trạng thái MST" ở sheet "BK Mua vào" và tô đỏ dòng cần chú ý; <b>không tick thì bỏ qua hẳn</b>, không gọi mạng, xuất Excel nhanh hơn. <b>Đã tick 1 lần sẽ được nhớ</b> cho các lần sau.</span>
     </label>
     <label class="chk" style="margin-bottom:10px;display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="cTatMay"> <span>🖥️ Tự động tắt máy tính sau khi tải xong</span>
@@ -9427,9 +9448,10 @@ async function exportExcel(btn){
     // -> vẫn tôn trọng ô "Lưu file kết xuất" ở trên (cùng màn hình), để lưu
     // đúng vào thư mục Năm/Quý đã cấu hình thay vì luôn rơi ra Desktop.
     const luu=document.getElementById('cLuuKetXuat')?.checked?1:0;
+    const traMst=document.getElementById('cTraMst')?.checked?1:0;
     const tu=fmtDate(document.getElementById('tuNgay').value);
     const den=fmtDate(document.getElementById('denNgay').value);
-    let url=`/api/export-excel/${current}?luu_ket_xuat=${luu}`;
+    let url=`/api/export-excel/${current}?luu_ket_xuat=${luu}&tra_mst=${traMst}`;
     if(tu)url+=`&tu_ngay=${encodeURIComponent(tu)}`;
     if(den)url+=`&den_ngay=${encodeURIComponent(den)}`;
     const r=await fetch(url,{cache:'no-store'});
@@ -9528,15 +9550,41 @@ function xinvNewKeyRow(client_id,api_key){
 function themXInvoiceKeyRow(client_id,api_key){
   document.getElementById('xinv_keys_list').appendChild(xinvNewKeyRow(client_id,api_key));
 }
+let _xinvKeysDaLuu=[];   // nhớ danh sách key ĐÃ LƯU của lần mở modal này (dùng để hiện bản tóm tắt)
 async function moXInvoiceModal(){
   const list=document.getElementById('xinv_keys_list');
   list.innerHTML='';
+  _xinvKeysDaLuu=[];
   try{
     const r=await api('/api/settings/xinvoice-mst-api');
-    const keys=(r.keys&&r.keys.length)?r.keys:[{client_id:'',api_key:''}];
-    keys.forEach(k=>themXInvoiceKeyRow(k.client_id,k.api_key));
-  }catch(e){themXInvoiceKeyRow('','');}
+    _xinvKeysDaLuu=r.keys||[];
+  }catch(e){}
+  if(_xinvKeysDaLuu.length){
+    // ĐÃ có key cấu hình từ trước -> mặc định chỉ hiện bản TÓM TẮT (ẩn hẳn
+    // ô nhập Client ID/API Key thật đi), đúng yêu cầu người dùng "ẩn mục
+    // điền api đi" — bấm "Sửa / thêm bớt key" mới hiện lại ô nhập để chỉnh.
+    _xinvKeysDaLuu.forEach(k=>themXInvoiceKeyRow(k.client_id,k.api_key));
+    xinvHienTomTat();
+  }else{
+    themXInvoiceKeyRow('','');
+    xinvHienSua();
+  }
   document.getElementById('xinvoiceModal').classList.add('show');
+}
+function xinvHienTomTat(){
+  document.getElementById('xinv_summary_txt').textContent=
+    `✅ Đã cấu hình ${_xinvKeysDaLuu.length} cặp Client ID/API Key — phần mềm tự dò tình trạng MST khi xuất Excel (nếu đã tick "Tra cứu tình trạng MST").`;
+  document.getElementById('xinv_summary').style.display='block';
+  document.getElementById('xinv_edit_area').style.display='none';
+  document.getElementById('xinv_luu_btn').style.display='none';
+}
+function xinvHienSua(){
+  document.getElementById('xinv_summary').style.display='none';
+  document.getElementById('xinv_edit_area').style.display='block';
+  document.getElementById('xinv_luu_btn').style.display='';
+}
+function xinvSuaKey(){
+  xinvHienSua();
 }
 function dongXInvoiceModal(){
   document.getElementById('xinvoiceModal').classList.remove('show');

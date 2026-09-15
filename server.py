@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.262"
+APP_BUILD = "2026-09-15.263"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1532,6 +1532,14 @@ def init_db():
         # trước khi tra cứu thì mới lưu đúng vào thư mục đã cấu hình. Nay lưu
         # lại để tick 1 lần là áp dụng luôn cho các lần kết xuất sau.
         conn.execute("ALTER TABLE companies ADD COLUMN luu_ket_xuat_mac_dinh INTEGER DEFAULT 0")
+    if "tra_mst_mac_dinh" not in ccols:
+        # Ghi nhớ trạng thái tick "Tra cứu tình trạng MST khi xuất Excel"
+        # RIÊNG cho từng công ty — người dùng yêu cầu: "thêm nút tick tra cứu
+        # tình trạng mst khi nào tick vào thì mới cho chạy tra cứu này còn
+        # không tíck thì không cần chạy" (mặc định TẮT — chỉ tra cứu khi
+        # NGƯỜI DÙNG CHỦ Ý bật, vì đây là lượt gọi mạng ra ngoài, tốn thời
+        # gian/hạn mức API, không phải ai cũng cần).
+        conn.execute("ALTER TABLE companies ADD COLUMN tra_mst_mac_dinh INTEGER DEFAULT 0")
     if "no_mac_dinh" not in ccols:
         # TK Nợ MẶC ĐỊNH riêng theo từng công ty — dùng làm TK Nợ dự phòng CUỐI CÙNG khi
         # tạo "Chi tiết MUA VÀO" (export_excel) cho 1 dòng hàng CHƯA có TK Nợ học riêng
@@ -1980,6 +1988,19 @@ def set_luu_ket_xuat_mac_dinh(cid: int, body: dict = Body(...)):
     n = 1 if body.get("bat") else 0
     conn = db()
     conn.execute("UPDATE companies SET luu_ket_xuat_mac_dinh=? WHERE id=?", (n, cid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/company/{cid}/tra-mst")
+def set_tra_mst_mac_dinh(cid: int, body: dict = Body(...)):
+    """Ghi nhớ trạng thái tick "Tra cứu tình trạng MST khi xuất Excel" RIÊNG
+    cho công ty này — tick 1 lần là nhớ luôn cho các lần xuất Excel sau,
+    khỏi phải tick lại mỗi lần (đúng cơ chế đã có cho "Lưu file kết xuất")."""
+    n = 1 if body.get("bat") else 0
+    conn = db()
+    conn.execute("UPDATE companies SET tra_mst_mac_dinh=? WHERE id=?", (n, cid))
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -32972,11 +32993,17 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
 
 @app.get("/api/export-excel/{cid}")
 def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
-                 den_ngay: str = "", mo_file: int = 1):
+                 den_ngay: str = "", mo_file: int = 1, tra_mst: int = 0):
     """Xuất Excel bảng kê hóa đơn.
     luu_ket_xuat=1: NGOÀI Desktop, còn LƯU thêm vào thư mục kết xuất của công
       ty theo cấu trúc Năm/Quý (dựa vào tu_ngay/den_ngay). Nếu công ty chưa
       đặt 'Thư mục lưu file kết xuất' thì bỏ qua (vẫn lưu Desktop như thường).
+    tra_mst=1: BẬT tra cứu tình trạng hoạt động MST (cột "Trạng thái MST" ở
+      sheet "BK Mua vào") — MẶC ĐỊNH TẮT (0), theo đúng yêu cầu người dùng
+      "thêm nút tick tra cứu tình trạng mst khi nào tick vào thì mới cho
+      chạy tra cứu này còn không tíck thì không cần chạy" — đây là các lượt
+      gọi mạng ra ngoài (XInvoice/masothue.com), tốn thời gian và có thể
+      tốn hạn mức API, chỉ nên chạy khi người dùng CHỦ Ý cần.
     mo_file: MẶC ĐỊNH = 1 (tự mở file Excel ngay sau khi xuất, cho tiện xem
       luôn). Có ĐÁNH ĐỔI đã biết: file "Bảng kê hóa đơn" này là NGUỒN DỮ
       LIỆU chính mà "Kết xuất XML" đọc vào và bị GHI ĐÈ LẠI mỗi khi Import
@@ -34447,8 +34474,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     rows_mua_vao = sorted(
         (r for r in rows if r["loai"] == "purchase"),
         key=lambda r: str(r["tdlap"] or ""))
-    _prefetch_trang_thai_mst(
-        "BK Mua vào", (r["nbmst"] for r in rows_mua_vao if _hd_dung_cty(r, "purchase")))
+    if tra_mst:
+        _prefetch_trang_thai_mst(
+            "BK Mua vào", (r["nbmst"] for r in rows_mua_vao if _hd_dung_cty(r, "purchase")))
     for r in rows_mua_vao:
         if not _hd_dung_cty(r, "purchase"):   # loại HĐ lẫn của công ty khác
             continue
@@ -34517,7 +34545,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             # Hóa đơn KHÔNG MÃ: TCT không cấp chi tiết dòng hàng qua API, dù
             # thử lại cũng vậy — ghi rõ lý do thay vì để trống trông như lỗi.
             mat_hang = "(Hóa đơn không mã — không có chi tiết dòng hàng)"
-        mst_info_ncc = _lay_trang_thai_mst_cached(r["nbmst"])
+        mst_info_ncc = (_lay_trang_thai_mst_cached(r["nbmst"]) if tra_mst
+                       else {"trang_thai": "", "canh_bao": None})
         ws.append([stt, r["khhdon"], r["shdon"], ngay, r["nbten"], r["nbmst"],
                    mat_hang, thue_suat, ds, thue, _to_num(r["tgtttbso"]),
                    _mo_ta_trang_thai(raw.get("tthai", r["tthai"])),
