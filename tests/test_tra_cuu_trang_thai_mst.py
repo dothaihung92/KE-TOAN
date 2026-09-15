@@ -192,8 +192,14 @@ print("PASS 6: không có dữ liệu tình trạng -> canh_bao=None, không suy
 
 # ===== Test 7-13: _tra_cuu_trang_thai_mst() — luồng cấu hình + cache + gọi API (mock). =====
 
-# Test 7: MST rỗng/"KL" (khách lẻ)/quá ngắn -> KHÔNG gọi mạng, trả canh_bao=None
-# (kể cả khi ĐÃ cấu hình client-id/api-key).
+# Test 7 (QUAN TRỌNG — chẩn đoán "sao vẫn còn?"): MST rỗng/"KL" (khách lẻ)/
+# quá ngắn -> KHÔNG gọi mạng, trả canh_bao=None (kể cả khi ĐÃ cấu hình
+# client-id/api-key). "" và "KL" là CHỦ Ý bỏ qua (không phải lỗi) nên KHÔNG
+# kèm ly_do_loi; còn "123" (có chữ nhưng KHÔNG đủ 9-10 chữ số — dấu hiệu dữ
+# liệu MST trên hóa đơn gốc bị lỗi/thiếu/sai định dạng) PHẢI kèm ly_do_loi
+# để _prefetch_trang_thai_mst() còn hiện được trong "VÍ DỤ LỖI GẶP PHẢI" —
+# tránh tình trạng người dùng thấy còn MST trống nhưng không có ví dụ lỗi
+# nào để biết nguyên nhân.
 _fake_settings.set("xinvoice_client_id", "demo-client")
 _fake_settings.set("xinvoice_api_key", "demo-key")
 _fake_requests.calls.clear()
@@ -204,7 +210,16 @@ assert r7a["canh_bao"] is None and r7b["canh_bao"] is None and r7c["canh_bao"] i
 assert len(_fake_requests.calls) == 0, (
     f"MST rỗng/'KL'/quá ngắn KHÔNG được gọi mạng (tránh tra cứu vô nghĩa cho khách lẻ dùng chung mã) "
     f"— got {len(_fake_requests.calls)} lượt gọi")
-print("PASS 7: MST rỗng/'KL' (khách lẻ dùng chung mã)/quá ngắn -> bỏ qua hẳn, không gọi mạng.")
+assert "ly_do_loi" not in r7a and "ly_do_loi" not in r7b, (
+    f"MST rỗng/'KL' là CHỦ Ý bỏ qua (khách lẻ dùng chung mã), KHÔNG phải lỗi -> không kèm ly_do_loi "
+    f"— got r7a={r7a}, r7b={r7b}")
+assert "không hợp lệ" in (r7c.get("ly_do_loi") or ""), (
+    f"MST '123' (không đủ 9-10 chữ số) -> PHẢI kèm ly_do_loi ghi rõ 'không hợp lệ' để người dùng biết "
+    f"nguyên nhân (dữ liệu MST trên hóa đơn gốc bị lỗi/thiếu), thay vì chỉ thấy trống không rõ vì sao "
+    f"— got {r7c}")
+print("PASS 7: MST rỗng/'KL' (khách lẻ dùng chung mã) -> bỏ qua hẳn, không gọi mạng, không kèm "
+      "ly_do_loi (chủ ý, không phải lỗi); MST quá ngắn/sai định dạng -> vẫn bỏ qua nhưng kèm ly_do_loi "
+      "rõ ràng để chẩn đoán.")
 
 # Test 8a (QUAN TRỌNG — tính năng dự phòng masothue.com): CHƯA cấu hình
 # client-id/api-key XInvoice nào -> KHÔNG còn "bỏ qua hẳn" như trước nữa, mà

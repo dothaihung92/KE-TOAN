@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.259"
+APP_BUILD = "2026-09-15.260"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32770,7 +32770,19 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     được tình trạng xấu, không suy đoán khi thiếu dữ liệu)."""
     mst_c = _chuan_mst(mst)[:10]
     if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
-        return {"trang_thai": "", "canh_bao": None}
+        # "" (rỗng) và "KL" (khách lẻ dùng chung mã) là CHỦ Ý bỏ qua, không
+        # phải lỗi (KHÔNG kèm ly_do_loi để tránh làm nhiễu chẩn đoán) — còn
+        # lại (có chữ nhưng KHÔNG đủ 9-10 chữ số) nhiều khả năng là dữ liệu
+        # MST bị lỗi/thiếu/sai định dạng trên hóa đơn gốc (vd đọc/OCR sai) —
+        # PHẢI kèm ly_do_loi để _prefetch_trang_thai_mst() còn hiện được
+        # trong "VÍ DỤ LỖI GẶP PHẢI", thay vì người dùng thấy MST còn trống
+        # mà không rõ nguyên nhân (đúng câu hỏi người dùng đã hỏi lại "sao
+        # vẫn còn?" khi không thấy dòng ví dụ lỗi nào trong log).
+        ket_qua = {"trang_thai": "", "canh_bao": None}
+        if mst_c and mst_c.upper() != "KL":
+            ket_qua["ly_do_loi"] = (f"MST '{mst}' không hợp lệ (chuẩn hoá còn '{mst_c}', không đủ "
+                                    f"9-10 chữ số) — bỏ qua, không tra cứu được")
+        return ket_qua
 
     danh_sach_keys = _lay_danh_sach_xinvoice_keys()
 
