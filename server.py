@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.244"
+APP_BUILD = "2026-09-15.245"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33216,6 +33216,20 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         # --- Pass 1b: gom dòng CHIẾT KHẤU THƯƠNG MẠI RIÊNG (LOẠI 2) theo thuế suất ---
         # dòng TChat=3, KHÔNG có STCKhau, thành tiền là số tiền chiết khấu
         # -> sẽ PHÂN BỔ TRỪ vào thành tiền các dòng hàng (KHÔNG hiện dòng riêng).
+        # NGOÀI TChat=3 (đúng chuẩn), một số phần mềm xuất hóa đơn GHI SAI TChat
+        # cho dòng chiết khấu riêng (vd HĐ C25MHY-1387 - CTY TNHH PHÂN PHỐI HÀNG
+        # TIÊU DÙNG HOÀNG YẾN: dòng "Chiết khấu hàng bán" ghi TChat=2 — đúng
+        # chuẩn TChat=2 là "Khuyến mại", KHÔNG phải "Chiết khấu thương mại" —
+        # khiến dòng này bị coi là 1 dòng hàng hóa BÌNH THƯỜNG, CỘNG DƯƠNG vào
+        # tổng thay vì bị TRỪ, làm "Chi tiết" hóa đơn (tổng dòng hàng) lệch hẳn
+        # với TgTCThue/TgTTTBSo chính thức của hóa đơn VÀ lệch với Bảng kê đầu
+        # vào — người dùng báo "chiết khấu thương mại nhưng phần chi tiết phần
+        # mềm không tính chung vào đơn giá làm cho đối chiếu bị lệch với bảng
+        # kê đầu vào"). Nhận diện THÊM qua NỘI DUNG (không chỉ TChat): dòng
+        # KHÔNG có số lượng/đơn giá (SLuong=0 VÀ DGia=0 — dấu hiệu rõ đây là 1
+        # dòng tiền điều chỉnh gộp, không phải hàng hóa thật có SL/đơn giá cụ
+        # thể) VÀ tên có chữ "chiết khấu" — cùng cách nhận diện đã dùng ở
+        # _is_ck() (hàm phát hiện hóa đơn CHỈ có dòng chiết khấu, phía dưới).
         ck_rieng = {}          # thuế suất -> tổng tiền chiết khấu
         ck_rieng_items = {}    # thuế suất -> list các dòng CK gốc (dùng khi HĐ chỉ có dòng CK, không có dòng hàng để phân bổ)
         skip_ck_rieng = set()  # id() các dòng CK riêng để bỏ qua khi dựng
@@ -33227,7 +33241,13 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 continue
             if not isinstance(tt, (int, float)) or tt <= 0:
                 continue
-            if tchat == "3" and not (isinstance(ck, (int, float)) and ck > 0):
+            sl = _to_num(it.get("sluong")) or 0
+            dg = _to_num(it.get("dgia")) or 0
+            khong_co_sl_dg = not sl and not dg
+            ten_l = str(it.get("ten_hang", "") or "").lower()
+            la_dong_ck_rieng = (tchat == "3"
+                                or (khong_co_sl_dg and ("chiết khấu" in ten_l or "chiet khau" in ten_l)))
+            if la_dong_ck_rieng and not (isinstance(ck, (int, float)) and ck > 0):
                 rate = _norm_rate(it.get("tsuat"))
                 ck_rieng[rate] = ck_rieng.get(rate, 0) + abs(tt)
                 ck_rieng_items.setdefault(rate, []).append(it)
