@@ -1,0 +1,165 @@
+import os
+import re
+import time
+import threading
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
+
+# Regression test cho _prefetch_trang_thai_mst() (nested trong export_excel(),
+# server.py) — người dùng yêu cầu sau khi thấy xuất Excel bị chậm/treo lâu với
+# công ty có nhiều nhà cung cấp/khách hàng khác nhau: "có thể kiểm tra nhiều
+# luồn được đẩy 3 luồn kiểm tra luôn phiên" — tra tình trạng nhiều MST SONG
+# SONG (mặc định 3 luồng) thay vì tuần tự từng cái, để tận dụng đầy đủ ngân
+# sách thời gian (_MST_NGAN_SACH_GIAY) dò được nhiều MST hơn trong cùng thời
+# gian.
+
+
+def extract_nested_fn(name):
+    """Trích xuất hàm NESTED bên trong export_excel() — dò theo ĐÚNG mức thụt
+    lề của chính dòng 'def name(' (không phải cột 0), dừng ở dòng đầu tiên
+    thụt lề <= mức đó (ranh giới thật của hàm nested)."""
+    idx = src.index('def ' + name + '(')
+    line_start = src.rfind('\n', 0, idx) + 1
+    def_indent = idx - line_start
+    i = src.index(':', idx)
+    lines = src[i + 1:].split('\n')
+    body = []
+    started = False
+    for ln in lines:
+        if ln.strip() == '':
+            body.append(ln)
+            continue
+        indent = len(ln) - len(ln.lstrip(' '))
+        if indent <= def_indent and started:
+            break
+        started = True
+        body.append(ln)
+    return src[idx:i + 1] + '\n'.join(body)
+
+
+def extract_fn(name):
+    idx = src.index('def ' + name + '(')
+    i = src.index(':', idx)
+    lines = src[i + 1:].split('\n')
+    body = []
+    started = False
+    for ln in lines:
+        if ln.strip() == '' and not started:
+            body.append(ln)
+            continue
+        if ln and not ln[0].isspace() and started:
+            break
+        if ln.strip():
+            started = True
+        body.append(ln)
+    return src[idx:i + 1] + '\n'.join(body)
+
+
+ns = {'time': time}
+exec(extract_fn('_chuan_mst'), ns)
+m = re.search(r'^_MST_NGAN_SACH_GIAY\s*=\s*[\d.]+', src, re.M)
+exec(m.group(0), ns)
+
+# Mô phỏng _tra_cuu_trang_thai_mst() thật — mỗi lượt gọi "chậm" NGANG NHAU (mô
+# phỏng độ trễ mạng thật khi gọi API XInvoice), ghi lại thời điểm bắt
+# đầu/kết thúc từng lượt để kiểm chứng có THẬT SỰ chạy song song hay không
+# (nếu chạy song song, nhiều lượt sẽ CHỒNG LẤN thời gian nhau; nếu tuần tự,
+# các lượt sẽ nối đuôi nhau không chồng lấn).
+DO_TRE_GIAY = 0.12
+_calls_lock = threading.Lock()
+_call_intervals = []
+_call_count = {"n": 0}
+
+
+def _fake_tra_cuu(mst, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
+    t0 = time.time()
+    with _calls_lock:
+        _call_count["n"] += 1
+    time.sleep(DO_TRE_GIAY)
+    t1 = time.time()
+    with _calls_lock:
+        _call_intervals.append((t0, t1))
+    return {"trang_thai": "Đang hoạt động", "canh_bao": False}
+
+
+ns['_tra_cuu_trang_thai_mst'] = _fake_tra_cuu
+ns['_mst_status_local'] = {}
+ns['_mst_fail_counter'] = [0]
+ns['_mst_bat_dau'] = time.time()
+
+exec(extract_nested_fn('_lay_trang_thai_mst_cached'), ns)
+exec(extract_nested_fn('_prefetch_trang_thai_mst'), ns)
+_prefetch_trang_thai_mst = ns['_prefetch_trang_thai_mst']
+_mst_status_local = ns['_mst_status_local']
+
+
+def _chong_lan(intervals):
+    """True nếu có ÍT NHẤT 2 khoảng thời gian trong danh sách CHỒNG LẤN nhau
+    — bằng chứng trực tiếp cho thấy các lượt gọi THẬT SỰ chạy song song
+    (khác hẳn chạy tuần tự, nơi mỗi lượt luôn bắt đầu SAU khi lượt trước đã
+    kết thúc, không bao giờ chồng lấn)."""
+    for i in range(len(intervals)):
+        for j in range(i + 1, len(intervals)):
+            a0, a1 = intervals[i]
+            b0, b1 = intervals[j]
+            if a0 < b1 and b0 < a1:
+                return True
+    return False
+
+
+# ----- Test 1 (QUAN TRỌNG — đúng yêu cầu người dùng): 9 MST khác nhau, mỗi lượt
+# tra "chậm" 0.12s -> nếu chạy SONG SONG 3 luồng, phải xong NHANH HƠN HẲN so với
+# chạy tuần tự (9 x 0.12s = 1.08s) VÀ phải có ít nhất 2 lượt CHỒNG LẤN thời gian
+# nhau (bằng chứng trực tiếp là đa luồng thật, không phải giả vờ). -----
+_call_intervals.clear()
+_call_count["n"] = 0
+ds_mst = [f"03{i:08d}" for i in range(9)]
+t_bd = time.time()
+_prefetch_trang_thai_mst(ds_mst, so_luong_song_song=3)
+t_kt = time.time()
+thoi_gian_thuc_te = t_kt - t_bd
+thoi_gian_tuan_tu = len(ds_mst) * DO_TRE_GIAY
+assert _call_count["n"] == 9, f"Phải tra ĐỦ cả 9 MST khác nhau — got {_call_count['n']}"
+assert thoi_gian_thuc_te < thoi_gian_tuan_tu * 0.7, (
+    f"Chạy SONG SONG 3 luồng phải NHANH HƠN HẲN tuần tự — tuần tự sẽ mất ~{thoi_gian_tuan_tu:.2f}s, "
+    f"song song đo được {thoi_gian_thuc_te:.2f}s (kỳ vọng < {thoi_gian_tuan_tu*0.7:.2f}s)")
+assert _chong_lan(_call_intervals), (
+    "Phải có ÍT NHẤT 2 lượt gọi CHỒNG LẤN thời gian nhau — bằng chứng trực tiếp chạy đa luồng thật, "
+    "không phải giả vờ nhanh nhờ nguyên nhân khác")
+for mst in ds_mst:
+    key = ns['_chuan_mst'](mst)[:10]
+    assert _mst_status_local.get(key, {}).get("canh_bao") is False, f"Kết quả phải được đổ vào _mst_status_local cho MST {mst}"
+print(f"PASS 1: 9 MST khác nhau tra SONG SONG (3 luồng) mất {thoi_gian_thuc_te:.2f}s, "
+      f"nhanh hơn hẳn tuần tự (~{thoi_gian_tuan_tu:.2f}s), có lượt chồng lấn thời gian thật — "
+      "đúng yêu cầu người dùng.")
+
+# ----- Test 2 (không hồi quy — quan trọng): DANH SÁCH có MST TRÙNG NHAU nhiều
+# lần (đúng thực tế 1 nhà cung cấp xuất hóa đơn nhiều lần) -> chỉ tra ĐÚNG 1 LẦN
+# cho mỗi MST duy nhất, không tra trùng lặp dù đưa vào danh sách nhiều lần. -----
+_call_intervals.clear()
+_call_count["n"] = 0
+ns['_mst_status_local'].clear()
+ds_trung = ["0311112222"] * 5 + ["0322223333"] * 3
+_prefetch_trang_thai_mst(ds_trung, so_luong_song_song=3)
+assert _call_count["n"] == 2, f"Chỉ được tra ĐÚNG 1 lần cho mỗi MST duy nhất (2 MST khác nhau) — got {_call_count['n']}"
+print("PASS 2: MST trùng lặp nhiều lần trong danh sách (1 NCC xuất nhiều hóa đơn) -> chỉ tra đúng 1 "
+      "lần cho mỗi MST duy nhất, không lãng phí lượt gọi.")
+
+# ----- Test 3 (không hồi quy): MST ĐÃ CÓ SẴN trong _mst_status_local (đã tra
+# từ trước, vd 1 lượt prefetch trước đó hoặc tra inline) -> KHÔNG tra lại. -----
+_call_intervals.clear()
+_call_count["n"] = 0
+ns['_mst_status_local'].clear()
+ns['_mst_status_local']["0333334444"] = {"trang_thai": "Đang hoạt động", "canh_bao": False}
+_prefetch_trang_thai_mst(["0333334444", "0344445555"], so_luong_song_song=3)
+assert _call_count["n"] == 1, f"MST đã có sẵn trong cache cục bộ KHÔNG được tra lại — got {_call_count['n']}"
+print("PASS 3: MST đã có sẵn trong cache cục bộ (_mst_status_local) -> không tra lại, chỉ tra MST mới.")
+
+# ----- Test 4 (an toàn): danh sách rỗng -> không tạo thread pool, không lỗi. -----
+_call_count["n"] = 0
+_prefetch_trang_thai_mst([], so_luong_song_song=3)
+assert _call_count["n"] == 0
+print("PASS 4: danh sách rỗng -> không làm gì, không lỗi.")
+
+print("\nALL DONE")

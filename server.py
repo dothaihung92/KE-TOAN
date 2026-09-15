@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.249"
+APP_BUILD = "2026-09-15.250"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34097,6 +34097,37 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             for c in range(1, n_cols + 1):
                 ws_.cell(row_idx, c).fill = _mst_do_nhat
 
+    def _prefetch_trang_thai_mst(danh_sach_mst, so_luong_song_song=3):
+        """Tra TRƯỚC tình trạng NHIỀU MST CÙNG LÚC (song song, mặc định 3
+        luồng thay phiên nhau — theo đúng yêu cầu người dùng: "có thể kiểm
+        tra nhiều luồng được đẩy 3 luồng kiểm tra luân phiên") thay vì tra
+        TUẦN TỰ từng MST một — với bảng kê có hàng trăm nhà cung cấp/khách
+        hàng khác nhau, chạy song song giúp tận dụng ĐẦY ĐỦ _MST_NGAN_SACH_GIAY
+        giây ngân sách thời gian để tra được NHIỀU MST hơn hẳn so với chạy
+        tuần tự (mỗi luồng vẫn tự nghỉ _MST_API_NGHI_GIUA_LUOT riêng trước
+        mỗi lượt gọi thật — vẫn né giới hạn tốc độ API, chỉ là 3 luồng cùng
+        làm việc đó song song thay vì 1 luồng làm lần lượt). Đổ thẳng kết
+        quả vào _mst_status_local — các bước dựng dòng Excel sau đó chỉ cần
+        đọc lại (cache hit, không tốn thêm thời gian)."""
+        can_tra = []
+        da_gom = set()
+        for mst in danh_sach_mst:
+            key = _chuan_mst(mst)[:10]
+            if not key or key in da_gom or key in _mst_status_local:
+                continue
+            da_gom.add(key)
+            can_tra.append(mst)
+        if not can_tra:
+            return
+        import concurrent.futures as _cf_mst
+        with _cf_mst.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
+            futs = [ex.submit(_lay_trang_thai_mst_cached, mst) for mst in can_tra]
+            for fut in futs:
+                try:
+                    fut.result()
+                except Exception:
+                    pass
+
     # ----- BẢNG KÊ MUA VÀO (mỗi hóa đơn 1 dòng + cột Mặt hàng) -----
     ws = wb.create_sheet("BK Mua vào")
     hdr1 = ["STT", "Ký hiệu", "Số Hoá Đơn", "Ngày lập",
@@ -34114,6 +34145,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     rows_mua_vao = sorted(
         (r for r in rows if r["loai"] == "purchase"),
         key=lambda r: str(r["tdlap"] or ""))
+    _prefetch_trang_thai_mst(r["nbmst"] for r in rows_mua_vao if _hd_dung_cty(r, "purchase"))
     for r in rows_mua_vao:
         if not _hd_dung_cty(r, "purchase"):   # loại HĐ lẫn của công ty khác
             continue
@@ -34311,6 +34343,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             g = key if key in groups else "KHAC"
             groups[g].append((r, raw, tt, kq, info, (key, val)))
             bt["ds"] += val["ds"]; bt["thue"] += val["thue"]
+
+    _prefetch_trang_thai_mst(
+        (info_g["mst_nmua"] if info_g and tsdata_g else r_g["nmmst"]) or "KL"
+        for glist_g in groups.values() for (r_g, _raw_g, _tt_g, _kq_g, info_g, tsdata_g) in glist_g)
 
     nhom_label = {
         "KCT": "1. Hàng hóa, dịch vụ không chịu thuế GTGT (KCT)",
