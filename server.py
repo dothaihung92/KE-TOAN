@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.251"
+APP_BUILD = "2026-09-15.252"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32518,7 +32518,7 @@ def _thue_theo_cong_thue(it, items, r):
 
 _MST_CACHE_NGAY = 14   # số ngày giữ cache tình trạng MST trước khi tra lại
 _MST_API_NGHI_GIUA_LUOT = 0.35   # giây nghỉ giữa các lượt gọi API MST thật (né giới hạn tốc độ)
-_MST_NGAN_SACH_GIAY = 25   # giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel
+_MST_NGAN_SACH_GIAY = 40   # giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel
 
 
 def _phan_loai_trang_thai_mst(mo_ta):
