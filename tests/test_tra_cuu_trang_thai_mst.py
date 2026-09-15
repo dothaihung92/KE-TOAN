@@ -1,8 +1,10 @@
 import os
 import re
+import json
 import sqlite3
 import tempfile
 import datetime
+import threading
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
@@ -102,7 +104,7 @@ class _FakeSettings:
         self.store[key] = value
 
 
-ns = {'datetime': datetime}
+ns = {'datetime': datetime, 'json': json, 'threading': threading}
 exec(extract_fn('_khong_dau'), ns)
 exec(extract_fn('_chuan_mst'), ns)
 exec(extract_fn('_phan_loai_trang_thai_mst'), ns)
@@ -110,6 +112,8 @@ m = re.search(r'^_MST_CACHE_NGAY\s*=\s*\d+', src, re.M)
 exec(m.group(0), ns)
 m2 = re.search(r'^_MST_API_NGHI_GIUA_LUOT\s*=\s*[\d.]+', src, re.M)
 exec(m2.group(0), ns)
+m3 = re.search(r'^_XINVOICE_KEY_STATE\s*=\s*\{.*\}', src, re.M)
+exec(m3.group(0), ns)
 
 _fake_requests = _FakeRequests()
 _fake_settings = _FakeSettings()
@@ -118,6 +122,8 @@ ns['requests'] = _fake_requests
 ns['_get_setting'] = _fake_settings.get
 ns['_set_setting'] = _fake_settings.set
 ns['time'] = _fake_time
+exec(extract_fn('_lay_danh_sach_xinvoice_keys'), ns)
+exec(extract_fn('_goi_1_lan_xinvoice'), ns)
 
 _tmp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
 _tmp_db.close()
@@ -136,6 +142,18 @@ ns['db'] = _fresh_db
 exec(extract_fn('_tra_cuu_trang_thai_mst'), ns)
 _phan_loai_trang_thai_mst = ns['_phan_loai_trang_thai_mst']
 _tra_cuu_trang_thai_mst = ns['_tra_cuu_trang_thai_mst']
+
+
+def _set_xinvoice_keys(danh_sach):
+    """Cấu hình NHIỀU cặp client-id/api-key (định dạng mới, dùng cho test tính
+    năng "hết key này chạy qua key khác") — xoá luôn cấu hình 1-cặp CŨ để
+    không lẫn lộn, và reset _XINVOICE_KEY_STATE["idx"] về 0 (giống hệt
+    POST /api/settings/xinvoice-mst-api thật sự làm khi lưu cấu hình mới)."""
+    _fake_settings.set("xinvoice_client_id", "")
+    _fake_settings.set("xinvoice_api_key", "")
+    _fake_settings.set("xinvoice_api_keys", json.dumps(danh_sach, ensure_ascii=False))
+    with ns['_XINVOICE_KEY_STATE']['lock']:
+        ns['_XINVOICE_KEY_STATE']['idx'] = 0
 
 _conn0 = _fresh_db()
 _conn0.execute("DELETE FROM mst_status_cache")
@@ -429,6 +447,124 @@ assert r15b["canh_bao"] is True, (
 assert len(_fake_requests.calls) == 0, "chi_dung_cache=True TUYỆT ĐỐI không được gọi mạng dù cache quá hạn"
 print("PASS 15: hết ngân sách thời gian nhưng MST đã có cache cũ (dù quá hạn 14 ngày) -> vẫn dùng cache "
       "cũ làm dự phòng thay vì để trống, không gọi mạng thêm.")
+
+# ===== Test 16-20: nhiều cặp client-id/api-key (yêu cầu người dùng: "hãy thử
+# tạo thêm api thứ 2 tôi sẽ tạo thêm key để gắn vào hết key này có thể chạy
+# qua key khác") — tự động CHUYỂN SANG key kế tiếp khi key đang dùng báo lỗi
+# DO CHÍNH key đó (401 sai/hết hạn, hoặc 429 hết hạn mức gói riêng của key),
+# nhưng KHÔNG chuyển key khi lỗi là lỗi CHUNG (HTTP khác/lỗi mạng — đổi key
+# cũng vô ích). =====
+_fake_time.sleeps.clear()
+
+# Test 16 (QUAN TRỌNG): key 1 báo 401 (sai/hết hạn) -> PHẢI tự chuyển ngay
+# sang key 2 trong CÙNG lượt gọi này, key 2 thành công -> trả đúng kết quả,
+# không phải để trống/thất bại dù đã có key 2 dùng được.
+conn16 = _fresh_db()
+conn16.execute("DELETE FROM mst_status_cache")
+conn16.commit()
+conn16.close()
+_set_xinvoice_keys([{"client_id": "key1-id", "api_key": "key1-secret"},
+                    {"client_id": "key2-id", "api_key": "key2-secret"}])
+_fake_requests.calls.clear()
+_fake_requests.next_exc = None
+_fake_requests.next_responses = [
+    (401, {"message": "Unauthorized"}, {}),
+    (200, {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}, {}),
+]
+r16 = _tra_cuu_trang_thai_mst("0321111111", timeout=1)
+assert r16["canh_bao"] is False, (
+    f"Key 1 lỗi 401 nhưng key 2 dùng được -> PHẢI tự chuyển key NGAY và lấy được kết quả thật, "
+    f"không được để trống — got {r16}")
+assert len(_fake_requests.calls) == 2, (
+    f"Phải thử ĐÚNG 2 lượt (key 1 thất bại rồi tự chuyển sang key 2) — got {len(_fake_requests.calls)}")
+assert _fake_requests.calls[0]["headers"].get("client-id") == "key1-id", "Lượt 1 phải dùng key 1"
+assert _fake_requests.calls[1]["headers"].get("client-id") == "key2-id", "Lượt 2 phải tự chuyển sang key 2"
+assert ns['_XINVOICE_KEY_STATE']['idx'] == 1, (
+    "Sau khi key 1 lỗi do CHÍNH key đó, phải NHỚ lại (idx=1) để các MST SAU bắt đầu ngay từ key 2, "
+    "khỏi phải dò lại qua key 1 đã hỏng cho từng MST")
+print("PASS 16: key 1 lỗi 401 (sai/hết hạn) -> tự động chuyển NGAY sang key 2 trong cùng lượt gọi, "
+      "lấy được kết quả thật, đúng yêu cầu người dùng 'hết key này chạy qua key khác'.")
+
+# Test 17: MST KHÁC (chưa có cache) tra tiếp ngay sau đó -> phải bắt đầu THẲNG
+# từ key 2 (nhớ từ Test 16, idx=1), CHỈ 1 lượt gọi (không dò lại qua key 1
+# đã biết hỏng).
+_fake_requests.calls.clear()
+_fake_requests.next_responses = [
+    (200, {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}, {}),
+]
+r17 = _tra_cuu_trang_thai_mst("0321111112", timeout=1)
+assert r17["canh_bao"] is False
+assert len(_fake_requests.calls) == 1, (
+    f"Phải bắt đầu THẲNG từ key 2 (đã nhớ từ lần trước) -> chỉ 1 lượt gọi, không dò lại qua key 1 "
+    f"đã biết hỏng — got {len(_fake_requests.calls)} lượt gọi")
+assert _fake_requests.calls[0]["headers"].get("client-id") == "key2-id", (
+    "Phải dùng THẲNG key 2 (nhớ từ lần chuyển key trước), không thử lại key 1")
+print("PASS 17: MST khác tra ngay sau đó -> bắt đầu THẲNG từ key đang hoạt động (đã nhớ từ lần trước), "
+      "không lãng phí lượt gọi dò lại qua key đã biết hỏng.")
+
+# Test 18: CẢ 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt cả 2 rồi
+# thất bại HẲN (không lặp vô hạn), ly_do_loi phải nêu rõ đã thử CẢ 2 key.
+conn18 = _fresh_db()
+conn18.execute("DELETE FROM mst_status_cache")
+conn18.commit()
+conn18.close()
+_set_xinvoice_keys([{"client_id": "keyA-id", "api_key": "keyA-secret"},
+                    {"client_id": "keyB-id", "api_key": "keyB-secret"}])
+loi_quota = {"success": False,
+            "error": "Exceeded free tier limit. Please try again later or upgrade your plan."}
+_fake_requests.calls.clear()
+_fake_requests.next_responses = [
+    (429, loi_quota, {}),
+    (429, loi_quota, {}),
+]
+r18 = _tra_cuu_trang_thai_mst("0321111113", timeout=1)
+assert r18["canh_bao"] is None
+assert len(_fake_requests.calls) == 2, (
+    f"Phải thử ĐÚNG 2 key (mỗi key 1 lượt, hết hạn mức gói không chờ+thử lại) rồi DỪNG HẲN, không lặp "
+    f"vô hạn — got {len(_fake_requests.calls)}")
+assert "2 key" in (r18.get("ly_do_loi") or ""), (
+    f"ly_do_loi phải nêu rõ đã thử CẢ 2 key đều hết hạn mức để người dùng biết cần thêm key khác "
+    f"— got {r18}")
+print("PASS 18: cả 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt từng key rồi thất bại hẳn "
+      "(không lặp vô hạn), ly_do_loi nêu rõ đã thử cả 2 key.")
+
+# Test 19 (không hồi quy — QUAN TRỌNG): lỗi CHUNG (vd HTTP 404 — MST không
+# tồn tại) KHÔNG PHẢI do lỗi của riêng 1 key -> KHÔNG được lãng phí thử key
+# khác (đổi key cũng vô ích, tốn thêm lượt gọi API vô nghĩa).
+conn19 = _fresh_db()
+conn19.execute("DELETE FROM mst_status_cache")
+conn19.commit()
+conn19.close()
+_set_xinvoice_keys([{"client_id": "keyC-id", "api_key": "keyC-secret"},
+                    {"client_id": "keyD-id", "api_key": "keyD-secret"}])
+_fake_requests.calls.clear()
+_fake_requests.next_responses = [(404, {"message": "Not Found"}, {})]
+r19 = _tra_cuu_trang_thai_mst("0321111114", timeout=1)
+assert r19["canh_bao"] is None
+assert len(_fake_requests.calls) == 1, (
+    f"Lỗi CHUNG (vd HTTP 404, không phải lỗi riêng của key) KHÔNG được thử key khác -> chỉ 1 lượt gọi "
+    f"— got {len(_fake_requests.calls)}")
+assert "HTTP 404" in (r19.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ HTTP 404 — got {r19}"
+print("PASS 19: lỗi CHUNG (HTTP 404, không phải lỗi riêng của 1 key) -> KHÔNG lãng phí thử key khác, "
+      "chỉ 1 lượt gọi, thất bại ngay đúng như lỗi thật.")
+
+# Test 20 (không hồi quy): lỗi kết nối/mạng (exception) cũng là lỗi CHUNG ->
+# tương tự Test 19, KHÔNG được thử key khác.
+conn20 = _fresh_db()
+conn20.execute("DELETE FROM mst_status_cache")
+conn20.commit()
+conn20.close()
+_fake_requests.calls.clear()
+_fake_requests.next_responses = None
+_fake_requests.next_exc = Exception("mạng lỗi giả lập")
+r20 = _tra_cuu_trang_thai_mst("0321111115", timeout=1)
+assert r20["canh_bao"] is None
+assert len(_fake_requests.calls) == 1, (
+    f"Lỗi kết nối/mạng (lỗi CHUNG, không phải lỗi riêng của key) KHÔNG được thử key khác -> chỉ 1 lượt "
+    f"gọi — got {len(_fake_requests.calls)}")
+assert "Lỗi kết nối" in (r20.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ lỗi kết nối — got {r20}"
+print("PASS 20: lỗi kết nối/mạng (lỗi CHUNG) -> KHÔNG lãng phí thử key khác, chỉ 1 lượt gọi.")
+_fake_requests.next_exc = None
 
 os.unlink(_tmp_db.name)
 print("\nALL DONE")

@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.256"
+APP_BUILD = "2026-09-15.257"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5803,22 +5803,60 @@ def set_thu_muc_nop_to_khai(body: dict = Body(...)):
     return {"ok": True, "thu_muc": folder}
 
 
+def _lay_danh_sach_xinvoice_keys():
+    """Danh sách TẤT CẢ cặp client-id/api-key XInvoice đã cấu hình (có thể
+    NHIỀU cặp — theo yêu cầu người dùng: "tạo thêm api thứ 2... hết key này
+    có thể chạy qua key khác" — mỗi gói free tier có hạn mức riêng, nhiều
+    key luân phiên nhau sẽ có tổng hạn mức nhiều hơn). Tự động MIGRATE cấu
+    hình 1-cặp CŨ (khoá xinvoice_client_id/xinvoice_api_key, trước khi có
+    tính năng nhiều key) sang định dạng danh sách mới nếu danh sách mới
+    chưa có gì, để không mất cấu hình người dùng đã nhập trước đó.
+    Trả về list [{"client_id":..., "api_key":...}, ...] (rỗng nếu chưa cấu
+    hình gì)."""
+    raw = _get_setting("xinvoice_api_keys", "")
+    if raw:
+        try:
+            ds = json.loads(raw)
+            if isinstance(ds, list):
+                return [k for k in ds if isinstance(k, dict)
+                        and (k.get("client_id") or "").strip() and (k.get("api_key") or "").strip()]
+        except Exception:
+            pass
+    cu_id = (_get_setting("xinvoice_client_id", "") or "").strip()
+    cu_key = (_get_setting("xinvoice_api_key", "") or "").strip()
+    if cu_id and cu_key:
+        return [{"client_id": cu_id, "api_key": cu_key}]
+    return []
+
+
+def _luu_danh_sach_xinvoice_keys(danh_sach):
+    ds_sach = [{"client_id": (k.get("client_id") or "").strip(),
+               "api_key": (k.get("api_key") or "").strip()}
+              for k in (danh_sach or []) if isinstance(k, dict)]
+    ds_sach = [k for k in ds_sach if k["client_id"] and k["api_key"]]
+    _set_setting("xinvoice_api_keys", json.dumps(ds_sach, ensure_ascii=False))
+
+
 @app.get("/api/settings/xinvoice-mst-api")
 def get_xinvoice_mst_api():
-    """client-id/api-key để gọi API tra cứu tình trạng hoạt động MST của
-    XInvoice (api.xinvoice.vn/gdt-api/tax-payer) khi xuất Excel — xem
-    _tra_cuu_trang_thai_mst. Đăng ký lấy 2 giá trị này tại xinvoice.vn."""
-    return {"client_id": _get_setting("xinvoice_client_id", ""),
-            "api_key": _get_setting("xinvoice_api_key", "")}
+    """Danh sách cặp client-id/api-key để gọi API tra cứu tình trạng hoạt
+    động MST của XInvoice (api.xinvoice.vn/gdt-api/tax-payer) khi xuất
+    Excel — xem _tra_cuu_trang_thai_mst. Đăng ký lấy các cặp này tại
+    xinvoice.vn — có thể thêm NHIỀU cặp, phần mềm tự chuyển sang cặp kế
+    tiếp khi cặp đang dùng báo hết hạn mức gói."""
+    return {"keys": _lay_danh_sach_xinvoice_keys()}
 
 
 @app.post("/api/settings/xinvoice-mst-api")
 def set_xinvoice_mst_api(body: dict = Body(...)):
-    client_id = (body.get("client_id") or "").strip()
-    api_key = (body.get("api_key") or "").strip()
-    _set_setting("xinvoice_client_id", client_id)
-    _set_setting("xinvoice_api_key", api_key)
-    return {"ok": True}
+    keys = body.get("keys")
+    if keys is None:
+        # tương thích cách gọi CŨ (1 cặp duy nhất, body={"client_id","api_key"})
+        keys = [{"client_id": body.get("client_id"), "api_key": body.get("api_key")}]
+    _luu_danh_sach_xinvoice_keys(keys)
+    with _XINVOICE_KEY_STATE["lock"]:
+        _XINVOICE_KEY_STATE["idx"] = 0   # cấu hình lại -> thử lại từ cặp đầu tiên
+    return {"ok": True, "keys": _lay_danh_sach_xinvoice_keys()}
 
 
 @app.get("/api/settings/pin-nop-to-khai")
@@ -32538,6 +32576,16 @@ _MST_CACHE_NGAY = 14   # số ngày giữ cache tình trạng MST trước khi t
 _MST_API_NGHI_GIUA_LUOT = 0.35   # giây nghỉ giữa các lượt gọi API MST thật (né giới hạn tốc độ)
 _MST_NGAN_SACH_GIAY = 40   # giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel
 
+# Chỉ số cặp client-id/api-key XInvoice ĐANG DÙNG (trong danh sách nhiều cặp
+# đã cấu hình) — theo yêu cầu người dùng: "tạo thêm api thứ 2... hết key này
+# có thể chạy qua key khác". CHIA SẺ giữa CÁC LUỒNG (3 luồng song song tra
+# MST cùng lúc, xem _prefetch_trang_thai_mst) NÊN cần lock — khi 1 cặp báo
+# HẾT HẠN MỨC GÓI, mọi luồng chuyển sang cặp KẾ TIẾP ngay, không cần đợi
+# khởi động lại phần mềm. Sống trong bộ nhớ (reset về cặp đầu tiên mỗi khi
+# khởi động lại phần mềm hoặc khi người dùng lưu lại cấu hình key) — không
+# cần lưu DB vì chỉ ảnh hưởng trong phiên làm việc hiện tại.
+_XINVOICE_KEY_STATE = {"idx": 0, "lock": threading.Lock()}
+
 
 def _phan_loai_trang_thai_mst(mo_ta):
     """Phân loại tình trạng hoạt động MST từ 1 đoạn mô tả dạng chữ (trường
@@ -32582,6 +32630,64 @@ def _phan_loai_trang_thai_mst(mo_ta):
     if "dang hoat dong" in t:
         return "Đang hoạt động", False
     return "", None
+
+
+def _goi_1_lan_xinvoice(mst_c, client_id, api_key, timeout):
+    """Gọi API XInvoice tra 1 MST với ĐÚNG 1 cặp client-id/api-key — tự thử
+    lại ĐÚNG 1 lần nếu gặp 429 do giới hạn tốc độ TẠM THỜI (chờ theo
+    Retry-After), KHÁC với 429 do HẾT HẠN MỨC GÓI (free tier) — trường hợp
+    đó thất bại NGAY (chờ vô ích, hạn mức tính theo ngày/tháng).
+
+    Trả về (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi, loi_do_key).
+    loi_do_key=True nghĩa là lỗi này là do CHÍNH cặp key đang dùng (401 sai/
+    hết hạn key, hoặc 429 hết hạn mức gói CỦA RIÊNG key này) — bên gọi nên
+    CHUYỂN SANG CẶP KEY KHÁC (nếu có cấu hình nhiều cặp — theo yêu cầu
+    người dùng: "tạo thêm api thứ 2... hết key này có thể chạy qua key
+    khác") thử lại NGAY, khác với lỗi CHUNG (MST không tồn tại/lỗi mạng)
+    mà đổi key cũng vô ích, không đáng thử."""
+    try:
+        for lan_thu in range(2):
+            r = requests.get(f"https://api.xinvoice.vn/gdt-api/tax-payer/{mst_c}",
+                             headers={"Accept": "application/json",
+                                      "client-id": client_id, "api-key": api_key},
+                             timeout=timeout)
+            if r.status_code == 200:
+                data = r.json() or {}
+                trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(str(data.get("status") or ""))
+                return True, trang_thai_goc, canh_bao, None, False
+            if r.status_code == 429:
+                try:
+                    _body_429 = r.text or ""
+                except Exception:
+                    _body_429 = ""
+                _het_han_muc_goi = any(kw in _khong_dau(_body_429) for kw in
+                                       ("free tier", "quota", "upgrade your plan", "vuot han muc",
+                                        "het han muc"))
+                if lan_thu == 0 and not _het_han_muc_goi:
+                    ra = (r.headers or {}).get("Retry-After")
+                    try:
+                        cho = min(max(float(ra), 0), 10) if ra else 2
+                    except Exception:
+                        cho = 2
+                    time.sleep(cho)
+                    continue
+                ly_do = (f"HTTP 429 (HẾT HẠN MỨC GÓI API — cần đợi gói tự làm mới, thêm key khác, "
+                        f"hoặc nâng cấp gói trên xinvoice.vn): {_body_429[:200]}" if _het_han_muc_goi
+                        else f"HTTP 429: {_body_429[:200]}")
+                return False, "", None, ly_do, _het_han_muc_goi
+            if r.status_code == 401:
+                try:
+                    ly_do = f"HTTP 401 (client-id/api-key sai hoặc hết hạn): {(r.text or '')[:200]}"
+                except Exception:
+                    ly_do = "HTTP 401 (client-id/api-key sai hoặc hết hạn)"
+                return False, "", None, ly_do, True
+            try:
+                ly_do = f"HTTP {r.status_code}: {(r.text or '')[:200]}"
+            except Exception:
+                ly_do = f"HTTP {r.status_code}"
+            return False, "", None, ly_do, False
+    except Exception as _e_mst:
+        return False, "", None, f"Lỗi kết nối: {str(_e_mst)[:150]}", False
 
 
 def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
@@ -32630,9 +32736,8 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
         return {"trang_thai": "", "canh_bao": None}
 
-    client_id = (_get_setting("xinvoice_client_id", "") or "").strip()
-    api_key = (_get_setting("xinvoice_api_key", "") or "").strip()
-    if not client_id or not api_key:
+    danh_sach_keys = _lay_danh_sach_xinvoice_keys()
+    if not danh_sach_keys:
         return {"trang_thai": "", "canh_bao": None}
 
     conn = db()
@@ -32675,6 +32780,20 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # nhanh, không phải do MST không hợp lệ hay sai client-id/api-key.
     time.sleep(_MST_API_NGHI_GIUA_LUOT)
 
+    # Nhiều cặp client-id/api-key (người dùng yêu cầu: "tạo thêm api thứ 2...
+    # hết key này có thể chạy qua key khác") — thử LẦN LƯỢT từng key bắt đầu
+    # từ key đang "hoạt động" (_XINVOICE_KEY_STATE["idx"], nhớ xuyên suốt các
+    # lượt gọi, dùng chung giữa các luồng song song qua lock), CHỈ chuyển
+    # sang key kế tiếp NGAY khi lỗi rõ ràng do CHÍNH cặp key đó (401 sai/hết
+    # hạn, hoặc 429 hết hạn mức gói CỦA RIÊNG key này) — lỗi KHÁC (MST không
+    # tồn tại, lỗi mạng...) thì đổi key cũng vô ích, dừng ngay không thử key
+    # khác. Khi 1 key báo lỗi do key -> ghi nhớ lại để các MST SAU (kể cả
+    # đang tra song song ở luồng khác) bắt đầu ngay từ key mới, khỏi phải
+    # lần lượt "dò lại từ đầu" qua key đã hỏng cho từng MST.
+    so_key = len(danh_sach_keys)
+    with _XINVOICE_KEY_STATE["lock"]:
+        idx_bat_dau = _XINVOICE_KEY_STATE["idx"] % so_key
+
     trang_thai_goc = ""
     canh_bao = None
     thanh_cong = False
@@ -32683,57 +32802,20 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # -> client-id/api-key sai/hết hạn/hết hạn mức, khác hẳn "Lỗi kết nối" ->
     # mạng/tường lửa) thay vì chỉ thấy trống không rõ vì sao.
     ly_do_loi = None
-    try:
-        # Thử tối đa 2 lần: lần 2 CHỈ khi gặp 429 do GIỚI HẠN TỐC ĐỘ TẠM THỜI
-        # (chờ đúng theo Retry-After rồi thử lại ĐÚNG 1 lần) — KHÁC HẲN 429
-        # do HẾT HẠN MỨC GÓI (vd free tier của XInvoice: "Exceeded free tier
-        # limit. Please try again later or upgrade your plan" — xác nhận
-        # đúng ca thật người dùng gặp) — hạn mức gói tính theo ngày/tháng,
-        # chờ vài giây không giải quyết được gì, chỉ tổ tốn thêm thời gian
-        # vô ích — nhận diện qua từ khoá trong nội dung lỗi trả về để bỏ
-        # qua bước chờ+thử lại, thất bại NGAY để bộ đếm lỗi liên tiếp
-        # (so_lan_that_bai_lien_tiep) sớm dừng hẳn việc gọi mạng cho các
-        # MST còn lại trong lượt này.
-        for lan_thu in range(2):
-            r = requests.get(f"https://api.xinvoice.vn/gdt-api/tax-payer/{mst_c}",
-                             headers={"Accept": "application/json",
-                                      "client-id": client_id, "api-key": api_key},
-                             timeout=timeout)
-            if r.status_code == 200:
-                data = r.json() or {}
-                trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(str(data.get("status") or ""))
-                thanh_cong = True
-                break
-            if r.status_code == 429:
-                try:
-                    _body_429 = r.text or ""
-                except Exception:
-                    _body_429 = ""
-                _het_han_muc_goi = any(kw in _khong_dau(_body_429) for kw in
-                                       ("free tier", "quota", "upgrade your plan", "vuot han muc",
-                                        "het han muc"))
-                if lan_thu == 0 and not _het_han_muc_goi:
-                    ra = (r.headers or {}).get("Retry-After")
-                    try:
-                        cho = min(max(float(ra), 0), 10) if ra else 2
-                    except Exception:
-                        cho = 2
-                    time.sleep(cho)
-                    continue
-                ly_do_loi = (f"HTTP 429 (HẾT HẠN MỨC GÓI API — cần đợi gói tự làm mới hoặc nâng "
-                            f"cấp gói trên xinvoice.vn): {_body_429[:200]}" if _het_han_muc_goi
-                            else f"HTTP 429: {_body_429[:200]}")
-                break
-            # status khác 200/429 (401 sai client-id/api-key, 404 không có
-            # MST...) -> coi là 1 lượt lỗi (tính vào bộ đếm lỗi liên tiếp bên
-            # dưới), KHÔNG suy đoán tình trạng.
-            try:
-                ly_do_loi = f"HTTP {r.status_code}: {(r.text or '')[:200]}"
-            except Exception:
-                ly_do_loi = f"HTTP {r.status_code}"
+    for buoc in range(so_key):
+        idx_key = (idx_bat_dau + buoc) % so_key
+        k = danh_sach_keys[idx_key]
+        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi, loi_do_key = _goi_1_lan_xinvoice(
+            mst_c, k["client_id"], k["api_key"], timeout)
+        if thanh_cong:
             break
-    except Exception as _e_mst:
-        ly_do_loi = f"Lỗi kết nối: {str(_e_mst)[:150]}"
+        if loi_do_key and buoc < so_key - 1:
+            with _XINVOICE_KEY_STATE["lock"]:
+                _XINVOICE_KEY_STATE["idx"] = (idx_key + 1) % so_key
+            continue
+        if loi_do_key and so_key > 1:
+            ly_do_loi = f"ĐÃ HẾT HẠN MỨC/SAI cả {so_key} key đã cấu hình — lỗi key cuối: {ly_do_loi}"
+        break
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
 

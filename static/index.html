@@ -481,9 +481,9 @@
 <div class="modal-bg" id="xinvoiceModal">
   <div class="modal" style="width:min(520px,96vw);max-width:520px">
     <h3 style="margin-top:0">🔑 Cấu hình API tra cứu tình trạng MST</h3>
-    <p class="hint" style="margin-top:0">Khi xuất Excel, phần mềm tự dò tình trạng hoạt động của MST đối tác (đang hoạt động / bị khoá MST / chờ xác minh địa chỉ kinh doanh...) qua API của <b>XInvoice</b>, thêm cột "Trạng thái MST" và tô đỏ dòng cần chú ý. Cần đăng ký lấy <b>Client ID</b> và <b>API Key</b> tại <a href="https://xinvoice.vn/apis/tra-cuu-ma-so-thue" target="_blank" rel="noopener">xinvoice.vn</a> rồi nhập vào đây. Chưa nhập thì phần mềm vẫn xuất Excel bình thường, chỉ là chưa có cột này.</p>
-    <div class="field"><label>Client ID</label><input id="xinv_client_id" placeholder="Client ID (xinvoice.vn cấp khi đăng ký)"></div>
-    <div class="field"><label>API Key</label><input id="xinv_api_key" type="password" placeholder="API Key (xinvoice.vn cấp khi đăng ký)"></div>
+    <p class="hint" style="margin-top:0">Khi xuất Excel, phần mềm tự dò tình trạng hoạt động của MST đối tác (đang hoạt động / bị khoá MST / chờ xác minh địa chỉ kinh doanh...) qua API của <b>XInvoice</b>, thêm cột "Trạng thái MST" và tô đỏ dòng cần chú ý. Cần đăng ký lấy <b>Client ID</b> và <b>API Key</b> tại <a href="https://xinvoice.vn/apis/tra-cuu-ma-so-thue" target="_blank" rel="noopener">xinvoice.vn</a> rồi nhập vào đây. Chưa nhập thì phần mềm vẫn xuất Excel bình thường, chỉ là chưa có cột này. Có thể thêm <b>nhiều cặp Client ID/API Key</b> — mỗi gói free tier có hạn mức riêng, khi cặp đang dùng hết hạn mức phần mềm sẽ <b>tự động chuyển sang cặp kế tiếp</b>.</p>
+    <div id="xinv_keys_list"></div>
+    <button type="button" class="btn ghost" style="margin:2px 0 12px" onclick="themXInvoiceKeyRow()">➕ Thêm cặp key khác</button>
     <div class="modal-actions">
       <button class="btn ghost" onclick="dongXInvoiceModal()">Đóng</button>
       <button class="btn" onclick="luuXInvoiceModal()">💾 Lưu</button>
@@ -9500,22 +9500,54 @@ function moHDNModal(){
 function hdnDongModal(){
   document.getElementById('hdnModal').classList.remove('show');
 }
+function xinvNewKeyRow(client_id,api_key){
+  const div=document.createElement('div');
+  div.className='xinv-key-row';
+  div.style.cssText='display:flex;gap:6px;margin-bottom:6px;align-items:center';
+  const inC=document.createElement('input');
+  inC.className='xinv-key-client';
+  inC.placeholder='Client ID (xinvoice.vn cấp khi đăng ký)';
+  inC.style.flex='1';
+  inC.value=client_id||'';
+  const inK=document.createElement('input');
+  inK.className='xinv-key-secret';
+  inK.type='password';
+  inK.placeholder='API Key (xinvoice.vn cấp khi đăng ký)';
+  inK.style.flex='1';
+  inK.value=api_key||'';
+  const btnXoa=document.createElement('button');
+  btnXoa.type='button';
+  btnXoa.className='btn ghost';
+  btnXoa.style.padding='6px 10px';
+  btnXoa.textContent='✕';
+  btnXoa.title='Xoá cặp key này';
+  btnXoa.onclick=()=>div.remove();
+  div.appendChild(inC);div.appendChild(inK);div.appendChild(btnXoa);
+  return div;
+}
+function themXInvoiceKeyRow(client_id,api_key){
+  document.getElementById('xinv_keys_list').appendChild(xinvNewKeyRow(client_id,api_key));
+}
 async function moXInvoiceModal(){
+  const list=document.getElementById('xinv_keys_list');
+  list.innerHTML='';
   try{
     const r=await api('/api/settings/xinvoice-mst-api');
-    document.getElementById('xinv_client_id').value=r.client_id||'';
-    document.getElementById('xinv_api_key').value=r.api_key||'';
-  }catch(e){}
+    const keys=(r.keys&&r.keys.length)?r.keys:[{client_id:'',api_key:''}];
+    keys.forEach(k=>themXInvoiceKeyRow(k.client_id,k.api_key));
+  }catch(e){themXInvoiceKeyRow('','');}
   document.getElementById('xinvoiceModal').classList.add('show');
 }
 function dongXInvoiceModal(){
   document.getElementById('xinvoiceModal').classList.remove('show');
 }
 async function luuXInvoiceModal(){
-  const client_id=document.getElementById('xinv_client_id').value.trim();
-  const api_key=document.getElementById('xinv_api_key').value.trim();
+  const keys=[...document.querySelectorAll('#xinv_keys_list .xinv-key-row')].map(row=>({
+    client_id: row.querySelector('.xinv-key-client').value.trim(),
+    api_key: row.querySelector('.xinv-key-secret').value.trim()
+  })).filter(k=>k.client_id&&k.api_key);
   try{
-    await api('/api/settings/xinvoice-mst-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id,api_key})});
+    await api('/api/settings/xinvoice-mst-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keys})});
     toast('Đã lưu cấu hình API tra cứu MST','ok');
     dongXInvoiceModal();
   }catch(e){toast('Lỗi lưu: '+e.message,'err');}
