@@ -37,9 +37,10 @@ def extract_fn(name):
 
 
 class _FakeResp:
-    def __init__(self, status_code, data=None):
+    def __init__(self, status_code, data=None, headers=None):
         self.status_code = status_code
         self._data = data
+        self.headers = headers or {}
 
     def json(self):
         return self._data
@@ -48,18 +49,36 @@ class _FakeResp:
 class _FakeRequests:
     """Thay cho module requests thật — kiểm soát được nội dung trả về/lỗi mạng
     để test KHÔNG cần gọi mạng thật (không thể test trực tiếp API XInvoice từ
-    môi trường sandbox hiện tại — bị chặn egress proxy)."""
+    môi trường sandbox hiện tại — bị chặn egress proxy). next_responses: hàng
+    đợi (status, data, headers) trả về LẦN LƯỢT theo từng lượt gọi (dùng để mô
+    phỏng 429 rồi 200 ở lượt thử lại) — hết hàng đợi thì fallback về
+    next_status/next_data (giữ tương thích các test cũ chỉ cần 1 kết quả cố định)."""
     def __init__(self):
         self.calls = []
         self.next_status = 200
         self.next_data = None
         self.next_exc = None
+        self.next_responses = None
 
     def get(self, url, headers=None, timeout=None):
         self.calls.append({"url": url, "headers": dict(headers or {})})
         if self.next_exc is not None:
             raise self.next_exc
+        if self.next_responses:
+            status, data, hdrs = self.next_responses.pop(0)
+            return _FakeResp(status, data, hdrs)
         return _FakeResp(self.next_status, self.next_data)
+
+
+class _FakeTime:
+    """Thay cho module time thật — ghi lại các lượt sleep() thay vì chờ thật,
+    để test chạy nhanh dù _tra_cuu_trang_thai_mst giờ có nghỉ giữa các lượt gọi
+    API thật (né giới hạn tốc độ) + chờ theo Retry-After khi gặp 429."""
+    def __init__(self):
+        self.sleeps = []
+
+    def sleep(self, s):
+        self.sleeps.append(s)
 
 
 class _FakeSettings:
@@ -81,12 +100,16 @@ exec(extract_fn('_chuan_mst'), ns)
 exec(extract_fn('_phan_loai_trang_thai_mst'), ns)
 m = re.search(r'^_MST_CACHE_NGAY\s*=\s*\d+', src, re.M)
 exec(m.group(0), ns)
+m2 = re.search(r'^_MST_API_NGHI_GIUA_LUOT\s*=\s*[\d.]+', src, re.M)
+exec(m2.group(0), ns)
 
 _fake_requests = _FakeRequests()
 _fake_settings = _FakeSettings()
+_fake_time = _FakeTime()
 ns['requests'] = _fake_requests
 ns['_get_setting'] = _fake_settings.get
 ns['_set_setting'] = _fake_settings.set
+ns['time'] = _fake_time
 
 _tmp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
 _tmp_db.close()
@@ -185,6 +208,33 @@ assert call["headers"].get("client-id") == "demo-client"
 assert call["headers"].get("api-key") == "demo-key"
 print("PASS 9: cache MISS -> gọi đúng API XInvoice (URL + header client-id/api-key), phân loại đúng "
       "theo trường 'status'.")
+
+# Test 9b (ca thật người dùng báo — QUAN TRỌNG): bảng kê ~880 hóa đơn chỉ dò được
+# ~50 dòng, còn lại trống hết dù cùng client-id/api-key -> dấu hiệu bị GIỚI HẠN TỐC
+# ĐỘ (429) do gọi API quá nhanh liên tiếp cho hàng trăm MST khác nhau. Xác nhận: gặp
+# 429 kèm Retry-After -> phải NGHỈ đúng theo đó rồi THỬ LẠI 1 lần (không bỏ cuộc
+# ngay), và vẫn phải nghỉ 1 chút TRƯỚC mỗi lượt gọi API thật để né giới hạn tốc độ
+# ngay từ đầu.
+_fake_requests.calls.clear()
+_fake_time.sleeps.clear()
+_fake_requests.next_responses = [
+    (429, {"message": "Too Many Requests"}, {"Retry-After": "3"}),
+    (200, {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}, {}),
+]
+r9b = _tra_cuu_trang_thai_mst("0399998888", timeout=1)
+assert r9b["canh_bao"] is False, (
+    f"Gặp 429 rồi thử lại thành công -> PHẢI lấy được tình trạng thật, không phải bỏ cuộc — got {r9b}")
+assert len(_fake_requests.calls) == 2, (
+    f"429 phải được THỬ LẠI đúng 1 lần (không bỏ cuộc ngay ở lần đầu) — got {len(_fake_requests.calls)} lượt gọi")
+assert 3 in _fake_time.sleeps, (
+    f"Phải NGHỈ đúng theo Retry-After (3s) khi gặp 429 trước khi thử lại — got các lượt nghỉ {_fake_time.sleeps}")
+assert _fake_time.sleeps[0] == ns['_MST_API_NGHI_GIUA_LUOT'], (
+    f"Phải nghỉ 1 chút TRƯỚC lượt gọi API thật đầu tiên (né giới hạn tốc độ ngay từ đầu) "
+    f"— got {_fake_time.sleeps}")
+print("PASS 9b: gặp 429 (giới hạn tốc độ, đúng ca thật ~830/880 dòng bị trống) -> nghỉ đúng theo "
+      "Retry-After rồi thử lại thành công, không bỏ cuộc ngay; luôn nghỉ 1 chút trước mỗi lượt gọi "
+      "API thật để né giới hạn tốc độ ngay từ đầu.")
+_fake_requests.next_responses = None
 
 # Test 10: cache HIT (vừa tra ở Test 9) -> KHÔNG gọi mạng lại, trả đúng kết quả đã lưu.
 _fake_requests.calls.clear()

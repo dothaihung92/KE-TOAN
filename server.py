@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.247"
+APP_BUILD = "2026-09-15.248"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32517,6 +32517,7 @@ def _thue_theo_cong_thue(it, items, r):
 
 
 _MST_CACHE_NGAY = 14   # số ngày giữ cache tình trạng MST trước khi tra lại
+_MST_API_NGHI_GIUA_LUOT = 0.35   # giây nghỉ giữa các lượt gọi API MST thật (né giới hạn tốc độ)
 
 
 def _phan_loai_trang_thai_mst(mo_ta):
@@ -32633,21 +32634,47 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None):
                     "canh_bao": bool(canh_bao_cu) if canh_bao_cu is not None else None}
         return {"trang_thai": "", "canh_bao": None}
 
+    # Nghỉ 1 chút TRƯỚC mỗi lượt gọi API thật (không áp dụng cho cache
+    # hit/MST không hợp lệ ở trên) — hạn chế bắn dồn dập hàng trăm request
+    # liên tiếp khi xuất Excel bảng kê nhiều trăm hóa đơn (mỗi hóa đơn 1 nhà
+    # cung cấp khác nhau), vì API bên thứ 3 thường có giới hạn tốc độ
+    # (request/giây) — xác nhận đúng ca thật người dùng báo: bảng kê ~880
+    # hóa đơn, chỉ ~50 dòng dò được, còn lại trống hết dù cùng client-id/
+    # api-key — dấu hiệu rõ bị giới hạn tốc độ (429) hàng loạt do gọi quá
+    # nhanh, không phải do MST không hợp lệ hay sai client-id/api-key.
+    time.sleep(_MST_API_NGHI_GIUA_LUOT)
+
     trang_thai_goc = ""
     canh_bao = None
     thanh_cong = False
     try:
-        r = requests.get(f"https://api.xinvoice.vn/gdt-api/tax-payer/{mst_c}",
-                         headers={"Accept": "application/json",
-                                  "client-id": client_id, "api-key": api_key},
-                         timeout=timeout)
-        if r.status_code == 200:
-            data = r.json() or {}
-            trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(str(data.get("status") or ""))
-            thanh_cong = True
-        # status khác 200 (401 sai client-id/api-key, 404 không có MST, 429
-        # vượt hạn mức...) -> coi là 1 lượt lỗi (tính vào bộ đếm lỗi liên
-        # tiếp bên dưới), KHÔNG suy đoán tình trạng.
+        # Thử tối đa 2 lần: lần 2 CHỈ khi gặp 429 (giới hạn tốc độ) — chờ
+        # đúng theo Retry-After (nếu API có trả) rồi thử lại ĐÚNG 1 lần,
+        # thay vì coi 429 là lỗi hẳn rồi bỏ cuộc luôn (429 chỉ là tạm thời,
+        # khác hẳn 401/404 — lỗi thật sự).
+        for lan_thu in range(2):
+            r = requests.get(f"https://api.xinvoice.vn/gdt-api/tax-payer/{mst_c}",
+                             headers={"Accept": "application/json",
+                                      "client-id": client_id, "api-key": api_key},
+                             timeout=timeout)
+            if r.status_code == 200:
+                data = r.json() or {}
+                trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(str(data.get("status") or ""))
+                thanh_cong = True
+                break
+            if r.status_code == 429 and lan_thu == 0:
+                ra = (r.headers or {}).get("Retry-After")
+                try:
+                    cho = min(max(float(ra), 0), 10) if ra else 2
+                except Exception:
+                    cho = 2
+                time.sleep(cho)
+                continue
+            # status khác 200 (401 sai client-id/api-key, 404 không có MST,
+            # hoặc vẫn 429 sau khi đã chờ+thử lại) -> coi là 1 lượt lỗi
+            # (tính vào bộ đếm lỗi liên tiếp bên dưới), KHÔNG suy đoán tình
+            # trạng.
+            break
     except Exception:
         pass
     if so_lan_that_bai_lien_tiep is not None:
