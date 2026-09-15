@@ -45,6 +45,14 @@ class _FakeResp:
     def json(self):
         return self._data
 
+    @property
+    def text(self):
+        import json as _json
+        try:
+            return _json.dumps(self._data, ensure_ascii=False) if self._data is not None else ""
+        except Exception:
+            return ""
+
 
 class _FakeRequests:
     """Thay cho module requests thật — kiểm soát được nội dung trả về/lỗi mạng
@@ -282,11 +290,17 @@ assert all(kq["canh_bao"] is None for kq in ket_qua_12), (
 assert len(_fake_requests.calls) == 5, (
     f"Sau ĐÚNG 5 lỗi liên tiếp phải NGỪNG gọi API cho các MST còn lại trong lượt này (tránh treo lâu "
     f"vì hàng loạt timeout) — got {len(_fake_requests.calls)} lượt gọi thật (kỳ vọng đúng 5)")
-print("PASS 12: lỗi mạng không làm crash (canh_bao=None, an toàn), và dừng hẳn việc gọi API sau 5 lỗi "
-      "liên tiếp trong cùng 1 lượt xuất Excel — không treo lâu vô ích.")
+assert all("Lỗi kết nối" in (kq.get("ly_do_loi") or "") for kq in ket_qua_12[:5]), (
+    f"Mỗi lượt lỗi kết nối THẬT SỰ (5 lượt đầu, trước khi ngừng gọi mạng) phải kèm ly_do_loi cụ thể để "
+    f"người dùng biết nguyên nhân thật (không chỉ thấy trống không rõ vì sao) — got {ket_qua_12[:5]}")
+print("PASS 12: lỗi mạng không làm crash (canh_bao=None, an toàn), dừng hẳn việc gọi API sau 5 lỗi "
+      "liên tiếp trong cùng 1 lượt xuất Excel, và mỗi lượt lỗi đều kèm ly_do_loi cụ thể để chẩn đoán.")
 
-# Test 13 (không hồi quy): status HTTP khác 200 (vd 401 sai client-id/api-key) -> KHÔNG
-# suy đoán tình trạng (canh_bao=None), vẫn tính là 1 lượt lỗi cho bộ đếm liên tiếp.
+# Test 13 (không hồi quy — QUAN TRỌNG): status HTTP khác 200 (vd 401 sai client-id/
+# api-key) -> KHÔNG suy đoán tình trạng (canh_bao=None), vẫn tính là 1 lượt lỗi cho bộ
+# đếm liên tiếp, VÀ trả kèm ly_do_loi ghi rõ "HTTP 401" để người dùng tự biết đây là do
+# client-id/api-key sai/hết hạn — đúng câu hỏi người dùng đã hỏi "này là do api hết hạn
+# nên chặn phải không".
 _fake_requests.next_exc = None
 _fake_requests.next_status = 401
 _fake_requests.next_data = {"message": "Unauthorized"}
@@ -295,8 +309,11 @@ dem_loi2 = [0]
 r13 = _tra_cuu_trang_thai_mst("0311111111", timeout=1, so_lan_that_bai_lien_tiep=dem_loi2)
 assert r13["canh_bao"] is None, f"HTTP 401 (sai key) KHÔNG được suy đoán tình trạng — got {r13}"
 assert dem_loi2[0] == 1, f"HTTP lỗi vẫn phải tính vào bộ đếm lỗi liên tiếp — got {dem_loi2[0]}"
+assert "HTTP 401" in (r13.get("ly_do_loi") or ""), (
+    f"Phải trả kèm ly_do_loi ghi rõ mã lỗi HTTP thật (401) để người dùng tự chẩn đoán được nguyên nhân "
+    f"— got {r13}")
 print("PASS 13: HTTP lỗi (vd 401 sai client-id/api-key) -> canh_bao=None (không suy đoán), vẫn tính "
-      "vào bộ đếm lỗi liên tiếp.")
+      "vào bộ đếm lỗi liên tiếp, VÀ trả kèm ly_do_loi ghi rõ 'HTTP 401' để chẩn đoán đúng nguyên nhân.")
 
 # ===== Test 14-15: chi_dung_cache — ca thật người dùng báo tiếp "chạy lâu quá" với
 # bảng kê ~992 hóa đơn nhiều trăm nhà cung cấp khác nhau: export_excel giới hạn

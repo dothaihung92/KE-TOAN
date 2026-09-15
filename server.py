@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.252"
+APP_BUILD = "2026-09-15.253"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32660,6 +32660,11 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     trang_thai_goc = ""
     canh_bao = None
     thanh_cong = False
+    # ly_do_loi: CHỈ để chẩn đoán (không lưu vào cache DB) — giúp người dùng
+    # tự biết NGUYÊN NHÂN thật khi thấy nhiều MST không dò được (vd "HTTP 401"
+    # -> client-id/api-key sai/hết hạn/hết hạn mức, khác hẳn "Lỗi kết nối" ->
+    # mạng/tường lửa) thay vì chỉ thấy trống không rõ vì sao.
+    ly_do_loi = None
     try:
         # Thử tối đa 2 lần: lần 2 CHỈ khi gặp 429 (giới hạn tốc độ) — chờ
         # đúng theo Retry-After (nếu API có trả) rồi thử lại ĐÚNG 1 lần,
@@ -32687,9 +32692,13 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
             # hoặc vẫn 429 sau khi đã chờ+thử lại) -> coi là 1 lượt lỗi
             # (tính vào bộ đếm lỗi liên tiếp bên dưới), KHÔNG suy đoán tình
             # trạng.
+            try:
+                ly_do_loi = f"HTTP {r.status_code}: {(r.text or '')[:200]}"
+            except Exception:
+                ly_do_loi = f"HTTP {r.status_code}"
             break
-    except Exception:
-        pass
+    except Exception as _e_mst:
+        ly_do_loi = f"Lỗi kết nối: {str(_e_mst)[:150]}"
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
 
@@ -32705,7 +32714,10 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         conn.commit()
     finally:
         conn.close()
-    return {"trang_thai": trang_thai_goc, "canh_bao": canh_bao}
+    ket_qua = {"trang_thai": trang_thai_goc, "canh_bao": canh_bao}
+    if ly_do_loi:
+        ket_qua["ly_do_loi"] = ly_do_loi
+    return ket_qua
 
 
 @app.get("/api/export-excel/{cid}")
@@ -34130,11 +34142,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         _tlog(f"[{nhan}] bắt đầu dò tình trạng MST: 0/{tong} đối tác khác nhau...")
         import concurrent.futures as _cf_mst
         xong = 0
+        vi_du_loi = None   # lưu lại 1 LÝ DO LỖI THẬT cụ thể đầu tiên gặp phải, để chẩn đoán
         with _cf_mst.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
             futs = [ex.submit(_lay_trang_thai_mst_cached, mst) for mst in can_tra]
             for fut in _cf_mst.as_completed(futs):
                 try:
-                    fut.result()
+                    kq_1 = fut.result()
+                    if vi_du_loi is None and kq_1.get("ly_do_loi"):
+                        vi_du_loi = kq_1["ly_do_loi"]
                 except Exception:
                     pass
                 xong += 1
@@ -34144,8 +34159,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             1 for mst in can_tra
             if not (_mst_status_local.get(_chuan_mst(mst)[:10]) or {}).get("trang_thai"))
         if so_chua_co:
+            ly_do_txt = f" — VÍ DỤ LỖI GẶP PHẢI: {vi_du_loi}" if vi_du_loi else ""
             _tlog(f"[{nhan}] xong {tong}/{tong} lượt dò — {so_chua_co} MST chưa lấy được tình trạng "
-                  f"(hết ngân sách thời gian/lỗi mạng), sẽ tự bổ sung ở lần xuất Excel sau")
+                  f"(hết ngân sách thời gian/lỗi mạng), sẽ tự bổ sung ở lần xuất Excel sau{ly_do_txt}")
         else:
             _tlog(f"[{nhan}] đã dò xong tình trạng MST cho cả {tong} đối tác.")
 
@@ -34326,7 +34342,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     hdr2 = ["STT", "Ký hiệu mẫu", "Ký hiệu HĐ", "Số hóa đơn", "Ngày lập",
             "Tên người mua", "MST người mua", "Mặt hàng",
             "Doanh số bán chưa thuế", "Thuế GTGT", "Trạng thái", "Kết quả",
-            "Thành tiền USD", "Tỷ giá", "Trạng thái MST"]
+            "Thành tiền USD", "Tỷ giá"]
     ws.append(hdr2)
     hrow = ws.max_row
     for c in range(1, len(hdr2) + 1):
@@ -34367,10 +34383,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             groups[g].append((r, raw, tt, kq, info, (key, val)))
             bt["ds"] += val["ds"]; bt["thue"] += val["thue"]
 
-    _prefetch_trang_thai_mst(
-        "BK Bán ra",
-        ((info_g["mst_nmua"] if info_g and tsdata_g else r_g["nmmst"]) or "KL"
-         for glist_g in groups.values() for (r_g, _raw_g, _tt_g, _kq_g, info_g, tsdata_g) in glist_g))
+    # LƯU Ý: KHÔNG dò tình trạng MST cho "BK Bán ra" — theo yêu cầu người dùng
+    # ("bảng kê đầu ra không cần phải tra tình trạng mst chỉ cần bk mua vào
+    # thôi"), vì rủi ro thực tế (khấu trừ thuế GTGT đầu vào) chỉ liên quan tới
+    # MST của NHÀ CUNG CẤP (đầu vào), không phải của khách mua hàng (đầu ra).
 
     nhom_label = {
         "KCT": "1. Hàng hóa, dịch vụ không chịu thuế GTGT (KCT)",
@@ -34402,36 +34418,31 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 # dùng để quy đổi ra cột Doanh số/Thuế (đã là VNĐ) ở trên.
                 usd_out = _to_num(val.get("ds_nt")) if info.get("tygia") else ""
                 tygia_out = info.get("tygia") or ""
-                mst_kh = info["mst_nmua"] or "KL"
-                mst_info_kh = _lay_trang_thai_mst_cached(mst_kh)
                 ws.append([stt, info["khmshdon"], info["khhdon"], info["shdon"],
-                           ngay, info["ten_nmua"] or "Khách lẻ", mst_kh,
+                           ngay, info["ten_nmua"] or "Khách lẻ", info["mst_nmua"] or "KL",
                            info["mat_hang"], _to_num(ds), _to_num(thue), tt, kq,
-                           usd_out, tygia_out, mst_info_kh["trang_thai"]])
+                           usd_out, tygia_out])
             else:
                 ds = _to_num(r["tgtcthue"]) or 0
                 thue = _to_num(r["tgtthue"]) or 0
                 dang_nhap_ok_row = bool(client and client.token and not getattr(client, "_token_dead", False))
                 mat_hang_txt = ("(Cả hóa đơn — không tách dòng hàng)" if (dang_nhap_ok_row and ds)
                                 else "(chưa lấy được file XML)")
-                mst_kh = r["nmmst"] or "KL"
-                mst_info_kh = _lay_trang_thai_mst_cached(mst_kh)
                 ws.append([stt, "1", r["khhdon"], r["shdon"], ngay,
-                           "", mst_kh, mat_hang_txt,
-                           ds, thue, tt, kq, "", "", mst_info_kh["trang_thai"]])
-            _to_do_dong_neu_canh_bao(ws, ws.max_row, len(hdr2), mst_info_kh["canh_bao"])
+                           "", r["nmmst"] or "KL", mat_hang_txt,
+                           ds, thue, tt, kq, "", ""])
             sub_ds += ds if isinstance(ds, (int, float)) else 0
             sub_thue += thue if isinstance(thue, (int, float)) else 0
         ws.append(["", "", "", "", "", "", "", "Tổng nhóm",
-                   _to_num(sub_ds), _to_num(sub_thue), "", "", "", "", ""])
-        for c in range(1, 16):
+                   _to_num(sub_ds), _to_num(sub_thue), "", "", "", ""])
+        for c in range(1, 15):
             ws.cell(ws.max_row, c).font = bold
         grand_ds += sub_ds; grand_thue += sub_thue
 
     ws.append([])
     ws.append(["", "", "", "", "", "", "", "TỔNG CỘNG",
-               _to_num(grand_ds), _to_num(grand_thue), "", "", "", "", ""])
-    for c in range(1, 16):
+               _to_num(grand_ds), _to_num(grand_thue), "", "", "", ""])
+    for c in range(1, 15):
         ws.cell(ws.max_row, c).font = Font(bold=True, color="C00000", name="Times New Roman")
     autofit(ws)
     format_so(ws)
