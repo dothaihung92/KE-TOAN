@@ -244,6 +244,34 @@ print("PASS 9b: gặp 429 (giới hạn tốc độ, đúng ca thật ~830/880 d
       "API thật để né giới hạn tốc độ ngay từ đầu.")
 _fake_requests.next_responses = None
 
+# Test 9c (ca thật người dùng báo tiếp — QUAN TRỌNG): 429 do HẾT HẠN MỨC GÓI (free
+# tier XInvoice) — đúng NGUYÊN VĂN lỗi thật người dùng gặp: "Exceeded free tier
+# limit. Please try again later or upgrade your plan." — PHẢI nhận diện ra đây KHÁC
+# với 429 giới hạn tốc độ tạm thời (Test 9b): KHÔNG chờ+thử lại (chờ vài giây không
+# giải quyết được hạn mức theo ngày/tháng, chỉ tốn thêm thời gian vô ích), thất bại
+# NGAY, và ly_do_loi phải ghi rõ "HẾT HẠN MỨC GÓI" để người dùng tự biết cần đợi gói
+# làm mới hoặc nâng cấp, KHÔNG PHẢI do "hết hạn"/sai client-id-api-key.
+_fake_requests.calls.clear()
+_fake_time.sleeps.clear()
+_fake_requests.next_exc = None
+_fake_requests.next_status = 429
+_fake_requests.next_data = {"success": False,
+                            "error": "Exceeded free tier limit. Please try again later or upgrade your plan."}
+dem_loi_9c = [0]
+r9c = _tra_cuu_trang_thai_mst("0388887777", timeout=1, so_lan_that_bai_lien_tiep=dem_loi_9c)
+assert r9c["canh_bao"] is None
+assert len(_fake_requests.calls) == 1, (
+    f"429 HẾT HẠN MỨC GÓI KHÔNG được chờ+thử lại (vô ích, hạn mức tính theo ngày/tháng) — phải thất "
+    f"bại ngay ở lần gọi đầu tiên — got {len(_fake_requests.calls)} lượt gọi")
+assert dem_loi_9c[0] == 1, "Vẫn phải tính vào bộ đếm lỗi liên tiếp để sớm dừng gọi mạng cho các MST còn lại"
+assert "HẾT HẠN MỨC GÓI" in (r9c.get("ly_do_loi") or ""), (
+    f"ly_do_loi phải ghi rõ 'HẾT HẠN MỨC GÓI' (khác hẳn 'hết hạn'/sai key) để người dùng tự biết đúng "
+    f"nguyên nhân cần đợi gói làm mới hoặc nâng cấp trên xinvoice.vn — got {r9c}")
+print("PASS 9c: 429 do HẾT HẠN MỨC GÓI (free tier, đúng nguyên văn lỗi thật người dùng gặp) -> nhận "
+      "diện đúng, KHÔNG chờ+thử lại vô ích, thất bại ngay, ly_do_loi ghi rõ nguyên nhân là hết hạn "
+      "mức gói (không phải hết hạn/sai key).")
+_fake_requests.next_status = 200   # trả về trạng thái mặc định cho các test sau
+
 # Test 10: cache HIT (vừa tra ở Test 9) -> KHÔNG gọi mạng lại, trả đúng kết quả đã lưu.
 _fake_requests.calls.clear()
 r10 = _tra_cuu_trang_thai_mst("0315696133", timeout=1)

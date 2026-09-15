@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.255"
+APP_BUILD = "2026-09-15.256"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32684,10 +32684,16 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # mạng/tường lửa) thay vì chỉ thấy trống không rõ vì sao.
     ly_do_loi = None
     try:
-        # Thử tối đa 2 lần: lần 2 CHỈ khi gặp 429 (giới hạn tốc độ) — chờ
-        # đúng theo Retry-After (nếu API có trả) rồi thử lại ĐÚNG 1 lần,
-        # thay vì coi 429 là lỗi hẳn rồi bỏ cuộc luôn (429 chỉ là tạm thời,
-        # khác hẳn 401/404 — lỗi thật sự).
+        # Thử tối đa 2 lần: lần 2 CHỈ khi gặp 429 do GIỚI HẠN TỐC ĐỘ TẠM THỜI
+        # (chờ đúng theo Retry-After rồi thử lại ĐÚNG 1 lần) — KHÁC HẲN 429
+        # do HẾT HẠN MỨC GÓI (vd free tier của XInvoice: "Exceeded free tier
+        # limit. Please try again later or upgrade your plan" — xác nhận
+        # đúng ca thật người dùng gặp) — hạn mức gói tính theo ngày/tháng,
+        # chờ vài giây không giải quyết được gì, chỉ tổ tốn thêm thời gian
+        # vô ích — nhận diện qua từ khoá trong nội dung lỗi trả về để bỏ
+        # qua bước chờ+thử lại, thất bại NGAY để bộ đếm lỗi liên tiếp
+        # (so_lan_that_bai_lien_tiep) sớm dừng hẳn việc gọi mạng cho các
+        # MST còn lại trong lượt này.
         for lan_thu in range(2):
             r = requests.get(f"https://api.xinvoice.vn/gdt-api/tax-payer/{mst_c}",
                              headers={"Accept": "application/json",
@@ -32698,18 +32704,29 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
                 trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(str(data.get("status") or ""))
                 thanh_cong = True
                 break
-            if r.status_code == 429 and lan_thu == 0:
-                ra = (r.headers or {}).get("Retry-After")
+            if r.status_code == 429:
                 try:
-                    cho = min(max(float(ra), 0), 10) if ra else 2
+                    _body_429 = r.text or ""
                 except Exception:
-                    cho = 2
-                time.sleep(cho)
-                continue
-            # status khác 200 (401 sai client-id/api-key, 404 không có MST,
-            # hoặc vẫn 429 sau khi đã chờ+thử lại) -> coi là 1 lượt lỗi
-            # (tính vào bộ đếm lỗi liên tiếp bên dưới), KHÔNG suy đoán tình
-            # trạng.
+                    _body_429 = ""
+                _het_han_muc_goi = any(kw in _khong_dau(_body_429) for kw in
+                                       ("free tier", "quota", "upgrade your plan", "vuot han muc",
+                                        "het han muc"))
+                if lan_thu == 0 and not _het_han_muc_goi:
+                    ra = (r.headers or {}).get("Retry-After")
+                    try:
+                        cho = min(max(float(ra), 0), 10) if ra else 2
+                    except Exception:
+                        cho = 2
+                    time.sleep(cho)
+                    continue
+                ly_do_loi = (f"HTTP 429 (HẾT HẠN MỨC GÓI API — cần đợi gói tự làm mới hoặc nâng "
+                            f"cấp gói trên xinvoice.vn): {_body_429[:200]}" if _het_han_muc_goi
+                            else f"HTTP 429: {_body_429[:200]}")
+                break
+            # status khác 200/429 (401 sai client-id/api-key, 404 không có
+            # MST...) -> coi là 1 lượt lỗi (tính vào bộ đếm lỗi liên tiếp bên
+            # dưới), KHÔNG suy đoán tình trạng.
             try:
                 ly_do_loi = f"HTTP {r.status_code}: {(r.text or '')[:200]}"
             except Exception:
