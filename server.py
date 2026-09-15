@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-14.243"
+APP_BUILD = "2026-09-15.244"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6864,6 +6864,48 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
         msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
 
 
+def _thu_lai_tai_file_loi(tai_lai_fn, loi_ban_dau, so_lan_toi_da=8, canh_bao_fn=None,
+                          nen_dung_fn=None, sleep_fn=time.sleep):
+    """Thử lại NHIỀU LƯỢT việc tải các file (XML hóa đơn) bị lỗi ở lượt đầu,
+    CHỜ TĂNG DẦN giữa các lượt (5s, 10s, 15s... tối đa 30s), cho tới khi tải
+    đủ HẲN (danh sách lỗi rỗng) hoặc hết so_lan_toi_da lượt thử hoặc
+    nen_dung_fn() báo phải dừng ngay (token hết hạn/người dùng hủy giữa
+    chừng) — đúng yêu cầu người dùng "phải tải đầy đủ file, không được
+    thiếu file nào trong quá trình tra cứu". TRƯỚC ĐÂY chỉ thử lại ĐÚNG 1
+    LƯỢT rồi bỏ cuộc luôn dù còn thiếu (thường do bị chặn tốc độ tạm thời
+    giữa chừng, chỉ cần chờ thêm/thử thêm vài lượt là qua), bắt người dùng
+    phải tự nhận ra còn thiếu file rồi tự bấm tra cứu lại (chế độ "Chậm &
+    an toàn") mới tải nốt được.
+
+    tai_lai_fn(ds_loi, lan_thu) -> (so_thanh_cong, ds_loi_moi, so_bo_qua,
+    so_khong_ma): hàm THẬT SỰ gọi mạng để tải lại đúng danh sách hóa đơn còn
+    lỗi ở lượt trước — CÙNG HÌNH DẠNG kết quả với _tai_nhieu_file() trong
+    _run_fetch_job, kèm số lần thử hiện tại (để đặt tên nhãn tiến độ).
+    canh_bao_fn(lan_thu, so_giay_cho, ds_loi_hien_tai): gọi TRƯỚC khi chờ ở
+    mỗi lượt, để bên gọi tự hiển thị cảnh báo tiến độ theo đúng định dạng
+    UI hiện có (không hard-code chuỗi thông báo trong hàm thuần này).
+    Tách thành hàm THUẦN (không phụ thuộc client/msg/FETCH_JOBS trực tiếp)
+    để dễ kiểm thử chính sách thử lại (số lượt, thời gian chờ, điều kiện
+    dừng sớm) độc lập với phần gọi mạng thật.
+
+    Trả về (tong_so_thanh_cong, loi_con_lai, tong_bo_qua, tong_khong_ma,
+    so_lan_da_thu)."""
+    loi = list(loi_ban_dau)
+    tong_ok = tong_bo_qua = tong_khong_ma = 0
+    lan = 0
+    while loi and lan < so_lan_toi_da and not (nen_dung_fn and nen_dung_fn()):
+        lan += 1
+        cho = min(5 * lan, 30)
+        if canh_bao_fn:
+            canh_bao_fn(lan, cho, loi)
+        sleep_fn(cho)
+        ok_n, loi, bo_qua_n, khong_ma_n = tai_lai_fn(loi, lan)
+        tong_ok += ok_n
+        tong_bo_qua += bo_qua_n
+        tong_khong_ma += khong_ma_n
+    return tong_ok, loi, tong_bo_qua, tong_khong_ma, lan
+
+
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
 def _run_fetch_job(cid: int, body: dict):
     """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
@@ -7607,19 +7649,30 @@ def _run_fetch_job(cid: int, body: dict):
                                      f"cũ trên máy nhưng vẫn tải lại — lý do cụ thể: "
                                      f"{'; '.join(ly_do_tai_lai_du_co_file[:10])}")
 
-                        # THỬ LẠI 1 LƯỢT các file bị lỗi (thường do bị chặn tốc độ giữa
-                        # chừng) — trước đây KHÔNG hề thử lại nên 1 lần vấp là mất file
-                        # vĩnh viễn dù dữ liệu hóa đơn (bảng) vẫn tải đủ.
-                        if loi_file and not getattr(client, "_token_dead", False):
-                            msg(stage="warn",
-                                text=f"⚠ {loai_txt}{ht_txt}: {len(loi_file)} file tải chưa được, "
-                                     f"đang thử lại... [{_mo_ta_ds_hd_loi(loi_file, loai)}]")
-                            time.sleep(5)
-                            ok_2, loi_file, bo_qua_2, khong_ma_2 = _tai_nhieu_file(loi_file, "Thử lại file")
-                            with khoa_tonghop:
-                                file_saved += ok_2
-                            bo_qua += bo_qua_2
-                            khong_ma += khong_ma_2
+                        # THỬ LẠI NHIỀU LƯỢT các file bị lỗi (thường do bị chặn tốc độ
+                        # giữa chừng), CHỜ TĂNG DẦN giữa các lượt — cho tới khi tải đủ
+                        # HẲN hoặc hết số lượt thử — đúng yêu cầu người dùng "phải tải
+                        # đầy đủ file, không được thiếu file nào trong quá trình tra
+                        # cứu". TRƯỚC ĐÂY chỉ thử lại ĐÚNG 1 LƯỢT rồi bỏ cuộc luôn dù
+                        # còn thiếu, bắt người dùng phải tự nhận ra rồi tự bấm tra cứu
+                        # lại (chế độ "Chậm & an toàn") mới tải nốt được số còn thiếu.
+                        # Chính sách thử lại (số lượt/thời gian chờ) nằm trong hàm
+                        # THUẦN _thu_lai_tai_file_loi (dễ kiểm thử độc lập).
+                        SO_LAN_THU_FILE = 8
+                        ok_n, loi_file, bo_qua_n, khong_ma_n, lan_thu_file = _thu_lai_tai_file_loi(
+                            lambda ds, lan: _tai_nhieu_file(ds, f"Thử lại file (lần {lan})"),
+                            loi_file, so_lan_toi_da=SO_LAN_THU_FILE,
+                            canh_bao_fn=lambda lan, cho, ds: msg(
+                                stage="warn",
+                                text=f"⚠ {loai_txt}{ht_txt}: {len(ds)} file tải chưa được "
+                                     f"(lần thử {lan}/{SO_LAN_THU_FILE}) — đang chờ {cho}s "
+                                     f"rồi thử lại... [{_mo_ta_ds_hd_loi(ds, loai)}]"),
+                            nen_dung_fn=lambda: (getattr(client, "_token_dead", False)
+                                                 or bool((FETCH_JOBS.get(cid) or {}).get("cancel"))))
+                        with khoa_tonghop:
+                            file_saved += ok_n
+                        bo_qua += bo_qua_n
+                        khong_ma += khong_ma_n
 
                         if bo_qua:
                             msg(stage="info",
