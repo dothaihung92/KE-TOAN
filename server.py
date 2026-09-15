@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.250"
+APP_BUILD = "2026-09-15.251"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34097,7 +34097,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             for c in range(1, n_cols + 1):
                 ws_.cell(row_idx, c).fill = _mst_do_nhat
 
-    def _prefetch_trang_thai_mst(danh_sach_mst, so_luong_song_song=3):
+    def _prefetch_trang_thai_mst(nhan, danh_sach_mst, so_luong_song_song=3):
         """Tra TRƯỚC tình trạng NHIỀU MST CÙNG LÚC (song song, mặc định 3
         luồng thay phiên nhau — theo đúng yêu cầu người dùng: "có thể kiểm
         tra nhiều luồng được đẩy 3 luồng kiểm tra luân phiên") thay vì tra
@@ -34108,7 +34108,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         mỗi lượt gọi thật — vẫn né giới hạn tốc độ API, chỉ là 3 luồng cùng
         làm việc đó song song thay vì 1 luồng làm lần lượt). Đổ thẳng kết
         quả vào _mst_status_local — các bước dựng dòng Excel sau đó chỉ cần
-        đọc lại (cache hit, không tốn thêm thời gian)."""
+        đọc lại (cache hit, không tốn thêm thời gian).
+
+        nhan: tên hiển thị trong log tiến độ (vd "BK Mua vào"/"BK Bán ra") —
+        BÁO TIẾN ĐỘ qua _tlog() mỗi 10 MST xong (và lúc bắt đầu/kết thúc) để
+        người dùng biết phần mềm đang làm gì và còn bao nhiêu, thay vì màn
+        hình đứng im không rõ đang chạy hay bị treo (đúng yêu cầu người
+        dùng: "hãy hiện thông tin quá trình đối chiếu và còn bao nhiêu để
+        người dùng biết")."""
         can_tra = []
         da_gom = set()
         for mst in danh_sach_mst:
@@ -34119,14 +34126,28 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             can_tra.append(mst)
         if not can_tra:
             return
+        tong = len(can_tra)
+        _tlog(f"[{nhan}] bắt đầu dò tình trạng MST: 0/{tong} đối tác khác nhau...")
         import concurrent.futures as _cf_mst
+        xong = 0
         with _cf_mst.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
             futs = [ex.submit(_lay_trang_thai_mst_cached, mst) for mst in can_tra]
-            for fut in futs:
+            for fut in _cf_mst.as_completed(futs):
                 try:
                     fut.result()
                 except Exception:
                     pass
+                xong += 1
+                if xong % 10 == 0 or xong == tong:
+                    _tlog(f"[{nhan}] đang dò tình trạng MST: {xong}/{tong} (còn {tong - xong})")
+        so_chua_co = sum(
+            1 for mst in can_tra
+            if not (_mst_status_local.get(_chuan_mst(mst)[:10]) or {}).get("trang_thai"))
+        if so_chua_co:
+            _tlog(f"[{nhan}] xong {tong}/{tong} lượt dò — {so_chua_co} MST chưa lấy được tình trạng "
+                  f"(hết ngân sách thời gian/lỗi mạng), sẽ tự bổ sung ở lần xuất Excel sau")
+        else:
+            _tlog(f"[{nhan}] đã dò xong tình trạng MST cho cả {tong} đối tác.")
 
     # ----- BẢNG KÊ MUA VÀO (mỗi hóa đơn 1 dòng + cột Mặt hàng) -----
     ws = wb.create_sheet("BK Mua vào")
@@ -34145,7 +34166,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     rows_mua_vao = sorted(
         (r for r in rows if r["loai"] == "purchase"),
         key=lambda r: str(r["tdlap"] or ""))
-    _prefetch_trang_thai_mst(r["nbmst"] for r in rows_mua_vao if _hd_dung_cty(r, "purchase"))
+    _prefetch_trang_thai_mst(
+        "BK Mua vào", (r["nbmst"] for r in rows_mua_vao if _hd_dung_cty(r, "purchase")))
     for r in rows_mua_vao:
         if not _hd_dung_cty(r, "purchase"):   # loại HĐ lẫn của công ty khác
             continue
@@ -34285,6 +34307,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     ws.freeze_panes = "C2"
     if ws.max_row > 1:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(hdr1))}{ws.max_row}"
+    _tlog(f"xong sheet BK Mua vào ({stt} dòng)")
 
     # ----- BẢNG KÊ BÁN RA (form BKDAURA chuẩn 01-1/GTGT, tách theo thuế suất) -----
     from openpyxl.styles import Border, Side, Alignment as _Al
@@ -34345,8 +34368,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             bt["ds"] += val["ds"]; bt["thue"] += val["thue"]
 
     _prefetch_trang_thai_mst(
-        (info_g["mst_nmua"] if info_g and tsdata_g else r_g["nmmst"]) or "KL"
-        for glist_g in groups.values() for (r_g, _raw_g, _tt_g, _kq_g, info_g, tsdata_g) in glist_g)
+        "BK Bán ra",
+        ((info_g["mst_nmua"] if info_g and tsdata_g else r_g["nmmst"]) or "KL"
+         for glist_g in groups.values() for (r_g, _raw_g, _tt_g, _kq_g, info_g, tsdata_g) in glist_g))
 
     nhom_label = {
         "KCT": "1. Hàng hóa, dịch vụ không chịu thuế GTGT (KCT)",
@@ -34419,8 +34443,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # Việc 9: thêm Filter từ dòng header tới cuối
     if ws.max_row > hrow:
         ws.auto_filter.ref = f"A{hrow}:{get_column_letter(ws.max_column)}{ws.max_row}"
+    _tlog(f"xong sheet BK Bán ra ({stt} dòng)")
 
     # ===== SHEET ĐỐI CHIẾU (việc 4): so Chi tiết vs Bảng kê =====
+    _tlog("đang dựng sheet Đối chiếu...")
     ws = wb.create_sheet("Đối chiếu")
     bold = Font(bold=True)
     ws.append(["BẢNG ĐỐI CHIẾU TỔNG HỢP (tự cập nhật khi sửa số liệu các sheet)"])

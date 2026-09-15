@@ -83,10 +83,12 @@ def _fake_tra_cuu(mst, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
     return {"trang_thai": "Đang hoạt động", "canh_bao": False}
 
 
+_tlog_msgs = []
 ns['_tra_cuu_trang_thai_mst'] = _fake_tra_cuu
 ns['_mst_status_local'] = {}
 ns['_mst_fail_counter'] = [0]
 ns['_mst_bat_dau'] = time.time()
+ns['_tlog'] = lambda m: _tlog_msgs.append(m)
 
 exec(extract_nested_fn('_lay_trang_thai_mst_cached'), ns)
 exec(extract_nested_fn('_prefetch_trang_thai_mst'), ns)
@@ -114,9 +116,10 @@ def _chong_lan(intervals):
 # nhau (bằng chứng trực tiếp là đa luồng thật, không phải giả vờ). -----
 _call_intervals.clear()
 _call_count["n"] = 0
+_tlog_msgs.clear()
 ds_mst = [f"03{i:08d}" for i in range(9)]
 t_bd = time.time()
-_prefetch_trang_thai_mst(ds_mst, so_luong_song_song=3)
+_prefetch_trang_thai_mst("BK Test", ds_mst, so_luong_song_song=3)
 t_kt = time.time()
 thoi_gian_thuc_te = t_kt - t_bd
 thoi_gian_tuan_tu = len(ds_mst) * DO_TRE_GIAY
@@ -134,6 +137,17 @@ print(f"PASS 1: 9 MST khác nhau tra SONG SONG (3 luồng) mất {thoi_gian_thuc
       f"nhanh hơn hẳn tuần tự (~{thoi_gian_tuan_tu:.2f}s), có lượt chồng lấn thời gian thật — "
       "đúng yêu cầu người dùng.")
 
+# ----- Test 1b (đúng yêu cầu người dùng "hãy hiện thông tin quá trình đối chiếu
+# và còn bao nhiêu để người dùng biết"): phải có log báo tiến độ dạng "đã
+# xong/tổng" ở lúc bắt đầu (0/9) và lúc kết thúc (9/9), kèm tên nhãn để phân
+# biệt đang ở bước nào (BK Mua vào/BK Bán ra). -----
+assert any("0/9" in m and "BK Test" in m for m in _tlog_msgs), (
+    f"Phải có log báo bắt đầu '0/9' kèm tên bước — got {_tlog_msgs}")
+assert any("9/9" in m and "BK Test" in m for m in _tlog_msgs), (
+    f"Phải có log báo hoàn tất '9/9' kèm tên bước — got {_tlog_msgs}")
+print("PASS 1b: có log báo tiến độ dạng 'đã xong/tổng' (0/9 lúc bắt đầu, 9/9 lúc xong) kèm tên bước, "
+      "đúng yêu cầu người dùng 'hiện thông tin quá trình và còn bao nhiêu để người dùng biết'.")
+
 # ----- Test 2 (không hồi quy — quan trọng): DANH SÁCH có MST TRÙNG NHAU nhiều
 # lần (đúng thực tế 1 nhà cung cấp xuất hóa đơn nhiều lần) -> chỉ tra ĐÚNG 1 LẦN
 # cho mỗi MST duy nhất, không tra trùng lặp dù đưa vào danh sách nhiều lần. -----
@@ -141,7 +155,7 @@ _call_intervals.clear()
 _call_count["n"] = 0
 ns['_mst_status_local'].clear()
 ds_trung = ["0311112222"] * 5 + ["0322223333"] * 3
-_prefetch_trang_thai_mst(ds_trung, so_luong_song_song=3)
+_prefetch_trang_thai_mst("BK Test", ds_trung, so_luong_song_song=3)
 assert _call_count["n"] == 2, f"Chỉ được tra ĐÚNG 1 lần cho mỗi MST duy nhất (2 MST khác nhau) — got {_call_count['n']}"
 print("PASS 2: MST trùng lặp nhiều lần trong danh sách (1 NCC xuất nhiều hóa đơn) -> chỉ tra đúng 1 "
       "lần cho mỗi MST duy nhất, không lãng phí lượt gọi.")
@@ -152,13 +166,13 @@ _call_intervals.clear()
 _call_count["n"] = 0
 ns['_mst_status_local'].clear()
 ns['_mst_status_local']["0333334444"] = {"trang_thai": "Đang hoạt động", "canh_bao": False}
-_prefetch_trang_thai_mst(["0333334444", "0344445555"], so_luong_song_song=3)
+_prefetch_trang_thai_mst("BK Test", ["0333334444", "0344445555"], so_luong_song_song=3)
 assert _call_count["n"] == 1, f"MST đã có sẵn trong cache cục bộ KHÔNG được tra lại — got {_call_count['n']}"
 print("PASS 3: MST đã có sẵn trong cache cục bộ (_mst_status_local) -> không tra lại, chỉ tra MST mới.")
 
 # ----- Test 4 (an toàn): danh sách rỗng -> không tạo thread pool, không lỗi. -----
 _call_count["n"] = 0
-_prefetch_trang_thai_mst([], so_luong_song_song=3)
+_prefetch_trang_thai_mst("BK Test", [], so_luong_song_song=3)
 assert _call_count["n"] == 0
 print("PASS 4: danh sách rỗng -> không làm gì, không lỗi.")
 
