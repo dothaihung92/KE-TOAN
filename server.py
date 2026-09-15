@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.260"
+APP_BUILD = "2026-09-15.261"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34357,26 +34357,41 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         _tlog(f"[{nhan}] bắt đầu dò tình trạng MST: 0/{tong} đối tác khác nhau...")
         import concurrent.futures as _cf_mst
         xong = 0
-        vi_du_loi = None   # lưu lại 1 LÝ DO LỖI THẬT cụ thể đầu tiên gặp phải, để chẩn đoán
         with _cf_mst.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
             futs = [ex.submit(_lay_trang_thai_mst_cached, mst) for mst in can_tra]
             for fut in _cf_mst.as_completed(futs):
                 try:
-                    kq_1 = fut.result()
-                    if vi_du_loi is None and kq_1.get("ly_do_loi"):
-                        vi_du_loi = kq_1["ly_do_loi"]
+                    fut.result()
                 except Exception:
                     pass
                 xong += 1
                 if xong % 10 == 0 or xong == tong:
                     _tlog(f"[{nhan}] đang dò tình trạng MST: {xong}/{tong} (còn {tong - xong})")
-        so_chua_co = sum(
-            1 for mst in can_tra
-            if not (_mst_status_local.get(_chuan_mst(mst)[:10]) or {}).get("trang_thai"))
-        if so_chua_co:
-            ly_do_txt = f" — VÍ DỤ LỖI GẶP PHẢI: {vi_du_loi}" if vi_du_loi else ""
-            _tlog(f"[{nhan}] xong {tong}/{tong} lượt dò — {so_chua_co} MST chưa lấy được tình trạng "
-                  f"(hết ngân sách thời gian/lỗi mạng), sẽ tự bổ sung ở lần xuất Excel sau{ly_do_txt}")
+        # Liệt kê ĐẦY ĐỦ từng MST CHƯA lấy được tình trạng KÈM lý do cụ thể
+        # của CHÍNH MST đó (thay vì chỉ 1 "VÍ DỤ LỖI GẶP PHẢI" duy nhất như
+        # trước — không đủ để biết TẤT CẢ các MST còn lại có cùng 1 nguyên
+        # nhân hay không, đúng câu hỏi người dùng đã hỏi lại nhiều lần "sao
+        # vẫn còn?"/"thực tế dò chỉ còn 4 mst thôi?" khi không rõ MST nào
+        # đang bị gì) — giới hạn hiện tối đa 10 MST đầu tiên trong log để
+        # không tràn màn hình nếu số lượng quá lớn.
+        mst_chua_co = []
+        da_liet_ke = set()
+        for mst in can_tra:
+            key = _chuan_mst(mst)[:10]
+            if key in da_liet_ke:
+                continue
+            info = _mst_status_local.get(key) or {}
+            if not info.get("trang_thai"):
+                da_liet_ke.add(key)
+                mst_chua_co.append((mst, info.get("ly_do_loi") or "không rõ lý do"))
+        if mst_chua_co:
+            _TOI_DA_HIEN = 10
+            chi_tiet = "; ".join(f"{mst} ({ly_do})" for mst, ly_do in mst_chua_co[:_TOI_DA_HIEN])
+            con_lai = len(mst_chua_co) - _TOI_DA_HIEN
+            if con_lai > 0:
+                chi_tiet += f"; ... và {con_lai} MST khác"
+            _tlog(f"[{nhan}] xong {tong}/{tong} lượt dò — {len(mst_chua_co)} MST chưa lấy được tình "
+                  f"trạng, sẽ tự bổ sung ở lần xuất Excel sau. CHI TIẾT TỪNG MST: {chi_tiet}")
         else:
             _tlog(f"[{nhan}] đã dò xong tình trạng MST cho cả {tong} đối tác.")
 

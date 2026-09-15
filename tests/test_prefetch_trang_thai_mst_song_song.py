@@ -176,4 +176,35 @@ _prefetch_trang_thai_mst("BK Test", [], so_luong_song_song=3)
 assert _call_count["n"] == 0
 print("PASS 4: danh sách rỗng -> không làm gì, không lỗi.")
 
+# ----- Test 5 (MỚI — đúng câu hỏi người dùng hỏi đi hỏi lại "sao vẫn còn?"/
+# "thực tế dò chỉ còn 4 mst thôi?" khi thấy log báo N MST chưa dò được mà
+# không rõ MST nào đang bị lỗi gì): log tổng kết PHẢI liệt kê ĐẦY ĐỦ TỪNG
+# MST chưa lấy được tình trạng KÈM lý do cụ thể của CHÍNH MST đó — khác hẳn
+# trước đây chỉ in 1 "VÍ DỤ LỖI GẶP PHẢI" DUY NHẤT (không đủ để biết CÁC MST
+# còn lại có cùng nguyên nhân hay không, hay mỗi MST bị 1 lỗi khác nhau). -----
+def _fake_tra_cuu_hon_hop(mst, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
+    if mst.endswith("1"):
+        return {"trang_thai": "Đang hoạt động", "canh_bao": False}
+    if mst.endswith("2"):
+        return {"trang_thai": "", "canh_bao": None, "ly_do_loi": f"LY DO RIENG CUA {mst}"}
+    return {"trang_thai": "", "canh_bao": None}   # không có ly_do_loi cụ thể
+
+
+ns['_tra_cuu_trang_thai_mst'] = _fake_tra_cuu_hon_hop   # late-binding qua ns (globals của hàm đã exec)
+ns['_mst_status_local'].clear()
+_tlog_msgs.clear()
+ds_hon_hop = ["0300000001", "0300000002", "0300000003"]
+_prefetch_trang_thai_mst("BK Hon Hop", ds_hon_hop, so_luong_song_song=3)
+dong_ket = next((m for m in _tlog_msgs if "CHI TIẾT TỪNG MST" in m), None)
+assert dong_ket is not None, f"Phải có dòng log liệt kê CHI TIẾT TỪNG MST chưa dò được — got {_tlog_msgs}"
+assert "0300000002" in dong_ket and "LY DO RIENG CUA 0300000002" in dong_ket, (
+    f"Phải liệt kê MST 0300000002 KÈM đúng lý do riêng của chính MST đó — got {dong_ket}")
+assert "0300000003" in dong_ket and "không rõ lý do" in dong_ket, (
+    f"MST không có ly_do_loi cụ thể vẫn phải liệt kê, kèm 'không rõ lý do' — got {dong_ket}")
+assert "0300000001" not in dong_ket, (
+    f"MST đã tra THÀNH CÔNG (có trạng thái) KHÔNG được liệt kê vào danh sách chưa dò được — got {dong_ket}")
+print("PASS 5: log tổng kết liệt kê ĐẦY ĐỦ từng MST chưa lấy được tình trạng KÈM lý do cụ thể của "
+      "chính MST đó, thay vì chỉ 1 ví dụ lỗi duy nhất — giúp chẩn đoán rõ ràng khi người dùng hỏi lại "
+      "'sao vẫn còn?'.")
+
 print("\nALL DONE")
