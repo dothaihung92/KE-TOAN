@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.254"
+APP_BUILD = "2026-09-15.255"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1387,6 +1387,24 @@ def init_db():
         checked_at TEXT
     );
     """)
+    # Migration MỘT LẦN (đánh dấu qua app_settings, không chạy lại mỗi lần
+    # khởi động): xoá các dòng mst_status_cache có canh_bao=NULL đã lỡ ghi
+    # từ BẢN CŨ (trước khi sửa _tra_cuu_trang_thai_mst chỉ lưu cache khi tra
+    # THẬT SỰ THÀNH CÔNG) — bản cũ lưu cache CẢ KHI THẤT BẠI (lỗi mạng/HTTP
+    # lỗi), khiến MST đó bị "kẹt cứng" ở trạng thái trống suốt 14 ngày dù
+    # code MỚI đã sửa xong (code mới không tự xoá được dữ liệu CŨ đã lỡ ghi
+    # sai từ TRƯỚC lúc cập nhật) — xác nhận đúng ca thật người dùng báo: đã
+    # cập nhật bản có fix nhưng xuất Excel lại vẫn ĐÚNG 34 MST y hệt cũ,
+    # KHÔNG hề thử gọi mạng lại (đọc trúng dòng cache "trống" ghi từ TRƯỚC
+    # khi cập nhật). CHỈ chạy ĐÚNG 1 LẦN (không xoá tiếp ở các lần khởi động
+    # SAU) để không xoá luôn những MST tra THÀNH CÔNG nhưng không phân loại
+    # được tình trạng (cũng có canh_bao=NULL hợp lệ, do code MỚI ghi đúng).
+    if not conn.execute(
+            "SELECT 1 FROM app_settings WHERE key='mst_cache_null_cleanup_done'").fetchone():
+        conn.execute("DELETE FROM mst_status_cache WHERE canh_bao IS NULL")
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('mst_cache_null_cleanup_done', '1') "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     # Migration: thêm cột he_thong nếu DB cũ chưa có
     cols = [r[1] for r in conn.execute("PRAGMA table_info(invoices)").fetchall()]
     if "he_thong" not in cols:
