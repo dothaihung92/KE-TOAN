@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.246"
+APP_BUILD = "2026-09-15.247"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5783,6 +5783,24 @@ def set_thu_muc_nop_to_khai(body: dict = Body(...)):
     folder = (body.get("thu_muc") or "").strip()
     _set_setting("thu_muc_nop_to_khai", folder)
     return {"ok": True, "thu_muc": folder}
+
+
+@app.get("/api/settings/xinvoice-mst-api")
+def get_xinvoice_mst_api():
+    """client-id/api-key để gọi API tra cứu tình trạng hoạt động MST của
+    XInvoice (api.xinvoice.vn/gdt-api/tax-payer) khi xuất Excel — xem
+    _tra_cuu_trang_thai_mst. Đăng ký lấy 2 giá trị này tại xinvoice.vn."""
+    return {"client_id": _get_setting("xinvoice_client_id", ""),
+            "api_key": _get_setting("xinvoice_api_key", "")}
+
+
+@app.post("/api/settings/xinvoice-mst-api")
+def set_xinvoice_mst_api(body: dict = Body(...)):
+    client_id = (body.get("client_id") or "").strip()
+    api_key = (body.get("api_key") or "").strip()
+    _set_setting("xinvoice_client_id", client_id)
+    _set_setting("xinvoice_api_key", api_key)
+    return {"ok": True}
 
 
 @app.get("/api/settings/pin-nop-to-khai")
@@ -32501,13 +32519,12 @@ def _thue_theo_cong_thue(it, items, r):
 _MST_CACHE_NGAY = 14   # số ngày giữ cache tình trạng MST trước khi tra lại
 
 
-def _phan_loai_trang_thai_mst(html):
-    """Phân loại tình trạng hoạt động MST từ nội dung trang tra cứu
-    (masothue.com — theo yêu cầu người dùng: "https://masothue.com/ hãy dùng
-    trang này để tự động dò mst"). DÒ THEO TỪ KHOÁ trong toàn bộ nội dung
-    trang (không phụ thuộc cấu trúc bảng/CSS cụ thể — bền hơn khi trang đổi
-    giao diện), theo ĐÚNG các cụm mô tả tình trạng hoạt động CHÍNH THỨC của
-    Tổng cục Thuế (masothue.com lấy lại dữ liệu từ nguồn này).
+def _phan_loai_trang_thai_mst(mo_ta):
+    """Phân loại tình trạng hoạt động MST từ 1 đoạn mô tả dạng chữ (trường
+    "status" trả về từ API tra cứu MST — xem _tra_cuu_trang_thai_mst). DÒ
+    THEO TỪ KHOÁ trong nội dung (không phụ thuộc định dạng/nguồn cụ thể —
+    bền hơn khi đổi nguồn tra cứu), theo ĐÚNG các cụm mô tả tình trạng hoạt
+    động CHÍNH THỨC của Tổng cục Thuế.
 
     Trả về (trang_thai_hien_thi, canh_bao):
       canh_bao=True  -> đã khóa MST/ngừng hoạt động/chờ xác minh địa chỉ kinh
@@ -32515,10 +32532,9 @@ def _phan_loai_trang_thai_mst(html):
                          cầu: "công ty cần xác minh địa chỉ kinh doanh...
                          hoặc bị khoá mst... thì tô đỏ dòng đó").
       canh_bao=False -> đang hoạt động bình thường, không cảnh báo.
-      canh_bao=None  -> KHÔNG dò được tình trạng (trang lỗi/không có dữ liệu
-                         khớp MST) — KHÔNG suy đoán, không tô đỏ khi thiếu
-                         bằng chứng."""
-    t = _khong_dau(html)
+      canh_bao=None  -> KHÔNG dò được tình trạng (không có dữ liệu khớp MST)
+                         — KHÔNG suy đoán, không tô đỏ khi thiếu bằng chứng."""
+    t = _khong_dau(mo_ta)
     # Thứ tự ưu tiên: các cụm CẢNH BÁO trước (đủ đặc trưng, không lẫn với
     # "dang hoat dong" — vd 'cho xac minh...' vẫn chứa chữ 'hoat dong' nên
     # phải kiểm tra các cụm cảnh báo TRƯỚC khi rơi về mặc định "đang hoạt
@@ -32548,34 +32564,46 @@ def _phan_loai_trang_thai_mst(html):
     return "", None
 
 
-def _tra_cuu_trang_thai_mst(mst, timeout=6, so_lan_that_bai_lien_tiep=None):
-    """Tra cứu tình trạng hoạt động của 1 MST qua trang công khai masothue.com
-    — dùng để cảnh báo khi xuất Excel bảng kê mua vào/bán ra: đối tác đã bị
-    khóa MST/ngừng hoạt động, hoặc đang bị đánh dấu "chờ xác minh tình trạng
-    hoạt động tại địa chỉ đã đăng ký" (dấu hiệu rủi ro thường gặp: hóa đơn
-    của NCC "ma" — không có thật tại địa chỉ đăng ký — ảnh hưởng việc khấu
-    trừ thuế GTGT đầu vào).
+def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None):
+    """Tra cứu tình trạng hoạt động của 1 MST qua API CHÍNH THỨC của XInvoice
+    (api.xinvoice.vn/gdt-api/tax-payer/{mst} — lấy lại dữ liệu Tổng cục Thuế,
+    theo đúng chỉ định của người dùng, thay cho việc đọc HTML masothue.com
+    trước đây) — dùng để cảnh báo khi xuất Excel bảng kê mua vào/bán ra: đối
+    tác đã bị khóa MST/ngừng hoạt động, hoặc đang bị đánh dấu "chờ xác minh
+    tình trạng hoạt động tại địa chỉ đã đăng ký" (dấu hiệu rủi ro thường gặp:
+    hóa đơn của NCC "ma" — không có thật tại địa chỉ đăng ký — ảnh hưởng việc
+    khấu trừ thuế GTGT đầu vào).
+
+    CẦN cấu hình client-id + api-key (đăng ký tại xinvoice.vn) qua
+    /api/settings/xinvoice-mst-api trước khi dùng được — CHƯA cấu hình thì
+    bỏ qua HẲN tính năng này (canh_bao=None, không lỗi, không chặn xuất
+    Excel) — người dùng có thể xuất Excel bình thường mà chưa cần đăng ký
+    ngay, chỉ là chưa có cột "Trạng thái MST".
 
     CHỈ tra cứu THẬT SỰ qua mạng khi CHƯA có cache hoặc cache đã quá
     _MST_CACHE_NGAY ngày — kết quả (kể cả tra cứu thất bại) được lưu vào
-    bảng mst_status_cache, tránh tra lại liên tục cho cùng 1 MST ở mỗi lần
-    xuất Excel (giảm số lượt gọi tới masothue.com — trang CÔNG KHAI của bên
-    thứ 3, không phải API chính thức của Tổng cục Thuế, cần hạn chế gọi dồn
-    dập tránh bị chặn/giới hạn tốc độ).
+    bảng mst_status_cache, tránh gọi API liên tục cho cùng 1 MST ở mỗi lần
+    xuất Excel (giảm số lượt gọi — API có thể tính phí/giới hạn hạn mức
+    theo lượt gọi).
 
     so_lan_that_bai_lien_tiep: list 1 phần tử [count] dùng làm bộ đếm CHUNG
     giữa nhiều lần gọi liên tiếp (vd trong 1 lượt xuất Excel có hàng trăm
-    MST khác nhau) — nếu masothue.com không phản hồi được NHIỀU LẦN LIÊN
-    TIẾP (server lỗi/mạng chặn), dừng hẳn việc gọi mạng cho các MST còn lại
-    trong CÙNG lượt này (khỏi phải chờ timeout từng cái một, có khi hàng
-    trăm lần vô ích) — tự động thử lại bình thường ở lượt xuất Excel SAU.
+    MST khác nhau) — nếu API không phản hồi được/sai client-id-api-key NHIỀU
+    LẦN LIÊN TIẾP, dừng hẳn việc gọi mạng cho các MST còn lại trong CÙNG lượt
+    này (khỏi phải chờ timeout/báo lỗi từng cái một, có khi hàng trăm lần vô
+    ích) — tự động thử lại bình thường ở lượt xuất Excel SAU.
 
     Trả về dict {"trang_thai": str hiển thị, "canh_bao": True/False/None}.
-    canh_bao=None nghĩa là KHÔNG tra cứu được/MST không hợp lệ — KHÔNG được
-    coi là cảnh báo (an toàn: chỉ tô đỏ khi THẬT SỰ xác nhận được tình trạng
-    xấu, không suy đoán khi thiếu dữ liệu)."""
+    canh_bao=None nghĩa là KHÔNG tra cứu được/chưa cấu hình/MST không hợp lệ
+    — KHÔNG được coi là cảnh báo (an toàn: chỉ tô đỏ khi THẬT SỰ xác nhận
+    được tình trạng xấu, không suy đoán khi thiếu dữ liệu)."""
     mst_c = _chuan_mst(mst)[:10]
     if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
+        return {"trang_thai": "", "canh_bao": None}
+
+    client_id = (_get_setting("xinvoice_client_id", "") or "").strip()
+    api_key = (_get_setting("xinvoice_api_key", "") or "").strip()
+    if not client_id or not api_key:
         return {"trang_thai": "", "canh_bao": None}
 
     conn = db()
@@ -32596,8 +32624,9 @@ def _tra_cuu_trang_thai_mst(mst, timeout=6, so_lan_that_bai_lien_tiep=None):
             pass
 
     if so_lan_that_bai_lien_tiep is not None and so_lan_that_bai_lien_tiep[0] >= 5:
-        # Đã lỗi liên tiếp quá nhiều lần trong lượt này -> khỏi thử mạng nữa,
-        # để cache cũ (nếu có, dù quá hạn) làm dự phòng thay vì không có gì.
+        # Đã lỗi liên tiếp quá nhiều lần trong lượt này (vd sai client-id/
+        # api-key, hoặc API không phản hồi) -> khỏi thử mạng nữa, để cache
+        # cũ (nếu có, dù quá hạn) làm dự phòng thay vì không có gì.
         if row:
             canh_bao_cu = row["canh_bao"]
             return {"trang_thai": row["trang_thai_goc"] or "",
@@ -32606,17 +32635,23 @@ def _tra_cuu_trang_thai_mst(mst, timeout=6, so_lan_that_bai_lien_tiep=None):
 
     trang_thai_goc = ""
     canh_bao = None
+    thanh_cong = False
     try:
-        r = requests.get("https://masothue.com/Search/",
-                         params={"q": mst_c, "type": "auto"},
-                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+        r = requests.get(f"https://api.xinvoice.vn/gdt-api/tax-payer/{mst_c}",
+                         headers={"Accept": "application/json",
+                                  "client-id": client_id, "api-key": api_key},
                          timeout=timeout)
-        trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(r.text or "")
-        if so_lan_that_bai_lien_tiep is not None:
-            so_lan_that_bai_lien_tiep[0] = 0
+        if r.status_code == 200:
+            data = r.json() or {}
+            trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(str(data.get("status") or ""))
+            thanh_cong = True
+        # status khác 200 (401 sai client-id/api-key, 404 không có MST, 429
+        # vượt hạn mức...) -> coi là 1 lượt lỗi (tính vào bộ đếm lỗi liên
+        # tiếp bên dưới), KHÔNG suy đoán tình trạng.
     except Exception:
-        if so_lan_that_bai_lien_tiep is not None:
-            so_lan_that_bai_lien_tiep[0] += 1
+        pass
+    if so_lan_that_bai_lien_tiep is not None:
+        so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
 
     conn = db()
     try:

@@ -235,6 +235,7 @@
       <button class="btn" style="width:100%;font-size:14.5px;padding:10px;white-space:nowrap" onclick="openBatchModal();toggleHoTroKeKhai()">🚀 Tra cứu hoá đơn hàng loạt</button>
       <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moNopToKhai();toggleHoTroKeKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
       <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moHDNModal();toggleHoTroKeKhai()">🧾 Soạn nháp hoá đơn nhanh (từ file/nội dung khách gửi)</button>
+      <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moXInvoiceModal();toggleHoTroKeKhai()">🔑 Cấu hình API tra cứu tình trạng MST (XInvoice)</button>
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
@@ -472,6 +473,20 @@
       <button class="btn ghost" onclick="hdnDongModal()">Đóng</button>
       <button class="btn ghost" onclick="hdnLamMoi()">🗑 Làm nháp mới</button>
       <button class="btn" onclick="hdnXuatExcel()">⬇ Xuất Excel</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CẤU HÌNH API TRA CỨU TÌNH TRẠNG MST (XInvoice) -->
+<div class="modal-bg" id="xinvoiceModal">
+  <div class="modal" style="width:min(520px,96vw);max-width:520px">
+    <h3 style="margin-top:0">🔑 Cấu hình API tra cứu tình trạng MST</h3>
+    <p class="hint" style="margin-top:0">Khi xuất Excel, phần mềm tự dò tình trạng hoạt động của MST đối tác (đang hoạt động / bị khoá MST / chờ xác minh địa chỉ kinh doanh...) qua API của <b>XInvoice</b>, thêm cột "Trạng thái MST" và tô đỏ dòng cần chú ý. Cần đăng ký lấy <b>Client ID</b> và <b>API Key</b> tại <a href="https://xinvoice.vn/apis/tra-cuu-ma-so-thue" target="_blank" rel="noopener">xinvoice.vn</a> rồi nhập vào đây. Chưa nhập thì phần mềm vẫn xuất Excel bình thường, chỉ là chưa có cột này.</p>
+    <div class="field"><label>Client ID</label><input id="xinv_client_id" placeholder="Client ID (xinvoice.vn cấp khi đăng ký)"></div>
+    <div class="field"><label>API Key</label><input id="xinv_api_key" type="password" placeholder="API Key (xinvoice.vn cấp khi đăng ký)"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="dongXInvoiceModal()">Đóng</button>
+      <button class="btn" onclick="luuXInvoiceModal()">💾 Lưu</button>
     </div>
   </div>
 </div>
@@ -9484,6 +9499,26 @@ function moHDNModal(){
 }
 function hdnDongModal(){
   document.getElementById('hdnModal').classList.remove('show');
+}
+async function moXInvoiceModal(){
+  try{
+    const r=await api('/api/settings/xinvoice-mst-api');
+    document.getElementById('xinv_client_id').value=r.client_id||'';
+    document.getElementById('xinv_api_key').value=r.api_key||'';
+  }catch(e){}
+  document.getElementById('xinvoiceModal').classList.add('show');
+}
+function dongXInvoiceModal(){
+  document.getElementById('xinvoiceModal').classList.remove('show');
+}
+async function luuXInvoiceModal(){
+  const client_id=document.getElementById('xinv_client_id').value.trim();
+  const api_key=document.getElementById('xinv_api_key').value.trim();
+  try{
+    await api('/api/settings/xinvoice-mst-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_id,api_key})});
+    toast('Đã lưu cấu hình API tra cứu MST','ok');
+    dongXInvoiceModal();
+  }catch(e){toast('Lỗi lưu: '+e.message,'err');}
 }
 function hdnLamMoi(){
   document.getElementById('hdn_paste').value='';
