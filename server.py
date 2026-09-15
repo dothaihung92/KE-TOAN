@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.245"
+APP_BUILD = "2026-09-15.246"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1379,6 +1379,12 @@ def init_db():
         trang_thai TEXT,         -- 'dang_chay' / 'tam_dung' / 'hoan_tat'
         created_at TEXT,
         updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS mst_status_cache (
+        mst TEXT PRIMARY KEY,    -- MST gốc 10 số
+        trang_thai_goc TEXT,     -- chữ mô tả tình trạng lấy được (masothue.com)
+        canh_bao INTEGER,        -- 1=cần cảnh báo/tô đỏ, 0=bình thường, NULL=không tra được
+        checked_at TEXT
     );
     """)
     # Migration: thêm cột he_thong nếu DB cũ chưa có
@@ -32492,6 +32498,141 @@ def _thue_theo_cong_thue(it, items, r):
     return round(tong_thue_hd * (ds / tong_tt))
 
 
+_MST_CACHE_NGAY = 14   # số ngày giữ cache tình trạng MST trước khi tra lại
+
+
+def _phan_loai_trang_thai_mst(html):
+    """Phân loại tình trạng hoạt động MST từ nội dung trang tra cứu
+    (masothue.com — theo yêu cầu người dùng: "https://masothue.com/ hãy dùng
+    trang này để tự động dò mst"). DÒ THEO TỪ KHOÁ trong toàn bộ nội dung
+    trang (không phụ thuộc cấu trúc bảng/CSS cụ thể — bền hơn khi trang đổi
+    giao diện), theo ĐÚNG các cụm mô tả tình trạng hoạt động CHÍNH THỨC của
+    Tổng cục Thuế (masothue.com lấy lại dữ liệu từ nguồn này).
+
+    Trả về (trang_thai_hien_thi, canh_bao):
+      canh_bao=True  -> đã khóa MST/ngừng hoạt động/chờ xác minh địa chỉ kinh
+                         doanh/giải thể — CẦN tô đỏ cảnh báo (theo đúng yêu
+                         cầu: "công ty cần xác minh địa chỉ kinh doanh...
+                         hoặc bị khoá mst... thì tô đỏ dòng đó").
+      canh_bao=False -> đang hoạt động bình thường, không cảnh báo.
+      canh_bao=None  -> KHÔNG dò được tình trạng (trang lỗi/không có dữ liệu
+                         khớp MST) — KHÔNG suy đoán, không tô đỏ khi thiếu
+                         bằng chứng."""
+    t = _khong_dau(html)
+    # Thứ tự ưu tiên: các cụm CẢNH BÁO trước (đủ đặc trưng, không lẫn với
+    # "dang hoat dong" — vd 'cho xac minh...' vẫn chứa chữ 'hoat dong' nên
+    # phải kiểm tra các cụm cảnh báo TRƯỚC khi rơi về mặc định "đang hoạt
+    # động" ở cuối).
+    canh_bao_tu_khoa = [
+        ("cho xac minh tinh trang hoat dong",
+         "Chờ xác minh tình trạng hoạt động tại địa chỉ đã đăng ký"),
+        ("dang xac minh tinh trang hoat dong",
+         "Đang xác minh tình trạng hoạt động tại địa chỉ đã đăng ký"),
+        ("khong hoat dong tai dia chi da dang ky",
+         "Không hoạt động tại địa chỉ đã đăng ký"),
+        ("da bi khoa ma so thue", "Đã bị khóa mã số thuế"),
+        ("da khoa ma so thue", "Đã khóa mã số thuế"),
+        ("ngung hoat dong nhung chua hoan thanh thu tuc",
+         "NNT ngừng hoạt động nhưng chưa hoàn thành thủ tục đóng mã số thuế"),
+        ("da ngung hoat dong", "Đã ngừng hoạt động"),
+        ("ngung hoat dong", "Ngừng hoạt động"),
+        ("tam ngung kinh doanh", "Tạm ngừng kinh doanh"),
+        ("da giai the", "Đã giải thể"),
+        ("cham dut hieu luc ma so thue", "Chấm dứt hiệu lực mã số thuế"),
+    ]
+    for kw, nhan in canh_bao_tu_khoa:
+        if kw in t:
+            return nhan, True
+    if "dang hoat dong" in t:
+        return "Đang hoạt động", False
+    return "", None
+
+
+def _tra_cuu_trang_thai_mst(mst, timeout=6, so_lan_that_bai_lien_tiep=None):
+    """Tra cứu tình trạng hoạt động của 1 MST qua trang công khai masothue.com
+    — dùng để cảnh báo khi xuất Excel bảng kê mua vào/bán ra: đối tác đã bị
+    khóa MST/ngừng hoạt động, hoặc đang bị đánh dấu "chờ xác minh tình trạng
+    hoạt động tại địa chỉ đã đăng ký" (dấu hiệu rủi ro thường gặp: hóa đơn
+    của NCC "ma" — không có thật tại địa chỉ đăng ký — ảnh hưởng việc khấu
+    trừ thuế GTGT đầu vào).
+
+    CHỈ tra cứu THẬT SỰ qua mạng khi CHƯA có cache hoặc cache đã quá
+    _MST_CACHE_NGAY ngày — kết quả (kể cả tra cứu thất bại) được lưu vào
+    bảng mst_status_cache, tránh tra lại liên tục cho cùng 1 MST ở mỗi lần
+    xuất Excel (giảm số lượt gọi tới masothue.com — trang CÔNG KHAI của bên
+    thứ 3, không phải API chính thức của Tổng cục Thuế, cần hạn chế gọi dồn
+    dập tránh bị chặn/giới hạn tốc độ).
+
+    so_lan_that_bai_lien_tiep: list 1 phần tử [count] dùng làm bộ đếm CHUNG
+    giữa nhiều lần gọi liên tiếp (vd trong 1 lượt xuất Excel có hàng trăm
+    MST khác nhau) — nếu masothue.com không phản hồi được NHIỀU LẦN LIÊN
+    TIẾP (server lỗi/mạng chặn), dừng hẳn việc gọi mạng cho các MST còn lại
+    trong CÙNG lượt này (khỏi phải chờ timeout từng cái một, có khi hàng
+    trăm lần vô ích) — tự động thử lại bình thường ở lượt xuất Excel SAU.
+
+    Trả về dict {"trang_thai": str hiển thị, "canh_bao": True/False/None}.
+    canh_bao=None nghĩa là KHÔNG tra cứu được/MST không hợp lệ — KHÔNG được
+    coi là cảnh báo (an toàn: chỉ tô đỏ khi THẬT SỰ xác nhận được tình trạng
+    xấu, không suy đoán khi thiếu dữ liệu)."""
+    mst_c = _chuan_mst(mst)[:10]
+    if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
+        return {"trang_thai": "", "canh_bao": None}
+
+    conn = db()
+    try:
+        row = conn.execute(
+            "SELECT trang_thai_goc, canh_bao, checked_at FROM mst_status_cache WHERE mst=?",
+            (mst_c,)).fetchone()
+    finally:
+        conn.close()
+    if row and row["checked_at"]:
+        try:
+            cu = datetime.datetime.fromisoformat(row["checked_at"])
+            if (datetime.datetime.now() - cu).days < _MST_CACHE_NGAY:
+                canh_bao_cu = row["canh_bao"]
+                canh_bao_cu = bool(canh_bao_cu) if canh_bao_cu is not None else None
+                return {"trang_thai": row["trang_thai_goc"] or "", "canh_bao": canh_bao_cu}
+        except Exception:
+            pass
+
+    if so_lan_that_bai_lien_tiep is not None and so_lan_that_bai_lien_tiep[0] >= 5:
+        # Đã lỗi liên tiếp quá nhiều lần trong lượt này -> khỏi thử mạng nữa,
+        # để cache cũ (nếu có, dù quá hạn) làm dự phòng thay vì không có gì.
+        if row:
+            canh_bao_cu = row["canh_bao"]
+            return {"trang_thai": row["trang_thai_goc"] or "",
+                    "canh_bao": bool(canh_bao_cu) if canh_bao_cu is not None else None}
+        return {"trang_thai": "", "canh_bao": None}
+
+    trang_thai_goc = ""
+    canh_bao = None
+    try:
+        r = requests.get("https://masothue.com/Search/",
+                         params={"q": mst_c, "type": "auto"},
+                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                         timeout=timeout)
+        trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(r.text or "")
+        if so_lan_that_bai_lien_tiep is not None:
+            so_lan_that_bai_lien_tiep[0] = 0
+    except Exception:
+        if so_lan_that_bai_lien_tiep is not None:
+            so_lan_that_bai_lien_tiep[0] += 1
+
+    conn = db()
+    try:
+        conn.execute(
+            "INSERT INTO mst_status_cache(mst, trang_thai_goc, canh_bao, checked_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(mst) DO UPDATE SET trang_thai_goc=excluded.trang_thai_goc, "
+            "canh_bao=excluded.canh_bao, checked_at=excluded.checked_at",
+            (mst_c, trang_thai_goc,
+             (1 if canh_bao is True else (0 if canh_bao is False else None)),
+             datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"trang_thai": trang_thai_goc, "canh_bao": canh_bao}
+
+
 @app.get("/api/export-excel/{cid}")
 def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                  den_ngay: str = "", mo_file: int = 1):
@@ -33842,12 +33983,36 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             return nmc[:10] == mst_cty_bk_goc or nmc in mst_khac_bk_set
         return True
 
+    # Dò tình trạng hoạt động MST (theo yêu cầu người dùng: "thêm chức năng dò
+    # mst còn đang hoạt động hay không hoặc công ty cần xác minh địa chỉ kinh
+    # doanh khi kết xuất ra excel, thêm 1 cột trạng thái mst ở cuối... tô đỏ
+    # dòng đó" — dùng https://masothue.com theo chỉ định của người dùng, xem
+    # _tra_cuu_trang_thai_mst) — CACHE trong bộ nhớ theo MST (dict) NGOÀI cache
+    # DB dài hạn (mst_status_cache) để không tra lại nhiều lần cho CÙNG 1 MST
+    # xuất hiện ở nhiều dòng/nhiều sheet trong CÙNG 1 lượt xuất Excel này.
+    _mst_status_local = {}
+    _mst_fail_counter = [0]
+    _mst_do_nhat = PatternFill("solid", fgColor="FFC7CE")
+
+    def _lay_trang_thai_mst_cached(mst):
+        key = _chuan_mst(mst)[:10]
+        if key in _mst_status_local:
+            return _mst_status_local[key]
+        info = _tra_cuu_trang_thai_mst(mst, so_lan_that_bai_lien_tiep=_mst_fail_counter)
+        _mst_status_local[key] = info
+        return info
+
+    def _to_do_dong_neu_canh_bao(ws_, row_idx, n_cols, canh_bao):
+        if canh_bao:
+            for c in range(1, n_cols + 1):
+                ws_.cell(row_idx, c).fill = _mst_do_nhat
+
     # ----- BẢNG KÊ MUA VÀO (mỗi hóa đơn 1 dòng + cột Mặt hàng) -----
     ws = wb.create_sheet("BK Mua vào")
     hdr1 = ["STT", "Ký hiệu", "Số Hoá Đơn", "Ngày lập",
             "Tên người bán", "MST người bán", "Mặt hàng", "Thuế suất GTGT",
             "Doanh số mua chưa thuế", "Thuế GTGT", "Tổng thanh toán",
-            "Trạng thái"]
+            "Trạng thái", "Trạng thái MST"]
     ws.append(hdr1)
     style_header(ws, len(hdr1))
     stt = 0
@@ -33927,9 +34092,12 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             # Hóa đơn KHÔNG MÃ: TCT không cấp chi tiết dòng hàng qua API, dù
             # thử lại cũng vậy — ghi rõ lý do thay vì để trống trông như lỗi.
             mat_hang = "(Hóa đơn không mã — không có chi tiết dòng hàng)"
+        mst_info_ncc = _lay_trang_thai_mst_cached(r["nbmst"])
         ws.append([stt, r["khhdon"], r["shdon"], ngay, r["nbten"], r["nbmst"],
                    mat_hang, thue_suat, ds, thue, _to_num(r["tgtttbso"]),
-                   _mo_ta_trang_thai(raw.get("tthai", r["tthai"]))])
+                   _mo_ta_trang_thai(raw.get("tthai", r["tthai"])),
+                   mst_info_ncc["trang_thai"]])
+        _to_do_dong_neu_canh_bao(ws, ws.max_row, len(hdr1), mst_info_ncc["canh_bao"])
         tong_ds_mua += ds if isinstance(ds, (int, float)) else 0
         tong_thue_mua += thue if isinstance(thue, (int, float)) else 0
         ikey = (str(r["khhdon"]), str(r["shdon"]).lstrip("0") or "0")
@@ -33944,7 +34112,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 continue
             stt += 1
             ws.append([stt, r["khhdon"], r["shdon"], ngay, r["nbten"], r["nbmst"],
-                       "Tổng tiền phí", "KCT", tien_phi, 0, "", ""])
+                       "Tổng tiền phí", "KCT", tien_phi, 0, "", "",
+                       mst_info_ncc["trang_thai"]])
+            _to_do_dong_neu_canh_bao(ws, ws.max_row, len(hdr1), mst_info_ncc["canh_bao"])
             tong_ds_mua += tien_phi
             bk_totals["purchase"][ikey]["ds"] += tien_phi
 
@@ -33977,7 +34147,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 ts_set.append(tsv)
         ws.append([stt, "TKNK", tkr["so_tk"], ngay_tk, tkr["nguoi_xk"], tkr["nguoi_xk"],
                    ten_gop, ", ".join(ts_set), ds_tk_tong, thue_tk_tong,
-                   _to_num(ds_tk_tong + thue_tk_tong), "Tờ khai nhập khẩu"])
+                   _to_num(ds_tk_tong + thue_tk_tong), "Tờ khai nhập khẩu", ""])
         tong_ds_mua += ds_tk_tong
         tong_thue_mua += thue_tk_tong
         # key đối chiếu khớp với Chi tiết (TKNK + số tờ khai)
@@ -33985,8 +34155,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
 
     # dòng tổng (Doanh số giờ ở cột I=9, Thuế cột J=10)
     ws.append(["", "", "", "", "", "", "", "TỔNG CỘNG",
-               _to_num(tong_ds_mua), _to_num(tong_thue_mua), "", ""])
-    for c in range(1, 13):
+               _to_num(tong_ds_mua), _to_num(tong_thue_mua), "", "", ""])
+    for c in range(1, 14):
         ws.cell(ws.max_row, c).font = Font(bold=True, color="C00000")
     autofit(ws)
     format_so(ws)
@@ -34011,7 +34181,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     hdr2 = ["STT", "Ký hiệu mẫu", "Ký hiệu HĐ", "Số hóa đơn", "Ngày lập",
             "Tên người mua", "MST người mua", "Mặt hàng",
             "Doanh số bán chưa thuế", "Thuế GTGT", "Trạng thái", "Kết quả",
-            "Thành tiền USD", "Tỷ giá"]
+            "Thành tiền USD", "Tỷ giá", "Trạng thái MST"]
     ws.append(hdr2)
     hrow = ws.max_row
     for c in range(1, len(hdr2) + 1):
@@ -34082,31 +34252,36 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 # dùng để quy đổi ra cột Doanh số/Thuế (đã là VNĐ) ở trên.
                 usd_out = _to_num(val.get("ds_nt")) if info.get("tygia") else ""
                 tygia_out = info.get("tygia") or ""
+                mst_kh = info["mst_nmua"] or "KL"
+                mst_info_kh = _lay_trang_thai_mst_cached(mst_kh)
                 ws.append([stt, info["khmshdon"], info["khhdon"], info["shdon"],
-                           ngay, info["ten_nmua"] or "Khách lẻ", info["mst_nmua"] or "KL",
+                           ngay, info["ten_nmua"] or "Khách lẻ", mst_kh,
                            info["mat_hang"], _to_num(ds), _to_num(thue), tt, kq,
-                           usd_out, tygia_out])
+                           usd_out, tygia_out, mst_info_kh["trang_thai"]])
             else:
                 ds = _to_num(r["tgtcthue"]) or 0
                 thue = _to_num(r["tgtthue"]) or 0
                 dang_nhap_ok_row = bool(client and client.token and not getattr(client, "_token_dead", False))
                 mat_hang_txt = ("(Cả hóa đơn — không tách dòng hàng)" if (dang_nhap_ok_row and ds)
                                 else "(chưa lấy được file XML)")
+                mst_kh = r["nmmst"] or "KL"
+                mst_info_kh = _lay_trang_thai_mst_cached(mst_kh)
                 ws.append([stt, "1", r["khhdon"], r["shdon"], ngay,
-                           "", r["nmmst"] or "KL", mat_hang_txt,
-                           ds, thue, tt, kq, "", ""])
+                           "", mst_kh, mat_hang_txt,
+                           ds, thue, tt, kq, "", "", mst_info_kh["trang_thai"]])
+            _to_do_dong_neu_canh_bao(ws, ws.max_row, len(hdr2), mst_info_kh["canh_bao"])
             sub_ds += ds if isinstance(ds, (int, float)) else 0
             sub_thue += thue if isinstance(thue, (int, float)) else 0
         ws.append(["", "", "", "", "", "", "", "Tổng nhóm",
-                   _to_num(sub_ds), _to_num(sub_thue), "", "", "", ""])
-        for c in range(1, 15):
+                   _to_num(sub_ds), _to_num(sub_thue), "", "", "", "", ""])
+        for c in range(1, 16):
             ws.cell(ws.max_row, c).font = bold
         grand_ds += sub_ds; grand_thue += sub_thue
 
     ws.append([])
     ws.append(["", "", "", "", "", "", "", "TỔNG CỘNG",
-               _to_num(grand_ds), _to_num(grand_thue), "", "", "", ""])
-    for c in range(1, 15):
+               _to_num(grand_ds), _to_num(grand_thue), "", "", "", "", ""])
+    for c in range(1, 16):
         ws.cell(ws.max_row, c).font = Font(bold=True, color="C00000", name="Times New Roman")
     autofit(ws)
     format_so(ws)
