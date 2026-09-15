@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.261"
+APP_BUILD = "2026-09-15.262"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1404,6 +1404,25 @@ def init_db():
         conn.execute("DELETE FROM mst_status_cache WHERE canh_bao IS NULL")
         conn.execute(
             "INSERT INTO app_settings (key, value) VALUES ('mst_cache_null_cleanup_done', '1') "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    # Migration MỘT LẦN thứ 2 (bug THẬT khác, mới phát hiện — người dùng báo
+    # lại "CHI TIẾT TỪNG MST" toàn "không rõ lý do" dù đã có log chẩn đoán
+    # chi tiết): _goi_1_lan_xinvoice() TRƯỚC ĐÂY coi HTTP 200 là "tra THÀNH
+    # CÔNG" dù trường "status" trả về KHÔNG khớp được tình trạng nào (canh_bao
+    # =NULL) — tưởng đây là "tra thành công nhưng không phân loại được" (như
+    # migration thứ 1 ở trên giả định) nên VẪN LƯU CACHE, khiến MST đó bị
+    # "kẹt cứng" ở trạng thái trống suốt 14 ngày y hệt bug cache-khi-thất-bại
+    # đã sửa trước đó — nhưng qua đường 200 "thành công rỗng" thay vì lỗi
+    # HTTP, nên migration thứ 1 (đã chạy xong, đánh dấu xong) KHÔNG dọn được
+    # các dòng này (ghi SAU khi migration 1 đã chạy). Đã sửa code để KHÔNG
+    # còn coi trường hợp này là thành công nữa (không lưu cache mới) — dọn
+    # NỐT các dòng canh_bao=NULL còn sót lại do bug này, dùng CỜ RIÊNG (v2)
+    # để không lặp lại vô ích ở các lần khởi động sau.
+    if not conn.execute(
+            "SELECT 1 FROM app_settings WHERE key='mst_cache_null_cleanup_done_v2'").fetchone():
+        conn.execute("DELETE FROM mst_status_cache WHERE canh_bao IS NULL")
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('mst_cache_null_cleanup_done_v2', '1') "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
     # Migration: thêm cột he_thong nếu DB cũ chưa có
     cols = [r[1] for r in conn.execute("PRAGMA table_info(invoices)").fetchall()]
@@ -32653,7 +32672,23 @@ def _goi_1_lan_xinvoice(mst_c, client_id, api_key, timeout):
                              timeout=timeout)
             if r.status_code == 200:
                 data = r.json() or {}
-                trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(str(data.get("status") or ""))
+                raw_status = str(data.get("status") or "")
+                trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(raw_status)
+                if canh_bao is None:
+                    # HTTP 200 nhưng KHÔNG dò được tình trạng nào khớp (trường
+                    # "status" rỗng/không có trong danh sách từ khoá đã biết —
+                    # vd MST là chi nhánh hạch toán phụ thuộc mà API không trả
+                    # đúng dữ liệu cho mã GỐC 10 số, hoặc XInvoice đổi cách mô
+                    # tả tình trạng) -> KHÔNG được coi là "tra thành công" (dù
+                    # HTTP 200), vì bug THẬT đã gặp: coi đây là thành công rồi
+                    # LƯU CACHE vĩnh viễn kết quả rỗng đó, khiến MST bị "kẹt
+                    # cứng" y hệt bug cache-khi-thất-bại đã sửa trước đây,
+                    # nhưng qua đường khác (200 "thành công" rỗng thay vì lỗi
+                    # HTTP) — coi là THẤT BẠI để KHÔNG lưu cache, để còn tự
+                    # động dự phòng qua masothue.com và thử lại ở lượt sau.
+                    return (False, "", None,
+                           f"XInvoice trả về 200 nhưng không xác định được tình trạng "
+                           f"(status='{raw_status[:150]}')", False)
                 return True, trang_thai_goc, canh_bao, None, False
             if r.status_code == 429:
                 try:

@@ -735,5 +735,75 @@ print("PASS 23: bộ đếm lỗi liên tiếp đã đạt ngưỡng (circuit br
       "('đã dừng gọi mạng sau 5 lỗi liên tiếp') thay vì im lặng, để người dùng biết đúng nguyên nhân "
       "khi thấy MST còn trống.")
 
+# ===== Test 24-25 (bug THẬT vừa phát hiện qua log người dùng gửi: "CHI TIẾT
+# TỪNG MST" toàn "không rõ lý do" cho ĐỦ cả 8 MST, dù đã có log chẩn đoán chi
+# tiết — thời gian chạy CHỈ 6.0s cho 234 MST, quá nhanh so với gọi mạng thật
+# -> dấu hiệu CACHE HIT, không hề thử mạng lại): _goi_1_lan_xinvoice() TRƯỚC
+# ĐÂY coi HTTP 200 là "tra THÀNH CÔNG" dù trường "status" trả về KHÔNG khớp
+# được tình trạng nào (canh_bao=None) — LƯU CACHE kết quả rỗng đó, khiến MST
+# "kẹt cứng" y hệt bug cache-khi-thất-bại đã sửa trước đây, nhưng qua đường
+# 200 "thành công rỗng" thay vì lỗi HTTP nên KHÔNG đi qua nhánh có ly_do_loi
+# -> cache-hit lần sau trả thẳng {"trang_thai":"","canh_bao":None} không kèm
+# ly_do_loi -> _prefetch_trang_thai_mst() phải tự điền "không rõ lý do". =====
+
+# Test 24: XInvoice trả 200 nhưng "status" KHÔNG khớp từ khoá nào (canh_bao=
+# None) -> PHẢI coi là THẤT BẠI (không phải thành công), tự động dự phòng
+# masothue.com (ở đây cũng không khớp) -> canh_bao=None, ly_do_loi PHẢI ghi
+# rõ nguyên nhân (không phải "không rõ lý do"), và TUYỆT ĐỐI KHÔNG được lưu
+# cache (để lần sau còn thử lại, không bị kẹt cứng suốt 14 ngày).
+conn24 = _fresh_db()
+conn24.execute("DELETE FROM mst_status_cache")
+conn24.commit()
+conn24.close()
+_set_xinvoice_keys([{"client_id": "keyG-id", "api_key": "keyG-secret"}])
+_fake_requests.calls.clear()
+_fake_requests.next_exc = None
+_fake_requests.next_responses = [
+    (200, {"status": "Trạng thái không xác định XYZ"}, {}),
+    (200, {"noi_dung": "trang masothue cung khong khop"}, {}),
+]
+r24 = _tra_cuu_trang_thai_mst("0321111119", timeout=1)
+assert r24["canh_bao"] is None
+assert len(_fake_requests.calls) == 2, (
+    f"HTTP 200 nhưng không khớp tình trạng nào -> PHẢI coi là thất bại (không phải thành công), tự "
+    f"động dự phòng thêm 1 lượt masothue.com — got {len(_fake_requests.calls)} lượt gọi")
+assert (r24.get("ly_do_loi") or "") and "không rõ lý do" not in (r24.get("ly_do_loi") or ""), (
+    f"PHẢI kèm ly_do_loi cụ thể (vd 'XInvoice trả về 200 nhưng không xác định được tình trạng'), "
+    f"KHÔNG được để trống/rơi vào 'không rõ lý do' — got {r24}")
+conn24b = _fresh_db()
+row24 = conn24b.execute("SELECT * FROM mst_status_cache WHERE mst=?", ("0321111119",)).fetchone()
+conn24b.close()
+assert row24 is None, (
+    f"HTTP 200 'thành công rỗng' (không khớp tình trạng nào) TUYỆT ĐỐI KHÔNG được lưu cache — nếu "
+    f"không sẽ tái diễn đúng bug 'kẹt cứng 14 ngày' đã gặp thật (log toàn 'không rõ lý do' cho cả 8 "
+    f"MST, chạy chỉ 6.0s vì toàn cache hit) — got {dict(row24) if row24 else None}")
+print("PASS 24: XInvoice trả HTTP 200 nhưng 'status' không khớp tình trạng nào -> coi là THẤT BẠI "
+      "(không phải thành công rỗng), tự động dự phòng masothue.com, kèm ly_do_loi cụ thể, KHÔNG lưu "
+      "cache — sửa đúng bug thật khiến 8 MST bị 'kẹt cứng không rõ lý do'.")
+
+# Test 25: XInvoice 200 không khớp (như Test 24), nhưng masothue.com dự
+# phòng LẦN NÀY thành công -> PHẢI lấy được kết quả thật (không bị chặn bởi
+# XInvoice "thành công rỗng" trước đó), và kết quả dự phòng phải được lưu
+# cache bình thường.
+_fake_requests.calls.clear()
+_fake_requests.next_responses = [
+    (200, {"status": "Trạng thái không xác định XYZ"}, {}),
+    (200, {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}, {}),
+]
+r25 = _tra_cuu_trang_thai_mst("0321111120", timeout=1)
+assert r25["canh_bao"] is False, (
+    f"XInvoice 200 không khớp -> dự phòng masothue.com thành công -> PHẢI lấy được tình trạng thật "
+    f"— got {r25}")
+assert "ly_do_loi" not in r25, f"Đã dự phòng thành công -> không còn là lỗi nữa — got {r25}"
+conn25 = _fresh_db()
+row25 = conn25.execute("SELECT * FROM mst_status_cache WHERE mst=?", ("0321111120",)).fetchone()
+conn25.close()
+assert row25 is not None and bool(row25["canh_bao"]) is False, (
+    "Kết quả dự phòng thành công từ masothue.com (sau khi XInvoice 200 rỗng) PHẢI được lưu cache bình "
+    "thường")
+print("PASS 25: XInvoice 200 không khớp tình trạng -> tự động dự phòng masothue.com và lấy được kết "
+      "quả thật, có lưu cache bình thường.")
+_fake_requests.next_responses = None
+
 os.unlink(_tmp_db.name)
 print("\nALL DONE")
