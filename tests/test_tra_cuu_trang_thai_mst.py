@@ -70,8 +70,8 @@ class _FakeRequests:
         self.next_exc = None
         self.next_responses = None
 
-    def get(self, url, headers=None, timeout=None):
-        self.calls.append({"url": url, "headers": dict(headers or {})})
+    def get(self, url, headers=None, timeout=None, params=None):
+        self.calls.append({"url": url, "headers": dict(headers or {}), "params": dict(params or {})})
         if self.next_exc is not None:
             raise self.next_exc
         if self.next_responses:
@@ -124,6 +124,7 @@ ns['_set_setting'] = _fake_settings.set
 ns['time'] = _fake_time
 exec(extract_fn('_lay_danh_sach_xinvoice_keys'), ns)
 exec(extract_fn('_goi_1_lan_xinvoice'), ns)
+exec(extract_fn('_tra_cuu_masothue'), ns)
 
 _tmp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
 _tmp_db.close()
@@ -205,20 +206,48 @@ assert len(_fake_requests.calls) == 0, (
     f"— got {len(_fake_requests.calls)} lượt gọi")
 print("PASS 7: MST rỗng/'KL' (khách lẻ dùng chung mã)/quá ngắn -> bỏ qua hẳn, không gọi mạng.")
 
-# Test 8 (QUAN TRỌNG): CHƯA cấu hình client-id/api-key -> bỏ qua HẲN tính năng
-# (canh_bao=None), KHÔNG gọi mạng, KHÔNG lỗi — để xuất Excel vẫn chạy bình thường
-# khi người dùng chưa đăng ký API.
+# Test 8a (QUAN TRỌNG — tính năng dự phòng masothue.com): CHƯA cấu hình
+# client-id/api-key XInvoice nào -> KHÔNG còn "bỏ qua hẳn" như trước nữa, mà
+# TỰ ĐỘNG dự phòng tra qua trang công khai masothue.com (không cần đăng ký),
+# đúng yêu cầu người dùng "nếu api không tra được hết thì hãy tra qua
+# masothue.com" — áp dụng cả khi HOÀN TOÀN chưa có key nào, không chỉ khi
+# key đã cấu hình bị hết hạn mức.
 _fake_settings.set("xinvoice_client_id", "")
 _fake_settings.set("xinvoice_api_key", "")
+_fake_settings.set("xinvoice_api_keys", "")
 _fake_requests.calls.clear()
-r8 = _tra_cuu_trang_thai_mst("0315696133", timeout=1)
-assert r8["canh_bao"] is None
-assert len(_fake_requests.calls) == 0, (
-    f"Chưa cấu hình client-id/api-key thì KHÔNG được gọi API — got {len(_fake_requests.calls)} lượt gọi")
-print("PASS 8: chưa cấu hình client-id/api-key -> bỏ qua hẳn tính năng, không gọi mạng, không lỗi.")
+_fake_requests.next_exc = None
+_fake_requests.next_responses = None
+_fake_requests.next_status = 200
+_fake_requests.next_data = {"status": "Người nộp thuế đã bị khóa mã số thuế"}
+r8a = _tra_cuu_trang_thai_mst("0315696199", timeout=1)
+assert r8a["canh_bao"] is True, (
+    f"Chưa cấu hình key XInvoice nào -> PHẢI tự động dự phòng tra qua masothue.com, không được để "
+    f"trống — got {r8a}")
+assert len(_fake_requests.calls) == 1, (
+    f"Chưa có key XInvoice -> 0 lượt gọi XInvoice, CHỈ gọi thẳng 1 lượt masothue.com dự phòng "
+    f"— got {len(_fake_requests.calls)} lượt gọi")
+assert "masothue.com" in _fake_requests.calls[0]["url"], (
+    f"Phải gọi đúng masothue.com — got {_fake_requests.calls[0]['url']}")
+print("PASS 8a: chưa cấu hình key XInvoice nào -> tự động dự phòng tra qua masothue.com, lấy được tình "
+      "trạng thật thay vì để trống như trước.")
+
+# Test 8b: chưa cấu hình key + masothue.com CŨNG không dò được (vd trang lỗi/
+# không có dữ liệu MST) -> canh_bao=None (an toàn, không suy đoán), không lỗi/
+# crash, không chặn xuất Excel — CẢ HAI cách đều không tra được mới chịu thua.
+_fake_requests.calls.clear()
+_fake_requests.next_status = 500
+_fake_requests.next_data = None
+r8b = _tra_cuu_trang_thai_mst("0315696188", timeout=1)
+assert r8b["canh_bao"] is None
+assert len(_fake_requests.calls) == 1, f"got {len(_fake_requests.calls)}"
+print("PASS 8b: chưa cấu hình key XInvoice + masothue.com cũng lỗi -> canh_bao=None an toàn, không "
+      "crash, không chặn xuất Excel.")
 
 _fake_settings.set("xinvoice_client_id", "demo-client")
 _fake_settings.set("xinvoice_api_key", "demo-key")
+_fake_requests.next_status = 200
+_fake_requests.next_data = None
 
 # Test 9: cache MISS (đã có cấu hình) -> gọi API đúng 1 lần, đúng URL/header, phân
 # loại đúng, LƯU vào cache.
@@ -269,26 +298,35 @@ _fake_requests.next_responses = None
 # giải quyết được hạn mức theo ngày/tháng, chỉ tốn thêm thời gian vô ích), thất bại
 # NGAY, và ly_do_loi phải ghi rõ "HẾT HẠN MỨC GÓI" để người dùng tự biết cần đợi gói
 # làm mới hoặc nâng cấp, KHÔNG PHẢI do "hết hạn"/sai client-id-api-key.
+# (đã cấu hình đúng 1 key XInvoice -> key đó hết hạn mức, rồi PHẢI tự động
+# dự phòng qua masothue.com — ở đây masothue.com CŨNG lỗi, để giữ nguyên ý
+# định gốc của test: xác nhận KHÔNG chờ+thử lại XInvoice vô ích, chỉ đúng 1
+# lượt XInvoice + 1 lượt masothue dự phòng rồi mới chịu thua hẳn.)
 _fake_requests.calls.clear()
 _fake_time.sleeps.clear()
 _fake_requests.next_exc = None
-_fake_requests.next_status = 429
-_fake_requests.next_data = {"success": False,
-                            "error": "Exceeded free tier limit. Please try again later or upgrade your plan."}
+_fake_requests.next_responses = [
+    (429, {"success": False,
+          "error": "Exceeded free tier limit. Please try again later or upgrade your plan."}, {}),
+    (500, {"message": "masothue loi"}, {}),
+]
 dem_loi_9c = [0]
 r9c = _tra_cuu_trang_thai_mst("0388887777", timeout=1, so_lan_that_bai_lien_tiep=dem_loi_9c)
 assert r9c["canh_bao"] is None
-assert len(_fake_requests.calls) == 1, (
-    f"429 HẾT HẠN MỨC GÓI KHÔNG được chờ+thử lại (vô ích, hạn mức tính theo ngày/tháng) — phải thất "
-    f"bại ngay ở lần gọi đầu tiên — got {len(_fake_requests.calls)} lượt gọi")
+assert len(_fake_requests.calls) == 2, (
+    f"429 HẾT HẠN MỨC GÓI KHÔNG được chờ+thử lại XInvoice (vô ích, hạn mức tính theo ngày/tháng) — chỉ "
+    f"1 lượt gọi XInvoice, rồi tự động dự phòng thêm ĐÚNG 1 lượt masothue.com (ở đây cũng lỗi) — got "
+    f"{len(_fake_requests.calls)} lượt gọi")
 assert dem_loi_9c[0] == 1, "Vẫn phải tính vào bộ đếm lỗi liên tiếp để sớm dừng gọi mạng cho các MST còn lại"
 assert "HẾT HẠN MỨC GÓI" in (r9c.get("ly_do_loi") or ""), (
     f"ly_do_loi phải ghi rõ 'HẾT HẠN MỨC GÓI' (khác hẳn 'hết hạn'/sai key) để người dùng tự biết đúng "
     f"nguyên nhân cần đợi gói làm mới hoặc nâng cấp trên xinvoice.vn — got {r9c}")
 print("PASS 9c: 429 do HẾT HẠN MỨC GÓI (free tier, đúng nguyên văn lỗi thật người dùng gặp) -> nhận "
-      "diện đúng, KHÔNG chờ+thử lại vô ích, thất bại ngay, ly_do_loi ghi rõ nguyên nhân là hết hạn "
-      "mức gói (không phải hết hạn/sai key).")
+      "diện đúng, KHÔNG chờ+thử lại XInvoice vô ích, thất bại ngay rồi tự động dự phòng masothue.com "
+      "(ở đây cũng lỗi), ly_do_loi ghi rõ nguyên nhân là hết hạn mức gói (không phải hết hạn/sai key).")
+_fake_requests.next_responses = None
 _fake_requests.next_status = 200   # trả về trạng thái mặc định cho các test sau
+_fake_requests.next_data = None
 
 # Test 10: cache HIT (vừa tra ở Test 9) -> KHÔNG gọi mạng lại, trả đúng kết quả đã lưu.
 _fake_requests.calls.clear()
@@ -333,9 +371,14 @@ for i in range(8):
     ket_qua_12.append(_tra_cuu_trang_thai_mst(mst_gia + "0", timeout=1, so_lan_that_bai_lien_tiep=dem_loi))
 assert all(kq["canh_bao"] is None for kq in ket_qua_12), (
     "Lỗi mạng KHÔNG được crash và KHÔNG được suy đoán canh_bao — phải luôn là None")
-assert len(_fake_requests.calls) == 5, (
-    f"Sau ĐÚNG 5 lỗi liên tiếp phải NGỪNG gọi API cho các MST còn lại trong lượt này (tránh treo lâu "
-    f"vì hàng loạt timeout) — got {len(_fake_requests.calls)} lượt gọi thật (kỳ vọng đúng 5)")
+# Mỗi lượt lỗi (trước khi bộ đếm đạt 5) giờ làm ĐÚNG 2 lượt gọi mạng thật: 1
+# lượt XInvoice (lỗi) + 1 lượt masothue.com dự phòng (cũng lỗi, vì next_exc
+# áp dụng cho MỌI lượt gọi) -> 5 lượt lỗi liên tiếp x 2 = 10 lượt gọi thật,
+# rồi bộ đếm đạt 5 mới NGỪNG hẳn (3 lượt còn lại không gọi mạng nữa).
+assert len(_fake_requests.calls) == 10, (
+    f"Sau ĐÚNG 5 lượt lỗi liên tiếp (mỗi lượt thử cả XInvoice lẫn masothue.com dự phòng, 2 lượt gọi "
+    f"mạng/lượt) phải NGỪNG gọi mạng cho các MST còn lại trong lượt này (tránh treo lâu vì hàng loạt "
+    f"timeout) — got {len(_fake_requests.calls)} lượt gọi thật (kỳ vọng đúng 10)")
 assert all("Lỗi kết nối" in (kq.get("ly_do_loi") or "") for kq in ket_qua_12[:5]), (
     f"Mỗi lượt lỗi kết nối THẬT SỰ (5 lượt đầu, trước khi ngừng gọi mạng) phải kèm ly_do_loi cụ thể để "
     f"người dùng biết nguyên nhân thật (không chỉ thấy trống không rõ vì sao) — got {ket_qua_12[:5]}")
@@ -358,8 +401,12 @@ assert dem_loi2[0] == 1, f"HTTP lỗi vẫn phải tính vào bộ đếm lỗi 
 assert "HTTP 401" in (r13.get("ly_do_loi") or ""), (
     f"Phải trả kèm ly_do_loi ghi rõ mã lỗi HTTP thật (401) để người dùng tự chẩn đoán được nguyên nhân "
     f"— got {r13}")
+assert len(_fake_requests.calls) == 2, (
+    f"1 lượt XInvoice (401) rồi tự động dự phòng thêm 1 lượt masothue.com (ở đây cũng trả 401, mặc "
+    f"định của fake) — got {len(_fake_requests.calls)} lượt gọi")
 print("PASS 13: HTTP lỗi (vd 401 sai client-id/api-key) -> canh_bao=None (không suy đoán), vẫn tính "
-      "vào bộ đếm lỗi liên tiếp, VÀ trả kèm ly_do_loi ghi rõ 'HTTP 401' để chẩn đoán đúng nguyên nhân.")
+      "vào bộ đếm lỗi liên tiếp, VÀ trả kèm ly_do_loi ghi rõ 'HTTP 401' để chẩn đoán đúng nguyên nhân "
+      "(sau khi đã thử dự phòng masothue.com cũng không được).")
 
 # ===== Test 13b (ca thật người dùng báo — CỰC KỲ QUAN TRỌNG, bug thật): lượt tra THẤT
 # BẠI (lỗi mạng/HTTP lỗi) KHÔNG được lưu vào cache DB — trước đây LUÔN lưu cache dù
@@ -516,17 +563,19 @@ _fake_requests.calls.clear()
 _fake_requests.next_responses = [
     (429, loi_quota, {}),
     (429, loi_quota, {}),
+    (500, {"message": "masothue loi"}, {}),
 ]
 r18 = _tra_cuu_trang_thai_mst("0321111113", timeout=1)
 assert r18["canh_bao"] is None
-assert len(_fake_requests.calls) == 2, (
-    f"Phải thử ĐÚNG 2 key (mỗi key 1 lượt, hết hạn mức gói không chờ+thử lại) rồi DỪNG HẲN, không lặp "
-    f"vô hạn — got {len(_fake_requests.calls)}")
+assert len(_fake_requests.calls) == 3, (
+    f"Phải thử ĐÚNG 2 key (mỗi key 1 lượt, hết hạn mức gói không chờ+thử lại) rồi tự động dự phòng "
+    f"thêm ĐÚNG 1 lượt masothue.com (ở đây cũng lỗi) — got {len(_fake_requests.calls)}")
 assert "2 key" in (r18.get("ly_do_loi") or ""), (
     f"ly_do_loi phải nêu rõ đã thử CẢ 2 key đều hết hạn mức để người dùng biết cần thêm key khác "
     f"— got {r18}")
-print("PASS 18: cả 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt từng key rồi thất bại hẳn "
-      "(không lặp vô hạn), ly_do_loi nêu rõ đã thử cả 2 key.")
+print("PASS 18: cả 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt từng key, rồi tự động dự "
+      "phòng thêm masothue.com (ở đây cũng lỗi) rồi mới thất bại hẳn (không lặp vô hạn), ly_do_loi "
+      "nêu rõ đã thử cả 2 key.")
 
 # Test 19 (không hồi quy — QUAN TRỌNG): lỗi CHUNG (vd HTTP 404 — MST không
 # tồn tại) KHÔNG PHẢI do lỗi của riêng 1 key -> KHÔNG được lãng phí thử key
@@ -538,15 +587,17 @@ conn19.close()
 _set_xinvoice_keys([{"client_id": "keyC-id", "api_key": "keyC-secret"},
                     {"client_id": "keyD-id", "api_key": "keyD-secret"}])
 _fake_requests.calls.clear()
-_fake_requests.next_responses = [(404, {"message": "Not Found"}, {})]
+_fake_requests.next_responses = [(404, {"message": "Not Found"}, {}), (500, {"message": "masothue loi"}, {})]
 r19 = _tra_cuu_trang_thai_mst("0321111114", timeout=1)
 assert r19["canh_bao"] is None
-assert len(_fake_requests.calls) == 1, (
+assert len(_fake_requests.calls) == 2, (
     f"Lỗi CHUNG (vd HTTP 404, không phải lỗi riêng của key) KHÔNG được thử key khác -> chỉ 1 lượt gọi "
-    f"— got {len(_fake_requests.calls)}")
+    f"XInvoice, rồi tự động dự phòng thêm 1 lượt masothue.com (ở đây cũng lỗi) — got "
+    f"{len(_fake_requests.calls)}")
 assert "HTTP 404" in (r19.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ HTTP 404 — got {r19}"
-print("PASS 19: lỗi CHUNG (HTTP 404, không phải lỗi riêng của 1 key) -> KHÔNG lãng phí thử key khác, "
-      "chỉ 1 lượt gọi, thất bại ngay đúng như lỗi thật.")
+print("PASS 19: lỗi CHUNG (HTTP 404, không phải lỗi riêng của 1 key) -> KHÔNG lãng phí thử key XInvoice "
+      "khác, chỉ 1 lượt gọi, rồi vẫn tự động dự phòng masothue.com (ở đây cũng lỗi) trước khi thất bại "
+      "hẳn.")
 
 # Test 20 (không hồi quy): lỗi kết nối/mạng (exception) cũng là lỗi CHUNG ->
 # tương tự Test 19, KHÔNG được thử key khác.
@@ -559,12 +610,83 @@ _fake_requests.next_responses = None
 _fake_requests.next_exc = Exception("mạng lỗi giả lập")
 r20 = _tra_cuu_trang_thai_mst("0321111115", timeout=1)
 assert r20["canh_bao"] is None
-assert len(_fake_requests.calls) == 1, (
-    f"Lỗi kết nối/mạng (lỗi CHUNG, không phải lỗi riêng của key) KHÔNG được thử key khác -> chỉ 1 lượt "
-    f"gọi — got {len(_fake_requests.calls)}")
+assert len(_fake_requests.calls) == 2, (
+    f"Lỗi kết nối/mạng (lỗi CHUNG, không phải lỗi riêng của key) KHÔNG được thử key XInvoice khác -> "
+    f"chỉ 1 lượt gọi XInvoice, rồi tự động dự phòng thêm 1 lượt masothue.com (ở đây cũng lỗi kết nối "
+    f"y hệt, vì next_exc áp dụng cho mọi lượt gọi) — got {len(_fake_requests.calls)}")
 assert "Lỗi kết nối" in (r20.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ lỗi kết nối — got {r20}"
-print("PASS 20: lỗi kết nối/mạng (lỗi CHUNG) -> KHÔNG lãng phí thử key khác, chỉ 1 lượt gọi.")
+print("PASS 20: lỗi kết nối/mạng (lỗi CHUNG) -> KHÔNG lãng phí thử key XInvoice khác, chỉ 1 lượt gọi "
+      "XInvoice, vẫn tự động dự phòng thêm masothue.com trước khi thất bại hẳn.")
 _fake_requests.next_exc = None
+
+# ===== Test 21-22 (CHÍNH tính năng vừa yêu cầu người dùng — "hãy chỉnh thêm
+# nếu api khong tra được hết thì hãy tra qua masothue.com", đúng log thật:
+# "17 MST chưa lấy được tình trạng... ĐÃ HẾT HẠN MỨC/SAI cả 2 key đã cấu
+# hình"): khi API XInvoice đã cấu hình nhưng KHÔNG dùng được (hết hạn mức/
+# lỗi), tự động DỰ PHÒNG qua masothue.com thay vì chịu để trống. =====
+
+# Test 21 (QUAN TRỌNG — đúng ca thật): đã cấu hình 1 key XInvoice nhưng HẾT
+# HẠN MỨC GÓI (429 quota) -> PHẢI tự động dự phòng qua masothue.com và LẤY
+# ĐƯỢC kết quả thật (thay vì để trống như trước khi có tính năng dự phòng
+# này), và kết quả dự phòng thành công đó PHẢI được lưu cache bình thường.
+conn21 = _fresh_db()
+conn21.execute("DELETE FROM mst_status_cache")
+conn21.commit()
+conn21.close()
+_set_xinvoice_keys([{"client_id": "keyE-id", "api_key": "keyE-secret"}])
+_fake_requests.calls.clear()
+_fake_requests.next_exc = None
+_fake_requests.next_responses = [
+    (429, loi_quota, {}),
+    (200, {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}, {}),
+]
+r21 = _tra_cuu_trang_thai_mst("0321111116", timeout=1)
+assert r21["canh_bao"] is False, (
+    f"XInvoice hết hạn mức gói -> PHẢI tự động dự phòng masothue.com và lấy được tình trạng thật, "
+    f"không được để trống — got {r21}")
+assert len(_fake_requests.calls) == 2, (
+    f"Phải thử 1 lượt XInvoice (hết hạn mức) rồi 1 lượt masothue.com dự phòng — got "
+    f"{len(_fake_requests.calls)}")
+assert "masothue.com" in _fake_requests.calls[1]["url"], "Lượt 2 phải là gọi masothue.com dự phòng"
+assert "ly_do_loi" not in r21, (
+    f"Đã lấy được kết quả thật từ masothue.com (dự phòng thành công) -> KHÔNG được còn báo ly_do_loi "
+    f"(đã có dữ liệu thật, không còn là lỗi nữa) — got {r21}")
+conn21b = _fresh_db()
+row21 = conn21b.execute("SELECT * FROM mst_status_cache WHERE mst=?", ("0321111116",)).fetchone()
+conn21b.close()
+assert row21 is not None and bool(row21["canh_bao"]) is False, (
+    "Kết quả dự phòng thành công từ masothue.com PHẢI được lưu cache như bình thường")
+print("PASS 21: XInvoice hết hạn mức gói (429 quota, đúng ca thật người dùng báo) -> tự động dự phòng "
+      "tra qua masothue.com và lấy được tình trạng thật, không còn để trống nữa, đúng yêu cầu người "
+      "dùng 'nếu api không tra được hết thì hãy tra qua masothue.com'; kết quả dự phòng cũng được lưu "
+      "cache bình thường.")
+
+# Test 22 (không hồi quy — QUAN TRỌNG): dự phòng masothue.com trả về HTTP 200
+# nhưng NỘI DUNG không khớp được tình trạng nào (trang lỗi/đổi cấu trúc/MST
+# không có dữ liệu) -> PHẢI coi là THẤT BẠI (không suy đoán canh_bao=True/
+# False bừa), và KHÔNG được lưu cache (tránh lặp lại đúng bug "kẹt cứng" 34
+# MST đã gặp trước đây với nguồn XInvoice).
+conn22 = _fresh_db()
+conn22.execute("DELETE FROM mst_status_cache")
+conn22.commit()
+conn22.close()
+_fake_requests.calls.clear()
+_fake_requests.next_responses = [
+    (404, {"message": "Not Found"}, {}),
+    (200, {"noi_dung": "trang khong co du lieu khop mst nao"}, {}),
+]
+r22 = _tra_cuu_trang_thai_mst("0321111117", timeout=1)
+assert r22["canh_bao"] is None
+assert len(_fake_requests.calls) == 2
+conn22b = _fresh_db()
+row22 = conn22b.execute("SELECT * FROM mst_status_cache WHERE mst=?", ("0321111117",)).fetchone()
+conn22b.close()
+assert row22 is None, (
+    f"Dự phòng masothue.com trả 200 nhưng KHÔNG khớp tình trạng nào -> phải coi là thất bại, KHÔNG lưu "
+    f"cache (tránh lặp lại bug 'kẹt cứng' đã sửa trước đây) — got {dict(row22) if row22 else None}")
+print("PASS 22: dự phòng masothue.com trả về nội dung không khớp tình trạng nào -> coi là thất bại an "
+      "toàn (canh_bao=None), KHÔNG lưu cache để còn thử lại lần sau.")
+_fake_requests.next_responses = None
 
 os.unlink(_tmp_db.name)
 print("\nALL DONE")

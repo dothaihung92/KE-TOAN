@@ -38,7 +38,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.257"
+APP_BUILD = "2026-09-15.258"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32690,6 +32690,38 @@ def _goi_1_lan_xinvoice(mst_c, client_id, api_key, timeout):
         return False, "", None, f"Lỗi kết nối: {str(_e_mst)[:150]}", False
 
 
+def _tra_cuu_masothue(mst_c, timeout):
+    """Dự phòng khi API XInvoice KHÔNG dùng được (chưa cấu hình key nào,
+    hoặc đã thử hết các key đã cấu hình mà vẫn lỗi — vd cả key đều hết hạn
+    mức gói free tier) — tra cứu tình trạng MST qua trang CÔNG KHAI
+    masothue.com (không cần đăng ký client-id/api-key, nhưng KHÔNG phải API
+    chính thức của Tổng cục Thuế như XInvoice, chỉ dùng làm phương án dự
+    phòng), theo đúng yêu cầu người dùng: "nếu api không tra được hết thì
+    hãy tra qua masothue.com". Dò tình trạng bằng CÙNG hàm
+    _phan_loai_trang_thai_mst() dò theo từ khoá trên toàn bộ nội dung trang
+    (không phụ thuộc cấu trúc HTML/CSS cụ thể, bền hơn khi trang đổi giao
+    diện) — y hệt cách dùng trước khi chuyển sang XInvoice.
+
+    Trả về (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi). Nếu không dò
+    được tình trạng khớp (trang lỗi/không có dữ liệu MST) thì coi là THẤT
+    BẠI (thanh_cong=False, không lưu cache) thay vì trả canh_bao=None
+    "thành công" — để lần xuất Excel SAU còn thử lại thay vì bị kẹt cứng ở
+    kết quả rỗng."""
+    try:
+        r = requests.get("https://masothue.com/Search/",
+                         params={"q": mst_c, "type": "auto"},
+                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                         timeout=timeout)
+        if r.status_code != 200:
+            return False, "", None, f"masothue.com HTTP {r.status_code}"
+        trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(r.text or "")
+        if canh_bao is None:
+            return False, "", None, "masothue.com: không dò được tình trạng khớp MST"
+        return True, trang_thai_goc, canh_bao, None
+    except Exception as _e_mt:
+        return False, "", None, f"masothue.com lỗi kết nối: {str(_e_mt)[:150]}"
+
+
 def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
     """Tra cứu tình trạng hoạt động của 1 MST qua API CHÍNH THỨC của XInvoice
     (api.xinvoice.vn/gdt-api/tax-payer/{mst} — lấy lại dữ liệu Tổng cục Thuế,
@@ -32700,11 +32732,15 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     hóa đơn của NCC "ma" — không có thật tại địa chỉ đăng ký — ảnh hưởng việc
     khấu trừ thuế GTGT đầu vào).
 
-    CẦN cấu hình client-id + api-key (đăng ký tại xinvoice.vn) qua
-    /api/settings/xinvoice-mst-api trước khi dùng được — CHƯA cấu hình thì
-    bỏ qua HẲN tính năng này (canh_bao=None, không lỗi, không chặn xuất
-    Excel) — người dùng có thể xuất Excel bình thường mà chưa cần đăng ký
-    ngay, chỉ là chưa có cột "Trạng thái MST".
+    ƯU TIÊN dùng API XInvoice nếu đã cấu hình client-id + api-key (đăng ký
+    tại xinvoice.vn) qua /api/settings/xinvoice-mst-api (có thể cấu hình
+    NHIỀU cặp key, tự chuyển key khi cặp đang dùng hết hạn mức) — nếu CHƯA
+    cấu hình key nào, HOẶC đã thử hết các key mà vẫn lỗi (vd hết hạn mức gói
+    free tier ở TẤT CẢ key), tự động DỰ PHÒNG sang tra cứu qua trang công
+    khai masothue.com (không cần đăng ký, theo yêu cầu người dùng "nếu api
+    không tra được hết thì hãy tra qua masothue.com") — chỉ khi CẢ HAI cách
+    đều không tra được mới trả canh_bao=None (không lỗi, không chặn xuất
+    Excel).
 
     CHỈ tra cứu THẬT SỰ qua mạng khi CHƯA có cache hoặc cache đã quá
     _MST_CACHE_NGAY ngày — kết quả (kể cả tra cứu thất bại) được lưu vào
@@ -32737,8 +32773,6 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         return {"trang_thai": "", "canh_bao": None}
 
     danh_sach_keys = _lay_danh_sach_xinvoice_keys()
-    if not danh_sach_keys:
-        return {"trang_thai": "", "canh_bao": None}
 
     conn = db()
     try:
@@ -32792,7 +32826,7 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # lần lượt "dò lại từ đầu" qua key đã hỏng cho từng MST.
     so_key = len(danh_sach_keys)
     with _XINVOICE_KEY_STATE["lock"]:
-        idx_bat_dau = _XINVOICE_KEY_STATE["idx"] % so_key
+        idx_bat_dau = (_XINVOICE_KEY_STATE["idx"] % so_key) if so_key else 0
 
     trang_thai_goc = ""
     canh_bao = None
@@ -32816,6 +32850,24 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         if loi_do_key and so_key > 1:
             ly_do_loi = f"ĐÃ HẾT HẠN MỨC/SAI cả {so_key} key đã cấu hình — lỗi key cuối: {ly_do_loi}"
         break
+
+    # DỰ PHÒNG masothue.com: khi API XInvoice không dùng được (chưa cấu hình
+    # key nào -> so_key=0, vòng lặp trên không chạy lần nào; HOẶC đã thử hết
+    # các key đã cấu hình mà vẫn lỗi) -> tự động thử tra qua trang công khai
+    # masothue.com trước khi chịu thua hẳn, đúng yêu cầu người dùng "nếu api
+    # không tra được hết thì hãy tra qua masothue.com" (ca thật: cả 2 key đã
+    # cấu hình đều hết hạn mức gói free tier cùng lúc, 17/234 MST không dò
+    # được trong 1 lượt xuất Excel).
+    if not thanh_cong:
+        ly_do_loi_xinvoice = ly_do_loi
+        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_mt = _tra_cuu_masothue(mst_c, timeout)
+        if thanh_cong:
+            ly_do_loi = None
+        elif ly_do_loi_xinvoice:
+            ly_do_loi = f"{ly_do_loi_xinvoice} | Dự phòng masothue.com cũng lỗi: {ly_do_loi_mt}"
+        else:
+            ly_do_loi = ly_do_loi_mt
+
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
 
