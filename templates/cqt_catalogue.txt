@@ -1,0 +1,761 @@
+10100###Thuế Thành phố Hà Nội
+10101###Thuế cơ sở 2 Thành phố Hà Nội
+10103###Thuế cơ sở 7 Thành phố Hà Nội
+10105###Thuế cơ sở 1 Thành phố Hà Nội
+10106###Thuế cơ sở 11 Thành phố Hà Nội
+10107###Thuế cơ sở 3 Thành phố Hà Nội
+10108###Thuế cơ sở 13 Thành phố Hà Nội
+10109###Thuế cơ sở 4 Thành phố Hà Nội
+10111###Thuế cơ sở 6 Thành phố Hà Nội
+10113###Thuế cơ sở 5 Thành phố Hà Nội
+10115###Thuế cơ sở 18 thành phố Hà Nội
+10117###Thuế cơ sở 10 Thành phố Hà Nội
+10119###Thuế cơ sở 12 Thành phố Hà Nội
+10123###Thuế cơ sở 14 Thành phố Hà Nội
+10125###Thuế cơ sở 18 thành phố Hà Nội
+10127###Thuế cơ sở 15 Thành phố Hà Nội
+10129###Thuế cơ sở 16 Thành phố Hà Nội
+10131###Thuế cơ sở 25 Thành phố Hà Nội
+10133###Thuế cơ sở 24 Thành phố Hà Nội
+10135###Thuế cơ sở 22 Thành phố Hà Nội
+10137###Thuế cơ sở 23 Thành phố Hà Nội
+10139###Thuế cơ sở 22 Thành phố Hà Nội
+10141###Thuế cơ sở 21 Thành phố Hà Nội
+10143###Thuế cơ sở 19 Thành phố Hà Nội
+10145###Thuế cơ sở 20 Thành phố Hà Nội
+10147###Thuế cơ sở 20 Thành phố Hà Nội
+10149###Thuế cơ sở 19 Thành phố Hà Nội
+10151###Thuế cơ sở 17 Thành phố Hà Nội
+10153###Thuế cơ sở 21 Thành phố Hà Nội
+10155###Thuế cơ sở 8 Thành phố Hà Nội
+10157###Thuế cơ sở 9 Thành phố Hà Nội
+10300###Thuế Thành phố Hải Phòng
+10301###Thuế cơ sở 2 Thành phố Hải Phòng
+10303###Thuế cơ sở 1 Thành phố Hải Phòng
+10304###Thuế cơ sở 1 Thành phố Hải Phòng
+10305###Thuế cơ sở 3 Thành phố Hải Phòng
+10307###Thuế cơ sở 5 Thành phố Hải Phòng
+10309###Thuế cơ sở 6 Thành phố Hải Phòng
+10311###Thuế cơ sở 4 Thành phố Hải Phòng
+10313###Thuế cơ sở 2 Thành phố Hải Phòng
+10315###Thuế cơ sở 5 Thành phố Hải Phòng
+10317###Thuế cơ sở 6 Thành phố Hải Phòng
+10319###Thuế cơ sở 8 Thành phố Hải Phòng
+10321###Thuế cơ sở 8 Thành phố Hải Phòng
+10323###Thuế cơ sở 7 Thành phố Hải Phòng
+10325###Thuế cơ sở 6 Thành phố Hải Phòng
+10327###Thuế cơ sở 3 Thành phố Hải Phòng
+10700###Thuế Thành phố Hải Phòng
+10701###Thuế cơ sở 9 thành phố Hải Phòng
+10703###Thuế cơ sở 10 thành phố Hải Phòng
+10705###Thuế cơ sở 14 thành phố Hải Phòng
+10707###Thuế cơ sở 14 thành phố Hải Phòng
+10709###Thuế cơ sở 13 thành phố Hải Phòng
+10711###Thuế cơ sở 13 thành phố Hải Phòng
+10713###Thuế cơ sở 12 thành phố Hải Phòng
+10715###Thuế cơ sở 12 thành phố Hải Phòng
+10717###Thuế cơ sở 11 thành phố Hải Phòng
+10719###Thuế cơ sở 11 thành phố Hải Phòng
+10721###Thuế cơ sở 11 thành phố Hải Phòng
+10723###Thuế cơ sở 12 thành phố Hải Phòng
+10900###Thuế Tỉnh Hưng Yên
+10901###Thuế cơ sở 1 tỉnh Hưng Yên
+10903###Thuế cơ sở 2 tỉnh Hưng Yên
+10905###Thuế cơ sở 3 tỉnh Hưng Yên
+10907###Thuế cơ sở 4 tỉnh Hưng Yên
+10909###Thuế cơ sở 1 tỉnh Hưng Yên
+10911###Thuế cơ sở 5 tỉnh Hưng Yên
+10913###Thuế cơ sở 5 tỉnh Hưng Yên
+10915###Thuế cơ sở 3 tỉnh Hưng Yên
+10917###Thuế cơ sở 2 tỉnh Hưng Yên
+10919###Thuế cơ sở 4 tỉnh Hưng Yên
+11100###Thuế Tỉnh Ninh Bình
+11101###Thuế cơ sở 10 tỉnh Ninh Bình
+11103###Thuế cơ sở 12 tỉnh Ninh Bình
+11105###Thuế cơ sở 10 tỉnh Ninh Bình
+11107###Thuế cơ sở 12 tỉnh Ninh Bình
+11109###Thuế cơ sở 11 tỉnh Ninh Bình
+11111###Thuế cơ sở 11 tỉnh Ninh Bình
+11300###Thuế Tỉnh Ninh Bình
+11301###Thuế cơ sở 5 tỉnh Ninh Bình
+11303###Thuế cơ sở 7 tỉnh Ninh Bình
+11307###Thuế cơ sở 7 tỉnh Ninh Bình
+11309###Thuế cơ sở 6 tỉnh Ninh Bình
+11311###Thuế cơ sở 6 tỉnh Ninh Bình
+11313###Thuế cơ sở 8 tỉnh Ninh Bình
+11315###Thuế cơ sở 8 tỉnh Ninh Bình
+11317###Thuế cơ sở 9 tỉnh Ninh Bình
+11319###Thuế cơ sở 9 tỉnh Ninh Bình
+11500###Thuế Tỉnh Hưng Yên
+11501###Thuế cơ sở 8 tỉnh Hưng Yên
+11503###Thuế cơ sở 6 tỉnh Hưng Yên
+11505###Thuế cơ sở 6 tỉnh Hưng Yên
+11507###Thuế cơ sở 7 tỉnh Hưng Yên
+11509###Thuế cơ sở 7 tỉnh Hưng Yên
+11511###Thuế cơ sở 8 tỉnh Hưng Yên
+11513###Thuế cơ sở 9 tỉnh Hưng Yên
+11515###Thuế cơ sở 9 tỉnh Hưng Yên
+11700###Thuế Tỉnh Ninh Bình
+11703###Thuế cơ sở 2 tỉnh Ninh Bình
+11705###Thuế cơ sở 4 tỉnh Ninh Bình
+11707###Thuế cơ sở 4 tỉnh Ninh Bình
+11709###Thuế cơ sở 1 tỉnh Ninh Bình
+11711###Thuế cơ sở 2 tỉnh Ninh Bình
+11713###Thuế cơ sở 3 tỉnh Ninh Bình
+11715###Thuế cơ sở 3 tỉnh Ninh Bình
+20100###Thuế Tỉnh Tuyên Quang
+20101###Thuế cơ sở 6 tỉnh Tuyên Quang
+20103###Thuế cơ sở 8 tỉnh Tuyên Quang
+20105###Thuế cơ sở 8 tỉnh Tuyên Quang
+20107###Thuế cơ sở 8 tỉnh Tuyên Quang
+20109###Thuế cơ sở 8 tỉnh Tuyên Quang
+20111###Thuế cơ sở 6 tỉnh Tuyên Quang
+20113###Thuế cơ sở 7 tỉnh Tuyên Quang
+20115###Thuế cơ sở 5 tỉnh Tuyên Quang
+20117###Thuế cơ sở 7 tỉnh Tuyên Quang
+20118###Thuế cơ sở 5 tỉnh Tuyên Quang
+20119###Thuế cơ sở 5 tỉnh Tuyên Quang
+20300###Thuế Tỉnh Cao Bằng
+20301###Thuế cơ sở 1 tỉnh Cao Bằng
+20303###Thuế cơ sở 4 tỉnh Cao Bằng
+20305###Thuế cơ sở 2 tỉnh Cao Bằng
+20311###Thuế cơ sở 3 tỉnh Cao Bằng
+20313###Thuế cơ sở 2 tỉnh Cao Bằng
+20315###Thuế cơ sở 2 tỉnh Cao Bằng
+20317###Thuế cơ sở 3 tỉnh Cao Bằng
+20319###Thuế cơ sở 3 tỉnh Cao Bằng
+20321###Thuế cơ sở 1 tỉnh Cao Bằng
+20323###Thuế cơ sở 4 tỉnh Cao Bằng
+20500###Thuế Tỉnh Lào Cai
+20501###Thuế cơ sở 1 tỉnh Lào Cai
+20505###Thuế cơ sở 1 tỉnh Lào Cai
+20507###Thuế cơ sở 2 tỉnh Lào Cai
+20509###Thuế cơ sở 4 tỉnh Lào Cai
+20511###Thuế cơ sở 5 tỉnh Lào Cai
+20513###Thuế cơ sở 3 tỉnh Lào Cai
+20515###Thuế cơ sở 5 tỉnh Lào Cai
+20519###Thuế cơ sở 5 tỉnh Lào Cai
+20521###Thuế cơ sở 4 tỉnh Lào Cai
+20700###Thuế Tỉnh Thái Nguyên
+20701###Thuế cơ sở 6 tỉnh Thái Nguyên
+20703###Thuế cơ sở 7 tỉnh Thái Nguyên
+20704###Thuế cơ sở 7 tỉnh Thái Nguyên
+20705###Thuế cơ sở 7 tỉnh Thái Nguyên
+20707###Thuế cơ sở 6 tỉnh Thái Nguyên
+20709###Thuế cơ sở 8 tỉnh Thái Nguyên
+20711###Thuế cơ sở 6 tỉnh Thái Nguyên
+20713###Thuế cơ sở 8 tỉnh Thái Nguyên
+20900###Thuế Tỉnh Lạng Sơn
+20901###Thuế cơ sở 5 tỉnh Lạng Sơn
+20903###Thuế cơ sở 3 tỉnh Lạng Sơn
+20905###Thuế cơ sở 3 tỉnh Lạng Sơn
+20907###Thuế cơ sở 4 tỉnh Lạng Sơn
+20909###Thuế cơ sở 4 tỉnh Lạng Sơn
+20911###Thuế cơ sở 4 tỉnh Lạng Sơn
+20913###Thuế cơ sở 5 tỉnh Lạng Sơn
+20915###Thuế cơ sở 2 tỉnh Lạng Sơn
+20917###Thuế cơ sở 1 tỉnh Lạng Sơn
+20919###Thuế cơ sở 2 tỉnh Lạng Sơn
+20921###Thuế cơ sở 1 tỉnh Lạng Sơn
+21100###Thuế Tỉnh Tuyên Quang
+21101###Thuế cơ sở 1 tỉnh Tuyên Quang
+21103###Thuế cơ sở 4 tỉnh Tuyên Quang
+21105###Thuế cơ sở 3 tỉnh Tuyên Quang
+21107###Thuế cơ sở 3 tỉnh Tuyên Quang
+21109###Thuế cơ sở 1 tỉnh Tuyên Quang
+21111###Thuế cơ sở 2 tỉnh Tuyên Quang
+21113###Thuế cơ sở 4 tỉnh Tuyên Quang
+21300###Thuế Tỉnh Lào Cai
+21301###Thuế cơ sở 6 tỉnh Lào Cai
+21303###Thuế cơ sở 8 tỉnh Lào Cai
+21305###Thuế cơ sở 9 tỉnh Lào Cai
+21307###Thuế cơ sở 7 tỉnh Lào Cai
+21309###Thuế cơ sở 8 tỉnh Lào Cai
+21311###Thuế cơ sở 7 tỉnh Lào Cai
+21313###Thuế cơ sở 6 tỉnh Lào Cai
+21315###Thuế cơ sở 8 tỉnh Lào Cai
+21317###Thuế cơ sở 8 tỉnh Lào Cai
+21500###Thuế Tỉnh Thái Nguyên
+21501###Thuế cơ sở 1 tỉnh Thái Nguyên
+21503###Thuế cơ sở 2 tỉnh Thái Nguyên
+21505###Thuế cơ sở 4 tỉnh Thái Nguyên
+21507###Thuế cơ sở 5 tỉnh Thái Nguyên
+21509###Thuế cơ sở 4 tỉnh Thái Nguyên
+21511###Thuế cơ sở 5 tỉnh Thái Nguyên
+21513###Thuế cơ sở 3 tỉnh Thái Nguyên
+21515###Thuế cơ sở 2 tỉnh Thái Nguyên
+21517###Thuế cơ sở 2 tỉnh Thái Nguyên
+21700###Thuế Tỉnh Phú Thọ
+21701###Thuế cơ sở 1 tỉnh Phú Thọ
+21703###Thuế cơ sở 2 tỉnh Phú Thọ
+21705###Thuế cơ sở 3 tỉnh Phú Thọ
+21707###Thuế cơ sở 3 tỉnh Phú Thọ
+21709###Thuế cơ sở 3 tỉnh Phú Thọ
+21711###Thuế cơ sở 2 tỉnh Phú Thọ
+21713###Thuế cơ sở 6 tỉnh Phú Thọ
+21715###Thuế cơ sở 6 tỉnh Phú Thọ
+21717###Thuế cơ sở 4 tỉnh Phú Thọ
+21719###Thuế cơ sở 5 tỉnh Phú Thọ
+21720###Thuế cơ sở 5 tỉnh Phú Thọ
+21721###Thuế cơ sở 1 tỉnh Phú Thọ
+21723###Thuế cơ sở 4 tỉnh Phú Thọ
+21900###Thuế Tỉnh Phú Thọ
+21901###Thuế cơ sở 8 tỉnh Phú Thọ
+21902###Thuế cơ sở 7 tỉnh Phú Thọ
+21903###Thuế cơ sở 11 tỉnh Phú Thọ
+21904###Thuế cơ sở 10 tỉnh Phú Thọ
+21905###Thuế cơ sở 10 tỉnh Phú Thọ
+21907###Thuế cơ sở 9 tỉnh Phú Thọ
+21909###Thuế cơ sở 9 tỉnh Phú Thọ
+21913###Thuế cơ sở 7 tỉnh Phú Thọ
+21915###Thuế cơ sở 11 tỉnh Phú Thọ
+22100###Thuế Tỉnh Bắc Ninh
+22101###Thuế cơ sở 1 tỉnh Bắc Ninh
+22103###Thuế cơ sở 3 tỉnh Bắc Ninh
+22105###Thuế cơ sở 3 tỉnh Bắc Ninh
+22107###Thuế cơ sở 5 tỉnh Bắc Ninh
+22109###Thuế cơ sở 2 tỉnh Bắc Ninh
+22111###Thuế cơ sở 4 tỉnh Bắc Ninh
+22113###Thuế cơ sở 5 tỉnh Bắc Ninh
+22115###Thuế cơ sở 4 tỉnh Bắc Ninh
+22117###Thuế cơ sở 2 tỉnh Bắc Ninh
+22121###Thuế cơ sở 5 tỉnh Bắc Ninh
+22300###Thuế Tỉnh Bắc Ninh
+22301###Thuế cơ sở 7 tỉnh Bắc Ninh
+22303###Thuế cơ sở 8 tỉnh Bắc Ninh
+22305###Thuế cơ sở 6 tỉnh Bắc Ninh
+22307###Thuế cơ sở 6 tỉnh Bắc Ninh
+22309###Thuế cơ sở 9 tỉnh Bắc Ninh
+22311###Thuế cơ sở 10 tỉnh Bắc Ninh
+22313###Thuế cơ sở 8 tỉnh Bắc Ninh
+22315###Thuế cơ sở 10 tỉnh Bắc Ninh
+22500###Thuế Tỉnh Quảng Ninh
+22501###Thuế cơ sở 1 tỉnh Quảng Ninh
+22503###Thuế cơ sở 3 tỉnh Quảng Ninh
+22505###Thuế cơ sở 4 tỉnh Quảng Ninh
+22507###Thuế cơ sở 6 tỉnh Quảng Ninh
+22509###Thuế cơ sở 2 tỉnh Quảng Ninh
+22511###Thuế cơ sở 7 tỉnh Quảng Ninh
+22513###Thuế cơ sở 6 tỉnh Quảng Ninh
+22515###Thuế cơ sở 6 tỉnh Quảng Ninh
+22517###Thuế cơ sở 3 tỉnh Quảng Ninh
+22521###Thuế cơ sở 5 tỉnh Quảng Ninh
+22523###Thuế cơ sở 3 tỉnh Quảng Ninh
+22525###Thuế cơ sở 4 tỉnh Quảng Ninh
+22527###Thuế cơ sở 7 tỉnh Quảng Ninh
+30100###Thuế Tỉnh Điện Biên
+30101###Thuế cơ sở 1 tỉnh Điện Biên
+30103###Thuế cơ sở 4 tỉnh Điện Biên
+30104###Thuế cơ sở 5 tỉnh Điện Biên
+30111###Thuế cơ sở 4 tỉnh Điện Biên
+30113###Thuế cơ sở 3 tỉnh Điện Biên
+30115###Thuế cơ sở 3 tỉnh Điện Biên
+30117###Thuế cơ sở 2 tỉnh Điện Biên
+30119###Thuế cơ sở 2 tỉnh Điện Biên
+30121###Thuế cơ sở 1 tỉnh Điện Biên
+30123###Thuế cơ sở 5 tỉnh Điện Biên
+30200###Thuế Tỉnh Lai Châu
+30201###Thuế cơ sở 4 tỉnh Lai Châu
+30202###Thuế cơ sở 1 tỉnh Lai Châu
+30203###Thuế cơ sở 3 tỉnh Lai Châu
+30205###Thuế cơ sở 1 tỉnh Lai Châu
+30207###Thuế cơ sở 3 tỉnh Lai Châu
+30209###Thuế cơ sở 2 tỉnh Lai Châu
+30211###Thuế cơ sở 2 tỉnh Lai Châu
+30213###Thuế cơ sở 4 tỉnh Lai Châu
+30300###Thuế Tỉnh Sơn La
+30301###Thuế cơ sở 1 Tỉnh Sơn La
+30303###Thuế cơ sở 1 Tỉnh Sơn La
+30305###Thuế cơ sở 1 Tỉnh Sơn La
+30307###Thuế cơ sở 1 Tỉnh Sơn La
+30309###Thuế cơ sở 4 Tỉnh Sơn La
+30311###Thuế cơ sở 4 Tỉnh Sơn La
+30313###Thuế cơ sở 2 Tỉnh Sơn La
+30315###Thuế cơ sở 5 Tỉnh Sơn La
+30317###Thuế cơ sở 2 Tỉnh Sơn La
+30319###Thuế cơ sở 3 Tỉnh Sơn La
+30321###Thuế cơ sở 5 Tỉnh Sơn La
+30323###Thuế cơ sở 3 Tỉnh Sơn La
+30500###Thuế Tỉnh Phú Thọ
+30501###Thuế cơ sở 12 tỉnh Phú Thọ
+30503###Thuế cơ sở 12 tỉnh Phú Thọ
+30505###Thuế cơ sở 13 tỉnh Phú Thọ
+30509###Thuế cơ sở 14 tỉnh Phú Thọ
+30510###Thuế cơ sở 13 tỉnh Phú Thọ
+30511###Thuế cơ sở 15 tỉnh Phú Thọ
+30513###Thuế cơ sở 13 tỉnh Phú Thọ
+30515###Thuế cơ sở 16 tỉnh Phú Thọ
+30517###Thuế cơ sở 15 tỉnh Phú Thọ
+30519###Thuế cơ sở 16 tỉnh Phú Thọ
+40100###Thuế Tỉnh Thanh Hóa
+40101###Thuế cơ sở 1 tỉnh Thanh Hóa
+40103###Thuế cơ sở 4 tỉnh Thanh Hóa
+40105###Thuế cơ sở 2 tỉnh Thanh Hóa
+40107###Thuế cơ sở 11 tỉnh Thanh Hóa
+40109###Thuế cơ sở 11 tỉnh Thanh Hóa
+40111###Thuế cơ sở 11 tỉnh Thanh Hóa
+40113###Thuế cơ sở 9 tỉnh Thanh Hóa
+40115###Thuế cơ sở 9 tỉnh Thanh Hóa
+40117###Thuế cơ sở 10 tỉnh Thanh Hóa
+40119###Thuế cơ sở 5 tỉnh Thanh Hóa
+40121###Thuế cơ sở 10 tỉnh Thanh Hóa
+40123###Thuế cơ sở 8 tỉnh Thanh Hóa
+40125###Thuế cơ sở 12 tỉnh Thanh Hóa
+40127###Thuế cơ sở 12 tỉnh Thanh Hóa
+40129###Thuế cơ sở 5 tỉnh Thanh Hóa
+40131###Thuế cơ sở 4 tỉnh Thanh Hóa
+40133###Thuế cơ sở 3 tỉnh Thanh Hóa
+40135###Thuế cơ sở 6 tỉnh Thanh Hóa
+40137###Thuế cơ sở 8 tỉnh Thanh Hóa
+40139###Thuế cơ sở 3 tỉnh Thanh Hóa
+40141###Thuế cơ sở 6 tỉnh Thanh Hóa
+40143###Thuế cơ sở 3 tỉnh Thanh Hóa
+40147###Thuế cơ sở 7 tỉnh Thanh Hóa
+40149###Thuế cơ sở 2 tỉnh Thanh Hóa
+40151###Thuế cơ sở 7 tỉnh Thanh Hóa
+40153###Thuế cơ sở 13 tỉnh Thanh Hóa
+40300###Thuế Tỉnh Nghệ An
+40301###Thuế cơ sở 1 tỉnh Nghệ An
+40305###Thuế cơ sở 5 tỉnh Nghệ An
+40307###Thuế cơ sở 5 tỉnh Nghệ An
+40309###Thuế cơ sở 4 tỉnh Nghệ An
+40311###Thuế cơ sở 5 tỉnh Nghệ An
+40313###Thuế cơ sở 6 tỉnh Nghệ An
+40314###Thuế cơ sở 6 tỉnh Nghệ An
+40315###Thuế cơ sở 4 tỉnh Nghệ An
+40317###Thuế cơ sở 7 tỉnh Nghệ An
+40319###Thuế cơ sở 3 tỉnh Nghệ An
+40321###Thuế cơ sở 4 tỉnh Nghệ An
+40323###Thuế cơ sở 8 tỉnh Nghệ An
+40325###Thuế cơ sở 8 tỉnh Nghệ An
+40327###Thuế cơ sở 4 tỉnh Nghệ An
+40329###Thuế cơ sở 3 tỉnh Nghệ An
+40331###Thuế cơ sở 3 tỉnh Nghệ An
+40333###Thuế cơ sở 9 tỉnh Nghệ An
+40335###Thuế cơ sở 2 tỉnh Nghệ An
+40337###Thuế cơ sở 2 tỉnh Nghệ An
+40339###Thuế cơ sở 7 tỉnh Nghệ An
+40500###Thuế Tỉnh Hà Tĩnh
+40501###Thuế cơ sở 1 tỉnh Hà Tĩnh
+40503###Thuế cơ sở 3 tỉnh Hà Tĩnh
+40505###Thuế cơ sở 3 tỉnh Hà Tĩnh
+40507###Thuế cơ sở 4 tỉnh Hà Tĩnh
+40509###Thuế cơ sở 4 tỉnh Hà Tĩnh
+40511###Thuế cơ sở 2 tỉnh Hà Tĩnh
+40513###Thuế cơ sở 2 tỉnh Hà Tĩnh
+40515###Thuế cơ sở 1 tỉnh Hà Tĩnh
+40517###Thuế cơ sở 5 tỉnh Hà Tĩnh
+40519###Thuế cơ sở 6 tỉnh Hà Tĩnh
+40520###Thuế cơ sở 6 tỉnh Hà Tĩnh
+40521###Thuế cơ sở 5 tỉnh Hà Tĩnh
+40700###Thuế Tỉnh Quảng Trị
+40701###Thuế cơ sở 1 tỉnh Quảng Trị
+40703###Thuế cơ sở 8 tỉnh Quảng Trị
+40705###Thuế cơ sở 8 tỉnh Quảng Trị
+40707###Thuế cơ sở 7 tỉnh Quảng Trị
+40709###Thuế cơ sở 6 tỉnh Quảng Trị
+40711###Thuế cơ sở 1 tỉnh Quảng Trị
+40713###Thuế cơ sở 5 tỉnh Quảng Trị
+40715###Thuế cơ sở 7 tỉnh Quảng Trị
+40900###Thuế Tỉnh Quảng Trị
+40901###Thuế cơ sở 2 tỉnh Quảng Trị
+40903###Thuế cơ sở 3 tỉnh Quảng Trị
+40905###Thuế cơ sở 4 tỉnh Quảng Trị
+40907###Thuế cơ sở 4 tỉnh Quảng Trị
+40909###Thuế cơ sở 2 tỉnh Quảng Trị
+40911###Thuế cơ sở 3 tỉnh Quảng Trị
+40913###Thuế cơ sở 3 tỉnh Quảng Trị
+40915###Thuế cơ sở 9 tỉnh Quảng Trị
+40917###Thuế cơ sở 9 tỉnh Quảng Trị
+40919###Thuế cơ sở 10 tỉnh Quảng Trị
+41100###Thuế Thành phố Huế
+41101###Thuế cơ sở 1 thành phố Huế
+41103###Thuế cơ sở 2 thành phố Huế
+41105###Thuế cơ sở 2 thành phố Huế
+41107###Thuế cơ sở 2 thành phố Huế
+41109###Thuế cơ sở 3 thành phố Huế
+41111###Thuế cơ sở 3 thành phố Huế
+41113###Thuế cơ sở 4 thành phố Huế
+41115###Thuế cơ sở 5 thành phố Huế
+41119###Thuế cơ sở 1 thành phố Huế
+50100###Thuế Thành phố Đà Nẵng
+50101###Thuế cơ sở 2 thành phố Đà Nẵng
+50103###Thuế cơ sở 1 thành phố Đà Nẵng
+50105###Thuế cơ sở 3 thành phố Đà Nẵng
+50107###Thuế cơ sở 3 thành phố Đà Nẵng
+50109###Thuế cơ sở 4 thành phố Đà Nẵng
+50111###Thuế cơ sở 4 thành phố Đà Nẵng
+50113###Thuế cơ sở 3 thành phố Đà Nẵng
+50115###Thuế cơ sở 4 thành phố Đà Nẵng
+50300###Thuế Thành phố Đà Nẵng
+50301###Thuế cơ sở 9 thành phố Đà Nẵng
+50302###Thuế cơ sở 9 thành phố Đà Nẵng
+50303###Thuế cơ sở 7 thành phố Đà Nẵng
+50304###Thuế cơ sở 5 thành phố Đà Nẵng
+50305###Thuế cơ sở 5 thành phố Đà Nẵng
+50307###Thuế cơ sở 6 thành phố Đà Nẵng
+50309###Thuế cơ sở 7 thành phố Đà Nẵng
+50311###Thuế cơ sở 7 thành phố Đà Nẵng
+50313###Thuế cơ sở 6 thành phố Đà Nẵng
+50315###Thuế cơ sở 8 thành phố Đà Nẵng
+50317###Thuế cơ sở 8 thành phố Đà Nẵng
+50319###Thuế cơ sở 8 thành phố Đà Nẵng
+50321###Thuế cơ sở 10 thành phố Đà Nẵng
+50323###Thuế cơ sở 6 thành phố Đà Nẵng
+50325###Thuế cơ sở 9 thành phố Đà Nẵng
+50327###Thuế cơ sở 10 thành phố Đà Nẵng
+50329###Thuế cơ sở 10 thành phố Đà Nẵng
+50500###Thuế Tỉnh Quảng Ngãi
+50501###Thuế cơ sở 2 tỉnh Quảng Ngãi
+50503###Thuế cơ sở 5 tỉnh Quảng Ngãi
+50505###Thuế cơ sở 1 tỉnh Quảng Ngãi
+50507###Thuế cơ sở 1 tỉnh Quảng Ngãi
+50509###Thuế cơ sở 2 tỉnh Quảng Ngãi
+50511###Thuế cơ sở 4 tỉnh Quảng Ngãi
+50513###Thuế cơ sở 4 tỉnh Quảng Ngãi
+50515###Thuế cơ sở 2 tỉnh Quảng Ngãi
+50517###Thuế cơ sở 2 tỉnh Quảng Ngãi
+50519###Thuế cơ sở 2 tỉnh Quảng Ngãi
+50521###Thuế cơ sở 3 tỉnh Quảng Ngãi
+50523###Thuế cơ sở 3 tỉnh Quảng Ngãi
+50525###Thuế cơ sở 3 tỉnh Quảng Ngãi
+50700###Thuế Tỉnh Gia Lai
+50701###Thuế cơ sở 1 tỉnh Gia Lai
+50703###Thuế cơ sở 4 tỉnh Gia Lai
+50705###Thuế cơ sở 4 tỉnh Gia Lai
+50707###Thuế cơ sở 4 tỉnh Gia Lai
+50709###Thuế cơ sở 3 tỉnh Gia Lai
+50711###Thuế cơ sở 5 tỉnh Gia Lai
+50713###Thuế cơ sở 3 tỉnh Gia Lai
+50715###Thuế cơ sở 5 tỉnh Gia Lai
+50717###Thuế cơ sở 2 tỉnh Gia Lai
+50719###Thuế cơ sở 2 tỉnh Gia Lai
+50721###Thuế cơ sở 2 tỉnh Gia Lai
+50900###Thuế Tỉnh Đắk Lắk
+50901###Thuế cơ sở 7 tỉnh Đắk Lắk
+50903###Thuế cơ sở 10 tỉnh Đắk Lắk
+50905###Thuế cơ sở 11 tỉnh Đắk Lắk
+50907###Thuế cơ sở 10 tỉnh Đắk Lắk
+50909###Thuế cơ sở 8 tỉnh Đắk Lắk
+50911###Thuế cơ sở 9 tỉnh Đắk Lắk
+50912###Thuế cơ sở 8 tỉnh Đắk Lắk
+50913###Thuế cơ sở 8 tỉnh Đắk Lắk
+50915###Thuế cơ sở 8 tỉnh Đắk Lắk
+51100###Thuế Tỉnh Khánh Hòa
+51101###Thuế cơ sở 2 tỉnh Khánh Hòa
+51103###Thuế cơ sở 1 tỉnh Khánh Hòa
+51105###Thuế cơ sở 1 tỉnh Khánh Hòa
+51107###Thuế cơ sở 3 tỉnh Khánh Hòa
+51109###Thuế cơ sở 4 tỉnh Khánh Hòa
+51111###Thuế cơ sở 3 tỉnh Khánh Hòa
+51113###Thuế cơ sở 4 tỉnh Khánh Hòa
+51115###Thuế cơ sở 4 tỉnh Khánh Hòa
+51117###Thuế cơ sở 2 tỉnh Khánh Hòa
+60100###Thuế Tỉnh Quảng Ngãi
+60101###Thuế cơ sở 7 tỉnh Quảng Ngãi
+60103###Thuế cơ sở 11 tỉnh Quảng Ngãi
+60105###Thuế cơ sở 10 tỉnh Quảng Ngãi
+60107###Thuế cơ sở 9 tỉnh Quảng Ngãi
+60108###Thuế cơ sở 6 tỉnh Quảng Ngãi
+60109###Thuế cơ sở 6 tỉnh Quảng Ngãi
+60111###Thuế cơ sở 9 tỉnh Quảng Ngãi
+60113###Thuế cơ sở 8 tỉnh Quảng Ngãi
+60114###Thuế cơ sở 8 tỉnh Quảng Ngãi
+60115###Thuế cơ sở 9 tỉnh Quảng Ngãi
+60300###Thuế Tỉnh Gia Lai
+60301###Thuế cơ sở 8 tỉnh Gia Lai
+60303###Thuế cơ sở 6 tỉnh Gia Lai
+60305###Thuế cơ sở 7 tỉnh Gia Lai
+60307###Thuế cơ sở 8 tỉnh Gia Lai
+60309###Thuế cơ sở 8 tỉnh Gia Lai
+60311###Thuế cơ sở 6 tỉnh Gia Lai
+60313###Thuế cơ sở 6 tỉnh Gia Lai
+60315###Thuế cơ sở 9 tỉnh Gia Lai
+60317###Thuế cơ sở 9 tỉnh Gia Lai
+60319###Thuế cơ sở 10 tỉnh Gia Lai
+60320###Thuế cơ sở 11 tỉnh Gia Lai
+60321###Thuế cơ sở 11 tỉnh Gia Lai
+60323###Thuế cơ sở 11 tỉnh Gia Lai
+60325###Thuế cơ sở 7 tỉnh Gia Lai
+60327###Thuế cơ sở 6 tỉnh Gia Lai
+60329###Thuế cơ sở 11 tỉnh Gia Lai
+60331###Thuế cơ sở 10 tỉnh Gia Lai
+60500###Thuế Tỉnh Đắk Lắk
+60501###Thuế cơ sở 1 tỉnh Đắk Lắk
+60503###Thuế cơ sở 5 tỉnh Đắk Lắk
+60505###Thuế cơ sở 2 tỉnh Đắk Lắk
+60507###Thuế cơ sở 4 tỉnh Đắk Lắk
+60509###Thuế cơ sở 4 tỉnh Đắk Lắk
+60511###Thuế cơ sở 2 tỉnh Đắk Lắk
+60513###Thuế cơ sở 2 tỉnh Đắk Lắk
+60515###Thuế cơ sở 6 tỉnh Đắk Lắk
+60517###Thuế cơ sở 6 tỉnh Đắk Lắk
+60519###Thuế cơ sở 6 tỉnh Đắk Lắk
+60523###Thuế cơ sở 1 tỉnh Đắk Lắk
+60525###Thuế cơ sở 3 tỉnh Đắk Lắk
+60531###Thuế cơ sở 3 tỉnh Đắk Lắk
+60537###Thuế cơ sở 1 tỉnh Đắk Lắk
+60539###Thuế cơ sở 5 tỉnh Đắk Lắk
+60600###Thuế Tỉnh Lâm Đồng
+60603###Thuế cơ sở 13 tỉnh Lâm Đồng
+60605###Thuế cơ sở 13 tỉnh Lâm Đồng
+60607###Thuế cơ sở 12 tỉnh Lâm Đồng
+60609###Thuế cơ sở 12 tỉnh Lâm Đồng
+60611###Thuế cơ sở 11 tỉnh Lâm Đồng
+60613###Thuế cơ sở 10 tỉnh Lâm Đồng
+60615###Thuế cơ sở 10 tỉnh Lâm Đồng
+60617###Thuế cơ sở 11 tỉnh Lâm Đồng
+70100###Thuế Thành phố Hồ Chí Minh
+70101###Thuế cơ sở 1 Thành phố Hồ Chí Minh
+70105###Thuế cơ sở 3 Thành phố Hồ Chí Minh
+70107###Thuế cơ sở 4 Thành phố Hồ Chí Minh
+70109###Thuế cơ sở 5 Thành phố Hồ Chí Minh
+70111###Thuế cơ sở 6 Thành phố Hồ Chí Minh
+70113###Thuế cơ sở 7 Thành phố Hồ Chí Minh
+70115###Thuế cơ sở 8 Thành phố Hồ Chí Minh
+70119###Thuế cơ sở 10 Thành phố Hồ Chí Minh
+70121###Thuế cơ sở 11 Thành phố Hồ Chí Minh
+70123###Thuế cơ sở 12 Thành phố Hồ Chí Minh
+70125###Thuế cơ sở 15 Thành phố Hồ Chí Minh
+70127###Thuế cơ sở 16 Thành phố Hồ Chí Minh
+70128###Thuế cơ sở 17 Thành phố Hồ Chí Minh
+70129###Thuế cơ sở 14 Thành phố Hồ Chí Minh
+70131###Thuế cơ sở 13 Thành phố Hồ Chí Minh
+70134###Thuế cơ sở 9 Thành phố Hồ Chí Minh
+70135###Thuế cơ sở 19 Thành phố Hồ Chí Minh
+70137###Thuế cơ sở 12 Thành phố Hồ Chí Minh
+70139###Thuế cơ sở 18 Thành phố Hồ Chí Minh
+70141###Thuế cơ sở 7 Thành phố Hồ Chí Minh
+70143###Thuế cơ sở 20 Thành phố Hồ Chí Minh
+70145###Thuế cơ sở 2 Thành phố Hồ Chí Minh
+70300###Thuế Tỉnh Lâm Đồng
+70301###Thuế cơ sở 1 tỉnh Lâm Đồng
+70303###Thuế cơ sở 2 tỉnh Lâm Đồng
+70305###Thuế cơ sở 1 tỉnh Lâm Đồng
+70307###Thuế cơ sở 3 tỉnh Lâm Đồng
+70309###Thuế cơ sở 3 tỉnh Lâm Đồng
+70311###Thuế cơ sở 4 tỉnh Lâm Đồng
+70313###Thuế cơ sở 2 tỉnh Lâm Đồng
+70315###Thuế cơ sở 2 tỉnh Lâm Đồng
+70317###Thuế cơ sở 5 tỉnh Lâm Đồng
+70323###Thuế cơ sở 4 tỉnh Lâm Đồng
+70500###Thuế Tỉnh Khánh Hòa
+70501###Thuế cơ sở 6 tỉnh Khánh Hòa
+70503###Thuế cơ sở 8 tỉnh Khánh Hòa
+70505###Thuế cơ sở 7 tỉnh Khánh Hòa
+70507###Thuế cơ sở 5 tỉnh Khánh Hòa
+70509###Thuế cơ sở 8 tỉnh Khánh Hòa
+70511###Thuế cơ sở 7 tỉnh Khánh Hòa
+70513###Thuế cơ sở 5 tỉnh Khánh Hòa
+70700###Thuế Tỉnh Đồng Nai
+70701###Thuế cơ sở 10 tỉnh Đồng Nai
+70703###Thuế cơ sở 8 tỉnh Đồng Nai
+70705###Thuế cơ sở 9 tỉnh Đồng Nai
+70706###Thuế cơ sở 9 tỉnh Đồng Nai
+70707###Thuế cơ sở 10 tỉnh Đồng Nai
+70709###Thuế cơ sở 7 tỉnh Đồng Nai
+70710###Thuế cơ sở 7 tỉnh Đồng Nai
+70711###Thuế cơ sở 10 tỉnh Đồng Nai
+70713###Thuế cơ sở 7 tỉnh Đồng Nai
+70715###Thuế cơ sở 8 tỉnh Đồng Nai
+70716###Thuế cơ sở 8 tỉnh Đồng Nai
+70900###Thuế Tỉnh Tây Ninh
+70901###Thuế cơ sở 8 tỉnh Tây Ninh
+70903###Thuế cơ sở 10 tỉnh Tây Ninh
+70905###Thuế cơ sở 10 tỉnh Tây Ninh
+70907###Thuế cơ sở 9 tỉnh Tây Ninh
+70909###Thuế cơ sở 8 tỉnh Tây Ninh
+70911###Thuế cơ sở 9 tỉnh Tây Ninh
+70913###Thuế cơ sở 7 tỉnh Tây Ninh
+70915###Thuế cơ sở 7 tỉnh Tây Ninh
+70917###Thuế cơ sở 7 tỉnh Tây Ninh
+71100###Thuế Thành phố Hồ Chí Minh
+71101###Thuế cơ sở 25 Thành phố Hồ Chí Minh
+71103###Thuế cơ sở 29 Thành phố Hồ Chí Minh
+71105###Thuế cơ sở 28 Thành phố Hồ Chí Minh
+71107###Thuế cơ sở 27 Thành phố Hồ Chí Minh
+71109###Thuế cơ sở 26 Thành phố Hồ Chí Minh
+71111###Thuế cơ sở 28 Thành phố Hồ Chí Minh
+71113###Thuế cơ sở 29 Thành phố Hồ Chí Minh
+71115###Thuế cơ sở 29 Thành phố Hồ Chí Minh
+71117###Thuế cơ sở 28 Thành phố Hồ Chí Minh
+71300###Thuế Tỉnh Đồng Nai
+71301###Thuế cơ sở 3 tỉnh Đồng Nai
+71302###Thuế cơ sở 2 tỉnh Đồng Nai
+71303###Thuế cơ sở 4 tỉnh Đồng Nai
+71305###Thuế cơ sở 4 tỉnh Đồng Nai
+71307###Thuế cơ sở 3 tỉnh Đồng Nai
+71308###Thuế cơ sở 6 tỉnh Đồng Nai
+71309###Thuế cơ sở 6 tỉnh Đồng Nai
+71311###Thuế cơ sở 2 tỉnh Đồng Nai
+71313###Thuế cơ sở 1 tỉnh Đồng Nai
+71315###Thuế cơ sở 5 tỉnh Đồng Nai
+71317###Thuế cơ sở 5 tỉnh Đồng Nai
+71500###Thuế Tỉnh Lâm Đồng
+71501###Thuế cơ sở 6 tỉnh Lâm Đồng
+71503###Thuế cơ sở 8 tỉnh Lâm Đồng
+71505###Thuế cơ sở 8 tỉnh Lâm Đồng
+71507###Thuế cơ sở 6 tỉnh Lâm Đồng
+71509###Thuế cơ sở 6 tỉnh Lâm Đồng
+71511###Thuế cơ sở 9 tỉnh Lâm Đồng
+71513###Thuế cơ sở 9 tỉnh Lâm Đồng
+71514###Thuế cơ sở 9 tỉnh Lâm Đồng
+71515###Thuế cơ sở 9 tỉnh Lâm Đồng
+71517###Thuế cơ sở 7 tỉnh Lâm Đồng
+71700###Thuế Thành phố Hồ Chí Minh
+71701###Thuế cơ sở 24 Thành phố Hồ Chí Minh
+71703###Thuế cơ sở 21 Thành phố Hồ Chí Minh
+71705###Thuế cơ sở 23 Thành phố Hồ Chí Minh
+71707###Thuế cơ sở 23 Thành phố Hồ Chí Minh
+71709###Thuế cơ sở 22 Thành phố Hồ Chí Minh
+71712###Thuế cơ sở 21 Thành phố Hồ Chí Minh
+71713###Thuế cơ sở 24 Thành phố Hồ Chí Minh
+80100###Thuế Tỉnh Tây Ninh
+80101###Thuế cơ sở 1 tỉnh Tây Ninh
+80103###Thuế cơ sở 6 tỉnh Tây Ninh
+80105###Thuế cơ sở 6 tỉnh Tây Ninh
+80107###Thuế cơ sở 5 tỉnh Tây Ninh
+80109###Thuế cơ sở 5 tỉnh Tây Ninh
+80111###Thuế cơ sở 5 tỉnh Tây Ninh
+80113###Thuế cơ sở 4 tỉnh Tây Ninh
+80115###Thuế cơ sở 4 tỉnh Tây Ninh
+80117###Thuế cơ sở 2 tỉnh Tây Ninh
+80119###Thuế cơ sở 2 tỉnh Tây Ninh
+80121###Thuế cơ sở 1 tỉnh Tây Ninh
+80123###Thuế cơ sở 1 tỉnh Tây Ninh
+80125###Thuế cơ sở 3 tỉnh Tây Ninh
+80127###Thuế cơ sở 3 tỉnh Tây Ninh
+80129###Thuế cơ sở 6 tỉnh Tây Ninh
+80300###Thuế Tỉnh Đồng Tháp
+80301###Thuế cơ sở 5 tỉnh Đồng Tháp
+80303###Thuế cơ sở 6 tỉnh Đồng Tháp
+80305###Thuế cơ sở 7 tỉnh Đồng Tháp
+80307###Thuế cơ sở 7 tỉnh Đồng Tháp
+80309###Thuế cơ sở 7 tỉnh Đồng Tháp
+80311###Thuế cơ sở 5 tỉnh Đồng Tháp
+80313###Thuế cơ sở 8 tỉnh Đồng Tháp
+80315###Thuế cơ sở 8 tỉnh Đồng Tháp
+80317###Thuế cơ sở 9 tỉnh Đồng Tháp
+80319###Thuế cơ sở 9 tỉnh Đồng Tháp
+80321###Thuế cơ sở 6 tỉnh Đồng Tháp
+80323###Thuế cơ sở 7 tỉnh Đồng Tháp
+80500###Thuế Tỉnh An Giang
+80501###Thuế cơ sở 7 tỉnh An Giang
+80503###Thuế cơ sở 8 tỉnh An Giang
+80505###Thuế cơ sở 10 tỉnh An Giang
+80507###Thuế cơ sở 10 tỉnh An Giang
+80509###Thuế cơ sở 9 tỉnh An Giang
+80511###Thuế cơ sở 8 tỉnh An Giang
+80513###Thuế cơ sở 11 tỉnh An Giang
+80515###Thuế cơ sở 11 tỉnh An Giang
+80517###Thuế cơ sở 9 tỉnh An Giang
+80519###Thuế cơ sở 7 tỉnh An Giang
+80521###Thuế cơ sở 7 tỉnh An Giang
+80700###Thuế Tỉnh Đồng Tháp
+80701###Thuế cơ sở 1 tỉnh Đồng Tháp
+80703###Thuế cơ sở 3 tỉnh Đồng Tháp
+80705###Thuế cơ sở 4 tỉnh Đồng Tháp
+80707###Thuế cơ sở 2 tỉnh Đồng Tháp
+80709###Thuế cơ sở 4 tỉnh Đồng Tháp
+80711###Thuế cơ sở 2 tỉnh Đồng Tháp
+80713###Thuế cơ sở 4 tỉnh Đồng Tháp
+80715###Thuế cơ sở 2 tỉnh Đồng Tháp
+80717###Thuế cơ sở 3 tỉnh Đồng Tháp
+80719###Thuế cơ sở 3 tỉnh Đồng Tháp
+80721###Thuế cơ sở 4 tỉnh Đồng Tháp
+80900###Thuế Tỉnh Vĩnh Long
+80901###Thuế cơ sở 1 tỉnh Vĩnh Long
+80903###Thuế cơ sở 1 tỉnh Vĩnh Long
+80905###Thuế cơ sở 4 tỉnh Vĩnh Long
+80907###Thuế cơ sở 2 tỉnh Vĩnh Long
+80908###Thuế cơ sở 2 tỉnh Vĩnh Long
+80909###Thuế cơ sở 3 tỉnh Vĩnh Long
+80911###Thuế cơ sở 3 tỉnh Vĩnh Long
+80913###Thuế cơ sở 4 tỉnh Vĩnh Long
+81100###Thuế Tỉnh Vĩnh Long
+81101###Thuế cơ sở 9 tỉnh Vĩnh Long
+81103###Thuế cơ sở 9 tỉnh Vĩnh Long
+81105###Thuế cơ sở 11 tỉnh Vĩnh Long
+81107###Thuế cơ sở 12 tỉnh Vĩnh Long
+81108###Thuế cơ sở 11 tỉnh Vĩnh Long
+81109###Thuế cơ sở 10 tỉnh Vĩnh Long
+81111###Thuế cơ sở 10 tỉnh Vĩnh Long
+81113###Thuế cơ sở 10 tỉnh Vĩnh Long
+81115###Thuế cơ sở 12 tỉnh Vĩnh Long
+81300###Thuế Tỉnh An Giang
+81301###Thuế cơ sở 1 tỉnh An Giang
+81303###Thuế cơ sở 4 tỉnh An Giang
+81304###Thuế cơ sở 3 tỉnh An Giang
+81305###Thuế cơ sở 4 tỉnh An Giang
+81307###Thuế cơ sở 5 tỉnh An Giang
+81309###Thuế cơ sở 5 tỉnh An Giang
+81311###Thuế cơ sở 5 tỉnh An Giang
+81313###Thuế cơ sở 5 tỉnh An Giang
+81315###Thuế cơ sở 6 tỉnh An Giang
+81317###Thuế cơ sở 6 tỉnh An Giang
+81319###Thuế cơ sở 6 tỉnh An Giang
+81321###Thuế cơ sở 2 tỉnh An Giang
+81323###Thuế cơ sở 1 tỉnh An Giang
+81325###Thuế cơ sở 3 tỉnh An Giang
+81327###Thuế cơ sở 6 tỉnh An Giang
+81500###Thuế Thành phố Cần Thơ
+81503###Thuế cơ sở 4 thành phố Cần Thơ
+81505###Thuế cơ sở 3 thành phố Cần Thơ
+81519###Thuế cơ sở 1 thành phố Cần Thơ
+81521###Thuế cơ sở 3 thành phố Cần Thơ
+81523###Thuế cơ sở 2 thành phố Cần Thơ
+81525###Thuế cơ sở 4 thành phố Cần Thơ
+81527###Thuế cơ sở 5 thành phố Cần Thơ
+81529###Thuế cơ sở 2 thành phố Cần Thơ
+81531###Thuế cơ sở 5 thành phố Cần Thơ
+81600###Thuế Thành phố Cần Thơ
+81601###Thuế cơ sở 6 thành phố Cần Thơ
+81603###Thuế cơ sở 9 thành phố Cần Thơ
+81605###Thuế cơ sở 9 thành phố Cần Thơ
+81607###Thuế cơ sở 8 thành phố Cần Thơ
+81608###Thuế cơ sở 8 thành phố Cần Thơ
+81609###Thuế cơ sở 6 thành phố Cần Thơ
+81611###Thuế cơ sở 7 thành phố Cần Thơ
+81612###Thuế cơ sở 7 thành phố Cần Thơ
+81700###Thuế Tỉnh Vĩnh Long
+81701###Thuế cơ sở 5 tỉnh Vĩnh Long
+81703###Thuế cơ sở 8 tỉnh Vĩnh Long
+81705###Thuế cơ sở 5 tỉnh Vĩnh Long
+81707###Thuế cơ sở 8 tỉnh Vĩnh Long
+81709###Thuế cơ sở 6 tỉnh Vĩnh Long
+81711###Thuế cơ sở 7 tỉnh Vĩnh Long
+81713###Thuế cơ sở 6 tỉnh Vĩnh Long
+81715###Thuế cơ sở 7 tỉnh Vĩnh Long
+81716###Thuế cơ sở 7 tỉnh Vĩnh Long
+81900###Thuế Thành phố Cần Thơ
+81901###Thuế cơ sở 10 thành phố Cần Thơ
+81903###Thuế cơ sở 11 thành phố Cần Thơ
+81905###Thuế cơ sở 12 thành phố Cần Thơ
+81906###Thuế cơ sở 12 thành phố Cần Thơ
+81907###Thuế cơ sở 11 thành phố Cần Thơ
+81909###Thuế cơ sở 10 thành phố Cần Thơ
+81911###Thuế cơ sở 13 thành phố Cần Thơ
+81912###Thuế cơ sở 13 thành phố Cần Thơ
+81913###Thuế cơ sở 10 thành phố Cần Thơ
+81915###Thuế cơ sở 11 thành phố Cần Thơ
+81917###Thuế cơ sở 12 thành phố Cần Thơ
+82100###Thuế Tỉnh Cà Mau
+82101###Thuế cơ sở 2 tỉnh Cà Mau
+82103###Thuế cơ sở 8 tỉnh Cà Mau
+82105###Thuế cơ sở 6 tỉnh Cà Mau
+82106###Thuế cơ sở 6 tỉnh Cà Mau
+82107###Thuế cơ sở 7 tỉnh Cà Mau
+82109###Thuế cơ sở 8 tỉnh Cà Mau
+82111###Thuế cơ sở 7 tỉnh Cà Mau
+82300###Thuế Tỉnh Cà Mau
+82301###Thuế cơ sở 1 tỉnh Cà Mau
+82303###Thuế cơ sở 5 tỉnh Cà Mau
+82305###Thuế cơ sở 5 tỉnh Cà Mau
+82307###Thuế cơ sở 4 tỉnh Cà Mau
+82308###Thuế cơ sở 4 tỉnh Cà Mau
+82309###Thuế cơ sở 4 tỉnh Cà Mau
+82311###Thuế cơ sở 1 tỉnh Cà Mau
+82312###Thuế cơ sở 3 tỉnh Cà Mau
+82313###Thuế cơ sở 3 tỉnh Cà Mau
+82500###Chi cục Thuế doanh nghiệp lớn
+82700###Chi cục Thuế Thương mại điện tử

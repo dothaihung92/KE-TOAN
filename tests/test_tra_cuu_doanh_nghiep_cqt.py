@@ -113,8 +113,17 @@ def _fresh_db():
 
 
 ns['db'] = _fresh_db
+# tra_cuu_doanh_nghiep() giờ còn dò thêm danh mục CQT toàn quốc
+# (_lay_danh_muc_cqt, xem test_danh_muc_cqt_toan_quoc.py) — trỏ BASE_DIR
+# vào thư mục KHÔNG có data/cqt_catalogue.txt để hàm đó trả về {} an toàn,
+# giữ đúng các kỳ vọng "chưa học được thì để rỗng" của các test PHÍA TRÊN
+# (chỉ kiểm tra việc "học" qua cqt_ma_ten, không phải danh mục toàn quốc).
+ns['os'] = os
+ns['BASE_DIR'] = tempfile.mkdtemp()
+ns['_DANH_MUC_CQT'] = None
 exec(extract_fn('_tra_cuu_thong_tin_nnt'), ns)
 exec(extract_fn('_ghi_nho_ma_cqt'), ns)
+exec(extract_fn('_lay_danh_muc_cqt'), ns)
 exec(extract_fn('tra_cuu_doanh_nghiep'), ns)
 _tra_cuu_thong_tin_nnt = ns['_tra_cuu_thong_tin_nnt']
 _ghi_nho_ma_cqt = ns['_ghi_nho_ma_cqt']

@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.273"
+APP_BUILD = "2026-09-16.274"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6055,13 +6055,60 @@ def _ghi_nho_ma_cqt(ten_cqt, ma_cqt):
         conn.close()
 
 
+_DANH_MUC_CQT = None  # cache {ten_cqt: [ma_cqt, ...]} — nạp 1 lần từ file
+
+
+def _lay_danh_muc_cqt():
+    """Đọc bảng danh mục Mã<->Tên TOÀN BỘ cơ quan thuế cả nước, rút từ chính
+    file dữ liệu gốc của phần mềm HTKK (InterfaceIni\\Catalogue_CQT_Dia_Ban.xml
+    — người dùng tự lấy trên máy họ, mỗi dòng "MaXa###MaCQT###TenCQT" lặp lại
+    theo phường/xã, đã gộp lại đây thành các cặp Mã<->Tên duy nhất). Đây là
+    nguồn TRA CỨU ĐƯỢC NGAY, không cần đợi "học" dần từ công ty khác như
+    bảng cqt_ma_ten — giải quyết đúng yêu cầu người dùng: "muốn khi điền mst
+    sẽ tự dò ra thông tin, vì có công ty mới nên thư mục sẽ chưa có file".
+
+    QUAN TRỌNG: một vài TÊN bị trùng ở NHIỀU Mã CQT khác nhau (vd "Thuế cơ
+    sở 7 Thành phố Hồ Chí Minh" ứng với cả 70113 lẫn 70141) — nên trả về
+    dict {ten_cqt: [danh sách mã]}; nơi gọi hàm này CHỈ được tự động điền
+    khi danh sách có ĐÚNG 1 phần tử, tránh đoán sai mã.
+
+    Trả về {} nếu chưa có file danh mục (không lỗi/crash)."""
+    global _DANH_MUC_CQT
+    if _DANH_MUC_CQT is not None:
+        return _DANH_MUC_CQT
+    ket_qua = {}
+    duong_dan = os.path.join(BASE_DIR, "templates", "cqt_catalogue.txt")
+    try:
+        with open(duong_dan, encoding="utf-8") as f:
+            for dong in f:
+                dong = dong.strip()
+                if not dong:
+                    continue
+                phan = dong.split("###")
+                if len(phan) < 2:
+                    continue
+                ma, ten = phan[0].strip(), phan[1].strip()
+                if ma and ten:
+                    ket_qua.setdefault(ten, [])
+                    if ma not in ket_qua[ten]:
+                        ket_qua[ten].append(ma)
+    except FileNotFoundError:
+        pass
+    _DANH_MUC_CQT = ket_qua
+    return ket_qua
+
+
 @app.get("/api/tra-cuu-doanh-nghiep/{mst}")
 def tra_cuu_doanh_nghiep(mst: str):
     """Tra cứu thông tin đăng ký 1 MST để tự động điền form "Thêm công ty"
-    (Tên công ty, Địa chỉ trụ sở, Tên CQT nơi nộp — và Mã CQT nơi nộp NẾU
-    bảng cqt_ma_ten đã "học" được từ công ty khác cùng cơ quan thuế trước
-    đó). CHƯA cấu hình API XInvoice, hoặc MST không hợp lệ/không có dữ liệu
-    -> trả 404 (giao diện tự bỏ qua, không chặn việc tự nhập tay)."""
+    (Tên công ty, Địa chỉ trụ sở, Tên CQT nơi nộp — và Mã CQT nơi nộp).
+    Mã CQT được tra theo thứ tự: (1) bảng cqt_ma_ten đã "học" từ công ty
+    khác đã tự nhập/xác nhận đúng trước đó; (2) nếu chưa học được, tra
+    trong danh mục CQT toàn quốc (_lay_danh_muc_cqt) — CHỈ điền khi tên đó
+    ứng với ĐÚNG 1 mã duy nhất, để không đoán sai với công ty MỚI (chưa
+    từng có công ty nào cùng cơ quan thuế được nhập trước đó). CHƯA cấu
+    hình API XInvoice, hoặc MST không hợp lệ/không có dữ liệu -> trả 404
+    (giao diện tự bỏ qua, không chặn việc tự nhập tay)."""
     info = _tra_cuu_thong_tin_nnt(mst)
     if not info:
         raise HTTPException(
@@ -6077,6 +6124,10 @@ def tra_cuu_doanh_nghiep(mst: str):
                 ma_cqt = row["ma_cqt"] or ""
         finally:
             conn.close()
+        if not ma_cqt:
+            cac_ma = _lay_danh_muc_cqt().get(info["ten_cqt"], [])
+            if len(cac_ma) == 1:
+                ma_cqt = cac_ma[0]
     info["ma_cqt"] = ma_cqt
     return info
 
