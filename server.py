@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.270"
+APP_BUILD = "2026-09-16.271"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1465,6 +1465,16 @@ def init_db():
         canh_bao INTEGER,        -- 1=cần cảnh báo/tô đỏ, 0=bình thường, NULL=không tra được
         checked_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS cqt_ma_ten (
+        ten_cqt TEXT PRIMARY KEY,  -- Tên CQT nơi nộp (vd "Thuế cơ sở 4 tỉnh Tây Ninh")
+        ma_cqt TEXT,               -- Mã CQT nơi nộp tương ứng (vd "70113") — API tra
+                                    -- cứu MST (XInvoice) chỉ trả TÊN, không có MÃ; bảng
+                                    -- này tự "học" MÃ tương ứng mỗi khi có công ty nào
+                                    -- đó đã được người dùng tự nhập/xác nhận đúng cả
+                                    -- 2 trường (xem add_company/update_company) — công
+                                    -- ty SAU cùng chung 1 CQT sẽ tự động gợi ý đúng mã.
+        cap_nhat_at TEXT
+    );
     """)
     # Migration MỘT LẦN (đánh dấu qua app_settings, không chạy lại mỗi lần
     # khởi động): xoá các dòng mst_status_cache có canh_bao=NULL đã lỡ ghi
@@ -1982,6 +1992,7 @@ def add_company(data: dict = Body(...)):
     )
     conn.commit()
     conn.close()
+    _ghi_nho_ma_cqt(data.get("ten_cqt_noi_nop"), data.get("ma_cqt_noi_nop"))
     return {"ok": True}
 
 @app.put("/api/companies/{cid}")
@@ -2051,6 +2062,7 @@ def update_company(cid: int, data: dict = Body(...)):
     )
     conn.commit()
     conn.close()
+    _ghi_nho_ma_cqt(ten_cqt, ma_cqt)
     # Luôn reset phiên đăng nhập cũ sau khi sửa (phòng đổi MST/mật khẩu)
     if cid in CLIENTS:
         del CLIENTS[cid]
@@ -5977,6 +5989,96 @@ def set_xinvoice_mst_api(body: dict = Body(...)):
     with _XINVOICE_KEY_STATE["lock"]:
         _XINVOICE_KEY_STATE["idx"] = 0   # cấu hình lại -> thử lại từ cặp đầu tiên
     return {"ok": True, "keys": _lay_danh_sach_xinvoice_keys()}
+
+
+def _tra_cuu_thong_tin_nnt(mst):
+    """Tra cứu thông tin đăng ký của 1 MST qua API XInvoice (tên công ty,
+    địa chỉ trụ sở, cơ quan thuế quản lý) — dùng để tự động điền form "Thêm
+    công ty", theo yêu cầu người dùng: "chỉ cần điền mã thì phần mềm tự
+    động điền các thông tin dưới". Xác nhận qua request THẬT (người dùng tự
+    gọi API, dán lại JSON): {"orgType":..., "taxID":..., "name":"CÔNG TY
+    TNHH THIÊN Ý VN", "address":"...", "taxDepartment":"Thuế cơ sở 4 tỉnh
+    Tây Ninh", "status":"NNT đang hoạt động", "updatedAt":"..."}.
+
+    LƯU Ý: trường "taxDepartment" chỉ có TÊN cơ quan thuế, KHÔNG có MÃ số
+    (vd "70113") — API không trả mã này, nên _tra_cuu_thong_tin_nnt() chỉ
+    lấy được TÊN; MÃ được tra riêng từ bảng cqt_ma_ten (tự "học" dần từ các
+    công ty người dùng đã tự nhập/xác nhận đúng trước đó — xem
+    add_company/update_company) ở endpoint gọi hàm này.
+
+    Trả về dict {"ten":.., "dia_chi":.., "ten_cqt":.., "trang_thai":..}
+    (rỗng ở field nào API không trả) — hoặc None nếu không tra được (chưa
+    cấu hình key XInvoice nào, MST không hợp lệ, hoặc tất cả key đều lỗi)."""
+    mst_c = _chuan_mst(mst)[:10]
+    if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
+        return None
+    danh_sach_keys = _lay_danh_sach_xinvoice_keys()
+    if not danh_sach_keys:
+        return None
+    for k in danh_sach_keys:
+        try:
+            r = requests.get(f"https://api.xinvoice.vn/gdt-api/tax-payer/{mst_c}",
+                             headers={"Accept": "application/json",
+                                      "client-id": k["client_id"], "api-key": k["api_key"]},
+                             timeout=8)
+            if r.status_code == 200:
+                data = r.json() or {}
+                return {
+                    "ten": str(data.get("name") or "").strip(),
+                    "dia_chi": str(data.get("address") or "").strip(),
+                    "ten_cqt": str(data.get("taxDepartment") or "").strip(),
+                    "trang_thai": str(data.get("status") or "").strip(),
+                }
+        except Exception:
+            continue
+    return None
+
+
+def _ghi_nho_ma_cqt(ten_cqt, ma_cqt):
+    """Ghi nhớ ĐÚNG cặp Tên CQT <-> Mã CQT khi người dùng đã tự nhập/xác
+    nhận cả 2 trường cho 1 công ty (add_company/update_company) — bảng
+    cqt_ma_ten tự "học" dần, để công ty SAU cùng chung 1 cơ quan thuế được
+    tự động gợi ý đúng Mã CQT (API XInvoice chỉ trả Tên, không có Mã —
+    xem _tra_cuu_thong_tin_nnt)."""
+    ten_cqt = (ten_cqt or "").strip()
+    ma_cqt = (ma_cqt or "").strip()
+    if not ten_cqt or not ma_cqt:
+        return
+    conn = db()
+    try:
+        conn.execute(
+            "INSERT INTO cqt_ma_ten(ten_cqt, ma_cqt, cap_nhat_at) VALUES(?,?,?) "
+            "ON CONFLICT(ten_cqt) DO UPDATE SET ma_cqt=excluded.ma_cqt, cap_nhat_at=excluded.cap_nhat_at",
+            (ten_cqt, ma_cqt, datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@app.get("/api/tra-cuu-doanh-nghiep/{mst}")
+def tra_cuu_doanh_nghiep(mst: str):
+    """Tra cứu thông tin đăng ký 1 MST để tự động điền form "Thêm công ty"
+    (Tên công ty, Địa chỉ trụ sở, Tên CQT nơi nộp — và Mã CQT nơi nộp NẾU
+    bảng cqt_ma_ten đã "học" được từ công ty khác cùng cơ quan thuế trước
+    đó). CHƯA cấu hình API XInvoice, hoặc MST không hợp lệ/không có dữ liệu
+    -> trả 404 (giao diện tự bỏ qua, không chặn việc tự nhập tay)."""
+    info = _tra_cuu_thong_tin_nnt(mst)
+    if not info:
+        raise HTTPException(
+            404, "Không tra cứu được thông tin công ty cho MST này — có thể chưa cấu hình API "
+                 "XInvoice (menu Hỗ Trợ Kê khai tự động), hoặc MST không hợp lệ/không có dữ liệu.")
+    ma_cqt = ""
+    if info["ten_cqt"]:
+        conn = db()
+        try:
+            row = conn.execute(
+                "SELECT ma_cqt FROM cqt_ma_ten WHERE ten_cqt=?", (info["ten_cqt"],)).fetchone()
+            if row:
+                ma_cqt = row["ma_cqt"] or ""
+        finally:
+            conn.close()
+    info["ma_cqt"] = ma_cqt
+    return info
 
 
 @app.get("/api/settings/pin-nop-to-khai")

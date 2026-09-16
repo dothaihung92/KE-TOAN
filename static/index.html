@@ -360,7 +360,13 @@
   <div class="modal" style="width:min(560px,94vw);max-width:560px;max-height:92vh;overflow-y:auto">
     <h3 id="coModalTitle">Thêm công ty</h3>
     <div class="field"><label>Tên công ty</label><input id="m_ten" placeholder="Công ty TNHH ABC"></div>
-    <div class="field"><label>Mã số thuế</label><input id="m_mst" placeholder="0301234567"></div>
+    <div class="field"><label>Mã số thuế</label>
+      <div style="display:flex;gap:6px">
+        <input id="m_mst" placeholder="0301234567" style="flex:1">
+        <button type="button" class="btn ghost sm" onclick="traCuuDoanhNghiep()" id="traCuuDnBtn" style="white-space:nowrap">🔍 Tự động điền</button>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:-6px">Bấm "🔍 Tự động điền" sau khi nhập MST để phần mềm tự tra Tên công ty/Địa chỉ/Tên CQT nơi nộp (cần đã cấu hình API tra cứu MST ở menu "Hỗ Trợ Kê khai tự động"). <b>Mã CQT nơi nộp</b> thì API không có sẵn — phần mềm tự nhớ lại nếu ĐÃ có công ty khác cùng cơ quan thuế được nhập đúng trước đó, còn không vẫn cần bạn tự điền 1 lần.</p>
     <div class="field"><label>MST khác <span style="font-weight:400;color:var(--muted)">(hộ/cá nhân kinh doanh: mã định danh cá nhân/CCCD nếu hóa đơn ghi MST mua khác MST đăng ký ở trên — cách nhau bởi dấu phẩy nếu nhiều mã)</span></label><input id="m_mst_khac" placeholder="VD: 079089022914"></div>
     <div class="field"><label>Địa chỉ trụ sở <span style="font-weight:400;color:var(--muted)">(đúng theo đăng ký thuế — dùng khi Kết xuất XML cho HTKK)</span></label><input id="m_dia_chi" placeholder="VD: 141/69/23, Khu phố 3C, ..."></div>
     <div class="row" style="display:flex;gap:10px">
@@ -1532,6 +1538,32 @@ async function openCompanyModal(edit=null){
   document.getElementById('coModal').classList.add('show');
 }
 function closeCompanyModal(){document.getElementById('coModal').classList.remove('show')}
+async function traCuuDoanhNghiep(){
+  const mst=document.getElementById('m_mst').value.trim();
+  if(!mst){toast('Nhập Mã số thuế trước đã','err');return;}
+  const btn=document.getElementById('traCuuDnBtn');
+  const old=btn.innerHTML;
+  btn.innerHTML='<span class="spin"></span>';btn.disabled=true;
+  try{
+    const info=await api(`/api/tra-cuu-doanh-nghiep/${encodeURIComponent(mst)}`);
+    const tenEl=document.getElementById('m_ten'), diaChiEl=document.getElementById('m_dia_chi');
+    // CHỈ điền vào ô CÒN TRỐNG — không ghi đè dữ liệu người dùng đã tự gõ.
+    if(!tenEl.value.trim() && info.ten) tenEl.value=info.ten;
+    if(!diaChiEl.value.trim() && info.dia_chi) diaChiEl.value=info.dia_chi;
+    if(info.ten_cqt) document.getElementById('m_ten_cqt').value=info.ten_cqt;
+    if(info.ma_cqt) document.getElementById('m_ma_cqt').value=info.ma_cqt;
+    if(info.ten_cqt && !info.ma_cqt){
+      toast(`✓ Đã điền Tên CQT nơi nộp ("${info.ten_cqt}") — API không có sẵn Mã CQT, bạn tự điền 1 lần, các công ty sau cùng cơ quan thuế này sẽ được tự động gợi ý.`,'ok');
+    }else if(info.ten_cqt){
+      toast('✓ Đã tự động điền đầy đủ Tên/Mã CQT nơi nộp','ok');
+    }else{
+      toast('Tra cứu được công ty nhưng chưa rõ cơ quan thuế quản lý — vui lòng tự điền','');
+    }
+  }catch(e){
+    toast('Không tự điền được: '+e.message,'err');
+  }
+  btn.innerHTML=old;btn.disabled=false;
+}
 function togglePass(){
   const inp=document.getElementById('m_pass'),btn=document.getElementById('passToggle');
   if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
