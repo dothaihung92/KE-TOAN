@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.278"
+APP_BUILD = "2026-09-16.279"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6090,11 +6090,26 @@ def _lay_ten_nguoi_dai_dien_masothue(mst):
          này (thông tin công ty đang tra), KHÔNG lấy nhầm "Người đại diện"
          của các công ty khác liệt kê thêm ở cuối trang (dạng <em><a>...).
 
+    Sau khi đổi sang curl_cffi vẫn tra không ra (log server thật:
+    "[masothue] Ajax/Search không khớp MST: '{"success":1,"url":"\\/"}'"
+    — tức bước Search VẪN chạy được, có nhận request, nhưng trả kết quả
+    RỖNG thay vì báo lỗi) — người dùng gửi lại đúng 2 request thật bằng
+    "Copy as cURL" từ DevTools để so khớp, phát hiện 2 khác biệt so với
+    code cũ: (1) tham số "r" gửi kèm /Ajax/Token thật có dạng 6 ký tự chữ
+    thường+số (vd "bc36lo", giống JS Math.random().toString(36)), còn code
+    cũ dùng uuid hex 8 ký tự; (2) request thật còn có Content-Type kèm
+    charset và các header Client-Hints/Fetch-Metadata (sec-ch-ua*,
+    sec-fetch-*) mà trình duyệt luôn tự thêm cho request cùng-nguồn gốc,
+    code cũ chưa gửi. Thêm các header này CHỈ để giống đúng 1 request bình
+    thường từ trình duyệt thật (không phải giải mã thử thách/CAPTCHA gì).
+
     Trả về "" nếu không tra được (không lỗi/crash, người dùng vẫn tự điền
     tay). In log [masothue] khi có bước thất bại — để chẩn đoán được lý do
     thay vì âm thầm không rõ vì sao (đã từng gặp: tra không ra gì nhưng
     không biết bước nào lỗi)."""
     import re as _re
+    import random as _random
+    import string as _string
     mst_c = _chuan_mst(mst)[:10]
     if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
         return ""
@@ -6103,13 +6118,21 @@ def _lay_ten_nguoi_dai_dien_masothue(mst):
         headers_chung = {
             "x-requested-with": "XMLHttpRequest",
             "accept": "application/json, text/javascript, */*; q=0.01",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
             "origin": "https://masothue.com",
             "referer": "https://masothue.com/",
+            "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
         }
         if not dung_tls_chrome:
             headers_chung["user-agent"] = _MASOTHUE_UA
+        r_ngau_nhien = "".join(_random.choices(_string.ascii_lowercase + _string.digits, k=6))
         r1 = s.post("https://masothue.com/Ajax/Token", headers=headers_chung,
-                     data={"r": uuid.uuid4().hex[:8]}, timeout=8)
+                     data={"r": r_ngau_nhien}, timeout=8)
         if r1.status_code != 200:
             print(f"[masothue] Ajax/Token status={r1.status_code} (tls_chrome={dung_tls_chrome})")
             return ""

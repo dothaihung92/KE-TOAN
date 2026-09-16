@@ -1,5 +1,5 @@
 import os
-import uuid as _uuid_module
+import re as _re_module
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
@@ -119,7 +119,6 @@ class _FakeTaoSessionMasothue:
 
 
 ns = {
-    'uuid': _uuid_module,
     '_MASOTHUE_UA': ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"),
 }
@@ -146,6 +145,20 @@ assert sess1.calls[0]["url"] == "https://masothue.com/Ajax/Token"
 assert sess1.calls[1]["url"] == "https://masothue.com/Ajax/Search"
 assert sess1.calls[1]["data"]["token"] == "24quXCbivJ", f"got {sess1.calls[1]['data']}"
 assert sess1.calls[2]["url"] == "https://masothue.com/1102183121-cong-ty-tnhh-thien-y-vn"
+# ===== Đúng ĐÚNG hình dạng tham số "r" của /Ajax/Token khớp request thật
+# (Copy as cURL từ DevTools: "r=bc36lo" — 6 ký tự chữ thường+số) — trước
+# đó dùng uuid hex 8 ký tự (khác hẳn hình dạng thật), nghi là nguyên nhân
+# /Ajax/Search trả kết quả RỖNG dù không báo lỗi gì. =====
+r_gui = sess1.calls[0]["data"]["r"]
+assert _re_module.fullmatch(r"[a-z0-9]{6}", r_gui), (
+    f"Tham số 'r' gửi /Ajax/Token phải có hình dạng 6 ký tự chữ thường+số, đúng như request thật "
+    f"(vd 'bc36lo') — got {r_gui!r}")
+# ===== Các header Content-Type/Client-Hints/Fetch-Metadata mà request
+# thật (Copy as cURL) có nhưng code cũ chưa gửi — thêm vào cho giống 1
+# request bình thường từ trình duyệt thật. =====
+for h in ("content-type", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+          "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site"):
+    assert h in sess1.calls[0]["headers"], f"Thiếu header '{h}' (có trong request thật) — got {sess1.calls[0]['headers']}"
 print("PASS 1: đúng luồng 3 bước Token->Search->GET (đúng dữ liệu thật MST 1102183121), trích ĐÚNG "
       "'HÀ MINH VŨ' từ khối alumni của công ty đang tra, không lấy nhầm 'HỒ VĂN SƠN' của công ty khác "
       "liệt kê thêm trên cùng trang.")
