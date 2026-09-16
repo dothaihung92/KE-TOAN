@@ -7,6 +7,7 @@
 """
 import os
 import io
+import uuid
 import hmac
 import json
 import time
@@ -39,7 +40,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.267"
+APP_BUILD = "2026-09-16.268"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -435,7 +436,22 @@ class GDTClient:
         # đã sửa ở _tu_dong_dang_nhap()/doAutoLogin()).
         "Origin": "https://hoadondientu.gdt.gov.vn",
         "Referer": "https://hoadondientu.gdt.gov.vn/",
-        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+        # Đúng thứ tự/giá trị trình duyệt thật gửi (xác nhận qua cURL người
+        # dùng chụp từ DevTools lúc đăng nhập thành công thật, KHÔNG phải
+        # đoán) — trước đây để "vi-VN,vi;..." (vi-VN đứng đầu), thật ra trình
+        # duyệt để "vi" (không có -VN) đứng đầu.
+        "Accept-Language": "vi,en-US;q=0.9,en;q=0.8,vi-VN;q=0.7",
+        # 3 header dưới đây do CHÍNH mã Angular của trang tự gắn vào MỌI lượt
+        # gọi API (qua HTTP interceptor của trang, không liên quan gì tới
+        # chống bot) — xác nhận qua cùng cURL trên: "action" luôn rỗng,
+        # "end-point" là đường dẫn trang gốc — thiếu 2 header CỐ ĐỊNH này
+        # cũng là 1 điểm khác biệt dễ thấy so với 1 lượt gọi thật từ trang.
+        # Header "request-id" (UUID ngẫu nhiên MỖI LƯỢT gọi, trang tự sinh
+        # để theo dõi/truy vết từng request) KHÔNG đặt cố định ở đây — gắn
+        # riêng vào từng header cụ thể của từng lượt gọi (xem get_captcha/
+        # login) vì mỗi lượt PHẢI có giá trị request-id KHÁC NHAU.
+        "action": "",
+        "end-point": "/",
     }
 
     def __init__(self):
@@ -466,22 +482,7 @@ class GDTClient:
         self.token: Optional[str] = None
         self._last_total = 0
         self._token_dead = False  # bật khi gặp 401 (hết phiên) -> bỏ qua nốt các gọi mạng
-        self.primed = False   # đã "vào trang chủ" lấy cookie WAF/XSRF chưa (xem prime())
-
-    def _xsrf(self):
-        # Nhiều cổng Thuế dùng Spring + Angular: XSRF-TOKEN nằm trong cookie,
-        # phải gửi LẠI đúng giá trị qua header X-XSRF-TOKEN ở mỗi request
-        # POST/PUT/DELETE — thiếu header này (dù cookie có sẵn) khiến request
-        # bị coi là KHÔNG xuất phát từ chính trang đó (giống hệt cách đã áp
-        # dụng đúng cho DVCClient/dichvucong.gdt.gov.vn, cổng dùng chung 1 hạ
-        # tầng WAF F5 BIG-IP với hoadondientu.gdt.gov.vn).
-        try:
-            return self.session.cookies.get("XSRF-TOKEN", "") or ""
-        except Exception:
-            for c in self.session.cookies:
-                if getattr(c, "name", "") == "XSRF-TOKEN":
-                    return c.value or ""
-            return ""
+        self.primed = False   # đã "vào trang chủ" lấy cookie WAF chưa (xem prime())
 
     def prime(self):
         """Vào trang chủ 1 lần (y hệt trình duyệt thật mở hoadondientu.gdt.gov.vn
@@ -517,7 +518,7 @@ class GDTClient:
         self.prime()
         url = f"{self.BASE}/captcha"
         h = {
-            "X-Requested-With": "XMLHttpRequest",
+            "request-id": str(uuid.uuid4()),
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
@@ -544,14 +545,11 @@ class GDTClient:
             "ckey": ckey,       # key captcha tương ứng
         }
         h = {
-            "X-Requested-With": "XMLHttpRequest",
+            "request-id": str(uuid.uuid4()),
             "Sec-Fetch-Dest": "empty",
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
         }
-        xsrf = self._xsrf()
-        if xsrf:
-            h["X-XSRF-TOKEN"] = xsrf
         r = self.session.post(url, json=payload, timeout=30, headers=h)
         if r.status_code != 200:
             raise Exception(f"Đăng nhập thất bại ({r.status_code}): {r.text[:200]}")

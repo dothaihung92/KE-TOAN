@@ -5,21 +5,31 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
 import server
 
-# Regression test cho GDTClient.prime()/_xsrf() (server.py) — người dùng
+# Regression test cho GDTClient.prime()/headers (server.py) — người dùng
 # khẳng định lại lỗi 403 "Hệ thống phát hiện hành vi không hợp lệ. Yêu cầu
-# đã bị chặn." KHÔNG PHẢI do đăng nhập quá nhanh (đã sửa ở bản trước: nghỉ
-# giữa các lần thử + nghỉ đọc/gõ captcha), mà do hệ thống Thuế phát hiện
-# request đến từ PHẦN MỀM chứ không phải trình duyệt thật — yêu cầu "chỉnh
-# lại đăng nhập như người thật".
+# đã bị chặn." KHÔNG PHẢI do đăng nhập quá nhanh, cũng KHÔNG PHẢI chặn theo
+# IP (đăng nhập tay qua trình duyệt thật của họ vẫn bình thường) — theo yêu
+# cầu, người dùng đã tự lấy 1 request "authenticate" THẬT THÀNH CÔNG từ
+# DevTools (Copy as cURL) trên máy họ, gửi lại để so sánh CHÍNH XÁC với
+# những gì GDTClient đang gửi, thay vì đoán tiếp.
 #
-# So sánh với DVCClient (dichvucong.gdt.gov.vn, dùng CHUNG 1 hạ tầng WAF F5
-# BIG-IP với hoadondientu.gdt.gov.vn, đã có sẵn cơ chế .prime() hoạt động
-# tốt) phát hiện GDTClient THIẾU HẲN bước quan trọng: trình duyệt thật LUÔN
-# "ghé" trang chủ TRƯỚC (nhận cookie phiên/WAF/XSRF-TOKEN) rồi mới gọi các
-# API captcha/đăng nhập — GDTClient TRƯỚC ĐÂY gọi THẲNG API mà không hề có
-# bước điều hướng trang nào trước đó, tự bản thân việc đó đã là 1 dấu hiệu
-# rõ ràng của request tự động (không phải trình duyệt), bất kể đã giả lập
-# đúng vân tay TLS hay nghỉ đúng nhịp hay chưa.
+# Kết quả so sánh (xác nhận qua đúng cURL thật đó, không phải đoán):
+#   - Request thật CÓ 3 header GDTClient trước đây KHÔNG hề gửi: "action"
+#     (luôn rỗng), "end-point" (luôn "/"), "request-id" (1 UUID ngẫu nhiên
+#     KHÁC NHAU mỗi lượt gọi) — đều do chính mã Angular của trang tự gắn
+#     vào MỌI request qua HTTP interceptor, không liên quan chống bot.
+#   - Request thật KHÔNG CÓ header "X-Requested-With: XMLHttpRequest" (suy
+#     đoán sai trước đó, borrow từ DVCClient — fetch()/Angular HttpClient
+#     hiện đại KHÔNG tự thêm header này như jQuery $.ajax cũ) — GDTClient
+#     trước đây LỠ THÊM header này, tự nó cũng là 1 điểm khác biệt.
+#   - Request thật KHÔNG CÓ cookie/header XSRF-TOKEN nào cả (suy đoán sai
+#     trước đó, cũng borrow từ DVCClient) — đã bỏ hẳn _xsrf()/X-XSRF-TOKEN
+#     khỏi GDTClient (chỉ DVCClient/dichvucong.gdt.gov.vn mới dùng đúng mẫu
+#     đó, đã xác nhận qua thực tế trước đây — 2 trang KHÔNG giống hệt nhau).
+#   - Request thật CÓ 3 cookie tên dạng chuỗi hex 32 ký tự ngẫu nhiên (dấu
+#     hiệu đặc trưng của SDK chống bot chạy JS, kiểu F5 Bot Defense) — CỐ
+#     Ý KHÔNG cố tái tạo/giả mạo các cookie này (đó là lớp chống bot THẬT
+#     SỰ, việc lách qua nó không phải việc nên làm).
 
 
 class _FakeCookies(dict):
@@ -44,6 +54,12 @@ class _FakeResp:
 
 
 class _FakeSession:
+    """self.headers mô phỏng requests.Session.headers (header MẶC ĐỊNH áp
+    dụng cho MỌI request) — mỗi lượt .get()/.post() ghi lại header THỰC SỰ
+    sẽ được gửi đi = self.headers HOÀ TRỘN VỚI headers riêng của lượt đó
+    (đúng hành vi requests.Session thật), để test được cả những header cố
+    định gắn qua self.session.headers.update(...) trong GDTClient.__init__
+    (vd "action"/"end-point") lẫn header riêng từng lượt (vd "request-id")."""
     def __init__(self):
         self.calls = []
         self.cookies = _FakeCookies()
@@ -51,21 +67,33 @@ class _FakeSession:
         self.next_json = {}
 
     def get(self, url, timeout=None, headers=None):
-        self.calls.append({"method": "GET", "url": url, "headers": dict(headers or {})})
+        self.calls.append({"method": "GET", "url": url, "headers": {**self.headers, **(headers or {})}})
         return _FakeResp(200, self.next_json)
 
     def post(self, url, json=None, timeout=None, headers=None):
-        self.calls.append({"method": "POST", "url": url, "headers": dict(headers or {}), "body": json})
+        self.calls.append({"method": "POST", "url": url, "headers": {**self.headers, **(headers or {})}, "body": json})
         return _FakeResp(200, self.next_json)
+
+
+def _new_client_with_fake_session():
+    """Tạo 1 GDTClient rồi THAY session thật (curl_cffi/requests, không kiểm
+    soát được) bằng _FakeSession — nhưng vẫn phải tự áp lại đúng bộ header
+    CỐ ĐỊNH (GDTClient.HEADERS, gồm cả "action"/"end-point" mới thêm) lên
+    session giả, vì bước đó thật ra đã chạy trong __init__() lên session
+    THẬT (đã bị thay thế) trước khi test kịp can thiệp — nếu không session
+    giả sẽ "quên" mất các header cố định này."""
+    c = server.GDTClient()
+    fs = _FakeSession()
+    fs.headers.update(server.GDTClient.HEADERS)
+    c.session = fs
+    return c, fs
 
 
 # ===== Test 1 (QUAN TRỌNG — đúng ý người dùng "đăng nhập như người thật"):
 # get_captcha() lần ĐẦU TIÊN phải TỰ ĐỘNG "ghé" trang chủ hoadondientu.gdt.gov.vn
 # TRƯỚC (như trình duyệt thật mở trang rồi mới bấm đăng nhập), SAU ĐÓ mới
 # gọi API /api/captcha — không được gọi thẳng API mà bỏ qua bước này. =====
-c1 = server.GDTClient()
-fs1 = _FakeSession()
-c1.session = fs1
+c1, fs1 = _new_client_with_fake_session()
 fs1.next_json = {"key": "k1", "content": "<svg></svg>"}
 d1 = c1.get_captcha()
 assert len(fs1.calls) == 2, (
@@ -96,51 +124,58 @@ assert fs1.calls[0]["url"].endswith("/api/captcha")
 print("PASS 2: các lần gọi get_captcha() SAU lần đầu không ghé lại trang chủ nữa (giữ nguyên cookie "
       "phiên đã có), tránh tốn thêm lượt gọi không cần thiết.")
 
-# ===== Test 3 (QUAN TRỌNG): login() PHẢI gửi kèm header X-XSRF-TOKEN đúng
-# giá trị cookie XSRF-TOKEN hiện có trong session (mẫu bảo vệ CSRF phổ biến
-# ở các cổng Spring+Angular của Thuế — đã áp dụng đúng cho DVCClient, GDTClient
-# TRƯỚC ĐÂY hoàn toàn KHÔNG có) — thiếu header này dù cookie có sẵn cũng là
-# 1 dấu hiệu request KHÔNG xuất phát từ chính trang web đó. =====
-c3 = server.GDTClient()
-fs3 = _FakeSession()
-c3.session = fs3
-fs3.cookies["XSRF-TOKEN"] = "xsrf-abc-123"
+# ===== Test 3 (QUAN TRỌNG — đúng cURL thật người dùng gửi từ DevTools):
+# login() PHẢI gửi kèm header "request-id" (1 UUID, sinh MỚI mỗi lượt gọi)
+# và session PHẢI có sẵn "action"/"end-point" (từ HEADERS cố định) — đúng
+# NGUYÊN VĂN những gì trình duyệt thật gửi. login() KHÔNG được tự thêm
+# "X-Requested-With"/"X-XSRF-TOKEN" (2 header KHÔNG có trong request thật —
+# suy đoán sai trước đó, đã bỏ). =====
+c3, fs3 = _new_client_with_fake_session()
 fs3.next_json = {"token": "fake-token-xyz"}
 tok = c3.login(username="0300000000", password="matkhau", cvalue="AB12", ckey="ckey1")
 assert tok == "fake-token-xyz"
 post_call = next(c for c in fs3.calls if c["method"] == "POST")
-assert post_call["headers"].get("X-XSRF-TOKEN") == "xsrf-abc-123", (
-    f"login() phải gửi kèm header X-XSRF-TOKEN đúng giá trị cookie XSRF-TOKEN hiện có — got "
+rid = post_call["headers"].get("request-id")
+assert rid and len(rid) >= 32, (
+    f"login() phải gửi kèm header 'request-id' dạng UUID (đúng như request thật từ DevTools) — got "
     f"{post_call['headers']}")
-assert post_call["headers"].get("X-Requested-With") == "XMLHttpRequest", (
-    f"login() phải gửi kèm header X-Requested-With: XMLHttpRequest (đúng kiểu gọi AJAX/XHR từ trang, "
-    f"khác hẳn 1 lượt POST trần) — got {post_call['headers']}")
-print("PASS 3: login() gửi kèm đúng header X-XSRF-TOKEN (từ cookie phiên hiện có) và X-Requested-With "
-      "— 2 dấu hiệu quan trọng khẳng định request xuất phát từ chính trang, GDTClient trước đây hoàn "
-      "toàn thiếu.")
+assert "X-Requested-With" not in post_call["headers"], (
+    f"KHÔNG được tự thêm header 'X-Requested-With' — request thật (cURL từ DevTools) KHÔNG có header "
+    f"này, thêm vào là 1 điểm khác biệt so với trình duyệt thật — got {post_call['headers']}")
+assert "X-XSRF-TOKEN" not in post_call["headers"], (
+    f"KHÔNG được tự thêm header 'X-XSRF-TOKEN' — request thật (cURL từ DevTools) không có cookie/header "
+    f"XSRF-TOKEN nào (khác hẳn DVCClient/dichvucong.gdt.gov.vn) — got {post_call['headers']}")
+print("PASS 3: login() gửi đúng header 'request-id' (UUID) và KHÔNG tự thêm 'X-Requested-With'/"
+      "'X-XSRF-TOKEN' — khớp đúng NGUYÊN VĂN request thật lấy từ DevTools, không còn suy đoán.")
 
-# ===== Test 4 (không hồi quy): CHƯA có cookie XSRF-TOKEN (vd trang chủ chưa
-# từng cấp, hoặc lỗi khi 'ghé' trang chủ) -> login() vẫn hoạt động bình
-# thường, KHÔNG gửi header X-XSRF-TOKEN rỗng vô nghĩa, KHÔNG lỗi/crash. =====
-c4 = server.GDTClient()
-fs4 = _FakeSession()
-c4.session = fs4
+# ===== Test 4 (QUAN TRỌNG — đúng cURL thật): mỗi lượt gọi PHẢI có "request-id"
+# KHÁC NHAU (UUID ngẫu nhiên mới mỗi lần, đúng cách trang thật tự sinh), và
+# session PHẢI có sẵn header cố định "action"/"end-point" (do trang tự gắn
+# vào MỌI request, không đổi giữa các lượt). =====
+c4, fs4 = _new_client_with_fake_session()
+fs4.next_json = {"key": "k4", "content": "<svg></svg>"}
+c4.get_captcha()
 fs4.next_json = {"token": "fake-token-2"}
-tok4 = c4.login(username="0300000000", password="matkhau", cvalue="CD34", ckey="ckey2")
-assert tok4 == "fake-token-2"
-post_call4 = next(c for c in fs4.calls if c["method"] == "POST")
-assert "X-XSRF-TOKEN" not in post_call4["headers"], (
-    f"Chưa có cookie XSRF-TOKEN nào -> KHÔNG được tự gửi header X-XSRF-TOKEN rỗng vô nghĩa — got "
-    f"{post_call4['headers']}")
-print("PASS 4: chưa có cookie XSRF-TOKEN -> login() vẫn hoạt động bình thường, không gửi header rỗng "
-      "vô nghĩa, không lỗi.")
+c4.login(username="0300000000", password="matkhau", cvalue="CD34", ckey="ckey2")
+rid_calls = [c["headers"].get("request-id") for c in fs4.calls if "request-id" in c["headers"]]
+assert len(rid_calls) == 2 and rid_calls[0] != rid_calls[1], (
+    f"Mỗi lượt gọi (captcha, login) phải có request-id KHÁC NHAU (UUID mới mỗi lần, đúng cách trang "
+    f"thật tự sinh, không phải 1 giá trị cố định dùng lại) — got {rid_calls}")
+for c in fs4.calls:
+    if c["url"].endswith("/api/captcha") or c["url"].endswith("/authenticate"):
+        assert c["headers"].get("action") == "", (
+            f"Mọi lượt gọi API phải có sẵn header 'action' rỗng (từ session, do trang thật tự gắn cố "
+            f"định) — got {c['headers']}")
+        assert c["headers"].get("end-point") == "/", (
+            f"Mọi lượt gọi API phải có sẵn header 'end-point: /' (từ session, do trang thật tự gắn cố "
+            f"định) — got {c['headers']}")
+print("PASS 4: mỗi lượt gọi có request-id KHÁC NHAU (UUID mới mỗi lần), và có sẵn header cố định "
+      "'action'/'end-point' đúng như trang thật — khớp đúng cURL DevTools người dùng gửi.")
 
 # ===== Test 5 (QUAN TRỌNG): gọi login() TRỰC TIẾP (không gọi get_captcha()
 # trước, vd endpoint /api/solve-login gọi thẳng login() sau khi tự OCR) ->
 # VẪN phải tự 'ghé' trang chủ trước nếu client CHƯA từng primed. =====
-c5 = server.GDTClient()
-fs5 = _FakeSession()
-c5.session = fs5
+c5, fs5 = _new_client_with_fake_session()
 fs5.next_json = {"token": "fake-token-3"}
 assert c5.primed is False
 c5.login(username="0300000000", password="matkhau", cvalue="EF56", ckey="ckey3")
