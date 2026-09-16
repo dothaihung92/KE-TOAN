@@ -1564,10 +1564,12 @@ async function traCuuDoanhNghiep(silent){
   btn.innerHTML='<span class="spin"></span>';btn.disabled=true;
   try{
     const info=await api(`/api/tra-cuu-doanh-nghiep/${encodeURIComponent(mst)}`);
-    const tenEl=document.getElementById('m_ten'), diaChiEl=document.getElementById('m_dia_chi');
+    const tenEl=document.getElementById('m_ten'), diaChiEl=document.getElementById('m_dia_chi'),
+          nguoiKyEl=document.getElementById('m_nguoi_ky');
     // CHỈ điền vào ô CÒN TRỐNG — không ghi đè dữ liệu người dùng đã tự gõ.
     if(!tenEl.value.trim() && info.ten) tenEl.value=info.ten;
     if(!diaChiEl.value.trim() && info.dia_chi) diaChiEl.value=info.dia_chi;
+    if(!nguoiKyEl.value.trim() && info.nguoi_ky) nguoiKyEl.value=info.nguoi_ky;
     if(info.ten_cqt) document.getElementById('m_ten_cqt').value=info.ten_cqt;
     if(info.ma_cqt) document.getElementById('m_ma_cqt').value=info.ma_cqt;
     if(info.ten_cqt && !info.ma_cqt){

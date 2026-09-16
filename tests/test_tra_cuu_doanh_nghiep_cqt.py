@@ -124,6 +124,12 @@ ns['_DANH_MUC_CQT'] = None
 exec(extract_fn('_tra_cuu_thong_tin_nnt'), ns)
 exec(extract_fn('_ghi_nho_ma_cqt'), ns)
 exec(extract_fn('_lay_danh_muc_cqt'), ns)
+# tra_cuu_doanh_nghiep() giờ còn tra "Người đại diện" trên masothue.com
+# (_lay_ten_nguoi_dai_dien_masothue, xem test_nguoi_dai_dien_masothue.py)
+# — dùng bản giả luôn trả "" (không gọi mạng), vì các test trong file này
+# chỉ kiểm tra riêng phần Tên/Địa chỉ/Mã CQT qua XInvoice, không liên quan
+# masothue.com.
+ns['_lay_ten_nguoi_dai_dien_masothue'] = lambda mst: ""
 exec(extract_fn('tra_cuu_doanh_nghiep'), ns)
 _tra_cuu_thong_tin_nnt = ns['_tra_cuu_thong_tin_nnt']
 _ghi_nho_ma_cqt = ns['_ghi_nho_ma_cqt']

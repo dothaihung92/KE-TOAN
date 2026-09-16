@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.276"
+APP_BUILD = "2026-09-16.277"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6055,6 +6055,67 @@ def _ghi_nho_ma_cqt(ten_cqt, ma_cqt):
         conn.close()
 
 
+_MASOTHUE_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+
+
+def _lay_ten_nguoi_dai_dien_masothue(mst):
+    """Tra 'Người đại diện' trên masothue.com để gợi ý điền 'Tên người ký
+    tờ khai' — API XInvoice không có trường này. Theo đúng luồng THẬT
+    người dùng chụp lại từ DevTools (site dùng token phiên đơn giản, không
+    phải thử thách chống bot phức tạp — token chỉ là {"success":1,"token":
+    "..."} lấy tự do, không cần giải mã gì):
+      1) POST /Ajax/Token   -> {"success":1,"token":"..."}
+      2) POST /Ajax/Search  (q=<mst>, type=auto, token=<token trên>,
+         force-search=1) -> {"success":1,"url":"/<mst>-<slug>",...}
+      3) GET https://masothue.com<url> -> trang chi tiết, đọc tên trong
+         khối <tr itemprop='alumni' itemscope itemtype='.../Person'>...
+         <span itemprop='name'><a ...>TÊN</a></span>...</tr> — CHỈ khối
+         này (thông tin công ty đang tra), KHÔNG lấy nhầm "Người đại diện"
+         của các công ty khác liệt kê thêm ở cuối trang (dạng <em><a>...).
+
+    Trả về "" nếu không tra được (không lỗi/crash, người dùng vẫn tự điền
+    tay hoặc dùng file tờ khai XML đã nộp như trước)."""
+    import re as _re
+    mst_c = _chuan_mst(mst)[:10]
+    if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
+        return ""
+    try:
+        s = requests.Session()
+        s.headers.update({
+            "user-agent": _MASOTHUE_UA,
+            "x-requested-with": "XMLHttpRequest",
+            "accept": "application/json, text/javascript, */*; q=0.01",
+            "origin": "https://masothue.com",
+            "referer": "https://masothue.com/",
+        })
+        r1 = s.post("https://masothue.com/Ajax/Token",
+                     data={"r": uuid.uuid4().hex[:8]}, timeout=8)
+        if r1.status_code != 200:
+            return ""
+        token = (r1.json() or {}).get("token") or ""
+        if not token:
+            return ""
+        r2 = s.post("https://masothue.com/Ajax/Search",
+                     data={"q": mst_c, "type": "auto", "token": token, "force-search": "1"},
+                     timeout=8)
+        if r2.status_code != 200:
+            return ""
+        duong_dan = (r2.json() or {}).get("url") or ""
+        if not duong_dan or mst_c not in duong_dan:
+            return ""
+        r3 = s.get("https://masothue.com" + duong_dan,
+                    headers={"user-agent": _MASOTHUE_UA}, timeout=8)
+        if r3.status_code != 200:
+            return ""
+        m = _re.search(
+            r"itemprop=['\"]alumni['\"].*?itemprop=['\"]name['\"]>\s*<a[^>]*>([^<]+)</a>",
+            r3.text, _re.DOTALL)
+        return m.group(1).strip() if m else ""
+    except Exception:
+        return ""
+
+
 _DANH_MUC_CQT = None  # cache {ten_cqt: [ma_cqt, ...]} — nạp 1 lần từ file
 
 
@@ -6164,8 +6225,10 @@ def tra_cuu_doanh_nghiep(mst: str):
     (_go_trung_ma_cqt_theo_dia_chi — đúng cách HTKK tự suy ra Mã CQT từ lựa
     chọn Tỉnh/Thành + Xã/Phường, xác nhận qua ví dụ thật: "Xã Đức Lập" tỉnh
     Tây Ninh -> đúng mã 80115, không phải 80113). Không đoán được -> để
-    trống an toàn, không chặn việc tự nhập tay. CHƯA cấu hình API
-    XInvoice, hoặc MST không hợp lệ/không có dữ liệu -> trả 404."""
+    trống an toàn, không chặn việc tự nhập tay. Ngoài ra tra thêm "Người
+    đại diện" trên masothue.com (_lay_ten_nguoi_dai_dien_masothue) để gợi ý
+    "Tên người ký tờ khai" — API XInvoice không có trường này. CHƯA cấu
+    hình API XInvoice, hoặc MST không hợp lệ/không có dữ liệu -> trả 404."""
     info = _tra_cuu_thong_tin_nnt(mst)
     if not info:
         raise HTTPException(
@@ -6188,6 +6251,7 @@ def tra_cuu_doanh_nghiep(mst: str):
             elif len(cac_ma) > 1:
                 ma_cqt = _go_trung_ma_cqt_theo_dia_chi(cac_ma, info["dia_chi"])
     info["ma_cqt"] = ma_cqt
+    info["nguoi_ky"] = _lay_ten_nguoi_dai_dien_masothue(mst)
     return info
 
 
