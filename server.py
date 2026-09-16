@@ -25,7 +25,7 @@ import concurrent.futures as _cf
 from typing import Optional, List
 
 import requests
-from fastapi import FastAPI, HTTPException, Body, Request, Response
+from fastapi import FastAPI, HTTPException, Body, Request, Response, File, UploadFile
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.271"
+APP_BUILD = "2026-09-16.272"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6078,6 +6078,61 @@ def tra_cuu_doanh_nghiep(mst: str):
         finally:
             conn.close()
     info["ma_cqt"] = ma_cqt
+    return info
+
+
+def _parse_tkhai_xml_htkk(xml_text):
+    """Đọc 1 file tờ khai HTKK ĐÃ NỘP THÀNH CÔNG (vd 01_GTGT_TT80-...xml) để
+    lấy các thông tin đăng ký công ty — theo yêu cầu người dùng: "còn thiếu
+    Mã CQT nơi nộp (HTKK) và Tên người ký tờ khai ... đây là file gốc HTKK
+    hãy xem có file nào chứ mã CQT không". Xác nhận qua file thật người
+    dùng gửi (01_GTGT_TT80-Q12026-L00.xml): các thẻ <mst>, <tenNNT>,
+    <dchiNNT>, <maCQTNoiNop>, <tenCQTNoiNop>, <nguoiKy> đều KHÔNG có tiền
+    tố namespace dù root khai xmlns mặc định -> chỉ cần regex đơn giản,
+    giống hệt cách set_tag() ở export_htkk đã dùng để GHI các thẻ này (đối
+    xứng đọc/ghi cùng 1 kiểu thẻ).
+
+    Đây là nguồn dữ liệu ĐÁNG TIN CẬY NHẤT (đã được CQT chấp nhận) — hơn
+    hẳn API tra cứu ngoài (chỉ có Tên CQT, không có Mã) hoặc người dùng tự
+    gõ có thể gõ sai; cung cấp được LUÔN CẢ Mã CQT lẫn Tên người ký trong 1
+    lần, thay vì phải tự "học" dần qua nhiều công ty như bảng cqt_ma_ten.
+
+    Trả về dict rỗng ở field nào không tìm thấy trong file."""
+    import re as _re
+    import html as _html
+
+    def get_tag(tag):
+        m = _re.search(r"<" + tag + r"[^>]*>(.*?)</" + tag + r">", xml_text, _re.DOTALL)
+        return _html.unescape(m.group(1).strip()) if m else ""
+
+    return {
+        "mst": get_tag("mst"),
+        "ten": get_tag("tenNNT"),
+        "dia_chi": get_tag("dchiNNT"),
+        "ma_cqt": get_tag("maCQTNoiNop"),
+        "ten_cqt": get_tag("tenCQTNoiNop"),
+        "nguoi_ky": get_tag("nguoiKy"),
+    }
+
+
+@app.post("/api/import-tkhai-xml")
+async def import_tkhai_xml(file: UploadFile = File(...)):
+    """Đọc 1 file tờ khai HTKK ĐÃ NỘP THÀNH CÔNG để tự động điền form "Thêm
+    công ty"/"Sửa công ty" (Mã/Tên CQT nơi nộp, Tên người ký tờ khai — và
+    cả MST/Tên/Địa chỉ nếu form đang trống) — theo yêu cầu người dùng dùng
+    file gốc HTKK (thư mục D:\\HTKK\\DataFiles hoặc file XML tờ khai đã tải
+    về) làm nguồn vì API tra cứu ngoài không có sẵn Mã CQT."""
+    raw = await file.read()
+    try:
+        xml_text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        xml_text = raw.decode("utf-8", errors="ignore")
+    info = _parse_tkhai_xml_htkk(xml_text)
+    if not any(info.values()):
+        raise HTTPException(
+            400, "Không đọc được thông tin công ty từ file này — hãy chọn đúng file tờ khai XML "
+                 "đã nộp (vd 01_GTGT_TT80-...xml, mở bằng phần mềm HTKK).")
+    _ghi_nho_ma_cqt(info["ten_cqt"], info["ma_cqt"])
     return info
 
 
