@@ -366,14 +366,12 @@
         <button type="button" class="btn ghost sm" onclick="traCuuDoanhNghiep()" id="traCuuDnBtn" style="white-space:nowrap">🔍 Tự động điền</button>
       </div>
     </div>
-    <p class="hint" style="margin-top:-6px">Phần mềm TỰ tra Tên công ty/Địa chỉ/Tên CQT nơi nộp ngay khi bạn nhập xong MST (rời khỏi ô) — cần đã cấu hình API tra cứu MST ở menu "Hỗ Trợ Kê khai tự động". Không tự động được thì bấm nút "🔍 Tự động điền" để xem rõ lý do. <b>Mã CQT nơi nộp</b> thì API không có sẵn — phần mềm tự nhớ lại nếu ĐÃ có công ty khác cùng cơ quan thuế được nhập đúng trước đó, còn không vẫn cần bạn tự điền 1 lần.</p>
     <div class="field"><label>MST khác <span style="font-weight:400;color:var(--muted)">(hộ/cá nhân kinh doanh: mã định danh cá nhân/CCCD nếu hóa đơn ghi MST mua khác MST đăng ký ở trên — cách nhau bởi dấu phẩy nếu nhiều mã)</span></label><input id="m_mst_khac" placeholder="VD: 079089022914"></div>
     <div class="field"><label>Địa chỉ trụ sở <span style="font-weight:400;color:var(--muted)">(đúng theo đăng ký thuế — dùng khi Kết xuất XML cho HTKK)</span></label><input id="m_dia_chi" placeholder="VD: 141/69/23, Khu phố 3C, ..."></div>
     <div class="row" style="display:flex;gap:10px">
       <div class="field" style="flex:1"><label>Mã CQT nơi nộp <span style="font-weight:400;color:var(--muted)">(HTKK)</span></label><input id="m_ma_cqt" placeholder="VD: 70113"></div>
       <div class="field" style="flex:2"><label>Tên CQT nơi nộp</label><input id="m_ten_cqt" placeholder="VD: Thuế cơ sở 7 Thành phố Hồ Chí Minh"></div>
     </div>
-    <p class="hint" style="margin-top:-6px">⚠ 3 mục trên PHẢI đúng theo đăng ký thuế của công ty (xem trên tờ khai HTKK đã nộp được lần gần nhất, hoặc hỏi kế toán) — nếu để trống hoặc sai, file "Kết xuất XML cho HTKK" có thể bị Cơ quan Thuế báo lỗi "Cơ quan thuế nơi nộp không là Cơ quan thuế quản lý".</p>
     <div class="field"><label>Tên người ký tờ khai <span style="font-weight:400;color:var(--muted)">(dùng khi Kết xuất XML GTGT/TNCN cho HTKK)</span></label><input id="m_nguoi_ky" placeholder="VD: Nguyễn Văn A"></div>
     <p class="hint" style="margin-top:-6px">Đã lưu sẵn ở đây thì lúc Kết xuất XML sẽ tự lấy tên này, không hỏi lại nữa.</p>
     <div class="field"><label>Tên đăng nhập trang Thuế <span style="font-weight:400;color:var(--muted)">(thường là MST)</span></label><input id="m_user" placeholder="Để trống sẽ dùng MST"></div>
@@ -398,9 +396,6 @@
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
     <div class="field"><label>Thư mục lưu file KẾT XUẤT <span style="font-weight:400;color:var(--muted)">(tự tạo cấu trúc Năm/Quý (hoặc Năm/Tháng nếu công ty đã tự tổ chức thư mục theo tháng) — chỉ dùng khi tick "Lưu file kết xuất" lúc tra cứu)</span></label><input id="m_exportdir" placeholder="VD: D:\\OneDrive\\...\\BAO CAO QUY"></div>
-    <p class="hint">📁 Ví dụ: chọn kỳ Quý 2/2026 + tick "Lưu file kết xuất" → phần mềm tự tạo <b>…\BAO CAO QUY\2026\Quý 2\</b> và lưu file Excel vào đó (tạo đủ cả 4 quý nếu thiếu). Nếu bên trong thư mục Năm đã có sẵn thư mục "THANG N" (công ty kê khai theo tháng) thì phần mềm tự lưu theo THÁNG (tạo đủ 12 tháng) thay vì theo Quý.</p>
-    <p class="hint">📂 Dữ liệu công ty (hạch toán, danh mục...) TỰ ĐỘNG lưu vào thư mục con "DU LIEU CTY" ngay TRONG "Thư mục lưu file XML/PDF" ở trên — không cần gõ thêm đường dẫn nào.</p>
-    <p class="hint">🔒 Thông tin lưu cục bộ trên máy bạn (SQLite), không gửi đi đâu khác ngoài trang Tổng cục Thuế khi đăng nhập.</p>
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
       <button class="btn" id="coSaveBtn" onclick="saveCompany()">Lưu</button>
