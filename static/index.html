@@ -3010,12 +3010,31 @@ async function doAutoLogin(){
       }
     }
   }
-  if(!done){
-    if(biChanWaf){
-      toast('⚠ Hệ thống Thuế đã TẠM CHẶN do phát hiện đăng nhập tự động quá nhanh — vui lòng đợi vài phút rồi thử lại, hoặc bấm "Lấy mã" để tự nhập captcha bằng tay (chậm hơn nhưng không bị chặn).','err');
-    }else{
-      toast('Tự đăng nhập thất bại: '+lastErr,'err');
+  if(!done && biChanWaf){
+    // Gọi trực tiếp HTTP (dù đã né tần suất/thêm header) vẫn bị chặn — thử
+    // DỰ PHÒNG bằng trình duyệt ẩn THẬT ở server (mở hẳn 1 Chrome, điều
+    // hướng tới đúng trang rồi đăng nhập trong chính ngữ cảnh trang đó,
+    // xem _gdt_browser_login/server.py) — đúng yêu cầu người dùng khẳng
+    // định "không phải do đăng nhập nhanh mà do hệ thống thuế phát hiện
+    // đăng nhập qua phần mềm... xem có cách nào vào như người đăng nhập
+    // bình thường không". Có thể mất 20-40 giây (mở trình duyệt + vài lần
+    // thử lại), báo rõ để người dùng không tưởng bị treo.
+    btn.innerHTML='<span class="spin"></span> Đang thử bằng trình duyệt thật (20-40s)...';
+    toast('Đăng nhập qua mạng thường bị chặn — đang thử lại bằng trình duyệt thật, vui lòng đợi...','');
+    try{
+      await api(`/api/auto-login/${current}`,{method:'POST'});
+      clientState[current]=true;
+      toast('✓ Tự đăng nhập thành công qua trình duyệt thật','ok');
+      await loadCompanies();
+      selectCompany(current);
+      done=true;
+    }catch(e2){
+      lastErr=e2.message||lastErr;
     }
+  }
+  if(!done){
+    toast('⚠ Tự đăng nhập thất bại (đã thử cả qua mạng thường lẫn trình duyệt thật): '+lastErr
+      +' — vui lòng đợi vài phút rồi thử lại, hoặc bấm "Lấy mã" để tự nhập captcha bằng tay.','err');
     loadCaptcha();
   }
   btn.innerHTML='🤖 Tự đăng nhập';btn.disabled=false;btn2.disabled=false;

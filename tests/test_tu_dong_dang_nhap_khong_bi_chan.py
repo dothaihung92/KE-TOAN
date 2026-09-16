@@ -78,6 +78,7 @@ class _FakeClient:
         self.so_lan_goi_captcha = 0
         self.so_lan_goi_login = 0
         self._token_dead = True
+        self.token = None
 
     def get_captcha(self):
         self.so_lan_goi_captcha += 1
@@ -89,6 +90,9 @@ class _FakeClient:
         if hanh_dong is not None:
             raise hanh_dong
         return "fake-token"
+
+    def set_token(self, token):
+        self.token = token
 
 
 ns = {}
@@ -102,6 +106,17 @@ ns['db'] = lambda: _FakeConn(_comp_row)
 
 _client_hien_tai = {"c": None}
 ns['get_client'] = lambda cid: _client_hien_tai["c"]
+
+_goi_browser_login = []
+_ket_qua_browser_login = {"v": (False, None, {"tried": []})}
+
+
+def _fake_gdt_browser_login(drv, username, password, so_lan=6, progress=None):
+    _goi_browser_login.append({"drv": drv, "username": username, "password": password, "so_lan": so_lan})
+    return _ket_qua_browser_login["v"]
+
+
+ns['_gdt_browser_login'] = _fake_gdt_browser_login
 
 exec(extract_fn('_tu_dong_dang_nhap'), ns)
 _tu_dong_dang_nhap = ns['_tu_dong_dang_nhap']
@@ -169,5 +184,63 @@ assert len(_fake_time.sleeps) == 3, (
 assert _client_hien_tai["c"]._token_dead is False, "Đăng nhập thành công phải 'hồi sinh' client (_token_dead=False)"
 print("PASS 3: đăng nhập thành công ở lần thử thứ 2 -> vẫn hoạt động đúng như trước (không hồi quy), "
       "có nghỉ đủ cả 2 loại (giữa lượt + đọc/gõ captcha).")
+
+# ===== Test 4-6 (MỚI — đúng yêu cầu người dùng khẳng định lại: "không phải
+# do đăng nhập nhanh mà do hệ thống thuế phát hiện đăng nhập qua phần mềm
+# ... hãy xem có cách nào vào như người đăng nhập bình thường không"): khi
+# HTTP thuần (GDTClient, dù đã giả lập kỹ) vẫn bị chặn hẳn, PHẢI tự động dự
+# phòng bằng TRÌNH DUYỆT THẬT (_gdt_browser_login, chỉ khi có sẵn drv). =====
+
+# Test 4 (QUAN TRỌNG): bị chặn hẳn qua HTTP (lỗi "hành vi không hợp lệ") +
+# CÓ drv (trình duyệt ẩn thật) -> PHẢI tự động gọi _gdt_browser_login() dự
+# phòng, và nếu nó THÀNH CÔNG thì trả về ok=True, gán đúng token vào client
+# qua set_token() (không phải qua login() HTTP thường).
+_client_hien_tai["c"] = _FakeClient([loi_waf])
+_goi_browser_login.clear()
+_ket_qua_browser_login["v"] = (True, "token-tu-trinh-duyet-that", {"so_lan": 2, "tried": ["AB", "CD"]})
+_fake_time.sleeps.clear()
+ok4, msg4, so_lan_thu4, tried4 = _tu_dong_dang_nhap(4, so_lan=5, drv="fake-driver")
+assert ok4 is True, f"Trình duyệt thật đăng nhập được -> phải trả về ok=True — got {ok4}, msg={msg4}"
+assert "trình duyệt thật" in msg4, f"Thông báo phải nêu rõ đã đăng nhập qua trình duyệt thật — got {msg4}"
+assert len(_goi_browser_login) == 1, (
+    f"Phải gọi ĐÚNG 1 lần _gdt_browser_login() dự phòng khi HTTP bị chặn hẳn và có sẵn drv — got "
+    f"{len(_goi_browser_login)}")
+assert _goi_browser_login[0]["drv"] == "fake-driver", "Phải truyền đúng drv đã có sẵn cho _gdt_browser_login()"
+assert _goi_browser_login[0]["username"] == "0300000000", "Phải truyền đúng username (mst) cho _gdt_browser_login()"
+assert _client_hien_tai["c"].token == "token-tu-trinh-duyet-that", (
+    f"Token lấy được từ trình duyệt thật phải được gán vào client qua set_token() — got "
+    f"{_client_hien_tai['c'].token}")
+assert _client_hien_tai["c"]._token_dead is False
+print("PASS 4: HTTP thuần bị chặn hẳn + có sẵn trình duyệt ẩn thật -> tự động dự phòng đăng nhập qua "
+      "trình duyệt thật, thành công thì gán đúng token vào client — đúng yêu cầu người dùng 'xem có "
+      "cách nào vào như người đăng nhập bình thường không'.")
+
+# Test 5 (không hồi quy — QUAN TRỌNG): HTTP thuần THÀNH CÔNG ngay từ đầu ->
+# TUYỆT ĐỐI KHÔNG được gọi _gdt_browser_login() dự phòng (lãng phí, mở
+# trình duyệt thật tốn thời gian hơn hẳn — chỉ dùng khi HTTP thường thất
+# bại), dù có sẵn drv đi nữa.
+_client_hien_tai["c"] = _FakeClient([None])
+_goi_browser_login.clear()
+ok5, msg5, so_lan_thu5, tried5 = _tu_dong_dang_nhap(5, so_lan=5, drv="fake-driver")
+assert ok5 is True
+assert len(_goi_browser_login) == 0, (
+    f"HTTP thuần đã thành công ngay từ lần đầu -> KHÔNG được gọi thêm _gdt_browser_login() dự phòng "
+    f"(lãng phí, mở trình duyệt thật chậm hơn hẳn) — got {len(_goi_browser_login)} lượt gọi")
+print("PASS 5: HTTP thuần đăng nhập thành công ngay -> không lãng phí gọi thêm trình duyệt thật dự "
+      "phòng (chỉ dùng khi HTTP thường thất bại).")
+
+# Test 6 (không hồi quy): HTTP thuần bị chặn hẳn + có drv, NHƯNG trình duyệt
+# thật dự phòng CŨNG thất bại -> trả về ok=False, thông báo kèm cả lý do
+# thất bại của trình duyệt thật (không chỉ lý do HTTP), không crash.
+_client_hien_tai["c"] = _FakeClient([loi_waf])
+_goi_browser_login.clear()
+_ket_qua_browser_login["v"] = (False, None, {"so_lan": 6, "tried": ["AB", "CD", "EF"]})
+ok6, msg6, so_lan_thu6, tried6 = _tu_dong_dang_nhap(6, so_lan=5, drv="fake-driver")
+assert ok6 is False
+assert len(_goi_browser_login) == 1
+assert "Trình duyệt thật" in msg6 or "trình duyệt thật" in msg6, (
+    f"Thông báo thất bại cuối cùng phải nêu rõ trình duyệt thật dự phòng CŨNG đã thất bại — got {msg6}")
+print("PASS 6: HTTP thuần bị chặn hẳn VÀ trình duyệt thật dự phòng cũng thất bại -> trả về thất bại "
+      "an toàn, thông báo nêu rõ cả 2 cách đã thử, không crash.")
 
 print("\nALL DONE")

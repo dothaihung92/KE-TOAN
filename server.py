@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.266"
+APP_BUILD = "2026-09-16.267"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2451,12 +2451,116 @@ def solve_login(cid: int, body: dict = Body(...)):
         raise HTTPException(401, f"Sai mã '{guess}': {e}")
 
 
+# --- Đăng nhập hoadondientu.gdt.gov.vn bằng TRÌNH DUYỆT THẬT (dự phòng khi
+# gọi HTTP thuần qua GDTClient — dù đã giả lập vân tay TLS/headers/XSRF-TOKEN
+# — vẫn bị chặn 403 "Hệ thống phát hiện hành vi không hợp lệ") — người dùng
+# xác nhận đây KHÔNG PHẢI do đăng nhập quá nhanh (tài khoản vẫn đăng nhập
+# BÌNH THƯỜNG qua trình duyệt thật của họ), mà do hệ thống Thuế phát hiện ra
+# request đến từ PHẦN MỀM chứ không phải trình duyệt — yêu cầu "xem có cách
+# nào vào như người đăng nhập bình thường không". Gọi ĐÚNG API đã xác nhận
+# qua DevTools (/api/captcha, /api/security-taxpayer/authenticate) nhưng
+# chạy fetch() NGAY TRONG NGỮ CẢNH của trang hoadondientu.gdt.gov.vn THẬT
+# (sau khi trình duyệt đã thật sự điều hướng tới đó) — y hệt cách DVCClient/
+# dichvucong.gdt.gov.vn (dùng CHUNG 1 hạ tầng WAF F5 BIG-IP) đã làm thành
+# công từ trước (_JS_LOGIN) — không cần biết cấu trúc HTML/selector cụ thể
+# của trang (không tự dò/bấm nút trên DOM, dễ gãy nếu trang đổi giao diện),
+# chỉ cần trình duyệt đã TẢI đúng trang (nhận đủ cookie/token WAF cấp qua JS
+# challenge nếu có — thứ mà 1 lượt gọi HTTP thuần, dù đã giả lập kỹ đến đâu,
+# cũng không thể có được vì không thực thi JS).
+_JS_GDT_CAPTCHA = r"""
+var cb = arguments[arguments.length-1];
+fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
+  method: 'GET',
+  headers: {'Accept': 'application/json, text/plain, */*'},
+  credentials: 'include'
+}).then(function(r){
+  return r.text().then(function(t){ cb({ok:true, status:r.status, body:t}); });
+}).catch(function(e){ cb({ok:false, err:String(e)}); });
+"""
+
+_JS_GDT_LOGIN = r"""
+var cb = arguments[arguments.length-1];
+var username=arguments[0], password=arguments[1], cvalue=arguments[2], ckey=arguments[3];
+fetch('https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate', {
+  method: 'POST',
+  headers: {'Content-Type':'application/json', 'Accept':'application/json, text/plain, */*'},
+  credentials: 'include',
+  body: JSON.stringify({username:username, password:password, cvalue:cvalue, ckey:ckey})
+}).then(function(r){
+  return r.text().then(function(t){ cb({ok:true, status:r.status, body:t}); });
+}).catch(function(e){ cb({ok:false, err:String(e)}); });
+"""
+
+
+def _gdt_browser_login(drv, username, password, so_lan=6, progress=None):
+    """Đăng nhập hoadondientu.gdt.gov.vn bằng TRÌNH DUYỆT THẬT — xem giải
+    thích đầy đủ ở khối comment ngay phía trên. Trả (ok, token_hoặc_None,
+    {"so_lan":.., "tried": [...]})."""
+    drv.get("https://hoadondientu.gdt.gov.vn/")
+    time.sleep(2.0 + random.random())
+    tried = []
+    for lan in range(1, so_lan + 1):
+        if progress:
+            progress(f"[Trình duyệt thật] lần {lan}/{so_lan}: đang lấy captcha...")
+        try:
+            capres = drv.execute_async_script(_JS_GDT_CAPTCHA)
+        except Exception as e:
+            tried.append(f"(lỗi lấy captcha: {e})")
+            time.sleep(1.0)
+            continue
+        if not capres or not capres.get("ok"):
+            tried.append(f"(lấy captcha lỗi: {str(capres)[:120]})")
+            time.sleep(1.0)
+            continue
+        try:
+            cap = json.loads(capres.get("body") or "{}")
+        except Exception:
+            tried.append(f"(captcha không phải JSON: {str(capres.get('body'))[:80]})")
+            time.sleep(1.0)
+            continue
+        ckey = cap.get("key") or ""
+        cval = _solve_captcha(cap.get("content") or "", drv=drv)
+        tried.append(cval or "(không giải được)")
+        if not cval:
+            time.sleep(1.0)
+            continue
+        if progress:
+            progress(f"[Trình duyệt thật] lần {lan}/{so_lan}: đã đoán mã, đang đăng nhập...")
+        time.sleep(0.8 + random.random() * 1.0)   # mô phỏng thời gian đọc + gõ captcha
+        try:
+            res = drv.execute_async_script(_JS_GDT_LOGIN, username, password, cval, ckey)
+        except Exception as e:
+            tried[-1] = f"{tried[-1]}→lỗi gọi login: {e}"
+            time.sleep(1.2)
+            continue
+        if res and res.get("ok"):
+            try:
+                data = json.loads(res.get("body") or "{}")
+            except Exception:
+                data = {}
+            token = data.get("token")
+            if token:
+                return True, token, {"so_lan": lan, "tried": tried}
+            tried[-1] = f"{tried[-1]}→HTTP {res.get('status')}: {str(res.get('body'))[:150]}"
+        else:
+            tried[-1] = f"{tried[-1]}→{str(res)[:150]}"
+        if lan < so_lan:
+            time.sleep(1.2 + random.random() * 1.2)
+    return False, None, {"so_lan": so_lan, "tried": tried}
+
+
 def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
     """Tự lấy captcha -> giải -> đăng nhập cho 1 công ty (dùng chung cho endpoint
     /api/auto-login VÀ cho tra cứu hàng loạt — công ty chưa đăng nhập thì tự
     đăng nhập bằng tài khoản/mật khẩu đã lưu thay vì bỏ qua).
     drv: webdriver Chrome ẩn (tùy chọn) để vẽ captcha SVG→PNG chính xác như
-    trình duyệt thật (xem _svg_to_png_browser) — tăng tỉ lệ tự đăng nhập thành công.
+    trình duyệt thật (xem _svg_to_png_browser) — tăng tỉ lệ tự đăng nhập thành
+    công. NẾU có drv, còn dùng làm DỰ PHÒNG đăng nhập bằng TRÌNH DUYỆT THẬT
+    (_gdt_browser_login) khi cách gọi HTTP thuần (GDTClient, dù đã giả lập
+    vân tay TLS/headers/XSRF-TOKEN) vẫn bị hệ thống Thuế chặn hẳn — người
+    dùng xác nhận: tài khoản vẫn đăng nhập BÌNH THƯỜNG qua trình duyệt thật
+    của họ, nên đây KHÔNG PHẢI chặn theo IP, mà do hệ thống nhận ra request
+    đến từ phần mềm.
     progress: callback(text) báo tiến độ từng lần thử (tùy chọn) — để người
     dùng biết đang thử lần thứ mấy, không phải chờ 'im lặng' cả quá trình.
     Trả (ok: bool, message: str, so_lan_thu: int, ma_da_thu: list)."""
@@ -2468,15 +2572,13 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
     if not comp["password"]:
         return False, "Công ty chưa lưu mật khẩu — không thể tự đăng nhập", 0, []
     client = get_client(cid)
+    username = comp["username"] or comp["mst"]
+    password = comp["password"]
     last_err = ""
     tried = []
     for lan in range(1, so_lan + 1):
-        # Nghỉ ngẫu nhiên TRƯỚC mỗi lần thử lại (không nghỉ ở lần đầu) — bắn
-        # liên tiếp nhiều lượt gần như tức thời (lấy captcha mới + đăng nhập
-        # ngay) khiến hệ thống Thuế coi là hành vi bot (tần suất đăng nhập/
-        # giây bất thường so với người thật gõ tay), dẫn tới bị chặn hẳn với
-        # lỗi "Hệ thống phát hiện hành vi không hợp lệ. Yêu cầu đã bị chặn."
-        # (403) — đúng ca thật người dùng gặp qua nút "🤖 Tự đăng nhập".
+        # Nghỉ ngẫu nhiên TRƯỚC mỗi lần thử lại (không nghỉ ở lần đầu) — né
+        # tần suất đăng nhập/giây bất thường so với người thật gõ tay.
         if lan > 1:
             time.sleep(1.2 + random.random() * 1.2)
         if progress:
@@ -2484,7 +2586,8 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
         try:
             cap = client.get_captcha()
         except Exception as e:
-            return False, f"Lỗi lấy captcha: {e}", lan, tried
+            last_err = f"Lỗi lấy captcha: {e}"
+            break   # dừng vòng HTTP, để còn thử dự phòng bằng trình duyệt thật bên dưới
         ckey = cap.get("key") or ""
         cval = _solve_captcha(cap.get("content") or "", drv=drv)
         tried.append(cval or "(không giải được)")
@@ -2496,17 +2599,10 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
         if progress:
             progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: đã đoán mã, đang đăng nhập...")
         # Nghỉ thêm 1 chút SAU khi giải xong captcha, TRƯỚC khi gửi đăng nhập
-        # — mô phỏng thời gian người thật "đọc + gõ" captcha, tránh gửi NGAY
-        # LẬP TỨC sau khi có captcha (tốc độ phản xạ "siêu nhân" cũng là 1
-        # dấu hiệu hành vi bot, góp phần vào lỗi 403 đã gặp thật).
+        # — mô phỏng thời gian người thật "đọc + gõ" captcha.
         time.sleep(0.8 + random.random() * 1.0)
         try:
-            client.login(
-                username=comp["username"] or comp["mst"],
-                password=comp["password"],
-                cvalue=cval,
-                ckey=ckey,
-            )
+            client.login(username=username, password=password, cvalue=cval, ckey=ckey)
             # "Hồi sinh" client sau khi đăng nhập lại thành công — nếu trước đó
             # đã bị đánh dấu _token_dead=True (do gặp 401 lúc tải file/lấy chi
             # tiết), phải RESET lại để các bước đó không tiếp tục bỏ qua mạng
@@ -2516,15 +2612,35 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
         except Exception as e:
             last_err = str(e)
             # Hệ thống Thuế đã CHẶN HẲN (WAF phát hiện hành vi bất thường) ->
-            # dừng NGAY, KHÔNG thử tiếp (thử tiếp trong lúc đang bị chặn chỉ
-            # tổ kéo dài thời gian bị chặn, vô ích).
+            # dừng NGAY vòng HTTP (thử tiếp bằng HTTP trong lúc đang bị chặn
+            # chỉ tổ kéo dài thời gian bị chặn, vô ích) — chuyển sang thử dự
+            # phòng bằng trình duyệt thật bên dưới thay vì bỏ cuộc luôn.
             if "hành vi không hợp lệ" in last_err or "đã bị chặn" in last_err:
-                return (False,
-                       f"Hệ thống Thuế đã TẠM CHẶN do phát hiện đăng nhập tự động quá nhanh — "
-                       f"vui lòng đợi vài phút rồi thử lại. Lỗi: {last_err}", lan, tried)
+                break
             if progress:
                 progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: sai mã/lỗi đăng nhập, thử lại...")
             continue
+
+    # DỰ PHÒNG: cách gọi HTTP thuần (dù đã giả lập kỹ TLS/headers/XSRF-TOKEN)
+    # vẫn không đăng nhập được -> nếu có sẵn trình duyệt ẩn thật (drv), thử
+    # đăng nhập lại bằng cách điều hướng trình duyệt tới ĐÚNG trang rồi gọi
+    # API NGAY TRONG NGỮ CẢNH trang đó (_gdt_browser_login) — xem giải thích
+    # đầy đủ ở comment của hàm đó.
+    if drv is not None:
+        if progress:
+            progress("Đăng nhập qua mạng thường bị chặn — đang thử lại bằng trình duyệt thật "
+                     "(có thể mất 20-40 giây)...")
+        try:
+            ok_dt, token, diag = _gdt_browser_login(drv, username, password, so_lan=6, progress=progress)
+        except Exception as e:
+            ok_dt, token, diag = False, None, {"loi": str(e)}
+        if ok_dt and token:
+            client.set_token(token)
+            client._token_dead = False
+            return (True, f"Đăng nhập tự động thành công (qua trình duyệt thật, lần {diag.get('so_lan')})",
+                   so_lan, tried)
+        last_err = f"{last_err} | Trình duyệt thật cũng thất bại: {diag}"
+
     return False, f"Tự đăng nhập thất bại sau {so_lan} lần. Lỗi cuối: {last_err}", so_lan, tried
 
 
@@ -2548,9 +2664,11 @@ def _dong_trinh_duyet_captcha(drv):
 
 @app.post("/api/auto-login/{cid}")
 def auto_login(cid: int):
-    """Tự lấy captcha → giải → đăng nhập, retry tối đa 5 lần (server-side, fallback).
-    Dùng trình duyệt ẩn thật để vẽ captcha (chính xác như lúc người dùng tự bấm
-    nút trên giao diện) thay vì svglib để tăng tỉ lệ thành công."""
+    """Tự lấy captcha → giải → đăng nhập, retry tối đa 8 lần qua HTTP thuần
+    (GDTClient); nếu vẫn bị hệ thống Thuế chặn hẳn, TỰ ĐỘNG dự phòng đăng
+    nhập bằng chính trình duyệt ẩn thật này (_gdt_browser_login, xem
+    _tu_dong_dang_nhap) — dùng cho nút "🤖 Tự đăng nhập" khi cách gọi HTTP ở
+    trình duyệt người dùng (doAutoLogin, /api/solve-login) đã bị chặn."""
     drv = _mo_trinh_duyet_captcha()
     try:
         ok, thong_bao, so_lan_thu, ma_da_thu = _tu_dong_dang_nhap(cid, so_lan=8, drv=drv)
