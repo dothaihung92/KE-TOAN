@@ -124,11 +124,6 @@ exec(extract_fn('_tra_cuu_thong_tin_nnt'), ns)
 exec(extract_fn('_lay_danh_muc_cqt'), ns)
 exec(extract_fn('_lay_ma_cqt_theo_xa'), ns)
 exec(extract_fn('_go_trung_ma_cqt_theo_dia_chi'), ns)
-# tra_cuu_doanh_nghiep() giờ còn tra "Người đại diện" trên masothue.com
-# (_lay_ten_nguoi_dai_dien_masothue, xem test_nguoi_dai_dien_masothue.py)
-# — dùng bản giả luôn trả "" (không gọi mạng), vì các test trong file này
-# chỉ kiểm tra riêng phần Mã CQT, không liên quan masothue.com.
-ns['_lay_ten_nguoi_dai_dien_masothue'] = lambda mst: ""
 exec(extract_fn('tra_cuu_doanh_nghiep'), ns)
 _lay_danh_muc_cqt = ns['_lay_danh_muc_cqt']
 tra_cuu_doanh_nghiep = ns['tra_cuu_doanh_nghiep']

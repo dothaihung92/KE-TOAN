@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.279"
+APP_BUILD = "2026-09-16.280"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6055,117 +6055,6 @@ def _ghi_nho_ma_cqt(ten_cqt, ma_cqt):
         conn.close()
 
 
-_MASOTHUE_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-
-
-def _tao_session_masothue():
-    """Tạo session gọi masothue.com — ưu tiên curl_cffi (giả lập đúng vân
-    tay TLS Chrome, xem GDTClient.__init__ dùng y hệt cách này cho trang
-    Thuế bị WAF chặn theo TLS/JA3) vì masothue.com chạy sau Cloudflare
-    (thấy rõ qua endpoint cdn-cgi/rum trong log DevTools người dùng gửi) —
-    request bằng requests thuần (vân tay TLS khác hẳn trình duyệt thật) có
-    thể bị Cloudflare âm thầm trả về trang/JSON khác khiến tra cứu luôn
-    thất bại dù code đúng. Rớt về requests thường nếu máy chưa cài
-    curl_cffi (vẫn hoạt động, chỉ dễ bị chặn hơn)."""
-    try:
-        from curl_cffi import requests as _cffi
-        return _cffi.Session(impersonate="chrome"), True
-    except Exception:
-        return requests.Session(), False
-
-
-def _lay_ten_nguoi_dai_dien_masothue(mst):
-    """Tra 'Người đại diện' trên masothue.com để gợi ý điền 'Tên người ký
-    tờ khai' — API XInvoice không có trường này. Theo đúng luồng THẬT
-    người dùng chụp lại từ DevTools (site dùng token phiên đơn giản, không
-    phải thử thách chống bot phức tạp — token chỉ là {"success":1,"token":
-    "..."} lấy tự do, không cần giải mã gì):
-      1) POST /Ajax/Token   -> {"success":1,"token":"..."}
-      2) POST /Ajax/Search  (q=<mst>, type=auto, token=<token trên>,
-         force-search=1) -> {"success":1,"url":"/<mst>-<slug>",...}
-      3) GET https://masothue.com<url> -> trang chi tiết, đọc tên trong
-         khối <tr itemprop='alumni' itemscope itemtype='.../Person'>...
-         <span itemprop='name'><a ...>TÊN</a></span>...</tr> — CHỈ khối
-         này (thông tin công ty đang tra), KHÔNG lấy nhầm "Người đại diện"
-         của các công ty khác liệt kê thêm ở cuối trang (dạng <em><a>...).
-
-    Sau khi đổi sang curl_cffi vẫn tra không ra (log server thật:
-    "[masothue] Ajax/Search không khớp MST: '{"success":1,"url":"\\/"}'"
-    — tức bước Search VẪN chạy được, có nhận request, nhưng trả kết quả
-    RỖNG thay vì báo lỗi) — người dùng gửi lại đúng 2 request thật bằng
-    "Copy as cURL" từ DevTools để so khớp, phát hiện 2 khác biệt so với
-    code cũ: (1) tham số "r" gửi kèm /Ajax/Token thật có dạng 6 ký tự chữ
-    thường+số (vd "bc36lo", giống JS Math.random().toString(36)), còn code
-    cũ dùng uuid hex 8 ký tự; (2) request thật còn có Content-Type kèm
-    charset và các header Client-Hints/Fetch-Metadata (sec-ch-ua*,
-    sec-fetch-*) mà trình duyệt luôn tự thêm cho request cùng-nguồn gốc,
-    code cũ chưa gửi. Thêm các header này CHỈ để giống đúng 1 request bình
-    thường từ trình duyệt thật (không phải giải mã thử thách/CAPTCHA gì).
-
-    Trả về "" nếu không tra được (không lỗi/crash, người dùng vẫn tự điền
-    tay). In log [masothue] khi có bước thất bại — để chẩn đoán được lý do
-    thay vì âm thầm không rõ vì sao (đã từng gặp: tra không ra gì nhưng
-    không biết bước nào lỗi)."""
-    import re as _re
-    import random as _random
-    import string as _string
-    mst_c = _chuan_mst(mst)[:10]
-    if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
-        return ""
-    try:
-        s, dung_tls_chrome = _tao_session_masothue()
-        headers_chung = {
-            "x-requested-with": "XMLHttpRequest",
-            "accept": "application/json, text/javascript, */*; q=0.01",
-            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "origin": "https://masothue.com",
-            "referer": "https://masothue.com/",
-            "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-origin",
-        }
-        if not dung_tls_chrome:
-            headers_chung["user-agent"] = _MASOTHUE_UA
-        r_ngau_nhien = "".join(_random.choices(_string.ascii_lowercase + _string.digits, k=6))
-        r1 = s.post("https://masothue.com/Ajax/Token", headers=headers_chung,
-                     data={"r": r_ngau_nhien}, timeout=8)
-        if r1.status_code != 200:
-            print(f"[masothue] Ajax/Token status={r1.status_code} (tls_chrome={dung_tls_chrome})")
-            return ""
-        token = (r1.json() or {}).get("token") or ""
-        if not token:
-            print(f"[masothue] Ajax/Token không có token: {r1.text[:200]!r}")
-            return ""
-        r2 = s.post("https://masothue.com/Ajax/Search", headers=headers_chung,
-                     data={"q": mst_c, "type": "auto", "token": token, "force-search": "1"},
-                     timeout=8)
-        if r2.status_code != 200:
-            print(f"[masothue] Ajax/Search status={r2.status_code}")
-            return ""
-        duong_dan = (r2.json() or {}).get("url") or ""
-        if not duong_dan or mst_c not in duong_dan:
-            print(f"[masothue] Ajax/Search không khớp MST: {r2.text[:200]!r}")
-            return ""
-        r3 = s.get("https://masothue.com" + duong_dan,
-                    headers={} if dung_tls_chrome else {"user-agent": _MASOTHUE_UA}, timeout=8)
-        if r3.status_code != 200:
-            print(f"[masothue] tải trang chi tiết status={r3.status_code}")
-            return ""
-        m = _re.search(
-            r"itemprop=['\"]alumni['\"].*?itemprop=['\"]name['\"]>\s*<a[^>]*>([^<]+)</a>",
-            r3.text, _re.DOTALL)
-        if not m:
-            print("[masothue] không tìm thấy khối 'Người đại diện' trong trang chi tiết")
-        return m.group(1).strip() if m else ""
-    except Exception as e:
-        print(f"[masothue] lỗi khi tra cứu: {e}")
-        return ""
-
-
 _DANH_MUC_CQT = None  # cache {ten_cqt: [ma_cqt, ...]} — nạp 1 lần từ file
 
 
@@ -6275,10 +6164,16 @@ def tra_cuu_doanh_nghiep(mst: str):
     (_go_trung_ma_cqt_theo_dia_chi — đúng cách HTKK tự suy ra Mã CQT từ lựa
     chọn Tỉnh/Thành + Xã/Phường, xác nhận qua ví dụ thật: "Xã Đức Lập" tỉnh
     Tây Ninh -> đúng mã 80115, không phải 80113). Không đoán được -> để
-    trống an toàn, không chặn việc tự nhập tay. Ngoài ra tra thêm "Người
-    đại diện" trên masothue.com (_lay_ten_nguoi_dai_dien_masothue) để gợi ý
-    "Tên người ký tờ khai" — API XInvoice không có trường này. CHƯA cấu
-    hình API XInvoice, hoặc MST không hợp lệ/không có dữ liệu -> trả 404."""
+    trống an toàn, không chặn việc tự nhập tay. CHƯA cấu hình API
+    XInvoice, hoặc MST không hợp lệ/không có dữ liệu -> trả 404.
+
+    LƯU Ý: trước đây có tra thêm "Người đại diện" trên masothue.com để gợi
+    ý "Tên người ký tờ khai", nhưng đã BỎ — log thật cho thấy server
+    masothue.com chủ động hủy session (Set-Cookie xoá PHPSESSID) ngay khi
+    nhận request tìm kiếm tự động dù bước lấy token trước đó vẫn thành
+    công, tức là họ CHỦ ĐỘNG phát hiện và chặn truy cập tự động vào chức
+    năng tìm kiếm — không cố lách qua cơ chế này nữa. "Tên người ký tờ
+    khai" nay để người dùng tự nhập tay như trước."""
     info = _tra_cuu_thong_tin_nnt(mst)
     if not info:
         raise HTTPException(
@@ -6301,7 +6196,6 @@ def tra_cuu_doanh_nghiep(mst: str):
             elif len(cac_ma) > 1:
                 ma_cqt = _go_trung_ma_cqt_theo_dia_chi(cac_ma, info["dia_chi"])
     info["ma_cqt"] = ma_cqt
-    info["nguoi_ky"] = _lay_ten_nguoi_dai_dien_masothue(mst)
     return info
 
 
