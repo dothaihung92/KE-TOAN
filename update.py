@@ -35,6 +35,8 @@ FILES = [
     "static/doi_chieu_ngan_hang.html",
     "templates/htkk_01gtgt_template.xml",
     "templates/htkk_05tncn_template.xml",
+    "templates/cqt_catalogue.txt",
+    "templates/cqt_dia_ban.txt",
     "license_core.py",
     "cap_phep_admin.py",
 ]
