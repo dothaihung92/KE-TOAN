@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.269"
+APP_BUILD = "2026-09-16.270"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -917,6 +917,7 @@ class GDTClient:
             if cancel_check and cancel_check():
                 raise Exception("CANCELLED")
             attempt += 1
+            extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
             try:
                 r = self.session.get(full_url, headers=extra_headers, timeout=45)
             except Exception:
@@ -990,10 +991,16 @@ class GDTClient:
             sp = SP()
             attempt = 0
             so_lan_5xx_lien_tiep = 0   # đếm số lần lỗi 5xx LIÊN TIẾP (reset khi gặp loại khác)
+            so_lan_403_lien_tiep = 0   # đếm số lần lỗi 403 LIÊN TIẾP (reset khi gặp loại khác)
             while True:
                 if cancel_check and cancel_check():
                     raise Exception("CANCELLED")
                 attempt += 1
+                # Mỗi lượt gọi PHẢI có "request-id" (UUID) KHÁC NHAU — đúng cách
+                # trang thật (Angular) tự sinh cho MỌI request, xác nhận qua cURL
+                # thật từ DevTools (xem GDTClient.login()/get_captcha()) — thiếu
+                # header này từng gây lỗi 403 y hệt ở bước đăng nhập.
+                extra_headers["request-id"] = str(uuid.uuid4())
                 try:
                     # timeout 90s (không phải 60s) — hệ thống máy tính tiền có
                     # thể phân trang chậm dần theo offset khi tổng số hóa đơn
@@ -1015,14 +1022,38 @@ class GDTClient:
                     # reset", SSL...) vào log thay vì chỉ nói chung chung "lỗi
                     # mạng" — để biết chính xác đang gặp vấn đề gì mà xử lý.
                     so_lan_5xx_lien_tiep = 0
+                    so_lan_403_lien_tiep = 0
                     cho = 3
                     if progress:
                         progress(f"lỗi mạng ({type(e).__name__}: {str(e)[:100]}), "
                                  f"đợi {cho}s rồi thử lại (lần {attempt})...")
                     _ngu_ktra_huy(cho, cancel_check)
                     continue
+                if r.status_code == 403:
+                    # Trước đây coi 403 là lỗi KHÔNG retry được (rơi thẳng xuống
+                    # raise_for_status()) — đúng ca thật người dùng báo: "mua vào
+                    # (máy tính tiền): một phần bị lỗi (3 lượt) dù đã tra cứu lại
+                    # 6 lượt ... HTTP Error 403" cho đúng các trạng thái ttxly
+                    # đang gọi SONG SONG 3 luồng (5/6/8) — cùng mã lỗi 403 đã xác
+                    # nhận ở bước đăng nhập là do THIẾU header (đã sửa), nhưng có
+                    # thể vẫn thoáng qua do tải dồn dập nhiều luồng cùng lúc ->
+                    # cho thử lại có chờ (giống 429) thay vì bỏ cuộc ngay, GIỚI
+                    # HẠN số lần liên tiếp (khác 429/5xx ở trên vốn thử vô hạn)
+                    # vì 403 cũng có thể là lỗi THẬT SỰ không tự hết (sai quyền,
+                    # endpoint đổi...) — quá ngưỡng thì rơi xuống raise_for_status()
+                    # báo lỗi rõ ràng thay vì treo mãi.
+                    so_lan_403_lien_tiep += 1
+                    so_lan_5xx_lien_tiep = 0
+                    if so_lan_403_lien_tiep > sp["retry_max"]:
+                        break
+                    if progress:
+                        progress(f"bị từ chối (403), đợi {sp['retry_base']}s rồi thử lại "
+                                 f"(lần {attempt})...")
+                    _ngu_ktra_huy(sp["retry_base"], cancel_check)
+                    continue
                 if r.status_code == 429:
                     so_lan_5xx_lien_tiep = 0
+                    so_lan_403_lien_tiep = 0
                     ra = r.headers.get("Retry-After")
                     try:
                         wait = int(ra) if ra else sp["retry_base"]
@@ -1038,6 +1069,7 @@ class GDTClient:
                     # Lỗi PHÍA MÁY CHỦ Thuế (500/502/503/504...) — thường là quá
                     # tải/đang bảo trì TẠM THỜI (nhất là hệ thống máy tính tiền),
                     # không phải do request sai.
+                    so_lan_403_lien_tiep = 0
                     so_lan_5xx_lien_tiep += 1
                     if so_lan_5xx_lien_tiep == 1:
                         # LẦN ĐẦU gặp 5xx -> chỉ chờ 3s rồi TỰ THỬ LẠI BÌNH
@@ -1214,6 +1246,7 @@ class GDTClient:
         for attempt in range(so_lan):
             if time.time() - t_bat_dau_thu > NGUONG_THOI_GIAN_THU_LAI:
                 break
+            extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
             try:
                 r = self.session.get(url, params=params, headers=extra_headers, timeout=90)
             except Exception as e:
@@ -1275,6 +1308,7 @@ class GDTClient:
         sp = SP()
         so_lan = max_retry if max_retry else sp["retry_max"]
         for attempt in range(so_lan):
+            extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
             try:
                 r = self.session.get(url, params=params,
                                      headers=extra_headers, timeout=60)
