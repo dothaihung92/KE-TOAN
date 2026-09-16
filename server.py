@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-15.265"
+APP_BUILD = "2026-09-16.266"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -466,11 +466,63 @@ class GDTClient:
         self.token: Optional[str] = None
         self._last_total = 0
         self._token_dead = False  # bật khi gặp 401 (hết phiên) -> bỏ qua nốt các gọi mạng
+        self.primed = False   # đã "vào trang chủ" lấy cookie WAF/XSRF chưa (xem prime())
+
+    def _xsrf(self):
+        # Nhiều cổng Thuế dùng Spring + Angular: XSRF-TOKEN nằm trong cookie,
+        # phải gửi LẠI đúng giá trị qua header X-XSRF-TOKEN ở mỗi request
+        # POST/PUT/DELETE — thiếu header này (dù cookie có sẵn) khiến request
+        # bị coi là KHÔNG xuất phát từ chính trang đó (giống hệt cách đã áp
+        # dụng đúng cho DVCClient/dichvucong.gdt.gov.vn, cổng dùng chung 1 hạ
+        # tầng WAF F5 BIG-IP với hoadondientu.gdt.gov.vn).
+        try:
+            return self.session.cookies.get("XSRF-TOKEN", "") or ""
+        except Exception:
+            for c in self.session.cookies:
+                if getattr(c, "name", "") == "XSRF-TOKEN":
+                    return c.value or ""
+            return ""
+
+    def prime(self):
+        """Vào trang chủ 1 lần (y hệt trình duyệt thật mở hoadondientu.gdt.gov.vn
+        trước khi bấm đăng nhập) để WAF F5 BIG-IP cấp cookie phiên (TS01.../
+        JSESSIONID/XSRF-TOKEN...) TRƯỚC KHI gọi thẳng các API captcha/đăng
+        nhập — bug thật đã gặp: trước đây gọi THẲNG /api/captcha rồi
+        /api/security-taxpayer/authenticate mà KHÔNG hề "ghé" trang chủ
+        trước, bất kể đã giả lập đúng vân tay TLS (curl_cffi) hay nghỉ đúng
+        nhịp giữa các lần thử — tự bản thân việc gọi thẳng API mà không có
+        lượt điều hướng trang nào trước đó ĐÃ LÀ 1 dấu hiệu rõ ràng KHÔNG
+        phải trình duyệt thật, dẫn tới lỗi 403 "Hệ thống phát hiện hành vi
+        không hợp lệ" NGAY CẢ KHI chỉ đăng nhập 1 lần duy nhất (không liên
+        quan gì tới tần suất/tốc độ). CHỈ prime 1 LẦN cho mỗi client (đăng
+        nhập lại lần sau trong cùng phiên làm việc dùng lại cookie cũ, không
+        cần vào lại trang chủ mỗi lần)."""
+        if self.primed:
+            return
+        try:
+            self.session.get("https://hoadondientu.gdt.gov.vn/", timeout=30, headers={
+                "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                           "image/avif,image/webp,image/apng,*/*;q=0.8"),
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+            })
+        except Exception:
+            pass   # không vào được trang chủ cũng KHÔNG chặn hẳn — vẫn thử API như trước
+        self.primed = True
 
     # --- Lấy ảnh captcha ---
     def get_captcha(self):
+        self.prime()
         url = f"{self.BASE}/captcha"
-        r = self.session.get(url, timeout=30)
+        h = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+        }
+        r = self.session.get(url, timeout=30, headers=h)
         r.raise_for_status()
         # Trang trả JSON: {"key": "...", "content": "data:image/svg+xml;base64,..."}
         # (content có thể là chuỗi SVG thô hoặc data-URI base64)
@@ -483,6 +535,7 @@ class GDTClient:
 
     # --- Đăng nhập lấy token ---
     def login(self, username, password, cvalue, ckey):
+        self.prime()
         url = f"{self.BASE}/security-taxpayer/authenticate"
         payload = {
             "username": username,
@@ -490,7 +543,16 @@ class GDTClient:
             "cvalue": cvalue,   # mã captcha người dùng nhập
             "ckey": ckey,       # key captcha tương ứng
         }
-        r = self.session.post(url, json=payload, timeout=30)
+        h = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+        }
+        xsrf = self._xsrf()
+        if xsrf:
+            h["X-XSRF-TOKEN"] = xsrf
+        r = self.session.post(url, json=payload, timeout=30, headers=h)
         if r.status_code != 200:
             raise Exception(f"Đăng nhập thất bại ({r.status_code}): {r.text[:200]}")
         data = r.json()
