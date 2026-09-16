@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.274"
+APP_BUILD = "2026-09-16.275"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6098,17 +6098,74 @@ def _lay_danh_muc_cqt():
     return ket_qua
 
 
+_MA_CQT_THEO_XA = None  # cache {ma_cqt: [ten_xa, ...]} — nạp 1 lần từ file
+
+
+def _lay_ma_cqt_theo_xa():
+    """Đọc bảng Mã CQT <-> Xã/Phường trực thuộc, dựng từ 2 file gốc HTKK
+    (InterfaceIni\\Catalogue_CQT_Dia_Ban.xml + Catalogue_CQThu_Dia_Ban.xml,
+    nối qua khoá chung "MaXa") — người dùng tự gửi cả 2 file, đã xác nhận
+    qua đúng ví dụ THẬT: HTKK tự suy ra "Cơ quan thuế quản lý" = Mã 80115
+    (không phải 80113) cho công ty ở "Xã Đức Lập" tỉnh Tây Ninh, dựa vào
+    lựa chọn Tỉnh/Thành + Xã/Phường — KHÔNG chỉ dựa vào tên CQT suông (vốn
+    có thể trùng giữa nhiều mã, xem _lay_danh_muc_cqt).
+
+    Dùng để gỡ trùng: khi 1 Tên CQT ứng với NHIỀU Mã (_lay_danh_muc_cqt),
+    so khớp tên xã/phường của từng Mã ứng viên với địa chỉ công ty (API
+    XInvoice trả về thường có tên xã/phường trong chuỗi địa chỉ) — Mã nào
+    có xã khớp thì chọn Mã đó.
+
+    Trả về {} nếu chưa có file danh mục (không lỗi/crash)."""
+    global _MA_CQT_THEO_XA
+    if _MA_CQT_THEO_XA is not None:
+        return _MA_CQT_THEO_XA
+    ket_qua = {}
+    duong_dan = os.path.join(BASE_DIR, "templates", "cqt_dia_ban.txt")
+    try:
+        with open(duong_dan, encoding="utf-8") as f:
+            for dong in f:
+                dong = dong.strip()
+                if not dong:
+                    continue
+                phan = dong.split("###")
+                if len(phan) < 2:
+                    continue
+                ma, xa = phan[0].strip(), phan[1].strip()
+                if ma and xa:
+                    ket_qua.setdefault(ma, [])
+                    ket_qua[ma].append(xa)
+    except FileNotFoundError:
+        pass
+    _MA_CQT_THEO_XA = ket_qua
+    return ket_qua
+
+
+def _go_trung_ma_cqt_theo_dia_chi(cac_ma, dia_chi):
+    """Trong danh sách Mã CQT ứng viên (cùng chung 1 Tên CQT bị trùng), tìm
+    ra ĐÚNG 1 Mã có tên xã/phường trực thuộc xuất hiện trong địa chỉ công
+    ty — trả về Mã đó, hoặc "" nếu không tìm được ĐÚNG 1 (0 hoặc từ 2 Mã
+    khớp trở lên) để tránh đoán sai."""
+    if not dia_chi:
+        return ""
+    ma_theo_xa = _lay_ma_cqt_theo_xa()
+    ma_khop = [ma for ma in cac_ma if any(xa in dia_chi for xa in ma_theo_xa.get(ma, []))]
+    return ma_khop[0] if len(ma_khop) == 1 else ""
+
+
 @app.get("/api/tra-cuu-doanh-nghiep/{mst}")
 def tra_cuu_doanh_nghiep(mst: str):
     """Tra cứu thông tin đăng ký 1 MST để tự động điền form "Thêm công ty"
     (Tên công ty, Địa chỉ trụ sở, Tên CQT nơi nộp — và Mã CQT nơi nộp).
     Mã CQT được tra theo thứ tự: (1) bảng cqt_ma_ten đã "học" từ công ty
-    khác đã tự nhập/xác nhận đúng trước đó; (2) nếu chưa học được, tra
-    trong danh mục CQT toàn quốc (_lay_danh_muc_cqt) — CHỈ điền khi tên đó
-    ứng với ĐÚNG 1 mã duy nhất, để không đoán sai với công ty MỚI (chưa
-    từng có công ty nào cùng cơ quan thuế được nhập trước đó). CHƯA cấu
-    hình API XInvoice, hoặc MST không hợp lệ/không có dữ liệu -> trả 404
-    (giao diện tự bỏ qua, không chặn việc tự nhập tay)."""
+    khác đã tự nhập/xác nhận đúng trước đó; (2) nếu chưa học được và tên đó
+    ứng với ĐÚNG 1 mã duy nhất trong danh mục CQT toàn quốc
+    (_lay_danh_muc_cqt) thì dùng luôn; (3) nếu tên bị trùng ở NHIỀU mã, so
+    khớp tên xã/phường của từng mã ứng viên với địa chỉ công ty
+    (_go_trung_ma_cqt_theo_dia_chi — đúng cách HTKK tự suy ra Mã CQT từ lựa
+    chọn Tỉnh/Thành + Xã/Phường, xác nhận qua ví dụ thật: "Xã Đức Lập" tỉnh
+    Tây Ninh -> đúng mã 80115, không phải 80113). Không đoán được -> để
+    trống an toàn, không chặn việc tự nhập tay. CHƯA cấu hình API
+    XInvoice, hoặc MST không hợp lệ/không có dữ liệu -> trả 404."""
     info = _tra_cuu_thong_tin_nnt(mst)
     if not info:
         raise HTTPException(
@@ -6128,6 +6185,8 @@ def tra_cuu_doanh_nghiep(mst: str):
             cac_ma = _lay_danh_muc_cqt().get(info["ten_cqt"], [])
             if len(cac_ma) == 1:
                 ma_cqt = cac_ma[0]
+            elif len(cac_ma) > 1:
+                ma_cqt = _go_trung_ma_cqt_theo_dia_chi(cac_ma, info["dia_chi"])
     info["ma_cqt"] = ma_cqt
     return info
 

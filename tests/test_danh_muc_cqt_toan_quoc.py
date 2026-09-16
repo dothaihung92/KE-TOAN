@@ -111,11 +111,19 @@ _fake_requests = _FakeRequests()
 _fake_settings = _FakeSettings()
 ns['requests'] = _fake_requests
 ns['_get_setting'] = _fake_settings.get
+# tra_cuu_doanh_nghiep() giờ còn gỡ trùng Mã CQT theo Xã/Phường trong địa
+# chỉ (_go_trung_ma_cqt_theo_dia_chi, xem test_go_trung_ma_cqt_theo_dia_chi.py)
+# — thư mục templates/ giả lập ở đây KHÔNG có cqt_dia_ban.txt nên hàm đó
+# luôn trả {} an toàn, giữ đúng kỳ vọng "để rỗng khi không gỡ được" của
+# các test trong file này (chỉ kiểm tra riêng phần danh mục toàn quốc).
+ns['_MA_CQT_THEO_XA'] = None
 exec(extract_fn('_khong_dau'), ns)
 exec(extract_fn('_chuan_mst'), ns)
 exec(extract_fn('_lay_danh_sach_xinvoice_keys'), ns)
 exec(extract_fn('_tra_cuu_thong_tin_nnt'), ns)
 exec(extract_fn('_lay_danh_muc_cqt'), ns)
+exec(extract_fn('_lay_ma_cqt_theo_xa'), ns)
+exec(extract_fn('_go_trung_ma_cqt_theo_dia_chi'), ns)
 exec(extract_fn('tra_cuu_doanh_nghiep'), ns)
 _lay_danh_muc_cqt = ns['_lay_danh_muc_cqt']
 tra_cuu_doanh_nghiep = ns['tra_cuu_doanh_nghiep']
