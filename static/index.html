@@ -374,11 +374,6 @@
       <div class="field" style="flex:2"><label>Tên CQT nơi nộp</label><input id="m_ten_cqt" placeholder="VD: Thuế cơ sở 7 Thành phố Hồ Chí Minh"></div>
     </div>
     <p class="hint" style="margin-top:-6px">⚠ 3 mục trên PHẢI đúng theo đăng ký thuế của công ty (xem trên tờ khai HTKK đã nộp được lần gần nhất, hoặc hỏi kế toán) — nếu để trống hoặc sai, file "Kết xuất XML cho HTKK" có thể bị Cơ quan Thuế báo lỗi "Cơ quan thuế nơi nộp không là Cơ quan thuế quản lý".</p>
-    <div class="field">
-      <input type="file" id="m_tkhai_file" accept=".xml" style="display:none" onchange="nhapTuFileTKhai(this)">
-      <button type="button" class="btn ghost sm" onclick="document.getElementById('m_tkhai_file').click()" id="nhapTkhaiBtn">📄 Nhập từ file tờ khai đã nộp (XML)</button>
-    </div>
-    <p class="hint" style="margin-top:-6px">Cách chắc chắn đúng nhất: chọn 1 file tờ khai (vd <code>01_GTGT_TT80-...xml</code>) ĐÃ NỘP THÀNH CÔNG trước đây (lấy trong thư mục cài HTKK, hoặc file đã tải về máy) — phần mềm tự đọc và điền đủ MST/Tên/Địa chỉ/Mã CQT/Tên CQT/Tên người ký từ chính file đó.</p>
     <div class="field"><label>Tên người ký tờ khai <span style="font-weight:400;color:var(--muted)">(dùng khi Kết xuất XML GTGT/TNCN cho HTKK)</span></label><input id="m_nguoi_ky" placeholder="VD: Nguyễn Văn A"></div>
     <p class="hint" style="margin-top:-6px">Đã lưu sẵn ở đây thì lúc Kết xuất XML sẽ tự lấy tên này, không hỏi lại nữa.</p>
     <div class="field"><label>Tên đăng nhập trang Thuế <span style="font-weight:400;color:var(--muted)">(thường là MST)</span></label><input id="m_user" placeholder="Để trống sẽ dùng MST"></div>
@@ -1562,6 +1557,10 @@ async function traCuuDoanhNghiep(silent){
   const btn=document.getElementById('traCuuDnBtn');
   const old=btn.innerHTML;
   btn.innerHTML='<span class="spin"></span>';btn.disabled=true;
+  // Tên đăng nhập trang Thuế thường trùng MST — tự điền luôn khi tra cứu,
+  // không cần đợi API trả về (không phụ thuộc kết quả tra cứu thành công).
+  const userEl=document.getElementById('m_user');
+  if(!userEl.value.trim()) userEl.value=mst;
   try{
     const info=await api(`/api/tra-cuu-doanh-nghiep/${encodeURIComponent(mst)}`);
     const tenEl=document.getElementById('m_ten'), diaChiEl=document.getElementById('m_dia_chi'),
@@ -1583,34 +1582,6 @@ async function traCuuDoanhNghiep(silent){
     if(!silent)toast('Không tự điền được: '+e.message,'err');
   }
   btn.innerHTML=old;btn.disabled=false;
-}
-async function nhapTuFileTKhai(inp){
-  const file=inp.files&&inp.files[0];
-  if(!file)return;
-  const btn=document.getElementById('nhapTkhaiBtn');
-  const old=btn.innerHTML;
-  btn.innerHTML='<span class="spin"></span> Đang đọc...';btn.disabled=true;
-  try{
-    const fd=new FormData();
-    fd.append('file',file);
-    const info=await api('/api/import-tkhai-xml',{method:'POST',body:fd});
-    const mstEl=document.getElementById('m_mst'), tenEl=document.getElementById('m_ten'),
-          diaChiEl=document.getElementById('m_dia_chi'), nguoiKyEl=document.getElementById('m_nguoi_ky');
-    // CHỈ điền vào ô CÒN TRỐNG — không ghi đè dữ liệu người dùng đã tự gõ.
-    if(!mstEl.value.trim() && info.mst) mstEl.value=info.mst;
-    if(!tenEl.value.trim() && info.ten) tenEl.value=info.ten;
-    if(!diaChiEl.value.trim() && info.dia_chi) diaChiEl.value=info.dia_chi;
-    if(!nguoiKyEl.value.trim() && info.nguoi_ky) nguoiKyEl.value=info.nguoi_ky;
-    // Mã/Tên CQT nơi nộp: file tờ khai đã nộp là dữ liệu CHẮC CHẮN ĐÚNG,
-    // luôn ghi đè (kể cả khi ô đã có giá trị khác/sai trước đó).
-    if(info.ten_cqt) document.getElementById('m_ten_cqt').value=info.ten_cqt;
-    if(info.ma_cqt) document.getElementById('m_ma_cqt').value=info.ma_cqt;
-    toast('✓ Đã đọc file tờ khai và điền đầy đủ thông tin','ok');
-  }catch(e){
-    toast('Không đọc được file: '+e.message,'err');
-  }
-  btn.innerHTML=old;btn.disabled=false;
-  inp.value='';
 }
 function togglePass(){
   const inp=document.getElementById('m_pass'),btn=document.getElementById('passToggle');

@@ -9,6 +9,15 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 # người dùng yêu cầu vì API XInvoice không có trường này. Người dùng tự
 # bắt (DevTools) đúng luồng 3 bước THẬT trang masothue.com dùng khi tìm
 # kiếm theo MST:
+#
+# LƯU Ý: sau khi build .277 KHÔNG hoạt động ở môi trường thật (dù test cũ
+# pass), đổi sang tạo session qua curl_cffi.impersonate("chrome") — giống
+# hệt GDTClient dùng cho trang Thuế bị WAF chặn theo TLS/JA3 — vì
+# masothue.com chạy sau Cloudflare (endpoint cdn-cgi/rum thấy trong log
+# DevTools người dùng gửi), nghi vấn requests thuần bị Cloudflare âm thầm
+# chặn/trả khác do vân tay TLS không giống trình duyệt thật. Việc tạo
+# session được tách riêng thành _tao_session_masothue() để test giả lập
+# được (không phụ thuộc curl_cffi có cài trong máy chạy test hay không).
 #   1) POST /Ajax/Token   -> {"success":1,"token":"24quXCbivJ"}  (token
 #      phiên đơn giản, lấy tự do — KHÔNG phải thử thách chống bot phức
 #      tạp cần giải mã, khác hẳn WAF F5 Bot Defense của trang Thuế trước
@@ -86,8 +95,8 @@ class _FakeSession:
         self.calls = []
         self._plan = list(plan)
 
-    def post(self, url, data=None, timeout=None):
-        self.calls.append({"method": "POST", "url": url, "data": data})
+    def post(self, url, headers=None, data=None, timeout=None):
+        self.calls.append({"method": "POST", "url": url, "headers": headers, "data": data})
         return self._plan.pop(0)
 
     def get(self, url, headers=None, timeout=None):
@@ -95,15 +104,18 @@ class _FakeSession:
         return self._plan.pop(0)
 
 
-class _FakeRequestsModule:
+class _FakeTaoSessionMasothue:
+    """Giả lập _tao_session_masothue() — trả session giả đã xếp sẵn kịch
+    bản thay vì gọi curl_cffi/requests thật, để test không phụ thuộc việc
+    máy chạy test có cài curl_cffi hay không và không gọi mạng."""
     def __init__(self):
-        self._next_session = None
+        self._next = None
 
-    def dat_session_ke_tiep(self, sess):
-        self._next_session = sess
+    def dat_session_ke_tiep(self, sess, dung_tls_chrome=True):
+        self._next = (sess, dung_tls_chrome)
 
-    def Session(self):
-        return self._next_session
+    def __call__(self):
+        return self._next
 
 
 ns = {
@@ -111,8 +123,8 @@ ns = {
     '_MASOTHUE_UA': ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"),
 }
-_fake_requests = _FakeRequestsModule()
-ns['requests'] = _fake_requests
+_fake_tao_session = _FakeTaoSessionMasothue()
+ns['_tao_session_masothue'] = _fake_tao_session
 exec(extract_fn('_khong_dau'), ns)
 exec(extract_fn('_chuan_mst'), ns)
 exec(extract_fn('_lay_ten_nguoi_dai_dien_masothue'), ns)
@@ -127,7 +139,7 @@ sess1 = _FakeSession([
     _FakeResp(200, json_data={"success": 1, "url": "/1102183121-cong-ty-tnhh-thien-y-vn", "numRows": 1}),
     _FakeResp(200, text=_HTML_THAT),
 ])
-_fake_requests.dat_session_ke_tiep(sess1)
+_fake_tao_session.dat_session_ke_tiep(sess1)
 ket_qua1 = _lay_ten_nguoi_dai_dien_masothue("1102183121")
 assert ket_qua1 == "HÀ MINH VŨ", f"got {ket_qua1!r}"
 assert sess1.calls[0]["url"] == "https://masothue.com/Ajax/Token"
@@ -141,7 +153,7 @@ print("PASS 1: đúng luồng 3 bước Token->Search->GET (đúng dữ liệu t
 # ===== Test 2 (không hồi quy): MST không hợp lệ -> trả '', KHÔNG gọi
 # mạng. =====
 sess2 = _FakeSession([])
-_fake_requests.dat_session_ke_tiep(sess2)
+_fake_tao_session.dat_session_ke_tiep(sess2)
 ket_qua2 = _lay_ten_nguoi_dai_dien_masothue("123")
 assert ket_qua2 == "", f"got {ket_qua2!r}"
 assert sess2.calls == [], f"MST không hợp lệ không được gọi mạng — got {sess2.calls}"
@@ -150,7 +162,7 @@ print("PASS 2: MST không hợp lệ -> trả '' an toàn, không gọi mạng."
 # ===== Test 3 (không hồi quy — an toàn): /Ajax/Token lỗi/không trả token
 # -> trả '' an toàn, không lỗi/crash, không gọi tiếp Search/GET. =====
 sess3 = _FakeSession([_FakeResp(200, json_data={"success": 0})])
-_fake_requests.dat_session_ke_tiep(sess3)
+_fake_tao_session.dat_session_ke_tiep(sess3)
 ket_qua3 = _lay_ten_nguoi_dai_dien_masothue("1102183121")
 assert ket_qua3 == "", f"got {ket_qua3!r}"
 assert len(sess3.calls) == 1, f"Không có token -> không được gọi tiếp Search/GET — got {sess3.calls}"
@@ -163,7 +175,7 @@ sess4 = _FakeSession([
     _FakeResp(200, json_data={"success": 1, "token": "abc"}),
     _FakeResp(200, json_data={"success": 1, "url": "/9999999999-cong-ty-khac", "numRows": 1}),
 ])
-_fake_requests.dat_session_ke_tiep(sess4)
+_fake_tao_session.dat_session_ke_tiep(sess4)
 ket_qua4 = _lay_ten_nguoi_dai_dien_masothue("1102183121")
 assert ket_qua4 == "", f"got {ket_qua4!r}"
 assert len(sess4.calls) == 2, f"URL không khớp MST -> không được tải tiếp trang chi tiết — got {sess4.calls}"
@@ -178,7 +190,7 @@ sess5 = _FakeSession([
     _FakeResp(200, json_data={"success": 1, "url": "/1102183121-cong-ty-khong-co-nguoi-dai-dien"}),
     _FakeResp(200, text="<html><body>Không có thông tin người đại diện</body></html>"),
 ])
-_fake_requests.dat_session_ke_tiep(sess5)
+_fake_tao_session.dat_session_ke_tiep(sess5)
 ket_qua5 = _lay_ten_nguoi_dai_dien_masothue("1102183121")
 assert ket_qua5 == "", f"got {ket_qua5!r}"
 print("PASS 5: trang chi tiết không có khối 'alumni' -> trả '' an toàn, không lỗi.")

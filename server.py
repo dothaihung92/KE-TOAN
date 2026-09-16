@@ -25,7 +25,7 @@ import concurrent.futures as _cf
 from typing import Optional, List
 
 import requests
-from fastapi import FastAPI, HTTPException, Body, Request, Response, File, UploadFile
+from fastapi import FastAPI, HTTPException, Body, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.277"
+APP_BUILD = "2026-09-16.278"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6059,6 +6059,22 @@ _MASOTHUE_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
 
+def _tao_session_masothue():
+    """Tạo session gọi masothue.com — ưu tiên curl_cffi (giả lập đúng vân
+    tay TLS Chrome, xem GDTClient.__init__ dùng y hệt cách này cho trang
+    Thuế bị WAF chặn theo TLS/JA3) vì masothue.com chạy sau Cloudflare
+    (thấy rõ qua endpoint cdn-cgi/rum trong log DevTools người dùng gửi) —
+    request bằng requests thuần (vân tay TLS khác hẳn trình duyệt thật) có
+    thể bị Cloudflare âm thầm trả về trang/JSON khác khiến tra cứu luôn
+    thất bại dù code đúng. Rớt về requests thường nếu máy chưa cài
+    curl_cffi (vẫn hoạt động, chỉ dễ bị chặn hơn)."""
+    try:
+        from curl_cffi import requests as _cffi
+        return _cffi.Session(impersonate="chrome"), True
+    except Exception:
+        return requests.Session(), False
+
+
 def _lay_ten_nguoi_dai_dien_masothue(mst):
     """Tra 'Người đại diện' trên masothue.com để gợi ý điền 'Tên người ký
     tờ khai' — API XInvoice không có trường này. Theo đúng luồng THẬT
@@ -6075,44 +6091,55 @@ def _lay_ten_nguoi_dai_dien_masothue(mst):
          của các công ty khác liệt kê thêm ở cuối trang (dạng <em><a>...).
 
     Trả về "" nếu không tra được (không lỗi/crash, người dùng vẫn tự điền
-    tay hoặc dùng file tờ khai XML đã nộp như trước)."""
+    tay). In log [masothue] khi có bước thất bại — để chẩn đoán được lý do
+    thay vì âm thầm không rõ vì sao (đã từng gặp: tra không ra gì nhưng
+    không biết bước nào lỗi)."""
     import re as _re
     mst_c = _chuan_mst(mst)[:10]
     if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
         return ""
     try:
-        s = requests.Session()
-        s.headers.update({
-            "user-agent": _MASOTHUE_UA,
+        s, dung_tls_chrome = _tao_session_masothue()
+        headers_chung = {
             "x-requested-with": "XMLHttpRequest",
             "accept": "application/json, text/javascript, */*; q=0.01",
             "origin": "https://masothue.com",
             "referer": "https://masothue.com/",
-        })
-        r1 = s.post("https://masothue.com/Ajax/Token",
+        }
+        if not dung_tls_chrome:
+            headers_chung["user-agent"] = _MASOTHUE_UA
+        r1 = s.post("https://masothue.com/Ajax/Token", headers=headers_chung,
                      data={"r": uuid.uuid4().hex[:8]}, timeout=8)
         if r1.status_code != 200:
+            print(f"[masothue] Ajax/Token status={r1.status_code} (tls_chrome={dung_tls_chrome})")
             return ""
         token = (r1.json() or {}).get("token") or ""
         if not token:
+            print(f"[masothue] Ajax/Token không có token: {r1.text[:200]!r}")
             return ""
-        r2 = s.post("https://masothue.com/Ajax/Search",
+        r2 = s.post("https://masothue.com/Ajax/Search", headers=headers_chung,
                      data={"q": mst_c, "type": "auto", "token": token, "force-search": "1"},
                      timeout=8)
         if r2.status_code != 200:
+            print(f"[masothue] Ajax/Search status={r2.status_code}")
             return ""
         duong_dan = (r2.json() or {}).get("url") or ""
         if not duong_dan or mst_c not in duong_dan:
+            print(f"[masothue] Ajax/Search không khớp MST: {r2.text[:200]!r}")
             return ""
         r3 = s.get("https://masothue.com" + duong_dan,
-                    headers={"user-agent": _MASOTHUE_UA}, timeout=8)
+                    headers={} if dung_tls_chrome else {"user-agent": _MASOTHUE_UA}, timeout=8)
         if r3.status_code != 200:
+            print(f"[masothue] tải trang chi tiết status={r3.status_code}")
             return ""
         m = _re.search(
             r"itemprop=['\"]alumni['\"].*?itemprop=['\"]name['\"]>\s*<a[^>]*>([^<]+)</a>",
             r3.text, _re.DOTALL)
+        if not m:
+            print("[masothue] không tìm thấy khối 'Người đại diện' trong trang chi tiết")
         return m.group(1).strip() if m else ""
-    except Exception:
+    except Exception as e:
+        print(f"[masothue] lỗi khi tra cứu: {e}")
         return ""
 
 
@@ -6252,61 +6279,6 @@ def tra_cuu_doanh_nghiep(mst: str):
                 ma_cqt = _go_trung_ma_cqt_theo_dia_chi(cac_ma, info["dia_chi"])
     info["ma_cqt"] = ma_cqt
     info["nguoi_ky"] = _lay_ten_nguoi_dai_dien_masothue(mst)
-    return info
-
-
-def _parse_tkhai_xml_htkk(xml_text):
-    """Đọc 1 file tờ khai HTKK ĐÃ NỘP THÀNH CÔNG (vd 01_GTGT_TT80-...xml) để
-    lấy các thông tin đăng ký công ty — theo yêu cầu người dùng: "còn thiếu
-    Mã CQT nơi nộp (HTKK) và Tên người ký tờ khai ... đây là file gốc HTKK
-    hãy xem có file nào chứ mã CQT không". Xác nhận qua file thật người
-    dùng gửi (01_GTGT_TT80-Q12026-L00.xml): các thẻ <mst>, <tenNNT>,
-    <dchiNNT>, <maCQTNoiNop>, <tenCQTNoiNop>, <nguoiKy> đều KHÔNG có tiền
-    tố namespace dù root khai xmlns mặc định -> chỉ cần regex đơn giản,
-    giống hệt cách set_tag() ở export_htkk đã dùng để GHI các thẻ này (đối
-    xứng đọc/ghi cùng 1 kiểu thẻ).
-
-    Đây là nguồn dữ liệu ĐÁNG TIN CẬY NHẤT (đã được CQT chấp nhận) — hơn
-    hẳn API tra cứu ngoài (chỉ có Tên CQT, không có Mã) hoặc người dùng tự
-    gõ có thể gõ sai; cung cấp được LUÔN CẢ Mã CQT lẫn Tên người ký trong 1
-    lần, thay vì phải tự "học" dần qua nhiều công ty như bảng cqt_ma_ten.
-
-    Trả về dict rỗng ở field nào không tìm thấy trong file."""
-    import re as _re
-    import html as _html
-
-    def get_tag(tag):
-        m = _re.search(r"<" + tag + r"[^>]*>(.*?)</" + tag + r">", xml_text, _re.DOTALL)
-        return _html.unescape(m.group(1).strip()) if m else ""
-
-    return {
-        "mst": get_tag("mst"),
-        "ten": get_tag("tenNNT"),
-        "dia_chi": get_tag("dchiNNT"),
-        "ma_cqt": get_tag("maCQTNoiNop"),
-        "ten_cqt": get_tag("tenCQTNoiNop"),
-        "nguoi_ky": get_tag("nguoiKy"),
-    }
-
-
-@app.post("/api/import-tkhai-xml")
-async def import_tkhai_xml(file: UploadFile = File(...)):
-    """Đọc 1 file tờ khai HTKK ĐÃ NỘP THÀNH CÔNG để tự động điền form "Thêm
-    công ty"/"Sửa công ty" (Mã/Tên CQT nơi nộp, Tên người ký tờ khai — và
-    cả MST/Tên/Địa chỉ nếu form đang trống) — theo yêu cầu người dùng dùng
-    file gốc HTKK (thư mục D:\\HTKK\\DataFiles hoặc file XML tờ khai đã tải
-    về) làm nguồn vì API tra cứu ngoài không có sẵn Mã CQT."""
-    raw = await file.read()
-    try:
-        xml_text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        xml_text = raw.decode("utf-8", errors="ignore")
-    info = _parse_tkhai_xml_htkk(xml_text)
-    if not any(info.values()):
-        raise HTTPException(
-            400, "Không đọc được thông tin công ty từ file này — hãy chọn đúng file tờ khai XML "
-                 "đã nộp (vd 01_GTGT_TT80-...xml, mở bằng phần mềm HTKK).")
-    _ghi_nho_ma_cqt(info["ten_cqt"], info["ma_cqt"])
     return info
 
 
