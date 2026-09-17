@@ -153,4 +153,76 @@ assert gia_tri2 == 500000000, (
 print("PASS 2: kỳ trước KHÔNG hoàn thuế -> [43]=[41], kết quả không đổi so với trước (không phá vỡ ca "
       "bình thường).")
 
+# ===== _tinh_ct22_dau_ky_gtgt(): ĐÚNG luồng "Kết xuất XML cho HTKK" thật
+# — người dùng báo: đã sửa _doc_so_du_cuoi_ky_ky_truoc() (đọc [43] thay vì
+# [41]) NHƯNG bấm "Kết xuất XML" VẪN lấy sai 3.819.789.966, vì số sai đó
+# đã LỠ được lưu sẵn vào bảng vat_balance TỪ TRƯỚC lúc sửa lỗi — "Kết xuất
+# XML" trước đây ưu tiên đọc cache CŨ này, chỉ đọc lại file khi cache
+# TRỐNG. Người dùng yêu cầu rõ: "không cần nhấn vào tạm tính thuế VAT phần
+# mềm cũng phải lấy đúng, 2 nút không liên quan nhau" -> phải ưu tiên đọc
+# LẠI file (nguồn chính xác nhất) và TỰ SỬA cache cũ nếu sai, không được
+# phụ thuộc/bị kẹt bởi cache của màn "Tạm tính thuế VAT". =====
+import sqlite3
+
+exec(extract_fn('_tinh_ct22_dau_ky_gtgt'), ns)
+_tinh_ct22_dau_ky_gtgt = ns['_tinh_ct22_dau_ky_gtgt']
+
+_tmp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+_tmp_db.close()
+
+
+def _fresh_db():
+    conn = sqlite3.connect(_tmp_db.name, check_same_thread=False, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""CREATE TABLE IF NOT EXISTS vat_balance (
+        company_id INTEGER, ky TEXT, du_dau_ky REAL, updated_at TEXT,
+        PRIMARY KEY (company_id, ky)
+    )""")
+    return conn
+
+
+ns['db'] = _fresh_db
+
+# ===== Test 3 (QUAN TRỌNG — ĐÚNG ca thật người dùng báo lần 2): bảng
+# vat_balance đã LỠ lưu sẵn số SAI (3.819.789.966, từ TRƯỚC lúc sửa lỗi
+# [41]/[43]) cho kỳ 08/2026 — "Kết xuất XML" (_tinh_ct22_dau_ky_gtgt) PHẢI
+# đọc LẠI file kỳ trước (đúng [43]=0) và TỰ SỬA cache, KHÔNG được dùng lại
+# số sai cũ trong vat_balance. =====
+conn_seed = _fresh_db()
+conn_seed.execute(
+    "INSERT INTO vat_balance (company_id, ky, du_dau_ky, updated_at) VALUES (?,?,?,?)",
+    (1, "08/2026", 3819789966, datetime.datetime.now().isoformat()))
+conn_seed.commit(); conn_seed.close()
+comp3 = _cong_ty_gia("0317256924", _tmp1)  # _tmp1: thư mục có sẵn file tháng 7 hoàn thuế TOÀN BỘ -> [43]=0
+ct22_3 = _tinh_ct22_dau_ky_gtgt(1, comp3, "08/2026", "08/2026")
+assert ct22_3 == 0, (
+    f"vat_balance đã lỡ lưu sẵn số SAI (3.819.789.966) từ TRƯỚC lúc sửa lỗi -> 'Kết xuất XML' PHẢI đọc "
+    f"LẠI file kỳ trước (đúng [43]=0) và TỰ SỬA cache, không được dùng lại số sai cũ — got {ct22_3}")
+# Xác nhận cache ĐÃ được tự sửa lại đúng (0), không còn số sai cũ.
+conn_chk = _fresh_db()
+row_chk = conn_chk.execute("SELECT du_dau_ky FROM vat_balance WHERE company_id=? AND ky=?", (1, "08/2026")).fetchone()
+conn_chk.close()
+assert row_chk["du_dau_ky"] == 0, f"cache vat_balance phải được TỰ SỬA về 0, got {row_chk['du_dau_ky']}"
+print("PASS 3: 'Kết xuất XML' (_tinh_ct22_dau_ky_gtgt) đọc LẠI file kỳ trước và TỰ SỬA cache dù "
+      "vat_balance đã lỡ lưu sẵn số SAI từ trước khi sửa lỗi — đúng ca thật người dùng báo lần 2, và đúng "
+      "yêu cầu '2 nút không liên quan nhau, không cần nhấn Tạm tính thuế VAT vẫn phải lấy đúng'.")
+
+# ===== Test 4 (không hồi quy — an toàn): KHÔNG có file kỳ trước (công ty
+# mới/chưa cấu hình thư mục kết xuất) -> LÙI VỀ số đã tự lưu tay trong
+# vat_balance (vẫn tôn trọng số người dùng tự xác nhận khi không có file
+# nào đáng tin cậy hơn). =====
+conn_seed4 = _fresh_db()
+conn_seed4.execute(
+    "INSERT INTO vat_balance (company_id, ky, du_dau_ky, updated_at) VALUES (?,?,?,?)",
+    (2, "08/2026", 123456789, datetime.datetime.now().isoformat()))
+conn_seed4.commit(); conn_seed4.close()
+comp4 = _cong_ty_gia("0399999999", tempfile.mkdtemp())  # thư mục trống, không có file kỳ trước nào
+ct22_4 = _tinh_ct22_dau_ky_gtgt(2, comp4, "08/2026", "08/2026")
+assert ct22_4 == 123456789, (
+    f"Không có file kỳ trước -> phải LÙI VỀ số đã tự lưu tay trong vat_balance, không tự ý đổi thành 0 "
+    f"— got {ct22_4}")
+print("PASS 4: không có file kỳ trước (công ty mới/chưa cấu hình thư mục) -> lùi về đúng số đã tự lưu "
+      "tay trong vat_balance, không đoán bừa/không xóa mất dữ liệu người dùng tự nhập.")
+
+os.unlink(_tmp_db.name)
 print("\nALL DONE")
