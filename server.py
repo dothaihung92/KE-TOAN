@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-16.282"
+APP_BUILD = "2026-09-17.283"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -7115,7 +7115,7 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
 
 
 def _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den):
-    """Tự lấy số dư đầu kỳ (chỉ tiêu [41] tờ khai GTGT kỳ trước, đọc từ thư
+    """Tự lấy số dư đầu kỳ (chỉ tiêu [43] tờ khai GTGT kỳ trước, đọc từ thư
     mục kết xuất Năm/Quý riêng của công ty) rồi TÍNH + LƯU LUÔN tạm tính thuế
     GTGT kỳ hiện tại — để mở 'Tạm tính thuế VAT' ra là có sẵn kết quả, không
     phải tự bấm 'Lấy tự động' rồi 'Tính & Save' sau mỗi lần tra cứu.
@@ -7131,15 +7131,15 @@ def _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den):
                 "SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
             conn_vat.close()
             if comp_vat:
-                gia_tri_ct41, ky_truoc_vat, _fp_vat = _doc_ct41_ky_truoc(comp_vat, ky_hien_tai)
-                if gia_tri_ct41 is not None:
-                    ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=gia_tri_ct41)
+                so_du_cuoi_ky_truoc, ky_truoc_vat, _fp_vat = _doc_so_du_cuoi_ky_ky_truoc(comp_vat, ky_hien_tai)
+                if so_du_cuoi_ky_truoc is not None:
+                    ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=so_du_cuoi_ky_truoc)
                     vat_luu(cid, data={
-                        "ky": ky_hien_tai, "du_dau_ky": gia_tri_ct41,
+                        "ky": ky_hien_tai, "du_dau_ky": so_du_cuoi_ky_truoc,
                         "vat_mua": ket_qua_vat["vat_mua"], "vat_ban": ket_qua_vat["vat_ban"],
                         "phai_nop": ket_qua_vat["phai_nop"],
                         "du_cuoi_ky": ket_qua_vat["du_cuoi_ky"]})
-                    so_tien_fmt = f"{round(gia_tri_ct41):,}".replace(",", ".")
+                    so_tien_fmt = f"{round(so_du_cuoi_ky_truoc):,}".replace(",", ".")
                     ok_msg = (
                         f"✓ Đã tự động lấy số dư đầu kỳ {so_tien_fmt} đ (từ tờ khai "
                         f"GTGT kỳ {ky_truoc_vat}) và tính tạm thuế GTGT kỳ "
@@ -31686,13 +31686,26 @@ def _nam_quy_cua_ky(ky):
     return nam, (thang - 1) // 3 + 1
 
 
-def _doc_ct41_ky_truoc(comp, ky_hien_tai):
-    """Tự động đọc chỉ tiêu [41] (thuế GTGT còn được khấu trừ chuyển kỳ
-    sau) từ file XML tờ khai 01/GTGT của KỲ LIỀN TRƯỚC ky_hien_tai, tìm
-    trong thư mục lưu file kết xuất riêng của công ty (cấu trúc Năm/Quý
-    hoặc Năm/Tháng nếu công ty kê khai theo tháng) — dùng làm 'Số dư đầu
-    kỳ' (chỉ tiêu [22]) cho kỳ hiện tại, thay vì phải tự mở file cũ ra
-    chép tay số liệu.
+def _doc_so_du_cuoi_ky_ky_truoc(comp, ky_hien_tai):
+    """Tự động đọc chỉ tiêu [43] (thuế GTGT còn được khấu trừ, hoàn
+    chuyển kỳ sau — SAU KHI đã trừ phần đề nghị hoàn ở [42]) từ file XML
+    tờ khai 01/GTGT của KỲ LIỀN TRƯỚC ky_hien_tai, tìm trong thư mục lưu
+    file kết xuất riêng của công ty (cấu trúc Năm/Quý hoặc Năm/Tháng nếu
+    công ty kê khai theo tháng) — dùng làm 'Số dư đầu kỳ' (chỉ tiêu [22])
+    cho kỳ hiện tại, thay vì phải tự mở file cũ ra chép tay số liệu.
+
+    TRƯỚC ĐÂY đọc nhầm chỉ tiêu [41] (= tổng số còn được khấu trừ, CHƯA
+    trừ phần đề nghị hoàn) — SAI khi kỳ trước có hoàn thuế GTGT: người
+    dùng báo thật, công ty MST 0317256924, tờ khai tháng 07/2026 có
+    [41]=3.819.789.966 NHƯNG [42] (đề nghị hoàn) CŨNG = 3.819.789.966
+    (hoàn toàn bộ) nên [43] (còn lại CHUYỂN KỲ SAU) = 0 — số dư đầu kỳ
+    ĐÚNG cho tháng 08/2026 phải là 0, nhưng phần mềm lại lấy nguyên [41]
+    (3.819.789.966) làm số dư đầu kỳ tháng 8, sai lệch đúng bằng số tiền
+    đã xin hoàn (số đó không còn được khấu trừ nữa, đã tách ra xin hoàn).
+    Sửa: đọc [43] trước — kỳ trước KHÔNG hoàn thuế thì [42]=0 nên
+    [43]=[41], kết quả không đổi; CHỈ khác khi có hoàn thuế, đúng như ca
+    thật trên. Rớt về đọc [41] nếu file kỳ trước không có thẻ [43] (file
+    tờ khai cũ, từ bản HTKK trước khi mẫu này bổ sung phụ lục có [43]).
     Trả (gia_tri_hoac_None, ky_truoc, duong_dan_file_hoac_None)."""
     import re as _re_ct41
     ky_truoc = _ky_lien_truoc(ky_hien_tai)
@@ -31732,7 +31745,9 @@ def _doc_ct41_ky_truoc(comp, ky_hien_tai):
     try:
         with open(fp, encoding="utf-8-sig") as f:
             xml = f.read()
-        m = _re_ct41.search(r"<ct41>(.*?)</ct41>", xml, _re_ct41.DOTALL)
+        m = _re_ct41.search(r"<ct43>(.*?)</ct43>", xml, _re_ct41.DOTALL)
+        if not m:
+            m = _re_ct41.search(r"<ct41>(.*?)</ct41>", xml, _re_ct41.DOTALL)
         if m:
             return (_to_num(m.group(1).strip()) or 0), ky_truoc, fp
     except Exception:
@@ -31742,7 +31757,7 @@ def _doc_ct41_ky_truoc(comp, ky_hien_tai):
 
 @app.get("/api/vat-du-dau-ky-tu-dong/{cid}")
 def vat_du_dau_ky_tu_dong(cid: int, ky: str = ""):
-    """Tự động lấy 'Số dư đầu kỳ' từ chỉ tiêu [41] của tờ khai GTGT kỳ
+    """Tự động lấy 'Số dư đầu kỳ' từ chỉ tiêu [43] của tờ khai GTGT kỳ
     liền trước (đọc file XML đã lưu trong thư mục kết xuất Năm/Quý riêng
     của công ty), thay vì phải tự tìm file cũ ra chép tay."""
     if not ky:
@@ -31752,7 +31767,7 @@ def vat_du_dau_ky_tu_dong(cid: int, ky: str = ""):
     conn.close()
     if not comp:
         raise HTTPException(404, "Không tìm thấy công ty")
-    gia_tri, ky_truoc, fp = _doc_ct41_ky_truoc(comp, ky)
+    gia_tri, ky_truoc, fp = _doc_so_du_cuoi_ky_ky_truoc(comp, ky)
     if gia_tri is None:
         raise HTTPException(
             404, f"Không tìm thấy tờ khai GTGT của kỳ {ky_truoc or '(không xác định được kỳ trước)'} "
@@ -32212,15 +32227,15 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # thuế hàng loạt" hay tự bấm "Tạm tính thuế VAT" — bước tự động lấy số dư
     # đầu kỳ trước đây CHỈ có ở 2 luồng đó, KHÔNG có khi bấm thẳng "Kết xuất
     # XML cho HTKK", nên số dư đầu kỳ [22] bị bỏ trống/0 dù kỳ trước ĐÃ CÓ tờ
-    # khai với chỉ tiêu [41] > 0) -> TỰ ĐỘNG đọc chỉ tiêu [41] của tờ khai kỳ
+    # khai với chỉ tiêu [43] > 0) -> TỰ ĐỘNG đọc chỉ tiêu [43] của tờ khai kỳ
     # liền trước (từ thư mục lưu file kết xuất riêng của công ty), giống hệt
     # "Tạm tính thuế VAT" đã làm, rồi LƯU LUÔN vào vat_balance để lần sau khỏi
     # phải dò lại file.
     if not ct22_val and comp:
         try:
-            gia_tri_ct41, ky_truoc, _fp = _doc_ct41_ky_truoc(comp, ky_tim)
-            if gia_tri_ct41:
-                ct22_val = round(gia_tri_ct41)
+            so_du_cuoi_ky_truoc, ky_truoc, _fp = _doc_so_du_cuoi_ky_ky_truoc(comp, ky_tim)
+            if so_du_cuoi_ky_truoc:
+                ct22_val = round(so_du_cuoi_ky_truoc)
                 conn3 = db()
                 conn3.execute("""
                     INSERT INTO vat_balance (company_id, ky, du_dau_ky, updated_at)
