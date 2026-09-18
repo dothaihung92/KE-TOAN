@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.304"
+APP_BUILD = "2026-09-18.305"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4263,14 +4263,16 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
         diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
         return out, diag
     # Có idTbao cần tải -> phải có jQuery cho $.ajax() (_JS_DOWNLOAD_TB) —
-    # thử lại tối đa 3 lần nếu chưa nạp xong (giống _dvc_browser_download_tdt,
-    # trang chi tiết đôi khi nạp jQuery chậm/flaky, không cố định).
-    if not _dvc_wait_jquery(drv, 10):
-        for _lan in range(2):
+    # thử lại tối đa 5 lần nếu chưa nạp xong (giống _dvc_browser_download_tdt,
+    # trang chi tiết đôi khi nạp jQuery chậm/flaky, không cố định — CÀNG DỄ
+    # xảy ra khi phiên trình duyệt đã chạy lâu, vd tra cứu/tải liên tục
+    # nhiều tháng, so với 1 lượt lẻ).
+    if not _dvc_wait_jquery(drv, 15):
+        for _lan in range(4):
             try:
                 drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
                 _t.sleep(1.5)
-                if _dvc_wait_jquery(drv, 10):
+                if _dvc_wait_jquery(drv, 15):
                     break
             except Exception:
                 pass
@@ -4756,16 +4758,21 @@ def _dvc_browser_download_tdt(drv, ma):
     Trang chi tiết hồ sơ THỈNH THOẢNG không nạp xong jQuery (lần đầu người
     dùng test thành công 3/3, lần sau lại lỗi "$ is not defined" cả
     12/12) — không phải lỗi cố định như tưởng trước đây mà là flaky (lúc
-    được lúc không). THỬ LẠI (tải lại đúng trang, không đổi gì khác) tối
-    đa 3 lần nếu jQuery chưa nạp xong, thay vì chỉ đợi 1 lần rồi cứ thế
-    gọi bừa (như bản gốc) — tăng cơ hội thành công mà không quay lại phải
-    tự đoán CSRF."""
+    được lúc không). Người dùng test thêm: tra/tải 1 THÁNG lẻ luôn được,
+    chạy LIÊN TỤC 12 tháng lại lỗi hàng loạt ở bước tải — phiên trình
+    duyệt CÀNG CHẠY LÂU (nhiều lượt tra cứu/điều hướng trước đó) CÀNG DỄ
+    gặp lỗi nạp jQuery chậm, cần thử nhiều lần/lâu hơn để bù lại (tăng từ
+    3 lên 5 lần, mỗi lần đợi 15s thay vì 10s) so với bù chỉ 1 lượt lẻ.
+    THỬ LẠI (tải lại đúng trang, không đổi gì khác) tối đa 5 lần nếu
+    jQuery chưa nạp xong, thay vì chỉ đợi 1 lần rồi cứ thế gọi bừa (như
+    bản gốc) — tăng cơ hội thành công mà không quay lại phải tự đoán
+    CSRF."""
     import time as _t
-    for _lan in range(3):
+    for _lan in range(5):
         try:
             drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
             _t.sleep(1.0)
-            if _dvc_wait_jquery(drv, 10):
+            if _dvc_wait_jquery(drv, 15):
                 break
         except Exception:
             pass
@@ -5712,6 +5719,19 @@ def _dvc_run_batch(batch_id, cids, body):
                         item["loi_tra_cuu"] += (f"[{nhan_nguon}] " + "; ".join(sdiag))[:200]
                 else:
                     co_du_lieu_nguon_nao = True
+                # Sau khi tra cứu NHIỀU đoạn liên tiếp (chia theo tháng) rồi mới
+                # sang bước tải file — người dùng xác nhận: tra/tải 1 THÁNG lẻ
+                # luôn tải được, nhưng chạy LIÊN TỤC 12 tháng thì tới bước tải
+                # file lại báo "$ is not defined" hàng loạt (dù đã thử lại 3 lần
+                # ở _dvc_browser_download_tdt) — phiên trình duyệt CÀNG CHẠY LÂU
+                # (12 lượt tra cứu liên tiếp trước đó) CÀNG DỄ gặp lỗi nạp jQuery
+                # ở bước tải, khác hẳn 1 lượt tra cứu đơn lẻ. Nghỉ 1 chút TRƯỚC
+                # KHI bắt đầu tải (chỉ khi vừa tra cứu nhiều đoạn) để trình duyệt
+                # "hạ nhiệt" trước bước tải nặng hơn (nhiều lượt điều hướng liên
+                # tục) — dù chưa chắc hết hẳn, thử hướng này trước khi tính tới
+                # khởi động lại trình duyệt giữa chừng (phức tạp/rủi ro hơn).
+                if len(cac_doan) > 1 and tai_file and ma_list:
+                    time.sleep(3)
                 # tải file (tùy chọn)
                 if tai_file and ma_list:
                     folder = _dvc_save_folder(cid)
