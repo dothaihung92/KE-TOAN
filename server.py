@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.287"
+APP_BUILD = "2026-09-18.288"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4560,6 +4560,7 @@ def _dvc_mo_ta_loi_dang_nhap(info):
 def _dvc_browser_tracuu(drv, tu, den, so_lan=8):
     """Tra cứu → trả (rows_struct, ma_list, raw_html, diag)."""
     import time as _t
+    import re as _re
     diag = []
     drv.get(DVC_BASE + "/tchs"); _t.sleep(1.5)
     if not _dvc_wait_jquery(drv, 15):
@@ -4587,7 +4588,18 @@ def _dvc_browser_tracuu(drv, tu, den, so_lan=8):
                         rows = _dvc_map_bang(pr.get("rows") or [])
                 except Exception as e:
                     diag.append(f"parse bảng lỗi: {e}")
-                diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng")
+                # Đối chiếu "Tổng số bản ghi" cổng tự báo (nếu có) với số dòng
+                # THẬT SỰ đọc được — người dùng báo tra cứu khoảng ngày rộng
+                # bị THIẾU tờ khai cũ dù search "thành công" (có bảng kết
+                # quả) — cần biết cổng có đang âm thầm cắt bớt hay không
+                # trước khi thử sửa tiếp, tránh đoán mò (đã đoán sai 2 lần).
+                m_tong = _re.search(r"tổng số bản ghi[^\d]{0,20}(\d+)", low)
+                if m_tong and int(m_tong.group(1)) != len(rows):
+                    diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng NHƯNG cổng báo "
+                                f"'Tổng số bản ghi'={m_tong.group(1)} — LỆCH, có thể bị cắt bớt")
+                else:
+                    diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng"
+                                + (f" (cổng báo tổng {m_tong.group(1)} bản ghi, khớp)" if m_tong else ""))
                 return rows, ma, html, diag
             diag.append(f"{cap}→chưa ra bảng ({len(html)})")
         else:
@@ -4602,6 +4614,7 @@ def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
     hiện có chỉ có dữ liệu TỪ 01/07/2025 trở đi, nên 2 tab bổ sung cho nhau).
     Trả (rows_struct, ma_list, raw_html, diag)."""
     import time as _t
+    import re as _re
     diag = []
     drv.get(DVC_BASE + "/tchs"); _t.sleep(1.5)
     if not _dvc_wait_jquery(drv, 15):
@@ -4630,7 +4643,18 @@ def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
                         ma = [r["ma"] for r in rows if r.get("ma")]
                 except Exception as e:
                     diag.append(f"parse bảng lỗi: {e}")
-                diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng")
+                # Đối chiếu "Tổng số bản ghi" cổng tự báo (nếu có) với số
+                # dòng THẬT SỰ đọc được — đây chính là nguồn "thuedientu"
+                # liên quan trực tiếp ca thật người dùng báo thiếu tờ khai
+                # Quý 1-2/2024 dù search "thành công" — cần biết cổng có âm
+                # thầm cắt bớt hay không trước khi thử sửa tiếp lần nữa.
+                m_tong = _re.search(r"tổng số bản ghi[^\d]{0,20}(\d+)", low)
+                if m_tong and int(m_tong.group(1)) != len(rows):
+                    diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng NHƯNG cổng báo "
+                                f"'Tổng số bản ghi'={m_tong.group(1)} — LỆCH, có thể bị cắt bớt")
+                else:
+                    diag.append(f"{cap}→OK: {len(ma)} hồ sơ, {len(rows)} dòng bảng"
+                                + (f" (cổng báo tổng {m_tong.group(1)} bản ghi, khớp)" if m_tong else ""))
                 return rows, ma, html, diag
             diag.append(f"{cap}→chưa ra bảng ({len(html)})")
         else:
@@ -5269,49 +5293,6 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
     return nguon or ["dvc"]
 
 
-def _chia_khoang_ngay_theo_thang(tu_str, den_str):
-    """Chia khoảng ngày (dd/mm/yyyy) thành các đoạn NHỎ, mỗi đoạn NẰM TRỌN
-    trong 1 tháng dương lịch — người dùng tự tay tra cứu thử trực tiếp
-    trên cổng ở tab "Tra cứu hồ sơ đã nộp trên thuế điện tử" xác nhận
-    CỔNG CHỈ CHO TRA CỨU TỐI ĐA 1 THÁNG mỗi lần (chọn khoảng 01/01/2024-
-    31/12/2025 bị TỪ CHỐI hẳn, không hiện được kết quả) — trong khi
-    _dvc_browser_tracuu_tdt() trước đây gửi thẳng CẢ khoảng rộng (vd 2
-    năm) trong 1 lần gọi. Xác nhận đúng ca thật người dùng báo: công ty
-    MST 0312253694 hoạt động liên tục từ trước 2024, tra cứu "Tùy chọn
-    ngày" 01/01/2024-31/12/2025 nhưng phần mềm bị THIẾU HẲN các tờ khai
-    Quý 1-2/2024 — sửa page/size (build .285) KHÔNG giải quyết được vì
-    đây không phải lỗi phân trang, mà cổng ÂM THẦM không trả kết quả cho
-    khoảng rộng hơn giới hạn cho phép (không rõ có báo lỗi rõ ràng trong
-    response hay không — do dùng gọi thẳng API AJAX, không qua form có
-    validate ngày như giao diện, nên trước đây không phát hiện ra).
-
-    Chỉ dùng cho nguồn "thuedientu" (tab bị giới hạn) — nguồn "dvc" chưa
-    xác nhận có giới hạn tương tự nên KHÔNG áp dụng ở đó, tránh gọi thêm
-    nhiều lần không cần thiết (mỗi đoạn cần giải captcha riêng, khá tốn
-    thời gian) nếu không thật sự cần.
-
-    Trả về list [(tu1,den1), (tu2,den2), ...] dd/mm/yyyy — rỗng nếu
-    không đọc được ngày."""
-    def _dmy(s):
-        try:
-            d, m, y = (s or "").split("/")
-            return datetime.date(int(y), int(m), int(d))
-        except Exception:
-            return None
-    tu_d, den_d = _dmy(tu_str), _dmy(den_str)
-    if not tu_d or not den_d:
-        return []
-    if tu_d > den_d:
-        tu_d, den_d = den_d, tu_d
-    ket_qua = []
-    cur = tu_d
-    while cur <= den_d:
-        cuoi_thang = calendar.monthrange(cur.year, cur.month)[1]
-        cuoi_doan = min(den_d, datetime.date(cur.year, cur.month, cuoi_thang))
-        ket_qua.append((cur.strftime("%d/%m/%Y"), cuoi_doan.strftime("%d/%m/%Y")))
-        cur = cuoi_doan + datetime.timedelta(days=1)
-    return ket_qua
-
 
 # Số công ty xử lý ĐỒNG THỜI (mỗi luồng 1 trình duyệt ẩn riêng) — TÁCH RIÊNG
 # 2 hằng số cho 2 tính năng để tăng luồng cho tính năng này KHÔNG ảnh hưởng
@@ -5488,45 +5469,33 @@ def _dvc_run_batch(batch_id, cids, body):
                             den_tim = hom_nay_kt.strftime("%d/%m/%Y")
                     except Exception:
                         pass
-                # Nguồn "thuedientu" (tab "Tra cứu hồ sơ đã nộp trên thuế điện
-                # tử") CHỈ CHO TRA CỨU TỐI ĐA 1 THÁNG mỗi lần — xác nhận thật
-                # qua người dùng tự tay thử trên cổng: chọn khoảng rộng (vd
-                # 01/01/2024-31/12/2025) bị từ chối hẳn, không ra kết quả gì.
-                # Gọi thẳng cả khoảng rộng trong 1 lần AJAX (như trước) khiến
-                # tờ khai của các tháng nằm ngoài phạm vi cổng cho phép bị
-                # THIẾU hẳn khỏi kết quả — phải chia nhỏ theo TỪNG THÁNG rồi
-                # gộp lại (xem _chia_khoang_ngay_theo_thang). Nguồn "dvc"
-                # chưa xác nhận có giới hạn tương tự nên giữ nguyên gọi 1 lần.
-                if ngu == "thuedientu":
-                    cac_doan = _chia_khoang_ngay_theo_thang(tu_tim, den_tim)
-                else:
-                    cac_doan = [(tu_tim, den_tim)]
-                rows_tho, ma_list, sdiag = [], [], []
-                raw_html = ""
-                # Chia nhiều đoạn (khoảng ngày rộng) có thể tốn KHÁ LÂU (mỗi
-                # đoạn cần giải 1 captcha riêng) — cập nhật trang_thái LIÊN
-                # TỤC theo từng đoạn đang tra để khung tiến độ không đứng yên
-                # 1 chỗ suốt cả quá trình (người dùng báo "cứ treo không biết
-                # đã xong chưa" khi thấy mãi vẫn "đang xử lý" không đổi gì).
-                for _idx_doan, (tu_doan, den_doan) in enumerate(cac_doan, 1):
-                    if len(cac_doan) > 1:
-                        item["trang_thai"] = (
-                            f"đang tra cứu {nhan_nguon}: tháng {tu_doan[3:]} "
-                            f"({_idx_doan}/{len(cac_doan)})")
-                    try:
-                        r_tho, r_ma, r_html, r_diag = _tra_cuu_fn(drv, tu_doan, den_doan)
-                    except Exception as e:
-                        r_tho, r_ma, r_html, r_diag = [], [], "", [f"lỗi tra cứu {tu_doan}-{den_doan}: {e}"]
-                    rows_tho.extend(r_tho)
-                    for m_ in r_ma:
-                        if m_ not in ma_list:
-                            ma_list.append(m_)
-                    if r_html and not raw_html:
-                        raw_html = r_html
-                    if len(cac_doan) > 1:
-                        sdiag.extend(f"[{tu_doan}-{den_doan}] {d}" for d in r_diag)
-                    else:
-                        sdiag.extend(r_diag)
+                # LƯU Ý (build .286-.287, ĐÃ REVERT): từng thử chia khoảng
+                # ngày rộng thành nhiều lượt tra cứu riêng theo TỪNG THÁNG cho
+                # nguồn "thuedientu" (dựa trên việc người dùng tự tay thử form
+                # trên cổng bị từ chối khoảng rộng) — nhưng người dùng báo kết
+                # quả THỰC TẾ tệ hơn hẳn (15 dòng -> chỉ còn 5 dòng, mất luôn
+                # cả các tháng TRƯỚC ĐÓ đã tìm ra được) — rất có thể do gọi
+                # captcha liên tiếp nhiều lần khiến cổng chặn/lỗi phần lớn các
+                # lượt. Revert lại gọi 1 lần duy nhất như ban đầu (build .285:
+                # vẫn tìm được 1 phần dữ liệu — Quý 3/2024 trở đi — dù chưa rõ
+                # vì sao vẫn thiếu Quý 1-2/2024). Nguyên nhân THẬT vẫn CHƯA rõ
+                # — cần log/chẩn đoán thật (xem item['loi_tra_cuu'] hiện ở
+                # khung tiến độ) trước khi thử sửa tiếp, tránh đoán mò lần nữa.
+                try:
+                    rows_tho, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu_tim, den_tim)
+                except Exception as e:
+                    rows_tho, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+                # Cổng báo "Tổng số bản ghi" LỆCH với số dòng thật đọc được
+                # (xem _dvc_browser_tracuu/_dvc_browser_tracuu_tdt) — search
+                # vẫn coi là "thành công" (có rows) nên nhánh loi_tra_cuu bên
+                # dưới KHÔNG chạy tới — phải ghi chú riêng ở đây để không bị
+                # bỏ sót, đúng phục vụ chẩn đoán ca thật người dùng báo thiếu
+                # tờ khai dù tra cứu "thành công".
+                for _d in sdiag:
+                    if "LỆCH" in _d:
+                        item.setdefault("loi_tra_cuu", "")
+                        item["loi_tra_cuu"] += f"[{nhan_nguon}] {_d}; "[:200]
+                        break
                 # Giữ lại dòng NẰM TRỌN trong kỳ đang chọn, HOẶC dòng không suy
                 # được kỳ (_ky_khong_xac_dinh — vd Môn bài/TTĐB/Tài nguyên/BVMT/
                 # XNK và nhiều loại tờ khai khác không ghi kỳ theo dạng Quý/
