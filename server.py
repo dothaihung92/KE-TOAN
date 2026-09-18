@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.285"
+APP_BUILD = "2026-09-18.286"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5269,6 +5269,50 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
     return nguon or ["dvc"]
 
 
+def _chia_khoang_ngay_theo_thang(tu_str, den_str):
+    """Chia khoảng ngày (dd/mm/yyyy) thành các đoạn NHỎ, mỗi đoạn NẰM TRỌN
+    trong 1 tháng dương lịch — người dùng tự tay tra cứu thử trực tiếp
+    trên cổng ở tab "Tra cứu hồ sơ đã nộp trên thuế điện tử" xác nhận
+    CỔNG CHỈ CHO TRA CỨU TỐI ĐA 1 THÁNG mỗi lần (chọn khoảng 01/01/2024-
+    31/12/2025 bị TỪ CHỐI hẳn, không hiện được kết quả) — trong khi
+    _dvc_browser_tracuu_tdt() trước đây gửi thẳng CẢ khoảng rộng (vd 2
+    năm) trong 1 lần gọi. Xác nhận đúng ca thật người dùng báo: công ty
+    MST 0312253694 hoạt động liên tục từ trước 2024, tra cứu "Tùy chọn
+    ngày" 01/01/2024-31/12/2025 nhưng phần mềm bị THIẾU HẲN các tờ khai
+    Quý 1-2/2024 — sửa page/size (build .285) KHÔNG giải quyết được vì
+    đây không phải lỗi phân trang, mà cổng ÂM THẦM không trả kết quả cho
+    khoảng rộng hơn giới hạn cho phép (không rõ có báo lỗi rõ ràng trong
+    response hay không — do dùng gọi thẳng API AJAX, không qua form có
+    validate ngày như giao diện, nên trước đây không phát hiện ra).
+
+    Chỉ dùng cho nguồn "thuedientu" (tab bị giới hạn) — nguồn "dvc" chưa
+    xác nhận có giới hạn tương tự nên KHÔNG áp dụng ở đó, tránh gọi thêm
+    nhiều lần không cần thiết (mỗi đoạn cần giải captcha riêng, khá tốn
+    thời gian) nếu không thật sự cần.
+
+    Trả về list [(tu1,den1), (tu2,den2), ...] dd/mm/yyyy — rỗng nếu
+    không đọc được ngày."""
+    def _dmy(s):
+        try:
+            d, m, y = (s or "").split("/")
+            return datetime.date(int(y), int(m), int(d))
+        except Exception:
+            return None
+    tu_d, den_d = _dmy(tu_str), _dmy(den_str)
+    if not tu_d or not den_d:
+        return []
+    if tu_d > den_d:
+        tu_d, den_d = den_d, tu_d
+    ket_qua = []
+    cur = tu_d
+    while cur <= den_d:
+        cuoi_thang = calendar.monthrange(cur.year, cur.month)[1]
+        cuoi_doan = min(den_d, datetime.date(cur.year, cur.month, cuoi_thang))
+        ket_qua.append((cur.strftime("%d/%m/%Y"), cuoi_doan.strftime("%d/%m/%Y")))
+        cur = cuoi_doan + datetime.timedelta(days=1)
+    return ket_qua
+
+
 # Số công ty xử lý ĐỒNG THỜI (mỗi luồng 1 trình duyệt ẩn riêng) — TÁCH RIÊNG
 # 2 hằng số cho 2 tính năng để tăng luồng cho tính năng này KHÔNG ảnh hưởng
 # tới tính năng kia (vd tăng cho "Tra cứu tờ khai thuế hàng loạt" nhưng vẫn
@@ -5444,10 +5488,36 @@ def _dvc_run_batch(batch_id, cids, body):
                             den_tim = hom_nay_kt.strftime("%d/%m/%Y")
                     except Exception:
                         pass
-                try:
-                    rows_tho, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu_tim, den_tim)
-                except Exception as e:
-                    rows_tho, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+                # Nguồn "thuedientu" (tab "Tra cứu hồ sơ đã nộp trên thuế điện
+                # tử") CHỈ CHO TRA CỨU TỐI ĐA 1 THÁNG mỗi lần — xác nhận thật
+                # qua người dùng tự tay thử trên cổng: chọn khoảng rộng (vd
+                # 01/01/2024-31/12/2025) bị từ chối hẳn, không ra kết quả gì.
+                # Gọi thẳng cả khoảng rộng trong 1 lần AJAX (như trước) khiến
+                # tờ khai của các tháng nằm ngoài phạm vi cổng cho phép bị
+                # THIẾU hẳn khỏi kết quả — phải chia nhỏ theo TỪNG THÁNG rồi
+                # gộp lại (xem _chia_khoang_ngay_theo_thang). Nguồn "dvc"
+                # chưa xác nhận có giới hạn tương tự nên giữ nguyên gọi 1 lần.
+                if ngu == "thuedientu":
+                    cac_doan = _chia_khoang_ngay_theo_thang(tu_tim, den_tim)
+                else:
+                    cac_doan = [(tu_tim, den_tim)]
+                rows_tho, ma_list, sdiag = [], [], []
+                raw_html = ""
+                for tu_doan, den_doan in cac_doan:
+                    try:
+                        r_tho, r_ma, r_html, r_diag = _tra_cuu_fn(drv, tu_doan, den_doan)
+                    except Exception as e:
+                        r_tho, r_ma, r_html, r_diag = [], [], "", [f"lỗi tra cứu {tu_doan}-{den_doan}: {e}"]
+                    rows_tho.extend(r_tho)
+                    for m_ in r_ma:
+                        if m_ not in ma_list:
+                            ma_list.append(m_)
+                    if r_html and not raw_html:
+                        raw_html = r_html
+                    if len(cac_doan) > 1:
+                        sdiag.extend(f"[{tu_doan}-{den_doan}] {d}" for d in r_diag)
+                    else:
+                        sdiag.extend(r_diag)
                 # Giữ lại dòng NẰM TRỌN trong kỳ đang chọn, HOẶC dòng không suy
                 # được kỳ (_ky_khong_xac_dinh — vd Môn bài/TTĐB/Tài nguyên/BVMT/
                 # XNK và nhiều loại tờ khai khác không ghi kỳ theo dạng Quý/
