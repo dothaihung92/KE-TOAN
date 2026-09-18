@@ -47,10 +47,10 @@ print("PASS 1: cả _dvc_browser_download_tdt() và _dvc_browser_thongbao() đ�
 assert "range(2)" in than_download_tdt, (
     "_dvc_browser_download_tdt() phải thử tải lại trang chi tiết ít nhất 1 lần nữa nếu jQuery chưa kịp "
     "nạp lần đầu, trước khi báo lỗi hẳn — tránh thất bại ngay chỉ vì 1 lần chờ không đủ lâu.")
-assert "nạp được jQuery" in than_download_tdt, (
-    "_dvc_browser_download_tdt() phải báo lỗi RÕ RÀNG ('không nạp được jQuery...') khi thật sự thất bại "
-    "sau khi đã thử lại — không được để lỗi mù mờ 'ReferenceError: $ is not defined' lọt ra ngoài, "
-    "người dùng không biết nguyên nhân thật là gì.")
+assert "jQuery" in than_download_tdt and "raise Exception(" in than_download_tdt, (
+    "_dvc_browser_download_tdt() phải báo lỗi RÕ RÀNG có nhắc tới jQuery khi thật sự thất bại sau khi "
+    "đã thử lại — không được để lỗi mù mờ 'ReferenceError: $ is not defined' lọt ra ngoài, người dùng "
+    "không biết nguyên nhân thật là gì.")
 print("PASS 2: _dvc_browser_download_tdt() thử lại 1 lần khi jQuery chưa kịp nạp, và báo lỗi rõ ràng "
       "(không mù mờ) nếu vẫn thất bại sau khi thử lại.")
 

@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.292"
+APP_BUILD = "2026-09-18.293"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4684,44 +4684,44 @@ def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
 
 
 def _dvc_browser_download_tdt(drv, ma):
-    """Tải tờ khai từ tab "Thuế điện tử" — vào trang chi tiết (?loai=ETAX,
-    đúng đường dẫn xác nhận được từ request thật) trước để có đúng ngữ
-    cảnh/referer, rồi gọi POST /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX
-    (endpoint đã xác nhận qua request bắt được từ trình duyệt).
+    """Tải tờ khai từ tab "Thuế điện tử" — gọi POST
+    /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX (endpoint đã xác nhận qua
+    request bắt được từ trình duyệt).
 
-    TRƯỚC ĐÂY gọi _dvc_wait_jquery() nhưng KHÔNG kiểm tra kết quả chờ —
-    nếu jQuery chưa kịp nạp xong (giành giật với thời gian) vẫn cứ chạy
-    tiếp qua execute_async_script(), gây lỗi mù mờ "$ is not defined" —
-    xác nhận qua log thật người dùng gửi: 22/22 hồ sơ nguồn "Thuế điện
-    tử" tải file đều lỗi y hệt "$ is not defined" (sau khi tra cứu vừa
-    được sửa tìm ra NHIỀU hồ sơ hơn hẳn — có thể trang chi tiết bị tải
-    liên tục nhiều lần trong thời gian ngắn nên nạp jQuery không kịp).
-    Giờ THỬ LẠI 1 lần (tải lại trang) nếu lần đầu jQuery chưa nạp kịp,
-    và báo lỗi RÕ RÀNG (thay vì mù mờ "$ is not defined") nếu vẫn không
-    được sau khi thử lại.
-
-    Vẫn CHƯA đủ — người dùng báo log thật lần 2: 8/8 hồ sơ vẫn lỗi y hệt
-    "không nạp được jQuery sau 2 lần thử". Nhìn lại luồng gọi (xem
-    _dvc_run_batch): với MỖI hồ sơ, phần mềm điều hướng tới ĐÚNG trang
-    chi tiết này 2 LẦN RIÊNG BIỆT — 1 lần trong _dvc_browser_thongbao()
-    (tải Thông báo), 1 lần NGAY SAU ĐÓ trong hàm này (tải file), gần như
-    không nghỉ giữa 2 lần. Với 8 hồ sơ x 2 lần điều hướng x tối đa 2 lần
-    thử lại = rất nhiều lượt tải trang dồn dập trong thời gian ngắn — rất
-    có thể là nguyên nhân THẬT khiến cổng không kịp nạp xong (hoặc cố
-    tình làm chậm/chặn do phát hiện điều hướng quá dồn dập), KHÔNG phải
-    do mạng chậm ngẫu nhiên. Giờ nếu trình duyệt ĐANG SẴN Ở ĐÚNG trang chi
-    tiết này (do _dvc_browser_thongbao() vừa mở CHO CHÍNH mã hồ sơ này) —
-    dùng LUÔN, không điều hướng lại lần nữa — giảm còn 1 lần điều hướng
-    thay vì 2 cho mỗi hồ sơ."""
+    LỊCH SỬ SỬA LỖI "$ is not defined" (jQuery chưa nạp) khi tải — người
+    dùng báo qua NHIỀU vòng log thật, mỗi vòng sửa vẫn KHÔNG hết (100%
+    hồ sơ nguồn "thuế điện tử" luôn lỗi y hệt nhau mọi lần, không phải
+    thỉnh thoảng — dấu hiệu rõ đây là lỗi CẤU TRÚC, không phải do mạng
+    chậm/dồn dập ngẫu nhiên như từng nghi ngờ):
+      1) Thêm kiểm tra kết quả _dvc_wait_jquery() (trước đó gọi xong bỏ
+         qua luôn) + thử lại 1 lần -> KHÔNG hết (8/8 vẫn lỗi y hệt).
+      2) Gộp bớt điều hướng (dùng lại trang đã mở từ
+         _dvc_browser_thongbao() thay vì điều hướng thêm lần nữa) ->
+         VẪN KHÔNG hết (8/8 vẫn lỗi y hệt, không đổi 1 chút nào) — chứng
+         tỏ vấn đề không nằm ở việc điều hướng dồn dập, mà rất có thể
+         trang chi tiết .../files/detail/{ma}?loai=ETAX (tải bằng
+         drv.get() — điều hướng TOÀN TRANG) ĐƠN GIẢN LÀ KHÔNG BAO GIỜ tự
+         nạp xong jQuery được (có thể do cấu trúc trang này khác trang
+         tìm kiếm /tchs, hoặc chặn tải trực tiếp không qua điều hướng
+         nội bộ SPA).
+      3) (bản này) ĐỔI HẲN cách tiếp cận: KHÔNG điều hướng sang trang chi
+         tiết nữa — gọi thẳng $.ajax(...) NGAY TỪ TRANG HIỆN TẠI (thường
+         vẫn đang ở /tchs — trang tìm kiếm, nơi jQuery ĐÃ XÁC NHẬN nạp
+         tốt vì tra cứu vẫn luôn thành công). Endpoint download tự nó là
+         1 API POST độc lập (chỉ cần {"maHoSo":...}, không đọc gì từ DOM
+         trang chi tiết) nên về lý thuyết không cần điều hướng riêng —
+         phần điều hướng trước đây chỉ để có đúng Referer, CHƯA CHẮC
+         cổng có kiểm tra chặt Referer hay không. Nếu cách này vẫn lỗi,
+         thông báo lỗi sẽ cho biết CHÍNH XÁC nguyên nhân mới (vd cổng từ
+         chối vì thiếu đúng Referer) thay vì mù mờ 'chưa nạp jQuery'."""
     import time as _t
-    url_muon = f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX"
     da_co_jquery = False
     try:
-        if (drv.current_url or "").rstrip("/") == url_muon.rstrip("/"):
-            da_co_jquery = _dvc_wait_jquery(drv, 5)
+        da_co_jquery = _dvc_wait_jquery(drv, 3)
     except Exception:
         da_co_jquery = False
     if not da_co_jquery:
+        url_muon = f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX"
         for lan_thu in range(2):
             try:
                 drv.get(url_muon)
@@ -4732,7 +4732,8 @@ def _dvc_browser_download_tdt(drv, ma):
             if da_co_jquery:
                 break
     if not da_co_jquery:
-        raise Exception("Trang chi tiết hồ sơ không nạp được jQuery sau 2 lần thử (mạng chậm/cổng lỗi)")
+        raise Exception("Trang hiện tại không có jQuery để gọi tải file sau khi đã thử điều hướng lại "
+                         "trang chi tiết hồ sơ (mạng chậm/cổng lỗi)")
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).
