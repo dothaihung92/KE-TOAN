@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.302"
+APP_BUILD = "2026-09-18.303"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5600,13 +5600,16 @@ def _dvc_run_batch(batch_id, cids, body):
                 # page/size sang số — gây thất bại HOÀN TOÀN; xác nhận ở
                 # build .289 (đổi page/size sang số, KHÔNG chia nhỏ) cũng
                 # thất bại y hệt -> lỗi do tham số số bị cổng từ chối, KHÔNG
-                # phải do việc chia nhỏ/gọi lặp lại. Lần này chia theo đoạn
-                # 6 THÁNG (đúng độ rộng đã xác nhận chạy được, ít lượt hơn
-                # hẳn 1 tháng/lần) và GIỮ NGUYÊN page/size rỗng (đã xác nhận
-                # đúng ở _JS_SEARCH_TDT) — chỉ áp dụng cho "thuedientu", CHƯA
-                # xác nhận "dvc" có cùng giới hạn nên không đụng vào.
+                # phải do việc chia nhỏ/gọi lặp lại (giữ NGUYÊN page/size
+                # rỗng, đã xác nhận đúng ở _JS_SEARCH_TDT, không đụng vào).
+                # Ban đầu chọn đoạn 6 tháng, nhưng người dùng tự test thêm
+                # (độc lập, sau khi bước TẢI FILE đã sửa xong ở vòng
+                # $.ajax()): tải theo TỪNG THÁNG mới tải được file tờ khai
+                # đầy đủ (đoạn rộng hơn vẫn thiếu) — đổi lại 1 THÁNG/đoạn
+                # theo đúng yêu cầu, chỉ áp dụng cho "thuedientu", CHƯA xác
+                # nhận "dvc" có cùng giới hạn nên không đụng vào.
                 if ngu == "thuedientu":
-                    cac_doan = _chia_khoang_ngay_thanh_doan(tu_tim, den_tim, so_thang_moi_doan=6)
+                    cac_doan = _chia_khoang_ngay_thanh_doan(tu_tim, den_tim, so_thang_moi_doan=1)
                 else:
                     cac_doan = [(tu_tim, den_tim)]
                 rows_tho, ma_list, sdiag = [], [], []
