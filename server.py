@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.306"
+APP_BUILD = "2026-09-18.307"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4278,27 +4278,46 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     _JS_DOWNLOAD_TB (tải file thông báo) đã quay lại dùng $.ajax() (xem
     _dvc_browser_download_tdt — bản fetch() gây 403 Forbidden, quay lại
     $.ajax() mới tải được) nên PHẢI đợi jQuery nạp xong trước khi gọi, nếu
-    có idTbao cần tải."""
+    có idTbao cần tải.
+
+    Người dùng nghi ngờ đúng: "tải nhiều tháng báo ko tìm thấy thông báo
+    thuế là sẽ ko tải được file" — không tìm thấy idTbao (mục "Danh sách
+    thông báo" render bằng JS SAU khi trang tải HTML xong) và không nạp
+    được jQuery (script riêng) RẤT CÓ THỂ cùng 1 nguyên nhân: trang chưa
+    kịp "khởi động" xong khung ứng dụng (SPA) ở lượt điều hướng đó, không
+    hẳn là CQT chưa phát hành thông báo. Tăng số lần/thời gian thử lại
+    (2 lần/1.5s -> 4 lần/2.5s) giống mức tăng đã áp dụng cho bước tải
+    file, và ghi kèm trạng thái jQuery lúc đó vào chẩn đoán để biết có
+    đúng cùng nguyên nhân hay không."""
     import time as _t
     out, diag = [], []
     html = ""
-    for lan_thu in range(2):
+    for lan_thu in range(4):
         try:
             drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
-            _t.sleep(1.5)
+            _t.sleep(2.5)
             html = drv.page_source or ""
         except Exception as e:
-            if lan_thu == 1:
+            if lan_thu == 3:
                 return out, [f"lỗi mở chi tiết {ma}: {e}"]
             continue
         if html and _dvc_parse_id_tbao(html):
             break
     ids = _dvc_parse_id_tbao(html)
     if not ids:
-        # dò manh mối để tinh chỉnh sau
+        # dò manh mối để tinh chỉnh sau — kèm trạng thái jQuery lúc đó để
+        # biết có đúng cùng nguyên nhân với lỗi "$ is not defined" ở bước
+        # tải file hay không (nghi ngờ của người dùng).
         import re as _re
         m = _re.search(r'.{0,40}(?:hongBao|hong báo|Tbao).{0,40}', html)
-        diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
+        co_jquery = False
+        try:
+            co_jquery = bool(drv.execute_script(
+                "return (typeof window.jQuery!=='undefined') && (typeof window.$==='function');"))
+        except Exception:
+            pass
+        diag.append(f"{ma}: không thấy idTbao (jQuery lúc đó: {'có' if co_jquery else 'KHÔNG'})"
+                     + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
         return out, diag
     # Có idTbao cần tải -> phải có jQuery cho $.ajax() (_JS_DOWNLOAD_TB) —
     # thử lại tối đa 5 lần nếu chưa nạp xong (giống _dvc_browser_download_tdt,
@@ -5796,7 +5815,7 @@ def _dvc_run_batch(batch_id, cids, body):
                             ten_goi = _ten_file_fn(rec.get("to_khai"), rec.get("ky"), mst, rec.get("lan_bs"))
                             try:
                                 if tai_tb:
-                                    tb_files, _ = _dvc_browser_thongbao(drv, ma, _tb_loai)
+                                    tb_files, tb_diag = _dvc_browser_thongbao(drv, ma, _tb_loai)
                                     so_tb = len(tb_files)
                                     if so_tb == 0:
                                         # KHÔNG chắc đây là lỗi (có thể CQT thật sự chưa
@@ -5804,10 +5823,15 @@ def _dvc_run_batch(batch_id, cids, body):
                                         # (không tính vào so_loi_tai) để người dùng tự đối
                                         # chiếu lại trên cổng nếu thấy đáng ngờ, thay vì im
                                         # lặng như trước (không cách nào biết vì sao thiếu).
+                                        # Kèm chẩn đoán (trạng thái jQuery lúc đó) — người
+                                        # dùng nghi ngờ "không thấy thông báo" cùng nguyên
+                                        # nhân với lỗi tải file, cần dữ liệu để xác nhận.
                                         item["so_khong_co_tb"] = item.get("so_khong_co_tb", 0) + 1
                                         mau_tb = item.setdefault("khong_co_tb_mau", [])
                                         if len(mau_tb) < _DVC_LOI_TAI_TOI_DA:
-                                            mau_tb.append(str(rec.get("to_khai") or ten_goi)[:80])
+                                            ghi_chu_tb = "; ".join(tb_diag)[:100]
+                                            nhan = str(rec.get("to_khai") or ten_goi)[:80]
+                                            mau_tb.append(f"{nhan} ({ghi_chu_tb})" if ghi_chu_tb else nhan)
                                     for k, (fn, raw) in enumerate(tb_files, 1):
                                         if raw:
                                             ext = os.path.splitext(fn)[1] or ".xml"
