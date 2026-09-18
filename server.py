@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.295"
+APP_BUILD = "2026-09-18.296"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3979,6 +3979,17 @@ try {
 # tiết hồ sơ (xác nhận qua request thật) — trình duyệt tự gắn Referer theo
 # trang đang đứng, không thể giả từ script, nên bắt buộc phải điều hướng
 # tới đúng trang chi tiết trước khi gọi (không gọi thẳng từ /tchs được).
+#
+# DÙNG fetch() THAY VÌ $.ajax() (jQuery) — sau khi thêm token vẫn còn báo
+# lại đúng lỗi "trang chi tiết không nạp được jQuery" (thử tới 3 lần, 12
+# giây/lần vẫn vậy) — xác nhận chắc chắn trang chi tiết hồ sơ KHÔNG BAO
+# GIỜ tự nạp xong thư viện jQuery qua drv.get() (có thể do CDN chặn, hoặc
+# trang không thật sự cần jQuery nên không tải). Nhưng ta CHỈ cần gọi 1
+# API POST thuần — không cần jQuery, chỉ cần trang đã "đứng đúng chỗ" để
+# có Referer đúng. fetch() là API GỐC của MỌI trình duyệt hiện đại, LUÔN
+# có sẵn ngay khi trang load xong HTML, KHÔNG phụ thuộc việc jQuery (hay
+# bất kỳ thư viện ngoài nào) có tải được hay không — né hẳn được vấn đề
+# chờ jQuery đã bế tắc suốt 4 vòng sửa trước.
 _JS_DOWNLOAD_TDT = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
@@ -3988,18 +3999,24 @@ try {
     return m ? decodeURIComponent(m[1]) : '';
   }
   var csrf = getCookie('XSRF-TOKEN');
-  $.ajax({ type:'POST', url:'/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX',
-    contentType:'application/json', data: body,
-    headers:{ 'X-XSRF-TOKEN':csrf },
-    success:function(d){ cb({ok:true, data:d}); },
-    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
-  });
+  fetch('/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf },
+    body: body
+  }).then(function(r){
+    return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
+  }).then(function(r){
+    if (!r.ok) { cb({ok:false, status:r.status, resp:r.text.slice(0,200)}); return; }
+    var d; try { d = JSON.parse(r.text); } catch(e) { d = r.text; }
+    cb({ok:true, data:d});
+  }).catch(function(e){ cb({ok:false, err:''+e}); });
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
-# Thiếu header 'x-xsrf-token' y hệt _JS_DOWNLOAD_TDT trước khi sửa (xem
-# giải thích chi tiết ở đó, cùng nguyên nhân/cùng cách sửa) — request thật
-# bắt được qua DevTools lúc tải Thông báo thành công cũng có header này.
+# Thiếu header 'x-xsrf-token' + dùng fetch() thay $.ajax() y hệt
+# _JS_DOWNLOAD_TDT trước khi sửa (xem giải thích chi tiết ở đó, cùng
+# nguyên nhân/cùng cách sửa) — request thật bắt được qua DevTools lúc tải
+# Thông báo thành công cũng có header này.
 _JS_DOWNLOAD_TB = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
@@ -4009,12 +4026,17 @@ try {
     return m ? decodeURIComponent(m[1]) : '';
   }
   var csrf = getCookie('XSRF-TOKEN');
-  $.ajax({ type:'POST', url:'/tthc/tchs/downloadthongbao',
-    contentType:'application/json', data: body,
-    headers:{ 'X-XSRF-TOKEN':csrf },
-    success:function(d){ cb({ok:true, data:d}); },
-    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
-  });
+  fetch('/tthc/tchs/downloadthongbao', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf },
+    body: body
+  }).then(function(r){
+    return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
+  }).then(function(r){
+    if (!r.ok) { cb({ok:false, status:r.status, resp:r.text.slice(0,200)}); return; }
+    var d; try { d = JSON.parse(r.text); } catch(e) { d = r.text; }
+    cb({ok:true, data:d});
+  }).catch(function(e){ cb({ok:false, err:''+e}); });
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
@@ -4216,31 +4238,28 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     đúng nguồn của ma (xem _dvc_browser_download_tdt dùng cùng quy ước), nếu
     không trang chi tiết mở SAI ngữ cảnh, không dò được idTbao nào dù thông
     báo thật sự tồn tại trên cổng (đã xác nhận qua báo cáo thật: hồ sơ nguồn
-    TDT có Thông báo trên cổng nhưng gọi thiếu loai=ETAX báo 'không thấy')."""
+    TDT có Thông báo trên cổng nhưng gọi thiếu loai=ETAX báo 'không thấy').
+
+    KHÔNG còn chờ/kiểm tra jQuery — xác nhận qua nhiều vòng chẩn đoán thật
+    (xem _dvc_browser_download_tdt): trang chi tiết hồ sơ KHÔNG BAO GIỜ tự
+    nạp xong jQuery qua drv.get(), nhưng _JS_DOWNLOAD_TB (tải file thông
+    báo) giờ dùng fetch() nên KHÔNG cần jQuery nữa — chỉ cần đợi TRANG (HTML
+    thật, để đọc idTbao) render xong, không liên quan gì đến việc thư viện
+    jQuery có tải được hay không."""
     import time as _t
     out, diag = [], []
-    # THỬ LẠI 1 lần nếu jQuery chưa kịp nạp — cùng nguyên nhân/cách sửa với
-    # _dvc_browser_download_tdt (xem giải thích ở đó): trước đây không kiểm
-    # tra kết quả _dvc_wait_jquery(), nên trang chi tiết có thể còn TRỐNG
-    # (chưa render xong) lúc đọc html, khiến _dvc_parse_id_tbao() không tìm
-    # thấy idTbao nào dù thông báo thật sự tồn tại -> báo nhầm "không thấy
-    # idTbao" (hiện ở UI thành "không tìm thấy Thông báo").
-    da_co_jquery = False
     html = ""
     for lan_thu in range(2):
         try:
             drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
-            _t.sleep(1.2)
-            da_co_jquery = _dvc_wait_jquery(drv, 10)
+            _t.sleep(1.5)
             html = drv.page_source or ""
         except Exception as e:
             if lan_thu == 1:
                 return out, [f"lỗi mở chi tiết {ma}: {e}"]
             continue
-        if da_co_jquery:
+        if html and _dvc_parse_id_tbao(html):
             break
-    if not da_co_jquery:
-        diag.append(f"{ma}: trang chi tiết không nạp được jQuery sau 2 lần thử")
     ids = _dvc_parse_id_tbao(html)
     if not ids:
         # dò manh mối để tinh chỉnh sau
@@ -4711,53 +4730,41 @@ def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
 
 def _dvc_browser_download_tdt(drv, ma):
     """Tải tờ khai từ tab "Thuế điện tử" — vào ĐÚNG trang chi tiết
-    (.../files/detail/{ma}?loai=ETAX) trước rồi gọi POST
+    (.../files/detail/{ma}?loai=ETAX) trước (để có đúng Referer — bắt
+    buộc, xem giải thích ở dưới) rồi gọi POST
     /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX (endpoint đã xác nhận qua
     request bắt được từ trình duyệt).
 
     LỊCH SỬ SỬA LỖI tải file nguồn "thuế điện tử" — người dùng báo qua
     NHIỀU vòng log thật:
-      1-3) Các lần sửa trước loay hoay quanh lỗi "$ is not defined"
-         (jQuery chưa nạp) — thử kiểm tra kết quả chờ, gộp bớt điều
-         hướng, rồi bỏ hẳn điều hướng sang trang chi tiết (gọi thẳng từ
-         /tchs) — nhưng gọi thẳng từ /tchs lại bị SERVER từ chối rõ ràng:
-         500 "Tải hồ sơ thất bại" (khác hẳn lỗi client-side "$ is not
-         defined" — nghĩa là ĐÃ vượt qua được bước nạp trang, chỉ còn
-         thiếu gì đó server yêu cầu).
-      4) (bản này) Người dùng tự bắt request THẬT lúc tải thành công qua
-         DevTools (Copy Request Headers) — phát hiện 2 điều quan trọng:
-         (a) request thật CÓ header 'x-xsrf-token' (đọc từ cookie
-         XSRF-TOKEN) mà _JS_DOWNLOAD_TDT TRƯỚC GIỜ CHƯA BAO GIỜ gửi — đã
-         thêm vào (xem _JS_DOWNLOAD_TDT); (b) 'referer' của request thật
-         ĐÚNG LÀ trang chi tiết hồ sơ — trình duyệt tự gắn Referer theo
-         trang đang đứng, KHÔNG thể giả từ script khác trang, nên vẫn
-         PHẢI điều hướng tới đúng trang chi tiết trước khi gọi (không
-         gọi thẳng từ /tchs được nữa, dù trang đó nạp jQuery ổn định
-         hơn) — nghi vấn "trang chi tiết không bao giờ tự nạp jQuery" ở
-         các lần sửa trước có thể do ẢNH HƯỞNG DÂY CHUYỀN từ việc thiếu
-         token CSRF (server có thể phản ứng khác/chậm hơn khi phát hiện
-         nhiều request thiếu token liên tiếp), CHƯA CHẮC là lỗi cấu trúc
-         thật của trang — cần thử lại với token đã có mới biết chắc."""
+      1-3) Loay hoay quanh lỗi "$ is not defined" (jQuery chưa nạp) —
+         kiểm tra kết quả chờ, gộp bớt điều hướng, rồi bỏ hẳn điều hướng
+         (gọi thẳng từ /tchs) — nhưng gọi thẳng từ /tchs bị SERVER từ
+         chối rõ ràng: 500 "Tải hồ sơ thất bại" (khác lỗi client-side
+         "$ is not defined" — đã vượt qua bước nạp trang, chỉ thiếu gì
+         đó server yêu cầu).
+      4) Người dùng tự bắt request THẬT qua DevTools — phát hiện thiếu
+         header 'x-xsrf-token' (đã thêm, xem _JS_DOWNLOAD_TDT) VÀ Referer
+         phải đúng trang chi tiết (không giả được từ script khác trang)
+         — khôi phục điều hướng tới trang chi tiết. NHƯNG sau khi thêm
+         token, VẪN quay lại đúng lỗi "không nạp được jQuery" (thử tới 3
+         lần, 12 giây/lần) — xác nhận CHẮC CHẮN trang chi tiết hồ sơ
+         KHÔNG BAO GIỜ tự nạp xong jQuery qua drv.get(), không phải do
+         thiếu token hay mạng chậm.
+      5) (bản này) Đổi hẳn: KHÔNG cần jQuery nữa — _JS_DOWNLOAD_TDT giờ
+         dùng fetch() (API gốc mọi trình duyệt, luôn sẵn có ngay khi
+         trang load xong HTML, không phụ thuộc thư viện ngoài nào tải
+         được hay không). Chỉ cần ĐIỀU HƯỚNG tới đúng trang (để có đúng
+         Referer) và đợi trang load xong (document.readyState), KHÔNG
+         cần chờ/kiểm tra jQuery gì cả."""
     import time as _t
     url_muon = f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX"
-    da_co_jquery = False
     try:
-        if (drv.current_url or "").rstrip("/") == url_muon.rstrip("/"):
-            da_co_jquery = _dvc_wait_jquery(drv, 5)
+        if (drv.current_url or "").rstrip("/") != url_muon.rstrip("/"):
+            drv.get(url_muon)
+            _t.sleep(1.0)
     except Exception:
-        da_co_jquery = False
-    if not da_co_jquery:
-        for lan_thu in range(3):
-            try:
-                drv.get(url_muon)
-                _t.sleep(1.5)
-                da_co_jquery = _dvc_wait_jquery(drv, 12)
-            except Exception:
-                da_co_jquery = False
-            if da_co_jquery:
-                break
-    if not da_co_jquery:
-        raise Exception("Trang chi tiết hồ sơ không nạp được jQuery sau 3 lần thử (mạng chậm/cổng lỗi)")
+        pass
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).

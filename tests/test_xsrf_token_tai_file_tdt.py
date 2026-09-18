@@ -1,4 +1,5 @@
 import os
+import re
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
@@ -55,7 +56,7 @@ for ten, khoi in (('_JS_DOWNLOAD_TDT', khoi_download_tdt), ('_JS_DOWNLOAD_TB', k
         f"{ten} phải đọc cookie XSRF-TOKEN — request tải file THẬT (bắt qua DevTools lúc tải thành "
         f"công) có header 'x-xsrf-token' mà code cũ hoàn toàn không gửi, khiến server từ chối 500 "
         f"'Tải hồ sơ thất bại'.")
-    assert "'X-XSRF-TOKEN':csrf" in khoi or '"X-XSRF-TOKEN":csrf' in khoi, (
+    assert re.search(r"['\"]X-XSRF-TOKEN['\"]\s*:\s*csrf", khoi), (
         f"{ten} phải gửi header 'X-XSRF-TOKEN' (giá trị đọc từ cookie XSRF-TOKEN) trong request tải "
         f"file — đúng như request thật đã xác nhận.")
 print("PASS 1: cả _JS_DOWNLOAD_TDT và _JS_DOWNLOAD_TB đều gửi header X-XSRF-TOKEN (đọc từ cookie) — "
