@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.289"
+APP_BUILD = "2026-09-18.290"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5298,6 +5298,48 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
     return nguon or ["dvc"]
 
 
+def _chia_khoang_ngay_thanh_doan(tu_str, den_str, so_thang_moi_doan=6):
+    """Chia khoảng ngày (dd/mm/yyyy) thành các đoạn NHỎ ≤so_thang_moi_doan
+    tháng — nguồn "thuedientu" bị giới hạn số dòng trả về cho khoảng ngày
+    RỘNG (xác nhận qua chính người dùng: tra cứu "Tùy chọn ngày"
+    01/01/2024-31/12/2025 luôn thiếu Quý 1-2/2024, nhưng thu hẹp lại
+    01/01/2024-30/06/2024 [6 tháng] thì lấy ĐỦ — kể cả Quý 4/2023 nộp
+    trong khoảng đó). Trước đó (build .286-287) từng thử chia theo TỪNG
+    THÁNG nhưng đồng thời đổi luôn page/size sang số — gây thất bại HOÀN
+    TOÀN (đã revert) — hoá ra là do tham số số bị cổng từ chối (xác nhận
+    build .289: dù KHÔNG chia nhỏ, chỉ đổi page/size sang số cũng đã thất
+    bại y hệt), KHÔNG phải do việc chia nhỏ/gọi lặp lại. Lần này chia
+    theo đoạn 6 THÁNG (thay vì 1 tháng — đúng độ rộng người dùng tự xác
+    nhận chạy được, ít lượt gọi hơn hẳn 1 tháng/lần, đỡ tốn thời gian +
+    đỡ rủi ro hơn) và GIỮ NGUYÊN page/size rỗng (đã xác nhận đúng).
+
+    Trả về list [(tu1,den1), (tu2,den2), ...] dd/mm/yyyy — rỗng nếu
+    không đọc được ngày."""
+    def _dmy(s):
+        try:
+            d, m, y = (s or "").split("/")
+            return datetime.date(int(y), int(m), int(d))
+        except Exception:
+            return None
+    tu_d, den_d = _dmy(tu_str), _dmy(den_str)
+    if not tu_d or not den_d:
+        return []
+    if tu_d > den_d:
+        tu_d, den_d = den_d, tu_d
+    ket_qua = []
+    cur = tu_d
+    while cur <= den_d:
+        # Tiến thêm so_thang_moi_doan tháng rồi lùi lại 1 ngày -> cuối đoạn.
+        y2, m2 = cur.year, cur.month + so_thang_moi_doan
+        y2 += (m2 - 1) // 12
+        m2 = (m2 - 1) % 12 + 1
+        cuoi_doan_tinh = datetime.date(y2, m2, 1) - datetime.timedelta(days=1)
+        cuoi_doan = min(den_d, cuoi_doan_tinh)
+        ket_qua.append((cur.strftime("%d/%m/%Y"), cuoi_doan.strftime("%d/%m/%Y")))
+        cur = cuoi_doan + datetime.timedelta(days=1)
+    return ket_qua
+
+
 
 # Số công ty xử lý ĐỒNG THỜI (mỗi luồng 1 trình duyệt ẩn riêng) — TÁCH RIÊNG
 # 2 hằng số cho 2 tính năng để tăng luồng cho tính năng này KHÔNG ảnh hưởng
@@ -5474,22 +5516,47 @@ def _dvc_run_batch(batch_id, cids, body):
                             den_tim = hom_nay_kt.strftime("%d/%m/%Y")
                     except Exception:
                         pass
-                # LƯU Ý (build .286-.287, ĐÃ REVERT): từng thử chia khoảng
-                # ngày rộng thành nhiều lượt tra cứu riêng theo TỪNG THÁNG cho
-                # nguồn "thuedientu" (dựa trên việc người dùng tự tay thử form
-                # trên cổng bị từ chối khoảng rộng) — nhưng người dùng báo kết
-                # quả THỰC TẾ tệ hơn hẳn (15 dòng -> chỉ còn 5 dòng, mất luôn
-                # cả các tháng TRƯỚC ĐÓ đã tìm ra được) — rất có thể do gọi
-                # captcha liên tiếp nhiều lần khiến cổng chặn/lỗi phần lớn các
-                # lượt. Revert lại gọi 1 lần duy nhất như ban đầu (build .285:
-                # vẫn tìm được 1 phần dữ liệu — Quý 3/2024 trở đi — dù chưa rõ
-                # vì sao vẫn thiếu Quý 1-2/2024). Nguyên nhân THẬT vẫn CHƯA rõ
-                # — cần log/chẩn đoán thật (xem item['loi_tra_cuu'] hiện ở
-                # khung tiến độ) trước khi thử sửa tiếp, tránh đoán mò lần nữa.
-                try:
-                    rows_tho, ma_list, raw_html, sdiag = _tra_cuu_fn(drv, tu_tim, den_tim)
-                except Exception as e:
-                    rows_tho, ma_list, raw_html, sdiag = [], [], "", [f"lỗi tra cứu: {e}"]
+                # Nguồn "thuedientu" bị giới hạn số dòng trả về cho khoảng
+                # ngày RỘNG — người dùng tự xác nhận: tra "Tùy chọn ngày"
+                # 01/01/2024-31/12/2025 (2 năm) luôn thiếu Quý 1-2/2024,
+                # nhưng thu hẹp lại 01/01/2024-30/06/2024 (6 tháng) thì lấy
+                # ĐỦ (kể cả Quý 4/2023 nộp trong khoảng đó). Từng thử chia
+                # theo TỪNG THÁNG ở build .286-287 nhưng ĐỒNG THỜI đổi luôn
+                # page/size sang số — gây thất bại HOÀN TOÀN; xác nhận ở
+                # build .289 (đổi page/size sang số, KHÔNG chia nhỏ) cũng
+                # thất bại y hệt -> lỗi do tham số số bị cổng từ chối, KHÔNG
+                # phải do việc chia nhỏ/gọi lặp lại. Lần này chia theo đoạn
+                # 6 THÁNG (đúng độ rộng đã xác nhận chạy được, ít lượt hơn
+                # hẳn 1 tháng/lần) và GIỮ NGUYÊN page/size rỗng (đã xác nhận
+                # đúng ở _JS_SEARCH_TDT) — chỉ áp dụng cho "thuedientu", CHƯA
+                # xác nhận "dvc" có cùng giới hạn nên không đụng vào.
+                if ngu == "thuedientu":
+                    cac_doan = _chia_khoang_ngay_thanh_doan(tu_tim, den_tim, so_thang_moi_doan=6)
+                else:
+                    cac_doan = [(tu_tim, den_tim)]
+                rows_tho, ma_list, sdiag = [], [], []
+                raw_html = ""
+                for _idx_doan, (tu_doan, den_doan) in enumerate(cac_doan, 1):
+                    if len(cac_doan) > 1:
+                        item["trang_thai"] = (
+                            f"đang tra cứu {nhan_nguon}: {tu_doan}-{den_doan} "
+                            f"({_idx_doan}/{len(cac_doan)})")
+                        if _idx_doan > 1:
+                            time.sleep(2)   # nghỉ giữa các lượt — đỡ dồn dập vào cổng
+                    try:
+                        r_tho, r_ma, r_html, r_diag = _tra_cuu_fn(drv, tu_doan, den_doan)
+                    except Exception as e:
+                        r_tho, r_ma, r_html, r_diag = [], [], "", [f"lỗi tra cứu {tu_doan}-{den_doan}: {e}"]
+                    rows_tho.extend(r_tho)
+                    for m_ in r_ma:
+                        if m_ not in ma_list:
+                            ma_list.append(m_)
+                    if r_html and not raw_html:
+                        raw_html = r_html
+                    if len(cac_doan) > 1:
+                        sdiag.extend(f"[{tu_doan}-{den_doan}] {d}" for d in r_diag)
+                    else:
+                        sdiag.extend(r_diag)
                 # Cổng báo "Tổng số bản ghi" LỆCH với số dòng thật đọc được
                 # (xem _dvc_browser_tracuu/_dvc_browser_tracuu_tdt) — search
                 # vẫn coi là "thành công" (có rows) nên nhánh loi_tra_cuu bên

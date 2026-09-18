@@ -49,14 +49,19 @@ assert '"LỆCH" in _d' in than_run_batch or "'LỆCH' in _d" in than_run_batch,
 print("PASS 2: _dvc_run_batch() bắt riêng thông báo LỆCH và ghi vào item['loi_tra_cuu'] dù search có "
       "rows (không bị bỏ sót như nhánh loi_tra_cuu cũ).")
 
-# ===== Test 3 (không hồi quy): _dvc_run_batch() KHÔNG còn gọi chia nhỏ
-# theo tháng nữa (đã revert vì làm tệ hơn) — gọi tra cứu 1 lần duy nhất
-# như trước khi có build .286. =====
+# ===== Test 3 (không hồi quy): hàm chia nhỏ theo TỪNG THÁNG (bản lỗi cũ,
+# build .286-287 — kết hợp NHẦM với việc đổi page/size sang số, gây thất
+# bại hoàn toàn) phải đã bị gỡ bỏ hẳn — không được để sót code chết. Việc
+# chia nhỏ theo khoảng RỘNG HƠN (6 tháng, xem
+# _chia_khoang_ngay_thanh_doan + test_chia_khoang_ngay_thanh_doan.py) là
+# tính năng KHÁC, được thêm lại SAU khi xác nhận nguyên nhân thật sự là
+# do tham số số (không phải do chia nhỏ/gọi lặp lại) — không mâu thuẫn
+# với test này. =====
 assert "_chia_khoang_ngay_theo_thang" not in src, (
-    "_chia_khoang_ngay_theo_thang() phải đã được gỡ bỏ hoàn toàn (đã revert vì làm tệ hơn — người dùng "
-    "báo 15 dòng tụt còn 5 dòng) — không được để sót lại code chết hoặc vẫn còn gọi.")
-print("PASS 3: đã gỡ bỏ hoàn toàn _chia_khoang_ngay_theo_thang() (revert đúng theo phản ánh của người "
-      "dùng), không còn code chết sót lại.")
+    "_chia_khoang_ngay_theo_thang() (bản chia theo TỪNG THÁNG, lỗi cũ) phải đã được gỡ bỏ hoàn toàn — "
+    "không được để sót lại code chết. Việc chia nhỏ theo 6 tháng (_chia_khoang_ngay_thanh_doan) là tính "
+    "năng khác, không phải hàm này.")
+print("PASS 3: đã gỡ bỏ hoàn toàn hàm chia theo TỪNG THÁNG (bản lỗi cũ), không còn code chết sót lại.")
 
 # ===== Test 4: khung tiến độ (frontend) phải HIỂN THỊ item.loi_tra_cuu —
 # trước đây trường này ĐÃ được ghi ở backend nhưng KHÔNG hiện ra đâu cả,
