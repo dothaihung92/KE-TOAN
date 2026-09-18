@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.293"
+APP_BUILD = "2026-09-18.294"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4704,16 +4704,20 @@ def _dvc_browser_download_tdt(drv, ma):
          nạp xong jQuery được (có thể do cấu trúc trang này khác trang
          tìm kiếm /tchs, hoặc chặn tải trực tiếp không qua điều hướng
          nội bộ SPA).
-      3) (bản này) ĐỔI HẲN cách tiếp cận: KHÔNG điều hướng sang trang chi
-         tiết nữa — gọi thẳng $.ajax(...) NGAY TỪ TRANG HIỆN TẠI (thường
-         vẫn đang ở /tchs — trang tìm kiếm, nơi jQuery ĐÃ XÁC NHẬN nạp
-         tốt vì tra cứu vẫn luôn thành công). Endpoint download tự nó là
-         1 API POST độc lập (chỉ cần {"maHoSo":...}, không đọc gì từ DOM
-         trang chi tiết) nên về lý thuyết không cần điều hướng riêng —
-         phần điều hướng trước đây chỉ để có đúng Referer, CHƯA CHẮC
-         cổng có kiểm tra chặt Referer hay không. Nếu cách này vẫn lỗi,
-         thông báo lỗi sẽ cho biết CHÍNH XÁC nguyên nhân mới (vd cổng từ
-         chối vì thiếu đúng Referer) thay vì mù mờ 'chưa nạp jQuery'."""
+      3) ĐỔI cách tiếp cận: KHÔNG điều hướng sang trang chi tiết nữa —
+         thử gọi $.ajax(...) NGAY TỪ TRANG HIỆN TẠI trước. VẪN KHÔNG hết
+         — người dùng báo lần 4: 8/8 hồ sơ lỗi Y HỆT, vì luồng gọi thật
+         (_dvc_run_batch) LUÔN gọi _dvc_browser_thongbao() TRƯỚC hàm này
+         cho CÙNG mã hồ sơ (để tải Thông báo) — mà thongbao() tự nó VẪN
+         điều hướng sang trang chi tiết (cần đọc HTML để dò idTbao, khác
+         download() chỉ cần gọi API thuần) — nên "trang hiện tại" lúc
+         hàm NÀY chạy LUÔN LÀ trang chi tiết (đã xác nhận không tự nạp
+         jQuery), KHÔNG PHẢI /tchs như tưởng — phần "kiểm tra trang hiện
+         tại" ở sửa lần 3 vì vậy hoàn toàn VÔ NGHĨA (luôn rơi vào đúng
+         trang hỏng). Sửa LẦN NÀY: khi trang hiện tại không có jQuery,
+         ĐIỀU HƯỚNG VỀ THẲNG /tchs (trang tìm kiếm — nơi XÁC NHẬN CHẮC
+         CHẮN có jQuery, vì tra cứu luôn thành công), KHÔNG quay lại
+         trang chi tiết (đã xác nhận hỏng) như các lần sửa trước."""
     import time as _t
     da_co_jquery = False
     try:
@@ -4721,10 +4725,9 @@ def _dvc_browser_download_tdt(drv, ma):
     except Exception:
         da_co_jquery = False
     if not da_co_jquery:
-        url_muon = f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX"
         for lan_thu in range(2):
             try:
-                drv.get(url_muon)
+                drv.get(f"{DVC_BASE}/tchs")
                 _t.sleep(1.0)
                 da_co_jquery = _dvc_wait_jquery(drv, 10)
             except Exception:
@@ -4732,8 +4735,8 @@ def _dvc_browser_download_tdt(drv, ma):
             if da_co_jquery:
                 break
     if not da_co_jquery:
-        raise Exception("Trang hiện tại không có jQuery để gọi tải file sau khi đã thử điều hướng lại "
-                         "trang chi tiết hồ sơ (mạng chậm/cổng lỗi)")
+        raise Exception("Không nạp được jQuery ở cả trang hiện tại lẫn trang /tchs sau khi thử lại "
+                         "(mạng chậm/cổng lỗi)")
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).
