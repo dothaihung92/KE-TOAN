@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.305"
+APP_BUILD = "2026-09-18.306"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4086,6 +4086,44 @@ def _dvc_wait_jquery(drv, giay=12):
         _t.sleep(0.5)
     return False
 
+# Chẩn đoán VÌ SAO jQuery không nạp được — tăng số lần/thời gian thử lại
+# (3->5 lần, 10s->15s) KHÔNG giải quyết được (người dùng xác nhận: "vẫn
+# không tải được vậy không phải do thời gian chờ"), nên đây không phải
+# lỗi RACE CONDITION (chờ chưa đủ lâu) mà là lỗi THẬT SỰ không nạp được,
+# bất kể chờ bao lâu. Đọc Performance API để biết CHÍNH XÁC: có thẻ
+# <script> nào tham chiếu jquery trên trang không, request tải nó có xảy
+# ra không, và nếu có thì kết quả thế nào (transferSize=0 dù
+# duration>0 thường là dấu hiệu bị chặn/lỗi mạng, không phải tải chậm).
+_JS_CHAN_DOAN_JQUERY = r"""
+var out = {};
+try {
+  var scripts = Array.prototype.slice.call(document.scripts)
+    .map(function(s){ return s.src; })
+    .filter(function(s){ return /jquery/i.test(s); });
+  out.the_script = scripts;
+  var res = [];
+  try {
+    res = performance.getEntriesByType('resource')
+      .filter(function(r){ return /jquery/i.test(r.name); })
+      .map(function(r){
+        return {ten: r.name, thoi_gian: Math.round(r.duration),
+                kich_thuoc: r.transferSize, giao_thuc: r.nextHopProtocol || ''};
+      });
+  } catch(e) {}
+  out.tai_nguyen = res;
+  out.co_jquery = (typeof window.jQuery !== 'undefined');
+  out.trang_thai_trang = document.readyState;
+  out.url = location.href;
+} catch(e) { out.loi = ''+e; }
+return out;
+"""
+
+def _dvc_chan_doan_jquery(drv):
+    try:
+        return drv.execute_script(_JS_CHAN_DOAN_JQUERY)
+    except Exception as e:
+        return {"loi_chan_doan": str(e)}
+
 def _dvc_cap_from_js(res):
     """Từ kết quả _JS_GETCAPTCHA (PNG do trình duyệt vẽ từ canvas) → mã captcha."""
     if not res or not res.get("ok"):
@@ -4768,11 +4806,13 @@ def _dvc_browser_download_tdt(drv, ma):
     bản gốc) — tăng cơ hội thành công mà không quay lại phải tự đoán
     CSRF."""
     import time as _t
+    jq_ok = False
     for _lan in range(5):
         try:
             drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
             _t.sleep(1.0)
             if _dvc_wait_jquery(drv, 15):
+                jq_ok = True
                 break
         except Exception:
             pass
@@ -4783,6 +4823,14 @@ def _dvc_browser_download_tdt(drv, ma):
     body = '{"maHoSo":%s}' % ma_so
     res = drv.execute_async_script(_JS_DOWNLOAD_TDT, body)
     if not res or not res.get("ok"):
+        # Tăng số lần/thời gian thử lại KHÔNG giải quyết được (người dùng xác
+        # nhận: "vẫn không tải được vậy không phải do thời gian chờ") -> không
+        # phải race condition (chờ chưa đủ lâu) mà lỗi THẬT SỰ không nạp
+        # được, bất kể chờ bao lâu — đính kèm chẩn đoán Performance API để
+        # biết CHÍNH XÁC vì sao (có request tải jquery.js không, có bị chặn/
+        # lỗi mạng không) thay vì tiếp tục đoán mù thêm 1 vòng chờ nữa.
+        if not jq_ok:
+            res = dict(res or {}); res["chan_doan_jquery"] = _dvc_chan_doan_jquery(drv)
         raise Exception(f"{res}")
     d = _dvc_norm_data(res.get("data"))
     if not isinstance(d, dict):
@@ -5463,7 +5511,7 @@ def _dvc_ghi_loi_tai(item, ma, to_khai, loi):
     item["so_loi_tai"] = item.get("so_loi_tai", 0) + 1
     mau = item.setdefault("loi_tai_mau", [])
     if len(mau) < _DVC_LOI_TAI_TOI_DA:
-        mau.append({"ma": str(ma or "")[:30], "to_khai": str(to_khai or "")[:80], "loi": str(loi or "")[:350]})
+        mau.append({"ma": str(ma or "")[:30], "to_khai": str(to_khai or "")[:80], "loi": str(loi or "")[:600]})
 
 
 def _dvc_run_batch(batch_id, cids, body):
