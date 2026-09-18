@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.290"
+APP_BUILD = "2026-09-18.291"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4193,13 +4193,28 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     TDT có Thông báo trên cổng nhưng gọi thiếu loai=ETAX báo 'không thấy')."""
     import time as _t
     out, diag = [], []
-    try:
-        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
-        _t.sleep(1.2)
-        _dvc_wait_jquery(drv, 10)
-        html = drv.page_source or ""
-    except Exception as e:
-        return out, [f"lỗi mở chi tiết {ma}: {e}"]
+    # THỬ LẠI 1 lần nếu jQuery chưa kịp nạp — cùng nguyên nhân/cách sửa với
+    # _dvc_browser_download_tdt (xem giải thích ở đó): trước đây không kiểm
+    # tra kết quả _dvc_wait_jquery(), nên trang chi tiết có thể còn TRỐNG
+    # (chưa render xong) lúc đọc html, khiến _dvc_parse_id_tbao() không tìm
+    # thấy idTbao nào dù thông báo thật sự tồn tại -> báo nhầm "không thấy
+    # idTbao" (hiện ở UI thành "không tìm thấy Thông báo").
+    da_co_jquery = False
+    html = ""
+    for lan_thu in range(2):
+        try:
+            drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
+            _t.sleep(1.2)
+            da_co_jquery = _dvc_wait_jquery(drv, 10)
+            html = drv.page_source or ""
+        except Exception as e:
+            if lan_thu == 1:
+                return out, [f"lỗi mở chi tiết {ma}: {e}"]
+            continue
+        if da_co_jquery:
+            break
+    if not da_co_jquery:
+        diag.append(f"{ma}: trang chi tiết không nạp được jQuery sau 2 lần thử")
     ids = _dvc_parse_id_tbao(html)
     if not ids:
         # dò manh mối để tinh chỉnh sau
@@ -4672,14 +4687,31 @@ def _dvc_browser_download_tdt(drv, ma):
     """Tải tờ khai từ tab "Thuế điện tử" — vào trang chi tiết (?loai=ETAX,
     đúng đường dẫn xác nhận được từ request thật) trước để có đúng ngữ
     cảnh/referer, rồi gọi POST /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX
-    (endpoint đã xác nhận qua request bắt được từ trình duyệt)."""
+    (endpoint đã xác nhận qua request bắt được từ trình duyệt).
+
+    TRƯỚC ĐÂY gọi _dvc_wait_jquery() nhưng KHÔNG kiểm tra kết quả chờ —
+    nếu jQuery chưa kịp nạp xong (giành giật với thời gian) vẫn cứ chạy
+    tiếp qua execute_async_script(), gây lỗi mù mờ "$ is not defined" —
+    xác nhận qua log thật người dùng gửi: 22/22 hồ sơ nguồn "Thuế điện
+    tử" tải file đều lỗi y hệt "$ is not defined" (sau khi tra cứu vừa
+    được sửa tìm ra NHIỀU hồ sơ hơn hẳn — có thể trang chi tiết bị tải
+    liên tục nhiều lần trong thời gian ngắn nên nạp jQuery không kịp).
+    Giờ THỬ LẠI 1 lần (tải lại trang) nếu lần đầu jQuery chưa nạp kịp,
+    và báo lỗi RÕ RÀNG (thay vì mù mờ "$ is not defined") nếu vẫn không
+    được sau khi thử lại."""
     import time as _t
-    try:
-        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
-        _t.sleep(1.0)
-        _dvc_wait_jquery(drv, 10)
-    except Exception:
-        pass
+    da_co_jquery = False
+    for lan_thu in range(2):
+        try:
+            drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
+            _t.sleep(1.0)
+            da_co_jquery = _dvc_wait_jquery(drv, 10)
+        except Exception:
+            da_co_jquery = False
+        if da_co_jquery:
+            break
+    if not da_co_jquery:
+        raise Exception("Trang chi tiết hồ sơ không nạp được jQuery sau 2 lần thử (mạng chậm/cổng lỗi)")
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).
