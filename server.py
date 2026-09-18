@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.296"
+APP_BUILD = "2026-09-18.297"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3990,6 +3990,14 @@ try {
 # có sẵn ngay khi trang load xong HTML, KHÔNG phụ thuộc việc jQuery (hay
 # bất kỳ thư viện ngoài nào) có tải được hay không — né hẳn được vấn đề
 # chờ jQuery đã bế tắc suốt 4 vòng sửa trước.
+#
+# Đổi sang fetch() rồi vẫn lỗi — nhưng lần này là 403 Forbidden RÕ RÀNG từ
+# server (khác hẳn lỗi client-side trước đó — xác nhận request ĐÃ gửi đi
+# đúng, chỉ còn thiếu quyền). Nhìn lại đúng request thật đã bắt trước đó
+# (Copy Request Headers) mới để ý sót 1 header nữa: 'x-requested-with:
+# XMLHttpRequest' — jQuery TỰ ĐỘNG thêm header này cho mọi request AJAX
+# (đó là lý do trước đây dùng $.ajax() không cần khai báo tay), nhưng
+# fetch() KHÔNG tự thêm — phải khai báo thủ công.
 _JS_DOWNLOAD_TDT = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
@@ -4001,7 +4009,8 @@ try {
   var csrf = getCookie('XSRF-TOKEN');
   fetch('/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX', {
     method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf },
+    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf,
+               'X-Requested-With': 'XMLHttpRequest' },
     body: body
   }).then(function(r){
     return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
@@ -4028,7 +4037,8 @@ try {
   var csrf = getCookie('XSRF-TOKEN');
   fetch('/tthc/tchs/downloadthongbao', {
     method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf },
+    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf,
+               'X-Requested-With': 'XMLHttpRequest' },
     body: body
   }).then(function(r){
     return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
