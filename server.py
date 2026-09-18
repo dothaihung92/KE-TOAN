@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.294"
+APP_BUILD = "2026-09-18.295"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3968,24 +3968,50 @@ try {
 # tới 17 chữ số, VƯỢT quá độ chính xác an toàn của kiểu Number trong
 # JavaScript (Number.MAX_SAFE_INTEGER chỉ 16 chữ số) — nếu để JS tự
 # JSON.stringify({maHoSo:ma}) sẽ làm SAI lệch vài chữ số cuối.
+#
+# THIẾU header 'x-xsrf-token' — người dùng tự bắt request THẬT lúc tải
+# thành công qua DevTools (Copy Request Headers) mới phát hiện ra: request
+# thật CÓ gửi header này (đọc từ cookie XSRF-TOKEN, giống hệt cách
+# _JS_SEARCH_TDT đã làm cho bước tìm kiếm) nhưng _JS_DOWNLOAD_TDT trước giờ
+# CHƯA BAO GIỜ gửi — server trả về lỗi 500 "Tải hồ sơ thất bại" (khác hẳn
+# lỗi thiếu jQuery đã sửa trước đó — chứng tỏ đã QUA được bước nạp trang,
+# chỉ còn thiếu đúng header CSRF này). Referer cũng PHẢI đúng là trang chi
+# tiết hồ sơ (xác nhận qua request thật) — trình duyệt tự gắn Referer theo
+# trang đang đứng, không thể giả từ script, nên bắt buộc phải điều hướng
+# tới đúng trang chi tiết trước khi gọi (không gọi thẳng từ /tchs được).
 _JS_DOWNLOAD_TDT = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
 try {
+  function getCookie(name){
+    var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  var csrf = getCookie('XSRF-TOKEN');
   $.ajax({ type:'POST', url:'/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX',
     contentType:'application/json', data: body,
+    headers:{ 'X-XSRF-TOKEN':csrf },
     success:function(d){ cb({ok:true, data:d}); },
     error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
   });
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
+# Thiếu header 'x-xsrf-token' y hệt _JS_DOWNLOAD_TDT trước khi sửa (xem
+# giải thích chi tiết ở đó, cùng nguyên nhân/cùng cách sửa) — request thật
+# bắt được qua DevTools lúc tải Thông báo thành công cũng có header này.
 _JS_DOWNLOAD_TB = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
 try {
+  function getCookie(name){
+    var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  var csrf = getCookie('XSRF-TOKEN');
   $.ajax({ type:'POST', url:'/tthc/tchs/downloadthongbao',
     contentType:'application/json', data: body,
+    headers:{ 'X-XSRF-TOKEN':csrf },
     success:function(d){ cb({ok:true, data:d}); },
     error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
   });
@@ -4684,59 +4710,54 @@ def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
 
 
 def _dvc_browser_download_tdt(drv, ma):
-    """Tải tờ khai từ tab "Thuế điện tử" — gọi POST
+    """Tải tờ khai từ tab "Thuế điện tử" — vào ĐÚNG trang chi tiết
+    (.../files/detail/{ma}?loai=ETAX) trước rồi gọi POST
     /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX (endpoint đã xác nhận qua
     request bắt được từ trình duyệt).
 
-    LỊCH SỬ SỬA LỖI "$ is not defined" (jQuery chưa nạp) khi tải — người
-    dùng báo qua NHIỀU vòng log thật, mỗi vòng sửa vẫn KHÔNG hết (100%
-    hồ sơ nguồn "thuế điện tử" luôn lỗi y hệt nhau mọi lần, không phải
-    thỉnh thoảng — dấu hiệu rõ đây là lỗi CẤU TRÚC, không phải do mạng
-    chậm/dồn dập ngẫu nhiên như từng nghi ngờ):
-      1) Thêm kiểm tra kết quả _dvc_wait_jquery() (trước đó gọi xong bỏ
-         qua luôn) + thử lại 1 lần -> KHÔNG hết (8/8 vẫn lỗi y hệt).
-      2) Gộp bớt điều hướng (dùng lại trang đã mở từ
-         _dvc_browser_thongbao() thay vì điều hướng thêm lần nữa) ->
-         VẪN KHÔNG hết (8/8 vẫn lỗi y hệt, không đổi 1 chút nào) — chứng
-         tỏ vấn đề không nằm ở việc điều hướng dồn dập, mà rất có thể
-         trang chi tiết .../files/detail/{ma}?loai=ETAX (tải bằng
-         drv.get() — điều hướng TOÀN TRANG) ĐƠN GIẢN LÀ KHÔNG BAO GIỜ tự
-         nạp xong jQuery được (có thể do cấu trúc trang này khác trang
-         tìm kiếm /tchs, hoặc chặn tải trực tiếp không qua điều hướng
-         nội bộ SPA).
-      3) ĐỔI cách tiếp cận: KHÔNG điều hướng sang trang chi tiết nữa —
-         thử gọi $.ajax(...) NGAY TỪ TRANG HIỆN TẠI trước. VẪN KHÔNG hết
-         — người dùng báo lần 4: 8/8 hồ sơ lỗi Y HỆT, vì luồng gọi thật
-         (_dvc_run_batch) LUÔN gọi _dvc_browser_thongbao() TRƯỚC hàm này
-         cho CÙNG mã hồ sơ (để tải Thông báo) — mà thongbao() tự nó VẪN
-         điều hướng sang trang chi tiết (cần đọc HTML để dò idTbao, khác
-         download() chỉ cần gọi API thuần) — nên "trang hiện tại" lúc
-         hàm NÀY chạy LUÔN LÀ trang chi tiết (đã xác nhận không tự nạp
-         jQuery), KHÔNG PHẢI /tchs như tưởng — phần "kiểm tra trang hiện
-         tại" ở sửa lần 3 vì vậy hoàn toàn VÔ NGHĨA (luôn rơi vào đúng
-         trang hỏng). Sửa LẦN NÀY: khi trang hiện tại không có jQuery,
-         ĐIỀU HƯỚNG VỀ THẲNG /tchs (trang tìm kiếm — nơi XÁC NHẬN CHẮC
-         CHẮN có jQuery, vì tra cứu luôn thành công), KHÔNG quay lại
-         trang chi tiết (đã xác nhận hỏng) như các lần sửa trước."""
+    LỊCH SỬ SỬA LỖI tải file nguồn "thuế điện tử" — người dùng báo qua
+    NHIỀU vòng log thật:
+      1-3) Các lần sửa trước loay hoay quanh lỗi "$ is not defined"
+         (jQuery chưa nạp) — thử kiểm tra kết quả chờ, gộp bớt điều
+         hướng, rồi bỏ hẳn điều hướng sang trang chi tiết (gọi thẳng từ
+         /tchs) — nhưng gọi thẳng từ /tchs lại bị SERVER từ chối rõ ràng:
+         500 "Tải hồ sơ thất bại" (khác hẳn lỗi client-side "$ is not
+         defined" — nghĩa là ĐÃ vượt qua được bước nạp trang, chỉ còn
+         thiếu gì đó server yêu cầu).
+      4) (bản này) Người dùng tự bắt request THẬT lúc tải thành công qua
+         DevTools (Copy Request Headers) — phát hiện 2 điều quan trọng:
+         (a) request thật CÓ header 'x-xsrf-token' (đọc từ cookie
+         XSRF-TOKEN) mà _JS_DOWNLOAD_TDT TRƯỚC GIỜ CHƯA BAO GIỜ gửi — đã
+         thêm vào (xem _JS_DOWNLOAD_TDT); (b) 'referer' của request thật
+         ĐÚNG LÀ trang chi tiết hồ sơ — trình duyệt tự gắn Referer theo
+         trang đang đứng, KHÔNG thể giả từ script khác trang, nên vẫn
+         PHẢI điều hướng tới đúng trang chi tiết trước khi gọi (không
+         gọi thẳng từ /tchs được nữa, dù trang đó nạp jQuery ổn định
+         hơn) — nghi vấn "trang chi tiết không bao giờ tự nạp jQuery" ở
+         các lần sửa trước có thể do ẢNH HƯỞNG DÂY CHUYỀN từ việc thiếu
+         token CSRF (server có thể phản ứng khác/chậm hơn khi phát hiện
+         nhiều request thiếu token liên tiếp), CHƯA CHẮC là lỗi cấu trúc
+         thật của trang — cần thử lại với token đã có mới biết chắc."""
     import time as _t
+    url_muon = f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX"
     da_co_jquery = False
     try:
-        da_co_jquery = _dvc_wait_jquery(drv, 3)
+        if (drv.current_url or "").rstrip("/") == url_muon.rstrip("/"):
+            da_co_jquery = _dvc_wait_jquery(drv, 5)
     except Exception:
         da_co_jquery = False
     if not da_co_jquery:
-        for lan_thu in range(2):
+        for lan_thu in range(3):
             try:
-                drv.get(f"{DVC_BASE}/tchs")
-                _t.sleep(1.0)
-                da_co_jquery = _dvc_wait_jquery(drv, 10)
+                drv.get(url_muon)
+                _t.sleep(1.5)
+                da_co_jquery = _dvc_wait_jquery(drv, 12)
             except Exception:
                 da_co_jquery = False
             if da_co_jquery:
                 break
     if not da_co_jquery:
-        raise Exception("Không nạp được jQuery ở cả trang hiện tại lẫn trang /tchs sau khi thử lại "
-                         "(mạng chậm/cổng lỗi)")
+        raise Exception("Trang chi tiết hồ sơ không nạp được jQuery sau 3 lần thử (mạng chậm/cổng lỗi)")
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).

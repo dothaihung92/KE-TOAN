@@ -1,4 +1,5 @@
 import os
+import re
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
@@ -27,10 +28,10 @@ than_thongbao = _lay_than_ham('_dvc_browser_thongbao')
 # trang chi tiết hồ sơ nguồn "thuế điện tử" phải KIỂM TRA kết quả
 # _dvc_wait_jquery() — không được gọi rồi bỏ qua kết quả trả về. =====
 for ten, than in (('_dvc_browser_download_tdt', than_download_tdt), ('_dvc_browser_thongbao', than_thongbao)):
-    assert "_dvc_wait_jquery(drv, 10)" in than, f"{ten} phải gọi _dvc_wait_jquery(drv, 10)"
+    assert re.search(r"_dvc_wait_jquery\(drv,\s*\d+\)", than), f"{ten} phải gọi _dvc_wait_jquery(drv, <số>)"
     # Không được để dòng gọi đứng riêng lẻ (không gán/không kiểm tra) — phải
     # gán vào 1 biến để sau đó CÓ kiểm tra (vd "if not da_co_jquery:").
-    assert "da_co_jquery = _dvc_wait_jquery(drv, 10)" in than, (
+    assert re.search(r"da_co_jquery\s*=\s*_dvc_wait_jquery\(drv,\s*\d+\)", than), (
         f"{ten} phải GÁN kết quả _dvc_wait_jquery() vào biến rồi kiểm tra — trước đây gọi xong bỏ qua "
         f"luôn kết quả, nếu jQuery chưa kịp nạp vẫn chạy tiếp gây lỗi mù mờ 'ReferenceError: $ is not "
         f"defined' (đúng log thật người dùng báo: 22/22 hồ sơ lỗi y hệt nhau).")
@@ -44,7 +45,7 @@ print("PASS 1: cả _dvc_browser_download_tdt() và _dvc_browser_thongbao() đ�
 # lại trang chi tiết) nếu lần đầu jQuery chưa kịp nạp, và báo lỗi RÕ RÀNG
 # (không phải "$ is not defined" mù mờ) nếu vẫn không được sau khi thử
 # lại — không được để lỗi mù mờ lọt ra ngoài như trước. =====
-assert "range(2)" in than_download_tdt, (
+assert re.search(r"range\(\d+\)", than_download_tdt), (
     "_dvc_browser_download_tdt() phải thử tải lại trang chi tiết ít nhất 1 lần nữa nếu jQuery chưa kịp "
     "nạp lần đầu, trước khi báo lỗi hẳn — tránh thất bại ngay chỉ vì 1 lần chờ không đủ lâu.")
 assert "jQuery" in than_download_tdt and "raise Exception(" in than_download_tdt, (
