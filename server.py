@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.301"
+APP_BUILD = "2026-09-18.302"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23385,6 +23385,15 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
                     _misa_gan(led_row, cols_led, st["so_ky"], "LifeTimeInMonth")
                     _misa_gan(led_row, cols_led, max(st["con_lai_ky"], 0), "LifeTimeRemainingInMonth")
                     _misa_gan(led_row, cols_led, tien_ky_thuc, "MonthlyDepreciationAmount")
+                    # "Giá trị tính KH" (báo cáo Sổ tài sản cố định đọc từ dòng
+                    # MỚI NHẤT trong FixedAssetLedger, giống hệt bài học ở
+                    # _misa_ghi_tang_tscd) — TRƯỚC ĐÂY chỉ set OriginDepreciationAmount
+                    # mà QUÊN set DepreciationAmount (cột NOT NULL, tự về 0 theo
+                    # _misa_gia_tri_mac_dinh) -> mỗi lần "Tính khấu hao" chạy xong lại
+                    # ghi đè "Giá trị tính KH" của tài sản về 0 trên báo cáo, dù dòng
+                    # "Ghi tăng" ban đầu đã ghi đúng. Xác nhận qua dữ liệu thật người
+                    # dùng gửi: Giá trị còn lại = ĐÚNG BẰNG ÂM Hao mòn luỹ kế (0 - K).
+                    _misa_gan(led_row, cols_led, st["tong_tien"], "DepreciationAmount")
                     _misa_gan(led_row, cols_led, st["tong_tien"], "OriginDepreciationAmount")
                     _tich_luy_kh = max(round(st["tong_tien"] - st["con_lai_tien"]), 0)
                     _misa_gan(led_row, cols_led, _tich_luy_kh, "AccumDepreciationAmount")
