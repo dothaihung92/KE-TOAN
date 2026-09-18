@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-17.284"
+APP_BUILD = "2026-09-18.285"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3927,8 +3927,22 @@ try {
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
-# Tải 1 thông báo (Tiếp nhận / Xác nhận). body là chuỗi JSON dựng sẵn từ Python
-# để giữ nguyên idTbao (số rất lớn, tránh mất chính xác khi qua JS number).
+# page/size PHẢI truyền số thật (không để rỗng ''): người dùng báo tra cứu
+# công ty hoạt động liên tục từ trước 2024, chọn khoảng "Tùy chọn ngày"
+# 01/01/2024-31/12/2025 nhưng phần mềm chỉ tìm ra 15 dòng, THIẾU HẲN các tờ
+# khai Quý 1-2/2024 (xác nhận qua đối chiếu Excel "TraCuuToKhai_..." xuất
+# ra — GTGT/TNCN chỉ thấy từ Quý 3-4/2024 trở đi dù công ty đã hoạt động từ
+# trước đó) — trong khi _JS_SEARCH (nguồn "dvc", TỪ 01/07/2025) đã cẩn thận
+# truyền page:0, size:200 để chắc chắn lấy đủ 1 trang lớn, hàm NÀY (nguồn
+# "thuedientu", dùng cho toàn bộ dữ liệu TRƯỚC 01/07/2025 — đúng giai đoạn
+# chứa các tờ khai bị thiếu) lại để page/size RỖNG, khiến cổng dùng cỡ
+# trang MẶC ĐỊNH nhỏ (kiểu phân trang Spring Pageable) — nếu công ty có
+# NHIỀU hồ sơ hơn cỡ trang mặc định trong khoảng ngày tìm, các hồ sơ CŨ
+# NHẤT (thường xếp cuối nếu sắp mới->cũ) bị rớt khỏi trang 1 mà không có
+# vòng lặp lấy thêm trang sau -> mất đúng kiểu Quý 1-2/2024 bị thiếu trong
+# khi Quý 3/2024 trở về sau (mới hơn) vẫn thấy đủ. Sửa: truyền page:0,
+# size:200 giống hệt _JS_SEARCH — CHƯA tự xác nhận được là hết thiếu hẳn
+# hay chưa (không có mạng để tự tra cứu sống), cần người dùng thử lại.
 _JS_SEARCH_TDT = r"""
 var cb = arguments[arguments.length-1];
 var tu=arguments[0], den=arguments[1], cap=arguments[2];
@@ -3939,7 +3953,7 @@ try {
   }
   var csrf = getCookie('XSRF-TOKEN');
   $.ajax({ type:'POST', url:'/tthc/tchs/thuedientu', dataType:'html',
-    data:{ _csrf:csrf, page:'', size:'', maToKhai_tdt:'', maGiaoDichTthc_tdt:'',
+    data:{ _csrf:csrf, page:0, size:200, maToKhai_tdt:'', maGiaoDichTthc_tdt:'',
            tuNgay_tdt:tu, denNgay_tdt:den, scope_tdt2:'SELF', mstUyQuyen_tdt2:'', captcha:cap },
     headers:{ 'X-XSRF-TOKEN':csrf, 'HX-Request':'true', 'HX-Target':'bangKetQuaTraCuu_tdt',
               'HX-Current-URL': location.href },
