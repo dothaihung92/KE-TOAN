@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.300"
+APP_BUILD = "2026-09-18.301"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4002,78 +4002,37 @@ try {
 # việc ĐỌC LẠI từ trang, không phải tự tạo/đọc cookie. Đổi sang đọc từ
 # thẻ meta này (dự phòng đọc cookie nếu trang không có, phòng khi đoán
 # sai lần nữa vẫn còn cơ hội).
+# QUAY LẠI đúng bản GỐC (jQuery $.ajax(), KHÔNG có header CSRF thủ công
+# nào) — sau 4 vòng tự đoán/đọc header X-XSRF-TOKEN (từ cookie, rồi từ thẻ
+# <meta>) đều gây 403 Forbidden 100%, trong khi bản gốc này (không đụng gì
+# tới CSRF cả) đã từng tải được "gần như tất cả" hồ sơ thật trước đây.
+# Giả thuyết: khi jQuery nạp được, CHÍNH trang web tự gắn đúng header cần
+# thiết qua cơ chế nội bộ của nó (vd $.ajaxSetup/ajaxSend do site tự cấu
+# hình) — không cần (và không nên) tự set tay, vì giá trị thật sự cần gửi
+# không nằm ở cookie hay thẻ meta nào tìm được (đã xác nhận qua nhiều lần
+# đối chiếu request thật). Đổi ngược từ fetch() về $.ajax(), bỏ toàn bộ
+# header X-XSRF-TOKEN/X-Requested-With tự set.
 _JS_DOWNLOAD_TDT = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
 try {
-  function getCookie(name){
-    var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
-    return m ? decodeURIComponent(m[1]) : '';
-  }
-  var csrfSrc = 'cookie';
-  function getCsrf(){
-    var el = document.querySelector('meta[name="_csrf"]');
-    if (el) { var c = el.getAttribute('content'); if (c) { csrfSrc = 'meta'; return c; } }
-    return getCookie('XSRF-TOKEN');
-  }
-  var csrf = getCsrf();
-  fetch('/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX', {
-    method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf,
-               'X-Requested-With': 'XMLHttpRequest' },
-    body: body
-  }).then(function(r){
-    return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
-  }).then(function(r){
-    if (!r.ok) {
-      cb({ok:false, status:r.status, csrfSrc:csrfSrc, csrfLen:csrf.length,
-          csrfPre:csrf.slice(0,6), hasWebdriver: !!navigator.webdriver,
-          resp:r.text.slice(0,80)});
-      return;
-    }
-    var d; try { d = JSON.parse(r.text); } catch(e) { d = r.text; }
-    cb({ok:true, data:d});
-  }).catch(function(e){ cb({ok:false, err:''+e}); });
+  $.ajax({ type:'POST', url:'/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX',
+    contentType:'application/json', data: body,
+    success:function(d){ cb({ok:true, data:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
+  });
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
-# Thiếu header 'x-xsrf-token' + dùng fetch() thay $.ajax() y hệt
-# _JS_DOWNLOAD_TDT trước khi sửa (xem giải thích chi tiết ở đó, cùng
-# nguyên nhân/cùng cách sửa) — request thật bắt được qua DevTools lúc tải
-# Thông báo thành công cũng có header này. Token đọc từ thẻ <meta
-# name="_csrf"> của trang (dự phòng đọc cookie XSRF-TOKEN nếu không có).
 _JS_DOWNLOAD_TB = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
 try {
-  function getCookie(name){
-    var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
-    return m ? decodeURIComponent(m[1]) : '';
-  }
-  var csrfSrc = 'cookie';
-  function getCsrf(){
-    var el = document.querySelector('meta[name="_csrf"]');
-    if (el) { var c = el.getAttribute('content'); if (c) { csrfSrc = 'meta'; return c; } }
-    return getCookie('XSRF-TOKEN');
-  }
-  var csrf = getCsrf();
-  fetch('/tthc/tchs/downloadthongbao', {
-    method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf,
-               'X-Requested-With': 'XMLHttpRequest' },
-    body: body
-  }).then(function(r){
-    return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
-  }).then(function(r){
-    if (!r.ok) {
-      cb({ok:false, status:r.status, csrfSrc:csrfSrc, csrfLen:csrf.length,
-          csrfPre:csrf.slice(0,6), hasWebdriver: !!navigator.webdriver,
-          resp:r.text.slice(0,80)});
-      return;
-    }
-    var d; try { d = JSON.parse(r.text); } catch(e) { d = r.text; }
-    cb({ok:true, data:d});
-  }).catch(function(e){ cb({ok:false, err:''+e}); });
+  $.ajax({ type:'POST', url:'/tthc/tchs/downloadthongbao',
+    contentType:'application/json', data: body,
+    success:function(d){ cb({ok:true, data:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
+  });
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
@@ -4766,40 +4725,27 @@ def _dvc_browser_tracuu_tdt(drv, tu, den, so_lan=8):
 
 
 def _dvc_browser_download_tdt(drv, ma):
-    """Tải tờ khai từ tab "Thuế điện tử" — vào ĐÚNG trang chi tiết
-    (.../files/detail/{ma}?loai=ETAX) trước (để có đúng Referer — bắt
-    buộc, xem giải thích ở dưới) rồi gọi POST
-    /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX (endpoint đã xác nhận qua
-    request bắt được từ trình duyệt).
+    """Tải tờ khai từ tab "Thuế điện tử" — vào trang chi tiết (?loai=ETAX,
+    đúng đường dẫn xác nhận được từ request thật) trước để có đúng ngữ
+    cảnh/referer, rồi gọi POST /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX
+    (endpoint đã xác nhận qua request bắt được từ trình duyệt).
 
-    LỊCH SỬ SỬA LỖI tải file nguồn "thuế điện tử" — người dùng báo qua
-    NHIỀU vòng log thật:
-      1-3) Loay hoay quanh lỗi "$ is not defined" (jQuery chưa nạp) —
-         kiểm tra kết quả chờ, gộp bớt điều hướng, rồi bỏ hẳn điều hướng
-         (gọi thẳng từ /tchs) — nhưng gọi thẳng từ /tchs bị SERVER từ
-         chối rõ ràng: 500 "Tải hồ sơ thất bại" (khác lỗi client-side
-         "$ is not defined" — đã vượt qua bước nạp trang, chỉ thiếu gì
-         đó server yêu cầu).
-      4) Người dùng tự bắt request THẬT qua DevTools — phát hiện thiếu
-         header 'x-xsrf-token' (đã thêm, xem _JS_DOWNLOAD_TDT) VÀ Referer
-         phải đúng trang chi tiết (không giả được từ script khác trang)
-         — khôi phục điều hướng tới trang chi tiết. NHƯNG sau khi thêm
-         token, VẪN quay lại đúng lỗi "không nạp được jQuery" (thử tới 3
-         lần, 12 giây/lần) — xác nhận CHẮC CHẮN trang chi tiết hồ sơ
-         KHÔNG BAO GIỜ tự nạp xong jQuery qua drv.get(), không phải do
-         thiếu token hay mạng chậm.
-      5) (bản này) Đổi hẳn: KHÔNG cần jQuery nữa — _JS_DOWNLOAD_TDT giờ
-         dùng fetch() (API gốc mọi trình duyệt, luôn sẵn có ngay khi
-         trang load xong HTML, không phụ thuộc thư viện ngoài nào tải
-         được hay không). Chỉ cần ĐIỀU HƯỚNG tới đúng trang (để có đúng
-         Referer) và đợi trang load xong (document.readyState), KHÔNG
-         cần chờ/kiểm tra jQuery gì cả."""
+    QUAY LẠI đúng cách làm GỐC (dùng $.ajax() của jQuery, đợi jQuery nạp
+    trước khi gọi) — sau nhiều vòng sửa loanh quanh CSRF/fetch() (thử đọc
+    token từ cookie, rồi từ thẻ <meta>, rồi nghỉ lâu hơn giữa các lượt)
+    đều KHÔNG giải quyết được 403 Forbidden, người dùng chỉ ra bản GỐC này
+    (trước khi có bất kỳ sửa đổi nào ở trên) đã từng tải được "gần như tất
+    cả" hồ sơ thật. Nhiều khả năng khi jQuery nạp xong, CHÍNH trang web tự
+    gắn đúng header CSRF cần thiết qua cơ chế nội bộ (site tự cấu hình vd
+    $.ajaxSetup/ajaxSend) — việc tự đọc/set tay token (dù từ cookie hay
+    thẻ meta) đều sai vì giá trị thật không nằm ở 2 chỗ đó (đã xác nhận
+    qua nhiều lần đối chiếu request thật). Dùng lại $.ajax() để tận dụng
+    đúng cơ chế tự động này của trang, không tự đoán token nữa."""
     import time as _t
-    url_muon = f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX"
     try:
-        if (drv.current_url or "").rstrip("/") != url_muon.rstrip("/"):
-            drv.get(url_muon)
-            _t.sleep(1.0)
+        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
+        _t.sleep(1.0)
+        _dvc_wait_jquery(drv, 10)
     except Exception:
         pass
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
@@ -5598,18 +5544,12 @@ def _dvc_run_batch(batch_id, cids, body):
                     # cáo thật: hồ sơ GTGT Quý 1/2025 (nguồn TDT) có Thông báo
                     # trên cổng nhưng phần mềm báo "không tìm thấy".
                     _tb_loai = "ETAX"
-                    # Nghỉ giữa các lượt tải liên tiếp (nguồn Thuế điện tử):
-                    # log thật cho thấy tải hồ sơ ĐẦU TIÊN trong 1 lượt chạy
-                    # vẫn thành công bình thường (cùng cơ chế token/cookie),
-                    # nhưng các hồ sơ SAU ĐÓ trong CÙNG lượt chạy đó lại bị
-                    # 403 Forbidden liên tục — không phải do token sai chỗ
-                    # (đã xác nhận qua 2 vòng chẩn đoán CSRF không tìm ra chỗ
-                    # nào khác), mà giống dấu hiệu bị giới hạn tần suất/chặn
-                    # tạm thời khi gọi POST liên tiếp quá nhanh (trước đây
-                    # chỉ nghỉ 0.3s/hồ sơ — quá nhanh so với thao tác người
-                    # thật). Tăng lên nghỉ dài hơn CHỈ cho nguồn này (nguồn
-                    # DVC vẫn tải bình thường ở 0.3s, không đổi).
-                    _nghi_giua_tai = 3.0
+                    # Thử tăng thời gian nghỉ giữa các lượt tải liên tiếp lên
+                    # 3s (đoán do bị giới hạn tần suất) KHÔNG giải quyết được
+                    # 403 (log thật xác nhận độ trễ đã đúng ~3s/lượt nhưng vẫn
+                    # lỗi y hệt) — bỏ giả thuyết này, quay lại 0.3s như code
+                    # gốc (xem _dvc_browser_download_tdt: quay lại $.ajax()).
+                    _nghi_giua_tai = 0.3
                 else:
                     _tra_cuu_fn = _dvc_browser_tracuu
                     _tai_file_fn = _dvc_browser_download
