@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.299"
+APP_BUILD = "2026-09-18.300"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5598,12 +5598,25 @@ def _dvc_run_batch(batch_id, cids, body):
                     # cáo thật: hồ sơ GTGT Quý 1/2025 (nguồn TDT) có Thông báo
                     # trên cổng nhưng phần mềm báo "không tìm thấy".
                     _tb_loai = "ETAX"
+                    # Nghỉ giữa các lượt tải liên tiếp (nguồn Thuế điện tử):
+                    # log thật cho thấy tải hồ sơ ĐẦU TIÊN trong 1 lượt chạy
+                    # vẫn thành công bình thường (cùng cơ chế token/cookie),
+                    # nhưng các hồ sơ SAU ĐÓ trong CÙNG lượt chạy đó lại bị
+                    # 403 Forbidden liên tục — không phải do token sai chỗ
+                    # (đã xác nhận qua 2 vòng chẩn đoán CSRF không tìm ra chỗ
+                    # nào khác), mà giống dấu hiệu bị giới hạn tần suất/chặn
+                    # tạm thời khi gọi POST liên tiếp quá nhanh (trước đây
+                    # chỉ nghỉ 0.3s/hồ sơ — quá nhanh so với thao tác người
+                    # thật). Tăng lên nghỉ dài hơn CHỈ cho nguồn này (nguồn
+                    # DVC vẫn tải bình thường ở 0.3s, không đổi).
+                    _nghi_giua_tai = 3.0
                 else:
                     _tra_cuu_fn = _dvc_browser_tracuu
                     _tai_file_fn = _dvc_browser_download
                     _ten_file_fn = _ten_file_than_thien
                     nhan_nguon = "DVC (từ 01/07/2025)"
                     _tb_loai = ""
+                    _nghi_giua_tai = 0.3
                 # QUAN TRỌNG: ô tìm kiếm trên cổng lọc theo NGÀY NỘP HỒ SƠ, KHÔNG
                 # phải theo kỳ tính thuế của tờ khai (giống hệt vấn đề đã gặp và
                 # sửa ở _dvc_kiem_tra_da_nop_mot_loai) — tờ khai kỳ QUÝ luôn được
@@ -5780,7 +5793,7 @@ def _dvc_run_batch(batch_id, cids, body):
                                     _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), "API trả về rỗng (không có nội dung file)")
                             except Exception as e:
                                 _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), str(e))
-                            time.sleep(0.3)
+                            time.sleep(_nghi_giua_tai)
                         # Các hồ sơ có ĐỦ dữ liệu dòng (nằm trong rows_tho, biết rõ
                         # cột "Kỳ") nhưng KHÔNG khớp đúng kỳ đang tra cứu (tu, den)
                         # -> đây là tờ khai của KỲ KHÁC (vd nộp bổ sung/điều chỉnh
@@ -5817,7 +5830,7 @@ def _dvc_run_batch(batch_id, cids, body):
                                     _dvc_ghi_loi_tai(item, ma, "", "API trả về rỗng (không có nội dung file)")
                             except Exception as e:
                                 _dvc_ghi_loi_tai(item, ma, "", str(e))
-                            time.sleep(0.3)
+                            time.sleep(_nghi_giua_tai)
             item["chua_nop"] = not co_du_lieu_nguon_nao and not item.get("loi_tra_cuu")
 
             # ===== ĐỒNG BỘ tick "Tự động nộp tờ khai" (GTGT/TNCN) theo đúng
