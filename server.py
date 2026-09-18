@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.307"
+APP_BUILD = "2026-09-18.308"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4074,6 +4074,53 @@ def _dvc_qua_man_chon_loai_tk(drv, giay_cho=15):
     return False
 
 
+# Chẩn đoán qua Performance API (build .306) xác nhận DỨT KHOÁT: trang chi
+# tiết hồ sơ (.../files/detail/{ma}?loai=...) vào THẲNG bằng drv.get()
+# KHÔNG HỀ có thẻ <script> nào tải jQuery (the_script:[], tai_nguyen:[]) —
+# không phải tải CHẬM (đợi/thử lại bao lâu cũng vô ích, đúng như người
+# dùng xác nhận "không phải do thời gian chờ") mà ĐƠN GIẢN LÀ KHÔNG CÓ YÊU
+# CẦU TẢI jQuery khi vào thẳng link (chỉ tải khi điều hướng từ BÊN TRONG
+# ứng dụng qua router riêng, không phải hard navigation). Vậy hướng đúng
+# không phải chờ/thử lại nữa mà TỰ ĐƯA vào trang 1 bản $.ajax() tối giản
+# (không cần internet/CDN ngoài, không phụ thuộc trang web nguồn) — chỉ
+# cần đúng hành vi jQuery $.ajax() mà _JS_DOWNLOAD_TDT/_JS_DOWNLOAD_TB
+# đang dùng (POST JSON, tự động gắn 'X-Requested-With: XMLHttpRequest' —
+# đúng mặc định thật của jQuery, không phải fetch() vốn không tự gắn).
+_JS_DAM_BAO_JQUERY = r"""
+if (typeof window.$ === 'undefined' || typeof window.$.ajax !== 'function') {
+  window.jQuery = window.$ = {
+    ajax: function(opts) {
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open(opts.type || 'GET', opts.url, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        if (opts.contentType) xhr.setRequestHeader('Content-Type', opts.contentType);
+        xhr.onload = function() {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            var d; try { d = JSON.parse(xhr.responseText); } catch(e) { d = xhr.responseText; }
+            if (opts.success) opts.success(d);
+          } else if (opts.error) {
+            opts.error({status: xhr.status, responseText: xhr.responseText});
+          }
+        };
+        xhr.onerror = function() { if (opts.error) opts.error({status: 0, responseText: ''}); };
+        xhr.send(opts.data);
+      } catch(e) { if (opts.error) opts.error({status: 0, responseText: ''+e}); }
+    }
+  };
+}
+"""
+
+def _dvc_dam_bao_jquery(drv):
+    """Đưa $.ajax() tối giản vào trang nếu jQuery thật chưa có — xem
+    _JS_DAM_BAO_JQUERY. Gọi NGAY TRƯỚC khi execute_async_script() các khối
+    _JS_DOWNLOAD_TDT/_JS_DOWNLOAD_TB, thay cho việc chờ/thử lại jQuery thật
+    (đã xác nhận vô ích — trang không hề tải jQuery khi vào thẳng link)."""
+    try:
+        drv.execute_script(_JS_DAM_BAO_JQUERY)
+    except Exception:
+        pass
+
 def _dvc_wait_jquery(drv, giay=12):
     import time as _t
     for _ in range(int(giay*2)):
@@ -4085,44 +4132,6 @@ def _dvc_wait_jquery(drv, giay=12):
             pass
         _t.sleep(0.5)
     return False
-
-# Chẩn đoán VÌ SAO jQuery không nạp được — tăng số lần/thời gian thử lại
-# (3->5 lần, 10s->15s) KHÔNG giải quyết được (người dùng xác nhận: "vẫn
-# không tải được vậy không phải do thời gian chờ"), nên đây không phải
-# lỗi RACE CONDITION (chờ chưa đủ lâu) mà là lỗi THẬT SỰ không nạp được,
-# bất kể chờ bao lâu. Đọc Performance API để biết CHÍNH XÁC: có thẻ
-# <script> nào tham chiếu jquery trên trang không, request tải nó có xảy
-# ra không, và nếu có thì kết quả thế nào (transferSize=0 dù
-# duration>0 thường là dấu hiệu bị chặn/lỗi mạng, không phải tải chậm).
-_JS_CHAN_DOAN_JQUERY = r"""
-var out = {};
-try {
-  var scripts = Array.prototype.slice.call(document.scripts)
-    .map(function(s){ return s.src; })
-    .filter(function(s){ return /jquery/i.test(s); });
-  out.the_script = scripts;
-  var res = [];
-  try {
-    res = performance.getEntriesByType('resource')
-      .filter(function(r){ return /jquery/i.test(r.name); })
-      .map(function(r){
-        return {ten: r.name, thoi_gian: Math.round(r.duration),
-                kich_thuoc: r.transferSize, giao_thuc: r.nextHopProtocol || ''};
-      });
-  } catch(e) {}
-  out.tai_nguyen = res;
-  out.co_jquery = (typeof window.jQuery !== 'undefined');
-  out.trang_thai_trang = document.readyState;
-  out.url = location.href;
-} catch(e) { out.loi = ''+e; }
-return out;
-"""
-
-def _dvc_chan_doan_jquery(drv):
-    try:
-        return drv.execute_script(_JS_CHAN_DOAN_JQUERY)
-    except Exception as e:
-        return {"loi_chan_doan": str(e)}
 
 def _dvc_cap_from_js(res):
     """Từ kết quả _JS_GETCAPTCHA (PNG do trình duyệt vẽ từ canvas) → mã captcha."""
@@ -4275,20 +4284,22 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     TDT có Thông báo trên cổng nhưng gọi thiếu loai=ETAX báo 'không thấy').
 
     Đọc idTbao chỉ cần HTML render xong, không cần jQuery. Nhưng
-    _JS_DOWNLOAD_TB (tải file thông báo) đã quay lại dùng $.ajax() (xem
+    _JS_DOWNLOAD_TB (tải file thông báo) dùng $.ajax() (xem
     _dvc_browser_download_tdt — bản fetch() gây 403 Forbidden, quay lại
-    $.ajax() mới tải được) nên PHẢI đợi jQuery nạp xong trước khi gọi, nếu
-    có idTbao cần tải.
+    $.ajax() mới tải được), nên trước khi gọi cần đảm bảo $.ajax() tồn tại
+    — xem _dvc_dam_bao_jquery() (chẩn đoán Performance API xác nhận trang
+    chi tiết KHÔNG HỀ tự tải jQuery khi vào thẳng link, chờ/thử lại vô
+    ích, phải tự đưa vào).
 
     Người dùng nghi ngờ đúng: "tải nhiều tháng báo ko tìm thấy thông báo
     thuế là sẽ ko tải được file" — không tìm thấy idTbao (mục "Danh sách
     thông báo" render bằng JS SAU khi trang tải HTML xong) và không nạp
-    được jQuery (script riêng) RẤT CÓ THỂ cùng 1 nguyên nhân: trang chưa
-    kịp "khởi động" xong khung ứng dụng (SPA) ở lượt điều hướng đó, không
-    hẳn là CQT chưa phát hành thông báo. Tăng số lần/thời gian thử lại
-    (2 lần/1.5s -> 4 lần/2.5s) giống mức tăng đã áp dụng cho bước tải
-    file, và ghi kèm trạng thái jQuery lúc đó vào chẩn đoán để biết có
-    đúng cùng nguyên nhân hay không."""
+    được jQuery thật (script riêng) đều CÙNG 1 nguyên nhân gốc: trang
+    không tự tải thêm gì khi vào thẳng link (khác hẳn điều hướng từ bên
+    trong ứng dụng), không hẳn là CQT chưa phát hành thông báo. Tăng số
+    lần/thời gian thử lại đọc idTbao (2 lần/1.5s -> 4 lần/2.5s) và ghi
+    kèm trạng thái jQuery thật lúc đó vào chẩn đoán để biết có đúng cùng
+    nguyên nhân hay không."""
     import time as _t
     out, diag = [], []
     html = ""
@@ -4319,20 +4330,10 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
         diag.append(f"{ma}: không thấy idTbao (jQuery lúc đó: {'có' if co_jquery else 'KHÔNG'})"
                      + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
         return out, diag
-    # Có idTbao cần tải -> phải có jQuery cho $.ajax() (_JS_DOWNLOAD_TB) —
-    # thử lại tối đa 5 lần nếu chưa nạp xong (giống _dvc_browser_download_tdt,
-    # trang chi tiết đôi khi nạp jQuery chậm/flaky, không cố định — CÀNG DỄ
-    # xảy ra khi phiên trình duyệt đã chạy lâu, vd tra cứu/tải liên tục
-    # nhiều tháng, so với 1 lượt lẻ).
-    if not _dvc_wait_jquery(drv, 15):
-        for _lan in range(4):
-            try:
-                drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
-                _t.sleep(1.5)
-                if _dvc_wait_jquery(drv, 15):
-                    break
-            except Exception:
-                pass
+    # Có idTbao cần tải -> cần $.ajax() cho _JS_DOWNLOAD_TB. Trang không tự
+    # tải jQuery khi vào thẳng link (xác nhận qua chẩn đoán Performance
+    # API) nên tự đưa vào thay vì chờ/thử lại (đã xác nhận vô ích).
+    _dvc_dam_bao_jquery(drv)
     for idt in ids:
         body = json.dumps({"idTbao": idt, "loaiTBao": ""})
         try:
@@ -4800,41 +4801,30 @@ def _dvc_browser_download_tdt(drv, ma):
     cảnh/referer, rồi gọi POST /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX
     (endpoint đã xác nhận qua request bắt được từ trình duyệt).
 
-    QUAY LẠI đúng cách làm GỐC (dùng $.ajax() của jQuery, đợi jQuery nạp
-    trước khi gọi) — sau nhiều vòng sửa loanh quanh CSRF/fetch() (thử đọc
-    token từ cookie, rồi từ thẻ <meta>, rồi nghỉ lâu hơn giữa các lượt)
-    đều KHÔNG giải quyết được 403 Forbidden, người dùng chỉ ra bản GỐC này
-    (trước khi có bất kỳ sửa đổi nào ở trên) đã từng tải được "gần như tất
-    cả" hồ sơ thật. Nhiều khả năng khi jQuery nạp xong, CHÍNH trang web tự
-    gắn đúng header CSRF cần thiết qua cơ chế nội bộ (site tự cấu hình vd
-    $.ajaxSetup/ajaxSend) — việc tự đọc/set tay token (dù từ cookie hay
-    thẻ meta) đều sai vì giá trị thật không nằm ở 2 chỗ đó (đã xác nhận
-    qua nhiều lần đối chiếu request thật). Dùng lại $.ajax() để tận dụng
-    đúng cơ chế tự động này của trang, không tự đoán token nữa.
+    LỊCH SỬ: từng nghĩ lỗi "$ is not defined" là do jQuery nạp CHẬM (thử
+    chờ/thử lại nhiều vòng, tăng dần 3->5 lần/10->15s) nhưng người dùng
+    xác nhận KHÔNG cải thiện ("không phải do thời gian chờ"). Chẩn đoán
+    tạm thời qua Performance API (đã gỡ sau khi dùng xong — chỉ để tìm
+    nguyên nhân, không cần giữ lại trong code chạy thật) xác nhận DỨT
+    KHOÁT: trang chi tiết vào THẲNG bằng drv.get() KHÔNG HỀ có thẻ
+    <script> nào tải jQuery (the_script:[], tai_nguyen:[] cho CẢ 12/12
+    hồ sơ test) — không phải chờ chưa đủ lâu, mà ĐƠN GIẢN LÀ KHÔNG CÓ
+    YÊU CẦU TẢI jQuery khi vào thẳng link (chỉ tải khi điều hướng từ BÊN
+    TRONG ứng dụng qua router riêng).
 
-    Trang chi tiết hồ sơ THỈNH THOẢNG không nạp xong jQuery (lần đầu người
-    dùng test thành công 3/3, lần sau lại lỗi "$ is not defined" cả
-    12/12) — không phải lỗi cố định như tưởng trước đây mà là flaky (lúc
-    được lúc không). Người dùng test thêm: tra/tải 1 THÁNG lẻ luôn được,
-    chạy LIÊN TỤC 12 tháng lại lỗi hàng loạt ở bước tải — phiên trình
-    duyệt CÀNG CHẠY LÂU (nhiều lượt tra cứu/điều hướng trước đó) CÀNG DỄ
-    gặp lỗi nạp jQuery chậm, cần thử nhiều lần/lâu hơn để bù lại (tăng từ
-    3 lên 5 lần, mỗi lần đợi 15s thay vì 10s) so với bù chỉ 1 lượt lẻ.
-    THỬ LẠI (tải lại đúng trang, không đổi gì khác) tối đa 5 lần nếu
-    jQuery chưa nạp xong, thay vì chỉ đợi 1 lần rồi cứ thế gọi bừa (như
-    bản gốc) — tăng cơ hội thành công mà không quay lại phải tự đoán
-    CSRF."""
+    Sửa đúng gốc: TỰ ĐƯA vào trang 1 bản $.ajax() tối giản qua
+    _dvc_dam_bao_jquery() (xem _JS_DAM_BAO_JQUERY) — không cần chờ/thử
+    lại trang tự tải jQuery nữa (đã xác nhận vô ích), không cần đoán
+    CSRF (đúng hành vi $.ajax() gốc: tự gắn 'X-Requested-With', không tự
+    gắn X-XSRF-TOKEN — dựa vào cookie phiên + Referer đúng trang là đủ,
+    xác nhận qua nhiều lần đối chiếu request thật)."""
     import time as _t
-    jq_ok = False
-    for _lan in range(5):
-        try:
-            drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
-            _t.sleep(1.0)
-            if _dvc_wait_jquery(drv, 15):
-                jq_ok = True
-                break
-        except Exception:
-            pass
+    try:
+        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
+        _t.sleep(1.0)
+    except Exception:
+        pass
+    _dvc_dam_bao_jquery(drv)
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).
@@ -4842,14 +4832,6 @@ def _dvc_browser_download_tdt(drv, ma):
     body = '{"maHoSo":%s}' % ma_so
     res = drv.execute_async_script(_JS_DOWNLOAD_TDT, body)
     if not res or not res.get("ok"):
-        # Tăng số lần/thời gian thử lại KHÔNG giải quyết được (người dùng xác
-        # nhận: "vẫn không tải được vậy không phải do thời gian chờ") -> không
-        # phải race condition (chờ chưa đủ lâu) mà lỗi THẬT SỰ không nạp
-        # được, bất kể chờ bao lâu — đính kèm chẩn đoán Performance API để
-        # biết CHÍNH XÁC vì sao (có request tải jquery.js không, có bị chặn/
-        # lỗi mạng không) thay vì tiếp tục đoán mù thêm 1 vòng chờ nữa.
-        if not jq_ok:
-            res = dict(res or {}); res["chan_doan_jquery"] = _dvc_chan_doan_jquery(drv)
         raise Exception(f"{res}")
     d = _dvc_norm_data(res.get("data"))
     if not isinstance(d, dict):

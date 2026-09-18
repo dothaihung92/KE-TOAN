@@ -56,12 +56,15 @@ for ten, khoi in (('_JS_DOWNLOAD_TDT', khoi_download_tdt), ('_JS_DOWNLOAD_TB', k
     assert 'X-Requested-With' not in khoi, f"{ten} không được tự set header X-Requested-With (bản gốc không có)."
 print("PASS 1: cả _JS_DOWNLOAD_TDT và _JS_DOWNLOAD_TB đều quay lại $.ajax() thuần, không tự set header CSRF.")
 
-# ===== Test 2 (không hồi quy): _dvc_browser_download_tdt() phải gọi lại
-# _dvc_wait_jquery() trước khi gọi tải — đúng bản gốc (chờ jQuery nạp,
-# dùng $.ajax() cần jQuery). =====
-assert '_dvc_wait_jquery' in than_download_tdt, (
-    "_dvc_browser_download_tdt() phải gọi _dvc_wait_jquery() trước khi tải — bản $.ajax() cần jQuery "
-    "đã nạp xong, khác bản fetch() (không cần) vừa bỏ.")
-print("PASS 2: _dvc_browser_download_tdt() gọi _dvc_wait_jquery() trước khi tải — đúng bản gốc.")
+# ===== Test 2 (không hồi quy, cập nhật sau khi xác nhận trang không hề tự
+# tải jQuery khi vào thẳng link — xem test_tu_dua_jquery_polyfill_tdt.py):
+# _dvc_browser_download_tdt() phải đảm bảo có $.ajax() qua
+# _dvc_dam_bao_jquery() trước khi gọi tải, KHÔNG còn chờ trang tự tải
+# jQuery thật (_dvc_wait_jquery) nữa — đã xác nhận vô ích. =====
+assert '_dvc_dam_bao_jquery' in than_download_tdt, (
+    "_dvc_browser_download_tdt() phải gọi _dvc_dam_bao_jquery() để tự đưa $.ajax() vào trang trước "
+    "khi tải — trang không hề tự tải jQuery khi vào thẳng link (xác nhận qua chẩn đoán Performance "
+    "API), chờ/thử lại (_dvc_wait_jquery) không còn cần thiết.")
+print("PASS 2: _dvc_browser_download_tdt() gọi _dvc_dam_bao_jquery() trước khi tải.")
 
 print("\nALL DONE")
