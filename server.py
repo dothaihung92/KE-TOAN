@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.303"
+APP_BUILD = "2026-09-18.304"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4236,12 +4236,11 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     báo thật sự tồn tại trên cổng (đã xác nhận qua báo cáo thật: hồ sơ nguồn
     TDT có Thông báo trên cổng nhưng gọi thiếu loai=ETAX báo 'không thấy').
 
-    KHÔNG còn chờ/kiểm tra jQuery — xác nhận qua nhiều vòng chẩn đoán thật
-    (xem _dvc_browser_download_tdt): trang chi tiết hồ sơ KHÔNG BAO GIỜ tự
-    nạp xong jQuery qua drv.get(), nhưng _JS_DOWNLOAD_TB (tải file thông
-    báo) giờ dùng fetch() nên KHÔNG cần jQuery nữa — chỉ cần đợi TRANG (HTML
-    thật, để đọc idTbao) render xong, không liên quan gì đến việc thư viện
-    jQuery có tải được hay không."""
+    Đọc idTbao chỉ cần HTML render xong, không cần jQuery. Nhưng
+    _JS_DOWNLOAD_TB (tải file thông báo) đã quay lại dùng $.ajax() (xem
+    _dvc_browser_download_tdt — bản fetch() gây 403 Forbidden, quay lại
+    $.ajax() mới tải được) nên PHẢI đợi jQuery nạp xong trước khi gọi, nếu
+    có idTbao cần tải."""
     import time as _t
     out, diag = [], []
     html = ""
@@ -4263,6 +4262,18 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
         m = _re.search(r'.{0,40}(?:hongBao|hong báo|Tbao).{0,40}', html)
         diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
         return out, diag
+    # Có idTbao cần tải -> phải có jQuery cho $.ajax() (_JS_DOWNLOAD_TB) —
+    # thử lại tối đa 3 lần nếu chưa nạp xong (giống _dvc_browser_download_tdt,
+    # trang chi tiết đôi khi nạp jQuery chậm/flaky, không cố định).
+    if not _dvc_wait_jquery(drv, 10):
+        for _lan in range(2):
+            try:
+                drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
+                _t.sleep(1.5)
+                if _dvc_wait_jquery(drv, 10):
+                    break
+            except Exception:
+                pass
     for idt in ids:
         body = json.dumps({"idTbao": idt, "loaiTBao": ""})
         try:
@@ -4740,14 +4751,24 @@ def _dvc_browser_download_tdt(drv, ma):
     $.ajaxSetup/ajaxSend) — việc tự đọc/set tay token (dù từ cookie hay
     thẻ meta) đều sai vì giá trị thật không nằm ở 2 chỗ đó (đã xác nhận
     qua nhiều lần đối chiếu request thật). Dùng lại $.ajax() để tận dụng
-    đúng cơ chế tự động này của trang, không tự đoán token nữa."""
+    đúng cơ chế tự động này của trang, không tự đoán token nữa.
+
+    Trang chi tiết hồ sơ THỈNH THOẢNG không nạp xong jQuery (lần đầu người
+    dùng test thành công 3/3, lần sau lại lỗi "$ is not defined" cả
+    12/12) — không phải lỗi cố định như tưởng trước đây mà là flaky (lúc
+    được lúc không). THỬ LẠI (tải lại đúng trang, không đổi gì khác) tối
+    đa 3 lần nếu jQuery chưa nạp xong, thay vì chỉ đợi 1 lần rồi cứ thế
+    gọi bừa (như bản gốc) — tăng cơ hội thành công mà không quay lại phải
+    tự đoán CSRF."""
     import time as _t
-    try:
-        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
-        _t.sleep(1.0)
-        _dvc_wait_jquery(drv, 10)
-    except Exception:
-        pass
+    for _lan in range(3):
+        try:
+            drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
+            _t.sleep(1.0)
+            if _dvc_wait_jquery(drv, 10):
+                break
+        except Exception:
+            pass
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).
