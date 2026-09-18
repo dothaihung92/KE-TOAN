@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.298"
+APP_BUILD = "2026-09-18.299"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4010,9 +4010,10 @@ try {
     var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : '';
   }
+  var csrfSrc = 'cookie';
   function getCsrf(){
     var el = document.querySelector('meta[name="_csrf"]');
-    if (el) { var c = el.getAttribute('content'); if (c) return c; }
+    if (el) { var c = el.getAttribute('content'); if (c) { csrfSrc = 'meta'; return c; } }
     return getCookie('XSRF-TOKEN');
   }
   var csrf = getCsrf();
@@ -4024,7 +4025,12 @@ try {
   }).then(function(r){
     return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
   }).then(function(r){
-    if (!r.ok) { cb({ok:false, status:r.status, resp:r.text.slice(0,200)}); return; }
+    if (!r.ok) {
+      cb({ok:false, status:r.status, csrfSrc:csrfSrc, csrfLen:csrf.length,
+          csrfPre:csrf.slice(0,6), hasWebdriver: !!navigator.webdriver,
+          resp:r.text.slice(0,80)});
+      return;
+    }
     var d; try { d = JSON.parse(r.text); } catch(e) { d = r.text; }
     cb({ok:true, data:d});
   }).catch(function(e){ cb({ok:false, err:''+e}); });
@@ -4044,9 +4050,10 @@ try {
     var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : '';
   }
+  var csrfSrc = 'cookie';
   function getCsrf(){
     var el = document.querySelector('meta[name="_csrf"]');
-    if (el) { var c = el.getAttribute('content'); if (c) return c; }
+    if (el) { var c = el.getAttribute('content'); if (c) { csrfSrc = 'meta'; return c; } }
     return getCookie('XSRF-TOKEN');
   }
   var csrf = getCsrf();
@@ -4058,7 +4065,12 @@ try {
   }).then(function(r){
     return r.text().then(function(t){ return {ok:r.ok, status:r.status, text:t}; });
   }).then(function(r){
-    if (!r.ok) { cb({ok:false, status:r.status, resp:r.text.slice(0,200)}); return; }
+    if (!r.ok) {
+      cb({ok:false, status:r.status, csrfSrc:csrfSrc, csrfLen:csrf.length,
+          csrfPre:csrf.slice(0,6), hasWebdriver: !!navigator.webdriver,
+          resp:r.text.slice(0,80)});
+      return;
+    }
     var d; try { d = JSON.parse(r.text); } catch(e) { d = r.text; }
     cb({ok:true, data:d});
   }).catch(function(e){ cb({ok:false, err:''+e}); });
@@ -5477,7 +5489,7 @@ def _dvc_ghi_loi_tai(item, ma, to_khai, loi):
     item["so_loi_tai"] = item.get("so_loi_tai", 0) + 1
     mau = item.setdefault("loi_tai_mau", [])
     if len(mau) < _DVC_LOI_TAI_TOI_DA:
-        mau.append({"ma": str(ma or "")[:30], "to_khai": str(to_khai or "")[:80], "loi": str(loi or "")[:200]})
+        mau.append({"ma": str(ma or "")[:30], "to_khai": str(to_khai or "")[:80], "loi": str(loi or "")[:350]})
 
 
 def _dvc_run_batch(batch_id, cids, body):
