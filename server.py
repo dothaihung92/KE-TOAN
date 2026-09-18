@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.297"
+APP_BUILD = "2026-09-18.298"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3991,13 +3991,17 @@ try {
 # bất kỳ thư viện ngoài nào) có tải được hay không — né hẳn được vấn đề
 # chờ jQuery đã bế tắc suốt 4 vòng sửa trước.
 #
-# Đổi sang fetch() rồi vẫn lỗi — nhưng lần này là 403 Forbidden RÕ RÀNG từ
-# server (khác hẳn lỗi client-side trước đó — xác nhận request ĐÃ gửi đi
-# đúng, chỉ còn thiếu quyền). Nhìn lại đúng request thật đã bắt trước đó
-# (Copy Request Headers) mới để ý sót 1 header nữa: 'x-requested-with:
-# XMLHttpRequest' — jQuery TỰ ĐỘNG thêm header này cho mọi request AJAX
-# (đó là lý do trước đây dùng $.ajax() không cần khai báo tay), nhưng
-# fetch() KHÔNG tự thêm — phải khai báo thủ công.
+# Đổi sang fetch() + thêm X-Requested-With rồi vẫn lỗi y hệt: 403
+# Forbidden. Soi kỹ lại chính request thật đã bắt trước đó mới nhận ra:
+# giá trị header 'x-xsrf-token' KHÁC HẲN giá trị cookie 'XSRF-TOKEN' (2
+# chuỗi hoàn toàn khác nhau, không phải cùng 1 giá trị copy qua) — nghĩa
+# là token gửi trong header KHÔNG đọc từ cookie (khác hẳn _JS_SEARCH_TDT
+# — endpoint tìm kiếm khác, có thể dùng cơ chế CSRF khác). Đây là mẫu
+# CSRF rất phổ biến ở ứng dụng Spring+Thymeleaf: token được máy chủ nhúng
+# SẴN vào chính trang HTML lúc render (thẻ <meta name="_csrf">), JS chỉ
+# việc ĐỌC LẠI từ trang, không phải tự tạo/đọc cookie. Đổi sang đọc từ
+# thẻ meta này (dự phòng đọc cookie nếu trang không có, phòng khi đoán
+# sai lần nữa vẫn còn cơ hội).
 _JS_DOWNLOAD_TDT = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
@@ -4006,7 +4010,12 @@ try {
     var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : '';
   }
-  var csrf = getCookie('XSRF-TOKEN');
+  function getCsrf(){
+    var el = document.querySelector('meta[name="_csrf"]');
+    if (el) { var c = el.getAttribute('content'); if (c) return c; }
+    return getCookie('XSRF-TOKEN');
+  }
+  var csrf = getCsrf();
   fetch('/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX', {
     method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf,
@@ -4025,7 +4034,8 @@ try {
 # Thiếu header 'x-xsrf-token' + dùng fetch() thay $.ajax() y hệt
 # _JS_DOWNLOAD_TDT trước khi sửa (xem giải thích chi tiết ở đó, cùng
 # nguyên nhân/cùng cách sửa) — request thật bắt được qua DevTools lúc tải
-# Thông báo thành công cũng có header này.
+# Thông báo thành công cũng có header này. Token đọc từ thẻ <meta
+# name="_csrf"> của trang (dự phòng đọc cookie XSRF-TOKEN nếu không có).
 _JS_DOWNLOAD_TB = r"""
 var cb = arguments[arguments.length-1];
 var body = arguments[0];
@@ -4034,7 +4044,12 @@ try {
     var m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
     return m ? decodeURIComponent(m[1]) : '';
   }
-  var csrf = getCookie('XSRF-TOKEN');
+  function getCsrf(){
+    var el = document.querySelector('meta[name="_csrf"]');
+    if (el) { var c = el.getAttribute('content'); if (c) return c; }
+    return getCookie('XSRF-TOKEN');
+  }
+  var csrf = getCsrf();
   fetch('/tthc/tchs/downloadthongbao', {
     method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': csrf,
