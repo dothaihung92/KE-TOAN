@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.286"
+APP_BUILD = "2026-09-18.287"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5503,7 +5503,16 @@ def _dvc_run_batch(batch_id, cids, body):
                     cac_doan = [(tu_tim, den_tim)]
                 rows_tho, ma_list, sdiag = [], [], []
                 raw_html = ""
-                for tu_doan, den_doan in cac_doan:
+                # Chia nhiều đoạn (khoảng ngày rộng) có thể tốn KHÁ LÂU (mỗi
+                # đoạn cần giải 1 captcha riêng) — cập nhật trang_thái LIÊN
+                # TỤC theo từng đoạn đang tra để khung tiến độ không đứng yên
+                # 1 chỗ suốt cả quá trình (người dùng báo "cứ treo không biết
+                # đã xong chưa" khi thấy mãi vẫn "đang xử lý" không đổi gì).
+                for _idx_doan, (tu_doan, den_doan) in enumerate(cac_doan, 1):
+                    if len(cac_doan) > 1:
+                        item["trang_thai"] = (
+                            f"đang tra cứu {nhan_nguon}: tháng {tu_doan[3:]} "
+                            f"({_idx_doan}/{len(cac_doan)})")
                     try:
                         r_tho, r_ma, r_html, r_diag = _tra_cuu_fn(drv, tu_doan, den_doan)
                     except Exception as e:
