@@ -5828,6 +5828,30 @@ function ConfirmScreen({
     const t = setTimeout(() => setJumpTargetRowId(cur => (cur === jumpTargetRowId ? null : cur)), 6000);
     return () => clearTimeout(t);
   }, [jumpTargetRowId]);
+  // Cuộn TỚI ĐÚNG dòng vừa nhảy tới — dò TRỰC TIẾP theo data-row-id (không dựa vào focusIdx/thứ tự
+  // DOM như hiệu ứng điều hướng bàn phím keyboardNavRef bên dưới, vì đổi filter/tab ngay trước đó có
+  // thể làm danh sách dòng render lại (key="list_"+filter) đúng lúc effect kia chạy, khiến index bị
+  // lệch nhịp — nhìn như phần mềm "kéo về chưa đúng giao dịch" dù thật ra chỉ là querySelectorAll
+  // theo INDEX tính sai thời điểm). Thử lại vài lần (tối đa ~2s) vì có thể DOM chưa kịp vẽ xong dòng
+  // đó ngay lượt render đầu (showCount/rows vừa cập nhật).
+  React.useEffect(() => {
+    if (!jumpTargetRowId) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (cancelled) return;
+      const sel = '[data-row-id="' + String(jumpTargetRowId).replace(/"/g, '\\"') + '"]';
+      const el = listRef.current && listRef.current.querySelector(sel);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
+      attempts++;
+      if (attempts < 20) setTimeout(tryScroll, 100);
+    };
+    tryScroll();
+    return () => { cancelled = true; };
+  }, [jumpTargetRowId]);
   // Dò lại accountId thật cho payment CŨ (accountId===undefined, gắn từ trước khi có tính năng này)
   // bằng cách quét hết sao kê đã lưu của công ty — xem giải thích ở timAccountIdTheoRowIdCu.
   const resolveOldAccountId = rowId => {
@@ -8608,6 +8632,7 @@ function ConfirmRow({
 
   return /*#__PURE__*/React.createElement("div", {
     "data-row": "1",
+    "data-row-id": String(r.id),
     onClick: e => {
       onFocus();
       // Nhấn vào vùng trống của dòng (không phải nút/ô nhập) cũng chọn luôn để xác nhận hàng loạt,

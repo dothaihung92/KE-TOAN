@@ -101,4 +101,24 @@ assert(/Đặt cọc — chờ tờ khai/.test(tbodyBlock.src),
   'Số/Ngày tờ khai thật sau này (nếu không, dòng chưa hoàn tất dễ bị bỏ quên lẫn trong danh sách).');
 console.log('PASS 5: dòng tờ khai placeholder (đặt cọc trước khi có tờ khai) được đánh dấu rõ trong bảng.');
 
+// ===== Phần 6 (QUAN TRỌNG — ĐÚNG CA THẬT người dùng báo TIẾP: "vẫn chưa hiện đúng giao dịch trên
+// màn hình" dù ô "Dòng X/Y" đã nhảy đúng vị trí): cuộn tới dòng đích phải dò TRỰC TIẾP theo
+// data-row-id, KHÔNG được dựa vào querySelectorAll(...)[focusIdx] theo index — cách cũ dễ lệch nhịp
+// khi đổi filter/tab ngay trước đó làm danh sách render lại đúng lúc effect chạy (key="list_"+filter
+// đổi -> remount), khiến index tính sai thời điểm dù focusIdx/jumpTargetRowId đã đúng ID. =====
+assert(/"data-row-id":\s*String\(r\.id\)/.test(html),
+  'Mỗi dòng giao dịch phải có data-row-id = r.id để dò/cuộn tới ĐÚNG dòng bằng ID thay vì suy theo ' +
+  'vị trí (index) dễ lệch nhịp khi danh sách vừa render lại do đổi filter/tab.');
+const scrollByIdEffect = braceBlockOf('React.useEffect(() => {\n    if (!jumpTargetRowId) return;\n    let cancelled = false;');
+assert(/data-row-id="\s*'\s*\+\s*String\(jumpTargetRowId\)/.test(scrollByIdEffect.src) ||
+       /'\[data-row-id="'\s*\+\s*String\(jumpTargetRowId\)/.test(scrollByIdEffect.src),
+  'Phải dò phần tử DOM của dòng đích bằng querySelector([data-row-id="<jumpTargetRowId>"]) — cuộn theo ' +
+  'ID chắc chắn đúng dòng, không phụ thuộc thứ tự DOM tại đúng thời điểm effect chạy.');
+assert(/scrollIntoView\(/.test(scrollByIdEffect.src),
+  'Phải gọi scrollIntoView() lên đúng phần tử tìm được theo data-row-id.');
+assert(/setTimeout\(tryScroll,\s*100\)/.test(scrollByIdEffect.src) && /attempts\s*<\s*20/.test(scrollByIdEffect.src),
+  'Phải thử lại nhiều lần (vòng lặp hẹn giờ, tối đa ~2s) trước khi bỏ cuộc — dòng đích có thể chưa kịp ' +
+  'vẽ ra DOM ngay lượt render đầu tiên (showCount/rows vừa cập nhật xong).');
+console.log('PASS 6: cuộn tới dòng đích dò trực tiếp theo data-row-id (có thử lại), không còn lệ thuộc index dễ lệch nhịp.');
+
 console.log('\nALL DONE');
