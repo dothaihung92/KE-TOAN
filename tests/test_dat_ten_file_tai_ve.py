@@ -69,7 +69,7 @@ assert loai("TỜ KHAI QUYẾT TOÁN THUẾ THU NHẬP CÁ NHÂN (TT80/2021)") !
 print("PASS 3: tờ khai quyết toán không bị gộp nhầm vào mã chung.")
 
 # ---------- 2) Tên file Thông báo ----------
-ns2 = _nap('_khong_dau', '_doc_chu_trong_file_tai_ve', '_hau_to_ten_thong_bao')
+ns2 = _nap('_khong_dau', '_giai_ma_chu', '_doc_chu_trong_file_tai_ve', '_hau_to_ten_thong_bao')
 hau_to = ns2['_hau_to_ten_thong_bao']
 
 # ===== Test 4 (QUAN TRỌNG — đúng yêu cầu): đặt tên theo đúng loại thông
@@ -99,6 +99,31 @@ assert hau_to(buf.getvalue()) == "_TB_CHAPNHAN", "Phải đọc được nội d
 assert hau_to(_xml("Giấy nộp tiền")) == "", "Không nhận ra loại thì phải trả rỗng (dùng tên chung)."
 assert hau_to(b"") == "", "Nội dung rỗng không được làm chết lượt tải."
 print("PASS 6: đọc được file nén; không nhận ra thì trả rỗng, không ném lỗi.")
+
+# ===== Test 6b (ĐÚNG CA THẬT người dùng báo): thông báo THỨ HAI (chấp
+# nhận/từ chối) vẫn rơi về tên chung _ThongBao2. 3 nguyên nhân đã tái
+# hiện được, phải xử lý hết: =====
+# (a) chữ bị CẮT NGANG bởi thẻ XML -> phải bỏ thẻ rồi mới dò
+assert hau_to('<tieuDe>TB về việc <b>chấp</b> <b>nhận</b> hồ sơ khai thuế điện tử</tieuDe>'
+              .encode('utf-8')) == "_TB_CHAPNHAN", (
+    "Chữ bị cắt ngang bởi thẻ XML ('<b>chấp</b> <b>nhận</b>') vẫn phải nhận ra — giữ nguyên thẻ thì "
+    "cụm 'chấp nhận' không bao giờ khớp, đúng lỗi thông báo thứ 2 luôn về tên chung.")
+# (b) file KHÔNG phải UTF-8 (gặp cả UTF-16) -> ép UTF-8 sẽ ra chuỗi rác
+assert hau_to('<tieuDe>Thông báo về việc chấp nhận hồ sơ khai thuế</tieuDe>'
+              .encode('utf-16')) == "_TB_CHAPNHAN", (
+    "File mã hoá UTF-16 vẫn phải đọc được — ép UTF-8 cho file UTF-16 ra chuỗi rác, dò gì cũng trượt.")
+# (c) BẪY NGUY HIỂM: tiêu đề mẫu ghi GỘP "chấp nhận/không chấp nhận";
+#     kết quả thật nằm ở phần nội dung. Gắn nhầm nhãn TỪ CHỐI cho hồ sơ
+#     ĐÃ ĐƯỢC CHẤP NHẬN là sai nghiêm trọng.
+tieu_de_gop = '<tieuDe>TB về việc chấp nhận/không chấp nhận hồ sơ khai thuế điện tử</tieuDe>'
+assert hau_to((tieu_de_gop + '<noiDung>Hồ sơ khai thuế điện tử của quý đơn vị đã được chấp nhận'
+               '</noiDung>').encode('utf-8')) == "_TB_CHAPNHAN", (
+    "Tiêu đề mẫu ghi gộp 'chấp nhận/không chấp nhận' nhưng nội dung ghi ĐÃ ĐƯỢC CHẤP NHẬN thì phải "
+    "ra _TB_CHAPNHAN — chỉ dò tiêu đề sẽ gắn nhầm thành từ chối.")
+assert hau_to((tieu_de_gop + '<noiDung>Hồ sơ không được chấp nhận. Lý do không chấp nhận: sai mẫu'
+               '</noiDung>').encode('utf-8')) == "_TB_TUCHOI", (
+    "Cùng tiêu đề gộp đó nhưng nội dung ghi KHÔNG ĐƯỢC CHẤP NHẬN thì phải ra _TB_TUCHOI.")
+print("PASS 6b: xử lý đúng cả 3 ca thật — chữ bị cắt bởi thẻ, file UTF-16, và tiêu đề ghi gộp.")
 
 # ===== Test 7 (nguồn): nơi lưu file Thông báo phải dùng hậu tố này. =====
 i = src.index('def _dvc_run_batch(')

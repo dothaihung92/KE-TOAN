@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.316"
+APP_BUILD = "2026-09-19.317"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6099,9 +6099,33 @@ def _dvc_run_batch(batch_id, cids, body):
     job["running"] = False
     job["current"] = None
 
+def _giai_ma_chu(b, gioi_han=400000):
+    """Đọc bytes ra chữ, thử lần lượt các bảng mã hay gặp. File Thông báo
+    của cổng Thuế không phải lúc nào cũng UTF-8 (gặp cả UTF-16); ép UTF-8
+    cho file UTF-16 sẽ ra chuỗi rác, dò từ khoá không bao giờ khớp."""
+    b = b[:gioi_han]
+    if b[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return b.decode("utf-16")
+        except Exception:
+            pass
+    for bang_ma in ("utf-8-sig", "utf-8", "utf-16", "cp1258"):
+        try:
+            return b.decode(bang_ma)
+        except Exception:
+            continue
+    return b.decode("utf-8", "ignore")
+
+
 def _doc_chu_trong_file_tai_ve(raw, gioi_han=400000):
     """Lấy phần CHỮ trong file vừa tải (không dấu, viết thường) để dò từ
-    khoá. File Thông báo có thể là XML thuần hoặc nằm trong file nén."""
+    khoá. File Thông báo có thể là XML thuần hoặc nằm trong file nén.
+
+    PHẢI BỎ THẺ XML rồi mới dò: chữ trong file thật hay bị cắt ngang bởi
+    thẻ (vd "<b>chấp</b> <b>nhận</b>"), giữ nguyên thẻ thì cụm "chấp nhận"
+    không bao giờ khớp — đúng lỗi thật: thông báo thứ 2 (chấp nhận/từ
+    chối) luôn rơi về tên chung _ThongBao2."""
+    import re as _re
     try:
         if raw[:2] == b"PK":
             import io as _io
@@ -6110,14 +6134,17 @@ def _doc_chu_trong_file_tai_ve(raw, gioi_han=400000):
             with _zip.ZipFile(_io.BytesIO(raw)) as z:
                 for ten in z.namelist()[:20]:
                     try:
-                        phan.append(z.read(ten)[:gioi_han].decode("utf-8", "ignore"))
+                        phan.append(_giai_ma_chu(z.read(ten), gioi_han))
                     except Exception:
                         pass
             chu = " ".join(phan)
         else:
-            chu = raw[:gioi_han].decode("utf-8", "ignore")
+            chu = _giai_ma_chu(raw, gioi_han)
     except Exception:
         return ""
+    chu = _re.sub(r"<[^>]*>", " ", chu)          # bỏ thẻ XML/HTML
+    chu = chu.replace("&nbsp;", " ")
+    chu = _re.sub(r"\s+", " ", chu)              # gộp khoảng trắng/xuống dòng
     return _khong_dau(chu)
 
 
@@ -6127,14 +6154,39 @@ def _hau_to_ten_thong_bao(raw):
       _TB_CHAPNHAN — đã chấp nhận hồ sơ khai thuế điện tử
       _TB_TIEPNHAN — mới chỉ tiếp nhận (chưa xét duyệt)
     Trả "" nếu không nhận ra để nơi gọi dùng tên chung như trước.
-    THỨ TỰ KIỂM TRA QUAN TRỌNG: "không chấp nhận" phải xét TRƯỚC "chấp
-    nhận", nếu không thông báo từ chối sẽ bị đặt nhầm thành chấp nhận."""
+
+    THỨ TỰ XÉT CỰC KỲ QUAN TRỌNG, có 2 cái bẫy:
+      1) "không chấp nhận" CHỨA "chấp nhận" -> phải xét cái phủ định
+         TRƯỚC, nếu không hồ sơ bị từ chối lại được đặt tên chấp nhận.
+      2) TIÊU ĐỀ MẪU của thông báo thường ghi GỘP cả hai khả năng:
+         "Thông báo về việc chấp nhận/không chấp nhận hồ sơ khai thuế
+         điện tử" — chỉ dò tiêu đề thì hồ sơ ĐƯỢC CHẤP NHẬN vẫn dính chữ
+         "không chấp nhận" và bị gắn nhãn TỪ CHỐI (sai nguy hiểm: người
+         dùng tưởng bị từ chối trong khi đã nộp thành công). Vì vậy phải
+         ưu tiên các cụm nằm trong PHẦN NỘI DUNG nêu kết quả thật ("đã
+         được chấp nhận" / "không được chấp nhận" / "lý do không chấp
+         nhận") trước các cụm chung chung của tiêu đề."""
     chu = _doc_chu_trong_file_tai_ve(raw)
     if not chu:
         return ""
-    if "khong chap nhan" in chu or "tu choi" in chu:
+    if "tu choi" in chu:
         return "_TB_TUCHOI"
-    if "chap nhan" in chu:
+    # KHỬ hẳn các câu PHỦ ĐỊNH trước rồi mới dò cụm khẳng định: mọi cụm
+    # khẳng định ("chấp nhận hồ sơ", "được chấp nhận") đều nằm SẴN BÊN
+    # TRONG câu phủ định ("KHÔNG chấp nhận hồ sơ") nên dò thẳng sẽ luôn
+    # khớp nhầm thành chấp nhận.
+    chu_bo_am = chu
+    for cum_am in ("khong duoc chap nhan", "ly do khong chap nhan", "khong chap nhan"):
+        chu_bo_am = chu_bo_am.replace(cum_am, " ")
+    co_cau_phu_dinh = chu_bo_am != chu
+    # Phần còn lại mà vẫn nêu kết quả chấp nhận -> đúng là ĐÃ CHẤP NHẬN
+    # (kể cả khi tiêu đề mẫu ghi gộp "chấp nhận/không chấp nhận").
+    if any(c in chu_bo_am for c in ("duoc chap nhan", "da chap nhan",
+                                    "chap nhan ho so", "chap thuan")):
+        return "_TB_CHAPNHAN"
+    if co_cau_phu_dinh:
+        return "_TB_TUCHOI"
+    if "chap nhan" in chu_bo_am:
         return "_TB_CHAPNHAN"
     if "tiep nhan" in chu:
         return "_TB_TIEPNHAN"
