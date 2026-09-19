@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.314"
+APP_BUILD = "2026-09-19.315"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4311,6 +4311,18 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
         # window.jQuery, nên tin vào nó để rẽ nhánh là SAI.
         _dvc_wait_jquery(drv, 10)
         html = drv.page_source or ""
+        # ĐỢI ĐÚNG THỨ CẦN: mục "Danh sách thông báo" do chính script của
+        # trang gọi thêm rồi mới vẽ ra, XONG SAU cả lúc jQuery đã sẵn sàng.
+        # Đọc trang ngay lúc jQuery vừa có (thường chỉ 1-2 giây) thì mục này
+        # chưa kịp hiện -> dò không thấy mã thông báo nào -> kết luận nhầm
+        # "CQT chưa phát hành". Ảnh chụp trang thật của người dùng xác nhận
+        # mục này CÓ TỒN TẠI. Nên đọc lại trang nhiều lần cho tới khi dò
+        # được mã thông báo, tối đa ~8 giây rồi mới chịu thua.
+        for _ in range(16):
+            if _dvc_parse_id_tbao(html, ma):
+                break
+            _t.sleep(0.5)
+            html = drv.page_source or ""
     except Exception as e:
         return out, [f"lỗi mở chi tiết {ma}: {e}"]
     ids = _dvc_parse_id_tbao(html, ma)
