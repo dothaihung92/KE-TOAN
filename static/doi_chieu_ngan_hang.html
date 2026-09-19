@@ -786,6 +786,16 @@ function computeBankPayment(row, tk) {
   const bankRate = bankAmt > 0 ? Math.round(bankVND / bankAmt) : 0;
   return { bankAmt, bankRate, bankVND, missingRate: false };
 }
+function bankAccountLabel(accounts, accId) {
+  // Tên tài khoản NH hiện trên cột "Tài khoản NH" của bảng Tờ khai NK/XK — accId
+  // undefined nghĩa là payment được gắn TỪ TRƯỚC KHI có tính năng này (dữ liệu cũ,
+  // chưa lưu accountId), khác hẳn accId===null (tài khoản duy nhất/mặc định của công
+  // ty chưa từng thêm nhiều tài khoản, id hợp lệ là null) — phải phân biệt 2 trường
+  // hợp này, không được gộp chung vào 1 nhánh "không có giá trị".
+  if (accId === undefined) return "(cũ)";
+  const acc = (accounts || []).find(a => a.id === accId);
+  return acc ? acc.label : "?";
+}
 function parseToKhaiWorkbook(wb, kind) {
   // File tờ khai NK thường có sheet tên "TKN"; tờ khai XK theo cùng quy ước hải quan là "TKX" —
   // nếu không tìm thấy đúng tên sheet (một số file export ra tên khác) thì lấy sheet đầu tiên.
@@ -5775,6 +5785,52 @@ function ConfirmScreen({
       });
     }
   }, [focusIdx]);
+
+  // Nhảy về ĐÚNG giao dịch ngân hàng đã gắn cho 1 lần thanh toán của tờ khai NK/XK —
+  // bấm ở cột "Tài khoản NH" trong bảng Tờ khai (xem ToKhaiModal). Có thể cần ĐỔI TAB
+  // trước (payment.accountId khác tab đang mở) nên không tìm thấy ngay trong `filtered`
+  // của render hiện tại — dùng pendingJumpRowId + useEffect đợi rows/tab cập nhật xong
+  // rồi mới focus, thay vì tính index ngay lúc bấm (sẽ luôn ra -1 nếu vừa đổi tab).
+  const [pendingJumpRowId, setPendingJumpRowId] = useState(null);
+  const jumpToPayment = (accountId, rowId) => {
+    if (!rowId) return;
+    setTokhaiModalOpen(false);
+    setTokhaiXKModalOpen(false);
+    setTokhaiPickForRow(null);
+    setTokhaiXKPickForRow(null);
+    // Bỏ mọi bộ lọc đang áp — nếu không, giao dịch cần tới có thể đang bị lọc ẩn đi
+    // (VD đang lọc "Chưa xử lý" nhưng giao dịch này đã xác nhận rồi) nên tìm mãi không
+    // ra dù dữ liệu vẫn còn nguyên.
+    setFilter("all");
+    setSearch("");
+    setLocTuModal(null);
+    setHachFilter("");
+    if (accountId !== undefined && accountId !== activeTabAccId) {
+      switchTab(accountId);
+    }
+    setPendingJumpRowId(rowId);
+  };
+  React.useEffect(() => {
+    if (!pendingJumpRowId) return;
+    const idx = filtered.findIndex(r => r.id === pendingJumpRowId);
+    if (idx === -1) {
+      // Chưa chắc là "không có" — có thể `rows` của tab vừa đổi chưa kịp nạp xong ở lần
+      // render này (switchTab nạp từ cache/LocalStorage). Đợi thêm 1 nhịp rows đổi nữa
+      // rồi mới báo không tìm thấy, tránh báo nhầm "đã xoá" trong lúc chỉ đang tải.
+      const t = setTimeout(() => {
+        setPendingJumpRowId(cur => {
+          if (cur !== pendingJumpRowId) return cur; // đã nhảy nơi khác trong lúc chờ
+          showToast && showToast("Không tìm thấy giao dịch ngân hàng này (có thể đã bị xoá/sửa lại sao kê)", "warn");
+          return null;
+        });
+      }, 400);
+      return () => clearTimeout(t);
+    }
+    keyboardNavRef.current = true;
+    setFocusIdx(idx);
+    setPendingJumpRowId(null);
+  }, [pendingJumpRowId, rows, activeTabAccId]);
+
   React.useEffect(() => {
     const handler = e => {
       // F5: thay vì tải lại trang (mặc định trình duyệt), hiện thêm SHOW_STEP dòng
@@ -6138,7 +6194,10 @@ function ConfirmScreen({
     }));
     const { bankAmt, bankRate, bankVND, missingRate } = computeBankPayment(row, tk);
     const existingPayments = tkPayments(tk).filter(p => p.rowId !== rowId);
-    const newPayments = [...existingPayments, { rowId, bankDate: row.tx.date, bankAmt, bankRate, bankVND }];
+    // accountId: tài khoản NH đang mở tab lúc gắn — LƯU LẠI để sau này biết giao dịch
+    // này thuộc tài khoản nào (hiện cột "Tài khoản NH") và bấm nhảy về đúng tab (xem
+    // jumpToPayment) — rowId chỉ có ý nghĩa TRONG ĐÚNG phiên sao kê của tài khoản này.
+    const newPayments = [...existingPayments, { rowId, accountId: activeTabAccId, bankDate: row.tx.date, bankAmt, bankRate, bankVND }];
     saveTokhaiListOf(kind)(list.map(t => t.id !== tk.id ? t : {
       ...t, payments: newPayments,
       linkedRowId: undefined, bankDate: undefined, bankAmt: undefined, bankRate: undefined, bankVND: undefined
@@ -6173,7 +6232,8 @@ function ConfirmScreen({
         : (extractForeignAmt(row.tx.desc, tk.currency) || 0);
       const bankRate = bankAmt > 0 ? Math.round(a.amtVND / bankAmt) : 0;
       const existingPayments = tkPayments(tk).filter(p => p.rowId !== rowId);
-      const newPayments = [...existingPayments, { rowId, bankDate: row.tx.date, bankAmt, bankRate, bankVND: a.amtVND }];
+      // accountId: xem giải thích ở attachTokhai.
+      const newPayments = [...existingPayments, { rowId, accountId: activeTabAccId, bankDate: row.tx.date, bankAmt, bankRate, bankVND: a.amtVND }];
       updatedList = updatedList.map(t => t.id !== tk.id ? t : {
         ...t, payments: newPayments,
         linkedRowId: undefined, bankDate: undefined, bankAmt: undefined, bankRate: undefined, bankVND: undefined
@@ -7484,6 +7544,8 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     bankRows: rows,
     onExportFxDiff: tkIds => exportFxDiffForTk("NK", tkIds),
     onUnlinkRow: unlinkRow,
+    accounts: allAccounts,
+    onJumpToPayment: jumpToPayment,
     showToast
   }), tokhaiXKModalOpen && /*#__PURE__*/React.createElement(ToKhaiModal, {
     kind: "XK",
@@ -7507,6 +7569,8 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     bankRows: rows,
     onExportFxDiff: tkIds => exportFxDiffForTk("XK", tkIds),
     onUnlinkRow: unlinkRow,
+    accounts: allAccounts,
+    onJumpToPayment: jumpToPayment,
     showToast
   }), fxPreviewOpen && /*#__PURE__*/React.createElement(FxDiffPreviewModal, {
     rows: fxPreviewRows,
@@ -7597,7 +7661,8 @@ function FxDiffPreviewModal({ rows, onClose, onExport }) {
 
 // ── Bảng quản lý Tờ khai Hải quan NK: xem/sửa tay/nhập từ file tờ khai/xoá, và (khi mở ở chế độ
 // "chọn cho 1 giao dịch") cho chọn 1 tờ khai để gắn thẳng vào GD thanh toán đang xem trên sao kê ──
-function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, pickForRowDesc, onPick, onPickSplit, splitRemainingVND, splitInProgress, onApplyFxDiff, onEditFxDiff, bankRows, onExportFxDiff, showToast, coId, onUnlinkRow }) {
+function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, pickForRowDesc, onPick, onPickSplit, splitRemainingVND, splitInProgress, onApplyFxDiff, onEditFxDiff, bankRows, onExportFxDiff, showToast, coId, onUnlinkRow, accounts, onJumpToPayment }) {
+  const accountLabel = accId => bankAccountLabel(accounts, accId);
   const isXK = kind === "XK";
   // Đối tác luôn hiển thị nhãn "Khách hàng" (cả tờ NK lẫn XK) — CÙNG 1 trường dữ liệu tk.nhaCungCap.
   const partnerLabel = "Khách hàng";
@@ -7895,7 +7960,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                 React.createElement("th", { style: { padding: "4px 8px", position: "sticky", top: 0, zIndex: 3, background: "#fff" } }, ""),
                 React.createElement("th", { colSpan: 5, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, isXK ? "TỜ KHAI HẢI QUAN XK" : "TỜ KHAI HẢI QUAN NK"),
                 React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, "TRỊ GIÁ"),
-                React.createElement("th", { colSpan: 4, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#1d4ed8", background: "#eef2ff", position: "sticky", top: 0, zIndex: 3 } }, "CHỨNG TỪ NGÂN HÀNG"),
+                React.createElement("th", { colSpan: 5, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#1d4ed8", background: "#eef2ff", position: "sticky", top: 0, zIndex: 3 } }, "CHỨNG TỪ NGÂN HÀNG"),
                 React.createElement("th", { colSpan: 2, style: { padding: "4px 8px", textAlign: "left", fontSize: 11, color: "#7c3aed", background: "#f5f0ff", position: "sticky", top: 0, zIndex: 3 } }, "CHÊNH LỆCH"),
                 React.createElement("th", { style: { padding: "4px 8px", position: "sticky", top: 0, zIndex: 3, background: "#fff" } }, "")
               ),
@@ -7913,7 +7978,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                 ),
                 th(partnerLabel, 220), th(maDoiTuongLabel, 120), th("Tờ khai số", 160), th("Ngày TK", 115), th("Số hoá đơn", 220),
                 th("Trị giá HĐ", 110), th("NT", 50), th("Tỷ giá thuế", 100), th("Trị giá thuế (VND)", 130),
-                th("Ngày TT", 110), th("Trị giá TT (NT)", 120), th("Tỷ giá TT", 100), th("Đồng Việt Nam TT", 130),
+                th("Tài khoản NH", 130), th("Ngày TT", 110), th("Trị giá TT (NT)", 120), th("Tỷ giá TT", 100), th("Đồng Việt Nam TT", 130),
                 th("VND", 110), th("NT", 90), th("", 100)
               ),
               // Dòng lọc riêng TỪNG CỘT — chỉ đặt cho các cột dữ liệu gốc (không đặt cho cột tính
@@ -7929,7 +7994,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                 React.createElement("td", { key: "c5", style: stTd }, colFilterInput("triGiaHoaDon")),
                 React.createElement("td", { key: "c6", style: stTd }, colFilterInput("currency")),
                 React.createElement("td", { key: "c7", style: stTd }, colFilterInput("tyGiaTinhThue")),
-                React.createElement("td", { key: "c8", colSpan: 8, style: stTd })
+                React.createElement("td", { key: "c8", colSpan: 9, style: stTd })
                 ]; })()
               )
             ),
@@ -7970,6 +8035,22 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                 // Trị giá thuế = Trị giá HĐ × Tỷ giá tính thuế — LUÔN tự tính, hiện định dạng số tiền
                 // (không cho sửa tay trực tiếp; muốn đổi thì sửa Trị giá HĐ hoặc Tỷ giá tính thuế).
                 td(React.createElement("div", { style: { padding: "3px 4px", fontWeight: 600 } }, taxVND ? fmt(taxVND, "VND") : "")),
+                // Tài khoản NH của TỪNG lần thanh toán — bấm để nhảy thẳng về đúng giao dịch
+                // ngân hàng đã gắn (đổi tab tài khoản nếu cần rồi cuộn/tô sáng đúng dòng, xem
+                // jumpToPayment ở ConfirmScreen). accountId có thể khác nhau giữa các lần thanh
+                // toán của cùng 1 tờ khai nếu trả từ nhiều tài khoản khác nhau.
+                td(payments.length
+                  ? payments.map((p, idx) => payRow(idx, React.createElement("button", {
+                      onClick: () => onJumpToPayment && onJumpToPayment(p.accountId, p.rowId),
+                      disabled: !onJumpToPayment || !p.rowId,
+                      title: p.rowId ? "Quay lại đúng giao dịch ngân hàng đã chọn" : "Giao dịch cũ, chưa lưu liên kết để nhảy về",
+                      style: {
+                        fontSize: 11, padding: "2px 6px", borderRadius: 4, border: "1px solid #93c5fd",
+                        background: "#eff6ff", color: "#1d4ed8", cursor: (onJumpToPayment && p.rowId) ? "pointer" : "default",
+                        whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis"
+                      }
+                    }, accountLabel(p.accountId))))
+                  : ""),
                 // 1 tờ khai có thể có NHIỀU lần thanh toán khác ngày — mỗi lần hiện 1 dòng riêng
                 // trong cùng ô, có nút ✕ để bỏ gắn đúng lần đó (không ảnh hưởng các lần khác).
                 td(payments.length
