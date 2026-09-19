@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.315"
+APP_BUILD = "2026-09-19.316"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4517,10 +4517,19 @@ def _ten_file_than_thien(ten_to_khai_full, ky, mst, lan_bs):
 # Khớp theo TỪ KHÓA (không phân biệt hoa/thường, không dấu) — ưu tiên các
 # mẫu CỤ THỂ hơn (quyết toán, báo cáo tài chính...) trước các mẫu chung.
 _TDT_LOAI_TU_KHOA = [
-    ("QTTNCN", ["quyet toan thue thu nhap ca nhan", "quyet toan tncn"]),
-    ("QTTNDN", ["quyet toan thue thu nhap doanh nghiep", "quyet toan tndn"]),
+    # Phải có cả biến thể VIẾT TẮT ("quyết toán thuế TNDN") — tên thật trên
+    # cổng dùng viết tắt, thiếu biến thể này thì rơi xuống mẫu chung "TNDN"
+    # (là tờ khai tạm tính, KHÁC hẳn tờ khai quyết toán).
+    ("QTTNCN", ["quyet toan thue thu nhap ca nhan", "quyet toan thue tncn", "quyet toan tncn"]),
+    ("QTTNDN", ["quyet toan thue thu nhap doanh nghiep", "quyet toan thue tndn", "quyet toan tndn"]),
     ("BCTC",   ["bao cao tai chinh"]),
-    ("GTGT",   ["gia tri gia tang", "gtgt"]),
+    # Dùng MÃ TỜ KHAI CHÍNH THỨC (01GTGT, 05KK-TNCN...) thay cho nhãn ngắn
+    # (GTGT, TNCN) để tên file khớp với nguồn DVC — nguồn đó lấy thẳng mã
+    # từ cột "Tờ khai" nên vẫn ra 01GTGT/05KK-TNCN. Trước đây 2 nguồn đặt
+    # 2 kiểu tên khác nhau cho CÙNG một loại tờ khai (GTGT_QUY1.2025 ở
+    # nguồn thuế điện tử vs 01GTGT_QUY2.2026 ở nguồn DVC).
+    ("05KK-TNCN", ["khau tru thue thu nhap ca nhan", "khau tru tncn"]),
+    ("01GTGT", ["gia tri gia tang", "gtgt"]),
     ("TNCN",   ["thu nhap ca nhan", "tncn"]),
     ("TNDN",   ["thu nhap doanh nghiep", "tndn"]),
     ("TTDB",   ["tieu thu dac biet"]),
@@ -4532,8 +4541,18 @@ _TDT_LOAI_TU_KHOA = [
 _TDT_TU_BO_QUA = {"to", "khai", "bao", "cao", "thue", "ve", "cua", "va", "so", "phu", "luc"}
 
 def _loai_tk_tu_ten_day_du(ten_to_khai_full):
-    """Nhận diện mã ngắn loại tờ khai từ TÊN ĐẦY ĐỦ (không có mã đi kèm)."""
-    kd = _khong_dau(ten_to_khai_full or "")
+    """Nhận diện MÃ tờ khai từ TÊN ĐẦY ĐỦ (tab Thuế điện tử, tên thường
+    không kèm mã). Trả về đúng MÃ CHÍNH THỨC như nguồn DVC để 2 nguồn đặt
+    tên file giống nhau cho cùng một loại tờ khai."""
+    s = str(ten_to_khai_full or "")
+    # Nếu tên có sẵn mã dạng "01/GTGT", "05/KK-TNCN" thì dùng thẳng (chính
+    # xác nhất, khỏi phải đoán theo từ khoá).
+    import re as _re
+    m = _re.search(r'\b(\d{2}/[A-Za-zÀ-ỹ][\w\-]*)', s)
+    if m:
+        ma = m.group(1).upper()
+        return _TEN_TO_KHAI_MAP.get(ma) or ma.replace("/", "")
+    kd = _khong_dau(s)
     for ma_ngan, tu_khoa_list in _TDT_LOAI_TU_KHOA:
         if any(tk in kd for tk in tu_khoa_list):
             return ma_ngan
@@ -5805,7 +5824,13 @@ def _dvc_run_batch(batch_id, cids, body):
                                 for k, (fn, raw) in enumerate(tb_files, 1):
                                     if raw:
                                         ext = os.path.splitext(fn)[1] or ".xml"
-                                        hau_to = f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"
+                                        # Đặt tên theo ĐÚNG loại thông báo đọc được từ nội
+                                        # dung file (_TB_TIEPNHAN/_TB_CHAPNHAN/_TB_TUCHOI)
+                                        # thay vì đánh số _ThongBao1/_ThongBao2 vô nghĩa —
+                                        # nhìn tên file là biết hồ sơ được chấp nhận hay bị
+                                        # từ chối. Không nhận ra thì giữ tên chung như cũ.
+                                        hau_to = (_hau_to_ten_thong_bao(raw)
+                                                  or (f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"))
                                         _dvc_luu_file(folder, f"{ten_goi}{hau_to}{ext}", raw); item["so_file"] += 1
                             fn, raw = _tai_file_fn(drv, ma)
                             if raw:
@@ -6073,6 +6098,48 @@ def _dvc_run_batch(batch_id, cids, body):
     job["so_sai_pass"] = len(sai_pass)
     job["running"] = False
     job["current"] = None
+
+def _doc_chu_trong_file_tai_ve(raw, gioi_han=400000):
+    """Lấy phần CHỮ trong file vừa tải (không dấu, viết thường) để dò từ
+    khoá. File Thông báo có thể là XML thuần hoặc nằm trong file nén."""
+    try:
+        if raw[:2] == b"PK":
+            import io as _io
+            import zipfile as _zip
+            phan = []
+            with _zip.ZipFile(_io.BytesIO(raw)) as z:
+                for ten in z.namelist()[:20]:
+                    try:
+                        phan.append(z.read(ten)[:gioi_han].decode("utf-8", "ignore"))
+                    except Exception:
+                        pass
+            chu = " ".join(phan)
+        else:
+            chu = raw[:gioi_han].decode("utf-8", "ignore")
+    except Exception:
+        return ""
+    return _khong_dau(chu)
+
+
+def _hau_to_ten_thong_bao(raw):
+    """Hậu tố tên file cho 1 file Thông báo, dựa theo NỘI DUNG thật:
+      _TB_TUCHOI   — cơ quan thuế KHÔNG chấp nhận hồ sơ
+      _TB_CHAPNHAN — đã chấp nhận hồ sơ khai thuế điện tử
+      _TB_TIEPNHAN — mới chỉ tiếp nhận (chưa xét duyệt)
+    Trả "" nếu không nhận ra để nơi gọi dùng tên chung như trước.
+    THỨ TỰ KIỂM TRA QUAN TRỌNG: "không chấp nhận" phải xét TRƯỚC "chấp
+    nhận", nếu không thông báo từ chối sẽ bị đặt nhầm thành chấp nhận."""
+    chu = _doc_chu_trong_file_tai_ve(raw)
+    if not chu:
+        return ""
+    if "khong chap nhan" in chu or "tu choi" in chu:
+        return "_TB_TUCHOI"
+    if "chap nhan" in chu:
+        return "_TB_CHAPNHAN"
+    if "tiep nhan" in chu:
+        return "_TB_TIEPNHAN"
+    return ""
+
 
 def _dvc_luu_file(folder, fname, raw):
     safe = "".join(ch for ch in fname if ch not in '\\/:*?"<>|') or "file.zip"
