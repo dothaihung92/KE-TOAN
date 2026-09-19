@@ -4708,6 +4708,26 @@ function ConfirmScreen({
     if (saveCoAccounts) saveCoAccounts(co.id, allAccounts.map(a=>a.id===accId?{...a,label:trimmed||a.label,misaAcct:trimmed,bankName:editBankName.trim(),accountNo:editAccountNo.trim()}:a));
     setEditingMisaId(null);
   };
+  // Thêm tài khoản NH NGAY TẠI màn Xác nhận kết quả — trước đây phải quay lại Bước 1 (màn nhập sao
+  // kê ban đầu) mới thêm được tài khoản, rất bất tiện khi đang xử lý dở dang. Logic giống hệt
+  // addAccount() của AccountTabs (Bước 1) — chỉ khác là gọi thẳng saveCoAccounts rồi switchTab luôn
+  // sang tab mới tạo để người dùng dán sao kê tiếp ngay, không cần rời màn hình này.
+  const [addAccMode, setAddAccMode] = useState(false);
+  const [newAccLabel, setNewAccLabel] = useState("");
+  const [newAccCurrency, setNewAccCurrency] = useState("VND");
+  const addAccountInline = () => {
+    const label = newAccLabel.trim();
+    if (!label) return;
+    const misaAcct = suggestMisaAcct(label, newAccCurrency, allAccounts.map(a => a.misaAcct || ""));
+    const newAcc = {
+      id: "acc_" + Math.random().toString(36).slice(2, 10), label, currency: newAccCurrency,
+      misaAcct, bankName: suggestBankName(label), accountNo: suggestAccountNo(label)
+    };
+    if (saveCoAccounts) saveCoAccounts(co.id, [...allAccounts, newAcc]);
+    setNewAccLabel(""); setAddAccMode(false);
+    switchTab(newAcc.id);
+    showToast && showToast("✓ Đã thêm tài khoản \"" + newAcc.label + "\" (" + newAcc.currency + ") — dán sao kê ngay ở tab mới.");
+  };
 
   // In-memory row cache per account tab — avoids loading stale LS data when switching back
   const rowsCache = React.useRef({});
@@ -4766,6 +4786,12 @@ function ConfirmScreen({
   const [tokhaiPickForRow, setTokhaiPickForRow] = useState(null); // rowId khi mở bảng ở chế độ "chọn"
   const [tokhaiXKList, setTokhaiXKList] = useState(() => getCoToKhai(co.id, "XK"));
   const [tokhaiXKModalOpen, setTokhaiXKModalOpen] = useState(false);
+  // Số lệnh "Đặt cọc — chờ tờ khai" còn TREO (đã gắn giao dịch ngân hàng nhưng chưa có Số tờ khai
+  // thật) — cùng điều kiện nhận diện dòng placeholder ở ToKhaiModal. Tự RỤNG khỏi số đếm này ngay
+  // khi người dùng sửa lại dòng đó điền Số tờ khai thật, vì chỉ đếm lại theo đúng điều kiện mỗi lần
+  // render — không cần code riêng để "gỡ" khỏi danh sách.
+  const pendingDepositNK = tokhaiList.filter(t => !t.toKhaiSo && tkPayments(t).length > 0).length;
+  const pendingDepositXK = tokhaiXKList.filter(t => !t.toKhaiSo && tkPayments(t).length > 0).length;
   // Kết quả xem trước Import UNT/UNC vào MISA — hiện qua ImportMisaModal (thay confirm()/alert() cũ).
   const [misaImportState, setMisaImportState] = useState(null);
   const [misaImportBusy, setMisaImportBusy] = useState(false);
@@ -6286,6 +6312,36 @@ function ConfirmScreen({
     setTokhaiPickForRowOf(kind)(null);
     setTokhaiModalOpenOf(kind)(false);
   };
+  // Ghi nhận NGAY 1 khoản đặt cọc trả/thu TRƯỚC KHI có tờ khai hải quan thật (VD đặt cọc 1 phần cho
+  // NCC nước ngoài trước khi có tờ khai NK) — làm 1 lượt thay vì phải tự "+ Thêm tay" rồi vào bảng Tờ
+  // khai gắn tay từng bước: hạch toán công nợ + mã KH/NCC ngay tại dòng giao dịch (để import MISA trừ
+  // công nợ trước), ĐỒNG THỜI tự tạo 1 dòng tờ khai "placeholder" (chưa có Số tờ khai — xem nhãn "⏳
+  // Đặt cọc — chờ tờ khai" ở ToKhaiModal) đã gắn sẵn giao dịch này. Khi có tờ khai thật, người dùng chỉ
+  // cần sửa lại ĐÚNG dòng placeholder đó (điền Số/Ngày/Trị giá tờ khai) — liên kết vẫn giữ nguyên.
+  const datCocChoToKhai = (kind, rowId, mst, name, hach) => {
+    const row = rows.find(r => r.id === rowId);
+    if (!row) return;
+    const newTk = {
+      id: uid(), toKhaiSo: "", ngayToKhai: "", nhaCungCap: (name || "").trim(),
+      maDoiTuong: (mst || "").trim(), soHoaDon: "", ngayHoaDon: "", triGiaHoaDon: 0,
+      currency: (row.tx.currency || "USD").toUpperCase(), tyGiaTinhThue: 0,
+      ghiChu: "Đặt cọc — chờ tờ khai", created: new Date().toLocaleDateString("vi-VN")
+    };
+    // Cùng tiền tệ với dòng NH -> computeBankPayment lấy thẳng số tiền GD, không cần đoán qua diễn giải.
+    const { bankAmt, bankRate, bankVND } = computeBankPayment(row, newTk);
+    const tkWithPayment = {
+      ...newTk,
+      payments: [{ rowId, accountId: activeTabAccId, bankDate: row.tx.date, bankAmt, bankRate, bankVND }]
+    };
+    saveTokhaiListOf(kind)([...tokhaiListOf(kind), tkWithPayment]);
+    setRowsH(prev => prev.map(r => r.id !== rowId ? r : {
+      ...r, confirmed: "yes", confirmedName: newTk.nhaCungCap || r.confirmedName,
+      confirmedMST: newTk.maDoiTuong || r.confirmedMST,
+      confirmedHach: hach || r.confirmedHach || defaultHachOf(kind), manualConfirm: true, confirmedToKhaiId: newTk.id
+    }));
+    showToast("✓ Đã ghi nhận đặt cọc chờ tờ khai " + kind + " — khi có tờ khai thật, mở \"Tờ Khai " + kind +
+      "\" sửa lại đúng dòng \"⏳ Đặt cọc — chờ tờ khai\" để hoàn tất (giữ nguyên liên kết).");
+  };
   const openTokhaiPicker = (kind, rowId) => { setTokhaiPickForRowOf(kind)(rowId); setTokhaiModalOpenOf(kind)(true); };
   // Thanh toán "gối đầu" — 1 giao dịch NH trả/thu 1 lần nhưng tiền được CHIA cho nhiều tờ khai khác
   // nhau (VD trả 5.000$: 3.000$ tất toán tờ khai A đang thiếu, 2.000$ còn dư dùng đặt cọc trước cho
@@ -7007,13 +7063,48 @@ function ConfirmScreen({
     style:{borderColor: addMode ? "var(--green)" : undefined, color: addMode ? "var(--green)" : undefined}
   }, "➕ Thêm sao kê"),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
+    title:"Thêm tài khoản ngân hàng mới ngay tại đây — khỏi phải quay lại Bước 1 rồi vào lại",
+    onClick:()=>setAddAccMode(m=>!m),
+    style:{borderColor: addAccMode ? "var(--blue)" : undefined, color: addAccMode ? "var(--blue)" : undefined}
+  }, addAccMode ? "🏦 Đóng" : "🏦 + Thêm TK NH"),
+  addAccMode && /*#__PURE__*/React.createElement("div",{
+    style:{display:"flex",gap:6,alignItems:"center",padding:"4px 8px",background:"#f0f6ff",borderRadius:6,border:"1px solid var(--blue)"}
+  },
+    /*#__PURE__*/React.createElement("input",{
+      autoFocus:true, value:newAccLabel, onChange:e=>setNewAccLabel(e.target.value),
+      onKeyDown:e=>{if(e.key==="Enter")addAccountInline(); if(e.key==="Escape")setAddAccMode(false);},
+      placeholder:"Tên TK (VD: ACB 1418367, USD Vietcombank...)",
+      style:{height:28,fontSize:12,borderRadius:5,border:"1px solid var(--border)",padding:"0 8px",width:220}
+    }),
+    /*#__PURE__*/React.createElement("button",{
+      onClick:()=>setNewAccCurrency(c=>c==="VND"?"USD":"VND"),
+      style:{padding:"4px 10px",borderRadius:5,border:"1px solid var(--border)",background:newAccCurrency==="USD"?"#1a7a4a":"var(--green)",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}
+    }, newAccCurrency),
+    /*#__PURE__*/React.createElement("button",{
+      onClick:addAccountInline, disabled:!newAccLabel.trim(),
+      style:{padding:"4px 12px",borderRadius:5,border:"none",background:newAccLabel.trim()?"var(--blue)":"#ccc",color:"#fff",fontSize:12,cursor:newAccLabel.trim()?"pointer":"not-allowed"}
+    }, "Thêm")
+  ),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
     title:"Quản lý Tờ khai Hải quan NK — nhập từ file tờ khai, dùng để gắn vào GD thanh toán",
     onClick:()=>{setTokhaiPickForRow(null);setTokhaiModalOpen(true);}
-  }, "📋 Tờ Khai NK" + (tokhaiList.length ? " (" + tokhaiList.length + ")" : "")),/*#__PURE__*/React.createElement("button",{
+  }, "📋 Tờ Khai NK" + (tokhaiList.length ? " (" + tokhaiList.length + ")" : "")),
+  pendingDepositNK > 0 && /*#__PURE__*/React.createElement("button",{
+    title:"Còn " + pendingDepositNK + " lệnh đặt cọc NK đang chờ tờ khai thật — bấm để mở và bổ sung",
+    onClick:()=>{setTokhaiPickForRow(null);setTokhaiModalOpen(true);},
+    style:{padding:"4px 10px",borderRadius:6,border:"1px solid #fcd34d",background:"#fef3c7",color:"#92400e",fontSize:12,fontWeight:700,cursor:"pointer"}
+  }, "⏳ Đặt cọc NK chờ: " + pendingDepositNK),
+  /*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
     title:"Quản lý Tờ khai Hải quan XK — nhập từ file tờ khai, dùng để gắn vào GD thu tiền",
     onClick:()=>{setTokhaiXKPickForRow(null);setTokhaiXKModalOpen(true);}
-  }, "📋 Tờ Khai XK" + (tokhaiXKList.length ? " (" + tokhaiXKList.length + ")" : "")),/*#__PURE__*/React.createElement("button",{
+  }, "📋 Tờ Khai XK" + (tokhaiXKList.length ? " (" + tokhaiXKList.length + ")" : "")),
+  pendingDepositXK > 0 && /*#__PURE__*/React.createElement("button",{
+    title:"Còn " + pendingDepositXK + " lệnh đặt cọc XK đang chờ tờ khai thật — bấm để mở và bổ sung",
+    onClick:()=>{setTokhaiXKPickForRow(null);setTokhaiXKModalOpen(true);},
+    style:{padding:"4px 10px",borderRadius:6,border:"1px solid #fcd34d",background:"#fef3c7",color:"#92400e",fontSize:12,fontWeight:700,cursor:"pointer"}
+  }, "⏳ Đặt cọc XK chờ: " + pendingDepositXK),
+  /*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
     onClick:()=>exportExcel(rows,co&&co.name||"export",[...coDict,...globalDict])
   }, "\uD83D\uDCE5 Xu\u1EA5t Excel"),/*#__PURE__*/React.createElement("button",{
@@ -7590,6 +7681,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     onSetTyGia: setRowTyGia,
     tokhaiSuggestions: tokhaiSuggestions[r.id],
     onAttachTokhai: attachTokhai,
+    onDatCocChoToKhai: datCocChoToKhai,
     onOpenTokhaiPicker: openTokhaiPicker,
     onResetPending: unlinkRow,
     searchTerm: search,
@@ -8441,6 +8533,7 @@ function ConfirmRow({
   onSetTyGia,
   tokhaiSuggestions,
   onAttachTokhai,
+  onDatCocChoToKhai,
   onOpenTokhaiPicker,
   onResetPending,
   searchTerm,
@@ -8555,6 +8648,21 @@ function ConfirmRow({
   const saveSingle = () => {
     onOverride(r.id, editMST, editName, "", editHach);
     if (editKwGlobal.trim().length >= 3) onAddDict(editMST, editName, editKwGlobal, true, editHach);
+    setEditMode(false);
+    setEditMST("");
+    setEditName("");
+    setEditKw("");
+    setEditKwGlobal("");
+    setEditHach("");
+    if (onClearBulkPreview) onClearBulkPreview();
+  };
+  // Ghi nhận GD này là "Đặt cọc — chờ tờ khai" (kind: "NK"/"XK") — dùng đúng MST/Tên/Hạch toán đang
+  // gõ trong form (giống hệt "Lưu GD này thôi"), nhưng thay vì chỉ xác nhận suông (131/331 không gắn
+  // đối tượng công nợ cụ thể nào), tự tạo 1 dòng tờ khai placeholder và gắn giao dịch này vào luôn —
+  // để sau này có tờ khai thật chỉ cần sửa lại đúng dòng đó, không mất liên kết.
+  const submitDatCoc = kind => {
+    if (!onDatCocChoToKhai) return;
+    onDatCocChoToKhai(kind, r.id, editMST, editName, editHach);
     setEditMode(false);
     setEditMST("");
     setEditName("");
@@ -9364,7 +9472,30 @@ function ConfirmRow({
       cursor: editMST || editName ? "pointer" : "not-allowed",
       fontWeight: 500
     }
-  }, "L\u01B0u GD n\xE0y th\xF4i"), /*#__PURE__*/React.createElement("div", {
+  }, "L\u01B0u GD n\xE0y th\xF4i"),
+  onDatCocChoToKhai && /*#__PURE__*/React.createElement("div", {
+    title: "Ch\u01B0a c\xF3 t\u1EDD khai h\u1EA3i quan? D\xF9ng khi GD n\xE0y l\xE0 kho\u1EA3n \u0111\u1EB7t c\u1ECDc tr\u1EA3/thu tr\u01B0\u1EDBc cho NCC/KH n\u01B0\u1EDBc ngo\xE0i \u2014 h\u1EA1ch to\xE1n c\xF4ng n\u1EE3 + m\xE3 \u0111\u1ED1i t\u01B0\u1EE3ng ngay (\u0111\u1EC3 import MISA tr\u1EEB c\xF4ng n\u1EE3 tr\u01B0\u1EDBc), \u0111\u1ED3ng th\u1EDDi t\u1EF1 t\u1EA1o s\u1EB5n 1 d\xF2ng t\u1EDD khai ch\u1EDD b\u1ED5 sung \u2014 khi c\xF3 t\u1EDD khai th\u1EADt ch\u1EC9 c\u1EA7n s\u1EEDa l\u1EA1i \u0111\xFAng d\xF2ng \u0111\xF3.",
+    style: { display: "flex", gap: 4 }
+  },
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => submitDatCoc("NK"),
+      disabled: !editMST && !editName,
+      style: {
+        flex: 1, height: 26, borderRadius: 5, border: "1px solid #fcd34d", background: "#fef3c7",
+        color: "#92400e", fontSize: 10, fontWeight: 700,
+        cursor: (editMST || editName) ? "pointer" : "not-allowed"
+      }
+    }, "\u23F3 \u0110\u1EB7t c\u1ECDc ch\u1EDD t\u1EDD khai NK"),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => submitDatCoc("XK"),
+      disabled: !editMST && !editName,
+      style: {
+        flex: 1, height: 26, borderRadius: 5, border: "1px solid #fcd34d", background: "#fef3c7",
+        color: "#92400e", fontSize: 10, fontWeight: 700,
+        cursor: (editMST || editName) ? "pointer" : "not-allowed"
+      }
+    }, "\u23F3 \u0110\u1EB7t c\u1ECDc ch\u1EDD t\u1EDD khai XK")
+  ), /*#__PURE__*/React.createElement("div", {
     style: {
       borderTop: "1px dashed #ddd",
       paddingTop: 4,
