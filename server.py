@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.313"
+APP_BUILD = "2026-09-19.314"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4043,6 +4043,23 @@ try {
 } catch(e){ cb({ok:false, err:''+e}); }
 """
 
+# Thông báo của hồ sơ nguồn "thuế điện tử" (trước 01/07/2025): trang chi
+# tiết KHÔNG có idTbao nào trong HTML (xác nhận qua báo cáo thật), nên thử
+# tải theo MÃ HỒ SƠ đúng quy ước mà chính API này dùng cho tờ khai nguồn
+# ETAX (/tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX, đã xác nhận tải
+# được) — chỉ đổi "downloadhoso" thành "downloadthongbao".
+_JS_DOWNLOAD_TB_TDT = r"""
+var cb = arguments[arguments.length-1];
+var body = arguments[0];
+try {
+  $.ajax({ type:'POST', url:'/tthc/tchs/downloadthongbao-tdt?loaiTraCuu=ETAX',
+    contentType:'application/json', data: body,
+    success:function(d){ cb({ok:true, data:d}); },
+    error:function(x){ cb({ok:false, status:x.status, resp:(x.responseText||'').slice(0,200)}); }
+  });
+} catch(e){ cb({ok:false, err:''+e}); }
+"""
+
 _DVC_HOA_KO_DAU = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ"
 _DVC_THUONG_KO_DAU = "abcdefghijklmnopqrstuvwxyzáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ"
 
@@ -4297,14 +4314,53 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     except Exception as e:
         return out, [f"lỗi mở chi tiết {ma}: {e}"]
     ids = _dvc_parse_id_tbao(html, ma)
+    if not ids and str(loai).upper() == "ETAX":
+        # Hồ sơ nguồn "thuế điện tử" (trước 01/07/2025): trang chi tiết
+        # KHÔNG hề có idTbao nào trong HTML (đã xác nhận qua báo cáo thật —
+        # thứ duy nhất khớp chữ "thông báo" là LINK MENU
+        # /tthc/tra-cuu-thongbao-cqt). Thử endpoint Thông báo theo ĐÚNG quy
+        # ước mà chính API này dùng cho tờ khai nguồn ETAX: tờ khai là
+        # /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX với {"maHoSo": ...}
+        # (đã xác nhận tải được), nên Thông báo nhiều khả năng là
+        # /tthc/tchs/downloadthongbao-tdt?loaiTraCuu=ETAX với cùng tham số —
+        # tức tải theo MÃ HỒ SƠ chứ không cần idTbao. Ghi lại nguyên phản
+        # hồi của máy chủ để biết chắc đúng/sai mà chỉnh tiếp.
+        ma_so = "".join(ch for ch in str(ma) if ch.isdigit()) or "0"
+        try:
+            res = drv.execute_async_script(_JS_DOWNLOAD_TB_TDT, '{"maHoSo":%s}' % ma_so)
+        except Exception as e:
+            res = {"ok": False, "err": str(e)}
+        d = _dvc_norm_data(res.get("data")) if (res and res.get("ok")) else None
+        content = d.get("content") if isinstance(d, dict) else ""
+        raw = base64.b64decode(content) if content else b""
+        if raw:
+            fname = (d.get("fileName") if isinstance(d, dict) else "") or f"TB_{ma}.zip"
+            out.append((fname, raw))
+            diag.append(f"{ma}: tải Thông báo theo mã hồ sơ (endpoint -tdt)")
+            return out, diag
+        diag.append(f"{ma}: thử tải Thông báo theo mã hồ sơ -> {str(res)[:150]}")
     if not ids:
-        # Dò manh mối để tinh chỉnh mẫu nhận dạng: cắt đoạn HTML quanh chỗ
-        # nhắc tới "thông báo" (lấy rộng hơn trước — 80 ký tự quá ngắn,
-        # không đủ thấy cấu trúc thẻ/hàm JS tải thông báo để biết idTbao
-        # thật nằm ở đâu).
+        # Dò manh mối để tinh chỉnh mẫu nhận dạng. LƯU Ý mẫu cũ chỉ bắt
+        # lần xuất hiện ĐẦU TIÊN của chữ "thongbao" nên luôn trúng LINK
+        # MENU (/tthc/tra-cuu-thongbao-cqt), không bao giờ thấy mục "Danh
+        # sách thông báo" thật. Ưu tiên đoạn có dấu tiếng Việt ("thông
+        # báo") và gần chữ "Danh sách"/"Tải".
         import re as _re
-        m = _re.search(r'.{0,90}(?:hongBao|hong báo|Tbao|hongbao).{0,150}', html, _re.IGNORECASE)
-        diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:240]}" if m else ""))
+        ung_vien = [m for m in _re.finditer(r'[Tt]h[ôo]ng\s*b[áa]o', html)]
+        m_chon = None
+        for m in ung_vien:
+            quanh = html[max(0, m.start() - 120):m.start() + 200]
+            if 'Danh sách' in quanh or 'Tải' in quanh or 'ownload' in quanh:
+                m_chon = m
+                break
+        if m_chon is None and ung_vien:
+            m_chon = ung_vien[-1]
+        goi_y = ""
+        if m_chon:
+            goi_y = html[max(0, m_chon.start() - 110):m_chon.start() + 190]
+            goi_y = _re.sub(r'\s+', ' ', goi_y).strip()
+        diag.append(f"{ma}: không thấy idTbao (có {len(ung_vien)} chỗ nhắc 'thông báo')"
+                    + (f" | gợi ý: {goi_y[:260]}" if goi_y else ""))
         return out, diag
     for idt in ids:
         body = json.dumps({"idTbao": idt, "loaiTBao": ""})
