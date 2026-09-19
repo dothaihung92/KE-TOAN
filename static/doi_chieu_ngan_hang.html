@@ -5820,6 +5820,14 @@ function ConfirmScreen({
   // của render hiện tại — dùng pendingJumpRowId + useEffect đợi rows/tab cập nhật xong
   // rồi mới focus, thay vì tính index ngay lúc bấm (sẽ luôn ra -1 nếu vừa đổi tab).
   const [pendingJumpRowId, setPendingJumpRowId] = useState(null);
+  // Viền đỏ đánh dấu RÕ RÀNG đúng dòng vừa nhảy tới (khác hẳn viền xanh của focus bàn phím thông
+  // thường) để người dùng tự kiểm tra được đúng/sai giao dịch — tự tắt sau vài giây.
+  const [jumpTargetRowId, setJumpTargetRowId] = useState(null);
+  React.useEffect(() => {
+    if (!jumpTargetRowId) return;
+    const t = setTimeout(() => setJumpTargetRowId(cur => (cur === jumpTargetRowId ? null : cur)), 6000);
+    return () => clearTimeout(t);
+  }, [jumpTargetRowId]);
   // Dò lại accountId thật cho payment CŨ (accountId===undefined, gắn từ trước khi có tính năng này)
   // bằng cách quét hết sao kê đã lưu của công ty — xem giải thích ở timAccountIdTheoRowIdCu.
   const resolveOldAccountId = rowId => {
@@ -5865,8 +5873,15 @@ function ConfirmScreen({
       }, 400);
       return () => clearTimeout(t);
     }
+    // Đảm bảo dòng đích đã có mặt trong DOM: jumpToPayment vừa gọi setFilter("all") ở trên có thể
+    // làm showCount bị RESET về SHOW_STEP (150, xem effect theo [filter, activeTabAccId]) — nếu dòng
+    // đích nằm ngoài 150 dòng đầu, querySelectorAll(...)[focusIdx] ở effect cuộn bên dưới sẽ ra
+    // undefined và KHÔNG cuộn tới đâu cả, nhìn như phần mềm "kéo về nhầm/không đúng giao dịch" dù
+    // thật ra chỉ là chưa kịp hiện dòng đó ra. Phải bơm showCount TRƯỚC/CÙNG lúc với focusIdx.
+    setShowCount(c => Math.max(c, idx + 30));
     keyboardNavRef.current = true;
     setFocusIdx(idx);
+    setJumpTargetRowId(pendingJumpRowId);
     setPendingJumpRowId(null);
   }, [pendingJumpRowId, rows, activeTabAccId]);
 
@@ -7542,6 +7557,7 @@ filtered.slice(0, showCount).map((r, idx) => /*#__PURE__*/React.createElement(Co
     onQuickInternal: quickAcceptInternal,
     onPickInvById: (rowId, inv) => assignInvoice(rowId, inv, r.tx.debit>0?"331":"131"),
     isFocused: idx === focusIdx,
+    isJumpTarget: r.id === jumpTargetRowId,
     onFocus: () => setFocusIdx(idx),
     isSelected: bulkSelected.has(r.id),
     onToggleSelect: toggleBulkSelect,
@@ -8075,7 +8091,22 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                     style: { flexShrink: 0, width: 22, height: 22, borderRadius: 4, border: "1px solid var(--border)", background: "#fff", cursor: "pointer", fontSize: 11, padding: 0 }
                   }, "🔍")
                 )),
-                td(React.createElement("input", { style: inputStyle, title: tk.toKhaiSo||"", value: tk.toKhaiSo||"", onChange: e => updateField(tk.id, "toKhaiSo", e.target.value) })),
+                td(React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 2 } },
+                  React.createElement("input", { style: inputStyle, title: tk.toKhaiSo||"", value: tk.toKhaiSo||"", onChange: e => updateField(tk.id, "toKhaiSo", e.target.value) }),
+                  // Chưa có Số tờ khai nhưng đã gắn ít nhất 1 giao dịch ngân hàng -> đây là dòng
+                  // "placeholder" tạo tay để giữ chỗ cho khoản đặt cọc trả trước khi có tờ khai hải
+                  // quan chính thức (xem hướng dẫn "+ Thêm tay" + "⤵ Gối đầu"). Đánh dấu rõ để không
+                  // quên bổ sung Số/Ngày tờ khai thật sau này.
+                  !tk.toKhaiSo && payments.length > 0 && React.createElement("span", {
+                    title: "Dòng này chưa có Số tờ khai — đang giữ chỗ cho khoản đặt cọc đã trả trước. " +
+                      "Khi có tờ khai hải quan thật, hãy sửa lại đúng dòng này (điền Số/Ngày/Trị giá tờ " +
+                      "khai) để giữ nguyên liên kết với giao dịch ngân hàng đã gắn.",
+                    style: {
+                      fontSize: 10, fontWeight: 700, color: "#92400e", background: "#fef3c7",
+                      border: "1px solid #fcd34d", borderRadius: 4, padding: "1px 5px", whiteSpace: "nowrap"
+                    }
+                  }, "⏳ Đặt cọc — chờ tờ khai")
+                )),
                 td(React.createElement("input", { style: inputStyle, value: tk.ngayToKhai||"", onChange: e => updateField(tk.id, "ngayToKhai", e.target.value), placeholder: "dd/mm/yyyy" })),
                 td(React.createElement("input", { style: inputStyle, title: tk.soHoaDon||"", value: tk.soHoaDon||"", onChange: e => updateField(tk.id, "soHoaDon", e.target.value) })),
                 td(numInput(tk, "triGiaHoaDon")),
@@ -8373,6 +8404,7 @@ function ConfirmRow({
   allRows,
   onBhxh,
   isFocused,
+  isJumpTarget,
   onFocus,
   isSelected,
   onToggleSelect,
@@ -8586,16 +8618,24 @@ function ConfirmRow({
     },
     style: {
       position: "relative",
-      border: hasMismatch ? "2px solid #dc2626" : isSelected ? "1px solid #d4a017" : `1px solid ${isFocused ? "#1a5276" : borderColor}`,
+      border: isJumpTarget ? "3px solid #dc2626" : hasMismatch ? "2px solid #dc2626" : isSelected ? "1px solid #d4a017" : `1px solid ${isFocused ? "#1a5276" : borderColor}`,
       borderRadius: 8,
       padding: "10px 12px 10px 30px",
       marginBottom: 8,
       background: isSelected ? "#fffbe6" : hasMismatch && !r.confirmed ? "#fff5f5" : bgColor,
-      outline: isFocused ? "2px solid #1a527640" : "none",
+      outline: isJumpTarget ? "3px solid #dc262640" : isFocused ? "2px solid #1a527640" : "none",
       outlineOffset: 1,
-      transition: "outline .1s"
+      boxShadow: isJumpTarget ? "0 0 0 4px rgba(220,38,38,.18)" : "none",
+      transition: "outline .1s, box-shadow .2s"
     }
-  }, onToggleSelect && /*#__PURE__*/React.createElement("input", {
+  }, isJumpTarget && /*#__PURE__*/React.createElement("span", {
+    title: "Đây là giao dịch phần mềm vừa tìm và nhảy về theo yêu cầu — kiểm tra kỹ xem có đúng giao dịch cần không.",
+    style: {
+      position: "absolute", top: -11, right: 10, zIndex: 2,
+      background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 700,
+      padding: "2px 8px", borderRadius: 10, boxShadow: "0 1px 3px rgba(0,0,0,.25)"
+    }
+  }, "🔎 Giao dịch vừa tìm"), onToggleSelect && /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!isSelected,
     onClick: e => e.stopPropagation(),
