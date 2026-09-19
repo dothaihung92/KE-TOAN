@@ -64,6 +64,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
 <script>const {
   useState,
   useEffect,
@@ -139,12 +140,20 @@ if (typeof window !== "undefined") window.__IDBKV = IDBKV;
 // — đọc/ghi qua bộ nhớ đệm RAM (__mem, nạp sẵn từ IndexedDB lúc khởi động ở
 // boot() cuối file) để không phải sửa lại từng nơi gọi thành async; mỗi lần
 // set/del đồng thời ghi NGẦM xuống IndexedDB phía sau (không chặn UI).
+// Tiền tố đánh dấu giá trị đã NÉN (LZString) — dữ liệu JSON thuần (chưa nén, lưu từ các bản trước
+// khi có nén) luôn bắt đầu bằng "{"/"[" nên không bao giờ trùng tiền tố này, phân biệt an toàn để
+// LS.get() vẫn đọc được dữ liệu cũ đã lưu từ trước, không mất dữ liệu người dùng khi lên bản mới.
+const LS_LZ_PREFIX = "~LZ~";
 const LS = {
   __mem: Object.create(null),
   get: k => {
     try {
-      const v = LS.__mem[k];
-      return v != null ? JSON.parse(v) : null;
+      const raw = LS.__mem[k];
+      if (raw == null) return null;
+      const str = raw.indexOf(LS_LZ_PREFIX) === 0
+        ? (window.LZString ? LZString.decompressFromBase64(raw.slice(LS_LZ_PREFIX.length)) : null)
+        : raw;
+      return str != null ? JSON.parse(str) : null;
     } catch {
       return null;
     }
@@ -157,7 +166,12 @@ const LS = {
       if (k.indexOf("session_") === 0 && v && typeof v === "object" && !Array.isArray(v)) {
         v = { ...v, _savedAt: Date.now() };
       }
-      const str = JSON.stringify(v);
+      const json = JSON.stringify(v);
+      // Nén lại trước khi lưu — người dùng làm nhiều công ty và LUÔN giữ lại toàn bộ sao kê (không
+      // xoá đi làm lại như trước), dung lượng cộng dồn lớn dần; nén ở đây (JSON đối chiếu ngân hàng
+      // nén rất tốt vì lặp lại nhiều cấu trúc/khoá) chỉ giải nén lúc thật sự cần đọc (LS.get), không
+      // phải sửa gì thêm ở hàng trăm chỗ gọi LS.get/set rải khắp file.
+      const str = window.LZString ? (LS_LZ_PREFIX + LZString.compressToBase64(json)) : json;
       LS.__mem[k] = str;
       IDBKV.put(k, str);
       try { if (window.__FS && window.__FS.handle) window.__FS.schedule(); } catch(e) {}
@@ -785,6 +799,26 @@ function computeBankPayment(row, tk) {
   const bankAmt = extractForeignAmt(row.tx.desc, tk.currency) || remainForeignEst || 0;
   const bankRate = bankAmt > 0 ? Math.round(bankVND / bankAmt) : 0;
   return { bankAmt, bankRate, bankVND, missingRate: false };
+}
+// Quy ngày giao dịch kiểu VN (dd/mm/yyyy, có thể kèm giờ) về "yyyy-mm-dd" để so KHOẢNG NGÀY an toàn
+// bằng so chuỗi — không dùng new Date(dd/mm/yyyy) vì trình duyệt hiểu nhầm thành mm/dd/yyyy (Mỹ).
+function ngayVNThanhISO(vnDate) {
+  const s = String(vnDate || "").trim().split(/\s+/)[0];
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (!m) return "";
+  return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+}
+// Lọc theo khoảng ngày (Từ ngày/Đến ngày, dạng yyyy-mm-dd từ <input type="date">) — dùng cho cả bộ
+// lọc hiển thị (filtered) LẪN phạm vi xuất UNT/UNC, để 2 nơi luôn khớp nhau: xem đúng khoảng nào thì
+// xuất chứng từ đúng khoảng đó, không lệch. Bỏ trống from/to = không giới hạn phía đó. Ngày không đọc
+// được (hiếm, dữ liệu lỗi) thì KHÔNG lọc bỏ — an toàn hơn ẩn mất giao dịch oan khi có bộ lọc ngày.
+function ngayTrongKhoang(vnDate, from, to) {
+  if (!from && !to) return true;
+  const iso = ngayVNThanhISO(vnDate);
+  if (!iso) return true;
+  if (from && iso < from) return false;
+  if (to && iso > to) return false;
+  return true;
 }
 // rowId của 1 giao dịch ngân hàng là uid() = Date.now() + hậu tố ngẫu nhiên (xem hàm uid()) nên
 // KHÔNG BAO GIỜ trùng giữa các tài khoản khác nhau của cùng 1 công ty -> với payment CŨ (tạo trước
@@ -2908,7 +2942,8 @@ function App() {
     invDR: processData && processData.invDR || [],
     activeAccountId: inputData.activeAccountId,
     saveCoAccounts: saveCoAccounts,
-    onSyncSaokePer: (accId, raw) => setInputData(prev => ({...prev, saokePer: {...(prev.saokePer||{}), [accId]: raw}}))
+    onSyncSaokePer: (accId, raw) => setInputData(prev => ({...prev, saokePer: {...(prev.saokePer||{}), [accId]: raw}})),
+    onUpdateInvoices: (dv, dr) => setProcessData(prev => ({...(prev||{}), invDV: dv, invDR: dr}))
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: screen === "dict" && activeCo ? "block" : "none"
@@ -4685,7 +4720,8 @@ function ConfirmScreen({
   invDR,
   activeAccountId,
   saveCoAccounts,
-  onSyncSaokePer
+  onSyncSaokePer,
+  onUpdateInvoices
 }) {
   // ── Account tabs: all accounts with saved sessions ──
   const allAccounts = (co.accounts && co.accounts.length) ? co.accounts : [{id:null, label:"TK chính", currency:"VND"}];
@@ -4727,6 +4763,35 @@ function ConfirmScreen({
     setNewAccLabel(""); setAddAccMode(false);
     switchTab(newAcc.id);
     showToast && showToast("✓ Đã thêm tài khoản \"" + newAcc.label + "\" (" + newAcc.currency + ") — dán sao kê ngay ở tab mới.");
+  };
+  // Lấy lại hoá đơn đầu vào/đầu ra MỚI NHẤT từ "Tra cứu hoá đơn" (phần mềm chính) NGAY TẠI màn Xác
+  // nhận kết quả — trước đây chỉ lấy được 1 lần lúc mới bắt đầu (Bước 1); nếu công cụ tra cứu hoá đơn
+  // chạy XONG SAU (chạy nền/chạy riêng), phải quay lại Bước 1 mới thấy hoá đơn mới. Dùng lại đúng cầu
+  // nối /api/dcnh/hoa-don đã có (xem layHoaDonTuPhanMemChinh ở Bước 1) — lấy xong lưu + đẩy lên qua
+  // onUpdateInvoices để invDV/invDR đổi, effect rematchPending (đã có sẵn, xem useEffect theo [invDV,
+  // invDR] bên dưới) tự đối chiếu lại toàn bộ sao kê, không cần code thêm bước đối chiếu thủ công.
+  const [capNhatHoaDonBusy, setCapNhatHoaDonBusy] = useState(false);
+  const capNhatHoaDon = async () => {
+    if (!co || !co.mst) { showToast && showToast("Công ty chưa có MST, không lấy được hoá đơn", "err"); return; }
+    setCapNhatHoaDonBusy(true);
+    try {
+      const res = await fetch("/api/dcnh/hoa-don?" + new URLSearchParams({ mst: co.mst }));
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.detail || ("Lỗi " + res.status));
+      }
+      const d = await res.json();
+      const cur = activeTabAcc ? activeTabAcc.currency : "VND";
+      const dv = parseInv(d.dau_vao || "", cur);
+      const dr = parseInv(d.dau_ra || "", cur);
+      saveCoInvoices(co.id, dv, dr);
+      if (onUpdateInvoices) onUpdateInvoices(dv, dr);
+      showToast && showToast(`✓ Đã cập nhật ${d.so_dau_vao} HĐ đầu vào + ${d.so_dau_ra} HĐ đầu ra từ Tra cứu hoá đơn (${d.ten_cong_ty || co.mst}) — tự đối chiếu lại với sao kê.`, "ok");
+    } catch (e) {
+      showToast && showToast("Lỗi cập nhật hoá đơn: " + (e.message || e), "err");
+    } finally {
+      setCapNhatHoaDonBusy(false);
+    }
   };
 
   // In-memory row cache per account tab — avoids loading stale LS data when switching back
@@ -5150,6 +5215,12 @@ function ConfirmScreen({
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [hachFilter, setHachFilter] = useState(""); // lọc theo đúng mã hạch toán (VD "331", "1111")
+  // Lọc theo khoảng ngày (Từ ngày/Đến ngày, <input type="date"> nên ở dạng yyyy-mm-dd) — dùng khi
+  // người dùng LUÔN làm tiếp trên cùng 1 phiên sao kê (dán chồng lấn nhiều đợt) thay vì xử lý xong
+  // 1 đợt rồi xoá làm đợt mới: xem lại ĐÚNG khoảng ngày đang cần, gồm CẢ giao dịch đã xử lý lẫn chưa
+  // xử lý (không thay thế filter theo trạng thái ở trên — cộng dồn/AND với filter đó).
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [pickerFor, setPickerFor] = useState(null);
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerSelected, setPickerSelected] = useState(new Set());
@@ -5695,6 +5766,7 @@ function ConfirmScreen({
     if (filter === "msterror" && !isMstErrorRow(r)) return false;
     if (locTuModal && !locTuModal.has(r.id)) return false;
     if (hachFilter && r.confirmedHach !== hachFilter) return false;
+    if (!ngayTrongKhoang(r.tx.date, dateFrom, dateTo)) return false;
     if (search && !r.tx.desc.toLowerCase().includes(search.toLowerCase()) && !(r.confirmedName || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
     // Sort: tiền vào (credit) first, then tiền ra (debit) - display only, NOT for export
@@ -5708,6 +5780,11 @@ function ConfirmScreen({
     if (aIsIn !== bIsIn) return aIsIn - bIsIn;
     return 0;
   });
+  // Phạm vi xuất chứng từ (UNT/UNC + Import vào MISA) — CHỈ lọc theo khoảng ngày đang chọn (Từ
+  // ngày/Đến ngày), KHÔNG cộng thêm filter trạng thái (Tất cả/Chờ/Tự động/...)/tìm kiếm ở trên —
+  // xuất chứng từ luôn cần đủ toàn bộ giao dịch ĐÃ XÁC NHẬN trong khoảng ngày đó, dù đang xem lọc gì
+  // trên màn hình. Không chọn khoảng ngày (dateFrom/dateTo rỗng) thì ra đúng y như trước (toàn bộ rows).
+  const rowsForExport = (dateFrom || dateTo) ? rows.filter(r => ngayTrongKhoang(r.tx.date, dateFrom, dateTo)) : rows;
   const addToDict = (mst, ten_cty, kw, isGlobal, hach) => {
     if (!kw) return;
     const entry = {
@@ -6576,10 +6653,17 @@ function ConfirmScreen({
       if (!newSaoke.length) { showToast && showToast("Không nhận diện được giao dịch nào"); setAddBusy(false); return; }
       const apiKey = LS.get("api_key") || "";
       const newResults = await runMatching(newSaoke, invDV||[], invDR||[], coDict, globalDict, apiKey, () => {}, co && co.name);
+      // Khớp theo NGÀY + DIỄN GIẢI + SỐ TIỀN — dòng nào đã có sẵn (trùng cả 3, đúng là 1 giao dịch
+      // thật đã xử lý trước đó) thì GIỮ NGUYÊN dòng cũ (không tạo dòng thứ 2, không đụng vào trạng
+      // thái đã xác nhận/hạch toán đã làm — đây chính là "ghi đè" theo nghĩa dữ liệu cũ vẫn là dữ
+      // liệu đúng, không bị nhân đôi); dòng nào KHÔNG khớp (thật sự chưa có) mới được thêm mới để xử
+      // lý. Nhờ vậy dán CHỒNG LẤN nhiều đợt sao kê (VD Bước 1 dán Jan-Mar, sau đó dán tiếp Feb-Apr để
+      // làm nối tiếp mà không xoá dữ liệu cũ) không bao giờ tạo giao dịch trùng.
       const keyOf = r => (r.tx.date||"") + "|" + (r.tx.desc||"").trim() + "|" + Math.max(r.tx.debit||0, r.tx.credit||0);
       const existKeys = new Set(rows.map(keyOf));
       const uniqueNew = newResults.filter(nr => !existKeys.has(keyOf(nr)));
-      if (!uniqueNew.length) { showToast && showToast("Tất cả giao dịch đã có sẵn (trùng lặp)"); setAddBusy(false); return; }
+      const soDaCoSan = newResults.length - uniqueNew.length;
+      if (!uniqueNew.length) { showToast && showToast(`Cả ${newResults.length} giao dịch đều đã có sẵn (giữ nguyên, không thêm trùng)`); setAddBusy(false); return; }
       const mergedRows = [...rows, ...uniqueNew];
       // ── LƯU TRỰC TIẾP & ĐẦY ĐỦ vào đúng key của tab (atomic) ──
       const saveKey = tabId ? co.id+"_"+tabId : co.id;
@@ -6597,7 +6681,8 @@ function ConfirmScreen({
       undoStack.current = [...undoStack.current.slice(-29), rows];
       redoStack.current = [];
       setRows(mergedRows);
-      showToast && showToast("✓ Đã thêm " + uniqueNew.length + " giao dịch mới");
+      showToast && showToast("✓ Đã thêm " + uniqueNew.length + " giao dịch mới" +
+        (soDaCoSan > 0 ? " (" + soDaCoSan + " giao dịch đã có sẵn — giữ nguyên, không thêm trùng)" : ""));
       setAddText("");
       setAddMode(false);
     } catch (e) {
@@ -7086,6 +7171,11 @@ function ConfirmScreen({
     }, "Thêm")
   ),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
+    disabled: capNhatHoaDonBusy,
+    title:"Lấy lại hoá đơn đầu vào/đầu ra MỚI NHẤT từ Tra cứu hoá đơn (phần mềm chính) — dùng khi công cụ tra cứu hoá đơn vừa chạy xong sau, không cần quay lại Bước 1.",
+    onClick: capNhatHoaDon
+  }, capNhatHoaDonBusy ? "⏳ Đang cập nhật..." : "🔄 Cập nhật hoá đơn"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
     title:"Quản lý Tờ khai Hải quan NK — nhập từ file tờ khai, dùng để gắn vào GD thanh toán",
     onClick:()=>{setTokhaiPickForRow(null);setTokhaiModalOpen(true);}
   }, "📋 Tờ Khai NK" + (tokhaiList.length ? " (" + tokhaiList.length + ")" : "")),
@@ -7109,14 +7199,14 @@ function ConfirmScreen({
     onClick:()=>exportExcel(rows,co&&co.name||"export",[...coDict,...globalDict])
   }, "\uD83D\uDCE5 Xu\u1EA5t Excel"),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
-    title:"Xuất chứng từ thu tiền (tiền vào) theo mẫu import MISA",
-    onClick:()=>exportUNT(rows, co&&co.name||"export", (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
+    title:"Xuất chứng từ thu tiền (tiền vào) theo mẫu import MISA" + ((dateFrom||dateTo) ? " — CHỈ trong khoảng ngày đang lọc" : ""),
+    onClick:()=>exportUNT(rowsForExport, co&&co.name||"export", (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
       (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label),
       (activeTabAcc&&activeTabAcc.bankName) || suggestBankName(activeTabAcc&&activeTabAcc.label), showToast, [...tokhaiList, ...tokhaiXKList])
   }, "\uD83D\uDCE5 Xuất UNT"),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
-    title:"Xuất chứng từ chi tiền gửi (tiền ra) theo mẫu import MISA",
-    onClick:()=>exportUNC(rows, co&&co.name||"export", (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
+    title:"Xuất chứng từ chi tiền gửi (tiền ra) theo mẫu import MISA" + ((dateFrom||dateTo) ? " — CHỈ trong khoảng ngày đang lọc" : ""),
+    onClick:()=>exportUNC(rowsForExport, co&&co.name||"export", (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
       (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label),
       (activeTabAcc&&activeTabAcc.bankName) || suggestBankName(activeTabAcc&&activeTabAcc.label), showToast, [...tokhaiList, ...tokhaiXKList])
   }, "\uD83D\uDCE5 Xu\u1EA5t UNC"),/*#__PURE__*/React.createElement("button",{
@@ -7125,7 +7215,7 @@ function ConfirmScreen({
     title:"Ghi ch\u1EE9ng t\u1EEB thu ti\u1EC1n (ti\u1EC1n v\u00E0o) TH\u1EB2NG v\u00E0o CSDL MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 kh\u00F4ng c\u1EA7n import tay file Excel. T\u00EDnh n\u0103ng M\u1EDAI, lu\u00F4n hi\u1EC7n xem tr\u01B0\u1EDBc tr\u01B0\u1EDBc khi ghi th\u1EADt.",
     onClick:async()=>{
       setMisaImportBusy(true);
-      const st=await previewThuChiVaoMisa(rows, "unt", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
+      const st=await previewThuChiVaoMisa(rowsForExport, "unt", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
         (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
         (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast);
       setMisaImportBusy(false);
@@ -7137,7 +7227,7 @@ function ConfirmScreen({
     title:"Ghi ch\u1EE9ng t\u1EEB chi ti\u1EC1n g\u1EEDi (ti\u1EC1n ra) TH\u1EB2NG v\u00E0o CSDL MISA \u0111ang k\u1EBFt n\u1ED1i \u2014 kh\u00F4ng c\u1EA7n import tay file Excel. T\u00EDnh n\u0103ng M\u1EDAI, lu\u00F4n hi\u1EC7n xem tr\u01B0\u1EDBc tr\u01B0\u1EDBc khi ghi th\u1EADt.",
     onClick:async()=>{
       setMisaImportBusy(true);
-      const st=await previewThuChiVaoMisa(rows, "unc", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
+      const st=await previewThuChiVaoMisa(rowsForExport, "unc", co&&co.mst, [...tokhaiList, ...tokhaiXKList],
         (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
         (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label), showToast);
       setMisaImportBusy(false);
@@ -7378,6 +7468,30 @@ function ConfirmScreen({
     }
   }, /*#__PURE__*/React.createElement("option", {value:""}, "T\u1EA5t c\u1EA3 h\u1EA1ch to\u00E1n"),
     usedHachCodes.map(hc => /*#__PURE__*/React.createElement("option", {key: hc, value: hc}, "H\u1EA1ch to\u00E1n " + hc))
+  ),
+  /*#__PURE__*/React.createElement("div", {
+    title: "L\u1ECDc theo kho\u1EA3ng ng\u00E0y \u2014 hi\u1EC7n C\u1EA2 giao d\u1ECBch \u0111\u00E3 x\u1EED l\u00FD l\u1EABn ch\u01B0a x\u1EED l\u00FD trong kho\u1EA3ng n\u00E0y (c\u1ED9ng " +
+      "d\u1ED3n v\u1EDBi b\u1ED9 l\u1ECDc tr\u1EA1ng th\u00E1i \u1EDF tr\u00EAn), d\u00F9ng khi l\u00E0m TI\u1EBEP T\u1EE4C tr\u00EAn c\u00F9ng 1 phi\u00EAn sao k\u00EA thay v\u00EC xo\u00E1 " +
+      "l\u00E0m l\u1EA1i. C\u0169ng thu h\u1EB9p \u0111\u00FAng ph\u1EA1m vi khi Xu\u1EA5t/Import UNT/UNC v\u00E0o MISA.",
+    style: { display: "flex", alignItems: "center", gap: 4, padding: "0 4px", background: (dateFrom||dateTo) ? "#eef4fa" : "transparent", borderRadius: 6 }
+  },
+    /*#__PURE__*/React.createElement("span", { style: { fontSize: 11, color: "var(--text2)" } }, "\uD83D\uDCC5"),
+    /*#__PURE__*/React.createElement("input", {
+      type: "date", value: dateFrom,
+      onChange: e => { setDateFrom(e.target.value); setFocusIdx(0); clearBulkSelection(); },
+      style: { height: 32, fontSize: 12, borderRadius: 6, border: "1px solid var(--border)", padding: "0 4px" }
+    }),
+    /*#__PURE__*/React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, "\u2192"),
+    /*#__PURE__*/React.createElement("input", {
+      type: "date", value: dateTo,
+      onChange: e => { setDateTo(e.target.value); setFocusIdx(0); clearBulkSelection(); },
+      style: { height: 32, fontSize: 12, borderRadius: 6, border: "1px solid var(--border)", padding: "0 4px" }
+    }),
+    (dateFrom || dateTo) && /*#__PURE__*/React.createElement("button", {
+      onClick: () => { setDateFrom(""); setDateTo(""); setFocusIdx(0); },
+      title: "B\u1ECF l\u1ECDc theo ng\u00E0y",
+      style: { height: 24, width: 24, borderRadius: 5, border: "1px solid var(--border)", background: "#fff", cursor: "pointer", fontSize: 12, lineHeight: "22px", padding: 0 }
+    }, "\u2715")
   ), /*#__PURE__*/React.createElement("input", {
     ref: searchInputRef,
     value: search,
