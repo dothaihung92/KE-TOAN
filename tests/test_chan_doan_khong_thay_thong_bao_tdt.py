@@ -27,17 +27,21 @@ def _lay_than_ham(ten_ham):
 than_thongbao = _lay_than_ham('_dvc_browser_thongbao')
 than_batch = _lay_than_ham('_dvc_run_batch')
 
-# ===== Test 1 (QUAN TRỌNG — đúng ca thật): vòng lặp đọc idTbao trong
-# _dvc_browser_thongbao() phải thử LẠI NHIỀU LẦN HƠN (>=4) trước khi kết
-# luận "không thấy idTbao" — 2 lần/1.5s có thể chưa đủ cho trang render
-# xong khung SPA (cùng nguyên nhân với lỗi jQuery chậm ở bước tải). =====
+# ===== Test 1 (QUAN TRỌNG — đúng ca thật): PHẢI đợi jQuery thật nạp xong
+# RỒI MỚI đọc page_source để dò idTbao — mục "Danh sách thông báo" do
+# chính script của trang render ra SAU khi HTML tải xong, đọc sớm sẽ thấy
+# rỗng và kết luận nhầm "CQT chưa phát hành thông báo". Bản gỡ bước đợi
+# này đi (thay bằng sleep cứng + thử lại nhiều lần) đã báo "không tìm
+# thấy Thông báo" hàng loạt; bản .284 có bước đợi thì dò được bình
+# thường. =====
 khoi_doc_id = than_thongbao[:than_thongbao.index('ids = _dvc_parse_id_tbao(html)')]
-m_loop = re.search(r'for\s+\w+\s+in\s+range\((\d+)\)', khoi_doc_id)
-assert m_loop and int(m_loop.group(1)) >= 4, (
-    f"Vòng lặp đọc idTbao trong _dvc_browser_thongbao() phải thử lại ÍT NHẤT 4 lần (tăng từ 2) — "
-    f"trang có thể chưa kịp render xong khung SPA ở vài lượt điều hướng, giống nguyên nhân khiến "
-    f"jQuery nạp chậm ở bước tải file.")
-print(f"PASS 1: vòng lặp đọc idTbao thử lại {m_loop.group(1)} lần (tăng từ 2).")
+assert '_dvc_wait_jquery(' in khoi_doc_id, (
+    "_dvc_browser_thongbao() phải gọi _dvc_wait_jquery() TRƯỚC khi đọc page_source để dò idTbao — "
+    "đọc khi script của trang chưa chạy xong sẽ thấy trang rỗng và báo nhầm 'không tìm thấy Thông "
+    "báo' hàng loạt (đúng lỗi đã xảy ra khi gỡ bước đợi này).")
+assert khoi_doc_id.index('_dvc_wait_jquery(') < khoi_doc_id.index('drv.page_source'), (
+    "Phải ĐỢI jQuery TRƯỚC rồi mới đọc drv.page_source, không được làm ngược lại.")
+print("PASS 1: đợi jQuery thật nạp xong rồi mới đọc trang để dò idTbao.")
 
 # ===== Test 2 (QUAN TRỌNG — đúng ca thật): khi không thấy idTbao, PHẢI
 # ghi kèm trạng thái jQuery lúc đó vào thông điệp diag trả về — để biết

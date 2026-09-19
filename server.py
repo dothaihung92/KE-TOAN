@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-18.308"
+APP_BUILD = "2026-09-19.309"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4283,33 +4283,33 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     báo thật sự tồn tại trên cổng (đã xác nhận qua báo cáo thật: hồ sơ nguồn
     TDT có Thông báo trên cổng nhưng gọi thiếu loai=ETAX báo 'không thấy').
 
-    Đọc idTbao chỉ cần HTML render xong, không cần jQuery. Nhưng
-    _JS_DOWNLOAD_TB (tải file thông báo) dùng $.ajax() (xem
-    _dvc_browser_download_tdt — bản fetch() gây 403 Forbidden, quay lại
-    $.ajax() mới tải được), nên trước khi gọi cần đảm bảo $.ajax() tồn tại
-    — xem _dvc_dam_bao_jquery() (chẩn đoán Performance API xác nhận trang
-    chi tiết KHÔNG HỀ tự tải jQuery khi vào thẳng link, chờ/thử lại vô
-    ích, phải tự đưa vào).
-
-    Người dùng nghi ngờ đúng: "tải nhiều tháng báo ko tìm thấy thông báo
-    thuế là sẽ ko tải được file" — không tìm thấy idTbao (mục "Danh sách
-    thông báo" render bằng JS SAU khi trang tải HTML xong) và không nạp
-    được jQuery thật (script riêng) đều CÙNG 1 nguyên nhân gốc: trang
-    không tự tải thêm gì khi vào thẳng link (khác hẳn điều hướng từ bên
-    trong ứng dụng), không hẳn là CQT chưa phát hành thông báo. Tăng số
-    lần/thời gian thử lại đọc idTbao (2 lần/1.5s -> 4 lần/2.5s) và ghi
-    kèm trạng thái jQuery thật lúc đó vào chẩn đoán để biết có đúng cùng
-    nguyên nhân hay không."""
+    Người dùng nghi ngờ ĐÚNG: "tải nhiều tháng báo ko tìm thấy thông báo
+    thuế là sẽ ko tải được file" — cả 2 cùng 1 nguyên nhân: ĐỌC/GỌI KHI
+    SCRIPT CỦA TRANG CHƯA CHẠY XONG. Mục "Danh sách thông báo" do chính
+    script của trang render ra SAU khi HTML tải xong, còn $.ajax() (tải
+    file thông báo) thì cần đúng jQuery của trang. Vì vậy cả 2 bước đều
+    phải ĐỢI jQuery thật nạp xong (_dvc_wait_jquery) — đúng cách bản .284
+    làm, bản người dùng xác nhận chạy được; bản gỡ bước đợi này đi lập
+    tức báo "không tìm thấy Thông báo" hàng loạt VÀ không tải được file
+    nào. Bản $.ajax() tối giản (_dvc_dam_bao_jquery) chỉ là phương án
+    cuối khi đợi hết giờ — xem _dvc_browser_download_tdt."""
     import time as _t
     out, diag = [], []
     html = ""
-    for lan_thu in range(4):
+    for lan_thu in range(2):
         try:
             drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
-            _t.sleep(2.5)
+            _t.sleep(1.2)
+            # ĐỢI jQuery thật nạp xong RỒI MỚI đọc page_source — mục "Danh
+            # sách thông báo" do chính script của trang render ra SAU khi
+            # HTML tải xong, nên đọc sớm sẽ thấy trang rỗng và kết luận
+            # nhầm "CQT chưa phát hành thông báo". Đúng cách bản .284 làm
+            # (bản người dùng xác nhận chạy được); có bản đã gỡ bước đợi
+            # này và lập tức báo "không tìm thấy Thông báo" hàng loạt.
+            _dvc_wait_jquery(drv, 10)
             html = drv.page_source or ""
         except Exception as e:
-            if lan_thu == 3:
+            if lan_thu == 1:
                 return out, [f"lỗi mở chi tiết {ma}: {e}"]
             continue
         if html and _dvc_parse_id_tbao(html):
@@ -4330,10 +4330,12 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
         diag.append(f"{ma}: không thấy idTbao (jQuery lúc đó: {'có' if co_jquery else 'KHÔNG'})"
                      + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
         return out, diag
-    # Có idTbao cần tải -> cần $.ajax() cho _JS_DOWNLOAD_TB. Trang không tự
-    # tải jQuery khi vào thẳng link (xác nhận qua chẩn đoán Performance
-    # API) nên tự đưa vào thay vì chờ/thử lại (đã xác nhận vô ích).
-    _dvc_dam_bao_jquery(drv)
+    # Có idTbao cần tải -> cần jQuery THẬT của trang cho $.ajax()
+    # (_JS_DOWNLOAD_TB), vì chính script của trang mới tự gắn đúng token
+    # CSRF. Chỉ khi đợi hết giờ vẫn chưa có mới dùng bản tối giản (phương
+    # án cuối) — xem giải thích đầy đủ ở _dvc_browser_download_tdt.
+    if not _dvc_wait_jquery(drv, 10):
+        _dvc_dam_bao_jquery(drv)
     for idt in ids:
         body = json.dumps({"idTbao": idt, "loaiTBao": ""})
         try:
@@ -4801,30 +4803,34 @@ def _dvc_browser_download_tdt(drv, ma):
     cảnh/referer, rồi gọi POST /tthc/tchs/downloadhoso-tdt?loaiTraCuu=ETAX
     (endpoint đã xác nhận qua request bắt được từ trình duyệt).
 
-    LỊCH SỬ: từng nghĩ lỗi "$ is not defined" là do jQuery nạp CHẬM (thử
-    chờ/thử lại nhiều vòng, tăng dần 3->5 lần/10->15s) nhưng người dùng
-    xác nhận KHÔNG cải thiện ("không phải do thời gian chờ"). Chẩn đoán
-    tạm thời qua Performance API (đã gỡ sau khi dùng xong — chỉ để tìm
-    nguyên nhân, không cần giữ lại trong code chạy thật) xác nhận DỨT
-    KHOÁT: trang chi tiết vào THẲNG bằng drv.get() KHÔNG HỀ có thẻ
-    <script> nào tải jQuery (the_script:[], tai_nguyen:[] cho CẢ 12/12
-    hồ sơ test) — không phải chờ chưa đủ lâu, mà ĐƠN GIẢN LÀ KHÔNG CÓ
-    YÊU CẦU TẢI jQuery khi vào thẳng link (chỉ tải khi điều hướng từ BÊN
-    TRONG ứng dụng qua router riêng).
+    PHẢI ĐỢI jQuery THẬT của trang nạp xong rồi mới gọi $.ajax() — đây
+    chính là cách bản .284 làm và người dùng xác nhận bản đó TẢI ĐƯỢC
+    (chỉ thiếu vài tờ khai do lỗi tra cứu khác). Lý do: jQuery thật đi
+    kèm chính các script của trang, trong đó có phần tự gắn token CSRF
+    cho mọi request AJAX — dùng đúng jQuery của trang thì khỏi phải đoán
+    token (mọi lần tự đoán token đều sai, xem lịch sử _JS_DOWNLOAD_TDT).
 
-    Sửa đúng gốc: TỰ ĐƯA vào trang 1 bản $.ajax() tối giản qua
-    _dvc_dam_bao_jquery() (xem _JS_DAM_BAO_JQUERY) — không cần chờ/thử
-    lại trang tự tải jQuery nữa (đã xác nhận vô ích), không cần đoán
-    CSRF (đúng hành vi $.ajax() gốc: tự gắn 'X-Requested-With', không tự
-    gắn X-XSRF-TOKEN — dựa vào cookie phiên + Referer đúng trang là đủ,
-    xác nhận qua nhiều lần đối chiếu request thật)."""
+    BÀI HỌC (đừng lặp lại): có bản đã GỠ BỎ bước đợi này, thay bằng tự
+    cài ngay bản $.ajax() tối giản — hậu quả KHÔNG TẢI ĐƯỢC TỜ NÀO (bản
+    tối giản không có phần tự gắn token của trang). Quyết định gỡ dựa
+    trên chẩn đoán Performance API lọc script có chữ "jquery" trong
+    đường dẫn, thấy rỗng rồi KẾT LUẬN SAI rằng trang không hề tải jQuery
+    — thực ra trang gói jQuery trong file bundle mang tên khác (app/
+    vendor/main...) nên không khớp bộ lọc. Rỗng chỉ có nghĩa "không có
+    đường dẫn nào chứa chữ jquery", KHÔNG có nghĩa "không có jQuery".
+
+    Bản $.ajax() tối giản (_dvc_dam_bao_jquery) CHỈ dùng làm phương án
+    CUỐI khi đợi hết giờ mà jQuery thật vẫn chưa có — lúc đó bản .284 sẽ
+    lỗi "$ is not defined", nên thử bản tối giản vẫn hơn là chắc chắn
+    hỏng."""
     import time as _t
     try:
         drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
         _t.sleep(1.0)
     except Exception:
         pass
-    _dvc_dam_bao_jquery(drv)
+    if not _dvc_wait_jquery(drv, 10):
+        _dvc_dam_bao_jquery(drv)
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).
