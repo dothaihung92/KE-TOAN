@@ -33,7 +33,7 @@ than_batch = _lay_than_ham('_dvc_run_batch')
 # này đi (thay bằng sleep cứng + thử lại nhiều lần) đã báo "không tìm
 # thấy Thông báo" hàng loạt; bản .284 có bước đợi thì dò được bình
 # thường. =====
-khoi_doc_id = than_thongbao[:than_thongbao.index('ids = _dvc_parse_id_tbao(html)')]
+khoi_doc_id = than_thongbao[:re.search(r'ids = _dvc_parse_id_tbao\(', than_thongbao).start()]
 assert '_dvc_wait_jquery(' in khoi_doc_id, (
     "_dvc_browser_thongbao() phải gọi _dvc_wait_jquery() TRƯỚC khi đọc page_source để dò idTbao — "
     "đọc khi script của trang chưa chạy xong sẽ thấy trang rỗng và báo nhầm 'không tìm thấy Thông "

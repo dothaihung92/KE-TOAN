@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.311"
+APP_BUILD = "2026-09-19.312"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2839,10 +2839,17 @@ def _dvc_parse_ma_ho_so(html):
     return found
 
 
-def _dvc_parse_id_tbao(html):
+def _dvc_parse_id_tbao(html, ma_ho_so=""):
     """Bóc idTbao của các thông báo (Tiếp nhận / Xác nhận) trong trang chi tiết hồ sơ.
-    Trả về list (idTbao, loaiTBao_đoán)."""
+
+    ma_ho_so: mã hồ sơ của CHÍNH trang đang đọc — PHẢI loại ra khỏi kết
+    quả. Mã hồ sơ (17 chữ số) nằm đầy trên trang nên khớp luôn các mẫu
+    dưới đây; gửi nhầm nó làm idTbao thì máy chủ trả 500 "Tải file thất
+    bại." (đúng lỗi thật đã gặp: idTbao gửi đi = 11320240228940064 =
+    chính mã hồ sơ). Trước đây không lộ ra vì trang chưa nạp được nên
+    không khớp gì cả."""
     import re as _re
+    ma_ho_so = "".join(ch for ch in str(ma_ho_so or "") if ch.isdigit())
     ids, seen = [], set()
     pats = [
         r'idTbao["\'\s:=]+["\']?(\d{12,22})',
@@ -2852,7 +2859,7 @@ def _dvc_parse_id_tbao(html):
     ]
     for p in pats:
         for m in _re.findall(p, html, _re.IGNORECASE):
-            if m and m not in seen:
+            if m and m not in seen and m != ma_ho_so:
                 seen.add(m); ids.append(m)
     return ids
 
@@ -4227,6 +4234,22 @@ def _dvc_browser_search(drv, tu, den, so_lan=8):
     return [], diag
 
 def _dvc_browser_download(drv, ma):
+    """Tải tờ khai nguồn DVC (từ 01/07/2025) — POST /tthc/tchs/downloadhoso.
+
+    Mở ĐÚNG trang chi tiết hồ sơ rồi đợi script của trang chạy xong trước
+    khi gọi, y hệt _dvc_browser_download_tdt (cách đã xác nhận tải được).
+    Trước đây hàm này KHÔNG tự mở trang mà gọi thẳng $.ajax trên trang
+    hiện tại — mà trang hiện tại lúc đó là trang chi tiết do
+    _dvc_browser_thongbao vừa mở, nếu trang đó chưa nạp xong script thì
+    $ chưa tồn tại -> "$ is not defined", đúng lỗi người dùng báo "tờ
+    khai từ sau 07/2025 phần mềm chưa tải được"."""
+    import time as _t
+    try:
+        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=")
+        _t.sleep(1.0)
+        _dvc_wait_jquery(drv, 10)
+    except Exception:
+        pass
     res = drv.execute_async_script(_JS_DOWNLOAD, ma)
     if not res or not res.get("ok"):
         raise Exception(f"{res}")
@@ -4273,12 +4296,15 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
         html = drv.page_source or ""
     except Exception as e:
         return out, [f"lỗi mở chi tiết {ma}: {e}"]
-    ids = _dvc_parse_id_tbao(html)
+    ids = _dvc_parse_id_tbao(html, ma)
     if not ids:
-        # dò manh mối để tinh chỉnh sau
+        # Dò manh mối để tinh chỉnh mẫu nhận dạng: cắt đoạn HTML quanh chỗ
+        # nhắc tới "thông báo" (lấy rộng hơn trước — 80 ký tự quá ngắn,
+        # không đủ thấy cấu trúc thẻ/hàm JS tải thông báo để biết idTbao
+        # thật nằm ở đâu).
         import re as _re
-        m = _re.search(r'.{0,40}(?:hongBao|hong báo|Tbao).{0,40}', html)
-        diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
+        m = _re.search(r'.{0,90}(?:hongBao|hong báo|Tbao|hongbao).{0,150}', html, _re.IGNORECASE)
+        diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:240]}" if m else ""))
         return out, diag
     for idt in ids:
         body = json.dumps({"idTbao": idt, "loaiTBao": ""})
@@ -5680,7 +5706,9 @@ def _dvc_run_batch(batch_id, cids, body):
                                     item["so_khong_co_tb"] = item.get("so_khong_co_tb", 0) + 1
                                     mau_tb = item.setdefault("khong_co_tb_mau", [])
                                     if len(mau_tb) < _DVC_LOI_TAI_TOI_DA:
-                                        ghi_chu_tb = "; ".join(tb_diag)[:100]
+                                        # để rộng (100 quá ngắn, cắt mất đoạn HTML
+                                        # gợi ý cần đọc để chỉnh mẫu nhận dạng)
+                                        ghi_chu_tb = "; ".join(tb_diag)[:300]
                                         nhan = str(rec.get("to_khai") or ten_goi)[:80]
                                         mau_tb.append(f"{nhan} ({ghi_chu_tb})" if ghi_chu_tb else nhan)
                                 for k, (fn, raw) in enumerate(tb_files, 1):
