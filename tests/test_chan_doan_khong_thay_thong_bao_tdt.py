@@ -4,18 +4,17 @@ import re
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 
-# Regression test (nguồn) — người dùng nghi ngờ: "tải nhiều tháng phần
-# mềm báo ko tìm thấy thông báo thuế là sẽ ko tải được file" — tức "không
-# thấy idTbao" và lỗi "$ is not defined" ở bước tải file CÙNG hồ sơ có thể
-# CÙNG 1 nguyên nhân (trang chưa kịp khởi động xong khung SPA ở lượt điều
-# hướng đó), không hẳn là CQT chưa phát hành thông báo như vẫn ghi chú.
+# Regression test (nguồn) — người dùng nghi ngờ ĐÚNG: "tải nhiều tháng
+# phần mềm báo ko tìm thấy thông báo thuế là sẽ ko tải được file" — cả 2
+# cùng 1 gốc: ĐỌC/GỌI KHI SCRIPT CỦA TRANG CHƯA CHẠY XONG. Mục "Danh sách
+# thông báo" do chính script của trang render ra SAU khi HTML tải xong,
+# nên phải đợi rồi mới đọc page_source; không hẳn là CQT chưa phát hành.
 #
-# 2 thay đổi: (1) tăng số lần/thời gian thử lại đọc idTbao (2 lần/1.5s ->
-# 4 lần/2.5s), giống mức tăng đã áp dụng cho bước tải file; (2) đính kèm
-# trạng thái jQuery lúc không tìm thấy idTbao vào chẩn đoán, và THỰC SỰ
-# hiện ra cho người dùng (trước đó _dvc_run_batch() gọi
-# _dvc_browser_thongbao() nhưng VỨT BỎ giá trị diag trả về — dù hàm có
-# trả về gợi ý gì cũng không ai thấy được) để xác nhận/bác bỏ nghi ngờ.
+# Test này khoá 2 điểm: (1) đợi script của trang chạy xong rồi mới đọc
+# trang để dò idTbao (đúng trình tự bản .284 — bản người dùng xác nhận
+# chạy được); (2) _dvc_run_batch() phải thực sự HIỂN THỊ diag trả về từ
+# _dvc_browser_thongbao() (trước đó vứt bỏ vào biến "_", nên hàm có trả
+# về gợi ý gì cũng không ai thấy).
 
 
 def _lay_than_ham(ten_ham):
@@ -43,17 +42,13 @@ assert khoi_doc_id.index('_dvc_wait_jquery(') < khoi_doc_id.index('drv.page_sour
     "Phải ĐỢI jQuery TRƯỚC rồi mới đọc drv.page_source, không được làm ngược lại.")
 print("PASS 1: đợi jQuery thật nạp xong rồi mới đọc trang để dò idTbao.")
 
-# ===== Test 2 (QUAN TRỌNG — đúng ca thật): khi không thấy idTbao, PHẢI
-# ghi kèm trạng thái jQuery lúc đó vào thông điệp diag trả về — để biết
-# có đúng cùng nguyên nhân với lỗi tải file hay không. =====
-idx_khong_thay = than_thongbao.index("không thấy idTbao")
-doan_quanh = than_thongbao[max(0, idx_khong_thay - 400):idx_khong_thay + 100]
-assert 'jquery' in doan_quanh.lower(), (
-    "Thông điệp 'không thấy idTbao' phải kèm trạng thái jQuery lúc đó (có/không) để xác nhận/bác bỏ "
-    "nghi ngờ của người dùng rằng 2 lỗi cùng 1 nguyên nhân.")
-print("PASS 2: thông điệp 'không thấy idTbao' kèm trạng thái jQuery lúc đó.")
+# (Đã bỏ phần kiểm tra "ghi kèm trạng thái jQuery vào thông điệp không
+# thấy idTbao": chẩn đoán đó GÂY HIỂU NHẦM — nó báo "jQuery lúc đó:
+# KHÔNG" cho mọi hồ sơ vì _dvc_wait_jquery đòi cả window.jQuery, trong
+# khi trang thật sự vẫn có $ dùng được và bản .284 vẫn tải được bình
+# thường. Tin vào chẩn đoán đó đã dẫn tới bản sửa sai gây 403 hàng loạt.)
 
-# ===== Test 3 (QUAN TRỌNG — đúng ca thật, không hồi quy): _dvc_run_batch()
+# ===== Test 2 (QUAN TRỌNG — đúng ca thật, không hồi quy): _dvc_run_batch()
 # PHẢI thực sự LẤY và HIỂN THỊ giá trị diag trả về từ _dvc_browser_thongbao()
 # vào khong_co_tb_mau — trước đó bị vứt bỏ (gán vào biến "_"), khiến chẩn
 # đoán dù có thêm cũng không ai thấy được. =====
@@ -63,6 +58,6 @@ assert 'tb_files, tb_diag = _dvc_browser_thongbao(' in than_batch, (
 assert 'tb_diag' in than_batch[than_batch.index('tb_files, tb_diag ='):than_batch.index('tb_files, tb_diag =') + 800], (
     "_dvc_run_batch() phải dùng biến tb_diag (vd đưa vào khong_co_tb_mau) chứ không chỉ lấy ra rồi bỏ "
     "không dùng.")
-print("PASS 3: _dvc_run_batch() lấy và hiển thị chẩn đoán diag từ _dvc_browser_thongbao().")
+print("PASS 2: _dvc_run_batch() lấy và hiển thị chẩn đoán diag từ _dvc_browser_thongbao().")
 
 print("\nALL DONE")

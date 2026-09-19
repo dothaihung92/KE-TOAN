@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.309"
+APP_BUILD = "2026-09-19.310"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -4074,52 +4074,16 @@ def _dvc_qua_man_chon_loai_tk(drv, giay_cho=15):
     return False
 
 
-# Chẩn đoán qua Performance API (build .306) xác nhận DỨT KHOÁT: trang chi
-# tiết hồ sơ (.../files/detail/{ma}?loai=...) vào THẲNG bằng drv.get()
-# KHÔNG HỀ có thẻ <script> nào tải jQuery (the_script:[], tai_nguyen:[]) —
-# không phải tải CHẬM (đợi/thử lại bao lâu cũng vô ích, đúng như người
-# dùng xác nhận "không phải do thời gian chờ") mà ĐƠN GIẢN LÀ KHÔNG CÓ YÊU
-# CẦU TẢI jQuery khi vào thẳng link (chỉ tải khi điều hướng từ BÊN TRONG
-# ứng dụng qua router riêng, không phải hard navigation). Vậy hướng đúng
-# không phải chờ/thử lại nữa mà TỰ ĐƯA vào trang 1 bản $.ajax() tối giản
-# (không cần internet/CDN ngoài, không phụ thuộc trang web nguồn) — chỉ
-# cần đúng hành vi jQuery $.ajax() mà _JS_DOWNLOAD_TDT/_JS_DOWNLOAD_TB
-# đang dùng (POST JSON, tự động gắn 'X-Requested-With: XMLHttpRequest' —
-# đúng mặc định thật của jQuery, không phải fetch() vốn không tự gắn).
-_JS_DAM_BAO_JQUERY = r"""
-if (typeof window.$ === 'undefined' || typeof window.$.ajax !== 'function') {
-  window.jQuery = window.$ = {
-    ajax: function(opts) {
-      try {
-        var xhr = new XMLHttpRequest();
-        xhr.open(opts.type || 'GET', opts.url, true);
-        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-        if (opts.contentType) xhr.setRequestHeader('Content-Type', opts.contentType);
-        xhr.onload = function() {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            var d; try { d = JSON.parse(xhr.responseText); } catch(e) { d = xhr.responseText; }
-            if (opts.success) opts.success(d);
-          } else if (opts.error) {
-            opts.error({status: xhr.status, responseText: xhr.responseText});
-          }
-        };
-        xhr.onerror = function() { if (opts.error) opts.error({status: 0, responseText: ''}); };
-        xhr.send(opts.data);
-      } catch(e) { if (opts.error) opts.error({status: 0, responseText: ''+e}); }
-    }
-  };
-}
-"""
-
-def _dvc_dam_bao_jquery(drv):
-    """Đưa $.ajax() tối giản vào trang nếu jQuery thật chưa có — xem
-    _JS_DAM_BAO_JQUERY. Gọi NGAY TRƯỚC khi execute_async_script() các khối
-    _JS_DOWNLOAD_TDT/_JS_DOWNLOAD_TB, thay cho việc chờ/thử lại jQuery thật
-    (đã xác nhận vô ích — trang không hề tải jQuery khi vào thẳng link)."""
-    try:
-        drv.execute_script(_JS_DAM_BAO_JQUERY)
-    except Exception:
-        pass
+# ĐÃ THỬ VÀ ĐÃ GỠ — ĐỪNG LÀM LẠI: từng tự cài vào trang 1 bản $.ajax()
+# tối giản (XMLHttpRequest thuần) để thay jQuery thật khi trang chưa nạp
+# xong. Kết quả THẬT: hỏng NẶNG HƠN — lỗi đổi từ "$ is not defined" sang
+# 403 Forbidden cho 22/22 hồ sơ, VÀ hỏng luôn nhánh DVC (từ 01/07/2025)
+# vốn đang chạy tốt. Lý do: (1) request do bản tối giản gửi KHÔNG có
+# token CSRF mà chính script của trang tự gắn -> server từ chối 403;
+# (2) bản tối giản cài vào trang còn "đầu độc" luôn các lần gọi SAU trên
+# CÙNG trang đó — _dvc_browser_download (nhánh DVC) gọi $.ajax NGAY TRÊN
+# trang mà _dvc_browser_thongbao vừa mở, nên cũng dính bản tối giản.
+# Kết luận: PHẢI dùng đúng jQuery THẬT của trang, không có cách thay thế.
 
 def _dvc_wait_jquery(drv, giay=12):
     import time as _t
@@ -4288,54 +4252,34 @@ def _dvc_browser_thongbao(drv, ma, loai=""):
     SCRIPT CỦA TRANG CHƯA CHẠY XONG. Mục "Danh sách thông báo" do chính
     script của trang render ra SAU khi HTML tải xong, còn $.ajax() (tải
     file thông báo) thì cần đúng jQuery của trang. Vì vậy cả 2 bước đều
-    phải ĐỢI jQuery thật nạp xong (_dvc_wait_jquery) — đúng cách bản .284
-    làm, bản người dùng xác nhận chạy được; bản gỡ bước đợi này đi lập
-    tức báo "không tìm thấy Thông báo" hàng loạt VÀ không tải được file
-    nào. Bản $.ajax() tối giản (_dvc_dam_bao_jquery) chỉ là phương án
-    cuối khi đợi hết giờ — xem _dvc_browser_download_tdt."""
+    phải ĐỢI jQuery thật nạp xong (_dvc_wait_jquery) — ĐÚNG NGUYÊN TRÌNH
+    TỰ BẢN .284 mà người dùng xác nhận chạy được. TUYỆT ĐỐI không tự cài
+    bản $.ajax() thay thế: đã thử và hỏng nặng hơn, còn "đầu độc" luôn
+    nhánh DVC vì _dvc_browser_download gọi $.ajax NGAY TRÊN trang mà hàm
+    này vừa mở (xem ghi chú ở chỗ _dvc_wait_jquery)."""
     import time as _t
     out, diag = [], []
     html = ""
-    for lan_thu in range(2):
-        try:
-            drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
-            _t.sleep(1.2)
-            # ĐỢI jQuery thật nạp xong RỒI MỚI đọc page_source — mục "Danh
-            # sách thông báo" do chính script của trang render ra SAU khi
-            # HTML tải xong, nên đọc sớm sẽ thấy trang rỗng và kết luận
-            # nhầm "CQT chưa phát hành thông báo". Đúng cách bản .284 làm
-            # (bản người dùng xác nhận chạy được); có bản đã gỡ bước đợi
-            # này và lập tức báo "không tìm thấy Thông báo" hàng loạt.
-            _dvc_wait_jquery(drv, 10)
-            html = drv.page_source or ""
-        except Exception as e:
-            if lan_thu == 1:
-                return out, [f"lỗi mở chi tiết {ma}: {e}"]
-            continue
-        if html and _dvc_parse_id_tbao(html):
-            break
+    try:
+        drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai={loai}")
+        _t.sleep(1.2)
+        # Đợi script của trang chạy xong RỒI MỚI đọc page_source — mục
+        # "Danh sách thông báo" do chính script của trang render ra SAU khi
+        # HTML tải xong, đọc sớm sẽ thấy rỗng và kết luận nhầm "CQT chưa
+        # phát hành thông báo". Không xét kết quả trả về (đúng như .284):
+        # hàm này trả False cả khi trang có $ dùng được nhưng không đặt
+        # window.jQuery, nên tin vào nó để rẽ nhánh là SAI.
+        _dvc_wait_jquery(drv, 10)
+        html = drv.page_source or ""
+    except Exception as e:
+        return out, [f"lỗi mở chi tiết {ma}: {e}"]
     ids = _dvc_parse_id_tbao(html)
     if not ids:
-        # dò manh mối để tinh chỉnh sau — kèm trạng thái jQuery lúc đó để
-        # biết có đúng cùng nguyên nhân với lỗi "$ is not defined" ở bước
-        # tải file hay không (nghi ngờ của người dùng).
+        # dò manh mối để tinh chỉnh sau
         import re as _re
         m = _re.search(r'.{0,40}(?:hongBao|hong báo|Tbao).{0,40}', html)
-        co_jquery = False
-        try:
-            co_jquery = bool(drv.execute_script(
-                "return (typeof window.jQuery!=='undefined') && (typeof window.$==='function');"))
-        except Exception:
-            pass
-        diag.append(f"{ma}: không thấy idTbao (jQuery lúc đó: {'có' if co_jquery else 'KHÔNG'})"
-                     + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
+        diag.append(f"{ma}: không thấy idTbao" + (f" | gợi ý: {m.group(0)[:80]}" if m else ""))
         return out, diag
-    # Có idTbao cần tải -> cần jQuery THẬT của trang cho $.ajax()
-    # (_JS_DOWNLOAD_TB), vì chính script của trang mới tự gắn đúng token
-    # CSRF. Chỉ khi đợi hết giờ vẫn chưa có mới dùng bản tối giản (phương
-    # án cuối) — xem giải thích đầy đủ ở _dvc_browser_download_tdt.
-    if not _dvc_wait_jquery(drv, 10):
-        _dvc_dam_bao_jquery(drv)
     for idt in ids:
         body = json.dumps({"idTbao": idt, "loaiTBao": ""})
         try:
@@ -4810,27 +4754,22 @@ def _dvc_browser_download_tdt(drv, ma):
     cho mọi request AJAX — dùng đúng jQuery của trang thì khỏi phải đoán
     token (mọi lần tự đoán token đều sai, xem lịch sử _JS_DOWNLOAD_TDT).
 
-    BÀI HỌC (đừng lặp lại): có bản đã GỠ BỎ bước đợi này, thay bằng tự
-    cài ngay bản $.ajax() tối giản — hậu quả KHÔNG TẢI ĐƯỢC TỜ NÀO (bản
-    tối giản không có phần tự gắn token của trang). Quyết định gỡ dựa
-    trên chẩn đoán Performance API lọc script có chữ "jquery" trong
-    đường dẫn, thấy rỗng rồi KẾT LUẬN SAI rằng trang không hề tải jQuery
-    — thực ra trang gói jQuery trong file bundle mang tên khác (app/
-    vendor/main...) nên không khớp bộ lọc. Rỗng chỉ có nghĩa "không có
-    đường dẫn nào chứa chữ jquery", KHÔNG có nghĩa "không có jQuery".
-
-    Bản $.ajax() tối giản (_dvc_dam_bao_jquery) CHỈ dùng làm phương án
-    CUỐI khi đợi hết giờ mà jQuery thật vẫn chưa có — lúc đó bản .284 sẽ
-    lỗi "$ is not defined", nên thử bản tối giản vẫn hơn là chắc chắn
-    hỏng."""
+    2 BÀI HỌC ĐÃ TRẢ GIÁ (đừng lặp lại):
+    1) Từng GỠ bước đợi này, thay bằng tự cài bản $.ajax() tối giản ->
+       KHÔNG TẢI ĐƯỢC TỜ NÀO (403 Forbidden 22/22), hỏng luôn cả nhánh
+       DVC. Xem ghi chú dài ở ngay trên _dvc_wait_jquery.
+    2) KHÔNG được XÉT kết quả trả về của _dvc_wait_jquery để rẽ nhánh —
+       hàm đó đòi CẢ window.jQuery lẫn typeof window.$ === 'function',
+       nên trả False ngay cả khi trang đã có $ dùng được (log thật: "jQuery
+       lúc đó: KHÔNG" cho mọi hồ sơ, nhưng bản .284 với đúng trang đó vẫn
+       $.ajax() tải được). Chỉ GỌI để ĐỢI, rồi cứ gọi $.ajax() như .284."""
     import time as _t
     try:
         drv.get(f"{DVC_BASE}/tchs/files/detail/{ma}?loai=ETAX")
         _t.sleep(1.0)
+        _dvc_wait_jquery(drv, 10)
     except Exception:
         pass
-    if not _dvc_wait_jquery(drv, 10):
-        _dvc_dam_bao_jquery(drv)
     # "Mã giao dịch" là số nguyên (17 chữ số) — dựng JSON body sẵn ở Python
     # để giữ nguyên chính xác, tránh mất độ chính xác nếu để JS tự chuyển
     # qua kiểu Number (xem giải thích ở _JS_DOWNLOAD_TDT).

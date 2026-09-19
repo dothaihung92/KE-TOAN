@@ -56,15 +56,14 @@ for ten, khoi in (('_JS_DOWNLOAD_TDT', khoi_download_tdt), ('_JS_DOWNLOAD_TB', k
     assert 'X-Requested-With' not in khoi, f"{ten} không được tự set header X-Requested-With (bản gốc không có)."
 print("PASS 1: cả _JS_DOWNLOAD_TDT và _JS_DOWNLOAD_TB đều quay lại $.ajax() thuần, không tự set header CSRF.")
 
-# ===== Test 2 (không hồi quy, cập nhật sau khi xác nhận trang không hề tự
-# tải jQuery khi vào thẳng link — xem test_tu_dua_jquery_polyfill_tdt.py):
-# _dvc_browser_download_tdt() phải đảm bảo có $.ajax() qua
-# _dvc_dam_bao_jquery() trước khi gọi tải, KHÔNG còn chờ trang tự tải
-# jQuery thật (_dvc_wait_jquery) nữa — đã xác nhận vô ích. =====
-assert '_dvc_dam_bao_jquery' in than_download_tdt, (
-    "_dvc_browser_download_tdt() phải gọi _dvc_dam_bao_jquery() để tự đưa $.ajax() vào trang trước "
-    "khi tải — trang không hề tự tải jQuery khi vào thẳng link (xác nhận qua chẩn đoán Performance "
-    "API), chờ/thử lại (_dvc_wait_jquery) không còn cần thiết.")
-print("PASS 2: _dvc_browser_download_tdt() gọi _dvc_dam_bao_jquery() trước khi tải.")
+# ===== Test 2 (không hồi quy): _dvc_browser_download_tdt() phải gọi
+# _dvc_wait_jquery() để ĐỢI script của trang chạy xong rồi mới gọi tải —
+# đúng trình tự bản .284. (Bản từng thay bước đợi này bằng cách tự cài
+# $.ajax() riêng đã gây 403 hàng loạt; chi tiết ở
+# test_khong_tu_thay_jquery_tdt.py.) =====
+assert '_dvc_wait_jquery' in than_download_tdt, (
+    "_dvc_browser_download_tdt() phải gọi _dvc_wait_jquery() để đợi script của trang chạy xong trước "
+    "khi gọi $.ajax() — đúng trình tự bản .284 (bản người dùng xác nhận tải được).")
+print("PASS 2: _dvc_browser_download_tdt() đợi script của trang chạy xong trước khi tải.")
 
 print("\nALL DONE")
