@@ -38,20 +38,23 @@ function assert(cond, msg) {
 }
 
 // ===== Phần 1: bankAccountLabel() — hàm thuần, test bằng cách gọi thật =====
+eval(extractFn('xayMapRowIdSangAccountId'));
+eval(extractFn('timAccountIdTheoRowIdCu'));
 eval(extractFn('bankAccountLabel'));
 
 const accounts = [
-  { id: 'acc-vnd', label: '1121 VND', currency: 'VND' },
+  { id: 'acc-vnd', label: '1121 VND', currency: 'VND', bankName: 'ACB' },
   { id: 'acc-usd', label: 'USD 362698698', currency: 'USD' },
 ];
 
-assert(bankAccountLabel(accounts, 'acc-vnd') === '1121 VND',
-  'Phải trả về đúng nhãn của tài khoản khớp accId.');
+assert(bankAccountLabel(accounts, 'acc-vnd') === 'ACB',
+  'Tài khoản có "Tên ngân hàng" (bankName, VD "ACB") thì PHẢI ưu tiên hiện đúng tên đó — người dùng yêu ' +
+  'cầu rõ "hãy lấy theo Tên ngân hàng đã nhập từ tk NH", không phải nhãn tab kỹ thuật.');
 assert(bankAccountLabel(accounts, 'acc-usd') === 'USD 362698698',
-  'Phải trả về đúng nhãn tài khoản USD.');
+  'Tài khoản CHƯA nhập Tên ngân hàng thì tạm hiện nhãn tab (acc.label) để không bỏ trống.');
 assert(bankAccountLabel(accounts, undefined) === '(cũ)',
-  'accId===undefined (payment gắn TỪ TRƯỚC khi có tính năng này, chưa từng lưu accountId) phải hiện ' +
-  '"(cũ)" — KHÔNG được lẫn với accId===null (tài khoản mặc định hợp lệ khi công ty chỉ có 1 TK).');
+  'accId===undefined mà không truyền/không dò được qua oldAccountMap vẫn phải hiện "(cũ)", không được ' +
+  'ném lỗi hay đoán bừa.');
 assert(bankAccountLabel(accounts, null) === '?',
   'accId===null nhưng KHÔNG có tài khoản nào trong danh sách mang id null thì phải hiện "?" (không tìm ' +
   'thấy), khác hẳn trường hợp thật "chỉ có 1 TK mặc định, accounts=[{id:null,...}]".');
@@ -62,7 +65,37 @@ assert(bankAccountLabel(accounts, 'khong-ton-tai') === '?',
   'accId không khớp tài khoản nào trong danh sách (VD tài khoản đã bị xoá) phải hiện "?", không được lỗi.');
 assert(bankAccountLabel(null, 'acc-vnd') === '?',
   'accounts=null/rỗng (chưa truyền prop) không được làm chết hàm — phải trả "?" an toàn.');
-console.log('PASS 1: bankAccountLabel() phân biệt đúng "(cũ)" / accId hợp lệ / không tìm thấy / rỗng.');
+console.log('PASS 1: bankAccountLabel() phân biệt đúng "(cũ)" / accId hợp lệ (ưu tiên bankName) / không tìm thấy / rỗng.');
+
+// ===== Phần 1b (QUAN TRỌNG — ĐÚNG CA THẬT người dùng báo: cột "Tài khoản NH"
+// hiện "(cũ)" cho MỌI dòng dữ liệu có sẵn): payment CŨ (accountId===undefined)
+// vẫn phải dò lại được tài khoản thật qua oldAccountMap (rowId -> accountId,
+// dựng từ sao kê đã lưu của TỪNG tài khoản — xem xayMapRowIdSangAccountId). =====
+const oldMap = xayMapRowIdSangAccountId([
+  { accountId: 'acc-vnd', results: [{ id: 'row-1' }, { id: 'row-2' }] },
+  { accountId: undefined, results: [{ id: 'row-3' }] }, // session cũ chưa từng lưu accountId -> mặc định null
+]);
+assert(oldMap['row-1'] === 'acc-vnd' && oldMap['row-2'] === 'acc-vnd',
+  'xayMapRowIdSangAccountId() phải gộp mọi rowId trong .results của 1 session về đúng accountId của session đó.');
+assert(oldMap['row-3'] === null,
+  'Session cũ (accountId===undefined, lưu từ trước khi hỗ trợ nhiều tài khoản) phải quy về null (tài ' +
+  'khoản mặc định) trong map — undefined trong map nghĩa là "chưa dò được", khác hẳn null "đã dò ra, là TK mặc định".');
+assert(!('row-khong-co' in oldMap), 'rowId không có trong bất kỳ session nào thì không được có mặt trong map.');
+
+assert(timAccountIdTheoRowIdCu([{ accountId: 'acc-vnd', results: [{ id: 'row-1' }] }], 'row-1') === 'acc-vnd',
+  'timAccountIdTheoRowIdCu() phải tìm đúng session chứa rowId rồi trả về accountId của session đó.');
+assert(timAccountIdTheoRowIdCu([{ accountId: 'acc-vnd', results: [{ id: 'row-1' }] }], 'row-khac') === undefined,
+  'rowId không khớp session nào thì phải trả undefined (không dò ra), không phải null hay lỗi.');
+assert(timAccountIdTheoRowIdCu([], 'row-1') === undefined && timAccountIdTheoRowIdCu(null, 'row-1') === undefined,
+  'Không có session nào (mảng rỗng/null) không được làm chết hàm.');
+
+assert(bankAccountLabel(accounts, undefined, 'row-1', oldMap) === 'ACB',
+  'payment CŨ (accountId===undefined) nhưng dò được qua oldAccountMap (đúng ca thật người dùng báo: mọi ' +
+  'dòng dữ liệu có sẵn đều hiện "(cũ)") PHẢI hiện đúng Tên ngân hàng đã dò lại, không được hiện "(cũ)" nữa.');
+assert(bankAccountLabel(accounts, undefined, 'row-khong-co-trong-map', oldMap) === '(cũ)',
+  'rowId không có trong oldAccountMap (thật sự không dò ra được, VD sao kê gốc đã bị xoá) thì vẫn hiện ' +
+  '"(cũ)" như cũ, không được đoán bừa.');
+console.log('PASS 1b: payment cũ dò lại được đúng tên ngân hàng qua oldAccountMap thay vì luôn hiện "(cũ)".');
 
 // ===== Phần 2 (QUAN TRỌNG — đúng ca thật, kiểm tra qua mã nguồn): payment
 // PHẢI lưu accountId = tab đang mở (activeTabAccId) lúc gắn tờ khai, ở CẢ
@@ -122,7 +155,13 @@ assert(/"Tài khoản NH"/.test(modalBody),
 assert(/onJumpToPayment\s*&&\s*onJumpToPayment\(p\.accountId,\s*p\.rowId\)/.test(modalBody),
   'Nút trong cột "Tài khoản NH" phải gọi onJumpToPayment(p.accountId, p.rowId) — đúng accountId/rowId ' +
   'của TỪNG lần thanh toán (1 tờ khai có thể có nhiều lần thanh toán khác tài khoản/khác ngày).');
-console.log('PASS 3: ToKhaiModal (dùng chung XK/NK) có cột "Tài khoản NH" với nút nhảy về đúng giao dịch.');
+assert(/xayMapRowIdSangAccountId\(/.test(modalBody),
+  'ToKhaiModal phải dò lại accountId cho payment CŨ qua xayMapRowIdSangAccountId (quét sao kê đã lưu) — ' +
+  'nếu không, cột "Tài khoản NH" sẽ luôn hiện "(cũ)" cho mọi dòng dữ liệu có từ trước, đúng lỗi người dùng báo.');
+assert(/accountLabel\(p\.accountId,\s*p\.rowId\)/.test(modalBody),
+  'Chỗ hiện tên tài khoản phải gọi accountLabel(p.accountId, p.rowId) — truyền cả rowId để dò qua ' +
+  'oldAccountMap khi accountId===undefined.');
+console.log('PASS 3: ToKhaiModal (dùng chung XK/NK) có cột "Tài khoản NH" (dò lại được payment cũ) với nút nhảy về đúng giao dịch.');
 
 // ===== Phần 4 (không hồi quy — cả 2 nơi gọi ToKhaiModal, cho XK VÀ NK, đều
 // phải truyền accounts/onJumpToPayment — không được chỉ sửa 1 bên). =====
@@ -145,13 +184,30 @@ console.log('PASS 4: cả 2 chỗ gọi ToKhaiModal (kind="NK" và kind="XK") đ
 // phải đổi tab khi payment thuộc tài khoản khác tab đang mở, và phải bỏ mọi
 // bộ lọc đang áp (nếu không, giao dịch cần tới có thể đang bị lọc ẩn). =====
 const jumpFnSrc = braceBlockOf('const jumpToPayment = (accountId, rowId) => {');
-assert(/switchTab\(accountId\)/.test(jumpFnSrc),
-  'jumpToPayment() phải gọi switchTab(accountId) khi payment thuộc tài khoản KHÁC tab đang mở — đây là ' +
-  'chỗ THỰC SỰ "quay lại đúng tài khoản" mà người dùng yêu cầu, không chỉ hiện tên suông.');
 assert(/setFilter\("all"\)/.test(jumpFnSrc) && /setSearch\(""\)/.test(jumpFnSrc),
   'jumpToPayment() phải bỏ bộ lọc/ô tìm kiếm đang áp trước khi tìm dòng cần nhảy tới — nếu không, dòng ' +
   'đó có thể đang bị lọc ẩn (VD đang lọc "Chưa xử lý" nhưng giao dịch đã xác nhận rồi) và sẽ báo nhầm ' +
   '"không tìm thấy" dù dữ liệu vẫn còn nguyên.');
-console.log('PASS 5: jumpToPayment() đổi đúng tab và bỏ bộ lọc trước khi tìm dòng cần nhảy tới.');
+assert(/targetAccountId\s*=\s*accountId/.test(jumpFnSrc) &&
+       /targetAccountId\s*===\s*undefined/.test(jumpFnSrc) &&
+       /resolveOldAccountId\(rowId\)/.test(jumpFnSrc),
+  'jumpToPayment() phải gọi resolveOldAccountId(rowId) để dò lại accountId khi payment CŨ ' +
+  '(accountId===undefined) — nếu không, payment cũ sẽ luôn tìm trong tab ĐANG MỞ thay vì đổi sang đúng ' +
+  'tab thật, đúng lỗi người dùng báo (nhấn vào báo "Không tìm thấy giao dịch ngân hàng này").');
+assert(/switchTab\(targetAccountId\)/.test(jumpFnSrc),
+  'jumpToPayment() phải đổi tab theo targetAccountId (accountId gốc, hoặc đã dò lại qua ' +
+  'resolveOldAccountId nếu là payment cũ) — đây là chỗ THỰC SỰ "quay lại đúng tài khoản" mà người dùng yêu cầu.');
+
+// ===== Phần 5b (ĐÚNG CA THẬT: nhấn vào payment CŨ không nhảy đúng nơi): phải
+// có sẵn resolveOldAccountId() dò accountId qua toàn bộ sao kê đã lưu của
+// công ty (getSessionIndex + timAccountIdTheoRowIdCu), dùng khi payment
+// không có accountId lưu sẵn. =====
+const resolveOldSrc = braceBlockOf('const resolveOldAccountId = rowId => {');
+assert(/getSessionIndex\(co\.id\)/.test(resolveOldSrc),
+  'resolveOldAccountId() phải quét TOÀN BỘ session đã lưu của công ty (getSessionIndex(co.id)), không ' +
+  'chỉ tab đang mở — payment cũ có thể thuộc BẤT KỲ tài khoản nào.');
+assert(/timAccountIdTheoRowIdCu\(/.test(resolveOldSrc),
+  'resolveOldAccountId() phải dùng timAccountIdTheoRowIdCu() để dò rowId trong các session đã đọc.');
+console.log('PASS 5: jumpToPayment() dò lại accountId cho payment cũ (resolveOldAccountId) rồi mới đổi tab, và bỏ bộ lọc trước khi tìm dòng cần nhảy tới.');
 
 console.log('\nALL DONE');

@@ -786,15 +786,43 @@ function computeBankPayment(row, tk) {
   const bankRate = bankAmt > 0 ? Math.round(bankVND / bankAmt) : 0;
   return { bankAmt, bankRate, bankVND, missingRate: false };
 }
-function bankAccountLabel(accounts, accId) {
-  // Tên tài khoản NH hiện trên cột "Tài khoản NH" của bảng Tờ khai NK/XK — accId
-  // undefined nghĩa là payment được gắn TỪ TRƯỚC KHI có tính năng này (dữ liệu cũ,
-  // chưa lưu accountId), khác hẳn accId===null (tài khoản duy nhất/mặc định của công
-  // ty chưa từng thêm nhiều tài khoản, id hợp lệ là null) — phải phân biệt 2 trường
-  // hợp này, không được gộp chung vào 1 nhánh "không có giá trị".
-  if (accId === undefined) return "(cũ)";
-  const acc = (accounts || []).find(a => a.id === accId);
-  return acc ? acc.label : "?";
+// rowId của 1 giao dịch ngân hàng là uid() = Date.now() + hậu tố ngẫu nhiên (xem hàm uid()) nên
+// KHÔNG BAO GIỜ trùng giữa các tài khoản khác nhau của cùng 1 công ty -> với payment CŨ (tạo trước
+// khi có cột "Tài khoản NH", accountId===undefined) vẫn dò lại được tài khoản thật bằng cách quét
+// hết sao kê đã lưu của công ty, tìm đúng dòng có id đó rồi lấy accountId của session chứa nó.
+// sessions: mảng các session đã lưu (mỗi phần tử {accountId, results:[{id,...}]}) — nơi gọi tự đọc
+// từ localStorage rồi truyền vào, tách hàm thuần này ra để test được ngoài trình duyệt.
+function xayMapRowIdSangAccountId(sessions) {
+  const map = {};
+  (sessions || []).forEach(s => {
+    if (!s || !s.results) return;
+    const accId = s.accountId === undefined ? null : s.accountId;
+    s.results.forEach(r => { if (r && r.id !== undefined && r.id !== null) map[r.id] = accId; });
+  });
+  return map;
+}
+function timAccountIdTheoRowIdCu(sessions, rowId) {
+  if (rowId === undefined || rowId === null) return undefined;
+  const map = xayMapRowIdSangAccountId(sessions);
+  return Object.prototype.hasOwnProperty.call(map, rowId) ? map[rowId] : undefined;
+}
+function bankAccountLabel(accounts, accId, rowId, oldAccountMap) {
+  // Tên tài khoản NH hiện trên cột "Tài khoản NH" của bảng Tờ khai NK/XK — accId undefined nghĩa là
+  // payment được gắn TỪ TRƯỚC KHI có tính năng này (dữ liệu cũ, chưa lưu accountId), khác hẳn
+  // accId===null (tài khoản duy nhất/mặc định của công ty chưa từng thêm nhiều tài khoản, id hợp lệ
+  // là null). Với payment cũ, thử dò lại qua oldAccountMap (rowId -> accountId, xem
+  // xayMapRowIdSangAccountId) trước khi chịu thua và hiện "(cũ)".
+  let resolvedId = accId;
+  if (resolvedId === undefined && oldAccountMap && rowId !== undefined &&
+      Object.prototype.hasOwnProperty.call(oldAccountMap, rowId)) {
+    resolvedId = oldAccountMap[rowId];
+  }
+  if (resolvedId === undefined) return "(cũ)";
+  const acc = (accounts || []).find(a => a.id === resolvedId);
+  if (!acc) return "?";
+  // Ưu tiên đúng "Tên ngân hàng" đã nhập ở TK NH (VD "ACB") — nhãn tab (acc.label, VD "1121 VND")
+  // chỉ dùng khi tài khoản đó chưa nhập tên ngân hàng.
+  return acc.bankName || acc.label || "?";
 }
 function parseToKhaiWorkbook(wb, kind) {
   // File tờ khai NK thường có sheet tên "TKN"; tờ khai XK theo cùng quy ước hải quan là "TKX" —
@@ -5792,6 +5820,15 @@ function ConfirmScreen({
   // của render hiện tại — dùng pendingJumpRowId + useEffect đợi rows/tab cập nhật xong
   // rồi mới focus, thay vì tính index ngay lúc bấm (sẽ luôn ra -1 nếu vừa đổi tab).
   const [pendingJumpRowId, setPendingJumpRowId] = useState(null);
+  // Dò lại accountId thật cho payment CŨ (accountId===undefined, gắn từ trước khi có tính năng này)
+  // bằng cách quét hết sao kê đã lưu của công ty — xem giải thích ở timAccountIdTheoRowIdCu.
+  const resolveOldAccountId = rowId => {
+    try {
+      const keys = getSessionIndex(co.id);
+      const sessions = keys.map(k => LS.get("session_" + k)).filter(Boolean);
+      return timAccountIdTheoRowIdCu(sessions, rowId);
+    } catch (e) { return undefined; }
+  };
   const jumpToPayment = (accountId, rowId) => {
     if (!rowId) return;
     setTokhaiModalOpen(false);
@@ -5805,8 +5842,10 @@ function ConfirmScreen({
     setSearch("");
     setLocTuModal(null);
     setHachFilter("");
-    if (accountId !== undefined && accountId !== activeTabAccId) {
-      switchTab(accountId);
+    let targetAccountId = accountId;
+    if (targetAccountId === undefined) targetAccountId = resolveOldAccountId(rowId);
+    if (targetAccountId !== undefined && targetAccountId !== activeTabAccId) {
+      switchTab(targetAccountId);
     }
     setPendingJumpRowId(rowId);
   };
@@ -7662,7 +7701,17 @@ function FxDiffPreviewModal({ rows, onClose, onExport }) {
 // ── Bảng quản lý Tờ khai Hải quan NK: xem/sửa tay/nhập từ file tờ khai/xoá, và (khi mở ở chế độ
 // "chọn cho 1 giao dịch") cho chọn 1 tờ khai để gắn thẳng vào GD thanh toán đang xem trên sao kê ──
 function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, pickForRowDesc, onPick, onPickSplit, splitRemainingVND, splitInProgress, onApplyFxDiff, onEditFxDiff, bankRows, onExportFxDiff, showToast, coId, onUnlinkRow, accounts, onJumpToPayment }) {
-  const accountLabel = accId => bankAccountLabel(accounts, accId);
+  // Với payment CŨ (accountId===undefined) dò lại tài khoản thật bằng cách quét hết sao kê đã lưu
+  // của công ty 1 lần (không phải mỗi dòng), để cột "Tài khoản NH" hiện đúng tên ngân hàng thay vì
+  // luôn ghi "(cũ)" — xem bankAccountLabel/xayMapRowIdSangAccountId.
+  const oldAccountMap = React.useMemo(() => {
+    try {
+      const keys = getSessionIndex(coId);
+      const sessions = keys.map(k => LS.get("session_" + k)).filter(Boolean);
+      return xayMapRowIdSangAccountId(sessions);
+    } catch (e) { return {}; }
+  }, [coId]);
+  const accountLabel = (accId, rowId) => bankAccountLabel(accounts, accId, rowId, oldAccountMap);
   const isXK = kind === "XK";
   // Đối tác luôn hiển thị nhãn "Khách hàng" (cả tờ NK lẫn XK) — CÙNG 1 trường dữ liệu tk.nhaCungCap.
   const partnerLabel = "Khách hàng";
@@ -8049,7 +8098,7 @@ function ToKhaiModal({ kind, list, onClose, onSave, onImportFile, pickForRowId, 
                         background: "#eff6ff", color: "#1d4ed8", cursor: (onJumpToPayment && p.rowId) ? "pointer" : "default",
                         whiteSpace: "nowrap", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis"
                       }
-                    }, accountLabel(p.accountId))))
+                    }, accountLabel(p.accountId, p.rowId))))
                   : ""),
                 // 1 tờ khai có thể có NHIỀU lần thanh toán khác ngày — mỗi lần hiện 1 dòng riêng
                 // trong cùng ô, có nút ✕ để bỏ gắn đúng lần đó (không ảnh hưởng các lần khác).
