@@ -28,7 +28,7 @@ than_batch = _lay_than_ham('_dvc_run_batch')
 # ===== Test 1 (QUAN TRỌNG — đúng yêu cầu mới nhất): lệnh gọi
 # _chia_khoang_ngay_thanh_doan cho nguồn "thuedientu" PHẢI dùng
 # so_thang_moi_doan=1 (từng tháng), KHÔNG còn 6 tháng/đoạn như trước. =====
-m = re.search(r'_chia_khoang_ngay_thanh_doan\(tu_tim, den_tim, so_thang_moi_doan=(\d+)\)', than_batch)
+m = re.search(r'_chia_khoang_ngay_thanh_doan\([^)]*so_thang_moi_doan=(\d+)\)', than_batch)
 assert m, "_dvc_run_batch() phải gọi _chia_khoang_ngay_thanh_doan(tu_tim, den_tim, so_thang_moi_doan=N)."
 so_thang = int(m.group(1))
 assert so_thang == 1, (

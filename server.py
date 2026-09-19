@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.312"
+APP_BUILD = "2026-09-19.313"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5414,6 +5414,18 @@ def _nguon_tra_cuu_theo_ky(tu_str, den_str):
     return nguon or ["dvc"]
 
 
+def _ngay_dmy_nho_hon(a, b):
+    """So sánh 2 chuỗi ngày dd/mm/yyyy: a < b ? (False nếu đọc không được)."""
+    def _d(s):
+        try:
+            d, m, y = (s or "").split("/")
+            return datetime.date(int(y), int(m), int(d))
+        except Exception:
+            return None
+    da, db = _d(a), _d(b)
+    return bool(da and db and da < db)
+
+
 def _chia_khoang_ngay_thanh_doan(tu_str, den_str, so_thang_moi_doan=6):
     """Chia khoảng ngày (dd/mm/yyyy) thành các đoạn NHỎ ≤so_thang_moi_doan
     tháng — nguồn "thuedientu" bị giới hạn số dòng trả về cho khoảng ngày
@@ -5653,13 +5665,24 @@ def _dvc_run_batch(batch_id, cids, body):
                 # Ban đầu chọn đoạn 6 tháng, nhưng người dùng tự test thêm
                 # (độc lập, sau khi bước TẢI FILE đã sửa xong ở vòng
                 # $.ajax()): tải theo TỪNG THÁNG mới tải được file tờ khai
-                # đầy đủ (đoạn rộng hơn vẫn thiếu) — đổi lại 1 THÁNG/đoạn
-                # theo đúng yêu cầu, chỉ áp dụng cho "thuedientu", CHƯA xác
-                # nhận "dvc" có cùng giới hạn nên không đụng vào.
-                if ngu == "thuedientu":
-                    cac_doan = _chia_khoang_ngay_thanh_doan(tu_tim, den_tim, so_thang_moi_doan=1)
-                else:
-                    cac_doan = [(tu_tim, den_tim)]
+                # đầy đủ (đoạn rộng hơn vẫn thiếu) — đổi lại 1 THÁNG/đoạn.
+                #
+                # Nguồn "dvc" GIỜ CŨNG CHIA THEO THÁNG: báo cáo thật cho thấy
+                # tra cứu nguyên khoảng 01/01/2024-31/12/2025 trong 1 lần trả
+                # về KHÔNG DÒNG NÀO ("CHƯA NỘP TỜ KHAI" cho cả nguồn DVC), dù
+                # công ty có nộp tờ khai sau 01/07/2025 — đúng kiểu giới hạn
+                # khoảng ngày RỘNG đã gặp ở nguồn "thuedientu". Đồng thời CẮT
+                # phần khoảng ngày nằm TRƯỚC mốc chuyển hệ thống: nguồn DVC
+                # chỉ có dữ liệu từ 01/07/2025, tra các tháng trước đó vừa vô
+                # ích vừa kéo dài thời gian chạy.
+                tu_ng, den_ng = tu_tim, den_tim
+                if ngu == "dvc":
+                    _moc = _DVC_MOC_CHUYEN_HE_THONG.strftime("%d/%m/%Y")
+                    if _ngay_dmy_nho_hon(tu_ng, _moc):
+                        tu_ng = _moc
+                cac_doan = _chia_khoang_ngay_thanh_doan(tu_ng, den_ng, so_thang_moi_doan=1)
+                if not cac_doan:
+                    cac_doan = [(tu_ng, den_ng)]
                 # TRA TỚI ĐÂU TẢI TỚI ĐÓ — KHÔNG gom hết mọi đoạn rồi mới tải.
                 # Người dùng xác nhận: tra/tải 1 THÁNG lẻ luôn tải được, nhưng
                 # gom 12-24 tháng rồi mới tải thì báo "$ is not defined" hàng
