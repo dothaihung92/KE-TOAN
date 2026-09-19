@@ -4751,16 +4751,22 @@ function ConfirmScreen({
   const [addAccMode, setAddAccMode] = useState(false);
   const [newAccLabel, setNewAccLabel] = useState("");
   const [newAccCurrency, setNewAccCurrency] = useState("VND");
+  // Cho điền thẳng Mã hạch toán MISA/Tên ngân hàng/Số TK ngay lúc thêm — giống hệt 3 ô của popup
+  // "🏦 sửa" từng tài khoản (startEditMisa/saveMisa) — để không phải thêm xong rồi mở popup đó sửa
+  // lại ngay. Để trống thì vẫn tự gợi ý như trước (suggestMisaAcct/suggestBankName/suggestAccountNo).
+  const [newAccMisa, setNewAccMisa] = useState("");
+  const [newAccBankName, setNewAccBankName] = useState("");
+  const [newAccNo, setNewAccNo] = useState("");
   const addAccountInline = () => {
     const label = newAccLabel.trim();
     if (!label) return;
-    const misaAcct = suggestMisaAcct(label, newAccCurrency, allAccounts.map(a => a.misaAcct || ""));
+    const misaAcct = newAccMisa.trim() || suggestMisaAcct(label, newAccCurrency, allAccounts.map(a => a.misaAcct || ""));
     const newAcc = {
       id: "acc_" + Math.random().toString(36).slice(2, 10), label, currency: newAccCurrency,
-      misaAcct, bankName: suggestBankName(label), accountNo: suggestAccountNo(label)
+      misaAcct, bankName: newAccBankName.trim() || suggestBankName(label), accountNo: newAccNo.trim() || suggestAccountNo(label)
     };
     if (saveCoAccounts) saveCoAccounts(co.id, [...allAccounts, newAcc]);
-    setNewAccLabel(""); setAddAccMode(false);
+    setNewAccLabel(""); setNewAccMisa(""); setNewAccBankName(""); setNewAccNo(""); setAddAccMode(false);
     switchTab(newAcc.id);
     showToast && showToast("✓ Đã thêm tài khoản \"" + newAcc.label + "\" (" + newAcc.currency + ") — dán sao kê ngay ở tab mới.");
   };
@@ -7146,29 +7152,63 @@ function ConfirmScreen({
     className:"btn btn-outline",
     onClick:()=>setAddMode(m=>!m),
     style:{borderColor: addMode ? "var(--green)" : undefined, color: addMode ? "var(--green)" : undefined}
-  }, "➕ Thêm sao kê"),/*#__PURE__*/React.createElement("button",{
-    className:"btn btn-outline",
-    title:"Thêm tài khoản ngân hàng mới ngay tại đây — khỏi phải quay lại Bước 1 rồi vào lại",
-    onClick:()=>setAddAccMode(m=>!m),
-    style:{borderColor: addAccMode ? "var(--blue)" : undefined, color: addAccMode ? "var(--blue)" : undefined}
-  }, addAccMode ? "🏦 Đóng" : "🏦 + Thêm TK NH"),
-  addAccMode && /*#__PURE__*/React.createElement("div",{
-    style:{display:"flex",gap:6,alignItems:"center",padding:"4px 8px",background:"#f0f6ff",borderRadius:6,border:"1px solid var(--blue)"}
-  },
-    /*#__PURE__*/React.createElement("input",{
-      autoFocus:true, value:newAccLabel, onChange:e=>setNewAccLabel(e.target.value),
-      onKeyDown:e=>{if(e.key==="Enter")addAccountInline(); if(e.key==="Escape")setAddAccMode(false);},
-      placeholder:"Tên TK (VD: ACB 1418367, USD Vietcombank...)",
-      style:{height:28,fontSize:12,borderRadius:5,border:"1px solid var(--border)",padding:"0 8px",width:220}
-    }),
+  }, "➕ Thêm sao kê"),
+  /*#__PURE__*/React.createElement("div",{style:{position:"relative",display:"inline-flex"}},
     /*#__PURE__*/React.createElement("button",{
-      onClick:()=>setNewAccCurrency(c=>c==="VND"?"USD":"VND"),
-      style:{padding:"4px 10px",borderRadius:5,border:"1px solid var(--border)",background:newAccCurrency==="USD"?"#1a7a4a":"var(--green)",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}
-    }, newAccCurrency),
-    /*#__PURE__*/React.createElement("button",{
-      onClick:addAccountInline, disabled:!newAccLabel.trim(),
-      style:{padding:"4px 12px",borderRadius:5,border:"none",background:newAccLabel.trim()?"var(--blue)":"#ccc",color:"#fff",fontSize:12,cursor:newAccLabel.trim()?"pointer":"not-allowed"}
-    }, "Thêm")
+      className:"btn btn-outline",
+      title:"Thêm tài khoản ngân hàng mới ngay tại đây — khỏi phải quay lại Bước 1 rồi vào lại",
+      onClick:()=>setAddAccMode(m=>!m),
+      style:{borderColor: addAccMode ? "var(--blue)" : undefined, color: addAccMode ? "var(--blue)" : undefined}
+    }, addAccMode ? "🏦 Đóng" : "🏦 + Thêm TK NH"),
+    addAccMode && /*#__PURE__*/React.createElement("div",{
+      onKeyDown:e=>{if(e.key==="Escape")setAddAccMode(false);},
+      style:{position:"absolute",top:"100%",left:0,marginTop:4,zIndex:80,background:"#fff",
+        border:"1px solid var(--blue)",borderRadius:8,padding:10,width:240,
+        boxShadow:"0 4px 16px rgba(0,0,0,.15)",display:"flex",flexDirection:"column",gap:6}
+    },
+      /*#__PURE__*/React.createElement("label", {style:{fontSize:10,color:"var(--text3)"}}, "Tên TK",
+        /*#__PURE__*/React.createElement("input",{
+          autoFocus:true, value:newAccLabel, onChange:e=>setNewAccLabel(e.target.value),
+          onKeyDown:e=>{if(e.key==="Enter")addAccountInline();},
+          placeholder:"VD: ACB 1418367, USD Vietcombank...",
+          style:{width:"100%",height:28,fontSize:12,borderRadius:5,border:"1px solid var(--border)",padding:"0 6px",boxSizing:"border-box",marginTop:2}
+        })),
+      // Cùng 3 ô Mã hạch toán MISA / Tên ngân hàng / Số TK như popup "🏦 sửa" của từng tài khoản đang
+      // có — điền thẳng ngay lúc thêm, khỏi phải thêm xong rồi mở popup đó sửa lại lần nữa.
+      /*#__PURE__*/React.createElement("label", {style:{fontSize:10,color:"var(--text3)"}}, "Mã hạch toán MISA",
+        /*#__PURE__*/React.createElement("input",{
+          value:newAccMisa, onChange:e=>setNewAccMisa(e.target.value),
+          onKeyDown:e=>{if(e.key==="Enter")addAccountInline();},
+          placeholder:"VD: 1121-VCB",
+          style:{width:"100%",height:28,fontSize:12,borderRadius:5,border:"1px solid var(--border)",padding:"0 6px",boxSizing:"border-box",marginTop:2}
+        })),
+      /*#__PURE__*/React.createElement("label", {style:{fontSize:10,color:"var(--text3)"}}, "Tên ngân hàng",
+        /*#__PURE__*/React.createElement("input",{
+          value:newAccBankName, onChange:e=>setNewAccBankName(e.target.value),
+          onKeyDown:e=>{if(e.key==="Enter")addAccountInline();},
+          placeholder:"VD: Vietcombank",
+          style:{width:"100%",height:28,fontSize:12,borderRadius:5,border:"1px solid var(--border)",padding:"0 6px",boxSizing:"border-box",marginTop:2}
+        })),
+      /*#__PURE__*/React.createElement("label", {style:{fontSize:10,color:"var(--text3)"}}, "Số tài khoản ngân hàng",
+        /*#__PURE__*/React.createElement("input",{
+          value:newAccNo, onChange:e=>setNewAccNo(e.target.value),
+          onKeyDown:e=>{if(e.key==="Enter")addAccountInline();},
+          placeholder:"VD: 11600294",
+          style:{width:"100%",height:28,fontSize:12,borderRadius:5,border:"1px solid var(--border)",padding:"0 6px",boxSizing:"border-box",marginTop:2}
+        })),
+      /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:6,marginTop:2}},
+        /*#__PURE__*/React.createElement("button",{
+          onClick:()=>setNewAccCurrency(c=>c==="VND"?"USD":"VND"),
+          style:{padding:"4px 10px",borderRadius:5,border:"1px solid var(--border)",background:newAccCurrency==="USD"?"#1a7a4a":"var(--green)",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}
+        }, newAccCurrency),
+        /*#__PURE__*/React.createElement("button",{
+          onClick:addAccountInline, disabled:!newAccLabel.trim(),
+          style:{flex:1,height:28,borderRadius:5,border:"none",background:newAccLabel.trim()?"var(--blue)":"#ccc",color:"#fff",fontSize:12,fontWeight:600,cursor:newAccLabel.trim()?"pointer":"not-allowed"}
+        }, "✓ Thêm"),
+        /*#__PURE__*/React.createElement("button",{onClick:()=>setAddAccMode(false),
+          style:{height:28,padding:"0 10px",borderRadius:5,border:"1px solid var(--border)",background:"#fff",fontSize:12,cursor:"pointer"}}, "Huỷ")
+      )
+    )
   ),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
     disabled: capNhatHoaDonBusy,

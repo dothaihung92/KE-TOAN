@@ -111,4 +111,30 @@ assert(/onClick:\(\)=>setAddAccMode\(m=>!m\)/.test(html),
   'Nút thêm TK NH phải bật/tắt được form thêm tài khoản (addAccMode) ngay tại chỗ.');
 console.log('PASS 5: có nút "+ Thêm TK NH" ngay tại màn Xác nhận kết quả, thêm xong tự chuyển sang tab mới.');
 
+// ===== Phần 6 (QUAN TRỌNG — đúng yêu cầu tiếp theo: "hiện thêm tài khoản như bên ngoài như Mã hạch
+// toán MISA; Tên ngân hàng; Số tài khoản ngân hàng"): form thêm tài khoản phải có đủ 3 ô này, giống
+// popup "🏦 sửa" của từng tài khoản đang có (startEditMisa/saveMisa), và addAccountInline() phải DÙNG
+// đúng giá trị người dùng gõ (không chỉ tự gợi ý ngầm như trước). =====
+assert(/"Mã hạch toán MISA"/.test(html) && /"Tên ngân hàng"/.test(html) && /"Số tài khoản ngân hàng"/.test(html),
+  'Form thêm tài khoản phải có đủ nhãn "Mã hạch toán MISA", "Tên ngân hàng", "Số tài khoản ngân hàng" ' +
+  '— giống hệt popup sửa tài khoản đang có, để điền thẳng ngay lúc thêm.');
+assert(/const \[newAccMisa, setNewAccMisa\] = useState\(""\);/.test(html) &&
+       /const \[newAccBankName, setNewAccBankName\] = useState\(""\);/.test(html) &&
+       /const \[newAccNo, setNewAccNo\] = useState\(""\);/.test(html),
+  'Phải có state riêng cho 3 ô mới (newAccMisa/newAccBankName/newAccNo).');
+assert(/value:newAccMisa, onChange:e=>setNewAccMisa\(e\.target\.value\)/.test(html) &&
+       /value:newAccBankName, onChange:e=>setNewAccBankName\(e\.target\.value\)/.test(html) &&
+       /value:newAccNo, onChange:e=>setNewAccNo\(e\.target\.value\)/.test(html),
+  'Cả 3 ô mới phải nối đúng state (gõ vào phải cập nhật được).');
+const addAccSrc2 = braceBlockOf('const addAccountInline = () => {');
+assert(/newAccMisa\.trim\(\) \|\| suggestMisaAcct\(/.test(addAccSrc2.src),
+  'addAccountInline() phải ưu tiên dùng Mã hạch toán MISA người dùng vừa gõ — chỉ tự gợi ý khi để trống.');
+assert(/newAccBankName\.trim\(\) \|\| suggestBankName\(label\)/.test(addAccSrc2.src),
+  'addAccountInline() phải ưu tiên dùng Tên ngân hàng người dùng vừa gõ — chỉ tự gợi ý khi để trống.');
+assert(/newAccNo\.trim\(\) \|\| suggestAccountNo\(label\)/.test(addAccSrc2.src),
+  'addAccountInline() phải ưu tiên dùng Số TK người dùng vừa gõ — chỉ tự gợi ý khi để trống.');
+assert(/setNewAccLabel\(""\); setNewAccMisa\(""\); setNewAccBankName\(""\); setNewAccNo\(""\); setAddAccMode\(false\);/.test(addAccSrc2.src),
+  'Thêm xong phải reset sạch cả 3 ô mới (không để sót giá trị cũ cho lần thêm tài khoản tiếp theo).');
+console.log('PASS 6: form thêm tài khoản có đủ 3 ô Mã hạch toán MISA/Tên ngân hàng/Số TK, dùng đúng giá trị người dùng gõ.');
+
 console.log('\nALL DONE');
