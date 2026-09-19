@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.310"
+APP_BUILD = "2026-09-19.311"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5634,8 +5634,111 @@ def _dvc_run_batch(batch_id, cids, body):
                     cac_doan = _chia_khoang_ngay_thanh_doan(tu_tim, den_tim, so_thang_moi_doan=1)
                 else:
                     cac_doan = [(tu_tim, den_tim)]
-                rows_tho, ma_list, sdiag = [], [], []
+                # TRA TỚI ĐÂU TẢI TỚI ĐÓ — KHÔNG gom hết mọi đoạn rồi mới tải.
+                # Người dùng xác nhận: tra/tải 1 THÁNG lẻ luôn tải được, nhưng
+                # gom 12-24 tháng rồi mới tải thì báo "$ is not defined" hàng
+                # loạt ở bước tải. Log thật cho thấy bước TRA CỨU vẫn chạy tốt
+                # tới đoạn cuối (24/24) — mà tra cứu bắt buộc phải nạp được
+                # jQuery trên trang /tchs mới chạy được — nên trình duyệt và
+                # phiên đăng nhập VẪN KHOẺ; chỉ riêng TRANG CHI TIẾT hồ sơ là
+                # không nạp được script sau QUÁ NHIỀU lượt điều hướng liên
+                # tiếp. Tra xong đoạn nào tải luôn đoạn đó giữ đúng điều kiện
+                # đã xác nhận chạy được (bản .284 chỉ tra 1 lượt rồi tải ngay
+                # nên luôn ở điều kiện này).
+                rows_tho, sdiag = [], []
                 raw_html = ""
+                co_dong_dung_ky = False
+                seen_ma = set()          # dùng CHUNG mọi đoạn -> không tải trùng
+                folder_tai = _dvc_save_folder(cid) if tai_file else None
+
+                def _tai_ho_so_1_doan(rows_doan, rows_tho_doan, ma_doan):
+                    """Tải file + Thông báo cho ĐÚNG các hồ sơ của 1 đoạn vừa
+                    tra cứu xong (xem giải thích ngay trên vì sao phải tải
+                    ngay thay vì gom lại tải 1 lượt ở cuối)."""
+                    if not (tai_file and ma_doan and folder_tai):
+                        return
+                    folder = folder_tai
+                    # 1) các hồ sơ dò được đủ dữ liệu dòng (to_khai/ky/lan_bs) -> đặt tên thân thiện
+                    for rec in rows_doan:
+                        ma = (rec.get("ma") or "").strip()
+                        if not ma or ma in seen_ma:
+                            continue
+                        seen_ma.add(ma)
+                        if job.get("cancel"):
+                            break
+                        ten_goi = _ten_file_fn(rec.get("to_khai"), rec.get("ky"), mst, rec.get("lan_bs"))
+                        try:
+                            if tai_tb:
+                                tb_files, tb_diag = _dvc_browser_thongbao(drv, ma, _tb_loai)
+                                so_tb = len(tb_files)
+                                if so_tb == 0:
+                                    # KHÔNG chắc đây là lỗi (có thể CQT thật sự chưa
+                                    # phát hành thông báo cho hồ sơ này) — ghi chú NHẸ
+                                    # (không tính vào so_loi_tai) để người dùng tự đối
+                                    # chiếu lại trên cổng nếu thấy đáng ngờ, thay vì im
+                                    # lặng như trước (không cách nào biết vì sao thiếu).
+                                    item["so_khong_co_tb"] = item.get("so_khong_co_tb", 0) + 1
+                                    mau_tb = item.setdefault("khong_co_tb_mau", [])
+                                    if len(mau_tb) < _DVC_LOI_TAI_TOI_DA:
+                                        ghi_chu_tb = "; ".join(tb_diag)[:100]
+                                        nhan = str(rec.get("to_khai") or ten_goi)[:80]
+                                        mau_tb.append(f"{nhan} ({ghi_chu_tb})" if ghi_chu_tb else nhan)
+                                for k, (fn, raw) in enumerate(tb_files, 1):
+                                    if raw:
+                                        ext = os.path.splitext(fn)[1] or ".xml"
+                                        hau_to = f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"
+                                        _dvc_luu_file(folder, f"{ten_goi}{hau_to}{ext}", raw); item["so_file"] += 1
+                            fn, raw = _tai_file_fn(drv, ma)
+                            if raw:
+                                ext = os.path.splitext(fn)[1] or ".zip"
+                                _dvc_luu_file(folder, f"{ten_goi}{ext}", raw); item["so_file"] += 1
+                            else:
+                                # KHÔNG NÉM lỗi (API trả "thành công" nhưng rỗng nội
+                                # dung) — vẫn phải GHI LẠI để biết vì sao thiếu file,
+                                # thay vì im lặng bỏ qua như trước (xem giải thích ở
+                                # danh sách item['loi_tai_ho_so']).
+                                _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), "API trả về rỗng (không có nội dung file)")
+                        except Exception as e:
+                            _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), str(e))
+                        time.sleep(_nghi_giua_tai)
+                    # Các hồ sơ có ĐỦ dữ liệu dòng (nằm trong rows_tho_doan, biết rõ
+                    # cột "Kỳ") nhưng KHÔNG khớp đúng kỳ đang tra cứu (tu, den)
+                    # -> đây là tờ khai của KỲ KHÁC (vd nộp bổ sung/điều chỉnh
+                    # cho Quý 1 nhưng nộp muộn trong khoảng ngày nộp của Quý 2)
+                    # — KHÔNG được tải xuống ở bước "dự phòng" bên dưới, dù mã hồ
+                    # sơ của nó vẫn nằm trong ma_doan (danh sách mọi mã tìm thấy,
+                    # không lọc theo kỳ). Trước đây thiếu bước loại trừ này nên
+                    # tờ khai của kỳ khác bị tải lẫn vào (đặt tên gốc dạng
+                    # "files_xxx.zip"), lẫn cả vào kết quả của kỳ đang chọn.
+                    ma_ky_khac = {(r.get("ma") or "").strip() for r in rows_tho_doan} - seen_ma
+                    ma_ky_khac.discard("")
+                    seen_ma.update(ma_ky_khac)
+                    # 2) mã hồ sơ tìm thấy trong ma_doan nhưng KHÔNG có trong
+                    # rows_tho_doan (raw_html có link mã nhưng không ghép được dữ
+                    # liệu dòng để biết cột "Kỳ" của nó) -> CHƯA XÁC ĐỊNH được
+                    # kỳ, tải với tên gốc (dự phòng) như trước — CHỈ áp dụng cho
+                    # trường hợp này, không áp dụng cho hồ sơ đã biết rõ là kỳ khác.
+                    for ma in ma_doan:
+                        if ma in seen_ma:
+                            continue
+                        seen_ma.add(ma)
+                        if job.get("cancel"):
+                            break
+                        try:
+                            if tai_tb:
+                                tb_files, _ = _dvc_browser_thongbao(drv, ma, _tb_loai)
+                                for fn, raw in tb_files:
+                                    if raw:
+                                        _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
+                            fn, raw = _tai_file_fn(drv, ma)
+                            if raw:
+                                _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
+                            else:
+                                _dvc_ghi_loi_tai(item, ma, "", "API trả về rỗng (không có nội dung file)")
+                        except Exception as e:
+                            _dvc_ghi_loi_tai(item, ma, "", str(e))
+                        time.sleep(_nghi_giua_tai)
+
                 for _idx_doan, (tu_doan, den_doan) in enumerate(cac_doan, 1):
                     if len(cac_doan) > 1:
                         item["trang_thai"] = (
@@ -5648,15 +5751,42 @@ def _dvc_run_batch(batch_id, cids, body):
                     except Exception as e:
                         r_tho, r_ma, r_html, r_diag = [], [], "", [f"lỗi tra cứu {tu_doan}-{den_doan}: {e}"]
                     rows_tho.extend(r_tho)
-                    for m_ in r_ma:
-                        if m_ not in ma_list:
-                            ma_list.append(m_)
                     if r_html and not raw_html:
                         raw_html = r_html
                     if len(cac_doan) > 1:
                         sdiag.extend(f"[{tu_doan}-{den_doan}] {d}" for d in r_diag)
                     else:
                         sdiag.extend(r_diag)
+                    # Giữ lại dòng NẰM TRỌN trong kỳ đang chọn, HOẶC dòng không suy
+                    # được kỳ (_ky_khong_xac_dinh — vd Môn bài/TTĐB/Tài nguyên/BVMT/
+                    # XNK và nhiều loại tờ khai khác không ghi kỳ theo dạng Quý/
+                    # Tháng/Năm chuẩn) — CHỈ loại đúng những dòng suy được kỳ và
+                    # kỳ đó THẬT SỰ khác (xem _ky_khong_xac_dinh để biết vì sao,
+                    # nếu không thì tra cứu/tải hàng loạt chỉ ra đúng 4 loại GTGT/
+                    # TNCN/BCTC/TNDN dù công ty còn nộp nhiều loại tờ khai khác).
+                    # loc_theo_ky=False ("Tùy chọn ngày"): KHÔNG lọc theo kỳ chút
+                    # nào — tu/den ở chế độ này là khoảng NGÀY NỘP người dùng
+                    # thật sự muốn xem, không phải 1 kỳ tính thuế cần khớp; lọc
+                    # theo kỳ ở đây sẽ loại nhầm tờ khai kỳ CŨ nộp BỔ SUNG muộn
+                    # (vd Quý 3/2024 nộp bổ sung ngày 20/04/2025, rơi đúng trong
+                    # khoảng Tùy chọn ngày đang chọn) dù đó chính là thứ đang tìm.
+                    rows_doan = r_tho if not loc_theo_ky else [
+                        r for r in r_tho
+                        if _ky_dong_bo_trong_khoang(r.get("ky", ""), tu, den)
+                        or _ky_khong_xac_dinh(r.get("ky", ""))]
+                    if rows_doan:
+                        co_dong_dung_ky = True
+                        co_du_lieu_nguon_nao = True
+                        with job_lock:
+                            for rec in rows_doan:
+                                rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
+                                tracuu_rows.append(rec2)
+                        item["so_dong"] = item.get("so_dong", 0) + len(rows_doan)
+                    if tai_file and r_ma and len(cac_doan) > 1:
+                        item["trang_thai"] = (
+                            f"đang tải file {nhan_nguon}: {tu_doan}-{den_doan} "
+                            f"({_idx_doan}/{len(cac_doan)})")
+                    _tai_ho_so_1_doan(rows_doan, r_tho, r_ma)
                 # Cổng báo "Tổng số bản ghi" LỆCH với số dòng thật đọc được
                 # (xem _dvc_browser_tracuu/_dvc_browser_tracuu_tdt) — search
                 # vẫn coi là "thành công" (có rows) nên nhánh loi_tra_cuu bên
@@ -5668,37 +5798,15 @@ def _dvc_run_batch(batch_id, cids, body):
                         item.setdefault("loi_tra_cuu", "")
                         item["loi_tra_cuu"] += f"[{nhan_nguon}] {_d}; "[:200]
                         break
-                # Giữ lại dòng NẰM TRỌN trong kỳ đang chọn, HOẶC dòng không suy
-                # được kỳ (_ky_khong_xac_dinh — vd Môn bài/TTĐB/Tài nguyên/BVMT/
-                # XNK và nhiều loại tờ khai khác không ghi kỳ theo dạng Quý/
-                # Tháng/Năm chuẩn) — CHỈ loại đúng những dòng suy được kỳ và
-                # kỳ đó THẬT SỰ khác (xem _ky_khong_xac_dinh để biết vì sao,
-                # nếu không thì tra cứu/tải hàng loạt chỉ ra đúng 4 loại GTGT/
-                # TNCN/BCTC/TNDN dù công ty còn nộp nhiều loại tờ khai khác).
-                # loc_theo_ky=False ("Tùy chọn ngày"): KHÔNG lọc theo kỳ chút
-                # nào — tu/den ở chế độ này là khoảng NGÀY NỘP người dùng
-                # thật sự muốn xem, không phải 1 kỳ tính thuế cần khớp; lọc
-                # theo kỳ ở đây sẽ loại nhầm tờ khai kỳ CŨ nộp BỔ SUNG muộn
-                # (vd Quý 3/2024 nộp bổ sung ngày 20/04/2025, rơi đúng trong
-                # khoảng Tùy chọn ngày đang chọn) dù đó chính là thứ đang tìm.
-                rows = rows_tho if not loc_theo_ky else [
-                    r for r in rows_tho
-                    if _ky_dong_bo_trong_khoang(r.get("ky", ""), tu, den)
-                    or _ky_khong_xac_dinh(r.get("ky", ""))]
-                if rows_tho and not rows:
+                if rows_tho and not co_dong_dung_ky:
                     sdiag = list(sdiag) + [
                         f"tìm thấy {len(rows_tho)} dòng trong khoảng ngày nộp {tu_tim}-{den_tim} "
                         f"nhưng KHÔNG dòng nào đúng kỳ {ky_label} đang tra cứu (kỳ khác) — coi như "
                         f"CHƯA nộp đúng kỳ này"]
-                with job_lock:
-                    for rec in rows:
-                        rec2 = {"mst": mst, "ten": ten}; rec2.update(rec)
-                        tracuu_rows.append(rec2)
-                item["so_dong"] = item.get("so_dong", 0) + len(rows)
                 # Nếu tra cứu THÀNH CÔNG nhưng KHÔNG có tờ khai nào trong kỳ
                 # (của ĐÚNG NGUỒN này) -> ghi chú "CHƯA NỘP TỜ KHAI" (đỏ).
                 # Nếu tra cứu lỗi thì không kết luận.
-                if not rows:
+                if not co_dong_dung_ky:
                     if raw_html:
                         with job_lock:
                             tracuu_rows.append({
@@ -5711,109 +5819,6 @@ def _dvc_run_batch(batch_id, cids, body):
                     else:
                         item.setdefault("loi_tra_cuu", "")
                         item["loi_tra_cuu"] += (f"[{nhan_nguon}] " + "; ".join(sdiag))[:200]
-                else:
-                    co_du_lieu_nguon_nao = True
-                # Sau khi tra cứu NHIỀU đoạn liên tiếp (chia theo tháng) rồi mới
-                # sang bước tải file — người dùng xác nhận: tra/tải 1 THÁNG lẻ
-                # luôn tải được, nhưng chạy LIÊN TỤC 12 tháng thì tới bước tải
-                # file lại báo "$ is not defined" hàng loạt (dù đã thử lại 3 lần
-                # ở _dvc_browser_download_tdt) — phiên trình duyệt CÀNG CHẠY LÂU
-                # (12 lượt tra cứu liên tiếp trước đó) CÀNG DỄ gặp lỗi nạp jQuery
-                # ở bước tải, khác hẳn 1 lượt tra cứu đơn lẻ. Nghỉ 1 chút TRƯỚC
-                # KHI bắt đầu tải (chỉ khi vừa tra cứu nhiều đoạn) để trình duyệt
-                # "hạ nhiệt" trước bước tải nặng hơn (nhiều lượt điều hướng liên
-                # tục) — dù chưa chắc hết hẳn, thử hướng này trước khi tính tới
-                # khởi động lại trình duyệt giữa chừng (phức tạp/rủi ro hơn).
-                if len(cac_doan) > 1 and tai_file and ma_list:
-                    time.sleep(3)
-                # tải file (tùy chọn)
-                if tai_file and ma_list:
-                    folder = _dvc_save_folder(cid)
-                    if folder:
-                        seen_ma = set()
-                        # 1) các hồ sơ dò được đủ dữ liệu dòng (to_khai/ky/lan_bs) -> đặt tên thân thiện
-                        for rec in rows:
-                            ma = (rec.get("ma") or "").strip()
-                            if not ma or ma in seen_ma:
-                                continue
-                            seen_ma.add(ma)
-                            if job.get("cancel"):
-                                break
-                            ten_goi = _ten_file_fn(rec.get("to_khai"), rec.get("ky"), mst, rec.get("lan_bs"))
-                            try:
-                                if tai_tb:
-                                    tb_files, tb_diag = _dvc_browser_thongbao(drv, ma, _tb_loai)
-                                    so_tb = len(tb_files)
-                                    if so_tb == 0:
-                                        # KHÔNG chắc đây là lỗi (có thể CQT thật sự chưa
-                                        # phát hành thông báo cho hồ sơ này) — ghi chú NHẸ
-                                        # (không tính vào so_loi_tai) để người dùng tự đối
-                                        # chiếu lại trên cổng nếu thấy đáng ngờ, thay vì im
-                                        # lặng như trước (không cách nào biết vì sao thiếu).
-                                        # Kèm chẩn đoán (trạng thái jQuery lúc đó) — người
-                                        # dùng nghi ngờ "không thấy thông báo" cùng nguyên
-                                        # nhân với lỗi tải file, cần dữ liệu để xác nhận.
-                                        item["so_khong_co_tb"] = item.get("so_khong_co_tb", 0) + 1
-                                        mau_tb = item.setdefault("khong_co_tb_mau", [])
-                                        if len(mau_tb) < _DVC_LOI_TAI_TOI_DA:
-                                            ghi_chu_tb = "; ".join(tb_diag)[:100]
-                                            nhan = str(rec.get("to_khai") or ten_goi)[:80]
-                                            mau_tb.append(f"{nhan} ({ghi_chu_tb})" if ghi_chu_tb else nhan)
-                                    for k, (fn, raw) in enumerate(tb_files, 1):
-                                        if raw:
-                                            ext = os.path.splitext(fn)[1] or ".xml"
-                                            hau_to = f"_ThongBao{k}" if so_tb > 1 else "_ThongBao"
-                                            _dvc_luu_file(folder, f"{ten_goi}{hau_to}{ext}", raw); item["so_file"] += 1
-                                fn, raw = _tai_file_fn(drv, ma)
-                                if raw:
-                                    ext = os.path.splitext(fn)[1] or ".zip"
-                                    _dvc_luu_file(folder, f"{ten_goi}{ext}", raw); item["so_file"] += 1
-                                else:
-                                    # KHÔNG NÉM lỗi (API trả "thành công" nhưng rỗng nội
-                                    # dung) — vẫn phải GHI LẠI để biết vì sao thiếu file,
-                                    # thay vì im lặng bỏ qua như trước (xem giải thích ở
-                                    # danh sách item['loi_tai_ho_so']).
-                                    _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), "API trả về rỗng (không có nội dung file)")
-                            except Exception as e:
-                                _dvc_ghi_loi_tai(item, ma, rec.get("to_khai"), str(e))
-                            time.sleep(_nghi_giua_tai)
-                        # Các hồ sơ có ĐỦ dữ liệu dòng (nằm trong rows_tho, biết rõ
-                        # cột "Kỳ") nhưng KHÔNG khớp đúng kỳ đang tra cứu (tu, den)
-                        # -> đây là tờ khai của KỲ KHÁC (vd nộp bổ sung/điều chỉnh
-                        # cho Quý 1 nhưng nộp muộn trong khoảng ngày nộp của Quý 2)
-                        # — KHÔNG được tải xuống ở bước "dự phòng" bên dưới, dù mã hồ
-                        # sơ của nó vẫn nằm trong ma_list (danh sách mọi mã tìm thấy,
-                        # không lọc theo kỳ). Trước đây thiếu bước loại trừ này nên
-                        # tờ khai của kỳ khác bị tải lẫn vào (đặt tên gốc dạng
-                        # "files_xxx.zip"), lẫn cả vào kết quả của kỳ đang chọn.
-                        ma_ky_khac = {(r.get("ma") or "").strip() for r in rows_tho} - seen_ma
-                        ma_ky_khac.discard("")
-                        seen_ma |= ma_ky_khac
-                        # 2) mã hồ sơ tìm thấy trong ma_list nhưng KHÔNG có trong
-                        # rows_tho (raw_html có link mã nhưng không ghép được dữ
-                        # liệu dòng để biết cột "Kỳ" của nó) -> CHƯA XÁC ĐỊNH được
-                        # kỳ, tải với tên gốc (dự phòng) như trước — CHỈ áp dụng cho
-                        # trường hợp này, không áp dụng cho hồ sơ đã biết rõ là kỳ khác.
-                        for ma in ma_list:
-                            if ma in seen_ma:
-                                continue
-                            seen_ma.add(ma)
-                            if job.get("cancel"):
-                                break
-                            try:
-                                if tai_tb:
-                                    tb_files, _ = _dvc_browser_thongbao(drv, ma, _tb_loai)
-                                    for fn, raw in tb_files:
-                                        if raw:
-                                            _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
-                                fn, raw = _tai_file_fn(drv, ma)
-                                if raw:
-                                    _dvc_luu_file(folder, fn, raw); item["so_file"] += 1
-                                else:
-                                    _dvc_ghi_loi_tai(item, ma, "", "API trả về rỗng (không có nội dung file)")
-                            except Exception as e:
-                                _dvc_ghi_loi_tai(item, ma, "", str(e))
-                            time.sleep(_nghi_giua_tai)
             item["chua_nop"] = not co_du_lieu_nguon_nao and not item.get("loi_tra_cuu")
 
             # ===== ĐỒNG BỘ tick "Tự động nộp tờ khai" (GTGT/TNCN) theo đúng
