@@ -1,9 +1,6 @@
 import os
 import re
 import json
-import sqlite3
-import tempfile
-import datetime
 import threading
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +15,16 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 # masothue.com/tracuunnt.gdt.gov.vn từ môi trường sandbox), người dùng chọn dùng API
 # CHÍNH THỨC của XInvoice (api.xinvoice.vn/gdt-api/tax-payer/{mst}, cần client-id +
 # api-key tự đăng ký) thay cho việc đọc HTML masothue.com ban đầu.
+#
+# QUAN TRỌNG (đổi ý nghĩa lớn — vừa bỏ hẳn cache): trước đây có cache DB dài hạn
+# (bảng mst_status_cache, 14 ngày, sau đó rút xuống 1 ngày riêng cho MST "CÓ CẢNH
+# BÁO"), nhưng người dùng vẫn tiếp tục báo "phần mềm báo sai" (tra ra 'NNT ngừng
+# hoạt động...' dù MST đó THẬT SỰ đang hoạt động bình thường) và yêu cầu thẳng:
+# "hãy bỏ cache 14 ngày đi, không cần lưu, cứ dò ở thời điểm hiện tại" — nên
+# _tra_cuu_trang_thai_mst() giờ KHÔNG còn đọc/ghi bất kỳ cache dài hạn nào nữa,
+# LUÔN tra cứu thật sự qua mạng mỗi lần được gọi (trừ dedup trong bộ nhớ CHỈ trong
+# CÙNG 1 lượt xuất Excel — xem _mst_status_local ở export_excel, không phải cache
+# dài hạn nên KHÔNG có trong phạm vi test file này).
 
 
 def extract_fn(name):
@@ -104,14 +111,10 @@ class _FakeSettings:
         self.store[key] = value
 
 
-ns = {'datetime': datetime, 'json': json, 'threading': threading}
+ns = {'json': json, 'threading': threading}
 exec(extract_fn('_khong_dau'), ns)
 exec(extract_fn('_chuan_mst'), ns)
 exec(extract_fn('_phan_loai_trang_thai_mst'), ns)
-m = re.search(r'^_MST_CACHE_NGAY\s*=\s*\d+', src, re.M)
-exec(m.group(0), ns)
-m1b = re.search(r'^_MST_CACHE_NGAY_CANH_BAO\s*=\s*\d+', src, re.M)
-exec(m1b.group(0), ns)
 m2 = re.search(r'^_MST_API_NGHI_GIUA_LUOT\s*=\s*[\d.]+', src, re.M)
 exec(m2.group(0), ns)
 m3 = re.search(r'^_XINVOICE_KEY_STATE\s*=\s*\{.*\}', src, re.M)
@@ -127,26 +130,13 @@ ns['time'] = _fake_time
 exec(extract_fn('_lay_danh_sach_xinvoice_keys'), ns)
 exec(extract_fn('_goi_1_lan_xinvoice'), ns)
 
-_tmp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
-_tmp_db.close()
-
-
-def _fresh_db():
-    conn = sqlite3.connect(_tmp_db.name, check_same_thread=False, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("""CREATE TABLE IF NOT EXISTS mst_status_cache (
-        mst TEXT PRIMARY KEY, trang_thai_goc TEXT, canh_bao INTEGER, checked_at TEXT
-    )""")
-    return conn
-
-
-ns['db'] = _fresh_db
 # Stub nguồn ưu tiên số 1 (VietQR, thử TRƯỚC XInvoice — xem
 # _tra_cuu_trang_thai_mst) LUÔN thất bại: các test dưới đây kiểm tra hành vi
 # RIÊNG của chuỗi XInvoice (cấu hình key, chuyển key, dự phòng...), không
 # liên quan tới VietQR — nguồn đó có test riêng (test_tra_mst_qua_vietqr.py).
 # (tracuunnt.gdt.gov.vn và masothue.com đã BỊ BỎ theo yêu cầu người dùng
-# "không đúng được" — không còn trong chuỗi nữa.)
+# "không đúng được" — không còn trong chuỗi nữa. Đã bỏ luôn cache DB dài hạn
+# — không cần bind ns['db'] nữa, hàm không còn gọi db() ở đâu cả.)
 ns['_tra_cuu_mst_qua_vietqr'] = lambda mst_c, timeout: (False, "", None, "stub: tắt trong test này")
 exec(extract_fn('_tra_cuu_trang_thai_mst'), ns)
 _phan_loai_trang_thai_mst = ns['_phan_loai_trang_thai_mst']
@@ -163,11 +153,6 @@ def _set_xinvoice_keys(danh_sach):
     _fake_settings.set("xinvoice_api_keys", json.dumps(danh_sach, ensure_ascii=False))
     with ns['_XINVOICE_KEY_STATE']['lock']:
         ns['_XINVOICE_KEY_STATE']['idx'] = 0
-
-_conn0 = _fresh_db()
-_conn0.execute("DELETE FROM mst_status_cache")
-_conn0.commit()
-_conn0.close()
 
 # ===== Test 1-6: _phan_loai_trang_thai_mst() — phân loại theo nội dung trường
 # "status" trả về từ API, các ca thường gặp (đúng cụm mô tả chính thức của Tổng
@@ -198,7 +183,8 @@ _, cb = _phan_loai_trang_thai_mst("")
 assert cb is None, f"KHÔNG có dữ liệu tình trạng -> canh_bao=None (KHÔNG suy đoán/không tô đỏ) — got {cb}"
 print("PASS 6: không có dữ liệu tình trạng -> canh_bao=None, không suy đoán bừa.")
 
-# ===== Test 7-13: _tra_cuu_trang_thai_mst() — luồng cấu hình + cache + gọi API (mock). =====
+# ===== Test 7-13: _tra_cuu_trang_thai_mst() — luồng cấu hình + gọi API (mock),
+# KHÔNG còn cache dài hạn — luôn tra thật tại thời điểm gọi. =====
 
 # Test 7 (QUAN TRỌNG — chẩn đoán "sao vẫn còn?"): MST rỗng/"KL" (khách lẻ)/
 # quá ngắn -> KHÔNG gọi mạng, trả canh_bao=None (kể cả khi ĐÃ cấu hình
@@ -258,20 +244,20 @@ _fake_settings.set("xinvoice_api_key", "demo-key")
 _fake_requests.next_status = 200
 _fake_requests.next_data = None
 
-# Test 9: cache MISS (đã có cấu hình) -> gọi API đúng 1 lần, đúng URL/header, phân
-# loại đúng, LƯU vào cache.
+# Test 9: gọi API đúng 1 lần, đúng URL/header, phân loại đúng theo trường
+# "status" trả về.
 _fake_requests.calls.clear()
 _fake_requests.next_status = 200
 _fake_requests.next_data = {"status": "Người nộp thuế đã bị khóa mã số thuế"}
 r9 = _tra_cuu_trang_thai_mst("0315696133", timeout=1)
 assert r9["canh_bao"] is True, f"Phải phân loại đúng từ trường 'status' trả về — got {r9}"
-assert len(_fake_requests.calls) == 1, f"Cache MISS phải gọi API đúng 1 lần — got {len(_fake_requests.calls)}"
+assert len(_fake_requests.calls) == 1, f"Phải gọi API đúng 1 lần — got {len(_fake_requests.calls)}"
 call = _fake_requests.calls[0]
 assert call["url"] == "https://api.xinvoice.vn/gdt-api/tax-payer/0315696133", f"Sai URL — got {call['url']}"
 assert call["headers"].get("client-id") == "demo-client"
 assert call["headers"].get("api-key") == "demo-key"
-print("PASS 9: cache MISS -> gọi đúng API XInvoice (URL + header client-id/api-key), phân loại đúng "
-      "theo trường 'status'.")
+print("PASS 9: gọi đúng API XInvoice (URL + header client-id/api-key), phân loại đúng theo trường "
+      "'status'.")
 
 # Test 9b (ca thật người dùng báo — QUAN TRỌNG): bảng kê ~880 hóa đơn chỉ dò được
 # ~50 dòng, còn lại trống hết dù cùng client-id/api-key -> dấu hiệu bị GIỚI HẠN TỐC
@@ -334,111 +320,64 @@ _fake_requests.next_responses = None
 _fake_requests.next_status = 200   # trả về trạng thái mặc định cho các test sau
 _fake_requests.next_data = None
 
-# Test 10: cache HIT (vừa tra ở Test 9) -> KHÔNG gọi mạng lại, trả đúng kết quả đã lưu.
-_fake_requests.calls.clear()
-r10 = _tra_cuu_trang_thai_mst("0315696133", timeout=1)
-assert r10["canh_bao"] is True
-assert len(_fake_requests.calls) == 0, (
-    f"MST đã tra cứu gần đây (còn trong hạn cache _MST_CACHE_NGAY ngày) KHÔNG được gọi lại API "
-    f"— got {len(_fake_requests.calls)} lượt gọi")
-print("PASS 10: cache HIT (MST vừa tra) -> không gọi lại API, dùng lại kết quả đã lưu (giảm số lượt "
-      "gọi API có thể tính phí).")
-
-# Test 11: cache đã QUÁ HẠN (checked_at cũ hơn _MST_CACHE_NGAY ngày) -> tra lại THẬT SỰ.
-conn11 = _fresh_db()
-qua_han = (datetime.datetime.now() - datetime.timedelta(days=ns['_MST_CACHE_NGAY'] + 1)).isoformat()
-conn11.execute("UPDATE mst_status_cache SET checked_at=? WHERE mst=?", (qua_han, "0315696133"))
-conn11.commit()
-conn11.close()
-_fake_requests.calls.clear()
-_fake_requests.next_data = {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}
-r11 = _tra_cuu_trang_thai_mst("0315696133", timeout=1)
-assert r11["canh_bao"] is False, f"Sau khi tra lại, tình trạng đã đổi thành 'đang hoạt động' — got {r11}"
-assert len(_fake_requests.calls) == 1, "Cache quá hạn PHẢI tra lại thật sự (gọi API lại)"
-print("PASS 11: cache đã quá hạn (_MST_CACHE_NGAY ngày) -> tự động tra lại thật sự, cập nhật kết quả "
-      "mới.")
-
-# ===== Test 11b (bug THẬT người dùng vừa báo — "kiểm tra lại tra cứu mst phần
-# mềm báo sai"): CÔNG TY TNHH BROTHER INTERNATIONAL (0313415034) và CÔNG TY
-# CỔ PHẦN BKAV (0101360697) bị phần mềm tô đỏ "NNT ngừng hoạt động..." do
-# cache CŨ (lưu từ 1 lần tra trước, khi nguồn lúc đó trả tình trạng này) —
-# trong khi tra lại THẬT qua api.vietqr.io cho kết quả HIỆN TẠI là "NNT đang
-# hoạt động". Cache tuy còn hạn 14 ngày (_MST_CACHE_NGAY) nhưng đã LỖI THỜI,
-# khiến phần mềm cứ báo sai suốt cho tới khi cache hết hạn. Sửa: cache "CÓ
-# CẢNH BÁO" (canh_bao=True) hết hạn SỚM hơn nhiều (_MST_CACHE_NGAY_CANH_BAO,
-# 1 ngày) để tự sửa các trường hợp báo sai kiểu này nhanh chóng. =====
-conn11b = _fresh_db()
-conn11b.execute("DELETE FROM mst_status_cache")
-qua_han_canh_bao = (datetime.datetime.now()
-                    - datetime.timedelta(days=ns['_MST_CACHE_NGAY_CANH_BAO'] + 1)).isoformat()
-conn11b.execute(
-    "INSERT INTO mst_status_cache(mst, trang_thai_goc, canh_bao, checked_at) VALUES(?,?,?,?)",
-    ("0313415034", "NNT ngừng hoạt động nhưng chưa hoàn thành thủ tục đóng mã số thuế", 1, qua_han_canh_bao))
-# Cache canh_bao=False (bình thường) ở CÙNG độ tuổi -> vẫn còn hạn hẳn
-# _MST_CACHE_NGAY (14 ngày), phải KHÔNG bị ảnh hưởng bởi hạn ngắn dành riêng
-# cho canh_bao=True.
-conn11b.execute(
-    "INSERT INTO mst_status_cache(mst, trang_thai_goc, canh_bao, checked_at) VALUES(?,?,?,?)",
-    ("0101360697", "NNT đang hoạt động", 0, qua_han_canh_bao))
-conn11b.commit()
-conn11b.close()
-
+# ===== Test 10 (bug THẬT người dùng vừa báo tiếp — CỰC KỲ QUAN TRỌNG: "vẫn tra
+# mst NNT ngừng hoạt động nhưng chưa hoàn thành thủ tục đóng mã số thuế nhưng đã
+# dò mst này không bị gì hết vẫn hoạt động bình thường hãy có cache 14 ngày đi
+# ko cần lưu cứ dò ở thời điểm hiện tại"): kể cả sau khi đã sửa cache "CÓ CẢNH
+# BÁO" hết hạn sớm hơn (1 ngày, bản vá trước), người dùng vẫn thấy báo sai vì
+# cache CŨ (ghi từ TRƯỚC bản vá) vẫn còn hiệu lực. Giải pháp cuối cùng theo
+# đúng yêu cầu người dùng: BỎ HẲN cache dài hạn — LUÔN tra cứu THẬT SỰ tại thời
+# điểm gọi, không lưu/dùng lại kết quả cũ giữa các lần gọi khác nhau. =====
 _fake_requests.calls.clear()
 _fake_requests.next_status = 200
-_fake_requests.next_data = {"status": "NNT đang hoạt động"}
-r11b_khoa = _tra_cuu_trang_thai_mst("0313415034", timeout=1)
-assert r11b_khoa["canh_bao"] is False, (
-    f"Cache 'CÓ CẢNH BÁO' đã lỗi thời (quá _MST_CACHE_NGAY_CANH_BAO ngày, dù vẫn còn hạn "
-    f"_MST_CACHE_NGAY 14 ngày) PHẢI tự động dò lại và lấy tình trạng MỚI ('NNT đang hoạt động') thay vì "
-    f"tiếp tục báo sai tình trạng cũ — got {r11b_khoa}")
-assert len(_fake_requests.calls) == 1, (
-    f"Cache 'CÓ CẢNH BÁO' quá hạn _MST_CACHE_NGAY_CANH_BAO ngày PHẢI gọi API dò lại thật sự — got "
-    f"{len(_fake_requests.calls)} lượt gọi")
+_fake_requests.next_data = {"status": "NNT ngừng hoạt động nhưng chưa hoàn thành thủ tục đóng mã số thuế"}
+r10a = _tra_cuu_trang_thai_mst("0313415034", timeout=1)   # đúng MST thật người dùng báo (BROTHER INTERNATIONAL)
+assert r10a["canh_bao"] is True, f"got {r10a}"
+assert len(_fake_requests.calls) == 1
 
 _fake_requests.calls.clear()
-r11b_binh_thuong = _tra_cuu_trang_thai_mst("0101360697", timeout=1)
-assert r11b_binh_thuong["canh_bao"] is False, f"got {r11b_binh_thuong}"
-assert len(_fake_requests.calls) == 0, (
-    f"Cache 'BÌNH THƯỜNG' (canh_bao=False) cùng độ tuổi vẫn PHẢI còn hạn _MST_CACHE_NGAY (14 ngày) "
-    f"— KHÔNG bị rút ngắn hạn như cache 'CÓ CẢNH BÁO' — got {len(_fake_requests.calls)} lượt gọi")
-print("PASS 11b: cache 'CÓ CẢNH BÁO' (canh_bao=True) hết hạn SỚM hơn (_MST_CACHE_NGAY_CANH_BAO, 1 ngày) "
-      "để tự sửa các trường hợp báo sai do dữ liệu cache cũ đã lỗi thời — đúng bug thật người dùng báo "
-      "(BROTHER INTERNATIONAL/BKAV bị tô đỏ oan); cache 'bình thường' vẫn giữ nguyên hạn 14 ngày, không "
-      "bị ảnh hưởng.")
+_fake_requests.next_data = {"status": "NNT đang hoạt động"}
+r10b = _tra_cuu_trang_thai_mst("0313415034", timeout=1)   # gọi lại NGAY sau đó, CÙNG 1 MST
+assert r10b["canh_bao"] is False, (
+    f"KHÔNG được cache lại kết quả cũ — gọi lại PHẢI LUÔN tra cứu THẬT SỰ tại thời điểm hiện tại và lấy "
+    f"đúng tình trạng MỚI NHẤT, đúng ca thật người dùng báo (MST đã hoạt động bình thường trở lại nhưng "
+    f"phần mềm vẫn báo sai do cache cũ) — got {r10b}")
+assert len(_fake_requests.calls) == 1, (
+    f"KHÔNG còn cache -> PHẢI gọi mạng lại THẬT SỰ mỗi lần gọi (không được trả thẳng kết quả cũ của lần "
+    f"trước) — got {len(_fake_requests.calls)} lượt gọi")
+print("PASS 10: KHÔNG còn cache dài hạn — gọi lại CÙNG 1 MST luôn tra cứu THẬT SỰ tại thời điểm hiện "
+      "tại, lấy đúng tình trạng mới nhất, đúng yêu cầu người dùng 'không cần lưu cứ dò ở thời điểm hiện "
+      "tại' — sửa dứt điểm bug báo sai kéo dài do cache cũ.")
 
-# Test 12 (an toàn/không hồi quy — QUAN TRỌNG): lỗi mạng/API (mất kết nối/timeout/sai
+# Test 11 (an toàn/không hồi quy — QUAN TRỌNG): lỗi mạng/API (mất kết nối/timeout/sai
 # client-id-api-key -> 401) -> KHÔNG được crash, trả canh_bao=None (không suy đoán khi
 # không tra cứu được), và bộ đếm lỗi liên tiếp phải hoạt động: sau nhiều lỗi liên tiếp
 # trong CÙNG 1 lượt xuất Excel, DỪNG gọi API cho các MST còn lại (tránh treo lâu vì
 # hàng loạt MST timeout/401 liên tục).
-conn12 = _fresh_db()
-conn12.execute("DELETE FROM mst_status_cache")
-conn12.commit()
-conn12.close()
 _fake_requests.calls.clear()
 _fake_requests.next_data = None
 _fake_requests.next_exc = Exception("mạng lỗi giả lập")
 dem_loi = [0]
-ket_qua_12 = []
+ket_qua_11 = []
 for i in range(8):
-    mst_gia = f"031569613{i % 10}"  # nhiều MST khác nhau -> không trùng cache
-    ket_qua_12.append(_tra_cuu_trang_thai_mst(mst_gia + "0", timeout=1, so_lan_that_bai_lien_tiep=dem_loi))
-assert all(kq["canh_bao"] is None for kq in ket_qua_12), (
+    mst_gia = f"031569613{i % 10}"  # nhiều MST khác nhau
+    ket_qua_11.append(_tra_cuu_trang_thai_mst(mst_gia + "0", timeout=1, so_lan_that_bai_lien_tiep=dem_loi))
+assert all(kq["canh_bao"] is None for kq in ket_qua_11), (
     "Lỗi mạng KHÔNG được crash và KHÔNG được suy đoán canh_bao — phải luôn là None")
-# Mỗi lượt lỗi (trước khi bộ đếm đạt 5) giờ làm ĐÚNG 1 lượt gọi mạng thật (chỉ
+# Mỗi lượt lỗi (trước khi bộ đếm đạt 5) làm ĐÚNG 1 lượt gọi mạng thật (chỉ
 # XInvoice — đã bỏ masothue.com dự phòng) -> 5 lượt lỗi liên tiếp = 5 lượt gọi
 # thật, rồi bộ đếm đạt 5 mới NGỪNG hẳn (3 lượt còn lại không gọi mạng nữa).
 assert len(_fake_requests.calls) == 5, (
     f"Sau ĐÚNG 5 lượt lỗi liên tiếp (1 lượt gọi mạng XInvoice/lượt, đã bỏ masothue.com dự phòng) phải "
     f"NGỪNG gọi mạng cho các MST còn lại trong lượt này (tránh treo lâu vì hàng loạt timeout) — got "
     f"{len(_fake_requests.calls)} lượt gọi thật (kỳ vọng đúng 5)")
-assert all("Lỗi kết nối" in (kq.get("ly_do_loi") or "") for kq in ket_qua_12[:5]), (
+assert all("Lỗi kết nối" in (kq.get("ly_do_loi") or "") for kq in ket_qua_11[:5]), (
     f"Mỗi lượt lỗi kết nối THẬT SỰ (5 lượt đầu, trước khi ngừng gọi mạng) phải kèm ly_do_loi cụ thể để "
-    f"người dùng biết nguyên nhân thật (không chỉ thấy trống không rõ vì sao) — got {ket_qua_12[:5]}")
-print("PASS 12: lỗi mạng không làm crash (canh_bao=None, an toàn), dừng hẳn việc gọi API sau 5 lỗi "
+    f"người dùng biết nguyên nhân thật (không chỉ thấy trống không rõ vì sao) — got {ket_qua_11[:5]}")
+print("PASS 11: lỗi mạng không làm crash (canh_bao=None, an toàn), dừng hẳn việc gọi API sau 5 lỗi "
       "liên tiếp trong cùng 1 lượt xuất Excel, và mỗi lượt lỗi đều kèm ly_do_loi cụ thể để chẩn đoán.")
 
-# Test 13 (không hồi quy — QUAN TRỌNG): status HTTP khác 200 (vd 401 sai client-id/
+# Test 12 (không hồi quy — QUAN TRỌNG): status HTTP khác 200 (vd 401 sai client-id/
 # api-key) -> KHÔNG suy đoán tình trạng (canh_bao=None), vẫn tính là 1 lượt lỗi cho bộ
 # đếm liên tiếp, VÀ trả kèm ly_do_loi ghi rõ "HTTP 401" để người dùng tự biết đây là do
 # client-id/api-key sai/hết hạn — đúng câu hỏi người dùng đã hỏi "này là do api hết hạn
@@ -448,109 +387,84 @@ _fake_requests.next_status = 401
 _fake_requests.next_data = {"message": "Unauthorized"}
 _fake_requests.calls.clear()
 dem_loi2 = [0]
-r13 = _tra_cuu_trang_thai_mst("0311111111", timeout=1, so_lan_that_bai_lien_tiep=dem_loi2)
-assert r13["canh_bao"] is None, f"HTTP 401 (sai key) KHÔNG được suy đoán tình trạng — got {r13}"
+r12 = _tra_cuu_trang_thai_mst("0311111111", timeout=1, so_lan_that_bai_lien_tiep=dem_loi2)
+assert r12["canh_bao"] is None, f"HTTP 401 (sai key) KHÔNG được suy đoán tình trạng — got {r12}"
 assert dem_loi2[0] == 1, f"HTTP lỗi vẫn phải tính vào bộ đếm lỗi liên tiếp — got {dem_loi2[0]}"
-assert "HTTP 401" in (r13.get("ly_do_loi") or ""), (
+assert "HTTP 401" in (r12.get("ly_do_loi") or ""), (
     f"Phải trả kèm ly_do_loi ghi rõ mã lỗi HTTP thật (401) để người dùng tự chẩn đoán được nguyên nhân "
-    f"— got {r13}")
+    f"— got {r12}")
 assert len(_fake_requests.calls) == 1, (
     f"ĐÚNG 1 lượt gọi XInvoice (401), đã bỏ masothue.com dự phòng — got {len(_fake_requests.calls)} lượt gọi")
-print("PASS 13: HTTP lỗi (vd 401 sai client-id/api-key) -> canh_bao=None (không suy đoán), vẫn tính "
+print("PASS 12: HTTP lỗi (vd 401 sai client-id/api-key) -> canh_bao=None (không suy đoán), vẫn tính "
       "vào bộ đếm lỗi liên tiếp, VÀ trả kèm ly_do_loi ghi rõ 'HTTP 401' để chẩn đoán đúng nguyên nhân.")
 
-# ===== Test 13b (ca thật người dùng báo — CỰC KỲ QUAN TRỌNG, bug thật): lượt tra THẤT
-# BẠI (lỗi mạng/HTTP lỗi) KHÔNG được lưu vào cache DB — trước đây LUÔN lưu cache dù
-# thành công hay thất bại, khiến 1 MST lỡ gặp lỗi 1 lần bị "kẹt cứng" ở trạng thái trống
-# suốt 14 ngày (lần xuất Excel SAU đọc trúng cache "trống" đó, KHÔNG thử lại nữa dù còn
-# nguyên ngân sách thời gian) — đúng log thật người dùng gửi: xuất Excel LẦN 2 chỉ mất
-# 0.4 giây cho 234 MST (quá nhanh, toàn cache hit) nhưng VẪN ĐÚNG 34 MST không dò được y
-# hệt lần 1, và KHÔNG hề in ra "VÍ DỤ LỖI GẶP PHẢI" nào (vì được trả thẳng từ cache, không
-# hề thử gọi mạng lại trong lượt 2) — "sẽ tự bổ sung ở lần xuất Excel sau" đã KHÔNG XẢY RA
-# THẬT như đã hứa với người dùng. =====
-conn13b = _fresh_db()
-conn13b.execute("DELETE FROM mst_status_cache")
-conn13b.commit()
-conn13b.close()
+# ===== Test 12b (ca thật người dùng báo — lượt tra THẤT BẠI rồi gọi lại ngay
+# sau đó, mô phỏng lần xuất Excel SAU, MST này giờ đã hoạt động bình thường
+# trở lại): KHÔNG còn cache nên chắc chắn KHÔNG thể bị "kẹt cứng" ở kết quả
+# thất bại cũ — PHẢI luôn thử gọi mạng lại thật sự. =====
 _fake_requests.next_exc = None
 _fake_requests.next_status = 401
 _fake_requests.next_data = {"message": "Unauthorized"}
 _fake_requests.calls.clear()
 mst_that_bai = "0319998888"
-r13b_lan1 = _tra_cuu_trang_thai_mst(mst_that_bai, timeout=1)   # lượt 1: thất bại (401)
-assert r13b_lan1["canh_bao"] is None
-conn13b2 = _fresh_db()
-row13b = conn13b2.execute(
-    "SELECT * FROM mst_status_cache WHERE mst=?", (ns['_chuan_mst'](mst_that_bai)[:10],)).fetchone()
-conn13b2.close()
-assert row13b is None, (
-    f"Lượt tra THẤT BẠI KHÔNG được lưu vào bảng mst_status_cache (để lần sau còn thử lại được) "
-    f"— got 1 dòng cache: {dict(row13b) if row13b else None}")
-# Lượt 2 (mô phỏng lần xuất Excel SAU, MST này giờ đã hoạt động bình thường trở lại) ->
-# PHẢI thử gọi mạng lại THẬT SỰ (không bị "kẹt cứng" trả về cache trống của lượt 1).
+r12b_lan1 = _tra_cuu_trang_thai_mst(mst_that_bai, timeout=1)   # lượt 1: thất bại (401)
+assert r12b_lan1["canh_bao"] is None
 _fake_requests.calls.clear()
 _fake_requests.next_status = 200
 _fake_requests.next_data = {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}
-r13b_lan2 = _tra_cuu_trang_thai_mst(mst_that_bai, timeout=1)
-assert r13b_lan2["canh_bao"] is False, (
-    f"Lượt 2 (lần xuất Excel SAU) PHẢI thử gọi mạng lại thật sự, không bị kẹt ở kết quả trống của "
-    f"lượt 1 thất bại trước đó — got {r13b_lan2}")
+r12b_lan2 = _tra_cuu_trang_thai_mst(mst_that_bai, timeout=1)   # lượt 2: thử lại
+assert r12b_lan2["canh_bao"] is False, (
+    f"Lượt 2 PHẢI thử gọi mạng lại thật sự, không bị kẹt ở kết quả trống của lượt 1 thất bại trước đó "
+    f"— got {r12b_lan2}")
 assert len(_fake_requests.calls) == 1, (
-    f"Lượt 2 phải THẬT SỰ gọi mạng (không được coi là 'đã tra rồi' từ cache của lượt 1 thất bại) "
+    f"Lượt 2 phải THẬT SỰ gọi mạng (không có cache 'đã tra rồi' từ lượt 1 thất bại) "
     f"— got {len(_fake_requests.calls)} lượt gọi")
-print("PASS 13b: lượt tra THẤT BẠI (lỗi mạng/HTTP lỗi) KHÔNG bị lưu vào cache 14 ngày — lần xuất Excel "
-      "SAU vẫn thử tra lại thật sự (đúng như đã hứa 'sẽ tự bổ sung ở lần xuất Excel sau'), không còn bị "
-      "kẹt cứng ở trạng thái trống.")
+print("PASS 12b: lượt tra THẤT BẠI rồi gọi lại ngay sau đó -> luôn thử tra lại thật sự (không còn cache "
+      "dài hạn nên chắc chắn không bị kẹt cứng ở trạng thái trống).")
 
-# ===== Test 14-15: chi_dung_cache — ca thật người dùng báo tiếp "chạy lâu quá" với
+# ===== Test 13-14: chi_dung_cache — ca thật người dùng báo tiếp "chạy lâu quá" với
 # bảng kê ~992 hóa đơn nhiều trăm nhà cung cấp khác nhau: export_excel giới hạn
-# _MST_NGAN_SACH_GIAY giây cho việc tra MST MỚI, hết ngân sách thì gọi với
-# chi_dung_cache=True — CHỈ dùng cache đã có (kể cả quá hạn), TUYỆT ĐỐI không gọi
-# mạng thêm, để cả lượt xuất Excel không bị "treo" vô hạn theo số lượng nhà cung
-# cấp khác nhau. =====
+# _MST_NGAN_SACH_GIAY giây cho việc tra MST, hết ngân sách thì gọi với
+# chi_dung_cache=True — TUYỆT ĐỐI không gọi mạng thêm cho MST đó trong lượt này (để
+# trống an toàn), để cả lượt xuất Excel không bị "treo" vô hạn theo số lượng nhà
+# cung cấp khác nhau. Không còn cache dài hạn để "dùng dự phòng" nữa — chi_dung_cache
+# luôn nghĩa là để trống, bất kể MST này đã từng tra trước đó hay chưa. =====
 _fake_requests.next_exc = None
 _fake_requests.next_status = 200
 
-# Test 14: chi_dung_cache=True + MST CHƯA từng có cache -> KHÔNG gọi mạng, trả
-# canh_bao=None (để trống, không suy đoán) — không chặn xuất Excel.
-conn14 = _fresh_db()
-conn14.execute("DELETE FROM mst_status_cache")
-conn14.commit()
-conn14.close()
+# Test 13: chi_dung_cache=True + MST CHƯA từng tra trong lượt này -> KHÔNG gọi
+# mạng, trả canh_bao=None (để trống, không suy đoán) — không chặn xuất Excel.
 _fake_requests.calls.clear()
-r14 = _tra_cuu_trang_thai_mst("0316888888", timeout=1, chi_dung_cache=True)
-assert r14["canh_bao"] is None
+r13 = _tra_cuu_trang_thai_mst("0316888888", timeout=1, chi_dung_cache=True)
+assert r13["canh_bao"] is None
 assert len(_fake_requests.calls) == 0, (
-    f"chi_dung_cache=True (đã hết ngân sách thời gian) + MST chưa từng tra -> TUYỆT ĐỐI không được gọi "
-    f"mạng — got {len(_fake_requests.calls)} lượt gọi")
-assert "ngân sách thời gian" in (r14.get("ly_do_loi") or ""), (
+    f"chi_dung_cache=True (đã hết ngân sách thời gian) -> TUYỆT ĐỐI không được gọi mạng "
+    f"— got {len(_fake_requests.calls)} lượt gọi")
+assert "ngân sách thời gian" in (r13.get("ly_do_loi") or ""), (
     f"PHẢI kèm ly_do_loi ghi rõ nguyên nhân 'hết ngân sách thời gian' — để người dùng biết TẠI SAO MST "
     f"này vẫn chưa dò được (đúng câu hỏi người dùng 'sao vẫn còn?') thay vì im lặng không rõ lý do "
-    f"— got {r14}")
-print("PASS 14: hết ngân sách thời gian (chi_dung_cache=True) + MST chưa từng tra -> để trống, không "
-      "gọi mạng thêm (không làm treo lâu cả lượt xuất Excel), kèm ly_do_loi ghi rõ nguyên nhân.")
+    f"— got {r13}")
+print("PASS 13: hết ngân sách thời gian (chi_dung_cache=True) -> để trống, không gọi mạng thêm (không "
+      "làm treo lâu cả lượt xuất Excel), kèm ly_do_loi ghi rõ nguyên nhân.")
 
-# Test 15: chi_dung_cache=True + MST ĐÃ có cache (dù cache đã QUÁ HẠN _MST_CACHE_NGAY
-# ngày) -> vẫn dùng cache cũ đó làm dự phòng (còn hơn để trống), KHÔNG gọi mạng.
+# Test 14 (đổi ý nghĩa sau khi bỏ hẳn cache): chi_dung_cache=True dù MST này ĐÃ
+# từng tra THÀNH CÔNG trước đó (ở 1 lệnh gọi khác trong CÙNG lượt test này) ->
+# vẫn phải để trống (canh_bao=None), KHÔNG được dùng lại kết quả cũ — vì không
+# còn cache để "dự phòng" nữa (đúng yêu cầu người dùng "không cần lưu cứ dò ở
+# thời điểm hiện tại").
 _fake_requests.calls.clear()
 _fake_requests.next_data = {"status": "Người nộp thuế đã bị khóa mã số thuế"}
-r15a = _tra_cuu_trang_thai_mst("0316999999", timeout=1)   # tra bình thường trước để có cache
-assert r15a["canh_bao"] is True
-qua_han15 = (datetime.datetime.now() - datetime.timedelta(days=ns['_MST_CACHE_NGAY'] + 5)).isoformat()
-conn15 = _fresh_db()
-conn15.execute("UPDATE mst_status_cache SET checked_at=? WHERE mst=?", (qua_han15, "0316999999"))
-conn15.commit()
-conn15.close()
+r14a = _tra_cuu_trang_thai_mst("0316999999", timeout=1)   # tra bình thường trước, THÀNH CÔNG
+assert r14a["canh_bao"] is True
 _fake_requests.calls.clear()
-r15b = _tra_cuu_trang_thai_mst("0316999999", timeout=1, chi_dung_cache=True)
-assert r15b["canh_bao"] is True, (
-    f"chi_dung_cache=True nhưng ĐÃ có cache cũ (dù quá hạn) -> phải dùng cache cũ làm dự phòng, "
-    f"không được để trống — got {r15b}")
-assert len(_fake_requests.calls) == 0, "chi_dung_cache=True TUYỆT ĐỐI không được gọi mạng dù cache quá hạn"
-print("PASS 15: hết ngân sách thời gian nhưng MST đã có cache cũ (dù quá hạn 14 ngày) -> vẫn dùng cache "
-      "cũ làm dự phòng thay vì để trống, không gọi mạng thêm.")
+r14b = _tra_cuu_trang_thai_mst("0316999999", timeout=1, chi_dung_cache=True)
+assert r14b["canh_bao"] is None, (
+    f"chi_dung_cache=True -> PHẢI để trống (không còn cache để dùng dự phòng nữa) — got {r14b}")
+assert len(_fake_requests.calls) == 0, "chi_dung_cache=True TUYỆT ĐỐI không được gọi mạng dù đã tra thành công trước đó"
+print("PASS 14: chi_dung_cache=True -> luôn để trống an toàn (không còn cache dài hạn để dùng dự phòng "
+      "nữa), kể cả khi MST này đã từng tra thành công trước đó trong CÙNG lượt.")
 
-# ===== Test 16-20: nhiều cặp client-id/api-key (yêu cầu người dùng: "hãy thử
+# ===== Test 15-19: nhiều cặp client-id/api-key (yêu cầu người dùng: "hãy thử
 # tạo thêm api thứ 2 tôi sẽ tạo thêm key để gắn vào hết key này có thể chạy
 # qua key khác") — tự động CHUYỂN SANG key kế tiếp khi key đang dùng báo lỗi
 # DO CHÍNH key đó (401 sai/hết hạn, hoặc 429 hết hạn mức gói riêng của key),
@@ -558,13 +472,9 @@ print("PASS 15: hết ngân sách thời gian nhưng MST đã có cache cũ (dù
 # cũng vô ích). =====
 _fake_time.sleeps.clear()
 
-# Test 16 (QUAN TRỌNG): key 1 báo 401 (sai/hết hạn) -> PHẢI tự chuyển ngay
+# Test 15 (QUAN TRỌNG): key 1 báo 401 (sai/hết hạn) -> PHẢI tự chuyển ngay
 # sang key 2 trong CÙNG lượt gọi này, key 2 thành công -> trả đúng kết quả,
 # không phải để trống/thất bại dù đã có key 2 dùng được.
-conn16 = _fresh_db()
-conn16.execute("DELETE FROM mst_status_cache")
-conn16.commit()
-conn16.close()
 _set_xinvoice_keys([{"client_id": "key1-id", "api_key": "key1-secret"},
                     {"client_id": "key2-id", "api_key": "key2-secret"}])
 _fake_requests.calls.clear()
@@ -573,10 +483,10 @@ _fake_requests.next_responses = [
     (401, {"message": "Unauthorized"}, {}),
     (200, {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}, {}),
 ]
-r16 = _tra_cuu_trang_thai_mst("0321111111", timeout=1)
-assert r16["canh_bao"] is False, (
+r15 = _tra_cuu_trang_thai_mst("0321111111", timeout=1)
+assert r15["canh_bao"] is False, (
     f"Key 1 lỗi 401 nhưng key 2 dùng được -> PHẢI tự chuyển key NGAY và lấy được kết quả thật, "
-    f"không được để trống — got {r16}")
+    f"không được để trống — got {r15}")
 assert len(_fake_requests.calls) == 2, (
     f"Phải thử ĐÚNG 2 lượt (key 1 thất bại rồi tự chuyển sang key 2) — got {len(_fake_requests.calls)}")
 assert _fake_requests.calls[0]["headers"].get("client-id") == "key1-id", "Lượt 1 phải dùng key 1"
@@ -584,32 +494,27 @@ assert _fake_requests.calls[1]["headers"].get("client-id") == "key2-id", "Lượ
 assert ns['_XINVOICE_KEY_STATE']['idx'] == 1, (
     "Sau khi key 1 lỗi do CHÍNH key đó, phải NHỚ lại (idx=1) để các MST SAU bắt đầu ngay từ key 2, "
     "khỏi phải dò lại qua key 1 đã hỏng cho từng MST")
-print("PASS 16: key 1 lỗi 401 (sai/hết hạn) -> tự động chuyển NGAY sang key 2 trong cùng lượt gọi, "
+print("PASS 15: key 1 lỗi 401 (sai/hết hạn) -> tự động chuyển NGAY sang key 2 trong cùng lượt gọi, "
       "lấy được kết quả thật, đúng yêu cầu người dùng 'hết key này chạy qua key khác'.")
 
-# Test 17: MST KHÁC (chưa có cache) tra tiếp ngay sau đó -> phải bắt đầu THẲNG
-# từ key 2 (nhớ từ Test 16, idx=1), CHỈ 1 lượt gọi (không dò lại qua key 1
-# đã biết hỏng).
+# Test 16: MST KHÁC tra tiếp ngay sau đó -> phải bắt đầu THẲNG từ key 2 (nhớ
+# từ Test 15, idx=1), CHỈ 1 lượt gọi (không dò lại qua key 1 đã biết hỏng).
 _fake_requests.calls.clear()
 _fake_requests.next_responses = [
     (200, {"status": "Người nộp thuế đang hoạt động (đã cấp GCN ĐKT)"}, {}),
 ]
-r17 = _tra_cuu_trang_thai_mst("0321111112", timeout=1)
-assert r17["canh_bao"] is False
+r16 = _tra_cuu_trang_thai_mst("0321111112", timeout=1)
+assert r16["canh_bao"] is False
 assert len(_fake_requests.calls) == 1, (
     f"Phải bắt đầu THẲNG từ key 2 (đã nhớ từ lần trước) -> chỉ 1 lượt gọi, không dò lại qua key 1 "
     f"đã biết hỏng — got {len(_fake_requests.calls)} lượt gọi")
 assert _fake_requests.calls[0]["headers"].get("client-id") == "key2-id", (
     "Phải dùng THẲNG key 2 (nhớ từ lần chuyển key trước), không thử lại key 1")
-print("PASS 17: MST khác tra ngay sau đó -> bắt đầu THẲNG từ key đang hoạt động (đã nhớ từ lần trước), "
+print("PASS 16: MST khác tra ngay sau đó -> bắt đầu THẲNG từ key đang hoạt động (đã nhớ từ lần trước), "
       "không lãng phí lượt gọi dò lại qua key đã biết hỏng.")
 
-# Test 18: CẢ 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt cả 2 rồi
+# Test 17: CẢ 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt cả 2 rồi
 # thất bại HẲN (không lặp vô hạn), ly_do_loi phải nêu rõ đã thử CẢ 2 key.
-conn18 = _fresh_db()
-conn18.execute("DELETE FROM mst_status_cache")
-conn18.commit()
-conn18.close()
 _set_xinvoice_keys([{"client_id": "keyA-id", "api_key": "keyA-secret"},
                     {"client_id": "keyB-id", "api_key": "keyB-secret"}])
 loi_quota = {"success": False,
@@ -619,125 +524,97 @@ _fake_requests.next_responses = [
     (429, loi_quota, {}),
     (429, loi_quota, {}),
 ]
-r18 = _tra_cuu_trang_thai_mst("0321111113", timeout=1)
-assert r18["canh_bao"] is None
+r17 = _tra_cuu_trang_thai_mst("0321111113", timeout=1)
+assert r17["canh_bao"] is None
 assert len(_fake_requests.calls) == 2, (
     f"Phải thử ĐÚNG 2 key (mỗi key 1 lượt, hết hạn mức gói không chờ+thử lại), đã bỏ masothue.com dự "
     f"phòng nên thất bại hẳn ngay sau đó — got {len(_fake_requests.calls)}")
-assert "2 key" in (r18.get("ly_do_loi") or ""), (
+assert "2 key" in (r17.get("ly_do_loi") or ""), (
     f"ly_do_loi phải nêu rõ đã thử CẢ 2 key đều hết hạn mức để người dùng biết cần thêm key khác "
-    f"— got {r18}")
-print("PASS 18: cả 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt từng key rồi thất bại hẳn "
+    f"— got {r17}")
+print("PASS 17: cả 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt từng key rồi thất bại hẳn "
       "(không lặp vô hạn, đã bỏ masothue.com dự phòng), ly_do_loi nêu rõ đã thử cả 2 key.")
 
-# Test 19 (không hồi quy — QUAN TRỌNG): lỗi CHUNG (vd HTTP 404 — MST không
+# Test 18 (không hồi quy — QUAN TRỌNG): lỗi CHUNG (vd HTTP 404 — MST không
 # tồn tại) KHÔNG PHẢI do lỗi của riêng 1 key -> KHÔNG được lãng phí thử key
 # khác (đổi key cũng vô ích, tốn thêm lượt gọi API vô nghĩa).
-conn19 = _fresh_db()
-conn19.execute("DELETE FROM mst_status_cache")
-conn19.commit()
-conn19.close()
 _set_xinvoice_keys([{"client_id": "keyC-id", "api_key": "keyC-secret"},
                     {"client_id": "keyD-id", "api_key": "keyD-secret"}])
 _fake_requests.calls.clear()
 _fake_requests.next_responses = [(404, {"message": "Not Found"}, {})]
-r19 = _tra_cuu_trang_thai_mst("0321111114", timeout=1)
-assert r19["canh_bao"] is None
+r18 = _tra_cuu_trang_thai_mst("0321111114", timeout=1)
+assert r18["canh_bao"] is None
 assert len(_fake_requests.calls) == 1, (
     f"Lỗi CHUNG (vd HTTP 404, không phải lỗi riêng của key) KHÔNG được thử key khác -> ĐÚNG 1 lượt gọi "
     f"XInvoice, đã bỏ masothue.com dự phòng nên thất bại hẳn ngay sau đó — got "
     f"{len(_fake_requests.calls)}")
-assert "HTTP 404" in (r19.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ HTTP 404 — got {r19}"
-print("PASS 19: lỗi CHUNG (HTTP 404, không phải lỗi riêng của 1 key) -> KHÔNG lãng phí thử key XInvoice "
+assert "HTTP 404" in (r18.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ HTTP 404 — got {r18}"
+print("PASS 18: lỗi CHUNG (HTTP 404, không phải lỗi riêng của 1 key) -> KHÔNG lãng phí thử key XInvoice "
       "khác, chỉ ĐÚNG 1 lượt gọi rồi thất bại hẳn (đã bỏ masothue.com dự phòng).")
 
-# Test 20 (không hồi quy): lỗi kết nối/mạng (exception) cũng là lỗi CHUNG ->
-# tương tự Test 19, KHÔNG được thử key khác.
-conn20 = _fresh_db()
-conn20.execute("DELETE FROM mst_status_cache")
-conn20.commit()
-conn20.close()
+# Test 19 (không hồi quy): lỗi kết nối/mạng (exception) cũng là lỗi CHUNG ->
+# tương tự Test 18, KHÔNG được thử key khác.
 _fake_requests.calls.clear()
 _fake_requests.next_responses = None
 _fake_requests.next_exc = Exception("mạng lỗi giả lập")
-r20 = _tra_cuu_trang_thai_mst("0321111115", timeout=1)
-assert r20["canh_bao"] is None
+r19 = _tra_cuu_trang_thai_mst("0321111115", timeout=1)
+assert r19["canh_bao"] is None
 assert len(_fake_requests.calls) == 1, (
     f"Lỗi kết nối/mạng (lỗi CHUNG, không phải lỗi riêng của key) KHÔNG được thử key XInvoice khác -> "
     f"chỉ ĐÚNG 1 lượt gọi XInvoice, đã bỏ masothue.com dự phòng nên thất bại hẳn ngay sau đó — got "
     f"{len(_fake_requests.calls)}")
-assert "Lỗi kết nối" in (r20.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ lỗi kết nối — got {r20}"
-print("PASS 20: lỗi kết nối/mạng (lỗi CHUNG) -> KHÔNG lãng phí thử key XInvoice khác, chỉ ĐÚNG 1 lượt "
+assert "Lỗi kết nối" in (r19.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ lỗi kết nối — got {r19}"
+print("PASS 19: lỗi kết nối/mạng (lỗi CHUNG) -> KHÔNG lãng phí thử key XInvoice khác, chỉ ĐÚNG 1 lượt "
       "gọi rồi thất bại hẳn (đã bỏ masothue.com dự phòng).")
 _fake_requests.next_exc = None
 
-# ===== Test 23 (người dùng hỏi lại "sao vẫn còn?" sau khi thấy log báo N MST
+# ===== Test 20 (người dùng hỏi lại "sao vẫn còn?" sau khi thấy log báo N MST
 # chưa lấy được tình trạng nhưng KHÔNG có dòng "VÍ DỤ LỖI GẶP PHẢI" nào —
 # nguyên nhân: các MST đó rơi vào bộ đếm lỗi liên tiếp (circuit breaker) đã
 # kích hoạt, nhánh này TRƯỚC ĐÂY hoàn toàn không ghi ly_do_loi, nên
 # _prefetch_trang_thai_mst() không có gì để hiện làm ví dụ) — giờ nhánh này
 # PHẢI kèm ly_do_loi rõ ràng để _prefetch_trang_thai_mst() còn hiện được
 # "VÍ DỤ LỖI GẶP PHẢI" giải thích đúng nguyên nhân cho người dùng. =====
-conn23 = _fresh_db()
-conn23.execute("DELETE FROM mst_status_cache")
-conn23.commit()
-conn23.close()
 _set_xinvoice_keys([{"client_id": "keyF-id", "api_key": "keyF-secret"}])
-dem_loi23 = [5]   # mô phỏng bộ đếm ĐÃ đạt ngưỡng 5 lỗi liên tiếp từ các MST trước đó
+dem_loi20 = [5]   # mô phỏng bộ đếm ĐÃ đạt ngưỡng 5 lỗi liên tiếp từ các MST trước đó
 _fake_requests.calls.clear()
-r23 = _tra_cuu_trang_thai_mst("0321111118", timeout=1, so_lan_that_bai_lien_tiep=dem_loi23)
-assert r23["canh_bao"] is None
+r20 = _tra_cuu_trang_thai_mst("0321111118", timeout=1, so_lan_that_bai_lien_tiep=dem_loi20)
+assert r20["canh_bao"] is None
 assert len(_fake_requests.calls) == 0, (
     f"Bộ đếm lỗi liên tiếp đã đạt ngưỡng -> KHÔNG được gọi mạng nữa (VietQR lẫn XInvoice) "
     f"— got {len(_fake_requests.calls)} lượt gọi")
-assert "5 lỗi liên tiếp" in (r23.get("ly_do_loi") or ""), (
+assert "5 lỗi liên tiếp" in (r20.get("ly_do_loi") or ""), (
     f"PHẢI kèm ly_do_loi ghi rõ đã dừng do 5 lỗi liên tiếp — để _prefetch_trang_thai_mst() còn hiện "
     f"được 'VÍ DỤ LỖI GẶP PHẢI' giải thích đúng nguyên nhân cho người dùng (trước đây nhánh này im "
     f"lặng hoàn toàn, khiến log báo còn N MST chưa dò được nhưng KHÔNG có ví dụ lỗi nào kèm theo, "
-    f"người dùng phải hỏi lại 'sao vẫn còn?') — got {r23}")
-print("PASS 23: bộ đếm lỗi liên tiếp đã đạt ngưỡng (circuit breaker) -> giờ vẫn kèm ly_do_loi rõ ràng "
+    f"người dùng phải hỏi lại 'sao vẫn còn?') — got {r20}")
+print("PASS 20: bộ đếm lỗi liên tiếp đã đạt ngưỡng (circuit breaker) -> giờ vẫn kèm ly_do_loi rõ ràng "
       "('đã dừng gọi mạng sau 5 lỗi liên tiếp') thay vì im lặng, để người dùng biết đúng nguyên nhân "
       "khi thấy MST còn trống.")
 
-# ===== Test 24 (bug THẬT vừa phát hiện qua log người dùng gửi: "CHI TIẾT
+# ===== Test 21 (bug THẬT vừa phát hiện qua log người dùng gửi: "CHI TIẾT
 # TỪNG MST" toàn "không rõ lý do" cho ĐỦ cả 8 MST, dù đã có log chẩn đoán chi
-# tiết — thời gian chạy CHỈ 6.0s cho 234 MST, quá nhanh so với gọi mạng thật
-# -> dấu hiệu CACHE HIT, không hề thử mạng lại): _goi_1_lan_xinvoice() TRƯỚC
-# ĐÂY coi HTTP 200 là "tra THÀNH CÔNG" dù trường "status" trả về KHÔNG khớp
-# được tình trạng nào (canh_bao=None) — LƯU CACHE kết quả rỗng đó, khiến MST
-# "kẹt cứng" y hệt bug cache-khi-thất-bại đã sửa trước đây, nhưng qua đường
-# 200 "thành công rỗng" thay vì lỗi HTTP nên KHÔNG đi qua nhánh có ly_do_loi
-# -> cache-hit lần sau trả thẳng {"trang_thai":"","canh_bao":None} không kèm
-# ly_do_loi -> _prefetch_trang_thai_mst() phải tự điền "không rõ lý do". =====
-conn24 = _fresh_db()
-conn24.execute("DELETE FROM mst_status_cache")
-conn24.commit()
-conn24.close()
+# tiết): _goi_1_lan_xinvoice() TRƯỚC ĐÂY coi HTTP 200 là "tra THÀNH CÔNG" dù
+# trường "status" trả về KHÔNG khớp được tình trạng nào (canh_bao=None) —
+# PHẢI coi là THẤT BẠI (không phải thành công rỗng), kèm ly_do_loi cụ thể
+# (không rơi vào "không rõ lý do"). =====
 _set_xinvoice_keys([{"client_id": "keyG-id", "api_key": "keyG-secret"}])
 _fake_requests.calls.clear()
 _fake_requests.next_exc = None
 _fake_requests.next_responses = [
     (200, {"status": "Trạng thái không xác định XYZ"}, {}),
 ]
-r24 = _tra_cuu_trang_thai_mst("0321111119", timeout=1)
-assert r24["canh_bao"] is None
+r21 = _tra_cuu_trang_thai_mst("0321111119", timeout=1)
+assert r21["canh_bao"] is None
 assert len(_fake_requests.calls) == 1, (
     f"HTTP 200 nhưng không khớp tình trạng nào -> PHẢI coi là thất bại (không phải thành công), đã bỏ "
     f"masothue.com dự phòng nên chỉ ĐÚNG 1 lượt gọi — got {len(_fake_requests.calls)} lượt gọi")
-assert (r24.get("ly_do_loi") or "") and "không rõ lý do" not in (r24.get("ly_do_loi") or ""), (
+assert (r21.get("ly_do_loi") or "") and "không rõ lý do" not in (r21.get("ly_do_loi") or ""), (
     f"PHẢI kèm ly_do_loi cụ thể (vd 'XInvoice trả về 200 nhưng không xác định được tình trạng'), "
-    f"KHÔNG được để trống/rơi vào 'không rõ lý do' — got {r24}")
-conn24b = _fresh_db()
-row24 = conn24b.execute("SELECT * FROM mst_status_cache WHERE mst=?", ("0321111119",)).fetchone()
-conn24b.close()
-assert row24 is None, (
-    f"HTTP 200 'thành công rỗng' (không khớp tình trạng nào) TUYỆT ĐỐI KHÔNG được lưu cache — nếu "
-    f"không sẽ tái diễn đúng bug 'kẹt cứng 14 ngày' đã gặp thật (log toàn 'không rõ lý do' cho cả 8 "
-    f"MST, chạy chỉ 6.0s vì toàn cache hit) — got {dict(row24) if row24 else None}")
-print("PASS 24: XInvoice trả HTTP 200 nhưng 'status' không khớp tình trạng nào -> coi là THẤT BẠI "
-      "(không phải thành công rỗng), kèm ly_do_loi cụ thể, KHÔNG lưu cache — sửa đúng bug thật khiến "
-      "8 MST bị 'kẹt cứng không rõ lý do'.")
+    f"KHÔNG được để trống/rơi vào 'không rõ lý do' — got {r21}")
+print("PASS 21: XInvoice trả HTTP 200 nhưng 'status' không khớp tình trạng nào -> coi là THẤT BẠI "
+      "(không phải thành công rỗng), kèm ly_do_loi cụ thể — sửa đúng bug thật khiến 8 MST bị 'kẹt cứng "
+      "không rõ lý do'.")
 _fake_requests.next_responses = None
 
-os.unlink(_tmp_db.name)
 print("\nALL DONE")

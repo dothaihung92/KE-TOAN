@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.332"
+APP_BUILD = "2026-09-20.333"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1475,6 +1475,11 @@ def init_db():
         created_at TEXT,
         updated_at TEXT
     );
+    -- KHÔNG còn được _tra_cuu_trang_thai_mst() đọc/ghi nữa (đã bỏ cache dài
+    -- hạn theo yêu cầu người dùng "không cần lưu cứ dò ở thời điểm hiện
+    -- tại", tránh báo sai tình trạng MST do dữ liệu cache cũ lỗi thời) —
+    -- giữ lại bảng (rỗng dần) chỉ để không phá vỡ các migration MỘT LẦN cũ
+    -- bên dưới còn tham chiếu tới nó trên các máy nâng cấp từ bản cũ.
     CREATE TABLE IF NOT EXISTS mst_status_cache (
         mst TEXT PRIMARY KEY,    -- MST gốc 10 số
         trang_thai_goc TEXT,     -- chữ mô tả tình trạng lấy được (VietQR/XInvoice)
@@ -33491,21 +33496,6 @@ def _thue_theo_cong_thue(it, items, r):
     return round(tong_thue_hd * (ds / tong_tt))
 
 
-_MST_CACHE_NGAY = 14   # số ngày giữ cache tình trạng MST trước khi tra lại
-# Cache "CÓ CẢNH BÁO" (canh_bao=True, tô đỏ) chỉ tin trong VÀI ngày rồi PHẢI dò
-# lại — ngắn hơn nhiều so với _MST_CACHE_NGAY ở trên. Đúng ca thật người dùng
-# báo "phần mềm báo sai": CÔNG TY TNHH BROTHER INTERNATIONAL (0313415034) và
-# CÔNG TY CỔ PHẦN BKAV (0101360697) đã bị lưu cache "NNT ngừng hoạt động..."
-# (canh_bao=True) từ 1 lần tra trước đó (khi nguồn tra lúc đó trả tình trạng
-# này), trong khi tra lại THẬT qua api.vietqr.io cho kết quả HIỆN TẠI là "NNT
-# đang hoạt động" — cache cũ tuy vẫn còn hạn 14 ngày nhưng đã LỖI THỜI, khiến
-# phần mềm cứ báo sai (tô đỏ oan 1 nhà cung cấp đang hoạt động bình thường)
-# cho tới khi cache hết hạn. Vì api.vietqr.io MIỄN PHÍ/không hạn mức, dò lại
-# thường xuyên hơn riêng cho các MST đang bị cảnh báo (rủi ro báo sai gây
-# nghi oan nhà cung cấp, ảnh hưởng trực tiếp quyết định của người dùng) không
-# tốn kém gì — còn MST "đang hoạt động bình thường" thì vẫn giữ cache dài
-# ngày như cũ (_MST_CACHE_NGAY) để đỡ tốn lượt gọi.
-_MST_CACHE_NGAY_CANH_BAO = 1
 _MST_API_NGHI_GIUA_LUOT = 0.35   # giây nghỉ giữa các lượt gọi API MST thật (né giới hạn tốc độ)
 _MST_NGAN_SACH_GIAY = 40   # giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel
 
@@ -33733,15 +33723,14 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     HAI cách đều không tra được mới trả canh_bao=None (không lỗi, không chặn
     xuất Excel).
 
-    CHỈ tra cứu THẬT SỰ qua mạng khi CHƯA có cache hoặc cache đã quá hạn —
-    kết quả tra cứu THÀNH CÔNG được lưu vào bảng mst_status_cache, tránh gọi
-    API liên tục cho cùng 1 MST ở mỗi lần xuất Excel (giảm số lượt gọi — API
-    có thể tính phí/giới hạn hạn mức theo lượt gọi). Hạn cache KHÔNG đồng
-    đều: MST "bình thường" giữ cache _MST_CACHE_NGAY (14) ngày, còn MST
-    "CÓ CẢNH BÁO" (canh_bao=True) chỉ giữ cache _MST_CACHE_NGAY_CANH_BAO (1)
-    ngày rồi dò lại ngay — tránh cảnh báo sai kéo dài do dữ liệu cache đã lỗi
-    thời (đúng ca thật người dùng báo "phần mềm báo sai" cho 1 MST đã hoạt
-    động trở lại nhưng vẫn bị tô đỏ do cache cũ).
+    LUÔN tra cứu qua mạng TẠI THỜI ĐIỂM HIỆN TẠI, KHÔNG lưu/dùng lại kết quả
+    cũ qua nhiều lần xuất Excel khác nhau — theo đúng yêu cầu người dùng
+    ("hãy bỏ cache 14 ngày đi, không cần lưu, cứ dò ở thời điểm hiện tại")
+    sau khi phát hiện cache cũ (dù có cơ chế hết hạn sớm riêng cho MST đang
+    cảnh báo) vẫn khiến phần mềm báo sai tình trạng cho MST đã hoạt động
+    bình thường trở lại. (Vẫn CÓ dedup theo bộ nhớ TRONG CÙNG 1 lượt xuất
+    Excel — xem _mst_status_local ở export_excel — để 1 MST xuất hiện ở
+    nhiều dòng/nhiều sheet chỉ bị tra ĐÚNG 1 lần, không phải cache dài hạn.)
 
     so_lan_that_bai_lien_tiep: list 1 phần tử [count] dùng làm bộ đếm CHUNG
     giữa nhiều lần gọi liên tiếp (vd trong 1 lượt xuất Excel có hàng trăm
@@ -33751,13 +33740,13 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     ích) — tự động thử lại bình thường ở lượt xuất Excel SAU.
 
     chi_dung_cache=True: bên gọi đã hết "ngân sách thời gian" dành cho việc
-    tra MST MỚI trong lượt xuất Excel này (xem _MST_NGAN_SACH_GIAY ở
-    export_excel — hóa đơn nhiều trăm nhà cung cấp khác nhau sẽ khiến cả
-    lượt xuất Excel bị treo rất lâu nếu cứ cố tra HẾT, người dùng đã báo
-    "chạy lâu quá") — CHỈ dùng cache đã có (kể cả đã quá hạn, còn hơn không
-    có gì), TUYỆT ĐỐI không gọi mạng thêm nữa; các MST chưa từng tra sẽ được
-    bổ sung dần ở NHỮNG lượt xuất Excel SAU (không mất — chỉ là chưa có
-    ngay trong lượt này).
+    tra MST trong lượt xuất Excel này (xem _MST_NGAN_SACH_GIAY ở export_excel
+    — hóa đơn nhiều trăm nhà cung cấp khác nhau sẽ khiến cả lượt xuất Excel
+    bị treo rất lâu nếu cứ cố tra HẾT, người dùng đã báo "chạy lâu quá") ->
+    TUYỆT ĐỐI không gọi mạng thêm nữa cho MST này trong lượt này, để trống
+    an toàn (canh_bao=None) thay vì làm treo lâu; các MST chưa từng tra
+    trong lượt này sẽ được tra lại từ đầu ở lượt xuất Excel SAU (không có
+    cache để "nhớ tạm", nhưng không mất — chỉ là chưa xong ngay lượt này).
 
     Trả về dict {"trang_thai": str hiển thị, "canh_bao": True/False/None}.
     canh_bao=None nghĩa là KHÔNG tra cứu được/chưa cấu hình/MST không hợp lệ
@@ -33781,54 +33770,25 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
 
     danh_sach_keys = _lay_danh_sach_xinvoice_keys()
 
-    conn = db()
-    try:
-        row = conn.execute(
-            "SELECT trang_thai_goc, canh_bao, checked_at FROM mst_status_cache WHERE mst=?",
-            (mst_c,)).fetchone()
-    finally:
-        conn.close()
-    if row and row["checked_at"]:
-        try:
-            cu = datetime.datetime.fromisoformat(row["checked_at"])
-            canh_bao_cu = row["canh_bao"]
-            canh_bao_cu = bool(canh_bao_cu) if canh_bao_cu is not None else None
-            # Cache "CÓ CẢNH BÁO" hết hạn SỚM hơn (_MST_CACHE_NGAY_CANH_BAO) để
-            # tự sửa các trường hợp "báo sai" do cache cũ đã lỗi thời — xem giải
-            # thích đầy đủ ở khai báo _MST_CACHE_NGAY_CANH_BAO phía trên.
-            han_ngay = _MST_CACHE_NGAY_CANH_BAO if canh_bao_cu is True else _MST_CACHE_NGAY
-            if (datetime.datetime.now() - cu).days < han_ngay:
-                return {"trang_thai": row["trang_thai_goc"] or "", "canh_bao": canh_bao_cu}
-        except Exception:
-            pass
-
     bo_dem_da_toi_han = (so_lan_that_bai_lien_tiep is not None and so_lan_that_bai_lien_tiep[0] >= 5)
     het_han_muc = chi_dung_cache or bo_dem_da_toi_han
     if het_han_muc:
         # Đã hết ngân sách thời gian CHO LƯỢT NÀY, hoặc đã lỗi liên tiếp quá
         # nhiều lần (cả VietQR lẫn XInvoice dự phòng đều không tra được — vd
-        # mất mạng/hết hạn mức gói API) -> khỏi thử mạng nữa, để cache cũ (nếu
-        # có, dù quá hạn) làm dự phòng thay vì không có gì. GHI RÕ ly_do_loi
-        # (trước đây bỏ trống hoàn toàn ở nhánh này) để người dùng còn biết
-        # được VÌ SAO các MST này vẫn chưa dò được (đúng câu hỏi người dùng
+        # mất mạng/hết hạn mức gói API) -> khỏi thử mạng nữa cho MST này
+        # trong lượt xuất Excel này -> để trống an toàn (canh_bao=None,
+        # không suy đoán). GHI RÕ ly_do_loi để người dùng còn biết được VÌ
+        # SAO các MST này vẫn chưa dò được (đúng câu hỏi người dùng đã hỏi
         # "sao vẫn còn?") thay vì không thấy dòng "VÍ DỤ LỖI GẶP PHẢI" nào
         # trong log dù vẫn còn MST trống.
-        if row:
-            canh_bao_cu = row["canh_bao"]
-            ket_qua = {"trang_thai": row["trang_thai_goc"] or "",
-                      "canh_bao": bool(canh_bao_cu) if canh_bao_cu is not None else None}
-        else:
-            ket_qua = {"trang_thai": "", "canh_bao": None}
-        if not ket_qua["trang_thai"]:
-            ket_qua["ly_do_loi"] = ("Hết ngân sách thời gian tra MST mới trong lượt xuất Excel này"
-                                    if chi_dung_cache else
-                                    "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả VietQR lẫn XInvoice dự "
-                                    "phòng đều không tra được) để tránh treo lâu — sẽ tự thử lại ở "
-                                    "lượt xuất Excel sau")
-        return ket_qua
+        return {"trang_thai": "", "canh_bao": None,
+               "ly_do_loi": ("Hết ngân sách thời gian tra MST trong lượt xuất Excel này"
+                             if chi_dung_cache else
+                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả VietQR lẫn XInvoice dự "
+                             "phòng đều không tra được) để tránh treo lâu — sẽ tự thử lại ở "
+                             "lượt xuất Excel sau")}
 
-    # Nghỉ 1 chút TRƯỚC mỗi lượt gọi API thật (không áp dụng cho cache
-    # hit/MST không hợp lệ ở trên) — hạn chế bắn dồn dập hàng trăm request
+    # Nghỉ 1 chút TRƯỚC mỗi lượt gọi API thật — hạn chế bắn dồn dập hàng trăm request
     # liên tiếp khi xuất Excel bảng kê nhiều trăm hóa đơn (mỗi hóa đơn 1 nhà
     # cung cấp khác nhau), vì API bên thứ 3 thường có giới hạn tốc độ
     # (request/giây) — xác nhận đúng ca thật người dùng báo: bảng kê ~880
@@ -33897,31 +33857,6 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
 
-    # CHỈ lưu cache khi THẬT SỰ gọi API thành công (thanh_cong=True) — trước
-    # đây lưu cache CẢ KHI THẤT BẠI (lỗi mạng/HTTP lỗi/hết ngân sách), khiến
-    # 1 MST lỡ gặp lỗi 1 lần bị "kẹt cứng" ở trạng thái trống suốt
-    # _MST_CACHE_NGAY (14) ngày — lần xuất Excel SAU đọc trúng cache "trống"
-    # đó, tưởng đã tra rồi nên KHÔNG thử lại nữa, dù còn nguyên ngân sách
-    # thời gian — đúng ca thật người dùng báo: log xuất Excel LẦN 2 chỉ mất
-    # 0.4 giây cho 234 MST (quá nhanh so với gọi mạng thật), vẫn còn ĐÚNG 34
-    # MST không dò được y hệt lần trước — vì 34 MST đó đã bị lưu cache
-    # "trống" từ lần 1, "sẽ tự bổ sung ở lần xuất Excel sau" KHÔNG XẢY RA
-    # THẬT như đã hứa. Không lưu gì khi thất bại -> lần gọi SAU (dù trong
-    # cùng 1 lượt xuất hay lượt xuất kế tiếp) sẽ coi là CHƯA tra, thử lại
-    # bình thường thay vì bị khóa cứng.
-    if thanh_cong:
-        conn = db()
-        try:
-            conn.execute(
-                "INSERT INTO mst_status_cache(mst, trang_thai_goc, canh_bao, checked_at) VALUES(?,?,?,?) "
-                "ON CONFLICT(mst) DO UPDATE SET trang_thai_goc=excluded.trang_thai_goc, "
-                "canh_bao=excluded.canh_bao, checked_at=excluded.checked_at",
-                (mst_c, trang_thai_goc,
-                 (1 if canh_bao is True else (0 if canh_bao is False else None)),
-                 datetime.datetime.now().isoformat()))
-            conn.commit()
-        finally:
-            conn.close()
     ket_qua = {"trang_thai": trang_thai_goc, "canh_bao": canh_bao}
     if ly_do_loi:
         ket_qua["ly_do_loi"] = ly_do_loi
@@ -35287,22 +35222,24 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # Dò tình trạng hoạt động MST (theo yêu cầu người dùng: "thêm chức năng dò
     # mst còn đang hoạt động hay không hoặc công ty cần xác minh địa chỉ kinh
     # doanh khi kết xuất ra excel, thêm 1 cột trạng thái mst ở cuối... tô đỏ
-    # dòng đó", dùng API XInvoice — xem _tra_cuu_trang_thai_mst) — CACHE trong
-    # bộ nhớ theo MST (dict) NGOÀI cache DB dài hạn (mst_status_cache) để
-    # không tra lại nhiều lần cho CÙNG 1 MST xuất hiện ở nhiều dòng/nhiều
-    # sheet trong CÙNG 1 lượt xuất Excel này — 1 MST có thể xuất hóa đơn cho
-    # cùng công ty NHIỀU LẦN, chỉ cần tra ĐÚNG 1 LẦN cho mỗi MST khác nhau.
+    # dòng đó", dùng api.vietqr.io/XInvoice — xem _tra_cuu_trang_thai_mst) —
+    # CACHE trong bộ nhớ theo MST (dict), CHỈ tồn tại trong CÙNG 1 lượt xuất
+    # Excel này (không lưu lại giữa các lượt xuất khác nhau — theo yêu cầu
+    # người dùng "không cần lưu cứ dò ở thời điểm hiện tại", tránh báo sai
+    # tình trạng do dữ liệu cũ đã lỗi thời) — để không tra lại nhiều lần cho
+    # CÙNG 1 MST xuất hiện ở nhiều dòng/nhiều sheet trong CÙNG 1 lượt xuất
+    # Excel này — 1 MST có thể xuất hóa đơn cho cùng công ty NHIỀU LẦN, chỉ
+    # cần tra ĐÚNG 1 LẦN cho mỗi MST khác nhau.
     #
     # NGÂN SÁCH THỜI GIAN (theo phản hồi người dùng "chạy lâu quá"): bảng kê
     # nhiều trăm hóa đơn có thể có tới HÀNG TRĂM nhà cung cấp/khách hàng KHÁC
     # NHAU — dù đã dedup theo MST, việc tra MỚI cho từng đó MST (mỗi lượt
     # nghỉ 1 chút để né giới hạn tốc độ API) vẫn có thể cộng dồn thành rất
     # lâu, khiến cả lượt xuất Excel bị "treo" y hệt lỗi thật đã báo. Giới hạn
-    # tối đa _MST_NGAN_SACH_GIAY giây dành cho việc tra MST MỚI trong 1 lượt
-    # — hết ngân sách thì các MST CHƯA từng tra chỉ hiện trống (KHÔNG chặn
-    # xuất Excel), sẽ tự bổ sung dần ở NHỮNG lượt xuất Excel SAU (persistent
-    # cache 14 ngày) — không mất, chỉ là chưa xong ngay lượt đầu với công ty
-    # có rất nhiều đối tác khác nhau.
+    # tối đa _MST_NGAN_SACH_GIAY giây dành cho việc tra MST trong 1 lượt —
+    # hết ngân sách thì các MST CHƯA tra kịp chỉ hiện trống (KHÔNG chặn xuất
+    # Excel), sẽ được tra lại từ đầu ở lượt xuất Excel SAU (không có cache
+    # dài hạn để "nhớ tạm" — không mất, chỉ là chưa xong ngay lượt này).
     _mst_status_local = {}
     _mst_fail_counter = [0]
     _mst_do_nhat = PatternFill("solid", fgColor="FFC7CE")
