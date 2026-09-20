@@ -183,6 +183,24 @@ _, cb = _phan_loai_trang_thai_mst("")
 assert cb is None, f"KHÔNG có dữ liệu tình trạng -> canh_bao=None (KHÔNG suy đoán/không tô đỏ) — got {cb}"
 print("PASS 6: không có dữ liệu tình trạng -> canh_bao=None, không suy đoán bừa.")
 
+# ===== Test 6b (bug THẬT người dùng vừa báo qua log xuất Excel — "kiểm tra
+# lại sao phần mềm không kiểm tra đủ thông tin"): nhiều MST thật (vd
+# 0106869738-005, 0315482212, 0316642412) trả về tình trạng VIẾT TẮT "NNT
+# ngừng HĐ nhưng chưa hoàn thành thủ tục chấm dứt hiệu lực MST" ("HĐ" =
+# "hoạt động", "MST" = "mã số thuế") — các cụm từ khoá ĐẦY ĐỦ ở Test 4 KHÔNG
+# khớp được cụm viết tắt này, trước đây rơi vào "tình trạng lạ chưa nhận
+# diện được" (canh_bao=None, coi là THẤT BẠI) dù MST thật sự đang ở tình
+# trạng xấu này -> PHẢI nhận diện được cả biến thể viết tắt. =====
+nhan6b, cb6b = _phan_loai_trang_thai_mst(
+    "NNT ngừng HĐ nhưng chưa hoàn thành thủ tục chấm dứt hiệu lực MST")
+assert cb6b is True, (
+    f"Biến thể VIẾT TẮT 'ngừng HĐ...chấm dứt hiệu lực MST' PHẢI được nhận diện là CẢNH BÁO (canh_bao=True) "
+    f"giống hệt cụm đầy đủ 'ngừng hoạt động...đóng mã số thuế' — got {cb6b}")
+assert "ngừng hoạt động" in nhan6b.lower(), f"got {nhan6b}"
+print("PASS 6b: biến thể viết tắt 'ngừng HĐ...chấm dứt hiệu lực MST' -> canh_bao=True (khớp đúng như "
+      "cụm đầy đủ), sửa đúng bug thật khiến các MST như 0106869738-005/0315482212/0316642412 không "
+      "được nhận diện đúng tình trạng.")
+
 # ===== Test 7-13: _tra_cuu_trang_thai_mst() — luồng cấu hình + gọi API (mock),
 # KHÔNG còn cache dài hạn — luôn tra thật tại thời điểm gọi. =====
 

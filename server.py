@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.333"
+APP_BUILD = "2026-09-20.334"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33541,8 +33541,18 @@ def _phan_loai_trang_thai_mst(mo_ta):
         ("da khoa ma so thue", "Đã khóa mã số thuế"),
         ("ngung hoat dong nhung chua hoan thanh thu tuc",
          "NNT ngừng hoạt động nhưng chưa hoàn thành thủ tục đóng mã số thuế"),
+        # Biến thể VIẾT TẮT gặp thật qua api.vietqr.io/XInvoice (vd MST
+        # 0106869738-005/0315482212/...): "NNT ngừng HĐ nhưng chưa hoàn thành
+        # thủ tục chấm dứt hiệu lực MST" — viết tắt "HĐ" (hoạt động) và "MST"
+        # (mã số thuế) khiến các cụm từ khoá đầy đủ ở trên KHÔNG khớp được,
+        # trước đây rơi vào "tình trạng lạ chưa nhận diện được" nên bị coi là
+        # THẤT BẠI (không tô đỏ dù MST thật sự đang trong tình trạng xấu này).
+        ("ngung hd nhung chua hoan thanh thu tuc",
+         "NNT ngừng hoạt động nhưng chưa hoàn thành thủ tục chấm dứt hiệu lực MST"),
         ("da ngung hoat dong", "Đã ngừng hoạt động"),
         ("ngung hoat dong", "Ngừng hoạt động"),
+        ("da ngung hd", "Đã ngừng hoạt động"),
+        ("ngung hd", "Ngừng hoạt động"),
         ("tam ngung kinh doanh", "Tạm ngừng kinh doanh"),
         ("da giai the", "Đã giải thể"),
         ("cham dut hieu luc ma so thue", "Chấm dứt hiệu lực mã số thuế"),
@@ -33662,14 +33672,32 @@ def _tra_cuu_mst_qua_vietqr(mst_c, timeout):
     còn lại — XInvoice — vẫn còn nguyên nếu cần dữ liệu tức thời hơn).
 
     Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với các
-    nguồn tra MST khác để ghép vào chuỗi dự phòng sẵn có."""
+    nguồn tra MST khác để ghép vào chuỗi dự phòng sẵn có.
+
+    Sau khi bỏ hẳn cache dài hạn (theo yêu cầu người dùng "không cần lưu cứ
+    dò ở thời điểm hiện tại"), mỗi lượt xuất Excel giờ tra TẤT CẢ MST qua
+    mạng thật, khiến nguồn này dễ gặp 429 (giới hạn tốc độ TẠM THỜI) hơn hẳn
+    trước đây dù được quảng cáo "không hạn mức" (khác XInvoice — hạn mức
+    theo NGÀY/THÁNG, chờ vô ích) -> THỬ LẠI đúng 1 lần theo Retry-After (hoặc
+    2 giây mặc định) trước khi chịu thua, giống hệt cách XInvoice xử lý 429
+    tạm thời (xem _goi_1_lan_xinvoice)."""
     with _VIETQR_STATE["lock"]:
         if _VIETQR_STATE["loi_lien_tiep"] >= _VIETQR_NGUONG_TAT:
             return False, "", None, (f"Đã tạm tắt tra qua api.vietqr.io "
                                      f"(thất bại {_VIETQR_NGUONG_TAT} lần liên tiếp trong lượt này) "
                                      f"— sẽ tự thử lại ở lượt xuất Excel sau")
     try:
-        r = requests.get(f"https://api.vietqr.io/v2/business/{mst_c}", timeout=timeout)
+        for lan_thu in range(2):
+            r = requests.get(f"https://api.vietqr.io/v2/business/{mst_c}", timeout=timeout)
+            if r.status_code == 429 and lan_thu == 0:
+                ra = (r.headers or {}).get("Retry-After")
+                try:
+                    cho = min(max(float(ra), 0), 10) if ra else 2
+                except Exception:
+                    cho = 2
+                time.sleep(cho)
+                continue
+            break
     except Exception as e:
         _vietqr_danh_dau(False)
         return False, "", None, f"api.vietqr.io lỗi kết nối: {str(e)[:150]}"
