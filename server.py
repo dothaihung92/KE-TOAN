@@ -33614,12 +33614,10 @@ def _goi_1_lan_xinvoice(mst_c, client_id, api_key, timeout):
                     # vd MST là chi nhánh hạch toán phụ thuộc mà API không trả
                     # đúng dữ liệu cho mã GỐC 10 số, hoặc XInvoice đổi cách mô
                     # tả tình trạng) -> KHÔNG được coi là "tra thành công" (dù
-                    # HTTP 200), vì bug THẬT đã gặp: coi đây là thành công rồi
-                    # LƯU CACHE vĩnh viễn kết quả rỗng đó, khiến MST bị "kẹt
-                    # cứng" y hệt bug cache-khi-thất-bại đã sửa trước đây,
-                    # nhưng qua đường khác (200 "thành công" rỗng thay vì lỗi
-                    # HTTP) — coi là THẤT BẠI để KHÔNG lưu cache, để còn tự
-                    # động dự phòng qua masothue.com và thử lại ở lượt sau.
+                    # HTTP 200) — coi là THẤT BẠI để tự động thử lại ở lượt
+                    # xuất Excel sau (không còn cache dài hạn để lỡ "kẹt cứng"
+                    # kết quả rỗng vĩnh viễn — đã bỏ hẳn cache theo yêu cầu
+                    # người dùng).
                     return (False, "", None,
                            f"XInvoice trả về 200 nhưng không xác định được tình trạng "
                            f"(status='{raw_status[:150]}')", False)
