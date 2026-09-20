@@ -49,9 +49,13 @@ assert '_TCT_MST_NGUONG_TAT' in src and '_tct_danh_dau(' in than_tct, (
     "vô ích cho hàng trăm MST còn lại trong cùng lượt xuất Excel.")
 assert 'da_thu_login' in than_tct, (
     "Phải ghi nhớ ĐÃ THỬ tự đăng nhập — giải captcha rất tốn thời gian, không được giải lại cho từng MST.")
-assert than_tct.count('_tu_dong_dang_nhap(') >= 1 and 'so_lan=2' in than_tct, (
-    "Khi chưa có phiên thì tự đăng nhập, nhưng giới hạn số lần thử (so_lan nhỏ) để không treo lượt xuất Excel.")
-print("PASS 2: có ngưỡng tắt khi lỗi liên tiếp và chỉ tự đăng nhập 1 lần, không giải captcha lại cho từng MST.")
+assert than_tct.count('_tu_dong_dang_nhap(') >= 1 and 'so_lan=5' in than_tct, (
+    "Khi chưa có phiên thì tự đăng nhập, giới hạn số lần thử (không lặp vô hạn) để không treo lượt xuất Excel.")
+assert '_mo_trinh_duyet_captcha()' in than_tct and '_dong_trinh_duyet_captcha(' in than_tct, (
+    "Đăng nhập phải dùng trình duyệt ẩn vẽ captcha CHÍNH XÁC (giống /api/auto-login, xuất Excel) thay "
+    "vì rớt về svglib kém chính xác — đây là điều kiện tiên quyết để cả nguồn tra MST này chạy được, "
+    "đăng nhập thất bại thì mọi MST trong lượt đều rơi xuống XInvoice/masothue.")
+print("PASS 2: có ngưỡng tắt khi lỗi liên tiếp, chỉ tự đăng nhập 1 lần (dùng trình duyệt ẩn vẽ captcha chính xác), không giải captcha lại cho từng MST.")
 
 # ===== Test 3 (AN TOÀN — không được suy đoán): có dữ liệu trả về nhưng KHÔNG
 # dò ra cụm mô tả tình trạng thì phải coi là THẤT BẠI (để rơi xuống XInvoice/
@@ -88,7 +92,10 @@ assert 'chan_doan_mst_tct' in src and '/api/chan-doan-mst-tct/' in src, (
 than_cd = _than_ham('chan_doan_mst_tct')
 assert '"da_thu": chi_tiet' in than_cd and 'ket_luan' in than_cd, (
     "Chẩn đoán phải trả về CHI TIẾT từng đường dẫn đã thử kèm kết luận đọc được ngay, không chỉ ok/không ok.")
-print("PASS 5: có endpoint chẩn đoán hiện rõ từng đường dẫn đã thử + kết luận; JSON bung đúng unicode tiếng Việt.")
+assert 'so_lan=5' in than_cd and '_mo_trinh_duyet_captcha()' in than_cd, (
+    "Endpoint chẩn đoán cũng phải tự đăng nhập bằng trình duyệt ẩn vẽ captcha chính xác (giống thật) — "
+    "nếu dùng OCR thô yếu hơn thì kết quả chẩn đoán không phản ánh đúng khả năng chạy thật của tính năng.")
+print("PASS 5: có endpoint chẩn đoán hiện rõ từng đường dẫn đã thử + kết luận; JSON bung đúng unicode tiếng Việt; đăng nhập bằng trình duyệt ẩn vẽ captcha chính xác.")
 
 # ===== Test 6 (không hồi quy — phải nối dây tới nơi gọi thật): export Excel
 # phải TRUYỀN cid xuống, nếu không thì hàm tra cứu không biết mượn phiên đăng

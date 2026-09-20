@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.325"
+APP_BUILD = "2026-09-20.326"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6783,7 +6783,11 @@ def chan_doan_mst_tct(cid: int, mst: str = ""):
     da_dang_nhap = bool(client.token)
     thong_bao_login = "Đã có sẵn phiên đăng nhập" if da_dang_nhap else ""
     if not da_dang_nhap:
-        ok, msg, _, _ = _tu_dong_dang_nhap(cid, so_lan=2)
+        drv_cd = _mo_trinh_duyet_captcha()
+        try:
+            ok, msg, _, _ = _tu_dong_dang_nhap(cid, so_lan=5, drv=drv_cd)
+        finally:
+            _dong_trinh_duyet_captcha(drv_cd)
         thong_bao_login = ("Vừa tự đăng nhập: " + msg) if ok else ("KHÔNG đăng nhập được: " + msg)
         if not ok:
             return {"cong_ty": comp["ten"], "mst_tra": mst_c, "dang_nhap": thong_bao_login,
@@ -33776,13 +33780,21 @@ def _tra_cuu_mst_qua_tct(mst_c, cid, timeout):
     client = get_client(cid)
 
     def _thu_dang_nhap_lai():
-        """Tự đăng nhập ĐÚNG 1 LẦN cho cả lượt (giải captcha tốn thời gian)."""
+        """Tự đăng nhập ĐÚNG 1 LẦN cho cả lượt (giải captcha tốn thời gian). Dùng
+        trình duyệt ẩn vẽ captcha CHÍNH XÁC (như /api/auto-login, xuất Excel —
+        xem _mo_trinh_duyet_captcha) thay vì rớt về svglib kém chính xác hơn,
+        vì đây là ĐIỀU KIỆN TIÊN QUYẾT để cả nguồn tra MST này chạy được — đăng
+        nhập thất bại thì mọi MST trong lượt đều rơi xuống XInvoice/masothue."""
         with _TCT_MST_STATE["lock"]:
             da_thu = cid in _TCT_MST_STATE["da_thu_login"]
             _TCT_MST_STATE["da_thu_login"].add(cid)
         if da_thu:
             return False, "đã thử tự đăng nhập trước đó nhưng không được"
-        ok, msg, _, _ = _tu_dong_dang_nhap(cid, so_lan=2)
+        drv = _mo_trinh_duyet_captcha()
+        try:
+            ok, msg, _, _ = _tu_dong_dang_nhap(cid, so_lan=5, drv=drv)
+        finally:
+            _dong_trinh_duyet_captcha(drv)
         return ok, msg
 
     if not client.token:
