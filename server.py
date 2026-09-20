@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.327"
+APP_BUILD = "2026-09-20.328"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33661,16 +33661,34 @@ def _tracuunnt_danh_dau(thanh_cong):
             _TRACUUNNT_STATE["loi_lien_tiep"] += 1
 
 
-def _tao_session_tracuunnt():
+def _tao_session_tracuunnt(dung_curl_cffi=True):
     """Session riêng cho tracuunnt.gdt.gov.vn — cùng lý do dùng curl_cffi giả
     lập Chrome như GDTClient/DVCClient: trang cũng đứng sau WAF F5 (thấy cookie
     TS0151a243.../TS2ec19012027... kiểu BIG-IP ASM trong cURL người dùng chụp
-    từ DevTools)."""
-    try:
-        from curl_cffi import requests as _cffi
-        return _cffi.Session(impersonate="chrome")
-    except Exception:
-        return requests.Session()
+    từ DevTools). dung_curl_cffi=False -> ép dùng requests thường (xem
+    _loi_ssl_chung_thuc — 1 số máy gặp lỗi curl_cffi không xác thực được
+    chứng chỉ TLS của trang này, dù trình duyệt thật vẫn mở được bình
+    thường)."""
+    if dung_curl_cffi:
+        try:
+            from curl_cffi import requests as _cffi
+            return _cffi.Session(impersonate="chrome")
+        except Exception:
+            pass
+    return requests.Session()
+
+
+def _loi_ssl_chung_thuc(e):
+    """True nếu lỗi là do KHÔNG XÁC THỰC ĐƯỢC chứng chỉ TLS (thiếu chứng chỉ
+    trung gian trong kho chứng chỉ mà curl_cffi tự mang theo, khác kho chứng
+    chỉ hệ điều hành mà trình duyệt thật dùng) — xác nhận qua ca thật người
+    dùng báo: "SSL certificate problem: unable to get local issuer
+    certificate" khi tra tracuunnt.gdt.gov.vn dù trình duyệt thật vẫn mở được
+    trang đó bình thường. TUYỆT ĐỐI không tắt xác thực TLS để né lỗi này —
+    thay vào đó đổi sang requests thường (dùng kho chứng chỉ certifi, vẫn xác
+    thực TLS đầy đủ, chỉ khác nguồn kho chứng chỉ đang dùng)."""
+    s = str(e).lower()
+    return "certificate" in s or "ssl" in s or "issuer" in s
 
 
 def _doc_bang_trang_thai_tracuunnt(html, mst_c):
@@ -33698,6 +33716,9 @@ def _doc_bang_trang_thai_tracuunnt(html, mst_c):
     return ""
 
 
+_SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # captcha trang này KHÓ — người dùng xác nhận tự nhập tay còn phải thử 3-5 lần
+
+
 def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
     """Tra tình trạng hoạt động 1 MST qua CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC
     tracuunnt.gdt.gov.vn (tcnnt/mstdn.jsp) — theo yêu cầu người dùng "còn cách
@@ -33714,6 +33735,11 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
          đang hoạt động") — PHẢI dùng CHUNG 1 session cho cả 3 bước vì captcha
          gắn với JSESSIONID của phiên.
 
+    Captcha trang này KHÓ (người dùng xác nhận tự nhập tay còn phải thử 3-5
+    lần) — nên THỬ LẠI với ảnh captcha MỚI tối đa _SO_LAN_THU_CAPTCHA_TRACUUNNT
+    lần trong CÙNG 1 session (không mở lại trang từ đầu mỗi lần, chỉ lấy lại
+    captcha.png mới) trước khi chịu thua, thay vì chỉ thử đúng 1 lần.
+
     Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
     _tra_cuu_masothue() để ghép vào chuỗi dự phòng sẵn có."""
     with _TRACUUNNT_STATE["lock"]:
@@ -33722,66 +33748,93 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
                                      f"(thất bại {_TRACUUNNT_NGUONG_TAT} lần liên tiếp trong lượt này) "
                                      f"— sẽ tự thử lại ở lượt xuất Excel sau")
 
-    sess = _tao_session_tracuunnt()
     ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                         "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
-    # Bước 1: mở trang trước (như trình duyệt thật) để có JSESSIONID, RỒI mới
-    # lấy captcha — captcha.png gắn với đúng session vừa mở.
-    try:
-        sess.get("https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp", headers=ua, timeout=timeout)
-        r_cap = sess.get("https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png",
-                         headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
-                         timeout=timeout)
-        if r_cap.status_code != 200 or not r_cap.content:
+
+    # Bước 1: mở trang trước (như trình duyệt thật) để có JSESSIONID. Thử
+    # curl_cffi (giả lập Chrome, cần cho các trang có WAF) trước — nếu gặp lỗi
+    # XÁC THỰC CHỨNG CHỈ TLS (1 số máy/mạng gặp, xem _loi_ssl_chung_thuc) thì
+    # đổi sang requests thường (kho chứng chỉ certifi, vẫn xác thực TLS đầy
+    # đủ) thay vì tắt xác thực.
+    sess = None
+    loi_mo_trang = None
+    for dung_curl_cffi in (True, False):
+        try:
+            sess_thu = _tao_session_tracuunnt(dung_curl_cffi)
+            sess_thu.get("https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp", headers=ua, timeout=timeout)
+            sess = sess_thu
+            break
+        except Exception as e:
+            loi_mo_trang = str(e)[:150]
+            if not (dung_curl_cffi and _loi_ssl_chung_thuc(e)):
+                break   # lỗi khác lỗi SSL thì đổi cách cũng vô ích, dừng ngay
+    if sess is None:
+        _tracuunnt_danh_dau(False)
+        return False, "", None, f"tracuunnt.gdt.gov.vn lỗi kết nối: {loi_mo_trang}"
+
+    ly_do_loi_cuoi = "không rõ lý do"
+    for lan in range(1, _SO_LAN_THU_CAPTCHA_TRACUUNNT + 1):
+        try:
+            r_cap = sess.get("https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png",
+                             headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
+                             timeout=timeout)
+            if r_cap.status_code != 200 or not r_cap.content:
+                ly_do_loi_cuoi = f"không lấy được ảnh captcha (HTTP {r_cap.status_code})"
+                continue
+        except Exception as e:
+            ly_do_loi_cuoi = f"lỗi kết nối (lấy captcha): {str(e)[:150]}"
+            continue
+
+        ma_captcha = _ocr_png(r_cap.content)
+        if not ma_captcha:
+            ly_do_loi_cuoi = "không giải được captcha (OCR không đọc ra)"
+            continue
+
+        try:
+            r = sess.post("https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
+                          headers={**ua, "Content-Type": "application/x-www-form-urlencoded",
+                                   "Origin": "https://tracuunnt.gdt.gov.vn",
+                                   "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
+                          data={"cm": "cm", "mst": mst_c, "fullname": "", "address": "",
+                                "cmt": "", "captcha": ma_captcha},
+                          timeout=timeout)
+        except Exception as e:
+            ly_do_loi_cuoi = f"lỗi kết nối (tra cứu): {str(e)[:150]}"
+            continue
+
+        if r.status_code != 200:
+            ly_do_loi_cuoi = f"HTTP {r.status_code}"
+            continue
+
+        html = r.text or ""
+        if "Trạng thái MST" not in html:
+            # Không có cả bảng kết quả -> nhiều khả năng đoán sai mã captcha
+            # (trang báo lỗi captcha khác nhau tuỳ phiên bản, không bám 1 câu
+            # chữ cụ thể) -> ĐÁNG thử lại với captcha mới.
+            ly_do_loi_cuoi = f"có thể đã đoán sai captcha '{ma_captcha}' (lần {lan}/{_SO_LAN_THU_CAPTCHA_TRACUUNNT}), không ra bảng kết quả"
+            continue
+
+        # Đã CÓ bảng kết quả -> captcha chắc chắn ĐÚNG (trang đã chạy tra cứu
+        # thật) -> các lỗi dưới đây KHÔNG PHẢI do captcha, thử lại captcha mới
+        # cũng vô ích -> trả kết quả/lỗi NGAY, không lặp thêm.
+        trang_thai_goc = _doc_bang_trang_thai_tracuunnt(html, mst_c)
+        if not trang_thai_goc:
             _tracuunnt_danh_dau(False)
-            return False, "", None, f"tracuunnt.gdt.gov.vn: không lấy được ảnh captcha (HTTP {r_cap.status_code})"
-    except Exception as e:
-        _tracuunnt_danh_dau(False)
-        return False, "", None, f"tracuunnt.gdt.gov.vn lỗi kết nối (lấy captcha): {str(e)[:150]}"
+            return False, "", None, f"tracuunnt.gdt.gov.vn: không thấy đúng dòng MST {mst_c} trong bảng kết quả"
 
-    ma_captcha = _ocr_png(r_cap.content)
-    if not ma_captcha:
-        _tracuunnt_danh_dau(False)
-        return False, "", None, "tracuunnt.gdt.gov.vn: không giải được captcha (OCR không đọc ra)"
+        _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
+        if canh_bao is None:
+            # Có dòng nhưng chữ tình trạng không khớp từ khoá nào đã biết ->
+            # coi là thất bại để rơi xuống XInvoice/masothue, TUYỆT ĐỐI không
+            # suy đoán "đang hoạt động" (đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
+            _tracuunnt_danh_dau(False)
+            return False, "", None, f"tracuunnt.gdt.gov.vn: tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
 
-    try:
-        r = sess.post("https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
-                      headers={**ua, "Content-Type": "application/x-www-form-urlencoded",
-                               "Origin": "https://tracuunnt.gdt.gov.vn",
-                               "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
-                      data={"cm": "cm", "mst": mst_c, "fullname": "", "address": "",
-                            "cmt": "", "captcha": ma_captcha},
-                      timeout=timeout)
-    except Exception as e:
-        _tracuunnt_danh_dau(False)
-        return False, "", None, f"tracuunnt.gdt.gov.vn lỗi kết nối (tra cứu): {str(e)[:150]}"
+        _tracuunnt_danh_dau(True)
+        return True, trang_thai_goc, canh_bao, None
 
-    if r.status_code != 200:
-        _tracuunnt_danh_dau(False)
-        return False, "", None, f"tracuunnt.gdt.gov.vn HTTP {r.status_code}"
-
-    html = r.text or ""
-    if "Trạng thái MST" not in html:
-        # Không có cả bảng kết quả -> nhiều khả năng đoán sai mã captcha (trang
-        # báo lỗi captcha khác nhau tuỳ phiên bản, không bám 1 câu chữ cụ thể).
-        _tracuunnt_danh_dau(False)
-        return False, "", None, f"tracuunnt.gdt.gov.vn: có thể đã đoán sai captcha '{ma_captcha}', không ra bảng kết quả"
-
-    trang_thai_goc = _doc_bang_trang_thai_tracuunnt(html, mst_c)
-    if not trang_thai_goc:
-        _tracuunnt_danh_dau(False)
-        return False, "", None, f"tracuunnt.gdt.gov.vn: không thấy đúng dòng MST {mst_c} trong bảng kết quả"
-
-    _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
-    if canh_bao is None:
-        # Có dòng nhưng chữ tình trạng không khớp từ khoá nào đã biết -> coi
-        # là thất bại để rơi xuống XInvoice/masothue, TUYỆT ĐỐI không suy đoán
-        # "đang hoạt động" (đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
-        _tracuunnt_danh_dau(False)
-        return False, "", None, f"tracuunnt.gdt.gov.vn: tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
-
-    _tracuunnt_danh_dau(True)
-    return True, trang_thai_goc, canh_bao, None
+    _tracuunnt_danh_dau(False)
+    return False, "", None, f"tracuunnt.gdt.gov.vn: {ly_do_loi_cuoi} (đã thử {_SO_LAN_THU_CAPTCHA_TRACUUNNT} lần captcha)"
 
 
 def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):

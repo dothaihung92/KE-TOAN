@@ -89,14 +89,14 @@ assert ns['_phan_loai_trang_thai_mst'](doc_bang(HTML_MAU, "0315458241-003"))[1] 
 print("PASS 1: dò đúng dòng khớp CHÍNH XÁC cột MST trong bảng có nhiều dòng (trụ sở + chi nhánh), không lấy nhầm dòng khác.")
 
 # ===== Test 2 (không hồi quy — quy trình 3 bước đúng thứ tự): phải GET trang
-# trước để có JSESSIONID, rồi GET captcha.png (gắn với đúng session đó), rồi
-# POST mstdn.jsp — dùng CHUNG 1 session (sess) cho cả 3 bước, KHÔNG tạo session
-# mới giữa chừng (nếu không captcha sẽ không khớp session lúc POST, tra cứu
-# luôn thất bại). =====
+# trước để có JSESSIONID (sess_thu.get), rồi GET captcha.png (gắn với đúng
+# session đó, sess.get), rồi POST mstdn.jsp (sess.post) — dùng CHUNG 1 session
+# cho cả 3 bước, KHÔNG tạo session mới giữa chừng (nếu không captcha sẽ không
+# khớp session lúc POST, tra cứu luôn thất bại). =====
 than_tc = _than_ham('_tra_cuu_mst_qua_tracuunnt')
-assert than_tc.count('sess.get(') >= 2 and than_tc.count('sess.post(') >= 1, (
-    "Phải dùng CHUNG 1 session (sess) cho cả bước mở trang, lấy captcha, và POST tra cứu.")
-vt_mo_trang = than_tc.find('sess.get(')
+assert 'sess_thu.get(' in than_tc and than_tc.count('sess.get(') >= 1 and than_tc.count('sess.post(') >= 1, (
+    "Phải dùng CHUNG 1 session cho cả bước mở trang, lấy captcha, và POST tra cứu.")
+vt_mo_trang = than_tc.find('sess_thu.get(')
 vt_captcha = than_tc.find('r_cap = sess.get(')
 vt_post = than_tc.find('sess.post(')
 assert 0 < vt_mo_trang < vt_captcha < vt_post, (
@@ -104,6 +104,37 @@ assert 0 < vt_mo_trang < vt_captcha < vt_post, (
     "kèm mã captcha đã giải — sai thứ tự thì captcha không khớp session lúc tra cứu.")
 assert '_ocr_png(' in than_tc, "Phải dùng bộ giải captcha PNG sẵn có (_ocr_png) — captcha ở đây là ẢNH PNG, khác captcha SVG của hoadondientu."
 print("PASS 2: quy trình 3 bước đúng thứ tự (mở trang -> lấy captcha -> tra cứu), dùng chung 1 session.")
+
+# ===== Test 2b (QUAN TRỌNG — đúng ca thật người dùng báo): captcha trang này
+# KHÓ, tự nhập tay còn phải thử 3-5 lần -> phải THỬ LẠI với ảnh captcha MỚI
+# nhiều lần trong CÙNG 1 session trước khi chịu thua, không phải chỉ 1 lần. =====
+assert '_SO_LAN_THU_CAPTCHA_TRACUUNNT' in src, "Phải có hằng số số lần thử captcha (không phải chỉ thử 1 lần)."
+m_solan = re.search(r'^_SO_LAN_THU_CAPTCHA_TRACUUNNT\s*=\s*(\d+)', src, re.M)
+assert m_solan and int(m_solan.group(1)) >= 3, (
+    "Số lần thử captcha phải đủ nhiều (>=3) — người dùng xác nhận tự nhập tay còn phải thử 3-5 lần mới "
+    "ra, thử đúng 1 lần rồi bỏ cuộc sẽ gần như luôn thất bại với captcha khó kiểu này.")
+assert 'for lan in range(1, _SO_LAN_THU_CAPTCHA_TRACUUNNT' in than_tc, (
+    "Phải có vòng lặp thử lại lấy captcha MỚI (không dùng lại đúng 1 ảnh captcha đã sai nhiều lần).")
+print("PASS 2b: thử lại captcha nhiều lần (ảnh mới mỗi lần) trong cùng 1 session trước khi chịu thua, đúng thực tế captcha khó.")
+
+# ===== Test 2c (QUAN TRỌNG — đúng ca thật người dùng báo lỗi SSL): lỗi
+# 'unable to get local issuer certificate' của curl_cffi trên 1 số máy phải
+# được xử lý bằng cách đổi sang requests thường (VẪN xác thực TLS đầy đủ,
+# chỉ khác kho chứng chỉ) — TUYỆT ĐỐI không được tắt xác thực TLS (verify=False)
+# để né lỗi này. =====
+assert 'def _loi_ssl_chung_thuc' in src, "Phải có hàm nhận diện lỗi xác thực chứng chỉ TLS."
+than_ssl_fn = _than_ham('_loi_ssl_chung_thuc')
+assert 'certificate' in than_ssl_fn.lower() and 'ssl' in than_ssl_fn.lower(), (
+    "Phải dò đúng các từ khoá lỗi chứng chỉ TLS (certificate/ssl/issuer).")
+assert '_loi_ssl_chung_thuc(e)' in than_tc, (
+    "_tra_cuu_mst_qua_tracuunnt() phải dùng _loi_ssl_chung_thuc() để phát hiện lỗi SSL và đổi cách kết nối.")
+assert 'verify=False' not in than_tc and 'verify = False' not in than_tc, (
+    "TUYỆT ĐỐI không được tắt xác thực TLS (verify=False) để né lỗi SSL — đây là lỗ hổng bảo mật nghiêm "
+    "trọng (mất khả năng phát hiện tấn công man-in-the-middle), phải xử lý bằng cách đổi kho chứng chỉ "
+    "(đổi sang requests thường) thay vì tắt xác thực.")
+assert "for dung_curl_cffi in (True, False):" in than_tc, (
+    "Phải thử curl_cffi (giả lập Chrome, cần cho WAF) trước, rồi mới rớt về requests thường khi gặp lỗi SSL.")
+print("PASS 2c: lỗi xác thực chứng chỉ TLS (SSL) được xử lý bằng cách đổi kho chứng chỉ, không tắt xác thực TLS.")
 
 # ===== Test 3 (AN TOÀN — không suy đoán): không dò ra tình trạng (bảng trống/
 # không khớp MST/tình trạng lạ) thì PHẢI trả thất bại để rơi xuống XInvoice/
