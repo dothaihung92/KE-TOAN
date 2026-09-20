@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.330"
+APP_BUILD = "2026-09-20.331"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6722,6 +6722,26 @@ def chan_doan_mst_tracuunnt(mst: str = "0315458241"):
     if not mst_c:
         raise HTTPException(400, "MST không hợp lệ")
     thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = _tra_cuu_mst_qua_tracuunnt(mst_c, timeout=20)
+    if thanh_cong:
+        ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{trang_thai_goc}' "
+                    f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
+    else:
+        ket_luan = f"KHÔNG dùng được: {ly_do_loi}"
+    return {"mst_tra": mst_c, "ket_luan": ket_luan,
+            "trang_thai_do_duoc": trang_thai_goc, "canh_bao": canh_bao, "ly_do_loi": ly_do_loi}
+
+
+@app.get("/api/chan-doan-mst-vietqr")
+def chan_doan_mst_vietqr(mst: str = "0315458241"):
+    """CHẨN ĐOÁN việc tra tình trạng MST qua API JSON công khai api.vietqr.io
+    (xem _tra_cuu_mst_qua_vietqr) — KHÔNG cần captcha/đăng nhập, nguồn ưu
+    tiên số 1 (trước cả tracuunnt.gdt.gov.vn).
+
+    Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-vietqr?mst=0315458241"""
+    mst_c = _chuan_mst(mst)[:10]
+    if not mst_c:
+        raise HTTPException(400, "MST không hợp lệ")
+    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = _tra_cuu_mst_qua_vietqr(mst_c, timeout=20)
     if thanh_cong:
         ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{trang_thai_goc}' "
                     f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
@@ -33658,6 +33678,84 @@ def _tra_cuu_masothue(mst_c, timeout):
         return False, "", None, f"masothue.com lỗi kết nối: {str(_e_mt)[:150]}"
 
 
+# Trạng thái việc tra MST qua api.vietqr.io (API JSON công khai, KHÔNG cần
+# captcha/đăng nhập) — cùng kiểu circuit-breaker với _TRACUUNNT_STATE bên
+# dưới, xem giải thích ở đó.
+_VIETQR_STATE = {"lock": threading.Lock(), "loi_lien_tiep": 0}
+_VIETQR_NGUONG_TAT = 5
+
+
+def _vietqr_danh_dau(thanh_cong):
+    with _VIETQR_STATE["lock"]:
+        if thanh_cong:
+            _VIETQR_STATE["loi_lien_tiep"] = 0
+        else:
+            _VIETQR_STATE["loi_lien_tiep"] += 1
+
+
+def _tra_cuu_mst_qua_vietqr(mst_c, timeout):
+    """Tra tình trạng hoạt động 1 MST qua API JSON công khai api.vietqr.io
+    (GET https://api.vietqr.io/v2/business/{mst}) — theo yêu cầu người dùng
+    "hãy kiểm tra ngoài trang tracuunnt.gdt.gov.vn còn trang nào cung cấp api
+    tra thông tin mst không". Xác nhận qua ví dụ JSON THẬT người dùng dán:
+        {"code":"00","data":{"id":"...","name":"...","status":"NNT đang hoạt
+         động",...},"metadata":{...}}
+    KHÔNG cần captcha, KHÔNG cần đăng nhập, KHÔNG cần API key — đơn giản hơn
+    hẳn tracuunnt.gdt.gov.vn (không phụ thuộc bộ giải mã captcha ddddocr có
+    nạp được trên máy hay không) nên đặt làm nguồn ƯU TIÊN CAO NHẤT.
+
+    Đánh đổi: dữ liệu là dữ liệu TỔNG HỢP (xem metadata.updatedAt trong JSON
+    trả về, ví dụ thật ghi "11 ngày trước"), có thể trễ vài ngày so với thời
+    điểm thật — chấp nhận được vì tình trạng MST hiếm khi đổi (và các nguồn
+    dự phòng sau đó — tracuunnt.gdt.gov.vn, XInvoice, masothue.com — vẫn còn
+    nguyên nếu cần dữ liệu tức thời hơn).
+
+    Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
+    _tra_cuu_masothue()/_tra_cuu_mst_qua_tracuunnt() để ghép vào chuỗi dự
+    phòng sẵn có."""
+    with _VIETQR_STATE["lock"]:
+        if _VIETQR_STATE["loi_lien_tiep"] >= _VIETQR_NGUONG_TAT:
+            return False, "", None, (f"Đã tạm tắt tra qua api.vietqr.io "
+                                     f"(thất bại {_VIETQR_NGUONG_TAT} lần liên tiếp trong lượt này) "
+                                     f"— sẽ tự thử lại ở lượt xuất Excel sau")
+    try:
+        r = requests.get(f"https://api.vietqr.io/v2/business/{mst_c}", timeout=timeout)
+    except Exception as e:
+        _vietqr_danh_dau(False)
+        return False, "", None, f"api.vietqr.io lỗi kết nối: {str(e)[:150]}"
+
+    if r.status_code != 200:
+        _vietqr_danh_dau(False)
+        return False, "", None, f"api.vietqr.io HTTP {r.status_code}"
+
+    try:
+        d = r.json()
+    except Exception:
+        _vietqr_danh_dau(False)
+        return False, "", None, "api.vietqr.io: phản hồi không phải JSON hợp lệ"
+
+    if d.get("code") != "00":
+        _vietqr_danh_dau(False)
+        return False, "", None, f"api.vietqr.io: {d.get('desc') or 'không thành công'}"
+
+    du_lieu = d.get("data") or {}
+    trang_thai_goc = (du_lieu.get("status") or "").strip()
+    if not trang_thai_goc:
+        _vietqr_danh_dau(False)
+        return False, "", None, "api.vietqr.io: không có trường tình trạng MST trong dữ liệu trả về"
+
+    _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
+    if canh_bao is None:
+        # Có tình trạng nhưng chữ không khớp từ khoá nào đã biết -> coi là
+        # thất bại để rơi xuống nguồn sau, TUYỆT ĐỐI không suy đoán "đang
+        # hoạt động" (đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
+        _vietqr_danh_dau(False)
+        return False, "", None, f"api.vietqr.io: tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
+
+    _vietqr_danh_dau(True)
+    return True, trang_thai_goc, canh_bao, None
+
+
 # Trạng thái việc tra MST qua tracuunnt.gdt.gov.vn (cổng công khai, KHÔNG cần
 # đăng nhập công ty nào) — GLOBAL (không tách theo cid, vì nguồn này không
 # gắn với phiên đăng nhập của bất kỳ công ty nào, xem _tra_cuu_mst_qua_tracuunnt):
@@ -34010,15 +34108,24 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # mạng/tường lửa) thay vì chỉ thấy trống không rõ vì sao.
     ly_do_loi = None
 
-    # ── NGUỒN ƯU TIÊN 1: CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC tracuunnt.gdt.gov.vn ──
+    # ── NGUỒN ƯU TIÊN 1: api.vietqr.io (API JSON công khai, KHÔNG cần captcha) ──
+    # Đặt TRÊN CẢ tracuunnt.gdt.gov.vn: cùng miễn phí/không hạn mức, nhưng
+    # KHÔNG phụ thuộc bộ giải mã captcha (ddddocr) có nạp được trên máy hay
+    # không — nhanh và chắc chắn hơn hẳn, chỉ đánh đổi dữ liệu có thể trễ vài
+    # ngày (chấp nhận được, tình trạng MST hiếm khi đổi liên tục).
+    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_vietqr = _tra_cuu_mst_qua_vietqr(mst_c, timeout)
+
+    # ── NGUỒN ƯU TIÊN 2: CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC tracuunnt.gdt.gov.vn ──
     # Đặt TRƯỚC XInvoice (không phải sau) là CỐ Ý: nguồn này chính thức, miễn
     # phí, KHÔNG hạn mức gói, KHÔNG cần đăng nhập công ty nào — tra được ở đây
     # thì KHÔNG tiêu tốn lượt gọi nào của XInvoice, giữ nguyên hạn mức gói cho
     # lúc thật sự cần (đúng vấn đề người dùng báo: cả 2 key XInvoice đều HTTP
     # 429 "Exceeded free tier limit", kéo theo dự phòng masothue.com cũng 429
     # vì cả lượt dồn sang).
-    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_tracuunnt = _tra_cuu_mst_qua_tracuunnt(
-        mst_c, timeout)
+    ly_do_loi_tracuunnt = None
+    if not thanh_cong:
+        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_tracuunnt = _tra_cuu_mst_qua_tracuunnt(
+            mst_c, timeout)
 
     for buoc in range(0 if thanh_cong else so_key):
         idx_key = (idx_bat_dau + buoc) % so_key
@@ -34056,11 +34163,12 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         if thanh_cong:
             ly_do_loi = None
         else:
-            # Gộp lý do của CẢ 3 nguồn (cổng Thuế điện tử + XInvoice +
-            # masothue.com) — người dùng cần thấy ĐỦ mới biết mắc ở đâu: trước
-            # đây chỉ có 2 nguồn nên bỏ sót lý do nguồn mới sẽ khiến chẩn đoán
-            # "cụt", không biết cổng Thuế điện tử có được thử hay không.
+            # Gộp lý do của CẢ 4 nguồn (VietQR + tracuunnt.gdt.gov.vn +
+            # XInvoice + masothue.com) — người dùng cần thấy ĐỦ mới biết mắc
+            # ở đâu: bỏ sót lý do nguồn nào sẽ khiến chẩn đoán "cụt", không
+            # biết nguồn đó có được thử hay không.
             phan = [p for p in (
+                (f"api.vietqr.io: {ly_do_loi_vietqr}" if ly_do_loi_vietqr else None),
                 (f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt}" if ly_do_loi_tracuunnt else None),
                 ly_do_loi_xinvoice,
                 (f"Dự phòng masothue.com cũng lỗi: {ly_do_loi_mt}" if ly_do_loi_mt else None),
