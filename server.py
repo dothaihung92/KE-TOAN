@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.331"
+APP_BUILD = "2026-09-20.332"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1477,7 +1477,7 @@ def init_db():
     );
     CREATE TABLE IF NOT EXISTS mst_status_cache (
         mst TEXT PRIMARY KEY,    -- MST gốc 10 số
-        trang_thai_goc TEXT,     -- chữ mô tả tình trạng lấy được (masothue.com)
+        trang_thai_goc TEXT,     -- chữ mô tả tình trạng lấy được (VietQR/XInvoice)
         canh_bao INTEGER,        -- 1=cần cảnh báo/tô đỏ, 0=bình thường, NULL=không tra được
         checked_at TEXT
     );
@@ -6710,32 +6710,11 @@ def tra_cuu_doanh_nghiep(mst: str):
     return info
 
 
-@app.get("/api/chan-doan-mst-tracuunnt")
-def chan_doan_mst_tracuunnt(mst: str = "0315458241"):
-    """CHẨN ĐOÁN việc tra tình trạng MST qua CỔNG CÔNG KHAI CHÍNH THỨC
-    tracuunnt.gdt.gov.vn — nguồn MIỄN PHÍ, KHÔNG hạn mức, KHÔNG cần đăng nhập
-    công ty nào (xem _tra_cuu_mst_qua_tracuunnt), thay cho API XInvoice hay
-    hết hạn mức gói free tier.
-
-    Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-tracuunnt?mst=0315458241"""
-    mst_c = _chuan_mst(mst)[:10]
-    if not mst_c:
-        raise HTTPException(400, "MST không hợp lệ")
-    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = _tra_cuu_mst_qua_tracuunnt(mst_c, timeout=20)
-    if thanh_cong:
-        ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{trang_thai_goc}' "
-                    f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
-    else:
-        ket_luan = f"KHÔNG dùng được: {ly_do_loi}"
-    return {"mst_tra": mst_c, "ket_luan": ket_luan,
-            "trang_thai_do_duoc": trang_thai_goc, "canh_bao": canh_bao, "ly_do_loi": ly_do_loi}
-
-
 @app.get("/api/chan-doan-mst-vietqr")
 def chan_doan_mst_vietqr(mst: str = "0315458241"):
     """CHẨN ĐOÁN việc tra tình trạng MST qua API JSON công khai api.vietqr.io
     (xem _tra_cuu_mst_qua_vietqr) — KHÔNG cần captcha/đăng nhập, nguồn ưu
-    tiên số 1 (trước cả tracuunnt.gdt.gov.vn).
+    tiên số 1 (dự phòng còn lại: XInvoice).
 
     Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-vietqr?mst=0315458241"""
     mst_c = _chuan_mst(mst)[:10]
@@ -33513,6 +33492,20 @@ def _thue_theo_cong_thue(it, items, r):
 
 
 _MST_CACHE_NGAY = 14   # số ngày giữ cache tình trạng MST trước khi tra lại
+# Cache "CÓ CẢNH BÁO" (canh_bao=True, tô đỏ) chỉ tin trong VÀI ngày rồi PHẢI dò
+# lại — ngắn hơn nhiều so với _MST_CACHE_NGAY ở trên. Đúng ca thật người dùng
+# báo "phần mềm báo sai": CÔNG TY TNHH BROTHER INTERNATIONAL (0313415034) và
+# CÔNG TY CỔ PHẦN BKAV (0101360697) đã bị lưu cache "NNT ngừng hoạt động..."
+# (canh_bao=True) từ 1 lần tra trước đó (khi nguồn tra lúc đó trả tình trạng
+# này), trong khi tra lại THẬT qua api.vietqr.io cho kết quả HIỆN TẠI là "NNT
+# đang hoạt động" — cache cũ tuy vẫn còn hạn 14 ngày nhưng đã LỖI THỜI, khiến
+# phần mềm cứ báo sai (tô đỏ oan 1 nhà cung cấp đang hoạt động bình thường)
+# cho tới khi cache hết hạn. Vì api.vietqr.io MIỄN PHÍ/không hạn mức, dò lại
+# thường xuyên hơn riêng cho các MST đang bị cảnh báo (rủi ro báo sai gây
+# nghi oan nhà cung cấp, ảnh hưởng trực tiếp quyết định của người dùng) không
+# tốn kém gì — còn MST "đang hoạt động bình thường" thì vẫn giữ cache dài
+# ngày như cũ (_MST_CACHE_NGAY) để đỡ tốn lượt gọi.
+_MST_CACHE_NGAY_CANH_BAO = 1
 _MST_API_NGHI_GIUA_LUOT = 0.35   # giây nghỉ giữa các lượt gọi API MST thật (né giới hạn tốc độ)
 _MST_NGAN_SACH_GIAY = 40   # giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel
 
@@ -33646,41 +33639,8 @@ def _goi_1_lan_xinvoice(mst_c, client_id, api_key, timeout):
         return False, "", None, f"Lỗi kết nối: {str(_e_mst)[:150]}", False
 
 
-def _tra_cuu_masothue(mst_c, timeout):
-    """Dự phòng khi API XInvoice KHÔNG dùng được (chưa cấu hình key nào,
-    hoặc đã thử hết các key đã cấu hình mà vẫn lỗi — vd cả key đều hết hạn
-    mức gói free tier) — tra cứu tình trạng MST qua trang CÔNG KHAI
-    masothue.com (không cần đăng ký client-id/api-key, nhưng KHÔNG phải API
-    chính thức của Tổng cục Thuế như XInvoice, chỉ dùng làm phương án dự
-    phòng), theo đúng yêu cầu người dùng: "nếu api không tra được hết thì
-    hãy tra qua masothue.com". Dò tình trạng bằng CÙNG hàm
-    _phan_loai_trang_thai_mst() dò theo từ khoá trên toàn bộ nội dung trang
-    (không phụ thuộc cấu trúc HTML/CSS cụ thể, bền hơn khi trang đổi giao
-    diện) — y hệt cách dùng trước khi chuyển sang XInvoice.
-
-    Trả về (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi). Nếu không dò
-    được tình trạng khớp (trang lỗi/không có dữ liệu MST) thì coi là THẤT
-    BẠI (thanh_cong=False, không lưu cache) thay vì trả canh_bao=None
-    "thành công" — để lần xuất Excel SAU còn thử lại thay vì bị kẹt cứng ở
-    kết quả rỗng."""
-    try:
-        r = requests.get("https://masothue.com/Search/",
-                         params={"q": mst_c, "type": "auto"},
-                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
-                         timeout=timeout)
-        if r.status_code != 200:
-            return False, "", None, f"masothue.com HTTP {r.status_code}"
-        trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(r.text or "")
-        if canh_bao is None:
-            return False, "", None, "masothue.com: không dò được tình trạng khớp MST"
-        return True, trang_thai_goc, canh_bao, None
-    except Exception as _e_mt:
-        return False, "", None, f"masothue.com lỗi kết nối: {str(_e_mt)[:150]}"
-
-
 # Trạng thái việc tra MST qua api.vietqr.io (API JSON công khai, KHÔNG cần
-# captcha/đăng nhập) — cùng kiểu circuit-breaker với _TRACUUNNT_STATE bên
-# dưới, xem giải thích ở đó.
+# captcha/đăng nhập).
 _VIETQR_STATE = {"lock": threading.Lock(), "loi_lien_tiep": 0}
 _VIETQR_NGUONG_TAT = 5
 
@@ -33700,19 +33660,19 @@ def _tra_cuu_mst_qua_vietqr(mst_c, timeout):
     tra thông tin mst không". Xác nhận qua ví dụ JSON THẬT người dùng dán:
         {"code":"00","data":{"id":"...","name":"...","status":"NNT đang hoạt
          động",...},"metadata":{...}}
-    KHÔNG cần captcha, KHÔNG cần đăng nhập, KHÔNG cần API key — đơn giản hơn
-    hẳn tracuunnt.gdt.gov.vn (không phụ thuộc bộ giải mã captcha ddddocr có
-    nạp được trên máy hay không) nên đặt làm nguồn ƯU TIÊN CAO NHẤT.
+    KHÔNG cần captcha, KHÔNG cần đăng nhập, KHÔNG cần API key — đơn giản và ổn
+    định hơn hẳn tracuunnt.gdt.gov.vn (không phụ thuộc bộ giải mã captcha
+    ddddocr có nạp được trên máy hay không) và masothue.com (hay bị chặn/giới
+    hạn tốc độ khi gọi dồn dập nhiều MST liên tiếp) — người dùng xác nhận cả 2
+    nguồn đó "không đúng được" nên đã BỎ hẳn, giờ nguồn này là ƯU TIÊN CAO NHẤT.
 
     Đánh đổi: dữ liệu là dữ liệu TỔNG HỢP (xem metadata.updatedAt trong JSON
     trả về, ví dụ thật ghi "11 ngày trước"), có thể trễ vài ngày so với thời
-    điểm thật — chấp nhận được vì tình trạng MST hiếm khi đổi (và các nguồn
-    dự phòng sau đó — tracuunnt.gdt.gov.vn, XInvoice, masothue.com — vẫn còn
-    nguyên nếu cần dữ liệu tức thời hơn).
+    điểm thật — chấp nhận được vì tình trạng MST hiếm khi đổi (nguồn dự phòng
+    còn lại — XInvoice — vẫn còn nguyên nếu cần dữ liệu tức thời hơn).
 
-    Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
-    _tra_cuu_masothue()/_tra_cuu_mst_qua_tracuunnt() để ghép vào chuỗi dự
-    phòng sẵn có."""
+    Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với các
+    nguồn tra MST khác để ghép vào chuỗi dự phòng sẵn có."""
     with _VIETQR_STATE["lock"]:
         if _VIETQR_STATE["loi_lien_tiep"] >= _VIETQR_NGUONG_TAT:
             return False, "", None, (f"Đã tạm tắt tra qua api.vietqr.io "
@@ -33756,243 +33716,32 @@ def _tra_cuu_mst_qua_vietqr(mst_c, timeout):
     return True, trang_thai_goc, canh_bao, None
 
 
-# Trạng thái việc tra MST qua tracuunnt.gdt.gov.vn (cổng công khai, KHÔNG cần
-# đăng nhập công ty nào) — GLOBAL (không tách theo cid, vì nguồn này không
-# gắn với phiên đăng nhập của bất kỳ công ty nào, xem _tra_cuu_mst_qua_tracuunnt):
-#   loi_lien_tiep: số lần thất bại liên tiếp -> tới ngưỡng thì TẮT hẳn nguồn
-#     này cho cả lượt xuất Excel hiện tại. Cần thiết vì 1 lượt có thể phải tra
-#     HÀNG TRĂM MST: nếu trang đổi cấu trúc/chặn IP thì cứ thử lại cho từng
-#     MST sẽ làm chậm cả lượt xuất mà chẳng được gì.
-_TRACUUNNT_STATE = {"lock": threading.Lock(), "loi_lien_tiep": 0}
-_TRACUUNNT_NGUONG_TAT = 5   # thất bại liên tiếp bấy nhiêu lần thì tạm tắt nguồn này
-
-
-def _tracuunnt_danh_dau(thanh_cong):
-    with _TRACUUNNT_STATE["lock"]:
-        if thanh_cong:
-            _TRACUUNNT_STATE["loi_lien_tiep"] = 0
-        else:
-            _TRACUUNNT_STATE["loi_lien_tiep"] += 1
-
-
-def _tao_session_tracuunnt(dung_curl_cffi=True):
-    """Session riêng cho tracuunnt.gdt.gov.vn — cùng lý do dùng curl_cffi giả
-    lập Chrome như GDTClient/DVCClient: trang cũng đứng sau WAF F5 (thấy cookie
-    TS0151a243.../TS2ec19012027... kiểu BIG-IP ASM trong cURL người dùng chụp
-    từ DevTools). dung_curl_cffi=False -> ép dùng requests thường (xem
-    _loi_ssl_chung_thuc — 1 số máy gặp lỗi curl_cffi không xác thực được
-    chứng chỉ TLS của trang này, dù trình duyệt thật vẫn mở được bình
-    thường)."""
-    if dung_curl_cffi:
-        try:
-            from curl_cffi import requests as _cffi
-            return _cffi.Session(impersonate="chrome")
-        except Exception:
-            pass
-    return requests.Session()
-
-
-def _loi_ssl_chung_thuc(e):
-    """True nếu lỗi là do KHÔNG XÁC THỰC ĐƯỢC chứng chỉ TLS (thiếu chứng chỉ
-    trung gian trong kho chứng chỉ mà curl_cffi tự mang theo, khác kho chứng
-    chỉ hệ điều hành mà trình duyệt thật dùng) — xác nhận qua ca thật người
-    dùng báo: "SSL certificate problem: unable to get local issuer
-    certificate" khi tra tracuunnt.gdt.gov.vn dù trình duyệt thật vẫn mở được
-    trang đó bình thường. TUYỆT ĐỐI không tắt xác thực TLS để né lỗi này —
-    thay vào đó đổi sang requests thường (dùng kho chứng chỉ certifi, vẫn xác
-    thực TLS đầy đủ, chỉ khác nguồn kho chứng chỉ đang dùng)."""
-    s = str(e).lower()
-    return "certificate" in s or "ssl" in s or "issuer" in s
-
-
-def _doc_bang_trang_thai_tracuunnt(html, mst_c):
-    """Dò ĐÚNG dòng của mst_c trong bảng kết quả trả về từ tracuunnt.gdt.gov.vn
-    (mstdn.jsp) — trang trả về CẢ trụ sở chính lẫn các chi nhánh (MST dạng
-    "gốc-001", "gốc-002"...) trong CÙNG 1 bảng, nên phải khớp ĐÚNG CHÍNH XÁC
-    cột MST = mst_c (không phải startswith, tránh nhầm dòng chi nhánh) mới lấy
-    đúng cột "Trạng thái MST" của công ty cần tra.
-
-    Trả trang_thai_goc ('' nếu không tìm thấy dòng khớp)."""
-    import re
-    import html as _html
-    # Chỉ xét các <tr> SAU tiêu đề "Trạng thái MST" (đầu bảng kết quả) — tránh
-    # khớp nhầm vào bảng/menu khác trên cùng trang nếu có.
-    idx_tieu_de = html.find("Trạng thái MST")
-    vung = html[idx_tieu_de:] if idx_tieu_de >= 0 else html
-    for tr in re.findall(r'<tr[^>]*>(.*?)</tr>', vung, re.S | re.I):
-        cells_raw = re.findall(r'<td[^>]*>(.*?)</td>', tr, re.S | re.I)
-        if len(cells_raw) < 6:
-            continue
-        cells = [_html.unescape(re.sub(r'<[^>]+>', ' ', c)).strip() for c in cells_raw]
-        cells = [re.sub(r'\s+', ' ', c) for c in cells]
-        if cells[1] == mst_c:
-            return cells[5]
-    return ""
-
-
-_SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # captcha trang này KHÓ — người dùng xác nhận tự nhập tay còn phải thử 3-5 lần
-
-
-def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
-    """Tra tình trạng hoạt động 1 MST qua CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC
-    tracuunnt.gdt.gov.vn (tcnnt/mstdn.jsp) — theo yêu cầu người dùng "còn cách
-    nào khác... vì api XInvoice hạn chế quá": nguồn CHÍNH THỨC của Tổng cục
-    Thuế, MIỄN PHÍ, KHÔNG hạn mức gói, và KHÔNG cần đăng nhập công ty nào (ai
-    cũng tra được) — chính là nguồn mà masothue.com/XInvoice cũng lấy dữ liệu
-    gốc từ đây.
-
-    Quy trình (xác nhận qua cURL thật người dùng chụp từ DevTools):
-      1. GET  /tcnnt/captcha.png  -> ảnh PNG (không phải SVG như hoadondientu)
-      2. OCR ảnh captcha bằng ddddocr (_ocr_png, đã dùng cho hoadondientu)
-      3. POST /tcnnt/mstdn.jsp  (cm=cm&mst=..&fullname=&address=&cmt=&captcha=..)
-         -> trang HTML có bảng kết quả (cột cuối "Trạng thái MST", VD "NNT
-         đang hoạt động") — PHẢI dùng CHUNG 1 session cho cả 3 bước vì captcha
-         gắn với JSESSIONID của phiên.
-
-    Captcha trang này KHÓ (người dùng xác nhận tự nhập tay còn phải thử 3-5
-    lần) — nên THỬ LẠI với ảnh captcha MỚI tối đa _SO_LAN_THU_CAPTCHA_TRACUUNNT
-    lần trong CÙNG 1 session (không mở lại trang từ đầu mỗi lần, chỉ lấy lại
-    captcha.png mới) trước khi chịu thua, thay vì chỉ thử đúng 1 lần.
-
-    Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
-    _tra_cuu_masothue() để ghép vào chuỗi dự phòng sẵn có."""
-    with _TRACUUNNT_STATE["lock"]:
-        if _TRACUUNNT_STATE["loi_lien_tiep"] >= _TRACUUNNT_NGUONG_TAT:
-            return False, "", None, (f"Đã tạm tắt tra qua tracuunnt.gdt.gov.vn "
-                                     f"(thất bại {_TRACUUNNT_NGUONG_TAT} lần liên tiếp trong lượt này) "
-                                     f"— sẽ tự thử lại ở lượt xuất Excel sau")
-
-    # Kiểm tra NGAY bộ giải captcha (ddddocr) có nạp được không TRƯỚC khi gọi
-    # mạng — captcha của trang này bắt buộc phải OCR ảnh PNG thật sự (không có
-    # đường tắt kiểu đọc thẳng <text> trong SVG như captcha của hoadondientu),
-    # nên ddddocr KHÔNG nạp được thì chắc chắn 6 lần thử lại sau đều thất bại
-    # y hệt nhau (lãng phí 6 lượt gọi mạng vô ích) — báo NGAY nguyên nhân thật
-    # (thường là thiếu 'Microsoft Visual C++ Redistributable') + trỏ đúng chỗ
-    # tự khắc phục đã có sẵn (/api/fix-ocr), thay vì lặp lại đúng câu "OCR
-    # không đọc ra" vô nghĩa 6 lần.
-    if _get_ddddocr() is None:
-        _tracuunnt_danh_dau(False)
-        return False, "", None, (
-            "Chưa dùng được bộ giải mã captcha (ddddocr) trên máy này"
-            + (f" — {_DDDDOCR_ERR}" if _DDDDOCR_ERR else "")
-            + ". Máy mới thường thiếu 'Microsoft Visual C++ Redistributable (x64)' — gọi "
-              "POST http://127.0.0.1:8686/api/fix-ocr để tự tải/cài rồi thử lại (hoặc mở "
-              "http://127.0.0.1:8686/api/captcha-debug/1 để xem chi tiết lỗi).")
-
-    ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
-
-    # Bước 1: mở trang trước (như trình duyệt thật) để có JSESSIONID. Thử
-    # curl_cffi (giả lập Chrome, cần cho các trang có WAF) trước — nếu gặp lỗi
-    # XÁC THỰC CHỨNG CHỈ TLS (1 số máy/mạng gặp, xem _loi_ssl_chung_thuc) thì
-    # đổi sang requests thường (kho chứng chỉ certifi, vẫn xác thực TLS đầy
-    # đủ) thay vì tắt xác thực.
-    sess = None
-    loi_mo_trang = None
-    for dung_curl_cffi in (True, False):
-        try:
-            sess_thu = _tao_session_tracuunnt(dung_curl_cffi)
-            sess_thu.get("https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp", headers=ua, timeout=timeout)
-            sess = sess_thu
-            break
-        except Exception as e:
-            loi_mo_trang = str(e)[:150]
-            if not (dung_curl_cffi and _loi_ssl_chung_thuc(e)):
-                break   # lỗi khác lỗi SSL thì đổi cách cũng vô ích, dừng ngay
-    if sess is None:
-        _tracuunnt_danh_dau(False)
-        return False, "", None, f"tracuunnt.gdt.gov.vn lỗi kết nối: {loi_mo_trang}"
-
-    ly_do_loi_cuoi = "không rõ lý do"
-    for lan in range(1, _SO_LAN_THU_CAPTCHA_TRACUUNNT + 1):
-        try:
-            r_cap = sess.get("https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png",
-                             headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
-                             timeout=timeout)
-            if r_cap.status_code != 200 or not r_cap.content:
-                ly_do_loi_cuoi = f"không lấy được ảnh captcha (HTTP {r_cap.status_code})"
-                continue
-        except Exception as e:
-            ly_do_loi_cuoi = f"lỗi kết nối (lấy captcha): {str(e)[:150]}"
-            continue
-
-        ma_captcha = _ocr_png(r_cap.content)
-        if not ma_captcha:
-            ly_do_loi_cuoi = "không giải được captcha (OCR không đọc ra)"
-            continue
-
-        try:
-            r = sess.post("https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
-                          headers={**ua, "Content-Type": "application/x-www-form-urlencoded",
-                                   "Origin": "https://tracuunnt.gdt.gov.vn",
-                                   "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
-                          data={"cm": "cm", "mst": mst_c, "fullname": "", "address": "",
-                                "cmt": "", "captcha": ma_captcha},
-                          timeout=timeout)
-        except Exception as e:
-            ly_do_loi_cuoi = f"lỗi kết nối (tra cứu): {str(e)[:150]}"
-            continue
-
-        if r.status_code != 200:
-            ly_do_loi_cuoi = f"HTTP {r.status_code}"
-            continue
-
-        html = r.text or ""
-        if "Trạng thái MST" not in html:
-            # Không có cả bảng kết quả -> nhiều khả năng đoán sai mã captcha
-            # (trang báo lỗi captcha khác nhau tuỳ phiên bản, không bám 1 câu
-            # chữ cụ thể) -> ĐÁNG thử lại với captcha mới.
-            ly_do_loi_cuoi = f"có thể đã đoán sai captcha '{ma_captcha}' (lần {lan}/{_SO_LAN_THU_CAPTCHA_TRACUUNNT}), không ra bảng kết quả"
-            continue
-
-        # Đã CÓ bảng kết quả -> captcha chắc chắn ĐÚNG (trang đã chạy tra cứu
-        # thật) -> các lỗi dưới đây KHÔNG PHẢI do captcha, thử lại captcha mới
-        # cũng vô ích -> trả kết quả/lỗi NGAY, không lặp thêm.
-        trang_thai_goc = _doc_bang_trang_thai_tracuunnt(html, mst_c)
-        if not trang_thai_goc:
-            _tracuunnt_danh_dau(False)
-            return False, "", None, f"tracuunnt.gdt.gov.vn: không thấy đúng dòng MST {mst_c} trong bảng kết quả"
-
-        _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
-        if canh_bao is None:
-            # Có dòng nhưng chữ tình trạng không khớp từ khoá nào đã biết ->
-            # coi là thất bại để rơi xuống XInvoice/masothue, TUYỆT ĐỐI không
-            # suy đoán "đang hoạt động" (đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
-            _tracuunnt_danh_dau(False)
-            return False, "", None, f"tracuunnt.gdt.gov.vn: tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
-
-        _tracuunnt_danh_dau(True)
-        return True, trang_thai_goc, canh_bao, None
-
-    _tracuunnt_danh_dau(False)
-    return False, "", None, f"tracuunnt.gdt.gov.vn: {ly_do_loi_cuoi} (đã thử {_SO_LAN_THU_CAPTCHA_TRACUUNNT} lần captcha)"
-
-
 def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
-    """Tra cứu tình trạng hoạt động của 1 MST qua API CHÍNH THỨC của XInvoice
-    (api.xinvoice.vn/gdt-api/tax-payer/{mst} — lấy lại dữ liệu Tổng cục Thuế,
-    theo đúng chỉ định của người dùng, thay cho việc đọc HTML masothue.com
-    trước đây) — dùng để cảnh báo khi xuất Excel bảng kê mua vào/bán ra: đối
-    tác đã bị khóa MST/ngừng hoạt động, hoặc đang bị đánh dấu "chờ xác minh
-    tình trạng hoạt động tại địa chỉ đã đăng ký" (dấu hiệu rủi ro thường gặp:
-    hóa đơn của NCC "ma" — không có thật tại địa chỉ đăng ký — ảnh hưởng việc
-    khấu trừ thuế GTGT đầu vào).
+    """Tra cứu tình trạng hoạt động của 1 MST — dùng để cảnh báo khi xuất
+    Excel bảng kê mua vào/bán ra: đối tác đã bị khóa MST/ngừng hoạt động,
+    hoặc đang bị đánh dấu "chờ xác minh tình trạng hoạt động tại địa chỉ đã
+    đăng ký" (dấu hiệu rủi ro thường gặp: hóa đơn của NCC "ma" — không có
+    thật tại địa chỉ đăng ký — ảnh hưởng việc khấu trừ thuế GTGT đầu vào).
 
-    ƯU TIÊN dùng API XInvoice nếu đã cấu hình client-id + api-key (đăng ký
-    tại xinvoice.vn) qua /api/settings/xinvoice-mst-api (có thể cấu hình
-    NHIỀU cặp key, tự chuyển key khi cặp đang dùng hết hạn mức) — nếu CHƯA
-    cấu hình key nào, HOẶC đã thử hết các key mà vẫn lỗi (vd hết hạn mức gói
-    free tier ở TẤT CẢ key), tự động DỰ PHÒNG sang tra cứu qua trang công
-    khai masothue.com (không cần đăng ký, theo yêu cầu người dùng "nếu api
-    không tra được hết thì hãy tra qua masothue.com") — chỉ khi CẢ HAI cách
-    đều không tra được mới trả canh_bao=None (không lỗi, không chặn xuất
-    Excel).
+    ƯU TIÊN dùng api.vietqr.io (miễn phí, không hạn mức, KHÔNG cần captcha —
+    xem _tra_cuu_mst_qua_vietqr) — nếu không tra được, DỰ PHÒNG sang API
+    XInvoice nếu đã cấu hình client-id + api-key (đăng ký tại xinvoice.vn)
+    qua /api/settings/xinvoice-mst-api (có thể cấu hình NHIỀU cặp key, tự
+    chuyển key khi cặp đang dùng hết hạn mức). tracuunnt.gdt.gov.vn và
+    masothue.com ĐÃ BỎ theo yêu cầu người dùng ("không đúng được" — captcha
+    khó/ddddocr không nạp được, và hay bị chặn/giới hạn tốc độ). Chỉ khi CẢ
+    HAI cách đều không tra được mới trả canh_bao=None (không lỗi, không chặn
+    xuất Excel).
 
-    CHỈ tra cứu THẬT SỰ qua mạng khi CHƯA có cache hoặc cache đã quá
-    _MST_CACHE_NGAY ngày — kết quả (kể cả tra cứu thất bại) được lưu vào
-    bảng mst_status_cache, tránh gọi API liên tục cho cùng 1 MST ở mỗi lần
-    xuất Excel (giảm số lượt gọi — API có thể tính phí/giới hạn hạn mức
-    theo lượt gọi).
+    CHỈ tra cứu THẬT SỰ qua mạng khi CHƯA có cache hoặc cache đã quá hạn —
+    kết quả tra cứu THÀNH CÔNG được lưu vào bảng mst_status_cache, tránh gọi
+    API liên tục cho cùng 1 MST ở mỗi lần xuất Excel (giảm số lượt gọi — API
+    có thể tính phí/giới hạn hạn mức theo lượt gọi). Hạn cache KHÔNG đồng
+    đều: MST "bình thường" giữ cache _MST_CACHE_NGAY (14) ngày, còn MST
+    "CÓ CẢNH BÁO" (canh_bao=True) chỉ giữ cache _MST_CACHE_NGAY_CANH_BAO (1)
+    ngày rồi dò lại ngay — tránh cảnh báo sai kéo dài do dữ liệu cache đã lỗi
+    thời (đúng ca thật người dùng báo "phần mềm báo sai" cho 1 MST đã hoạt
+    động trở lại nhưng vẫn bị tô đỏ do cache cũ).
 
     so_lan_that_bai_lien_tiep: list 1 phần tử [count] dùng làm bộ đếm CHUNG
     giữa nhiều lần gọi liên tiếp (vd trong 1 lượt xuất Excel có hàng trăm
@@ -34042,9 +33791,13 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     if row and row["checked_at"]:
         try:
             cu = datetime.datetime.fromisoformat(row["checked_at"])
-            if (datetime.datetime.now() - cu).days < _MST_CACHE_NGAY:
-                canh_bao_cu = row["canh_bao"]
-                canh_bao_cu = bool(canh_bao_cu) if canh_bao_cu is not None else None
+            canh_bao_cu = row["canh_bao"]
+            canh_bao_cu = bool(canh_bao_cu) if canh_bao_cu is not None else None
+            # Cache "CÓ CẢNH BÁO" hết hạn SỚM hơn (_MST_CACHE_NGAY_CANH_BAO) để
+            # tự sửa các trường hợp "báo sai" do cache cũ đã lỗi thời — xem giải
+            # thích đầy đủ ở khai báo _MST_CACHE_NGAY_CANH_BAO phía trên.
+            han_ngay = _MST_CACHE_NGAY_CANH_BAO if canh_bao_cu is True else _MST_CACHE_NGAY
+            if (datetime.datetime.now() - cu).days < han_ngay:
                 return {"trang_thai": row["trang_thai_goc"] or "", "canh_bao": canh_bao_cu}
         except Exception:
             pass
@@ -34053,14 +33806,13 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     het_han_muc = chi_dung_cache or bo_dem_da_toi_han
     if het_han_muc:
         # Đã hết ngân sách thời gian CHO LƯỢT NÀY, hoặc đã lỗi liên tiếp quá
-        # nhiều lần (cả XInvoice lẫn masothue.com dự phòng đều không tra
-        # được — vd hết hạn mức gói API/masothue.com tạm thời chặn do gọi
-        # dồn dập) -> khỏi thử mạng nữa, để cache cũ (nếu có, dù quá hạn) làm
-        # dự phòng thay vì không có gì. GHI RÕ ly_do_loi (trước đây bỏ trống
-        # hoàn toàn ở nhánh này) để người dùng còn biết được VÌ SAO các MST
-        # này vẫn chưa dò được (đúng câu hỏi người dùng "sao vẫn còn?") thay
-        # vì không thấy dòng "VÍ DỤ LỖI GẶP PHẢI" nào trong log dù vẫn còn
-        # MST trống.
+        # nhiều lần (cả VietQR lẫn XInvoice dự phòng đều không tra được — vd
+        # mất mạng/hết hạn mức gói API) -> khỏi thử mạng nữa, để cache cũ (nếu
+        # có, dù quá hạn) làm dự phòng thay vì không có gì. GHI RÕ ly_do_loi
+        # (trước đây bỏ trống hoàn toàn ở nhánh này) để người dùng còn biết
+        # được VÌ SAO các MST này vẫn chưa dò được (đúng câu hỏi người dùng
+        # "sao vẫn còn?") thay vì không thấy dòng "VÍ DỤ LỖI GẶP PHẢI" nào
+        # trong log dù vẫn còn MST trống.
         if row:
             canh_bao_cu = row["canh_bao"]
             ket_qua = {"trang_thai": row["trang_thai_goc"] or "",
@@ -34070,8 +33822,8 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         if not ket_qua["trang_thai"]:
             ket_qua["ly_do_loi"] = ("Hết ngân sách thời gian tra MST mới trong lượt xuất Excel này"
                                     if chi_dung_cache else
-                                    "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả XInvoice lẫn masothue.com "
-                                    "dự phòng đều không tra được) để tránh treo lâu — sẽ tự thử lại ở "
+                                    "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả VietQR lẫn XInvoice dự "
+                                    "phòng đều không tra được) để tránh treo lâu — sẽ tự thử lại ở "
                                     "lượt xuất Excel sau")
         return ket_qua
 
@@ -34109,24 +33861,15 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     ly_do_loi = None
 
     # ── NGUỒN ƯU TIÊN 1: api.vietqr.io (API JSON công khai, KHÔNG cần captcha) ──
-    # Đặt TRÊN CẢ tracuunnt.gdt.gov.vn: cùng miễn phí/không hạn mức, nhưng
-    # KHÔNG phụ thuộc bộ giải mã captcha (ddddocr) có nạp được trên máy hay
-    # không — nhanh và chắc chắn hơn hẳn, chỉ đánh đổi dữ liệu có thể trễ vài
-    # ngày (chấp nhận được, tình trạng MST hiếm khi đổi liên tục).
+    # Miễn phí, không hạn mức, không phụ thuộc bộ giải mã captcha (ddddocr) có
+    # nạp được trên máy hay không — nhanh và chắc chắn hơn hẳn, chỉ đánh đổi
+    # dữ liệu có thể trễ vài ngày (chấp nhận được, tình trạng MST hiếm khi đổi
+    # liên tục). tracuunnt.gdt.gov.vn và masothue.com đã BỎ theo yêu cầu người
+    # dùng "không đúng được" (masothue.com hay bị chặn/giới hạn tốc độ khi gọi
+    # dồn dập, tracuunnt.gdt.gov.vn phụ thuộc captcha khó + ddddocr).
     thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_vietqr = _tra_cuu_mst_qua_vietqr(mst_c, timeout)
 
-    # ── NGUỒN ƯU TIÊN 2: CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC tracuunnt.gdt.gov.vn ──
-    # Đặt TRƯỚC XInvoice (không phải sau) là CỐ Ý: nguồn này chính thức, miễn
-    # phí, KHÔNG hạn mức gói, KHÔNG cần đăng nhập công ty nào — tra được ở đây
-    # thì KHÔNG tiêu tốn lượt gọi nào của XInvoice, giữ nguyên hạn mức gói cho
-    # lúc thật sự cần (đúng vấn đề người dùng báo: cả 2 key XInvoice đều HTTP
-    # 429 "Exceeded free tier limit", kéo theo dự phòng masothue.com cũng 429
-    # vì cả lượt dồn sang).
-    ly_do_loi_tracuunnt = None
-    if not thanh_cong:
-        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_tracuunnt = _tra_cuu_mst_qua_tracuunnt(
-            mst_c, timeout)
-
+    # ── NGUỒN ƯU TIÊN 2 (dự phòng): API XInvoice ──
     for buoc in range(0 if thanh_cong else so_key):
         idx_key = (idx_bat_dau + buoc) % so_key
         k = danh_sach_keys[idx_key]
@@ -34142,38 +33885,14 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
             ly_do_loi = f"ĐÃ HẾT HẠN MỨC/SAI cả {so_key} key đã cấu hình — lỗi key cuối: {ly_do_loi}"
         break
 
-    # DỰ PHÒNG masothue.com: khi API XInvoice không dùng được (chưa cấu hình
-    # key nào -> so_key=0, vòng lặp trên không chạy lần nào; HOẶC đã thử hết
-    # các key đã cấu hình mà vẫn lỗi) -> tự động thử tra qua trang công khai
-    # masothue.com trước khi chịu thua hẳn, đúng yêu cầu người dùng "nếu api
-    # không tra được hết thì hãy tra qua masothue.com" (ca thật: cả 2 key đã
-    # cấu hình đều hết hạn mức gói free tier cùng lúc, 17/234 MST không dò
-    # được trong 1 lượt xuất Excel).
     if not thanh_cong:
-        ly_do_loi_xinvoice = ly_do_loi
-        # Nghỉ thêm 1 chút TRƯỚC lượt gọi masothue.com dự phòng — khi các
-        # key XInvoice đã hết hạn mức, TẤT CẢ MST trong lượt xuất Excel này
-        # đều rơi vào nhánh dự phòng gần như CÙNG LÚC (kể cả đang chạy song
-        # song nhiều luồng), dễ bắn dồn dập vào masothue.com (trang công
-        # khai, không phải API trả phí, dễ bị tự chặn/giới hạn tốc độ khi
-        # thấy nhiều request liên tiếp từ cùng nguồn) nếu không nghỉ riêng
-        # trước lượt gọi này.
-        time.sleep(_MST_API_NGHI_GIUA_LUOT)
-        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_mt = _tra_cuu_masothue(mst_c, timeout)
-        if thanh_cong:
-            ly_do_loi = None
-        else:
-            # Gộp lý do của CẢ 4 nguồn (VietQR + tracuunnt.gdt.gov.vn +
-            # XInvoice + masothue.com) — người dùng cần thấy ĐỦ mới biết mắc
-            # ở đâu: bỏ sót lý do nguồn nào sẽ khiến chẩn đoán "cụt", không
-            # biết nguồn đó có được thử hay không.
-            phan = [p for p in (
-                (f"api.vietqr.io: {ly_do_loi_vietqr}" if ly_do_loi_vietqr else None),
-                (f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt}" if ly_do_loi_tracuunnt else None),
-                ly_do_loi_xinvoice,
-                (f"Dự phòng masothue.com cũng lỗi: {ly_do_loi_mt}" if ly_do_loi_mt else None),
-            ) if p]
-            ly_do_loi = " | ".join(phan) if phan else None
+        # Gộp lý do của CẢ 2 nguồn (VietQR + XInvoice) — người dùng cần thấy
+        # ĐỦ mới biết mắc ở đâu.
+        phan = [p for p in (
+            (f"api.vietqr.io: {ly_do_loi_vietqr}" if ly_do_loi_vietqr else None),
+            ly_do_loi,
+        ) if p]
+        ly_do_loi = " | ".join(phan) if phan else None
 
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
@@ -34220,8 +33939,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
       sheet "BK Mua vào") — MẶC ĐỊNH TẮT (0), theo đúng yêu cầu người dùng
       "thêm nút tick tra cứu tình trạng mst khi nào tick vào thì mới cho
       chạy tra cứu này còn không tíck thì không cần chạy" — đây là các lượt
-      gọi mạng ra ngoài (XInvoice/masothue.com), tốn thời gian và có thể
-      tốn hạn mức API, chỉ nên chạy khi người dùng CHỦ Ý cần.
+      gọi mạng ra ngoài (VietQR/XInvoice), tốn thời gian và có thể tốn hạn
+      mức API, chỉ nên chạy khi người dùng CHỦ Ý cần.
     mo_file: MẶC ĐỊNH = 1 (tự mở file Excel ngay sau khi xuất, cho tiện xem
       luôn). Có ĐÁNH ĐỔI đã biết: file "Bảng kê hóa đơn" này là NGUỒN DỮ
       LIỆU chính mà "Kết xuất XML" đọc vào và bị GHI ĐÈ LẠI mỗi khi Import

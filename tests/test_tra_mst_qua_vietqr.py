@@ -11,8 +11,9 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 #    "data":{"id":"0315458241","name":"...","status":"NNT đang hoạt động"},
 #    "metadata":{"disclaimer":"... 11 ngày trước","source":"gdt.gov.vn",...}}
 # Nguồn này KHÔNG cần captcha/đăng nhập -> không phụ thuộc ddddocr có nạp
-# được trên máy hay không (vấn đề đang vướng ở tracuunnt.gdt.gov.vn) -> đặt
-# làm nguồn ưu tiên CAO NHẤT, trước cả tracuunnt.gdt.gov.vn.
+# được trên máy hay không -> đặt làm nguồn ưu tiên CAO NHẤT. (tracuunnt.gdt.
+# gov.vn và masothue.com đã BỊ BỎ sau đó theo yêu cầu người dùng "không đúng
+# được" — dự phòng còn lại chỉ còn XInvoice.)
 
 
 def _than_ham(ten):
@@ -119,26 +120,22 @@ assert '_VIETQR_NGUONG_TAT' in src and '_vietqr_danh_dau(' in than_vietqr, (
 print("PASS 4: có ngưỡng tạm tắt khi lỗi liên tiếp, tránh lãng phí lượt gọi cho hàng trăm MST còn lại.")
 
 # ===== Test 5 (QUAN TRỌNG — đúng yêu cầu thứ tự ưu tiên): api.vietqr.io phải
-# được thử TRƯỚC tracuunnt.gdt.gov.vn (và cả XInvoice/masothue) — vì KHÔNG
-# phụ thuộc ddddocr, nhanh/chắc chắn hơn hẳn nguồn cần giải captcha. =====
+# được thử TRƯỚC XInvoice — vì KHÔNG phụ thuộc ddddocr, nhanh/chắc chắn hơn
+# hẳn. (tracuunnt.gdt.gov.vn và masothue.com đã BỊ BỎ theo yêu cầu người
+# dùng "không đúng được" — không còn trong chuỗi nữa.) =====
 than_chinh = _than_ham('_tra_cuu_trang_thai_mst')
 vt_vietqr = than_chinh.find('_tra_cuu_mst_qua_vietqr(')
-vt_tracuunnt = than_chinh.find('_tra_cuu_mst_qua_tracuunnt(')
 vt_xinvoice = than_chinh.find('_goi_1_lan_xinvoice(')
-vt_masothue = than_chinh.find('_tra_cuu_masothue(')
-assert 0 < vt_vietqr < vt_tracuunnt < vt_xinvoice < vt_masothue, (
-    "Thứ tự ưu tiên phải là: api.vietqr.io (không captcha) -> tracuunnt.gdt.gov.vn -> XInvoice -> masothue.com.")
-assert 'if not thanh_cong:' in than_chinh[vt_tracuunnt - 200:vt_tracuunnt], (
-    "Chỉ thử tracuunnt.gdt.gov.vn khi VietQR đã THẤT BẠI (thanh_cong=False) — tra được ở VietQR rồi thì "
-    "không cần thử thêm nguồn khác, tránh lãng phí gọi mạng/giải captcha vô ích.")
-print("PASS 5: api.vietqr.io được thử TRƯỚC tracuunnt.gdt.gov.vn/XInvoice/masothue.com, chỉ rơi xuống khi VietQR thất bại.")
+assert 0 < vt_vietqr < vt_xinvoice, (
+    "Thứ tự ưu tiên phải là: api.vietqr.io (không captcha) -> XInvoice (dự phòng).")
+print("PASS 5: api.vietqr.io được thử TRƯỚC XInvoice, chỉ rơi xuống XInvoice khi VietQR thất bại.")
 
-# ===== Test 6 (không hồi quy — thông báo lỗi cuối gộp đủ cả 4 nguồn): thiếu
+# ===== Test 6 (không hồi quy — thông báo lỗi cuối gộp đủ cả 2 nguồn): thiếu
 # lý do của 1 nguồn sẽ khiến người dùng chẩn đoán "cụt", không biết nguồn đó
 # có được thử hay không. =====
 assert 'api.vietqr.io: {ly_do_loi_vietqr}' in src, (
-    "Thông báo lỗi cuối cùng (khi cả 4 nguồn đều thất bại) phải kèm lý do của api.vietqr.io.")
-print("PASS 6: thông báo lỗi cuối cùng gộp đủ lý do của cả 4 nguồn (VietQR + tracuunnt + XInvoice + masothue.com).")
+    "Thông báo lỗi cuối cùng (khi cả 2 nguồn đều thất bại) phải kèm lý do của api.vietqr.io.")
+print("PASS 6: thông báo lỗi cuối cùng gộp đủ lý do của cả 2 nguồn (VietQR + XInvoice).")
 
 # ===== Test 7 (không hồi quy — endpoint chẩn đoán riêng): phải có endpoint
 # chẩn đoán nhanh cho VietQR, không cần biết id công ty nào (API công khai). =====
