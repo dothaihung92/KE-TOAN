@@ -72,10 +72,7 @@ _call_intervals = []
 _call_count = {"n": 0}
 
 
-def _fake_tra_cuu(mst, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False, cid=None):
-    # cid: thêm từ khi có nguồn tra MST qua CỔNG THUẾ ĐIỆN TỬ chính thức
-    # (_tra_cuu_mst_qua_tct) — nơi gọi trong export_excel truyền cid xuống để
-    # mượn đúng phiên đăng nhập của công ty đang xuất Excel.
+def _fake_tra_cuu(mst, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
     t0 = time.time()
     with _calls_lock:
         _call_count["n"] += 1
@@ -90,7 +87,6 @@ _tlog_msgs = []
 ns['_tra_cuu_trang_thai_mst'] = _fake_tra_cuu
 ns['_mst_status_local'] = {}
 ns['_mst_fail_counter'] = [0]
-ns['cid'] = 1   # export_excel(cid) — hàm nested lấy cid từ scope ngoài để truyền xuống
 ns['_mst_bat_dau'] = time.time()
 ns['_tlog'] = lambda m: _tlog_msgs.append(m)
 
@@ -186,7 +182,7 @@ print("PASS 4: danh sách rỗng -> không làm gì, không lỗi.")
 # MST chưa lấy được tình trạng KÈM lý do cụ thể của CHÍNH MST đó — khác hẳn
 # trước đây chỉ in 1 "VÍ DỤ LỖI GẶP PHẢI" DUY NHẤT (không đủ để biết CÁC MST
 # còn lại có cùng nguyên nhân hay không, hay mỗi MST bị 1 lỗi khác nhau). -----
-def _fake_tra_cuu_hon_hop(mst, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False, cid=None):
+def _fake_tra_cuu_hon_hop(mst, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
     if mst.endswith("1"):
         return {"trang_thai": "Đang hoạt động", "canh_bao": False}
     if mst.endswith("2"):

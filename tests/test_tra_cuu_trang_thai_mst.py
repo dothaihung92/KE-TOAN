@@ -140,6 +140,11 @@ def _fresh_db():
 
 
 ns['db'] = _fresh_db
+# Stub nguồn tracuunnt.gdt.gov.vn (thử TRƯỚC XInvoice — xem _tra_cuu_trang_thai_mst)
+# LUÔN thất bại: các test dưới đây kiểm tra hành vi RIÊNG của chuỗi XInvoice/
+# masothue.com (cấu hình key, chuyển key, dự phòng...), không liên quan tới
+# tracuunnt.gdt.gov.vn — để test đó có test riêng (test_tra_mst_qua_tracuunnt.py).
+ns['_tra_cuu_mst_qua_tracuunnt'] = lambda mst_c, timeout: (False, "", None, "stub: tắt trong test này")
 exec(extract_fn('_tra_cuu_trang_thai_mst'), ns)
 _phan_loai_trang_thai_mst = ns['_phan_loai_trang_thai_mst']
 _tra_cuu_trang_thai_mst = ns['_tra_cuu_trang_thai_mst']
