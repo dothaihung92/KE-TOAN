@@ -202,4 +202,24 @@ assert 'verify=False' not in src and 'verify = False' not in src, (
     "nguồn kho chứng chỉ.")
 print("PASS 7: dùng kho chứng chỉ gốc hệ điều hành (truststore) ngay lúc khởi động, không tắt xác thực TLS.")
 
+# ===== Test 8 (QUAN TRỌNG — đúng ca thật: "không giải được captcha" LẶP LẠI
+# giống hệt nhau cả 6/6 lần): captcha trang này bắt buộc OCR ảnh PNG thật sự
+# (không có đường tắt đọc <text> trong SVG như hoadondientu) — nếu ddddocr
+# KHÔNG NẠP ĐƯỢC (thường do thiếu VC++ Redistributable) thì CHẮC CHẮN cả 6
+# lần thử lại đều thất bại y hệt nhau, lãng phí 6 lượt gọi mạng vô ích và
+# không báo đúng nguyên nhân thật. Phải kiểm tra NGAY TỪ ĐẦU (trước khi gọi
+# mạng lần nào) và trỏ đúng cơ chế tự khắc phục đã có sẵn (/api/fix-ocr). =====
+than_tc2 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
+vt_check_ddddocr = than_tc2.find('_get_ddddocr() is None')
+vt_vong_lap_captcha = than_tc2.find('for lan in range(1, _SO_LAN_THU_CAPTCHA_TRACUUNNT')
+assert 0 < vt_check_ddddocr < vt_vong_lap_captcha, (
+    "Phải kiểm tra ddddocr đã nạp được chưa NGAY TỪ ĐẦU, TRƯỚC vòng lặp thử captcha — nếu không, máy "
+    "chưa nạp được ddddocr sẽ lãng phí đủ 6 lượt gọi mạng rồi mới báo lỗi, và lỗi báo ra ('OCR không "
+    "đọc ra') không đúng nguyên nhân thật (ddddocr chưa nạp được, không phải OCR đọc sai).")
+assert '/api/fix-ocr' in than_tc2, (
+    "Thông báo lỗi phải trỏ tới đúng cơ chế tự khắc phục ddddocr đã có sẵn trong phần mềm (/api/fix-ocr) "
+    "— không bắt người dùng tự mò cách sửa.")
+assert '_DDDDOCR_ERR' in than_tc2, "Phải kèm chi tiết lỗi thật (_DDDDOCR_ERR) để chẩn đoán chính xác, không chỉ nói chung chung."
+print("PASS 8: kiểm tra ddddocr nạp được ngay từ đầu, tránh lãng phí 6 lượt gọi mạng vô ích, trỏ đúng cách tự khắc phục.")
+
 print("\nALL DONE")

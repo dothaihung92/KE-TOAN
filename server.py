@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.329"
+APP_BUILD = "2026-09-20.330"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33763,6 +33763,23 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
             return False, "", None, (f"Đã tạm tắt tra qua tracuunnt.gdt.gov.vn "
                                      f"(thất bại {_TRACUUNNT_NGUONG_TAT} lần liên tiếp trong lượt này) "
                                      f"— sẽ tự thử lại ở lượt xuất Excel sau")
+
+    # Kiểm tra NGAY bộ giải captcha (ddddocr) có nạp được không TRƯỚC khi gọi
+    # mạng — captcha của trang này bắt buộc phải OCR ảnh PNG thật sự (không có
+    # đường tắt kiểu đọc thẳng <text> trong SVG như captcha của hoadondientu),
+    # nên ddddocr KHÔNG nạp được thì chắc chắn 6 lần thử lại sau đều thất bại
+    # y hệt nhau (lãng phí 6 lượt gọi mạng vô ích) — báo NGAY nguyên nhân thật
+    # (thường là thiếu 'Microsoft Visual C++ Redistributable') + trỏ đúng chỗ
+    # tự khắc phục đã có sẵn (/api/fix-ocr), thay vì lặp lại đúng câu "OCR
+    # không đọc ra" vô nghĩa 6 lần.
+    if _get_ddddocr() is None:
+        _tracuunnt_danh_dau(False)
+        return False, "", None, (
+            "Chưa dùng được bộ giải mã captcha (ddddocr) trên máy này"
+            + (f" — {_DDDDOCR_ERR}" if _DDDDOCR_ERR else "")
+            + ". Máy mới thường thiếu 'Microsoft Visual C++ Redistributable (x64)' — gọi "
+              "POST http://127.0.0.1:8686/api/fix-ocr để tự tải/cài rồi thử lại (hoặc mở "
+              "http://127.0.0.1:8686/api/captcha-debug/1 để xem chi tiết lỗi).")
 
     ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                         "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
