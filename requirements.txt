@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 requests
+truststore
 openpyxl
 xlrd
 python-multipart

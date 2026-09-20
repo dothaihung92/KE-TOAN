@@ -25,6 +25,22 @@ import concurrent.futures as _cf
 from typing import Optional, List
 
 import requests
+# Dùng kho chứng chỉ GỐC CỦA HỆ ĐIỀU HÀNH (Windows: SChannel) thay vì kho
+# chứng chỉ certifi đóng gói sẵn trong Python — sửa đúng ca thật người dùng
+# báo: một số trang .gov.vn (VD tracuunnt.gdt.gov.vn) trình duyệt vẫn mở bình
+# thường (Windows đã tin cậy đúng chuỗi chứng chỉ, có thể qua Windows
+# Update/GPO/phần mềm diệt virus có TLS interception) nhưng Python báo "SSL
+# certificate problem: unable to get local issuer certificate" vì kho chứng
+# chỉ certifi không có/không cập nhật đúng chứng chỉ trung gian đó. Gọi
+# NGAY SAU KHI import requests, TRƯỚC MỌI request nào — inject_into_ssl() vá
+# thẳng ssl.SSLContext nên phải chạy trước khi bất kỳ session nào được tạo.
+# TUYỆT ĐỐI không phải tắt xác thực TLS — chỉ đổi NGUỒN kho chứng chỉ dùng để
+# xác thực, vẫn chặn đúng chứng chỉ giả mạo/hết hạn như trước.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
 from fastapi import FastAPI, HTTPException, Body, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.328"
+APP_BUILD = "2026-09-20.329"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN

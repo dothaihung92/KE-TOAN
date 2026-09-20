@@ -175,4 +175,31 @@ than_cd = _than_ham('chan_doan_mst_tracuunnt')
 assert '_tra_cuu_mst_qua_tracuunnt(' in than_cd, "Endpoint chẩn đoán phải gọi đúng hàm tra cứu thật (không phải mô phỏng riêng)."
 print("PASS 6: có endpoint chẩn đoán mới cho tracuunnt.gdt.gov.vn, không cần biết id công ty nào.")
 
+# ===== Test 7 (QUAN TRỌNG — đúng ca thật: SSL lỗi ở CẢ curl_cffi LẪN requests
+# thường trên máy người dùng, "SSL certificate problem: unable to get local
+# issuer certificate" / SSLCertVerificationError): phải dùng kho chứng chỉ
+# GỐC CỦA HỆ ĐIỀU HÀNH (truststore) thay cho kho chứng chỉ certifi đóng gói
+# sẵn — trình duyệt tin cậy được trang .gov.vn này (dùng kho chứng chỉ hệ
+# điều hành) nhưng Python (certifi) thì không. Phải bật NGAY LÚC KHỞI ĐỘNG,
+# TRƯỚC MỌI request (inject_into_ssl() vá thẳng ssl.SSLContext) — không phải
+# tắt xác thực TLS, chỉ đổi NGUỒN kho chứng chỉ dùng để xác thực. =====
+assert 'truststore' in open(os.path.join(_REPO_ROOT, 'requirements.txt'), encoding='utf-8').read(), (
+    "Phải thêm truststore vào requirements.txt để start.bat tự cài cho người dùng ở lần chạy sau "
+    "(start.bat tự pip install lại khi requirements.txt mới hơn .installed).")
+vt_import_requests = src.find('\nimport requests\n')
+vt_inject = src.find('truststore.inject_into_ssl()')
+vt_fastapi_import = src.find('from fastapi import FastAPI')
+assert 0 < vt_import_requests < vt_inject < vt_fastapi_import, (
+    "Phải gọi truststore.inject_into_ssl() NGAY SAU 'import requests' và TRƯỚC các import/code khác "
+    "— gọi trễ (sau khi đã có request/session nào đó tạo trước) sẽ không vá kịp, request đó vẫn lỗi.")
+khoi_inject = src[src.find('try:\n    import truststore'):vt_fastapi_import]
+assert 'except Exception:' in khoi_inject and 'pass' in khoi_inject, (
+    "Phải bọc try/except — máy nào chưa kịp cài truststore (vd chưa chạy lại start.bat) không được làm "
+    "sập cả server, chỉ là chưa có bản vá này (rớt về hành vi cũ, vẫn còn thử curl_cffi/requests thường)."
+)
+assert 'verify=False' not in src and 'verify = False' not in src, (
+    "TUYỆT ĐỐI không được tắt xác thực TLS ở bất kỳ đâu để né lỗi SSL — phải luôn xác thực, chỉ đổi "
+    "nguồn kho chứng chỉ.")
+print("PASS 7: dùng kho chứng chỉ gốc hệ điều hành (truststore) ngay lúc khởi động, không tắt xác thực TLS.")
+
 print("\nALL DONE")
