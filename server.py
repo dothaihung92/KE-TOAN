@@ -39,7 +39,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-19.324"
+APP_BUILD = "2026-09-20.325"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -532,6 +532,68 @@ class GDTClient:
     def set_token(self, token):
         self.token = token
         self.session.headers.update({"Authorization": f"Bearer {token}"})
+
+    # --- Tra cứu THÔNG TIN NGƯỜI NỘP THUẾ (để biết tình trạng hoạt động MST) ---
+    # Dùng CHÍNH phiên đăng nhập cổng Thuế điện tử đã có sẵn (mỗi công ty đều
+    # phải đăng nhập cổng này để tải hóa đơn) — nguồn CHÍNH THỨC của Tổng cục
+    # Thuế, MIỄN PHÍ và KHÔNG có hạn mức gói như API bên thứ 3 (XInvoice free
+    # tier rất dễ hết hạn mức: người dùng đã gặp cả 2 key cùng báo HTTP 429
+    # "Exceeded free tier limit", kéo theo dự phòng masothue.com cũng 429).
+    #
+    # Trang không công bố tài liệu API nên đường dẫn chính xác phải DÒ: thử
+    # lần lượt các mẫu đường dẫn dưới đây, lấy cái đầu tiên trả về 200 kèm nội
+    # dung. Nếu về sau Tổng cục Thuế đổi đường dẫn, chỉ cần sửa/bổ sung danh
+    # sách này (xem thêm /api/chan-doan-mst-tct/{cid} — nút chẩn đoán hiện rõ
+    # từng đường dẫn đã thử + mã HTTP + nội dung trả về để biết đúng/sai ngay).
+    NNT_ENDPOINTS = [
+        "{base}/business/api/business/{mst}",
+        "{base}/business/api/business?taxcode={mst}",
+        "{base}/query/business/{mst}",
+        "{base}/business/{mst}",
+    ]
+
+    def tra_cuu_nnt(self, mst, timeout=15):
+        """Tra thông tin 1 MST bất kỳ qua cổng Thuế điện tử (cần đã đăng nhập).
+
+        Trả (thanh_cong, noi_dung_chu, http_code_cuoi, chi_tiet_da_thu):
+          - noi_dung_chu: TOÀN BỘ nội dung trả về dạng chữ (JSON đã bung
+            unicode tiếng Việt) để nơi gọi dò từ khoá tình trạng bằng
+            _phan_loai_trang_thai_mst() — cố ý KHÔNG bám vào tên trường cụ
+            thể nào, vì chưa có tài liệu chính thức và trang có thể đổi cấu
+            trúc; dò theo từ khoá thì đổi cấu trúc vẫn chạy đúng.
+          - http_code_cuoi = 401 nghĩa là HẾT PHIÊN -> nơi gọi tự đăng nhập
+            lại rồi thử lại (không coi là MST không tra được).
+          - chi_tiet_da_thu: list từng đường dẫn đã thử (để chẩn đoán)."""
+        chi_tiet = []
+        http_cuoi = 0
+        for mau in self.NNT_ENDPOINTS:
+            url = mau.format(base=self.BASE, mst=mst)
+            h = {
+                "request-id": str(uuid.uuid4()),
+                "accept-language": "vi",
+                "action": "",
+                "end-point": "/tra-cuu/tra-cuu-thong-tin-nguoi-nop-thue",
+                "referer": "https://hoadondientu.gdt.gov.vn/tra-cuu/tra-cuu-thong-tin-nguoi-nop-thue",
+            }
+            try:
+                r = self.session.get(url, headers=h, timeout=timeout)
+            except Exception as e:
+                chi_tiet.append({"url": url, "loi": f"Lỗi kết nối: {str(e)[:150]}"})
+                continue
+            http_cuoi = r.status_code
+            # Ưu tiên đọc JSON rồi bung lại KHÔNG escape unicode — nếu để
+            # nguyên r.text mà máy chủ trả dạng "Đang hoạt..." thì dò
+            # từ khoá tiếng Việt sẽ trượt hết dù dữ liệu vẫn đúng.
+            try:
+                than = json.dumps(r.json(), ensure_ascii=False)
+            except Exception:
+                than = r.text or ""
+            chi_tiet.append({"url": url, "http": r.status_code, "than": than[:500]})
+            if r.status_code == 401:
+                return False, "", 401, chi_tiet
+            if r.status_code == 200 and than.strip():
+                return True, than, 200, chi_tiet
+        return False, "", http_cuoi, chi_tiet
 
     # --- Tra cứu hóa đơn (tự chia nhỏ theo tháng) ---
     # loai: "purchase" (mua vào) hoặc "sold" (bán ra)
@@ -6692,6 +6754,56 @@ def tra_cuu_doanh_nghiep(mst: str):
                 ma_cqt = _go_trung_ma_cqt_theo_dia_chi(cac_ma, info["dia_chi"])
     info["ma_cqt"] = ma_cqt
     return info
+
+
+@app.get("/api/chan-doan-mst-tct/{cid}")
+def chan_doan_mst_tct(cid: int, mst: str = ""):
+    """CHẨN ĐOÁN việc tra tình trạng MST qua CỔNG THUẾ ĐIỆN TỬ CHÍNH THỨC
+    (hoadondientu.gdt.gov.vn) — nguồn MIỄN PHÍ, KHÔNG hạn mức, thay cho API
+    XInvoice hay hết hạn mức gói free tier (xem _tra_cuu_mst_qua_tct).
+
+    Cổng Thuế KHÔNG công bố tài liệu API nên đường dẫn tra cứu người nộp thuế
+    phải dò (GDTClient.NNT_ENDPOINTS). Endpoint này hiện RÕ từng đường dẫn đã
+    thử + mã HTTP + nội dung trả về THẬT, để biết ngay đường dẫn nào đúng (và
+    nội dung trả về có chứa mô tả tình trạng hoạt động hay không) thay vì chỉ
+    thấy "không tra được" mà không rõ vì sao.
+
+    Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-tct/{cid}?mst=0315458241
+    (cid = id công ty ĐÃ đăng nhập cổng Thuế điện tử; mst = MST cần thử)."""
+    conn = db()
+    comp = conn.execute("SELECT id, ten, mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    mst_c = _chuan_mst(mst or comp["mst"] or "")[:10]
+    if not mst_c:
+        raise HTTPException(400, "Thiếu MST cần tra (thêm ?mst=...)")
+
+    client = get_client(cid)
+    da_dang_nhap = bool(client.token)
+    thong_bao_login = "Đã có sẵn phiên đăng nhập" if da_dang_nhap else ""
+    if not da_dang_nhap:
+        ok, msg, _, _ = _tu_dong_dang_nhap(cid, so_lan=2)
+        thong_bao_login = ("Vừa tự đăng nhập: " + msg) if ok else ("KHÔNG đăng nhập được: " + msg)
+        if not ok:
+            return {"cong_ty": comp["ten"], "mst_tra": mst_c, "dang_nhap": thong_bao_login,
+                    "ket_luan": "Chưa đăng nhập được cổng Thuế điện tử nên chưa thử được đường dẫn nào.",
+                    "da_thu": []}
+
+    thanh_cong, than, http, chi_tiet = client.tra_cuu_nnt(mst_c, timeout=20)
+    trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(than) if thanh_cong else ("", None)
+    if thanh_cong and canh_bao is not None:
+        ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{trang_thai_goc}' "
+                    f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
+    elif thanh_cong:
+        ket_luan = ("Đường dẫn TRẢ VỀ ĐƯỢC dữ liệu nhưng KHÔNG thấy cụm mô tả tình trạng hoạt động "
+                    "nào trong đó — xem mục 'da_thu' để biết dữ liệu thật, có thể cần đổi cách dò.")
+    else:
+        ket_luan = (f"KHÔNG dùng được (HTTP cuối {http}) — xem 'da_thu' để biết từng đường dẫn đã "
+                    "thử trả về gì; nếu tất cả đều 404 thì cổng Thuế đã đổi đường dẫn.")
+    return {"cong_ty": comp["ten"], "mst_tra": mst_c, "dang_nhap": thong_bao_login,
+            "ket_luan": ket_luan, "trang_thai_do_duoc": trang_thai_goc,
+            "canh_bao": canh_bao, "da_thu": chi_tiet}
 
 
 @app.get("/api/settings/pin-nop-to-khai")
@@ -33621,7 +33733,94 @@ def _tra_cuu_masothue(mst_c, timeout):
         return False, "", None, f"masothue.com lỗi kết nối: {str(_e_mt)[:150]}"
 
 
-def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
+# Trạng thái việc tra MST qua cổng Thuế điện tử, RIÊNG cho từng công ty (cid):
+#   loi_lien_tiep: số lần thất bại liên tiếp -> tới ngưỡng thì TẮT hẳn nguồn này
+#     cho công ty đó trong phiên chạy hiện tại. Cần thiết vì 1 lượt xuất Excel
+#     có thể phải tra HÀNG TRĂM MST: nếu cổng Thuế đổi đường dẫn/tài khoản
+#     không đăng nhập được thì cứ thử lại cho từng MST sẽ làm chậm cả lượt xuất
+#     mà chẳng được gì (đúng bài học từ bộ đếm 5-lỗi-liên-tiếp sẵn có).
+#   da_thu_login: đã tự đăng nhập lại 1 lần cho cid này chưa (giải captcha khá
+#     tốn thời gian — tuyệt đối không giải lại cho từng MST).
+_TCT_MST_STATE = {"lock": threading.Lock(), "loi_lien_tiep": {}, "da_thu_login": set()}
+_TCT_MST_NGUONG_TAT = 3   # thất bại liên tiếp bấy nhiêu lần thì tắt nguồn TCT cho cid đó
+
+
+def _tct_danh_dau(cid, thanh_cong):
+    """Cập nhật bộ đếm lỗi liên tiếp; trả True nếu nguồn TCT đang bị TẮT cho cid."""
+    with _TCT_MST_STATE["lock"]:
+        if thanh_cong:
+            _TCT_MST_STATE["loi_lien_tiep"][cid] = 0
+            return False
+        n = _TCT_MST_STATE["loi_lien_tiep"].get(cid, 0) + 1
+        _TCT_MST_STATE["loi_lien_tiep"][cid] = n
+        return n >= _TCT_MST_NGUONG_TAT
+
+
+def _tra_cuu_mst_qua_tct(mst_c, cid, timeout):
+    """Tra tình trạng hoạt động 1 MST qua CỔNG THUẾ ĐIỆN TỬ CHÍNH THỨC
+    (hoadondientu.gdt.gov.vn) bằng chính phiên đăng nhập của công ty đang xử
+    lý — theo yêu cầu người dùng "còn cách nào khác... vì api XInvoice hạn chế
+    quá": đây là nguồn CHÍNH THỨC của Tổng cục Thuế, KHÔNG hạn mức gói, và hầu
+    như LUÔN SẴN SÀNG lúc xuất Excel (vì để có hóa đơn xuất bảng kê thì công ty
+    đó vừa phải đăng nhập cổng này rồi).
+
+    Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
+    _tra_cuu_masothue() để ghép vào chuỗi dự phòng sẵn có."""
+    if not cid:
+        return False, "", None, "Không rõ công ty nào để mượn phiên đăng nhập cổng Thuế điện tử"
+    with _TCT_MST_STATE["lock"]:
+        if _TCT_MST_STATE["loi_lien_tiep"].get(cid, 0) >= _TCT_MST_NGUONG_TAT:
+            return False, "", None, (f"Đã tạm tắt tra qua cổng Thuế điện tử cho công ty này "
+                                     f"(thất bại {_TCT_MST_NGUONG_TAT} lần liên tiếp) — sẽ tự bật "
+                                     f"lại khi khởi động lại phần mềm")
+    client = get_client(cid)
+
+    def _thu_dang_nhap_lai():
+        """Tự đăng nhập ĐÚNG 1 LẦN cho cả lượt (giải captcha tốn thời gian)."""
+        with _TCT_MST_STATE["lock"]:
+            da_thu = cid in _TCT_MST_STATE["da_thu_login"]
+            _TCT_MST_STATE["da_thu_login"].add(cid)
+        if da_thu:
+            return False, "đã thử tự đăng nhập trước đó nhưng không được"
+        ok, msg, _, _ = _tu_dong_dang_nhap(cid, so_lan=2)
+        return ok, msg
+
+    if not client.token:
+        ok, msg = _thu_dang_nhap_lai()
+        if not ok:
+            _tct_danh_dau(cid, False)
+            return False, "", None, f"Cổng Thuế điện tử chưa đăng nhập được: {msg}"
+
+    thanh_cong, than, http, _chi_tiet = client.tra_cuu_nnt(mst_c, timeout=timeout)
+    if http == 401:
+        # Hết phiên giữa chừng -> đăng nhập lại rồi thử đúng 1 lần nữa.
+        ok, msg = _thu_dang_nhap_lai()
+        if not ok:
+            _tct_danh_dau(cid, False)
+            return False, "", None, f"Cổng Thuế điện tử hết phiên, đăng nhập lại không được: {msg}"
+        thanh_cong, than, http, _chi_tiet = client.tra_cuu_nnt(mst_c, timeout=timeout)
+
+    if not thanh_cong:
+        _tct_danh_dau(cid, False)
+        return False, "", None, (f"Cổng Thuế điện tử không trả được dữ liệu (HTTP {http}) — nếu lỗi "
+                                 f"lặp lại, mở /api/chan-doan-mst-tct/{cid}?mst={mst_c} để xem chi "
+                                 f"tiết từng đường dẫn đã thử")
+
+    trang_thai_goc, canh_bao = _phan_loai_trang_thai_mst(than)
+    if canh_bao is None:
+        # Có dữ liệu nhưng KHÔNG chứa cụm mô tả tình trạng nào -> coi là thất
+        # bại để còn rơi xuống XInvoice/masothue, TUYỆT ĐỐI không suy đoán
+        # "đang hoạt động" (suy đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
+        _tct_danh_dau(cid, False)
+        return False, "", None, ("Cổng Thuế điện tử có trả dữ liệu nhưng không thấy mô tả tình trạng "
+                                 f"hoạt động — mở /api/chan-doan-mst-tct/{cid}?mst={mst_c} để xem dữ "
+                                 "liệu thật trả về")
+    _tct_danh_dau(cid, True)
+    return True, trang_thai_goc, canh_bao, None
+
+
+def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False,
+                            cid=None):
     """Tra cứu tình trạng hoạt động của 1 MST qua API CHÍNH THỨC của XInvoice
     (api.xinvoice.vn/gdt-api/tax-payer/{mst} — lấy lại dữ liệu Tổng cục Thuế,
     theo đúng chỉ định của người dùng, thay cho việc đọc HTML masothue.com
@@ -33760,7 +33959,19 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # -> client-id/api-key sai/hết hạn/hết hạn mức, khác hẳn "Lỗi kết nối" ->
     # mạng/tường lửa) thay vì chỉ thấy trống không rõ vì sao.
     ly_do_loi = None
-    for buoc in range(so_key):
+
+    # ── NGUỒN ƯU TIÊN 1: CỔNG THUẾ ĐIỆN TỬ CHÍNH THỨC (hoadondientu.gdt.gov.vn) ──
+    # Đặt TRƯỚC XInvoice (không phải sau) là CỐ Ý: nguồn này chính thức, miễn
+    # phí, KHÔNG hạn mức gói — tra được ở đây thì KHÔNG tiêu tốn lượt gọi nào
+    # của XInvoice, giữ nguyên hạn mức gói cho lúc thật sự cần (đúng vấn đề
+    # người dùng báo: cả 2 key XInvoice đều HTTP 429 "Exceeded free tier
+    # limit", kéo theo dự phòng masothue.com cũng 429 vì cả lượt dồn sang).
+    ly_do_loi_tct = None
+    if cid:
+        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_tct = _tra_cuu_mst_qua_tct(
+            mst_c, cid, timeout)
+
+    for buoc in range(0 if thanh_cong else so_key):
         idx_key = (idx_bat_dau + buoc) % so_key
         k = danh_sach_keys[idx_key]
         thanh_cong, trang_thai_goc, canh_bao, ly_do_loi, loi_do_key = _goi_1_lan_xinvoice(
@@ -33795,10 +34006,17 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_mt = _tra_cuu_masothue(mst_c, timeout)
         if thanh_cong:
             ly_do_loi = None
-        elif ly_do_loi_xinvoice:
-            ly_do_loi = f"{ly_do_loi_xinvoice} | Dự phòng masothue.com cũng lỗi: {ly_do_loi_mt}"
         else:
-            ly_do_loi = ly_do_loi_mt
+            # Gộp lý do của CẢ 3 nguồn (cổng Thuế điện tử + XInvoice +
+            # masothue.com) — người dùng cần thấy ĐỦ mới biết mắc ở đâu: trước
+            # đây chỉ có 2 nguồn nên bỏ sót lý do nguồn mới sẽ khiến chẩn đoán
+            # "cụt", không biết cổng Thuế điện tử có được thử hay không.
+            phan = [p for p in (
+                (f"Cổng Thuế điện tử: {ly_do_loi_tct}" if ly_do_loi_tct else None),
+                ly_do_loi_xinvoice,
+                (f"Dự phòng masothue.com cũng lỗi: {ly_do_loi_mt}" if ly_do_loi_mt else None),
+            ) if p]
+            ly_do_loi = " | ".join(phan) if phan else None
 
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1
@@ -35219,8 +35437,13 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         if key in _mst_status_local:
             return _mst_status_local[key]
         het_ngan_sach = (time.time() - _mst_bat_dau) > _MST_NGAN_SACH_GIAY
+        # cid: để mượn ĐÚNG phiên đăng nhập cổng Thuế điện tử của công ty đang
+        # xuất Excel — nguồn tra MST chính thức, không hạn mức (xem
+        # _tra_cuu_mst_qua_tct). Lúc xuất Excel thì công ty này gần như chắc
+        # chắn đã đăng nhập sẵn (vừa tra cứu hóa đơn xong) nên không tốn thêm
+        # bước giải captcha nào.
         info = _tra_cuu_trang_thai_mst(mst, so_lan_that_bai_lien_tiep=_mst_fail_counter,
-                                       chi_dung_cache=het_ngan_sach)
+                                       chi_dung_cache=het_ngan_sach, cid=cid)
         _mst_status_local[key] = info
         return info
 
