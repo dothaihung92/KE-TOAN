@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.334"
+APP_BUILD = "2026-09-20.335"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1482,7 +1482,7 @@ def init_db():
     -- bên dưới còn tham chiếu tới nó trên các máy nâng cấp từ bản cũ.
     CREATE TABLE IF NOT EXISTS mst_status_cache (
         mst TEXT PRIMARY KEY,    -- MST gốc 10 số
-        trang_thai_goc TEXT,     -- chữ mô tả tình trạng lấy được (VietQR/XInvoice)
+        trang_thai_goc TEXT,     -- chữ mô tả tình trạng lấy được (VietQR/escodata.net/XInvoice)
         canh_bao INTEGER,        -- 1=cần cảnh báo/tô đỏ, 0=bình thường, NULL=không tra được
         checked_at TEXT
     );
@@ -6719,13 +6719,33 @@ def tra_cuu_doanh_nghiep(mst: str):
 def chan_doan_mst_vietqr(mst: str = "0315458241"):
     """CHẨN ĐOÁN việc tra tình trạng MST qua API JSON công khai api.vietqr.io
     (xem _tra_cuu_mst_qua_vietqr) — KHÔNG cần captcha/đăng nhập, nguồn ưu
-    tiên số 1 (dự phòng còn lại: XInvoice).
+    tiên số 1 (dự phòng còn lại: escodata.net, rồi XInvoice).
 
     Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-vietqr?mst=0315458241"""
     mst_c = _chuan_mst(mst)[:10]
     if not mst_c:
         raise HTTPException(400, "MST không hợp lệ")
     thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = _tra_cuu_mst_qua_vietqr(mst_c, timeout=20)
+    if thanh_cong:
+        ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{trang_thai_goc}' "
+                    f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
+    else:
+        ket_luan = f"KHÔNG dùng được: {ly_do_loi}"
+    return {"mst_tra": mst_c, "ket_luan": ket_luan,
+            "trang_thai_do_duoc": trang_thai_goc, "canh_bao": canh_bao, "ly_do_loi": ly_do_loi}
+
+
+@app.get("/api/chan-doan-mst-escodata")
+def chan_doan_mst_escodata(mst: str = "0315458241"):
+    """CHẨN ĐOÁN việc tra tình trạng MST qua API JSON công khai escodata.net
+    (xem _tra_cuu_mst_qua_escodata) — KHÔNG cần API key/đăng nhập, nguồn dự
+    phòng thứ 2 (sau api.vietqr.io, trước XInvoice).
+
+    Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-escodata?mst=0315458241"""
+    mst_c = _chuan_mst(mst)[:10]
+    if not mst_c:
+        raise HTTPException(400, "MST không hợp lệ")
+    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = _tra_cuu_mst_qua_escodata(mst_c, timeout=20)
     if thanh_cong:
         ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{trang_thai_goc}' "
                     f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
@@ -33734,6 +33754,96 @@ def _tra_cuu_mst_qua_vietqr(mst_c, timeout):
     return True, trang_thai_goc, canh_bao, None
 
 
+# Trạng thái việc tra MST qua escodata.net (API JSON công khai, KHÔNG cần
+# API key) — cùng kiểu circuit-breaker với _VIETQR_STATE ở trên.
+_ESCODATA_STATE = {"lock": threading.Lock(), "loi_lien_tiep": 0}
+_ESCODATA_NGUONG_TAT = 5
+
+
+def _escodata_danh_dau(thanh_cong):
+    with _ESCODATA_STATE["lock"]:
+        if thanh_cong:
+            _ESCODATA_STATE["loi_lien_tiep"] = 0
+        else:
+            _ESCODATA_STATE["loi_lien_tiep"] += 1
+
+
+def _tra_cuu_mst_qua_escodata(mst_c, timeout):
+    """Tra tình trạng hoạt động 1 MST qua API JSON công khai escodata.net
+    (GET https://escodata.net/api-mst/{mst}.htm) — người dùng gửi tài liệu +
+    ví dụ JSON THẬT (demo https://escodata.net/api-mst/0316956049.htm):
+        {"error":0,"error_text":"...thành công..!",
+         "data":{"ten":"...","mst":"...","dc":"...","daidien":"...",
+                 "tinhtrang":"Đang hoạt động (đã được cấp GCN ĐKT)",...}}
+    KHÔNG cần API key/đăng nhập (như api.vietqr.io) — đặt làm nguồn DỰ PHÒNG
+    thứ 2 (sau VietQR, trước XInvoice — XInvoice cần key + có thể hết hạn
+    mức gói free tier nên để cuối cùng, dùng khi CẢ 2 nguồn miễn phí đều
+    không tra được).
+
+    Nguồn KHÔNG chính thức (như masothue.com/tracuunnt.gdt.gov.vn trước đây)
+    nên CHƯA rõ độ ổn định khi gọi dồn dập hàng trăm MST/lượt xuất Excel —
+    có circuit-breaker riêng (_ESCODATA_STATE/_ESCODATA_NGUONG_TAT) để tự
+    tạm tắt nếu gặp vấn đề, giống các nguồn khác, tránh lặp lại bài học
+    masothue.com (bị chặn khi gọi dồn dập) nếu escodata.net cũng gặp vấn đề
+    tương tự.
+
+    Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
+    các nguồn tra MST khác để ghép vào chuỗi dự phòng sẵn có."""
+    with _ESCODATA_STATE["lock"]:
+        if _ESCODATA_STATE["loi_lien_tiep"] >= _ESCODATA_NGUONG_TAT:
+            return False, "", None, (f"Đã tạm tắt tra qua escodata.net "
+                                     f"(thất bại {_ESCODATA_NGUONG_TAT} lần liên tiếp trong lượt này) "
+                                     f"— sẽ tự thử lại ở lượt xuất Excel sau")
+    try:
+        for lan_thu in range(2):
+            r = requests.get(f"https://escodata.net/api-mst/{mst_c}.htm",
+                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                             timeout=timeout)
+            if r.status_code == 429 and lan_thu == 0:
+                ra = (r.headers or {}).get("Retry-After")
+                try:
+                    cho = min(max(float(ra), 0), 10) if ra else 2
+                except Exception:
+                    cho = 2
+                time.sleep(cho)
+                continue
+            break
+    except Exception as e:
+        _escodata_danh_dau(False)
+        return False, "", None, f"escodata.net lỗi kết nối: {str(e)[:150]}"
+
+    if r.status_code != 200:
+        _escodata_danh_dau(False)
+        return False, "", None, f"escodata.net HTTP {r.status_code}"
+
+    try:
+        d = r.json()
+    except Exception:
+        _escodata_danh_dau(False)
+        return False, "", None, "escodata.net: phản hồi không phải JSON hợp lệ"
+
+    if not isinstance(d, dict) or d.get("error") != 0:
+        _escodata_danh_dau(False)
+        return False, "", None, f"escodata.net: {(d.get('error_text') if isinstance(d, dict) else None) or 'không thành công'}"
+
+    du_lieu = d.get("data") or {}
+    trang_thai_goc = str(du_lieu.get("tinhtrang") or "").strip()
+    if not trang_thai_goc:
+        _escodata_danh_dau(False)
+        return False, "", None, "escodata.net: không có trường tình trạng MST trong dữ liệu trả về"
+
+    _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
+    if canh_bao is None:
+        # Có tình trạng nhưng chữ không khớp từ khoá nào đã biết -> coi là
+        # thất bại để rơi xuống nguồn sau, TUYỆT ĐỐI không suy đoán "đang
+        # hoạt động" (đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
+        _escodata_danh_dau(False)
+        return False, "", None, f"escodata.net: tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
+
+    _escodata_danh_dau(True)
+    return True, trang_thai_goc, canh_bao, None
+
+
 def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
     """Tra cứu tình trạng hoạt động của 1 MST — dùng để cảnh báo khi xuất
     Excel bảng kê mua vào/bán ra: đối tác đã bị khóa MST/ngừng hoạt động,
@@ -33742,13 +33852,15 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     thật tại địa chỉ đăng ký — ảnh hưởng việc khấu trừ thuế GTGT đầu vào).
 
     ƯU TIÊN dùng api.vietqr.io (miễn phí, không hạn mức, KHÔNG cần captcha —
-    xem _tra_cuu_mst_qua_vietqr) — nếu không tra được, DỰ PHÒNG sang API
-    XInvoice nếu đã cấu hình client-id + api-key (đăng ký tại xinvoice.vn)
-    qua /api/settings/xinvoice-mst-api (có thể cấu hình NHIỀU cặp key, tự
+    xem _tra_cuu_mst_qua_vietqr) — nếu không tra được, DỰ PHÒNG sang
+    escodata.net (cũng miễn phí, KHÔNG cần key — xem _tra_cuu_mst_qua_escodata)
+    — nếu CẢ 2 đều không tra được, DỰ PHÒNG CUỐI sang API XInvoice nếu đã
+    cấu hình client-id + api-key (đăng ký tại xinvoice.vn) qua
+    /api/settings/xinvoice-mst-api (có thể cấu hình NHIỀU cặp key, tự
     chuyển key khi cặp đang dùng hết hạn mức). tracuunnt.gdt.gov.vn và
     masothue.com ĐÃ BỎ theo yêu cầu người dùng ("không đúng được" — captcha
     khó/ddddocr không nạp được, và hay bị chặn/giới hạn tốc độ). Chỉ khi CẢ
-    HAI cách đều không tra được mới trả canh_bao=None (không lỗi, không chặn
+    3 cách đều không tra được mới trả canh_bao=None (không lỗi, không chặn
     xuất Excel).
 
     LUÔN tra cứu qua mạng TẠI THỜI ĐIỂM HIỆN TẠI, KHÔNG lưu/dùng lại kết quả
@@ -33802,19 +33914,19 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     het_han_muc = chi_dung_cache or bo_dem_da_toi_han
     if het_han_muc:
         # Đã hết ngân sách thời gian CHO LƯỢT NÀY, hoặc đã lỗi liên tiếp quá
-        # nhiều lần (cả VietQR lẫn XInvoice dự phòng đều không tra được — vd
-        # mất mạng/hết hạn mức gói API) -> khỏi thử mạng nữa cho MST này
-        # trong lượt xuất Excel này -> để trống an toàn (canh_bao=None,
-        # không suy đoán). GHI RÕ ly_do_loi để người dùng còn biết được VÌ
-        # SAO các MST này vẫn chưa dò được (đúng câu hỏi người dùng đã hỏi
-        # "sao vẫn còn?") thay vì không thấy dòng "VÍ DỤ LỖI GẶP PHẢI" nào
-        # trong log dù vẫn còn MST trống.
+        # nhiều lần (cả VietQR lẫn escodata.net/XInvoice dự phòng đều không
+        # tra được — vd mất mạng/hết hạn mức gói API) -> khỏi thử mạng nữa
+        # cho MST này trong lượt xuất Excel này -> để trống an toàn
+        # (canh_bao=None, không suy đoán). GHI RÕ ly_do_loi để người dùng
+        # còn biết được VÌ SAO các MST này vẫn chưa dò được (đúng câu hỏi
+        # người dùng đã hỏi "sao vẫn còn?") thay vì không thấy dòng "VÍ DỤ
+        # LỖI GẶP PHẢI" nào trong log dù vẫn còn MST trống.
         return {"trang_thai": "", "canh_bao": None,
                "ly_do_loi": ("Hết ngân sách thời gian tra MST trong lượt xuất Excel này"
                              if chi_dung_cache else
-                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả VietQR lẫn XInvoice dự "
-                             "phòng đều không tra được) để tránh treo lâu — sẽ tự thử lại ở "
-                             "lượt xuất Excel sau")}
+                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả VietQR lẫn escodata.net/"
+                             "XInvoice dự phòng đều không tra được) để tránh treo lâu — sẽ tự "
+                             "thử lại ở lượt xuất Excel sau")}
 
     # Nghỉ 1 chút TRƯỚC mỗi lượt gọi API thật — hạn chế bắn dồn dập hàng trăm request
     # liên tiếp khi xuất Excel bảng kê nhiều trăm hóa đơn (mỗi hóa đơn 1 nhà
@@ -33857,7 +33969,15 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     # dồn dập, tracuunnt.gdt.gov.vn phụ thuộc captcha khó + ddddocr).
     thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_vietqr = _tra_cuu_mst_qua_vietqr(mst_c, timeout)
 
-    # ── NGUỒN ƯU TIÊN 2 (dự phòng): API XInvoice ──
+    # ── NGUỒN ƯU TIÊN 2 (dự phòng): escodata.net (API JSON công khai, KHÔNG
+    # cần API key) — người dùng gửi tài liệu + JSON thật, dùng làm dự phòng
+    # thêm cho VietQR (cả 2 đều miễn phí/không cần key) trước khi phải dùng
+    # tới XInvoice (cần key, có thể hết hạn mức gói free tier).
+    ly_do_loi_escodata = None
+    if not thanh_cong:
+        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_escodata = _tra_cuu_mst_qua_escodata(mst_c, timeout)
+
+    # ── NGUỒN ƯU TIÊN 3 (dự phòng cuối): API XInvoice ──
     for buoc in range(0 if thanh_cong else so_key):
         idx_key = (idx_bat_dau + buoc) % so_key
         k = danh_sach_keys[idx_key]
@@ -33874,10 +33994,11 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         break
 
     if not thanh_cong:
-        # Gộp lý do của CẢ 2 nguồn (VietQR + XInvoice) — người dùng cần thấy
-        # ĐỦ mới biết mắc ở đâu.
+        # Gộp lý do của CẢ 3 nguồn (VietQR + escodata.net + XInvoice) — người
+        # dùng cần thấy ĐỦ mới biết mắc ở đâu.
         phan = [p for p in (
             (f"api.vietqr.io: {ly_do_loi_vietqr}" if ly_do_loi_vietqr else None),
+            (f"escodata.net: {ly_do_loi_escodata}" if ly_do_loi_escodata else None),
             ly_do_loi,
         ) if p]
         ly_do_loi = " | ".join(phan) if phan else None
@@ -33902,8 +34023,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
       sheet "BK Mua vào") — MẶC ĐỊNH TẮT (0), theo đúng yêu cầu người dùng
       "thêm nút tick tra cứu tình trạng mst khi nào tick vào thì mới cho
       chạy tra cứu này còn không tíck thì không cần chạy" — đây là các lượt
-      gọi mạng ra ngoài (VietQR/XInvoice), tốn thời gian và có thể tốn hạn
-      mức API, chỉ nên chạy khi người dùng CHỦ Ý cần.
+      gọi mạng ra ngoài (VietQR/escodata.net/XInvoice), tốn thời gian và có
+      thể tốn hạn mức API, chỉ nên chạy khi người dùng CHỦ Ý cần.
     mo_file: MẶC ĐỊNH = 1 (tự mở file Excel ngay sau khi xuất, cho tiện xem
       luôn). Có ĐÁNH ĐỔI đã biết: file "Bảng kê hóa đơn" này là NGUỒN DỮ
       LIỆU chính mà "Kết xuất XML" đọc vào và bị GHI ĐÈ LẠI mỗi khi Import
@@ -35250,7 +35371,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # Dò tình trạng hoạt động MST (theo yêu cầu người dùng: "thêm chức năng dò
     # mst còn đang hoạt động hay không hoặc công ty cần xác minh địa chỉ kinh
     # doanh khi kết xuất ra excel, thêm 1 cột trạng thái mst ở cuối... tô đỏ
-    # dòng đó", dùng api.vietqr.io/XInvoice — xem _tra_cuu_trang_thai_mst) —
+    # dòng đó", dùng api.vietqr.io/escodata.net/XInvoice — xem _tra_cuu_trang_thai_mst) —
     # CACHE trong bộ nhớ theo MST (dict), CHỈ tồn tại trong CÙNG 1 lượt xuất
     # Excel này (không lưu lại giữa các lượt xuất khác nhau — theo yêu cầu
     # người dùng "không cần lưu cứ dò ở thời điểm hiện tại", tránh báo sai

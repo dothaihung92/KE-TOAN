@@ -130,14 +130,16 @@ ns['time'] = _fake_time
 exec(extract_fn('_lay_danh_sach_xinvoice_keys'), ns)
 exec(extract_fn('_goi_1_lan_xinvoice'), ns)
 
-# Stub nguồn ưu tiên số 1 (VietQR, thử TRƯỚC XInvoice — xem
+# Stub 2 nguồn ưu tiên trước XInvoice (VietQR rồi escodata.net — xem
 # _tra_cuu_trang_thai_mst) LUÔN thất bại: các test dưới đây kiểm tra hành vi
 # RIÊNG của chuỗi XInvoice (cấu hình key, chuyển key, dự phòng...), không
-# liên quan tới VietQR — nguồn đó có test riêng (test_tra_mst_qua_vietqr.py).
-# (tracuunnt.gdt.gov.vn và masothue.com đã BỊ BỎ theo yêu cầu người dùng
-# "không đúng được" — không còn trong chuỗi nữa. Đã bỏ luôn cache DB dài hạn
-# — không cần bind ns['db'] nữa, hàm không còn gọi db() ở đâu cả.)
+# liên quan tới 2 nguồn đó — mỗi nguồn có test riêng (test_tra_mst_qua_vietqr.py
+# / test_tra_mst_qua_escodata.py). (tracuunnt.gdt.gov.vn và masothue.com đã
+# BỊ BỎ theo yêu cầu người dùng "không đúng được" — không còn trong chuỗi
+# nữa. Đã bỏ luôn cache DB dài hạn — không cần bind ns['db'] nữa, hàm không
+# còn gọi db() ở đâu cả.)
 ns['_tra_cuu_mst_qua_vietqr'] = lambda mst_c, timeout: (False, "", None, "stub: tắt trong test này")
+ns['_tra_cuu_mst_qua_escodata'] = lambda mst_c, timeout: (False, "", None, "stub: tắt trong test này")
 exec(extract_fn('_tra_cuu_trang_thai_mst'), ns)
 _phan_loai_trang_thai_mst = ns['_phan_loai_trang_thai_mst']
 _tra_cuu_trang_thai_mst = ns['_tra_cuu_trang_thai_mst']

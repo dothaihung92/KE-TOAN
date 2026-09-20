@@ -183,12 +183,15 @@ assert 0 < vt_vietqr < vt_xinvoice, (
     "Thứ tự ưu tiên phải là: api.vietqr.io (không captcha) -> XInvoice (dự phòng).")
 print("PASS 5: api.vietqr.io được thử TRƯỚC XInvoice, chỉ rơi xuống XInvoice khi VietQR thất bại.")
 
-# ===== Test 6 (không hồi quy — thông báo lỗi cuối gộp đủ cả 2 nguồn): thiếu
-# lý do của 1 nguồn sẽ khiến người dùng chẩn đoán "cụt", không biết nguồn đó
-# có được thử hay không. =====
+# ===== Test 6 (không hồi quy — thông báo lỗi cuối không bỏ sót lý do của
+# VietQR): thiếu lý do của 1 nguồn sẽ khiến người dùng chẩn đoán "cụt",
+# không biết nguồn đó có được thử hay không. (Việc gộp đủ lý do của CẢ 3
+# nguồn — VietQR + escodata.net + XInvoice — được kiểm tra đầy đủ hơn ở
+# test_tra_mst_qua_escodata.py Test 6, vì file đó còn xác nhận cả phần
+# escodata.net trong thông báo gộp.) =====
 assert 'api.vietqr.io: {ly_do_loi_vietqr}' in src, (
-    "Thông báo lỗi cuối cùng (khi cả 2 nguồn đều thất bại) phải kèm lý do của api.vietqr.io.")
-print("PASS 6: thông báo lỗi cuối cùng gộp đủ lý do của cả 2 nguồn (VietQR + XInvoice).")
+    "Thông báo lỗi cuối cùng (khi các nguồn đều thất bại) phải kèm lý do của api.vietqr.io.")
+print("PASS 6: thông báo lỗi cuối cùng không bỏ sót lý do của api.vietqr.io.")
 
 # ===== Test 7 (không hồi quy — endpoint chẩn đoán riêng): phải có endpoint
 # chẩn đoán nhanh cho VietQR, không cần biết id công ty nào (API công khai). =====
