@@ -139,6 +139,24 @@ ns['requests'] = _FakeRequests(_nem_loi)
 assert fn("0000000000", 20)[0] is False, "Lỗi kết nối phải trả thất bại, không văng exception ra ngoài."
 print("PASS 3: mọi trường hợp lỗi/dữ liệu bất thường đều trả thất bại an toàn, không suy đoán 'đang hoạt động'.")
 
+# ===== Test 3b (không hồi quy — cùng lỗi trùng lặp tiền tố đã phát hiện ở
+# escodata.net "escodata.net: escodata.net: ..."): ly_do_loi do
+# _tra_cuu_mst_qua_vietqr() TỰ trả về KHÔNG được tự ý kèm sẵn tiền tố
+# "api.vietqr.io: " — vì _tra_cuu_trang_thai_mst() (nơi gộp lỗi cuối cùng của
+# cả 3 nguồn) ĐÃ tự thêm tiền tố "api.vietqr.io: " rồi, kèm sẵn nữa sẽ bị LẶP
+# tiền tố 2 LẦN. =====
+ns3b = _nap('_khong_dau', '_phan_loai_trang_thai_mst', '_vietqr_danh_dau', '_tra_cuu_mst_qua_vietqr')
+fn3b = ns3b['_tra_cuu_mst_qua_vietqr']
+ns3b['requests'] = _FakeRequests(lambda url, timeout: _FakeResp(200, {"code": "01", "desc": "Không tìm thấy MST"}))
+r3b = fn3b("0000000000", 20)
+assert r3b[0] is False
+assert r3b[3] == "Không tìm thấy MST", (
+    f"ly_do_loi KHÔNG được tự kèm sẵn tiền tố 'api.vietqr.io: ' (nơi gộp lỗi cuối cùng ở "
+    f"_tra_cuu_trang_thai_mst() đã tự thêm rồi, kèm sẵn nữa sẽ bị lặp 2 lần "
+    f"'api.vietqr.io: api.vietqr.io: ...') — got {r3b[3]!r}")
+print("PASS 3b: ly_do_loi trả về KHÔNG tự kèm sẵn tiền tố 'api.vietqr.io: ' — tránh lặp tiền tố 2 lần "
+      "khi _tra_cuu_trang_thai_mst() gộp lỗi cuối cùng của cả 3 nguồn.")
+
 # ===== Test 4 (đúng ca thật — tránh lãng phí lượt gọi hàng loạt): phải có
 # ngưỡng tạm tắt khi lỗi liên tiếp, giống cơ chế đã áp dụng cho tracuunnt. =====
 than_vietqr = _than_ham('_tra_cuu_mst_qua_vietqr')

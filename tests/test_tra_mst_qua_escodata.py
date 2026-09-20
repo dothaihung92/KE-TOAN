@@ -140,6 +140,25 @@ ns['requests'] = _FakeRequests(_nem_loi)
 assert fn("0000000000", 20)[0] is False, "Lỗi kết nối phải trả thất bại, không văng exception ra ngoài."
 print("PASS 3: mọi trường hợp lỗi/dữ liệu bất thường đều trả thất bại an toàn, không suy đoán 'đang hoạt động'.")
 
+# ===== Test 3b (bug THẬT người dùng vừa báo qua log xuất Excel — trùng lặp
+# "escodata.net: escodata.net: Lỗi không lấy được thông tin từ mã số thuế
+# này..!"): ly_do_loi do _tra_cuu_mst_qua_escodata() TỰ trả về KHÔNG được tự
+# ý kèm sẵn tiền tố "escodata.net: " — vì _tra_cuu_trang_thai_mst() (nơi gộp
+# lỗi cuối cùng của cả 3 nguồn) ĐÃ tự thêm tiền tố "escodata.net: " rồi,
+# kèm sẵn nữa sẽ bị LẶP tiền tố 2 LẦN, đọc rối mắt/khó chẩn đoán. =====
+ns3b = _nap('_khong_dau', '_phan_loai_trang_thai_mst', '_escodata_danh_dau', '_tra_cuu_mst_qua_escodata')
+fn3b = ns3b['_tra_cuu_mst_qua_escodata']
+ns3b['requests'] = _FakeRequests(lambda url, timeout: _FakeResp(
+    200, {"error": 1, "error_text": "Lỗi không lấy được thông tin từ mã số thuế này..!"}))
+r3b = fn3b("0316642412", 20)
+assert r3b[0] is False
+assert r3b[3] == "Lỗi không lấy được thông tin từ mã số thuế này..!", (
+    f"ly_do_loi KHÔNG được tự kèm sẵn tiền tố 'escodata.net: ' (nơi gộp lỗi cuối cùng ở "
+    f"_tra_cuu_trang_thai_mst() đã tự thêm rồi, kèm sẵn nữa sẽ bị lặp 2 lần "
+    f"'escodata.net: escodata.net: ...') — got {r3b[3]!r}")
+print("PASS 3b: ly_do_loi trả về KHÔNG tự kèm sẵn tiền tố 'escodata.net: ' — tránh lặp tiền tố 2 lần "
+      "khi _tra_cuu_trang_thai_mst() gộp lỗi cuối cùng của cả 3 nguồn.")
+
 # ===== Test 4 (đúng ca thật — tránh lãng phí lượt gọi hàng loạt): phải có
 # ngưỡng tạm tắt khi lỗi liên tiếp, giống cơ chế đã áp dụng cho VietQR. =====
 than_escodata = _than_ham('_tra_cuu_mst_qua_escodata')

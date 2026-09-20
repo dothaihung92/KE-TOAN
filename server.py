@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-20.336"
+APP_BUILD = "2026-09-20.337"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33718,27 +33718,27 @@ def _tra_cuu_mst_qua_vietqr(mst_c, timeout):
             break
     except Exception as e:
         _vietqr_danh_dau(False)
-        return False, "", None, f"api.vietqr.io lỗi kết nối: {str(e)[:150]}"
+        return False, "", None, f"lỗi kết nối: {str(e)[:150]}"
 
     if r.status_code != 200:
         _vietqr_danh_dau(False)
-        return False, "", None, f"api.vietqr.io HTTP {r.status_code}"
+        return False, "", None, f"HTTP {r.status_code}"
 
     try:
         d = r.json()
     except Exception:
         _vietqr_danh_dau(False)
-        return False, "", None, "api.vietqr.io: phản hồi không phải JSON hợp lệ"
+        return False, "", None, "phản hồi không phải JSON hợp lệ"
 
     if d.get("code") != "00":
         _vietqr_danh_dau(False)
-        return False, "", None, f"api.vietqr.io: {d.get('desc') or 'không thành công'}"
+        return False, "", None, d.get('desc') or 'không thành công'
 
     du_lieu = d.get("data") or {}
     trang_thai_goc = (du_lieu.get("status") or "").strip()
     if not trang_thai_goc:
         _vietqr_danh_dau(False)
-        return False, "", None, "api.vietqr.io: không có trường tình trạng MST trong dữ liệu trả về"
+        return False, "", None, "không có trường tình trạng MST trong dữ liệu trả về"
 
     _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
     if canh_bao is None:
@@ -33746,7 +33746,7 @@ def _tra_cuu_mst_qua_vietqr(mst_c, timeout):
         # thất bại để rơi xuống nguồn sau, TUYỆT ĐỐI không suy đoán "đang
         # hoạt động" (đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
         _vietqr_danh_dau(False)
-        return False, "", None, f"api.vietqr.io: tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
+        return False, "", None, f"tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
 
     _vietqr_danh_dau(True)
     return True, trang_thai_goc, canh_bao, None
@@ -33808,27 +33808,27 @@ def _tra_cuu_mst_qua_escodata(mst_c, timeout):
             break
     except Exception as e:
         _escodata_danh_dau(False)
-        return False, "", None, f"escodata.net lỗi kết nối: {str(e)[:150]}"
+        return False, "", None, f"lỗi kết nối: {str(e)[:150]}"
 
     if r.status_code != 200:
         _escodata_danh_dau(False)
-        return False, "", None, f"escodata.net HTTP {r.status_code}"
+        return False, "", None, f"HTTP {r.status_code}"
 
     try:
         d = r.json()
     except Exception:
         _escodata_danh_dau(False)
-        return False, "", None, "escodata.net: phản hồi không phải JSON hợp lệ"
+        return False, "", None, "phản hồi không phải JSON hợp lệ"
 
     if not isinstance(d, dict) or d.get("error") != 0:
         _escodata_danh_dau(False)
-        return False, "", None, f"escodata.net: {(d.get('error_text') if isinstance(d, dict) else None) or 'không thành công'}"
+        return False, "", None, (d.get('error_text') if isinstance(d, dict) else None) or 'không thành công'
 
     du_lieu = d.get("data") or {}
     trang_thai_goc = str(du_lieu.get("tinhtrang") or "").strip()
     if not trang_thai_goc:
         _escodata_danh_dau(False)
-        return False, "", None, "escodata.net: không có trường tình trạng MST trong dữ liệu trả về"
+        return False, "", None, "không có trường tình trạng MST trong dữ liệu trả về"
 
     _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
     if canh_bao is None:
@@ -33836,7 +33836,7 @@ def _tra_cuu_mst_qua_escodata(mst_c, timeout):
         # thất bại để rơi xuống nguồn sau, TUYỆT ĐỐI không suy đoán "đang
         # hoạt động" (đoán sai sẽ bỏ sót đúng thứ cần cảnh báo).
         _escodata_danh_dau(False)
-        return False, "", None, f"escodata.net: tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
+        return False, "", None, f"tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
 
     _escodata_danh_dau(True)
     return True, trang_thai_goc, canh_bao, None
