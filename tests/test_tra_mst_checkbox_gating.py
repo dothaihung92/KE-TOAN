@@ -10,7 +10,7 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 # thêm checkbox "🔍 Tra cứu tình trạng MST" (mặc định TẮT, nhớ riêng theo
 # từng công ty qua companies.tra_mst_mac_dinh) ở màn hình Tra cứu & tải hóa
 # đơn; export_excel() nhận query param tra_mst (mặc định 0) để BẬT/TẮT hẳn
-# việc gọi mạng ra ngoài (XInvoice/masothue.com) dò tình trạng MST.
+# việc gọi mạng ra ngoài (api.vietqr.io/escodata.net/XInvoice) dò tình trạng MST.
 #
 # export_excel() quá lớn để extract nguyên hàm (như đã làm với các hàm nhỏ
 # khác trong file này) -> trích xuất ĐÚNG 2 đoạn code thật quyết định việc
