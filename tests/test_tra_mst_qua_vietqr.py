@@ -12,8 +12,10 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 #    "metadata":{"disclaimer":"... 11 ngày trước","source":"gdt.gov.vn",...}}
 # Nguồn này KHÔNG cần captcha/đăng nhập -> không phụ thuộc ddddocr có nạp
 # được trên máy hay không -> đặt làm nguồn ưu tiên CAO NHẤT. (tracuunnt.gdt.
-# gov.vn và masothue.com đã BỊ BỎ sau đó theo yêu cầu người dùng "không đúng
-# được" — dự phòng còn lại chỉ còn XInvoice.)
+# gov.vn đã BỊ BỎ theo yêu cầu người dùng "không đúng được"; masothue.com
+# cũng từng bị bỏ vì lý do tương tự nhưng người dùng tự kiểm tra lại xác
+# nhận "chạy được" nên đã thêm lại làm dự phòng thứ 2 — xem
+# test_tra_mst_qua_masothue.py — trước khi rơi xuống XInvoice.)
 
 
 def _than_ham(ten):
@@ -192,8 +194,9 @@ print("PASS 4b: gặp 429 (giới hạn tốc độ tạm thời — ca thật k
 
 # ===== Test 5 (QUAN TRỌNG — đúng yêu cầu thứ tự ưu tiên): api.vietqr.io phải
 # được thử TRƯỚC XInvoice — vì KHÔNG phụ thuộc ddddocr, nhanh/chắc chắn hơn
-# hẳn. (tracuunnt.gdt.gov.vn và masothue.com đã BỊ BỎ theo yêu cầu người
-# dùng "không đúng được" — không còn trong chuỗi nữa.) =====
+# hẳn. (tracuunnt.gdt.gov.vn đã BỊ BỎ theo yêu cầu người dùng "không đúng
+# được" — không còn trong chuỗi nữa; masothue.com nằm GIỮA VietQR và
+# XInvoice, xem test_tra_mst_qua_masothue.py để kiểm tra đúng vị trí đó.) =====
 than_chinh = _than_ham('_tra_cuu_trang_thai_mst')
 vt_vietqr = than_chinh.find('_tra_cuu_mst_qua_vietqr(')
 vt_xinvoice = than_chinh.find('_goi_1_lan_xinvoice(')
@@ -204,9 +207,9 @@ print("PASS 5: api.vietqr.io được thử TRƯỚC XInvoice, chỉ rơi xuốn
 # ===== Test 6 (không hồi quy — thông báo lỗi cuối không bỏ sót lý do của
 # VietQR): thiếu lý do của 1 nguồn sẽ khiến người dùng chẩn đoán "cụt",
 # không biết nguồn đó có được thử hay không. (Việc gộp đủ lý do của CẢ 3
-# nguồn — VietQR + escodata.net + XInvoice — được kiểm tra đầy đủ hơn ở
-# test_tra_mst_qua_escodata.py Test 6, vì file đó còn xác nhận cả phần
-# escodata.net trong thông báo gộp.) =====
+# nguồn — VietQR + masothue.com + XInvoice — được kiểm tra đầy đủ hơn ở
+# test_tra_mst_qua_masothue.py Test 6, vì file đó còn xác nhận cả phần
+# masothue.com trong thông báo gộp.) =====
 assert 'api.vietqr.io: {ly_do_loi_vietqr}' in src, (
     "Thông báo lỗi cuối cùng (khi các nguồn đều thất bại) phải kèm lý do của api.vietqr.io.")
 print("PASS 6: thông báo lỗi cuối cùng không bỏ sót lý do của api.vietqr.io.")

@@ -130,16 +130,17 @@ ns['time'] = _fake_time
 exec(extract_fn('_lay_danh_sach_xinvoice_keys'), ns)
 exec(extract_fn('_goi_1_lan_xinvoice'), ns)
 
-# Stub 2 nguồn ưu tiên trước XInvoice (VietQR rồi escodata.net — xem
+# Stub 2 nguồn ưu tiên trước XInvoice (VietQR rồi masothue.com — xem
 # _tra_cuu_trang_thai_mst) LUÔN thất bại: các test dưới đây kiểm tra hành vi
 # RIÊNG của chuỗi XInvoice (cấu hình key, chuyển key, dự phòng...), không
 # liên quan tới 2 nguồn đó — mỗi nguồn có test riêng (test_tra_mst_qua_vietqr.py
-# / test_tra_mst_qua_escodata.py). (tracuunnt.gdt.gov.vn và masothue.com đã
-# BỊ BỎ theo yêu cầu người dùng "không đúng được" — không còn trong chuỗi
-# nữa. Đã bỏ luôn cache DB dài hạn — không cần bind ns['db'] nữa, hàm không
-# còn gọi db() ở đâu cả.)
+# / test_tra_mst_qua_masothue.py). (tracuunnt.gdt.gov.vn ĐÃ BỎ theo yêu cầu
+# người dùng "không đúng được" — không còn trong chuỗi nữa; masothue.com
+# từng bị bỏ vì lý do tương tự nhưng người dùng tự kiểm tra lại xác nhận
+# "chạy được" nên đã thêm lại. Đã bỏ luôn cache DB dài hạn — không cần bind
+# ns['db'] nữa, hàm không còn gọi db() ở đâu cả.)
 ns['_tra_cuu_mst_qua_vietqr'] = lambda mst_c, timeout: (False, "", None, "stub: tắt trong test này")
-ns['_tra_cuu_mst_qua_escodata'] = lambda mst_c, timeout: (False, "", None, "stub: tắt trong test này")
+ns['_tra_cuu_mst_qua_masothue'] = lambda mst_c, timeout: (False, "", None, "stub: tắt trong test này")
 exec(extract_fn('_tra_cuu_trang_thai_mst'), ns)
 _phan_loai_trang_thai_mst = ns['_phan_loai_trang_thai_mst']
 _tra_cuu_trang_thai_mst = ns['_tra_cuu_trang_thai_mst']
@@ -235,12 +236,13 @@ print("PASS 7: MST rỗng/'KL' (khách lẻ dùng chung mã) -> bỏ qua hẳn, 
       "ly_do_loi (chủ ý, không phải lỗi); MST quá ngắn/sai định dạng -> vẫn bỏ qua nhưng kèm ly_do_loi "
       "rõ ràng để chẩn đoán.")
 
-# Test 8 (không hồi quy sau khi BỎ tracuunnt.gdt.gov.vn/masothue.com theo yêu
+# Test 8 (không hồi quy sau khi BỎ tracuunnt.gdt.gov.vn theo yêu
 # cầu người dùng "không đúng được"): CHƯA cấu hình client-id/api-key XInvoice
 # nào, VÀ VietQR (nguồn duy nhất còn lại phía trước XInvoice) cũng thất bại
 # (bị stub thất bại trong file test này) -> KHÔNG còn nguồn nào để thử ->
 # canh_bao=None an toàn (không suy đoán), KHÔNG gọi mạng lần nào (không có
-# key nên vòng lặp XInvoice không chạy, không còn masothue.com dự phòng nữa).
+# key nên vòng lặp XInvoice không chạy, masothue.com đã bị stub thất bại trong
+# file test này — xem test_tra_mst_qua_masothue.py cho hành vi thật của nguồn đó).
 _fake_settings.set("xinvoice_client_id", "")
 _fake_settings.set("xinvoice_api_key", "")
 _fake_settings.set("xinvoice_api_keys", "")
@@ -254,10 +256,11 @@ assert r8a["canh_bao"] is None, (
     f"Chưa cấu hình key XInvoice nào + VietQR cũng thất bại -> không còn nguồn nào để thử, phải trả "
     f"canh_bao=None an toàn (không suy đoán) — got {r8a}")
 assert len(_fake_requests.calls) == 0, (
-    f"Chưa có key XInvoice (không còn masothue.com dự phòng) -> KHÔNG được gọi mạng lần nào "
+    f"Chưa có key XInvoice (masothue.com bị stub thất bại trong test này) -> KHÔNG được gọi mạng lần nào "
     f"— got {len(_fake_requests.calls)} lượt gọi")
 print("PASS 8: chưa cấu hình key XInvoice nào + VietQR thất bại -> không còn nguồn nào để thử (đã bỏ "
-      "tracuunnt.gdt.gov.vn/masothue.com), trả canh_bao=None an toàn, không gọi mạng thừa.")
+      "tracuunnt.gdt.gov.vn, masothue.com bị stub thất bại), trả canh_bao=None an toàn, không gọi "
+      "mạng thừa.")
 
 _fake_settings.set("xinvoice_client_id", "demo-client")
 _fake_settings.set("xinvoice_api_key", "demo-key")
@@ -314,7 +317,8 @@ _fake_requests.next_responses = None
 # NGAY, và ly_do_loi phải ghi rõ "HẾT HẠN MỨC GÓI" để người dùng tự biết cần đợi gói
 # làm mới hoặc nâng cấp, KHÔNG PHẢI do "hết hạn"/sai client-id-api-key.
 # (đã cấu hình đúng 1 key XInvoice -> key đó hết hạn mức -> đã bỏ
-# masothue.com dự phòng nên chịu thua ngay sau ĐÚNG 1 lượt gọi XInvoice.)
+# masothue.com bị stub thất bại trong test này nên chịu thua ngay sau ĐÚNG 1 lượt
+# gọi XInvoice.)
 _fake_requests.calls.clear()
 _fake_time.sleeps.clear()
 _fake_requests.next_exc = None
@@ -327,14 +331,15 @@ r9c = _tra_cuu_trang_thai_mst("0388887777", timeout=1, so_lan_that_bai_lien_tiep
 assert r9c["canh_bao"] is None
 assert len(_fake_requests.calls) == 1, (
     f"429 HẾT HẠN MỨC GÓI KHÔNG được chờ+thử lại XInvoice (vô ích, hạn mức tính theo ngày/tháng) — chỉ "
-    f"ĐÚNG 1 lượt gọi XInvoice rồi chịu thua ngay (không còn masothue.com dự phòng nữa) — got "
+    f"ĐÚNG 1 lượt gọi XInvoice rồi chịu thua ngay (masothue.com bị stub thất bại trong test này) — got "
     f"{len(_fake_requests.calls)} lượt gọi")
 assert dem_loi_9c[0] == 1, "Vẫn phải tính vào bộ đếm lỗi liên tiếp để sớm dừng gọi mạng cho các MST còn lại"
 assert "HẾT HẠN MỨC GÓI" in (r9c.get("ly_do_loi") or ""), (
     f"ly_do_loi phải ghi rõ 'HẾT HẠN MỨC GÓI' (khác hẳn 'hết hạn'/sai key) để người dùng tự biết đúng "
     f"nguyên nhân cần đợi gói làm mới hoặc nâng cấp trên xinvoice.vn — got {r9c}")
 print("PASS 9c: 429 do HẾT HẠN MỨC GÓI (free tier, đúng nguyên văn lỗi thật người dùng gặp) -> nhận "
-      "diện đúng, KHÔNG chờ+thử lại XInvoice vô ích, thất bại ngay (đã bỏ masothue.com dự phòng), "
+      "diện đúng, KHÔNG chờ+thử lại XInvoice vô ích, thất bại ngay (masothue.com bị stub thất bại "
+      "trong test này), "
       "ly_do_loi ghi rõ nguyên nhân là hết hạn mức gói (không phải hết hạn/sai key).")
 _fake_requests.next_responses = None
 _fake_requests.next_status = 200   # trả về trạng thái mặc định cho các test sau
@@ -385,10 +390,11 @@ for i in range(8):
 assert all(kq["canh_bao"] is None for kq in ket_qua_11), (
     "Lỗi mạng KHÔNG được crash và KHÔNG được suy đoán canh_bao — phải luôn là None")
 # Mỗi lượt lỗi (trước khi bộ đếm đạt 5) làm ĐÚNG 1 lượt gọi mạng thật (chỉ
-# XInvoice — đã bỏ masothue.com dự phòng) -> 5 lượt lỗi liên tiếp = 5 lượt gọi
+# XInvoice — masothue.com bị stub thất bại trong test này) -> 5 lượt lỗi liên tiếp
+# = 5 lượt gọi
 # thật, rồi bộ đếm đạt 5 mới NGỪNG hẳn (3 lượt còn lại không gọi mạng nữa).
 assert len(_fake_requests.calls) == 5, (
-    f"Sau ĐÚNG 5 lượt lỗi liên tiếp (1 lượt gọi mạng XInvoice/lượt, đã bỏ masothue.com dự phòng) phải "
+    f"Sau ĐÚNG 5 lượt lỗi liên tiếp (1 lượt gọi mạng XInvoice/lượt, masothue.com bị stub thất bại) phải "
     f"NGỪNG gọi mạng cho các MST còn lại trong lượt này (tránh treo lâu vì hàng loạt timeout) — got "
     f"{len(_fake_requests.calls)} lượt gọi thật (kỳ vọng đúng 5)")
 assert all("Lỗi kết nối" in (kq.get("ly_do_loi") or "") for kq in ket_qua_11[:5]), (
@@ -414,7 +420,7 @@ assert "HTTP 401" in (r12.get("ly_do_loi") or ""), (
     f"Phải trả kèm ly_do_loi ghi rõ mã lỗi HTTP thật (401) để người dùng tự chẩn đoán được nguyên nhân "
     f"— got {r12}")
 assert len(_fake_requests.calls) == 1, (
-    f"ĐÚNG 1 lượt gọi XInvoice (401), đã bỏ masothue.com dự phòng — got {len(_fake_requests.calls)} lượt gọi")
+    f"ĐÚNG 1 lượt gọi XInvoice (401), masothue.com bị stub thất bại trong test này — got {len(_fake_requests.calls)} lượt gọi")
 print("PASS 12: HTTP lỗi (vd 401 sai client-id/api-key) -> canh_bao=None (không suy đoán), vẫn tính "
       "vào bộ đếm lỗi liên tiếp, VÀ trả kèm ly_do_loi ghi rõ 'HTTP 401' để chẩn đoán đúng nguyên nhân.")
 
@@ -547,13 +553,13 @@ _fake_requests.next_responses = [
 r17 = _tra_cuu_trang_thai_mst("0321111113", timeout=1)
 assert r17["canh_bao"] is None
 assert len(_fake_requests.calls) == 2, (
-    f"Phải thử ĐÚNG 2 key (mỗi key 1 lượt, hết hạn mức gói không chờ+thử lại), đã bỏ masothue.com dự "
-    f"phòng nên thất bại hẳn ngay sau đó — got {len(_fake_requests.calls)}")
+    f"Phải thử ĐÚNG 2 key (mỗi key 1 lượt, hết hạn mức gói không chờ+thử lại), masothue.com bị stub "
+    f"thất bại nên thất bại hẳn ngay sau đó — got {len(_fake_requests.calls)}")
 assert "2 key" in (r17.get("ly_do_loi") or ""), (
     f"ly_do_loi phải nêu rõ đã thử CẢ 2 key đều hết hạn mức để người dùng biết cần thêm key khác "
     f"— got {r17}")
 print("PASS 17: cả 2 key đều hết hạn mức gói (429 quota) -> thử lần lượt từng key rồi thất bại hẳn "
-      "(không lặp vô hạn, đã bỏ masothue.com dự phòng), ly_do_loi nêu rõ đã thử cả 2 key.")
+      "(không lặp vô hạn, masothue.com bị stub thất bại), ly_do_loi nêu rõ đã thử cả 2 key.")
 
 # Test 18 (không hồi quy — QUAN TRỌNG): lỗi CHUNG (vd HTTP 404 — MST không
 # tồn tại) KHÔNG PHẢI do lỗi của riêng 1 key -> KHÔNG được lãng phí thử key
@@ -566,11 +572,11 @@ r18 = _tra_cuu_trang_thai_mst("0321111114", timeout=1)
 assert r18["canh_bao"] is None
 assert len(_fake_requests.calls) == 1, (
     f"Lỗi CHUNG (vd HTTP 404, không phải lỗi riêng của key) KHÔNG được thử key khác -> ĐÚNG 1 lượt gọi "
-    f"XInvoice, đã bỏ masothue.com dự phòng nên thất bại hẳn ngay sau đó — got "
+    f"XInvoice, masothue.com bị stub thất bại nên thất bại hẳn ngay sau đó — got "
     f"{len(_fake_requests.calls)}")
 assert "HTTP 404" in (r18.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ HTTP 404 — got {r18}"
 print("PASS 18: lỗi CHUNG (HTTP 404, không phải lỗi riêng của 1 key) -> KHÔNG lãng phí thử key XInvoice "
-      "khác, chỉ ĐÚNG 1 lượt gọi rồi thất bại hẳn (đã bỏ masothue.com dự phòng).")
+      "khác, chỉ ĐÚNG 1 lượt gọi rồi thất bại hẳn (masothue.com bị stub thất bại).")
 
 # Test 19 (không hồi quy): lỗi kết nối/mạng (exception) cũng là lỗi CHUNG ->
 # tương tự Test 18, KHÔNG được thử key khác.
@@ -581,11 +587,11 @@ r19 = _tra_cuu_trang_thai_mst("0321111115", timeout=1)
 assert r19["canh_bao"] is None
 assert len(_fake_requests.calls) == 1, (
     f"Lỗi kết nối/mạng (lỗi CHUNG, không phải lỗi riêng của key) KHÔNG được thử key XInvoice khác -> "
-    f"chỉ ĐÚNG 1 lượt gọi XInvoice, đã bỏ masothue.com dự phòng nên thất bại hẳn ngay sau đó — got "
+    f"chỉ ĐÚNG 1 lượt gọi XInvoice, masothue.com bị stub thất bại nên thất bại hẳn ngay sau đó — got "
     f"{len(_fake_requests.calls)}")
 assert "Lỗi kết nối" in (r19.get("ly_do_loi") or ""), f"ly_do_loi phải ghi rõ lỗi kết nối — got {r19}"
 print("PASS 19: lỗi kết nối/mạng (lỗi CHUNG) -> KHÔNG lãng phí thử key XInvoice khác, chỉ ĐÚNG 1 lượt "
-      "gọi rồi thất bại hẳn (đã bỏ masothue.com dự phòng).")
+      "gọi rồi thất bại hẳn (masothue.com bị stub thất bại).")
 _fake_requests.next_exc = None
 
 # ===== Test 20 (người dùng hỏi lại "sao vẫn còn?" sau khi thấy log báo N MST
@@ -628,7 +634,7 @@ r21 = _tra_cuu_trang_thai_mst("0321111119", timeout=1)
 assert r21["canh_bao"] is None
 assert len(_fake_requests.calls) == 1, (
     f"HTTP 200 nhưng không khớp tình trạng nào -> PHẢI coi là thất bại (không phải thành công), đã bỏ "
-    f"masothue.com dự phòng nên chỉ ĐÚNG 1 lượt gọi — got {len(_fake_requests.calls)} lượt gọi")
+    f"masothue.com bị stub thất bại nên chỉ ĐÚNG 1 lượt gọi — got {len(_fake_requests.calls)} lượt gọi")
 assert (r21.get("ly_do_loi") or "") and "không rõ lý do" not in (r21.get("ly_do_loi") or ""), (
     f"PHẢI kèm ly_do_loi cụ thể (vd 'XInvoice trả về 200 nhưng không xác định được tình trạng'), "
     f"KHÔNG được để trống/rơi vào 'không rõ lý do' — got {r21}")
