@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.346"
+APP_BUILD = "2026-09-21.347"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33814,17 +33814,32 @@ def _doc_bang_trang_thai_tracuunnt(html, mst_c):
     return ""
 
 
-def _trich_doan_loi_html_tracuunnt(html, do_dai=200):
-    """Trích đoạn văn bản NGẮN GỌN (bỏ hết thẻ HTML/script/style) từ trang
+_TU_KHOA_LOI_TRACUUNNT = (
+    'không đúng', 'khong dung', 'không hợp lệ', 'khong hop le', 'sai mã', 'sai ma',
+    'hết hạn', 'het han', 'quá nhiều', 'qua nhieu', 'vượt quá', 'vuot qua',
+    'bị chặn', 'bi chan', 'không thể', 'khong the', 'exception', 'error', 'block',
+)
+
+
+def _trich_doan_loi_html_tracuunnt(html, do_dai=450):
+    """Trích đoạn văn bản (bỏ hết thẻ HTML/script/style) từ trang
     tracuunnt.gdt.gov.vn trả về khi KHÔNG ra bảng kết quả — dùng để CHẨN
     ĐOÁN lý do THẬT: code cũ chỉ đoán chung chung "có thể đã đoán sai
     captcha" cho MỌI trường hợp không thấy "Trạng thái MST" trong HTML, dù
     lý do thật có thể KHÁC hẳn (trang WAF chặn tạm do gọi dồn dập nhiều
-    luồng cùng lúc, trang báo lỗi hệ thống, hết phiên làm việc...) — log
-    thật cho thấy RẤT NHIỀU MST khác nhau cùng thất bại đủ 6/6 lần trong 1
-    lượt xuất Excel (sau khi tăng số luồng song song 3 -> 8), đáng ngờ hơn
-    là ngẫu nhiên đoán sai captcha 6 lần liên tiếp cho từng đó MST khác
-    nhau — cần thấy được TRANG THẬT SỰ nói gì để biết chắc."""
+    luồng cùng lúc, trang báo lỗi hệ thống, hết phiên làm việc...).
+
+    BẢN ĐẦU TIÊN lấy 200 ký tự ĐẦU trang — log thật (sau khi triển khai)
+    cho thấy VÔ ÍCH: 200 ký tự đầu LUÔN là tiêu đề/nhãn form cố định
+    ("Cục Thuế - Bộ Tài Chính ... Mã số thuế * Tên tổ chức cá nhân nộp
+    thuế Địa chỉ trụ sở kinh doanh Số c...") GIỐNG HỆT NHAU ở MỌI MST/lần
+    thử khác nhau — không giúp chẩn đoán được gì thêm. SỬA: (1) ưu tiên
+    tìm đoạn văn bản QUANH 1 trong các TỪ KHOÁ liên quan lỗi/chặn thật
+    (_TU_KHOA_LOI_TRACUUNNT) nếu có — nhiều khả năng chứa đúng thông báo
+    lỗi thật của trang; (2) nếu KHÔNG tìm thấy từ khoá nào, lấy đoạn DÀI
+    HƠN hẳn (450 ký tự, tăng từ 200) để có cơ hội vượt qua phần nhãn form
+    cố định, chạm tới nội dung PHÍA SAU (nơi thường đặt captcha/thông báo
+    lỗi thật)."""
     import re as _re_h
     import html as _html_h
     try:
@@ -33832,6 +33847,14 @@ def _trich_doan_loi_html_tracuunnt(html, do_dai=200):
         txt = _re_h.sub(r'<[^>]+>', ' ', txt)
         txt = _html_h.unescape(txt)
         txt = _re_h.sub(r'\s+', ' ', txt).strip()
+        if not txt:
+            return ""
+        low = txt.lower()
+        for tu_khoa in _TU_KHOA_LOI_TRACUUNNT:
+            vt = low.find(tu_khoa)
+            if vt >= 0:
+                bd = max(0, vt - 60)
+                return txt[bd:bd + do_dai]
         return txt[:do_dai]
     except Exception:
         return ""

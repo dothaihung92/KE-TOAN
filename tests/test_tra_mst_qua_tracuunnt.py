@@ -400,8 +400,16 @@ print("PASS 10: có endpoint /api/xem-captcha-tracuunnt trả thẳng ảnh capt
 # dập nhiều luồng cùng lúc — mà câu thông báo cũ "có thể đã đoán sai
 # captcha" không phản ánh đúng): khi không ra bảng kết quả, PHẢI trích kèm
 # đoạn văn bản THẬT trang trả về (không phải chỉ đoán mù), để biết chắc lần
-# sau. =====
+# sau. BẢN ĐẦU TIÊN (200 ký tự đầu trang) hoá ra VÔ ÍCH — log thật (sau khi
+# triển khai) cho thấy 200 ký tự đầu LUÔN là tiêu đề/nhãn form cố định
+# ("Cục Thuế - Bộ Tài Chính ... Mã số thuế * Tên tổ chức cá nhân nộp thuế
+# Địa chỉ trụ sở kinh doanh Số c...") GIỐNG HỆT NHAU ở MỌI MST khác nhau —
+# đã SỬA: ưu tiên đoạn văn bản QUANH từ khoá liên quan lỗi thật nếu có,
+# tăng độ dài mặc định (200 -> 450) khi không tìm thấy từ khoá nào. =====
 ns11 = _nap('_khong_dau')
+m11 = re.search(r'^_TU_KHOA_LOI_TRACUUNNT\s*=\s*\([^)]*\)', src, re.M | re.S)
+assert m11 is not None, "Phải có danh sách _TU_KHOA_LOI_TRACUUNNT (các từ khoá liên quan lỗi/chặn thật)."
+exec(m11.group(0), ns11)
 exec(_than_ham('_trich_doan_loi_html_tracuunnt'), ns11)
 trich = ns11['_trich_doan_loi_html_tracuunnt']
 r11a = trich('<html><body><script>var x=1;</script><p>Bạn đã gửi quá nhiều '
@@ -414,6 +422,26 @@ r11c = trich(None)
 assert r11c == "", f"HTML rỗng/None không được crash, trả rỗng — got {r11c!r}"
 print("PASS 11a: _trich_doan_loi_html_tracuunnt() trích đúng văn bản thật (bỏ thẻ/script, giải mã "
       "entity, giới hạn độ dài), không crash với input rỗng.")
+
+# Đúng ca thật: đoạn tiêu đề/nhãn form cố định (giống hệt log thật) ĐỨNG
+# TRƯỚC 1 thông báo lỗi thật xa hơn trong trang -> PHẢI trả về đoạn QUANH
+# thông báo lỗi đó, KHÔNG PHẢI chỉ lấy phần đầu (tiêu đề cố định) như bản cũ.
+m_sig11 = re.search(r'def _trich_doan_loi_html_tracuunnt\([^)]*do_dai\s*=\s*(\d+)', src)
+assert m_sig11 is not None and int(m_sig11.group(1)) >= 400, (
+    f"Độ dài mặc định (khi KHÔNG tìm thấy từ khoá lỗi nào) phải tăng lên đủ dài (>= 400, từ 200 cũ) để "
+    f"có cơ hội vượt qua phần tiêu đề/nhãn form cố định — got {m_sig11.group(1) if m_sig11 else None}")
+tieu_de_co_dinh = ('Cục Thuế - Bộ Tài Chính Trang chủ Tra cứu thông tin người nộp Thuế Thông tin về '
+                   'người nộp thuế Thông tin về người nộp thuế TNCN Mã số thuế * Tên tổ chức cá nhân '
+                   'nộp thuế Địa chỉ trụ sở kinh doanh Số chứng minh thư')
+html_that = f'<html><body><div>{tieu_de_co_dinh}</div><div>Mã xác nhận không đúng, vui lòng nhập lại.</div></body></html>'
+r11d = trich(html_that)
+assert 'không đúng' in r11d.lower(), (
+    f"Phải ưu tiên đoạn văn bản QUANH từ khoá lỗi thật ('không đúng'), KHÔNG PHẢI chỉ lấy phần đầu "
+    f"trang (tiêu đề/nhãn form cố định, giống hệt nhau ở mọi MST, không giúp chẩn đoán được gì) — "
+    f"got {r11d!r}")
+print("PASS 11c: khi trang có từ khoá liên quan lỗi thật (vd 'không đúng'), trích đúng đoạn QUANH từ "
+      "khoá đó thay vì chỉ lấy phần đầu trang (tiêu đề/nhãn form cố định, vô ích để chẩn đoán — đúng "
+      "bug thật phát hiện qua log sau khi triển khai bản đầu tiên).")
 
 than_tc11 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
 assert '_trich_doan_loi_html_tracuunnt(html)' in than_tc11 and 'doan_html' in than_tc11, (
