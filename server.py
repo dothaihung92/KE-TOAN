@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.340"
+APP_BUILD = "2026-09-21.341"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6787,6 +6787,47 @@ def chan_doan_mst_tracuunnt(mst: str = "0315458241"):
         ket_luan = f"KHÔNG dùng được: {ly_do_loi}"
     return {"mst_tra": mst_c, "ket_luan": ket_luan,
             "trang_thai_do_duoc": trang_thai_goc, "canh_bao": canh_bao, "ly_do_loi": ly_do_loi}
+
+
+@app.get("/api/xem-captcha-tracuunnt")
+def xem_captcha_tracuunnt():
+    """CHẨN ĐOÁN SÂU HƠN cho tracuunnt.gdt.gov.vn — trả THẲNG ảnh captcha.png
+    THẬT (Content-Type image/png) để NGƯỜI DÙNG TỰ MẮT xem, thay vì chỉ đọc
+    số byte + kết quả ddddocr đoán được qua /api/chan-doan-mst-tracuunnt. Ca
+    thật vừa gặp: ddddocr đoán ra RỖNG HOÀN TOÀN (không phải sai/quá ngắn) ở
+    cả 6/6 lần dù ảnh nhận được có kích cỡ hợp lý (1184 byte, không phải ảnh
+    lỗi/rỗng 0 byte) — cần xem trực tiếp ảnh để biết đây là captcha bình
+    thường (model ddddocr mặc định không đọc được kiểu font này) hay ảnh bị
+    hỏng/không phải captcha thật (vd trang chủ động trả ảnh khác cho request
+    tự động, nghi vấn WAF/chống bot).
+
+    Dùng: mở thẳng http://127.0.0.1:8686/api/xem-captcha-tracuunnt trên
+    trình duyệt — ảnh hiện ra ngay (F5 để xem ảnh MỚI khác)."""
+    ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
+    sess = None
+    loi_mo_trang = None
+    for dung_curl_cffi in (True, False):
+        try:
+            sess_thu = _tao_session_tracuunnt(dung_curl_cffi)
+            sess_thu.get("https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp", headers=ua, timeout=20)
+            sess = sess_thu
+            break
+        except Exception as e:
+            loi_mo_trang = str(e)[:200]
+            if not (dung_curl_cffi and _loi_ssl_chung_thuc(e)):
+                break
+    if sess is None:
+        raise HTTPException(502, f"Không mở được trang tracuunnt.gdt.gov.vn: {loi_mo_trang}")
+    try:
+        r_cap = sess.get("https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png",
+                         headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
+                         timeout=20)
+    except Exception as e:
+        raise HTTPException(502, f"Không lấy được ảnh captcha: {str(e)[:200]}")
+    if r_cap.status_code != 200 or not r_cap.content:
+        raise HTTPException(502, f"Lấy ảnh captcha thất bại: HTTP {r_cap.status_code}")
+    return Response(content=r_cap.content, media_type="image/png")
 
 
 @app.get("/api/settings/pin-nop-to-khai")

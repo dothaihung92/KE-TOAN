@@ -275,4 +275,25 @@ assert 'doan_debug' in than_tc9 and 'len(r_cap.content)' in than_tc9, (
 print("PASS 9b: _tra_cuu_mst_qua_tracuunnt() kèm kích cỡ ảnh + chuỗi ddddocr thật sự đoán được vào "
       "thông báo lỗi cuối cùng, thay vì chỉ 1 câu chung chung không giúp chẩn đoán được gì thêm.")
 
+# ===== Test 10 (không hồi quy — endpoint xem ảnh captcha thật, ca thật vừa
+# gặp: ddddocr đoán RỖNG HOÀN TOÀN 6/6 lần dù ảnh nhận được có kích cỡ hợp
+# lý 1184 byte — cần xem trực tiếp ảnh để biết đây là captcha bình thường
+# hay ảnh bị hỏng/không phải captcha thật): phải có endpoint trả THẲNG ảnh
+# PNG thật (Content-Type image/png) để người dùng tự mắt xem trên trình
+# duyệt, dùng CHUNG cơ chế mở session/fallback SSL như
+# _tra_cuu_mst_qua_tracuunnt() (không phải mô phỏng riêng). =====
+assert '/api/xem-captcha-tracuunnt' in src and 'def xem_captcha_tracuunnt' in src, (
+    "Phải có endpoint trả ảnh captcha thật để xem trực tiếp trên trình duyệt.")
+than_xem = _than_ham('xem_captcha_tracuunnt')
+assert '_tao_session_tracuunnt(' in than_xem and '_loi_ssl_chung_thuc(' in than_xem, (
+    "Endpoint xem ảnh phải dùng CHUNG cơ chế mở session/fallback SSL như _tra_cuu_mst_qua_tracuunnt(), "
+    "không phải viết lại logic riêng (dễ lệch hành vi, khó chẩn đoán đúng).")
+assert 'media_type="image/png"' in than_xem, (
+    "Phải trả về đúng Content-Type image/png để trình duyệt hiển thị được ảnh trực tiếp, không phải "
+    "JSON/base64 (người dùng cần xem BẰNG MẮT ngay, không cần công cụ giải mã thêm).")
+assert '"https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png"' in than_xem, (
+    "Phải lấy đúng ảnh captcha.png thật từ tracuunnt.gdt.gov.vn, không phải ảnh mô phỏng/giả lập.")
+print("PASS 10: có endpoint /api/xem-captcha-tracuunnt trả thẳng ảnh captcha thật (image/png) để xem "
+      "trực tiếp trên trình duyệt, dùng chung cơ chế session/fallback SSL với hàm tra cứu thật.")
+
 print("\nALL DONE")
