@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.349"
+APP_BUILD = "2026-09-21.350"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33871,6 +33871,24 @@ def _trich_doan_loi_html_tracuunnt(html, do_dai=450):
         return ""
 
 
+def _trich_doan_khong_phai_png_tracuunnt(raw: bytes, do_dai=200) -> str:
+    """Trích đoạn văn bản NGẮN GỌN từ nội dung nhận được ở /tcnnt/captcha.png
+    khi nó KHÔNG PHẢI ảnh PNG hợp lệ (thiếu chữ ký/magic bytes PNG thật —
+    xem chỗ gọi) — dùng để CHẨN ĐOÁN: log thật cho thấy ddddocr đôi khi ném
+    lỗi "cannot identify image file" (khác hẳn đoán RỖNG bình thường), nghĩa
+    là nội dung nhận được không phải ảnh (vd trang WAF trả về trang/JSON
+    chặn tạm thay vì captcha.png thật). Thử giải mã UTF-8 (thay ký tự lỗi
+    bằng dấu hỏi thay vì crash) để xem được NỘI DUNG THẬT thay vì chỉ biết
+    gián tiếp qua lỗi khó hiểu của ddddocr."""
+    import re as _re_p
+    try:
+        txt = (raw or b"")[:2000].decode("utf-8", errors="replace")
+        txt = _re_p.sub(r'\s+', ' ', txt).strip()
+        return txt[:do_dai]
+    except Exception:
+        return ""
+
+
 _SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # captcha trang này KHÓ — người dùng xác nhận tự nhập tay còn phải thử 3-5 lần
 
 
@@ -33960,6 +33978,21 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
                 continue
         except Exception as e:
             ly_do_loi_cuoi = f"lỗi kết nối (lấy captcha): {str(e)[:150]}"
+            continue
+
+        # Log thật cho thấy ddddocr đôi khi ném lỗi "cannot identify image
+        # file" (KHÔNG PHẢI đoán rỗng như bình thường) — nghĩa là nội dung
+        # nhận được KHÔNG PHẢI ảnh PNG thật (vd trang WAF trả về trang/JSON
+        # chặn tạm thay vì captcha.png thật khi thấy nhiều phiên cùng lúc từ
+        # 1 IP) — kiểm tra NGAY bằng chữ ký (magic bytes) PNG thật
+        # (\x89PNG\r\n\x1a\n) TRƯỚC khi đưa vào OCR, để báo ĐÚNG lý do (kèm
+        # nội dung THẬT nhận được) thay vì để ddddocr ném lỗi khó hiểu (có
+        # tiếng Trung, cắt ngắn giữa chừng) rồi mới biết gián tiếp.
+        if not r_cap.content.startswith(b"\x89PNG\r\n\x1a\n"):
+            doan_khong_phai_png = _trich_doan_khong_phai_png_tracuunnt(r_cap.content)
+            ly_do_loi_cuoi = (f"ảnh captcha nhận được KHÔNG PHẢI PNG hợp lệ ({len(r_cap.content)} byte)"
+                             + (f" — nội dung thật: {doan_khong_phai_png!r}" if doan_khong_phai_png else "")
+                             + " — có thể trang tạm chặn/trả lỗi thay vì ảnh captcha thật khi gọi dồn dập")
             continue
 
         doan_debug = []

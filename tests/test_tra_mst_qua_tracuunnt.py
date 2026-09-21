@@ -496,4 +496,39 @@ assert '_XINVOICE_TAM_DUNG' in than_chinh, (
 print("PASS 12: XInvoice đang TẠM dừng qua cờ _XINVOICE_TAM_DUNG=True (code vẫn còn nguyên, không xoá) "
       "— đúng yêu cầu người dùng sau khi cả 2 key đều hết hạn mức gói/timeout.")
 
+# ===== Test 13 (QUAN TRỌNG — bug/ca thật vừa gặp: ddddocr đôi khi ném LỖI
+# "cannot identify image file" (KHÁC HẲN đoán RỖNG bình thường) — nghĩa là
+# nội dung nhận được ở /tcnnt/captcha.png KHÔNG PHẢI ảnh PNG hợp lệ (vd
+# trang WAF trả về trang/JSON chặn tạm thay vì captcha.png thật khi gọi dồn
+# dập nhiều phiên cùng lúc từ 1 IP) — nếu cứ đưa thẳng vào OCR, chỉ nhận
+# được lỗi khó hiểu (có tiếng Trung, bị cắt ngắn giữa chừng bởi
+# str(e)[:80]) thay vì biết ĐÚNG lý do thật): phải kiểm tra chữ ký (magic
+# bytes) PNG thật NGAY khi nhận ảnh, TRƯỚC khi đưa vào OCR, và báo rõ nội
+# dung THẬT nhận được nếu không phải PNG hợp lệ. =====
+ns13 = _nap('_khong_dau')
+exec(_than_ham('_trich_doan_khong_phai_png_tracuunnt'), ns13)
+trich_png = ns13['_trich_doan_khong_phai_png_tracuunnt']
+r13a = trich_png(b'{"error":"too many requests, please try again later"}')
+assert 'too many requests' in r13a, f"Phải giải mã UTF-8 đúng nội dung thật nhận được — got {r13a!r}"
+r13b = trich_png(b'\xff\xfe\x00\x01khong-phai-utf8-hop-le')
+assert r13b != "" and not isinstance(r13b, bytes), (
+    f"Byte không giải mã UTF-8 được (vd nhị phân lạ) KHÔNG được crash, phải thay bằng ký tự thay thế "
+    f"— got {r13b!r}")
+r13c = trich_png(b'')
+assert r13c == "", f"Nội dung rỗng không được crash, trả rỗng — got {r13c!r}"
+print("PASS 13a: _trich_doan_khong_phai_png_tracuunnt() giải mã đúng nội dung thật (UTF-8, thay ký tự "
+      "lỗi bằng dấu hỏi thay vì crash với dữ liệu nhị phân lạ), không crash với input rỗng.")
+
+than_tc13 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
+assert r'\x89PNG\r\n\x1a\n' in than_tc13, (
+    "_tra_cuu_mst_qua_tracuunnt() phải kiểm tra chữ ký (magic bytes) PNG thật NGAY khi nhận ảnh captcha, "
+    "TRƯỚC khi đưa vào OCR — nếu không, nội dung KHÔNG PHẢI ảnh PNG hợp lệ (vd trang chặn tạm trả về "
+    "trang/JSON lỗi thay vì captcha.png thật) sẽ khiến ddddocr ném lỗi khó hiểu (có tiếng Trung, bị cắt "
+    "ngắn giữa chừng) thay vì báo đúng lý do thật kèm nội dung thật nhận được.")
+assert '_trich_doan_khong_phai_png_tracuunnt(' in than_tc13, (
+    "Khi ảnh nhận được KHÔNG PHẢI PNG hợp lệ, phải trích kèm nội dung THẬT nhận được vào ly_do_loi_cuoi "
+    "(qua _trich_doan_khong_phai_png_tracuunnt()), không chỉ báo chung chung.")
+print("PASS 13b: _tra_cuu_mst_qua_tracuunnt() kiểm tra chữ ký PNG thật TRƯỚC khi OCR, kèm nội dung thật "
+      "nhận được vào thông báo lỗi khi không phải ảnh PNG hợp lệ — thay vì để ddddocr ném lỗi khó hiểu.")
+
 print("\nALL DONE")
