@@ -143,30 +143,27 @@ assert '_TRACUUNNT_NGUONG_TAT' in src and '_tracuunnt_danh_dau(' in than_tc, (
     "Phải có bộ đếm lỗi liên tiếp + ngưỡng tạm tắt nguồn này trong 1 lượt xuất Excel.")
 print("PASS 4: có ngưỡng tạm tắt khi lỗi liên tiếp, tránh lãng phí lượt gọi cho hàng trăm MST còn lại.")
 
-# ===== Test 5 (QUAN TRỌNG — đúng yêu cầu người dùng hiện tại: "hãy tạm ngưng
-# dùng VietQR/masothue.com/XInvoice mà tập trung xử lý test chạy kiểm tra qua
-# tracuunnt.gdt.gov.vn"): _tra_cuu_trang_thai_mst() giờ CHỈ được gọi
-# _tra_cuu_mst_qua_tracuunnt(), KHÔNG còn gọi 3 nguồn kia nữa trong lượt kiểm
-# tra này (dù 3 hàm đó vẫn còn nguyên trong file để khôi phục sau). =====
+# ===== Test 5 (QUAN TRỌNG — đúng yêu cầu người dùng đã CHỐT: "GIữ
+# tracuunnt.gdt.gov.vn + XInvoice, BỊ VietQR/masothue.com"): chuỗi tra MST
+# PERMANENT là tracuunnt.gdt.gov.vn (ưu tiên 1) -> XInvoice (dự phòng) —
+# VietQR/masothue.com đã BỎ HẲN (xoá code, không phải tạm ngưng). =====
 than_chinh = _than_ham('_tra_cuu_trang_thai_mst')
 assert '_tra_cuu_mst_qua_tracuunnt(' in than_chinh, (
-    "_tra_cuu_trang_thai_mst() phải gọi _tra_cuu_mst_qua_tracuunnt().")
-assert '_tra_cuu_mst_qua_vietqr(' not in than_chinh, (
-    "TẠM NGƯNG api.vietqr.io theo yêu cầu người dùng — _tra_cuu_trang_thai_mst() KHÔNG được gọi "
-    "_tra_cuu_mst_qua_vietqr() trong lượt kiểm tra riêng tracuunnt.gdt.gov.vn này.")
-assert '_tra_cuu_mst_qua_masothue(' not in than_chinh, (
-    "TẠM NGƯNG masothue.com theo yêu cầu người dùng — _tra_cuu_trang_thai_mst() KHÔNG được gọi "
-    "_tra_cuu_mst_qua_masothue() trong lượt kiểm tra riêng tracuunnt.gdt.gov.vn này.")
-assert '_goi_1_lan_xinvoice(' not in than_chinh, (
-    "TẠM NGƯNG XInvoice theo yêu cầu người dùng — _tra_cuu_trang_thai_mst() KHÔNG được gọi "
-    "_goi_1_lan_xinvoice() trong lượt kiểm tra riêng tracuunnt.gdt.gov.vn này.")
-# Nhưng 3 hàm đó vẫn phải còn NGUYÊN trong file (chưa xoá hẳn) để khôi phục
-# nhanh chuỗi đầy đủ khi người dùng xác nhận xong đợt kiểm tra.
-assert 'def _tra_cuu_mst_qua_vietqr(' in src and 'def _tra_cuu_mst_qua_masothue(' in src and 'def _goi_1_lan_xinvoice(' in src, (
-    "3 hàm tra MST kia (VietQR/masothue.com/XInvoice) phải vẫn còn NGUYÊN trong file (chỉ tạm ngưng GỌI, "
-    "không xoá) để khôi phục lại chuỗi đầy đủ khi cần, không phải viết lại từ đầu.")
-print("PASS 5: _tra_cuu_trang_thai_mst() hiện CHỈ gọi tracuunnt.gdt.gov.vn (tạm ngưng VietQR/masothue.com/"
-      "XInvoice theo yêu cầu người dùng), 3 hàm kia vẫn còn nguyên trong file để khôi phục sau.")
+    "_tra_cuu_trang_thai_mst() phải gọi _tra_cuu_mst_qua_tracuunnt() (nguồn ưu tiên 1).")
+assert '_goi_1_lan_xinvoice(' in than_chinh, (
+    "_tra_cuu_trang_thai_mst() phải gọi _goi_1_lan_xinvoice() làm nguồn dự phòng khi "
+    "tracuunnt.gdt.gov.vn không tra được.")
+assert than_chinh.index('_tra_cuu_mst_qua_tracuunnt(') < than_chinh.index('_goi_1_lan_xinvoice('), (
+    "tracuunnt.gdt.gov.vn phải được gọi TRƯỚC XInvoice (đúng thứ tự ưu tiên: nguồn chính thức, "
+    "miễn phí, không hạn mức gói trước; XInvoice dự phòng sau, tốn hạn mức key).")
+assert 'def _tra_cuu_mst_qua_vietqr(' not in src, (
+    "VietQR (api.vietqr.io) phải đã BỎ HẲN khỏi file (xoá code, theo yêu cầu người dùng), "
+    "không chỉ tạm ngưng gọi.")
+assert 'def _tra_cuu_mst_qua_masothue(' not in src, (
+    "masothue.com phải đã BỎ HẲN khỏi file (xoá code, theo yêu cầu người dùng), "
+    "không chỉ tạm ngưng gọi.")
+print("PASS 5: _tra_cuu_trang_thai_mst() gọi tracuunnt.gdt.gov.vn (ưu tiên 1) rồi XInvoice (dự phòng); "
+      "VietQR/masothue.com đã bỏ hẳn khỏi file.")
 
 # ===== Test 6 (không hồi quy — endpoint chẩn đoán riêng, không cần cid): phải
 # có endpoint chẩn đoán đơn giản (không cần biết id công ty nào, vì nguồn này

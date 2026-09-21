@@ -2831,7 +2831,7 @@ function renderWorkspace(c,online){
     </label>
     <label class="chk" style="margin-bottom:10px;display:flex;align-items:flex-start;gap:8px">
       <input type="checkbox" id="cTraMst" ${c.tra_mst_mac_dinh?'checked':''} onchange="luuTuyChonTraMst(${c.id},this.checked)">
-      <span>🔍 <b>Tra cứu tình trạng MST</b> khi xuất Excel — tick thì mới dò tình trạng hoạt động (đang hoạt động/bị khóa MST/chờ xác minh...) của từng nhà cung cấp qua API bên ngoài (đang tạm thời chỉ dùng tracuunnt.gdt.gov.vn để kiểm tra riêng nguồn này), thêm cột "Trạng thái MST" ở sheet "BK Mua vào" và tô đỏ dòng cần chú ý; <b>không tick thì bỏ qua hẳn</b>, không gọi mạng, xuất Excel nhanh hơn. <b>Đã tick 1 lần sẽ được nhớ</b> cho các lần sau.</span>
+      <span>🔍 <b>Tra cứu tình trạng MST</b> khi xuất Excel — tick thì mới dò tình trạng hoạt động (đang hoạt động/bị khóa MST/chờ xác minh...) của từng nhà cung cấp qua API bên ngoài (tracuunnt.gdt.gov.vn/XInvoice), thêm cột "Trạng thái MST" ở sheet "BK Mua vào" và tô đỏ dòng cần chú ý; <b>không tick thì bỏ qua hẳn</b>, không gọi mạng, xuất Excel nhanh hơn. <b>Đã tick 1 lần sẽ được nhớ</b> cho các lần sau.</span>
     </label>
     <label class="chk" style="margin-bottom:10px;display:flex;align-items:center;gap:8px">
       <input type="checkbox" id="cTatMay"> <span>🖥️ Tự động tắt máy tính sau khi tải xong</span>
