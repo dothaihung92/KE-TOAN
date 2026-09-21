@@ -10,9 +10,10 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 # server.py) — người dùng yêu cầu sau khi thấy xuất Excel bị chậm/treo lâu với
 # công ty có nhiều nhà cung cấp/khách hàng khác nhau: "có thể kiểm tra nhiều
 # luồn được đẩy 3 luồn kiểm tra luôn phiên" — tra tình trạng nhiều MST SONG
-# SONG (ban đầu mặc định 3 luồng, sau TĂNG lên 8 — xem Test 6 — khi
-# tracuunnt.gdt.gov.vn trở thành nguồn ưu tiên 1, chậm hơn hẳn XInvoice) thay
-# vì tuần tự từng cái, để tận dụng đầy đủ ngân sách thời gian
+# SONG (ban đầu mặc định 3 luồng, tăng lên 8 khi tracuunnt.gdt.gov.vn trở
+# thành nguồn ưu tiên 1 — chậm hơn hẳn XInvoice — rồi GIẢM LẠI còn 5 sau khi
+# log thật cho thấy 8 luồng phản tác dụng, nghi bị WAF chặn — xem Test 6)
+# thay vì tuần tự từng cái, để tận dụng đầy đủ ngân sách thời gian
 # (_MST_NGAN_SACH_GIAY) dò được nhiều MST hơn trong cùng thời gian.
 
 
@@ -208,28 +209,27 @@ print("PASS 5: log tổng kết liệt kê ĐẦY ĐỦ từng MST chưa lấy �
       "chính MST đó, thay vì chỉ 1 ví dụ lỗi duy nhất — giúp chẩn đoán rõ ràng khi người dùng hỏi lại "
       "'sao vẫn còn?'.")
 
-# ===== Test 6 (QUAN TRỌNG — đúng lựa chọn người dùng đã xác nhận): mặc định
-# PHẢI là 8 luồng (không phải 3 như trước) — log thật cho thấy sau khi
-# tracuunnt.gdt.gov.vn (cần mở session + giải captcha bằng OCR, chậm hơn hẳn
-# 1 request đơn của XInvoice) trở thành nguồn ưu tiên 1, với 3 luồng/ngân
-# sách 40 giây chỉ tra kịp ~23/77 MST — đa số MST còn lại KHÔNG được thử qua
-# mạng LẦN NÀO (không phải MST xấu, chỉ chưa tới lượt). Người dùng được hỏi
-# và CHỌN tăng số luồng song song (thay vì tăng ngân sách thời gian tổng
-# hoặc giảm số lần thử captcha). Lệnh gọi THẬT trong export_excel() (không
-# truyền so_luong_song_song, dùng mặc định của hàm) phải dùng đúng số luồng
-# mới này. =====
+# ===== Test 6 (QUAN TRỌNG — đúng lựa chọn người dùng đã xác nhận, ĐÃ ĐIỀU
+# CHỈNH LẠI theo log thật): mặc định PHẢI là 5 luồng — từng tăng 3 -> 8 khi
+# tracuunnt.gdt.gov.vn trở thành nguồn ưu tiên 1, nhưng log thật với 8 luồng
+# lại TỆ HƠN HẲN (chỉ 4/77 tra được, so với 23/77 lúc 3 luồng) — nhiều MST
+# khác nhau cùng đoán sai captcha 6/6 lần + 1 số bị "Connection aborted",
+# dấu hiệu tracuunnt.gdt.gov.vn (WAF) CHẶN khi thấy quá nhiều phiên cùng lúc
+# — 8 luồng đã PHẢN TÁC DỤNG. Người dùng xác nhận chọn THỬ mức trung gian: 5
+# luồng. Lệnh gọi THẬT trong export_excel() (không truyền so_luong_song_song,
+# dùng mặc định của hàm) phải dùng đúng số luồng mới này. =====
 than_nested = extract_nested_fn('_prefetch_trang_thai_mst')
 m6 = re.search(r'def _prefetch_trang_thai_mst\([^)]*so_luong_song_song\s*=\s*(\d+)', than_nested)
-assert m6 is not None and m6.group(1) == '8', (
-    f"Mặc định so_luong_song_song PHẢI là 8 (tăng từ 3, đúng lựa chọn người dùng đã xác nhận để tra "
-    f"được nhiều MST hơn qua tracuunnt.gdt.gov.vn trong cùng ngân sách thời gian) — got {m6.group(1) if m6 else None}")
+assert m6 is not None and m6.group(1) == '5', (
+    f"Mặc định so_luong_song_song PHẢI là 5 (giảm từ 8, đúng lựa chọn người dùng đã xác nhận sau khi "
+    f"log thật cho thấy 8 luồng phản tác dụng — tỷ lệ tra được giảm mạnh, nghi bị WAF của "
+    f"tracuunnt.gdt.gov.vn chặn) — got {m6.group(1) if m6 else None}")
 loi_goi_that = re.search(r'_prefetch_trang_thai_mst\(\s*"BK Mua vào"[^)]*\)', src)
 assert loi_goi_that is not None and 'so_luong_song_song' not in loi_goi_that.group(0), (
     "Lệnh gọi thật trong export_excel() (sheet BK Mua vào) phải KHÔNG truyền so_luong_song_song riêng, "
     "để dùng đúng mặc định mới của hàm — nếu test này fail nghĩa là có ai đó đã ghi đè giá trị khác ở "
     "đây, cần xem lại cho khớp.")
-print("PASS 6: mặc định so_luong_song_song=8 (tăng từ 3), lệnh gọi thật trong export_excel() dùng đúng "
-      "mặc định này — đúng lựa chọn người dùng đã xác nhận để tra được nhiều MST hơn qua "
-      "tracuunnt.gdt.gov.vn trong cùng ngân sách thời gian.")
+print("PASS 6: mặc định so_luong_song_song=5 (giảm từ 8 sau khi log thật cho thấy 8 luồng phản tác "
+      "dụng, nghi bị WAF chặn), lệnh gọi thật trong export_excel() dùng đúng mặc định này.")
 
 print("\nALL DONE")

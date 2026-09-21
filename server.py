@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.347"
+APP_BUILD = "2026-09-21.348"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -35574,8 +35574,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             for c in range(1, n_cols + 1):
                 ws_.cell(row_idx, c).fill = _mst_do_nhat
 
-    def _prefetch_trang_thai_mst(nhan, danh_sach_mst, so_luong_song_song=8):
-        """Tra TRƯỚC tình trạng NHIỀU MST CÙNG LÚC (song song, mặc định 8
+    def _prefetch_trang_thai_mst(nhan, danh_sach_mst, so_luong_song_song=5):
+        """Tra TRƯỚC tình trạng NHIỀU MST CÙNG LÚC (song song, mặc định 5
         luồng thay phiên nhau) thay vì tra TUẦN TỰ từng MST một — với bảng
         kê có hàng trăm nhà cung cấp/khách hàng khác nhau, chạy song song
         giúp tận dụng ĐẦY ĐỦ _MST_NGAN_SACH_GIAY giây ngân sách thời gian để
@@ -35588,18 +35588,21 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
 
         TỪNG là 3 luồng (theo yêu cầu người dùng ban đầu "có thể kiểm tra
         nhiều luồng được đẩy 3 luồng kiểm tra luân phiên", lúc nguồn tra MST
-        DUY NHẤT còn là API key XInvoice — 1 request là xong) — TĂNG lên 8
-        sau khi tracuunnt.gdt.gov.vn trở thành nguồn ưu tiên 1 (mỗi MST cần
-        MỞ SESSION + GIẢI CAPTCHA bằng OCR, chậm hơn hẳn 1 request đơn của
-        XInvoice): log thật cho thấy với 3 luồng/ngân sách 40 giây chỉ tra
-        kịp ~23/77 MST rồi hết giờ, đa số các MST còn lại KHÔNG được thử qua
-        mạng LẦN NÀO (không phải MST xấu, chỉ đơn giản chưa tới lượt) — người
-        dùng xác nhận chọn TĂNG SỐ LUỒNG (thay vì tăng ngân sách thời gian
-        tổng, tránh lặp lại phàn nàn "chạy lâu quá" trước đây, hoặc giảm số
-        lần thử captcha làm tốn thêm lượt gọi XInvoice trả phí). Đã có sẵn
-        lưới an toàn nếu 8 luồng khiến tracuunnt.gdt.gov.vn chặn/lỗi nhiều:
-        _TRACUUNNT_NGUONG_TAT (tự tạm tắt nguồn này sau 5 lỗi liên tiếp
-        trong lượt, rơi thẳng xuống XInvoice dự phòng, không treo/crash).
+        DUY NHẤT còn là API key XInvoice — 1 request là xong), sau TĂNG lên
+        8 khi tracuunnt.gdt.gov.vn trở thành nguồn ưu tiên 1 (mỗi MST cần MỞ
+        SESSION + GIẢI CAPTCHA bằng OCR, chậm hơn hẳn 1 request đơn của
+        XInvoice) — NHƯNG log thật với 8 luồng lại cho kết quả TỆ HƠN HẲN: từ
+        23/77 (3 luồng) xuống còn CHỈ 4/77 tra được, rất nhiều MST khác nhau
+        cùng đoán sai captcha đủ 6/6 lần + một số bị "Connection aborted —
+        Remote end closed connection" (trang chủ động ngắt kết nối), cả lượt
+        chạy xong chỉ trong 15 giây (thất bại gần như TỨC THÌ, không phải do
+        chờ hết timeout) — dấu hiệu rõ tracuunnt.gdt.gov.vn (đứng sau WAF F5)
+        CHẶN/GIỚI HẠN khi thấy quá nhiều phiên cùng lúc từ 1 IP, tức 8 luồng
+        đã PHẢN TÁC DỤNG. Người dùng xác nhận chọn THỬ mức trung gian: GIẢM
+        xuống 5 (vẫn cao hơn 3 gốc, thấp hơn hẳn 8) — cần theo dõi thêm ở các
+        lượt xuất Excel sau để biết có thật sự cải thiện hay chưa. Đã có sẵn
+        lưới an toàn nếu vẫn còn bị chặn/lỗi nhiều: _TRACUUNNT_NGUONG_TAT (tự
+        tạm tắt nguồn này sau 5 lỗi liên tiếp trong lượt, không treo/crash).
 
         nhan: tên hiển thị trong log tiến độ (vd "BK Mua vào"/"BK Bán ra") —
         BÁO TIẾN ĐỘ qua _tlog() mỗi 10 MST xong (và lúc bắt đầu/kết thúc) để
