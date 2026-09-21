@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.342"
+APP_BUILD = "2026-09-21.343"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2313,12 +2313,42 @@ def _svg_to_png_browser(svg_text: str, drv) -> bytes:
         pass
     return b""
 
+def _flatten_rgba_png(png_bytes: bytes) -> bytes:
+    """Làm PHẲNG (composite xuống nền TRẮNG) ảnh PNG có kênh ALPHA (trong
+    suốt) TRƯỚC khi OCR — xác nhận qua ảnh captcha THẬT của
+    tracuunnt.gdt.gov.vn (RGBA, nền trong suốt, chữ đen; user gửi file PNG
+    gốc, test trực tiếp bằng ddddocr xác nhận): ĐƠN GIẢN bỏ kênh alpha
+    (.convert('RGB')/('L') không composite, PIL chỉ cắt bỏ kênh alpha) để
+    lại phần RGB dưới vùng trong suốt gần như ĐEN TRÙNG MÀU CHỮ luôn — ảnh
+    kết quả gần như toàn đen, không còn phân biệt được chữ với "nền", khiến
+    ddddocr đoán ra RỖNG dù ảnh gốc (trình duyệt tự composite đúng với nền
+    trang, thường trắng/sáng) rất rõ ràng, dễ đọc bằng mắt thường. Ảnh
+    KHÔNG có kênh alpha (RGB/L bình thường) -> trả nguyên png_bytes, không
+    đổi gì (an toàn cho các nguồn captcha khác, vd _svg_to_png đã tự vẽ nền
+    trắng sẵn). Lỗi/không đọc được ảnh -> trả nguyên png_bytes gốc (không
+    có gì để mất)."""
+    try:
+        from PIL import Image
+        import io as _io
+        im = Image.open(_io.BytesIO(png_bytes))
+        if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+            im = im.convert("RGBA")
+            nen = Image.new("RGB", im.size, (255, 255, 255))
+            nen.paste(im, mask=im.split()[-1])
+            buf = _io.BytesIO()
+            nen.save(buf, format="PNG")
+            return buf.getvalue()
+    except Exception:
+        pass
+    return png_bytes
+
+
 def _preprocess_png(png_bytes: bytes) -> bytes:
     """Làm sạch PNG để ddddocr đoán chuẩn hơn: grayscale + threshold + phóng to."""
     try:
         from PIL import Image, ImageOps, ImageFilter
         import io as _io
-        im = Image.open(_io.BytesIO(png_bytes)).convert("L")
+        im = Image.open(_io.BytesIO(_flatten_rgba_png(png_bytes))).convert("L")
         # phóng to nếu nhỏ
         if im.width < 200:
             im = im.resize((im.width * 3, im.height * 3), Image.LANCZOS)
@@ -2425,6 +2455,11 @@ def _ocr_png(png_bytes: bytes, _debug=None) -> str:
     ocr = _get_ddddocr()
     if not ocr or not png_bytes:
         return ""
+    # Làm phẳng kênh alpha (nếu có) TRƯỚC CẢ lượt thử "ảnh gốc" — không chỉ
+    # trong _preprocess_png() — vì captcha THẬT của tracuunnt.gdt.gov.vn là
+    # RGBA nền trong suốt, ddddocr tự decode ảnh gốc (không qua
+    # _preprocess_png) CŨNG bị mất chữ y hệt nếu không làm phẳng trước.
+    png_bytes = _flatten_rgba_png(png_bytes)
     for buf in (png_bytes, _preprocess_png(png_bytes)):
         try:
             ans_raw = (ocr.classification(buf) or "").strip()

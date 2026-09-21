@@ -253,6 +253,7 @@ class _FakeOcr:
 
 ns9['_get_ddddocr'] = lambda: ns9['_fake_ocr']
 ns9['_preprocess_png'] = lambda b: b
+ns9['_flatten_rgba_png'] = lambda b: b   # không liên quan phần đang test (bộ lọc chuỗi), bỏ qua alpha
 exec(_than_ham('_ocr_png'), ns9)
 ocr_png = ns9['_ocr_png']
 
@@ -281,6 +282,98 @@ assert 'doan_debug' in than_tc9 and 'len(r_cap.content)' in than_tc9, (
     "không giúp chẩn đoán được gì thêm khi captcha thất bại LẶP LẠI 6/6 lần dù ddddocr đã nạp được.")
 print("PASS 9b: _tra_cuu_mst_qua_tracuunnt() kèm kích cỡ ảnh + chuỗi ddddocr thật sự đoán được vào "
       "thông báo lỗi cuối cùng, thay vì chỉ 1 câu chung chung không giúp chẩn đoán được gì thêm.")
+
+# ===== Test 9c (TÌM RA ĐÚNG NGUYÊN NHÂN GỐC — bug THẬT vừa xác nhận qua file
+# ảnh captcha THẬT người dùng gửi + test độc lập bằng ddddocr THẬT ngoài
+# phần mềm): captcha.png của tracuunnt.gdt.gov.vn là ảnh RGBA NỀN TRONG SUỐT
+# (đã xác nhận: pixel góc ảnh = (0,0,0,0) — đen, alpha=0). Trình duyệt tự
+# composite đúng với nền trang (trắng/sáng) nên NGƯỜI DÙNG thấy chữ rõ ràng
+# ("6r4yy"), nhưng PIL .convert('RGB')/('L') KHÔNG composite — chỉ CẮT BỎ
+# kênh alpha, để lại phần RGB dưới vùng trong suốt vốn gần như ĐEN TRÙNG MÀU
+# CHỮ luôn -> ảnh kết quả gần như toàn đen, ddddocr đoán ra RỖNG dù ảnh gốc
+# rất dễ đọc. Test bằng ddddocr THẬT (không mock) trên chính file ảnh thật
+# người dùng gửi, xác nhận: KHÔNG làm phẳng alpha trước -> đoán rỗng; CÓ làm
+# phẳng (composite xuống nền trắng) -> đoán ĐÚNG '6r4yy'. =====
+_duong_dan_fixture = os.path.join(_REPO_ROOT, 'tests', 'fixtures', 'tracuunnt_captcha_fixture_rgba.png')
+try:
+    import ddddocr as _ddddocr_that
+    _co_ddddocr_that = True
+except Exception:
+    _co_ddddocr_that = False
+
+if _co_ddddocr_that and os.path.exists(_duong_dan_fixture):
+    ns9c = _nap('_khong_dau')
+    exec(_than_ham('_flatten_rgba_png'), ns9c)
+    exec(_than_ham('_preprocess_png'), ns9c)
+    exec(_than_ham('_ocr_png'), ns9c)
+    _ocr_that = _ddddocr_that.DdddOcr(show_ad=False)
+    ns9c['_get_ddddocr'] = lambda: _ocr_that
+
+    anh_that = open(_duong_dan_fixture, 'rb').read()
+
+    from PIL import Image as _Image_t
+    import io as _io_t
+    im_that = _Image_t.open(_io_t.BytesIO(anh_that))
+    assert im_that.mode == "RGBA", f"Fixture phải đúng ảnh RGBA thật đã xác nhận — got mode={im_that.mode}"
+    assert im_that.getpixel((0, 0))[3] == 0, "Pixel góc ảnh phải TRONG SUỐT (alpha=0) — đúng ca thật đã xác nhận."
+
+    # KHÔNG làm phẳng alpha (mô phỏng hành vi CŨ trước khi sửa) -> ddddocr
+    # phải đoán RỖNG (tái hiện đúng bug thật).
+    ans_chua_sua = (_ocr_that.classification(anh_that) or "").strip()
+    assert ans_chua_sua == "", (
+        f"Xác nhận lại đúng bug gốc: KHÔNG làm phẳng alpha trước -> ddddocr phải đoán RỖNG trên ảnh "
+        f"thật này (như đã tái hiện được) — got {ans_chua_sua!r} (nếu ddddocr đã đoán ra được không cần "
+        f"làm phẳng thì có thể model đã đổi, xem lại giả thiết)")
+
+    # _ocr_png() (ĐÃ SỬA, tự làm phẳng alpha bên trong) -> phải đoán ĐÚNG.
+    debug9c = []
+    ket_qua_9c = ns9c['_ocr_png'](anh_that, debug9c)
+    assert ket_qua_9c == "6r4yy", (
+        f"_ocr_png() ĐÃ SỬA (tự làm phẳng alpha xuống nền trắng trước khi OCR) phải đọc ĐÚNG captcha "
+        f"thật '6r4yy' từ file ảnh RGBA nền trong suốt — got {ket_qua_9c!r}, debug={debug9c!r}")
+    print("PASS 9c: xác nhận ĐÚNG NGUYÊN NHÂN GỐC bằng ddddocr THẬT trên file ảnh captcha THẬT người "
+          "dùng gửi — captcha.png là RGBA nền trong suốt, không làm phẳng alpha thì ddddocr đoán rỗng; "
+          "_ocr_png() đã sửa (tự làm phẳng xuống nền trắng) đọc đúng '6r4yy'.")
+else:
+    print("BỎ QUA Test 9c: cần cài ddddocr thật + file tests/fixtures/tracuunnt_captcha_fixture_rgba.png "
+          "để xác nhận bằng OCR thật (môi trường này thiếu 1 trong 2, các test khác vẫn đủ để xác nhận "
+          "logic làm phẳng alpha qua Test 9d bên dưới, không cần ddddocr thật).")
+
+# ===== Test 9d (không cần ddddocr thật — kiểm tra ĐÚNG logic làm phẳng alpha
+# ở mức pixel, luôn chạy được dù môi trường không có ddddocr): _flatten_rgba_png()
+# phải composite ĐÚNG kênh alpha xuống nền TRẮNG (không phải chỉ cắt bỏ alpha)
+# — pixel trong suốt (alpha=0) trong ảnh RGBA phải thành TRẮNG (255,255,255)
+# sau khi làm phẳng, không phải giữ nguyên RGB gốc (thường là đen/tối với
+# ảnh captcha kiểu này). Ảnh KHÔNG có alpha (RGB thường) phải giữ NGUYÊN,
+# không bị đổi gì (an toàn cho các nguồn captcha khác đã tự vẽ nền trắng). =====
+if os.path.exists(_duong_dan_fixture):
+    ns9d = _nap('_khong_dau')
+    exec(_than_ham('_flatten_rgba_png'), ns9d)
+    from PIL import Image as _Image_d
+    import io as _io_d
+
+    anh_that_d = open(_duong_dan_fixture, 'rb').read()
+    da_lam_phang = ns9d['_flatten_rgba_png'](anh_that_d)
+    im_sau = _Image_d.open(_io_d.BytesIO(da_lam_phang))
+    assert im_sau.mode == "RGB", f"Sau khi làm phẳng phải hết kênh alpha (mode RGB) — got {im_sau.mode}"
+    assert im_sau.getpixel((0, 0)) == (255, 255, 255), (
+        f"Pixel TRONG SUỐT (alpha=0) trong ảnh gốc phải thành TRẮNG (255,255,255) sau khi composite "
+        f"— KHÔNG được chỉ cắt bỏ alpha (sẽ giữ nguyên RGB gốc, thường đen/tối, làm mất chữ) "
+        f"— got {im_sau.getpixel((0, 0))}")
+
+    # Ảnh KHÔNG có alpha -> phải giữ NGUYÊN, không đổi.
+    anh_rgb_thuong = _Image_d.new("RGB", (10, 10), (128, 64, 32))
+    buf_thuong = _io_d.BytesIO()
+    anh_rgb_thuong.save(buf_thuong, format="PNG")
+    khong_alpha_bytes = buf_thuong.getvalue()
+    ket_qua_khong_alpha = ns9d['_flatten_rgba_png'](khong_alpha_bytes)
+    assert ket_qua_khong_alpha == khong_alpha_bytes, (
+        "Ảnh KHÔNG có kênh alpha (RGB thường) phải trả về NGUYÊN VẸN, không bị đổi gì — an toàn cho các "
+        "nguồn captcha khác (vd _svg_to_png đã tự vẽ nền trắng sẵn, không cần/không nên làm phẳng lại).")
+    print("PASS 9d: _flatten_rgba_png() composite ĐÚNG kênh alpha xuống nền trắng (pixel trong suốt "
+          "thành trắng, không phải giữ nguyên RGB tối gốc), và KHÔNG đổi gì với ảnh không có alpha.")
+else:
+    print("BỎ QUA Test 9d: thiếu file tests/fixtures/tracuunnt_captcha_fixture_rgba.png")
 
 # ===== Test 10 (không hồi quy — endpoint xem ảnh captcha thật, ca thật vừa
 # gặp: ddddocr đoán RỖNG HOÀN TOÀN 6/6 lần dù ảnh nhận được có kích cỡ hợp
