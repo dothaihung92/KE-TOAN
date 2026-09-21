@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.345"
+APP_BUILD = "2026-09-21.346"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33600,6 +33600,17 @@ _MST_NGAN_SACH_GIAY = 40   # giây tối đa dành cho việc tra MST MỚI tron
 # cần lưu DB vì chỉ ảnh hưởng trong phiên làm việc hiện tại.
 _XINVOICE_KEY_STATE = {"idx": 0, "lock": threading.Lock()}
 
+# TẠM DỪNG (KHÔNG xoá code) dùng XInvoice làm nguồn dự phòng khi tra tình
+# trạng MST — theo yêu cầu người dùng sau khi thấy log thật: CẢ 2 key
+# XInvoice đã cấu hình đều HTTP 429 "Exceeded free tier limit" (hết hạn mức
+# gói free tier) HOẶC "Read timed out" (mạng/API chậm), khiến mỗi lượt gọi
+# XInvoice dự phòng chỉ tốn thêm thời gian chờ timeout vô ích chứ không tra
+# được gì — trong lúc chờ hạn mức gói tự làm mới/nâng cấp gói, tạm dừng hẳn
+# việc gọi XInvoice, CHỈ dùng tracuunnt.gdt.gov.vn. Đổi lại False (không cần
+# sửa gì khác) khi hạn mức gói XInvoice đã có lại để khôi phục chuỗi dự
+# phòng đầy đủ.
+_XINVOICE_TAM_DUNG = True
+
 
 def _phan_loai_trang_thai_mst(mo_ta):
     """Phân loại tình trạng hoạt động MST từ 1 đoạn mô tả dạng chữ (trường
@@ -33803,6 +33814,29 @@ def _doc_bang_trang_thai_tracuunnt(html, mst_c):
     return ""
 
 
+def _trich_doan_loi_html_tracuunnt(html, do_dai=200):
+    """Trích đoạn văn bản NGẮN GỌN (bỏ hết thẻ HTML/script/style) từ trang
+    tracuunnt.gdt.gov.vn trả về khi KHÔNG ra bảng kết quả — dùng để CHẨN
+    ĐOÁN lý do THẬT: code cũ chỉ đoán chung chung "có thể đã đoán sai
+    captcha" cho MỌI trường hợp không thấy "Trạng thái MST" trong HTML, dù
+    lý do thật có thể KHÁC hẳn (trang WAF chặn tạm do gọi dồn dập nhiều
+    luồng cùng lúc, trang báo lỗi hệ thống, hết phiên làm việc...) — log
+    thật cho thấy RẤT NHIỀU MST khác nhau cùng thất bại đủ 6/6 lần trong 1
+    lượt xuất Excel (sau khi tăng số luồng song song 3 -> 8), đáng ngờ hơn
+    là ngẫu nhiên đoán sai captcha 6 lần liên tiếp cho từng đó MST khác
+    nhau — cần thấy được TRANG THẬT SỰ nói gì để biết chắc."""
+    import re as _re_h
+    import html as _html_h
+    try:
+        txt = _re_h.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html or '', flags=_re_h.S | _re_h.I)
+        txt = _re_h.sub(r'<[^>]+>', ' ', txt)
+        txt = _html_h.unescape(txt)
+        txt = _re_h.sub(r'\s+', ' ', txt).strip()
+        return txt[:do_dai]
+    except Exception:
+        return ""
+
+
 _SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # captcha trang này KHÓ — người dùng xác nhận tự nhập tay còn phải thử 3-5 lần
 
 
@@ -33928,8 +33962,15 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
         if "Trạng thái MST" not in html:
             # Không có cả bảng kết quả -> nhiều khả năng đoán sai mã captcha
             # (trang báo lỗi captcha khác nhau tuỳ phiên bản, không bám 1 câu
-            # chữ cụ thể) -> ĐÁNG thử lại với captcha mới.
-            ly_do_loi_cuoi = f"có thể đã đoán sai captcha '{ma_captcha}' (lần {lan}/{_SO_LAN_THU_CAPTCHA_TRACUUNNT}), không ra bảng kết quả"
+            # chữ cụ thể) -> ĐÁNG thử lại với captcha mới. NHƯNG cũng kèm
+            # THẲNG đoạn văn bản thật trang trả về (_trich_doan_loi_html_tracuunnt)
+            # — "có thể đã đoán sai captcha" chỉ là PHỎNG ĐOÁN, lý do thật có
+            # thể khác hẳn (bị chặn tạm/lỗi hệ thống/hết phiên) — xem đoạn
+            # văn bản thật mới biết chắc, thay vì đoán mù.
+            doan_html = _trich_doan_loi_html_tracuunnt(html)
+            ly_do_loi_cuoi = (f"có thể đã đoán sai captcha '{ma_captcha}' (lần {lan}/"
+                             f"{_SO_LAN_THU_CAPTCHA_TRACUUNNT}), không ra bảng kết quả"
+                             + (f" — trang trả về: {doan_html!r}" if doan_html else ""))
             continue
 
         # Đã CÓ bảng kết quả -> captcha chắc chắn ĐÚNG (trang đã chạy tra cứu
@@ -33972,6 +34013,13 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     gọi khi tracuunnt.gdt.gov.vn không tra được). VietQR (api.vietqr.io) và
     masothue.com đã BỎ HẲN khỏi codebase theo yêu cầu người dùng (đặt
     tracuunnt.gdt.gov.vn làm nguồn chính thức nhất, XInvoice làm dự phòng).
+
+    ═══ XInvoice ĐANG TẠM DỪNG (_XINVOICE_TAM_DUNG=True) ═══ — log thật cho
+    thấy CẢ 2 key XInvoice đã cấu hình đều HTTP 429 "Exceeded free tier
+    limit"/timeout, gọi dự phòng chỉ tốn thêm thời gian chờ vô ích — hàm này
+    HIỆN CHỈ gọi tracuunnt.gdt.gov.vn, code XInvoice VẪN CÒN NGUYÊN (chỉ
+    tạm dừng gọi qua cờ _XINVOICE_TAM_DUNG, không xoá) để khôi phục ngay khi
+    hạn mức gói có lại.
 
     LUÔN tra cứu qua mạng TẠI THỜI ĐIỂM HIỆN TẠI, KHÔNG lưu/dùng lại kết quả
     cũ qua nhiều lần xuất Excel khác nhau — theo đúng yêu cầu người dùng
@@ -34022,19 +34070,19 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     het_han_muc = chi_dung_cache or bo_dem_da_toi_han
     if het_han_muc:
         # Đã hết ngân sách thời gian CHO LƯỢT NÀY, hoặc đã lỗi liên tiếp quá
-        # nhiều lần (cả tracuunnt.gdt.gov.vn lẫn XInvoice dự phòng đều không
-        # tra được, vd mất mạng/captcha liên tục sai/hết hạn mức key) -> khỏi
-        # thử mạng nữa cho MST này trong lượt xuất Excel này -> để trống an
-        # toàn (canh_bao=None, không suy đoán). GHI RÕ ly_do_loi để người
+        # nhiều lần (tracuunnt.gdt.gov.vn không tra được — XInvoice dự phòng
+        # ĐANG TẠM DỪNG, xem _XINVOICE_TAM_DUNG, nên KHÔNG tính vào đây) ->
+        # khỏi thử mạng nữa cho MST này trong lượt xuất Excel này -> để trống
+        # an toàn (canh_bao=None, không suy đoán). GHI RÕ ly_do_loi để người
         # dùng còn biết được VÌ SAO các MST này vẫn chưa dò được (đúng câu
         # hỏi người dùng đã hỏi "sao vẫn còn?") thay vì không thấy dòng "VÍ
         # DỤ LỖI GẶP PHẢI" nào trong log dù vẫn còn MST trống.
         return {"trang_thai": "", "canh_bao": None,
                "ly_do_loi": ("Hết ngân sách thời gian tra MST trong lượt xuất Excel này"
                              if chi_dung_cache else
-                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (cả tracuunnt.gdt.gov.vn lẫn "
-                             "XInvoice dự phòng đều không tra được) để tránh treo lâu — sẽ tự thử "
-                             "lại ở lượt xuất Excel sau")}
+                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (tracuunnt.gdt.gov.vn không tra "
+                             "được — XInvoice dự phòng đang tạm dừng do hết hạn mức gói) để tránh "
+                             "treo lâu — sẽ tự thử lại ở lượt xuất Excel sau")}
 
     danh_sach_keys = _lay_danh_sach_xinvoice_keys()
 
@@ -34077,8 +34125,9 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     if not thanh_cong:
         ly_do_loi = f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt}"
 
-    # ── DỰ PHÒNG: XInvoice — CHỈ gọi khi tracuunnt.gdt.gov.vn không tra được ──
-    for buoc in range(0 if thanh_cong else so_key):
+    # ── DỰ PHÒNG: XInvoice — CHỈ gọi khi tracuunnt.gdt.gov.vn không tra được
+    # VÀ chưa bị tạm dừng (_XINVOICE_TAM_DUNG, xem chú thích ở đầu hàm) ──
+    for buoc in range(0 if (thanh_cong or _XINVOICE_TAM_DUNG) else so_key):
         idx_key = (idx_bat_dau + buoc) % so_key
         k = danh_sach_keys[idx_key]
         thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_xinvoice, loi_do_key = _goi_1_lan_xinvoice(

@@ -19,15 +19,21 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 # là tracuunnt.gdt.gov.vn (cổng công khai chính thức của Tổng cục Thuế, miễn
 # phí, không hạn mức gói) — _goi_1_lan_xinvoice (API trả phí, cần client-id/
 # api-key) là NGUỒN DỰ PHÒNG, CHỈ gọi khi tracuunnt.gdt.gov.vn không tra
-# được. VietQR (api.vietqr.io) và masothue.com đã BỎ HẲN khỏi server.py. File
-# test này CHỈ kiểm tra phần orchestration CHUNG (thứ tự ưu tiên, luân phiên
-# key XInvoice, validate MST, circuit breaker, ngân sách thời gian, gộp tiền
-# tố lỗi) qua 2 stub đơn giản cho _tra_cuu_mst_qua_tracuunnt/
-# _goi_1_lan_xinvoice — hành vi THẬT của tracuunnt.gdt.gov.vn (session/
-# captcha/HTML) có test riêng ở test_tra_mst_qua_tracuunnt.py. Cũng KHÔNG có
-# cache dài hạn (bảng mst_status_cache) — LUÔN tra cứu thật sự qua mạng mỗi
-# lần gọi (trừ dedup trong bộ nhớ CHỈ trong CÙNG 1 lượt xuất Excel — xem
-# _mst_status_local ở export_excel, không có trong phạm vi test file này).
+# được VÀ chưa bị tạm dừng. VietQR (api.vietqr.io) và masothue.com đã BỎ HẲN
+# khỏi server.py. XInvoice hiện ĐANG TẠM DỪNG (_XINVOICE_TAM_DUNG=True,
+# code vẫn còn nguyên) — log thật cho thấy cả 2 key đã cấu hình đều hết hạn
+# mức gói (HTTP 429)/timeout, gọi dự phòng chỉ tốn thêm thời gian vô ích —
+# xem Test 15. Các test 8-14 CHỦ ĐỘNG mở cờ này ra (_XINVOICE_TAM_DUNG=False
+# trong ns) để kiểm tra riêng LOGIC chuỗi dự phòng (thứ tự ưu tiên, luân
+# phiên key XInvoice, gộp tiền tố lỗi), không phụ thuộc giá trị THẬT đang
+# cấu hình lúc này. File test này CHỈ kiểm tra phần orchestration CHUNG
+# (validate MST, circuit breaker, ngân sách thời gian) qua 2 stub đơn giản
+# cho _tra_cuu_mst_qua_tracuunnt/_goi_1_lan_xinvoice — hành vi THẬT của
+# tracuunnt.gdt.gov.vn (session/captcha/HTML) có test riêng ở
+# test_tra_mst_qua_tracuunnt.py. Cũng KHÔNG có cache dài hạn (bảng
+# mst_status_cache) — LUÔN tra cứu thật sự qua mạng mỗi lần gọi (trừ dedup
+# trong bộ nhớ CHỈ trong CÙNG 1 lượt xuất Excel — xem _mst_status_local ở
+# export_excel, không có trong phạm vi test file này).
 
 
 def extract_fn(name):
@@ -111,6 +117,14 @@ ns['_goi_1_lan_xinvoice'] = _fake_xinvoice
 _danh_sach_keys_gia = [{"client_id": "key1", "api_key": "sec1"}]
 ns['_lay_danh_sach_xinvoice_keys'] = lambda: _danh_sach_keys_gia
 ns['_XINVOICE_KEY_STATE'] = {"idx": 0, "lock": threading.Lock()}
+# CÁC TEST TỪ 8 TRỞ ĐI (trừ Test 15) kiểm tra ĐÚNG LOGIC chuỗi dự phòng
+# tracuunnt.gdt.gov.vn -> XInvoice — nên CHỦ ĐỘNG mở cờ này (False = KHÔNG
+# tạm dừng) để test được logic đó, KHÔNG PHỤ THUỘC giá trị THẬT
+# (_XINVOICE_TAM_DUNG=True) đang cấu hình trong server.py lúc này (log thật
+# cho thấy cả 2 key XInvoice đều hết hạn mức gói/timeout, người dùng xác
+# nhận tạm dừng gọi XInvoice — xem Test 15 kiểm tra ĐÚNG hành vi khi cờ THẬT
+# đang bật).
+ns['_XINVOICE_TAM_DUNG'] = False
 exec(extract_fn('_tra_cuu_trang_thai_mst'), ns)
 _phan_loai_trang_thai_mst = ns['_phan_loai_trang_thai_mst']
 _tra_cuu_trang_thai_mst = ns['_tra_cuu_trang_thai_mst']
@@ -125,6 +139,7 @@ def _reset():
     _fake_xinvoice.ket_qua_mac_dinh = (True, "NNT đang hoạt động", False, None, False)
     _danh_sach_keys_gia[:] = [{"client_id": "key1", "api_key": "sec1"}]
     ns['_XINVOICE_KEY_STATE']["idx"] = 0
+    ns['_XINVOICE_TAM_DUNG'] = False
 
 
 # ===== Test 1-6: _phan_loai_trang_thai_mst() — phân loại theo nội dung trường
@@ -358,5 +373,29 @@ assert _fake_xinvoice.calls == 0, (
 assert "tracuunnt.gdt.gov.vn:" in (r14.get("ly_do_loi") or ""), f"got {r14}"
 print("PASS 14: chưa cấu hình key XInvoice nào -> không gọi XInvoice, không crash, chỉ dựa vào "
       "tracuunnt.gdt.gov.vn.")
+
+# ===== Test 15 (QUAN TRỌNG — đúng yêu cầu người dùng: "hãy tạm dừng
+# xinvoice.vn chỉ dùng tracuunnt.gdt.gov.vn để tra cứu" sau khi log thật cho
+# thấy CẢ 2 key XInvoice đều HTTP 429 "Exceeded free tier limit"/timeout):
+# khi cờ _XINVOICE_TAM_DUNG=True (giá trị THẬT đang cấu hình trong
+# server.py, KHÁC các Test 8-14 ở trên chủ động mở cờ này ra để test riêng
+# logic dự phòng), _tra_cuu_trang_thai_mst() PHẢI KHÔNG gọi XInvoice dù
+# tracuunnt.gdt.gov.vn thất bại — kể cả khi ĐÃ cấu hình sẵn key. =====
+_reset()
+ns['_XINVOICE_TAM_DUNG'] = True
+_fake_tracuunnt.ket_qua = (False, "", None, "không giải được captcha (OCR không đọc ra)")
+r15 = _tra_cuu_trang_thai_mst("0319555555", timeout=1)
+assert r15["canh_bao"] is None
+assert _fake_tracuunnt.calls == 1, f"vẫn phải gọi tracuunnt.gdt.gov.vn — got {_fake_tracuunnt.calls}"
+assert _fake_xinvoice.calls == 0, (
+    f"_XINVOICE_TAM_DUNG=True -> TUYỆT ĐỐI không được gọi XInvoice dù tracuunnt.gdt.gov.vn thất bại và "
+    f"ĐÃ có cấu hình key — got {_fake_xinvoice.calls} lượt gọi")
+assert r15.get("ly_do_loi") == "tracuunnt.gdt.gov.vn: không giải được captcha (OCR không đọc ra)", (
+    f"ly_do_loi chỉ được nhắc tới tracuunnt.gdt.gov.vn (XInvoice đang tạm dừng, không tham gia) "
+    f"— got {r15.get('ly_do_loi')!r}")
+ns['_XINVOICE_TAM_DUNG'] = False   # trả lại mặc định cho các test khác nếu file được import lại
+print("PASS 15: XInvoice đang TẠM DỪNG (_XINVOICE_TAM_DUNG=True, giá trị THẬT trong server.py) -> "
+      "KHÔNG gọi XInvoice dù tracuunnt.gdt.gov.vn thất bại và đã có cấu hình key — chỉ dựa vào "
+      "tracuunnt.gdt.gov.vn, đúng yêu cầu người dùng sau khi cả 2 key XInvoice đều hết hạn mức gói.")
 
 print("\nALL DONE")

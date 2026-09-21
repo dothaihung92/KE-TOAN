@@ -393,4 +393,54 @@ assert '"https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png"' in than_xem, (
 print("PASS 10: có endpoint /api/xem-captcha-tracuunnt trả thẳng ảnh captcha thật (image/png) để xem "
       "trực tiếp trên trình duyệt, dùng chung cơ chế session/fallback SSL với hàm tra cứu thật.")
 
+# ===== Test 11 (QUAN TRỌNG — ca thật vừa gặp: RẤT NHIỀU MST khác nhau cùng
+# thất bại đủ 6/6 lần captcha trong 1 lượt xuất Excel — đáng ngờ hơn ngẫu
+# nhiên đoán sai captcha 6 lần liên tiếp cho từng đó MST khác nhau, có thể
+# do lý do KHÁC hẳn "đoán sai captcha" — vd trang WAF chặn tạm do gọi dồn
+# dập nhiều luồng cùng lúc — mà câu thông báo cũ "có thể đã đoán sai
+# captcha" không phản ánh đúng): khi không ra bảng kết quả, PHẢI trích kèm
+# đoạn văn bản THẬT trang trả về (không phải chỉ đoán mù), để biết chắc lần
+# sau. =====
+ns11 = _nap('_khong_dau')
+exec(_than_ham('_trich_doan_loi_html_tracuunnt'), ns11)
+trich = ns11['_trich_doan_loi_html_tracuunnt']
+r11a = trich('<html><body><script>var x=1;</script><p>Bạn đã gửi quá nhiều '
+             'yêu cầu, vui lòng thử lại sau &amp; kiên nhẫn.</p></body></html>')
+assert 'Bạn đã gửi quá nhiều yêu cầu' in r11a and '<' not in r11a and '&amp;' not in r11a, (
+    f"Phải bỏ hết thẻ HTML/script, giải mã HTML entity, giữ lại đúng văn bản thật — got {r11a!r}")
+r11b = trich('a' * 500, do_dai=50)
+assert len(r11b) == 50, f"Phải giới hạn độ dài (tránh log quá dài) — got độ dài {len(r11b)}"
+r11c = trich(None)
+assert r11c == "", f"HTML rỗng/None không được crash, trả rỗng — got {r11c!r}"
+print("PASS 11a: _trich_doan_loi_html_tracuunnt() trích đúng văn bản thật (bỏ thẻ/script, giải mã "
+      "entity, giới hạn độ dài), không crash với input rỗng.")
+
+than_tc11 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
+assert '_trich_doan_loi_html_tracuunnt(html)' in than_tc11 and 'doan_html' in than_tc11, (
+    "_tra_cuu_mst_qua_tracuunnt() phải gọi _trich_doan_loi_html_tracuunnt() và đưa vào ly_do_loi_cuoi "
+    "khi không ra bảng kết quả, thay vì chỉ 1 câu đoán mù 'có thể đã đoán sai captcha' không giúp chẩn "
+    "đoán được gì thêm khi RẤT NHIỀU MST khác nhau cùng thất bại 6/6 lần trong 1 lượt.")
+print("PASS 11b: _tra_cuu_mst_qua_tracuunnt() kèm đoạn văn bản THẬT trang trả về vào thông báo lỗi khi "
+      "không ra bảng kết quả, thay vì chỉ đoán mù 'có thể đã đoán sai captcha'.")
+
+# ===== Test 12 (QUAN TRỌNG — đúng yêu cầu người dùng: "hãy tạm dừng
+# xinvoice.vn chỉ dùng tracuunnt.gdt.gov.vn để tra cứu" sau khi log thật cho
+# thấy CẢ 2 key XInvoice đã cấu hình đều HTTP 429 "Exceeded free tier
+# limit"/timeout — gọi XInvoice dự phòng chỉ tốn thêm thời gian chờ vô ích):
+# _tra_cuu_trang_thai_mst() phải KHÔNG gọi _goi_1_lan_xinvoice() khi cờ
+# _XINVOICE_TAM_DUNG đang True (mặc định hiện tại), NHƯNG code XInvoice vẫn
+# phải CÒN NGUYÊN trong file (chỉ tạm dừng gọi qua cờ, không xoá) để khôi
+# phục ngay khi hạn mức gói có lại — TẠM DỪNG khác hẳn BỎ HẲN (đã áp dụng
+# đúng cho VietQR/masothue.com ở Test 5, không lẫn 2 khái niệm này). =====
+assert 'def _goi_1_lan_xinvoice(' in src, (
+    "_goi_1_lan_xinvoice() phải CÒN NGUYÊN trong file (TẠM dừng gọi, không xoá code) — khác VietQR/"
+    "masothue.com đã BỎ HẲN.")
+assert re.search(r'^_XINVOICE_TAM_DUNG\s*=\s*True', src, re.M), (
+    "Phải có cờ _XINVOICE_TAM_DUNG=True (mặc định TẠM dừng gọi XInvoice) — đúng yêu cầu người dùng sau "
+    "khi thấy cả 2 key XInvoice đều hết hạn mức gói/timeout, gọi dự phòng chỉ tốn thêm thời gian vô ích.")
+assert '_XINVOICE_TAM_DUNG' in than_chinh, (
+    "_tra_cuu_trang_thai_mst() phải kiểm tra cờ _XINVOICE_TAM_DUNG trước khi gọi _goi_1_lan_xinvoice().")
+print("PASS 12: XInvoice đang TẠM dừng qua cờ _XINVOICE_TAM_DUNG=True (code vẫn còn nguyên, không xoá) "
+      "— đúng yêu cầu người dùng sau khi cả 2 key đều hết hạn mức gói/timeout.")
+
 print("\nALL DONE")
