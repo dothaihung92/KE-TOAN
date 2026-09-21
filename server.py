@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.341"
+APP_BUILD = "2026-09-21.342"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2413,22 +2413,24 @@ def _solve_captcha(content: str, drv=None) -> str:
 def _ocr_png(png_bytes: bytes, _debug=None) -> str:
     """OCR 1 ảnh PNG bằng ddddocr, thử cả ảnh gốc và ảnh đã làm sạch. '' nếu fail.
 
-    _debug (tuỳ chọn): list để ghi lại CHUỖI THẬT ĐÃ ĐOÁN được ở mỗi lần thử
-    (kể cả khi bị loại vì sai độ dài 4-10 ký tự, hoặc lỗi exception) — dùng
-    để chẩn đoán khi 1 nguồn nào đó báo "không giải được captcha" LẶP LẠI
-    nhiều lần: rỗng hoàn toàn (ddddocr không đọc ra gì, có thể do ảnh hỏng/
-    khác định dạng model quen) khác hẳn với đoán ra chuỗi sai/quá ngắn/quá
-    dài (model có đọc được nhưng captcha quá khó/kiểu font lạ)."""
+    _debug (tuỳ chọn): list để ghi lại CẢ chuỗi THÔ (raw, trước khi lọc ký tự
+    lạ) LẪN chuỗi ĐÃ LỌC ở mỗi lần thử (dạng "raw_repr -> loc_repr", kể cả
+    khi bị loại vì sai độ dài 4-10 ký tự, hoặc lỗi exception) — dùng để chẩn
+    đoán khi 1 nguồn nào đó báo "không giải được captcha" LẶP LẠI nhiều lần:
+    PHÂN BIỆT được 3 ca khác nhau: (1) model đoán ra CHUỖI RỖNG THẬT SỰ
+    (raw=''), (2) model đoán ra CÓ chữ nhưng TOÀN ký tự lạ bị lọc sạch hết
+    (vd raw chứa ký tự Unicode khác — loc rỗng dù raw không rỗng), (3) model
+    đoán ra chuỗi hợp lệ nhưng SAI ĐỘ DÀI (quá ngắn/quá dài)."""
     import re as _re_o
     ocr = _get_ddddocr()
     if not ocr or not png_bytes:
         return ""
     for buf in (png_bytes, _preprocess_png(png_bytes)):
         try:
-            ans = (ocr.classification(buf) or "").strip()
-            ans = _re_o.sub(r'[^A-Za-z0-9]', '', ans)
+            ans_raw = (ocr.classification(buf) or "").strip()
+            ans = _re_o.sub(r'[^A-Za-z0-9]', '', ans_raw)
             if _debug is not None:
-                _debug.append(ans)
+                _debug.append(f"{ans_raw!r} -> {ans!r}")
             if 4 <= len(ans) <= 10:
                 return ans
         except Exception as _e_ocr:

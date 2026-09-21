@@ -225,16 +225,16 @@ assert '_DDDDOCR_ERR' in than_tc2, "Phải kèm chi tiết lỗi thật (_DDDDOC
 print("PASS 8: kiểm tra ddddocr nạp được ngay từ đầu, tránh lãng phí 6 lượt gọi mạng vô ích, trỏ đúng cách tự khắc phục.")
 
 # ===== Test 9 (bug/ca thật người dùng vừa báo qua endpoint chẩn đoán: "không
-# giải được captcha (OCR không đọc ra) (đã thử 6 lần captcha)" — ddddocr CÓ
-# nạp được (đã qua nhánh kiểm tra sớm ở Test 8) nhưng captcha vẫn không giải
-# được đủ 6/6 lần THẬT SỰ đã thử mạng, khác hẳn ca "ddddocr chưa nạp được"):
-# _ocr_png() phải cho phép GHI LẠI chuỗi THẬT ĐÃ ĐOÁN được (debug list) ở mỗi
-# lần thử — kể cả khi bị loại vì sai độ dài — và _tra_cuu_mst_qua_tracuunnt()
-# phải TRUYỀN debug list đó vào ly_do_loi_cuoi kèm kích cỡ ảnh captcha nhận
-# được, để phân biệt được "ddddocr đọc ra rỗng hoàn toàn" (có thể ảnh hỏng/
-# bị chặn) với "đọc ra chuỗi sai/quá ngắn/quá dài" (model đọc được nhưng
-# captcha quá khó) — không còn chỉ 1 câu chung chung "OCR không đọc ra"
-# không giúp chẩn đoán được gì thêm. =====
+# giải được captcha (ảnh 1184 byte, ddddocr đoán: ['', '']) (đã thử 6 lần
+# captcha)" — ảnh xem trực tiếp qua /api/xem-captcha-tracuunnt cho thấy
+# captcha RẤT RÕ RÀNG, dễ đọc bằng mắt thường ("n5xa3", chữ đậm, ít nhiễu) —
+# ddddocr CÓ nạp được (đã qua nhánh kiểm tra sớm ở Test 8) nhưng đoán ra
+# CHUỖI RỖNG dù captcha dễ, cần phân biệt RÕ RÀNG 2 khả năng: (a) model THẬT
+# SỰ trả về '' (không đọc được gì), hay (b) model trả về CÓ chữ nhưng TOÀN
+# ký tự bị bộ lọc [^A-Za-z0-9] xoá sạch (vd ký tự Unicode/dấu câu lạ) — 2 ca
+# này có nguyên nhân và cách sửa khác hẳn nhau, nên debug list phải ghi CẢ
+# chuỗi THÔ (trước lọc) LẪN chuỗi ĐÃ LỌC, không chỉ mỗi chuỗi đã lọc như
+# trước (khiến ca (b) trông giống hệt ca (a), không phân biệt được). =====
 ns9 = _nap('_khong_dau')
 exec("import re as _re_o", ns9)
 
@@ -242,7 +242,8 @@ exec("import re as _re_o", ns9)
 class _FakeOcr:
     """Giả lập ddddocr.DdddOcr() — trả về LẦN LƯỢT các chuỗi đã cấu hình sẵn
     cho từng lần gọi .classification(), mô phỏng đúng ca thật: đoán ra chuỗi
-    RỖNG hoặc QUÁ NGẮN liên tục (không phải exception, không phải None)."""
+    RỖNG/QUÁ NGẮN/TOÀN KÝ TỰ LẠ liên tục (không phải exception, không phải
+    None)."""
     def __init__(self, cac_ket_qua):
         self._ds = list(cac_ket_qua)
 
@@ -255,15 +256,21 @@ ns9['_preprocess_png'] = lambda b: b
 exec(_than_ham('_ocr_png'), ns9)
 ocr_png = ns9['_ocr_png']
 
-ns9['_fake_ocr'] = _FakeOcr(["", "12"])   # ảnh gốc: rỗng hoàn toàn; ảnh đã làm sạch: quá ngắn (2 ký tự)
+# Lượt 1 (ảnh gốc): model trả về RỖNG THẬT SỰ ('') -> ca (a).
+# Lượt 2 (ảnh đã làm sạch): model trả về CÓ chữ ('###') nhưng TOÀN ký tự bị
+# bộ lọc [^A-Za-z0-9] xoá sạch -> sau lọc cũng thành '' -> ca (b), PHẢI phân
+# biệt được với lượt 1 qua debug list (chuỗi thô khác nhau: '' vs '###').
+ns9['_fake_ocr'] = _FakeOcr(["", "###"])
 debug9 = []
 r9 = ocr_png(b"\x89PNG-gia-lap-du-lieu-anh-captcha", debug9)
 assert r9 == "", f"Cả 2 lần thử đều KHÔNG đạt độ dài hợp lệ (4-10 ký tự) -> phải trả rỗng — got {r9!r}"
-assert debug9 == ["", "12"], (
-    f"debug list phải ghi lại ĐÚNG chuỗi thật đã đoán được ở mỗi lần thử (kể cả bị loại vì sai độ dài) "
+assert debug9 == ["'' -> ''", "'###' -> ''"], (
+    f"debug list phải ghi lại CẢ chuỗi THÔ (trước lọc) LẪN chuỗi ĐÃ LỌC ở mỗi lần thử, để phân biệt "
+    f"được ca 'model thật sự trả về rỗng' (thô cũng rỗng) với ca 'model có trả về chữ nhưng bị bộ lọc "
+    f"ký tự lạ xoá sạch' (thô KHÔNG rỗng, chỉ lọc xong mới rỗng) — 2 ca này nguyên nhân khác hẳn nhau "
     f"— got {debug9!r}")
-print("PASS 9a: _ocr_png() ghi lại đúng chuỗi THẬT đã đoán được ở mỗi lần thử (kể cả rỗng/sai độ dài) "
-      "vào debug list, giúp phân biệt 'đọc ra rỗng hoàn toàn' với 'đọc ra sai/quá ngắn'.")
+print("PASS 9a: _ocr_png() ghi lại CẢ chuỗi thô (trước lọc) LẪN chuỗi đã lọc vào debug list, phân biệt "
+      "được 'model thật sự đoán rỗng' với 'model có đoán ra chữ nhưng bị lọc ký tự lạ xoá sạch'.")
 
 than_tc9 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
 assert '_ocr_png(r_cap.content, doan_debug)' in than_tc9 or ('doan_debug' in than_tc9 and '_ocr_png(r_cap.content,' in than_tc9), (
