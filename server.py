@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.339"
+APP_BUILD = "2026-09-21.340"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2410,8 +2410,15 @@ def _solve_captcha(content: str, drv=None) -> str:
                     pass
     return ""
 
-def _ocr_png(png_bytes: bytes) -> str:
-    """OCR 1 ảnh PNG bằng ddddocr, thử cả ảnh gốc và ảnh đã làm sạch. '' nếu fail."""
+def _ocr_png(png_bytes: bytes, _debug=None) -> str:
+    """OCR 1 ảnh PNG bằng ddddocr, thử cả ảnh gốc và ảnh đã làm sạch. '' nếu fail.
+
+    _debug (tuỳ chọn): list để ghi lại CHUỖI THẬT ĐÃ ĐOÁN được ở mỗi lần thử
+    (kể cả khi bị loại vì sai độ dài 4-10 ký tự, hoặc lỗi exception) — dùng
+    để chẩn đoán khi 1 nguồn nào đó báo "không giải được captcha" LẶP LẠI
+    nhiều lần: rỗng hoàn toàn (ddddocr không đọc ra gì, có thể do ảnh hỏng/
+    khác định dạng model quen) khác hẳn với đoán ra chuỗi sai/quá ngắn/quá
+    dài (model có đọc được nhưng captcha quá khó/kiểu font lạ)."""
     import re as _re_o
     ocr = _get_ddddocr()
     if not ocr or not png_bytes:
@@ -2420,10 +2427,13 @@ def _ocr_png(png_bytes: bytes) -> str:
         try:
             ans = (ocr.classification(buf) or "").strip()
             ans = _re_o.sub(r'[^A-Za-z0-9]', '', ans)
+            if _debug is not None:
+                _debug.append(ans)
             if 4 <= len(ans) <= 10:
                 return ans
-        except Exception:
-            pass
+        except Exception as _e_ocr:
+            if _debug is not None:
+                _debug.append(f"[lỗi: {str(_e_ocr)[:80]}]")
     return ""
 
 
@@ -34017,9 +34027,18 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
             ly_do_loi_cuoi = f"lỗi kết nối (lấy captcha): {str(e)[:150]}"
             continue
 
-        ma_captcha = _ocr_png(r_cap.content)
+        doan_debug = []
+        ma_captcha = _ocr_png(r_cap.content, doan_debug)
         if not ma_captcha:
-            ly_do_loi_cuoi = "không giải được captcha (OCR không đọc ra)"
+            # Kèm CHI TIẾT ddddocr thật sự đoán ra gì (rỗng hoàn toàn khác
+            # với đoán ra chuỗi sai/quá ngắn/quá dài) + kích cỡ ảnh nhận
+            # được (ảnh 0 hoặc rất nhỏ byte là dấu hiệu bị chặn/trả về ảnh
+            # lỗi thay vì captcha thật) — đúng ca thật người dùng báo "không
+            # giải được captcha" LẶP LẠI y hệt cả 6/6 lần dù ddddocr đã nạp
+            # được (khác hẳn ca "ddddocr chưa nạp được" đã xử lý ở nhánh
+            # kiểm tra sớm phía trên).
+            ly_do_loi_cuoi = (f"không giải được captcha (ảnh {len(r_cap.content)} byte, "
+                              f"ddddocr đoán: {doan_debug!r})")
             continue
 
         try:

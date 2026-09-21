@@ -24,7 +24,9 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 
 def _than_ham(ten):
     i = src.index('def ' + ten + '(')
-    j = src.index('\ndef ', i + 10)
+    j_def = src.index('\ndef ', i + 10)
+    j_deco = src.find('\n@', i + 10)
+    j = min(j_def, j_deco) if 0 <= j_deco < j_def else j_def
     return src[i:j]
 
 
@@ -221,5 +223,56 @@ assert '/api/fix-ocr' in than_tc2, (
     "— không bắt người dùng tự mò cách sửa.")
 assert '_DDDDOCR_ERR' in than_tc2, "Phải kèm chi tiết lỗi thật (_DDDDOCR_ERR) để chẩn đoán chính xác, không chỉ nói chung chung."
 print("PASS 8: kiểm tra ddddocr nạp được ngay từ đầu, tránh lãng phí 6 lượt gọi mạng vô ích, trỏ đúng cách tự khắc phục.")
+
+# ===== Test 9 (bug/ca thật người dùng vừa báo qua endpoint chẩn đoán: "không
+# giải được captcha (OCR không đọc ra) (đã thử 6 lần captcha)" — ddddocr CÓ
+# nạp được (đã qua nhánh kiểm tra sớm ở Test 8) nhưng captcha vẫn không giải
+# được đủ 6/6 lần THẬT SỰ đã thử mạng, khác hẳn ca "ddddocr chưa nạp được"):
+# _ocr_png() phải cho phép GHI LẠI chuỗi THẬT ĐÃ ĐOÁN được (debug list) ở mỗi
+# lần thử — kể cả khi bị loại vì sai độ dài — và _tra_cuu_mst_qua_tracuunnt()
+# phải TRUYỀN debug list đó vào ly_do_loi_cuoi kèm kích cỡ ảnh captcha nhận
+# được, để phân biệt được "ddddocr đọc ra rỗng hoàn toàn" (có thể ảnh hỏng/
+# bị chặn) với "đọc ra chuỗi sai/quá ngắn/quá dài" (model đọc được nhưng
+# captcha quá khó) — không còn chỉ 1 câu chung chung "OCR không đọc ra"
+# không giúp chẩn đoán được gì thêm. =====
+ns9 = _nap('_khong_dau')
+exec("import re as _re_o", ns9)
+
+
+class _FakeOcr:
+    """Giả lập ddddocr.DdddOcr() — trả về LẦN LƯỢT các chuỗi đã cấu hình sẵn
+    cho từng lần gọi .classification(), mô phỏng đúng ca thật: đoán ra chuỗi
+    RỖNG hoặc QUÁ NGẮN liên tục (không phải exception, không phải None)."""
+    def __init__(self, cac_ket_qua):
+        self._ds = list(cac_ket_qua)
+
+    def classification(self, buf):
+        return self._ds.pop(0) if self._ds else ""
+
+
+ns9['_get_ddddocr'] = lambda: ns9['_fake_ocr']
+ns9['_preprocess_png'] = lambda b: b
+exec(_than_ham('_ocr_png'), ns9)
+ocr_png = ns9['_ocr_png']
+
+ns9['_fake_ocr'] = _FakeOcr(["", "12"])   # ảnh gốc: rỗng hoàn toàn; ảnh đã làm sạch: quá ngắn (2 ký tự)
+debug9 = []
+r9 = ocr_png(b"\x89PNG-gia-lap-du-lieu-anh-captcha", debug9)
+assert r9 == "", f"Cả 2 lần thử đều KHÔNG đạt độ dài hợp lệ (4-10 ký tự) -> phải trả rỗng — got {r9!r}"
+assert debug9 == ["", "12"], (
+    f"debug list phải ghi lại ĐÚNG chuỗi thật đã đoán được ở mỗi lần thử (kể cả bị loại vì sai độ dài) "
+    f"— got {debug9!r}")
+print("PASS 9a: _ocr_png() ghi lại đúng chuỗi THẬT đã đoán được ở mỗi lần thử (kể cả rỗng/sai độ dài) "
+      "vào debug list, giúp phân biệt 'đọc ra rỗng hoàn toàn' với 'đọc ra sai/quá ngắn'.")
+
+than_tc9 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
+assert '_ocr_png(r_cap.content, doan_debug)' in than_tc9 or ('doan_debug' in than_tc9 and '_ocr_png(r_cap.content,' in than_tc9), (
+    "_tra_cuu_mst_qua_tracuunnt() phải truyền debug list vào _ocr_png() để ghi lại chuỗi thật đã đoán.")
+assert 'doan_debug' in than_tc9 and 'len(r_cap.content)' in than_tc9, (
+    "Thông báo lỗi khi không giải được captcha phải kèm CẢ kích cỡ ảnh nhận được (len(r_cap.content)) "
+    "LẪN debug list (ddddocr thật sự đoán ra gì) — không còn chỉ 1 câu chung chung 'OCR không đọc ra' "
+    "không giúp chẩn đoán được gì thêm khi captcha thất bại LẶP LẠI 6/6 lần dù ddddocr đã nạp được.")
+print("PASS 9b: _tra_cuu_mst_qua_tracuunnt() kèm kích cỡ ảnh + chuỗi ddddocr thật sự đoán được vào "
+      "thông báo lỗi cuối cùng, thay vì chỉ 1 câu chung chung không giúp chẩn đoán được gì thêm.")
 
 print("\nALL DONE")
