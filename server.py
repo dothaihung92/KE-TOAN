@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.354"
+APP_BUILD = "2026-09-21.355"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33946,9 +33946,11 @@ def _luu_anh_captcha_debug_tracuunnt(mst_c, lan, png_bytes, nhan_ket_qua):
         pass
 
 
-_SO_LAN_THU_CAPTCHA_TRACUUNNT = 20   # TĂNG từ 6 lên 20 để thử nghiệm — sau khi sửa lỗi cache ảnh captcha
-# (xem _url_captcha_tracuunnt_khong_cache), người dùng muốn thử tăng số lần thử lại để xem tỷ lệ thành
-# công có cải thiện thêm không (mỗi lần thử giờ tốn thêm 1 chuyến GET+OCR+POST, ~1-3 giây/lần).
+_SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # ĐÃ THỬ tăng lên 20 (sau khi sửa lỗi cache ảnh captcha) nhưng log
+# thật cho kết quả TỆ HƠN: 1 MST bị chính trang trả về HTTP 429 (xác nhận trang CHỦ ĐỘNG giới hạn tốc độ
+# khi 1 phiên thử captcha quá nhiều lần liên tiếp, không liên quan gì tới cache/OCR nữa), MST còn lại vẫn
+# thất bại đủ 20/20 lần, và ngân sách thời gian (_MST_NGAN_SACH_GIAY) bị 2 MST này ngốn hết sạch, khiến
+# ~59 MST còn lại KHÔNG được thử qua mạng lần nào -> GIẢM LẠI về 6 (giá trị gốc).
 
 
 def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
