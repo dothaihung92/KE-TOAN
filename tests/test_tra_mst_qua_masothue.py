@@ -175,35 +175,32 @@ assert ns4b['_fake_time'].sleeps == [3], (
 print("PASS 4b: gặp 429 (giới hạn tốc độ tạm thời) -> nghỉ đúng theo Retry-After rồi thử lại thành "
       "công, không bỏ cuộc ngay.")
 
-# ===== Test 5 (QUAN TRỌNG — đúng yêu cầu thứ tự ưu tiên): masothue.com phải
-# được thử SAU api.vietqr.io (chỉ khi VietQR đã thất bại) nhưng TRƯỚC
-# XInvoice (dự phòng cuối, cần key/có thể hết hạn mức gói free tier). =====
+# ===== Test 5 (ĐANG TẠM NGƯNG — đúng yêu cầu người dùng hiện tại: "hãy tạm
+# ngưng dùng VietQR/masothue.com/XInvoice mà tập trung xử lý test chạy kiểm
+# tra qua tracuunnt.gdt.gov.vn"): _tra_cuu_trang_thai_mst() hiện KHÔNG còn
+# gọi _tra_cuu_mst_qua_masothue() nữa (chỉ gọi tracuunnt.gdt.gov.vn — xem
+# test_tra_mst_qua_tracuunnt.py Test 5), nhưng hàm _tra_cuu_mst_qua_masothue()
+# CHÍNH NÓ vẫn còn nguyên trong file (đã kiểm tra hoạt động đúng ở các Test
+# 1-4b phía trên) để khôi phục lại chuỗi đầy đủ khi cần. =====
 than_chinh = _than_ham('_tra_cuu_trang_thai_mst')
-vt_vietqr = than_chinh.find('_tra_cuu_mst_qua_vietqr(')
-vt_masothue = than_chinh.find('_tra_cuu_mst_qua_masothue(')
-vt_xinvoice = than_chinh.find('_goi_1_lan_xinvoice(')
-assert 0 < vt_vietqr < vt_masothue < vt_xinvoice, (
-    "Thứ tự ưu tiên phải là: api.vietqr.io -> masothue.com -> XInvoice (dự phòng cuối).")
-assert 'if not thanh_cong:' in than_chinh[vt_masothue - 100:vt_masothue], (
-    "Chỉ thử masothue.com khi VietQR đã THẤT BẠI (thanh_cong=False) — tra được ở VietQR rồi thì không "
-    "cần thử thêm nguồn khác, tránh lãng phí gọi mạng vô ích.")
-print("PASS 5: masothue.com được thử SAU api.vietqr.io nhưng TRƯỚC XInvoice, chỉ rơi xuống khi VietQR "
-      "đã thất bại.")
+assert '_tra_cuu_mst_qua_masothue(' not in than_chinh, (
+    "TẠM NGƯNG masothue.com theo yêu cầu người dùng — _tra_cuu_trang_thai_mst() KHÔNG được gọi hàm này "
+    "trong lượt kiểm tra riêng tracuunnt.gdt.gov.vn hiện tại.")
+assert 'def _tra_cuu_mst_qua_masothue(' in src, (
+    "Hàm _tra_cuu_mst_qua_masothue() phải vẫn còn NGUYÊN trong file (chỉ tạm ngưng GỌI, không xoá hàm) "
+    "để khôi phục nhanh khi cần.")
+print("PASS 5: masothue.com hiện TẠM NGƯNG (không còn được gọi trong chuỗi chính), nhưng hàm vẫn còn "
+      "nguyên trong file, sẵn sàng khôi phục.")
 
-# ===== Test 6 (không hồi quy — thông báo lỗi cuối gộp đủ cả 3 nguồn): thiếu
-# lý do của 1 nguồn sẽ khiến người dùng chẩn đoán "cụt", không biết nguồn đó
-# có được thử hay không. =====
-assert 'masothue.com: {ly_do_loi_masothue}' in src, (
-    "Thông báo lỗi cuối cùng (khi cả 3 nguồn đều thất bại) phải kèm lý do của masothue.com.")
-print("PASS 6: thông báo lỗi cuối cùng gộp đủ lý do của cả 3 nguồn (VietQR + masothue.com + XInvoice).")
-
-# ===== Test 7 (không hồi quy — endpoint chẩn đoán riêng): phải có endpoint
+# ===== Test 6 (không hồi quy — endpoint chẩn đoán riêng): phải có endpoint
 # chẩn đoán nhanh cho masothue.com, không cần biết id công ty nào (trang
-# công khai). =====
+# công khai) — ĐỘC LẬP với chuỗi chính đang tạm ngưng, endpoint này vẫn gọi
+# thẳng hàm tra cứu thật nên vẫn dùng để kiểm tra riêng masothue.com bất cứ
+# lúc nào. =====
 assert '/api/chan-doan-mst-masothue' in src and 'def chan_doan_mst_masothue' in src, (
     "Phải có endpoint chẩn đoán riêng cho masothue.com.")
 than_cd = _than_ham('chan_doan_mst_masothue')
 assert '_tra_cuu_mst_qua_masothue(' in than_cd, "Endpoint chẩn đoán phải gọi đúng hàm tra cứu thật (không phải mô phỏng riêng)."
-print("PASS 7: có endpoint chẩn đoán riêng /api/chan-doan-mst-masothue, không cần biết id công ty nào.")
+print("PASS 6: có endpoint chẩn đoán riêng /api/chan-doan-mst-masothue, không cần biết id công ty nào.")
 
 print("\nALL DONE")
