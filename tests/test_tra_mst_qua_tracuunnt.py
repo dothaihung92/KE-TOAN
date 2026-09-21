@@ -531,4 +531,48 @@ assert '_trich_doan_khong_phai_png_tracuunnt(' in than_tc13, (
 print("PASS 13b: _tra_cuu_mst_qua_tracuunnt() kiểm tra chữ ký PNG thật TRƯỚC khi OCR, kèm nội dung thật "
       "nhận được vào thông báo lỗi khi không phải ảnh PNG hợp lệ — thay vì để ddddocr ném lỗi khó hiểu.")
 
+# ===== Test 14 (QUAN TRỌNG — ca thật vừa gặp: dù đã giảm số luồng song song
+# về mức thấp nhất từng thử (3, giá trị gốc) vẫn đa số MST thất bại đủ 6/6
+# lần captcha với chuỗi đoán TRÔNG HỢP LÝ (không rỗng, không lỗi) — cần XEM
+# TRỰC TIẾP ảnh thật SONG SONG với chuỗi ddddocr đoán được để biết chắc
+# model đọc GẦN ĐÚNG (OCR yếu) hay SAI HOÀN TOÀN (dấu hiệu khác hẳn), thay
+# vì chỉ đọc mô tả bằng chữ như trước): _tra_cuu_mst_qua_tracuunnt() phải hỗ
+# trợ luu_anh_debug=True để lưu MỖI ảnh captcha đã thử ra đĩa kèm tên file
+# có MST/lần thử/chuỗi đoán được, và /api/chan-doan-mst-tracuunnt phải LUÔN
+# bật cờ này + trả về đường dẫn thư mục trong response. =====
+import tempfile as _tempfile_t14
+ns14 = _nap('_khong_dau')
+exec('import os, re', ns14)
+_thu_muc_gia = _tempfile_t14.mkdtemp()
+ns14['_get_desktop_dir'] = lambda: _thu_muc_gia
+exec(_than_ham('_luu_anh_captcha_debug_tracuunnt'), ns14)
+luu_anh = ns14['_luu_anh_captcha_debug_tracuunnt']
+luu_anh('0315525949', 3, b'\x89PNG\r\n\x1a\ndu-lieu-anh-gia-lap', 'ab12c')
+duong_dan_ky_vong = ns14['os'].path.join(
+    _thu_muc_gia, 'captcha_tracuunnt_debug', 'captcha_0315525949_3_ab12c.png')
+assert ns14['os'].path.exists(duong_dan_ky_vong), (
+    f"Phải lưu đúng file với tên chứa MST + lần thử + chuỗi đoán được — kỳ vọng {duong_dan_ky_vong}")
+with open(duong_dan_ky_vong, 'rb') as f:
+    assert f.read() == b'\x89PNG\r\n\x1a\ndu-lieu-anh-gia-lap', (
+        "Nội dung file lưu phải ĐÚNG bytes ảnh thật nhận được, không xử lý/biến đổi gì thêm.")
+# Không crash khi lưu lỗi (vd không lấy được đường dẫn Desktop)
+ns14['_get_desktop_dir'] = lambda: (_ for _ in ()).throw(Exception("giả lập lỗi"))
+luu_anh('0315525949', 1, b'abc', 'x')   # KHÔNG được raise ra ngoài
+print("PASS 14a: _luu_anh_captcha_debug_tracuunnt() lưu đúng file (tên chứa MST/lần thử/chuỗi đoán, nội "
+      "dung đúng bytes ảnh thật), không crash khi lưu lỗi (chỉ là phụ trợ chẩn đoán).")
+
+than_tc14 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
+assert 'luu_anh_debug' in than_tc14 and '_luu_anh_captcha_debug_tracuunnt(' in than_tc14, (
+    "_tra_cuu_mst_qua_tracuunnt() phải hỗ trợ tham số luu_anh_debug để lưu ảnh captcha thật khi chẩn "
+    "đoán, giúp so sánh trực tiếp ảnh thật với chuỗi ddddocr đoán được.")
+than_cd14 = _than_ham('chan_doan_mst_tracuunnt')
+assert 'luu_anh_debug=True' in than_cd14, (
+    "/api/chan-doan-mst-tracuunnt phải LUÔN bật luu_anh_debug=True khi gọi _tra_cuu_mst_qua_tracuunnt() "
+    "(khác lời gọi thật trong luồng xuất Excel, không bật cờ này).")
+assert 'thu_muc_anh_captcha_debug' in than_cd14, (
+    "/api/chan-doan-mst-tracuunnt phải trả về đường dẫn thư mục ảnh debug trong response, để người dùng "
+    "biết tìm ảnh ở đâu mà xem.")
+print("PASS 14b: /api/chan-doan-mst-tracuunnt LUÔN bật lưu ảnh captcha debug + trả đường dẫn thư mục "
+      "trong response, để người dùng xem trực tiếp ảnh thật so với chuỗi ddddocr đoán được.")
+
 print("\nALL DONE")

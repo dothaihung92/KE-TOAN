@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.351"
+APP_BUILD = "2026-09-21.352"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6771,18 +6771,28 @@ def chan_doan_mst_tracuunnt(mst: str = "0315458241"):
     /api/fix-ocr). Nguồn ưu tiên số 1 trong chuỗi tra MST (dự phòng: XInvoice
     — VietQR/masothue.com đã BỎ hẳn theo yêu cầu người dùng).
 
+    LUÔN bật luu_anh_debug=True (khác lời gọi thật trong luồng xuất Excel) —
+    lưu MỖI ảnh captcha đã thử ra Desktop/captcha_tracuunnt_debug/ kèm chuỗi
+    ddddocr đoán được, trả kèm đường dẫn thư mục trong response — log thật
+    cho thấy dù đã giảm số luồng song song xuống mức thấp nhất vẫn đa số
+    thất bại 6/6 lần, cần XEM TRỰC TIẾP ảnh thật để biết chắc model đọc GẦN
+    ĐÚNG (OCR yếu) hay SAI HOÀN TOÀN (dấu hiệu khác, vd site trả nhầm ảnh).
+
     Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-tracuunnt?mst=0315458241"""
     mst_c = _chuan_mst(mst)[:10]
     if not mst_c:
         raise HTTPException(400, "MST không hợp lệ")
-    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = _tra_cuu_mst_qua_tracuunnt(mst_c, timeout=20)
+    thu_muc_anh = os.path.join(_get_desktop_dir(), "captcha_tracuunnt_debug")
+    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = _tra_cuu_mst_qua_tracuunnt(
+        mst_c, timeout=20, luu_anh_debug=True)
     if thanh_cong:
         ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{trang_thai_goc}' "
                     f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
     else:
         ket_luan = f"KHÔNG dùng được: {ly_do_loi}"
     return {"mst_tra": mst_c, "ket_luan": ket_luan,
-            "trang_thai_do_duoc": trang_thai_goc, "canh_bao": canh_bao, "ly_do_loi": ly_do_loi}
+            "trang_thai_do_duoc": trang_thai_goc, "canh_bao": canh_bao, "ly_do_loi": ly_do_loi,
+            "thu_muc_anh_captcha_debug": thu_muc_anh}
 
 
 @app.get("/api/xem-captcha-tracuunnt")
@@ -33889,10 +33899,35 @@ def _trich_doan_khong_phai_png_tracuunnt(raw: bytes, do_dai=200) -> str:
         return ""
 
 
+def _luu_anh_captcha_debug_tracuunnt(mst_c, lan, png_bytes, nhan_ket_qua):
+    """Lưu ảnh captcha THẬT (mỗi lần thử) ra Desktop/captcha_tracuunnt_debug/
+    — CHỈ khi bật cờ debug (qua /api/chan-doan-mst-tracuunnt) — tên file kèm
+    MST + số lần thử + ddddocr đoán ra gì. Log thật cho thấy dù đã giảm số
+    luồng song song xuống mức thấp nhất từng thử (3, giá trị gốc), tuyệt đại
+    đa số MST vẫn đoán sai captcha đủ 6/6 lần — cần XEM TRỰC TIẾP ảnh thật
+    SONG SONG với chuỗi ddddocr đoán ra (thay vì chỉ đọc mô tả bằng chữ) để
+    biết chắc: model đọc GẦN ĐÚNG (lệch 1-2 ký tự — dấu hiệu OCR yếu, có thể
+    cần huấn luyện/đổi model) hay đoán HOÀN TOÀN SAI/không liên quan gì tới
+    ảnh (dấu hiệu khác hẳn — có thể site trả nhầm ảnh hoặc cố tình làm khó
+    nhận diện tự động). Lỗi khi lưu (đĩa đầy/không có quyền...) -> bỏ qua
+    lặng lẽ, không ảnh hưởng kết quả tra cứu chính (đây chỉ là phụ trợ chẩn
+    đoán, không phải bước bắt buộc)."""
+    import re as _re_luu
+    try:
+        thu_muc = os.path.join(_get_desktop_dir(), "captcha_tracuunnt_debug")
+        os.makedirs(thu_muc, exist_ok=True)
+        ten_an_toan = _re_luu.sub(r'[^A-Za-z0-9_-]', '_', str(nhan_ket_qua))[:40] or "RONG"
+        duong_dan = os.path.join(thu_muc, f"captcha_{mst_c}_{lan}_{ten_an_toan}.png")
+        with open(duong_dan, "wb") as f:
+            f.write(png_bytes)
+    except Exception:
+        pass
+
+
 _SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # captcha trang này KHÓ — người dùng xác nhận tự nhập tay còn phải thử 3-5 lần
 
 
-def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
+def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
     """Tra tình trạng hoạt động 1 MST qua CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC
     tracuunnt.gdt.gov.vn (tcnnt/mstdn.jsp) — nguồn CHÍNH THỨC của Tổng cục
     Thuế, MIỄN PHÍ, KHÔNG hạn mức gói, và KHÔNG cần đăng nhập công ty nào (ai
@@ -33916,6 +33951,14 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
     lần) — nên THỬ LẠI với ảnh captcha MỚI tối đa _SO_LAN_THU_CAPTCHA_TRACUUNNT
     lần trong CÙNG 1 session (không mở lại trang từ đầu mỗi lần, chỉ lấy lại
     captcha.png mới) trước khi chịu thua, thay vì chỉ thử đúng 1 lần.
+
+    luu_anh_debug=True (CHỈ bật qua /api/chan-doan-mst-tracuunnt, KHÔNG bật
+    trong luồng xuất Excel bình thường): lưu MỖI ảnh captcha thật đã thử ra
+    Desktop/captcha_tracuunnt_debug/ (xem _luu_anh_captcha_debug_tracuunnt)
+    kèm chuỗi ddddocr đoán được — log thật cho thấy dù đã giảm số luồng song
+    song về mức thấp nhất từng thử vẫn đa số thất bại 6/6 lần, cần XEM TRỰC
+    TIẾP ảnh thật để biết chắc model đọc gần đúng (OCR yếu) hay sai hoàn
+    toàn (dấu hiệu khác, vd site trả nhầm ảnh).
 
     Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
     các nguồn tra MST khác để ghép vào chuỗi dự phòng sẵn có."""
@@ -33997,6 +34040,8 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout):
 
         doan_debug = []
         ma_captcha = _ocr_png(r_cap.content, doan_debug)
+        if luu_anh_debug:
+            _luu_anh_captcha_debug_tracuunnt(mst_c, lan, r_cap.content, ma_captcha or "RONG")
         if not ma_captcha:
             # Kèm CHI TIẾT ddddocr thật sự đoán ra gì (rỗng hoàn toàn khác
             # với đoán ra chuỗi sai/quá ngắn/quá dài) + kích cỡ ảnh nhận
