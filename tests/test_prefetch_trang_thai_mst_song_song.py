@@ -11,9 +11,10 @@ src = open(os.path.join(_REPO_ROOT, 'server.py'), encoding='utf-8').read()
 # công ty có nhiều nhà cung cấp/khách hàng khác nhau: "có thể kiểm tra nhiều
 # luồn được đẩy 3 luồn kiểm tra luôn phiên" — tra tình trạng nhiều MST SONG
 # SONG (ban đầu mặc định 3 luồng, tăng lên 8 khi tracuunnt.gdt.gov.vn trở
-# thành nguồn ưu tiên 1 — chậm hơn hẳn XInvoice — rồi GIẢM LẠI còn 5 sau khi
-# log thật cho thấy 8 luồng phản tác dụng, nghi bị WAF chặn — xem Test 6)
-# thay vì tuần tự từng cái, để tận dụng đầy đủ ngân sách thời gian
+# thành nguồn ưu tiên 1 — chậm hơn hẳn XInvoice — rồi GIẢM DẦN 8 -> 5 -> lại
+# 3 sau 2 lần log thật liên tiếp cho thấy CÀNG NHIỀU luồng CÀNG tệ, nghi bị
+# WAF chặn — xem Test 6) thay vì tuần tự từng cái, để tận dụng đầy đủ ngân
+# sách thời gian
 # (_MST_NGAN_SACH_GIAY) dò được nhiều MST hơn trong cùng thời gian.
 
 
@@ -210,26 +211,28 @@ print("PASS 5: log tổng kết liệt kê ĐẦY ĐỦ từng MST chưa lấy �
       "'sao vẫn còn?'.")
 
 # ===== Test 6 (QUAN TRỌNG — đúng lựa chọn người dùng đã xác nhận, ĐÃ ĐIỀU
-# CHỈNH LẠI theo log thật): mặc định PHẢI là 5 luồng — từng tăng 3 -> 8 khi
-# tracuunnt.gdt.gov.vn trở thành nguồn ưu tiên 1, nhưng log thật với 8 luồng
-# lại TỆ HƠN HẲN (chỉ 4/77 tra được, so với 23/77 lúc 3 luồng) — nhiều MST
-# khác nhau cùng đoán sai captcha 6/6 lần + 1 số bị "Connection aborted",
-# dấu hiệu tracuunnt.gdt.gov.vn (WAF) CHẶN khi thấy quá nhiều phiên cùng lúc
-# — 8 luồng đã PHẢN TÁC DỤNG. Người dùng xác nhận chọn THỬ mức trung gian: 5
-# luồng. Lệnh gọi THẬT trong export_excel() (không truyền so_luong_song_song,
-# dùng mặc định của hàm) phải dùng đúng số luồng mới này. =====
+# CHỈNH LẠI 2 LẦN theo log thật): mặc định PHẢI là 3 luồng (quay về giá trị
+# GỐC) — lịch sử: 3 (gốc) -> tăng 8 khi tracuunnt.gdt.gov.vn thành nguồn ưu
+# tiên 1 -> log thật TỆ HƠN HẲN (chỉ 4/77 tra được, kèm "Connection
+# aborted") -> giảm xuống 5 -> log thật VẪN còn tệ (15/77, dù đỡ hơn 8) —
+# CÙNG điều kiện (XInvoice tạm dừng) ở cả 2 lần đo, xu hướng RÕ: càng ít
+# luồng càng tra được nhiều hơn, dấu hiệu chắc chắn bị WAF của
+# tracuunnt.gdt.gov.vn giới hạn theo số phiên đồng thời -> GIẢM TIẾP về lại
+# 3 (mức cao nhất từng đo tỷ lệ thành công tốt). Lệnh gọi THẬT trong
+# export_excel() (không truyền so_luong_song_song, dùng mặc định của hàm)
+# phải dùng đúng số luồng mới này. =====
 than_nested = extract_nested_fn('_prefetch_trang_thai_mst')
 m6 = re.search(r'def _prefetch_trang_thai_mst\([^)]*so_luong_song_song\s*=\s*(\d+)', than_nested)
-assert m6 is not None and m6.group(1) == '5', (
-    f"Mặc định so_luong_song_song PHẢI là 5 (giảm từ 8, đúng lựa chọn người dùng đã xác nhận sau khi "
-    f"log thật cho thấy 8 luồng phản tác dụng — tỷ lệ tra được giảm mạnh, nghi bị WAF của "
-    f"tracuunnt.gdt.gov.vn chặn) — got {m6.group(1) if m6 else None}")
+assert m6 is not None and m6.group(1) == '3', (
+    f"Mặc định so_luong_song_song PHẢI là 3 (giảm từ 5 rồi từ 8, đúng lựa chọn người dùng đã xác nhận "
+    f"sau khi log thật 2 lần liên tiếp cho thấy CÀNG NHIỀU luồng CÀNG tệ — nghi bị WAF của "
+    f"tracuunnt.gdt.gov.vn giới hạn theo số phiên đồng thời) — got {m6.group(1) if m6 else None}")
 loi_goi_that = re.search(r'_prefetch_trang_thai_mst\(\s*"BK Mua vào"[^)]*\)', src)
 assert loi_goi_that is not None and 'so_luong_song_song' not in loi_goi_that.group(0), (
     "Lệnh gọi thật trong export_excel() (sheet BK Mua vào) phải KHÔNG truyền so_luong_song_song riêng, "
     "để dùng đúng mặc định mới của hàm — nếu test này fail nghĩa là có ai đó đã ghi đè giá trị khác ở "
     "đây, cần xem lại cho khớp.")
-print("PASS 6: mặc định so_luong_song_song=5 (giảm từ 8 sau khi log thật cho thấy 8 luồng phản tác "
-      "dụng, nghi bị WAF chặn), lệnh gọi thật trong export_excel() dùng đúng mặc định này.")
+print("PASS 6: mặc định so_luong_song_song=3 (quay về giá trị gốc sau 2 lần điều chỉnh giảm dần theo "
+      "log thật, nghi bị WAF chặn), lệnh gọi thật trong export_excel() dùng đúng mặc định này.")
 
 print("\nALL DONE")
