@@ -443,6 +443,31 @@ print("PASS 11c: khi trang có từ khoá liên quan lỗi thật (vd 'không đ
       "khoá đó thay vì chỉ lấy phần đầu trang (tiêu đề/nhãn form cố định, vô ích để chẩn đoán — đúng "
       "bug thật phát hiện qua log sau khi triển khai bản đầu tiên).")
 
+# ===== Test 11e (QUAN TRỌNG — ca thật vừa gặp: SAU KHI đã tăng độ dài + ưu
+# tiên từ khoá ở Test 11c, log thật VẪN chỉ ra đúng nhãn form tĩnh — kể cả
+# đoạn "Mã xác nhận * Lưu ý:... Vui lòng nhập đúng mã xác nhận!" cũng chỉ là
+# NHÃN HƯỚNG DẪN CỐ ĐỊNH cạnh ô nhập captcha, không phải thông báo lỗi ĐỘNG
+# theo từng lần thử — nghĩa là trang này KHÔNG có thông báo lỗi nào trong
+# phần VĂN BẢN HIỂN THỊ cả, dù captcha đúng hay sai): nhiều trang JSP cũ báo
+# lỗi qua alert()/confirm() JAVASCRIPT (popup), mà bản cũ lại CỐ TÌNH bỏ hẳn
+# nội dung trong <script> (coi là không phải văn bản người đọc) — PHẢI tìm
+# TRƯỚC trong HTML gốc xem có alert()/confirm() với thông báo lỗi thật
+# không, ưu tiên CAO NHẤT (trước cả từ khoá/đầu trang). =====
+r11e = trich('<html><head><script>alert(\'Mã xác nhận không đúng, vui lòng thử lại!\');'
+             'history.back();</script></head><body><div>Cục Thuế - Bộ Tài Chính ...</div></body></html>')
+assert 'Mã xác nhận không đúng, vui lòng thử lại' in r11e, (
+    f"Phải ưu tiên CAO NHẤT lấy thông báo lỗi thật từ alert()/confirm() JAVASCRIPT (bản cũ bỏ hẳn nội "
+    f"dung <script>, bỏ sót đúng chỗ nhiều trang JSP cũ dùng để báo lỗi captcha) — got {r11e!r}")
+r11f = trich('<html><body><script>var x=1; someOtherFunc("khong lien quan");</script>'
+             '<div>Chỉ có tiêu đề trang bình thường thôi, không có popup nào cả.</div></body></html>')
+assert '[thông báo popup của trang]' not in r11f and 'someOtherFunc' not in r11f and (
+    'Chỉ có tiêu đề trang bình thường' in r11f), (
+    f"KHÔNG có alert()/confirm() nào trong trang -> phải rơi về hành vi cũ (từ khoá/đầu trang văn bản "
+    f"hiển thị, bỏ qua nội dung <script> không liên quan), không được báo nhầm có popup lỗi — got {r11f!r}")
+print("PASS 11e: ưu tiên CAO NHẤT lấy thông báo lỗi thật từ alert()/confirm() JAVASCRIPT nếu trang có "
+      "(nhiều trang JSP cũ báo lỗi captcha qua popup, không phải văn bản hiển thị thường) — không có "
+      "alert nào thì rơi về hành vi cũ (từ khoá/đầu trang).")
+
 than_tc11 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
 assert '_trich_doan_loi_html_tracuunnt(html)' in than_tc11 and 'doan_html' in than_tc11, (
     "_tra_cuu_mst_qua_tracuunnt() phải gọi _trich_doan_loi_html_tracuunnt() và đưa vào ly_do_loi_cuoi "

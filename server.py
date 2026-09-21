@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.348"
+APP_BUILD = "2026-09-21.349"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33822,27 +33822,38 @@ _TU_KHOA_LOI_TRACUUNNT = (
 
 
 def _trich_doan_loi_html_tracuunnt(html, do_dai=450):
-    """Trích đoạn văn bản (bỏ hết thẻ HTML/script/style) từ trang
-    tracuunnt.gdt.gov.vn trả về khi KHÔNG ra bảng kết quả — dùng để CHẨN
-    ĐOÁN lý do THẬT: code cũ chỉ đoán chung chung "có thể đã đoán sai
-    captcha" cho MỌI trường hợp không thấy "Trạng thái MST" trong HTML, dù
-    lý do thật có thể KHÁC hẳn (trang WAF chặn tạm do gọi dồn dập nhiều
-    luồng cùng lúc, trang báo lỗi hệ thống, hết phiên làm việc...).
+    """Trích đoạn văn bản CHẨN ĐOÁN từ trang tracuunnt.gdt.gov.vn trả về khi
+    KHÔNG ra bảng kết quả — code cũ chỉ đoán chung chung "có thể đã đoán sai
+    captcha" cho MỌI trường hợp, không đủ để biết lý do thật (trang WAF chặn
+    tạm do gọi dồn dập nhiều luồng cùng lúc, trang báo lỗi hệ thống, hết
+    phiên làm việc...).
 
-    BẢN ĐẦU TIÊN lấy 200 ký tự ĐẦU trang — log thật (sau khi triển khai)
-    cho thấy VÔ ÍCH: 200 ký tự đầu LUÔN là tiêu đề/nhãn form cố định
-    ("Cục Thuế - Bộ Tài Chính ... Mã số thuế * Tên tổ chức cá nhân nộp
-    thuế Địa chỉ trụ sở kinh doanh Số c...") GIỐNG HỆT NHAU ở MỌI MST/lần
-    thử khác nhau — không giúp chẩn đoán được gì thêm. SỬA: (1) ưu tiên
-    tìm đoạn văn bản QUANH 1 trong các TỪ KHOÁ liên quan lỗi/chặn thật
-    (_TU_KHOA_LOI_TRACUUNNT) nếu có — nhiều khả năng chứa đúng thông báo
-    lỗi thật của trang; (2) nếu KHÔNG tìm thấy từ khoá nào, lấy đoạn DÀI
-    HƠN hẳn (450 ký tự, tăng từ 200) để có cơ hội vượt qua phần nhãn form
-    cố định, chạm tới nội dung PHÍA SAU (nơi thường đặt captcha/thông báo
-    lỗi thật)."""
+    Đã qua 2 bản: (1) lấy 200 ký tự ĐẦU trang — log thật cho thấy VÔ ÍCH,
+    luôn là tiêu đề/nhãn form cố định giống hệt nhau ở mọi MST; (2) tăng độ
+    dài (450) + ưu tiên đoạn quanh từ khoá lỗi (_TU_KHOA_LOI_TRACUUNNT) —
+    log thật SAU đó VẪN chỉ ra đúng nhãn form tĩnh (không khớp từ khoá nào,
+    vẫn rơi về lấy đầu trang) dù đã dài hơn — té ra CẢ trang KHÔNG có thông
+    báo lỗi nào trong phần VĂN BẢN HIỂN THỊ cả, kể cả khi captcha sai.
+
+    BẢN NÀY: nhiều trang JSP cũ (kiểu trang này) báo lỗi captcha qua
+    alert()/confirm() JAVASCRIPT (popup hiện lên khi tải lại trang) —
+    KHÔNG PHẢI văn bản hiển thị thường — mà việc bỏ hẳn nội dung bên trong
+    <script> (coi là "không phải văn bản người đọc") lại bỏ sót ĐÚNG chỗ có
+    thể chứa thông báo lỗi thật. SỬA: tìm TRƯỚC trong HTML GỐC (trước khi bỏ
+    thẻ <script>) xem có lời gọi alert(...)/confirm(...) với chuỗi trong
+    ngoặc nào không — ưu tiên CAO NHẤT nếu có (đây rất có thể là ĐÚNG thông
+    báo lỗi hiện lên cho người dùng thấy trên trình duyệt thật, khác hẳn văn
+    bản HTML tĩnh không đổi dù thành công hay thất bại). Không có alert nào
+    -> rơi về đoạn quanh từ khoá lỗi trong văn bản hiển thị, rồi mới tới đầu
+    trang như 2 bản trước."""
     import re as _re_h
     import html as _html_h
     try:
+        m_alert = _re_h.search(r'''(?:alert|confirm)\s*\(\s*['"]([^'"]{3,300})['"]''', html or '')
+        if m_alert:
+            doan_alert = _html_h.unescape(m_alert.group(1)).strip()
+            if doan_alert:
+                return f"[thông báo popup của trang] {doan_alert}"[:do_dai]
         txt = _re_h.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html or '', flags=_re_h.S | _re_h.I)
         txt = _re_h.sub(r'<[^>]+>', ' ', txt)
         txt = _html_h.unescape(txt)
