@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.352"
+APP_BUILD = "2026-09-21.353"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6826,8 +6826,9 @@ def xem_captcha_tracuunnt():
     if sess is None:
         raise HTTPException(502, f"Không mở được trang tracuunnt.gdt.gov.vn: {loi_mo_trang}")
     try:
-        r_cap = sess.get("https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png",
-                         headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
+        r_cap = sess.get(_url_captcha_tracuunnt_khong_cache(),
+                         headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
+                                  "Cache-Control": "no-cache, no-store", "Pragma": "no-cache"},
                          timeout=20)
     except Exception as e:
         raise HTTPException(502, f"Không lấy được ảnh captcha: {str(e)[:200]}")
@@ -33786,6 +33787,27 @@ def _tao_session_tracuunnt(dung_curl_cffi=True):
     return requests.Session()
 
 
+def _url_captcha_tracuunnt_khong_cache():
+    """URL captcha.png của tracuunnt.gdt.gov.vn kèm tham số CHỐNG CACHE (thời
+    điểm hiện tại tính mili-giây + số ngẫu nhiên, không lặp lại) — nghi vấn
+    THẬT: người dùng gửi ảnh captcha đã lưu debug, OCR (ddddocr) đọc ĐÚNG
+    100% chữ trong ảnh (vd 'apfge', xác nhận độc lập ngoài phần mềm), NHƯNG
+    trang VẪN từ chối, không ra bảng kết quả — trang này đứng sau WAF F5
+    BIG-IP ASM (xem _tao_session_tracuunnt), rất có thể có 1 lớp CACHE (CDN/
+    WAF) đứng giữa trả về ảnh CŨ (của phiên/lượt gọi KHÁC, URL giống hệt
+    /tcnnt/captcha.png không có gì phân biệt) — người dùng ĐỌC ĐÚNG ảnh
+    nhận được, nhưng ảnh đó KHÔNG PHẢI captcha THẬT của phiên hiện tại nên
+    đáp án không khớp với server mong đợi. Thêm tham số ngẫu nhiên vào URL
+    (hầu hết cache theo URL, không xét query param linh tinh -> URL khác
+    nhau mỗi lần -> không trúng cache) + header Cache-Control/Pragma
+    no-cache (yêu cầu rõ với server/proxy giữa đường không phục vụ bản
+    cache) để ép lấy ảnh MỚI THẬT SỰ, đúng phiên hiện tại."""
+    import time as _time_cb
+    import random as _random_cb
+    return (f"https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png?_="
+            f"{int(_time_cb.time() * 1000)}{_random_cb.randint(1000, 9999)}")
+
+
 def _loi_ssl_chung_thuc(e):
     """True nếu lỗi là do KHÔNG XÁC THỰC ĐƯỢC chứng chỉ TLS (thiếu chứng chỉ
     trung gian trong kho chứng chỉ mà curl_cffi tự mang theo, khác kho chứng
@@ -33955,10 +33977,20 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
     luu_anh_debug=True (CHỈ bật qua /api/chan-doan-mst-tracuunnt, KHÔNG bật
     trong luồng xuất Excel bình thường): lưu MỖI ảnh captcha thật đã thử ra
     Desktop/captcha_tracuunnt_debug/ (xem _luu_anh_captcha_debug_tracuunnt)
-    kèm chuỗi ddddocr đoán được — log thật cho thấy dù đã giảm số luồng song
-    song về mức thấp nhất từng thử vẫn đa số thất bại 6/6 lần, cần XEM TRỰC
-    TIẾP ảnh thật để biết chắc model đọc gần đúng (OCR yếu) hay sai hoàn
-    toàn (dấu hiệu khác, vd site trả nhầm ảnh).
+    kèm chuỗi ddddocr đoán được.
+
+    ═══ BUG THẬT ĐÃ TÌM RA (qua ảnh debug người dùng gửi) ═══ — người dùng
+    gửi ảnh captcha đã lưu debug (tên file kèm chuỗi ddddocr đoán 'apfge'),
+    xác nhận ĐỘC LẬP ngoài phần mềm (test trực tiếp bằng ddddocr thật, thử
+    cả 3 chế độ model): ddddocr đọc ĐÚNG 100% — ảnh THẬT SỰ là 'apfge' —
+    NHƯNG trang vẫn từ chối, không ra bảng kết quả. Nghĩa là KHÔNG PHẢI lỗi
+    OCR (model đọc đúng) — trang này đứng sau WAF F5 BIG-IP ASM, nghi vấn
+    /tcnnt/captcha.png bị 1 lớp CACHE (CDN/WAF) phục vụ ảnh CŨ (của phiên/
+    lượt gọi KHÁC, cùng URL không có gì phân biệt) — đọc ĐÚNG ảnh nhận được
+    nhưng ảnh đó KHÔNG PHẢI captcha thật của phiên/lượt hiện tại nên đáp án
+    không khớp server mong đợi. ĐÃ SỬA: thêm tham số chống cache vào URL
+    captcha.png (_url_captcha_tracuunnt_khong_cache) + header Cache-Control/
+    Pragma no-cache, ép lấy ảnh MỚI THẬT SỰ mỗi lần thay vì có thể dính cache.
 
     Trả (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi) — cùng kiểu với
     các nguồn tra MST khác để ghép vào chuỗi dự phòng sẵn có."""
@@ -34013,8 +34045,9 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
     ly_do_loi_cuoi = "không rõ lý do"
     for lan in range(1, _SO_LAN_THU_CAPTCHA_TRACUUNNT + 1):
         try:
-            r_cap = sess.get("https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png",
-                             headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"},
+            r_cap = sess.get(_url_captcha_tracuunnt_khong_cache(),
+                             headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
+                                      "Cache-Control": "no-cache, no-store", "Pragma": "no-cache"},
                              timeout=timeout)
             if r_cap.status_code != 200 or not r_cap.content:
                 ly_do_loi_cuoi = f"không lấy được ảnh captcha (HTTP {r_cap.status_code})"

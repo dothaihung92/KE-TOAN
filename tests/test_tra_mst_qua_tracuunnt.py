@@ -388,8 +388,9 @@ assert '_tao_session_tracuunnt(' in than_xem and '_loi_ssl_chung_thuc(' in than_
 assert 'media_type="image/png"' in than_xem, (
     "Phải trả về đúng Content-Type image/png để trình duyệt hiển thị được ảnh trực tiếp, không phải "
     "JSON/base64 (người dùng cần xem BẰNG MẮT ngay, không cần công cụ giải mã thêm).")
-assert '"https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png"' in than_xem, (
-    "Phải lấy đúng ảnh captcha.png thật từ tracuunnt.gdt.gov.vn, không phải ảnh mô phỏng/giả lập.")
+assert '_url_captcha_tracuunnt_khong_cache(' in than_xem, (
+    "Phải lấy đúng ảnh captcha.png thật từ tracuunnt.gdt.gov.vn qua _url_captcha_tracuunnt_khong_cache() "
+    "(chống cache — xem Test 15), không phải ảnh mô phỏng/giả lập hay URL tĩnh dễ dính cache.")
 print("PASS 10: có endpoint /api/xem-captcha-tracuunnt trả thẳng ảnh captcha thật (image/png) để xem "
       "trực tiếp trên trình duyệt, dùng chung cơ chế session/fallback SSL với hàm tra cứu thật.")
 
@@ -574,5 +575,45 @@ assert 'thu_muc_anh_captcha_debug' in than_cd14, (
     "biết tìm ảnh ở đâu mà xem.")
 print("PASS 14b: /api/chan-doan-mst-tracuunnt LUÔN bật lưu ảnh captcha debug + trả đường dẫn thư mục "
       "trong response, để người dùng xem trực tiếp ảnh thật so với chuỗi ddddocr đoán được.")
+
+# ===== Test 15 (QUAN TRỌNG — BUG THẬT ĐÃ TÌM RA qua ảnh debug người dùng
+# gửi: ddddocr đọc ĐÚNG 100% ảnh captcha 'apfge' — xác nhận ĐỘC LẬP ngoài
+# phần mềm bằng ddddocr thật, cả 3 chế độ model — NHƯNG trang vẫn từ chối,
+# không ra bảng kết quả -> KHÔNG PHẢI lỗi OCR. Trang đứng sau WAF F5 BIG-IP
+# ASM, nghi vấn /tcnnt/captcha.png bị 1 lớp CACHE (CDN/WAF) phục vụ ảnh CŨ
+# của phiên/lượt gọi KHÁC — đọc đúng ảnh NHẬN ĐƯỢC nhưng ảnh đó không phải
+# captcha thật của phiên hiện tại): phải lấy captcha.png qua URL có tham số
+# CHỐNG CACHE (khác nhau mỗi lần gọi) + header Cache-Control/Pragma
+# no-cache, ở CẢ 2 nơi gọi captcha.png (hàm tra cứu thật VÀ endpoint xem
+# ảnh /api/xem-captcha-tracuunnt — dùng chung 1 hàm, không lệch nhau). =====
+ns15 = _nap('_khong_dau')
+exec(_than_ham('_url_captcha_tracuunnt_khong_cache'), ns15)
+url_cb = ns15['_url_captcha_tracuunnt_khong_cache']
+u1 = url_cb()
+u2 = url_cb()
+assert u1.startswith("https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png?") and "?_=" in u1, (
+    f"URL captcha.png phải kèm tham số chống cache (query string thay đổi mỗi lần) — got {u1!r}")
+assert u1 != u2, (
+    f"2 lần gọi liên tiếp PHẢI cho ra URL KHÁC NHAU (để không trúng cache theo URL) — got {u1!r} == {u2!r}")
+print("PASS 15a: _url_captcha_tracuunnt_khong_cache() trả về URL captcha.png kèm tham số chống cache, "
+      "khác nhau ở mỗi lần gọi (không trúng cache theo URL giống hệt nhau).")
+
+than_tc15 = _than_ham('_tra_cuu_mst_qua_tracuunnt')
+assert '_url_captcha_tracuunnt_khong_cache()' in than_tc15, (
+    "_tra_cuu_mst_qua_tracuunnt() phải lấy captcha.png qua _url_captcha_tracuunnt_khong_cache() (chống "
+    "cache), không phải URL tĩnh 'https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png' cố định dễ dính cache.")
+assert '"https://tracuunnt.gdt.gov.vn/tcnnt/captcha.png"' not in than_tc15, (
+    "KHÔNG được còn URL tĩnh cố định gọi captcha.png trong hàm tra cứu thật — phải đi qua "
+    "_url_captcha_tracuunnt_khong_cache() để chống cache.")
+assert 'no-cache' in than_tc15.lower(), (
+    "Phải kèm header Cache-Control/Pragma no-cache khi gọi captcha.png, yêu cầu rõ với server/proxy "
+    "giữa đường không phục vụ bản cache.")
+than_xem15 = _than_ham('xem_captcha_tracuunnt')
+assert '_url_captcha_tracuunnt_khong_cache()' in than_xem15 and 'no-cache' in than_xem15.lower(), (
+    "/api/xem-captcha-tracuunnt cũng phải dùng CHUNG cơ chế chống cache như hàm tra cứu thật, không "
+    "lệch nhau (nếu không, ảnh xem để chẩn đoán có thể khác hành vi thật khi tra cứu).")
+print("PASS 15b: _tra_cuu_mst_qua_tracuunnt() VÀ /api/xem-captcha-tracuunnt đều lấy captcha.png qua URL "
+      "chống cache + header no-cache — sửa đúng nguyên nhân gốc vừa tìm ra (OCR đọc đúng nhưng có thể "
+      "dính ảnh captcha CŨ do cache của WAF/CDN phía trước trang).")
 
 print("\nALL DONE")
