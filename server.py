@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-21.355"
+APP_BUILD = "2026-09-22.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -35391,18 +35391,25 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 # mạng/đăng nhập — ĐÃ đăng nhập thành công) NHƯNG có số tiền
                 # thật từ danh sách tra cứu -> thường là "Hóa đơn bán hàng" của
                 # hộ/cá nhân kinh doanh (không tách VAT, TCT không trả chi tiết
-                # dòng hàng cho loại này). Ghi nhận CẢ HÓA ĐƠN thành 1 dòng
-                # KHÔNG CHỊU THUẾ (KCT) thay vì để trống/báo "chưa lấy được chi
-                # tiết" — báo lỗi đó SAI vì không phải do mạng, thử lại cũng
-                # không bao giờ có chi tiết dòng hàng cho loại hóa đơn này.
+                # dòng hàng cho loại này). Ghi nhận CẢ HÓA ĐƠN thành 1 dòng —
+                # BUG THẬT đã xác nhận qua ca thật người dùng báo (HĐ C26MHH-
+                # 1491): bản CŨ gán CỨNG "KCT" (không chịu thuế) + 0đ tiền thuế
+                # cho MỌI hóa đơn rơi vào nhánh này, dù hóa đơn ĐÓ thật sự CÓ
+                # tiền thuế (r["tgtthue"]=357.467đ, "BK Bán ra" đã dùng đúng số
+                # này qua nhánh dự phòng riêng của nó — 2 sheet vì vậy lệch
+                # nhau) — SỬA: dùng ĐÚNG tiền thuế thật từ chính hóa đơn
+                # (r["tgtthue"]), CHỈ hiện "KCT" khi số đó thật sự bằng 0.
                 if loai == "sold" and dang_nhap_ok and tong_tien_hd:
                     nmten_raw = raw.get("nmten", "") or raw.get("nmtnmua", "") or ""
+                    thue_hd_that = _to_num(r["tgtthue"]) or 0
+                    ts_hien_hd = "KCT" if not thue_hd_that else ""
                     append_row([r["khhdon"], r["shdon"], ngay_fmt,
                                 nmten_raw, r["nmmst"], 1, "",
                                 "(Cả hóa đơn — không tách dòng hàng)", "",
-                                "", "", tong_tien_hd, "KCT", 0, tt, kq])
+                                "", "", tong_tien_hd, ts_hien_hd, thue_hd_that, tt, kq])
                     cur = ct_totals[loai].setdefault(ikey, {"ds": 0, "thue": 0})
                     cur["ds"] += tong_tien_hd
+                    cur["thue"] += thue_hd_that
                     continue
                 if client and getattr(client, "_token_dead", False):
                     ly_do = "(chưa lấy được chi tiết — phiên đăng nhập đã hết, đăng nhập lại rồi xuất lại)"
@@ -35821,11 +35828,31 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         ngay = (r["tdlap"] or "").split("T")[0]
         if ngay and "-" in ngay:
             y, m, d = ngay.split("-"); ngay = f"{d}/{m}/{y}"
-        ds = _to_num(r["tgtcthue"]) or 0
-        thue = _to_num(r["tgtthue"]) or 0
-        # HKD: nếu tgtcthue=0 nhưng tgtttbso>0 -> lấy thành tiền (tổng thanh toán)
-        if not ds:
-            ds = _to_num(r["tgtttbso"]) or 0
+        ikey = (str(r["khhdon"]), str(r["shdon"]).lstrip("0") or "0")
+        # ƯU TIÊN dùng tổng ĐÃ TÍNH SẴN từ chính các dòng hàng khi dựng sheet
+        # "Chi tiết MUA VÀO" (ct_totals, chạy TRƯỚC trong cùng lượt xuất Excel
+        # này) thay vì tính LẠI từ trường tổng đầu hóa đơn (tgtcthue/
+        # tgtttbso) — đảm bảo "BK Mua vào" và "Chi tiết MUA VÀO" LUÔN khớp
+        # TUYỆT ĐỐI (cùng 1 nguồn số liệu, không thể lệch nhau nữa).
+        #
+        # BUG THẬT đã xác nhận qua file XML gốc người dùng gửi (hóa đơn
+        # "Chiết khấu TM"/"Hóa đơn điều chỉnh giảm"): trường tổng đầu hóa đơn
+        # <TgTCThue> (Tổng tiền CHƯA thuế) bên phát hành ghi = 0 dù dòng hàng
+        # có Thành tiền thật khác 0 (họ diễn giải khoản chiết khấu qua
+        # <TTCKTMai>/dòng hàng theo nhóm thuế suất, không qua TgTCThue) — bản
+        # cũ coi TgTCThue=0 là "thiếu dữ liệu" (nhánh "HKD" dưới đây) nên lấy
+        # NHẦM <TgTTTBSo> (tổng tiền CÓ thuế) làm Doanh số CHƯA thuế, lệch
+        # hẳn so với "Chi tiết MUA VÀO" (vốn tính đúng từ chính dòng hàng).
+        ct_tong = ct_totals["purchase"].get(ikey)
+        if ct_tong is not None:
+            ds = ct_tong["ds"]
+            thue = ct_tong["thue"]
+        else:
+            ds = _to_num(r["tgtcthue"]) or 0
+            thue = _to_num(r["tgtthue"]) or 0
+            # HKD: nếu tgtcthue=0 nhưng tgtttbso>0 -> lấy thành tiền (tổng thanh toán)
+            if not ds:
+                ds = _to_num(r["tgtttbso"]) or 0
         # mặt hàng đầu tiên + thuế suất (loại dòng "Tổng tiền phí" ra khỏi
         # phần gộp này vì nó đã được ghi thành 1 dòng riêng ở dưới)
         _items, _sm = get_invoice_items(r)
@@ -35885,7 +35912,6 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         _to_do_dong_neu_canh_bao(ws, ws.max_row, len(hdr1), mst_info_ncc["canh_bao"])
         tong_ds_mua += ds if isinstance(ds, (int, float)) else 0
         tong_thue_mua += thue if isinstance(thue, (int, float)) else 0
-        ikey = (str(r["khhdon"]), str(r["shdon"]).lstrip("0") or "0")
         bk_totals["purchase"][ikey] = {"ds": ds, "thue": thue}
         # dòng riêng "Tổng tiền phí" (thu hộ/lệ phí ngoài DSHHDVu, không nằm
         # trong TgTCThue) — khớp với dòng đã thêm ở "Chi tiết MUA VÀO"
