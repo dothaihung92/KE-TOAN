@@ -7,6 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- Dùng để GIẢI NÉN dữ liệu "session_..."/"companies" mà doi_chieu_ngan_hang.html NÉN bằng
+     LZString trước khi lưu IndexedDB (xem LS.set ở đó) — cầu nối badge "còn dữ liệu chưa hoàn
+     thành" bên dưới (_dcnhKvGet/dcnhTrangThaiCty) đọc CHUNG kho IndexedDB đó nên cũng phải giải
+     nén y hệt, nếu không JSON.parse thẳng chuỗi đã nén sẽ luôn lỗi -> tưởng nhầm là không có dữ liệu. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
 <style>
   :root{
     --ink:#16241d; --paper:#f3f1e8; --card:#ffffff;
@@ -4042,12 +4047,27 @@ function _dcnhOpenDb(){
     }catch(e){resolve(null);}
   });
 }
+// Giải nén 1 giá trị đọc thẳng từ IndexedDB của Đối Chiếu Ngân Hàng — công cụ đó NÉN mọi giá trị
+// bằng LZString trước khi lưu (tiền tố "~LZ~", xem LS.set trong doi_chieu_ngan_hang.html) để đỡ tốn
+// chỗ; JSON.parse thẳng chuỗi đã nén sẽ LUÔN LỖI (không phải JSON hợp lệ) -> tưởng nhầm không có dữ
+// liệu. Phải giải nén ĐÚNG Y HỆT cách LS.get bên đó làm thì mới đọc được (kể cả dữ liệu CŨ lưu từ
+// trước khi có nén — không có tiền tố "~LZ~" thì coi là JSON thuần, không cần giải nén).
+const _DCNH_LZ_PREFIX='~LZ~';
+function _dcnhGiaiNen(raw){
+  if(raw==null)return null;
+  try{
+    const str=(typeof raw==='string'&&raw.indexOf(_DCNH_LZ_PREFIX)===0)
+      ? (window.LZString?LZString.decompressFromBase64(raw.slice(_DCNH_LZ_PREFIX.length)):null)
+      : raw;
+    return str!=null?JSON.parse(str):null;
+  }catch(e){ return null; }
+}
 function _dcnhKvGet(db,key){
   return new Promise(resolve=>{
     if(!db){resolve(null);return;}
     try{
       const req=db.transaction('kv','readonly').objectStore('kv').get(key);
-      req.onsuccess=()=>{ try{resolve(req.result!=null?JSON.parse(req.result):null);}catch(e){resolve(null);} };
+      req.onsuccess=()=>{ resolve(_dcnhGiaiNen(req.result)); };
       req.onerror=()=>resolve(null);
     }catch(e){resolve(null);}
   });
@@ -4084,7 +4104,7 @@ async function dcnhTrangThaiCty(mst){
         const cur=e.target.result;
         if(cur){
           let has=false;
-          try{ const s=JSON.parse(cur.value); has=!!(s&&s.results&&s.results.length); }catch(err){}
+          try{ const s=_dcnhGiaiNen(cur.value); has=!!(s&&s.results&&s.results.length); }catch(err){}
           if(has){ resolve({co,hasData:true}); return; }
           cur.continue();
         } else resolve({co,hasData:false});
