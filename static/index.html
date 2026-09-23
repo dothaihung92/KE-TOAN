@@ -8885,7 +8885,13 @@ async function banHangImportMisa(){
       <div style="max-height:40vh;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
         <tr style="background:#f0f0f0"><th style="border:1px solid #eee;padding:2px 6px">Số CT</th><th style="border:1px solid #eee;padding:2px 6px">Số HĐ</th><th style="border:1px solid #eee;padding:2px 6px">Khách hàng</th><th style="border:1px solid #eee;padding:2px 6px">Tổng tiền</th><th style="border:1px solid #eee;padding:2px 6px">Ngày CT</th><th style="border:1px solid #eee;padding:2px 6px">Loại CT (MISA)</th><th style="border:1px solid #eee;padding:2px 6px">Trạng thái</th></tr>
         ${ds}</table></div>
-      <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <div id="misaGhiTienDoBox" style="display:none;margin-top:10px">
+        <div style="font-size:12.5px;color:#a03a3a;font-weight:600;margin-bottom:3px" id="misaGhiTienDoText">Đang ghi vào MISA...</div>
+        <div style="background:#eee;border-radius:6px;height:8px;overflow:hidden">
+          <div id="misaGhiTienDoBar" style="background:#a03a3a;height:100%;width:0%;transition:width .2s"></div>
+        </div>
+      </div>
+      <div id="misaGhiNutBox" style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
         ${pv.so_trung>0?`<button class="btn sm" style="background:#8a5300" onclick="banHangImportMisaGhi(true)">♻ Ghi đè ${pv.so_trung} chứng từ</button>`:''}
         ${pv.so_chungtu>0?`<button class="btn sm" style="background:#a03a3a" onclick="banHangImportMisaGhi(false)">⬆ Ghi ${pv.so_chungtu} chứng từ mới vào MISA</button>`:''}
@@ -8893,8 +8899,30 @@ async function banHangImportMisa(){
     misaModalNormal();document.getElementById('misaModal').style.display='flex';
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
+// Ghi trực tiếp vào MISA qua ODBC, TỪNG DÒNG 1 — với dữ liệu nhiều nghìn
+// chứng từ (vd 4356) có thể mất khá lâu; theo yêu cầu người dùng ("nhiều dữ
+// liệu quá không biết đã import hay chưa"), hiện thanh tiến độ bằng cách
+// vừa gọi API ghi thật (chạy nền ở server), vừa SONG SONG hỏi thăm tiến độ
+// mỗi 500ms — cùng cơ chế đã dùng cho "Dò mã hàng tự động" (xkDoMa).
 async function banHangImportMisaGhi(ghiDe){
-  toast('Đang ghi vào MISA...','');
+  const box=document.getElementById('misaGhiTienDoBox');
+  const text=document.getElementById('misaGhiTienDoText');
+  const bar=document.getElementById('misaGhiTienDoBar');
+  const nutBox=document.getElementById('misaGhiNutBox');
+  if(box){box.style.display='block';text.textContent='Đang ghi vào MISA...';bar.style.width='0%';}
+  if(nutBox)nutBox.querySelectorAll('button').forEach(b=>b.disabled=true);
+  const capNhatTienDo=async()=>{
+    try{
+      const st=await api(`/api/misa-sql/import-ban-hang-status/${current}`);
+      if(!box)return;
+      if(st.tong>0){
+        const pct=Math.min(100,Math.round(st.da_xu_ly/st.tong*100));
+        bar.style.width=pct+'%';
+        text.textContent=`Đang ghi vào MISA: ${st.da_xu_ly.toLocaleString('vi-VN')}/${st.tong.toLocaleString('vi-VN')} chứng từ (${pct}%)...`;
+      }
+    }catch(e){}
+  };
+  const hen=setInterval(capNhatTienDo,500);
   try{
     const d=await api(`/api/misa-sql/import-ban-hang/${current}?preview=0&ghi_de=${ghiDe?1:0}`,{method:'POST'});
     const goTxt=(d.so_ghi_de>0)?` (ghi đè ${d.so_ghi_de} chứng từ cũ)`:'';
@@ -8902,7 +8930,11 @@ async function banHangImportMisaGhi(ghiDe){
     const dvtTxt=(d.so_dvt_chungtu_sua>0)?` (đã tự sửa ĐVT cho ${d.so_dvt_chungtu_sua} dòng chứng từ${dmTxt})`:'';
     document.getElementById('misaModal').style.display='none';
     toast(`✓ Đã ghi ${d.so_chungtu} chứng từ Bán hàng vào MISA${goTxt}${dvtTxt} — ĐÃ GHI SỔ.`,'ok');
-  }catch(e){toast('Lỗi ghi: '+e.message,'err')}
+  }catch(e){
+    toast('Lỗi ghi: '+e.message,'err');
+    if(nutBox)nutBox.querySelectorAll('button').forEach(b=>b.disabled=false);
+  }
+  finally{clearInterval(hen);if(box)box.style.display='none';}
 }
 // Ghi chứng từ XUẤT KHO (GIATHANH đã gắn mã) THẲNG vào MISA (bảng RIÊNG
 // INOutward/INOutwardDetail — màn MISA "Kho > Nhập, xuất kho > Xuất kho"),

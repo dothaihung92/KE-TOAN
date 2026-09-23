@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-23.001"
+APP_BUILD = "2026-09-23.002"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20031,7 +20031,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         conn.close()
 
 
-def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
+def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=None):
     """Ghi chứng từ BÁN HÀNG thẳng vào MISA (bảng RIÊNG SAVoucher/
     SAVoucherDetail — xem _SA_VOUCHER_DEFAULT). Dữ liệu lấy từ Bảng kê Đầu ra
     ĐÃ LƯU (nhap_lieu 'out') — MỖI DÒNG trong bảng kê = 1 hóa đơn = 1 chứng từ
@@ -20048,7 +20048,12 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
     BỎ QUA, không ghi trùng (_da_co_hoa_don) — xác nhận qua thử nghiệm
     thật: TRƯỚC ĐÂY chỉ kiểm tra trùng với chứng từ mang CustomField10=
     _PM_MARK (do chính phần mềm tạo), nên 3 hóa đơn khách tự nhập tay
-    trong MISA (không có dấu _PM_MARK) đã bị ghi thêm 1 bản trùng."""
+    trong MISA (không có dấu _PM_MARK) đã bị ghi thêm 1 bản trùng.
+
+    on_progress(i, n) (tuỳ chọn): callback báo tiến độ (đã xử lý i/n dòng)
+    — dữ liệu nhiều nghìn dòng có thể mất khá lâu (mỗi dòng 1 lượt INSERT
+    qua ODBC), người dùng không biết đang chạy hay treo nếu không có gì
+    hiện ra — xem /api/misa-sql/import-ban-hang-status/{cid}."""
     import uuid as _uuid
     dl = nhap_lieu_get(cid, "out")
     header, rows = dl.get("header") or [], dl.get("rows") or []
@@ -20460,7 +20465,10 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
             pass
         co_the_ghi_so_tai_chinh = bool(cols_gl) and bool(cols_aol) and bool(cols_cfl)
 
-        for r in rows:
+        _tong_r_pgs = len(rows)
+        for _idx_pgs, r in enumerate(rows):
+            if on_progress:
+                on_progress(_idx_pgs, _tong_r_pgs)
             sohd = str(gv(r, col["sohd"]) or "").strip()
             if not sohd:
                 continue
@@ -21034,6 +21042,16 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False):
         conn.close()
 
 
+# Tiến độ "Ghi Bán hàng vào MISA" — {cid: {"da_xu_ly", "tong", "dang_chay"}}.
+# CÙNG cơ chế đã dùng cho "Dò mã hàng tự động" (_XK_DOMA_TIEN_DO): route
+# chạy đồng bộ (def thường) nên FastAPI tự chạy trong threadpool riêng,
+# request GET trạng thái ở threadpool khác vẫn được phục vụ song song bình
+# thường trong lúc đó — không cần dựng hẳn hệ thống job nền/queue riêng.
+# Theo yêu cầu người dùng: dữ liệu nhiều nghìn dòng (vd 4356 chứng từ) ghi
+# từng dòng 1 qua ODBC có thể mất khá lâu, không biết đã ghi hay chưa/còn
+# treo hay không nếu màn hình chỉ đứng yên 1 dòng "Đang ghi vào MISA...".
+_MISA_GHI_BH_TIEN_DO = {}
+
 @app.post("/api/misa-sql/import-ban-hang/{cid}")
 def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi_de: int = 0):
     """Ghi chứng từ Bán hàng (Bảng kê Đầu ra) thẳng vào MISA — xem
@@ -21041,12 +21059,34 @@ def misa_sql_import_ban_hang(cid: int, preview: int = 1, database: str = "", ghi
     (IsPostedFinance=IsPostedManagement=0, quay lại như trước — xem giải
     thích ở _PU_HEADER_DEFAULT), người dùng tự bấm "Ghi sổ" trong MISA sau
     khi kiểm tra. ghi_de=1 -> gỡ chứng từ trùng số (do chính phần mềm tạo
-    trước đó) rồi ghi lại."""
+    trước đó) rồi ghi lại.
+
+    Báo tiến độ qua _MISA_GHI_BH_TIEN_DO (client tự poll
+    /api/misa-sql/import-ban-hang-status/{cid} trong lúc chờ — xem
+    _misa_ghi_ban_hang's on_progress)."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_ghi_ban_hang(cid, database, preview=bool(preview), ghi_de=bool(ghi_de))
+    _MISA_GHI_BH_TIEN_DO[cid] = {"da_xu_ly": 0, "tong": 0, "dang_chay": True}
+
+    def _bao_tien_do(i, n):
+        _MISA_GHI_BH_TIEN_DO[cid] = {"da_xu_ly": i, "tong": n, "dang_chay": True}
+
+    try:
+        return _misa_ghi_ban_hang(cid, database, preview=bool(preview), ghi_de=bool(ghi_de),
+                                  on_progress=_bao_tien_do)
+    finally:
+        if cid in _MISA_GHI_BH_TIEN_DO:
+            _MISA_GHI_BH_TIEN_DO[cid]["dang_chay"] = False
+
+
+@app.get("/api/misa-sql/import-ban-hang-status/{cid}")
+def misa_sql_import_ban_hang_status(cid: int):
+    """Tiến độ (đã xử lý/tổng số dòng) của lần 'Ghi Bán hàng vào MISA' gần
+    nhất — để client hiển thị thanh tiến độ trong lúc chờ (dữ liệu nhiều
+    nghìn dòng ghi từng dòng 1 qua ODBC có thể mất khá lâu)."""
+    return _MISA_GHI_BH_TIEN_DO.get(cid, {"da_xu_ly": 0, "tong": 0, "dang_chay": False})
 
 
 @app.post("/api/misa-sql/import-xuat-kho/{cid}")
