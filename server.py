@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-23.009"
+APP_BUILD = "2026-09-23.010"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -29345,18 +29345,26 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
             try:
                 gl_cols_list = [name for name, _ in cols_gl.values()]
                 if refdetail_mau_gl is not None and tk_mau_gl is not None:
-                    sql = ("SELECT [%s] FROM GeneralLedger WHERE RefID=? AND RefDetailID=? AND "
-                           "((AccountNumber=? AND CorrespondingAccountNumber=?) OR "
-                           "(AccountNumber=? AND CorrespondingAccountNumber=?)) ORDER BY EntryType" %
-                           "],[".join(gl_cols_list))
-                    tham_so = (ref_id_mau_gl, refdetail_mau_gl, tk_mau_gl, tk_doi_ung_mau_gl,
-                              tk_doi_ung_mau_gl, tk_mau_gl)
+                    # Đợt 4 — ĐÚNG dữ liệu thật vừa chẩn đoán được (chan_doan_so_cai gửi lại): 1 hóa
+                    # đơn có NHIỀU dòng hàng cùng thuế suất có thể khiến MISA gộp NHIỀU dòng cùng 1
+                    # cặp AccountNumber/CorrespondingAccountNumber (VD 2 dòng hàng cùng thuế 33311↔131
+                    # đều chung 1 RefDetailID) — ra 4 dòng (hoặc hơn) thay vì đúng 2, "== 2" ở bản vá
+                    # trước LUÔN thất bại với hóa đơn nhiều dòng hàng cùng thuế suất. Sửa: KHÔNG lấy
+                    # HẾT mọi dòng khớp — chỉ lấy TOP 1 CHO MỖI CHIỀU (combo1: AccountNumber=tk_mau_gl/
+                    # CorrespondingAccountNumber=tk_doi_ung_mau_gl; combo2: chiều ngược lại) — luôn ra
+                    # ĐÚNG tối đa 2 dòng (1 Nợ + 1 Có) làm khung, bất kể dữ liệu thật có bao nhiêu dòng
+                    # trùng cặp TK đó.
+                    sql = ("SELECT TOP 1 [%s] FROM GeneralLedger WHERE RefID=? AND RefDetailID=? AND "
+                           "AccountNumber=? AND CorrespondingAccountNumber=?" % "],[".join(gl_cols_list))
+                    for tk_a, tk_b in ((tk_mau_gl, tk_doi_ung_mau_gl), (tk_doi_ung_mau_gl, tk_mau_gl)):
+                        row = cur.execute(sql, (ref_id_mau_gl, refdetail_mau_gl, tk_a, tk_b)).fetchone()
+                        if row:
+                            mau_gl.append(dict(zip(gl_cols_list, row)))
                 else:
                     sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % (
                         "],[".join(gl_cols_list))
-                    tham_so = (ref_id_mau_gl,)
-                for row in cur.execute(sql, tham_so).fetchall():
-                    mau_gl.append(dict(zip(gl_cols_list, row)))
+                    for row in cur.execute(sql, (ref_id_mau_gl,)).fetchall():
+                        mau_gl.append(dict(zip(gl_cols_list, row)))
                 if len(mau_gl) != 2:
                     chan_doan_so_cai.append(
                         "mau_gl-fetch: tìm được RefID/cặp TK nhưng fetch lại ra %d dòng (cần đúng 2) — "

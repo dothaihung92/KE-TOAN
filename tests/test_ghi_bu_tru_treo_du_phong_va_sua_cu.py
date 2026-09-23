@@ -134,6 +134,9 @@ AOL_MAU = {
 # dùng để FakeCursor tự lọc THẬT theo params nhận được (mô phỏng đúng câu WHERE ((A=?,B=?) OR
 # (A=?,B=?)) trong server.py) thay vì trả cố định — phát hiện được nếu code truyền sai tham số.
 _TAT_CA_DONG_GL_SAD1 = [GL_BAN_HANG_NO, GL_BAN_HANG_CO, GL_BAN_HANG_VAT_NO, GL_BAN_HANG_VAT_CO]
+# Bọc trong list 1 phần tử để từng test có thể TỰ THAY nguồn dữ liệu (mô phỏng các ca khác nhau,
+# VD hóa đơn nhiều dòng hàng khiến 1 cặp TK có NHIỀU dòng trùng) mà không cần định nghĩa lại FakeCursor.
+_NGUON_GL_FETCH = [_TAT_CA_DONG_GL_SAD1]
 
 
 class FakeCursor:
@@ -181,19 +184,19 @@ class FakeCursor:
             # — mô phỏng thực tế: thứ tự vật lý ngẫu nhiên, code phải tự tách đúng cặp dù trúng dòng nào.
             r = GL_BAN_HANG_NO
             self._result = [(r["RefID"], r["RefDetailID"], r["AccountNumber"], r["CorrespondingAccountNumber"])]
-        elif ("FROM GeneralLedger WHERE RefID=? AND RefDetailID=? AND" in sql and
-              "CorrespondingAccountNumber" in sql):
-            # Lọc THẬT theo đúng tham số nhận được — phát hiện được nếu code truyền sai/thiếu tham số,
-            # hoặc lẫn cả cặp thuế (33311↔131) vào — CHỈ được lấy đúng cặp doanh thu (131↔5111).
-            ref_id_p, refdetail_p, tk1_p, corr1_p, tk2_p, corr2_p = p
+        elif (sql.startswith("SELECT TOP 1 [") and "FROM GeneralLedger WHERE RefID=? AND RefDetailID=? "
+              "AND AccountNumber=? AND CorrespondingAccountNumber=?" in sql):
+            # Lọc THẬT theo đúng tham số nhận được (TOP 1 CHO ĐÚNG 1 CHIỀU, gọi 2 lần — 1 lần/chiều) —
+            # phát hiện được nếu code truyền sai/thiếu tham số. Nguồn dữ liệu (_NGUON_GL_FETCH) do từng
+            # test tự gán trước khi gọi, mô phỏng đúng ca thật: có thể có NHIỀU dòng trùng cùng 1 cặp TK
+            # (VD hóa đơn nhiều dòng hàng cùng thuế suất) — chỉ cần lấy ĐÚNG 1 dòng đại diện mỗi chiều.
+            ref_id_p, refdetail_p, tk_a_p, tk_b_p = p
             def _khop(row):
-                if row["RefID"] != ref_id_p or row["RefDetailID"] != refdetail_p:
-                    return False
-                return ((row["AccountNumber"] == tk1_p and row["CorrespondingAccountNumber"] == corr1_p) or
-                        (row["AccountNumber"] == tk2_p and row["CorrespondingAccountNumber"] == corr2_p))
-            self._result = [r for r in _TAT_CA_DONG_GL_SAD1 if _khop(r)]
+                return (row["RefID"] == ref_id_p and row["RefDetailID"] == refdetail_p and
+                        row["AccountNumber"] == tk_a_p and row["CorrespondingAccountNumber"] == tk_b_p)
+            khop_rows = [r for r in _NGUON_GL_FETCH[0] if _khop(r)]
             cols = [c for c, _t in COLUMNS["GeneralLedger"]]
-            self._result = [tuple(r[c] for c in cols) for r in self._result]
+            self._result = [tuple(r[c] for c in cols) for r in khop_rows[:1]]
         elif "FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" in sql:
             cols = [c for c, _t in COLUMNS["GeneralLedger"]]
             self._result = [tuple(GL_BAN_HANG_NO[c] for c in cols), tuple(GL_BAN_HANG_CO[c] for c in cols)]
@@ -388,5 +391,48 @@ assert 'chan_doan_so_cai' in html, (
     "static/index.html phải đọc và hiện d.chan_doan_so_cai khi hoc_duoc_so_cai=False — để lần báo lỗi "
     "tiếp theo có bằng chứng cụ thể (gửi kèm ảnh chụp) thay vì chỉ 1 câu cảnh báo chung chung.")
 print("PASS 8: static/index.html hiện chi tiết chan_doan_so_cai khi chưa ghi được Sổ Cái.")
+
+# ===== Test 9 (QUAN TRỌNG — đợt 4, ĐÚNG dữ liệu thật vừa chẩn đoán được qua chan_doan_so_cai người
+# dùng gửi lại): "TOP 1" tình cờ rơi vào dòng có TK='131'/CorrespondingAccountNumber='33311' (cặp
+# THUẾ, không phải cặp doanh thu) — và với 1 hóa đơn có NHIỀU DÒNG HÀNG cùng thuế suất, cặp TK đó
+# (131↔33311) có tới 4 dòng CÙNG chung RefDetailID (không phải 2) — bản vá đợt 3 (fetch qua OR, kỳ
+# vọng đúng 2 dòng) LUÔN thất bại với ca này ("fetch lại ra 4 dòng (cần đúng 2)"). Sửa: chỉ lấy TOP 1
+# CHO MỖI CHIỀU riêng biệt (2 câu SELECT TOP 1 riêng, không gộp OR) — phải ra ĐÚNG 2 dòng dù nguồn có
+# bao nhiêu dòng trùng cặp TK đó. =====
+GL_NHIEU_DONG_HANG_THUE_1 = {**GL_BAN_HANG_VAT_NO, "RefDetailID": "detail-hoa-don-nhieu-dong",
+                             "RefID": "sa-voucher-nhieu-dong"}
+GL_NHIEU_DONG_HANG_THUE_2 = {**GL_BAN_HANG_VAT_NO, "RefDetailID": "detail-hoa-don-nhieu-dong",
+                             "RefID": "sa-voucher-nhieu-dong"}   # dòng hàng THỨ 2 — trùng lặp cặp TK
+GL_NHIEU_DONG_HANG_THUE_CO_1 = {**GL_BAN_HANG_VAT_CO, "RefDetailID": "detail-hoa-don-nhieu-dong",
+                                "RefID": "sa-voucher-nhieu-dong"}
+GL_NHIEU_DONG_HANG_THUE_CO_2 = {**GL_BAN_HANG_VAT_CO, "RefDetailID": "detail-hoa-don-nhieu-dong",
+                                "RefID": "sa-voucher-nhieu-dong"}   # dòng hàng THỨ 2 — trùng lặp cặp TK
+_NGUON_NHIEU_DONG_HANG = [GL_NHIEU_DONG_HANG_THUE_1, GL_NHIEU_DONG_HANG_THUE_2,
+                         GL_NHIEU_DONG_HANG_THUE_CO_1, GL_NHIEU_DONG_HANG_THUE_CO_2]
+
+
+class FakeCursorNhieuDongHang(FakeCursor):
+    def execute(self, sql, params=()):
+        if sql.startswith("SELECT TOP 1 RefID, RefDetailID, AccountNumber, CorrespondingAccountNumber "
+                          "FROM GeneralLedger WHERE AccountNumber LIKE ?"):
+            r = GL_NHIEU_DONG_HANG_THUE_1   # "TOP 1" tình cờ rơi vào ĐÚNG dòng cặp THUẾ (131↔33311)
+            self._result = [(r["RefID"], r["RefDetailID"], r["AccountNumber"], r["CorrespondingAccountNumber"])]
+            return self
+        return super().execute(sql, params)
+
+
+_NGUON_GL_FETCH[0] = _NGUON_NHIEU_DONG_HANG
+cur9 = FakeCursorNhieuDongHang()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur9)
+r9 = _misa_ghi_bu_tru_treo(1, "TESTDB", "kh", danh_sach_kh, preview=False)
+assert r9["hoc_duoc_so_cai"] is True, (
+    f"Hóa đơn nhiều dòng hàng khiến 1 cặp TK (131↔33311) có 4 dòng cùng RefDetailID (không phải 2) — "
+    f"PHẢI vẫn tự mượn được khung (lấy TOP 1 cho MỖI chiều riêng), không được rơi vào "
+    f"hoc_duoc_so_cai=False — got chan_doan_so_cai={r9.get('chan_doan_so_cai')}")
+gl_rows9 = [row for tbl, row in cur9.written if tbl == "GeneralLedger"]
+assert len(gl_rows9) == 2, f"Phải ghi đúng 2 dòng GeneralLedger dù nguồn có 4 dòng trùng cặp TK — got {len(gl_rows9)}"
+print("PASS 9: hóa đơn nhiều dòng hàng (1 cặp TK có 4 dòng cùng RefDetailID, không phải 2) — vẫn tự "
+      "mượn đúng khung 2 dòng (TOP 1 cho mỗi chiều), không còn rơi vào hoc_duoc_so_cai=False như đúng "
+      "lỗi thật vừa chẩn đoán được (chan_doan_so_cai: 'fetch lại ra 4 dòng (cần đúng 2)').")
 
 print("\nALL DONE")
