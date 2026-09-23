@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-23.007"
+APP_BUILD = "2026-09-23.008"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -29301,20 +29301,41 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
         # hàng ghi nợ TK này — chính là dữ liệu công nợ đang cần điều chỉnh) làm khung, RỒI GHI ĐÈ tường
         # minh RefType/RefTypeName/CurrencyID/ExchangeRate cho ĐÚNG loại 'Nghiệp vụ khác' (xem chỗ dùng
         # ref_type/ref_type_ten bên dưới) — không còn phụ thuộc công ty đã từng tạo tay chứng từ NVK nào.
+        #
+        # QUAN TRỌNG (đúng lỗi thật vẫn còn gặp SAU bản vá trên — công ty khác, cùng hiện tượng): 1
+        # hóa đơn Bán hàng THẬT (có thuế GTGT) không chỉ có 1 cặp Nợ/Có (131↔511) mà có TỚI 4 dòng
+        # GeneralLedger cùng RefDetailID — thêm 1 cặp thuế (33311↔131, xem _misa_ghi_ban_hang: cặp
+        # doanh thu EntryType 1/2 + cặp thuế EntryType 2/3, CÙNG 1 detail_id) — "GROUP BY RefID HAVING
+        # COUNT(*)=2" ở trên KHÔNG BAO GIỜ khớp được hóa đơn có thuế (đa số hóa đơn thật), vẫn rơi về
+        # rỗng y như trước khi vá. Sửa: lấy CHÍNH XÁC 1 dòng bất kỳ chạm TK 131/331, rồi chỉ fetch
+        # ĐÚNG CẶP đối ứng của dòng đó (cùng RefID+RefDetailID, khớp đúng cặp AccountNumber/
+        # CorrespondingAccountNumber theo cả 2 chiều) — bỏ qua các cặp KHÁC (VD cặp thuế) cùng chung
+        # RefDetailID, không cần cả RefID phải "sạch" chỉ đúng 2 dòng.
+        refdetail_mau_gl = tk_mau_gl = tk_doi_ung_mau_gl = None
         if not ref_id_mau_gl and cols_gl:
             try:
                 row0 = cur.execute(
-                    "SELECT TOP 1 RefID FROM GeneralLedger WHERE AccountNumber LIKE ? "
-                    "GROUP BY RefID HAVING COUNT(*)=2").fetchone()
-                ref_id_mau_gl = row0[0] if row0 else None
+                    "SELECT TOP 1 RefID, RefDetailID, AccountNumber, CorrespondingAccountNumber "
+                    "FROM GeneralLedger WHERE AccountNumber LIKE ?", tk_ke_toan + "%").fetchone()
+                if row0:
+                    ref_id_mau_gl, refdetail_mau_gl, tk_mau_gl, tk_doi_ung_mau_gl = row0
             except Exception:
                 ref_id_mau_gl = None
         if ref_id_mau_gl and cols_gl:
             try:
                 gl_cols_list = [name for name, _ in cols_gl.values()]
-                sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % (
-                    "],[".join(gl_cols_list))
-                for row in cur.execute(sql, ref_id_mau_gl).fetchall():
+                if refdetail_mau_gl is not None and tk_mau_gl is not None:
+                    sql = ("SELECT [%s] FROM GeneralLedger WHERE RefID=? AND RefDetailID=? AND "
+                           "((AccountNumber=? AND CorrespondingAccountNumber=?) OR "
+                           "(AccountNumber=? AND CorrespondingAccountNumber=?)) ORDER BY EntryType" %
+                           "],[".join(gl_cols_list))
+                    tham_so = (ref_id_mau_gl, refdetail_mau_gl, tk_mau_gl, tk_doi_ung_mau_gl,
+                              tk_doi_ung_mau_gl, tk_mau_gl)
+                else:
+                    sql = "SELECT [%s] FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" % (
+                        "],[".join(gl_cols_list))
+                    tham_so = (ref_id_mau_gl,)
+                for row in cur.execute(sql, tham_so).fetchall():
                     mau_gl.append(dict(zip(gl_cols_list, row)))
             except Exception:
                 mau_gl = []

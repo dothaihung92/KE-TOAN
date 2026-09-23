@@ -109,6 +109,15 @@ GL_BAN_HANG_NO = {
 }
 GL_BAN_HANG_CO = {**GL_BAN_HANG_NO, "AccountNumber": "5111", "CorrespondingAccountNumber": "131",
                   "DebitAmountOC": 0, "DebitAmount": 0, "CreditAmountOC": 19356975, "CreditAmount": 19356975}
+# Cặp THUẾ (33311↔131) — CÙNG RefDetailID "sad1" với cặp doanh thu ở trên (đúng cấu trúc thật
+# _misa_ghi_ban_hang dùng: 1 hóa đơn có thuế GTGT sinh RA 4 dòng GeneralLedger — 2 cặp — nhưng
+# CÙNG 1 detail_id, xem _gl()/gl_rows.append trong _misa_ghi_ban_hang) — đúng bug thật vẫn còn gặp
+# SAU bản vá đợt 1 (dùng "GROUP BY RefID HAVING COUNT(*)=2"): hóa đơn có thuế có 4 dòng/RefDetailID
+# (không phải 2) nên KHÔNG BAO GIỜ khớp — phải tách ĐÚNG cặp doanh thu ra khỏi cặp thuế mới đúng.
+GL_BAN_HANG_VAT_NO = {**GL_BAN_HANG_NO, "AccountNumber": "33311", "CorrespondingAccountNumber": "131",
+                      "DebitAmountOC": 0, "DebitAmount": 0, "CreditAmountOC": 1935698, "CreditAmount": 1935698}
+GL_BAN_HANG_VAT_CO = {**GL_BAN_HANG_NO, "AccountNumber": "131", "CorrespondingAccountNumber": "33311",
+                      "DebitAmountOC": 1935698, "DebitAmount": 1935698, "CreditAmountOC": 0, "CreditAmount": 0}
 AOL_MAU = {
     "RefID": "sa-voucher-1", "RefDetailID": "sad1", "RefDate": datetime.datetime(2025, 6, 24),
     "PostedDate": datetime.datetime(2025, 6, 24), "RefNo": "BH00390", "RefNoFinance": "BH00390",
@@ -121,11 +130,18 @@ AOL_MAU = {
 }
 
 
+# Toàn bộ 4 dòng GeneralLedger thật chia sẻ CÙNG RefDetailID "sad1" (2 cặp: doanh thu + thuế) —
+# dùng để FakeCursor tự lọc THẬT theo params nhận được (mô phỏng đúng câu WHERE ((A=?,B=?) OR
+# (A=?,B=?)) trong server.py) thay vì trả cố định — phát hiện được nếu code truyền sai tham số.
+_TAT_CA_DONG_GL_SAD1 = [GL_BAN_HANG_NO, GL_BAN_HANG_CO, GL_BAN_HANG_VAT_NO, GL_BAN_HANG_VAT_CO]
+
+
 class FakeCursor:
     """Công ty CHƯA TỪNG tự tạo tay 1 chứng từ 'Nghiệp vụ khác' nào (cả mẫu JournalMemo 'Điều
     chỉnh công nợ treo...' lẫn mẫu GLVoucher 1-dòng bất kỳ đều RỖNG) — nhưng CÓ hóa đơn Bán hàng
-    thật ghi nợ TK 131 (GL_BAN_HANG_NO/CO) — đúng ca thật người dùng xác nhận: 'công ty chưa từng
-    có chứng từ Nghiệp vụ khác nào chạm TK 131/331 để phần mềm học theo cấu trúc'."""
+    THẬT ghi nợ TK 131, CÓ THUẾ GTGT (4 dòng GeneralLedger/RefDetailID — 2 cặp doanh thu+thuế,
+    đúng cấu trúc thật _misa_ghi_ban_hang tạo ra) — đúng ca thật người dùng xác nhận: 'công ty
+    chưa từng có chứng từ Nghiệp vụ khác nào chạm TK 131/331 để phần mềm học theo cấu trúc'."""
     def __init__(self):
         self.written = []
         self.deletes = []
@@ -159,9 +175,25 @@ class FakeCursor:
             self._result = []
         elif "SELECT TOP 1 gv.RefID FROM GLVoucher gv WHERE" in sql:
             self._result = []   # KHÔNG có chứng từ Nghiệp vụ khác 1-dòng nào để học (đúng ca thật)
-        elif sql.startswith("SELECT TOP 1 RefID FROM GeneralLedger WHERE AccountNumber LIKE ? "
-                            "GROUP BY RefID HAVING COUNT(*)=2"):
-            self._result = [(GL_BAN_HANG_NO["RefID"],)]   # dự phòng — mượn cặp GL thật từ Bán hàng
+        elif sql.startswith("SELECT TOP 1 RefID, RefDetailID, AccountNumber, CorrespondingAccountNumber "
+                            "FROM GeneralLedger WHERE AccountNumber LIKE ?"):
+            # Dự phòng — "TOP 1" tình cờ rơi vào ĐÚNG dòng 131 của cặp DOANH THU (không phải cặp thuế)
+            # — mô phỏng thực tế: thứ tự vật lý ngẫu nhiên, code phải tự tách đúng cặp dù trúng dòng nào.
+            r = GL_BAN_HANG_NO
+            self._result = [(r["RefID"], r["RefDetailID"], r["AccountNumber"], r["CorrespondingAccountNumber"])]
+        elif ("FROM GeneralLedger WHERE RefID=? AND RefDetailID=? AND" in sql and
+              "CorrespondingAccountNumber" in sql):
+            # Lọc THẬT theo đúng tham số nhận được — phát hiện được nếu code truyền sai/thiếu tham số,
+            # hoặc lẫn cả cặp thuế (33311↔131) vào — CHỈ được lấy đúng cặp doanh thu (131↔5111).
+            ref_id_p, refdetail_p, tk1_p, corr1_p, tk2_p, corr2_p = p
+            def _khop(row):
+                if row["RefID"] != ref_id_p or row["RefDetailID"] != refdetail_p:
+                    return False
+                return ((row["AccountNumber"] == tk1_p and row["CorrespondingAccountNumber"] == corr1_p) or
+                        (row["AccountNumber"] == tk2_p and row["CorrespondingAccountNumber"] == corr2_p))
+            self._result = [r for r in _TAT_CA_DONG_GL_SAD1 if _khop(r)]
+            cols = [c for c, _t in COLUMNS["GeneralLedger"]]
+            self._result = [tuple(r[c] for c in cols) for r in self._result]
         elif "FROM GeneralLedger WHERE RefID=? ORDER BY EntryType" in sql:
             cols = [c for c, _t in COLUMNS["GeneralLedger"]]
             self._result = [tuple(GL_BAN_HANG_NO[c] for c in cols), tuple(GL_BAN_HANG_CO[c] for c in cols)]
@@ -223,11 +255,19 @@ assert r1["hoc_duoc_so_cai"] is True, (
     "PHẢI tự mượn cặp GeneralLedger đó làm khung (dự phòng), không còn hoc_duoc_so_cai=False — đúng "
     "nguyên nhân báo cáo MISA không thấy đối chiếu nào dù chứng từ đã 'ghi sổ'.")
 gl_rows1 = [row for tbl, row in cur1.written if tbl == "GeneralLedger"]
-assert len(gl_rows1) == 2, f"Phải ghi đủ 2 dòng GeneralLedger — got {len(gl_rows1)}"
+assert len(gl_rows1) == 2, (
+    f"Phải ghi ĐÚNG 2 dòng GeneralLedger (1 cặp) — hóa đơn mẫu mượn có THUẾ GTGT nên thật ra có 4 "
+    f"dòng chung RefDetailID (2 cặp: doanh thu + thuế) — nếu code lẫn cả 2 cặp vào (bug thật vừa gặp "
+    f"lại sau bản vá đợt 1) sẽ ra 4 dòng thay vì 2 — got {len(gl_rows1)}")
+tk_theo_dong1 = {r["AccountNumber"] for r in gl_rows1}
+assert tk_theo_dong1 == {"1111", "131"}, (
+    f"2 dòng GeneralLedger PHẢI đúng TK của giao dịch MỚI (1111/131), không được lẫn TK 5111/33311 "
+    f"của cặp mẫu mượn — got {tk_theo_dong1}")
 aol_rows1 = [row for tbl, row in cur1.written if tbl == "AccountObjectLedger"]
 assert len(aol_rows1) == 1, f"Phải ghi đúng 1 dòng AccountObjectLedger — got {len(aol_rows1)}"
-print("PASS 1: công ty chưa từng tạo chứng từ Nghiệp vụ khác nào -> tự mượn cặp GeneralLedger thật "
-      "từ Bán hàng làm khung, co_mau_so_cai=True, ghi đủ GeneralLedger/AccountObjectLedger.")
+print("PASS 1: công ty chưa từng tạo chứng từ Nghiệp vụ khác nào -> tự mượn ĐÚNG 1 cặp doanh thu "
+      "(không lẫn cặp thuế cùng RefDetailID) từ Bán hàng làm khung, co_mau_so_cai=True, ghi đủ "
+      "GeneralLedger/AccountObjectLedger.")
 
 # ===== Test 2 (QUAN TRỌNG — không hồi quy): mẫu mượn tạm từ Bán hàng có RefType=302/RefTypeName=
 # 'Bán hàng trong nước' — PHẢI bị GHI ĐÈ đúng RefType/RefTypeName của 'Nghiệp vụ khác' (4501/
