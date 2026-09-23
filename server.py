@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-22.001"
+APP_BUILD = "2026-09-23.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16950,7 +16950,20 @@ def _misa_ghi_khncc(cid, database, preview=True):
                 "FROM AccountObject").fetchall():
             ten_misa = str(name or "")
             if code:
+                # BUG THẬT đã gặp: Mã ĐT có sẵn trong MISA chứa dấu gạch
+                # ngang/khoảng trắng/chấm (vd "CH-Kim-Long", tự đặt tay cho
+                # khách không có MST) chỉ được strip()+lower() ở đây, KHÔNG
+                # bỏ các dấu đó như _misa_khncc_chuan_mst đã làm với "mst"
+                # của dòng MỚI cần thêm (vd "CHKimLong", đã bỏ hết dấu) — 2
+                # bên lệch chuẩn hoá nên "chkimlong" (mst mới) không khớp
+                # được "ch-kim-long" (khoá cũ), lọt qua bước kiểm tra "đã
+                # có" rồi INSERT bị SQL Server chặn ngay tại ràng buộc
+                # UNIQUE KHÁC (báo lỗi khó hiểu, không rõ vì sao "đã bỏ qua
+                # (đã có)" lại còn báo trùng). Ghi CẢ 2 khoá (nguyên bản VÀ
+                # đã chuẩn hoá bỏ dấu) để chắc chắn khớp được dù Mã ĐT có
+                # dấu phân cách hay không.
                 existing[str(code).strip().lower()] = ten_misa
+                existing[_misa_khncc_chuan_mst(code).lower()] = ten_misa
             if taxcode:
                 existing[_misa_khncc_chuan_mst(taxcode).lower()] = ten_misa
 
@@ -16992,6 +17005,14 @@ def _misa_ghi_khncc(cid, database, preview=True):
             them += 1
             ket.append({"mst": mst_hien, "ten": ten, "thieu_ten": it.get("thieu_ten", False),
                         "vai_tro": "NCC+KH", "trang_thai": "sẽ thêm" if preview else "đã thêm"})
+            # Đánh dấu NGAY vào 'existing' (không đợi query lại DB) — lưới an
+            # toàn THỨ 2 phòng khi 2 "mst" KHÁC NHAU (khác khoá dict 'items')
+            # nhưng lại trùng CÙNG 1 AccountObjectCode sau khi cắt 50 ký tự/
+            # chuẩn hoá — tránh lặp lại đúng lỗi UNIQUE constraint đã gặp,
+            # biến thành "đã có (bỏ qua)" an toàn thay vì để SQL Server chặn
+            # giữa chừng (rollback SẠCH cả lô, không ghi được dòng nào).
+            existing[k] = ten
+            existing[mst_hien[:50].strip().lower()] = ten
         if preview:
             conn.rollback()
         else:
