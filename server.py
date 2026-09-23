@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-23.008"
+APP_BUILD = "2026-09-23.009"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -29283,14 +29283,25 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
         cols_aol = _misa_cot_bang_that(cur, "AccountObjectLedger")
         mau_gl = []
         mau_aol = None
+        # Đợt 3 — 2 lần vá trước (mau_gl dự phòng qua GROUP BY, rồi qua tách đúng cặp) đều KHÔNG đủ
+        # cho 1 công ty khác vẫn gặp y hệt hiện tượng (kèm ảnh chụp: "⚠ CHƯA ghi được Sổ Cái" vẫn
+        # hiện dù công ty rõ ràng có RẤT NHIỀU hóa đơn Bán hàng thật trên TK 131) — không còn cách
+        # nào chẩn đoán tiếp nếu KHÔNG có dữ liệu thật để soi, nên GHI LẠI rõ ràng ở đây lý do CHÍNH
+        # XÁC vì sao không học được mẫu (thay vì nuốt gọn mọi Exception như trước) — trả về qua
+        # "chan_doan_so_cai" để người dùng gửi lại ảnh chụp thông báo, biết ngay đang vướng ở bước
+        # nào (không có cols_gl/cols_aol? câu SELECT lỗi thật? hay chỉ đơn giản KHÔNG có dòng nào?).
+        chan_doan_so_cai = []
         try:
             row0 = cur.execute(
                 "SELECT TOP 1 gv.RefID FROM GLVoucher gv WHERE ISNULL(gv.CustomField10,'')<>? "
                 "AND ISNULL(gv.IsPostedFinance,0)=1 AND (SELECT COUNT(*) FROM GLVoucherDetail gd "
                 "WHERE gd.RefID=gv.RefID)=1 ORDER BY gv.CreatedDate DESC", _PM_MARK).fetchone()
             ref_id_mau_gl = row0[0] if row0 else None
-        except Exception:
+            if not ref_id_mau_gl:
+                chan_doan_so_cai.append("mau_gl-chinh: không có chứng từ Nghiệp vụ khác 1-dòng thật nào")
+        except Exception as e:
             ref_id_mau_gl = None
+            chan_doan_so_cai.append("mau_gl-chinh: lỗi SQL — %s" % str(e)[:200])
         # DỰ PHÒNG (đúng ca thật đã báo: công ty CHƯA TỪNG tự tạo tay 1 chứng từ 'Nghiệp vụ khác'
         # nào để học theo — mau_gl rỗng, co_mau_so_cai=False — chứng từ vẫn "ghi sổ" (IsPostedFinance=1)
         # nhưng THIẾU HẲN GeneralLedger/AccountObjectLedger, nên "Chi tiết công nợ phải thu" của MISA
@@ -29311,6 +29322,10 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
         # ĐÚNG CẶP đối ứng của dòng đó (cùng RefID+RefDetailID, khớp đúng cặp AccountNumber/
         # CorrespondingAccountNumber theo cả 2 chiều) — bỏ qua các cặp KHÁC (VD cặp thuế) cùng chung
         # RefDetailID, không cần cả RefID phải "sạch" chỉ đúng 2 dòng.
+        if not cols_gl:
+            chan_doan_so_cai.append("mau_gl: không tìm thấy/không đọc được cấu trúc bảng GeneralLedger")
+        if not cols_aol:
+            chan_doan_so_cai.append("mau_aol: không tìm thấy/không đọc được cấu trúc bảng AccountObjectLedger")
         refdetail_mau_gl = tk_mau_gl = tk_doi_ung_mau_gl = None
         if not ref_id_mau_gl and cols_gl:
             try:
@@ -29319,8 +29334,13 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                     "FROM GeneralLedger WHERE AccountNumber LIKE ?", tk_ke_toan + "%").fetchone()
                 if row0:
                     ref_id_mau_gl, refdetail_mau_gl, tk_mau_gl, tk_doi_ung_mau_gl = row0
-            except Exception:
+                else:
+                    chan_doan_so_cai.append(
+                        "mau_gl-du-phong: KHÔNG có dòng GeneralLedger nào có AccountNumber LIKE '%s%%'"
+                        % tk_ke_toan)
+            except Exception as e:
                 ref_id_mau_gl = None
+                chan_doan_so_cai.append("mau_gl-du-phong: lỗi SQL — %s" % str(e)[:200])
         if ref_id_mau_gl and cols_gl:
             try:
                 gl_cols_list = [name for name, _ in cols_gl.values()]
@@ -29337,8 +29357,14 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                     tham_so = (ref_id_mau_gl,)
                 for row in cur.execute(sql, tham_so).fetchall():
                     mau_gl.append(dict(zip(gl_cols_list, row)))
-            except Exception:
+                if len(mau_gl) != 2:
+                    chan_doan_so_cai.append(
+                        "mau_gl-fetch: tìm được RefID/cặp TK nhưng fetch lại ra %d dòng (cần đúng 2) — "
+                        "RefID=%r RefDetailID=%r TK=%r/%r" %
+                        (len(mau_gl), ref_id_mau_gl, refdetail_mau_gl, tk_mau_gl, tk_doi_ung_mau_gl))
+            except Exception as e:
                 mau_gl = []
+                chan_doan_so_cai.append("mau_gl-fetch: lỗi SQL — %s" % str(e)[:200])
         if cols_aol:
             try:
                 aol_cols_list = [name for name, _ in cols_aol.values()]
@@ -29348,8 +29374,13 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                 row = cur.execute(sql, tk_ke_toan + "%").fetchone()
                 if row:
                     mau_aol = dict(zip(aol_cols_list, row))
-            except Exception:
+                else:
+                    chan_doan_so_cai.append(
+                        "mau_aol: KHÔNG có dòng AccountObjectLedger nào có AccountNumber LIKE '%s%%' VÀ "
+                        "AccountObjectID khác NULL" % tk_ke_toan)
+            except Exception as e:
                 mau_aol = None
+                chan_doan_so_cai.append("mau_aol: lỗi SQL — %s" % str(e)[:200])
         co_mau_so_cai = len(mau_gl) == 2 and mau_aol is not None
 
         max_reforder = 0
@@ -29613,7 +29644,8 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
         else:
             conn.commit()
         return {"preview": preview, "loai": loai, "so_ghi": so_ghi, "so_sua": so_sua, "danh_sach": ket_qua,
-                "hoc_duoc_cot_doi_tuong": bool(cot_dt), "hoc_duoc_so_cai": co_mau_so_cai}
+                "hoc_duoc_cot_doi_tuong": bool(cot_dt), "hoc_duoc_so_cai": co_mau_so_cai,
+                "chan_doan_so_cai": chan_doan_so_cai}
     except HTTPException:
         conn.rollback()
         raise

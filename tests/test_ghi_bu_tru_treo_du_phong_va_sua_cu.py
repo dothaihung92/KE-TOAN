@@ -352,4 +352,41 @@ assert 'd.so_sua' in html and 'đã tự sửa bổ sung Sổ Cái' in html, (
     "được tự động vá bổ sung Sổ Cái/Sổ chi tiết công nợ (d.so_sua), không chỉ im lặng sửa ngầm.")
 print("PASS 6: static/index.html hiện rõ số chứng từ cũ đã được tự động vá bổ sung sổ cái.")
 
+# ===== Test 7 (QUAN TRỌNG — đợt 3, sau khi 2 lần vá dự phòng mau_gl trước vẫn KHÔNG đủ cho 1 công
+# ty khác gặp lại y hệt hiện tượng dù rõ ràng có rất nhiều hóa đơn Bán hàng thật trên TK 131): khi
+# co_mau_so_cai vẫn ra False (dù không rõ nguyên nhân cụ thể là gì — không có dữ liệu thật để soi
+# tiếp), PHẢI trả về "chan_doan_so_cai" liệt kê rõ lý do (không nuốt gọn mọi Exception như trước),
+# và static/index.html PHẢI hiện chi tiết đó cho người dùng thay vì chỉ 1 câu cảnh báo chung chung —
+# để lần báo lỗi tiếp theo có bằng chứng cụ thể thay vì phải đoán tiếp trong bóng tối. =====
+class FakeCursorKhongCoGiCa(FakeCursor):
+    """Mô phỏng trường hợp KHÔNG tìm được mẫu nào ở BẤT KỲ bước nào (mau_gl chính rỗng, mau_gl dự
+    phòng rỗng, mau_aol rỗng) — không rõ vì sao trên dữ liệu thật, nhưng phần mềm PHẢI tự báo cáo lại
+    rõ ràng lý do thay vì chỉ nói chung chung "chưa có mẫu"."""
+    def execute(self, sql, params=()):
+        if sql.startswith("SELECT TOP 1 RefID, RefDetailID, AccountNumber, CorrespondingAccountNumber "
+                          "FROM GeneralLedger WHERE AccountNumber LIKE ?"):
+            self._result = []; return self
+        if "FROM AccountObjectLedger WHERE AccountNumber LIKE" in sql:
+            self._result = []; return self
+        return super().execute(sql, params)
+
+
+cur7 = FakeCursorKhongCoGiCa()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur7)
+r7 = _misa_ghi_bu_tru_treo(1, "TESTDB", "kh", danh_sach_kh, preview=False)
+assert r7["hoc_duoc_so_cai"] is False, "Ca này phải rơi vào hoc_duoc_so_cai=False (không tìm được mẫu nào)."
+assert r7.get("chan_doan_so_cai"), (
+    "Khi hoc_duoc_so_cai=False, PHẢI trả về chan_doan_so_cai (danh sách lý do cụ thể) — không được để "
+    "người dùng/người hỗ trợ kỹ thuật phải đoán mò vì sao, nhất là sau khi đã vá 2 lần mà vẫn gặp lại "
+    "y hệt hiện tượng trên 1 công ty khác.")
+assert any("mau_aol" in x for x in r7["chan_doan_so_cai"]), (
+    f"Phải nêu rõ mau_aol là phần không tìm được — got {r7['chan_doan_so_cai']}")
+print("PASS 7: khi không tìm được mẫu Sổ Cái ở bất kỳ bước nào, trả về chan_doan_so_cai nêu rõ lý do "
+      "cụ thể (không nuốt gọn), phục vụ chẩn đoán tiếp nếu vẫn còn gặp lại trên dữ liệu thật khác.")
+
+assert 'chan_doan_so_cai' in html, (
+    "static/index.html phải đọc và hiện d.chan_doan_so_cai khi hoc_duoc_so_cai=False — để lần báo lỗi "
+    "tiếp theo có bằng chứng cụ thể (gửi kèm ảnh chụp) thay vì chỉ 1 câu cảnh báo chung chung.")
+print("PASS 8: static/index.html hiện chi tiết chan_doan_so_cai khi chưa ghi được Sổ Cái.")
+
 print("\nALL DONE")
