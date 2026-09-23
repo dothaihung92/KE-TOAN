@@ -4135,6 +4135,31 @@ function CompanyScreen({
     return rows.filter(r => r.some(c => String(c).trim())).map(r => r.map(c => String(c || "").trim()).join("\t")).join("\n");
   }
   const handleRun = () => {
+    // Chặn GHI ĐÈ NHẦM dữ liệu ĐÃ XÁC NHẬN của TK ĐANG MỞ (activeAccountId) —
+    // bug thật đã gặp: người dùng bấm thẳng vào thẻ "Đối Chiếu Ngân Hàng" ở
+    // màn Nhập Liệu (KHÔNG qua nút "▶ Tiếp tục"), vào lại đúng Bước 1 với
+    // sao kê của TK đang mở đã tự điền sẵn (rawSaoke khôi phục từ phiên cũ),
+    // rồi bấm "🚀 Chạy AI đối chiếu" — TRƯỚC ĐÂY lưới an toàn "không ghi đè
+    // TK đã có dữ liệu" (xem chú thích accsWithData dưới) CHỈ áp dụng cho
+    // các TK KHÁC TK đang mở, còn TK ĐANG MỞ (đúng ca thật gặp phải) hoàn
+    // toàn KHÔNG được bảo vệ — chạy xong ghi đè MẤT SẠCH phần đã xác nhận
+    // (hạch toán đã gắn giao dịch) mà không hỏi gì cả, phải làm lại từ đầu.
+    // GIỐNG HỆT cảnh báo đã có sẵn ở nút "Ghi đè toàn bộ" trong màn Xác nhận
+    // kết quả (dùng đúng window.confirm cùng kiểu) — chỉ khác là chặn TRƯỚC
+    // khi chạy lại từ Bước 1, không phải sau khi đã vào màn Xác nhận.
+    const accKeyDangMo = activeAccountId ? co.id + "_" + activeAccountId : co.id;
+    const existingDangMo = LS.get("session_" + accKeyDangMo);
+    if (existingDangMo && existingDangMo.results && existingDangMo.results.length > 0) {
+      const soDaXacNhan = existingDangMo.results.filter(
+        r => r && (r.confirmed === "yes" || r.confirmed === "no")).length;
+      if (soDaXacNhan > 0 && !window.confirm(
+        "⚠ Tài khoản đang mở đã có " + soDaXacNhan + " giao dịch ĐÃ XÁC NHẬN (hạch toán đã gắn) từ " +
+        "trước.\n\nChạy lại từ đầu sẽ GHI ĐÈ và MẤT các giao dịch đã xác nhận đó, phải xác nhận lại từ " +
+        "đầu.\n\nNếu chỉ muốn xem lại/bổ sung dữ liệu, hãy đóng màn này và bấm \"▶ Tiếp tục\" ở màn " +
+        "Nhập Liệu thay vì chạy lại từ Bước 1.\n\nBạn có chắc chắn muốn GHI ĐÈ và chạy lại không?")) {
+        return;
+      }
+    }
     // Collect ALL accounts with saokePer data
     const allAccounts2 = (co && co.accounts && co.accounts.length)
       ? co.accounts
