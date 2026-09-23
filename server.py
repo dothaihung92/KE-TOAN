@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-23.005"
+APP_BUILD = "2026-09-23.006"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26303,6 +26303,25 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         if not cols_m or not cols_d:
             raise HTTPException(
                 400, f"Không tìm thấy bảng {master_tbl}/{detail_tbl} trong CSDL MISA đang kết nối.")
+        # Danh mục TÀI KHOẢN thật của MISA — cột tk_cot (CreditAccount cho UNT/DebitAccount cho
+        # UNC) trên detail_tbl có FOREIGN KEY sang Account.AccountNumber, cùng lý do/cách xử lý đã
+        # dùng cho Mua hàng/Bán hàng (xem _misa_tk_fallback): mã hạch toán người dùng chọn trong
+        # Đối Chiếu Ngân Hàng (hach) có thể KHÔNG tồn tại trong danh mục TK thật của công ty đó
+        # trên MISA (VD tiểu khoản công ty chưa mở, hoặc gõ nhầm) — ghi thẳng sẽ dính lỗi FK
+        # "FK_BADepositDetail_Account_CreditAccount"/"FK_BAWithDrawDetail_Account_DebitAccount"
+        # NGAY TỪ DÒNG ĐẦU TIÊN gặp lỗi, mà conn chỉ commit 1 LẦN DUY NHẤT cho CẢ LƯỢT ghi (xem
+        # cuối hàm) — 1 dòng có TK sai làm ROLLBACK MẤT SẠCH toàn bộ hàng nghìn chứng từ khác vốn
+        # hợp lệ. Đúng lỗi thật đã báo kèm ảnh chụp: ghi 1993 chứng từ UNT, lỗi ngay "The INSERT
+        # statement conflicted with the FOREIGN KEY constraint...column 'AccountNumber'" — không
+        # chứng từ nào được ghi dù tuyệt đại đa số hợp lệ.
+        tk_set = set()
+        try:
+            for (an,) in cur.execute("SELECT AccountNumber FROM Account").fetchall():
+                if an:
+                    tk_set.add(str(an).strip())
+        except Exception:
+            pass
+        tk_thay = set()   # "2421→242": TK đã tự rút về TK cha đang tồn tại
         # Dò ĐÚNG TK ngân hàng khớp số TK người dùng đã cấu hình (xem giải thích ở docstring) — chỉ
         # 1 LẦN cho cả lượt ghi này, áp dụng cho MỌI chứng từ tạo ra bên dưới.
         bank_id_dung, bank_name_dung = _misa_bank_account_theo_so(cur, so_tk_ngan_hang)
@@ -26489,7 +26508,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         m_cols_that = {name for name, _ in cols_m.values()}
         d_cols_that = {name for name, _ in cols_d.values()}
         now = datetime.datetime.now()
-        them = trung = bo_qua_kh = 0
+        them = trung = bo_qua_kh = bo_qua_tk = 0
         ket = []
         for gd in (giao_dich or []):
             so_ct = str(gd.get("so_ct") or "").strip()
@@ -26504,6 +26523,20 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             mst = _misa_khncc_chuan_mst(mst_goc)
             ten = str(gd.get("ten_doi_tuong") or "").strip()
             hach = str(gd.get("tk_doi_ung") or hach_mac_dinh).strip()
+            # TK hạch toán phải tồn tại trong danh mục Account MISA (FK, xem giải thích ở tk_set
+            # phía trên) — không rút về được TK cha nào đang tồn tại thì BỎ QUA riêng chứng từ này
+            # (báo rõ lý do), KHÔNG để cả lượt ghi ăn theo lỗi rollback mất hết vì 1 chứng từ.
+            if tk_set:
+                hach_dung = _misa_tk_fallback(hach, tk_set)
+                if not hach_dung:
+                    bo_qua_tk += 1
+                    ket.append({"so_ct": so_ct,
+                               "trang_thai": f"bỏ qua — TK {hach} không có trong danh mục "
+                                             f"tài khoản MISA"})
+                    continue
+                if hach_dung != hach:
+                    tk_thay.add("%s→%s" % (hach, hach_dung))
+                hach = hach_dung
             # Thử khớp MST thuế thật trước; MST không khớp gì (hoặc không phải dạng MST, VD "KL" —
             # mã đối tượng Khách lẻ do phần mềm tự gán) thì thử lại theo Mã đối tượng (AccountObjectCode).
             dt = doi_tuong.get(mst.lower()) if mst else None
@@ -26772,6 +26805,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             conn.commit()
         return {"database": database, "preview": preview, "loai": loai,
                "so_them": them, "so_trung": trung, "so_bo_qua_kh": bo_qua_kh,
+               "so_bo_qua_tk": bo_qua_tk, "tk_thay": sorted(tk_thay),
                "co_ghi_so_cai": co_ban_ghi_so_cai, "danh_sach": ket}
     except HTTPException:
         conn.rollback()
