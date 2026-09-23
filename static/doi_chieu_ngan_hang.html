@@ -5774,6 +5774,25 @@ function ConfirmScreen({
   // Danh sách các mã hạch toán đã dùng (để lọc theo đúng 1 mã, VD lọc riêng "331" hoặc "1111")
   const usedHachCodes = [...new Set(rows.filter(r => r.confirmed === "yes" && r.confirmedHach).map(r => r.confirmedHach))].sort();
 
+  // Bấm 1 trong 3 banner cảnh báo (mismatch/missingmst/wronghach) để lọc — số đếm trên banner
+  // (mismatchCount/missingMstCount/wrongHachCount) tính trên TOÀN BỘ rows, KHÔNG áp search/hachFilter/
+  // locTuModal/khoảng ngày đang chọn. Nếu người dùng đang còn ô tìm kiếm/lọc hạch toán/khoảng ngày từ
+  // trước (VD gõ tên 1 công ty khác để tra cứu việc khác rồi quên xoá) mà không bỏ đi khi bật lọc
+  // banner, dòng cần tìm có thể đang bị NHỮNG bộ lọc đó che mất — ra "Không có giao dịch nào" dù banner
+  // vẫn báo có, làm người dùng tưởng phần mềm báo sai. Cùng lý do/cách xử lý đã áp dụng cho
+  // jumpToPayment() ("Bỏ mọi bộ lọc đang áp — nếu không, giao dịch cần tới có thể đang bị lọc ẩn đi").
+  const xemBannerCanhBao = target => {
+    if (filter === target) { setFilter("all"); setFocusIdx(0); clearBulkSelection(); return; }
+    setFilter(target);
+    setSearch("");
+    setHachFilter("");
+    setLocTuModal(null);
+    setDateFrom("");
+    setDateTo("");
+    setFocusIdx(0);
+    clearBulkSelection();
+  };
+
   // 3 mục lọc riêng theo NGUỒN gợi ý (chỉ tính dòng CHƯA xác nhận — dòng đã xác nhận rồi thì gợi ý
   // không còn ý nghĩa để lọc/xử lý tiếp) — bấm vào chỉ hiện đúng các dòng thuộc mục đó để xử lý nhanh.
   const isNameMatchRow = r => !r.confirmed && r.nameMatches && r.nameMatches.length > 0;
@@ -7392,7 +7411,7 @@ function ConfirmScreen({
     )
   ),
   mismatchCount > 0 && /*#__PURE__*/React.createElement("div", {
-    onClick: () => { setFilter(filter === "mismatch" ? "all" : "mismatch"); setFocusIdx(0); clearBulkSelection(); },
+    onClick: () => xemBannerCanhBao("mismatch"),
     style: {
       background: filter === "mismatch" ? "#dc2626" : "#fee2e2",
       border: "1px solid #fca5a5",
@@ -7419,7 +7438,7 @@ function ConfirmScreen({
     }}, filter === "mismatch" ? "→ Đang lọc — nhấn để bỏ" : "→ Nhấn để lọc")
   ),
   missingMstCount > 0 && /*#__PURE__*/React.createElement("div", {
-    onClick: () => { setFilter(filter === "missingmst" ? "all" : "missingmst"); setFocusIdx(0); clearBulkSelection(); },
+    onClick: () => xemBannerCanhBao("missingmst"),
     title: "Các giao dịch đã xác nhận hạch toán 131/331 nhưng chưa có MST đối tác — nhấn để lọc và sửa lại",
     style: {
       background: filter === "missingmst" ? "#dc2626" : "#fee2e2",
@@ -7447,7 +7466,7 @@ function ConfirmScreen({
     }}, filter === "missingmst" ? "→ Đang lọc — nhấn để bỏ" : "→ Nhấn để lọc và sửa")
   ),
   wrongHachCount > 0 && /*#__PURE__*/React.createElement("div", {
-    onClick: () => { setFilter(filter === "wronghach" ? "all" : "wronghach"); setFocusIdx(0); clearBulkSelection(); },
+    onClick: () => xemBannerCanhBao("wronghach"),
     title: "Tiền vào mà hạch toán 331/loại 6 (chi phí), hoặc tiền ra mà hạch toán 131/loại 5,7 (doanh thu) — có thể chọn nhầm hạch toán, nhấn để lọc và kiểm tra lại",
     style: {
       background: filter === "wronghach" ? "#dc2626" : "#fee2e2",
