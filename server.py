@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-24.003"
+APP_BUILD = "2026-09-24.004"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -499,6 +499,23 @@ class GDTClient:
         self._last_total = 0
         self._token_dead = False  # bật khi gặp 401 (hết phiên) -> bỏ qua nốt các gọi mạng
 
+    def _ha_cap_session(self):
+        """Hạ cấp từ curl_cffi (impersonate Chrome, né WAF F5) về requests.Session THƯỜNG — dùng khi
+        curl_cffi lỗi lúc GỌI THẬT (khác với lỗi IMPORT đã có sẵn fallback ở __init__): người dùng
+        macOS báo lỗi thật "Lỗi lấy captcha: HTTP Error 404" ngay ở bước ĐẦU TIÊN (lấy captcha, trước
+        cả khi kịp gửi request nào khác) — rất có thể do phần gốc (native, biên dịch sẵn theo từng hệ
+        điều hành/kiến trúc CPU) của curl_cffi không tương thích tốt trên đúng máy macOS đó (dù cài
+        đặt/import thành công, lỗi chỉ lộ ra lúc THỰC SỰ gửi request), khiến request bị gửi sai lệch
+        và nhận về phản hồi bất thường (404) thay vì đúng nội dung trang. Hạ cấp về requests.Session
+        (thuần Python, không phụ thuộc thư viện gốc theo nền tảng) mất khả năng né WAF theo vân tay
+        TLS — CÒN HƠN hẳn không dùng được luôn. Chỉ hạ cấp 1 LẦN (self.impersonate=False sau đó, mọi
+        lượt gọi tiếp theo của CHÍNH client này tự động dùng session mới, không cần sửa gì thêm)."""
+        if not self.impersonate:
+            return
+        self.impersonate = False
+        self.session = requests.Session()
+        self.session.headers.update(self.HEADERS)
+
     # --- Lấy ảnh captcha ---
     def get_captcha(self):
         url = f"{self.BASE}/captcha"
@@ -508,8 +525,19 @@ class GDTClient:
             "Sec-Fetch-Mode": "cors",
             "Sec-Fetch-Site": "same-origin",
         }
-        r = self.session.get(url, timeout=30, headers=h)
-        r.raise_for_status()
+        try:
+            r = self.session.get(url, timeout=30, headers=h)
+            r.raise_for_status()
+        except Exception:
+            # Lỗi RUNTIME (không phải lỗi import) khi đang dùng curl_cffi — thử lại 1 LẦN với
+            # requests.Session() thường trước khi chịu thua hẳn (xem giải thích ở _ha_cap_session).
+            # Lỗi khi ĐÃ ở requests.Session() thường rồi (impersonate=False) thì để nguyên, ném lên
+            # trên như cũ (không có gì để hạ cấp thêm).
+            if not self.impersonate:
+                raise
+            self._ha_cap_session()
+            r = self.session.get(url, timeout=30, headers=h)
+            r.raise_for_status()
         # Trang trả JSON: {"key": "...", "content": "data:image/svg+xml;base64,..."}
         # (content có thể là chuỗi SVG thô hoặc data-URI base64)
         try:
