@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-24.004"
+APP_BUILD = "2026-09-24.005"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13504,9 +13504,25 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
     # hàng ~75 ký tự) — chỉ _ma_ngoac_khop_xk (so đúng cụm liền
     # 'D210XH62CMMTBK') mới phân biệt được đúng chỗ 'MTBK' khớp còn 'MTWT'
     # thì không.
+    # HOÀ giữa >=2 MÃ KHÁC NHAU cùng khớp mã-trong-ngoặc/điểm giống tên (đúng ca thật đã báo kèm ảnh
+    # chụp MISA: 1 sản phẩm tồn tại NHIỀU mã trong Tồn kho, VD 'MH451'/'MH51' là mã công ty ĐANG
+    # DÙNG THẬT (còn Đầu kỳ) còn 'TPVT00176' là mã khác trùng tên do lỗi nhập liệu cũ/mã tạo trùng
+    # để lại trong MISA, KHÔNG có Đầu kỳ) -> ưu tiên mã CÒN ĐẦU KỲ (dau_ky, cột "Đầu kỳ - Số lượng"
+    # trong Tồn kho — bằng chứng khách quan mã đó đã được dùng LIÊN TỤC từ trước, không phải mã mới
+    # tạo/trùng lặp) trước khi rơi về thứ tự trong file — TRƯỚC ĐÂY không có tiêu chí này nên sort
+    # ỔN ĐỊNH rơi thẳng về thứ tự trong file (ngẫu nhiên, không phản ánh mã nào công ty THẬT SỰ đang
+    # dùng), có thể chọn NHẦM mã lạ/trùng (dù còn nhiều tồn) thay vì mã công ty đang dùng (dù còn ít
+    # tồn hơn), khiến 1 sản phẩm bị TÁCH tồn kho ra 2 mã khác nhau vô lý và mã còn Đầu kỳ bị "mồ côi"
+    # (không được dùng dần dù vẫn còn tồn thật). dau_ky chỉ có nếu ton_list lấy từ báo cáo Tồn kho
+    # (_doc_file_ton_kho/_misa_lay_ton_kho) — thiếu thì coi như 0 (không có tín hiệu, không đổi hành
+    # vi cũ). CHỈ dùng làm tiêu chí PHỤ (sau bracket-match + điểm giống tên) — không đổi kết quả các
+    # ca đã phân biệt được qua kích thước/mã trong ngoặc/điểm giống tên (Gloss White/Yellow...) ở
+    # trên, và khi TẤT CẢ ứng viên hoà luôn cả dau_ky (VD test 'Đối chứng' — không có dữ liệu Đầu kỳ)
+    # vẫn rơi về đúng thứ tự trong file như thiết kế gốc.
     pool = sorted(pool, key=lambda tn: (
         not _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"]),
-        -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2)))
+        -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2),
+        -(_to_num(tn.get("dau_ky")) or 0)))
     # hoc_ma (mã đã "học" từ lần dò/gán TRƯỚC) CHỈ được ưu tiên khi đầu bảng
     # (top, đã sắp theo _ma_ngoac_khop_xk rồi điểm giống tên) KHÔNG có tín
     # hiệu mã-trong-ngoặc CHẮC CHẮN — nếu top ĐÃ khớp chắc chắn qua
