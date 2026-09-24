@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-23.010"
+APP_BUILD = "2026-09-24.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -28169,15 +28169,66 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
         return (hd["inv_date"] - dem_truoc) <= tt["date"] <= (hd["inv_date"] + cua_so)
 
     def tim_to_hop(ung_vien, so_tien, nguong_lech):
+        """Tìm tổ hợp con (>=2 phần tử, tối đa max_to_hop) có tổng so_tien khớp — DỪNG SỚM ngay khi
+        tìm được > 1 tổ hợp (bên gọi chỉ cần phân biệt 0/1/nhiều, không cần liệt kê hết).
+
+        Người dùng báo thật (kèm ảnh chụp): công ty nhiều hóa đơn, "Chạy đối chiếu" hơn 5 phút chưa
+        xong — NGUYÊN NHÂN: bản cũ duyệt BRUTE-FORCE mọi tổ hợp bằng itertools.combinations(ung_vien,
+        k) cho từng k từ 2..max_to_hop — dù đã giới hạn cỡ nhóm ứng viên (2..20, xem nơi gọi), C(20,8)
+        ≈ 126.000 tổ hợp/lần gọi, mà hàm này gọi LẶP LẠI cho MỖI khoản thanh toán CHƯA khớp × MỖI
+        hướng (Tầng 2 thuận + Tầng 2c ngược) × MỖI đối tượng công nợ trong cả kỳ đối chiếu — cộng dồn
+        dễ lên tới hàng trăm triệu phép tính khi công ty có nhiều hóa đơn/thanh toán, nhất là ở
+        TRƯỜNG HỢP PHỔ BIẾN NHẤT (không có tổ hợp nào khớp — vẫn phải duyệt HẾT mới kết luận "không
+        có").
+
+        Sửa: số tiền hóa đơn/thanh toán LUÔN DƯƠNG (bản chất nghiệp vụ — không có hóa đơn/khoản thu
+        chi âm ở luồng dữ liệu này) — SẮP XẾP tăng dần rồi duyệt kiểu quay lui (backtracking) có CẮT
+        TỈA: dừng nhánh ngay khi tổng riêng phần đã vượt so_tien+nguong_lech (mọi phần tử sau, do đã
+        sắp tăng dần, chỉ càng làm tổng lớn hơn — không cần duyệt tiếp), giảm số nhánh phải xét từ
+        hàng trăm nghìn xuống chỉ còn vài trăm/nghìn trong đa số trường hợp thực tế mà KHÔNG đổi kết
+        quả (vẫn tìm đúng những tổ hợp brute-force sẽ tìm ra, chỉ khác thứ tự duyệt — bên gọi chỉ
+        quan tâm 0/1/nhiều tổ hợp, không quan tâm thứ tự). Nếu lỡ gặp dữ liệu có giá trị <=0 (phòng hờ
+        dữ liệu bất thường ngoài dự kiến) thì TỰ ĐỘNG rơi về đúng cách brute-force cũ (an toàn tuyệt
+        đối cho tính đúng đắn, chỉ mất tốc độ ở đúng ca hiếm gặp đó)."""
+        if any(h["so_tien"] <= 0 for h in ung_vien):
+            khop = []
+            for k in range(2, min(max_to_hop, len(ung_vien)) + 1):
+                for to_hop in itertools.combinations(ung_vien, k):
+                    if abs(sum(h["so_tien"] for h in to_hop) - so_tien) <= nguong_lech:
+                        khop.append(to_hop)
+                        if len(khop) > 1:
+                            break
+                if len(khop) > 1:
+                    break
+            return khop
+
+        items = sorted(ung_vien, key=lambda h: h["so_tien"])
+        n = len(items)
+        gioi_han = min(max_to_hop, n)
+        tran = so_tien + nguong_lech
         khop = []
-        for k in range(2, min(max_to_hop, len(ung_vien)) + 1):
-            for to_hop in itertools.combinations(ung_vien, k):
-                if abs(sum(h["so_tien"] for h in to_hop) - so_tien) <= nguong_lech:
-                    khop.append(to_hop)
-                    if len(khop) > 1:
-                        break
+        chosen = []
+
+        def backtrack(start, tong):
             if len(khop) > 1:
-                break
+                return
+            if len(chosen) >= 2 and abs(tong - so_tien) <= nguong_lech:
+                khop.append(tuple(chosen))
+                if len(khop) > 1:
+                    return
+            if len(chosen) >= gioi_han:
+                return
+            for i in range(start, n):
+                gt = items[i]["so_tien"]
+                if tong + gt > tran:
+                    break   # đã sắp tăng dần -> mọi phần tử sau cũng vượt ngưỡng, dừng cả nhánh
+                chosen.append(items[i])
+                backtrack(i + 1, tong + gt)
+                chosen.pop()
+                if len(khop) > 1:
+                    return
+
+        backtrack(0, 0)
         return khop
 
     def thanh_phan_con_lai(hd):
