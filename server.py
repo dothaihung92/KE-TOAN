@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-24.002"
+APP_BUILD = "2026-09-24.003"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -28642,6 +28642,22 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
             doi_tuong_tt.setdefault(aoid, []).extend(ds)
     finally:
         conn.close()
+
+    # QUAN TRỌNG — đúng nguyên nhân thật đã báo (kèm ảnh chụp thanh tiến độ): "Chạy đối chiếu" kẹt
+    # hàng phút liền ở đúng 1 mã "KL" (Khách lẻ, dùng CHUNG cho HÀNG NGHÌN khách hàng THẬT KHÁC
+    # NHAU không có MST — xem _misa_ghi_ban_hang) — TRƯỚC ĐÂY chỉ loại "KL" khỏi Tầng 3 (xem vòng
+    # lặp Tầng 3 bên dưới) và khỏi "Ghi bù trừ treo" (_misa_ghi_bu_tru_treo), nhưng KHÔNG loại khỏi
+    # chính _misa_khop_1_2() — "KL" gộp chung có thể tới HÀNG NGHÌN hóa đơn/khoản thanh toán của
+    # hàng nghìn khách khác nhau làm 1 "đối tượng" DUY NHẤT, khiến các vòng lặp O(số hóa đơn × số
+    # thanh toán) của Tầng 1/2c (lặp lại tới 30 vòng ổn định hóa MỖI đối tượng, xem mot_vong) phải
+    # xử lý khối lượng khổng lồ CHỈ CHO 1 "đối tượng" này — đúng điểm nghẽn "kẹt" người dùng thấy.
+    # Kết quả khớp cho "KL" cũng VÔ NGHĨA về bản chất (không phải 1 đối tượng công nợ thật — xem
+    # giải thích đầy đủ ở vòng lặp Tầng 3), nên loại bỏ HẲN khỏi đầu vào đối chiếu (không chỉ khỏi
+    # Tầng 3) vừa đúng vừa nhanh hơn nhiều.
+    for _aoid_kl in [aoid for aoid, d in doi_tuong_hd.items()
+                     if str(d.get("ma") or "").strip().upper() == "KL"]:
+        del doi_tuong_hd[_aoid_kl]
+        doi_tuong_tt.pop(_aoid_kl, None)
 
     # Lọc HÓA ĐƠN CHỈ theo Đến ngày (mốc trên) — KHÔNG còn loại bỏ hóa đơn
     # trước Từ ngày (tu_ngay) nữa, xem giải thích ở "CÔNG NỢ TREO TỪ TRƯỚC KỲ"
