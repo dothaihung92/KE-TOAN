@@ -8492,6 +8492,24 @@ async function misaBuTruTim(loai){
   if(!misaNgayHopLe(tuNgay,'Hóa đơn từ ngày')||!misaNgayHopLe(denNgay,'Đến ngày'))return;
   const kq=document.getElementById('misaBuTruKetQua');
   kq.innerHTML=`<div style="text-align:center;padding:20px"><span class="spin"></span> Đang đối chiếu 3 tầng (có thể mất chút thời gian nếu nhiều hóa đơn)...</div>`;
+  // Thanh tiến độ — poll đúng cơ chế đã dùng cho "Dò mã hàng tự động" (xkDoMa) — người dùng báo
+  // công ty nhiều hóa đơn, chạy lâu mà không biết đã tới đâu/còn bao lâu. Đơn vị tiến độ: số đối
+  // tượng công nợ (khách hàng/NCC) đã xử lý xong trên tổng số — xem _bao_tien_do ở server.py.
+  const capNhatTienDo3Tang=async()=>{
+    try{
+      const st=await api(`/api/misa-sql/doi-chieu-3-tang-status/${current}`);
+      if(!st.dang_chay||!st.tong)return;
+      const pct=Math.min(100,Math.round(st.da_xu_ly/st.tong*100));
+      kq.innerHTML=`<div style="text-align:center;padding:20px">
+        <span class="spin"></span> Đang đối chiếu 3 tầng...<br>
+        <div style="max-width:420px;margin:10px auto 4px;background:#eee;border-radius:6px;overflow:hidden;height:10px">
+          <div style="width:${pct}%;height:100%;background:#7a4fb5;transition:width .3s"></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted)">${st.da_xu_ly.toLocaleString('vi-VN')}/${st.tong.toLocaleString('vi-VN')} đối tượng công nợ (${pct}%)${st.ten?' — đang xử lý: '+misaEsc(st.ten):''}</div>
+      </div>`;
+    }catch(e){}
+  };
+  const henTienDo3Tang=setInterval(capNhatTienDo3Tang,500);
   try{
     const qs=new URLSearchParams({loai, cua_so_thang:cuaSoThang, thang_qua_han:thangQuaHan, nguong,
       dung_sai:dungSai, truoc_ngay:truocNgay, tu_ngay:tuNgay, den_ngay:denNgay});
@@ -8655,6 +8673,7 @@ async function misaBuTruTim(loai){
         <button class="btn sm" style="background:#1a7a4a" onclick="misaBuTruXuatExcel('${loai}')">📥 Xuất Excel "Nghiệp vụ khác" (khuyên dùng)</button>
       </div>`;
   }catch(e){kq.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`}
+  finally{clearInterval(henTienDo3Tang);}
 }
 async function misaBuTruXuatExcel(loai){
   const ds=misaBuTruDsChon();

@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-24.001"
+APP_BUILD = "2026-09-24.002"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -28117,7 +28117,7 @@ def _hd_so_trong_mo_ta(inv_no, mo_ta):
 
 
 def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dung_sai=20_000,
-                   truoc_ngay=7):
+                   truoc_ngay=7, on_progress=None):
     """Chạy Tầng 1 (khớp 1-1 chính xác) + Tầng 2 (khớp tổ hợp nhiều hóa đơn,
     kể cả hóa đơn KHÔNG liên tiếp — ví dụ HĐ 1;2;5 mà bỏ qua 3;4, vì khách/NCC
     gộp nhiều hóa đơn để thanh toán 1 cục — VÀ CHIỀU NGƯỢC LẠI: 1 hóa đơn
@@ -28264,7 +28264,10 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
         else:
             danh_dau_dung(hd, "full")
 
-    for aoid, d in doi_tuong_hd.items():
+    _tong_doi_tuong_pgs = len(doi_tuong_hd)
+    for _idx_doi_tuong_pgs, (aoid, d) in enumerate(doi_tuong_hd.items()):
+        if on_progress:
+            on_progress(_idx_doi_tuong_pgs, _tong_doi_tuong_pgs, d.get("ten") or d.get("ma") or "")
         ma, ten = d["ma"], d["ten"]
         hds = sorted(d["hoa_don"], key=lambda h: h["inv_date"] or ngay_xa)
         for hd in hds:
@@ -28545,12 +28548,14 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
                                 "hoa_don": [{"inv_no": h["inv_no"], "inv_date": _misa_ngay_str(h["inv_date"]),
                                             "so_tien": round(h["so_tien"])} for h in khoi_hd]})
                 khoi_tt, khoi_hd, running, khoi_bd = [], [], 0.0, None
+    if on_progress:
+        on_progress(_tong_doi_tuong_pgs, _tong_doi_tuong_pgs, "")
     return tang1, tang2, khong_ro, tam_ung
 
 
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
                            nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None,
-                           dung_sai=20_000, truoc_ngay=7):
+                           dung_sai=20_000, truoc_ngay=7, on_progress=None):
     """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
     KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng).
 
@@ -28677,7 +28682,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
 
     tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
                                             cua_so_thang=cua_so_thang, max_to_hop=max_to_hop,
-                                            dung_sai=dung_sai, truoc_ngay=truoc_ngay)
+                                            dung_sai=dung_sai, truoc_ngay=truoc_ngay,
+                                            on_progress=on_progress)
 
     # Tầng 3 — hóa đơn đã được lọc đúng khung Từ ngày/Đến ngày ở bước đầu
     # (nếu có nhập), NHƯNG điều kiện "quá hạn hơn N tháng" LUÔN áp dụng
@@ -28898,6 +28904,16 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
             "thu_2_lan": thu_2_lan, "nghi_sai_doi_tuong": nghi_sai_doi_tuong, "goi_y_chuyen": goi_y_chuyen}
 
 
+# Tiến độ "Đối chiếu công nợ 3 tầng" — CÙNG cơ chế đã dùng cho "Dò mã hàng tự động"
+# (_XK_DOMA_TIEN_DO)/"Ghi Bán hàng vào MISA" (_MISA_GHI_BH_TIEN_DO): route chạy ĐỒNG BỘ (def
+# thường, không phải async def) nên FastAPI/Starlette tự chạy trong threadpool riêng — trong lúc nó
+# còn chạy, request GET trạng thái ở threadpool khác vẫn được phục vụ song song bình thường. Người
+# dùng báo (kèm ảnh chụp): công ty nhiều hóa đơn, "Chạy đối chiếu" chạy lâu mà không biết đã tới
+# đâu/còn bao lâu — đơn vị tiến độ là SỐ ĐỐI TƯỢNG CÔNG NỢ (khách hàng/NCC) đã xử lý xong trên tổng
+# số, vì đây là bước tốn thời gian nhất (tim_to_hop trong _misa_khop_1_2, xem giải thích ở đó).
+_MISA_3TANG_TIEN_DO = {}
+
+
 @app.get("/api/misa-sql/doi-chieu-3-tang/{cid}")
 def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
                               thang_qua_han: int = 10, nguong: float = 5_000_000,
@@ -28907,10 +28923,27 @@ def misa_sql_doi_chieu_3_tang(cid: int, loai: str = "kh", cua_so_thang: int = 3,
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', "
                                  "kết nối tới dữ liệu THỬ trước.")
-    return _misa_doi_chieu_3_tang(cid, database, loai=loai, cua_so_thang=cua_so_thang,
-                                  thang_qua_han=thang_qua_han, nguong=nguong, dung_sai=dung_sai,
-                                  truoc_ngay=truoc_ngay,
-                                  tu_ngay=tu_ngay or None, den_ngay=den_ngay or None)
+    _MISA_3TANG_TIEN_DO[cid] = {"da_xu_ly": 0, "tong": 0, "ten": "", "dang_chay": True}
+
+    def _bao_tien_do(i, n, ten):
+        _MISA_3TANG_TIEN_DO[cid] = {"da_xu_ly": i, "tong": n, "ten": ten, "dang_chay": True}
+
+    try:
+        return _misa_doi_chieu_3_tang(cid, database, loai=loai, cua_so_thang=cua_so_thang,
+                                      thang_qua_han=thang_qua_han, nguong=nguong, dung_sai=dung_sai,
+                                      truoc_ngay=truoc_ngay,
+                                      tu_ngay=tu_ngay or None, den_ngay=den_ngay or None,
+                                      on_progress=_bao_tien_do)
+    finally:
+        if cid in _MISA_3TANG_TIEN_DO:
+            _MISA_3TANG_TIEN_DO[cid]["dang_chay"] = False
+
+
+@app.get("/api/misa-sql/doi-chieu-3-tang-status/{cid}")
+def misa_sql_doi_chieu_3_tang_status(cid: int):
+    """Tiến độ (đã xử lý/tổng số đối tượng công nợ) của lần 'Chạy đối chiếu' gần nhất — để client
+    hiển thị thanh tiến độ trong lúc chờ (công ty nhiều hóa đơn/khách hàng-NCC có thể mất khá lâu)."""
+    return _MISA_3TANG_TIEN_DO.get(cid, {"da_xu_ly": 0, "tong": 0, "ten": "", "dang_chay": False})
 
 
 def _misa_chi_tiet_cong_no(cid, database, loai, account_object_id, tu_ngay=None, den_ngay=None,
