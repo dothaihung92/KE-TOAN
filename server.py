@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-24.005"
+APP_BUILD = "2026-09-25.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32664,6 +32664,36 @@ def vat_tam_tinh(cid: int, response: Response, ky: str = "", du_dau_ky: float = 
                   + (_to_num(imp["ban_thue_10"]) or 0)
         nguon = "import"
     else:
+        # LỌC ĐÚNG KỲ đang tính trước khi cộng — bảng invoices chỉ xoá/ghi đè
+        # theo (company_id, loai, he_thong) mỗi lần tra cứu (xem
+        # "DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?"),
+        # KHÔNG theo kỳ, nên nếu "HĐ điện tử thường" và "HĐ máy tính tiền"
+        # (2 he_thong khác nhau) từng được tra cứu ở 2 khoảng ngày KHÁC nhau
+        # (vd 1 bên đã tra cứu lại đúng kỳ đang xem, bên kia còn sót dữ liệu
+        # của lần tra cứu TRƯỚC với khoảng ngày rộng hơn/khác kỳ), bảng
+        # invoices sẽ lẫn lộn NHIỀU kỳ cùng lúc — trước đây hàm này cộng
+        # THẲNG toàn bộ "rows" (không lọc theo ky) nên "Tạm tính thuế GTGT
+        # trong kỳ" ra số VAT mua/bán CAO HƠN hẳn (gần gấp đôi) số thật của
+        # đúng kỳ, không có cảnh báo gì cho người dùng biết. Xác nhận đúng
+        # qua báo cáo thật: công ty MST 0313829148, kỳ Q3/2026 — phần mềm
+        # báo VAT mua 50.010.855đ/VAT bán 130.987.776đ, trong khi bảng kê
+        # hóa đơn THẬT của đúng Q3/2026 (kết xuất từ trang Thuế) chỉ có VAT
+        # mua 26.899.508đ/VAT bán 61.378.697đ (74 hóa đơn mua/202 hóa đơn
+        # bán) — gần gấp đôi, đúng dấu hiệu dữ liệu 2 kỳ bị cộng lẫn.
+        def _ngay_hoa_don_ttinh(tdlap):
+            s = str(tdlap or "").split("T")[0].strip()
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+                try:
+                    return datetime.datetime.strptime(s, fmt).date()
+                except Exception:
+                    pass
+            return None
+
+        d_tu_ky, d_den_ky = _khoang_ngay_ky(ky)
+        if d_tu_ky and d_den_ky:
+            rows = [r for r in rows
+                   if (d := _ngay_hoa_don_ttinh(r["tdlap"])) and d_tu_ky <= d <= d_den_ky]
+
         vat_mua = vat_ban = 0
         for r in rows:
             if loai_bo(r):
