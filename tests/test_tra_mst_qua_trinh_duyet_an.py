@@ -32,17 +32,20 @@ import server
 def _dat_lai_trang_thai_trinh_duyet():
     st = server._TRACUUNNT_TD
     drv = st["drv"]
-    st.update(drv=None, loi_khoi_tao=None, lan_loi_khoi_tao=0.0, lan_dung_cuoi=0.0)
+    st.update(drv=None, loi_khoi_tao=None, lan_loi_khoi_tao=0.0, lan_dung_cuoi=0.0, lan_gui_cuoi=0.0)
     if drv is not None:
         try:
             drv.quit()
         except Exception:
             pass
     server._tracuunnt_dat_lai_dem_loi()
+    with server._TRACUUNNT_STATE["lock"]:
+        server._TRACUUNNT_STATE["nghi_den"] = 0.0
 
 
 _goc = {k: getattr(server, k) for k in (
-    "_tracuunnt_tao_trinh_duyet", "_tao_session_tracuunnt", "_get_ddddocr", "_ocr_png", "_TRACUUNNT_URL")}
+    "_tracuunnt_tao_trinh_duyet", "_tao_session_tracuunnt", "_get_ddddocr", "_ocr_png", "_TRACUUNNT_URL",
+    "_TRACUUNNT_KHOANG_CACH_GUI_GIAY")}
 
 
 def _khoi_phuc():
@@ -139,10 +142,60 @@ assert than_pf.index("_tracuunnt_dat_lai_dem_loi()") < than_pf.index("ThreadPool
 print("PASS A3: bộ đếm lỗi liên tiếp tracuunnt được đặt lại ở đầu mỗi lượt xuất Excel.")
 
 
+# ===== A4 (QUAN TRỌNG — đúng log thật "Too Many Requests"): trang trả HTTP 429 -> DỪNG NGAY, không
+# thử tiếp các lần captcha còn lại, và trong thời gian nghỉ mọi MST khác cũng KHÔNG gọi mạng (gửi
+# thêm lúc bị giới hạn chỉ làm lệnh chặn kéo dài). Hết thời gian nghỉ thì tự tra lại bình thường. =====
+class _Resp:
+    def __init__(self, ma, noi_dung=b"", text=""):
+        self.status_code, self.content, self.text = ma, noi_dung, text
+
+
+so_goi = {"session": 0, "get": 0, "post": 0}
+
+
+class _Session429:
+    def __init__(self, *a, **kw):
+        so_goi["session"] += 1
+        self.headers = {}
+
+    def get(self, url, **kw):
+        so_goi["get"] += 1
+        if "captcha.png" in url:
+            return _Resp(429, b"Too Many Requests", "Too Many Requests")
+        return _Resp(200, b"<html>form</html>", "<html>form</html>")
+
+    def post(self, *a, **kw):
+        so_goi["post"] += 1
+        return _Resp(200, b"", "")
+
+
+_dat_lai_trang_thai_trinh_duyet()
+server._get_ddddocr = lambda: object()
+server._tracuunnt_tao_trinh_duyet = _mo_chrome_loi
+server._tao_session_tracuunnt = lambda dung_curl_cffi=True: _Session429()
+try:
+    ok, tt, cb, ly_do = server._tra_cuu_mst_qua_tracuunnt("0301234567", 8)
+    assert ok is False and "giới hạn tốc độ" in ly_do, f"got {ly_do!r}"
+    assert so_goi["get"] == 2 and so_goi["post"] == 0, (
+        f"Gặp 429 phải dừng NGAY (1 lần mở trang + 1 lần lấy captcha), không thử tiếp — got {so_goi}")
+    goi_truoc = dict(so_goi)
+    ok, tt, cb, ly_do = server._tra_cuu_mst_qua_tracuunnt("0309999999", 8)
+    assert ok is False and "giới hạn tốc độ" in ly_do and so_goi == goi_truoc, (
+        f"Đang trong thời gian nghỉ thì MST khác KHÔNG được gọi mạng — got {so_goi} (trước {goi_truoc})")
+    with server._TRACUUNNT_STATE["lock"]:
+        server._TRACUUNNT_STATE["nghi_den"] = 0.0
+    server._tra_cuu_mst_qua_tracuunnt("0309999999", 8)
+    assert so_goi["session"] > goi_truoc["session"], "Hết thời gian nghỉ thì phải tra lại bình thường."
+finally:
+    _khoi_phuc()
+print("PASS A4: trang trả 429 -> dừng ngay, tạm nghỉ mọi lượt tra, hết giờ nghỉ tự tra lại.")
+
+
 # ============================ PHẦN B ============================
 _KY_TU = "abcdefghjkmnpqrstuvwxyz23456789"
 PHIEN = {}
-THONG_KE = {"get_form": 0, "get_captcha": 0, "post": 0, "cm": []}
+THONG_KE = {"get_form": 0, "get_captcha": 0, "post": 0, "cm": [], "gio_post": []}
+CHE_DO = {"gioi_han": False}
 _khoa_tk = threading.Lock()
 
 
@@ -234,6 +287,10 @@ class _MayChuGia(http.server.BaseHTTPRequestHandler):
         with _khoa_tk:
             THONG_KE["post"] += 1
             THONG_KE["cm"].append(lay("cm"))
+            THONG_KE["gio_post"].append(time.time())
+        if CHE_DO["gioi_han"]:
+            self._tra(429, "text/plain", b"Too Many Requests", sid, moi)
+            return
         if lay("cm") != "cm" or not ma_dung or lay("captcha") != ma_dung:
             than = '<p style="color:red">Vui lòng nhập đúng mã xác nhận!</p>'
         else:
@@ -294,6 +351,7 @@ def _mo_chrome_dem():
 
 server._tracuunnt_tao_trinh_duyet = _mo_chrome_dem
 server._get_ddddocr = lambda: object()
+server._TRACUUNNT_KHOANG_CACH_GUI_GIAY = 0.0   # các test B1-B7 chạy nhanh; B8 kiểm tra riêng giãn cách
 KICH_BAN = {"sai_truoc": 0, "ngan_truoc": 0, "luon_sai": False, "so_lan_ocr": 0}
 
 
@@ -381,6 +439,36 @@ try:
     kq = server._tra_cuu_mst_qua_tracuunnt("0306666666", 8)
     assert kq[0] is True and so_lan_mo_chrome[0] == 2, f"got {kq!r}, mở Chrome {so_lan_mo_chrome[0]} lần"
     print("PASS B6: Chrome tự đóng khi rảnh, lượt sau tự mở lại được.")
+
+    # ===== B7 (QUAN TRỌNG — đúng log thật): trình duyệt thật bấm Tra cứu nhưng trang trả "Too Many
+    # Requests" -> dừng NGAY sau đúng 1 lần gửi (trước đây thử tiếp đủ 6 lần, càng làm lệnh chặn kéo
+    # dài), báo rõ lý do; MST kế tiếp không mở trang/không gửi gì trong thời gian nghỉ. =====
+    CHE_DO["gioi_han"] = True
+    post_truoc, get_truoc = THONG_KE["post"], THONG_KE["get_form"]
+    ok, tt, cb, ly_do = server._tra_cuu_mst_qua_tracuunnt("0307777777", 8)
+    assert ok is False and "giới hạn tốc độ" in ly_do, f"got {ly_do!r}"
+    assert THONG_KE["post"] == post_truoc + 1, f"Phải dừng sau đúng 1 lần gửi — got {THONG_KE['post'] - post_truoc}"
+    post_truoc, get_truoc = THONG_KE["post"], THONG_KE["get_form"]
+    ok, tt, cb, ly_do = server._tra_cuu_mst_qua_tracuunnt("0308888888", 8)
+    assert ok is False and "giới hạn tốc độ" in ly_do
+    assert THONG_KE["post"] == post_truoc and THONG_KE["get_form"] == get_truoc, (
+        "Trong thời gian nghỉ không được mở trang/gửi tra cứu cho MST khác.")
+    CHE_DO["gioi_han"] = False
+    with server._TRACUUNNT_STATE["lock"]:
+        server._TRACUUNNT_STATE["nghi_den"] = 0.0
+    kq = server._tra_cuu_mst_qua_tracuunnt("0308888888", 8)
+    assert kq[0] is True, f"Hết thời gian nghỉ phải tra lại được — got {kq!r}"
+    print("PASS B7: trang trả 'Too Many Requests' -> dừng ngay sau 1 lần gửi, tạm nghỉ, hết giờ nghỉ tra lại được.")
+
+    # ===== B8: giãn cách tối thiểu giữa 2 lần bấm Tra cứu liên tiếp (kể cả khác MST) — người gõ tay
+    # không bấm nhanh hơn mức này, giảm nguy cơ bị giới hạn tốc độ. =====
+    server._TRACUUNNT_KHOANG_CACH_GUI_GIAY = 1.5
+    n0 = len(THONG_KE["gio_post"])
+    assert server._tra_cuu_mst_qua_tracuunnt("0301010101", 8)[0] is True
+    assert server._tra_cuu_mst_qua_tracuunnt("0302020202", 8)[0] is True
+    gio = THONG_KE["gio_post"][n0:]
+    assert len(gio) == 2 and gio[1] - gio[0] >= 1.4, f"2 lần gửi phải cách nhau >= 1.5s — got {gio}"
+    print("PASS B8: 2 lần bấm Tra cứu liên tiếp được giãn cách đúng khoảng tối thiểu.")
 finally:
     _khoi_phuc()
     may_chu.shutdown()

@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.002"
+APP_BUILD = "2026-09-26.003"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34186,8 +34186,37 @@ def _goi_1_lan_xinvoice(mst_c, client_id, api_key, timeout):
 #     này cho cả lượt xuất Excel hiện tại. Cần thiết vì 1 lượt có thể phải tra
 #     HÀNG TRĂM MST: nếu trang đổi cấu trúc/chặn IP thì cứ thử lại cho từng
 #     MST sẽ làm chậm cả lượt xuất mà chẳng được gì.
-_TRACUUNNT_STATE = {"lock": threading.Lock(), "loi_lien_tiep": 0}
+#   nghi_den: mốc thời gian (time.time()) trang đang GIỚI HẠN TỐC ĐỘ (HTTP 429
+#     "Too Many Requests") — xem _tracuunnt_danh_dau_bi_gioi_han.
+_TRACUUNNT_STATE = {"lock": threading.Lock(), "loi_lien_tiep": 0, "nghi_den": 0.0}
 _TRACUUNNT_NGUONG_TAT = 5   # thất bại liên tiếp bấy nhiêu lần thì tạm tắt nguồn này
+# Log thật (tra qua Chrome ẩn — trình duyệt thật vào được trang, giải captcha, bấm Tra cứu): trang
+# trả về "Too Many Requests" — tức IP của người dùng đang bị GIỚI HẠN TỐC ĐỘ (sau nhiều ngày thử
+# liên tục, có lượt tới 20 lần/MST), không còn là chuyện captcha. Trước đây gặp lỗi này code VẪN
+# thử tiếp đủ 6 lần rồi sang MST kế tiếp -> càng gửi thêm, lệnh chặn càng kéo dài. Gặp 429 là
+# DỪNG NGAY mọi lượt tra qua trang này trong khoảng thời gian dưới đây (không gọi mạng, báo rõ lý
+# do), tự thử lại sau đó.
+_TRACUUNNT_NGHI_KHI_BI_GIOI_HAN_GIAY = 900
+
+
+def _tracuunnt_la_bi_gioi_han(van_ban):
+    return "too many requests" in (van_ban or "").lower()
+
+
+def _tracuunnt_danh_dau_bi_gioi_han():
+    with _TRACUUNNT_STATE["lock"]:
+        _TRACUUNNT_STATE["nghi_den"] = time.time() + _TRACUUNNT_NGHI_KHI_BI_GIOI_HAN_GIAY
+
+
+def _tracuunnt_ly_do_dang_bi_gioi_han():
+    """'' nếu KHÔNG bị giới hạn, ngược lại là câu báo lỗi kèm giờ thử lại."""
+    with _TRACUUNNT_STATE["lock"]:
+        nghi_den = _TRACUUNNT_STATE["nghi_den"]
+    if time.time() >= nghi_den:
+        return ""
+    gio = datetime.datetime.fromtimestamp(nghi_den).strftime("%H:%M")
+    return (f"trang tracuunnt.gdt.gov.vn đang giới hạn tốc độ (Too Many Requests) — tạm dừng tra tới "
+            f"{gio} để trang tự mở lại (gửi thêm lúc này chỉ làm lệnh chặn kéo dài hơn)")
 
 
 def _tracuunnt_danh_dau(thanh_cong):
@@ -34398,8 +34427,13 @@ _SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # ĐÃ THỬ tăng lên 20 (sau khi sửa l�
 # -> rơi về cách gửi request trực tiếp cũ, không mất chức năng.
 _TRACUUNNT_URL = "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"
 _TRACUUNNT_TD = {"lock": threading.Lock(), "drv": None, "lan_dung_cuoi": 0.0,
-                 "loi_khoi_tao": None, "lan_loi_khoi_tao": 0.0, "dang_theo_doi": False}
+                 "loi_khoi_tao": None, "lan_loi_khoi_tao": 0.0, "dang_theo_doi": False,
+                 "lan_gui_cuoi": 0.0}
 _TRACUUNNT_TD_DONG_KHI_RANH_GIAY = 90
+# Khoảng cách TỐI THIỂU giữa 2 lần bấm "Tra cứu" liên tiếp (kể cả giữa 2 MST khác nhau) — trang
+# giới hạn tốc độ theo IP (đã thấy "Too Many Requests" ngay cả với trình duyệt thật); người gõ tay
+# không bấm nhanh hơn mức này. Ngưỡng thật của trang KHÔNG biết chính xác, đây là mức ước lượng.
+_TRACUUNNT_KHOANG_CACH_GUI_GIAY = 4.0
 # Mở Chrome lỗi thì trong khoảng này KHÔNG thử mở lại cho từng MST (mỗi lần thử mở tốn vài giây,
 # nhân lên hàng chục MST sẽ ngốn hết ngân sách thời gian mà chắc chắn vẫn lỗi y hệt).
 _TRACUUNNT_TD_THU_LAI_KHOI_TAO_GIAY = 600
@@ -34596,7 +34630,11 @@ def _tracuunnt_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout, luu_anh_debug=Fal
         if can_mo_lai:
             drv.get(_TRACUUNNT_URL)
             if not _tracuunnt_cho_form(drv, gioi_han):
-                doan = _trich_doan_loi_html_tracuunnt(_tracuunnt_chu_hien_thi(drv))
+                chu = _tracuunnt_chu_hien_thi(drv)
+                if _tracuunnt_la_bi_gioi_han(chu):
+                    _tracuunnt_danh_dau_bi_gioi_han()
+                    return False, "", None, _tracuunnt_ly_do_dang_bi_gioi_han()
+                doan = _trich_doan_loi_html_tracuunnt(chu)
                 ly_do_loi_cuoi = f"trang không hiện ô nhập MST/ảnh captcha — trang hiện: {doan!r}"
                 continue
         can_mo_lai = True
@@ -34615,6 +34653,10 @@ def _tracuunnt_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout, luu_anh_debug=Fal
         if not ma_captcha:
             ly_do_loi_cuoi = f"không giải được captcha (ảnh {len(png)} byte, ddddocr đoán: {doan_debug!r})"
             continue
+        cho_them = _TRACUUNNT_TD["lan_gui_cuoi"] + _TRACUUNNT_KHOANG_CACH_GUI_GIAY - time.time()
+        if cho_them > 0:
+            time.sleep(cho_them)
+        _TRACUUNNT_TD["lan_gui_cuoi"] = time.time()
         gui = drv.execute_script(_JS_TRACUUNNT_GUI_FORM, mst_c, ma_captcha) or {}
         if not gui.get("ok"):
             ly_do_loi_cuoi = f"không điền/gửi được form tra cứu ({gui.get('err')})"
@@ -34627,7 +34669,11 @@ def _tracuunnt_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout, luu_anh_debug=Fal
             continue
         html = drv.page_source or ""
         if "Trạng thái MST" not in html:
-            doan_html = _trich_doan_loi_html_tracuunnt(_tracuunnt_chu_hien_thi(drv))
+            chu = _tracuunnt_chu_hien_thi(drv)
+            if _tracuunnt_la_bi_gioi_han(chu):
+                _tracuunnt_danh_dau_bi_gioi_han()
+                return False, "", None, _tracuunnt_ly_do_dang_bi_gioi_han()
+            doan_html = _trich_doan_loi_html_tracuunnt(chu)
             ly_do_loi_cuoi = (f"có thể đã đoán sai captcha '{ma_captcha}' (lần {lan}/{so_lan}), không ra "
                               f"bảng kết quả" + (f" — trang trả về: {doan_html!r}" if doan_html else ""))
             try:
@@ -34728,6 +34774,9 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
             return False, "", None, (f"Đã tạm tắt tra qua tracuunnt.gdt.gov.vn "
                                      f"(thất bại {_TRACUUNNT_NGUONG_TAT} lần liên tiếp trong lượt này) "
                                      f"— sẽ tự thử lại ở lượt xuất Excel sau")
+    ly_do_gioi_han = _tracuunnt_ly_do_dang_bi_gioi_han()
+    if ly_do_gioi_han:
+        return False, "", None, ly_do_gioi_han
 
     # Kiểm tra NGAY bộ giải captcha (ddddocr) có nạp được không TRƯỚC khi gọi
     # mạng — captcha của trang này bắt buộc phải OCR ảnh PNG thật sự (không có
@@ -34787,6 +34836,9 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
                              headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
                                       "Cache-Control": "no-cache, no-store", "Pragma": "no-cache"},
                              timeout=timeout)
+            if r_cap.status_code == 429:
+                _tracuunnt_danh_dau_bi_gioi_han()
+                return False, "", None, _tracuunnt_ly_do_dang_bi_gioi_han()
             if r_cap.status_code != 200 or not r_cap.content:
                 ly_do_loi_cuoi = f"không lấy được ảnh captcha (HTTP {r_cap.status_code})"
                 continue
@@ -34837,6 +34889,9 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
             ly_do_loi_cuoi = f"lỗi kết nối (tra cứu): {str(e)[:150]}"
             continue
 
+        if r.status_code == 429 or _tracuunnt_la_bi_gioi_han(r.text if r.status_code != 200 else ""):
+            _tracuunnt_danh_dau_bi_gioi_han()
+            return False, "", None, _tracuunnt_ly_do_dang_bi_gioi_han()
         if r.status_code != 200:
             ly_do_loi_cuoi = f"HTTP {r.status_code}"
             continue
