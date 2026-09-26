@@ -23,7 +23,7 @@ import server
 
 _goc = {k: getattr(server, k) for k in (
     "_tracuunnt_tao_trinh_duyet", "_tra_cuu_mst_qua_tracuunnt", "_tra_cuu_mst_qua_masothue_trinh_duyet",
-    "_MASOTHUE_URL_TIM", "_MASOTHUE_KHOANG_CACH_GIAY", "_MST_API_NGHI_GIUA_LUOT", "_XINVOICE_TAM_DUNG")}
+    "_MASOTHUE_URL_TIM", "_MASOTHUE_URL_TRANG_CHU", "_MASOTHUE_KHOANG_CACH_GIAY", "_MST_API_NGHI_GIUA_LUOT", "_XINVOICE_TAM_DUNG")}
 
 
 def _dat_lai():
@@ -99,6 +99,24 @@ print("PASS A5: đang tạm nghỉ/tạm tắt thì không truy cập masothue.c
 
 # ============================ PHẦN B ============================
 THONG_KE = {"lan_mo": []}
+# co_o_tim: trang chủ có ô tìm kiếm; can_token: /Search/ KHÔNG có token hợp lệ -> đưa sang 1 công ty
+# NGẪU NHIÊN khác (đúng hành vi thật đã gặp: 2 lần mở thẳng /Search/?q=0311941289 ra 0901217946 rồi
+# 3502569116).
+CHE_DO = {"co_o_tim": True, "can_token": True}
+_TOKEN = "tok-hop-le"
+_TRANG_CHU = """<html><head><meta charset="utf-8"><title>MaSoThue - Tra cứu mã số thuế</title>
+<script>
+function tim(ev) {
+  ev.preventDefault();
+  var q = document.getElementById('search').value;
+  fetch('/Ajax/Token').then(function (r) { return r.text(); }).then(function (t) {
+    location.href = '/Search/?q=' + encodeURIComponent(q) + '&type=auto&token=' + t;
+  });
+}
+</script></head><body>
+<form action="/Search/" method="get" onsubmit="tim(event)">
+<input id="search" type="text" name="q" placeholder="Nhập mã số thuế"> <button type="submit">Tìm</button>
+</form></body></html>"""
 
 
 def _trang_cty(mst, tinh_trang):
@@ -137,8 +155,15 @@ class _MayChuGia(http.server.BaseHTTPRequestHandler):
         if u.path == "/favicon.ico":
             return self._tra(404, "", "text/plain")
         THONG_KE["lan_mo"].append((time.time(), self.path))
+        if u.path == "/":
+            return self._tra(200, _TRANG_CHU if CHE_DO["co_o_tim"] else
+                             "<html><head><title>MaSoThue</title></head><body>Trang chủ</body></html>")
+        if u.path == "/Ajax/Token":
+            return self._tra(200, _TOKEN, "text/plain")
         if u.path == "/Search/":
             q = urllib.parse.parse_qs(u.query).get("q", [""])[0]
+            if CHE_DO["can_token"] and urllib.parse.parse_qs(u.query).get("token", [""])[0] != _TOKEN:
+                return self._tra(302, "", them={"Location": "/3502569116-cong-ty-ngau-nhien"})
             if q == "0311111111":      # tìm đúng MST -> chuyển thẳng tới trang công ty (như trang thật)
                 return self._tra(302, "", them={"Location": f"/{q}-cong-ty-gia-lap"})
             if q == "0312222222":      # ra trang danh sách kết quả -> phải tự mở đúng link
@@ -210,6 +235,7 @@ if cach_mo is None:
 may_chu = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _MayChuGia)
 threading.Thread(target=may_chu.serve_forever, daemon=True).start()
 server._MASOTHUE_URL_TIM = f"http://127.0.0.1:{may_chu.server_address[1]}/Search/?q={{mst}}&type=auto"
+server._MASOTHUE_URL_TRANG_CHU = f"http://127.0.0.1:{may_chu.server_address[1]}/"
 server._tracuunnt_tao_trinh_duyet = cach_mo
 server._MASOTHUE_KHOANG_CACH_GIAY = 0.0
 tra = server._tra_cuu_mst_qua_masothue_trinh_duyet
@@ -221,7 +247,11 @@ try:
     # cũ quét từ khoá toàn trang sẽ tô đỏ nhầm công ty đang hoạt động bình thường). =====
     kq = tra("0311111111", 8)
     assert kq == (True, "Đang hoạt động (đã được cấp GCN ĐKT)", False, None), f"got {kq!r}"
-    print("PASS B1: đọc đúng ô 'Tình trạng' của đúng công ty, không bắt nhầm chữ ở mục khác trên trang.")
+    assert any(p.startswith("/Search/") and "token=tok-hop-le" in p for _t, p in THONG_KE["lan_mo"]), (
+        "Phải tìm qua ô tìm kiếm của trang chủ (để JS của trang lấy token), KHÔNG mở thẳng /Search/ không "
+        f"token (bị đưa sang công ty ngẫu nhiên) — got {THONG_KE['lan_mo']}")
+    print("PASS B1: tìm qua ô tìm kiếm trang chủ (JS của trang tự lấy token), đọc đúng ô 'Tình trạng' của "
+          "đúng công ty, không bắt nhầm chữ ở mục khác trên trang.")
 
     # ===== B2: trang danh sách kết quả -> tự mở đúng link của MST cần tra (không lấy link đầu). =====
     kq = tra("0312222222", 8)
@@ -282,6 +312,23 @@ try:
     lan_tim = [t for t, p in THONG_KE["lan_mo"][n:] if p.startswith("/Search/")]
     assert len(lan_tim) == 2 and lan_tim[1] - lan_tim[0] >= 1.4, f"got {lan_tim}"
     print("PASS B8: 2 lần mở trang masothue.com được giãn cách đúng khoảng tối thiểu.")
+    server._MASOTHUE_KHOANG_CACH_GIAY = 0.0
+
+    # ===== B11 (đúng lỗi thật): mở thẳng /Search/ không token bị đưa sang công ty NGẪU NHIÊN khác ->
+    # KHÔNG được lấy tình trạng của công ty đó; báo lỗi kèm url để chẩn đoán. (Chỉ xảy ra ở đường dự
+    # phòng khi trang chủ không có ô tìm kiếm.) =====
+    CHE_DO["co_o_tim"] = False
+    kq = tra("0311111111", 8)
+    assert kq[0] is False and "3502569116" in kq[3], f"got {kq!r}"
+
+    # ===== B12: trang chủ không có ô tìm kiếm và /Search/ không đòi token -> đường dự phòng mở thẳng
+    # đường dẫn tìm kiếm vẫn tra được. =====
+    CHE_DO["can_token"] = False
+    kq = tra("0311111111", 8)
+    assert kq[0] is True, f"got {kq!r}"
+    CHE_DO.update(co_o_tim=True, can_token=True)
+    print("PASS B11-B12: không lấy tình trạng của công ty 'mồi' ngẫu nhiên; trang chủ không có ô tìm kiếm "
+          "thì rơi về mở thẳng đường dẫn tìm kiếm.")
 finally:
     _khoi_phuc()
     may_chu.shutdown()

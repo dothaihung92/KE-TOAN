@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.005"
+APP_BUILD = "2026-09-26.006"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34756,7 +34756,23 @@ def _tracuunnt_dat_lai_dem_loi():
 # Chrome) để trang kiểm tra JavaScript của Cloudflare tự chạy như trình duyệt thật. Bản cũ còn quét
 # từ khoá trên TOÀN trang (dễ bắt nhầm chữ "ngừng hoạt động" ở mục khác trên trang) — bản này chỉ
 # đọc đúng ô "Tình trạng" trong bảng thông tin, và đối chiếu ô "Mã số thuế" phải đúng MST cần tra.
+_MASOTHUE_URL_TRANG_CHU = "https://masothue.com/"
+# Chỉ dùng khi trang chủ KHÔNG có ô tìm kiếm (xem _masothue_tim_qua_o_tim_kiem) — mở thẳng đường
+# dẫn này (không có token) đã bị trang đưa sang công ty ngẫu nhiên khác.
 _MASOTHUE_URL_TIM = "https://masothue.com/Search/?q={mst}&type=auto"
+
+_JS_MASOTHUE_O_TIM = r"""
+var o = document.querySelector('input[name="q"]') || document.querySelector('input[type="search"]');
+if (!o) {
+  var f = document.querySelectorAll('form');
+  for (var i = 0; i < f.length && !o; i++) {
+    if ((f[i].getAttribute('action') || '').toLowerCase().indexOf('search') >= 0) {
+      o = f[i].querySelector('input[type="text"], input:not([type])');
+    }
+  }
+}
+return o || null;
+"""
 _MASOTHUE_TD = {"lock": threading.Lock(), "lan_mo_cuoi": 0.0, "nghi_den": 0.0, "loi_lien_tiep": 0,
                 "ly_do_nghi": ""}
 _MASOTHUE_KHOANG_CACH_GIAY = 3.0     # giãn cách tối thiểu giữa 2 lần mở trang masothue.com
@@ -34834,26 +34850,65 @@ def _masothue_tam_nghi(ly_do):
     return _masothue_ly_do_tam_dung()
 
 
-def _masothue_mo_va_doc(drv, url, mst_c, gioi_han):
-    """Mở url (giữ giãn cách tối thiểu giữa các lần mở), chờ qua trang kiểm tra
-    của Cloudflare (nếu có, tự chuyển sau vài giây) rồi đọc thông tin trang."""
+def _masothue_cho_gian_cach():
     cho_them = _MASOTHUE_TD["lan_mo_cuoi"] + _MASOTHUE_KHOANG_CACH_GIAY - time.time()
     if cho_them > 0:
         time.sleep(cho_them)
     _MASOTHUE_TD["lan_mo_cuoi"] = time.time()
-    drv.get(url)
+
+
+def _masothue_doc_trang(drv, mst_c, gioi_han, cho_dung_mst_giay=0):
+    """Đọc trang hiện tại, chờ qua trang kiểm tra của Cloudflare (nếu có, tự
+    chuyển sau vài giây). cho_dung_mst_giay > 0: chờ thêm tối đa chừng đó giây
+    để trang chuyển hẳn tới đúng MST (trang tìm kiếm có thể tự chuyển tiếp)."""
     het = time.time() + gioi_han
+    het_cho_mst = time.time() + cho_dung_mst_giay
     kq = {}
     while True:
         try:
             kq = drv.execute_script(_JS_MASOTHUE_DOC, mst_c) or {}
         except Exception:
             kq = {}
-        if kq and _masothue_loai_trang(kq) != "dang_kiem_tra":
-            return kq
+        loai = _masothue_loai_trang(kq) if kq else "dang_kiem_tra"
+        if loai != "dang_kiem_tra":
+            if (loai or _masothue_dung_mst(kq, mst_c) or kq.get("link")
+                    or time.time() >= het_cho_mst):
+                return kq
         if time.time() >= het:
             return kq
         time.sleep(1.0)
+
+
+def _masothue_mo_va_doc(drv, url, mst_c, gioi_han):
+    """Mở url (giữ giãn cách tối thiểu giữa các lần mở) rồi đọc trang."""
+    _masothue_cho_gian_cach()
+    drv.get(url)
+    return _masothue_doc_trang(drv, mst_c, gioi_han)
+
+
+def _masothue_tim_qua_o_tim_kiem(drv, mst_c, gioi_han):
+    """Tìm MST như NGƯỜI DÙNG THẬT: mở trang chủ, gõ MST vào ô tìm kiếm rồi
+    nhấn Enter — để JavaScript của trang tự lấy mã xác thực (token) trước
+    khi tìm. Log thật: mở THẲNG /Search/?q=<MST>&type=auto (không token) bị
+    trang đưa sang 1 công ty NGẪU NHIÊN khác (2 lần 2 công ty khác nhau:
+    0901217946, 3502569116 — trang "mồi" chống bot) dù phần đọc trang đúng
+    hoàn toàn. Trả dict trang đọc được, hoặc None nếu trang chủ không có ô
+    tìm kiếm (bên gọi rơi về mở thẳng đường dẫn tìm kiếm)."""
+    from selenium.webdriver.common.keys import Keys
+    kq = _masothue_mo_va_doc(drv, _MASOTHUE_URL_TRANG_CHU, mst_c, gioi_han)
+    if _masothue_loai_trang(kq) or not kq:
+        return kq
+    o_tim = drv.execute_script(_JS_MASOTHUE_O_TIM)
+    if o_tim is None:
+        return None
+    o_tim.clear()
+    o_tim.send_keys(mst_c)
+    time.sleep(0.5)
+    drv.execute_script("window.__kt_trang_cu = true;")
+    _MASOTHUE_TD["lan_mo_cuoi"] = time.time()
+    o_tim.send_keys(Keys.ENTER)
+    _tracuunnt_cho_trang_moi(drv, gioi_han)
+    return _masothue_doc_trang(drv, mst_c, gioi_han, cho_dung_mst_giay=10)
 
 
 def _masothue_dung_mst(kq, mst_c):
@@ -34866,7 +34921,9 @@ def _masothue_dung_mst(kq, mst_c):
 
 def _masothue_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout):
     gioi_han = max(20, timeout * 2)
-    kq = _masothue_mo_va_doc(drv, _MASOTHUE_URL_TIM.format(mst=mst_c), mst_c, gioi_han)
+    kq = _masothue_tim_qua_o_tim_kiem(drv, mst_c, gioi_han)
+    if kq is None:
+        kq = _masothue_mo_va_doc(drv, _MASOTHUE_URL_TIM.format(mst=mst_c), mst_c, gioi_han)
     for buoc in range(2):
         loai = _masothue_loai_trang(kq)
         if loai == "gioi_han":
