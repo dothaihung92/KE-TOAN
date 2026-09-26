@@ -102,21 +102,25 @@ THONG_KE = {"lan_mo": []}
 # co_o_tim: trang chủ có ô tìm kiếm; can_token: /Search/ KHÔNG có token hợp lệ -> đưa sang 1 công ty
 # NGẪU NHIÊN khác (đúng hành vi thật đã gặp: 2 lần mở thẳng /Search/?q=0311941289 ra 0901217946 rồi
 # 3502569116).
-CHE_DO = {"co_o_tim": True, "can_token": True}
+CHE_DO = {"co_o_tim": True, "can_token": True, "chi_o_an": False}
 _TOKEN = "tok-hop-le"
 _TRANG_CHU = """<html><head><meta charset="utf-8"><title>MaSoThue - Tra cứu mã số thuế</title>
 <script>
 function tim(ev) {
   ev.preventDefault();
-  var q = document.getElementById('search').value;
+  var q = ev.target.querySelector('input[name="q"]').value;
   fetch('/Ajax/Token').then(function (r) { return r.text(); }).then(function (t) {
     location.href = '/Search/?q=' + encodeURIComponent(q) + '&type=auto&token=' + t;
   });
 }
 </script></head><body>
+<div class="menu-dien-thoai" style="display:none">
 <form action="/Search/" method="get" onsubmit="tim(event)">
+<input type="text" name="q" placeholder="Tìm"> <button type="submit">Tìm</button></form></div>
+%s</body></html>"""
+_O_TIM_HIEN = """<form action="/Search/" method="get" onsubmit="tim(event)">
 <input id="search" type="text" name="q" placeholder="Nhập mã số thuế"> <button type="submit">Tìm</button>
-</form></body></html>"""
+</form>"""
 
 
 def _trang_cty(mst, tinh_trang):
@@ -156,7 +160,7 @@ class _MayChuGia(http.server.BaseHTTPRequestHandler):
             return self._tra(404, "", "text/plain")
         THONG_KE["lan_mo"].append((time.time(), self.path))
         if u.path == "/":
-            return self._tra(200, _TRANG_CHU if CHE_DO["co_o_tim"] else
+            return self._tra(200, _TRANG_CHU % ("" if CHE_DO["chi_o_an"] else _O_TIM_HIEN) if CHE_DO["co_o_tim"] else
                              "<html><head><title>MaSoThue</title></head><body>Trang chủ</body></html>")
         if u.path == "/Ajax/Token":
             return self._tra(200, _TOKEN, "text/plain")
@@ -250,6 +254,8 @@ try:
     assert any(p.startswith("/Search/") and "token=tok-hop-le" in p for _t, p in THONG_KE["lan_mo"]), (
         "Phải tìm qua ô tìm kiếm của trang chủ (để JS của trang lấy token), KHÔNG mở thẳng /Search/ không "
         f"token (bị đưa sang công ty ngẫu nhiên) — got {THONG_KE['lan_mo']}")
+    print("PASS B1 (trang có ô tìm kiếm ẨN đứng trước ô hiển thị — đúng lỗi thật 'element not "
+          "interactable'): chọn đúng ô đang hiển thị.")
     print("PASS B1: tìm qua ô tìm kiếm trang chủ (JS của trang tự lấy token), đọc đúng ô 'Tình trạng' của "
           "đúng công ty, không bắt nhầm chữ ở mục khác trên trang.")
 
@@ -327,6 +333,14 @@ try:
     kq = tra("0311111111", 8)
     assert kq[0] is True, f"got {kq!r}"
     CHE_DO.update(co_o_tim=True, can_token=True)
+
+    # ===== B13: CHỈ có ô tìm kiếm bị ẩn (không gõ phím được) -> điền bằng JavaScript rồi bấm nút
+    # tìm của CHÍNH form đó (vẫn chạy JS lấy token của trang) -> tra được, không lỗi "not interactable". =====
+    CHE_DO["chi_o_an"] = True
+    kq = tra("0311111111", 8)
+    CHE_DO["chi_o_an"] = False
+    assert kq[0] is True, f"got {kq!r}"
+    print("PASS B13: chỉ có ô tìm kiếm bị ẩn -> điền bằng JS và bấm nút tìm của trang, vẫn tra được.")
     print("PASS B11-B12: không lấy tình trạng của công ty 'mồi' ngẫu nhiên; trang chủ không có ô tìm kiếm "
           "thì rơi về mở thẳng đường dẫn tìm kiếm.")
 finally:

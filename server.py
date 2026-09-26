@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.006"
+APP_BUILD = "2026-09-26.007"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34761,17 +34761,40 @@ _MASOTHUE_URL_TRANG_CHU = "https://masothue.com/"
 # dẫn này (không có token) đã bị trang đưa sang công ty ngẫu nhiên khác.
 _MASOTHUE_URL_TIM = "https://masothue.com/Search/?q={mst}&type=auto"
 
+# Trang có thể có NHIỀU ô tìm kiếm (log thật: ô đầu tiên bị ẩn — Chrome báo "element not
+# interactable", nhiều khả năng ô của menu điện thoại) -> ưu tiên ô ĐANG HIỂN THỊ.
 _JS_MASOTHUE_O_TIM = r"""
-var o = document.querySelector('input[name="q"]') || document.querySelector('input[type="search"]');
-if (!o) {
-  var f = document.querySelectorAll('form');
-  for (var i = 0; i < f.length && !o; i++) {
-    if ((f[i].getAttribute('action') || '').toLowerCase().indexOf('search') >= 0) {
-      o = f[i].querySelector('input[type="text"], input:not([type])');
-    }
+function hien(e) {
+  if (!e || e.disabled || e.type === 'hidden') return false;
+  var r = e.getBoundingClientRect(), s = getComputedStyle(e);
+  return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+}
+var ds = [].slice.call(document.querySelectorAll('input[name="q"], input[type="search"]'));
+var f = document.querySelectorAll('form');
+for (var i = 0; i < f.length; i++) {
+  if ((f[i].getAttribute('action') || '').toLowerCase().indexOf('search') >= 0) {
+    ds = ds.concat([].slice.call(f[i].querySelectorAll('input[type="text"], input:not([type])')));
   }
 }
-return o || null;
+var hien_ds = ds.filter(hien);
+return hien_ds[0] || ds[0] || null;
+"""
+
+# Dự phòng khi ô tìm kiếm không gõ được (bị ẩn): điền bằng JavaScript rồi bấm CHÍNH nút tìm của
+# form (click nút / requestSubmit đều chạy onsubmit của trang -> trang vẫn tự lấy token; KHÔNG dùng
+# form.submit() vì nó bỏ qua onsubmit).
+_JS_MASOTHUE_GUI_BANG_JS = r"""
+var o = arguments[0], mst = arguments[1];
+o.value = mst;
+o.dispatchEvent(new Event('input', {bubbles: true}));
+o.dispatchEvent(new Event('change', {bubbles: true}));
+var f = o.form, nut = f ? f.querySelector('button[type="submit"], input[type="submit"], button:not([type])') : null;
+setTimeout(function () {
+  if (nut) { nut.click(); }
+  else if (f && f.requestSubmit) { f.requestSubmit(); }
+  else if (f) { f.submit(); }
+}, 0);
+return !!(nut || f);
 """
 _MASOTHUE_TD = {"lock": threading.Lock(), "lan_mo_cuoi": 0.0, "nghi_den": 0.0, "loi_lien_tiep": 0,
                 "ly_do_nghi": ""}
@@ -34901,12 +34924,20 @@ def _masothue_tim_qua_o_tim_kiem(drv, mst_c, gioi_han):
     o_tim = drv.execute_script(_JS_MASOTHUE_O_TIM)
     if o_tim is None:
         return None
-    o_tim.clear()
-    o_tim.send_keys(mst_c)
-    time.sleep(0.5)
-    drv.execute_script("window.__kt_trang_cu = true;")
-    _MASOTHUE_TD["lan_mo_cuoi"] = time.time()
-    o_tim.send_keys(Keys.ENTER)
+    try:
+        o_tim.clear()
+        o_tim.send_keys(mst_c)
+        time.sleep(0.5)
+        drv.execute_script("window.__kt_trang_cu = true;")
+        _MASOTHUE_TD["lan_mo_cuoi"] = time.time()
+        o_tim.send_keys(Keys.ENTER)
+    except Exception as e:
+        if "interactable" not in type(e).__name__.lower() and "interactable" not in str(e).lower():
+            raise
+        drv.execute_script("window.__kt_trang_cu = true;")
+        _MASOTHUE_TD["lan_mo_cuoi"] = time.time()
+        if not drv.execute_script(_JS_MASOTHUE_GUI_BANG_JS, o_tim, mst_c):
+            return None
     _tracuunnt_cho_trang_moi(drv, gioi_han)
     return _masothue_doc_trang(drv, mst_c, gioi_han, cho_dung_mst_giay=10)
 
