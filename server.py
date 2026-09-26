@@ -11,6 +11,7 @@ import uuid
 import hmac
 import json
 import time
+import random
 import base64
 import hashlib
 import sqlite3
@@ -55,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-25.001"
+APP_BUILD = "2026-09-26.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34377,6 +34378,17 @@ _SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # ĐÃ THỬ tăng lên 20 (sau khi sửa l�
 # thất bại đủ 20/20 lần, và ngân sách thời gian (_MST_NGAN_SACH_GIAY) bị 2 MST này ngốn hết sạch, khiến
 # ~59 MST còn lại KHÔNG được thử qua mạng lần nào -> GIẢM LẠI về 6 (giá trị gốc).
 
+# THỬ NGHIỆM (sau khi đã loại trừ OCR/cache/số luồng/số lần thử là nguyên nhân — cả 3 hướng đều chỉ
+# ra trang CHỦ ĐỘNG phát hiện/giới hạn truy cập tự động): nghỉ NGẪU NHIÊN 2-3 giây giữa các lần thử
+# lại captcha CÙNG 1 MST (trước đây gọi lại NGAY LẬP TỨC không nghỉ) — mô phỏng nhịp độ người dùng
+# thật tự nhập tay (xác nhận qua lời người dùng: tự nhập tay cũng phải thử 3-5 lần, không ai bấm lại
+# tức thì), hi vọng giảm khả năng bị nhận diện là bot dồn dập nhiều request/giây. ĐÁNH ĐỔI: mỗi MST
+# thất bại đủ 6 lần giờ tốn thêm tới 5*3=15 giây chờ, ăn sâu vào _MST_NGAN_SACH_GIAY (40s/lượt xuất
+# Excel) -> ÍT MST hơn được thử qua mạng mỗi lượt xuất — CHƯA XÁC NHẬN có thật sự cải thiện tỷ lệ
+# thành công hay không (không thể tái hiện đáng tin cậy từ môi trường phát triển — chặn có khả năng
+# theo IP/hành vi của ĐÚNG mạng người dùng thật, cần chạy thật ở máy người dùng để biết kết quả).
+_NGHI_GIUA_CAPTCHA_TRACUUNNT_GIAY = (2.0, 3.0)
+
 
 def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
     """Tra tình trạng hoạt động 1 MST qua CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC
@@ -34473,6 +34485,10 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
 
     ly_do_loi_cuoi = "không rõ lý do"
     for lan in range(1, _SO_LAN_THU_CAPTCHA_TRACUUNNT + 1):
+        if lan > 1:
+            # Nghỉ TRƯỚC khi thử lại (không nghỉ trước lần ĐẦU) — xem
+            # _NGHI_GIUA_CAPTCHA_TRACUUNNT_GIAY.
+            time.sleep(random.uniform(*_NGHI_GIUA_CAPTCHA_TRACUUNNT_GIAY))
         try:
             r_cap = sess.get(_url_captcha_tracuunnt_khong_cache(),
                              headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
