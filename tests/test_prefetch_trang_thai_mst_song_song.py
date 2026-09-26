@@ -61,8 +61,11 @@ def extract_fn(name):
 
 ns = {'time': time}
 exec(extract_fn('_chuan_mst'), ns)
-m = re.search(r'^_MST_NGAN_SACH_GIAY\s*=\s*[\d.]+', src, re.M)
+m = re.search(r'^_MST_NGAN_SACH_GIAY\s*=\s*(None|[\d.]+)', src, re.M)
 exec(m.group(0), ns)
+ns['_MST_TIEN_DO'] = {}
+ns['_TRACUUNNT_TD'] = {"mst_dang_tra": ""}
+ns['cid'] = 1
 
 # Mô phỏng _tra_cuu_trang_thai_mst() thật — mỗi lượt gọi "chậm" NGANG NHAU (mô
 # phỏng độ trễ mạng thật khi gọi API XInvoice), ghi lại thời điểm bắt

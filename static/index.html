@@ -9570,7 +9570,34 @@ async function exportExcel(btn){
   if(!btn&&window.event)btn=window.event.currentTarget||window.event.target;
   const old=btn?btn.innerHTML:'';
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Đang xử lý, vui lòng đợi...';}
-  toast('Đang kết xuất Excel — có thể mất 1-2 phút nếu nhiều hóa đơn','');
+  const coTraMst=!!document.getElementById('cTraMst')?.checked;
+  toast(coTraMst?'Đang kết xuất Excel kèm dò tình trạng MST (~6–7 giây mỗi MST chưa dò hôm nay) — xem tiến độ ngay dưới nút'
+                :'Đang kết xuất Excel — có thể mất 1-2 phút nếu nhiều hóa đơn','');
+  // Tiến độ dò tình trạng MST (tổng số MST, đã dò tới đâu, đang dò MST nào, còn bao lâu) — hỏi
+  // /api/tra-mst-tien-do mỗi giây trong lúc chờ file Excel.
+  let henTienDoMst=null,hopTienDoMst=null;
+  if(coTraMst){
+    hopTienDoMst=document.createElement('div');
+    hopTienDoMst.className='mst-tien-do';
+    hopTienDoMst.style.cssText='margin-top:8px;padding:8px 10px;border:1px solid #cfe3d6;border-radius:8px;background:#f5fbf7;font-size:13px;color:#1f4d36;max-width:560px';
+    hopTienDoMst.textContent='Đang chuẩn bị dò tình trạng MST...';
+    if(btn&&btn.parentNode)btn.parentNode.insertBefore(hopTienDoMst,btn.nextSibling);
+    const capNhatTienDoMst=async()=>{
+      try{
+        const td=await api(`/api/tra-mst-tien-do/${current}`);
+        if(!td||!td.dang_chay||!td.tong)return;
+        const pct=Math.round(td.da_xong*100/td.tong);
+        const s=td.con_lai_giay||0;
+        const conLai=s>=60?`~${Math.ceil(s/60)} phút`:`~${s} giây`;
+        const dangDo=String(td.dang_tra||'').replace(/[^0-9-]/g,'');
+        hopTienDoMst.innerHTML=`🔍 Đang dò tình trạng MST: <b>${td.da_xong}/${td.tong}</b> (${pct}%) — tra được ${td.tra_duoc}`
+          +(dangDo?` — đang dò <b>${dangDo}</b>`:'')+` — còn ${conLai}`
+          +`<div style="height:6px;background:#dfeee4;border-radius:3px;margin-top:6px"><div style="height:6px;width:${pct}%;background:#2e7d4f;border-radius:3px"></div></div>`;
+        if(btn)btn.innerHTML=`<span class="spin"></span> Đang dò MST ${td.da_xong}/${td.tong}...`;
+      }catch{}
+    };
+    henTienDoMst=setInterval(capNhatTienDoMst,1000);
+  }
   try{
     // Nút "Xuất Excel" ở đây tự bấm riêng (không nhất thiết vừa tra cứu xong)
     // -> vẫn tôn trọng ô "Lưu file kết xuất" ở trên (cùng màn hình), để lưu
@@ -9611,7 +9638,19 @@ async function exportExcel(btn){
     if(loiLuuKx){
       setTimeout(()=>toast('⚠ '+decodeURIComponent(loiLuuKx),'err'),300);
     }
+    if(coTraMst){
+      try{
+        const td=await api(`/api/tra-mst-tien-do/${current}`);
+        if(td&&td.tong)setTimeout(()=>toast(`Dò tình trạng MST: tra được ${td.tra_duoc}/${td.tong} MST cần dò`
+          +(td.tra_duoc<td.tong?' — MST chưa tra được sẽ dò tiếp ở lần xuất Excel sau':''),
+          td.tra_duoc<td.tong?'err':'ok'),600);
+      }catch{}
+    }
   }catch(e){toast(e.message,'err')}
+  finally{
+    if(henTienDoMst)clearInterval(henTienDoMst);
+    if(hopTienDoMst)hopTienDoMst.remove();
+  }
   if(btn){btn.disabled=false;btn.innerHTML=old;}
 }
 function dl(blob,name){

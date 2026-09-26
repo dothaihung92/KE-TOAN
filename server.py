@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.009"
+APP_BUILD = "2026-09-26.010"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34050,11 +34050,15 @@ def _thue_theo_cong_thue(it, items, r):
 
 
 _MST_API_NGHI_GIUA_LUOT = 0.35   # giây nghỉ giữa các lượt gọi API MST thật (né giới hạn tốc độ)
-# Giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel — CHỈ áp dụng khi người dùng đã tick
-# "Tra cứu tình trạng MST". Từ 40 lên 180 theo đồng ý của người dùng: tra qua trình duyệt (masothue.com/
-# tracuunnt) mỗi MST mất vài giây, 40s chỉ đủ ~5-8 MST; kèm lưu kết quả trong ngày nên các lượt sau
-# không tra lại MST đã có.
-_MST_NGAN_SACH_GIAY = 180
+# Giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel — None = KHÔNG giới hạn (người dùng
+# yêu cầu: "nếu có 100 mst thì... bỏ giới hạn 180 giây mà hãy để trung bình kiểm tra 6–7 giây mỗi
+# MST giống như người dò thật"). Chỉ chạy khi người dùng đã tick "Tra cứu tình trạng MST"; tiến độ
+# hiện trên giao diện qua /api/tra-mst-tien-do/{cid}. Vẫn còn lưới an toàn: dừng sau 5 lỗi liên
+# tiếp, tạm nghỉ khi trang báo "Too Many Requests".
+_MST_NGAN_SACH_GIAY = None
+# Tiến độ dò tình trạng MST của lượt xuất Excel ĐANG CHẠY theo từng công ty (cid) — xem
+# _prefetch_trang_thai_mst trong export_excel và /api/tra-mst-tien-do/{cid}.
+_MST_TIEN_DO = {}
 
 # Chỉ số cặp client-id/api-key XInvoice ĐANG DÙNG (trong danh sách nhiều cặp
 # đã cấu hình) — theo yêu cầu người dùng: "tạo thêm api thứ 2... hết key này
@@ -34456,7 +34460,7 @@ _SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # ĐÃ THỬ tăng lên 20 (sau khi sửa l�
 _TRACUUNNT_URL = "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"
 _TRACUUNNT_TD = {"lock": threading.Lock(), "drv": None, "lan_dung_cuoi": 0.0,
                  "loi_khoi_tao": None, "lan_loi_khoi_tao": 0.0, "dang_theo_doi": False,
-                 "lan_gui_cuoi": 0.0}
+                 "lan_gui_cuoi": 0.0, "mst_dang_tra": ""}
 _TRACUUNNT_TD_DONG_KHI_RANH_GIAY = 90
 # Khoảng cách TỐI THIỂU giữa 2 lần bấm "Tra cứu" liên tiếp (kể cả giữa 2 MST khác nhau) — trang
 # giới hạn tốc độ theo IP (đã thấy "Too Many Requests" ngay cả với trình duyệt thật); người gõ tay
@@ -34728,6 +34732,7 @@ def _tra_cuu_mst_qua_tracuunnt_trinh_duyet(mst_c, timeout, luu_anh_debug=False):
         drv, _loi = _tracuunnt_lay_trinh_duyet_da_khoa()
         if drv is None:
             return None
+        _TRACUUNNT_TD["mst_dang_tra"] = mst_c
         try:
             return _tracuunnt_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout, luu_anh_debug)
         except Exception as e:
@@ -34803,7 +34808,9 @@ return !!(nut || f);
 """
 _MASOTHUE_TD = {"lock": threading.Lock(), "lan_mo_cuoi": 0.0, "nghi_den": 0.0, "loi_lien_tiep": 0,
                 "ly_do_nghi": ""}
-_MASOTHUE_KHOANG_CACH_GIAY = 3.0     # giãn cách tối thiểu giữa 2 lần mở trang masothue.com
+# Giãn cách giữa 2 lần tìm trên masothue.com: NGẪU NHIÊN 6-7 giây (người dùng yêu cầu "trung bình
+# kiểm tra 6–7 giây mỗi MST giống như người dò thật") — nhận cả 1 số cố định.
+_MASOTHUE_KHOANG_CACH_GIAY = (6.0, 7.0)
 _MASOTHUE_NGHI_KHI_BI_CHAN_GIAY = 900
 _MASOTHUE_NGUONG_TAT = 5
 
@@ -34879,7 +34886,10 @@ def _masothue_tam_nghi(ly_do):
 
 
 def _masothue_cho_gian_cach():
-    cho_them = _MASOTHUE_TD["lan_mo_cuoi"] + _MASOTHUE_KHOANG_CACH_GIAY - time.time()
+    import random as _rd_mst
+    khoang = _MASOTHUE_KHOANG_CACH_GIAY
+    khoang = _rd_mst.uniform(*khoang) if isinstance(khoang, (tuple, list)) else float(khoang)
+    cho_them = _MASOTHUE_TD["lan_mo_cuoi"] + khoang - time.time()
     if cho_them > 0:
         time.sleep(cho_them)
     _MASOTHUE_TD["lan_mo_cuoi"] = time.time()
@@ -35019,6 +35029,7 @@ def _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout, luu_anh_debug=False):
         drv, _loi = _tracuunnt_lay_trinh_duyet_da_khoa()
         if drv is None:
             return None
+        _TRACUUNNT_TD["mst_dang_tra"] = mst_c
         try:
             kq = _masothue_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout)
             if luu_anh_debug and not kq[0]:
@@ -35449,6 +35460,24 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     if ly_do_loi:
         ket_qua["ly_do_loi"] = ly_do_loi
     return ket_qua
+
+
+@app.get("/api/tra-mst-tien-do/{cid}")
+def tra_mst_tien_do(cid: int):
+    """Tiến độ dò tình trạng MST của lượt xuất Excel đang chạy (giao diện hỏi mỗi giây): tổng số MST
+    cần dò, đã xong bao nhiêu, tra được bao nhiêu, đang dò MST nào, ước thời gian còn lại."""
+    td = dict(_MST_TIEN_DO.get(cid) or {"dang_chay": False, "tong": 0, "da_xong": 0, "tra_duoc": 0,
+                                         "dang_tra": "", "bat_dau": 0})
+    if td.get("dang_chay"):
+        # MST Chrome ẩn ĐANG thực sự tra (các luồng dò song song xếp hàng dùng chung 1 Chrome, nên
+        # MST vừa được luồng nhận chưa chắc đã đang tra) — rơi về MST luồng vừa nhận nếu chưa có.
+        td["dang_tra"] = _TRACUUNNT_TD.get("mst_dang_tra") or td.get("dang_tra") or ""
+    da_chay = max(0.0, time.time() - td["bat_dau"]) if td.get("bat_dau") else 0.0
+    con_lai = max(0, td["tong"] - td["da_xong"])
+    giay_moi_mst = (da_chay / td["da_xong"]) if td["da_xong"] >= 3 else 6.5
+    td["da_chay_giay"] = round(da_chay)
+    td["con_lai_giay"] = round(con_lai * giay_moi_mst)
+    return td
 
 
 @app.get("/api/export-excel/{cid}")
@@ -36844,7 +36873,11 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         key = _chuan_mst(mst)[:10]
         if key in _mst_status_local:
             return _mst_status_local[key]
-        het_ngan_sach = (time.time() - _mst_bat_dau) > _MST_NGAN_SACH_GIAY
+        het_ngan_sach = (_MST_NGAN_SACH_GIAY is not None
+                         and (time.time() - _mst_bat_dau) > _MST_NGAN_SACH_GIAY)
+        td = _MST_TIEN_DO.get(cid)
+        if td and td.get("dang_chay") and not het_ngan_sach:
+            td["dang_tra"] = key
         info = _tra_cuu_trang_thai_mst(mst, so_lan_that_bai_lien_tiep=_mst_fail_counter,
                                        chi_dung_cache=het_ngan_sach)
         _mst_status_local[key] = info
@@ -36906,16 +36939,27 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         _tlog(f"[{nhan}] bắt đầu dò tình trạng MST: 0/{tong} đối tác khác nhau...")
         import concurrent.futures as _cf_mst
         xong = 0
-        with _cf_mst.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
-            futs = [ex.submit(_lay_trang_thai_mst_cached, mst) for mst in can_tra]
-            for fut in _cf_mst.as_completed(futs):
-                try:
-                    fut.result()
-                except Exception:
-                    pass
-                xong += 1
-                if xong % 10 == 0 or xong == tong:
-                    _tlog(f"[{nhan}] đang dò tình trạng MST: {xong}/{tong} (còn {tong - xong})")
+        td = {"dang_chay": True, "nhan": nhan, "tong": tong, "da_xong": 0, "tra_duoc": 0,
+              "dang_tra": "", "bat_dau": time.time()}
+        _MST_TIEN_DO[cid] = td
+        _TRACUUNNT_TD["mst_dang_tra"] = ""
+        try:
+            with _cf_mst.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
+                futs = [ex.submit(_lay_trang_thai_mst_cached, mst) for mst in can_tra]
+                for fut in _cf_mst.as_completed(futs):
+                    try:
+                        info_xong = fut.result() or {}
+                    except Exception:
+                        info_xong = {}
+                    xong += 1
+                    td["da_xong"] = xong
+                    if info_xong.get("trang_thai"):
+                        td["tra_duoc"] += 1
+                    if xong % 10 == 0 or xong == tong:
+                        _tlog(f"[{nhan}] đang dò tình trạng MST: {xong}/{tong} (còn {tong - xong})")
+        finally:
+            td["dang_chay"] = False
+            td["dang_tra"] = ""
         # Liệt kê ĐẦY ĐỦ từng MST CHƯA lấy được tình trạng KÈM lý do cụ thể
         # của CHÍNH MST đó (thay vì chỉ 1 "VÍ DỤ LỖI GẶP PHẢI" duy nhất như
         # trước — không đủ để biết TẤT CẢ các MST còn lại có cùng 1 nguyên

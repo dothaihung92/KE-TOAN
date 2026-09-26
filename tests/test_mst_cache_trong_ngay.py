@@ -81,9 +81,8 @@ try:
     assert server._mst_cache_doc_trong_ngay("0319876543") is None
     print("PASS 3: không tra được thì không lưu, lượt sau tra lại.")
 
-    # ===== 4: ngân sách thời gian tra MST mỗi lượt xuất Excel (chỉ khi đã tick tra MST) = 180 giây. =====
-    assert server._MST_NGAN_SACH_GIAY == 180, f"got {server._MST_NGAN_SACH_GIAY}"
-    print("PASS 4: ngân sách thời gian tra MST mỗi lượt xuất Excel = 180 giây.")
+    # (Giới hạn thời gian tra MST mỗi lượt đã BỎ theo yêu cầu người dùng — xem
+    # test_tra_mst_tien_do_khong_gioi_han.py.)
 finally:
     for k, v in _goc.items():
         setattr(server, k, v)
