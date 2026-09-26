@@ -24,7 +24,8 @@ import server
 _goc = {k: getattr(server, k) for k in (
     "_tracuunnt_tao_trinh_duyet", "_tra_cuu_mst_qua_tracuunnt", "_tra_cuu_mst_qua_masothue_trinh_duyet",
     "_MASOTHUE_URL_TIM", "_MASOTHUE_URL_TRANG_CHU", "_MASOTHUE_KHOANG_CACH_GIAY",
-    "_mst_cache_doc_trong_ngay", "_mst_cache_ghi", "_MST_API_NGHI_GIUA_LUOT", "_XINVOICE_TAM_DUNG")}
+    "_mst_cache_doc_trong_ngay", "_mst_cache_ghi", "_MST_API_NGHI_GIUA_LUOT", "_XINVOICE_TAM_DUNG",
+    "_TRACUUNNT_TAM_DUNG")}
 
 
 def _dat_lai():
@@ -50,6 +51,7 @@ server._MST_API_NGHI_GIUA_LUOT = 0
 server._mst_cache_doc_trong_ngay = lambda mst_c: None      # không đụng DB thật
 server._mst_cache_ghi = lambda mst_c, trang_thai_goc, canh_bao: None
 server._XINVOICE_TAM_DUNG = True
+server._TRACUUNNT_TAM_DUNG = False   # phần A kiểm tra chuỗi masothue.com -> tracuunnt (cờ thật đang tạm dừng)
 try:
     # ===== A1: masothue.com (nguồn ĐẦU TIÊN) tra được -> trả kết quả của masothue.com, không lỗi. =====
     server._tra_cuu_mst_qua_tracuunnt = lambda m, t: (False, "", None, "đang giới hạn tốc độ (Too Many Requests)")

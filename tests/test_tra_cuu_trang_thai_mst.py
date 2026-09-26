@@ -104,6 +104,10 @@ class _FakeXInvoice:
 ns = {'json': json, 'threading': threading}
 exec(extract_fn('_khong_dau'), ns)
 exec(extract_fn('_chuan_mst'), ns)
+exec(extract_fn('_mst_tra_cuu'), ns)
+# File này kiểm tra LOGIC chuỗi nguồn gồm cả tracuunnt -> mở cờ tạm dừng (giá trị thật đang True theo
+# yêu cầu người dùng — hành vi khi tạm dừng có test riêng ở test_tra_mst_tam_dung_12so_tam_ngung_kd.py).
+ns['_TRACUUNNT_TAM_DUNG'] = False
 exec(extract_fn('_phan_loai_trang_thai_mst'), ns)
 m2 = re.search(r'^_MST_API_NGHI_GIUA_LUOT\s*=\s*[\d.]+', src, re.M)
 exec(m2.group(0), ns)

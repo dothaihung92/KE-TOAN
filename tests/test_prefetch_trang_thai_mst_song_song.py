@@ -61,6 +61,7 @@ def extract_fn(name):
 
 ns = {'time': time}
 exec(extract_fn('_chuan_mst'), ns)
+exec(extract_fn('_mst_tra_cuu'), ns)
 m = re.search(r'^_MST_NGAN_SACH_GIAY\s*=\s*(None|[\d.]+)', src, re.M)
 exec(m.group(0), ns)
 ns['_MST_TIEN_DO'] = {}

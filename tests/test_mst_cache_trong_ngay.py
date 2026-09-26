@@ -32,8 +32,9 @@ c0.close()
 
 _goc = {k: getattr(server, k) for k in (
     "db", "_tra_cuu_mst_qua_masothue_trinh_duyet", "_tra_cuu_mst_qua_tracuunnt",
-    "_lay_danh_sach_xinvoice_keys", "_MST_API_NGHI_GIUA_LUOT")}
+    "_lay_danh_sach_xinvoice_keys", "_MST_API_NGHI_GIUA_LUOT", "_TRACUUNNT_TAM_DUNG")}
 server.db = _db_tam
+server._TRACUUNNT_TAM_DUNG = False   # test cả chuỗi masothue.com -> tracuunnt (cờ thật đang tạm dừng)
 server._MST_API_NGHI_GIUA_LUOT = 0
 server._lay_danh_sach_xinvoice_keys = lambda: []
 try:

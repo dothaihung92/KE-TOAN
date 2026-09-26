@@ -64,7 +64,7 @@ def _than_long(ten):
     return "\n".join(x[4:] if x.startswith("    ") else x for x in than)
 
 
-ns = {"time": time, "_chuan_mst": server._chuan_mst, "_MST_NGAN_SACH_GIAY": server._MST_NGAN_SACH_GIAY,
+ns = {"time": time, "_chuan_mst": server._chuan_mst, "_mst_tra_cuu": server._mst_tra_cuu, "_MST_NGAN_SACH_GIAY": server._MST_NGAN_SACH_GIAY,
       "_MST_TIEN_DO": {}, "_TRACUUNNT_TD": {"mst_dang_tra": ""}, "cid": 7,
       "_mst_status_local": {}, "_mst_fail_counter": [0], "_mst_bat_dau": time.time() - 100000,
       "_tlog": lambda m: None, "_tracuunnt_dat_lai_dem_loi": lambda: None}

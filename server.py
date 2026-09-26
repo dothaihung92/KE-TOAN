@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.011"
+APP_BUILD = "2026-09-26.012"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6818,7 +6818,7 @@ def chan_doan_mst_tracuunnt(mst: str = "0315458241"):
     ĐÚNG (OCR yếu) hay SAI HOÀN TOÀN (dấu hiệu khác, vd site trả nhầm ảnh).
 
     Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-tracuunnt?mst=0315458241"""
-    mst_c = _chuan_mst(mst)[:10]
+    mst_c = _mst_tra_cuu(mst)
     if not mst_c:
         raise HTTPException(400, "MST không hợp lệ")
     thu_muc_anh = os.path.join(_get_desktop_dir(), "captcha_tracuunnt_debug")
@@ -6844,7 +6844,7 @@ def chan_doan_mst_masothue(mst: str = "0315458241"):
     tracuunnt. Thất bại thì chụp màn hình trang ra Desktop/masothue_debug/.
 
     Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-masothue?mst=0315458241"""
-    mst_c = _chuan_mst(mst)[:10]
+    mst_c = _mst_tra_cuu(mst)
     if not mst_c:
         raise HTTPException(400, "MST không hợp lệ")
     kq = _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout=20, luu_anh_debug=True)
@@ -10381,6 +10381,16 @@ NGUONG_5TR = 5_000_000
 def _chuan_mst(s):
     """Chuẩn hóa MST: bỏ khoảng trắng, gạch, chấm."""
     return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
+
+
+def _mst_tra_cuu(s):
+    """Khoá MST dùng để TRA TÌNH TRẠNG hoạt động: MST 13 số của đơn vị trực thuộc
+    ('0312345678-001') quy về 10 số gốc như trước; MST 12 số (số định danh cá nhân
+    — hộ/cá nhân kinh doanh dùng làm MST) GIỮ NGUYÊN 12 số. Trước đây mọi MST đều
+    bị cắt còn 10 số, MST 12 số '079183039914' thành '0791830399' (không tồn tại)
+    -> masothue.com đưa sang 1 công ty khác (VNG 0303490096), XInvoice báo 404."""
+    c = _chuan_mst(s)
+    return c if len(c) == 12 and c.isdigit() else c[:10]
 
 
 def _bien_the_khmshdon(v):
@@ -33892,6 +33902,12 @@ _XINVOICE_KEY_STATE = {"idx": 0, "lock": threading.Lock()}
 # trong chuỗi masothue.com -> tracuunnt -> XInvoice.
 _XINVOICE_TAM_DUNG = False   # người dùng chốt chuỗi nguồn masothue.com -> tracuunnt -> XInvoice
 
+# TẠM DỪNG (KHÔNG xoá code) tra tình trạng MST qua tracuunnt.gdt.gov.vn — theo yêu cầu người dùng
+# ("tạm ngưng chạy tracuunnt.gdt.gov.vn") sau log thật: trang liên tục báo "Too Many Requests" (IP
+# người dùng bị giới hạn tốc độ), mỗi MST masothue.com chưa tra được lại gọi thêm tracuunnt chỉ tốn
+# thời gian. Chuỗi nguồn khi tạm dừng: masothue.com -> XInvoice. Đổi lại False để bật lại.
+_TRACUUNNT_TAM_DUNG = True
+
 
 def _phan_loai_trang_thai_mst(mo_ta):
     """Phân loại tình trạng hoạt động MST từ 1 đoạn mô tả dạng chữ (trường
@@ -33932,11 +33948,19 @@ def _phan_loai_trang_thai_mst(mo_ta):
         # THẤT BẠI (không tô đỏ dù MST thật sự đang trong tình trạng xấu này).
         ("ngung hd nhung chua hoan thanh thu tuc",
          "NNT ngừng hoạt động nhưng chưa hoàn thành thủ tục chấm dứt hiệu lực MST"),
+        # "Tạm ngừng ..." đặt TRƯỚC các cụm "ngừng hoạt động" chung bên dưới (chữ "tạm ngừng hoạt
+        # động" cũng chứa "ngừng hoạt động" — khớp trước sẽ bị ghi nhầm thành ngừng hẳn).
+        ("tam ngung kinh doanh", "Tạm ngừng kinh doanh"),
+        # Viết tắt "KD" (kinh doanh) — gặp thật với MST 0317657700: masothue.com ghi "Tạm ngừng KD
+        # có thời hạn", XInvoice ghi "NNT tạm ngừng KD có thời hạn" — trước đây không khớp cụm đầy
+        # đủ ở trên nên bị coi là "tình trạng lạ", MST bỏ trống dù đã tra ra.
+        ("tam ngung kd", "Tạm ngừng kinh doanh"),
+        ("tam ngung hoat dong", "Tạm ngừng hoạt động"),
+        ("tam ngung hd", "Tạm ngừng hoạt động"),
         ("da ngung hoat dong", "Đã ngừng hoạt động"),
         ("ngung hoat dong", "Ngừng hoạt động"),
         ("da ngung hd", "Đã ngừng hoạt động"),
         ("ngung hd", "Ngừng hoạt động"),
-        ("tam ngung kinh doanh", "Tạm ngừng kinh doanh"),
         ("da giai the", "Đã giải thể"),
         ("cham dut hieu luc ma so thue", "Chấm dứt hiệu lực mã số thuế"),
     ]
@@ -34787,7 +34811,7 @@ def _masothue_dung_mst(kq, mst_c):
     """True nếu trang đọc được ô "Tình trạng" VÀ đó là thông tin của ĐÚNG mst_c."""
     if not kq.get("tinh_trang"):
         return False
-    mst_trang = _chuan_mst(kq.get("mst_trang") or "")[:10]
+    mst_trang = _mst_tra_cuu(kq.get("mst_trang") or "")
     return mst_trang == mst_c if mst_trang else bool(kq.get("co_mst"))
 
 
@@ -35152,7 +35176,7 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     canh_bao=None nghĩa là KHÔNG tra cứu được/chưa cấu hình/MST không hợp lệ
     — KHÔNG được coi là cảnh báo (an toàn: chỉ tô đỏ khi THẬT SỰ xác nhận
     được tình trạng xấu, không suy đoán khi thiếu dữ liệu)."""
-    mst_c = _chuan_mst(mst)[:10]
+    mst_c = _mst_tra_cuu(mst)
     if not mst_c or len(mst_c) < 9 or not mst_c.isdigit() or mst_c.upper() == "KL":
         # "" (rỗng) và "KL" (khách lẻ dùng chung mã) là CHỦ Ý bỏ qua, không
         # phải lỗi (KHÔNG kèm ly_do_loi để tránh làm nhiễu chẩn đoán) — còn
@@ -35231,8 +35255,9 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         else:
             loi_cac_nguon.append(f"masothue.com: {kq_masothue[3]}")
 
-    # 2) tracuunnt.gdt.gov.vn — cổng chính thức của Tổng cục Thuế (captcha).
-    if not thanh_cong:
+    # 2) tracuunnt.gdt.gov.vn — cổng chính thức của Tổng cục Thuế (captcha). Bỏ qua khi đang tạm
+    #    dừng (_TRACUUNNT_TAM_DUNG).
+    if not thanh_cong and not _TRACUUNNT_TAM_DUNG:
         thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_tracuunnt = _tra_cuu_mst_qua_tracuunnt(
             mst_c, timeout)
         if not thanh_cong:
@@ -35240,7 +35265,13 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     ly_do_loi = None if thanh_cong else " | ".join(loi_cac_nguon)
     tien_to_loi = " | ".join(loi_cac_nguon)
 
-    # 3) XInvoice (API trả phí, cần key) — CHỈ khi 2 nguồn trên không tra được và chưa tạm dừng
+    if not thanh_cong and not loi_cac_nguon and (_XINVOICE_TAM_DUNG or not so_key):
+        # Không nguồn nào chạy được (Chrome ẩn không mở được, tracuunnt/XInvoice đang tạm dừng hoặc
+        # chưa có key) — ghi rõ lý do thay vì để trống không rõ vì sao.
+        ly_do_loi = tien_to_loi = ("không có nguồn tra MST nào chạy được (masothue.com cần Chrome ẩn; "
+                                   "tracuunnt.gdt.gov.vn đang tạm dừng; XInvoice đang tạm dừng/chưa có key)")
+
+    # 3) XInvoice (API trả phí, cần key) — CHỈ khi các nguồn trên không tra được và chưa tạm dừng
     #    (_XINVOICE_TAM_DUNG).
     for buoc in range(0 if (thanh_cong or _XINVOICE_TAM_DUNG) else so_key):
         idx_key = (idx_bat_dau + buoc) % so_key
@@ -35250,14 +35281,15 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         if thanh_cong:
             ly_do_loi = None
             break
-        ly_do_loi = f"{tien_to_loi} | XInvoice: {ly_do_loi_xinvoice}"
+        ly_do_loi = " | ".join(x for x in (tien_to_loi, f"XInvoice: {ly_do_loi_xinvoice}") if x)
         if loi_do_key and buoc < so_key - 1:
             with _XINVOICE_KEY_STATE["lock"]:
                 _XINVOICE_KEY_STATE["idx"] = (idx_key + 1) % so_key
             continue
         if loi_do_key and so_key > 1:
-            ly_do_loi = (f"{tien_to_loi} | XInvoice: ĐÃ HẾT HẠN "
-                        f"MỨC/SAI cả {so_key} key đã cấu hình — lỗi key cuối: {ly_do_loi_xinvoice}")
+            ly_do_loi = " | ".join(x for x in (
+                tien_to_loi, f"XInvoice: ĐÃ HẾT HẠN MỨC/SAI cả {so_key} key đã cấu hình — lỗi key cuối: "
+                             f"{ly_do_loi_xinvoice}") if x)
         break
 
     if thanh_cong and canh_bao is not None:
@@ -36680,7 +36712,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     _mst_bat_dau = time.time()
 
     def _lay_trang_thai_mst_cached(mst):
-        key = _chuan_mst(mst)[:10]
+        key = _mst_tra_cuu(mst)
         if key in _mst_status_local:
             return _mst_status_local[key]
         het_ngan_sach = (_MST_NGAN_SACH_GIAY is not None
@@ -36737,7 +36769,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         can_tra = []
         da_gom = set()
         for mst in danh_sach_mst:
-            key = _chuan_mst(mst)[:10]
+            key = _mst_tra_cuu(mst)
             if not key or key in da_gom or key in _mst_status_local:
                 continue
             da_gom.add(key)
@@ -36780,7 +36812,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         mst_chua_co = []
         da_liet_ke = set()
         for mst in can_tra:
-            key = _chuan_mst(mst)[:10]
+            key = _mst_tra_cuu(mst)
             if key in da_liet_ke:
                 continue
             info = _mst_status_local.get(key) or {}
