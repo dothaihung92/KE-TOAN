@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.007"
+APP_BUILD = "2026-09-26.008"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34050,7 +34050,11 @@ def _thue_theo_cong_thue(it, items, r):
 
 
 _MST_API_NGHI_GIUA_LUOT = 0.35   # giây nghỉ giữa các lượt gọi API MST thật (né giới hạn tốc độ)
-_MST_NGAN_SACH_GIAY = 40   # giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel
+# Giây tối đa dành cho việc tra MST MỚI trong 1 lượt xuất Excel — CHỈ áp dụng khi người dùng đã tick
+# "Tra cứu tình trạng MST". Từ 40 lên 180 theo đồng ý của người dùng: tra qua trình duyệt (masothue.com/
+# tracuunnt) mỗi MST mất vài giây, 40s chỉ đủ ~5-8 MST; kèm lưu kết quả trong ngày nên các lượt sau
+# không tra lại MST đã có.
+_MST_NGAN_SACH_GIAY = 180
 
 # Chỉ số cặp client-id/api-key XInvoice ĐANG DÙNG (trong danh sách nhiều cặp
 # đã cấu hình) — theo yêu cầu người dùng: "tạo thêm api thứ 2... hết key này
@@ -34070,8 +34074,9 @@ _XINVOICE_KEY_STATE = {"idx": 0, "lock": threading.Lock()}
 # được gì — trong lúc chờ hạn mức gói tự làm mới/nâng cấp gói, tạm dừng hẳn
 # việc gọi XInvoice, CHỈ dùng tracuunnt.gdt.gov.vn. Đổi lại False (không cần
 # sửa gì khác) khi hạn mức gói XInvoice đã có lại để khôi phục chuỗi dự
-# phòng đầy đủ.
-_XINVOICE_TAM_DUNG = True
+# phòng đầy đủ. ĐÃ BẬT LẠI (False): người dùng chốt XInvoice là nguồn cuối
+# trong chuỗi masothue.com -> tracuunnt -> XInvoice.
+_XINVOICE_TAM_DUNG = False   # người dùng chốt chuỗi nguồn masothue.com -> tracuunnt -> XInvoice
 
 
 def _phan_loai_trang_thai_mst(mo_ta):
@@ -35232,6 +35237,42 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
                              f"{ghi_chu_khong_chrome}")
 
 
+def _mst_cache_doc_trong_ngay(mst_c):
+    """Kết quả tra MST ĐÃ lưu trong NGÀY HÔM NAY -> {"trang_thai","canh_bao"},
+    ngược lại None (chưa tra/tra từ hôm trước/không tra được)."""
+    try:
+        conn = db()
+        try:
+            row = conn.execute("SELECT trang_thai_goc, canh_bao, checked_at FROM mst_status_cache "
+                               "WHERE mst=?", (mst_c,)).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    if not row or row["canh_bao"] is None:
+        return None
+    if str(row["checked_at"] or "")[:10] != datetime.date.today().isoformat():
+        return None
+    return {"trang_thai": row["trang_thai_goc"] or "", "canh_bao": bool(row["canh_bao"])}
+
+
+def _mst_cache_ghi(mst_c, trang_thai_goc, canh_bao):
+    try:
+        conn = db()
+        try:
+            conn.execute(
+                "INSERT INTO mst_status_cache (mst, trang_thai_goc, canh_bao, checked_at) VALUES (?,?,?,?) "
+                "ON CONFLICT(mst) DO UPDATE SET trang_thai_goc=excluded.trang_thai_goc, "
+                "canh_bao=excluded.canh_bao, checked_at=excluded.checked_at",
+                (mst_c, trang_thai_goc, 1 if canh_bao else 0,
+                 datetime.datetime.now().isoformat(timespec="seconds")))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
     """Tra cứu tình trạng hoạt động của 1 MST — dùng để cảnh báo khi xuất
     Excel bảng kê mua vào/bán ra: đối tác đã bị khóa MST/ngừng hoạt động,
@@ -35239,32 +35280,20 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     đăng ký" (dấu hiệu rủi ro thường gặp: hóa đơn của NCC "ma" — không có
     thật tại địa chỉ đăng ký — ảnh hưởng việc khấu trừ thuế GTGT đầu vào).
 
-    ═══ CHUỖI NGUỒN TRA MST (đã chốt) ═══ — NGUỒN ƯU TIÊN 1:
-    tracuunnt.gdt.gov.vn (_tra_cuu_mst_qua_tracuunnt — cổng công khai CHÍNH
-    THỨC của Tổng cục Thuế, MIỄN PHÍ, KHÔNG hạn mức gói, KHÔNG cần đăng nhập
-    công ty nào; từng bị nghi captcha không giải được nhưng hoá ra là 1 bug
-    thật trong code — xử lý sai kênh alpha của ảnh captcha RGBA nền trong
-    suốt — đã sửa xong, xem _flatten_rgba_png). NGUỒN DỰ PHÒNG:
-    _goi_1_lan_xinvoice (API trả phí, cần cấu hình client-id/api-key, CHỈ
-    gọi khi tracuunnt.gdt.gov.vn không tra được). VietQR (api.vietqr.io) và
-    masothue.com đã BỎ HẲN khỏi codebase theo yêu cầu người dùng (đặt
-    tracuunnt.gdt.gov.vn làm nguồn chính thức nhất, XInvoice làm dự phòng).
+    ═══ CHUỖI NGUỒN TRA MST (người dùng chốt lại) ═══: masothue.com (qua
+    Chrome ẩn, _tra_cuu_mst_qua_masothue_trinh_duyet — miễn phí, không
+    captcha, đã xác nhận tra được trên máy người dùng) -> tracuunnt.gdt.gov.vn
+    (_tra_cuu_mst_qua_tracuunnt — cổng chính thức, có captcha, đang hay bị
+    giới hạn tốc độ) -> XInvoice (_goi_1_lan_xinvoice — API trả phí, cần
+    client-id/api-key). Chỉ gọi nguồn sau khi nguồn trước không tra được.
 
-    ═══ XInvoice ĐANG TẠM DỪNG (_XINVOICE_TAM_DUNG=True) ═══ — log thật cho
-    thấy CẢ 2 key XInvoice đã cấu hình đều HTTP 429 "Exceeded free tier
-    limit"/timeout, gọi dự phòng chỉ tốn thêm thời gian chờ vô ích — hàm này
-    HIỆN CHỈ gọi tracuunnt.gdt.gov.vn, code XInvoice VẪN CÒN NGUYÊN (chỉ
-    tạm dừng gọi qua cờ _XINVOICE_TAM_DUNG, không xoá) để khôi phục ngay khi
-    hạn mức gói có lại.
-
-    LUÔN tra cứu qua mạng TẠI THỜI ĐIỂM HIỆN TẠI, KHÔNG lưu/dùng lại kết quả
-    cũ qua nhiều lần xuất Excel khác nhau — theo đúng yêu cầu người dùng
-    ("hãy bỏ cache 14 ngày đi, không cần lưu, cứ dò ở thời điểm hiện tại")
-    sau khi phát hiện cache cũ (dù có cơ chế hết hạn sớm riêng cho MST đang
-    cảnh báo) vẫn khiến phần mềm báo sai tình trạng cho MST đã hoạt động
-    bình thường trở lại. (Vẫn CÓ dedup theo bộ nhớ TRONG CÙNG 1 lượt xuất
-    Excel — xem _mst_status_local ở export_excel — để 1 MST xuất hiện ở
-    nhiều dòng/nhiều sheet chỉ bị tra ĐÚNG 1 lần, không phải cache dài hạn.)
+    ═══ LƯU KẾT QUẢ TRONG NGÀY ═══ (người dùng đồng ý, thay cho "không lưu
+    gì" trước đây): kết quả tra ĐƯỢC lưu vào mst_status_cache và CHỈ dùng
+    lại trong CÙNG NGÀY (_mst_cache_doc_trong_ngay) — mỗi lượt xuất Excel
+    chỉ phải tra các MST chưa có, vài lượt là đủ hết, ít gửi yêu cầu lên
+    trang hơn (đỡ bị chặn); sang ngày mới thì tra lại, vẫn đúng ý "dò ở thời
+    điểm hiện tại" (lý do bỏ cache 14 ngày trước đây: báo sai tình trạng cho
+    MST đã hoạt động lại). Kết quả KHÔNG tra được thì không lưu.
 
     so_lan_that_bai_lien_tiep: list 1 phần tử [count] dùng làm bộ đếm CHUNG
     giữa nhiều lần gọi liên tiếp (vd trong 1 lượt xuất Excel có hàng trăm
@@ -35302,6 +35331,12 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
                                     f"9-10 chữ số) — bỏ qua, không tra cứu được")
         return ket_qua
 
+    # Kết quả ĐÃ tra được TRONG NGÀY HÔM NAY -> dùng lại, không gọi mạng (kể cả khi đã hết ngân sách
+    # thời gian của lượt này) — xem _mst_cache_doc_trong_ngay.
+    da_luu = _mst_cache_doc_trong_ngay(mst_c)
+    if da_luu is not None:
+        return da_luu
+
     bo_dem_da_toi_han = (so_lan_that_bai_lien_tiep is not None and so_lan_that_bai_lien_tiep[0] >= 5)
     het_han_muc = chi_dung_cache or bo_dem_da_toi_han
     if het_han_muc:
@@ -35316,9 +35351,9 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         return {"trang_thai": "", "canh_bao": None,
                "ly_do_loi": ("Hết ngân sách thời gian tra MST trong lượt xuất Excel này"
                              if chi_dung_cache else
-                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (tracuunnt.gdt.gov.vn không tra "
-                             "được — XInvoice dự phòng đang tạm dừng do hết hạn mức gói) để tránh "
-                             "treo lâu — sẽ tự thử lại ở lượt xuất Excel sau")}
+                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (không tra được qua cả masothue.com/"
+                             "tracuunnt.gdt.gov.vn/XInvoice) để tránh treo lâu — sẽ tự thử lại ở lượt "
+                             "xuất Excel sau")}
 
     danh_sach_keys = _lay_danh_sach_xinvoice_keys()
 
@@ -35345,32 +35380,31 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
     trang_thai_goc = ""
     canh_bao = None
     thanh_cong = False
-    # ly_do_loi: CHỈ để chẩn đoán (không lưu vào cache DB) — giúp người dùng
-    # tự biết NGUYÊN NHÂN thật khi thấy nhiều MST không dò được (vd "HTTP 401"
-    # -> client-id/api-key sai/hết hạn/hết hạn mức, khác hẳn "Lỗi kết nối" ->
-    # mạng/tường lửa) thay vì chỉ thấy trống không rõ vì sao.
-    ly_do_loi = None
+    # Lý do lỗi của TỪNG nguồn đã thử (chỉ để chẩn đoán, không lưu) — ghép bằng " | ".
+    loi_cac_nguon = []
 
-    # ── NGUỒN ƯU TIÊN 1: CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC tracuunnt.gdt.gov.vn ──
-    # Đặt TRƯỚC XInvoice (không phải sau) là CỐ Ý: nguồn này chính thức, miễn
-    # phí, KHÔNG hạn mức gói, KHÔNG cần đăng nhập công ty nào — tra được ở đây
-    # thì KHÔNG tiêu tốn lượt gọi nào của XInvoice, giữ nguyên hạn mức gói cho
-    # lúc thật sự cần.
-    thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_tracuunnt = _tra_cuu_mst_qua_tracuunnt(
-        mst_c, timeout)
+    # ── THỨ TỰ NGUỒN (người dùng chốt): masothue.com -> tracuunnt.gdt.gov.vn -> XInvoice ──
+    # 1) masothue.com qua Chrome ẩn (miễn phí, không captcha — đã xác nhận tra được trên máy người
+    #    dùng, trong khi tracuunnt đang bị giới hạn tốc độ/từ chối captcha). None = không mở được
+    #    Chrome -> bỏ qua nguồn này.
+    kq_masothue = _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout)
+    if kq_masothue is not None:
+        if kq_masothue[0]:
+            thanh_cong, trang_thai_goc, canh_bao, _ = kq_masothue
+        else:
+            loi_cac_nguon.append(f"masothue.com: {kq_masothue[3]}")
+
+    # 2) tracuunnt.gdt.gov.vn — cổng chính thức của Tổng cục Thuế (captcha).
     if not thanh_cong:
-        ly_do_loi = f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt}"
-        # ── DỰ PHÒNG 1: masothue.com qua Chrome ẩn (miễn phí, không cần key) —
-        # None = không mở được Chrome, bỏ qua nguồn này (không đổi ly_do_loi).
-        kq_masothue = _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout)
-        if kq_masothue is not None:
-            if kq_masothue[0]:
-                thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = kq_masothue
-            else:
-                ly_do_loi = f"{ly_do_loi} | masothue.com: {kq_masothue[3]}"
+        thanh_cong, trang_thai_goc, canh_bao, ly_do_loi_tracuunnt = _tra_cuu_mst_qua_tracuunnt(
+            mst_c, timeout)
+        if not thanh_cong:
+            loi_cac_nguon.append(f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt}")
+    ly_do_loi = None if thanh_cong else " | ".join(loi_cac_nguon)
+    tien_to_loi = " | ".join(loi_cac_nguon)
 
-    # ── DỰ PHÒNG: XInvoice — CHỈ gọi khi tracuunnt.gdt.gov.vn không tra được
-    # VÀ chưa bị tạm dừng (_XINVOICE_TAM_DUNG, xem chú thích ở đầu hàm) ──
+    # 3) XInvoice (API trả phí, cần key) — CHỈ khi 2 nguồn trên không tra được và chưa tạm dừng
+    #    (_XINVOICE_TAM_DUNG).
     for buoc in range(0 if (thanh_cong or _XINVOICE_TAM_DUNG) else so_key):
         idx_key = (idx_bat_dau + buoc) % so_key
         k = danh_sach_keys[idx_key]
@@ -35379,15 +35413,18 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         if thanh_cong:
             ly_do_loi = None
             break
-        ly_do_loi = f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt} | XInvoice: {ly_do_loi_xinvoice}"
+        ly_do_loi = f"{tien_to_loi} | XInvoice: {ly_do_loi_xinvoice}"
         if loi_do_key and buoc < so_key - 1:
             with _XINVOICE_KEY_STATE["lock"]:
                 _XINVOICE_KEY_STATE["idx"] = (idx_key + 1) % so_key
             continue
         if loi_do_key and so_key > 1:
-            ly_do_loi = (f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt} | XInvoice: ĐÃ HẾT HẠN "
+            ly_do_loi = (f"{tien_to_loi} | XInvoice: ĐÃ HẾT HẠN "
                         f"MỨC/SAI cả {so_key} key đã cấu hình — lỗi key cuối: {ly_do_loi_xinvoice}")
         break
+
+    if thanh_cong and canh_bao is not None:
+        _mst_cache_ghi(mst_c, trang_thai_goc, canh_bao)
 
     if so_lan_that_bai_lien_tiep is not None:
         so_lan_that_bai_lien_tiep[0] = 0 if thanh_cong else so_lan_that_bai_lien_tiep[0] + 1

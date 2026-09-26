@@ -164,11 +164,11 @@ assert 'def _tra_cuu_mst_qua_vietqr(' not in src, (
 # (_tra_cuu_mst_qua_masothue_trinh_duyet), gọi SAU tracuunnt và TRƯỚC XInvoice.
 assert 'def _tra_cuu_mst_qua_masothue(' not in src and 'requests.get("https://masothue.com' not in src, (
     "Bản masothue.com gửi request thô (bị Cloudflare chặn) phải đã BỎ HẲN — chỉ tra qua Chrome ẩn.")
-assert (than_chinh.index('_tra_cuu_mst_qua_tracuunnt(') < than_chinh.index('_tra_cuu_mst_qua_masothue_trinh_duyet(')
+assert (than_chinh.index('_tra_cuu_mst_qua_masothue_trinh_duyet(') < than_chinh.index('_tra_cuu_mst_qua_tracuunnt(')
         < than_chinh.index('_goi_1_lan_xinvoice(')), (
-    "Thứ tự nguồn: tracuunnt.gdt.gov.vn -> masothue.com (Chrome ẩn) -> XInvoice.")
-print("PASS 5: _tra_cuu_trang_thai_mst() gọi tracuunnt.gdt.gov.vn (ưu tiên 1) -> masothue.com qua Chrome ẩn "
-      "-> XInvoice; VietQR và bản masothue.com request thô đã bỏ hẳn khỏi file.")
+    "Thứ tự nguồn người dùng chốt: masothue.com (Chrome ẩn) -> tracuunnt.gdt.gov.vn -> XInvoice.")
+print("PASS 5: _tra_cuu_trang_thai_mst() gọi masothue.com qua Chrome ẩn -> tracuunnt.gdt.gov.vn -> XInvoice; "
+      "VietQR và bản masothue.com request thô đã bỏ hẳn khỏi file.")
 
 # ===== Test 6 (không hồi quy — endpoint chẩn đoán riêng, không cần cid): phải
 # có endpoint chẩn đoán đơn giản (không cần biết id công ty nào, vì nguồn này
@@ -494,13 +494,12 @@ print("PASS 11b: _tra_cuu_mst_qua_tracuunnt() kèm đoạn văn bản THẬT tra
 assert 'def _goi_1_lan_xinvoice(' in src, (
     "_goi_1_lan_xinvoice() phải CÒN NGUYÊN trong file (TẠM dừng gọi, không xoá code) — khác VietQR/"
     "masothue.com đã BỎ HẲN.")
-assert re.search(r'^_XINVOICE_TAM_DUNG\s*=\s*True', src, re.M), (
-    "Phải có cờ _XINVOICE_TAM_DUNG=True (mặc định TẠM dừng gọi XInvoice) — đúng yêu cầu người dùng sau "
-    "khi thấy cả 2 key XInvoice đều hết hạn mức gói/timeout, gọi dự phòng chỉ tốn thêm thời gian vô ích.")
+assert re.search(r'^_XINVOICE_TAM_DUNG\s*=\s*False', src, re.M), (
+    "Cờ _XINVOICE_TAM_DUNG phải = False — người dùng đã chốt lại XInvoice là nguồn CUỐI trong chuỗi "
+    "masothue.com -> tracuunnt -> XInvoice (cờ vẫn giữ để tạm dừng lại khi cần).")
 assert '_XINVOICE_TAM_DUNG' in than_chinh, (
     "_tra_cuu_trang_thai_mst() phải kiểm tra cờ _XINVOICE_TAM_DUNG trước khi gọi _goi_1_lan_xinvoice().")
-print("PASS 12: XInvoice đang TẠM dừng qua cờ _XINVOICE_TAM_DUNG=True (code vẫn còn nguyên, không xoá) "
-      "— đúng yêu cầu người dùng sau khi cả 2 key đều hết hạn mức gói/timeout.")
+print("PASS 12: XInvoice đã bật lại làm nguồn cuối (_XINVOICE_TAM_DUNG=False), vẫn giữ cờ để tạm dừng khi cần.")
 
 # ===== Test 13 (QUAN TRỌNG — bug/ca thật vừa gặp: ddddocr đôi khi ném LỖI
 # "cannot identify image file" (KHÁC HẲN đoán RỖNG bình thường) — nghĩa là

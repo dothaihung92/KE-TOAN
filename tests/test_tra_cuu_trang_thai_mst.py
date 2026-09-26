@@ -117,6 +117,10 @@ ns['_goi_1_lan_xinvoice'] = _fake_xinvoice
 # masothue.com (qua Chrome ẩn) — None = không mở được Chrome, bỏ qua nguồn này; hành vi thật có
 # test riêng ở test_tra_mst_qua_masothue_trinh_duyet.py.
 ns['_tra_cuu_mst_qua_masothue_trinh_duyet'] = lambda mst_c, timeout: None
+# Lưu kết quả trong ngày có test riêng (test_mst_cache_trong_ngay.py) — ở đây tắt để các test
+# orchestration luôn tra qua nguồn (không dính kết quả đã lưu).
+ns['_mst_cache_doc_trong_ngay'] = lambda mst_c: None
+ns['_mst_cache_ghi'] = lambda mst_c, trang_thai_goc, canh_bao: None
 _danh_sach_keys_gia = [{"client_id": "key1", "api_key": "sec1"}]
 ns['_lay_danh_sach_xinvoice_keys'] = lambda: _danh_sach_keys_gia
 ns['_XINVOICE_KEY_STATE'] = {"idx": 0, "lock": threading.Lock()}

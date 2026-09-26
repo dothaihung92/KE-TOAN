@@ -23,7 +23,8 @@ import server
 
 _goc = {k: getattr(server, k) for k in (
     "_tracuunnt_tao_trinh_duyet", "_tra_cuu_mst_qua_tracuunnt", "_tra_cuu_mst_qua_masothue_trinh_duyet",
-    "_MASOTHUE_URL_TIM", "_MASOTHUE_URL_TRANG_CHU", "_MASOTHUE_KHOANG_CACH_GIAY", "_MST_API_NGHI_GIUA_LUOT", "_XINVOICE_TAM_DUNG")}
+    "_MASOTHUE_URL_TIM", "_MASOTHUE_URL_TRANG_CHU", "_MASOTHUE_KHOANG_CACH_GIAY",
+    "_mst_cache_doc_trong_ngay", "_mst_cache_ghi", "_MST_API_NGHI_GIUA_LUOT", "_XINVOICE_TAM_DUNG")}
 
 
 def _dat_lai():
@@ -46,10 +47,11 @@ def _khoi_phuc():
 
 # ============================ PHẦN A ============================
 server._MST_API_NGHI_GIUA_LUOT = 0
+server._mst_cache_doc_trong_ngay = lambda mst_c: None      # không đụng DB thật
+server._mst_cache_ghi = lambda mst_c, trang_thai_goc, canh_bao: None
 server._XINVOICE_TAM_DUNG = True
 try:
-    # ===== A1: tracuunnt thất bại (vd đang bị giới hạn tốc độ) -> tra tiếp qua masothue.com, tra
-    # được thì trả kết quả của masothue.com, không còn lỗi. =====
+    # ===== A1: masothue.com (nguồn ĐẦU TIÊN) tra được -> trả kết quả của masothue.com, không lỗi. =====
     server._tra_cuu_mst_qua_tracuunnt = lambda m, t: (False, "", None, "đang giới hạn tốc độ (Too Many Requests)")
     server._tra_cuu_mst_qua_masothue_trinh_duyet = lambda m, t: (
         True, "Đang hoạt động (đã được cấp GCN ĐKT)", False, None)
@@ -67,16 +69,20 @@ try:
     kq = server._tra_cuu_trang_thai_mst("0301234567")
     assert kq["ly_do_loi"] == "tracuunnt.gdt.gov.vn: đang giới hạn tốc độ (Too Many Requests)", f"got {kq!r}"
 
-    # ===== A4: tracuunnt tra được -> KHÔNG gọi masothue.com (không tốn thêm lượt truy cập). =====
+    # ===== A4: masothue.com (nguồn đầu) tra được -> KHÔNG gọi tracuunnt (không tốn thêm lượt truy
+    # cập trang đang bị giới hạn tốc độ); masothue.com không tra được -> mới gọi tracuunnt. =====
     goi = []
-    server._tra_cuu_mst_qua_tracuunnt = lambda m, t: (True, "NNT đang hoạt động", False, None)
-    server._tra_cuu_mst_qua_masothue_trinh_duyet = lambda m, t: goi.append(m)
+    server._tra_cuu_mst_qua_tracuunnt = lambda m, t: (goi.append(m), (True, "NNT đang hoạt động", False, None))[1]
+    server._tra_cuu_mst_qua_masothue_trinh_duyet = lambda m, t: (True, "Đang hoạt động", False, None)
     kq = server._tra_cuu_trang_thai_mst("0301234567")
-    assert kq["trang_thai"] == "NNT đang hoạt động" and goi == [], f"got {kq!r}, goi={goi}"
+    assert kq["trang_thai"] == "Đang hoạt động" and goi == [], f"got {kq!r}, goi={goi}"
+    server._tra_cuu_mst_qua_masothue_trinh_duyet = lambda m, t: (False, "", None, "lỗi")
+    kq = server._tra_cuu_trang_thai_mst("0301234567")
+    assert kq["trang_thai"] == "NNT đang hoạt động" and goi == ["0301234567"], f"got {kq!r}, goi={goi}"
 finally:
     _khoi_phuc()
-print("PASS A1-A4: chuỗi nguồn tracuunnt -> masothue.com (Chrome ẩn) -> XInvoice đúng thứ tự, gộp lý do "
-      "lỗi đủ các nguồn, không gọi masothue khi tracuunnt đã tra được.")
+print("PASS A1-A4: chuỗi nguồn masothue.com (Chrome ẩn) -> tracuunnt -> XInvoice đúng thứ tự, gộp lý do "
+      "lỗi đủ các nguồn, không gọi tracuunnt khi masothue.com đã tra được.")
 
 # ===== A5: đang tạm nghỉ (bị giới hạn/chặn) hoặc đã thất bại liên tiếp quá ngưỡng -> trả lỗi NGAY,
 # không mở Chrome/không truy cập trang; đầu mỗi lượt xuất Excel bộ đếm được đặt lại. =====
