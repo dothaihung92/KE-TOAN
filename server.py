@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.008"
+APP_BUILD = "2026-09-26.009"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34923,12 +34923,28 @@ def _masothue_tim_qua_o_tim_kiem(drv, mst_c, gioi_han):
     hoàn toàn. Trả dict trang đọc được, hoặc None nếu trang chủ không có ô
     tìm kiếm (bên gọi rơi về mở thẳng đường dẫn tìm kiếm)."""
     from selenium.webdriver.common.keys import Keys
-    kq = _masothue_mo_va_doc(drv, _MASOTHUE_URL_TRANG_CHU, mst_c, gioi_han)
-    if _masothue_loai_trang(kq) or not kq:
-        return kq
-    o_tim = drv.execute_script(_JS_MASOTHUE_O_TIM)
-    if o_tim is None:
-        return None
+    import urllib.parse as _up_mst
+    # Trang ĐANG MỞ là 1 trang masothue.com bình thường (vd trang kết quả của MST trước) có sẵn ô
+    # tìm kiếm -> gõ luôn vào đó như người dùng thật, KHÔNG tải lại trang chủ. Log thật lượt xuất
+    # Excel 29 MST: ~6-7 giây/MST, 4 MST cuối hết ngân sách 180s — mỗi MST đều mở lại trang chủ
+    # trước khi tìm, tốn thêm 1 lượt tải trang vô ích.
+    o_tim = None
+    try:
+        if _up_mst.urlparse(drv.current_url or "").netloc == _up_mst.urlparse(_MASOTHUE_URL_TRANG_CHU).netloc:
+            o_tim = drv.execute_script(_JS_MASOTHUE_O_TIM)
+            if o_tim is not None and _masothue_loai_trang(drv.execute_script(_JS_MASOTHUE_DOC, mst_c) or {}):
+                o_tim = None
+    except Exception:
+        o_tim = None
+    if o_tim is not None:
+        _masothue_cho_gian_cach()
+    else:
+        kq = _masothue_mo_va_doc(drv, _MASOTHUE_URL_TRANG_CHU, mst_c, gioi_han)
+        if _masothue_loai_trang(kq) or not kq:
+            return kq
+        o_tim = drv.execute_script(_JS_MASOTHUE_O_TIM)
+        if o_tim is None:
+            return None
     try:
         o_tim.clear()
         o_tim.send_keys(mst_c)

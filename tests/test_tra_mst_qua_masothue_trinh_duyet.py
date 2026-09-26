@@ -129,8 +129,21 @@ _O_TIM_HIEN = """<form action="/Search/" method="get" onsubmit="tim(event)">
 </form>"""
 
 
+_SCRIPT_TIM = _TRANG_CHU[_TRANG_CHU.index("<script>"):_TRANG_CHU.index("</script>") + len("</script>")]
+
+
+def _khoi_tim():
+    """Ô tìm kiếm ở đầu MỌI trang (như trang thật): 1 ô ẩn của menu điện thoại + 1 ô hiển thị."""
+    if not CHE_DO["co_o_tim"]:
+        return ""
+    return ('<div class="menu-dien-thoai" style="display:none"><form action="/Search/" method="get" '
+            'onsubmit="tim(event)"><input type="text" name="q"><button type="submit">Tìm</button></form></div>'
+            + ("" if CHE_DO["chi_o_an"] else _O_TIM_HIEN))
+
+
 def _trang_cty(mst, tinh_trang):
-    return f"""<html><head><meta charset="utf-8"><title>{mst} - CÔNG TY GIẢ LẬP</title></head><body>
+    return f"""<html><head><meta charset="utf-8"><title>{mst} - CÔNG TY GIẢ LẬP</title>{_SCRIPT_TIM}</head><body>
+{_khoi_tim()}
 <div class="sidebar"><h3>Doanh nghiệp mới cập nhật</h3>
 <p>CÔNG TY KHÁC 0399999999 — Ngừng hoạt động và đã đóng MST</p></div>
 <table class="table-taxinfo">
@@ -330,6 +343,7 @@ try:
     # KHÔNG được lấy tình trạng của công ty đó; báo lỗi kèm url để chẩn đoán. (Chỉ xảy ra ở đường dự
     # phòng khi trang chủ không có ô tìm kiếm.) =====
     CHE_DO["co_o_tim"] = False
+    _dat_lai()   # bỏ trang (có ô tìm kiếm) còn mở từ các test trước — mô phỏng trang KHÔNG có ô tìm kiếm
     kq = tra("0311111111", 8)
     assert kq[0] is False and "3502569116" in kq[3], f"got {kq!r}"
 
@@ -347,6 +361,16 @@ try:
     CHE_DO["chi_o_an"] = False
     assert kq[0] is True, f"got {kq!r}"
     print("PASS B13: chỉ có ô tìm kiếm bị ẩn -> điền bằng JS và bấm nút tìm của trang, vẫn tra được.")
+
+    # ===== B14 (đúng log thật: 29 MST mất ~197s, 4 MST cuối hết ngân sách 180s): các MST liên tiếp
+    # gõ luôn vào ô tìm kiếm của trang kết quả đang mở, CHỈ tải trang chủ 1 lần (lần đầu). =====
+    _dat_lai()
+    n = len(THONG_KE["lan_mo"])
+    for m in ("0311111111", "0318888888", "0317777777"):
+        assert tra(m, 8)[0] is True, m
+    so_trang_chu = sum(1 for _t, p in THONG_KE["lan_mo"][n:] if p == "/")
+    assert so_trang_chu == 1, f"Chỉ được tải trang chủ 1 lần cho 3 MST liên tiếp — got {so_trang_chu}"
+    print("PASS B14: MST liên tiếp gõ luôn vào ô tìm kiếm của trang đang mở, không tải lại trang chủ.")
     print("PASS B11-B12: không lấy tình trạng của công ty 'mồi' ngẫu nhiên; trang chủ không có ô tìm kiếm "
           "thì rơi về mở thẳng đường dẫn tìm kiếm.")
 finally:
