@@ -11,7 +11,6 @@ import uuid
 import hmac
 import json
 import time
-import random
 import base64
 import hashlib
 import sqlite3
@@ -56,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.001"
+APP_BUILD = "2026-09-26.002"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6819,8 +6818,11 @@ def chan_doan_mst_tracuunnt(mst: str = "0315458241"):
                     f"({'CÓ cảnh báo (tô đỏ)' if canh_bao else 'bình thường'})")
     else:
         ket_luan = f"KHÔNG dùng được: {ly_do_loi}"
+    loi_chrome = _TRACUUNNT_TD["loi_khoi_tao"]
     return {"mst_tra": mst_c, "ket_luan": ket_luan,
             "trang_thai_do_duoc": trang_thai_goc, "canh_bao": canh_bao, "ly_do_loi": ly_do_loi,
+            "cach_tra": (f"gửi request trực tiếp (không mở được Chrome ẩn: {loi_chrome})"
+                         if loi_chrome else "Chrome ẩn (trình duyệt thật)"),
             "thu_muc_anh_captcha_debug": thu_muc_anh}
 
 
@@ -34378,16 +34380,302 @@ _SO_LAN_THU_CAPTCHA_TRACUUNNT = 6   # ĐÃ THỬ tăng lên 20 (sau khi sửa l�
 # thất bại đủ 20/20 lần, và ngân sách thời gian (_MST_NGAN_SACH_GIAY) bị 2 MST này ngốn hết sạch, khiến
 # ~59 MST còn lại KHÔNG được thử qua mạng lần nào -> GIẢM LẠI về 6 (giá trị gốc).
 
-# THỬ NGHIỆM (sau khi đã loại trừ OCR/cache/số luồng/số lần thử là nguyên nhân — cả 3 hướng đều chỉ
-# ra trang CHỦ ĐỘNG phát hiện/giới hạn truy cập tự động): nghỉ NGẪU NHIÊN 2-3 giây giữa các lần thử
-# lại captcha CÙNG 1 MST (trước đây gọi lại NGAY LẬP TỨC không nghỉ) — mô phỏng nhịp độ người dùng
-# thật tự nhập tay (xác nhận qua lời người dùng: tự nhập tay cũng phải thử 3-5 lần, không ai bấm lại
-# tức thì), hi vọng giảm khả năng bị nhận diện là bot dồn dập nhiều request/giây. ĐÁNH ĐỔI: mỗi MST
-# thất bại đủ 6 lần giờ tốn thêm tới 5*3=15 giây chờ, ăn sâu vào _MST_NGAN_SACH_GIAY (40s/lượt xuất
-# Excel) -> ÍT MST hơn được thử qua mạng mỗi lượt xuất — CHƯA XÁC NHẬN có thật sự cải thiện tỷ lệ
-# thành công hay không (không thể tái hiện đáng tin cậy từ môi trường phát triển — chặn có khả năng
-# theo IP/hành vi của ĐÚNG mạng người dùng thật, cần chạy thật ở máy người dùng để biết kết quả).
-_NGHI_GIUA_CAPTCHA_TRACUUNNT_GIAY = (2.0, 3.0)
+# ═══ TRA MST QUA TRÌNH DUYỆT THẬT (Chrome ẩn) — NGUỒN ƯU TIÊN khi mở được Chrome ═══
+# Bằng chứng log thật (sau khi đã loại trừ OCR/cache/số luồng/số lần thử, và thử nghỉ 2-3s giữa
+# các lần thử cũng KHÔNG cải thiện): trang trả về ĐÚNG câu "Vui lòng nhập đúng mã xác nhận!" ở cả
+# 6/6 lần cho MỌI MST, dù OCR đã được xác minh độc lập là đọc ĐÚNG ảnh nhận được — tức ảnh ta đọc
+# KHÔNG PHẢI ảnh mà máy chủ dùng để so khi gửi request thô (requests/curl_cffi), trong khi người
+# dùng tự gõ trên trình duyệt thật vẫn tra được. Trang đứng sau CÙNG loại WAF F5 BIG-IP như cổng
+# dichvucong — nơi phần mềm ĐÃ phải chuyển sang Chrome ẩn vì WAF cần chạy JavaScript (xem khối
+# "DVC qua TRÌNH DUYỆT THẬT" / _dvc_make_driver). Làm y như vậy: mở trang bằng Chrome ẩn (tự qua
+# JS của WAF, cookie/phiên y như người dùng thật), đọc ĐÚNG ảnh captcha trang ĐANG HIỂN THỊ (vẽ
+# thẳng thẻ <img> ra canvas — KHÔNG tải lại ảnh lần 2), OCR, điền ô MST/mã xác nhận rồi bấm CHÍNH
+# nút "Tra cứu" của trang (để JS của trang tự chạy như người bấm thật). Sai captcha thì trang trả
+# về thường vẫn có form + ảnh captcha MỚI -> dùng luôn như người thật, không tải lại trang.
+# Dùng CHUNG 1 Chrome cho mọi MST (khởi động Chrome tốn vài giây), khoá để chỉ 1 luồng dùng tại 1
+# thời điểm (Selenium không an toàn đa luồng — các luồng tra MST song song tự xếp hàng), tự đóng
+# khi rảnh _TRACUUNNT_TD_DONG_KHI_RANH_GIAY giây. Không mở được Chrome (máy chưa cài Chrome...)
+# -> rơi về cách gửi request trực tiếp cũ, không mất chức năng.
+_TRACUUNNT_URL = "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp"
+_TRACUUNNT_TD = {"lock": threading.Lock(), "drv": None, "lan_dung_cuoi": 0.0,
+                 "loi_khoi_tao": None, "lan_loi_khoi_tao": 0.0, "dang_theo_doi": False}
+_TRACUUNNT_TD_DONG_KHI_RANH_GIAY = 90
+# Mở Chrome lỗi thì trong khoảng này KHÔNG thử mở lại cho từng MST (mỗi lần thử mở tốn vài giây,
+# nhân lên hàng chục MST sẽ ngốn hết ngân sách thời gian mà chắc chắn vẫn lỗi y hệt).
+_TRACUUNNT_TD_THU_LAI_KHOI_TAO_GIAY = 600
+
+_JS_TRACUUNNT_CO_FORM = r"""
+if (!document.querySelector('input[name="mst"]')) return false;
+var ds = document.getElementsByTagName('img');
+for (var i = 0; i < ds.length; i++) {
+  if ((ds[i].getAttribute('src') || '').toLowerCase().indexOf('captcha') >= 0) return true;
+}
+return false;
+"""
+
+_JS_TRACUUNNT_DOC_CAPTCHA = r"""
+var cb = arguments[arguments.length - 1];
+var img = null, ds = document.getElementsByTagName('img');
+for (var i = 0; i < ds.length; i++) {
+  if ((ds[i].getAttribute('src') || '').toLowerCase().indexOf('captcha') >= 0) { img = ds[i]; break; }
+}
+if (!img) { cb({ok: false, err: 'khong-thay-anh-captcha'}); return; }
+var dem = 0;
+(function cho() {
+  dem++;
+  if (img.complete && img.naturalWidth > 0) {
+    try {
+      var c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      var g = c.getContext('2d');
+      g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(img, 0, 0);
+      cb({ok: true, data: c.toDataURL('image/png').split(',')[1]});
+    } catch (e) { cb({ok: false, err: 'canvas: ' + e}); }
+    return;
+  }
+  if (dem > 100) { cb({ok: false, err: 'anh-captcha-chua-tai-xong'}); return; }
+  setTimeout(cho, 100);
+})();
+"""
+
+_JS_TRACUUNNT_GUI_FORM = r"""
+var mst = arguments[0], ma = arguments[1];
+var o = document.querySelector('input[name="captcha"]');
+if (!o) {
+  var ip = document.getElementsByTagName('input');
+  for (var i = 0; i < ip.length; i++) {
+    if ((ip[i].name || '').toLowerCase().indexOf('captcha') >= 0) { o = ip[i]; break; }
+  }
+}
+if (!o) return {ok: false, err: 'khong-thay-o-ma-xac-nhan'};
+var f = o.form;
+var m = (f || document).querySelector('input[name="mst"]');
+if (!m) return {ok: false, err: 'khong-thay-o-mst'};
+m.value = mst; o.value = ma;
+var nut = null, ung = (f || document).querySelectorAll(
+  'input[type=submit],input[type=button],input[type=image],button');
+for (var j = 0; j < ung.length; j++) {
+  var t = ((ung[j].value || '') + ' ' + (ung[j].textContent || '')).toLowerCase();
+  if (t.indexOf('tra c') >= 0 || t.indexOf('tìm') >= 0) { nut = ung[j]; break; }
+}
+if (!nut) {
+  for (var k = 0; k < ung.length; k++) { if (ung[k].type === 'submit') { nut = ung[k]; break; } }
+}
+if (!nut && !f) return {ok: false, err: 'khong-thay-nut-tra-cuu'};
+window.__kt_trang_cu = true;
+setTimeout(function () { if (nut) { nut.click(); } else { f.submit(); } }, 0);
+return {ok: true};
+"""
+
+_JS_TRACUUNNT_DA_SANG_TRANG_MOI = (
+    "return (typeof window.__kt_trang_cu === 'undefined') && document.readyState === 'complete';")
+
+
+def _tracuunnt_tao_trinh_duyet():
+    drv = _dvc_make_driver(headless=True)
+    drv.set_page_load_timeout(25)
+    drv.set_script_timeout(20)
+    return drv
+
+
+def _tracuunnt_dong_trinh_duyet_neu_ranh(so_giay_ranh=_TRACUUNNT_TD_DONG_KHI_RANH_GIAY):
+    """Đóng Chrome ẩn tra MST nếu đã rảnh >= so_giay_ranh giây. Trả True nếu
+    không còn Chrome nào đang mở (vừa đóng xong hoặc vốn không có)."""
+    with _TRACUUNNT_TD["lock"]:
+        drv = _TRACUUNNT_TD["drv"]
+        if drv is None:
+            return True
+        if time.time() - _TRACUUNNT_TD["lan_dung_cuoi"] < so_giay_ranh:
+            return False
+        _TRACUUNNT_TD["drv"] = None
+    try:
+        drv.quit()
+    except Exception:
+        pass
+    return True
+
+
+def _tracuunnt_theo_doi_dong_trinh_duyet():
+    while True:
+        time.sleep(15)
+        if _tracuunnt_dong_trinh_duyet_neu_ranh():
+            with _TRACUUNNT_TD["lock"]:
+                if _TRACUUNNT_TD["drv"] is None:
+                    _TRACUUNNT_TD["dang_theo_doi"] = False
+                    return
+
+
+def _tracuunnt_lay_trinh_duyet_da_khoa():
+    """CHỈ gọi khi ĐANG GIỮ _TRACUUNNT_TD['lock']. Trả (drv, loi)."""
+    st = _TRACUUNNT_TD
+    if st["drv"] is not None:
+        return st["drv"], None
+    if st["loi_khoi_tao"] and time.time() - st["lan_loi_khoi_tao"] < _TRACUUNNT_TD_THU_LAI_KHOI_TAO_GIAY:
+        return None, st["loi_khoi_tao"]
+    try:
+        st["drv"] = _tracuunnt_tao_trinh_duyet()
+    except Exception as e:
+        st["loi_khoi_tao"] = f"{type(e).__name__}: {str(e)[:160]}"
+        st["lan_loi_khoi_tao"] = time.time()
+        return None, st["loi_khoi_tao"]
+    st["loi_khoi_tao"] = None
+    st["lan_dung_cuoi"] = time.time()
+    if not st["dang_theo_doi"]:
+        st["dang_theo_doi"] = True
+        threading.Thread(target=_tracuunnt_theo_doi_dong_trinh_duyet, daemon=True).start()
+    return st["drv"], None
+
+
+def _tracuunnt_cho_form(drv, gioi_han_giay):
+    """Chờ trang hiện ô nhập MST + ảnh captcha (lần mở đầu WAF có thể chạy
+    trang kiểm tra JS rồi mới tự chuyển sang trang thật)."""
+    het = time.time() + gioi_han_giay
+    while True:
+        try:
+            if drv.execute_script(_JS_TRACUUNNT_CO_FORM):
+                return True
+        except Exception:
+            pass
+        if time.time() >= het:
+            return False
+        time.sleep(0.3)
+
+
+def _tracuunnt_cho_trang_moi(drv, gioi_han_giay):
+    """Chờ trang kết quả tải xong sau khi bấm "Tra cứu". Trả (da_sang_trang_moi,
+    noi_dung_hop_thoai) — trang có thể báo lỗi qua hộp thoại alert() thay vì
+    tải trang mới (khi đó không chuyển trang)."""
+    het = time.time() + gioi_han_giay
+    while time.time() < het:
+        time.sleep(0.3)
+        try:
+            if drv.execute_script(_JS_TRACUUNNT_DA_SANG_TRANG_MOI):
+                return True, None
+        except Exception as e:
+            if "alert" in type(e).__name__.lower():
+                txt = getattr(e, "alert_text", None)
+                if not txt:
+                    try:
+                        hop = drv.switch_to.alert
+                        txt = hop.text
+                        hop.accept()
+                    except Exception:
+                        pass
+                return False, txt or "(hộp thoại không rõ nội dung)"
+    try:
+        hop = drv.switch_to.alert
+        txt = hop.text
+        hop.accept()
+        return False, txt
+    except Exception:
+        return False, None
+
+
+def _tracuunnt_chu_hien_thi(drv):
+    """Văn bản trang ĐANG HIỂN THỊ (innerText) để trích lỗi — KHÔNG dùng mã
+    nguồn trang: _trich_doan_loi_html_tracuunnt ưu tiên chuỗi alert() tìm
+    thấy trong <script>, mà trang có sẵn câu alert kiểm tra form TĨNH trong
+    mã JS (vd 'Vui lòng nhập mã xác nhận!') sẽ che mất câu lỗi THẬT đang hiện
+    trên trang. Hộp thoại alert THẬT đã được bắt riêng qua Selenium."""
+    try:
+        return drv.execute_script("return document.body ? document.body.innerText : '';") or ""
+    except Exception:
+        return drv.page_source or ""
+
+
+def _tracuunnt_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout, luu_anh_debug=False):
+    gioi_han = max(15, timeout * 2)
+    so_lan = _SO_LAN_THU_CAPTCHA_TRACUUNNT
+    ly_do_loi_cuoi = "không rõ lý do"
+    try:
+        can_mo_lai = not drv.execute_script(_JS_TRACUUNNT_CO_FORM)
+    except Exception:
+        can_mo_lai = True
+    for lan in range(1, so_lan + 1):
+        if can_mo_lai:
+            drv.get(_TRACUUNNT_URL)
+            if not _tracuunnt_cho_form(drv, gioi_han):
+                doan = _trich_doan_loi_html_tracuunnt(_tracuunnt_chu_hien_thi(drv))
+                ly_do_loi_cuoi = f"trang không hiện ô nhập MST/ảnh captcha — trang hiện: {doan!r}"
+                continue
+        can_mo_lai = True
+        anh = drv.execute_async_script(_JS_TRACUUNNT_DOC_CAPTCHA) or {}
+        if not anh.get("ok"):
+            ly_do_loi_cuoi = f"không đọc được ảnh captcha trên trang ({anh.get('err')})"
+            continue
+        try:
+            png = base64.b64decode(anh.get("data") or "")
+        except Exception:
+            png = b""
+        doan_debug = []
+        ma_captcha = _ocr_png(png, doan_debug)
+        if luu_anh_debug:
+            _luu_anh_captcha_debug_tracuunnt(mst_c, lan, png, ma_captcha or "RONG")
+        if not ma_captcha:
+            ly_do_loi_cuoi = f"không giải được captcha (ảnh {len(png)} byte, ddddocr đoán: {doan_debug!r})"
+            continue
+        gui = drv.execute_script(_JS_TRACUUNNT_GUI_FORM, mst_c, ma_captcha) or {}
+        if not gui.get("ok"):
+            ly_do_loi_cuoi = f"không điền/gửi được form tra cứu ({gui.get('err')})"
+            continue
+        sang_trang, hop_thoai = _tracuunnt_cho_trang_moi(drv, gioi_han)
+        if not sang_trang:
+            ly_do_loi_cuoi = (f"captcha '{ma_captcha}' (lần {lan}/{so_lan}) bị từ chối — trang báo: "
+                              f"{hop_thoai!r}" if hop_thoai else
+                              f"đã bấm Tra cứu nhưng trang không chuyển sang kết quả (lần {lan}/{so_lan})")
+            continue
+        html = drv.page_source or ""
+        if "Trạng thái MST" not in html:
+            doan_html = _trich_doan_loi_html_tracuunnt(_tracuunnt_chu_hien_thi(drv))
+            ly_do_loi_cuoi = (f"có thể đã đoán sai captcha '{ma_captcha}' (lần {lan}/{so_lan}), không ra "
+                              f"bảng kết quả" + (f" — trang trả về: {doan_html!r}" if doan_html else ""))
+            try:
+                can_mo_lai = not drv.execute_script(_JS_TRACUUNNT_CO_FORM)
+            except Exception:
+                can_mo_lai = True
+            continue
+        trang_thai_goc = _doc_bang_trang_thai_tracuunnt(html, mst_c)
+        if not trang_thai_goc:
+            return False, "", None, f"không thấy đúng dòng MST {mst_c} trong bảng kết quả"
+        _, canh_bao = _phan_loai_trang_thai_mst(trang_thai_goc)
+        if canh_bao is None:
+            return False, "", None, f"tình trạng lạ chưa nhận diện được: '{trang_thai_goc}'"
+        return True, trang_thai_goc, canh_bao, None
+    return False, "", None, f"{ly_do_loi_cuoi} (đã thử {so_lan} lần captcha qua trình duyệt ẩn)"
+
+
+def _tra_cuu_mst_qua_tracuunnt_trinh_duyet(mst_c, timeout, luu_anh_debug=False):
+    """Tra 1 MST qua Chrome ẩn (xem khối chú thích ngay trên). Trả None nếu
+    KHÔNG mở được Chrome (để bên gọi rơi về cách gửi request trực tiếp),
+    ngược lại trả đúng bộ 4 (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi)
+    như _tra_cuu_mst_qua_tracuunnt."""
+    with _TRACUUNNT_TD["lock"]:
+        drv, _loi = _tracuunnt_lay_trinh_duyet_da_khoa()
+        if drv is None:
+            return None
+        try:
+            return _tracuunnt_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout, luu_anh_debug)
+        except Exception as e:
+            # Chrome treo/bị đóng giữa chừng -> bỏ phiên hỏng, lượt sau tự mở Chrome mới.
+            _TRACUUNNT_TD["drv"] = None
+            try:
+                drv.quit()
+            except Exception:
+                pass
+            return False, "", None, f"lỗi trình duyệt ẩn: {type(e).__name__}: {str(e)[:150]}"
+        finally:
+            _TRACUUNNT_TD["lan_dung_cuoi"] = time.time()
+
+
+def _tracuunnt_dat_lai_dem_loi():
+    """Đặt lại bộ đếm lỗi liên tiếp của tracuunnt (_TRACUUNNT_STATE) ở ĐẦU mỗi
+    lượt xuất Excel — trước đây bộ đếm này chỉ về 0 khi CÓ 1 lần tra thành
+    công, mà khi đã chạm _TRACUUNNT_NGUONG_TAT thì hàm tra trả lỗi ngay, không
+    còn cơ hội thành công nào -> nguồn bị tắt LUÔN tới khi khởi động lại phần
+    mềm, trái với thông báo "sẽ tự thử lại ở lượt xuất Excel sau"."""
+    with _TRACUUNNT_STATE["lock"]:
+        _TRACUUNNT_STATE["loi_lien_tiep"] = 0
 
 
 def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
@@ -34459,6 +34747,15 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
               "http://127.0.0.1:8686/api/captcha-debug/1 để xem chi tiết lỗi)."
         )
 
+    # ƯU TIÊN: tra bằng Chrome ẩn (xem _tra_cuu_mst_qua_tracuunnt_trinh_duyet)
+    # — chỉ rơi xuống cách gửi request trực tiếp bên dưới khi KHÔNG mở được Chrome.
+    kq_trinh_duyet = _tra_cuu_mst_qua_tracuunnt_trinh_duyet(mst_c, timeout, luu_anh_debug=luu_anh_debug)
+    if kq_trinh_duyet is not None:
+        _tracuunnt_danh_dau(kq_trinh_duyet[0])
+        return kq_trinh_duyet
+    ghi_chu_khong_chrome = (f" [không mở được Chrome ẩn nên dùng cách gửi request trực tiếp: "
+                            f"{_TRACUUNNT_TD['loi_khoi_tao']}]")
+
     ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                         "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
 
@@ -34481,14 +34778,10 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
                 break   # lỗi khác lỗi SSL thì đổi cách cũng vô ích, dừng ngay
     if sess is None:
         _tracuunnt_danh_dau(False)
-        return False, "", None, f"lỗi kết nối: {loi_mo_trang}"
+        return False, "", None, f"lỗi kết nối: {loi_mo_trang}{ghi_chu_khong_chrome}"
 
     ly_do_loi_cuoi = "không rõ lý do"
     for lan in range(1, _SO_LAN_THU_CAPTCHA_TRACUUNNT + 1):
-        if lan > 1:
-            # Nghỉ TRƯỚC khi thử lại (không nghỉ trước lần ĐẦU) — xem
-            # _NGHI_GIUA_CAPTCHA_TRACUUNNT_GIAY.
-            time.sleep(random.uniform(*_NGHI_GIUA_CAPTCHA_TRACUUNNT_GIAY))
         try:
             r_cap = sess.get(_url_captcha_tracuunnt_khong_cache(),
                              headers={**ua, "Referer": "https://tracuunnt.gdt.gov.vn/tcnnt/mstdn.jsp",
@@ -34583,7 +34876,8 @@ def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
         return True, trang_thai_goc, canh_bao, None
 
     _tracuunnt_danh_dau(False)
-    return False, "", None, f"{ly_do_loi_cuoi} (đã thử {_SO_LAN_THU_CAPTCHA_TRACUUNNT} lần captcha)"
+    return False, "", None, (f"{ly_do_loi_cuoi} (đã thử {_SO_LAN_THU_CAPTCHA_TRACUUNNT} lần captcha)"
+                             f"{ghi_chu_khong_chrome}")
 
 
 def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_dung_cache=False):
@@ -36194,6 +36488,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             can_tra.append(mst)
         if not can_tra:
             return
+        _tracuunnt_dat_lai_dem_loi()
         tong = len(can_tra)
         _tlog(f"[{nhan}] bắt đầu dò tình trạng MST: 0/{tong} đối tác khác nhau...")
         import concurrent.futures as _cf_mst

@@ -92,6 +92,7 @@ ns['_mst_status_local'] = {}
 ns['_mst_fail_counter'] = [0]
 ns['_mst_bat_dau'] = time.time()
 ns['_tlog'] = lambda m: _tlog_msgs.append(m)
+ns['_tracuunnt_dat_lai_dem_loi'] = lambda: None
 
 exec(extract_nested_fn('_lay_trang_thai_mst_cached'), ns)
 exec(extract_nested_fn('_prefetch_trang_thai_mst'), ns)
