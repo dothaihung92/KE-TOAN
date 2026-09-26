@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.004"
+APP_BUILD = "2026-09-26.005"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34769,15 +34769,31 @@ function sach(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
 var body = document.body ? document.body.innerText : '';
 var kq = {tieu_de: document.title || '', tinh_trang: '', mst_trang: '', link: '',
           chu: sach(body).slice(0, 600), co_mst: body.indexOf(mst) >= 0};
-var hang = document.querySelectorAll('tr');
-for (var i = 0; i < hang.length; i++) {
-  var o = hang[i].querySelectorAll('td,th');
-  if (o.length < 2) continue;
-  var nhan = sach(o[0].innerText).toLowerCase();
-  var gt = sach(o[o.length - 1].innerText);
-  if (!kq.tinh_trang && nhan.indexOf('tình trạng') >= 0) kq.tinh_trang = gt;
-  if (!kq.mst_trang && nhan.indexOf('mã số thuế') >= 0) kq.mst_trang = gt;
+kq.url = location.href;
+kq.cac_dong = [];
+function chiSo(s) { return (s || '').replace(/[^0-9]/g, ''); }
+// Trang có thể có NHIỀU bảng (thông tin công ty + bảng/mục liên quan khác) -> chọn ĐÚNG bảng có
+// dòng "Mã số thuế" khớp MST cần tra, lấy "Tình trạng" TRONG CHÍNH bảng đó. Nhãn lấy ở ô KẾ CUỐI
+// (có mẫu trang để riêng 1 cột biểu tượng trước ô nhãn), giá trị ở ô CUỐI.
+var ms_dau = '', tt_dau = '', bang = document.querySelectorAll('table');
+for (var b = 0; b < bang.length && !kq.tinh_trang; b++) {
+  var hang = bang[b].querySelectorAll('tr'), tt = '', khop = '';
+  for (var i = 0; i < hang.length; i++) {
+    var o = hang[i].querySelectorAll('td,th');
+    if (o.length < 2) continue;
+    var nhan = sach(o[o.length - 2].innerText).toLowerCase();
+    var gt = sach(o[o.length - 1].innerText);
+    if (kq.cac_dong.length < 30) kq.cac_dong.push(nhan.slice(0, 30) + ': ' + gt.slice(0, 60));
+    if (nhan.indexOf('tình trạng') >= 0 && !tt) tt = gt;
+    if (nhan.indexOf('mã số thuế') >= 0) {
+      if (!ms_dau) ms_dau = gt;
+      if (chiSo(gt).indexOf(mst) === 0) khop = gt;
+    }
+  }
+  if (tt && !tt_dau) tt_dau = tt;
+  if (khop && tt) { kq.tinh_trang = tt; kq.mst_trang = khop; }
 }
+if (!kq.tinh_trang) { kq.tinh_trang = tt_dau; kq.mst_trang = ms_dau; }
 var a = document.querySelectorAll('a[href]');
 for (var j = 0; j < a.length; j++) {
   if ((a[j].getAttribute('href') || '').indexOf('/' + mst + '-') >= 0) { kq.link = a[j].href; break; }
@@ -34840,6 +34856,14 @@ def _masothue_mo_va_doc(drv, url, mst_c, gioi_han):
         time.sleep(1.0)
 
 
+def _masothue_dung_mst(kq, mst_c):
+    """True nếu trang đọc được ô "Tình trạng" VÀ đó là thông tin của ĐÚNG mst_c."""
+    if not kq.get("tinh_trang"):
+        return False
+    mst_trang = _chuan_mst(kq.get("mst_trang") or "")[:10]
+    return mst_trang == mst_c if mst_trang else bool(kq.get("co_mst"))
+
+
 def _masothue_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout):
     gioi_han = max(20, timeout * 2)
     kq = _masothue_mo_va_doc(drv, _MASOTHUE_URL_TIM.format(mst=mst_c), mst_c, gioi_han)
@@ -34853,17 +34877,19 @@ def _masothue_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout):
         if loai == "dang_kiem_tra" or not kq:
             return False, "", None, (f"trang kiểm tra 'bạn là người' của Cloudflare không tự qua được sau "
                                      f"{gioi_han}s (tiêu đề: {kq.get('tieu_de', '')!r})")
-        if kq.get("tinh_trang") or buoc == 1 or not kq.get("link"):
+        if _masothue_dung_mst(kq, mst_c) or buoc == 1 or not kq.get("link"):
             break
-        # Trang kết quả tìm kiếm (danh sách) thay vì trang công ty -> mở đúng link của MST này.
+        # Trang danh sách kết quả, hoặc trang đang hiện 1 đối tượng KHÁC nhưng có link tới đúng MST
+        # này -> mở đúng link đó.
         kq = _masothue_mo_va_doc(drv, kq["link"], mst_c, gioi_han)
+    chan_doan = (f"url: {kq.get('url', '')!r}, tiêu đề: {kq.get('tieu_de', '')!r}, các dòng đọc được: "
+                 f"{(kq.get('cac_dong') or [])[:12]!r}")
     if not kq.get("tinh_trang"):
-        return False, "", None, (f"không thấy ô 'Tình trạng' trên trang (tiêu đề: {kq.get('tieu_de', '')!r}, "
-                                 f"nội dung: {kq.get('chu', '')[:200]!r})")
-    mst_trang = _chuan_mst(kq.get("mst_trang") or "")[:10]
-    if (mst_trang and mst_trang != mst_c) or (not mst_trang and not kq.get("co_mst")):
+        return False, "", None, (f"không thấy ô 'Tình trạng' trên trang ({chan_doan}, nội dung: "
+                                 f"{kq.get('chu', '')[:200]!r})")
+    if not _masothue_dung_mst(kq, mst_c):
         return False, "", None, (f"trang hiện thông tin MST khác ('{kq.get('mst_trang') or '?'}'), không "
-                                 f"phải {mst_c}")
+                                 f"phải {mst_c} — {chan_doan}")
     _, canh_bao = _phan_loai_trang_thai_mst(kq["tinh_trang"])
     if canh_bao is None:
         return False, "", None, f"tình trạng lạ chưa nhận diện được: '{kq['tinh_trang']}'"

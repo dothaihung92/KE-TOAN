@@ -154,6 +154,20 @@ Checking your browser before accessing masothue.com.
             if q == "0315555555":
                 return self._tra(403, """<html><head><title>Attention Required! | Cloudflare</title></head>
 <body>Sorry, you have been blocked. You are unable to access masothue.com</body></html>""")
+            if q == "0319090909":
+                # ĐÚNG hình dạng lỗi thật đã gặp ("trang hiện thông tin MST khác ('0901217946')"): bảng
+                # ĐẦU TIÊN trên trang là của 1 đối tượng KHÁC, bảng thông tin công ty cần tra nằm SAU,
+                # kiểu 3 cột (biểu tượng | nhãn | giá trị).
+                return self._tra(200, f"""<html><head><meta charset="utf-8"><title>{q}</title></head><body>
+<table><tr><td>Mã số thuế</td><td>0901217946</td></tr><tr><td>Tình trạng</td><td>Ngừng hoạt động</td></tr></table>
+<table class="table-taxinfo">
+<tr><th colspan="3">CÔNG TY GIẢ LẬP {q}</th></tr>
+<tr><td><i class="fa fa-hashtag"></i></td><td>Mã số thuế</td><td>{q}</td></tr>
+<tr><td><i class="fa fa-info"></i></td><td>Tình trạng</td><td>Đang hoạt động (đã được cấp GCN ĐKT)</td></tr>
+</table></body></html>""")
+            if q == "0319191919":      # trang của đối tượng KHÁC nhưng có link tới đúng MST cần tra
+                return self._tra(200, _trang_cty("0901217946", "Đang hoạt động").replace(
+                    "</body>", f'<a href="/{q}-cong-ty-gia-lap">Xem {q}</a></body>'))
             if q == "0316666666":      # trang lại hiện thông tin 1 MST KHÁC
                 return self._tra(200, _trang_cty("0319999999", "Đang hoạt động (đã được cấp GCN ĐKT)"))
             return self._tra(200, _trang_cty(q, _tinh_trang_gia(q)))
@@ -229,7 +243,22 @@ try:
     # ===== B5: trang hiện thông tin của MST KHÁC -> không được lấy (tránh gán tình trạng nhầm công ty). =====
     kq = tra("0316666666", 8)
     assert kq[0] is False and "MST khác" in kq[3], f"got {kq!r}"
-    print("PASS B5: trang hiện MST khác -> không lấy tình trạng của công ty khác.")
+    assert "url:" in kq[3] and "các dòng đọc được" in kq[3] and "mã số thuế: 0319999999" in kq[3], (
+        f"Lỗi lệch MST phải kèm url + các dòng đọc được để chẩn đoán trang thật — got {kq[3]!r}")
+    print("PASS B5: trang hiện MST khác -> không lấy tình trạng của công ty khác, kèm url/các dòng để chẩn đoán.")
+
+    # ===== B9 (QUAN TRỌNG — đúng lỗi thật "trang hiện thông tin MST khác ('0901217946')"): trang có
+    # NHIỀU bảng, bảng đầu của đối tượng khác -> phải chọn đúng bảng có MST cần tra (kể cả kiểu 3
+    # cột biểu tượng|nhãn|giá trị), KHÔNG lấy "Ngừng hoạt động" của bảng đối tượng khác. =====
+    kq = tra("0319090909", 8)
+    assert kq == (True, "Đang hoạt động (đã được cấp GCN ĐKT)", False, None), f"got {kq!r}"
+    print("PASS B9: nhiều bảng trên trang -> chọn đúng bảng của MST cần tra (kể cả có cột biểu tượng).")
+
+    # ===== B10: trang hiện đối tượng KHÁC nhưng có link tới đúng MST -> tự mở link đó rồi tra được. =====
+    kq = tra("0319191919", 8)
+    assert kq[0] is True and THONG_KE["lan_mo"][-1][1].startswith("/0319191919-"), (
+        f"got {kq!r}, {THONG_KE['lan_mo'][-2:]}")
+    print("PASS B10: trang đối tượng khác có link tới đúng MST -> tự mở link và tra được.")
 
     # ===== B6: "Too Many Requests" -> dừng, tạm nghỉ; MST kế tiếp không truy cập trang nữa. =====
     kq = tra("0314444444", 8)
