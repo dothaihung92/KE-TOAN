@@ -159,11 +159,16 @@ assert than_chinh.index('_tra_cuu_mst_qua_tracuunnt(') < than_chinh.index('_goi_
 assert 'def _tra_cuu_mst_qua_vietqr(' not in src, (
     "VietQR (api.vietqr.io) phải đã BỎ HẲN khỏi file (xoá code, theo yêu cầu người dùng), "
     "không chỉ tạm ngưng gọi.")
-assert 'def _tra_cuu_mst_qua_masothue(' not in src, (
-    "masothue.com phải đã BỎ HẲN khỏi file (xoá code, theo yêu cầu người dùng), "
-    "không chỉ tạm ngưng gọi.")
-print("PASS 5: _tra_cuu_trang_thai_mst() gọi tracuunnt.gdt.gov.vn (ưu tiên 1) rồi XInvoice (dự phòng); "
-      "VietQR/masothue.com đã bỏ hẳn khỏi file.")
+# masothue.com: bản CŨ gửi request thô (requests.get, bị Cloudflare chặn/hủy phiên) vẫn phải đã BỎ
+# HẲN; người dùng sau đó yêu cầu thử lại masothue.com — chỉ được tra qua Chrome ẩn
+# (_tra_cuu_mst_qua_masothue_trinh_duyet), gọi SAU tracuunnt và TRƯỚC XInvoice.
+assert 'def _tra_cuu_mst_qua_masothue(' not in src and 'requests.get("https://masothue.com' not in src, (
+    "Bản masothue.com gửi request thô (bị Cloudflare chặn) phải đã BỎ HẲN — chỉ tra qua Chrome ẩn.")
+assert (than_chinh.index('_tra_cuu_mst_qua_tracuunnt(') < than_chinh.index('_tra_cuu_mst_qua_masothue_trinh_duyet(')
+        < than_chinh.index('_goi_1_lan_xinvoice(')), (
+    "Thứ tự nguồn: tracuunnt.gdt.gov.vn -> masothue.com (Chrome ẩn) -> XInvoice.")
+print("PASS 5: _tra_cuu_trang_thai_mst() gọi tracuunnt.gdt.gov.vn (ưu tiên 1) -> masothue.com qua Chrome ẩn "
+      "-> XInvoice; VietQR và bản masothue.com request thô đã bỏ hẳn khỏi file.")
 
 # ===== Test 6 (không hồi quy — endpoint chẩn đoán riêng, không cần cid): phải
 # có endpoint chẩn đoán đơn giản (không cần biết id công ty nào, vì nguồn này

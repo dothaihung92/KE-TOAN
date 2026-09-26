@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.003"
+APP_BUILD = "2026-09-26.004"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6824,6 +6824,29 @@ def chan_doan_mst_tracuunnt(mst: str = "0315458241"):
             "cach_tra": (f"gửi request trực tiếp (không mở được Chrome ẩn: {loi_chrome})"
                          if loi_chrome else "Chrome ẩn (trình duyệt thật)"),
             "thu_muc_anh_captcha_debug": thu_muc_anh}
+
+
+@app.get("/api/chan-doan-mst-masothue")
+def chan_doan_mst_masothue(mst: str = "0315458241"):
+    """CHẨN ĐOÁN tra tình trạng MST qua masothue.com bằng Chrome ẩn (xem
+    _tra_cuu_mst_qua_masothue_trinh_duyet) — gọi THẲNG nguồn này, không qua
+    tracuunnt. Thất bại thì chụp màn hình trang ra Desktop/masothue_debug/.
+
+    Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-masothue?mst=0315458241"""
+    mst_c = _chuan_mst(mst)[:10]
+    if not mst_c:
+        raise HTTPException(400, "MST không hợp lệ")
+    kq = _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout=20, luu_anh_debug=True)
+    if kq is None:
+        ket_luan = f"KHÔNG dùng được: không mở được Chrome ẩn ({_TRACUUNNT_TD['loi_khoi_tao']})"
+        kq = (False, "", None, ket_luan)
+    elif kq[0]:
+        ket_luan = (f"DÙNG ĐƯỢC — dò ra tình trạng: '{kq[1]}' "
+                    f"({'CÓ cảnh báo (tô đỏ)' if kq[2] else 'bình thường'})")
+    else:
+        ket_luan = f"KHÔNG dùng được: {kq[3]}"
+    return {"mst_tra": mst_c, "ket_luan": ket_luan, "trang_thai_do_duoc": kq[1], "canh_bao": kq[2],
+            "ly_do_loi": kq[3], "thu_muc_anh_debug": os.path.join(_get_desktop_dir(), "masothue_debug")}
 
 
 @app.get("/api/xem-captcha-tracuunnt")
@@ -34722,6 +34745,166 @@ def _tracuunnt_dat_lai_dem_loi():
     mềm, trái với thông báo "sẽ tự thử lại ở lượt xuất Excel sau"."""
     with _TRACUUNNT_STATE["lock"]:
         _TRACUUNNT_STATE["loi_lien_tiep"] = 0
+    with _MASOTHUE_TD["lock"]:
+        _MASOTHUE_TD["loi_lien_tiep"] = 0
+
+
+# ═══ masothue.com QUA CHROME ẨN — nguồn DỰ PHÒNG khi tracuunnt không tra được ═══
+# Theo yêu cầu người dùng thử lại masothue.com (tracuunnt đang bị giới hạn tốc độ "Too Many
+# Requests"). Bản cũ (đã gỡ) dùng requests.get thô nên bị Cloudflare chặn/hủy phiên (403) — bản
+# này chạy qua CHÍNH Chrome ẩn dùng chung với tracuunnt (_TRACUUNNT_TD: cùng khoá, cùng tiến trình
+# Chrome) để trang kiểm tra JavaScript của Cloudflare tự chạy như trình duyệt thật. Bản cũ còn quét
+# từ khoá trên TOÀN trang (dễ bắt nhầm chữ "ngừng hoạt động" ở mục khác trên trang) — bản này chỉ
+# đọc đúng ô "Tình trạng" trong bảng thông tin, và đối chiếu ô "Mã số thuế" phải đúng MST cần tra.
+_MASOTHUE_URL_TIM = "https://masothue.com/Search/?q={mst}&type=auto"
+_MASOTHUE_TD = {"lock": threading.Lock(), "lan_mo_cuoi": 0.0, "nghi_den": 0.0, "loi_lien_tiep": 0,
+                "ly_do_nghi": ""}
+_MASOTHUE_KHOANG_CACH_GIAY = 3.0     # giãn cách tối thiểu giữa 2 lần mở trang masothue.com
+_MASOTHUE_NGHI_KHI_BI_CHAN_GIAY = 900
+_MASOTHUE_NGUONG_TAT = 5
+
+_JS_MASOTHUE_DOC = r"""
+var mst = arguments[0];
+function sach(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
+var body = document.body ? document.body.innerText : '';
+var kq = {tieu_de: document.title || '', tinh_trang: '', mst_trang: '', link: '',
+          chu: sach(body).slice(0, 600), co_mst: body.indexOf(mst) >= 0};
+var hang = document.querySelectorAll('tr');
+for (var i = 0; i < hang.length; i++) {
+  var o = hang[i].querySelectorAll('td,th');
+  if (o.length < 2) continue;
+  var nhan = sach(o[0].innerText).toLowerCase();
+  var gt = sach(o[o.length - 1].innerText);
+  if (!kq.tinh_trang && nhan.indexOf('tình trạng') >= 0) kq.tinh_trang = gt;
+  if (!kq.mst_trang && nhan.indexOf('mã số thuế') >= 0) kq.mst_trang = gt;
+}
+var a = document.querySelectorAll('a[href]');
+for (var j = 0; j < a.length; j++) {
+  if ((a[j].getAttribute('href') || '').indexOf('/' + mst + '-') >= 0) { kq.link = a[j].href; break; }
+}
+return kq;
+"""
+
+
+def _masothue_loai_trang(kq):
+    t = f"{kq.get('tieu_de') or ''} {kq.get('chu') or ''}".lower()
+    if "too many requests" in t or "error 1015" in t or "being rate limited" in t:
+        return "gioi_han"
+    if "you have been blocked" in t or "error 1020" in t or "access denied" in t:
+        return "bi_chan"
+    if ("just a moment" in t or "checking your browser" in t or "verify you are human" in t
+            or "xác minh bạn là con người" in t):
+        return "dang_kiem_tra"
+    return ""
+
+
+def _masothue_ly_do_tam_dung():
+    with _MASOTHUE_TD["lock"]:
+        nghi_den, ly_do_nghi = _MASOTHUE_TD["nghi_den"], _MASOTHUE_TD["ly_do_nghi"]
+        loi = _MASOTHUE_TD["loi_lien_tiep"]
+    if time.time() < nghi_den:
+        gio = datetime.datetime.fromtimestamp(nghi_den).strftime("%H:%M")
+        return f"{ly_do_nghi} — tạm dừng tra masothue.com tới {gio}"
+    if loi >= _MASOTHUE_NGUONG_TAT:
+        return (f"Đã tạm tắt tra qua masothue.com (thất bại {_MASOTHUE_NGUONG_TAT} lần liên tiếp trong "
+                f"lượt này) — sẽ tự thử lại ở lượt xuất Excel sau")
+    return ""
+
+
+def _masothue_tam_nghi(ly_do):
+    with _MASOTHUE_TD["lock"]:
+        _MASOTHUE_TD["nghi_den"] = time.time() + _MASOTHUE_NGHI_KHI_BI_CHAN_GIAY
+        _MASOTHUE_TD["ly_do_nghi"] = ly_do
+    return _masothue_ly_do_tam_dung()
+
+
+def _masothue_mo_va_doc(drv, url, mst_c, gioi_han):
+    """Mở url (giữ giãn cách tối thiểu giữa các lần mở), chờ qua trang kiểm tra
+    của Cloudflare (nếu có, tự chuyển sau vài giây) rồi đọc thông tin trang."""
+    cho_them = _MASOTHUE_TD["lan_mo_cuoi"] + _MASOTHUE_KHOANG_CACH_GIAY - time.time()
+    if cho_them > 0:
+        time.sleep(cho_them)
+    _MASOTHUE_TD["lan_mo_cuoi"] = time.time()
+    drv.get(url)
+    het = time.time() + gioi_han
+    kq = {}
+    while True:
+        try:
+            kq = drv.execute_script(_JS_MASOTHUE_DOC, mst_c) or {}
+        except Exception:
+            kq = {}
+        if kq and _masothue_loai_trang(kq) != "dang_kiem_tra":
+            return kq
+        if time.time() >= het:
+            return kq
+        time.sleep(1.0)
+
+
+def _masothue_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout):
+    gioi_han = max(20, timeout * 2)
+    kq = _masothue_mo_va_doc(drv, _MASOTHUE_URL_TIM.format(mst=mst_c), mst_c, gioi_han)
+    for buoc in range(2):
+        loai = _masothue_loai_trang(kq)
+        if loai == "gioi_han":
+            return False, "", None, _masothue_tam_nghi("masothue.com đang giới hạn tốc độ (Too Many Requests)")
+        if loai == "bi_chan":
+            return False, "", None, _masothue_tam_nghi(
+                f"Cloudflare của masothue.com chặn truy cập (trang báo: {kq.get('chu', '')[:150]!r})")
+        if loai == "dang_kiem_tra" or not kq:
+            return False, "", None, (f"trang kiểm tra 'bạn là người' của Cloudflare không tự qua được sau "
+                                     f"{gioi_han}s (tiêu đề: {kq.get('tieu_de', '')!r})")
+        if kq.get("tinh_trang") or buoc == 1 or not kq.get("link"):
+            break
+        # Trang kết quả tìm kiếm (danh sách) thay vì trang công ty -> mở đúng link của MST này.
+        kq = _masothue_mo_va_doc(drv, kq["link"], mst_c, gioi_han)
+    if not kq.get("tinh_trang"):
+        return False, "", None, (f"không thấy ô 'Tình trạng' trên trang (tiêu đề: {kq.get('tieu_de', '')!r}, "
+                                 f"nội dung: {kq.get('chu', '')[:200]!r})")
+    mst_trang = _chuan_mst(kq.get("mst_trang") or "")[:10]
+    if (mst_trang and mst_trang != mst_c) or (not mst_trang and not kq.get("co_mst")):
+        return False, "", None, (f"trang hiện thông tin MST khác ('{kq.get('mst_trang') or '?'}'), không "
+                                 f"phải {mst_c}")
+    _, canh_bao = _phan_loai_trang_thai_mst(kq["tinh_trang"])
+    if canh_bao is None:
+        return False, "", None, f"tình trạng lạ chưa nhận diện được: '{kq['tinh_trang']}'"
+    return True, kq["tinh_trang"], canh_bao, None
+
+
+def _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout, luu_anh_debug=False):
+    """Tra 1 MST qua masothue.com bằng Chrome ẩn (xem chú thích khối ngay
+    trên). Trả None nếu KHÔNG mở được Chrome (không có cách tra masothue.com
+    nào khác dùng được — request thô bị Cloudflare chặn), ngược lại trả bộ 4
+    (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi). luu_anh_debug=True
+    (chỉ qua /api/chan-doan-mst-masothue): chụp màn hình trang khi thất bại ra
+    Desktop/masothue_debug/."""
+    ly_do_dung = _masothue_ly_do_tam_dung()
+    if ly_do_dung:
+        return False, "", None, ly_do_dung
+    with _TRACUUNNT_TD["lock"]:
+        drv, _loi = _tracuunnt_lay_trinh_duyet_da_khoa()
+        if drv is None:
+            return None
+        try:
+            kq = _masothue_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout)
+            if luu_anh_debug and not kq[0]:
+                try:
+                    thu_muc = os.path.join(_get_desktop_dir(), "masothue_debug")
+                    os.makedirs(thu_muc, exist_ok=True)
+                    drv.save_screenshot(os.path.join(thu_muc, f"{mst_c}_{int(time.time())}.png"))
+                except Exception:
+                    pass
+        except Exception as e:
+            _TRACUUNNT_TD["drv"] = None
+            try:
+                drv.quit()
+            except Exception:
+                pass
+            kq = (False, "", None, f"lỗi trình duyệt ẩn: {type(e).__name__}: {str(e)[:150]}")
+        finally:
+            _TRACUUNNT_TD["lan_dung_cuoi"] = time.time()
+    with _MASOTHUE_TD["lock"]:
+        _MASOTHUE_TD["loi_lien_tiep"] = 0 if kq[0] else _MASOTHUE_TD["loi_lien_tiep"] + 1
+    return kq
 
 
 def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
@@ -35063,6 +35246,14 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         mst_c, timeout)
     if not thanh_cong:
         ly_do_loi = f"tracuunnt.gdt.gov.vn: {ly_do_loi_tracuunnt}"
+        # ── DỰ PHÒNG 1: masothue.com qua Chrome ẩn (miễn phí, không cần key) —
+        # None = không mở được Chrome, bỏ qua nguồn này (không đổi ly_do_loi).
+        kq_masothue = _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout)
+        if kq_masothue is not None:
+            if kq_masothue[0]:
+                thanh_cong, trang_thai_goc, canh_bao, ly_do_loi = kq_masothue
+            else:
+                ly_do_loi = f"{ly_do_loi} | masothue.com: {kq_masothue[3]}"
 
     # ── DỰ PHÒNG: XInvoice — CHỈ gọi khi tracuunnt.gdt.gov.vn không tra được
     # VÀ chưa bị tạm dừng (_XINVOICE_TAM_DUNG, xem chú thích ở đầu hàm) ──

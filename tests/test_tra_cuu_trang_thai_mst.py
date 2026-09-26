@@ -114,6 +114,9 @@ _fake_tracuunnt = _FakeTracuunnt()
 ns['_tra_cuu_mst_qua_tracuunnt'] = _fake_tracuunnt
 _fake_xinvoice = _FakeXInvoice()
 ns['_goi_1_lan_xinvoice'] = _fake_xinvoice
+# masothue.com (qua Chrome ẩn) — None = không mở được Chrome, bỏ qua nguồn này; hành vi thật có
+# test riêng ở test_tra_mst_qua_masothue_trinh_duyet.py.
+ns['_tra_cuu_mst_qua_masothue_trinh_duyet'] = lambda mst_c, timeout: None
 _danh_sach_keys_gia = [{"client_id": "key1", "api_key": "sec1"}]
 ns['_lay_danh_sach_xinvoice_keys'] = lambda: _danh_sach_keys_gia
 ns['_XINVOICE_KEY_STATE'] = {"idx": 0, "lock": threading.Lock()}
