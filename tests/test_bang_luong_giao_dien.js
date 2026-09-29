@@ -248,5 +248,39 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/công chuẩn 27 ngày/.test(m.phanTu['blInfo'].textContent), m.phanTu['blInfo'].textContent);
   console.log('PASS 14: công chuẩn theo lịch — hiển thị, sửa tay, sao chép tháng, gửi năm/tháng khi tính lại.');
 
+  // ---- 15: cột phụ cấp chỉ như Danh Sách Nhân Viên; cố định cột Mã NV + Họ tên; nạp NV cập nhật lương/phụ cấp ----
+  m = nap();
+  m.ctx.blThang = '09';
+  m.ctx.blDL = { '09': [dongMau('101', 'A', { luong: 1, xang_xe: 500000, dien_thoai: 500000 })] };
+  m.ctx.blVeBang();
+  const b15 = m.phanTu['blBangWrap'].innerHTML;
+  const tieuDe = [...b15.matchAll(/<th [^>]*>([^<]*)<\/th>/g)].map(x => x[1]);
+  for (const c of ['Lương CB/Tháng', 'PC Tiền cơm', 'PC Xăng xe', 'PC Chức vụ', 'PC Điện thoại', 'PC Trang phục'])
+    assert(tieuDe.includes(c), 'Phải có cột ' + c + ' — got ' + tieuDe.join('|'));
+  for (const c of ['Mức xăng xe/tháng', 'Mức điện thoại/tháng', 'Hỗ trợ đi lại'])
+    assert(!tieuDe.includes(c), 'Cột dư phải bị loại: ' + c);
+  assert(!/data-k="muc_xang"/.test(b15) && !/data-k="di_lai"/.test(b15));
+  // "Hỗ trợ đi lại" chỉ hiện khi dòng có giá trị (dữ liệu import cũ) — không giấu số đang tính vào thuế
+  m.ctx.blDL = { '09': [dongMau('101', 'A', { di_lai: 300000 })] };
+  m.ctx.blVeBang();
+  assert(/data-k="di_lai"/.test(m.phanTu['blBangWrap'].innerHTML), 'Có giá trị đi lại -> vẫn hiện để không giấu số');
+  // cố định 2 cột đầu
+  const thMa = b15.match(/<th [^>]*>Mã NV<\/th>/)[0], thTen = b15.match(/<th [^>]*>Họ và Tên<\/th>/)[0];
+  assert(/position:sticky;left:0/.test(thMa) && /position:sticky;left:60px/.test(thTen), 'Tiêu đề Mã NV/Họ tên cố định khi kéo ngang');
+  assert(/data-k="ten"[^>]*position:sticky;left:60px/.test(b15) && /data-k="ma"[^>]*position:sticky;left:0/.test(b15), 'Ô dữ liệu Mã NV/Họ tên cố định');
+  // nạp NV: người đã có -> cập nhật lương/phụ cấp theo danh sách; người mới -> thêm
+  m = nap({ api: (url, o) => (url.includes('tu-nhan-vien')
+    ? { rows: [dongMau('101', 'A', { luong_cb: 6000000, tien_com: 800000 }), dongMau('102', 'B')] }
+    : { rows: JSON.parse(o.body).rows, tham_so: JSON.parse(o.body).tham_so }) });
+  m.ctx.blNam = 2025; m.ctx.blThang = '09'; m.ctx.blTS = {};
+  m.ctx.blDL = { '09': [dongMau('101', 'A', { luong_cb: 5310000, tien_com: 700000, thuong_bh: 123 })] };
+  await m.ctx.blNapNhanVien();
+  const r15 = m.ctx.blDL['09'];
+  assert.strictEqual(r15.length, 2, 'Thêm người mới');
+  assert.strictEqual(r15[0].luong_cb, 6000000); assert.strictEqual(r15[0].tien_com, 800000);
+  assert.strictEqual(r15[0].thuong_bh, 123, 'Không đụng các khoản nhập riêng từng tháng');
+  assert(/thêm 1 nhân viên, cập nhật lương\/phụ cấp .* 1 người/.test(m.toasts[m.toasts.length - 1][0]), m.toasts.join('|'));
+  console.log('PASS 15: cột phụ cấp như Danh Sách Nhân Viên, cố định Mã NV + Họ tên, nạp NV cập nhật lương/phụ cấp.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
