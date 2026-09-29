@@ -4504,11 +4504,14 @@ const BL_COT=[
   {k:'ma',t:'Mã NV',nhap:1,w:60},{k:'ten',t:'Họ và Tên',nhap:1,w:170},{k:'chuc_vu',t:'Chức vụ',nhap:1,w:110},
   {k:'luong_cb',t:'Lương CB/Tháng',nhap:1,so:1,tong:1},{k:'ngay_cong',t:'Ngày công',nhap:1,so:1,dp:1,hd:'ngay_cong_hd'},
   {k:'ngay_lam',t:'Tổng NC',nhap:1,so:1,dp:1,hd:'ngay_lam_hd'},{k:'gio_tang_ca',t:'Giờ tăng ca',so:1,dp:1},
-  {k:'luong',t:'Tiền lương',so:1,tong:1},{k:'tien_com',t:'PC Tiền cơm',nhap:1,so:1,tong:1},
-  {k:'muc_xang',t:'Mức xăng xe/tháng',nhap:1,so:1,an:1},{k:'xang_xe',t:'PC Xăng xe',so:1,tong:1},
-  {k:'di_lai',t:'Hỗ trợ đi lại',nhap:1,so:1,tong:1,anNeuTrong:1},{k:'pc_chuc_vu',t:'PC Chức vụ',nhap:1,so:1,tong:1},
-  {k:'muc_dt',t:'Mức điện thoại/tháng',nhap:1,so:1,an:1},{k:'dien_thoai',t:'PC Điện thoại',so:1,tong:1},
-  {k:'trang_phuc',t:'PC Trang phục',nhap:1,so:1,tong:1},{k:'thuong_bh',t:'Thưởng bán hàng',nhap:1,so:1,tong:1},
+  {k:'luong',t:'Tiền lương',so:1,tong:1},
+  {k:'tien_com',t:'Mức tiền cơm/tháng',nhap:1,so:1,muc:1},{k:'tt_tien_com',t:'PC Tiền cơm',so:1,tong:1},
+  {k:'muc_xang',t:'Mức xăng xe/tháng',nhap:1,so:1,muc:1},{k:'xang_xe',t:'PC Xăng xe',so:1,tong:1},
+  {k:'di_lai',t:'Mức hỗ trợ đi lại/tháng',nhap:1,so:1,muc:1},{k:'tt_di_lai',t:'Hỗ trợ đi lại',so:1,tong:1,anNeuTrong:1},
+  {k:'pc_chuc_vu',t:'Mức PC chức vụ/tháng',nhap:1,so:1,muc:1},{k:'tt_pc_chuc_vu',t:'PC Chức vụ',so:1,tong:1},
+  {k:'muc_dt',t:'Mức điện thoại/tháng',nhap:1,so:1,muc:1},{k:'dien_thoai',t:'PC Điện thoại',so:1,tong:1},
+  {k:'trang_phuc',t:'Mức trang phục/tháng',nhap:1,so:1,muc:1},{k:'tt_trang_phuc',t:'PC Trang phục',so:1,tong:1},
+  {k:'thuong_bh',t:'Thưởng bán hàng',nhap:1,so:1,tong:1},
   {k:'thuong_t13',t:'Thưởng T13',nhap:1,so:1,tong:1},{k:'tang_ca',t:'Tăng ca (tiền)',nhap:1,so:1,tong:1},
   {k:'dong_bh',t:'Đóng BHXH (tick)',nhap:1,tick:1,w:70},
   {k:'bhxh_dn',t:'DN chịu BHXH',so:1,tong:1},{k:'bhyt_dn',t:'DN chịu BHYT',so:1,tong:1},{k:'bhtn_dn',t:'DN chịu BHTN',so:1,tong:1},
@@ -4521,9 +4524,16 @@ const BL_COT=[
   {k:'tien_giam_tru_npt',t:'Giảm trừ người phụ thuộc',so:1},{k:'tn_tinh_thue',t:'Thu nhập tính thuế',so:1,tong:1},
   {k:'thue_tncn',t:'Thuế TNCN',so:1,tong:1,dam:1}];
 // Cột hiển thị: chỉ các phụ cấp có trong Danh Sách Nhân Viên (Tiền cơm, Xăng xe, Chức vụ, Điện thoại, Trang phục).
-// an = luôn ẩn (mức xăng xe/điện thoại lấy từ Danh Sách Nhân Viên, hiện qua cột PC đã tính theo ngày công);
+// Mọi phụ cấp TÍNH THEO NGÀY ĐI LÀM (mức/công chuẩn x ngày làm): cột "PC ..." là số đã tính; muc = cột MỨC/tháng (lấy từ
+// Danh Sách Nhân Viên) chỉ hiện khi bấm nút "✎ Mức phụ cấp" để sửa tay;
 // anNeuTrong = chỉ hiện khi tháng đó có dòng mang giá trị (dữ liệu import từ file cũ) — không ẩn số đang tính vào lương/thuế.
-function blCotHienThi(rows){return BL_COT.filter(c=>!c.an&&!(c.anNeuTrong&&!(rows||[]).some(r=>Number(r[c.k])))) }
+let blHienMuc=false;
+function blCotHienThi(rows){return BL_COT.filter(c=>!c.an&&(!c.muc||blHienMuc)&&!(c.anNeuTrong&&!(rows||[]).some(r=>Number(r[c.k])))) }
+function blDoiHienMuc(){
+  blHienMuc=!blHienMuc;
+  const n=document.getElementById('blNutMuc');if(n)n.style.background=blHienMuc?'#e8f3ec':'';
+  blVeBang();
+}
 const BL_TRUONG_NHAP=BL_COT.filter(c=>c.nhap).map(c=>c.k);
 const BL_THANG=Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'));
 let blNam=0,blThang='01',blTS=null,blDL={},blCacNam=[],blBan=false,blSeq=0;
@@ -4565,6 +4575,7 @@ async function moBangLuongNam(){
         <button class="btn ghost sm" onclick="document.getElementById('blImportFile').click()">📥 Import Excel</button>
         <input type="file" id="blImportFile" accept=".xlsx" style="display:none" onchange="blImportExcel(this)">
         <button class="btn ghost sm" onclick="blXuatExcel()">📤 Xuất Excel cả năm</button>
+        <button class="btn ghost sm" id="blNutMuc" onclick="blDoiHienMuc()" title="Hiện/ẩn các cột MỨC phụ cấp mỗi tháng (lấy từ Danh Sách Nhân Viên) để sửa tay — cột PC bên cạnh là số đã tính theo ngày đi làm">✎ Mức phụ cấp</button>
         <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
       </div>
       <div id="blThamSo" style="display:none"></div>

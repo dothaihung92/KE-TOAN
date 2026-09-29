@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-29.006"
+APP_BUILD = "2026-09-29.007"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10299,7 +10299,7 @@ def _luong_chuan_dong_nhap(r, ts=None):
 
 def _luong_tinh_dong(r, ts, thang=None):
     """Tính 1 dòng bảng lương từ dòng NHẬP r + tham số ts (đã chuẩn hoá). Công thức bám sát file gốc
-    (cột theo file): H=D/E*G; J=mức xăng/E*G; L=mức ĐT/E*G; Q..S=D*%DN; T..V=D*%NLĐ; X=ROUND(SUM(H:P));
+    (cột theo file): H=D/E*G; mọi phụ cấp = mức/E*G (E=công chuẩn, G=ngày đi làm); Q..S=D*%DN; T..V=D*%NLĐ; X=ROUND(SUM(H:P));
     AA=H+J+K+N+P+O (+PC chức vụ); AB=I+M+L; AF=T+U+V; AI=NPT*giảm trừ; AJ=AA-AG-AF-AI;
     AK=ROUND(thuế lũy tiến(AJ)); W=ROUND(SUM(H:P)-T-U-V-AK)."""
     d = _luong_chuan_dong_nhap(r)
@@ -10312,16 +10312,18 @@ def _luong_tinh_dong(r, ts, thang=None):
         return x / e * g if e else 0.0
 
     luong = tl(d["luong_cb"])
+    # MỌI phụ cấp tính theo ngày đi làm: đủ công mới nhận đủ, nghỉ vài ngày thì phụ cấp giảm theo (mức/công chuẩn x ngày làm).
     xang = tl(d["muc_xang"])
     dien_thoai = tl(d["muc_dt"])
+    tien_com, pc_chuc_vu, trang_phuc, di_lai = tl(d["tien_com"]), tl(d["pc_chuc_vu"]), tl(d["trang_phuc"]), tl(d["di_lai"])
     gio_tc = d["tang_ca"] / (d["luong_cb"] / e / 8.0 * ts["he_so_tang_ca"]) if (d["tang_ca"] and d["luong_cb"] and e) else 0.0
     # Chỉ lao động được TICK "Đóng BHXH" mới tính BH (phần công ty + phần người lao động); không tick -> 0.
     co_bh = 1.0 if d["dong_bh"] else 0.0
     bh_dn = {k: d["luong_cb"] * ts["bh_dn"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
     bh_nld = {k: d["luong_cb"] * ts["bh_nld"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
     tong_bh_nld = sum(bh_nld.values())
-    tong_chiu_thue = luong + xang + d["di_lai"] + d["pc_chuc_vu"] + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
-    khong_chiu_thue = d["tien_com"] + d["trang_phuc"] + dien_thoai
+    tong_chiu_thue = luong + xang + di_lai + pc_chuc_vu + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
+    khong_chiu_thue = tien_com + trang_phuc + dien_thoai
     tong_thu_nhap = tong_chiu_thue + khong_chiu_thue
     npt = d["so_npt"]
     tt = _luong_thue_ap_dung(ts, thang)      # từ 1/1/2026 tự dùng giảm trừ + biểu thuế mới
@@ -10333,6 +10335,7 @@ def _luong_tinh_dong(r, ts, thang=None):
     kq = dict(d)
     kq.update({
         "gio_tang_ca": gio_tc, "luong": luong, "xang_xe": xang, "dien_thoai": dien_thoai,
+        "tt_tien_com": tien_com, "tt_pc_chuc_vu": pc_chuc_vu, "tt_trang_phuc": trang_phuc, "tt_di_lai": di_lai,
         "bhxh_dn": bh_dn["bhxh"], "bhyt_dn": bh_dn["bhyt"], "bhtn_dn": bh_dn["bhtn"],
         "bhxh_nld": bh_nld["bhxh"], "bhyt_nld": bh_nld["bhyt"], "bhtn_nld": bh_nld["bhtn"],
         "tt_luong": tt_luong, "chi_phi_luong": _luong_lam_tron(tong_thu_nhap),
@@ -10582,12 +10585,10 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             ws[f"{L['ngay_lam']}{r}"] = d["ngay_lam"] if d["ngay_lam"] != "" else e
             ws[f"{L['gio_tang_ca']}{r}"] = (f"=IFERROR({L['tang_ca']}{r}/(({L['luong_cb']}{r}/{L['ngay_cong']}{r}/8)*{hs!r}),0)")
             ws[f"{L['luong']}{r}"] = f"={L['luong_cb']}{r}/{L['ngay_cong']}{r}*{L['ngay_lam']}{r}"
-            ws[f"{L['tien_com']}{r}"] = d["tien_com"]
-            ws[f"{L['xang_xe']}{r}"] = f"=({d['muc_xang']!r}/{L['ngay_cong']}{r})*{L['ngay_lam']}{r}"
-            ws[f"{L['di_lai']}{r}"] = d["di_lai"]
-            ws[f"{L['pc_chuc_vu']}{r}"] = d["pc_chuc_vu"]
-            ws[f"{L['dien_thoai']}{r}"] = f"=({d['muc_dt']!r}/{L['ngay_cong']}{r})*{L['ngay_lam']}{r}"
-            ws[f"{L['trang_phuc']}{r}"] = d["trang_phuc"]
+            for k_pc, muc in (("tien_com", d["tien_com"]), ("xang_xe", d["muc_xang"]), ("di_lai", d["di_lai"]),
+                              ("pc_chuc_vu", d["pc_chuc_vu"]), ("dien_thoai", d["muc_dt"]),
+                              ("trang_phuc", d["trang_phuc"])):     # mọi phụ cấp theo ngày đi làm
+                ws[f"{L[k_pc]}{r}"] = f"=({muc!r}/{L['ngay_cong']}{r})*{L['ngay_lam']}{r}"
             ws[f"{L['thuong_bh']}{r}"] = d["thuong_bh"]
             ws[f"{L['thuong_t13']}{r}"] = d["thuong_t13"]
             ws[f"{L['tang_ca']}{r}"] = d["tang_ca"]
@@ -10714,6 +10715,21 @@ def _luong_doc_excel(wb_giatri, wb_congthuc=None):
         c = cot.get(k)
         return ws.cell(r, c).value if c else None
 
+    def muc_pc(r, k, e, g):
+        """Mức phụ cấp/tháng của ô: công thức '=(mức/E)*G' -> lấy mức; ô có công thức khác mà đã có giá trị tính sẵn
+        -> suy ngược mức (giá trị x E / G); ô nhập tay (file cũ chưa tính theo ngày công) -> chính giá trị đó."""
+        c = cot.get(k)
+        if not c:
+            return 0.0
+        v = ws.cell(r, c).value
+        f = str(wf.cell(r, c).value or "") if wf is not None else ""
+        m = _re.match(r"^=\(\s*([0-9.]+)\s*/", f)
+        if m:
+            return float(m.group(1))
+        if f.startswith("="):
+            return _luong_so(v) * e / g if (v is not None and g) else 0.0
+        return _luong_so(v)
+
     def muc_tu_cong_thuc(r, k, e, g):
         c = cot.get(k)
         if not c:
@@ -10760,9 +10776,9 @@ def _luong_doc_excel(wb_giatri, wb_congthuc=None):
         g = _luong_so(gl) if gl not in (None, "") else e
         thang.setdefault(tt, []).append(_luong_chuan_dong_nhap({
             "ma": ma, "ten": ten, "chuc_vu": gt(r, "chuc_vu"), "luong_cb": gt(r, "luong_cb"), "ngay_cong": e,
-            "ngay_lam": g, "tien_com": gt(r, "tien_com"), "muc_xang": muc_tu_cong_thuc(r, "xang_xe", e, g),
-            "di_lai": gt(r, "di_lai"), "pc_chuc_vu": gt(r, "pc_chuc_vu"),
-            "muc_dt": muc_tu_cong_thuc(r, "dien_thoai", e, g), "trang_phuc": gt(r, "trang_phuc"),
+            "ngay_lam": g, "tien_com": muc_pc(r, "tien_com", e, g), "muc_xang": muc_tu_cong_thuc(r, "xang_xe", e, g),
+            "di_lai": muc_pc(r, "di_lai", e, g), "pc_chuc_vu": muc_pc(r, "pc_chuc_vu", e, g),
+            "muc_dt": muc_tu_cong_thuc(r, "dien_thoai", e, g), "trang_phuc": muc_pc(r, "trang_phuc", e, g),
             "thuong_bh": gt(r, "thuong_bh"), "thuong_t13": gt(r, "thuong_t13"), "tang_ca": gt(r, "tang_ca"),
             "so_npt": gt(r, "so_npt"), "dong_bh": co_dong_bh(r), "ghi_chu": gt(r, "ghi_chu")}))
     return thang, loi

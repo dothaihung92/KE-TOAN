@@ -261,9 +261,9 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
     assert(!tieuDe.includes(c), 'Cột dư phải bị loại: ' + c);
   assert(!/data-k="muc_xang"/.test(b15) && !/data-k="di_lai"/.test(b15));
   // "Hỗ trợ đi lại" chỉ hiện khi dòng có giá trị (dữ liệu import cũ) — không giấu số đang tính vào thuế
-  m.ctx.blDL = { '09': [dongMau('101', 'A', { di_lai: 300000 })] };
+  m.ctx.blDL = { '09': [dongMau('101', 'A', { di_lai: 300000, tt_di_lai: 300000 })] };
   m.ctx.blVeBang();
-  assert(/data-k="di_lai"/.test(m.phanTu['blBangWrap'].innerHTML), 'Có giá trị đi lại -> vẫn hiện để không giấu số');
+  assert(/>Hỗ trợ đi lại</.test(m.phanTu['blBangWrap'].innerHTML), 'Có giá trị đi lại -> vẫn hiện để không giấu số');
   // cố định 2 cột đầu
   const thMa = b15.match(/<th [^>]*>Mã NV<\/th>/)[0], thTen = b15.match(/<th [^>]*>Họ và Tên<\/th>/)[0];
   assert(/position:sticky;left:0/.test(thMa) && /position:sticky;left:60px/.test(thTen), 'Tiêu đề Mã NV/Họ tên cố định khi kéo ngang');
@@ -345,6 +345,23 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual((m.phanTu['blChonNv'].innerHTML.match(/class="blNvMuc/g) || []).length, 1);
   m.ctx.blDongChonNv(); assert.strictEqual(m.phanTu['blChonNv'].style.display, 'none');
   console.log('PASS 17: bấm tên -> danh sách nhân viên, viền đỏ người đang chọn, chọn người khác đổi dòng, chặn trùng.');
+
+  // ---- 18: mọi phụ cấp tính theo ngày đi làm: cột PC là số đã tính (chỉ đọc); nút "Mức phụ cấp" hiện cột MỨC để sửa ----
+  m = nap();
+  m.ctx.blThang = '09'; m.ctx.blNam = 2026; m.ctx.blTS = {};
+  m.ctx.blDL = { '09': [dongMau('101', 'A', { ngay_lam: 13, tt_tien_com: 365000, xang_xe: 500000, tt_pc_chuc_vu: 250000, dien_thoai: 500000, tt_trang_phuc: 200000 })] };
+  m.ctx.blVeBang();
+  let b18 = m.phanTu['blBangWrap'].innerHTML;
+  for (const k of ['tt_tien_com', 'tt_pc_chuc_vu', 'tt_trang_phuc']) assert(b18.includes('>' + ({ tt_tien_com: 'PC Tiền cơm', tt_pc_chuc_vu: 'PC Chức vụ', tt_trang_phuc: 'PC Trang phục' })[k] + '<'), 'Cột PC đã tính: ' + k);
+  assert(!/data-k="tien_com"/.test(b18) && !/data-k="pc_chuc_vu"/.test(b18) && !/data-k="trang_phuc"/.test(b18), 'Mặc định ẩn cột mức');
+  assert(/365\.000/.test(b18) && /250\.000/.test(b18) && /200\.000/.test(b18), 'Hiện số phụ cấp đã tính theo ngày làm');
+  m.ctx.blDoiHienMuc();
+  b18 = m.phanTu['blBangWrap'].innerHTML;
+  for (const k of ['tien_com', 'muc_xang', 'di_lai', 'pc_chuc_vu', 'muc_dt', 'trang_phuc']) assert(new RegExp('data-k="' + k + '"').test(b18), 'Bấm nút -> hiện cột mức ' + k);
+  assert(!/data-k="tt_tien_com"/.test(b18), 'Cột đã tính vẫn chỉ đọc');
+  m.ctx.blDoiHienMuc();
+  assert(!/data-k="tien_com"/.test(m.phanTu['blBangWrap'].innerHTML), 'Bấm lần nữa -> ẩn lại');
+  console.log('PASS 18: phụ cấp theo ngày đi làm — cột PC đã tính (chỉ đọc), nút "✎ Mức phụ cấp" hiện/ẩn cột mức.');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
