@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-29.001"
+APP_BUILD = "2026-09-29.002"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10062,7 +10062,7 @@ _LUONG_THAM_SO_MAC_DINH = {
 }
 _LUONG_CAC_TRUONG_NHAP = (
     "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
-    "pc_chuc_vu", "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "ghi_chu")
+    "pc_chuc_vu", "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "ghi_chu")
 _LUONG_TRUONG_CHU = ("ma", "ten", "chuc_vu", "ghi_chu")
 _LUONG_THANG = tuple("%02d" % i for i in range(1, 13))
 
@@ -10139,6 +10139,20 @@ def _luong_thue_tncn(thu_nhap_tinh_thue, bac_thue):
     return thue
 
 
+def _luong_co_dong_bh(v):
+    """Ô tick 'Đóng BHXH': 1/True/'1'/'x'/'có' -> 1; 0/False/'0'/'không' -> 0. Thiếu (dữ liệu cũ, chưa có ô tick)
+    hoặc rỗng -> 1 để bảng lương đã lưu trước đây giữ nguyên kết quả."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return 1
+    if isinstance(v, bool):
+        return 1 if v else 0
+    if isinstance(v, str) and _khong_dau(v).strip().lower() in ("false", "no", "khong", "k", "n"):
+        return 0
+    if isinstance(v, str) and _khong_dau(v).strip().lower() in ("true", "yes", "co", "x", "c", "y"):
+        return 1
+    return 1 if _luong_so(v) != 0 else 0
+
+
 def _luong_chuan_dong_nhap(r, ts=None):
     """Chuẩn hoá 1 dòng NHẬP (chỉ giữ các trường đã biết, số -> float, chữ -> str)."""
     r = r if isinstance(r, dict) else {}
@@ -10149,6 +10163,8 @@ def _luong_chuan_dong_nhap(r, ts=None):
         elif k == "ngay_lam":
             v = r.get(k)
             kq[k] = "" if v is None or str(v).strip() == "" else _luong_so(v)
+        elif k == "dong_bh":
+            kq[k] = _luong_co_dong_bh(r.get(k))
         else:
             kq[k] = _luong_so(r.get(k))
     return kq
@@ -10170,8 +10186,10 @@ def _luong_tinh_dong(r, ts):
     xang = tl(d["muc_xang"])
     dien_thoai = tl(d["muc_dt"])
     gio_tc = d["tang_ca"] / (d["luong_cb"] / e / 8.0 * ts["he_so_tang_ca"]) if (d["tang_ca"] and d["luong_cb"] and e) else 0.0
-    bh_dn = {k: d["luong_cb"] * ts["bh_dn"][k] / 100.0 for k in ("bhxh", "bhyt", "bhtn")}
-    bh_nld = {k: d["luong_cb"] * ts["bh_nld"][k] / 100.0 for k in ("bhxh", "bhyt", "bhtn")}
+    # Chỉ lao động được TICK "Đóng BHXH" mới tính BH (phần công ty + phần người lao động); không tick -> 0.
+    co_bh = 1.0 if d["dong_bh"] else 0.0
+    bh_dn = {k: d["luong_cb"] * ts["bh_dn"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
+    bh_nld = {k: d["luong_cb"] * ts["bh_nld"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
     tong_bh_nld = sum(bh_nld.values())
     tong_chiu_thue = luong + xang + d["di_lai"] + d["pc_chuc_vu"] + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
     khong_chiu_thue = d["tien_com"] + d["trang_phuc"] + dien_thoai
@@ -10423,7 +10441,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             for k, khoa_bh, nhom in (("bhxh_dn", "bhxh", "bh_dn"), ("bhyt_dn", "bhyt", "bh_dn"),
                                      ("bhtn_dn", "bhtn", "bh_dn"), ("bhxh_nld", "bhxh", "bh_nld"),
                                      ("bhyt_nld", "bhyt", "bh_nld"), ("bhtn_nld", "bhtn", "bh_nld")):
-                ws[f"{L[k]}{r}"] = f"={L['luong_cb']}{r}*{ts[nhom][khoa_bh]!r}%"
+                ws[f"{L[k]}{r}"] = (f"={L['luong_cb']}{r}*{ts[nhom][khoa_bh]!r}%" if d["dong_bh"] else 0)
             hq, tq = L["luong"], L["tang_ca"]
             ws[f"{L['tt_luong']}{r}"] = (f"=ROUND(SUM({hq}{r}:{tq}{r})-{L['bhxh_nld']}{r}-{L['bhyt_nld']}{r}"
                                          f"-{L['bhtn_nld']}{r}-{L['thue_tncn']}{r},0)")
@@ -10471,6 +10489,12 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
 
 _LUONG_TU_KHOA_COT = [   # (khoá, hàm nhận diện tiêu đề đã gộp, không dấu)
     ("gio_tang_ca", lambda h: "gio" in h and "tang ca" in h),
+    ("bhxh_dn", lambda h: "dn chiu" in h and "bhxh" in h),
+    ("bhyt_dn", lambda h: "dn chiu" in h and "bhyt" in h),
+    ("bhtn_dn", lambda h: "dn chiu" in h and "bhtn" in h),
+    ("bhxh_nld", lambda h: "giam tru" in h and "bhxh" in h and "dn chiu" not in h),
+    ("bhyt_nld", lambda h: "giam tru" in h and "bhyt" in h and "dn chiu" not in h),
+    ("bhtn_nld", lambda h: "giam tru" in h and "bhtn" in h and "dn chiu" not in h),
     ("tang_ca", lambda h: h in ("tang ca", "tang ca ") or (h.startswith("tang") and h.endswith("ca") and "gio" not in h)),
     ("ten", lambda h: "ho va ten" in h),
     ("pc_chuc_vu", lambda h: "chuc vu" in h and ("pc" in h or "phu cap" in h)),
@@ -10547,6 +10571,20 @@ def _luong_doc_excel(wb_giatri, wb_congthuc=None):
                 return float(m.group(1))
         v = ws.cell(r, c).value
         return _luong_so(v) * e / g if (v is not None and g) else 0.0
+    cot_bh = [k for k in ("bhxh_dn", "bhyt_dn", "bhtn_dn", "bhxh_nld", "bhyt_nld", "bhtn_nld") if cot.get(k)]
+
+    def co_dong_bh(r):
+        """Suy ra ô tick 'Đóng BHXH' từ các cột BH của file: ô nào có công thức hoặc số khác 0 -> có đóng;
+        toàn bộ các cột BH đều trống/0 (và không có công thức) -> không đóng. Không có cột BH -> có đóng."""
+        if not cot_bh:
+            return 1
+        for k in cot_bh:
+            v = ws.cell(r, cot[k]).value
+            if _luong_so(v) != 0:
+                return 1
+            if wf is not None and str(wf.cell(r, cot[k]).value or "").startswith("=") and v is None:
+                return 1
+        return 0
     thang = {}
     for r in range(hang_dau + 2, ws.max_row + 1):
         ten = str(gt(r, "ten") or "").strip()
@@ -10573,7 +10611,7 @@ def _luong_doc_excel(wb_giatri, wb_congthuc=None):
             "di_lai": gt(r, "di_lai"), "pc_chuc_vu": gt(r, "pc_chuc_vu"),
             "muc_dt": muc_tu_cong_thuc(r, "dien_thoai", e, g), "trang_phuc": gt(r, "trang_phuc"),
             "thuong_bh": gt(r, "thuong_bh"), "thuong_t13": gt(r, "thuong_t13"), "tang_ca": gt(r, "tang_ca"),
-            "so_npt": gt(r, "so_npt"), "ghi_chu": gt(r, "ghi_chu")}))
+            "so_npt": gt(r, "so_npt"), "dong_bh": co_dong_bh(r), "ghi_chu": gt(r, "ghi_chu")}))
     return thang, loi
 
 

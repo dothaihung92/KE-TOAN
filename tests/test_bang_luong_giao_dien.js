@@ -197,5 +197,25 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(m.ctx.blBan, true);
   console.log('PASS 12: áp dụng tham số năm -> chuẩn hoá -> tính lại các tháng, đánh dấu chưa lưu.');
 
+  // ---- 13: ô tick "Đóng BHXH": có cột tick, dòng mới mặc định tick, bỏ tick -> lưu cờ + gọi server tính lại ----
+  m = nap({ api: (url, o) => { const b = JSON.parse(o.body); return { rows: b.rows, tham_so: {} }; } });
+  m.ctx.blTS = { ngay_cong_chuan: 26 };
+  assert.strictEqual(m.ctx.blDongTrong().dong_bh, 1, 'Dòng mới mặc định có tick');
+  m.ctx.blThang = '09'; m.ctx.blNam = 2026;
+  m.ctx.blDL = { '09': [dongMau('101', 'A', { dong_bh: 1 }), dongMau('102', 'B', { dong_bh: 0 }), dongMau('103', 'C')] };
+  m.ctx.blVeBang();
+  const hb = m.phanTu['blBangWrap'].innerHTML;
+  const tick = [...hb.matchAll(/<input type="checkbox"([^>]*)onchange="blDoiBH\((\d+),this\.checked\)"/g)];
+  assert.strictEqual(tick.length, 3, 'Mỗi nhân viên 1 ô tick');
+  assert(/checked/.test(tick[0][1]) && !/checked/.test(tick[1][1]) && /checked/.test(tick[2][1]), 'Tick theo dong_bh (thiếu = có tick)');
+  assert(/Đóng BHXH/.test(hb), 'Có tiêu đề cột Đóng BHXH');
+  m.ctx.blDoiBH(0, false);
+  assert.strictEqual(m.ctx.blDL['09'][0].dong_bh, 0);
+  assert.strictEqual(m.ctx.blBan, true);
+  assert(m.goiApi.some(([u, b]) => u.includes('bang-luong-tinh') && b.rows[0].dong_bh === 0), 'Gửi cờ tick cho server tính lại');
+  await m.ctx.blLuu(true);
+  assert.strictEqual(m.goiApi[m.goiApi.length - 1][1].thang['09'][1].dong_bh, 0, 'Lưu gửi kèm dong_bh');
+  console.log('PASS 13: ô tick Đóng BHXH — mặc định tick, bỏ tick -> tính lại, lưu kèm cờ.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

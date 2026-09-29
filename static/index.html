@@ -4510,6 +4510,7 @@ const BL_COT=[
   {k:'muc_dt',t:'Mức điện thoại/tháng',nhap:1,so:1},{k:'dien_thoai',t:'Điện thoại',so:1,tong:1},
   {k:'trang_phuc',t:'Trang phục',nhap:1,so:1,tong:1},{k:'thuong_bh',t:'Thưởng bán hàng',nhap:1,so:1,tong:1},
   {k:'thuong_t13',t:'Thưởng T13',nhap:1,so:1,tong:1},{k:'tang_ca',t:'Tăng ca (tiền)',nhap:1,so:1,tong:1},
+  {k:'dong_bh',t:'Đóng BHXH (tick)',nhap:1,tick:1,w:70},
   {k:'bhxh_dn',t:'DN chịu BHXH',so:1,tong:1},{k:'bhyt_dn',t:'DN chịu BHYT',so:1,tong:1},{k:'bhtn_dn',t:'DN chịu BHTN',so:1,tong:1},
   {k:'bhxh_nld',t:'Trừ BHXH',so:1,tong:1},{k:'bhyt_nld',t:'Trừ BHYT',so:1,tong:1},{k:'bhtn_nld',t:'Trừ BHTN',so:1,tong:1},
   {k:'tt_luong',t:'TT Lương (thực lãnh)',so:1,tong:1,dam:1},{k:'chi_phi_luong',t:'Chi phí lương',so:1,tong:1,dam:1},
@@ -4528,7 +4529,7 @@ function blDinhDang(v,dp){
 }
 function blDongTrong(){
   const d={};BL_TRUONG_NHAP.forEach(k=>{d[k]=(k==='ma'||k==='ten'||k==='chuc_vu'||k==='ghi_chu')?'':0;});
-  d.ngay_cong=(blTS&&blTS.ngay_cong_chuan)||26;d.ngay_lam='';d.ghi_chu='CK';
+  d.ngay_cong=(blTS&&blTS.ngay_cong_chuan)||26;d.ngay_lam='';d.ghi_chu='CK';d.dong_bh=1;
   return d;
 }
 async function moBangLuongNam(){
@@ -4625,7 +4626,8 @@ function blVeBang(){
       const v=r[c.k];
       const kt=c.k==='kiem_tra'&&Math.abs((r.kiem_tra||0)-(r.thue_tncn||0))>=1;
       const noiDung=c.so?blDinhDang(v,c.dp):xkEsc(v==null?'':v);
-      if(c.nhap)h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;${c.so?'text-align:right;':''}">${noiDung}</td>`;
+      if(c.tick)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${(v===0||v==='0'||v===false)?'':'checked'} onchange="blDoiBH(${ri},this.checked)" title="Tick = có đóng BHXH/BHYT/BHTN; bỏ tick = không tính BH" style="width:17px;height:17px;cursor:pointer"></td>`;
+      else if(c.nhap)h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;${c.so?'text-align:right;':''}">${noiDung}</td>`;
       else h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:${kt?'#fde2e2':'#f4f6f5'};white-space:nowrap;text-align:right;${c.dam?'font-weight:700;':''}">${noiDung}</td>`;
     });
     h+=`<td style="border:1px solid #e3e3e3;text-align:center"><button onclick="blXoaDong(${ri})" title="Xóa dòng" style="border:none;background:transparent;color:#c00;cursor:pointer">✕</button></td></tr>`;
@@ -4696,6 +4698,10 @@ function blSuaO(td){
   if(cot&&cot.so&&blDinhDang(cu,cot.dp)===moi)return;   // chỉ khác định dạng hiển thị
   rows[ri][k]=moi;blBan=true;blVeInfo();
   blTinhLai(blThang);
+}
+function blDoiBH(ri,co){
+  const rows=blDL[blThang];if(!rows||!rows[ri])return;
+  rows[ri].dong_bh=co?1:0;blBan=true;blVeInfo();blTinhLai(blThang);
 }
 function blThemDong(){
   if(blThang==='nam'){toast('Chọn 1 tab tháng để thêm dòng','err');return}
