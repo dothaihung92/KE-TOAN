@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-26.012"
+APP_BUILD = "2026-09-29.001"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10038,6 +10038,571 @@ def companies_template():
     path = os.path.join(DOWNLOAD_DIR, "Mau_DanhSach_CongTy.xlsx")
     wb.save(path)
     return _resp_xuat(path, "Mau_DanhSach_CongTy.xlsx")
+
+
+# ============================================================
+#  BẢNG LƯƠNG — theo file "TỔNG HỢP" người dùng gửi (sheet TONG HOP VP): mỗi nhân
+#  viên 1 dòng cho MỖI THÁNG, chọn theo NĂM (2025, 2026...). Nhập liệu đầu vào
+#  (lương CB, ngày công, phụ cấp, thưởng, tăng ca, người phụ thuộc) -> tự tính
+#  Tiền lương, BHXH/BHYT/BHTN (DN chịu + người lao động), Thu nhập chịu thuế,
+#  Thuế TNCN (biểu lũy tiến), Thực lãnh (TT Lương), Chi phí lương. Danh sách
+#  nhân viên lấy từ "Danh Sách Nhân Viên" (loai 'nv') của cùng công ty.
+# ============================================================
+_LUONG_THAM_SO_MAC_DINH = {
+    "ngay_cong_chuan": 26,
+    "giam_tru_ban_than": 11000000,
+    "giam_tru_npt": 4400000,
+    "bh_dn": {"bhxh": 17.5, "bhyt": 3.0, "bhtn": 1.0},
+    "bh_nld": {"bhxh": 8.0, "bhyt": 1.5, "bhtn": 1.0},
+    "he_so_tang_ca": 8.0 / 6.0,
+    # [từ mức (đ), thuế suất %] — file gốc: công thức mảng {0,5,10,18,32,52,80} triệu x 5% cộng dồn
+    # = biểu lũy tiến 5/10/15/20/25/30/35%.
+    "bac_thue": [[0, 5], [5000000, 10], [10000000, 15], [18000000, 20],
+                 [32000000, 25], [52000000, 30], [80000000, 35]],
+}
+_LUONG_CAC_TRUONG_NHAP = (
+    "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
+    "pc_chuc_vu", "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "ghi_chu")
+_LUONG_TRUONG_CHU = ("ma", "ten", "chuc_vu", "ghi_chu")
+_LUONG_THANG = tuple("%02d" % i for i in range(1, 13))
+
+
+def _luong_so(v):
+    """Số từ ô nhập tay/Excel: nhận 32500000, '32,500,000', '32.500.000', '1.234,5', ' 12 '. Rỗng/lạ -> 0."""
+    if v is None or isinstance(v, bool):
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace(" ", "").replace(" ", "").replace("đ", "").replace("₫", "")
+    if not s or s in ("-", "+"):
+        return 0.0
+    neg = s.startswith("-")
+    s = s.lstrip("+-")
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        p = s.split(",")
+        s = s.replace(",", "") if (len(p) > 2 or len(p[-1]) == 3) else s.replace(",", ".")
+    elif "." in s:
+        p = s.split(".")
+        if len(p) > 2 or len(p[-1]) == 3:
+            s = s.replace(".", "")
+    try:
+        f = float(s)
+    except Exception:
+        return 0.0
+    return -f if neg else f
+
+
+def _luong_lam_tron(x):
+    """ROUND(x,0) của Excel: làm tròn nửa ra xa số 0 (Python round() là làm tròn chẵn — sai lệch 1đ)."""
+    import math
+    return math.floor(x + 0.5) if x >= 0 else -math.floor(-x + 0.5)
+
+
+def _luong_chuan_tham_so(ts):
+    """Trộn tham số người dùng với mặc định, ép về số, sắp xếp bậc thuế — không bao giờ ném lỗi."""
+    mac_dinh = _LUONG_THAM_SO_MAC_DINH
+    ts = ts if isinstance(ts, dict) else {}
+    kq = {
+        "ngay_cong_chuan": _luong_so(ts.get("ngay_cong_chuan")) or mac_dinh["ngay_cong_chuan"],
+        "giam_tru_ban_than": _luong_so(ts["giam_tru_ban_than"]) if "giam_tru_ban_than" in ts
+        else mac_dinh["giam_tru_ban_than"],
+        "giam_tru_npt": _luong_so(ts["giam_tru_npt"]) if "giam_tru_npt" in ts else mac_dinh["giam_tru_npt"],
+        "he_so_tang_ca": _luong_so(ts.get("he_so_tang_ca")) or mac_dinh["he_so_tang_ca"],
+    }
+    for khoa in ("bh_dn", "bh_nld"):
+        goc = ts.get(khoa) if isinstance(ts.get(khoa), dict) else {}
+        kq[khoa] = {k: (_luong_so(goc[k]) if k in goc else v) for k, v in mac_dinh[khoa].items()}
+    bac = []
+    for b in (ts.get("bac_thue") if isinstance(ts.get("bac_thue"), list) else []):
+        if isinstance(b, (list, tuple)) and len(b) >= 2:
+            bac.append([_luong_so(b[0]), _luong_so(b[1])])
+    kq["bac_thue"] = sorted(bac) if bac else [list(b) for b in mac_dinh["bac_thue"]]
+    return kq
+
+
+def _luong_thue_tncn(thu_nhap_tinh_thue, bac_thue):
+    """Thuế TNCN theo biểu lũy tiến từng phần (bac_thue = [[từ mức, thuế suất %], ...] tăng dần).
+    Thu nhập tính thuế <= 0 -> 0. Kết quả CHƯA làm tròn."""
+    x = thu_nhap_tinh_thue
+    if x <= 0:
+        return 0.0
+    thue = 0.0
+    for i, (tu, ts) in enumerate(bac_thue):
+        den = bac_thue[i + 1][0] if i + 1 < len(bac_thue) else float("inf")
+        if x > tu:
+            thue += (min(x, den) - tu) * ts / 100.0
+    return thue
+
+
+def _luong_chuan_dong_nhap(r, ts=None):
+    """Chuẩn hoá 1 dòng NHẬP (chỉ giữ các trường đã biết, số -> float, chữ -> str)."""
+    r = r if isinstance(r, dict) else {}
+    kq = {}
+    for k in _LUONG_CAC_TRUONG_NHAP:
+        if k in _LUONG_TRUONG_CHU:
+            kq[k] = str(r.get(k) if r.get(k) is not None else "").strip()
+        elif k == "ngay_lam":
+            v = r.get(k)
+            kq[k] = "" if v is None or str(v).strip() == "" else _luong_so(v)
+        else:
+            kq[k] = _luong_so(r.get(k))
+    return kq
+
+
+def _luong_tinh_dong(r, ts):
+    """Tính 1 dòng bảng lương từ dòng NHẬP r + tham số ts (đã chuẩn hoá). Công thức bám sát file gốc
+    (cột theo file): H=D/E*G; J=mức xăng/E*G; L=mức ĐT/E*G; Q..S=D*%DN; T..V=D*%NLĐ; X=ROUND(SUM(H:P));
+    AA=H+J+K+N+P+O (+PC chức vụ); AB=I+M+L; AF=T+U+V; AI=NPT*giảm trừ; AJ=AA-AG-AF-AI;
+    AK=ROUND(thuế lũy tiến(AJ)); W=ROUND(SUM(H:P)-T-U-V-AK)."""
+    d = _luong_chuan_dong_nhap(r)
+    e = d["ngay_cong"] or ts["ngay_cong_chuan"]
+    g = d["ngay_lam"] if d["ngay_lam"] != "" else e
+
+    def tl(x):   # theo ngày công thực tế, tránh chia 0
+        return x / e * g if e else 0.0
+
+    luong = tl(d["luong_cb"])
+    xang = tl(d["muc_xang"])
+    dien_thoai = tl(d["muc_dt"])
+    gio_tc = d["tang_ca"] / (d["luong_cb"] / e / 8.0 * ts["he_so_tang_ca"]) if (d["tang_ca"] and d["luong_cb"] and e) else 0.0
+    bh_dn = {k: d["luong_cb"] * ts["bh_dn"][k] / 100.0 for k in ("bhxh", "bhyt", "bhtn")}
+    bh_nld = {k: d["luong_cb"] * ts["bh_nld"][k] / 100.0 for k in ("bhxh", "bhyt", "bhtn")}
+    tong_bh_nld = sum(bh_nld.values())
+    tong_chiu_thue = luong + xang + d["di_lai"] + d["pc_chuc_vu"] + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
+    khong_chiu_thue = d["tien_com"] + d["trang_phuc"] + dien_thoai
+    tong_thu_nhap = tong_chiu_thue + khong_chiu_thue
+    npt = d["so_npt"]
+    gt_npt = npt * ts["giam_tru_npt"]
+    gt_ban_than = ts["giam_tru_ban_than"]
+    tn_tinh_thue = tong_chiu_thue - gt_ban_than - tong_bh_nld - gt_npt
+    thue = _luong_lam_tron(_luong_thue_tncn(tn_tinh_thue, ts["bac_thue"]))
+    tt_luong = _luong_lam_tron(tong_thu_nhap - tong_bh_nld - thue)
+    kq = dict(d)
+    kq.update({
+        "gio_tang_ca": gio_tc, "luong": luong, "xang_xe": xang, "dien_thoai": dien_thoai,
+        "bhxh_dn": bh_dn["bhxh"], "bhyt_dn": bh_dn["bhyt"], "bhtn_dn": bh_dn["bhtn"],
+        "bhxh_nld": bh_nld["bhxh"], "bhyt_nld": bh_nld["bhyt"], "bhtn_nld": bh_nld["bhtn"],
+        "tt_luong": tt_luong, "chi_phi_luong": _luong_lam_tron(tong_thu_nhap),
+        "tn_chiu_thue": tong_chiu_thue, "tn_khong_chiu_thue": khong_chiu_thue,
+        "bh_duoc_tru": tong_bh_nld, "kiem_tra": tong_chiu_thue + khong_chiu_thue - tong_bh_nld - tt_luong,
+        "giam_tru_ban_than": gt_ban_than, "tien_giam_tru_npt": gt_npt,
+        "tn_tinh_thue": tn_tinh_thue, "thue_tncn": thue,
+    })
+    kq["ngay_cong"] = e
+    kq["ngay_lam"] = g
+    return kq
+
+
+def _luong_tinh_thang(dong_nhap, ts):
+    ts = _luong_chuan_tham_so(ts)
+    return [_luong_tinh_dong(r, ts) for r in (dong_nhap or [])]
+
+
+def _luong_dam_bao_bang(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS bang_luong (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, nam INTEGER,
+        tham_so_json TEXT, thang_json TEXT, updated_at TEXT,
+        UNIQUE(company_id, nam))""")
+
+
+def _luong_doc_nam(cid, nam):
+    """Đọc dữ liệu NHẬP đã lưu của 1 năm -> (tham_so đã chuẩn hoá, {thang: [dòng nhập]}, updated_at)."""
+    conn = db()
+    try:
+        _luong_dam_bao_bang(conn)
+        r = conn.execute("SELECT tham_so_json, thang_json, updated_at FROM bang_luong "
+                         "WHERE company_id=? AND nam=?", (cid, nam)).fetchone()
+        cac_nam = [x["nam"] for x in conn.execute(
+            "SELECT nam FROM bang_luong WHERE company_id=? ORDER BY nam DESC", (cid,)).fetchall()]
+    finally:
+        conn.close()
+    ts, thang, cap_nhat = {}, {}, ""
+    if r:
+        try:
+            ts = json.loads(r["tham_so_json"] or "{}")
+            thang = json.loads(r["thang_json"] or "{}")
+        except Exception:
+            ts, thang = {}, {}
+        cap_nhat = r["updated_at"] or ""
+    thang = {t: [_luong_chuan_dong_nhap(x) for x in (thang.get(t) or [])] for t in _LUONG_THANG if thang.get(t)}
+    return _luong_chuan_tham_so(ts), thang, cap_nhat, cac_nam
+
+
+def _luong_tra_ve(cid, nam, ts, thang_nhap, cap_nhat, cac_nam):
+    return {"nam": nam, "tham_so": ts, "cap_nhat": cap_nhat, "cac_nam": cac_nam,
+            "thang": {t: _luong_tinh_thang(rows, ts) for t, rows in thang_nhap.items()}}
+
+
+def _luong_nam_hop_le(nam):
+    try:
+        nam = int(nam)
+    except Exception:
+        raise HTTPException(400, "Năm không hợp lệ")
+    if not (2000 <= nam <= 2100):
+        raise HTTPException(400, "Năm phải trong khoảng 2000-2100")
+    return nam
+
+
+@app.get("/api/bang-luong/{cid}")
+def bang_luong_get(cid: int, nam: int = 0):
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    ts, thang, cap_nhat, cac_nam = _luong_doc_nam(cid, nam)
+    return _luong_tra_ve(cid, nam, ts, thang, cap_nhat, cac_nam)
+
+
+@app.post("/api/bang-luong/{cid}")
+async def bang_luong_luu(cid: int, request: Request, nam: int = 0):
+    """Lưu dữ liệu NHẬP của 1 năm (thay thế toàn bộ năm đó): body {tham_so, thang: {"01": [dòng nhập]}}."""
+    nam = _luong_nam_hop_le(nam)
+    body = await request.json()
+    ts = _luong_chuan_tham_so(body.get("tham_so"))
+    thang_in = body.get("thang") if isinstance(body.get("thang"), dict) else {}
+    thang = {t: [_luong_chuan_dong_nhap(x) for x in (thang_in.get(t) or [])] for t in _LUONG_THANG if thang_in.get(t)}
+    conn = db()
+    try:
+        _luong_dam_bao_bang(conn)
+        conn.execute("""INSERT INTO bang_luong (company_id, nam, tham_so_json, thang_json, updated_at)
+            VALUES (?,?,?,?,?) ON CONFLICT(company_id, nam) DO UPDATE SET
+            tham_so_json=excluded.tham_so_json, thang_json=excluded.thang_json, updated_at=excluded.updated_at""",
+                     (cid, nam, json.dumps(ts, ensure_ascii=False), json.dumps(thang, ensure_ascii=False),
+                      datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    ts2, thang2, cap_nhat, cac_nam = _luong_doc_nam(cid, nam)
+    return _luong_tra_ve(cid, nam, ts2, thang2, cap_nhat, cac_nam)
+
+
+@app.post("/api/bang-luong-tinh")
+async def bang_luong_tinh(request: Request):
+    """Tính lại các dòng (không lưu) — giao diện gọi mỗi khi sửa 1 ô: body {tham_so, rows}."""
+    body = await request.json()
+    ts = _luong_chuan_tham_so(body.get("tham_so"))
+    return {"rows": _luong_tinh_thang(body.get("rows") or [], ts), "tham_so": ts}
+
+
+def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=26):
+    """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định)."""
+    cot = {}
+    for i, h in enumerate(header or []):
+        cot[_khong_dau(str(h or "")).strip().lower()] = i
+
+    def lay(r, *ten):
+        for t in ten:
+            i = cot.get(_khong_dau(t).lower())
+            if i is not None and i < len(r):
+                return r[i]
+        return ""
+    kq = []
+    for r in rows or []:
+        ten = str(lay(r, "Họ và tên") or "").strip()
+        if not ten:
+            continue
+        kq.append(_luong_chuan_dong_nhap({
+            "ma": lay(r, "Mã NV"), "ten": ten, "chuc_vu": lay(r, "Chức vụ"),
+            "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,
+            "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
+            "pc_chuc_vu": lay(r, "PC Chức vụ"), "muc_dt": lay(r, "PC Điện thoại"),
+            "trang_phuc": lay(r, "PC Trang phục"), "ghi_chu": "CK"}))
+    return kq
+
+
+@app.get("/api/bang-luong/{cid}/tu-nhan-vien")
+def bang_luong_tu_nhan_vien(cid: int, nam: int = 0):
+    """Các dòng nhập dựng sẵn từ 'Danh Sách Nhân Viên' của công ty (ngày công chuẩn theo tham số năm)."""
+    ts, _t, _c, _n = _luong_doc_nam(cid, _luong_nam_hop_le(nam or datetime.date.today().year))
+    d = nhap_lieu_get(cid, loai="nv")
+    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), ts["ngay_cong_chuan"])}
+
+
+# ----- Xuất / nhập Excel theo bố cục file "TỔNG HỢP" (2 dòng tiêu đề, mỗi nhân viên 1 dòng / tháng) -----
+# (khoá, tiêu đề dòng 1, tiêu đề dòng 2, độ rộng). Khác file gốc đúng 1 chỗ: thêm cột "PC Chức vụ" (có sẵn
+# trong Danh Sách Nhân Viên nhưng file gốc không có cột riêng) nằm sau "Hỗ trợ đi lại".
+_LUONG_COT_EXCEL = [
+    ("ma", "Mã NV", "", 8), ("ten", "Họ và Tên", "", 26), ("chuc_vu", "Chức vụ", "", 16),
+    ("luong_cb", "Lương", "CB/Tháng", 14), ("ngay_cong", "Ngày", "Công", 8),
+    ("gio_tang_ca", "Giờ", "Tăng ca", 9), ("ngay_lam", "Tổng", "NC", 8), ("luong", "Tiền", "Lương", 14),
+    ("tien_com", "Phụ cấp", "Tiền cơm", 12), ("xang_xe", "Phụ cấp", "Xăng xe", 12),
+    ("di_lai", "Phụ cấp", "Hỗ trợ đi lại", 12), ("pc_chuc_vu", "Phụ cấp", "PC Chức vụ", 12),
+    ("dien_thoai", "Phụ cấp", "Điện thoại", 12), ("trang_phuc", "Phụ cấp", "Trang Phục", 12),
+    ("thuong_bh", "Phụ cấp", "Thưởng Bán Hàng", 14), ("thuong_t13", "Phụ cấp", "Thưởng T13", 14),
+    ("tang_ca", "Tăng", "ca", 12),
+    ("bhxh_dn", "DN chịu", "BHXH 17.5%", 13), ("bhyt_dn", "DN chịu", "BHYT 3%", 12),
+    ("bhtn_dn", "DN chịu", "BHTN 1%", 12),
+    ("bhxh_nld", "Khoản giảm trừ", "BHXH 8%", 12), ("bhyt_nld", "Khoản giảm trừ", "BHYT 1.5%", 12),
+    ("bhtn_nld", "Khoản giảm trừ", "BHTN 1%", 12),
+    ("tt_luong", "TT Lương", "", 14), ("chi_phi_luong", "Chi Phí Lương", "", 14),
+    ("thang", "Tháng", "", 8), ("ghi_chu", "Ghi", "chú", 8),
+    ("tn_chiu_thue", "Thu nhập", "chịu thuế TNCN", 15), ("tn_khong_chiu_thue", "Thu nhập không", "chịu thuế TNCN", 15),
+    ("bh_duoc_tru", "Bảo hiểm", "được trừ", 13), ("kiem_tra", "Kiểm", "tra số liệu", 13),
+    ("tong_chiu_thue", "Tổng thu nhập", "Chịu Thuế", 15), ("bh_tru2", "Bảo hiểm", "BHXH", 13),
+    ("giam_tru_bt", "Giảm trừ", "bản thân", 13), ("so_npt", "Số người", "phụ thuộc", 10),
+    ("tien_npt", "Người", "Phụ Thuộc", 13), ("tn_tinh_thue", "Thu nhập chịu", "thuế TNCN", 15),
+    ("thue_tncn", "Thuế", "TNCN", 13),
+]
+
+
+def _luong_ten_cot(i):
+    from openpyxl.utils import get_column_letter
+    return get_column_letter(i + 1)
+
+
+def _luong_xuat_excel(nam, ts, thang_nhap):
+    """Xuất bảng lương cả năm ra Excel CÓ CÔNG THỨC (sửa số ở ô nhập -> tự tính lại như file gốc)."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "TONG HOP"
+    khoa = {k: _luong_ten_cot(i) for i, (k, _a, _b, _w) in enumerate(_LUONG_COT_EXCEL)}
+    ten_cot = [c[0] for c in _LUONG_COT_EXCEL]
+    thin = Side(style="thin", color="BBBBBB")
+    vien = Border(left=thin, right=thin, top=thin, bottom=thin)
+    xanh = PatternFill("solid", fgColor="1F6B4A")
+    for i, (k, h1, h2, w) in enumerate(_LUONG_COT_EXCEL, 1):
+        ws.cell(1, i, h1)
+        ws.cell(2, i, h2 or None)
+        ws.column_dimensions[_luong_ten_cot(i - 1)].width = w
+    # gộp ô tiêu đề như file gốc: cột chỉ có dòng 1 -> gộp dọc; nhóm cùng tiêu đề dòng 1 -> gộp ngang
+    for i, (k, h1, h2, w) in enumerate(_LUONG_COT_EXCEL, 1):
+        if not h2:
+            ws.merge_cells(start_row=1, start_column=i, end_row=2, end_column=i)
+    i = 0
+    while i < len(_LUONG_COT_EXCEL):
+        j = i
+        while (j + 1 < len(_LUONG_COT_EXCEL) and _LUONG_COT_EXCEL[j + 1][1] == _LUONG_COT_EXCEL[i][1]
+               and _LUONG_COT_EXCEL[i][2]):
+            j += 1
+        if j > i:
+            ws.merge_cells(start_row=1, start_column=i + 1, end_row=1, end_column=j + 1)
+        i = j + 1
+    for r in (1, 2):
+        for c in range(1, len(_LUONG_COT_EXCEL) + 1):
+            cell = ws.cell(r, c)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = xanh
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = vien
+    E, hs = ts["ngay_cong_chuan"], ts["he_so_tang_ca"]
+    bac = ts["bac_thue"]
+    moc = ",".join(repr(int(b[0]) if float(b[0]).is_integer() else b[0]) for b in bac)
+    tang = []
+    truoc = 0.0
+    for b in bac:
+        tang.append(round((b[1] - truoc) / 100.0, 10))
+        truoc = b[1]
+    dtang = ",".join(repr(x) for x in tang)
+    r = 3
+    for t in _LUONG_THANG:
+        for dong in (thang_nhap.get(t) or []):
+            d = _luong_chuan_dong_nhap(dong)
+            L = khoa
+            e = d["ngay_cong"] or E
+            ws[f"{L['ma']}{r}"] = d["ma"]
+            ws[f"{L['ten']}{r}"] = d["ten"]
+            ws[f"{L['chuc_vu']}{r}"] = d["chuc_vu"]
+            ws[f"{L['luong_cb']}{r}"] = d["luong_cb"]
+            ws[f"{L['ngay_cong']}{r}"] = e
+            ws[f"{L['ngay_lam']}{r}"] = d["ngay_lam"] if d["ngay_lam"] != "" else e
+            ws[f"{L['gio_tang_ca']}{r}"] = (f"=IFERROR({L['tang_ca']}{r}/(({L['luong_cb']}{r}/{L['ngay_cong']}{r}/8)*{hs!r}),0)")
+            ws[f"{L['luong']}{r}"] = f"={L['luong_cb']}{r}/{L['ngay_cong']}{r}*{L['ngay_lam']}{r}"
+            ws[f"{L['tien_com']}{r}"] = d["tien_com"]
+            ws[f"{L['xang_xe']}{r}"] = f"=({d['muc_xang']!r}/{L['ngay_cong']}{r})*{L['ngay_lam']}{r}"
+            ws[f"{L['di_lai']}{r}"] = d["di_lai"]
+            ws[f"{L['pc_chuc_vu']}{r}"] = d["pc_chuc_vu"]
+            ws[f"{L['dien_thoai']}{r}"] = f"=({d['muc_dt']!r}/{L['ngay_cong']}{r})*{L['ngay_lam']}{r}"
+            ws[f"{L['trang_phuc']}{r}"] = d["trang_phuc"]
+            ws[f"{L['thuong_bh']}{r}"] = d["thuong_bh"]
+            ws[f"{L['thuong_t13']}{r}"] = d["thuong_t13"]
+            ws[f"{L['tang_ca']}{r}"] = d["tang_ca"]
+            for k, khoa_bh, nhom in (("bhxh_dn", "bhxh", "bh_dn"), ("bhyt_dn", "bhyt", "bh_dn"),
+                                     ("bhtn_dn", "bhtn", "bh_dn"), ("bhxh_nld", "bhxh", "bh_nld"),
+                                     ("bhyt_nld", "bhyt", "bh_nld"), ("bhtn_nld", "bhtn", "bh_nld")):
+                ws[f"{L[k]}{r}"] = f"={L['luong_cb']}{r}*{ts[nhom][khoa_bh]!r}%"
+            hq, tq = L["luong"], L["tang_ca"]
+            ws[f"{L['tt_luong']}{r}"] = (f"=ROUND(SUM({hq}{r}:{tq}{r})-{L['bhxh_nld']}{r}-{L['bhyt_nld']}{r}"
+                                         f"-{L['bhtn_nld']}{r}-{L['thue_tncn']}{r},0)")
+            ws[f"{L['chi_phi_luong']}{r}"] = f"=ROUND(SUM({hq}{r}:{tq}{r}),0)"
+            ws[f"{L['thang']}{r}"] = t
+            ws[f"{L['ghi_chu']}{r}"] = d["ghi_chu"]
+            chiu = "+".join(f"{L[k]}{r}" for k in ("luong", "xang_xe", "di_lai", "pc_chuc_vu", "thuong_bh",
+                                                     "tang_ca", "thuong_t13"))
+            ws[f"{L['tn_chiu_thue']}{r}"] = f"=+{chiu}"
+            ws[f"{L['tn_khong_chiu_thue']}{r}"] = f"=+{L['tien_com']}{r}+{L['trang_phuc']}{r}+{L['dien_thoai']}{r}"
+            ws[f"{L['bh_duoc_tru']}{r}"] = f"=+SUM({L['bhxh_nld']}{r}:{L['bhtn_nld']}{r})"
+            ws[f"{L['kiem_tra']}{r}"] = (f"=+{L['tn_chiu_thue']}{r}+{L['tn_khong_chiu_thue']}{r}"
+                                         f"-{L['bh_duoc_tru']}{r}-{L['tt_luong']}{r}")
+            ws[f"{L['tong_chiu_thue']}{r}"] = f"=+{L['tn_chiu_thue']}{r}"
+            ws[f"{L['bh_tru2']}{r}"] = f"=SUM({L['bhxh_nld']}{r}:{L['bhtn_nld']}{r})"
+            ws[f"{L['giam_tru_bt']}{r}"] = ts["giam_tru_ban_than"]
+            ws[f"{L['so_npt']}{r}"] = d["so_npt"]
+            ws[f"{L['tien_npt']}{r}"] = f"={L['so_npt']}{r}*{ts['giam_tru_npt']!r}"
+            ws[f"{L['tn_tinh_thue']}{r}"] = (f"={L['tong_chiu_thue']}{r}-{L['giam_tru_bt']}{r}"
+                                             f"-{L['bh_tru2']}{r}-{L['tien_npt']}{r}")
+            x = f"{L['tn_tinh_thue']}{r}"
+            ws[f"{L['thue_tncn']}{r}"] = f"=ROUND(SUMPRODUCT(({x}>{{{moc}}})*({x}-{{{moc}}})*{{{dtang}}}),0)"
+            r += 1
+    cuoi = r - 1
+    if cuoi >= 3:
+        ws.cell(r, 2, f"TỔNG CỘNG NĂM {nam}").font = Font(bold=True, color="C00000")
+        for k in ("luong", "tien_com", "xang_xe", "di_lai", "pc_chuc_vu", "dien_thoai", "trang_phuc",
+                  "thuong_bh", "thuong_t13", "tang_ca", "bhxh_dn", "bhyt_dn", "bhtn_dn", "bhxh_nld", "bhyt_nld",
+                  "bhtn_nld", "tt_luong", "chi_phi_luong", "tn_chiu_thue", "tn_khong_chiu_thue", "bh_duoc_tru",
+                  "thue_tncn"):
+            c = ws[f"{khoa[k]}{r}"]
+            c.value = f"=SUM({khoa[k]}3:{khoa[k]}{cuoi})"
+            c.font = Font(bold=True, color="C00000")
+    for row in ws.iter_rows(min_row=3, max_row=r):
+        for c in row:
+            if ten_cot[c.column - 1] not in ("ma", "ten", "chuc_vu", "thang", "ghi_chu"):
+                c.number_format = "#,##0"
+    ws.freeze_panes = "D3"
+    ws.row_dimensions[1].height = 30
+    fname = f"BangLuong_{nam}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    return path, fname
+
+
+_LUONG_TU_KHOA_COT = [   # (khoá, hàm nhận diện tiêu đề đã gộp, không dấu)
+    ("gio_tang_ca", lambda h: "gio" in h and "tang ca" in h),
+    ("tang_ca", lambda h: h in ("tang ca", "tang ca ") or (h.startswith("tang") and h.endswith("ca") and "gio" not in h)),
+    ("ten", lambda h: "ho va ten" in h),
+    ("pc_chuc_vu", lambda h: "chuc vu" in h and ("pc" in h or "phu cap" in h)),
+    ("chuc_vu", lambda h: h == "chuc vu"),
+    ("luong_cb", lambda h: "cb/thang" in h or "luong cb" in h),
+    ("ngay_lam", lambda h: h in ("tong nc", "tong nc ") or ("tong" in h.split() and "nc" in h.split())),
+    ("ngay_cong", lambda h: h in ("ngay cong",)),
+    ("tien_com", lambda h: "tien com" in h),
+    ("xang_xe", lambda h: "xang xe" in h),
+    ("di_lai", lambda h: "di lai" in h),
+    ("dien_thoai", lambda h: "dien thoai" in h),
+    ("trang_phuc", lambda h: "trang phuc" in h),
+    ("thuong_bh", lambda h: "thuong ban hang" in h),
+    ("thuong_t13", lambda h: "thuong t13" in h),
+    ("so_npt", lambda h: "so nguoi phu thuoc" in h),
+    ("thang", lambda h: h == "thang"),
+    ("ghi_chu", lambda h: h in ("ghi chu",)),
+]
+
+
+def _luong_doc_excel(wb_giatri, wb_congthuc=None):
+    """Đọc file bảng lương dạng 'TỔNG HỢP' (file gốc hoặc file xuất từ phần mềm) -> ({tháng: [dòng nhập]}, [lỗi]).
+    Ô công thức mà file chưa có giá trị lưu sẵn (xuất từ phần mềm rồi chưa mở bằng Excel) thì đọc mức phụ cấp
+    (xăng xe/điện thoại) từ chính công thức '=(1000000/E3)*G3'."""
+    import re as _re
+    loi = []
+    ws = wb_giatri.worksheets[0]
+    for s in wb_giatri.worksheets:
+        if any("ho va ten" in _khong_dau(str(c.value or "")).lower() for row in s.iter_rows(min_row=1, max_row=3)
+               for c in row):
+            ws = s
+            break
+    wf = wb_congthuc[ws.title] if wb_congthuc is not None and ws.title in wb_congthuc.sheetnames else None
+    hang_dau = None
+    for r in range(1, 6):
+        if any("ho va ten" in _khong_dau(str(c.value or "")).lower() for c in ws[r]):
+            hang_dau = r
+            break
+    if hang_dau is None:
+        return {}, ["Không tìm thấy dòng tiêu đề có cột 'Họ và Tên' (cần đúng bố cục file TỔNG HỢP)"]
+    ncol = ws.max_column
+    gop = {}
+    for rng in ws.merged_cells.ranges:
+        if rng.min_row <= hang_dau <= rng.max_row:
+            v = ws.cell(rng.min_row, rng.min_col).value
+            for c in range(rng.min_col, rng.max_col + 1):
+                gop[c] = v
+    cot = {}
+    for c in range(1, ncol + 1):
+        h1 = gop.get(c, ws.cell(hang_dau, c).value)
+        h2 = ws.cell(hang_dau + 1, c).value
+        h = " ".join(str(x).replace("\n", " ").strip() for x in (h1, h2) if x not in (None, ""))
+        h = _re.sub(r"\s+", " ", _khong_dau(h).lower()).strip()
+        for k, ham in _LUONG_TU_KHOA_COT:
+            if k not in cot and h and ham(h):
+                cot[k] = c
+                break
+    i_ten = cot.get("ten")
+    if not i_ten or "luong_cb" not in cot or "thang" not in cot:
+        return {}, ["Thiếu cột bắt buộc: cần 'Họ và Tên', 'Lương CB/Tháng' và 'Tháng'"]
+    cot["ma"] = i_ten - 1 if i_ten > 1 else None
+
+    def gt(r, k):
+        c = cot.get(k)
+        return ws.cell(r, c).value if c else None
+
+    def muc_tu_cong_thuc(r, k, e, g):
+        c = cot.get(k)
+        if not c:
+            return 0.0
+        if wf is not None:
+            m = _re.match(r"^=\(\s*([0-9.]+)\s*/", str(wf.cell(r, c).value or ""))
+            if m:
+                return float(m.group(1))
+        v = ws.cell(r, c).value
+        return _luong_so(v) * e / g if (v is not None and g) else 0.0
+    thang = {}
+    for r in range(hang_dau + 2, ws.max_row + 1):
+        ten = str(gt(r, "ten") or "").strip()
+        ma = str(gt(r, "ma") or "").strip() if cot.get("ma") else ""
+        if not ten and not ma:
+            continue
+        if _khong_dau(ten).lower().startswith("tong cong") or _khong_dau(ma).lower().startswith("tong cong"):
+            continue          # dòng TỔNG CỘNG cuối bảng (nhãn ở cột Tên hoặc cột Mã)
+        t = gt(r, "thang")
+        try:
+            tt = "%02d" % int(float(str(t).strip()))
+        except Exception:
+            loi.append(f"Dòng {r}: thiếu/sai cột Tháng ('{t}') — bỏ qua")
+            continue
+        if tt not in _LUONG_THANG:
+            loi.append(f"Dòng {r}: tháng '{t}' ngoài 1-12 — bỏ qua")
+            continue
+        e = _luong_so(gt(r, "ngay_cong")) or 26.0
+        gl = gt(r, "ngay_lam")
+        g = _luong_so(gl) if gl not in (None, "") else e
+        thang.setdefault(tt, []).append(_luong_chuan_dong_nhap({
+            "ma": ma, "ten": ten, "chuc_vu": gt(r, "chuc_vu"), "luong_cb": gt(r, "luong_cb"), "ngay_cong": e,
+            "ngay_lam": g, "tien_com": gt(r, "tien_com"), "muc_xang": muc_tu_cong_thuc(r, "xang_xe", e, g),
+            "di_lai": gt(r, "di_lai"), "pc_chuc_vu": gt(r, "pc_chuc_vu"),
+            "muc_dt": muc_tu_cong_thuc(r, "dien_thoai", e, g), "trang_phuc": gt(r, "trang_phuc"),
+            "thuong_bh": gt(r, "thuong_bh"), "thuong_t13": gt(r, "thuong_t13"), "tang_ca": gt(r, "tang_ca"),
+            "so_npt": gt(r, "so_npt"), "ghi_chu": gt(r, "ghi_chu")}))
+    return thang, loi
+
+
+@app.get("/api/bang-luong/{cid}/xuat-excel")
+def bang_luong_xuat_excel(cid: int, nam: int = 0):
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    ts, thang, _c, _n = _luong_doc_nam(cid, nam)
+    if not any(thang.values()):
+        raise HTTPException(404, f"Năm {nam} chưa có dữ liệu bảng lương để xuất")
+    path, fname = _luong_xuat_excel(nam, ts, thang)
+    return _resp_xuat(path, fname)
+
+
+@app.post("/api/bang-luong/{cid}/nhap-excel")
+async def bang_luong_nhap_excel(cid: int, request: Request):
+    """Đọc file bảng lương dạng TỔNG HỢP (chưa lưu) -> {thang: {"07": [dòng nhập]}, so_dong, loi}."""
+    import openpyxl, io as _io
+    form = await request.form()
+    up = form.get("file")
+    if up is None:
+        raise HTTPException(400, "Chưa chọn file")
+    content = await up.read()
+    try:
+        wb_gt = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+        wb_ct = openpyxl.load_workbook(_io.BytesIO(content), data_only=False)
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file Excel: {e}")
+    thang, loi = _luong_doc_excel(wb_gt, wb_ct)
+    return {"thang": thang, "so_dong": sum(len(v) for v in thang.values()), "loi": loi[:10]}
 
 
 def _parse_tokhai_nhap(wb):

@@ -4351,6 +4351,12 @@ function moBangLuong(){
         <div style="font-size:18px;font-weight:700;color:#a03a7a">Danh Sách Nhân Viên</div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Hồ sơ nhân viên, lương cơ bản, phụ cấp</div>
       </div>
+      <div onclick="moBangLuongNam()" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #1f6b4a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+           onmouseover="this.style.background='#eef8f2'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:38px;margin-bottom:8px">💰</div>
+        <div style="font-size:18px;font-weight:700;color:#1f6b4a">Bảng Lương</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Lương tháng theo năm, BHXH, thuế TNCN</div>
+      </div>
     </div>`;
 }
 function moDanhSachNhanVien(){
@@ -4491,6 +4497,323 @@ async function nvImportExcel(input){
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
 }
+/* ----- BẢNG LƯƠNG (theo file TỔNG HỢP: mỗi nhân viên 1 dòng / tháng, chọn theo NĂM) ----- */
+// k: khoá dữ liệu; t: tiêu đề; nhap: ô NHẬP (sửa được) — còn lại là ô TÍNH (server tính, chỉ đọc);
+// so: hiện dạng số; tong: cộng vào dòng tổng.
+const BL_COT=[
+  {k:'ma',t:'Mã NV',nhap:1,w:60},{k:'ten',t:'Họ và Tên',nhap:1,w:170},{k:'chuc_vu',t:'Chức vụ',nhap:1,w:110},
+  {k:'luong_cb',t:'Lương CB/Tháng',nhap:1,so:1,tong:1},{k:'ngay_cong',t:'Ngày công',nhap:1,so:1,dp:1},
+  {k:'ngay_lam',t:'Tổng NC',nhap:1,so:1,dp:1},{k:'gio_tang_ca',t:'Giờ tăng ca',so:1,dp:1},
+  {k:'luong',t:'Tiền lương',so:1,tong:1},{k:'tien_com',t:'PC Tiền cơm',nhap:1,so:1,tong:1},
+  {k:'muc_xang',t:'Mức xăng xe/tháng',nhap:1,so:1},{k:'xang_xe',t:'Xăng xe',so:1,tong:1},
+  {k:'di_lai',t:'Hỗ trợ đi lại',nhap:1,so:1,tong:1},{k:'pc_chuc_vu',t:'PC Chức vụ',nhap:1,so:1,tong:1},
+  {k:'muc_dt',t:'Mức điện thoại/tháng',nhap:1,so:1},{k:'dien_thoai',t:'Điện thoại',so:1,tong:1},
+  {k:'trang_phuc',t:'Trang phục',nhap:1,so:1,tong:1},{k:'thuong_bh',t:'Thưởng bán hàng',nhap:1,so:1,tong:1},
+  {k:'thuong_t13',t:'Thưởng T13',nhap:1,so:1,tong:1},{k:'tang_ca',t:'Tăng ca (tiền)',nhap:1,so:1,tong:1},
+  {k:'bhxh_dn',t:'DN chịu BHXH',so:1,tong:1},{k:'bhyt_dn',t:'DN chịu BHYT',so:1,tong:1},{k:'bhtn_dn',t:'DN chịu BHTN',so:1,tong:1},
+  {k:'bhxh_nld',t:'Trừ BHXH',so:1,tong:1},{k:'bhyt_nld',t:'Trừ BHYT',so:1,tong:1},{k:'bhtn_nld',t:'Trừ BHTN',so:1,tong:1},
+  {k:'tt_luong',t:'TT Lương (thực lãnh)',so:1,tong:1,dam:1},{k:'chi_phi_luong',t:'Chi phí lương',so:1,tong:1,dam:1},
+  {k:'ghi_chu',t:'Ghi chú',nhap:1,w:60},
+  {k:'tn_chiu_thue',t:'Thu nhập chịu thuế',so:1,tong:1},{k:'tn_khong_chiu_thue',t:'Thu nhập không chịu thuế',so:1,tong:1},
+  {k:'bh_duoc_tru',t:'Bảo hiểm được trừ',so:1,tong:1},{k:'kiem_tra',t:'Kiểm tra số liệu',so:1},
+  {k:'giam_tru_ban_than',t:'Giảm trừ bản thân',so:1},{k:'so_npt',t:'Số người phụ thuộc',nhap:1,so:1,dp:1},
+  {k:'tien_giam_tru_npt',t:'Giảm trừ người phụ thuộc',so:1},{k:'tn_tinh_thue',t:'Thu nhập tính thuế',so:1,tong:1},
+  {k:'thue_tncn',t:'Thuế TNCN',so:1,tong:1,dam:1}];
+const BL_TRUONG_NHAP=BL_COT.filter(c=>c.nhap).map(c=>c.k);
+const BL_THANG=Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'));
+let blNam=0,blThang='01',blTS=null,blDL={},blCacNam=[],blBan=false,blSeq=0;
+function blDinhDang(v,dp){
+  const n=Number(v);if(!isFinite(n))return'';
+  return n.toLocaleString('vi-VN',{maximumFractionDigits:dp?2:0});
+}
+function blDongTrong(){
+  const d={};BL_TRUONG_NHAP.forEach(k=>{d[k]=(k==='ma'||k==='ten'||k==='chuc_vu'||k==='ghi_chu')?'':0;});
+  d.ngay_cong=(blTS&&blTS.ngay_cong_chuan)||26;d.ngay_lam='';d.ghi_chu='CK';
+  return d;
+}
+async function moBangLuongNam(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  let nam=parseInt(localStorage.getItem('blNam')||'',10);
+  if(!(nam>=2000&&nam<=2100))nam=new Date().getFullYear();
+  blNam=nam;blThang=String(new Date().getMonth()+1).padStart(2,'0');blBan=false;
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;color:#1f6b4a">💰 Bảng Lương</h3>
+        <button class="btn ghost sm" onclick="blQuayLai()">← Bảng Lương - BHXH</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <label style="font-weight:700">Năm</label>
+        <select id="blChonNam" onchange="blDoiNam(this.value)" style="padding:6px 10px;border:1px solid #ccc;border-radius:8px;font-weight:700"></select>
+        <button class="btn ghost sm" onclick="blNamKhac()">➕ Năm khác</button>
+        <span style="width:8px"></span>
+        <button class="btn gold sm" onclick="blLuu()">💾 Lưu</button>
+        <button class="btn sm" style="background:#2e5c8a" onclick="blNapNhanVien()">👥 Nạp từ Danh Sách Nhân Viên</button>
+        <button class="btn ghost sm" onclick="blSaoChepThangTruoc()">📋 Sao chép từ tháng trước</button>
+        <button class="btn ghost sm" onclick="blThemDong()">➕ Thêm dòng</button>
+        <button class="btn ghost sm" onclick="document.getElementById('blImportFile').click()">📥 Import Excel</button>
+        <input type="file" id="blImportFile" accept=".xlsx" style="display:none" onchange="blImportExcel(this)">
+        <button class="btn ghost sm" onclick="blXuatExcel()">📤 Xuất Excel cả năm</button>
+        <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
+      </div>
+      <div id="blThamSo" style="display:none"></div>
+      <div id="blTabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
+      <div id="blInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
+      <div id="blBangWrap" style="overflow:auto;max-height:62vh;border:1px solid #ddd;border-radius:8px"></div>
+    </div>`;
+  await blTai();
+}
+function blQuayLai(){
+  if(blBan&&!confirm('Bảng lương có thay đổi CHƯA LƯU. Vẫn thoát?'))return;
+  moBangLuong();
+}
+async function blTai(){
+  try{
+    const d=await api(`/api/bang-luong/${current}?nam=${blNam}`);
+    blTS=d.tham_so;blDL=d.thang||{};blCacNam=d.cac_nam||[];blBan=false;
+    localStorage.setItem('blNam',String(blNam));
+    blVeChonNam();blVeTabs();blVeBang();
+    const info=document.getElementById('blInfo');
+    if(info&&d.cap_nhat)info.dataset.capnhat=new Date(d.cap_nhat).toLocaleString('vi-VN');
+    blVeInfo();
+  }catch(e){toast('Không tải được bảng lương: '+e.message,'err')}
+}
+function blVeChonNam(){
+  const cy=new Date().getFullYear();
+  const ds=[...new Set([...blCacNam,cy-1,cy,cy+1,blNam])].sort((a,b)=>b-a);
+  const sel=document.getElementById('blChonNam');
+  if(sel)sel.innerHTML=ds.map(y=>`<option value="${y}"${y===blNam?' selected':''}>${y}${blCacNam.includes(y)?' ●':''}</option>`).join('');
+}
+async function blDoiNam(v){
+  const nam=parseInt(v,10);if(!(nam>=2000&&nam<=2100))return;
+  if(blBan&&!confirm('Bảng lương có thay đổi CHƯA LƯU. Đổi năm sẽ bỏ các thay đổi này. Tiếp tục?')){blVeChonNam();return}
+  blNam=nam;await blTai();
+}
+async function blNamKhac(){
+  const v=prompt('Nhập năm cần làm việc (VD 2025):',String(blNam));
+  if(v==null)return;
+  const nam=parseInt(v,10);
+  if(!(nam>=2000&&nam<=2100)){toast('Năm không hợp lệ (2000-2100)','err');return}
+  await blDoiNam(nam);
+}
+function blVeInfo(){
+  const info=document.getElementById('blInfo');if(!info)return;
+  const tong=Object.values(blDL).reduce((s,a)=>s+a.length,0);
+  let t=blThang==='nam'?`Năm ${blNam}: ${tong} dòng lương`:`Tháng ${parseInt(blThang,10)}/${blNam}: ${(blDL[blThang]||[]).length} nhân viên`;
+  if(info.dataset.capnhat)t+=` — đã lưu lúc ${info.dataset.capnhat}`;
+  if(blBan)t+=' — ⚠ có thay đổi CHƯA LƯU';
+  info.textContent=t;
+  info.style.color=blBan?'#b45309':'var(--muted)';
+}
+function blVeTabs(){
+  const w=document.getElementById('blTabs');if(!w)return;
+  const nut=(k,ten)=>`<button class="btn sm ${blThang===k?'':'ghost'}" style="${blThang===k?'background:#1f6b4a;color:#fff':''}" onclick="blChonThang('${k}')">${ten}${(k!=='nam'&&(blDL[k]||[]).length)?' ●':''}</button>`;
+  w.innerHTML=BL_THANG.map(t=>nut(t,'T'+parseInt(t,10))).join('')+nut('nam','📊 Cả năm');
+}
+function blChonThang(k){blThang=k;blVeTabs();blVeBang();blVeInfo();}
+function blSoDong(d){return(blDL[d]||[])}
+function blVeBang(){
+  const w=document.getElementById('blBangWrap');if(!w)return;
+  if(blThang==='nam'){blVeCaNam(w);return}
+  const rows=blDL[blThang]||[];
+  let h='<table style="border-collapse:collapse;font-size:13px"><thead><tr>';
+  BL_COT.forEach(c=>{h+=`<th style="position:sticky;top:0;background:${c.nhap?'#1f6b4a':'#5b6b62'};color:#fff;padding:6px 8px;border:1px solid #14523a;white-space:normal;min-width:${c.w||90}px;line-height:1.25;z-index:1">${xkEsc(c.t)}</th>`;});
+  h+='<th style="position:sticky;top:0;background:#5b6b62;color:#fff;border:1px solid #14523a;width:28px"></th></tr></thead><tbody>';
+  rows.forEach((r,ri)=>{
+    h+='<tr>';
+    BL_COT.forEach(c=>{
+      const v=r[c.k];
+      const kt=c.k==='kiem_tra'&&Math.abs((r.kiem_tra||0)-(r.thue_tncn||0))>=1;
+      const noiDung=c.so?blDinhDang(v,c.dp):xkEsc(v==null?'':v);
+      if(c.nhap)h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;${c.so?'text-align:right;':''}">${noiDung}</td>`;
+      else h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:${kt?'#fde2e2':'#f4f6f5'};white-space:nowrap;text-align:right;${c.dam?'font-weight:700;':''}">${noiDung}</td>`;
+    });
+    h+=`<td style="border:1px solid #e3e3e3;text-align:center"><button onclick="blXoaDong(${ri})" title="Xóa dòng" style="border:none;background:transparent;color:#c00;cursor:pointer">✕</button></td></tr>`;
+  });
+  if(rows.length){
+    h+='<tr style="background:#eef6f0;font-weight:700">';
+    BL_COT.forEach((c,i)=>{h+=`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right;position:sticky;bottom:0;background:#eef6f0">${i===1?'TỔNG CỘNG':(c.tong?blDinhDang(rows.reduce((s,r)=>s+(Number(r[c.k])||0),0)):'')}</td>`;});
+    h+='<td style="position:sticky;bottom:0;background:#eef6f0"></td></tr>';
+  }
+  h+='</tbody></table>';
+  w.innerHTML=h;
+  if(!rows.length)w.innerHTML+=`<div style="padding:22px;text-align:center;color:var(--muted)">Tháng này chưa có dữ liệu. Bấm <b>👥 Nạp từ Danh Sách Nhân Viên</b>, <b>📋 Sao chép từ tháng trước</b>, <b>➕ Thêm dòng</b> hoặc <b>📥 Import Excel</b>.</div>`;
+}
+function blVeCaNam(w){
+  const ds=[];BL_THANG.forEach(t=>(blDL[t]||[]).forEach(r=>ds.push({t,r})));
+  if(!ds.length){w.innerHTML='<div style="padding:22px;text-align:center;color:var(--muted)">Năm này chưa có dữ liệu.</div>';return}
+  const cot=[{k:'t',t:'Tháng'}].concat(BL_COT.filter(c=>['ma','ten','chuc_vu','luong_cb','luong','tt_luong','chi_phi_luong','bhxh_dn','bhyt_dn','bhtn_dn','bhxh_nld','bhyt_nld','bhtn_nld','tn_chiu_thue','tn_khong_chiu_thue','tn_tinh_thue','thue_tncn'].includes(c.k)));
+  let h='<div style="font-weight:700;margin:8px">Tổng hợp theo nhân viên (cả năm)</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 14px"><thead><tr>';
+  const cotNv=['ma','ten','chi_phi_luong','tt_luong','bh_dn','bhxh_nld_tong','tn_chiu_thue','thue_tncn'];
+  const tenNv={ma:'Mã NV',ten:'Họ và Tên',chi_phi_luong:'Tổng chi phí lương',tt_luong:'Tổng thực lãnh',bh_dn:'Tổng BH doanh nghiệp chịu',bhxh_nld_tong:'Tổng BH người lao động',tn_chiu_thue:'Tổng thu nhập chịu thuế',thue_tncn:'Tổng thuế TNCN'};
+  cotNv.forEach(k=>{h+=`<th style="background:#1f6b4a;color:#fff;padding:6px 8px;border:1px solid #14523a">${tenNv[k]}</th>`;});
+  h+='</tr></thead><tbody>';
+  const nv={};
+  ds.forEach(({r})=>{
+    const key=(r.ma||'')+'|'+(r.ten||'');
+    const a=nv[key]||(nv[key]={ma:r.ma,ten:r.ten,chi_phi_luong:0,tt_luong:0,bh_dn:0,bhxh_nld_tong:0,tn_chiu_thue:0,thue_tncn:0});
+    a.chi_phi_luong+=r.chi_phi_luong||0;a.tt_luong+=r.tt_luong||0;a.bh_dn+=(r.bhxh_dn||0)+(r.bhyt_dn||0)+(r.bhtn_dn||0);
+    a.bhxh_nld_tong+=r.bh_duoc_tru||0;a.tn_chiu_thue+=r.tn_chiu_thue||0;a.thue_tncn+=r.thue_tncn||0;
+  });
+  const tong={chi_phi_luong:0,tt_luong:0,bh_dn:0,bhxh_nld_tong:0,tn_chiu_thue:0,thue_tncn:0};
+  Object.values(nv).forEach(a=>{
+    h+='<tr>'+cotNv.map(k=>{
+      if(k!=='ma'&&k!=='ten')tong[k]+=a[k];
+      return `<td style="padding:4px 8px;border:1px solid #e3e3e3;${k==='ma'||k==='ten'?'':'text-align:right'}">${k==='ma'||k==='ten'?xkEsc(a[k]):blDinhDang(a[k])}</td>`;
+    }).join('')+'</tr>';
+  });
+  h+='<tr style="background:#eef6f0;font-weight:700">'+cotNv.map((k,i)=>`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right">${i===1?'TỔNG CỘNG':(i<2?'':blDinhDang(tong[k]))}</td>`).join('')+'</tr></tbody></table>';
+  h+='<div style="font-weight:700;margin:8px">Chi tiết từng tháng</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 8px"><thead><tr>';
+  cot.forEach(c=>{h+=`<th style="background:#5b6b62;color:#fff;padding:6px 8px;border:1px solid #14523a;white-space:normal">${xkEsc(c.t)}</th>`;});
+  h+='</tr></thead><tbody>';
+  ds.forEach(({t,r})=>{
+    h+='<tr>'+cot.map(c=>{
+      if(c.k==='t')return `<td style="padding:4px 8px;border:1px solid #e3e3e3">T${parseInt(t,10)}</td>`;
+      return `<td style="padding:4px 8px;border:1px solid #e3e3e3;${c.so?'text-align:right':''}">${c.so?blDinhDang(r[c.k],c.dp):xkEsc(r[c.k]==null?'':r[c.k])}</td>`;
+    }).join('')+'</tr>';
+  });
+  h+='</tbody></table><div style="font-size:12px;color:var(--muted);margin:0 8px 8px">Muốn sửa số: chọn tab tháng tương ứng. Xuất Excel cả năm để có đủ mọi cột theo bố cục bảng TỔNG HỢP.</div>';
+  w.innerHTML=h;
+}
+async function blTinhLai(t){
+  const rows=blDL[t]||[];
+  const seq=++blSeq;
+  if(!rows.length)return;
+  try{
+    const kq=await api('/api/bang-luong-tinh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,rows})});
+    if(seq!==blSeq)return;               // có lần sửa mới hơn — bỏ kết quả cũ
+    blDL[t]=kq.rows;blTS=kq.tham_so||blTS;
+    if(blThang===t)blVeBang();
+  }catch(e){toast('Lỗi tính lương: '+e.message,'err')}
+}
+function blSuaO(td){
+  const ri=+td.dataset.r,k=td.dataset.k,rows=blDL[blThang];
+  if(!rows||!rows[ri])return;
+  const cu=rows[ri][k];
+  const moi=td.textContent.trim();
+  if(String(cu==null?'':cu)===moi)return;
+  const cot=BL_COT.find(c=>c.k===k);
+  if(cot&&cot.so&&blDinhDang(cu,cot.dp)===moi)return;   // chỉ khác định dạng hiển thị
+  rows[ri][k]=moi;blBan=true;blVeInfo();
+  blTinhLai(blThang);
+}
+function blThemDong(){
+  if(blThang==='nam'){toast('Chọn 1 tab tháng để thêm dòng','err');return}
+  (blDL[blThang]=blDL[blThang]||[]).push(blDongTrong());
+  blBan=true;blVeTabs();blVeBang();blVeInfo();blTinhLai(blThang);
+}
+function blXoaDong(ri){
+  const rows=blDL[blThang];if(!rows||!rows[ri])return;
+  if(!confirm(`Xóa dòng "${rows[ri].ten||rows[ri].ma||'(trống)'}" khỏi tháng ${parseInt(blThang,10)}?`))return;
+  rows.splice(ri,1);if(!rows.length)delete blDL[blThang];
+  blBan=true;blVeTabs();blVeBang();blVeInfo();
+}
+async function blNapNhanVien(){
+  if(blThang==='nam'){toast('Chọn 1 tab tháng để nạp nhân viên','err');return}
+  try{
+    const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}`);
+    if(!d.rows||!d.rows.length){toast('Danh Sách Nhân Viên đang trống — nhập nhân viên trước','err');return}
+    const co=blDL[blThang]=blDL[blThang]||[];
+    const daCo=new Set(co.map(r=>(r.ma||r.ten||'').toString().trim().toLowerCase()));
+    let them=0;
+    d.rows.forEach(r=>{const key=(r.ma||r.ten||'').toString().trim().toLowerCase();if(!daCo.has(key)){co.push(r);daCo.add(key);them++}});
+    if(!them){toast('Tất cả nhân viên đã có trong tháng này','');return}
+    blBan=true;blVeTabs();blVeBang();blVeInfo();await blTinhLai(blThang);
+    toast(`✓ Đã thêm ${them} nhân viên vào tháng ${parseInt(blThang,10)} — nhập ngày công/thưởng rồi bấm 💾 Lưu`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function blSaoChepThangTruoc(){
+  if(blThang==='nam'){toast('Chọn 1 tab tháng để sao chép','err');return}
+  let t=parseInt(blThang,10)-1;
+  while(t>=1&&!(blDL[String(t).padStart(2,'0')]||[]).length)t--;
+  if(t<1){toast('Không có tháng nào trước đó (trong năm này) có dữ liệu để sao chép','err');return}
+  const nguon=String(t).padStart(2,'0');
+  if((blDL[blThang]||[]).length&&!confirm(`Tháng ${parseInt(blThang,10)} đã có dữ liệu — thay bằng bản sao của tháng ${t}?`))return;
+  // Sao chép mọi khoản cố định; các khoản phát sinh riêng từng tháng (thưởng bán hàng, thưởng T13, tăng ca) đặt lại 0.
+  blDL[blThang]=blDL[nguon].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);c.thuong_bh=0;c.thuong_t13=0;c.tang_ca=0;c.ngay_lam='';return c});
+  blBan=true;blVeTabs();blVeBang();blVeInfo();await blTinhLai(blThang);
+  toast(`✓ Đã sao chép từ tháng ${t} (thưởng bán hàng/thưởng T13/tăng ca đặt lại 0 — nhập lại nếu có)`,'ok');
+}
+async function blLuu(im){
+  try{
+    const thang={};BL_THANG.forEach(t=>{if((blDL[t]||[]).length)thang[t]=blDL[t].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);return c})});
+    const d=await api(`/api/bang-luong/${current}?nam=${blNam}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,thang})});
+    blTS=d.tham_so;blDL=d.thang||{};blCacNam=d.cac_nam||[];blBan=false;
+    const info=document.getElementById('blInfo');if(info)info.dataset.capnhat=new Date().toLocaleString('vi-VN');
+    blVeChonNam();blVeTabs();blVeBang();blVeInfo();
+    if(!im)toast(`💾 Đã lưu bảng lương năm ${blNam}`,'ok');
+    return true;
+  }catch(e){toast('Lỗi lưu: '+e.message,'err');return false}
+}
+async function blXuatExcel(){
+  if(blBan&&!(await blLuu(true)))return;
+  try{
+    const r=await fetch(`/api/bang-luong/${current}/xuat-excel?nam=${blNam}`,{cache:'no-store'});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    await xuatFile(r,`BangLuong_${blNam}.xlsx`);
+    toast(`📤 Đã xuất bảng lương năm ${blNam}`,'ok');
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
+}
+async function blImportExcel(input){
+  const f=input.files&&input.files[0];if(!f)return;
+  toast('Đang đọc file...','');
+  try{
+    const fd=new FormData();fd.append('file',f);
+    const r=await fetch(`/api/bang-luong/${current}/nhap-excel`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const kq=await r.json();
+    if(!kq.so_dong){toast('Không đọc được dòng lương nào'+(kq.loi&&kq.loi.length?': '+kq.loi.join('; '):''),'err');input.value='';return}
+    const thangCo=Object.keys(kq.thang).filter(t=>(blDL[t]||[]).length);
+    if(thangCo.length&&!confirm(`File có dữ liệu cho tháng ${thangCo.map(t=>parseInt(t,10)).join(', ')} đã có sẵn trong năm ${blNam} — thay các tháng đó bằng dữ liệu trong file?`)){input.value='';return}
+    Object.assign(blDL,kq.thang);blBan=true;
+    for(const t of Object.keys(kq.thang))await blTinhLai(t);
+    blVeTabs();blVeBang();blVeInfo();
+    toast(`✓ Đã đọc ${kq.so_dong} dòng (tháng ${Object.keys(kq.thang).map(t=>parseInt(t,10)).join(', ')}) vào năm ${blNam}`+(kq.loi&&kq.loi.length?` (⚠ ${kq.loi.join('; ')})`:'')+' — nhớ bấm 💾 Lưu','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
+}
+/* Tham số năm: giảm trừ, tỷ lệ bảo hiểm, biểu thuế — mặc định đúng như file bảng lương mẫu */
+function blMoThamSo(){
+  const w=document.getElementById('blThamSo');if(!w)return;
+  if(w.style.display!=='none'){w.style.display='none';return}
+  const t=blTS,o=(id,v,st)=>`<input id="${id}" value="${v}" style="width:${st||110}px;padding:4px 6px;border:1px solid #ccc;border-radius:6px;text-align:right">`;
+  w.style.cssText='display:block;border:1px solid #cfe0d5;background:#f6fbf8;border-radius:10px;padding:12px;margin-bottom:10px';
+  w.innerHTML=`<div style="font-weight:700;margin-bottom:6px">⚙ Tham số năm ${blNam}</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center">
+      <span>Ngày công chuẩn ${o('blTsNgay',t.ngay_cong_chuan,60)}</span>
+      <span>Giảm trừ bản thân ${o('blTsBt',t.giam_tru_ban_than)} đ</span>
+      <span>Giảm trừ mỗi người phụ thuộc ${o('blTsNpt',t.giam_tru_npt)} đ</span>
+      <span>Hệ số quy đổi tăng ca ${o('blTsHs',Number(t.he_so_tang_ca).toFixed(4),70)}</span>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center;margin-top:8px">
+      <b>DN chịu (% lương CB):</b> <span>BHXH ${o('blTsDx',t.bh_dn.bhxh,50)}</span><span>BHYT ${o('blTsDy',t.bh_dn.bhyt,50)}</span><span>BHTN ${o('blTsDt',t.bh_dn.bhtn,50)}</span>
+      <b>Người lao động trừ:</b> <span>BHXH ${o('blTsNx',t.bh_nld.bhxh,50)}</span><span>BHYT ${o('blTsNy',t.bh_nld.bhyt,50)}</span><span>BHTN ${o('blTsNt',t.bh_nld.bhtn,50)}</span>
+    </div>
+    <div style="margin-top:8px;font-size:13px"><b>Biểu thuế TNCN lũy tiến</b> (từ mức thu nhập tính thuế / thuế suất %):
+      <div id="blBac" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${t.bac_thue.map((b,i)=>blBacHtml(b,i)).join('')}</div>
+      <button class="btn ghost sm" style="margin-top:4px" onclick="blThemBac()">➕ Thêm bậc</button></div>
+    <div style="margin-top:8px;font-size:12px;color:#6b5b00;background:#fff8dc;padding:6px 8px;border-radius:6px">Giá trị mặc định lấy đúng theo file bảng lương bạn gửi (giảm trừ 11.000.000 / 4.400.000, biểu thuế 7 bậc 5–35%). Mỗi năm có tham số riêng — <b>hãy kiểm tra và chỉnh lại cho năm ${blNam}</b> nếu quy định về mức giảm trừ/biểu thuế có thay đổi.</div>
+    <div style="margin-top:8px"><button class="btn gold sm" onclick="blApDungThamSo()">✓ Áp dụng &amp; tính lại</button> <button class="btn ghost sm" onclick="document.getElementById('blThamSo').style.display='none'">Đóng</button></div>`;
+}
+function blBacHtml(b,i){
+  return `<span class="blBacDong" style="border:1px solid #d6e3db;border-radius:6px;padding:3px 6px;background:#fff">từ <input class="blBacTu" value="${b[0]}" style="width:100px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> → <input class="blBacTs" value="${b[1]}" style="width:44px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px">% <button onclick="this.parentNode.remove()" style="border:none;background:transparent;color:#c00;cursor:pointer">✕</button></span>`;
+}
+function blThemBac(){document.getElementById('blBac').insertAdjacentHTML('beforeend',blBacHtml([0,0],0))}
+async function blApDungThamSo(){
+  const g=id=>document.getElementById(id).value;
+  const bac=[...document.querySelectorAll('#blBac .blBacDong')].map(d=>[d.querySelector('.blBacTu').value,d.querySelector('.blBacTs').value]);
+  if(!bac.length){toast('Cần ít nhất 1 bậc thuế','err');return}
+  blTS={ngay_cong_chuan:g('blTsNgay'),giam_tru_ban_than:g('blTsBt'),giam_tru_npt:g('blTsNpt'),he_so_tang_ca:g('blTsHs'),
+    bh_dn:{bhxh:g('blTsDx'),bhyt:g('blTsDy'),bhtn:g('blTsDt')},bh_nld:{bhxh:g('blTsNx'),bhyt:g('blTsNy'),bhtn:g('blTsNt')},bac_thue:bac};
+  blBan=true;
+  // server chuẩn hoá tham số (ép số, sắp bậc thuế) — lấy lại bản chuẩn để hiển thị/lưu
+  try{const kq=await api('/api/bang-luong-tinh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,rows:[]})});blTS=kq.tham_so;}catch(e){toast('Lỗi: '+e.message,'err');return}
+  for(const t of Object.keys(blDL))await blTinhLai(t);
+  blVeInfo();
+  document.getElementById('blThamSo').style.display='none';
+  toast('✓ Đã áp dụng tham số và tính lại — bấm 💾 Lưu để giữ lại','ok');
+}
+
 /* ----- KẾT NỐI MISA SME (import trực tiếp qua CSDL) ----- */
 function misaEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 /* ----- Kết nối trực tiếp CSDL MISA (SQL Server) — CHỈ ĐỌC / khám phá ----- */
