@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-29.005"
+APP_BUILD = "2026-09-29.006"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10063,19 +10063,29 @@ _LUONG_THAM_SO_MAC_DINH = {
 _LUONG_CAC_TRUONG_NHAP = (
     "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
     "pc_chuc_vu", "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "ghi_chu")
-# Thuế TNCN theo Luật Thuế thu nhập cá nhân 2025 (hiệu lực 1/7/2026): giảm trừ bản thân 15.500.000, mỗi người
+# Thuế TNCN theo Luật Thuế thu nhập cá nhân 2025 (áp dụng cho kỳ tính thuế từ 1/1/2026): giảm trừ bản thân 15.500.000, mỗi người
 # phụ thuộc 6.200.000 và biểu lũy tiến từng phần 5 bậc (đến 10tr 5%, đến 30tr 10%, đến 60tr 20%, đến 100tr 30%,
-# trên 100tr 35%). Khi tính lương từ tháng 7/2026 phần mềm tự áp dụng bộ này; các tháng trước đó vẫn tính theo
+# trên 100tr 35%). Khi tính lương từ tháng 1/2026 phần mềm tự áp dụng bộ này; năm 2025 trở về trước vẫn tính theo
 # biểu 7 bậc + giảm trừ 11.000.000 / 4.400.000 (file bảng lương mẫu).
 _LUONG_THUE_MOI = {
     "giam_tru_ban_than": 15500000, "giam_tru_npt": 6200000,
     "bac_thue": [[0, 5], [10000000, 10], [30000000, 20], [60000000, 30], [100000000, 35]],
 }
-_LUONG_THUE_MOI_TU = (2026, 7)      # (năm, tháng) bắt đầu áp dụng
+_LUONG_THUE_MOI_TU = (2026, 1)      # (năm, tháng) bắt đầu áp dụng
+
+
+def _luong_thue_moi_la_mac_dinh(tm):
+    """tm còn NGUYÊN giá trị mặc định (giảm trừ + biểu thuế) — người dùng chưa chỉnh số nào."""
+    try:
+        return (_luong_so(tm.get("giam_tru_ban_than")) == _LUONG_THUE_MOI["giam_tru_ban_than"]
+                and _luong_so(tm.get("giam_tru_npt")) == _LUONG_THUE_MOI["giam_tru_npt"]
+                and [[_luong_so(b[0]), _luong_so(b[1])] for b in tm.get("bac_thue")] == _LUONG_THUE_MOI["bac_thue"])
+    except Exception:
+        return False
 
 
 def _luong_thue_moi_mac_dinh(nam):
-    """Thiết lập thuế mới mặc định theo năm: 2026 -> đổi từ tháng 7; các năm sau -> áp dụng cả năm (đặt ngay làm
+    """Thiết lập thuế mới mặc định theo năm: 2026 -> áp dụng từ tháng 1; các năm sau -> áp dụng cả năm (đặt ngay làm
     tham số chính, không cần đổi giữa năm); năm trước 2026 -> không có."""
     if nam == _LUONG_THUE_MOI_TU[0]:
         return dict(tu_thang=_LUONG_THUE_MOI_TU[1], **{k: ([list(b) for b in v] if k == "bac_thue" else v)
@@ -10207,6 +10217,10 @@ def _luong_chuan_tham_so(ts, nam=None):
     # Bộ tham số thuế THAY ĐỔI GIỮA NĂM: từ tháng tu_thang trở đi dùng giảm trừ + biểu thuế riêng.
     # Thiếu khoá -> mặc định theo năm; đặt None (giao diện bỏ tick) -> không đổi giữa năm.
     tm = ts["thue_moi"] if "thue_moi" in ts else _luong_thue_moi_mac_dinh(nam) if nam else None
+    if (nam == _LUONG_THUE_MOI_TU[0] and isinstance(tm, dict) and int(_luong_so(tm.get("tu_thang"))) == 7
+            and _luong_thue_moi_la_mac_dinh(tm)):
+        # Bản lưu trước đây tự đặt "đổi từ tháng 7" (chưa ai chỉnh số) -> đổi về từ 1/1/2026 theo quy định.
+        tm = dict(tm, tu_thang=_LUONG_THUE_MOI_TU[1])
     kq["thue_moi"] = None
     if isinstance(tm, dict):
         tu = int(_luong_so(tm.get("tu_thang")))
@@ -10310,7 +10324,7 @@ def _luong_tinh_dong(r, ts, thang=None):
     khong_chiu_thue = d["tien_com"] + d["trang_phuc"] + dien_thoai
     tong_thu_nhap = tong_chiu_thue + khong_chiu_thue
     npt = d["so_npt"]
-    tt = _luong_thue_ap_dung(ts, thang)      # từ 7/2026 tự đổi sang giảm trừ + biểu thuế mới
+    tt = _luong_thue_ap_dung(ts, thang)      # từ 1/1/2026 tự dùng giảm trừ + biểu thuế mới
     gt_npt = npt * tt["giam_tru_npt"]
     gt_ban_than = tt["giam_tru_ban_than"]
     tn_tinh_thue = tong_chiu_thue - gt_ban_than - tong_bh_nld - gt_npt

@@ -4568,6 +4568,7 @@ async function moBangLuongNam(){
         <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
       </div>
       <div id="blThamSo" style="display:none"></div>
+      <div id="blChonNv" style="display:none"></div>
       <div id="blTabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
       <div id="blInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="blBangWrap" style="overflow:auto;max-height:62vh;border:1px solid #ddd;border-radius:8px"></div>
@@ -4642,7 +4643,8 @@ function blVeBang(){
       const v=r[c.k];
       const kt=c.k==='kiem_tra'&&Math.abs((r.kiem_tra||0)-(r.thue_tncn||0))>=1;
       const noiDung=c.so?blDinhDang(blGiaTriHienThi(r,c),c.dp):xkEsc(v==null?'':v);
-      if(c.tick)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${(v===0||v==='0'||v===false)?'':'checked'} onchange="blDoiBH(${ri},this.checked)" title="Tick = có đóng BHXH/BHYT/BHTN; bỏ tick = không tính BH" style="width:17px;height:17px;cursor:pointer"></td>`;
+      if(c.k==='ten')h+=`<td data-r="${ri}" data-k="ten" onclick="blMoChonNv(${ri})" title="Bấm để chọn người lao động trong Danh Sách Nhân Viên" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;cursor:pointer;${co(c,1)}">${noiDung} <span style="color:#1f6b4a;font-size:11px">▾</span></td>`;
+      else if(c.tick)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${(v===0||v==='0'||v===false)?'':'checked'} onchange="blDoiBH(${ri},this.checked)" title="Tick = có đóng BHXH/BHYT/BHTN; bỏ tick = không tính BH" style="width:17px;height:17px;cursor:pointer"></td>`;
       else if(c.nhap)h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;${c.so?'text-align:right;':''}${co(c,1)}">${noiDung}</td>`;
       else h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:${kt?'#fde2e2':'#f4f6f5'};white-space:nowrap;text-align:right;${c.dam?'font-weight:700;':''}">${noiDung}</td>`;
     });
@@ -4715,6 +4717,60 @@ function blSuaO(td){
   if(cot&&cot.so&&blDinhDang(cu,cot.dp)===moi)return;   // chỉ khác định dạng hiển thị
   rows[ri][k]=moi;blBan=true;blVeInfo();
   blTinhLai(blThang);
+}
+/* Bấm tên người lao động -> hiện danh sách nhân viên (Danh Sách Nhân Viên), tô viền ĐỎ người đang chọn; chọn người khác
+   để đổi dòng sang người đó (lương cơ bản + phụ cấp lấy theo danh sách; ngày công/thưởng/tăng ca của dòng giữ nguyên). */
+let blDsNv=[],blChonRi=-1;
+function blKeyNv(r){return (r.ma||r.ten||'').toString().trim().toLowerCase()}
+async function blMoChonNv(ri){
+  const rows=blDL[blThang];if(!rows||!rows[ri])return;
+  blChonRi=ri;
+  try{
+    const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}`);
+    blDsNv=d.rows||[];
+  }catch(e){toast('Lỗi tải Danh Sách Nhân Viên: '+e.message,'err');return}
+  blVeChonNv('');
+}
+function blVeChonNv(loc){
+  const w=document.getElementById('blChonNv');if(!w)return;
+  const rows=blDL[blThang]||[],hien=rows[blChonRi];if(!hien){w.style.display='none';return}
+  const keyHien=blKeyNv(hien),loai=(loc||'').toString().trim().toLowerCase();
+  const daCo=new Set(rows.filter((_,i)=>i!==blChonRi).map(blKeyNv));
+  const ds=blDsNv.map((r,i)=>({r,i})).filter(({r})=>!loai||((r.ma||'')+' '+(r.ten||'')+' '+(r.chuc_vu||'')).toLowerCase().includes(loai));
+  w.style.cssText='display:block;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;overflow:auto';
+  w.innerHTML=`<div onclick="event.stopPropagation()" style="background:#fff;max-width:520px;margin:6vh auto;border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b style="color:#1f6b4a">👥 Chọn người lao động (tháng ${parseInt(blThang,10)}/${blNam})</b>
+      <button class="btn ghost sm" onclick="blDongChonNv()">✕ Đóng</button></div>
+    <input id="blChonNvTim" value="${xkEsc(loc||'')}" oninput="blVeChonNv(this.value)" onkeydown="if(event.key==='Escape')blDongChonNv()" placeholder="Tìm theo mã / tên / chức vụ..." style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px">
+    <div style="max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:6px">${
+      ds.length?ds.map(({r,i})=>{
+        const dang=blKeyNv(r)===keyHien, trung=!dang&&daCo.has(blKeyNv(r));
+        return `<div class="blNvMuc${dang?' blNvDang':''}" data-i="${i}" onclick="blChonNvChot(${i})" style="cursor:${trung?'not-allowed':'pointer'};padding:8px 10px;border-radius:8px;border:${dang?'2px solid #d00000':'1px solid #ddd'};background:${dang?'#fff5f5':trung?'#f3f3f3':'#fff'};opacity:${trung?.6:1}">
+          <div style="font-weight:700">${xkEsc(r.ten||'')} <span style="font-weight:400;color:var(--muted)">— Mã ${xkEsc(r.ma||'')}</span>${dang?' <span style="color:#d00000;font-size:12px">● đang chọn</span>':''}${trung?' <span style="font-size:12px;color:#888">(đã có ở dòng khác trong tháng)</span>':''}</div>
+          <div style="font-size:12px;color:var(--muted)">${xkEsc(r.chuc_vu||'')} · Lương CB ${blDinhDang(r.luong_cb)}</div></div>`}).join(''):`<div style="padding:16px;text-align:center;color:var(--muted)">${blDsNv.length?'Không có nhân viên khớp':'Danh Sách Nhân Viên đang trống — nhập nhân viên trước'}</div>`}</div>
+    <div style="margin-top:8px;text-align:right"><button class="btn ghost sm" onclick="blGoTenTay()">✏ Gõ tay tên/mã (không có trong danh sách)</button></div></div>`;
+  w.onclick=blDongChonNv;
+  const tim=document.getElementById('blChonNvTim');
+  if(tim&&tim.focus){tim.focus();if(tim.setSelectionRange)tim.setSelectionRange(tim.value.length,tim.value.length)}
+}
+function blDongChonNv(){const w=document.getElementById('blChonNv');if(w){w.style.display='none';w.innerHTML=''}blChonRi=-1}
+async function blChonNvChot(i){
+  const rows=blDL[blThang],hien=rows&&rows[blChonRi],r=blDsNv[i];
+  if(!hien||!r)return;
+  const kr=blKeyNv(r);
+  if(kr!==blKeyNv(hien)&&rows.some((x,j)=>j!==blChonRi&&blKeyNv(x)===kr)){toast('Người này đã có ở dòng khác trong tháng','err');return}
+  if(kr===blKeyNv(hien)){blDongChonNv();return}
+  ['ma','ten','chuc_vu','luong_cb','tien_com','muc_xang','pc_chuc_vu','muc_dt','trang_phuc'].forEach(k=>{hien[k]=r[k]});
+  blBan=true;blDongChonNv();blVeBang();blVeInfo();await blTinhLai(blThang);
+  toast(`✓ Đã chọn ${r.ten} — lương cơ bản/phụ cấp lấy theo Danh Sách Nhân Viên`,'ok');
+}
+function blGoTenTay(){
+  const rows=blDL[blThang],hien=rows&&rows[blChonRi];if(!hien)return;
+  const ten=prompt('Họ và tên người lao động:',hien.ten||'');
+  if(ten===null)return;
+  const ma=prompt('Mã NV (có thể để trống):',hien.ma||'');
+  hien.ten=ten.trim();if(ma!==null)hien.ma=ma.trim();
+  blBan=true;blDongChonNv();blVeBang();blVeInfo();
 }
 function blDoiBH(ri,co){
   const rows=blDL[blThang];if(!rows||!rows[ri])return;
@@ -4833,13 +4889,13 @@ function blMoThamSo(){
       <div id="blBac" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${t.bac_thue.map((b,i)=>blBacHtml(b,i)).join('')}</div>
       <button class="btn ghost sm" style="margin-top:4px" onclick="blThemBac()">➕ Thêm bậc</button></div>
     <div style="margin-top:10px;font-size:13px;border-top:1px dashed #cfe0d5;padding-top:8px">
-      <label><input type="checkbox" id="blMoiBat" ${t.thue_moi?'checked':''} onchange="document.getElementById('blMoiBox').style.display=this.checked?'block':'none'"> <b>Thuế TNCN thay đổi giữa năm</b> — từ tháng <input id="blMoiTu" value="${t.thue_moi?t.thue_moi.tu_thang:7}" style="width:40px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> tự động dùng giảm trừ + biểu thuế bên dưới (các tháng trước dùng bộ ở trên)</label>
+      <label><input type="checkbox" id="blMoiBat" ${t.thue_moi?'checked':''} onchange="document.getElementById('blMoiBox').style.display=this.checked?'block':'none'"> <b>Thuế TNCN thay đổi giữa năm</b> — từ tháng <input id="blMoiTu" value="${t.thue_moi?t.thue_moi.tu_thang:1}" style="width:40px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> tự động dùng giảm trừ + biểu thuế bên dưới (các tháng trước dùng bộ ở trên)</label>
       <div id="blMoiBox" style="display:${t.thue_moi?'block':'none'};margin-top:6px">
         <span>Giảm trừ bản thân ${o('blMoiBt',t.thue_moi?t.thue_moi.giam_tru_ban_than:15500000)} đ</span>
         <span style="margin-left:14px">Giảm trừ mỗi người phụ thuộc ${o('blMoiNpt',t.thue_moi?t.thue_moi.giam_tru_npt:6200000)} đ</span>
         <div id="blBacMoi" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">${(t.thue_moi?t.thue_moi.bac_thue:[[0,5],[10000000,10],[30000000,20],[60000000,30],[100000000,35]]).map(b=>blBacHtml(b,0)).join('')}</div>
         <button class="btn ghost sm" style="margin-top:4px" onclick="document.getElementById('blBacMoi').insertAdjacentHTML('beforeend',blBacHtml([0,0],0))">➕ Thêm bậc</button>
-        <div style="font-size:12px;color:#6b5b00;margin-top:4px">Mặc định năm 2026: từ tháng 7 áp dụng Luật Thuế TNCN mới — giảm trừ bản thân 15.500.000, người phụ thuộc 6.200.000, biểu lũy tiến 5 bậc (10tr 5% · 30tr 10% · 60tr 20% · 100tr 30% · trên 100tr 35%). Từ năm 2027 phần mềm dùng bộ này cả năm.</div>
+        <div style="font-size:12px;color:#6b5b00;margin-top:4px">Mặc định năm 2026: áp dụng Luật Thuế TNCN mới từ 1/1/2026 — giảm trừ bản thân 15.500.000, người phụ thuộc 6.200.000, biểu lũy tiến 5 bậc (10tr 5% · 30tr 10% · 60tr 20% · 100tr 30% · trên 100tr 35%). Từ năm 2027 phần mềm dùng bộ này cả năm.</div>
       </div>
     </div>
     <div style="margin-top:8px;font-size:12px;color:#6b5b00;background:#fff8dc;padding:6px 8px;border-radius:6px">Giá trị mặc định lấy đúng theo file bảng lương bạn gửi (giảm trừ 11.000.000 / 4.400.000, biểu thuế 7 bậc 5–35%). Mỗi năm có tham số riêng — <b>hãy kiểm tra và chỉnh lại cho năm ${blNam}</b> nếu quy định về mức giảm trừ/biểu thuế có thay đổi.</div>
