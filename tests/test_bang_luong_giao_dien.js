@@ -62,7 +62,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(m.ctx.blDinhDang(26.5, true), '26,5');
   assert.strictEqual(m.ctx.blDinhDang('abc'), '');
   const trong = m.ctx.blDongTrong();
-  assert(trong.ngay_cong === 26 && trong.ghi_chu === 'CK' && trong.luong_cb === 0 && trong.ngay_lam === '');
+  assert(trong.ngay_cong === 0 && trong.ghi_chu === 'CK' && trong.luong_cb === 0 && trong.ngay_lam === '');
   console.log('PASS 2: định dạng số kiểu VN; dòng trống mặc định (công chuẩn 26, ghi chú CK).');
 
   // ---- 3: chọn NĂM — danh sách gồm các năm đã có dữ liệu + năm hiện tại ±1; nhớ năm đã chọn ----
@@ -216,6 +216,37 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   await m.ctx.blLuu(true);
   assert.strictEqual(m.goiApi[m.goiApi.length - 1][1].thang['09'][1].dong_bh, 0, 'Lưu gửi kèm dong_bh');
   console.log('PASS 13: ô tick Đóng BHXH — mặc định tick, bỏ tick -> tính lại, lưu kèm cờ.');
+
+  // ---- 14: công chuẩn theo lịch: ô Ngày công/Tổng NC trống hiện giá trị đang dùng; gửi năm+tháng khi tính lại ----
+  m = nap({ api: (url, o) => { const b = JSON.parse(o.body); return { rows: b.rows, tham_so: b.tham_so }; } });
+  m.ctx.blNam = 2025; m.ctx.blThang = '01';
+  m.ctx.blTS = { cong_chuan: { '01': 21, '07': 27 } };
+  assert.strictEqual(m.ctx.blDongTrong().ngay_cong, 0, 'Dòng mới: ngày công 0 = theo lịch tháng');
+  m.ctx.blDL = { '01': [dongMau('101', 'A', { ngay_cong: 0, ngay_lam: '', ngay_cong_hd: 21, ngay_lam_hd: 21 }),
+                        dongMau('102', 'B', { ngay_cong: 24, ngay_lam: 20, ngay_cong_hd: 24, ngay_lam_hd: 20 })] };
+  m.ctx.blVeBang();
+  const b14 = m.phanTu['blBangWrap'].innerHTML;
+  const oNgayCong = [...b14.matchAll(/data-k="ngay_cong"[^>]*>([^<]*)</g)].map(x => x[1]);
+  const oTongNc = [...b14.matchAll(/data-k="ngay_lam"[^>]*>([^<]*)</g)].map(x => x[1]);
+  assert.deepStrictEqual(oNgayCong, ['21', '24'], 'Hiện công chuẩn tháng khi để trống, giữ số nhập tay');
+  assert.deepStrictEqual(oTongNc, ['21', '20']);
+  m.ctx.blSuaO({ dataset: { r: '0', k: 'ngay_cong' }, textContent: '21' });
+  assert.strictEqual(m.ctx.blBan, false, 'Gõ lại đúng số đang hiển thị -> không đổi/không tính lại');
+  assert.strictEqual(m.goiApi.length, 0);
+  m.ctx.blSuaO({ dataset: { r: '0', k: 'ngay_cong' }, textContent: '26' });
+  assert.strictEqual(m.ctx.blBan, true);
+  const goi = m.goiApi.find(([u]) => u.includes('bang-luong-tinh'))[1];
+  assert.strictEqual(goi.nam, 2025); assert.strictEqual(goi.thang, '01');
+  assert.strictEqual(goi.rows[0].ngay_cong, '26');
+  // sao chép từ tháng trước: về "theo lịch" (ngay_cong = 0)
+  m.ctx.blThang = '02'; m.ctx.blDL = { '01': [dongMau('101', 'A', { ngay_cong: 24 })] };
+  await m.ctx.blSaoChepThangTruoc();
+  assert.strictEqual(m.ctx.blDL['02'][0].ngay_cong, 0);
+  // dòng thông tin tháng có công chuẩn
+  m.ctx.blThang = '07'; m.phanTu['blInfo'] = { dataset: {}, style: {}, textContent: '' };
+  m.ctx.blVeInfo();
+  assert(/công chuẩn 27 ngày/.test(m.phanTu['blInfo'].textContent), m.phanTu['blInfo'].textContent);
+  console.log('PASS 14: công chuẩn theo lịch — hiển thị, sửa tay, sao chép tháng, gửi năm/tháng khi tính lại.');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

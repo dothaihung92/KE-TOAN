@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-29.002"
+APP_BUILD = "2026-09-29.003"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10067,6 +10067,62 @@ _LUONG_TRUONG_CHU = ("ma", "ten", "chuc_vu", "ghi_chu")
 _LUONG_THANG = tuple("%02d" % i for i in range(1, 13))
 
 
+# Ngày nghỉ lễ hưởng lương theo Bộ luật Lao động (mức tối thiểu cho khu vực tư nhân) — chỉ tính các ngày
+# rơi vào thứ 2–thứ 7 (ngày lễ trùng Chủ nhật đã nằm trong ngày nghỉ hằng tuần, không trừ 2 lần).
+# 2025: Tết DL 1/1; Tết Ất Tỵ 27–31/1 (28 Chạp–mùng 3); Giỗ Tổ 7/4 (10/3 ÂL); 30/4 + 1/5; Quốc khánh 1/9 + 2/9.
+# 2026: Tết DL 1/1; Tết Bính Ngọ 16–20/2; Giỗ Tổ 26/4 (CN) -> nghỉ bù 27/4; 30/4 + 1/5; Quốc khánh 1/9 + 2/9.
+# (Quốc khánh: 2/9 + 1 ngày liền kề do doanh nghiệp chọn 1/9 hoặc 3/9 — mặc định chọn 1/9; sửa được trong Tham số năm.)
+_LUONG_LE_MAC_DINH = {
+    2025: [("01-01", "Tết Dương lịch"), ("01-27", "Tết Nguyên đán"), ("01-28", "Tết Nguyên đán"),
+           ("01-29", "Tết Nguyên đán"), ("01-30", "Tết Nguyên đán"), ("01-31", "Tết Nguyên đán"),
+           ("04-07", "Giỗ Tổ Hùng Vương"), ("04-30", "Ngày Giải phóng miền Nam"), ("05-01", "Quốc tế Lao động"),
+           ("09-01", "Quốc khánh"), ("09-02", "Quốc khánh")],
+    2026: [("01-01", "Tết Dương lịch"), ("02-16", "Tết Nguyên đán"), ("02-17", "Tết Nguyên đán"),
+           ("02-18", "Tết Nguyên đán"), ("02-19", "Tết Nguyên đán"), ("02-20", "Tết Nguyên đán"),
+           ("04-27", "Nghỉ bù Giỗ Tổ Hùng Vương"), ("04-30", "Ngày Giải phóng miền Nam"),
+           ("05-01", "Quốc tế Lao động"), ("09-01", "Quốc khánh"), ("09-02", "Quốc khánh")],
+}
+_LUONG_LE_CO_DINH = [("01-01", "Tết Dương lịch"), ("04-30", "Ngày Giải phóng miền Nam"),
+                     ("05-01", "Quốc tế Lao động"), ("09-01", "Quốc khánh"), ("09-02", "Quốc khánh")]
+
+
+def _luong_le_mac_dinh(nam):
+    """Danh sách ngày lễ mặc định của năm: [{"ngay": "YYYY-MM-DD", "ten": ...}]. Năm chưa có lịch sẵn (Tết Âm lịch,
+    Giỗ Tổ tính theo Âm lịch) chỉ có các ngày lễ dương lịch cố định — người dùng tự thêm Tết/Giỗ Tổ."""
+    ds = _LUONG_LE_MAC_DINH.get(nam) or _LUONG_LE_CO_DINH
+    return [{"ngay": f"{nam}-{md}", "ten": ten} for md, ten in ds]
+
+
+def _luong_chuan_ngay_le(ds, nam):
+    """Chuẩn hoá danh sách ngày lễ nhập tay: chỉ giữ ngày hợp lệ NẰM TRONG NĂM, bỏ trùng, sắp theo ngày."""
+    kq, da = [], set()
+    for x in (ds if isinstance(ds, list) else []):
+        ngay = str((x.get("ngay") if isinstance(x, dict) else x) or "").strip()[:10]
+        try:
+            d = datetime.date.fromisoformat(ngay)
+        except Exception:
+            continue
+        if d.year != nam or ngay in da:
+            continue
+        da.add(ngay)
+        ten = str(x.get("ten") or "").strip() if isinstance(x, dict) else ""
+        kq.append({"ngay": ngay, "ten": ten})
+    return sorted(kq, key=lambda z: z["ngay"])
+
+
+def _luong_cong_chuan_thang(nam, thang, ngay_le):
+    """Công chuẩn của 1 tháng = số ngày trong tháng − số Chủ nhật − số ngày lễ (không trùng Chủ nhật)."""
+    import calendar
+    t = int(thang)
+    le = {x["ngay"] if isinstance(x, dict) else str(x) for x in (ngay_le or [])}
+    dem = 0
+    for ng in range(1, calendar.monthrange(nam, t)[1] + 1):
+        d = datetime.date(nam, t, ng)
+        if d.weekday() != 6 and d.isoformat() not in le:
+            dem += 1
+    return dem
+
+
 def _luong_so(v):
     """Số từ ô nhập tay/Excel: nhận 32500000, '32,500,000', '32.500.000', '1.234,5', ' 12 '. Rỗng/lạ -> 0."""
     if v is None or isinstance(v, bool):
@@ -10103,8 +10159,9 @@ def _luong_lam_tron(x):
     return math.floor(x + 0.5) if x >= 0 else -math.floor(-x + 0.5)
 
 
-def _luong_chuan_tham_so(ts):
-    """Trộn tham số người dùng với mặc định, ép về số, sắp xếp bậc thuế — không bao giờ ném lỗi."""
+def _luong_chuan_tham_so(ts, nam=None):
+    """Trộn tham số người dùng với mặc định, ép về số, sắp xếp bậc thuế — không bao giờ ném lỗi.
+    Có `nam` -> thêm ngày lễ của năm (chưa nhập thì lấy lịch mặc định) và công chuẩn từng tháng (cong_chuan)."""
     mac_dinh = _LUONG_THAM_SO_MAC_DINH
     ts = ts if isinstance(ts, dict) else {}
     kq = {
@@ -10122,6 +10179,11 @@ def _luong_chuan_tham_so(ts):
         if isinstance(b, (list, tuple)) and len(b) >= 2:
             bac.append([_luong_so(b[0]), _luong_so(b[1])])
     kq["bac_thue"] = sorted(bac) if bac else [list(b) for b in mac_dinh["bac_thue"]]
+    if nam:
+        kq["nam"] = nam
+        kq["ngay_le"] = (_luong_chuan_ngay_le(ts["ngay_le"], nam) if isinstance(ts.get("ngay_le"), list)
+                         else _luong_le_mac_dinh(nam))
+        kq["cong_chuan"] = {t: _luong_cong_chuan_thang(nam, t, kq["ngay_le"]) for t in _LUONG_THANG}
     return kq
 
 
@@ -10170,13 +10232,15 @@ def _luong_chuan_dong_nhap(r, ts=None):
     return kq
 
 
-def _luong_tinh_dong(r, ts):
+def _luong_tinh_dong(r, ts, thang=None):
     """Tính 1 dòng bảng lương từ dòng NHẬP r + tham số ts (đã chuẩn hoá). Công thức bám sát file gốc
     (cột theo file): H=D/E*G; J=mức xăng/E*G; L=mức ĐT/E*G; Q..S=D*%DN; T..V=D*%NLĐ; X=ROUND(SUM(H:P));
     AA=H+J+K+N+P+O (+PC chức vụ); AB=I+M+L; AF=T+U+V; AI=NPT*giảm trừ; AJ=AA-AG-AF-AI;
     AK=ROUND(thuế lũy tiến(AJ)); W=ROUND(SUM(H:P)-T-U-V-AK)."""
     d = _luong_chuan_dong_nhap(r)
-    e = d["ngay_cong"] or ts["ngay_cong_chuan"]
+    # Ngày công chuẩn: ô "Ngày công" để trống/0 -> theo LỊCH THÁNG (trừ Chủ nhật + ngày lễ); nhập số -> dùng số đó.
+    cong_chuan = (ts.get("cong_chuan") or {}).get(thang) if thang else None
+    e = d["ngay_cong"] or cong_chuan or ts["ngay_cong_chuan"]
     g = d["ngay_lam"] if d["ngay_lam"] != "" else e
 
     def tl(x):   # theo ngày công thực tế, tránh chia 0
@@ -10211,14 +10275,14 @@ def _luong_tinh_dong(r, ts):
         "giam_tru_ban_than": gt_ban_than, "tien_giam_tru_npt": gt_npt,
         "tn_tinh_thue": tn_tinh_thue, "thue_tncn": thue,
     })
-    kq["ngay_cong"] = e
-    kq["ngay_lam"] = g
+    kq["ngay_cong_hd"] = e      # giá trị đang dùng để tính (ô nhập giữ nguyên: 0/trống = theo lịch tháng)
+    kq["ngay_lam_hd"] = g
     return kq
 
 
-def _luong_tinh_thang(dong_nhap, ts):
-    ts = _luong_chuan_tham_so(ts)
-    return [_luong_tinh_dong(r, ts) for r in (dong_nhap or [])]
+def _luong_tinh_thang(dong_nhap, ts, thang=None, nam=None):
+    ts = _luong_chuan_tham_so(ts, nam or (ts.get("nam") if isinstance(ts, dict) else None))
+    return [_luong_tinh_dong(r, ts, thang) for r in (dong_nhap or [])]
 
 
 def _luong_dam_bao_bang(conn):
@@ -10248,12 +10312,20 @@ def _luong_doc_nam(cid, nam):
             ts, thang = {}, {}
         cap_nhat = r["updated_at"] or ""
     thang = {t: [_luong_chuan_dong_nhap(x) for x in (thang.get(t) or [])] for t in _LUONG_THANG if thang.get(t)}
-    return _luong_chuan_tham_so(ts), thang, cap_nhat, cac_nam
+    if r and "ngay_le" not in ts:
+        # Dữ liệu lưu TRƯỚC khi có công chuẩn theo lịch: mỗi dòng bị điền cứng ngày công 26 -> chuyển về
+        # "theo lịch tháng" (0) để tính lại đúng công chuẩn từng tháng.
+        cu = _luong_so(ts.get("ngay_cong_chuan")) or _LUONG_THAM_SO_MAC_DINH["ngay_cong_chuan"]
+        for rows in thang.values():
+            for x in rows:
+                if x["ngay_cong"] == cu:
+                    x["ngay_cong"] = 0.0
+    return _luong_chuan_tham_so(ts, nam), thang, cap_nhat, cac_nam
 
 
 def _luong_tra_ve(cid, nam, ts, thang_nhap, cap_nhat, cac_nam):
     return {"nam": nam, "tham_so": ts, "cap_nhat": cap_nhat, "cac_nam": cac_nam,
-            "thang": {t: _luong_tinh_thang(rows, ts) for t, rows in thang_nhap.items()}}
+            "thang": {t: _luong_tinh_thang(rows, ts, t, nam) for t, rows in thang_nhap.items()}}
 
 
 def _luong_nam_hop_le(nam):
@@ -10278,7 +10350,7 @@ async def bang_luong_luu(cid: int, request: Request, nam: int = 0):
     """Lưu dữ liệu NHẬP của 1 năm (thay thế toàn bộ năm đó): body {tham_so, thang: {"01": [dòng nhập]}}."""
     nam = _luong_nam_hop_le(nam)
     body = await request.json()
-    ts = _luong_chuan_tham_so(body.get("tham_so"))
+    ts = _luong_chuan_tham_so(body.get("tham_so"), nam)
     thang_in = body.get("thang") if isinstance(body.get("thang"), dict) else {}
     thang = {t: [_luong_chuan_dong_nhap(x) for x in (thang_in.get(t) or [])] for t in _LUONG_THANG if thang_in.get(t)}
     conn = db()
@@ -10300,11 +10372,23 @@ async def bang_luong_luu(cid: int, request: Request, nam: int = 0):
 async def bang_luong_tinh(request: Request):
     """Tính lại các dòng (không lưu) — giao diện gọi mỗi khi sửa 1 ô: body {tham_so, rows}."""
     body = await request.json()
-    ts = _luong_chuan_tham_so(body.get("tham_so"))
-    return {"rows": _luong_tinh_thang(body.get("rows") or [], ts), "tham_so": ts}
+    nam = int(_luong_so(body.get("nam"))) or None
+    thang = str(body.get("thang") or "").zfill(2)
+    ts = _luong_chuan_tham_so(body.get("tham_so"), nam)
+    return {"rows": _luong_tinh_thang(body.get("rows") or [], ts, thang if thang in _LUONG_THANG else None, nam),
+            "tham_so": ts}
 
 
-def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=26):
+@app.get("/api/bang-luong-le-mac-dinh")
+def bang_luong_le_mac_dinh(nam: int = 0):
+    """Lịch ngày lễ mặc định của 1 năm + công chuẩn từng tháng (để nút 'khôi phục lịch lễ mặc định')."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    ds = _luong_le_mac_dinh(nam)
+    return {"nam": nam, "ngay_le": ds, "co_lich_day_du": nam in _LUONG_LE_MAC_DINH,
+            "cong_chuan": {t: _luong_cong_chuan_thang(nam, t, ds) for t in _LUONG_THANG}}
+
+
+def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0):
     """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định)."""
     cot = {}
     for i, h in enumerate(header or []):
@@ -10323,7 +10407,7 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=26):
             continue
         kq.append(_luong_chuan_dong_nhap({
             "ma": lay(r, "Mã NV"), "ten": ten, "chuc_vu": lay(r, "Chức vụ"),
-            "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,
+            "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,   # 0 = theo công chuẩn (lịch) của tháng
             "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
             "pc_chuc_vu": lay(r, "PC Chức vụ"), "muc_dt": lay(r, "PC Điện thoại"),
             "trang_phuc": lay(r, "PC Trang phục"), "ghi_chu": "CK"}))
@@ -10335,7 +10419,7 @@ def bang_luong_tu_nhan_vien(cid: int, nam: int = 0):
     """Các dòng nhập dựng sẵn từ 'Danh Sách Nhân Viên' của công ty (ngày công chuẩn theo tham số năm)."""
     ts, _t, _c, _n = _luong_doc_nam(cid, _luong_nam_hop_le(nam or datetime.date.today().year))
     d = nhap_lieu_get(cid, loai="nv")
-    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), ts["ngay_cong_chuan"])}
+    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"))}
 
 
 # ----- Xuất / nhập Excel theo bố cục file "TỔNG HỢP" (2 dòng tiêu đề, mỗi nhân viên 1 dòng / tháng) -----
@@ -10406,7 +10490,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             cell.fill = xanh
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = vien
-    E, hs = ts["ngay_cong_chuan"], ts["he_so_tang_ca"]
+    hs = ts["he_so_tang_ca"]
     bac = ts["bac_thue"]
     moc = ",".join(repr(int(b[0]) if float(b[0]).is_integer() else b[0]) for b in bac)
     tang = []
@@ -10420,7 +10504,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
         for dong in (thang_nhap.get(t) or []):
             d = _luong_chuan_dong_nhap(dong)
             L = khoa
-            e = d["ngay_cong"] or E
+            e = d["ngay_cong"] or (ts.get("cong_chuan") or {}).get(t) or ts["ngay_cong_chuan"]
             ws[f"{L['ma']}{r}"] = d["ma"]
             ws[f"{L['ten']}{r}"] = d["ten"]
             ws[f"{L['chuc_vu']}{r}"] = d["chuc_vu"]

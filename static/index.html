@@ -4502,8 +4502,8 @@ async function nvImportExcel(input){
 // so: hiện dạng số; tong: cộng vào dòng tổng.
 const BL_COT=[
   {k:'ma',t:'Mã NV',nhap:1,w:60},{k:'ten',t:'Họ và Tên',nhap:1,w:170},{k:'chuc_vu',t:'Chức vụ',nhap:1,w:110},
-  {k:'luong_cb',t:'Lương CB/Tháng',nhap:1,so:1,tong:1},{k:'ngay_cong',t:'Ngày công',nhap:1,so:1,dp:1},
-  {k:'ngay_lam',t:'Tổng NC',nhap:1,so:1,dp:1},{k:'gio_tang_ca',t:'Giờ tăng ca',so:1,dp:1},
+  {k:'luong_cb',t:'Lương CB/Tháng',nhap:1,so:1,tong:1},{k:'ngay_cong',t:'Ngày công',nhap:1,so:1,dp:1,hd:'ngay_cong_hd'},
+  {k:'ngay_lam',t:'Tổng NC',nhap:1,so:1,dp:1,hd:'ngay_lam_hd'},{k:'gio_tang_ca',t:'Giờ tăng ca',so:1,dp:1},
   {k:'luong',t:'Tiền lương',so:1,tong:1},{k:'tien_com',t:'PC Tiền cơm',nhap:1,so:1,tong:1},
   {k:'muc_xang',t:'Mức xăng xe/tháng',nhap:1,so:1},{k:'xang_xe',t:'Xăng xe',so:1,tong:1},
   {k:'di_lai',t:'Hỗ trợ đi lại',nhap:1,so:1,tong:1},{k:'pc_chuc_vu',t:'PC Chức vụ',nhap:1,so:1,tong:1},
@@ -4527,9 +4527,15 @@ function blDinhDang(v,dp){
   const n=Number(v);if(!isFinite(n))return'';
   return n.toLocaleString('vi-VN',{maximumFractionDigits:dp?2:0});
 }
+// Ô "Ngày công" trống/0 và ô "Tổng NC" trống = tự theo công chuẩn của tháng (server trả giá trị đang dùng ở *_hd).
+function blGiaTriHienThi(r,c){
+  const v=r[c.k];
+  if(c.hd&&r[c.hd]!=null&&(v===''||v==null||(c.k==='ngay_cong'&&(Number(v)===0))))return r[c.hd];
+  return v;
+}
 function blDongTrong(){
   const d={};BL_TRUONG_NHAP.forEach(k=>{d[k]=(k==='ma'||k==='ten'||k==='chuc_vu'||k==='ghi_chu')?'':0;});
-  d.ngay_cong=(blTS&&blTS.ngay_cong_chuan)||26;d.ngay_lam='';d.ghi_chu='CK';d.dong_bh=1;
+  d.ngay_cong=0;d.ngay_lam='';d.ghi_chu='CK';d.dong_bh=1;
   return d;
 }
 async function moBangLuongNam(){
@@ -4601,6 +4607,7 @@ function blVeInfo(){
   const info=document.getElementById('blInfo');if(!info)return;
   const tong=Object.values(blDL).reduce((s,a)=>s+a.length,0);
   let t=blThang==='nam'?`Năm ${blNam}: ${tong} dòng lương`:`Tháng ${parseInt(blThang,10)}/${blNam}: ${(blDL[blThang]||[]).length} nhân viên`;
+  if(blThang!=='nam'&&blTS&&blTS.cong_chuan&&blTS.cong_chuan[blThang]!=null)t+=` — công chuẩn ${blTS.cong_chuan[blThang]} ngày (trừ Chủ nhật + lễ)`;
   if(info.dataset.capnhat)t+=` — đã lưu lúc ${info.dataset.capnhat}`;
   if(blBan)t+=' — ⚠ có thay đổi CHƯA LƯU';
   info.textContent=t;
@@ -4625,7 +4632,7 @@ function blVeBang(){
     BL_COT.forEach(c=>{
       const v=r[c.k];
       const kt=c.k==='kiem_tra'&&Math.abs((r.kiem_tra||0)-(r.thue_tncn||0))>=1;
-      const noiDung=c.so?blDinhDang(v,c.dp):xkEsc(v==null?'':v);
+      const noiDung=c.so?blDinhDang(blGiaTriHienThi(r,c),c.dp):xkEsc(v==null?'':v);
       if(c.tick)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${(v===0||v==='0'||v===false)?'':'checked'} onchange="blDoiBH(${ri},this.checked)" title="Tick = có đóng BHXH/BHYT/BHTN; bỏ tick = không tính BH" style="width:17px;height:17px;cursor:pointer"></td>`;
       else if(c.nhap)h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;${c.so?'text-align:right;':''}">${noiDung}</td>`;
       else h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:${kt?'#fde2e2':'#f4f6f5'};white-space:nowrap;text-align:right;${c.dam?'font-weight:700;':''}">${noiDung}</td>`;
@@ -4682,7 +4689,7 @@ async function blTinhLai(t){
   const seq=++blSeq;
   if(!rows.length)return;
   try{
-    const kq=await api('/api/bang-luong-tinh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,rows})});
+    const kq=await api('/api/bang-luong-tinh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,rows,nam:blNam,thang:t})});
     if(seq!==blSeq)return;               // có lần sửa mới hơn — bỏ kết quả cũ
     blDL[t]=kq.rows;blTS=kq.tham_so||blTS;
     if(blThang===t)blVeBang();
@@ -4691,7 +4698,8 @@ async function blTinhLai(t){
 function blSuaO(td){
   const ri=+td.dataset.r,k=td.dataset.k,rows=blDL[blThang];
   if(!rows||!rows[ri])return;
-  const cu=rows[ri][k];
+  const cotHd=BL_COT.find(c=>c.k===k);
+  const cu=cotHd?blGiaTriHienThi(rows[ri],cotHd):rows[ri][k];
   const moi=td.textContent.trim();
   if(String(cu==null?'':cu)===moi)return;
   const cot=BL_COT.find(c=>c.k===k);
@@ -4736,7 +4744,8 @@ async function blSaoChepThangTruoc(){
   const nguon=String(t).padStart(2,'0');
   if((blDL[blThang]||[]).length&&!confirm(`Tháng ${parseInt(blThang,10)} đã có dữ liệu — thay bằng bản sao của tháng ${t}?`))return;
   // Sao chép mọi khoản cố định; các khoản phát sinh riêng từng tháng (thưởng bán hàng, thưởng T13, tăng ca) đặt lại 0.
-  blDL[blThang]=blDL[nguon].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);c.thuong_bh=0;c.thuong_t13=0;c.tang_ca=0;c.ngay_lam='';return c});
+  // công chuẩn mỗi tháng một khác -> sao chép về "theo lịch tháng" (ngay_cong=0)
+  blDL[blThang]=blDL[nguon].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);c.thuong_bh=0;c.thuong_t13=0;c.tang_ca=0;c.ngay_lam='';c.ngay_cong=0;return c});
   blBan=true;blVeTabs();blVeBang();blVeInfo();await blTinhLai(blThang);
   toast(`✓ Đã sao chép từ tháng ${t} (thưởng bán hàng/thưởng T13/tăng ca đặt lại 0 — nhập lại nếu có)`,'ok');
 }
@@ -4786,7 +4795,6 @@ function blMoThamSo(){
   w.style.cssText='display:block;border:1px solid #cfe0d5;background:#f6fbf8;border-radius:10px;padding:12px;margin-bottom:10px';
   w.innerHTML=`<div style="font-weight:700;margin-bottom:6px">⚙ Tham số năm ${blNam}</div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center">
-      <span>Ngày công chuẩn ${o('blTsNgay',t.ngay_cong_chuan,60)}</span>
       <span>Giảm trừ bản thân ${o('blTsBt',t.giam_tru_ban_than)} đ</span>
       <span>Giảm trừ mỗi người phụ thuộc ${o('blTsNpt',t.giam_tru_npt)} đ</span>
       <span>Hệ số quy đổi tăng ca ${o('blTsHs',Number(t.he_so_tang_ca).toFixed(4),70)}</span>
@@ -4795,11 +4803,35 @@ function blMoThamSo(){
       <b>DN chịu (% lương CB):</b> <span>BHXH ${o('blTsDx',t.bh_dn.bhxh,50)}</span><span>BHYT ${o('blTsDy',t.bh_dn.bhyt,50)}</span><span>BHTN ${o('blTsDt',t.bh_dn.bhtn,50)}</span>
       <b>Người lao động trừ:</b> <span>BHXH ${o('blTsNx',t.bh_nld.bhxh,50)}</span><span>BHYT ${o('blTsNy',t.bh_nld.bhyt,50)}</span><span>BHTN ${o('blTsNt',t.bh_nld.bhtn,50)}</span>
     </div>
+    <div style="margin-top:8px;font-size:13px"><b>Ngày công chuẩn từng tháng = số ngày trong tháng − Chủ nhật − ngày nghỉ lễ</b> (lễ trùng Chủ nhật không trừ 2 lần):
+      <div id="blCongChuan" style="margin-top:4px">${blCongChuanHtml(t)}</div>
+      <div style="margin-top:6px"><b>Ngày nghỉ lễ năm ${blNam}</b> (có hưởng lương — sửa được):</div>
+      <div id="blLe" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${(t.ngay_le||[]).map(x=>blLeHtml(x)).join('')}</div>
+      <button class="btn ghost sm" style="margin-top:4px" onclick="blThemLe()">➕ Thêm ngày lễ</button>
+      <button class="btn ghost sm" style="margin-top:4px" onclick="blLeMacDinh()">↺ Khôi phục lịch lễ mặc định năm ${blNam}</button>
+      <div id="blLeGhiChu" style="font-size:12px;color:#6b5b00;margin-top:4px">Ô <b>Ngày công</b> để trống/0 = tự theo công chuẩn tháng; gõ số riêng thì dùng số đó. Sau khi sửa ngày lễ bấm <b>Áp dụng &amp; tính lại</b>.</div>
+    </div>
     <div style="margin-top:8px;font-size:13px"><b>Biểu thuế TNCN lũy tiến</b> (từ mức thu nhập tính thuế / thuế suất %):
       <div id="blBac" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${t.bac_thue.map((b,i)=>blBacHtml(b,i)).join('')}</div>
       <button class="btn ghost sm" style="margin-top:4px" onclick="blThemBac()">➕ Thêm bậc</button></div>
     <div style="margin-top:8px;font-size:12px;color:#6b5b00;background:#fff8dc;padding:6px 8px;border-radius:6px">Giá trị mặc định lấy đúng theo file bảng lương bạn gửi (giảm trừ 11.000.000 / 4.400.000, biểu thuế 7 bậc 5–35%). Mỗi năm có tham số riêng — <b>hãy kiểm tra và chỉnh lại cho năm ${blNam}</b> nếu quy định về mức giảm trừ/biểu thuế có thay đổi.</div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blApDungThamSo()">✓ Áp dụng &amp; tính lại</button> <button class="btn ghost sm" onclick="document.getElementById('blThamSo').style.display='none'">Đóng</button></div>`;
+}
+function blCongChuanHtml(t){
+  const cc=(t&&t.cong_chuan)||{};
+  return BL_THANG.map(k=>`<span style="display:inline-block;border:1px solid #d6e3db;border-radius:6px;padding:2px 8px;margin:0 4px 4px 0;background:#fff">T${parseInt(k,10)}: <b>${cc[k]!=null?cc[k]:''}</b></span>`).join('');
+}
+function blLeHtml(x){
+  return `<span class="blLeDong" style="border:1px solid #d6e3db;border-radius:6px;padding:3px 6px;background:#fff"><input class="blLeNgay" type="date" value="${xkEsc(x.ngay||'')}" style="padding:2px 4px;border:1px solid #ccc;border-radius:4px"> <input class="blLeTen" value="${xkEsc(x.ten||'')}" placeholder="Tên ngày lễ" style="width:150px;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> <button onclick="this.parentNode.remove()" style="border:none;background:transparent;color:#c00;cursor:pointer">✕</button></span>`;
+}
+function blThemLe(){document.getElementById('blLe').insertAdjacentHTML('beforeend',blLeHtml({ngay:blNam+'-01-01',ten:''}))}
+async function blLeMacDinh(){
+  try{
+    const d=await api(`/api/bang-luong-le-mac-dinh?nam=${blNam}`);
+    document.getElementById('blLe').innerHTML=(d.ngay_le||[]).map(x=>blLeHtml(x)).join('');
+    const g=document.getElementById('blLeGhiChu');
+    if(g)g.innerHTML=d.co_lich_day_du?'Đã khôi phục lịch lễ mặc định — bấm <b>Áp dụng &amp; tính lại</b>.':`⚠ Năm ${blNam} chưa có lịch sẵn: chỉ có các ngày lễ dương lịch cố định. <b>Hãy tự thêm Tết Nguyên đán và Giỗ Tổ Hùng Vương</b> rồi bấm Áp dụng &amp; tính lại.`;
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function blBacHtml(b,i){
   return `<span class="blBacDong" style="border:1px solid #d6e3db;border-radius:6px;padding:3px 6px;background:#fff">từ <input class="blBacTu" value="${b[0]}" style="width:100px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> → <input class="blBacTs" value="${b[1]}" style="width:44px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px">% <button onclick="this.parentNode.remove()" style="border:none;background:transparent;color:#c00;cursor:pointer">✕</button></span>`;
@@ -4809,11 +4841,12 @@ async function blApDungThamSo(){
   const g=id=>document.getElementById(id).value;
   const bac=[...document.querySelectorAll('#blBac .blBacDong')].map(d=>[d.querySelector('.blBacTu').value,d.querySelector('.blBacTs').value]);
   if(!bac.length){toast('Cần ít nhất 1 bậc thuế','err');return}
-  blTS={ngay_cong_chuan:g('blTsNgay'),giam_tru_ban_than:g('blTsBt'),giam_tru_npt:g('blTsNpt'),he_so_tang_ca:g('blTsHs'),
+  const le=[...document.querySelectorAll('#blLe .blLeDong')].map(d=>({ngay:d.querySelector('.blLeNgay').value,ten:d.querySelector('.blLeTen').value})).filter(x=>x.ngay);
+  blTS={ngay_le:le,giam_tru_ban_than:g('blTsBt'),giam_tru_npt:g('blTsNpt'),he_so_tang_ca:g('blTsHs'),
     bh_dn:{bhxh:g('blTsDx'),bhyt:g('blTsDy'),bhtn:g('blTsDt')},bh_nld:{bhxh:g('blTsNx'),bhyt:g('blTsNy'),bhtn:g('blTsNt')},bac_thue:bac};
   blBan=true;
   // server chuẩn hoá tham số (ép số, sắp bậc thuế) — lấy lại bản chuẩn để hiển thị/lưu
-  try{const kq=await api('/api/bang-luong-tinh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,rows:[]})});blTS=kq.tham_so;}catch(e){toast('Lỗi: '+e.message,'err');return}
+  try{const kq=await api('/api/bang-luong-tinh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,rows:[],nam:blNam})});blTS=kq.tham_so;}catch(e){toast('Lỗi: '+e.message,'err');return}
   for(const t of Object.keys(blDL))await blTinhLai(t);
   blVeInfo();
   document.getElementById('blThamSo').style.display='none';
