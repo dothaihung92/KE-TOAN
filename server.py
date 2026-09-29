@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-29.004"
+APP_BUILD = "2026-09-29.005"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10063,6 +10063,26 @@ _LUONG_THAM_SO_MAC_DINH = {
 _LUONG_CAC_TRUONG_NHAP = (
     "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
     "pc_chuc_vu", "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "ghi_chu")
+# Thuế TNCN theo Luật Thuế thu nhập cá nhân 2025 (hiệu lực 1/7/2026): giảm trừ bản thân 15.500.000, mỗi người
+# phụ thuộc 6.200.000 và biểu lũy tiến từng phần 5 bậc (đến 10tr 5%, đến 30tr 10%, đến 60tr 20%, đến 100tr 30%,
+# trên 100tr 35%). Khi tính lương từ tháng 7/2026 phần mềm tự áp dụng bộ này; các tháng trước đó vẫn tính theo
+# biểu 7 bậc + giảm trừ 11.000.000 / 4.400.000 (file bảng lương mẫu).
+_LUONG_THUE_MOI = {
+    "giam_tru_ban_than": 15500000, "giam_tru_npt": 6200000,
+    "bac_thue": [[0, 5], [10000000, 10], [30000000, 20], [60000000, 30], [100000000, 35]],
+}
+_LUONG_THUE_MOI_TU = (2026, 7)      # (năm, tháng) bắt đầu áp dụng
+
+
+def _luong_thue_moi_mac_dinh(nam):
+    """Thiết lập thuế mới mặc định theo năm: 2026 -> đổi từ tháng 7; các năm sau -> áp dụng cả năm (đặt ngay làm
+    tham số chính, không cần đổi giữa năm); năm trước 2026 -> không có."""
+    if nam == _LUONG_THUE_MOI_TU[0]:
+        return dict(tu_thang=_LUONG_THUE_MOI_TU[1], **{k: ([list(b) for b in v] if k == "bac_thue" else v)
+                                                        for k, v in _LUONG_THUE_MOI.items()})
+    return None
+
+
 _LUONG_TRUONG_CHU = ("ma", "ten", "chuc_vu", "ghi_chu")
 _LUONG_THANG = tuple("%02d" % i for i in range(1, 13))
 
@@ -10179,12 +10199,43 @@ def _luong_chuan_tham_so(ts, nam=None):
         if isinstance(b, (list, tuple)) and len(b) >= 2:
             bac.append([_luong_so(b[0]), _luong_so(b[1])])
     kq["bac_thue"] = sorted(bac) if bac else [list(b) for b in mac_dinh["bac_thue"]]
+    if nam and nam > _LUONG_THUE_MOI_TU[0] and not any(k in ts for k in ("giam_tru_ban_than", "giam_tru_npt", "bac_thue")):
+        # năm sau 2026 chưa từng chỉnh tham số thuế -> áp dụng luôn quy định thuế mới cả năm
+        kq["giam_tru_ban_than"] = _LUONG_THUE_MOI["giam_tru_ban_than"]
+        kq["giam_tru_npt"] = _LUONG_THUE_MOI["giam_tru_npt"]
+        kq["bac_thue"] = [list(b) for b in _LUONG_THUE_MOI["bac_thue"]]
+    # Bộ tham số thuế THAY ĐỔI GIỮA NĂM: từ tháng tu_thang trở đi dùng giảm trừ + biểu thuế riêng.
+    # Thiếu khoá -> mặc định theo năm; đặt None (giao diện bỏ tick) -> không đổi giữa năm.
+    tm = ts["thue_moi"] if "thue_moi" in ts else _luong_thue_moi_mac_dinh(nam) if nam else None
+    kq["thue_moi"] = None
+    if isinstance(tm, dict):
+        tu = int(_luong_so(tm.get("tu_thang")))
+        bac_m = []
+        for b in (tm.get("bac_thue") if isinstance(tm.get("bac_thue"), list) else []):
+            if isinstance(b, (list, tuple)) and len(b) >= 2:
+                bac_m.append([_luong_so(b[0]), _luong_so(b[1])])
+        if 1 <= tu <= 12:
+            kq["thue_moi"] = {
+                "tu_thang": tu,
+                "giam_tru_ban_than": _luong_so(tm["giam_tru_ban_than"]) if "giam_tru_ban_than" in tm
+                else _LUONG_THUE_MOI["giam_tru_ban_than"],
+                "giam_tru_npt": _luong_so(tm["giam_tru_npt"]) if "giam_tru_npt" in tm
+                else _LUONG_THUE_MOI["giam_tru_npt"],
+                "bac_thue": sorted(bac_m) if bac_m else [list(b) for b in _LUONG_THUE_MOI["bac_thue"]]}
     if nam:
         kq["nam"] = nam
         kq["ngay_le"] = (_luong_chuan_ngay_le(ts["ngay_le"], nam) if isinstance(ts.get("ngay_le"), list)
                          else _luong_le_mac_dinh(nam))
         kq["cong_chuan"] = {t: _luong_cong_chuan_thang(nam, t, kq["ngay_le"]) for t in _LUONG_THANG}
     return kq
+
+
+def _luong_thue_ap_dung(ts, thang=None):
+    """Giảm trừ + biểu thuế áp dụng cho `thang` ("01".."12"): từ tháng bắt đầu của bộ thuế mới trở đi dùng bộ mới."""
+    tm = ts.get("thue_moi")
+    if tm and thang and int(thang) >= tm["tu_thang"]:
+        return tm
+    return ts
 
 
 def _luong_thue_tncn(thu_nhap_tinh_thue, bac_thue):
@@ -10259,10 +10310,11 @@ def _luong_tinh_dong(r, ts, thang=None):
     khong_chiu_thue = d["tien_com"] + d["trang_phuc"] + dien_thoai
     tong_thu_nhap = tong_chiu_thue + khong_chiu_thue
     npt = d["so_npt"]
-    gt_npt = npt * ts["giam_tru_npt"]
-    gt_ban_than = ts["giam_tru_ban_than"]
+    tt = _luong_thue_ap_dung(ts, thang)      # từ 7/2026 tự đổi sang giảm trừ + biểu thuế mới
+    gt_npt = npt * tt["giam_tru_npt"]
+    gt_ban_than = tt["giam_tru_ban_than"]
     tn_tinh_thue = tong_chiu_thue - gt_ban_than - tong_bh_nld - gt_npt
-    thue = _luong_lam_tron(_luong_thue_tncn(tn_tinh_thue, ts["bac_thue"]))
+    thue = _luong_lam_tron(_luong_thue_tncn(tn_tinh_thue, tt["bac_thue"]))
     tt_luong = _luong_lam_tron(tong_thu_nhap - tong_bh_nld - thue)
     kq = dict(d)
     kq.update({
@@ -10491,19 +10543,22 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             cell.border = vien
     hs = ts["he_so_tang_ca"]
-    bac = ts["bac_thue"]
-    moc = ",".join(repr(int(b[0]) if float(b[0]).is_integer() else b[0]) for b in bac)
-    tang = []
-    truoc = 0.0
-    for b in bac:
-        tang.append(round((b[1] - truoc) / 100.0, 10))
-        truoc = b[1]
-    dtang = ",".join(repr(x) for x in tang)
+
+    def hang_so_thue(tt):
+        bac = tt["bac_thue"]
+        moc = ",".join(repr(int(b[0]) if float(b[0]).is_integer() else b[0]) for b in bac)
+        tang, truoc = [], 0.0
+        for b in bac:
+            tang.append(round((b[1] - truoc) / 100.0, 10))
+            truoc = b[1]
+        return moc, ",".join(repr(x) for x in tang)
     r = 3
     for t in _LUONG_THANG:
         for dong in (thang_nhap.get(t) or []):
             d = _luong_chuan_dong_nhap(dong)
             L = khoa
+            tt = _luong_thue_ap_dung(ts, t)
+            moc, dtang = hang_so_thue(tt)
             e = d["ngay_cong"] or (ts.get("cong_chuan") or {}).get(t) or ts["ngay_cong_chuan"]
             ws[f"{L['ma']}{r}"] = d["ma"]
             ws[f"{L['ten']}{r}"] = d["ten"]
@@ -10541,9 +10596,9 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
                                          f"-{L['bh_duoc_tru']}{r}-{L['tt_luong']}{r}")
             ws[f"{L['tong_chiu_thue']}{r}"] = f"=+{L['tn_chiu_thue']}{r}"
             ws[f"{L['bh_tru2']}{r}"] = f"=SUM({L['bhxh_nld']}{r}:{L['bhtn_nld']}{r})"
-            ws[f"{L['giam_tru_bt']}{r}"] = ts["giam_tru_ban_than"]
+            ws[f"{L['giam_tru_bt']}{r}"] = tt["giam_tru_ban_than"]
             ws[f"{L['so_npt']}{r}"] = d["so_npt"]
-            ws[f"{L['tien_npt']}{r}"] = f"={L['so_npt']}{r}*{ts['giam_tru_npt']!r}"
+            ws[f"{L['tien_npt']}{r}"] = f"={L['so_npt']}{r}*{tt['giam_tru_npt']!r}"
             ws[f"{L['tn_tinh_thue']}{r}"] = (f"={L['tong_chiu_thue']}{r}-{L['giam_tru_bt']}{r}"
                                              f"-{L['bh_tru2']}{r}-{L['tien_npt']}{r}")
             x = f"{L['tn_tinh_thue']}{r}"

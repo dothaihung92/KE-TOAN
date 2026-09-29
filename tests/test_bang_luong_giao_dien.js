@@ -282,5 +282,34 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/thêm 1 nhân viên, cập nhật lương\/phụ cấp .* 1 người/.test(m.toasts[m.toasts.length - 1][0]), m.toasts.join('|'));
   console.log('PASS 15: cột phụ cấp như Danh Sách Nhân Viên, cố định Mã NV + Họ tên, nạp NV cập nhật lương/phụ cấp.');
 
+  // ---- 16: thuế TNCN thay đổi giữa năm (từ 7/2026): khung tham số có mục riêng, áp dụng gửi đúng, dòng thông tin báo ----
+  const moi = { tu_thang: 7, giam_tru_ban_than: 15500000, giam_tru_npt: 6200000, bac_thue: [[0, 5], [10000000, 10], [30000000, 20], [60000000, 30], [100000000, 35]] };
+  m = nap({ api: (url, o) => { const b = JSON.parse(o.body); return { rows: b.rows, tham_so: b.tham_so }; } });
+  m.ctx.blNam = 2026; m.ctx.blThang = '08';
+  m.ctx.blTS = { ngay_cong_chuan: 26, giam_tru_ban_than: 11000000, giam_tru_npt: 4400000, he_so_tang_ca: 1.33, bh_dn: { bhxh: 17.5, bhyt: 3, bhtn: 1 }, bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 }, bac_thue: [[0, 5]], thue_moi: moi };
+  m.ctx.document.getElementById('blThamSo').style.display = 'none';
+  m.ctx.blMoThamSo();
+  const ph = m.phanTu['blThamSo'].innerHTML;
+  assert(/Thuế TNCN thay đổi giữa năm/.test(ph) && /id="blMoiBat" checked/.test(ph) && /15500000/.test(ph) && /6200000/.test(ph), 'Có mục thuế thay đổi giữa năm, đã tick sẵn với bộ mới');
+  assert((ph.match(/class="blBacDong"/g) || []).length === 1 + 5, 'Bậc thuế cũ (1) + bộ mới 5 bậc');
+  m.phanTu['blInfo'] = { dataset: {}, style: {}, textContent: '' }; m.ctx.blVeInfo();
+  assert(/thuế TNCN theo quy định mới \(từ tháng 7: giảm trừ 15\.500\.000\/6\.200\.000, 5 bậc\)/.test(m.phanTu['blInfo'].textContent), m.phanTu['blInfo'].textContent);
+  m.ctx.blThang = '05'; m.ctx.blVeInfo();
+  assert(!/quy định mới/.test(m.phanTu['blInfo'].textContent), 'Tháng trước 7 không báo thuế mới');
+  // áp dụng: tick bật -> gửi thue_moi; bỏ tick -> gửi null
+  const gia2 = { blTsBt: '11000000', blTsNpt: '4400000', blTsHs: '1.33', blTsDx: '17.5', blTsDy: '3', blTsDt: '1', blTsNx: '8', blTsNy: '1.5', blTsNt: '1',
+    blMoiTu: '7', blMoiBt: '15500000', blMoiNpt: '6200000' };
+  let bat = true;
+  m.ctx.document.getElementById = (id) => (id === 'blMoiBat' ? { checked: bat } : gia2[id] !== undefined ? { value: gia2[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
+  m.ctx.document.querySelectorAll = (sel) => sel.includes('blBacMoi') ? [{ querySelector: (q) => ({ value: q.includes('Tu') ? '0' : '5' }) }]
+    : sel.includes('blBacDong') ? [{ querySelector: (q) => ({ value: q.includes('Tu') ? '0' : '5' }) }] : [];
+  await m.ctx.blApDungThamSo();
+  const g1 = m.goiApi.find(([u]) => u.includes('bang-luong-tinh'))[1];
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(g1.tham_so.thue_moi)), { tu_thang: '7', giam_tru_ban_than: '15500000', giam_tru_npt: '6200000', bac_thue: [['0', '5']] });
+  bat = false; m.goiApi.length = 0;
+  await m.ctx.blApDungThamSo();
+  assert.strictEqual(m.goiApi.find(([u]) => u.includes('bang-luong-tinh'))[1].tham_so.thue_moi, null, 'Bỏ tick -> không đổi giữa năm');
+  console.log('PASS 16: mục thuế TNCN thay đổi giữa năm (từ 7/2026) trong tham số năm + dòng thông tin theo tháng.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

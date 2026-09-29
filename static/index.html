@@ -4612,6 +4612,8 @@ function blVeInfo(){
   const tong=Object.values(blDL).reduce((s,a)=>s+a.length,0);
   let t=blThang==='nam'?`Năm ${blNam}: ${tong} dòng lương`:`Tháng ${parseInt(blThang,10)}/${blNam}: ${(blDL[blThang]||[]).length} nhân viên`;
   if(blThang!=='nam'&&blTS&&blTS.cong_chuan&&blTS.cong_chuan[blThang]!=null)t+=` — công chuẩn ${blTS.cong_chuan[blThang]} ngày (trừ Chủ nhật + lễ)`;
+  const tm=blTS&&blTS.thue_moi;
+  if(blThang!=='nam'&&tm&&parseInt(blThang,10)>=tm.tu_thang)t+=` — thuế TNCN theo quy định mới (từ tháng ${tm.tu_thang}: giảm trừ ${blDinhDang(tm.giam_tru_ban_than)}/${blDinhDang(tm.giam_tru_npt)}, ${tm.bac_thue.length} bậc)`;
   if(info.dataset.capnhat)t+=` — đã lưu lúc ${info.dataset.capnhat}`;
   if(blBan)t+=' — ⚠ có thay đổi CHƯA LƯU';
   info.textContent=t;
@@ -4830,6 +4832,16 @@ function blMoThamSo(){
     <div style="margin-top:8px;font-size:13px"><b>Biểu thuế TNCN lũy tiến</b> (từ mức thu nhập tính thuế / thuế suất %):
       <div id="blBac" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${t.bac_thue.map((b,i)=>blBacHtml(b,i)).join('')}</div>
       <button class="btn ghost sm" style="margin-top:4px" onclick="blThemBac()">➕ Thêm bậc</button></div>
+    <div style="margin-top:10px;font-size:13px;border-top:1px dashed #cfe0d5;padding-top:8px">
+      <label><input type="checkbox" id="blMoiBat" ${t.thue_moi?'checked':''} onchange="document.getElementById('blMoiBox').style.display=this.checked?'block':'none'"> <b>Thuế TNCN thay đổi giữa năm</b> — từ tháng <input id="blMoiTu" value="${t.thue_moi?t.thue_moi.tu_thang:7}" style="width:40px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> tự động dùng giảm trừ + biểu thuế bên dưới (các tháng trước dùng bộ ở trên)</label>
+      <div id="blMoiBox" style="display:${t.thue_moi?'block':'none'};margin-top:6px">
+        <span>Giảm trừ bản thân ${o('blMoiBt',t.thue_moi?t.thue_moi.giam_tru_ban_than:15500000)} đ</span>
+        <span style="margin-left:14px">Giảm trừ mỗi người phụ thuộc ${o('blMoiNpt',t.thue_moi?t.thue_moi.giam_tru_npt:6200000)} đ</span>
+        <div id="blBacMoi" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">${(t.thue_moi?t.thue_moi.bac_thue:[[0,5],[10000000,10],[30000000,20],[60000000,30],[100000000,35]]).map(b=>blBacHtml(b,0)).join('')}</div>
+        <button class="btn ghost sm" style="margin-top:4px" onclick="document.getElementById('blBacMoi').insertAdjacentHTML('beforeend',blBacHtml([0,0],0))">➕ Thêm bậc</button>
+        <div style="font-size:12px;color:#6b5b00;margin-top:4px">Mặc định năm 2026: từ tháng 7 áp dụng Luật Thuế TNCN mới — giảm trừ bản thân 15.500.000, người phụ thuộc 6.200.000, biểu lũy tiến 5 bậc (10tr 5% · 30tr 10% · 60tr 20% · 100tr 30% · trên 100tr 35%). Từ năm 2027 phần mềm dùng bộ này cả năm.</div>
+      </div>
+    </div>
     <div style="margin-top:8px;font-size:12px;color:#6b5b00;background:#fff8dc;padding:6px 8px;border-radius:6px">Giá trị mặc định lấy đúng theo file bảng lương bạn gửi (giảm trừ 11.000.000 / 4.400.000, biểu thuế 7 bậc 5–35%). Mỗi năm có tham số riêng — <b>hãy kiểm tra và chỉnh lại cho năm ${blNam}</b> nếu quy định về mức giảm trừ/biểu thuế có thay đổi.</div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blApDungThamSo()">✓ Áp dụng &amp; tính lại</button> <button class="btn ghost sm" onclick="document.getElementById('blThamSo').style.display='none'">Đóng</button></div>`;
 }
@@ -4858,7 +4870,13 @@ async function blApDungThamSo(){
   const bac=[...document.querySelectorAll('#blBac .blBacDong')].map(d=>[d.querySelector('.blBacTu').value,d.querySelector('.blBacTs').value]);
   if(!bac.length){toast('Cần ít nhất 1 bậc thuế','err');return}
   const le=[...document.querySelectorAll('#blLe .blLeDong')].map(d=>({ngay:d.querySelector('.blLeNgay').value,ten:d.querySelector('.blLeTen').value})).filter(x=>x.ngay);
-  blTS={ngay_le:le,giam_tru_ban_than:g('blTsBt'),giam_tru_npt:g('blTsNpt'),he_so_tang_ca:g('blTsHs'),
+  let thueMoi=null;
+  if(document.getElementById('blMoiBat')&&document.getElementById('blMoiBat').checked){
+    const bacMoi=[...document.querySelectorAll('#blBacMoi .blBacDong')].map(d=>[d.querySelector('.blBacTu').value,d.querySelector('.blBacTs').value]);
+    if(!bacMoi.length){toast('Bộ thuế thay đổi giữa năm cần ít nhất 1 bậc','err');return}
+    thueMoi={tu_thang:g('blMoiTu'),giam_tru_ban_than:g('blMoiBt'),giam_tru_npt:g('blMoiNpt'),bac_thue:bacMoi};
+  }
+  blTS={ngay_le:le,thue_moi:thueMoi,giam_tru_ban_than:g('blTsBt'),giam_tru_npt:g('blTsNpt'),he_so_tang_ca:g('blTsHs'),
     bh_dn:{bhxh:g('blTsDx'),bhyt:g('blTsDy'),bhtn:g('blTsDt')},bh_nld:{bhxh:g('blTsNx'),bhyt:g('blTsNy'),bhtn:g('blTsNt')},bac_thue:bac};
   blBan=true;
   // server chuẩn hoá tham số (ép số, sắp bậc thuế) — lấy lại bản chuẩn để hiển thị/lưu
