@@ -4352,6 +4352,12 @@ function moBangLuong(){
         <div style="font-size:18px;font-weight:700;color:#a03a7a">Danh Sách Nhân Viên</div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Hồ sơ nhân viên, lương cơ bản, phụ cấp</div>
       </div>
+      <div onclick="moNguoiPhuThuoc()" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #0b5d6b;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+           onmouseover="this.style.background='#eaf6f8'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:38px;margin-bottom:8px">👨‍👩‍👧</div>
+        <div style="font-size:18px;font-weight:700;color:#0b5d6b">Người Phụ Thuộc</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Bảng kê người phụ thuộc — giảm trừ gia cảnh + quyết toán TNCN</div>
+      </div>
       <div onclick="moBangLuongNam()" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #1f6b4a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
            onmouseover="this.style.background='#eef8f2'" onmouseout="this.style.background='#fff'">
         <div style="font-size:38px;margin-bottom:8px">💰</div>
@@ -4579,6 +4585,100 @@ async function nvImportExcel(input){
     toast(`✓ Đã thêm ${kq.rows.length} nhân viên`+(kq.loi&&kq.loi.length?` (⚠ ${kq.loi.join('; ')})`:'')+'. Nhớ bấm 💾 Lưu!','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
+}
+/* ----- NGƯỜI PHỤ THUỘC (bảng kê 05-3/BK-QTT-TNCN): bảng lương tự giảm trừ theo danh sách này; kết xuất QT TNCN dùng để lập bảng kê ----- */
+const NPT_HEADERS=['STT','Mã NV','Họ và tên người lao động','Họ và tên người phụ thuộc','Ngày sinh','CCCD/Số định danh','Quan hệ','Từ tháng','Đến tháng'];
+const NPT_QUAN_HE=['Con','Cha/mẹ','Vợ/chồng','Khác'];
+let nptHeader=NPT_HEADERS.slice(), nptRows=[], nptChon=null, nptNv=[];
+function nptCot(ten){return nptHeader.findIndex(h=>String(h).trim().toLowerCase()===ten.toLowerCase())}
+function moNguoiPhuThuoc(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;color:#0b5d6b">👨‍👩‍👧 Người Phụ Thuộc</h3>
+        <button class="btn ghost sm" onclick="moBangLuong()">← Bảng Lương - BHXH</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <button class="btn gold sm" onclick="nptLuu()">💾 Lưu</button>
+        <button class="btn sm" style="background:#2e5c8a" onclick="nptThemDong()">➕ Thêm dòng</button>
+        <button class="btn ghost sm" onclick="nptXuatExcel()">📤 Xuất Excel</button>
+        <button class="btn ghost sm" onclick="nptXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
+      </div>
+      <div id="nptInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5">💡 Nhập <b>Mã NV</b> (hoặc họ tên) của người lao động, họ tên + ngày sinh + CCCD của người phụ thuộc, <b>Quan hệ</b> và khoảng tháng giảm trừ
+        (<b>Từ tháng</b>/<b>Đến tháng</b> dạng 01/2025; Đến tháng để trống = còn giảm trừ). Khi đã có danh sách này, <b>Bảng Lương tự tính giảm trừ người phụ thuộc theo từng tháng</b> (cột "Số người phụ thuộc" lấy theo danh sách), và "Kết xuất QT TNCN" dùng danh sách này để lập bảng kê 05-3.</div>
+      <div id="nptTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
+    </div>`;
+  taiNpt();
+}
+async function taiNpt(){
+  try{
+    const d=await api(`/api/nhap-lieu/${current}?loai=npt`);
+    nptHeader=(d.header&&d.header.length)?d.header.slice():NPT_HEADERS.slice();
+    nptRows=(d.rows||[]).map(r=>{const c=r.slice();while(c.length<nptHeader.length)c.push('');return c});
+    nptChon=null;
+    try{const nv=await api(`/api/nhap-lieu/${current}?loai=nv`);nptNv=nvDocMaTen(nv)}catch{nptNv=[]}
+    veGridNpt();
+    const info=document.getElementById('nptInfo');
+    if(info)info.textContent=nptRows.length?`${nptRows.length} người phụ thuộc`+(d.updated_at?` — lưu lúc ${new Date(d.updated_at).toLocaleString('vi-VN')}`:''):'Chưa có người phụ thuộc. Bấm ➕ Thêm dòng.';
+  }catch(e){toast('Không tải được danh sách người phụ thuộc: '+e.message,'err')}
+}
+// [{ma,ten}] từ Danh Sách Nhân Viên — để tự điền họ tên người lao động khi gõ Mã NV
+function nvDocMaTen(d){
+  const h=(d&&d.header)||[],iMa=h.findIndex(x=>String(x).trim().toLowerCase()==='mã nv'),iTen=h.findIndex(x=>String(x).trim().toLowerCase()==='họ và tên');
+  return ((d&&d.rows)||[]).map(r=>({ma:String(r[iMa]==null?'':r[iMa]).trim(),ten:String(r[iTen]==null?'':r[iTen]).trim()})).filter(x=>x.ten);
+}
+function veGridNpt(){
+  const w=document.getElementById('nptTableWrap');if(!w)return;
+  const iQh=nptCot('Quan hệ');
+  let h='<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>'+nptHeader.map(x=>`<th style="position:sticky;top:0;background:#0b5d6b;color:#fff;padding:6px 8px;border:1px solid #084a56;white-space:normal;line-height:1.3">${nvEsc(x)}</th>`).join('')+'</tr></thead><tbody>';
+  nptRows.forEach((row,ri)=>{
+    h+=`<tr style="${nptChon&&nptChon.r===ri?'background:#eaf6f8':''}">`;
+    nptHeader.forEach((c,ci)=>{
+      if(ci===iQh){
+        h+=`<td style="padding:3px 6px;border:1px solid #eee"><select onfocus="nptChon={r:${ri},c:${ci}}" onchange="nptDoiQh(${ri},this.value)"><option value=""></option>${NPT_QUAN_HE.map(q=>`<option${row[ci]===q?' selected':''}>${q}</option>`).join('')}</select></td>`;
+      }else h+=`<td contenteditable="true" data-r="${ri}" data-c="${ci}" onfocus="nptChon={r:${ri},c:${ci}}" onblur="nptSuaO(this)" style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;min-width:${ci<2?50:90}px">${nvEsc(row[ci])}</td>`;
+    });
+    h+='</tr>';
+  });
+  h+='</tbody></table>';
+  w.innerHTML=h+(nptRows.length?'':'<div style="padding:20px;text-align:center;color:var(--muted)">Chưa có dữ liệu.</div>');
+}
+function nptDanhLaiStt(){const c=nptCot('STT');if(c>=0)nptRows.forEach((r,i)=>{r[c]=i+1})}
+function nptSuaO(td){
+  const r=+td.dataset.r,c=+td.dataset.c;if(!nptRows[r])return;
+  const t=td.textContent.trim();
+  nptRows[r][c]=t;
+  // gõ Mã NV -> tự điền họ tên người lao động (nếu đang trống)
+  if(c===nptCot('Mã NV')&&t){
+    const nv=nptNv.find(x=>x.ma.toLowerCase()===t.toLowerCase()),cTen=nptCot('Họ và tên người lao động');
+    if(nv&&cTen>=0&&!String(nptRows[r][cTen]||'').trim()){nptRows[r][cTen]=nv.ten;veGridNpt()}
+  }
+}
+function nptDoiQh(ri,v){if(nptRows[ri])nptRows[ri][nptCot('Quan hệ')]=v}
+function nptThemDong(){nptRows.push(nptHeader.map(()=>''));nptChon={r:nptRows.length-1,c:0};nptDanhLaiStt();veGridNpt()}
+function nptXoaDong(){
+  if(!nptChon||nptChon.r==null||!nptRows[nptChon.r]){toast('Bấm chọn 1 ô trong dòng cần xóa trước','err');return}
+  if(!confirm('Xóa dòng người phụ thuộc này?'))return;
+  nptRows.splice(nptChon.r,1);nptChon=null;nptDanhLaiStt();veGridNpt();
+}
+async function nptLuu(){
+  try{
+    const sach=nptRows.filter(r=>String(r[nptCot('Họ và tên người phụ thuộc')]||'').trim());
+    const thieu=nptRows.length-sach.length;      // giữ nguyên các dòng đang sửa; dòng thiếu họ tên người phụ thuộc không được tính
+    await api(`/api/nhap-lieu/save/${current}?loai=npt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nptHeader,rows:nptRows})});
+    toast(`💾 Đã lưu ${sach.length} người phụ thuộc`+(thieu?` (⚠ ${thieu} dòng chưa có họ tên người phụ thuộc sẽ không được tính)`:'')+' — Bảng Lương sẽ tự giảm trừ theo danh sách này khi mở/tải lại năm','ok');
+    const info=document.getElementById('nptInfo');if(info)info.textContent=`${nptRows.length} người phụ thuộc — lưu lúc ${new Date().toLocaleString('vi-VN')}`;
+  }catch(e){toast('Lỗi lưu: '+e.message,'err')}
+}
+async function nptXuatExcel(){
+  try{
+    const r=await fetch(`/api/nhap-lieu/export/${current}?loai=npt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nptHeader,rows:nptRows})});
+    if(!r.ok)throw new Error('Xuất thất bại');
+    await xuatFile(r,'NguoiPhuThuoc.xlsx');
+    toast('📤 Đã xuất Excel','ok');
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
 /* ----- BẢNG LƯƠNG (theo file TỔNG HỢP: mỗi nhân viên 1 dòng / tháng, chọn theo NĂM) ----- */
 // k: khoá dữ liệu; t: tiêu đề; nhap: ô NHẬP (sửa được) — còn lại là ô TÍNH (server tính, chỉ đọc);
@@ -5003,7 +5103,7 @@ async function blNapNhanVien(){
       for(let i=co.length-1;i>=0;i--){if(daNghi.has((co[i].ma||co[i].ten||'').toString().trim().toLowerCase())){co.splice(i,1);bo++}}
     }
     // Nhân viên đã có trong tháng: cập nhật lại Lương cơ bản + các phụ cấp theo Danh Sách Nhân Viên (số liệu gốc lấy từ đó).
-    const truongNv=['chuc_vu','luong_cb','tien_com','muc_xang','muc_dt','trang_phuc'];
+    const truongNv=['chuc_vu','luong_cb','tien_com','muc_xang','muc_dt','trang_phuc'].concat(d.npt_co_ds?['so_npt']:[]);      // có danh sách người phụ thuộc -> số NPT theo danh sách
     const cuaKey=new Map(co.map(r=>[(r.ma||r.ten||'').toString().trim().toLowerCase(),r]));
     d.rows.forEach(r=>{
       const key=(r.ma||r.ten||'').toString().trim().toLowerCase();

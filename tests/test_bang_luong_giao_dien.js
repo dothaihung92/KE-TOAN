@@ -917,5 +917,51 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   await m.ctx.blKetXuatQt(); assert(m.toasts.some(([t, k]) => k === 'err' && /chưa có dữ liệu bảng lương/.test(t)));
   console.log('PASS 36: nút Kết xuất QT TNCN: hỏi người ký, gọi server, lưu XML, báo thuế + cảnh báo, xử lý lỗi/hủy.');
 
+  // ---- 37: màn "Người Phụ Thuộc": tải/sửa/lưu; tự điền họ tên người lao động theo Mã NV; Bảng Lương cập nhật số NPT khi nạp ----
+  assert(/onclick="moNguoiPhuThuoc\(\)"/.test(html) && /Người Phụ Thuộc<\/div>/.test(html), 'Có ô Người Phụ Thuộc cạnh Danh Sách Nhân Viên');
+  {
+    const n0 = html.indexOf('/* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN'), n1 = html.indexOf('/* ----- BẢNG LƯƠNG (theo file TỔNG HỢP', n0);
+    const khoi = html.slice(n0, n1).replace(/^let /gm, 'var ').replace(/^const /gm, 'var ');
+    const dom = {}, goi = [], toasts37 = [];
+    const ctxN = { current: 7, toast: (t, k) => toasts37.push([t, k]), console, confirm: () => true, document: { getElementById: (id) => dom[id] || (dom[id] = { style: {}, innerHTML: '', textContent: '' }) },
+      xuatFile: async () => {}, fetch: async (u, o) => { goi.push([u, JSON.parse(o.body)]); return { ok: true }; },
+      api: async (u, o) => {
+        if (u.includes('loai=npt') && !o) return { header: ['STT', 'Mã NV', 'Họ và tên người lao động', 'Họ và tên người phụ thuộc', 'Ngày sinh', 'CCCD/Số định danh', 'Quan hệ', 'Từ tháng', 'Đến tháng'], rows: [[1, '1', 'A', 'Con A', '02/03/2015', '', 'Con', '01/2025', '']], updated_at: '2026-09-30T10:00:00' };
+        if (u.includes('loai=nv') && !o) return { header: ['STT', 'Mã NV', 'Họ và tên'], rows: [[1, '1', 'A'], [2, '2', 'Trần Thị B']] };
+        goi.push([u, JSON.parse(o.body)]); return { ok: true };
+      } };
+    ctxN.window = ctxN;
+    vm.createContext(ctxN);
+    vm.runInContext(khoi, ctxN);
+    assert.strictEqual(JSON.stringify(ctxN.NPT_HEADERS), JSON.stringify(['STT', 'Mã NV', 'Họ và tên người lao động', 'Họ và tên người phụ thuộc', 'Ngày sinh', 'CCCD/Số định danh', 'Quan hệ', 'Từ tháng', 'Đến tháng']));
+    await ctxN.taiNpt();
+    assert.strictEqual(ctxN.nptRows.length, 1); assert(/Con A/.test(dom['nptTableWrap'].innerHTML) && /<option selected>Con<\/option>/.test(dom['nptTableWrap'].innerHTML), 'Hiện dòng + quan hệ chọn sẵn');
+    assert(/1 người phụ thuộc/.test(dom['nptInfo'].textContent));
+    ctxN.nptThemDong(); assert.strictEqual(ctxN.nptRows.length, 2); assert.strictEqual(ctxN.nptRows[1][0], 2, 'Đánh lại STT');
+    // gõ Mã NV -> tự điền họ tên người lao động
+    ctxN.nptSuaO({ dataset: { r: '1', c: String(ctxN.nptCot('Mã NV')) }, textContent: '2' });
+    assert.strictEqual(ctxN.nptRows[1][ctxN.nptCot('Họ và tên người lao động')], 'Trần Thị B', 'Tự điền tên theo Mã NV');
+    ctxN.nptSuaO({ dataset: { r: '1', c: String(ctxN.nptCot('Họ và tên người phụ thuộc')) }, textContent: 'Con B' });
+    ctxN.nptDoiQh(1, 'Cha/mẹ'); assert.strictEqual(ctxN.nptRows[1][ctxN.nptCot('Quan hệ')], 'Cha/mẹ');
+    await ctxN.nptLuu();
+    const luu = goi.find(([u]) => u.includes('save') && u.includes('loai=npt'));
+    assert(luu && luu[1].rows.length === 2 && luu[1].header.length === 9, 'Lưu đúng loại npt');
+    assert(toasts37.some(([t]) => /Đã lưu 2 người phụ thuộc/.test(t) && /tự giảm trừ/.test(t)));
+    // dòng thiếu họ tên NPT -> cảnh báo
+    ctxN.nptThemDong(); await ctxN.nptLuu(); assert(toasts37.some(([t]) => /1 dòng chưa có họ tên người phụ thuộc/.test(t)));
+    // xóa dòng đã chọn
+    ctxN.nptChon = { r: 2, c: 0 }; ctxN.nptXoaDong(); assert.strictEqual(ctxN.nptRows.length, 2);
+  }
+  // Nạp từ Danh Sách Nhân Viên: có danh sách NPT -> cập nhật số người phụ thuộc của dòng đã có
+  m = nap({ api: (url, o) => url.includes('tu-nhan-vien') ? { rows: [dongMau('101', 'A', { so_npt: 2 })], npt_co_ds: true, da_nghi: [] } : { rows: JSON.parse(o.body).rows, tham_so: {} } });
+  m.ctx.blNam = 2025; m.ctx.blThang = '05'; m.ctx.blTS = {}; m.ctx.blDL = { '05': [dongMau('101', 'A', { so_npt: 0 })] };
+  await m.ctx.blNapNhanVien();
+  assert.strictEqual(m.ctx.blDL['05'][0].so_npt, 2, 'Số NPT cập nhật theo danh sách người phụ thuộc');
+  m = nap({ api: (url, o) => url.includes('tu-nhan-vien') ? { rows: [dongMau('101', 'A', { so_npt: 0 })], npt_co_ds: false } : { rows: JSON.parse(o.body).rows, tham_so: {} } });
+  m.ctx.blNam = 2025; m.ctx.blThang = '05'; m.ctx.blTS = {}; m.ctx.blDL = { '05': [dongMau('101', 'A', { so_npt: 3 })] };
+  await m.ctx.blNapNhanVien();
+  assert.strictEqual(m.ctx.blDL['05'][0].so_npt, 3, 'Chưa có danh sách NPT -> giữ số nhập tay');
+  console.log('PASS 37: màn Người Phụ Thuộc (tải/sửa/lưu, tự điền tên) + Bảng Lương cập nhật số NPT theo danh sách.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

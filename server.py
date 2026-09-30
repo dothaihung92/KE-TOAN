@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.028"
+APP_BUILD = "2026-09-30.029"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10385,6 +10385,61 @@ def _luong_dam_bao_bang(conn):
         UNIQUE(company_id, nam))""")
 
 
+# ----- DANH SÁCH NGƯỜI PHỤ THUỘC (nhập liệu loại 'npt'): dùng để giảm trừ người phụ thuộc trong Bảng Lương + lập bảng kê 05-3/BK-QTT-TNCN -----
+NPT_HEADERS = ["STT", "Mã NV", "Họ và tên người lao động", "Họ và tên người phụ thuộc", "Ngày sinh", "CCCD/Số định danh", "Quan hệ", "Từ tháng", "Đến tháng"]
+# Mã quan hệ của HTKK đã ĐỐI CHIẾU với file mẫu thật: 01 = Con, 03 = Cha/mẹ. Các quan hệ khác chưa có mã xác nhận -> để trống mã (chọn lại trên HTKK).
+_NPT_QUAN_HE = {"con": ("01", "Con"), "cha/me": ("03", "Cha/mẹ"), "cha me": ("03", "Cha/mẹ"), "cha": ("03", "Cha/mẹ"), "me": ("03", "Cha/mẹ")}
+
+
+def _luong_npt_doc(d):
+    """Đọc dữ liệu nhập liệu 'npt' -> danh sách {ma, nld, ten, ngay_sinh, cccd, quan_he, tu:(năm,tháng)|None, den:(năm,tháng)|None}. Dòng không có
+    tên người phụ thuộc hoặc không xác định được người lao động (Mã NV/Họ tên) bị bỏ qua. Từ tháng trống = từ đầu; Đến tháng trống = còn giảm trừ."""
+    cot = {_khong_dau(str(h or "")).strip().lower(): i for i, h in enumerate((d or {}).get("header") or [])}
+    g = lambda r, *ten: next((r[cot[t]] for t in ten if t in cot and cot[t] < len(r) and r[cot[t]] is not None), "")
+    kq = []
+    for r in (d or {}).get("rows") or []:
+        ten = str(g(r, "ho va ten nguoi phu thuoc", "nguoi phu thuoc") or "").strip()
+        ma = str(g(r, "ma nv") or "").strip()
+        nld = str(g(r, "ho va ten nguoi lao dong", "nguoi lao dong") or "").strip()
+        if not ten or not (ma or nld):
+            continue
+        tu, den = _luong_thang_nghi_viec(g(r, "tu thang")), _luong_thang_nghi_viec(g(r, "den thang"))
+        kq.append({"ma": ma, "nld": nld, "ten": ten, "ngay_sinh": g(r, "ngay sinh"), "cccd": str(g(r, "cccd/so dinh danh", "cccd") or "").strip().replace(" ", ""),
+                   "quan_he": str(g(r, "quan he") or "").strip(), "tu": tu, "den": den})
+    return kq
+
+
+def _luong_npt_cua(rec, ma, ten):
+    """Bản ghi người phụ thuộc thuộc về người lao động (ma, ten)? Khớp Mã NV trước, không có thì họ tên (không phân biệt dấu/hoa thường)."""
+    if rec["ma"] and ma:
+        return rec["ma"].lower() == str(ma).strip().lower()
+    return bool(rec["nld"]) and _khong_dau(rec["nld"]).lower() == _khong_dau(str(ten or "")).strip().lower()
+
+
+def _luong_so_npt_thang(ds, ma, ten, nam, thang):
+    """Số người phụ thuộc được giảm trừ của người lao động ở (nam, thang) theo danh sách: Từ tháng <= tháng <= Đến tháng."""
+    cur = (int(nam), int(thang))
+    n = 0
+    for r in ds:
+        if _luong_npt_cua(r, ma, ten) and (not r["tu"] or r["tu"] <= cur) and (not r["den"] or cur <= r["den"]):
+            n += 1
+    return n
+
+
+def _luong_ap_npt(cid, thang_nhap, nam):
+    """Có danh sách người phụ thuộc -> ghi đè 'số người phụ thuộc' của từng dòng bảng lương theo danh sách (danh sách là nguồn chuẩn; người không có
+    trong danh sách = 0). Chưa có danh sách nào -> giữ nguyên số đã nhập tay."""
+    try:
+        ds = _luong_npt_doc(nhap_lieu_get(cid, loai="npt"))
+    except Exception:
+        ds = []
+    if ds:
+        for t, rows in thang_nhap.items():
+            for r in rows:
+                r["so_npt"] = float(_luong_so_npt_thang(ds, r.get("ma"), r.get("ten"), nam, int(t)))
+    return thang_nhap
+
+
 def _luong_doc_nam(cid, nam):
     """Đọc dữ liệu NHẬP đã lưu của 1 năm -> (tham_so đã chuẩn hoá, {thang: [dòng nhập]}, updated_at)."""
     conn = db()
@@ -10413,7 +10468,7 @@ def _luong_doc_nam(cid, nam):
             for x in rows:
                 if x["ngay_cong"] == cu:
                     x["ngay_cong"] = 0.0
-    return _luong_chuan_tham_so(ts, nam), thang, cap_nhat, cac_nam
+    return _luong_chuan_tham_so(ts, nam), _luong_ap_npt(cid, thang, nam), cap_nhat, cac_nam
 
 
 def _luong_tra_ve(cid, nam, ts, thang_nhap, cap_nhat, cac_nam):
@@ -10491,7 +10546,7 @@ def _nv_co_tick(v):
     return t not in ("", "0", "false", "khong", "k", "no", "n", "-")
 
 
-def _luong_doc_ngay_thang(v):
+def _luong_doc_ngay_thang(v, nam_min=1990):
     """Đọc ngày/tháng: 10/2024, 1/10/2024, 01-10-2024, 2024-10, 2024-10-01, ngày Excel (datetime) -> (năm, tháng, ngày) hoặc None."""
     import re as _re
     if isinstance(v, datetime.datetime):
@@ -10514,7 +10569,7 @@ def _luong_doc_ngay_thang(v):
                 if not g:
                     return None
                 m, y, d = int(g.group(1)), int(g.group(2)), 1
-    if not (1 <= m <= 12 and 1 <= d <= 31 and 1990 <= y <= 2200):
+    if not (1 <= m <= 12 and 1 <= d <= 31 and nam_min <= y <= 2200):
         return None
     return (y, m, d)
 
@@ -10573,7 +10628,7 @@ def _luong_dong_bh_tu_nv(tick, vao_lam, nam=None, thang=None, nghi_viec=None):
     return 1
 
 
-def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=None):
+def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=None, npt=None):
     """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định + có đóng BHXH không).
     Đóng BHXH = ô tick "Đóng BHXH" trong danh sách VÀ đã tới tháng "Tháng/Năm vào làm" (bắt đầu đóng). Danh sách cũ
     chưa có cột "Đóng BHXH" -> coi như đều đóng (giữ nguyên cách tính trước đây)."""
@@ -10604,6 +10659,8 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
             "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
             "muc_dt": lay(r, "PC Điện thoại"),
             "trang_phuc": lay(r, "PC Trang phục"), "ghi_chu": "CK"}))
+        if npt and nam and thang:         # có danh sách người phụ thuộc -> số NPT giảm trừ theo danh sách ở tháng này
+            kq[-1]["so_npt"] = float(_luong_so_npt_thang(npt, kq[-1]["ma"], kq[-1]["ten"], nam, thang))
     return kq
 
 
@@ -10628,7 +10685,8 @@ def bang_luong_tu_nhan_vien(cid: int, nam: int = 0, thang: int = 0):
     thì ô "Đóng BHXH" tính theo tick + tháng bắt đầu đóng của từng người."""
     nam = _luong_nam_hop_le(nam or datetime.date.today().year)
     d = nhap_lieu_get(cid, loai="nv")
-    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, thang if 1 <= thang <= 12 else None),
+    npt = _luong_npt_doc(nhap_lieu_get(cid, loai="npt"))
+    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, thang if 1 <= thang <= 12 else None, npt), "npt_co_ds": bool(npt),
             "da_nghi": _luong_nv_da_nghi(d.get("header"), d.get("rows"), nam, thang) if 1 <= thang <= 12 else []}
 
 
@@ -11081,8 +11139,10 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
     if not _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows")):
         raise HTTPException(400, "Danh Sách Nhân Viên đang trống — nhập nhân viên trước")
 
+    npt = _luong_npt_doc(nhap_lieu_get(cid, loai="npt"))
+
     def pool(t):
-        return _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, int(t))
+        return _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, int(t), npt)
     ty_le = min(100.0, max(0.0, _luong_so(body.get("ty_le_tang_ca")) if body.get("ty_le_tang_ca") not in (None, "") else 50.0))
     thang, tom = _luong_ke_hoach(pool, nam, body.get("tu_thang"), body.get("den_thang"), body.get("muc_tieu"),
                                  body.get("tham_so"), ty_le, body.get("da_co_ngoai") or 0,
@@ -12183,11 +12243,13 @@ def _luong_qt_thue_nam(tn_tinh_thue, ts):
     return _luong_thue_tncn(tn_tinh_thue, [[tu * 12, pct] for tu, pct in tt["bac_thue"]])
 
 
-def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv):
+def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
     """Gộp bảng lương cả năm theo từng người -> {nhom_05_1: [...], nhom_05_2: [...], npt: [...], canh_bao: [...]}.
     - 05-1: người có tháng làm bình thường (khấu trừ lũy tiến hằng tháng) — đều là cá nhân ỦY QUYỀN quyết toán thay (ct10=1);
     - 05-2: tháng 'thời vụ' (không đóng BHXH, làm < 14 ngày) bị khấu trừ 10% thuế TNCN (chỉ tính người thật sự bị khấu trừ > 0);
-    - MST cá nhân = số CCCD (cột CCCD của Danh Sách Nhân Viên, khớp theo Mã NV rồi Họ tên)."""
+    - MST cá nhân = số CCCD (cột CCCD của Danh Sách Nhân Viên, khớp theo Mã NV rồi Họ tên);
+    - npt_ds (danh sách người phụ thuộc đã nhập): dùng lập bảng kê 05-3 (họ tên, ngày sinh, CCCD, quan hệ, từ/đến tháng — cắt theo các tháng người lao động
+      thật sự có trên bảng lương); không có danh sách thì dựng dòng tạm theo 'số người phụ thuộc' của bảng lương."""
     cot = {_khong_dau(str(h or "")).strip().lower(): i for i, h in enumerate(header or [])}
     i_ma, i_ten, i_cccd = cot.get("ma nv"), cot.get("ho va ten"), cot.get("cccd")
     cccd_ma, cccd_ten = {}, {}
@@ -12207,7 +12269,7 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv):
             if not key:
                 continue
             p = ng.setdefault(key, {"ma": ma, "ten": ten, "tn": 0.0, "bh": 0.0, "gt": 0.0, "thue": 0.0, "npt": 0, "npt_thang": {}, "co_thang": False,
-                                    "tv_tn": 0.0, "tv_thue": 0.0, "co_tv": False})
+                                    "tv_tn": 0.0, "tv_thue": 0.0, "co_tv": False, "thang_co": set()})
             if not p["ten"]:
                 p["ten"] = ten
             if r.get("thoi_vu"):
@@ -12216,6 +12278,7 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv):
                 p["tv_thue"] += _luong_so(r.get("thue_tru_luong"))
             else:
                 p["co_thang"] = True
+                p["thang_co"].add(t)
                 p["tn"] += _luong_so(r.get("tn_chiu_thue"))
                 p["bh"] += _luong_so(r.get("bh_duoc_tru"))
                 p["gt"] += _luong_so(r.get("giam_tru_ban_than")) + _luong_so(r.get("tien_giam_tru_npt"))
@@ -12251,14 +12314,38 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv):
         canh_bao.append("Chưa có số CCCD (mã số thuế cá nhân) của: " + ", ".join(thieu_cccd[:10]) + (" ..." if len(thieu_cccd) > 10 else "") +
                         " — nhập cột CCCD trong Danh Sách Nhân Viên rồi kết xuất lại.")
     npt = []
-    for p in g1:
-        ts_t = sorted(p["npt_thang"])
-        for k in range(1, p["npt"] + 1):
-            thang_k = [t for t in ts_t if p["npt_thang"][t] >= k]
-            npt.append({"ten": p["ten"], "cccd": p["cccd"], "k": k, "tu": thang_k[0] if thang_k else "01", "den": thang_k[-1] if thang_k else "12"})
-    if npt:
-        canh_bao.append(f"Có {len(npt)} người phụ thuộc (theo cột 'Số người phụ thuộc' của Bảng Lương) nhưng phần mềm chưa lưu họ tên/ngày sinh/CCCD/quan hệ của từng người — "
-                        "bảng kê 05-3 được tạo dòng tạm, hãy bổ sung đầy đủ trên HTKK trước khi nộp.")
+    if npt_ds:
+        thieu_cccd_npt, quan_he_la = [], set()
+        for p in g1:
+            dem = 0
+            for rec in npt_ds:
+                if not _luong_npt_cua(rec, p["ma"], p["ten"]):
+                    continue
+                thang_k = sorted(t for t in p["thang_co"] if (not rec["tu"] or rec["tu"] <= (int(nam), int(t))) and (not rec["den"] or (int(nam), int(t)) <= rec["den"]))
+                if not thang_k:
+                    continue
+                dem += 1
+                qh = _NPT_QUAN_HE.get(_khong_dau(rec["quan_he"]).lower().strip(), ("", rec["quan_he"]))
+                if not qh[0]:
+                    quan_he_la.add(rec["quan_he"] or "(trống)")
+                if not rec["cccd"]:
+                    thieu_cccd_npt.append(rec["ten"])
+                npt.append({"ten": p["ten"], "cccd": p["cccd"], "k": dem, "tu": thang_k[0], "den": thang_k[-1], "npt_ten": rec["ten"], "ngay_sinh": rec["ngay_sinh"],
+                            "npt_cccd": rec["cccd"], "qh_ma": qh[0], "qh_ten": qh[1]})
+            p["ct16"] = dem
+        if thieu_cccd_npt:
+            canh_bao.append("Người phụ thuộc chưa có CCCD/số định danh: " + ", ".join(thieu_cccd_npt[:8]) + (" ..." if len(thieu_cccd_npt) > 8 else "") + " — bổ sung nếu đã có (trẻ chưa có CCCD thì để trống).")
+        if quan_he_la:
+            canh_bao.append("Quan hệ " + ", ".join(sorted(quan_he_la)) + " chưa có mã HTKK đã xác nhận (chỉ 'Con' và 'Cha/mẹ' đã đối chiếu với mẫu) — để trống mã, hãy chọn lại quan hệ trên HTKK.")
+    else:
+        for p in g1:
+            ts_t = sorted(p["npt_thang"])
+            for k in range(1, p["npt"] + 1):
+                thang_k = [t for t in ts_t if p["npt_thang"][t] >= k]
+                npt.append({"ten": p["ten"], "cccd": p["cccd"], "k": k, "tu": thang_k[0] if thang_k else "01", "den": thang_k[-1] if thang_k else "12"})
+        if npt:
+            canh_bao.append(f"Có {len(npt)} người phụ thuộc (theo cột 'Số người phụ thuộc' của Bảng Lương) nhưng chưa có danh sách người phụ thuộc — bảng kê 05-3 được tạo dòng tạm, "
+                            "hãy nhập 'Người phụ thuộc' trong phần mềm (hoặc bổ sung trên HTKK) trước khi nộp.")
     return {"g1": g1, "g2": g2, "npt": npt, "canh_bao": canh_bao, "so_nguoi": len(ng)}
 
 
@@ -12406,15 +12493,27 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
             a(f'        <BKeTTinNPT id="ID_{i}">')
             a(f'          <ct07>{e(d["ten"])}</ct07>')
             a(f'          <ct08>{e(d["cccd"])}</ct08>')
-            a(f'          <ct09>Người phụ thuộc {d["k"]} của {e(d["ten"])} (cần bổ sung họ tên)</ct09>')
-            a('          <ct10 xsi:nil="true" />')
-            a('          <ct11 xsi:nil="true" />')
-            a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
-            a('          <ct12_ma>03</ct12_ma>')
-            a('          <ct12_ten>Thẻ CCCD/Số định danh cá nhân</ct12_ten>')
-            a('          <ct13 />')
-            a('          <ct14_ma />')
-            a('          <ct14_ten />')
+            if d.get("npt_ten"):         # có danh sách người phụ thuộc: đủ họ tên/ngày sinh/CCCD/quan hệ
+                dt = _luong_doc_ngay_thang(d.get("ngay_sinh"), 1900)
+                a(f'          <ct09>{e(d["npt_ten"])}</ct09>')
+                a(f'          <ct10>{dt[0]:04d}-{dt[1]:02d}-{dt[2]:02d}</ct10>' if dt else '          <ct10 xsi:nil="true" />')
+                a(f'          <ct11>{e(d["npt_cccd"])}</ct11>' if d["npt_cccd"] else '          <ct11 xsi:nil="true" />')
+                a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
+                a('          <ct12_ma>03</ct12_ma>')
+                a('          <ct12_ten>Thẻ CCCD/Số định danh cá nhân</ct12_ten>')
+                a(f'          <ct13>{e(d["npt_cccd"])}</ct13>' if d["npt_cccd"] else '          <ct13 />')
+                a(f'          <ct14_ma>{e(d["qh_ma"])}</ct14_ma>' if d["qh_ma"] else '          <ct14_ma />')
+                a(f'          <ct14_ten>{e(d["qh_ten"])}</ct14_ten>')
+            else:                        # chưa có danh sách: dòng tạm theo số NPT của bảng lương
+                a(f'          <ct09>Người phụ thuộc {d["k"]} của {e(d["ten"])} (cần bổ sung họ tên)</ct09>')
+                a('          <ct10 xsi:nil="true" />')
+                a('          <ct11 xsi:nil="true" />')
+                a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
+                a('          <ct12_ma>03</ct12_ma>')
+                a('          <ct12_ten>Thẻ CCCD/Số định danh cá nhân</ct12_ten>')
+                a('          <ct13 />')
+                a('          <ct14_ma />')
+                a('          <ct14_ten />')
             a(f'          <ct15>{d["tu"]}/{nam}</ct15>')
             a(f'          <ct16>{d["den"]}/{nam}</ct16>')
             a('        </BKeTTinNPT>')
@@ -12437,7 +12536,7 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
         raise HTTPException(404, f"Năm {nam} chưa có dữ liệu bảng lương để quyết toán thuế TNCN")
     thang_tinh = {t: _luong_tinh_thang(rows, ts, t, nam) for t, rows in thang_nhap.items()}
     d = nhap_lieu_get(cid, loai="nv")
-    tong = _luong_qt_tong_hop(ts, thang_tinh, d.get("header"), d.get("rows"))
+    tong = _luong_qt_tong_hop(ts, thang_tinh, d.get("header"), d.get("rows"), _luong_npt_doc(nhap_lieu_get(cid, loai="npt")), nam)
     if not tong["g1"] and not tong["g2"]:
         raise HTTPException(400, f"Bảng lương năm {nam} không có người nào để đưa vào quyết toán")
     tong["so_nguoi_khai"] = len({(p["ma"] or p["ten"]).lower() for p in tong["g1"] + tong["g2"]})
