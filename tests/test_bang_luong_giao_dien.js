@@ -866,12 +866,23 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
     ctxNv.window = ctxNv;
     vm.createContext(ctxNv);
     vm.runInContext(khoiNv, ctxNv);
-    assert(!ctxNv.NV_HEADERS.includes('PC Chức vụ') && ctxNv.NV_HEADERS.length === 15, 'Bộ cột mặc định không còn PC Chức vụ');
+    assert(!ctxNv.NV_HEADERS.includes('PC Chức vụ') && ctxNv.NV_HEADERS.length === 16 && ctxNv.NV_HEADERS.indexOf('Tháng/Năm nghỉ việc') === ctxNv.NV_HEADERS.indexOf('Đóng BHXH') + 1, 'Bộ cột mặc định không còn PC Chức vụ, có cột Tháng/Năm nghỉ việc sau Đóng BHXH');
     await ctxNv.taiNhanVien();
     assert(!ctxNv.nvHeader.includes('PC Chức vụ'), 'Đã gỡ cột khỏi tiêu đề');
     const i33 = ctxNv.nvHeader.indexOf('PC Điện thoại');
     assert(ctxNv.nvRows[0][i33] === '500000' && !ctxNv.nvRows[0].includes('900000') && ctxNv.nvRows[0].length === ctxNv.nvHeader.length, 'Dòng dữ liệu cũng gỡ đúng ô PC Chức vụ, các ô sau không lệch');
     console.log('PASS 33: Danh Sách Nhân Viên bỏ cột PC Chức vụ (kể cả dữ liệu đã lưu cũ).');
+
+    // ---- 34: cột "Tháng/Năm nghỉ việc": danh sách đã lưu cũ (chưa có cột) -> thêm cột trống sau "Đóng BHXH"; đã có cột thì giữ nguyên dữ liệu ----
+    ctxNv.api = async () => ({ header: ['STT', 'Mã NV', 'Họ và tên', 'Tháng/Năm vào làm', 'Đóng BHXH', 'Chức vụ', 'Lương Cơ bản'], rows: [[1, '1', 'A', '12/2024', 'x', 'KD', '5310000'], [2, '2', 'B', '01/2025', '', 'KD', '5310000']] });
+    await ctxNv.taiNhanVien();
+    const i34 = ctxNv.nvHeader.indexOf('Tháng/Năm nghỉ việc');
+    assert(i34 === ctxNv.nvHeader.indexOf('Đóng BHXH') + 1 && ctxNv.nvHeader.indexOf('Chức vụ') === i34 + 1, 'Cột nghỉ việc chèn ngay sau Đóng BHXH');
+    assert(ctxNv.nvRows.every(r => r.length === ctxNv.nvHeader.length && r[i34] === '') && ctxNv.nvRows[0][ctxNv.nvHeader.indexOf('Chức vụ')] === 'KD' && ctxNv.nvRows[1][ctxNv.nvHeader.indexOf('Lương Cơ bản')] === '5310000', 'Ô mới trống, các ô khác không lệch');
+    ctxNv.api = async () => ({ header: ctxNv.nvHeader.slice(), rows: [[1, '1', 'A', '12/2024', 'x', '06/2025', 'KD', '5310000']] });
+    await ctxNv.taiNhanVien();
+    assert(ctxNv.nvHeader.filter(h => h === 'Tháng/Năm nghỉ việc').length === 1 && ctxNv.nvRows[0][ctxNv.nvHeader.indexOf('Tháng/Năm nghỉ việc')] === '06/2025', 'Không thêm cột lần 2, giữ dữ liệu nghỉ việc');
+    console.log('PASS 34: cột Tháng/Năm nghỉ việc: thêm vào danh sách cũ đúng vị trí, không lệch, không nhân đôi.');
   }
 
   console.log('\nALL DONE');

@@ -4334,7 +4334,7 @@ async function tmdtShopeeLayDonHang(){
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
-                   'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Chức vụ','Lương Cơ bản',
+                   'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Tháng/Năm nghỉ việc','Chức vụ','Lương Cơ bản',
                    'PC Tiền cơm','PC Xăng xe','PC Điện thoại','PC Trang phục'];
 let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={};
 let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
@@ -4390,6 +4390,7 @@ async function taiNhanVien(){
     nvRows=(d.rows||[]).map(r=>r.slice());
     nvBoCotPcChucVu();
     nvThemCotTick();
+    nvThemCotNghiViec();
     nvFilters={}; nvChon=null;
     veGridNhanVien();
     const info=document.getElementById('nvInfo');
@@ -4415,6 +4416,17 @@ function nvBoCotPcChucVu(){
   if(vt<0)return;
   nvHeader.splice(vt,1);
   nvRows.forEach(r=>{if(r.length>vt)r.splice(vt,1)});
+  nvFilters={};
+}
+// Cột "Tháng/Năm nghỉ việc" = tháng cuối cùng còn làm (từ tháng sau không lên bảng lương): danh sách đã lưu từ trước chưa có cột -> thêm cột trống, đặt sau "Đóng BHXH".
+const NV_COT_NGHI='Tháng/Năm nghỉ việc';
+function nvThemCotNghiViec(){
+  if(nvHeader.some(x=>String(x).trim().toLowerCase()===NV_COT_NGHI.toLowerCase()))return;
+  let vt=nvHeader.findIndex(nvLaCotTick);
+  if(vt<0)vt=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='tháng/năm vào làm');
+  vt=vt>=0?vt+1:nvHeader.length;
+  nvHeader.splice(vt,0,NV_COT_NGHI);
+  nvRows.forEach(r=>{while(r.length<nvHeader.length-1)r.push('');r.splice(vt,0,'')});
   nvFilters={};
 }
 function nvThemCotTick(){
@@ -4555,6 +4567,7 @@ async function nvImportExcel(input){
     if(!nvRows.length&&kq.header&&kq.header.length)nvHeader=kq.header.slice();
     nvBoCotPcChucVu();
     nvThemCotTick();
+    nvThemCotNghiViec();
     nvRows.push(...kq.rows.map(r=>{
       const rr=r.slice();
       while(rr.length<nvHeader.length)rr.push('');

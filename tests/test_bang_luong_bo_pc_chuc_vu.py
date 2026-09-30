@@ -41,7 +41,7 @@ finally:
 print("PASS 3: Excel không còn cột PC Chức vụ, đọc lại bình thường.")
 # 4: Danh Sách Nhân Viên: bộ cột chuẩn không còn PC Chức vụ; import file có cột "Phụ cấp chức vụ" thì bỏ cột đó và KHÔNG làm sai cột Chức vụ
 import asyncio, io
-assert "PC Chức vụ" not in server.NV_HEADERS and len(server.NV_HEADERS) == 15
+assert "PC Chức vụ" not in server.NV_HEADERS and len(server.NV_HEADERS) == 16 and "Tháng/Năm nghỉ việc" in server.NV_HEADERS
 wb = openpyxl.Workbook()
 w = wb.active
 for pos, dong in enumerate([["Mã NV", "Họ và tên", "Phụ cấp chức vụ", "Chức vụ", "Lương cơ bản", "Tiền cơm", "Xăng xe", "Điện thoại", "Trang phục"],
@@ -68,5 +68,41 @@ r = dict(zip(kq["header"], kq["rows"][0]))
 assert r["Chức vụ"] == "Kinh doanh" and r["Lương Cơ bản"] == 5_310_000 and r["PC Tiền cơm"] == 700_000 and r["PC Xăng xe"] == 500_000
 assert 900_000 not in kq["rows"][0], "Phụ cấp chức vụ của file nguồn không được đưa vào bất kỳ cột nào"
 print("PASS 4: import Danh Sách Nhân Viên bỏ cột phụ cấp chức vụ, không nhầm sang cột Chức vụ.")
+
+# 5: cột "Tháng/Năm nghỉ việc": nghỉ tháng M -> còn lên bảng lương tới hết tháng M, từ tháng M+1 không còn; trống = còn làm
+hd = ["Mã NV", "Họ và tên", "Tháng/Năm nghỉ việc", "Lương Cơ bản"]
+nv = [["1", "Còn làm", "", 5_000_000], ["2", "Nghỉ 6/2025", "06/2025", 5_000_000], ["3", "Nghỉ ngày đầy đủ", "15/03/2025", 5_000_000], ["4", "Nghỉ 12/2024", "2024-12", 5_000_000]]
+ten = lambda nam, thang: [r["ten"] for r in server._luong_dong_tu_nhan_vien(hd, nv, 0, nam, thang)]
+assert ten(2025, 3) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ"], "Tháng nghỉ việc vẫn còn trên bảng lương"
+assert ten(2025, 4) == ["Còn làm", "Nghỉ 6/2025"]
+assert ten(2025, 6) == ["Còn làm", "Nghỉ 6/2025"] and ten(2025, 7) == ["Còn làm"]
+assert ten(2025, 1) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ"] and ten(2024, 12) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ", "Nghỉ 12/2024"]
+assert len(server._luong_dong_tu_nhan_vien(hd, nv)) == 4, "Không có tháng -> lấy đủ (không lọc)"
+assert server._luong_thang_nghi_viec("06/2025") == (2025, 6) and server._luong_thang_nghi_viec("") is None and server._luong_thang_nghi_viec("abc") is None
+# vào làm vẫn theo quy tắc cũ (sau ngày 18 -> tháng sau)
+assert server._luong_bat_dau_bhxh("20/03/2025") == (2025, 4) and server._luong_bat_dau_bhxh("10/2024") == (2024, 10)
+# kế hoạch chi phí cả năm: người đã nghỉ không được chọn ở các tháng sau khi nghỉ
+import random
+hd2 = ["Mã NV", "Họ và tên", "Tháng/Năm nghỉ việc", "Lương Cơ bản", "Đóng BHXH"]
+nv2 = [[str(i), f"NV{i}", "07/2025" if i < 4 else "", 5_310_000, "x"] for i in range(1, 8)]
+pool = lambda t: server._luong_dong_tu_nhan_vien(hd2, nv2, 0, 2025, int(t))
+th, tom = server._luong_ke_hoach(pool, 2025, 6, 9, 100_000_000, None, 50, 0, random.Random(1))
+for t in ("08", "09"):
+    assert all(r["ten"] not in ("NV1", "NV2", "NV3") for r in th[t]), "Đã nghỉ từ tháng 7 -> không xuất hiện ở tháng 8, 9"
+assert sum(r["chi_phi_luong"] for rows in th.values() for r in rows) == 100_000_000
+print("PASS 5: cột Tháng/Năm nghỉ việc: còn lên bảng lương tới hết tháng nghỉ, sau đó không còn (nạp danh sách + kế hoạch cả năm).")
+
+# 6: import Excel Danh Sách Nhân Viên nhận cột "Ngày nghỉ việc" -> Tháng/Năm nghỉ việc
+wb = openpyxl.Workbook()
+w = wb.active
+w.append(["Mã NV", "Họ và tên", "Ngày vào làm", "Ngày nghỉ việc", "Chức vụ", "Lương cơ bản"])
+w.append([])
+w.append(["1", "Nguyễn A", "01/01/2024", "30/06/2025", "KD", 5_310_000])
+buf = io.BytesIO()
+wb.save(buf)
+kq = asyncio.run(server.nhap_lieu_import_nhan_vien(1, Req()))       # Up.read() đọc biến buf hiện tại
+r = dict(zip(kq["header"], kq["rows"][0]))
+assert r["Tháng/Năm nghỉ việc"] == "30/06/2025" and r["Tháng/Năm vào làm"] == "01/01/2024" and r["Chức vụ"] == "KD" and r["Lương Cơ bản"] == 5_310_000
+print("PASS 6: import Excel nhận cột Ngày nghỉ việc, không nhầm sang cột khác.")
 
 print("\nALL DONE")

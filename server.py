@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.025"
+APP_BUILD = "2026-09-30.026"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10491,10 +10491,8 @@ def _nv_co_tick(v):
     return t not in ("", "0", "false", "khong", "k", "no", "n", "-")
 
 
-def _luong_bat_dau_bhxh(v):
-    """'Tháng/Năm vào làm' = thời điểm BẮT ĐẦU đóng BHXH. Nhận 10/2024, 1/10/2024, 01-10-2024, 2024-10, 2024-10-01,
-    ngày Excel (datetime). Trả (năm, tháng); vào làm sau ngày 18 (còn < 14 ngày trong tháng) thì tính từ tháng sau.
-    Trống/không đọc được -> None (đóng từ đầu)."""
+def _luong_doc_ngay_thang(v):
+    """Đọc ngày/tháng: 10/2024, 1/10/2024, 01-10-2024, 2024-10, 2024-10-01, ngày Excel (datetime) -> (năm, tháng, ngày) hoặc None."""
     import re as _re
     if isinstance(v, datetime.datetime):
         v = v.date()
@@ -10518,6 +10516,22 @@ def _luong_bat_dau_bhxh(v):
                 m, y, d = int(g.group(1)), int(g.group(2)), 1
     if not (1 <= m <= 12 and 1 <= d <= 31 and 1990 <= y <= 2200):
         return None
+    return (y, m, d)
+
+
+def _luong_thang_nghi_viec(v):
+    """'Tháng/Năm nghỉ việc' = THÁNG CUỐI CÙNG còn làm việc (còn lên bảng lương tháng đó, từ tháng sau không còn). Trống/không đọc được -> None."""
+    kq = _luong_doc_ngay_thang(v)
+    return (kq[0], kq[1]) if kq else None
+
+
+def _luong_bat_dau_bhxh(v):
+    """'Tháng/Năm vào làm' = thời điểm BẮT ĐẦU đóng BHXH (đọc như _luong_doc_ngay_thang). Trả (năm, tháng); vào làm sau ngày 18
+    (còn < 14 ngày trong tháng) thì tính từ tháng sau. Trống/không đọc được -> None (đóng từ đầu)."""
+    kq = _luong_doc_ngay_thang(v)
+    if not kq:
+        return None
+    y, m, d = kq
     if calendar.monthrange(y, m)[1] - d + 1 < _LUONG_NGAY_DONG_BHXH:     # làm < 14 ngày trong tháng vào làm -> chưa đóng
         y, m = (y + 1, 1) if m == 12 else (y, m + 1)
     return (y, m)
@@ -10552,6 +10566,9 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
     for r in rows or []:
         ten = str(lay(r, "Họ và tên") or "").strip()
         if not ten:
+            continue
+        nghi = _luong_thang_nghi_viec(lay(r, "Tháng/Năm nghỉ việc"))
+        if nghi and nam and thang and (int(nam), int(thang)) > nghi:      # đã nghỉ việc từ tháng trước -> không lên bảng lương tháng này
             continue
         tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
         kq.append(_luong_chuan_dong_nhap({
@@ -12998,7 +13015,7 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
 
 NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
-              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Chức vụ", "Lương Cơ bản",
+              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Lương Cơ bản",
               "PC Tiền cơm", "PC Xăng xe", "PC Điện thoại", "PC Trang phục"]
 
 # Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
@@ -13013,6 +13030,7 @@ _NV_TU_KHOA = [
     ("PC Trang phục", ["trang phuc", "phu cap trang phuc", "pc trang phuc"]),
     ("Lương Cơ bản", ["luong co ban", "luong cb", "muc luong"]),
     ("Chức vụ", ["chuc vu", "chuc danh"]),
+    ("Tháng/Năm nghỉ việc", ["nghi viec", "ngay nghi", "thoi viec"]),
     ("Tháng/Năm vào làm", ["vao lam", "ngay vao", "thang nam vao"]),
     ("Ngày cấp", ["ngay cap"]),
     ("CCCD", ["cccd", "can cuoc", "cmnd", "so cmt"]),
