@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.027"
+APP_BUILD = "2026-09-30.028"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12173,6 +12173,308 @@ async def bang_luong_import_misa(cid: int, request: Request):
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', kết nối tới dữ liệu THỬ trước.")
     return _luong_misa_ghi_sql(cid, database, nam, thang_rows, body, preview=body.get("preview", True) not in (False, 0, "0", "false"))
+
+
+# ----- KẾT XUẤT QUYẾT TOÁN TNCN NĂM (Mẫu 05/QTT-TNCN, TT80/2021) — XML cho HTKK, lập từ Bảng Lương + Danh Sách Nhân Viên -----
+# Cấu trúc + ý nghĩa các chỉ tiêu đối chiếu theo 2 file XML HTKK thật người dùng cung cấp (tờ khai chính ct16–ct41, PLuc_05_1/05_2/05_3_BK_QTT).
+def _luong_qt_thue_nam(tn_tinh_thue, ts):
+    """Thuế TNCN cả năm theo biểu lũy tiến (mức tháng x 12) của bộ thuế áp dụng cho tháng 12 của năm."""
+    tt = _luong_thue_ap_dung(ts, "12")
+    return _luong_thue_tncn(tn_tinh_thue, [[tu * 12, pct] for tu, pct in tt["bac_thue"]])
+
+
+def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv):
+    """Gộp bảng lương cả năm theo từng người -> {nhom_05_1: [...], nhom_05_2: [...], npt: [...], canh_bao: [...]}.
+    - 05-1: người có tháng làm bình thường (khấu trừ lũy tiến hằng tháng) — đều là cá nhân ỦY QUYỀN quyết toán thay (ct10=1);
+    - 05-2: tháng 'thời vụ' (không đóng BHXH, làm < 14 ngày) bị khấu trừ 10% thuế TNCN (chỉ tính người thật sự bị khấu trừ > 0);
+    - MST cá nhân = số CCCD (cột CCCD của Danh Sách Nhân Viên, khớp theo Mã NV rồi Họ tên)."""
+    cot = {_khong_dau(str(h or "")).strip().lower(): i for i, h in enumerate(header or [])}
+    i_ma, i_ten, i_cccd = cot.get("ma nv"), cot.get("ho va ten"), cot.get("cccd")
+    cccd_ma, cccd_ten = {}, {}
+    for r in rows_nv or []:
+        ten = str(r[i_ten] if i_ten is not None and i_ten < len(r) and r[i_ten] is not None else "").strip()
+        ma = str(r[i_ma] if i_ma is not None and i_ma < len(r) and r[i_ma] is not None else "").strip()
+        cc = str(r[i_cccd] if i_cccd is not None and i_cccd < len(r) and r[i_cccd] is not None else "").strip().replace(" ", "")
+        if ma:
+            cccd_ma[ma.lower()] = cc
+        if ten:
+            cccd_ten[_khong_dau(ten).lower()] = cc
+    ng = {}
+    for t in _LUONG_THANG:
+        for r in thang_tinh.get(t) or []:
+            ma, ten = str(r.get("ma") or "").strip(), str(r.get("ten") or "").strip()
+            key = (ma or ten).lower()
+            if not key:
+                continue
+            p = ng.setdefault(key, {"ma": ma, "ten": ten, "tn": 0.0, "bh": 0.0, "gt": 0.0, "thue": 0.0, "npt": 0, "npt_thang": {}, "co_thang": False,
+                                    "tv_tn": 0.0, "tv_thue": 0.0, "co_tv": False})
+            if not p["ten"]:
+                p["ten"] = ten
+            if r.get("thoi_vu"):
+                p["co_tv"] = True
+                p["tv_tn"] += _luong_so(r.get("tn_chiu_thue"))
+                p["tv_thue"] += _luong_so(r.get("thue_tru_luong"))
+            else:
+                p["co_thang"] = True
+                p["tn"] += _luong_so(r.get("tn_chiu_thue"))
+                p["bh"] += _luong_so(r.get("bh_duoc_tru"))
+                p["gt"] += _luong_so(r.get("giam_tru_ban_than")) + _luong_so(r.get("tien_giam_tru_npt"))
+                p["thue"] += _luong_so(r.get("thue_tru_luong"))
+                n = int(_luong_so(r.get("so_npt")))
+                p["npt"] = max(p["npt"], n)
+                if n > 0:
+                    p["npt_thang"][t] = n
+    canh_bao, g1, g2 = [], [], []
+    thieu_cccd = []
+    for p in ng.values():
+        cc = cccd_ma.get(p["ma"].lower()) if p["ma"] else ""
+        if not cc:
+            cc = cccd_ten.get(_khong_dau(p["ten"]).lower(), "")
+        p["cccd"] = cc
+        if not cc:
+            thieu_cccd.append(p["ten"] or p["ma"])
+        if p["co_thang"]:
+            ct12 = int(_luong_lam_tron(p["tn"]))
+            ct17 = int(_luong_lam_tron(p["gt"]))
+            ct18 = int(_luong_lam_tron(p["bh"]))
+            ct21 = max(0, ct12 - ct17 - ct18)
+            ct24 = int(_luong_lam_tron(_luong_qt_thue_nam(ct21, ts)))
+            ct25 = int(_luong_lam_tron(p["thue"]))
+            g1.append(dict(p, ct12=ct12, ct16=p["npt"], ct17=ct17, ct18=ct18, ct21=ct21, ct24=ct24, ct25=ct25, ct26=max(0, ct24 - ct25), ct27=max(0, ct25 - ct24)))
+        tv_thue = int(_luong_lam_tron(p["tv_thue"]))
+        if p["co_tv"]:
+            if tv_thue > 0:
+                g2.append(dict(p, ct11=int(_luong_lam_tron(p["tv_tn"])), ct15=tv_thue))
+            else:
+                canh_bao.append(f"{p['ten'] or p['ma']}: có tháng làm < 14 ngày nhưng không bị khấu trừ thuế 10% — không đưa vào bảng kê 05-2.")
+    if thieu_cccd:
+        canh_bao.append("Chưa có số CCCD (mã số thuế cá nhân) của: " + ", ".join(thieu_cccd[:10]) + (" ..." if len(thieu_cccd) > 10 else "") +
+                        " — nhập cột CCCD trong Danh Sách Nhân Viên rồi kết xuất lại.")
+    npt = []
+    for p in g1:
+        ts_t = sorted(p["npt_thang"])
+        for k in range(1, p["npt"] + 1):
+            thang_k = [t for t in ts_t if p["npt_thang"][t] >= k]
+            npt.append({"ten": p["ten"], "cccd": p["cccd"], "k": k, "tu": thang_k[0] if thang_k else "01", "den": thang_k[-1] if thang_k else "12"})
+    if npt:
+        canh_bao.append(f"Có {len(npt)} người phụ thuộc (theo cột 'Số người phụ thuộc' của Bảng Lương) nhưng phần mềm chưa lưu họ tên/ngày sinh/CCCD/quan hệ của từng người — "
+                        "bảng kê 05-3 được tạo dòng tạm, hãy bổ sung đầy đủ trên HTKK trước khi nộp.")
+    return {"g1": g1, "g2": g2, "npt": npt, "canh_bao": canh_bao, "so_nguoi": len(ng)}
+
+
+def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
+    """Dựng XML 05/QTT-TNCN (lần đầu, loại C) cho HTKK từ kết quả _luong_qt_tong_hop."""
+    import html as _html
+    e = lambda v: _html.escape(str(v if v is not None else ""))
+    g1, g2, npt = tong["g1"], tong["g2"], tong["npt"]
+    sum1 = lambda k: sum(p[k] for p in g1)
+    mst = str(comp["mst"] or "").strip()
+    ma_cqt = (comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else "") or ""
+    ten_cqt = (comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else "") or ""
+    dia_chi = (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or ""
+    khau_tru = [p for p in g1 if p["ct25"] > 0] + g2
+    ct23 = sum1("ct12") + sum(p["ct11"] for p in g2)
+    ct28 = sum(p["ct12"] for p in g1 if p["ct25"] > 0) + sum(p["ct11"] for p in g2)
+    ct31 = sum(p["ct25"] for p in g1 if p["ct25"] > 0) + sum(p["ct15"] for p in g2)
+    so_nguoi = tong["so_nguoi_khai"]
+    chinh = {"ct16": so_nguoi, "ct17": len(g1), "ct18": len(khau_tru), "ct19": len(khau_tru), "ct20": 0, "ct21": 0, "ct22": sum1("ct16"),
+             "ct23": ct23, "ct24": ct23, "ct25": 0, "ct26": 0, "ct27": 0, "ct28": ct28, "ct29": ct28, "ct30": 0, "ct31": ct31, "ct32": ct31, "ct33": 0, "ct34": 0}
+    thay = {"ct35": len(g1), "ct36": 0, "ct37": 0, "ct38": sum1("ct24"), "ct39": sum1("ct25"), "ct40": sum1("ct26"), "ct41": sum1("ct27")}
+    L = []
+    a = L.append
+    a('<?xml version="1.0" encoding="UTF-8"?>')
+    a('<HSoThueDTu xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://kekhaithue.gdt.gov.vn/TKhaiThue">')
+    a('  <HSoKhaiThue id="ID_1">')
+    a('    <TTinChung>')
+    a('      <TTinDVu>')
+    a('        <maDVu>HTKK</maDVu>')
+    a('        <tenDVu>HỖ TRỢ KÊ KHAI THUẾ</tenDVu>')
+    a('        <pbanDVu>5.7.8</pbanDVu>')
+    a('        <ttinNhaCCapDVu>F9BF5985C172BF1B5C62D9F233CDBEBE</ttinNhaCCapDVu>')
+    a('      </TTinDVu>')
+    a('      <TTinTKhaiThue>')
+    a('        <TKhaiThue>')
+    a('          <maTKhai>953</maTKhai>')
+    a('          <tenTKhai>TỜ KHAI QUYẾT TOÁN THUẾ THU NHẬP CÁ NHÂN (Mẫu số 05/QTT-TNCN)</tenTKhai>')
+    a('          <moTaBMau>(Ban hành kèm theo Thông tư số 80/2021/TT-BTC ngày 29 tháng 9 năm 2021 của Bộ trưởng Bộ Tài chính)</moTaBMau>')
+    a('          <pbanTKhaiXML>2.9.3</pbanTKhaiXML>')
+    a('          <loaiTKhai>C</loaiTKhai>')
+    a('          <soLan>0</soLan>')
+    a('          <KyKKhaiThue>')
+    a('            <kieuKy>Y</kieuKy>')
+    a(f'            <kyKKhai>{nam}</kyKKhai>')
+    a('            <kyKKhaiTuNgay />')
+    a('            <kyKKhaiDenNgay />')
+    a(f'            <kyKKhaiTuThang>01/{nam}</kyKKhaiTuThang>')
+    a(f'            <kyKKhaiDenThang>12/{nam}</kyKKhaiDenThang>')
+    a('          </KyKKhaiThue>')
+    a(f'          <maCQTNoiNop>{e(ma_cqt)}</maCQTNoiNop>')
+    a(f'          <tenCQTNoiNop>{e(ten_cqt)}</tenCQTNoiNop>')
+    a(f'          <ngayLapTKhai>{homnay.isoformat()}</ngayLapTKhai>')
+    a('          <GiaHan>')
+    a('            <maLyDoGiaHan />')
+    a('            <lyDoGiaHan />')
+    a('          </GiaHan>')
+    a(f'          <nguoiKy>{e(nguoi_ky)}</nguoiKy>')
+    a(f'          <ngayKy>{homnay.isoformat()}</ngayKy>')
+    a('          <nganhNgheKD />')
+    a('        </TKhaiThue>')
+    a('        <NNT>')
+    a(f'          <mst>{e(mst)}</mst>')
+    a(f'          <tenNNT>{e(comp["ten"])}</tenNNT>')
+    a(f'          <dchiNNT>{e(dia_chi)}</dchiNNT>')
+    a(f'          <tenXaNNT>{e(ten_cqt)}</tenXaNNT>')
+    a(f'          <maXaNNT>{e(ma_cqt)}</maXaNNT>')
+    a('          <maHuyenNNT />')
+    a('          <tenHuyenNNT />')
+    a(f'          <maTinhNNT>{e(str(ma_cqt)[:3])}</maTinhNNT>')
+    a('          <tenTinhNNT />')
+    a('          <dthoaiNNT />')
+    a('          <faxNNT />')
+    a('          <emailNNT />')
+    a('        </NNT>')
+    a('      </TTinTKhaiThue>')
+    a('    </TTinChung>')
+    a('    <CTieuTKhaiChinh>')
+    a(f'      <mst_cu>{e(mst)}</mst_cu>')
+    a('      <Header>')
+    a('        <toChucCoQTTTheoUyQuyen>0</toChucCoQTTTheoUyQuyen>')
+    a('        <ma_THQuyetToan>01</ma_THQuyetToan>')
+    a('        <ten_THQuyetToan>QT định kỳ</ten_THQuyetToan>')
+    a('        <hanNop />')
+    a('      </Header>')
+    a('      <NVuKhauTruThue>')
+    for k, v in chinh.items():
+        a(f'        <{k}>{int(v)}</{k}>')
+    a('      </NVuKhauTruThue>')
+    a('      <NVuQToanThay>')
+    for k, v in thay.items():
+        a(f'        <{k}>{int(v)}</{k}>')
+    a('      </NVuQToanThay>')
+    a('    </CTieuTKhaiChinh>')
+    a('    <PLuc>')
+    # --- 05-1/BK-QTT-TNCN: cá nhân quyết toán theo biểu lũy tiến, tất cả ỦY QUYỀN cho công ty quyết toán thay (ct10=1) ---
+    a('      <PLuc_05_1_BK_QTT>')
+    for i, p in enumerate(g1, 1):
+        a(f'        <BKeCTietCNhan id="ID_{i}">')
+        a('          <coDieuChinhSoLieu>0</coDieuChinhSoLieu>')
+        a(f'          <ct07>{e(p["ten"])}</ct07>')
+        a(f'          <ct08>{e(p["cccd"])}</ct08>')
+        a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
+        a('          <ct09a_ma />')
+        a('          <ct09a_ten>Thẻ CCCD/Số định danh cá nhân</ct09a_ten>')
+        a(f'          <ct09>{e(p["cccd"])}</ct09>')
+        a('          <ct10>1</ct10>')
+        a('          <ct11>0</ct11>')
+        for k in ("ct12", "ct13", "ct14", "ct15", "ct15.1", "ct16", "ct17", "ct18", "ct19", "ct20", "ct21", "ct22", "ct23", "ct24", "ct25", "ct26", "ct27"):
+            a(f'          <{k}>{int(p.get(k, 0))}</{k}>')
+        a('        </BKeCTietCNhan>')
+    tong1 = {"ct28": "ct12", "ct29": "ct13", "ct30": "ct14", "ct31": "ct15", "ct31.1": "ct15.1", "ct32": "ct16", "ct33": "ct17", "ct34": "ct18", "ct35": "ct19",
+             "ct36": "ct20", "ct37": "ct21", "ct38": "ct22", "ct39": "ct23", "ct40": "ct24", "ct41": "ct25", "ct42": "ct26", "ct43": "ct27"}
+    for k, nguon in tong1.items():
+        a(f'        <{k}>{int(sum(p.get(nguon, 0) for p in g1))}</{k}>')
+    a('      </PLuc_05_1_BK_QTT>')
+    # --- 05-2/BK-QTT-TNCN: cá nhân bị khấu trừ 10% (thuế suất toàn phần) ---
+    if g2:
+        a('      <PLuc_05_2_BK_QTT>')
+        for i, p in enumerate(g2, 1):
+            a(f'        <BKeCTietCNhan id="ID_{i}">')
+            a('          <coDieuChinhSoLieu>0</coDieuChinhSoLieu>')
+            a(f'          <ct07>{e(p["ten"])}</ct07>')
+            a(f'          <ct08>{e(p["cccd"])}</ct08>')
+            a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
+            a('          <ct09a_ma>03</ct09a_ma>')
+            a('          <ct09a_ten>Thẻ CCCD/Số định danh cá nhân</ct09a_ten>')
+            a(f'          <ct09>{e(p["cccd"])}</ct09>')
+            a('          <ct10>0</ct10>')
+            a(f'          <ct11>{p["ct11"]}</ct11>')
+            for k in ("ct12", "ct13", "ct14", "ct14.1"):
+                a(f'          <{k}>0</{k}>')
+            a(f'          <ct15>{p["ct15"]}</ct15>')
+            a('          <ct16>0</ct16>')
+            a('        </BKeCTietCNhan>')
+        a(f'        <ct17>{sum(p["ct11"] for p in g2)}</ct17>')
+        for k in ("ct18", "ct19", "ct20", "ct20.1"):
+            a(f'        <{k}>0</{k}>')
+        a(f'        <ct21>{sum(p["ct15"] for p in g2)}</ct21>')
+        a('        <ct22>0</ct22>')
+        a('      </PLuc_05_2_BK_QTT>')
+    # --- 05-3/BK-QTT-TNCN: người phụ thuộc ---
+    if npt:
+        a('      <PLuc_05_3_BK_QTT>')
+        for i, d in enumerate(npt, 1):
+            a(f'        <BKeTTinNPT id="ID_{i}">')
+            a(f'          <ct07>{e(d["ten"])}</ct07>')
+            a(f'          <ct08>{e(d["cccd"])}</ct08>')
+            a(f'          <ct09>Người phụ thuộc {d["k"]} của {e(d["ten"])} (cần bổ sung họ tên)</ct09>')
+            a('          <ct10 xsi:nil="true" />')
+            a('          <ct11 xsi:nil="true" />')
+            a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
+            a('          <ct12_ma>03</ct12_ma>')
+            a('          <ct12_ten>Thẻ CCCD/Số định danh cá nhân</ct12_ten>')
+            a('          <ct13 />')
+            a('          <ct14_ma />')
+            a('          <ct14_ten />')
+            a(f'          <ct15>{d["tu"]}/{nam}</ct15>')
+            a(f'          <ct16>{d["den"]}/{nam}</ct16>')
+            a('        </BKeTTinNPT>')
+        a('      </PLuc_05_3_BK_QTT>')
+    a('    </PLuc>')
+    a('  </HSoKhaiThue>')
+    a('</HSoThueDTu>')
+    return "\n".join(L) + "\n", chinh, thay
+
+
+@app.post("/api/bang-luong/{cid}/ket-xuat-qt-tncn")
+async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
+    """Body: {nam, nguoi_ky}. Lập XML quyết toán TNCN năm (05/QTT-TNCN, lần đầu) từ Bảng Lương ĐÃ LƯU của năm + Danh Sách Nhân Viên (CCCD = mã số
+    thuế cá nhân; tất cả cá nhân mặc định ỦY QUYỀN quyết toán thay). Trả file XML (header X-Canh-Bao = cảnh báo, đã mã hoá URL)."""
+    from urllib.parse import quote
+    body = await request.json()
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
+    if not any(thang_nhap.values()):
+        raise HTTPException(404, f"Năm {nam} chưa có dữ liệu bảng lương để quyết toán thuế TNCN")
+    thang_tinh = {t: _luong_tinh_thang(rows, ts, t, nam) for t, rows in thang_nhap.items()}
+    d = nhap_lieu_get(cid, loai="nv")
+    tong = _luong_qt_tong_hop(ts, thang_tinh, d.get("header"), d.get("rows"))
+    if not tong["g1"] and not tong["g2"]:
+        raise HTTPException(400, f"Bảng lương năm {nam} không có người nào để đưa vào quyết toán")
+    tong["so_nguoi_khai"] = len({(p["ma"] or p["ten"]).lower() for p in tong["g1"] + tong["g2"]})
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    nguoi_ky = str(body.get("nguoi_ky") or "").strip()
+    try:
+        if not comp:
+            raise HTTPException(404, "Không tìm thấy công ty")
+        if nguoi_ky:
+            conn.execute("UPDATE companies SET nguoi_ky=? WHERE id=?", (nguoi_ky, cid))
+            conn.commit()
+        else:
+            nguoi_ky = (comp["nguoi_ky"] if "nguoi_ky" in comp.keys() else "") or ""
+    finally:
+        conn.close()
+    canh_bao = list(tong["canh_bao"])
+    for ten, gt in (("địa chỉ trụ sở", comp["dia_chi"] if "dia_chi" in comp.keys() else ""), ("mã CQT nơi nộp", comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else ""),
+                    ("tên CQT nơi nộp", comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else ""), ("người ký", nguoi_ky)):
+        if not (gt or "").strip():
+            canh_bao.append(f"Công ty chưa khai báo {ten} — vào 'Sửa công ty' rồi kết xuất lại (hoặc điền trên HTKK).")
+    xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today())
+    mst_file = str(comp["mst"] or "").strip()
+    if len(mst_file) == 10:
+        mst_file += "000"
+    fname = f"{mst_file}-05_QTT_TNCN_TT80-Y{nam}-L00.xml"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\ufeff" + xml)
+    dk = _get_desktop_dir()
+    if dk and os.path.isdir(dk):
+        try:
+            with open(os.path.join(dk, fname), "w", encoding="utf-8") as f:
+                f.write("\ufeff" + xml)
+        except Exception:
+            pass
+    return _resp_xuat(path, fname, {"X-Canh-Bao": quote(" | ".join(canh_bao)), "X-So-Nguoi": str(chinh["ct16"]), "X-Thue-Phai-Nop": str(thay["ct40"])})
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")

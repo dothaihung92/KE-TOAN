@@ -4663,6 +4663,7 @@ async function moBangLuongNam(thangGiu){
         <button class="btn ghost sm" style="color:#7a3a00" onclick="blMoKeHoach()" title="Nhập khoảng tháng + tổng chi phí lương cả năm -> phần mềm tự tính cần bao nhiêu người và phân bổ (thiếu thì bù thưởng bán hàng + tăng ca)">🎯 Chi phí lương cả năm</button>
         <button class="btn ghost sm" style="color:#1f4e8c" onclick="blMoIn()" title="In bảng lương từng tháng + bảng chấm công tương ứng (mẫu như file bảng lương); in một tháng hoặc hàng loạt từ tháng nào đến tháng nào">🖨 In bảng lương & chấm công</button>
         <button class="btn ghost sm" style="color:#7a1f5c" onclick="blMoMisa()" title="Xuất file Excel để Import vào MISA (Nghiệp vụ khác > Chứng từ nghiệp vụ khác): hạch toán chi phí lương, trích BHXH/BHYT/BHTN, thuế TNCN, thanh toán lương — lấy số liệu bảng lương từng tháng đã làm">📤 Hạch toán lương → MISA</button>
+        <button class="btn ghost sm" style="color:#0b5d6b" onclick="blKetXuatQt()" title="Kết xuất XML quyết toán thuế TNCN năm (Mẫu 05/QTT-TNCN, TT80/2021) để nhập vào HTKK — lập từ Bảng Lương đã lưu + Danh Sách Nhân Viên; mã số thuế cá nhân = số CCCD; mặc định tất cả cá nhân ủy quyền quyết toán thay">🧾 Kết xuất QT TNCN</button>
         <button class="btn ghost sm" id="blNutMuc" onclick="blDoiHienMuc()" title="Hiện/ẩn các cột MỨC phụ cấp mỗi tháng (lấy từ Danh Sách Nhân Viên) để sửa tay — cột PC bên cạnh là số đã tính theo ngày đi làm">✎ Mức phụ cấp</button>
         <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
       </div>
@@ -5445,6 +5446,24 @@ function blInNgay(){
   document.body.appendChild(f);
   f.onload=()=>{setTimeout(()=>{try{f.contentWindow.focus();f.contentWindow.print()}finally{setTimeout(()=>f.remove(),60000)}},300)};
   f.srcdoc=kq.html;
+}
+
+/* ----- KẾT XUẤT QUYẾT TOÁN TNCN NĂM (05/QTT-TNCN) -> XML cho HTKK ----- */
+async function blKetXuatQt(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  if(blBan&&!(await blLuu(true)))return;      // số liệu lấy từ bảng lương ĐÃ LƯU
+  let nk='';try{nk=localStorage.getItem('blQtNguoiKy'+current)||''}catch{}
+  const hoi=prompt(`Kết xuất quyết toán TNCN năm ${blNam} (05/QTT-TNCN) từ Bảng Lương + Danh Sách Nhân Viên.\nMã số thuế cá nhân = số CCCD; tất cả cá nhân ủy quyền quyết toán thay.\n\nNgười ký tờ khai:`,nk);
+  if(hoi===null)return;
+  try{localStorage.setItem('blQtNguoiKy'+current,hoi)}catch{}
+  try{
+    const r=await fetch(`/api/bang-luong/${current}/ket-xuat-qt-tncn`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,nguoi_ky:hoi.trim()})});
+    if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    let cb='';try{cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'')}catch{}
+    const tn=(r.headers.get('X-So-Nguoi')||'?'),thue=Number(r.headers.get('X-Thue-Phai-Nop')||0);
+    await xuatFile(r,`QT_TNCN_${blNam}.xml`);
+    toast(`🧾 Đã kết xuất QT TNCN ${blNam}: ${tn} người, thuế còn phải nộp của cá nhân ủy quyền ${Math.round(thue).toLocaleString('vi-VN')} đ — nhập file XML vào HTKK để kiểm tra rồi nộp`+(cb?`\n⚠ ${cb}`:''),cb?'err':'ok');
+  }catch(e){toast('Lỗi kết xuất QT TNCN: '+e.message,'err')}
 }
 
 /* ----- HẠCH TOÁN CHI PHÍ LƯƠNG -> MISA (Import Excel "Chứng từ nghiệp vụ khác"; mỗi tháng 2 chứng từ theo mẫu file người dùng) ----- */
