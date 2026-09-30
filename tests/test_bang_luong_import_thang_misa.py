@@ -290,6 +290,24 @@ g = server._luong_misa_tong(rows_thang("05"))
 assert len(tt) == 1 and tt[0]["Amount"] == g["tt_luong"] - g["tt_ck"] > 0
 print("PASS 8: import thẳng: người tick Chuyển khoản không có dòng 1121, chỉ còn TT lương tiền mặt.")
 
+# ===== 8a: có số chuyển khoản theo FILE (ck_file): ghi Nợ 3341/Có 1121 + TK ngân hàng, kể cả khi "bỏ qua tick CK"; thiếu số TK ngân hàng -> cảnh báo =====
+db = Db()
+dung(db)
+kq = goi_api(goi(thang={"05": rows_thang("05")}, tach_ck=False, ck_file={"05": 10_000_000}, tk_nh_ma="0123456789", preview=False))
+dong_nh = [d for d in db.glvd if d["CreditAccount"] == "1121"]
+assert len(dong_nh) == 1 and dong_nh[0]["Amount"] == 10_000_000 and dong_nh[0]["BankAccountID"] == "bank-1" and dong_nh[0]["BankName"] == "Vietcombank" and not kq["canh_bao"]
+g = server._luong_misa_tong(rows_thang("05"))
+assert [d["Amount"] for d in db.glvd if d["CreditAccount"] == "1111"] == [g["tt_luong"] - 10_000_000]
+gl_nh = [x for x in db.gl if x.get("AccountNumber") == "1121" or x.get("CorrespondingAccountNumber") == "1121"]
+assert len(gl_nh) == 2, "Dòng 1121 có sổ cái Nợ/Có như mọi dòng khác"
+db = Db()
+dung(db)
+kq = goi_api(goi(thang={"05": rows_thang("05")}, ck_file={"05": 10_000_000}, preview=False))
+assert any("số TK ngân hàng" in c for c in kq["canh_bao"]) and len([d for d in db.glvd if d["CreditAccount"] == "1121"]) == 1
+kq = goi_api(goi(thang={"05": rows_thang("05")}, ck_file={"05": 10_000_000}, tk_nh_ma="9999", preview=False))
+assert any("Không tìm thấy TK ngân hàng '9999'" in c for c in kq["canh_bao"])
+print("PASS 8a: import thẳng theo số chuyển khoản trong file: 1121 + TK ngân hàng, phần còn lại 1111; thiếu/sai TK ngân hàng chỉ cảnh báo.")
+
 # ===== 8b: không học được mẫu sổ cái -> KHÔNG ghi sổ nửa vời: ghi chưa ghi sổ + cảnh báo =====
 db = Db()
 db.gl = []

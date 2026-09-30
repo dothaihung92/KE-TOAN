@@ -4858,7 +4858,8 @@ function blMoKeHoach(){
       <label for="blCkFile" class="btn ghost sm" style="cursor:pointer" title="Sổ chi tiết TK 334 (Nợ 334 / Có 112x) xuất từ MISA">📥 Import file thanh toán lương chuyển khoản</label>
       <input type="file" id="blCkFile" accept=".xlsx" style="display:none" onchange="blImportCk(this)">
       <button class="btn ghost sm" onclick="blBoCk()" title="Bỏ file đã import">✕ Bỏ file</button>
-      <span style="font-size:12px;color:#6b5b00">Phần mềm dựng bảng lương từng tháng sao cho <b>TT lương chuyển khoản khớp đúng số đã chuyển</b> trong file (tháng = tháng của <b>ngày hạch toán</b> từng khoản chi); vẫn theo các quy tắc ở trên. Có file thì ô "Tổng chi phí lương cả năm" có thể để trống.</span>
+      <span style="font-size:12px;color:#6b5b00">Phần mềm dựng bảng lương từng tháng sao cho <b>TT lương chuyển khoản khớp đúng số đã chuyển</b> trong file (tháng = tháng của <b>ngày hạch toán</b> từng khoản chi); vẫn theo các quy tắc ở trên. Tháng có chuyển khoản được <b>chia ra nhiều người</b> (không để 1 người nhận quá cao); các lao động còn lại được <b>thêm vào bảng lương, trả tiền mặt</b> — nên tổng bảng lương lớn hơn số chuyển khoản. Có file thì ô "Tổng chi phí lương cả năm" có thể để trống.</span>
+      <span style="margin-left:8px" title="Mỗi người nhận chuyển khoản không quá mức này trong 1 tháng (nếu đủ người)">Tối đa/người/tháng <input id="blKhCkMax" value="12.000.000" oninput="blDangTien(this)" style="width:100px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"> đ</span>
       <div id="blCkKq" style="margin-top:6px"></div>
     </div>
     <div id="blKhKq" style="margin-top:8px"></div>`;
@@ -4910,7 +4911,7 @@ async function blTinhKeHoach(){
   const fc=document.getElementById('blKhFull');
   const ngoai=0;      // áp dụng sẽ xóa dữ liệu cũ của cả năm nên không trừ các tháng đã có
   try{
-    const kq=await api(`/api/bang-luong/${current}/ke-hoach`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,tu_thang:tu,den_thang:den,muc_tieu:g('blKhTien'),ty_le_tang_ca:g('blKhTc'),tham_so:blTS,da_co_ngoai:ngoai,full_cong:!!(fc&&fc.checked),ck_theo_thang:ckThang,tran_pc:{tien_com:g('blKhTranCom'),trang_phuc:g('blKhTranTp'),muc_dt:g('blKhTranDt'),muc_xang:g('blKhTranXx')}})});
+    const kq=await api(`/api/bang-luong/${current}/ke-hoach`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,tu_thang:tu,den_thang:den,muc_tieu:g('blKhTien'),ty_le_tang_ca:g('blKhTc'),tham_so:blTS,da_co_ngoai:ngoai,full_cong:!!(fc&&fc.checked),ck_theo_thang:ckThang,ck_toi_da:g('blKhCkMax'),tran_pc:{tien_com:g('blKhTranCom'),trang_phuc:g('blKhTranTp'),muc_dt:g('blKhTranDt'),muc_xang:g('blKhTranXx')}})});
     blKh=kq;blVeKeHoach();
   }catch(e){document.getElementById('blKhKq').innerHTML=`<div style="color:#b91c1c;font-weight:600">⚠ ${xkEsc(e.message)}</div>`;blKh=null}
 }
@@ -4926,7 +4927,7 @@ function blVeKeHoach(){
       <b>Kết quả:</b> cần <b style="color:#7a3a00">${s.so_nguoi} người</b> (${s.full_cong?`${s.day_du} người làm FULL ngày công, không khấu trừ 10%`:`${s.day_du} người đủ công có BHXH`}${s.thoi_vu?`, ${s.thoi_vu} người làm dưới 14 ngày không BHXH`:''}) · ${s.so_thang} tháng ·
       tổng chi phí lương <b>${blTienKh(s.tong_chi_phi)}</b> đ${s.da_co_ngoai?` (đã có ${blTienKh(s.da_co_ngoai)} ở các tháng khác + ${blTienKh(s.can_them)} phân bổ thêm = mục tiêu ${blTienKh(s.muc_tieu)})`:''} ·
       bù thưởng bán hàng ${blTienKh(s.tong_thuong_bh)} đ + tăng ca ${blTienKh(s.tong_tang_ca)} đ · thuế TNCN phát sinh <b>${blTienKh(s.tong_thue)}</b> đ
-      ${s.ck&&Object.keys(s.ck).length?`<br>Khớp lương chuyển khoản (TT lương = số trong file): ${Object.keys(s.ck).sort().map(t=>`T${parseInt(t,10)} <b style="color:${s.ck[t].khop?'#166534':'#b91c1c'}">${blTienKh(s.ck[t].tt_luong)}</b>${s.ck[t].khop?' ✓':' ⚠ file '+blTienKh(s.ck[t].file)}`).join(' · ')}`:''}
+      ${s.ck&&Object.keys(s.ck).length?`<br>Khớp lương chuyển khoản (TT lương = số trong file): ${Object.keys(s.ck).sort().map(t=>`T${parseInt(t,10)} <b style="color:${s.ck[t].khop?'#166534':'#b91c1c'}">${blTienKh(s.ck[t].tt_luong)}</b>${s.ck[t].khop?' ✓':' ⚠ file '+blTienKh(s.ck[t].file)} (${s.ck[t].so_nguoi_ck||0} người CK${s.ck[t].so_nguoi_tm?`, ${s.ck[t].so_nguoi_tm} người tiền mặt ${blTienKh(s.ck[t].tt_tien_mat)}`:''})`).join(' · ')}`:''}
       ${s.full_cong?`<br>Thu nhập chịu thuế cao nhất của 1 người trong ${s.so_thang} tháng: <b style="color:${s.chiu_thue_nam_max<=s.nguong_chiu_thue?'#166534':'#b91c1c'}">${blTienKh(s.chiu_thue_nam_max)}</b> đ / ngưỡng ${blTienKh(s.nguong_chiu_thue)} đ (giảm trừ bản thân × ${s.so_thang} tháng) ${s.chiu_thue_nam_max<=s.nguong_chiu_thue?'✓ dưới ngưỡng':'⚠ vượt ngưỡng'}`:''}</div>
     ${(s.canh_bao||[]).length?`<div style="margin-top:6px;font-size:12px;color:#b45309">${s.canh_bao.slice(0,6).map(x=>'⚠ '+xkEsc(x)).join('<br>')}</div>`:''}
     <div style="overflow:auto;max-height:220px;margin-top:6px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:#f6efe2"><th style="padding:4px 8px;border:1px solid #eee">Tháng</th><th style="padding:4px 8px;border:1px solid #eee;text-align:left">Người làm</th><th style="padding:4px 8px;border:1px solid #eee">Thưởng bán hàng</th><th style="padding:4px 8px;border:1px solid #eee">Tăng ca</th><th style="padding:4px 8px;border:1px solid #eee">Chi phí lương</th><th style="padding:4px 8px;border:1px solid #eee">Thuế TNCN</th></tr></thead><tbody>${dong}</tbody></table></div>
@@ -5436,7 +5437,8 @@ function blMoMisa(){
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px;margin-top:8px">
       <label title="Mặc định (như file mẫu từ T6): thuế TNCN và thanh toán lương là 2 chứng từ riêng. Tick = gộp vào 1 chứng từ (như T1–T5)"><input type="checkbox" id="blMsGop"${cu.gop?' checked':''}> Gộp thuế TNCN + TT lương vào 1 chứng từ</label>
-      <label title="Mặc định: người tick 'Chuyển khoản' thì KHÔNG hạch toán thanh toán lương (Nợ 3341/Có 1121 do sao kê ngân hàng ghi nhận) — chỉ hạch toán Nợ 3341/Có 1111 cho người không tick. Tick ô này để bỏ qua tick Chuyển khoản: hạch toán TT lương tiền mặt 1111 cho TẤT CẢ"><input type="checkbox" id="blMsTm"${cu.tm?' checked':''}> Bỏ qua tick Chuyển khoản (TT lương 1111 cho tất cả)</label>
+      <label title="Mặc định: người tick 'Chuyển khoản' thì KHÔNG hạch toán thanh toán lương (Nợ 3341/Có 1121 do sao kê ngân hàng ghi nhận) — chỉ hạch toán Nợ 3341/Có 1111 cho người không tick. Tick ô này để bỏ qua tick Chuyển khoản: hạch toán TT lương tiền mặt 1111 cho TẤT CẢ"><input type="checkbox" id="blMsTm"${cu.tm?' checked':''}> Bỏ qua tick Chuyển khoản (TT lương 1111 cho tất cả) — riêng số chuyển khoản theo FILE đã import vẫn hạch toán 1121</label>
+      <span title="Số TK ngân hàng trong Danh mục MISA — cho dòng TT lương chuyển khoản theo file đã import">TK ngân hàng (số TK) ${i('blMsNh',cu.nh,'width:140px;','vd 0123456789')}</span>
       <span title="Nếu MISA của bạn có mã thống kê cho các dòng BH, điền vào đây (tùy chọn)">Mã thống kê dòng BH ${i('blMsTk',cu.tk,'width:90px;')}</span>
     </div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemMisa()">👁 Xem trước</button> <button class="btn sm" style="background:#7a1f5c" onclick="blXuatMisa()">📤 Xuất file import MISA</button>
@@ -5459,8 +5461,8 @@ function blDocMisa(){
   if(!Object.keys(thang).length){toast(`Tháng ${tu}–${den} chưa có dữ liệu bảng lương`,'err');return null}
   const tm=document.getElementById('blMsTm'),gop=document.getElementById('blMsGop');
   const goi={gop_thue:!!(gop&&gop.checked),nam:blNam,thang,ngay:g('blMsNgay'),tk_cp_luong:g('blMsTkL'),tk_cp_bh:g('blMsTkB'),so_bat_dau:g('blMsSo'),tach_ck:!(tm&&tm.checked),
-    ma_thong_ke:g('blMsTk')};
-  try{localStorage.setItem('blMisa'+current,JSON.stringify({ngay:goi.ngay,tkL:goi.tk_cp_luong,tkB:goi.tk_cp_bh,so:goi.so_bat_dau,tm:!goi.tach_ck,gop:goi.gop_thue,tk:goi.ma_thong_ke}))}catch{}
+    ma_thong_ke:g('blMsTk'),tk_nh_ma:g('blMsNh'),ck_file:blCkTheoThang()};
+  try{localStorage.setItem('blMisa'+current,JSON.stringify({ngay:goi.ngay,tkL:goi.tk_cp_luong,tkB:goi.tk_cp_bh,so:goi.so_bat_dau,tm:!goi.tach_ck,gop:goi.gop_thue,tk:goi.ma_thong_ke,nh:goi.tk_nh_ma}))}catch{}
   return goi;
 }
 async function blXemMisa(){

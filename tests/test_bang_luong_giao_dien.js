@@ -704,7 +704,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   c27.blDL = { '01': [r27('1', true), Object.assign(r27('2', false), { thue_tru_luong: undefined, thue_tncn: 5000 })] };
   c27.blMoMisa();
   const hop27 = els27['blMisa'].innerHTML;
-  assert(/Hạch toán chi phí lương → MISA/.test(hop27) && /id="blMsTkL" value="6422"/.test(hop27) && /id="blMsTkB" value="6421"/.test(hop27) && /Bỏ qua tick Chuyển khoản/.test(hop27) && !/blMsTkNh|blMsNh/.test(hop27) && /Gộp thuế TNCN \+ TT lương vào 1 chứng từ/.test(hop27) && /Import Excel/.test(hop27), 'Hộp có TK mặc định 6422/6421 + tách chuyển khoản + gộp chứng từ + hướng dẫn');
+  assert(/Hạch toán chi phí lương → MISA/.test(hop27) && /id="blMsTkL" value="6422"/.test(hop27) && /id="blMsTkB" value="6421"/.test(hop27) && /Bỏ qua tick Chuyển khoản/.test(hop27) && /id="blMsNh"/.test(hop27) && !/blMsTkNh/.test(hop27) && /Gộp thuế TNCN \+ TT lương vào 1 chứng từ/.test(hop27) && /Import Excel/.test(hop27), 'Hộp có TK mặc định 6422/6421 + tách chuyển khoản + gộp chứng từ + hướng dẫn');
   assert.strictEqual(c27.blDocMisa().gop_thue, false, 'Mặc định tách thuế và TT lương (như file mẫu từ T6)');
   const goi27 = c27.blDocMisa();
   assert.strictEqual(goi27.nam, 2025); assert.strictEqual(JSON.stringify(Object.keys(goi27.thang)), '["01"]', 'Chỉ gửi tháng có dữ liệu');
@@ -832,6 +832,29 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/TỔNG CỘNG/.test(nam31) && /23\.512\.000/.test(nam31) && /2\.283\.300/.test(nam31), 'Dòng tổng: chi phí 2 tháng 23.512.000, BH DN 2.283.300');
   assert(!/Hỗ trợ đi lại/.test(nam31.split('Chi tiết từng tháng')[1] || ''), 'Cột không có số liệu thì ẩn');
   console.log('PASS 31: tab Cả năm: đủ phụ cấp/thưởng/tăng ca, BH gộp mỗi bên 1 cột, có dòng tổng.');
+
+  // ---- 32: hạch toán MISA dùng số chuyển khoản theo FILE đã import (kể cả khi tick "Bỏ qua tick Chuyển khoản") + ô "Tối đa/người/tháng" ----
+  m = nap({ api: async () => ({}) });
+  m.ctx.blNam = 2025; m.ctx.blThang = '06'; m.ctx.blTS = {};
+  const val32 = { blMsTu: '6', blMsDen: '7', blMsNgay: '', blMsTkL: '6422', blMsTkB: '6421', blMsSo: '', blMsNh: '0123456789', blMsTk: '', blKhTu: '1', blKhDen: '12', blKhTien: '', blKhTc: '50', blKhCkMax: '10.000.000' };
+  let tm32 = true;
+  m.ctx.document.getElementById = (id) => (id === 'blMsTm' ? { checked: tm32 } : id === 'blKhFull' ? { checked: false } : id in val32 ? { value: val32[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
+  const r32 = (ma) => ({ ma, ten: 'NV' + ma, chi_phi_luong: 7910000, tt_luong: 7352450, thue_tncn: 0, thue_tru_luong: 0, bhxh_dn: 0, bhyt_dn: 0, bhtn_dn: 0, bhxh_nld: 0, bhyt_nld: 0, bhtn_nld: 0, ghi_chu: 'CK' });
+  m.ctx.blDL = { '06': [r32('1')], '07': [r32('2')] };
+  m.ctx.blCkGd = [{ ngay: '16/06/2025', so_ct: 'U1', dien_giai: 'x', so_tien: 4000000, thang: '06' }, { ngay: '20/06/2025', so_ct: 'U2', dien_giai: 'y', so_tien: 1000000, thang: '06' }, { ngay: '05/08/2025', so_ct: 'U3', dien_giai: 'z', so_tien: 9, thang: '08' }];
+  const g32 = m.ctx.blDocMisa();
+  assert.strictEqual(JSON.stringify(g32.ck_file), '{"06":5000000,"08":9}', 'Gửi số chuyển khoản theo file từng tháng'); assert.strictEqual(g32.tach_ck, false, 'Tick bỏ qua -> tach_ck=false nhưng ck_file vẫn gửi'); assert.strictEqual(g32.tk_nh_ma, '0123456789');
+  m.ctx.blCkGd = null; assert.strictEqual(JSON.stringify(m.ctx.blDocMisa().ck_file), '{}', 'Không có file -> ck_file rỗng');
+  m.ctx.blCkGd = [{ ngay: '16/06/2025', so_ct: 'U1', dien_giai: 'x', so_tien: 4000000, thang: '06' }];
+  m.ctx.blMoKeHoach();
+  assert(/id="blKhCkMax" value="12\.000\.000"/.test(m.phanTu['blKeHoach'].innerHTML) && /chia ra nhiều người/.test(m.phanTu['blKeHoach'].innerHTML), 'Ô Tối đa/người/tháng + giải thích tiền mặt');
+  m.ctx.api = async (url, o) => { m.goiApi.push([url, JSON.parse(o.body)]); return { thang: {}, tom_tat: { so_nguoi: 3, day_du: 3, thoi_vu: 0, so_thang: 1, tong_chi_phi: 1, muc_tieu: 1, da_co_ngoai: 0, can_them: 0, tong_thuong_bh: 0, tong_tang_ca: 0, tong_thue: 0, canh_bao: [],
+    ck: { '06': { file: 4000000, tt_luong: 4000000, chi_phi: 5, khop: true, tt_tien_mat: 1500000, so_nguoi_ck: 2, so_nguoi_tm: 1, ck_cao_nhat: 2500000 } } } }; };
+  await m.ctx.blTinhKeHoach();
+  const goi32 = m.goiApi.find(([u]) => u.includes('/ke-hoach'))[1];
+  assert.strictEqual(goi32.ck_toi_da, '10.000.000'); assert.strictEqual(JSON.stringify(goi32.ck_theo_thang), '{"06":4000000}');
+  assert(/2 người CK, 1 người tiền mặt 1\.500\.000/.test(m.phanTu['blKhKq'].innerHTML), 'Hiện số người chuyển khoản/tiền mặt từng tháng');
+  console.log('PASS 32: hạch toán MISA gửi số chuyển khoản theo file; kế hoạch gửi mức tối đa/người và hiện phần tiền mặt.');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

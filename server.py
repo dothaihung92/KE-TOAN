@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.021"
+APP_BUILD = "2026-09-30.022"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10580,7 +10580,7 @@ _LUONG_GIO_TANG_CA_TOI_DA = 40      # Bộ luật Lao động: tăng ca tối đ
 _LUONG_TRAN_PC_KHONG_THUE = {"tien_com": 730000.0, "trang_phuc": 5000000.0 / 12, "muc_dt": 1000000.0}
 
 
-def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, chon, canh_bao, tran_pc=None):
+def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, chon, canh_bao, tran_pc=None, dung_het=False):
     """Chế độ "làm full ngày công" của kế hoạch chi phí lương (xem _luong_ke_hoach_thang). Điền `chon` (danh sách {"row","loai"}), trả về số tiền
     còn thiếu (luôn 0: phần vượt được dồn vào thưởng + cảnh báo)."""
     tran = dict(_LUONG_TRAN_PC_KHONG_THUE)
@@ -10604,7 +10604,7 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
         info.append((caps, head, max(0.0, tran_xang - row["muc_xang"]) if tran_xang is not None else 0.0))
         tong_goc += f
         suc_chua += f + sum(caps) + head
-        if suc_chua >= con:
+        if suc_chua >= con and not dung_het:
             break
     if not chon:
         raise HTTPException(400, f"Tháng {int(thang)}: mục tiêu {int(con):,} đ nhỏ hơn lương đủ công của nhân viên rẻ nhất".replace(",", "."))
@@ -10645,7 +10645,7 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
     return 0
 
 
-def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=None, full_cong=False, tran_pc=None):
+def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=None, full_cong=False, tran_pc=None, dung_het=False):
     """Phân bổ tổng chi phí lương `muc_tieu` của 1 tháng cho các nhân viên trong `pool` (dòng nhập dựng từ Danh Sách
     Nhân Viên; dòng có dong_bh=0 là người KHÔNG được đóng BHXH). Lương CB + các phụ cấp GIỮ NGUYÊN theo danh sách.
       1. Lấy lần lượt nhân viên được đóng BHXH, ĐI LÀM ĐỦ CÔNG, chừng nào tổng chi phí còn <= mục tiêu.
@@ -10730,7 +10730,7 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
                 du -= them
         return phan
     if full_cong:
-        con = _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, chon, canh_bao, tran_pc)
+        con = _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, chon, canh_bao, tran_pc, dung_het)
     if chon and con > 0:                                          # 2. bù trong ngưỡng không phải nộp thuế
         cho_trong = [max(0.0, -tinh(c["row"])["tn_tinh_thue"]) for c in chon]
         x = int(min(con, sum(cho_trong)))
@@ -10846,10 +10846,31 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
                   "thue": sum(k["thue_tncn"] for k in tinh_rows)}
 
 
-def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=False, tran_pc=None):
-    """Dựng bảng lương 1 tháng sao cho TỔNG TT LƯƠNG (thực lãnh, chuyển khoản) = so_ck ĐÚNG TỪNG ĐỒNG. Chi phí lương = TT lương + BH người lao động + thuế
-    nên mục tiêu chi phí phải dò: chạy kế hoạch tháng (giữ nguyên trạng thái ngẫu nhiên để kết quả ổn định giữa các vòng), lệch bao nhiêu cộng vào mục
-    tiêu rồi chạy lại; cuối cùng dồn vài đồng còn lệch vào thưởng bán hàng của 1 người (không đổi thuế)."""
+def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=False, tran_pc=None, ck_toi_da=12000000):
+    """Dựng bảng lương 1 tháng có LƯƠNG CHUYỂN KHOẢN (từ file sao kê) = so_ck. Tổng TT lương của NHÓM CHUYỂN KHOẢN = so_ck ĐÚNG TỪNG ĐỒNG; nhóm này được CHIA RA
+    NHIỀU NGƯỜI (mỗi người <= ck_toi_da nếu đủ người, số người ~ so_ck / thực lãnh đủ công trung bình) để không ai nhận chuyển khoản quá cao. Các lao động
+    CÒN LẠI trong danh sách được thêm vào bảng lương với lương đủ công, trả TIỀN MẶT (bỏ tick CK) — nên tổng bảng lương của tháng LỚN HƠN số chuyển khoản.
+    Chi phí lương = TT lương + BH người lao động + thuế nên mục tiêu chi phí của nhóm CK phải dò: chạy kế hoạch (giữ nguyên trạng thái ngẫu nhiên giữa các
+    vòng), lệch bao nhiêu cộng vào mục tiêu rồi chạy lại; cuối cùng dồn vài đồng còn lệch vào thưởng bán hàng của 1 người."""
+    import math
+    ung = []
+    for r in pool:
+        d = _luong_chuan_dong_nhap(r)
+        base = dict(d, ngay_cong=0, ngay_lam="", thuong_bh=0, thuong_t13=0, tang_ca=0)
+        k = _luong_tinh_dong(base, ts, thang)
+        if k["chi_phi_luong"] > 0:
+            ung.append((base, k["tt_luong"]))
+    if not ung:
+        raise HTTPException(400, "Danh Sách Nhân Viên chưa có ai có lương (lương cơ bản/phụ cấp) để phân bổ")
+    ung.sort(key=lambda u: 0 if u[0]["dong_bh"] else 1)          # người được đóng BHXH đứng trước (sort ổn định)
+    n = len(ung)
+    canh_bao = []
+    tb = sum(u[1] for u in ung) / n if n else 0
+    k_min = math.ceil(int(so_ck) / ck_toi_da) if ck_toi_da and ck_toi_da > 0 else 1
+    k = min(n, max(1, k_min, int(round(int(so_ck) / tb)) if tb > 0 else 1))
+    if k_min > n:
+        canh_bao.append(f"Tháng {int(thang)}: lương chuyển khoản {int(so_ck):,} đ chia cho cả {n} người vẫn hơn mức tối đa {int(ck_toi_da):,} đ/người/tháng.".replace(",", "."))
+    sub = [dict(u[0], ghi_chu="CK") for u in ung[:k]]
     st = rng.getstate()
     muc = int(so_ck)
     rows = tt = None
@@ -10857,11 +10878,11 @@ def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=Fal
     for _ in range(10):
         rng.setstate(st)
         try:
-            rows, tt = _luong_ke_hoach_thang(pool, muc, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc)
+            rows, tt = _luong_ke_hoach_thang(sub, muc, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc, dung_het=True)
         except HTTPException as e:
             raise HTTPException(e.status_code, f"Tháng {int(thang)}: lương chuyển khoản {int(so_ck):,} đ quá nhỏ để dựng bảng lương — {e.detail}".replace(",", "."))
         tinh = [_luong_tinh_dong(r, ts, thang) for r in rows]
-        lech = int(so_ck) - sum(k["tt_luong"] for k in tinh)
+        lech = int(so_ck) - sum(x["tt_luong"] for x in tinh)
         if lech == 0:
             break
         muc += lech
@@ -10875,7 +10896,7 @@ def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=Fal
                     if thu["thuong_bh"] < 0:
                         continue
                     k2 = [_luong_tinh_dong(x if j != i else thu, ts, thang) for j, x in enumerate(rows)]
-                    if sum(k["tt_luong"] for k in k2) == int(so_ck):
+                    if sum(x["tt_luong"] for x in k2) == int(so_ck):
                         rows[i] = thu
                         tinh, lech = k2, 0
                         break
@@ -10883,14 +10904,27 @@ def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=Fal
                     break
             if lech == 0:
                 break
-    tt = dict(tt, chi_phi=sum(k["chi_phi_luong"] for k in tinh), thue=sum(k["thue_tncn"] for k in tinh), tt_luong=sum(k["tt_luong"] for k in tinh))
+    for r in rows:
+        r["ghi_chu"] = "CK"
+    da_co = {(r["ma"], r["ten"]) for r in rows}
+    tien_mat = [dict(u[0], ghi_chu="") for u in ung if (u[0]["ma"], u[0]["ten"]) not in da_co]      # lao động còn lại: đủ công, trả tiền mặt
+    tinh_tm = [_luong_tinh_dong(r, ts, thang) for r in tien_mat]
+    tt = dict(tt, chi_phi=sum(x["chi_phi_luong"] for x in tinh) + sum(x["chi_phi_luong"] for x in tinh_tm),
+              thue=sum(x["thue_tncn"] for x in tinh) + sum(x["thue_tncn"] for x in tinh_tm),
+              tt_luong=sum(x["tt_luong"] for x in tinh), tt_tien_mat=sum(x["tt_luong"] for x in tinh_tm),
+              so_nguoi_ck=len(rows), so_nguoi_tm=len(tien_mat), ck_cao_nhat=max(x["tt_luong"] for x in tinh))
+    tt["canh_bao"] = list(tt["canh_bao"]) + canh_bao
+    if ck_toi_da and tt["ck_cao_nhat"] > ck_toi_da and k_min <= n:
+        so_cao = sum(1 for x in tinh if x["tt_luong"] > ck_toi_da)
+        tt["canh_bao"].append(f"Tháng {int(thang)}: {so_cao} người nhận chuyển khoản trên mức tối đa {int(ck_toi_da):,} đ (cao nhất {int(tt['ck_cao_nhat']):,} đ) — "
+                              "số chuyển khoản quá lớn so với số người/lương đủ công; hãy nâng mức tối đa hoặc thêm nhân viên.".replace(",", "."))
     if lech:
-        tt["canh_bao"] = list(tt["canh_bao"]) + [f"Tháng {int(thang)}: TT lương lệch {lech:,} đ so với số chuyển khoản trong file".replace(",", ".")]
-    return rows, tt
+        tt["canh_bao"] = tt["canh_bao"] + [f"Tháng {int(thang)}: TT lương lệch {lech:,} đ so với số chuyển khoản trong file".replace(",", ".")]
+    return rows + tien_mat, tt
 
 
 def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=50.0, da_co_ngoai=0.0, rng=None, full_cong=False, tran_pc=None,
-                    ck_theo_thang=None):
+                    ck_theo_thang=None, ck_toi_da=12000000):
     """Chia `muc_tieu` (tổng chi phí lương CẢ NĂM) cho các tháng tu_thang..den_thang (trừ phần các tháng khác trong
     năm đã có sẵn) rồi phân bổ từng tháng bằng _luong_ke_hoach_thang. `pool`: danh sách dòng nhập, hoặc hàm
     (tháng "01".."12") -> danh sách (để ô "đóng BHXH" thay đổi theo tháng bắt đầu đóng của từng người).
@@ -10929,9 +10963,10 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
         nguoi.update((r["ma"] or r["ten"]) for r in rows)
     # Tháng có LƯƠNG CHUYỂN KHOẢN trong file sao kê: bảng lương dựng sao cho TT lương (chuyển khoản) của tháng KHỚP ĐÚNG số đã chuyển
     for t in [x for x in thang_ds if x in ck]:
-        rows, tt = _luong_ke_hoach_ck(pool(t) if callable(pool) else pool, ck[t], ts, t, ty_le_tang_ca, rng, full_cong, tran_pc)
+        rows, tt = _luong_ke_hoach_ck(pool(t) if callable(pool) else pool, ck[t], ts, t, ty_le_tang_ca, rng, full_cong, tran_pc, ck_toi_da)
         gop(t, rows, tt)
-        ck_kq[t] = {"file": ck[t], "tt_luong": tt["tt_luong"], "chi_phi": tt["chi_phi"], "khop": tt["tt_luong"] == ck[t]}
+        ck_kq[t] = {"file": ck[t], "tt_luong": tt["tt_luong"], "chi_phi": tt["chi_phi"], "khop": tt["tt_luong"] == ck[t], "tt_tien_mat": tt["tt_tien_mat"],
+                    "so_nguoi_ck": tt["so_nguoi_ck"], "so_nguoi_tm": tt["so_nguoi_tm"], "ck_cao_nhat": tt["ck_cao_nhat"]}
     chi_ck = sum(v["chi_phi"] for v in ck_kq.values())
     thang_tu_do = [t for t in thang_ds if t not in ck]
     if ck:
@@ -10994,7 +11029,8 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
                                  body.get("tham_so"), ty_le, body.get("da_co_ngoai") or 0,
                                  __import__("random").Random(body.get("seed")) if body.get("seed") is not None else None,
                                  bool(body.get("full_cong")), body.get("tran_pc") if isinstance(body.get("tran_pc"), dict) else None,
-                                 body.get("ck_theo_thang") if isinstance(body.get("ck_theo_thang"), dict) else None)
+                                 body.get("ck_theo_thang") if isinstance(body.get("ck_theo_thang"), dict) else None,
+                                 int(_luong_so(body.get("ck_toi_da")) or 12000000) if body.get("ck_toi_da") not in (None, "") else 12000000)
     return {"thang": thang, "tom_tat": tom}
 
 
@@ -11618,7 +11654,7 @@ async def bang_luong_xuat_excel_mau(cid: int, request: Request):
 
 # ----- HẠCH TOÁN CHI PHÍ LƯƠNG -> file Excel import MISA "Chứng từ nghiệp vụ khác" (mẫu người dùng gửi, từng tháng 2 chứng từ) -----
 _LUONG_MISA_TK = {"tk_cp_luong": "6422", "tk_cp_bh": "6421", "tk_phai_tra": "3341", "tk_bhxh": "3383", "tk_bhyt": "3384",
-                  "tk_bhtn": "3386", "tk_thue": "3335", "tk_tien_mat": "1111"}
+                  "tk_bhtn": "3386", "tk_thue": "3335", "tk_tien_mat": "1111", "tk_ngan_hang": "1121"}
 
 
 def _luong_la_chuyen_khoan(ghi_chu):
@@ -11665,8 +11701,21 @@ def _luong_misa_chung_tu(nam, thang_rows, tc, so_dau):
         for ten, k in (("BHXH", "bhxh"), ("BHYT", "bhyt"), ("BHTN", "bhtn")):
             v1.append((f"DN Trích {ten} {kt}", tk["tk_phai_tra"], tk["tk_" + k], g["bh_nld"][k], "bh"))
         v2 = [(f"Hạch toán lương thuế TNCN {kt}", tk["tk_phai_tra"], tk["tk_thue"], g["thue"], "")]
-        if tc.get("tach_ck") and g["tt_ck"] > 0:
-            # Người tick Chuyển khoản: KHÔNG hạch toán Nợ 3341/Có 1121 ở đây (khoản chi đó do sao kê ngân hàng ghi nhận) — chỉ còn TT lương
+        ck_file = 0
+        for kk, vv in (tc.get("ck_file") or {}).items():
+            try:
+                if int(kk) == m:
+                    ck_file = int(_luong_lam_tron(_luong_so(vv)))
+            except Exception:
+                pass
+        if ck_file > 0:
+            # Có FILE thanh toán chuyển khoản đã import: số chuyển khoản của tháng LẤY THEO FILE, luôn hạch toán Nợ 3341/Có 1121 (kể cả khi tick
+            # "bỏ qua tick Chuyển khoản"); phần thực lãnh còn lại (trả tiền mặt) hạch toán Có 1111
+            tt_ck = min(ck_file, g["tt_luong"])
+            v2.append((f"TT lương {kt}", tk["tk_phai_tra"], tk["tk_tien_mat"], g["tt_luong"] - tt_ck, ""))
+            v2.append((f"TT lương chuyển khoản {kt}", tk["tk_phai_tra"], tk["tk_ngan_hang"], tt_ck, "nh"))
+        elif tc.get("tach_ck") and g["tt_ck"] > 0:
+            # Người tick Chuyển khoản (không có file): KHÔNG hạch toán Nợ 3341/Có 1121 ở đây (khoản chi đó do sao kê ngân hàng ghi nhận) — chỉ còn TT lương
             # tiền mặt của những người không tick
             v2.append((f"TT lương {kt}", tk["tk_phai_tra"], tk["tk_tien_mat"], g["tt_luong"] - g["tt_ck"], ""))
         else:
@@ -11739,6 +11788,8 @@ def _luong_xuat_misa_nvk(nam, chung_tu, tc):
             row[10] = str(d["co"])
             row[11] = d["so_tien"]
             row[12] = d["so_tien"]
+            if d["loai"] == "nh":
+                row[15] = str(tc.get("tk_nh_ma") or "")      # TK ngân hàng (MISA bắt buộc khi hạch toán TK 112)
             if d["loai"] == "bh":
                 row[22] = str(tc.get("ma_thong_ke") or "")   # Mã thống kê (tùy chọn)
             for c, v in enumerate(row, 1):
@@ -11761,7 +11812,7 @@ def _luong_xuat_misa_nvk(nam, chung_tu, tc):
 
 @app.post("/api/bang-luong/{cid}/hach-toan-misa")
 async def bang_luong_hach_toan_misa(cid: int, request: Request):
-    """Body: {nam, thang:{"05":[dòng đã tính]}, ngay, tk_cp_luong, tk_cp_bh, tach_ck, ma_thong_ke, so_bat_dau,
+    """Body: {nam, thang:{"05":[dòng đã tính]}, ngay, tk_cp_luong, tk_cp_bh, tach_ck, ck_file {"05": số tiền chuyển khoản theo file}, tk_ngan_hang, tk_nh_ma, ma_thong_ke, so_bat_dau,
     xuat}. xuat=false -> trả bản XEM TRƯỚC (danh sách chứng từ); xuat=true -> trả file Excel import MISA 'Chứng từ nghiệp vụ khác'."""
     body = await request.json()
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
@@ -11962,7 +12013,18 @@ def _luong_misa_ghi_sql(cid, database, nam, thang_rows, tc, preview=True):
             canh_bao.append("Không học được mẫu sổ cái (GeneralLedger) từ chứng từ nào của công ty — chứng từ được ghi ở trạng thái CHƯA GHI SỔ; "
                             "hãy mở MISA bấm Ghi sổ (hoặc tạo tay 1 chứng từ Nghiệp vụ khác đã ghi sổ rồi ghi lại).")
 
-        # 6) Mã thống kê (dòng BH) — tùy chọn, không có thì cảnh báo, không chặn
+        # 6) TK ngân hàng cho dòng thanh toán chuyển khoản (theo file đã import) — không có thì cảnh báo, không chặn
+        bank_id = bank_ten = None
+        if any(d["loai"] == "nh" for ct in chung_tu for d in ct["dong"]):
+            if str(tc.get("tk_nh_ma") or "").strip():
+                bank_id, bank_ten = _misa_bank_account_theo_so(cur, tc.get("tk_nh_ma"))
+                if not bank_id:
+                    canh_bao.append("Không tìm thấy TK ngân hàng '%s' trong Danh mục MISA — chọn TK ngân hàng tay trên các chứng từ TT lương chuyển khoản."
+                                    % tc.get("tk_nh_ma"))
+            else:
+                canh_bao.append("Chưa nhập số TK ngân hàng — dòng TT lương chuyển khoản (Có %s) cần chọn TK ngân hàng tay trên MISA." % (tc.get("tk_ngan_hang") or "1121"))
+
+        # 6b) Mã thống kê (dòng BH) — tùy chọn, không có thì cảnh báo, không chặn
         thong_ke_id = None
         if str(tc.get("ma_thong_ke") or "").strip():
             try:
@@ -12023,6 +12085,10 @@ def _luong_misa_ghi_sql(cid, database, nam, thang_rows, tc, preview=True):
                 _misa_gan(glvd, cols_glvd, False, "UnResonableCost")
                 _misa_gan(glvd, cols_glvd, i, "SortOrder")
                 _misa_gan(glvd, cols_glvd, None, "BusinessType")
+                if d["loai"] == "nh" and bank_id:
+                    _misa_gan(glvd, cols_glvd, bank_id, "BankAccountID")
+                    if bank_ten:
+                        _misa_gan(glvd, cols_glvd, bank_ten, "BankName")
                 if d["loai"] == "bh" and thong_ke_id:
                     _misa_gan(glvd, cols_glvd, thong_ke_id, "ListItemID")
                 if not preview:

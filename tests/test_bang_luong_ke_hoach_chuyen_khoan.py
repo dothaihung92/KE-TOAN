@@ -30,6 +30,11 @@ DONG = [
 ]
 
 
+def ck_tt(rows):
+    """Tổng TT lương của NHÓM CHUYỂN KHOẢN (người tick CK)."""
+    return sum(r["tt_luong"] for r in rows if server._luong_la_chuyen_khoan(r["ghi_chu"]))
+
+
 def tao_file(dong=DONG, tieu_de=True):
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -77,10 +82,15 @@ for full in (False, True):
     th, tom = server._luong_ke_hoach(pool, 2025, 5, 12, 0, None, 50, 0, random.Random(2), full, None, ck)
     assert sorted(th) == sorted(ck)
     for t, so in ck.items():
-        assert sum(r["tt_luong"] for r in th[t]) == so, (full, t)
-        assert tom["ck"][t]["khop"] and tom["ck"][t]["file"] == so
-        assert all(server._luong_la_chuyen_khoan(r["ghi_chu"]) for r in th[t]), "Mọi người trong tháng có chuyển khoản đều tick CK"
+        assert ck_tt(th[t]) == so, (full, t)
+        assert tom["ck"][t]["khop"] and tom["ck"][t]["file"] == so and tom["ck"][t]["tt_luong"] == so
+        assert len({(r["ma"]) for r in th[t]}) == len(th[t]) == 7, "Bảng lương có đủ 7 lao động: người chuyển khoản + người trả tiền mặt"
+        tm = [r for r in th[t] if not server._luong_la_chuyen_khoan(r["ghi_chu"])]
+        assert tom["ck"][t]["so_nguoi_ck"] == 7 - len(tm) and tom["ck"][t]["so_nguoi_tm"] == len(tm)
+        assert all(r["ngay_lam_hd"] == r["ngay_cong_hd"] and r["thuong_bh"] == 0 and r["tang_ca"] == 0 for r in tm), "Người trả tiền mặt: lương đủ công theo danh sách"
+        assert abs(tom["ck"][t]["tt_tien_mat"] - sum(r["tt_luong"] for r in tm)) < 1
     assert tom["tong_chi_phi"] == sum(r["chi_phi_luong"] for rows in th.values() for r in rows)
+    assert tom["tong_chi_phi"] > sum(ck.values()), "Tổng bảng lương LỚN HƠN số chuyển khoản (có thêm lao động trả tiền mặt + BH)"
     if full:
         assert tom["tong_thue"] == 0 and tom["thoi_vu"] == 0
 print("PASS 2: mỗi tháng TT lương chuyển khoản = đúng số trong file (cả chế độ thường và full công).")
@@ -92,14 +102,14 @@ for _ in range(25):
     th, tom = server._luong_ke_hoach(pool, 2025, 1, 12, 0, None, 50, 0, random.Random(rng.randint(1, 999)), rng.random() < 0.5, None, ck_r)
     assert sorted(th) == sorted(ck_r)
     for t, so in ck_r.items():
-        assert sum(r["tt_luong"] for r in th[t]) == so, (t, so, sum(r["tt_luong"] for r in th[t]))
+        assert ck_tt(th[t]) == so, (t, so, ck_tt(th[t]))
 print("PASS 3: 25 bộ số ngẫu nhiên: TT lương chuyển khoản luôn khớp từng đồng.")
 
 # ===== 4: có cả tổng chi phí lương cả năm: tháng có file theo file, các tháng còn lại chia phần còn lại -> tổng ĐÚNG mục tiêu =====
 ck2 = {"05": 28_110_000, "06": 36_295_000}
 th, tom = server._luong_ke_hoach(pool, 2025, 5, 8, 200_000_000, None, 50, 0, random.Random(3), False, None, ck2)
 assert sorted(th) == ["05", "06", "07", "08"]
-assert sum(r["tt_luong"] for r in th["05"]) == 28_110_000 and sum(r["tt_luong"] for r in th["06"]) == 36_295_000
+assert ck_tt(th["05"]) == 28_110_000 and ck_tt(th["06"]) == 36_295_000
 assert sum(r["chi_phi_luong"] for rows in th.values() for r in rows) == 200_000_000 == tom["tong_chi_phi"]
 # tháng chỉ nhập file (không tổng): các tháng không có chuyển khoản bị bỏ qua + báo
 th, tom = server._luong_ke_hoach(pool, 2025, 5, 8, 0, None, 50, 0, random.Random(3), False, None, ck2)
@@ -144,8 +154,44 @@ except HTTPException as e:
 hd = ["Mã NV", "Họ và tên", "Chức vụ", "Lương Cơ bản", "PC Tiền cơm", "PC Xăng xe", "PC Chức vụ", "PC Điện thoại", "PC Trang phục", "Đóng BHXH"]
 server.nhap_lieu_get = lambda cid, loai="nv": {"header": hd, "rows": [[str(i), f"NV{i}", "KD", 5310000, 700000, 500000, 500000, 500000, 400000, "x"] for i in range(2, 9)]}
 out = asyncio.run(server.bang_luong_ke_hoach(1, Req({"nam": 2025, "tu_thang": 5, "den_thang": 6, "muc_tieu": "", "ck_theo_thang": {"05": 28_110_000, "06": "36295000"}, "seed": 4})))
-assert sum(r["tt_luong"] for r in out["thang"]["05"]) == 28_110_000 and sum(r["tt_luong"] for r in out["thang"]["06"]) == 36_295_000
+assert ck_tt(out["thang"]["05"]) == 28_110_000 and ck_tt(out["thang"]["06"]) == 36_295_000
 assert out["tom_tat"]["ck"]["06"]["khop"] is True
 print("PASS 5: API đọc file + lập kế hoạch theo ck_theo_thang.")
+
+# ===== 6: CHIA RA NHIỀU NGƯỜI: mức tối đa mỗi người nhỏ hơn -> số người chuyển khoản không giảm; vượt mức thì có cảnh báo =====
+ck6 = {"06": 40_110_000}
+so_nguoi = []
+for toi_da in (20_000_000, 12_000_000, 8_000_000):
+    th, tom = server._luong_ke_hoach(pool, 2025, 6, 6, 0, None, 50, 0, random.Random(4), True, None, ck6, toi_da)
+    so_nguoi.append(tom["ck"]["06"]["so_nguoi_ck"])
+    assert ck_tt(th["06"]) == 40_110_000 and tom["ck"]["06"]["ck_cao_nhat"] == max(r["tt_luong"] for r in th["06"] if server._luong_la_chuyen_khoan(r["ghi_chu"]))
+    if tom["ck"]["06"]["ck_cao_nhat"] > toi_da:
+        assert any("trên mức tối đa" in c for c in tom["canh_bao"]), "Có người vượt mức tối đa -> phải cảnh báo"
+assert so_nguoi == sorted(so_nguoi) and so_nguoi[-1] >= 5, so_nguoi
+print("PASS 6: chuyển khoản chia ra nhiều người theo mức tối đa mỗi người (số người tăng khi mức tối đa giảm); vượt mức thì cảnh báo.")
+th, tom = server._luong_ke_hoach(pool, 2025, 6, 6, 0, None, 50, 0, random.Random(4), True, None, {"06": 90_000_000}, 12_000_000)
+assert ck_tt(th["06"]) == 90_000_000 and any("mức tối đa" in c for c in tom["canh_bao"]), "Quá lớn so với số người -> vẫn khớp + cảnh báo"
+print("PASS 6b: số chuyển khoản quá lớn so với số người: vẫn khớp + cảnh báo mức tối đa.")
+
+# ===== 7: hạch toán MISA: số chuyển khoản theo FILE luôn ghi Nợ 3341/Có 1121 (kể cả "bỏ qua tick CK"), phần còn lại Có 1111 =====
+rows6 = th6 = server._luong_ke_hoach(pool, 2025, 6, 6, 0, None, 50, 0, random.Random(4), True, None, ck6, 12_000_000)[0]["06"]
+g = server._luong_misa_tong(rows6)
+for tach in (True, False):
+    ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": tach, "ck_file": {"06": 40_110_000}, "tk_nh_ma": "0123"}, 1)
+    tt = [d for c in ds for d in c["dong"] if d["dien_giai"].startswith("TT lương")]
+    nh = [d for d in tt if d["co"] == "1121"]
+    tm = [d for d in tt if d["co"] == "1111"]
+    assert len(nh) == 1 and nh[0]["so_tien"] == 40_110_000 and nh[0]["loai"] == "nh" and nh[0]["dien_giai"] == "TT lương chuyển khoản T6/2025", tach
+    assert len(tm) == 1 and tm[0]["so_tien"] == g["tt_luong"] - 40_110_000 > 0
+# không có file: hành vi cũ (tick CK -> không ghi 1121; bỏ qua tick -> 1111 tất cả)
+ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": True}, 1)
+assert not any(d["co"] == "1121" for c in ds for d in c["dong"])
+ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": False, "ck_file": {"07": 5}}, 1)
+assert not any(d["co"] == "1121" for c in ds for d in c["dong"]), "File chỉ có tháng khác -> tháng này không ghi 1121"
+# số CK theo file lớn hơn tổng thực lãnh -> chặn ở tổng thực lãnh (không âm)
+ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"ck_file": {"6": 999_999_999}}, 1)
+tt = {d["co"]: d["so_tien"] for c in ds for d in c["dong"] if d["dien_giai"].startswith("TT lương")}
+assert tt == {"1121": g["tt_luong"]}, tt
+print("PASS 7: hạch toán MISA theo file: 1121 = số chuyển khoản trong file, 1111 = phần còn lại; không có file thì như cũ.")
 
 print("\nALL DONE")
