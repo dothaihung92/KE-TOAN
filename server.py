@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.008"
+APP_BUILD = "2026-09-30.009"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11138,6 +11138,222 @@ def _luong_doc_excel(wb_giatri, wb_congthuc=None):
             "so_npt": gt(r, "so_npt"), "dong_bh": co_dong_bh(r), "thue_tay": thue_chinh_tay(r),
             "ghi_chu": gt(r, "ghi_chu")}))
     return thang, loi
+
+
+# ----- XUẤT EXCEL THEO MẪU "BL": mỗi tháng 1 sheet, bên trái BẢNG TÍNH LƯƠNG, bên phải BẢNG CHẤM CÔNG (in 2 trang) -----
+def _luong_xuat_excel_mau(nam, thang, tuy_chon):
+    """`thang` = {"05": {cot, rows, cham, ngay}} do giao diện dựng (cùng dữ liệu với bản in, nên Excel = bản in).
+    Cột tổng/thực nhận/TNC là công thức Excel; khổ giấy + vùng in + lặp tiêu đề đặt sẵn để in ra đẹp."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter as L
+    from openpyxl.worksheet.properties import PageSetupProperties
+    tc = tuy_chon if isinstance(tuy_chon, dict) else {}
+    in_luong, in_cong = tc.get("in_luong", True) is not False, tc.get("in_cong", True) is not False
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    mong = Side(style="thin", color="000000")
+    vien = Border(left=mong, right=mong, top=mong, bottom=mong)
+    xam = PatternFill("solid", fgColor="E8E8E8")
+    cn_fill = PatternFill("solid", fgColor="D9D9D9")
+    le_fill = PatternFill("solid", fgColor="FFF2CC")
+    ten_font = "Times New Roman"
+    giua = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    trai = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    phai = Alignment(horizontal="right", vertical="center")
+
+    def font(b=False, sz=11, i=False):
+        return Font(name=ten_font, size=sz, bold=b, italic=i)
+    THU = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"]
+    for t in _LUONG_THANG:
+        d = (thang or {}).get(t)
+        if not isinstance(d, dict) or not d.get("rows"):
+            continue
+        cot, rows, cham, ngay = d.get("cot") or [], d.get("rows") or [], d.get("cham") or [], d.get("ngay") or []
+        n, nL = len(rows), len(cot)
+        r0, r_dau = 10, 10 + n - 1
+        r_tong = r_dau + 1
+        ws = wb.create_sheet(f"BL {t}-{nam}")
+        c_cong = (nL + 1) if in_luong else 1           # cột đầu của khối chấm công (liền sau khối lương như mẫu)
+        dim = len(ngay)
+        nC = 2 + dim + 2
+        ten_cty, dia_chi, mst = tc.get("ten_cty") or "", tc.get("dia_chi") or "", tc.get("mst") or ""
+        cuoi_thang = f"Ngày {dim} tháng {t} năm {nam}"
+
+        def dau_khoi(c1, c2, tieu_de, dong5):
+            ws.cell(1, c1, ten_cty).font = font(True, 12)
+            if dia_chi:
+                ws.cell(2, c1, f"ĐC: {dia_chi}").font = font(False, 11)
+            if mst:
+                ws.cell(3, c1, f"MST: {mst}").font = font(False, 11)
+            ws.merge_cells(start_row=4, start_column=c1, end_row=4, end_column=c2)
+            ws.cell(4, c1, tieu_de).font = font(True, 16)
+            ws.cell(4, c1).alignment = giua
+            ws.merge_cells(start_row=5, start_column=c1, end_row=5, end_column=c2)
+            ws.cell(5, c1, dong5).font = font(True, 13)
+            ws.cell(5, c1).alignment = giua
+            ws.row_dimensions[4].height = 24
+
+        def chu_ky(c1, c2, r):
+            ws.merge_cells(start_row=r, start_column=max(c1, c2 - 6), end_row=r, end_column=c2)
+            ws.cell(r, max(c1, c2 - 6), cuoi_thang).font = font(False, 11, True)
+            ws.cell(r, max(c1, c2 - 6)).alignment = phai
+            trai_c = c1 + 1
+            phai_c = max(c1 + 3, c2 - 5)
+            for cc, vai, ten in ((trai_c, "Người lập biểu", tc.get("nguoi_lap") or ""), (phai_c, "Giám đốc", tc.get("giam_doc") or "")):
+                ws.cell(r + 1, cc, vai).font = font(True, 12)
+                ws.cell(r + 2, cc, "(Ký, ghi rõ họ tên)" if vai == "Người lập biểu" else "(Ký, đóng dấu, ghi rõ họ tên)").font = font(False, 10, True)
+                ws.cell(r + 7, cc, ten).font = font(True, 12)
+        vung_in = []
+        # ===== khối 1: BẢNG TÍNH LƯƠNG =====
+        if in_luong and nL:
+            dau_khoi(1, nL, "BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC", f"THÁNG {t} NĂM {nam}")
+            co_nhom = any(c.get("nhom") for c in cot)
+            done = set()
+            for j, c in enumerate(cot, 1):
+                nh = c.get("nhom") or ""
+                if nh and nh not in done:
+                    done.add(nh)
+                    so = sum(1 for x in cot if (x.get("nhom") or "") == nh)
+                    ws.merge_cells(start_row=8, start_column=j, end_row=8, end_column=j + so - 1)
+                    ws.cell(8, j, "Phụ cấp" if nh == "pc" else "Các khoản giảm trừ")
+                if nh:
+                    ws.cell(9, j, c.get("t"))
+                else:
+                    if co_nhom:
+                        ws.merge_cells(start_row=8, start_column=j, end_row=9, end_column=j)
+                    ws.cell(8, j, c.get("t"))
+                ws.column_dimensions[L(j)].width = max(4, round((c.get("w") or 60) / 6.6, 1))
+            for rr in (8, 9):
+                for j in range(1, nL + 1):
+                    x = ws.cell(rr, j)
+                    x.font, x.fill, x.alignment, x.border = font(True, 11), xam, giua, vien
+            pos = {c["k"]: j for j, c in enumerate(cot, 1)}
+            thu_nhap = [pos[k] for k in ("luong", "tt_tien_com", "xang_xe", "tt_di_lai", "tt_pc_chuc_vu", "dien_thoai", "tt_trang_phuc",
+                                         "thuong_bh", "thuong_t13", "tang_ca") if k in pos]
+            giam_tru = [pos[k] for k in ("bhxh_nld", "bhyt_nld", "bhtn_nld", "thue_tru_luong") if k in pos]
+            for i, r in enumerate(rows):
+                rr = r0 + i
+                for j, c in enumerate(cot, 1):
+                    k = c["k"]
+                    x = ws.cell(rr, j)
+                    if k == "stt":
+                        x.value = i + 1
+                    elif k == "ky":
+                        x.value = None
+                    elif k == "tt_luong" and thu_nhap:
+                        f = f"=ROUND(SUM({L(thu_nhap[0])}{rr}:{L(thu_nhap[-1])}{rr})"
+                        if giam_tru:
+                            f += f"-SUM({L(giam_tru[0])}{rr}:{L(giam_tru[-1])}{rr})"
+                        x.value = f + ",0)"
+                    else:
+                        v = r.get(k)
+                        if v in (None, "") or (v == 0 and k not in ("luong_cb", "ngay_cong_hd", "ngay_lam_hd", "luong", "tt_luong")):
+                            v = None                # ô 0 của cột phụ cấp/khấu trừ để trống cho dễ nhìn (như bản in)
+                        x.value = v
+                    x.border = vien
+                    x.font = font(bool(c.get("dam")), 12)
+                    if c.get("n"):
+                        x.number_format = "#,##0"
+                        x.alignment = phai
+                    elif k in ("ten", "chuc_vu"):
+                        x.alignment = trai
+                    else:
+                        x.alignment = giua
+                        if c.get("dp"):
+                            x.number_format = "0.0" if k != "ngay_cong_hd" and k != "ngay_lam_hd" else "0.##"
+                ws.row_dimensions[rr].height = 17
+            # dòng tổng cộng
+            dau_tong = pos.get("luong_cb", 1)
+            if dau_tong > 1:
+                ws.merge_cells(start_row=r_tong, start_column=1, end_row=r_tong, end_column=dau_tong - 1)
+                ws.cell(r_tong, 1, "Tổng cộng")
+            for j, c in enumerate(cot, 1):
+                x = ws.cell(r_tong, j)
+                if c.get("tong") and n:
+                    x.value = f"=SUM({L(j)}{r0}:{L(j)}{r_dau})"
+                    x.number_format = "#,##0" if c.get("n") else "0.0"
+                x.font, x.border, x.fill = font(True, 12), vien, PatternFill("solid", fgColor="F3F3F3")
+                x.alignment = phai if c.get("n") else giua
+            chu_ky(1, nL, r_tong + 2)
+            vung_in.append(f"A1:{L(nL)}{r_tong + 10}")
+        # ===== khối 2: BẢNG CHẤM CÔNG =====
+        if in_cong and dim:
+            c1, c2 = c_cong, c_cong + nC - 1
+            dau_khoi(c1, c2, f"BẢNG CHẤM CÔNG THÁNG TỪ 01/{t}/{nam}  ĐẾN {dim:02d}/{t}/{nam}", f"THÁNG {t} NĂM {nam}")
+            for k, ten, rong in ((0, "STT", 4.5), (1, "Họ và Tên", 30)):
+                ws.merge_cells(start_row=8, start_column=c1 + k, end_row=9, end_column=c1 + k)
+                ws.cell(8, c1 + k, ten)
+                ws.column_dimensions[L(c1 + k)].width = rong
+            for j, g in enumerate(ngay):
+                cc = c1 + 2 + j
+                ws.cell(8, cc, THU[g["thu"] % 7])
+                ws.cell(9, cc, g["d"])
+                ws.column_dimensions[L(cc)].width = 3.9
+            c_tnc, c_gc = c1 + 2 + dim, c1 + 3 + dim
+            for cc, ten, rong in ((c_tnc, "TNC", 7), (c_gc, "Ghi chú", 22)):
+                ws.merge_cells(start_row=8, start_column=cc, end_row=9, end_column=cc)
+                ws.cell(8, cc, ten)
+                ws.column_dimensions[L(cc)].width = rong
+            for rr in (8, 9):
+                for cc in range(c1, c2 + 1):
+                    x = ws.cell(rr, cc)
+                    x.font, x.alignment, x.border = font(True, 11), giua, vien
+                    x.fill = cn_fill if (2 <= cc - c1 < 2 + dim and ngay[cc - c1 - 2].get("cn")) else xam
+            for i, r in enumerate(rows):
+                rr = r0 + i
+                ws.cell(rr, c1, i + 1).alignment = giua
+                ws.cell(rr, c1 + 1, r.get("ten") or r.get("ma") or "").alignment = trai
+                ch = cham[i] if i < len(cham) else {"dau": [], "tong": 0, "soX": 0}
+                for j, g in enumerate(ngay):
+                    dau = (ch.get("dau") or [""] * dim)[j] if j < len(ch.get("dau") or []) else ""
+                    x = ws.cell(rr, c1 + 2 + j, dau or None)
+                    x.alignment = giua
+                    if g.get("cn"):
+                        x.fill = cn_fill
+                    elif dau == "L":
+                        x.fill = le_fill
+                a, b = L(c1 + 2), L(c1 + 1 + dim)
+                tnc = ws.cell(rr, c_tnc)
+                tnc.value = f'=COUNTIF({a}{rr}:{b}{rr},"X")' if abs((ch.get("tong") or 0) - (ch.get("soX") or 0)) < 1e-9 else ch.get("tong")
+                tnc.alignment, tnc.number_format = giua, "0.##"
+                ws.cell(rr, c_gc, "Thời vụ (không BHXH)" if r.get("thoi_vu") else None).alignment = trai
+                for cc in range(c1, c2 + 1):
+                    x = ws.cell(rr, cc)
+                    x.border = vien
+                    x.font = font(cc == c_tnc, 11)
+            ws.cell(r_tong + 1, c1, "X: đi làm    L: nghỉ lễ    (trống): nghỉ / Chủ nhật    TNC: tổng ngày công").font = font(False, 10, True)
+            chu_ky(c1, c2, r_tong + 3)
+            vung_in.append(f"{L(c1)}1:{L(c2)}{r_tong + 11}")
+        # in ấn: khổ giấy, hướng, vừa bề ngang, lề nhỏ, lặp tiêu đề bảng, mỗi khối 1 vùng in (khối lương trang trước, chấm công trang sau)
+        kho = tc.get("kho") or "a4n"
+        ws.page_setup.orientation = "portrait" if kho == "a4d" else "landscape"
+        ws.page_setup.paperSize = 8 if kho == "a3n" else 9
+        ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
+        ws.page_margins.left = ws.page_margins.right = 0.3
+        ws.page_margins.top = ws.page_margins.bottom = 0.4
+        ws.print_options.horizontalCentered = True
+        ws.print_title_rows = "8:9"
+        if vung_in:
+            ws.print_area = vung_in
+        ws.sheet_view.showGridLines = False
+    if not wb.sheetnames:
+        raise HTTPException(404, "Không có tháng nào có dữ liệu để xuất")
+    fname = f"BangLuong_ChamCong_{nam}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    return path, fname
+
+
+@app.post("/api/bang-luong/{cid}/xuat-excel-mau")
+async def bang_luong_xuat_excel_mau(cid: int, request: Request):
+    """Xuất Excel theo mẫu file 'BL' (bảng tính lương + bảng chấm công từng tháng). Body do giao diện dựng từ đúng dữ
+    liệu đang in: {nam, tuy_chon, thang:{"05":{cot,rows,cham,ngay}}}."""
+    body = await request.json()
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    path, fname = _luong_xuat_excel_mau(nam, body.get("thang"), body.get("tuy_chon"))
+    return _resp_xuat(path, fname)
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")

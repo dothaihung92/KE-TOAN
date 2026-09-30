@@ -596,5 +596,37 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   kho.blInTu = '5'; kho.blInDen = '5'; cks.blInLuong = false; cks.blInCong = false; assert.strictEqual(c.blChuanBiIn(), null, 'Phải chọn ít nhất 1 loại bảng');
   console.log('PASS 23: in bảng lương + chấm công (theo mẫu file), tự thu phóng theo khổ giấy, in hàng loạt nhiều tháng.');
 
+  // ---- 24: xuất Excel theo mẫu: dữ liệu gửi server = đúng dữ liệu đã dựng cho bản in ----
+  m = nap();
+  const c24 = m.ctx;
+  const rows24 = [dongMau('2', 'Trần A', { chuc_vu: 'KD', ngay_cong_hd: 26, ngay_lam_hd: 26, luong: 5310000, tt_tien_com: 700000, tt_luong: 7352450, bhxh_nld: 424800, thue_tru_luong: 0, xang_xe: 0, tt_pc_chuc_vu: 0, dien_thoai: 0, tt_trang_phuc: 0 }),
+    dongMau('3', 'Lê B', { chuc_vu: 'KD', ngay_cong_hd: 26, ngay_lam_hd: 13, thoi_vu: true, luong: 2655000, tt_tien_com: 350000, tt_luong: 3000000, thue_tru_luong: 5000, xang_xe: 0, tt_pc_chuc_vu: 0, dien_thoai: 0, tt_trang_phuc: 0 })];
+  const o24 = { tenCty: 'CÔNG TY A', mst: '031', diaChi: 'ĐC', nguoiLap: 'L', giamDoc: 'G', leSet: new Set(['2024-05-01']), ts: { bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 } }, inLuong: true, inCong: true, kho: 'a4n' };
+  const goiXm = JSON.parse(JSON.stringify(c24.blDuLieuXuatMau([{ t: '05', rows: rows24 }, { t: '06', rows: [] }], 2024, o24)));
+  assert.strictEqual(goiXm.nam, 2024); assert.deepStrictEqual(Object.keys(goiXm.thang), ['05'], 'Tháng trống không gửi');
+  const t5 = goiXm.thang['05'];
+  assert.strictEqual(t5.rows.length, 2); assert.strictEqual(t5.cham.length, 2); assert.strictEqual(t5.ngay.length, 31);
+  assert(t5.cot.some((x) => x.k === 'tt_luong') && t5.cot.some((x) => x.k === 'bhxh_nld' && x.nhom === 'gt') && t5.cot.some((x) => x.k === 'tt_tien_com' && x.nhom === 'pc'));
+  assert(!t5.cot.some((x) => x.k === 'thuong_t13'), 'Cột toàn 0 bị ẩn giống bản in');
+  assert.strictEqual(t5.rows[0].tt_luong, 7352450); assert.strictEqual(t5.rows[1].thoi_vu, true); assert.strictEqual(t5.cham[0].tong, 26); assert.strictEqual(t5.cham[0].soX, 26); assert.strictEqual(t5.cham[1].soX, 13);
+  assert.strictEqual(t5.cham[0].dau.length, 31); assert.strictEqual(t5.cham[0].dau[0], 'L', 'Ngày lễ'); assert.strictEqual(t5.ngay[4].cn, true, '5/5/2024 là Chủ nhật');
+  assert.deepStrictEqual(Object.keys(goiXm.tuy_chon).sort(), ['dia_chi', 'giam_doc', 'in_cong', 'in_luong', 'kho', 'mst', 'nguoi_lap', 'ten_cty']);
+  // nút + gọi API
+  const goiApi24 = []; const luuTep = [];
+  c24.fetch = async (url, o) => { goiApi24.push([url, JSON.parse(o.body)]); return { ok: true, headers: { get: () => null }, blob: async () => ({}) }; };
+  c24.xuatFile = async (r, ten) => { luuTep.push(ten); };
+  c24.blNam = 2024; c24.blThang = '05'; c24.blTS = { ngay_le: [{ ngay: '2024-05-01' }], bh_nld: o24.ts.bh_nld }; c24.companies = [{ id: 7, ten: 'CÔNG TY A', mst: '031' }]; c24.blDL = { '05': rows24 };
+  const kho24 = { blInTu: '5', blInDen: '6', blInKho: 'a4n', blInDc: '', blInLap: '', blInGd: '' }; const cks24 = { blInLuong: true, blInCong: true };
+  c24.document.getElementById = (id) => (id in kho24 ? { value: kho24[id] } : id in cks24 ? { checked: cks24[id] } : { style: {}, innerHTML: '', dataset: {} });
+  await c24.blXuatExcelMau();
+  assert.strictEqual(goiApi24.length, 1); assert.strictEqual(goiApi24[0][0], '/api/bang-luong/7/xuat-excel-mau');
+  assert.deepStrictEqual(Object.keys(goiApi24[0][1].thang), ['05']); assert.strictEqual(luuTep[0], 'BangLuong_ChamCong_2024_T5-T6.xlsx');
+  kho24.blInTu = '9'; kho24.blInDen = '10'; const truoc = goiApi24.length; await c24.blXuatExcelMau(); assert.strictEqual(goiApi24.length, truoc, 'Không có dữ liệu -> không gọi server');
+  kho24.blInTu = '8'; kho24.blInDen = '3'; await c24.blXuatExcelMau(); assert.strictEqual(goiApi24.length, truoc, 'Khoảng tháng sai -> không gọi server');
+  c24.fetch = async () => ({ ok: false, json: async () => ({ detail: 'Lỗi thử' }) }); kho24.blInTu = '5'; kho24.blInDen = '5';
+  const nToast = m.toasts.length; await c24.blXuatExcelMau(); assert(m.toasts.slice(nToast).some((x) => /Lỗi thử/.test(x[0])), 'Báo lỗi server');
+  assert(/Xuất Excel theo mẫu/.test(html) && /blXuatExcelMau\(\)/.test(html), 'Có nút Xuất Excel theo mẫu trong hộp in');
+  console.log('PASS 24: xuất Excel theo mẫu — dữ liệu gửi server đúng, xử lý lỗi/khoảng tháng/không có dữ liệu.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -5217,6 +5217,35 @@ function blDocTuyChonIn(){
   return {tu:parseInt(g('blInTu'),10),den:parseInt(g('blInDen'),10),inLuong:ck('blInLuong'),inCong:ck('blInCong'),kho:g('blInKho')||'a4n',
     diaChi:g('blInDc').trim(),nguoiLap:g('blInLap').trim(),giamDoc:g('blInGd').trim(),tenCty:co.ten||'',mst:co.mst||'',leSet:le,ts:blTS};
 }
+/* Dữ liệu gửi server để xuất Excel theo mẫu — dựng từ đúng các hàm của bản in (cột hiển thị, chấm công X/L) nên Excel = bản in */
+function blDuLieuXuatMau(dsThang,nam,o){
+  const thang={};
+  dsThang.forEach(({t,rows})=>{
+    if(!rows||!rows.length)return;
+    const cot=blCotIn(rows,o.ts);
+    const cham=rows.map(r=>blChamCongThang(r,nam,t,o.leSet));
+    const ngay=(cham[0]||blChamCongThang({},nam,t,o.leSet)).ngay;
+    thang[t]={
+      cot:cot.map(c=>({k:c.k,t:c.t,nhom:c.nhom||'',n:!!c.n,tong:!!c.tong,dp:!!c.dp,dam:!!c.dam,w:c.w})),
+      rows:rows.map(r=>{const x={ten:r.ten||'',ma:r.ma||'',chuc_vu:r.chuc_vu||'',thoi_vu:!!r.thoi_vu};cot.forEach(c=>{if(c.k!=='stt'&&c.k!=='ky')x[c.k]=r[c.k]});return x}),
+      cham:cham.map(c=>({tong:c.tong,soX:c.soX,dau:c.ngay.map(n=>n.dau)})),
+      ngay:ngay.map(n=>({d:n.d,thu:n.thu,cn:n.cn,le:n.le}))};
+  });
+  return {nam,thang,tuy_chon:{ten_cty:o.tenCty,dia_chi:o.diaChi,mst:o.mst,nguoi_lap:o.nguoiLap,giam_doc:o.giamDoc,in_luong:o.inLuong,in_cong:o.inCong,kho:o.kho}};
+}
+async function blXuatExcelMau(){
+  const dl=blLayDuLieuIn();if(!dl)return;
+  const {o,ds}=dl;
+  const goi=blDuLieuXuatMau(ds,blNam,o);
+  if(!Object.keys(goi.thang).length){toast(`Tháng ${o.tu}–${o.den} chưa có dữ liệu để xuất`,'err');return}
+  blLuuTuyChonIn(o);
+  try{
+    const r=await fetch(`/api/bang-luong/${current}/xuat-excel-mau`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(goi)});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    await xuatFile(r,`BangLuong_ChamCong_${blNam}_T${o.tu}-T${o.den}.xlsx`);
+    toast(`📥 Đã xuất Excel theo mẫu: ${Object.keys(goi.thang).length} tháng (mỗi tháng 1 sheet)`,'ok');
+  }catch(e){toast('Lỗi xuất Excel: '+e.message,'err')}
+}
 function blLuuTuyChonIn(o){try{localStorage.setItem('blIn'+current,JSON.stringify({diaChi:o.diaChi,nguoiLap:o.nguoiLap,giamDoc:o.giamDoc,kho:o.kho}))}catch{}}
 function blMoIn(){
   const w=document.getElementById('blIn');if(!w)return;
@@ -5236,16 +5265,22 @@ function blMoIn(){
       <span>Người lập biểu ${i('blInLap',cu.nguoiLap,'width:170px;')}</span><span>Giám đốc ${i('blInGd',cu.giamDoc,'width:170px;')}</span>
     </div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemIn()">👁 Xem trước</button> <button class="btn sm" style="background:#1f4e8c" onclick="blInNgay()">🖨 In luôn</button>
+      <button class="btn sm" style="background:#1f6b4a" onclick="blXuatExcelMau()" title="Xuất Excel theo mẫu file BL: mỗi tháng 1 sheet, bên trái bảng tính lương, bên phải bảng chấm công; đã đặt sẵn khổ giấy/vùng in">📥 Xuất Excel theo mẫu</button>
       <button class="btn ghost sm" onclick="document.getElementById('blIn').style.display='none'">Đóng</button>
       <span style="font-size:12px;color:var(--muted)">In hàng loạt: chọn từ tháng – đến tháng (mỗi tháng gồm bảng lương rồi bảng chấm công). Phần mềm tự thu phóng cho vừa khổ giấy, tự ngắt trang, lặp tiêu đề bảng ở mỗi trang.</span></div>
     <div id="blInKq" style="margin-top:6px;font-size:12px"></div>`;
 }
 // Dựng tài liệu in theo các ô đã nhập; trả null (và báo lỗi) nếu chưa hợp lệ
-function blChuanBiIn(){
+function blLayDuLieuIn(){
   const o=blDocTuyChonIn();
   if(!(o.tu>=1&&o.den<=12&&o.tu<=o.den)){toast('Khoảng tháng không hợp lệ (1–12, "đến" ≥ "từ")','err');return null}
   if(!o.inLuong&&!o.inCong){toast('Chọn in Bảng tính lương và/hoặc Bảng chấm công','err');return null}
   const ds=[];for(let t=o.tu;t<=o.den;t++){const k=String(t).padStart(2,'0');ds.push({t:k,rows:blDL[k]||[]})}
+  return {o,ds};
+}
+function blChuanBiIn(){
+  const dl=blLayDuLieuIn();if(!dl)return null;
+  const {o,ds}=dl;
   const kq=blDungTrangIn(ds,blNam,o);
   if(!kq.so_bang){toast(`Tháng ${o.tu}–${o.den} chưa có dữ liệu để in`,'err');return null}
   blLuuTuyChonIn(o);
