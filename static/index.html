@@ -4639,11 +4639,13 @@ async function moBangLuongNam(thangGiu){
         <input type="file" id="blImportFile" accept=".xlsx" style="display:none" onchange="blImportExcel(this)">
         <button class="btn ghost sm" onclick="blXuatExcel()">📤 Xuất Excel cả năm</button>
         <button class="btn ghost sm" style="color:#7a3a00" onclick="blMoKeHoach()" title="Nhập khoảng tháng + tổng chi phí lương cả năm -> phần mềm tự tính cần bao nhiêu người và phân bổ (thiếu thì bù thưởng bán hàng + tăng ca)">🎯 Chi phí lương cả năm</button>
+        <button class="btn ghost sm" style="color:#1f4e8c" onclick="blMoIn()" title="In bảng lương từng tháng + bảng chấm công tương ứng (mẫu như file bảng lương); in một tháng hoặc hàng loạt từ tháng nào đến tháng nào">🖨 In bảng lương & chấm công</button>
         <button class="btn ghost sm" id="blNutMuc" onclick="blDoiHienMuc()" title="Hiện/ẩn các cột MỨC phụ cấp mỗi tháng (lấy từ Danh Sách Nhân Viên) để sửa tay — cột PC bên cạnh là số đã tính theo ngày đi làm">✎ Mức phụ cấp</button>
         <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
       </div>
       <div id="blThamSo" style="display:none"></div>
       <div id="blKeHoach" style="display:none"></div>
+      <div id="blIn" style="display:none"></div>
       <div id="blTabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
       <div id="blInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="blBangWrap" style="overflow:auto;max-height:62vh;border:1px solid #ddd;border-radius:8px"></div>
@@ -5051,6 +5053,229 @@ async function blApDungThamSo(){
   blVeInfo();
   document.getElementById('blThamSo').style.display='none';
   toast('✓ Đã áp dụng tham số và tính lại — bấm 💾 Lưu để giữ lại','ok');
+}
+
+/* ----- IN BẢNG LƯƠNG + BẢNG CHẤM CÔNG (mẫu theo file "BL": bảng tính lương + bảng chấm công cùng tháng, có ký tên) ----- */
+const BL_KHO_GIAY={a4n:{ten:'A4 ngang',w:297,css:'A4 landscape'},a3n:{ten:'A3 ngang',w:420,css:'A3 landscape'},a4d:{ten:'A4 dọc',w:210,css:'A4 portrait'}};
+const BL_LE_TRANG=8;      // lề giấy (mm)
+const BL_THU=['CN','T2','T3','T4','T5','T6','T7'];
+function blSoNgayThang(nam,t){return new Date(nam,parseInt(t,10),0).getDate()}
+// bộ số ngẫu nhiên CỐ ĐỊNH theo khóa (in lại cho ra đúng bảng chấm công cũ, không đổi ngày nghỉ mỗi lần in)
+function blNgauNhienTheo(khoa){
+  let h=1779033703^khoa.length;
+  for(let i=0;i<khoa.length;i++){h=Math.imul(h^khoa.charCodeAt(i),3432918353);h=h<<13|h>>>19}
+  h=Math.imul(h^h>>>16,2246822507)^Math.imul(h^h>>>13,3266489909);
+  let a=h>>>0;
+  return function(){a=(a+0x6D2B79F5)|0;let t=Math.imul(a^a>>>15,1|a);t=(t+Math.imul(t^t>>>7,61|t))^t;return((t^t>>>14)>>>0)/4294967296};
+}
+/* Chấm công 1 người trong tháng: X = đi làm, L = nghỉ lễ, trống = nghỉ / Chủ nhật. Số ô X = số ngày làm (Tổng NC) của bảng lương;
+   đi đủ công thì X ở mọi ngày làm việc (T2–T7 không phải lễ), đi ít hơn thì các ngày nghỉ được chọn ngẫu nhiên cố định theo người + tháng. */
+function blChamCongThang(r,nam,t,leSet){
+  const dim=blSoNgayThang(nam,t),mm=String(parseInt(t,10)).padStart(2,'0');
+  const ngay=[],thuong=[],le=[],cn=[];
+  for(let d=1;d<=dim;d++){
+    const thu=new Date(nam,parseInt(t,10)-1,d).getDay();
+    const laLe=leSet&&leSet.has(`${nam}-${mm}-${String(d).padStart(2,'0')}`);
+    ngay.push({d,thu,cn:thu===0,le:!!laLe});
+    if(thu===0)cn.push(d);else if(laLe)le.push(d);else thuong.push(d);
+  }
+  const g=Number(r.ngay_lam_hd!=null?r.ngay_lam_hd:r.ngay_lam)||0;
+  let can=Math.max(0,Math.floor(g+1e-9));
+  const co=new Set();
+  if(can>=thuong.length){thuong.forEach(d=>co.add(d));can-=thuong.length;for(const d of le.concat(cn)){if(can<=0)break;co.add(d);can--}}
+  else{
+    const rng=blNgauNhienTheo(`${r.ma||r.ten||''}|${nam}|${mm}`),ds=thuong.slice();
+    for(let i=ds.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[ds[i],ds[j]]=[ds[j],ds[i]]}
+    ds.slice(0,can).forEach(d=>co.add(d));
+  }
+  ngay.forEach(x=>{x.dau=co.has(x.d)?'X':(x.le?'L':'')});
+  return {ngay,tong:g,soX:co.size};
+}
+// Cột bảng tính lương: cột phụ cấp/khấu trừ nào toàn số 0 thì ẩn để các cột còn lại rộng, đẹp và vừa khổ giấy
+function blCotIn(rows,ts){
+  const bh=(ts&&ts.bh_nld)||{};
+  const goc=[
+    {k:'stt',t:'Stt',w:26,c:1},{k:'ma',t:'Mã NV',w:40,c:1},{k:'ten',t:'Họ và Tên',w:150},{k:'chuc_vu',t:'Chức vụ',w:88},
+    {k:'luong_cb',t:'Lương căn bản',w:86,n:1,tong:1},{k:'ngay_cong_hd',t:'Ngày công',w:40,c:1,dp:1},
+    {k:'gio_tang_ca',t:'Số giờ tăng ca',w:46,c:1,dp:1,tong:1,opt:1},{k:'ngay_lam_hd',t:'Tổng NC',w:42,c:1,dp:1},
+    {k:'luong',t:'Tiền lương',w:86,n:1,tong:1},
+    {k:'tt_tien_com',t:'Tiền cơm',w:74,n:1,tong:1,opt:1,nhom:'pc'},{k:'xang_xe',t:'Xăng xe',w:74,n:1,tong:1,opt:1,nhom:'pc'},
+    {k:'tt_di_lai',t:'Hỗ trợ đi lại',w:74,n:1,tong:1,opt:1,nhom:'pc'},{k:'tt_pc_chuc_vu',t:'PC chức vụ',w:74,n:1,tong:1,opt:1,nhom:'pc'},
+    {k:'dien_thoai',t:'Điện thoại',w:74,n:1,tong:1,opt:1,nhom:'pc'},{k:'tt_trang_phuc',t:'Trang phục',w:74,n:1,tong:1,opt:1,nhom:'pc'},
+    {k:'thuong_bh',t:'Thưởng bán hàng',w:80,n:1,tong:1,opt:1,nhom:'pc'},{k:'thuong_t13',t:'Thưởng T13',w:80,n:1,tong:1,opt:1,nhom:'pc'},
+    {k:'tang_ca',t:'Tăng ca',w:76,n:1,tong:1,opt:1},
+    {k:'bhxh_nld',t:'BHXH '+(bh.bhxh!=null?bh.bhxh:8)+'%',w:70,n:1,tong:1,opt:1,nhom:'gt'},
+    {k:'bhyt_nld',t:'BHYT '+(bh.bhyt!=null?bh.bhyt:1.5)+'%',w:66,n:1,tong:1,opt:1,nhom:'gt'},
+    {k:'bhtn_nld',t:'BHTN '+(bh.bhtn!=null?bh.bhtn:1)+'%',w:62,n:1,tong:1,opt:1,nhom:'gt'},
+    {k:'thue_tru_luong',t:'Thuế TNCN',w:72,n:1,tong:1,opt:1,nhom:'gt'},
+    {k:'tt_luong',t:'Tổng thực nhận',w:92,n:1,tong:1,dam:1},{k:'ky',t:'Ký nhận',w:96,ky:1}];
+  return goc.filter(c=>!c.opt||rows.some(r=>Math.abs(Number(r[c.k])||0)>=0.5));
+}
+function blTieuDeNhom(t){return t==='pc'?'Phụ cấp':'Các khoản giảm trừ'}
+function blNgayKy(nam,t,tuyChon){
+  const dim=blSoNgayThang(nam,t),mm=String(parseInt(t,10)).padStart(2,'0');
+  return `Ngày ${dim} tháng ${mm} năm ${nam}`;
+}
+function blKhungTren(tuyChon,tieuDe,dong2){
+  return `<div class="dau"><div class="cty">${xkEsc(tuyChon.tenCty||'')}</div>`+
+    (tuyChon.diaChi?`<div>ĐC: ${xkEsc(tuyChon.diaChi)}</div>`:'')+(tuyChon.mst?`<div>MST: ${xkEsc(tuyChon.mst)}</div>`:'')+`</div>
+    <div class="tieude">${tieuDe}</div><div class="thang">${dong2}</div>`;
+}
+function blKhungKy(tuyChon,nam,t,rong){
+  return `<div class="ky" style="width:${rong}px"><div class="ngay-ky">${blNgayKy(nam,t)}</div>
+    <div class="ky2"><div><b>Người lập biểu</b><div class="ghi">(Ký, ghi rõ họ tên)</div><div class="ten-ky">${xkEsc(tuyChon.nguoiLap||'')}</div></div>
+    <div><b>Giám đốc</b><div class="ghi">(Ký, đóng dấu, ghi rõ họ tên)</div><div class="ten-ky">${xkEsc(tuyChon.giamDoc||'')}</div></div></div></div>`;
+}
+function blSoIn(v,dp){const n=Number(v);if(!isFinite(n)||Math.abs(n)<(dp?0.005:0.5))return'';return blDinhDang(n,dp)}
+// Trang "BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC" của 1 tháng. Trả {html, rong (px tự nhiên của bảng)}
+function blDungBangLuongIn(rows,nam,t,tuyChon){
+  const cot=blCotIn(rows,tuyChon.ts),rong=cot.reduce((s,c)=>s+c.w,0);
+  const nhom={};cot.forEach(c=>{if(c.nhom)nhom[c.nhom]=(nhom[c.nhom]||0)+1});
+  const coNhom=Object.keys(nhom).length>0;
+  let h1='<tr>',h2='<tr>',daNhom={};
+  cot.forEach(c=>{
+    if(!c.nhom)h1+=`<th rowspan="${coNhom?2:1}">${xkEsc(c.t)}</th>`;
+    else{
+      if(!daNhom[c.nhom]){daNhom[c.nhom]=1;h1+=`<th colspan="${nhom[c.nhom]}">${blTieuDeNhom(c.nhom)}</th>`}
+      h2+=`<th>${xkEsc(c.t)}</th>`;
+    }
+  });
+  h1+='</tr>';h2+='</tr>';
+  const mp=(c,r,i)=>{
+    if(c.k==='stt')return `<td class="c">${i+1}</td>`;
+    if(c.ky)return '<td></td>';
+    if(c.k==='ma'||c.k==='ten'||c.k==='chuc_vu')return `<td class="${c.k==='ma'?'c':''}">${xkEsc(r[c.k]==null?'':r[c.k])}</td>`;
+    const v=r[c.k];
+    const s=(c.k==='ngay_lam_hd'||c.k==='ngay_cong_hd'||c.k==='luong_cb'||c.k==='luong'||c.k==='tt_luong')?blDinhDang(v,c.dp):blSoIn(v,c.dp);
+    return `<td class="${c.n?'n':'c'}${c.dam?' dam':''}">${s}</td>`;
+  };
+  const than=rows.map((r,i)=>'<tr>'+cot.map(c=>mp(c,r,i)).join('')+'</tr>').join('');
+  const dauTong=cot.findIndex(c=>c.k==='luong_cb');
+  const tong='<tr class="tong">'+(dauTong>0?`<td colspan="${dauTong}" class="c">Tổng cộng</td>`:'')+cot.slice(Math.max(dauTong,0)).map(c=>{
+    if(!c.tong)return '<td></td>';
+    return `<td class="${c.n?'n':'c'}">${blDinhDang(rows.reduce((s,r)=>s+(Number(r[c.k])||0),0),c.dp)}</td>`;
+  }).join('')+'</tr>';
+  const thang=`THÁNG ${String(parseInt(t,10)).padStart(2,'0')} NĂM ${nam}`;
+  const html=`${blKhungTren(tuyChon,'BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC',thang)}
+    <table class="bang" style="width:${rong}px"><colgroup>${cot.map(c=>`<col style="width:${c.w}px">`).join('')}</colgroup>
+    <thead>${h1}${coNhom?h2:''}</thead><tbody>${than}${tong}</tbody></table>${blKhungKy(tuyChon,nam,t,rong)}`;
+  return {html,rong,cot};
+}
+// Trang "BẢNG CHẤM CÔNG THÁNG TỪ dd/mm/yyyy ĐẾN dd/mm/yyyy": 31 cột ngày, thứ trong tuần, X = đi làm, L = nghỉ lễ, TNC = tổng ngày công
+function blDungChamCongIn(rows,nam,t,tuyChon){
+  const dim=blSoNgayThang(nam,t),mm=String(parseInt(t,10)).padStart(2,'0');
+  const wDay=24,rong=26+156+dim*wDay+44+96;
+  const cc=rows.map(r=>blChamCongThang(r,nam,t,tuyChon.leSet));
+  const mau=cc[0]?cc[0].ngay:blChamCongThang({},nam,t,tuyChon.leSet).ngay;
+  const ht=mau.map(x=>`<th class="${x.cn?'cn':''}">${BL_THU[x.thu]}</th>`).join('');
+  const hd=mau.map(x=>`<th class="${x.cn?'cn':''}">${x.d}</th>`).join('');
+  const than=rows.map((r,i)=>`<tr><td class="c">${i+1}</td><td>${xkEsc(r.ten||r.ma||'')}</td>`+cc[i].ngay.map(x=>`<td class="c${x.cn?' cn':''}${x.dau==='L'?' le':''}">${x.dau}</td>`).join('')+
+    `<td class="c dam">${blDinhDang(cc[i].tong,1)}</td><td class="gc">${r.thoi_vu?'Thời vụ (không BHXH)':''}</td></tr>`).join('');
+  const d1=`01/${mm}/${nam}`,d2=`${String(dim).padStart(2,'0')}/${mm}/${nam}`;
+  const html=`${blKhungTren(tuyChon,`BẢNG CHẤM CÔNG THÁNG TỪ ${d1}  ĐẾN ${d2}`,`THÁNG ${mm} NĂM ${nam}`)}
+    <table class="bang cham" style="width:${rong}px"><colgroup><col style="width:26px"><col style="width:156px">${mau.map(()=>`<col style="width:${wDay}px">`).join('')}<col style="width:44px"><col style="width:96px"></colgroup>
+    <thead><tr><th rowspan="2">STT</th><th rowspan="2">Họ và Tên</th>${ht}<th rowspan="2">TNC</th><th rowspan="2">Ghi chú</th></tr><tr>${hd}</tr></thead>
+    <tbody>${than}</tbody></table>
+    <div class="chuthich">X: đi làm &nbsp; L: nghỉ lễ &nbsp; (trống): nghỉ / Chủ nhật &nbsp; TNC: tổng ngày công</div>${blKhungKy(tuyChon,nam,t,rong)}`;
+  return {html,rong};
+}
+/* Ghép cả tài liệu in: mỗi tháng = bảng tính lương rồi bảng chấm công, mỗi bảng tự thu/phóng vừa bề ngang khổ giấy đã chọn */
+function blDungTrangIn(dsThang,nam,tuyChon){
+  const kho=BL_KHO_GIAY[tuyChon.kho]||BL_KHO_GIAY.a4n;
+  const rongTrang=Math.floor((kho.w-2*BL_LE_TRANG)/25.4*96);
+  const phan=[],bo=[];
+  dsThang.forEach(({t,rows})=>{
+    if(!rows||!rows.length){bo.push(t);return}
+    const ct=Object.assign({},tuyChon);
+    const them=(kq)=>{const z=Math.min(1.2,rongTrang/kq.rong);phan.push(`<section class="muc"><div class="hop" style="width:${kq.rong}px;zoom:${z.toFixed(4)}">${kq.html}</div></section>`);return z};
+    const zs=[];
+    if(tuyChon.inLuong)zs.push(them(blDungBangLuongIn(rows,nam,t,ct)));
+    if(tuyChon.inCong)zs.push(them(blDungChamCongIn(rows,nam,t,ct)));
+  });
+  const css=`@page{size:${kho.css};margin:${BL_LE_TRANG}mm}
+*{box-sizing:border-box}body{margin:0;font-family:'Times New Roman',Times,serif;color:#000;font-size:12px;background:#fff}
+.muc{page-break-after:always}.muc:last-child{page-break-after:auto}.hop{margin:0 auto}
+.dau{font-size:13px;line-height:1.45}.cty{font-weight:bold;font-size:15px;text-transform:uppercase}
+.tieude{text-align:center;font-weight:bold;font-size:20px;margin:8px 0 2px}.thang{text-align:center;font-weight:bold;font-size:15px;margin-bottom:8px}
+table.bang{border-collapse:collapse;table-layout:fixed}
+.bang th,.bang td{border:1px solid #000;padding:2px 4px;font-size:12px;line-height:1.25;overflow:hidden;word-break:break-word;vertical-align:middle}
+.bang th{background:#e8e8e8;text-align:center;font-weight:bold}.bang td.n{text-align:right;white-space:nowrap}.bang td.c{text-align:center}.bang td.dam{font-weight:bold}
+.bang thead{display:table-header-group}.bang tr{page-break-inside:avoid}.bang tr.tong td{font-weight:bold;background:#f3f3f3}
+.cham th,.cham td{padding:1px 0;font-size:11px}.cham td.cn,.cham th.cn{background:#d9d9d9}.cham td.le{background:#fff2cc}.cham td.gc{font-size:10px;text-align:left;padding-left:3px}
+.chuthich{font-size:11px;margin-top:4px;font-style:italic}
+.ky{page-break-inside:avoid;margin-top:14px}.ngay-ky{text-align:right;font-style:italic;margin-bottom:2px}.ky2{display:flex;justify-content:space-between;text-align:center;padding:0 6%}
+.ky2>div{min-width:200px}.ghi{font-size:11px;font-style:italic}.ten-ky{margin-top:70px;font-weight:bold}
+@media screen{body{background:#9a9a9a;padding:14px}.muc{background:#fff;margin:0 auto 14px;padding:${BL_LE_TRANG}mm;width:${kho.w}mm;box-shadow:0 2px 8px rgba(0,0,0,.4)}}`;
+  return {html:`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Bảng lương ${nam}</title><style>${css}</style></head><body>${phan.join('')}</body></html>`,so_bang:phan.length,bo};
+}
+let blInKq=null;
+function blDocTuyChonIn(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:''};
+  const ck=id=>{const e=document.getElementById(id);return !!(e&&e.checked)};
+  const co=(typeof companies!=='undefined'&&companies.find(c=>c.id===current))||{};
+  const le=new Set(((blTS&&blTS.ngay_le)||[]).map(x=>x.ngay));
+  return {tu:parseInt(g('blInTu'),10),den:parseInt(g('blInDen'),10),inLuong:ck('blInLuong'),inCong:ck('blInCong'),kho:g('blInKho')||'a4n',
+    diaChi:g('blInDc').trim(),nguoiLap:g('blInLap').trim(),giamDoc:g('blInGd').trim(),tenCty:co.ten||'',mst:co.mst||'',leSet:le,ts:blTS};
+}
+function blLuuTuyChonIn(o){try{localStorage.setItem('blIn'+current,JSON.stringify({diaChi:o.diaChi,nguoiLap:o.nguoiLap,giamDoc:o.giamDoc,kho:o.kho}))}catch{}}
+function blMoIn(){
+  const w=document.getElementById('blIn');if(!w)return;
+  if(w.style.display!=='none'&&w.innerHTML){w.style.display='none';return}
+  let cu={};try{cu=JSON.parse(localStorage.getItem('blIn'+current)||'{}')}catch{}
+  const t=blThang==='nam'?1:(parseInt(blThang,10)||1);
+  const i=(id,v,st,ph)=>`<input id="${id}" value="${xkEsc(v==null?'':v)}" placeholder="${ph||''}" style="${st||''}padding:4px 6px;border:1px solid #ccc;border-radius:6px">`;
+  w.style.cssText='display:block;border:1px solid #bcd2ef;background:#f5f9ff;border-radius:10px;padding:12px;margin-bottom:10px';
+  w.innerHTML=`<div style="font-weight:700;margin-bottom:6px">🖨 In bảng lương & bảng chấm công — năm ${blNam}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px">
+      <span>Từ tháng ${i('blInTu',t,'width:42px;text-align:right;')}</span><span>đến tháng ${i('blInDen',t,'width:42px;text-align:right;')}</span>
+      <label><input type="checkbox" id="blInLuong" checked> Bảng tính lương</label><label><input type="checkbox" id="blInCong" checked> Bảng chấm công</label>
+      <span>Khổ giấy <select id="blInKho" style="padding:4px 6px;border:1px solid #ccc;border-radius:6px">${Object.entries(BL_KHO_GIAY).map(([k,v])=>`<option value="${k}"${(cu.kho||'a4n')===k?' selected':''}>${v.ten}</option>`).join('')}</select></span>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px;margin-top:8px">
+      <span>Địa chỉ ${i('blInDc',cu.diaChi,'width:300px;','Địa chỉ công ty (in ở đầu trang)')}</span>
+      <span>Người lập biểu ${i('blInLap',cu.nguoiLap,'width:170px;')}</span><span>Giám đốc ${i('blInGd',cu.giamDoc,'width:170px;')}</span>
+    </div>
+    <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemIn()">👁 Xem trước</button> <button class="btn sm" style="background:#1f4e8c" onclick="blInNgay()">🖨 In luôn</button>
+      <button class="btn ghost sm" onclick="document.getElementById('blIn').style.display='none'">Đóng</button>
+      <span style="font-size:12px;color:var(--muted)">In hàng loạt: chọn từ tháng – đến tháng (mỗi tháng gồm bảng lương rồi bảng chấm công). Phần mềm tự thu phóng cho vừa khổ giấy, tự ngắt trang, lặp tiêu đề bảng ở mỗi trang.</span></div>
+    <div id="blInKq" style="margin-top:6px;font-size:12px"></div>`;
+}
+// Dựng tài liệu in theo các ô đã nhập; trả null (và báo lỗi) nếu chưa hợp lệ
+function blChuanBiIn(){
+  const o=blDocTuyChonIn();
+  if(!(o.tu>=1&&o.den<=12&&o.tu<=o.den)){toast('Khoảng tháng không hợp lệ (1–12, "đến" ≥ "từ")','err');return null}
+  if(!o.inLuong&&!o.inCong){toast('Chọn in Bảng tính lương và/hoặc Bảng chấm công','err');return null}
+  const ds=[];for(let t=o.tu;t<=o.den;t++){const k=String(t).padStart(2,'0');ds.push({t:k,rows:blDL[k]||[]})}
+  const kq=blDungTrangIn(ds,blNam,o);
+  if(!kq.so_bang){toast(`Tháng ${o.tu}–${o.den} chưa có dữ liệu để in`,'err');return null}
+  blLuuTuyChonIn(o);
+  const k=document.getElementById('blInKq');
+  if(k)k.innerHTML=`✓ ${kq.so_bang} bảng (${ds.length-kq.bo.length} tháng)`+(kq.bo.length?` — bỏ qua tháng chưa có dữ liệu: ${kq.bo.map(x=>parseInt(x,10)).join(', ')}`:'');
+  return kq;
+}
+function blXemIn(){
+  const kq=blChuanBiIn();if(!kq)return;
+  blInKq=kq;
+  let m=document.getElementById('blInXem');
+  if(!m){m=document.createElement('div');m.id='blInXem';document.body.appendChild(m)}
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;flex-direction:column';
+  m.innerHTML=`<div style="background:#fff;padding:8px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>🖨 Xem trước bản in</b>
+    <button class="btn sm" style="background:#1f4e8c" onclick="blInKhungXem()">🖨 In</button><button class="btn ghost sm" onclick="blDongXemIn()">✕ Đóng</button>
+    <span style="font-size:12px;color:#666">${kq.so_bang} bảng — khi in trình duyệt tự ngắt trang; chọn "Lưu dạng PDF" ở hộp thoại in nếu muốn xuất file.</span></div>
+    <iframe id="blInKhung" style="flex:1;border:0;background:#888"></iframe>`;
+  document.getElementById('blInKhung').srcdoc=kq.html;
+}
+function blDongXemIn(){const m=document.getElementById('blInXem');if(m)m.remove()}
+function blInKhungXem(){const f=document.getElementById('blInKhung');if(f&&f.contentWindow){f.contentWindow.focus();f.contentWindow.print()}}
+// In luôn (không qua xem trước): dựng khung ẩn rồi mở hộp thoại in
+function blInNgay(){
+  const kq=blChuanBiIn();if(!kq)return;
+  blInKq=kq;
+  const f=document.createElement('iframe');
+  f.style.cssText='position:fixed;left:-99999px;top:0;width:1200px;height:800px;border:0';
+  document.body.appendChild(f);
+  f.onload=()=>{setTimeout(()=>{try{f.contentWindow.focus();f.contentWindow.print()}finally{setTimeout(()=>f.remove(),60000)}},300)};
+  f.srcdoc=kq.html;
 }
 
 /* ----- KẾT NỐI MISA SME (import trực tiếp qua CSDL) ----- */

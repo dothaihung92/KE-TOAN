@@ -527,5 +527,74 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(m.ctx.blDL['09'][0].thue_tay, '', 'Sao chép tháng: không mang theo thuế đã chỉnh tay');
   console.log('PASS 22: cột Thuế TNCN tự chỉnh được (trống = tự tính, gõ số = chỉnh tay, xóa = tự tính lại).');
 
+  // ---- 23: IN bảng lương + bảng chấm công (mẫu theo file "BL"), in hàng loạt từ tháng – đến tháng ----
+  m = nap();
+  const c = m.ctx;
+  const leSet = new Set(['2024-05-01']);      // 1/5/2024 (thứ Tư) là ngày lễ
+  // chấm công: T5/2024 có 31 ngày, 4 Chủ nhật (5, 12, 19, 26), 1 ngày lễ (1/5) => 26 ngày làm việc
+  const full = c.blChamCongThang({ ma: '1', ngay_lam_hd: 26 }, 2024, '05', leSet);
+  assert.strictEqual(full.ngay.length, 31); assert.strictEqual(full.soX, 26);
+  assert.strictEqual(JSON.stringify(full.ngay.filter((x) => x.cn).map((x) => x.d)), '[5,12,19,26]', 'Chủ nhật của tháng 5/2024');
+  assert(full.ngay.filter((x) => x.cn).every((x) => x.dau === ''), 'Chủ nhật không đánh dấu');
+  assert.strictEqual(full.ngay[0].dau, 'L', 'Ngày lễ ghi L'); assert.strictEqual(full.ngay[1].dau, 'X');
+  const it = c.blChamCongThang({ ma: '2', ngay_lam_hd: 13 }, 2024, '05', leSet);
+  assert.strictEqual(it.soX, 13); assert.strictEqual(it.tong, 13);
+  assert(it.ngay.filter((x) => x.dau === 'X').every((x) => !x.cn && !x.le), 'Chỉ đánh dấu ngày làm việc (không CN, không lễ)');
+  const lai = c.blChamCongThang({ ma: '2', ngay_lam_hd: 13 }, 2024, '05', leSet);
+  assert.strictEqual(JSON.stringify(lai.ngay.map((x) => x.dau)), JSON.stringify(it.ngay.map((x) => x.dau)), 'In lại ra đúng bảng chấm công cũ (cố định theo người + tháng)');
+  const khac = c.blChamCongThang({ ma: '3', ngay_lam_hd: 13 }, 2024, '05', leSet);
+  assert.notStrictEqual(JSON.stringify(khac.ngay.map((x) => x.dau)), JSON.stringify(it.ngay.map((x) => x.dau)), 'Mỗi người nghỉ những ngày khác nhau');
+  assert.strictEqual(c.blChamCongThang({ ma: '4', ngay_lam_hd: 0 }, 2024, '05', leSet).soX, 0);
+  assert.strictEqual(c.blChamCongThang({ ma: '5', ngay_lam_hd: 30 }, 2024, '05', leSet).soX, 30, 'Công thừa thì dồn sang ngày lễ/CN để số X khớp Tổng NC');
+  assert.strictEqual(c.blChamCongThang({ ma: '6', ngay_lam_hd: 12 }, 2024, '02', new Set()).ngay.length, 29, 'Tháng 2/2024 có 29 ngày');
+  // cột: ẩn cột toàn 0; nhóm tiêu đề
+  const rowsIn = [
+    dongMau('2', 'Trần A', { chuc_vu: 'KD', ngay_cong_hd: 26, ngay_lam_hd: 26, luong: 5310000, tt_tien_com: 700000, xang_xe: 500000, tt_pc_chuc_vu: 500000, dien_thoai: 500000, tt_trang_phuc: 400000,
+      bhxh_nld: 424800, bhyt_nld: 79650, bhtn_nld: 53100, thue_tru_luong: 0, tt_luong: 7352450, gio_tang_ca: 0, tang_ca: 0, thuong_bh: 0, tt_di_lai: 0, thuong_t13: 0 }),
+    dongMau('3', 'Lê B', { chuc_vu: 'KD', ngay_cong_hd: 26, ngay_lam_hd: 13, thoi_vu: true, luong: 2655000, tt_tien_com: 350000, xang_xe: 250000, tt_pc_chuc_vu: 250000, dien_thoai: 250000, tt_trang_phuc: 200000,
+      bhxh_nld: 0, bhyt_nld: 0, bhtn_nld: 0, thue_tru_luong: 315500, tt_luong: 3639500, gio_tang_ca: 0, tang_ca: 0, thuong_bh: 1500000, tt_di_lai: 0, thuong_t13: 0 })];
+  const ts = { bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 } };
+  const cot = c.blCotIn(rowsIn, ts).map((x) => x.k);
+  assert(!cot.includes('tt_di_lai') && !cot.includes('thuong_t13') && !cot.includes('tang_ca') && !cot.includes('gio_tang_ca'), 'Cột toàn số 0 bị ẩn');
+  assert(cot.includes('tt_tien_com') && cot.includes('thuong_bh') && cot.includes('thue_tru_luong') && cot.includes('bhxh_nld') && cot.includes('ky') && cot.includes('tt_luong'));
+  const tuyChon = { tenCty: 'CÔNG TY TNHH A', mst: '0312345678', diaChi: '1/50 Thanh Đa', nguoiLap: 'Đỗ Thái Hưng', giamDoc: 'Nguyễn Văn Kiên', leSet, ts, inLuong: true, inCong: true, kho: 'a4n' };
+  const bl = c.blDungBangLuongIn(rowsIn, 2024, '05', tuyChon);
+  for (const t of ['CÔNG TY TNHH A', 'ĐC: 1/50 Thanh Đa', 'MST: 0312345678', 'BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC', 'THÁNG 05 NĂM 2024', 'Họ và Tên', 'Lương căn bản', 'Phụ cấp', 'Các khoản giảm trừ', 'BHXH 8%', 'BHYT 1.5%', 'BHTN 1%', 'Tổng thực nhận', 'Ký nhận',
+    'Tổng cộng', 'Ngày 31 tháng 05 năm 2024', 'Người lập biểu', 'Giám đốc', 'Đỗ Thái Hưng', 'Nguyễn Văn Kiên'])
+    assert(bl.html.includes(t), 'Bảng lương thiếu: ' + t);
+  assert(/7\.352\.450/.test(bl.html) && /3\.639\.500/.test(bl.html) && /10\.991\.950/.test(bl.html), 'Có thực nhận từng người + tổng (7.352.450 + 3.639.500)');
+  assert(/<td[^>]*>315\.500<\/td>/.test(bl.html), 'Thuế trừ vào lương hiện ở cột Thuế TNCN');
+  assert(!bl.html.includes('Hỗ trợ đi lại'), 'Cột đi lại toàn 0 -> không in');
+  const cc = c.blDungChamCongIn(rowsIn, 2024, '05', tuyChon);
+  assert(cc.html.includes('BẢNG CHẤM CÔNG THÁNG TỪ 01/05/2024  ĐẾN 31/05/2024') && cc.html.includes('TNC') && cc.html.includes('Ghi chú') && cc.html.includes('Thời vụ (không BHXH)'));
+  assert.strictEqual((cc.html.match(/<th class="cn?">|<th class="">|<th class="cn">/g) || []).length >= 62, true, 'Hàng thứ + hàng ngày, 31 cột mỗi hàng');
+  assert(cc.html.includes('>T4<') && cc.html.includes('>CN<') && cc.html.includes('X: đi làm'), 'Có thứ trong tuần + chú thích');
+  const xTong = (cc.html.match(/>X</g) || []).length; assert.strictEqual(xTong, 26 + 13, 'Số X đúng bằng Tổng NC (26 + 13)');
+  // ghép tài liệu in: khổ giấy, tự thu phóng, bỏ tháng trống, chọn bảng
+  const ds = [{ t: '05', rows: rowsIn }, { t: '06', rows: [] }, { t: '07', rows: rowsIn }];
+  let doc = c.blDungTrangIn(ds, 2024, tuyChon);
+  assert.strictEqual(doc.so_bang, 4, '2 tháng x (bảng lương + chấm công)'); assert.strictEqual(JSON.stringify(doc.bo), '["06"]');
+  assert(/@page\{size:A4 landscape;margin:8mm\}/.test(doc.html) && (doc.html.match(/<section class="muc">/g) || []).length === 4 && /page-break-after:always/.test(doc.html));
+  assert(/thead\{display:table-header-group\}/.test(doc.html), 'Lặp tiêu đề bảng ở mỗi trang');
+  const zoom = [...doc.html.matchAll(/zoom:([0-9.]+)/g)].map((x) => +x[1]); assert(zoom.length === 4 && zoom.every((z) => z > 0.3 && z <= 1.2), 'Tự thu phóng để vừa bề ngang: ' + zoom);
+  assert(doc.html.indexOf('BẢNG TÍNH LƯƠNG') < doc.html.indexOf('BẢNG CHẤM CÔNG') && doc.html.lastIndexOf('BẢNG TÍNH LƯƠNG') > doc.html.indexOf('BẢNG CHẤM CÔNG'), 'Thứ tự: lương T5, công T5, lương T7, công T7');
+  assert(/size:A3 landscape/.test(c.blDungTrangIn(ds, 2024, Object.assign({}, tuyChon, { kho: 'a3n' })).html) && /size:A4 portrait/.test(c.blDungTrangIn(ds, 2024, Object.assign({}, tuyChon, { kho: 'a4d' })).html));
+  assert.strictEqual(c.blDungTrangIn(ds, 2024, Object.assign({}, tuyChon, { inCong: false })).so_bang, 2, 'Chỉ in bảng lương');
+  assert.strictEqual(c.blDungTrangIn(ds, 2024, Object.assign({}, tuyChon, { inLuong: false })).so_bang, 2, 'Chỉ in bảng chấm công');
+  // giao diện: hộp in + kiểm tra khoảng tháng
+  const els = {}; const kho = { blInTu: '5', blInDen: '7', blInKho: 'a4n', blInDc: 'ĐC X', blInLap: 'L', blInGd: 'G' }; const cks = { blInLuong: true, blInCong: true };
+  c.document.getElementById = (id) => (id in kho ? { value: kho[id] } : id in cks ? { checked: cks[id] } : (els[id] || (els[id] = { style: {}, innerHTML: '', dataset: {} })));
+  c.companies = [{ id: 7, ten: 'CÔNG TY A', mst: '031' }]; c.blNam = 2024; c.blThang = '05'; c.blTS = { ngay_le: [{ ngay: '2024-05-01' }], bh_nld: ts.bh_nld };
+  c.blMoIn(); assert(/In bảng lương & bảng chấm công — năm 2024/.test(els['blIn'].innerHTML) && /In hàng loạt/.test(els['blIn'].innerHTML) && /A3 ngang/.test(els['blIn'].innerHTML) && /id="blInLuong"/.test(els['blIn'].innerHTML));
+  c.blDL = { '05': rowsIn, '06': [], '07': rowsIn };
+  const kq = c.blChuanBiIn();
+  assert.strictEqual(kq.so_bang, 4); assert(kq.html.includes('CÔNG TY A') && kq.html.includes('MST: 031') && kq.html.includes('ĐC: ĐC X'));
+  assert(/2 tháng/.test(els['blInKq'].innerHTML) && /bỏ qua tháng chưa có dữ liệu: 6/.test(els['blInKq'].innerHTML));
+  assert(/"diaChi":"ĐC X"/.test(m.luuTru['blIn7']) && /"nguoiLap":"L"/.test(m.luuTru['blIn7']), 'Nhớ địa chỉ/người ký cho lần in sau');
+  const nhat = m.toasts.length; kho.blInTu = '8'; kho.blInDen = '3'; assert.strictEqual(c.blChuanBiIn(), null); assert(m.toasts.length > nhat, 'Khoảng tháng sai -> báo lỗi');
+  kho.blInTu = '9'; kho.blInDen = '10'; assert.strictEqual(c.blChuanBiIn(), null, 'Không có dữ liệu -> không in');
+  kho.blInTu = '5'; kho.blInDen = '5'; cks.blInLuong = false; cks.blInCong = false; assert.strictEqual(c.blChuanBiIn(), null, 'Phải chọn ít nhất 1 loại bảng');
+  console.log('PASS 23: in bảng lương + chấm công (theo mẫu file), tự thu phóng theo khổ giấy, in hàng loạt nhiều tháng.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
