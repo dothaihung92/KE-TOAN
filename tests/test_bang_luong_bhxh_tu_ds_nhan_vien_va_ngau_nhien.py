@@ -84,7 +84,8 @@ for rows_ in th.values():
 # mục tiêu nhỏ: chỉ có người không được đóng BHXH ở đầu danh sách sử dụng trước cho phần làm < 14 ngày
 pool2 = [server._luong_chuan_dong_nhap(dict(base, ma=str(i), ten=f"NV{i}", dong_bh=0 if i == 3 else 1)) for i in range(1, 5)]
 th2, tom2 = server._luong_ke_hoach(pool2, 2024, 12, 12, 3_000_000, None, rng=random.Random(1))
-assert [r["ma"] for r in th2["12"]] == ["3"] and th2["12"][0]["dong_bh"] == 0 and th2["12"][0]["ngay_lam_hd"] < 14, th2["12"][0]["ma"]
+assert th2["12"][0]["ma"] == "3", "Người không được đóng BHXH được dùng làm người làm < 14 ngày trước"
+assert all(r["dong_bh"] == 0 and r["ngay_lam_hd"] < 14 for r in th2["12"])
 # pool theo THÁNG (hàm): người vào làm 10/2024 chưa được đóng ở tháng 9
 def pool_thang(t):
     return server._luong_dong_tu_nhan_vien(hdr, [[1, "1", "A", "10/2024", "x", "KD", 5310000, 700000]], 0, 2024, int(t))
@@ -121,5 +122,31 @@ print("PASS 3: thưởng/tăng ca ngẫu nhiên từng người (tròn nghìn), 
 src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
 assert 'dong_moi[NV_HEADERS.index("Đóng BHXH")] = "x"' in src
 print("PASS 4: import Danh Sách Nhân Viên từ file không có cột tick -> mặc định tick.")
+
+# ===== 5: người làm < 14 ngày: SỐ NGÀY LÀM NGẪU NHIÊN mỗi người một khác; thưởng + tăng ca chia cho NHIỀU người. =====
+kb = {"luong_cb": 5_310_000, "tien_com": 700_000, "muc_xang": 500_000, "pc_chuc_vu": 500_000, "muc_dt": 500_000, "trang_phuc": 400_000}
+khong = [server._luong_chuan_dong_nhap(dict(kb, ma=str(i), ten=f"NV{i}", dong_bh=0)) for i in range(2, 9)]   # 7 người, không ai được đóng BHXH
+for muc, ky_vong_tuan_thu in ((24_000_000, True), (60_000_000, False), (117_000_000, False)):
+    th, tom = server._luong_ke_hoach(khong, 2024, 10, 11, muc, None, 50, rng=random.Random(muc))
+    assert sum(r["chi_phi_luong"] for rows_ in th.values() for r in rows_) == muc
+    for rows_ in th.values():
+        assert all(r["dong_bh"] == 0 and r["thoi_vu"] and 1 <= r["ngay_lam_hd"] <= 13 for r in rows_)
+        nguoi_co_thuong = sum(1 for r in rows_ if r["thuong_bh"] > 0 or r["tang_ca"] > 0)
+        assert nguoi_co_thuong >= len(rows_) - 1 and nguoi_co_thuong >= 2, "Thưởng/tăng ca chia cho nhiều người, không dồn 1 người"
+        if muc != 117_000_000:
+            assert max(r["thuong_bh"] for r in rows_) < 0.8 * sum(r["thuong_bh"] for r in rows_), "Không có ai chiếm gần hết thưởng"
+    if ky_vong_tuan_thu:
+        assert tom["tong_thue"] == 0, "Đủ sức chứa -> mỗi người dưới ngưỡng khấu trừ 10%"
+# số ngày khác nhau giữa người với người (nhiều mức), qua nhiều lần tính
+so_muc = set()
+for seed in range(20):
+    th, _ = server._luong_ke_hoach(khong, 2024, 10, 10, 60_000_000, None, 50, rng=random.Random(seed))
+    so_muc |= {r["ngay_lam_hd"] for r in th["10"]}
+    assert len({r["ngay_lam_hd"] for r in th["10"]}) >= 3, "Trong 1 tháng có nhiều mức số ngày khác nhau"
+assert len(so_muc) >= 8 and min(so_muc) <= 4 and max(so_muc) >= 11, so_muc
+# mục tiêu vừa phải: người làm ít ngày (dưới ngưỡng thuế) có số ngày khác nhau
+th, tom = server._luong_ke_hoach(khong, 2024, 10, 11, 24_000_000, None, 50, rng=random.Random(2))
+assert len({r["ngay_lam_hd"] for r in th["10"]}) >= 2 and tom["tong_thue"] == 0
+print("PASS 5: số ngày làm ngẫu nhiên nhiều mức (vd 3, 7, 12 ngày); thưởng + tăng ca chia cho nhiều người; tổng đúng.")
 
 print("\nALL DONE")

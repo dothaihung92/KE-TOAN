@@ -62,7 +62,7 @@ print("PASS 2a: 50tr T10–T12 -> 2 người đủ công, tổng đúng 50.000.0
 # 2b: mục tiêu nhỏ hơn 1 người đủ công -> làm < 14 ngày, không BHXH, khấu trừ 10% (nếu >= ngưỡng).
 th, tom = server._luong_ke_hoach(pool, 2025, 10, 12, 16_000_000, None)
 kiem_tra_tong(th, 16_000_000)
-assert tom["day_du"] == 0 and tom["thoi_vu"] == 2, tom
+assert tom["day_du"] == 0 and tom["thoi_vu"] >= 2 and tom["tong_thue"] == 0, tom     # nhiều người làm ít ngày để cùng dưới ngưỡng thuế
 for rows in th.values():
     for r in rows:
         assert r["dong_bh"] == 0 and r["ngay_lam_hd"] < 14 and r["bhxh_nld"] == 0 and r["bhxh_dn"] == 0, r["ngay_lam_hd"]
@@ -71,7 +71,7 @@ for rows in th.values():
             assert r["thue_tncn"] == server._luong_lam_tron(r["tn_chiu_thue"] * 0.1)
         else:
             assert r["thue_tncn"] == 0
-print("PASS 2b: mục tiêu nhỏ -> người làm dưới 14 ngày, không BHXH, khấu trừ 10%; tổng vẫn đúng 16.000.000.")
+print("PASS 2b: mục tiêu nhỏ -> nhiều người làm dưới 14 ngày, không BHXH, giữ dưới ngưỡng khấu trừ 10%; tổng đúng 16.000.000.")
 
 # 2c: nhiều người đủ công + bù, phân bổ trong ngưỡng nộp thuế; tăng ca không vượt 40 giờ/tháng.
 th, tom = server._luong_ke_hoach(pool, 2025, 10, 12, 200_000_000, None)

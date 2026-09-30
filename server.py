@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.003"
+APP_BUILD = "2026-09-30.004"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10613,58 +10613,132 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
         ty = ty_le_tang_ca / 100.0
         if 0 < ty_le_tang_ca < 100:
             ty = min(1.0, max(0.0, ty * rng.uniform(0.3, 1.7)))
-        tc = min(int(so_tien * ty) // 1000 * 1000, int(_LUONG_GIO_TANG_CA_TOI_DA * gio_don) // 1000 * 1000)
+        con_tc = max(0, int(_LUONG_GIO_TANG_CA_TOI_DA * gio_don) // 1000 * 1000 - row["tang_ca"])   # còn bao nhiêu để không quá 40 giờ
+        tc = min(int(so_tien * ty) // 1000 * 1000, con_tc)
         row["tang_ca"] += tc
         row["thuong_bh"] += so_tien - tc
+
+    def chia(x, caps):
+        """Chia `x` đồng cho len(caps) người theo trọng số NGẪU NHIÊN (mỗi người một mức, làm tròn nghìn đồng); caps[j]
+        là mức tối đa của người j (None = không giới hạn); người chạm trần thì phần dư dồn cho người khác."""
+        n = len(caps)
+        w = [rng.uniform(0.3, 2.0) for _ in range(n)]
+        phan = [0.0] * n
+        con_x, hoat_dong = float(x), set(range(n))
+        while con_x > 0.5 and hoat_dong:
+            tw = sum(w[j] for j in hoat_dong)
+            da_chia = 0.0
+            for j in list(hoat_dong):
+                them = con_x * w[j] / tw
+                if caps[j] is not None:
+                    them = min(caps[j] - phan[j], them)
+                phan[j] += them
+                da_chia += them
+                if caps[j] is not None and caps[j] - phan[j] < 1:
+                    hoat_dong.discard(j)
+            con_x -= da_chia
+        phan = [int(pj // 1000 * 1000) for pj in phan]
+        du = int(x) - sum(phan)
+        for j in sorted(range(n), key=lambda k: (caps[k] - phan[k]) if caps[k] is not None else 1e18, reverse=True):
+            if du <= 0:
+                break
+            them = du if caps[j] is None else int(min(du, caps[j] - phan[j]))
+            if them > 0:
+                phan[j] += them
+                du -= them
+        return phan
     if chon and con > 0:                                          # 2. bù trong ngưỡng không phải nộp thuế
-        n = len(chon)
         cho_trong = [max(0.0, -tinh(c["row"])["tn_tinh_thue"]) for c in chon]
         x = int(min(con, sum(cho_trong)))
         if x > 0:
-            trong = [rng.uniform(0.15, 2.0) for _ in range(n)]     # trọng số ngẫu nhiên từng người
-            phan = [0.0] * n
-            con_x, hoat_dong = float(x), set(range(n))
-            while con_x > 0.5 and hoat_dong:                       # chia theo trọng số, người chạm trần thì dồn cho người khác
-                tw = sum(trong[j] for j in hoat_dong)
-                da_chia = 0.0
-                for j in list(hoat_dong):
-                    them = min(cho_trong[j] - phan[j], con_x * trong[j] / tw)
-                    phan[j] += them
-                    da_chia += them
-                    if cho_trong[j] - phan[j] < 1:
-                        hoat_dong.discard(j)
-                con_x -= da_chia
-            phan = [int(pj // 1000 * 1000) for pj in phan]         # làm tròn nghìn đồng
-            du = x - sum(phan)
-            for j in sorted(range(n), key=lambda k: cho_trong[k] - phan[k], reverse=True):
-                if du <= 0:
-                    break
-                them = int(min(du, cho_trong[j] - phan[j]))
-                phan[j] += them
-                du -= them
+            phan = chia(x, cho_trong)
             for c, a in zip(chon, phan):
                 bu(c, a)
             con -= sum(phan)
-    for base, f in ung_vien_3:                                    # 3. người làm < 14 ngày, không BHXH
-        if con <= 0:
-            break
-        moi_ngay = f / e if e else 0
-        ngay = int(min(_LUONG_NGAY_DONG_BHXH - 1, con // moi_ngay)) if moi_ngay else 0
-        while ngay >= 1 and tinh(dict(base, ngay_lam=ngay, dong_bh=0))["chi_phi_luong"] > con:
-            ngay -= 1
-        if ngay < 1:
-            break
-        row = dict(base, ngay_lam=ngay, dong_bh=0)
-        chon.append({"row": row, "loai": "thoi_vu"})
-        con -= tinh(row)["chi_phi_luong"]
-        if ngay < _LUONG_NGAY_DONG_BHXH - 1 and con > 0:          # phần lẻ (< 1 ngày công) bù bằng thưởng
-            row["thuong_bh"] += con
-            con = 0
-    if con > 0:                                                  # 4. hết người: dồn vào thưởng (vượt ngưỡng thuế)
+    nguong = ts.get("nguong_khau_tru_10", 2000000.0)
+    ngay_toi_da = _LUONG_NGAY_DONG_BHXH - 1
+
+    def them_thoi_vu(ds, gioi_han_thue):
+        """3. Thêm người làm < 14 ngày (không BHXH) với SỐ NGÀY NGẪU NHIÊN mỗi người một khác (vd 10 ngày, 3 ngày...),
+        phần còn thiếu bù thưởng bán hàng + tăng ca CHIA CHO TẤT CẢ những người này (không dồn 1 người).
+        gioi_han_thue=True: chỉ nhận nếu mỗi người giữ được thu nhập chịu thuế dưới ngưỡng khấu trừ 10% (không phát
+        sinh thuế). Trả True nếu đã phân bổ xong."""
+        nonlocal con
+        tp = {}
+
+        def k_pt(idx, d):
+            if (idx, d) not in tp:
+                tp[(idx, d)] = tinh(dict(ds[idx][0], ngay_lam=d, dong_bh=0))
+            return tp[(idx, d)]
+
+        def d_max(idx):
+            if not gioi_han_thue:
+                return ngay_toi_da
+            for d in range(ngay_toi_da, 0, -1):
+                if k_pt(idx, d)["tn_chiu_thue"] <= nguong - 1:
+                    return d
+            return 0
+
+        def cho_thue(idx, d):        # chỗ trống thu nhập chịu thuế còn lại dưới ngưỡng
+            return max(0.0, nguong - 1 - k_pt(idx, d)["tn_chiu_thue"]) if gioi_han_thue else None
+        idxs = [k for k in range(len(ds)) if d_max(k) >= 1]
+        if not idxs:
+            return False
+        rho = rng.uniform(0.08, 0.30) if gioi_han_thue else rng.uniform(0.25, 0.50)   # phần dành cho thưởng + tăng ca (nhiều người cùng được bù)
+        chon_k, suc_cs, suc_ct = [], 0, 0
+        for idx in idxs:
+            chon_k.append(idx)
+            dm = d_max(idx)
+            suc_cs += k_pt(idx, dm)["chi_phi_luong"]
+            suc_ct += k_pt(idx, dm)["chi_phi_luong"] + (cho_thue(idx, dm) or 0)
+            if suc_cs >= con * (1 - rho) and (not gioi_han_thue or suc_ct >= con):
+                break
+        if gioi_han_thue and suc_ct < con:
+            return False                                     # không đủ sức chứa dưới ngưỡng thuế -> chế độ khác
+        dm = {idx: d_max(idx) for idx in chon_k}
+        ngay = {idx: rng.randint(1 if gioi_han_thue else min(2, dm[idx]), dm[idx]) for idx in chon_k}   # số ngày làm ngẫu nhiên
+        dich = con * (1 - rho)
+        moi_ngay_max = max(k_pt(idx, dm[idx])["chi_phi_luong"] / dm[idx] for idx in chon_k)
+        for _ in range(600):
+            tong = sum(k_pt(idx, ngay[idx])["chi_phi_luong"] for idx in chon_k)
+            du_ = con - tong
+            cho = sum(cho_thue(idx, ngay[idx]) for idx in chon_k) if gioi_han_thue else float("inf")
+            if du_ < 0:
+                cand = [idx for idx in chon_k if ngay[idx] > 1]
+                if not cand:
+                    break
+                ngay[rng.choice(cand)] -= 1
+            elif du_ > cho or (gioi_han_thue and tong < dich - moi_ngay_max):
+                cand = [idx for idx in chon_k if ngay[idx] < dm[idx]]
+                if not cand:
+                    break
+                ngay[rng.choice(cand)] += 1
+            else:
+                break
+        tong = sum(k_pt(idx, ngay[idx])["chi_phi_luong"] for idx in chon_k)
+        if tong > con:
+            return False
+        moi = [{"row": dict(ds[idx][0], ngay_lam=ngay[idx], dong_bh=0), "loai": "thoi_vu"} for idx in chon_k]
+        du_ = con - tong
+        if du_ > 0:
+            caps = [cho_thue(idx, ngay[idx]) for idx in chon_k]
+            if gioi_han_thue and sum(caps) < du_:
+                return False
+            for c, a in zip(moi, chia(du_, caps)):
+                bu(c, a)
+        chon.extend(moi)
+        con = 0
+        return True
+    if con > 0 and ung_vien_3:
+        if not them_thoi_vu(ung_vien_3, True):                # ưu tiên: mỗi người dưới ngưỡng thuế
+            if not them_thoi_vu(ung_vien_3, False):           # không đủ sức chứa -> chấp nhận khấu trừ 10%
+                pass
+    if con > 0:                                                  # 4. hết người: chia đều ngẫu nhiên vào thưởng + tăng ca
         if chon:
-            chon[0]["row"]["thuong_bh"] += con
-            canh_bao.append(f"Tháng {int(thang)}: Danh Sách Nhân Viên không đủ người — còn {con:,.0f} đ phải dồn vào thưởng "
-                            f"bán hàng của {chon[0]['row']['ten'] or chon[0]['row']['ma']}, vượt ngưỡng nộp thuế TNCN. "
+            for c, a in zip(chon, chia(con, [None] * len(chon))):
+                bu(c, a)
+            canh_bao.append(f"Tháng {int(thang)}: Danh Sách Nhân Viên không đủ người — còn {con:,.0f} đ phải bù thêm vào thưởng/"
+                            "tăng ca của những người đang làm, vượt ngưỡng nộp thuế TNCN. "
                             "Nên bổ sung thêm nhân viên vào Danh Sách Nhân Viên.".replace(",", "."))
             con = 0
         else:
