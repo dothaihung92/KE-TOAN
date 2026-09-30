@@ -45,29 +45,29 @@ def tao_file(dong=DONG, tieu_de=True):
     return b.getvalue()
 
 
-# ===== 1: đọc file: kỳ lương lấy từ diễn giải (năm gõ sai bỏ qua; quý -> tháng cuối quý; không ghi kỳ -> tháng trước + đánh dấu) =====
+# ===== 1: đọc file: tháng của mỗi khoản = THÁNG NGÀY HẠCH TOÁN (không đọc kỳ lương trong diễn giải, kể cả khi diễn giải ghi kỳ khác/sai/thiếu) =====
 kq = server._luong_doc_so_ck(tao_file(), 2025)
 gd = {x["so_ct"]: x for x in kq["giao_dich"]}
 assert "TM1" not in gd and len(gd) == 8, "Khoản tiền mặt (TK đối ứng 111x) không tính"
-assert (gd["UNC1"]["thang"], gd["UNC1"]["loai"]) == ("06", "ung"), "Ứng lương T6 chi ngày 16/6 -> kỳ T6"
-assert gd["UNC2"]["thang"] == "05" and gd["UNC3"]["thang"] == "05", "Lương T5 chi vào tháng 6 -> kỳ T5"
-assert gd["UNC4"]["thang"] == "07" and gd["UNC4"]["nam_ky"] == 2025, "Diễn giải ghi 'T7 2026' (gõ sai) -> vẫn kỳ T7/2025 theo ngày chi"
-assert gd["UNC5"]["doan"] is True and gd["UNC5"]["thang"] == "06" and gd["UNC5"]["ten"] == "DO THAI HUNG", "Không ghi kỳ -> tháng trước ngày chi + đánh dấu"
-assert gd["UNC6"]["thang"] == "09" and gd["UNC6"]["loai"] == "thuong", "Thưởng doanh số QUÝ 3 -> tháng 9"
+assert gd["UNC1"]["thang"] == "06" and gd["UNC1"]["loai"] == "ung"
+assert gd["UNC2"]["thang"] == "06" and gd["UNC3"]["thang"] == "06", "'LUONG T5' chi ngày 17/6 -> tháng 6 (theo ngày hạch toán, không theo diễn giải)"
+assert gd["UNC4"]["thang"] == "07" and gd["UNC5"]["thang"] == "07", "Diễn giải 'T7 2026' hoặc không ghi kỳ đều theo ngày hạch toán"
+assert gd["UNC6"]["thang"] == "10" and gd["UNC6"]["loai"] == "thuong", "'QUI 3' chi ngày 18/10 -> tháng 10"
 assert gd["UNC7"]["thang"] == "12" and gd["UNC7"]["ten"] == "NGUYEN NGOC TUYEN"
-assert gd["UNC8"]["thang"] == "12" and gd["UNC8"]["nam_ky"] == 2025, "Lương T12/2025 trả vào tháng 1/2026 vẫn thuộc kỳ T12/2025"
-assert kq["theo_thang"] == {"05": 28_110_000, "06": 3_500_000 + 3_000_000, "07": 2_500_000, "09": 20_000_000, "12": 9_500_000}
-assert kq["tong"] == sum(d[4] for d in DONG if d[3] == "1121") and any("tiền mặt" in c or "không phải chuyển khoản" in c for c in kq["canh_bao"])
-assert any("THÁNG TRƯỚC" in c for c in kq["canh_bao"])
-kq24 = server._luong_doc_so_ck(tao_file(), 2024)
-assert kq24["theo_thang"] == {} and all(x["thang"] == "" for x in kq24["giao_dich"]) and any("năm khác" in c for c in kq24["canh_bao"])
+assert gd["UNC8"]["thang"] == "" and gd["UNC8"]["nam_ky"] == 2026, "Ngày hạch toán 3/1/2026 -> ngoài năm 2025, không tính"
+assert not any("doan" in x for x in kq["giao_dich"])
+assert kq["theo_thang"] == {"06": 3_500_000 + 22_894_000 + 5_216_000, "07": 2_500_000 + 3_000_000, "10": 20_000_000, "12": 4_500_000}
+assert kq["tong"] == sum(d[4] for d in DONG if d[3] == "1121") and any("không phải chuyển khoản" in c for c in kq["canh_bao"])
+assert any("ngoài năm 2025" in c for c in kq["canh_bao"])
+kq26 = server._luong_doc_so_ck(tao_file(), 2026)
+assert kq26["theo_thang"] == {"01": 5_000_000}
 for hong in (b"khong phai file", tao_file(tieu_de=False), tao_file(dong=[(D(2025, 1, 1), "TM", "x", "1111", 5)])):
     try:
         server._luong_doc_so_ck(hong, 2025)
         raise SystemExit("phải báo lỗi")
     except HTTPException as e:
         assert e.status_code == 400
-print("PASS 1: đọc file sao kê: kỳ lương từ diễn giải, bỏ tiền mặt, năm gõ sai, quý, không ghi kỳ, lỗi rõ.")
+print("PASS 1: đọc file sao kê: tháng theo ngày hạch toán, bỏ tiền mặt, ngoài năm, lỗi rõ.")
 
 # ===== 2: dựng bảng lương khớp ĐÚNG số chuyển khoản từng tháng (tổng chi phí cả năm để trống) =====
 dong_nv = {"luong_cb": 5_310_000, "tien_com": 700_000, "muc_xang": 500_000, "pc_chuc_vu": 500_000, "muc_dt": 500_000, "trang_phuc": 400_000}
@@ -135,7 +135,7 @@ class Req:
     async def json(self): return self._b
 
 kq = asyncio.run(server.bang_luong_nhap_chuyen_khoan(1, ReqForm({"file": Up(tao_file()), "nam": "2025"})))
-assert kq["theo_thang"]["05"] == 28_110_000
+assert kq["theo_thang"]["06"] == 31_610_000
 try:
     asyncio.run(server.bang_luong_nhap_chuyen_khoan(1, ReqForm({})))
     raise SystemExit("phải báo lỗi")

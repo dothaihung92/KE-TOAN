@@ -4843,14 +4843,14 @@ function blMoKeHoach(){
       <label for="blCkFile" class="btn ghost sm" style="cursor:pointer" title="Sổ chi tiết TK 334 (Nợ 334 / Có 112x) xuất từ MISA">📥 Import file thanh toán lương chuyển khoản</label>
       <input type="file" id="blCkFile" accept=".xlsx" style="display:none" onchange="blImportCk(this)">
       <button class="btn ghost sm" onclick="blBoCk()" title="Bỏ file đã import">✕ Bỏ file</button>
-      <span style="font-size:12px;color:#6b5b00">Phần mềm dựng bảng lương từng tháng sao cho <b>TT lương chuyển khoản khớp đúng số đã chuyển</b> trong file (theo kỳ lương ghi ở diễn giải); vẫn theo các quy tắc ở trên. Có file thì ô "Tổng chi phí lương cả năm" có thể để trống.</span>
+      <span style="font-size:12px;color:#6b5b00">Phần mềm dựng bảng lương từng tháng sao cho <b>TT lương chuyển khoản khớp đúng số đã chuyển</b> trong file (tháng = tháng của <b>ngày hạch toán</b> từng khoản chi); vẫn theo các quy tắc ở trên. Có file thì ô "Tổng chi phí lương cả năm" có thể để trống.</span>
       <div id="blCkKq" style="margin-top:6px"></div>
     </div>
     <div id="blKhKq" style="margin-top:8px"></div>`;
   blVeCk();
 }
 /* ----- Import file thanh toán lương chuyển khoản (Sổ chi tiết TK 334 của MISA) ----- */
-let blCkGd=null;     // các khoản chuyển khoản đã đọc (mỗi khoản có 'thang' = kỳ lương, '' = không tính)
+let blCkGd=null;     // các khoản chuyển khoản đã đọc (mỗi khoản có 'thang' = tháng ngày hạch toán, '' = không tính)
 async function blImportCk(input){
   const f=input.files&&input.files[0];if(!f)return;
   toast('Đang đọc file chuyển khoản...','');
@@ -4874,17 +4874,17 @@ function blCkTheoThang(){
   (blCkGd||[]).forEach(x=>{if(x.thang)kq[x.thang]=(kq[x.thang]||0)+Number(x.so_tien||0)});
   return kq;
 }
-function blCkDoiThang(i,v){if(blCkGd&&blCkGd[i]){blCkGd[i].thang=v;blCkGd[i].doan=false;blVeCk()}}
+function blCkDoiThang(i,v){if(blCkGd&&blCkGd[i]){blCkGd[i].thang=v;blVeCk()}}
 function blVeCk(){
   const b=document.getElementById('blCkKq');if(!b)return;
   if(!blCkGd||!blCkGd.length){b.innerHTML='';return}
   const tt=blCkTheoThang(),ts=Object.keys(tt).sort();
   const opt=v=>`<option value="">— bỏ qua</option>`+Array.from({length:12},(_,i)=>{const k=String(i+1).padStart(2,'0');return `<option value="${k}"${v===k?' selected':''}>T${i+1}</option>`}).join('');
-  const dong=blCkGd.map((x,i)=>`<tr style="${x.doan?'background:#fff3cd':''}"><td style="padding:2px 6px;border:1px solid #eee;white-space:nowrap">${xkEsc(x.ngay)}</td><td style="padding:2px 6px;border:1px solid #eee;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${xkEsc(x.dien_giai)}">${xkEsc(x.dien_giai)}</td>
-    <td style="padding:2px 6px;border:1px solid #eee;text-align:right">${blTienKh(x.so_tien)}</td><td style="padding:2px 6px;border:1px solid #eee"><select onchange="blCkDoiThang(${i},this.value)">${opt(x.thang)}</select>${x.doan?' <span title="Diễn giải không ghi kỳ lương — tạm gán tháng trước ngày chi">⚠</span>':''}</td></tr>`).join('');
+  const dong=blCkGd.map((x,i)=>`<tr><td style="padding:2px 6px;border:1px solid #eee;white-space:nowrap">${xkEsc(x.ngay)}</td><td style="padding:2px 6px;border:1px solid #eee;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${xkEsc(x.dien_giai)}">${xkEsc(x.dien_giai)}</td>
+    <td style="padding:2px 6px;border:1px solid #eee;text-align:right">${blTienKh(x.so_tien)}</td><td style="padding:2px 6px;border:1px solid #eee"><select onchange="blCkDoiThang(${i},this.value)">${opt(x.thang)}</select></td></tr>`).join('');
   b.innerHTML=`<div style="font-weight:600">Lương chuyển khoản theo tháng: ${ts.length?ts.map(t=>`T${parseInt(t,10)}: ${blTienKh(tt[t])}`).join(' · '):'(chưa có tháng nào)'} — tổng ${blTienKh(Object.values(tt).reduce((a,v)=>a+v,0))} đ</div>
     ${blCkCb.length?`<div style="font-size:12px;color:#b45309">${blCkCb.map(x=>'⚠ '+xkEsc(x)).join('<br>')}</div>`:''}
-    <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12px">Xem/sửa tháng của từng khoản (${blCkGd.length} khoản)</summary><div style="overflow:auto;max-height:220px;margin-top:4px"><table style="border-collapse:collapse;font-size:12px"><thead><tr style="background:#f6efe2"><th style="padding:2px 6px;border:1px solid #eee">Ngày chi</th><th style="padding:2px 6px;border:1px solid #eee;text-align:left">Diễn giải</th><th style="padding:2px 6px;border:1px solid #eee">Số tiền</th><th style="padding:2px 6px;border:1px solid #eee">Kỳ lương</th></tr></thead><tbody>${dong}</tbody></table></div></details>`;
+    <details style="margin-top:4px"><summary style="cursor:pointer;font-size:12px">Xem/sửa tháng của từng khoản (${blCkGd.length} khoản)</summary><div style="overflow:auto;max-height:220px;margin-top:4px"><table style="border-collapse:collapse;font-size:12px"><thead><tr style="background:#f6efe2"><th style="padding:2px 6px;border:1px solid #eee">Ngày chi</th><th style="padding:2px 6px;border:1px solid #eee;text-align:left">Diễn giải</th><th style="padding:2px 6px;border:1px solid #eee">Số tiền</th><th style="padding:2px 6px;border:1px solid #eee">Tháng</th></tr></thead><tbody>${dong}</tbody></table></div></details>`;
 }
 async function blTinhKeHoach(){
   const g=id=>document.getElementById(id).value;

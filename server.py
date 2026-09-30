@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.019"
+APP_BUILD = "2026-09-30.020"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10987,28 +10987,10 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
 
 
 # ----- IMPORT FILE THANH TOÁN LƯƠNG CHUYỂN KHOẢN (Sổ chi tiết TK 334 xuất từ MISA: Nợ 334 / Có 112x) -----
-def _luong_ky_luong(dien_giai, ngay):
-    """Kỳ lương (tháng, năm) của 1 khoản chuyển khoản, đọc từ diễn giải: 'LUONG T5 2025', 'LUONG UNG T6', 'THANG 7', 'THUONG DOANH SO QUI 3' (quý -> tháng
-    cuối quý). Năm trong diễn giải hay gõ sai (vd 'UNG T7 2026') nên KHÔNG dùng: kỳ > tháng chi => kỳ của năm trước, ngược lại cùng năm chi.
-    Không có kỳ nào -> tạm gán THÁNG TRƯỚC của ngày chi (doan=True để người dùng kiểm tra). Trả (tháng, năm, doan)."""
-    import re as _re
-    up = _khong_dau(str(dien_giai or "")).upper()
-    m = None
-    g = _re.search(r"(?<![A-Z0-9])T\s?(\d{1,2})(?![0-9])", up) or _re.search(r"THANG\s*(\d{1,2})(?![0-9])", up)
-    if g and 1 <= int(g.group(1)) <= 12:
-        m = int(g.group(1))
-    else:
-        q = _re.search(r"\b(?:QUI|QUY)\s*(\d)\b", up)
-        if q and 1 <= int(q.group(1)) <= 4:
-            m = 3 * int(q.group(1))
-    if m is not None:
-        return m, (ngay.year - 1 if m > ngay.month else ngay.year), False
-    return (12, ngay.year - 1, True) if ngay.month == 1 else (ngay.month - 1, ngay.year, True)
-
-
 def _luong_doc_so_ck(content, nam):
-    """Đọc file 'Sổ chi tiết các tài khoản' TK 334 (MISA) -> danh sách các khoản chi lương CHUYỂN KHOẢN (Phát sinh Nợ, TK đối ứng 112x), kèm kỳ lương đọc
-    từ diễn giải. Khoản tiền mặt (đối ứng 111x) không tính. Trả dict {giao_dich, theo_thang{"05": số tiền}, tong, canh_bao}."""
+    """Đọc file 'Sổ chi tiết các tài khoản' TK 334 (MISA) -> danh sách các khoản chi lương CHUYỂN KHOẢN (Phát sinh Nợ, TK đối ứng 112x). Tháng của mỗi khoản
+    = THÁNG CỦA NGÀY HẠCH TOÁN (không đọc kỳ lương trong diễn giải, vì diễn giải hay ghi sai/thiếu); người dùng vẫn sửa được tháng từng khoản
+    ở giao diện. Khoản tiền mặt (đối ứng 111x) không tính. Trả dict {giao_dich, theo_thang{"05": số tiền}, tong, canh_bao}."""
     import openpyxl, io as _io
     try:
         ws = openpyxl.load_workbook(_io.BytesIO(content), data_only=True).active
@@ -11046,11 +11028,11 @@ def _luong_doc_so_ck(content, nam):
             so_tm += 1
             continue
         dg = str(r[c_dg] or "").strip()
-        m, y, doan = _luong_ky_luong(dg, ngay)
+        m, y = ngay.month, ngay.year
         up = _khong_dau(dg).upper()
         ten = __import__("re").search(r"-\s*([A-Z][A-Z ]{3,}?)\s*-\s*\1\s*$", up)
         gd.append({"ngay": ngay.strftime("%d/%m/%Y"), "so_ct": str(r[c_so] or "").strip(), "dien_giai": dg, "so_tien": tien,
-                   "thang": "%02d" % m if y == nam else "", "nam_ky": y, "doan": doan,
+                   "thang": "%02d" % m if y == nam else "", "nam_ky": y,
                    "loai": "thuong" if "THUONG" in up else "ung" if " UNG " in (" " + up + " ") else "luong",
                    "ten": ten.group(1).strip() if ten else ""})
         if y != nam:
@@ -11060,9 +11042,7 @@ def _luong_doc_so_ck(content, nam):
     if so_tm:
         canh_bao.append(f"Bỏ qua {so_tm} khoản không phải chuyển khoản (TK đối ứng không phải 112x).")
     if ngoai_nam:
-        canh_bao.append(f"{ngoai_nam} khoản thuộc kỳ lương của năm khác năm {nam} — không tính vào năm {nam} (chọn lại tháng nếu cần).")
-    if any(x["doan"] for x in gd):
-        canh_bao.append("Có khoản không ghi kỳ lương trong diễn giải — tạm gán vào THÁNG TRƯỚC của ngày chi; hãy kiểm tra cột Tháng.")
+        canh_bao.append(f"{ngoai_nam} khoản có ngày hạch toán ngoài năm {nam} — không tính vào năm {nam} (chọn lại tháng nếu cần).")
     theo_thang = {}
     for x in gd:
         if x["thang"]:

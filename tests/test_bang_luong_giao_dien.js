@@ -789,8 +789,8 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/id="blCkFile"/.test(m.phanTu['blKeHoach'].innerHTML) && /Import file thanh toán lương chuyển khoản/.test(m.phanTu['blKeHoach'].innerHTML) && /khớp đúng số đã chuyển/.test(m.phanTu['blKeHoach'].innerHTML), 'Có nút import file chuyển khoản');
   const kqCk = { giao_dich: [{ ngay: '17/06/2025', so_ct: 'U1', dien_giai: 'THANH TOAN LUONG T5 2025', so_tien: 22894000, thang: '05', nam_ky: 2025, doan: false },
     { ngay: '17/06/2025', so_ct: 'U2', dien_giai: 'THANH TOAN LUON TAN TAN T5', so_tien: 5216000, thang: '05', nam_ky: 2025, doan: false },
-    { ngay: '28/07/2025', so_ct: 'U3', dien_giai: 'THANH TOAN LUONG KETOAN', so_tien: 3000000, thang: '06', nam_ky: 2025, doan: true }],
-    theo_thang: { '05': 28110000, '06': 3000000 }, tong: 31110000, canh_bao: ['Có khoản không ghi kỳ lương'] };
+    { ngay: '28/06/2025', so_ct: 'U3', dien_giai: 'THANH TOAN LUONG KETOAN', so_tien: 3000000, thang: '06', nam_ky: 2025 }],
+    theo_thang: { '05': 28110000, '06': 3000000 }, tong: 31110000, canh_bao: ['Bỏ qua 1 khoản không phải chuyển khoản'] };
   const fetch30 = [];
   m.ctx.FormData = class { constructor() { this.d = {}; } append(k, v) { this.d[k] = v; } get(k) { return this.d[k]; } };
   m.ctx.fetch = async (url, o) => { fetch30.push([url, o]); return { ok: true, json: async () => kqCk }; };
@@ -798,7 +798,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/nhap-chuyen-khoan/.test(fetch30[0][0]) && fetch30[0][1].body.get('nam') == 2025, 'Gửi file + năm');
   assert.strictEqual(m.ctx.document.getElementById('blKhTu').value, '1');
   const ck30 = m.phanTu['blCkKq'].innerHTML;
-  assert(/T5: 28\.110\.000/.test(ck30) && /T6: 3\.000\.000/.test(ck30) && /tổng 31\.110\.000/.test(ck30) && /Có khoản không ghi kỳ lương/.test(ck30) && /Xem\/sửa tháng của từng khoản \(3 khoản\)/.test(ck30), 'Tóm tắt theo tháng + cảnh báo + bảng sửa');
+  assert(/T5: 28\.110\.000/.test(ck30) && /T6: 3\.000\.000/.test(ck30) && /tổng 31\.110\.000/.test(ck30) && /Bỏ qua 1 khoản không phải chuyển khoản/.test(ck30) && /ngày hạch toán/.test(m.phanTu['blKeHoach'].innerHTML) && /Xem\/sửa tháng của từng khoản \(3 khoản\)/.test(ck30), 'Tóm tắt theo tháng + cảnh báo + bảng sửa');
   // sửa tháng của 1 khoản (khoản đoán tháng) -> tổng theo tháng đổi; chọn "bỏ qua" -> không tính
   m.ctx.blCkDoiThang(2, '07'); assert.strictEqual(JSON.stringify(m.ctx.blCkTheoThang()), '{"05":28110000,"07":3000000}');
   m.ctx.blCkDoiThang(0, ''); assert.strictEqual(JSON.stringify(m.ctx.blCkTheoThang()), '{"05":5216000,"07":3000000}');
