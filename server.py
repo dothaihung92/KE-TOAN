@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.011"
+APP_BUILD = "2026-09-30.013"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11369,6 +11369,178 @@ async def bang_luong_xuat_excel_mau(cid: int, request: Request):
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
     path, fname = _luong_xuat_excel_mau(nam, body.get("thang"), body.get("tuy_chon"))
     return _resp_xuat(path, fname)
+
+
+# ----- HẠCH TOÁN CHI PHÍ LƯƠNG -> file Excel import MISA "Chứng từ nghiệp vụ khác" (mẫu người dùng gửi, từng tháng 2 chứng từ) -----
+_LUONG_MISA_TK = {"tk_cp_luong": "6422", "tk_cp_bh": "6421", "tk_phai_tra": "3341", "tk_bhxh": "3383", "tk_bhyt": "3384",
+                  "tk_bhtn": "3386", "tk_thue": "3335", "tk_tien_mat": "1111", "tk_ngan_hang": "1121"}
+
+
+def _luong_la_chuyen_khoan(ghi_chu):
+    import re as _re
+    return bool(_re.search(r"(^|[^a-z])ck([^a-z]|$)|chuy[eể]n\s*kho[aả]n", str(ghi_chu or ""), _re.I))
+
+
+def _luong_misa_tong(rows):
+    """Tổng các khoản hạch toán của 1 tháng từ các dòng bảng lương (đã tính). Thực lãnh = chi phí − BH người lao động − thuế trừ
+    lương (để TK 334 đóng về 0 đúng từng đồng, không lệch do làm tròn từng người)."""
+    def tong(k):
+        return _luong_lam_tron(sum(_luong_so(r.get(k)) for r in rows))
+    kq = {"chi_phi": tong("chi_phi_luong"), "thue": tong("thue_tru_luong"),
+          "bh_dn": {k: tong(f"{k}_dn") for k in ("bhxh", "bhyt", "bhtn")}, "bh_nld": {k: tong(f"{k}_nld") for k in ("bhxh", "bhyt", "bhtn")}}
+    kq["tt_luong"] = kq["chi_phi"] - sum(kq["bh_nld"].values()) - kq["thue"]
+    ck = _luong_lam_tron(sum(_luong_so(r.get("tt_luong")) for r in rows if _luong_la_chuyen_khoan(r.get("ghi_chu"))))
+    kq["tt_ck"] = max(0, min(ck, kq["tt_luong"]))
+    return kq
+
+
+def _luong_misa_chung_tu(nam, thang_rows, tc, so_dau):
+    """Dựng danh sách chứng từ: mỗi tháng 3 chứng từ NVK (đúng file mẫu từ T6) — (1) chi phí lương + trích BH (công ty chịu) + BH trừ vào
+    lương của NLĐ; (2) thuế TNCN trừ lương; (3) thanh toán lương. gop_thue=True -> gộp (2)+(3) thành 1 chứng từ (như T1–T5 của file mẫu).
+    Dòng số tiền 0 bỏ qua. tc = tùy chọn (tài khoản, ngày, tách chuyển khoản...)."""
+    tk = dict(_LUONG_MISA_TK)
+    for k in tk:
+        if str(tc.get(k) or "").strip():
+            tk[k] = str(tc[k]).strip()
+    ds, so = [], so_dau
+    for t in sorted(thang_rows):
+        rows = thang_rows[t]
+        if not rows:
+            continue
+        m = int(t)
+        dim = calendar.monthrange(nam, m)[1]
+        ngay_in = int(_luong_so(tc.get("ngay"))) if str(tc.get("ngay") or "").strip() else 0
+        ngay = min(dim, ngay_in) if ngay_in >= 1 else dim
+        ngay_str = f"{ngay:02d}/{m:02d}/{nam}"
+        kt = f"T{m}/{nam}"
+        g = _luong_misa_tong(rows)
+        v1 = [(f"Hạch toán chi phí lương {kt}", tk["tk_cp_luong"], tk["tk_phai_tra"], g["chi_phi"], "")]
+        for ten, k in (("BHXH", "bhxh"), ("BHYT", "bhyt"), ("BHTN", "bhtn")):
+            v1.append((f"Trích {ten} {kt}", tk["tk_cp_bh"], tk["tk_" + k], g["bh_dn"][k], "bh"))
+        for ten, k in (("BHXH", "bhxh"), ("BHYT", "bhyt"), ("BHTN", "bhtn")):
+            v1.append((f"DN Trích {ten} {kt}", tk["tk_phai_tra"], tk["tk_" + k], g["bh_nld"][k], "bh"))
+        v2 = [(f"Hạch toán lương thuế TNCN {kt}", tk["tk_phai_tra"], tk["tk_thue"], g["thue"], "")]
+        if tc.get("tach_ck") and g["tt_ck"] > 0:
+            v2.append((f"TT lương {kt}", tk["tk_phai_tra"], tk["tk_tien_mat"], g["tt_luong"] - g["tt_ck"], ""))
+            v2.append((f"TT lương chuyển khoản {kt}", tk["tk_phai_tra"], tk["tk_ngan_hang"], g["tt_ck"], "nh"))
+        else:
+            v2.append((f"TT lương {kt}", tk["tk_phai_tra"], tk["tk_tien_mat"], g["tt_luong"], ""))
+        v3 = []
+        if not tc.get("gop_thue"):
+            # Tách riêng: chứng từ thuế TNCN + chứng từ thanh toán lương (đúng cách file mẫu từ T6 trở đi); gop_thue = gộp 1 chứng từ (như T1–T5)
+            v3, v2 = v2[1:], v2[:1]
+        for dong in (v1, v2, v3):
+            dong = [d for d in dong if d[3] > 0]
+            if not dong:
+                continue
+            ds.append({"thang": t, "ngay": ngay_str, "so_ct": f"NVK{so}/{m}/{nam}",
+                       "dong": [{"dien_giai": d[0], "no": d[1], "co": d[2], "so_tien": d[3], "loai": d[4]} for d in dong]})
+            so += 1
+    return ds
+
+
+def _luong_misa_so_bat_dau(cid, tc, tu_thang):
+    """Số NVK bắt đầu: người dùng nhập; hoặc TIẾP NỐI số NVK cao nhất đang có trong MISA (nếu đã cấu hình kết nối) để không trùng số
+    chứng từ; hoặc theo mẫu (3 chứng từ/tháng, gộp thuế + TT lương thì 2: T1 = NVK1.., T3 = NVK7..)."""
+    import re as _re
+    tay = int(_luong_so(tc.get("so_bat_dau")))
+    if tay >= 1:
+        return tay
+    try:
+        database = (_misa_sql_cfg(cid).get("database") or "").strip()
+        if database:
+            conn = _misa_sql_connect(cid, database=database)
+            try:
+                cao = 0
+                for (rf,) in conn.cursor().execute("SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE 'NVK%'").fetchall():
+                    mm = _re.match(r"^NVK(\d+)", str(rf or ""))
+                    if mm:
+                        cao = max(cao, int(mm.group(1)))
+                if cao:
+                    return cao + 1
+            finally:
+                conn.close()
+    except Exception:
+        pass
+    moi_thang = 2 if tc.get("gop_thue") else 3
+    return moi_thang * (int(tu_thang) - 1) + 1
+
+
+def _luong_xuat_misa_nvk(nam, chung_tu, tc):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Chứng từ nghiệp vụ khác"
+    for c, h in enumerate(_GLVOUCHER_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    r = 2
+    for ct in chung_tu:
+        for d in ct["dong"]:
+            row = [""] * len(_GLVOUCHER_HEADERS)
+            row[0] = 0                                   # Hiển thị trên sổ (như file mẫu của người dùng)
+            row[1] = ct["ngay"]
+            row[2] = ct["ngay"]
+            row[3] = ct["so_ct"]
+            row[4] = d["dien_giai"]
+            row[6] = "VND"
+            row[7] = 1
+            row[8] = d["dien_giai"]
+            row[9] = str(d["no"])
+            row[10] = str(d["co"])
+            row[11] = d["so_tien"]
+            row[12] = d["so_tien"]
+            if d["loai"] == "nh":
+                row[15] = str(tc.get("tk_nh_ma") or "")      # TK ngân hàng (MISA bắt buộc khi hạch toán TK 112)
+            if d["loai"] == "bh":
+                row[22] = str(tc.get("ma_thong_ke") or "")   # Mã thống kê (tùy chọn)
+            for c, v in enumerate(row, 1):
+                cell = ws.cell(r, c)
+                cell.value = v if v != "" else None
+                if c in (12, 13):
+                    cell.number_format = "#,##0"
+            r += 1
+    for c in range(1, len(_GLVOUCHER_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 18
+    ws.column_dimensions["E"].width = 36
+    ws.column_dimensions["I"].width = 36
+    ws.freeze_panes = "A2"
+    thang = sorted({ct["thang"] for ct in chung_tu})
+    fname = f"HachToanLuong_MISA_{nam}_T{int(thang[0])}-T{int(thang[-1])}.xlsx" if thang else f"HachToanLuong_MISA_{nam}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    return path, fname, r - 2
+
+
+@app.post("/api/bang-luong/{cid}/hach-toan-misa")
+async def bang_luong_hach_toan_misa(cid: int, request: Request):
+    """Body: {nam, thang:{"05":[dòng đã tính]}, ngay, tk_cp_luong, tk_cp_bh, tach_ck, tk_ngan_hang, tk_nh_ma, ma_thong_ke, so_bat_dau,
+    xuat}. xuat=false -> trả bản XEM TRƯỚC (danh sách chứng từ); xuat=true -> trả file Excel import MISA 'Chứng từ nghiệp vụ khác'."""
+    body = await request.json()
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    thang_rows = {t: [r for r in (rows or []) if isinstance(r, dict)] for t, rows in (body.get("thang") or {}).items()
+                  if t in _LUONG_THANG}
+    thang_rows = {t: rows for t, rows in thang_rows.items() if rows}
+    if not thang_rows:
+        raise HTTPException(404, "Không có tháng nào có dữ liệu bảng lương để hạch toán")
+    so_dau = _luong_misa_so_bat_dau(cid, body, min(int(t) for t in thang_rows))
+    chung_tu = _luong_misa_chung_tu(nam, thang_rows, body, so_dau)
+    if not chung_tu:
+        raise HTTPException(400, "Các tháng đã chọn không có số tiền nào để hạch toán")
+    if not body.get("xuat"):
+        return {"chung_tu": chung_tu, "so_dong": sum(len(c["dong"]) for c in chung_tu), "so_bat_dau": so_dau}
+    path, fname, so_dong = _luong_xuat_misa_nvk(nam, chung_tu, body)
+    import shutil
+    d = _get_desktop_dir()
+    if d and os.path.isdir(d):
+        try:
+            shutil.copy(path, os.path.join(d, fname))
+        except Exception:
+            pass
+    return _resp_xuat(path, fname, {"X-So-Dong": str(so_dong)})
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")

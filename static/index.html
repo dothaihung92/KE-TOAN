@@ -4640,12 +4640,14 @@ async function moBangLuongNam(thangGiu){
         <button class="btn ghost sm" onclick="blXuatExcel()">📤 Xuất Excel cả năm</button>
         <button class="btn ghost sm" style="color:#7a3a00" onclick="blMoKeHoach()" title="Nhập khoảng tháng + tổng chi phí lương cả năm -> phần mềm tự tính cần bao nhiêu người và phân bổ (thiếu thì bù thưởng bán hàng + tăng ca)">🎯 Chi phí lương cả năm</button>
         <button class="btn ghost sm" style="color:#1f4e8c" onclick="blMoIn()" title="In bảng lương từng tháng + bảng chấm công tương ứng (mẫu như file bảng lương); in một tháng hoặc hàng loạt từ tháng nào đến tháng nào">🖨 In bảng lương & chấm công</button>
+        <button class="btn ghost sm" style="color:#7a1f5c" onclick="blMoMisa()" title="Xuất file Excel để Import vào MISA (Nghiệp vụ khác > Chứng từ nghiệp vụ khác): hạch toán chi phí lương, trích BHXH/BHYT/BHTN, thuế TNCN, thanh toán lương — lấy số liệu bảng lương từng tháng đã làm">📤 Hạch toán lương → MISA</button>
         <button class="btn ghost sm" id="blNutMuc" onclick="blDoiHienMuc()" title="Hiện/ẩn các cột MỨC phụ cấp mỗi tháng (lấy từ Danh Sách Nhân Viên) để sửa tay — cột PC bên cạnh là số đã tính theo ngày đi làm">✎ Mức phụ cấp</button>
         <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
       </div>
       <div id="blThamSo" style="display:none"></div>
       <div id="blKeHoach" style="display:none"></div>
       <div id="blIn" style="display:none"></div>
+      <div id="blMisa" style="display:none"></div>
       <div id="blTabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
       <div id="blInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="blBangWrap" style="overflow:auto;max-height:62vh;border:1px solid #ddd;border-radius:8px"></div>
@@ -5344,6 +5346,78 @@ function blInNgay(){
   document.body.appendChild(f);
   f.onload=()=>{setTimeout(()=>{try{f.contentWindow.focus();f.contentWindow.print()}finally{setTimeout(()=>f.remove(),60000)}},300)};
   f.srcdoc=kq.html;
+}
+
+/* ----- HẠCH TOÁN CHI PHÍ LƯƠNG -> MISA (Import Excel "Chứng từ nghiệp vụ khác"; mỗi tháng 2 chứng từ theo mẫu file người dùng) ----- */
+function blMoMisa(){
+  const w=document.getElementById('blMisa');if(!w)return;
+  if(w.style.display!=='none'&&w.innerHTML){w.style.display='none';return}
+  let cu={};try{cu=JSON.parse(localStorage.getItem('blMisa'+current)||'{}')}catch{}
+  const t=blThang==='nam'?1:(parseInt(blThang,10)||1);
+  const i=(id,v,st,ph)=>`<input id="${id}" value="${xkEsc(v==null?'':v)}" placeholder="${ph||''}" style="${st||''}padding:4px 6px;border:1px solid #ccc;border-radius:6px">`;
+  w.style.cssText='display:block;border:1px solid #e0c3d6;background:#fff7fc;border-radius:10px;padding:12px;margin-bottom:10px';
+  w.innerHTML=`<div style="font-weight:700;margin-bottom:6px">📤 Hạch toán chi phí lương → MISA (Chứng từ nghiệp vụ khác) — năm ${blNam}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px">
+      <span>Từ tháng ${i('blMsTu',t,'width:42px;text-align:right;')}</span><span>đến tháng ${i('blMsDen',t,'width:42px;text-align:right;')}</span>
+      <span title="Ngày ghi trên chứng từ; để trống = ngày cuối tháng">Ngày chứng từ ${i('blMsNgay',cu.ngay,'width:50px;text-align:right;','cuối tháng')}</span>
+      <span>TK chi phí lương ${i('blMsTkL',cu.tkL||'6422','width:60px;')}</span><span>TK chi phí BH ${i('blMsTkB',cu.tkB||'6421','width:60px;')}</span>
+      <span title="Nếu để trống, MISA tự đánh số nối tiếp; nhập số để bắt đầu từ NVK số đó">Số CT bắt đầu NVK ${i('blMsSo',cu.so,'width:60px;text-align:right;','tự động')}</span>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px;margin-top:8px">
+      <label title="Mặc định (như file mẫu từ T6): thuế TNCN và thanh toán lương là 2 chứng từ riêng. Tick = gộp vào 1 chứng từ (như T1–T5)"><input type="checkbox" id="blMsGop"${cu.gop?' checked':''}> Gộp thuế TNCN + TT lương vào 1 chứng từ</label>
+      <label title="Người lao động tick 'Chuyển khoản' -> thanh toán lương ghi Có TK 1121 (ngân hàng); còn lại Có TK 1111 (tiền mặt)"><input type="checkbox" id="blMsCk"${cu.ck?' checked':''}> Tách lương chuyển khoản sang TK ngân hàng</label>
+      <span>TK ${i('blMsTkNh',cu.tkNh||'1121','width:60px;')}</span><span>TK ngân hàng (cột MISA) ${i('blMsNh',cu.nh,'width:150px;','vd 0123456789 (nếu cần)')}</span>
+      <span title="Nếu MISA của bạn có mã thống kê cho các dòng BH, điền vào đây (tùy chọn)">Mã thống kê dòng BH ${i('blMsTk',cu.tk,'width:90px;')}</span>
+    </div>
+    <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemMisa()">👁 Xem trước</button> <button class="btn sm" style="background:#7a1f5c" onclick="blXuatMisa()">📤 Xuất file import MISA</button>
+      <button class="btn ghost sm" onclick="document.getElementById('blMisa').style.display='none'">Đóng</button>
+      <span style="font-size:12px;color:var(--muted)">Số liệu lấy theo bảng lương từng tháng đang có (kể cả chưa lưu). Sau khi xuất: MISA → Nghiệp vụ khác → Import Excel, chọn file này.</span></div>
+    <div id="blMsKq" style="margin-top:8px"></div>`;
+}
+function blDocMisa(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:''};
+  const tu=parseInt(g('blMsTu'),10),den=parseInt(g('blMsDen'),10);
+  if(!(tu>=1&&den<=12&&tu<=den)){toast('Khoảng tháng không hợp lệ (1–12, "đến" ≥ "từ")','err');return null}
+  const thang={};
+  for(let t=tu;t<=den;t++){
+    const k=String(t).padStart(2,'0');
+    const rows=blDL[k]||[];
+    if(rows.length)thang[k]=rows.map(r=>({chi_phi_luong:r.chi_phi_luong,tt_luong:r.tt_luong,thue_tru_luong:r.thue_tru_luong!=null?r.thue_tru_luong:r.thue_tncn,
+      bhxh_dn:r.bhxh_dn,bhyt_dn:r.bhyt_dn,bhtn_dn:r.bhtn_dn,bhxh_nld:r.bhxh_nld,bhyt_nld:r.bhyt_nld,bhtn_nld:r.bhtn_nld,ghi_chu:r.ghi_chu||''}));
+  }
+  if(!Object.keys(thang).length){toast(`Tháng ${tu}–${den} chưa có dữ liệu bảng lương`,'err');return null}
+  const ck=document.getElementById('blMsCk'),gop=document.getElementById('blMsGop');
+  const goi={gop_thue:!!(gop&&gop.checked),nam:blNam,thang,ngay:g('blMsNgay'),tk_cp_luong:g('blMsTkL'),tk_cp_bh:g('blMsTkB'),so_bat_dau:g('blMsSo'),tach_ck:!!(ck&&ck.checked),
+    tk_ngan_hang:g('blMsTkNh'),tk_nh_ma:g('blMsNh'),ma_thong_ke:g('blMsTk')};
+  try{localStorage.setItem('blMisa'+current,JSON.stringify({ngay:goi.ngay,tkL:goi.tk_cp_luong,tkB:goi.tk_cp_bh,so:goi.so_bat_dau,ck:goi.tach_ck,gop:goi.gop_thue,tkNh:goi.tk_ngan_hang,nh:goi.tk_nh_ma,tk:goi.ma_thong_ke}))}catch{}
+  return goi;
+}
+async function blXemMisa(){
+  const goi=blDocMisa();if(!goi)return;
+  const b=document.getElementById('blMsKq');
+  try{
+    const kq=await api(`/api/bang-luong/${current}/hach-toan-misa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign(goi,{xuat:false}))});
+    blVeMisa(kq);
+  }catch(e){if(b)b.innerHTML=`<div style="color:#b91c1c;font-weight:600">⚠ ${xkEsc(e.message)}</div>`}
+}
+function blVeMisa(kq){
+  const b=document.getElementById('blMsKq');if(!b)return;
+  const tien=v=>Math.round(Number(v)||0).toLocaleString('vi-VN');
+  const dong=kq.chung_tu.map(ct=>ct.dong.map((d,i)=>`<tr>${i===0?`<td rowspan="${ct.dong.length}" style="padding:4px 8px;border:1px solid #eee;vertical-align:top;font-weight:700;white-space:nowrap">${xkEsc(ct.so_ct)}<br><span style="font-weight:400;color:#666">${xkEsc(ct.ngay)}</span></td>`:''}
+    <td style="padding:4px 8px;border:1px solid #eee">${xkEsc(d.dien_giai)}</td><td style="padding:4px 8px;border:1px solid #eee;text-align:center">${xkEsc(d.no)}</td><td style="padding:4px 8px;border:1px solid #eee;text-align:center">${xkEsc(d.co)}</td>
+    <td style="padding:4px 8px;border:1px solid #eee;text-align:right">${tien(d.so_tien)}</td></tr>`).join('')).join('');
+  b.innerHTML=`<div style="font-size:13px;margin-bottom:6px">✓ <b>${kq.chung_tu.length}</b> chứng từ · <b>${kq.so_dong}</b> dòng hạch toán · số chứng từ bắt đầu <b>NVK${kq.so_bat_dau}</b></div>
+    <div style="overflow:auto;max-height:280px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:#f6e6f0"><th style="padding:4px 8px;border:1px solid #eee">Số chứng từ</th><th style="padding:4px 8px;border:1px solid #eee;text-align:left">Diễn giải</th><th style="padding:4px 8px;border:1px solid #eee">TK Nợ</th><th style="padding:4px 8px;border:1px solid #eee">TK Có</th><th style="padding:4px 8px;border:1px solid #eee">Số tiền</th></tr></thead><tbody>${dong}</tbody></table></div>`;
+}
+async function blXuatMisa(){
+  const goi=blDocMisa();if(!goi)return;
+  try{
+    const r=await fetch(`/api/bang-luong/${current}/hach-toan-misa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign(goi,{xuat:true}))});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const ts=Object.keys(goi.thang);
+    await xuatFile(r,`HachToanLuong_MISA_${blNam}_T${parseInt(ts[0],10)}-T${parseInt(ts[ts.length-1],10)}.xlsx`);
+    toast(`📤 Đã xuất file import MISA (${ts.length} tháng) — vào MISA: Nghiệp vụ khác → Import Excel`,'ok');
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
 
 /* ----- KẾT NỐI MISA SME (import trực tiếp qua CSDL) ----- */
