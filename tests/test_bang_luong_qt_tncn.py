@@ -147,7 +147,14 @@ try:
     # người ký được lưu cho lần sau
     assert _db_tam().execute("SELECT nguoi_ky FROM companies WHERE id=1").fetchone()[0] == "NGUYỄN NGỌC PHƯƠNG THẢO"
     resp2 = asyncio.run(server.bang_luong_ket_xuat_qt_tncn(1, Req({"nam": 2025})))
-    assert "<nguoiKy>NGUYỄN NGỌC PHƯƠNG THẢO</nguoiKy>" in open(resp2.path, encoding="utf-8").read()
+    raw2 = open(resp2.path, encoding="utf-8").read()
+    assert "<nguoiKy>NGUYỄN NGỌC PHƯƠNG THẢO</nguoiKy>" in raw2
+    # Không truyền gì: người ký + CQT + địa chỉ lấy hết theo thông tin công ty đã nhập ban đầu
+    assert "<tenCQTNoiNop>Thuế cơ sở 12</tenCQTNoiNop>" in raw2 and "<maCQTNoiNop>70123</maCQTNoiNop>" in raw2 and "<dchiNNT>1 Đường A</dchiNNT>" in raw2
+    assert "chưa khai báo" not in __import__("urllib.parse", fromlist=["unquote"]).unquote(resp2.headers["x-canh-bao"])
+    # công ty đã nhập sẵn người ký từ đầu -> dùng luôn, không cần truyền
+    _c = _db_tam(); _c.execute("UPDATE companies SET nguoi_ky='HỒ THỊ CẨM VÂN' WHERE id=1"); _c.commit(); _c.close()
+    assert "<nguoiKy>HỒ THỊ CẨM VÂN</nguoiKy>" in open(asyncio.run(server.bang_luong_ket_xuat_qt_tncn(1, Req({"nam": 2025}))).path, encoding="utf-8").read()
     for loi_nam in (2024,):
         try:
             asyncio.run(server.bang_luong_ket_xuat_qt_tncn(1, Req({"nam": loi_nam})))

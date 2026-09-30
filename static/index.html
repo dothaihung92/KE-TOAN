@@ -5552,12 +5552,9 @@ function blInNgay(){
 async function blKetXuatQt(){
   if(!current){toast('Chọn công ty trước','err');return}
   if(blBan&&!(await blLuu(true)))return;      // số liệu lấy từ bảng lương ĐÃ LƯU
-  let nk='';try{nk=localStorage.getItem('blQtNguoiKy'+current)||''}catch{}
-  const hoi=prompt(`Kết xuất quyết toán TNCN năm ${blNam} (05/QTT-TNCN) từ Bảng Lương + Danh Sách Nhân Viên.\nMã số thuế cá nhân = số CCCD; tất cả cá nhân ủy quyền quyết toán thay.\n\nNgười ký tờ khai:`,nk);
-  if(hoi===null)return;
-  try{localStorage.setItem('blQtNguoiKy'+current,hoi)}catch{}
+  // Người ký + cơ quan thuế (mã/tên CQT) + địa chỉ: lấy theo thông tin công ty đã nhập ban đầu ("Sửa công ty"), không hỏi lại
   try{
-    const r=await fetch(`/api/bang-luong/${current}/ket-xuat-qt-tncn`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,nguoi_ky:hoi.trim()})});
+    const r=await fetch(`/api/bang-luong/${current}/ket-xuat-qt-tncn`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam})});
     if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     let cb='';try{cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'')}catch{}
     const tn=(r.headers.get('X-So-Nguoi')||'?'),thue=Number(r.headers.get('X-Thue-Phai-Nop')||0);

@@ -900,22 +900,18 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
 
   // ---- 36: nút "Kết xuất QT TNCN": lưu trước nếu đang sửa, hỏi người ký, gọi server, lưu file XML, báo cảnh báo ----
   assert(/onclick="blKetXuatQt\(\)"/.test(html) && /Kết xuất QT TNCN/.test(html), 'Có nút Kết xuất QT TNCN trên thanh công cụ Bảng Lương');
-  m = nap({ prompt: () => 'NGUYỄN A' });
+  let hoi36 = 0; m = nap({ prompt: () => { hoi36++; return 'X'; } });
   m.ctx.blNam = 2025; m.ctx.blBan = false;
   const goi36 = [], luu36 = [];
   m.ctx.fetch = async (url, o) => { goi36.push([url, JSON.parse(o.body)]); return { ok: true, headers: { get: (k) => ({ 'X-Canh-Bao': encodeURIComponent('Chưa có số CCCD của: B'), 'X-So-Nguoi': '3', 'X-Thue-Phai-Nop': '1234567' })[k] || null } }; };
   m.ctx.xuatFile = async (r, ten) => { luu36.push(ten); };
   await m.ctx.blKetXuatQt();
-  assert.strictEqual(goi36[0][0], '/api/bang-luong/7/ket-xuat-qt-tncn'); assert.strictEqual(goi36[0][1].nam, 2025); assert.strictEqual(goi36[0][1].nguoi_ky, 'NGUYỄN A');
+  assert.strictEqual(goi36[0][0], '/api/bang-luong/7/ket-xuat-qt-tncn'); assert.strictEqual(goi36[0][1].nam, 2025); assert.strictEqual(goi36[0][1].nguoi_ky, undefined, 'Không gửi người ký: server lấy theo thông tin công ty'); assert.strictEqual(hoi36, 0, 'Không hỏi người ký');
   assert.strictEqual(luu36[0], 'QT_TNCN_2025.xml'); assert(/3 người/.test(m.toasts[m.toasts.length - 1][0]) && /1\.234\.567/.test(m.toasts[m.toasts.length - 1][0]) && /Chưa có số CCCD của: B/.test(m.toasts[m.toasts.length - 1][0]), 'Báo số người, thuế còn phải nộp, cảnh báo');
-  assert.strictEqual(m.luuTru['blQtNguoiKy7'], 'NGUYỄN A', 'Nhớ người ký cho lần sau');
-  // bấm Hủy ở hộp hỏi -> không gọi server
-  m = nap({ prompt: () => null }); m.ctx.blNam = 2025; m.ctx.blBan = false; const f36 = []; m.ctx.fetch = async () => { f36.push(1); return { ok: true }; };
-  await m.ctx.blKetXuatQt(); assert.strictEqual(f36.length, 0);
   // lỗi server -> báo lỗi
   m = nap({ prompt: () => 'X' }); m.ctx.blNam = 2025; m.ctx.blBan = false; m.ctx.fetch = async () => ({ ok: false, json: async () => ({ detail: 'Năm 2025 chưa có dữ liệu bảng lương' }) });
   await m.ctx.blKetXuatQt(); assert(m.toasts.some(([t, k]) => k === 'err' && /chưa có dữ liệu bảng lương/.test(t)));
-  console.log('PASS 36: nút Kết xuất QT TNCN: hỏi người ký, gọi server, lưu XML, báo thuế + cảnh báo, xử lý lỗi/hủy.');
+  console.log('PASS 36: nút Kết xuất QT TNCN: không hỏi người ký (lấy theo công ty), gọi server, lưu XML, báo thuế + cảnh báo, xử lý lỗi.');
 
   // ---- 37: màn "Người Phụ Thuộc": tải/sửa/lưu; tự điền họ tên người lao động theo Mã NV; Bảng Lương cập nhật số NPT khi nạp ----
   assert(/onclick="moNguoiPhuThuoc\(\)"/.test(html) && /Người Phụ Thuộc<\/div>/.test(html), 'Có ô Người Phụ Thuộc cạnh Danh Sách Nhân Viên');
