@@ -160,4 +160,47 @@ try:
 finally:
     server.DOWNLOAD_DIR = _dl
 
+# ===== 8: bảng chấm công có GIỜ TĂNG CA: ô "X+n", cột Giờ TC, TNC vẫn đếm đúng (COUNTIF "X*"); số ngày/giờ hiện dạng số =====
+import copy
+p2 = copy.deepcopy(thang_payload)
+tc0 = [0.0] * 31
+for d_, h_ in ((2, 2.0), (7, 1.5), (9, 4.0), (14, 4.4)):
+    tc0[d_ - 1] = h_
+p2["05"]["cham"][0]["tc"] = tc0
+p2["05"]["cham"][0]["gio"] = 11.9
+_dl2 = server.DOWNLOAD_DIR
+server.DOWNLOAD_DIR = tempfile.mkdtemp()
+try:
+    duong2, _ = server._luong_xuat_excel_mau(2024, p2, tuy)
+    w = openpyxl.load_workbook(duong2)["BL 05-2024"]
+    nL2 = len(cot)
+    c1 = nL2 + 1
+    assert w.cell(10, c1 + 2 + 1).value == "X+2" and w.cell(10, c1 + 2 + 6).value == "X+1,5" and w.cell(10, c1 + 2 + 13).value == "X+4,4"
+    assert w.cell(10, c1 + 2 + 2).value == "X", "Ngày không tăng ca vẫn là X"
+    c_tnc = c1 + 2 + 31
+    assert w.cell(8, c_tnc).value == "TNC" and w.cell(8, c_tnc + 1).value == "Giờ TC" and w.cell(8, c_tnc + 2).value == "Ghi chú"
+    assert w.cell(10, c_tnc + 1).value == 11.9 and w.cell(11, c_tnc + 1).value is None, "Chỉ người có tăng ca mới có giờ"
+    assert str(w.cell(10, c_tnc).value).startswith('=COUNTIF(') and str(w.cell(10, c_tnc).value).endswith(',"X*")')
+    assert "X+n" in str(w.cell(14, c1).value)
+    assert w.column_dimensions[openpyxl.utils.get_column_letter(c1 + 2)].width > 5, "Cột ngày rộng hơn để vừa 'X+1,5'"
+    # định dạng số: "24" không còn "24."; giờ lẻ hiện 1 số thập phân
+    pos = {c["k"]: j for j, c in enumerate(cot, 1)}
+    assert w.cell(10, pos["ngay_cong_hd"]).number_format == "0" and w.cell(10, pos["ngay_lam_hd"]).number_format == "0"
+    assert w.cell(11, pos["ngay_lam_hd"]).value == 20 and w.cell(11, pos["ngay_lam_hd"]).number_format == "0"
+    assert w.cell(10, c_tnc).number_format == "General" and w.cell(10, c_tnc + 1).number_format == "General"
+    assert w.column_dimensions["C"].width >= 28, "Cột họ tên đủ rộng, không bị cắt"
+    try:
+        import formulas
+        sol = formulas.ExcelModel().loads(duong2).finish().calculate()
+        ref = "'[%s]%s'!%s10" % (os.path.basename(duong2), "BL 05-2024".upper(), openpyxl.utils.get_column_letter(c_tnc))
+        assert float(list(sol[ref].value[0])[0]) == 26, "TNC đếm cả ô X+n"
+    except ImportError:
+        pass
+    # payload không có giờ tăng ca -> không thêm cột Giờ TC, cột ngày hẹp như cũ
+    w0 = openpyxl.load_workbook(server._luong_xuat_excel_mau(2024, thang_payload, tuy)[0])["BL 05-2024"]
+    assert w0.cell(8, c_tnc + 1).value == "Ghi chú" and w0.column_dimensions[openpyxl.utils.get_column_letter(c1 + 2)].width < 5
+finally:
+    server.DOWNLOAD_DIR = _dl2
+print("PASS 8: chấm công có giờ tăng ca (X+n, cột Giờ TC), TNC vẫn đúng; ngày công/giờ tăng ca hiện dạng số (không còn '24.').")
+
 print("\nALL DONE")

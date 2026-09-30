@@ -5088,9 +5088,29 @@ function blChamCongThang(r,nam,t,leSet){
     for(let i=ds.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[ds[i],ds[j]]=[ds[j],ds[i]]}
     ds.slice(0,can).forEach(d=>co.add(d));
   }
-  ngay.forEach(x=>{x.dau=co.has(x.d)?'X':(x.le?'L':'')});
-  return {ngay,tong:g,soX:co.size};
+  ngay.forEach(x=>{x.dau=co.has(x.d)?'X':(x.le?'L':'');x.tc=0});
+  const gio=Math.round((Number(r.gio_tang_ca)||0)*10)/10;
+  if(gio>0&&co.size)blChiaGioTangCa(ngay,co,gio,`${r.ma||r.ten||''}|${nam}|${mm}|tc`);
+  return {ngay,tong:g,soX:co.size,gio};
 }
+/* Điền GIỜ TĂNG CA vào các ngày đi làm (tổng đúng bằng "Số giờ tăng ca" của bảng lương): chọn vài ngày làm việc, mỗi ngày
+   1–4 giờ (bội số 0,5 giờ, phần lẻ dồn 1 ngày), ngẫu nhiên nhưng cố định theo người + tháng. */
+function blChiaGioTangCa(ngay,co,gio,khoa){
+  let ds=[...co].filter(d=>!ngay[d-1].cn&&!ngay[d-1].le).sort((a,b)=>a-b);
+  if(!ds.length)ds=[...co].sort((a,b)=>a-b);
+  const rng=blNgauNhienTheo(khoa);
+  const k=Math.min(ds.length,Math.max(1,Math.ceil(gio/2.5),Math.ceil(gio/4)));
+  for(let i=ds.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[ds[i],ds[j]]=[ds[j],ds[i]]}
+  const chon=ds.slice(0,k).sort((a,b)=>a-b);
+  const tenths=Math.round(gio*10),halves=Math.floor(tenths/5),le=tenths-halves*5;      // số nửa giờ + phần lẻ (0–4 phần mười giờ)
+  const phan=new Array(k).fill(Math.floor(halves/k));
+  for(let i=0;i<halves-Math.floor(halves/k)*k;i++)phan[Math.floor(rng()*k)]++;
+  for(let i=0;i<k;i++){const a=Math.floor(rng()*k),b=Math.floor(rng()*k);if(a!==b&&phan[a]>1){phan[a]--;phan[b]++}}     // xáo nhẹ cho tự nhiên
+  chon.forEach((d,i)=>{ngay[d-1].tc=phan[i]*0.5});
+  ngay[chon[k-1]-1].tc=Math.round((ngay[chon[k-1]-1].tc+le/10)*10)/10;
+}
+function blSoGio(v){const n=Math.round(v*10)/10;return Number.isInteger(n)?String(n):String(n).replace('.',',')}
+function blDauHienThi(x){return x.dau==='X'&&x.tc>0?`X+${blSoGio(x.tc)}`:x.dau}
 // Cột bảng tính lương: cột phụ cấp/khấu trừ nào toàn số 0 thì ẩn để các cột còn lại rộng, đẹp và vừa khổ giấy
 function blCotIn(rows,ts){
   const bh=(ts&&ts.bh_nld)||{};
@@ -5164,19 +5184,20 @@ function blDungBangLuongIn(rows,nam,t,tuyChon){
 // Trang "BẢNG CHẤM CÔNG THÁNG TỪ dd/mm/yyyy ĐẾN dd/mm/yyyy": 31 cột ngày, thứ trong tuần, X = đi làm, L = nghỉ lễ, TNC = tổng ngày công
 function blDungChamCongIn(rows,nam,t,tuyChon){
   const dim=blSoNgayThang(nam,t),mm=String(parseInt(t,10)).padStart(2,'0');
-  const wDay=24,rong=26+156+dim*wDay+44+96;
   const cc=rows.map(r=>blChamCongThang(r,nam,t,tuyChon.leSet));
+  const coTc=cc.some(c=>c.gio>0);
+  const wDay=coTc?32:24,rong=26+156+dim*wDay+44+(coTc?44:0)+96;
   const mau=cc[0]?cc[0].ngay:blChamCongThang({},nam,t,tuyChon.leSet).ngay;
   const ht=mau.map(x=>`<th class="${x.cn?'cn':''}">${BL_THU[x.thu]}</th>`).join('');
   const hd=mau.map(x=>`<th class="${x.cn?'cn':''}">${x.d}</th>`).join('');
-  const than=rows.map((r,i)=>`<tr><td class="c">${i+1}</td><td>${xkEsc(r.ten||r.ma||'')}</td>`+cc[i].ngay.map(x=>`<td class="c${x.cn?' cn':''}${x.dau==='L'?' le':''}">${x.dau}</td>`).join('')+
-    `<td class="c dam">${blDinhDang(cc[i].tong,1)}</td><td class="gc">${r.thoi_vu?'Thời vụ (không BHXH)':''}</td></tr>`).join('');
+  const than=rows.map((r,i)=>`<tr><td class="c">${i+1}</td><td>${xkEsc(r.ten||r.ma||'')}</td>`+cc[i].ngay.map(x=>`<td class="c${x.cn?' cn':''}${x.dau==='L'?' le':''}${x.tc>0?' tc':''}">${blDauHienThi(x)}</td>`).join('')+
+    `<td class="c dam">${blDinhDang(cc[i].tong,1)}</td>${coTc?`<td class="c">${cc[i].gio>0?blSoGio(cc[i].gio):''}</td>`:''}<td class="gc">${r.thoi_vu?'Thời vụ (không BHXH)':''}</td></tr>`).join('');
   const d1=`01/${mm}/${nam}`,d2=`${String(dim).padStart(2,'0')}/${mm}/${nam}`;
   const html=`${blKhungTren(tuyChon,`BẢNG CHẤM CÔNG THÁNG TỪ ${d1}  ĐẾN ${d2}`,`THÁNG ${mm} NĂM ${nam}`)}
-    <table class="bang cham" style="width:${rong}px"><colgroup><col style="width:26px"><col style="width:156px">${mau.map(()=>`<col style="width:${wDay}px">`).join('')}<col style="width:44px"><col style="width:96px"></colgroup>
-    <thead><tr><th rowspan="2">STT</th><th rowspan="2">Họ và Tên</th>${ht}<th rowspan="2">TNC</th><th rowspan="2">Ghi chú</th></tr><tr>${hd}</tr></thead>
+    <table class="bang cham" style="width:${rong}px"><colgroup><col style="width:26px"><col style="width:156px">${mau.map(()=>`<col style="width:${wDay}px">`).join('')}<col style="width:44px">${coTc?'<col style="width:44px">':''}<col style="width:96px"></colgroup>
+    <thead><tr><th rowspan="2">STT</th><th rowspan="2">Họ và Tên</th>${ht}<th rowspan="2">TNC</th>${coTc?'<th rowspan="2">Giờ TC</th>':''}<th rowspan="2">Ghi chú</th></tr><tr>${hd}</tr></thead>
     <tbody>${than}</tbody></table>
-    <div class="chuthich">X: đi làm &nbsp; L: nghỉ lễ &nbsp; (trống): nghỉ / Chủ nhật &nbsp; TNC: tổng ngày công</div>${blKhungKy(tuyChon,nam,t,rong)}`;
+    <div class="chuthich">X: đi làm &nbsp; X+n: đi làm và tăng ca n giờ &nbsp; L: nghỉ lễ &nbsp; (trống): nghỉ / Chủ nhật &nbsp; TNC: tổng ngày công &nbsp; Giờ TC: tổng giờ tăng ca</div>${blKhungKy(tuyChon,nam,t,rong)}`;
   return {html,rong};
 }
 /* Ghép cả tài liệu in: mỗi tháng = bảng tính lương rồi bảng chấm công, mỗi bảng tự thu/phóng vừa bề ngang khổ giấy đã chọn */
@@ -5201,7 +5222,7 @@ table.bang{border-collapse:collapse;table-layout:fixed}
 .bang th,.bang td{border:1px solid #000;padding:2px 4px;font-size:12px;line-height:1.25;overflow:hidden;word-break:break-word;vertical-align:middle}
 .bang th{background:#e8e8e8;text-align:center;font-weight:bold}.bang td.n{text-align:right;white-space:nowrap}.bang td.c{text-align:center}.bang td.dam{font-weight:bold}
 .bang thead{display:table-header-group}.bang tr{page-break-inside:avoid}.bang tr.tong td{font-weight:bold;background:#f3f3f3}
-.cham th,.cham td{padding:1px 0;font-size:11px}.cham td.cn,.cham th.cn{background:#d9d9d9}.cham td.le{background:#fff2cc}.cham td.gc{font-size:10px;text-align:left;padding-left:3px}
+.cham th,.cham td{padding:1px 0;font-size:11px}.cham td.cn,.cham th.cn{background:#d9d9d9}.cham td.le{background:#fff2cc}.cham td.tc{font-size:9.5px;font-weight:bold;letter-spacing:-.3px}.cham td.gc{font-size:10px;text-align:left;padding-left:3px}
 .chuthich{font-size:11px;margin-top:4px;font-style:italic}
 .ky{page-break-inside:avoid;margin-top:14px}.ngay-ky{text-align:right;font-style:italic;margin-bottom:2px}.ky2{display:flex;justify-content:space-between;text-align:center;padding:0 6%}
 .ky2>div{min-width:200px}.ghi{font-size:11px;font-style:italic}.ten-ky{margin-top:70px;font-weight:bold}
@@ -5228,7 +5249,7 @@ function blDuLieuXuatMau(dsThang,nam,o){
     thang[t]={
       cot:cot.map(c=>({k:c.k,t:c.t,nhom:c.nhom||'',n:!!c.n,tong:!!c.tong,dp:!!c.dp,dam:!!c.dam,w:c.w})),
       rows:rows.map(r=>{const x={ten:r.ten||'',ma:r.ma||'',chuc_vu:r.chuc_vu||'',thoi_vu:!!r.thoi_vu};cot.forEach(c=>{if(c.k!=='stt'&&c.k!=='ky')x[c.k]=r[c.k]});return x}),
-      cham:cham.map(c=>({tong:c.tong,soX:c.soX,dau:c.ngay.map(n=>n.dau)})),
+      cham:cham.map(c=>({tong:c.tong,soX:c.soX,gio:c.gio||0,dau:c.ngay.map(n=>n.dau),tc:c.ngay.map(n=>n.tc||0)})),
       ngay:ngay.map(n=>({d:n.d,thu:n.thu,cn:n.cn,le:n.le}))};
   });
   return {nam,thang,tuy_chon:{ten_cty:o.tenCty,dia_chi:o.diaChi,mst:o.mst,nguoi_lap:o.nguoiLap,giam_doc:o.giamDoc,in_luong:o.inLuong,in_cong:o.inCong,kho:o.kho}};

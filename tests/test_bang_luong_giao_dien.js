@@ -628,5 +628,39 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/Xuất Excel theo mẫu/.test(html) && /blXuatExcelMau\(\)/.test(html), 'Có nút Xuất Excel theo mẫu trong hộp in');
   console.log('PASS 24: xuất Excel theo mẫu — dữ liệu gửi server đúng, xử lý lỗi/khoảng tháng/không có dữ liệu.');
 
+  // ---- 25: bảng chấm công có GIỜ TĂNG CA: tổng giờ trong các ô X+n = "Số giờ tăng ca" của bảng lương ----
+  m = nap();
+  const c25 = m.ctx, le25 = new Set(['2024-09-02']);
+  const tongTc = (kq) => Math.round(kq.ngay.reduce((s, x) => s + (x.tc || 0), 0) * 10) / 10;
+  for (const [ma, gio, du] of [['2', 11.9864406779661, 12], ['3', 40, 40], ['4', 8.352542372881356, 8.4], ['5', 0.3, 0.3], ['6', 3, 3]]) {
+    const kq = c25.blChamCongThang({ ma, ngay_lam_hd: 24, gio_tang_ca: gio }, 2024, '09', le25);
+    assert.strictEqual(tongTc(kq), du, `Tổng giờ tăng ca trong bảng chấm công (${ma}) = ${du}`); assert.strictEqual(kq.gio, du);
+    const co = kq.ngay.filter((x) => x.tc > 0);
+    assert(co.length >= 1 && co.every((x) => x.dau === 'X' && !x.cn && !x.le), 'Tăng ca chỉ ghi vào ngày đi làm (không CN/lễ)');
+    assert(co.every((x) => x.tc <= 8), 'Mỗi ngày không quá 8 giờ');
+    if (gio >= 4) assert(co.every((x) => x.tc <= 4.5), 'Mỗi ngày tối đa khoảng 4 giờ khi đủ ngày để chia');
+    if (gio >= 8) assert(co.length >= 3, 'Số giờ lớn được chia nhiều ngày');
+    const le = co.filter((x) => Math.abs(x.tc * 2 - Math.round(x.tc * 2)) > 1e-9);
+    assert(le.length <= 1, 'Chỉ 1 ngày có phần lẻ (' + ma + ')');
+  }
+  const a1 = c25.blChamCongThang({ ma: '2', ngay_lam_hd: 24, gio_tang_ca: 12 }, 2024, '09', le25), a2 = c25.blChamCongThang({ ma: '2', ngay_lam_hd: 24, gio_tang_ca: 12 }, 2024, '09', le25);
+  assert.strictEqual(JSON.stringify(a1.ngay.map((x) => x.tc)), JSON.stringify(a2.ngay.map((x) => x.tc)), 'In lại ra đúng số giờ từng ngày');
+  assert.strictEqual(tongTc(c25.blChamCongThang({ ma: '7', ngay_lam_hd: 0, gio_tang_ca: 5 }, 2024, '09', le25)), 0, 'Không đi làm thì không có tăng ca');
+  assert.strictEqual(tongTc(c25.blChamCongThang({ ma: '8', ngay_lam_hd: 20 }, 2024, '09', le25)), 0, 'Không có giờ tăng ca -> không điền');
+  assert.strictEqual(c25.blDauHienThi({ dau: 'X', tc: 2 }), 'X+2'); assert.strictEqual(c25.blDauHienThi({ dau: 'X', tc: 1.5 }), 'X+1,5'); assert.strictEqual(c25.blDauHienThi({ dau: 'X', tc: 0 }), 'X'); assert.strictEqual(c25.blDauHienThi({ dau: 'L', tc: 0 }), 'L');
+  // bản in
+  const rows25 = [dongMau('2', 'Trần A', { ngay_lam_hd: 24, ngay_cong_hd: 24, gio_tang_ca: 12, luong: 5310000, tt_luong: 5310000 }), dongMau('3', 'Lê B', { ngay_lam_hd: 24, ngay_cong_hd: 24, gio_tang_ca: 0, luong: 5310000, tt_luong: 5310000 })];
+  const o25 = { tenCty: 'A', leSet: le25, ts: {}, inLuong: true, inCong: true, kho: 'a4n' };
+  const cc25 = c25.blDungChamCongIn(rows25, 2024, '09', o25);
+  assert(cc25.html.includes('>Giờ TC<') && /X\+\d/.test(cc25.html) && cc25.html.includes('X+n: đi làm và tăng ca n giờ'), 'Bản in có cột Giờ TC + ô X+n');
+  const gioTrongO = [...cc25.html.matchAll(/>X\+([0-9,]+)</g)].reduce((sum, x) => sum + parseFloat(x[1].replace(',', '.')), 0);
+  assert.strictEqual(Math.round(gioTrongO * 10) / 10, 12, 'Cộng các ô X+n = 12 giờ = Số giờ tăng ca');
+  const khong = c25.blDungChamCongIn(rows25.map((r) => Object.assign({}, r, { gio_tang_ca: 0 })), 2024, '09', o25);
+  assert(!khong.html.includes('>Giờ TC<') && !/X\+\d/.test(khong.html), 'Không ai tăng ca -> không thêm cột');
+  const gx = JSON.parse(JSON.stringify(c25.blDuLieuXuatMau([{ t: '09', rows: rows25 }], 2024, Object.assign({}, o25, { nguoiLap: '', giamDoc: '', diaChi: '', mst: '' }))));
+  assert.strictEqual(gx.thang['09'].cham[0].gio, 12); assert.strictEqual(gx.thang['09'].cham[0].tc.length, 30);
+  assert.strictEqual(Math.round(gx.thang['09'].cham[0].tc.reduce((a, b) => a + b, 0) * 10) / 10, 12, 'Payload Excel mang đủ giờ từng ngày');
+  console.log('PASS 25: bảng chấm công điền giờ tăng ca (ô X+n, cột Giờ TC), tổng = Số giờ tăng ca; Excel cũng nhận đủ.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

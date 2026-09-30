@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.009"
+APP_BUILD = "2026-09-30.010"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11176,7 +11176,8 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
         ws = wb.create_sheet(f"BL {t}-{nam}")
         c_cong = (nL + 1) if in_luong else 1           # cột đầu của khối chấm công (liền sau khối lương như mẫu)
         dim = len(ngay)
-        nC = 2 + dim + 2
+        co_tc = any((c.get("gio") or 0) > 0 for c in cham)      # có giờ tăng ca -> thêm cột Giờ TC + ô 'X+n'
+        nC = 2 + dim + 2 + (1 if co_tc else 0)
         ten_cty, dia_chi, mst = tc.get("ten_cty") or "", tc.get("dia_chi") or "", tc.get("mst") or ""
         cuoi_thang = f"Ngày {dim} tháng {t} năm {nam}"
 
@@ -11223,7 +11224,7 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                     if co_nhom:
                         ws.merge_cells(start_row=8, start_column=j, end_row=9, end_column=j)
                     ws.cell(8, j, c.get("t"))
-                ws.column_dimensions[L(j)].width = max(4, round((c.get("w") or 60) / 6.6, 1))
+                ws.column_dimensions[L(j)].width = max(4, round((c.get("w") or 60) / 6.6, 1), 28 if c.get("k") == "ten" else 0)
             for rr in (8, 9):
                 for j in range(1, nL + 1):
                     x = ws.cell(rr, j)
@@ -11260,8 +11261,10 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                         x.alignment = trai
                     else:
                         x.alignment = giua
-                        if c.get("dp"):
-                            x.number_format = "0.0" if k != "ngay_cong_hd" and k != "ngay_lam_hd" else "0.##"
+                        if c.get("dp"):      # số ngày / số giờ: số nguyên hiện "24", có lẻ hiện "11,9" (không còn "24.")
+                            gia_tri = x.value
+                            x.value = round(gia_tri, 1) if isinstance(gia_tri, (int, float)) and k == "gio_tang_ca" else gia_tri
+                            x.number_format = "0" if isinstance(x.value, (int, float)) and float(x.value).is_integer() else "0.0"
                 ws.row_dimensions[rr].height = 17
             # dòng tổng cộng
             dau_tong = pos.get("luong_cb", 1)
@@ -11272,7 +11275,7 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                 x = ws.cell(r_tong, j)
                 if c.get("tong") and n:
                     x.value = f"=SUM({L(j)}{r0}:{L(j)}{r_dau})"
-                    x.number_format = "#,##0" if c.get("n") else "0.0"
+                    x.number_format = "#,##0" if c.get("n") else "General"
                 x.font, x.border, x.fill = font(True, 12), vien, PatternFill("solid", fgColor="F3F3F3")
                 x.alignment = phai if c.get("n") else giua
             chu_ky(1, nL, r_tong + 2)
@@ -11289,9 +11292,11 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                 cc = c1 + 2 + j
                 ws.cell(8, cc, THU[g["thu"] % 7])
                 ws.cell(9, cc, g["d"])
-                ws.column_dimensions[L(cc)].width = 3.9
-            c_tnc, c_gc = c1 + 2 + dim, c1 + 3 + dim
-            for cc, ten, rong in ((c_tnc, "TNC", 7), (c_gc, "Ghi chú", 22)):
+                ws.column_dimensions[L(cc)].width = 5.6 if co_tc else 3.9
+            c_tnc = c1 + 2 + dim
+            c_tc = c_tnc + 1 if co_tc else None
+            c_gc = c1 + 3 + dim + (1 if co_tc else 0)
+            for cc, ten, rong in ([(c_tnc, "TNC", 7)] + ([(c_tc, "Giờ TC", 7)] if co_tc else []) + [(c_gc, "Ghi chú", 22)]):
                 ws.merge_cells(start_row=8, start_column=cc, end_row=9, end_column=cc)
                 ws.cell(8, cc, ten)
                 ws.column_dimensions[L(cc)].width = rong
@@ -11307,6 +11312,9 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                 ch = cham[i] if i < len(cham) else {"dau": [], "tong": 0, "soX": 0}
                 for j, g in enumerate(ngay):
                     dau = (ch.get("dau") or [""] * dim)[j] if j < len(ch.get("dau") or []) else ""
+                    gio_ngay = (ch.get("tc") or [0] * dim)[j] if j < len(ch.get("tc") or []) else 0
+                    if dau == "X" and gio_ngay and gio_ngay > 0:        # ngày đi làm có tăng ca: "X+2" / "X+1,5"
+                        dau = "X+" + (str(int(gio_ngay)) if float(gio_ngay).is_integer() else f"{gio_ngay:.1f}".replace(".", ","))
                     x = ws.cell(rr, c1 + 2 + j, dau or None)
                     x.alignment = giua
                     if g.get("cn"):
@@ -11315,14 +11323,21 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                         x.fill = le_fill
                 a, b = L(c1 + 2), L(c1 + 1 + dim)
                 tnc = ws.cell(rr, c_tnc)
-                tnc.value = f'=COUNTIF({a}{rr}:{b}{rr},"X")' if abs((ch.get("tong") or 0) - (ch.get("soX") or 0)) < 1e-9 else ch.get("tong")
-                tnc.alignment, tnc.number_format = giua, "0.##"
+                tnc.value = f'=COUNTIF({a}{rr}:{b}{rr},"X*")' if abs((ch.get("tong") or 0) - (ch.get("soX") or 0)) < 1e-9 else ch.get("tong")
+                tnc.alignment, tnc.number_format = giua, "General"
+                if co_tc:
+                    gio_tong = ch.get("gio") or 0
+                    ctc = ws.cell(rr, c_tc, gio_tong if gio_tong > 0 else None)
+                    ctc.alignment, ctc.number_format = giua, "General"
                 ws.cell(rr, c_gc, "Thời vụ (không BHXH)" if r.get("thoi_vu") else None).alignment = trai
                 for cc in range(c1, c2 + 1):
                     x = ws.cell(rr, cc)
                     x.border = vien
                     x.font = font(cc == c_tnc, 11)
-            ws.cell(r_tong + 1, c1, "X: đi làm    L: nghỉ lễ    (trống): nghỉ / Chủ nhật    TNC: tổng ngày công").font = font(False, 10, True)
+                    if c1 + 2 <= cc < c1 + 2 + dim and isinstance(x.value, str) and x.value.startswith("X+"):
+                        x.font = font(True, 9)
+            ws.cell(r_tong + 1, c1, "X: đi làm    X+n: đi làm và tăng ca n giờ    L: nghỉ lễ    (trống): nghỉ / Chủ nhật    TNC: tổng ngày công"
+                    + ("    Giờ TC: tổng giờ tăng ca" if co_tc else "")).font = font(False, 10, True)
             chu_ky(c1, c2, r_tong + 3)
             vung_in.append(f"{L(c1)}1:{L(c2)}{r_tong + 11}")
         # in ấn: khổ giấy, hướng, vừa bề ngang, lề nhỏ, lặp tiêu đề bảng, mỗi khối 1 vùng in (khối lương trang trước, chấm công trang sau)
