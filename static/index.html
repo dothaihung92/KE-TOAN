@@ -5267,12 +5267,23 @@ async function blXuatExcelMau(){
     toast(`📥 Đã xuất Excel theo mẫu: ${Object.keys(goi.thang).length} tháng (mỗi tháng 1 sheet)`,'ok');
   }catch(e){toast('Lỗi xuất Excel: '+e.message,'err')}
 }
-function blLuuTuyChonIn(o){try{localStorage.setItem('blIn'+current,JSON.stringify({diaChi:o.diaChi,nguoiLap:o.nguoiLap,giamDoc:o.giamDoc,kho:o.kho}))}catch{}}
+// Địa chỉ + Giám đốc lấy theo THÔNG TIN CÔNG TY đã nhập (Sửa công ty: "Địa chỉ trụ sở", "Tên người ký"); chỉ khi công ty chưa nhập
+// mới dùng giá trị người dùng gõ ở hộp in (và nhớ cho lần sau).
+function blThongTinCty(){
+  const co=(typeof companies!=='undefined'&&companies.find(c=>c.id===current))||{};
+  return {diaChi:String(co.dia_chi||'').trim(),giamDoc:String(co.nguoi_ky||'').trim()};
+}
+function blLuuTuyChonIn(o){
+  const tc=blThongTinCty();
+  try{localStorage.setItem('blIn'+current,JSON.stringify({diaChi:tc.diaChi?'':o.diaChi,nguoiLap:o.nguoiLap,giamDoc:tc.giamDoc?'':o.giamDoc,kho:o.kho}))}catch{}
+}
 function blMoIn(){
   const w=document.getElementById('blIn');if(!w)return;
   if(w.style.display!=='none'&&w.innerHTML){w.style.display='none';return}
   let cu={};try{cu=JSON.parse(localStorage.getItem('blIn'+current)||'{}')}catch{}
   const t=blThang==='nam'?1:(parseInt(blThang,10)||1);
+  const cty=blThongTinCty();
+  const diaChi=cty.diaChi||cu.diaChi||'',giamDoc=cty.giamDoc||cu.giamDoc||'';
   const i=(id,v,st,ph)=>`<input id="${id}" value="${xkEsc(v==null?'':v)}" placeholder="${ph||''}" style="${st||''}padding:4px 6px;border:1px solid #ccc;border-radius:6px">`;
   w.style.cssText='display:block;border:1px solid #bcd2ef;background:#f5f9ff;border-radius:10px;padding:12px;margin-bottom:10px';
   w.innerHTML=`<div style="font-weight:700;margin-bottom:6px">🖨 In bảng lương & bảng chấm công — năm ${blNam}</div>
@@ -5282,9 +5293,10 @@ function blMoIn(){
       <span>Khổ giấy <select id="blInKho" style="padding:4px 6px;border:1px solid #ccc;border-radius:6px">${Object.entries(BL_KHO_GIAY).map(([k,v])=>`<option value="${k}"${(cu.kho||'a4n')===k?' selected':''}>${v.ten}</option>`).join('')}</select></span>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px;margin-top:8px">
-      <span>Địa chỉ ${i('blInDc',cu.diaChi,'width:300px;','Địa chỉ công ty (in ở đầu trang)')}</span>
-      <span>Người lập biểu ${i('blInLap',cu.nguoiLap,'width:170px;')}</span><span>Giám đốc ${i('blInGd',cu.giamDoc,'width:170px;')}</span>
+      <span>Địa chỉ ${i('blInDc',diaChi,'width:300px;','Chưa có trong thông tin công ty — nhập ở đây')}</span>
+      <span>Người lập biểu ${i('blInLap',cu.nguoiLap,'width:170px;')}</span><span>Giám đốc ${i('blInGd',giamDoc,'width:170px;','Chưa có — nhập ở đây')}</span>
     </div>
+    <div style="font-size:12px;color:#555;margin-top:4px">${cty.diaChi&&cty.giamDoc?'Địa chỉ và Giám đốc đã lấy theo thông tin công ty (Sửa công ty → Địa chỉ trụ sở, Tên người ký).':`Địa chỉ/Giám đốc lấy theo <b>thông tin công ty</b> đã nhập (Sửa công ty → "Địa chỉ trụ sở", "Tên người ký tờ khai")${!cty.diaChi?' — <span style="color:#b45309">công ty chưa có địa chỉ</span>':''}${!cty.giamDoc?' — <span style="color:#b45309">chưa có tên người ký</span>':''}.`}</div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemIn()">👁 Xem trước</button> <button class="btn sm" style="background:#1f4e8c" onclick="blInNgay()">🖨 In luôn</button>
       <button class="btn sm" style="background:#1f6b4a" onclick="blXuatExcelMau()" title="Xuất Excel theo mẫu file BL: mỗi tháng 1 sheet, bên trái bảng tính lương, bên phải bảng chấm công; đã đặt sẵn khổ giấy/vùng in">📥 Xuất Excel theo mẫu</button>
       <button class="btn ghost sm" onclick="document.getElementById('blIn').style.display='none'">Đóng</button>

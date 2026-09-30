@@ -662,5 +662,37 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(Math.round(gx.thang['09'].cham[0].tc.reduce((a, b) => a + b, 0) * 10) / 10, 12, 'Payload Excel mang đủ giờ từng ngày');
   console.log('PASS 25: bảng chấm công điền giờ tăng ca (ô X+n, cột Giờ TC), tổng = Số giờ tăng ca; Excel cũng nhận đủ.');
 
+  // ---- 26: Địa chỉ + Giám đốc trong hộp in lấy theo THÔNG TIN CÔNG TY đã nhập ----
+  m = nap();
+  const c26 = m.ctx, els26 = {};
+  ['blInTu', 'blInDen', 'blInLuong', 'blInCong', 'blInKho', 'blInDc', 'blInLap', 'blInGd'].forEach((k) => { els26[k] = { style: {}, innerHTML: '', dataset: {}, value: '', checked: false }; });
+  c26.document.getElementById = (id) => (els26[id] || (els26[id] = { style: {}, innerHTML: '', dataset: {}, value: '' }));
+  c26.blNam = 2024; c26.blThang = '05'; c26.blTS = {};
+  c26.companies = [{ id: 7, ten: 'CÔNG TY A', mst: '031', dia_chi: '1/50 Thanh Đa, P.27, Bình Thạnh', nguoi_ky: 'Nguyễn Văn Kiên' }];
+  m.luuTru['blIn7'] = JSON.stringify({ diaChi: '1', nguoiLap: 'Đỗ Thái Hưng', giamDoc: '2', kho: 'a3n' });      // giá trị cũ người dùng đã gõ tay
+  c26.blMoIn();
+  const hop26 = els26['blIn'].innerHTML;
+  assert(/id="blInDc" value="1\/50 Thanh Đa, P\.27, Bình Thạnh"/.test(hop26), 'Địa chỉ lấy theo công ty (không dùng giá trị gõ tay cũ)');
+  assert(/id="blInGd" value="Nguyễn Văn Kiên"/.test(hop26), 'Giám đốc lấy theo Tên người ký của công ty');
+  assert(/id="blInLap" value="Đỗ Thái Hưng"/.test(hop26), 'Người lập biểu vẫn nhớ lần trước');
+  assert(/đã lấy theo thông tin công ty/.test(hop26) && !/công ty chưa có địa chỉ/.test(hop26));
+  assert(/<option value="a3n" selected>/.test(hop26), 'Nhớ khổ giấy');
+  // dựng bản in dùng đúng thông tin công ty; không nhớ lại địa chỉ/giám đốc của công ty vào bộ nhớ
+  els26['blInTu'].value = '5'; els26['blInDen'].value = '5'; els26['blInLuong'].checked = true; els26['blInCong'].checked = true; els26['blInKho'].value = 'a4n';
+  els26['blInDc'].value = '1/50 Thanh Đa, P.27, Bình Thạnh'; els26['blInLap'].value = 'Đỗ Thái Hưng'; els26['blInGd'].value = 'Nguyễn Văn Kiên';
+  c26.blDL = { '05': [dongMau('2', 'Trần A', { ngay_lam_hd: 26, ngay_cong_hd: 26, luong: 5310000, tt_luong: 5310000 })] };
+  const kq26 = c26.blChuanBiIn();
+  assert(kq26.html.includes('ĐC: 1/50 Thanh Đa, P.27, Bình Thạnh') && kq26.html.includes('Nguyễn Văn Kiên') && kq26.html.includes('Đỗ Thái Hưng'));
+  const saved26 = JSON.parse(m.luuTru['blIn7']); assert.strictEqual(saved26.diaChi, ''); assert.strictEqual(saved26.giamDoc, ''); assert.strictEqual(saved26.nguoiLap, 'Đỗ Thái Hưng');
+  // công ty chưa nhập: dùng giá trị gõ ở hộp in và nhớ lại; hiện nhắc nhập
+  c26.companies = [{ id: 7, ten: 'CÔNG TY A', mst: '031', dia_chi: '', nguoi_ky: '' }];
+  els26['blIn'].style.display = 'none'; m.luuTru['blIn7'] = JSON.stringify({ diaChi: 'ĐC gõ tay', nguoiLap: 'L', giamDoc: 'GĐ gõ tay', kho: 'a4n' });
+  c26.blMoIn();
+  assert(/id="blInDc" value="ĐC gõ tay"/.test(els26['blIn'].innerHTML) && /id="blInGd" value="GĐ gõ tay"/.test(els26['blIn'].innerHTML));
+  assert(/công ty chưa có địa chỉ/.test(els26['blIn'].innerHTML) && /chưa có tên người ký/.test(els26['blIn'].innerHTML));
+  els26['blInDc'].value = 'ĐC mới'; els26['blInGd'].value = 'GĐ mới'; c26.blChuanBiIn();
+  assert.strictEqual(JSON.parse(m.luuTru['blIn7']).diaChi, 'ĐC mới'); assert.strictEqual(JSON.parse(m.luuTru['blIn7']).giamDoc, 'GĐ mới');
+  console.log('PASS 26: địa chỉ + giám đốc trong bản in/Excel lấy theo thông tin công ty đã nhập.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
