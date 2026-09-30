@@ -4600,7 +4600,8 @@ const BL_THANG=Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'));
 let blNam=0,blThang='01',blTS=null,blDL={},blCacNam=[],blBan=false,blSeq=0;
 function blDangTien(el){const d=String(el.value).replace(/\D/g,'');el.value=d?Number(d).toLocaleString('vi-VN'):''}
 function blDinhDang(v,dp){
-  const n=Number(v);if(!isFinite(n))return'';
+  let n=Number(v);if(!isFinite(n))return'';
+  if(Math.abs(n)<(dp?0.005:0.5))n=0;          // tránh hiện "-0" (số âm cực nhỏ do làm tròn)
   return n.toLocaleString('vi-VN',{maximumFractionDigits:dp?2:0});
 }
 // Ô "Ngày công" trống/0 và ô "Tổng NC" trống = tự theo công chuẩn của tháng (server trả giá trị đang dùng ở *_hd).
@@ -4851,7 +4852,7 @@ function blVeKeHoach(){
   b.innerHTML=`<div style="font-size:13px;padding:8px 10px;background:#fff;border:1px solid #f0d9b5;border-radius:8px">
       <b>Kết quả:</b> cần <b style="color:#7a3a00">${s.so_nguoi} người</b> (${s.day_du} người đủ công có BHXH${s.thoi_vu?`, ${s.thoi_vu} người làm dưới 14 ngày không BHXH`:''}) · ${s.so_thang} tháng ·
       tổng chi phí lương <b>${blTienKh(s.tong_chi_phi)}</b> đ${s.da_co_ngoai?` (đã có ${blTienKh(s.da_co_ngoai)} ở các tháng khác + ${blTienKh(s.can_them)} phân bổ thêm = mục tiêu ${blTienKh(s.muc_tieu)})`:''} ·
-      bù thưởng bán hàng ${blTienKh(s.tong_thuong_bh)} đ + tăng ca ${blTienKh(s.tong_tang_ca)} đ · thuế TNCN phát sinh <b>${blTienKh(s.tong_thue)}</b> đ${s.thue_cong_ty_chiu?` (trong đó <b>${blTienKh(s.thue_cong_ty_chiu)}</b> đ thuế 10% công ty chịu thay, người lao động vẫn nhận đủ)`:''}</div>
+      bù thưởng bán hàng ${blTienKh(s.tong_thuong_bh)} đ + tăng ca ${blTienKh(s.tong_tang_ca)} đ · thuế TNCN phát sinh <b>${blTienKh(s.tong_thue)}</b> đ</div>
     ${(s.canh_bao||[]).length?`<div style="margin-top:6px;font-size:12px;color:#b45309">${s.canh_bao.slice(0,6).map(x=>'⚠ '+xkEsc(x)).join('<br>')}</div>`:''}
     <div style="overflow:auto;max-height:220px;margin-top:6px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:#f6efe2"><th style="padding:4px 8px;border:1px solid #eee">Tháng</th><th style="padding:4px 8px;border:1px solid #eee;text-align:left">Người làm</th><th style="padding:4px 8px;border:1px solid #eee">Thưởng bán hàng</th><th style="padding:4px 8px;border:1px solid #eee">Tăng ca</th><th style="padding:4px 8px;border:1px solid #eee">Chi phí lương</th><th style="padding:4px 8px;border:1px solid #eee">Thuế TNCN</th></tr></thead><tbody>${dong}</tbody></table></div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blApDungKeHoach()">✓ Áp dụng (xóa dữ liệu cũ cả năm, nhập lại tháng ${parseInt(ds[0],10)}–${parseInt(ds[ds.length-1],10)})</button> <span style="font-size:12px;color:var(--muted)">Sau khi áp dụng nhớ bấm 💾 Lưu.</span></div>`;
@@ -4978,7 +4979,7 @@ function blMoThamSo(){
       <span>Giảm trừ bản thân ${om('blTsBt',t.giam_tru_ban_than)} đ</span>
       <span>Giảm trừ mỗi người phụ thuộc ${om('blTsNpt',t.giam_tru_npt)} đ</span>
       <span>Hệ số quy đổi tăng ca ${o('blTsHs',Number(t.he_so_tang_ca).toFixed(4),70)}</span>
-      <label title="Mặc định KHÔNG tick: thuế 10% trừ vào tiền thực lãnh của người làm dưới 14 ngày (TT lương = Chi phí lương − thuế). Tick: công ty chịu thuế thay, họ nhận đủ."><input type="checkbox" id="blTsCt" ${t.thue_10_cong_ty_chiu?'checked':''}> Công ty chịu thuế 10% thay (người làm &lt;14 ngày nhận đủ)</label>
+      <label title="Mặc định KHÔNG tick: người làm dưới 14 ngày bị trừ thuế 10% vào thực lãnh (TT lương = Chi phí lương − thuế). Tick: những người này KHÔNG bị trừ thuế 10% (thuế = 0), nhận đủ (TT lương = Chi phí lương)."><input type="checkbox" id="blTsCt" ${t.thue_10_cong_ty_chiu?'checked':''}> Không trừ thuế 10% của người làm &lt;14 ngày (thuế = 0, nhận đủ)</label>
       <span title="Người không đóng BHXH (làm dưới 14 ngày/tháng) bị khấu trừ 10% thuế TNCN khi thu nhập chịu thuế từ mức này trở lên">Ngưỡng khấu trừ 10% ${om('blTsN10',t.nguong_khau_tru_10!=null?t.nguong_khau_tru_10:2000000)} đ</span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center;margin-top:8px">

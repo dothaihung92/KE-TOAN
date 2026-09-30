@@ -490,9 +490,11 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   const tsMau = { ngay_cong_chuan: 26, giam_tru_ban_than: 11000000, giam_tru_npt: 4400000, he_so_tang_ca: 1.33, bh_dn: { bhxh: 17.5, bhyt: 3, bhtn: 1 }, bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 }, bac_thue: [[0, 5]], thue_moi: null };
   m.ctx.blTS = Object.assign({}, tsMau);
   m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
-  assert(/id="blTsCt" >/.test(m.phanTu['blThamSo'].innerHTML) && /Công ty chịu thuế 10% thay/.test(m.phanTu['blThamSo'].innerHTML), 'Mặc định không tick');
+  assert(/id="blTsCt" >/.test(m.phanTu['blThamSo'].innerHTML) && /Không trừ thuế 10% của người làm/.test(m.phanTu['blThamSo'].innerHTML), 'Mặc định không tick');
   m.ctx.blTS = Object.assign({}, tsMau, { thue_10_cong_ty_chiu: true }); m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
   assert(/id="blTsCt" checked/.test(m.phanTu['blThamSo'].innerHTML), 'Đã tick thì hiển thị tick');
+  // không hiện "-0" khi số âm cực nhỏ (cột Kiểm tra số liệu)
+  assert.strictEqual(m.ctx.blDinhDang(-0.1111), '0'); assert.strictEqual(m.ctx.blDinhDang(-0.4), '0'); assert.strictEqual(m.ctx.blDinhDang(-1234), '-1.234'); assert.strictEqual(m.ctx.blDinhDang(0.6), '1');
   console.log('PASS 21: cột Chuyển khoản (tick) thay Ghi chú; kiểm tra số liệu theo thuế thực trừ; tham số công ty chịu thuế 10%.');
 
   // ---- 22: cột Thuế TNCN cho người dùng tự chỉnh: trống = tự tính (hiện số tính), gõ số = chỉnh tay, xóa số = trở lại tự tính ----

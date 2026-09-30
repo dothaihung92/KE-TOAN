@@ -190,8 +190,8 @@ finally:
     server.DOWNLOAD_DIR = _dl
 print("PASS 4: Excel: thời vụ có thuế 10% (công thức IF), người đóng BHXH giữ biểu lũy tiến; nhập lại đúng.")
 
-# ===== 5: Người làm < 14 ngày (không BHXH): thuế 10% TRỪ VÀO thực lãnh (TT lương = Chi phí lương − thuế); tick "công ty chịu
-# thuế thay" thì họ nhận đủ. =====
+# ===== 5: Người làm < 14 ngày (không BHXH): thuế 10% TRỪ VÀO thực lãnh (TT lương = Chi phí lương − thuế); tick "không trừ thuế
+# 10%" thì thuế của họ = 0 và họ nhận đủ (TT lương = Chi phí lương). =====
 tv2 = dict(dong, luong_cb=8_000_000, ngay_lam=13, dong_bh=0)
 k_nld = server._luong_tinh_dong(tv2, TS25, "10")                     # mặc định: người lao động chịu (trừ vào thực lãnh)
 assert TS25["thue_10_cong_ty_chiu"] is False
@@ -200,20 +200,46 @@ assert k_nld["tt_luong"] == k_nld["chi_phi_luong"] - k_nld["thue_tncn"], (k_nld[
 assert k_nld["thue_tru_luong"] == k_nld["thue_tncn"] and abs(k_nld["kiem_tra"] - k_nld["thue_tncn"]) < 1
 ts_ct = server._luong_chuan_tham_so({"thue_10_cong_ty_chiu": True}, 2025)
 k_ct = server._luong_tinh_dong(tv2, ts_ct, "10")
-assert k_ct["thue_tncn"] == k_nld["thue_tncn"] and k_ct["thue_tru_luong"] == 0 and k_ct["tt_luong"] == k_ct["chi_phi_luong"]
+assert k_ct["thue_tncn"] == 0 and k_ct["thue_tru_luong"] == 0 and k_ct["tt_luong"] == k_ct["chi_phi_luong"], "Không trừ thuế -> thuế về 0"
+assert abs(k_ct["kiem_tra"]) < 1 and k_ct["thoi_vu"]
+# người đóng BHXH không bị ảnh hưởng bởi tham số này
+assert server._luong_tinh_dong(dict(dong, luong_cb=30_000_000, dong_bh=1), ts_ct, "10")["thue_tncn"] > 0
 assert server._luong_chuan_tham_so({"thue_10_cong_ty_chiu": "không"}, 2025)["thue_10_cong_ty_chiu"] is False
 assert server._luong_chuan_tham_so({"cong_ty_chiu_thue_10": True}, 2025)["thue_10_cong_ty_chiu"] is False, "Khóa cũ (mặc định bản trước) không còn hiệu lực"
 # người đóng BHXH không bị ảnh hưởng: vẫn trừ BH NLĐ + thuế lũy tiến khỏi thực lãnh
 dbh = server._luong_tinh_dong(dict(dong, luong_cb=30_000_000, dong_bh=1), TS25, "10")
 assert dbh["tt_luong"] == dbh["chi_phi_luong"] - dbh["bh_duoc_tru"] - dbh["thue_tncn"] and dbh["thue_tru_luong"] == dbh["thue_tncn"]
-# kế hoạch (mặc định): thực lãnh của người làm < 14 ngày = chi phí − thuế; bật "công ty chịu" thì bằng chi phí
+# kế hoạch (mặc định): thực lãnh của người làm < 14 ngày = chi phí − thuế; bật "không trừ thuế" thì thuế = 0, thực lãnh = chi phí
 pool_kh = [server._luong_chuan_dong_nhap(dict(dong, ma=str(i), ten=f"NV{i}", dong_bh=0)) for i in range(2, 9)]
 th, tom = server._luong_ke_hoach(pool_kh, 2024, 10, 11, 60_000_000, None, rng=random.Random(1))
 assert all(r["tt_luong"] == r["chi_phi_luong"] - r["thue_tncn"] for rs in th.values() for r in rs if r["thoi_vu"])
-assert tom["thue_cong_ty_chiu"] == 0 and tom["tong_thue"] > 0
+assert tom["tong_thue"] > 0
 th, tom = server._luong_ke_hoach(pool_kh, 2024, 10, 11, 60_000_000, {"thue_10_cong_ty_chiu": True}, rng=random.Random(1))
-assert all(r["tt_luong"] == r["chi_phi_luong"] for rs in th.values() for r in rs if r["thoi_vu"]) and tom["thue_cong_ty_chiu"] == tom["tong_thue"] > 0
-print("PASS 5: người làm < 14 ngày: thuế 10% trừ vào thực lãnh (mặc định); tick 'công ty chịu thay' thì nhận đủ.")
+assert all(r["tt_luong"] == r["chi_phi_luong"] and r["thue_tncn"] == 0 for rs in th.values() for r in rs if r["thoi_vu"]) and tom["tong_thue"] == 0
+print("PASS 5: người làm < 14 ngày: thuế 10% trừ vào thực lãnh (mặc định); tick 'không trừ thuế' thì thuế = 0 và nhận đủ.")
+
+# Excel khi tick "không trừ thuế 10%": dòng thời vụ có thuế =0 (công thức, nên nhập lại KHÔNG bị coi là chỉnh tay), TT lương = Chi phí lương
+_dl = server.DOWNLOAD_DIR
+server.DOWNLOAD_DIR = tempfile.mkdtemp()
+try:
+    duong, _ = server._luong_xuat_excel(2025, ts_ct, {"10": [tv2, dict(dong, luong_cb=30_000_000, dong_bh=1)]})
+    ws = openpyxl.load_workbook(duong).active
+    cot = [c[0] for c in server._LUONG_COT_EXCEL]
+    ch = lambda r, k: ws.cell(r, cot.index(k) + 1).value
+    assert ch(3, "thue_tncn") == "=0" and str(ch(4, "thue_tncn")).startswith("=ROUND(SUMPRODUCT")
+    t, loi = server._luong_doc_excel(openpyxl.load_workbook(duong, data_only=True), openpyxl.load_workbook(duong))
+    assert [r["thue_tay"] for r in t["10"]] == ["", ""] and loi == []
+    try:
+        import formulas
+        sol = formulas.ExcelModel().loads(duong).finish().calculate()
+        ten = lambda r, k: "'[%s]%s'!%s%d" % (os.path.basename(duong), ws.title.upper(), openpyxl.utils.get_column_letter(cot.index(k) + 1), r)
+        a = server._luong_tinh_dong(tv2, ts_ct, "10")
+        assert float(list(sol[ten(3, "thue_tncn")].value[0])[0]) == 0
+        assert round(float(list(sol[ten(3, "tt_luong")].value[0])[0])) == a["tt_luong"] == a["chi_phi_luong"]
+    except ImportError:
+        pass
+finally:
+    server.DOWNLOAD_DIR = _dl
 
 # ===== 6: Cột Thuế TNCN cho NGƯỜI DÙNG TỰ CHỈNH: thue_tay có số = dùng đúng số đó; trống = tự tính. =====
 auto = server._luong_tinh_dong(tv2, TS25, "10")

@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.006"
+APP_BUILD = "2026-09-30.007"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10207,7 +10207,7 @@ def _luong_chuan_tham_so(ts, nam=None):
     kq["nguong_khau_tru_10"] = (_luong_so(ts["nguong_khau_tru_10"]) if "nguong_khau_tru_10" in ts
                                 else (5000000.0 if nam and nam >= 2026 else 2000000.0))
     # Thuế khấu trừ 10% của người làm < 14 ngày (không BHXH): mặc định TRỪ VÀO thực lãnh của người lao động (TT lương =
-    # Chi phí lương − thuế). Tick "công ty chịu thay" -> người lao động nhận đủ, công ty nộp thuế thay.
+    # Chi phí lương − thuế). Tick "không trừ thuế 10%" -> thuế của họ = 0, nhận đủ (TT lương = Chi phí lương).
     kq["thue_10_cong_ty_chiu"] = _nv_co_tick(ts["thue_10_cong_ty_chiu"]) if "thue_10_cong_ty_chiu" in ts else False
     for khoa in ("bh_dn", "bh_nld"):
         goc = ts.get(khoa) if isinstance(ts.get(khoa), dict) else {}
@@ -10350,7 +10350,9 @@ def _luong_tinh_dong(r, ts, thang=None):
     thue_da_chinh = d["thue_tay"] != ""
     if thue_da_chinh:                           # người dùng tự chỉnh số thuế TNCN -> dùng đúng số đó (trừ vào thực lãnh)
         thue = _luong_lam_tron(d["thue_tay"])
-    thue_tru = 0 if (thoi_vu and ts.get("thue_10_cong_ty_chiu", False) and not thue_da_chinh) else thue   # thuế trừ vào thực lãnh của NLĐ
+    if thoi_vu and ts.get("thue_10_cong_ty_chiu", False) and not thue_da_chinh:
+        thue = 0                                # tham số "không trừ thuế 10%": người làm < 14 ngày không bị trừ thuế -> thuế = 0
+    thue_tru = thue                             # thuế trừ vào thực lãnh của NLĐ
     tt_luong = _luong_lam_tron(tong_thu_nhap - tong_bh_nld - thue_tru)
     kq = dict(d)
     kq.update({
@@ -10766,8 +10768,7 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
     return rows, {"day_du": sum(1 for c in chon if c["loai"] == "day_du"),
                   "thoi_vu": sum(1 for c in chon if c["loai"] == "thoi_vu"),
                   "chi_phi": sum(k["chi_phi_luong"] for k in tinh_rows), "canh_bao": canh_bao,
-                  "thue": sum(k["thue_tncn"] for k in tinh_rows),
-                  "thue_cong_ty_chiu": sum(k["thue_tncn"] - k["thue_tru_luong"] for k in tinh_rows)}
+                  "thue": sum(k["thue_tncn"] for k in tinh_rows)}
 
 
 def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=50.0, da_co_ngoai=0.0, rng=None):
@@ -10789,7 +10790,7 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
     thang_ds = ["%02d" % m for m in range(tu, den + 1)]
     moi = can // len(thang_ds)
     thang_kq, tom, canh_bao, nguoi = {}, {"day_du": 0, "thoi_vu": 0}, [], set()
-    tong_chi_phi = tong_thue = tong_thue_ct = 0
+    tong_chi_phi = tong_thue = 0
     for j, t in enumerate(thang_ds):
         muc = moi + (can - moi * len(thang_ds) if j == len(thang_ds) - 1 else 0)
         rows, tt = _luong_ke_hoach_thang(pool(t) if callable(pool) else pool, muc, ts, t, ty_le_tang_ca, rng)
@@ -10799,10 +10800,9 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
         canh_bao += tt["canh_bao"]
         tong_chi_phi += tt["chi_phi"]
         tong_thue += tt["thue"]
-        tong_thue_ct += tt["thue_cong_ty_chiu"]
         nguoi.update((r["ma"] or r["ten"]) for r in rows)
     tom.update({"muc_tieu": muc_tieu, "da_co_ngoai": int(_luong_lam_tron(_luong_so(da_co_ngoai))), "can_them": can,
-                "tong_chi_phi": tong_chi_phi, "tong_thue": tong_thue, "thue_cong_ty_chiu": tong_thue_ct, "so_thang": len(thang_ds),
+                "tong_chi_phi": tong_chi_phi, "tong_thue": tong_thue, "so_thang": len(thang_ds),
                 "so_nguoi": len(nguoi), "canh_bao": canh_bao,
                 "tong_thuong_bh": sum(r["thuong_bh"] for rows in thang_kq.values() for r in rows),
                 "tong_tang_ca": sum(r["tang_ca"] for rows in thang_kq.values() for r in rows)})
@@ -10936,8 +10936,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
                                      ("bhyt_nld", "bhyt", "bh_nld"), ("bhtn_nld", "bhtn", "bh_nld")):
                 ws[f"{L[k]}{r}"] = (f"={L['luong_cb']}{r}*{ts[nhom][khoa_bh]!r}%" if d["dong_bh"] else 0)
             hq, tq = L["luong"], L["tang_ca"]
-            tru_thue = ("" if (thoi_vu and ts.get("thue_10_cong_ty_chiu", False) and d["thue_tay"] == "")
-                        else f"-{L['thue_tncn']}{r}")
+            tru_thue = f"-{L['thue_tncn']}{r}"
             ws[f"{L['tt_luong']}{r}"] = (f"=ROUND(SUM({hq}{r}:{tq}{r})-{L['bhxh_nld']}{r}-{L['bhyt_nld']}{r}"
                                          f"-{L['bhtn_nld']}{r}{tru_thue},0)")
             ws[f"{L['chi_phi_luong']}{r}"] = f"=ROUND(SUM({hq}{r}:{tq}{r}),0)"
@@ -10960,6 +10959,8 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             x = f"{L['tn_tinh_thue']}{r}"
             if d["thue_tay"] != "":      # người dùng tự chỉnh số thuế -> ghi cố định con số đó
                 ws[f"{L['thue_tncn']}{r}"] = _luong_lam_tron(d["thue_tay"])
+            elif thoi_vu and ts.get("thue_10_cong_ty_chiu", False):
+                ws[f"{L['thue_tncn']}{r}"] = "=0"       # không trừ thuế 10% (theo tham số năm)
             elif thoi_vu:     # không đóng BHXH (<14 ngày): khấu trừ 10% khi từ ngưỡng
                 ws[f"{L['thue_tncn']}{r}"] = f"=IF({x}>={ts.get('nguong_khau_tru_10', 2000000.0)!r},ROUND({x}*10%,0),0)"
             else:
