@@ -779,5 +779,42 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(m.goiApi[0][1].full_cong, false, 'Không tick -> full_cong=false (cách cũ)');
   console.log('PASS 29: chi phí lương cả năm: tick Làm full ngày công + trần phụ cấp + ngưỡng chịu thuế.');
 
+  // ---- 30: import file thanh toán lương chuyển khoản trong "Chi phí lương cả năm" ----
+  m = nap({ api: async () => ({}) });
+  m.ctx.blNam = 2025; m.ctx.blThang = '05'; m.ctx.blTS = {}; m.ctx.blDL = {};
+  const gia30 = { blKhTu: '1', blKhDen: '12', blKhTien: '', blKhTc: '50', blKhTranCom: '730.000', blKhTranTp: '416.000', blKhTranDt: '1.000.000' };
+  const dtu30 = { blKhTu: { value: '1' }, blKhDen: { value: '12' } };
+  m.ctx.document.getElementById = (id) => (id === 'blKhFull' ? { checked: false } : gia30[id] !== undefined ? { value: gia30[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
+  m.ctx.blMoKeHoach();
+  assert(/id="blCkFile"/.test(m.phanTu['blKeHoach'].innerHTML) && /Import file thanh toán lương chuyển khoản/.test(m.phanTu['blKeHoach'].innerHTML) && /khớp đúng số đã chuyển/.test(m.phanTu['blKeHoach'].innerHTML), 'Có nút import file chuyển khoản');
+  const kqCk = { giao_dich: [{ ngay: '17/06/2025', so_ct: 'U1', dien_giai: 'THANH TOAN LUONG T5 2025', so_tien: 22894000, thang: '05', nam_ky: 2025, doan: false },
+    { ngay: '17/06/2025', so_ct: 'U2', dien_giai: 'THANH TOAN LUON TAN TAN T5', so_tien: 5216000, thang: '05', nam_ky: 2025, doan: false },
+    { ngay: '28/07/2025', so_ct: 'U3', dien_giai: 'THANH TOAN LUONG KETOAN', so_tien: 3000000, thang: '06', nam_ky: 2025, doan: true }],
+    theo_thang: { '05': 28110000, '06': 3000000 }, tong: 31110000, canh_bao: ['Có khoản không ghi kỳ lương'] };
+  const fetch30 = [];
+  m.ctx.FormData = class { constructor() { this.d = {}; } append(k, v) { this.d[k] = v; } get(k) { return this.d[k]; } };
+  m.ctx.fetch = async (url, o) => { fetch30.push([url, o]); return { ok: true, json: async () => kqCk }; };
+  await m.ctx.blImportCk({ files: [{ name: 'so.xlsx' }], value: 'x' });
+  assert(/nhap-chuyen-khoan/.test(fetch30[0][0]) && fetch30[0][1].body.get('nam') == 2025, 'Gửi file + năm');
+  assert.strictEqual(m.ctx.document.getElementById('blKhTu').value, '1');
+  const ck30 = m.phanTu['blCkKq'].innerHTML;
+  assert(/T5: 28\.110\.000/.test(ck30) && /T6: 3\.000\.000/.test(ck30) && /tổng 31\.110\.000/.test(ck30) && /Có khoản không ghi kỳ lương/.test(ck30) && /Xem\/sửa tháng của từng khoản \(3 khoản\)/.test(ck30), 'Tóm tắt theo tháng + cảnh báo + bảng sửa');
+  // sửa tháng của 1 khoản (khoản đoán tháng) -> tổng theo tháng đổi; chọn "bỏ qua" -> không tính
+  m.ctx.blCkDoiThang(2, '07'); assert.strictEqual(JSON.stringify(m.ctx.blCkTheoThang()), '{"05":28110000,"07":3000000}');
+  m.ctx.blCkDoiThang(0, ''); assert.strictEqual(JSON.stringify(m.ctx.blCkTheoThang()), '{"05":5216000,"07":3000000}');
+  m.ctx.blCkDoiThang(0, '05');
+  // Tính: KHÔNG cần nhập tổng chi phí khi đã có file; gửi ck_theo_thang; hiển thị khớp
+  const kqKh = { thang: { '05': [dongMau('2', 'NV2', { chi_phi_luong: 29000000 })] }, tom_tat: { so_nguoi: 1, day_du: 1, thoi_vu: 0, so_thang: 2, tong_chi_phi: 29000000, muc_tieu: 29000000, da_co_ngoai: 0, can_them: 0,
+    tong_thuong_bh: 0, tong_tang_ca: 0, tong_thue: 0, canh_bao: [], ck: { '05': { file: 28110000, tt_luong: 28110000, chi_phi: 29000000, khop: true }, '07': { file: 3000000, tt_luong: 2900000, chi_phi: 3000000, khop: false } } } };
+  m.ctx.api = async (url, o) => { m.goiApi.push([url, JSON.parse(o.body)]); return kqKh; };
+  await m.ctx.blTinhKeHoach();
+  const goi30 = m.goiApi.find(([u]) => u.includes('/ke-hoach'))[1];
+  assert.strictEqual(JSON.stringify(goi30.ck_theo_thang), '{"05":28110000,"07":3000000}'); assert.strictEqual(goi30.muc_tieu, '');
+  const html30 = m.phanTu['blKhKq'].innerHTML;
+  assert(/Khớp lương chuyển khoản/.test(html30) && /T5 <b[^>]*>28\.110\.000<\/b> ✓/.test(html30) && /T7 <b[^>]*>2\.900\.000<\/b> ⚠ file 3\.000\.000/.test(html30), 'Hiện khớp/không khớp từng tháng');
+  // bỏ file + không nhập tổng -> báo lỗi, không gọi server
+  m.ctx.blBoCk(); m.goiApi.length = 0; await m.ctx.blTinhKeHoach(); assert.strictEqual(m.goiApi.length, 0, 'Không file + không tổng -> không gọi server');
+  console.log('PASS 30: import file lương chuyển khoản: đọc, tóm tắt theo tháng, sửa kỳ, tính khớp, bỏ file.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
