@@ -755,5 +755,29 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/Lỗi kết nối MISA/.test(els27['blMsKq'].innerHTML), 'Báo lỗi server');
   console.log('PASS 28: import thẳng vào MISA: nút, kiểm tra trước, xác nhận, ghi, lỗi.');
 
+  // ---- 29: "Làm full ngày công" trong Chi phí lương cả năm: gửi full_cong + trần phụ cấp; kết quả hiện ngưỡng 132tr ----
+  m = nap({ api: async () => ({}) });
+  m.ctx.blNam = 2025; m.ctx.blThang = '09'; m.ctx.blTS = {}; m.ctx.blDL = {};
+  const gia29 = { blKhTu: '9', blKhDen: '12', blKhTien: '50.000.000', blKhTc: '50', blKhTranCom: '730.000', blKhTranTp: '416.000', blKhTranDt: '1.000.000' };
+  let fc29 = true;
+  m.ctx.document.getElementById = (id) => (id === 'blKhFull' ? { checked: fc29 } : gia29[id] !== undefined ? { value: gia29[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
+  m.ctx.blMoKeHoach();
+  const hop29 = m.phanTu['blKeHoach'].innerHTML;
+  assert(/id="blKhFull"/.test(hop29) && /Làm full ngày công/.test(hop29) && /id="blKhTranCom"/.test(hop29) && /id="blKhTranTp"/.test(hop29) && /id="blKhTranDt"/.test(hop29) && /KHÔNG chịu thuế/.test(hop29), 'Có ô tick + 3 ô trần phụ cấp');
+  const kq29 = { thang: { '09': [dongMau('2', 'NV2', { ngay_lam_hd: 24, dong_bh: 0, chi_phi_luong: 12500000, thue_tncn: 0 })] },
+    tom_tat: { full_cong: true, so_nguoi: 1, day_du: 1, thoi_vu: 0, so_thang: 4, tong_chi_phi: 50000000, muc_tieu: 50000000, da_co_ngoai: 0, can_them: 50000000,
+      tong_thuong_bh: 10000000, tong_tang_ca: 5000000, tong_thue: 0, chiu_thue_nam_max: 41413336, nguong_chiu_thue: 44000000, canh_bao: [] } };
+  m.ctx.api = async (url, o) => { m.goiApi.push([url, JSON.parse(o.body)]); return kq29; };
+  await m.ctx.blTinhKeHoach();
+  const goi29 = m.goiApi.find(([u]) => u.includes('/ke-hoach'))[1];
+  assert.strictEqual(goi29.full_cong, true); assert.strictEqual(goi29.tran_pc.tien_com, '730.000'); assert.strictEqual(goi29.tran_pc.trang_phuc, '416.000'); assert.strictEqual(goi29.tran_pc.muc_dt, '1.000.000');
+  const html29 = m.phanTu['blKhKq'].innerHTML;
+  assert(/FULL ngày công, không khấu trừ 10%/.test(html29) && /41\.413\.336/.test(html29) && /44\.000\.000/.test(html29) && /dưới ngưỡng/.test(html29) && !/dưới 14 ngày không BHXH/.test(html29), 'Kết quả: full công + ngưỡng chịu thuế');
+  m.ctx.api = async () => Object.assign({}, kq29, { tom_tat: Object.assign({}, kq29.tom_tat, { chiu_thue_nam_max: 50000000 }) }); await m.ctx.blTinhKeHoach();
+  assert(/vượt ngưỡng/.test(m.phanTu['blKhKq'].innerHTML), 'Vượt ngưỡng thì báo đỏ');
+  fc29 = false; m.goiApi.length = 0; m.ctx.api = async (url, o) => { m.goiApi.push([url, JSON.parse(o.body)]); return kq29; }; await m.ctx.blTinhKeHoach();
+  assert.strictEqual(m.goiApi[0][1].full_cong, false, 'Không tick -> full_cong=false (cách cũ)');
+  console.log('PASS 29: chi phí lương cả năm: tick Làm full ngày công + trần phụ cấp + ngưỡng chịu thuế.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
