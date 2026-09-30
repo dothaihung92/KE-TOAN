@@ -4582,7 +4582,8 @@ const BL_COT=[
   {k:'bh_duoc_tru',t:'Bảo hiểm được trừ',so:1,tong:1},{k:'kiem_tra',t:'Kiểm tra số liệu',so:1},
   {k:'giam_tru_ban_than',t:'Giảm trừ bản thân',so:1},{k:'so_npt',t:'Số người phụ thuộc',nhap:1,so:1,dp:1},
   {k:'tien_giam_tru_npt',t:'Giảm trừ người phụ thuộc',so:1},{k:'tn_tinh_thue',t:'Thu nhập tính thuế',so:1,tong:1},
-  {k:'thue_tncn',t:'Thuế TNCN',so:1,tong:1,dam:1}];
+  {k:'thue_tncn',t:'Thuế TNCN',so:1,an:1},
+  {k:'thue_tay',t:'Thuế TNCN (sửa được)',nhap:1,so:1,tong:1,dam:1,hd:'thue_tncn',tayThue:1,w:100}];
 // Cột hiển thị: chỉ các phụ cấp có trong Danh Sách Nhân Viên (Tiền cơm, Xăng xe, Chức vụ, Điện thoại, Trang phục).
 // Mọi phụ cấp TÍNH THEO NGÀY ĐI LÀM (mức/công chuẩn x ngày làm): cột "PC ..." là số đã tính; muc = cột MỨC/tháng (lấy từ
 // Danh Sách Nhân Viên) chỉ hiện khi bấm nút "✎ Mức phụ cấp" để sửa tay;
@@ -4723,6 +4724,7 @@ function blVeBang(){
       if(c.tickCk)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${blLaCk(v)?'checked':''} onchange="blDoiCk(${ri},this.checked)" title="Tick = người này nhận lương bằng chuyển khoản; bỏ tick = nhận tiền mặt" style="width:17px;height:17px;cursor:pointer"></td>`;
       else if(c.k==='ten'&&(r.ten||r.ma))h+=`<td data-r="${ri}" data-k="ten" onclick="blMoNvCuaNguoi(${ri})" title="Bấm để mở Danh Sách Nhân Viên (dòng của người này viền đỏ)" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;cursor:pointer;${co(c,1)}">${noiDung} <span style="color:#1f6b4a;font-size:11px">▾</span></td>`;
       else if(c.tick)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${(v===0||v==='0'||v===false)?'':'checked'} onchange="blDoiBH(${ri},this.checked)" title="Tick = có đóng BHXH/BHYT/BHTN; bỏ tick = không tính BH" style="width:17px;height:17px;cursor:pointer"></td>`;
+      else if(c.tayThue){const tay=v!==''&&v!=null;h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" title="${tay?'Đã chỉnh tay — xóa số trong ô để tính tự động lại':'Tự tính — gõ số để tự chỉnh thuế TNCN của người này'}" style="padding:4px 8px;border:1px solid ${tay?'#93b4f0':'#e3e3e3'};background:${tay?'#eef4ff':'#fbfff9'};white-space:nowrap;text-align:right;font-weight:700;${tay?'color:#1d4ed8;':''}">${noiDung}${tay?' ✎':''}</td>`}
       else if(c.nhap)h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;${c.so?'text-align:right;':''}${co(c,1)}">${noiDung}</td>`;
       else h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:${kt?'#fde2e2':'#f4f6f5'};white-space:nowrap;text-align:right;${c.dam?'font-weight:700;':''}">${noiDung}</td>`;
     });
@@ -4730,7 +4732,7 @@ function blVeBang(){
   });
   if(rows.length){
     h+='<tr style="background:#eef6f0;font-weight:700">';
-    cots.forEach((c,i)=>{h+=`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right;position:sticky;bottom:0;background:#eef6f0;${c.k==='ma'||c.k==='ten'?co(c,2):''}">${c.k==='ten'?'TỔNG CỘNG':(c.tong?blDinhDang(rows.reduce((s,r)=>s+(Number(r[c.k])||0),0)):'')}</td>`;});
+    cots.forEach((c,i)=>{h+=`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right;position:sticky;bottom:0;background:#eef6f0;${c.k==='ma'||c.k==='ten'?co(c,2):''}">${c.k==='ten'?'TỔNG CỘNG':(c.tong?blDinhDang(rows.reduce((s,r)=>s+(Number(blGiaTriHienThi(r,c))||0),0)):'')}</td>`;});
     h+='<td style="position:sticky;bottom:0;background:#eef6f0"></td></tr>';
   }
   h+='</tbody></table>';
@@ -4789,7 +4791,8 @@ function blSuaO(td){
   if(!rows||!rows[ri])return;
   const cotHd=BL_COT.find(c=>c.k===k);
   const cu=cotHd?blGiaTriHienThi(rows[ri],cotHd):rows[ri][k];
-  const moi=td.textContent.trim();
+  let moi=td.textContent.trim();
+  if(cotHd&&cotHd.tayThue)moi=moi.replace('✎','').trim();      // ô thuế đã chỉnh tay có dấu ✎ cuối
   if(String(cu==null?'':cu)===moi)return;
   const cot=BL_COT.find(c=>c.k===k);
   if(cot&&cot.so&&blDinhDang(cu,cot.dp)===moi)return;   // chỉ khác định dạng hiển thị
@@ -4921,7 +4924,7 @@ async function blSaoChepThangTruoc(){
   if((blDL[blThang]||[]).length&&!confirm(`Tháng ${parseInt(blThang,10)} đã có dữ liệu — thay bằng bản sao của tháng ${t}?`))return;
   // Sao chép mọi khoản cố định; các khoản phát sinh riêng từng tháng (thưởng bán hàng, thưởng T13, tăng ca) đặt lại 0.
   // công chuẩn mỗi tháng một khác -> sao chép về "theo lịch tháng" (ngay_cong=0)
-  blDL[blThang]=blDL[nguon].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);c.thuong_bh=0;c.thuong_t13=0;c.tang_ca=0;c.ngay_lam='';c.ngay_cong=0;return c});
+  blDL[blThang]=blDL[nguon].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);c.thuong_bh=0;c.thuong_t13=0;c.tang_ca=0;c.ngay_lam='';c.ngay_cong=0;c.thue_tay='';return c});
   blBan=true;blVeTabs();blVeBang();blVeInfo();await blTinhLai(blThang);
   toast(`✓ Đã sao chép từ tháng ${t} (thưởng bán hàng/thưởng T13/tăng ca đặt lại 0 — nhập lại nếu có)`,'ok');
 }
@@ -4975,7 +4978,7 @@ function blMoThamSo(){
       <span>Giảm trừ bản thân ${om('blTsBt',t.giam_tru_ban_than)} đ</span>
       <span>Giảm trừ mỗi người phụ thuộc ${om('blTsNpt',t.giam_tru_npt)} đ</span>
       <span>Hệ số quy đổi tăng ca ${o('blTsHs',Number(t.he_so_tang_ca).toFixed(4),70)}</span>
-      <label title="Tick: công ty chịu thuế 10% thay người làm dưới 14 ngày -> họ nhận ĐỦ (TT lương = Chi phí lương), thuế vẫn được tính và nộp. Bỏ tick: thuế 10% trừ vào tiền thực lãnh của họ."><input type="checkbox" id="blTsCt" ${t.cong_ty_chiu_thue_10===false?'':'checked'}> Công ty chịu thuế 10% thay (thực lãnh = chi phí lương)</label>
+      <label title="Mặc định KHÔNG tick: thuế 10% trừ vào tiền thực lãnh của người làm dưới 14 ngày (TT lương = Chi phí lương − thuế). Tick: công ty chịu thuế thay, họ nhận đủ."><input type="checkbox" id="blTsCt" ${t.thue_10_cong_ty_chiu?'checked':''}> Công ty chịu thuế 10% thay (người làm &lt;14 ngày nhận đủ)</label>
       <span title="Người không đóng BHXH (làm dưới 14 ngày/tháng) bị khấu trừ 10% thuế TNCN khi thu nhập chịu thuế từ mức này trở lên">Ngưỡng khấu trừ 10% ${om('blTsN10',t.nguong_khau_tru_10!=null?t.nguong_khau_tru_10:2000000)} đ</span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center;margin-top:8px">
@@ -5038,7 +5041,7 @@ async function blApDungThamSo(){
     thueMoi={tu_thang:g('blMoiTu'),giam_tru_ban_than:g('blMoiBt'),giam_tru_npt:g('blMoiNpt'),bac_thue:bacMoi};
   }
   blTS={ngay_le:le,thue_moi:thueMoi,giam_tru_ban_than:g('blTsBt'),giam_tru_npt:g('blTsNpt'),he_so_tang_ca:g('blTsHs'),nguong_khau_tru_10:g('blTsN10'),
-    cong_ty_chiu_thue_10:(()=>{const e=document.getElementById('blTsCt');return e&&e.checked!==undefined?e.checked:true})(),
+    thue_10_cong_ty_chiu:(()=>{const e=document.getElementById('blTsCt');return e&&e.checked!==undefined?e.checked:false})(),
     bh_dn:{bhxh:g('blTsDx'),bhyt:g('blTsDy'),bhtn:g('blTsDt')},bh_nld:{bhxh:g('blTsNx'),bhyt:g('blTsNy'),bhtn:g('blTsNt')},bac_thue:bac};
   blBan=true;
   // server chuẩn hoá tham số (ép số, sắp bậc thuế) — lấy lại bản chuẩn để hiển thị/lưu

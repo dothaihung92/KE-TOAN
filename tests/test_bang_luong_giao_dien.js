@@ -486,13 +486,44 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(!/#fde2e2/.test(m.phanTu['blBangWrap'].innerHTML), 'Kiểm tra khớp thuế thực trừ -> không tô đỏ');
   m.ctx.blDL = { '09': [dongMau('1', 'A', { kiem_tra: 5000, thue_tncn: 100, thue_tru_luong: 100 })] };
   m.ctx.blVeBang(); assert(/#fde2e2/.test(m.phanTu['blBangWrap'].innerHTML), 'Lệch thật thì vẫn tô đỏ');
-  // tham số: ô tick công ty chịu thuế 10%; áp dụng gửi giá trị
-  m.ctx.blTS = { ngay_cong_chuan: 26, giam_tru_ban_than: 11000000, giam_tru_npt: 4400000, he_so_tang_ca: 1.33, bh_dn: { bhxh: 17.5, bhyt: 3, bhtn: 1 }, bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 }, bac_thue: [[0, 5]], thue_moi: null, cong_ty_chiu_thue_10: true };
+  // tham số: ô tick "công ty chịu thuế 10% thay" — mặc định KHÔNG tick (thuế trừ vào thực lãnh)
+  const tsMau = { ngay_cong_chuan: 26, giam_tru_ban_than: 11000000, giam_tru_npt: 4400000, he_so_tang_ca: 1.33, bh_dn: { bhxh: 17.5, bhyt: 3, bhtn: 1 }, bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 }, bac_thue: [[0, 5]], thue_moi: null };
+  m.ctx.blTS = Object.assign({}, tsMau);
   m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
-  assert(/id="blTsCt" checked/.test(m.phanTu['blThamSo'].innerHTML) && /Công ty chịu thuế 10% thay/.test(m.phanTu['blThamSo'].innerHTML));
-  m.ctx.blTS.cong_ty_chiu_thue_10 = false; m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
-  assert(!/id="blTsCt" checked/.test(m.phanTu['blThamSo'].innerHTML), 'Đã bỏ tick thì hiển thị không tick');
+  assert(/id="blTsCt" >/.test(m.phanTu['blThamSo'].innerHTML) && /Công ty chịu thuế 10% thay/.test(m.phanTu['blThamSo'].innerHTML), 'Mặc định không tick');
+  m.ctx.blTS = Object.assign({}, tsMau, { thue_10_cong_ty_chiu: true }); m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
+  assert(/id="blTsCt" checked/.test(m.phanTu['blThamSo'].innerHTML), 'Đã tick thì hiển thị tick');
   console.log('PASS 21: cột Chuyển khoản (tick) thay Ghi chú; kiểm tra số liệu theo thuế thực trừ; tham số công ty chịu thuế 10%.');
+
+  // ---- 22: cột Thuế TNCN cho người dùng tự chỉnh: trống = tự tính (hiện số tính), gõ số = chỉnh tay, xóa số = trở lại tự tính ----
+  m = nap({ api: async (url, o) => ({ rows: JSON.parse(o.body).rows, tham_so: {} }) });
+  m.ctx.blThang = '09'; m.ctx.blNam = 2024; m.ctx.blTS = {};
+  m.ctx.blDL = { '09': [dongMau('1', 'A', { thue_tay: '', thue_tncn: 427885 }), dongMau('2', 'B', { thue_tay: 300000, thue_tncn: 300000, thue_da_chinh: true }), dongMau('3', 'C', { thue_tay: 0, thue_tncn: 0 })] };
+  m.ctx.blVeBang();
+  const b22 = m.phanTu['blBangWrap'].innerHTML;
+  const cellThue = b22.match(/<td [^>]*data-k="thue_tay"[^>]*>[^<]*<\/td>/g);
+  assert.strictEqual(cellThue.length, 3); assert(!/data-k="thue_tncn"/.test(b22));
+  assert(/contenteditable/.test(cellThue[0]) && />427\.885</.test(cellThue[0]) && /Tự tính/.test(cellThue[0]) && !/✎/.test(cellThue[0]), 'Ô tự tính: hiện số tính, gõ được');
+  assert(/300\.000 ✎/.test(cellThue[1]) && /Đã chỉnh tay/.test(cellThue[1]) && /#1d4ed8/.test(cellThue[1]), 'Ô đã chỉnh tay có dấu ✎ + màu khác');
+  assert(/>0 ✎</.test(cellThue[2]), 'Chỉnh tay = 0 (miễn thuế) vẫn được coi là đã chỉnh');
+  assert(/Thuế TNCN \(sửa được\)/.test(b22));
+  assert(/300\.000/.test(b22) && /727\.885/.test(b22), 'Dòng tổng cộng dùng số thuế đang hiển thị (427.885 + 300.000 + 0)');
+  // gõ số -> lưu vào thue_tay (chuỗi gõ tay), gọi server tính lại; gõ lại đúng số tự tính -> không coi là chỉnh
+  m.ctx.blSuaO({ dataset: { r: '0', k: 'thue_tay' }, textContent: '427.885' }); assert.strictEqual(m.ctx.blBan, false); assert.strictEqual(m.goiApi.length, 0);
+  m.ctx.blSuaO({ dataset: { r: '0', k: 'thue_tay' }, textContent: '500.000' });
+  assert.strictEqual(m.ctx.blDL['09'][0].thue_tay, '500.000'); assert.strictEqual(m.ctx.blBan, true);
+  assert.strictEqual(m.goiApi[m.goiApi.length - 1][1].rows[0].thue_tay, '500.000', 'Gửi số chỉnh tay cho server tính lại');
+  // xóa số trong ô đã chỉnh tay (hiện "300.000 ✎") -> trở lại tự tính
+  m.ctx.blSuaO({ dataset: { r: '1', k: 'thue_tay' }, textContent: '300.000 ✎' }); assert.strictEqual(m.ctx.blBan, true, 'Không đổi gì: giữ nguyên (đã tính lại ở lần trước)');
+  m.ctx.blBan = false;
+  m.ctx.blSuaO({ dataset: { r: '1', k: 'thue_tay' }, textContent: '' });
+  assert.strictEqual(m.ctx.blDL['09'][1].thue_tay, '', 'Xóa số -> tự tính lại'); assert.strictEqual(m.ctx.blBan, true);
+  // lưu gửi thue_tay; sao chép tháng trước bỏ thuế chỉnh tay
+  await m.ctx.blLuu(true);
+  assert.strictEqual(m.goiApi[m.goiApi.length - 1][1].thang['09'][0].thue_tay, '500.000');
+  m.ctx.blDL = { '08': [dongMau('1', 'A', { thue_tay: 123456 })] }; m.ctx.blThang = '09'; await m.ctx.blSaoChepThangTruoc();
+  assert.strictEqual(m.ctx.blDL['09'][0].thue_tay, '', 'Sao chép tháng: không mang theo thuế đã chỉnh tay');
+  console.log('PASS 22: cột Thuế TNCN tự chỉnh được (trống = tự tính, gõ số = chỉnh tay, xóa = tự tính lại).');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
