@@ -311,40 +311,60 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(m.goiApi.find(([u]) => u.includes('bang-luong-tinh'))[1].tham_so.thue_moi, null, 'Bỏ tick -> không đổi giữa năm');
   console.log('PASS 16: mục thuế TNCN thay đổi giữa năm (từ 7/2026) trong tham số năm + dòng thông tin theo tháng.');
 
-  // ---- 17: bấm tên người lao động -> danh sách nhân viên, tô viền ĐỎ người đang chọn; chọn người khác đổi dòng ----
-  const dsNv = [dongMau('101', 'Trần A', { chuc_vu: 'KD', luong_cb: 5000000 }), dongMau('102', 'Nguyễn B', { chuc_vu: 'KT', luong_cb: 7000000, tien_com: 900000 }),
-    dongMau('103', 'Lê C', { luong_cb: 6000000 })];
-  m = nap({ api: (url, o) => (url.includes('tu-nhan-vien') ? { rows: JSON.parse(JSON.stringify(dsNv)) } : { rows: JSON.parse(o.body).rows, tham_so: JSON.parse(o.body).tham_so }) });
+  // ---- 17: bấm tên người lao động -> chuyển sang Danh Sách Nhân Viên, viền ĐỎ dòng của người đó; có nút quay lại ----
+  m = nap();
+  let moNv = [];
+  m.ctx.moDanhSachNhanVien = (giu) => moNv.push(giu);
   m.ctx.blNam = 2026; m.ctx.blThang = '02'; m.ctx.blTS = {};
-  m.ctx.blDL = { '02': [dongMau('101', 'Trần A', { thuong_bh: 55 }), dongMau('103', 'Lê C')] };
+  m.ctx.blDL = { '02': [dongMau('101', 'Trần A'), dongMau('', 'Lê C'), dongMau('', '')] };
   m.ctx.blVeBang();
   const tdTen = m.phanTu['blBangWrap'].innerHTML.match(/<td [^>]*data-k="ten"[^>]*>/g);
-  assert(tdTen.length === 2 && /onclick="blMoChonNv\(0\)"/.test(tdTen[0]) && !/contenteditable/.test(tdTen[0]), 'Ô tên bấm được, không gõ trực tiếp');
-  await m.ctx.blMoChonNv(0);
-  let hop = m.phanTu['blChonNv'].innerHTML;
-  assert(/display:block/.test(m.phanTu['blChonNv'].style.cssText), 'Danh sách hiện ra');
-  assert.strictEqual((hop.match(/class="blNvMuc/g) || []).length, 3, 'Hiện đủ danh sách 3 nhân viên');
-  const muc = hop.split('class="blNvMuc').slice(1);
-  assert(/blNvDang/.test(muc[0]) && /2px solid #d00000/.test(muc[0]), 'Người đang chọn (Trần A) viền đỏ');
-  assert(!/2px solid #d00000/.test(muc[1]) && !/2px solid #d00000/.test(muc[2]), 'Người khác không viền đỏ');
-  assert(/đã có ở dòng khác/.test(muc[2]), 'Người đã có ở dòng khác được đánh dấu');
-  // chọn người trùng dòng khác -> chặn
-  await m.ctx.blChonNvChot(2);
-  assert.strictEqual(m.ctx.blDL['02'][0].ma, '101'); assert(m.toasts.some(t => /đã có ở dòng khác/.test(t[0])));
-  // chọn Nguyễn B -> đổi dòng: người + lương/phụ cấp theo danh sách, khoản nhập riêng giữ nguyên; tính lại
-  await m.ctx.blChonNvChot(1);
-  const dong0 = m.ctx.blDL['02'][0];
-  assert.strictEqual(dong0.ma, '102'); assert.strictEqual(dong0.ten, 'Nguyễn B'); assert.strictEqual(dong0.luong_cb, 7000000);
-  assert.strictEqual(dong0.tien_com, 900000); assert.strictEqual(dong0.thuong_bh, 55, 'Thưởng nhập riêng giữ nguyên');
-  assert.strictEqual(m.ctx.blBan, true); assert.strictEqual(m.phanTu['blChonNv'].style.display, 'none');
-  // mở lại: viền đỏ chuyển sang Nguyễn B; lọc theo tên
-  await m.ctx.blMoChonNv(0);
-  const muc2 = m.phanTu['blChonNv'].innerHTML.split('class="blNvMuc').slice(1);
-  assert(/2px solid #d00000/.test(muc2[1]) && !/2px solid #d00000/.test(muc2[0]));
-  m.ctx.blVeChonNv('lê');
-  assert.strictEqual((m.phanTu['blChonNv'].innerHTML.match(/class="blNvMuc/g) || []).length, 1);
-  m.ctx.blDongChonNv(); assert.strictEqual(m.phanTu['blChonNv'].style.display, 'none');
-  console.log('PASS 17: bấm tên -> danh sách nhân viên, viền đỏ người đang chọn, chọn người khác đổi dòng, chặn trùng.');
+  assert(/onclick="blMoNvCuaNguoi\(0\)"/.test(tdTen[0]) && !/contenteditable/.test(tdTen[0]), 'Dòng có người: ô tên bấm được -> mở Danh Sách Nhân Viên');
+  assert(/onclick="blMoNvCuaNguoi\(1\)"/.test(tdTen[1]), 'Dòng chỉ có tên (không mã) vẫn bấm được');
+  assert(/contenteditable/.test(tdTen[2]) && !/blMoNvCuaNguoi/.test(tdTen[2]), 'Dòng trống (thêm tay): ô tên gõ được');
+  await m.ctx.blMoNvCuaNguoi(0);
+  assert.deepStrictEqual(moNv, [true], 'Chuyển sang màn Danh Sách Nhân Viên');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(m.ctx.nvTuBl)), { thang: '02', ma: '101', ten: 'Trần A' });
+  // có thay đổi chưa lưu: hỏi, OK -> lưu rồi chuyển; Hủy -> ở lại
+  m = nap({ confirm: () => false, api: async () => ({}) });
+  moNv = []; m.ctx.moDanhSachNhanVien = (g) => moNv.push(g);
+  m.ctx.blNam = 2026; m.ctx.blThang = '02'; m.ctx.blDL = { '02': [dongMau('101', 'Trần A')] }; m.ctx.blBan = true;
+  await m.ctx.blMoNvCuaNguoi(0);
+  assert.strictEqual(moNv.length, 0, 'Hủy -> ở lại Bảng Lương, không mất dữ liệu'); assert.strictEqual(m.goiApi.length, 0);
+  m = nap({ confirm: () => true, api: async (u, o) => ({ tham_so: {}, thang: JSON.parse(o.body).thang, cac_nam: [2026] }) });
+  moNv = []; m.ctx.moDanhSachNhanVien = (g) => moNv.push(g);
+  m.ctx.blNam = 2026; m.ctx.blThang = '02'; m.ctx.blDL = { '02': [dongMau('101', 'Trần A')] }; m.ctx.blBan = true;
+  await m.ctx.blMoNvCuaNguoi(0);
+  assert.strictEqual(moNv.length, 1); assert(m.goiApi.some(([u]) => u.includes('/api/bang-luong/7?nam=2026')), 'OK -> lưu bảng lương trước khi chuyển');
+
+  // --- phía Danh Sách Nhân Viên: chạy ĐÚNG code veGridNhanVien trong index.html ---
+  const n0 = html.indexOf('function veGridNhanVien(){'), n1 = html.indexOf('function nvSuaO(', n0);
+  const nvJs = html.slice(n0, n1);
+  const nvEnv = { nvHeader: ['STT', 'Mã NV', 'Họ và tên', 'Lương Cơ bản'], nvFilters: {}, nvChon: null, nvEsc: (x) => String(x), nvTuBl: null,
+    nvRows: [[1, '101', 'Trần A', 5000000], [2, '102', 'Nguyễn B', 6000000], [3, '', 'Lê C', 4000000]],
+    nvRowsLoc: () => [0, 1, 2], console };
+  const nvEls = { nvTableWrap: { innerHTML: '' }, nvTuBl: { innerHTML: '' } };
+  nvEnv.document = { getElementById: (id) => nvEls[id], querySelector: () => ({ scrollIntoView() { nvEnv.__cuon = (nvEnv.__cuon || 0) + 1; } }) };
+  nvEnv.moBangLuongNam = (t) => { nvEnv.__ve = t; };
+  vm.createContext(nvEnv);
+  vm.runInContext(nvJs + '\nvar nvSuaOCuoi;', nvEnv);
+  vm.runInContext('nvTuBl=null;veGridNhanVien()', nvEnv);
+  assert(!/d00000/.test(nvEls.nvTableWrap.innerHTML) && nvEls.nvTuBl.innerHTML === '', 'Mở từ menu thường: không viền đỏ');
+  vm.runInContext("nvTuBl={thang:'02',ma:'102',ten:'Nguyễn B'};veGridNhanVien()", nvEnv);
+  const tr = nvEls.nvTableWrap.innerHTML.split('<tr').filter((x) => /data-r=/.test(x));
+  assert(!/d00000/.test(tr[0]) && /data-nvsel="1"/.test(tr[1]) && /inset 0 2px 0 #d00000/.test(tr[1]) && !/d00000/.test(tr[2]), 'Chỉ dòng của Nguyễn B (Mã 102) viền đỏ');
+  assert(/Người lao động đang chọn: <b>Nguyễn B<\/b>/.test(nvEls.nvTuBl.innerHTML) && /Quay lại Bảng Lương \(tháng 2\)/.test(nvEls.nvTuBl.innerHTML));
+  assert.strictEqual(nvEnv.__cuon, 1, 'Tự cuộn tới dòng được chọn');
+  vm.runInContext('veGridNhanVien()', nvEnv);
+  assert.strictEqual(nvEnv.__cuon, 1, 'Lọc/vẽ lại không cuộn lại');
+  // không có mã -> khớp theo tên; không thấy -> báo
+  vm.runInContext("nvTuBl={thang:'02',ma:'',ten:'Lê C'};veGridNhanVien()", nvEnv);
+  assert(/data-nvsel="1"/.test(nvEls.nvTableWrap.innerHTML.split('<tr').filter((x) => /data-r=/.test(x))[2]));
+  vm.runInContext("nvTuBl={thang:'02',ma:'999',ten:'Không có'};veGridNhanVien()", nvEnv);
+  assert(!/data-nvsel/.test(nvEls.nvTableWrap.innerHTML) && /Không thấy <b>Không có<\/b>/.test(nvEls.nvTuBl.innerHTML));
+  vm.runInContext('nvVeBangLuong()', nvEnv);
+  assert.strictEqual(nvEnv.__ve, '02'); assert.strictEqual(vm.runInContext('nvTuBl', nvEnv), null);
+  console.log('PASS 17: bấm tên -> mở Danh Sách Nhân Viên, viền đỏ dòng người đó (theo mã, không có mã theo tên), nút quay lại đúng tháng.');
 
   // ---- 18: mọi phụ cấp tính theo ngày đi làm: cột PC là số đã tính (chỉ đọc); nút "Mức phụ cấp" hiện cột MỨC để sửa ----
   m = nap();

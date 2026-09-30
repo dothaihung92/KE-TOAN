@@ -4337,6 +4337,7 @@ const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hi�
                    'Ngày cấp','Tháng/Năm vào làm','Chức vụ','Lương Cơ bản',
                    'PC Tiền cơm','PC Xăng xe','PC Chức vụ','PC Điện thoại','PC Trang phục'];
 let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={};
+let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
 function nvEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function moBangLuong(){
   if(!current){toast('Chọn công ty trước','err');return}
@@ -4359,7 +4360,8 @@ function moBangLuong(){
       </div>
     </div>`;
 }
-function moDanhSachNhanVien(){
+function moDanhSachNhanVien(tuBangLuong){
+  if(!tuBangLuong)nvTuBl=null;    // mở từ menu thường: không tô viền
   document.getElementById('nhapLieuBody').innerHTML=`
     <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -4374,6 +4376,7 @@ function moDanhSachNhanVien(){
         <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
         <button class="btn ghost sm" onclick="nvXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
       </div>
+      <div id="nvTuBl"></div>
       <div id="nvInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó.</div>
       <div id="nvTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
@@ -4418,13 +4421,16 @@ function veGridNhanVien(){
   html+='</tr><tr>';
   nvHeader.forEach((h,ci)=>{html+=`<th style="position:sticky;top:29px;background:#f8eef5;padding:2px;border:1px solid #ddd"><input value="${nvEsc(nvFilters[ci]||'')}" oninput="nvFilters[${ci}]=this.value;veGridNhanVien()" placeholder="lọc..." style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>`;});
   html+='</tr></thead><tbody>';
+  const dong=nvTuBl?nvDongCanTo():-1;
   idxHien.forEach(ri=>{
     const row=nvRows[ri];
-    html+=`<tr>`;
+    const to=ri===dong;      // người vừa bấm ở Bảng Lương -> viền đỏ cả dòng
+    html+=`<tr${to?' data-nvsel="1"':''}>`;
     nvHeader.forEach((h,ci)=>{
       const v=row[ci]==null?'':row[ci];
       const chon=nvChon&&nvChon.r===ri;
-      html+=`<td contenteditable="true" data-r="${ri}" data-c="${ci}" onfocus="nvChon={r:${ri},c:${ci}}" onblur="nvSuaO(this)" style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;min-width:70px${chon?';background:#fdf0f8':''}">${nvEsc(v)}</td>`;
+      const vien=to?`;background:#fff5f5;box-shadow:inset 0 2px 0 #d00000,inset 0 -2px 0 #d00000${ci===0?',inset 2px 0 0 #d00000':''}${ci===nvHeader.length-1?',inset -2px 0 0 #d00000':''}`:(chon?';background:#fdf0f8':'');
+      html+=`<td contenteditable="true" data-r="${ri}" data-c="${ci}" onfocus="nvChon={r:${ri},c:${ci}}" onblur="nvSuaO(this)" style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;min-width:70px${vien}">${nvEsc(v)}</td>`;
     });
     html+='</tr>';
   });
@@ -4433,7 +4439,29 @@ function veGridNhanVien(){
   if(!idxHien.length){
     wrap.innerHTML+=`<div style="padding:20px;text-align:center;color:var(--muted)">${nvRows.length?'Không có dòng nào khớp bộ lọc.':'Chưa có dữ liệu.'}</div>`;
   }
+  nvVeTuBl(dong);
 }
+// Dòng của người vừa bấm ở Bảng Lương: khớp theo Mã NV, không có mã thì theo Họ và tên.
+function nvDongCanTo(){
+  if(!nvTuBl)return -1;
+  const ma=nvTuBl.ma.toLowerCase(),ten=nvTuBl.ten.toLowerCase();
+  const cMa=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='mã nv');
+  const cTen=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='họ và tên');
+  const g=(r,c)=>c<0?'':String(r[c]==null?'':r[c]).trim().toLowerCase();
+  let i=ma&&cMa>=0?nvRows.findIndex(r=>g(r,cMa)===ma):-1;
+  if(i<0&&ten&&cTen>=0)i=nvRows.findIndex(r=>g(r,cTen)===ten);
+  return i;
+}
+function nvVeTuBl(dong){
+  const b=document.getElementById('nvTuBl');if(!b)return;
+  if(!nvTuBl){b.innerHTML='';return}
+  const ten=nvTuBl.ten||nvTuBl.ma;
+  b.innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;padding:8px 10px;border:1px solid #f1c5c5;background:#fff5f5;border-radius:8px;font-size:13px">
+    <button class="btn sm" style="background:#1f6b4a" onclick="nvVeBangLuong()">← Quay lại Bảng Lương (tháng ${parseInt(nvTuBl.thang,10)})</button>
+    <span>${dong>=0?`Người lao động đang chọn: <b>${nvEsc(ten)}</b> — dòng viền <b style="color:#d00000">đỏ</b>`:`⚠ Không thấy <b>${nvEsc(ten)}</b> trong Danh Sách Nhân Viên (chưa có hoặc khác mã/tên)`}. Sửa lương/phụ cấp ở đây rồi 💾 Lưu, sau đó vào Bảng Lương bấm "Nạp từ Danh Sách Nhân Viên" để cập nhật.</span></div>`;
+  if(dong>=0&&!nvTuBl.daCuon){nvTuBl.daCuon=true;const tr=document.querySelector('#nvTableWrap tr[data-nvsel]');if(tr&&tr.scrollIntoView)tr.scrollIntoView({block:'center'})}
+}
+function nvVeBangLuong(){const t=nvTuBl&&nvTuBl.thang;nvTuBl=null;moBangLuongNam(t)}
 function nvSuaO(td){
   const r=+td.dataset.r, c=+td.dataset.c;
   if(!nvRows[r])return;
@@ -4552,11 +4580,11 @@ function blDongTrong(){
   d.ngay_cong=0;d.ngay_lam='';d.ghi_chu='CK';d.dong_bh=1;
   return d;
 }
-async function moBangLuongNam(){
+async function moBangLuongNam(thangGiu){
   if(!current){toast('Chọn công ty trước','err');return}
   let nam=parseInt(localStorage.getItem('blNam')||'',10);
   if(!(nam>=2000&&nam<=2100))nam=new Date().getFullYear();
-  blNam=nam;blThang=String(new Date().getMonth()+1).padStart(2,'0');blBan=false;
+  blNam=nam;blThang=(thangGiu&&BL_THANG.includes(thangGiu))?thangGiu:String(new Date().getMonth()+1).padStart(2,'0');blBan=false;
   document.getElementById('nhapLieuBody').innerHTML=`
     <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -4579,7 +4607,6 @@ async function moBangLuongNam(){
         <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
       </div>
       <div id="blThamSo" style="display:none"></div>
-      <div id="blChonNv" style="display:none"></div>
       <div id="blTabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
       <div id="blInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div id="blBangWrap" style="overflow:auto;max-height:62vh;border:1px solid #ddd;border-radius:8px"></div>
@@ -4654,7 +4681,7 @@ function blVeBang(){
       const v=r[c.k];
       const kt=c.k==='kiem_tra'&&Math.abs((r.kiem_tra||0)-(r.thue_tncn||0))>=1;
       const noiDung=c.so?blDinhDang(blGiaTriHienThi(r,c),c.dp):xkEsc(v==null?'':v);
-      if(c.k==='ten')h+=`<td data-r="${ri}" data-k="ten" onclick="blMoChonNv(${ri})" title="Bấm để chọn người lao động trong Danh Sách Nhân Viên" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;cursor:pointer;${co(c,1)}">${noiDung} <span style="color:#1f6b4a;font-size:11px">▾</span></td>`;
+      if(c.k==='ten'&&(r.ten||r.ma))h+=`<td data-r="${ri}" data-k="ten" onclick="blMoNvCuaNguoi(${ri})" title="Bấm để mở Danh Sách Nhân Viên (dòng của người này viền đỏ)" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;cursor:pointer;${co(c,1)}">${noiDung} <span style="color:#1f6b4a;font-size:11px">▾</span></td>`;
       else if(c.tick)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${(v===0||v==='0'||v===false)?'':'checked'} onchange="blDoiBH(${ri},this.checked)" title="Tick = có đóng BHXH/BHYT/BHTN; bỏ tick = không tính BH" style="width:17px;height:17px;cursor:pointer"></td>`;
       else if(c.nhap)h+=`<td contenteditable="true" data-r="${ri}" data-k="${c.k}" onblur="blSuaO(this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;${c.so?'text-align:right;':''}${co(c,1)}">${noiDung}</td>`;
       else h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:${kt?'#fde2e2':'#f4f6f5'};white-space:nowrap;text-align:right;${c.dam?'font-weight:700;':''}">${noiDung}</td>`;
@@ -4729,59 +4756,15 @@ function blSuaO(td){
   rows[ri][k]=moi;blBan=true;blVeInfo();
   blTinhLai(blThang);
 }
-/* Bấm tên người lao động -> hiện danh sách nhân viên (Danh Sách Nhân Viên), tô viền ĐỎ người đang chọn; chọn người khác
-   để đổi dòng sang người đó (lương cơ bản + phụ cấp lấy theo danh sách; ngày công/thưởng/tăng ca của dòng giữ nguyên). */
-let blDsNv=[],blChonRi=-1;
-function blKeyNv(r){return (r.ma||r.ten||'').toString().trim().toLowerCase()}
-async function blMoChonNv(ri){
-  const rows=blDL[blThang];if(!rows||!rows[ri])return;
-  blChonRi=ri;
-  try{
-    const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}`);
-    blDsNv=d.rows||[];
-  }catch(e){toast('Lỗi tải Danh Sách Nhân Viên: '+e.message,'err');return}
-  blVeChonNv('');
-}
-function blVeChonNv(loc){
-  const w=document.getElementById('blChonNv');if(!w)return;
-  const rows=blDL[blThang]||[],hien=rows[blChonRi];if(!hien){w.style.display='none';return}
-  const keyHien=blKeyNv(hien),loai=(loc||'').toString().trim().toLowerCase();
-  const daCo=new Set(rows.filter((_,i)=>i!==blChonRi).map(blKeyNv));
-  const ds=blDsNv.map((r,i)=>({r,i})).filter(({r})=>!loai||((r.ma||'')+' '+(r.ten||'')+' '+(r.chuc_vu||'')).toLowerCase().includes(loai));
-  w.style.cssText='display:block;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;overflow:auto';
-  w.innerHTML=`<div onclick="event.stopPropagation()" style="background:#fff;max-width:520px;margin:6vh auto;border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px rgba(0,0,0,.3)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b style="color:#1f6b4a">👥 Chọn người lao động (tháng ${parseInt(blThang,10)}/${blNam})</b>
-      <button class="btn ghost sm" onclick="blDongChonNv()">✕ Đóng</button></div>
-    <input id="blChonNvTim" value="${xkEsc(loc||'')}" oninput="blVeChonNv(this.value)" onkeydown="if(event.key==='Escape')blDongChonNv()" placeholder="Tìm theo mã / tên / chức vụ..." style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #ccc;border-radius:8px;margin-bottom:8px">
-    <div style="max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:6px">${
-      ds.length?ds.map(({r,i})=>{
-        const dang=blKeyNv(r)===keyHien, trung=!dang&&daCo.has(blKeyNv(r));
-        return `<div class="blNvMuc${dang?' blNvDang':''}" data-i="${i}" onclick="blChonNvChot(${i})" style="cursor:${trung?'not-allowed':'pointer'};padding:8px 10px;border-radius:8px;border:${dang?'2px solid #d00000':'1px solid #ddd'};background:${dang?'#fff5f5':trung?'#f3f3f3':'#fff'};opacity:${trung?.6:1}">
-          <div style="font-weight:700">${xkEsc(r.ten||'')} <span style="font-weight:400;color:var(--muted)">— Mã ${xkEsc(r.ma||'')}</span>${dang?' <span style="color:#d00000;font-size:12px">● đang chọn</span>':''}${trung?' <span style="font-size:12px;color:#888">(đã có ở dòng khác trong tháng)</span>':''}</div>
-          <div style="font-size:12px;color:var(--muted)">${xkEsc(r.chuc_vu||'')} · Lương CB ${blDinhDang(r.luong_cb)}</div></div>`}).join(''):`<div style="padding:16px;text-align:center;color:var(--muted)">${blDsNv.length?'Không có nhân viên khớp':'Danh Sách Nhân Viên đang trống — nhập nhân viên trước'}</div>`}</div>
-    <div style="margin-top:8px;text-align:right"><button class="btn ghost sm" onclick="blGoTenTay()">✏ Gõ tay tên/mã (không có trong danh sách)</button></div></div>`;
-  w.onclick=blDongChonNv;
-  const tim=document.getElementById('blChonNvTim');
-  if(tim&&tim.focus){tim.focus();if(tim.setSelectionRange)tim.setSelectionRange(tim.value.length,tim.value.length)}
-}
-function blDongChonNv(){const w=document.getElementById('blChonNv');if(w){w.style.display='none';w.innerHTML=''}blChonRi=-1}
-async function blChonNvChot(i){
-  const rows=blDL[blThang],hien=rows&&rows[blChonRi],r=blDsNv[i];
-  if(!hien||!r)return;
-  const kr=blKeyNv(r);
-  if(kr!==blKeyNv(hien)&&rows.some((x,j)=>j!==blChonRi&&blKeyNv(x)===kr)){toast('Người này đã có ở dòng khác trong tháng','err');return}
-  if(kr===blKeyNv(hien)){blDongChonNv();return}
-  ['ma','ten','chuc_vu','luong_cb','tien_com','muc_xang','pc_chuc_vu','muc_dt','trang_phuc'].forEach(k=>{hien[k]=r[k]});
-  blBan=true;blDongChonNv();blVeBang();blVeInfo();await blTinhLai(blThang);
-  toast(`✓ Đã chọn ${r.ten} — lương cơ bản/phụ cấp lấy theo Danh Sách Nhân Viên`,'ok');
-}
-function blGoTenTay(){
-  const rows=blDL[blThang],hien=rows&&rows[blChonRi];if(!hien)return;
-  const ten=prompt('Họ và tên người lao động:',hien.ten||'');
-  if(ten===null)return;
-  const ma=prompt('Mã NV (có thể để trống):',hien.ma||'');
-  hien.ten=ten.trim();if(ma!==null)hien.ma=ma.trim();
-  blBan=true;blDongChonNv();blVeBang();blVeInfo();
+/* Bấm tên người lao động -> chuyển sang Danh Sách Nhân Viên, tô viền ĐỎ dòng của người đó (có nút quay lại Bảng Lương). */
+async function blMoNvCuaNguoi(ri){
+  const rows=blDL[blThang],r=rows&&rows[ri];if(!r)return;
+  if(blBan){
+    if(!confirm('Bảng lương có thay đổi CHƯA LƯU.\nBấm OK để lưu rồi chuyển sang Danh Sách Nhân Viên.'))return;
+    if(!(await blLuu(true)))return;
+  }
+  nvTuBl={thang:blThang,ma:String(r.ma||'').trim(),ten:String(r.ten||'').trim()};
+  moDanhSachNhanVien(true);
 }
 function blDoiBH(ri,co){
   const rows=blDL[blThang];if(!rows||!rows[ri])return;
