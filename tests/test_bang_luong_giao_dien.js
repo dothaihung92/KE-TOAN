@@ -885,5 +885,18 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
     console.log('PASS 34: cột Tháng/Năm nghỉ việc: thêm vào danh sách cũ đúng vị trí, không lệch, không nhân đôi.');
   }
 
+  // ---- 35: nạp từ Danh Sách Nhân Viên gỡ người đã nghỉ việc trước tháng này; cập nhật Đóng BHXH theo thời gian tham gia ----
+  m = nap({ api: (url, o) => url.includes('tu-nhan-vien') ? { rows: [dongMau('101', 'A', { dong_bh: 1 }), dongMau('102', 'B', { dong_bh: 0 })], da_nghi: [{ ma: '103', ten: 'C đã nghỉ' }] }
+    : { rows: JSON.parse(o.body).rows, tham_so: {} } });
+  m.ctx.blNam = 2025; m.ctx.blThang = '09'; m.ctx.blTS = { ngay_cong_chuan: 26 };
+  m.ctx.blDL = { '09': [dongMau('101', 'A', { dong_bh: 0 }), dongMau('103', 'C đã nghỉ', { dong_bh: 1 }), dongMau('', 'Nhập tay không có trong danh sách')] };
+  await m.ctx.blNapNhanVien();
+  assert.deepStrictEqual(m.ctx.blDL['09'].map(r => r.ma + ':' + r.ten), ['101:A', ':Nhập tay không có trong danh sách', '102:B'], 'Gỡ người đã nghỉ (103), giữ dòng nhập tay, thêm người mới');
+  assert.strictEqual(m.ctx.blDL['09'][0].dong_bh, 1, 'Đóng BHXH cập nhật theo danh sách (đã tới tháng tham gia)');
+  assert(m.toasts.some(([t]) => /gỡ 1 người đã nghỉ việc/.test(t)), 'Báo số người đã gỡ');
+  const gia35 = m.goiApi.find(([u]) => u.includes('tu-nhan-vien'));
+  assert(/nam=2025&thang=9/.test(gia35[0]), 'Gửi đúng năm/tháng để server tính BHXH theo thời gian tham gia');
+  console.log('PASS 35: nạp từ Danh Sách Nhân Viên gỡ người đã nghỉ việc + cập nhật Đóng BHXH theo thời gian.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.026"
+APP_BUILD = "2026-09-30.027"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10525,6 +10525,21 @@ def _luong_thang_nghi_viec(v):
     return (kq[0], kq[1]) if kq else None
 
 
+def _luong_ngay_cu_the(v):
+    """Ngày trong tháng nếu ô ghi RÕ ngày (30/06/2025, 2025-06-30, ngày Excel); chỉ ghi tháng/năm (06/2025) -> None."""
+    import re as _re
+    if isinstance(v, datetime.datetime):
+        v = v.date()
+    if isinstance(v, datetime.date):
+        return v.day
+    t = str(v or "").strip()
+    g = _re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})", t)
+    if g:
+        return int(g.group(1))
+    g = _re.match(r"^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})", t)
+    return int(g.group(3)) if g else None
+
+
 def _luong_bat_dau_bhxh(v):
     """'Tháng/Năm vào làm' = thời điểm BẮT ĐẦU đóng BHXH (đọc như _luong_doc_ngay_thang). Trả (năm, tháng); vào làm sau ngày 18
     (còn < 14 ngày trong tháng) thì tính từ tháng sau. Trống/không đọc được -> None (đóng từ đầu)."""
@@ -10537,13 +10552,24 @@ def _luong_bat_dau_bhxh(v):
     return (y, m)
 
 
-def _luong_dong_bh_tu_nv(tick, vao_lam, nam=None, thang=None):
-    """Có đóng BHXH ở (nam, thang) không: phải được TICK và đã tới tháng bắt đầu đóng (Tháng/Năm vào làm)."""
+def _luong_dong_bh_tu_nv(tick, vao_lam, nam=None, thang=None, nghi_viec=None):
+    """Có đóng BHXH ở (nam, thang) không: phải được TICK, đã tới tháng bắt đầu đóng (Tháng/Năm vào làm) và CHƯA quá tháng nghỉ việc. Tháng nghỉ việc
+    vẫn đóng BHXH; riêng khi ô nghỉ việc ghi RÕ ngày mà ngày đó < 14 (làm chưa đủ 14 ngày trong tháng nghỉ) thì tháng nghỉ không đóng — cùng
+    quy tắc 14 ngày với tháng vào làm."""
     if not tick:
         return 0
     bd = _luong_bat_dau_bhxh(vao_lam)
     if bd and nam and thang and (int(nam), int(thang)) < bd:
         return 0
+    nghi = _luong_thang_nghi_viec(nghi_viec)
+    if nghi and nam and thang:
+        cur = (int(nam), int(thang))
+        if cur > nghi:
+            return 0
+        if cur == nghi:
+            d = _luong_ngay_cu_the(nghi_viec)
+            if d is not None and d < _LUONG_NGAY_DONG_BHXH:
+                return 0
     return 1
 
 
@@ -10572,12 +10598,27 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
             continue
         tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
         kq.append(_luong_chuan_dong_nhap({
-            "dong_bh": _luong_dong_bh_tu_nv(tick, lay(r, "Tháng/Năm vào làm"), nam, thang),
+            "dong_bh": _luong_dong_bh_tu_nv(tick, lay(r, "Tháng/Năm vào làm"), nam, thang, lay(r, "Tháng/Năm nghỉ việc")),
             "ma": lay(r, "Mã NV"), "ten": ten, "chuc_vu": lay(r, "Chức vụ"),
             "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,   # 0 = theo công chuẩn (lịch) của tháng
             "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
             "muc_dt": lay(r, "PC Điện thoại"),
             "trang_phuc": lay(r, "PC Trang phục"), "ghi_chu": "CK"}))
+    return kq
+
+
+def _luong_nv_da_nghi(header, rows, nam, thang):
+    """Những người trong Danh Sách Nhân Viên ĐÃ NGHỈ VIỆC trước tháng (nam, thang) -> [{ma, ten}] (không còn lên bảng lương tháng đó)."""
+    cot = {_khong_dau(str(h or "")).strip().lower(): i for i, h in enumerate(header or [])}
+    i_ma, i_ten, i_nghi = cot.get("ma nv"), cot.get("ho va ten"), cot.get(_khong_dau("Tháng/Năm nghỉ việc").lower())
+    kq = []
+    if i_nghi is None or i_ten is None:
+        return kq
+    for r in rows or []:
+        nghi = _luong_thang_nghi_viec(r[i_nghi] if i_nghi < len(r) else "")
+        ten = str(r[i_ten] if i_ten < len(r) else "").strip()
+        if nghi and ten and (int(nam), int(thang)) > nghi:
+            kq.append({"ma": str(r[i_ma]).strip() if i_ma is not None and i_ma < len(r) and r[i_ma] is not None else "", "ten": ten})
     return kq
 
 
@@ -10587,7 +10628,8 @@ def bang_luong_tu_nhan_vien(cid: int, nam: int = 0, thang: int = 0):
     thì ô "Đóng BHXH" tính theo tick + tháng bắt đầu đóng của từng người."""
     nam = _luong_nam_hop_le(nam or datetime.date.today().year)
     d = nhap_lieu_get(cid, loai="nv")
-    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, thang if 1 <= thang <= 12 else None)}
+    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, thang if 1 <= thang <= 12 else None),
+            "da_nghi": _luong_nv_da_nghi(d.get("header"), d.get("rows"), nam, thang) if 1 <= thang <= 12 else []}
 
 
 # ----- LẬP KẾ HOẠCH "CHI PHÍ LƯƠNG CẢ NĂM": nhập khoảng tháng + tổng chi phí lương -> tự tính cần bao nhiêu người -----

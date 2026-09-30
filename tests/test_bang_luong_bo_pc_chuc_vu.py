@@ -105,4 +105,46 @@ r = dict(zip(kq["header"], kq["rows"][0]))
 assert r["Tháng/Năm nghỉ việc"] == "30/06/2025" and r["Tháng/Năm vào làm"] == "01/01/2024" and r["Chức vụ"] == "KD" and r["Lương Cơ bản"] == 5_310_000
 print("PASS 6: import Excel nhận cột Ngày nghỉ việc, không nhầm sang cột khác.")
 
+# 7: BHXH theo THỜI GIAN THAM GIA: tick + Tháng/Năm vào làm + Tháng/Năm nghỉ việc
+hd7 = ["Mã NV", "Họ và tên", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Lương Cơ bản"]
+def bh(tick, vao, nghi, nam, thang):
+    r = server._luong_dong_tu_nhan_vien(hd7, [["1", "A", vao, tick, nghi, 5_310_000]], 0, nam, thang)
+    return r[0]["dong_bh"] if r else None          # None = không lên bảng lương tháng đó
+assert [bh("x", "12/2024", "06/2025", 2024, m_) for m_ in (11, 12)] == [0, 1], "Trước tháng tham gia: chưa đóng; từ tháng vào làm: đóng"
+assert [bh("x", "12/2024", "06/2025", 2025, m_) for m_ in (1, 6, 7, 8)] == [1, 1, None, None], "Đóng hết tháng nghỉ việc; sau đó không còn trên bảng lương"
+assert bh("", "12/2024", "", 2025, 5) == 0 and bh("x", "12/2024", "", 2026, 3) == 1, "Không tick thì không đóng; không có ngày nghỉ = còn đóng"
+assert bh("x", "", "", 2025, 1) == 1, "Không có ngày vào làm = đóng từ đầu"
+# nghỉ việc ghi rõ ngày: < 14 ngày làm trong tháng nghỉ -> tháng nghỉ không đóng; >= 14 thì đóng
+assert bh("x", "12/2024", "10/06/2025", 2025, 5) == 1 and bh("x", "12/2024", "10/06/2025", 2025, 6) == 0 and bh("x", "12/2024", "10/06/2025", 2025, 7) is None
+assert bh("x", "12/2024", "20/06/2025", 2025, 6) == 1 and bh("x", "12/2024", "14/06/2025", 2025, 6) == 1 and bh("x", "12/2024", "13/06/2025", 2025, 6) == 0
+assert bh("x", "12/2024", "06/2025", 2025, 6) == 1, "Chỉ ghi tháng/năm -> tính đủ tháng nghỉ"
+assert server._luong_ngay_cu_the("06/2025") is None and server._luong_ngay_cu_the("20/06/2025") == 20 and server._luong_ngay_cu_the("2025-06-09") == 9
+# vào làm sau ngày 18 vẫn tính từ tháng sau (quy tắc cũ), kết hợp nghỉ việc
+assert [bh("x", "20/03/2025", "05/2025", 2025, m_) for m_ in (3, 4, 5, 6)] == [0, 1, 1, None]
+# danh sách người đã nghỉ + API
+hd8 = ["Mã NV", "Họ và tên", "Tháng/Năm nghỉ việc"]
+nv8 = [["1", "A", ""], ["2", "B", "06/2025"], ["3", "C", "2025-08-15"]]
+assert [x["ten"] for x in server._luong_nv_da_nghi(hd8, nv8, 2025, 7)] == ["B"] and [x["ten"] for x in server._luong_nv_da_nghi(hd8, nv8, 2025, 9)] == ["B", "C"]
+assert server._luong_nv_da_nghi(hd8, nv8, 2025, 6) == [] and server._luong_nv_da_nghi(["Mã NV", "Họ và tên"], nv8, 2025, 9) == []
+server.nhap_lieu_get = lambda cid, loai="nv": {"header": hd7, "rows": [["1", "A", "12/2024", "x", "06/2025", 5_310_000], ["2", "B", "12/2024", "x", "", 5_310_000]]}
+kq = server.bang_luong_tu_nhan_vien(1, 2025, 8)
+assert [r["ten"] for r in kq["rows"]] == ["B"] and kq["da_nghi"] == [{"ma": "1", "ten": "A"}] and kq["rows"][0]["dong_bh"] == 1
+assert server.bang_luong_tu_nhan_vien(1, 2025, 0)["da_nghi"] == [] and len(server.bang_luong_tu_nhan_vien(1, 2025, 0)["rows"]) == 2
+# kế hoạch cả năm: người BHXH chỉ được chọn đúng khoảng tham gia (vào 08/2025, nghỉ 10/2025)
+hd9 = ["Mã NV", "Họ và tên", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Lương Cơ bản"]
+nv9 = [["1", "Dài hạn", "01/2024", "x", "", 5_310_000], ["2", "Ngắn hạn", "08/2025", "x", "10/2025", 5_310_000]]
+pool9 = lambda t: server._luong_dong_tu_nhan_vien(hd9, nv9, 0, 2025, int(t))
+th, tom = server._luong_ke_hoach(pool9, 2025, 7, 11, 100_000_000, None, 50, 0, random.Random(2))
+for t, rows in th.items():
+    ngan = [r for r in rows if r["ten"] == "Ngắn hạn"]
+    if t == "11":
+        assert not ngan, "Đã nghỉ từ tháng 11 -> không còn trên bảng lương"
+    for r in ngan:
+        if "08" <= t <= "10":
+            assert r["dong_bh"] == 1 and r["bhxh_nld"] > 0, (t, r["dong_bh"])      # đúng khoảng tham gia: đóng BHXH
+        else:
+            assert r["dong_bh"] == 0 and r["bhxh_nld"] == 0, (t, r["dong_bh"])      # trước tháng tham gia: không đóng
+assert any(r["ten"] == "Dài hạn" and r["dong_bh"] == 1 for rows in th.values() for r in rows)
+print("PASS 7: BHXH theo thời gian tham gia: tick + vào làm + nghỉ việc (kể cả ngày nghỉ < 14), nạp/kế hoạch đúng theo tháng.")
+
 print("\nALL DONE")

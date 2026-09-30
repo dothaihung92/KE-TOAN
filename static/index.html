@@ -4995,7 +4995,12 @@ async function blNapNhanVien(){
     const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}&thang=${parseInt(blThang,10)}`);
     if(!d.rows||!d.rows.length){toast('Danh Sách Nhân Viên đang trống — nhập nhân viên trước','err');return}
     const co=blDL[blThang]=blDL[blThang]||[];
-    let them=0,capNhat=0;
+    let them=0,capNhat=0,bo=0;
+    // Người đã NGHỈ VIỆC trước tháng này (cột "Tháng/Năm nghỉ việc" của Danh Sách Nhân Viên) không còn lên bảng lương -> gỡ khỏi tháng
+    const daNghi=new Set((d.da_nghi||[]).map(x=>(x.ma||x.ten||'').toString().trim().toLowerCase()));
+    if(daNghi.size){
+      for(let i=co.length-1;i>=0;i--){if(daNghi.has((co[i].ma||co[i].ten||'').toString().trim().toLowerCase())){co.splice(i,1);bo++}}
+    }
     // Nhân viên đã có trong tháng: cập nhật lại Lương cơ bản + các phụ cấp theo Danh Sách Nhân Viên (số liệu gốc lấy từ đó).
     const truongNv=['chuc_vu','luong_cb','tien_com','muc_xang','muc_dt','trang_phuc'];
     const cuaKey=new Map(co.map(r=>[(r.ma||r.ten||'').toString().trim().toLowerCase(),r]));
@@ -5009,9 +5014,9 @@ async function blNapNhanVien(){
       if(!dong.thoi_vu&&r.dong_bh!=null&&Number(dong.dong_bh)!==Number(r.dong_bh)){dong.dong_bh=r.dong_bh;doi=true}
       if(doi)capNhat++;
     });
-    if(!them&&!capNhat){toast('Tất cả nhân viên đã có trong tháng này và khớp Danh Sách Nhân Viên','');return}
+    if(!them&&!capNhat&&!bo){toast('Tất cả nhân viên đã có trong tháng này và khớp Danh Sách Nhân Viên','');return}
     blBan=true;blVeTabs();blVeBang();blVeInfo();await blTinhLai(blThang);
-    toast(`✓ Tháng ${parseInt(blThang,10)}: thêm ${them} nhân viên, cập nhật lương/phụ cấp/đóng BHXH theo Danh Sách Nhân Viên cho ${capNhat} người — nhập ngày công/thưởng rồi bấm 💾 Lưu`,'ok');
+    toast(`✓ Tháng ${parseInt(blThang,10)}: thêm ${them} nhân viên${bo?`, gỡ ${bo} người đã nghỉ việc`:''}, cập nhật lương/phụ cấp/đóng BHXH theo Danh Sách Nhân Viên cho ${capNhat} người — nhập ngày công/thưởng rồi bấm 💾 Lưu`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function blSaoChepThangTruoc(){
