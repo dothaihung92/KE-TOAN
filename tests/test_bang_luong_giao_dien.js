@@ -736,5 +736,23 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/Hạch toán lương → MISA/.test(html) && /blMoMisa\(\)/.test(html), 'Có nút trên thanh công cụ Bảng Lương');
   console.log('PASS 27: hạch toán chi phí lương → MISA: hộp tùy chọn, xem trước, xuất file, xử lý lỗi.');
 
+  // ---- 28: Import THẲNG vào MISA: kiểm tra trước (preview:true, chưa ghi) -> xác nhận -> ghi (preview:false) ----
+  assert(/Import thẳng vào MISA/.test(hop27) && /blImportMisa\(\)/.test(hop27), 'Có nút Import thẳng vào MISA trong hộp');
+  const goiApi28 = [];
+  const kqImp = Object.assign({}, kqMau, { preview: true, database: 'MISA_TEST', so_chung_tu: 2, so_bat_dau: 1, so_go_cu: 2, bo_qua: [{ thang: '02', ly_do: 'Tháng 2/2025 đã có chứng từ' }], canh_bao: ['Chưa nhập TK ngân hàng'] });
+  c27.api = async (url, o) => { goiApi28.push([url, JSON.parse(o.body)]); return kqImp; };
+  val27.blMsTu = '1'; val27.blMsDen = '1';
+  await c27.blImportMisa();
+  assert.strictEqual(goiApi28[0][0], '/api/bang-luong/7/import-misa'); assert.strictEqual(goiApi28[0][1].preview, true, 'Bước 1 chỉ kiểm tra, không ghi');
+  const kq28 = els27['blMsKq'].innerHTML;
+  assert(/CHƯA GHI SỔ/.test(kq28) && /MISA_TEST/.test(kq28) && /NVK1/.test(kq28) && /Tháng 2\/2025 đã có chứng từ/.test(kq28) && /Chưa nhập TK ngân hàng/.test(kq28) && /gỡ 2 chứng từ cũ/.test(kq28) && /blImportMisaGhi\(\)/.test(kq28), 'Xem trước: cảnh báo, DB, tháng bỏ qua, nút ghi');
+  c27.confirm = () => false; await c27.blImportMisaGhi(); assert.strictEqual(goiApi28.length, 1, 'Không xác nhận -> không gọi ghi');
+  c27.confirm = () => true; c27.api = async (url, o) => { goiApi28.push([url, JSON.parse(o.body)]); return Object.assign({}, kqImp, { preview: false }); };
+  await c27.blImportMisaGhi();
+  assert.strictEqual(goiApi28[1][1].preview, false, 'Bước 2 ghi thật'); assert(/Đã ghi 2 chứng từ/.test(els27['blMsKq'].innerHTML) && /CHƯA ghi sổ/.test(els27['blMsKq'].innerHTML));
+  c27.api = async () => { throw new Error('Lỗi kết nối MISA'); }; await c27.blImportMisa();
+  assert(/Lỗi kết nối MISA/.test(els27['blMsKq'].innerHTML), 'Báo lỗi server');
+  console.log('PASS 28: import thẳng vào MISA: nút, kiểm tra trước, xác nhận, ghi, lỗi.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

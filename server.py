@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.013"
+APP_BUILD = "2026-09-30.014"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11541,6 +11541,215 @@ async def bang_luong_hach_toan_misa(cid: int, request: Request):
         except Exception:
             pass
     return _resp_xuat(path, fname, {"X-So-Dong": str(so_dong)})
+
+
+_LUONG_MISA_MARK = "HDDT-LUONG"   # đánh dấu CustomField10 của chứng từ do chức năng "Import thẳng vào MISA" của Bảng Lương tạo
+
+
+def _luong_misa_ghi_sql(cid, database, nam, thang_rows, tc, preview=True):
+    """Ghi THẲNG vào CSDL MISA (bảng GLVoucher/GLVoucherDetail) đúng các chứng từ 'Nghiệp vụ khác' mà _luong_misa_chung_tu dựng cho file
+    Excel — thay cho bước import Excel thủ công. An toàn theo tiền lệ của các hàm ghi SQL khác:
+    - CHƯA GHI SỔ (IsPostedFinance=0, không sinh sổ cái): người dùng mở MISA kiểm tra rồi bấm 'Ghi sổ' (giống chứng từ khấu trừ GTGT);
+    - đánh dấu CustomField10=_LUONG_MISA_MARK; chạy lại thì GỠ các chứng từ CHƯA GHI SỔ cũ do chính mình tạo của những tháng đang chọn rồi ghi
+      lại (không đụng chứng từ đã ghi sổ / chứng từ người dùng tự nhập);
+    - tháng đã có sẵn chứng từ hạch toán lương (cùng diễn giải 'Hạch toán chi phí lương T{m}/{năm}') mà không phải của mình -> BỎ QUA tháng đó,
+      không ghi trùng; số chứng từ NVK nối tiếp số lớn nhất đang có; không bao giờ ghi đè số đã tồn tại;
+    - preview=True: chạy đủ mọi bước rồi ROLLBACK, không ghi gì; lỗi giữa chừng cũng ROLLBACK toàn bộ."""
+    import re as _re
+    import uuid as _uuid
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        cols_glv = _misa_cot_bang_that(cur, "GLVoucher")
+        cols_glvd = _misa_cot_bang_that(cur, "GLVoucherDetail")
+        if not (cols_glv and cols_glvd):
+            raise HTTPException(400, "Không tìm thấy bảng GLVoucher/GLVoucherDetail trong CSDL MISA đang kết nối.")
+        canh_bao, bo_qua = [], []
+
+        # 1) Gỡ chứng từ CHƯA GHI SỔ do chính chức năng này tạo ở các tháng đang chọn (ghi lại cho sạch, không tồn rác)
+        so_go = 0
+        for t in sorted(thang_rows):
+            m = int(t)
+            cur.execute("DELETE FROM GLVoucherDetail WHERE RefID IN (SELECT RefID FROM GLVoucher WHERE CustomField10=? "
+                        "AND ISNULL(IsPostedFinance,0)=0 AND YEAR(RefDate)=? AND MONTH(RefDate)=?)", (_LUONG_MISA_MARK, nam, m))
+            cur.execute("DELETE FROM GLVoucher WHERE CustomField10=? AND ISNULL(IsPostedFinance,0)=0 "
+                        "AND YEAR(RefDate)=? AND MONTH(RefDate)=?", (_LUONG_MISA_MARK, nam, m))
+            so_go += max(0, getattr(cur, "rowcount", 0) or 0)
+
+        # 2) Tháng đã có sẵn chứng từ hạch toán lương khác -> bỏ qua (tránh ghi trùng)
+        con_lai = {}
+        for t, rows in thang_rows.items():
+            m = int(t)
+            row = cur.execute("SELECT TOP 1 gv.RefNoFinance FROM GLVoucher gv JOIN GLVoucherDetail gd ON gd.RefID=gv.RefID "
+                              "WHERE gd.Description=?", "Hạch toán chi phí lương T%d/%d" % (m, nam)).fetchone()
+            if row:
+                bo_qua.append({"thang": t, "ly_do": "Tháng %d/%d đã có chứng từ hạch toán lương trong MISA (số %s) — bỏ qua, không ghi trùng"
+                                                    % (m, nam, row[0])})
+            else:
+                con_lai[t] = rows
+        if not con_lai:
+            raise HTTPException(400, "Mọi tháng đã chọn đều đã có chứng từ hạch toán lương trong MISA — không có gì để ghi. " +
+                                     "; ".join(b["ly_do"] for b in bo_qua))
+
+        # 3) Số chứng từ: người dùng nhập, hoặc nối tiếp NVK cao nhất đang có (đọc SAU khi gỡ chứng từ cũ của mình)
+        so_dau = int(_luong_so(tc.get("so_bat_dau")))
+        if so_dau < 1:
+            cao = 0
+            for (rf,) in cur.execute("SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE 'NVK%'").fetchall():
+                mm = _re.match(r"^NVK(\d+)", str(rf or ""))
+                if mm:
+                    cao = max(cao, int(mm.group(1)))
+            so_dau = cao + 1
+        chung_tu = _luong_misa_chung_tu(nam, con_lai, tc, so_dau)
+        if not chung_tu:
+            raise HTTPException(400, "Các tháng đã chọn không có số tiền nào để hạch toán")
+        # Không bao giờ ghi trùng số chứng từ đã tồn tại
+        trung = []
+        for ct in chung_tu:
+            if cur.execute("SELECT TOP 1 RefID FROM GLVoucher WHERE RefNoFinance=?", ct["so_ct"]).fetchone():
+                trung.append(ct["so_ct"])
+        if trung:
+            raise HTTPException(400, "Số chứng từ đã tồn tại trong MISA: %s. Hãy nhập 'Số CT bắt đầu NVK' lớn hơn rồi thử lại." % ", ".join(trung[:8]))
+
+        # 4) Tài khoản kế toán phải có trong Danh mục TK của MISA (tránh lỗi khóa ngoại khó hiểu)
+        try:
+            co = {str(r[0]).strip() for r in cur.execute("SELECT AccountNumber FROM Account").fetchall()}
+            if co:
+                thieu = sorted({tk for ct in chung_tu for d in ct["dong"] for tk in (d["no"], d["co"]) if tk not in co})
+                if thieu:
+                    raise HTTPException(400, "Các tài khoản sau CHƯA có trong Danh mục tài khoản của MISA: %s. Đổi tài khoản trong khung này "
+                                             "hoặc thêm TK bên MISA rồi thử lại." % ", ".join(thieu))
+        except HTTPException:
+            raise
+        except Exception:
+            canh_bao.append("Không đối chiếu được danh mục tài khoản (bảng Account) — hãy kiểm tra TK trong MISA sau khi ghi.")
+
+        # 5) Loại chứng từ 'Chứng từ nghiệp vụ khác'
+        ref_type = None
+        try:
+            r0 = cur.execute("SELECT TOP 1 RefType FROM SYSRefType WHERE MasterTableName='GLVoucher' AND RefTypeName LIKE N'%nghiệp vụ khác%'").fetchone()
+            ref_type = r0[0] if r0 else None
+        except Exception:
+            ref_type = None
+        if ref_type is None:
+            mau = _misa_mau_dong_that(cur, "GLVoucher", "RefNoFinance LIKE 'NVK%' AND ISNULL(CustomField10,'')<>?", (_LUONG_MISA_MARK,))
+            ref_type = mau.get("RefType") if mau else None
+        if ref_type is None:
+            ref_type, _n = _misa_pu_reftype(cur, ("khác",), master_table="GLVoucher")
+        if ref_type is None:
+            raise HTTPException(400, "Không xác định được loại chứng từ 'Nghiệp vụ khác' (RefType) trong CSDL MISA. Hãy tạo tay 1 chứng từ "
+                                     "'Nghiệp vụ khác' trên MISA rồi thử lại.")
+
+        # 6) TK ngân hàng (cho dòng thanh toán chuyển khoản) & mã thống kê (dòng BH) — tùy chọn, không có thì cảnh báo, không chặn
+        bank_id = bank_ten = None
+        if any(d["loai"] == "nh" for ct in chung_tu for d in ct["dong"]):
+            if str(tc.get("tk_nh_ma") or "").strip():
+                bank_id, bank_ten = _misa_bank_account_theo_so(cur, tc.get("tk_nh_ma"))
+                if not bank_id:
+                    canh_bao.append("Không tìm thấy TK ngân hàng '%s' trong Danh mục MISA — chọn TK ngân hàng tay trên các chứng từ TT lương chuyển khoản."
+                                    % tc.get("tk_nh_ma"))
+            else:
+                canh_bao.append("Chưa nhập TK ngân hàng — dòng TT lương chuyển khoản (Có %s) cần chọn TK ngân hàng tay trên MISA." % (tc.get("tk_ngan_hang") or "1121"))
+        thong_ke_id = None
+        if str(tc.get("ma_thong_ke") or "").strip():
+            try:
+                r0 = cur.execute("SELECT TOP 1 ListItemID FROM ListItem WHERE ListItemCode=?", str(tc.get("ma_thong_ke")).strip()).fetchone()
+                thong_ke_id = r0[0] if r0 else None
+            except Exception:
+                thong_ke_id = None
+            if not thong_ke_id:
+                canh_bao.append("Không tìm thấy mã thống kê '%s' trong MISA — dòng BH ghi không kèm mã thống kê." % tc.get("ma_thong_ke"))
+
+        max_reforder = 0
+        try:
+            r0 = cur.execute("SELECT ISNULL(MAX(RefOrder),0) FROM GLVoucher").fetchone()
+            max_reforder = (r0[0] or 0) if r0 else 0
+        except Exception:
+            pass
+        branch_id = _misa_branch_id(cur)
+        now = datetime.datetime.now()
+
+        for ct in chung_tu:
+            ngay_dt = datetime.datetime.strptime(ct["ngay"], "%d/%m/%Y")
+            tong = sum(d["so_tien"] for d in ct["dong"])
+            glv_id = str(_uuid.uuid4())
+            memo = ct["dong"][0]["dien_giai"]
+            glv = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glv.values()}
+            _misa_gan(glv, cols_glv, glv_id, "RefID")
+            _misa_gan(glv, cols_glv, ref_type, "RefType")
+            _misa_gan(glv, cols_glv, 0, "DisplayOnBook")
+            _misa_gan(glv, cols_glv, ngay_dt, "RefDate")
+            _misa_gan(glv, cols_glv, ngay_dt, "PostedDate")
+            _misa_gan(glv, cols_glv, ct["so_ct"], "RefNoFinance")
+            _misa_gan(glv, cols_glv, False, "IsPostedFinance")
+            _misa_gan(glv, cols_glv, False, "IsPostedManagement")
+            _misa_gan(glv, cols_glv, memo, "JournalMemo")
+            _misa_gan(glv, cols_glv, tong, "TotalAmountOC")
+            _misa_gan(glv, cols_glv, tong, "TotalAmount")
+            _misa_gan(glv, cols_glv, branch_id, "BranchID")
+            _misa_gan(glv, cols_glv, "VND", "CurrencyID")
+            _misa_gan(glv, cols_glv, 1, "ExchangeRate")
+            max_reforder += 1
+            _misa_gan(glv, cols_glv, max_reforder, "RefOrder")
+            _misa_gan(glv, cols_glv, now, "CreatedDate")
+            _misa_gan(glv, cols_glv, "PhanMem", "CreatedBy")
+            _misa_gan(glv, cols_glv, _LUONG_MISA_MARK, "CustomField10")
+            if not preview:
+                cs = list(glv.keys())
+                cur.execute("INSERT INTO GLVoucher ([%s]) VALUES (%s)" % ("],[".join(cs), ",".join(["?"] * len(cs))), [glv[c] for c in cs])
+            for i, d in enumerate(ct["dong"]):
+                glvd = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glvd.values()}
+                _misa_gan(glvd, cols_glvd, str(_uuid.uuid4()), "RefDetailID")
+                _misa_gan(glvd, cols_glvd, glv_id, "RefID")
+                _misa_gan(glvd, cols_glvd, d["dien_giai"], "Description")
+                _misa_gan(glvd, cols_glvd, d["no"], "DebitAccount")
+                _misa_gan(glvd, cols_glvd, d["co"], "CreditAccount")
+                _misa_gan(glvd, cols_glvd, d["so_tien"], "AmountOC")
+                _misa_gan(glvd, cols_glvd, d["so_tien"], "Amount")
+                _misa_gan(glvd, cols_glvd, False, "UnResonableCost")
+                _misa_gan(glvd, cols_glvd, i, "SortOrder")
+                _misa_gan(glvd, cols_glvd, None, "BusinessType")
+                if d["loai"] == "nh" and bank_id:
+                    _misa_gan(glvd, cols_glvd, bank_id, "BankAccountID")
+                    if bank_ten:
+                        _misa_gan(glvd, cols_glvd, bank_ten, "BankName")
+                if d["loai"] == "bh" and thong_ke_id:
+                    _misa_gan(glvd, cols_glvd, thong_ke_id, "ListItemID")
+                if not preview:
+                    cs = list(glvd.keys())
+                    cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" % ("],[".join(cs), ",".join(["?"] * len(cs))), [glvd[c] for c in cs])
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "chung_tu": chung_tu, "so_chung_tu": len(chung_tu),
+                "so_dong": sum(len(c["dong"]) for c in chung_tu), "so_bat_dau": so_dau, "so_go_cu": so_go,
+                "bo_qua": bo_qua, "canh_bao": canh_bao, "da_ghi_so": False}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+@app.post("/api/bang-luong/{cid}/import-misa")
+async def bang_luong_import_misa(cid: int, request: Request):
+    """Body như /hach-toan-misa + preview (mặc định true = chỉ kiểm tra, không ghi) + database (tùy chọn). Ghi THẲNG chứng từ Nghiệp vụ khác
+    (chưa ghi sổ) vào CSDL MISA đã cấu hình ở '🗄 Kết nối CSDL MISA'."""
+    body = await request.json()
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    thang_rows = {t: [r for r in (rows or []) if isinstance(r, dict)] for t, rows in (body.get("thang") or {}).items() if t in _LUONG_THANG}
+    thang_rows = {t: rows for t, rows in thang_rows.items() if rows}
+    if not thang_rows:
+        raise HTTPException(404, "Không có tháng nào có dữ liệu bảng lương để hạch toán")
+    database = str(body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA', kết nối tới dữ liệu THỬ trước.")
+    return _luong_misa_ghi_sql(cid, database, nam, thang_rows, body, preview=body.get("preview", True) not in (False, 0, "0", "false"))
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")
