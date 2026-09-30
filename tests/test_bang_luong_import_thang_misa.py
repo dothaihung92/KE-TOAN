@@ -28,9 +28,25 @@ GLVD_COLS = [("RefDetailID", "uniqueidentifier"), ("RefID", "uniqueidentifier"),
              ("BusinessType", "int"), ("BankAccountID", "uniqueidentifier"), ("BankName", "nvarchar"), ("ListItemID", "uniqueidentifier")]
 
 
+GL_COLS = [("RefID", "uniqueidentifier"), ("RefDetailID", "uniqueidentifier"), ("RefType", "int"), ("RefTypeName", "nvarchar"), ("RefDate", "datetime"),
+           ("PostedDate", "datetime"), ("RefNo", "nvarchar"), ("JournalMemo", "nvarchar"), ("AccountNumber", "nvarchar"),
+           ("CorrespondingAccountNumber", "nvarchar"), ("DebitAmountOC", "money"), ("DebitAmount", "money"), ("CreditAmountOC", "money"),
+           ("CreditAmount", "money"), ("AccountObjectID", "uniqueidentifier"), ("AccountObjectCode", "nvarchar"), ("EmployeeID", "uniqueidentifier"),
+           ("BranchID", "uniqueidentifier"), ("CurrencyID", "nvarchar"), ("ExchangeRate", "decimal"), ("RefOrder", "int"), ("EntryType", "int"),
+           ("DetailPostOrder", "int")]
+
+
+def gl_mau():
+    """Sổ cái mẫu của 1 chứng từ THẬT khác (có đối tượng/nhân viên riêng — phải bị xóa khi nhân bản)."""
+    kh = dict(RefID="real-1", RefDetailID="real-d1", RefType=4010, RefTypeName="Chứng từ nghiệp vụ khác", AccountNumber="1111", CorrespondingAccountNumber="131",
+              DebitAmountOC=500, DebitAmount=500, CreditAmountOC=0, CreditAmount=0, AccountObjectID="kh-1", AccountObjectCode="KH01", EmployeeID="nv-1",
+              BranchID="branch-1", CurrencyID="VND", ExchangeRate=1, RefOrder=1, EntryType=1, DetailPostOrder=7)
+    return [kh, dict(kh, AccountNumber="131", CorrespondingAccountNumber="1111", DebitAmountOC=0, DebitAmount=0, CreditAmountOC=500, CreditAmount=500, EntryType=2)]
+
+
 class Db:
     def __init__(self, tk=None):
-        self.glv, self.glvd, self.log, self.committed, self.rolled = [], [], [], 0, 0
+        self.glv, self.glvd, self.gl, self.log, self.committed, self.rolled = [], [], gl_mau(), [], 0, 0
         self.tk = tk if tk is not None else {"6422", "6421", "3341", "3383", "3384", "3386", "3335", "1111", "1121"}
         self.tk_nh = {"0123456789": ("bank-1", "Vietcombank")}
 
@@ -48,14 +64,27 @@ class Cur:
         self._r = []
         if "FROM sys.columns" in sql1:
             self._r = [(n, t) for n, t in (GLV_COLS if params[0] == "GLVoucher" else GLVD_COLS if params[0] == "GLVoucherDetail"
+                                                   else GL_COLS if params[0] == "GeneralLedger"
                                                    else [("BankAccountID", "uniqueidentifier"), ("AccountNumber", "nvarchar"), ("BankName", "nvarchar")] if params[0] == "BankAccount" else [])]
+        elif sql1.startswith("DELETE FROM GeneralLedger"):
+            cf, yy, mm = params
+            ids = {g["RefID"] for g in db.glv if g["CustomField10"] == cf and g["RefDate"].year == yy and g["RefDate"].month == mm}
+            db.gl = [x for x in db.gl if x["RefID"] not in ids]
+        elif sql1.startswith("SELECT TOP 1 RefID, RefDetailID FROM GeneralLedger"):
+            ok = [x for x in db.gl if x["RefID"] not in {g["RefID"] for g in db.glv}]
+            self._r = [(ok[0]["RefID"], ok[0]["RefDetailID"])] if ok else []
+        elif sql1.startswith("SELECT [RefID]") and "FROM GeneralLedger" in sql1:
+            self._r = [tuple(x.get(n) for n, _ in GL_COLS) for x in db.gl if x["RefID"] == params[0] and x["RefDetailID"] == params[1]]
+        elif sql1.startswith("INSERT INTO GeneralLedger"):
+            cols = re.findall(r"\[(\w+)\]", sql1.split("VALUES")[0])
+            db.gl.append(dict(zip(cols, params)))
         elif sql1.startswith("DELETE FROM GLVoucherDetail"):
             cf, yy, mm = params
-            ids = {g["RefID"] for g in db.glv if g["CustomField10"] == cf and not g["IsPostedFinance"] and g["RefDate"].year == yy and g["RefDate"].month == mm}
+            ids = {g["RefID"] for g in db.glv if g["CustomField10"] == cf and g["RefDate"].year == yy and g["RefDate"].month == mm}
             db.glvd = [d for d in db.glvd if d["RefID"] not in ids]
         elif sql1.startswith("DELETE FROM GLVoucher"):
             cf, yy, mm = params
-            keep = [g for g in db.glv if not (g["CustomField10"] == cf and not g["IsPostedFinance"] and g["RefDate"].year == yy and g["RefDate"].month == mm)]
+            keep = [g for g in db.glv if not (g["CustomField10"] == cf and g["RefDate"].year == yy and g["RefDate"].month == mm)]
             self.rowcount = len(db.glv) - len(keep)
             db.glv = keep
         elif "WHERE gd.Description=?" in sql1:
@@ -98,18 +127,18 @@ class Cur:
 class Conn:
     def __init__(self, db):
         self.db, self.autocommit = db, True
-        self._snap = ([dict(x) for x in db.glv], [dict(x) for x in db.glvd])
+        self._snap = ([dict(x) for x in db.glv], [dict(x) for x in db.glvd], [dict(x) for x in db.gl])
 
     def cursor(self):
         return Cur(self.db)
 
     def commit(self):
         self.db.committed += 1
-        self._snap = ([dict(x) for x in self.db.glv], [dict(x) for x in self.db.glvd])
+        self._snap = ([dict(x) for x in self.db.glv], [dict(x) for x in self.db.glvd], [dict(x) for x in self.db.gl])
 
     def rollback(self):
         self.db.rolled += 1
-        self.db.glv, self.db.glvd = [dict(x) for x in self._snap[0]], [dict(x) for x in self._snap[1]]
+        self.db.glv, self.db.glvd, self.db.gl = [dict(x) for x in self._snap[0]], [dict(x) for x in self._snap[1]], [dict(x) for x in self._snap[2]]
 
     def close(self):
         pass
@@ -142,16 +171,16 @@ assert kq["preview"] is True and db.glv == [] and db.glvd == [] and db.committed
 assert kq["so_chung_tu"] == 4 and kq["so_dong"] == 2 * (7 + 1)   # lương mẫu không có thuế TNCN -> dòng 0đ bỏ; mỗi tháng: BH(7 dòng) + TT lương(1 dòng)
 mong_doi = server._luong_misa_chung_tu(2025, {"05": rows_thang("05"), "06": rows_thang("06")}, {}, 1)
 assert [c["so_ct"] for c in kq["chung_tu"]] == [c["so_ct"] for c in mong_doi] == ["NVK1/5/2025", "NVK2/5/2025", "NVK3/6/2025", "NVK4/6/2025"]
-assert kq["da_ghi_so"] is False
+assert kq["da_ghi_so"] is True, "Xem trước báo sẽ ghi sổ luôn"
 print("PASS 1: xem trước không ghi gì, danh sách chứng từ trùng bản Excel.")
 
-# ===== 2: ghi thật — đúng bảng, cờ chưa ghi sổ, marker, tài khoản, số tiền, cân Nợ = Có =====
+# ===== 2: ghi thật — GHI SỔ LUÔN: cờ ghi sổ + sổ cái 2 dòng/dòng hạch toán, marker, tài khoản, số tiền, cân Nợ = Có =====
 db = Db()
 dung(db)
 kq = goi_api(goi(preview=False))
 assert db.committed == 1 and len(db.glv) == 4 and len(db.glvd) == kq["so_dong"]
 for g in db.glv:
-    assert g["IsPostedFinance"] is False and g["CustomField10"] == server._LUONG_MISA_MARK and g["RefType"] == 4010 and g["CurrencyID"] == "VND"
+    assert g["IsPostedFinance"] is True and g["CustomField10"] == server._LUONG_MISA_MARK and g["RefType"] == 4010 and g["CurrencyID"] == "VND"
     ds = [d for d in db.glvd if d["RefID"] == g["RefID"]]
     assert ds and abs(sum(d["Amount"] for d in ds) - g["TotalAmount"]) < 1 and all(d["AmountOC"] == d["Amount"] > 0 for d in ds)
     assert [d["SortOrder"] for d in ds] == list(range(len(ds)))
@@ -165,19 +194,34 @@ assert [(d["Description"], d["DebitAccount"], d["CreditAccount"]) for d in d1][:
 co334 = sum(d["Amount"] for d in db.glvd if d["CreditAccount"] == "3341")
 no334 = sum(d["Amount"] for d in db.glvd if d["DebitAccount"] == "3341")
 assert co334 == no334
-print("PASS 2: ghi thật GLVoucher/GLVoucherDetail: chưa ghi sổ, có marker, TK 334 cân.")
+assert kq["da_ghi_so"] is True and not kq["canh_bao"]
+moi = [x for x in db.gl if x["RefID"] != "real-1"]
+assert len(moi) == 2 * len(db.glvd) and len(db.gl) == len(moi) + 2, "Mỗi dòng hạch toán = 2 dòng sổ cái (Nợ + Có); sổ cái chứng từ mẫu không bị đụng"
+for d in db.glvd:
+    r = [x for x in moi if x["RefDetailID"] == d["RefDetailID"]]
+    no = next(x for x in r if x["DebitAmount"] > 0); co = next(x for x in r if x["CreditAmount"] > 0)
+    assert (no["AccountNumber"], no["CorrespondingAccountNumber"], no["DebitAmount"], no["CreditAmount"]) == (d["DebitAccount"], d["CreditAccount"], d["Amount"], 0)
+    assert (co["AccountNumber"], co["CorrespondingAccountNumber"], co["CreditAmount"], co["DebitAmount"]) == (d["CreditAccount"], d["DebitAccount"], d["Amount"], 0)
+    for x in (no, co):
+        assert x["RefID"] == d["RefID"] and x["RefNo"] == next(g["RefNoFinance"] for g in db.glv if g["RefID"] == d["RefID"]) and x["JournalMemo"] == d["Description"]
+        assert x["AccountObjectID"] is None and x["AccountObjectCode"] is None and x["EmployeeID"] is None, "Không kế thừa đối tượng/nhân viên của chứng từ mẫu"
+        assert x["RefType"] == 4010 and x["BranchID"] == "branch-1" and x["EntryType"] in (1, 2) and x["DetailPostOrder"] == 7
+assert len({x["RefOrder"] for x in moi}) == len(moi)
+assert sum(x["DebitAmount"] for x in moi) == sum(x["CreditAmount"] for x in moi) > 0, "Sổ cái cân Nợ = Có"
+print("PASS 2: ghi thật + GHI SỔ LUÔN: GLVoucher/GLVoucherDetail + sổ cái Nợ/Có cân, có marker, TK 334 cân.")
 
-# ===== 3: chạy lại -> thấy chứng từ chưa ghi sổ do mình tạo thì GỠ rồi ghi lại (không nhân đôi, không trùng số) =====
+# ===== 3: chạy lại -> thấy chứng từ do mình tạo (đã ghi sổ) thì GỠ kèm sổ cái rồi ghi lại (không nhân đôi, không trùng số) =====
 kq2 = goi_api(goi(preview=False))
 assert len(db.glv) == 4 and kq2["so_go_cu"] == 4 and not kq2["bo_qua"]
 assert sorted(g["RefNoFinance"] for g in db.glv) == sorted(c["so_ct"] for c in kq2["chung_tu"])
 assert len({g["RefNoFinance"] for g in db.glv}) == 4
-print("PASS 3: ghi lại thay thế bản cũ chưa ghi sổ, không nhân đôi.")
+assert len([x for x in db.gl if x["RefID"] != "real-1"]) == 2 * len(db.glvd) and len(db.gl) == 2 * len(db.glvd) + 2, "Gỡ cả sổ cái cũ, không nhân đôi"
+print("PASS 3: ghi lại thay thế bản cũ (kể cả đã ghi sổ + sổ cái), không nhân đôi.")
 
-# ===== 4: chứng từ đã GHI SỔ (hoặc do người dùng tự nhập) thì KHÔNG đụng: tháng đó bị bỏ qua, không ghi trùng =====
+# ===== 4: chứng từ KHÔNG có dấu của phần mềm (người dùng tự nhập/import Excel) thì KHÔNG đụng: tháng đó bị bỏ qua, không ghi trùng =====
 for g in db.glv:
     if g["RefDate"].month == 5:
-        g["IsPostedFinance"] = True
+        g["CustomField10"] = None          # người dùng đã tự sửa/nhập tay -> không còn là chứng từ của phần mềm
 kq3 = goi_api(goi(preview=False))
 assert len(kq3["bo_qua"]) == 1 and kq3["bo_qua"][0]["thang"] == "05" and "đã có chứng từ hạch toán lương" in kq3["bo_qua"][0]["ly_do"]
 assert sum(1 for g in db.glv if g["RefDate"].month == 5) == 2 and all(g["IsPostedFinance"] for g in db.glv if g["RefDate"].month == 5)
@@ -188,7 +232,7 @@ try:
     raise SystemExit("phải báo lỗi: mọi tháng đều đã có chứng từ")
 except HTTPException as e:
     assert e.status_code == 400 and "đã có chứng từ hạch toán lương" in e.detail
-print("PASS 4: chứng từ đã ghi sổ không bị đụng; tháng đã có thì bỏ qua, không ghi trùng.")
+print("PASS 4: chứng từ của người dùng không bị đụng; tháng đã có thì bỏ qua, không ghi trùng.")
 
 # ===== 5: số chứng từ nối tiếp NVK lớn nhất đang có; hoặc theo số người dùng nhập; số đã tồn tại thì chặn =====
 db = Db()
@@ -233,7 +277,7 @@ except HTTPException as e:
     assert e.status_code == 400 and "đã hoàn tác" in e.detail
 finally:
     Cur.execute = _ins
-assert db.glv == [] and db.glvd == [] and db.committed == 0
+assert db.glv == [] and db.glvd == [] and len(db.gl) == 2 and db.committed == 0
 print("PASS 7: lỗi giữa chừng -> hoàn tác toàn bộ.")
 
 # ===== 8: người tick Chuyển khoản -> không ghi dòng Nợ 3341/Có 1121; chỉ phần tiền mặt =====
@@ -245,6 +289,15 @@ tt = [d for d in db.glvd if d["CreditAccount"] == "1111"]
 g = server._luong_misa_tong(rows_thang("05"))
 assert len(tt) == 1 and tt[0]["Amount"] == g["tt_luong"] - g["tt_ck"] > 0
 print("PASS 8: import thẳng: người tick Chuyển khoản không có dòng 1121, chỉ còn TT lương tiền mặt.")
+
+# ===== 8b: không học được mẫu sổ cái -> KHÔNG ghi sổ nửa vời: ghi chưa ghi sổ + cảnh báo =====
+db = Db()
+db.gl = []
+dung(db)
+kq = goi_api(goi(thang={"05": rows_thang("05")}, preview=False))
+assert kq["da_ghi_so"] is False and any("sổ cái" in c for c in kq["canh_bao"]) and len(db.glv) == 2 and db.gl == []
+assert all(g["IsPostedFinance"] is False for g in db.glv)
+print("PASS 8b: không có mẫu sổ cái -> chứng từ chưa ghi sổ + cảnh báo rõ.")
 
 # ===== 9: chưa cấu hình CSDL MISA -> báo rõ; không có dữ liệu -> 404 =====
 server._misa_sql_cfg = lambda cid: {}

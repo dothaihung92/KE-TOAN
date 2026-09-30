@@ -5369,7 +5369,7 @@ function blMoMisa(){
       <span title="Nếu MISA của bạn có mã thống kê cho các dòng BH, điền vào đây (tùy chọn)">Mã thống kê dòng BH ${i('blMsTk',cu.tk,'width:90px;')}</span>
     </div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemMisa()">👁 Xem trước</button> <button class="btn sm" style="background:#7a1f5c" onclick="blXuatMisa()">📤 Xuất file import MISA</button>
-      <button class="btn sm" style="background:#a03a3a" onclick="blImportMisa()" title="Ghi thẳng chứng từ Nghiệp vụ khác (chưa ghi sổ) vào CSDL MISA đã kết nối — có bước kiểm tra trước khi ghi">🗄 Import thẳng vào MISA</button>
+      <button class="btn sm" style="background:#a03a3a" onclick="blImportMisa()" title="Ghi thẳng chứng từ Nghiệp vụ khác (ghi sổ luôn) vào CSDL MISA đã kết nối — có bước kiểm tra trước khi ghi">🗄 Import thẳng vào MISA</button>
       <button class="btn ghost sm" onclick="document.getElementById('blMisa').style.display='none'">Đóng</button>
       <span style="font-size:12px;color:var(--muted)">Số liệu lấy theo bảng lương từng tháng đang có (kể cả chưa lưu). Sau khi xuất: MISA → Nghiệp vụ khác → Import Excel, chọn file này.</span></div>
     <div id="blMsKq" style="margin-top:8px"></div>`;
@@ -5439,8 +5439,8 @@ function blVeImportMisa(kq){
   const dong=kq.chung_tu.map(ct=>`<tr><td style="padding:3px 8px;border:1px solid #eee;font-weight:700;white-space:nowrap">${xkEsc(ct.so_ct)}</td><td style="padding:3px 8px;border:1px solid #eee">${xkEsc(ct.ngay)}</td>
     <td style="padding:3px 8px;border:1px solid #eee">${xkEsc(ct.dong.map(d=>d.dien_giai).join(' · '))}</td><td style="padding:3px 8px;border:1px solid #eee;text-align:right">${tien(ct.dong.reduce((a,d)=>a+d.so_tien,0))}</td></tr>`).join('');
   b.innerHTML=`<div style="background:#fde8e8;border:1px solid #e39a9a;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#a03a3a;margin-bottom:8px">
-      ⚠ Sẽ ghi <b>${kq.so_chung_tu}</b> chứng từ (${kq.so_dong} dòng, bắt đầu <b>NVK${kq.so_bat_dau}</b>) THẲNG vào CSDL <b>${xkEsc(kq.database||'?')}</b>, trạng thái <b>CHƯA GHI SỔ</b> — mở MISA kiểm tra rồi bấm Ghi sổ.
-      ${kq.so_go_cu?`Sẽ gỡ ${kq.so_go_cu} chứng từ cũ chưa ghi sổ do phần mềm tạo ở các tháng này để ghi lại. `:''}Chỉ chạy trên dữ liệu <b>THỬ / đã sao lưu</b>.</div>
+      ⚠ Sẽ ghi <b>${kq.so_chung_tu}</b> chứng từ (${kq.so_dong} dòng, bắt đầu <b>NVK${kq.so_bat_dau}</b>) THẲNG vào CSDL <b>${xkEsc(kq.database||'?')}</b>, ${kq.da_ghi_so?'<b>GHI SỔ LUÔN</b> (kèm sổ cái) — mở MISA kiểm tra lại sau khi ghi.':'trạng thái <b>CHƯA GHI SỔ</b> (chưa học được mẫu sổ cái) — mở MISA kiểm tra rồi bấm Ghi sổ.'}
+      ${kq.so_go_cu?`Sẽ gỡ ${kq.so_go_cu} chứng từ cũ (kèm sổ cái) do phần mềm tạo ở các tháng này để ghi lại. `:''}Chỉ chạy trên dữ liệu <b>THỬ / đã sao lưu</b>.</div>
     ${bq}${cb}
     <div style="overflow:auto;max-height:240px;margin-top:6px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:#f6e6f0"><th style="padding:3px 8px;border:1px solid #eee">Số CT</th><th style="padding:3px 8px;border:1px solid #eee">Ngày</th><th style="padding:3px 8px;border:1px solid #eee;text-align:left">Nội dung</th><th style="padding:3px 8px;border:1px solid #eee">Tổng tiền</th></tr></thead><tbody>${dong}</tbody></table></div>
     <div style="margin-top:8px"><button class="btn sm" style="background:#a03a3a" onclick="blImportMisaGhi()">⬆ Ghi ${kq.so_chung_tu} chứng từ vào MISA</button></div>`;
@@ -5448,12 +5448,12 @@ function blVeImportMisa(kq){
 async function blImportMisaGhi(){
   const goi=blDocMisa();if(!goi)return;
   const b=document.getElementById('blMsKq');
-  if(!confirm('Ghi thẳng các chứng từ lương vào CSDL MISA?\n(Chưa ghi sổ. Nên sao lưu dữ liệu MISA trước.)'))return;
+  if(!confirm('Ghi thẳng các chứng từ lương vào CSDL MISA và ghi sổ luôn?\n(Nên sao lưu dữ liệu MISA trước.)'))return;
   try{
     const kq=await api(`/api/bang-luong/${current}/import-misa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign(goi,{preview:false}))});
     const cb=(kq.canh_bao||[]).map(x=>`<div style="color:#8a5300">⚠ ${xkEsc(x)}</div>`).join('');
-    if(b)b.innerHTML=`<div style="color:#166534;font-weight:600">✓ Đã ghi ${kq.so_chung_tu} chứng từ (NVK${kq.so_bat_dau}…) vào MISA — CHƯA ghi sổ. Mở MISA → Nghiệp vụ khác để kiểm tra rồi Ghi sổ.</div>${cb}`;
-    toast(`✓ Đã ghi ${kq.so_chung_tu} chứng từ vào MISA (chưa ghi sổ)`,'ok');
+    if(b)b.innerHTML=`<div style="color:#166534;font-weight:600">✓ Đã ghi ${kq.so_chung_tu} chứng từ (NVK${kq.so_bat_dau}…) vào MISA — ${kq.da_ghi_so?'ĐÃ GHI SỔ. Mở MISA → Nghiệp vụ khác để kiểm tra lại.':'CHƯA ghi sổ. Mở MISA → Nghiệp vụ khác để kiểm tra rồi Ghi sổ.'}</div>${cb}`;
+    toast(`✓ Đã ghi ${kq.so_chung_tu} chứng từ vào MISA (${kq.da_ghi_so?'đã ghi sổ':'chưa ghi sổ'})`,'ok');
   }catch(e){if(b)b.innerHTML=`<div style="color:#b91c1c;font-weight:600">⚠ ${xkEsc(e.message)}</div>`;toast('Lỗi ghi MISA: '+e.message,'err')}
 }
 
