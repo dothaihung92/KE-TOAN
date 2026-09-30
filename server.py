@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.002"
+APP_BUILD = "2026-09-30.003"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10472,8 +10472,62 @@ def bang_luong_le_mac_dinh(nam: int = 0):
             "cong_chuan": {t: _luong_cong_chuan_thang(nam, t, ds) for t in _LUONG_THANG}}
 
 
-def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0):
-    """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định)."""
+def _nv_co_tick(v):
+    """Ô tick 'Đóng BHXH' trong Danh Sách Nhân Viên: trống/0/không/false -> KHÔNG tick; x/1/có/true/... -> tick."""
+    if v is None or isinstance(v, bool):
+        return bool(v)
+    if isinstance(v, (int, float)):
+        return v != 0
+    t = _khong_dau(str(v)).strip().lower()
+    return t not in ("", "0", "false", "khong", "k", "no", "n", "-")
+
+
+def _luong_bat_dau_bhxh(v):
+    """'Tháng/Năm vào làm' = thời điểm BẮT ĐẦU đóng BHXH. Nhận 10/2024, 1/10/2024, 01-10-2024, 2024-10, 2024-10-01,
+    ngày Excel (datetime). Trả (năm, tháng); vào làm sau ngày 18 (còn < 14 ngày trong tháng) thì tính từ tháng sau.
+    Trống/không đọc được -> None (đóng từ đầu)."""
+    import re as _re
+    if isinstance(v, datetime.datetime):
+        v = v.date()
+    if isinstance(v, datetime.date):
+        y, m, d = v.year, v.month, v.day
+    else:
+        t = str(v or "").strip()
+        if not t:
+            return None
+        g = _re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})", t)
+        if g:
+            d, m, y = int(g.group(1)), int(g.group(2)), int(g.group(3))
+        else:
+            g = _re.match(r"^(\d{4})[/\-.](\d{1,2})(?:[/\-.](\d{1,2}))?", t)
+            if g:
+                y, m, d = int(g.group(1)), int(g.group(2)), int(g.group(3) or 1)
+            else:
+                g = _re.match(r"^(\d{1,2})[/\-.](\d{4})$", t)
+                if not g:
+                    return None
+                m, y, d = int(g.group(1)), int(g.group(2)), 1
+    if not (1 <= m <= 12 and 1 <= d <= 31 and 1990 <= y <= 2200):
+        return None
+    if calendar.monthrange(y, m)[1] - d + 1 < _LUONG_NGAY_DONG_BHXH:     # làm < 14 ngày trong tháng vào làm -> chưa đóng
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return (y, m)
+
+
+def _luong_dong_bh_tu_nv(tick, vao_lam, nam=None, thang=None):
+    """Có đóng BHXH ở (nam, thang) không: phải được TICK và đã tới tháng bắt đầu đóng (Tháng/Năm vào làm)."""
+    if not tick:
+        return 0
+    bd = _luong_bat_dau_bhxh(vao_lam)
+    if bd and nam and thang and (int(nam), int(thang)) < bd:
+        return 0
+    return 1
+
+
+def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=None):
+    """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định + có đóng BHXH không).
+    Đóng BHXH = ô tick "Đóng BHXH" trong danh sách VÀ đã tới tháng "Tháng/Năm vào làm" (bắt đầu đóng). Danh sách cũ
+    chưa có cột "Đóng BHXH" -> coi như đều đóng (giữ nguyên cách tính trước đây)."""
     cot = {}
     for i, h in enumerate(header or []):
         cot[_khong_dau(str(h or "")).strip().lower()] = i
@@ -10485,11 +10539,14 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0):
                 return r[i]
         return ""
     kq = []
+    co_cot_tick = _khong_dau("Đóng BHXH").lower() in cot
     for r in rows or []:
         ten = str(lay(r, "Họ và tên") or "").strip()
         if not ten:
             continue
+        tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
         kq.append(_luong_chuan_dong_nhap({
+            "dong_bh": _luong_dong_bh_tu_nv(tick, lay(r, "Tháng/Năm vào làm"), nam, thang),
             "ma": lay(r, "Mã NV"), "ten": ten, "chuc_vu": lay(r, "Chức vụ"),
             "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,   # 0 = theo công chuẩn (lịch) của tháng
             "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
@@ -10499,65 +10556,87 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0):
 
 
 @app.get("/api/bang-luong/{cid}/tu-nhan-vien")
-def bang_luong_tu_nhan_vien(cid: int, nam: int = 0):
-    """Các dòng nhập dựng sẵn từ 'Danh Sách Nhân Viên' của công ty (ngày công chuẩn theo tham số năm)."""
-    ts, _t, _c, _n = _luong_doc_nam(cid, _luong_nam_hop_le(nam or datetime.date.today().year))
+def bang_luong_tu_nhan_vien(cid: int, nam: int = 0, thang: int = 0):
+    """Các dòng nhập dựng sẵn từ 'Danh Sách Nhân Viên' của công ty (ngày công chuẩn theo tham số năm). Có `thang` (1-12)
+    thì ô "Đóng BHXH" tính theo tick + tháng bắt đầu đóng của từng người."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
     d = nhap_lieu_get(cid, loai="nv")
-    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"))}
+    return {"rows": _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, thang if 1 <= thang <= 12 else None)}
 
 
 # ----- LẬP KẾ HOẠCH "CHI PHÍ LƯƠNG CẢ NĂM": nhập khoảng tháng + tổng chi phí lương -> tự tính cần bao nhiêu người -----
 _LUONG_GIO_TANG_CA_TOI_DA = 40      # Bộ luật Lao động: tăng ca tối đa 40 giờ/tháng
 
 
-def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0):
+def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=None):
     """Phân bổ tổng chi phí lương `muc_tieu` của 1 tháng cho các nhân viên trong `pool` (dòng nhập dựng từ Danh Sách
-    Nhân Viên). Lương CB + các phụ cấp GIỮ NGUYÊN theo danh sách. Thứ tự ưu tiên:
-      1. Lấy lần lượt nhân viên ĐI LÀM ĐỦ CÔNG, có đóng BHXH, chừng nào tổng chi phí còn <= mục tiêu.
-      2. Còn thiếu -> BÙ bằng THƯỞNG BÁN HÀNG + TĂNG CA (tăng ca tối đa 40 giờ/tháng) cho những người đó, chia theo
-         "chỗ trống" còn lại dưới ngưỡng nộp thuế TNCN (thu nhập tính thuế <= 0) nên không phát sinh thuế.
-      3. Vẫn thiếu -> thêm nhân viên khác làm DƯỚI 14 NGÀY/tháng (theo luật BHXH thì không phải đóng BHXH); những
-         người này bị khấu trừ 10% thuế TNCN. Số ngày làm chọn sao cho khớp phần còn thiếu.
+    Nhân Viên; dòng có dong_bh=0 là người KHÔNG được đóng BHXH). Lương CB + các phụ cấp GIỮ NGUYÊN theo danh sách.
+      1. Lấy lần lượt nhân viên được đóng BHXH, ĐI LÀM ĐỦ CÔNG, chừng nào tổng chi phí còn <= mục tiêu.
+      2. Còn thiếu -> BÙ bằng THƯỞNG BÁN HÀNG + TĂNG CA (tăng ca tối đa 40 giờ/tháng) cho những người đó, trong "chỗ
+         trống" dưới ngưỡng nộp thuế TNCN (thu nhập tính thuế <= 0) nên không phát sinh thuế. Mức bù của từng người và
+         tỷ lệ tăng ca/thưởng NGẪU NHIÊN (làm tròn nghìn đồng) cho tự nhiên, không chia đều.
+      3. Vẫn thiếu -> thêm người làm DƯỚI 14 NGÀY/tháng (không đóng BHXH theo luật; ưu tiên người không được đóng
+         BHXH), bị khấu trừ 10% thuế TNCN. Số ngày làm chọn sao cho khớp phần còn thiếu.
       4. Hết người mà vẫn thiếu -> dồn vào thưởng bán hàng (vượt ngưỡng thuế) và báo cảnh báo.
     Trả về (danh sách dòng nhập, thông tin)."""
+    import random as _random
+    rng = rng or _random.Random()
     e = (ts.get("cong_chuan") or {}).get(thang) or ts["ngay_cong_chuan"]
     hs = ts["he_so_tang_ca"]
 
     def tinh(r):
         return _luong_tinh_dong(r, ts, thang)
-    ung_vien = []
+    du_bh, khong_bh = [], []
     for r in pool:
-        base = dict(_luong_chuan_dong_nhap(r), ngay_cong=0, ngay_lam="", dong_bh=1, thuong_bh=0, thuong_t13=0, tang_ca=0)
+        d = _luong_chuan_dong_nhap(r)
+        base = dict(d, ngay_cong=0, ngay_lam="", dong_bh=1, thuong_bh=0, thuong_t13=0, tang_ca=0)
         f = tinh(base)["chi_phi_luong"]
         if f > 0:
-            ung_vien.append((base, f))
-    if not ung_vien:
+            (du_bh if d["dong_bh"] else khong_bh).append((base, f))
+    if not du_bh and not khong_bh:
         raise HTTPException(400, "Danh Sách Nhân Viên chưa có ai có lương (lương cơ bản/phụ cấp) để phân bổ")
     canh_bao = []
     con = int(muc_tieu)
     chon, i = [], 0
-    while i < len(ung_vien) and ung_vien[i][1] <= con:          # 1. đủ công, có BHXH
-        chon.append({"row": dict(ung_vien[i][0]), "loai": "day_du"})
-        con -= ung_vien[i][1]
+    while i < len(du_bh) and du_bh[i][1] <= con:                # 1. được đóng BHXH, đủ công
+        chon.append({"row": dict(du_bh[i][0]), "loai": "day_du"})
+        con -= du_bh[i][1]
         i += 1
+    ung_vien_3 = khong_bh + du_bh[i:]                          # người còn lại: làm < 14 ngày
 
     def bu(c, so_tien):
-        """Cộng `so_tien` vào tăng ca (tối đa 40 giờ) + thưởng bán hàng của người c."""
+        """Cộng `so_tien` vào tăng ca (tối đa 40 giờ) + thưởng bán hàng của người c; tỷ lệ tăng ca mỗi người một khác."""
         if so_tien <= 0:
             return
         row = c["row"]
         gio_don = row["luong_cb"] / e / 8.0 * hs if e else 0.0
-        tc = min(int(so_tien * ty_le_tang_ca / 100.0), int(_LUONG_GIO_TANG_CA_TOI_DA * gio_don))
+        ty = ty_le_tang_ca / 100.0
+        if 0 < ty_le_tang_ca < 100:
+            ty = min(1.0, max(0.0, ty * rng.uniform(0.3, 1.7)))
+        tc = min(int(so_tien * ty) // 1000 * 1000, int(_LUONG_GIO_TANG_CA_TOI_DA * gio_don) // 1000 * 1000)
         row["tang_ca"] += tc
         row["thuong_bh"] += so_tien - tc
     if chon and con > 0:                                          # 2. bù trong ngưỡng không phải nộp thuế
+        n = len(chon)
         cho_trong = [max(0.0, -tinh(c["row"])["tn_tinh_thue"]) for c in chon]
-        tong_cho = sum(cho_trong)
-        x = int(min(con, tong_cho))
+        x = int(min(con, sum(cho_trong)))
         if x > 0:
-            phan = [int(x * ct / tong_cho) for ct in cho_trong]
+            trong = [rng.uniform(0.15, 2.0) for _ in range(n)]     # trọng số ngẫu nhiên từng người
+            phan = [0.0] * n
+            con_x, hoat_dong = float(x), set(range(n))
+            while con_x > 0.5 and hoat_dong:                       # chia theo trọng số, người chạm trần thì dồn cho người khác
+                tw = sum(trong[j] for j in hoat_dong)
+                da_chia = 0.0
+                for j in list(hoat_dong):
+                    them = min(cho_trong[j] - phan[j], con_x * trong[j] / tw)
+                    phan[j] += them
+                    da_chia += them
+                    if cho_trong[j] - phan[j] < 1:
+                        hoat_dong.discard(j)
+                con_x -= da_chia
+            phan = [int(pj // 1000 * 1000) for pj in phan]         # làm tròn nghìn đồng
             du = x - sum(phan)
-            for j in range(len(chon)):
+            for j in sorted(range(n), key=lambda k: cho_trong[k] - phan[k], reverse=True):
                 if du <= 0:
                     break
                 them = int(min(du, cho_trong[j] - phan[j]))
@@ -10566,9 +10645,9 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0):
             for c, a in zip(chon, phan):
                 bu(c, a)
             con -= sum(phan)
-    while con > 0 and i < len(ung_vien):                         # 3. người làm < 14 ngày, không BHXH
-        base, f = ung_vien[i]
-        i += 1
+    for base, f in ung_vien_3:                                    # 3. người làm < 14 ngày, không BHXH
+        if con <= 0:
+            break
         moi_ngay = f / e if e else 0
         ngay = int(min(_LUONG_NGAY_DONG_BHXH - 1, con // moi_ngay)) if moi_ngay else 0
         while ngay >= 1 and tinh(dict(base, ngay_lam=ngay, dong_bh=0))["chi_phi_luong"] > con:
@@ -10576,8 +10655,7 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0):
         if ngay < 1:
             break
         row = dict(base, ngay_lam=ngay, dong_bh=0)
-        c = {"row": row, "loai": "thoi_vu"}
-        chon.append(c)
+        chon.append({"row": row, "loai": "thoi_vu"})
         con -= tinh(row)["chi_phi_luong"]
         if ngay < _LUONG_NGAY_DONG_BHXH - 1 and con > 0:          # phần lẻ (< 1 ngày công) bù bằng thưởng
             row["thuong_bh"] += con
@@ -10610,9 +10688,12 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0):
                   "thue": sum(k["thue_tncn"] for k in tinh_rows)}
 
 
-def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=50.0, da_co_ngoai=0.0):
+def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=50.0, da_co_ngoai=0.0, rng=None):
     """Chia `muc_tieu` (tổng chi phí lương CẢ NĂM) cho các tháng tu_thang..den_thang (trừ phần các tháng khác trong
-    năm đã có sẵn) rồi phân bổ từng tháng bằng _luong_ke_hoach_thang."""
+    năm đã có sẵn) rồi phân bổ từng tháng bằng _luong_ke_hoach_thang. `pool`: danh sách dòng nhập, hoặc hàm
+    (tháng "01".."12") -> danh sách (để ô "đóng BHXH" thay đổi theo tháng bắt đầu đóng của từng người)."""
+    import random as _random
+    rng = rng or _random.Random()
     tu, den = int(tu_thang), int(den_thang)
     if not (1 <= tu <= den <= 12):
         raise HTTPException(400, "Khoảng tháng không hợp lệ (từ tháng 1–12, 'đến' phải >= 'từ')")
@@ -10629,7 +10710,7 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
     tong_chi_phi = tong_thue = 0
     for j, t in enumerate(thang_ds):
         muc = moi + (can - moi * len(thang_ds) if j == len(thang_ds) - 1 else 0)
-        rows, tt = _luong_ke_hoach_thang(pool, muc, ts, t, ty_le_tang_ca)
+        rows, tt = _luong_ke_hoach_thang(pool(t) if callable(pool) else pool, muc, ts, t, ty_le_tang_ca, rng)
         thang_kq[t] = [_luong_tinh_dong(r, ts, t) for r in rows]
         tom["day_du"] = max(tom["day_du"], tt["day_du"])
         tom["thoi_vu"] = max(tom["thoi_vu"], tt["thoi_vu"])
@@ -10652,12 +10733,15 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
     body = await request.json()
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
     d = nhap_lieu_get(cid, loai="nv")
-    pool = _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"))
-    if not pool:
+    if not _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows")):
         raise HTTPException(400, "Danh Sách Nhân Viên đang trống — nhập nhân viên trước")
+
+    def pool(t):
+        return _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, int(t))
     ty_le = min(100.0, max(0.0, _luong_so(body.get("ty_le_tang_ca")) if body.get("ty_le_tang_ca") not in (None, "") else 50.0))
     thang, tom = _luong_ke_hoach(pool, nam, body.get("tu_thang"), body.get("den_thang"), body.get("muc_tieu"),
-                                 body.get("tham_so"), ty_le, body.get("da_co_ngoai") or 0)
+                                 body.get("tham_so"), ty_le, body.get("da_co_ngoai") or 0,
+                                 __import__("random").Random(body.get("seed")) if body.get("seed") is not None else None)
     return {"thang": thang, "tom_tat": tom}
 
 
@@ -11841,13 +11925,14 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
 
 NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
-              "Ngày cấp", "Tháng/Năm vào làm", "Chức vụ", "Lương Cơ bản",
+              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Chức vụ", "Lương Cơ bản",
               "PC Tiền cơm", "PC Xăng xe", "PC Chức vụ", "PC Điện thoại", "PC Trang phục"]
 
 # Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
 # Thứ tự quan trọng: khớp cụm dài/đặc trưng trước để tránh nhầm (vd "phu cap
 # chuc vu" phải khớp PC Chức vụ trước khi "chuc vu" khớp nhầm cột Chức vụ).
 _NV_TU_KHOA = [
+    ("Đóng BHXH", ["dong bhxh", "tham gia bhxh", "co dong bhxh", "dong bao hiem"]),
     ("PC Tiền cơm", ["tien com", "phu cap com", "pc com"]),
     ("PC Xăng xe", ["xang xe", "phu cap xang", "pc xang"]),
     ("PC Chức vụ", ["phu cap chuc vu", "pc chuc vu"]),
@@ -11991,6 +12076,8 @@ async def nhap_lieu_import_nhan_vien(cid: int, request: Request):
                 if ma and all(k in "IVXLCDM" for k in ma) and len(ma) <= 4:
                     continue  # dòng tiêu đề mục đánh số La Mã ở cột Mã NV (vd "I")
             dong_moi = ["" for _ in NV_HEADERS]
+            if "Đóng BHXH" not in cot_dich_cua:      # file nguồn không có cột tick -> mặc định TICK (đóng), người dùng bỏ tick nếu không đóng
+                dong_moi[NV_HEADERS.index("Đóng BHXH")] = "x"
             for i, ten_dich in enumerate(cot_dich_cua):
                 if ten_dich and i < len(r) and r[i] is not None and str(r[i]).strip() != "":
                     j = NV_HEADERS.index(ten_dich)

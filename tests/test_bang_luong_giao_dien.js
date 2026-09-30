@@ -279,7 +279,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(r15.length, 2, 'Thêm người mới');
   assert.strictEqual(r15[0].luong_cb, 6000000); assert.strictEqual(r15[0].tien_com, 800000);
   assert.strictEqual(r15[0].thuong_bh, 123, 'Không đụng các khoản nhập riêng từng tháng');
-  assert(/thêm 1 nhân viên, cập nhật lương\/phụ cấp .* 1 người/.test(m.toasts[m.toasts.length - 1][0]), m.toasts.join('|'));
+  assert(/thêm 1 nhân viên, cập nhật lương\/phụ cấp\/đóng BHXH .* 1 người/.test(m.toasts[m.toasts.length - 1][0]), m.toasts.join('|'));
   console.log('PASS 15: cột phụ cấp như Danh Sách Nhân Viên, cố định Mã NV + Họ tên, nạp NV cập nhật lương/phụ cấp.');
 
   // ---- 16: thuế TNCN thay đổi giữa năm (từ 7/2026): khung tham số có mục riêng, áp dụng gửi đúng, dòng thông tin báo ----
@@ -290,7 +290,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   m.ctx.document.getElementById('blThamSo').style.display = 'none';
   m.ctx.blMoThamSo();
   const ph = m.phanTu['blThamSo'].innerHTML;
-  assert(/Thuế TNCN thay đổi giữa năm/.test(ph) && /id="blMoiBat" checked/.test(ph) && /15500000/.test(ph) && /6200000/.test(ph), 'Có mục thuế thay đổi giữa năm, đã tick sẵn với bộ mới');
+  assert(/Thuế TNCN thay đổi giữa năm/.test(ph) && /id="blMoiBat" checked/.test(ph) && /15\.500\.000/.test(ph) && /6\.200\.000/.test(ph), 'Có mục thuế thay đổi giữa năm, đã tick sẵn với bộ mới');
   assert((ph.match(/class="blBacDong"/g) || []).length === 1 + 5, 'Bậc thuế cũ (1) + bộ mới 5 bậc');
   m.phanTu['blInfo'] = { dataset: {}, style: {}, textContent: '' }; m.ctx.blVeInfo();
   assert(/thuế TNCN theo quy định mới \(từ tháng 7: giảm trừ 15\.500\.000\/6\.200\.000, 5 bậc\)/.test(m.phanTu['blInfo'].textContent), m.phanTu['blInfo'].textContent);
@@ -338,7 +338,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(moNv.length, 1); assert(m.goiApi.some(([u]) => u.includes('/api/bang-luong/7?nam=2026')), 'OK -> lưu bảng lương trước khi chuyển');
 
   // --- phía Danh Sách Nhân Viên: chạy ĐÚNG code veGridNhanVien trong index.html ---
-  const n0 = html.indexOf('function veGridNhanVien(){'), n1 = html.indexOf('function nvSuaO(', n0);
+  const n0 = html.indexOf('const NV_COT_TICK='), n1 = html.indexOf('function nvSuaO(', n0);
   const nvJs = html.slice(n0, n1);
   const nvEnv = { nvHeader: ['STT', 'Mã NV', 'Họ và tên', 'Lương Cơ bản'], nvFilters: {}, nvChon: null, nvEsc: (x) => String(x), nvTuBl: null,
     nvRows: [[1, '101', 'Trần A', 5000000], [2, '102', 'Nguyễn B', 6000000], [3, '', 'Lê C', 4000000]],
@@ -417,6 +417,54 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   m.ctx.blDL = { '10': [dongMau('1', 'A', { canh_bao_bh: true }), dongMau('2', 'B', { thoi_vu: true })] }; m.ctx.blVeInfo();
   assert(/1 người không đóng BHXH nhưng làm từ 14 ngày/.test(m.phanTu['blInfo'].textContent) && /1 người làm dưới 14 ngày không BHXH \(khấu trừ 10% thuế TNCN\)/.test(m.phanTu['blInfo'].textContent));
   console.log('PASS 19: nút "Chi phí lương cả năm" — nhập tháng + tổng, xem trước, áp dụng, cảnh báo BHXH <14 ngày.');
+
+  // ---- 20: Danh Sách Nhân Viên: cột tick "Đóng BHXH" (+ Tháng/Năm vào làm), số hiện 5.310.000; bảng lương tự tick theo đó ----
+  const q0 = html.indexOf('const NV_COT_TICK='), q1 = html.indexOf('async function nvLuu(', q0);
+  const env2 = { nvHeader: ['STT', 'Mã NV', 'Họ và tên', 'Tháng/Năm vào làm', 'Chức vụ', 'Lương Cơ bản', 'PC Tiền cơm'], nvFilters: {}, nvChon: null, nvTuBl: null,
+    nvEsc: (x) => String(x), nvRows: [[1, '2', 'Trần A', '10/2024', 'KD', 5310000, '700000'], [2, '3', 'Lê B', '', 'KD', '5.310.000', 700000]], console };
+  env2.nvRowsLoc = () => env2.nvRows.map((_, i) => i);
+  const els2 = { nvTableWrap: { innerHTML: '' }, nvTuBl: { innerHTML: '' } };
+  env2.document = { getElementById: (id) => els2[id], querySelector: () => null };
+  vm.createContext(env2); vm.runInContext(html.slice(q0, q1), env2);
+  vm.runInContext('nvThemCotTick()', env2);          // danh sách lưu từ trước chưa có cột
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(env2.nvHeader)), ['STT', 'Mã NV', 'Họ và tên', 'Tháng/Năm vào làm', 'Đóng BHXH', 'Chức vụ', 'Lương Cơ bản', 'PC Tiền cơm'], 'Cột mới ngay sau Tháng/Năm vào làm');
+  assert.deepStrictEqual(env2.nvRows.map((r) => r[4]), ['x', 'x'], 'Người cũ được tick sẵn (giữ hành vi cũ)');
+  assert.strictEqual(env2.nvRows[0].length, env2.nvHeader.length);
+  vm.runInContext('nvThemCotTick()', env2); assert.strictEqual(env2.nvHeader.length, 8, 'Không thêm cột lần 2');
+  vm.runInContext('veGridNhanVien()', env2);
+  const g2 = els2.nvTableWrap.innerHTML;
+  assert.strictEqual((g2.match(/type="checkbox"/g) || []).length, 2, 'Mỗi nhân viên 1 ô tick');
+  assert(/5\.310\.000/.test(g2) && /700\.000/.test(g2) && !/>5310000</.test(g2) && !/>700000</.test(g2), 'Lương + phụ cấp hiện dạng 5.310.000');
+  vm.runInContext('nvDoiTick(1,4,false)', env2); assert.strictEqual(env2.nvRows[1][4], '');
+  vm.runInContext('nvDoiTick(1,4,true)', env2); assert.strictEqual(env2.nvRows[1][4], 'x');
+  assert.deepStrictEqual(['x', '1', 1, 'có', '', 0, 'không', null].map((v) => vm.runInContext('nvCoTick', env2)(v)), [true, true, true, true, false, false, false, false]);
+  const td20 = { dataset: { r: '0', c: '6' }, textContent: '1500000', };
+  vm.runInContext('nvSuaO', env2)(td20);
+  assert.strictEqual(env2.nvRows[0][6], '1.500.000'); assert.strictEqual(td20.textContent, '1.500.000', 'Gõ 1500000 -> 1.500.000');
+  const tdTen2 = { dataset: { r: '0', c: '2' }, textContent: ' Trần A2 ' }; vm.runInContext('nvSuaO', env2)(tdTen2);
+  assert.strictEqual(env2.nvRows[0][2], 'Trần A2', 'Cột chữ giữ nguyên');
+  vm.runInContext('nvThemDong()', env2);
+  assert.strictEqual(env2.nvRows[env2.nvRows.length - 1][4], 'x', 'Dòng mới mặc định tick');
+  // bảng lương: nạp từ Danh Sách Nhân Viên gửi tháng và đồng bộ ô đóng BHXH (người làm dưới 14 ngày giữ không đóng)
+  m = nap({ api: (url, o) => (url.includes('tu-nhan-vien')
+    ? { rows: [dongMau('101', 'A', { dong_bh: 0 }), dongMau('102', 'B', { dong_bh: 1 }), dongMau('103', 'C', { dong_bh: 1 })] }
+    : { rows: JSON.parse(o.body).rows, tham_so: JSON.parse(o.body).tham_so }) });
+  m.ctx.blNam = 2024; m.ctx.blThang = '10'; m.ctx.blTS = {};
+  m.ctx.blDL = { '10': [dongMau('101', 'A', { dong_bh: 1 }), dongMau('102', 'B', { dong_bh: 0, thoi_vu: true, ngay_lam: 5 }), dongMau('103', 'C', { dong_bh: 1 })] };
+  await m.ctx.blNapNhanVien();
+  assert(m.goiApi[0][0].includes('thang=10'), 'Gửi tháng đang xem: ' + m.goiApi[0][0]);
+  const d20 = m.ctx.blDL['10'];
+  assert.strictEqual(d20[0].dong_bh, 0, 'Bỏ tick trong danh sách -> bảng lương không đóng BHXH');
+  assert.strictEqual(d20[1].dong_bh, 0, 'Người thời vụ (<14 ngày) giữ nguyên không đóng');
+  assert.strictEqual(d20[2].dong_bh, 1);
+  // ô nhập tiền hiện dấu chấm
+  const inp = { value: '120000000' }; m.ctx.blDangTien(inp); assert.strictEqual(inp.value, '120.000.000');
+  inp.value = '12abc'; m.ctx.blDangTien(inp); assert.strictEqual(inp.value, '12'); inp.value = ''; m.ctx.blDangTien(inp); assert.strictEqual(inp.value, '');
+  m.ctx.blTS = { ngay_cong_chuan: 26, giam_tru_ban_than: 11000000, giam_tru_npt: 4400000, he_so_tang_ca: 1.33, nguong_khau_tru_10: 2000000, bh_dn: { bhxh: 17.5, bhyt: 3, bhtn: 1 }, bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 }, bac_thue: [[0, 5], [10000000, 10]], thue_moi: null };
+  m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
+  const pt = m.phanTu['blThamSo'].innerHTML;
+  assert(/id="blTsBt" value="11\.000\.000"/.test(pt) && /id="blTsNpt" value="4\.400\.000"/.test(pt) && /id="blTsN10" value="2\.000\.000"/.test(pt) && /class="blBacTu" value="10\.000\.000"/.test(pt), 'Tham số tiền hiện 11.000.000');
+  console.log('PASS 20: Danh Sách Nhân Viên có cột tick Đóng BHXH, số hiện 5.310.000; bảng lương tự tick theo danh sách + tháng.');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

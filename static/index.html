@@ -4334,7 +4334,7 @@ async function tmdtShopeeLayDonHang(){
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
-                   'Ngày cấp','Tháng/Năm vào làm','Chức vụ','Lương Cơ bản',
+                   'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Chức vụ','Lương Cơ bản',
                    'PC Tiền cơm','PC Xăng xe','PC Chức vụ','PC Điện thoại','PC Trang phục'];
 let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={};
 let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
@@ -4388,6 +4388,7 @@ async function taiNhanVien(){
     const d=await api(`/api/nhap-lieu/${current}?loai=nv`);
     nvHeader=(d.header&&d.header.length)?d.header.slice():NV_HEADERS.slice();
     nvRows=(d.rows||[]).map(r=>r.slice());
+    nvThemCotTick();
     nvFilters={}; nvChon=null;
     veGridNhanVien();
     const info=document.getElementById('nvInfo');
@@ -4396,6 +4397,33 @@ async function taiNhanVien(){
       else info.textContent='Chưa có dữ liệu. Import Excel hoặc bấm ➕ Thêm dòng.';
     }
   }catch(e){toast('Không tải được dữ liệu đã lưu — thử lại: '+e.message,'err')}
+}
+/* Cột "Đóng BHXH" (tick) + "Tháng/Năm vào làm" = tháng BẮT ĐẦU đóng BHXH: bảng lương tự tick đóng theo 2 cột này;
+   không tick thì không đóng BHXH. Danh sách đã lưu từ trước chưa có cột -> thêm cột và tick sẵn cho mọi người (giữ nguyên hành vi cũ). */
+const NV_COT_TICK='Đóng BHXH';
+function nvLaCotTick(h){return String(h).trim().toLowerCase()==='đóng bhxh'}
+function nvCoTick(v){
+  if(v==null)return false;
+  if(typeof v==='number')return v!==0;
+  if(typeof v==='boolean')return v;
+  return !['','0','false','không','khong','k','no','n','-'].includes(String(v).trim().toLowerCase());
+}
+function nvThemCotTick(){
+  if(nvHeader.some(nvLaCotTick))return;
+  let vt=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='tháng/năm vào làm');
+  vt=vt>=0?vt+1:nvHeader.length;
+  nvHeader.splice(vt,0,NV_COT_TICK);
+  nvRows.forEach(r=>{while(r.length<nvHeader.length-1)r.push('');r.splice(vt,0,'x')});
+}
+function nvDoiTick(ri,ci,co){if(nvRows[ri])nvRows[ri][ci]=co?'x':''}
+// Lương cơ bản + các cột "PC ..." hiện dạng 5.310.000 cho dễ nhìn (lưu vẫn đọc được như số)
+function nvLaCotTien(h){h=String(h).trim().toLowerCase();return h==='lương cơ bản'||h.startsWith('pc ')}
+function nvSoDep(v){
+  if(v==null)return '';
+  if(typeof v==='number')return isFinite(v)?v.toLocaleString('vi-VN'):'';
+  const t=String(v).trim();
+  if(/^\d+$/.test(t)||/^\d{1,3}([.,]\d{3})+$/.test(t))return Number(t.replace(/[.,]/g,'')).toLocaleString('vi-VN');
+  return t;
 }
 function nvDanhLaiStt(){
   const ci=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='stt');
@@ -4427,10 +4455,11 @@ function veGridNhanVien(){
     const to=ri===dong;      // người vừa bấm ở Bảng Lương -> viền đỏ cả dòng
     html+=`<tr${to?' data-nvsel="1"':''}>`;
     nvHeader.forEach((h,ci)=>{
-      const v=row[ci]==null?'':row[ci];
+      const v=row[ci]==null?'':(nvLaCotTien(h)?nvSoDep(row[ci]):row[ci]);
       const chon=nvChon&&nvChon.r===ri;
       const vien=to?`;background:#fff5f5;box-shadow:inset 0 2px 0 #d00000,inset 0 -2px 0 #d00000${ci===0?',inset 2px 0 0 #d00000':''}${ci===nvHeader.length-1?',inset -2px 0 0 #d00000':''}`:(chon?';background:#fdf0f8':'');
-      html+=`<td contenteditable="true" data-r="${ri}" data-c="${ci}" onfocus="nvChon={r:${ri},c:${ci}}" onblur="nvSuaO(this)" style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;min-width:70px${vien}">${nvEsc(v)}</td>`;
+      if(nvLaCotTick(h))html+=`<td data-r="${ri}" data-c="${ci}" style="padding:5px 8px;border:1px solid #eee;text-align:center${vien}"><input type="checkbox" ${nvCoTick(row[ci])?'checked':''} onchange="nvDoiTick(${ri},${ci},this.checked)" title="Tick = có đóng BHXH (từ tháng ghi ở cột Tháng/Năm vào làm); không tick = không đóng BHXH" style="width:17px;height:17px;cursor:pointer"></td>`;
+      else html+=`<td contenteditable="true" data-r="${ri}" data-c="${ci}" onfocus="nvChon={r:${ri},c:${ci}}" onblur="nvSuaO(this)" style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;min-width:70px${nvLaCotTien(h)?';text-align:right':''}${vien}">${nvEsc(v)}</td>`;
     });
     html+='</tr>';
   });
@@ -4465,10 +4494,12 @@ function nvVeBangLuong(){const t=nvTuBl&&nvTuBl.thang;nvTuBl=null;moBangLuongNam
 function nvSuaO(td){
   const r=+td.dataset.r, c=+td.dataset.c;
   if(!nvRows[r])return;
-  nvRows[r][c]=td.textContent.trim();
+  let t=td.textContent.trim();
+  if(nvLaCotTien(nvHeader[c])){t=nvSoDep(t);td.textContent=t}      // gõ 5310000 -> 5.310.000
+  nvRows[r][c]=t;
 }
 function nvThemDong(){
-  nvRows.push(nvHeader.map(()=>''));
+  nvRows.push(nvHeader.map(h=>nvLaCotTick(h)?'x':''));
   nvChon={r:nvRows.length-1,c:0};
   nvDanhLaiStt();
   veGridNhanVien();
@@ -4513,6 +4544,7 @@ async function nvImportExcel(input){
     }
     // nối thêm vào danh sách đang xem (không thay thế), rồi đánh lại STT
     if(!nvRows.length&&kq.header&&kq.header.length)nvHeader=kq.header.slice();
+    nvThemCotTick();
     nvRows.push(...kq.rows.map(r=>{
       const rr=r.slice();
       while(rr.length<nvHeader.length)rr.push('');
@@ -4565,6 +4597,7 @@ function blDoiHienMuc(){
 const BL_TRUONG_NHAP=BL_COT.filter(c=>c.nhap).map(c=>c.k);
 const BL_THANG=Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'));
 let blNam=0,blThang='01',blTS=null,blDL={},blCacNam=[],blBan=false,blSeq=0;
+function blDangTien(el){const d=String(el.value).replace(/\D/g,'');el.value=d?Number(d).toLocaleString('vi-VN'):''}
 function blDinhDang(v,dp){
   const n=Number(v);if(!isFinite(n))return'';
   return n.toLocaleString('vi-VN',{maximumFractionDigits:dp?2:0});
@@ -4784,7 +4817,7 @@ function blMoKeHoach(){
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px">
       <span>Từ tháng <input id="blKhTu" value="${t}" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"></span>
       <span>đến tháng <input id="blKhDen" value="12" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"></span>
-      <span>Tổng chi phí lương cả năm <input id="blKhTien" placeholder="vd 50.000.000" style="width:150px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"> đ</span>
+      <span>Tổng chi phí lương cả năm <input id="blKhTien" placeholder="vd 50.000.000" oninput="blDangTien(this)" style="width:150px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"> đ</span>
       <span title="Phần thiếu được bù bằng tăng ca (tối đa 40 giờ/tháng) và thưởng bán hàng theo tỷ lệ này">Bù bằng tăng ca <input id="blKhTc" value="50" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px">%</span>
       <button class="btn gold sm" onclick="blTinhKeHoach()">Tính</button>
       <button class="btn ghost sm" onclick="document.getElementById('blKeHoach').style.display='none'">Đóng</button>
@@ -4849,7 +4882,7 @@ function blXoaDong(ri){
 async function blNapNhanVien(){
   if(blThang==='nam'){toast('Chọn 1 tab tháng để nạp nhân viên','err');return}
   try{
-    const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}`);
+    const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}&thang=${parseInt(blThang,10)}`);
     if(!d.rows||!d.rows.length){toast('Danh Sách Nhân Viên đang trống — nhập nhân viên trước','err');return}
     const co=blDL[blThang]=blDL[blThang]||[];
     let them=0,capNhat=0;
@@ -4862,11 +4895,13 @@ async function blNapNhanVien(){
       if(!dong){co.push(r);cuaKey.set(key,r);them++;return}
       let doi=false;
       truongNv.forEach(k=>{if(String(dong[k]==null?'':dong[k])!==String(r[k]==null?'':r[k])){dong[k]=r[k];doi=true}});
+      // Đóng BHXH theo tick + tháng bắt đầu đóng ở Danh Sách Nhân Viên (người đang làm < 14 ngày/tháng giữ không đóng)
+      if(!dong.thoi_vu&&r.dong_bh!=null&&Number(dong.dong_bh)!==Number(r.dong_bh)){dong.dong_bh=r.dong_bh;doi=true}
       if(doi)capNhat++;
     });
     if(!them&&!capNhat){toast('Tất cả nhân viên đã có trong tháng này và khớp Danh Sách Nhân Viên','');return}
     blBan=true;blVeTabs();blVeBang();blVeInfo();await blTinhLai(blThang);
-    toast(`✓ Tháng ${parseInt(blThang,10)}: thêm ${them} nhân viên, cập nhật lương/phụ cấp theo Danh Sách Nhân Viên cho ${capNhat} người — nhập ngày công/thưởng rồi bấm 💾 Lưu`,'ok');
+    toast(`✓ Tháng ${parseInt(blThang,10)}: thêm ${them} nhân viên, cập nhật lương/phụ cấp/đóng BHXH theo Danh Sách Nhân Viên cho ${capNhat} người — nhập ngày công/thưởng rồi bấm 💾 Lưu`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function blSaoChepThangTruoc(){
@@ -4925,13 +4960,14 @@ function blMoThamSo(){
   const w=document.getElementById('blThamSo');if(!w)return;
   if(w.style.display!=='none'){w.style.display='none';return}
   const t=blTS,o=(id,v,st)=>`<input id="${id}" value="${v}" style="width:${st||110}px;padding:4px 6px;border:1px solid #ccc;border-radius:6px;text-align:right">`;
+  const om=(id,v,st)=>`<input id="${id}" value="${blDinhDang(v)}" oninput="blDangTien(this)" style="width:${st||110}px;padding:4px 6px;border:1px solid #ccc;border-radius:6px;text-align:right">`;   // tiền: 11.000.000
   w.style.cssText='display:block;border:1px solid #cfe0d5;background:#f6fbf8;border-radius:10px;padding:12px;margin-bottom:10px';
   w.innerHTML=`<div style="font-weight:700;margin-bottom:6px">⚙ Tham số năm ${blNam}</div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center">
-      <span>Giảm trừ bản thân ${o('blTsBt',t.giam_tru_ban_than)} đ</span>
-      <span>Giảm trừ mỗi người phụ thuộc ${o('blTsNpt',t.giam_tru_npt)} đ</span>
+      <span>Giảm trừ bản thân ${om('blTsBt',t.giam_tru_ban_than)} đ</span>
+      <span>Giảm trừ mỗi người phụ thuộc ${om('blTsNpt',t.giam_tru_npt)} đ</span>
       <span>Hệ số quy đổi tăng ca ${o('blTsHs',Number(t.he_so_tang_ca).toFixed(4),70)}</span>
-      <span title="Người không đóng BHXH (làm dưới 14 ngày/tháng) bị khấu trừ 10% thuế TNCN khi thu nhập chịu thuế từ mức này trở lên">Ngưỡng khấu trừ 10% ${o('blTsN10',t.nguong_khau_tru_10!=null?t.nguong_khau_tru_10:2000000)} đ</span>
+      <span title="Người không đóng BHXH (làm dưới 14 ngày/tháng) bị khấu trừ 10% thuế TNCN khi thu nhập chịu thuế từ mức này trở lên">Ngưỡng khấu trừ 10% ${om('blTsN10',t.nguong_khau_tru_10!=null?t.nguong_khau_tru_10:2000000)} đ</span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center;margin-top:8px">
       <b>DN chịu (% lương CB):</b> <span>BHXH ${o('blTsDx',t.bh_dn.bhxh,50)}</span><span>BHYT ${o('blTsDy',t.bh_dn.bhyt,50)}</span><span>BHTN ${o('blTsDt',t.bh_dn.bhtn,50)}</span>
@@ -4951,8 +4987,8 @@ function blMoThamSo(){
     <div style="margin-top:10px;font-size:13px;border-top:1px dashed #cfe0d5;padding-top:8px">
       <label><input type="checkbox" id="blMoiBat" ${t.thue_moi?'checked':''} onchange="document.getElementById('blMoiBox').style.display=this.checked?'block':'none'"> <b>Thuế TNCN thay đổi giữa năm</b> — từ tháng <input id="blMoiTu" value="${t.thue_moi?t.thue_moi.tu_thang:1}" style="width:40px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> tự động dùng giảm trừ + biểu thuế bên dưới (các tháng trước dùng bộ ở trên)</label>
       <div id="blMoiBox" style="display:${t.thue_moi?'block':'none'};margin-top:6px">
-        <span>Giảm trừ bản thân ${o('blMoiBt',t.thue_moi?t.thue_moi.giam_tru_ban_than:15500000)} đ</span>
-        <span style="margin-left:14px">Giảm trừ mỗi người phụ thuộc ${o('blMoiNpt',t.thue_moi?t.thue_moi.giam_tru_npt:6200000)} đ</span>
+        <span>Giảm trừ bản thân ${om('blMoiBt',t.thue_moi?t.thue_moi.giam_tru_ban_than:15500000)} đ</span>
+        <span style="margin-left:14px">Giảm trừ mỗi người phụ thuộc ${om('blMoiNpt',t.thue_moi?t.thue_moi.giam_tru_npt:6200000)} đ</span>
         <div id="blBacMoi" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">${(t.thue_moi?t.thue_moi.bac_thue:[[0,5],[10000000,10],[30000000,20],[60000000,30],[100000000,35]]).map(b=>blBacHtml(b,0)).join('')}</div>
         <button class="btn ghost sm" style="margin-top:4px" onclick="document.getElementById('blBacMoi').insertAdjacentHTML('beforeend',blBacHtml([0,0],0))">➕ Thêm bậc</button>
         <div style="font-size:12px;color:#6b5b00;margin-top:4px">Mặc định năm 2026: áp dụng Luật Thuế TNCN mới từ 1/1/2026 — giảm trừ bản thân 15.500.000, người phụ thuộc 6.200.000, biểu lũy tiến 5 bậc (10tr 5% · 30tr 10% · 60tr 20% · 100tr 30% · trên 100tr 35%). Từ năm 2027 phần mềm dùng bộ này cả năm.</div>
@@ -4978,7 +5014,7 @@ async function blLeMacDinh(){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function blBacHtml(b,i){
-  return `<span class="blBacDong" style="border:1px solid #d6e3db;border-radius:6px;padding:3px 6px;background:#fff">từ <input class="blBacTu" value="${b[0]}" style="width:100px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> → <input class="blBacTs" value="${b[1]}" style="width:44px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px">% <button onclick="this.parentNode.remove()" style="border:none;background:transparent;color:#c00;cursor:pointer">✕</button></span>`;
+  return `<span class="blBacDong" style="border:1px solid #d6e3db;border-radius:6px;padding:3px 6px;background:#fff">từ <input class="blBacTu" value="${blDinhDang(b[0])}" oninput="blDangTien(this)" style="width:100px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px"> → <input class="blBacTs" value="${b[1]}" style="width:44px;text-align:right;padding:2px 4px;border:1px solid #ccc;border-radius:4px">% <button onclick="this.parentNode.remove()" style="border:none;background:transparent;color:#c00;cursor:pointer">✕</button></span>`;
 }
 function blThemBac(){document.getElementById('blBac').insertAdjacentHTML('beforeend',blBacHtml([0,0],0))}
 async function blApDungThamSo(){
