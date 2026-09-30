@@ -173,25 +173,24 @@ th, tom = server._luong_ke_hoach(pool, 2025, 6, 6, 0, None, 50, 0, random.Random
 assert ck_tt(th["06"]) == 90_000_000 and any("mức tối đa" in c for c in tom["canh_bao"]), "Quá lớn so với số người -> vẫn khớp + cảnh báo"
 print("PASS 6b: số chuyển khoản quá lớn so với số người: vẫn khớp + cảnh báo mức tối đa.")
 
-# ===== 7: hạch toán MISA: số chuyển khoản theo FILE luôn ghi Nợ 3341/Có 1121 (kể cả "bỏ qua tick CK"), phần còn lại Có 1111 =====
-rows6 = th6 = server._luong_ke_hoach(pool, 2025, 6, 6, 0, None, 50, 0, random.Random(4), True, None, ck6, 12_000_000)[0]["06"]
+# ===== 7: hạch toán MISA có FILE chuyển khoản: KHÔNG hạch toán khoản chuyển khoản (đã hạch toán NH từ trước), chỉ hạch toán phần tiền mặt còn lại (Có 1111) =====
+rows6 = server._luong_ke_hoach(pool, 2025, 6, 6, 0, None, 50, 0, random.Random(4), True, None, ck6, 12_000_000)[0]["06"]
 g = server._luong_misa_tong(rows6)
 for tach in (True, False):
-    ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": tach, "ck_file": {"06": 40_110_000}, "tk_nh_ma": "0123"}, 1)
+    ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": tach, "ck_file": {"06": 40_110_000}}, 1)
     tt = [d for c in ds for d in c["dong"] if d["dien_giai"].startswith("TT lương")]
-    nh = [d for d in tt if d["co"] == "1121"]
-    tm = [d for d in tt if d["co"] == "1111"]
-    assert len(nh) == 1 and nh[0]["so_tien"] == 40_110_000 and nh[0]["loai"] == "nh" and nh[0]["dien_giai"] == "TT lương chuyển khoản T6/2025", tach
-    assert len(tm) == 1 and tm[0]["so_tien"] == g["tt_luong"] - 40_110_000 > 0
-# không có file: hành vi cũ (tick CK -> không ghi 1121; bỏ qua tick -> 1111 tất cả)
-ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": True}, 1)
-assert not any(d["co"] == "1121" for c in ds for d in c["dong"])
-ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": False, "ck_file": {"07": 5}}, 1)
-assert not any(d["co"] == "1121" for c in ds for d in c["dong"]), "File chỉ có tháng khác -> tháng này không ghi 1121"
-# số CK theo file lớn hơn tổng thực lãnh -> chặn ở tổng thực lãnh (không âm)
+    assert not any(d["co"].startswith("112") or d["loai"] == "nh" for c in ds for d in c["dong"]), "Không có dòng chuyển khoản (Có 112x)"
+    assert len(tt) == 1 and tt[0]["co"] == "1111" and tt[0]["so_tien"] == g["tt_luong"] - 40_110_000 > 0, tach
+# số CK theo file lớn hơn tổng thực lãnh -> không còn dòng thanh toán nào (không âm)
 ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"ck_file": {"6": 999_999_999}}, 1)
-tt = {d["co"]: d["so_tien"] for c in ds for d in c["dong"] if d["dien_giai"].startswith("TT lương")}
-assert tt == {"1121": g["tt_luong"]}, tt
-print("PASS 7: hạch toán MISA theo file: 1121 = số chuyển khoản trong file, 1111 = phần còn lại; không có file thì như cũ.")
+assert not any(d["dien_giai"].startswith("TT lương") for c in ds for d in c["dong"])
+# file chỉ có tháng khác -> tháng này theo hành vi cũ (không có file, bỏ qua tick -> TT lương 1111 tất cả)
+ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": False, "ck_file": {"07": 5}}, 1)
+tt = [d for c in ds for d in c["dong"] if d["dien_giai"].startswith("TT lương")]
+assert len(tt) == 1 and tt[0]["so_tien"] == g["tt_luong"]
+# không có file: hành vi cũ (tick CK -> chỉ tiền mặt của người không tick)
+ds = server._luong_misa_chung_tu(2025, {"06": rows6}, {"tach_ck": True}, 1)
+assert not any(d["co"].startswith("112") for c in ds for d in c["dong"])
+print("PASS 7: hạch toán MISA theo file: không hạch toán khoản chuyển khoản, chỉ hạch toán phần tiền mặt (Có 1111).")
 
 print("\nALL DONE")

@@ -5446,8 +5446,7 @@ function blMoMisa(){
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px;margin-top:8px">
       <label title="Mặc định (như file mẫu từ T6): thuế TNCN và thanh toán lương là 2 chứng từ riêng. Tick = gộp vào 1 chứng từ (như T1–T5)"><input type="checkbox" id="blMsGop"${cu.gop?' checked':''}> Gộp thuế TNCN + TT lương vào 1 chứng từ</label>
-      <label title="Mặc định: người tick 'Chuyển khoản' thì KHÔNG hạch toán thanh toán lương (Nợ 3341/Có 1121 do sao kê ngân hàng ghi nhận) — chỉ hạch toán Nợ 3341/Có 1111 cho người không tick. Tick ô này để bỏ qua tick Chuyển khoản: hạch toán TT lương tiền mặt 1111 cho TẤT CẢ"><input type="checkbox" id="blMsTm"${cu.tm?' checked':''}> Bỏ qua tick Chuyển khoản (TT lương 1111 cho tất cả) — riêng số chuyển khoản theo FILE đã import vẫn hạch toán 1121</label>
-      <span title="Số TK ngân hàng trong Danh mục MISA — cho dòng TT lương chuyển khoản theo file đã import">TK ngân hàng (số TK) ${i('blMsNh',cu.nh,'width:140px;','vd 0123456789')}</span>
+      <label title="Mặc định: người tick 'Chuyển khoản' thì KHÔNG hạch toán thanh toán lương (Nợ 3341/Có 1121 do sao kê ngân hàng ghi nhận) — chỉ hạch toán Nợ 3341/Có 1111 cho người không tick. Tick ô này để bỏ qua tick Chuyển khoản: hạch toán TT lương tiền mặt 1111 cho TẤT CẢ"><input type="checkbox" id="blMsTm"${cu.tm?' checked':''}> Bỏ qua tick Chuyển khoản (TT lương 1111 cho tất cả) — riêng số chuyển khoản theo FILE đã import <b>không hạch toán</b> (đã hạch toán NH từ trước), chỉ hạch toán phần tiền mặt còn lại</label>
       <span title="Nếu MISA của bạn có mã thống kê cho các dòng BH, điền vào đây (tùy chọn)">Mã thống kê dòng BH ${i('blMsTk',cu.tk,'width:90px;')}</span>
     </div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemMisa()">👁 Xem trước</button> <button class="btn sm" style="background:#7a1f5c" onclick="blXuatMisa()">📤 Xuất file import MISA</button>
@@ -5470,8 +5469,8 @@ function blDocMisa(){
   if(!Object.keys(thang).length){toast(`Tháng ${tu}–${den} chưa có dữ liệu bảng lương`,'err');return null}
   const tm=document.getElementById('blMsTm'),gop=document.getElementById('blMsGop');
   const goi={gop_thue:!!(gop&&gop.checked),nam:blNam,thang,ngay:g('blMsNgay'),tk_cp_luong:g('blMsTkL'),tk_cp_bh:g('blMsTkB'),so_bat_dau:g('blMsSo'),tach_ck:!(tm&&tm.checked),
-    ma_thong_ke:g('blMsTk'),tk_nh_ma:g('blMsNh'),ck_file:blCkTheoThang()};
-  try{localStorage.setItem('blMisa'+current,JSON.stringify({ngay:goi.ngay,tkL:goi.tk_cp_luong,tkB:goi.tk_cp_bh,so:goi.so_bat_dau,tm:!goi.tach_ck,gop:goi.gop_thue,tk:goi.ma_thong_ke,nh:goi.tk_nh_ma}))}catch{}
+    ma_thong_ke:g('blMsTk'),ck_file:blCkTheoThang()};
+  try{localStorage.setItem('blMisa'+current,JSON.stringify({ngay:goi.ngay,tkL:goi.tk_cp_luong,tkB:goi.tk_cp_bh,so:goi.so_bat_dau,tm:!goi.tach_ck,gop:goi.gop_thue,tk:goi.ma_thong_ke}))}catch{}
   return goi;
 }
 async function blXemMisa(){

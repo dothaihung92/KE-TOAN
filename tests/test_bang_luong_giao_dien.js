@@ -704,7 +704,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   c27.blDL = { '01': [r27('1', true), Object.assign(r27('2', false), { thue_tru_luong: undefined, thue_tncn: 5000 })] };
   c27.blMoMisa();
   const hop27 = els27['blMisa'].innerHTML;
-  assert(/Hạch toán chi phí lương → MISA/.test(hop27) && /id="blMsTkL" value="6422"/.test(hop27) && /id="blMsTkB" value="6421"/.test(hop27) && /Bỏ qua tick Chuyển khoản/.test(hop27) && /id="blMsNh"/.test(hop27) && !/blMsTkNh/.test(hop27) && /Gộp thuế TNCN \+ TT lương vào 1 chứng từ/.test(hop27) && /Import Excel/.test(hop27), 'Hộp có TK mặc định 6422/6421 + tách chuyển khoản + gộp chứng từ + hướng dẫn');
+  assert(/Hạch toán chi phí lương → MISA/.test(hop27) && /id="blMsTkL" value="6422"/.test(hop27) && /id="blMsTkB" value="6421"/.test(hop27) && /Bỏ qua tick Chuyển khoản/.test(hop27) && !/blMsNh|blMsTkNh/.test(hop27) && /Gộp thuế TNCN \+ TT lương vào 1 chứng từ/.test(hop27) && /Import Excel/.test(hop27), 'Hộp có TK mặc định 6422/6421 + tách chuyển khoản + gộp chứng từ + hướng dẫn');
   assert.strictEqual(c27.blDocMisa().gop_thue, false, 'Mặc định tách thuế và TT lương (như file mẫu từ T6)');
   const goi27 = c27.blDocMisa();
   assert.strictEqual(goi27.nam, 2025); assert.strictEqual(JSON.stringify(Object.keys(goi27.thang)), '["01"]', 'Chỉ gửi tháng có dữ liệu');
@@ -836,14 +836,14 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   // ---- 32: hạch toán MISA dùng số chuyển khoản theo FILE đã import (kể cả khi tick "Bỏ qua tick Chuyển khoản") + ô "Tối đa/người/tháng" ----
   m = nap({ api: async () => ({}) });
   m.ctx.blNam = 2025; m.ctx.blThang = '06'; m.ctx.blTS = {};
-  const val32 = { blMsTu: '6', blMsDen: '7', blMsNgay: '', blMsTkL: '6422', blMsTkB: '6421', blMsSo: '', blMsNh: '0123456789', blMsTk: '', blKhTu: '1', blKhDen: '12', blKhTien: '', blKhTc: '50', blKhCkMax: '10.000.000' };
+  const val32 = { blMsTu: '6', blMsDen: '7', blMsNgay: '', blMsTkL: '6422', blMsTkB: '6421', blMsSo: '', blMsTk: '', blKhTu: '1', blKhDen: '12', blKhTien: '', blKhTc: '50', blKhCkMax: '10.000.000' };
   let tm32 = true;
   m.ctx.document.getElementById = (id) => (id === 'blMsTm' ? { checked: tm32 } : id === 'blKhFull' ? { checked: false } : id in val32 ? { value: val32[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
   const r32 = (ma) => ({ ma, ten: 'NV' + ma, chi_phi_luong: 7910000, tt_luong: 7352450, thue_tncn: 0, thue_tru_luong: 0, bhxh_dn: 0, bhyt_dn: 0, bhtn_dn: 0, bhxh_nld: 0, bhyt_nld: 0, bhtn_nld: 0, ghi_chu: 'CK' });
   m.ctx.blDL = { '06': [r32('1')], '07': [r32('2')] };
   m.ctx.blCkGd = [{ ngay: '16/06/2025', so_ct: 'U1', dien_giai: 'x', so_tien: 4000000, thang: '06' }, { ngay: '20/06/2025', so_ct: 'U2', dien_giai: 'y', so_tien: 1000000, thang: '06' }, { ngay: '05/08/2025', so_ct: 'U3', dien_giai: 'z', so_tien: 9, thang: '08' }];
   const g32 = m.ctx.blDocMisa();
-  assert.strictEqual(JSON.stringify(g32.ck_file), '{"06":5000000,"08":9}', 'Gửi số chuyển khoản theo file từng tháng'); assert.strictEqual(g32.tach_ck, false, 'Tick bỏ qua -> tach_ck=false nhưng ck_file vẫn gửi'); assert.strictEqual(g32.tk_nh_ma, '0123456789');
+  assert.strictEqual(JSON.stringify(g32.ck_file), '{"06":5000000,"08":9}', 'Gửi số chuyển khoản theo file từng tháng'); assert.strictEqual(g32.tach_ck, false, 'Tick bỏ qua -> tach_ck=false nhưng ck_file vẫn gửi'); assert.strictEqual(g32.tk_nh_ma, undefined, 'Không còn ô TK ngân hàng');
   m.ctx.blCkGd = null; assert.strictEqual(JSON.stringify(m.ctx.blDocMisa().ck_file), '{}', 'Không có file -> ck_file rỗng');
   m.ctx.blCkGd = [{ ngay: '16/06/2025', so_ct: 'U1', dien_giai: 'x', so_tien: 4000000, thang: '06' }];
   m.ctx.blMoKeHoach();
