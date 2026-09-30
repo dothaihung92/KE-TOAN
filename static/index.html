@@ -4335,7 +4335,7 @@ async function tmdtShopeeLayDonHang(){
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
                    'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Chức vụ','Lương Cơ bản',
-                   'PC Tiền cơm','PC Xăng xe','PC Chức vụ','PC Điện thoại','PC Trang phục'];
+                   'PC Tiền cơm','PC Xăng xe','PC Điện thoại','PC Trang phục'];
 let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={};
 let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
 function nvEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
@@ -4388,6 +4388,7 @@ async function taiNhanVien(){
     const d=await api(`/api/nhap-lieu/${current}?loai=nv`);
     nvHeader=(d.header&&d.header.length)?d.header.slice():NV_HEADERS.slice();
     nvRows=(d.rows||[]).map(r=>r.slice());
+    nvBoCotPcChucVu();
     nvThemCotTick();
     nvFilters={}; nvChon=null;
     veGridNhanVien();
@@ -4407,6 +4408,14 @@ function nvCoTick(v){
   if(typeof v==='number')return v!==0;
   if(typeof v==='boolean')return v;
   return !['','0','false','không','khong','k','no','n','-'].includes(String(v).trim().toLowerCase());
+}
+// Cột "PC Chức vụ" đã bỏ khỏi Danh Sách Nhân Viên (phụ cấp chức vụ có tính BHXH): danh sách đã lưu từ trước còn cột này thì gỡ khỏi tiêu đề + mọi dòng.
+function nvBoCotPcChucVu(){
+  const vt=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='pc chức vụ');
+  if(vt<0)return;
+  nvHeader.splice(vt,1);
+  nvRows.forEach(r=>{if(r.length>vt)r.splice(vt,1)});
+  nvFilters={};
 }
 function nvThemCotTick(){
   if(nvHeader.some(nvLaCotTick))return;
@@ -4544,6 +4553,7 @@ async function nvImportExcel(input){
     }
     // nối thêm vào danh sách đang xem (không thay thế), rồi đánh lại STT
     if(!nvRows.length&&kq.header&&kq.header.length)nvHeader=kq.header.slice();
+    nvBoCotPcChucVu();
     nvThemCotTick();
     nvRows.push(...kq.rows.map(r=>{
       const rr=r.slice();

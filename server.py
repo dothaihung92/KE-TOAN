@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.023"
+APP_BUILD = "2026-09-30.024"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13017,16 +13017,16 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
 NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
               "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Chức vụ", "Lương Cơ bản",
-              "PC Tiền cơm", "PC Xăng xe", "PC Chức vụ", "PC Điện thoại", "PC Trang phục"]
+              "PC Tiền cơm", "PC Xăng xe", "PC Điện thoại", "PC Trang phục"]
 
 # Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
-# Thứ tự quan trọng: khớp cụm dài/đặc trưng trước để tránh nhầm (vd "phu cap
-# chuc vu" phải khớp PC Chức vụ trước khi "chuc vu" khớp nhầm cột Chức vụ).
+# Thứ tự quan trọng: khớp cụm dài/đặc trưng trước để tránh nhầm (vd cột "Phụ cấp
+# chức vụ" của file nguồn phải bị NUỐT bởi mục đích "" — cột này đã bỏ khỏi danh sách — trước khi "chuc vu" khớp nhầm cột Chức vụ).
 _NV_TU_KHOA = [
     ("Đóng BHXH", ["dong bhxh", "tham gia bhxh", "co dong bhxh", "dong bao hiem"]),
     ("PC Tiền cơm", ["tien com", "phu cap com", "pc com"]),
     ("PC Xăng xe", ["xang xe", "phu cap xang", "pc xang"]),
-    ("PC Chức vụ", ["phu cap chuc vu", "pc chuc vu"]),
+    ("", ["phu cap chuc vu", "pc chuc vu"]),        # nuốt cột phụ cấp chức vụ của file nguồn (không đưa vào danh sách)
     ("PC Điện thoại", ["dien thoai", "phu cap dt", "pc dien thoai"]),
     ("PC Trang phục", ["trang phuc", "phu cap trang phuc", "pc trang phuc"]),
     ("Lương Cơ bản", ["luong co ban", "luong cb", "muc luong"]),

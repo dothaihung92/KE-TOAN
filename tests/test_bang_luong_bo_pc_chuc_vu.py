@@ -39,4 +39,34 @@ try:
 finally:
     server.DOWNLOAD_DIR = _dl
 print("PASS 3: Excel không còn cột PC Chức vụ, đọc lại bình thường.")
+# 4: Danh Sách Nhân Viên: bộ cột chuẩn không còn PC Chức vụ; import file có cột "Phụ cấp chức vụ" thì bỏ cột đó và KHÔNG làm sai cột Chức vụ
+import asyncio, io
+assert "PC Chức vụ" not in server.NV_HEADERS and len(server.NV_HEADERS) == 15
+wb = openpyxl.Workbook()
+w = wb.active
+for pos, dong in enumerate([["Mã NV", "Họ và tên", "Phụ cấp chức vụ", "Chức vụ", "Lương cơ bản", "Tiền cơm", "Xăng xe", "Điện thoại", "Trang phục"],
+                            [],
+                            ["1", "Nguyễn A", 900_000, "Kinh doanh", 5_310_000, 700_000, 500_000, 500_000, 400_000]]):
+    w.append(dong)
+buf = io.BytesIO()
+wb.save(buf)
+
+class Up:
+    filename = "nv.xlsx"
+    async def read(self): return buf.getvalue()
+
+class Form:
+    def getlist(self, k): return [Up()] if k == "files" else []
+    def get(self, k): return None
+
+class Req:
+    async def form(self): return Form()
+
+kq = asyncio.run(server.nhap_lieu_import_nhan_vien(1, Req()))
+assert kq["header"] == server.NV_HEADERS and len(kq["rows"]) == 1
+r = dict(zip(kq["header"], kq["rows"][0]))
+assert r["Chức vụ"] == "Kinh doanh" and r["Lương Cơ bản"] == 5_310_000 and r["PC Tiền cơm"] == 700_000 and r["PC Xăng xe"] == 500_000
+assert 900_000 not in kq["rows"][0], "Phụ cấp chức vụ của file nguồn không được đưa vào bất kỳ cột nào"
+print("PASS 4: import Danh Sách Nhân Viên bỏ cột phụ cấp chức vụ, không nhầm sang cột Chức vụ.")
+
 print("\nALL DONE")

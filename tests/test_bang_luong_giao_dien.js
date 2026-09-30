@@ -856,5 +856,23 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/2 người CK, 1 người tiền mặt 1\.500\.000/.test(m.phanTu['blKhKq'].innerHTML), 'Hiện số người chuyển khoản/tiền mặt từng tháng');
   console.log('PASS 32: hạch toán MISA gửi số chuyển khoản theo file; kế hoạch gửi mức tối đa/người và hiện phần tiền mặt.');
 
+  // ---- 33: Danh Sách Nhân Viên: bỏ cột PC Chức vụ (danh sách đã lưu cũ còn cột này thì gỡ khỏi tiêu đề + mọi dòng) ----
+  {
+    const n0 = html.indexOf('/* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN'), n1 = html.indexOf('/* ----- BẢNG LƯƠNG (theo file TỔNG HỢP', n0);
+    assert(n0 > 0 && n1 > n0);
+    const khoiNv = html.slice(n0, n1).replace(/^let /gm, 'var ').replace(/^const /gm, 'var ');
+    const ctxNv = { current: 7, toast() {}, console, document: { getElementById: () => ({ style: {}, innerHTML: '', textContent: '' }) }, veGridNhanVien() {},
+      api: async () => ({ header: ['STT', 'Mã NV', 'Họ và tên', 'Chức vụ', 'Lương Cơ bản', 'PC Tiền cơm', 'PC Xăng xe', 'PC Chức vụ', 'PC Điện thoại'], rows: [[1, '1', 'A', 'KD', '5310000', '700000', '500000', '900000', '500000']] }) };
+    ctxNv.window = ctxNv;
+    vm.createContext(ctxNv);
+    vm.runInContext(khoiNv, ctxNv);
+    assert(!ctxNv.NV_HEADERS.includes('PC Chức vụ') && ctxNv.NV_HEADERS.length === 15, 'Bộ cột mặc định không còn PC Chức vụ');
+    await ctxNv.taiNhanVien();
+    assert(!ctxNv.nvHeader.includes('PC Chức vụ'), 'Đã gỡ cột khỏi tiêu đề');
+    const i33 = ctxNv.nvHeader.indexOf('PC Điện thoại');
+    assert(ctxNv.nvRows[0][i33] === '500000' && !ctxNv.nvRows[0].includes('900000') && ctxNv.nvRows[0].length === ctxNv.nvHeader.length, 'Dòng dữ liệu cũng gỡ đúng ô PC Chức vụ, các ô sau không lệch');
+    console.log('PASS 33: Danh Sách Nhân Viên bỏ cột PC Chức vụ (kể cả dữ liệu đã lưu cũ).');
+  }
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
