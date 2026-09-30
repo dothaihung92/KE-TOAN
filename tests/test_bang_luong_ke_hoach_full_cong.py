@@ -118,4 +118,29 @@ kq2 = asyncio.run(server.bang_luong_ke_hoach(1, Req({"nam": 2025, "tu_thang": 9,
 assert not kq2["tom_tat"]["full_cong"] and kq2["tom_tat"]["thoi_vu"] > 0, "Không tick: cách cũ (người làm dưới 14 ngày)"
 print("PASS 8: API nhận full_cong/tran_pc; không tick vẫn theo cách cũ.")
 
+# ===== 9: trần xăng xe: đẩy xăng xe lên (dùng chỗ trống thu nhập chịu thuế), vẫn khớp tổng + dưới ngưỡng; không đưa trần thì giữ nguyên =====
+th, tom = chay(48_000_000, tran_pc={"muc_xang": "1.200.000".replace(".", "")})
+kiem(th, tom, 48_000_000)
+assert tom["tong_thue"] == 0 and tom["chiu_thue_nam_max"] <= tom["nguong_chiu_thue"]
+for rows in th.values():
+    for r in rows:
+        assert r["muc_xang"] == 1_200_000 and r["tn_chiu_thue"] <= 11_000_000
+        assert (r["tien_com"], r["trang_phuc"], r["muc_dt"]) == (730_000, 416_000, 1_000_000), "Phụ cấp không chịu thuế vẫn đẩy trước"
+th, tom = chay(48_000_000)
+assert all(r["muc_xang"] == 500_000 for rows in th.values() for r in rows), "Không đưa trần xăng xe -> giữ nguyên"
+# mục tiêu chỉ đủ đẩy phụ cấp không chịu thuế + 1 phần xăng xe: chưa cần thưởng/tăng ca
+th, tom = chay(8_700_000 * 4, tran_pc={"muc_xang": "1000000"})
+kiem(th, tom, 8_700_000 * 4)
+r = th["09"][0]
+assert r["muc_xang"] > 500_000 and tom["tong_thuong_bh"] == 0 and tom["tong_tang_ca"] == 0
+rng9 = random.Random(5)
+for _ in range(25):
+    muc = rng9.randrange(33_000_000, 200_000_000, 1_000)
+    th, tom = chay(muc, seed=rng9.randint(1, 999), tran_pc={"muc_xang": str(rng9.choice([500_000, 800_000, 1_500_000]))})
+    if any("chưa đủ sức chứa" in c for c in tom["canh_bao"]):
+        continue
+    kiem(th, tom, muc)
+    assert tom["tong_thue"] == 0 and tom["chiu_thue_nam_max"] <= tom["nguong_chiu_thue"]
+print("PASS 9: trần xăng xe: đẩy xăng xe sau phụ cấp không chịu thuế, vẫn khớp tổng + dưới ngưỡng thuế.")
+
 print("\nALL DONE")

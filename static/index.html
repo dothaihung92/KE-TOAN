@@ -4747,7 +4747,20 @@ function blVeBang(){
 function blVeCaNam(w){
   const ds=[];BL_THANG.forEach(t=>(blDL[t]||[]).forEach(r=>ds.push({t,r})));
   if(!ds.length){w.innerHTML='<div style="padding:22px;text-align:center;color:var(--muted)">Năm này chưa có dữ liệu.</div>';return}
-  const cot=[{k:'t',t:'Tháng'}].concat(BL_COT.filter(c=>['ma','ten','chuc_vu','luong_cb','luong','tt_luong','chi_phi_luong','bhxh_dn','bhyt_dn','bhtn_dn','bhxh_nld','bhyt_nld','bhtn_nld','tn_chiu_thue','tn_khong_chiu_thue','tn_tinh_thue','thue_tncn'].includes(c.k)));
+  // Chi tiết từng tháng: đủ các phụ cấp + thưởng + tăng ca để cộng ra tổng lương; BH doanh nghiệp chịu và BH người lao động trừ gộp mỗi bên 1 cột cho gọn
+  const sum3=(r,a,b,c)=>(Number(r[a])||0)+(Number(r[b])||0)+(Number(r[c])||0);
+  const cot=[{k:'t',t:'Tháng'},{k:'ma',t:'Mã NV'},{k:'ten',t:'Họ và Tên'},{k:'chuc_vu',t:'Chức vụ'},
+    {k:'luong_cb',t:'Lương CB/Tháng',so:1,tong:1},{k:'luong',t:'Tiền lương',so:1,tong:1},
+    {k:'tt_tien_com',t:'PC Tiền cơm',so:1,tong:1},{k:'xang_xe',t:'PC Xăng xe',so:1,tong:1},{k:'tt_di_lai',t:'Hỗ trợ đi lại',so:1,tong:1,anNeuTrong:1},
+    {k:'tt_pc_chuc_vu',t:'PC Chức vụ',so:1,tong:1},{k:'dien_thoai',t:'PC Điện thoại',so:1,tong:1},{k:'tt_trang_phuc',t:'PC Trang phục',so:1,tong:1},
+    {k:'thuong_bh',t:'Thưởng bán hàng',so:1,tong:1},{k:'thuong_t13',t:'Thưởng T13',so:1,tong:1,anNeuTrong:1},{k:'tang_ca',t:'Tăng ca (tiền)',so:1,tong:1},
+    {k:'chi_phi_luong',t:'Chi phí lương (tổng)',so:1,tong:1,dam:1},
+    {k:'bh_dn_gop',t:'BH DN chịu (BHXH+BHYT+BHTN)',so:1,tong:1,f:r=>sum3(r,'bhxh_dn','bhyt_dn','bhtn_dn')},
+    {k:'bh_nld_gop',t:'BH NLĐ trừ (BHXH+BHYT+BHTN)',so:1,tong:1,f:r=>sum3(r,'bhxh_nld','bhyt_nld','bhtn_nld')},
+    {k:'thue_tncn',t:'Thuế TNCN',so:1,tong:1},{k:'tt_luong',t:'TT lương (thực lãnh)',so:1,tong:1,dam:1},
+    {k:'tn_chiu_thue',t:'Thu nhập chịu thuế',so:1,tong:1},{k:'tn_khong_chiu_thue',t:'Thu nhập không chịu thuế',so:1,tong:1},{k:'tn_tinh_thue',t:'Thu nhập tính thuế',so:1,tong:1}]
+    .filter(c=>!(c.anNeuTrong&&!ds.some(({r})=>Number(r[c.k]))));
+  const giaTri=(r,c)=>c.f?c.f(r):r[c.k];
   let h='<div style="font-weight:700;margin:8px">Tổng hợp theo nhân viên (cả năm)</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 14px"><thead><tr>';
   const cotNv=['ma','ten','chi_phi_luong','tt_luong','bh_dn','bhxh_nld_tong','tn_chiu_thue','thue_tncn'];
   const tenNv={ma:'Mã NV',ten:'Họ và Tên',chi_phi_luong:'Tổng chi phí lương',tt_luong:'Tổng thực lãnh',bh_dn:'Tổng BH doanh nghiệp chịu',bhxh_nld_tong:'Tổng BH người lao động',tn_chiu_thue:'Tổng thu nhập chịu thuế',thue_tncn:'Tổng thuế TNCN'};
@@ -4774,9 +4787,10 @@ function blVeCaNam(w){
   ds.forEach(({t,r})=>{
     h+='<tr>'+cot.map(c=>{
       if(c.k==='t')return `<td style="padding:4px 8px;border:1px solid #e3e3e3">T${parseInt(t,10)}</td>`;
-      return `<td style="padding:4px 8px;border:1px solid #e3e3e3;${c.so?'text-align:right':''}">${c.so?blDinhDang(r[c.k],c.dp):xkEsc(r[c.k]==null?'':r[c.k])}</td>`;
+      return `<td style="padding:4px 8px;border:1px solid #e3e3e3;${c.so?'text-align:right':''}${c.dam?';font-weight:700':''}">${c.so?blDinhDang(giaTri(r,c),c.dp):xkEsc(r[c.k]==null?'':r[c.k])}</td>`;
     }).join('')+'</tr>';
   });
+  h+='<tr style="background:#eef6f0;font-weight:700">'+cot.map((c,i)=>`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right">${c.k==='ten'?'TỔNG CỘNG':(c.tong?blDinhDang(ds.reduce((a,{r})=>a+(Number(giaTri(r,c))||0),0)):'')}</td>`).join('')+'</tr>';
   h+='</tbody></table><div style="font-size:12px;color:var(--muted);margin:0 8px 8px">Muốn sửa số: chọn tab tháng tương ứng. Xuất Excel cả năm để có đủ mọi cột theo bố cục bảng TỔNG HỢP.</div>';
   w.innerHTML=h;
 }
@@ -4837,6 +4851,7 @@ function blMoKeHoach(){
       <span>Tiền cơm <input id="blKhTranCom" value="730.000" oninput="blDangTien(this)" style="width:80px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"></span>
       <span>Trang phục <input id="blKhTranTp" value="416.000" oninput="blDangTien(this)" style="width:80px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"></span>
       <span>Điện thoại <input id="blKhTranDt" value="1.000.000" oninput="blDangTien(this)" style="width:90px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"></span>
+      <span title="Xăng xe cũng được đẩy lên tới mức này. Lưu ý: theo công thức bảng lương (file gốc) phụ cấp xăng xe vẫn tính vào thu nhập chịu thuế, nên phần đẩy thêm dùng chỗ trống dưới giảm trừ bản thân (vẫn không phát sinh thuế)">Xăng xe <input id="blKhTranXx" value="1.000.000" oninput="blDangTien(this)" style="width:90px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"></span>
     </div>
     <div style="font-size:12px;color:#6b5b00;margin-top:6px;line-height:1.5">Lương cơ bản + phụ cấp <b>giữ nguyên theo Danh Sách Nhân Viên</b>. Phần mềm lấy lần lượt nhân viên đi làm đủ công (có đóng BHXH); nếu còn thiếu thì <b>tăng thưởng bán hàng + tăng ca</b> trong mức <b>không phải nộp thuế TNCN</b>; vẫn thiếu thì thêm người làm <b>dưới 14 ngày/tháng</b> (không đóng BHXH theo luật, bị <b>khấu trừ 10% thuế TNCN</b>). Khi bấm <b>Áp dụng</b>, <b>toàn bộ dữ liệu đã nhập của năm này sẽ bị xóa</b> rồi nhập lại theo kế hoạch mới (nên tổng chi phí lương cả năm sẽ đúng bằng số bạn nhập).</div>
     <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #f0d9b5;font-size:13px">
@@ -4895,7 +4910,7 @@ async function blTinhKeHoach(){
   const fc=document.getElementById('blKhFull');
   const ngoai=0;      // áp dụng sẽ xóa dữ liệu cũ của cả năm nên không trừ các tháng đã có
   try{
-    const kq=await api(`/api/bang-luong/${current}/ke-hoach`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,tu_thang:tu,den_thang:den,muc_tieu:g('blKhTien'),ty_le_tang_ca:g('blKhTc'),tham_so:blTS,da_co_ngoai:ngoai,full_cong:!!(fc&&fc.checked),ck_theo_thang:ckThang,tran_pc:{tien_com:g('blKhTranCom'),trang_phuc:g('blKhTranTp'),muc_dt:g('blKhTranDt')}})});
+    const kq=await api(`/api/bang-luong/${current}/ke-hoach`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,tu_thang:tu,den_thang:den,muc_tieu:g('blKhTien'),ty_le_tang_ca:g('blKhTc'),tham_so:blTS,da_co_ngoai:ngoai,full_cong:!!(fc&&fc.checked),ck_theo_thang:ckThang,tran_pc:{tien_com:g('blKhTranCom'),trang_phuc:g('blKhTranTp'),muc_dt:g('blKhTranDt'),muc_xang:g('blKhTranXx')}})});
     blKh=kq;blVeKeHoach();
   }catch(e){document.getElementById('blKhKq').innerHTML=`<div style="color:#b91c1c;font-weight:600">⚠ ${xkEsc(e.message)}</div>`;blKh=null}
 }

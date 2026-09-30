@@ -758,7 +758,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   // ---- 29: "Làm full ngày công" trong Chi phí lương cả năm: gửi full_cong + trần phụ cấp; kết quả hiện ngưỡng 132tr ----
   m = nap({ api: async () => ({}) });
   m.ctx.blNam = 2025; m.ctx.blThang = '09'; m.ctx.blTS = {}; m.ctx.blDL = {};
-  const gia29 = { blKhTu: '9', blKhDen: '12', blKhTien: '50.000.000', blKhTc: '50', blKhTranCom: '730.000', blKhTranTp: '416.000', blKhTranDt: '1.000.000' };
+  const gia29 = { blKhTu: '9', blKhDen: '12', blKhTien: '50.000.000', blKhTc: '50', blKhTranCom: '730.000', blKhTranTp: '416.000', blKhTranDt: '1.000.000', blKhTranXx: '1.200.000' };
   let fc29 = true;
   m.ctx.document.getElementById = (id) => (id === 'blKhFull' ? { checked: fc29 } : gia29[id] !== undefined ? { value: gia29[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
   m.ctx.blMoKeHoach();
@@ -770,7 +770,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   m.ctx.api = async (url, o) => { m.goiApi.push([url, JSON.parse(o.body)]); return kq29; };
   await m.ctx.blTinhKeHoach();
   const goi29 = m.goiApi.find(([u]) => u.includes('/ke-hoach'))[1];
-  assert.strictEqual(goi29.full_cong, true); assert.strictEqual(goi29.tran_pc.tien_com, '730.000'); assert.strictEqual(goi29.tran_pc.trang_phuc, '416.000'); assert.strictEqual(goi29.tran_pc.muc_dt, '1.000.000');
+  assert.strictEqual(goi29.full_cong, true); assert.strictEqual(goi29.tran_pc.tien_com, '730.000'); assert.strictEqual(goi29.tran_pc.trang_phuc, '416.000'); assert.strictEqual(goi29.tran_pc.muc_dt, '1.000.000'); assert.strictEqual(goi29.tran_pc.muc_xang, '1.200.000', 'Gửi cả trần xăng xe'); assert(/id="blKhTranXx"/.test(hop29), 'Có ô trần xăng xe');
   const html29 = m.phanTu['blKhKq'].innerHTML;
   assert(/FULL ngày công, không khấu trừ 10%/.test(html29) && /41\.413\.336/.test(html29) && /44\.000\.000/.test(html29) && /dưới ngưỡng/.test(html29) && !/dưới 14 ngày không BHXH/.test(html29), 'Kết quả: full công + ngưỡng chịu thuế');
   m.ctx.api = async () => Object.assign({}, kq29, { tom_tat: Object.assign({}, kq29.tom_tat, { chiu_thue_nam_max: 50000000 }) }); await m.ctx.blTinhKeHoach();
@@ -815,6 +815,23 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   // bỏ file + không nhập tổng -> báo lỗi, không gọi server
   m.ctx.blBoCk(); m.goiApi.length = 0; await m.ctx.blTinhKeHoach(); assert.strictEqual(m.goiApi.length, 0, 'Không file + không tổng -> không gọi server');
   console.log('PASS 30: import file lương chuyển khoản: đọc, tóm tắt theo tháng, sửa kỳ, tính khớp, bỏ file.');
+
+  // ---- 31: tab Cả năm: chi tiết từng tháng có đủ phụ cấp/thưởng/tăng ca; BH doanh nghiệp chịu + BH người lao động trừ gộp mỗi bên 1 cột; có dòng tổng ----
+  m = nap();
+  m.ctx.blDL = { '07': [dongMau('101', 'A', { luong_cb: 5310000, luong: 5310000, tt_tien_com: 730000, xang_xe: 800000, tt_pc_chuc_vu: 500000, dien_thoai: 1000000, tt_trang_phuc: 416000, thuong_bh: 2000000, tang_ca: 1000000,
+      chi_phi_luong: 11756000, bhxh_dn: 929250, bhyt_dn: 159300, bhtn_dn: 53100, bhxh_nld: 424800, bhyt_nld: 79650, bhtn_nld: 53100, tt_luong: 11198450, thue_tncn: 0 })],
+    '08': [dongMau('101', 'A', { luong_cb: 5310000, luong: 5310000, tt_tien_com: 730000, xang_xe: 800000, tt_pc_chuc_vu: 500000, dien_thoai: 1000000, tt_trang_phuc: 416000, thuong_bh: 2000000, tang_ca: 1000000,
+      chi_phi_luong: 11756000, bhxh_dn: 929250, bhyt_dn: 159300, bhtn_dn: 53100, bhxh_nld: 424800, bhyt_nld: 79650, bhtn_nld: 53100, tt_luong: 11198450, thue_tncn: 0 })] };
+  m.ctx.blThang = 'nam'; m.ctx.blVeBang();
+  const nam31 = m.phanTu['blBangWrap'].innerHTML;
+  for (const tieuDe of ['PC Tiền cơm', 'PC Xăng xe', 'PC Chức vụ', 'PC Điện thoại', 'PC Trang phục', 'Thưởng bán hàng', 'Tăng ca (tiền)', 'Chi phí lương (tổng)', 'TT lương (thực lãnh)'])
+    assert(nam31.includes(tieuDe), 'Cả năm thiếu cột: ' + tieuDe);
+  assert(/BH DN chịu \(BHXH\+BHYT\+BHTN\)/.test(nam31) && /BH NLĐ trừ \(BHXH\+BHYT\+BHTN\)/.test(nam31) && !/DN chịu BHXH/.test(nam31) && !/Trừ BHXH/.test(nam31), 'BH gộp mỗi bên 1 cột');
+  assert(/>1\.141\.650</.test(nam31), 'BH DN chịu = 929.250+159.300+53.100 = 1.141.650 mỗi tháng');
+  assert(/>557\.550</.test(nam31), 'BH NLĐ trừ = 424.800+79.650+53.100 = 557.550 mỗi tháng');
+  assert(/TỔNG CỘNG/.test(nam31) && /23\.512\.000/.test(nam31) && /2\.283\.300/.test(nam31), 'Dòng tổng: chi phí 2 tháng 23.512.000, BH DN 2.283.300');
+  assert(!/Hỗ trợ đi lại/.test(nam31.split('Chi tiết từng tháng')[1] || ''), 'Cột không có số liệu thì ẩn');
+  console.log('PASS 31: tab Cả năm: đủ phụ cấp/thưởng/tăng ca, BH gộp mỗi bên 1 cột, có dòng tổng.');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

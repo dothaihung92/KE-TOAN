@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.020"
+APP_BUILD = "2026-09-30.021"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10587,6 +10587,9 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
     for k, v in (tran_pc or {}).items():
         if k in tran and str(v).strip() != "":
             tran[k] = max(0.0, _luong_so(v))
+    tran_xang = None                                                # xăng xe: chỉ đẩy khi người dùng đưa trần (mặc định giữ nguyên)
+    if str((tran_pc or {}).get("muc_xang", "")).strip() != "":
+        tran_xang = max(0.0, _luong_so(tran_pc["muc_xang"])) // 1000 * 1000
     tran = {k: v // 1000 * 1000 for k, v in tran.items()}          # mức trần tròn nghìn đồng (vd 416.000)
     gt_bt = _luong_thue_ap_dung(ts, thang)["giam_tru_ban_than"]
     ung = [(dict(b), f) for b, f in du_bh] + [(dict(b, dong_bh=0), f) for b, f in khong_bh]      # người được đóng BHXH đứng trước
@@ -10598,7 +10601,7 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
         caps = [max(0.0, tran[k] - row[k]) for k in ("tien_com", "trang_phuc", "muc_dt")]
         head = max(0.0, gt_bt - tinh(row)["tn_chiu_thue"] - 1)          # chỗ trống thu nhập chịu thuế (<= giảm trừ bản thân)
         chon.append({"row": row, "loai": "day_du"})
-        info.append((caps, head))
+        info.append((caps, head, max(0.0, tran_xang - row["muc_xang"]) if tran_xang is not None else 0.0))
         tong_goc += f
         suc_chua += f + sum(caps) + head
         if suc_chua >= con:
@@ -10607,15 +10610,23 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
         raise HTTPException(400, f"Tháng {int(thang)}: mục tiêu {int(con):,} đ nhỏ hơn lương đủ công của nhân viên rẻ nhất".replace(",", "."))
     con -= int(tong_goc)
     if con > 0:                                                   # (a) đẩy phụ cấp không chịu thuế
-        cap_ng = [sum(c) for c, _h in info]
+        cap_ng = [sum(c) for c, _h, _x in info]
         x = int(min(con, sum(cap_ng)))
         if x > 0:
-            for c, (caps, _h), u in zip(chon, info, chia(x, cap_ng)):
+            for c, (caps, _h, _x), u in zip(chon, info, chia(x, cap_ng)):
                 for k, a in zip(("tien_com", "trang_phuc", "muc_dt"), chia(u, caps) if u > 0 else [0, 0, 0]):
                     c["row"][k] += a
                 con -= u
+    heads = [h for _c, h, _x in info]
+    if con > 0 and any(x for _c, _h, x in info):                  # (a2) đẩy xăng xe — vẫn là thu nhập chịu thuế nên dùng chỗ trống dưới giảm trừ bản thân
+        cap_x = [min(x, h) for _c, h, x in info]
+        x = int(min(con, sum(cap_x)))
+        if x > 0:
+            for i, (c, u) in enumerate(zip(chon, chia(x, cap_x))):
+                c["row"]["muc_xang"] += u
+                heads[i] -= u
+                con -= u
     if con > 0:                                                   # (b) thưởng + tăng ca, thu nhập chịu thuế vẫn <= giảm trừ bản thân
-        heads = [h for _c, h in info]
         x = int(min(con, sum(heads)))
         if x > 0:
             for c, a in zip(chon, chia(x, heads)):
@@ -10646,7 +10657,8 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
       4. Hết người mà vẫn thiếu -> dồn vào thưởng bán hàng (vượt ngưỡng thuế) và báo cảnh báo.
     full_cong=True (tick "Làm full ngày công"): KHÔNG có người làm < 14 ngày, KHÔNG khấu trừ 10%; mọi người đi làm ĐỦ CÔNG. Chọn số người ít nhất đủ
     "sức chứa", bù phần thiếu theo thứ tự: (a) ĐẨY các phụ cấp KHÔNG chịu thuế TNCN (tiền cơm, trang phục, điện thoại) lên tới mức trần `tran_pc`
-    (mỗi tháng; mặc định cơm 730.000, trang phục 5.000.000/12, điện thoại 1.000.000); (b) rồi thưởng bán hàng + tăng ca nhưng THU NHẬP CHỊU THUẾ
+    (mỗi tháng; mặc định cơm 730.000, trang phục 5.000.000/12, điện thoại 1.000.000), rồi xăng xe nếu có trần `muc_xang` (xăng xe vẫn là thu nhập CHỊU thuế
+    theo công thức bảng lương nên dùng chỗ trống dưới giảm trừ bản thân); (b) rồi thưởng bán hàng + tăng ca nhưng THU NHẬP CHỊU THUẾ
     mỗi người mỗi tháng <= giảm trừ bản thân (11tr x 12 = 132tr/năm) nên không phát sinh thuế TNCN; (c) hết chỗ mới dồn vượt ngưỡng + cảnh báo.
     Trả về (danh sách dòng nhập, thông tin)."""
     import random as _random
