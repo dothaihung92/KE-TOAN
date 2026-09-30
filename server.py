@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.015"
+APP_BUILD = "2026-09-30.016"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11373,7 +11373,7 @@ async def bang_luong_xuat_excel_mau(cid: int, request: Request):
 
 # ----- HẠCH TOÁN CHI PHÍ LƯƠNG -> file Excel import MISA "Chứng từ nghiệp vụ khác" (mẫu người dùng gửi, từng tháng 2 chứng từ) -----
 _LUONG_MISA_TK = {"tk_cp_luong": "6422", "tk_cp_bh": "6421", "tk_phai_tra": "3341", "tk_bhxh": "3383", "tk_bhyt": "3384",
-                  "tk_bhtn": "3386", "tk_thue": "3335", "tk_tien_mat": "1111", "tk_ngan_hang": "1121"}
+                  "tk_bhtn": "3386", "tk_thue": "3335", "tk_tien_mat": "1111"}
 
 
 def _luong_la_chuyen_khoan(ghi_chu):
@@ -11421,8 +11421,9 @@ def _luong_misa_chung_tu(nam, thang_rows, tc, so_dau):
             v1.append((f"DN Trích {ten} {kt}", tk["tk_phai_tra"], tk["tk_" + k], g["bh_nld"][k], "bh"))
         v2 = [(f"Hạch toán lương thuế TNCN {kt}", tk["tk_phai_tra"], tk["tk_thue"], g["thue"], "")]
         if tc.get("tach_ck") and g["tt_ck"] > 0:
+            # Người tick Chuyển khoản: KHÔNG hạch toán Nợ 3341/Có 1121 ở đây (khoản chi đó do sao kê ngân hàng ghi nhận) — chỉ còn TT lương
+            # tiền mặt của những người không tick
             v2.append((f"TT lương {kt}", tk["tk_phai_tra"], tk["tk_tien_mat"], g["tt_luong"] - g["tt_ck"], ""))
-            v2.append((f"TT lương chuyển khoản {kt}", tk["tk_phai_tra"], tk["tk_ngan_hang"], g["tt_ck"], "nh"))
         else:
             v2.append((f"TT lương {kt}", tk["tk_phai_tra"], tk["tk_tien_mat"], g["tt_luong"], ""))
         v3 = []
@@ -11493,8 +11494,6 @@ def _luong_xuat_misa_nvk(nam, chung_tu, tc):
             row[10] = str(d["co"])
             row[11] = d["so_tien"]
             row[12] = d["so_tien"]
-            if d["loai"] == "nh":
-                row[15] = str(tc.get("tk_nh_ma") or "")      # TK ngân hàng (MISA bắt buộc khi hạch toán TK 112)
             if d["loai"] == "bh":
                 row[22] = str(tc.get("ma_thong_ke") or "")   # Mã thống kê (tùy chọn)
             for c, v in enumerate(row, 1):
@@ -11517,7 +11516,7 @@ def _luong_xuat_misa_nvk(nam, chung_tu, tc):
 
 @app.post("/api/bang-luong/{cid}/hach-toan-misa")
 async def bang_luong_hach_toan_misa(cid: int, request: Request):
-    """Body: {nam, thang:{"05":[dòng đã tính]}, ngay, tk_cp_luong, tk_cp_bh, tach_ck, tk_ngan_hang, tk_nh_ma, ma_thong_ke, so_bat_dau,
+    """Body: {nam, thang:{"05":[dòng đã tính]}, ngay, tk_cp_luong, tk_cp_bh, tach_ck, ma_thong_ke, so_bat_dau,
     xuat}. xuat=false -> trả bản XEM TRƯỚC (danh sách chứng từ); xuat=true -> trả file Excel import MISA 'Chứng từ nghiệp vụ khác'."""
     body = await request.json()
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
@@ -11641,16 +11640,7 @@ def _luong_misa_ghi_sql(cid, database, nam, thang_rows, tc, preview=True):
             raise HTTPException(400, "Không xác định được loại chứng từ 'Nghiệp vụ khác' (RefType) trong CSDL MISA. Hãy tạo tay 1 chứng từ "
                                      "'Nghiệp vụ khác' trên MISA rồi thử lại.")
 
-        # 6) TK ngân hàng (cho dòng thanh toán chuyển khoản) & mã thống kê (dòng BH) — tùy chọn, không có thì cảnh báo, không chặn
-        bank_id = bank_ten = None
-        if any(d["loai"] == "nh" for ct in chung_tu for d in ct["dong"]):
-            if str(tc.get("tk_nh_ma") or "").strip():
-                bank_id, bank_ten = _misa_bank_account_theo_so(cur, tc.get("tk_nh_ma"))
-                if not bank_id:
-                    canh_bao.append("Không tìm thấy TK ngân hàng '%s' trong Danh mục MISA — chọn TK ngân hàng tay trên các chứng từ TT lương chuyển khoản."
-                                    % tc.get("tk_nh_ma"))
-            else:
-                canh_bao.append("Chưa nhập TK ngân hàng — dòng TT lương chuyển khoản (Có %s) cần chọn TK ngân hàng tay trên MISA." % (tc.get("tk_ngan_hang") or "1121"))
+        # 6) Mã thống kê (dòng BH) — tùy chọn, không có thì cảnh báo, không chặn
         thong_ke_id = None
         if str(tc.get("ma_thong_ke") or "").strip():
             try:
@@ -11710,10 +11700,6 @@ def _luong_misa_ghi_sql(cid, database, nam, thang_rows, tc, preview=True):
                 _misa_gan(glvd, cols_glvd, False, "UnResonableCost")
                 _misa_gan(glvd, cols_glvd, i, "SortOrder")
                 _misa_gan(glvd, cols_glvd, None, "BusinessType")
-                if d["loai"] == "nh" and bank_id:
-                    _misa_gan(glvd, cols_glvd, bank_id, "BankAccountID")
-                    if bank_ten:
-                        _misa_gan(glvd, cols_glvd, bank_ten, "BankName")
                 if d["loai"] == "bh" and thong_ke_id:
                     _misa_gan(glvd, cols_glvd, thong_ke_id, "ListItemID")
                 if not preview:

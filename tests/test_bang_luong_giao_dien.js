@@ -696,7 +696,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
 
   // ---- 27: Hạch toán chi phí lương -> MISA (file import "Chứng từ nghiệp vụ khác") ----
   m = nap();
-  const c27 = m.ctx, els27 = {}, val27 = { blMsTu: '1', blMsDen: '2', blMsNgay: '', blMsTkL: '6422', blMsTkB: '6421', blMsSo: '', blMsTkNh: '1121', blMsNh: '', blMsTk: '' };
+  const c27 = m.ctx, els27 = {}, val27 = { blMsTu: '1', blMsDen: '2', blMsNgay: '', blMsTkL: '6422', blMsTkB: '6421', blMsSo: '', blMsTk: '' };
   let tm27 = false;
   c27.document.getElementById = (id) => (id === 'blMsTm' ? { checked: tm27 } : id in val27 ? { value: val27[id] } : (els27[id] || (els27[id] = { style: {}, innerHTML: '', dataset: {} })));
   c27.blNam = 2025; c27.blThang = '01'; c27.blTS = {};
@@ -704,13 +704,13 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   c27.blDL = { '01': [r27('1', true), Object.assign(r27('2', false), { thue_tru_luong: undefined, thue_tncn: 5000 })] };
   c27.blMoMisa();
   const hop27 = els27['blMisa'].innerHTML;
-  assert(/Hạch toán chi phí lương → MISA/.test(hop27) && /id="blMsTkL" value="6422"/.test(hop27) && /id="blMsTkB" value="6421"/.test(hop27) && /Chi toàn bộ bằng tiền mặt/.test(hop27) && /Gộp thuế TNCN \+ TT lương vào 1 chứng từ/.test(hop27) && /Import Excel/.test(hop27), 'Hộp có TK mặc định 6422/6421 + tách chuyển khoản + gộp chứng từ + hướng dẫn');
+  assert(/Hạch toán chi phí lương → MISA/.test(hop27) && /id="blMsTkL" value="6422"/.test(hop27) && /id="blMsTkB" value="6421"/.test(hop27) && /Bỏ qua tick Chuyển khoản/.test(hop27) && !/blMsTkNh|blMsNh/.test(hop27) && /Gộp thuế TNCN \+ TT lương vào 1 chứng từ/.test(hop27) && /Import Excel/.test(hop27), 'Hộp có TK mặc định 6422/6421 + tách chuyển khoản + gộp chứng từ + hướng dẫn');
   assert.strictEqual(c27.blDocMisa().gop_thue, false, 'Mặc định tách thuế và TT lương (như file mẫu từ T6)');
   const goi27 = c27.blDocMisa();
   assert.strictEqual(goi27.nam, 2025); assert.strictEqual(JSON.stringify(Object.keys(goi27.thang)), '["01"]', 'Chỉ gửi tháng có dữ liệu');
   assert.strictEqual(goi27.thang['01'].length, 2); assert.strictEqual(goi27.thang['01'][0].chi_phi_luong, 7910000); assert.strictEqual(goi27.thang['01'][0].ghi_chu, 'CK');
   assert.strictEqual(goi27.thang['01'][1].thue_tru_luong, 5000, 'Chưa có thue_tru_luong thì lấy thuế TNCN');
-  assert.strictEqual(goi27.tach_ck, true, 'Mặc định: người tick Chuyển khoản -> hạch toán 1121 (không cần tick thêm ô nào)'); assert.strictEqual(goi27.tk_cp_luong, '6422');
+  assert.strictEqual(goi27.tach_ck, true, 'Mặc định: người tick Chuyển khoản -> không hạch toán thanh toán 1121'); assert.strictEqual(goi27.tk_cp_luong, '6422');
   assert(/"tkL":"6422"/.test(m.luuTru['blMisa7'] || ''), 'Nhớ tùy chọn');
   // gọi API xem trước + xuất file
   const goiApi27 = [];
@@ -724,9 +724,9 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   const luuTep27 = [], fetch27 = [];
   c27.fetch = async (url, o) => { fetch27.push([url, JSON.parse(o.body)]); return { ok: true, headers: { get: () => null }, blob: async () => ({}) }; };
   c27.xuatFile = async (r, ten) => { luuTep27.push(ten); };
-  tm27 = true; val27.blMsNgay = '30'; val27.blMsSo = '15'; val27.blMsNh = '0123';
+  tm27 = true; val27.blMsNgay = '30'; val27.blMsSo = '15';
   await c27.blXuatMisa();
-  assert.strictEqual(fetch27[0][1].xuat, true); assert.strictEqual(fetch27[0][1].tach_ck, false, 'Tick chi toàn bộ tiền mặt -> tach_ck=false (1111 hết)'); assert.strictEqual(fetch27[0][1].ngay, '30'); assert.strictEqual(fetch27[0][1].so_bat_dau, '15'); assert.strictEqual(fetch27[0][1].tk_nh_ma, '0123');
+  assert.strictEqual(fetch27[0][1].xuat, true); assert.strictEqual(fetch27[0][1].tach_ck, false, 'Tick chi toàn bộ tiền mặt -> tach_ck=false (1111 hết)'); assert.strictEqual(fetch27[0][1].ngay, '30'); assert.strictEqual(fetch27[0][1].so_bat_dau, '15');
   assert.strictEqual(luuTep27[0], 'HachToanLuong_MISA_2025_T1-T1.xlsx');
   // lỗi: khoảng tháng sai / không có dữ liệu / lỗi server
   const soGoi = fetch27.length; val27.blMsTu = '5'; val27.blMsDen = '3'; await c27.blXuatMisa(); assert.strictEqual(fetch27.length, soGoi, 'Khoảng tháng sai -> không gọi server');

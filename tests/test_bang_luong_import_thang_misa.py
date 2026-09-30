@@ -236,17 +236,15 @@ finally:
 assert db.glv == [] and db.glvd == [] and db.committed == 0
 print("PASS 7: lỗi giữa chừng -> hoàn tác toàn bộ.")
 
-# ===== 8: TK ngân hàng cho dòng TT lương chuyển khoản; thiếu thì chỉ cảnh báo =====
-db = Db()
-dung(db)
-kq = goi_api(goi(thang={"05": rows_thang("05")}, tach_ck=True, tk_nh_ma="0123456789", preview=False))
-dong_nh = [d for d in db.glvd if d["CreditAccount"] == "1121"]
-assert len(dong_nh) == 1 and dong_nh[0]["BankAccountID"] == "bank-1" and dong_nh[0]["BankName"] == "Vietcombank" and not kq["canh_bao"]
+# ===== 8: người tick Chuyển khoản -> không ghi dòng Nợ 3341/Có 1121; chỉ phần tiền mặt =====
 db = Db()
 dung(db)
 kq = goi_api(goi(thang={"05": rows_thang("05")}, tach_ck=True, preview=False))
-assert any("TK ngân hàng" in c for c in kq["canh_bao"]) and len(db.glv) == 2
-print("PASS 8: TK ngân hàng ghi vào dòng chuyển khoản; thiếu thì cảnh báo, không chặn.")
+assert not [d for d in db.glvd if str(d["CreditAccount"]).startswith("112")] and not kq["canh_bao"]
+tt = [d for d in db.glvd if d["CreditAccount"] == "1111"]
+g = server._luong_misa_tong(rows_thang("05"))
+assert len(tt) == 1 and tt[0]["Amount"] == g["tt_luong"] - g["tt_ck"] > 0
+print("PASS 8: import thẳng: người tick Chuyển khoản không có dòng 1121, chỉ còn TT lương tiền mặt.")
 
 # ===== 9: chưa cấu hình CSDL MISA -> báo rõ; không có dữ liệu -> 404 =====
 server._misa_sql_cfg = lambda cid: {}

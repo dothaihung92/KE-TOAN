@@ -82,20 +82,23 @@ assert server._luong_misa_chung_tu(2025, {"05": []}, {}, 1) == []
 print("PASS 3: số chứng từ nối tiếp, ngày cuối tháng/ngày tự chọn, dòng số tiền 0 bị bỏ.")
 
 # ===== 4: tuỳ chọn tài khoản + tách lương chuyển khoản sang TK ngân hàng =====
-tk = server._luong_misa_chung_tu(2025, {"01": r1}, {"tk_cp_luong": "642", "tk_cp_bh": "6422", "tach_ck": True, "tk_ngan_hang": "1121"}, 1)
+tk = server._luong_misa_chung_tu(2025, {"01": r1}, {"tk_cp_luong": "642", "tk_cp_bh": "6422", "tach_ck": True}, 1)
 assert tk[0]["dong"][0]["no"] == "642" and tk[0]["dong"][1]["no"] == "6422"
 tt = [d for c_ in tk[1:] for d in c_["dong"] if d["dien_giai"].startswith("TT lương")]
-assert [(d["dien_giai"], d["co"]) for d in tt] == [("TT lương T1/2025", "1111"), ("TT lương chuyển khoản T1/2025", "1121")]
-assert sum(d["so_tien"] for d in tt) == g1["tt_luong"] and tt[1]["so_tien"] == g1["tt_ck"] > 0
+assert [(d["dien_giai"], d["co"]) for d in tt] == [("TT lương T1/2025", "1111")], "Người tick Chuyển khoản: KHÔNG có dòng Nợ 3341/Có 1121"
+assert tt[0]["so_tien"] == g1["tt_luong"] - g1["tt_ck"] and g1["tt_ck"] > 0 and not any(d["co"].startswith("112") for c_ in tk for d in c_["dong"])
+# mọi người đều tick Chuyển khoản -> không còn dòng thanh toán lương nào (chỉ còn chi phí + BH + thuế)
+cktat = server._luong_misa_chung_tu(2025, {"01": [dict(r, ghi_chu="CK") for r in r1]}, {"tach_ck": True}, 1)
+assert not any(d["dien_giai"].startswith("TT lương") for c_ in cktat for d in c_["dong"])
 tat = server._luong_misa_chung_tu(2025, {"01": r1}, {"tach_ck": False}, 1)
 assert [d["co"] for d in tat[1]["dong"]] == ["3335"] and [d["co"] for d in tat[2]["dong"]] == ["1111"], "Mặc định (như mẫu): toàn bộ TT lương ghi Có 1111"
-print("PASS 4: tài khoản tùy chỉnh; tách lương chuyển khoản sang 1121 (tổng không đổi).")
+print("PASS 4: tài khoản tùy chỉnh; người tick Chuyển khoản không hạch toán thanh toán 1121.")
 
 # ===== 5: file Excel đúng mẫu 'Chứng từ nghiệp vụ khác' của MISA =====
 _dl = server.DOWNLOAD_DIR
 server.DOWNLOAD_DIR = tempfile.mkdtemp()
 try:
-    duong, ten, so_dong = server._luong_xuat_misa_nvk(2025, tk, {"tk_nh_ma": "0123456789", "ma_thong_ke": "BHXH"})
+    duong, ten, so_dong = server._luong_xuat_misa_nvk(2025, tk, {"ma_thong_ke": "BHXH"})
     assert ten == "HachToanLuong_MISA_2025_T1-T1.xlsx" and so_dong == sum(len(c["dong"]) for c in tk)
     ws = openpyxl.load_workbook(duong).active
     assert ws.title == "Chứng từ nghiệp vụ khác"
@@ -108,9 +111,9 @@ try:
     assert v(2, "Loại tiền") == "VND" and v(2, "Tỷ giá") == 1
     assert v(3, "Mã thống kê") == "BHXH" and v(2, "Mã thống kê") is None, "Mã thống kê chỉ ở dòng BH"
     cuoi = ws.max_row
-    assert v(cuoi, "TK Có (*)") == "1121" and v(cuoi, "TK ngân hàng") == "0123456789" and v(cuoi - 1, "TK ngân hàng") is None
+    assert v(cuoi, "TK Có (*)") == "1111" and all(ws.cell(r, cot["TK ngân hàng"]).value is None for r in range(2, cuoi + 1))
     assert ws.cell(2, cot["Số tiền"]).number_format == "#,##0"
-    print("PASS 5: file Excel đúng tiêu đề mẫu MISA; ngày/số CT/diễn giải/TK/số tiền đúng; TK ngân hàng chỉ ở dòng 1121.")
+    print("PASS 5: file Excel đúng tiêu đề mẫu MISA; ngày/số CT/diễn giải/TK/số tiền đúng; không có dòng 1121.")
 
     # ===== 6: API xem trước + xuất file; lỗi khi không có dữ liệu =====
     class _Req:
