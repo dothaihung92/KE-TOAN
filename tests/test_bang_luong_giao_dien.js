@@ -383,5 +383,40 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(!/data-k="tien_com"/.test(m.phanTu['blBangWrap'].innerHTML), 'Bấm lần nữa -> ẩn lại');
   console.log('PASS 18: phụ cấp theo ngày đi làm — cột PC đã tính (chỉ đọc), nút "✎ Mức phụ cấp" hiện/ẩn cột mức.');
 
+  // ---- 19: nút "Chi phí lương cả năm": nhập khoảng tháng + tổng -> gọi server -> xem trước -> áp dụng vào bảng ----
+  const khKq = { thang: { '10': [dongMau('2', 'NV2', { ngay_lam_hd: 27, dong_bh: 1, thuong_bh: 200000, tang_ca: 200000, chi_phi_luong: 8333333, thue_tncn: 0 })],
+                          '11': [dongMau('2', 'NV2', { ngay_lam_hd: 13, dong_bh: 0, thoi_vu: true, chi_phi_luong: 4000000, thue_tncn: 300000 })] },
+    tom_tat: { so_nguoi: 2, day_du: 1, thoi_vu: 1, so_thang: 2, tong_chi_phi: 12333333, muc_tieu: 12333333, da_co_ngoai: 0, can_them: 12333333,
+      tong_thuong_bh: 200000, tong_tang_ca: 200000, tong_thue: 300000, canh_bao: ['Tháng 11: thử cảnh báo'] } };
+  m = nap({ api: async (url, o) => (url.includes('ke-hoach') ? khKq : { rows: JSON.parse(o.body).rows, tham_so: {} }) });
+  m.ctx.blNam = 2025; m.ctx.blThang = '01'; m.ctx.blTS = {};
+  m.ctx.blDL = { '03': [dongMau('9', 'Có sẵn', { chi_phi_luong: 1000000 })] };
+  const khGia = { blKhTu: '10', blKhDen: '11', blKhTien: '50.000.000', blKhTc: '40' };
+  m.ctx.document.getElementById = (id) => (khGia[id] !== undefined ? { value: khGia[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
+  m.ctx.blMoKeHoach();
+  assert(/Chi phí lương cả năm 2025/.test(m.phanTu['blKeHoach'].innerHTML) && /giữ nguyên theo Danh Sách Nhân Viên/.test(m.phanTu['blKeHoach'].innerHTML) && /dưới 14 ngày/.test(m.phanTu['blKeHoach'].innerHTML));
+  await m.ctx.blTinhKeHoach();
+  const goiKh = m.goiApi.find(([u]) => u.includes('/ke-hoach'))[1];
+  assert.strictEqual(goiKh.nam, 2025); assert.strictEqual(goiKh.tu_thang, 10); assert.strictEqual(goiKh.den_thang, 11);
+  assert.strictEqual(goiKh.muc_tieu, '50.000.000'); assert.strictEqual(goiKh.ty_le_tang_ca, '40');
+  assert.strictEqual(goiKh.da_co_ngoai, 1000000, 'Các tháng khác đã có (tháng 3) được trừ vào tổng');
+  const kqHtml = m.phanTu['blKhKq'].innerHTML;
+  assert(/cần <b[^>]*>2 người<\/b>/.test(kqHtml) && /1 người đủ công có BHXH, 1 người làm dưới 14 ngày không BHXH/.test(kqHtml) && /thử cảnh báo/.test(kqHtml) && /Áp dụng vào Bảng Lương/.test(kqHtml));
+  assert(/không BHXH/.test(kqHtml) && /12\.333\.333/.test(kqHtml));
+  // áp dụng: thay các tháng 10–11, giữ tháng 3, đánh dấu chưa lưu, chuyển sang tháng đầu khoảng
+  await m.ctx.blApDungKeHoach();
+  assert.strictEqual(m.ctx.blDL['10'][0].chi_phi_luong, 8333333); assert.strictEqual(m.ctx.blDL['11'][0].dong_bh, 0);
+  assert.strictEqual(m.ctx.blDL['03'].length, 1, 'Tháng ngoài khoảng giữ nguyên');
+  assert.strictEqual(m.ctx.blBan, true); assert.strictEqual(m.ctx.blThang, '10');
+  // khoảng tháng sai / thiếu tiền -> báo lỗi, không gọi server
+  m.goiApi.length = 0; khGia.blKhTu = '11'; khGia.blKhDen = '10';
+  await m.ctx.blTinhKeHoach(); assert.strictEqual(m.goiApi.length, 0);
+  khGia.blKhTu = '10'; khGia.blKhTien = ''; await m.ctx.blTinhKeHoach(); assert.strictEqual(m.goiApi.length, 0);
+  // thông tin tháng: cảnh báo không đóng BHXH nhưng làm >= 14 ngày, và số người thời vụ
+  m.ctx.blThang = '10'; m.phanTu['blInfo'] = { dataset: {}, style: {}, textContent: '' };
+  m.ctx.blDL = { '10': [dongMau('1', 'A', { canh_bao_bh: true }), dongMau('2', 'B', { thoi_vu: true })] }; m.ctx.blVeInfo();
+  assert(/1 người không đóng BHXH nhưng làm từ 14 ngày/.test(m.phanTu['blInfo'].textContent) && /1 người làm dưới 14 ngày không BHXH \(khấu trừ 10% thuế TNCN\)/.test(m.phanTu['blInfo'].textContent));
+  console.log('PASS 19: nút "Chi phí lương cả năm" — nhập tháng + tổng, xem trước, áp dụng, cảnh báo BHXH <14 ngày.');
+
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
