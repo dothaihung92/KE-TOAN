@@ -4,6 +4,7 @@ import asyncio
 import sqlite3
 import tempfile
 import json
+import random
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
@@ -188,5 +189,51 @@ try:
 finally:
     server.DOWNLOAD_DIR = _dl
 print("PASS 4: Excel: thời vụ có thuế 10% (công thức IF), người đóng BHXH giữ biểu lũy tiến; nhập lại đúng.")
+
+# ===== 5: Thực lãnh của người làm < 14 ngày (không BHXH) = Chi phí lương (công ty chịu thuế 10% thay); tắt thì trừ vào lương. =====
+tv2 = dict(dong, luong_cb=8_000_000, ngay_lam=13, dong_bh=0)
+k_ct = server._luong_tinh_dong(tv2, TS25, "10")                      # mặc định: công ty chịu thuế 10%
+assert TS25["cong_ty_chiu_thue_10"] is True
+assert k_ct["thoi_vu"] and k_ct["thue_tncn"] > 0, "Thuế 10% vẫn được tính (để trích nộp)"
+assert k_ct["tt_luong"] == k_ct["chi_phi_luong"], (k_ct["tt_luong"], k_ct["chi_phi_luong"])
+assert k_ct["thue_tru_luong"] == 0 and abs(k_ct["kiem_tra"]) < 1
+ts_nld = server._luong_chuan_tham_so({"cong_ty_chiu_thue_10": False}, 2025)
+k_nld = server._luong_tinh_dong(tv2, ts_nld, "10")
+assert k_nld["thue_tncn"] == k_ct["thue_tncn"] and k_nld["thue_tru_luong"] == k_nld["thue_tncn"]
+assert k_nld["tt_luong"] == k_nld["chi_phi_luong"] - k_nld["thue_tncn"] and abs(k_nld["kiem_tra"] - k_nld["thue_tncn"]) < 1
+# người đóng BHXH không bị ảnh hưởng: vẫn trừ BH NLĐ + thuế lũy tiến khỏi thực lãnh
+dbh = server._luong_tinh_dong(dict(dong, luong_cb=30_000_000, dong_bh=1), TS25, "10")
+assert dbh["tt_luong"] == dbh["chi_phi_luong"] - dbh["bh_duoc_tru"] - dbh["thue_tncn"] and dbh["thue_tru_luong"] == dbh["thue_tncn"]
+assert server._luong_chuan_tham_so({"cong_ty_chiu_thue_10": "không"}, 2025)["cong_ty_chiu_thue_10"] is False
+assert server._luong_chuan_tham_so({"cong_ty_chiu_thue_10": True}, 2025)["cong_ty_chiu_thue_10"] is True
+# kế hoạch: MỌI dòng làm < 14 ngày đều có thực lãnh = chi phí lương
+pool_kh = [server._luong_chuan_dong_nhap(dict(dong, ma=str(i), ten=f"NV{i}", dong_bh=0)) for i in range(2, 9)]
+for muc in (60_000_000, 16_000_000):
+    th, tom = server._luong_ke_hoach(pool_kh, 2024, 10, 11, muc, None, rng=random.Random(muc))
+    assert all(r["tt_luong"] == r["chi_phi_luong"] for rs in th.values() for r in rs if r["thoi_vu"])
+    assert tom["thue_cong_ty_chiu"] == tom["tong_thue"]
+# Excel: dòng thời vụ không trừ thuế trong công thức TT lương; tính lại độc lập vẫn khớp
+_dl = server.DOWNLOAD_DIR
+server.DOWNLOAD_DIR = tempfile.mkdtemp()
+try:
+    duong, _ = server._luong_xuat_excel(2025, TS25, {"10": [tv2, dict(dong, luong_cb=30_000_000, dong_bh=1)]})
+    ws = openpyxl.load_workbook(duong).active
+    cot = [c[0] for c in server._LUONG_COT_EXCEL]
+    ch = lambda r, k: ws.cell(r, cot.index(k) + 1).value
+    assert ch(3, "thue_tncn").startswith("=IF(")
+    assert f"-{openpyxl.utils.get_column_letter(cot.index('thue_tncn') + 1)}3" not in ch(3, "tt_luong"), "Thời vụ: không trừ thuế khỏi TT lương"
+    assert f"-{openpyxl.utils.get_column_letter(cot.index('thue_tncn') + 1)}4" in ch(4, "tt_luong"), "Người đóng BHXH: vẫn trừ thuế"
+    try:
+        import formulas
+        sol = formulas.ExcelModel().loads(duong).finish().calculate()
+        ten = lambda r, k: "'[%s]%s'!%s%d" % (os.path.basename(duong), ws.title.upper(), openpyxl.utils.get_column_letter(cot.index(k) + 1), r)
+        a = server._luong_tinh_dong(tv2, TS25, "10")
+        assert round(float(list(sol[ten(3, "tt_luong")].value[0])[0])) == a["tt_luong"] == a["chi_phi_luong"]
+        assert round(float(list(sol[ten(3, "chi_phi_luong")].value[0])[0])) == a["chi_phi_luong"]
+    except ImportError:
+        pass
+finally:
+    server.DOWNLOAD_DIR = _dl
+print("PASS 5: người làm < 14 ngày: TT lương thực lãnh = Chi phí lương (công ty chịu thuế 10%); tắt tùy chọn thì trừ vào lương.")
 
 print("\nALL DONE")

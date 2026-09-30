@@ -399,14 +399,16 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   const goiKh = m.goiApi.find(([u]) => u.includes('/ke-hoach'))[1];
   assert.strictEqual(goiKh.nam, 2025); assert.strictEqual(goiKh.tu_thang, 10); assert.strictEqual(goiKh.den_thang, 11);
   assert.strictEqual(goiKh.muc_tieu, '50.000.000'); assert.strictEqual(goiKh.ty_le_tang_ca, '40');
-  assert.strictEqual(goiKh.da_co_ngoai, 1000000, 'Các tháng khác đã có (tháng 3) được trừ vào tổng');
+  assert.strictEqual(goiKh.da_co_ngoai, 0, 'Áp dụng xóa dữ liệu cũ cả năm -> không trừ các tháng đã có');
   const kqHtml = m.phanTu['blKhKq'].innerHTML;
-  assert(/cần <b[^>]*>2 người<\/b>/.test(kqHtml) && /1 người đủ công có BHXH, 1 người làm dưới 14 ngày không BHXH/.test(kqHtml) && /thử cảnh báo/.test(kqHtml) && /Áp dụng vào Bảng Lương/.test(kqHtml));
+  assert(/cần <b[^>]*>2 người<\/b>/.test(kqHtml) && /1 người đủ công có BHXH, 1 người làm dưới 14 ngày không BHXH/.test(kqHtml) && /thử cảnh báo/.test(kqHtml) && /Áp dụng \(xóa dữ liệu cũ cả năm/.test(kqHtml) && /toàn bộ dữ liệu đã nhập của năm này sẽ bị xóa/.test(m.phanTu['blKeHoach'].innerHTML));
   assert(/không BHXH/.test(kqHtml) && /12\.333\.333/.test(kqHtml));
-  // áp dụng: thay các tháng 10–11, giữ tháng 3, đánh dấu chưa lưu, chuyển sang tháng đầu khoảng
+  // áp dụng: hỏi xác nhận, XÓA dữ liệu cũ của cả năm (kể cả tháng 3) rồi nhập lại tháng 10–11
+  let hoiKh = 0; m.ctx.confirm = (msg) => { hoiKh++; assert(/XÓA toàn bộ dữ liệu đã nhập của năm 2025 \(tháng 3\)/.test(msg), msg); return true; };
   await m.ctx.blApDungKeHoach();
+  assert.strictEqual(hoiKh, 1, 'Có dữ liệu cũ -> hỏi xác nhận'); assert.strictEqual(m.ctx.blDL['03'], undefined, 'Dữ liệu cũ của cả năm bị xóa');
+  assert.deepStrictEqual(Object.keys(m.ctx.blDL).sort(), ['10', '11']);
   assert.strictEqual(m.ctx.blDL['10'][0].chi_phi_luong, 8333333); assert.strictEqual(m.ctx.blDL['11'][0].dong_bh, 0);
-  assert.strictEqual(m.ctx.blDL['03'].length, 1, 'Tháng ngoài khoảng giữ nguyên');
   assert.strictEqual(m.ctx.blBan, true); assert.strictEqual(m.ctx.blThang, '10');
   // khoảng tháng sai / thiếu tiền -> báo lỗi, không gọi server
   m.goiApi.length = 0; khGia.blKhTu = '11'; khGia.blKhDen = '10';
@@ -465,6 +467,32 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   const pt = m.phanTu['blThamSo'].innerHTML;
   assert(/id="blTsBt" value="11\.000\.000"/.test(pt) && /id="blTsNpt" value="4\.400\.000"/.test(pt) && /id="blTsN10" value="2\.000\.000"/.test(pt) && /class="blBacTu" value="10\.000\.000"/.test(pt), 'Tham số tiền hiện 11.000.000');
   console.log('PASS 20: Danh Sách Nhân Viên có cột tick Đóng BHXH, số hiện 5.310.000; bảng lương tự tick theo danh sách + tháng.');
+
+  // ---- 21: cột "Ghi chú" đổi thành tick Chuyển khoản; thực lãnh = chi phí lương của người làm < 14 ngày (công ty chịu thuế 10%) ----
+  m = nap();
+  m.ctx.blThang = '09'; m.ctx.blNam = 2024; m.ctx.blTS = {};
+  m.ctx.blDL = { '09': [dongMau('1', 'A', { ghi_chu: 'CK' }), dongMau('2', 'B', { ghi_chu: '' }), dongMau('3', 'C', { ghi_chu: 'Chuyển khoản' }), dongMau('4', 'D', { ghi_chu: 'TM' })] };
+  m.ctx.blVeBang();
+  const b21 = m.phanTu['blBangWrap'].innerHTML;
+  assert(/>Chuyển khoản \(tick\)</.test(b21) && !/>Ghi chú</.test(b21), 'Cột đổi tên thành Chuyển khoản (tick)');
+  const ck = [...b21.matchAll(/<input type="checkbox"([^>]*)onchange="blDoiCk\((\d+),this\.checked\)"/g)];
+  assert.strictEqual(ck.length, 4);
+  assert.deepStrictEqual(ck.map((x) => /checked/.test(x[1])), [true, false, true, false], 'CK / Chuyển khoản = tick; trống / TM = không tick');
+  m.ctx.blDoiCk(1, true); assert.strictEqual(m.ctx.blDL['09'][1].ghi_chu, 'CK'); assert.strictEqual(m.ctx.blBan, true);
+  m.ctx.blDoiCk(0, false); assert.strictEqual(m.ctx.blDL['09'][0].ghi_chu, '');
+  // cột Kiểm tra: so với thuế THỰC SỰ trừ vào lương (người làm < 14 ngày, công ty chịu thuế: kiểm tra = 0 vẫn đúng, không tô đỏ)
+  m.ctx.blDL = { '09': [dongMau('1', 'A', { kiem_tra: 0, thue_tncn: 427885, thue_tru_luong: 0, thoi_vu: true }), dongMau('2', 'B', { kiem_tra: 100, thue_tncn: 100, thue_tru_luong: 100 })] };
+  m.ctx.blVeBang();
+  assert(!/#fde2e2/.test(m.phanTu['blBangWrap'].innerHTML), 'Kiểm tra khớp thuế thực trừ -> không tô đỏ');
+  m.ctx.blDL = { '09': [dongMau('1', 'A', { kiem_tra: 5000, thue_tncn: 100, thue_tru_luong: 100 })] };
+  m.ctx.blVeBang(); assert(/#fde2e2/.test(m.phanTu['blBangWrap'].innerHTML), 'Lệch thật thì vẫn tô đỏ');
+  // tham số: ô tick công ty chịu thuế 10%; áp dụng gửi giá trị
+  m.ctx.blTS = { ngay_cong_chuan: 26, giam_tru_ban_than: 11000000, giam_tru_npt: 4400000, he_so_tang_ca: 1.33, bh_dn: { bhxh: 17.5, bhyt: 3, bhtn: 1 }, bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 }, bac_thue: [[0, 5]], thue_moi: null, cong_ty_chiu_thue_10: true };
+  m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
+  assert(/id="blTsCt" checked/.test(m.phanTu['blThamSo'].innerHTML) && /Công ty chịu thuế 10% thay/.test(m.phanTu['blThamSo'].innerHTML));
+  m.ctx.blTS.cong_ty_chiu_thue_10 = false; m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
+  assert(!/id="blTsCt" checked/.test(m.phanTu['blThamSo'].innerHTML), 'Đã bỏ tick thì hiển thị không tick');
+  console.log('PASS 21: cột Chuyển khoản (tick) thay Ghi chú; kiểm tra số liệu theo thuế thực trừ; tham số công ty chịu thuế 10%.');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
