@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.022"
+APP_BUILD = "2026-09-30.023"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10062,7 +10062,7 @@ _LUONG_THAM_SO_MAC_DINH = {
 }
 _LUONG_CAC_TRUONG_NHAP = (
     "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
-    "pc_chuc_vu", "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "thue_tay", "ghi_chu")
+    "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "thue_tay", "ghi_chu")
 # Thuế TNCN theo Luật Thuế thu nhập cá nhân 2025 (áp dụng cho kỳ tính thuế từ 1/1/2026): giảm trừ bản thân 15.500.000, mỗi người
 # phụ thuộc 6.200.000 và biểu lũy tiến từng phần 5 bậc (đến 10tr 5%, đến 30tr 10%, đến 60tr 20%, đến 100tr 30%,
 # trên 100tr 35%). Khi tính lương từ tháng 1/2026 phần mềm tự áp dụng bộ này; năm 2025 trở về trước vẫn tính theo
@@ -10308,7 +10308,7 @@ def _luong_chuan_dong_nhap(r, ts=None):
 def _luong_tinh_dong(r, ts, thang=None):
     """Tính 1 dòng bảng lương từ dòng NHẬP r + tham số ts (đã chuẩn hoá). Công thức bám sát file gốc
     (cột theo file): H=D/E*G; mọi phụ cấp = mức/E*G (E=công chuẩn, G=ngày đi làm); Q..S=D*%DN; T..V=D*%NLĐ; X=ROUND(SUM(H:P));
-    AA=H+J+K+N+P+O (+PC chức vụ); AB=I+M+L; AF=T+U+V; AI=NPT*giảm trừ; AJ=AA-AG-AF-AI;
+    AA=H+J+K+N+P+O; AB=I+M+L; AF=T+U+V; AI=NPT*giảm trừ; AJ=AA-AG-AF-AI;
     AK=ROUND(thuế lũy tiến(AJ)); W=ROUND(SUM(H:P)-T-U-V-AK)."""
     d = _luong_chuan_dong_nhap(r)
     # Ngày công chuẩn: ô "Ngày công" để trống/0 -> theo LỊCH THÁNG (trừ Chủ nhật + ngày lễ); nhập số -> dùng số đó.
@@ -10323,14 +10323,14 @@ def _luong_tinh_dong(r, ts, thang=None):
     # MỌI phụ cấp tính theo ngày đi làm: đủ công mới nhận đủ, nghỉ vài ngày thì phụ cấp giảm theo (mức/công chuẩn x ngày làm).
     xang = tl(d["muc_xang"])
     dien_thoai = tl(d["muc_dt"])
-    tien_com, pc_chuc_vu, trang_phuc, di_lai = tl(d["tien_com"]), tl(d["pc_chuc_vu"]), tl(d["trang_phuc"]), tl(d["di_lai"])
+    tien_com, trang_phuc, di_lai = tl(d["tien_com"]), tl(d["trang_phuc"]), tl(d["di_lai"])
     gio_tc = d["tang_ca"] / (d["luong_cb"] / e / 8.0 * ts["he_so_tang_ca"]) if (d["tang_ca"] and d["luong_cb"] and e) else 0.0
     # Chỉ lao động được TICK "Đóng BHXH" mới tính BH (phần công ty + phần người lao động); không tick -> 0.
     co_bh = 1.0 if d["dong_bh"] else 0.0
     bh_dn = {k: d["luong_cb"] * ts["bh_dn"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
     bh_nld = {k: d["luong_cb"] * ts["bh_nld"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
     tong_bh_nld = sum(bh_nld.values())
-    tong_chiu_thue = luong + xang + di_lai + pc_chuc_vu + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
+    tong_chiu_thue = luong + xang + di_lai + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
     khong_chiu_thue = tien_com + trang_phuc + dien_thoai
     tong_thu_nhap = tong_chiu_thue + khong_chiu_thue
     npt = d["so_npt"]
@@ -10357,7 +10357,7 @@ def _luong_tinh_dong(r, ts, thang=None):
     kq = dict(d)
     kq.update({
         "gio_tang_ca": gio_tc, "luong": luong, "xang_xe": xang, "dien_thoai": dien_thoai,
-        "tt_tien_com": tien_com, "tt_pc_chuc_vu": pc_chuc_vu, "tt_trang_phuc": trang_phuc, "tt_di_lai": di_lai,
+        "tt_tien_com": tien_com, "tt_trang_phuc": trang_phuc, "tt_di_lai": di_lai,
         "bhxh_dn": bh_dn["bhxh"], "bhyt_dn": bh_dn["bhyt"], "bhtn_dn": bh_dn["bhtn"],
         "bhxh_nld": bh_nld["bhxh"], "bhyt_nld": bh_nld["bhyt"], "bhtn_nld": bh_nld["bhtn"],
         "tt_luong": tt_luong, "chi_phi_luong": _luong_lam_tron(tong_thu_nhap),
@@ -10559,7 +10559,7 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
             "ma": lay(r, "Mã NV"), "ten": ten, "chuc_vu": lay(r, "Chức vụ"),
             "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,   # 0 = theo công chuẩn (lịch) của tháng
             "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
-            "pc_chuc_vu": lay(r, "PC Chức vụ"), "muc_dt": lay(r, "PC Điện thoại"),
+            "muc_dt": lay(r, "PC Điện thoại"),
             "trang_phuc": lay(r, "PC Trang phục"), "ghi_chu": "CK"}))
     return kq
 
@@ -11110,14 +11110,14 @@ async def bang_luong_nhap_chuyen_khoan(cid: int, request: Request):
 
 
 # ----- Xuất / nhập Excel theo bố cục file "TỔNG HỢP" (2 dòng tiêu đề, mỗi nhân viên 1 dòng / tháng) -----
-# (khoá, tiêu đề dòng 1, tiêu đề dòng 2, độ rộng). Khác file gốc đúng 1 chỗ: thêm cột "PC Chức vụ" (có sẵn
+# (khoá, tiêu đề dòng 1, tiêu đề dòng 2, độ rộng). Khác file gốc đúng 1 chỗ: (trước đây thêm cột "PC Chức vụ" — nay đã bỏ) (có sẵn
 # trong Danh Sách Nhân Viên nhưng file gốc không có cột riêng) nằm sau "Hỗ trợ đi lại".
 _LUONG_COT_EXCEL = [
     ("ma", "Mã NV", "", 8), ("ten", "Họ và Tên", "", 26), ("chuc_vu", "Chức vụ", "", 16),
     ("luong_cb", "Lương", "CB/Tháng", 14), ("ngay_cong", "Ngày", "Công", 8),
     ("gio_tang_ca", "Giờ", "Tăng ca", 9), ("ngay_lam", "Tổng", "NC", 8), ("luong", "Tiền", "Lương", 14),
     ("tien_com", "Phụ cấp", "Tiền cơm", 12), ("xang_xe", "Phụ cấp", "Xăng xe", 12),
-    ("di_lai", "Phụ cấp", "Hỗ trợ đi lại", 12), ("pc_chuc_vu", "Phụ cấp", "PC Chức vụ", 12),
+    ("di_lai", "Phụ cấp", "Hỗ trợ đi lại", 12),
     ("dien_thoai", "Phụ cấp", "Điện thoại", 12), ("trang_phuc", "Phụ cấp", "Trang Phục", 12),
     ("thuong_bh", "Phụ cấp", "Thưởng Bán Hàng", 14), ("thuong_t13", "Phụ cấp", "Thưởng T13", 14),
     ("tang_ca", "Tăng", "ca", 12),
@@ -11206,7 +11206,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             ws[f"{L['gio_tang_ca']}{r}"] = (f"=IFERROR({L['tang_ca']}{r}/(({L['luong_cb']}{r}/{L['ngay_cong']}{r}/8)*{hs!r}),0)")
             ws[f"{L['luong']}{r}"] = f"={L['luong_cb']}{r}/{L['ngay_cong']}{r}*{L['ngay_lam']}{r}"
             for k_pc, muc in (("tien_com", d["tien_com"]), ("xang_xe", d["muc_xang"]), ("di_lai", d["di_lai"]),
-                              ("pc_chuc_vu", d["pc_chuc_vu"]), ("dien_thoai", d["muc_dt"]),
+                              ("dien_thoai", d["muc_dt"]),
                               ("trang_phuc", d["trang_phuc"])):     # mọi phụ cấp theo ngày đi làm
                 ws[f"{L[k_pc]}{r}"] = f"=({muc!r}/{L['ngay_cong']}{r})*{L['ngay_lam']}{r}"
             ws[f"{L['thuong_bh']}{r}"] = d["thuong_bh"]
@@ -11223,7 +11223,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             ws[f"{L['chi_phi_luong']}{r}"] = f"=ROUND(SUM({hq}{r}:{tq}{r}),0)"
             ws[f"{L['thang']}{r}"] = t
             ws[f"{L['ghi_chu']}{r}"] = d["ghi_chu"]
-            chiu = "+".join(f"{L[k]}{r}" for k in ("luong", "xang_xe", "di_lai", "pc_chuc_vu", "thuong_bh",
+            chiu = "+".join(f"{L[k]}{r}" for k in ("luong", "xang_xe", "di_lai", "thuong_bh",
                                                      "tang_ca", "thuong_t13"))
             ws[f"{L['tn_chiu_thue']}{r}"] = f"=+{chiu}"
             ws[f"{L['tn_khong_chiu_thue']}{r}"] = f"=+{L['tien_com']}{r}+{L['trang_phuc']}{r}+{L['dien_thoai']}{r}"
@@ -11250,7 +11250,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
     cuoi = r - 1
     if cuoi >= 3:
         ws.cell(r, 2, f"TỔNG CỘNG NĂM {nam}").font = Font(bold=True, color="C00000")
-        for k in ("luong", "tien_com", "xang_xe", "di_lai", "pc_chuc_vu", "dien_thoai", "trang_phuc",
+        for k in ("luong", "tien_com", "xang_xe", "di_lai", "dien_thoai", "trang_phuc",
                   "thuong_bh", "thuong_t13", "tang_ca", "bhxh_dn", "bhyt_dn", "bhtn_dn", "bhxh_nld", "bhyt_nld",
                   "bhtn_nld", "tt_luong", "chi_phi_luong", "tn_chiu_thue", "tn_khong_chiu_thue", "bh_duoc_tru",
                   "thue_tncn"):
@@ -11279,7 +11279,6 @@ _LUONG_TU_KHOA_COT = [   # (khoá, hàm nhận diện tiêu đề đã gộp, kh
     ("bhtn_nld", lambda h: "giam tru" in h and "bhtn" in h and "dn chiu" not in h),
     ("tang_ca", lambda h: h in ("tang ca", "tang ca ") or (h.startswith("tang") and h.endswith("ca") and "gio" not in h)),
     ("ten", lambda h: "ho va ten" in h),
-    ("pc_chuc_vu", lambda h: "chuc vu" in h and ("pc" in h or "phu cap" in h)),
     ("chuc_vu", lambda h: h == "chuc vu"),
     ("luong_cb", lambda h: "cb/thang" in h or "luong cb" in h),
     ("ngay_lam", lambda h: h in ("tong nc", "tong nc ") or ("tong" in h.split() and "nc" in h.split())),
@@ -11413,7 +11412,7 @@ def _luong_doc_excel(wb_giatri, wb_congthuc=None):
         thang.setdefault(tt, []).append(_luong_chuan_dong_nhap({
             "ma": ma, "ten": ten, "chuc_vu": gt(r, "chuc_vu"), "luong_cb": gt(r, "luong_cb"), "ngay_cong": e,
             "ngay_lam": g, "tien_com": muc_pc(r, "tien_com", e, g), "muc_xang": muc_tu_cong_thuc(r, "xang_xe", e, g),
-            "di_lai": muc_pc(r, "di_lai", e, g), "pc_chuc_vu": muc_pc(r, "pc_chuc_vu", e, g),
+            "di_lai": muc_pc(r, "di_lai", e, g),
             "muc_dt": muc_tu_cong_thuc(r, "dien_thoai", e, g), "trang_phuc": muc_pc(r, "trang_phuc", e, g),
             "thuong_bh": gt(r, "thuong_bh"), "thuong_t13": gt(r, "thuong_t13"), "tang_ca": gt(r, "tang_ca"),
             "so_npt": gt(r, "so_npt"), "dong_bh": co_dong_bh(r), "thue_tay": thue_chinh_tay(r),
@@ -11511,7 +11510,7 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                     x = ws.cell(rr, j)
                     x.font, x.fill, x.alignment, x.border = font(True, 11), xam, giua, vien
             pos = {c["k"]: j for j, c in enumerate(cot, 1)}
-            thu_nhap = [pos[k] for k in ("luong", "tt_tien_com", "xang_xe", "tt_di_lai", "tt_pc_chuc_vu", "dien_thoai", "tt_trang_phuc",
+            thu_nhap = [pos[k] for k in ("luong", "tt_tien_com", "xang_xe", "tt_di_lai", "dien_thoai", "tt_trang_phuc",
                                          "thuong_bh", "thuong_t13", "tang_ca") if k in pos]
             giam_tru = [pos[k] for k in ("bhxh_nld", "bhyt_nld", "bhtn_nld", "thue_tru_luong") if k in pos]
             for i, r in enumerate(rows):

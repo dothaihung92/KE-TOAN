@@ -255,9 +255,9 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   m.ctx.blVeBang();
   const b15 = m.phanTu['blBangWrap'].innerHTML;
   const tieuDe = [...b15.matchAll(/<th [^>]*>([^<]*)<\/th>/g)].map(x => x[1]);
-  for (const c of ['Lương CB/Tháng', 'PC Tiền cơm', 'PC Xăng xe', 'PC Chức vụ', 'PC Điện thoại', 'PC Trang phục'])
+  for (const c of ['Lương CB/Tháng', 'PC Tiền cơm', 'PC Xăng xe', 'PC Điện thoại', 'PC Trang phục'])
     assert(tieuDe.includes(c), 'Phải có cột ' + c + ' — got ' + tieuDe.join('|'));
-  for (const c of ['Mức xăng xe/tháng', 'Mức điện thoại/tháng', 'Hỗ trợ đi lại'])
+  for (const c of ['Mức xăng xe/tháng', 'Mức điện thoại/tháng', 'Hỗ trợ đi lại', 'PC Chức vụ', 'Mức PC chức vụ/tháng'])
     assert(!tieuDe.includes(c), 'Cột dư phải bị loại: ' + c);
   assert(!/data-k="muc_xang"/.test(b15) && !/data-k="di_lai"/.test(b15));
   // "Hỗ trợ đi lại" chỉ hiện khi dòng có giá trị (dữ liệu import cũ) — không giấu số đang tính vào thuế
@@ -372,12 +372,12 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   m.ctx.blDL = { '09': [dongMau('101', 'A', { ngay_lam: 13, tt_tien_com: 365000, xang_xe: 500000, tt_pc_chuc_vu: 250000, dien_thoai: 500000, tt_trang_phuc: 200000 })] };
   m.ctx.blVeBang();
   let b18 = m.phanTu['blBangWrap'].innerHTML;
-  for (const k of ['tt_tien_com', 'tt_pc_chuc_vu', 'tt_trang_phuc']) assert(b18.includes('>' + ({ tt_tien_com: 'PC Tiền cơm', tt_pc_chuc_vu: 'PC Chức vụ', tt_trang_phuc: 'PC Trang phục' })[k] + '<'), 'Cột PC đã tính: ' + k);
+  for (const k of ['tt_tien_com', 'tt_trang_phuc']) assert(b18.includes('>' + ({ tt_tien_com: 'PC Tiền cơm', tt_trang_phuc: 'PC Trang phục' })[k] + '<'), 'Cột PC đã tính: ' + k);
   assert(!/data-k="tien_com"/.test(b18) && !/data-k="pc_chuc_vu"/.test(b18) && !/data-k="trang_phuc"/.test(b18), 'Mặc định ẩn cột mức');
-  assert(/365\.000/.test(b18) && /250\.000/.test(b18) && /200\.000/.test(b18), 'Hiện số phụ cấp đã tính theo ngày làm');
+  assert(/365\.000/.test(b18) && /200\.000/.test(b18), 'Hiện số phụ cấp đã tính theo ngày làm');
   m.ctx.blDoiHienMuc();
   b18 = m.phanTu['blBangWrap'].innerHTML;
-  for (const k of ['tien_com', 'muc_xang', 'di_lai', 'pc_chuc_vu', 'muc_dt', 'trang_phuc']) assert(new RegExp('data-k="' + k + '"').test(b18), 'Bấm nút -> hiện cột mức ' + k);
+  for (const k of ['tien_com', 'muc_xang', 'di_lai', 'muc_dt', 'trang_phuc']) assert(new RegExp('data-k="' + k + '"').test(b18), 'Bấm nút -> hiện cột mức ' + k);
   assert(!/data-k="tt_tien_com"/.test(b18), 'Cột đã tính vẫn chỉ đọc');
   m.ctx.blDoiHienMuc();
   assert(!/data-k="tien_com"/.test(m.phanTu['blBangWrap'].innerHTML), 'Bấm lần nữa -> ẩn lại');
@@ -824,9 +824,9 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
       chi_phi_luong: 11756000, bhxh_dn: 929250, bhyt_dn: 159300, bhtn_dn: 53100, bhxh_nld: 424800, bhyt_nld: 79650, bhtn_nld: 53100, tt_luong: 11198450, thue_tncn: 0 })] };
   m.ctx.blThang = 'nam'; m.ctx.blVeBang();
   const nam31 = m.phanTu['blBangWrap'].innerHTML;
-  for (const tieuDe of ['PC Tiền cơm', 'PC Xăng xe', 'PC Chức vụ', 'PC Điện thoại', 'PC Trang phục', 'Thưởng bán hàng', 'Tăng ca (tiền)', 'Chi phí lương (tổng)', 'TT lương (thực lãnh)'])
+  for (const tieuDe of ['PC Tiền cơm', 'PC Xăng xe', 'PC Điện thoại', 'PC Trang phục', 'Thưởng bán hàng', 'Tăng ca (tiền)', 'Chi phí lương (tổng)', 'TT lương (thực lãnh)'])
     assert(nam31.includes(tieuDe), 'Cả năm thiếu cột: ' + tieuDe);
-  assert(/BH DN chịu \(BHXH\+BHYT\+BHTN\)/.test(nam31) && /BH NLĐ trừ \(BHXH\+BHYT\+BHTN\)/.test(nam31) && !/DN chịu BHXH/.test(nam31) && !/Trừ BHXH/.test(nam31), 'BH gộp mỗi bên 1 cột');
+  assert(!nam31.includes('PC Chức vụ'), 'Đã bỏ cột PC Chức vụ'); assert(/BH DN chịu \(BHXH\+BHYT\+BHTN\)/.test(nam31) && /BH NLĐ trừ \(BHXH\+BHYT\+BHTN\)/.test(nam31) && !/DN chịu BHXH/.test(nam31) && !/Trừ BHXH/.test(nam31), 'BH gộp mỗi bên 1 cột');
   assert(/>1\.141\.650</.test(nam31), 'BH DN chịu = 929.250+159.300+53.100 = 1.141.650 mỗi tháng');
   assert(/>557\.550</.test(nam31), 'BH NLĐ trừ = 424.800+79.650+53.100 = 557.550 mỗi tháng');
   assert(/TỔNG CỘNG/.test(nam31) && /23\.512\.000/.test(nam31) && /2\.283\.300/.test(nam31), 'Dòng tổng: chi phí 2 tháng 23.512.000, BH DN 2.283.300');

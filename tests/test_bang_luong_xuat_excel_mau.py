@@ -26,10 +26,10 @@ tinh = [server._luong_tinh_dong(r, TS, "05") for r in rows_nhap]
 
 # dựng payload đúng như giao diện (cột hiển thị + chấm công) — cột toàn 0 bị ẩn
 ky_hieu = [("luong_cb", "Lương căn bản"), ("ngay_cong_hd", "Ngày công"), ("ngay_lam_hd", "Tổng NC"), ("luong", "Tiền lương"),
-           ("tt_tien_com", "Tiền cơm"), ("xang_xe", "Xăng xe"), ("tt_pc_chuc_vu", "PC chức vụ"), ("dien_thoai", "Điện thoại"),
+           ("tt_tien_com", "Tiền cơm"), ("xang_xe", "Xăng xe"), ("dien_thoai", "Điện thoại"),
            ("tt_trang_phuc", "Trang phục"), ("thuong_bh", "Thưởng bán hàng"), ("bhxh_nld", "BHXH 8%"), ("bhyt_nld", "BHYT 1.5%"),
            ("bhtn_nld", "BHTN 1%"), ("thue_tru_luong", "Thuế TNCN"), ("tt_luong", "Tổng thực nhận")]
-nhom = {"tt_tien_com": "pc", "xang_xe": "pc", "tt_pc_chuc_vu": "pc", "dien_thoai": "pc", "tt_trang_phuc": "pc", "thuong_bh": "pc",
+nhom = {"tt_tien_com": "pc", "xang_xe": "pc", "dien_thoai": "pc", "tt_trang_phuc": "pc", "thuong_bh": "pc",
         "bhxh_nld": "gt", "bhyt_nld": "gt", "bhtn_nld": "gt", "thue_tru_luong": "gt"}
 cot = [{"k": "stt", "t": "Stt", "w": 26}, {"k": "ma", "t": "Mã NV", "w": 40}, {"k": "ten", "t": "Họ và Tên", "w": 150}, {"k": "chuc_vu", "t": "Chức vụ", "w": 88}]
 for k, t in ky_hieu:

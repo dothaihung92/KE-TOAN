@@ -15,23 +15,23 @@ dong = {"ma": "1", "ten": "A", "luong_cb": 10_000_000, "ngay_cong": 26, "tien_co
 
 # ===== 1: đi làm ĐỦ công -> nhận đủ mức phụ cấp; nghỉ -> giảm theo tỷ lệ ngày đi làm. =====
 du = server._luong_tinh_dong(dict(dong, ngay_lam=26), TS)
-assert (du["tt_tien_com"], du["xang_xe"], du["tt_di_lai"], du["tt_pc_chuc_vu"], du["dien_thoai"], du["tt_trang_phuc"]) == \
-       (730_000, 1_000_000, 260_000, 500_000, 600_000, 400_000)
+assert (du["tt_tien_com"], du["xang_xe"], du["tt_di_lai"], du["dien_thoai"], du["tt_trang_phuc"]) == \
+       (730_000, 1_000_000, 260_000, 600_000, 400_000)
 nua = server._luong_tinh_dong(dict(dong, ngay_lam=13), TS)                # nghỉ nửa tháng
-assert (nua["tt_tien_com"], nua["xang_xe"], nua["tt_di_lai"], nua["tt_pc_chuc_vu"], nua["dien_thoai"], nua["tt_trang_phuc"]) == \
-       (365_000, 500_000, 130_000, 250_000, 300_000, 200_000)
+assert (nua["tt_tien_com"], nua["xang_xe"], nua["tt_di_lai"], nua["dien_thoai"], nua["tt_trang_phuc"]) == \
+       (365_000, 500_000, 130_000, 300_000, 200_000)
 nghi2 = server._luong_tinh_dong(dict(dong, ngay_lam=24), TS)              # nghỉ 2 ngày / 26
-assert abs(nghi2["tt_tien_com"] - 730_000 / 26 * 24) < 1e-6 and abs(nghi2["tt_pc_chuc_vu"] - 500_000 / 26 * 24) < 1e-6
+assert abs(nghi2["tt_tien_com"] - 730_000 / 26 * 24) < 1e-6
 assert abs(nghi2["tt_trang_phuc"] - 400_000 / 26 * 24) < 1e-6
 zero = server._luong_tinh_dong(dict(dong, ngay_lam=0), TS)                # nghỉ cả tháng -> không phụ cấp nào
-assert all(zero[k] == 0 for k in ("tt_tien_com", "xang_xe", "tt_di_lai", "tt_pc_chuc_vu", "dien_thoai", "tt_trang_phuc"))
+assert all(zero[k] == 0 for k in ("tt_tien_com", "xang_xe", "tt_di_lai", "dien_thoai", "tt_trang_phuc"))
 # ô Tổng NC trống -> đi làm đủ công chuẩn -> đủ phụ cấp
 assert server._luong_tinh_dong(dict(dong), TS)["tt_tien_com"] == 730_000
 print("PASS 1: đủ công nhận đủ phụ cấp; nghỉ 13/26 ngày còn một nửa; nghỉ 2 ngày giảm tỷ lệ; nghỉ cả tháng = 0.")
 
 # ===== 2: phụ cấp đã giảm được đưa đúng vào thu nhập chịu thuế / không chịu thuế / tổng thu nhập. =====
 assert nua["tn_khong_chiu_thue"] == 365_000 + 200_000 + 300_000                       # tiền cơm + trang phục + điện thoại
-assert nua["tn_chiu_thue"] == 5_000_000 + 500_000 + 130_000 + 250_000                 # lương + xăng + đi lại + PC chức vụ
+assert nua["tn_chiu_thue"] == 5_000_000 + 500_000 + 130_000                           # lương + xăng + đi lại
 assert nua["chi_phi_luong"] == round(nua["tn_chiu_thue"] + nua["tn_khong_chiu_thue"])
 assert du["tn_khong_chiu_thue"] == 730_000 + 400_000 + 600_000
 print("PASS 2: phụ cấp đã giảm vào đúng thu nhập chịu thuế / không chịu thuế / chi phí lương.")
@@ -54,17 +54,17 @@ try:
     ws = openpyxl.load_workbook(duong).active
     cot = [c[0] for c in server._LUONG_COT_EXCEL]
     ch = lambda k: ws.cell(3, cot.index(k) + 1).value
-    for k in ("tien_com", "xang_xe", "di_lai", "pc_chuc_vu", "dien_thoai", "trang_phuc"):
+    for k in ("tien_com", "xang_xe", "di_lai", "dien_thoai", "trang_phuc"):
         assert str(ch(k)).startswith("=(") and "*" in str(ch(k)), (k, ch(k))
     t, loi = server._luong_doc_excel(openpyxl.load_workbook(duong, data_only=True), openpyxl.load_workbook(duong))
     r = t["03"][0]
-    assert loi == [] and (r["tien_com"], r["muc_xang"], r["di_lai"], r["pc_chuc_vu"], r["muc_dt"], r["trang_phuc"], r["ngay_lam"]) == \
-           (730_000, 1_000_000, 260_000, 500_000, 600_000, 400_000, 13), r
+    assert loi == [] and (r["tien_com"], r["muc_xang"], r["di_lai"], r["muc_dt"], r["trang_phuc"], r["ngay_lam"]) == \
+           (730_000, 1_000_000, 260_000, 600_000, 400_000, 13), r
     try:
         import formulas
         sol = formulas.ExcelModel().loads(duong).finish().calculate()
         ten = lambda k: "'[%s]%s'!%s3" % (os.path.basename(duong), ws.title.upper(), openpyxl.utils.get_column_letter(cot.index(k) + 1))
-        for k, kv in (("tien_com", "tt_tien_com"), ("xang_xe", "xang_xe"), ("di_lai", "tt_di_lai"), ("pc_chuc_vu", "tt_pc_chuc_vu"),
+        for k, kv in (("tien_com", "tt_tien_com"), ("xang_xe", "xang_xe"), ("di_lai", "tt_di_lai"),
                       ("dien_thoai", "dien_thoai"), ("trang_phuc", "tt_trang_phuc")):
             assert abs(float(list(sol[ten(k)].value[0])[0]) - nua[kv]) < 1e-6, (k, sol[ten(k)].value)
         assert round(float(list(sol[ten("tt_luong")].value[0])[0])) == nua["tt_luong"]

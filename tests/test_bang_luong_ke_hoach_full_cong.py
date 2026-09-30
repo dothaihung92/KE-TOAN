@@ -44,13 +44,13 @@ th, tom = chay(50_000_000)
 for rows in th.values():
     r = rows[0]
     assert (r["tien_com"], r["trang_phuc"], r["muc_dt"]) == (730_000, 416_000, 1_000_000), "Đã đẩy các phụ cấp không thuế lên tới trần"
-    assert r["muc_xang"] == 500_000 and r["pc_chuc_vu"] == 500_000 and r["luong_cb"] == 5_310_000, "Lương CB + phụ cấp chịu thuế giữ nguyên"
+    assert r["muc_xang"] == 500_000 and r["luong_cb"] == 5_310_000, "Lương CB + phụ cấp chịu thuế giữ nguyên"
 # mục tiêu nhỏ (chỉ cần đẩy phụ cấp, chưa phải thưởng/tăng ca): 1 người 7.91tr + tối đa 546k đẩy lên
-th, tom = chay(8_300_000 * 4)
-kiem(th, tom, 8_300_000 * 4)
+th, tom = chay(7_850_000 * 4)
+kiem(th, tom, 7_850_000 * 4)
 assert tom["tong_thuong_bh"] == 0 and tom["tong_tang_ca"] == 0, "Phụ cấp không chịu thuế đẩy đủ rồi nên KHÔNG cần thưởng/tăng ca"
 r = th["09"][0]
-assert r["tien_com"] + r["trang_phuc"] + r["muc_dt"] - (700_000 + 400_000 + 500_000) == 8_300_000 - 7_910_000
+assert r["tien_com"] + r["trang_phuc"] + r["muc_dt"] - (700_000 + 400_000 + 500_000) == 7_850_000 - 7_410_000
 print("PASS 2: đẩy phụ cấp không chịu thuế trước; thưởng/tăng ca chỉ khi phụ cấp đã tới trần.")
 
 # ===== 3: nhiều mục tiêu ngẫu nhiên: luôn khớp tổng, không thuế, mỗi người <= ngưỡng năm, phụ cấp <= trần =====
@@ -129,8 +129,8 @@ for rows in th.values():
 th, tom = chay(48_000_000)
 assert all(r["muc_xang"] == 500_000 for rows in th.values() for r in rows), "Không đưa trần xăng xe -> giữ nguyên"
 # mục tiêu chỉ đủ đẩy phụ cấp không chịu thuế + 1 phần xăng xe: chưa cần thưởng/tăng ca
-th, tom = chay(8_700_000 * 4, tran_pc={"muc_xang": "1000000"})
-kiem(th, tom, 8_700_000 * 4)
+th, tom = chay(8_200_000 * 4, tran_pc={"muc_xang": "1000000"})
+kiem(th, tom, 8_200_000 * 4)
 r = th["09"][0]
 assert r["muc_xang"] > 500_000 and tom["tong_thuong_bh"] == 0 and tom["tong_tang_ca"] == 0
 rng9 = random.Random(5)

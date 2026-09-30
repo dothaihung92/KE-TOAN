@@ -137,7 +137,7 @@ try:
     tv = server.bang_luong_tu_nhan_vien(1, nam=2025)["rows"]
     assert [x["ma"] for x in tv] == ["101", "102"], "Dòng không có tên phải bị bỏ"
     assert tv[0]["luong_cb"] == 32500000 and tv[0]["muc_xang"] == 1000000 and tv[0]["tien_com"] == 730000
-    assert tv[1]["pc_chuc_vu"] == 500000 and tv[1]["ngay_cong"] == 0 and tv[1]["ghi_chu"] == "CK"
+    assert "pc_chuc_vu" not in tv[1] and tv[1]["ngay_cong"] == 0 and tv[1]["ghi_chu"] == "CK"
     assert server.bang_luong_tu_nhan_vien(2, nam=2025)["rows"] == []
     print("PASS 7: dựng dòng lương từ Danh Sách Nhân Viên (số kiểu VN, bỏ dòng trống, phụ cấp chức vụ được giữ).")
 

@@ -4568,7 +4568,6 @@ const BL_COT=[
   {k:'tien_com',t:'Mức tiền cơm/tháng',nhap:1,so:1,muc:1},{k:'tt_tien_com',t:'PC Tiền cơm',so:1,tong:1},
   {k:'muc_xang',t:'Mức xăng xe/tháng',nhap:1,so:1,muc:1},{k:'xang_xe',t:'PC Xăng xe',so:1,tong:1},
   {k:'di_lai',t:'Mức hỗ trợ đi lại/tháng',nhap:1,so:1,muc:1},{k:'tt_di_lai',t:'Hỗ trợ đi lại',so:1,tong:1,anNeuTrong:1},
-  {k:'pc_chuc_vu',t:'Mức PC chức vụ/tháng',nhap:1,so:1,muc:1},{k:'tt_pc_chuc_vu',t:'PC Chức vụ',so:1,tong:1},
   {k:'muc_dt',t:'Mức điện thoại/tháng',nhap:1,so:1,muc:1},{k:'dien_thoai',t:'PC Điện thoại',so:1,tong:1},
   {k:'trang_phuc',t:'Mức trang phục/tháng',nhap:1,so:1,muc:1},{k:'tt_trang_phuc',t:'PC Trang phục',so:1,tong:1},
   {k:'thuong_bh',t:'Thưởng bán hàng',nhap:1,so:1,tong:1},
@@ -4752,7 +4751,7 @@ function blVeCaNam(w){
   const cot=[{k:'t',t:'Tháng'},{k:'ma',t:'Mã NV'},{k:'ten',t:'Họ và Tên'},{k:'chuc_vu',t:'Chức vụ'},
     {k:'luong_cb',t:'Lương CB/Tháng',so:1,tong:1},{k:'luong',t:'Tiền lương',so:1,tong:1},
     {k:'tt_tien_com',t:'PC Tiền cơm',so:1,tong:1},{k:'xang_xe',t:'PC Xăng xe',so:1,tong:1},{k:'tt_di_lai',t:'Hỗ trợ đi lại',so:1,tong:1,anNeuTrong:1},
-    {k:'tt_pc_chuc_vu',t:'PC Chức vụ',so:1,tong:1},{k:'dien_thoai',t:'PC Điện thoại',so:1,tong:1},{k:'tt_trang_phuc',t:'PC Trang phục',so:1,tong:1},
+    {k:'dien_thoai',t:'PC Điện thoại',so:1,tong:1},{k:'tt_trang_phuc',t:'PC Trang phục',so:1,tong:1},
     {k:'thuong_bh',t:'Thưởng bán hàng',so:1,tong:1},{k:'thuong_t13',t:'Thưởng T13',so:1,tong:1,anNeuTrong:1},{k:'tang_ca',t:'Tăng ca (tiền)',so:1,tong:1},
     {k:'chi_phi_luong',t:'Chi phí lương (tổng)',so:1,tong:1,dam:1},
     {k:'bh_dn_gop',t:'BH DN chịu (BHXH+BHYT+BHTN)',so:1,tong:1,f:r=>sum3(r,'bhxh_dn','bhyt_dn','bhtn_dn')},
@@ -4975,7 +4974,7 @@ async function blNapNhanVien(){
     const co=blDL[blThang]=blDL[blThang]||[];
     let them=0,capNhat=0;
     // Nhân viên đã có trong tháng: cập nhật lại Lương cơ bản + các phụ cấp theo Danh Sách Nhân Viên (số liệu gốc lấy từ đó).
-    const truongNv=['chuc_vu','luong_cb','tien_com','muc_xang','pc_chuc_vu','muc_dt','trang_phuc'];
+    const truongNv=['chuc_vu','luong_cb','tien_com','muc_xang','muc_dt','trang_phuc'];
     const cuaKey=new Map(co.map(r=>[(r.ma||r.ten||'').toString().trim().toLowerCase(),r]));
     d.rows.forEach(r=>{
       const key=(r.ma||r.ten||'').toString().trim().toLowerCase();
@@ -5194,7 +5193,7 @@ function blCotIn(rows,ts){
     {k:'gio_tang_ca',t:'Số giờ tăng ca',w:46,c:1,dp:1,tong:1,opt:1},{k:'ngay_lam_hd',t:'Tổng NC',w:42,c:1,dp:1},
     {k:'luong',t:'Tiền lương',w:86,n:1,tong:1},
     {k:'tt_tien_com',t:'Tiền cơm',w:74,n:1,tong:1,opt:1,nhom:'pc'},{k:'xang_xe',t:'Xăng xe',w:74,n:1,tong:1,opt:1,nhom:'pc'},
-    {k:'tt_di_lai',t:'Hỗ trợ đi lại',w:74,n:1,tong:1,opt:1,nhom:'pc'},{k:'tt_pc_chuc_vu',t:'PC chức vụ',w:74,n:1,tong:1,opt:1,nhom:'pc'},
+    {k:'tt_di_lai',t:'Hỗ trợ đi lại',w:74,n:1,tong:1,opt:1,nhom:'pc'},
     {k:'dien_thoai',t:'Điện thoại',w:74,n:1,tong:1,opt:1,nhom:'pc'},{k:'tt_trang_phuc',t:'Trang phục',w:74,n:1,tong:1,opt:1,nhom:'pc'},
     {k:'thuong_bh',t:'Thưởng bán hàng',w:80,n:1,tong:1,opt:1,nhom:'pc'},{k:'thuong_t13',t:'Thưởng T13',w:80,n:1,tong:1,opt:1,nhom:'pc'},
     {k:'tang_ca',t:'Tăng ca',w:76,n:1,tong:1,opt:1},
