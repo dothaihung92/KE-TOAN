@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.030"
+APP_BUILD = "2026-09-30.031"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10308,7 +10308,7 @@ def _luong_chuan_dong_nhap(r, ts=None):
 def _luong_tinh_dong(r, ts, thang=None):
     """Tính 1 dòng bảng lương từ dòng NHẬP r + tham số ts (đã chuẩn hoá). Công thức bám sát file gốc
     (cột theo file): H=D/E*G; mọi phụ cấp = mức/E*G (E=công chuẩn, G=ngày đi làm); Q..S=D*%DN; T..V=D*%NLĐ; X=ROUND(SUM(H:P));
-    AA=H+J+K+N+P+O; AB=I+M+L; AF=T+U+V; AI=NPT*giảm trừ; AJ=AA-AG-AF-AI;
+    AA=H+K+N+P+O (xăng xe J chuyển sang không chịu thuế); AB=I+J+M+L; AF=T+U+V; AI=NPT*giảm trừ; AJ=AA-AG-AF-AI;
     AK=ROUND(thuế lũy tiến(AJ)); W=ROUND(SUM(H:P)-T-U-V-AK)."""
     d = _luong_chuan_dong_nhap(r)
     # Ngày công chuẩn: ô "Ngày công" để trống/0 -> theo LỊCH THÁNG (trừ Chủ nhật + ngày lễ); nhập số -> dùng số đó.
@@ -10330,8 +10330,9 @@ def _luong_tinh_dong(r, ts, thang=None):
     bh_dn = {k: d["luong_cb"] * ts["bh_dn"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
     bh_nld = {k: d["luong_cb"] * ts["bh_nld"][k] / 100.0 * co_bh for k in ("bhxh", "bhyt", "bhtn")}
     tong_bh_nld = sum(bh_nld.values())
-    tong_chiu_thue = luong + xang + di_lai + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
-    khong_chiu_thue = tien_com + trang_phuc + dien_thoai
+    # Phụ cấp XĂNG XE là khoản KHÔNG chịu thuế TNCN (theo yêu cầu người dùng) — cùng nhóm tiền cơm/điện thoại/trang phục.
+    tong_chiu_thue = luong + di_lai + d["thuong_bh"] + d["tang_ca"] + d["thuong_t13"]
+    khong_chiu_thue = tien_com + xang + trang_phuc + dien_thoai
     tong_thu_nhap = tong_chiu_thue + khong_chiu_thue
     npt = d["so_npt"]
     tt = _luong_thue_ap_dung(ts, thang)      # từ 1/1/2026 tự dùng giảm trừ + biểu thuế mới
@@ -10704,10 +10705,11 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
     for k, v in (tran_pc or {}).items():
         if k in tran and str(v).strip() != "":
             tran[k] = max(0.0, _luong_so(v))
-    tran_xang = None                                                # xăng xe: chỉ đẩy khi người dùng đưa trần (mặc định giữ nguyên)
+    # Xăng xe cũng là phụ cấp KHÔNG chịu thuế: chỉ đẩy khi người dùng đưa trần (`muc_xang`), mặc định giữ nguyên mức trong danh sách
     if str((tran_pc or {}).get("muc_xang", "")).strip() != "":
-        tran_xang = max(0.0, _luong_so(tran_pc["muc_xang"])) // 1000 * 1000
+        tran["muc_xang"] = max(0.0, _luong_so(tran_pc["muc_xang"]))
     tran = {k: v // 1000 * 1000 for k, v in tran.items()}          # mức trần tròn nghìn đồng (vd 416.000)
+    khoa_pc = [k for k in ("tien_com", "trang_phuc", "muc_dt", "muc_xang") if k in tran]
     gt_bt = _luong_thue_ap_dung(ts, thang)["giam_tru_ban_than"]
     ung = [(dict(b), f) for b, f in du_bh] + [(dict(b, dong_bh=0), f) for b, f in khong_bh]      # người được đóng BHXH đứng trước
     tong_goc = suc_chua = 0.0
@@ -10715,10 +10717,10 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
     for row, f in ung:
         if tong_goc + f > con:
             continue
-        caps = [max(0.0, tran[k] - row[k]) for k in ("tien_com", "trang_phuc", "muc_dt")]
+        caps = [max(0.0, tran[k] - row[k]) for k in khoa_pc]
         head = max(0.0, gt_bt - tinh(row)["tn_chiu_thue"] - 1)          # chỗ trống thu nhập chịu thuế (<= giảm trừ bản thân)
         chon.append({"row": row, "loai": "day_du"})
-        info.append((caps, head, max(0.0, tran_xang - row["muc_xang"]) if tran_xang is not None else 0.0))
+        info.append((caps, head))
         tong_goc += f
         suc_chua += f + sum(caps) + head
         if suc_chua >= con and not dung_het:
@@ -10726,23 +10728,15 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
     if not chon:
         raise HTTPException(400, f"Tháng {int(thang)}: mục tiêu {int(con):,} đ nhỏ hơn lương đủ công của nhân viên rẻ nhất".replace(",", "."))
     con -= int(tong_goc)
-    if con > 0:                                                   # (a) đẩy phụ cấp không chịu thuế
-        cap_ng = [sum(c) for c, _h, _x in info]
+    if con > 0:                                                   # (a) đẩy phụ cấp không chịu thuế (cơm, trang phục, điện thoại, xăng xe)
+        cap_ng = [sum(c) for c, _h in info]
         x = int(min(con, sum(cap_ng)))
         if x > 0:
-            for c, (caps, _h, _x), u in zip(chon, info, chia(x, cap_ng)):
-                for k, a in zip(("tien_com", "trang_phuc", "muc_dt"), chia(u, caps) if u > 0 else [0, 0, 0]):
+            for c, (caps, _h), u in zip(chon, info, chia(x, cap_ng)):
+                for k, a in zip(khoa_pc, chia(u, caps) if u > 0 else [0] * len(khoa_pc)):
                     c["row"][k] += a
                 con -= u
-    heads = [h for _c, h, _x in info]
-    if con > 0 and any(x for _c, _h, x in info):                  # (a2) đẩy xăng xe — vẫn là thu nhập chịu thuế nên dùng chỗ trống dưới giảm trừ bản thân
-        cap_x = [min(x, h) for _c, h, x in info]
-        x = int(min(con, sum(cap_x)))
-        if x > 0:
-            for i, (c, u) in enumerate(zip(chon, chia(x, cap_x))):
-                c["row"]["muc_xang"] += u
-                heads[i] -= u
-                con -= u
+    heads = [h for _c, h in info]
     if con > 0:                                                   # (b) thưởng + tăng ca, thu nhập chịu thuế vẫn <= giảm trừ bản thân
         x = int(min(con, sum(heads)))
         if x > 0:
@@ -10774,8 +10768,7 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
       4. Hết người mà vẫn thiếu -> dồn vào thưởng bán hàng (vượt ngưỡng thuế) và báo cảnh báo.
     full_cong=True (tick "Làm full ngày công"): KHÔNG có người làm < 14 ngày, KHÔNG khấu trừ 10%; mọi người đi làm ĐỦ CÔNG. Chọn số người ít nhất đủ
     "sức chứa", bù phần thiếu theo thứ tự: (a) ĐẨY các phụ cấp KHÔNG chịu thuế TNCN (tiền cơm, trang phục, điện thoại) lên tới mức trần `tran_pc`
-    (mỗi tháng; mặc định cơm 730.000, trang phục 5.000.000/12, điện thoại 1.000.000), rồi xăng xe nếu có trần `muc_xang` (xăng xe vẫn là thu nhập CHỊU thuế
-    theo công thức bảng lương nên dùng chỗ trống dưới giảm trừ bản thân); (b) rồi thưởng bán hàng + tăng ca nhưng THU NHẬP CHỊU THUẾ
+    (mỗi tháng; mặc định cơm 730.000, trang phục 5.000.000/12, điện thoại 1.000.000; xăng xe cũng không chịu thuế, chỉ đẩy khi có trần `muc_xang`); (b) rồi thưởng bán hàng + tăng ca nhưng THU NHẬP CHỊU THUẾ
     mỗi người mỗi tháng <= giảm trừ bản thân (11tr x 12 = 132tr/năm) nên không phát sinh thuế TNCN; (c) hết chỗ mới dồn vượt ngưỡng + cảnh báo.
     Trả về (danh sách dòng nhập, thông tin)."""
     import random as _random
@@ -11342,10 +11335,10 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             ws[f"{L['chi_phi_luong']}{r}"] = f"=ROUND(SUM({hq}{r}:{tq}{r}),0)"
             ws[f"{L['thang']}{r}"] = t
             ws[f"{L['ghi_chu']}{r}"] = d["ghi_chu"]
-            chiu = "+".join(f"{L[k]}{r}" for k in ("luong", "xang_xe", "di_lai", "thuong_bh",
+            chiu = "+".join(f"{L[k]}{r}" for k in ("luong", "di_lai", "thuong_bh",
                                                      "tang_ca", "thuong_t13"))
             ws[f"{L['tn_chiu_thue']}{r}"] = f"=+{chiu}"
-            ws[f"{L['tn_khong_chiu_thue']}{r}"] = f"=+{L['tien_com']}{r}+{L['trang_phuc']}{r}+{L['dien_thoai']}{r}"
+            ws[f"{L['tn_khong_chiu_thue']}{r}"] = f"=+{L['tien_com']}{r}+{L['xang_xe']}{r}+{L['trang_phuc']}{r}+{L['dien_thoai']}{r}"
             ws[f"{L['bh_duoc_tru']}{r}"] = f"=+SUM({L['bhxh_nld']}{r}:{L['bhtn_nld']}{r})"
             ws[f"{L['kiem_tra']}{r}"] = (f"=+{L['tn_chiu_thue']}{r}+{L['tn_khong_chiu_thue']}{r}"
                                          f"-{L['bh_duoc_tru']}{r}-{L['tt_luong']}{r}")

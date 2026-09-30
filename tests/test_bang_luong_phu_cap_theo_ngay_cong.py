@@ -30,10 +30,10 @@ assert server._luong_tinh_dong(dict(dong), TS)["tt_tien_com"] == 730_000
 print("PASS 1: đủ công nhận đủ phụ cấp; nghỉ 13/26 ngày còn một nửa; nghỉ 2 ngày giảm tỷ lệ; nghỉ cả tháng = 0.")
 
 # ===== 2: phụ cấp đã giảm được đưa đúng vào thu nhập chịu thuế / không chịu thuế / tổng thu nhập. =====
-assert nua["tn_khong_chiu_thue"] == 365_000 + 200_000 + 300_000                       # tiền cơm + trang phục + điện thoại
-assert nua["tn_chiu_thue"] == 5_000_000 + 500_000 + 130_000                           # lương + xăng + đi lại
+assert nua["tn_khong_chiu_thue"] == 365_000 + 500_000 + 200_000 + 300_000             # tiền cơm + xăng xe + trang phục + điện thoại (đều không chịu thuế)
+assert nua["tn_chiu_thue"] == 5_000_000 + 130_000                                     # lương + đi lại (xăng xe KHÔNG chịu thuế)
 assert nua["chi_phi_luong"] == round(nua["tn_chiu_thue"] + nua["tn_khong_chiu_thue"])
-assert du["tn_khong_chiu_thue"] == 730_000 + 400_000 + 600_000
+assert du["tn_khong_chiu_thue"] == 730_000 + 1_000_000 + 400_000 + 600_000
 print("PASS 2: phụ cấp đã giảm vào đúng thu nhập chịu thuế / không chịu thuế / chi phí lương.")
 
 # ===== 3: công chuẩn theo lịch tháng: đủ công tháng 27 ngày thì nhận đủ, thiếu 1 ngày thì giảm 1/27. =====

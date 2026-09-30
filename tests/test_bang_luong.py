@@ -49,11 +49,15 @@ for ma, luong, thuong, t13, w, x, aa, aj, ak in CA_THAT:
     k = server._luong_tinh_dong({"ma": ma, "luong_cb": luong, "ngay_cong": 26, "ngay_lam": 26, "tien_com": 730000,
                                  "muc_xang": 1000000, "muc_dt": 1000000, "trang_phuc": 400000,
                                  "thuong_bh": thuong, "thuong_t13": t13, "so_npt": 0}, TS)
-    assert k["tt_luong"] == w and k["chi_phi_luong"] == x and abs(k["tn_chiu_thue"] - aa) < 0.01 \
-        and abs(k["tn_tinh_thue"] - aj) < 0.01 and k["thue_tncn"] == ak, (ma, k)
-    assert k["tn_khong_chiu_thue"] == 2130000 and k["giam_tru_ban_than"] == 11000000
+    # Số trong file gốc tính XĂNG XE (1.000.000) vào thu nhập chịu thuế; theo yêu cầu mới xăng xe KHÔNG chịu thuế -> chịu thuế/tính thuế giảm đúng 1.000.000,
+    # chi phí lương không đổi, thuế tính lại theo biểu lũy tiến, thực lãnh = chi phí − BH NLĐ − thuế mới.
+    aj2 = aj - 1_000_000
+    thue2 = server._luong_lam_tron(server._luong_thue_tncn(aj2, TS["bac_thue"]))
+    assert k["chi_phi_luong"] == x and abs(k["tn_chiu_thue"] - (aa - 1_000_000)) < 0.01 and abs(k["tn_tinh_thue"] - aj2) < 0.01 and k["thue_tncn"] == thue2, (ma, k)
+    assert k["tt_luong"] == x - round(k["bh_duoc_tru"]) - thue2 and k["tt_luong"] >= w
+    assert k["tn_khong_chiu_thue"] == 3130000 and k["giam_tru_ban_than"] == 11000000
     assert abs(k["kiem_tra"] - k["thue_tncn"]) < 1, ("Cột Kiểm tra số liệu phải ≈ Thuế TNCN", k["kiem_tra"], k["thue_tncn"])
-print("PASS 4: 5 ca thật trong file (gồm thưởng bán hàng lẻ, thưởng T13, thuế 9.646.875đ) khớp Excel tới từng đồng.")
+print("PASS 4: 5 ca thật trong file: chi phí lương khớp Excel; xăng xe không chịu thuế -> thu nhập chịu thuế/tính thuế giảm 1.000.000, thuế tính lại đúng.")
 
 # ===== 5: các tình huống biên: người phụ thuộc, nghỉ bớt ngày, công chuẩn 0, thu nhập dưới giảm trừ, tham số tùy chỉnh. =====
 co_ban = {"luong_cb": 26000000, "ngay_cong": 26, "ngay_lam": 26}
@@ -100,7 +104,7 @@ try:
     kq = asyncio.run(server.bang_luong_luu(1, _Req({"tham_so": {}, "thang": {"07": [dong], "13": [dong]}}), nam=2025))
     assert kq["nam"] == 2025 and list(kq["thang"]) == ["07"], "Tháng 13 (ngoài 1-12) phải bị bỏ"
     r = kq["thang"]["07"][0]
-    assert r["luong_cb"] == 32500000 and r["tt_luong"] == 30050000 and r["thue_tncn"] == 2167500 and "rac_khong_biet" not in r
+    assert r["luong_cb"] == 32500000 and r["tt_luong"] == 30250000 and r["thue_tncn"] == 1967500 and "rac_khong_biet" not in r
     assert kq["cac_nam"] == [2025]
     # năm 2026 tách riêng, không lẫn dữ liệu 2025
     assert server.bang_luong_get(1, nam=2026)["thang"] == {}
