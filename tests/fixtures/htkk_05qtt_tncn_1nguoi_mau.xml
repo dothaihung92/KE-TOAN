@@ -1,0 +1,143 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<HSoThueDTu xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://kekhaithue.gdt.gov.vn/TKhaiThue">
+  <HSoKhaiThue id="ID_1">
+    <TTinChung>
+      <TTinDVu>
+        <maDVu>HTKK</maDVu>
+        <tenDVu>HỖ TRỢ KÊ KHAI THUẾ</tenDVu>
+        <pbanDVu>5.7.8</pbanDVu>
+        <ttinNhaCCapDVu>77166B67F86FD6B315258E77B9627F54</ttinNhaCCapDVu>
+      </TTinDVu>
+      <TTinTKhaiThue>
+        <TKhaiThue>
+          <maTKhai>953</maTKhai>
+          <tenTKhai>TỜ KHAI QUYẾT TOÁN THUẾ THU NHẬP CÁ NHÂN (Mẫu số 05/QTT-TNCN)</tenTKhai>
+          <moTaBMau>(Ban hành kèm theo Thông tư số 80/2021/TT-BTC ngày 29 tháng 9 năm 2021 của Bộ trưởng Bộ Tài chính)</moTaBMau>
+          <pbanTKhaiXML>2.9.3</pbanTKhaiXML>
+          <loaiTKhai>C</loaiTKhai>
+          <soLan>0</soLan>
+          <KyKKhaiThue>
+            <kieuKy>Y</kieuKy>
+            <kyKKhai>2025</kyKKhai>
+            <kyKKhaiTuNgay />
+            <kyKKhaiDenNgay />
+            <kyKKhaiTuThang>01/2025</kyKKhaiTuThang>
+            <kyKKhaiDenThang>12/2025</kyKKhaiDenThang>
+          </KyKKhaiThue>
+          <maCQTNoiNop>70123</maCQTNoiNop>
+          <tenCQTNoiNop>Thuế cơ sở 12 Thành phố Hồ Chí Minh</tenCQTNoiNop>
+          <ngayLapTKhai>2026-10-01</ngayLapTKhai>
+          <GiaHan>
+            <maLyDoGiaHan />
+            <lyDoGiaHan />
+          </GiaHan>
+          <nguoiKy>NGUYỄN VĂN KÝ</nguoiKy>
+          <ngayKy>2026-10-01</ngayKy>
+          <nganhNgheKD />
+        </TKhaiThue>
+        <NNT>
+          <mst>0300000001</mst>
+          <tenNNT>CÔNG TY TNHH MẪU</tenNNT>
+          <dchiNNT>1 Đường Mẫu</dchiNNT>
+          <tenXaNNT>Phường An Phú Đông</tenXaNNT>
+          <maXaNNT>70123098</maXaNNT>
+          <maHuyenNNT />
+          <tenHuyenNNT />
+          <maTinhNNT>701</maTinhNNT>
+          <tenTinhNNT>Thành phố Hồ Chí Minh</tenTinhNNT>
+          <dthoaiNNT />
+          <faxNNT />
+          <emailNNT />
+        </NNT>
+      </TTinTKhaiThue>
+    </TTinChung>
+    <CTieuTKhaiChinh>
+      <mst_cu>0300000001</mst_cu>
+      <Header>
+        <toChucCoQTTTheoUyQuyen>0</toChucCoQTTTheoUyQuyen>
+        <ma_THQuyetToan>01</ma_THQuyetToan>
+        <ten_THQuyetToan>QT định kỳ</ten_THQuyetToan>
+        <hanNop />
+      </Header>
+      <NVuKhauTruThue>
+        <ct16>1</ct16>
+        <ct17>1</ct17>
+        <ct18>0</ct18>
+        <ct19>0</ct19>
+        <ct20>0</ct20>
+        <ct21>0</ct21>
+        <ct22>0</ct22>
+        <ct23>63720000</ct23>
+        <ct24>63720000</ct24>
+        <ct25>0</ct25>
+        <ct26>0</ct26>
+        <ct27>0</ct27>
+        <ct28>0</ct28>
+        <ct29>0</ct29>
+        <ct30>0</ct30>
+        <ct31>0</ct31>
+        <ct32>0</ct32>
+        <ct33>0</ct33>
+        <ct34>0</ct34>
+      </NVuKhauTruThue>
+      <NVuQToanThay>
+        <ct35>1</ct35>
+        <ct36>0</ct36>
+        <ct37>0</ct37>
+        <ct38>0</ct38>
+        <ct39>0</ct39>
+        <ct40>0</ct40>
+        <ct41>0</ct41>
+      </NVuQToanThay>
+    </CTieuTKhaiChinh>
+    <PLuc>
+      <PLuc_05_1_BK_QTT>
+        <BKeCTietCNhan id="ID_1">
+          <coDieuChinhSoLieu>0</coDieuChinhSoLieu>
+          <ct07>Nguyễn Văn A</ct07>
+          <ct08>000000000001</ct08>
+          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>
+          <ct09a_ma>03</ct09a_ma>
+          <ct09a_ten>Thẻ CCCD/Số định danh cá nhân</ct09a_ten>
+          <ct09>000000000001</ct09>
+          <ct10>1</ct10>
+          <ct11>0</ct11>
+          <ct12>63720000</ct12>
+          <ct13>0</ct13>
+          <ct14>0</ct14>
+          <ct15>0</ct15>
+          <ct15.1>0</ct15.1>
+          <ct16>0</ct16>
+          <ct17>132000000</ct17>
+          <ct18>0</ct18>
+          <ct19>6690600</ct19>
+          <ct20>0</ct20>
+          <ct21>0</ct21>
+          <ct22>0</ct22>
+          <ct23>0</ct23>
+          <ct24>0</ct24>
+          <ct25>0</ct25>
+          <ct26>0</ct26>
+          <ct27>0</ct27>
+        </BKeCTietCNhan>
+        <ct28>63720000</ct28>
+        <ct29>0</ct29>
+        <ct30>0</ct30>
+        <ct31>0</ct31>
+        <ct31.1>0</ct31.1>
+        <ct32>0</ct32>
+        <ct33>132000000</ct33>
+        <ct34>0</ct34>
+        <ct35>6690600</ct35>
+        <ct36>0</ct36>
+        <ct37>0</ct37>
+        <ct38>0</ct38>
+        <ct39>0</ct39>
+        <ct40>0</ct40>
+        <ct41>0</ct41>
+        <ct42>0</ct42>
+        <ct43>0</ct43>
+      </PLuc_05_1_BK_QTT>
+    </PLuc>
+  </HSoKhaiThue>
+</HSoThueDTu>

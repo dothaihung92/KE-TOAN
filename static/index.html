@@ -4764,6 +4764,8 @@ async function moBangLuongNam(thangGiu){
         <button class="btn ghost sm" style="color:#1f4e8c" onclick="blMoIn()" title="In bảng lương từng tháng + bảng chấm công tương ứng (mẫu như file bảng lương); in một tháng hoặc hàng loạt từ tháng nào đến tháng nào">🖨 In bảng lương & chấm công</button>
         <button class="btn ghost sm" style="color:#7a1f5c" onclick="blMoMisa()" title="Xuất file Excel để Import vào MISA (Nghiệp vụ khác > Chứng từ nghiệp vụ khác): hạch toán chi phí lương, trích BHXH/BHYT/BHTN, thuế TNCN, thanh toán lương — lấy số liệu bảng lương từng tháng đã làm">📤 Hạch toán lương → MISA</button>
         <button class="btn ghost sm" style="color:#0b5d6b" onclick="blKetXuatQt()" title="Kết xuất XML quyết toán thuế TNCN năm (Mẫu 05/QTT-TNCN, TT80/2021) để nhập vào HTKK — lập từ Bảng Lương đã lưu + Danh Sách Nhân Viên; mã số thuế cá nhân = số CCCD; mặc định tất cả cá nhân ủy quyền quyết toán thay">🧾 Kết xuất QT TNCN</button>
+        <button class="btn ghost sm" style="color:#0b5d6b" onclick="document.getElementById('blNntFile').click()" title="Chọn 1 file XML tờ khai do HTKK xuất của công ty để lấy phường/xã, tỉnh... (maXaNNT/tenXaNNT) — chỉ cần làm 1 lần, các lần kết xuất QT TNCN sau dùng lại">📥 Nạp NNT từ XML HTKK</button>
+        <input type="file" id="blNntFile" accept=".xml" style="display:none" onchange="blNapNntHtkk(this)">
         <button class="btn ghost sm" id="blNutMuc" onclick="blDoiHienMuc()" title="Hiện/ẩn các cột MỨC phụ cấp mỗi tháng (lấy từ Danh Sách Nhân Viên) để sửa tay — cột PC bên cạnh là số đã tính theo ngày đi làm">✎ Mức phụ cấp</button>
         <button class="btn ghost sm" onclick="blMoThamSo()">⚙ Tham số năm</button>
       </div>
@@ -5549,6 +5551,17 @@ function blInNgay(){
 }
 
 /* ----- KẾT XUẤT QUYẾT TOÁN TNCN NĂM (05/QTT-TNCN) -> XML cho HTKK ----- */
+async function blNapNntHtkk(input){
+  const f=input.files&&input.files[0];if(!f)return;
+  try{
+    const fd=new FormData();fd.append('file',f);
+    const r=await fetch(`/api/bang-luong/${current}/nap-nnt-htkk`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi đọc file';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const kq=(await r.json()).nnt||{};
+    toast(`✓ Đã nạp thông tin người nộp thuế từ HTKK: ${kq.ten_xa||''} (mã ${kq.ma_xa||''}), ${kq.ten_tinh||''} — dùng cho mọi lần kết xuất QT TNCN`,'ok');
+  }catch(e){toast('Lỗi nạp NNT: '+e.message,'err')}
+  input.value='';
+}
 async function blKetXuatQt(){
   if(!current){toast('Chọn công ty trước','err');return}
   if(blBan&&!(await blLuu(true)))return;      // số liệu lấy từ bảng lương ĐÃ LƯU

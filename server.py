@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-09-30.032"
+APP_BUILD = "2026-10-01.033"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12292,11 +12292,11 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
         if p["co_thang"]:
             ct12 = int(_luong_lam_tron(p["tn"]))
             ct17 = int(_luong_lam_tron(p["gt"]))
-            ct18 = int(_luong_lam_tron(p["bh"]))
-            ct21 = max(0, ct12 - ct17 - ct18)
+            ct19 = int(_luong_lam_tron(p["bh"]))          # [19] = bảo hiểm bắt buộc (đối chiếu file HTKK thật); [18] = từ thiện/nhân đạo/khuyến học (chưa dùng)
+            ct21 = max(0, ct12 - ct17 - ct19)
             ct24 = int(_luong_lam_tron(_luong_qt_thue_nam(ct21, ts)))
             ct25 = int(_luong_lam_tron(p["thue"]))
-            g1.append(dict(p, ct12=ct12, ct16=p["npt"], ct17=ct17, ct18=ct18, ct21=ct21, ct24=ct24, ct25=ct25, ct26=max(0, ct24 - ct25), ct27=max(0, ct25 - ct24)))
+            g1.append(dict(p, ct12=ct12, ct16=p["npt"], ct17=ct17, ct18=0, ct19=ct19, ct21=ct21, ct24=ct24, ct25=ct25, ct26=max(0, ct24 - ct25), ct27=max(0, ct25 - ct24)))
         tv_thue = int(_luong_lam_tron(p["tv_thue"]))
         if p["co_tv"]:
             if tv_thue > 0:
@@ -12342,7 +12342,59 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
     return {"g1": g1, "g2": g2, "npt": npt, "canh_bao": canh_bao, "so_nguoi": len(ng)}
 
 
-def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
+def _luong_tinh_tu_ten_cqt(ten_cqt):
+    """'Thuế cơ sở 12 Thành phố Hồ Chí Minh' -> 'Thành phố Hồ Chí Minh'; 'Thuế cơ sở 10 tỉnh Lâm Đồng' -> 'Tỉnh Lâm Đồng' (tên tỉnh/thành, dự phòng khi chưa nạp NNT từ HTKK)."""
+    import re as _re
+    m = _re.match(r"^Thuế\s+(?:cơ sở\s+\d+\s+)?(.+)$", str(ten_cqt or "").strip(), _re.IGNORECASE)
+    r = m.group(1).strip() if m else ""
+    return (r[:1].upper() + r[1:]) if r else ""
+
+
+def _luong_doc_nnt_htkk(content):
+    """Đọc phần <NNT> của 1 file XML do HTKK xuất (bất kỳ tờ khai nào) -> dict thông tin người nộp thuế để dùng lại khi kết xuất: phường/xã (mã + tên), quận/huyện,
+    tỉnh, địa chỉ, điện thoại, fax, email."""
+    import xml.etree.ElementTree as _ET
+    try:
+        root = _ET.fromstring(content.lstrip(b"\xef\xbb\xbf"))
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file XML: {e}")
+    ns = "{http://kekhaithue.gdt.gov.vn/TKhaiThue}"
+    nnt = root.find(f".//{ns}NNT")
+    if nnt is None:
+        nnt = root.find(".//NNT")
+        ns = ""
+    if nnt is None:
+        raise HTTPException(400, "Không thấy thông tin người nộp thuế (<NNT>) trong file — hãy chọn file XML tờ khai do HTKK xuất.")
+    g = lambda tag: ((nnt.find(f"{ns}{tag}").text or "").strip() if nnt.find(f"{ns}{tag}") is not None else "")
+    kq = {"mst": g("mst"), "ten": g("tenNNT"), "dchi": g("dchiNNT"), "ten_xa": g("tenXaNNT"), "ma_xa": g("maXaNNT"), "ten_huyen": g("tenHuyenNNT"), "ma_huyen": g("maHuyenNNT"),
+          "ten_tinh": g("tenTinhNNT"), "ma_tinh": g("maTinhNNT"), "dthoai": g("dthoaiNNT"), "fax": g("faxNNT"), "email": g("emailNNT")}
+    if not kq["ma_xa"] or not kq["ten_xa"]:
+        raise HTTPException(400, "File không có phường/xã (maXaNNT/tenXaNNT) của người nộp thuế")
+    return kq
+
+
+@app.post("/api/bang-luong/{cid}/nap-nnt-htkk")
+async def bang_luong_nap_nnt_htkk(cid: int, request: Request):
+    """multipart: file XML do HTKK xuất. Lưu thông tin NNT (phường/xã, tỉnh...) cho công ty để mọi lần kết xuất QT TNCN dùng đúng mã/tên phường xã."""
+    form = await request.form()
+    up = form.get("file")
+    if up is None:
+        raise HTTPException(400, "Chưa chọn file")
+    kq = _luong_doc_nnt_htkk(await up.read())
+    conn = db()
+    try:
+        comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    if comp and kq["mst"] and str(comp["mst"] or "").strip()[:10] != kq["mst"][:10]:
+        raise HTTPException(400, f"File là của MST {kq['mst']}, khác MST công ty đang chọn ({comp['mst']})")
+    data = _doc_du_lieu_cty(cid)
+    data["htkk_nnt"] = kq
+    _ghi_du_lieu_cty(cid, data)
+    return {"ok": True, "nnt": kq}
+
+
+def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay, nnt=None):
     """Dựng XML 05/QTT-TNCN (lần đầu, loại C) cho HTKK từ kết quả _luong_qt_tong_hop."""
     import html as _html
     e = lambda v: _html.escape(str(v if v is not None else ""))
@@ -12402,16 +12454,18 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
     a('        <NNT>')
     a(f'          <mst>{e(mst)}</mst>')
     a(f'          <tenNNT>{e(comp["ten"])}</tenNNT>')
-    a(f'          <dchiNNT>{e(dia_chi)}</dchiNNT>')
-    a(f'          <tenXaNNT>{e(ten_cqt)}</tenXaNNT>')
-    a(f'          <maXaNNT>{e(ma_cqt)}</maXaNNT>')
-    a('          <maHuyenNNT />')
-    a('          <tenHuyenNNT />')
-    a(f'          <maTinhNNT>{e(str(ma_cqt)[:3])}</maTinhNNT>')
-    a('          <tenTinhNNT />')
-    a('          <dthoaiNNT />')
-    a('          <faxNNT />')
-    a('          <emailNNT />')
+    nnt = nnt or {}
+    tag_nnt = lambda tag, v: a(f'          <{tag}>{e(v)}</{tag}>' if str(v or "") != "" else f'          <{tag} />')
+    tag_nnt("dchiNNT", dia_chi or nnt.get("dchi"))
+    tag_nnt("tenXaNNT", nnt.get("ten_xa"))                   # phường/xã: lấy từ file XML HTKK đã nạp (không đoán)
+    tag_nnt("maXaNNT", nnt.get("ma_xa"))
+    tag_nnt("maHuyenNNT", nnt.get("ma_huyen"))
+    tag_nnt("tenHuyenNNT", nnt.get("ten_huyen"))
+    tag_nnt("maTinhNNT", nnt.get("ma_tinh") or str(ma_cqt)[:3])
+    tag_nnt("tenTinhNNT", nnt.get("ten_tinh") or _luong_tinh_tu_ten_cqt(ten_cqt))
+    tag_nnt("dthoaiNNT", nnt.get("dthoai"))
+    tag_nnt("faxNNT", nnt.get("fax"))
+    tag_nnt("emailNNT", nnt.get("email"))
     a('        </NNT>')
     a('      </TTinTKhaiThue>')
     a('    </TTinChung>')
@@ -12434,7 +12488,7 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
     a('    </CTieuTKhaiChinh>')
     a('    <PLuc>')
     # --- 05-1/BK-QTT-TNCN: cá nhân quyết toán theo biểu lũy tiến, tất cả ỦY QUYỀN cho công ty quyết toán thay (ct10=1) ---
-    # Luôn xuất ĐỦ 3 phụ lục kể cả khi không phát sinh: phụ lục trống có 1 dòng rỗng (mọi số = 0) theo quy ước dòng trống của HTKK
+    # Phụ lục 05-2/05-3 không có dữ liệu thì KHÔNG xuất (HTKK cũng không xuất — đối chiếu file HTKK thật); 05-1 luôn có (không có ai thì 1 dòng rỗng)
     a('      <PLuc_05_1_BK_QTT>')
     if not g1:
         a('        <BKeCTietCNhan id="ID_1">')
@@ -12456,7 +12510,7 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
         a(f'          <ct07>{e(p["ten"])}</ct07>')
         a(f'          <ct08>{e(p["cccd"])}</ct08>')
         a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
-        a('          <ct09a_ma />')
+        a('          <ct09a_ma>03</ct09a_ma>' if p["cccd"] else '          <ct09a_ma />')
         a('          <ct09a_ten>Thẻ CCCD/Số định danh cá nhân</ct09a_ten>')
         a(f'          <ct09>{e(p["cccd"])}</ct09>')
         a('          <ct10>1</ct10>')
@@ -12470,21 +12524,8 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
         a(f'        <{k}>{int(sum(p.get(nguon, 0) for p in g1))}</{k}>')
     a('      </PLuc_05_1_BK_QTT>')
     # --- 05-2/BK-QTT-TNCN: cá nhân bị khấu trừ 10% (thuế suất toàn phần) ---
-    if True:
+    if g2:         # giống HTKK: phụ lục không có dữ liệu thì không xuất
         a('      <PLuc_05_2_BK_QTT>')
-        if not g2:
-            a('        <BKeCTietCNhan id="ID_1">')
-            a('          <coDieuChinhSoLieu>0</coDieuChinhSoLieu>')
-            for k in ("ct07", "ct08"):
-                a(f'          <{k} />')
-            a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
-            a('          <ct09a_ma />')
-            a('          <ct09a_ten>Thẻ CCCD/Số định danh cá nhân</ct09a_ten>')
-            a('          <ct09 />')
-            a('          <ct10>0</ct10>')
-            for k in ("ct11", "ct12", "ct13", "ct14", "ct14.1", "ct15", "ct16"):
-                a(f'          <{k}>0</{k}>')
-            a('        </BKeCTietCNhan>')
         for i, p in enumerate(g2, 1):
             a(f'        <BKeCTietCNhan id="ID_{i}">')
             a('          <coDieuChinhSoLieu>0</coDieuChinhSoLieu>')
@@ -12508,23 +12549,8 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
         a('        <ct22>0</ct22>')
         a('      </PLuc_05_2_BK_QTT>')
     # --- 05-3/BK-QTT-TNCN: người phụ thuộc ---
-    if True:
+    if npt:
         a('      <PLuc_05_3_BK_QTT>')
-        if not npt:
-            a('        <BKeTTinNPT id="ID_1">')
-            for k in ("ct07", "ct08", "ct09"):
-                a(f'          <{k} />')
-            a('          <ct10 xsi:nil="true" />')
-            a('          <ct11 xsi:nil="true" />')
-            a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
-            a('          <ct12_ma />')
-            a('          <ct12_ten />')
-            a('          <ct13 />')
-            a('          <ct14_ma />')
-            a('          <ct14_ten />')
-            a('          <ct15 />')
-            a('          <ct16 />')
-            a('        </BKeTTinNPT>')
         for i, d in enumerate(npt, 1):
             a(f'        <BKeTTinNPT id="ID_{i}">')
             a(f'          <ct07>{e(d["ten"])}</ct07>')
@@ -12594,7 +12620,14 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
                     ("tên CQT nơi nộp", comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else ""), ("người ký", nguoi_ky)):
         if not (gt or "").strip():
             canh_bao.append(f"Công ty chưa khai báo {ten} — vào 'Sửa công ty' rồi kết xuất lại (hoặc điền trên HTKK).")
-    xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today())
+    try:
+        nnt = (_doc_du_lieu_cty(cid) or {}).get("htkk_nnt") or {}
+    except Exception:
+        nnt = {}
+    if not nnt.get("ma_xa"):
+        canh_bao.append("Chưa có phường/xã của công ty (maXaNNT/tenXaNNT) — bấm '📥 Nạp NNT từ XML HTKK' (chọn 1 file tờ khai do HTKK xuất của công ty) rồi kết xuất lại, "
+                        "nếu không HTKK có thể báo lỗi khi nhập file.")
+    xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today(), nnt)
     mst_file = str(comp["mst"] or "").strip()
     if len(mst_file) == 10:
         mst_file += "000"
