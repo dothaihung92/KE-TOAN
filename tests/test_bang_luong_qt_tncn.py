@@ -185,6 +185,8 @@ try:
     cb = _uq(resp.headers["x-canh-bao"])
     assert "Phụ lục 05-2 để trống" in cb or "người phụ thuộc" in cb
     assert os.path.basename(resp.path) == "0318712827000-05_QTT_TNCN_TT80-Y2025-L00.xml"
+    assert _uq(resp.headers["x-ten-file"]) == "0318712827000-05_QTT_TNCN_TT80-Y2025-L00.xml"
+    assert all(x.startswith("ℹ") for x in _uq(resp.headers["x-canh-bao"]).split(" | ") if "Phụ lục 05-" in x), "Ghi chú phụ lục trống chỉ là thông tin (ℹ), không phải cảnh báo"
     raw = open(resp.path, encoding="utf-8").read()
     assert raw.startswith("﻿<?xml") and "<nguoiKy>NGUYỄN NGỌC PHƯƠNG THẢO</nguoiKy>" in raw and "<maCQTNoiNop>70123</maCQTNoiNop>" in raw
     r6 = ET.fromstring(raw.lstrip("﻿").encode("utf-8"))

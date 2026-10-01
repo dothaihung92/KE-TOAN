@@ -903,11 +903,14 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   let hoi36 = 0; m = nap({ prompt: () => { hoi36++; return 'X'; } });
   m.ctx.blNam = 2025; m.ctx.blBan = false;
   const goi36 = [], luu36 = [];
-  m.ctx.fetch = async (url, o) => { goi36.push([url, JSON.parse(o.body)]); return { ok: true, headers: { get: (k) => ({ 'X-Canh-Bao': encodeURIComponent('Chưa có số CCCD của: B'), 'X-So-Nguoi': '3', 'X-Thue-Phai-Nop': '1234567' })[k] || null } }; };
+  m.ctx.fetch = async (url, o) => { goi36.push([url, JSON.parse(o.body)]); return { ok: true, headers: { get: (k) => ({ 'X-Canh-Bao': encodeURIComponent('Chưa có số CCCD của: B | ℹ Phụ lục 05-2 để trống'), 'X-So-Nguoi': '3', 'X-Thue-Phai-Nop': '1234567', 'X-Ten-File': encodeURIComponent('0318712827000-05_QTT_TNCN_TT80-Y2025-L00.xml'), 'X-Saved-Desktop': '1' })[k] || null } }; };
   m.ctx.xuatFile = async (r, ten) => { luu36.push(ten); };
   await m.ctx.blKetXuatQt();
   assert.strictEqual(goi36[0][0], '/api/bang-luong/7/ket-xuat-qt-tncn'); assert.strictEqual(goi36[0][1].nam, 2025); assert.strictEqual(goi36[0][1].nguoi_ky, undefined, 'Không gửi người ký: server lấy theo thông tin công ty'); assert.strictEqual(hoi36, 0, 'Không hỏi người ký');
-  assert.strictEqual(luu36[0], 'QT_TNCN_2025.xml'); assert(/3 người/.test(m.toasts[m.toasts.length - 1][0]) && /1\.234\.567/.test(m.toasts[m.toasts.length - 1][0]) && /Chưa có số CCCD của: B/.test(m.toasts[m.toasts.length - 1][0]), 'Báo số người, thuế còn phải nộp, cảnh báo');
+  assert.strictEqual(luu36[0], '0318712827000-05_QTT_TNCN_TT80-Y2025-L00.xml', 'Dùng đúng tên file server đặt'); assert(/KẾT XUẤT THÀNH CÔNG/.test(m.toasts[m.toasts.length - 1][0]) && /đã lưu ra màn hình Desktop/.test(m.toasts[m.toasts.length - 1][0]) && /ℹ Phụ lục 05-2 để trống/.test(m.toasts[m.toasts.length - 1][0]) && !/⚠ ℹ/.test(m.toasts[m.toasts.length - 1][0]) && m.toasts[m.toasts.length - 1][1] === 'err', 'Báo thành công + nơi lưu file + cảnh báo thật'); assert(/3 người/.test(m.toasts[m.toasts.length - 1][0]) && /1\.234\.567/.test(m.toasts[m.toasts.length - 1][0]) && /Chưa có số CCCD của: B/.test(m.toasts[m.toasts.length - 1][0]), 'Báo số người, thuế còn phải nộp, cảnh báo');
+  // chỉ có ghi chú thông tin (ℹ) -> màu thành công, không đỏ
+  m = nap(); m.ctx.blNam = 2025; m.ctx.blBan = false; m.ctx.xuatFile = async () => {}; m.ctx.fetch = async () => ({ ok: true, headers: { get: (k) => ({ 'X-Canh-Bao': encodeURIComponent('ℹ Phụ lục 05-2 để trống'), 'X-So-Nguoi': '2', 'X-Thue-Phai-Nop': '0' })[k] || null } });
+  await m.ctx.blKetXuatQt(); assert.strictEqual(m.toasts[m.toasts.length - 1][1], 'ok'); assert(/đã tải về thư mục Tải xuống/.test(m.toasts[m.toasts.length - 1][0]));
   // lỗi server -> báo lỗi
   m = nap({ prompt: () => 'X' }); m.ctx.blNam = 2025; m.ctx.blBan = false; m.ctx.fetch = async () => ({ ok: false, json: async () => ({ detail: 'Năm 2025 chưa có dữ liệu bảng lương' }) });
   await m.ctx.blKetXuatQt(); assert(m.toasts.some(([t, k]) => k === 'err' && /chưa có dữ liệu bảng lương/.test(t)));

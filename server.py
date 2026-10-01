@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.036"
+APP_BUILD = "2026-10-01.037"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12608,10 +12608,10 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
     # Giải thích vì sao phụ lục không có dữ liệu (HTKK cũng không xuất phụ lục trống)
     if not tong["g2"]:
         co_tv = sum(1 for p in tong.get("tat_ca", []) if p.get("co_tv"))
-        canh_bao.append("Phụ lục 05-2 để trống (không phát sinh): chỉ đưa vào 05-2 những người làm dưới 14 ngày/tháng, không đóng BHXH và THỰC SỰ bị khấu trừ thuế 10% ở Bảng Lương "
+        canh_bao.append("ℹ Phụ lục 05-2 để trống (không phát sinh): chỉ đưa vào 05-2 những người làm dưới 14 ngày/tháng, không đóng BHXH và THỰC SỰ bị khấu trừ thuế 10% ở Bảng Lương "
                         + (f"(có {co_tv} người làm thời vụ nhưng không bị khấu trừ — thu nhập dưới ngưỡng hoặc tick 'không trừ thuế 10%')." if co_tv else "(bảng lương năm này không có người nào như vậy)."))
     if not tong["npt"]:
-        canh_bao.append("Phụ lục 05-3 để trống (không phát sinh): chưa có người phụ thuộc nào — nhập ở màn 'Người Phụ Thuộc' (Bảng Lương - BHXH), người lao động phải có tháng trên Bảng Lương của năm.")
+        canh_bao.append("ℹ Phụ lục 05-3 để trống (không phát sinh): chưa có người phụ thuộc nào — nhập ở màn 'Người Phụ Thuộc' (Bảng Lương - BHXH), người lao động phải có tháng trên Bảng Lương của năm.")
     xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today())
     mst_file = str(comp["mst"] or "").strip()
     if len(mst_file) == 10:
@@ -12627,7 +12627,7 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
                 f.write("\ufeff" + xml)
         except Exception:
             pass
-    return _resp_xuat(path, fname, {"X-Canh-Bao": quote(" | ".join(canh_bao)), "X-So-Nguoi": str(chinh["ct16"]), "X-Thue-Phai-Nop": str(thay["ct40"])})
+    return _resp_xuat(path, fname, {"X-Ten-File": quote(fname), "X-Canh-Bao": quote(" | ".join(canh_bao)), "X-So-Nguoi": str(chinh["ct16"]), "X-Thue-Phai-Nop": str(thay["ct40"])})
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")

@@ -5556,10 +5556,15 @@ async function blKetXuatQt(){
   try{
     const r=await fetch(`/api/bang-luong/${current}/ket-xuat-qt-tncn`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam})});
     if(!r.ok){let m='Kết xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
-    let cb='';try{cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'')}catch{}
+    let cb='',ten='';try{cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'')}catch{}
+    try{ten=decodeURIComponent(r.headers.get('X-Ten-File')||'')}catch{}
+    ten=ten||`QT_TNCN_${blNam}.xml`;
     const tn=(r.headers.get('X-So-Nguoi')||'?'),thue=Number(r.headers.get('X-Thue-Phai-Nop')||0);
-    await xuatFile(r,`QT_TNCN_${blNam}.xml`);
-    toast(`🧾 Đã kết xuất QT TNCN ${blNam}: ${tn} người, thuế còn phải nộp của cá nhân ủy quyền ${Math.round(thue).toLocaleString('vi-VN')} đ — nhập file XML vào HTKK để kiểm tra rồi nộp`+(cb?`\n⚠ ${cb}`:''),cb?'err':'ok');
+    const raDesktop=!!r.headers.get('X-Saved-Desktop');
+    await xuatFile(r,ten);
+    // Kết xuất ĐÃ THÀNH CÔNG: nói rõ file nằm ở đâu; ghi chú "ℹ" chỉ là thông tin, chỉ cảnh báo thật mới hiện màu đỏ
+    const ds=cb?cb.split(' | ').filter(x=>x):[],canhBaoThat=ds.filter(x=>!x.startsWith('ℹ'));
+    toast(`✅ KẾT XUẤT THÀNH CÔNG — file ${ten} ${raDesktop?'đã lưu ra màn hình Desktop':'đã tải về thư mục Tải xuống'}.\n${tn} người, thuế còn phải nộp của cá nhân ủy quyền ${Math.round(thue).toLocaleString('vi-VN')} đ — nhập file XML vào HTKK để kiểm tra rồi nộp.`+(ds.length?`\n${ds.map(x=>x.startsWith('ℹ')?x:'⚠ '+x).join('\n')}`:''),canhBaoThat.length?'err':'ok');
   }catch(e){toast('Lỗi kết xuất QT TNCN: '+e.message,'err')}
 }
 
