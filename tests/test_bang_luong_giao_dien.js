@@ -461,7 +461,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(d20[2].dong_bh, 1);
   // ô nhập tiền hiện dấu chấm
   const inp = { value: '120000000' }; m.ctx.blDangTien(inp); assert.strictEqual(inp.value, '120.000.000');
-  inp.value = '12abc'; m.ctx.blDangTien(inp); assert.strictEqual(inp.value, '12'); inp.value = ''; m.ctx.blDangTien(inp); assert.strictEqual(inp38.value, '');
+  inp.value = '12abc'; m.ctx.blDangTien(inp); assert.strictEqual(inp.value, '12'); inp.value = ''; m.ctx.blDangTien(inp); assert.strictEqual(inp.value, '');
   m.ctx.blTS = { ngay_cong_chuan: 26, giam_tru_ban_than: 11000000, giam_tru_npt: 4400000, he_so_tang_ca: 1.33, nguong_khau_tru_10: 2000000, bh_dn: { bhxh: 17.5, bhyt: 3, bhtn: 1 }, bh_nld: { bhxh: 8, bhyt: 1.5, bhtn: 1 }, bac_thue: [[0, 5], [10000000, 10]], thue_moi: null };
   m.ctx.document.getElementById('blThamSo').style.display = 'none'; m.ctx.blMoThamSo();
   const pt = m.phanTu['blThamSo'].innerHTML;
@@ -960,7 +960,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   console.log('PASS 37: màn Người Phụ Thuộc (tải/sửa/lưu, tự điền tên) + Bảng Lương cập nhật số NPT theo danh sách.');
 
   // ---- 38: nút "Nạp NNT từ XML HTKK" ----
-  assert(/onclick="blNapNntHtkk\(this\)"/.test(html) && /Nạp NNT từ XML HTKK/.test(html), 'Có nút Nạp NNT từ XML HTKK');
+  assert(/onchange="blNapNntHtkk\(this\)"/.test(html) && /Nạp NNT từ XML HTKK/.test(html), 'Có nút Nạp NNT từ XML HTKK');
   m = nap(); m.ctx.FormData = class { constructor() { this.d = {}; } append(k, v) { this.d[k] = v; } };
   const g38 = [];
   m.ctx.fetch = async (u, o) => { g38.push([u, o.body.d.file.name]); return { ok: true, json: async () => ({ nnt: { ten_xa: 'Phường An Phú Đông', ma_xa: '70123098', ten_tinh: 'Thành phố Hồ Chí Minh' } }) }; };
