@@ -2,8 +2,8 @@ import os, sys, json, sqlite3, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
 
-# HĐ chiết khấu NCC (Satori 5451, 6036...) hạch toán Nợ 331 / Có 6427 SỐ DƯƠNG: KHÔNG còn đi vào chứng từ mua dịch vụ ghi âm mà ghi thành
-# Chứng từ nghiệp vụ khác (xem tests/test_chiet_khau_ncc_nghiep_vu_khac.py). Dòng Nợ 6xx / Có 331 (kể cả ghi âm cũ) vẫn vào mua dịch vụ như trước.
+# HĐ chiết khấu NCC (Satori 5451, 6036...) hạch toán Nợ 331 / Có 6427 (số dương hay âm): ghi ở mục "Dịch vụ vào MISA" thành chứng từ mua dịch vụ GHI ÂM
+# (người dùng yêu cầu bỏ cách ghi Chứng từ nghiệp vụ khác). Nợ 331/Có 15x (trả lại hàng) hoặc Có 112 (thanh toán) không phải chiết khấu.
 hd = ["Ký hiệu", "Số HĐ", "Ngày", "Người bán", "MST bán", "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT", "Số lượng", "Đơn giá",
       "Thành tiền", "Thuế suất", "Tiền thuế GTGT", "Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK", "Nợ", "Có"]
 rows = [
@@ -14,12 +14,22 @@ rows = [
 ]
 dv = server._gen_mua_hang_dv(1, hd, rows)
 by = {r[33]: r for r in dv}
-assert set(by) == {"6206", "7810"}, set(by)                 # Nợ 331 (dù Có 6427 hay 1561) không vào mua dịch vụ
+assert set(by) == {"5451", "6206", "7810"}, set(by)         # Nợ 331/Có 6xx vào mua dịch vụ ghi âm; Nợ 331/Có 1561 (trả lại hàng) thì không
+assert by["5451"][16] == "6427" and by["5451"][17] == "331" and by["5451"][21] == -10980720 and by["5451"][28] == -878458
 assert by["6206"][16] == "6427" and by["6206"][17] == "331" and by["6206"][21] == -16947150
 assert by["7810"][16] == "6428" and by["7810"][21] == 6900000
-print("PASS 1: Nợ 331 không vào mua dịch vụ ghi âm; Nợ 6xx/Có 331 (kể cả âm) và dịch vụ thường giữ nguyên.")
+print("PASS 1: Nợ 331/Có 6xx vào mua dịch vụ ghi ÂM (Nợ 6427/Có 331); Nợ 6xx/Có 331 và dịch vụ thường giữ nguyên.")
 
 # Nhóm chiết khấu NCC: Có 6xx / Có trống / Có 331; Nợ 331/Có 15x, Có 112 (thanh toán) KHÔNG phải chiết khấu
+# Có trống hoặc Có 331 (chỉ gõ Nợ 331) vẫn hiểu là giảm chi phí 6427
+rows_co_trong = [
+    ["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, 10980720, "8%", 878458, None, None, None, "331", ""],
+    ["C26TSA", "5452", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, -11169792, "8%", -893583, None, None, None, 331, 331],
+]
+dv2 = server._gen_mua_hang_dv(1, hd, rows_co_trong)
+assert len(dv2) == 2 and all(r[16] == "6427" and r[17] == "331" and r[21] < 0 and r[28] < 0 for r in dv2), dv2
+print("PASS 1b: Nợ 331 + Có trống/331 -> giảm chi phí 6427, ghi âm.")
+
 rows_ck = rows[:1] + [
     ["C26TSA", "6036", "23/09/2026", "SATORI", "0319340593", "1", "MHDV", "HT", None, 0, 0, -13340460, "8%", -1067237, None, None, None, "331", ""],
     ["C26TSA", "6212", "24/09/2026", "SATORI", "0319340593", "1", "MHDV", "HT", None, 0, 0, 19585710, "8%", 1566857, None, None, None, 331, 331],

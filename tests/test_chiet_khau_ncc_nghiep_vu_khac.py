@@ -176,13 +176,31 @@ assert r6["so_trung"] == 1 and r6["so_chungtu"] == 1
 print("PASS 3: xem trước không ghi gì (rollback); KHÔNG có chứng từ mẫu vẫn ghi được (GLVoucher/Detail/GL/công nợ NCC, số dương).")
 
 # 4) không còn đi qua chứng từ mua dịch vụ ghi âm; đối chiếu nhận diện nhóm
-assert server._gen_mua_hang_dv(1, hd, rows) == []
+dv_ck = server._gen_mua_hang_dv(1, hd, rows)       # từ build .050 hóa đơn chiết khấu lại ghi ở mục Dịch vụ (ghi âm), không còn tự động ghi NVK
+assert sorted((r[33], r[16], r[17], r[21]) for r in dv_ck) == [("5451", "6427", "331", -10980720), ("6036", "6427", "331", -13340460)], dv_ck
 dd = server._dong_chiet_khau_ncc(hd, rows)
 assert [(x["so_hd"], x["net"], x["vat"]) for x in dd] == [("5451", 10980720, 878458), ("6036", 13340460, 1067237)] and dd[1]["tk_cp"] == "6427"
-print("PASS 4: Nợ 331 không còn vào mua dịch vụ ghi âm; gom đúng theo hóa đơn (trị tuyệt đối).")
+print("PASS 4: Nợ 331 vào mua dịch vụ ghi ÂM (Nợ 6427/Có 331); hàm gom nhóm đúng theo hóa đơn (trị tuyệt đối).")
 import re
 mm = re.match(r"^%s (\S+) \(MST ([^)]*)\)" % re.escape(server._CK_NCC_MEMO), det[0]["Description"])
 assert mm and mm.groups() == ("5451", "0319340593"), "memo ghi ra phải khớp mẫu mà Đối chiếu dùng để trừ vào đúng hóa đơn"
 assert "_re_dc.match(r\"^%s (\\S+) \\(MST ([^)]*)\\)\"" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server.py"), encoding="utf-8").read()
 print("PASS 5: memo chứng từ khớp biểu thức Đối chiếu dùng để trừ doanh số/thuế đúng hóa đơn.")
+# 6) Dọn chứng từ nghiệp vụ khác chiết khấu cũ (nay ghi ở Dịch vụ): chỉ gỡ chứng từ của phần mềm đúng diễn giải, kèm sổ cái
+class CurDon(Cur):
+    def fetchall(self):
+        if self.sql.startswith("SELECT RefID, RefNoFinance FROM GLVoucher"):
+            return [("NVK-OLD-5451", "NVK0001")] if "HĐ 5451 " in self.p[1] else []
+        return super().fetchall()
+cd = CurDon()
+cnd = Conn(cd)
+server._misa_sql_connect = lambda cid, database=None: cnd
+r6 = server._misa_go_chiet_khau_nvk_cu(1, "DB", preview=False)
+assert r6["so_go"] == 1 and cnd.cm and ("GLVoucher", "NVK-OLD-5451") in cd.dele and ("GeneralLedger", "NVK-OLD-5451") in cd.dele, (r6, cd.dele)
+assert cd.dele[-1][0] == "GLVoucher", "bảng chính gỡ cuối"
+cd2 = CurDon(); cn2 = Conn(cd2)
+server._misa_sql_connect = lambda cid, database=None: cn2
+r7 = server._misa_go_chiet_khau_nvk_cu(1, "DB", preview=True)
+assert r7["so_go"] == 1 and not cd2.dele and cn2.rb
+print("PASS 6: dọn chứng từ NVK chiết khấu cũ (gỡ cả sổ cái, bảng chính cuối); xem trước không xóa.")
 print("\nALL DONE")

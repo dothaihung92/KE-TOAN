@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.049"
+APP_BUILD = "2026-10-01.050"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13937,8 +13937,14 @@ def _gen_mua_hang_dv(cid, header, rows):
         co = str(gv(r, i_co) or "").strip()
         dao_ck = False
         if not no.startswith("6"):          # chỉ lấy Nợ là TK chi phí 6xx
-            # Nợ 331 / Có 6xx (hóa đơn CHIẾT KHẤU NCC) KHÔNG đi đường này nữa: ghi thành Chứng từ nghiệp vụ khác số dương — xem _misa_ghi_chiet_khau_ncc
-            continue
+            # NCC xuất hóa đơn CHIẾT KHẤU/điều chỉnh giảm, kế toán hạch toán Nợ 331 / Có 6xx (giảm chi phí): ghi vào MISA dưới dạng chứng từ
+            # MUA DỊCH VỤ GHI ÂM (Nợ 6xx âm / Có 331 âm, thuế âm — cùng bút toán, nằm trong danh sách Mua hàng, giảm thuế GTGT đầu vào, khớp số
+            # âm của nguồn Thuế khi Đối chiếu). Có để TRỐNG hoặc ghi 331 (chỉ gõ Nợ 331) -> hiểu là giảm chi phí 6427.
+            # (Cách ghi thành Chứng từ nghiệp vụ khác số dương — _misa_ghi_chiet_khau_ncc — đã tắt theo yêu cầu người dùng.)
+            if no.startswith("331") and (co.startswith("6") or co in ("", "331")):
+                no, co, dao_ck = (co if co.startswith("6") else "6427"), no, True
+            else:
+                continue
         mst_disp = _dinh_dang_mst(gv(r, i_mst))
         ngay = str(gv(r, i_ngay) or "")
         sohd = gv(r, i_so)
@@ -33584,6 +33590,43 @@ def _misa_ghi_chiet_khau_ncc(cid, database, preview=True):
         conn.close()
 
 
+def _misa_go_chiet_khau_nvk_cu(cid, database, preview=True):
+    """Gỡ các Chứng từ nghiệp vụ khác 'Chiết khấu mua hàng HĐ <số> (MST <mst>)' do PHẦN MỀM tạo (build .047-.049) cho các hóa đơn chiết khấu NCC
+    trong Bảng kê đầu vào — nay các hóa đơn này ghi ở mục Dịch vụ (chứng từ mua dịch vụ ghi âm, xem _gen_mua_hang_dv); nếu để lại sẽ bị tính TRÙNG.
+    Chỉ gỡ chứng từ mang dấu phần mềm + đúng diễn giải; gỡ cả sổ cái. preview=True: rollback."""
+    dl = nhap_lieu_get(cid, "in")
+    ds = _dong_chiet_khau_ncc(dl.get("header") or [], dl.get("rows") or [])
+    if not ds:
+        return {"preview": preview, "so_go": 0, "ghi_chu": "Không có hóa đơn chiết khấu NCC trong Bảng kê đầu vào — không cần dọn."}
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        bang = _misa_bang_theo_refid(cur)
+        if "GLVoucher" not in bang:
+            return {"preview": preview, "so_go": 0, "ghi_chu": "Không có bảng GLVoucher — không cần dọn."}
+        so_go, chi_tiet = 0, []
+        for e in ds:
+            for rid, doc in cur.execute("SELECT RefID, RefNoFinance FROM GLVoucher WHERE ISNULL(CustomField10,'')=? AND JournalMemo LIKE ?",
+                                        _PM_MARK, "%s %s (MST %s)%%" % (_CK_NCC_MEMO, e["so_hd"], e["mst"])).fetchall():
+                if not preview:
+                    _misa_go_chung_tu_theo_refid(cur, bang, rid, "GLVoucher", "GLVoucher")
+                so_go += 1
+                chi_tiet.append({"so_ct": doc, "so_hd": e["so_hd"]})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "so_go": so_go, "chi_tiet": chi_tiet[:200],
+                "ghi_chu": ("Không có chứng từ nghiệp vụ khác chiết khấu cũ nào cần gỡ." if not so_go else
+                            ("Sẽ gỡ %d" if preview else "Đã gỡ %d") % so_go + " chứng từ nghiệp vụ khác chiết khấu NCC cũ (do phần mềm tạo) — hóa đơn ghi ở mục Dịch vụ.")}
+    except Exception as ex:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi dọn chứng từ chiết khấu cũ (đã hoàn tác): %s" % str(ex)[:300])
+    finally:
+        conn.close()
+
+
 def _misa_tom_tat_buoc(r):
     """Tóm tắt 1 dòng kết quả của 1 bước (số thêm/bỏ qua/ghi đè...) để hiện
     trong dòng tiến độ — cùng logic với misaTomTatBuoc() phía JS."""
@@ -33744,14 +33787,14 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     chay("3c. Danh mục TSCĐ", lambda: _lam_danh_muc("tscd"))
     chay("3d. Danh mục CCDC", lambda: _lam_danh_muc("ccdc"))
 
+    chay("4. Dọn chứng từ nghiệp vụ khác chiết khấu NCC cũ (nay ghi ở 4c Dịch vụ)",
+         lambda: _misa_go_chiet_khau_nvk_cu(cid, database, preview=preview))
     chay("4a. Nhập kho vào MISA",
          lambda: _misa_ghi_mua_hang(cid, database, "nk", preview=preview, ghi_de=ghi_de))
     chay("4b. Không qua kho vào MISA",
          lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=ghi_de))
     chay("4c. Dịch vụ vào MISA",
          lambda: _misa_ghi_mua_hang_dv(cid, database, preview=preview, ghi_de=ghi_de))
-    chay("4d. Chiết khấu NCC (Nợ 331 / Có 6xx) → Chứng từ nghiệp vụ khác",
-         lambda: _misa_ghi_chiet_khau_ncc(cid, database, preview=preview))
     chay("4e. Kiểm tra dòng Bảng kê đầu vào không nhận dạng được",
          lambda: _dong_bang_ke_dau_vao_khong_nhan_dang(cid))
 
