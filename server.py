@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.042"
+APP_BUILD = "2026-10-01.043"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20161,6 +20161,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
     cfg = _MUA_COT[loai]
     dl = nhap_lieu_get(cid, "in")
     header, rows = dl.get("header") or [], dl.get("rows") or []
+    rows, _ = _dien_tk_no_bang_ke_dau_vao(cid, header, rows)   # chạy riêng từng nút: vẫn điền TK Nợ trống (trong bộ nhớ)
     if not rows:
         raise HTTPException(400, "Chưa có Bảng kê đầu vào đã lưu — Import & Lưu trước.")
     if loai == "nk":
@@ -21710,6 +21711,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
     cfg = _MUA_COT["dv"]
     dl = nhap_lieu_get(cid, "in")
     header, rows = dl.get("header") or [], dl.get("rows") or []
+    rows, _ = _dien_tk_no_bang_ke_dau_vao(cid, header, rows)   # chạy riêng từng nút: vẫn điền TK Nợ trống (trong bộ nhớ)
     if not rows:
         raise HTTPException(400, "Chưa có Bảng kê đầu vào đã lưu — Import & Lưu trước.")
     flat = _gen_mua_hang_dv(cid, header, rows)

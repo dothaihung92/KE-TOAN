@@ -202,6 +202,7 @@ flat = [
 ]
 ns['_gen_mua_hang_dv'] = lambda cid, header, rows: flat
 ns['nhap_lieu_get'] = lambda cid, loai: {"header": [], "rows": [1]}
+ns['_dien_tk_no_bang_ke_dau_vao'] = lambda cid, header, rows: (rows, [])
 exec(extract_fn('_misa_ghi_mua_hang_dv'), ns)
 _misa_ghi_mua_hang_dv = ns['_misa_ghi_mua_hang_dv']
 

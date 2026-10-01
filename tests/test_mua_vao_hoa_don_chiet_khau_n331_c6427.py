@@ -26,3 +26,24 @@ assert by["6036"][21] == -13340460 and by["6036"][28] == -1067237
 assert by["7810"][16] == "6428" and by["7810"][21] == 6900000
 print("PASS: HĐ chiết khấu NCC hạch toán Nợ 331/Có 6427 (dương hay âm) và Nợ 6427/Có 331 âm đều vào mua dịch vụ ghi ÂM; HĐ thường giữ nguyên.")
 print("\nALL DONE")
+
+# Ca thật: file NhapLieu_DauVao.xlsx người dùng gửi — Nợ/Có nhập dạng SỐ (331, 6427) chứ không phải chuỗi, và 4 HĐ (1706, 1759, 185, 1264)
+# còn trống Nợ -> Import nhập kho bỏ qua. Sau khi điền TK Nợ trống, nhập kho phải nhận thêm đúng 5 dòng, DV vẫn nhận 7 HĐ chiết khấu (ghi âm).
+server._get_map_no = lambda cid: {}
+server._get_map_no_item = lambda cid: {}
+rows_so = [
+    ["C26TYY", "1706", "09/09/2026", "HOA HỒNG PHÁT", "0318961005", "1", "HH00114", "Bột ngọt 1kg", "Thùng", 208, 877403.85, 182500000, "8%", 14600000, None, None, None, None, "331"],
+    ["C26TKN", "1264", "22/09/2026", "KHÁNH NGỌC", "0313517406", "1", "GI034", "Giấy A4", "Ream", 5, 55000, 275000, "8%", 22000, None, None, None, None, "331"],
+    ["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, 10980720, "8%", 878458, None, None, None, 331, 6427],
+    ["C26TNT", "3513", "03/09/2026", "NAM TIẾN", "0317743519", "1", "TP1", "Nước tương", "Chai", 1200, 5333, 6399600, "8%", 511968, None, None, None, "1561", "331"],
+]
+hd_so = hd + ["Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK"]
+hd_so = ["Ký hiệu", "Số HĐ", "Ngày", "Người bán", "MST bán", "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền",
+         "Thuế suất", "Tiền thuế GTGT", "Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK", "Nợ", "Có"]
+assert len(server._gen_mua_hang_nk(1, hd_so, rows_so)) == 1            # chỉ HĐ 3513 có Nợ
+moi_so, ds_so = server._dien_tk_no_bang_ke_dau_vao(1, hd_so, rows_so)
+assert len(server._gen_mua_hang_nk(1, hd_so, moi_so)) == 3             # + 1706, 1264
+dv_so = server._gen_mua_hang_dv(1, hd_so, moi_so)
+assert len(dv_so) == 1 and dv_so[0][16] == "6427" and dv_so[0][17] == "331" and dv_so[0][21] == -10980720
+print("PASS 2: file thật (Nợ/Có dạng số 331/6427 + 4 HĐ trống Nợ): nhập kho nhận thêm HĐ trống Nợ sau khi điền, HĐ chiết khấu vào DV ghi âm.")
+print("\nALL DONE")
