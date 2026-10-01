@@ -72,4 +72,6 @@ print("PASS 4: HĐ có dòng 0đ trùng số: so theo TỔNG, khớp -> không g
 c5, r5 = chay([], moi)
 assert not c5.deleted
 print("PASS 5: chứng từ không do phần mềm tạo không bị đụng.")
+assert "1 × đã ghi sổ trong MISA" in r2["ly_do_bo_qua"], r2["ly_do_bo_qua"]
+print("PASS 6: kết quả nêu lý do bỏ qua (tính trên toàn bộ danh sách).")
 print("\nALL DONE")

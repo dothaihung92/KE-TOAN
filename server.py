@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.043"
+APP_BUILD = "2026-10-01.044"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -23583,7 +23583,10 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 "hoc_mau": (hoc["refname"] if hoc else None),
                 "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
                 "mau_that": mau_that,
-                "danh_sach": ket[:500]}
+                # lý do tính trên TOÀN BỘ ket (không chỉ 500 dòng đầu) + dòng ĐƯỢC GHI/CẬP NHẬT lên trước dòng bỏ qua
+                "ly_do_bo_qua": _tom_tat_ly_do_bo_qua(ket),
+                "danh_sach": sorted(ket, key=lambda x: str(x.get("trang_thai", "")).startswith(
+                    ("đã có", "bỏ qua", "đã ghi sổ")))[:500]}
     except HTTPException:
         conn.rollback()
         raise
@@ -33158,7 +33161,23 @@ def _misa_tom_tat_buoc(r):
         phan.append(f"{r['so_quy']} quý")
     if not phan and r.get("ghi_chu"):
         return r["ghi_chu"]
-    return ", ".join(phan) or "xong"
+    kq = ", ".join(phan) or "xong"
+    if r.get("ly_do_bo_qua"):
+        kq += " — lý do bỏ qua: " + r["ly_do_bo_qua"]
+    return kq
+
+
+def _tom_tat_ly_do_bo_qua(danh_sach, toi_da=4):
+    """Gom LÝ DO các chứng từ bị bỏ qua/cảnh báo của 1 bước Import (từ trang_thai từng dòng) thành 1 chuỗi ngắn
+    "N × lý do; ..." để hiện ngay ở dòng tóm tắt — trước đây chỉ có số "bỏ qua (đã có) 2321", người dùng không biết
+    vì sao chứng từ không được cập nhật/ghi."""
+    from collections import Counter
+    dem = Counter()
+    for x in danh_sach or []:
+        tt = str((x or {}).get("trang_thai") or "").strip()
+        if tt.startswith(("bỏ qua", "đã có", "⚠")):
+            dem[tt.split(" — ")[0].split(" (")[0][:80]] += 1
+    return "; ".join("%d × %s" % (n, t) for t, n in dem.most_common(toi_da))
 
 
 def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
@@ -33217,6 +33236,13 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
         bao(f"▶ Đang xử lý: {ten}...")
         try:
             r = fn()
+            if isinstance(r, dict):
+                try:
+                    ly = r.get("ly_do_bo_qua") or _tom_tat_ly_do_bo_qua(r.get("danh_sach"))
+                    if ly:
+                        r["ly_do_bo_qua"] = ly
+                except Exception:
+                    pass
             buoc.append({"ten": ten, "ket_qua": r})
             tien_to = "Xem trước" if preview else "Đã ghi"
             bao(f"✓ {ten} — {tien_to}: {_misa_tom_tat_buoc(r)}")

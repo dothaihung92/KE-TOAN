@@ -9053,7 +9053,7 @@ function misaTomTatBuoc(r){
   if(r.so_bo_qua_ncc!=null&&r.so_bo_qua_ncc>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_ncc} chứng từ do thiếu NCC/KH trong Danh mục`);
   if(r.so_bo_qua_mahang!=null&&r.so_bo_qua_mahang>0)phan.push(`⚠ bỏ qua ${r.so_bo_qua_mahang} dòng do cột Mã hàng trống trong Bảng kê`);
   if(!phan.length&&r.ghi_chu)return r.ghi_chu;
-  return phan.join(', ')||'xong';
+  return (phan.join(', ')||'xong')+(r.ly_do_bo_qua?` — lý do bỏ qua: ${r.ly_do_bo_qua}`:'');
 }
 function misaBuocCoBoQuaThieuDanhMuc(r){
   return !!(r&&((r.so_bo_qua_ncc!=null&&r.so_bo_qua_ncc>0)||(r.so_bo_qua_mahang!=null&&r.so_bo_qua_mahang>0)));
