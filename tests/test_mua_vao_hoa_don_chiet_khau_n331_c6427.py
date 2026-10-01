@@ -47,3 +47,30 @@ dv_so = server._gen_mua_hang_dv(1, hd_so, moi_so)
 assert len(dv_so) == 1 and dv_so[0][16] == "6427" and dv_so[0][17] == "331" and dv_so[0][21] == -10980720
 print("PASS 2: file thật (Nợ/Có dạng số 331/6427 + 4 HĐ trống Nợ): nhập kho nhận thêm HĐ trống Nợ sau khi điền, HĐ chiết khấu vào DV ghi âm.")
 print("\nALL DONE")
+
+# Kế toán chỉ gõ Nợ 331, để Có TRỐNG hoặc để mặc định 331 -> vẫn hiểu là giảm chi phí 6427 (không bỏ qua im lặng)
+rows_co_trong = [
+    ["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, 10980720, "8%", 878458, None, None, None, "331", ""],
+    ["C26TSA", "5452", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, -11169792, "8%", -893583, None, None, None, 331, 331],
+]
+dv2 = server._gen_mua_hang_dv(1, hd_so, rows_co_trong)
+assert len(dv2) == 2 and all(r[16] == "6427" and r[17] == "331" and r[21] < 0 and r[28] < 0 for r in dv2), dv2
+print("PASS 3: Nợ 331 + Có trống/331 -> vẫn là giảm chi phí 6427, ghi âm.")
+
+# Bước 4d: liệt kê dòng Bảng kê không nhóm nào nhận (Nợ lạ), không còn bỏ qua im lặng
+rows_la = rows_so + [["C26TXX", "999", "01/09/2026", "NCC X", "0301234567", "1", "X", "Hàng lạ", "Cái", 1, 100, 100, "8%", 8, None, None, None, "9999", "331"],
+                     ["C26TXX", "1000", "01/09/2026", "NCC X", "0301234567", "1", "X", "Phí NH", "", 1, 100, 100, "8%", 8, None, None, None, "331", "112"]]
+import json, sqlite3, tempfile
+_f = tempfile.mktemp(suffix=".db")
+def _db():
+    c = sqlite3.connect(_f); c.row_factory = sqlite3.Row; return c
+server.db = _db
+c0 = _db()
+c0.execute("CREATE TABLE nhap_lieu (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, loai TEXT, header_json TEXT, rows_json TEXT, updated_at TEXT, UNIQUE(company_id, loai))")
+c0.execute("INSERT INTO nhap_lieu (company_id, loai, header_json, rows_json) VALUES (1,'in',?,?)", (json.dumps(hd_so), json.dumps(rows_la)))
+c0.commit(); c0.close()
+kq = server._dong_bang_ke_dau_vao_khong_nhan_dang(1)
+assert kq["so_dong_khong_nhan_dang"] == 2 and {d["so_hd"] for d in kq["danh_sach"]} == {"999", "1000"}, kq
+assert "không nhận dạng" in kq["ghi_chu"]
+print("PASS 4: 4d liệt kê đúng 2 dòng có Nợ/Có không nhận dạng được (Nợ 9999; Nợ 331/Có 112).")
+print("\nALL DONE")

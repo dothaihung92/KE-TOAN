@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.045"
+APP_BUILD = "2026-10-01.046"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13940,8 +13940,9 @@ def _gen_mua_hang_dv(cid, header, rows):
             # NCC xuất hóa đơn CHIẾT KHẤU/điều chỉnh giảm, kế toán hạch toán Nợ 331 / Có 6xx (giảm chi phí): trước đây bị
             # bỏ qua im lặng (không lọt bộ lọc Nợ 6xx) -> hóa đơn báo "THIẾU trong MISA". Ghi vào MISA dưới dạng chứng
             # từ mua dịch vụ GHI ÂM (Nợ 6xx âm / Có 331 âm — cùng bút toán, đúng cách các dòng "ghi âm" đang làm).
-            if no.startswith("331") and co.startswith("6"):
-                no, co, dao_ck = co, no, True
+            # Có để TRỐNG hoặc ghi 331 (kế toán chỉ gõ Nợ 331, chưa gõ Có 6427) -> hiểu là giảm chi phí 6427.
+            if no.startswith("331") and (co.startswith("6") or co in ("", "331")):
+                no, co, dao_ck = (co if co.startswith("6") else "6427"), no, True
             else:
                 continue
         mst_disp = _dinh_dang_mst(gv(r, i_mst))
@@ -33173,6 +33174,40 @@ def _misa_chuan_bi_bang_ke_dau_vao(cid, preview=True):
                         "Đã điền TK Nợ dự đoán cho %d dòng — kiểm tra lại cột Nợ ở Bảng kê đầu vào." % len(ds))}
 
 
+def _dong_bang_ke_dau_vao_khong_nhan_dang(cid):
+    """Liệt kê dòng Bảng kê ĐẦU VÀO (có tiền) mà KHÔNG nhóm nào nhận để import vào MISA: Nợ không thuộc hàng hóa 156x/152,
+    TSCĐ/CCDC 211x/242x, hay chi phí dịch vụ 6xx (kể cả Nợ 331 giảm chi phí). Trước đây các dòng này bị bỏ qua IM LẶNG nên
+    hóa đơn báo "THIẾU trong MISA" mà không rõ vì sao."""
+    dl = nhap_lieu_get(cid, "in")
+    header, rows = dl.get("header") or [], dl.get("rows") or []
+    if not rows:
+        raise HTTPException(400, "Chưa có Bảng kê Đầu vào đã lưu.")
+    rows, _ = _dien_tk_no_bang_ke_dau_vao(cid, header, rows)
+    c = _nk_cols(header)
+    if c["no"] < 0 or c["sohd"] < 0:
+        return {"so_dong_khong_nhan_dang": 0, "ghi_chu": "Không tìm thấy cột Nợ/Số HĐ trong Bảng kê đầu vào."}
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+    ds = []
+    for r in rows:
+        no = str(gv(r, c["no"]) or "").strip()
+        co = str(gv(r, c["co"]) or "").strip()
+        sohd = str(gv(r, c["sohd"]) or "").strip()
+        if not sohd or str(gv(r, c["kh"]) or "").strip().upper() == "TKNK":
+            continue
+        if not (_to_num(gv(r, c["tt"])) or _to_num(gv(r, c["tthue"]))):
+            continue
+        if (no in ("1561", "156", "152", "2111", "211", "2421", "242") or no.startswith("6")
+                or (no.startswith("331") and (co.startswith("6") or co in ("", "331")))):
+            continue
+        ds.append({"so_hd": sohd, "ten": str(gv(r, c["ten"]) or "")[:60], "no": no, "co": co,
+                   "trang_thai": "bỏ qua — Nợ '%s' / Có '%s' không thuộc nhóm nào (hàng 156x/152, TSCĐ 211x, CCDC 242x, chi phí 6xx, hoặc Nợ 331/Có 6xx)" % (no, co)})
+    return {"so_dong_khong_nhan_dang": len(ds), "danh_sach": ds[:300],
+            "ghi_chu": ("Mọi dòng Bảng kê đầu vào đều được nhận dạng." if not ds else
+                        "⚠ %d dòng Bảng kê đầu vào KHÔNG được import vì TK Nợ/Có không nhận dạng được — xem cột Nợ/Có (vd HĐ %s)" % (
+                            len(ds), ", ".join(sorted({d["so_hd"] for d in ds})[:5])))}
+
+
 def _misa_tom_tat_buoc(r):
     """Tóm tắt 1 dòng kết quả của 1 bước (số thêm/bỏ qua/ghi đè...) để hiện
     trong dòng tiến độ — cùng logic với misaTomTatBuoc() phía JS."""
@@ -33339,6 +33374,8 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
          lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=ghi_de))
     chay("4c. Dịch vụ vào MISA",
          lambda: _misa_ghi_mua_hang_dv(cid, database, preview=preview, ghi_de=ghi_de))
+    chay("4d. Kiểm tra dòng Bảng kê đầu vào không nhận dạng được",
+         lambda: _dong_bang_ke_dau_vao_khong_nhan_dang(cid))
 
     # BƯỚC 4x (TỰ SỬA) — nếu bước 4a/4b/4c còn bỏ qua chứng từ vì THIẾU MÃ
     # HÀNG (chứng từ chỉ toàn dòng hàng MỚI mà bước 3 đáng lẽ đã Import
@@ -33354,7 +33391,7 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     # preview — Xem trước không tạo ra mã hàng mới nào để thử lại) và có
     # dấu hiệu thật sự bỏ qua vì thiếu mã hàng (tránh chạy lại vô ích).
     if not preview:
-        buoc_4 = buoc[-3:] if len(buoc) >= 3 else []
+        buoc_4 = [b for b in buoc if b["ten"][:2] in ("4a", "4b", "4c")][-3:]
         so_bo_qua_mahang_4 = sum(
             (b.get("ket_qua") or {}).get("so_bo_qua_mahang") or 0 for b in buoc_4)
         if so_bo_qua_mahang_4 > 0:
@@ -33383,7 +33420,7 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     # "Ghi đè" tay từng loại chứng từ mới xử lý được — nay xử lý LUÔN trong
     # 1 lượt chạy tự động, không cần thao tác tay nữa.
     if not preview:
-        buoc_4y = buoc[-3:] if len(buoc) >= 3 else []
+        buoc_4y = [b for b in buoc if b["ten"][:2] in ("4a", "4b", "4c")][-3:]
         so_bo_qua_an_pm_4 = sum(
             (b.get("ket_qua") or {}).get("so_bo_qua_an_pm") or 0 for b in buoc_4y)
         if so_bo_qua_an_pm_4 > 0:
@@ -34478,14 +34515,18 @@ def _doi_chieu_ghi_chu_thieu_mua(cid, ds_thieu):
                 return hlow.index(t)
         return -1
     i_so, i_mst, i_no = tim("số hđ", "số hóa đơn", "số hoá đơn"), tim("mst bán", "mst"), tim("nợ")
+    i_co = tim("có")
     co_bk = {}   # (mst, số HĐ chuẩn hóa) -> [Nợ của từng dòng]
+    co_co = {}   # cùng khóa -> tập TK Có
     if i_so >= 0 and i_no >= 0:
         for r in rows or []:
             if i_so >= len(r):
                 continue
             mst = _misa_khncc_chuan_mst(r[i_mst] if 0 <= i_mst < len(r) else "").lower()
-            co_bk.setdefault((mst, _chuan_shd(str(r[i_so] or "")).lower()), []).append(
-                str(r[i_no] if i_no < len(r) else "" or "").strip())
+            _k = (mst, _chuan_shd(str(r[i_so] or "")).lower())
+            co_bk.setdefault(_k, []).append(str(r[i_no] if i_no < len(r) else "" or "").strip())
+            if i_co >= 0 and i_co < len(r) and str(r[i_co] or "").strip():
+                co_co.setdefault(_k, set()).add(str(r[i_co]).strip())
     for x in ds_thieu:
         k = (_misa_khncc_chuan_mst(x.get("mst", "")).lower(), _chuan_shd(str(x.get("so_hd", ""))).lower())
         nos = co_bk.get(k)
@@ -34496,7 +34537,9 @@ def _doi_chieu_ghi_chu_thieu_mua(cid, ds_thieu):
         elif not any(nos):
             x["ghi_chu"] = (x.get("ghi_chu", "") + " | " if x.get("ghi_chu") else "") + "Bảng kê đầu vào CHƯA có TK Nợ nên Import bỏ qua — điền cột Nợ (hoặc TK Nợ mặc định ở 'Sửa công ty') rồi Import lại"
         else:
-            x["ghi_chu"] = (x.get("ghi_chu", "") + " | " if x.get("ghi_chu") else "") + "Đã có trong Bảng kê (Nợ %s) nhưng chưa ghi vào MISA — chạy lại Import" % ", ".join(sorted({n for n in nos if n}))
+            x["ghi_chu"] = (x.get("ghi_chu", "") + " | " if x.get("ghi_chu") else "") + "Đã có trong Bảng kê (Nợ %s%s) nhưng chưa ghi vào MISA — chạy lại Import, xem dòng 4c/4d" % (
+                ", ".join(sorted({n for n in nos if n})),
+                (" / Có %s" % ", ".join(sorted(co_co.get(k, ())))) if co_co.get(k) else " / Có trống")
 
 
 @app.get("/api/misa-sql/doi-chieu-import/{cid}")
