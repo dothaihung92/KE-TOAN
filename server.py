@@ -33175,7 +33175,7 @@ def _tom_tat_ly_do_bo_qua(danh_sach, toi_da=4):
     dem = Counter()
     for x in danh_sach or []:
         tt = str((x or {}).get("trang_thai") or "").strip()
-        if tt.startswith(("bỏ qua", "đã có", "⚠")):
+        if tt.startswith(("bỏ qua", "đã có", "đã ghi sổ", "⚠")):
             dem[tt.split(" — ")[0].split(" (")[0][:80]] += 1
     return "; ".join("%d × %s" % (n, t) for t, n in dem.most_common(toi_da))
 
