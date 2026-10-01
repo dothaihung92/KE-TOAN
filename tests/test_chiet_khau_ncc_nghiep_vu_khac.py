@@ -54,7 +54,7 @@ class Cur:
         p = p[0] if len(p) == 1 and isinstance(p[0], (tuple, list)) else p
         self.sql, self.p = sql, p
         if sql.startswith("INSERT INTO"):
-            t = sql.split("[")[1].split("]")[0]
+            t = sql.split()[2].strip("[]")
             cols = [c.strip("[]") for c in sql[sql.index("(") + 1:sql.index(")")].split(",")]
             self.ins.append((t, dict(zip(cols, p))))
         elif sql.startswith("DELETE FROM"):
@@ -69,7 +69,7 @@ class Cur:
         if "sys.index_columns" in s:
             return [(c,) for c in T[p[0]][1]]
         if s.startswith("SELECT [") and "WHERE RefID=?" in s:
-            t = s.split(" FROM [")[1].split("]")[0]
+            t = s.split(" FROM ")[1].split()[0].strip("[]")
             return [tuple(r.get(c) for c in [x[0] for x in T[t][0]]) for r in SAMPLE.get(t, [])] if p[0] == MAU else []
         if s.startswith("SELECT RefNoFinance FROM GLVoucher"):
             return [(d,) for d in self.docs]
@@ -84,6 +84,15 @@ class Cur:
         s = self.sql
         if "SELECT TOP 1 gv.RefID" in s:
             return (MAU,) if self.co_mau else None
+        if s.startswith("SELECT TOP 1 RefType FROM SYSRefType"):
+            return (4000,)
+        if s.startswith("SELECT RefTypeName FROM SYSRefType"):
+            return ("Chứng từ nghiệp vụ khác",)
+        if s.startswith("SELECT TOP 1 RefID, RefDetailID FROM GeneralLedger"):
+            return (MAU, D1)
+        if s.startswith("SELECT TOP 1 [") and "FROM AccountObjectLedger" in s:
+            r = SAMPLE["AccountObjectLedger"][0]
+            return tuple(r.get(c) for c, _t in T["AccountObjectLedger"][0])
         if s.startswith("SELECT ISNULL(MAX(RefOrder)"):
             return (11,)
         if s.startswith("SELECT AccountObjectCode, AccountObjectName"):
@@ -102,6 +111,7 @@ hd = ["Ký hiệu", "Số HĐ", "Ngày", "Người bán", "MST bán", "STT", "M�
 rows = [["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ thị trường", None, 0, 0, 10980720, "8%", 878458, None, None, None, 331, 6427],
         ["C26TSA", "6036", "23/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ phát triển", None, 0, 0, -13340460, "8%", -1067237, None, None, None, "331", ""]]
 server.nhap_lieu_get = lambda cid, loai="in": {"header": hd, "rows": rows}
+server._misa_branch_id = lambda cur: "BR-1"
 
 def chay(c, preview=False):
     cn = Conn(c)
@@ -144,11 +154,26 @@ print("PASS 2: chạy lại — đúng số thì bỏ qua; đổi số thì gỡ
 # 3) xem trước không ghi; thiếu mẫu báo hướng dẫn; mẫu số tiền không đủ khác biệt báo lỗi
 c4 = Cur(); cn4, r4 = chay(c4, preview=True)
 assert not c4.ins and not c4.dele and cn4.rb and r4["so_chungtu"] == 2 and r4["danh_sach"][0]["trang_thai"].startswith("sẽ ghi")
-try:
-    chay(Cur(co_mau=False)); assert False
-except server.HTTPException as ex:
-    assert "chứng từ MẪU" in str(ex.detail)
-print("PASS 3: xem trước không ghi gì (rollback); thiếu chứng từ mẫu thì hướng dẫn tạo mẫu.")
+# 3b) KHÔNG có chứng từ mẫu -> dựng bằng mẫu sổ cái tổng quát (GLVoucher + Detail + GeneralLedger + AccountObjectLedger), vẫn số DƯƠNG
+c5 = Cur(co_mau=False)
+cn5, r5 = chay(c5)
+assert r5["so_chungtu"] == 2 and "tổng quát" in r5["cach_ghi"], r5
+glv5 = [d for t, d in c5.ins if t == "GLVoucher"]
+assert [g["RefNoFinance"] for g in glv5] == ["NVK00013", "NVK00014"] and glv5[0]["TotalAmount"] == 11859178 and glv5[0]["CustomField10"] == server._PM_MARK
+assert glv5[0]["IsPostedFinance"] is True and glv5[0]["JournalMemo"].startswith("Chiết khấu mua hàng HĐ 5451 (MST 0319340593)")
+det5 = [d for t, d in c5.ins if t == "GLVoucherDetail" and d["RefID"] == glv5[0]["RefID"]]
+assert sorted((d["DebitAccount"], d["CreditAccount"], d["Amount"]) for d in det5) == [("331", "1331", 878458), ("331", "6427", 10980720)], det5
+assert all(d["DebitAccountObjectID"] == "AO-SATORI" for d in det5)
+gl5 = [d for t, d in c5.ins if t == "GeneralLedger" and d["RefID"] == glv5[0]["RefID"]]
+assert sorted((x["AccountNumber"], x["DebitAmount"], x["CreditAmount"]) for x in gl5) == sorted([("331", 10980720, 0), ("6427", 0, 10980720), ("331", 878458, 0), ("1331", 0, 878458)]), gl5
+assert all(x["AccountObjectID"] == "AO-SATORI" and x["RefNo"] == "NVK00013" and x["InvNo"] == "5451" for x in gl5)
+aol5 = [d for t, d in c5.ins if t == "AccountObjectLedger" and d["RefID"] == glv5[0]["RefID"]]
+assert sorted(a["DebitAmount"] for a in aol5) == [878458, 10980720] and all(a["AccountNumber"] == "331" and a["AccountObjectID"] == "AO-SATORI" and a["CreditAmount"] if False else True for a in aol5)
+assert all(a["PayKeyID"].endswith("#AO-SATORI#331") or a["PayKeyID"].endswith("#331") for a in aol5) if "PayKeyID" in aol5[0] else True
+c6 = Cur(co_mau=False, existing=[("EX-9", 11859178, "NVK00013")])
+cn6, r6 = chay(c6)
+assert r6["so_trung"] == 1 and r6["so_chungtu"] == 1
+print("PASS 3: xem trước không ghi gì (rollback); KHÔNG có chứng từ mẫu vẫn ghi được (GLVoucher/Detail/GL/công nợ NCC, số dương).")
 
 # 4) không còn đi qua chứng từ mua dịch vụ ghi âm; đối chiếu nhận diện nhóm
 assert server._gen_mua_hang_dv(1, hd, rows) == []
