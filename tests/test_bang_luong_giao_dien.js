@@ -959,17 +959,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert.strictEqual(m.ctx.blDL['05'][0].so_npt, 3, 'Chưa có danh sách NPT -> giữ số nhập tay');
   console.log('PASS 37: màn Người Phụ Thuộc (tải/sửa/lưu, tự điền tên) + Bảng Lương cập nhật số NPT theo danh sách.');
 
-  // ---- 38: nút "Nạp NNT từ XML HTKK" ----
-  assert(/onchange="blNapNntHtkk\(this\)"/.test(html) && /Nạp NNT từ XML HTKK/.test(html), 'Có nút Nạp NNT từ XML HTKK');
-  m = nap(); m.ctx.FormData = class { constructor() { this.d = {}; } append(k, v) { this.d[k] = v; } };
-  const g38 = [];
-  m.ctx.fetch = async (u, o) => { g38.push([u, o.body.d.file.name]); return { ok: true, json: async () => ({ nnt: { ten_xa: 'Phường An Phú Đông', ma_xa: '70123098', ten_tinh: 'Thành phố Hồ Chí Minh' } }) }; };
-  const inp38 = { files: [{ name: 'hs.xml' }], value: 'x' };
-  await m.ctx.blNapNntHtkk(inp38);
-  assert.strictEqual(g38[0][0], '/api/bang-luong/7/nap-nnt-htkk'); assert(/Phường An Phú Đông \(mã 70123098\)/.test(m.toasts[m.toasts.length - 1][0])); assert.strictEqual(inp38.value, '');
-  m.ctx.fetch = async () => ({ ok: false, json: async () => ({ detail: 'File là của MST khác' }) }); await m.ctx.blNapNntHtkk({ files: [{ name: 'x.xml' }], value: '' });
-  assert(m.toasts.some(([t, k]) => k === 'err' && /MST khác/.test(t)));
-  console.log('PASS 38: nạp NNT từ XML HTKK: gửi file, báo phường/xã đã nạp, báo lỗi.');
+  assert(!/blNapNntHtkk|Nạp NNT từ XML HTKK/.test(html), 'Không có bước nạp NNT riêng: dùng thông tin công ty đã nhập');
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });

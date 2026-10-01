@@ -135,28 +135,21 @@ def phang(root):
 comp_m = Row({"ten": "CÔNG TY TNHH MẪU", "mst": "0300000001", "dia_chi": "1 Đường Mẫu", "ma_cqt_noi_nop": "70123", "ten_cqt_noi_nop": "Thuế cơ sở 12 Thành phố Hồ Chí Minh", "nguoi_ky": "NGUYỄN VĂN KÝ"})
 nnt_m = {"ten_xa": "Phường An Phú Đông", "ma_xa": "70123098", "ten_tinh": "Thành phố Hồ Chí Minh", "ma_tinh": "701"}
 nguoi = {"ma": "2", "ten": "Nguyễn Văn A", "cccd": "000000000001", "ct12": 63_720_000, "ct16": 0, "ct17": 132_000_000, "ct18": 0, "ct19": 6_690_600, "ct21": 0, "ct24": 0, "ct25": 0, "ct26": 0, "ct27": 0}
-xml_m, ch_m, th_m = server._luong_qt_xml(comp_m, 2025, {"g1": [nguoi], "g2": [], "npt": [], "canh_bao": [], "so_nguoi": 1, "so_nguoi_khai": 1}, "NGUYỄN VĂN KÝ", datetime.date(2026, 10, 1), nnt_m)
+xml_m, ch_m, th_m = server._luong_qt_xml(comp_m, 2025, {"g1": [nguoi], "g2": [], "npt": [], "canh_bao": [], "so_nguoi": 1, "so_nguoi_khai": 1}, "NGUYỄN VĂN KÝ", datetime.date(2026, 10, 1))
 a_, b_ = phang(ref), phang(ET.fromstring(xml_m.encode("utf-8")))
 assert len(a_) == len(b_) == 110
 khac = [(x, y) for x, y in zip(a_, b_) if x != y and not x[0].endswith("ttinNhaCCapDVu")]
-assert khac == [], khac
-print("PASS 5b: cùng dữ liệu -> XML giống HỆT file HTKK thật (cấu trúc thẻ + giá trị: BH ở ct19, ct09a_ma=03, phường/xã/tỉnh, không phụ lục trống).")
+# Khác duy nhất ngoài ttinNhaCCapDVu: phường/xã — HTKK ghi mã/tên PHƯỜNG của người dùng chọn; phần mềm dùng mã/tên cơ quan thuế đã khai báo ở "Sửa công ty"
+assert [x[0].split("/")[-1] for x, y in khac] == ["tenXaNNT", "maXaNNT"], khac
+assert dict((x[0].split("/")[-1], y[1]) for x, y in khac) == {"tenXaNNT": "Thuế cơ sở 12 Thành phố Hồ Chí Minh", "maXaNNT": "70123"}
+print("PASS 5b: cùng dữ liệu -> XML giống file HTKK thật từng thẻ/giá trị (BH ở ct19, ct09a_ma=03, tỉnh, không phụ lục trống); chỉ khác phường/xã (lấy theo CQT đã khai báo).")
 
-# ===== 5c: nạp thông tin NNT (phường/xã...) từ file XML HTKK; tên tỉnh dự phòng từ tên CQT =====
-nnt = server._luong_doc_nnt_htkk(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "htkk_05qtt_tncn_1nguoi_mau.xml"), "rb").read())
-assert nnt["ma_xa"] == "70123098" and nnt["ten_xa"] == "Phường An Phú Đông" and nnt["ten_tinh"] == "Thành phố Hồ Chí Minh" and nnt["ma_tinh"] == "701" and nnt["mst"] == "0300000001"
-for hong in (b"khong phai xml", b"<a><b/></a>", b'<HSoThueDTu xmlns="http://kekhaithue.gdt.gov.vn/TKhaiThue"><NNT><mst>1</mst></NNT></HSoThueDTu>'):
-    try:
-        server._luong_doc_nnt_htkk(hong)
-        raise SystemExit("phải báo lỗi")
-    except HTTPException as e:
-        assert e.status_code == 400
+# ===== 5c: NNT lấy theo thông tin công ty đã nhập: tỉnh/thành suy từ mã + tên CQT =====
 assert server._luong_tinh_tu_ten_cqt("Thuế cơ sở 12 Thành phố Hồ Chí Minh") == "Thành phố Hồ Chí Minh" and server._luong_tinh_tu_ten_cqt("Thuế cơ sở 10 tỉnh Lâm Đồng") == "Tỉnh Lâm Đồng" and server._luong_tinh_tu_ten_cqt("") == ""
-xml_dp, _c, _t = server._luong_qt_xml(comp_m, 2025, {"g1": [nguoi], "g2": [], "npt": [], "canh_bao": [], "so_nguoi": 1, "so_nguoi_khai": 1}, "K", datetime.date(2026, 10, 1))
-rdp = ET.fromstring(xml_dp.encode("utf-8"))
+rdp = ET.fromstring(xml_m.encode("utf-8"))
 assert rdp.find(".//t:NNT/t:tenTinhNNT", NS).text == "Thành phố Hồ Chí Minh" and rdp.find(".//t:NNT/t:maTinhNNT", NS).text == "701"
-assert rdp.find(".//t:NNT/t:maXaNNT", NS).text is None and rdp.find(".//t:NNT/t:tenXaNNT", NS).text is None, "Chưa nạp NNT -> để trống phường/xã (không đoán)"
-print("PASS 5c: nạp NNT từ XML HTKK; chưa nạp thì phường/xã để trống + tên tỉnh suy từ tên CQT.")
+assert rdp.find(".//t:NNT/t:dchiNNT", NS).text == "1 Đường Mẫu" and rdp.find(".//t:NNT/t:maXaNNT", NS).text == "70123"
+print("PASS 5c: NNT theo thông tin công ty đã nhập (địa chỉ, mã/tên CQT); tỉnh/thành suy từ CQT.")
 
 # ===== 6: API: lấy bảng lương đã lưu + Danh Sách Nhân Viên + thông tin công ty; trả file XML =====
 _duong = tempfile.mktemp(suffix=".db")
@@ -175,35 +168,13 @@ try:
     c0.execute("INSERT INTO nhap_lieu (company_id, loai, header_json, rows_json) VALUES (1,'nv',?,?)", (json.dumps(nv_hd), json.dumps(nv_rows)))
     c0.commit(); c0.close()
     server._luong_doc_nam = lambda cid, nam: (TS, rows_nhap if nam == 2025 else {}, "", [2025])
-    kho_du_lieu = {}
-    server._doc_du_lieu_cty = lambda cid: dict(kho_du_lieu)
-    server._ghi_du_lieu_cty = lambda cid, d: (kho_du_lieu.clear(), kho_du_lieu.update(d))
 
     class Req:
         def __init__(self, b): self._b = b
         async def json(self): return self._b
-    resp0 = asyncio.run(server.bang_luong_ket_xuat_qt_tncn(1, Req({"nam": 2025, "nguoi_ky": "NGUYỄN NGỌC PHƯƠNG THẢO"})))
-    from urllib.parse import unquote as _uq
-    assert "Chưa có phường/xã" in _uq(resp0.headers["x-canh-bao"]), "Chưa nạp NNT -> cảnh báo"
-    # nạp thông tin NNT từ file XML HTKK (MST khác công ty -> chặn)
-    class UpX:
-        def __init__(self, b): self._b = b
-        async def read(self): return self._b
-    class Form:
-        def __init__(self, f): self._f = f
-        async def form(self): return {"file": UpX(self._f)}
-    mau = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "htkk_05qtt_tncn_1nguoi_mau.xml"), "rb").read()
-    try:
-        asyncio.run(server.bang_luong_nap_nnt_htkk(1, Form(mau)))
-        raise SystemExit("MST khác công ty phải bị chặn")
-    except HTTPException as e:
-        assert e.status_code == 400 and "khác MST" in e.detail
-    mau_dung = mau.replace(b"0300000001", b"0318712827")
-    assert asyncio.run(server.bang_luong_nap_nnt_htkk(1, Form(mau_dung)))["nnt"]["ma_xa"] == "70123098" and kho_du_lieu["htkk_nnt"]["ten_xa"] == "Phường An Phú Đông"
     resp = asyncio.run(server.bang_luong_ket_xuat_qt_tncn(1, Req({"nam": 2025, "nguoi_ky": "NGUYỄN NGỌC PHƯƠNG THẢO"})))
-    assert "Chưa có phường/xã" not in _uq(resp.headers["x-canh-bao"])
-    raw_x = open(resp.path, encoding="utf-8").read()
-    assert "<maXaNNT>70123098</maXaNNT>" in raw_x and "<tenXaNNT>Phường An Phú Đông</tenXaNNT>" in raw_x and "<tenTinhNNT>Thành phố Hồ Chí Minh</tenTinhNNT>" in raw_x
+    from urllib.parse import unquote as _uq
+    assert "phường/xã" not in _uq(resp.headers["x-canh-bao"]), "Không còn yêu cầu nạp phường/xã"
     assert os.path.basename(resp.path) == "0318712827000-05_QTT_TNCN_TT80-Y2025-L00.xml"
     raw = open(resp.path, encoding="utf-8").read()
     assert raw.startswith("﻿<?xml") and "<nguoiKy>NGUYỄN NGỌC PHƯƠNG THẢO</nguoiKy>" in raw and "<maCQTNoiNop>70123</maCQTNoiNop>" in raw

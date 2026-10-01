@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.033"
+APP_BUILD = "2026-10-01.034"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12350,51 +12350,7 @@ def _luong_tinh_tu_ten_cqt(ten_cqt):
     return (r[:1].upper() + r[1:]) if r else ""
 
 
-def _luong_doc_nnt_htkk(content):
-    """Đọc phần <NNT> của 1 file XML do HTKK xuất (bất kỳ tờ khai nào) -> dict thông tin người nộp thuế để dùng lại khi kết xuất: phường/xã (mã + tên), quận/huyện,
-    tỉnh, địa chỉ, điện thoại, fax, email."""
-    import xml.etree.ElementTree as _ET
-    try:
-        root = _ET.fromstring(content.lstrip(b"\xef\xbb\xbf"))
-    except Exception as e:
-        raise HTTPException(400, f"Không đọc được file XML: {e}")
-    ns = "{http://kekhaithue.gdt.gov.vn/TKhaiThue}"
-    nnt = root.find(f".//{ns}NNT")
-    if nnt is None:
-        nnt = root.find(".//NNT")
-        ns = ""
-    if nnt is None:
-        raise HTTPException(400, "Không thấy thông tin người nộp thuế (<NNT>) trong file — hãy chọn file XML tờ khai do HTKK xuất.")
-    g = lambda tag: ((nnt.find(f"{ns}{tag}").text or "").strip() if nnt.find(f"{ns}{tag}") is not None else "")
-    kq = {"mst": g("mst"), "ten": g("tenNNT"), "dchi": g("dchiNNT"), "ten_xa": g("tenXaNNT"), "ma_xa": g("maXaNNT"), "ten_huyen": g("tenHuyenNNT"), "ma_huyen": g("maHuyenNNT"),
-          "ten_tinh": g("tenTinhNNT"), "ma_tinh": g("maTinhNNT"), "dthoai": g("dthoaiNNT"), "fax": g("faxNNT"), "email": g("emailNNT")}
-    if not kq["ma_xa"] or not kq["ten_xa"]:
-        raise HTTPException(400, "File không có phường/xã (maXaNNT/tenXaNNT) của người nộp thuế")
-    return kq
-
-
-@app.post("/api/bang-luong/{cid}/nap-nnt-htkk")
-async def bang_luong_nap_nnt_htkk(cid: int, request: Request):
-    """multipart: file XML do HTKK xuất. Lưu thông tin NNT (phường/xã, tỉnh...) cho công ty để mọi lần kết xuất QT TNCN dùng đúng mã/tên phường xã."""
-    form = await request.form()
-    up = form.get("file")
-    if up is None:
-        raise HTTPException(400, "Chưa chọn file")
-    kq = _luong_doc_nnt_htkk(await up.read())
-    conn = db()
-    try:
-        comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
-    finally:
-        conn.close()
-    if comp and kq["mst"] and str(comp["mst"] or "").strip()[:10] != kq["mst"][:10]:
-        raise HTTPException(400, f"File là của MST {kq['mst']}, khác MST công ty đang chọn ({comp['mst']})")
-    data = _doc_du_lieu_cty(cid)
-    data["htkk_nnt"] = kq
-    _ghi_du_lieu_cty(cid, data)
-    return {"ok": True, "nnt": kq}
-
-
-def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay, nnt=None):
+def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
     """Dựng XML 05/QTT-TNCN (lần đầu, loại C) cho HTKK từ kết quả _luong_qt_tong_hop."""
     import html as _html
     e = lambda v: _html.escape(str(v if v is not None else ""))
@@ -12454,18 +12410,19 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay, nnt=None):
     a('        <NNT>')
     a(f'          <mst>{e(mst)}</mst>')
     a(f'          <tenNNT>{e(comp["ten"])}</tenNNT>')
-    nnt = nnt or {}
+    # Phường/xã: dùng mã + tên cơ quan thuế nơi nộp đã khai báo ở "Sửa công ty" (cùng cách các tờ khai 01/GTGT, 05/KK-TNCN — không tạo thêm trường riêng);
+    # tỉnh/thành: mã = 3 số đầu mã CQT, tên suy từ tên CQT.
     tag_nnt = lambda tag, v: a(f'          <{tag}>{e(v)}</{tag}>' if str(v or "") != "" else f'          <{tag} />')
-    tag_nnt("dchiNNT", dia_chi or nnt.get("dchi"))
-    tag_nnt("tenXaNNT", nnt.get("ten_xa"))                   # phường/xã: lấy từ file XML HTKK đã nạp (không đoán)
-    tag_nnt("maXaNNT", nnt.get("ma_xa"))
-    tag_nnt("maHuyenNNT", nnt.get("ma_huyen"))
-    tag_nnt("tenHuyenNNT", nnt.get("ten_huyen"))
-    tag_nnt("maTinhNNT", nnt.get("ma_tinh") or str(ma_cqt)[:3])
-    tag_nnt("tenTinhNNT", nnt.get("ten_tinh") or _luong_tinh_tu_ten_cqt(ten_cqt))
-    tag_nnt("dthoaiNNT", nnt.get("dthoai"))
-    tag_nnt("faxNNT", nnt.get("fax"))
-    tag_nnt("emailNNT", nnt.get("email"))
+    tag_nnt("dchiNNT", dia_chi)
+    tag_nnt("tenXaNNT", ten_cqt)
+    tag_nnt("maXaNNT", ma_cqt)
+    tag_nnt("maHuyenNNT", "")
+    tag_nnt("tenHuyenNNT", "")
+    tag_nnt("maTinhNNT", str(ma_cqt)[:3])
+    tag_nnt("tenTinhNNT", _luong_tinh_tu_ten_cqt(ten_cqt))
+    tag_nnt("dthoaiNNT", "")
+    tag_nnt("faxNNT", "")
+    tag_nnt("emailNNT", "")
     a('        </NNT>')
     a('      </TTinTKhaiThue>')
     a('    </TTinChung>')
@@ -12620,14 +12577,7 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
                     ("tên CQT nơi nộp", comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else ""), ("người ký", nguoi_ky)):
         if not (gt or "").strip():
             canh_bao.append(f"Công ty chưa khai báo {ten} — vào 'Sửa công ty' rồi kết xuất lại (hoặc điền trên HTKK).")
-    try:
-        nnt = (_doc_du_lieu_cty(cid) or {}).get("htkk_nnt") or {}
-    except Exception:
-        nnt = {}
-    if not nnt.get("ma_xa"):
-        canh_bao.append("Chưa có phường/xã của công ty (maXaNNT/tenXaNNT) — bấm '📥 Nạp NNT từ XML HTKK' (chọn 1 file tờ khai do HTKK xuất của công ty) rồi kết xuất lại, "
-                        "nếu không HTKK có thể báo lỗi khi nhập file.")
-    xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today(), nnt)
+    xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today())
     mst_file = str(comp["mst"] or "").strip()
     if len(mst_file) == 10:
         mst_file += "000"
