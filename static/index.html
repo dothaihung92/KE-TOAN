@@ -9029,6 +9029,7 @@ async function misaSuaThieuSAInvoiceReferenceXacNhan(){
 }
 function misaTomTatBuoc(r){
   if(!r)return'';
+  if(r.so_tk_no_du_doan!=null)return r.so_tk_no_du_doan>0?`✓ tự điền TK Nợ dự đoán ${r.so_tk_no_du_doan} dòng (kiểm tra lại cột Nợ)`:'không có dòng trống TK Nợ';
   const phan=[];
   if(r.so_chungtu!=null)phan.push(`${r.so_chungtu} chứng từ`);
   if(r.so_them!=null)phan.push(`thêm ${r.so_them}`);

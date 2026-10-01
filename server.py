@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.040"
+APP_BUILD = "2026-10-01.041"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33025,12 +33025,106 @@ async def misa_chuyen_cong_no_sai_doi_tuong(cid: int, request: Request, loai: st
 #  báo lỗi (đúng yêu cầu). Mỗi bước dùng LẠI ĐÚNG hàm ghi đã kiểm chứng của
 #  từng chức năng riêng lẻ — không viết lại logic ghi.
 # ============================================================
+def _tk_no_mac_dinh_hoc(cid):
+    """(tk_hang, tk_dich_vu) mặc định cho dòng MUA VÀO chưa có TK Nợ: lấy TK hay dùng NHẤT trong các TK Nợ công ty
+    ĐÃ HỌC (nhóm 15x = hàng hóa/NVL, nhóm 6xx = chi phí dịch vụ); chưa học gì thì 1561 / 6427."""
+    from collections import Counter
+    try:
+        hoc = list(_get_map_no(cid).values()) + list(_get_map_no_item(cid).values())
+    except Exception:
+        hoc = []
+    hoc = [str(x).strip() for x in hoc if str(x).strip()]
+    d15 = Counter(x for x in hoc if x.startswith("15"))
+    d6 = Counter(x for x in hoc if x.startswith("6"))
+    return (d15.most_common(1)[0][0] if d15 else "1561"), (d6.most_common(1)[0][0] if d6 else "6427")
+
+
+def _dien_tk_no_bang_ke_dau_vao(cid, header, rows):
+    """Điền TK Nợ (và TK Có = 331) cho các dòng Bảng kê ĐẦU VÀO còn TRỐNG cột Nợ — nếu để trống, Import vào MISA
+    (nhập kho/không qua kho/dịch vụ + Danh mục hàng hóa) lọc theo đầu TK Nợ nên BỎ QUA hẳn dòng đó, hóa đơn
+    báo "THIẾU trong MISA" (ca thật HĐ 1706/1759/185/1264, NCC mới chưa học TK). Thứ tự đoán: (1) TK Nợ cùng NCC
+    + cùng loại (hàng/dịch vụ) đã có trong chính Bảng kê; (2) TK hay dùng nhất đã học của công ty; (3) 1561 (hàng
+    có ĐVT/số lượng) hoặc 6427 (dịch vụ). Bỏ qua dòng 0đ, tờ khai nhập khẩu. Trả (rows_moi, [(số HĐ, tên, TK)])."""
+    from collections import Counter
+    c = _nk_cols(header)
+    if c["no"] < 0 or c["sohd"] < 0:
+        return rows, []
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+    def la_hang(r):
+        sl = _to_num(gv(r, c["sl"]))
+        return bool(str(gv(r, c["dvt"]) or "").strip()) or (isinstance(sl, (int, float)) and sl > 0)
+    theo_ncc = {}
+    for r in rows:
+        no = str(gv(r, c["no"]) or "").strip()
+        if no:
+            theo_ncc.setdefault((_chuan_mst(gv(r, c["mst"])), la_hang(r)), Counter())[no] += 1
+    tk_hang, tk_dv = _tk_no_mac_dinh_hoc(cid)
+    moi, ds = [], []
+    for r in rows:
+        r = list(r)
+        no = str(gv(r, c["no"]) or "").strip()
+        sohd = str(gv(r, c["sohd"]) or "").strip()
+        ten = str(gv(r, c["ten"]) or "").strip()
+        tt = _to_num(gv(r, c["tt"])) or 0
+        tthue = _to_num(gv(r, c["tthue"])) or 0
+        if (no or not sohd or not ten or (not tt and not tthue)
+                or str(gv(r, c["kh"]) or "").strip().upper() == "TKNK"):
+            moi.append(r)
+            continue
+        h = la_hang(r)
+        dem = theo_ncc.get((_chuan_mst(gv(r, c["mst"])), h))
+        tk = dem.most_common(1)[0][0] if dem else (tk_hang if h else tk_dv)
+        while len(r) <= c["no"]:
+            r.append("")
+        r[c["no"]] = tk
+        if c["co"] >= 0:
+            while len(r) <= c["co"]:
+                r.append("")
+            if not str(r[c["co"]] or "").strip():
+                r[c["co"]] = "331"
+        ds.append((sohd, ten, tk))
+        moi.append(r)
+    return moi, ds
+
+
+def _misa_chuan_bi_bang_ke_dau_vao(cid, preview=True):
+    """Bước 0 của Import tự động: điền TK Nợ trống của Bảng kê đầu vào đã lưu (xem _dien_tk_no_bang_ke_dau_vao) và
+    LƯU lại để mọi bước sau (Danh mục hàng hóa, Mua hàng...) đều thấy. Chỉ sửa dữ liệu làm việc của phần mềm, chưa
+    đụng MISA — người dùng xem lại/sửa cột Nợ ở màn Bảng kê đầu vào."""
+    dl = nhap_lieu_get(cid, "in")
+    header, rows = dl.get("header") or [], dl.get("rows") or []
+    if not rows:
+        raise HTTPException(400, "Chưa có Bảng kê Đầu vào đã lưu.")
+    moi, ds = _dien_tk_no_bang_ke_dau_vao(cid, header, rows)
+    if ds:
+        conn = db()
+        conn.execute("UPDATE nhap_lieu SET rows_json=?, updated_at=? WHERE company_id=? AND loai='in'",
+                     (json.dumps(moi, ensure_ascii=False), datetime.datetime.now().isoformat(), cid))
+        conn.commit()
+        conn.close()
+        try:
+            data_cty = _doc_du_lieu_cty(cid)
+            if isinstance(data_cty.get("nhap_lieu_in"), dict):
+                data_cty["nhap_lieu_in"]["rows"] = moi
+                _ghi_du_lieu_cty(cid, data_cty)
+        except Exception:
+            pass
+    return {"so_tk_no_du_doan": len(ds), "so_dong": len(ds),
+            "danh_sach": [{"so_hd": a, "ten": b, "tk_no": t} for a, b, t in ds[:300]],
+            "ghi_chu": ("Không có dòng nào trống TK Nợ." if not ds else
+                        "Đã điền TK Nợ dự đoán cho %d dòng — kiểm tra lại cột Nợ ở Bảng kê đầu vào." % len(ds))}
+
+
 def _misa_tom_tat_buoc(r):
     """Tóm tắt 1 dòng kết quả của 1 bước (số thêm/bỏ qua/ghi đè...) để hiện
     trong dòng tiến độ — cùng logic với misaTomTatBuoc() phía JS."""
     if not r:
         return "xong"
     phan = []
+    if r.get("so_tk_no_du_doan") is not None:
+        return ("✓ tự điền TK Nợ dự đoán %d dòng (kiểm tra lại cột Nợ)" % r["so_tk_no_du_doan"]
+                if r["so_tk_no_du_doan"] else "không có dòng trống TK Nợ")
     if r.get("so_chungtu") is not None:
         phan.append(f"{r['so_chungtu']} chứng từ")
     if r.get("so_them") is not None:
@@ -33126,6 +33220,7 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
             buoc.append({"ten": ten, "loi": emsg})
             bao(f"✗ Lỗi: {ten} — {emsg}")
 
+    chay("0. Chuẩn bị Bảng kê Đầu vào (điền TK Nợ trống)", lambda: _misa_chuan_bi_bang_ke_dau_vao(cid, preview))
     chay("1. Danh mục KH/NCC", lambda: _misa_ghi_khncc(cid, database, preview=preview))
 
     chay("2. Bảng kê Đầu ra (Bán hàng)",
@@ -38962,6 +39057,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         return nd  # yyyy-mm-dd so sánh chuỗi = đúng thứ tự thời gian
 
     map_no_ht = _get_map_no(cid)          # {mst: tk_no} học MẶC ĐỊNH theo MST -> dự phòng
+    tk_no_hang_md, tk_no_dv_md = _tk_no_mac_dinh_hoc(cid)   # dự phòng CUỐI khi NCC/mặt hàng chưa học TK Nợ
+    tk_no_doan = []                       # các dòng mua vào phải TỰ ĐOÁN TK Nợ -> liệt kê ở sheet Đối chiếu để kiểm tra
     map_no_item = _get_map_no_item(cid)   # {(mst, ten_chuan): tk_no} học RIÊNG theo mặt hàng
                                            # cụ thể -> ưu tiên dùng trước map_no_ht (xem Pass 2)
     # TK Nợ mặc định RIÊNG theo công ty (cấu hình ở "Sửa công ty") — dự phòng CUỐI CÙNG
@@ -39265,6 +39362,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                     no_line = "6427"
                 else:
                     no_line = no_r
+                # NCC mới chưa học TK Nợ + công ty chưa khai TK Nợ mặc định -> trước đây để TRỐNG, Import vào
+                # MISA lọc theo đầu TK Nợ nên bỏ qua hẳn dòng (hóa đơn báo "THIẾU trong MISA"). Nay tự đoán:
+                # có ĐVT/số lượng = hàng hóa (TK 15x hay dùng nhất), không có = dịch vụ (6xx) — và LIỆT KÊ
+                # ở sheet Đối chiếu để người dùng kiểm tra lại.
+                if loai == "purchase" and not str(no_line or "").strip() and isinstance(ds, (int, float)) and ds:
+                    _la_hang_d = bool(str(dvt_out or "").strip()) or (isinstance(d["sl"], (int, float)) and d["sl"] > 0)
+                    no_line = tk_no_hang_md if _la_hang_d else tk_no_dv_md
+                    tk_no_doan.append({"kh": r["khhdon"], "shd": r["shdon"], "ten": d["ten"], "ds": ds, "tk": no_line})
                 # HĐ hạch toán Nợ 6427: khi import vào MISA chỉ cần đổi MÃ
                 # HÀNG thành "MHDV" (mã dùng chung cho dòng chi phí quản lý
                 # DN); ĐVT/Số lượng/Đơn giá GIỮ NGUYÊN theo đúng hóa đơn gốc
@@ -40043,6 +40148,21 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                     ws.cell(rr, c).number_format = "#,##0"
         return len(ds_lech)
 
+    ws.append([])
+    ws.append(["TK NỢ MUA VÀO TỰ ĐOÁN (NCC/mặt hàng chưa học TK Nợ — kiểm tra lại cột Nợ trước khi Import vào MISA):"])
+    ws.cell(ws.max_row, 1).font = Font(bold=True, size=11, color="C00000")
+    if not tk_no_doan:
+        ws.append(["", "✓ Không có dòng nào phải tự đoán TK Nợ"])
+        ws.cell(ws.max_row, 2).font = Font(color="1F6B4A")
+    else:
+        ws.append(["Ký hiệu", "Số HĐ", "Tên hàng", "Thành tiền", "TK Nợ đã điền"])
+        hr = ws.max_row
+        for c in range(1, 6):
+            ws.cell(hr, c).font = Font(bold=True, color="FFFFFF")
+            ws.cell(hr, c).fill = PatternFill("solid", fgColor="C0392B")
+        for it in tk_no_doan:
+            ws.append([it["kh"], it["shd"], it["ten"], it["ds"], it["tk"]])
+            ws.cell(ws.max_row, 4).number_format = "#,##0"
     so_ts_lech_ban = them_ds_lech_thue_suat(
         "DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ - BÁN RA (nhãn % có thể sai do NĐ44 hoặc lỗi dữ liệu):", "sold")
     so_ts_lech_mua = them_ds_lech_thue_suat(
