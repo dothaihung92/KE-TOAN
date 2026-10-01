@@ -107,18 +107,25 @@ assert thay == {"ct35": 2, "ct36": 0, "ct37": 0, "ct38": int(v(p1, "ct40")), "ct
 assert len(p3.findall("t:BKeTTinNPT", NS)) == 2 and v(p3.findall("t:BKeTTinNPT", NS)[0], "ct15") == "01/2025"
 print("PASS 4: XML đúng cấu trúc thẻ HTKK, MST = CCCD, tất cả ủy quyền, tổng bảng kê ↔ tờ khai chính khớp.")
 
-# ===== 5: phụ lục 05-2/05-3 KHÔNG có dữ liệu -> KHÔNG xuất (HTKK cũng không xuất — đối chiếu file HTKK thật); 05-1 luôn có =====
+# ===== 5: KHÔNG phát sinh 05-2/05-3 -> VẪN xuất đủ 3 phụ lục (theo yêu cầu người dùng): phụ lục trống có 1 dòng rỗng, số liệu tờ khai chính không lệch =====
 tong5 = server._luong_qt_tong_hop(TS, {t: v_ for t, v_ in thang_tinh.items()}, nv_hd, nv_rows)
 tong5["g2"], tong5["npt"], tong5["so_nguoi_khai"] = [], [], 2
 xml5, chinh5, thay5 = server._luong_qt_xml(comp, 2025, tong5, "", datetime.date(2026, 4, 1))
 r5 = ET.fromstring(xml5.encode("utf-8"))
-assert [c.tag.split("}")[1] for c in r5.find(".//t:PLuc", NS)] == ["PLuc_05_1_BK_QTT"], "Chỉ còn phụ lục 05-1 như HTKK"
-assert chinh5["ct16"] == 2 and chinh5["ct23"] == int(r5.find(".//t:PLuc_05_1_BK_QTT/t:ct28", NS).text)
+assert [c.tag.split("}")[1] for c in r5.find(".//t:PLuc", NS)] == ["PLuc_05_1_BK_QTT", "PLuc_05_2_BK_QTT", "PLuc_05_3_BK_QTT"], "Đủ 3 phụ lục theo đúng thứ tự"
+e2 = r5.find(".//t:PLuc_05_2_BK_QTT", NS)
+h2 = e2.findall("t:BKeCTietCNhan", NS)
+assert len(h2) == 1 and [c.tag.split("}")[1] for c in h2[0]] == ch2 and h2[0].find("t:ct07", NS).text is None and h2[0].find("t:ct11", NS).text == "0"
+assert [c.tag.split("}")[1] for c in e2 if not c.tag.endswith("BKeCTietCNhan")] == ["ct17", "ct18", "ct19", "ct20", "ct20.1", "ct21", "ct22"] and all(c.text == "0" for c in e2 if not c.tag.endswith("BKeCTietCNhan"))
+h3 = r5.findall(".//t:PLuc_05_3_BK_QTT/t:BKeTTinNPT", NS)
+assert len(h3) == 1 and [c.tag.split("}")[1] for c in h3[0]] == ch3 and h3[0].find("t:ct09", NS).text is None
+assert h3[0].find("t:ct10", NS).attrib["{http://www.w3.org/2001/XMLSchema-instance}nil"] == "true"
+assert chinh5["ct16"] == 2 and chinh5["ct23"] == int(r5.find(".//t:PLuc_05_1_BK_QTT/t:ct28", NS).text), "Dòng rỗng không làm lệch tờ khai chính"
 tong5b = {"g1": [], "g2": [], "npt": [], "canh_bao": [], "so_nguoi": 0, "so_nguoi_khai": 0}
 x5b, c5b, t5b = server._luong_qt_xml(comp, 2025, tong5b, "", datetime.date(2026, 4, 1))
 r5b = ET.fromstring(x5b.encode("utf-8"))
-assert len(r5b.findall(".//t:PLuc_05_1_BK_QTT/t:BKeCTietCNhan", NS)) == 1 and r5b.find(".//t:PLuc_05_1_BK_QTT/t:ct28", NS).text == "0" and all(int(v_) == 0 for v_ in c5b.values())
-print("PASS 5: 05-2/05-3 không có dữ liệu thì không xuất (như HTKK); 05-1 luôn có.")
+assert [c.tag.split("}")[1] for c in r5b.find(".//t:PLuc", NS)] == ["PLuc_05_1_BK_QTT", "PLuc_05_2_BK_QTT", "PLuc_05_3_BK_QTT"] and all(int(v_) == 0 for v_ in c5b.values())
+print("PASS 5: không phát sinh vẫn xuất đủ 3 phụ lục 05-1, 05-2, 05-3 (dòng rỗng, số = 0), tờ khai chính không lệch.")
 
 # ===== 5b: SO KHỚP file HTKK thật (đã ẩn danh: tests/fixtures/htkk_05qtt_tncn_1nguoi_mau.xml): cùng dữ liệu -> XML giống HỆT từng thẻ/giá trị (trừ ttinNhaCCapDVu) =====
 ref = ET.parse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "htkk_05qtt_tncn_1nguoi_mau.xml")).getroot()
@@ -136,13 +143,13 @@ comp_m = Row({"ten": "CÔNG TY TNHH MẪU", "mst": "0300000001", "dia_chi": "1 �
 nnt_m = {"ten_xa": "Phường An Phú Đông", "ma_xa": "70123098", "ten_tinh": "Thành phố Hồ Chí Minh", "ma_tinh": "701"}
 nguoi = {"ma": "2", "ten": "Nguyễn Văn A", "cccd": "000000000001", "ct12": 63_720_000, "ct16": 0, "ct17": 132_000_000, "ct18": 0, "ct19": 6_690_600, "ct21": 0, "ct24": 0, "ct25": 0, "ct26": 0, "ct27": 0}
 xml_m, ch_m, th_m = server._luong_qt_xml(comp_m, 2025, {"g1": [nguoi], "g2": [], "npt": [], "canh_bao": [], "so_nguoi": 1, "so_nguoi_khai": 1}, "NGUYỄN VĂN KÝ", datetime.date(2026, 10, 1))
-a_, b_ = phang(ref), phang(ET.fromstring(xml_m.encode("utf-8")))
-assert len(a_) == len(b_) == 110
+a_, b_ = phang(ref), [x for x in phang(ET.fromstring(xml_m.encode("utf-8"))) if "/PLuc_05_2_BK_QTT" not in x[0] and "/PLuc_05_3_BK_QTT" not in x[0]]
+assert len(a_) == len(b_) == 110, "Ngoài 2 phụ lục trống (người dùng yêu cầu luôn hiện), mọi thẻ khớp file HTKK"
 khac = [(x, y) for x, y in zip(a_, b_) if x != y and not x[0].endswith("ttinNhaCCapDVu")]
 # Khác duy nhất ngoài ttinNhaCCapDVu: phường/xã — HTKK ghi mã/tên PHƯỜNG của người dùng chọn; phần mềm dùng mã/tên cơ quan thuế đã khai báo ở "Sửa công ty"
 assert [x[0].split("/")[-1] for x, y in khac] == ["tenXaNNT", "maXaNNT"], khac
 assert dict((x[0].split("/")[-1], y[1]) for x, y in khac) == {"tenXaNNT": "Thuế cơ sở 12 Thành phố Hồ Chí Minh", "maXaNNT": "70123"}
-print("PASS 5b: cùng dữ liệu -> XML giống file HTKK thật từng thẻ/giá trị (BH ở ct19, ct09a_ma=03, tỉnh, không phụ lục trống); chỉ khác phường/xã (lấy theo CQT đã khai báo).")
+print("PASS 5b: cùng dữ liệu -> XML giống file HTKK thật từng thẻ/giá trị (BH ở ct19, ct09a_ma=03, tỉnh) ngoài 2 phụ lục trống người dùng yêu cầu luôn hiện; chỉ khác phường/xã (lấy theo CQT đã khai báo).")
 
 # ===== 5c: NNT lấy theo thông tin công ty đã nhập: tỉnh/thành suy từ mã + tên CQT =====
 assert server._luong_tinh_tu_ten_cqt("Thuế cơ sở 12 Thành phố Hồ Chí Minh") == "Thành phố Hồ Chí Minh" and server._luong_tinh_tu_ten_cqt("Thuế cơ sở 10 tỉnh Lâm Đồng") == "Tỉnh Lâm Đồng" and server._luong_tinh_tu_ten_cqt("") == ""
@@ -176,7 +183,7 @@ try:
     from urllib.parse import unquote as _uq
     assert "phường/xã" not in _uq(resp.headers["x-canh-bao"]), "Không còn yêu cầu nạp phường/xã"
     cb = _uq(resp.headers["x-canh-bao"])
-    assert "Không có phụ lục 05-2" in cb and "Không có phụ lục 05-3" in cb or "người phụ thuộc" in cb
+    assert "Phụ lục 05-2 để trống" in cb or "người phụ thuộc" in cb
     assert os.path.basename(resp.path) == "0318712827000-05_QTT_TNCN_TT80-Y2025-L00.xml"
     raw = open(resp.path, encoding="utf-8").read()
     assert raw.startswith("﻿<?xml") and "<nguoiKy>NGUYỄN NGỌC PHƯƠNG THẢO</nguoiKy>" in raw and "<maCQTNoiNop>70123</maCQTNoiNop>" in raw

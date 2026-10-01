@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.035"
+APP_BUILD = "2026-10-01.036"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12445,7 +12445,7 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
     a('    </CTieuTKhaiChinh>')
     a('    <PLuc>')
     # --- 05-1/BK-QTT-TNCN: cá nhân quyết toán theo biểu lũy tiến, tất cả ỦY QUYỀN cho công ty quyết toán thay (ct10=1) ---
-    # Phụ lục 05-2/05-3 không có dữ liệu thì KHÔNG xuất (HTKK cũng không xuất — đối chiếu file HTKK thật); 05-1 luôn có (không có ai thì 1 dòng rỗng)
+    # LUÔN xuất đủ 3 phụ lục 05-1, 05-2, 05-3 (theo yêu cầu người dùng, kể cả khi không phát sinh — phụ lục trống có 1 dòng rỗng, mọi số = 0)
     a('      <PLuc_05_1_BK_QTT>')
     if not g1:
         a('        <BKeCTietCNhan id="ID_1">')
@@ -12481,8 +12481,21 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
         a(f'        <{k}>{int(sum(p.get(nguon, 0) for p in g1))}</{k}>')
     a('      </PLuc_05_1_BK_QTT>')
     # --- 05-2/BK-QTT-TNCN: cá nhân bị khấu trừ 10% (thuế suất toàn phần) ---
-    if g2:         # giống HTKK: phụ lục không có dữ liệu thì không xuất
+    if True:       # theo yêu cầu người dùng: LUÔN xuất đủ 05-2 và 05-3 kể cả khi không phát sinh (phụ lục trống = 1 dòng rỗng, mọi số = 0)
         a('      <PLuc_05_2_BK_QTT>')
+        if not g2:
+            a('        <BKeCTietCNhan id="ID_1">')
+            a('          <coDieuChinhSoLieu>0</coDieuChinhSoLieu>')
+            for k in ("ct07", "ct08"):
+                a(f'          <{k} />')
+            a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
+            a('          <ct09a_ma />')
+            a('          <ct09a_ten>Thẻ CCCD/Số định danh cá nhân</ct09a_ten>')
+            a('          <ct09 />')
+            a('          <ct10>0</ct10>')
+            for k in ("ct11", "ct12", "ct13", "ct14", "ct14.1", "ct15", "ct16"):
+                a(f'          <{k}>0</{k}>')
+            a('        </BKeCTietCNhan>')
         for i, p in enumerate(g2, 1):
             a(f'        <BKeCTietCNhan id="ID_{i}">')
             a('          <coDieuChinhSoLieu>0</coDieuChinhSoLieu>')
@@ -12506,8 +12519,23 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
         a('        <ct22>0</ct22>')
         a('      </PLuc_05_2_BK_QTT>')
     # --- 05-3/BK-QTT-TNCN: người phụ thuộc ---
-    if npt:
+    if True:
         a('      <PLuc_05_3_BK_QTT>')
+        if not npt:
+            a('        <BKeTTinNPT id="ID_1">')
+            for k in ("ct07", "ct08", "ct09"):
+                a(f'          <{k} />')
+            a('          <ct10 xsi:nil="true" />')
+            a('          <ct11 xsi:nil="true" />')
+            a('          <nguoiVNSongNN_NguoiNN>0</nguoiVNSongNN_NguoiNN>')
+            a('          <ct12_ma />')
+            a('          <ct12_ten />')
+            a('          <ct13 />')
+            a('          <ct14_ma />')
+            a('          <ct14_ten />')
+            a('          <ct15 />')
+            a('          <ct16 />')
+            a('        </BKeTTinNPT>')
         for i, d in enumerate(npt, 1):
             a(f'        <BKeTTinNPT id="ID_{i}">')
             a(f'          <ct07>{e(d["ten"])}</ct07>')
@@ -12580,10 +12608,10 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
     # Giải thích vì sao phụ lục không có dữ liệu (HTKK cũng không xuất phụ lục trống)
     if not tong["g2"]:
         co_tv = sum(1 for p in tong.get("tat_ca", []) if p.get("co_tv"))
-        canh_bao.append("Không có phụ lục 05-2: chỉ đưa vào 05-2 những người làm dưới 14 ngày/tháng, không đóng BHXH và THỰC SỰ bị khấu trừ thuế 10% ở Bảng Lương "
+        canh_bao.append("Phụ lục 05-2 để trống (không phát sinh): chỉ đưa vào 05-2 những người làm dưới 14 ngày/tháng, không đóng BHXH và THỰC SỰ bị khấu trừ thuế 10% ở Bảng Lương "
                         + (f"(có {co_tv} người làm thời vụ nhưng không bị khấu trừ — thu nhập dưới ngưỡng hoặc tick 'không trừ thuế 10%')." if co_tv else "(bảng lương năm này không có người nào như vậy)."))
     if not tong["npt"]:
-        canh_bao.append("Không có phụ lục 05-3: chưa có người phụ thuộc nào — nhập ở màn 'Người Phụ Thuộc' (Bảng Lương - BHXH), người lao động phải có tháng trên Bảng Lương của năm.")
+        canh_bao.append("Phụ lục 05-3 để trống (không phát sinh): chưa có người phụ thuộc nào — nhập ở màn 'Người Phụ Thuộc' (Bảng Lương - BHXH), người lao động phải có tháng trên Bảng Lương của năm.")
     xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today())
     mst_file = str(comp["mst"] or "").strip()
     if len(mst_file) == 10:
