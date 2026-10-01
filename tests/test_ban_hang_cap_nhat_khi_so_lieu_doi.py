@@ -74,4 +74,46 @@ assert not c5.deleted
 print("PASS 5: chứng từ không do phần mềm tạo không bị đụng.")
 assert "1 × đã ghi sổ trong MISA" in r2["ly_do_bo_qua"], r2["ly_do_bo_qua"]
 print("PASS 6: kết quả nêu lý do bỏ qua (tính trên toàn bộ danh sách).")
+# ===== Bảng kê đầu ra CŨ (còn số SAI do cộng chiết khấu) -> đối soát với dữ liệu hóa đơn GỐC và dùng số gốc =====
+# Ca thật: xóa chứng từ 10216/10400 trong MISA rồi import lại vẫn ghi 1.169.259 vì Bảng kê đã lưu là bản cũ.
+moi_cu = [["24/09/2026", "10216", MST, "CÔNG TY TNHH KHÁCH HÀNG A", "Bột ngọt", 1169259, 93540, "C26MHH", "1"]]
+ns['_ban_ra_goc_theo_hoa_don'] = lambda cid: {"10216": [("c26mhh", 990741, 79260)]}
+c7, r7 = chay([], moi_cu)
+assert r7["so_sua_theo_goc"] == 1 and r7["so_chungtu"] == 1, r7
+sv7 = c7.inserted["SAVoucher"]
+assert len(sv7) == 1 and sv7[0]["TotalAmount"] == 1070001 and sv7[0]["TotalVATAmount"] == 79260, sv7
+print("PASS 7: Bảng kê đầu ra cũ (1.169.259/93.540) -> ghi theo dữ liệu gốc 990.741/79.260.")
+
+# Hóa đơn nhiều dòng trong Bảng kê (nhiều thuế suất) KHÔNG tự sửa; số khớp gốc thì không đụng; ngoại tệ/gốc = 0 không dùng
+moi_2d = [["24/09/2026", "10216", MST, "CÔNG TY TNHH KHÁCH HÀNG A", "A", 500000, 40000, "C26MHH", "1"],
+          ["24/09/2026", "10216", MST, "CÔNG TY TNHH KHÁCH HÀNG A", "B", 669259, 53540, "C26MHH", "1"]]
+c8, r8 = chay([], moi_2d)
+assert r8["so_sua_theo_goc"] == 0 and sorted(v["TotalAmount"] for v in c8.inserted["SAVoucher"]) == [540000, 722799]
+c9, r9 = chay([], moi)           # đã đúng gốc
+assert r9["so_sua_theo_goc"] == 0
+ns['_ban_ra_goc_theo_hoa_don'] = lambda cid: {"10216": [("c26mhh", 0, 0)]}
+c10, r10 = chay([], moi_cu)
+assert r10["so_sua_theo_goc"] == 0
+print("PASS 8: không tự sửa hóa đơn nhiều dòng / đã khớp gốc / gốc = 0.")
+
+print("\nALL DONE")
+
+# _ban_ra_goc_theo_hoa_don: đọc bảng invoices thật (chỉ HĐ bán, hợp lệ, VNĐ)
+import sqlite3, tempfile, json as _json
+sys.path.insert(0, os.path.dirname(_HERE))
+import server as _srv
+_dbf = tempfile.mktemp(suffix=".db")
+def _db():
+    c = sqlite3.connect(_dbf); c.row_factory = sqlite3.Row; return c
+_srv.db = _db
+_c = _db()
+_c.execute("CREATE TABLE invoices (id INTEGER PRIMARY KEY, company_id INT, loai TEXT, khhdon TEXT, shdon TEXT, tgtcthue REAL, tgtthue REAL, tthai TEXT, raw TEXT)")
+for row in ((1, 1, "sold", "C26MHH", "0010216", 990741, 79260, "1", "{}"), (2, 1, "sold", "C26MHH", "5", 100, 8, "4", "{}"),
+            (3, 1, "sold", "C26MHH", "6", 100, 8, "1", _json.dumps({"dvtte": "USD"})), (4, 1, "purchase", "C26TSA", "7", 100, 8, "1", "{}"),
+            (5, 2, "sold", "C26MHH", "8", 100, 8, "1", "{}")):
+    _c.execute("INSERT INTO invoices VALUES (?,?,?,?,?,?,?,?,?)", row)
+_c.commit(); _c.close()
+g = _srv._ban_ra_goc_theo_hoa_don(1)
+assert g == {"10216": [("c26mhh", 990741, 79260)]}, g
+print("PASS 9: dữ liệu gốc chỉ lấy HĐ bán hợp lệ, VNĐ, đúng công ty (số HĐ chuẩn hóa bỏ số 0 đầu).")
 print("\nALL DONE")

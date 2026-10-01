@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.044"
+APP_BUILD = "2026-10-01.045"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22529,6 +22529,30 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         conn.close()
 
 
+def _ban_ra_goc_theo_hoa_don(cid):
+    """{số HĐ chuẩn hóa: [(ký hiệu lower, doanh số, thuế)]} của hóa đơn BÁN RA hợp lệ trong dữ liệu tra cứu (bảng invoices,
+    NGUỒN GỐC từ Tổng cục Thuế — cùng nguồn Đối chiếu dùng). Dùng để đối soát/tự sửa Bảng kê đầu ra cũ trước khi ghi MISA."""
+    out = {}
+    try:
+        conn = db()
+        rows = conn.execute("SELECT khhdon, shdon, tgtcthue, tgtthue, tthai, raw FROM invoices WHERE company_id=? AND loai='sold'",
+                            (cid,)).fetchall()
+        conn.close()
+    except Exception:
+        return out
+    for r in rows:
+        if str(r["tthai"] or "").strip() in ("4", "6") or not str(r["shdon"] or "").strip():
+            continue
+        try:    # hóa đơn NGOẠI TỆ: tgtcthue gốc chưa chắc đã quy đổi VNĐ -> không dùng để tự sửa
+            if str((json.loads(r["raw"]) if r["raw"] else {}).get("dvtte") or "VND").strip().upper() != "VND":
+                continue
+        except Exception:
+            pass
+        out.setdefault(_chuan_shd(str(r["shdon"])).lower(), []).append(
+            (str(r["khhdon"] or "").strip().lower(), _to_num(r["tgtcthue"]) or 0, _to_num(r["tgtthue"]) or 0))
+    return out
+
+
 def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=None):
     """Ghi chứng từ BÁN HÀNG thẳng vào MISA (bảng RIÊNG SAVoucher/
     SAVoucherDetail — xem _SA_VOUCHER_DEFAULT). Dữ liệu lấy từ Bảng kê Đầu ra
@@ -22984,12 +23008,16 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
         _bang_co_so = {t for t, c in (("GeneralLedger", cols_gl), ("AccountObjectLedger", cols_aol),
                                       ("CustomFieldLedger", cols_cfl), ("SaleLedger", cols_sll)) if c}
         _tong_nguon_hd = {}
+        _dem_dong_hd = {}
+        _goc_ban = _ban_ra_goc_theo_hoa_don(cid)
+        so_sua_theo_goc = 0
         for _r0 in rows:
             _sh0 = str(gv(_r0, col["sohd"]) or "").strip()
             if not _sh0:
                 continue
             _k0 = ((_dinh_dang_mst(gv(_r0, col["mst"])).lower() or "kl", _sh0.lower()),
                    str(gv(_r0, col["kyhieu"]) or "").strip().lower())
+            _dem_dong_hd[_k0] = _dem_dong_hd.get(_k0, 0) + 1
             _a0 = _tong_nguon_hd.get(_k0, (0, 0))
             _tong_nguon_hd[_k0] = (_a0[0] + round(_to_num(gv(_r0, col["ds"])) or 0),
                                    _a0[1] + round(_to_num(gv(_r0, col["thue"])) or 0))
@@ -23002,6 +23030,19 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 continue
             ds = round(_to_num(gv(r, col["ds"])) or 0)
             thue = round(_to_num(gv(r, col["thue"])) or 0)
+            # ĐỐI SOÁT với dữ liệu hóa đơn GỐC: Bảng kê đầu ra có thể là bản CŨ (xuất trước khi sửa lỗi dòng chiết khấu
+            # thương mại bị CỘNG thay vì TRỪ — HĐ 10216/10400) nên import lại vẫn ghi số sai. Hóa đơn chỉ có 1 dòng trong
+            # Bảng kê mà khác dữ liệu gốc (> 1đ) -> dùng số GỐC (đúng thứ Đối chiếu so sánh). Hóa đơn nhiều dòng (nhiều
+            # thuế suất, dòng 0đ trùng số) không tự sửa vì không ghép chắc chắn được.
+            _k1 = ((_dinh_dang_mst(gv(r, col["mst"])).lower() or "kl", sohd.lower()),
+                   str(gv(r, col["kyhieu"]) or "").strip().lower())
+            if _dem_dong_hd.get(_k1) == 1 and (ds or thue):
+                _ung = [g for g in _goc_ban.get(_chuan_shd(sohd).lower(), []) if g[0] == _k1[1]] or \
+                       (_goc_ban.get(_chuan_shd(sohd).lower(), []) if len(_goc_ban.get(_chuan_shd(sohd).lower(), [])) == 1 else [])
+                if len(_ung) == 1 and _ung[0][1] > 0 and (abs(round(_ung[0][1]) - ds) > 1 or abs(round(_ung[0][2]) - thue) > 1):
+                    ds, thue = round(_ung[0][1]), round(_ung[0][2])
+                    _tong_nguon_hd[_k1] = (ds, thue)
+                    so_sua_theo_goc += 1
             ngay_str = str(gv(r, col["ngay"]) or "").strip()
             mathang = str(gv(r, col["mathang"]) or "").strip()
             nguoimua = str(gv(r, col["nguoimua"]) or "").strip()
@@ -23582,7 +23623,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 "loai_ct_dang_co": loai_ct_dang_co,
                 "hoc_mau": (hoc["refname"] if hoc else None),
                 "hoc_display_on_book": hoc_dob, "hoc_chi_nhanh": hoc_branch_ten,
-                "mau_that": mau_that,
+                "mau_that": mau_that, "so_sua_theo_goc": so_sua_theo_goc,
                 # lý do tính trên TOÀN BỘ ket (không chỉ 500 dòng đầu) + dòng ĐƯỢC GHI/CẬP NHẬT lên trước dòng bỏ qua
                 "ly_do_bo_qua": _tom_tat_ly_do_bo_qua(ket),
                 "danh_sach": sorted(ket, key=lambda x: str(x.get("trang_thai", "")).startswith(
@@ -33138,6 +33179,8 @@ def _misa_tom_tat_buoc(r):
     if not r:
         return "xong"
     phan = []
+    if r.get("so_sua_theo_goc"):
+        phan.append(f"⚠ {r['so_sua_theo_goc']} HĐ Bảng kê khác dữ liệu gốc → đã dùng số gốc")
     if r.get("so_tk_no_du_doan") is not None:
         return ("✓ tự điền TK Nợ dự đoán %d dòng (kiểm tra lại cột Nợ)" % r["so_tk_no_du_doan"]
                 if r["so_tk_no_du_doan"] else "không có dòng trống TK Nợ")
@@ -40454,11 +40497,11 @@ def _dong_ck_tm_rieng(tchat, ten, thtien, stckhau, sluong, dgia):
     tt = _to_num(thtien) or 0
     if not isinstance(tt, (int, float)) or tt <= 0:
         return False
-    ck = _to_num(stckhau) or 0
-    if isinstance(ck, (int, float)) and ck > 0:
-        return False
     sl = _to_num(sluong) or 0
     dg = _to_num(dgia) or 0
+    ck = _to_num(stckhau) or 0
+    if isinstance(ck, (int, float)) and ck > 0 and (sl or dg or str(tchat or "").strip() != "3"):
+        return False      # hàng có chiết khấu dòng (TChat=3 vừa là hàng vừa có STCKhau, có SL/đơn giá)
     ten_l = str(ten or "").lower()
     return str(tchat or "").strip() == "3" or (not sl and not dg and ("chiết khấu" in ten_l or "chiet khau" in ten_l))
 
