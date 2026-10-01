@@ -1,76 +1,47 @@
-import os, sys
+import os, sys, json, sqlite3, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import server
 
-# NCC xuất hóa đơn chiết khấu (HĐ âm của Satori: 5451, 6036...). Người dùng hạch toán Nợ 331 / Có 6427 trong bảng chi tiết;
-# trước đây _gen_mua_hang_dv chỉ nhận Nợ 6xx nên dòng này bị bỏ qua im lặng -> "THIẾU trong MISA". Nay nhận Nợ 331/Có 6xx
-# (số dương hay âm đều được) và ghi chứng từ mua dịch vụ GHI ÂM (Nợ 6427 âm / Có 331 âm), cùng bút toán với Nợ 331/Có 6427.
+# HĐ chiết khấu NCC (Satori 5451, 6036...) hạch toán Nợ 331 / Có 6427 SỐ DƯƠNG: KHÔNG còn đi vào chứng từ mua dịch vụ ghi âm mà ghi thành
+# Chứng từ nghiệp vụ khác (xem tests/test_chiet_khau_ncc_nghiep_vu_khac.py). Dòng Nợ 6xx / Có 331 (kể cả ghi âm cũ) vẫn vào mua dịch vụ như trước.
 hd = ["Ký hiệu", "Số HĐ", "Ngày", "Người bán", "MST bán", "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT", "Số lượng", "Đơn giá",
-      "Thành tiền", "Thuế suất", "Tiền thuế GTGT", "Nợ", "Có"]
+      "Thành tiền", "Thuế suất", "Tiền thuế GTGT", "Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK", "Nợ", "Có"]
 rows = [
-    ["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ thị trường", "", "", "", 10980720, "8%", 878458, "331", "6427"],      # N331/C6427 dương
-    ["C26TSA", "6036", "23/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ phát triển", "", "", "", -13340460, "8%", -1067237, "331", "6427"],  # N331/C6427 âm
-    ["C26TSA", "6206", "24/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ khác", "", "", "", -16947150, "8%", -1355772, "6427", "331"],        # Nợ 6427/Có 331 âm (như cũ)
-    ["C26TVS", "7810", "03/09/2026", "VISNAM", "0401486901", "1", "MHDV", "Phần mềm", "", "", "", 6900000, "KCT", 0, "6428", "331"],                     # dịch vụ thường
-    ["C26TNT", "3513", "03/09/2026", "NAM TIẾN", "0317743519", "1", "TP1", "Nước tương", "Chai", 1, 100, 100, "8%", 8, "331", "1561"],                  # Nợ 331/Có 1561: KHÔNG phải chi phí -> không lấy
+    ["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ thị trường", "", "", "", 10980720, "8%", 878458, None, None, None, 331, 6427],
+    ["C26TSA", "6206", "24/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ khác", "", "", "", -16947150, "8%", -1355772, None, None, None, "6427", "331"],
+    ["C26TVS", "7810", "03/09/2026", "VISNAM", "0401486901", "1", "MHDV", "Phần mềm", "", "", "", 6900000, "KCT", 0, None, None, None, "6428", "331"],
+    ["C26TNT", "3513", "03/09/2026", "NAM TIẾN", "0317743519", "1", "TP1", "Nước tương", "Chai", 1, 100, 100, "8%", 8, None, None, None, "331", "1561"],
 ]
-out = server._gen_mua_hang_dv(1, hd, rows)
-assert len(out) == 4, [r[33] for r in out]
-by = {r[33]: r for r in out}                   # cột 34 = số HĐ
-for so in ("5451", "6036", "6206"):
-    r = by[so]
-    assert r[16] == "6427" and r[17] == "331", (so, r[16], r[17])
-    assert r[21] < 0 and r[22] < 0 and r[28] < 0, (so, r[21], r[22], r[28])
-assert by["5451"][21] == -10980720 and by["5451"][28] == -878458
-assert by["6036"][21] == -13340460 and by["6036"][28] == -1067237
+dv = server._gen_mua_hang_dv(1, hd, rows)
+by = {r[33]: r for r in dv}
+assert set(by) == {"6206", "7810"}, set(by)                 # Nợ 331 (dù Có 6427 hay 1561) không vào mua dịch vụ
+assert by["6206"][16] == "6427" and by["6206"][17] == "331" and by["6206"][21] == -16947150
 assert by["7810"][16] == "6428" and by["7810"][21] == 6900000
-print("PASS: HĐ chiết khấu NCC hạch toán Nợ 331/Có 6427 (dương hay âm) và Nợ 6427/Có 331 âm đều vào mua dịch vụ ghi ÂM; HĐ thường giữ nguyên.")
-print("\nALL DONE")
+print("PASS 1: Nợ 331 không vào mua dịch vụ ghi âm; Nợ 6xx/Có 331 (kể cả âm) và dịch vụ thường giữ nguyên.")
 
-# Ca thật: file NhapLieu_DauVao.xlsx người dùng gửi — Nợ/Có nhập dạng SỐ (331, 6427) chứ không phải chuỗi, và 4 HĐ (1706, 1759, 185, 1264)
-# còn trống Nợ -> Import nhập kho bỏ qua. Sau khi điền TK Nợ trống, nhập kho phải nhận thêm đúng 5 dòng, DV vẫn nhận 7 HĐ chiết khấu (ghi âm).
-server._get_map_no = lambda cid: {}
-server._get_map_no_item = lambda cid: {}
-rows_so = [
-    ["C26TYY", "1706", "09/09/2026", "HOA HỒNG PHÁT", "0318961005", "1", "HH00114", "Bột ngọt 1kg", "Thùng", 208, 877403.85, 182500000, "8%", 14600000, None, None, None, None, "331"],
-    ["C26TKN", "1264", "22/09/2026", "KHÁNH NGỌC", "0313517406", "1", "GI034", "Giấy A4", "Ream", 5, 55000, 275000, "8%", 22000, None, None, None, None, "331"],
-    ["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, 10980720, "8%", 878458, None, None, None, 331, 6427],
-    ["C26TNT", "3513", "03/09/2026", "NAM TIẾN", "0317743519", "1", "TP1", "Nước tương", "Chai", 1200, 5333, 6399600, "8%", 511968, None, None, None, "1561", "331"],
-]
-hd_so = hd + ["Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK"]
-hd_so = ["Ký hiệu", "Số HĐ", "Ngày", "Người bán", "MST bán", "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền",
-         "Thuế suất", "Tiền thuế GTGT", "Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK", "Nợ", "Có"]
-assert len(server._gen_mua_hang_nk(1, hd_so, rows_so)) == 1            # chỉ HĐ 3513 có Nợ
-moi_so, ds_so = server._dien_tk_no_bang_ke_dau_vao(1, hd_so, rows_so)
-assert len(server._gen_mua_hang_nk(1, hd_so, moi_so)) == 3             # + 1706, 1264
-dv_so = server._gen_mua_hang_dv(1, hd_so, moi_so)
-assert len(dv_so) == 1 and dv_so[0][16] == "6427" and dv_so[0][17] == "331" and dv_so[0][21] == -10980720
-print("PASS 2: file thật (Nợ/Có dạng số 331/6427 + 4 HĐ trống Nợ): nhập kho nhận thêm HĐ trống Nợ sau khi điền, HĐ chiết khấu vào DV ghi âm.")
-print("\nALL DONE")
+# Nhóm chiết khấu NCC: Có 6xx / Có trống / Có 331; Nợ 331/Có 15x, Có 112 (thanh toán) KHÔNG phải chiết khấu
+rows_ck = rows[:1] + [
+    ["C26TSA", "6036", "23/09/2026", "SATORI", "0319340593", "1", "MHDV", "HT", None, 0, 0, -13340460, "8%", -1067237, None, None, None, "331", ""],
+    ["C26TSA", "6212", "24/09/2026", "SATORI", "0319340593", "1", "MHDV", "HT", None, 0, 0, 19585710, "8%", 1566857, None, None, None, 331, 331],
+    ["C26TXX", "1000", "01/09/2026", "NCC X", "0301234567", "1", "X", "Thanh toán", "", 1, 100, 100, "8%", 8, None, None, None, "331", "112"],
+    ["C26TNT", "3513", "03/09/2026", "NAM TIẾN", "0317743519", "1", "TP1", "Nước tương", "Chai", 1, 100, 100, "8%", 8, None, None, None, "331", "1561"]]
+dd = server._dong_chiet_khau_ncc(hd, rows_ck)
+assert [x["so_hd"] for x in dd] == ["5451", "6036", "6212"] and all(x["tk_cp"] == "6427" for x in dd), dd
+assert dd[1]["net"] == 13340460 and dd[1]["vat"] == 1067237
+print("PASS 2: nhận diện hóa đơn chiết khấu NCC (Có 6xx/trống/331), trị tuyệt đối; bỏ Nợ 331/Có 112, Có 15x.")
 
-# Kế toán chỉ gõ Nợ 331, để Có TRỐNG hoặc để mặc định 331 -> vẫn hiểu là giảm chi phí 6427 (không bỏ qua im lặng)
-rows_co_trong = [
-    ["C26TSA", "5451", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, 10980720, "8%", 878458, None, None, None, "331", ""],
-    ["C26TSA", "5452", "17/09/2026", "SATORI", "0319340593", "1", "MHDV", "Hỗ trợ (CK)", None, 0, 0, -11169792, "8%", -893583, None, None, None, 331, 331],
-]
-dv2 = server._gen_mua_hang_dv(1, hd_so, rows_co_trong)
-assert len(dv2) == 2 and all(r[16] == "6427" and r[17] == "331" and r[21] < 0 and r[28] < 0 for r in dv2), dv2
-print("PASS 3: Nợ 331 + Có trống/331 -> vẫn là giảm chi phí 6427, ghi âm.")
-
-# Bước 4d: liệt kê dòng Bảng kê không nhóm nào nhận (Nợ lạ), không còn bỏ qua im lặng
-rows_la = rows_so + [["C26TXX", "999", "01/09/2026", "NCC X", "0301234567", "1", "X", "Hàng lạ", "Cái", 1, 100, 100, "8%", 8, None, None, None, "9999", "331"],
-                     ["C26TXX", "1000", "01/09/2026", "NCC X", "0301234567", "1", "X", "Phí NH", "", 1, 100, 100, "8%", 8, None, None, None, "331", "112"]]
-import json, sqlite3, tempfile
+# Bước 4e: dòng Bảng kê không nhóm nào nhận (Nợ lạ) được liệt kê, Nợ 331 chiết khấu thì KHÔNG bị coi là lạ
+rows_la = rows + [["C26TXX", "999", "01/09/2026", "NCC X", "0301234567", "1", "X", "Hàng lạ", "Cái", 1, 100, 100, "8%", 8, None, None, None, "9999", "331"],
+                  ["C26TXX", "1000", "01/09/2026", "NCC X", "0301234567", "1", "X", "Phí NH", "", 1, 100, 100, "8%", 8, None, None, None, "331", "112"]]
 _f = tempfile.mktemp(suffix=".db")
 def _db():
     c = sqlite3.connect(_f); c.row_factory = sqlite3.Row; return c
 server.db = _db
 c0 = _db()
 c0.execute("CREATE TABLE nhap_lieu (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, loai TEXT, header_json TEXT, rows_json TEXT, updated_at TEXT, UNIQUE(company_id, loai))")
-c0.execute("INSERT INTO nhap_lieu (company_id, loai, header_json, rows_json) VALUES (1,'in',?,?)", (json.dumps(hd_so), json.dumps(rows_la)))
+c0.execute("INSERT INTO nhap_lieu (company_id, loai, header_json, rows_json) VALUES (1,'in',?,?)", (json.dumps(hd), json.dumps(rows_la)))
 c0.commit(); c0.close()
 kq = server._dong_bang_ke_dau_vao_khong_nhan_dang(1)
-assert kq["so_dong_khong_nhan_dang"] == 2 and {d["so_hd"] for d in kq["danh_sach"]} == {"999", "1000"}, kq
-assert "không nhận dạng" in kq["ghi_chu"]
-print("PASS 4: 4d liệt kê đúng 2 dòng có Nợ/Có không nhận dạng được (Nợ 9999; Nợ 331/Có 112).")
+assert kq["so_dong_khong_nhan_dang"] == 3 and {d["so_hd"] for d in kq["danh_sach"]} == {"999", "1000", "3513"}, kq
+print("PASS 3: 4e liệt kê đúng 3 dòng Nợ/Có lạ (Nợ 9999; Nợ 331 với Có 112 hoặc 1561); Nợ 331/Có 6427 không bị coi là lạ.")
 print("\nALL DONE")

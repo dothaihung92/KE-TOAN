@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.046"
+APP_BUILD = "2026-10-01.047"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13937,14 +13937,8 @@ def _gen_mua_hang_dv(cid, header, rows):
         co = str(gv(r, i_co) or "").strip()
         dao_ck = False
         if not no.startswith("6"):          # chỉ lấy Nợ là TK chi phí 6xx
-            # NCC xuất hóa đơn CHIẾT KHẤU/điều chỉnh giảm, kế toán hạch toán Nợ 331 / Có 6xx (giảm chi phí): trước đây bị
-            # bỏ qua im lặng (không lọt bộ lọc Nợ 6xx) -> hóa đơn báo "THIẾU trong MISA". Ghi vào MISA dưới dạng chứng
-            # từ mua dịch vụ GHI ÂM (Nợ 6xx âm / Có 331 âm — cùng bút toán, đúng cách các dòng "ghi âm" đang làm).
-            # Có để TRỐNG hoặc ghi 331 (kế toán chỉ gõ Nợ 331, chưa gõ Có 6427) -> hiểu là giảm chi phí 6427.
-            if no.startswith("331") and (co.startswith("6") or co in ("", "331")):
-                no, co, dao_ck = (co if co.startswith("6") else "6427"), no, True
-            else:
-                continue
+            # Nợ 331 / Có 6xx (hóa đơn CHIẾT KHẤU NCC) KHÔNG đi đường này nữa: ghi thành Chứng từ nghiệp vụ khác số dương — xem _misa_ghi_chiet_khau_ncc
+            continue
         mst_disp = _dinh_dang_mst(gv(r, i_mst))
         ngay = str(gv(r, i_ngay) or "")
         sohd = gv(r, i_so)
@@ -33208,6 +33202,277 @@ def _dong_bang_ke_dau_vao_khong_nhan_dang(cid):
                             len(ds), ", ".join(sorted({d["so_hd"] for d in ds})[:5])))}
 
 
+# ----- CHIẾT KHẤU NCC (hóa đơn giảm giá/chiết khấu mua vào) hạch toán Nợ 331 / Có 6xx / Có 1331 DẠNG SỐ DƯƠNG -----
+# Người dùng chọn hạch toán đúng như đã gõ ở Bảng kê (Nợ 331, Có 6427 + Có 1331, số dương) thay vì chứng từ mua dịch vụ ghi ÂM.
+# Ghi thành "Chứng từ nghiệp vụ khác" (GLVoucher). Cấu trúc các bảng sổ/thuế KHÁC NHAU giữa các phiên bản MISA nên KHÔNG đoán cột:
+# CLONE từ 1 chứng từ MẪU THẬT của chính công ty (Nợ 331/Có 6xx + Nợ 331/Có 133x, đúng 2 dòng) — sao chép mọi dòng của mẫu ở các bảng
+# GLVoucher*/sổ cái theo RefID, đổi id/số chứng từ/ngày/hóa đơn/NCC/số tiền bằng thay thế GIÁ TRỊ (số tiền mẫu -> số tiền mới...).
+_CK_NCC_MEMO = "Chiết khấu mua hàng HĐ"
+
+
+def _dong_chiet_khau_ncc(header, rows):
+    """Gom dòng Bảng kê đầu vào Nợ 331x + Có 6xx (hoặc Có trống/331 -> hiểu là 6427) theo hóa đơn: [{mst, mst_k, so_hd, ky_hieu, ngay, ncc, net,
+    vat, ten, tk_cp}] — số tiền lấy TRỊ TUYỆT ĐỐI (dương hay âm đều là giảm chi phí)."""
+    c = _nk_cols(header)
+    if c["no"] < 0 or c["sohd"] < 0:
+        return []
+    def gv(r, i):
+        return r[i] if 0 <= i < len(r) else ""
+    out, idx = [], {}
+    for r in rows:
+        no = str(gv(r, c["no"]) or "").strip()
+        co = str(gv(r, c["co"]) or "").strip()
+        if not (no.startswith("331") and (co.startswith("6") or co in ("", "331"))):
+            continue
+        sohd = str(gv(r, c["sohd"]) or "").strip()
+        tt, th = _to_num(gv(r, c["tt"])) or 0, _to_num(gv(r, c["tthue"])) or 0
+        if not sohd or not (tt or th):
+            continue
+        mst = _dinh_dang_mst(gv(r, c["mst"]))
+        k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd).lower(), str(gv(r, c["kh"]) or "").strip().lower())
+        e = idx.get(k)
+        if e is None:
+            e = {"mst": mst, "mst_k": k[0], "so_hd": sohd, "ky_hieu": str(gv(r, c["kh"]) or "").strip(), "ngay": str(gv(r, c["ngay"]) or "").strip(),
+                 "ncc": str(gv(r, c["nb"]) or "").strip(), "net": 0, "vat": 0, "ten": str(gv(r, c["ten"]) or "").strip(),
+                 "tk_cp": co if co.startswith("6") else "6427"}
+            idx[k] = e
+            out.append(e)
+        e["net"] += abs(tt)
+        e["vat"] += abs(th)
+    return out
+
+
+def _misa_bang_theo_refid(cur):
+    """{tên bảng: ([(cột, kiểu)], [cột khóa chính])} cho mọi bảng THẬT có cột RefID (chỉ cột ghi được)."""
+    kq = {}
+    try:
+        ds = [r[0] for r in cur.execute("SELECT DISTINCT t.name FROM sys.columns c JOIN sys.tables t ON t.object_id=c.object_id "
+                                        "WHERE c.name='RefID'").fetchall()]
+    except Exception:
+        return kq
+    for t in ds:
+        cols = _misa_cot_bang_that(cur, t)
+        if not cols:
+            continue
+        try:
+            pk = [r[0] for r in cur.execute(
+                "SELECT c.name FROM sys.index_columns ic JOIN sys.indexes i ON i.object_id=ic.object_id AND i.index_id=ic.index_id "
+                "JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id "
+                "WHERE i.is_primary_key=1 AND ic.object_id=OBJECT_ID(?)", t).fetchall()]
+        except Exception:
+            pk = []
+        kq[t] = ([(n, ty) for n, ty in cols.values()], pk)
+    return kq
+
+
+def _misa_la_bang_gl(ten):
+    return ten.startswith("GLVoucher") or ten.endswith("Ledger")
+
+
+def _misa_go_chung_tu_theo_refid(cur, bang, ref_id, ho, bang_chinh):
+    """Gỡ 1 chứng từ khỏi mọi bảng cùng họ (ho = tiền tố bảng chi tiết, vd 'GLVoucher'/'PUService') + sổ cái, theo RefID. Sổ cái/chi tiết trước,
+    bảng chính (bang_chinh) cuối. Chỉ gọi cho chứng từ do chính phần mềm tạo (đã kiểm CustomField10)."""
+    thu_tu = sorted((t for t in bang if t != bang_chinh and (t.startswith(ho) or t.endswith("Ledger"))),
+                    key=lambda t: (0 if t.endswith("Ledger") else 1, t))
+    for t in thu_tu + [bang_chinh]:
+        if t in bang:
+            cur.execute("DELETE FROM [%s] WHERE RefID=?" % t, ref_id)
+
+
+def _misa_tim_chung_tu_mau_ck(cur):
+    """RefID 1 chứng từ Nghiệp vụ khác MẪU: đúng 2 dòng — Nợ 331x/Có 6xx và Nợ 331x/Có 133x. Ưu tiên chứng từ KHÔNG do phần mềm tạo."""
+    try:
+        r = cur.execute(
+            "SELECT TOP 1 gv.RefID FROM GLVoucher gv WHERE "
+            "EXISTS (SELECT 1 FROM GLVoucherDetail d WHERE d.RefID=gv.RefID AND d.DebitAccount LIKE '331%' AND d.CreditAccount LIKE '6%') AND "
+            "EXISTS (SELECT 1 FROM GLVoucherDetail d WHERE d.RefID=gv.RefID AND d.DebitAccount LIKE '331%' AND d.CreditAccount LIKE '133%') AND "
+            "(SELECT COUNT(*) FROM GLVoucherDetail d WHERE d.RefID=gv.RefID)=2 "
+            "ORDER BY CASE WHEN ISNULL(gv.CustomField10,'')=? THEN 1 ELSE 0 END, gv.CreatedDate DESC", _PM_MARK).fetchone()
+    except Exception:
+        return None
+    return r[0] if r else None
+
+
+def _misa_ghi_chiet_khau_ncc(cid, database, preview=True):
+    """Ghi hóa đơn chiết khấu NCC (Bảng kê đầu vào: Nợ 331 / Có 6xx) thành Chứng từ nghiệp vụ khác Nợ 331/Có 6xx (+ Nợ 331/Có 1331 nếu có thuế),
+    số DƯƠNG, bằng cách CLONE chứng từ mẫu thật của công ty (xem chú thích đầu mục). Chạy lại: hóa đơn đã ghi đúng số -> bỏ qua; đổi số -> gỡ ghi lại.
+    Đồng thời gỡ chứng từ mua dịch vụ ghi ÂM (do phần mềm tạo trước đây, cùng MST+Số HĐ) để không tính trùng."""
+    import uuid as _uuid
+    import re as _re
+    dl = nhap_lieu_get(cid, "in")
+    header, rows = dl.get("header") or [], dl.get("rows") or []
+    ds = _dong_chiet_khau_ncc(header, rows)
+    if not ds:
+        return {"preview": preview, "so_chungtu": 0, "so_dong": 0, "so_trung": 0, "danh_sach": [],
+                "ghi_chu": "Không có hóa đơn chiết khấu NCC (Nợ 331 / Có 6xx) trong Bảng kê đầu vào."}
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        bang = _misa_bang_theo_refid(cur)
+        if "GLVoucher" not in bang or "GLVoucherDetail" not in bang:
+            raise HTTPException(400, "Không tìm thấy bảng GLVoucher/GLVoucherDetail trong CSDL MISA đang kết nối.")
+        ref_mau = _misa_tim_chung_tu_mau_ck(cur)
+        if not ref_mau:
+            raise HTTPException(400, "Chưa có chứng từ MẪU để học cấu trúc. Trong MISA hãy tạo tay 1 'Chứng từ nghiệp vụ khác' ĐÃ GHI SỔ gồm đúng 2 dòng: "
+                                     "Nợ 331 (chọn 1 NCC, điền tab Thuế nếu muốn kê khai) / Có 6427 và Nợ 331 / Có 1331 — số tiền 2 dòng khác nhau và lớn hơn "
+                                     "1.000 (vd 123.457 và 9.877) — rồi chạy lại.")
+        mau = {}
+        for t, (cols, _pk) in bang.items():
+            if not _misa_la_bang_gl(t):
+                continue
+            ten_cot = [n for n, _ in cols]
+            rs = [dict(zip(ten_cot, r)) for r in cur.execute(
+                "SELECT [%s] FROM [%s] WHERE RefID=?" % ("],[".join(ten_cot), t), ref_mau).fetchall()]
+            if rs:
+                mau[t] = rs
+        glv_m = mau["GLVoucher"][0]
+        chi_tiet_m = mau["GLVoucherDetail"]
+        net_m = next((d for d in chi_tiet_m if str(d.get("CreditAccount") or "").startswith("6")), None)
+        vat_m = next((d for d in chi_tiet_m if str(d.get("CreditAccount") or "").startswith("133")), None)
+        if not (net_m and vat_m):
+            raise HTTPException(400, "Chứng từ mẫu không có đủ 2 dòng Nợ 331/Có 6xx và Nợ 331/Có 133x.")
+        a_net, a_vat = round(float(net_m.get("Amount") or 0), 2), round(float(vat_m.get("Amount") or 0), 2)
+        if a_net < 1000 or a_vat < 1000 or a_net == a_vat:
+            raise HTTPException(400, "Chứng từ mẫu phải có số tiền 2 dòng KHÁC nhau và lớn hơn 1.000 (hiện %s / %s) để phần mềm thay số chính xác." % (a_net, a_vat))
+        so_mau = str(glv_m.get("RefNoFinance") or "")
+        mm = _re.match(r"^(\D*)(\d+)", so_mau)
+        tien_to, do_rong = (mm.group(1), len(mm.group(2))) if mm else ("NVK", 5)
+        cao = 0
+        for (rf,) in cur.execute("SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?", tien_to + "%").fetchall():
+            m2 = _re.match(r"^%s(\d+)" % _re.escape(tien_to), str(rf or ""))
+            if m2:
+                cao = max(cao, int(m2.group(1)))
+        max_ro = 0
+        try:
+            max_ro = cur.execute("SELECT ISNULL(MAX(RefOrder),0) FROM GLVoucher").fetchone()[0] or 0
+        except Exception:
+            pass
+        ncc = {}
+        for aid, taxcode, code, name in cur.execute("SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName FROM AccountObject").fetchall():
+            if taxcode:
+                ncc[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, str(name or ""), str(code or ""), str(taxcode or ""))
+        ao_m = None      # NCC của chứng từ mẫu: giá trị cột *AccountObjectID đầu tiên (kể cả DebitAccountObjectID...) ở sổ/chi tiết
+        for t in ("AccountObjectLedger", "GeneralLedger", "GLVoucherDetail"):
+            for r in mau.get(t, []):
+                ao_m = next((v for c_, v in r.items() if "accountobjectid" in c_.lower() and isinstance(v, str) and v), None)
+                if ao_m:
+                    break
+            if ao_m:
+                break
+        ao_ten_m = ao_code_m = ao_tax_m = None
+        if ao_m:
+            r0 = cur.execute("SELECT AccountObjectCode, AccountObjectName, CompanyTaxCode FROM AccountObject WHERE AccountObjectID=?", ao_m).fetchone()
+            if r0:
+                ao_code_m, ao_ten_m, ao_tax_m = r0
+        now = datetime.datetime.now()
+        ket, them, trung, go = [], 0, 0, 0
+        for e in ds:
+            ngay = _misa_doc_ngay(e["ngay"]) or now
+            if e["mst_k"] not in ncc:
+                ket.append({"so_hd": e["so_hd"], "trang_thai": "bỏ qua — NCC (MST %s) chưa có trong MISA" % e["mst"]})
+                continue
+            ao_id, ao_ten, ao_code, ao_tax = ncc[e["mst_k"]]
+            net, vat = round(e["net"]), round(e["vat"])
+            memo = ("%s %s (MST %s) - %s" % (_CK_NCC_MEMO, e["so_hd"], e["mst"], e["ten"]))[:255]
+            memo_vat = ("Thuế GTGT - %s %s (MST %s)" % (_CK_NCC_MEMO, e["so_hd"], e["mst"]))[:255]
+            cu = cur.execute("SELECT RefID, ISNULL(TotalAmount,0), RefNoFinance FROM GLVoucher WHERE ISNULL(CustomField10,'')=? AND JournalMemo LIKE ?",
+                             _PM_MARK, "%s %s (MST %s)%%" % (_CK_NCC_MEMO, e["so_hd"], e["mst"])).fetchall()
+            doc = None
+            if cu:
+                if len(cu) == 1 and abs(float(cu[0][1]) - (net + vat)) <= 1:
+                    trung += 1
+                    ket.append({"so_ct": cu[0][2], "so_hd": e["so_hd"], "trang_thai": "đã có (do phần mềm tạo, đúng số liệu, bỏ qua)"})
+                    continue
+                doc = cu[0][2]
+                if not preview:
+                    for (rid, _t, _d) in cu:
+                        _misa_go_chung_tu_theo_refid(cur, bang, rid, "GLVoucher", "GLVoucher")
+                go += 1
+            if doc is None:
+                cao += 1
+                doc = "%s%0*d" % (tien_to, do_rong, cao)
+            if "PUService" in bang:      # gỡ chứng từ mua dịch vụ ghi ÂM cũ của chính phần mềm cho hóa đơn này (tránh tính trùng)
+                try:
+                    for (rid,) in cur.execute(
+                            "SELECT DISTINCT ps.RefID FROM PUService ps JOIN PUServiceDetail d ON d.RefID=ps.RefID WHERE ISNULL(ps.CustomField10,'')=? "
+                            "AND d.InvNo=? AND d.TaxAccountObjectTaxCode=? AND d.Amount<0", _PM_MARK, e["so_hd"], e["mst"]).fetchall():
+                        if not preview:
+                            _misa_go_chung_tu_theo_refid(cur, bang, rid, "PUService", "PUService")
+                        go += 1
+                except Exception:
+                    pass
+            new_ref = str(_uuid.uuid4())
+            idmap = {ref_mau: new_ref}
+            for d in chi_tiet_m:
+                idmap[d["RefDetailID"]] = str(_uuid.uuid4())
+            so_tien = {a_net: net, a_vat: vat, round(a_net + a_vat, 2): net + vat}
+            chuoi = {str(net_m.get("Description") or ""): memo, str(vat_m.get("Description") or ""): memo_vat,
+                     str(glv_m.get("JournalMemo") or ""): memo}
+            if ao_m:
+                idmap[ao_m] = ao_id
+                for a, b in ((ao_ten_m, ao_ten), (ao_code_m, ao_code), (ao_tax_m, ao_tax)):
+                    if a:
+                        chuoi[str(a)] = b
+            chuoi.pop("", None)
+            for t in sorted(mau, key=lambda t: (0 if t == "GLVoucher" else 1 if t.startswith("GLVoucher") else 2, t)):
+                cols, pk = bang[t]
+                for r in mau[t]:
+                    if vat == 0 and r.get("RefDetailID") == vat_m["RefDetailID"]:
+                        continue
+                    moi = {}
+                    for cot, _kieu in cols:
+                        v = r.get(cot)
+                        cl = cot.lower()
+                        if cl == "refid":
+                            v = new_ref
+                        elif isinstance(v, str) and v in idmap:
+                            v = idmap[v]
+                        elif cot in pk and v is not None:
+                            v = str(_uuid.uuid4())
+                        elif cl in ("refdate", "refdate1", "posteddate", "invdate"):
+                            v = ngay if v is not None else v
+                        elif cl == "invno":
+                            v = e["so_hd"][:25] if v else v
+                        elif cl == "invseries":
+                            v = e["ky_hieu"][:20] if v else v
+                        elif cl in ("refno", "refno1", "refno2", "refnofinance", "refnomanagement"):
+                            v = doc if v else v
+                        elif cl == "reforder":
+                            max_ro += 1
+                            v = max_ro
+                        elif cl in ("createddate", "modifieddate"):
+                            v = now
+                        elif cl == "customfield10" and t == "GLVoucher":
+                            v = _PM_MARK
+                        elif not isinstance(v, (bool, str, datetime.datetime)) and (isinstance(v, (int, float)) or hasattr(v, "quantize")):
+                            v = so_tien.get(round(float(v), 2), v)
+                        elif isinstance(v, str):
+                            v = chuoi.get(v, v)
+                        moi[cot] = v
+                    if not preview:
+                        cs = list(moi.keys())
+                        cur.execute("INSERT INTO [%s] ([%s]) VALUES (%s)" % (t, "],[".join(cs), ",".join(["?"] * len(cs))), [moi[c] for c in cs])
+            them += 1
+            hau = " / Có 1331" if vat else ""
+            ket.append({"so_ct": doc, "so_hd": e["so_hd"], "kh": ao_ten, "tong_tien": net, "tien_thue": vat,
+                        "trang_thai": ("sẽ ghi" if preview else "đã ghi") + " (Nợ 331 / Có %s%s)" % (e["tk_cp"], hau)})
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "database": database, "so_chungtu": them, "so_dong": them, "so_trung": trung, "so_ghi_de": go,
+                "ly_do_bo_qua": _tom_tat_ly_do_bo_qua(ket), "danh_sach": ket[:500]}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as ex:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi ghi chiết khấu NCC vào MISA (đã hoàn tác, không ghi gì): %s" % str(ex)[:400])
+    finally:
+        conn.close()
+
+
 def _misa_tom_tat_buoc(r):
     """Tóm tắt 1 dòng kết quả của 1 bước (số thêm/bỏ qua/ghi đè...) để hiện
     trong dòng tiến độ — cùng logic với misaTomTatBuoc() phía JS."""
@@ -33374,7 +33639,9 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
          lambda: _misa_ghi_mua_hang(cid, database, "kqk", preview=preview, ghi_de=ghi_de))
     chay("4c. Dịch vụ vào MISA",
          lambda: _misa_ghi_mua_hang_dv(cid, database, preview=preview, ghi_de=ghi_de))
-    chay("4d. Kiểm tra dòng Bảng kê đầu vào không nhận dạng được",
+    chay("4d. Chiết khấu NCC (Nợ 331 / Có 6xx) → Chứng từ nghiệp vụ khác",
+         lambda: _misa_ghi_chiet_khau_ncc(cid, database, preview=preview))
+    chay("4e. Kiểm tra dòng Bảng kê đầu vào không nhận dạng được",
          lambda: _dong_bang_ke_dau_vao_khong_nhan_dang(cid))
 
     # BƯỚC 4x (TỰ SỬA) — nếu bước 4a/4b/4c còn bỏ qua chứng từ vì THIẾU MÃ
@@ -34256,6 +34523,26 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             pass
                     e["ds"] += _snum(amt)
                     e["thue"] += _snum(vat)
+
+        # Chiết khấu NCC ghi dạng Chứng từ nghiệp vụ khác Nợ 331/Có 6xx/Có 133x (phần mềm tạo — xem _misa_ghi_chiet_khau_ncc, memo máy đọc được
+        # "Chiết khấu mua hàng HĐ <số> (MST <mst>)"): TRỪ vào doanh số/thuế của đúng hóa đơn (nguồn Thuế ghi các HĐ này là số ÂM).
+        try:
+            import re as _re_dc
+            if _misa_cot_bang_that(cur, "GLVoucher") and _misa_cot_bang_that(cur, "GLVoucherDetail"):
+                for memo_g, tk_co, amt_g in cur.execute(
+                        "SELECT gv.JournalMemo, d.CreditAccount, d.Amount FROM GLVoucher gv JOIN GLVoucherDetail d ON d.RefID=gv.RefID "
+                        "WHERE ISNULL(gv.CustomField10,'')=? AND gv.JournalMemo LIKE ?", _PM_MARK, _CK_NCC_MEMO + "%").fetchall():
+                    mm_g = _re_dc.match(r"^%s (\S+) \(MST ([^)]*)\)" % _re_dc.escape(_CK_NCC_MEMO), str(memo_g or ""))
+                    if not mm_g:
+                        continue
+                    k = (_misa_khncc_chuan_mst(mm_g.group(2)).lower(), _chuan_shd(mm_g.group(1)).lower())
+                    e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0, "ngay": ""})
+                    if str(tk_co or "").startswith("133"):
+                        e["thue"] -= _snum(amt_g)
+                    else:
+                        e["ds"] -= _snum(amt_g)
+        except Exception:
+            pass
     finally:
         conn2.close()
 
