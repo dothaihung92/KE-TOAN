@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.050"
+APP_BUILD = "2026-10-01.051"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -41442,7 +41442,9 @@ def _parse_xml_invoice(xml_bytes):
     for hh in hh_list:
         dgia_nt = find_text(hh, "DGia")
         thtien_nt = find_text(hh, "ThTien")
-        tien_thue_nt = lay_ttkhac(hh, "TongTien_Thue")
+        # Hóa đơn xuất từ phần mềm MISA ghi tiền thuế dòng ở TTKhac "VATAmount" (không có "TongTien_Thue") — ca thật HĐ chiết khấu Satori C26TSA
+        # số 6036: dòng ghi TSuat 8% nhưng VATAmount = 0 và TgTThue = 0 (hóa đơn KHÔNG có thuế); thiếu fallback này phần mềm tự tính 8% = 1.067.237.
+        tien_thue_nt = lay_ttkhac(hh, "TongTien_Thue") or lay_ttkhac(hh, "VATAmount")
         dgia_out, thtien_out, tien_thue_out = dgia_nt, thtien_nt, tien_thue_nt
         if tygia:
             if isinstance(_to_num(dgia_nt), (int, float)):
@@ -41580,13 +41582,19 @@ def _parse_invoice_summary(xml_bytes):
             # Ưu tiên tiền thuế THẬT của dòng hàng (giống _parse_xml_invoice,
             # TTKhac>TongTien_Thue) thay vì tự tính lại theo tỉ lệ.
             thue_goc = None
+            thue_vat_amount = None      # dự phòng: TTruong "VATAmount" (HĐ xuất từ phần mềm MISA, không có TongTien_Thue)
             for ttin in hh.findall(".//TTKhac/TTin"):
                 tt = ttin.find("TTruong")
-                if tt is not None and tt.text and tt.text.strip() == "TongTien_Thue":
-                    dl = ttin.find("DLieu")
+                ten_tt = tt.text.strip() if tt is not None and tt.text else ""
+                dl = ttin.find("DLieu")
+                if ten_tt == "TongTien_Thue":
                     if dl is not None and dl.text:
                         thue_goc = dl.text.strip()
                     break
+                if ten_tt == "VATAmount" and dl is not None and dl.text and thue_vat_amount is None:
+                    thue_vat_amount = dl.text.strip()
+            if thue_goc is None:
+                thue_goc = thue_vat_amount
             thue_num = _to_num(thue_goc)
             if isinstance(thue_num, (int, float)):
                 thue = thue_num
