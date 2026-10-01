@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.038"
+APP_BUILD = "2026-10-01.039"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34223,7 +34223,49 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                        "tong_thue_nguon": round(tong_thue_nguon_p), "tong_ds_misa": round(tong_ds_misa_p),
                        "tong_thue_misa": round(tong_thue_misa_p)}
 
+    # GHI CHÚ NGUYÊN NHÂN cho từng hóa đơn MUA VÀO "THIẾU trong MISA" — dò ngược Bảng kê đầu vào ĐÃ LƯU:
+    # đa số hóa đơn thiếu là do dòng đó CHƯA CÓ TK Nợ (NCC mới, chưa học TK + công ty chưa khai TK Nợ mặc
+    # định) nên Import vào MISA tự bỏ qua dòng — không phải lỗi đối chiếu (ca thật: HĐ 1706/1759/185/1264).
+    try:
+        _doi_chieu_ghi_chu_thieu_mua(cid, ket["mua_hang"].get("thieu") or [])
+    except Exception:
+        pass
     return {"ban_hang": ket["ban_hang"], "mua_hang": ket["mua_hang"], "doc_duoc": doc_duoc}
+
+
+def _doi_chieu_ghi_chu_thieu_mua(cid, ds_thieu):
+    """Gắn x["ghi_chu"] (nguyên nhân gợi ý) cho từng hóa đơn MUA VÀO báo THIẾU, dựa vào Bảng kê đầu vào
+    ĐÃ LƯU (nhap_lieu 'in'): không có trong Bảng kê / có nhưng thiếu TK Nợ (Import bỏ qua) / có Nợ nhưng
+    chưa ghi vào MISA / hóa đơn điều chỉnh-giảm (số âm — nên là chứng từ giảm giá/trả lại hàng mua)."""
+    if not ds_thieu:
+        return
+    header, rows = _doc_nhap_lieu(cid, "in")
+    hlow = [str(h or "").strip().lower() for h in (header or [])]
+    def tim(*ten):
+        for t in ten:
+            if t in hlow:
+                return hlow.index(t)
+        return -1
+    i_so, i_mst, i_no = tim("số hđ", "số hóa đơn", "số hoá đơn"), tim("mst bán", "mst"), tim("nợ")
+    co_bk = {}   # (mst, số HĐ chuẩn hóa) -> [Nợ của từng dòng]
+    if i_so >= 0 and i_no >= 0:
+        for r in rows or []:
+            if i_so >= len(r):
+                continue
+            mst = _misa_khncc_chuan_mst(r[i_mst] if 0 <= i_mst < len(r) else "").lower()
+            co_bk.setdefault((mst, _chuan_shd(str(r[i_so] or "")).lower()), []).append(
+                str(r[i_no] if i_no < len(r) else "" or "").strip())
+    for x in ds_thieu:
+        k = (_misa_khncc_chuan_mst(x.get("mst", "")).lower(), _chuan_shd(str(x.get("so_hd", ""))).lower())
+        nos = co_bk.get(k)
+        if (x.get("doanh_so_nguon") or 0) < 0:
+            x["ghi_chu"] = "Hóa đơn điều chỉnh/giảm (số âm) — MISA cần chứng từ giảm giá/trả lại hàng mua hoặc mua dịch vụ ghi âm"
+        if nos is None:
+            x["ghi_chu"] = (x.get("ghi_chu", "") + " | " if x.get("ghi_chu") else "") + "Chưa có trong Bảng kê đầu vào đã lưu — Import & Lưu lại rồi ghi vào MISA"
+        elif not any(nos):
+            x["ghi_chu"] = (x.get("ghi_chu", "") + " | " if x.get("ghi_chu") else "") + "Bảng kê đầu vào CHƯA có TK Nợ nên Import bỏ qua — điền cột Nợ (hoặc TK Nợ mặc định ở 'Sửa công ty') rồi Import lại"
+        else:
+            x["ghi_chu"] = (x.get("ghi_chu", "") + " | " if x.get("ghi_chu") else "") + "Đã có trong Bảng kê (Nợ %s) nhưng chưa ghi vào MISA — chạy lại Import" % ", ".join(sorted({n for n in nos if n}))
 
 
 @app.get("/api/misa-sql/doi-chieu-import/{cid}")
@@ -34245,7 +34287,7 @@ def misa_sql_doi_chieu_import(cid: int, database: str = ""):
 
 _DOI_CHIEU_XUAT_HEADERS = ["Loại", "Trạng thái", "MST", "Số HĐ", "Ngày",
                            "Doanh số nguồn", "Doanh số MISA", "Thuế GTGT nguồn",
-                           "Thuế GTGT MISA", "Chênh lệch"]
+                           "Thuế GTGT MISA", "Chênh lệch", "Ghi chú"]
 
 def _doi_chieu_xuat_rows(dc):
     """Gộp 3 danh sách (thiếu/lệch/thừa) của CẢ Bán hàng lẫn Mua hàng từ kết
@@ -34256,15 +34298,15 @@ def _doi_chieu_xuat_rows(dc):
     for nhan, d in (("Bán hàng", dc.get("ban_hang") or {}), ("Mua hàng", dc.get("mua_hang") or {})):
         for x in d.get("thieu") or []:
             rows.append([nhan, "THIẾU trong MISA", x.get("mst", ""), x.get("so_hd", ""), x.get("ngay", ""),
-                        x.get("doanh_so_nguon", 0), "", x.get("thue_nguon", 0), "", ""])
+                        x.get("doanh_so_nguon", 0), "", x.get("thue_nguon", 0), "", "", x.get("ghi_chu", "")])
         for x in d.get("lech") or []:
             rows.append([nhan, "LỆCH", x.get("mst", ""), x.get("so_hd", ""), x.get("ngay", ""),
                         x.get("doanh_so_nguon", 0), x.get("doanh_so_misa", 0),
-                        x.get("thue_nguon", 0), x.get("thue_misa", 0), x.get("chenh_lech", 0)])
+                        x.get("thue_nguon", 0), x.get("thue_misa", 0), x.get("chenh_lech", 0), ""])
         for x in d.get("thua") or []:
             rows.append([nhan, "THỪA trong MISA (không có trong nguồn tra cứu)", x.get("mst", ""),
                         x.get("so_hd", ""), x.get("ngay", ""), "", x.get("doanh_so_misa", 0),
-                        "", x.get("thue_misa", 0), ""])
+                        "", x.get("thue_misa", 0), "", ""])
     return rows
 
 
@@ -34310,6 +34352,7 @@ def misa_sql_doi_chieu_import_xuat(cid: int, database: str = ""):
     for c in range(1, len(_DOI_CHIEU_XUAT_HEADERS) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 16
     ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["K"].width = 90
     ws.freeze_panes = "A2"
     conn = db()
     comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
@@ -38567,7 +38610,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     # sai/gây hiểu nhầm khi tra cứu theo nhóm thuế suất).
     ts_lech_list = {"purchase": [], "sold": []}
 
-    def phan_bo_chiet_khau(items, tgtcthue_hd=None):
+    def phan_bo_chiet_khau(items, tgtcthue_hd=None, chi_ck_rieng=False):
         """Xử lý dòng hàng hóa đơn MUA VÀO — gồm CÁC LOẠI CHIẾT KHẤU THƯƠNG MẠI:
 
         LOẠI 1 — Chiết khấu trên TỪNG DÒNG (STCKhau>0 ngay trên dòng hàng):
@@ -38586,7 +38629,11 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
           'Đã giảm X ... 20% ... tỷ lệ %'): phân bổ X đều vào THÀNH TIỀN các
           dòng hàng theo tỷ lệ. (vd HĐ 91)
 
-        Ghi chú thuần khác (TChat=4, thtien=0): BỎ QUA."""
+        Ghi chú thuần khác (TChat=4, thtien=0): BỎ QUA.
+
+        chi_ck_rieng=True (dùng cho hóa đơn BÁN RA): CHỈ xử lý LOẠI 2 (dòng chiết khấu thương
+        mại riêng) — không đụng LOẠI 1/3/4, vì BK Bán ra (_summary_from_*) cũng chỉ trừ đúng
+        loại này; làm khác nhau sẽ khiến Chi tiết BÁN RA lệch BK Bán ra."""
 
         import re as _re_hkd
 
@@ -38629,7 +38676,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
 
         # --- Pass 1: phát hiện ghi chú HKD NQ204 (TChat=4, thtien=0) ---
         so_giam_hkd = 0
-        for it in items:
+        for it in ([] if chi_ck_rieng else items):
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
             if tchat == "4" and (not tt or tt == 0):
@@ -38661,6 +38708,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         # dòng tiền điều chỉnh gộp, không phải hàng hóa thật có SL/đơn giá cụ
         # thể) VÀ tên có chữ "chiết khấu" — cùng cách nhận diện đã dùng ở
         # _is_ck() (hàm phát hiện hóa đơn CHỈ có dòng chiết khấu, phía dưới).
+        nen_tru_ck_ban = not chi_ck_rieng or _nen_tru_ck_tm_rieng(
+            [(_dong_ck_tm_rieng(i_.get("tchat"), i_.get("ten_hang"), i_.get("thtien"), i_.get("stckhau"),
+                                i_.get("sluong"), i_.get("dgia")), _to_num(i_.get("thtien"))) for i_ in items],
+            tgtcthue_hd)
         ck_rieng = {}          # thuế suất -> tổng tiền chiết khấu
         ck_rieng_items = {}    # thuế suất -> list các dòng CK gốc (dùng khi HĐ chỉ có dòng CK, không có dòng hàng để phân bổ)
         skip_ck_rieng = set()  # id() các dòng CK riêng để bỏ qua khi dựng
@@ -38679,6 +38730,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             la_dong_ck_rieng = (tchat == "3"
                                 or (khong_co_sl_dg and ("chiết khấu" in ten_l or "chiet khau" in ten_l)))
             if la_dong_ck_rieng and not (isinstance(ck, (int, float)) and ck > 0):
+                if chi_ck_rieng and not nen_tru_ck_ban:
+                    continue
                 rate = _norm_rate(it.get("tsuat"))
                 ck_rieng[rate] = ck_rieng.get(rate, 0) + abs(tt)
                 ck_rieng_items.setdefault(rate, []).append(it)
@@ -38728,14 +38781,18 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         for it in items:
             tchat = str(it.get("tchat", "") or "")
             tt = _to_num(it.get("thtien")) or 0
-            # ghi chú thuần không có thành tiền -> bỏ (kể cả NQ204 đã xử lý ở Pass 1)
-            if tchat == "4" and (not tt or tt == 0):
+            # ghi chú thuần không có thành tiền -> bỏ (kể cả NQ204 đã xử lý ở Pass 1);
+            # hóa đơn BÁN RA (chi_ck_rieng) giữ nguyên như trước
+            if tchat == "4" and (not tt or tt == 0) and not chi_ck_rieng:
                 continue
             # dòng chiết khấu thương mại riêng -> đã gom ở Pass 1b, KHÔNG hiện
             if id(it) in skip_ck_rieng:
                 continue
             ck = _to_num(it.get("stckhau")) or 0
             h = dict(it)
+            if chi_ck_rieng:         # hóa đơn bán ra: giữ nguyên dòng hàng, chỉ trừ CK riêng ở Pass 4
+                out.append(h)
+                continue
             if isinstance(tt, (int, float)) and tt < 0:
                 # LOẠI 3: dòng điều chỉnh giảm sẵn ÂM -> giữ ÂM cả thành tiền + thuế
                 h["thtien"] = -abs(tt)
@@ -39049,6 +39106,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
 
             if loai == "purchase":
                 items = phan_bo_chiet_khau(items, tgtcthue_hd=r["tgtcthue"])
+            else:
+                # BÁN RA: dòng 'Chiết khấu thương mại' riêng phải TRỪ vào dòng hàng (bản cũ CỘNG
+                # DƯƠNG -> Chi tiết/BK Bán ra/MISA đều thừa so với nguồn Thuế).
+                items = phan_bo_chiet_khau(items, tgtcthue_hd=r["tgtcthue"], chi_ck_rieng=True)
 
             _TS_KHONG_THUE = ("", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG",
                               "KHONG", "0%", "0")
@@ -40171,6 +40232,42 @@ def _extract_invoice_xml(data_bytes):
     return data_bytes
 
 
+def _dong_ck_tm_rieng(tchat, ten, thtien, stckhau, sluong, dgia):
+    """Dòng CHIẾT KHẤU THƯƠNG MẠI ĐỨNG RIÊNG trên hóa đơn: TChat=3, hoặc dòng không có số
+    lượng/đơn giá mà tên có chữ 'chiết khấu' (nhiều phần mềm hóa đơn ghi sai TChat). Thành
+    tiền/tiền thuế của dòng này là số tiền CHIẾT KHẤU (ghi DƯƠNG trên XML/JSON) và phải được
+    TRỪ khỏi doanh số/thuế — cùng nhận diện với phan_bo_chiet_khau() (Pass 1b). Dòng TChat=3
+    nhưng có STCKhau>0 là HÀNG có giảm giá (không phải CK riêng); ghi chú TChat=4 thành tiền 0 bỏ qua."""
+    tt = _to_num(thtien) or 0
+    if not isinstance(tt, (int, float)) or tt <= 0:
+        return False
+    ck = _to_num(stckhau) or 0
+    if isinstance(ck, (int, float)) and ck > 0:
+        return False
+    sl = _to_num(sluong) or 0
+    dg = _to_num(dgia) or 0
+    ten_l = str(ten or "").lower()
+    return str(tchat or "").strip() == "3" or (not sl and not dg and ("chiết khấu" in ten_l or "chiet khau" in ten_l))
+
+
+def _nen_tru_ck_tm_rieng(dongs, tgtcthue_hd):
+    """dongs: [(la_ck_rieng, thanh_tien_goc)] của MỌI dòng 1 hóa đơn. True = nên TRỪ các dòng CK
+    riêng khỏi doanh số. Chỉ KHÔNG trừ khi tổng chưa thuế chính thức của hóa đơn (TgTCThue) khớp
+    với cách CỘNG DƯƠNG mà lệch với cách TRỪ (phòng nhà cung cấp hóa đơn ghi dòng CK chỉ để
+    tham khảo). Không đối chiếu được -> trừ (đúng bản chất chiết khấu thương mại).
+    Ca thật: HĐ C26MHH-10216 (1.080.000 hàng + dòng 'Chiết khấu thương mại' 89.259, TgTCThue
+    = 990.741) — bản cũ CỘNG 89.259 ra 1.169.259 làm BK Bán ra + MISA lệch với nguồn."""
+    if not any(la for la, _ in dongs):
+        return False
+    hd = _to_num(tgtcthue_hd)
+    if isinstance(hd, (int, float)) and hd > 0:
+        cong = sum((tt if isinstance(tt, (int, float)) else 0) for _, tt in dongs)
+        tru = sum(((-abs(tt) if la else tt) if isinstance(tt, (int, float)) else 0) for la, tt in dongs)
+        if abs(cong - hd) <= 1 and abs(tru - hd) > 1:
+            return False
+    return True
+
+
 def _parse_detail_json(detail):
     """
     Parse JSON chi tiết hóa đơn (từ endpoint detail của TCT) thành list mặt hàng.
@@ -40308,7 +40405,12 @@ def _summary_from_detail_json(detail):
     # cột thuế). Chỉ dùng "thttltsuat" khi hóa đơn KHÔNG có dòng hàng chi
     # tiết nào (trường hợp hiếm, TCT chỉ trả tổng hợp).
     if items:
-        for it in items:
+        # Dòng CHIẾT KHẤU THƯƠNG MẠI riêng (thành tiền/thuế ghi DƯƠNG) phải TRỪ — xem _dong_ck_tm_rieng
+        _la_ck_j = [_dong_ck_tm_rieng(it.get("tchat"), it.get("ten") or it.get("thhdvu"), it.get("thtien"),
+                                      it.get("stckhau"), it.get("sluong"), it.get("dgia")) for it in items]
+        _tru_ck_j = _nen_tru_ck_tm_rieng(
+            [(la, _to_num(it.get("thtien"))) for la, it in zip(_la_ck_j, items)], detail.get("tgtcthue"))
+        for it, la_ck_j in zip(items, _la_ck_j):
             key = norm_ts(it.get("ltsuat") or it.get("tsuat"))
             ds = _to_num(it.get("thtien")) or 0
             ds = ds if isinstance(ds, (int, float)) else 0
@@ -40324,6 +40426,8 @@ def _summary_from_detail_json(detail):
                 except Exception:
                     rate = 0
                 thue = round(ds * rate)
+            if la_ck_j and _tru_ck_j:
+                ds, thue = -abs(ds), -abs(thue)
             cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
             cur["ds_nt"] += ds
             cur["ds"] += ds * tygia if tygia else ds
@@ -40692,7 +40796,13 @@ def _parse_invoice_summary(xml_bytes):
     # thời MẤT LUÔN tiền thuế phần bị gộp nhầm (ct29 không có cột thuế). Chỉ
     # dùng "THTTLTSuat" khi hóa đơn KHÔNG có dòng hàng chi tiết nào.
     if dshh is not None and dshh.findall("HHDVu"):
-        for hh in dshh.findall("HHDVu"):
+        # Dòng CHIẾT KHẤU THƯƠNG MẠI riêng (thành tiền/thuế ghi DƯƠNG) phải TRỪ — xem _dong_ck_tm_rieng
+        _hh_x = dshh.findall("HHDVu")
+        _la_ck_x = [_dong_ck_tm_rieng(ft(h, "TChat"), ft(h, "THHDVu"), ft(h, "ThTien"),
+                                      ft(h, "STCKhau"), ft(h, "SLuong"), ft(h, "DGia")) for h in _hh_x]
+        _tru_ck_x = _nen_tru_ck_tm_rieng(
+            [(la, _to_num(ft(h, "ThTien"))) for la, h in zip(_la_ck_x, _hh_x)], ft(root, "TgTCThue"))
+        for hh, la_ck_x in zip(_hh_x, _la_ck_x):
             key = norm_ts(ft(hh, "TSuat"))
             ds = _to_num(ft(hh, "ThTien")) or 0
             ds = ds if isinstance(ds, (int, float)) else 0
@@ -40715,6 +40825,8 @@ def _parse_invoice_summary(xml_bytes):
                 except Exception:
                     rate = 0
                 thue = round(ds * rate)
+            if la_ck_x and _tru_ck_x:
+                ds, thue = -abs(ds), -abs(thue)
             cur = theo_ts.setdefault(key, {"ds": 0, "thue": 0, "ds_nt": 0})
             cur["ds_nt"] += ds
             cur["ds"] += ds * tygia if tygia else ds
