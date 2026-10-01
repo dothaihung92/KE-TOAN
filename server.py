@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.048"
+APP_BUILD = "2026-10-01.049"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34198,6 +34198,30 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 pass
         return 0
 
+    def _thue_tu_chi_tiet_hd(r):
+        """Tiền thuế GTGT TỔNG của hóa đơn theo chi tiết ĐÃ LƯU (detail_json.tgtthue) hoặc file XML đã tải (TgTThue). None nếu không đọc được."""
+        dj = r["detail_json"]
+        if dj:
+            try:
+                v = _to_num(_json.loads(dj).get("tgtthue"))
+                if isinstance(v, (int, float)):
+                    return v
+            except Exception:
+                pass
+        fpath = _tim_file_hoa_don(r)
+        if fpath:
+            try:
+                with open(fpath, "rb") as f:
+                    data = _extract_invoice_xml(f.read())
+                import xml.etree.ElementTree as _ET
+                el = _ET.fromstring(data).find(".//TgTThue")
+                v = _to_num(el.text) if el is not None and el.text else None
+                if isinstance(v, (int, float)):
+                    return v
+            except Exception:
+                pass
+        return None
+
     def _hd_hop_le(r):
         tt = str(r["tthai"] or "").strip()
         if tt in ("4", "6"):
@@ -34356,7 +34380,14 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             e = nguon["purchase"].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
                                                   "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
         e["ds"] += _snum(r["tgtcthue"]) + _tong_tien_phi_cua_hd(r)
-        e["thue"] += _snum(r["tgtthue"])
+        thue_r = _snum(r["tgtthue"])
+        if not thue_r and _snum(r["tgtcthue"]):
+            # API DANH SÁCH của Thuế đôi khi trả tgtthue = 0 cho hóa đơn có thuế (ca thật HĐ chiết khấu 6036: tổng thanh
+            # toán = chưa thuế, trong khi chi tiết/MISA có VAT) -> đối chiếu lại với TgTThue trong chi tiết/file XML gốc.
+            thue_file = _thue_tu_chi_tiet_hd(r)
+            if thue_file:
+                thue_r = thue_file
+        e["thue"] += thue_r
 
     # Loại bỏ hẳn các nhóm hóa đơn nguồn CỘNG DỒN RA ĐÚNG 0đ (cả doanh số lẫn
     # thuế) khỏi đối chiếu — thường là hóa đơn điều chỉnh/hàng khuyến mãi 0đ
