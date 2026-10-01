@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.034"
+APP_BUILD = "2026-10-01.035"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12339,7 +12339,7 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
         if npt:
             canh_bao.append(f"Có {len(npt)} người phụ thuộc (theo cột 'Số người phụ thuộc' của Bảng Lương) nhưng chưa có danh sách người phụ thuộc — bảng kê 05-3 được tạo dòng tạm, "
                             "hãy nhập 'Người phụ thuộc' trong phần mềm (hoặc bổ sung trên HTKK) trước khi nộp.")
-    return {"g1": g1, "g2": g2, "npt": npt, "canh_bao": canh_bao, "so_nguoi": len(ng)}
+    return {"g1": g1, "g2": g2, "npt": npt, "canh_bao": canh_bao, "so_nguoi": len(ng), "tat_ca": list(ng.values())}
 
 
 def _luong_tinh_tu_ten_cqt(ten_cqt):
@@ -12577,6 +12577,13 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
                     ("tên CQT nơi nộp", comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else ""), ("người ký", nguoi_ky)):
         if not (gt or "").strip():
             canh_bao.append(f"Công ty chưa khai báo {ten} — vào 'Sửa công ty' rồi kết xuất lại (hoặc điền trên HTKK).")
+    # Giải thích vì sao phụ lục không có dữ liệu (HTKK cũng không xuất phụ lục trống)
+    if not tong["g2"]:
+        co_tv = sum(1 for p in tong.get("tat_ca", []) if p.get("co_tv"))
+        canh_bao.append("Không có phụ lục 05-2: chỉ đưa vào 05-2 những người làm dưới 14 ngày/tháng, không đóng BHXH và THỰC SỰ bị khấu trừ thuế 10% ở Bảng Lương "
+                        + (f"(có {co_tv} người làm thời vụ nhưng không bị khấu trừ — thu nhập dưới ngưỡng hoặc tick 'không trừ thuế 10%')." if co_tv else "(bảng lương năm này không có người nào như vậy)."))
+    if not tong["npt"]:
+        canh_bao.append("Không có phụ lục 05-3: chưa có người phụ thuộc nào — nhập ở màn 'Người Phụ Thuộc' (Bảng Lương - BHXH), người lao động phải có tháng trên Bảng Lương của năm.")
     xml, chinh, thay = _luong_qt_xml(comp, nam, tong, nguoi_ky, datetime.date.today())
     mst_file = str(comp["mst"] or "").strip()
     if len(mst_file) == 10:

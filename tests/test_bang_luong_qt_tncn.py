@@ -175,6 +175,8 @@ try:
     resp = asyncio.run(server.bang_luong_ket_xuat_qt_tncn(1, Req({"nam": 2025, "nguoi_ky": "NGUYỄN NGỌC PHƯƠNG THẢO"})))
     from urllib.parse import unquote as _uq
     assert "phường/xã" not in _uq(resp.headers["x-canh-bao"]), "Không còn yêu cầu nạp phường/xã"
+    cb = _uq(resp.headers["x-canh-bao"])
+    assert "Không có phụ lục 05-2" in cb and "Không có phụ lục 05-3" in cb or "người phụ thuộc" in cb
     assert os.path.basename(resp.path) == "0318712827000-05_QTT_TNCN_TT80-Y2025-L00.xml"
     raw = open(resp.path, encoding="utf-8").read()
     assert raw.startswith("﻿<?xml") and "<nguoiKy>NGUYỄN NGỌC PHƯƠNG THẢO</nguoiKy>" in raw and "<maCQTNoiNop>70123</maCQTNoiNop>" in raw
