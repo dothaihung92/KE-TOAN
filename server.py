@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.039"
+APP_BUILD = "2026-10-01.040"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22805,11 +22805,22 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
         # trị & VAT, _misa_doi_chieu_import_toan_bo).
         _pm_invoices = {}   # (mst_lower, sohd_lower) -> {kyhieu_lower: {"refids","doc","posted"}}
         try:
-            for refid, rn, ax, invno, invkh, pf, pm in cur.execute(
+            # Kèm TỔNG TIỀN đã ghi (TotalAmount gồm VAT, TotalVATAmount) để phát hiện chứng từ
+            # CỦA PHẦN MỀM đã ghi nhưng SỐ LIỆU nay đã đổi (vd Bảng kê sửa lỗi chiết khấu) -> tự
+            # gỡ + ghi lại (xem cap_nhat_lech bên dưới). CSDL không có 2 cột này -> như cũ.
+            try:
+                _pm_rows = [tuple(x) + (True,) for x in cur.execute(
+                    "SELECT RefID, RefNoManagement, ISNULL(AccountObjectTaxCode,''), "
+                    "ISNULL(InvNo,''), ISNULL(InvSeries,''), ISNULL(IsPostedFinance,0), "
+                    "ISNULL(IsPostedManagement,0), ISNULL(TotalAmount,0), ISNULL(TotalVATAmount,0) "
+                    "FROM SAVoucher WHERE ISNULL(CustomField10,'')=?", _PM_MARK).fetchall()]
+            except Exception:
+                _pm_rows = [tuple(x) + (0, 0, False) for x in cur.execute(
                     "SELECT RefID, RefNoManagement, ISNULL(AccountObjectTaxCode,''), "
                     "ISNULL(InvNo,''), ISNULL(InvSeries,''), ISNULL(IsPostedFinance,0), "
                     "ISNULL(IsPostedManagement,0) "
-                    "FROM SAVoucher WHERE ISNULL(CustomField10,'')=?", _PM_MARK).fetchall():
+                    "FROM SAVoucher WHERE ISNULL(CustomField10,'')=?", _PM_MARK).fetchall()]
+            for refid, rn, ax, invno, invkh, pf, pm, _tong_cu, _thue_cu, _co_so in _pm_rows:
                 if not invno:
                     continue
                 bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower())
@@ -22824,8 +22835,13 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 # hàng đều bị báo sai "chưa có trong MISA", 0 chứng từ được
                 # ghi dù dữ liệu hoàn toàn hợp lệ.
                 kh_pm = str(invkh or "").strip().lower()
-                e = _pm_invoices.setdefault(bk, {}).setdefault(kh_pm, {"refids": [], "doc": rn, "posted": False})
+                e = _pm_invoices.setdefault(bk, {}).setdefault(
+                    kh_pm, {"refids": [], "doc": rn, "posted": False, "tong": 0.0, "thue": 0.0, "co_so": False})
                 e["refids"].append(refid)
+                if _co_so:
+                    e["co_so"] = True
+                    e["tong"] += float(_tong_cu or 0)
+                    e["thue"] += float(_thue_cu or 0)
                 if pf or pm:
                     e["posted"] = True
         except Exception:
@@ -22950,6 +22966,20 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             pass
         co_the_ghi_so_tai_chinh = bool(cols_gl) and bool(cols_aol) and bool(cols_cfl)
 
+        # Sổ cái nào tồn tại (để gỡ khi cập nhật chứng từ đã ghi sổ) + TỔNG doanh số/thuế theo từng hóa đơn
+        # trong Bảng kê hiện tại (hóa đơn có nhiều dòng trùng số thì so TỔNG với chứng từ cũ).
+        _bang_co_so = {t for t, c in (("GeneralLedger", cols_gl), ("AccountObjectLedger", cols_aol),
+                                      ("CustomFieldLedger", cols_cfl), ("SaleLedger", cols_sll)) if c}
+        _tong_nguon_hd = {}
+        for _r0 in rows:
+            _sh0 = str(gv(_r0, col["sohd"]) or "").strip()
+            if not _sh0:
+                continue
+            _k0 = ((_dinh_dang_mst(gv(_r0, col["mst"])).lower() or "kl", _sh0.lower()),
+                   str(gv(_r0, col["kyhieu"]) or "").strip().lower())
+            _a0 = _tong_nguon_hd.get(_k0, (0, 0))
+            _tong_nguon_hd[_k0] = (_a0[0] + round(_to_num(gv(_r0, col["ds"])) or 0),
+                                   _a0[1] + round(_to_num(gv(_r0, col["thue"])) or 0))
         _tong_r_pgs = len(rows)
         for _idx_pgs, r in enumerate(rows):
             if on_progress:
@@ -23001,17 +23031,32 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             bk = (mst_k, sohd.strip().lower())
             kh_moi = kyhieu.strip().lower()
             pm_e = _pm_tim_khop(bk, kh_moi)
-            if pm_e is None and _da_co_khop(bk, kh_moi, None if ngay_loi else ngay_dt):
+            # Nhóm chứng từ cũ của hóa đơn này VỪA được gỡ ở 1 dòng trước (cùng lượt, hóa đơn có nhiều
+            # dòng trùng số) -> dòng này ghi MỚI, không coi là "đã có".
+            da_cn_nhom = bool(pm_e is not None and pm_e.get("da_cn"))
+            if da_cn_nhom:
+                pm_e = None
+            # CẬP NHẬT KHI SỐ LIỆU ĐỔI: chứng từ DO PHẦN MỀM TẠO (kể cả đã ghi sổ) mà TỔNG TIỀN/VAT khác
+            # Bảng kê hiện tại (so theo TỔNG các dòng cùng hóa đơn) -> tự gỡ (cả sổ cái) rồi ghi lại đúng,
+            # không cần bật "Ghi đè". Ca thật: HĐ 10216/10400 có dòng chiết khấu bị cộng dương -> MISA
+            # ghi sai, sửa Bảng kê xong import lại vẫn báo "đã có, bỏ qua". Chứng từ KHÔNG do phần mềm tạo
+            # (khách tự nhập) tuyệt đối không đụng.
+            cap_nhat_lech = False
+            if pm_e is not None and pm_e.get("co_so") and (ds + thue) != 0:
+                _tn = _tong_nguon_hd.get((bk, kh_moi), (ds, thue))
+                if abs(pm_e["tong"] - (_tn[0] + _tn[1])) > 1 or abs(pm_e["thue"] - _tn[1]) > 1:
+                    cap_nhat_lech = True
+            if pm_e is None and not da_cn_nhom and _da_co_khop(bk, kh_moi, None if ngay_loi else ngay_dt):
                 trung += 1
                 ket.append({"so_hd": sohd, "kh_mst": mst,
                             "trang_thai": "đã có sẵn trong MISA (không phải do phần mềm tạo, bỏ qua)"})
                 continue
-            if pm_e and pm_e["posted"]:
+            if pm_e and pm_e["posted"] and not cap_nhat_lech:
                 trung += 1
                 ket.append({"so_ct": pm_e["doc"], "so_hd": sohd,
                             "trang_thai": "đã ghi sổ trong MISA (bỏ qua)"})
                 continue
-            if pm_e and not ghi_de:
+            if pm_e and not ghi_de and not cap_nhat_lech:
                 trung += 1
                 ket.append({"so_ct": pm_e["doc"], "so_hd": sohd,
                             "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
@@ -23031,8 +23076,14 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                     mk = (thang, nam)
                     seq_thang[mk] = seq_thang.get(mk, 0) + 1
                     doc = f"BH{seq_thang[mk]:03d}/T{thang}/{nam}"[:20]
+                pm_e["da_cn"] = True      # các dòng sau cùng hóa đơn (nếu có) sẽ ghi mới
                 if not preview:
                     for rid in pm_e["refids"]:
+                        # chứng từ ĐÃ GHI SỔ: gỡ cả SỔ CÁI trước (GeneralLedger/AccountObjectLedger/
+                        # CustomFieldLedger/SaleLedger đều khóa theo RefID) kẻo mồ côi bút toán cũ
+                        for _bang_so in ("GeneralLedger", "AccountObjectLedger", "CustomFieldLedger", "SaleLedger"):
+                            if _bang_so in _bang_co_so:
+                                cur.execute("DELETE FROM %s WHERE RefID=?" % _bang_so, rid)
                         # gỡ luôn HÓA ĐƠN liên kết (SAInvoice/SAInvoiceDetail) +
                         # bảng liên kết SAInvoiceReference (nguồn thật lưới danh
                         # sách Bán hàng đọc Số hóa đơn — xem chú thích ở khối ghi
@@ -23485,6 +23536,9 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             hau_to_so = " (đã ghi Sổ Tài chính)" if co_the_ghi_so_tai_chinh else " (CHƯA ghi sổ)"
             st = ("sẽ ghi đè" if preview else "đã ghi đè" + hau_to_so) if ghi_de_ct \
                 else ("sẽ thêm" if preview else "đã thêm" + hau_to_so)
+            if cap_nhat_lech:
+                st = (("sẽ cập nhật (số liệu đã đổi so với MISA)" if preview else "đã cập nhật (số liệu đã đổi so với MISA)")
+                      + ("" if preview else hau_to_so))
             ket.append({"so_ct": doc, "so_hd": sohd, "kh": ten_kh_misa, "tong_tien": ds,
                         "tien_thue": thue, "ref_type": ref_type, "loai_ct_misa": ref_type_ten,
                         "trang_thai": st, "da_ghi_so_tai_chinh": co_the_ghi_so_tai_chinh,
