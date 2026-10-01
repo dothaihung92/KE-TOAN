@@ -96,4 +96,22 @@ assert out[0]["thtien"] == 1000000
 out = pb([it("1", "Bột ngọt", 1, 1080000, 1080000), it("3", "Chiết khấu thương mại", 0, 0, 89259)], 1169259, chi_ck_rieng=True)
 assert len(out) == 2
 print("PASS 5: Chi tiết BÁN RA trừ CK riêng vào dòng hàng (HĐ 10216 -> 990.741), giữ nguyên STCKhau/ghi chú, an toàn khi TgTCThue khớp cách cộng.")
+# Cấu trúc XML THẬT của HĐ 10400 (người dùng gửi, ẩn danh tên): 3 dòng hàng + dòng TChat=3 "Chiết khấu thương mại" (không SL/đơn giá/STCKhau),
+# TgTCThue = 32.457.222 (đã trừ chiết khấu), TTCKTMai = tổng chiết khấu có thuế.
+def hhx(tchat, stt, ten, sl, dg, tt, ts, thue):
+    return ("<HHDVu><TChat>%s</TChat><STT>%s</STT><THHDVu>%s</THHDVu>%s%s<ThTien>%s</ThTien><TSuat>%s</TSuat><TTKhac><TTin><TTruong>TongTien_Thue</TTruong>"
+            "<DLieu>%s</DLieu></TTin></TTKhac></HHDVu>") % (tchat, stt, ten, ("<SLuong>%s</SLuong>" % sl) if sl else "", ("<DGia>%s</DGia>" % dg) if dg else "", tt, ts, thue)
+xml10400 = ("<HDon><DLHDon><TTChung><KHMSHDon>1</KHMSHDon><KHHDon>C26MHH</KHHDon><SHDon>10400</SHDon></TTChung><NDHDon><NBan><Ten>A</Ten><MST>0318712827</MST></NBan>"
+            "<NMua><Ten>B</Ten><MST>0318832627</MST></NMua><DSHHDVu>"
+            + hhx(1, 1, "Nước 500ml", "200.000000", "91000.000000", "18200000.000000", "8%", "1456000.000000")
+            + hhx(1, 2, "Nước 1.500ml", "200.000000", "91000.000000", "18200000.000000", "8%", "1456000.000000")
+            + hhx(1, 3, "Nước 350ml", "200.000000", "82000.000000", "16400000.000000", "8%", "1312000.000000")
+            + hhx(3, 4, "Chiết khấu thương mại", "", "", "20342778.000000", "8%", "1627422.000000")
+            + "</DSHHDVu><TToan><TgTCThue>32457222.000000</TgTCThue><TgTThue>2596578.000000</TgTThue><TTCKTMai>21970200.000000</TTCKTMai></TToan></NDHDon></DLHDon></HDon>")
+inf = server._parse_invoice_summary(xml10400.encode("utf-8"))
+assert inf["theo_ts"]["8"]["ds"] == 32457222 and inf["theo_ts"]["8"]["thue"] == 2596578, inf["theo_ts"]
+rows_ct = server._parse_xml_invoice(xml10400.encode("utf-8"))
+out = pb(rows_ct, 32457222, chi_ck_rieng=True)
+assert len(out) == 3 and abs(sum(float(o["thtien"]) for o in out) - 32457222) <= 1 and abs(sum(o["tien_thue"] for o in out) - 2596578) <= 2
+print("PASS 6: XML thật HĐ 10400 -> BK Bán ra 32.457.222 / 2.596.578; Chi tiết BÁN RA trừ chiết khấu vào dòng hàng (3 dòng, tổng 32.457.222).")
 print("\nALL DONE")

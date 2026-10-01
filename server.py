@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-01.041"
+APP_BUILD = "2026-10-01.042"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13934,9 +13934,16 @@ def _gen_mua_hang_dv(cid, header, rows):
     out = []
     for r in rows:
         no = str(gv(r, i_no) or "").strip()
-        if not no.startswith("6"):          # chỉ lấy Nợ là TK chi phí 6xx
-            continue
         co = str(gv(r, i_co) or "").strip()
+        dao_ck = False
+        if not no.startswith("6"):          # chỉ lấy Nợ là TK chi phí 6xx
+            # NCC xuất hóa đơn CHIẾT KHẤU/điều chỉnh giảm, kế toán hạch toán Nợ 331 / Có 6xx (giảm chi phí): trước đây bị
+            # bỏ qua im lặng (không lọt bộ lọc Nợ 6xx) -> hóa đơn báo "THIẾU trong MISA". Ghi vào MISA dưới dạng chứng
+            # từ mua dịch vụ GHI ÂM (Nợ 6xx âm / Có 331 âm — cùng bút toán, đúng cách các dòng "ghi âm" đang làm).
+            if no.startswith("331") and co.startswith("6"):
+                no, co, dao_ck = co, no, True
+            else:
+                continue
         mst_disp = _dinh_dang_mst(gv(r, i_mst))
         ngay = str(gv(r, i_ngay) or "")
         sohd = gv(r, i_so)
@@ -13944,6 +13951,10 @@ def _gen_mua_hang_dv(cid, header, rows):
         kyhieu = str(gv(r, i_kh) or "").strip()
         soct = so_chung_tu(sohd, mst_disp, ngay, kyhieu)
         tt_val = _to_num(gv(r, i_tt))
+        thue_val = _to_num(gv(r, i_tthue))
+        if dao_ck:
+            tt_val = -abs(tt_val) if isinstance(tt_val, (int, float)) else tt_val
+            thue_val = -abs(thue_val) if isinstance(thue_val, (int, float)) else thue_val
         row_vals = {
             1: 0, 2: 1, 3: 1,
             5: ngay, 6: ngay, 7: soct,
@@ -13953,7 +13964,7 @@ def _gen_mua_hang_dv(cid, header, rows):
             17: no, 18: co, 19: mst_disp,
             20: "", 21: 1,
             22: tt_val, 23: tt_val,
-            28: _chuan_thue_suat(gv(r, i_ts)), 29: _to_num(gv(r, i_tthue)),
+            28: _chuan_thue_suat(gv(r, i_ts)), 29: thue_val,
             31: "1331",
             33: kyhieu,
             34: sohd, 35: ngay, 36: "1",
