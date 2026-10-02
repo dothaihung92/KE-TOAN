@@ -4601,7 +4601,9 @@ function moNguoiPhuThuoc(){
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
         <button class="btn gold sm" onclick="nptLuu()">💾 Lưu</button>
-        <button class="btn sm" style="background:#2e5c8a" onclick="nptThemDong()">➕ Thêm dòng</button>
+        <button class="btn sm" style="background:#2e5c8a" onclick="nptMoChonNld()">➕ Thêm dòng</button>
+        <button class="btn ghost sm" onclick="document.getElementById('nptImportFile').click()">📥 Import Excel</button>
+        <input type="file" id="nptImportFile" accept=".xlsx" multiple style="display:none" onchange="nptImportExcel(this)">
         <button class="btn ghost sm" onclick="nptXuatExcel()">📤 Xuất Excel</button>
         <button class="btn ghost sm" onclick="nptXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
       </div>
@@ -4658,6 +4660,69 @@ function nptSuaO(td){
 }
 function nptDoiQh(ri,v){if(nptRows[ri])nptRows[ri][nptCot('Quan hệ')]=v}
 function nptThemDong(){nptRows.push(nptHeader.map(()=>''));nptChon={r:nptRows.length-1,c:0};nptDanhLaiStt();veGridNpt()}
+// "Thêm dòng": mở hộp chọn người lao động từ Danh Sách Nhân Viên (chọn nhiều người) — mỗi người được chọn thêm 1 dòng đã điền sẵn Mã NV + họ tên
+async function nptMoChonNld(){
+  if(!nptNv.length){try{const nv=await api(`/api/nhap-lieu/${current}?loai=nv`);nptNv=nvDocMaTen(nv)}catch{nptNv=[]}}
+  let ov=document.getElementById('nptChonNldOv');if(ov)ov.remove();
+  ov=document.createElement('div');ov.id='nptChonNldOv';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px;max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;gap:10px">
+    <div style="font-weight:700;color:#0b5d6b;font-size:16px">👥 Chọn người lao động (từ Danh Sách Nhân Viên)</div>
+    ${nptNv.length?`<input id="nptChonLoc" placeholder="Tìm theo mã/họ tên..." oninput="nptLocNld()" style="padding:7px 10px;border:1px solid #ccc;border-radius:8px">
+    <label style="font-size:13px"><input type="checkbox" onchange="nptChonTatCa(this.checked)"> Chọn tất cả (đang hiện)</label>
+    <div id="nptChonDs" style="overflow:auto;border:1px solid #eee;border-radius:8px;padding:6px;min-height:80px;max-height:45vh"></div>`
+    :`<div style="color:#a05a00;font-size:13px">Danh Sách Nhân Viên đang trống — bấm "Thêm dòng trống" để tự nhập, hoặc nhập nhân viên trước.</div>`}
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="btn ghost sm" onclick="document.getElementById('nptChonNldOv').remove()">Hủy</button>
+      <button class="btn ghost sm" onclick="nptThemDong();document.getElementById('nptChonNldOv').remove()">Thêm dòng trống</button>
+      ${nptNv.length?`<button class="btn gold sm" onclick="nptXacNhanChonNld()">✓ Thêm dòng cho người đã chọn</button>`:''}
+    </div></div>`;
+  document.body.appendChild(ov);
+  nptLocNld();
+}
+function nptLocNld(){
+  const q=(document.getElementById('nptChonLoc')||{}).value||'',k=nvKhongDau(q).toLowerCase(),ds=document.getElementById('nptChonDs');if(!ds)return;
+  const daCo=new Set(nptRows.map(r=>(String(r[nptCot('Mã NV')]||'')+'|'+String(r[nptCot('Họ và tên người lao động')]||'')).toLowerCase()));
+  ds.innerHTML=nptNv.map((x,i)=>({x,i})).filter(({x})=>!k||nvKhongDau(x.ma+' '+x.ten).toLowerCase().includes(k)).map(({x,i})=>
+    `<label style="display:block;padding:3px 4px;font-size:13px"><input type="checkbox" class="nptChonCb" value="${i}"> <b>${nvEsc(x.ma)}</b> — ${nvEsc(x.ten)}</label>`).join('')||'<div style="color:var(--muted);font-size:13px">Không có kết quả.</div>';
+}
+function nvKhongDau(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D')}
+function nptChonTatCa(on){document.querySelectorAll('.nptChonCb').forEach(c=>{c.checked=on})}
+function nptXacNhanChonNld(){
+  const ids=[...document.querySelectorAll('.nptChonCb:checked')].map(c=>+c.value);
+  if(!ids.length){toast('Chưa chọn người lao động nào','err');return}
+  const cMa=nptCot('Mã NV'),cTen=nptCot('Họ và tên người lao động');
+  for(const i of ids){const x=nptNv[i],r=nptHeader.map(()=>'');if(cMa>=0)r[cMa]=x.ma;if(cTen>=0)r[cTen]=x.ten;nptRows.push(r)}
+  nptChon={r:nptRows.length-ids.length,c:nptCot('Họ và tên người phụ thuộc')};
+  nptDanhLaiStt();veGridNpt();
+  document.getElementById('nptChonNldOv').remove();
+  toast(`✓ Đã thêm ${ids.length} dòng — nhập họ tên, ngày sinh, CCCD, quan hệ của người phụ thuộc rồi bấm 💾 Lưu`,'ok');
+}
+async function nptImportExcel(input){
+  const files=input.files;if(!files||!files.length)return;
+  toast(`Đang đọc ${files.length} file...`,'');
+  try{
+    const fd=new FormData();for(const f of files)fd.append('files',f);
+    const r=await fetch(`/api/nhap-lieu/import-npt/${current}`,{method:'POST',body:fd});
+    if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const kq=await r.json();
+    if(!kq.rows||!kq.rows.length){toast('Không đọc được dòng người phụ thuộc nào'+(kq.loi&&kq.loi.length?`: ${kq.loi.join('; ')}`:''),'err');input.value='';return}
+    if(!nptNv.length){try{const nv=await api(`/api/nhap-lieu/${current}?loai=nv`);nptNv=nvDocMaTen(nv)}catch{}}
+    const idx=h=>nptCot(h);
+    for(const rr of kq.rows){
+      const r=nptHeader.map(()=>'');
+      kq.header.forEach((h,j)=>{const c=idx(h);if(c>=0)r[c]=rr[j]==null?'':rr[j]});
+      // điền họ tên người lao động theo Mã NV (hoặc Mã NV theo họ tên) từ Danh Sách Nhân Viên khi file thiếu
+      const cMa=idx('Mã NV'),cTen=idx('Họ và tên người lao động');
+      const nv=nptNv.find(x=>(r[cMa]&&x.ma.toLowerCase()===String(r[cMa]).toLowerCase())||(!r[cMa]&&r[cTen]&&nvKhongDau(x.ten).toLowerCase()===nvKhongDau(r[cTen]).toLowerCase()));
+      if(nv){if(cTen>=0&&(!r[cTen]||!r[cMa]))r[cTen]=nv.ten;if(cMa>=0&&!r[cMa])r[cMa]=nv.ma}
+      nptRows.push(r);
+    }
+    nptDanhLaiStt();veGridNpt();
+    toast(`✓ Đã thêm ${kq.rows.length} người phụ thuộc`+(kq.loi&&kq.loi.length?` (⚠ ${kq.loi.join('; ')})`:'')+'. Nhớ bấm 💾 Lưu!','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  input.value='';
+}
 function nptXoaDong(){
   if(!nptChon||nptChon.r==null||!nptRows[nptChon.r]){toast('Bấm chọn 1 ô trong dòng cần xóa trước','err');return}
   if(!confirm('Xóa dòng người phụ thuộc này?'))return;

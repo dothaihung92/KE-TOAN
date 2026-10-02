@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.055"
+APP_BUILD = "2026-10-02.056"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13769,6 +13769,98 @@ def _nv_ghep_header_2_dong(ws, hang1_idx):
         else:
             out.append(c1)
     return out, (2 if co_dong_phu else 1)
+
+
+_NPT_HEADERS_IMPORT = ["STT", "Mã NV", "Họ và tên người lao động", "Họ và tên người phụ thuộc", "Ngày sinh", "CCCD/Số định danh", "Quan hệ", "Từ tháng", "Đến tháng"]
+
+
+def _npt_doc_excel(grid):
+    """Đọc lưới Excel Người phụ thuộc: tự dò dòng tiêu đề (có cột 'người phụ thuộc'), ghép cột theo từ khóa (không phân biệt dấu/hoa thường), trả
+    (rows theo đúng thứ tự _NPT_HEADERS_IMPORT, cảnh báo). Ngày sinh -> dd/mm/yyyy, Từ/Đến tháng -> mm/yyyy; dòng không có họ tên người phụ thuộc bị bỏ."""
+    def chuoi(v):
+        return "" if v is None else str(v).strip()
+
+    def ngay(v):
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            return v.strftime("%d/%m/%Y")
+        return chuoi(v)
+
+    def thang(v):
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            return v.strftime("%m/%Y")
+        t = chuoi(v)
+        m = __import__("re").match(r"^(\d{1,2})[/-](\d{4})$", t)
+        return "%02d/%s" % (int(m.group(1)), m.group(2)) if m else t
+    ten = lambda v: _khong_dau(chuoi(v)).lower()
+    dau, cot = None, {}
+    for i, r in enumerate(grid[:30]):
+        ts = [ten(c) for c in r]
+        if any(("nguoi phu thuoc" in t) for t in ts) and sum(1 for t in ts if t) >= 2:       # bỏ qua dòng tiêu đề lớn của trang (chỉ 1 ô)
+            dau = i
+            for j, t in enumerate(ts):
+                if not t:
+                    continue
+                if t in ("ma nv", "ma nhan vien", "ma"):
+                    cot.setdefault("ma", j)
+                elif "nguoi lao dong" in t or t in ("ten nhan vien", "ho ten nhan vien", "nhan vien"):
+                    cot.setdefault("nld", j)
+                elif "nguoi phu thuoc" in t:
+                    cot.setdefault("npt", j)
+                elif "ngay sinh" in t:
+                    cot.setdefault("ns", j)
+                elif t.startswith("cccd") or "so dinh danh" in t or "ma so thue" in t:
+                    cot.setdefault("cccd", j)
+                elif "quan he" in t:
+                    cot.setdefault("qh", j)
+                elif t.startswith("tu thang"):
+                    cot.setdefault("tu", j)
+                elif t.startswith("den thang"):
+                    cot.setdefault("den", j)
+            break
+    if dau is None or "npt" not in cot:
+        raise HTTPException(400, "Không tìm thấy dòng tiêu đề có cột 'Họ và tên người phụ thuộc' — hãy dùng file xuất từ màn Người Phụ Thuộc (Xuất Excel) "
+                                 "hoặc có các cột: Mã NV, Họ và tên người lao động, Họ và tên người phụ thuộc, Ngày sinh, CCCD, Quan hệ, Từ tháng, Đến tháng")
+    g = lambda r, k: r[cot[k]] if k in cot and cot[k] < len(r) else None
+    rows, bo = [], 0
+    for r in grid[dau + 1:]:
+        if not chuoi(g(r, "npt")):
+            if any(chuoi(c) for c in r):
+                bo += 1
+            continue
+        rows.append(["", chuoi(g(r, "ma")), chuoi(g(r, "nld")), chuoi(g(r, "npt")), ngay(g(r, "ns")), chuoi(g(r, "cccd")).replace(" ", ""),
+                     chuoi(g(r, "qh")), thang(g(r, "tu")), thang(g(r, "den"))])
+    canh_bao = []
+    if bo:
+        canh_bao.append("%d dòng thiếu họ tên người phụ thuộc đã bỏ qua" % bo)
+    if not any(r[1] or r[2] for r in rows) and rows:
+        canh_bao.append("File không có cột Mã NV / Họ tên người lao động — cần điền để Bảng Lương gắn người phụ thuộc đúng người")
+    return rows, canh_bao
+
+
+@app.post("/api/nhap-lieu/import-npt/{cid}")
+async def nhap_lieu_import_npt(cid: int, request: Request):
+    """Import danh sách NGƯỜI PHỤ THUỘC từ Excel (1 hoặc nhiều file): trả {header, rows, loi} để giao diện NỐI THÊM vào danh sách đang xem (chưa lưu)."""
+    import openpyxl, io as _io
+    form = await request.form()
+    files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
+    if not files:
+        raise HTTPException(400, "Chưa chọn file")
+    rows_out, loi = [], []
+    for up in files:
+        fn = getattr(up, "filename", "file")
+        try:
+            wb = openpyxl.load_workbook(_io.BytesIO(await up.read()), data_only=True)
+            grid = [list(r) for r in wb[wb.sheetnames[0]].iter_rows(values_only=True)]
+            r_, cb = _npt_doc_excel(grid)
+        except HTTPException as e:
+            loi.append("%s: %s" % (fn, e.detail))
+            continue
+        except Exception as e:
+            loi.append("%s: không đọc được (%s)" % (fn, e))
+            continue
+        rows_out.extend(r_)
+        loi.extend("%s: %s" % (fn, c) for c in cb)
+    return {"header": _NPT_HEADERS_IMPORT, "rows": rows_out, "loi": loi}
 
 
 @app.post("/api/nhap-lieu/import-nhan-vien/{cid}")

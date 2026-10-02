@@ -951,6 +951,38 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
     // xóa dòng đã chọn
     ctxN.nptChon = { r: 2, c: 0 }; ctxN.nptXoaDong(); assert.strictEqual(ctxN.nptRows.length, 2);
   }
+  // ---- 37b: Người Phụ Thuộc: "Thêm dòng" mở hộp chọn người lao động từ Danh Sách Nhân Viên + Import Excel ----
+  assert(/onclick="nptMoChonNld\(\)"/.test(html) && /id="nptImportFile"/.test(html) && /onchange="nptImportExcel\(this\)"/.test(html), 'Nút Thêm dòng mở hộp chọn + có Import Excel');
+  {
+    const n0 = html.indexOf('/* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN'), n1 = html.indexOf('/* ----- BẢNG LƯƠNG (theo file TỔNG HỢP', n0);
+    const khoi = html.slice(n0, n1).replace(/^let /gm, 'var ').replace(/^const /gm, 'var ');
+    const dom = {}, toasts = [], body = [], daXoa = [];
+    const mkEl = (id) => ({ id, style: {}, innerHTML: '', textContent: '', remove() { daXoa.push(id); } });
+    const ctxP = { current: 7, toast: (t, k) => toasts.push([t, k]), console, confirm: () => true,
+      document: { getElementById: (id) => dom[id] || (dom[id] = mkEl(id)), createElement: () => mkEl(''), body: { appendChild: (el) => { dom[el.id] = el; body.push(el); } },
+        querySelectorAll: (sel) => sel === '.nptChonCb:checked' ? [{ value: '1' }, { value: '0' }] : [] },
+      api: async (u) => ({ header: ['STT', 'Mã NV', 'Họ và tên'], rows: [[1, '1', 'Hồ A'], [2, '2', 'Trần B']] }),
+      fetch: async (u, o) => ({ ok: true, json: async () => ({ header: ['STT', 'Mã NV', 'Họ và tên người lao động', 'Họ và tên người phụ thuộc', 'Ngày sinh', 'CCCD/Số định danh', 'Quan hệ', 'Từ tháng', 'Đến tháng'],
+        rows: [['', '2', '', 'Con X', '01/02/2015', '0123', 'Con', '01/2026', ''], ['', '', 'ho a', 'Con Y', '', '', 'Con', '', '']], loi: ['f.xlsx: 1 dòng thiếu họ tên người phụ thuộc đã bỏ qua'] }) }),
+      FormData: function () { this.append = () => {}; } };
+    ctxP.window = ctxP;
+    vm.createContext(ctxP);
+    vm.runInContext(khoi, ctxP);
+    await ctxP.nptMoChonNld();
+    assert(body.length === 1 && /Chọn người lao động/.test(body[0].innerHTML) && /Thêm dòng trống/.test(body[0].innerHTML) && /Thêm dòng cho người đã chọn/.test(body[0].innerHTML), 'Hộp chọn người lao động');
+    assert.strictEqual(ctxP.nptNv.length, 2, 'Nạp Danh Sách Nhân Viên');
+    ctxP.nptXacNhanChonNld();
+    const cMa = ctxP.nptCot('Mã NV'), cTen = ctxP.nptCot('Họ và tên người lao động');
+    assert.strictEqual(ctxP.nptRows.length, 2); assert.strictEqual(ctxP.nptRows[0][cMa], '2'); assert.strictEqual(ctxP.nptRows[0][cTen], 'Trần B'); assert.strictEqual(ctxP.nptRows[1][cMa], '1');
+    assert.strictEqual(ctxP.nptRows[0][0], 1); assert.strictEqual(ctxP.nptRows[1][0], 2, 'Đánh lại STT'); assert(daXoa.includes('nptChonNldOv'), 'Đóng hộp');
+    await ctxP.nptImportExcel({ files: [{ name: 'f.xlsx' }], value: 'x' });
+    assert.strictEqual(ctxP.nptRows.length, 4);
+    const r3 = ctxP.nptRows[2], r4 = ctxP.nptRows[3];
+    assert.strictEqual(r3[cTen], 'Trần B', 'Điền tên NLĐ theo Mã NV'); assert.strictEqual(r3[ctxP.nptCot('Họ và tên người phụ thuộc')], 'Con X'); assert.strictEqual(r3[ctxP.nptCot('Từ tháng')], '01/2026');
+    assert.strictEqual(r4[cMa], '1', 'Điền Mã NV theo họ tên (không phân biệt dấu/hoa thường)'); assert.strictEqual(r4[cTen], 'Hồ A');
+    assert(toasts.some(([t, k]) => k === 'ok' && /Đã thêm 2 người phụ thuộc/.test(t) && /Nhớ bấm/.test(t)));
+  }
+  console.log('PASS 37b: Người Phụ Thuộc: Thêm dòng -> chọn người lao động từ Danh Sách Nhân Viên; Import Excel nối thêm và tự điền Mã NV/họ tên.');
   // Nạp từ Danh Sách Nhân Viên: có danh sách NPT -> cập nhật số người phụ thuộc của dòng đã có
   m = nap({ api: (url, o) => url.includes('tu-nhan-vien') ? { rows: [dongMau('101', 'A', { so_npt: 2 })], npt_co_ds: true, da_nghi: [] } : { rows: JSON.parse(o.body).rows, tham_so: {} } });
   m.ctx.blNam = 2025; m.ctx.blThang = '05'; m.ctx.blTS = {}; m.ctx.blDL = { '05': [dongMau('101', 'A', { so_npt: 0 })] };
