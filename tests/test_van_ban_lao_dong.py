@@ -197,4 +197,37 @@ vals = [[c for c in r if c is not None] for r in ws.iter_rows(values_only=True)]
 assert any("HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG" in str(r) for r in vals)
 assert any(r and r[0] == "Mức lương" and r[1] == 6_500_000 and r[2] == round(6_500_000 * 1.05) for r in vals)
 assert "Xếp lương" in wb.sheetnames and wb["Xếp lương"].max_row == 4
+# --- thang bảng lương theo bố cục file mẫu
+# nhóm tự khai báo: gộp nhiều chức danh, nhóm chưa có người dùng mức bậc 1 khai báo; người chưa thuộc nhóm nào tự lập nhóm
+nhom_tc = "Giám đốc | 8000000\nKế toán; Tạp vụ\nPhó giám đốc; Kế toán trưởng"
+tl2 = v.tinh_thang_luong(nv[:4], 2026, 1, 5, 7, nhom_tuy_chinh=nhom_tc)
+ten2 = [g["ten"] for g in tl2["nhom"]]
+assert ten2 == ["Giám đốc", "Kế toán; Tạp vụ", "Phó giám đốc; Kế toán trưởng"], ten2
+assert tl2["nhom"][0]["bac"][0] == 8_000_000 and len(tl2["nhom"][0]["xep"]) == 1, "Giám đốc (Lê Hoàng Cường) vào nhóm khai báo, bậc 1 = 8.000.000"
+assert len(tl2["nhom"][1]["xep"]) == 3 and tl2["nhom"][1]["bac"][0] == 5_310_000, "Kế toán + Tạp vụ gộp 1 nhóm; bậc 1 = mức thấp nhất (Tạp vụ 4tr nâng lên tối thiểu vùng)"
+assert tl2["nhom"][2]["xep"] == [] and tl2["nhom"][2]["bac"][0] == 5_310_000, "nhóm trống: bậc 1 = lương tối thiểu vùng"
+tl3 = v.tinh_thang_luong(nv[:3], 2026, 1, 5, 7, nhom_tuy_chinh="Giám đốc | 25000000")
+assert tl3["nhom"][0]["bac"][0] == 25_000_000 and tl3["nhom"][0]["xep"][0]["bac"] == 0
+assert tl3["nhom"][0]["duoi_bac_1"], "lương thấp hơn bậc 1 khai báo -> cờ cảnh báo"
+cb3 = v.kiem_tra(nv[:3], 2026, {"vung": 1, "nhom_tuy_chinh": "Giám đốc | 25000000", "ngay": "02/01/2026"})
+assert any("thấp hơn mức bậc 1" in c["nd"] for c in cb3), cb3
+# hệ số lương = mức bậc / lương tối thiểu vùng
+assert abs(tl["nhom"][0]["he_so"][0] - tl["nhom"][0]["bac"][0] / 5_310_000) < 1e-9
+raw = v.dung_thang_bang_luong(nv[:4], CTY, {"ngay": "03/10/2026", "nhom_tuy_chinh": nhom_tc}, 2025)
+th2 = van_ban(raw)
+dau = th2.split("HỆ THỐNG THANG LƯƠNG")[0]
+assert "Địa chỉ: 1 Lê Lợi" in dau and "ngày 03 tháng 10 năm 2026" not in dau, "đầu văn bản có địa chỉ; ngày nằm ở chỗ ký (như file mẫu)"
+assert "Hệ số lương 1,51" in th2, "bậc 1 Giám đốc 8.000.000 / 5.310.000 = 1,51"
+assert "1. Giám đốc" in th2 and "2. Kế toán; Tạp vụ" in th2 and "8.000.000" in th2 and "1,51" in th2
+assert "5.310.000" in th2 and "293/2025" in th2 and "4.960.000" not in th2, "lương tối thiểu theo ngày ban hành (2026) dù lấy Bảng lương năm 2025"
+assert "ngày 03 tháng 10 năm 2026 GIÁM ĐỐC CÔNG TY" in th2 and th2.index("(Ký, ghi rõ họ tên và đóng dấu)") < th2.index("PHỤ LỤC"), "ký ở cuối thang lương; xếp lương là phụ lục"
+assert 'class="pb"' in raw and "Mức lương đóng BHXH" in th2 and "Không tham gia" in th2 and "Bảng lương năm 2025" in th2
+assert "Hệ số lương" not in van_ban(v.dung_thang_bang_luong(nv[:4], CTY, {"hien_he_so": False}, 2026))
+rootT, _ = doc_xml(v.html_sang_docx(raw, {"ngang": True, "size": 11}))
+assert len(list(rootT.iter(W + "pageBreakBefore"))) == 1 and len(list(rootT.iter(W + "tbl"))) >= 4
+p2 = os.path.join(tempfile.mkdtemp(), "tl2.xlsx")
+v.thang_luong_excel(p2, nv[:4], CTY, {"ngay": "03/10/2026", "nhom_tuy_chinh": nhom_tc}, 2025)
+w2 = openpyxl.load_workbook(p2)["Thang bảng lương"]
+vv = [[c for c in r if c is not None] for r in w2.iter_rows(values_only=True)]
+assert any(r and r[0] == "Hệ số lương" and r[1] == round(8_000_000 / 5_310_000, 2) for r in vv) and any(r and r[0] == "Mức lương" and r[1] == 8_000_000 for r in vv)
 print("PASS")

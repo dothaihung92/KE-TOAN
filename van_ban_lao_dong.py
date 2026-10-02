@@ -251,7 +251,7 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "so_qd": f"01/QĐ-{hom_nay.year}", "kem_phu_luc": False,
         "phuc_loi": {k: {"bat": v[1], "m1": v[2], "m2": v[3]} for k, v in PHUC_LOI_MAC_DINH.items()},
         # thang bảng lương
-        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True,
+        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "hien_he_so": True, "nhom_tuy_chinh": "",
     }
 
 
@@ -262,7 +262,7 @@ def gop_tuy_chon(cty, tuy_chon, hom_nay=None):
             for kk, vv in v.items():
                 if kk in kq["phuc_loi"] and isinstance(vv, dict):
                     kq["phuc_loi"][kk].update(vv)
-        elif v is not None and (v != "" or k in ("bat_dau", "ngay_ky", "bo_phan", "cong_viec", "ong_ba_ky", "dien_thoai")):
+        elif v is not None and (v != "" or k in ("bat_dau", "ngay_ky", "bo_phan", "cong_viec", "ong_ba_ky", "dien_thoai", "nhom_tuy_chinh")):
             kq[k] = v
     return kq
 
@@ -410,17 +410,40 @@ def _lam_tron(x, don_vi=1):
     return int(round(x / don_vi)) * int(don_vi)
 
 
-def tinh_thang_luong(nv_list, nam, vung=1, buoc_pct=5.0, so_bac=7, lam_tron=1):
-    """Thang lương theo từng nhóm chức danh. Bậc 1 = mức lương cơ bản THẤP NHẤT đang trả cho chức danh (không thấp hơn lương tối thiểu vùng);
-    mỗi bậc sau = bậc liền trước × (1 + buoc_pct%). Tự thêm bậc nếu có người lương vượt bậc cuối. Mỗi người được xếp vào bậc cao nhất có
-    mức <= lương đang hưởng."""
+def doc_nhom_tuy_chinh(text):
+    """Mỗi dòng = 1 nhóm chức danh: 'Phó giám đốc; Kế toán trưởng | 8000000' (phần sau dấu | là mức bậc 1, có thể bỏ). -> [(tên nhóm, [chức danh], bậc 1|0)]"""
+    kq = []
+    for dong in str(text or "").splitlines():
+        dong = dong.strip()
+        if not dong:
+            continue
+        ten, _, goc = dong.partition("|")
+        cds = [x.strip() for x in re.split(r"[;]", ten) if x.strip()]
+        if cds:
+            kq.append(("; ".join(cds), cds, _so(goc)))
+    return kq
+
+
+def tinh_thang_luong(nv_list, nam, vung=1, buoc_pct=5.0, so_bac=7, lam_tron=1, nhom_tuy_chinh=""):
+    """Thang lương theo từng nhóm chức danh. Bậc 1 = mức lương cơ bản THẤP NHẤT đang trả cho nhóm (không thấp hơn lương tối thiểu vùng; nhóm do
+    người dùng khai báo kèm '| mức' thì lấy mức đó); mỗi bậc sau = bậc liền trước × (1 + buoc_pct%). Tự thêm bậc nếu có người lương vượt bậc cuối.
+    Mỗi người được xếp vào bậc cao nhất có mức <= lương đang hưởng. `nhom_tuy_chinh`: các nhóm khai báo tay (gộp nhiều chức danh, hoặc chức danh
+    chưa có người như Giám đốc); người không thuộc nhóm nào thì tự lập nhóm theo chức vụ của họ."""
     ltt = luong_toi_thieu_vung(nam, vung)
     buoc = 1.0 + float(buoc_pct or 0) / 100.0
     so_bac = max(1, int(so_bac or 7))
+    nhom_nguon, con_lai = [], list(nv_list)
+    for ten, cds, goc in doc_nhom_tuy_chinh(nhom_tuy_chinh):
+        khoa = {_chuan(c) for c in cds}
+        nguoi = [n for n in con_lai if _chuan(n.get("chuc_vu")) in khoa]
+        con_lai = [n for n in con_lai if _chuan(n.get("chuc_vu")) not in khoa]
+        nhom_nguon.append({"ten": ten, "nguoi": nguoi, "goc": goc})
+    for g in nhom_chuc_danh(con_lai):
+        nhom_nguon.append({"ten": g["ten"], "nguoi": g["nguoi"], "goc": 0})
     nhom_kq = []
-    for g in nhom_chuc_danh(nv_list):
+    for g in nhom_nguon:
         luong = [n["luong_cb"] for n in g["nguoi"] if n["luong_cb"] > 0]
-        goc = max(min(luong) if luong else ltt, ltt)
+        goc = max(g["goc"] or (min(luong) if luong else ltt), ltt)
         cao_nhat = max(luong) if luong else 0
         bac, muc = [], float(goc)
         while True:
@@ -438,7 +461,9 @@ def tinh_thang_luong(nv_list, nam, vung=1, buoc_pct=5.0, so_bac=7, lam_tron=1):
                     k = i
             xep.append({"nv": n, "bac": k, "muc_bac": bac[k - 1] if k else 0,
                         "chenh": (n["luong_cb"] - bac[k - 1]) if k else 0})
-        nhom_kq.append({"ten": g["ten"], "bac": bac, "xep": xep, "nguoi": g["nguoi"], "thap_hon_ltt": bool(luong) and min(luong) < ltt,
+        nhom_kq.append({"ten": g["ten"], "bac": bac, "he_so": [m / ltt for m in bac], "xep": xep, "nguoi": g["nguoi"],
+                         "thap_hon_ltt": bool(luong) and min(luong) < ltt,
+                         "duoi_bac_1": bool(luong) and min(luong) + 0.5 < bac[0] and min(luong) >= ltt,
                          "vuot_bac_cuoi": bool(luong) and bac[-1] + 0.5 < cao_nhat})
     return {"nhom": nhom_kq, "luong_toi_thieu": ltt, "buoc_pct": float(buoc_pct or 0), "so_bac_toi_da": max([len(g["bac"]) for g in nhom_kq] or [so_bac])}
 
@@ -447,6 +472,8 @@ def tinh_thang_luong(nv_list, nam, vung=1, buoc_pct=5.0, so_bac=7, lam_tron=1):
 def kiem_tra(nv_list, nam, tuy_chon, tran_pc=None):
     """Danh sách cảnh báo [{'muc': 'loi'|'canh_bao', 'nd': str}] — những chỗ có thể bị thanh tra BHXH / thuế hỏi."""
     tc = tuy_chon or {}
+    nd_ngay = ngay_date(tc.get("ngay"))
+    nam = nd_ngay.year if nd_ngay else nam          # lương tối thiểu vùng theo NGÀY BAN HÀNH văn bản
     ltt = luong_toi_thieu_vung(nam, tc.get("vung", 1))
     tran_pc = tran_pc or {}
     kq = []
@@ -486,8 +513,10 @@ def kiem_tra(nv_list, nam, tuy_chon, tran_pc=None):
             tap = sorted({int(n[k]) for n in g["nguoi"]})
             if len(tap) > 1:
                 them("canh_bao", f"Chức danh '{g['ten']}': phụ cấp {ten_pc} không đồng nhất ({', '.join(so_tien(x) for x in tap)} đ) — Quy chế sẽ ghi theo khoảng; nên thống nhất theo chức danh.")
-    tl = tinh_thang_luong(nv_list, nam, tc.get("vung", 1), tc.get("buoc_pct", 5), tc.get("so_bac", 7))
+    tl = tinh_thang_luong(nv_list, nam, tc.get("vung", 1), tc.get("buoc_pct", 5), tc.get("so_bac", 7), nhom_tuy_chinh=tc.get("nhom_tuy_chinh", ""))
     for g in tl["nhom"]:
+        if g["duoi_bac_1"]:
+            them("canh_bao", f"Nhóm '{g['ten']}': có người lương thấp hơn mức bậc 1 bạn khai báo ({so_tien(g['bac'][0])} đ) — người đó không xếp được vào bậc nào.")
         if g["thap_hon_ltt"]:
             them("loi", f"Chức danh '{g['ten']}': có người lương thấp hơn lương tối thiểu vùng — thang lương đã nâng bậc 1 lên bằng mức tối thiểu ({so_tien(tl['luong_toi_thieu'])} đ); cần điều chỉnh lương thực trả.")
         if g["vuot_bac_cuoi"]:
@@ -502,17 +531,20 @@ def _p(noi_dung, cls=""):
     return f'<p class="{cls}">{noi_dung}</p>' if cls else f"<p>{noi_dung}</p>"
 
 
-def _tieu_ngu(cty, so_van_ban, dia_danh, ngay, kieu="so"):
-    """Khối đầu văn bản: tên công ty + số | Quốc hiệu, tiêu ngữ + địa danh, ngày."""
+def _tieu_ngu(cty, so_van_ban, dia_danh, ngay, co_ngay=True, co_dia_chi=False):
+    """Khối đầu văn bản: tên công ty + số | Quốc hiệu, tiêu ngữ + địa danh, ngày (co_ngay=False: bỏ dòng ngày — vd thang lương ghi ngày ở chỗ ký)."""
     ten = esc((cty.get("ten") or "").upper())
     trai = [_p(f"<b>{ten}</b>", "c")]
     if cty.get("mst"):
         trai.append(_p(f"Mã số thuế: {esc(cty['mst'])}", "c"))
+    if co_dia_chi and cty.get("dia_chi"):
+        trai.append(_p(f"Địa chỉ: {esc(cty['dia_chi'])}", "c"))
     if so_van_ban:
         trai.append(_p(f"Số: {esc(so_van_ban)}", "c"))
     phai = [_p("<b>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</b>", "c"), _p("<b>Độc lập - Tự do - Hạnh phúc</b>", "c"),
-            _p("-------oOo-------", "c"),
-            _p(f"<i>{esc(dia_danh + ', ' if dia_danh else '')}{esc(ngay_chu(ngay))}</i>", "c")]
+            _p("-------oOo-------", "c")]
+    if co_ngay:
+        phai.append(_p(f"<i>{esc(dia_danh + ', ' if dia_danh else '')}{esc(ngay_chu(ngay))}</i>", "c"))
     return ('<table class="nb"><colgroup><col style="width:44%"><col style="width:56%"></colgroup><tr><td>'
             + "".join(trai) + "</td><td>" + "".join(phai) + "</td></tr></table>")
 
@@ -827,52 +859,80 @@ def bang_nhan_vien_html(ds):
     return "".join(r)
 
 
+def _ky_ben_phai(tc, ngay):
+    """Khối ký bên phải (như file mẫu): địa danh, ngày / chức danh / (Ký, ghi rõ họ tên và đóng dấu) / họ tên."""
+    return ('<table class="nb"><colgroup><col style="width:55%"><col style="width:45%"></colgroup><tr><td></td><td>'
+            + _p(f"<i>{esc(tc.get('dia_danh') + ', ' if tc.get('dia_danh') else '')}{esc(ngay_chu(ngay))}</i>", "c")
+            + _p(f"<b>{esc((tc.get('chuc_danh_ky') or 'Giám đốc').upper())} CÔNG TY</b>", "c") + _p("<i>(Ký, ghi rõ họ tên và đóng dấu)</i>", "c")
+            + _p("&nbsp;", "c") * 3 + _p(f"<b>{esc((tc.get('nguoi_ky') or '').upper())}</b>", "c") + "</td></tr></table>")
+
+
+def _he_so_hien(x):
+    return f"{x:.2f}".replace(".", ",")
+
+
 def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None):
-    """HTML Hệ thống thang lương, bảng lương (theo file mẫu: nhóm chức danh × bậc lương) + bảng xếp lương hiện tại."""
+    """HTML Hệ thống thang lương, bảng lương theo bố cục file mẫu (nhóm chức danh × bậc lương; mỗi nhóm có dòng Hệ số + Mức lương) +
+    phụ lục bảng xếp lương hiện tại của từng người (kèm mức lương đóng BHXH) để đối chiếu khi thanh tra."""
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
     ngay = ngay_date(tc.get("ngay"), hom_nay)
-    nam = nam or ngay.year
+    nam_du_lieu = nam or ngay.year
+    nam = ngay.year                       # lương tối thiểu vùng + văn bản áp dụng theo NGÀY BAN HÀNH
     dang_lam = [n for n in nv_list if not n.get("da_nghi")] or nv_list
-    tl = tinh_thang_luong(dang_lam, nam, tc.get("vung", 1), tc.get("buoc_pct", 5), tc.get("so_bac", 7))
+    tl = tinh_thang_luong(dang_lam, nam, tc.get("vung", 1), tc.get("buoc_pct", 5), tc.get("so_bac", 7), nhom_tuy_chinh=tc.get("nhom_tuy_chinh", ""))
     nb = tl["so_bac_toi_da"]
-    h = ['<section class="vb-trang ngang">', _tieu_ngu(cty, "", tc.get("dia_danh"), ngay), _p("&nbsp;"),
+    co_hs = bool(tc.get("hien_he_so", True))
+    ltt = tl["luong_toi_thieu"]
+    pct = format(float(tl["buoc_pct"]), "g").replace(".", ",")
+    h = ['<section class="vb-trang ngang">', _tieu_ngu(cty, "", tc.get("dia_danh"), ngay, co_ngay=False, co_dia_chi=True), _p("&nbsp;"),
          _p("<b>HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG</b>", "c b"),
-         _p(f"Áp dụng mức lương tối thiểu vùng {int(tc.get('vung', 1))}: {so_tien(tl['luong_toi_thieu'])} đồng/tháng ({esc(van_ban_luong_toi_thieu(nam).split(' quy định')[0])})", "c"),
+         _p(f"Áp dụng mức lương tối thiểu vùng {int(tc.get('vung', 1))}: {so_tien(ltt)} đồng/tháng ({esc(van_ban_luong_toi_thieu(nam).split(' quy định')[0])})", "c"),
          _p("Đơn vị tính: Việt Nam đồng", "r i")]
-    rong = f"{70.0 / nb:.3f}%"
-    t = ['<table><colgroup><col style="width:30%">' + "".join(f'<col style="width:{rong}">' for _ in range(nb)) + "</colgroup>"
+    rong = f"{72.0 / nb:.3f}%"
+    t = ['<table><colgroup><col style="width:28%">' + "".join(f'<col style="width:{rong}">' for _ in range(nb)) + "</colgroup>"
          + f'<tr><th>NHÓM CHỨC DANH, VỊ TRÍ CÔNG VIỆC</th><th colspan="{nb}">BẬC LƯƠNG</th></tr><tr><th>&nbsp;</th>'
          + "".join(f"<th>{so_la_ma(i)}</th>" for i in range(1, nb + 1)) + "</tr>"]
     for i, g in enumerate(tl["nhom"], 1):
         t.append(f'<tr><td colspan="{nb + 1}"><b>{i}. {esc(g["ten"])}</b></td></tr>')
+        if co_hs:
+            t.append("<tr><td>Hệ số lương</td>" + "".join(f'<td class="r">{_he_so_hien(g["he_so"][j]) if j < len(g["bac"]) else ""}</td>' for j in range(nb)) + "</tr>")
         t.append("<tr><td>Mức lương</td>" + "".join(f'<td class="r">{so_tien(g["bac"][j]) if j < len(g["bac"]) else ""}</td>' for j in range(nb)) + "</tr>")
     t.append("</table>")
     h.append("".join(t))
     h += [_p("&nbsp;"),
-          _p("<b>Nguyên tắc xây dựng thang lương, bảng lương:</b>"),
-          _p(f"1. Bậc 1 của mỗi chức danh là mức lương thấp nhất của chức danh đó, không thấp hơn mức lương tối thiểu vùng ({so_tien(tl['luong_toi_thieu'])} đồng/tháng).", "j"),
-          _p(f"2. Mức lương mỗi bậc cao hơn bậc liền kề trước {format(float(tl['buoc_pct']), 'g').replace('.', ',')}%.", "j"),
-          _p("3. Người lao động được xét nâng bậc lương khi đủ 12 tháng giữ bậc hiện hưởng, hoàn thành tốt nhiệm vụ và không bị kỷ luật lao động từ khiển trách bằng văn bản trở lên.", "j"),
-          _p("4. Thang lương, bảng lương được xây dựng theo Điều 93 Bộ luật Lao động năm 2019, được công bố công khai tại nơi làm việc trước khi thực hiện và làm căn cứ ký hợp đồng lao động, "
-             "thỏa thuận mức lương, đóng bảo hiểm xã hội và trả lương cho người lao động.", "j"),
-          _p("&nbsp;"),
-          _bang_ky("", "", "", (tc.get("chuc_danh_ky") or "Giám đốc").upper(), "(Ký, ghi rõ họ tên và đóng dấu)", tc.get("nguoi_ky") or "")]
+          _p("<b>Nguyên tắc xây dựng và áp dụng thang lương, bảng lương:</b>"),
+          _p(f"1. Mức lương bậc 1 của mỗi nhóm chức danh không thấp hơn mức lương tối thiểu vùng ({so_tien(ltt)} đồng/tháng)"
+             + (f"; hệ số lương = mức lương của bậc ÷ mức lương tối thiểu vùng." if co_hs else "."), "j"),
+          _p(f"2. Mức lương mỗi bậc cao hơn bậc liền kề trước {pct}%.", "j"),
+          _p("3. Mức lương ghi trong hợp đồng lao động và mức lương làm căn cứ đóng bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp của người lao động được xếp theo thang lương, bảng lương này "
+             "(chi tiết tại Phụ lục).", "j"),
+          _p("4. Người lao động được xét nâng bậc lương khi đủ 12 tháng giữ bậc hiện hưởng, hoàn thành tốt nhiệm vụ và không bị xử lý kỷ luật lao động từ hình thức khiển trách bằng văn bản trở lên.", "j"),
+          _p("5. Thang lương, bảng lương được xây dựng theo Điều 93 Bộ luật Lao động năm 2019 sau khi tham khảo ý kiến của tổ chức đại diện người lao động tại cơ sở (nếu có) "
+             "và được công bố công khai tại nơi làm việc trước khi thực hiện.", "j"),
+          _p("&nbsp;"), _ky_ben_phai(tc, ngay)]
     if tc.get("kem_xep_luong"):
         h.append('<p class="pb">&nbsp;</p>')
-        h.append(_p("<b>BẢNG XẾP LƯƠNG HIỆN TẠI CỦA NGƯỜI LAO ĐỘNG</b>", "c b"))
-        h.append(_p(f"(Lấy từ Danh sách nhân viên và Bảng lương năm {nam})", "c i"))
-        x = ["<table><tr><th>STT</th><th>Họ và tên</th><th>Chức danh</th><th>Lương cơ bản đang hưởng</th><th>Bậc lương</th><th>Mức lương của bậc</th><th>Chênh lệch</th></tr>"]
+        h.append(_p("<b>PHỤ LỤC</b>", "c b"))
+        h.append(_p("<b>BẢNG XẾP LƯƠNG HIỆN TẠI CỦA NGƯỜI LAO ĐỘNG</b>", "c"))
+        h.append(_p(f"(Theo Danh sách nhân viên và Bảng lương năm {nam_du_lieu})", "c i"))
+        x = ["<table><tr><th>STT</th><th>Họ và tên</th><th>Nhóm chức danh</th><th>Mức lương theo hợp đồng</th><th>Bậc lương</th><th>Hệ số</th><th>Mức lương của bậc</th>"
+             "<th>Chênh lệch</th><th>Mức lương đóng BHXH</th></tr>"]
         stt = 0
         for g in tl["nhom"]:
             for xp in g["xep"]:
                 stt += 1
                 n = xp["nv"]
+                k = xp["bac"]
                 x.append(f'<tr><td class="c">{stt}</td><td>{esc(n["ten"])}</td><td>{esc(g["ten"])}</td><td class="r">{so_tien(n["luong_cb"])}</td>'
-                         f'<td class="c">{so_la_ma(xp["bac"]) if xp["bac"] else "-"}</td><td class="r">{so_tien(xp["muc_bac"]) if xp["bac"] else "-"}</td>'
-                         f'<td class="r">{so_tien(xp["chenh"]) if xp["bac"] else "-"}</td></tr>')
+                         f'<td class="c">{so_la_ma(k) if k else "-"}</td><td class="r">{_he_so_hien(g["he_so"][k - 1]) if k else "-"}</td>'
+                         f'<td class="r">{so_tien(xp["muc_bac"]) if k else "-"}</td><td class="r">{so_tien(xp["chenh"]) if k else "-"}</td>'
+                         f'<td class="r">{so_tien(n["luong_cb"]) if n.get("dong_bh") else "Không tham gia"}</td></tr>')
         x.append("</table>")
         h.append("".join(x))
+        h.append(_p("Ghi chú: mức lương làm căn cứ đóng bảo hiểm xã hội bằng mức lương theo hợp đồng lao động (lương cơ bản), chưa gồm các khoản phụ cấp, hỗ trợ không thuộc diện đóng bảo hiểm.", "j i"))
+        h.append(_p("&nbsp;"))
+        h.append(_ky_ben_phai(tc, ngay))
     h.append("</section>")
     return "".join(h)
 
@@ -1256,28 +1316,31 @@ def html_sang_docx(html, trang=None):
 
 # ============================================================ Excel thang bảng lương (theo file mẫu)
 def thang_luong_excel(path, nv_list, cty, tuy_chon, nam=None, hom_nay=None):
+    """Thang bảng lương dạng Excel, bố cục như file mẫu (nhóm chức danh, Hệ số lương, Mức lương theo bậc) + sheet Xếp lương."""
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter as L
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
     ngay = ngay_date(tc.get("ngay"), hom_nay)
-    nam = nam or ngay.year
+    nam_du_lieu = nam or ngay.year
+    nam = ngay.year
     dang_lam = [n for n in nv_list if not n.get("da_nghi")] or nv_list
-    tl = tinh_thang_luong(dang_lam, nam, tc.get("vung", 1), tc.get("buoc_pct", 5), tc.get("so_bac", 7))
+    tl = tinh_thang_luong(dang_lam, nam, tc.get("vung", 1), tc.get("buoc_pct", 5), tc.get("so_bac", 7), nhom_tuy_chinh=tc.get("nhom_tuy_chinh", ""))
     nb = tl["so_bac_toi_da"]
+    co_hs = bool(tc.get("hien_he_so", True))
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Thang bảng lương"
     giua = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    s = Side(style="thin")
-    vien = Border(left=s, right=s, top=s, bottom=s)
+    s_ = Side(style="thin")
+    vien = Border(left=s_, right=s_, top=s_, bottom=s_)
     nc = nb + 1
+    cot_p = max(3, nc - 3)
     ws.cell(1, 1, (cty.get("ten") or "").upper()).font = Font(bold=True)
-    ws.cell(1, max(3, nc - 2), "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM").font = Font(bold=True)
-    if cty.get("mst"):
-        ws.cell(2, 1, "Mã số thuế: " + cty["mst"])
-    ws.cell(2, max(3, nc - 2), "Độc lập - Tự do - Hạnh phúc").font = Font(bold=True)
+    ws.cell(1, cot_p, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM").font = Font(bold=True)
+    ws.cell(2, 1, ("Mã số thuế: " + cty["mst"]) if cty.get("mst") else "")
+    ws.cell(2, cot_p, "Độc lập - Tự do - Hạnh phúc").font = Font(bold=True)
     ws.cell(3, 1, "Địa chỉ: " + (cty.get("dia_chi") or ""))
     ws.merge_cells(start_row=5, start_column=1, end_row=5, end_column=nc)
     ws.cell(5, 1, "HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG").font = Font(bold=True, size=14)
@@ -1302,23 +1365,31 @@ def thang_luong_excel(path, nv_list, cty, tuy_chon, nam=None, hom_nay=None):
         ws.cell(r, 1, f"{i}. {g['ten']}").font = Font(bold=True)
         for j in range(1, nc + 1):
             ws.cell(r, j).border = vien
-        ws.cell(r + 1, 1, "Mức lương")
+        r += 1
+        if co_hs:
+            ws.cell(r, 1, "Hệ số lương")
+            for j, m in enumerate(g["bac"]):
+                ws.cell(r, 2 + j, round(g["he_so"][j], 2)).number_format = "0.00"
+            for j in range(1, nc + 1):
+                ws.cell(r, j).border = vien
+            r += 1
+        ws.cell(r, 1, "Mức lương")
         for j, m in enumerate(g["bac"]):
-            ws.cell(r + 1, 2 + j, m).number_format = "#,##0"
+            ws.cell(r, 2 + j, m).number_format = "#,##0"
         for j in range(1, nc + 1):
-            ws.cell(r + 1, j).border = vien
-        r += 2
+            ws.cell(r, j).border = vien
+        r += 1
     ws.column_dimensions["A"].width = 38
     for j in range(2, nc + 1):
         ws.column_dimensions[L(j)].width = 15
     r += 1
-    ws.cell(r, max(3, nc - 2), f"{(tc.get('dia_danh') + ', ') if tc.get('dia_danh') else ''}{ngay_chu(ngay)}")
-    ws.cell(r + 1, max(3, nc - 2), (tc.get("chuc_danh_ky") or "Giám đốc").upper()).font = Font(bold=True)
-    ws.cell(r + 2, max(3, nc - 2), "(Ký, ghi rõ họ tên và đóng dấu)").font = Font(italic=True)
-    ws.cell(r + 6, max(3, nc - 2), tc.get("nguoi_ky") or "").font = Font(bold=True)
+    ws.cell(r, cot_p, f"{(tc.get('dia_danh') + ', ') if tc.get('dia_danh') else ''}{ngay_chu(ngay)}").font = Font(italic=True)
+    ws.cell(r + 1, cot_p, (tc.get("chuc_danh_ky") or "Giám đốc").upper() + " CÔNG TY").font = Font(bold=True)
+    ws.cell(r + 2, cot_p, "(Ký, ghi rõ họ tên và đóng dấu)").font = Font(italic=True)
+    ws.cell(r + 6, cot_p, (tc.get("nguoi_ky") or "").upper()).font = Font(bold=True)
     if tc.get("kem_xep_luong"):
         w2 = wb.create_sheet("Xếp lương")
-        hdr = ["STT", "Họ và tên", "Chức danh", "Lương cơ bản đang hưởng", "Bậc lương", "Mức lương của bậc", "Chênh lệch"]
+        hdr = ["STT", "Họ và tên", "Nhóm chức danh", "Mức lương theo hợp đồng", "Bậc lương", "Hệ số", "Mức lương của bậc", "Chênh lệch", "Mức lương đóng BHXH"]
         w2.append(hdr)
         for j in range(1, len(hdr) + 1):
             c = w2.cell(1, j)
@@ -1328,14 +1399,15 @@ def thang_luong_excel(path, nv_list, cty, tuy_chon, nam=None, hom_nay=None):
         for g in tl["nhom"]:
             for xp in g["xep"]:
                 stt += 1
-                n = xp["nv"]
-                w2.append([stt, n["ten"], g["ten"], n["luong_cb"], so_la_ma(xp["bac"]) if xp["bac"] else "-", xp["muc_bac"] if xp["bac"] else 0, xp["chenh"] if xp["bac"] else 0])
+                n, k = xp["nv"], xp["bac"]
+                w2.append([stt, n["ten"], g["ten"], n["luong_cb"], so_la_ma(k) if k else "-", round(g["he_so"][k - 1], 2) if k else "-",
+                           xp["muc_bac"] if k else 0, xp["chenh"] if k else 0, n["luong_cb"] if n.get("dong_bh") else "Không tham gia"])
         for row in w2.iter_rows(min_row=2):
             for c in row:
                 c.border = vien
-                if c.column in (4, 6, 7):
+                if c.column in (4, 7, 8, 9):
                     c.number_format = "#,##0"
-        for j, w in enumerate([6, 28, 28, 22, 12, 20, 16], 1):
+        for j, w in enumerate([6, 28, 28, 22, 12, 10, 20, 16, 22], 1):
             w2.column_dimensions[L(j)].width = w
     wb.save(path)
     return path

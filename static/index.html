@@ -4503,8 +4503,11 @@ function vbVeMan(){
       ${vbOChon('vb_vung','Vùng lương tối thiểu',[[1,'Vùng I'],[2,'Vùng II'],[3,'Vùng III'],[4,'Vùng IV']],tc.vung,130)}
       ${vbOChu('vb_buoc_pct','Mỗi bậc lương tăng (%)',tc.buoc_pct,120)}
       ${vbOChu('vb_so_bac','Số bậc lương',tc.so_bac,100)}
-      <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_kem_xep_luong" ${tc.kem_xep_luong?'checked':''}> Kèm bảng xếp lương từng người</label>
-    </div>`;
+      <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_hien_he_so" ${tc.hien_he_so?'checked':''}> Hiện dòng hệ số lương</label>
+      <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_kem_xep_luong" ${tc.kem_xep_luong?'checked':''}> Kèm phụ lục bảng xếp lương từng người (có mức lương đóng BHXH)</label>
+    </div>
+    <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);margin-bottom:8px">Nhóm chức danh tự khai báo (mỗi dòng 1 nhóm; gộp nhiều chức danh bằng dấu ; ; thêm "| mức bậc 1" nếu nhóm chưa có người). Chức danh không khai báo sẽ tự lập nhóm theo Danh sách nhân viên.
+      <textarea id="vb_nhom_tuy_chinh" rows="4" placeholder="Giám đốc | 8000000&#10;Phó giám đốc; Kế toán trưởng&#10;Nhân viên kế toán; Nhân viên kinh doanh; Nhân viên văn phòng" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;color:#222;font-family:inherit">${vbEsc(tc.nhom_tuy_chinh||'')}</textarea></label>`;
   }
   const cb=d.canh_bao||[];
   const loiN=cb.filter(c=>c.muc==='loi').length;
@@ -4520,7 +4523,7 @@ function vbVeMan(){
       </div>
       <div class="hint" style="margin-bottom:8px">${l==='hd'?'Thông tin người lao động, chức danh, lương và phụ cấp lấy từ Danh Sách Nhân Viên + Bảng Lương (Bảng lương được ưu tiên khi hai nơi khác nhau).':
         l==='qc'?'Mức lương, phụ cấp theo chức danh, tỷ lệ bảo hiểm lấy từ Bảng Lương năm đã chọn; phần còn lại theo Bộ luật Lao động 2019 và Nghị định 145/2020/NĐ-CP.':
-        'Nhóm chức danh và bậc lương dựng từ lương cơ bản đang trả trong Bảng Lương (bậc 1 = mức thấp nhất của chức danh, không thấp hơn lương tối thiểu vùng).'}
+        'Nhóm chức danh và bậc lương dựng từ lương cơ bản đang trả trong Bảng Lương (bậc 1 = mức thấp nhất của nhóm, không thấp hơn lương tối thiểu vùng); có thể tự khai báo nhóm (vd Giám đốc, Phó giám đốc; Kế toán trưởng) như file mẫu.'}
         Văn bản xem trước <b>sửa trực tiếp được</b>; chỉnh phông, cỡ chữ, giãn dòng, lề rồi in hoặc xuất Word.</div>
       ${form}${hopCb}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
@@ -4560,8 +4563,8 @@ function vbVeMan(){
 function vbTuyChon(){
   const g=id=>{const e=document.getElementById(id);return e?e.value.trim():undefined};
   const k={};
-  ['ngay','dia_danh','nguoi_ky','chuc_danh_ky','ong_ba_ky','dien_thoai','loai_hd','so_thang','bat_dau','ngay_ky','so_bat_dau','mau_so','dia_diem','bo_phan','cong_viec','thoi_gio','hinh_thuc_tra','ngay_tra','so_qd','vung','buoc_pct','so_bac'].forEach(f=>{const v=g('vb_'+f);if(v!==undefined)k[f]=v});
-  ['kem_phu_luc','kem_xep_luong','ghi_phu_cap'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
+  ['ngay','dia_danh','nguoi_ky','chuc_danh_ky','ong_ba_ky','dien_thoai','loai_hd','so_thang','bat_dau','ngay_ky','so_bat_dau','mau_so','dia_diem','bo_phan','cong_viec','thoi_gio','hinh_thuc_tra','ngay_tra','so_qd','vung','buoc_pct','so_bac','nhom_tuy_chinh'].forEach(f=>{const v=g('vb_'+f);if(v!==undefined)k[f]=v});
+  ['kem_phu_luc','kem_xep_luong','ghi_phu_cap','hien_he_so'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
   if(vbLoai==='qc'){
     k.phuc_loi={};
     Object.keys(VB_PHUC_LOI_TEN).forEach(p=>{const e=document.getElementById('vb_pl_'+p);if(!e)return;
