@@ -52,8 +52,9 @@ assert pa["ct19"] == round(sum(thang_tinh[t][0]["bh_duoc_tru"] for t in thang_ti
 assert pa["ct21"] == max(0, pa["ct12"] - pa["ct17"] - pa["ct19"])
 assert pa["ct24"] == round(server._luong_qt_thue_nam(pa["ct21"], TS)) > 0
 # [22] đã khấu trừ; [24] phải nộp; [25] nộp thừa = [22]-[24]; [26] còn phải nộp = [24]-[22]; [27] miễn (còn phải nộp 1..50.000đ)
-assert pa["ct22"] == pa["khau_tru"] == round(sum(thang_tinh[t][0]["thue_tru_luong"] for t in thang_tinh)) and pa["ct23"] == 0
-assert pa["ct26"] == max(0, pa["ct24"] - pa["ct22"]) and pa["ct25"] == max(0, pa["ct22"] - pa["ct24"]) and pa["ct27"] == (1 if 0 < pa["ct26"] <= 50000 else 0)
+assert pa["ct22"] == pa["khau_tru"] == 0 and pa["ct23"] == 0, "đã khấu trừ để trống"
+assert pa["thue_bang_luong"] == round(sum(thang_tinh[t][0]["thue_tru_luong"] for t in thang_tinh))
+assert pa["ct26"] == pa["ct24"] and pa["ct25"] == 0 and pa["ct27"] == (1 if 0 < pa["ct26"] <= 50000 else 0)
 pb = g1["Trần Thị B"]
 assert pb["ct24"] == 0 and pb["ct26"] == 0 and pb["ct17"] == 132_000_000 and pb["ct16"] == 0, "Lương thấp dưới mức giảm trừ -> không thuế"
 assert len(tong["g2"]) == 1 and tong["g2"][0]["ten"] == "Làm thời vụ" and tong["g2"][0]["ct15"] > 0
@@ -214,7 +215,7 @@ finally:
 print("PASS 6: API kết xuất: file XML đúng tên (MST+000-05_QTT_TNCN_TT80-Y2025-L00), người ký nhớ cho lần sau, năm chưa có lương báo lỗi.")
 print("\nALL DONE")
 
-# ===== 7: cột thuế 05-1 đúng thứ tự: [22] đã khấu trừ, [24] phải nộp, [25] nộp thừa, [26] còn phải nộp, [27] miễn (còn phải nộp <= 50.000đ); tổng sang tờ khai chính =====
+# ===== 7: cột thuế 05-1: [22] đã khấu trừ ĐỂ TRỐNG (không tự điền) -> [25] nộp thừa = 0, [26] còn phải nộp = [24] phải nộp, [27] miễn nếu [26] <= 50.000đ =====
 def dong_t(ma, thue_thang):
     return {"ma": ma, "ten": "NV " + ma, "tn_chiu_thue": 20_000_000, "bh_duoc_tru": 1_000_000, "giam_tru_ban_than": 15_500_000, "tien_giam_tru_npt": 0, "thue_tru_luong": thue_thang, "so_npt": 0}
 ts7 = server._luong_chuan_tham_so(None, 2026)
@@ -225,22 +226,23 @@ tg = server._luong_qt_tong_hop(ts7, tt7, nv_h, nv_r, None, 2026)
 by = {p["ma"]: p for p in tg["g1"]}
 ct24 = by["A"]["ct24"]
 assert ct24 > 0 and by["A"]["ct21"] == 20_000_000 * 12 - 15_500_000 * 12 - 1_000_000 * 12
-a, b, c = by["A"], by["B"], by["C"]
-assert a["ct22"] == 1_200_000 and a["ct24"] == ct24 and a["ct25"] == max(0, 1_200_000 - ct24) and a["ct26"] == max(0, ct24 - 1_200_000)
-assert b["ct22"] == 3_600_000 and b["ct25"] == 3_600_000 - ct24 and b["ct26"] == 0 and b["ct27"] == 0, "khấu trừ nhiều hơn phải nộp -> NỘP THỪA ở [25], không phải còn phải nộp"
-assert c["ct22"] == 0 and c["ct26"] == ct24 and c["ct25"] == 0
+for ma, p in by.items():
+    assert p["ct22"] == 0 and p["ct23"] == 0 and p["khau_tru"] == 0 and p["ct25"] == 0 and p["ct26"] == p["ct24"] == ct24, (ma, p)
+assert by["A"]["thue_bang_luong"] == 1_200_000 and by["B"]["thue_bang_luong"] == 3_600_000
+assert any(c.startswith("ℹ 'Tổng số thuế TNCN đã khấu trừ'") and "4.800.000" in c for c in tg["canh_bao"]), tg["canh_bao"]
 tong7 = dict(tg, so_nguoi_khai=3)
 comp7 = Row({"ten": "CT", "mst": "0300000001", "dia_chi": "x", "ma_cqt_noi_nop": "70123", "ten_cqt_noi_nop": "Thuế cơ sở 12", "nguoi_ky": "K"})
 x7, ch7, th7 = server._luong_qt_xml(comp7, 2026, tong7, "K", datetime.date(2026, 10, 2))
-assert th7["ct36"] == 1_200_000 + 3_600_000 and th7["ct38"] == 3 * ct24 and th7["ct39"] == b["ct25"] and th7["ct40"] == a["ct26"] + c["ct26"], th7
+assert th7["ct36"] == 0 and th7["ct38"] == 3 * ct24 and th7["ct39"] == 0 and th7["ct40"] == 3 * ct24, th7
+assert ch7["ct18"] == 0 and ch7["ct19"] == 0 and ch7["ct28"] == 0 and ch7["ct31"] == 0, "không tính nghĩa vụ khấu trừ từ số đã khấu trừ tự điền"
 r7 = ET.fromstring(x7.encode("utf-8"))
-nb = {x.find("t:ct07", NS).text: x for x in r7.findall(".//t:PLuc_05_1_BK_QTT/t:BKeCTietCNhan", NS)}
-assert nb["NV B"].find("t:ct22", NS).text == "3600000" and nb["NV B"].find("t:ct25", NS).text == str(3_600_000 - ct24)
-# người còn phải nộp nhỏ (<= 50.000đ) được đánh dấu miễn [27]=1
+for x in r7.findall(".//t:PLuc_05_1_BK_QTT/t:BKeCTietCNhan", NS):
+    assert x.find("t:ct22", NS).text == "0" and x.find("t:ct25", NS).text == "0" and x.find("t:ct26", NS).text == str(ct24)
+# còn phải nộp nhỏ (<= 50.000đ) -> đánh dấu miễn [27]=1
 tt8 = {t: [dong_t("A", 0)] for t in server._LUONG_THANG}
 for t in tt8:
-    tt8[t][0]["tn_chiu_thue"] = 16_550_000          # tính ra thuế năm rất nhỏ
+    tt8[t][0]["tn_chiu_thue"] = 16_550_000
 g8 = server._luong_qt_tong_hop(ts7, tt8, nv_h, nv_r, None, 2026)["g1"][0]
 assert 0 < g8["ct26"] <= 50000 and g8["ct27"] == 1 and g8["ct25"] == 0, g8
-print("PASS 7: 05-1: [22] đã khấu trừ, [24] phải nộp, [25] nộp thừa, [26] còn phải nộp, [27] miễn; tờ khai chính ct36..ct41 khớp tổng.")
+print("PASS 7: 05-1: [22] đã khấu trừ để trống (0), [25]=0, [26] còn phải nộp = [24], [27] miễn nếu <= 50.000đ; tờ khai chính ct36=0, ct38=ct40=tổng phải nộp; có ghi chú ℹ.")
 print("\nALL DONE")

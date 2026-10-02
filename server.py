@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.057"
+APP_BUILD = "2026-10-02.058"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12523,16 +12523,22 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
             # Cột thuế của 05-1 theo hướng dẫn mẫu 05-1/BK-QTT-TNCN: [22] Số thuế đã KHẤU TRỪ trong năm; [23] (HTKK tự cập nhật, 0); [24] Tổng số thuế PHẢI NỘP (tính theo
             # biểu lũy tiến trên [21]); [25] Số thuế ĐÃ NỘP THỪA = [22]+[23]-[24] nếu dương; [26] Số thuế CÒN PHẢI NỘP = [24]-[22]-[23] nếu dương; [27] cá nhân được miễn (đánh dấu 1 nếu
             # số còn phải nộp [26] > 0 và <= 50.000đ). Bản cũ đặt số đã khấu trừ nhầm vào [25] và số nộp thừa vào [27].
-            kt = int(_luong_lam_tron(p["thue"]))
+            # THEO YÊU CẦU người dùng: "Tổng số thuế TNCN đã khấu trừ" [22] để TRỐNG (0), không tự điền từ Bảng Lương — người dùng tự nhập trên HTKK; vì vậy [25] = 0 và
+            # [26] còn phải nộp = [24]. Số thuế đã trừ theo Bảng Lương vẫn giữ ở "thue_bang_luong" để tham khảo/cảnh báo.
+            kt = 0
             con = max(0, ct24 - kt)
             g1.append(dict(p, ct12=ct12, ct16=p["npt"], ct17=ct17, ct18=0, ct19=ct19, ct21=ct21, ct22=kt, ct23=0, ct24=ct24, ct25=max(0, kt - ct24), ct26=con,
-                           ct27=1 if 0 < con <= 50000 else 0, khau_tru=kt))
+                           ct27=1 if 0 < con <= 50000 else 0, khau_tru=kt, thue_bang_luong=int(_luong_lam_tron(p["thue"]))))
         tv_thue = int(_luong_lam_tron(p["tv_thue"]))
         if p["co_tv"]:
             if tv_thue > 0:
                 g2.append(dict(p, ct11=int(_luong_lam_tron(p["tv_tn"])), ct15=tv_thue))
             else:
                 canh_bao.append(f"{p['ten'] or p['ma']}: có tháng làm < 14 ngày nhưng không bị khấu trừ thuế 10% — không đưa vào bảng kê 05-2.")
+    da_tru = sum(p.get("thue_bang_luong", 0) for p in g1)
+    if g1:
+        canh_bao.append("ℹ 'Tổng số thuế TNCN đã khấu trừ' (cột [22] phụ lục 05-1 và chỉ tiêu [36]) để TRỐNG theo yêu cầu — nhập trên HTKK; số thuế đã trừ theo Bảng Lương cả năm là "
+                        + f"{da_tru:,}".replace(",", ".") + " đ (tham khảo). Khi chưa nhập, 'Số thuế còn phải nộp' = 'Tổng số thuế phải nộp'.")
     if thieu_cccd:
         canh_bao.append("Chưa có số CCCD (mã số thuế cá nhân) của: " + ", ".join(thieu_cccd[:10]) + (" ..." if len(thieu_cccd) > 10 else "") +
                         " — nhập cột CCCD trong Danh Sách Nhân Viên rồi kết xuất lại.")
