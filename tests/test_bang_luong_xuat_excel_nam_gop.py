@@ -43,10 +43,12 @@ if lay is not None:
     hdr = {str(ws.cell(5, j).value): j for j in range(1, ws.max_column + 1)}
     hang = {ws.cell(r, 3).value: r for r in range(6, ws.max_row + 1) if ws.cell(r, 3).value}
     assert set(hang) == {"An", "Bình", "Cường", "TỔNG CỘNG"}
+    assert ws.cell(3, 1).value == "BẢNG LƯƠNG TỔNG HỢP CẢ NĂM 2026", "tiêu đề gọn"
+    for bo in ("Số tháng có lương", "Lương CB (cộng các tháng)", "Tổng ngày công", "Giờ tăng ca", "Thu nhập chịu thuế", "Thu nhập không chịu thuế", "Bảo hiểm được trừ"):
+        assert bo not in hdr, bo + " đã bỏ khỏi bảng gộp"
     val = lambda ten, tieu_de: float(lay("CẢ NĂM", "%s%d" % (L(hdr[tieu_de]), hang[ten])))
     for ma, ten in (("1", "An"), ("2", "Bình"), ("3", "Cường")):
         ky = [k for t in thang_tinh for k in thang_tinh[t] if k["ma"] == ma]
-        assert ws.cell(hang[ten], 5).value == len(ky)
         for tieu_de, kk in (("Chi phí lương (tổng)", "chi_phi_luong"), ("TT lương (thực lãnh)", "tt_luong"), ("Tiền lương", "luong"), ("PC Xăng xe", "xang_xe"),
                             ("Thuế TNCN (trừ lương)", "thue_tru_luong"), ("Trừ BHXH", "bhxh_nld"), ("Thưởng bán hàng", "thuong_bh"), ("Tăng ca (tiền)", "tang_ca")):
             ky_v = sum(server._luong_lam_tron(k[kk]) if kk in ("chi_phi_luong", "tt_luong") else k[kk] for k in ky)
@@ -56,7 +58,7 @@ if lay is not None:
     assert val("TỔNG CỘNG", "TT lương (thực lãnh)") == sum(server._luong_lam_tron(k["tt_luong"]) for k in all_k)
     dc = wb["Đối chiếu tháng"]
     assert dc.max_row == 1 + 5 + 3, "5 tháng + cộng + bảng cả năm + kết quả"
-    for j in range(3, 8):
+    for j in range(3, 7):
         kq = lay("Đối chiếu tháng", "%s%d" % (L(j), dc.max_row))
         assert str(kq).startswith("✓ Khớp"), kq
     print("PASS 1: gộp cả năm: mỗi người 1 dòng, cộng dồn đúng các tháng; tổng khớp bảng lương từng tháng; đối chiếu ✓ Khớp (tính lại công thức).")
@@ -80,6 +82,15 @@ try:
 except server.HTTPException as e:
     assert e.status_code == 404
 print("PASS 2: API xuất Excel cả năm gộp; năm chưa có dữ liệu báo lỗi.")
+# xuất ra DESKTOP (không để trình duyệt tải vào Downloads)
+dk = tempfile.mkdtemp()
+server._get_desktop_dir = lambda: dk
+server._luong_doc_nam = lambda cid, nam: (TS, thang_nhap, "", [2026])
+resp = server.bang_luong_xuat_excel_nam_gop(1, 2026)
+assert os.path.isfile(os.path.join(dk, "BangLuong_GopCaNam_2026.xlsx")) and resp.headers.get("x-saved-desktop") == "1"
+resp2 = server._resp_xuat(path, "KhongDesktop.xlsx")
+assert "x-saved-desktop" not in resp2.headers, "không yêu cầu desktop thì giữ hành vi cũ"
+print("PASS 2b: Excel cả năm gộp được lưu ra Desktop, trình duyệt không tải thêm bản vào Downloads.")
 html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "index.html"), encoding="utf-8").read()
 assert 'onclick="blXuatExcelNamGop()"' in html and "xuat-excel-nam-gop?nam=${blNam}" in html and "Xuất Excel cả năm (gộp)" in html
 print("PASS 3: có nút 'Xuất Excel cả năm (gộp)' trong hộp In bảng lương & chấm công.")

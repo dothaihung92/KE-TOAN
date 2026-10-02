@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.059"
+APP_BUILD = "2026-10-02.060"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -216,13 +216,28 @@ def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
         return None
 
 
-def _resp_xuat(path, fname, extra=None):
+def _copy_ra_desktop(path, fname):
+    """Chép file kết xuất ra Desktop của người dùng (không báo lỗi nếu không chép được)."""
+    try:
+        d = _get_desktop_dir()
+        if d and os.path.isdir(d):
+            import shutil
+            dich = os.path.join(d, fname)
+            if os.path.abspath(dich) != os.path.abspath(path):
+                shutil.copy(path, dich)
+    except Exception:
+        pass
+
+
+def _resp_xuat(path, fname, extra=None, desktop=False):
     """Trả FileResponse cho file kết xuất. Nếu file ĐÃ CÓ trên Desktop (đã
     được copy ra đó) thì gắn header 'X-Saved-Desktop: 1' để trình duyệt KHÔNG
     tải trùng thêm 1 bản vào thư mục Downloads — người dùng chỉ muốn 1 bản
     ngoài Desktop. File nào KHÔNG có trên Desktop (vd file mẫu) thì không gắn
     header -> trình duyệt vẫn tải bình thường (không mất file)."""
     h = dict(extra or {})
+    if desktop:           # file Excel xuất ra: LƯU RA DESKTOP (không tải thêm 1 bản vào thư mục Downloads của trình duyệt)
+        _copy_ra_desktop(path, fname)
     try:
         d = _get_desktop_dir()
         if d and os.path.isfile(os.path.join(d, fname)):
@@ -11985,7 +12000,7 @@ async def bang_luong_xuat_excel_mau(cid: int, request: Request):
     body = await request.json()
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
     path, fname = _luong_xuat_excel_mau(nam, body.get("thang"), body.get("tuy_chon"))
-    return _resp_xuat(path, fname)
+    return _resp_xuat(path, fname, desktop=True)
 
 
 # ----- HẠCH TOÁN CHI PHÍ LƯƠNG -> file Excel import MISA "Chứng từ nghiệp vụ khác" (mẫu người dùng gửi, từng tháng 2 chứng từ) -----
@@ -12841,14 +12856,13 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
 
 # ----- XUẤT EXCEL BẢNG LƯƠNG GỘP CẢ NĂM: 1 người = 1 dòng, cộng dồn (SUM) 12 tháng; sheet "Đối chiếu tháng" kiểm khớp với bảng lương từng tháng -----
 _LUONG_GOP_COT = [   # (khóa, tiêu đề, độ rộng, cộng dồn?)
-    ("luong_cb", "Lương CB (cộng các tháng)", 16), ("ngay_lam_hd", "Tổng ngày công", 10), ("gio_tang_ca", "Giờ tăng ca", 9), ("luong", "Tiền lương", 15),
+    ("luong", "Tiền lương", 15),
     ("tt_tien_com", "PC Tiền cơm", 13), ("xang_xe", "PC Xăng xe", 13), ("tt_di_lai", "Hỗ trợ đi lại", 12), ("dien_thoai", "PC Điện thoại", 13),
     ("tt_trang_phuc", "PC Trang phục", 13), ("thuong_bh", "Thưởng bán hàng", 14), ("thuong_t13", "Thưởng T13", 13), ("tang_ca", "Tăng ca (tiền)", 13),
     ("chi_phi_luong", "Chi phí lương (tổng)", 16),
     ("bhxh_dn", "DN chịu BHXH", 13), ("bhyt_dn", "DN chịu BHYT", 13), ("bhtn_dn", "DN chịu BHTN", 13),
     ("bhxh_nld", "Trừ BHXH", 13), ("bhyt_nld", "Trừ BHYT", 13), ("bhtn_nld", "Trừ BHTN", 13),
-    ("thue_tru_luong", "Thuế TNCN (trừ lương)", 15), ("tt_luong", "TT lương (thực lãnh)", 16),
-    ("tn_chiu_thue", "Thu nhập chịu thuế", 16), ("tn_khong_chiu_thue", "Thu nhập không chịu thuế", 16), ("bh_duoc_tru", "Bảo hiểm được trừ", 14)]
+    ("thue_tru_luong", "Thuế TNCN (trừ lương)", 15), ("tt_luong", "TT lương (thực lãnh)", 16)]
 
 
 def _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, ten_cty="", mst=""):
@@ -12909,11 +12923,11 @@ def _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, ten_cty="", mst=""):
     ws.cell(1, 1, ten_cty).font = Font(bold=True, size=12)
     if mst:
         ws.cell(2, 1, "MST: " + mst)
-    nc = 5 + len(khoa)
+    nc = 4 + len(khoa)
     ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=nc)
-    ws.cell(3, 1, f"BẢNG LƯƠNG TỔNG HỢP CẢ NĂM {nam} (gộp từng người, cộng dồn các tháng)").font = Font(bold=True, size=15)
+    ws.cell(3, 1, f"BẢNG LƯƠNG TỔNG HỢP CẢ NĂM {nam}").font = Font(bold=True, size=15)
     ws.cell(3, 1).alignment = giua
-    hdr = ["STT", "Mã NV", "Họ và Tên", "Chức vụ", "Số tháng có lương"] + [c[1] for c in _LUONG_GOP_COT]
+    hdr = ["STT", "Mã NV", "Họ và Tên", "Chức vụ"] + [c[1] for c in _LUONG_GOP_COT]
     for j, h in enumerate(hdr, 1):
         c = ws.cell(5, j, h)
         c.font, c.fill, c.alignment, c.border = Font(bold=True, color="FFFFFF"), xanh, giua, vien
@@ -12928,11 +12942,10 @@ def _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, ten_cty="", mst=""):
         ws.cell(rr, 2, p["ma"])
         ws.cell(rr, 3, p["ten"])
         ws.cell(rr, 4, p["chuc_vu"])
-        ws.cell(rr, 5, len(p["thang"]))
         for j, kk in enumerate(khoa):
             dong = dong_ct[key]
             rng = f"'Chi tiết tháng'!{sc[kk]}{dong[0]}:{sc[kk]}{dong[-1]}"
-            ws.cell(rr, 6 + j, f"=SUM({rng})").number_format = so_fmt
+            ws.cell(rr, 5 + j, f"=SUM({rng})").number_format = so_fmt
         for j in range(1, nc + 1):
             ws.cell(rr, j).border = vien
     r_tong = h0 + len(thu_tu)
@@ -12944,10 +12957,9 @@ def _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, ten_cty="", mst=""):
         c = ws.cell(r_tong, j)
         c.font, c.fill, c.border = Font(bold=True), vang, vien
     ws.freeze_panes = ws.cell(h0, 4)
-    cg = {k: L(6 + i) for i, k in enumerate(khoa)}           # cột của khóa trong sheet CẢ NĂM
+    cg = {k: L(5 + i) for i, k in enumerate(khoa)}           # cột của khóa trong sheet CẢ NĂM
     # --- sheet đối chiếu ---
-    dc_cot = [("chi_phi_luong", "Chi phí lương"), ("tt_luong", "TT lương (thực lãnh)"), ("thue_tru_luong", "Thuế TNCN"), ("bhxh_nld", "Trừ BHXH"),
-              ("tn_chiu_thue", "Thu nhập chịu thuế")]
+    dc_cot = [("chi_phi_luong", "Chi phí lương"), ("tt_luong", "TT lương (thực lãnh)"), ("thue_tru_luong", "Thuế TNCN"), ("bhxh_nld", "Trừ BHXH")]
     dc.append(["Tháng", "Số người"] + [x[1] + " (bảng lương tháng)" for x in dc_cot])
     for j in range(1, 3 + len(dc_cot)):
         c = dc.cell(1, j)
@@ -12996,7 +13008,7 @@ def bang_luong_xuat_excel_nam_gop(cid: int, nam: int = 0):
     comp = conn.execute("SELECT ten, mst FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
     path, fname, tt = _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, (comp["ten"] if comp else "") or "", (comp["mst"] if comp else "") or "")
-    return _resp_xuat(path, fname, {"X-So-Nguoi": str(tt["so_nguoi"])})
+    return _resp_xuat(path, fname, {"X-So-Nguoi": str(tt["so_nguoi"])}, desktop=True)
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")
@@ -13006,7 +13018,7 @@ def bang_luong_xuat_excel(cid: int, nam: int = 0):
     if not any(thang.values()):
         raise HTTPException(404, f"Năm {nam} chưa có dữ liệu bảng lương để xuất")
     path, fname = _luong_xuat_excel(nam, ts, thang)
-    return _resp_xuat(path, fname)
+    return _resp_xuat(path, fname, desktop=True)
 
 
 @app.post("/api/bang-luong/{cid}/nhap-excel")
@@ -14319,7 +14331,7 @@ async def nhap_lieu_export(cid: int, request: Request, loai: str = "in"):
             shutil.copy(path, os.path.join(desktop, fname))
         except Exception:
             pass
-    return _resp_xuat(path, fname)
+    return _resp_xuat(path, fname, desktop=True)
 
 
 # ---- Helper CHUNG: ghi 1 workbook theo form MISA + lưu (dùng lại cho xuất

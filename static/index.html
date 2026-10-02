@@ -5224,8 +5224,9 @@ async function blXuatExcelNamGop(){
   try{
     const r=await fetch(`/api/bang-luong/${current}/xuat-excel-nam-gop?nam=${blNam}`,{cache:'no-store'});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const dk=!!r.headers.get('X-Saved-Desktop');
     await xuatFile(r,`BangLuong_GopCaNam_${blNam}.xlsx`);
-    toast(`📊 Đã xuất bảng lương cả năm ${blNam} (gộp theo người, cộng dồn các tháng) — xem sheet "Đối chiếu tháng" để kiểm khớp`,'ok');
+    toast(`📊 Đã xuất bảng lương cả năm ${blNam} (gộp theo người)${dk?' — đã lưu ra Desktop':''} — xem sheet "Đối chiếu tháng" để kiểm khớp`,'ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
 async function blImportExcel(input){
@@ -5540,8 +5541,9 @@ async function blXuatExcelMau(){
   try{
     const r=await fetch(`/api/bang-luong/${current}/xuat-excel-mau`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(goi)});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const dk=!!r.headers.get('X-Saved-Desktop');
     await xuatFile(r,`BangLuong_ChamCong_${blNam}_T${o.tu}-T${o.den}.xlsx`);
-    toast(`📥 Đã xuất Excel theo mẫu: ${Object.keys(goi.thang).length} tháng (mỗi tháng 1 sheet)`,'ok');
+    toast(`📥 Đã xuất Excel theo mẫu: ${Object.keys(goi.thang).length} tháng (mỗi tháng 1 sheet)${dk?' — đã lưu ra Desktop':''}`,'ok');
   }catch(e){toast('Lỗi xuất Excel: '+e.message,'err')}
 }
 // Địa chỉ + Giám đốc lấy theo THÔNG TIN CÔNG TY đã nhập (Sửa công ty: "Địa chỉ trụ sở", "Tên người ký"); chỉ khi công ty chưa nhập
