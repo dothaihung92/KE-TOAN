@@ -51,8 +51,9 @@ assert pa["ct17"] == 12 * (11_000_000 + 2 * 4_400_000) == 237_600_000, "Giảm t
 assert pa["ct19"] == round(sum(thang_tinh[t][0]["bh_duoc_tru"] for t in thang_tinh)) and pa["ct18"] == 0, "Bảo hiểm ở ct19 (đối chiếu HTKK); ct18 = từ thiện"
 assert pa["ct21"] == max(0, pa["ct12"] - pa["ct17"] - pa["ct19"])
 assert pa["ct24"] == round(server._luong_qt_thue_nam(pa["ct21"], TS)) > 0
-assert pa["ct25"] == round(sum(thang_tinh[t][0]["thue_tru_luong"] for t in thang_tinh))
-assert pa["ct26"] == max(0, pa["ct24"] - pa["ct25"]) and pa["ct27"] == max(0, pa["ct25"] - pa["ct24"])
+# [22] đã khấu trừ; [24] phải nộp; [25] nộp thừa = [22]-[24]; [26] còn phải nộp = [24]-[22]; [27] miễn (còn phải nộp 1..50.000đ)
+assert pa["ct22"] == pa["khau_tru"] == round(sum(thang_tinh[t][0]["thue_tru_luong"] for t in thang_tinh)) and pa["ct23"] == 0
+assert pa["ct26"] == max(0, pa["ct24"] - pa["ct22"]) and pa["ct25"] == max(0, pa["ct22"] - pa["ct24"]) and pa["ct27"] == (1 if 0 < pa["ct26"] <= 50000 else 0)
 pb = g1["Trần Thị B"]
 assert pb["ct24"] == 0 and pb["ct26"] == 0 and pb["ct17"] == 132_000_000 and pb["ct16"] == 0, "Lương thấp dưới mức giảm trừ -> không thuế"
 assert len(tong["g2"]) == 1 and tong["g2"][0]["ten"] == "Làm thời vụ" and tong["g2"][0]["ct15"] > 0
@@ -96,14 +97,14 @@ ca = p1.findall("t:BKeCTietCNhan", NS)[0]
 assert v(ca, "ct07") == "Hồ Thị A" and v(ca, "ct08") == "001175007514" == v(ca, "ct09") and v(ca, "ct10") == "1" and v(ca, "ct09a_ten") == "Thẻ CCCD/Số định danh cá nhân", "MST = CCCD; ủy quyền = 1"
 assert all(v(x, "ct10") == "1" for x in p1.findall("t:BKeCTietCNhan", NS)), "Mọi cá nhân mặc định ỦY QUYỀN quyết toán thay"
 # tổng của PLuc = tổng các dòng
-for nguon, tong_the in (("ct12", "ct28"), ("ct17", "ct33"), ("ct18", "ct34"), ("ct19", "ct35"), ("ct21", "ct37"), ("ct24", "ct40"), ("ct25", "ct41"), ("ct26", "ct42"), ("ct27", "ct43")):
+for nguon, tong_the in (("ct12", "ct28"), ("ct17", "ct33"), ("ct18", "ct34"), ("ct19", "ct35"), ("ct21", "ct37"), ("ct22", "ct38"), ("ct24", "ct40"), ("ct25", "ct41"), ("ct26", "ct42"), ("ct27", "ct43")):
     assert int(v(p1, tong_the)) == sum(int(v(x, nguon)) for x in p1.findall("t:BKeCTietCNhan", NS)), (nguon, tong_the)
 # tờ khai chính = tổng hợp bảng kê (cùng quan hệ như file HTKK thật)
 assert chinh["ct16"] == 3 and chinh["ct17"] == 2 and chinh["ct22"] == int(v(p1, "ct32")) == 2
 assert chinh["ct23"] == int(v(p1, "ct28")) + int(v(p2, "ct17")) and chinh["ct24"] == chinh["ct23"]
-assert chinh["ct28"] == int(v(p2, "ct17")) + sum(int(v(x, "ct12")) for x in p1.findall("t:BKeCTietCNhan", NS) if int(v(x, "ct25")) > 0)
-assert chinh["ct31"] == chinh["ct32"] == int(v(p2, "ct21")) + int(v(p1, "ct41")) and chinh["ct18"] == 1 + sum(1 for x in p1.findall("t:BKeCTietCNhan", NS) if int(v(x, "ct25")) > 0)
-assert thay == {"ct35": 2, "ct36": 0, "ct37": 0, "ct38": int(v(p1, "ct40")), "ct39": int(v(p1, "ct41")), "ct40": int(v(p1, "ct42")), "ct41": int(v(p1, "ct43"))}
+assert chinh["ct28"] == int(v(p2, "ct17")) + sum(int(v(x, "ct12")) for x in p1.findall("t:BKeCTietCNhan", NS) if int(v(x, "ct22")) > 0)
+assert chinh["ct31"] == chinh["ct32"] == int(v(p2, "ct21")) + int(v(p1, "ct38")) and chinh["ct18"] == 1 + sum(1 for x in p1.findall("t:BKeCTietCNhan", NS) if int(v(x, "ct22")) > 0)
+assert thay == {"ct35": 2, "ct36": int(v(p1, "ct38")), "ct37": int(v(p1, "ct39")), "ct38": int(v(p1, "ct40")), "ct39": int(v(p1, "ct41")), "ct40": int(v(p1, "ct42")), "ct41": int(v(p1, "ct43"))}
 assert len(p3.findall("t:BKeTTinNPT", NS)) == 2 and v(p3.findall("t:BKeTTinNPT", NS)[0], "ct15") == "01/2025"
 print("PASS 4: XML đúng cấu trúc thẻ HTKK, MST = CCCD, tất cả ủy quyền, tổng bảng kê ↔ tờ khai chính khớp.")
 
@@ -139,7 +140,7 @@ def phang(root):
     return kq
 comp_m = Row({"ten": "CÔNG TY TNHH MẪU", "mst": "0300000001", "dia_chi": "1 Đường Mẫu", "ma_cqt_noi_nop": "70123", "ten_cqt_noi_nop": "Thuế cơ sở 12 Thành phố Hồ Chí Minh", "nguoi_ky": "NGUYỄN VĂN KÝ"})
 nnt_m = {"ten_xa": "Phường An Phú Đông", "ma_xa": "70123098", "ten_tinh": "Thành phố Hồ Chí Minh", "ma_tinh": "701"}
-nguoi = {"ma": "2", "ten": "Nguyễn Văn A", "cccd": "000000000001", "ct12": 63_720_000, "ct16": 0, "ct17": 132_000_000, "ct18": 0, "ct19": 6_690_600, "ct21": 0, "ct24": 0, "ct25": 0, "ct26": 0, "ct27": 0}
+nguoi = {"ma": "2", "ten": "Nguyễn Văn A", "cccd": "000000000001", "ct12": 63_720_000, "ct16": 0, "ct17": 132_000_000, "ct18": 0, "ct19": 6_690_600, "ct21": 0, "ct22": 0, "ct24": 0, "ct25": 0, "ct26": 0, "ct27": 0, "khau_tru": 0}
 xml_m, ch_m, th_m = server._luong_qt_xml(comp_m, 2025, {"g1": [nguoi], "g2": [], "npt": [], "canh_bao": [], "so_nguoi": 1, "so_nguoi_khai": 1}, "NGUYỄN VĂN KÝ", datetime.date(2026, 10, 1))
 a_, b_ = phang(ref), phang(ET.fromstring(xml_m.encode("utf-8")))
 assert len(a_) == len(b_) == 110, "Mọi thẻ khớp file HTKK (HTKK không xuất phụ lục trống)"
@@ -211,4 +212,35 @@ try:
 finally:
     server.db, server.DOWNLOAD_DIR = _goc_db, _goc_dl
 print("PASS 6: API kết xuất: file XML đúng tên (MST+000-05_QTT_TNCN_TT80-Y2025-L00), người ký nhớ cho lần sau, năm chưa có lương báo lỗi.")
+print("\nALL DONE")
+
+# ===== 7: cột thuế 05-1 đúng thứ tự: [22] đã khấu trừ, [24] phải nộp, [25] nộp thừa, [26] còn phải nộp, [27] miễn (còn phải nộp <= 50.000đ); tổng sang tờ khai chính =====
+def dong_t(ma, thue_thang):
+    return {"ma": ma, "ten": "NV " + ma, "tn_chiu_thue": 20_000_000, "bh_duoc_tru": 1_000_000, "giam_tru_ban_than": 15_500_000, "tien_giam_tru_npt": 0, "thue_tru_luong": thue_thang, "so_npt": 0}
+ts7 = server._luong_chuan_tham_so(None, 2026)
+tt7 = {t: [dong_t("A", 100_000), dong_t("B", 300_000), dong_t("C", 0)] for t in server._LUONG_THANG}
+nv_h = ["Mã NV", "Họ và tên", "CCCD"]
+nv_r = [["A", "NV A", "000000000001"], ["B", "NV B", "000000000002"], ["C", "NV C", "000000000003"]]
+tg = server._luong_qt_tong_hop(ts7, tt7, nv_h, nv_r, None, 2026)
+by = {p["ma"]: p for p in tg["g1"]}
+ct24 = by["A"]["ct24"]
+assert ct24 > 0 and by["A"]["ct21"] == 20_000_000 * 12 - 15_500_000 * 12 - 1_000_000 * 12
+a, b, c = by["A"], by["B"], by["C"]
+assert a["ct22"] == 1_200_000 and a["ct24"] == ct24 and a["ct25"] == max(0, 1_200_000 - ct24) and a["ct26"] == max(0, ct24 - 1_200_000)
+assert b["ct22"] == 3_600_000 and b["ct25"] == 3_600_000 - ct24 and b["ct26"] == 0 and b["ct27"] == 0, "khấu trừ nhiều hơn phải nộp -> NỘP THỪA ở [25], không phải còn phải nộp"
+assert c["ct22"] == 0 and c["ct26"] == ct24 and c["ct25"] == 0
+tong7 = dict(tg, so_nguoi_khai=3)
+comp7 = Row({"ten": "CT", "mst": "0300000001", "dia_chi": "x", "ma_cqt_noi_nop": "70123", "ten_cqt_noi_nop": "Thuế cơ sở 12", "nguoi_ky": "K"})
+x7, ch7, th7 = server._luong_qt_xml(comp7, 2026, tong7, "K", datetime.date(2026, 10, 2))
+assert th7["ct36"] == 1_200_000 + 3_600_000 and th7["ct38"] == 3 * ct24 and th7["ct39"] == b["ct25"] and th7["ct40"] == a["ct26"] + c["ct26"], th7
+r7 = ET.fromstring(x7.encode("utf-8"))
+nb = {x.find("t:ct07", NS).text: x for x in r7.findall(".//t:PLuc_05_1_BK_QTT/t:BKeCTietCNhan", NS)}
+assert nb["NV B"].find("t:ct22", NS).text == "3600000" and nb["NV B"].find("t:ct25", NS).text == str(3_600_000 - ct24)
+# người còn phải nộp nhỏ (<= 50.000đ) được đánh dấu miễn [27]=1
+tt8 = {t: [dong_t("A", 0)] for t in server._LUONG_THANG}
+for t in tt8:
+    tt8[t][0]["tn_chiu_thue"] = 16_550_000          # tính ra thuế năm rất nhỏ
+g8 = server._luong_qt_tong_hop(ts7, tt8, nv_h, nv_r, None, 2026)["g1"][0]
+assert 0 < g8["ct26"] <= 50000 and g8["ct27"] == 1 and g8["ct25"] == 0, g8
+print("PASS 7: 05-1: [22] đã khấu trừ, [24] phải nộp, [25] nộp thừa, [26] còn phải nộp, [27] miễn; tờ khai chính ct36..ct41 khớp tổng.")
 print("\nALL DONE")

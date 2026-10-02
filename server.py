@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.056"
+APP_BUILD = "2026-10-02.057"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12520,8 +12520,13 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
             ct19 = int(_luong_lam_tron(p["bh"]))          # [19] = bảo hiểm bắt buộc (đối chiếu file HTKK thật); [18] = từ thiện/nhân đạo/khuyến học (chưa dùng)
             ct21 = max(0, ct12 - ct17 - ct19)
             ct24 = int(_luong_lam_tron(_luong_qt_thue_nam(ct21, ts)))
-            ct25 = int(_luong_lam_tron(p["thue"]))
-            g1.append(dict(p, ct12=ct12, ct16=p["npt"], ct17=ct17, ct18=0, ct19=ct19, ct21=ct21, ct24=ct24, ct25=ct25, ct26=max(0, ct24 - ct25), ct27=max(0, ct25 - ct24)))
+            # Cột thuế của 05-1 theo hướng dẫn mẫu 05-1/BK-QTT-TNCN: [22] Số thuế đã KHẤU TRỪ trong năm; [23] (HTKK tự cập nhật, 0); [24] Tổng số thuế PHẢI NỘP (tính theo
+            # biểu lũy tiến trên [21]); [25] Số thuế ĐÃ NỘP THỪA = [22]+[23]-[24] nếu dương; [26] Số thuế CÒN PHẢI NỘP = [24]-[22]-[23] nếu dương; [27] cá nhân được miễn (đánh dấu 1 nếu
+            # số còn phải nộp [26] > 0 và <= 50.000đ). Bản cũ đặt số đã khấu trừ nhầm vào [25] và số nộp thừa vào [27].
+            kt = int(_luong_lam_tron(p["thue"]))
+            con = max(0, ct24 - kt)
+            g1.append(dict(p, ct12=ct12, ct16=p["npt"], ct17=ct17, ct18=0, ct19=ct19, ct21=ct21, ct22=kt, ct23=0, ct24=ct24, ct25=max(0, kt - ct24), ct26=con,
+                           ct27=1 if 0 < con <= 50000 else 0, khau_tru=kt))
         tv_thue = int(_luong_lam_tron(p["tv_thue"]))
         if p["co_tv"]:
             if tv_thue > 0:
@@ -12580,19 +12585,19 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
     import html as _html
     e = lambda v: _html.escape(str(v if v is not None else ""))
     g1, g2, npt = tong["g1"], tong["g2"], tong["npt"]
-    sum1 = lambda k: sum(p[k] for p in g1)
+    sum1 = lambda k: sum(p.get(k, 0) for p in g1)
     mst = str(comp["mst"] or "").strip()
     ma_cqt = (comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else "") or ""
     ten_cqt = (comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else "") or ""
     dia_chi = (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or ""
-    khau_tru = [p for p in g1 if p["ct25"] > 0] + g2
+    khau_tru = [p for p in g1 if p.get("khau_tru", 0) > 0] + g2
     ct23 = sum1("ct12") + sum(p["ct11"] for p in g2)
-    ct28 = sum(p["ct12"] for p in g1 if p["ct25"] > 0) + sum(p["ct11"] for p in g2)
-    ct31 = sum(p["ct25"] for p in g1 if p["ct25"] > 0) + sum(p["ct15"] for p in g2)
+    ct28 = sum(p["ct12"] for p in g1 if p.get("khau_tru", 0) > 0) + sum(p["ct11"] for p in g2)
+    ct31 = sum(p.get("khau_tru", 0) for p in g1 if p.get("khau_tru", 0) > 0) + sum(p["ct15"] for p in g2)
     so_nguoi = tong["so_nguoi_khai"]
     chinh = {"ct16": so_nguoi, "ct17": len(g1), "ct18": len(khau_tru), "ct19": len(khau_tru), "ct20": 0, "ct21": 0, "ct22": sum1("ct16"),
              "ct23": ct23, "ct24": ct23, "ct25": 0, "ct26": 0, "ct27": 0, "ct28": ct28, "ct29": ct28, "ct30": 0, "ct31": ct31, "ct32": ct31, "ct33": 0, "ct34": 0}
-    thay = {"ct35": len(g1), "ct36": 0, "ct37": 0, "ct38": sum1("ct24"), "ct39": sum1("ct25"), "ct40": sum1("ct26"), "ct41": sum1("ct27")}
+    thay = {"ct35": len(g1), "ct36": sum1("ct22"), "ct37": sum1("ct23"), "ct38": sum1("ct24"), "ct39": sum1("ct25"), "ct40": sum1("ct26"), "ct41": sum1("ct27")}
     L = []
     a = L.append
     a('<?xml version="1.0" encoding="UTF-8"?>')
