@@ -19,6 +19,7 @@ assert v.luong_toi_thieu_vung(2026, 1) == 5_310_000 and v.luong_toi_thieu_vung(2
 assert v.luong_toi_thieu_vung(2025, 1) == 4_960_000 and v.luong_toi_thieu_vung(2023, 1) == 4_680_000
 assert v.dia_danh_tu_dia_chi("174/21 Điện Biên Phủ, Phường 17, Quận Bình Thạnh, Thành phố Hồ Chí Minh, Việt Nam") == "TP. Hồ Chí Minh"
 assert v.dia_danh_tu_dia_chi("12 Lê Lợi, Thành phố Huế") == "Huế"
+assert v.dia_danh_tu_dia_chi("141/69/23,Khu Phố 3C") == "" and v.dia_danh_tu_dia_chi("") == "", "cụm cuối không phải thành phố/tỉnh -> không ghi địa danh"
 
 HDR = ['STT', 'Mã NV', 'Họ và tên', 'Ngày sinh', 'Địa chỉ hiện đang cư trú', 'CCCD', 'Ngày cấp', 'Tháng/Năm vào làm', 'Đóng BHXH', 'Tháng/Năm nghỉ việc',
        'Chức vụ', 'Lương Cơ bản', 'PC Tiền cơm', 'PC Xăng xe', 'PC Điện thoại', 'PC Trang phục']
@@ -61,6 +62,15 @@ assert "không xác định thời hạn" in h3 and "ít nhất 45 ngày" in h3 
 assert "Ông/Bà: LÊ HOÀNG CƯỜNG" in h3 and "đóng bảo hiểm là" not in h3, "không tick BHXH: không ghi mức đóng"
 h6 = van_ban(v.dung_hop_dong(nv[0], CTY, dict(tc, so_thang=6, bat_dau="31/08/2025"), 0))
 assert "đến hết ngày 28 tháng 02 năm 2026" in h6 and "ít nhất 03 ngày làm việc" in h6, "6 tháng: kết thúc 28/02, báo trước 3 ngày làm việc"
+# năm lập hợp đồng chọn 2026: nhân viên vào làm từ năm trước -> ngày 01/01/2026 + số HĐ năm 2026; vào làm trong năm 2026 -> giữ ngày vào làm
+assert v.ngay_bat_dau_theo_nam("12/2024", 2026) == datetime.date(2026, 1, 1) and v.ngay_bat_dau_theo_nam("", 2026) == datetime.date(2026, 1, 1)
+assert v.ngay_bat_dau_theo_nam("15/03/2026", 2026) == datetime.date(2026, 3, 15) and v.ngay_bat_dau_theo_nam("06/2027", 2026) == datetime.date(2027, 6, 1)
+h26 = van_ban(v.dung_hop_dong(nv[0], CTY, tc, 0, nam=2026))
+assert "Số: 07/HĐLĐ-2026" in h26 and "ngày 01 tháng 01 năm 2026" in h26 and "2025" not in h26.split("Điều 1")[0], h26[:400]
+assert "ngày 01 tháng 06 năm 2025" in van_ban(v.dung_hop_dong(nv[0], CTY, dict(tc, bat_dau="01/06/2025"), 0, nam=2026)), "người dùng nhập ngày bắt đầu thì giữ đúng"
+assert "TP. Hồ Chí Minh, ngày" in van_ban(v.dung_hop_dong(nv[0], CTY, tc, 0, nam=2026))
+h_kdd = van_ban(v.dung_hop_dong(nv[0], dict(CTY, dia_chi="141/69/23,Khu Phố 3C"), {"nguoi_ky": "A"}, 0, nam=2026))
+assert "Khu Phố 3C, ngày" not in h_kdd and "ngày 01 tháng 01 năm 2026" in h_kdd, "không địa danh: chỉ hiện ngày tháng năm"
 many = v.dung_hop_dong_nhieu(nv[:3], CTY, tc)
 assert many.count('<section class="vb-trang">') == 3
 

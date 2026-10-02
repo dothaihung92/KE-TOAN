@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.061"
+APP_BUILD = "2026-10-02.062"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13071,7 +13071,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         if not chon:
             raise HTTPException(400, "Khoảng nhân viên đã chọn không có ai")
         ten = [n["ten"] for n in chon]
-        html = vbld.dung_hop_dong_nhieu(chon, cty, tc)
+        html = vbld.dung_hop_dong_nhieu(chon, cty, tc, nam=nam)
         so = len(chon)
         cb = [c for c in cb if any(c["nd"].startswith(t + ":") for t in ten) or ":" not in c["nd"][:60]]
     elif loai == "qc":

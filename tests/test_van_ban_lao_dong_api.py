@@ -38,7 +38,7 @@ except HTTPException as e:
 r = run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 2, "den": 4, "tuy_chon": {"nguoi_ky": "Hồ Thị Cẩm Vân", "ong_ba_ky": "Bà", "so_bat_dau": 10}})))
 assert r["so_van_ban"] == 3 and r["html"].count('<section class="vb-trang">') == 3 and "NHÂN VIÊN 2" in r["html"] and "NHÂN VIÊN 4" in r["html"] and "NHÂN VIÊN 1" not in r["html"] and "NHÂN VIÊN 5" not in r["html"]
 assert "9.000.000 đồng/tháng" in r["html"], "lương NV2 lấy từ Bảng lương (9.000.000) thay vì Danh sách (6.200.000)"
-assert "Số: 10/HĐLĐ-2025" in r["html"] and "Số: 12/HĐLĐ-2025" in r["html"]
+assert "Số: 10/HĐLĐ-2026" in r["html"] and "Số: 12/HĐLĐ-2026" in r["html"] and "ngày 01 tháng 01 năm 2026" in r["html"], "năm lập 2026 -> hợp đồng ghi năm 2026 dù vào làm 2025"
 r2 = run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 4, "den": 2})))
 assert r2["so_van_ban"] == 3
 assert all("Nhân Viên 1:" not in c["nd"] and "Nhân Viên 5:" not in c["nd"] for c in r["canh_bao"]), "cảnh báo chỉ của những người đang in"

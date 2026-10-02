@@ -4450,9 +4450,9 @@ function vbVeMan(){
   const nv=d.nhan_vien||[];
   const optNv=nv.map(n=>[n.stt,`${n.stt}. ${n.ma?n.ma+' – ':''}${n.ten}${n.chuc_vu?' ('+n.chuc_vu+')':''}${n.da_nghi?' [đã nghỉ việc]':''}`]);
   let form=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-    ${vbOChu('vb_nam','Năm (lấy Bảng lương năm)',vbNam,90)}
+    ${vbOChu('vb_nam','Năm lập (Bảng lương + ngày HĐ)',vbNam,110,'Hợp đồng ghi ngày 01/01 của năm này nếu nhân viên vào làm từ năm trước')}
     ${l==='hd'?'':vbOChu('vb_ngay','Ngày ban hành / ký',tc.ngay,130)}
-    ${vbOChu('vb_dia_danh','Địa danh',tc.dia_danh,130)}
+    ${vbOChu('vb_dia_danh','Địa danh (trống = chỉ hiện ngày tháng)',tc.dia_danh,150)}
     ${vbOChu('vb_nguoi_ky','Người đại diện ký',tc.nguoi_ky,170,'Lấy từ thông tin công ty (Người ký)')}
     ${vbOChu('vb_chuc_danh_ky','Chức danh',tc.chuc_danh_ky,110)}
     ${vbOChon('vb_ong_ba_ky','Ông/Bà',[['','Ông/Bà (sửa tay)'],['Ông','Ông'],['Bà','Bà']],tc.ong_ba_ky,110)}
@@ -4465,7 +4465,7 @@ function vbVeMan(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
       ${vbOChon('vb_loai_hd','Loại hợp đồng',[['xdth','Xác định thời hạn'],['kxdth','Không xác định thời hạn']],tc.loai_hd,170)}
       ${vbOChu('vb_so_thang','Thời hạn (tháng, tối đa 36)',tc.so_thang,120)}
-      ${vbOChu('vb_bat_dau','Ngày bắt đầu (trống = theo ngày vào làm)',tc.bat_dau,170,'dd/mm/yyyy')}
+      ${vbOChu('vb_bat_dau','Ngày bắt đầu (trống = ngày vào làm, hoặc 01/01 của năm lập)',tc.bat_dau,170,'dd/mm/yyyy')}
       ${vbOChu('vb_ngay_ky','Ngày ký (trống = ngày bắt đầu)',tc.ngay_ky,150,'dd/mm/yyyy')}
       ${vbOChu('vb_so_bat_dau','Số HĐ bắt đầu từ',tc.so_bat_dau,100)}
       ${vbOChu('vb_mau_so','Mẫu số hợp đồng',tc.mau_so,170,'{so:02d} = số thứ tự, {nam} = năm')}

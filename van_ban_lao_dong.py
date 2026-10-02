@@ -228,7 +228,7 @@ def dia_danh_tu_dia_chi(dia_chi):
     if kd in ("ho chi minh", "tp ho chi minh", "tp. ho chi minh", "thanh pho ho chi minh", "tp.hcm", "tp hcm", "tphcm", "hcm"):
         return "TP. Hồ Chí Minh"
     m = re.match(r"^(thành phố|tp\.?|tỉnh)\s+(.+)$", t, flags=re.I)
-    return (m.group(2) if m else t).strip(". ")
+    return m.group(2).strip(". ") if m else ""      # cụm cuối không phải tên thành phố/tỉnh (vd 'Khu Phố 3C') -> để trống, chỉ hiện ngày tháng
 
 
 def mac_dinh_tuy_chon(cty, hom_nay=None):
@@ -542,11 +542,19 @@ def _thoi_han_hd(tc, nv, ngay_bat_dau):
     return "Hợp đồng lao động xác định thời hạn", cuoi, thang, bao_truoc
 
 
-def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None):
+def ngay_bat_dau_theo_nam(vao_lam, nam):
+    """Ngày bắt đầu hợp đồng mặc định: theo ngày vào làm; nếu vào làm TRƯỚC năm đang lập hợp đồng (hoặc không ghi) thì 01/01 của năm đó."""
+    vl = ngay_date(vao_lam)
+    if nam and (vl is None or vl.year < int(nam)):
+        return datetime.date(int(nam), 1, 1)
+    return vl
+
+
+def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None):
     """HTML 1 hợp đồng lao động (1 <section>) cho người lao động `nv` (dict của gop_nhan_vien)."""
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
-    bat_dau = ngay_date(tc.get("bat_dau")) or ngay_date(nv.get("vao_lam"))
+    bat_dau = ngay_date(tc.get("bat_dau")) or ngay_bat_dau_theo_nam(nv.get("vao_lam"), nam)
     ngay_ky = ngay_date(tc.get("ngay_ky")) or bat_dau or ngay_date(tc.get("ngay"), hom_nay)
     bat_dau = bat_dau or ngay_ky
     loai_ten, cuoi, thang, bao_truoc = _thoi_han_hd(tc, nv, bat_dau)
@@ -652,8 +660,8 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None):
     return "".join(h)
 
 
-def dung_hop_dong_nhieu(ds_nv, cty, tuy_chon, hom_nay=None):
-    return "".join(dung_hop_dong(nv, cty, tuy_chon, i, hom_nay) for i, nv in enumerate(ds_nv))
+def dung_hop_dong_nhieu(ds_nv, cty, tuy_chon, hom_nay=None, nam=None):
+    return "".join(dung_hop_dong(nv, cty, tuy_chon, i, hom_nay, nam) for i, nv in enumerate(ds_nv))
 
 
 def _khoang(giatri):
