@@ -245,7 +245,7 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "loai_hd": "xdth", "so_thang": 12, "bat_dau": "", "ngay_ky": "", "so_bat_dau": 1,
         "mau_so": "{so:02d}/HĐLĐ-{nam}", "dia_diem": (cty.get("dia_chi") or "").strip(), "bo_phan": "", "cong_viec": "",
         "thoi_gio": "08 giờ/ngày, 06 ngày/tuần (nghỉ Chủ nhật), tổng cộng không quá 48 giờ/tuần",
-        "hinh_thuc_tra": "chuyển khoản", "ngay_tra": 5, "quoc_tich": "Việt Nam",
+        "hinh_thuc_tra": "chuyển khoản", "ngay_tra": 5, "ghi_phu_cap": False, "quoc_tich": "Việt Nam",
         "noi_cap_cccd": "Cục Cảnh sát quản lý hành chính về trật tự xã hội",
         # quy chế
         "so_qd": f"01/QĐ-{hom_nay.year}", "kem_phu_luc": False,
@@ -622,8 +622,9 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None):
     muc(f"Mức lương theo công việc hoặc chức danh: <b>{so_tien(luong)} đồng/tháng</b> (bằng chữ: {esc(doc_so_thanh_chu(luong))}). "
         "Mức lương này không thấp hơn mức lương tối thiểu vùng theo quy định của pháp luật và phù hợp với thang lương, bảng lương của Công ty;")
     if pc:
-        muc("Phụ cấp lương và các khoản bổ sung khác: " + "; ".join(f"{esc(t)}: {so_tien(v)} đồng/tháng" for t, v in pc)
-            + ". Các khoản phụ cấp được tính theo số ngày công thực tế đi làm trong tháng;")
+        chi_tiet = ("; ".join(f"{esc(t)}: {so_tien(v)} đồng/tháng" for t, v in pc) + ". ") if tc.get("ghi_phu_cap") else ""
+        muc("Phụ cấp lương và các khoản bổ sung khác: " + chi_tiet
+            + "Các khoản phụ cấp được tính theo số ngày công thực tế đi làm trong tháng;")
     else:
         muc("Phụ cấp lương và các khoản bổ sung khác: không có, trừ trường hợp được Công ty quyết định bằng văn bản;")
     muc(f"Hình thức trả lương: {esc(tc.get('hinh_thuc_tra') or 'chuyển khoản')}; kỳ trả lương: hằng tháng, vào ngày {int(_so(tc.get('ngay_tra')) or 5):02d} của tháng sau;")

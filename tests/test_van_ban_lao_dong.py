@@ -51,7 +51,12 @@ assert "Số: 07/HĐLĐ-2025" in t, "số HĐ theo mẫu + số bắt đầu"
 assert "Bà: HỒ THỊ CẨM VÂN" in t and "Chức vụ: Giám đốc" in t and "Mã số thuế: 0300000001" in t
 assert "Bà: NGUYỄN THỊ CHI" in t and "Giới tính: Nữ" in t and "083190002386" in t and "25/04/2021" in t and "Cục Cảnh sát quản lý hành chính" in t
 assert "6.500.000 đồng/tháng" in t and "Sáu triệu năm trăm nghìn đồng" in t, "lương theo bảng lương + bằng chữ"
-assert "tiền cơm" in t and "730.000" in t and "Phụ cấp xăng xe, đi lại: 700.000" in t and "điện thoại: 300.000" in t and "trang phục" not in t.split("Điều 3")[1].split("Điều 4")[0].lower().replace("trang bị", ""), "chỉ in phụ cấp > 0"
+mucA = t.split("Phụ cấp lương và các khoản bổ sung khác:")[1].split("Hình thức trả lương")[0]
+assert mucA.strip().startswith("Các khoản phụ cấp được tính theo số ngày công thực tế đi làm trong tháng") and "730.000" not in mucA and "đồng/tháng" not in mucA, "mặc định không ghi số tiền từng khoản phụ cấp"
+tA = van_ban(v.dung_hop_dong(nv[0], CTY, dict(tc, ghi_phu_cap=True), 0))
+assert "Phụ cấp tiền cơm (ăn trưa/ăn ca): 730.000" in tA and "Phụ cấp xăng xe, đi lại: 700.000" in tA and "điện thoại: 300.000" in tA and "Phụ cấp trang phục" not in tA, "tick ghi chi tiết: chỉ in phụ cấp > 0"
+tK = van_ban(v.dung_hop_dong(nv[3], CTY, tc, 0))
+assert "Phụ cấp lương và các khoản bổ sung khác: không có" in tK, "không có phụ cấp nào thì ghi không có"
 assert "từ ngày 01 tháng 06 năm 2025 đến hết ngày 31 tháng 05 năm 2026" in t, "thời hạn 12 tháng tính từ ngày vào làm"
 assert "ít nhất 30 ngày" in t, "HĐ xác định thời hạn 12-36 tháng: báo trước 30 ngày (Điều 35 BLLĐ)"
 assert "mức tiền lương làm căn cứ đóng bảo hiểm là 6.500.000" in t

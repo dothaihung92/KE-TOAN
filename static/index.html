@@ -4480,6 +4480,7 @@ function vbVeMan(){
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
       ${vbOChu('vb_cong_viec','Công việc phải làm (trống = theo chức danh)',tc.cong_viec,400)}
+      <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_ghi_phu_cap" ${tc.ghi_phu_cap?'checked':''}> Ghi chi tiết số tiền từng khoản phụ cấp vào hợp đồng</label>
     </div>`;
   }
   if(l==='qc'){
@@ -4560,7 +4561,7 @@ function vbTuyChon(){
   const g=id=>{const e=document.getElementById(id);return e?e.value.trim():undefined};
   const k={};
   ['ngay','dia_danh','nguoi_ky','chuc_danh_ky','ong_ba_ky','dien_thoai','loai_hd','so_thang','bat_dau','ngay_ky','so_bat_dau','mau_so','dia_diem','bo_phan','cong_viec','thoi_gio','hinh_thuc_tra','ngay_tra','so_qd','vung','buoc_pct','so_bac'].forEach(f=>{const v=g('vb_'+f);if(v!==undefined)k[f]=v});
-  ['kem_phu_luc','kem_xep_luong'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
+  ['kem_phu_luc','kem_xep_luong','ghi_phu_cap'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
   if(vbLoai==='qc'){
     k.phuc_loi={};
     Object.keys(VB_PHUC_LOI_TEN).forEach(p=>{const e=document.getElementById('vb_pl_'+p);if(!e)return;
