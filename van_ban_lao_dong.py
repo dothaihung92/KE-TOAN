@@ -678,7 +678,8 @@ def dung_quy_che(nv_list, cty, tuy_chon, ts=None, nam=None, hom_nay=None):
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
     ngay = ngay_date(tc.get("ngay"), hom_nay)
-    nam = nam or ngay.year
+    nam_du_lieu = nam or ngay.year       # năm của Bảng Lương dùng làm số liệu
+    nam = ngay.year                      # văn bản pháp luật + lương tối thiểu vùng áp dụng theo NGÀY BAN HÀNH quy chế
     ts = ts or {}
     bh_dn, bh_nld = ts.get("bh_dn") or {"bhxh": 17.5, "bhyt": 3.0, "bhtn": 1.0}, ts.get("bh_nld") or {"bhxh": 8.0, "bhyt": 1.5, "bhtn": 1.0}
     cong_chuan = int(_so(ts.get("ngay_cong_chuan")) or 26)
@@ -725,20 +726,11 @@ def dung_quy_che(nv_list, cty, tuy_chon, ts=None, nam=None, hom_nay=None):
          _p("2. Lương thử việc (nếu có): bằng ít nhất 85% mức lương của công việc đó (Điều 26 Bộ luật Lao động năm 2019).", "j ti"),
          _p("3. Tiền lương làm thêm giờ, làm việc vào ban đêm: trả theo Điều 7 của Quy chế này.", "j ti"),
          _p("<b>Điều 5. Phụ cấp, trợ cấp, hỗ trợ</b>"),
-         _p("Ngoài lương cơ bản, người lao động được hưởng các khoản phụ cấp, hỗ trợ sau đây theo từng chức danh (đơn vị: đồng/tháng):", "j ti")]
-    # bảng phụ cấp theo chức danh
-    cot = [("tien_com", "Tiền cơm"), ("xang_xe", "Xăng xe"), ("di_lai", "Đi lại"), ("dien_thoai", "Điện thoại"), ("trang_phuc", "Trang phục")]
-    cot = [(k, t) for k, t in cot if any(n.get(k, 0) > 0 for n in dang_lam)]
-    bang = ['<table><colgroup><col style="width:5%"><col style="width:25%">' + "".join(f'<col style="width:{70 // (len(cot) + 2)}%">' for _ in range(len(cot) + 2)) + "</colgroup>",
-            "<tr><th>STT</th><th>Chức danh</th><th>Số người</th><th>Lương cơ bản</th>" + "".join(f"<th>{t}</th>" for _, t in cot) + "</tr>"]
-    for i, g in enumerate(nhom, 1):
-        bang.append(f'<tr><td class="c">{i}</td><td>{esc(g["ten"])}</td><td class="c">{len(g["nguoi"])}</td><td class="r">{_khoang([n["luong_cb"] for n in g["nguoi"]])}</td>'
-                    + "".join(f'<td class="r">{_khoang([n.get(k, 0) for n in g["nguoi"]])}</td>' for k, _ in cot) + "</tr>")
-    bang.append("</table>")
-    h.append("".join(bang))
-    h += [_p("Ghi chú: Các khoản phụ cấp nêu trên được hưởng theo số ngày công đi làm thực tế trong tháng "
-             "(mức phụ cấp ÷ số ngày công chuẩn của tháng × số ngày công thực tế); không dùng làm căn cứ đóng bảo hiểm xã hội. "
-             "Việc tính hoặc không tính vào thu nhập chịu thuế thu nhập cá nhân thực hiện theo quy định của pháp luật về thuế.", "j i"),
+         _p("1. Ngoài lương cơ bản, tùy theo tính chất công việc, điều kiện làm việc và khả năng của Công ty, người lao động có thể được hưởng các khoản phụ cấp lương, trợ cấp, hỗ trợ khác "
+            "như phụ cấp trách nhiệm, tiền ăn, đi lại, điện thoại, trang phục... Đối tượng, mức hưởng cụ thể được ghi trong hợp đồng lao động hoặc quyết định của Người sử dụng lao động.", "j ti"),
+         _p("2. Các khoản phụ cấp, hỗ trợ được tính theo số ngày công thực tế đi làm trong tháng (mức phụ cấp ÷ số ngày công chuẩn của tháng × số ngày công thực tế), "
+            "không dùng làm căn cứ đóng bảo hiểm xã hội trừ trường hợp pháp luật có quy định khác.", "j ti"),
+         _p("3. Việc tính hoặc không tính các khoản phụ cấp, hỗ trợ vào thu nhập chịu thuế thu nhập cá nhân thực hiện theo quy định của pháp luật về thuế.", "j ti"),
           _p("<b>Điều 6. Cách tính lương</b>"),
           _p(f"1. Số ngày công chuẩn của tháng là số ngày làm việc tiêu chuẩn trong tháng theo lịch (tổng số ngày trong tháng trừ ngày nghỉ hằng tuần và ngày nghỉ lễ, Tết hưởng nguyên lương); "
              f"nếu không xác định theo lịch thì tính {cong_chuan} ngày/tháng.", "j ti"),
@@ -820,7 +812,7 @@ def dung_quy_che(nv_list, cty, tuy_chon, ts=None, nam=None, hom_nay=None):
           + _p("&nbsp;", "c") * 3 + _p(f"<b>{esc(tc.get('nguoi_ky') or '')}</b>", "c") + "</td></tr></table>", "</section>"]
     if tc.get("kem_phu_luc"):
         h.append('<section class="vb-trang">' + _p("<b>PHỤ LỤC</b>", "c b")
-                 + _p(f"<b>Bảng lương cơ bản và phụ cấp từng người lao động (theo Danh sách nhân viên và Bảng lương năm {nam})</b>", "c") + bang_nhan_vien_html(dang_lam) + "</section>")
+                 + _p(f"<b>Bảng lương cơ bản và phụ cấp từng người lao động (theo Danh sách nhân viên và Bảng lương năm {nam_du_lieu})</b>", "c") + bang_nhan_vien_html(dang_lam) + "</section>")
     return "".join(h)
 
 

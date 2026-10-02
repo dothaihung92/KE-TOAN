@@ -82,10 +82,14 @@ assert many.count('<section class="vb-trang">') == 3
 # --- quy chế lương
 qc = van_ban(v.dung_quy_che(nv[:4], CTY, {"ngay": "02/01/2026", "kem_phu_luc": True}, {"ngay_cong_chuan": 26}, 2026))
 assert "293/2025/NĐ-CP" in qc and "41/2024/QH15" in qc and "110/2025/UBTVQH15" in qc and "5.310.000" in qc, "năm 2026: căn cứ văn bản mới"
+# căn cứ pháp lý + lương tối thiểu theo NGÀY BAN HÀNH (không theo năm của Bảng Lương dùng làm số liệu)
+assert "293/2025/NĐ-CP" in van_ban(v.dung_quy_che(nv[:4], CTY, {"ngay": "03/10/2026"}, {}, 2025)) and "5.310.000" in van_ban(v.dung_quy_che(nv[:4], CTY, {"ngay": "03/10/2026"}, {}, 2025))
 qc25 = van_ban(v.dung_quy_che(nv[:4], CTY, {"ngay": "02/01/2025"}, {}, 2025))
 assert "74/2024/NĐ-CP" in qc25 and "58/2014/QH13" in qc25 and "954/2020" in qc25 and "4.960.000" in qc25
 assert "17,5%" in qc and "17.5%" not in qc and "8% bảo hiểm xã hội" in qc and "1,5% bảo hiểm y tế" in qc, "tỷ lệ BH lấy từ tham số bảng lương"
-assert "Kế toán" in qc and "6.500.000 – 7.000.000" in qc, "lương cơ bản theo chức danh ghi theo khoảng"
+d5 = qc.split("Điều 5. Phụ cấp, trợ cấp, hỗ trợ")[1].split("Điều 6.")[0]
+assert "tùy theo tính chất công việc" in d5 and "theo số ngày công thực tế đi làm trong tháng" in d5 and "pháp luật về thuế" in d5
+assert "Kế toán" not in d5 and "730.000" not in d5 and "<table" not in v.dung_quy_che(nv[:4], CTY, {}, {}, 2026).split("Điều 6.")[0].split("Điều 5.")[1], "Điều 5 ghi chung theo quy định, không liệt kê bảng phụ cấp theo bảng lương"
 assert "Giám đốc" in qc and "20.000.000" in qc and "PHỤ LỤC" in qc
 assert "cao hơn bậc liền kề trước 5%." in van_ban(v.dung_thang_bang_luong(nv[:4], CTY, {}, 2026))
 assert "cao hơn bậc liền kề trước 7,5%." in van_ban(v.dung_thang_bang_luong(nv[:4], CTY, {"buoc_pct": 7.5}, 2026)), "số thập phân kiểu Việt Nam (dấu phẩy)"
