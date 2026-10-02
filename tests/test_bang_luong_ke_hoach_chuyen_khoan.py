@@ -122,7 +122,21 @@ except HTTPException as e:
     assert e.status_code == 400 and "đã đạt/vượt" in e.detail
 # mọi tháng đều có file, tổng nhập khác -> file được ưu tiên + cảnh báo
 th, tom = server._luong_ke_hoach(pool, 2025, 5, 6, 999_000_000, None, 50, 0, random.Random(3), False, None, ck2)
-assert any("khác chi phí lương suy ra từ file" in c for c in tom["canh_bao"])
+assert any("khác chi phí lương suy ra từ file" in c for c in tom["canh_bao"])      # không full công: giữ nguyên hành vi cũ
+
+# ===== 4b: FULL CÔNG + mọi tháng đều có file + tổng nhập LỚN HƠN số suy ra từ file: phần chênh đẩy vào nhóm lao động TIỀN MẶT, TT lương CK vẫn khớp,
+# không phát sinh thuế, tổng ĐÚNG mục tiêu; vượt sức chứa thì báo rõ số còn thiếu (trước đây im lặng chỉ ra số theo file) =====
+tp = {"tien_com": 730000, "trang_phuc": 416000, "muc_dt": 6000000, "muc_xang": 8000000}
+for muc in (130_000_000, 150_000_000):
+    th, tom = server._luong_ke_hoach(pool, 2025, 5, 6, muc, None, 50, 0, random.Random(3), True, tp, ck2)
+    assert tom["tong_chi_phi"] == muc == sum(r["chi_phi_luong"] for rows in th.values() for r in rows), (muc, tom["tong_chi_phi"])
+    assert tom["tong_thue"] == 0 and not any("chỉ dựng được" in c for c in tom["canh_bao"])
+    assert ck_tt(th["05"]) == 28_110_000 and ck_tt(th["06"]) == 36_295_000 and all(v["khop"] for v in tom["ck"].values())
+    assert tom["chiu_thue_nam_max"] <= tom["nguong_chiu_thue"], "mỗi người vẫn dưới ngưỡng giảm trừ bản thân"
+th, tom = server._luong_ke_hoach(pool, 2025, 5, 6, 999_000_000, None, 50, 0, random.Random(3), True, tp, ck2)
+assert tom["tong_chi_phi"] < 999_000_000 and tom["tong_thue"] == 0 and all(v["khop"] for v in tom["ck"].values())
+assert any("chỉ dựng được" in c and "còn thiếu" in c for c in tom["canh_bao"]), "báo rõ vì sao không đạt mục tiêu"
+print("PASS 4b: full công + file chuyển khoản phủ mọi tháng: phần chênh so với tổng nhập được đẩy vào lao động tiền mặt, vượt sức chứa thì báo số thiếu.")
 # không có file và không có tổng -> lỗi như cũ
 try:
     server._luong_ke_hoach(pool, 2025, 5, 6, 0, None, 50, 0, random.Random(3))
