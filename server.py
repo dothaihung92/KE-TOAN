@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.053"
+APP_BUILD = "2026-10-02.054"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10956,6 +10956,59 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
                   "thue": sum(k["thue_tncn"] for k in tinh_rows)}
 
 
+def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
+    """Dựng nhóm CHUYỂN KHOẢN của 1 tháng bằng cách GIẢM NGÀY CÔNG: lương cơ bản và MỌI phụ cấp đều tính theo ngày làm (mức/công chuẩn x ngày làm) nên giảm
+    ngày công kéo cả lương lẫn phụ cấp xuống tương ứng, thay vì giữ đủ công rồi chỉnh phụ cấp. Chọn ít người nhất (>= k_min) mà lương đủ công cộng lại >= so_ck,
+    rồi hạ ngày làm từng người (ngẫu nhiên, mỗi người >= 14 ngày để vẫn đóng BHXH) tới khi TT lương chỉ còn thiếu dưới 1 ngày công; phần thiếu bù bằng thưởng bán
+    hàng nhỏ chia cho các người đó (cuối cùng khớp từng đồng ở _luong_ke_hoach_ck). Trả danh sách dòng nhập, hoặc None nếu không áp dụng được (lương đủ công
+    của cả danh sách không tới số chuyển khoản, hoặc cần < 14 ngày công) -> dùng cách cũ."""
+    e = (ts.get("cong_chuan") or {}).get(thang) or ts["ngay_cong_chuan"]
+    e_i = int(e)
+    n = len(ung)
+    k = None
+    luy = 0.0
+    for i in range(n):
+        luy += ung[i][1]
+        if i + 1 >= max(1, k_min) and luy >= so_ck:
+            k = i + 1
+            break
+    if k is None or e_i < _LUONG_NGAY_DONG_BHXH:
+        return None
+    base = [dict(u[0], ngay_lam=e_i, ghi_chu="CK") for u in ung[:k]]
+    ngay = [e_i] * k
+
+    def tt_i(i, g):
+        return _luong_tinh_dong(dict(base[i], ngay_lam=g), ts, thang)["tt_luong"]
+    cur = [tt_i(i, ngay[i]) for i in range(k)]
+    tong = sum(cur)
+    gioi_han = _LUONG_NGAY_DONG_BHXH
+    while True:                                   # hạ ngày làm ngẫu nhiên chừng nào TT lương còn >= số chuyển khoản
+        ung_vien = [i for i in range(k) if ngay[i] > gioi_han and tong - cur[i] + tt_i(i, ngay[i] - 1) >= so_ck]
+        if not ung_vien:
+            break
+        i = rng.choice(ung_vien)
+        tong += tt_i(i, ngay[i] - 1) - cur[i]
+        ngay[i] -= 1
+        cur[i] = tt_i(i, ngay[i])
+    ha = [i for i in range(k) if ngay[i] > gioi_han]
+    if ha:                                        # hạ thêm 1 ngày của 1 người để TT lương xuống dưới số chuyển khoản, phần thiếu bù thưởng
+        i = rng.choice(ha)
+        tong += tt_i(i, ngay[i] - 1) - cur[i]
+        ngay[i] -= 1
+        cur[i] = tt_i(i, ngay[i])
+    elif tong > so_ck:
+        return None                               # mọi người đã ở mức tối thiểu mà vẫn vượt số chuyển khoản
+    for i in range(k):
+        base[i]["ngay_lam"] = ngay[i]
+    thieu = int(so_ck) - tong
+    if thieu > 0:
+        w = [rng.uniform(0.3, 2.0) for _ in range(k)]
+        phan = [int(thieu * x / sum(w)) // 1000 * 1000 for x in w]
+        for i in range(k):
+            base[i]["thuong_bh"] += phan[i]
+    return base
+
+
 def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=False, tran_pc=None, ck_toi_da=12000000):
     """Dựng bảng lương 1 tháng có LƯƠNG CHUYỂN KHOẢN (từ file sao kê) = so_ck. Tổng TT lương của NHÓM CHUYỂN KHOẢN = so_ck ĐÚNG TỪNG ĐỒNG; nhóm này được CHIA RA
     NHIỀU NGƯỜI (mỗi người <= ck_toi_da nếu đủ người, số người ~ so_ck / thực lãnh đủ công trung bình) để không ai nhận chuyển khoản quá cao. Các lao động
@@ -10985,7 +11038,13 @@ def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=Fal
     muc = int(so_ck)
     rows = tt = None
     lech = 0
-    for _ in range(10):
+    rows_ngay = _luong_ck_dung_theo_ngay_cong(ung, int(so_ck), ts, thang, rng, k_min)
+    if rows_ngay is not None:                       # ƯU TIÊN: giảm ngày công (lương cb + phụ cấp giảm theo) để TT lương khớp file
+        rows = rows_ngay
+        tinh0 = [_luong_tinh_dong(r, ts, thang) for r in rows]
+        lech = int(so_ck) - sum(x["tt_luong"] for x in tinh0)
+        tt = {"day_du": len(rows), "thoi_vu": 0, "canh_bao": [], "chi_phi": sum(x["chi_phi_luong"] for x in tinh0), "thue": sum(x["thue_tncn"] for x in tinh0)}
+    for _ in range(0 if rows_ngay is not None else 10):
         rng.setstate(st)
         try:
             rows, tt = _luong_ke_hoach_thang(sub, muc, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc, dung_het=True)

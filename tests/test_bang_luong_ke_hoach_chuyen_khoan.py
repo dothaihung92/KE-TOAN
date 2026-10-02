@@ -218,3 +218,25 @@ assert not any(d["co"].startswith("112") for c in ds for d in c["dong"])
 print("PASS 7: hạch toán MISA theo file: không hạch toán khoản chuyển khoản, chỉ hạch toán phần tiền mặt (Có 1111).")
 
 print("\nALL DONE")
+
+# ===== 8: nhóm chuyển khoản dựng bằng GIẢM NGÀY CÔNG (lương cb + mọi phụ cấp giảm theo tỷ lệ), không chỉnh phụ cấp tùy ý =====
+dong_nv8 = {"luong_cb": 5_310_000, "tien_com": 730_000, "muc_xang": 1_000_000, "muc_dt": 500_000, "trang_phuc": 416_000}
+pool8 = lambda t: [server._luong_chuan_dong_nhap(dict(dong_nv8, ma=str(i), ten=f"NV{i}", dong_bh=1, ghi_chu="CK")) for i in range(2, 9)]
+ck8 = {"01": 22_500_000, "02": 38_500_000, "03": 34_000_000, "05": 49_876_000}
+for full in (False, True):
+    th, tom = server._luong_ke_hoach(pool8, 2026, 1, 5, 0, None, 50, 0, random.Random(5), full, None, ck8)
+    for t, so in ck8.items():
+        ck_rows = [r for r in th[t] if server._luong_la_chuyen_khoan(r["ghi_chu"])]
+        assert ck_tt(th[t]) == so and tom["ck"][t]["khop"]
+        e_ = ck_rows[0]["ngay_cong_hd"]
+        assert any(r["ngay_lam_hd"] < e_ for r in ck_rows), f"T{t}: phải giảm ngày công của người chuyển khoản"
+        for r in ck_rows:
+            assert r["ngay_lam_hd"] >= 14, "vẫn đủ 14 ngày để đóng BHXH"
+            assert abs(r["luong"] - r["luong_cb"] / e_ * r["ngay_lam_hd"]) < 1 and abs(r["xang_xe"] - r["muc_xang"] / e_ * r["ngay_lam_hd"]) < 1, \
+                "lương cb và phụ cấp giảm đúng theo ngày làm (không chỉnh phụ cấp tùy ý)"
+            assert r["thuong_bh"] < 1_500_000 and r["tang_ca"] == 0, "phần lẻ bù thưởng nhỏ"
+        for r in th[t]:
+            if not server._luong_la_chuyen_khoan(r["ghi_chu"]):
+                assert r["ngay_lam_hd"] == r["ngay_cong_hd"], "người trả tiền mặt vẫn đủ công"
+print("PASS 8: nhóm chuyển khoản giảm ngày công để khớp file (lương cb + phụ cấp theo tỷ lệ), vẫn >= 14 ngày, phần lẻ bù thưởng nhỏ.")
+print("\nALL DONE")
