@@ -5218,6 +5218,16 @@ async function blXuatExcel(){
     toast(`📤 Đã xuất bảng lương năm ${blNam}`,'ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
+// Excel bảng lương cả năm GỘP: 1 người = 1 dòng, cộng dồn các tháng của bảng lương ĐÃ LƯU (kèm sheet đối chiếu từng tháng)
+async function blXuatExcelNamGop(){
+  if(blBan&&!(await blLuu(true)))return;
+  try{
+    const r=await fetch(`/api/bang-luong/${current}/xuat-excel-nam-gop?nam=${blNam}`,{cache:'no-store'});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    await xuatFile(r,`BangLuong_GopCaNam_${blNam}.xlsx`);
+    toast(`📊 Đã xuất bảng lương cả năm ${blNam} (gộp theo người, cộng dồn các tháng) — xem sheet "Đối chiếu tháng" để kiểm khớp`,'ok');
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
+}
 async function blImportExcel(input){
   const f=input.files&&input.files[0];if(!f)return;
   toast('Đang đọc file...','');
@@ -5566,6 +5576,7 @@ function blMoIn(){
     <div style="font-size:12px;color:#555;margin-top:4px">${cty.diaChi&&cty.giamDoc?'Địa chỉ và Giám đốc đã lấy theo thông tin công ty (Sửa công ty → Địa chỉ trụ sở, Tên người ký).':`Địa chỉ/Giám đốc lấy theo <b>thông tin công ty</b> đã nhập (Sửa công ty → "Địa chỉ trụ sở", "Tên người ký tờ khai")${!cty.diaChi?' — <span style="color:#b45309">công ty chưa có địa chỉ</span>':''}${!cty.giamDoc?' — <span style="color:#b45309">chưa có tên người ký</span>':''}.`}</div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemIn()">👁 Xem trước</button> <button class="btn sm" style="background:#1f4e8c" onclick="blInNgay()">🖨 In luôn</button>
       <button class="btn sm" style="background:#1f6b4a" onclick="blXuatExcelMau()" title="Xuất Excel theo mẫu file BL: mỗi tháng 1 sheet, bên trái bảng tính lương, bên phải bảng chấm công; đã đặt sẵn khổ giấy/vùng in">📥 Xuất Excel theo mẫu</button>
+      <button class="btn sm" style="background:#7a4a1f" onclick="blXuatExcelNamGop()" title="Excel bảng lương CẢ NĂM gộp: mỗi người 1 dòng, cộng dồn các tháng (không tách tháng) + sheet đối chiếu khớp từng tháng">📊 Xuất Excel cả năm (gộp)</button>
       <button class="btn ghost sm" onclick="document.getElementById('blIn').style.display='none'">Đóng</button>
       <span style="font-size:12px;color:var(--muted)">In hàng loạt: chọn từ tháng – đến tháng (mỗi tháng gồm bảng lương rồi bảng chấm công). Phần mềm tự thu phóng cho vừa khổ giấy, tự ngắt trang, lặp tiêu đề bảng ở mỗi trang.</span></div>
     <div id="blInKq" style="margin-top:6px;font-size:12px"></div>`;

@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.058"
+APP_BUILD = "2026-10-02.059"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12837,6 +12837,166 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
         except Exception:
             pass
     return _resp_xuat(path, fname, {"X-Ten-File": quote(fname), "X-Canh-Bao": quote(" | ".join(canh_bao)), "X-So-Nguoi": str(chinh["ct16"]), "X-Thue-Phai-Nop": str(thay["ct40"])})
+
+
+# ----- XUẤT EXCEL BẢNG LƯƠNG GỘP CẢ NĂM: 1 người = 1 dòng, cộng dồn (SUM) 12 tháng; sheet "Đối chiếu tháng" kiểm khớp với bảng lương từng tháng -----
+_LUONG_GOP_COT = [   # (khóa, tiêu đề, độ rộng, cộng dồn?)
+    ("luong_cb", "Lương CB (cộng các tháng)", 16), ("ngay_lam_hd", "Tổng ngày công", 10), ("gio_tang_ca", "Giờ tăng ca", 9), ("luong", "Tiền lương", 15),
+    ("tt_tien_com", "PC Tiền cơm", 13), ("xang_xe", "PC Xăng xe", 13), ("tt_di_lai", "Hỗ trợ đi lại", 12), ("dien_thoai", "PC Điện thoại", 13),
+    ("tt_trang_phuc", "PC Trang phục", 13), ("thuong_bh", "Thưởng bán hàng", 14), ("thuong_t13", "Thưởng T13", 13), ("tang_ca", "Tăng ca (tiền)", 13),
+    ("chi_phi_luong", "Chi phí lương (tổng)", 16),
+    ("bhxh_dn", "DN chịu BHXH", 13), ("bhyt_dn", "DN chịu BHYT", 13), ("bhtn_dn", "DN chịu BHTN", 13),
+    ("bhxh_nld", "Trừ BHXH", 13), ("bhyt_nld", "Trừ BHYT", 13), ("bhtn_nld", "Trừ BHTN", 13),
+    ("thue_tru_luong", "Thuế TNCN (trừ lương)", 15), ("tt_luong", "TT lương (thực lãnh)", 16),
+    ("tn_chiu_thue", "Thu nhập chịu thuế", 16), ("tn_khong_chiu_thue", "Thu nhập không chịu thuế", 16), ("bh_duoc_tru", "Bảo hiểm được trừ", 14)]
+
+
+def _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, ten_cty="", mst=""):
+    """Bảng lương CẢ NĂM gộp theo người (cộng dồn các tháng, không tách tháng). `thang_tinh` = {"07": [dòng đã tính _luong_tinh_dong]}. Mỗi ô số = công thức SUM của
+    đúng các dòng tháng ở sheet 'Chi tiết tháng' (ẩn nguồn) nên khớp tuyệt đối với bảng lương từng tháng; sheet 'Đối chiếu tháng' so tổng từng tháng với bảng gộp."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter as L
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "CẢ NĂM"
+    ct = wb.create_sheet("Chi tiết tháng")           # nguồn: mỗi dòng 1 người/tháng (đúng số của bảng lương từng tháng)
+    dc = wb.create_sheet("Đối chiếu tháng")
+    mong = Side(style="thin", color="999999")
+    vien = Border(left=mong, right=mong, top=mong, bottom=mong)
+    xanh = PatternFill("solid", fgColor="1F6B4A")
+    vang = PatternFill("solid", fgColor="FFF2CC")
+    giua = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    so_fmt = "#,##0"
+    khoa = [c[0] for c in _LUONG_GOP_COT]
+    # --- sheet nguồn ---
+    ct.append(["Tháng", "Mã NV", "Họ và Tên"] + [c[1] for c in _LUONG_GOP_COT])
+    dong_ct = {}             # key người -> [số dòng trong sheet nguồn] (các dòng của 1 người LIỀN NHAU để SUM theo vùng)
+    nguoi = {}               # key -> {ma, ten, chuc_vu, thang:[...]}
+    thu_tu = []
+    theo_nguoi = {}
+    for t in _LUONG_THANG:
+        for k in thang_tinh.get(t) or []:
+            ma, ten = str(k.get("ma") or "").strip(), str(k.get("ten") or "").strip()
+            key = (ma or ten).lower()
+            if not key:
+                continue
+            if key not in nguoi:
+                nguoi[key] = {"ma": ma, "ten": ten, "chuc_vu": str(k.get("chuc_vu") or ""), "thang": []}
+                thu_tu.append(key)
+            nguoi[key]["thang"].append(int(t))
+            theo_nguoi.setdefault(key, []).append((int(t), ma, ten, k))
+    r = 2
+    for key in thu_tu:
+        for t, ma, ten, k in theo_nguoi[key]:
+            ct.cell(r, 1, t)
+            ct.cell(r, 2, ma)
+            ct.cell(r, 3, ten)
+            for j, kk in enumerate(khoa):
+                v = _luong_so(k.get(kk))
+                if kk in ("chi_phi_luong", "tt_luong"):
+                    v = _luong_lam_tron(v)            # đúng số làm tròn của bảng lương tháng
+                ct.cell(r, 4 + j, v)
+            dong_ct.setdefault(key, []).append(r)
+            r += 1
+    n_ct = r - 2
+    for j in range(1, 4 + len(khoa)):
+        c = ct.cell(1, j)
+        c.font, c.fill, c.alignment, c.border = Font(bold=True, color="FFFFFF"), xanh, giua, vien
+        ct.column_dimensions[L(j)].width = 14 if j > 3 else (8 if j == 1 else 22)
+    ct.freeze_panes = "D2"
+    # --- sheet CẢ NĂM ---
+    ws.cell(1, 1, ten_cty).font = Font(bold=True, size=12)
+    if mst:
+        ws.cell(2, 1, "MST: " + mst)
+    nc = 5 + len(khoa)
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=nc)
+    ws.cell(3, 1, f"BẢNG LƯƠNG TỔNG HỢP CẢ NĂM {nam} (gộp từng người, cộng dồn các tháng)").font = Font(bold=True, size=15)
+    ws.cell(3, 1).alignment = giua
+    hdr = ["STT", "Mã NV", "Họ và Tên", "Chức vụ", "Số tháng có lương"] + [c[1] for c in _LUONG_GOP_COT]
+    for j, h in enumerate(hdr, 1):
+        c = ws.cell(5, j, h)
+        c.font, c.fill, c.alignment, c.border = Font(bold=True, color="FFFFFF"), xanh, giua, vien
+        ws.column_dimensions[L(j)].width = 6 if j == 1 else (8 if j == 2 else (26 if j == 3 else 14))
+    ws.row_dimensions[5].height = 42
+    h0 = 6
+    sc = {k: L(4 + i) for i, k in enumerate(khoa)}          # cột của khóa trong sheet nguồn
+    for i, key in enumerate(thu_tu):
+        rr = h0 + i
+        p = nguoi[key]
+        ws.cell(rr, 1, i + 1)
+        ws.cell(rr, 2, p["ma"])
+        ws.cell(rr, 3, p["ten"])
+        ws.cell(rr, 4, p["chuc_vu"])
+        ws.cell(rr, 5, len(p["thang"]))
+        for j, kk in enumerate(khoa):
+            dong = dong_ct[key]
+            rng = f"'Chi tiết tháng'!{sc[kk]}{dong[0]}:{sc[kk]}{dong[-1]}"
+            ws.cell(rr, 6 + j, f"=SUM({rng})").number_format = so_fmt
+        for j in range(1, nc + 1):
+            ws.cell(rr, j).border = vien
+    r_tong = h0 + len(thu_tu)
+    ws.cell(r_tong, 3, "TỔNG CỘNG")
+    for j in range(5, nc + 1):
+        c = ws.cell(r_tong, j, f"=SUM({L(j)}{h0}:{L(j)}{r_tong - 1})" if thu_tu else 0)
+        c.number_format = so_fmt
+    for j in range(1, nc + 1):
+        c = ws.cell(r_tong, j)
+        c.font, c.fill, c.border = Font(bold=True), vang, vien
+    ws.freeze_panes = ws.cell(h0, 4)
+    cg = {k: L(6 + i) for i, k in enumerate(khoa)}           # cột của khóa trong sheet CẢ NĂM
+    # --- sheet đối chiếu ---
+    dc_cot = [("chi_phi_luong", "Chi phí lương"), ("tt_luong", "TT lương (thực lãnh)"), ("thue_tru_luong", "Thuế TNCN"), ("bhxh_nld", "Trừ BHXH"),
+              ("tn_chiu_thue", "Thu nhập chịu thuế")]
+    dc.append(["Tháng", "Số người"] + [x[1] + " (bảng lương tháng)" for x in dc_cot])
+    for j in range(1, 3 + len(dc_cot)):
+        c = dc.cell(1, j)
+        c.font, c.fill, c.alignment, c.border = Font(bold=True, color="FFFFFF"), xanh, giua, vien
+        dc.column_dimensions[L(j)].width = 22 if j > 2 else 10
+    dr = 2
+    for t in _LUONG_THANG:
+        rows = thang_tinh.get(t) or []
+        if not rows:
+            continue
+        dc.cell(dr, 1, int(t))
+        dc.cell(dr, 2, len(rows))
+        for j, (kk, _tt) in enumerate(dc_cot):
+            v = sum(_luong_lam_tron(_luong_so(k.get(kk))) if kk in ("chi_phi_luong", "tt_luong") else _luong_so(k.get(kk)) for k in rows)
+            dc.cell(dr, 3 + j, v).number_format = so_fmt
+        dr += 1
+    d_cuoi = dr - 1
+    dc.cell(dr, 1, "Cộng 12 tháng")
+    for j in range(2, 3 + len(dc_cot)):
+        dc.cell(dr, j, f"=SUM({L(j)}2:{L(j)}{d_cuoi})" if d_cuoi >= 2 else 0).number_format = so_fmt
+    dc.cell(dr + 1, 1, "Bảng CẢ NĂM (gộp theo người)")
+    for j, (kk, _tt) in enumerate(dc_cot):
+        dc.cell(dr + 1, 3 + j, f"='CẢ NĂM'!{cg[kk]}{r_tong}").number_format = so_fmt
+    dc.cell(dr + 2, 1, "Kết quả đối chiếu")
+    for j in range(len(dc_cot)):
+        col = L(3 + j)
+        dc.cell(dr + 2, 3 + j, f'=IF(ABS({col}{dr}-{col}{dr + 1})<1,"✓ Khớp","✗ Lệch "&TEXT({col}{dr}-{col}{dr + 1},"#,##0"))')
+    for rr in (dr, dr + 1, dr + 2):
+        for j in range(1, 3 + len(dc_cot)):
+            c = dc.cell(rr, j)
+            c.font, c.fill, c.border = Font(bold=True), vang, vien
+    path = os.path.join(DOWNLOAD_DIR, f"BangLuong_GopCaNam_{nam}.xlsx")
+    wb.save(path)
+    return path, os.path.basename(path), {"so_nguoi": len(thu_tu), "so_dong_thang": n_ct}
+
+
+@app.get("/api/bang-luong/{cid}/xuat-excel-nam-gop")
+def bang_luong_xuat_excel_nam_gop(cid: int, nam: int = 0):
+    """Excel bảng lương CẢ NĂM gộp theo người (1 người = 1 dòng, cộng dồn các tháng) + sheet đối chiếu khớp từng tháng. Lấy từ bảng lương ĐÃ LƯU của năm."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
+    if not any(thang_nhap.values()):
+        raise HTTPException(404, f"Năm {nam} chưa có dữ liệu bảng lương để xuất")
+    thang_tinh = {t: _luong_tinh_thang(rows, ts, t, nam) for t, rows in thang_nhap.items() if rows}
+    conn = db()
+    comp = conn.execute("SELECT ten, mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    path, fname, tt = _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, (comp["ten"] if comp else "") or "", (comp["mst"] if comp else "") or "")
+    return _resp_xuat(path, fname, {"X-So-Nguoi": str(tt["so_nguoi"])})
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")
