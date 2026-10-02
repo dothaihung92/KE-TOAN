@@ -4336,7 +4336,7 @@ async function tmdtShopeeLayDonHang(){
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
                    'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Tháng/Năm nghỉ việc','Chức vụ','Lương Cơ bản',
                    'PC Tiền cơm','PC Xăng xe','PC Điện thoại','PC Trang phục'];
-let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={};
+let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={}, nvChucDanh=[];     // nvChucDanh: các chức danh của Hệ thống thang bảng lương (Chức vụ chỉ chọn trong danh sách này)
 let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
 function nvEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function moBangLuong(){
@@ -4507,7 +4507,12 @@ function vbVeMan(){
       <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_kem_xep_luong" ${tc.kem_xep_luong?'checked':''}> Kèm phụ lục bảng xếp lương từng người (có mức lương đóng BHXH)</label>
     </div>
     <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);margin-bottom:8px">Nhóm chức danh tự khai báo (mỗi dòng 1 nhóm; gộp nhiều chức danh bằng dấu ; ; thêm "| mức bậc 1" nếu nhóm chưa có người). Chức danh không khai báo sẽ tự lập nhóm theo Danh sách nhân viên.
-      <textarea id="vb_nhom_tuy_chinh" rows="4" placeholder="Giám đốc | 8000000&#10;Phó giám đốc; Kế toán trưởng&#10;Nhân viên kế toán; Nhân viên kinh doanh; Nhân viên văn phòng" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;color:#222;font-family:inherit">${vbEsc(tc.nhom_tuy_chinh||'')}</textarea></label>`;
+      <textarea id="vb_nhom_tuy_chinh" rows="5" placeholder="Giám đốc | 8000000&#10;Phó giám đốc; Kế toán trưởng&#10;Nhân viên kế toán; Nhân viên kinh doanh" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;color:#222;font-family:inherit">${vbEsc(tc.nhom_tuy_chinh||'')}</textarea></label>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <button class="btn sm" style="background:#1f6b4a" onclick="vbDoLuong()" title="Tìm lương cơ bản thấp nhất/cao nhất của từng nhóm trong Bảng Lương năm đang chọn và điền mức bậc 1">🔍 Dò lương cơ bản theo năm ${vbNam}</button>
+      <span class="hint">${d.thang_luong_nam_goc==null?'Năm này chưa lưu thang lương — đang dùng nhóm chức danh chuẩn; bỏ "| mức" thì bậc 1 tự dò theo Bảng Lương năm '+vbNam+'.':(d.thang_luong_nam_goc===vbNam?'Đã lưu thang lương năm '+vbNam+' (tự lưu mỗi lần Tạo bản xem trước).':'Năm '+vbNam+' chưa lưu — kế thừa nhóm chức danh của năm '+d.thang_luong_nam_goc+'; mức bậc 1 tự dò theo Bảng Lương năm '+vbNam+'.')}</span>
+    </div>
+    <div id="vbDoLuongKq"></div>`;
   }
   const cb=d.canh_bao||[];
   const loiN=cb.filter(c=>c.muc==='loi').length;
@@ -4559,6 +4564,17 @@ function vbVeMan(){
   xem.addEventListener('input',()=>{vbSua=true});
   const n=document.getElementById('vb_nam');
   if(n)n.addEventListener('change',async()=>{const v=parseInt(n.value,10);if(v>=2000&&v<=2100){vbNam=v;vbSua=false;await vbTaiDuLieu()}});
+}
+async function vbDoLuong(){
+  const kq=document.getElementById('vbDoLuongKq');kq.innerHTML='<div class="hint">Đang dò lương cơ bản…</div>';
+  try{
+    const d=await api(`/api/van-ban/${current}/do-luong`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:vbNam,tuy_chon:vbTuyChon()})});
+    const so=n=>Number(n||0).toLocaleString('vi-VN');
+    document.getElementById('vb_nhom_tuy_chinh').value=d.nhom_tuy_chinh;
+    kq.innerHTML=`<table style="border-collapse:collapse;font-size:12.5px;margin-bottom:8px"><tr style="background:#eef8f2"><th style="padding:4px 8px;border:1px solid #ccc;text-align:left">Nhóm chức danh</th><th style="padding:4px 8px;border:1px solid #ccc">Số người</th><th style="padding:4px 8px;border:1px solid #ccc">Lương CB thấp nhất</th><th style="padding:4px 8px;border:1px solid #ccc">Cao nhất</th><th style="padding:4px 8px;border:1px solid #ccc">Mức bậc 1 (điền sẵn)</th></tr>
+      ${d.bang.map(b=>`<tr><td style="padding:4px 8px;border:1px solid #ddd">${vbEsc(b.ten)}</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:center">${b.so_nguoi}</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:right">${b.so_nguoi?so(b.thap_nhat):'-'}</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:right">${b.so_nguoi?so(b.cao_nhat):'-'}</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:right"><b>${so(b.bac_1)}</b></td></tr>`).join('')}</table>
+      <div class="hint" style="margin-bottom:8px">Đã dò theo Bảng Lương năm ${d.nam} (lương tối thiểu vùng ${so(d.luong_toi_thieu)}). Nhóm chưa có người lấy bằng lương tối thiểu — sửa số sau dấu | nếu cần, rồi bấm "Tạo bản xem trước" để lưu.</div>`;
+  }catch(e){kq.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${vbEsc(e.message)}</div>`}
 }
 function vbTuyChon(){
   const g=id=>{const e=document.getElementById(id);return e?e.value.trim():undefined};
@@ -4638,11 +4654,12 @@ function moDanhSachNhanVien(tuBangLuong){
         <button class="btn ghost sm" onclick="document.getElementById('nvImportFile').click()">📥 Import Excel</button>
         <input type="file" id="nvImportFile" accept=".xlsx" multiple style="display:none" onchange="nvImportExcel(this)">
         <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
-        <button class="btn ghost sm" onclick="nvXoaDong()" style="color:#c00">🗑 Xóa dòng đã chọn</button>
+        <button class="btn sm" style="background:#1f6b4a" onclick="nvLayLuongTheoNam()" title="Dò lương cơ bản + phụ cấp của từng người theo Bảng Lương của năm bạn chọn (mỗi năm lương cơ bản một khác)">🔄 Lấy lương theo Bảng Lương năm…</button>
+        <button class="btn ghost sm" style="color:#c00" onclick="nvXoaDong()">🗑 Xóa dòng đã chọn</button>
       </div>
       <div id="nvTuBl"></div>
       <div id="nvInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó.</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. <b>Chức vụ</b> chỉ chọn trong các chức danh của <b>Hệ thống thang bảng lương</b> (Nhập Liệu → Thang Bảng Lương); <b>Lương cơ bản</b> lấy theo Bảng Lương từng năm bằng nút "🔄 Lấy lương theo Bảng Lương năm…".</div>
       <div id="nvTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
     </div>`;
   taiNhanVien();
@@ -4656,6 +4673,7 @@ async function taiNhanVien(){
     nvThemCotTick();
     nvThemCotNghiViec();
     nvFilters={}; nvChon=null;
+    try{const c=await api(`/api/van-ban/${current}/chuc-danh`);nvChucDanh=c.chuc_danh||[]}catch(e){nvChucDanh=[]}
     veGridNhanVien();
     const info=document.getElementById('nvInfo');
     if(info){
@@ -4668,6 +4686,34 @@ async function taiNhanVien(){
    không tick thì không đóng BHXH. Danh sách đã lưu từ trước chưa có cột -> thêm cột và tick sẵn cho mọi người (giữ nguyên hành vi cũ). */
 const NV_COT_TICK='Đóng BHXH';
 function nvLaCotTick(h){return String(h).trim().toLowerCase()==='đóng bhxh'}
+function nvLaCotChucVu(h){return String(h).trim().toLowerCase()==='chức vụ'}
+function nvDoiChucVu(ri,ci,v){if(nvRows[ri])nvRows[ri][ci]=v;veGridNhanVien()}
+// Lấy lương cơ bản + phụ cấp từng người theo BẢNG LƯƠNG của 1 năm (tháng mới nhất có người đó); khớp theo Mã NV, không có mã thì theo Họ và tên
+async function nvLayLuongTheoNam(){
+  const mac=parseInt(localStorage.getItem('blNam')||'',10)||new Date().getFullYear();
+  const t=prompt('Lấy Lương cơ bản + phụ cấp theo Bảng Lương của năm nào?',String(mac));
+  if(t===null)return;
+  const nam=parseInt(t,10);
+  if(!(nam>=2000&&nam<=2100)){toast('Năm không hợp lệ','err');return}
+  try{
+    const d=await api(`/api/van-ban/${current}/luong-theo-nam?nam=${nam}`);
+    if(!d.nguoi||!d.nguoi.length){toast(`Năm ${nam} chưa có Bảng Lương nào để lấy lương`,'err');return}
+    const cot=ten=>nvHeader.findIndex(h=>String(h).trim().toLowerCase()===ten);
+    const cMa=cot('mã nv'),cTen=cot('họ và tên');
+    const dich=[['luong_cb','lương cơ bản'],['tien_com','pc tiền cơm'],['xang_xe','pc xăng xe'],['dien_thoai','pc điện thoại'],['trang_phuc','pc trang phục']].map(x=>[x[0],cot(x[1])]).filter(x=>x[1]>=0);
+    const g=(r,c)=>c<0?'':String(r[c]==null?'':r[c]).trim().toLowerCase();
+    let dem=0;
+    d.nguoi.forEach(n=>{
+      let i=n.ma&&cMa>=0?nvRows.findIndex(r=>g(r,cMa)===String(n.ma).toLowerCase()):-1;
+      if(i<0&&n.ten&&cTen>=0)i=nvRows.findIndex(r=>g(r,cTen)===String(n.ten).toLowerCase());
+      if(i<0)return;
+      dich.forEach(([k,ci])=>{nvRows[i][ci]=nvSoDep(n[k]||0)});
+      dem++;
+    });
+    veGridNhanVien();
+    toast(`🔄 Đã lấy lương cơ bản + phụ cấp năm ${nam} cho ${dem}/${nvRows.length} nhân viên — nhớ bấm 💾 Lưu`,dem?'ok':'err');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
 function nvCoTick(v){
   if(v==null)return false;
   if(typeof v==='number')return v!==0;
@@ -4743,7 +4789,14 @@ function veGridNhanVien(){
       const v=row[ci]==null?'':(nvLaCotTien(h)?nvSoDep(row[ci]):row[ci]);
       const chon=nvChon&&nvChon.r===ri;
       const vien=to?`;background:#fff5f5;box-shadow:inset 0 2px 0 #d00000,inset 0 -2px 0 #d00000${ci===0?',inset 2px 0 0 #d00000':''}${ci===nvHeader.length-1?',inset -2px 0 0 #d00000':''}`:(chon?';background:#fdf0f8':'');
-      if(nvLaCotTick(h))html+=`<td data-r="${ri}" data-c="${ci}" style="padding:5px 8px;border:1px solid #eee;text-align:center${vien}"><input type="checkbox" ${nvCoTick(row[ci])?'checked':''} onchange="nvDoiTick(${ri},${ci},this.checked)" title="Tick = có đóng BHXH (từ tháng ghi ở cột Tháng/Năm vào làm); không tick = không đóng BHXH" style="width:17px;height:17px;cursor:pointer"></td>`;
+      if(nvLaCotChucVu(h)&&nvChucDanh.length){
+        const cur=String(row[ci]==null?'':row[ci]).trim();
+        const co=nvChucDanh.some(x=>x.toLowerCase()===cur.toLowerCase());
+        html+=`<td data-r="${ri}" data-c="${ci}" style="padding:2px 4px;border:1px solid #eee${vien}"><select onfocus="nvChon={r:${ri},c:${ci}}" onchange="nvDoiChucVu(${ri},${ci},this.value)" style="width:100%;font-size:13px;padding:3px;border:1px solid ${cur&&!co?'#e08a00':'#ddd'};border-radius:5px;background:#fff">
+          <option value="">— chọn chức vụ —</option>${cur&&!co?`<option value="${nvEsc(cur)}" selected>⚠ ${nvEsc(cur)} (chưa có trong thang bảng lương)</option>`:''}
+          ${nvChucDanh.map(x=>`<option value="${nvEsc(x)}" ${co&&x.toLowerCase()===cur.toLowerCase()?'selected':''}>${nvEsc(x)}</option>`).join('')}</select></td>`;
+      }
+      else if(nvLaCotTick(h))html+=`<td data-r="${ri}" data-c="${ci}" style="padding:5px 8px;border:1px solid #eee;text-align:center${vien}"><input type="checkbox" ${nvCoTick(row[ci])?'checked':''} onchange="nvDoiTick(${ri},${ci},this.checked)" title="Tick = có đóng BHXH (từ tháng ghi ở cột Tháng/Năm vào làm); không tick = không đóng BHXH" style="width:17px;height:17px;cursor:pointer"></td>`;
       else html+=`<td contenteditable="true" data-r="${ri}" data-c="${ci}" onfocus="nvChon={r:${ri},c:${ci}}" onblur="nvSuaO(this)" style="padding:5px 8px;border:1px solid #eee;white-space:nowrap;min-width:70px${nvLaCotTien(h)?';text-align:right':''}${vien}">${nvEsc(v)}</td>`;
     });
     html+='</tr>';

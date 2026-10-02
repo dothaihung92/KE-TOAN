@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.065"
+APP_BUILD = "2026-10-02.066"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13013,7 +13013,9 @@ def bang_luong_xuat_excel_nam_gop(cid: int, nam: int = 0):
 
 
 # ----- HỢP ĐỒNG LAO ĐỘNG / QUY CHẾ LƯƠNG / THANG BẢNG LƯƠNG (dựng từ Danh Sách Nhân Viên + Bảng Lương; logic ở van_ban_lao_dong.py) -----
-def _vb_du_lieu(cid, nam):
+def _vb_du_lieu(cid, nam, chi_bang_luong=False):
+    """Công ty + người lao động (Danh Sách NV ghép Bảng Lương năm `nam`) + tham số bảng lương. chi_bang_luong=True (quy chế, thang lương): nếu năm đó
+    đã có Bảng Lương thì chỉ lấy những người CÓ trong Bảng Lương năm đó (lương cơ bản mỗi năm một khác, không lẫn số của năm khác)."""
     conn = db()
     comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
     conn.close()
@@ -13024,7 +13026,60 @@ def _vb_du_lieu(cid, nam):
     d = nhap_lieu_get(cid, loai="nv")
     ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
     nv = vbld.gop_nhan_vien(d.get("header"), d.get("rows"), thang_nhap)
+    if chi_bang_luong and any(n["nguon"].startswith("Bảng lương") for n in nv):
+        nv = [n for n in nv if n["nguon"].startswith("Bảng lương")]
+        for i, n in enumerate(nv, 1):
+            n["stt"] = i
     return cty, nv, ts
+
+
+# Cấu hình Hệ thống thang lương, bảng lương LƯU THEO TỪNG NĂM (lương cơ bản mỗi năm một khác): nhóm chức danh, % mỗi bậc, số bậc, vùng...
+_VB_KHOA_THANG_LUONG = ("nhom_tuy_chinh", "buoc_pct", "so_bac", "vung", "hien_he_so", "kem_xep_luong")
+
+
+def _vb_dam_bao_bang(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS thang_luong_cfg (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, nam INTEGER, data_json TEXT, updated_at TEXT,
+        UNIQUE(company_id, nam))""")
+
+
+def _vb_doc_thang_luong(cid, nam):
+    """Cấu hình thang lương đã lưu của năm `nam` -> (dict, 'nam_goc'). Năm chưa lưu: lấy năm gần nhất TRƯỚC đó (hoặc sau đó nếu chưa có năm trước),
+    giữ nhóm chức danh/tham số nhưng BỎ mức bậc 1 cố định để tự dò lại theo Bảng Lương của năm đang chọn. Chưa có gì: mặc định (nhóm chức danh chuẩn)."""
+    conn = db()
+    try:
+        _vb_dam_bao_bang(conn)
+        rows = conn.execute("SELECT nam, data_json FROM thang_luong_cfg WHERE company_id=? ORDER BY nam", (cid,)).fetchall()
+    finally:
+        conn.close()
+    cac = {r["nam"]: r["data_json"] for r in rows}
+    try:
+        if nam in cac:
+            return {k: v for k, v in json.loads(cac[nam]).items() if k in _VB_KHOA_THANG_LUONG}, nam
+        truoc = [n for n in cac if n < nam] or [n for n in cac if n > nam]
+        if truoc:
+            gan = max(truoc) if any(n < nam for n in truoc) else min(truoc)
+            d = {k: v for k, v in json.loads(cac[gan]).items() if k in _VB_KHOA_THANG_LUONG}
+            d["nhom_tuy_chinh"] = vbld.bo_muc_bac_1(d.get("nhom_tuy_chinh", ""))
+            return d, gan
+    except Exception:
+        pass
+    return {}, None
+
+
+def _vb_luu_thang_luong(cid, nam, tc):
+    d = {k: tc[k] for k in _VB_KHOA_THANG_LUONG if k in tc}
+    if not d:
+        return
+    conn = db()
+    try:
+        _vb_dam_bao_bang(conn)
+        conn.execute("INSERT INTO thang_luong_cfg (company_id, nam, data_json, updated_at) VALUES (?,?,?,?) "
+                     "ON CONFLICT(company_id, nam) DO UPDATE SET data_json=excluded.data_json, updated_at=excluded.updated_at",
+                     (cid, nam, json.dumps(d, ensure_ascii=False), datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _vb_trang_mac_dinh(loai):
@@ -13036,15 +13091,51 @@ def _vb_trang_mac_dinh(loai):
 
 @app.get("/api/van-ban/{cid}/du-lieu")
 def van_ban_du_lieu(cid: int, nam: int = 0):
-    """Danh sách người lao động (ghép Danh Sách NV + Bảng Lương) + tuỳ chọn mặc định + cảnh báo đối chiếu."""
+    """Danh sách người lao động (ghép Danh Sách NV + Bảng Lương) + tuỳ chọn mặc định (đã gộp cấu hình thang lương đã lưu của năm) + cảnh báo đối chiếu."""
     nam = _luong_nam_hop_le(nam or datetime.date.today().year)
     cty, nv, ts = _vb_du_lieu(cid, nam)
-    tc = vbld.mac_dinh_tuy_chon(cty)
-    return {"nam": nam, "cty": cty, "tuy_chon": tc, "css": vbld.VB_CSS,
+    luu, nam_goc = _vb_doc_thang_luong(cid, nam)
+    tc = vbld.gop_tuy_chon(cty, luu)
+    nv_tl = _vb_du_lieu(cid, nam, True)[1]
+    return {"nam": nam, "cty": cty, "tuy_chon": tc, "css": vbld.VB_CSS, "thang_luong_nam_goc": nam_goc,
             "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"]} for n in nv],
-            "canh_bao": vbld.kiem_tra(nv, nam, tc, _LUONG_TRAN_PC_KHONG_THUE)}
+            "chuc_danh": vbld.chuc_danh_tu_nhom(tc["nhom_tuy_chinh"]),
+            "canh_bao": vbld.kiem_tra(nv, nam, tc, _LUONG_TRAN_PC_KHONG_THUE) if nv else []}
+
+
+@app.get("/api/van-ban/{cid}/chuc-danh")
+def van_ban_chuc_danh(cid: int, nam: int = 0):
+    """Các chức danh của Hệ thống thang lương, bảng lương (năm gần nhất đã lưu hoặc mặc định) — Danh Sách Nhân Viên chỉ cho chọn Chức vụ trong danh sách này."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    luu, _g = _vb_doc_thang_luong(cid, nam)
+    return {"chuc_danh": vbld.chuc_danh_tu_nhom(luu.get("nhom_tuy_chinh") or vbld.NHOM_MAC_DINH), "nam": nam}
+
+
+@app.get("/api/van-ban/{cid}/luong-theo-nam")
+def van_ban_luong_theo_nam(cid: int, nam: int = 0):
+    """Lương cơ bản + phụ cấp của từng người theo BẢNG LƯƠNG năm `nam` (tháng mới nhất có người đó) — để Danh Sách Nhân Viên đồng bộ theo năm."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    _cty, nv, _ts = _vb_du_lieu(cid, nam)
+    ds = [n for n in nv if n["nguon"].startswith("Bảng lương")]
+    return {"nam": nam, "nguoi": [{"ma": n["ma"], "ten": n["ten"], "luong_cb": n["luong_cb"], "tien_com": n["tien_com"], "xang_xe": n["xang_xe"],
+                                  "dien_thoai": n["dien_thoai"], "trang_phuc": n["trang_phuc"]} for n in ds]}
+
+
+@app.post("/api/van-ban/{cid}/do-luong")
+async def van_ban_do_luong(cid: int, request: Request):
+    """Dò lương cơ bản theo năm: bảng nhóm chức danh (thấp nhất/cao nhất/đề xuất bậc 1) + danh sách nhóm đã điền sẵn '| mức bậc 1'."""
+    body = await request.json()
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    _cty, nv, _ts = _vb_du_lieu(cid, nam, True)
+    if not nv:
+        raise HTTPException(404, "Chưa có nhân viên/Bảng lương để dò lương cơ bản")
+    tc = vbld.gop_tuy_chon(_cty, body.get("tuy_chon") or {})
+    kq = vbld.do_luong_theo_nam(nv, nam, tc)
+    kq["nam"] = nam
+    kq["co_bang_luong"] = any(n["nguon"].startswith("Bảng lương") for n in nv)
+    return kq
 
 
 @app.post("/api/van-ban/{cid}/xem-truoc")
@@ -13055,10 +13146,12 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     if loai not in ("hd", "qc", "tl"):
         raise HTTPException(400, "Loại văn bản không hợp lệ")
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
-    cty, nv, ts = _vb_du_lieu(cid, nam)
+    cty, nv, ts = _vb_du_lieu(cid, nam, loai in ("qc", "tl"))
     if not nv:
         raise HTTPException(404, "Chưa có nhân viên: hãy nhập Danh Sách Nhân Viên hoặc lưu Bảng Lương trước")
-    tc = body.get("tuy_chon") or {}
+    luu, _g = _vb_doc_thang_luong(cid, nam)
+    tc = dict(luu)
+    tc.update({k: v for k, v in (body.get("tuy_chon") or {}).items() if v is not None})
     cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, tc), _LUONG_TRAN_PC_KHONG_THUE)
     if loai == "hd":
         try:
@@ -13078,6 +13171,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         html, so = vbld.dung_quy_che(nv, cty, tc, ts, nam), 1
     else:
         html, so = vbld.dung_thang_bang_luong(nv, cty, tc, nam), 1
+        _vb_luu_thang_luong(cid, nam, tc)      # lưu cấu hình thang lương theo từng năm (nhóm chức danh, % bậc...) để Quy chế/Danh sách NV dùng thống nhất
     return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "canh_bao": cb}
 
 
@@ -13102,12 +13196,15 @@ async def van_ban_word(cid: int, request: Request):
 async def van_ban_excel_thang_luong(cid: int, request: Request):
     body = await request.json()
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
-    cty, nv, _ts = _vb_du_lieu(cid, nam)
+    cty, nv, _ts = _vb_du_lieu(cid, nam, True)
     if not nv:
         raise HTTPException(404, "Chưa có nhân viên để lập thang bảng lương")
+    luu, _g = _vb_doc_thang_luong(cid, nam)
+    tc = dict(luu)
+    tc.update({k: v for k, v in (body.get("tuy_chon") or {}).items() if v is not None})
     fname = f"ThangBangLuong_{nam}.xlsx"
     path = os.path.join(DOWNLOAD_DIR, fname)
-    vbld.thang_luong_excel(path, nv, cty, body.get("tuy_chon") or {}, nam)
+    vbld.thang_luong_excel(path, nv, cty, tc, nam)
     return _resp_xuat(path, fname, desktop=True)
 
 

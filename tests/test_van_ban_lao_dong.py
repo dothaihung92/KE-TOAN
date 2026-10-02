@@ -230,4 +230,15 @@ v.thang_luong_excel(p2, nv[:4], CTY, {"ngay": "03/10/2026", "nhom_tuy_chinh": nh
 w2 = openpyxl.load_workbook(p2)["Thang bảng lương"]
 vv = [[c for c in r if c is not None] for r in w2.iter_rows(values_only=True)]
 assert any(r and r[0] == "Hệ số lương" and r[1] == round(8_000_000 / 5_310_000, 2) for r in vv) and any(r and r[0] == "Mức lương" and r[1] == 8_000_000 for r in vv)
+# --- chức danh chuẩn, dò lương theo năm, tiêu đề có năm
+assert v.chuc_danh_tu_nhom(v.NHOM_MAC_DINH) == ["Giám đốc", "Phó giám đốc", "Kế toán trưởng", "Nhân viên kế toán", "Nhân viên kinh doanh", "Phân xưởng sản xuất"]
+assert v.chuc_danh_tu_nhom("A; a | 100\nB") == ["A", "B"], "không trùng (không phân biệt hoa thường)"
+assert v.bo_muc_bac_1("Giám đốc | 8000000\n\nPhó giám đốc; Kế toán trưởng") == "Giám đốc\nPhó giám đốc; Kế toán trưởng"
+assert v.mac_dinh_tuy_chon(CTY)["nhom_tuy_chinh"] == v.NHOM_MAC_DINH
+dl = v.do_luong_theo_nam(nv[:4], 2026, {"nhom_tuy_chinh": "Giám đốc | 99\nKế toán; Tạp vụ"})
+ten_dl = [b["ten"] for b in dl["bang"]]
+assert ten_dl == ["Giám đốc", "Kế toán; Tạp vụ"], ten_dl
+assert dl["bang"][1]["so_nguoi"] == 2 and dl["bang"][1]["thap_nhat"] == 6_500_000 and dl["bang"][1]["cao_nhat"] == 7_000_000, "người đã nghỉ việc bị loại; dò thấp/cao nhất"
+assert dl["nhom_tuy_chinh"] == "Giám đốc | 20000000\nKế toán; Tạp vụ | 6500000", dl["nhom_tuy_chinh"]
+assert "HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG NĂM 2025" in van_ban(v.dung_thang_bang_luong(nv[:4], CTY, {"ngay": "03/10/2026"}, 2025)), "tiêu đề ghi năm của Bảng lương"
 print("PASS")

@@ -13,6 +13,7 @@ conn.execute("INSERT INTO companies VALUES (7, 'CÔNG TY TNHH THỬ', '030000000
 class KhongDong:
     def __init__(self, c): self.c = c
     def execute(self, *a): return self.c.execute(*a)
+    def commit(self): self.c.commit()
     def close(self): pass
 server.db = lambda: KhongDong(conn)
 server.nhap_lieu_get = lambda cid, loai="in": {"header": HDR, "rows": ROWS} if loai == "nv" else {"header": [], "rows": []}
@@ -54,7 +55,36 @@ except HTTPException as e:
 qc = run(server.van_ban_xem_truoc(7, Req({"loai": "qc", "nam": 2026, "tuy_chon": {"ngay": "02/01/2026", "ngay_tra": "10", "buoc_pct": "7"}})))
 assert "QUYẾT ĐỊNH" in qc["html"] and "5.310.000" in qc["html"] and "ngày 10 của tháng sau" in qc["html"] and "cao hơn bậc liền kề trước 7%" in qc["html"]
 tl = run(server.van_ban_xem_truoc(7, Req({"loai": "tl", "nam": 2026, "tuy_chon": {"vung": "2", "so_bac": "5"}})))
-assert "4.730.000" in tl["html"] and tl["trang"]["ngang"] is True and "Kế toán" in tl["html"] and "Kinh doanh" in tl["html"] and "V" in tl["html"]
+assert "4.730.000" in tl["html"] and tl["trang"]["ngang"] is True and "Nhân viên kế toán; Nhân viên kinh doanh" in tl["html"] and "NĂM 2026" in tl["html"]
+for ten in ("Giám đốc", "Phó giám đốc; Kế toán trưởng", "Phân xưởng sản xuất"):
+    assert ten in tl["html"], "nhóm chức danh mặc định: " + ten
+
+# --- thang lương lưu THEO TỪNG NĂM + dò lương cơ bản theo năm + danh sách chức vụ cho Danh Sách Nhân Viên
+d0 = server.van_ban_du_lieu(7, 2026)
+assert d0["chuc_danh"] == ["Giám đốc", "Phó giám đốc", "Kế toán trưởng", "Nhân viên kế toán", "Nhân viên kinh doanh", "Phân xưởng sản xuất"], d0["chuc_danh"]
+assert server.van_ban_chuc_danh(7, 2026)["chuc_danh"] == d0["chuc_danh"]
+# Bảng lương năm 2026 chỉ có Nhân Viên 2 (lương 9.000.000): thang lương/quy chế chỉ lấy người có trong Bảng lương năm đó
+assert tl["html"].count("Nhân Viên") == 1 and "Nhân Viên 2" in tl["html"] and "Nhân Viên 1" not in tl["html"]
+dl = run(server.van_ban_do_luong(7, Req({"nam": 2026, "tuy_chon": {"nhom_tuy_chinh": "Giám đốc\nNhân viên kế toán; Nhân viên kinh doanh | 1"}})))
+assert dl["co_bang_luong"] and dl["luong_toi_thieu"] == 5_310_000
+assert [b["ten"] for b in dl["bang"]][:2] == ["Giám đốc", "Nhân viên kế toán; Nhân viên kinh doanh"] and dl["bang"][0]["bac_1"] == 5_310_000
+assert dl["nhom_tuy_chinh"].splitlines()[0] == "Giám đốc | 5310000"
+ln = server.van_ban_luong_theo_nam(7, 2026)
+assert [(x["ten"], x["luong_cb"], x["tien_com"]) for x in ln["nguoi"]] == [("Nhân Viên 2", 9_000_000, 730000)], "chỉ người có trong Bảng lương năm đó"
+# tạo xem trước thang lương đã LƯU cấu hình của năm 2026; năm 2027 chưa lưu thì kế thừa nhóm nhưng bỏ mức bậc 1 cố định (tự dò lại theo năm)
+run(server.van_ban_xem_truoc(7, Req({"loai": "tl", "nam": 2026, "tuy_chon": {"nhom_tuy_chinh": "Giám đốc | 8000000\nNhân viên kinh doanh", "buoc_pct": "6"}})))
+d26 = server.van_ban_du_lieu(7, 2026)
+assert d26["tuy_chon"]["nhom_tuy_chinh"] == "Giám đốc | 8000000\nNhân viên kinh doanh" and float(d26["tuy_chon"]["buoc_pct"]) == 6 and d26["thang_luong_nam_goc"] == 2026
+assert d26["chuc_danh"] == ["Giám đốc", "Nhân viên kinh doanh"]
+d27 = server.van_ban_du_lieu(7, 2027)
+assert d27["tuy_chon"]["nhom_tuy_chinh"] == "Giám đốc\nNhân viên kinh doanh" and d27["thang_luong_nam_goc"] == 2026, "năm mới: giữ nhóm, bỏ '| mức' cũ"
+# quy chế/hợp đồng dùng lại cấu hình đã lưu (bước % bậc lương) mà không cần gửi lại
+qc2 = run(server.van_ban_xem_truoc(7, Req({"loai": "qc", "nam": 2026, "tuy_chon": {"ngay": "02/01/2026"}})))
+assert "cao hơn bậc liền kề trước 6%" in qc2["html"], "Quy chế thống nhất với thang lương đã lưu"
+# Excel dùng cấu hình đã lưu
+xl2 = run(server.van_ban_excel_thang_luong(7, Req({"nam": 2026})))
+ws2 = __import__("openpyxl").load_workbook(xl2.path)["Thang bảng lương"]
+assert any(c.value == "HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG NĂM 2026" for r in ws2.iter_rows() for c in r)
 
 # xuất Word từ HTML đã SỬA TAY: file lưu ra DOWNLOAD_DIR, đúng nội dung đã sửa + canh chỉnh
 html_sua = r["html"].replace("Điều 5. Điều khoản thi hành", "Điều 5. Điều khoản thi hành (đã sửa tay)")

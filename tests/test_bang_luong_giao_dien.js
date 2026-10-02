@@ -422,7 +422,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
 
   // ---- 20: Danh Sách Nhân Viên: cột tick "Đóng BHXH" (+ Tháng/Năm vào làm), số hiện 5.310.000; bảng lương tự tick theo đó ----
   const q0 = html.indexOf('const NV_COT_TICK='), q1 = html.indexOf('async function nvLuu(', q0);
-  const env2 = { nvHeader: ['STT', 'Mã NV', 'Họ và tên', 'Tháng/Năm vào làm', 'Chức vụ', 'Lương Cơ bản', 'PC Tiền cơm'], nvFilters: {}, nvChon: null, nvTuBl: null,
+  const env2 = { nvHeader: ['STT', 'Mã NV', 'Họ và tên', 'Tháng/Năm vào làm', 'Chức vụ', 'Lương Cơ bản', 'PC Tiền cơm'], nvFilters: {}, nvChon: null, nvTuBl: null, nvChucDanh: [],
     nvEsc: (x) => String(x), nvRows: [[1, '2', 'Trần A', '10/2024', 'KD', 5310000, '700000'], [2, '3', 'Lê B', '', 'KD', '5.310.000', 700000]], console };
   env2.nvRowsLoc = () => env2.nvRows.map((_, i) => i);
   const els2 = { nvTableWrap: { innerHTML: '' }, nvTuBl: { innerHTML: '' } };

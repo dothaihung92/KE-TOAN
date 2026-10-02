@@ -203,6 +203,9 @@ def van_ban_thue(ngay):
 # ============================================================ tuỳ chọn mặc định
 TRANG_MAC_DINH = {"font": "Times New Roman", "size": 13, "line": 1.15, "le": [20, 20, 30, 15], "ngang": False}
 
+# Nhóm chức danh mặc định của Hệ thống thang lương, bảng lương (mỗi dòng 1 nhóm, ; = gộp nhiều chức danh; "| mức" = mức bậc 1, bỏ = tự dò từ Bảng Lương)
+NHOM_MAC_DINH = "Giám đốc\nPhó giám đốc; Kế toán trưởng\nNhân viên kế toán; Nhân viên kinh doanh\nPhân xưởng sản xuất"
+
 PHUC_LOI_MAC_DINH = {
     # key: (nhãn, mặc định tick, mức 1, mức 2). Mặc định KHÔNG tick khoản có số tiền — người dùng tự tick + nhập theo chính sách công ty.
     "cuoi_nam": ("Thưởng cuối năm theo kết quả sản xuất kinh doanh", True, 0, 0),
@@ -251,7 +254,7 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "so_qd": f"01/QĐ-{hom_nay.year}", "kem_phu_luc": False,
         "phuc_loi": {k: {"bat": v[1], "m1": v[2], "m2": v[3]} for k, v in PHUC_LOI_MAC_DINH.items()},
         # thang bảng lương
-        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "hien_he_so": True, "nhom_tuy_chinh": "",
+        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
     }
 
 
@@ -422,6 +425,37 @@ def doc_nhom_tuy_chinh(text):
         if cds:
             kq.append(("; ".join(cds), cds, _so(goc)))
     return kq
+
+
+def chuc_danh_tu_nhom(text):
+    """Danh sách chức danh (không trùng, giữ thứ tự) trong các nhóm khai báo — dùng làm danh sách chọn Chức vụ ở Danh Sách Nhân Viên."""
+    kq, thay = [], set()
+    for _ten, cds, _goc in doc_nhom_tuy_chinh(text):
+        for c in cds:
+            if _chuan(c) not in thay:
+                thay.add(_chuan(c))
+                kq.append(c)
+    return kq
+
+
+def bo_muc_bac_1(text):
+    """Bỏ phần '| mức' của từng dòng nhóm (sang năm mới: giữ nhóm chức danh, mức bậc 1 tự dò lại từ Bảng Lương của năm đó)."""
+    return "\n".join(d.partition("|")[0].strip() for d in str(text or "").splitlines() if d.strip())
+
+
+def do_luong_theo_nam(nv_list, nam, tuy_chon):
+    """'Dò lương cơ bản theo năm': với từng nhóm chức danh, tìm lương cơ bản thấp nhất/cao nhất trong Bảng Lương năm đó và đề xuất mức bậc 1.
+    -> {'bang': [{ten, so_nguoi, thap_nhat, cao_nhat, bac_1}], 'nhom_tuy_chinh': text đã điền '| mức bậc 1' cho TẤT CẢ nhóm}."""
+    tc = tuy_chon or {}
+    dang_lam = [n for n in nv_list if not n.get("da_nghi")] or nv_list
+    tl = tinh_thang_luong(dang_lam, nam, tc.get("vung", 1), tc.get("buoc_pct", 5), tc.get("so_bac", 7), nhom_tuy_chinh=bo_muc_bac_1(tc.get("nhom_tuy_chinh", "")))
+    bang, dong = [], []
+    for g in tl["nhom"]:
+        luong = [n["luong_cb"] for n in g["nguoi"] if n["luong_cb"] > 0]
+        bang.append({"ten": g["ten"], "so_nguoi": len(g["nguoi"]), "thap_nhat": min(luong) if luong else 0, "cao_nhat": max(luong) if luong else 0,
+                     "bac_1": g["bac"][0]})
+        dong.append(f"{g['ten']} | {int(g['bac'][0])}")
+    return {"bang": bang, "nhom_tuy_chinh": "\n".join(dong), "luong_toi_thieu": tl["luong_toi_thieu"]}
 
 
 def tinh_thang_luong(nv_list, nam, vung=1, buoc_pct=5.0, so_bac=7, lam_tron=1, nhom_tuy_chinh=""):
@@ -886,7 +920,7 @@ def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None):
     ltt = tl["luong_toi_thieu"]
     pct = format(float(tl["buoc_pct"]), "g").replace(".", ",")
     h = ['<section class="vb-trang ngang">', _tieu_ngu(cty, "", tc.get("dia_danh"), ngay, co_ngay=False, co_dia_chi=True), _p("&nbsp;"),
-         _p("<b>HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG</b>", "c b"),
+         _p(f"<b>HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG NĂM {nam_du_lieu}</b>", "c b"),
          _p(f"Áp dụng mức lương tối thiểu vùng {int(tc.get('vung', 1))}: {so_tien(ltt)} đồng/tháng ({esc(van_ban_luong_toi_thieu(nam).split(' quy định')[0])})", "c"),
          _p("Đơn vị tính: Việt Nam đồng", "r i")]
     rong = f"{72.0 / nb:.3f}%"
@@ -1343,7 +1377,7 @@ def thang_luong_excel(path, nv_list, cty, tuy_chon, nam=None, hom_nay=None):
     ws.cell(2, cot_p, "Độc lập - Tự do - Hạnh phúc").font = Font(bold=True)
     ws.cell(3, 1, "Địa chỉ: " + (cty.get("dia_chi") or ""))
     ws.merge_cells(start_row=5, start_column=1, end_row=5, end_column=nc)
-    ws.cell(5, 1, "HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG").font = Font(bold=True, size=14)
+    ws.cell(5, 1, f"HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG NĂM {nam_du_lieu}").font = Font(bold=True, size=14)
     ws.cell(5, 1).alignment = giua
     ws.merge_cells(start_row=6, start_column=1, end_row=6, end_column=nc)
     ws.cell(6, 1, f"Áp dụng mức lương tối thiểu vùng {int(tc.get('vung', 1))}: {so_tien(tl['luong_toi_thieu'])} đồng/tháng").alignment = giua

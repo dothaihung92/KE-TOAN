@@ -73,3 +73,37 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.strictEqual(tai, 'HopDongLaoDong_2026.docx');
   console.log('PASS 4: xem trước / xuất Word gọi đúng API với nội dung đã sửa.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 5: Danh Sách Nhân Viên — Chức vụ chỉ chọn theo thang bảng lương; "Lấy lương theo Bảng Lương năm" cập nhật lương cơ bản + phụ cấp
+(async () => {
+  const n0 = html.indexOf('const NV_HEADERS='), n1 = html.indexOf('function moBangLuong(){');
+  const m0 = html.indexOf('function moDanhSachNhanVien'), m1 = html.indexOf('/* ----- NGƯỜI PHỤ THUỘC');
+  assert(n0 > 0 && m0 > n1 && m1 > m0);
+  const src = (html.slice(n0, n1) + html.slice(m0, m1)).replace(/^let (nv\w+)/gm, 'var $1').replace(/^const NV_HEADERS/m, 'var NV_HEADERS');
+  const wrap = { innerHTML: '' }, toasts = [], goi = [];
+  const ctx = { current: 7, console, toast: (m, k) => toasts.push([m, k]), document: { getElementById: (id) => id === 'nvTableWrap' ? wrap : null, querySelector: () => null },
+    localStorage: { getItem: () => '2026' }, prompt: () => '2026', confirm: () => true, fetch: async () => ({}), nlDMMode: null,
+    api: async (u) => { goi.push(u); return { nguoi: [{ ma: '2', ten: 'A', luong_cb: 6500000, tien_com: 730000, xang_xe: 500000, dien_thoai: 300000, trang_phuc: 0 },
+                                                  { ma: '', ten: 'Nguyễn Giang Nam', luong_cb: 7000000, tien_com: 700000, xang_xe: 0, dien_thoai: 0, trang_phuc: 400000 },
+                                                  { ma: '99', ten: 'Không có trong danh sách', luong_cb: 1 }] }; } };
+  vm.createContext(ctx); vm.runInContext(src, ctx);
+  vm.runInContext(`nvHeader = NV_HEADERS.slice(); nvChucDanh = ['Giám đốc','Nhân viên kinh doanh'];
+    nvRows = [['1','2','Trần Minh Hùng','','','','','','x','','Kinh Doanh','5.310.000','700.000','500.000','500.000','400.000'],
+              ['2','3','Nguyễn Giang Nam','','','','','','x','','Giám đốc','5.310.000','700.000','0','0','0']]; veGridNhanVien();`, ctx);
+  const h = wrap.innerHTML;
+  assert(h.includes('— chọn chức vụ —') && h.includes('<option value="Giám đốc" selected>'), 'Chức vụ phải là ô chọn theo thang bảng lương');
+  assert(h.includes('⚠ Kinh Doanh (chưa có trong thang bảng lương)'), 'chức vụ cũ không có trong thang lương phải được cảnh báo, không mất');
+  // không có thang lương (chưa tải được) -> vẫn là ô gõ tự do
+  vm.runInContext(`nvChucDanh = []; veGridNhanVien();`, ctx);
+  assert(!wrap.innerHTML.includes('— chọn chức vụ —') && wrap.innerHTML.includes('Kinh Doanh'));
+  vm.runInContext(`nvChucDanh = ['Giám đốc','Nhân viên kinh doanh']; nvDoiChucVu(0, nvHeader.indexOf('Chức vụ'), 'Nhân viên kinh doanh')`, ctx);
+  assert.strictEqual(vm.runInContext('nvRows[0][nvHeader.indexOf("Chức vụ")]', ctx), 'Nhân viên kinh doanh');
+  await ctx.nvLayLuongTheoNam();
+  assert(goi[0] === '/api/van-ban/7/luong-theo-nam?nam=2026', goi[0]);
+  const r = JSON.parse(vm.runInContext('JSON.stringify(nvRows)', ctx));
+  const c = (t) => vm.runInContext(`nvHeader.indexOf(${JSON.stringify(t)})`, ctx);
+  assert.deepStrictEqual([r[0][c('Lương Cơ bản')], r[0][c('PC Tiền cơm')], r[0][c('PC Xăng xe')], r[0][c('PC Điện thoại')], r[0][c('PC Trang phục')]], ['6.500.000', '730.000', '500.000', '300.000', '0'], 'khớp theo Mã NV');
+  assert.deepStrictEqual([r[1][c('Lương Cơ bản')], r[1][c('PC Tiền cơm')], r[1][c('PC Trang phục')]], ['7.000.000', '700.000', '400.000'], 'không có mã thì khớp theo Họ và tên');
+  assert(toasts.some(([m]) => m.includes('cho 2/2 nhân viên')), JSON.stringify(toasts));
+  console.log('PASS 5: Chức vụ chọn theo thang bảng lương + lấy lương theo Bảng Lương từng năm.');
+})().catch((e) => { console.error(e); process.exit(1); });
