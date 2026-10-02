@@ -137,6 +137,16 @@ th, tom = server._luong_ke_hoach(pool, 2025, 5, 6, 999_000_000, None, 50, 0, ran
 assert tom["tong_chi_phi"] < 999_000_000 and tom["tong_thue"] == 0 and all(v["khop"] for v in tom["ck"].values())
 assert any("chỉ dựng được" in c and "còn thiếu" in c for c in tom["canh_bao"]), "báo rõ vì sao không đạt mục tiêu"
 print("PASS 4b: full công + file chuyển khoản phủ mọi tháng: phần chênh so với tổng nhập được đẩy vào lao động tiền mặt, vượt sức chứa thì báo số thiếu.")
+
+# ===== 4c: ước tính cần thêm bao nhiêu người để đạt tổng nhập; thêm đúng số người đó thì đạt mục tiêu =====
+ck6 = {"01": 22_500_000, "02": 38_500_000, "03": 34_000_000, "04": 25_000_000, "05": 49_876_000, "06": 29_500_000}
+th, tom = server._luong_ke_hoach(pool, 2026, 1, 6, 1_250_000_000, None, 60, 0, random.Random(3), True, tp, ck6)
+ct = tom["can_them_nguoi"]
+assert ct and ct["so_nguoi"] >= 1 and ct["thieu"] == 1_250_000_000 - tom["tong_chi_phi"] and any(c.startswith("➕ Ước tính cần thêm khoảng %d người" % ct["so_nguoi"]) for c in tom["canh_bao"])
+pool_them = lambda t: pool(t) + [server._luong_chuan_dong_nhap(dict(dong_nv, ma=str(100 + i), ten=f"X{i}", dong_bh=1, ghi_chu="CK")) for i in range(ct["so_nguoi"])]
+th2, tom2 = server._luong_ke_hoach(pool_them, 2026, 1, 6, 1_250_000_000, None, 60, 0, random.Random(3), True, tp, ck6)
+assert tom2["tong_chi_phi"] == 1_250_000_000 and tom2["can_them_nguoi"] is None and tom2["tong_thue"] == 0
+print("PASS 4c: ước tính số người cần thêm; thêm đúng số đó thì đạt đúng mục tiêu, không phát sinh thuế.")
 # không có file và không có tổng -> lỗi như cũ
 try:
     server._luong_ke_hoach(pool, 2025, 5, 6, 0, None, 50, 0, random.Random(3))

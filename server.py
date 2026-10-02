@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.052"
+APP_BUILD = "2026-10-02.053"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11033,6 +11033,32 @@ def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=Fal
     return rows + tien_mat, tt
 
 
+def _luong_chi_phi_toi_da_1_nguoi(pool_rows, ts, thang, tran_pc=None):
+    """Chi phí lương TỐI ĐA (trung bình trên các người trong `pool_rows`) của 1 người làm đủ công trong 1 tháng mà KHÔNG phát sinh thuế TNCN: lương CB + phụ
+    cấp đẩy lên mức trần không chịu thuế + thưởng/tăng ca lấp tới giảm trừ bản thân (cùng quy tắc _luong_ke_hoach_full_cong) + BH công ty chịu."""
+    tran = dict(_LUONG_TRAN_PC_KHONG_THUE)
+    for k, v in (tran_pc or {}).items():
+        if k in tran and str(v).strip() != "":
+            tran[k] = max(0.0, _luong_so(v))
+    if str((tran_pc or {}).get("muc_xang", "")).strip() != "":
+        tran["muc_xang"] = max(0.0, _luong_so(tran_pc["muc_xang"]))
+    tran = {k: v // 1000 * 1000 for k, v in tran.items()}
+    gt_bt = _luong_thue_ap_dung(ts, thang)["giam_tru_ban_than"]
+    tong, n = 0.0, 0
+    for r in pool_rows:
+        d = _luong_chuan_dong_nhap(r)
+        row = dict(d, ngay_cong=0, ngay_lam="", dong_bh=1, thuong_bh=0, thuong_t13=0, tang_ca=0)
+        if _luong_tinh_dong(row, ts, thang)["chi_phi_luong"] <= 0:
+            continue
+        for k in ("tien_com", "trang_phuc", "muc_dt", "muc_xang"):
+            if k in tran:
+                row[k] = max(row.get(k, 0) or 0, tran[k])
+        row["thuong_bh"] = int(max(0.0, gt_bt - _luong_tinh_dong(row, ts, thang)["tn_chiu_thue"] - 1) // 1000 * 1000)
+        tong += _luong_tinh_dong(row, ts, thang)["chi_phi_luong"]
+        n += 1
+    return tong / n if n else 0.0
+
+
 def _luong_ck_hap_thu_tien_mat(tm_rows, them, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc):
     """Đẩy thêm `them` đồng chi phí lương vào nhóm lao động TIỀN MẶT của 1 tháng có chuyển khoản (nhóm CK giữ nguyên để TT lương khớp file).
     Dùng lại _luong_ke_hoach_thang trên nhóm tiền mặt với mục tiêu = chi phí gốc + them. Trả (rows_moi, tt, dat_duoc) — dat_duoc=False nếu nhóm
@@ -11118,6 +11144,7 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
     # Mọi tháng đều có chuyển khoản trong file mà tổng chi phí lương cả năm nhập LỚN HƠN số suy ra từ file: phần chênh được ĐẨY VÀO nhóm lao động TRẢ TIỀN MẶT
     # của các tháng (nhóm chuyển khoản giữ nguyên để TT lương khớp file), trong sức chứa không phải nộp thuế TNCN; thiếu sức chứa thì báo cảnh báo.
     thieu_ck = 0
+    tom_them = None
     chi_ck0 = sum(tt["chi_phi"] for _r, tt in ck_res.values())
     if full_cong and ck_res and muc_tieu > 0 and len(ck_res) == len(thang_ds) and muc_tieu - da_co > chi_ck0:
         thua = muc_tieu - da_co - chi_ck0
@@ -11177,6 +11204,16 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
                 canh_bao.append(f"Tổng chi phí lương cả năm nhập {so_f(muc_tieu)} đ nhưng chỉ dựng được {so_f(chi_ck + da_co)} đ: sau khi giữ nguyên lương chuyển khoản theo file, "
                                 f"nhóm lao động trả TIỀN MẶT không đủ sức chứa — còn thiếu {so_f(thieu_ck)} đ mà không phát sinh thuế TNCN (full công, thu nhập chịu thuế <= giảm trừ bản thân, "
                                 "phụ cấp không chịu thuế <= mức trần). Hãy thêm nhân viên vào Danh Sách Nhân Viên, nâng mức trần phụ cấp, hoặc giảm tổng chi phí lương.")
+                try:        # ước tính cần thêm bao nhiêu người (đủ công, trả tiền mặt, giống mức trung bình của danh sách hiện tại) để đạt mục tiêu
+                    cp_ky = sum(_luong_chi_phi_toi_da_1_nguoi(pool(t) if callable(pool) else pool, ts, t, tran_pc) for t in thang_ds)
+                    if cp_ky > 0:
+                        so_them = int(-(-thieu_ck // cp_ky))
+                        tom_them = {"so_nguoi": so_them, "chi_phi_1_nguoi_ky": int(cp_ky), "thieu": int(thieu_ck)}
+                        canh_bao.append(f"➕ Ước tính cần thêm khoảng {so_them} người (làm đủ công cả {len(thang_ds)} tháng, trả tiền mặt, nằm trong mức không phát sinh thuế TNCN) — mỗi người "
+                                        f"chứa tối đa ≈ {so_f(int(cp_ky))} đ chi phí lương cho cả kỳ, cần phủ thêm {so_f(int(thieu_ck))} đ. Thêm họ vào Danh Sách Nhân Viên rồi bấm Tính lại "
+                                        "(ước tính theo mức trung bình của nhân viên hiện có).")
+                except Exception:
+                    pass
             elif muc_tieu > 0 and muc_tieu - da_co != chi_ck:
                 so_f = lambda v: f"{v:,}".replace(",", ".")
                 canh_bao.append(f"Tổng chi phí lương cả năm nhập ({so_f(muc_tieu)} đ) khác chi phí lương suy ra từ file chuyển khoản ({so_f(chi_ck + da_co)} đ) — "
@@ -11202,7 +11239,7 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
             chiu_thue[r["ma"] or r["ten"]] = chiu_thue.get(r["ma"] or r["ten"], 0.0) + r["tn_chiu_thue"]
     tom.update({"full_cong": bool(full_cong), "nguong_chiu_thue": nguong_nam, "chiu_thue_nam_max": max(chiu_thue.values() or [0.0]),
                 "muc_tieu": muc_tieu, "da_co_ngoai": da_co, "can_them": can, "ck": ck_kq,
-                "tong_chi_phi": tong_chi_phi, "tong_thue": tong_thue, "so_thang": len(thang_ds),
+                "tong_chi_phi": tong_chi_phi, "tong_thue": tong_thue, "so_thang": len(thang_ds), "can_them_nguoi": tom_them,
                 "so_nguoi": len(nguoi), "canh_bao": canh_bao,
                 "tong_thuong_bh": sum(r["thuong_bh"] for rows in thang_kq.values() for r in rows),
                 "tong_tang_ca": sum(r["tang_ca"] for rows in thang_kq.values() for r in rows)})
