@@ -32,6 +32,7 @@ FILES = [
     "start.sh",
     ".gitattributes",
     "static/index.html",
+    "van_ban_lao_dong.py",
     "static/doi_chieu_ngan_hang.html",
     "templates/htkk_01gtgt_template.xml",
     "templates/htkk_05tncn_template.xml",

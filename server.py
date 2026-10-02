@@ -47,6 +47,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import license_core
+import van_ban_lao_dong as vbld
 import cap_phep_admin
 
 # ============================================================
@@ -55,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.060"
+APP_BUILD = "2026-10-02.061"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13009,6 +13010,105 @@ def bang_luong_xuat_excel_nam_gop(cid: int, nam: int = 0):
     conn.close()
     path, fname, tt = _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, (comp["ten"] if comp else "") or "", (comp["mst"] if comp else "") or "")
     return _resp_xuat(path, fname, {"X-So-Nguoi": str(tt["so_nguoi"])}, desktop=True)
+
+
+# ----- HỢP ĐỒNG LAO ĐỘNG / QUY CHẾ LƯƠNG / THANG BẢNG LƯƠNG (dựng từ Danh Sách Nhân Viên + Bảng Lương; logic ở van_ban_lao_dong.py) -----
+def _vb_du_lieu(cid, nam):
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not comp:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    ck = comp.keys()
+    cty = {k: ((comp[k] if k in ck else "") or "") for k in ("ten", "mst", "dia_chi", "nguoi_ky")}
+    d = nhap_lieu_get(cid, loai="nv")
+    ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
+    nv = vbld.gop_nhan_vien(d.get("header"), d.get("rows"), thang_nhap)
+    return cty, nv, ts
+
+
+def _vb_trang_mac_dinh(loai):
+    t = dict(vbld.TRANG_MAC_DINH)
+    if loai == "tl":
+        t.update({"ngang": True, "size": 11, "le": [15, 15, 20, 15]})
+    return t
+
+
+@app.get("/api/van-ban/{cid}/du-lieu")
+def van_ban_du_lieu(cid: int, nam: int = 0):
+    """Danh sách người lao động (ghép Danh Sách NV + Bảng Lương) + tuỳ chọn mặc định + cảnh báo đối chiếu."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    cty, nv, ts = _vb_du_lieu(cid, nam)
+    tc = vbld.mac_dinh_tuy_chon(cty)
+    return {"nam": nam, "cty": cty, "tuy_chon": tc, "css": vbld.VB_CSS,
+            "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
+            "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
+                           "da_nghi": n["da_nghi"], "nguon": n["nguon"]} for n in nv],
+            "canh_bao": vbld.kiem_tra(nv, nam, tc, _LUONG_TRAN_PC_KHONG_THUE)}
+
+
+@app.post("/api/van-ban/{cid}/xem-truoc")
+async def van_ban_xem_truoc(cid: int, request: Request):
+    """Dựng văn bản (HTML để xem/sửa/in): loai = hd (hợp đồng lao động, từ STT `tu` đến `den`) | qc (quy chế lương) | tl (thang bảng lương)."""
+    body = await request.json()
+    loai = body.get("loai")
+    if loai not in ("hd", "qc", "tl"):
+        raise HTTPException(400, "Loại văn bản không hợp lệ")
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    cty, nv, ts = _vb_du_lieu(cid, nam)
+    if not nv:
+        raise HTTPException(404, "Chưa có nhân viên: hãy nhập Danh Sách Nhân Viên hoặc lưu Bảng Lương trước")
+    tc = body.get("tuy_chon") or {}
+    cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, tc), _LUONG_TRAN_PC_KHONG_THUE)
+    if loai == "hd":
+        try:
+            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv))
+        except Exception:
+            raise HTTPException(400, "Từ/đến nhân viên không hợp lệ")
+        if tu > den:
+            tu, den = den, tu
+        chon = [n for n in nv if tu <= n["stt"] <= den]
+        if not chon:
+            raise HTTPException(400, "Khoảng nhân viên đã chọn không có ai")
+        ten = [n["ten"] for n in chon]
+        html = vbld.dung_hop_dong_nhieu(chon, cty, tc)
+        so = len(chon)
+        cb = [c for c in cb if any(c["nd"].startswith(t + ":") for t in ten) or ":" not in c["nd"][:60]]
+    elif loai == "qc":
+        html, so = vbld.dung_quy_che(nv, cty, tc, ts, nam), 1
+    else:
+        html, so = vbld.dung_thang_bang_luong(nv, cty, tc, nam), 1
+    return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "canh_bao": cb}
+
+
+@app.post("/api/van-ban/{cid}/word")
+async def van_ban_word(cid: int, request: Request):
+    """Văn bản đã xem/sửa trên màn hình (HTML) -> file Word .docx lưu ra Desktop."""
+    body = await request.json()
+    html = body.get("html") or ""
+    if not html.strip():
+        raise HTTPException(400, "Chưa có nội dung để xuất")
+    data = vbld.html_sang_docx(html, body.get("trang") or {})
+    import re as _re_vb
+    ten = _re_vb.sub(r"[^\w\-]+", "_", _khong_dau(str(body.get("ten_file") or "VanBan")))[:60].strip("_") or "VanBan"
+    fname = ten + ".docx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    with open(path, "wb") as f:
+        f.write(data)
+    return _resp_xuat(path, fname, desktop=True)
+
+
+@app.post("/api/van-ban/{cid}/excel-thang-luong")
+async def van_ban_excel_thang_luong(cid: int, request: Request):
+    body = await request.json()
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    cty, nv, _ts = _vb_du_lieu(cid, nam)
+    if not nv:
+        raise HTTPException(404, "Chưa có nhân viên để lập thang bảng lương")
+    fname = f"ThangBangLuong_{nam}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    vbld.thang_luong_excel(path, nv, cty, body.get("tuy_chon") or {}, nam)
+    return _resp_xuat(path, fname, desktop=True)
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel")

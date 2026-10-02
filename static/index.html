@@ -4364,7 +4364,261 @@ function moBangLuong(){
         <div style="font-size:18px;font-weight:700;color:#1f6b4a">Bảng Lương</div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Lương tháng theo năm, BHXH, thuế TNCN</div>
       </div>
+      <div onclick="moVanBan('hd')" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #7a4a1f;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+           onmouseover="this.style.background='#fbf3ea'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:38px;margin-bottom:8px">📝</div>
+        <div style="font-size:18px;font-weight:700;color:#7a4a1f">Hợp Đồng Lao Động</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Lấy từ Danh sách nhân viên + Bảng lương; in hàng loạt, xuất Word</div>
+      </div>
+      <div onclick="moVanBan('qc')" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #5a3a8a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+           onmouseover="this.style.background='#f3eefb'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:38px;margin-bottom:8px">📜</div>
+        <div style="font-size:18px;font-weight:700;color:#5a3a8a">Quy Chế Lương</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Quy chế lương, thưởng, phụ cấp theo Bảng lương</div>
+      </div>
+      <div onclick="moVanBan('tl')" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #8a1f3a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+           onmouseover="this.style.background='#fbeef1'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:38px;margin-bottom:8px">📊</div>
+        <div style="font-size:18px;font-weight:700;color:#8a1f3a">Thang Bảng Lương</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Hệ thống thang lương, bảng lương theo Bảng lương</div>
+      </div>
     </div>`;
+}
+
+/* ----- HỢP ĐỒNG LAO ĐỘNG / QUY CHẾ LƯƠNG / THANG BẢNG LƯƠNG (dựng từ Danh Sách Nhân Viên + Bảng Lương) ----- */
+const VB_TEN={hd:'Hợp Đồng Lao Động',qc:'Quy Chế Lương',tl:'Thang Bảng Lương'};
+const VB_ICON={hd:'📝',qc:'📜',tl:'📊'};
+let vbLoai='hd',vbDL=null,vbNam=0,vbSua=false;
+function vbEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function vbStyleTrang(t){
+  const le=(t&&t.le)||[20,20,30,15];
+  return `--vb-f:'${t.font||'Times New Roman'}';--vb-s:${t.size||13}pt;--vb-l:${t.line||1.15};--vb-mt:${le[0]}mm;--vb-mb:${le[1]}mm;--vb-ml:${le[2]}mm;--vb-mr:${le[3]}mm`;
+}
+// Trang in: dùng ĐÚNG css + html đang xem (đã sửa tay), khổ A4 dọc/ngang + lề theo ô canh chỉnh
+function vbHtmlIn(css,html,t){
+  const le=t.le||[20,20,30,15];
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${vbEsc(t.tieu_de||'Văn bản')}</title><style>${css}
+@page{size:A4 ${t.ngang?'landscape':'portrait'};margin:${le[0]}mm ${le[3]}mm ${le[1]}mm ${le[2]}mm}
+html,body{margin:0;padding:0;background:#fff}</style></head><body class="vb-doc" style="${vbStyleTrang(t)}">${html}</body></html>`;
+}
+function vbDocTrang(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:''};
+  const n=(id,d)=>{const x=parseFloat(String(g(id)).replace(',','.'));return isFinite(x)?x:d};
+  return {font:g('vb_font')||'Times New Roman',size:n('vb_size',13),line:n('vb_line',1.15),
+          le:[n('vb_mt',20),n('vb_mb',20),n('vb_ml',30),n('vb_mr',15)],ngang:!!(document.getElementById('vb_ngang')||{}).checked};
+}
+function vbApDungTrang(){
+  const x=document.getElementById('vbXem');if(!x)return;
+  const t=vbDocTrang();
+  x.setAttribute('style',vbStyleTrang(t));
+  x.querySelectorAll('.vb-trang').forEach(e=>e.classList.toggle('ngang',!!t.ngang));
+}
+function vbCmd(c){const x=document.getElementById('vbXem');if(!x)return;x.focus();document.execCommand(c,false,null)}
+function moVanBan(loai){
+  if(!current){toast('Chọn công ty trước','err');return}
+  vbLoai=loai;vbDL=null;vbSua=false;
+  nlDMMode=null;
+  document.getElementById('nhapLieuHome').style.display='none';
+  document.getElementById('nhapLieuContent').style.display='block';
+  vbNam=parseInt(localStorage.getItem('blNam')||'',10)||new Date().getFullYear();
+  document.getElementById('nhapLieuBody').innerHTML=`<div class="hint">Đang tải dữ liệu nhân viên + bảng lương…</div>`;
+  vbTaiDuLieu();
+}
+async function vbTaiDuLieu(){
+  try{
+    vbDL=await api(`/api/van-ban/${current}/du-lieu?nam=${vbNam}`);
+    vbVeMan();
+  }catch(e){
+    document.getElementById('nhapLieuBody').innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${vbEsc(e.message)}</div>
+      <button class="btn ghost sm" onclick="moBangLuong()">← Bảng Lương - BHXH</button>`;
+  }
+}
+function vbOChu(id,nhan,gt,rong,ghiChu){
+  return `<label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);min-width:${rong||150}px;flex:1">${nhan}
+    <input id="${id}" value="${vbEsc(gt)}" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;color:#222" ${ghiChu?`title="${vbEsc(ghiChu)}"`:''}></label>`;
+}
+function vbOChon(id,nhan,ds,gt,rong){
+  return `<label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);min-width:${rong||150}px;flex:1">${nhan}
+    <select id="${id}" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;color:#222">${ds.map(o=>`<option value="${vbEsc(o[0])}" ${String(o[0])===String(gt)?'selected':''}>${vbEsc(o[1])}</option>`).join('')}</select></label>`;
+}
+const VB_PHUC_LOI_TEN={cuoi_nam:['Thưởng cuối năm theo kết quả kinh doanh',0],tham_nien:['Thưởng thâm niên',0],
+  hieu_hy:['Hỗ trợ hiếu, hỷ — bản thân / thân nhân (đ/lần)',2],om_dau:['Hỗ trợ thiên tai, tai nạn, ốm đau — bản thân / thân nhân (đ/lần)',2],
+  thuong_le:['Thưởng sinh nhật, ngày lễ — từ / đến (đ/lần)',2],cong_tac_phi:['Công tác phí đi về trong ngày (đ/ngày)',1],
+  du_lich:['Hỗ trợ du lịch, nghỉ mát hằng năm',0],hoc_phi:['Hỗ trợ học phí đào tạo theo yêu cầu công việc',0]};
+function vbVeMan(){
+  const d=vbDL,tc=d.tuy_chon,l=vbLoai;
+  const nv=d.nhan_vien||[];
+  const optNv=nv.map(n=>[n.stt,`${n.stt}. ${n.ma?n.ma+' – ':''}${n.ten}${n.chuc_vu?' ('+n.chuc_vu+')':''}${n.da_nghi?' [đã nghỉ việc]':''}`]);
+  let form=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+    ${vbOChu('vb_nam','Năm (lấy Bảng lương năm)',vbNam,90)}
+    ${l==='hd'?'':vbOChu('vb_ngay','Ngày ban hành / ký',tc.ngay,130)}
+    ${vbOChu('vb_dia_danh','Địa danh',tc.dia_danh,130)}
+    ${vbOChu('vb_nguoi_ky','Người đại diện ký',tc.nguoi_ky,170,'Lấy từ thông tin công ty (Người ký)')}
+    ${vbOChu('vb_chuc_danh_ky','Chức danh',tc.chuc_danh_ky,110)}
+    ${vbOChon('vb_ong_ba_ky','Ông/Bà',[['','Ông/Bà (sửa tay)'],['Ông','Ông'],['Bà','Bà']],tc.ong_ba_ky,110)}
+  </div>`;
+  if(l==='hd'){
+    form+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChon('vb_tu','In hàng loạt — TỪ nhân viên',optNv,nv.length?nv[0].stt:1,260)}
+      ${vbOChon('vb_den','ĐẾN nhân viên',optNv,nv.length?nv[nv.length-1].stt:1,260)}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChon('vb_loai_hd','Loại hợp đồng',[['xdth','Xác định thời hạn'],['kxdth','Không xác định thời hạn']],tc.loai_hd,170)}
+      ${vbOChu('vb_so_thang','Thời hạn (tháng, tối đa 36)',tc.so_thang,120)}
+      ${vbOChu('vb_bat_dau','Ngày bắt đầu (trống = theo ngày vào làm)',tc.bat_dau,170,'dd/mm/yyyy')}
+      ${vbOChu('vb_ngay_ky','Ngày ký (trống = ngày bắt đầu)',tc.ngay_ky,150,'dd/mm/yyyy')}
+      ${vbOChu('vb_so_bat_dau','Số HĐ bắt đầu từ',tc.so_bat_dau,100)}
+      ${vbOChu('vb_mau_so','Mẫu số hợp đồng',tc.mau_so,170,'{so:02d} = số thứ tự, {nam} = năm')}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChu('vb_dia_diem','Địa điểm làm việc',tc.dia_diem,260)}
+      ${vbOChu('vb_bo_phan','Bộ phận (trống = bỏ dòng)',tc.bo_phan,140)}
+      ${vbOChu('vb_thoi_gio','Thời giờ làm việc',tc.thoi_gio,300)}
+      ${vbOChu('vb_hinh_thuc_tra','Hình thức trả lương',tc.hinh_thuc_tra,130)}
+      ${vbOChu('vb_ngay_tra','Trả lương ngày … hằng tháng',tc.ngay_tra,110)}
+      ${vbOChu('vb_dien_thoai','Điện thoại công ty',tc.dien_thoai,130)}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChu('vb_cong_viec','Công việc phải làm (trống = theo chức danh)',tc.cong_viec,400)}
+    </div>`;
+  }
+  if(l==='qc'){
+    form+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChu('vb_so_qd','Số quyết định',tc.so_qd,130)}
+      ${vbOChon('vb_vung','Vùng lương tối thiểu',[[1,'Vùng I'],[2,'Vùng II'],[3,'Vùng III'],[4,'Vùng IV']],tc.vung,130)}
+      ${vbOChu('vb_buoc_pct','Mỗi bậc lương tăng (%)',tc.buoc_pct,110)}
+      ${vbOChu('vb_ngay_tra','Trả lương ngày … hằng tháng',tc.ngay_tra,110)}
+      ${vbOChu('vb_hinh_thuc_tra','Hình thức trả lương',tc.hinh_thuc_tra,130)}
+      <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_kem_phu_luc" ${tc.kem_phu_luc?'checked':''}> Kèm phụ lục lương từng người</label>
+    </div>
+    <details style="margin-bottom:8px" open><summary style="cursor:pointer;font-size:13px;font-weight:600">Thưởng & hỗ trợ (tick khoản công ty áp dụng, nhập mức chi — theo chính sách thực tế của công ty)</summary>
+      <div style="padding:6px 0 0 10px">${Object.keys(VB_PHUC_LOI_TEN).map(k=>{const [t,so]=VB_PHUC_LOI_TEN[k];const v=(tc.phuc_loi||{})[k]||{};
+        return `<div style="display:flex;gap:8px;align-items:center;margin:3px 0;font-size:13px"><label style="display:flex;gap:5px;align-items:center;min-width:430px"><input type="checkbox" id="vb_pl_${k}" ${v.bat?'checked':''}> ${t}</label>
+          ${so>=1?`<input id="vb_pl_${k}_1" value="${v.m1||0}" style="width:110px;padding:4px;border:1px solid #ccc;border-radius:6px">`:''}${so>=2?`<input id="vb_pl_${k}_2" value="${v.m2||0}" style="width:110px;padding:4px;border:1px solid #ccc;border-radius:6px">`:''}</div>`}).join('')}</div>
+    </details>`;
+  }
+  if(l==='tl'){
+    form+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChon('vb_vung','Vùng lương tối thiểu',[[1,'Vùng I'],[2,'Vùng II'],[3,'Vùng III'],[4,'Vùng IV']],tc.vung,130)}
+      ${vbOChu('vb_buoc_pct','Mỗi bậc lương tăng (%)',tc.buoc_pct,120)}
+      ${vbOChu('vb_so_bac','Số bậc lương',tc.so_bac,100)}
+      <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_kem_xep_luong" ${tc.kem_xep_luong?'checked':''}> Kèm bảng xếp lương từng người</label>
+    </div>`;
+  }
+  const cb=d.canh_bao||[];
+  const loiN=cb.filter(c=>c.muc==='loi').length;
+  const hopCb=cb.length?`<details style="margin-bottom:8px;border:1px solid ${loiN?'#e0a0a0':'#e6d28a'};background:${loiN?'#fdf0f0':'#fffbe8'};border-radius:8px;padding:6px 10px" ${loiN?'open':''}>
+      <summary style="cursor:pointer;font-size:13px;font-weight:600">⚠ Đối chiếu dữ liệu trước khi nộp thanh tra BHXH / thuế: ${loiN} lỗi, ${cb.length-loiN} cảnh báo</summary>
+      <div style="font-size:12.5px;max-height:180px;overflow:auto;margin-top:4px">${cb.slice(0,60).map(c=>`<div style="color:${c.muc==='loi'?'#b00':'#7a5a00'}">${c.muc==='loi'?'✖':'•'} ${vbEsc(c.nd)}</div>`).join('')}${cb.length>60?`<div>… và ${cb.length-60} mục khác</div>`:''}</div></details>`
+    :`<div style="margin-bottom:8px;font-size:13px;color:#1f6b4a">✔ Dữ liệu đã đối chiếu: không phát hiện sai lệch.</div>`;
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">${VB_ICON[l]} ${VB_TEN[l]}</h3>
+        <button class="btn ghost sm" onclick="moBangLuong()">← Bảng Lương - BHXH</button>
+      </div>
+      <div class="hint" style="margin-bottom:8px">${l==='hd'?'Thông tin người lao động, chức danh, lương và phụ cấp lấy từ Danh Sách Nhân Viên + Bảng Lương (Bảng lương được ưu tiên khi hai nơi khác nhau).':
+        l==='qc'?'Mức lương, phụ cấp theo chức danh, tỷ lệ bảo hiểm lấy từ Bảng Lương năm đã chọn; phần còn lại theo Bộ luật Lao động 2019 và Nghị định 145/2020/NĐ-CP.':
+        'Nhóm chức danh và bậc lương dựng từ lương cơ bản đang trả trong Bảng Lương (bậc 1 = mức thấp nhất của chức danh, không thấp hơn lương tối thiểu vùng).'}
+        Văn bản xem trước <b>sửa trực tiếp được</b>; chỉnh phông, cỡ chữ, giãn dòng, lề rồi in hoặc xuất Word.</div>
+      ${form}${hopCb}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn gold" onclick="vbTaoXemTruoc()">📝 Tạo bản xem trước</button>
+        <span id="vbThongTin" class="hint" style="align-self:center"></span>
+      </div>
+      <div id="vbCongCu" style="display:none;position:sticky;top:0;z-index:5;background:#f4f4f4;border:1px solid #ddd;border-radius:8px;padding:6px;margin-bottom:8px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12.5px">
+          <select id="vb_font" onchange="vbApDungTrang()" style="padding:4px">${['Times New Roman','Arial','Tahoma','Cambria','Calibri','Verdana'].map(f=>`<option>${f}</option>`).join('')}</select>
+          Cỡ <input id="vb_size" type="number" step="0.5" min="8" max="20" value="13" onchange="vbApDungTrang()" style="width:52px;padding:4px">pt
+          Giãn dòng <select id="vb_line" onchange="vbApDungTrang()" style="padding:4px">${[1,1.15,1.3,1.5,2].map(x=>`<option>${x}</option>`).join('')}</select>
+          Lề (mm) trên <input id="vb_mt" type="number" value="20" onchange="vbApDungTrang()" style="width:48px;padding:4px">
+          dưới <input id="vb_mb" type="number" value="20" onchange="vbApDungTrang()" style="width:48px;padding:4px">
+          trái <input id="vb_ml" type="number" value="30" onchange="vbApDungTrang()" style="width:48px;padding:4px">
+          phải <input id="vb_mr" type="number" value="15" onchange="vbApDungTrang()" style="width:48px;padding:4px">
+          <label><input type="checkbox" id="vb_ngang" onchange="vbApDungTrang()"> Khổ ngang</label>
+          <span style="border-left:1px solid #ccc;height:20px"></span>
+          <button class="btn ghost sm" onclick="vbCmd('bold')"><b>B</b></button><button class="btn ghost sm" onclick="vbCmd('italic')"><i>I</i></button><button class="btn ghost sm" onclick="vbCmd('underline')"><u>U</u></button>
+          <button class="btn ghost sm" onclick="vbCmd('justifyLeft')" title="Căn trái">⇤</button><button class="btn ghost sm" onclick="vbCmd('justifyCenter')" title="Căn giữa">↔</button><button class="btn ghost sm" onclick="vbCmd('justifyRight')" title="Căn phải">⇥</button><button class="btn ghost sm" onclick="vbCmd('justifyFull')" title="Căn đều">☰</button>
+          <button class="btn ghost sm" onclick="vbCmd('undo')" title="Hoàn tác">↶</button><button class="btn ghost sm" onclick="vbCmd('redo')" title="Làm lại">↷</button>
+          <span style="border-left:1px solid #ccc;height:20px"></span>
+          <button class="btn sm" style="background:#2e5c8a" onclick="vbIn()">🖨 In</button>
+          <button class="btn gold sm" onclick="vbXuatWord()">📄 Xuất Word (.docx)</button>
+          ${l==='tl'?'<button class="btn sm" style="background:#1f6b4a" onclick="vbXuatExcel()">📊 Xuất Excel</button>':''}
+        </div>
+      </div>
+      <div style="background:#d9d9d9;padding:14px;border-radius:8px;overflow:auto">
+        <style id="vbStyle">${d.css||''}</style>
+        <div id="vbXem" class="vb-doc" contenteditable="true" spellcheck="false" style="outline:none;min-width:max-content"></div>
+      </div>
+    </div>`;
+  const xem=document.getElementById('vbXem');
+  xem.addEventListener('input',()=>{vbSua=true});
+  const n=document.getElementById('vb_nam');
+  if(n)n.addEventListener('change',async()=>{const v=parseInt(n.value,10);if(v>=2000&&v<=2100){vbNam=v;vbSua=false;await vbTaiDuLieu()}});
+}
+function vbTuyChon(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value.trim():undefined};
+  const k={};
+  ['ngay','dia_danh','nguoi_ky','chuc_danh_ky','ong_ba_ky','dien_thoai','loai_hd','so_thang','bat_dau','ngay_ky','so_bat_dau','mau_so','dia_diem','bo_phan','cong_viec','thoi_gio','hinh_thuc_tra','ngay_tra','so_qd','vung','buoc_pct','so_bac'].forEach(f=>{const v=g('vb_'+f);if(v!==undefined)k[f]=v});
+  ['kem_phu_luc','kem_xep_luong'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
+  if(vbLoai==='qc'){
+    k.phuc_loi={};
+    Object.keys(VB_PHUC_LOI_TEN).forEach(p=>{const e=document.getElementById('vb_pl_'+p);if(!e)return;
+      const m1=document.getElementById('vb_pl_'+p+'_1'),m2=document.getElementById('vb_pl_'+p+'_2');
+      k.phuc_loi[p]={bat:e.checked,m1:m1?m1.value:0,m2:m2?m2.value:0}});
+  }
+  return k;
+}
+async function vbTaoXemTruoc(){
+  if(vbSua&&!confirm('Bản đang xem có chỗ bạn đã sửa tay. Tạo lại sẽ mất các chỗ sửa đó. Tiếp tục?'))return;
+  const tt=document.getElementById('vbThongTin');tt.textContent='Đang dựng văn bản…';
+  try{
+    const body={loai:vbLoai,nam:vbNam,tuy_chon:vbTuyChon()};
+    if(vbLoai==='hd'){body.tu=parseInt(document.getElementById('vb_tu').value,10);body.den=parseInt(document.getElementById('vb_den').value,10)}
+    const d=await api(`/api/van-ban/${current}/xem-truoc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    document.getElementById('vbStyle').textContent=d.css;
+    const t=d.trang||{};
+    document.getElementById('vbCongCu').style.display='block';
+    const set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=v};
+    set('vb_font',t.font||'Times New Roman');set('vb_size',t.size||13);set('vb_line',t.line||1.15);
+    const le=t.le||[20,20,30,15];set('vb_mt',le[0]);set('vb_mb',le[1]);set('vb_ml',le[2]);set('vb_mr',le[3]);
+    document.getElementById('vb_ngang').checked=!!t.ngang;
+    document.getElementById('vbXem').innerHTML=d.html;
+    vbApDungTrang();vbSua=false;
+    tt.textContent=vbLoai==='hd'?`Đã dựng ${d.so_van_ban} hợp đồng (mỗi hợp đồng 1 trang riêng).`:'Đã dựng văn bản.';
+    document.getElementById('vbXem').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){tt.textContent='';toast('Lỗi: '+e.message,'err')}
+}
+function vbIn(){
+  const x=document.getElementById('vbXem');if(!x||!x.innerHTML.trim()){toast('Chưa có văn bản — bấm "Tạo bản xem trước"','err');return}
+  const t=vbDocTrang();t.tieu_de=VB_TEN[vbLoai];
+  const old=document.getElementById('vbInFrame');if(old)old.remove();
+  const f=document.createElement('iframe');f.id='vbInFrame';f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(f);
+  const dc=f.contentWindow.document;dc.open();dc.write(vbHtmlIn(document.getElementById('vbStyle').textContent,x.innerHTML,t));dc.close();
+  setTimeout(()=>{f.contentWindow.focus();f.contentWindow.print()},300);
+}
+async function vbXuatWord(){
+  const x=document.getElementById('vbXem');if(!x||!x.innerHTML.trim()){toast('Chưa có văn bản — bấm "Tạo bản xem trước"','err');return}
+  try{
+    const ten={hd:'HopDongLaoDong',qc:'QuyCheLuong',tl:'ThangBangLuong'}[vbLoai]+'_'+vbNam;
+    const r=await fetch(`/api/van-ban/${current}/word`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',
+      body:JSON.stringify({html:x.innerHTML,trang:vbDocTrang(),ten_file:ten})});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const dk=!!r.headers.get('X-Saved-Desktop');
+    await xuatFile(r,ten+'.docx');
+    toast(`📄 Đã xuất Word: ${ten}.docx${dk?' — đã lưu ra Desktop':''}`,'ok');
+  }catch(e){toast('Lỗi xuất Word: '+e.message,'err')}
+}
+async function vbXuatExcel(){
+  try{
+    const r=await fetch(`/api/van-ban/${current}/excel-thang-luong`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',
+      body:JSON.stringify({nam:vbNam,tuy_chon:vbTuyChon()})});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const dk=!!r.headers.get('X-Saved-Desktop');
+    await xuatFile(r,`ThangBangLuong_${vbNam}.xlsx`);
+    toast(`📊 Đã xuất Excel thang bảng lương${dk?' — đã lưu ra Desktop':''}`,'ok');
+  }catch(e){toast('Lỗi xuất Excel: '+e.message,'err')}
 }
 function moDanhSachNhanVien(tuBangLuong){
   if(!tuBangLuong)nvTuBl=null;    // mở từ menu thường: không tô viền
