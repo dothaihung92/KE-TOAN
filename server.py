@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.066"
+APP_BUILD = "2026-10-02.067"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10426,10 +10426,23 @@ def _luong_npt_doc(d):
     return kq
 
 
+def _nv_gom_ma(cac_ma):
+    """Hàm gom mã: '2-001' (dòng thay đổi lương) -> '2' nếu mã gốc '2' cũng có trong dữ liệu (cùng 1 người đổi mã giữa năm); mã khác giữ nguyên."""
+    tap = {str(m).strip().lower() for m in cac_ma if str(m or "").strip()}
+
+    def gom(m):
+        m = str(m or "").strip().lower()
+        g = vbld.ma_goc_phien_ban(m).lower()
+        return g if (g != m and g in tap) else m
+    return gom
+
+
 def _luong_npt_cua(rec, ma, ten):
     """Bản ghi người phụ thuộc thuộc về người lao động (ma, ten)? Khớp Mã NV trước, không có thì họ tên (không phân biệt dấu/hoa thường)."""
     if rec["ma"] and ma:
-        return rec["ma"].lower() == str(ma).strip().lower()
+        a, b = rec["ma"].strip().lower(), str(ma).strip().lower()
+        # mã dòng thay đổi lương = mã gốc + "-001": người phụ thuộc khai theo mã gốc vẫn thuộc về người đó
+        return a == b or (b.startswith(a + "-") and len(b) == len(a) + 4 and b[-3:].isdigit()) or (a.startswith(b + "-") and len(a) == len(b) + 4 and a[-3:].isdigit())
     return bool(rec["nld"]) and _khong_dau(rec["nld"]).lower() == _khong_dau(str(ten or "")).strip().lower()
 
 
@@ -10649,6 +10662,7 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
     """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định + có đóng BHXH không).
     Đóng BHXH = ô tick "Đóng BHXH" trong danh sách VÀ đã tới tháng "Tháng/Năm vào làm" (bắt đầu đóng). Danh sách cũ
     chưa có cột "Đóng BHXH" -> coi như đều đóng (giữ nguyên cách tính trước đây)."""
+    rows = vbld.chon_phien_ban_hieu_luc(header, rows, nam, thang)     # người có nhiều dòng thay đổi lương: lấy dòng (lương + mã) đang hiệu lực ở tháng này
     cot = {}
     for i, h in enumerate(header or []):
         cot[_khong_dau(str(h or "")).strip().lower()] = i
@@ -12496,10 +12510,11 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
         if ten:
             cccd_ten[_khong_dau(ten).lower()] = cc
     ng = {}
+    gom_ma = _nv_gom_ma(r.get("ma") for t in _LUONG_THANG for r in (thang_tinh.get(t) or []))
     for t in _LUONG_THANG:
         for r in thang_tinh.get(t) or []:
             ma, ten = str(r.get("ma") or "").strip(), str(r.get("ten") or "").strip()
-            key = (ma or ten).lower()
+            key = (gom_ma(ma) or ten).lower()
             if not key:
                 continue
             p = ng.setdefault(key, {"ma": ma, "ten": ten, "tn": 0.0, "bh": 0.0, "gt": 0.0, "thue": 0.0, "npt": 0, "npt_thang": {}, "co_thang": False,
@@ -12890,10 +12905,11 @@ def _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, ten_cty="", mst=""):
     nguoi = {}               # key -> {ma, ten, chuc_vu, thang:[...]}
     thu_tu = []
     theo_nguoi = {}
+    gom_ma = _nv_gom_ma(k.get("ma") for t in _LUONG_THANG for k in (thang_tinh.get(t) or []))
     for t in _LUONG_THANG:
         for k in thang_tinh.get(t) or []:
             ma, ten = str(k.get("ma") or "").strip(), str(k.get("ten") or "").strip()
-            key = (ma or ten).lower()
+            key = (gom_ma(ma) or ten).lower()
             if not key:
                 continue
             if key not in nguoi:
@@ -13025,7 +13041,7 @@ def _vb_du_lieu(cid, nam, chi_bang_luong=False):
     cty = {k: ((comp[k] if k in ck else "") or "") for k in ("ten", "mst", "dia_chi", "nguoi_ky")}
     d = nhap_lieu_get(cid, loai="nv")
     ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
-    nv = vbld.gop_nhan_vien(d.get("header"), d.get("rows"), thang_nhap)
+    nv = vbld.gop_nhan_vien(d.get("header"), d.get("rows"), thang_nhap, nam)
     if chi_bang_luong and any(n["nguon"].startswith("Bảng lương") for n in nv):
         nv = [n for n in nv if n["nguon"].startswith("Bảng lương")]
         for i, n in enumerate(nv, 1):
@@ -14090,7 +14106,7 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
 
 NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
-              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Lương Cơ bản",
+              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Tháng/Năm thay đổi lương", "Lương Cơ bản",
               "PC Tiền cơm", "PC Xăng xe", "PC Điện thoại", "PC Trang phục"]
 
 # Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
@@ -14098,6 +14114,7 @@ NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hi�
 # chức vụ" của file nguồn phải bị NUỐT bởi mục đích "" — cột này đã bỏ khỏi danh sách — trước khi "chuc vu" khớp nhầm cột Chức vụ).
 _NV_TU_KHOA = [
     ("Đóng BHXH", ["dong bhxh", "tham gia bhxh", "co dong bhxh", "dong bao hiem"]),
+    ("Tháng/Năm thay đổi lương", ["thay doi luong", "dieu chinh luong", "ap dung luong moi"]),
     ("PC Tiền cơm", ["tien com", "phu cap com", "pc com"]),
     ("PC Xăng xe", ["xang xe", "phu cap xang", "pc xang"]),
     ("", ["phu cap chuc vu", "pc chuc vu"]),        # nuốt cột phụ cấp chức vụ của file nguồn (không đưa vào danh sách)

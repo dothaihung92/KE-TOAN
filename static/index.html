@@ -4334,7 +4334,7 @@ async function tmdtShopeeLayDonHang(){
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
-                   'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Tháng/Năm nghỉ việc','Chức vụ','Lương Cơ bản',
+                   'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Tháng/Năm nghỉ việc','Chức vụ','Tháng/Năm thay đổi lương','Lương Cơ bản',
                    'PC Tiền cơm','PC Xăng xe','PC Điện thoại','PC Trang phục'];
 let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={}, nvChucDanh=[];     // nvChucDanh: các chức danh của Hệ thống thang bảng lương (Chức vụ chỉ chọn trong danh sách này)
 let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
@@ -4672,6 +4672,7 @@ async function taiNhanVien(){
     nvBoCotPcChucVu();
     nvThemCotTick();
     nvThemCotNghiViec();
+    nvThemCotDoiLuong();
     nvFilters={}; nvChon=null;
     try{const c=await api(`/api/van-ban/${current}/chuc-danh`);nvChucDanh=c.chuc_danh||[]}catch(e){nvChucDanh=[]}
     veGridNhanVien();
@@ -4729,6 +4730,41 @@ function nvBoCotPcChucVu(){
   nvFilters={};
 }
 // Cột "Tháng/Năm nghỉ việc" = tháng cuối cùng còn làm (từ tháng sau không lên bảng lương): danh sách đã lưu từ trước chưa có cột -> thêm cột trống, đặt sau "Đóng BHXH".
+const NV_COT_DOI_LUONG='Tháng/Năm thay đổi lương';
+// Cột "Tháng/Năm thay đổi lương": dòng thêm bằng nút ＋ (mã gốc-001, -002…) có ghi tháng này thì TỪ tháng đó Bảng Lương dùng lương + mã mới của dòng đó, không dùng dòng cũ.
+function nvThemCotDoiLuong(){
+  if(nvHeader.some(x=>String(x).trim().toLowerCase()===NV_COT_DOI_LUONG.toLowerCase()))return;
+  let vt=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='chức vụ');
+  if(vt<0)vt=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='lương cơ bản')-1;
+  vt=vt>=0?vt+1:nvHeader.length;
+  nvHeader.splice(vt,0,NV_COT_DOI_LUONG);
+  nvRows.forEach(r=>{while(r.length<nvHeader.length-1)r.push('');r.splice(vt,0,'')});
+  nvFilters={};
+}
+function nvMaGoc(ma){const m=String(ma==null?'':ma).trim().match(/^(.+)-(\d{3})$/);return m?m[1]:String(ma==null?'':ma).trim()}
+// ＋ ở đầu dòng: thêm 1 dòng thay đổi lương cho người đó (sao chép dòng, mã = mã gốc + -001/-002…), xếp ngay dưới các dòng của người đó
+function nvThemPhienBan(ri){
+  const cot=t=>nvHeader.findIndex(h=>String(h).trim().toLowerCase()===t.toLowerCase());
+  const cMa=cot('mã nv'),cDoi=cot(NV_COT_DOI_LUONG),cNghi=cot('tháng/năm nghỉ việc');
+  const goc=nvRows[ri];if(!goc||cMa<0){return}
+  const co=String(goc[cMa]==null?'':goc[cMa]).trim();
+  if(!co){toast('Nhập Mã NV của người này trước (mã mới sẽ là mã + -001)','err');return}
+  const g=nvMaGoc(co);
+  const cuaNguoi=r=>{const m=String(r[cMa]==null?'':r[cMa]).trim();return m===g||(m.startsWith(g+'-')&&/^\d{3}$/.test(m.slice(g.length+1)))};
+  let cuoi=ri,max=0;
+  nvRows.forEach((r,i)=>{if(cuaNguoi(r)){cuoi=Math.max(cuoi,i);const m=String(r[cMa]).trim();if(m!==g)max=Math.max(max,parseInt(m.slice(g.length+1),10))}});
+  const moi=goc.slice();
+  moi[cMa]=g+'-'+String(max+1).padStart(3,'0');
+  if(cDoi>=0)moi[cDoi]='';
+  if(cNghi>=0)moi[cNghi]='';
+  nvRows.splice(cuoi+1,0,moi);
+  nvDanhLaiStt();
+  nvChon={r:cuoi+1,c:cDoi>=0?cDoi:cMa};
+  veGridNhanVien();
+  const td=document.querySelector(`#nvTableWrap td[data-r="${cuoi+1}"][data-c="${cDoi}"]`);
+  if(td&&td.focus)td.focus();
+  toast(`➕ Đã thêm dòng thay đổi lương ${moi[cMa]} — nhập Tháng/Năm thay đổi lương (vd 01/2027) và lương mới rồi 💾 Lưu`,'ok');
+}
 const NV_COT_NGHI='Tháng/Năm nghỉ việc';
 function nvThemCotNghiViec(){
   if(nvHeader.some(x=>String(x).trim().toLowerCase()===NV_COT_NGHI.toLowerCase()))return;
@@ -4776,15 +4812,19 @@ function veGridNhanVien(){
   if(!wrap)return;
   const idxHien=nvRowsLoc();
   let html='<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>';
+  html+='<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 4px;border:1px solid #8a2f68;width:30px" title="Bấm ＋ để thêm dòng thay đổi lương của người này">＋</th>';
   nvHeader.forEach(h=>{html+=`<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 8px;border:1px solid #8a2f68;white-space:normal;max-width:110px;line-height:1.3">${nvEsc(h)}</th>`;});
-  html+='</tr><tr>';
+  html+='</tr><tr><th style="position:sticky;top:29px;background:#f8eef5;border:1px solid #ddd"></th>';
   nvHeader.forEach((h,ci)=>{html+=`<th style="position:sticky;top:29px;background:#f8eef5;padding:2px;border:1px solid #ddd"><input value="${nvEsc(nvFilters[ci]||'')}" oninput="nvFilters[${ci}]=this.value;veGridNhanVien()" placeholder="lọc..." style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>`;});
   html+='</tr></thead><tbody>';
   const dong=nvTuBl?nvDongCanTo():-1;
   idxHien.forEach(ri=>{
     const row=nvRows[ri];
     const to=ri===dong;      // người vừa bấm ở Bảng Lương -> viền đỏ cả dòng
-    html+=`<tr${to?' data-nvsel="1"':''}>`;
+    const cDoiL=nvHeader.findIndex(x=>String(x).trim().toLowerCase()===NV_COT_DOI_LUONG.toLowerCase());
+    const laPb=cDoiL>=0&&String(row[cDoiL]==null?'':row[cDoiL]).trim()!=='';     // dòng thay đổi lương: tô nền nhạt để phân biệt với dòng gốc
+    html+=`<tr${to?' data-nvsel="1"':''}${laPb?' style="background:#fffaf0"':''}>`;
+    html+=`<td style="padding:2px;border:1px solid #eee;text-align:center"><button type="button" class="btn ghost sm" style="padding:1px 7px;font-weight:700" onclick="nvThemPhienBan(${ri})" title="Thêm dòng thay đổi lương cho ${nvEsc(String(row[nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='họ và tên')]||''))} (mã mới = mã + -001…)">＋</button></td>`;
     nvHeader.forEach((h,ci)=>{
       const v=row[ci]==null?'':(nvLaCotTien(h)?nvSoDep(row[ci]):row[ci]);
       const chon=nvChon&&nvChon.r===ri;

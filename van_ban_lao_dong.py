@@ -301,11 +301,64 @@ def _tick(v):
     return _chuan(v) in ("x", "1", "true", "co", "yes", "v", "✓", "☑", "y")
 
 
-def gop_nhan_vien(nv_header, nv_rows, bang_luong_theo_thang=None):
+
+# ============================================================ nhiều phiên bản lương của 1 người (Danh Sách Nhân Viên: cột "Tháng/Năm thay đổi lương")
+_RE_MA_PHIEN_BAN = re.compile(r"^(.+)-(\d{3})$")
+
+
+def ma_goc_phien_ban(ma):
+    """'2-001' -> '2' (mã dòng thay đổi lương = mã gốc + '-001', '-002'...). Mã không có đuôi giữ nguyên."""
+    m = _RE_MA_PHIEN_BAN.match(str(ma or "").strip())
+    return m.group(1) if m else str(ma or "").strip()
+
+
+def chon_phien_ban_hieu_luc(header, rows, nam=None, thang=None):
+    """Danh Sách Nhân Viên có thể có NHIỀU DÒNG cho cùng 1 người: dòng gốc + các dòng thay đổi lương (mã gốc-001, -002..., có ô 'Tháng/Năm thay đổi lương').
+    Trả về mỗi người đúng 1 dòng ĐANG HIỆU LỰC ở (nam, thang): dòng có tháng thay đổi lớn nhất mà <= tháng đó (dòng gốc không ghi tháng = từ đầu).
+    Không truyền tháng: lấy dòng mới nhất (nam thôi: tính đến hết tháng 12 của năm). Người chỉ có dòng thay đổi ở tương lai thì chưa có."""
+    cot = {}
+    for i, h in enumerate(header or []):
+        cot.setdefault(_chuan(h), i)
+    i_ma, i_ten, i_doi = cot.get("ma nv"), cot.get("ho va ten"), cot.get("thang/nam thay doi luong")
+    if i_doi is None:
+        return list(rows or [])
+
+    def o(r, i):
+        return r[i] if i is not None and i < len(r) and r[i] is not None else ""
+    dich = (int(nam), int(thang)) if nam and thang else ((int(nam), 12) if nam else None)
+    nhom, thu_tu = {}, []
+    ten_goc = {}          # họ tên -> khoá của dòng gốc (để dòng thay đổi lương gõ mã khác, không có đuôi -001, vẫn gộp đúng người)
+    for r in rows or []:
+        if not doc_ngay(o(r, i_doi)) and _chuan(o(r, i_ten)) and str(o(r, i_ma)).strip():
+            ten_goc.setdefault(_chuan(o(r, i_ten)), ("ma", str(o(r, i_ma)).strip().lower()))
+    for idx, r in enumerate(rows or []):
+        ma, ten = str(o(r, i_ma)).strip(), _chuan(o(r, i_ten))
+        tu = doc_ngay(o(r, i_doi))
+        tu = (tu[0], tu[1]) if tu else None
+        if tu is None:
+            khoa = ("ma", ma.lower()) if ma else ("ten", ten) if ten else ("dong", idx)
+        elif _RE_MA_PHIEN_BAN.match(ma):
+            khoa = ("ma", ma_goc_phien_ban(ma).lower())
+        else:
+            khoa = ten_goc.get(ten) or (("ten", ten) if ten else ("dong", idx))
+        if khoa not in nhom:
+            nhom[khoa] = []
+            thu_tu.append(khoa)
+        nhom[khoa].append((tu or (0, 0), idx, r))
+    kq = []
+    for khoa in thu_tu:
+        ung = [x for x in nhom[khoa] if dich is None or x[0] <= dich]
+        if ung:
+            kq.append(max(ung, key=lambda x: (x[0], x[1]))[2])
+    return kq
+
+
+def gop_nhan_vien(nv_header, nv_rows, bang_luong_theo_thang=None, nam=None):
     """Ghép Danh Sách Nhân Viên (header+rows) với dòng NHẬP Bảng Lương của tháng mới nhất có người đó.
     `bang_luong_theo_thang` = {"01": [dòng nhập...], ...} (dòng nhập: ma, ten, chuc_vu, luong_cb, tien_com, muc_xang, muc_dt,
     trang_phuc, di_lai, dong_bh...). Bảng lương là số THỰC TRẢ nên được ưu tiên; chỗ nào khác danh sách thì ghi vào 'lech'.
     Trả về list dict (đã đánh stt 1..n, theo thứ tự danh sách; người chỉ có trong bảng lương xếp cuối)."""
+    nv_rows = chon_phien_ban_hieu_luc(nv_header, nv_rows, nam)      # mỗi người 1 dòng: phiên bản lương đang hiệu lực đến hết năm `nam`
     cot = {}
     for i, h in enumerate(nv_header or []):
         cot.setdefault(_chuan(h), i)
