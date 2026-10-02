@@ -55,7 +55,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.054"
+APP_BUILD = "2026-10-02.055"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10957,14 +10957,45 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
 
 
 def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
-    """Dựng nhóm CHUYỂN KHOẢN của 1 tháng bằng cách GIẢM NGÀY CÔNG: lương cơ bản và MỌI phụ cấp đều tính theo ngày làm (mức/công chuẩn x ngày làm) nên giảm
-    ngày công kéo cả lương lẫn phụ cấp xuống tương ứng, thay vì giữ đủ công rồi chỉnh phụ cấp. Chọn ít người nhất (>= k_min) mà lương đủ công cộng lại >= so_ck,
-    rồi hạ ngày làm từng người (ngẫu nhiên, mỗi người >= 14 ngày để vẫn đóng BHXH) tới khi TT lương chỉ còn thiếu dưới 1 ngày công; phần thiếu bù bằng thưởng bán
-    hàng nhỏ chia cho các người đó (cuối cùng khớp từng đồng ở _luong_ke_hoach_ck). Trả danh sách dòng nhập, hoặc None nếu không áp dụng được (lương đủ công
-    của cả danh sách không tới số chuyển khoản, hoặc cần < 14 ngày công) -> dùng cách cũ."""
+    """Dựng nhóm CHUYỂN KHOẢN của 1 tháng bằng NGÀY CÔNG + TĂNG CA (không chỉnh phụ cấp tùy ý): lương cơ bản và MỌI phụ cấp tính theo ngày làm (mức/công chuẩn x
+    ngày làm) nên
+      - lương đủ công của danh sách NHIỀU hơn số chuyển khoản: chọn ít người nhất (>= k_min), GIẢM ngày làm từng người (ngẫu nhiên, mỗi người >= 14 ngày để vẫn
+        đóng BHXH) tới khi TT lương thiếu dưới 1 ngày công; phần thiếu bù bằng TĂNG CA (tối đa 40 giờ/người/tháng) rồi thưởng bán hàng;
+      - lương đủ công của cả danh sách KHÔNG tới số chuyển khoản: mọi người làm đủ công, TĂNG ca (tối đa 40 giờ/người) để bù — chọn ít người nhất đủ sức chứa.
+    Thu nhập chịu thuế vẫn dưới giảm trừ bản thân nên không phát sinh TNCN. Trả danh sách dòng nhập, hoặc None nếu không áp dụng được (cần < 14 ngày công, hoặc
+    kể cả tăng ca tối đa vẫn không tới số chuyển khoản) -> dùng cách cũ (đẩy phụ cấp/thưởng). Phần lẻ cuối cùng được khớp từng đồng ở _luong_ke_hoach_ck."""
     e = (ts.get("cong_chuan") or {}).get(thang) or ts["ngay_cong_chuan"]
     e_i = int(e)
+    hs = ts["he_so_tang_ca"]
     n = len(ung)
+    if e_i < _LUONG_NGAY_DONG_BHXH:
+        return None
+
+    def tc_toi_da(base):
+        gio_don = base["luong_cb"] / e / 8.0 * hs if e else 0.0
+        return int(_LUONG_GIO_TANG_CA_TOI_DA * gio_don) // 1000 * 1000
+
+    def chia_tc(x, caps):
+        """Chia x đồng tăng ca cho các người theo trọng số ngẫu nhiên, không vượt caps (tròn nghìn); trả danh sách tiền từng người."""
+        phan = [0] * len(caps)
+        con = int(x)
+        for _ in range(20):
+            mo = [i for i in range(len(caps)) if caps[i] - phan[i] >= 1000]
+            if con < 1000 or not mo:
+                break
+            w = {i: rng.uniform(0.3, 2.0) for i in mo}
+            tw = sum(w.values())
+            for i in mo:
+                a = min(caps[i] - phan[i], int(con * w[i] / tw) // 1000 * 1000)
+                phan[i] += a
+            con = int(x) - sum(phan)
+            if all(int(con * w[i] / tw) < 1000 for i in mo):
+                for i in mo:
+                    a = min(caps[i] - phan[i], con // 1000 * 1000)
+                    if a > 0:
+                        phan[i] += a
+                        con -= a
+        return phan
     k = None
     luy = 0.0
     for i in range(n):
@@ -10972,8 +11003,20 @@ def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
         if i + 1 >= max(1, k_min) and luy >= so_ck:
             k = i + 1
             break
-    if k is None or e_i < _LUONG_NGAY_DONG_BHXH:
-        return None
+    if k is None:                                     # đủ công cũng không tới -> đủ công + tăng ca
+        luy = 0.0
+        for i in range(n):
+            luy += ung[i][1] + tc_toi_da(ung[i][0])
+            if i + 1 >= max(1, k_min) and luy >= so_ck:
+                k = i + 1
+                break
+        if k is None:
+            return None
+        base = [dict(u[0], ngay_lam=e_i, ghi_chu="CK") for u in ung[:k]]
+        thieu = int(so_ck) - sum(u[1] for u in ung[:k])
+        for b_, a in zip(base, chia_tc(thieu, [tc_toi_da(b_) for b_ in base])):
+            b_["tang_ca"] += a
+        return base
     base = [dict(u[0], ngay_lam=e_i, ghi_chu="CK") for u in ung[:k]]
     ngay = [e_i] * k
 
@@ -10991,7 +11034,7 @@ def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
         ngay[i] -= 1
         cur[i] = tt_i(i, ngay[i])
     ha = [i for i in range(k) if ngay[i] > gioi_han]
-    if ha:                                        # hạ thêm 1 ngày của 1 người để TT lương xuống dưới số chuyển khoản, phần thiếu bù thưởng
+    if ha:                                        # hạ thêm 1 ngày của 1 người để TT lương xuống dưới số chuyển khoản, phần thiếu bù tăng ca/thưởng
         i = rng.choice(ha)
         tong += tt_i(i, ngay[i] - 1) - cur[i]
         ngay[i] -= 1
@@ -11002,10 +11045,8 @@ def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
         base[i]["ngay_lam"] = ngay[i]
     thieu = int(so_ck) - tong
     if thieu > 0:
-        w = [rng.uniform(0.3, 2.0) for _ in range(k)]
-        phan = [int(thieu * x / sum(w)) // 1000 * 1000 for x in w]
-        for i in range(k):
-            base[i]["thuong_bh"] += phan[i]
+        for b_, a in zip(base, chia_tc(thieu, [tc_toi_da(b_) for b_ in base])):
+            b_["tang_ca"] += a
     return base
 
 
@@ -11061,8 +11102,9 @@ def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=Fal
             for goc in (lech, int(round(lech / 0.9))):
                 for them in range(-3, 4):
                     dl = goc + them
-                    thu = dict(r, thuong_bh=r["thuong_bh"] + dl)
-                    if thu["thuong_bh"] < 0:
+                    khoa_le = "tang_ca" if (rows_ngay is not None and r["tang_ca"] > 0) else "thuong_bh"      # phần lẻ: ưu tiên dồn vào tăng ca
+                    thu = dict(r, **{khoa_le: r[khoa_le] + dl})
+                    if thu[khoa_le] < 0:
                         continue
                     k2 = [_luong_tinh_dong(x if j != i else thu, ts, thang) for j, x in enumerate(rows)]
                     if sum(x["tt_luong"] for x in k2) == int(so_ck):

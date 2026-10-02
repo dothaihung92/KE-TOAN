@@ -234,9 +234,21 @@ for full in (False, True):
             assert r["ngay_lam_hd"] >= 14, "vẫn đủ 14 ngày để đóng BHXH"
             assert abs(r["luong"] - r["luong_cb"] / e_ * r["ngay_lam_hd"]) < 1 and abs(r["xang_xe"] - r["muc_xang"] / e_ * r["ngay_lam_hd"]) < 1, \
                 "lương cb và phụ cấp giảm đúng theo ngày làm (không chỉnh phụ cấp tùy ý)"
-            assert r["thuong_bh"] < 1_500_000 and r["tang_ca"] == 0, "phần lẻ bù thưởng nhỏ"
+            assert r["thuong_bh"] < 1_500_000 and r["tang_ca"] <= 40 * r["luong_cb"] / e_ / 8 * 1.5 + 1, "phần lẻ bù bằng tăng ca (<= 40 giờ) / thưởng nhỏ"
         for r in th[t]:
             if not server._luong_la_chuyen_khoan(r["ghi_chu"]):
                 assert r["ngay_lam_hd"] == r["ngay_cong_hd"], "người trả tiền mặt vẫn đủ công"
 print("PASS 8: nhóm chuyển khoản giảm ngày công để khớp file (lương cb + phụ cấp theo tỷ lệ), vẫn >= 14 ngày, phần lẻ bù thưởng nhỏ.")
+print("\nALL DONE")
+
+# ===== 9: lương đủ công của danh sách KHÔNG tới số chuyển khoản -> mọi người đủ công + TĂNG CA (<= 40 giờ) để bù, không chỉnh phụ cấp =====
+ck9 = {"05": 52_000_000}
+for full in (False, True):
+    th, tom = server._luong_ke_hoach(pool8, 2026, 5, 5, 0, None, 50, 0, random.Random(7), full, None, ck9)
+    ck_rows = [r for r in th["05"] if server._luong_la_chuyen_khoan(r["ghi_chu"])]
+    assert ck_tt(th["05"]) == 52_000_000 and tom["ck"]["05"]["khop"] and tom["tong_thue"] == 0
+    assert all(r["ngay_lam_hd"] == r["ngay_cong_hd"] for r in ck_rows), "đủ công"
+    assert all(r["muc_xang"] == dong_nv8["muc_xang"] and r["xang_xe"] == dong_nv8["muc_xang"] and r["thuong_bh"] == 0 for r in ck_rows), "không chỉnh phụ cấp/thưởng"
+    assert sum(r["tang_ca"] for r in ck_rows) > 0 and all(r["gio_tang_ca"] <= 40.01 for r in ck_rows), "bù bằng tăng ca, tối đa 40 giờ/người"
+print("PASS 9: lương đủ công không tới số chuyển khoản -> đủ công + tăng ca (<= 40 giờ) để khớp file, không chỉnh phụ cấp.")
 print("\nALL DONE")
