@@ -255,7 +255,7 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "phuc_loi": {k: {"bat": v[1], "m1": v[2], "m2": v[3]} for k, v in PHUC_LOI_MAC_DINH.items()},
         # thang bảng lương
         "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "gan_chu_ky": True,
-        "tv_tu": "", "tv_den": "", "tv_phan_tram": 85, "tv_cong_viec": "", "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
+        "tv_tu": "", "tv_den": "", "tv_phan_tram": 100, "tv_cong_viec": "", "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
     }
 
 
@@ -893,14 +893,16 @@ def dung_hop_dong_thu_viec(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None,
          _p("<b>Điều 1. Công việc, địa điểm và thời gian thử việc</b>"),
          _p(f"1. Chức danh, công việc thử việc: {esc(nv.get('chuc_vu') or '..........')} — {esc(cv)}.", "j"),
          _p(f"2. Địa điểm làm việc: {esc(tc.get('dia_diem') or cty.get('dia_chi') or '')}.", "j"),
-         _p(f"3. Thời gian thử việc: {so_ngay if so_ngay else '.....'} ngày, từ {esc(ngay_chu(tu))} đến hết {esc(ngay_chu(den)) if den else 'ngày ..... tháng ..... năm ........'}.", "j"),
+         _p(f"3. Thời gian thử việc: từ {esc(ngay_chu(tu))} đến hết {esc(ngay_chu(den)) if den else 'ngày ..... tháng ..... năm ........'}.", "j"),
          _p("4. Người thử việc chỉ thử việc một lần đối với một công việc theo Điều 25 Bộ luật Lao động năm 2019.", "j"),
          _p("<b>Điều 2. Tiền lương và chế độ trong thời gian thử việc</b>"),
-         _p(f"1. Tiền lương thử việc: <b>{so_tien(luong_tv)} đồng/tháng</b> (bằng chữ: {esc(doc_so_thanh_chu(luong_tv))}), bằng {pt:g}% mức lương chính thức của công việc "
-            f"({so_tien(luong_cb)} đồng/tháng), không thấp hơn 85% mức lương của công việc đó (Điều 26 Bộ luật Lao động năm 2019). Tiền lương được tính theo số ngày công thực tế đi làm.", "j"),
+         _p(f"1. Tiền lương thử việc: <b>{so_tien(luong_tv)} đồng/tháng</b> (bằng chữ: {esc(doc_so_thanh_chu(luong_tv))}), "
+            + ("theo mức lương cơ bản trong bảng lương" if pt == 100 else f"bằng {pt:g}% mức lương cơ bản trong bảng lương ({so_tien(luong_cb)} đồng/tháng)")
+            + ", không thấp hơn 85% mức lương của công việc đó (Điều 26 Bộ luật Lao động năm 2019). Tiền lương được tính theo số ngày công thực tế đi làm.", "j"),
          _p(f"2. Hình thức trả lương: {esc(tc.get('hinh_thuc_tra') or 'chuyển khoản')}; trả vào ngày {int(_so(tc.get('ngay_tra')) or 5):02d} của tháng sau hoặc ngay khi kết thúc thử việc.", "j"),
-         _p("3. Thời giờ làm việc, thời giờ nghỉ ngơi, an toàn lao động: theo quy định của pháp luật và nội quy lao động của Công ty.", "j"),
-         _p("4. Hợp đồng thử việc này là hợp đồng riêng; trong thời gian thử việc Người thử việc không thuộc đối tượng tham gia bảo hiểm xã hội bắt buộc. Thuế thu nhập cá nhân được khấu trừ theo quy định của pháp luật về thuế đối với người thử việc.", "j"),
+         _p("3. Phụ cấp lương và các khoản bổ sung khác: Các khoản phụ cấp được tính theo số ngày công thực tế đi làm trong tháng;", "j"),
+         _p("4. Thời giờ làm việc, thời giờ nghỉ ngơi, an toàn lao động: theo quy định của pháp luật và nội quy lao động của Công ty.", "j"),
+         _p("5. Hợp đồng thử việc này là hợp đồng riêng; trong thời gian thử việc Người thử việc không thuộc đối tượng tham gia bảo hiểm xã hội bắt buộc. Thuế thu nhập cá nhân được khấu trừ theo quy định của pháp luật về thuế đối với người thử việc.", "j"),
          _p("<b>Điều 3. Quyền và nghĩa vụ của Người thử việc</b>"),
          _p("1. Được hưởng tiền lương thử việc, được cung cấp thông tin, điều kiện làm việc, bảo hộ lao động (nếu có) theo yêu cầu công việc.", "j"),
          _p("2. Thực hiện công việc được giao, chấp hành nội quy lao động, quy chế của Công ty; bảo mật thông tin kinh doanh.", "j"),

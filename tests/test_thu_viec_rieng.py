@@ -73,8 +73,10 @@ nv = {"ten": "Lê Văn A", "ma": "5", "chuc_vu": "Nhân viên kế toán", "luon
       "gioi_tinh": "Nam", "thu_viec_tu": "01/03/2026", "thu_viec_den": "30/03/2026"}
 h = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", v.dung_hop_dong_thu_viec(nv, CTY, {"ong_ba_ky": "Bà"}, 0)).replace("&nbsp;", " "))
 assert "HỢP ĐỒNG THỬ VIỆC" in h and "Số: 01/HĐTV-2026" in h and "Điều 24 đến Điều 27" in h
-assert "30 ngày, từ ngày 01 tháng 03 năm 2026 đến hết ngày 30 tháng 03 năm 2026" in h
-assert "5.100.000 đồng/tháng" in h and "Năm triệu một trăm nghìn đồng" in h and "bằng 85% mức lương chính thức" in h and "(6.000.000 đồng/tháng)" in h
+assert "Thời gian thử việc: từ ngày 01 tháng 03 năm 2026 đến hết ngày 30 tháng 03 năm 2026" in h and "30 ngày, từ" not in h
+assert "6.000.000 đồng/tháng" in h and "Sáu triệu đồng" in h and "theo mức lương cơ bản trong bảng lương" in h and "bằng 85%" not in h and "không thấp hơn 85% mức lương của công việc đó" in h
+assert "3. Phụ cấp lương và các khoản bổ sung khác: Các khoản phụ cấp được tính theo số ngày công thực tế đi làm trong tháng;" in h and "5. Hợp đồng thử việc này là hợp đồng riêng" in h
+assert "5.100.000 đồng/tháng" in re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", v.dung_hop_dong_thu_viec(nv, CTY, {"tv_phan_tram": 85}, 0))) and "bằng 85% mức lương cơ bản trong bảng lương" in re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", v.dung_hop_dong_thu_viec(nv, CTY, {"tv_phan_tram": 85}, 0)))
 assert "không thuộc đối tượng tham gia bảo hiểm xã hội bắt buộc" in h and "Điều 27" in h and "Ông: LÊ VĂN A" in h and "Bà: HỒ THỊ CẨM VÂN" in h
 assert "5.400.000 đồng/tháng" in re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", v.dung_hop_dong_thu_viec(nv, CTY, {"tv_phan_tram": 90}, 0)))
 assert v.dung_hop_dong_thu_viec_nhieu([nv, nv], CTY, {}).count('<section class="vb-trang">') == 2
@@ -97,10 +99,10 @@ class Req:
     def __init__(self, b): self.b = b
     async def json(self): return self.b
 r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "tv", "nam": 2026, "tu": 1, "den": 3})))
-assert r["html"].count('<section class="vb-trang">') == 3 and "HỢP ĐỒNG THỬ VIỆC" in r["html"] and "5.950.000 đồng/tháng" in r["html"]
+assert r["html"].count('<section class="vb-trang">') == 3 and "HỢP ĐỒNG THỬ VIỆC" in r["html"] and "7.000.000 đồng/tháng" in r["html"]
 nd = " | ".join(c["nd"] for c in r["canh_bao"])
 assert "Trần B (Bảo vệ)" in nd and "06 ngày làm việc" in nd, "bảo vệ thử việc 30 ngày -> cảnh báo"
 assert "Lê C: chưa có ngày" in nd, "người chưa có ngày thử việc"
 r2 = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "tv", "nam": 2026, "tu": 3, "den": 3, "tuy_chon": {"tv_tu": "05/05/2026", "tv_den": "20/05/2026", "tv_phan_tram": "90"}})))
-assert "16 ngày, từ ngày 05 tháng 05 năm 2026 đến hết ngày 20 tháng 05 năm 2026" in re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", r2["html"])) and "4.500.000 đồng/tháng" in r2["html"]
+assert "từ ngày 05 tháng 05 năm 2026 đến hết ngày 20 tháng 05 năm 2026" in re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", r2["html"])) and "4.500.000 đồng/tháng" in r2["html"]
 print("PASS")
