@@ -4334,7 +4334,7 @@ async function tmdtShopeeLayDonHang(){
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
-                   'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Tháng/Năm nghỉ việc','Chức vụ','Tháng/Năm thay đổi lương','Lương Cơ bản',
+                   'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Tháng/Năm nghỉ việc','Chức vụ','Tháng/Năm thay đổi lương','Thử việc từ','Thử việc đến','Lương Cơ bản',
                    'PC Tiền cơm','PC Xăng xe','PC Điện thoại','PC Trang phục'];
 let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={}, nvChucDanh=[];     // nvChucDanh: các chức danh của Hệ thống thang bảng lương (Chức vụ chỉ chọn trong danh sách này)
 let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
@@ -4370,6 +4370,12 @@ function moBangLuong(){
         <div style="font-size:18px;font-weight:700;color:#7a4a1f">Hợp Đồng Lao Động</div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Lấy từ Danh sách nhân viên + Bảng lương; in hàng loạt, xuất Word</div>
       </div>
+      <div onclick="moVanBan('tv')" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #2f6b6b;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+           onmouseover="this.style.background='#eaf6f6'" onmouseout="this.style.background='#fff'">
+        <div style="font-size:38px;margin-bottom:8px">🧪</div>
+        <div style="font-size:18px;font-weight:700;color:#2f6b6b">Hợp Đồng Thử Việc</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:6px">Hợp đồng thử việc riêng (Điều 24–27 BLLĐ); in hàng loạt, xuất Word</div>
+      </div>
       <div onclick="moVanBan('qc')" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #5a3a8a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
            onmouseover="this.style.background='#f3eefb'" onmouseout="this.style.background='#fff'">
         <div style="font-size:38px;margin-bottom:8px">📜</div>
@@ -4386,8 +4392,8 @@ function moBangLuong(){
 }
 
 /* ----- HỢP ĐỒNG LAO ĐỘNG / QUY CHẾ LƯƠNG / THANG BẢNG LƯƠNG (dựng từ Danh Sách Nhân Viên + Bảng Lương) ----- */
-const VB_TEN={hd:'Hợp Đồng Lao Động',qc:'Quy Chế Lương',tl:'Thang Bảng Lương'};
-const VB_ICON={hd:'📝',qc:'📜',tl:'📊'};
+const VB_TEN={hd:'Hợp Đồng Lao Động',tv:'Hợp Đồng Thử Việc',qc:'Quy Chế Lương',tl:'Thang Bảng Lương'};
+const VB_ICON={hd:'📝',tv:'🧪',qc:'📜',tl:'📊'};
 let vbLoai='hd',vbDL=null,vbNam=0,vbSua=false;
 function vbEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function vbStyleTrang(t){
@@ -4451,7 +4457,7 @@ function vbVeMan(){
   const optNv=nv.map(n=>[n.stt,`${n.stt}. ${n.ma?n.ma+' – ':''}${n.ten}${n.chuc_vu?' ('+n.chuc_vu+')':''}${n.da_nghi?' [đã nghỉ việc]':''}`]);
   let form=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
     ${vbOChu('vb_nam','Năm lập (Bảng lương + ngày HĐ)',vbNam,110,'Hợp đồng ghi ngày 01/01 của năm này nếu nhân viên vào làm từ năm trước')}
-    ${l==='hd'?'':vbOChu('vb_ngay','Ngày ban hành / ký',tc.ngay,130)}
+    ${(l==='hd'||l==='tv')?'':vbOChu('vb_ngay','Ngày ban hành / ký',tc.ngay,130)}
     ${vbOChu('vb_dia_danh','Địa danh (trống = chỉ hiện ngày tháng)',tc.dia_danh,150)}
     ${vbOChu('vb_nguoi_ky','Người đại diện ký',tc.nguoi_ky,170,'Lấy từ thông tin công ty (Người ký)')}
     ${vbOChu('vb_chuc_danh_ky','Chức danh',tc.chuc_danh_ky,110)}
@@ -4481,6 +4487,26 @@ function vbVeMan(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
       ${vbOChu('vb_cong_viec','Công việc phải làm (trống = theo chức danh)',tc.cong_viec,400)}
       <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_ghi_phu_cap" ${tc.ghi_phu_cap?'checked':''}> Ghi chi tiết số tiền từng khoản phụ cấp vào hợp đồng</label>
+    </div>`;
+  }
+  if(l==='tv'){
+    form+=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChon('vb_tu','In hàng loạt — TỪ nhân viên',optNv,nv.length?nv[0].stt:1,260)}
+      ${vbOChon('vb_den','ĐẾN nhân viên',optNv,nv.length?nv[nv.length-1].stt:1,260)}
+    </div>
+    <div class="hint" style="margin-bottom:6px">Ngày thử việc của từng người lấy từ cột <b>Thử việc từ / Thử việc đến</b> ở Danh Sách Nhân Viên (người đang thử việc THỰC TẾ). Hai ô dưới chỉ dùng cho người chưa có ngày ở Danh Sách.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChu('vb_tv_tu','Thử việc từ ngày (nếu chưa có ở Danh sách)',tc.tv_tu,190,'dd/mm/yyyy')}
+      ${vbOChu('vb_tv_den','Đến hết ngày',tc.tv_den,150,'dd/mm/yyyy')}
+      ${vbOChu('vb_tv_phan_tram','Lương thử việc = % lương chính thức (tối thiểu 85)',tc.tv_phan_tram,200)}
+      ${vbOChu('vb_ngay_ky','Ngày ký (trống = ngày bắt đầu thử việc)',tc.ngay_ky,170,'dd/mm/yyyy')}
+      ${vbOChu('vb_so_bat_dau','Số HĐ bắt đầu từ',tc.so_bat_dau,100)}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      ${vbOChu('vb_dia_diem','Địa điểm làm việc',tc.dia_diem,260)}
+      ${vbOChu('vb_hinh_thuc_tra','Hình thức trả lương',tc.hinh_thuc_tra,130)}
+      ${vbOChu('vb_ngay_tra','Trả lương ngày … hằng tháng',tc.ngay_tra,110)}
+      ${vbOChu('vb_tv_cong_viec','Công việc thử việc (trống = theo chức danh)',tc.tv_cong_viec,360)}
     </div>`;
   }
   if(l==='qc'){
@@ -4526,7 +4552,7 @@ function vbVeMan(){
         <h3 style="margin:0">${VB_ICON[l]} ${VB_TEN[l]}</h3>
         <button class="btn ghost sm" onclick="moBangLuong()">← Bảng Lương - BHXH</button>
       </div>
-      <div class="hint" style="margin-bottom:8px">${l==='hd'?'Thông tin người lao động, chức danh, lương và phụ cấp lấy từ Danh Sách Nhân Viên + Bảng Lương (Bảng lương được ưu tiên khi hai nơi khác nhau).':
+      <div class="hint" style="margin-bottom:8px">${l==='hd'?'Thông tin người lao động, chức danh, lương và phụ cấp lấy từ Danh Sách Nhân Viên + Bảng Lương (Bảng lương được ưu tiên khi hai nơi khác nhau).':l==='tv'?'Hợp đồng thử việc RIÊNG cho người đang thử việc thật: không đóng BHXH trong thời gian thử việc, lương thử việc ≥ 85%, thời gian tối đa theo Điều 25 BLLĐ 2019 (có cảnh báo). Hết thử việc ký hợp đồng lao động thì tự đóng BHXH.':
         l==='qc'?'Mức lương, phụ cấp theo chức danh, tỷ lệ bảo hiểm lấy từ Bảng Lương năm đã chọn; phần còn lại theo Bộ luật Lao động 2019 và Nghị định 145/2020/NĐ-CP.':
         'Nhóm chức danh và bậc lương dựng từ lương cơ bản đang trả trong Bảng Lương (bậc 1 = mức thấp nhất của nhóm, không thấp hơn lương tối thiểu vùng); có thể tự khai báo nhóm (vd Giám đốc, Phó giám đốc; Kế toán trưởng) như file mẫu.'}
         Văn bản xem trước <b>sửa trực tiếp được</b>; chỉnh phông, cỡ chữ, giãn dòng, lề rồi in hoặc xuất Word.</div>
@@ -4584,7 +4610,7 @@ async function vbDoLuong(){
 function vbTuyChon(){
   const g=id=>{const e=document.getElementById(id);return e?e.value.trim():undefined};
   const k={};
-  ['ngay','dia_danh','nguoi_ky','chuc_danh_ky','ong_ba_ky','dien_thoai','loai_hd','so_thang','bat_dau','ngay_ky','so_bat_dau','mau_so','dia_diem','bo_phan','cong_viec','thoi_gio','hinh_thuc_tra','ngay_tra','so_qd','vung','buoc_pct','so_bac','nhom_tuy_chinh'].forEach(f=>{const v=g('vb_'+f);if(v!==undefined)k[f]=v});
+  ['ngay','dia_danh','nguoi_ky','chuc_danh_ky','ong_ba_ky','dien_thoai','loai_hd','so_thang','bat_dau','ngay_ky','so_bat_dau','mau_so','dia_diem','bo_phan','cong_viec','thoi_gio','hinh_thuc_tra','ngay_tra','so_qd','vung','buoc_pct','so_bac','nhom_tuy_chinh','tv_tu','tv_den','tv_phan_tram','tv_cong_viec'].forEach(f=>{const v=g('vb_'+f);if(v!==undefined)k[f]=v});
   ['kem_phu_luc','kem_xep_luong','ghi_phu_cap','hien_he_so','gan_chu_ky'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
   if(vbLoai==='qc'){
     k.phuc_loi={};
@@ -4599,7 +4625,7 @@ async function vbTaoXemTruoc(){
   const tt=document.getElementById('vbThongTin');tt.textContent='Đang dựng văn bản…';
   try{
     const body={loai:vbLoai,nam:vbNam,tuy_chon:vbTuyChon()};
-    if(vbLoai==='hd'){body.tu=parseInt(document.getElementById('vb_tu').value,10);body.den=parseInt(document.getElementById('vb_den').value,10)}
+    if(vbLoai==='hd'||vbLoai==='tv'){body.tu=parseInt(document.getElementById('vb_tu').value,10);body.den=parseInt(document.getElementById('vb_den').value,10)}
     const d=await api(`/api/van-ban/${current}/xem-truoc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     document.getElementById('vbStyle').textContent=d.css;
     const t=d.trang||{};
@@ -4610,7 +4636,7 @@ async function vbTaoXemTruoc(){
     document.getElementById('vb_ngang').checked=!!t.ngang;
     document.getElementById('vbXem').innerHTML=d.html;
     vbApDungTrang();vbSua=false;
-    tt.textContent=(vbLoai==='hd'?`Đã dựng ${d.so_van_ban} hợp đồng (mỗi hợp đồng 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
+    tt.textContent=((vbLoai==='hd'||vbLoai==='tv')?`Đã dựng ${d.so_van_ban} hợp đồng (mỗi hợp đồng 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
     document.getElementById('vbXem').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){tt.textContent='';toast('Lỗi: '+e.message,'err')}
 }
@@ -4626,7 +4652,7 @@ function vbIn(){
 async function vbXuatWord(){
   const x=document.getElementById('vbXem');if(!x||!x.innerHTML.trim()){toast('Chưa có văn bản — bấm "Tạo bản xem trước"','err');return}
   try{
-    const ten={hd:'HopDongLaoDong',qc:'QuyCheLuong',tl:'ThangBangLuong'}[vbLoai]+'_'+vbNam;
+    const ten={hd:'HopDongLaoDong',tv:'HopDongThuViec',qc:'QuyCheLuong',tl:'ThangBangLuong'}[vbLoai]+'_'+vbNam;
     const r=await fetch(`/api/van-ban/${current}/word`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',
       body:JSON.stringify({html:x.innerHTML,trang:vbDocTrang(),ten_file:ten})});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
@@ -4768,6 +4794,7 @@ async function taiNhanVien(){
     nvThemCotTick();
     nvThemCotNghiViec();
     nvThemCotDoiLuong();
+    nvThemCotThuViec();
     nvFilters={}; nvChon=null;
     try{const c=await api(`/api/van-ban/${current}/chuc-danh`);nvChucDanh=c.chuc_danh||[]}catch(e){nvChucDanh=[]}
     veGridNhanVien();
@@ -4834,6 +4861,19 @@ function nvThemCotDoiLuong(){
   vt=vt>=0?vt+1:nvHeader.length;
   nvHeader.splice(vt,0,NV_COT_DOI_LUONG);
   nvRows.forEach(r=>{while(r.length<nvHeader.length-1)r.push('');r.splice(vt,0,'')});
+  nvFilters={};
+}
+// Cột "Thử việc từ"/"Thử việc đến" (hợp đồng thử việc RIÊNG của người đang thử việc thật): trong thời gian đó Bảng Lương không đóng BHXH (dưới 3 tháng: khấu trừ 10% thuế TNCN), BHXH tự bắt đầu từ ngày sau khi hết thử việc.
+function nvThemCotThuViec(){
+  const co=t=>nvHeader.some(x=>String(x).trim().toLowerCase()===t.toLowerCase());
+  ['Thử việc từ','Thử việc đến'].forEach(t=>{
+    if(co(t))return;
+    let vt=nvHeader.findIndex(x=>String(x).trim().toLowerCase()===(t==='Thử việc từ'?'tháng/năm thay đổi lương':'thử việc từ'));
+    if(vt<0)vt=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='lương cơ bản')-1;
+    vt=vt>=0?vt+1:nvHeader.length;
+    nvHeader.splice(vt,0,t);
+    nvRows.forEach(r=>{while(r.length<nvHeader.length-1)r.push('');r.splice(vt,0,'')});
+  });
   nvFilters={};
 }
 function nvMaGoc(ma){const m=String(ma==null?'':ma).trim().match(/^(.+)-(\d{3})$/);return m?m[1]:String(ma==null?'':ma).trim()}
@@ -5332,6 +5372,8 @@ function blVeInfo(){
   if(canhBao)t+=` — ⚠ ${canhBao} người không đóng BHXH nhưng không lương dưới 14 ngày làm việc (theo luật phải đóng)`;
   const thoiVu=blThang==='nam'?0:(blDL[blThang]||[]).filter(r=>r.thoi_vu).length;
   if(thoiVu)t+=` — ${thoiVu} người không lương từ 14 ngày làm việc trở lên, không BHXH (khấu trừ 10% thuế TNCN)`;
+  const thuViec=blThang==='nam'?0:(blDL[blThang]||[]).filter(r=>r.thu_viec).length;
+  if(thuViec)t+=` — ${thuViec} người đang thử việc (hợp đồng thử việc riêng, không BHXH)`;
   if(info.dataset.capnhat)t+=` — đã lưu lúc ${info.dataset.capnhat}`;
   if(blBan)t+=' — ⚠ có thay đổi CHƯA LƯU';
   info.textContent=t;

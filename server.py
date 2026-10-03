@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.069"
+APP_BUILD = "2026-10-03.070"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10078,7 +10078,7 @@ _LUONG_THAM_SO_MAC_DINH = {
 }
 _LUONG_CAC_TRUONG_NHAP = (
     "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
-    "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "thue_tay", "ghi_chu")
+    "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "thu_viec", "thue_tay", "ghi_chu")
 # Thuế TNCN theo Luật Thuế thu nhập cá nhân 2025 (áp dụng cho kỳ tính thuế từ 1/1/2026): giảm trừ bản thân 15.500.000, mỗi người
 # phụ thuộc 6.200.000 và biểu lũy tiến từng phần 5 bậc (đến 10tr 5%, đến 30tr 10%, đến 60tr 20%, đến 100tr 30%,
 # trên 100tr 35%). Khi tính lương từ tháng 1/2026 phần mềm tự áp dụng bộ này; năm 2025 trở về trước vẫn tính theo
@@ -10365,7 +10365,9 @@ def _luong_tinh_dong(r, ts, thang=None):
     tt = _luong_thue_ap_dung(ts, thang)      # từ 1/1/2026 tự dùng giảm trừ + biểu thuế mới
     # Theo luật BHXH: KHÔNG LƯƠNG từ 14 ngày làm việc trở lên trong tháng (công chuẩn - ngày làm >= 14) thì KHÔNG đóng BHXH; người không đóng BHXH này (thời vụ) bị KHẤU
     # TRỪ 10% thuế TNCN trên thu nhập chịu thuế (không giảm trừ gia cảnh) khi khoản chi trả >= ngưỡng.
-    thoi_vu = (not d["dong_bh"]) and _luong_mien_bh_ngay(e, g)
+    # Thử việc theo HĐ THỬ VIỆC RIÊNG: không thuộc diện BHXH bắt buộc; dưới 3 tháng (thu_viec=1) -> khấu trừ 10% như người không/ký hợp đồng dưới 3 tháng;
+    # từ 3 tháng (thu_viec=2) -> tính lũy tiến như lao động thường.
+    thoi_vu = (not d["dong_bh"]) and (_luong_mien_bh_ngay(e, g) or d["thu_viec"] == 1)
     if thoi_vu:
         gt_npt = gt_ban_than = 0.0
         tn_tinh_thue = tong_chiu_thue
@@ -10394,7 +10396,7 @@ def _luong_tinh_dong(r, ts, thang=None):
         "giam_tru_ban_than": gt_ban_than, "tien_giam_tru_npt": gt_npt,
         "tn_tinh_thue": tn_tinh_thue, "thue_tncn": thue, "thue_tru_luong": thue_tru, "thue_da_chinh": thue_da_chinh,
         "thoi_vu": thoi_vu,                                           # không đóng BHXH + làm < 14 ngày: khấu trừ 10%
-        "canh_bao_bh": (not d["dong_bh"]) and not _luong_mien_bh_ngay(e, g),   # không lương < 14 ngày làm việc mà không đóng BHXH
+        "canh_bao_bh": (not d["dong_bh"]) and not d["thu_viec"] and not _luong_mien_bh_ngay(e, g),   # không lương < 14 ngày làm việc mà không đóng BHXH
     })
     kq["ngay_cong_hd"] = e      # giá trị đang dùng để tính (ô nhập giữ nguyên: 0/trống = theo lịch tháng)
     kq["ngay_lam_hd"] = g
@@ -10669,6 +10671,29 @@ def _luong_dong_bh_tu_nv(tick, vao_lam, nam=None, thang=None, nghi_viec=None):
     return 1
 
 
+def _luong_thu_viec_khoang(tu, den):
+    """Khoảng thời gian thử việc (HĐ thử việc riêng) từ 2 ô 'Thử việc từ'/'Thử việc đến' (dd/mm/yyyy hoặc mm/yyyy) -> (date|None, date|None).
+    Chỉ ghi tháng/năm: 'từ' = ngày 1, 'đến' = ngày cuối tháng. Không có ngày kết thúc -> (None, None) (chưa xác định thì không áp dụng)."""
+    def doc(v, cuoi):
+        k = _luong_doc_ngay_thang(v)
+        if not k:
+            return None
+        y, m, d = k
+        if cuoi and _luong_ngay_cu_the(v) is None:
+            d = calendar.monthrange(y, m)[1]
+        try:
+            return datetime.date(y, m, min(d, calendar.monthrange(y, m)[1]))
+        except ValueError:
+            return None
+    den_d = doc(den, True)
+    return (doc(tu, False) if den_d else None), den_d
+
+
+def _luong_cong_thang(d, n):
+    y, m = d.year + (d.month - 1 + n) // 12, (d.month - 1 + n) % 12 + 1
+    return datetime.date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+
+
 def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=None, npt=None):
     """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định + có đóng BHXH không).
     Đóng BHXH = ô tick "Đóng BHXH" trong danh sách VÀ đã tới tháng "Tháng/Năm vào làm" (bắt đầu đóng). Danh sách cũ
@@ -10694,8 +10719,23 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
         if nghi and nam and thang and (int(nam), int(thang)) > nghi:      # đã nghỉ việc từ tháng trước -> không lên bảng lương tháng này
             continue
         tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
+        # Thử việc theo HĐ thử việc riêng (cột "Thử việc từ"/"Thử việc đến"): không đóng BHXH trong thời gian thử việc; BHXH bắt đầu từ NGÀY SAU khi hết thử việc
+        # (cùng quy tắc ngày vào làm). Tháng nào giao với thời gian thử việc và không đóng BHXH -> thu_viec (1: dưới 3 tháng, 2: từ 3 tháng).
+        vao_lam = lay(r, "Tháng/Năm vào làm")
+        tv_tu, tv_den = _luong_thu_viec_khoang(lay(r, "Thử việc từ"), lay(r, "Thử việc đến"))
+        if tv_den:
+            sau = tv_den + datetime.timedelta(days=1)
+            vl = _luong_doc_ngay_thang(vao_lam)
+            if not vl or (sau.year, sau.month, sau.day) > vl:
+                vao_lam = sau.strftime("%d/%m/%Y")
+        dong_bh = _luong_dong_bh_tu_nv(tick, vao_lam, nam, thang, lay(r, "Tháng/Năm nghỉ việc"))
+        thu_viec = 0
+        if tv_den and nam and thang and not dong_bh:
+            dau_t, cuoi_t = datetime.date(int(nam), int(thang), 1), datetime.date(int(nam), int(thang), calendar.monthrange(int(nam), int(thang))[1])
+            if (tv_tu or dau_t) <= cuoi_t and tv_den >= dau_t:
+                thu_viec = 1 if tv_den < _luong_cong_thang(tv_tu or dau_t, 3) else 2
         kq.append(_luong_chuan_dong_nhap({
-            "dong_bh": _luong_dong_bh_tu_nv(tick, lay(r, "Tháng/Năm vào làm"), nam, thang, lay(r, "Tháng/Năm nghỉ việc")),
+            "dong_bh": dong_bh, "thu_viec": thu_viec,
             "ma": lay(r, "Mã NV"), "ten": ten, "chuc_vu": lay(r, "Chức vụ"),
             "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,   # 0 = theo công chuẩn (lịch) của tháng
             "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
@@ -13284,7 +13324,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     """Dựng văn bản (HTML để xem/sửa/in): loai = hd (hợp đồng lao động, từ STT `tu` đến `den`) | qc (quy chế lương) | tl (thang bảng lương)."""
     body = await request.json()
     loai = body.get("loai")
-    if loai not in ("hd", "qc", "tl"):
+    if loai not in ("hd", "qc", "tl", "tv"):
         raise HTTPException(400, "Loại văn bản không hợp lệ")
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
     cty, nv, ts = _vb_du_lieu(cid, nam, loai in ("qc", "tl"))
@@ -13295,7 +13335,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     tc.update({k: v for k, v in (body.get("tuy_chon") or {}).items() if v is not None})
     cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, tc), _LUONG_TRAN_PC_KHONG_THUE)
     chu_ky = _vb_chu_ky_dict(cid) if tc.get("gan_chu_ky", True) else {}          # chỉ chữ ký đã xác nhận đồng ý
-    if loai == "hd":
+    if loai in ("hd", "tv"):
         try:
             tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv))
         except Exception:
@@ -13306,9 +13346,14 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         if not chon:
             raise HTTPException(400, "Khoảng nhân viên đã chọn không có ai")
         ten = [n["ten"] for n in chon]
-        html = vbld.dung_hop_dong_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
+        if loai == "tv":      # hợp đồng thử việc RIÊNG (Điều 24-27 BLLĐ 2019): ngày thử việc lấy từ Danh Sách Nhân Viên hoặc ô trên màn hình
+            html = vbld.dung_hop_dong_thu_viec_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
+        else:
+            html = vbld.dung_hop_dong_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
         so = len(chon)
         cb = [c for c in cb if any(c["nd"].startswith(t + ":") for t in ten) or ":" not in c["nd"][:60]]
+        if loai == "tv":
+            cb = vbld.kiem_tra_thu_viec(chon, vbld.gop_tuy_chon(cty, tc)) + [c for c in cb if "BHXH" not in c["nd"] or ":" not in c["nd"][:60]]
     elif loai == "qc":
         html, so = vbld.dung_quy_che(nv, cty, tc, ts, nam, chu_ky=chu_ky), 1
     else:
@@ -14232,7 +14277,7 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
 
 NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
-              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Tháng/Năm thay đổi lương", "Lương Cơ bản",
+              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Tháng/Năm thay đổi lương", "Thử việc từ", "Thử việc đến", "Lương Cơ bản",
               "PC Tiền cơm", "PC Xăng xe", "PC Điện thoại", "PC Trang phục"]
 
 # Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
@@ -14241,6 +14286,8 @@ NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hi�
 _NV_TU_KHOA = [
     ("Đóng BHXH", ["dong bhxh", "tham gia bhxh", "co dong bhxh", "dong bao hiem"]),
     ("Tháng/Năm thay đổi lương", ["thay doi luong", "dieu chinh luong", "ap dung luong moi"]),
+    ("Thử việc từ", ["thu viec tu", "bat dau thu viec", "ngay bat dau thu viec"]),
+    ("Thử việc đến", ["thu viec den", "ket thuc thu viec", "ngay ket thuc thu viec"]),
     ("PC Tiền cơm", ["tien com", "phu cap com", "pc com"]),
     ("PC Xăng xe", ["xang xe", "phu cap xang", "pc xang"]),
     ("", ["phu cap chuc vu", "pc chuc vu"]),        # nuốt cột phụ cấp chức vụ của file nguồn (không đưa vào danh sách)

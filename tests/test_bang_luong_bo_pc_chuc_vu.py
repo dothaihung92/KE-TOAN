@@ -41,7 +41,7 @@ finally:
 print("PASS 3: Excel không còn cột PC Chức vụ, đọc lại bình thường.")
 # 4: Danh Sách Nhân Viên: bộ cột chuẩn không còn PC Chức vụ; import file có cột "Phụ cấp chức vụ" thì bỏ cột đó và KHÔNG làm sai cột Chức vụ
 import asyncio, io
-assert "PC Chức vụ" not in server.NV_HEADERS and len(server.NV_HEADERS) == 17 and "Tháng/Năm nghỉ việc" in server.NV_HEADERS and "Tháng/Năm thay đổi lương" in server.NV_HEADERS
+assert "PC Chức vụ" not in server.NV_HEADERS and len(server.NV_HEADERS) == 19 and "Tháng/Năm nghỉ việc" in server.NV_HEADERS and "Tháng/Năm thay đổi lương" in server.NV_HEADERS
 wb = openpyxl.Workbook()
 w = wb.active
 for pos, dong in enumerate([["Mã NV", "Họ và tên", "Phụ cấp chức vụ", "Chức vụ", "Lương cơ bản", "Tiền cơm", "Xăng xe", "Điện thoại", "Trang phục"],

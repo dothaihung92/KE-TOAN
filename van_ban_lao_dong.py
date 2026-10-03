@@ -254,7 +254,8 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "so_qd": f"01/QĐ-{hom_nay.year}", "kem_phu_luc": False,
         "phuc_loi": {k: {"bat": v[1], "m1": v[2], "m2": v[3]} for k, v in PHUC_LOI_MAC_DINH.items()},
         # thang bảng lương
-        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "gan_chu_ky": True, "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
+        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "gan_chu_ky": True,
+        "tv_tu": "", "tv_den": "", "tv_phan_tram": 85, "tv_cong_viec": "", "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
     }
 
 
@@ -265,7 +266,7 @@ def gop_tuy_chon(cty, tuy_chon, hom_nay=None):
             for kk, vv in v.items():
                 if kk in kq["phuc_loi"] and isinstance(vv, dict):
                     kq["phuc_loi"][kk].update(vv)
-        elif v is not None and (v != "" or k in ("bat_dau", "ngay_ky", "bo_phan", "cong_viec", "ong_ba_ky", "dien_thoai", "nhom_tuy_chinh")):
+        elif v is not None and (v != "" or k in ("bat_dau", "ngay_ky", "bo_phan", "cong_viec", "ong_ba_ky", "dien_thoai", "nhom_tuy_chinh", "tv_tu", "tv_den", "tv_cong_viec")):
             kq[k] = v
     return kq
 
@@ -275,6 +276,7 @@ _COT_NV = {  # khoá -> các tên cột (không dấu, thường) của Danh Sá
     "ma": ["ma nv"], "ten": ["ho va ten"], "ngay_sinh": ["ngay sinh"], "dia_chi": ["dia chi hien dang cu tru", "dia chi"],
     "cccd": ["cccd"], "ngay_cap": ["ngay cap"], "vao_lam": ["thang/nam vao lam"], "dong_bh": ["dong bhxh"],
     "nghi_viec": ["thang/nam nghi viec"], "chuc_vu": ["chuc vu"], "luong_cb": ["luong co ban"],
+    "thu_viec_tu": ["thu viec tu"], "thu_viec_den": ["thu viec den"],
     "tien_com": ["pc tien com"], "xang_xe": ["pc xang xe"], "dien_thoai": ["pc dien thoai"], "trang_phuc": ["pc trang phuc"],
 }
 
@@ -393,6 +395,7 @@ def gop_nhan_vien(nv_header, nv_rows, bang_luong_theo_thang=None, nam=None):
         nv = {"ma": ma, "ten": ten, "ngay_sinh": hien_ngay_nv(lay(r, "ngay_sinh")), "dia_chi": str(lay(r, "dia_chi") or "").strip(),
               "cccd": re.sub(r"\s+", "", str(lay(r, "cccd") or "")), "ngay_cap": hien_ngay_nv(lay(r, "ngay_cap")),
               "vao_lam": str(lay(r, "vao_lam") or "").strip(), "nghi_viec": str(lay(r, "nghi_viec") or "").strip(),
+              "thu_viec_tu": hien_ngay_nv(lay(r, "thu_viec_tu")), "thu_viec_den": hien_ngay_nv(lay(r, "thu_viec_den")),
               "dong_bh": _tick(lay(r, "dong_bh")) if co_cot_tick else True,
               "chuc_vu": str(lay(r, "chuc_vu") or "").strip(), "luong_cb": _so(lay(r, "luong_cb")),
               "tien_com": _so(lay(r, "tien_com")), "xang_xe": _so(lay(r, "xang_xe")), "dien_thoai": _so(lay(r, "dien_thoai")),
@@ -429,7 +432,7 @@ def gop_nhan_vien(nv_header, nv_rows, bang_luong_theo_thang=None, nam=None):
             thay[_chuan(ten)] = dict(r, _thang=t)
     for r in thay.values():
         kq.append({"ma": str(r.get("ma") or "").strip(), "ten": str(r.get("ten")).strip(), "ngay_sinh": "", "dia_chi": "", "cccd": "",
-                   "ngay_cap": "", "vao_lam": "", "nghi_viec": "", "dong_bh": bool(r.get("dong_bh")), "gioi_tinh": "",
+                   "ngay_cap": "", "vao_lam": "", "nghi_viec": "", "thu_viec_tu": "", "thu_viec_den": "", "dong_bh": bool(r.get("dong_bh")), "gioi_tinh": "",
                    "chuc_vu": str(r.get("chuc_vu") or "").strip(), "luong_cb": _so(r.get("luong_cb")), "tien_com": _so(r.get("tien_com")),
                    "xang_xe": _so(r.get("muc_xang")), "dien_thoai": _so(r.get("muc_dt")), "trang_phuc": _so(r.get("trang_phuc")),
                    "di_lai": _so(r.get("di_lai")), "nguon": f"Bảng lương tháng {int(r['_thang'])} (chưa có trong Danh sách NV)",
@@ -799,6 +802,125 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None, chu_ky=N
 
 def dung_hop_dong_nhieu(ds_nv, cty, tuy_chon, hom_nay=None, nam=None, chu_ky=None):
     return "".join(dung_hop_dong(nv, cty, tuy_chon, i, hom_nay, nam, chu_ky) for i, nv in enumerate(ds_nv))
+
+
+
+# ============================================================ HỢP ĐỒNG THỬ VIỆC (riêng) — Điều 24 đến Điều 27 Bộ luật Lao động 2019
+_CONG_VIEC_KHAC = ("bao ve", "tap vu", "lao cong", "phuc vu", "giup viec", "dong goi", "boc xep", "ve sinh")      # thường là "công việc khác" (tối đa 06 ngày làm việc)
+
+
+def khoang_thu_viec(nv, tc):
+    """(từ, đến) ngày thử việc: ưu tiên ô 'Thử việc từ/đến' của người đó trong Danh Sách NV, không có thì lấy ô trên form. (None, None) nếu thiếu."""
+    tu = ngay_date(nv.get("thu_viec_tu")) or ngay_date(tc.get("tv_tu"))
+    den_k = doc_ngay(nv.get("thu_viec_den")) or doc_ngay(tc.get("tv_den"))
+    den = None
+    if den_k:
+        import calendar
+        d = den_k[2] or calendar.monthrange(den_k[0], den_k[1])[1]
+        den = datetime.date(den_k[0], den_k[1], d)
+    return tu, den
+
+
+def kiem_tra_thu_viec(ds_nv, tuy_chon):
+    """Cảnh báo khi lập hợp đồng thử việc: thời gian tối đa theo Điều 25, lương thử việc >= 85% (Điều 26), thiếu ngày."""
+    tc = tuy_chon or {}
+    kq = []
+    try:
+        pt = float(tc.get("tv_phan_tram") or 85)
+    except Exception:
+        pt = 85.0
+    if pt < 85:
+        kq.append({"muc": "loi", "nd": f"Lương thử việc {pt:g}% thấp hơn 85% mức lương chính thức — trái Điều 26 Bộ luật Lao động 2019."})
+    for nv in ds_nv:
+        tu, den = khoang_thu_viec(nv, tc)
+        t = nv["ten"]
+        if not tu or not den:
+            kq.append({"muc": "loi", "nd": f"{t}: chưa có ngày bắt đầu/kết thúc thử việc (nhập cột 'Thử việc từ/đến' ở Danh Sách Nhân Viên hoặc ô trên màn hình)."})
+            continue
+        if den < tu:
+            kq.append({"muc": "loi", "nd": f"{t}: ngày kết thúc thử việc trước ngày bắt đầu."})
+            continue
+        so_ngay = (den - tu).days + 1
+        cv = _chuan(nv.get("chuc_vu"))
+        if so_ngay > 180:
+            kq.append({"muc": "loi", "nd": f"{t}: thử việc {so_ngay} ngày vượt tối đa 180 ngày (Điều 25 BLLĐ 2019, kể cả người quản lý doanh nghiệp)."})
+        elif so_ngay > 6 and any(k in cv for k in _CONG_VIEC_KHAC):
+            kq.append({"muc": "canh_bao", "nd": f"{t} ({nv.get('chuc_vu')}): công việc không đòi hỏi trình độ chuyên môn thường thuộc nhóm 'công việc khác' — thử việc tối đa 06 ngày làm việc, hiện ghi {so_ngay} ngày."})
+        elif so_ngay > 60:
+            kq.append({"muc": "canh_bao", "nd": f"{t}: thử việc {so_ngay} ngày — chỉ hợp lệ với công việc của người quản lý doanh nghiệp (tối đa 180 ngày); công việc cần trình độ cao đẳng trở lên tối đa 60 ngày."})
+        elif so_ngay > 30:
+            kq.append({"muc": "canh_bao", "nd": f"{t}: thử việc {so_ngay} ngày — chỉ hợp lệ với công việc cần trình độ cao đẳng trở lên (tối đa 60 ngày); trung cấp/công nhân kỹ thuật/nhân viên nghiệp vụ tối đa 30 ngày."})
+    return kq
+
+
+def dung_hop_dong_thu_viec(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None, chu_ky=None):
+    """HTML 1 HỢP ĐỒNG THỬ VIỆC (riêng) — không thuộc diện BHXH bắt buộc trong thời gian thử việc; lương thử việc >= 85% lương chính thức."""
+    tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
+    hom_nay = hom_nay or datetime.date.today()
+    tu, den = khoang_thu_viec(nv, tc)
+    tu = tu or ngay_date(tc.get("ngay_ky")) or hom_nay
+    so_ngay = ((den - tu).days + 1) if den else 0
+    ngay_ky = ngay_date(tc.get("ngay_ky")) or tu
+    try:
+        pt = float(tc.get("tv_phan_tram") or 85)
+    except Exception:
+        pt = 85.0
+    luong_cb = float(nv.get("luong_cb") or 0)
+    luong_tv = round(luong_cb * pt / 100.0)
+    so_hd = f"{int(tc.get('so_bat_dau') or 1) + so_thu_tu:02d}/HĐTV-{ngay_ky.year}"
+    gan = bool(tc.get("gan_chu_ky", True)) and bool(chu_ky)
+    anh_nld = (chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or "") if gan else ""
+    anh_gd = (chu_ky.get("giam_doc") or "") if gan else ""
+    ong_ba_ky = tc.get("ong_ba_ky") or "Ông/Bà"
+    ong_ba = {"Nam": "Ông", "Nữ": "Bà"}.get(nv.get("gioi_tinh"), "Ông/Bà")
+    cv = (tc.get("tv_cong_viec") or "").strip() or f"Thực hiện các nhiệm vụ của chức danh {nv.get('chuc_vu') or '.........'} theo phân công, hướng dẫn của Người sử dụng lao động"
+    cccd = nv.get("cccd") or ""
+    noi_cap = tc.get("noi_cap_cccd") if len(re.sub(r"\D", "", cccd)) == 12 else "........................"
+    h = ['<section class="vb-trang">', _tieu_ngu(cty, so_hd, tc.get("dia_danh"), ngay_ky), _p("&nbsp;"), _p("<b>HỢP ĐỒNG THỬ VIỆC</b>", "c b"),
+         _p("Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20/11/2019 (Điều 24 đến Điều 27) và Nghị định số 145/2020/NĐ-CP ngày 14/12/2020 của Chính phủ;", "j ti"),
+         _p("Hôm nay, " + esc(ngay_chu(ngay_ky)) + f", tại {esc(tc.get('dia_diem') or cty.get('dia_chi') or '..........')}, chúng tôi gồm:", "j ti"),
+         _p("<b>Người sử dụng lao động</b> (sau đây gọi là Công ty):"),
+         _p(f"{esc(ong_ba_ky)}: <b>{esc((tc.get('nguoi_ky') or '').upper())}</b>&nbsp;&nbsp;&nbsp;Quốc tịch: Việt Nam", "l1"),
+         _p(f"Chức vụ: {esc(tc.get('chuc_danh_ky') or 'Giám đốc')}", "l1"),
+         _p(f"Đại diện cho: <b>{esc((cty.get('ten') or '').upper())}</b>" + (f" — Mã số thuế: {esc(cty['mst'])}" if cty.get("mst") else ""), "l1"),
+         _p(f"Địa chỉ: {esc(cty.get('dia_chi') or '')}", "l1"),
+         _p("<b>Người lao động thử việc</b> (sau đây gọi là Người thử việc):"),
+         _p(f"{esc(ong_ba)}: <b>{esc(nv['ten'].upper())}</b>&nbsp;&nbsp;&nbsp;Quốc tịch: {esc(tc.get('quoc_tich') or 'Việt Nam')}", "l1"),
+         _p(f"Sinh ngày: {esc(nv.get('ngay_sinh') or '..../..../........')}" + (f"&nbsp;&nbsp;&nbsp;Giới tính: {esc(nv['gioi_tinh'])}" if nv.get("gioi_tinh") else ""), "l1"),
+         _p(f"Nơi cư trú: {esc(nv.get('dia_chi') or '..............................')}", "l1"),
+         _p(f"Số CCCD/CMND: {esc(nv.get('cccd') or '............')}, cấp ngày: {esc(nv.get('ngay_cap') or '..../..../........')}, nơi cấp: {esc(noi_cap)}", "l1"),
+         _p("Hai bên thỏa thuận ký kết hợp đồng thử việc và cam kết thực hiện đúng những điều khoản sau đây:", "j ti"),
+         _p("<b>Điều 1. Công việc, địa điểm và thời gian thử việc</b>"),
+         _p(f"1. Chức danh, công việc thử việc: {esc(nv.get('chuc_vu') or '..........')} — {esc(cv)}.", "j"),
+         _p(f"2. Địa điểm làm việc: {esc(tc.get('dia_diem') or cty.get('dia_chi') or '')}.", "j"),
+         _p(f"3. Thời gian thử việc: {so_ngay if so_ngay else '.....'} ngày, từ {esc(ngay_chu(tu))} đến hết {esc(ngay_chu(den)) if den else 'ngày ..... tháng ..... năm ........'}.", "j"),
+         _p("4. Người thử việc chỉ thử việc một lần đối với một công việc theo Điều 25 Bộ luật Lao động năm 2019.", "j"),
+         _p("<b>Điều 2. Tiền lương và chế độ trong thời gian thử việc</b>"),
+         _p(f"1. Tiền lương thử việc: <b>{so_tien(luong_tv)} đồng/tháng</b> (bằng chữ: {esc(doc_so_thanh_chu(luong_tv))}), bằng {pt:g}% mức lương chính thức của công việc "
+            f"({so_tien(luong_cb)} đồng/tháng), không thấp hơn 85% mức lương của công việc đó (Điều 26 Bộ luật Lao động năm 2019). Tiền lương được tính theo số ngày công thực tế đi làm.", "j"),
+         _p(f"2. Hình thức trả lương: {esc(tc.get('hinh_thuc_tra') or 'chuyển khoản')}; trả vào ngày {int(_so(tc.get('ngay_tra')) or 5):02d} của tháng sau hoặc ngay khi kết thúc thử việc.", "j"),
+         _p("3. Thời giờ làm việc, thời giờ nghỉ ngơi, an toàn lao động: theo quy định của pháp luật và nội quy lao động của Công ty.", "j"),
+         _p("4. Hợp đồng thử việc này là hợp đồng riêng; trong thời gian thử việc Người thử việc không thuộc đối tượng tham gia bảo hiểm xã hội bắt buộc. Thuế thu nhập cá nhân được khấu trừ theo quy định của pháp luật về thuế đối với người thử việc.", "j"),
+         _p("<b>Điều 3. Quyền và nghĩa vụ của Người thử việc</b>"),
+         _p("1. Được hưởng tiền lương thử việc, được cung cấp thông tin, điều kiện làm việc, bảo hộ lao động (nếu có) theo yêu cầu công việc.", "j"),
+         _p("2. Thực hiện công việc được giao, chấp hành nội quy lao động, quy chế của Công ty; bảo mật thông tin kinh doanh.", "j"),
+         _p("3. Trong thời gian thử việc, mỗi bên có quyền hủy bỏ thỏa thuận thử việc mà không cần báo trước và không phải bồi thường nếu việc làm thử không đạt yêu cầu (Điều 27 Bộ luật Lao động năm 2019).", "j"),
+         _p("<b>Điều 4. Quyền và nghĩa vụ của Người sử dụng lao động</b>"),
+         _p("1. Hướng dẫn, kiểm tra, đánh giá kết quả công việc thử việc; trả lương đầy đủ, đúng hạn cho Người thử việc.", "j"),
+         _p("2. Kết thúc thời gian thử việc, thông báo kết quả cho Người thử việc.", "j"),
+         _p("<b>Điều 5. Kết thúc thử việc</b>"),
+         _p("1. Khi kết thúc thời gian thử việc, nếu việc làm thử đạt yêu cầu thì Công ty giao kết hợp đồng lao động với Người thử việc; từ thời điểm hợp đồng lao động có hiệu lực, hai bên thực hiện đóng bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp theo quy định.", "j"),
+         _p("2. Nếu việc làm thử không đạt yêu cầu thì hợp đồng thử việc chấm dứt, hai bên không có nghĩa vụ bồi thường.", "j"),
+         _p("<b>Điều 6. Điều khoản thi hành</b>"),
+         _p(f"Hợp đồng thử việc được làm thành 02 bản có giá trị pháp lý như nhau, mỗi bên giữ 01 bản và có hiệu lực kể từ {esc(ngay_chu(tu))}.", "j"),
+         _p("&nbsp;"),
+         _bang_ky("NGƯỜI THỬ VIỆC", "(Ký, ghi rõ họ tên)", nv["ten"], "NGƯỜI SỬ DỤNG LAO ĐỘNG", f"({tc.get('chuc_danh_ky') or 'Giám đốc'} — Ký, ghi rõ họ tên, đóng dấu)", tc.get("nguoi_ky") or "", anh_nld, anh_gd),
+         "</section>"]
+    return "".join(h)
+
+
+def dung_hop_dong_thu_viec_nhieu(ds_nv, cty, tuy_chon, hom_nay=None, nam=None, chu_ky=None):
+    return "".join(dung_hop_dong_thu_viec(nv, cty, tuy_chon, i, hom_nay, nam, chu_ky) for i, nv in enumerate(ds_nv))
 
 
 def _khoang(giatri):

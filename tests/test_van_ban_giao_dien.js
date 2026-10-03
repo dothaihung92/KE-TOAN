@@ -5,7 +5,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'static', 'index.html'),
 // 1: 3 ô mới nằm cạnh Danh Sách Nhân Viên / Người Phụ Thuộc / Bảng Lương
 const iMo = html.indexOf('function moBangLuong(){');
 const thanMo = html.slice(iMo, html.indexOf('function moVanBan', iMo));
-for (const [loai, ten] of [['hd', 'Hợp Đồng Lao Động'], ['qc', 'Quy Chế Lương'], ['tl', 'Thang Bảng Lương']])
+for (const [loai, ten] of [['hd', 'Hợp Đồng Lao Động'], ['tv', 'Hợp Đồng Thử Việc'], ['qc', 'Quy Chế Lương'], ['tl', 'Thang Bảng Lương']])
   assert(thanMo.includes(`onclick="moVanBan('${loai}')"`) && thanMo.includes(ten), 'thiếu ô ' + ten);
 assert(thanMo.includes('moDanhSachNhanVien()') && thanMo.includes('moNguoiPhuThuoc()') && thanMo.includes('moBangLuongNam()'));
 console.log('PASS 1: 3 ô mới có trong Bảng Lương - BHXH.');
@@ -119,20 +119,20 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   vm.createContext(ctx); vm.runInContext(src, ctx);
   const ex = (c) => vm.runInContext(c, ctx);
   assert(a0 > 0 && a1 > a0);
-  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(NV_HEADERS.slice(10,13))')), ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Lương Cơ bản'], 'cột mới nằm ngay sau Chức vụ');
+  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(NV_HEADERS.slice(10,14))')), ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến'], 'cột mới nằm ngay sau Chức vụ');
   // danh sách cũ chưa có cột -> tự thêm cột trống đúng vị trí
-  ex(`nvHeader = NV_HEADERS.filter(h => h !== 'Tháng/Năm thay đổi lương'); nvRows = [['1','2','Hùng','','','','','12/2024','x','','KD','5.310.000','700.000','0','0','0']]; nvThemCotDoiLuong();`);
-  assert.strictEqual(ex('nvHeader.indexOf("Tháng/Năm thay đổi lương")'), 11);
+  ex(`nvHeader = NV_HEADERS.filter(h => !['Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến'].includes(h)); nvRows = [['1','2','Hùng','','','','','12/2024','x','','KD','5.310.000','700.000','0','0','0']]; nvThemCotDoiLuong(); nvThemCotThuViec();`);
+  assert.strictEqual(ex('nvHeader.indexOf("Tháng/Năm thay đổi lương")'), 11); assert.strictEqual(ex('nvHeader.indexOf("Thử việc đến")'), 13);
   assert.strictEqual(ex('nvRows[0].length'), ex('nvHeader.length'));
-  assert.strictEqual(ex('nvRows[0][12]'), '5.310.000');
-  ex(`nvThemCotDoiLuong(); nvChucDanh = [];`);
-  assert.strictEqual(ex('nvHeader.length'), 17, 'không thêm cột lần 2');
+  assert.strictEqual(ex('nvRows[0][14]'), '5.310.000', 'dữ liệu các cột sau không bị lệch');
+  ex(`nvThemCotDoiLuong(); nvThemCotThuViec(); nvChucDanh = [];`);
+  assert.strictEqual(ex('nvHeader.length'), 19, 'không thêm cột lần 2');
   // ＋ ở dòng 0 -> thêm dòng mã 2-001 ngay dưới, xoá tháng thay đổi + nghỉ việc, giữ lương cũ để sửa
   ex(`nvRows[0][9] = '06/2026'; nvRows.push(['2','3','Nam','','','','','12/2024','x','','KD','','5.310.000','0','0','0','0']); nvThemPhienBan(0)`);
   assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['2', '2-001', '3']);
   assert.strictEqual(ex('nvRows[1][9]'), '', 'dòng mới: chưa có tháng nghỉ việc');
   assert.strictEqual(ex('nvRows[1][11]'), '', 'dòng mới: chờ nhập Tháng/Năm thay đổi lương');
-  assert.strictEqual(ex('nvRows[1][12]'), '5.310.000', 'dòng mới sao chép lương cũ để sửa');
+  assert.strictEqual(ex('nvRows[1][14]'), '5.310.000', 'dòng mới sao chép lương cũ để sửa');
   assert.strictEqual(ex('nvRows[0][0]'), 1); assert.strictEqual(ex('nvRows[2][0]'), 3, 'STT đánh lại');
   // ＋ lần nữa (từ dòng gốc hoặc từ dòng -001) -> -002, xếp sau -001, trước người khác
   ex('nvThemPhienBan(1)');
