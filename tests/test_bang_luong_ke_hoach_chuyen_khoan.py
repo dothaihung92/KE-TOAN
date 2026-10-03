@@ -231,7 +231,7 @@ for full in (False, True):
         e_ = ck_rows[0]["ngay_cong_hd"]
         assert any(r["ngay_lam_hd"] < e_ for r in ck_rows), f"T{t}: phải giảm ngày công của người chuyển khoản"
         for r in ck_rows:
-            assert r["ngay_lam_hd"] >= 14, "vẫn đủ 14 ngày để đóng BHXH"
+            assert r["ngay_cong_hd"] - r["ngay_lam_hd"] < 14, "không lương dưới 14 ngày làm việc -> vẫn đóng BHXH"
             assert abs(r["luong"] - r["luong_cb"] / e_ * r["ngay_lam_hd"]) < 1 and abs(r["xang_xe"] - r["muc_xang"] / e_ * r["ngay_lam_hd"]) < 1, \
                 "lương cb và phụ cấp giảm đúng theo ngày làm (không chỉnh phụ cấp tùy ý)"
             assert r["thuong_bh"] < 1_500_000 and r["tang_ca"] <= 40 * r["luong_cb"] / e_ / 8 * 1.5 + 1, "phần lẻ bù bằng tăng ca (<= 40 giờ) / thưởng nhỏ"

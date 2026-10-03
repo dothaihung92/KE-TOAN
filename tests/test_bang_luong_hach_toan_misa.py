@@ -24,7 +24,7 @@ def bang_luong(thang, n=3, **kw):
     for i in range(n):
         d = dict(base, ma=str(i), ten=f"NV{i}", ghi_chu="CK" if i % 2 == 0 else "", **kw)
         if i == 2:
-            d.update(dong_bh=0, ngay_lam=13, thuong_bh=1_000_000)
+            d.update(dong_bh=0, ngay_lam=5, thuong_bh=1_000_000)
         rows.append(server._luong_tinh_dong(d, TS, thang))
     return rows
 

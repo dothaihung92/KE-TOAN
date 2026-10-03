@@ -66,7 +66,7 @@ kiem_tra_tong(th, 16_000_000)
 assert tom["day_du"] == 0 and tom["thoi_vu"] >= 2 and tom["tong_thue"] == 0, tom     # nhiều người làm ít ngày để cùng dưới ngưỡng thuế
 for rows in th.values():
     for r in rows:
-        assert r["dong_bh"] == 0 and r["ngay_lam_hd"] < 14 and r["bhxh_nld"] == 0 and r["bhxh_dn"] == 0, r["ngay_lam_hd"]
+        assert r["dong_bh"] == 0 and r["ngay_cong_hd"] - r["ngay_lam_hd"] >= 14 and r["bhxh_nld"] == 0 and r["bhxh_dn"] == 0, r["ngay_lam_hd"]
         assert r["thoi_vu"] is True
         if r["tn_chiu_thue"] >= 2_000_000:
             assert r["thue_tncn"] == server._luong_lam_tron(r["tn_chiu_thue"] * 0.1)
@@ -117,7 +117,7 @@ for _ in range(40):
     kiem_tra_tong(th, muc)
     for rows in th.values():
         for r in rows:
-            assert (r["dong_bh"] == 1) or (r["ngay_lam_hd"] < 14), "Không đóng BHXH thì phải làm dưới 14 ngày"
+            assert (r["dong_bh"] == 1) or (r["ngay_cong_hd"] - r["ngay_lam_hd"] >= 14), "Không đóng BHXH thì phải không lương từ 14 ngày làm việc"
             assert r["thuong_bh"] >= 0 and r["tang_ca"] >= 0
 print("PASS 2f: 40 mục tiêu ngẫu nhiên đều khớp tổng đúng và không ai vừa làm >=14 ngày vừa không đóng BHXH.")
 

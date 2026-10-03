@@ -80,17 +80,17 @@ for rows_ in th.values():
         if r["dong_bh"] == 1:
             assert r["ngay_lam_hd"] == r["ngay_cong_hd"] and int(r["ma"]) <= 4, "Người đủ công phải là người được đóng BHXH"
         else:
-            assert r["ngay_lam_hd"] < 14
+            assert r["ngay_cong_hd"] - r["ngay_lam_hd"] >= 14, "không đóng BHXH phải không lương từ 14 ngày làm việc"
 # mục tiêu nhỏ: chỉ có người không được đóng BHXH ở đầu danh sách sử dụng trước cho phần làm < 14 ngày
 pool2 = [server._luong_chuan_dong_nhap(dict(base, ma=str(i), ten=f"NV{i}", dong_bh=0 if i == 3 else 1)) for i in range(1, 5)]
 th2, tom2 = server._luong_ke_hoach(pool2, 2024, 12, 12, 3_000_000, None, rng=random.Random(1))
 assert th2["12"][0]["ma"] == "3", "Người không được đóng BHXH được dùng làm người làm < 14 ngày trước"
-assert all(r["dong_bh"] == 0 and r["ngay_lam_hd"] < 14 for r in th2["12"])
+assert all(r["dong_bh"] == 0 and r["ngay_cong_hd"] - r["ngay_lam_hd"] >= 14 for r in th2["12"])
 # pool theo THÁNG (hàm): người vào làm 10/2024 chưa được đóng ở tháng 9
 def pool_thang(t):
     return server._luong_dong_tu_nhan_vien(hdr, [[1, "1", "A", "10/2024", "x", "KD", 5310000, 700000]], 0, 2024, int(t))
 th3, _ = server._luong_ke_hoach(pool_thang, 2024, 9, 10, 20_000_000, None, rng=random.Random(2))
-assert th3["09"][0]["dong_bh"] == 0 and th3["09"][0]["ngay_lam_hd"] < 14 and th3["10"][0]["dong_bh"] == 1
+assert th3["09"][0]["dong_bh"] == 0 and th3["09"][0]["ngay_cong_hd"] - th3["09"][0]["ngay_lam_hd"] >= 14 and th3["10"][0]["dong_bh"] == 1
 print("PASS 2: người không được đóng BHXH chỉ làm < 14 ngày; người được đóng làm đủ công; tick theo từng tháng.")
 
 # ===== 3: thưởng bán hàng + tăng ca RANDOM từng người (không chia đều), làm tròn nghìn đồng, tổng vẫn đúng từng đồng. =====

@@ -394,14 +394,14 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   const khGia = { blKhTu: '10', blKhDen: '11', blKhTien: '50.000.000', blKhTc: '40' };
   m.ctx.document.getElementById = (id) => (khGia[id] !== undefined ? { value: khGia[id] } : (m.phanTu[id] || (m.phanTu[id] = { style: {}, innerHTML: '', dataset: {} })));
   m.ctx.blMoKeHoach();
-  assert(/Chi phí lương cả năm 2025/.test(m.phanTu['blKeHoach'].innerHTML) && /giữ nguyên theo Danh Sách Nhân Viên/.test(m.phanTu['blKeHoach'].innerHTML) && /dưới 14 ngày/.test(m.phanTu['blKeHoach'].innerHTML));
+  assert(/Chi phí lương cả năm 2025/.test(m.phanTu['blKeHoach'].innerHTML) && /giữ nguyên theo Danh Sách Nhân Viên/.test(m.phanTu['blKeHoach'].innerHTML) && /không lương từ 14 ngày làm việc trở lên/.test(m.phanTu['blKeHoach'].innerHTML));
   await m.ctx.blTinhKeHoach();
   const goiKh = m.goiApi.find(([u]) => u.includes('/ke-hoach'))[1];
   assert.strictEqual(goiKh.nam, 2025); assert.strictEqual(goiKh.tu_thang, 10); assert.strictEqual(goiKh.den_thang, 11);
   assert.strictEqual(goiKh.muc_tieu, '50.000.000'); assert.strictEqual(goiKh.ty_le_tang_ca, '40');
   assert.strictEqual(goiKh.da_co_ngoai, 0, 'Áp dụng xóa dữ liệu cũ cả năm -> không trừ các tháng đã có');
   const kqHtml = m.phanTu['blKhKq'].innerHTML;
-  assert(/cần <b[^>]*>2 người<\/b>/.test(kqHtml) && /1 người đủ công có BHXH, 1 người làm dưới 14 ngày không BHXH/.test(kqHtml) && /thử cảnh báo/.test(kqHtml) && /Áp dụng \(xóa dữ liệu cũ cả năm/.test(kqHtml) && /toàn bộ dữ liệu đã nhập của năm này sẽ bị xóa/.test(m.phanTu['blKeHoach'].innerHTML));
+  assert(/cần <b[^>]*>2 người<\/b>/.test(kqHtml) && /1 người đủ công có BHXH, 1 người làm ít ngày \(không lương ≥ 14 ngày làm việc\) không BHXH/.test(kqHtml) && /thử cảnh báo/.test(kqHtml) && /Áp dụng \(xóa dữ liệu cũ cả năm/.test(kqHtml) && /toàn bộ dữ liệu đã nhập của năm này sẽ bị xóa/.test(m.phanTu['blKeHoach'].innerHTML));
   assert(/không BHXH/.test(kqHtml) && /12\.333\.333/.test(kqHtml));
   // áp dụng: hỏi xác nhận, XÓA dữ liệu cũ của cả năm (kể cả tháng 3) rồi nhập lại tháng 10–11
   let hoiKh = 0; m.ctx.confirm = (msg) => { hoiKh++; assert(/XÓA toàn bộ dữ liệu đã nhập của năm 2025 \(tháng 3\)/.test(msg), msg); return true; };
@@ -417,7 +417,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   // thông tin tháng: cảnh báo không đóng BHXH nhưng làm >= 14 ngày, và số người thời vụ
   m.ctx.blThang = '10'; m.phanTu['blInfo'] = { dataset: {}, style: {}, textContent: '' };
   m.ctx.blDL = { '10': [dongMau('1', 'A', { canh_bao_bh: true }), dongMau('2', 'B', { thoi_vu: true })] }; m.ctx.blVeInfo();
-  assert(/1 người không đóng BHXH nhưng làm từ 14 ngày/.test(m.phanTu['blInfo'].textContent) && /1 người làm dưới 14 ngày không BHXH \(khấu trừ 10% thuế TNCN\)/.test(m.phanTu['blInfo'].textContent));
+  assert(/1 người không đóng BHXH nhưng không lương dưới 14 ngày làm việc/.test(m.phanTu['blInfo'].textContent) && /1 người không lương từ 14 ngày làm việc trở lên, không BHXH \(khấu trừ 10% thuế TNCN\)/.test(m.phanTu['blInfo'].textContent));
   console.log('PASS 19: nút "Chi phí lương cả năm" — nhập tháng + tổng, xem trước, áp dụng, cảnh báo BHXH <14 ngày.');
 
   // ---- 20: Danh Sách Nhân Viên: cột tick "Đóng BHXH" (+ Tháng/Năm vào làm), số hiện 5.310.000; bảng lương tự tick theo đó ----

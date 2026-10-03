@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.068"
+APP_BUILD = "2026-10-03.069"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10111,7 +10111,18 @@ def _luong_thue_moi_mac_dinh(nam):
 
 _LUONG_TRUONG_CHU = ("ma", "ten", "chuc_vu", "ghi_chu")
 _LUONG_THANG = tuple("%02d" % i for i in range(1, 13))
-_LUONG_NGAY_DONG_BHXH = 14      # làm từ 14 ngày/tháng trở lên phải đóng BHXH; dưới 14 ngày thì không
+_LUONG_NGAY_DONG_BHXH = 14      # Điều 33 khoản 5 Luật BHXH 2024: KHÔNG LƯƠNG từ 14 ngày làm việc trở lên trong tháng thì tháng đó không đóng BHXH
+
+
+def _luong_mien_bh_ngay(e, g):
+    """Tháng có công chuẩn `e`, người lao động làm `g` ngày: số ngày KHÔNG LƯƠNG = e - g. Từ 14 ngày làm việc trở lên -> được miễn đóng BHXH tháng đó
+    (vd công chuẩn 26: làm <= 12 ngày; công chuẩn 24: làm <= 10 ngày). Làm 13/26 ngày (không lương 13 ngày) vẫn phải đóng."""
+    return (float(e) - float(g)) >= _LUONG_NGAY_DONG_BHXH - 1e-9
+
+
+def _luong_ngay_lam_toi_da_mien_bh(e):
+    """Số ngày làm TỐI ĐA trong tháng (công chuẩn e) mà vẫn được miễn đóng BHXH (<= 0: tháng không thể miễn)."""
+    return int(e) - _LUONG_NGAY_DONG_BHXH
 
 
 # Ngày nghỉ lễ hưởng lương theo Bộ luật Lao động (mức tối thiểu cho khu vực tư nhân) — chỉ tính các ngày
@@ -10352,9 +10363,9 @@ def _luong_tinh_dong(r, ts, thang=None):
     tong_thu_nhap = tong_chiu_thue + khong_chiu_thue
     npt = d["so_npt"]
     tt = _luong_thue_ap_dung(ts, thang)      # từ 1/1/2026 tự dùng giảm trừ + biểu thuế mới
-    # Theo luật BHXH: làm dưới 14 ngày/tháng thì KHÔNG đóng BHXH; những người không đóng BHXH này (thời vụ) bị KHẤU
+    # Theo luật BHXH: KHÔNG LƯƠNG từ 14 ngày làm việc trở lên trong tháng (công chuẩn - ngày làm >= 14) thì KHÔNG đóng BHXH; người không đóng BHXH này (thời vụ) bị KHẤU
     # TRỪ 10% thuế TNCN trên thu nhập chịu thuế (không giảm trừ gia cảnh) khi khoản chi trả >= ngưỡng.
-    thoi_vu = (not d["dong_bh"]) and g < _LUONG_NGAY_DONG_BHXH
+    thoi_vu = (not d["dong_bh"]) and _luong_mien_bh_ngay(e, g)
     if thoi_vu:
         gt_npt = gt_ban_than = 0.0
         tn_tinh_thue = tong_chiu_thue
@@ -10383,7 +10394,7 @@ def _luong_tinh_dong(r, ts, thang=None):
         "giam_tru_ban_than": gt_ban_than, "tien_giam_tru_npt": gt_npt,
         "tn_tinh_thue": tn_tinh_thue, "thue_tncn": thue, "thue_tru_luong": thue_tru, "thue_da_chinh": thue_da_chinh,
         "thoi_vu": thoi_vu,                                           # không đóng BHXH + làm < 14 ngày: khấu trừ 10%
-        "canh_bao_bh": (not d["dong_bh"]) and g >= _LUONG_NGAY_DONG_BHXH,   # làm >= 14 ngày mà không đóng BHXH
+        "canh_bao_bh": (not d["dong_bh"]) and not _luong_mien_bh_ngay(e, g),   # không lương < 14 ngày làm việc mà không đóng BHXH
     })
     kq["ngay_cong_hd"] = e      # giá trị đang dùng để tính (ô nhập giữ nguyên: 0/trống = theo lịch tháng)
     kq["ngay_lam_hd"] = g
@@ -10781,7 +10792,7 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
                         "(có thể phát sinh thuế TNCN). Nên thêm nhân viên vào Danh Sách Nhân Viên hoặc nâng mức trần phụ cấp.")
     n_khong_bh = sum(1 for c in chon if not c["row"].get("dong_bh"))
     if n_khong_bh:
-        canh_bao.append("Có người làm đủ công nhưng CHƯA tick 'Đóng BHXH' — theo luật làm từ 14 ngày/tháng phải đóng BHXH; "
+        canh_bao.append("Có người làm đủ công nhưng CHƯA tick 'Đóng BHXH' — theo luật chỉ được miễn khi không lương từ 14 ngày làm việc trở lên trong tháng; "
                         "hãy tick trong Danh Sách Nhân Viên nếu cần.")
     return 0
 
@@ -10880,7 +10891,8 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
                 bu(c, a)
             con -= sum(phan)
     nguong = ts.get("nguong_khau_tru_10", 2000000.0)
-    ngay_toi_da = _LUONG_NGAY_DONG_BHXH - 1
+    e_thang = (ts.get("cong_chuan") or {}).get(thang) or ts["ngay_cong_chuan"]
+    ngay_toi_da = max(0, _luong_ngay_lam_toi_da_mien_bh(e_thang))       # công chuẩn 26 -> tối đa 12 ngày; công chuẩn 24 -> 10 ngày
 
     def them_thoi_vu(ds, gioi_han_thue):
         """3. Thêm người làm < 14 ngày (không BHXH) với SỐ NGÀY NGẪU NHIÊN mỗi người một khác (vd 10 ngày, 3 ngày...),
@@ -10989,7 +11001,7 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
 def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
     """Dựng nhóm CHUYỂN KHOẢN của 1 tháng bằng NGÀY CÔNG + TĂNG CA (không chỉnh phụ cấp tùy ý): lương cơ bản và MỌI phụ cấp tính theo ngày làm (mức/công chuẩn x
     ngày làm) nên
-      - lương đủ công của danh sách NHIỀU hơn số chuyển khoản: chọn ít người nhất (>= k_min), GIẢM ngày làm từng người (ngẫu nhiên, mỗi người >= 14 ngày để vẫn
+      - lương đủ công của danh sách NHIỀU hơn số chuyển khoản: chọn ít người nhất (>= k_min), GIẢM ngày làm từng người (ngẫu nhiên, không lương tối đa 13 ngày/tháng để vẫn
         đóng BHXH) tới khi TT lương thiếu dưới 1 ngày công; phần thiếu bù bằng TĂNG CA (tối đa 40 giờ/người/tháng) rồi thưởng bán hàng;
       - lương đủ công của cả danh sách KHÔNG tới số chuyển khoản: mọi người làm đủ công, TĂNG ca (tối đa 40 giờ/người) để bù — chọn ít người nhất đủ sức chứa.
     Thu nhập chịu thuế vẫn dưới giảm trừ bản thân nên không phát sinh TNCN. Trả danh sách dòng nhập, hoặc None nếu không áp dụng được (cần < 14 ngày công, hoặc
@@ -10998,7 +11010,7 @@ def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
     e_i = int(e)
     hs = ts["he_so_tang_ca"]
     n = len(ung)
-    if e_i < _LUONG_NGAY_DONG_BHXH:
+    if e_i < 1:
         return None
 
     def tc_toi_da(base):
@@ -11054,7 +11066,7 @@ def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
         return _luong_tinh_dong(dict(base[i], ngay_lam=g), ts, thang)["tt_luong"]
     cur = [tt_i(i, ngay[i]) for i in range(k)]
     tong = sum(cur)
-    gioi_han = _LUONG_NGAY_DONG_BHXH
+    gioi_han = max(1, e_i - (_LUONG_NGAY_DONG_BHXH - 1))      # còn đóng BHXH khi không lương <= 13 ngày: công chuẩn 26 -> làm >= 13 ngày
     while True:                                   # hạ ngày làm ngẫu nhiên chừng nào TT lương còn >= số chuyển khoản
         ung_vien = [i for i in range(k) if ngay[i] > gioi_han and tong - cur[i] + tt_i(i, ngay[i] - 1) >= so_ck]
         if not ung_vien:
@@ -11563,7 +11575,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             moc, dtang = hang_so_thue(tt)
             e = d["ngay_cong"] or (ts.get("cong_chuan") or {}).get(t) or ts["ngay_cong_chuan"]
             g_lam = d["ngay_lam"] if d["ngay_lam"] != "" else e
-            thoi_vu = (not d["dong_bh"]) and g_lam < _LUONG_NGAY_DONG_BHXH
+            thoi_vu = (not d["dong_bh"]) and _luong_mien_bh_ngay(e, g_lam)
             ws[f"{L['ma']}{r}"] = d["ma"]
             ws[f"{L['ten']}{r}"] = d["ten"]
             ws[f"{L['chuc_vu']}{r}"] = d["chuc_vu"]
@@ -12565,7 +12577,7 @@ def _luong_qt_tong_hop(ts, thang_tinh, header, rows_nv, npt_ds=None, nam=None):
             if tv_thue > 0:
                 g2.append(dict(p, ct11=int(_luong_lam_tron(p["tv_tn"])), ct15=tv_thue))
             else:
-                canh_bao.append(f"{p['ten'] or p['ma']}: có tháng làm < 14 ngày nhưng không bị khấu trừ thuế 10% — không đưa vào bảng kê 05-2.")
+                canh_bao.append(f"{p['ten'] or p['ma']}: có tháng không đóng BHXH (không lương từ 14 ngày làm việc) nhưng không bị khấu trừ thuế 10% — không đưa vào bảng kê 05-2.")
     da_tru = sum(p.get("thue_bang_luong", 0) for p in g1)
     if g1:
         canh_bao.append("ℹ 'Tổng số thuế TNCN đã khấu trừ' (cột [22] phụ lục 05-1 và chỉ tiêu [36]) để TRỐNG theo yêu cầu — nhập trên HTKK; số thuế đã trừ theo Bảng Lương cả năm là "
@@ -12848,7 +12860,7 @@ async def bang_luong_ket_xuat_qt_tncn(cid: int, request: Request):
     # Giải thích vì sao phụ lục không có dữ liệu (HTKK cũng không xuất phụ lục trống)
     if not tong["g2"]:
         co_tv = sum(1 for p in tong.get("tat_ca", []) if p.get("co_tv"))
-        canh_bao.append("ℹ Không có phụ lục 05-2 (không phát sinh; HTKK vẫn hiện tab trống khi nhập, đúng như file HTKK tự xuất): chỉ đưa vào 05-2 những người làm dưới 14 ngày/tháng, không đóng BHXH và THỰC SỰ bị khấu trừ thuế 10% ở Bảng Lương "
+        canh_bao.append("ℹ Không có phụ lục 05-2 (không phát sinh; HTKK vẫn hiện tab trống khi nhập, đúng như file HTKK tự xuất): chỉ đưa vào 05-2 những người không lương từ 14 ngày làm việc trở lên/tháng, không đóng BHXH và THỰC SỰ bị khấu trừ thuế 10% ở Bảng Lương "
                         + (f"(có {co_tv} người làm thời vụ nhưng không bị khấu trừ — thu nhập dưới ngưỡng hoặc tick 'không trừ thuế 10%')." if co_tv else "(bảng lương năm này không có người nào như vậy)."))
     if not tong["npt"]:
         canh_bao.append("ℹ Không có phụ lục 05-3 (không phát sinh; HTKK vẫn hiện tab trống khi nhập): chưa có người phụ thuộc nào — nhập ở màn 'Người Phụ Thuộc' (Bảng Lương - BHXH), người lao động phải có tháng trên Bảng Lương của năm.")

@@ -21,7 +21,7 @@ def dong(ma, ten, **kw):
 
 
 rows_nhap = [dong("2", "Nguyễn Văn A", dong_bh=1), dong("3", "Lê Thị B", dong_bh=1, ngay_lam=20),
-             dong("4", "Trần C", dong_bh=0, ngay_lam=13, thuong_bh=1_500_000)]
+             dong("4", "Trần C", dong_bh=0, ngay_lam=5, thuong_bh=1_500_000)]
 tinh = [server._luong_tinh_dong(r, TS, "05") for r in rows_nhap]
 
 # dựng payload đúng như giao diện (cột hiển thị + chấm công) — cột toàn 0 bị ẩn
@@ -127,7 +127,7 @@ try:
         tong_tt = sum(t["tt_luong"] for t in tinh)
         assert round(gt("BL 05-2024", f"{L(pos['tt_luong'])}13")) == tong_tt
         assert round(gt("BL 05-2024", f"{L(pos['luong'])}13")) == round(sum(t["luong"] for t in tinh))
-        assert gt("BL 05-2024", f"{L(c_tnc)}10") == 26 and gt("BL 05-2024", f"{L(c_tnc)}11") == 20 and gt("BL 05-2024", f"{L(c_tnc)}12") == 13
+        assert gt("BL 05-2024", f"{L(c_tnc)}10") == 26 and gt("BL 05-2024", f"{L(c_tnc)}11") == 20 and gt("BL 05-2024", f"{L(c_tnc)}12") == 5
         assert tinh[2]["thue_tru_luong"] > 0 and tinh[2]["tt_luong"] == tinh[2]["chi_phi_luong"] - tinh[2]["thue_tru_luong"], "Người thời vụ bị trừ thuế 10%"
         print("PASS 4: công thức Excel tính lại độc lập khớp phần mềm (thực nhận từng người, tổng cộng, TNC).")
 
