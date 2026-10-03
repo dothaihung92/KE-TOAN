@@ -110,7 +110,7 @@ hd7 = ["Mã NV", "Họ và tên", "Tháng/Năm vào làm", "Đóng BHXH", "Thán
 def bh(tick, vao, nghi, nam, thang):
     r = server._luong_dong_tu_nhan_vien(hd7, [["1", "A", vao, tick, nghi, 5_310_000]], 0, nam, thang)
     return r[0]["dong_bh"] if r else None          # None = không lên bảng lương tháng đó
-assert [bh("x", "12/2024", "06/2025", 2024, m_) for m_ in (11, 12)] == [None, 1], "Trước tháng vào làm: chưa lên bảng lương; từ tháng vào làm: đóng"
+assert [bh("x", "12/2024", "06/2025", 2024, m_) for m_ in (11, 12)] == [0, 1], "Trước tháng tham gia: chưa đóng; từ tháng vào làm: đóng"
 assert [bh("x", "12/2024", "06/2025", 2025, m_) for m_ in (1, 6, 7, 8)] == [1, 1, None, None], "Đóng hết tháng nghỉ việc; sau đó không còn trên bảng lương"
 assert bh("", "12/2024", "", 2025, 5) == 0 and bh("x", "12/2024", "", 2026, 3) == 1, "Không tick thì không đóng; không có ngày nghỉ = còn đóng"
 assert bh("x", "", "", 2025, 1) == 1, "Không có ngày vào làm = đóng từ đầu"

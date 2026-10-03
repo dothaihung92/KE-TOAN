@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.071"
+APP_BUILD = "2026-10-03.072"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10696,7 +10696,7 @@ def _luong_cong_thang(d, n):
 
 def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=None, npt=None):
     """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định + có đóng BHXH không).
-    Chỉ đưa vào bảng lương từ tháng BẮT ĐẦU LÀM (tháng "Thử việc từ", không có thì "Tháng/Năm vào làm") đến tháng nghỉ việc.
+    Người có ghi "Thử việc từ" chỉ lên bảng lương từ tháng bắt đầu thử việc; không ghi thử việc thì như bình thường.
     Đóng BHXH = ô tick "Đóng BHXH" trong danh sách VÀ đã tới tháng "Tháng/Năm vào làm" (bắt đầu đóng). Danh sách cũ
     chưa có cột "Đóng BHXH" -> coi như đều đóng (giữ nguyên cách tính trước đây)."""
     rows = vbld.chon_phien_ban_hieu_luc(header, rows, nam, thang)     # người có nhiều dòng thay đổi lương: lấy dòng (lương + mã) đang hiệu lực ở tháng này
@@ -10719,9 +10719,10 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
         nghi = _luong_thang_nghi_viec(lay(r, "Tháng/Năm nghỉ việc"))
         if nghi and nam and thang and (int(nam), int(thang)) > nghi:      # đã nghỉ việc từ tháng trước -> không lên bảng lương tháng này
             continue
-        # Chưa tới tháng bắt đầu làm (tháng đầu thử việc, không có thì tháng vào làm) -> chưa lên bảng lương tháng này.
-        bd = [k for k in (_luong_doc_ngay_thang(lay(r, "Thử việc từ")), _luong_doc_ngay_thang(lay(r, "Tháng/Năm vào làm"))) if k]
-        if bd and nam and thang and (int(nam), int(thang)) < min((k[0], k[1]) for k in bd):
+        # Có ghi THỬ VIỆC: chưa tới tháng bắt đầu thử việc -> chưa lên bảng lương tháng này. Không ghi thử việc -> như bình thường (có trên bảng lương,
+        # BHXH bắt đầu theo Tháng/Năm vào làm).
+        bd = _luong_doc_ngay_thang(lay(r, "Thử việc từ"))
+        if bd and nam and thang and (int(nam), int(thang)) < (bd[0], bd[1]):
             continue
         tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
         # Thử việc theo HĐ thử việc riêng (cột "Thử việc từ"/"Thử việc đến"): không đóng BHXH trong thời gian thử việc; BHXH bắt đầu từ NGÀY SAU khi hết thử việc

@@ -42,7 +42,7 @@ rows = [[1, "1", "A tick, vào làm 10/2024", "10/2024", "x", "KD", "5.310.000",
         [2, "2", "B không tick", "01/2024", "", "KD", 5310000, 700000],
         [3, "3", "C tick, chưa nhập ngày", "", "1", "KD", 5310000, 700000]]
 kq = {m: [x["dong_bh"] for x in server._luong_dong_tu_nhan_vien(hdr, rows, 0, 2024, m)] for m in (9, 10, 12)}
-assert kq == {9: [0, 1], 10: [1, 0, 1], 12: [1, 0, 1]}, kq     # tháng 9: A chưa vào làm (10/2024) -> chưa lên bảng lương
+assert kq == {9: [0, 0, 1], 10: [1, 0, 1], 12: [1, 0, 1]}, kq     # không ghi thử việc: vẫn có trên bảng lương, BHXH từ tháng vào làm
 assert [x["dong_bh"] for x in server._luong_dong_tu_nhan_vien(hdr, rows)] == [1, 0, 1]        # không có tháng: chỉ theo tick
 # danh sách cũ chưa có cột Đóng BHXH -> coi như đều đóng (giữ hành vi cũ)
 cu = server._luong_dong_tu_nhan_vien([h for h in hdr if h != "Đóng BHXH"], [[r[0], r[1], r[2], r[3], r[5], r[6], r[7]] for r in rows], 0, 2024, 12)
@@ -62,7 +62,7 @@ try:
                "header_json TEXT, rows_json TEXT, updated_at TEXT, UNIQUE(company_id, loai))")
     c0.execute("INSERT INTO nhap_lieu (company_id, loai, header_json, rows_json) VALUES (1,'nv',?,?)", (json.dumps(hdr), json.dumps(rows)))
     c0.commit(); c0.close()
-    assert [x["dong_bh"] for x in server.bang_luong_tu_nhan_vien(1, nam=2024, thang=9)["rows"]] == [0, 1], "tháng 9: người vào làm 10/2024 chưa lên bảng lương"
+    assert [x["dong_bh"] for x in server.bang_luong_tu_nhan_vien(1, nam=2024, thang=9)["rows"]] == [0, 0, 1]
     assert [x["dong_bh"] for x in server.bang_luong_tu_nhan_vien(1, nam=2024, thang=11)["rows"]] == [1, 0, 1]
     assert [x["dong_bh"] for x in server.bang_luong_tu_nhan_vien(1, nam=2024)["rows"]] == [1, 0, 1]
 finally:
@@ -90,9 +90,14 @@ assert all(r["dong_bh"] == 0 and r["ngay_cong_hd"] - r["ngay_lam_hd"] >= 14 for 
 def pool_thang(t):
     return server._luong_dong_tu_nhan_vien(hdr, [[1, "1", "A", "10/2024", "x", "KD", 5310000, 700000]], 0, 2024, int(t))
 th3, tom3 = server._luong_ke_hoach(pool_thang, 2024, 9, 10, 20_000_000, None, rng=random.Random(2))
-assert "09" not in th3 and th3["10"][0]["dong_bh"] == 1, "tháng 9 chưa vào làm -> không lập bảng lương; mục tiêu dồn sang tháng 10"
-assert any("Tháng 9: chưa có nhân viên vào làm" in c for c in tom3["canh_bao"]), tom3["canh_bao"]
-assert sum(r["chi_phi_luong"] for r in th3["10"]) == 20_000_000
+assert th3["09"][0]["dong_bh"] == 0 and th3["09"][0]["ngay_cong_hd"] - th3["09"][0]["ngay_lam_hd"] >= 14 and th3["10"][0]["dong_bh"] == 1
+# có ghi THỬ VIỆC từ 10/2024: tháng 9 chưa có ai -> không lập bảng lương tháng 9, mục tiêu dồn sang tháng 10
+hdr_tv = hdr + ["Thử việc từ", "Thử việc đến"]
+def pool_tv(t):
+    return server._luong_dong_tu_nhan_vien(hdr_tv, [[1, "1", "A", "11/2024", "x", "KD", 5310000, 700000, "10/2024", "10/2024"]], 0, 2024, int(t))
+th4, tom4 = server._luong_ke_hoach(pool_tv, 2024, 9, 10, 20_000_000, None, rng=random.Random(2))
+assert "09" not in th4 and th4["10"][0]["thu_viec"] == 1 and sum(r["chi_phi_luong"] for r in th4["10"]) == 20_000_000
+assert any("Tháng 9: chưa có nhân viên vào làm" in c for c in tom4["canh_bao"]), tom4["canh_bao"]
 print("PASS 2: người không được đóng BHXH chỉ làm < 14 ngày; người được đóng làm đủ công; tick theo từng tháng.")
 
 # ===== 3: thưởng bán hàng + tăng ca RANDOM từng người (không chia đều), làm tròn nghìn đồng, tổng vẫn đúng từng đồng. =====

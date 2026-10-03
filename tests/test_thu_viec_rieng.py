@@ -40,7 +40,7 @@ def thang(nam, th, tu='01/2024', den='01/2024', vao='02/2024'):
 assert thang(2023, 12) is None, "trước tháng thử việc: không có trong bảng lương"
 assert thang(2024, 1) == (0, 1) and thang(2024, 2) == (1, 0) and thang(2024, 12) == (1, 0)
 assert thang(2024, 1, vao='') == (0, 1) and thang(2024, 2, vao='') == (1, 0), "không ghi tháng vào làm: BHXH từ ngày sau khi hết thử việc"
-assert thang(2023, 12, tu='', den='', vao='01/2024') is None and thang(2024, 1, tu='', den='', vao='01/2024') == (1, 0), "không thử việc: lên bảng lương từ tháng vào làm"
+assert thang(2023, 12, tu='', den='', vao='01/2024') == (0, 0) and thang(2024, 1, tu='', den='', vao='01/2024') == (1, 0), "không ghi thử việc: như bình thường (có trên bảng lương, BHXH từ tháng vào làm)"
 
 TS = server._luong_chuan_tham_so(None, 2026)
 tinh = lambda d: server._luong_tinh_dong(dict(d, ngay_lam=26), TS, "03")
