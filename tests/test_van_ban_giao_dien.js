@@ -280,19 +280,18 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   console.log('PASS 13: mục Chữ ký chưa gán luôn hiện kèm số lượng (kể cả 0).');
 })().catch((e) => { console.error(e); process.exit(1); });
 
-// 14: chữ ký đã lưu ở công ty khác vẫn dùng lại được (cùng một người — phải xác nhận)
+// 14: sang công ty khác — chữ ký đã lưu (kho chung) của người chưa có trong danh sách được tính vào "Chữ ký chưa gán"
 (async () => {
-  const { ctx, goi, pt } = moiTruong({ vbKhoCk: '', vbCkLuuSel0: '2' });
+  const { ctx, goi, pt } = moiTruong({ vbKhoCk: '', vbCkDuSel1: '2' });
   const muc = [{ khoa: 'gd:x', ten: 'GĐ', co_anh: true }, { khoa: 'cccd:1', ten: 'A', co_anh: true }, { khoa: 'cccd:2', ten: 'Nguyễn B', ma: '5', co_anh: false }];
-  ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null, o && o.method]); return u.includes('?nam=') ? { giam_doc: muc[0], nhan_vien: muc.slice(1), tong_kho_chung: 3, du: [], da_luu: [{ khoa: 'cccd:9', ten: 'Nguyen Van B', anh: 'data:image/png;base64,Z' }] } : { ok: true }; };
+  ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null, o && o.method]); return u.includes('?nam=') ? { giam_doc: muc[0], nhan_vien: muc.slice(1), tong_kho_chung: 3, du: [{ id: 4, ten: 'chu_ky_1.png', anh: 'data:image/png;base64,Y' }], da_luu: [{ khoa: 'cccd:9', ten: 'Nguyen Van B', anh: 'data:image/png;base64,Z' }] } : { ok: true }; };
   ctx.vbNam = 2026; await ctx.vbCkVe();
-  let h = pt.vbKhoCk.innerHTML;
-  assert(h.includes('Chữ ký đã lưu dùng chung mọi công ty') && h.includes('vbCkDungLai(0)') && h.includes('Nguyen Van B'), 'luôn hiện mục chữ ký đã lưu dùng chung');
-  ctx.confirm = () => false; await ctx.vbCkDungLai(0); assert(!goi.some((x) => x[0].endsWith('/dung-lai')), 'không xác nhận thì không dùng');
-  ctx.confirm = (m) => { assert(m.includes('CÙNG MỘT NGƯỜI')); return true; }; await ctx.vbCkDungLai(0);
+  const h = pt.vbKhoCk.innerHTML;
+  assert(h.includes('id="vbCkDuSo" style="color:#6b3fa0">2</span>') && h.includes('<b>2 chữ ký chưa gán</b>') && !h.includes('Chữ ký đã lưu dùng chung'), 'gộp vào Chữ ký chưa gán: 1 file dư + 1 chữ ký công ty khác = 2');
+  assert(h.includes('(đã gắn ở công ty khác)') && h.split('vbCkXoaDu(').length === 2, 'chữ ký công ty khác có nhãn, không có nút xoá');
+  ctx.confirm = () => false; await ctx.vbCkGanDu(1); assert(!goi.some((x) => x[0].endsWith('/dung-lai')), 'không xác nhận thì không dùng');
+  ctx.confirm = (m) => { assert(m.includes('CÙNG MỘT NGƯỜI')); return true; }; await ctx.vbCkGanDu(1);
   const g = goi.find((x) => x[0].endsWith('/dung-lai'));
   assert(g && g[1].nguon_khoa === 'cccd:9' && g[1].khoa === 'cccd:2' && g[1].xac_nhan === true);
-  ctx.api = async () => ({ giam_doc: muc[0], nhan_vien: muc.slice(1), tong_kho_chung: 3, du: [], da_luu: [] }); await ctx.vbCkVe();
-  assert(pt.vbKhoCk.innerHTML.includes('Chưa có chữ ký nào của người khác trong kho'));
-  console.log('PASS 14: dùng lại chữ ký đã lưu ở công ty khác (xác nhận cùng một người).');
+  console.log('PASS 14: chữ ký đã lưu ở công ty khác tính vào Chữ ký chưa gán; gắn phải xác nhận cùng một người.');
 })().catch((e) => { console.error(e); process.exit(1); });
