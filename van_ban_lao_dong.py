@@ -660,7 +660,7 @@ def tim_chu_ky(chu_ky, nv):
 def _khoang_ky(anh=""):
     """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký."""
     if anh:
-        return f'<p class="c"><img src="{esc(anh)}" style="height:56px"></p>' + _p("&nbsp;", "c")
+        return f'<p class="c"><img src="{esc(anh)}" style="height:80px"></p>' + _p("&nbsp;", "c")
     return _p("&nbsp;", "c") * 3
 
 

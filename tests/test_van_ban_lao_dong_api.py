@@ -141,6 +141,12 @@ run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "xac_nhan": Tr
 resp = run(server.van_ban_word(7, Req({"html": run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 2, "den": 2})))["html"], "ten_file": "HD_CK"})))
 zz = zipfile.ZipFile(resp.path)
 assert sum(1 for n in zz.namelist() if n.startswith("word/media/")) == 2 and b"<w:drawing>" in zz.read("word/document.xml")
+# chữ ký cho bản in bảng lương: chỉ người ĐÃ xác nhận; khớp theo mã gốc hoặc họ tên ở phía giao diện
+ci = server.chu_ky_cho_in(7, 2026)
+assert ci["giam_doc"].startswith("data:image/png") and [(x["ma"], x["ten"]) for x in ci["nhan_vien"]][:1] == [("NV2", "Nhân Viên 2")] and all(x["anh"].startswith("data:image/png") for x in ci["nhan_vien"])
+run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "xac_nhan": False})))
+assert "NV2" not in [x["ma"] for x in server.chu_ky_cho_in(7, 2026)["nhan_vien"]], "bỏ đồng ý -> không gắn vào bản in"
+run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "xac_nhan": True})))
 # xoá chữ ký
 server.chu_ky_xoa(7, k2)
 assert not server.chu_ky_danh_sach(7, 2026)["nhan_vien"][1]["co_anh"]

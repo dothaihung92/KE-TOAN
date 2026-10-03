@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.076"
+APP_BUILD = "2026-10-03.077"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13348,6 +13348,21 @@ def _ck_luu_1(conn, cid, khoa, ten, anh, xac_nhan):
                  "ON CONFLICT(khoa) DO UPDATE SET ten=excluded.ten, anh=excluded.anh, xac_nhan=excluded.xac_nhan, updated_at=excluded.updated_at",
                  (khoa, str(ten or "")[:200], anh, 1 if xac_nhan else 0, datetime.datetime.now().isoformat()))
     return anh
+
+
+@app.get("/api/chu-ky/{cid}/in")
+def chu_ky_cho_in(cid: int, nam: int = 0):
+    """Chữ ký ĐÃ XÁC NHẬN đồng ý để gắn vào bản in bảng lương (cột Ký nhận, chỗ ký giám đốc/người lập biểu)."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    _cty, nv, _ts = _vb_du_lieu(cid, nam)
+    d = _vb_chu_ky_dict(cid)
+    ds, thay = [], set()
+    for n in nv:
+        a = vbld.tim_chu_ky(d, n)
+        if a and vbld.khoa_nguoi(n) not in thay:
+            thay.add(vbld.khoa_nguoi(n))
+            ds.append({"ma": n["ma"], "ten": n["ten"], "anh": a})
+    return {"giam_doc": d.get("giam_doc") or "", "nhan_vien": ds}
 
 
 @app.post("/api/chu-ky/{cid}")

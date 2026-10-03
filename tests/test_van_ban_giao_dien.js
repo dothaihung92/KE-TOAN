@@ -209,3 +209,27 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(g && g[1].xac_nhan === true && g[1].muc.length === 2 && g[1].muc.find((x) => x.khoa === 'cccd:1').anh.endsWith('B') && g[1].muc.find((x) => x.khoa === 'gd:ho thi cam van'));
   console.log('PASS 9: chọn nhiều chữ ký — tự ghép tên file, bắt buộc xác nhận, lưu 1 lần.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 10: bản in bảng lương — chữ ký trong Kho gắn vào cột Ký nhận + chỗ ký giám đốc (chỉ chữ ký đã xác nhận do server trả về)
+(() => {
+  const b0 = html.indexOf('let blChuKyIn=null;'), b1 = html.indexOf('function blDocTuyChonIn');
+  assert(b0 > 0 && b1 > b0);
+  const calls = [];
+  const ctx = { current: 7, blNam: 2026, console, api: async (u) => { calls.push(u); return { giam_doc: 'data:image/png;base64,GD', nhan_vien: [{ ma: '2', ten: 'Trần Minh Hùng', anh: 'data:image/png;base64,A' }, { ma: '', ten: 'Nguyễn Giang Nam', anh: 'data:image/png;base64,B' }] }; } };
+  vm.createContext(ctx); vm.runInContext(html.slice(b0, b1).replace(/^let (bl\w+)/gm, 'var $1').replace(/^let blInKq=null;/m, 'var blInKq=null;'), ctx);
+  assert.strictEqual(ctx.blAnhKy('2', 'x'), '', 'chưa nạp: không có ảnh');
+  ctx.blNapChuKyIn();
+  return new Promise((ok) => setTimeout(() => {
+    assert.deepStrictEqual(calls, ['/api/chu-ky/7/in?nam=2026']);
+    assert.strictEqual(ctx.blAnhKy('2', 'khác'), 'data:image/png;base64,A', 'khớp mã');
+    assert.strictEqual(ctx.blAnhKy('2-001', 'khác'), 'data:image/png;base64,A', 'mã đổi 2-001 vẫn là người đó');
+    assert.strictEqual(ctx.blAnhKy('99', 'nguyen giang nam'), 'data:image/png;base64,B', 'khớp họ tên không dấu');
+    assert.strictEqual(ctx.blAnhKy('99', 'Người lạ'), '');
+    const iBang = html.indexOf('function blDungBangLuongIn'), iHet = html.indexOf('// Trang "BẢNG CHẤM CÔNG', iBang);
+    const hBang = html.slice(iBang, iHet);
+    assert(hBang.includes('class="ky-nhan"') && hBang.includes('blAnhKy(r.ma,r.ten)'), 'cột Ký nhận chèn ảnh');
+    const iKy = html.indexOf('function blKhungKy'); assert(html.slice(iKy, iKy + 900).includes('blChuKyIn.giam_doc') && html.includes('.o-ky{height:80px'), 'chỗ ký giám đốc rộng hơn + ảnh');
+    console.log('PASS 10: chữ ký trong Kho gắn vào bản in bảng lương.');
+    ok();
+  }, 30));
+})();

@@ -5963,10 +5963,11 @@ function blKhungTren(tuyChon,tieuDe,dong2){
     (tuyChon.diaChi?`<div>ĐC: ${xkEsc(tuyChon.diaChi)}</div>`:'')+(tuyChon.mst?`<div>MST: ${xkEsc(tuyChon.mst)}</div>`:'')+`</div>
     <div class="tieude">${tieuDe}</div><div class="thang">${dong2}</div>`;
 }
+function blOKy(anh){return `<div class="o-ky">${anh?`<img src="${anh}">`:''}</div>`}
 function blKhungKy(tuyChon,nam,t,rong){
   return `<div class="ky" style="width:${rong}px"><div class="ngay-ky">${blNgayKy(nam,t)}</div>
-    <div class="ky2"><div><b>Người lập biểu</b><div class="ghi">(Ký, ghi rõ họ tên)</div><div class="ten-ky">${xkEsc(tuyChon.nguoiLap||'')}</div></div>
-    <div><b>Giám đốc</b><div class="ghi">(Ký, đóng dấu, ghi rõ họ tên)</div><div class="ten-ky">${xkEsc(tuyChon.giamDoc||'')}</div></div></div></div>`;
+    <div class="ky2"><div><b>Người lập biểu</b><div class="ghi">(Ký, ghi rõ họ tên)</div>${blOKy(blAnhKy('',tuyChon.nguoiLap))}<div class="ten-ky">${xkEsc(tuyChon.nguoiLap||'')}</div></div>
+    <div><b>Giám đốc</b><div class="ghi">(Ký, đóng dấu, ghi rõ họ tên)</div>${blOKy((blChuKyIn&&blChuKyIn.giam_doc)||'')}<div class="ten-ky">${xkEsc(tuyChon.giamDoc||'')}</div></div></div></div>`;
 }
 function blSoIn(v,dp){const n=Number(v);if(!isFinite(n)||Math.abs(n)<(dp?0.005:0.5))return'';return blDinhDang(n,dp)}
 // Trang "BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC" của 1 tháng. Trả {html, rong (px tự nhiên của bảng)}
@@ -5985,7 +5986,7 @@ function blDungBangLuongIn(rows,nam,t,tuyChon){
   h1+='</tr>';h2+='</tr>';
   const mp=(c,r,i)=>{
     if(c.k==='stt')return `<td class="c">${i+1}</td>`;
-    if(c.ky)return '<td></td>';
+    if(c.ky){const a=blAnhKy(r.ma,r.ten);return a?`<td class="ky-nhan"><img src="${a}"></td>`:'<td></td>'}
     if(c.k==='ma'||c.k==='ten'||c.k==='chuc_vu')return `<td class="${c.k==='ma'?'c':''}">${xkEsc(r[c.k]==null?'':r[c.k])}</td>`;
     const v=r[c.k];
     const s=(c.k==='ngay_lam_hd'||c.k==='ngay_cong_hd'||c.k==='luong_cb'||c.k==='luong'||c.k==='tt_luong')?blDinhDang(v,c.dp):blSoIn(v,c.dp);
@@ -6047,11 +6048,25 @@ table.bang{border-collapse:collapse;table-layout:fixed}
 .cham th,.cham td{padding:1px 0;font-size:11px}.cham td.cn,.cham th.cn{background:#d9d9d9}.cham td.le{background:#fff2cc}.cham td.tc{font-size:9.5px;font-weight:bold;letter-spacing:-.3px}.cham td.gc{font-size:10px;text-align:left;padding-left:3px}
 .chuthich{font-size:11px;margin-top:4px;font-style:italic}
 .ky{page-break-inside:avoid;margin-top:14px}.ngay-ky{text-align:right;font-style:italic;margin-bottom:2px}.ky2{display:flex;justify-content:space-between;text-align:center;padding:0 6%}
-.ky2>div{min-width:200px}.ghi{font-size:11px;font-style:italic}.ten-ky{margin-top:70px;font-weight:bold}
+.ky2>div{min-width:200px}.ghi{font-size:11px;font-style:italic}.o-ky{height:80px;display:flex;align-items:flex-end;justify-content:center}.o-ky img{max-height:76px;max-width:230px}.ten-ky{margin-top:2px;font-weight:bold;font-size:13px}
+.bang td.ky-nhan{height:36px;padding:1px 2px}.bang td.ky-nhan img{display:block;margin:0 auto;max-height:34px;max-width:90px}
 @media screen{body{background:#9a9a9a;padding:14px}.muc{background:#fff;margin:0 auto 14px;padding:${BL_LE_TRANG}mm;width:${kho.w}mm;box-shadow:0 2px 8px rgba(0,0,0,.4)}}`;
   return {html:`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Bảng lương ${nam}</title><style>${css}</style></head><body>${phan.join('')}</body></html>`,so_bang:phan.length,bo};
 }
 let blInKq=null;
+let blChuKyIn=null;     // chữ ký đã được đồng ý trong Kho chữ ký: {giam_doc, nhan_vien:[{ma,ten,anh}]} — tự gắn vào cột Ký nhận / chỗ ký của bản in
+function blNapChuKyIn(){
+  if(!current)return;
+  Promise.resolve(api(`/api/chu-ky/${current}/in?nam=${blNam}`)).then(d=>{blChuKyIn=d||null}).catch(()=>{blChuKyIn=null});
+}
+function blAnhKy(ma,ten){
+  const d=blChuKyIn;if(!d||!Array.isArray(d.nhan_vien))return '';
+  const goc=m=>String(m==null?'':m).trim().replace(/-\d{3}$/,'').toLowerCase();
+  const kd=s=>String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase().replace(/\s+/g,' ').trim();
+  let x=goc(ma)?d.nhan_vien.find(n=>goc(n.ma)===goc(ma)):null;
+  if(!x&&kd(ten))x=d.nhan_vien.find(n=>kd(n.ten)===kd(ten));
+  return x?x.anh:'';
+}
 function blDocTuyChonIn(){
   const g=id=>{const e=document.getElementById(id);return e?e.value:''};
   const ck=id=>{const e=document.getElementById(id);return !!(e&&e.checked)};
@@ -6103,6 +6118,7 @@ function blLuuTuyChonIn(o){
 function blMoIn(){
   const w=document.getElementById('blIn');if(!w)return;
   if(w.style.display!=='none'&&w.innerHTML){w.style.display='none';return}
+  blNapChuKyIn();
   let cu={};try{cu=JSON.parse(localStorage.getItem('blIn'+current)||'{}')}catch{}
   const t=blThang==='nam'?1:(parseInt(blThang,10)||1);
   const cty=blThongTinCty();

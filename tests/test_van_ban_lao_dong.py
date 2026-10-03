@@ -256,7 +256,7 @@ rootI, _ = doc_xml(v.html_sang_docx(hh))
 dr = list(rootI.iter(W + "drawing"))
 assert len(dr) == 2
 ext = dr[0].find(".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent")
-assert int(ext.get("cy")) == 56 * 9525 and abs(int(ext.get("cx")) / int(ext.get("cy")) - 3.0) < 0.02, "cao 56px, đúng tỷ lệ ảnh"
+assert int(ext.get("cy")) == 80 * 9525 and abs(int(ext.get("cx")) / int(ext.get("cy")) - 3.0) < 0.02, "cao 80px, đúng tỷ lệ ảnh"
 zi = zipfile.ZipFile(io.BytesIO(v.html_sang_docx(hh)))
 assert [n for n in zi.namelist() if n.startswith("word/media/")] == ["word/media/chuky1.png", "word/media/chuky2.png"] and "image/png" in zi.read("[Content_Types].xml").decode()
 assert 'Target="media/chuky2.png"' in zi.read("word/_rels/document.xml.rels").decode()
