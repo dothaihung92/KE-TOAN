@@ -4673,7 +4673,7 @@ async function vbXuatExcel(){
 }
 
 /* ----- KHO CHỮ KÝ: chữ ký do CHÍNH giám đốc/nhân viên ký trên màn hình hoặc cung cấp ảnh; phải xác nhận đã được đồng ý thì mới tự gắn vào văn bản ----- */
-let vbCkDs=null,vbCkPad=null,vbCkMuc=[],vbCkIdx=0,vbCkDu=[];
+let vbCkDs=null,vbCkPad=null,vbCkMuc=[],vbCkIdx=0,vbCkDu=[],vbCkDaLuu=[];
 async function vbCkGui(khoa,ten,anh,xn){
   return api(`/api/chu-ky/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa,ten,anh:anh||undefined,xac_nhan:!!xn})});
 }
@@ -4687,6 +4687,7 @@ async function vbCkVe(){
   const kv=document.getElementById('vbKhoCk');if(!kv)return;
   try{vbCkDs=await api(`/api/chu-ky/${current}?nam=${vbNam}`)}catch(e){kv.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${vbEsc(e.message)}</div>`;return}
   vbCkDu=vbCkDs.du||[];
+  vbCkDaLuu=vbCkDs.da_luu||[];
   vbCkMuc=[vbCkDs.giam_doc].concat(vbCkDs.nhan_vien||[]);     // thao tác theo CHỈ SỐ (tên có dấu ' không làm hỏng onclick)
   const dong=(m,i)=>`<tr>
     <td style="padding:5px 8px;border:1px solid #ddd">${i===0?'<b>Giám đốc / người đại diện</b><br>':''}${vbEsc(m.ten)}${m.ma?` <span class="hint">(${vbEsc(m.ma)})</span>`:''}<div class="hint">${vbEsc(m.chuc_vu||'')}</div></td>
@@ -4712,6 +4713,15 @@ async function vbCkVe(){
         <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}</td>
         <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>m.co_anh?'':`<option value="${j}">${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
         <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})">🗑</button></td></tr>`).join('')}</table></div>`:''}</div>
+    <div id="vbCkDaLuuKhung" style="margin-top:8px;border:1px dashed #9bb7d8;border-radius:8px;padding:8px;background:#fff">
+      <div style="font-weight:600;margin-bottom:4px">♻ Chữ ký đã lưu dùng chung mọi công ty: <span id="vbCkDaLuuSo">${vbCkDaLuu.length}</span> chữ ký (của người chưa có trong danh sách này)</div>
+      <div class="hint" style="margin-bottom:4px">Chữ ký đã gắn ở công ty khác <b>vẫn dùng được ở công ty này</b>: người cùng CCCD / cùng họ tên tự khớp. Nếu cùng một người mà hồ sơ ghi khác (khác CCCD hoặc cách viết tên) thì chọn người đó rồi bấm “Dùng”. Chữ ký gốc vẫn được giữ trong kho.</div>
+      ${vbCkDaLuu.length?`<div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDaLuu.map((d,i)=>`<tr>
+        <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
+        <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkLuuSel${i}" style="width:100%;padding:3px"><option value="-1">— chọn người cùng là người này —</option>${vbCkMuc.map((m,j)=>m.co_anh?'':`<option value="${j}">${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
+        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkDungLai(${i})">Dùng</button></td></tr>`).join('')}</table></div>`:'<div class="hint">Chưa có chữ ký nào của người khác trong kho.</div>'}
+    </div>
     <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="vbCkNhieu" accept="image/png,image/jpeg" multiple style="display:none" onchange="vbCkNhieuChon(this.files)">
     <div id="vbCkNhieuKq"></div>
@@ -4779,6 +4789,14 @@ async function vbCkGanDu(i){
   if(!(j>=0)||!m){toast('Chọn người để gắn chữ ký','err');return}
   if(!confirm(`Xác nhận: ${m.ten} đã đồng ý lưu và sử dụng chữ ký này trên văn bản của công ty?`))return;
   try{await api(`/api/chu-ky/${current}/gan-du`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:d.id,khoa:m.khoa,ten:m.ten,xac_nhan:true})});toast('Đã gắn chữ ký','ok');await vbCkVe()}
+  catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function vbCkDungLai(i){
+  const d=vbCkDaLuu[i],sel=document.getElementById('vbCkLuuSel'+i);if(!d||!sel)return;
+  const j=parseInt(sel.value,10),m=vbCkMuc[j];
+  if(!(j>=0)||!m){toast('Chọn người để dùng chữ ký','err');return}
+  if(!confirm(`Xác nhận: “${d.ten}” và “${m.ten}” là CÙNG MỘT NGƯỜI, và người này đã đồng ý sử dụng chữ ký này trên văn bản của công ty?`))return;
+  try{await api(`/api/chu-ky/${current}/dung-lai`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nguon_khoa:d.khoa,khoa:m.khoa,ten:m.ten,xac_nhan:true})});toast('Đã dùng lại chữ ký','ok');await vbCkVe()}
   catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function vbCkXoaDu(i){

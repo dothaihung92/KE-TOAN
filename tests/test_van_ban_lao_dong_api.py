@@ -208,6 +208,26 @@ server.chu_ky_xoa_du(7, ds6["du"][0]["id"])
 assert server.chu_ky_danh_sach(7, 2026)["du"] == []
 ROWS.pop()
 
+# chữ ký ĐÃ GÁN ở công ty khác (người không có trong danh sách này) vẫn dùng lại được: sao chép, không di chuyển
+run(server.chu_ky_luu(8, Req({"khoa": "cccd:999000111", "ten": "Người Ở Cty Khác", "anh": anh(), "xac_nhan": True})))
+dl = server.chu_ky_danh_sach(7, 2026)["da_luu"]
+assert "cccd:999000111" in [d["khoa"] for d in dl] and dl[0]["anh"].startswith("data:image/png"), "công ty này thấy chữ ký đã gán ở công ty khác"
+assert not {d["khoa"] for d in dl} & {m["khoa"] for m in server.chu_ky_danh_sach(7, 2026)["nhan_vien"]}, "không lặp người đã có trong danh sách"
+ROWS.append([6, "NV6", "Nhân Viên 6", "01/01/1990", "Địa chỉ 6", "079190000106", "01/01/2020", "01/2025", "x", "", "Kế toán", 6_000_000, 730000, 0, 0, 0])
+try:
+    run(server.chu_ky_dung_lai(7, Req({"nguon_khoa": "cccd:999000111", "khoa": k6, "ten": "Nhân Viên 6", "xac_nhan": False}))); raise SystemExit("phải lỗi: chưa xác nhận cùng một người")
+except HTTPException as e:
+    assert e.status_code == 400
+try:
+    run(server.chu_ky_dung_lai(7, Req({"nguon_khoa": "cccd:khong-co", "khoa": k6, "ten": "x", "xac_nhan": True}))); raise SystemExit("phải lỗi: nguồn không tồn tại")
+except HTTPException as e:
+    assert e.status_code == 404
+run(server.chu_ky_dung_lai(7, Req({"nguon_khoa": "cccd:999000111", "khoa": k6, "ten": "Nhân Viên 6", "xac_nhan": True})))
+d7 = server.chu_ky_danh_sach(7, 2026)
+assert d7["nhan_vien"][5]["co_anh"] and d7["nhan_vien"][5]["xac_nhan"], "người này đã có chữ ký dùng lại"
+assert "cccd:999000111" in [d["khoa"] for d in d7["da_luu"]], "chữ ký gốc vẫn còn trong kho (sao chép, không di chuyển)"
+ROWS.pop()
+
 # xuất Word từ HTML đã SỬA TAY: file lưu ra DOWNLOAD_DIR, đúng nội dung đã sửa + canh chỉnh
 html_sua = r["html"].replace("Điều 5. Điều khoản thi hành", "Điều 5. Điều khoản thi hành (đã sửa tay)")
 resp = run(server.van_ban_word(7, Req({"html": html_sua, "trang": {"font": "Tahoma", "size": 12, "line": 1.5, "le": [20, 20, 30, 15]}, "ten_file": "Hợp đồng lao động 2026/..\\x"})))

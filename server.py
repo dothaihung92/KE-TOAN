@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.082"
+APP_BUILD = "2026-10-03.083"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13328,7 +13328,18 @@ def chu_ky_danh_sach(cid: int, nam: int = 0):
         thay.add(k)
         ds.append(muc(k, n["ten"], n["ma"], n["chuc_vu"], vbld.khoa_chu_ky(n["ma"], n["ten"])))
     return {"nam": nam, "giam_doc": muc(_ck_khoa_gd(cid, cty.get("nguoi_ky")), cty.get("nguoi_ky") or "Giám đốc / người đại diện", "", "Người đại diện ký", "giam_doc"),
-            "nhan_vien": ds, "tong_kho_chung": len([1 for v in chung.values() if v.get("anh")]), "du": _ck_doc_du()}
+            "nhan_vien": ds, "tong_kho_chung": len([1 for v in chung.values() if v.get("anh")]), "du": _ck_doc_du(),
+            "da_luu": _ck_da_luu_khac(chung, {m["khoa"] for m in ds} | {_ck_khoa_gd(cid, cty.get("nguoi_ky"))})}
+
+
+def _ck_da_luu_khac(chung, khoa_cua_cty):
+    """Chữ ký ĐÃ GÁN trong kho dùng chung (của công ty khác / người không có trong danh sách này) — vẫn dùng lại được ở mọi công ty."""
+    kq = []
+    for k, v in sorted(chung.items(), key=lambda kv: (kv[1].get("ten") or "")):
+        if k in khoa_cua_cty or not v.get("anh") or not v.get("xac_nhan"):
+            continue
+        kq.append({"khoa": k, "ten": v.get("ten") or k, "anh": v["anh"]})
+    return kq
 
 
 def _ck_doc_du():
@@ -13439,6 +13450,27 @@ async def chu_ky_gan_du(cid: int, request: Request):
             raise HTTPException(404, "Không tìm thấy chữ ký chưa gán này")
         _ck_luu_1(conn, cid, str(body.get("khoa") or "").strip(), body.get("ten"), r["anh"], True)
         conn.execute("DELETE FROM chu_ky_du WHERE id=?", (int(body["id"]),))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/chu-ky/{cid}/dung-lai")
+async def chu_ky_dung_lai(cid: int, request: Request):
+    """Dùng lại chữ ký ĐÃ LƯU trong kho chung (từ công ty khác) cho 1 người trong công ty này, khi đó là CÙNG MỘT NGƯỜI nhưng hồ sơ ghi khác (khác CCCD/cách viết tên).
+    {nguon_khoa, khoa, ten, xac_nhan: true}. Chữ ký gốc vẫn giữ nguyên trong kho (sao chép, không di chuyển)."""
+    body = await request.json()
+    if not body.get("xac_nhan"):
+        raise HTTPException(400, "Cần xác nhận đây là cùng một người và người này đã đồng ý sử dụng chữ ký")
+    nguon = str(body.get("nguon_khoa") or "").strip()
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        r = conn.execute("SELECT anh, xac_nhan FROM chu_ky_chung WHERE khoa=?", (nguon,)).fetchone()
+        if not r or not r["anh"] or not r["xac_nhan"]:
+            raise HTTPException(404, "Không tìm thấy chữ ký đã lưu này")
+        _ck_luu_1(conn, cid, str(body.get("khoa") or "").strip(), body.get("ten"), r["anh"], True)
         conn.commit()
     finally:
         conn.close()
