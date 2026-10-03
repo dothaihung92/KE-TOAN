@@ -148,3 +148,35 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.strictEqual(ex('nvMaGoc("2-001")'), '2'); assert.strictEqual(ex('nvMaGoc("NV-12")'), 'NV-12');
   console.log('PASS 6: ＋ thêm dòng thay đổi lương (mã -001…), cột Tháng/Năm thay đổi lương.');
 })();
+
+// 7: Kho chữ ký — thao tác theo chỉ số (tên có dấu ' không làm hỏng nút), lưu phải kèm xác nhận đồng ý
+(async () => {
+  const { ctx, goi, pt } = moiTruong({ vbKhoCk: '' });
+  ctx.api = async (u, o) => {
+    goi.push([u, o && o.body ? JSON.parse(o.body) : null, o && o.method]);
+    if (u.startsWith('/api/chu-ky/7?nam=')) return { giam_doc: { khoa: 'giam_doc', ten: 'Hồ Thị Cẩm Vân', ma: '', chuc_vu: '', co_anh: true, xac_nhan: true, anh: 'data:image/png;base64,AAA' },
+      nhan_vien: [{ khoa: 'ma:3', ten: "Nguyễn D'Arc", ma: '3', chuc_vu: 'KD', co_anh: false, xac_nhan: false, anh: '' }] };
+    return { ok: true };
+  };
+  ctx.vbNam = 2026;
+  await ctx.vbCkVe();
+  const h = pt.vbKhoCk.innerHTML;
+  assert(h.includes('onclick="vbCkMoPad(1)"') && h.includes('onclick="vbCkTai(1)"') && h.includes('vbCkXacNhan(0,this.checked)'), 'nút thao tác theo chỉ số');
+  assert(!/onclick="[^"]*D'Arc/.test(h) && !/onclick="[^"]*Nguy/.test(h), 'tên không nằm trong onclick');
+  assert(h.includes('<img src="data:image/png;base64,AAA"') && h.includes('disabled'), 'có ảnh thì hiện; chưa có ảnh thì không cho tick đồng ý');
+  await ctx.vbCkGui('ma:3', 'A', 'data:image/png;base64,BBB', true);
+  assert.deepStrictEqual(goi.pop().slice(0, 3), ['/api/chu-ky/7', { khoa: 'ma:3', ten: 'A', anh: 'data:image/png;base64,BBB', xac_nhan: true }, 'POST']);
+  await ctx.vbCkXacNhan(0, false);
+  const g = goi.find((x) => x[2] === 'POST' && x[1] && x[1].khoa === 'giam_doc');
+  assert(g && g[1].xac_nhan === false && !('anh' in g[1]), 'bỏ đồng ý: chỉ gửi xác nhận, không gửi lại ảnh');
+  ctx.confirm = () => true; await ctx.vbCkXoa(1);
+  assert(goi.some((x) => x[2] === 'DELETE' && x[0] === '/api/chu-ky/7?khoa=ma%3A3'));
+  // ký trên màn hình: chưa ký / chưa tick đồng ý -> không lưu
+  const toasts = []; ctx.toast = (m, k) => toasts.push([m, k]);
+  ctx.vbCkIdx = 1; ctx.vbCkPad = { co: false, cv: { toDataURL: () => 'data:image/png;base64,CCC' } };
+  const so = goi.length; await ctx.vbCkPadLuu();
+  assert.strictEqual(goi.length, so); assert(toasts.some(([m]) => m.includes('ký vào khung')));
+  ctx.vbCkPad.co = true; const gd = ctx.document.getElementById; ctx.document.getElementById = (id) => id === 'vbCkDongY' ? { checked: false } : gd(id);
+  await ctx.vbCkPadLuu(); assert.strictEqual(goi.length, so); assert(toasts.some(([m]) => m.includes('xác nhận')));
+  console.log('PASS 7: Kho chữ ký — thao tác theo chỉ số, bắt buộc xác nhận đồng ý.');
+})().catch((e) => { console.error(e); process.exit(1); });

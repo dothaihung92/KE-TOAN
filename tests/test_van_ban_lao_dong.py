@@ -134,7 +134,8 @@ def doc_xml(data):
     z = zipfile.ZipFile(io.BytesIO(data))
     assert set(z.namelist()) >= {"[Content_Types].xml", "_rels/.rels", "word/document.xml", "word/styles.xml", "word/_rels/document.xml.rels"}
     for n in z.namelist():
-        ET.fromstring(z.read(n))            # XML hợp lệ
+        if not n.startswith("word/media/"):
+            ET.fromstring(z.read(n))        # XML hợp lệ
     return ET.fromstring(z.read("word/document.xml")), z.read("word/styles.xml").decode("utf8")
 def van_ban_docx(root):
     return ["".join(t.text or "" for t in p.iter(W + "t")) for p in root.iter(W + "p")]
@@ -241,4 +242,24 @@ assert ten_dl == ["Giám đốc", "Kế toán; Tạp vụ"], ten_dl
 assert dl["bang"][1]["so_nguoi"] == 2 and dl["bang"][1]["thap_nhat"] == 6_500_000 and dl["bang"][1]["cao_nhat"] == 7_000_000, "người đã nghỉ việc bị loại; dò thấp/cao nhất"
 assert dl["nhom_tuy_chinh"] == "Giám đốc | 20000000\nKế toán; Tạp vụ | 6500000", dl["nhom_tuy_chinh"]
 assert "HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG NĂM 2025" in van_ban(v.dung_thang_bang_luong(nv[:4], CTY, {"ngay": "03/10/2026"}, 2025)), "tiêu đề ghi năm của Bảng lương"
+# --- ảnh chữ ký trong HTML -> Word (hình nhúng, giữ tỷ lệ); gắn đúng ô chữ ký của người đó
+import base64
+from PIL import Image as _Im, ImageDraw as _Dr
+_im = _Im.new("RGBA", (300, 100), (0, 0, 0, 0)); _Dr.Draw(_im).line([(10, 80), (80, 10), (150, 90), (290, 20)], fill=(0, 0, 128, 255), width=4)
+_b = io.BytesIO(); _im.save(_b, "PNG"); URI = "data:image/png;base64," + base64.b64encode(_b.getvalue()).decode()
+ck = {v.khoa_chu_ky("NV1", "Nguyễn Thị Chi"): URI, "giam_doc": URI}
+hh = v.dung_hop_dong(nv[0], CTY, tc, 0, chu_ky=ck)
+assert hh.count("<img") == 2 and "NGƯỜI SỬ DỤNG LAO ĐỘNG" in hh
+assert v.dung_hop_dong(nv[1], CTY, tc, 0, chu_ky=ck).count("<img") == 1, "NV khác không có chữ ký riêng: chỉ chữ ký giám đốc"
+assert v.dung_hop_dong(nv[0], CTY, dict(tc, gan_chu_ky=False), 0, chu_ky=ck).count("<img") == 0 and v.dung_hop_dong(nv[0], CTY, tc, 0).count("<img") == 0
+rootI, _ = doc_xml(v.html_sang_docx(hh))
+dr = list(rootI.iter(W + "drawing"))
+assert len(dr) == 2
+ext = dr[0].find(".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent")
+assert int(ext.get("cy")) == 56 * 9525 and abs(int(ext.get("cx")) / int(ext.get("cy")) - 3.0) < 0.02, "cao 56px, đúng tỷ lệ ảnh"
+zi = zipfile.ZipFile(io.BytesIO(v.html_sang_docx(hh)))
+assert [n for n in zi.namelist() if n.startswith("word/media/")] == ["word/media/chuky1.png", "word/media/chuky2.png"] and "image/png" in zi.read("[Content_Types].xml").decode()
+assert 'Target="media/chuky2.png"' in zi.read("word/_rels/document.xml.rels").decode()
+# src không phải ảnh data URI (vd đường dẫn ngoài) bị bỏ qua, không làm hỏng file
+doc_xml(v.html_sang_docx('<p>a <img src="http://x/y.png"> b</p>'))
 print("PASS")

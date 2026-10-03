@@ -254,7 +254,7 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "so_qd": f"01/QĐ-{hom_nay.year}", "kem_phu_luc": False,
         "phuc_loi": {k: {"bat": v[1], "m1": v[2], "m2": v[3]} for k, v in PHUC_LOI_MAC_DINH.items()},
         # thang bảng lương
-        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
+        "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "gan_chu_ky": True, "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
     }
 
 
@@ -636,10 +636,23 @@ def _tieu_ngu(cty, so_van_ban, dia_danh, ngay, co_ngay=True, co_dia_chi=False):
             + "".join(trai) + "</td><td>" + "".join(phai) + "</td></tr></table>")
 
 
-def _bang_ky(trai_tieu_de, trai_phu, trai_ten, phai_tieu_de, phai_phu, phai_ten):
+def khoa_chu_ky(ma, ten):
+    """Khoá tìm chữ ký trong Kho chữ ký: theo mã gốc (2-001 -> 2) nếu có mã, không thì theo họ tên. Giám đốc/người đại diện: 'giam_doc'."""
+    m = ma_goc_phien_ban(ma)
+    return ("ma:" + m.lower()) if m else ("ten:" + _chuan(ten))
+
+
+def _khoang_ky(anh=""):
+    """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký."""
+    if anh:
+        return f'<p class="c"><img src="{esc(anh)}" style="height:56px"></p>' + _p("&nbsp;", "c")
+    return _p("&nbsp;", "c") * 3
+
+
+def _bang_ky(trai_tieu_de, trai_phu, trai_ten, phai_tieu_de, phai_phu, phai_ten, trai_anh="", phai_anh=""):
     return ('<table class="nb"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><tr><td>'
-            + _p(f"<b>{esc(trai_tieu_de)}</b>", "c") + _p(f"<i>{esc(trai_phu)}</i>", "c") + _p("&nbsp;", "c") * 3 + _p(f"<b>{esc(trai_ten)}</b>", "c")
-            + "</td><td>" + _p(f"<b>{esc(phai_tieu_de)}</b>", "c") + _p(f"<i>{esc(phai_phu)}</i>", "c") + _p("&nbsp;", "c") * 3
+            + _p(f"<b>{esc(trai_tieu_de)}</b>", "c") + _p(f"<i>{esc(trai_phu)}</i>", "c") + _khoang_ky(trai_anh) + _p(f"<b>{esc(trai_ten)}</b>", "c")
+            + "</td><td>" + _p(f"<b>{esc(phai_tieu_de)}</b>", "c") + _p(f"<i>{esc(phai_phu)}</i>", "c") + _khoang_ky(phai_anh)
             + _p(f"<b>{esc(phai_ten)}</b>", "c") + "</td></tr></table>")
 
 
@@ -669,7 +682,7 @@ def ngay_bat_dau_theo_nam(vao_lam, nam):
     return vl
 
 
-def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None):
+def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None, chu_ky=None):
     """HTML 1 hợp đồng lao động (1 <section>) cho người lao động `nv` (dict của gop_nhan_vien)."""
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
@@ -682,6 +695,9 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None):
         so_hd = str(tc.get("mau_so") or "{so:02d}/HĐLĐ-{nam}").format(so=int(tc.get("so_bat_dau") or 1) + so_thu_tu, nam=nam_so)
     except Exception:
         so_hd = f"{int(tc.get('so_bat_dau') or 1) + so_thu_tu:02d}/HĐLĐ-{nam_so}"
+    gan = bool(tc.get("gan_chu_ky", True)) and bool(chu_ky)
+    anh_nld = (chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or "") if gan else ""
+    anh_gd = (chu_ky.get("giam_doc") or "") if gan else ""
     ong_ba_ky = tc.get("ong_ba_ky") or "Ông/Bà"
     ong_ba = {"Nam": "Ông", "Nữ": "Bà"}.get(nv.get("gioi_tinh"), "Ông/Bà")
     h = ['<section class="vb-trang">', _tieu_ngu(cty, so_hd, tc.get("dia_danh"), ngay_ky),
@@ -775,13 +791,14 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None):
           _p("2. Khi một bên có yêu cầu thay đổi nội dung hợp đồng phải báo cho bên kia biết trước ít nhất 03 ngày làm việc; việc sửa đổi, bổ sung được lập bằng phụ lục hợp đồng lao động.", "j"),
           _p(f"3. Hợp đồng lao động được làm thành 02 bản có giá trị pháp lý như nhau, mỗi bên giữ 01 bản và có hiệu lực kể từ {esc(ngay_chu(bat_dau))}.", "j"),
           _p("&nbsp;"),
-          _bang_ky("NGƯỜI LAO ĐỘNG", "(Ký, ghi rõ họ tên)", nv["ten"], "NGƯỜI SỬ DỤNG LAO ĐỘNG", f"({tc.get('chuc_danh_ky') or 'Giám đốc'} — Ký, ghi rõ họ tên, đóng dấu)", tc.get("nguoi_ky") or ""),
+          _bang_ky("NGƯỜI LAO ĐỘNG", "(Ký, ghi rõ họ tên)", nv["ten"], "NGƯỜI SỬ DỤNG LAO ĐỘNG", f"({tc.get('chuc_danh_ky') or 'Giám đốc'} — Ký, ghi rõ họ tên, đóng dấu)", tc.get("nguoi_ky") or "",
+                   anh_nld, anh_gd),
           "</section>"]
     return "".join(h)
 
 
-def dung_hop_dong_nhieu(ds_nv, cty, tuy_chon, hom_nay=None, nam=None):
-    return "".join(dung_hop_dong(nv, cty, tuy_chon, i, hom_nay, nam) for i, nv in enumerate(ds_nv))
+def dung_hop_dong_nhieu(ds_nv, cty, tuy_chon, hom_nay=None, nam=None, chu_ky=None):
+    return "".join(dung_hop_dong(nv, cty, tuy_chon, i, hom_nay, nam, chu_ky) for i, nv in enumerate(ds_nv))
 
 
 def _khoang(giatri):
@@ -792,7 +809,7 @@ def _khoang(giatri):
     return so_tien(min(gt)) if min(gt) == max(gt) else f"{so_tien(min(gt))} – {so_tien(max(gt))}"
 
 
-def dung_quy_che(nv_list, cty, tuy_chon, ts=None, nam=None, hom_nay=None):
+def dung_quy_che(nv_list, cty, tuy_chon, ts=None, nam=None, hom_nay=None, chu_ky=None):
     """HTML Quyết định ban hành Quy chế lương, thưởng, phụ cấp — số liệu lấy từ Bảng Lương + Danh Sách Nhân Viên."""
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
@@ -928,7 +945,7 @@ def dung_quy_che(nv_list, cty, tuy_chon, ts=None, nam=None, hom_nay=None):
           '<table class="nb"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><tr><td>'
           + _p("<b><i>Nơi nhận:</i></b>") + _p("- Như Điều 2;") + _p("- Toàn thể người lao động;") + _p("- Lưu: VT.")
           + "</td><td>" + _p(f"<b>{esc((tc.get('chuc_danh_ky') or 'Giám đốc').upper())}</b>", "c") + _p("<i>(Ký, ghi rõ họ tên và đóng dấu)</i>", "c")
-          + _p("&nbsp;", "c") * 3 + _p(f"<b>{esc(tc.get('nguoi_ky') or '')}</b>", "c") + "</td></tr></table>", "</section>"]
+          + _khoang_ky((chu_ky or {}).get("giam_doc") if tc.get("gan_chu_ky", True) else "") + _p(f"<b>{esc(tc.get('nguoi_ky') or '')}</b>", "c") + "</td></tr></table>", "</section>"]
     if tc.get("kem_phu_luc"):
         h.append('<section class="vb-trang">' + _p("<b>PHỤ LỤC</b>", "c b")
                  + _p(f"<b>Bảng lương cơ bản và phụ cấp từng người lao động (theo Danh sách nhân viên và Bảng lương năm {nam_du_lieu})</b>", "c") + bang_nhan_vien_html(dang_lam) + "</section>")
@@ -946,19 +963,19 @@ def bang_nhan_vien_html(ds):
     return "".join(r)
 
 
-def _ky_ben_phai(tc, ngay):
+def _ky_ben_phai(tc, ngay, anh=""):
     """Khối ký bên phải (như file mẫu): địa danh, ngày / chức danh / (Ký, ghi rõ họ tên và đóng dấu) / họ tên."""
     return ('<table class="nb"><colgroup><col style="width:55%"><col style="width:45%"></colgroup><tr><td></td><td>'
             + _p(f"<i>{esc(tc.get('dia_danh') + ', ' if tc.get('dia_danh') else '')}{esc(ngay_chu(ngay))}</i>", "c")
             + _p(f"<b>{esc((tc.get('chuc_danh_ky') or 'Giám đốc').upper())} CÔNG TY</b>", "c") + _p("<i>(Ký, ghi rõ họ tên và đóng dấu)</i>", "c")
-            + _p("&nbsp;", "c") * 3 + _p(f"<b>{esc((tc.get('nguoi_ky') or '').upper())}</b>", "c") + "</td></tr></table>")
+            + _khoang_ky(anh) + _p(f"<b>{esc((tc.get('nguoi_ky') or '').upper())}</b>", "c") + "</td></tr></table>")
 
 
 def _he_so_hien(x):
     return f"{x:.2f}".replace(".", ",")
 
 
-def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None):
+def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None, chu_ky=None):
     """HTML Hệ thống thang lương, bảng lương theo bố cục file mẫu (nhóm chức danh × bậc lương; mỗi nhóm có dòng Hệ số + Mức lương) +
     phụ lục bảng xếp lương hiện tại của từng người (kèm mức lương đóng BHXH) để đối chiếu khi thanh tra."""
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
@@ -971,6 +988,7 @@ def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None):
     nb = tl["so_bac_toi_da"]
     co_hs = bool(tc.get("hien_he_so", True))
     ltt = tl["luong_toi_thieu"]
+    anh_gd = ((chu_ky or {}).get("giam_doc") or "") if tc.get("gan_chu_ky", True) else ""
     pct = format(float(tl["buoc_pct"]), "g").replace(".", ",")
     h = ['<section class="vb-trang ngang">', _tieu_ngu(cty, "", tc.get("dia_danh"), ngay, co_ngay=False, co_dia_chi=True), _p("&nbsp;"),
          _p(f"<b>HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG NĂM {nam_du_lieu}</b>", "c b"),
@@ -997,7 +1015,7 @@ def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None):
           _p("4. Người lao động được xét nâng bậc lương khi đủ 12 tháng giữ bậc hiện hưởng, hoàn thành tốt nhiệm vụ và không bị xử lý kỷ luật lao động từ hình thức khiển trách bằng văn bản trở lên.", "j"),
           _p("5. Thang lương, bảng lương được xây dựng theo Điều 93 Bộ luật Lao động năm 2019 sau khi tham khảo ý kiến của tổ chức đại diện người lao động tại cơ sở (nếu có) "
              "và được công bố công khai tại nơi làm việc trước khi thực hiện.", "j"),
-          _p("&nbsp;"), _ky_ben_phai(tc, ngay)]
+          _p("&nbsp;"), _ky_ben_phai(tc, ngay, anh_gd)]
     if tc.get("kem_xep_luong"):
         h.append('<p class="pb">&nbsp;</p>')
         h.append(_p("<b>PHỤ LỤC</b>", "c b"))
@@ -1019,7 +1037,7 @@ def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None):
         h.append("".join(x))
         h.append(_p("Ghi chú: mức lương làm căn cứ đóng bảo hiểm xã hội bằng mức lương theo hợp đồng lao động (lương cơ bản), chưa gồm các khoản phụ cấp, hỗ trợ không thuộc diện đóng bảo hiểm.", "j i"))
         h.append(_p("&nbsp;"))
-        h.append(_ky_ben_phai(tc, ngay))
+        h.append(_ky_ben_phai(tc, ngay, anh_gd))
     h.append("</section>")
     return "".join(h)
 
@@ -1207,6 +1225,24 @@ class _HtmlSangKhoi(HTMLParser):
                 self._mo_doan({})
             self.p["runs"].append(("br",))
             return
+        if tag == "img":                         # ảnh chữ ký (data URI): giữ nguyên tỷ lệ, cao theo style height (px)
+            kq = _doc_anh_data_uri(a.get("src"))
+            if kq:
+                st = _style_dict(a.get("style"))
+                w0, h0 = _kich_thuoc_anh(kq[1])
+                cao = _twips(st.get("height")) / 15 if st.get("height") else 0
+                rong = _twips(st.get("width")) / 15 if st.get("width") else 0
+                if w0 and h0:
+                    if cao and not rong:
+                        rong = cao * w0 / h0
+                    elif rong and not cao:
+                        cao = rong * h0 / w0
+                    elif not cao and not rong:
+                        rong, cao = min(w0, 200), min(w0, 200) * h0 / w0
+                if self.p is None:
+                    self._mo_doan({})
+                self.p["runs"].append(("img", kq[0], kq[1], max(8, rong or 100), max(8, cao or 40)))
+            return
         if tag in ("b", "strong"):
             self.fmt.append((tag, {"b": True}))
         elif tag in ("i", "em"):
@@ -1266,11 +1302,50 @@ class _HtmlSangKhoi(HTMLParser):
         self.p["runs"].append(("t", t, b or pr.get("b", False), i or pr.get("i", False), u or pr.get("u", False)))
 
 
+def _kich_thuoc_anh(b):
+    """(rộng, cao) pixel của ảnh PNG/JPEG; không đọc được -> (0, 0)."""
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(b)) as im:
+            return im.size
+    except Exception:
+        pass
+    if b[:8] == b"\x89PNG\r\n\x1a\n" and len(b) >= 24:
+        import struct
+        return struct.unpack(">II", b[16:24])
+    return (0, 0)
+
+
+def _doc_anh_data_uri(src):
+    m = re.match(r"^data:image/(png|jpe?g);base64,(.+)$", str(src or "").strip(), flags=re.S | re.I)
+    if not m:
+        return None
+    import base64
+    try:
+        return ("png" if m.group(1).lower() == "png" else "jpeg"), base64.b64decode(m.group(2))
+    except Exception:
+        return None
+
+
 def _x(s):
     return _xml_esc(re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(s)))
 
 
-def _xml_doan(p, ngat_truoc=False, an_dau=False, font_cfg=None, sau=None):
+def _xml_hinh(r, hinh):
+    hinh.append((r[1], r[2]))
+    n = len(hinh)
+    cx, cy = int(r[3] * 9525), int(r[4] * 9525)
+    return ('<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
+            f'<wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{n}" name="Chu ky {n}"/>'
+            '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic>'
+            f'<pic:nvPicPr><pic:cNvPr id="{n}" name="chuky{n}"/><pic:cNvPicPr/></pic:nvPicPr>'
+            f'<pic:blipFill><a:blip r:embed="rIdImg{n}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+            '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>')
+
+
+def _xml_doan(p, ngat_truoc=False, an_dau=False, font_cfg=None, sau=None, hinh=None):
     pr = p["props"]
     ppr = []
     if ngat_truoc:
@@ -1287,6 +1362,8 @@ def _xml_doan(p, ngat_truoc=False, an_dau=False, font_cfg=None, sau=None):
     for r in p["runs"]:
         if r[0] == "br":
             kq.append("<w:r><w:br/></w:r>")
+        elif r[0] == "img":
+            kq.append(_xml_hinh(r, hinh if hinh is not None else []))
         else:
             rpr = ("<w:b/>" if r[2] else "") + ("<w:i/>" if r[3] else "") + ('<w:u w:val="single"/>' if r[4] else "")
             kq.append("<w:r>" + (f"<w:rPr>{rpr}</w:rPr>" if rpr else "") + f'<w:t xml:space="preserve">{_x(r[1].replace(chr(160), " "))}</w:t></w:r>')
@@ -1294,7 +1371,7 @@ def _xml_doan(p, ngat_truoc=False, an_dau=False, font_cfg=None, sau=None):
     return "".join(kq)
 
 
-def _xml_bang(tbl, rong_chu):
+def _xml_bang(tbl, rong_chu, hinh=None):
     rows = [r for r in tbl["rows"] if r]
     if not rows:
         return ""
@@ -1327,7 +1404,7 @@ def _xml_bang(tbl, rong_chu):
             if c["th"]:
                 tcpr += '<w:shd w:val="clear" w:color="auto" w:fill="E8E8E8"/>'
             paras = c["paras"] or [{"props": {}, "runs": []}]
-            x.append(f"<w:tc><w:tcPr>{tcpr}</w:tcPr>" + "".join(_xml_doan(p, sau=0) for p in paras) + "</w:tc>")
+            x.append(f"<w:tc><w:tcPr>{tcpr}</w:tcPr>" + "".join(_xml_doan(p, sau=0, hinh=hinh) for p in paras) + "</w:tc>")
         x.append("</w:tr>")
     x.append("</w:tbl>")
     return "".join(x)
@@ -1361,6 +1438,7 @@ def html_sang_docx(html, trang=None):
     ps.feed(html or "")
     ps._dong_doan()
     thanh = []
+    hinh = []
     ngat = False
     for k in ps.khoi:
         if k[0] == "ngat_trang":
@@ -1369,11 +1447,14 @@ def html_sang_docx(html, trang=None):
         if ngat:                    # đoạn nhỏ 1pt mở trang mới (đảm bảo cả bảng cũng sang trang)
             thanh.append('<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr></w:p>')
             ngat = False
-        thanh.append(_xml_doan(k[1]) if k[0] == "p" else _xml_bang(k[1], rong_chu))
+        thanh.append(_xml_doan(k[1], hinh=hinh) if k[0] == "p" else _xml_bang(k[1], rong_chu, hinh))
     if not thanh:
         thanh.append("<w:p/>")
     ns = ('xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
-          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"')
+          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+          'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+          'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+          'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"')
     doc = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {ns}><w:body>' + "".join(thanh)
            + f'<w:sectPr><w:pgSz w:w="{w_trang}" w:h="{h_trang}"' + (' w:orient="landscape"' if ngang else "") + "/>"
            + f'<w:pgMar w:top="{tw(le[0])}" w:right="{tw(le[3])}" w:bottom="{tw(le[1])}" w:left="{tw(le[2])}" w:header="709" w:footer="709" w:gutter="0"/>'
@@ -1385,12 +1466,16 @@ def html_sang_docx(html, trang=None):
               '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>')
     ct = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
           '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'
+          '<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>'
           '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
           '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>')
     rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
     drels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+             + "".join(f'<Relationship Id="rIdImg{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/chuky{i}.{ext}"/>'
+                       for i, (ext, _b) in enumerate(hinh, 1))
+             + '</Relationships>')
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", ct)
@@ -1398,6 +1483,8 @@ def html_sang_docx(html, trang=None):
         z.writestr("word/document.xml", doc)
         z.writestr("word/styles.xml", styles)
         z.writestr("word/_rels/document.xml.rels", drels)
+        for i, (ext, b) in enumerate(hinh, 1):
+            z.writestr(f"word/media/chuky{i}.{ext}", b)
     return buf.getvalue()
 
 

@@ -86,6 +86,68 @@ xl2 = run(server.van_ban_excel_thang_luong(7, Req({"nam": 2026})))
 ws2 = __import__("openpyxl").load_workbook(xl2.path)["Thang bảng lương"]
 assert any(c.value == "HỆ THỐNG THANG LƯƠNG, BẢNG LƯƠNG NĂM 2026" for r in ws2.iter_rows() for c in r)
 
+
+# --- Kho chữ ký: chỉ chữ ký do chính người đó cung cấp + ĐÃ xác nhận đồng ý mới được lưu/gắn vào văn bản
+import base64, io as _io
+from PIL import Image, ImageDraw
+def anh(nen=(255, 255, 255, 255), size=(400, 160)):
+    im = Image.new("RGBA", size, nen); d = ImageDraw.Draw(im)
+    d.line([(60, 120), (140, 30), (220, 130), (330, 50)], fill=(10, 20, 120, 255), width=5)
+    b = _io.BytesIO(); im.save(b, "PNG"); return "data:image/png;base64," + base64.b64encode(b.getvalue()).decode()
+def giai(uri):
+    return Image.open(_io.BytesIO(base64.b64decode(uri.split(",", 1)[1]))).convert("RGBA")
+server.nhap_lieu_get = lambda cid, loai="in": {"header": HDR, "rows": ROWS} if loai == "nv" else {"header": [], "rows": []}
+server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), bl, "", [nam])
+ds = server.chu_ky_danh_sach(7, 2026)
+assert ds["giam_doc"]["khoa"] == "giam_doc" and ds["giam_doc"]["ten"] == "Hồ Thị Cẩm Vân" and len(ds["nhan_vien"]) == 5 and not any(m["co_anh"] for m in ds["nhan_vien"])
+k2 = ds["nhan_vien"][1]["khoa"]
+assert k2 == "ma:nv2", k2
+# lưu ảnh bắt buộc kèm xác nhận đồng ý
+for loi in ({"khoa": k2, "ten": "Nhân Viên 2", "anh": anh(), "xac_nhan": False}, {"khoa": "abc", "anh": anh(), "xac_nhan": True}, {"khoa": k2, "ten": "x", "anh": "data:text/html;base64,AAAA", "xac_nhan": True},
+            {"khoa": k2, "ten": "x", "xac_nhan": True}):
+    try:
+        run(server.chu_ky_luu(7, Req(loi))); raise SystemExit("phải lỗi: %s" % loi)
+    except HTTPException as e:
+        assert e.status_code == 400
+trang = _io.BytesIO(); Image.new("RGB", (200, 80), "white").save(trang, "PNG")
+try:   # ảnh trắng toàn bộ (không có nét ký)
+    run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "x", "anh": "data:image/png;base64," + base64.b64encode(trang.getvalue()).decode(), "xac_nhan": True}))); raise SystemExit("phải lỗi")
+except HTTPException as e:
+    assert e.status_code == 400 and "trống" in e.detail
+rs = run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "anh": anh(), "xac_nhan": True})))
+im = giai(rs["anh"])
+assert im.getpixel((0, 0))[3] == 0 and im.width <= 480 and im.height <= 160 and im.width < 400, "nền trắng thành trong suốt + cắt sát nét ký"
+assert im.getchannel("A").getextrema()[1] > 200, "nét ký vẫn đặc"
+run(server.chu_ky_luu(7, Req({"khoa": "giam_doc", "ten": "Hồ Thị Cẩm Vân", "anh": anh((0, 0, 0, 0)), "xac_nhan": True})))
+ds = server.chu_ky_danh_sach(7, 2026)
+assert ds["giam_doc"]["co_anh"] and ds["giam_doc"]["xac_nhan"] and ds["nhan_vien"][1]["co_anh"] and ds["nhan_vien"][1]["anh"].startswith("data:image/png;base64,")
+# tự gắn vào hợp đồng: chữ ký người lao động + giám đốc; chỉ khi đã xác nhận
+r = run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 1, "den": 3})))
+assert r["so_chu_ky"] == 4 and r["html"].count('<img src="data:image/png') == 4, "giám đốc ký cả 3 hợp đồng + chữ ký NV2"
+sec = r["html"].split('<section class="vb-trang">')
+assert [x.count("<img") for x in sec[1:]] == [1, 2, 1], "chữ ký NV2 chỉ nằm ở hợp đồng của NV2"
+rq = run(server.van_ban_xem_truoc(7, Req({"loai": "qc", "nam": 2026})))
+assert rq["so_chu_ky"] == 1, "quy chế: chữ ký giám đốc"
+rt = run(server.van_ban_xem_truoc(7, Req({"loai": "tl", "nam": 2026})))
+assert rt["so_chu_ky"] == 2, "thang lương: chữ ký giám đốc ở cuối bảng và cuối phụ lục"
+r_tat = run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 1, "den": 3, "tuy_chon": {"gan_chu_ky": False}})))
+assert r_tat["so_chu_ky"] == 0, "tắt tự gắn chữ ký"
+# bỏ xác nhận -> không gắn nữa (ảnh vẫn giữ trong kho)
+run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "xac_nhan": False})))
+assert run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 1, "den": 3})))["so_chu_ky"] == 3, "bỏ đồng ý: chỉ còn chữ ký giám đốc"
+assert server.chu_ky_danh_sach(7, 2026)["nhan_vien"][1]["co_anh"] and not server.chu_ky_danh_sach(7, 2026)["nhan_vien"][1]["xac_nhan"]
+run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "xac_nhan": True})))
+# Word: ảnh chữ ký nằm trong file .docx
+resp = run(server.van_ban_word(7, Req({"html": run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 2, "den": 2})))["html"], "ten_file": "HD_CK"})))
+zz = zipfile.ZipFile(resp.path)
+assert sum(1 for n in zz.namelist() if n.startswith("word/media/")) == 2 and b"<w:drawing>" in zz.read("word/document.xml")
+# xoá chữ ký
+server.chu_ky_xoa(7, k2)
+assert not server.chu_ky_danh_sach(7, 2026)["nhan_vien"][1]["co_anh"]
+# người đổi mã (2 -> 2-001) vẫn dùng chung 1 chữ ký (khoá theo mã gốc)
+import van_ban_lao_dong as _v
+assert _v.khoa_chu_ky("2-001", "A") == _v.khoa_chu_ky("2", "A") == "ma:2" and _v.khoa_chu_ky("", "Trần Văn Á") == "ten:tran van a"
+
 # xuất Word từ HTML đã SỬA TAY: file lưu ra DOWNLOAD_DIR, đúng nội dung đã sửa + canh chỉnh
 html_sua = r["html"].replace("Điều 5. Điều khoản thi hành", "Điều 5. Điều khoản thi hành (đã sửa tay)")
 resp = run(server.van_ban_word(7, Req({"html": html_sua, "trang": {"font": "Tahoma", "size": 12, "line": 1.5, "le": [20, 20, 30, 15]}, "ten_file": "Hợp đồng lao động 2026/..\\x"})))

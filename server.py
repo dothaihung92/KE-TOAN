@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-02.067"
+APP_BUILD = "2026-10-03.068"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13154,6 +13154,119 @@ async def van_ban_do_luong(cid: int, request: Request):
     return kq
 
 
+# ----- KHO CHỮ KÝ: ảnh chữ ký do CHÍNH nhân viên / giám đốc cung cấp (ký trên màn hình hoặc tải ảnh) + xác nhận đã đồng ý; tự gắn vào văn bản khi in/xuất Word -----
+def _ck_dam_bao_bang(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS chu_ky (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, khoa TEXT, ten TEXT, anh TEXT, xac_nhan INTEGER DEFAULT 0, updated_at TEXT,
+        UNIQUE(company_id, khoa))""")
+
+
+def _ck_chuan_hoa_anh(data_uri):
+    """Ảnh chữ ký (PNG/JPEG data URI) -> PNG nền trong suốt, cắt sát nét ký, tối đa 480x160 (nền trắng của ảnh chụp/quét được bỏ đi)."""
+    import base64, io as _io, re
+    m = re.match(r"^data:image/(png|jpe?g);base64,(.+)$", str(data_uri or "").strip(), flags=re.S | re.I)
+    if not m:
+        raise HTTPException(400, "Ảnh chữ ký phải là PNG hoặc JPEG")
+    try:
+        raw = base64.b64decode(m.group(2))
+    except Exception:
+        raise HTTPException(400, "Ảnh chữ ký không đọc được")
+    if len(raw) > 6 * 1024 * 1024:
+        raise HTTPException(400, "Ảnh chữ ký quá lớn (tối đa 6MB)")
+    from PIL import Image
+    try:
+        im = Image.open(_io.BytesIO(raw))
+        im.load()
+    except Exception:
+        raise HTTPException(400, "Ảnh chữ ký không đọc được")
+    im = im.convert("RGBA")
+    alpha = im.getchannel("A")
+    if alpha.getextrema()[0] == 255:         # ảnh chụp/quét nền trắng: nền sáng -> trong suốt, nét ký đậm -> đặc
+        gray = im.convert("L")
+        a = gray.point(lambda x: 0 if x >= 235 else (255 if x <= 150 else int((235 - x) * 255 / 85)))
+        im.putalpha(a)
+    box = im.getchannel("A").point(lambda x: 255 if x > 20 else 0).getbbox()
+    if not box:
+        raise HTTPException(400, "Ảnh chữ ký trống (không thấy nét ký)")
+    box = (max(0, box[0] - 4), max(0, box[1] - 4), min(im.width, box[2] + 4), min(im.height, box[3] + 4))
+    im = im.crop(box)
+    im.thumbnail((480, 160))
+    out = _io.BytesIO()
+    im.save(out, "PNG", optimize=True)
+    return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
+
+
+def _ck_doc_het(cid):
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        rows = conn.execute("SELECT khoa, ten, anh, xac_nhan, updated_at FROM chu_ky WHERE company_id=?", (cid,)).fetchall()
+    finally:
+        conn.close()
+    return {r["khoa"]: dict(r) for r in rows}
+
+
+def _vb_chu_ky_dict(cid):
+    """{khoa: ảnh} CHỈ những chữ ký đã được xác nhận người đó đồng ý sử dụng."""
+    return {k: v["anh"] for k, v in _ck_doc_het(cid).items() if v.get("xac_nhan") and v.get("anh")}
+
+
+@app.get("/api/chu-ky/{cid}")
+def chu_ky_danh_sach(cid: int, nam: int = 0):
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    cty, nv, _ts = _vb_du_lieu(cid, nam)
+    luu = _ck_doc_het(cid)
+
+    def muc(khoa, ten, ma="", chuc_vu=""):
+        r = luu.get(khoa) or {}
+        return {"khoa": khoa, "ten": ten, "ma": ma, "chuc_vu": chuc_vu, "co_anh": bool(r.get("anh")), "xac_nhan": bool(r.get("xac_nhan")),
+                "anh": r.get("anh") or "", "cap_nhat": r.get("updated_at") or ""}
+    return {"nam": nam, "giam_doc": muc("giam_doc", cty.get("nguoi_ky") or "Giám đốc / người đại diện", "", "Người đại diện ký"),
+            "nhan_vien": [muc(vbld.khoa_chu_ky(n["ma"], n["ten"]), n["ten"], n["ma"], n["chuc_vu"]) for n in nv]}
+
+
+@app.post("/api/chu-ky/{cid}")
+async def chu_ky_luu(cid: int, request: Request):
+    """Body: {khoa, ten, anh (data URI, tuỳ chọn), xac_nhan}. Lưu ảnh mới BẮT BUỘC kèm xac_nhan=true (người đó đã đồng ý); không có `anh` thì chỉ đổi xác nhận."""
+    body = await request.json()
+    khoa = str(body.get("khoa") or "").strip()
+    if not (khoa == "giam_doc" or khoa.startswith(("ma:", "ten:"))) or len(khoa) > 200:
+        raise HTTPException(400, "Khoá chữ ký không hợp lệ")
+    xac_nhan = 1 if body.get("xac_nhan") else 0
+    anh = body.get("anh")
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        cu = conn.execute("SELECT anh FROM chu_ky WHERE company_id=? AND khoa=?", (cid, khoa)).fetchone()
+        if anh:
+            if not xac_nhan:
+                raise HTTPException(400, "Cần xác nhận người này đã đồng ý lưu và sử dụng chữ ký")
+            anh = _ck_chuan_hoa_anh(anh)
+        elif not cu or not cu["anh"]:
+            raise HTTPException(400, "Chưa có ảnh chữ ký của người này")
+        else:
+            anh = cu["anh"]
+        conn.execute("INSERT INTO chu_ky (company_id, khoa, ten, anh, xac_nhan, updated_at) VALUES (?,?,?,?,?,?) "
+                     "ON CONFLICT(company_id, khoa) DO UPDATE SET ten=excluded.ten, anh=excluded.anh, xac_nhan=excluded.xac_nhan, updated_at=excluded.updated_at",
+                     (cid, khoa, str(body.get("ten") or "")[:200], anh, xac_nhan, datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "anh": anh, "xac_nhan": bool(xac_nhan)}
+
+
+@app.delete("/api/chu-ky/{cid}")
+def chu_ky_xoa(cid: int, khoa: str):
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        conn.execute("DELETE FROM chu_ky WHERE company_id=? AND khoa=?", (cid, khoa))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
 @app.post("/api/van-ban/{cid}/xem-truoc")
 async def van_ban_xem_truoc(cid: int, request: Request):
     """Dựng văn bản (HTML để xem/sửa/in): loai = hd (hợp đồng lao động, từ STT `tu` đến `den`) | qc (quy chế lương) | tl (thang bảng lương)."""
@@ -13169,6 +13282,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     tc = dict(luu)
     tc.update({k: v for k, v in (body.get("tuy_chon") or {}).items() if v is not None})
     cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, tc), _LUONG_TRAN_PC_KHONG_THUE)
+    chu_ky = _vb_chu_ky_dict(cid) if tc.get("gan_chu_ky", True) else {}          # chỉ chữ ký đã xác nhận đồng ý
     if loai == "hd":
         try:
             tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv))
@@ -13180,15 +13294,15 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         if not chon:
             raise HTTPException(400, "Khoảng nhân viên đã chọn không có ai")
         ten = [n["ten"] for n in chon]
-        html = vbld.dung_hop_dong_nhieu(chon, cty, tc, nam=nam)
+        html = vbld.dung_hop_dong_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
         so = len(chon)
         cb = [c for c in cb if any(c["nd"].startswith(t + ":") for t in ten) or ":" not in c["nd"][:60]]
     elif loai == "qc":
-        html, so = vbld.dung_quy_che(nv, cty, tc, ts, nam), 1
+        html, so = vbld.dung_quy_che(nv, cty, tc, ts, nam, chu_ky=chu_ky), 1
     else:
-        html, so = vbld.dung_thang_bang_luong(nv, cty, tc, nam), 1
+        html, so = vbld.dung_thang_bang_luong(nv, cty, tc, nam, chu_ky=chu_ky), 1
         _vb_luu_thang_luong(cid, nam, tc)      # lưu cấu hình thang lương theo từng năm (nhóm chức danh, % bậc...) để Quy chế/Danh sách NV dùng thống nhất
-    return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "canh_bao": cb}
+    return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "canh_bao": cb, "so_chu_ky": html.count('<img src="data:image')}
 
 
 @app.post("/api/van-ban/{cid}/word")

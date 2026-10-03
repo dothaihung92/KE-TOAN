@@ -4531,6 +4531,11 @@ function vbVeMan(){
         'Nhóm chức danh và bậc lương dựng từ lương cơ bản đang trả trong Bảng Lương (bậc 1 = mức thấp nhất của nhóm, không thấp hơn lương tối thiểu vùng); có thể tự khai báo nhóm (vd Giám đốc, Phó giám đốc; Kế toán trưởng) như file mẫu.'}
         Văn bản xem trước <b>sửa trực tiếp được</b>; chỉnh phông, cỡ chữ, giãn dòng, lề rồi in hoặc xuất Word.</div>
       ${form}${hopCb}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <button class="btn sm" style="background:#6b3fa0" onclick="vbMoKhoCk()" title="Nơi lưu chữ ký của giám đốc và từng nhân viên (do chính họ ký trên màn hình hoặc cung cấp ảnh)">✍ Kho chữ ký</button>
+        <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_gan_chu_ky" ${tc.gan_chu_ky===false?'':'checked'}> Tự gắn chữ ký trong Kho vào văn bản (chỉ chữ ký đã được người đó đồng ý)</label>
+      </div>
+      <div id="vbKhoCk" style="display:none"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
         <button class="btn gold" onclick="vbTaoXemTruoc()">📝 Tạo bản xem trước</button>
         <span id="vbThongTin" class="hint" style="align-self:center"></span>
@@ -4580,7 +4585,7 @@ function vbTuyChon(){
   const g=id=>{const e=document.getElementById(id);return e?e.value.trim():undefined};
   const k={};
   ['ngay','dia_danh','nguoi_ky','chuc_danh_ky','ong_ba_ky','dien_thoai','loai_hd','so_thang','bat_dau','ngay_ky','so_bat_dau','mau_so','dia_diem','bo_phan','cong_viec','thoi_gio','hinh_thuc_tra','ngay_tra','so_qd','vung','buoc_pct','so_bac','nhom_tuy_chinh'].forEach(f=>{const v=g('vb_'+f);if(v!==undefined)k[f]=v});
-  ['kem_phu_luc','kem_xep_luong','ghi_phu_cap','hien_he_so'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
+  ['kem_phu_luc','kem_xep_luong','ghi_phu_cap','hien_he_so','gan_chu_ky'].forEach(f=>{const e=document.getElementById('vb_'+f);if(e)k[f]=e.checked});
   if(vbLoai==='qc'){
     k.phuc_loi={};
     Object.keys(VB_PHUC_LOI_TEN).forEach(p=>{const e=document.getElementById('vb_pl_'+p);if(!e)return;
@@ -4605,7 +4610,7 @@ async function vbTaoXemTruoc(){
     document.getElementById('vb_ngang').checked=!!t.ngang;
     document.getElementById('vbXem').innerHTML=d.html;
     vbApDungTrang();vbSua=false;
-    tt.textContent=vbLoai==='hd'?`Đã dựng ${d.so_van_ban} hợp đồng (mỗi hợp đồng 1 trang riêng).`:'Đã dựng văn bản.';
+    tt.textContent=(vbLoai==='hd'?`Đã dựng ${d.so_van_ban} hợp đồng (mỗi hợp đồng 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
     document.getElementById('vbXem').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){tt.textContent='';toast('Lỗi: '+e.message,'err')}
 }
@@ -4639,6 +4644,96 @@ async function vbXuatExcel(){
     await xuatFile(r,`ThangBangLuong_${vbNam}.xlsx`);
     toast(`📊 Đã xuất Excel thang bảng lương${dk?' — đã lưu ra Desktop':''}`,'ok');
   }catch(e){toast('Lỗi xuất Excel: '+e.message,'err')}
+}
+
+/* ----- KHO CHỮ KÝ: chữ ký do CHÍNH giám đốc/nhân viên ký trên màn hình hoặc cung cấp ảnh; phải xác nhận đã được đồng ý thì mới tự gắn vào văn bản ----- */
+let vbCkDs=null,vbCkPad=null,vbCkMuc=[],vbCkIdx=0;
+async function vbCkGui(khoa,ten,anh,xn){
+  return api(`/api/chu-ky/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa,ten,anh:anh||undefined,xac_nhan:!!xn})});
+}
+async function vbMoKhoCk(){
+  const kv=document.getElementById('vbKhoCk');if(!kv)return;
+  if(kv.style.display==='block'){kv.style.display='none';return}
+  kv.style.display='block';kv.innerHTML='<div class="hint">Đang tải Kho chữ ký…</div>';
+  await vbCkVe();
+}
+async function vbCkVe(){
+  const kv=document.getElementById('vbKhoCk');if(!kv)return;
+  try{vbCkDs=await api(`/api/chu-ky/${current}?nam=${vbNam}`)}catch(e){kv.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${vbEsc(e.message)}</div>`;return}
+  vbCkMuc=[vbCkDs.giam_doc].concat(vbCkDs.nhan_vien||[]);     // thao tác theo CHỈ SỐ (tên có dấu ' không làm hỏng onclick)
+  const dong=(m,i)=>`<tr>
+    <td style="padding:5px 8px;border:1px solid #ddd">${i===0?'<b>Giám đốc / người đại diện</b><br>':''}${vbEsc(m.ten)}${m.ma?` <span class="hint">(${vbEsc(m.ma)})</span>`:''}<div class="hint">${vbEsc(m.chuc_vu||'')}</div></td>
+    <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;min-width:170px;background:#fff">${m.co_anh?`<img src="${m.anh}" style="max-height:44px;max-width:160px">`:'<span class="hint">chưa có</span>'}</td>
+    <td style="padding:5px 8px;border:1px solid #ddd;text-align:center"><input type="checkbox" ${m.xac_nhan?'checked':''} ${m.co_anh?'':'disabled'} onchange="vbCkXacNhan(${i},this.checked)" title="Người này đã đồng ý lưu và sử dụng chữ ký trên văn bản của công ty"></td>
+    <td style="padding:5px 8px;border:1px solid #ddd;white-space:nowrap">
+      <button class="btn ghost sm" onclick="vbCkMoPad(${i})">✍ Ký trên màn hình</button>
+      <button class="btn ghost sm" onclick="vbCkTai(${i})">📁 Tải ảnh</button>
+      ${m.co_anh?`<button class="btn ghost sm" style="color:#c00" onclick="vbCkXoa(${i})">🗑</button>`:''}</td></tr>`;
+  kv.innerHTML=`<div style="border:1px solid #d9c9ee;background:#faf6ff;border-radius:10px;padding:10px;margin-bottom:10px">
+    <div style="font-weight:700;margin-bottom:4px">✍ Kho chữ ký</div>
+    <div class="hint" style="margin-bottom:6px">Chỉ lưu chữ ký do <b>chính người đó</b> ký (trên màn hình/điện thoại) hoặc ảnh chữ ký họ cung cấp, và phải tick “đã đồng ý”. Phần mềm sẽ tự gắn vào ô chữ ký khi tạo hợp đồng / quy chế / thang bảng lương và xuất Word. Chữ ký lưu trong máy này.</div>
+    <div style="max-height:320px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">
+      <tr style="background:#efe6fb"><th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Người ký</th><th style="padding:4px 8px;border:1px solid #ddd">Chữ ký</th><th style="padding:4px 8px;border:1px solid #ddd">Đã đồng ý</th><th style="padding:4px 8px;border:1px solid #ddd"></th></tr>
+      ${vbCkMuc.map((m,i)=>dong(m,i)).join('')}</table></div>
+    <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
+    </div>`;
+}
+async function vbCkXacNhan(i,xn){
+  const m=vbCkMuc[i];if(!m)return;
+  try{await vbCkGui(m.khoa,m.ten,null,xn);toast(xn?'Đã ghi nhận người này đồng ý dùng chữ ký':'Đã bỏ đồng ý — chữ ký sẽ không được gắn','ok');await vbCkVe()}
+  catch(e){toast('Lỗi: '+e.message,'err');await vbCkVe()}
+}
+async function vbCkXoa(i){
+  const m=vbCkMuc[i];if(!m)return;
+  if(!confirm('Xóa chữ ký đã lưu của người này?'))return;
+  try{await api(`/api/chu-ky/${current}?khoa=${encodeURIComponent(m.khoa)}`,{method:'DELETE'});await vbCkVe()}catch(e){toast('Lỗi: '+e.message,'err')}
+}
+function vbCkTai(i){
+  const m=vbCkMuc[i],khoa=m&&m.khoa,ten=m&&m.ten;
+  const f=document.getElementById('vbCkFile');if(!f||!m)return;
+  f.value='';
+  f.onchange=()=>{
+    const file=f.files&&f.files[0];if(!file)return;
+    if(!confirm(`Xác nhận: ${ten} đã đồng ý lưu và sử dụng ảnh chữ ký này trên văn bản của công ty?`))return;
+    const rd=new FileReader();
+    rd.onload=async()=>{try{await vbCkGui(khoa,ten,rd.result,true);toast('Đã lưu chữ ký','ok');await vbCkVe()}catch(e){toast('Lỗi: '+e.message,'err')}};
+    rd.readAsDataURL(file);
+  };
+  f.click();
+}
+// Bảng ký trên màn hình: chuột / bút / ngón tay; nét ký lưu nền trong suốt
+function vbCkMoPad(i){
+  const m=vbCkMuc[i];if(!m)return;
+  const ten=m.ten;
+  vbCkIdx=i;
+  const old=document.getElementById('vbCkPadWrap');if(old)old.remove();
+  const w=document.createElement('div');w.id='vbCkPadWrap';
+  w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  w.innerHTML=`<div style="background:#fff;border-radius:12px;padding:16px;width:min(560px,94vw)">
+    <div style="font-weight:700;margin-bottom:6px">✍ Ký trên màn hình — ${vbEsc(ten)}</div>
+    <canvas id="vbCkCanvas" width="520" height="190" style="width:100%;border:1px dashed #999;border-radius:8px;touch-action:none;background:#fff;cursor:crosshair"></canvas>
+    <label style="display:flex;gap:6px;align-items:flex-start;font-size:13px;margin:8px 0"><input type="checkbox" id="vbCkDongY" style="margin-top:3px"> <span><b>${vbEsc(ten)}</b> tự ký và đồng ý lưu, sử dụng chữ ký này trên hợp đồng, quy chế, thang bảng lương của công ty.</span></label>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost sm" onclick="vbCkPadXoa()">Xóa nét</button><button class="btn ghost sm" onclick="document.getElementById('vbCkPadWrap').remove()">Hủy</button>
+      <button class="btn gold sm" onclick="vbCkPadLuu()">💾 Lưu chữ ký</button></div></div>`;
+  document.body.appendChild(w);
+  const cv=document.getElementById('vbCkCanvas'),cx=cv.getContext('2d');
+  cx.lineWidth=2.6;cx.lineCap='round';cx.lineJoin='round';cx.strokeStyle='#0a2a6b';
+  vbCkPad={cv,cx,ve:false,co:false};
+  const toa=e=>{const r=cv.getBoundingClientRect();const p=e.touches?e.touches[0]:e;return [(p.clientX-r.left)*cv.width/r.width,(p.clientY-r.top)*cv.height/r.height]};
+  const bat=e=>{e.preventDefault();vbCkPad.ve=true;const [x,y]=toa(e);cx.beginPath();cx.moveTo(x,y);cx.lineTo(x+0.1,y+0.1);cx.stroke()};
+  const ve=e=>{if(!vbCkPad.ve)return;e.preventDefault();const [x,y]=toa(e);cx.lineTo(x,y);cx.stroke();cx.beginPath();cx.moveTo(x,y);vbCkPad.co=true};
+  const dung=()=>{vbCkPad.ve=false};
+  cv.addEventListener('mousedown',bat);cv.addEventListener('mousemove',ve);window.addEventListener('mouseup',dung);
+  cv.addEventListener('touchstart',bat,{passive:false});cv.addEventListener('touchmove',ve,{passive:false});cv.addEventListener('touchend',dung);
+}
+function vbCkPadXoa(){if(!vbCkPad)return;vbCkPad.cx.clearRect(0,0,vbCkPad.cv.width,vbCkPad.cv.height);vbCkPad.co=false}
+async function vbCkPadLuu(){
+  const m=vbCkMuc[vbCkIdx],khoa=m&&m.khoa,ten=m&&m.ten;
+  if(!m)return;
+  if(!vbCkPad||!vbCkPad.co){toast('Hãy ký vào khung trước','err');return}
+  if(!document.getElementById('vbCkDongY').checked){toast('Cần tick xác nhận người này đồng ý lưu và sử dụng chữ ký','err');return}
+  try{await vbCkGui(khoa,ten,vbCkPad.cv.toDataURL('image/png'),true);document.getElementById('vbCkPadWrap').remove();toast('Đã lưu chữ ký','ok');await vbCkVe()}
+  catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function moDanhSachNhanVien(tuBangLuong){
   if(!tuBangLuong)nvTuBl=null;    // mở từ menu thường: không tô viền
