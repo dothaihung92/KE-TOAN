@@ -39,6 +39,8 @@ def thang(nam, th, tu='01/2024', den='01/2024', vao='02/2024'):
     return (r[0]["dong_bh"], r[0]["thu_viec"]) if r else None
 assert thang(2023, 12) is None, "trước tháng thử việc: không có trong bảng lương"
 assert thang(2024, 1) == (0, 1) and thang(2024, 2) == (1, 0) and thang(2024, 12) == (1, 0)
+# thử việc 01/2024, vào làm 12/2024: các tháng 2..11 không lên bảng lương; T1 thử việc; từ T12 đóng BHXH
+assert thang(2024, 1, vao='12/2024') == (0, 1) and all(thang(2024, m, vao='12/2024') is None for m in range(2, 12)) and thang(2024, 12, vao='12/2024') == (1, 0) and thang(2025, 3, vao='12/2024') == (1, 0)
 assert thang(2024, 1, vao='') == (0, 1) and thang(2024, 2, vao='') == (1, 0), "không ghi tháng vào làm: BHXH từ ngày sau khi hết thử việc"
 assert thang(2023, 12, tu='', den='', vao='01/2024') == (0, 0) and thang(2024, 1, tu='', den='', vao='01/2024') == (1, 0), "không ghi thử việc: như bình thường (có trên bảng lương, BHXH từ tháng vào làm)"
 

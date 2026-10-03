@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.072"
+APP_BUILD = "2026-10-03.073"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10723,6 +10723,11 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
         # BHXH bắt đầu theo Tháng/Năm vào làm).
         bd = _luong_doc_ngay_thang(lay(r, "Thử việc từ"))
         if bd and nam and thang and (int(nam), int(thang)) < (bd[0], bd[1]):
+            continue
+        # Đã hết thử việc nhưng chưa tới tháng vào làm chính thức (vd thử việc 01/2024, vào làm 12/2024): các tháng ở giữa không lên bảng lương.
+        _tv_tu, _tv_den = _luong_thu_viec_khoang(lay(r, "Thử việc từ"), lay(r, "Thử việc đến"))
+        _vl = _luong_doc_ngay_thang(lay(r, "Tháng/Năm vào làm"))
+        if _tv_den and _vl and nam and thang and (_tv_den.year, _tv_den.month) < (int(nam), int(thang)) < (_vl[0], _vl[1]):
             continue
         tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
         # Thử việc theo HĐ thử việc riêng (cột "Thử việc từ"/"Thử việc đến"): không đóng BHXH trong thời gian thử việc; BHXH bắt đầu từ NGÀY SAU khi hết thử việc
