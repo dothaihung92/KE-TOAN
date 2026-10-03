@@ -4728,14 +4728,22 @@ async function vbCkNhieuChon(files){
   const kq=document.getElementById('vbCkNhieuKq');if(!kq||!files||!files.length)return;
   const doc=f=>new Promise(res=>{const r=new FileReader();r.onload=()=>res({ten:f.name,anh:r.result});r.readAsDataURL(f)});
   const ds=await Promise.all(Array.from(files).map(doc));
-  vbCkNhieuDs=ds.map(d=>Object.assign(d,{idx:vbCkKhopTen(d.ten,vbCkMuc)}));
-  const opt=sel=>`<option value="-1">— bỏ qua —</option>`+vbCkMuc.map((m,i)=>`<option value="${i}" ${i===sel?'selected':''}>${i===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('');
+  vbCkNhieuDs=ds.map(d=>{let i=vbCkKhopTen(d.ten,vbCkMuc);if(i>=0&&vbCkMuc[i].co_anh)i=-1;return Object.assign(d,{idx:i})});   // người ĐÃ có chữ ký không tự ghép lại
+  vbCkNhieuVe();
+}
+// Bảng ghép: người đã có chữ ký trong Kho, và người đã được ghép ở dòng khác, KHÔNG hiện trong danh sách chọn
+function vbCkNhieuVe(){
+  const kq=document.getElementById('vbCkNhieuKq');if(!kq)return;
+  const dung=new Set(vbCkNhieuDs.map(d=>d.idx).filter(i=>i>=0));
+  const opt=sel=>`<option value="-1">— bỏ qua —</option>`+vbCkMuc.map((m,i)=>(m.co_anh||(dung.has(i)&&i!==sel))?'':`<option value="${i}" ${i===sel?'selected':''}>${i===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('');
+  const daCo=vbCkMuc.filter(m=>m.co_anh).length;
   kq.innerHTML=`<div style="border:1px solid #cdb8ea;background:#fff;border-radius:8px;padding:8px;margin-top:8px">
     <div style="font-weight:600;margin-bottom:4px">Ghép ${vbCkNhieuDs.length} file chữ ký với nhân viên (tự ghép theo mã NV hoặc họ tên trong tên file — kiểm tra lại, đổi người nếu sai)</div>
+    <div class="hint" style="margin-bottom:4px">Đã ghép ${dung.size}/${vbCkNhieuDs.length} file${daCo?` — ẩn ${daCo} người đã có chữ ký trong Kho`:''}.</div>
     <div style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkNhieuDs.map((d,i)=>`<tr>
       <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
       <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}</td>
-      <td style="padding:3px 6px;border:1px solid #ddd"><select onchange="vbCkNhieuDs[${i}].idx=parseInt(this.value,10)" style="width:100%;padding:3px">${opt(d.idx)}</select></td></tr>`).join('')}</table></div>
+      <td style="padding:3px 6px;border:1px solid #ddd"><select onchange="vbCkNhieuDs[${i}].idx=parseInt(this.value,10);vbCkNhieuVe()" style="width:100%;padding:3px">${opt(d.idx)}</select></td></tr>`).join('')}</table></div>
     <label style="display:flex;gap:6px;align-items:flex-start;font-size:13px;margin:8px 0"><input type="checkbox" id="vbCkNhieuDongY" style="margin-top:3px"> <span>Các nhân viên/giám đốc trên đã <b>đồng ý lưu và sử dụng</b> chữ ký của mình trên hợp đồng, quy chế, thang bảng lương.</span></label>
     <button class="btn gold sm" onclick="vbCkNhieuLuu()">💾 Lưu tất cả đã ghép</button> <button class="btn ghost sm" onclick="document.getElementById('vbCkNhieuKq').innerHTML=''">Hủy</button></div>`;
 }

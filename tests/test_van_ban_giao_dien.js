@@ -233,3 +233,18 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
     ok();
   }, 30));
 })();
+
+// 11: bảng ghép nhiều chữ ký — người đã có chữ ký / đã được ghép ở dòng khác không hiện trong danh sách chọn
+(() => {
+  const { ctx, pt } = moiTruong({ vbCkNhieuKq: '' });
+  ctx.vbCkMuc = [{ khoa: 'gd:x', ten: 'Giám Đốc', ma: '', co_anh: true }, { khoa: 'cccd:1', ten: 'Trần Minh Hùng', ma: '2', co_anh: true }, { khoa: 'cccd:2', ten: 'Nguyễn Giang Nam', ma: '3', co_anh: false }, { khoa: 'cccd:3', ten: 'Lê Văn C', ma: '4', co_anh: false }];
+  assert.strictEqual(ctx.vbCkKhopTen('Tran Minh Hung.png', ctx.vbCkMuc), 1);
+  ctx.vbCkNhieuDs = [{ ten: 'a.png', anh: 'data:image/png;base64,A', idx: 2 }, { ten: 'b.png', anh: 'data:image/png;base64,B', idx: -1 }];
+  ctx.vbCkNhieuVe();
+  const h = pt.vbCkNhieuKq.innerHTML;
+  const sel = h.split('<select');
+  assert(!h.includes('Trần Minh Hùng') && !h.includes('Giám đốc: '), 'người đã có chữ ký bị ẩn');
+  assert(sel[1].includes('Nguyễn Giang Nam') && sel[1].includes('Lê Văn C'), 'dòng 1 giữ lựa chọn của mình + còn người chưa ghép');
+  assert(!sel[2].includes('Nguyễn Giang Nam') && sel[2].includes('Lê Văn C'), 'người đã ghép ở dòng khác không hiện ở dòng này');
+  console.log('PASS 11: ẩn người đã có chữ ký / đã ghép khỏi danh sách chọn.');
+})();
