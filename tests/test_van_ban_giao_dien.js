@@ -206,7 +206,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   await ctx.vbCkNhieuLuu(); assert(!goi.length && toasts.some(([m]) => m.includes('xác nhận')));
   dongy = true; await ctx.vbCkNhieuLuu();
   const g = goi.find((x) => x[0].endsWith('/nhieu'));
-  assert(g && g[1].xac_nhan === true && g[1].muc.length === 2 && g[1].muc.find((x) => x.khoa === 'cccd:1').anh.endsWith('B') && g[1].muc.find((x) => x.khoa === 'gd:ho thi cam van'));
+  assert(g && g[1].du.length === 2 && g[1].du.map((x) => x.ten).join() === 'a,c' && g[1].xac_nhan === true && g[1].muc.length === 2 && g[1].muc.find((x) => x.khoa === 'cccd:1').anh.endsWith('B') && g[1].muc.find((x) => x.khoa === 'gd:ho thi cam van'));
   console.log('PASS 9: chọn nhiều chữ ký — tự ghép tên file, bắt buộc xác nhận, lưu 1 lần.');
 })().catch((e) => { console.error(e); process.exit(1); });
 
@@ -248,3 +248,19 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(!sel[2].includes('Nguyễn Giang Nam') && sel[2].includes('Lê Văn C'), 'người đã ghép ở dòng khác không hiện ở dòng này');
   console.log('PASS 11: ẩn người đã có chữ ký / đã ghép khỏi danh sách chọn.');
 })();
+
+// 12: hợp đồng lao động / thử việc không còn nút Kho chữ ký; chữ ký chưa gán gắn sau cho người khác
+(async () => {
+  const iV = html.indexOf('function vbVeMan'), iE = html.indexOf('function vbTuyChon', iV);
+  const phan = html.slice(iV, iE);
+  assert(phan.includes("(l==='hd'||l==='tv')?'':`<button class=\"btn sm\" style=\"background:#6b3fa0\" onclick=\"vbMoKhoCk()\""), 'ẩn nút Kho chữ ký ở hợp đồng lao động + thử việc (qc/tl vẫn có)');
+  const { ctx, goi } = moiTruong({ vbCkDuSel0: '3' });
+  ctx.vbCkMuc = [{ khoa: 'gd:x', ten: 'GĐ', co_anh: true }, { khoa: 'cccd:1', ten: 'A', co_anh: true }, { khoa: 'cccd:2', ten: 'B', co_anh: false }, { khoa: 'cccd:3', ten: 'Người mới', ma: '9', co_anh: false }];
+  ctx.vbCkDu = [{ id: 5, ten: 'chu_ky_20.png', anh: 'data:image/png;base64,Z' }];
+  ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null, o && o.method]); return u.includes('?nam=') ? { giam_doc: ctx.vbCkMuc[0], nhan_vien: ctx.vbCkMuc.slice(1), du: [] } : { ok: true }; };
+  ctx.confirm = () => false; await ctx.vbCkGanDu(0); assert(!goi.length, 'không xác nhận thì không gắn');
+  ctx.confirm = () => true; await ctx.vbCkGanDu(0);
+  const g = goi.find((x) => x[0].endsWith('/gan-du'));
+  assert(g && g[1].id === 5 && g[1].khoa === 'cccd:3' && g[1].xac_nhan === true);
+  console.log('PASS 12: ẩn Kho chữ ký ở hợp đồng; gắn chữ ký chưa gán cho người mới.');
+})().catch((e) => { console.error(e); process.exit(1); });

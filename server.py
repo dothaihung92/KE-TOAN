@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.080"
+APP_BUILD = "2026-10-03.081"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13230,6 +13230,8 @@ def _ck_dam_bao_bang(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS chu_ky (
         id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, khoa TEXT, ten TEXT, anh TEXT, xac_nhan INTEGER DEFAULT 0, updated_at TEXT,
         UNIQUE(company_id, khoa))""")        # bảng cũ theo từng công ty (chỉ còn đọc để tương thích)
+    conn.execute("""CREATE TABLE IF NOT EXISTS chu_ky_du (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ten_file TEXT, anh TEXT, updated_at TEXT)""")      # chữ ký CHƯA GÁN cho ai (nhiều hơn danh sách nhân viên): giữ lại để gán sau
     conn.execute("""CREATE TABLE IF NOT EXISTS chu_ky_chung (
         khoa TEXT PRIMARY KEY, ten TEXT, anh TEXT, xac_nhan INTEGER DEFAULT 0, updated_at TEXT)""")     # KHO CHUNG nhiều công ty: khoá theo CCCD / họ tên / người đại diện
 
@@ -13326,7 +13328,16 @@ def chu_ky_danh_sach(cid: int, nam: int = 0):
         thay.add(k)
         ds.append(muc(k, n["ten"], n["ma"], n["chuc_vu"], vbld.khoa_chu_ky(n["ma"], n["ten"])))
     return {"nam": nam, "giam_doc": muc(_ck_khoa_gd(cid, cty.get("nguoi_ky")), cty.get("nguoi_ky") or "Giám đốc / người đại diện", "", "Người đại diện ký", "giam_doc"),
-            "nhan_vien": ds, "tong_kho_chung": len([1 for v in chung.values() if v.get("anh")])}
+            "nhan_vien": ds, "tong_kho_chung": len([1 for v in chung.values() if v.get("anh")]), "du": _ck_doc_du()}
+
+
+def _ck_doc_du():
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        return [{"id": r["id"], "ten": r["ten_file"] or "", "anh": r["anh"]} for r in conn.execute("SELECT id, ten_file, anh FROM chu_ky_du ORDER BY id").fetchall()]
+    finally:
+        conn.close()
 
 
 def _ck_luu_1(conn, cid, khoa, ten, anh, xac_nhan):
@@ -13387,9 +13398,10 @@ async def chu_ky_luu_nhieu(cid: int, request: Request):
     if not body.get("xac_nhan"):
         raise HTTPException(400, "Cần xác nhận các nhân viên này đã đồng ý lưu và sử dụng chữ ký")
     ds = body.get("muc") or []
-    if not isinstance(ds, list) or not ds:
+    du = body.get("du") or []
+    if not isinstance(ds, list) or (not ds and not du):
         raise HTTPException(400, "Chưa có chữ ký nào để lưu")
-    da_luu, loi = 0, []
+    da_luu, loi, da_giu = 0, [], 0
     conn = db()
     try:
         _ck_dam_bao_bang(conn)
@@ -13399,10 +13411,50 @@ async def chu_ky_luu_nhieu(cid: int, request: Request):
                 da_luu += 1
             except HTTPException as e:
                 loi.append({"ten": str(m.get("ten") or m.get("khoa") or ""), "loi": e.detail})
+        # File chưa ghép với ai (nhiều chữ ký hơn danh sách nhân viên): LƯU LẠI trong kho chữ ký chưa gán để gán sau cho người mới thêm
+        for m in du[:500]:
+            try:
+                a = _ck_chuan_hoa_anh(m.get("anh"))
+                conn.execute("INSERT INTO chu_ky_du (ten_file, anh, updated_at) VALUES (?,?,?)", (str(m.get("ten") or "")[:200], a, datetime.datetime.now().isoformat()))
+                da_giu += 1
+            except HTTPException as e:
+                loi.append({"ten": str(m.get("ten") or ""), "loi": e.detail})
         conn.commit()
     finally:
         conn.close()
-    return {"ok": True, "da_luu": da_luu, "loi": loi}
+    return {"ok": True, "da_luu": da_luu, "da_giu": da_giu, "loi": loi}
+
+
+@app.post("/api/chu-ky/{cid}/gan-du")
+async def chu_ky_gan_du(cid: int, request: Request):
+    """Gán 1 chữ ký trong kho CHƯA GÁN cho 1 người: {id, khoa, ten, xac_nhan: true} — phải xác nhận người đó đồng ý."""
+    body = await request.json()
+    if not body.get("xac_nhan"):
+        raise HTTPException(400, "Cần xác nhận người này đã đồng ý lưu và sử dụng chữ ký")
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        r = conn.execute("SELECT anh FROM chu_ky_du WHERE id=?", (int(body.get("id") or 0),)).fetchone()
+        if not r:
+            raise HTTPException(404, "Không tìm thấy chữ ký chưa gán này")
+        _ck_luu_1(conn, cid, str(body.get("khoa") or "").strip(), body.get("ten"), r["anh"], True)
+        conn.execute("DELETE FROM chu_ky_du WHERE id=?", (int(body["id"]),))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/chu-ky/{cid}/du")
+def chu_ky_xoa_du(cid: int, id: int):
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        conn.execute("DELETE FROM chu_ky_du WHERE id=?", (id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
 
 
 @app.delete("/api/chu-ky/{cid}")

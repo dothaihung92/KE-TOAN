@@ -4558,7 +4558,7 @@ function vbVeMan(){
         Văn bản xem trước <b>sửa trực tiếp được</b>; chỉnh phông, cỡ chữ, giãn dòng, lề rồi in hoặc xuất Word.</div>
       ${form}${hopCb}
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-        <button class="btn sm" style="background:#6b3fa0" onclick="vbMoKhoCk()" title="Nơi lưu chữ ký của giám đốc và từng nhân viên (do chính họ ký trên màn hình hoặc cung cấp ảnh)">✍ Kho chữ ký</button>
+        ${(l==='hd'||l==='tv')?'':`<button class="btn sm" style="background:#6b3fa0" onclick="vbMoKhoCk()" title="Nơi lưu chữ ký của giám đốc và từng nhân viên (do chính họ ký trên màn hình hoặc cung cấp ảnh)">✍ Kho chữ ký</button>`}
         <label style="font-size:13px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="vb_gan_chu_ky" ${tc.gan_chu_ky===false?'':'checked'}> Tự gắn chữ ký trong Kho vào văn bản (chỉ chữ ký đã được người đó đồng ý)</label>
       </div>
       <div id="vbKhoCk" style="display:none"></div>
@@ -4673,7 +4673,7 @@ async function vbXuatExcel(){
 }
 
 /* ----- KHO CHỮ KÝ: chữ ký do CHÍNH giám đốc/nhân viên ký trên màn hình hoặc cung cấp ảnh; phải xác nhận đã được đồng ý thì mới tự gắn vào văn bản ----- */
-let vbCkDs=null,vbCkPad=null,vbCkMuc=[],vbCkIdx=0;
+let vbCkDs=null,vbCkPad=null,vbCkMuc=[],vbCkIdx=0,vbCkDu=[];
 async function vbCkGui(khoa,ten,anh,xn){
   return api(`/api/chu-ky/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa,ten,anh:anh||undefined,xac_nhan:!!xn})});
 }
@@ -4686,6 +4686,7 @@ async function vbMoKhoCk(){
 async function vbCkVe(){
   const kv=document.getElementById('vbKhoCk');if(!kv)return;
   try{vbCkDs=await api(`/api/chu-ky/${current}?nam=${vbNam}`)}catch(e){kv.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${vbEsc(e.message)}</div>`;return}
+  vbCkDu=vbCkDs.du||[];
   vbCkMuc=[vbCkDs.giam_doc].concat(vbCkDs.nhan_vien||[]);     // thao tác theo CHỈ SỐ (tên có dấu ' không làm hỏng onclick)
   const dong=(m,i)=>`<tr>
     <td style="padding:5px 8px;border:1px solid #ddd">${i===0?'<b>Giám đốc / người đại diện</b><br>':''}${vbEsc(m.ten)}${m.ma?` <span class="hint">(${vbEsc(m.ma)})</span>`:''}<div class="hint">${vbEsc(m.chuc_vu||'')}</div></td>
@@ -4703,6 +4704,13 @@ async function vbCkVe(){
     <div style="max-height:320px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">
       <tr style="background:#efe6fb"><th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Người ký</th><th style="padding:4px 8px;border:1px solid #ddd">Chữ ký</th><th style="padding:4px 8px;border:1px solid #ddd">Đã đồng ý</th><th style="padding:4px 8px;border:1px solid #ddd"></th></tr>
       ${vbCkMuc.map((m,i)=>dong(m,i)).join('')}</table></div>
+    ${vbCkDu.length?`<div style="margin-top:8px;border:1px dashed #b79bd8;border-radius:8px;padding:8px;background:#fff">
+      <div style="font-weight:600;margin-bottom:4px">🗂 Chữ ký chưa gán (${vbCkDu.length}) — đã lưu trong kho, gắn cho người mới thêm vào danh sách khi cần</div>
+      <div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDu.map((d,i)=>`<tr>
+        <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
+        <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}</td>
+        <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>m.co_anh?'':`<option value="${j}">${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
+        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})">🗑</button></td></tr>`).join('')}</table></div></div>`:''}
     <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="vbCkNhieu" accept="image/png,image/jpeg" multiple style="display:none" onchange="vbCkNhieuChon(this.files)">
     <div id="vbCkNhieuKq"></div>
@@ -4739,7 +4747,7 @@ function vbCkNhieuVe(){
   const daCo=vbCkMuc.filter(m=>m.co_anh).length;
   kq.innerHTML=`<div style="border:1px solid #cdb8ea;background:#fff;border-radius:8px;padding:8px;margin-top:8px">
     <div style="font-weight:600;margin-bottom:4px">Ghép ${vbCkNhieuDs.length} file chữ ký với nhân viên (tự ghép theo mã NV hoặc họ tên trong tên file — kiểm tra lại, đổi người nếu sai)</div>
-    <div class="hint" style="margin-bottom:4px">Đã ghép ${dung.size}/${vbCkNhieuDs.length} file${daCo?` — ẩn ${daCo} người đã có chữ ký trong Kho`:''}.</div>
+    <div class="hint" style="margin-bottom:4px">Đã ghép ${dung.size}/${vbCkNhieuDs.length} file${daCo?` — ẩn ${daCo} người đã có chữ ký trong Kho`:''}${vbCkNhieuDs.length>dung.size?` — ${vbCkNhieuDs.length-dung.size} file chưa ghép sẽ được <b>giữ lại</b> trong kho (chữ ký chưa gán) để gắn sau`:''}.</div>
     <div style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkNhieuDs.map((d,i)=>`<tr>
       <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
       <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}</td>
@@ -4753,13 +4761,29 @@ async function vbCkNhieuLuu(){
   const theo={};
   vbCkNhieuDs.forEach(d=>{if(d.idx>=0&&vbCkMuc[d.idx])theo[vbCkMuc[d.idx].khoa]={khoa:vbCkMuc[d.idx].khoa,ten:vbCkMuc[d.idx].ten,anh:d.anh}});   // 1 người nhiều file: lấy file cuối
   const muc=Object.values(theo);
-  if(!muc.length){toast('Chưa ghép file nào với nhân viên','err');return}
+  const duocGiu=new Set(Object.values(theo).map(x=>x.anh));
+  const du=vbCkNhieuDs.filter(d=>!duocGiu.has(d.anh)).map(d=>({ten:d.ten,anh:d.anh}));     // file chưa ghép với ai: LƯU LẠI trong kho "chưa gán"
+  if(!muc.length&&!du.length){toast('Chưa có chữ ký nào để lưu','err');return}
   try{
-    const r=await api(`/api/chu-ky/${current}/nhieu`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({xac_nhan:true,muc})});
-    toast(`Đã lưu ${r.da_luu} chữ ký${r.loi&&r.loi.length?` — ${r.loi.length} lỗi: `+r.loi.map(x=>x.ten+' ('+x.loi+')').join('; '):''}`,r.loi&&r.loi.length?'err':'ok');
+    const r=await api(`/api/chu-ky/${current}/nhieu`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({xac_nhan:true,muc,du})});
+    toast(`Đã lưu ${r.da_luu} chữ ký${r.da_giu?` + giữ lại ${r.da_giu} chữ ký chưa gán (gắn sau cho người mới thêm)`:''}${r.loi&&r.loi.length?` — ${r.loi.length} lỗi: `+r.loi.map(x=>x.ten+' ('+x.loi+')').join('; '):''}`,r.loi&&r.loi.length?'err':'ok');
     document.getElementById('vbCkNhieuKq').innerHTML='';
     await vbCkVe();
   }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Chữ ký CHƯA GÁN (nhiều hơn danh sách nhân viên): giữ trong kho, gắn sau cho người mới thêm (phải xác nhận người đó đồng ý)
+async function vbCkGanDu(i){
+  const d=vbCkDu[i],sel=document.getElementById('vbCkDuSel'+i);if(!d||!sel)return;
+  const j=parseInt(sel.value,10),m=vbCkMuc[j];
+  if(!(j>=0)||!m){toast('Chọn người để gắn chữ ký','err');return}
+  if(!confirm(`Xác nhận: ${m.ten} đã đồng ý lưu và sử dụng chữ ký này trên văn bản của công ty?`))return;
+  try{await api(`/api/chu-ky/${current}/gan-du`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:d.id,khoa:m.khoa,ten:m.ten,xac_nhan:true})});toast('Đã gắn chữ ký','ok');await vbCkVe()}
+  catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function vbCkXoaDu(i){
+  const d=vbCkDu[i];if(!d)return;
+  if(!confirm('Xóa chữ ký chưa gán này?'))return;
+  try{await api(`/api/chu-ky/${current}/du?id=${d.id}`,{method:'DELETE'});await vbCkVe()}catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function vbCkXacNhan(i,xn){
   const m=vbCkMuc[i];if(!m)return;

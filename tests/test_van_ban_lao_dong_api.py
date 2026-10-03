@@ -179,9 +179,34 @@ assert kq["da_luu"] == 2 and len(kq["loi"]) == 1 and kq["loi"][0]["ten"] == "Sai
 ds7 = server.chu_ky_danh_sach(7, 2026)
 assert ds7["nhan_vien"][3]["co_anh"] and ds7["nhan_vien"][3]["xac_nhan"] and ds7["nhan_vien"][4]["co_anh"]
 try:
-    run(server.chu_ky_luu_nhieu(7, Req({"xac_nhan": True, "muc": []}))); raise SystemExit("phải lỗi")
+    run(server.chu_ky_luu_nhieu(7, Req({"xac_nhan": True, "muc": []}))); raise SystemExit("phải lỗi: không có gì để lưu")
 except HTTPException as e:
     assert e.status_code == 400
+
+# chữ ký NHIỀU HƠN danh sách nhân viên: file chưa ghép được GIỮ LẠI (chưa gán), gắn sau cho người mới thêm
+kq = run(server.chu_ky_luu_nhieu(7, Req({"xac_nhan": True, "muc": [], "du": [{"ten": "chu_ky_20.png", "anh": anh()}, {"ten": "chu_ky_21.png", "anh": anh()}, {"ten": "hong.png", "anh": "data:text/plain;base64,AA=="}]})))
+assert kq["da_giu"] == 2 and kq["da_luu"] == 0 and len(kq["loi"]) == 1
+du = server.chu_ky_danh_sach(7, 2026)["du"]
+assert [d["ten"] for d in du] == ["chu_ky_20.png", "chu_ky_21.png"] and du[0]["anh"].startswith("data:image/png")
+assert [d["ten"] for d in server.chu_ky_danh_sach(8, 2026)["du"]] == ["chu_ky_20.png", "chu_ky_21.png"], "kho chưa gán dùng chung các công ty"
+assert "chu_ky_20.png" not in str(server._vb_chu_ky_dict(7).keys()), "chưa gán cho ai thì không gắn vào văn bản"
+ROWS.append([6, "NV6", "Nhân Viên 6", "01/01/1990", "Địa chỉ 6", "079190000106", "01/01/2020", "01/2025", "x", "", "Kế toán", 6_000_000, 730000, 0, 0, 0])      # người mới thêm vào danh sách
+k6 = server.chu_ky_danh_sach(7, 2026)["nhan_vien"][5]["khoa"]
+assert k6 == "cccd:079190000106" and not server.chu_ky_danh_sach(7, 2026)["nhan_vien"][5]["co_anh"]
+try:
+    run(server.chu_ky_gan_du(7, Req({"id": du[0]["id"], "khoa": k6, "ten": "Nhân Viên 6", "xac_nhan": False}))); raise SystemExit("phải lỗi: chưa xác nhận")
+except HTTPException as e:
+    assert e.status_code == 400
+run(server.chu_ky_gan_du(7, Req({"id": du[0]["id"], "khoa": k6, "ten": "Nhân Viên 6", "xac_nhan": True})))
+ds6 = server.chu_ky_danh_sach(7, 2026)
+assert ds6["nhan_vien"][5]["co_anh"] and ds6["nhan_vien"][5]["xac_nhan"] and [d["ten"] for d in ds6["du"]] == ["chu_ky_21.png"], "gắn xong thì rời khỏi kho chưa gán"
+try:
+    run(server.chu_ky_gan_du(7, Req({"id": du[0]["id"], "khoa": k6, "ten": "x", "xac_nhan": True}))); raise SystemExit("phải lỗi: đã gán rồi")
+except HTTPException as e:
+    assert e.status_code == 404
+server.chu_ky_xoa_du(7, ds6["du"][0]["id"])
+assert server.chu_ky_danh_sach(7, 2026)["du"] == []
+ROWS.pop()
 
 # xuất Word từ HTML đã SỬA TAY: file lưu ra DOWNLOAD_DIR, đúng nội dung đã sửa + canh chỉnh
 html_sua = r["html"].replace("Điều 5. Điều khoản thi hành", "Điều 5. Điều khoản thi hành (đã sửa tay)")
