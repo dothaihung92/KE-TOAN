@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.070"
+APP_BUILD = "2026-10-03.071"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10696,6 +10696,7 @@ def _luong_cong_thang(d, n):
 
 def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=None, npt=None):
     """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định + có đóng BHXH không).
+    Chỉ đưa vào bảng lương từ tháng BẮT ĐẦU LÀM (tháng "Thử việc từ", không có thì "Tháng/Năm vào làm") đến tháng nghỉ việc.
     Đóng BHXH = ô tick "Đóng BHXH" trong danh sách VÀ đã tới tháng "Tháng/Năm vào làm" (bắt đầu đóng). Danh sách cũ
     chưa có cột "Đóng BHXH" -> coi như đều đóng (giữ nguyên cách tính trước đây)."""
     rows = vbld.chon_phien_ban_hieu_luc(header, rows, nam, thang)     # người có nhiều dòng thay đổi lương: lấy dòng (lương + mã) đang hiệu lực ở tháng này
@@ -10717,6 +10718,10 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
             continue
         nghi = _luong_thang_nghi_viec(lay(r, "Tháng/Năm nghỉ việc"))
         if nghi and nam and thang and (int(nam), int(thang)) > nghi:      # đã nghỉ việc từ tháng trước -> không lên bảng lương tháng này
+            continue
+        # Chưa tới tháng bắt đầu làm (tháng đầu thử việc, không có thì tháng vào làm) -> chưa lên bảng lương tháng này.
+        bd = [k for k in (_luong_doc_ngay_thang(lay(r, "Thử việc từ")), _luong_doc_ngay_thang(lay(r, "Tháng/Năm vào làm"))) if k]
+        if bd and nam and thang and (int(nam), int(thang)) < min((k[0], k[1]) for k in bd):
             continue
         tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
         # Thử việc theo HĐ thử việc riêng (cột "Thử việc từ"/"Thử việc đến"): không đóng BHXH trong thời gian thử việc; BHXH bắt đầu từ NGÀY SAU khi hết thử việc
@@ -11405,6 +11410,14 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
         can = muc_tieu - da_co
         if can <= 0:
             raise HTTPException(400, f"Các tháng khác trong năm đã có {int(da_co_ngoai):,} đ, đã đạt/vượt mục tiêu {muc_tieu:,} đ".replace(",", "."))
+    if thang_tu_do and callable(pool):
+        # Tháng chưa có ai vào làm (Danh Sách NV: tháng thử việc/vào làm sau tháng đó) -> không lập bảng lương tháng đó; mục tiêu chia cho các tháng còn lại.
+        trong = [t for t in thang_tu_do if not any(_luong_so(r.get("luong_cb")) > 0 for r in (pool(t) or []))]
+        if trong:
+            thang_tu_do = [t for t in thang_tu_do if t not in trong]
+            canh_bao.append("Tháng " + ", ".join(str(int(t)) for t in trong) + ": chưa có nhân viên vào làm (theo Thử việc từ / Tháng/Năm vào làm) — không lập bảng lương tháng này.")
+            if not thang_tu_do and not ck_res:
+                raise HTTPException(400, "Trong khoảng tháng đã chọn chưa có nhân viên nào vào làm (xem cột Thử việc từ / Tháng/Năm vào làm ở Danh Sách Nhân Viên)")
     if thang_tu_do:
         moi = can // len(thang_tu_do)
         for j, t in enumerate(thang_tu_do):

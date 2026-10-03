@@ -33,6 +33,15 @@ assert (d3["dong_bh"], d3["thu_viec"]) == (0, 2)
 # người không tick BHXH và không thử việc: không bị đánh dấu thử việc; người chưa nhập cột: như trước
 assert mo('', '', thang=3)["thu_viec"] == 0 and mo('', '', thang=3)["dong_bh"] == 1
 
+# ví dụ người dùng: thử việc 01/2024 - 01/2024, vào làm (bắt đầu đóng BHXH) 02/2024 -> chưa lên bảng lương trước 01/2024; T1 thử việc; từ T2 đóng BHXH
+def thang(nam, th, tu='01/2024', den='01/2024', vao='02/2024'):
+    r = server._luong_dong_tu_nhan_vien(H, [R(**{'Mã NV': '9', 'Họ và tên': 'Z', 'Đóng BHXH': 'x', 'Tháng/Năm vào làm': vao, 'Thử việc từ': tu, 'Thử việc đến': den, 'Lương Cơ bản': 5310000})], 0, nam, th)
+    return (r[0]["dong_bh"], r[0]["thu_viec"]) if r else None
+assert thang(2023, 12) is None, "trước tháng thử việc: không có trong bảng lương"
+assert thang(2024, 1) == (0, 1) and thang(2024, 2) == (1, 0) and thang(2024, 12) == (1, 0)
+assert thang(2024, 1, vao='') == (0, 1) and thang(2024, 2, vao='') == (1, 0), "không ghi tháng vào làm: BHXH từ ngày sau khi hết thử việc"
+assert thang(2023, 12, tu='', den='', vao='01/2024') is None and thang(2024, 1, tu='', den='', vao='01/2024') == (1, 0), "không thử việc: lên bảng lương từ tháng vào làm"
+
 TS = server._luong_chuan_tham_so(None, 2026)
 tinh = lambda d: server._luong_tinh_dong(dict(d, ngay_lam=26), TS, "03")
 t1, t2 = tinh(a3), tinh(d3)
