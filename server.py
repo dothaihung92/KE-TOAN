@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.075"
+APP_BUILD = "2026-10-03.076"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13229,7 +13229,9 @@ async def van_ban_do_luong(cid: int, request: Request):
 def _ck_dam_bao_bang(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS chu_ky (
         id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, khoa TEXT, ten TEXT, anh TEXT, xac_nhan INTEGER DEFAULT 0, updated_at TEXT,
-        UNIQUE(company_id, khoa))""")
+        UNIQUE(company_id, khoa))""")        # bảng cũ theo từng công ty (chỉ còn đọc để tương thích)
+    conn.execute("""CREATE TABLE IF NOT EXISTS chu_ky_chung (
+        khoa TEXT PRIMARY KEY, ten TEXT, anh TEXT, xac_nhan INTEGER DEFAULT 0, updated_at TEXT)""")     # KHO CHUNG nhiều công ty: khoá theo CCCD / họ tên / người đại diện
 
 
 def _ck_chuan_hoa_anh(data_uri):
@@ -13267,63 +13269,125 @@ def _ck_chuan_hoa_anh(data_uri):
     return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
 
 
+def _ck_khoa_gd(cid, nguoi_ky):
+    """Khoá chữ ký của người đại diện: theo tên (cùng 1 giám đốc ký nhiều công ty dùng chung 1 chữ ký)."""
+    t = vbld._chuan(nguoi_ky)
+    return ("gd:" + t) if t else f"gd:cty{cid}"
+
+
 def _ck_doc_het(cid):
+    """(kho chung, bảng cũ theo công ty)."""
     conn = db()
     try:
         _ck_dam_bao_bang(conn)
-        rows = conn.execute("SELECT khoa, ten, anh, xac_nhan, updated_at FROM chu_ky WHERE company_id=?", (cid,)).fetchall()
+        chung = {r["khoa"]: dict(r) for r in conn.execute("SELECT khoa, ten, anh, xac_nhan, updated_at FROM chu_ky_chung").fetchall()}
+        cu = {r["khoa"]: dict(r) for r in conn.execute("SELECT khoa, ten, anh, xac_nhan, updated_at FROM chu_ky WHERE company_id=?", (cid,)).fetchall()}
     finally:
         conn.close()
-    return {r["khoa"]: dict(r) for r in rows}
+    return chung, cu
 
 
 def _vb_chu_ky_dict(cid):
-    """{khoa: ảnh} CHỈ những chữ ký đã được xác nhận người đó đồng ý sử dụng."""
-    return {k: v["anh"] for k, v in _ck_doc_het(cid).items() if v.get("xac_nhan") and v.get("anh")}
+    """{khoa: ảnh} CHỈ những chữ ký đã được xác nhận người đó đồng ý sử dụng: kho chung (khoá CCCD/họ tên/giám đốc) + khoá cũ theo công ty; 'giam_doc' = người đại diện của công ty."""
+    chung, cu = _ck_doc_het(cid)
+    conn = db()
+    try:
+        comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    nguoi_ky = ((comp["nguoi_ky"] if comp and "nguoi_ky" in comp.keys() else "") or "")
+    kq = {k: v["anh"] for k, v in cu.items() if v.get("xac_nhan") and v.get("anh")}
+    kq.update({k: v["anh"] for k, v in chung.items() if v.get("xac_nhan") and v.get("anh")})
+    gd = chung.get(_ck_khoa_gd(cid, nguoi_ky)) or cu.get("giam_doc") or {}
+    if gd.get("xac_nhan") and gd.get("anh"):
+        kq["giam_doc"] = gd["anh"]
+    else:
+        kq.pop("giam_doc", None)
+    return kq
 
 
 @app.get("/api/chu-ky/{cid}")
 def chu_ky_danh_sach(cid: int, nam: int = 0):
     nam = _luong_nam_hop_le(nam or datetime.date.today().year)
-    cty, nv, _ts = _vb_du_lieu(cid, nam)
-    luu = _ck_doc_het(cid)
+    cty, nv_ds, _ts = _vb_du_lieu(cid, nam)
+    chung, cu = _ck_doc_het(cid)
+    nv_ds_full = nv_ds
+    thay = set()
 
-    def muc(khoa, ten, ma="", chuc_vu=""):
-        r = luu.get(khoa) or {}
+    def muc(khoa, ten, ma="", chuc_vu="", khoa_cu=""):
+        r = chung.get(khoa) or cu.get(khoa_cu) or {}
         return {"khoa": khoa, "ten": ten, "ma": ma, "chuc_vu": chuc_vu, "co_anh": bool(r.get("anh")), "xac_nhan": bool(r.get("xac_nhan")),
                 "anh": r.get("anh") or "", "cap_nhat": r.get("updated_at") or ""}
-    return {"nam": nam, "giam_doc": muc("giam_doc", cty.get("nguoi_ky") or "Giám đốc / người đại diện", "", "Người đại diện ký"),
-            "nhan_vien": [muc(vbld.khoa_chu_ky(n["ma"], n["ten"]), n["ten"], n["ma"], n["chuc_vu"]) for n in nv]}
+    ds = []
+    for n in nv_ds_full:
+        k = vbld.khoa_nguoi(n)
+        if k in thay:
+            continue
+        thay.add(k)
+        ds.append(muc(k, n["ten"], n["ma"], n["chuc_vu"], vbld.khoa_chu_ky(n["ma"], n["ten"])))
+    return {"nam": nam, "giam_doc": muc(_ck_khoa_gd(cid, cty.get("nguoi_ky")), cty.get("nguoi_ky") or "Giám đốc / người đại diện", "", "Người đại diện ký", "giam_doc"),
+            "nhan_vien": ds, "tong_kho_chung": len([1 for v in chung.values() if v.get("anh")])}
+
+
+def _ck_luu_1(conn, cid, khoa, ten, anh, xac_nhan):
+    if khoa == "giam_doc":
+        comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+        khoa = _ck_khoa_gd(cid, (comp["nguoi_ky"] if comp and "nguoi_ky" in comp.keys() else "") or "")
+    if not khoa.startswith(("gd:", "cccd:", "ten:")) or len(khoa) > 200:
+        raise HTTPException(400, "Khoá chữ ký không hợp lệ")
+    cu = conn.execute("SELECT anh FROM chu_ky_chung WHERE khoa=?", (khoa,)).fetchone()
+    if anh:
+        if not xac_nhan:
+            raise HTTPException(400, "Cần xác nhận người này đã đồng ý lưu và sử dụng chữ ký")
+        anh = _ck_chuan_hoa_anh(anh)
+    elif not cu or not cu["anh"]:
+        raise HTTPException(400, "Chưa có ảnh chữ ký của người này")
+    else:
+        anh = cu["anh"]
+    conn.execute("INSERT INTO chu_ky_chung (khoa, ten, anh, xac_nhan, updated_at) VALUES (?,?,?,?,?) "
+                 "ON CONFLICT(khoa) DO UPDATE SET ten=excluded.ten, anh=excluded.anh, xac_nhan=excluded.xac_nhan, updated_at=excluded.updated_at",
+                 (khoa, str(ten or "")[:200], anh, 1 if xac_nhan else 0, datetime.datetime.now().isoformat()))
+    return anh
 
 
 @app.post("/api/chu-ky/{cid}")
 async def chu_ky_luu(cid: int, request: Request):
-    """Body: {khoa, ten, anh (data URI, tuỳ chọn), xac_nhan}. Lưu ảnh mới BẮT BUỘC kèm xac_nhan=true (người đó đã đồng ý); không có `anh` thì chỉ đổi xác nhận."""
+    """Body: {khoa, ten, anh (data URI, tuỳ chọn), xac_nhan}. Lưu ảnh mới BẮT BUỘC kèm xac_nhan=true (người đó đã đồng ý); không có `anh` thì chỉ đổi xác nhận.
+    Kho CHUNG nhiều công ty: khoá theo CCCD (hoặc họ tên) / người đại diện."""
     body = await request.json()
-    khoa = str(body.get("khoa") or "").strip()
-    if not (khoa == "giam_doc" or khoa.startswith(("ma:", "ten:"))) or len(khoa) > 200:
-        raise HTTPException(400, "Khoá chữ ký không hợp lệ")
-    xac_nhan = 1 if body.get("xac_nhan") else 0
-    anh = body.get("anh")
     conn = db()
     try:
         _ck_dam_bao_bang(conn)
-        cu = conn.execute("SELECT anh FROM chu_ky WHERE company_id=? AND khoa=?", (cid, khoa)).fetchone()
-        if anh:
-            if not xac_nhan:
-                raise HTTPException(400, "Cần xác nhận người này đã đồng ý lưu và sử dụng chữ ký")
-            anh = _ck_chuan_hoa_anh(anh)
-        elif not cu or not cu["anh"]:
-            raise HTTPException(400, "Chưa có ảnh chữ ký của người này")
-        else:
-            anh = cu["anh"]
-        conn.execute("INSERT INTO chu_ky (company_id, khoa, ten, anh, xac_nhan, updated_at) VALUES (?,?,?,?,?,?) "
-                     "ON CONFLICT(company_id, khoa) DO UPDATE SET ten=excluded.ten, anh=excluded.anh, xac_nhan=excluded.xac_nhan, updated_at=excluded.updated_at",
-                     (cid, khoa, str(body.get("ten") or "")[:200], anh, xac_nhan, datetime.datetime.now().isoformat()))
+        anh = _ck_luu_1(conn, cid, str(body.get("khoa") or "").strip(), body.get("ten"), body.get("anh"), bool(body.get("xac_nhan")))
         conn.commit()
     finally:
         conn.close()
-    return {"ok": True, "anh": anh, "xac_nhan": bool(xac_nhan)}
+    return {"ok": True, "anh": anh, "xac_nhan": bool(body.get("xac_nhan"))}
+
+
+@app.post("/api/chu-ky/{cid}/nhieu")
+async def chu_ky_luu_nhieu(cid: int, request: Request):
+    """Lưu NHIỀU chữ ký 1 lần: {xac_nhan: true, muc: [{khoa, ten, anh}]} — bắt buộc xác nhận đã được các người này đồng ý. Trả {da_luu, loi: [...]}."""
+    body = await request.json()
+    if not body.get("xac_nhan"):
+        raise HTTPException(400, "Cần xác nhận các nhân viên này đã đồng ý lưu và sử dụng chữ ký")
+    ds = body.get("muc") or []
+    if not isinstance(ds, list) or not ds:
+        raise HTTPException(400, "Chưa có chữ ký nào để lưu")
+    da_luu, loi = 0, []
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        for m in ds[:500]:
+            try:
+                _ck_luu_1(conn, cid, str(m.get("khoa") or "").strip(), m.get("ten"), m.get("anh"), True)
+                da_luu += 1
+            except HTTPException as e:
+                loi.append({"ten": str(m.get("ten") or m.get("khoa") or ""), "loi": e.detail})
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "da_luu": da_luu, "loi": loi}
 
 
 @app.delete("/api/chu-ky/{cid}")
@@ -13331,6 +13395,7 @@ def chu_ky_xoa(cid: int, khoa: str):
     conn = db()
     try:
         _ck_dam_bao_bang(conn)
+        conn.execute("DELETE FROM chu_ky_chung WHERE khoa=?", (khoa,))
         conn.execute("DELETE FROM chu_ky WHERE company_id=? AND khoa=?", (cid, khoa))
         conn.commit()
     finally:

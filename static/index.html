@@ -4696,13 +4696,62 @@ async function vbCkVe(){
       <button class="btn ghost sm" onclick="vbCkTai(${i})">📁 Tải ảnh</button>
       ${m.co_anh?`<button class="btn ghost sm" style="color:#c00" onclick="vbCkXoa(${i})">🗑</button>`:''}</td></tr>`;
   kv.innerHTML=`<div style="border:1px solid #d9c9ee;background:#faf6ff;border-radius:10px;padding:10px;margin-bottom:10px">
-    <div style="font-weight:700;margin-bottom:4px">✍ Kho chữ ký</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px"><span style="font-weight:700">✍ Kho chữ ký</span>
+      <button class="btn sm" style="background:#6b3fa0" onclick="document.getElementById('vbCkNhieu').click()" title="Chọn nhiều file ảnh chữ ký cùng lúc; phần mềm tự ghép tên file (mã NV hoặc họ tên) với từng nhân viên">📁 Chọn nhiều chữ ký 1 lần</button>
+      <span class="hint">Kho dùng chung cho mọi công ty (nhận diện theo CCCD / họ tên; giám đốc theo tên) — ${vbCkDs.tong_kho_chung||0} chữ ký trong kho.</span></div>
     <div class="hint" style="margin-bottom:6px">Chỉ lưu chữ ký do <b>chính người đó</b> ký (trên màn hình/điện thoại) hoặc ảnh chữ ký họ cung cấp, và phải tick “đã đồng ý”. Phần mềm sẽ tự gắn vào ô chữ ký khi tạo hợp đồng / quy chế / thang bảng lương và xuất Word. Chữ ký lưu trong máy này.</div>
     <div style="max-height:320px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">
       <tr style="background:#efe6fb"><th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Người ký</th><th style="padding:4px 8px;border:1px solid #ddd">Chữ ký</th><th style="padding:4px 8px;border:1px solid #ddd">Đã đồng ý</th><th style="padding:4px 8px;border:1px solid #ddd"></th></tr>
       ${vbCkMuc.map((m,i)=>dong(m,i)).join('')}</table></div>
     <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
+    <input type="file" id="vbCkNhieu" accept="image/png,image/jpeg" multiple style="display:none" onchange="vbCkNhieuChon(this.files)">
+    <div id="vbCkNhieuKq"></div>
     </div>`;
+}
+
+// Chọn NHIỀU ảnh chữ ký 1 lần: ghép tên file (mã NV hoặc họ tên, "giám đốc"/"gd") với nhân viên; xem lại, đổi người nếu sai, rồi lưu tất cả
+function vbCkKhongDau(s){return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase()}
+function vbCkKhopTen(tenFile,muc){
+  const goc=String(tenFile||'').replace(/\.[^.]+$/,'');
+  const n=vbCkKhongDau(goc).replace(/[_\-.]+/g,' ').replace(/\s+/g,' ').trim();
+  const toks=n.split(/[^a-z0-9]+/).filter(Boolean);
+  if(/\bgiam doc\b/.test(n)||toks.includes('gd'))return 0;
+  const cMa=[];muc.forEach((m,i)=>{if(i===0)return;const ma=vbCkKhongDau(m.ma).trim();if(ma&&toks.includes(ma))cMa.push(i)});
+  if(cMa.length===1)return cMa[0];
+  const cTen=[];muc.forEach((m,i)=>{if(i===0)return;const t=vbCkKhongDau(m.ten).replace(/\s+/g,' ').trim();if(t&&n.includes(t))cTen.push([i,t.length])});
+  if(cTen.length===1)return cTen[0][0];
+  if(cTen.length>1){cTen.sort((a,b)=>b[1]-a[1]);if(cTen[0][1]>cTen[1][1])return cTen[0][0]}
+  return -1;
+}
+let vbCkNhieuDs=[];
+async function vbCkNhieuChon(files){
+  const kq=document.getElementById('vbCkNhieuKq');if(!kq||!files||!files.length)return;
+  const doc=f=>new Promise(res=>{const r=new FileReader();r.onload=()=>res({ten:f.name,anh:r.result});r.readAsDataURL(f)});
+  const ds=await Promise.all(Array.from(files).map(doc));
+  vbCkNhieuDs=ds.map(d=>Object.assign(d,{idx:vbCkKhopTen(d.ten,vbCkMuc)}));
+  const opt=sel=>`<option value="-1">— bỏ qua —</option>`+vbCkMuc.map((m,i)=>`<option value="${i}" ${i===sel?'selected':''}>${i===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('');
+  kq.innerHTML=`<div style="border:1px solid #cdb8ea;background:#fff;border-radius:8px;padding:8px;margin-top:8px">
+    <div style="font-weight:600;margin-bottom:4px">Ghép ${vbCkNhieuDs.length} file chữ ký với nhân viên (tự ghép theo mã NV hoặc họ tên trong tên file — kiểm tra lại, đổi người nếu sai)</div>
+    <div style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkNhieuDs.map((d,i)=>`<tr>
+      <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
+      <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}</td>
+      <td style="padding:3px 6px;border:1px solid #ddd"><select onchange="vbCkNhieuDs[${i}].idx=parseInt(this.value,10)" style="width:100%;padding:3px">${opt(d.idx)}</select></td></tr>`).join('')}</table></div>
+    <label style="display:flex;gap:6px;align-items:flex-start;font-size:13px;margin:8px 0"><input type="checkbox" id="vbCkNhieuDongY" style="margin-top:3px"> <span>Các nhân viên/giám đốc trên đã <b>đồng ý lưu và sử dụng</b> chữ ký của mình trên hợp đồng, quy chế, thang bảng lương.</span></label>
+    <button class="btn gold sm" onclick="vbCkNhieuLuu()">💾 Lưu tất cả đã ghép</button> <button class="btn ghost sm" onclick="document.getElementById('vbCkNhieuKq').innerHTML=''">Hủy</button></div>`;
+}
+async function vbCkNhieuLuu(){
+  const cb=document.getElementById('vbCkNhieuDongY');
+  if(!cb||!cb.checked){toast('Cần tick xác nhận các nhân viên đã đồng ý dùng chữ ký','err');return}
+  const theo={};
+  vbCkNhieuDs.forEach(d=>{if(d.idx>=0&&vbCkMuc[d.idx])theo[vbCkMuc[d.idx].khoa]={khoa:vbCkMuc[d.idx].khoa,ten:vbCkMuc[d.idx].ten,anh:d.anh}});   // 1 người nhiều file: lấy file cuối
+  const muc=Object.values(theo);
+  if(!muc.length){toast('Chưa ghép file nào với nhân viên','err');return}
+  try{
+    const r=await api(`/api/chu-ky/${current}/nhieu`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({xac_nhan:true,muc})});
+    toast(`Đã lưu ${r.da_luu} chữ ký${r.loi&&r.loi.length?` — ${r.loi.length} lỗi: `+r.loi.map(x=>x.ten+' ('+x.loi+')').join('; '):''}`,r.loi&&r.loi.length?'err':'ok');
+    document.getElementById('vbCkNhieuKq').innerHTML='';
+    await vbCkVe();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function vbCkXacNhan(i,xn){
   const m=vbCkMuc[i];if(!m)return;

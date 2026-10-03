@@ -188,3 +188,24 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(khoi.includes('onclick="nvMoKhoCk()"') && khoi.includes('id="vbKhoCk"') && /function nvMoKhoCk\(\)\{[^}]*vbMoKhoCk\(\)/.test(khoi));
   console.log('PASS 8: Kho chữ ký trong Danh Sách Nhân Viên.');
 }
+
+// 9: chọn nhiều chữ ký 1 lần — ghép tên file với nhân viên
+(async () => {
+  const { ctx, goi } = moiTruong({ vbKhoCk: '' });
+  const muc = [{ khoa: 'gd:ho thi cam van', ten: 'Hồ Thị Cẩm Vân', ma: '' }, { khoa: 'cccd:1', ten: 'Trần Minh Hùng', ma: '2' }, { khoa: 'cccd:2', ten: 'Nguyễn Giang Nam', ma: '3' }, { khoa: 'cccd:3', ten: 'Nguyễn Giang', ma: '10' }];
+  const k = (f) => ctx.vbCkKhopTen(f, muc);
+  assert.strictEqual(k('2.png'), 1, 'tên file = mã NV'); assert.strictEqual(k('NV-2_chu_ky.jpg'), 1, 'mã NV là 1 từ trong tên file');
+  assert.strictEqual(k('Tran Minh Hung.png'), 1, 'họ tên không dấu'); assert.strictEqual(k('chuky_trần_minh_hùng.png'), 1, 'họ tên có dấu, gạch dưới');
+  assert.strictEqual(k('Nguyen Giang Nam.png'), 2, 'khi 2 tên cùng khớp: lấy tên dài hơn'); assert.strictEqual(k('giam doc.png'), 0); assert.strictEqual(k('GD.png'), 0);
+  assert.strictEqual(k('abc.png'), -1); assert.strictEqual(k('12.png'), -1, 'mã 12 không có');
+  // lưu: 1 người nhiều file lấy file cuối; bắt buộc xác nhận
+  ctx.vbCkMuc = muc; ctx.vbCkNhieuDs = [{ ten: 'a', anh: 'data:image/png;base64,A', idx: 1 }, { ten: 'b', anh: 'data:image/png;base64,B', idx: 1 }, { ten: 'c', anh: 'data:image/png;base64,C', idx: -1 }, { ten: 'd', anh: 'data:image/png;base64,D', idx: 0 }];
+  const toasts = []; ctx.toast = (m, kk) => toasts.push([m, kk]);
+  const gd = ctx.document.getElementById; let dongy = false; ctx.document.getElementById = (id) => id === 'vbCkNhieuDongY' ? { checked: dongy } : id === 'vbCkNhieuKq' ? { innerHTML: '' } : gd(id);
+  ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null]); return u.endsWith('/nhieu') ? { da_luu: 2, loi: [] } : { giam_doc: muc[0], nhan_vien: [], tong_kho_chung: 0 }; };
+  await ctx.vbCkNhieuLuu(); assert(!goi.length && toasts.some(([m]) => m.includes('xác nhận')));
+  dongy = true; await ctx.vbCkNhieuLuu();
+  const g = goi.find((x) => x[0].endsWith('/nhieu'));
+  assert(g && g[1].xac_nhan === true && g[1].muc.length === 2 && g[1].muc.find((x) => x.khoa === 'cccd:1').anh.endsWith('B') && g[1].muc.find((x) => x.khoa === 'gd:ho thi cam van'));
+  console.log('PASS 9: chọn nhiều chữ ký — tự ghép tên file, bắt buộc xác nhận, lưu 1 lần.');
+})().catch((e) => { console.error(e); process.exit(1); });

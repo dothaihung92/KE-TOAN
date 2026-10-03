@@ -99,9 +99,9 @@ def giai(uri):
 server.nhap_lieu_get = lambda cid, loai="in": {"header": HDR, "rows": ROWS} if loai == "nv" else {"header": [], "rows": []}
 server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), bl, "", [nam])
 ds = server.chu_ky_danh_sach(7, 2026)
-assert ds["giam_doc"]["khoa"] == "giam_doc" and ds["giam_doc"]["ten"] == "Hồ Thị Cẩm Vân" and len(ds["nhan_vien"]) == 5 and not any(m["co_anh"] for m in ds["nhan_vien"])
+assert ds["giam_doc"]["khoa"] == "gd:ho thi cam van" and ds["giam_doc"]["ten"] == "Hồ Thị Cẩm Vân" and len(ds["nhan_vien"]) == 5 and not any(m["co_anh"] for m in ds["nhan_vien"])
 k2 = ds["nhan_vien"][1]["khoa"]
-assert k2 == "ma:nv2", k2
+assert k2 == "cccd:079190000102", k2
 # lưu ảnh bắt buộc kèm xác nhận đồng ý
 for loi in ({"khoa": k2, "ten": "Nhân Viên 2", "anh": anh(), "xac_nhan": False}, {"khoa": "abc", "anh": anh(), "xac_nhan": True}, {"khoa": k2, "ten": "x", "anh": "data:text/html;base64,AAAA", "xac_nhan": True},
             {"khoa": k2, "ten": "x", "xac_nhan": True}):
@@ -118,7 +118,7 @@ rs = run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "anh": an
 im = giai(rs["anh"])
 assert im.getpixel((0, 0))[3] == 0 and im.width <= 480 and im.height <= 160 and im.width < 400, "nền trắng thành trong suốt + cắt sát nét ký"
 assert im.getchannel("A").getextrema()[1] > 200, "nét ký vẫn đặc"
-run(server.chu_ky_luu(7, Req({"khoa": "giam_doc", "ten": "Hồ Thị Cẩm Vân", "anh": anh((0, 0, 0, 0)), "xac_nhan": True})))
+run(server.chu_ky_luu(7, Req({"khoa": "giam_doc", "ten": "Hồ Thị Cẩm Vân", "anh": anh((0, 0, 0, 0)), "xac_nhan": True})))      # khoá cũ "giam_doc" tự đổi sang khoá chung theo tên người đại diện
 ds = server.chu_ky_danh_sach(7, 2026)
 assert ds["giam_doc"]["co_anh"] and ds["giam_doc"]["xac_nhan"] and ds["nhan_vien"][1]["co_anh"] and ds["nhan_vien"][1]["anh"].startswith("data:image/png;base64,")
 # tự gắn vào hợp đồng: chữ ký người lao động + giám đốc; chỉ khi đã xác nhận
@@ -144,9 +144,38 @@ assert sum(1 for n in zz.namelist() if n.startswith("word/media/")) == 2 and b"<
 # xoá chữ ký
 server.chu_ky_xoa(7, k2)
 assert not server.chu_ky_danh_sach(7, 2026)["nhan_vien"][1]["co_anh"]
-# người đổi mã (2 -> 2-001) vẫn dùng chung 1 chữ ký (khoá theo mã gốc)
+# người đổi mã (2 -> 2-001) vẫn dùng chung 1 chữ ký (khoá theo mã gốc / CCCD)
 import van_ban_lao_dong as _v
 assert _v.khoa_chu_ky("2-001", "A") == _v.khoa_chu_ky("2", "A") == "ma:2" and _v.khoa_chu_ky("", "Trần Văn Á") == "ten:tran van a"
+assert _v.khoa_nguoi({"cccd": "079 190 000 102", "ten": "X"}) == "cccd:079190000102" and _v.khoa_nguoi({"cccd": "123", "ten": "Trần Văn Á"}) == "ten:tran van a"
+
+# KHO CHUNG nhiều công ty: cùng người (CCCD) / cùng giám đốc ở công ty khác dùng lại đúng chữ ký đã lưu
+run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "anh": anh(), "xac_nhan": True})))
+conn.execute("INSERT INTO companies VALUES (8, 'CÔNG TY KHÁC', '0300000002', '9 Trần Hưng Đạo', 'Hồ Thị Cẩm Vân')")
+ds8 = server.chu_ky_danh_sach(8, 2026)
+assert ds8["giam_doc"]["co_anh"] and ds8["giam_doc"]["xac_nhan"] and ds8["nhan_vien"][1]["co_anh"] and ds8["tong_kho_chung"] == 2, "công ty khác thấy chữ ký trong kho chung"
+rk = run(server.van_ban_xem_truoc(8, Req({"loai": "hd", "nam": 2026, "tu": 2, "den": 2})))
+assert rk["so_chu_ky"] == 2, "hợp đồng ở công ty khác tự gắn chữ ký người lao động (CCCD) + giám đốc (cùng tên)"
+conn.execute("UPDATE companies SET nguoi_ky='Người Khác' WHERE id=8")
+assert not server.chu_ky_danh_sach(8, 2026)["giam_doc"]["co_anh"], "giám đốc khác tên thì không dùng chung"
+# khoá cũ theo công ty (bản trước) vẫn được đọc
+conn.execute("INSERT INTO chu_ky (company_id, khoa, ten, anh, xac_nhan, updated_at) VALUES (7, 'ma:nv3', 'Nhân Viên 3', ?, 1, '')", (anh(),))
+assert server.chu_ky_danh_sach(7, 2026)["nhan_vien"][2]["co_anh"] and "ma:nv3" in server._vb_chu_ky_dict(7)
+
+# lưu NHIỀU chữ ký 1 lần (bắt buộc xác nhận)
+muc = [{"khoa": ds["nhan_vien"][3]["khoa"], "ten": "Nhân Viên 4", "anh": anh()}, {"khoa": ds["nhan_vien"][4]["khoa"], "ten": "Nhân Viên 5", "anh": anh()}, {"khoa": "abc", "ten": "Sai khoá", "anh": anh()}]
+try:
+    run(server.chu_ky_luu_nhieu(7, Req({"muc": muc}))); raise SystemExit("phải lỗi: chưa xác nhận")
+except HTTPException as e:
+    assert e.status_code == 400
+kq = run(server.chu_ky_luu_nhieu(7, Req({"xac_nhan": True, "muc": muc})))
+assert kq["da_luu"] == 2 and len(kq["loi"]) == 1 and kq["loi"][0]["ten"] == "Sai khoá"
+ds7 = server.chu_ky_danh_sach(7, 2026)
+assert ds7["nhan_vien"][3]["co_anh"] and ds7["nhan_vien"][3]["xac_nhan"] and ds7["nhan_vien"][4]["co_anh"]
+try:
+    run(server.chu_ky_luu_nhieu(7, Req({"xac_nhan": True, "muc": []}))); raise SystemExit("phải lỗi")
+except HTTPException as e:
+    assert e.status_code == 400
 
 # xuất Word từ HTML đã SỬA TAY: file lưu ra DOWNLOAD_DIR, đúng nội dung đã sửa + canh chỉnh
 html_sua = r["html"].replace("Điều 5. Điều khoản thi hành", "Điều 5. Điều khoản thi hành (đã sửa tay)")

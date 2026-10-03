@@ -645,6 +645,18 @@ def khoa_chu_ky(ma, ten):
     return ("ma:" + m.lower()) if m else ("ten:" + _chuan(ten))
 
 
+def khoa_nguoi(nv):
+    """Khoá chữ ký DÙNG CHUNG nhiều công ty: theo số CCCD của người đó (nếu có), không thì theo họ tên (không dấu)."""
+    d = re.sub(r"\D", "", str((nv or {}).get("cccd") or ""))
+    return ("cccd:" + d) if len(d) >= 9 else ("ten:" + _chuan((nv or {}).get("ten")))
+
+
+def tim_chu_ky(chu_ky, nv):
+    """Ảnh chữ ký của nhân viên trong dict chu_ky: khoá dùng chung (CCCD/họ tên) trước, khoá cũ theo công ty (mã/họ tên) sau."""
+    chu_ky = chu_ky or {}
+    return chu_ky.get(khoa_nguoi(nv)) or chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or ""
+
+
 def _khoang_ky(anh=""):
     """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký."""
     if anh:
@@ -699,7 +711,7 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None, chu_ky=N
     except Exception:
         so_hd = f"{int(tc.get('so_bat_dau') or 1) + so_thu_tu:02d}/HĐLĐ-{nam_so}"
     gan = bool(tc.get("gan_chu_ky", True)) and bool(chu_ky)
-    anh_nld = (chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or "") if gan else ""
+    anh_nld = tim_chu_ky(chu_ky, nv) if gan else ""
     anh_gd = (chu_ky.get("giam_doc") or "") if gan else ""
     ong_ba_ky = tc.get("ong_ba_ky") or "Ông/Bà"
     ong_ba = {"Nam": "Ông", "Nữ": "Bà"}.get(nv.get("gioi_tinh"), "Ông/Bà")
@@ -869,7 +881,7 @@ def dung_hop_dong_thu_viec(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None,
     luong_tv = round(luong_cb * pt / 100.0)
     so_hd = f"{int(tc.get('so_bat_dau') or 1) + so_thu_tu:02d}/HĐTV-{ngay_ky.year}"
     gan = bool(tc.get("gan_chu_ky", True)) and bool(chu_ky)
-    anh_nld = (chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or "") if gan else ""
+    anh_nld = tim_chu_ky(chu_ky, nv) if gan else ""
     anh_gd = (chu_ky.get("giam_doc") or "") if gan else ""
     ong_ba_ky = tc.get("ong_ba_ky") or "Ông/Bà"
     ong_ba = {"Nam": "Ông", "Nữ": "Bà"}.get(nv.get("gioi_tinh"), "Ông/Bà")
