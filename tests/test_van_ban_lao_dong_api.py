@@ -226,6 +226,12 @@ run(server.chu_ky_dung_lai(7, Req({"nguon_khoa": "cccd:999000111", "khoa": k6, "
 d7 = server.chu_ky_danh_sach(7, 2026)
 assert d7["nhan_vien"][5]["co_anh"] and d7["nhan_vien"][5]["xac_nhan"], "người này đã có chữ ký dùng lại"
 assert "cccd:999000111" in [d["khoa"] for d in d7["da_luu"]], "chữ ký gốc vẫn còn trong kho (sao chép, không di chuyển)"
+# xoá chữ ký "đã gắn ở công ty khác" khỏi danh sách chưa gán của công ty NÀY: chỉ ẩn ở đây, công ty cũ + kho chung giữ nguyên
+run(server.chu_ky_luu(8, Req({"khoa": "cccd:888000222", "ten": "Người Khác 2", "anh": anh(), "xac_nhan": True})))
+assert "cccd:888000222" in [d["khoa"] for d in server.chu_ky_danh_sach(7, 2026)["da_luu"]]
+server.chu_ky_an_da_luu(7, "cccd:888000222")
+assert "cccd:888000222" not in [d["khoa"] for d in server.chu_ky_danh_sach(7, 2026)["da_luu"]], "đã ẩn ở công ty này"
+assert server.chu_ky_danh_sach(8, 2026)["tong_kho_chung"] == server.chu_ky_danh_sach(7, 2026)["tong_kho_chung"] and "cccd:888000222" in server._ck_doc_het(7)[0], "kho chung giữ nguyên"
 ROWS.pop()
 
 # xuất Word từ HTML đã SỬA TAY: file lưu ra DOWNLOAD_DIR, đúng nội dung đã sửa + canh chỉnh

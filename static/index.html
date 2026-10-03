@@ -4712,7 +4712,7 @@ async function vbCkVe(){
         <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
         <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}${d.loai==='luu'?' <span class="hint">(đã gắn ở công ty khác)</span>':''}</td>
         <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>m.co_anh?'':`<option value="${j}">${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
-        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button>${d.loai==='luu'?'':` <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})">🗑</button>`}</td></tr>`).join('')}</table></div>`:''}</div>
+        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})" title="${d.loai==='luu'?'Xoá khỏi danh sách chưa gán của công ty này (công ty cũ vẫn giữ chữ ký)':'Xóa chữ ký chưa gán'}">🗑</button></td></tr>`).join('')}</table></div>`:''}</div>
     <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="vbCkNhieu" accept="image/png,image/jpeg" multiple style="display:none" onchange="vbCkNhieuChon(this.files)">
     <div id="vbCkNhieuKq"></div>
@@ -4785,8 +4785,9 @@ async function vbCkGanDu(i){
 }
 async function vbCkXoaDu(i){
   const d=vbCkDu[i];if(!d)return;
-  if(!confirm('Xóa chữ ký chưa gán này?'))return;
-  try{await api(`/api/chu-ky/${current}/du?id=${d.id}`,{method:'DELETE'});await vbCkVe()}catch(e){toast('Lỗi: '+e.message,'err')}
+  const luu=d.loai==='luu';
+  if(!confirm(luu?`Xóa chữ ký “${d.ten}” khỏi danh sách chưa gán của CÔNG TY NÀY?\n(Chữ ký ở công ty cũ đã gắn vẫn được giữ nguyên.)`:'Xóa chữ ký chưa gán này?'))return;
+  try{await api(luu?`/api/chu-ky/${current}/da-luu?khoa=${encodeURIComponent(d.khoa)}`:`/api/chu-ky/${current}/du?id=${d.id}`,{method:'DELETE'});await vbCkVe()}catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function vbCkXacNhan(i,xn){
   const m=vbCkMuc[i];if(!m)return;
