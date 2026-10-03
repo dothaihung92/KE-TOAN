@@ -657,11 +657,11 @@ def tim_chu_ky(chu_ky, nv):
     return chu_ky.get(khoa_nguoi(nv)) or chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or ""
 
 
-def _khoang_ky(anh="", sau=False):
+def _khoang_ky(anh="", sau=False, cao=150):
     """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký.
     sau=True (chữ ký + con dấu giám đốc): ảnh LỚN, đặt PHÍA SAU chữ (behind text) — đè lên chức danh/họ tên như dấu thật."""
     if anh and sau:
-        return f'<p class="c ky-sau" style="height:80px"><img class="sau" src="{esc(anh)}" style="height:150px"></p>'
+        return f'<p class="c ky-sau" style="height:80px"><img class="sau" src="{esc(anh)}" style="height:{cao}px"></p>'
     if anh:
         return f'<p class="c"><img src="{esc(anh)}" style="height:80px"></p>' + _p("&nbsp;", "c")
     return _p("&nbsp;", "c") * 3
@@ -669,7 +669,7 @@ def _khoang_ky(anh="", sau=False):
 
 def _bang_ky(trai_tieu_de, trai_phu, trai_ten, phai_tieu_de, phai_phu, phai_ten, trai_anh="", phai_anh=""):
     return ('<table class="nb"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><tr><td>'
-            + _p(f"<b>{esc(trai_tieu_de)}</b>", "c") + _p(f"<i>{esc(trai_phu)}</i>", "c") + _khoang_ky(trai_anh) + _p(f"<b>{esc(trai_ten)}</b>", "c")
+            + _p(f"<b>{esc(trai_tieu_de)}</b>", "c") + _p(f"<i>{esc(trai_phu)}</i>", "c") + _khoang_ky(trai_anh, sau=True, cao=115) + _p(f"<b>{esc(trai_ten)}</b>", "c")
             + "</td><td>" + _p(f"<b>{esc(phai_tieu_de)}</b>", "c") + _p(f"<i>{esc(phai_phu)}</i>", "c") + _khoang_ky(phai_anh, sau=True)
             + _p(f"<b>{esc(phai_ten)}</b>", "c") + "</td></tr></table>")
 

@@ -256,21 +256,21 @@ rootI, _ = doc_xml(v.html_sang_docx(hh))
 dr = list(rootI.iter(W + "drawing"))
 assert len(dr) == 2
 ext = dr[0].find(".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent")
-assert int(ext.get("cy")) == 80 * 9525 and abs(int(ext.get("cx")) / int(ext.get("cy")) - 3.0) < 0.02, "cao 80px, đúng tỷ lệ ảnh"
+assert int(ext.get("cy")) == 115 * 9525 and abs(int(ext.get("cx")) / int(ext.get("cy")) - 3.0) < 0.02, "người lao động cao 115px, đúng tỷ lệ ảnh"
 zi = zipfile.ZipFile(io.BytesIO(v.html_sang_docx(hh)))
 assert [n for n in zi.namelist() if n.startswith("word/media/")] == ["word/media/chuky1.png", "word/media/chuky2.png"] and "image/png" in zi.read("[Content_Types].xml").decode()
 assert 'Target="media/chuky2.png"' in zi.read("word/_rels/document.xml.rels").decode()
 # src không phải ảnh data URI (vd đường dẫn ngoài) bị bỏ qua, không làm hỏng file
 doc_xml(v.html_sang_docx('<p>a <img src="http://x/y.png"> b</p>'))
 # chữ ký + con dấu GIÁM ĐỐC: ảnh lớn, đặt PHÍA SAU chữ (behind text) — HTML (img.sau) và Word (wp:anchor behindDoc)
-assert hh.count('class="sau"') == 1 and 'style="height:150px"' in hh and 'class="c ky-sau" style="height:80px"' in hh, "chỉ ảnh giám đốc là 'sau'; ảnh người lao động giữ cạnh chữ"
+assert hh.count('class="sau"') == 2 and 'style="height:150px"' in hh and 'style="height:115px"' in hh and hh.count('class="c ky-sau" style="height:80px"') == 2, "cả chữ ký người lao động (115px) và giám đốc (150px) đều phía sau chữ"
 assert "img.sau{position:absolute" in v.VB_CSS and "z-index:-1" in v.VB_CSS and ".vb-trang{position:relative;z-index:0}" in v.VB_CSS
 rootS, _ = doc_xml(v.html_sang_docx(hh))
 WP = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
 anc = list(rootS.iter(WP + "anchor")); inl = list(rootS.iter(WP + "inline"))
-assert len(anc) == 1 and len(inl) == 1 and anc[0].get("behindDoc") == "1", "giám đốc: neo phía sau chữ; người lao động: nằm trong dòng"
+assert len(anc) == 2 and len(inl) == 0 and all(a.get("behindDoc") == "1" for a in anc), "cả hai chữ ký neo phía sau chữ (Behind text)"
 assert anc[0].find(WP + "wrapNone") is not None and anc[0].find(WP + "positionH/" + WP + "align").text == "center"
-assert int(anc[0].find(WP + "extent").get("cy")) == 150 * 9525 and int(anc[0].find(WP + "positionV/" + WP + "posOffset").text) == int((80 - 150) / 2 * 9525)
+assert [int(a.find(WP + "extent").get("cy")) for a in anc] == [115 * 9525, 150 * 9525] and int(anc[1].find(WP + "positionV/" + WP + "posOffset").text) == int((80 - 150) / 2 * 9525) and int(anc[0].find(WP + "positionV/" + WP + "posOffset").text) == int((80 - 115) / 2 * 9525)
 sp = [p for p in rootS.iter(W + "p") if p.find(".//" + WP + "anchor") is not None][0]
 assert sp.find(W + "pPr/" + W + "spacing").get(W + "lineRule") == "exact" and sp.find(W + "pPr/" + W + "spacing").get(W + "line") == str(80 * 15)
 try:
