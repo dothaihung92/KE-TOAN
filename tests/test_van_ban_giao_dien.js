@@ -264,3 +264,18 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(g && g[1].id === 5 && g[1].khoa === 'cccd:3' && g[1].xac_nhan === true);
   console.log('PASS 12: ẩn Kho chữ ký ở hợp đồng; gắn chữ ký chưa gán cho người mới.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 13: mục "Chữ ký chưa gán" luôn hiện kèm số lượng (kể cả 0) trong Kho chữ ký
+(async () => {
+  for (const du of [[], [{ id: 1, ten: 'a.png', anh: 'data:image/png;base64,A' }, { id: 2, ten: 'b.png', anh: 'data:image/png;base64,B' }]]) {
+    const { ctx, pt } = moiTruong({ vbKhoCk: '' });
+    ctx.api = async () => ({ giam_doc: { khoa: 'giam_doc', ten: 'GĐ', co_anh: true, xac_nhan: true, anh: 'data:image/png;base64,G' }, nhan_vien: [{ khoa: 'ma:3', ten: 'B', ma: '3', co_anh: false, anh: '' }], tong_kho_chung: 3, du });
+    ctx.vbNam = 2026; await ctx.vbCkVe();
+    const h = pt.vbKhoCk.innerHTML, n = du.length;
+    assert(h.includes('Chữ ký chưa gán:') && h.includes(`id="vbCkDuSo" style="color:${n ? '#6b3fa0' : '#666'}">${n}</span> chữ ký`), 'luôn hiện mục + số lượng');
+    assert(h.includes(`<b>${n} chữ ký chưa gán</b>`), 'số lượng ở dòng đầu kho');
+    assert.strictEqual(h.includes('vbCkGanDu(0)'), n > 0);
+    assert.strictEqual(h.includes('Chưa có chữ ký nào chưa gán'), n === 0);
+  }
+  console.log('PASS 13: mục Chữ ký chưa gán luôn hiện kèm số lượng (kể cả 0).');
+})().catch((e) => { console.error(e); process.exit(1); });

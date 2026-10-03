@@ -4699,18 +4699,19 @@ async function vbCkVe(){
   kv.innerHTML=`<div style="border:1px solid #d9c9ee;background:#faf6ff;border-radius:10px;padding:10px;margin-bottom:10px">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px"><span style="font-weight:700">✍ Kho chữ ký</span>
       <button class="btn sm" style="background:#6b3fa0" onclick="document.getElementById('vbCkNhieu').click()" title="Chọn nhiều file ảnh chữ ký cùng lúc; phần mềm tự ghép tên file (mã NV hoặc họ tên) với từng nhân viên">📁 Chọn nhiều chữ ký 1 lần</button>
-      <span class="hint">Kho dùng chung cho mọi công ty (nhận diện theo CCCD / họ tên; giám đốc theo tên) — ${vbCkDs.tong_kho_chung||0} chữ ký trong kho.</span></div>
+      <span class="hint">Kho dùng chung cho mọi công ty (nhận diện theo CCCD / họ tên; giám đốc theo tên) — ${vbCkDs.tong_kho_chung||0} chữ ký trong kho, <b>${vbCkDu.length} chữ ký chưa gán</b>.</span></div>
     <div class="hint" style="margin-bottom:6px">Chỉ lưu chữ ký do <b>chính người đó</b> ký (trên màn hình/điện thoại) hoặc ảnh chữ ký họ cung cấp, và phải tick “đã đồng ý”. Phần mềm sẽ tự gắn vào ô chữ ký khi tạo hợp đồng / quy chế / thang bảng lương và xuất Word. Chữ ký lưu trong máy này.</div>
     <div style="max-height:320px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">
       <tr style="background:#efe6fb"><th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Người ký</th><th style="padding:4px 8px;border:1px solid #ddd">Chữ ký</th><th style="padding:4px 8px;border:1px solid #ddd">Đã đồng ý</th><th style="padding:4px 8px;border:1px solid #ddd"></th></tr>
       ${vbCkMuc.map((m,i)=>dong(m,i)).join('')}</table></div>
-    ${vbCkDu.length?`<div style="margin-top:8px;border:1px dashed #b79bd8;border-radius:8px;padding:8px;background:#fff">
-      <div style="font-weight:600;margin-bottom:4px">🗂 Chữ ký chưa gán (${vbCkDu.length}) — đã lưu trong kho, gắn cho người mới thêm vào danh sách khi cần</div>
-      <div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDu.map((d,i)=>`<tr>
+    <div id="vbCkDuKhung" style="margin-top:8px;border:1px dashed #b79bd8;border-radius:8px;padding:8px;background:#fff">
+      <div style="font-weight:600;margin-bottom:4px">🗂 Chữ ký chưa gán: <span id="vbCkDuSo" style="color:${vbCkDu.length?'#6b3fa0':'#666'}">${vbCkDu.length}</span> chữ ký${vbCkDu.length?' — đã lưu trong kho, gắn cho người mới thêm vào danh sách khi cần':''}</div>
+      ${vbCkDu.length?'':'<div class="hint">Chưa có chữ ký nào chưa gán. Khi chọn nhiều chữ ký 1 lần mà số file nhiều hơn số người trong danh sách (hoặc tên file không khớp ai), các chữ ký dư sẽ được giữ lại ở đây để gắn sau.</div>'}
+      ${vbCkDu.length?`<div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDu.map((d,i)=>`<tr>
         <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
         <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}</td>
         <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>m.co_anh?'':`<option value="${j}">${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
-        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})">🗑</button></td></tr>`).join('')}</table></div></div>`:''}
+        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})">🗑</button></td></tr>`).join('')}</table></div>`:''}</div>
     <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="vbCkNhieu" accept="image/png,image/jpeg" multiple style="display:none" onchange="vbCkNhieuChon(this.files)">
     <div id="vbCkNhieuKq"></div>
