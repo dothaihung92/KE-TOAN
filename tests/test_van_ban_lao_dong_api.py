@@ -123,7 +123,7 @@ ds = server.chu_ky_danh_sach(7, 2026)
 assert ds["giam_doc"]["co_anh"] and ds["giam_doc"]["xac_nhan"] and ds["nhan_vien"][1]["co_anh"] and ds["nhan_vien"][1]["anh"].startswith("data:image/png;base64,")
 # tự gắn vào hợp đồng: chữ ký người lao động + giám đốc; chỉ khi đã xác nhận
 r = run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026, "tu": 1, "den": 3})))
-assert r["so_chu_ky"] == 4 and r["html"].count('<img src="data:image/png') == 4, "giám đốc ký cả 3 hợp đồng + chữ ký NV2"
+assert r["so_chu_ky"] == 4 and r["html"].count('src="data:image/png') == 4, "giám đốc ký cả 3 hợp đồng + chữ ký NV2"
 sec = r["html"].split('<section class="vb-trang">')
 assert [x.count("<img") for x in sec[1:]] == [1, 2, 1], "chữ ký NV2 chỉ nằm ở hợp đồng của NV2"
 rq = run(server.van_ban_xem_truoc(7, Req({"loai": "qc", "nam": 2026})))

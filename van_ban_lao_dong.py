@@ -657,8 +657,11 @@ def tim_chu_ky(chu_ky, nv):
     return chu_ky.get(khoa_nguoi(nv)) or chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or ""
 
 
-def _khoang_ky(anh=""):
-    """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký."""
+def _khoang_ky(anh="", sau=False):
+    """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký.
+    sau=True (chữ ký + con dấu giám đốc): ảnh LỚN, đặt PHÍA SAU chữ (behind text) — đè lên chức danh/họ tên như dấu thật."""
+    if anh and sau:
+        return f'<p class="c ky-sau" style="height:80px"><img class="sau" src="{esc(anh)}" style="height:150px"></p>'
     if anh:
         return f'<p class="c"><img src="{esc(anh)}" style="height:80px"></p>' + _p("&nbsp;", "c")
     return _p("&nbsp;", "c") * 3
@@ -667,7 +670,7 @@ def _khoang_ky(anh=""):
 def _bang_ky(trai_tieu_de, trai_phu, trai_ten, phai_tieu_de, phai_phu, phai_ten, trai_anh="", phai_anh=""):
     return ('<table class="nb"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><tr><td>'
             + _p(f"<b>{esc(trai_tieu_de)}</b>", "c") + _p(f"<i>{esc(trai_phu)}</i>", "c") + _khoang_ky(trai_anh) + _p(f"<b>{esc(trai_ten)}</b>", "c")
-            + "</td><td>" + _p(f"<b>{esc(phai_tieu_de)}</b>", "c") + _p(f"<i>{esc(phai_phu)}</i>", "c") + _khoang_ky(phai_anh)
+            + "</td><td>" + _p(f"<b>{esc(phai_tieu_de)}</b>", "c") + _p(f"<i>{esc(phai_phu)}</i>", "c") + _khoang_ky(phai_anh, sau=True)
             + _p(f"<b>{esc(phai_ten)}</b>", "c") + "</td></tr></table>")
 
 
@@ -1081,7 +1084,7 @@ def dung_quy_che(nv_list, cty, tuy_chon, ts=None, nam=None, hom_nay=None, chu_ky
           '<table class="nb"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><tr><td>'
           + _p("<b><i>Nơi nhận:</i></b>") + _p("- Như Điều 2;") + _p("- Toàn thể người lao động;") + _p("- Lưu: VT.")
           + "</td><td>" + _p(f"<b>{esc((tc.get('chuc_danh_ky') or 'Giám đốc').upper())}</b>", "c") + _p("<i>(Ký, ghi rõ họ tên và đóng dấu)</i>", "c")
-          + _khoang_ky((chu_ky or {}).get("giam_doc") if tc.get("gan_chu_ky", True) else "") + _p(f"<b>{esc(tc.get('nguoi_ky') or '')}</b>", "c") + "</td></tr></table>", "</section>"]
+          + _khoang_ky((chu_ky or {}).get("giam_doc") if tc.get("gan_chu_ky", True) else "", sau=True) + _p(f"<b>{esc(tc.get('nguoi_ky') or '')}</b>", "c") + "</td></tr></table>", "</section>"]
     if tc.get("kem_phu_luc"):
         h.append('<section class="vb-trang">' + _p("<b>PHỤ LỤC</b>", "c b")
                  + _p(f"<b>Bảng lương cơ bản và phụ cấp từng người lao động (theo Danh sách nhân viên và Bảng lương năm {nam_du_lieu})</b>", "c") + bang_nhan_vien_html(dang_lam) + "</section>")
@@ -1104,7 +1107,7 @@ def _ky_ben_phai(tc, ngay, anh=""):
     return ('<table class="nb"><colgroup><col style="width:55%"><col style="width:45%"></colgroup><tr><td></td><td>'
             + _p(f"<i>{esc(tc.get('dia_danh') + ', ' if tc.get('dia_danh') else '')}{esc(ngay_chu(ngay))}</i>", "c")
             + _p(f"<b>{esc((tc.get('chuc_danh_ky') or 'Giám đốc').upper())} CÔNG TY</b>", "c") + _p("<i>(Ký, ghi rõ họ tên và đóng dấu)</i>", "c")
-            + _khoang_ky(anh) + _p(f"<b>{esc((tc.get('nguoi_ky') or '').upper())}</b>", "c") + "</td></tr></table>")
+            + _khoang_ky(anh, sau=True) + _p(f"<b>{esc((tc.get('nguoi_ky') or '').upper())}</b>", "c") + "</td></tr></table>")
 
 
 def _he_so_hien(x):
@@ -1182,7 +1185,9 @@ VB_CSS = """
 .vb-doc{font-family:var(--vb-f,"Times New Roman"),Times,serif;font-size:var(--vb-s,13pt);line-height:var(--vb-l,1.15);color:#000}
 .vb-doc .vb-trang{background:#fff;box-sizing:border-box;width:210mm;min-height:297mm;padding:var(--vb-mt,20mm) var(--vb-mr,15mm) var(--vb-mb,20mm) var(--vb-ml,30mm);margin:0 auto 14px;box-shadow:0 0 6px rgba(0,0,0,.3)}
 .vb-doc .vb-trang.ngang{width:297mm;min-height:210mm}
+.vb-doc .vb-trang{position:relative;z-index:0}
 .vb-doc p{margin:0 0 3pt}
+.vb-doc p.ky-sau{position:relative;margin:0}.vb-doc img.sau{position:absolute;left:50%;top:-35px;transform:translateX(-50%);z-index:-1;pointer-events:none}
 .vb-doc .c{text-align:center}.vb-doc .r{text-align:right}.vb-doc .j{text-align:justify}
 .vb-doc .b{font-weight:700}.vb-doc .i{font-style:italic}.vb-doc .u{text-decoration:underline}
 .vb-doc .ti{text-indent:10mm}.vb-doc .l1{margin-left:10mm}.vb-doc .l2{margin-left:20mm}
@@ -1261,7 +1266,8 @@ class _HtmlSangKhoi(HTMLParser):
             ml = ml or 1134
         if "ti" in cls:
             ti = ti or 567
-        return {"al": al, "ml": ml, "ti": ti, "b": "b" in cls or st.get("font-weight") in ("bold", "700", "800", "900"),
+        hgt = _twips(st.get("height")) if "ky-sau" in cls else 0
+        return {"al": al, "ml": ml, "ti": ti, "hgt": hgt, "b": "b" in cls or st.get("font-weight") in ("bold", "700", "800", "900"),
                 "i": "i" in cls or st.get("font-style") == "italic", "u": "u" in cls or "underline" in st.get("text-decoration", ""),
                 "pb": "pb" in cls}
 
@@ -1377,7 +1383,8 @@ class _HtmlSangKhoi(HTMLParser):
                         rong, cao = min(w0, 200), min(w0, 200) * h0 / w0
                 if self.p is None:
                     self._mo_doan({})
-                self.p["runs"].append(("img", kq[0], kq[1], max(8, rong or 100), max(8, cao or 40)))
+                sau = "sau" in set((a.get("class") or "").split())
+                self.p["runs"].append(("img", kq[0], kq[1], max(8, rong or 100), max(8, cao or 40), sau))
             return
         if tag in ("b", "strong"):
             self.fmt.append((tag, {"b": True}))
@@ -1467,10 +1474,22 @@ def _x(s):
     return _xml_esc(re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(s)))
 
 
-def _xml_hinh(r, hinh):
+def _xml_hinh(r, hinh, hgt_px=0):
     hinh.append((r[1], r[2]))
     n = len(hinh)
     cx, cy = int(r[3] * 9525), int(r[4] * 9525)
+    if len(r) > 5 and r[5]:         # Ảnh PHÍA SAU CHỮ (Wrap text: Behind text): neo vào đoạn trống, canh giữa ô, đè lên chức danh/họ tên như con dấu
+        lech = int(((hgt_px or r[4]) - r[4]) / 2 * 9525)
+        return ('<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">'
+                '<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:align>center</wp:align></wp:positionH>'
+                f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{lech}</wp:posOffset></wp:positionV>'
+                f'<wp:extent cx="{cx}" cy="{cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="{n}" name="Chu ky {n}"/>'
+                '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+                '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic>'
+                f'<pic:nvPicPr><pic:cNvPr id="{n}" name="chuky{n}"/><pic:cNvPicPr/></pic:nvPicPr>'
+                f'<pic:blipFill><a:blip r:embed="rIdImg{n}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+                f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+                '</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>')
     return ('<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
             f'<wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{n}" name="Chu ky {n}"/>'
             '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>'
@@ -1486,7 +1505,9 @@ def _xml_doan(p, ngat_truoc=False, an_dau=False, font_cfg=None, sau=None, hinh=N
     ppr = []
     if ngat_truoc:
         ppr.append("<w:pageBreakBefore/>")
-    if sau is not None:
+    if pr.get("hgt"):          # đoạn trống cao cố định chứa ảnh chữ ký/dấu phía sau chữ
+        ppr.append(f'<w:spacing w:before="0" w:after="0" w:line="{int(pr["hgt"])}" w:lineRule="exact"/>')
+    elif sau is not None:
         ppr.append(f'<w:spacing w:before="0" w:after="{sau}"/>')
     if pr.get("ml") or pr.get("ti"):
         ppr.append(f'<w:ind w:left="{int(pr.get("ml") or 0)}" w:firstLine="{int(pr.get("ti") or 0)}"/>')
@@ -1499,7 +1520,7 @@ def _xml_doan(p, ngat_truoc=False, an_dau=False, font_cfg=None, sau=None, hinh=N
         if r[0] == "br":
             kq.append("<w:r><w:br/></w:r>")
         elif r[0] == "img":
-            kq.append(_xml_hinh(r, hinh if hinh is not None else []))
+            kq.append(_xml_hinh(r, hinh if hinh is not None else [], (pr.get("hgt") or 0) / 15))
         else:
             rpr = ("<w:b/>" if r[2] else "") + ("<w:i/>" if r[3] else "") + ('<w:u w:val="single"/>' if r[4] else "")
             kq.append("<w:r>" + (f"<w:rPr>{rpr}</w:rPr>" if rpr else "") + f'<w:t xml:space="preserve">{_x(r[1].replace(chr(160), " "))}</w:t></w:r>')

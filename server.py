@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.078"
+APP_BUILD = "2026-10-03.079"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13458,7 +13458,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     else:
         html, so = vbld.dung_thang_bang_luong(nv, cty, tc, nam, chu_ky=chu_ky), 1
         _vb_luu_thang_luong(cid, nam, tc)      # lưu cấu hình thang lương theo từng năm (nhóm chức danh, % bậc...) để Quy chế/Danh sách NV dùng thống nhất
-    return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "canh_bao": cb, "so_chu_ky": html.count('<img src="data:image')}
+    return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "canh_bao": cb, "so_chu_ky": html.count('src="data:image')}
 
 
 @app.post("/api/van-ban/{cid}/word")
