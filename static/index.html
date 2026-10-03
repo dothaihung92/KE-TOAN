@@ -4776,8 +4776,10 @@ function moDanhSachNhanVien(tuBangLuong){
         <input type="file" id="nvImportFile" accept=".xlsx" multiple style="display:none" onchange="nvImportExcel(this)">
         <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
         <button class="btn sm" style="background:#1f6b4a" onclick="nvLayLuongTheoNam()" title="Dò lương cơ bản + phụ cấp của từng người theo Bảng Lương của năm bạn chọn (mỗi năm lương cơ bản một khác)">🔄 Lấy lương theo Bảng Lương năm…</button>
+        <button class="btn sm" style="background:#6b3fa0" onclick="nvMoKhoCk()" title="Kho chữ ký của giám đốc và từng nhân viên (do chính họ ký trên màn hình hoặc cung cấp ảnh) — tự gắn vào hợp đồng, quy chế, thang bảng lương">✍ Kho chữ ký</button>
         <button class="btn ghost sm" style="color:#c00" onclick="nvXoaDong()">🗑 Xóa dòng đã chọn</button>
       </div>
+      <div id="vbKhoCk" style="display:none"></div>
       <div id="nvTuBl"></div>
       <div id="nvInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. <b>Chức vụ</b> chỉ chọn trong các chức danh của <b>Hệ thống thang bảng lương</b> (Nhập Liệu → Thang Bảng Lương); <b>Lương cơ bản</b> lấy theo Bảng Lương từng năm bằng nút "🔄 Lấy lương theo Bảng Lương năm…".</div>
@@ -4809,6 +4811,11 @@ async function taiNhanVien(){
    không tick thì không đóng BHXH. Danh sách đã lưu từ trước chưa có cột -> thêm cột và tick sẵn cho mọi người (giữ nguyên hành vi cũ). */
 const NV_COT_TICK='Đóng BHXH';
 function nvLaCotTick(h){return String(h).trim().toLowerCase()==='đóng bhxh'}
+// Kho chữ ký ngay trong Danh Sách Nhân Viên (dùng chung với màn Hợp đồng/Quy chế/Thang bảng lương)
+function nvMoKhoCk(){
+  vbNam=parseInt(localStorage.getItem('blNam')||'',10)||new Date().getFullYear();
+  vbMoKhoCk();
+}
 function nvLaCotChucVu(h){return String(h).trim().toLowerCase()==='chức vụ'}
 function nvDoiChucVu(ri,ci,v){if(nvRows[ri])nvRows[ri][ci]=v;veGridNhanVien()}
 // Lấy lương cơ bản + phụ cấp từng người theo BẢNG LƯƠNG của 1 năm (tháng mới nhất có người đó); khớp theo Mã NV, không có mã thì theo Họ và tên

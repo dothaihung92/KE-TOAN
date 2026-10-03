@@ -180,3 +180,11 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   await ctx.vbCkPadLuu(); assert.strictEqual(goi.length, so); assert(toasts.some(([m]) => m.includes('xác nhận')));
   console.log('PASS 7: Kho chữ ký — thao tác theo chỉ số, bắt buộc xác nhận đồng ý.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 8: Kho chữ ký có ngay trong Danh Sách Nhân Viên (nút + vùng hiển thị dùng chung với màn Hợp đồng)
+{
+  const m0 = html.indexOf('function moDanhSachNhanVien'), m1 = html.indexOf('/* ----- NGƯỜI PHỤ THUỘC');
+  const khoi = html.slice(m0, m1);
+  assert(khoi.includes('onclick="nvMoKhoCk()"') && khoi.includes('id="vbKhoCk"') && /function nvMoKhoCk\(\)\{[^}]*vbMoKhoCk\(\)/.test(khoi));
+  console.log('PASS 8: Kho chữ ký trong Danh Sách Nhân Viên.');
+}
