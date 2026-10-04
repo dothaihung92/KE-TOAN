@@ -4546,7 +4546,7 @@ function vbVeMan(){
       <textarea id="vb_nhom_tuy_chinh" rows="5" placeholder="Giám đốc | 8000000&#10;Phó giám đốc; Kế toán trưởng&#10;Nhân viên kế toán; Nhân viên kinh doanh" style="padding:6px;border:1px solid #ccc;border-radius:6px;font-size:13px;color:#222;font-family:inherit">${vbEsc(tc.nhom_tuy_chinh||'')}</textarea></label>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <button class="btn sm" style="background:#1f6b4a" onclick="vbDoLuong()" title="Tìm lương cơ bản thấp nhất/cao nhất của từng nhóm trong Bảng Lương năm đang chọn và điền mức bậc 1">🔍 Dò lương cơ bản theo năm ${vbNam}</button>
-      <span class="hint">${d.thang_luong_nam_goc==null?'Năm này chưa lưu thang lương — đang dùng nhóm chức danh chuẩn; bỏ "| mức" thì bậc 1 tự dò theo Bảng Lương năm '+vbNam+'.':(d.thang_luong_nam_goc===vbNam?'Đã lưu thang lương năm '+vbNam+' (tự lưu mỗi lần Tạo bản xem trước).':'Năm '+vbNam+' chưa lưu — kế thừa nhóm chức danh của năm '+d.thang_luong_nam_goc+'; mức bậc 1 tự dò theo Bảng Lương năm '+vbNam+'.')}</span>
+      <span class="hint">💡 Sửa trực tiếp ô Hệ số / Mức lương trong bản xem trước: các bậc sau tự nhân theo (Mức lương = Hệ số × lương tối thiểu vùng).</span> <span class="hint">${d.thang_luong_nam_goc==null?'Năm này chưa lưu thang lương — đang dùng nhóm chức danh chuẩn; bỏ "| mức" thì bậc 1 tự dò theo Bảng Lương năm '+vbNam+'.':(d.thang_luong_nam_goc===vbNam?'Đã lưu thang lương năm '+vbNam+' (tự lưu mỗi lần Tạo bản xem trước).':'Năm '+vbNam+' chưa lưu — kế thừa nhóm chức danh của năm '+d.thang_luong_nam_goc+'; mức bậc 1 tự dò theo Bảng Lương năm '+vbNam+'.')}</span>
     </div>
     <div id="vbDoLuongKq"></div>`;
   }
@@ -4603,6 +4603,10 @@ function vbVeMan(){
     </div>`;
   const xem=document.getElementById('vbXem');
   xem.addEventListener('input',()=>{vbSua=true});
+  xem.addEventListener('beforeinput',()=>vbTlBatDau(vbTlODangChon()));
+  xem.addEventListener('keydown',(e)=>{if(vbTlOHienTai&&(e.key==='Enter'||e.key==='Tab'||e.key==='ArrowUp'||e.key==='ArrowDown')){if(e.key==='Enter')e.preventDefault();vbTlXacNhan()}});
+  xem.addEventListener('mousedown',(e)=>{const t=e.target&&e.target.closest?e.target.closest('td'):null;if(vbTlOHienTai&&t!==vbTlOHienTai)vbTlXacNhan()});
+  xem.addEventListener('focusout',()=>vbTlXacNhan());
   const n=document.getElementById('vb_nam');
   if(n)n.addEventListener('change',async()=>{const v=parseInt(n.value,10);if(v>=2000&&v<=2100){vbNam=v;vbSua=false;await vbTaiDuLieu()}});
 }
@@ -4651,6 +4655,7 @@ async function vbTaoXemTruoc(){
   }catch(e){tt.textContent='';toast('Lỗi: '+e.message,'err')}
 }
 function vbIn(){
+  vbTlXacNhan();
   const x=document.getElementById('vbXem');if(!x||!x.innerHTML.trim()){toast('Chưa có văn bản — bấm "Tạo bản xem trước"','err');return}
   const t=vbDocTrang();t.tieu_de=VB_TEN[vbLoai];
   const old=document.getElementById('vbInFrame');if(old)old.remove();
@@ -4660,6 +4665,7 @@ function vbIn(){
   setTimeout(()=>{f.contentWindow.focus();f.contentWindow.print()},300);
 }
 async function vbXuatWord(){
+  vbTlXacNhan();
   const x=document.getElementById('vbXem');if(!x||!x.innerHTML.trim()){toast('Chưa có văn bản — bấm "Tạo bản xem trước"','err');return}
   try{
     const ten={hd:'HopDongLaoDong',tv:'HopDongThuViec',qc:'QuyCheLuong',tl:'ThangBangLuong'}[vbLoai]+'_'+vbNam;
@@ -4671,6 +4677,49 @@ async function vbXuatWord(){
     toast(`📄 Đã xuất Word: ${ten}.docx${dk?' — đã lưu ra Desktop':''}`,'ok');
   }catch(e){toast('Lỗi xuất Word: '+e.message,'err')}
 }
+// Thang bảng lương: sửa tay 1 ô Hệ số / Mức lương trong bản xem trước -> các bậc SAU tự nhân theo (giữ nguyên tỉ lệ giữa các bậc),
+// Hệ số = Mức lương ÷ lương tối thiểu vùng (data-ltt của bảng). Chỉ chạy khi rời ô (focusout), không tính lại khi đang gõ.
+function vbTlSo(t,hs){t=String(t==null?'':t).trim();if(hs)t=t.replace(/\./g,'').replace(',','.');else t=t.replace(/[.,\s]/g,'');const v=parseFloat(t);return isFinite(v)?v:NaN}
+function vbTlVao(td){if(td&&td.closest&&td.closest('table.tl-thang'))td._truoc=td.textContent}
+// Hệ số CHÍNH XÁC của từng ô Mức lương được giữ trong ô (_hs) — số hiển thị đã làm tròn nên không dùng để tính lần sau
+function vbTlHs(c,ltt){if(c._hs===undefined){const v=vbTlSo(c.textContent,false);c._hs=v>0?v/ltt:0}return c._hs}
+function vbTlTinhLai(td){
+  const tb=td&&td.closest&&td.closest('table.tl-thang'),tr=td&&td.parentElement;
+  if(!tb||!tr||!tr.dataset||!tr.dataset.k||td.tagName!=='TD')return false;
+  const ltt=parseFloat(tb.dataset.ltt)||0;if(!(ltt>0))return false;
+  const ds=[].slice.call(tr.children),j=ds.indexOf(td);if(j<1)return false;           // cột 0 = nhãn
+  const la_hs=tr.dataset.k==='hs';
+  const ml=!la_hs?tr:(tr.nextElementSibling&&tr.nextElementSibling.dataset.k==='ml'?tr.nextElementSibling:null);
+  const hs=la_hs?tr:(tr.previousElementSibling&&tr.previousElementSibling.dataset.k==='hs'?tr.previousElementSibling:null);
+  if(!ml)return false;
+  const cMl=[].slice.call(ml.children),cHs=hs?[].slice.call(hs.children):[];
+  const truocText=td._truoc!==undefined?td._truoc:td.textContent;
+  if(td.textContent.trim()===String(truocText).trim())return false;                    // không đổi gì
+  const hsCu=(!la_hs&&td._hs===undefined)?vbTlSo(truocText,false)/ltt:vbTlHs(cMl[j],ltt);   // ô Mức lương đang sửa: hệ số CŨ lấy từ giá trị trước khi sửa
+  const hsMoi=la_hs?vbTlSo(td.textContent,true):vbTlSo(td.textContent,false)/ltt;
+  if(!(hsMoi>0)||!(hsCu>0)){td.textContent=truocText;return false}                    // nhập sai -> trả lại giá trị cũ
+  const tiLe=hsMoi/hsCu;
+  for(let k=j;k<cMl.length;k++){
+    const h=vbTlHs(cMl[k],ltt);
+    if(!(h>0)&&k!==j)continue;                                                          // ô trống (nhóm ít bậc hơn)
+    const nh=k===j?hsMoi:h*tiLe;cMl[k]._hs=nh;
+    cMl[k].textContent=Math.round(nh*ltt).toLocaleString('vi-VN');if(cHs[k])cHs[k].textContent=nh.toFixed(2).replace('.',',');
+  }
+  const b1=cMl[1]?vbTlHs(cMl[1],ltt)*ltt:0;
+  if(b1>0&&b1+0.5<ltt)toast(`Mức bậc I (${Math.round(b1).toLocaleString('vi-VN')}) thấp hơn lương tối thiểu vùng (${Math.round(ltt).toLocaleString('vi-VN')}) — không hợp lệ theo quy định`,'err');
+  td._truoc=td.textContent;
+  return true;
+}
+// Ô thang lương đang được sửa (ghi nhận lúc BẮT ĐẦU gõ); chỉ XÁC NHẬN (tính lại các bậc sau) khi bấm Enter / sang ô khác / rời khối soạn thảo / trước khi in-xuất Word
+let vbTlOHienTai=null;
+function vbTlODangChon(){
+  const sel=window.getSelection&&window.getSelection();if(!sel||!sel.anchorNode)return null;
+  const n=sel.anchorNode.nodeType===1?sel.anchorNode:sel.anchorNode.parentElement;
+  const td=n&&n.closest?n.closest('td'):null;
+  return td&&td.closest('table.tl-thang')&&td.closest('#vbXem')?td:null;
+}
+function vbTlBatDau(td){if(!td||td===vbTlOHienTai)return;if(vbTlOHienTai)vbTlXacNhan();vbTlOHienTai=td;vbTlVao(td)}
+function vbTlXacNhan(){const td=vbTlOHienTai;vbTlOHienTai=null;const doi=td?vbTlTinhLai(td):false;if(doi)vbSua=true;return doi}
 async function vbXuatExcel(){
   try{
     const r=await fetch(`/api/van-ban/${current}/excel-thang-luong`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',

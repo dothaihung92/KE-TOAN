@@ -92,6 +92,9 @@ assert "tùy theo tính chất công việc" in d5 and "theo số ngày công th
 assert "Kế toán" not in d5 and "730.000" not in d5 and "<table" not in v.dung_quy_che(nv[:4], CTY, {}, {}, 2026).split("Điều 6.")[0].split("Điều 5.")[1], "Điều 5 ghi chung theo quy định, không liệt kê bảng phụ cấp theo bảng lương"
 assert "Giám đốc" in qc and "20.000.000" in qc and "PHỤ LỤC" in qc
 assert "cao hơn bậc liền kề trước 5%." in van_ban(v.dung_thang_bang_luong(nv[:4], CTY, {}, 2026))
+_tl_html = v.dung_thang_bang_luong(nv[:4], CTY, {}, 2026)
+assert '<table class="tl-thang" data-ltt="5310000">' in _tl_html and _tl_html.count('<tr data-k="hs">') == _tl_html.count('<tr data-k="ml">') >= 1, "bảng thang lương có dấu hiệu để giao diện tự tính lại khi sửa tay"
+assert '<tr data-k="hs">' not in v.dung_thang_bang_luong(nv[:4], CTY, {"hien_he_so": False}, 2026) and '<tr data-k="ml">' in v.dung_thang_bang_luong(nv[:4], CTY, {"hien_he_so": False}, 2026)
 assert "cao hơn bậc liền kề trước 7,5%." in van_ban(v.dung_thang_bang_luong(nv[:4], CTY, {"buoc_pct": 7.5}, 2026)), "số thập phân kiểu Việt Nam (dấu phẩy)"
 assert "Ví dụ" in qc and "÷ 26 × 25" in qc, "ví dụ tính lương lấy số thật"
 m = re.search(r"Ví dụ: Chức danh (.+?) có lương cơ bản ([\d.]+) đồng, phụ cấp ([\d.]+) đồng.*?= ([\d.]+) đồng", qc)

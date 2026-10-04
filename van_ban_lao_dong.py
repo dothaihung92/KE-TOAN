@@ -1134,14 +1134,14 @@ def dung_thang_bang_luong(nv_list, cty, tuy_chon, nam=None, hom_nay=None, chu_ky
          _p(f"Áp dụng mức lương tối thiểu vùng {int(tc.get('vung', 1))}: {so_tien(ltt)} đồng/tháng ({esc(van_ban_luong_toi_thieu(nam).split(' quy định')[0])})", "c"),
          _p("Đơn vị tính: Việt Nam đồng", "r i")]
     rong = f"{72.0 / nb:.3f}%"
-    t = ['<table><colgroup><col style="width:28%">' + "".join(f'<col style="width:{rong}">' for _ in range(nb)) + "</colgroup>"
+    t = [f'<table class="tl-thang" data-ltt="{int(round(ltt))}"><colgroup><col style="width:28%">' + "".join(f'<col style="width:{rong}">' for _ in range(nb)) + "</colgroup>"
          + f'<tr><th>NHÓM CHỨC DANH, VỊ TRÍ CÔNG VIỆC</th><th colspan="{nb}">BẬC LƯƠNG</th></tr><tr><th>&nbsp;</th>'
          + "".join(f"<th>{so_la_ma(i)}</th>" for i in range(1, nb + 1)) + "</tr>"]
     for i, g in enumerate(tl["nhom"], 1):
         t.append(f'<tr><td colspan="{nb + 1}"><b>{i}. {esc(g["ten"])}</b></td></tr>')
         if co_hs:
-            t.append("<tr><td>Hệ số lương</td>" + "".join(f'<td class="r">{_he_so_hien(g["he_so"][j]) if j < len(g["bac"]) else ""}</td>' for j in range(nb)) + "</tr>")
-        t.append("<tr><td>Mức lương</td>" + "".join(f'<td class="r">{so_tien(g["bac"][j]) if j < len(g["bac"]) else ""}</td>' for j in range(nb)) + "</tr>")
+            t.append('<tr data-k="hs"><td>Hệ số lương</td>' + "".join(f'<td class="r">{_he_so_hien(g["he_so"][j]) if j < len(g["bac"]) else ""}</td>' for j in range(nb)) + "</tr>")
+        t.append('<tr data-k="ml"><td>Mức lương</td>' + "".join(f'<td class="r">{so_tien(g["bac"][j]) if j < len(g["bac"]) else ""}</td>' for j in range(nb)) + "</tr>")
     t.append("</table>")
     h.append("".join(t))
     h += [_p("&nbsp;"),

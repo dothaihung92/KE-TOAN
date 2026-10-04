@@ -345,3 +345,55 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.deepStrictEqual(chay('moBangLuong', { misaModal: { style: { display: 'flex' } } }), [], 'modal khác đang mở: để modal tự xử lý');
   console.log('PASS 16: Esc quay về Bảng Lương - BHXH.');
 })();
+
+// 17: Thang bảng lương — sửa tay Hệ số / Mức lương thì các bậc sau tự nhân theo (giữ tỉ lệ), hệ số = mức ÷ lương tối thiểu vùng
+(() => {
+  const dung = (hs, ml, co_hs = true) => {
+    const tb = { dataset: { ltt: '5310000' } };
+    const tao = (k, vals) => { const tr = { dataset: { k }, children: [], parentElement: tb, previousElementSibling: null, nextElementSibling: null };
+      tr.children = [{ textContent: 'nhan', tagName: 'TD', parentElement: tr, closest: () => tb }].concat(vals.map((v) => ({ textContent: v, tagName: 'TD', parentElement: tr, closest: () => tb }))); tr.children.forEach((c) => { c.closest = (sel) => { assert.strictEqual(sel, 'table.tl-thang'); return tb; }; }); return tr; };
+    const trMl = tao('ml', ml), trHs = co_hs ? tao('hs', hs) : null;
+    if (trHs) { trHs.nextElementSibling = trMl; trMl.previousElementSibling = trHs; }
+    return { trMl, trHs };
+  };
+  const { ctx } = moiTruong(); const tb = []; ctx.toast = (m, k) => tb.push([m, k]);
+  const doc = (tr) => tr.children.slice(1).map((c) => c.textContent);
+  // 1) sửa Mức lương bậc II: 5.575.500 -> 6.000.000 => bậc III..VII nhân tỉ lệ 6.000.000/5.575.500, hệ số = mức ÷ 5.310.000
+  let { trMl, trHs } = dung(['1,00', '1,05', '1,10', '1,16'], ['5.310.000', '5.575.500', '5.854.275', '6.146.989']);
+  let td = trMl.children[2]; ctx.vbTlVao(td); td.textContent = '6.000.000';
+  assert.strictEqual(ctx.vbTlTinhLai(td), true);
+  const ti = 6000000 / 5575500;
+  assert.deepStrictEqual(doc(trMl), ['5.310.000', '6.000.000', Math.round(5854275 * ti).toLocaleString('vi-VN'), Math.round(6146989 * ti).toLocaleString('vi-VN')], 'bậc trước giữ nguyên, bậc sau nhân theo');
+  assert.deepStrictEqual(doc(trHs), ['1,00', (6000000 / 5310000).toFixed(2).replace('.', ','), (Math.round(5854275 * ti) / 5310000).toFixed(2).replace('.', ','), (Math.round(6146989 * ti) / 5310000).toFixed(2).replace('.', ',')], 'hệ số = mức ÷ lương tối thiểu');
+  // 2) sửa Mức lương bậc I -> mọi bậc sau tự nhân
+  ({ trMl, trHs } = dung(['1,00', '1,05'], ['5.310.000', '5.575.500']));
+  td = trMl.children[1]; ctx.vbTlVao(td); td.textContent = '6.000.000'; assert(ctx.vbTlTinhLai(td));
+  assert.deepStrictEqual(doc(trMl), ['6.000.000', Math.round(5575500 * 6000000 / 5310000).toLocaleString('vi-VN')]);
+  // 3) sửa Hệ số bậc I = 1,2 -> mức = 1,2 × 5.310.000 = 6.372.000, bậc sau nhân 1,2
+  ({ trMl, trHs } = dung(['1,00', '1,05'], ['5.310.000', '5.575.500']));
+  td = trHs.children[1]; ctx.vbTlVao(td); td.textContent = '1,2'; assert(ctx.vbTlTinhLai(td));
+  assert.deepStrictEqual(doc(trMl), ['6.372.000', '6.690.600'], 'sửa hệ số: mức lương các bậc sau tự nhân'); assert.deepStrictEqual(doc(trHs), ['1,20', '1,26']);
+  // 4) không đổi gì -> không tính lại (hệ số hiển thị đã làm tròn)
+  ({ trMl, trHs } = dung(['1,00', '1,16'], ['5.310.000', '6.146.989']));
+  td = trHs.children[2]; ctx.vbTlVao(td); assert.strictEqual(ctx.vbTlTinhLai(td), false); assert.deepStrictEqual(doc(trMl), ['5.310.000', '6.146.989']);
+  // 5) nhập sai (chữ / số âm) -> trả lại giá trị cũ
+  td = trMl.children[2]; ctx.vbTlVao(td); td.textContent = 'abc'; assert.strictEqual(ctx.vbTlTinhLai(td), false); assert.strictEqual(td.textContent, '6.146.989');
+  // 6) ẩn dòng hệ số vẫn tính được; ô trống (nhóm ít bậc hơn) bỏ qua; bậc I thấp hơn lương tối thiểu thì cảnh báo
+  ({ trMl } = dung([], ['5.310.000', '5.575.500', ''], false));
+  td = trMl.children[1]; ctx.vbTlVao(td); td.textContent = '5.000.000'; assert(ctx.vbTlTinhLai(td));
+  assert.deepStrictEqual(doc(trMl), ['5.000.000', Math.round(5575500 * 5000000 / 5310000).toLocaleString('vi-VN'), '']);
+  assert(tb.some((x) => x[1] === 'err' && x[0].includes('thấp hơn lương tối thiểu')), 'cảnh báo mức bậc I < lương tối thiểu vùng');
+  assert(html.includes("xem.addEventListener('beforeinput',()=>vbTlBatDau(vbTlODangChon()))") && html.includes("xem.addEventListener('focusout',()=>vbTlXacNhan())") && !html.includes("addEventListener('selectionchange'"), 'xác nhận khi Enter/sang ô khác/rời khối soạn thảo — không tính lại giữa chừng khi đang gõ');
+  assert(/function vbIn\(\)\{\s*vbTlXacNhan\(\);/.test(html) && /async function vbXuatWord\(\)\{\s*vbTlXacNhan\(\);/.test(html), 'xác nhận ô đang sửa trước khi in / xuất Word');
+  // xác nhận khi sang ô khác: gõ dở ("6" -> "60" -> "6000000") chưa tính; chỉ tính 1 lần khi xác nhận
+  ({ trMl, trHs } = dung(['1,00', '1,05', '1,10'], ['5.310.000', '5.575.500', '5.854.275']));
+  const o2 = trMl.children[2], o3 = trMl.children[3];
+  ctx.vbTlBatDau(o2); o2.textContent = '6'; ctx.vbTlBatDau(o2); o2.textContent = '6000000';
+  assert.strictEqual(o3.textContent, '5.854.275', 'chưa xác nhận thì các bậc sau chưa đổi');
+  assert.strictEqual(ctx.vbTlXacNhan(), true); assert.strictEqual(o3.textContent, Math.round(5854275 * 6000000 / 5575500).toLocaleString('vi-VN'));
+  assert.strictEqual(ctx.vbTlXacNhan(), false, 'không còn ô đang sửa');
+  // sửa nhầm rồi sửa lại: không mất độ chính xác (hệ số lưu chính xác trong ô)
+  ctx.vbTlBatDau(o2); o2.textContent = '10'; ctx.vbTlXacNhan(); ctx.vbTlBatDau(o2); o2.textContent = '5.575.500'; ctx.vbTlXacNhan();
+  assert.deepStrictEqual(doc(trMl), ['5.310.000', '5.575.500', '5.854.275'], 'đổi nhầm rồi trả lại thì về đúng số cũ');
+  console.log('PASS 17: sửa Hệ số / Mức lương thì các bậc sau tự nhân theo.');
+})();
