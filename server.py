@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-03.085"
+APP_BUILD = "2026-10-04.086"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13236,6 +13236,28 @@ def _ck_dam_bao_bang(conn):
         company_id INTEGER, khoa TEXT, PRIMARY KEY (company_id, khoa))""")      # chữ ký của công ty khác mà công ty NÀY đã xử lý xong -> ẩn khỏi "Chưa gán" của công ty này (kho chung giữ nguyên)
     conn.execute("""CREATE TABLE IF NOT EXISTS chu_ky_chung (
         khoa TEXT PRIMARY KEY, ten TEXT, anh TEXT, xac_nhan INTEGER DEFAULT 0, updated_at TEXT)""")     # KHO CHUNG nhiều công ty: khoá theo CCCD / họ tên / người đại diện
+    _ck_chuyen_gd_cu(conn)
+
+
+def _ck_chuyen_gd_cu(conn):
+    """Bản trước khoá chữ ký giám đốc theo TÊN (gd:<tên>) nên công ty cùng tên dùng chung. Nay mỗi công ty 1 chữ ký riêng (gd:cty<id>):
+    khoá cũ chỉ được chuyển cho công ty khi CHỈ CÓ ĐÚNG 1 công ty có người đại diện trùng tên đó; nếu nhiều công ty trùng thì không đoán, để nguyên (không công ty nào dùng)."""
+    try:
+        cu = [r["khoa"] for r in conn.execute("SELECT khoa FROM chu_ky_chung WHERE khoa LIKE 'gd:%' AND khoa NOT LIKE 'gd:cty%'").fetchall()]
+        if not cu:
+            return
+        theo_ten = {}
+        for c in conn.execute("SELECT id, nguoi_ky FROM companies").fetchall():
+            t = vbld._chuan(c["nguoi_ky"] or "")
+            if t:
+                theo_ten.setdefault("gd:" + t, []).append(c["id"])
+        for k in cu:
+            ds = theo_ten.get(k) or []
+            if len(ds) == 1 and not conn.execute("SELECT 1 FROM chu_ky_chung WHERE khoa=?", (f"gd:cty{ds[0]}",)).fetchone():
+                conn.execute("UPDATE chu_ky_chung SET khoa=? WHERE khoa=?", (f"gd:cty{ds[0]}", k))
+        conn.commit()
+    except Exception:
+        pass
 
 
 def _ck_chuan_hoa_anh(data_uri):
@@ -13274,9 +13296,8 @@ def _ck_chuan_hoa_anh(data_uri):
 
 
 def _ck_khoa_gd(cid, nguoi_ky):
-    """Khoá chữ ký của người đại diện: theo tên (cùng 1 giám đốc ký nhiều công ty dùng chung 1 chữ ký)."""
-    t = vbld._chuan(nguoi_ky)
-    return ("gd:" + t) if t else f"gd:cty{cid}"
+    """Khoá chữ ký của người đại diện: MỖI CÔNG TY CHỈ CÓ 1 ô chữ ký giám đốc riêng (công ty khác không lấy dùng chung)."""
+    return f"gd:cty{cid}"
 
 
 def _ck_doc_het(cid):
@@ -13347,7 +13368,7 @@ def _ck_da_luu_khac(chung, khoa_cua_cty):
     """Chữ ký ĐÃ GÁN trong kho dùng chung (của công ty khác / người không có trong danh sách này) — vẫn dùng lại được ở mọi công ty."""
     kq = []
     for k, v in sorted(chung.items(), key=lambda kv: (kv[1].get("ten") or "")):
-        if k in khoa_cua_cty or not v.get("anh") or not v.get("xac_nhan"):
+        if k in khoa_cua_cty or k.startswith("gd:") or not v.get("anh") or not v.get("xac_nhan"):      # chữ ký giám đốc là của riêng từng công ty
             continue
         kq.append({"khoa": k, "ten": v.get("ten") or k, "anh": v["anh"]})
     return kq

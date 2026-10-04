@@ -99,7 +99,7 @@ def giai(uri):
 server.nhap_lieu_get = lambda cid, loai="in": {"header": HDR, "rows": ROWS} if loai == "nv" else {"header": [], "rows": []}
 server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), bl, "", [nam])
 ds = server.chu_ky_danh_sach(7, 2026)
-assert ds["giam_doc"]["khoa"] == "gd:ho thi cam van" and ds["giam_doc"]["ten"] == "Hồ Thị Cẩm Vân" and len(ds["nhan_vien"]) == 5 and not any(m["co_anh"] for m in ds["nhan_vien"])
+assert ds["giam_doc"]["khoa"] == "gd:cty7" and ds["giam_doc"]["ten"] == "Hồ Thị Cẩm Vân" and len(ds["nhan_vien"]) == 5 and not any(m["co_anh"] for m in ds["nhan_vien"])
 k2 = ds["nhan_vien"][1]["khoa"]
 assert k2 == "cccd:079190000102", k2
 # lưu ảnh bắt buộc kèm xác nhận đồng ý
@@ -155,15 +155,28 @@ import van_ban_lao_dong as _v
 assert _v.khoa_chu_ky("2-001", "A") == _v.khoa_chu_ky("2", "A") == "ma:2" and _v.khoa_chu_ky("", "Trần Văn Á") == "ten:tran van a"
 assert _v.khoa_nguoi({"cccd": "079 190 000 102", "ten": "X"}) == "cccd:079190000102" and _v.khoa_nguoi({"cccd": "123", "ten": "Trần Văn Á"}) == "ten:tran van a"
 
-# KHO CHUNG nhiều công ty: cùng người (CCCD) / cùng giám đốc ở công ty khác dùng lại đúng chữ ký đã lưu
+# KHO CHUNG nhiều công ty: cùng người (CCCD) ở công ty khác dùng lại đúng chữ ký đã lưu; chữ ký GIÁM ĐỐC là của riêng từng công ty
 run(server.chu_ky_luu(7, Req({"khoa": k2, "ten": "Nhân Viên 2", "anh": anh(), "xac_nhan": True})))
 conn.execute("INSERT INTO companies VALUES (8, 'CÔNG TY KHÁC', '0300000002', '9 Trần Hưng Đạo', 'Hồ Thị Cẩm Vân')")
 ds8 = server.chu_ky_danh_sach(8, 2026)
-assert ds8["giam_doc"]["co_anh"] and ds8["giam_doc"]["xac_nhan"] and ds8["nhan_vien"][1]["co_anh"] and ds8["tong_kho_chung"] == 2, "công ty khác thấy chữ ký trong kho chung"
+assert not ds8["giam_doc"]["co_anh"] and ds8["giam_doc"]["khoa"] == "gd:cty8", "giám đốc CÙNG TÊN ở công ty khác cũng KHÔNG lấy chữ ký giám đốc của công ty 7"
+assert ds8["nhan_vien"][1]["co_anh"] and ds8["tong_kho_chung"] == 2, "công ty khác thấy chữ ký người lao động trong kho chung"
+assert "gd:cty7" not in [d["khoa"] for d in ds8["da_luu"]] and not any(d["khoa"].startswith("gd:") for d in ds8["da_luu"]), "chữ ký giám đốc không hiện ở mục chưa gán của công ty khác"
 rk = run(server.van_ban_xem_truoc(8, Req({"loai": "hd", "nam": 2026, "tu": 2, "den": 2})))
-assert rk["so_chu_ky"] == 2, "hợp đồng ở công ty khác tự gắn chữ ký người lao động (CCCD) + giám đốc (cùng tên)"
+assert rk["so_chu_ky"] == 1, "hợp đồng ở công ty khác chỉ gắn chữ ký người lao động (CCCD), không gắn chữ ký giám đốc của công ty khác"
+run(server.chu_ky_luu(8, Req({"khoa": "giam_doc", "ten": "Hồ Thị Cẩm Vân", "anh": anh(), "xac_nhan": True})))
+assert server.chu_ky_danh_sach(8, 2026)["giam_doc"]["co_anh"] and server.chu_ky_danh_sach(7, 2026)["giam_doc"]["co_anh"], "mỗi công ty 1 chữ ký giám đốc riêng"
 conn.execute("UPDATE companies SET nguoi_ky='Người Khác' WHERE id=8")
-assert not server.chu_ky_danh_sach(8, 2026)["giam_doc"]["co_anh"], "giám đốc khác tên thì không dùng chung"
+# khoá giám đốc cũ theo TÊN (bản trước): chuyển cho công ty duy nhất trùng tên; trùng nhiều công ty thì không đoán
+conn.execute("INSERT INTO chu_ky_chung (khoa, ten, anh, xac_nhan, updated_at) VALUES ('gd:ten rieng', 'Tên Riêng', ?, 1, '')", (anh(),))
+conn.execute("INSERT INTO companies VALUES (9, 'CTY 9', '0300000009', 'x', 'Tên Riêng')")
+conn.execute("INSERT INTO chu_ky_chung (khoa, ten, anh, xac_nhan, updated_at) VALUES ('gd:trung ten', 'Trùng Tên', ?, 1, '')", (anh(),))
+conn.execute("INSERT INTO companies VALUES (10, 'CTY 10', '0300000010', 'x', 'Trùng Tên')"); conn.execute("INSERT INTO companies VALUES (11, 'CTY 11', '0300000011', 'x', 'Trùng Tên')")
+server._ck_doc_het(7)
+ks = {r[0] for r in conn.execute("SELECT khoa FROM chu_ky_chung")}
+assert "gd:cty9" in ks and "gd:ten rieng" not in ks, "chuyển khoá cũ cho công ty duy nhất trùng tên"
+assert "gd:trung ten" in ks and "gd:cty10" not in ks and "gd:cty11" not in ks, "trùng nhiều công ty: không đoán, không công ty nào dùng"
+conn.execute("DELETE FROM chu_ky_chung WHERE khoa IN ('gd:cty9','gd:trung ten')"); conn.execute("DELETE FROM companies WHERE id IN (9,10,11)")
 # khoá cũ theo công ty (bản trước) vẫn được đọc
 conn.execute("INSERT INTO chu_ky (company_id, khoa, ten, anh, xac_nhan, updated_at) VALUES (7, 'ma:nv3', 'Nhân Viên 3', ?, 1, '')", (anh(),))
 assert server.chu_ky_danh_sach(7, 2026)["nhan_vien"][2]["co_anh"] and "ma:nv3" in server._vb_chu_ky_dict(7)
