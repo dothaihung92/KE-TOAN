@@ -301,3 +301,26 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(goi.some((x) => x[2] === 'DELETE' && x[0] === '/api/chu-ky/7/du?id=4'), 'file dư: xoá hẳn như cũ');
   console.log('PASS 14: chữ ký đã lưu ở công ty khác tính vào Chữ ký chưa gán; gắn phải xác nhận cùng một người.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 15: nút "Tải về" chữ ký — tải PNG đúng nội dung, đặt tên file theo tên người
+(async () => {
+  const { ctx, pt } = moiTruong({ vbKhoCk: '' });
+  const png = 'data:image/png;base64,' + Buffer.from('PNGDATA').toString('base64');
+  const muc = [{ khoa: 'gd:cty7', ten: 'Dương Thị Hiền', co_anh: true, anh: png }, { khoa: 'cccd:2', ten: 'Nguyễn B', co_anh: false, anh: '' }];
+  ctx.api = async () => ({ giam_doc: muc[0], nhan_vien: [muc[1]], tong_kho_chung: 1, du: [{ id: 4, ten: 'chu_ky_12.png', anh: png }], da_luu: [{ khoa: 'cccd:9', ten: 'Nguyễn Hữu Hiệp', anh: png }] });
+  ctx.vbNam = 2026; await ctx.vbCkVe();
+  const h = pt.vbKhoCk.innerHTML;
+  assert.strictEqual(h.split("vbCkTaiVe('muc'").length, 2, 'chỉ dòng đã có chữ ký mới có nút Tải về');
+  assert(h.includes("vbCkTaiVe('du',0)") && h.includes("vbCkTaiVe('du',1)"), 'mục chưa gán có nút Tải về');
+  const tai = []; let nd = null;
+  ctx.URL = { createObjectURL: (b) => { nd = b; return 'blob:x'; }, revokeObjectURL() {} };
+  ctx.Blob = class { constructor(p, o) { this.p = p; this.type = o.type; } };
+  ctx.Uint8Array = Uint8Array; ctx.atob = (s) => Buffer.from(s, 'base64').toString('binary');
+  ctx.setTimeout = (f) => 0;
+  ctx.document.createElement = () => ({ click() { tai.push(this.download); }, remove() {} }); ctx.document.body = { appendChild() {} };
+  ctx.vbCkTaiVe('muc', 0); ctx.vbCkTaiVe('du', 0); ctx.vbCkTaiVe('du', 1);
+  assert.deepStrictEqual(tai, ['chu_ky_duong_thi_hien.png', 'chu_ky_chu_ky_12.png', 'chu_ky_nguyen_huu_hiep.png']);
+  assert(nd.type === 'image/png' && Buffer.from(nd.p[0]).toString() === 'PNGDATA', 'nội dung PNG đúng');
+  const toasts = []; ctx.toast = (m, k) => toasts.push(k); ctx.vbCkTaiVe('muc', 1); assert.deepStrictEqual(toasts, ['err'], 'chưa có ảnh thì báo lỗi');
+  console.log('PASS 15: nút Tải về chữ ký.');
+})().catch((e) => { console.error(e); process.exit(1); });

@@ -4696,7 +4696,7 @@ async function vbCkVe(){
     <td style="padding:5px 8px;border:1px solid #ddd;white-space:nowrap">
       <button class="btn ghost sm" onclick="vbCkMoPad(${i})">✍ Ký trên màn hình</button>
       <button class="btn ghost sm" onclick="vbCkTai(${i})">📁 Tải ảnh</button>
-      ${m.co_anh?`<button class="btn ghost sm" style="color:#c00" onclick="vbCkXoa(${i})">🗑</button>`:''}</td></tr>`;
+      ${m.co_anh?`<button class="btn ghost sm" onclick="vbCkTaiVe('muc',${i})" title="Tải ảnh chữ ký này về máy (PNG nền trong suốt)">⬇ Tải về</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoa(${i})">🗑</button>`:''}</td></tr>`;
   kv.innerHTML=`<div style="border:1px solid #d9c9ee;background:#faf6ff;border-radius:10px;padding:10px;margin-bottom:10px">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px"><span style="font-weight:700">✍ Kho chữ ký</span>
       <button class="btn sm" style="background:#6b3fa0" onclick="document.getElementById('vbCkNhieu').click()" title="Chọn nhiều file ảnh chữ ký cùng lúc; phần mềm tự ghép tên file (mã NV hoặc họ tên) với từng nhân viên">📁 Chọn nhiều chữ ký 1 lần</button>
@@ -4712,7 +4712,7 @@ async function vbCkVe(){
         <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
         <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}${d.loai==='luu'?' <span class="hint">(đã gắn ở công ty khác)</span>':''}</td>
         <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>m.co_anh?'':`<option value="${j}">${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
-        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})" title="${d.loai==='luu'?'Xoá khỏi danh sách chưa gán của công ty này (công ty cũ vẫn giữ chữ ký)':'Xóa chữ ký chưa gán'}">🗑</button></td></tr>`).join('')}</table></div>`:''}</div>
+        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" onclick="vbCkTaiVe('du',${i})" title="Tải ảnh chữ ký này về máy">⬇ Tải về</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})" title="${d.loai==='luu'?'Xoá khỏi danh sách chưa gán của công ty này (công ty cũ vẫn giữ chữ ký)':'Xóa chữ ký chưa gán'}">🗑</button></td></tr>`).join('')}</table></div>`:''}</div>
     <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="vbCkNhieu" accept="image/png,image/jpeg" multiple style="display:none" onchange="vbCkNhieuChon(this.files)">
     <div id="vbCkNhieuKq"></div>
@@ -4720,6 +4720,19 @@ async function vbCkVe(){
 }
 
 // Chọn NHIỀU ảnh chữ ký 1 lần: ghép tên file (mã NV hoặc họ tên, "giám đốc"/"gd") với nhân viên; xem lại, đổi người nếu sai, rồi lưu tất cả
+// Tải ảnh chữ ký (PNG) về máy: loai 'muc' = dòng trong bảng người ký, 'du' = mục chưa gán
+function vbCkTaiVe(loai,i){
+  const m=loai==='du'?vbCkDu[i]:vbCkMuc[i];
+  if(!m||!m.anh){toast('Chưa có ảnh chữ ký để tải','err');return}
+  const ten=(loai==='du'&&m.loai!=='luu'&&m.ten)?String(m.ten).replace(/\.[^.]+$/,''):(m.ten||'chu_ky');
+  const tenFile='chu_ky_'+(vbCkKhongDau(ten).replace(/[^a-z0-9_-]+/g,'_').replace(/^_+|_+$/g,'')||'khong_ten')+'.png';
+  try{
+    const b=m.anh.split(',');const bin=atob(b[1]||'');const u8=new Uint8Array(bin.length);for(let k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
+    const url=URL.createObjectURL(new Blob([u8],{type:'image/png'}));
+    const a=document.createElement('a');a.href=url;a.download=tenFile;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    toast('Đã tải '+tenFile,'ok');
+  }catch(e){toast('Lỗi tải chữ ký: '+e.message,'err')}
+}
 function vbCkKhongDau(s){return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase()}
 function vbCkKhopTen(tenFile,muc){
   const goc=String(tenFile||'').replace(/\.[^.]+$/,'');
