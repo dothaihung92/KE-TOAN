@@ -324,3 +324,24 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   const toasts = []; ctx.toast = (m, k) => toasts.push(k); ctx.vbCkTaiVe('muc', 1); assert.deepStrictEqual(toasts, ['err'], 'chưa có ảnh thì báo lỗi');
   console.log('PASS 15: nút Tải về chữ ký.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 16: Esc trong các mục của "Bảng Lương - BHXH" -> quay về màn Bảng Lương - BHXH (không văng ra trang chọn loại)
+(() => {
+  const i0 = html.indexOf('function nlThoatManHinh'), i1 = html.indexOf('async function capNhatBadge', i0);
+  assert(i0 > 0 && i1 > i0);
+  const lanh = html.slice(i0, i1);
+  assert(html.includes("if(content&&content.style.display!=='none'){nlThoatManHinh();}") && html.includes("e.stopPropagation();nlThoatManHinh();return;"), 'phím Esc toàn cục + trong ô lưới đều dùng nlThoatManHinh');
+  const chay = (body, dom = {}) => {
+    const log = [];
+    const el = (id) => dom[id] || null;
+    const ctx = { document: { getElementById: (id) => id === 'nhapLieuBody' ? { querySelector: (sel) => { assert(sel.includes('blQuayLai()') && sel.includes('moBangLuong()')); return body ? { click: () => log.push('click-' + body) } : null; } } : el(id) }, nlDMMode: null, dmDaSua: false, confirm: () => true, capNhatBadge() {} };
+    vm.createContext(ctx); vm.runInContext(lanh.replace(/\bfunction quayLaiChonBangKe[\s\S]*$/, '') + '\nfunction quayLaiChonBangKe(){globalThis.__log.push("chon-loai")}', ctx);
+    ctx.__log = log; vm.runInContext('globalThis.__log=__log', ctx); ctx.nlThoatManHinh(); return log;
+  };
+  assert.deepStrictEqual(chay('moBangLuong'), ['click-moBangLuong'], 'Danh sách NV / NPT / hợp đồng / quy chế / thang lương -> về Bảng Lương - BHXH');
+  assert.deepStrictEqual(chay('blQuayLai'), ['click-blQuayLai'], 'Bảng lương -> về Bảng Lương - BHXH (có hỏi nếu chưa lưu)');
+  assert.deepStrictEqual(chay(null), ['chon-loai'], 'đang ở màn Bảng Lương - BHXH (không có nút quay lại) -> về trang chọn loại như cũ');
+  const rm = []; assert.deepStrictEqual(chay('moBangLuong', { vbCkPadWrap: { remove: () => rm.push(1) } }), [], 'hộp thoại ký đang mở: Esc chỉ đóng hộp thoại'); assert.strictEqual(rm.length, 1);
+  assert.deepStrictEqual(chay('moBangLuong', { misaModal: { style: { display: 'flex' } } }), [], 'modal khác đang mở: để modal tự xử lý');
+  console.log('PASS 16: Esc quay về Bảng Lương - BHXH.');
+})();

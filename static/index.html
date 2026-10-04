@@ -4114,6 +4114,16 @@ function dongNhapLieu(){
   if(nlDMMode&&dmDaSua&&!confirm('Danh mục vừa sửa/import CHƯA LƯU sẽ mất. Vẫn thoát?'))return;
   document.getElementById('nhapLieuScreen').style.display='none';
 }
+// Phím Esc trên màn Nhập Liệu: đang có hộp thoại con (ký trên màn hình / chọn người lao động) -> đóng hộp thoại;
+// đang ở 1 mục con của "Bảng Lương - BHXH" (Danh sách nhân viên, Người phụ thuộc, Bảng lương, Hợp đồng, Quy chế, Thang bảng lương)
+// -> quay về màn "Bảng Lương - BHXH" (bấm đúng nút "← Bảng Lương - BHXH" của mục đó, nên vẫn hỏi nếu chưa lưu); còn lại -> về trang chọn loại
+function nlThoatManHinh(){
+  for(const id of ['xkGanModal','misaModal']){const m=document.getElementById(id);if(m&&m.style.display==='flex')return}
+  for(const id of ['vbCkPadWrap','nptChonNldOv']){const ov=document.getElementById(id);if(ov){ov.remove();return}}
+  const body=document.getElementById('nhapLieuBody'),nut=body&&body.querySelector('button[onclick="blQuayLai()"],button[onclick="moBangLuong()"]');
+  if(nut){nut.click();return}
+  quayLaiChonBangKe();
+}
 function quayLaiChonBangKe(){
   if(nlDMMode&&dmDaSua&&!confirm('Danh mục vừa sửa/import CHƯA LƯU sẽ mất. Vẫn thoát ra ngoài?'))return;
   document.getElementById('nhapLieuHome').style.display='block';
@@ -8999,7 +9009,7 @@ function nlPhimO(e,td){
     if(nhapLieuLoaiHienTai==='xk')xkFillDown();else nlFillDown();return;}
   if((e.ctrlKey||e.metaKey)&&(e.key==='r'||e.key==='R')){e.preventDefault();nlFillRight();return;}
   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&(e.key==='l'||e.key==='L')){e.preventDefault();nlBatFilter();return;}
-  if(e.key==='Escape'){e.preventDefault();quayLaiChonBangKe();return;}
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();nlThoatManHinh();return;}
   // mũi tên lên/xuống/trái/phải: di chuyển sang ô liền kề như Excel (không
   // dùng để dịch con trỏ chữ trong ô, vì ô luôn ở chế độ có thể gõ thẳng)
   if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&
@@ -9114,7 +9124,7 @@ document.addEventListener('keydown',(e)=>{
   if(e.altKey&&k==='g'&&nhapLieuLoaiHienTai==='xk'){e.preventDefault();xkGanChonDong();} // Alt+G: Gán mã
   if(e.key==='Escape'){
     const content=document.getElementById('nhapLieuContent');
-    if(content&&content.style.display!=='none'){quayLaiChonBangKe();}
+    if(content&&content.style.display!=='none'){nlThoatManHinh();}
     else{dongNhapLieu();}
   }
 });
