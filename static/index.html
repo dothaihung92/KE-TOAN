@@ -4788,7 +4788,7 @@ async function vbCkGui(khoa,ten,anh,xn){
 async function vbMoKhoCk(){
   const kv=document.getElementById('vbKhoCk');if(!kv)return;
   if(kv.style.display==='block'){kv.style.display='none';return}
-  kv.style.display='block';kv.innerHTML='<div class="hint">Đang tải Kho chữ ký…</div>';
+  kv.style.display='block';kv.innerHTML='<div class="hint">Đang tải Kho chữ ký…</div>';vbCkDuChon={};
   await vbCkVe();
 }
 async function vbCkVe(){
@@ -4816,15 +4816,13 @@ async function vbCkVe(){
     <div id="vbCkDuKhung" style="margin-top:8px;border:1px dashed #b79bd8;border-radius:8px;padding:8px;background:#fff">
       <div style="font-weight:600;margin-bottom:4px">🗂 Chữ ký chưa gán: <span id="vbCkDuSo" style="color:${vbCkDu.length?'#6b3fa0':'#666'}">${vbCkDu.length}</span> chữ ký${vbCkDu.length?' — đã lưu trong kho dùng chung mọi công ty, gắn cho người của công ty này khi cần':''}</div>
       ${vbCkDu.length?'':'<div class="hint">Chưa có chữ ký nào chưa gán. Chữ ký đã lưu ở công ty khác (của người chưa có trong danh sách này) cũng hiện ở đây. Khi chọn nhiều chữ ký 1 lần mà số file nhiều hơn số người trong danh sách (hoặc tên file không khớp ai), các chữ ký dư sẽ được giữ lại ở đây để gắn sau.</div>'}
-      ${vbCkDu.length?`<div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDu.map((d,i)=>`<tr>
-        <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
-        <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}${d.loai==='luu'?' <span class="hint">(đã gắn ở công ty khác)</span>':''}</td>
-        <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>m.co_anh?'':`<option value="${j}">${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
-        <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" onclick="vbCkTaiVe('du',${i})" title="Tải ảnh chữ ký này về máy">⬇ Tải về</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})" title="${d.loai==='luu'?'Xoá khỏi danh sách chưa gán của công ty này (công ty cũ vẫn giữ chữ ký)':'Xóa chữ ký chưa gán'}">🗑</button></td></tr>`).join('')}</table></div>`:''}</div>
+      <div id="vbCkDuBang"></div></div>
     <input type="file" id="vbCkFile" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="vbCkNhieu" accept="image/png,image/jpeg" multiple style="display:none" onchange="vbCkNhieuChon(this.files)">
     <div id="vbCkNhieuKq"></div>
     </div>`;
+  if(vbCkDuCt!==current){vbCkDuChon={};vbCkDuCt=current}    // sang công ty khác: bỏ các lựa chọn gắn chưa lưu
+  vbCkDuVe();
 }
 
 // Chọn NHIỀU ảnh chữ ký 1 lần: ghép tên file (mã NV hoặc họ tên, "giám đốc"/"gd") với nhân viên; xem lại, đổi người nếu sai, rồi lưu tất cả
@@ -4895,14 +4893,66 @@ async function vbCkNhieuLuu(){
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Chữ ký CHƯA GÁN (nhiều hơn danh sách nhân viên): giữ trong kho, gắn sau cho người mới thêm (phải xác nhận người đó đồng ý)
+// Lựa chọn người để gắn cho từng chữ ký chưa gán (giữ qua các lần vẽ lại): khoá chữ ký -> khoá người
+let vbCkDuChon={},vbCkDuCt=null;
+const vbCkDuKhoa=d=>d.loai+':'+(d.khoa||d.id);
+function vbCkDuChonCuaDong(d){
+  const kh=vbCkDuChon[vbCkDuKhoa(d)];
+  const j=kh==null?-1:vbCkMuc.findIndex(m=>m.khoa===kh);
+  return j>=0&&!vbCkMuc[j].co_anh?j:-1;      // người đã có chữ ký (vừa gắn xong) thì bỏ lựa chọn
+}
+// Bảng chữ ký chưa gán: người đã được chọn ở dòng khác KHÔNG hiện trong danh sách chọn của dòng này (dễ chọn người còn lại)
+function vbCkDuVe(){
+  const kv=document.getElementById('vbCkDuBang');if(!kv)return;
+  const cu=kv.querySelector('.vbCkDuCuon'),top=cu?cu.scrollTop:0;
+  const chon=vbCkDu.map(d=>vbCkDuChonCuaDong(d));
+  const dung=new Set(chon.filter(j=>j>=0));
+  const soChon=dung.size;
+  const conLai=vbCkMuc.filter((m,j)=>!m.co_anh&&!dung.has(j)).length;
+  kv.innerHTML=vbCkDu.length?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <button class="btn gold sm" onclick="vbCkGanTatCa()" ${soChon?'':'disabled'} title="Gắn cùng lúc tất cả các chữ ký đã chọn người ở bên dưới">✅ Gắn toàn bộ chữ ký đã chọn (${soChon})</button>
+      <span class="hint">Đã chọn người cho ${soChon}/${vbCkDu.length} chữ ký — người đã chọn ở dòng khác không hiện lại trong danh sách; còn ${conLai} người chưa có chữ ký chưa được chọn.</span></div>
+    <div class="vbCkDuCuon" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDu.map((d,i)=>`<tr>
+      <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
+      <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}${d.loai==='luu'?' <span class="hint">(đã gắn ở công ty khác)</span>':''}</td>
+      <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px" onchange="vbCkDuDoi(${i},this.value)"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>(m.co_anh||(dung.has(j)&&j!==chon[i]))?'':`<option value="${j}" ${j===chon[i]?'selected':''}>${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
+      <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" onclick="vbCkTaiVe('du',${i})" title="Tải ảnh chữ ký này về máy">⬇ Tải về</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})" title="${d.loai==='luu'?'Xoá khỏi danh sách chưa gán của công ty này (công ty cũ vẫn giữ chữ ký)':'Xóa chữ ký chưa gán'}">🗑</button></td></tr>`).join('')}</table></div>`:'';
+  const cu2=kv.querySelector('.vbCkDuCuon');if(cu2)cu2.scrollTop=top;
+}
+function vbCkDuDoi(i,v){
+  const d=vbCkDu[i];if(!d)return;
+  const j=parseInt(v,10),m=vbCkMuc[j];
+  if(j>=0&&m)vbCkDuChon[vbCkDuKhoa(d)]=m.khoa;else delete vbCkDuChon[vbCkDuKhoa(d)];
+  vbCkDuVe();
+}
+// Gọi API gắn 1 chữ ký chưa gán cho 1 người (đã được người dùng xác nhận)
+function vbCkGanApi(d,m){
+  const luu=d.loai==='luu';
+  return api(`/api/chu-ky/${current}/${luu?'dung-lai':'gan-du'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(luu?{nguon_khoa:d.khoa,khoa:m.khoa,ten:m.ten,xac_nhan:true}:{id:d.id,khoa:m.khoa,ten:m.ten,xac_nhan:true})});
+}
 async function vbCkGanDu(i){
-  const d=vbCkDu[i],sel=document.getElementById('vbCkDuSel'+i);if(!d||!sel)return;
-  const j=parseInt(sel.value,10),m=vbCkMuc[j];
+  const d=vbCkDu[i];if(!d)return;
+  const j=vbCkDuChonCuaDong(d),m=vbCkMuc[j];
   if(!(j>=0)||!m){toast('Chọn người để gắn chữ ký','err');return}
   const luu=d.loai==='luu';
   if(!confirm(luu?`Xác nhận: “${d.ten}” và “${m.ten}” là CÙNG MỘT NGƯỜI, và người này đã đồng ý sử dụng chữ ký này trên văn bản của công ty?`:`Xác nhận: ${m.ten} đã đồng ý lưu và sử dụng chữ ký này trên văn bản của công ty?`))return;
-  try{await api(`/api/chu-ky/${current}/${luu?'dung-lai':'gan-du'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(luu?{nguon_khoa:d.khoa,khoa:m.khoa,ten:m.ten,xac_nhan:true}:{id:d.id,khoa:m.khoa,ten:m.ten,xac_nhan:true})});toast('Đã gắn chữ ký','ok');await vbCkVe()}
+  try{await vbCkGanApi(d,m);delete vbCkDuChon[vbCkDuKhoa(d)];toast('Đã gắn chữ ký','ok');await vbCkVe()}
   catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Gắn TOÀN BỘ các chữ ký đã chọn người (1 lần xác nhận cho cả danh sách)
+async function vbCkGanTatCa(){
+  const ds=[];vbCkDu.forEach(d=>{const j=vbCkDuChonCuaDong(d);if(j>=0)ds.push({d,m:vbCkMuc[j]})});
+  if(!ds.length){toast('Chưa chọn người nào để gắn','err');return}
+  const dsTxt=ds.map(x=>'• '+(x.d.loai==='luu'?x.d.ten:String(x.d.ten||'').replace(/\.[^.]+$/,''))+'  →  '+x.m.ten).join('\n');
+  const coKhac=ds.filter(x=>x.d.loai==='luu').length;
+  if(!confirm(`Gắn ${ds.length} chữ ký:\n${dsTxt}\n\nXác nhận: từng người ở trên ĐÃ ĐỒNG Ý lưu và sử dụng chữ ký này trên văn bản của công ty${coKhac?`, và các chữ ký “đã gắn ở công ty khác” đúng là CÙNG MỘT NGƯỜI với người được chọn`:''}?`))return;
+  let ok=0;const loi=[];
+  for(const x of ds){
+    try{await vbCkGanApi(x.d,x.m);delete vbCkDuChon[vbCkDuKhoa(x.d)];ok++}
+    catch(e){loi.push((x.m.ten||'')+': '+e.message)}
+  }
+  toast(`Đã gắn ${ok}/${ds.length} chữ ký${loi.length?` — ${loi.length} lỗi: `+loi.join('; '):''}`,loi.length?'err':'ok');
+  await vbCkVe();
 }
 async function vbCkXoaDu(i){
   const d=vbCkDu[i];if(!d)return;

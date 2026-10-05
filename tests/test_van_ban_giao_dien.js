@@ -16,7 +16,7 @@ assert(b0 > 0 && b1 > b0);
 const khoi = html.slice(b0, b1).replace(/^let (vb\w+)/gm, 'var $1');
 function moiTruong(giaTri = {}) {
   const goi = [], pt = {};
-  const el = (id) => !(id in giaTri) && !(('c:' + id) in giaTri) ? null : pt[id] || (pt[id] = { id, value: giaTri[id] === undefined ? '' : giaTri[id], checked: !!giaTri['c:' + id], style: {}, classList: { toggle() {} }, innerHTML: '', textContent: '' });
+  const el = (id) => !(id in giaTri) && !(('c:' + id) in giaTri) ? null : pt[id] || (pt[id] = { id, value: giaTri[id] === undefined ? '' : giaTri[id], checked: !!giaTri['c:' + id], style: {}, classList: { toggle() {} }, querySelector: () => null, innerHTML: '', textContent: '' });
   const ctx = { current: 7, console, toast() {}, document: { getElementById: el, querySelectorAll: () => [] }, localStorage: { getItem: () => null },
     api: async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null]); return {}; }, nlDMMode: null };
   vm.createContext(ctx); vm.runInContext(khoi, ctx);
@@ -256,10 +256,11 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   const iV = html.indexOf('function vbVeMan'), iE = html.indexOf('function vbTuyChon', iV);
   const phan = html.slice(iV, iE);
   assert(phan.includes("(l==='hd'||l==='tv'||l==='pt')?'':`<button class=\"btn sm\" style=\"background:#6b3fa0\" onclick=\"vbMoKhoCk()\""), 'ẩn nút Kho chữ ký ở hợp đồng lao động + thử việc (qc/tl vẫn có)');
-  const { ctx, goi } = moiTruong({ vbCkDuSel0: '3' });
+  const { ctx, goi } = moiTruong({ vbCkDuBang: '' });
   ctx.vbCkMuc = [{ khoa: 'gd:x', ten: 'GĐ', co_anh: true }, { khoa: 'cccd:1', ten: 'A', co_anh: true }, { khoa: 'cccd:2', ten: 'B', co_anh: false }, { khoa: 'cccd:3', ten: 'Người mới', ma: '9', co_anh: false }];
   ctx.vbCkDu = [{ id: 5, ten: 'chu_ky_20.png', anh: 'data:image/png;base64,Z' }];
   ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null, o && o.method]); return u.includes('?nam=') ? { giam_doc: ctx.vbCkMuc[0], nhan_vien: ctx.vbCkMuc.slice(1), du: [] } : { ok: true }; };
+  ctx.vbCkDuChon = {}; ctx.vbCkDuDoi(0, '3');
   ctx.confirm = () => false; await ctx.vbCkGanDu(0); assert(!goi.length, 'không xác nhận thì không gắn');
   ctx.confirm = () => true; await ctx.vbCkGanDu(0);
   const g = goi.find((x) => x[0].endsWith('/gan-du'));
@@ -270,13 +271,13 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
 // 13: mục "Chữ ký chưa gán" luôn hiện kèm số lượng (kể cả 0) trong Kho chữ ký
 (async () => {
   for (const du of [[], [{ id: 1, ten: 'a.png', anh: 'data:image/png;base64,A' }, { id: 2, ten: 'b.png', anh: 'data:image/png;base64,B' }]]) {
-    const { ctx, pt } = moiTruong({ vbKhoCk: '' });
+    const { ctx, pt } = moiTruong({ vbKhoCk: '', vbCkDuBang: '' });
     ctx.api = async () => ({ giam_doc: { khoa: 'giam_doc', ten: 'GĐ', co_anh: true, xac_nhan: true, anh: 'data:image/png;base64,G' }, nhan_vien: [{ khoa: 'ma:3', ten: 'B', ma: '3', co_anh: false, anh: '' }], tong_kho_chung: 3, du });
     ctx.vbNam = 2026; await ctx.vbCkVe();
     const h = pt.vbKhoCk.innerHTML, n = du.length;
     assert(h.includes('Chữ ký chưa gán:') && h.includes(`id="vbCkDuSo" style="color:${n ? '#6b3fa0' : '#666'}">${n}</span> chữ ký`), 'luôn hiện mục + số lượng');
     assert(h.includes(`<b>${n} chữ ký chưa gán</b>`), 'số lượng ở dòng đầu kho');
-    assert.strictEqual(h.includes('vbCkGanDu(0)'), n > 0);
+    assert.strictEqual(pt.vbCkDuBang.innerHTML.includes('vbCkGanDu(0)'), n > 0);
     assert.strictEqual(h.includes('Chưa có chữ ký nào chưa gán'), n === 0);
   }
   console.log('PASS 13: mục Chữ ký chưa gán luôn hiện kèm số lượng (kể cả 0).');
@@ -284,13 +285,14 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
 
 // 14: sang công ty khác — chữ ký đã lưu (kho chung) của người chưa có trong danh sách được tính vào "Chữ ký chưa gán"
 (async () => {
-  const { ctx, goi, pt } = moiTruong({ vbKhoCk: '', vbCkDuSel1: '2' });
+  const { ctx, goi, pt } = moiTruong({ vbKhoCk: '', vbCkDuBang: '' });
   const muc = [{ khoa: 'gd:x', ten: 'GĐ', co_anh: true }, { khoa: 'cccd:1', ten: 'A', co_anh: true }, { khoa: 'cccd:2', ten: 'Nguyễn B', ma: '5', co_anh: false }];
   ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null, o && o.method]); return u.includes('?nam=') ? { giam_doc: muc[0], nhan_vien: muc.slice(1), tong_kho_chung: 3, du: [{ id: 4, ten: 'chu_ky_1.png', anh: 'data:image/png;base64,Y' }], da_luu: [{ khoa: 'cccd:9', ten: 'Nguyen Van B', anh: 'data:image/png;base64,Z' }] } : { ok: true }; };
   ctx.vbNam = 2026; await ctx.vbCkVe();
-  const h = pt.vbKhoCk.innerHTML;
+  const h = pt.vbKhoCk.innerHTML, hb = pt.vbCkDuBang.innerHTML;
   assert(h.includes('id="vbCkDuSo" style="color:#6b3fa0">2</span>') && h.includes('<b>2 chữ ký chưa gán</b>') && !h.includes('Chữ ký đã lưu dùng chung'), 'gộp vào Chữ ký chưa gán: 1 file dư + 1 chữ ký công ty khác = 2');
-  assert(h.includes('(đã gắn ở công ty khác)') && h.split('vbCkXoaDu(').length === 3, 'chữ ký công ty khác có nhãn + nút xoá (chỉ ẩn ở công ty này)');
+  assert(hb.includes('(đã gắn ở công ty khác)') && hb.split('vbCkXoaDu(').length === 3, 'chữ ký công ty khác có nhãn + nút xoá (chỉ ẩn ở công ty này)');
+  ctx.vbCkDuDoi(1, '2');
   ctx.confirm = () => false; await ctx.vbCkGanDu(1); assert(!goi.some((x) => x[0].endsWith('/dung-lai')), 'không xác nhận thì không dùng');
   ctx.confirm = (m) => { assert(m.includes('CÙNG MỘT NGƯỜI')); return true; }; await ctx.vbCkGanDu(1);
   const g = goi.find((x) => x[0].endsWith('/dung-lai'));
@@ -306,14 +308,14 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
 
 // 15: nút "Tải về" chữ ký — tải PNG đúng nội dung, đặt tên file theo tên người
 (async () => {
-  const { ctx, pt } = moiTruong({ vbKhoCk: '' });
+  const { ctx, pt } = moiTruong({ vbKhoCk: '', vbCkDuBang: '' });
   const png = 'data:image/png;base64,' + Buffer.from('PNGDATA').toString('base64');
   const muc = [{ khoa: 'gd:cty7', ten: 'Dương Thị Hiền', co_anh: true, anh: png }, { khoa: 'cccd:2', ten: 'Nguyễn B', co_anh: false, anh: '' }];
   ctx.api = async () => ({ giam_doc: muc[0], nhan_vien: [muc[1]], tong_kho_chung: 1, du: [{ id: 4, ten: 'chu_ky_12.png', anh: png }], da_luu: [{ khoa: 'cccd:9', ten: 'Nguyễn Hữu Hiệp', anh: png }] });
   ctx.vbNam = 2026; await ctx.vbCkVe();
   const h = pt.vbKhoCk.innerHTML;
   assert.strictEqual(h.split("vbCkTaiVe('muc'").length, 2, 'chỉ dòng đã có chữ ký mới có nút Tải về');
-  assert(h.includes("vbCkTaiVe('du',0)") && h.includes("vbCkTaiVe('du',1)"), 'mục chưa gán có nút Tải về');
+  assert(pt.vbCkDuBang.innerHTML.includes("vbCkTaiVe('du',0)") && pt.vbCkDuBang.innerHTML.includes("vbCkTaiVe('du',1)"), 'mục chưa gán có nút Tải về');
   const tai = []; let nd = null;
   ctx.URL = { createObjectURL: (b) => { nd = b; return 'blob:x'; }, revokeObjectURL() {} };
   ctx.Blob = class { constructor(p, o) { this.p = p; this.type = o.type; } };
@@ -722,3 +724,33 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(ma.includes('<div id="blKhFullBox" style="display:flex;') && !ma.includes("blKhFullBox').style.display") && ['blKhTranCom', 'blKhTranTp', 'blKhTranDt', 'blKhTranXx'].every((k) => ma.includes(k)));
   console.log('PASS 34: ô trần phụ cấp luôn hiện.');
 })();
+
+// 35: chữ ký chưa gán — người đã chọn ở dòng khác không hiện lại; "Gắn toàn bộ" gắn hết các dòng đã chọn
+(async () => {
+  const { ctx, goi, pt } = moiTruong({ vbCkDuBang: '' });
+  ctx.vbCkMuc = [{ khoa: 'gd:x', ten: 'GĐ', co_anh: true }, { khoa: 'cccd:1', ten: 'Có rồi', co_anh: true }, { khoa: 'cccd:2', ten: 'Người B', ma: '5', co_anh: false }, { khoa: 'cccd:3', ten: 'Người C', ma: '6', co_anh: false }, { khoa: 'cccd:4', ten: 'Người D', ma: '7', co_anh: false }];
+  ctx.vbCkDu = [{ loai: 'du', id: 1, ten: 'a.png', anh: 'data:image/png;base64,A' }, { loai: 'luu', khoa: 'cccd:9', ten: 'Nguyen C', anh: 'data:image/png;base64,B' }, { loai: 'du', id: 3, ten: 'c.png', anh: 'data:image/png;base64,C' }];
+  ctx.vbCkDuChon = {}; ctx.vbCkDuVe();
+  let h = pt.vbCkDuBang.innerHTML;
+  assert(h.includes('(0)') && h.includes('disabled'), 'chưa chọn: nút gắn toàn bộ bị khoá');
+  assert(h.split('<select').slice(1).every((x) => x.includes('Người B') && x.includes('Người C') && x.includes('Người D') && !x.includes('Có rồi')), 'ban đầu mỗi dòng đều thấy người chưa có chữ ký');
+  ctx.vbCkDuDoi(0, '2');
+  h = pt.vbCkDuBang.innerHTML; const sel = h.split('<select').slice(1);
+  assert(sel[0].includes('Người B') && !sel[1].includes('Người B') && !sel[2].includes('Người B'), 'người đã chọn ở dòng 1 biến mất khỏi dòng 2, 3');
+  assert(sel[1].includes('Người C') && sel[2].includes('Người D'), 'người còn lại vẫn hiện');
+  ctx.vbCkDuDoi(1, '3'); ctx.vbCkDuDoi(2, '4');
+  h = pt.vbCkDuBang.innerHTML; assert(h.includes('(3)') && !h.includes('disabled'), 'đã chọn 3: nút gắn toàn bộ (3)');
+  ctx.vbCkDuDoi(2, '-1'); assert(pt.vbCkDuBang.innerHTML.split('<select')[2].includes('Người D'), 'bỏ chọn thì người quay lại danh sách');
+  ctx.vbCkDuDoi(2, '4');
+  ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null, o && o.method]); return u.includes('?nam=') ? { giam_doc: ctx.vbCkMuc[0], nhan_vien: ctx.vbCkMuc.slice(1), du: [], da_luu: [] } : { ok: true }; };
+  let hoi = ''; ctx.confirm = (m) => { hoi = m; return false; };
+  await ctx.vbCkGanTatCa(); assert(!goi.length && hoi.includes('Người B') && hoi.includes('Người C') && hoi.includes('Người D') && hoi.includes('CÙNG MỘT NGƯỜI'), 'phải xác nhận, liệt kê đủ người');
+  ctx.confirm = () => true; await ctx.vbCkGanTatCa();
+  const gan = goi.filter((x) => /\/(gan-du|dung-lai)$/.test(x[0]));
+  assert.strictEqual(gan.length, 3);
+  assert(gan.find((x) => x[0].endsWith('/gan-du') && x[1].id === 1 && x[1].khoa === 'cccd:2'));
+  assert(gan.find((x) => x[0].endsWith('/dung-lai') && x[1].nguon_khoa === 'cccd:9' && x[1].khoa === 'cccd:3'));
+  assert(gan.find((x) => x[0].endsWith('/gan-du') && x[1].id === 3 && x[1].khoa === 'cccd:4'));
+  assert(gan.every((x) => x[1].xac_nhan === true));
+  console.log('PASS 35: chữ ký chưa gán ẩn người đã chọn + nút Gắn toàn bộ.');
+})().catch((e) => { console.error(e); process.exit(1); });
