@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.132"
+APP_BUILD = "2026-10-05.133"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -41276,6 +41276,17 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 summary = _summary_from_detail_json(detail)
             except Exception:
                 items = []; summary = None
+            # JSON của cổng thuế ghi thuế suất "KHAC" (hóa đơn điều chỉnh...) mà không đủ dữ liệu để biết là mấy %: dùng file XML gốc của hóa đơn nếu đã tải
+            # (XML ghi rõ "KHAC:8.00%" + tiền thuế) — thay vì âm thầm xếp vào không chịu thuế.
+            if items and summary and summary.get("ts_chua_ro"):
+                try:
+                    fp_x = find_invoice_file(r)
+                    if fp_x:
+                        items_x, summary_x = _doc_file_hoadon(fp_x)
+                        if items_x and summary_x and summary_x.get("theo_ts"):
+                            items, summary = items_x, summary_x
+                except Exception:
+                    pass
 
         # (1) file đã tải (XML, hoặc giải nén XML từ trong ZIP)
         if not items:
@@ -43009,6 +43020,101 @@ def _nen_tru_ck_tm_rieng(dongs, tgtcthue_hd):
     return True
 
 
+_TS_TUONG_MINH = ("KCT", "KKKNT", "KHTKKNT", "KHÔNG", "KHONG", "KO")
+
+
+def _ts_gan_chuan(f):
+    """Số % -> '0'/'5'/'8'/'10' nếu nằm trong ±0,5 của mức chuẩn; không thì None."""
+    gan = min((0, 5, 8, 10), key=lambda t: abs(f - t))
+    return str(gan) if abs(f - gan) <= 0.5 else None
+
+
+def _ts_tu_gia_tri(v):
+    """1 giá trị thuế suất bất kỳ ('8%', 'KHAC:8.00%', 8, 0.08...) -> '0'/'5'/'8'/'10' hoặc None nếu không đọc được con số."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, str):
+        kq = _chuan_hoa_thue_suat(v)
+        if kq in ("0", "5", "8", "10"):
+            return kq
+        try:
+            f = float(v.strip().replace("%", "").replace(",", "."))
+        except ValueError:
+            return None
+        pct = v.strip().endswith("%")
+    elif isinstance(v, (int, float)) and not isinstance(v, bool):
+        f, pct = float(v), False
+    else:
+        return None
+    if not pct and 0 < f < 1:       # 0.08 = 8% (cổng thuế có khi ghi tỷ lệ dạng số thập phân)
+        f *= 100
+    return _ts_gan_chuan(f)
+
+
+def _ts_json_dong(it, detail, thue_dong=None):
+    """Thuế suất THẬT của 1 dòng hàng trong JSON chi tiết của cổng thuế. Hóa đơn ĐIỀU CHỈNH/thay thế (vd mẫu MISA, "KHAC:8.00%") cổng thuế thường ghi
+    ltsuat = "KHAC" (không kèm số) và tiền thuế dòng trống/0 -> TRƯỚC ĐÂY bị xếp vào KHÔNG CHỊU THUẾ ([26]) với thuế 0. Tìm theo thứ tự:
+    ltsuat/tsuat của dòng (kể cả "KHAC:8.00%", 8, 0.08) -> khối tổng hợp thttltsuat của hóa đơn (cùng thành tiền, hoặc chỉ 1 mức) -> suy từ tiền thuế
+    dòng / tổng thuế ÷ tổng tiền hàng của hóa đơn (chỉ nhận khi sát 0/5/8/10 ±0,5%).
+    -> (nhãn '0'|'5'|'8'|'10'|'KCT'|None, ro): nhãn None = KHÔNG xác định được (giữ cách xử lý cũ); ro=False khi dòng ghi 'KHAC' mà không giải được."""
+    raw = [it.get("ltsuat"), it.get("tsuat")]
+    chuoi = [str(x or "").strip().upper().replace(" ", "") for x in raw]
+    if any(c in _TS_TUONG_MINH or "KKK" in c or "KCT" in c for c in chuoi):
+        return "KCT", True
+    la_khac = any(c.startswith("KHAC") for c in chuoi)
+    for x in raw:
+        k = _ts_tu_gia_tri(x)
+        if k == "0" and la_khac:
+            continue                 # ltsuat 'KHAC' mà tsuat = 0: số 0 chỉ là giá trị mặc định, không phải thuế suất 0% thật -> tìm nguồn khác
+        if k is not None:
+            return k, True
+    if not la_khac:
+        return None, True            # trống/khác lạ: giữ nguyên cách xử lý cũ
+    ds = _to_num(it.get("thtien"))
+    ds = ds if isinstance(ds, (int, float)) else None
+    # khối tổng hợp theo thuế suất của hóa đơn
+    ls = detail.get("thttltsuat") or detail.get("hdhhdvu_ltsuat") or []
+    muc = []
+    if isinstance(ls, list):
+        for l in ls:
+            if isinstance(l, dict):
+                k = _ts_tu_gia_tri(l.get("tsuat") if l.get("tsuat") not in (None, "") else l.get("ltsuat"))
+                if k is not None:
+                    muc.append((k, _to_num(l.get("thtien"))))
+    if muc:
+        trung = [k for k, t in muc if ds is not None and isinstance(t, (int, float)) and abs(t - ds) < 1]
+        if len({k for k in trung}) == 1:
+            return trung[0], True
+        if len({k for k, _ in muc}) == 1:
+            return muc[0][0], True
+    # suy từ tiền thuế dòng, hoặc tổng thuế/tổng tiền hàng của hóa đơn
+    thue = thue_dong if thue_dong is not None else _to_num(it.get("tthue") if it.get("tthue") not in (None, "") else it.get("tongtien_thue"))
+    if isinstance(thue, (int, float)) and thue and ds:
+        k = _ts_gan_chuan(thue / ds * 100)
+        if k is not None:
+            return k, True
+    tt, tc = _to_num(detail.get("tgtthue")), _to_num(detail.get("tgtcthue"))
+    if isinstance(tt, (int, float)) and isinstance(tc, (int, float)) and tt and tc:
+        k = _ts_gan_chuan(tt / tc * 100)
+        if k is not None:
+            return k, True
+    return None, False
+
+
+def _thue_vat_dong_json(it):
+    """Tiền thuế GTGT của dòng trong JSON: tthue / tongtien_thue, rồi TTKhac 'VATAmount' (mẫu MISA). None nếu không có."""
+    for k in ("tthue", "tongtien_thue"):
+        v = _to_num(it.get(k)) if it.get(k) not in (None, "") else None
+        if isinstance(v, (int, float)) and v:
+            return v
+    for t in it.get("ttkhac") or []:
+        if isinstance(t, dict) and str(t.get("ttruong") or "").strip() == "VATAmount":
+            v = _to_num(t.get("dlieu"))
+            if isinstance(v, (int, float)):
+                return v
+    return None
+
+
 def _parse_detail_json(detail):
     """
     Parse JSON chi tiết hóa đơn (từ endpoint detail của TCT) thành list mặt hàng.
@@ -43056,6 +43162,18 @@ def _parse_detail_json(detail):
                 thtien_out = _to_num(thtien_nt) * tygia
             if isinstance(_to_num(tien_thue_nt), (int, float)):
                 tien_thue_out = _to_num(tien_thue_nt) * tygia
+        # thuế suất "KHAC" (hóa đơn điều chỉnh...): lấy thuế suất + tiền thuế thật (xem _ts_json_dong)
+        ts_out, thue_out = str(it.get("ltsuat", "") or it.get("tsuat", "") or ""), tien_thue_out
+        if ts_out.strip().upper().replace(" ", "").startswith("KHAC"):
+            k_ts, _ro = _ts_json_dong(it, detail)
+            if k_ts in ("0", "5", "8", "10"):
+                ts_out = k_ts + "%"
+            if k_ts in ("5", "8", "10") and not (isinstance(_to_num(tien_thue_nt), (int, float)) and _to_num(tien_thue_nt)):
+                tv = _thue_vat_dong_json(it)
+                if tv is None and isinstance(_to_num(thtien_nt), (int, float)):
+                    tv = round(_to_num(thtien_nt) * int(k_ts) / 100)
+                if tv is not None:
+                    thue_out = tv * tygia if tygia else tv
         rows.append({
             "khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon,
             "ngay": ngay, "ten_nban": ten_nban, "mst_nban": mst_nban,
@@ -43069,8 +43187,8 @@ def _parse_detail_json(detail):
             "dgia": dgia_out,
             "thtien": thtien_out,
             "stckhau": it.get("stckhau", ""),
-            "tsuat": str(it.get("ltsuat", "") or it.get("tsuat", "") or ""),
-            "tien_thue": tien_thue_out,
+            "tsuat": ts_out,
+            "tien_thue": thue_out,
             "tgtcthue": tgtcthue,
             "tgtthue": tgtthue,
             "tgtttbso": tgtttbso,
@@ -43139,12 +43257,22 @@ def _summary_from_detail_json(detail):
             [(la, _to_num(it.get("thtien"))) for la, it in zip(_la_ck_j, items)], detail.get("tgtcthue"))
         for it, la_ck_j in zip(items, _la_ck_j):
             key = norm_ts(it.get("ltsuat") or it.get("tsuat"))
+            k_ts, _ro = _ts_json_dong(it, detail)
+            if not _ro:
+                info["ts_chua_ro"] = True       # dòng 'KHAC' không giải được thuế suất từ JSON -> nên đối chiếu với file XML gốc
+                key = "KHAC"                    # hiện ở nhóm "6. Khác / chưa lấy được file XML" (có cảnh báo khi kết xuất XML) thay vì âm thầm vào KCT
+            elif k_ts is not None:
+                key = k_ts
             ds = _to_num(it.get("thtien")) or 0
             ds = ds if isinstance(ds, (int, float)) else 0
             # Ưu tiên tiền thuế THẬT của dòng hàng (giống _parse_detail_json)
             # thay vì tự tính lại theo tỉ lệ (tránh lệch làm tròn).
             thue_goc = it.get("tthue") if it.get("tthue") not in (None, "") else it.get("tongtien_thue")
             thue_num = _to_num(thue_goc)
+            la_khac = str(it.get("ltsuat") or it.get("tsuat") or "").strip().upper().replace(" ", "").startswith("KHAC")
+            if la_khac and k_ts in ("5", "8", "10") and not thue_num:
+                tv = _thue_vat_dong_json(it)           # tiền thuế dòng trống/0 trong khi thuế suất 5/8/10%: lấy VATAmount hoặc ds × thuế suất
+                thue_num = tv if tv is not None else round(ds * int(k_ts) / 100)
             if isinstance(thue_num, (int, float)):
                 thue = thue_num
             else:
