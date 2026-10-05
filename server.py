@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.124"
+APP_BUILD = "2026-10-05.125"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13273,6 +13273,19 @@ def _vb_sap_theo_ngay(ds, nam, loai):
     return kq
 
 
+def _vb_loc_theo_nam(ds, nam):
+    """Hợp đồng lao động / thử việc của năm `nam` chỉ gồm người CÓ LÀM VIỆC trong năm đó: bỏ người vào làm sau 31/12/`nam` (vd vào làm 03/2026
+    khi đang lập năm 2025 — trước đây hợp đồng bị ghi năm 2026) và người đã nghỉ việc trước 01/01/`nam`. Không ghi ngày thì giữ lại."""
+    dau, cuoi = datetime.date(int(nam), 1, 1), datetime.date(int(nam), 12, 31)
+    kq = []
+    for n in ds or []:
+        vl, nghi = vbld.ngay_date(n.get("vao_lam")), vbld.ngay_date(n.get("nghi_viec"))
+        if (vl and vl > cuoi) or (nghi and nghi < dau):
+            continue
+        kq.append(n)
+    return kq
+
+
 def _vb_tc_kiem_tra(tc, nam, loai=None):
     """Tuỳ chọn dùng để ĐỐI CHIẾU (lương tối thiểu vùng theo năm của văn bản): hợp đồng lấy ngày ký / bắt đầu / 01/01 của NĂM LẬP đang chọn,
     không lấy ngày hôm nay (năm lập 2025 mà hôm nay 2026 thì không được đối chiếu với lương tối thiểu 2026)."""
@@ -13397,7 +13410,8 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
             "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
-            "nhan_vien_hd": gon(_vb_sap_theo_ngay(_vb_ghep_phu_luc(cid, nam, nv_ft), nam, "hd")), "nhan_vien_tv": gon(_vb_sap_theo_ngay(nv_ft, nam, "tv")),
+            "nhan_vien_hd": gon(_vb_sap_theo_ngay(_vb_loc_theo_nam(_vb_ghep_phu_luc(cid, nam, nv_ft), nam), nam, "hd")),
+            "nhan_vien_tv": gon(_vb_sap_theo_ngay(_vb_loc_theo_nam(nv_ft, nam), nam, "tv")),
             "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
                              for n in _vb_nv_part_time(cid, nam)],
             "chuc_danh": vbld.chuc_danh_day_du(tc["nhom_tuy_chinh"]),
@@ -13800,6 +13814,9 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     if loai == "hd":
         nv = _vb_ghep_phu_luc(cid, nam, nv)            # người đổi lương bằng mã -001...: hợp đồng theo mức lương ban đầu + phụ lục điều chỉnh lương
     if loai in ("hd", "tv"):
+        nv = _vb_loc_theo_nam(nv, nam)                  # chỉ người có làm việc trong năm lập (vào làm năm sau / nghỉ từ năm trước thì không)
+        if not nv:
+            raise HTTPException(404, f"Năm {nam} chưa có người lao động nào đang làm việc (theo Tháng/Năm vào làm và nghỉ việc ở Danh Sách NV)")
         nv = _vb_sap_theo_ngay(nv, nam, loai)           # xếp theo ngày bắt đầu tăng dần; STT + số hợp đồng theo thứ tự mới
         try:
             tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv))
@@ -13932,7 +13949,7 @@ def _vb_hd_con_hieu_luc(cid, nam, cty, tc, ds):
     def stt_nam(y, k):          # STT của người đó trong danh sách hợp đồng năm y (như màn hình năm đó) -> số hợp đồng
         if y not in ds_nam:
             nv_y = [n for n in _vb_du_lieu(cid, y)[1] if not n.get("part_time")]
-            ds_nam[y] = {vbld.khoa_lich_su(n): n["stt"] for n in _vb_sap_theo_ngay(_vb_ghep_phu_luc(cid, y, nv_y), y, "hd")}
+            ds_nam[y] = {vbld.khoa_lich_su(n): n["stt"] for n in _vb_sap_theo_ngay(_vb_loc_theo_nam(_vb_ghep_phu_luc(cid, y, nv_y), y), y, "hd")}
         return ds_nam[y].get(k)
     kq, het, gia_dinh, khong_doi, het_trong_nam, lien_tiep = {}, [], set(), [], [], []
     for n in ds:
