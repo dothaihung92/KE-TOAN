@@ -61,7 +61,7 @@ for ten in ("Giám đốc", "Phó giám đốc; Kế toán trưởng", "Phân x�
 
 # --- thang lương lưu THEO TỪNG NĂM + dò lương cơ bản theo năm + danh sách chức vụ cho Danh Sách Nhân Viên
 d0 = server.van_ban_du_lieu(7, 2026)
-assert d0["chuc_danh"] == ["Giám đốc", "Phó giám đốc", "Kế toán trưởng", "Nhân viên kế toán", "Nhân viên kinh doanh", "Phân xưởng sản xuất"], d0["chuc_danh"]
+assert d0["chuc_danh"] == ["Giám đốc", "Phó giám đốc", "Kế toán trưởng", "Nhân viên kế toán", "Nhân viên kinh doanh", "Phân xưởng sản xuất", "Quản lý", "Bảo vệ"], d0["chuc_danh"]
 assert server.van_ban_chuc_danh(7, 2026)["chuc_danh"] == d0["chuc_danh"]
 # Bảng lương năm 2026 chỉ có Nhân Viên 2 (lương 9.000.000): thang lương/quy chế chỉ lấy người có trong Bảng lương năm đó
 assert tl["html"].count("Nhân Viên") == 1 and "Nhân Viên 2" in tl["html"] and "Nhân Viên 1" not in tl["html"]
@@ -75,7 +75,7 @@ assert [(x["ten"], x["luong_cb"], x["tien_com"]) for x in ln["nguoi"]] == [("Nh�
 run(server.van_ban_xem_truoc(7, Req({"loai": "tl", "nam": 2026, "tuy_chon": {"nhom_tuy_chinh": "Giám đốc | 8000000\nNhân viên kinh doanh", "buoc_pct": "6"}})))
 d26 = server.van_ban_du_lieu(7, 2026)
 assert d26["tuy_chon"]["nhom_tuy_chinh"] == "Giám đốc | 8000000\nNhân viên kinh doanh" and float(d26["tuy_chon"]["buoc_pct"]) == 6 and d26["thang_luong_nam_goc"] == 2026
-assert d26["chuc_danh"] == ["Giám đốc", "Nhân viên kinh doanh"]
+assert d26["chuc_danh"] == ["Giám đốc", "Nhân viên kinh doanh", "Quản lý", "Bảo vệ"]
 d27 = server.van_ban_du_lieu(7, 2027)
 assert d27["tuy_chon"]["nhom_tuy_chinh"] == "Giám đốc\nNhân viên kinh doanh" and d27["thang_luong_nam_goc"] == 2026, "năm mới: giữ nhóm, bỏ '| mức' cũ"
 # quy chế/hợp đồng dùng lại cấu hình đã lưu (bước % bậc lương) mà không cần gửi lại

@@ -236,6 +236,8 @@ vv = [[c for c in r if c is not None] for r in w2.iter_rows(values_only=True)]
 assert any(r and r[0] == "Hệ số lương" and r[1] == round(8_000_000 / 5_310_000, 2) for r in vv) and any(r and r[0] == "Mức lương" and r[1] == 8_000_000 for r in vv)
 # --- chức danh chuẩn, dò lương theo năm, tiêu đề có năm
 assert v.chuc_danh_tu_nhom(v.NHOM_MAC_DINH) == ["Giám đốc", "Phó giám đốc", "Kế toán trưởng", "Nhân viên kế toán", "Nhân viên kinh doanh", "Phân xưởng sản xuất"]
+assert v.chuc_danh_day_du(v.NHOM_MAC_DINH)[-2:] == ["Quản lý", "Bảo vệ"] and v.chuc_danh_day_du(v.NHOM_MAC_DINH)[:-2] == v.chuc_danh_tu_nhom(v.NHOM_MAC_DINH), "Quản lý + Bảo vệ luôn có để chọn"
+assert v.chuc_danh_day_du("Bảo vệ | 5000000\nGiám đốc") == ["Bảo vệ", "Giám đốc", "Quản lý"], "đã có trong nhóm thì không thêm trùng"
 assert v.chuc_danh_tu_nhom("A; a | 100\nB") == ["A", "B"], "không trùng (không phân biệt hoa thường)"
 assert v.bo_muc_bac_1("Giám đốc | 8000000\n\nPhó giám đốc; Kế toán trưởng") == "Giám đốc\nPhó giám đốc; Kế toán trưởng"
 assert v.mac_dinh_tuy_chon(CTY)["nhom_tuy_chinh"] == v.NHOM_MAC_DINH

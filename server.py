@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.104"
+APP_BUILD = "2026-10-05.105"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13265,7 +13265,7 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
             "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
                              for n in _vb_nv_part_time(cid, nam)],
-            "chuc_danh": vbld.chuc_danh_tu_nhom(tc["nhom_tuy_chinh"]),
+            "chuc_danh": vbld.chuc_danh_day_du(tc["nhom_tuy_chinh"]),
             "canh_bao": vbld.kiem_tra(nv_ft, nam, tc, _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else []}
 
 
@@ -13274,7 +13274,7 @@ def van_ban_chuc_danh(cid: int, nam: int = 0):
     """Các chức danh của Hệ thống thang lương, bảng lương (năm gần nhất đã lưu hoặc mặc định) — Danh Sách Nhân Viên chỉ cho chọn Chức vụ trong danh sách này."""
     nam = _luong_nam_hop_le(nam or datetime.date.today().year)
     luu, _g = _vb_doc_thang_luong(cid, nam)
-    return {"chuc_danh": vbld.chuc_danh_tu_nhom(luu.get("nhom_tuy_chinh") or vbld.NHOM_MAC_DINH), "nam": nam}
+    return {"chuc_danh": vbld.chuc_danh_day_du(luu.get("nhom_tuy_chinh") or vbld.NHOM_MAC_DINH), "nam": nam}
 
 
 @app.get("/api/van-ban/{cid}/luong-theo-nam")

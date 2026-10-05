@@ -505,6 +505,17 @@ def chuc_danh_tu_nhom(text):
     return kq
 
 
+# Chức danh luôn có thể CHỌN ở Danh Sách Nhân Viên dù nhóm thang lương của năm chưa khai báo (chưa khai thì Thang bảng lương tự lập nhóm riêng theo chức danh của người đó)
+CHUC_DANH_BO_SUNG = ["Quản lý", "Bảo vệ"]
+
+
+def chuc_danh_day_du(text):
+    """chuc_danh_tu_nhom + các chức danh bổ sung (Quản lý, Bảo vệ) nếu chưa có trong các nhóm."""
+    kq = chuc_danh_tu_nhom(text)
+    co = {_chuan(c) for c in kq}
+    return kq + [c for c in CHUC_DANH_BO_SUNG if _chuan(c) not in co]
+
+
 def bo_muc_bac_1(text):
     """Bỏ phần '| mức' của từng dòng nhóm (sang năm mới: giữ nhóm chức danh, mức bậc 1 tự dò lại từ Bảng Lương của năm đó)."""
     return "\n".join(d.partition("|")[0].strip() for d in str(text or "").splitlines() if d.strip())
