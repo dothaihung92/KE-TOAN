@@ -750,19 +750,33 @@ def tim_chu_ky(chu_ky, nv):
     return chu_ky.get(khoa_nguoi(nv)) or chu_ky.get(khoa_chu_ky(nv.get("ma"), nv.get("ten"))) or ""
 
 
-def _khoang_ky(anh="", sau=False, cao=150):
+def _co_anh_vua_khung(anh, rong_toi_da, cao_toi_da):
+    """(rộng, cao) px để ảnh chữ ký NẰM GỌN trong khung rong_toi_da x cao_toi_da, giữ nguyên tỷ lệ (chữ ký dài không bị kéo tràn sang cột bên cạnh).
+    Không đọc được kích thước ảnh -> (0, cao_toi_da)."""
+    kq = _doc_anh_data_uri(anh)
+    w0, h0 = _kich_thuoc_anh(kq[1]) if kq else (0, 0)
+    if not (w0 and h0):
+        return 0, cao_toi_da
+    tl = min(rong_toi_da / w0, cao_toi_da / h0)
+    return max(1, round(w0 * tl)), max(1, round(h0 * tl))
+
+
+def _khoang_ky(anh="", sau=False, cao=150, rong=300):
     """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký.
-    sau=True (chữ ký + con dấu giám đốc): ảnh LỚN, đặt PHÍA SAU chữ (behind text) — đè lên chức danh/họ tên như dấu thật."""
+    sau=True (chữ ký + con dấu giám đốc): ảnh LỚN, đặt PHÍA SAU chữ (behind text) — đè lên chức danh/họ tên như dấu thật.
+    Ảnh luôn thu vừa khung rong x cao (giữ tỷ lệ) và ghi rõ width + height để bản Word cũng đúng cỡ."""
     if anh and sau:
-        return f'<p class="c ky-sau" style="height:80px"><img class="sau" src="{esc(anh)}" style="height:{cao}px"></p>'
+        w, h = _co_anh_vua_khung(anh, rong, cao)
+        return f'<p class="c ky-sau" style="height:80px"><img class="sau" src="{esc(anh)}" style="{f"width:{w}px;" if w else ""}height:{h}px;top:{(80 - h) // 2}px"></p>'
     if anh:
-        return f'<p class="c"><img src="{esc(anh)}" style="height:80px"></p>' + _p("&nbsp;", "c")
+        w, h = _co_anh_vua_khung(anh, rong, 80)
+        return f'<p class="c"><img src="{esc(anh)}" style="{f"width:{w}px;" if w else ""}height:{h}px"></p>' + _p("&nbsp;", "c")
     return _p("&nbsp;", "c") * 3
 
 
 def _bang_ky(trai_tieu_de, trai_phu, trai_ten, phai_tieu_de, phai_phu, phai_ten, trai_anh="", phai_anh=""):
     return ('<table class="nb"><colgroup><col style="width:50%"><col style="width:50%"></colgroup><tr><td>'
-            + _p(f"<b>{esc(trai_tieu_de)}</b>", "c") + _p(f"<i>{esc(trai_phu)}</i>", "c") + _khoang_ky(trai_anh, sau=True, cao=115) + _p(f"<b>{esc(trai_ten)}</b>", "c")
+            + _p(f"<b>{esc(trai_tieu_de)}</b>", "c") + _p(f"<i>{esc(trai_phu)}</i>", "c") + _khoang_ky(trai_anh, sau=True, cao=100, rong=210) + _p(f"<b>{esc(trai_ten)}</b>", "c")
             + "</td><td>" + _p(f"<b>{esc(phai_tieu_de)}</b>", "c") + _p(f"<i>{esc(phai_phu)}</i>", "c") + _khoang_ky(phai_anh, sau=True)
             + _p(f"<b>{esc(phai_ten)}</b>", "c") + "</td></tr></table>")
 
@@ -906,11 +920,22 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None, chu_ky=N
                    anh_nld, anh_gd),
           "</section>"]
     # Người có mã phiên bản (gốc-001...) đổi lương trong năm: mỗi lần đổi lương 1 PHỤ LỤC HỢP ĐỒNG ghi nhận mức lương mới + ngày áp dụng (Điều 22, 33 BLLĐ 2019)
-    pl = [x for x in (nv.get("phu_luc") or []) if x["tu"] > bat_dau]
-    for k, x in enumerate(pl, 1):
-        so_pl = (so_hd.replace("HĐLĐ", "PLHĐLĐ") if "HĐLĐ" in so_hd else so_hd + "/PL") + (f"-{k:02d}" if len(pl) > 1 else "")
-        h.append(dung_phu_luc_hop_dong(x, nv, cty, tc, so_hd, ngay_ky, so_pl, anh_nld, anh_gd))
+    pl = [x for x in (nv.get("phu_luc") or []) if x["tu"] > bat_dau and (cuoi is None or x["tu"] <= cuoi)]
+    h.append(dung_phu_luc_nhieu(nv, cty, tuy_chon, so_hd, ngay_ky, pl, chu_ky, hom_nay))
     return "".join(h)
+
+
+def dung_phu_luc_nhieu(nv, cty, tuy_chon, so_hd, ngay_ky_hd, ds_pl, chu_ky=None, hom_nay=None):
+    """Các PHỤ LỤC điều chỉnh lương của 1 người cho Hợp đồng lao động số `so_hd` (ký ngày `ngay_ky_hd`). Số phụ lục: <thứ tự trong năm>/<năm>/PL-<số HĐ>."""
+    tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
+    gan = bool(tc.get("gan_chu_ky", True)) and bool(chu_ky)
+    anh_nld = tim_chu_ky(chu_ky, nv) if gan else ""
+    anh_gd = (chu_ky.get("giam_doc") or "") if gan else ""
+    dem, kq = {}, []
+    for x in ds_pl or []:
+        dem[x["tu"].year] = dem.get(x["tu"].year, 0) + 1
+        kq.append(dung_phu_luc_hop_dong(x, nv, cty, tc, so_hd, ngay_ky_hd, f"{dem[x['tu'].year]:02d}/{x['tu'].year}/PL-{so_hd}", anh_nld, anh_gd))
+    return "".join(kq)
 
 
 def dung_phu_luc_hop_dong(dc, nv, cty, tc, so_hd, ngay_ky_hd, so_pl, anh_nld="", anh_gd=""):

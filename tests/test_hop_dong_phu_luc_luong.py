@@ -76,7 +76,7 @@ so_hd = hd1.split("Số: ")[1].split("<")[0]
 pl = sec[sec.index('</section>'):]
 assert pl.index("PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG") < pl.index("PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG", pl.index("PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG") + 5)
 pl1 = pl[pl.index('<section'):pl.index('</section>', pl.index('<section'))]
-assert f"Căn cứ Hợp đồng lao động số {so_hd} ký ngày 01/01/2025" in pl1 and "Số: " + so_hd.replace("HĐLĐ", "PLHĐLĐ") + "-01" in pl1
+assert f"Căn cứ Hợp đồng lao động số {so_hd} ký ngày 01/01/2025" in pl1 and "Số: 01/2025/PL-" + so_hd in pl1
 assert "Mức lương trước khi điều chỉnh: 6.000.000 đồng/tháng" in pl1 and "<b>7.000.000 đồng/tháng</b>" in pl1 and "kể từ <b>ngày 01 tháng 05 năm 2025</b>" in pl1
 assert "bảo hiểm thất nghiệp kể từ ngày áp dụng là 7.000.000 đồng/tháng" in pl1 and "ngày 01 tháng 05 năm 2025" in pl1.split("PHỤ LỤC")[0], "ngày lập phụ lục = ngày áp dụng"
 assert "Chức danh chuyên môn" not in pl1, "chức vụ không đổi thì không ghi"

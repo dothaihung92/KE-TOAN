@@ -261,21 +261,23 @@ rootI, _ = doc_xml(v.html_sang_docx(hh))
 dr = list(rootI.iter(W + "drawing"))
 assert len(dr) == 2
 ext = dr[0].find(".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent")
-assert int(ext.get("cy")) == 115 * 9525 and abs(int(ext.get("cx")) / int(ext.get("cy")) - 3.0) < 0.02, "người lao động cao 115px, đúng tỷ lệ ảnh"
+assert int(ext.get("cx")) == 210 * 9525 and int(ext.get("cy")) == 70 * 9525, "chữ ký người lao động (ảnh 3:1) thu vừa khung 210x100px, giữ đúng tỷ lệ — không kéo tràn"
 zi = zipfile.ZipFile(io.BytesIO(v.html_sang_docx(hh)))
 assert [n for n in zi.namelist() if n.startswith("word/media/")] == ["word/media/chuky1.png", "word/media/chuky2.png"] and "image/png" in zi.read("[Content_Types].xml").decode()
 assert 'Target="media/chuky2.png"' in zi.read("word/_rels/document.xml.rels").decode()
 # src không phải ảnh data URI (vd đường dẫn ngoài) bị bỏ qua, không làm hỏng file
 doc_xml(v.html_sang_docx('<p>a <img src="http://x/y.png"> b</p>'))
 # chữ ký + con dấu GIÁM ĐỐC: ảnh lớn, đặt PHÍA SAU chữ (behind text) — HTML (img.sau) và Word (wp:anchor behindDoc)
-assert hh.count('class="sau"') == 2 and 'style="height:150px"' in hh and 'style="height:115px"' in hh and hh.count('class="c ky-sau" style="height:80px"') == 2, "cả chữ ký người lao động (115px) và giám đốc (150px) đều phía sau chữ"
+assert hh.count('class="sau"') == 2 and 'style="width:300px;height:100px;top:-10px"' in hh and 'style="width:210px;height:70px;top:5px"' in hh and hh.count('class="c ky-sau" style="height:80px"') == 2, "cả chữ ký người lao động (khung 210x100) và giám đốc (khung 300x150) đều phía sau chữ, vừa khung"
 assert "img.sau{position:absolute" in v.VB_CSS and "z-index:-1" in v.VB_CSS and ".vb-trang{position:relative;z-index:0}" in v.VB_CSS
 rootS, _ = doc_xml(v.html_sang_docx(hh))
 WP = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
 anc = list(rootS.iter(WP + "anchor")); inl = list(rootS.iter(WP + "inline"))
 assert len(anc) == 2 and len(inl) == 0 and all(a.get("behindDoc") == "1" for a in anc), "cả hai chữ ký neo phía sau chữ (Behind text)"
 assert anc[0].find(WP + "wrapNone") is not None and anc[0].find(WP + "positionH/" + WP + "align").text == "center"
-assert [int(a.find(WP + "extent").get("cy")) for a in anc] == [115 * 9525, 150 * 9525] and int(anc[1].find(WP + "positionV/" + WP + "posOffset").text) == int((80 - 150) / 2 * 9525) and int(anc[0].find(WP + "positionV/" + WP + "posOffset").text) == int((80 - 115) / 2 * 9525)
+assert [int(a.find(WP + "extent").get("cy")) for a in anc] == [70 * 9525, 100 * 9525] and int(anc[1].find(WP + "positionV/" + WP + "posOffset").text) == int((80 - 100) / 2 * 9525) and int(anc[0].find(WP + "positionV/" + WP + "posOffset").text) == int((80 - 70) / 2 * 9525)
+# chữ ký rất dài (ảnh 8:1) không bị kéo to: rộng tối đa 210px; ảnh vuông thì giới hạn theo chiều cao
+assert v._co_anh_vua_khung(URI, 210, 100) == (210, 70) and v._co_anh_vua_khung("x", 210, 100) == (0, 100)
 sp = [p for p in rootS.iter(W + "p") if p.find(".//" + WP + "anchor") is not None][0]
 assert sp.find(W + "pPr/" + W + "spacing").get(W + "lineRule") == "exact" and sp.find(W + "pPr/" + W + "spacing").get(W + "line") == str(80 * 15)
 try:

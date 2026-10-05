@@ -4696,10 +4696,10 @@ async function vbTaoXemTruoc(){
     set('vb_font',t.font||'Times New Roman');set('vb_size',t.size||13);set('vb_line',t.line||1.15);
     const le=t.le||[20,20,30,15];set('vb_mt',le[0]);set('vb_mb',le[1]);set('vb_ml',le[2]);set('vb_mr',le[3]);
     document.getElementById('vb_ngang').checked=!!t.ngang;
-    document.getElementById('vbXem').innerHTML=d.html;
+    document.getElementById('vbXem').innerHTML=d.html||'<div class="hint" style="padding:20px;background:#fff">Không có văn bản nào cần lập cho khoảng nhân viên đã chọn (hợp đồng năm trước còn hiệu lực và lương không đổi) — xem mục Đối chiếu ở trên.</div>';
     const kbCb=document.getElementById('vbCanhBao');if(kbCb)kbCb.innerHTML=vbHtmlCanhBao(d.canh_bao||[]);      // bảng đối chiếu theo đúng những người + tuỳ chọn vừa dựng
     vbApDungTrang();vbSua=false;
-    tt.textContent=((vbLoai==='hd'||vbLoai==='tv'||vbLoai==='pt')?`Đã dựng ${d.so_van_ban} hợp đồng${d.so_phu_luc?` + ${d.so_phu_luc} phụ lục điều chỉnh lương (người có mã -001… đổi lương; phụ lục nằm ngay sau hợp đồng của người đó)`:''} (mỗi văn bản 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
+    tt.textContent=((vbLoai==='hd'||vbLoai==='tv'||vbLoai==='pt')?`Đã dựng ${d.so_van_ban} hợp đồng${d.so_phu_luc?` + ${d.so_phu_luc} phụ lục điều chỉnh lương (đổi lương trong năm bằng mã -001…, hoặc đổi lương đầu năm khi hợp đồng năm trước còn hiệu lực)`:''} (mỗi văn bản 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
     document.getElementById('vbXem').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){tt.textContent='';toast('Lỗi: '+e.message,'err')}
 }

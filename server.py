@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.122"
+APP_BUILD = "2026-10-05.123"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13796,7 +13796,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     if not nv:
         raise HTTPException(404, "Chưa có nhân viên toàn thời gian: hãy nhập Danh Sách Nhân Viên (lao động part-time có hợp đồng riêng)")
     cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, _vb_tc_kiem_tra(tc, nam, loai)), _LUONG_TRAN_PC_KHONG_THUE)
-    so_pl = 0
+    so_pl, cb_them = 0, []
     if loai == "hd":
         nv = _vb_ghep_phu_luc(cid, nam, nv)            # người đổi lương bằng mã -001...: hợp đồng theo mức lương ban đầu + phụ lục điều chỉnh lương
     if loai in ("hd", "tv"):
@@ -13814,11 +13814,25 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         if loai == "tv":      # hợp đồng thử việc RIÊNG (Điều 24-27 BLLĐ 2019): ngày thử việc lấy từ Danh Sách Nhân Viên hoặc ô trên màn hình
             html = vbld.dung_hop_dong_thu_viec_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
         else:
-            html = vbld.dung_hop_dong_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
+            # Người đã có hợp đồng từ năm trước (năm đầu tiên có trong Bảng Lương) CÒN HIỆU LỰC sang năm này: không lập hợp đồng mới, chỉ lập
+            # PHỤ LỤC điều chỉnh lương (nếu lương đổi); hợp đồng đã hết hạn thì lập hợp đồng mới như cũ (kèm giải thích).
+            con_hl, cb_hl = _vb_hd_con_hieu_luc(cid, nam, cty, tc, chon)
+            phan, so_hd_moi = [], 0
+            for n in chon:
+                x = con_hl.get(vbld.khoa_lich_su(n))
+                if x is not None:
+                    n["phu_luc"] = x["phu_luc"]
+                    phan.append(vbld.dung_phu_luc_nhieu(n, cty, tc, x["so_hd"], x["ngay_ky"], x["phu_luc"], chu_ky))
+                else:
+                    phan.append(vbld.dung_hop_dong(n, cty, tc, so_hd_moi, nam=nam, chu_ky=chu_ky))
+                    so_hd_moi += 1
+            html = "".join(phan)
             so_pl = html.count("PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG</b>")
-            cb += _vb_kiem_tra_phu_luc(chon, tc)
-        so = len(chon)
+            cb_them = cb_hl + _vb_kiem_tra_phu_luc(chon, tc)
+            _vb_hd_cfg_luu(cid, nam, tc)
+        so = len(chon) if loai == "tv" else so_hd_moi
         cb = [c for c in cb if any(c["nd"].startswith(t + ":") for t in ten) or ":" not in c["nd"][:60]]
+        cb = cb_them + cb
         if loai == "tv":
             cb = vbld.kiem_tra_thu_viec(chon, vbld.gop_tuy_chon(cty, tc)) + [c for c in cb if "BHXH" not in c["nd"] or ":" not in c["nd"][:60]]
     elif loai == "qc":
@@ -13847,6 +13861,127 @@ def _vb_ghep_phu_luc(cid, nam, nv):
         m["lech"] = list(n.get("lech") or [])          # cảnh báo lệch đã báo theo phiên bản mới nhất, không lặp lại
         kq.append(m)
     return kq
+
+
+_VB_KHOA_HD = ("loai_hd", "so_thang", "so_bat_dau", "mau_so", "bat_dau", "ngay_ky")
+
+
+def _vb_hd_cfg_luu(cid, nam, tc):
+    """Ghi lại loại / thời hạn / số hợp đồng lao động đã lập cho năm `nam` (để năm sau biết hợp đồng năm này còn hiệu lực hay đã hết hạn)."""
+    conn = db()
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS hop_dong_cfg (company_id INTEGER, nam INTEGER, data_json TEXT, updated_at TEXT, PRIMARY KEY(company_id, nam))")
+        conn.execute("INSERT INTO hop_dong_cfg (company_id, nam, data_json, updated_at) VALUES (?,?,?,?) "
+                     "ON CONFLICT(company_id, nam) DO UPDATE SET data_json=excluded.data_json, updated_at=excluded.updated_at",
+                     (cid, int(nam), json.dumps({k: (tc or {}).get(k) for k in _VB_KHOA_HD}, ensure_ascii=False), datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _vb_hd_cfg_doc(cid, nam):
+    conn = db()
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS hop_dong_cfg (company_id INTEGER, nam INTEGER, data_json TEXT, updated_at TEXT, PRIMARY KEY(company_id, nam))")
+        r = conn.execute("SELECT data_json FROM hop_dong_cfg WHERE company_id=? AND nam=?", (cid, int(nam))).fetchone()
+    finally:
+        conn.close()
+    try:
+        return json.loads(r["data_json"]) if r else None
+    except Exception:
+        return None
+
+
+def _vb_hd_con_hieu_luc(cid, nam, cty, tc, ds):
+    """Người làm từ TRƯỚC năm `nam` đã có hợp đồng lao động lập ở năm đầu tiên họ có trong Bảng Lương (năm gốc). Hợp đồng đó (loại/thời hạn đã lưu
+    khi lập ở năm gốc; chưa lưu thì giả định như lựa chọn hiện tại) CÒN HIỆU LỰC ngày 01/01/`nam` -> không lập hợp đồng mới mà lập PHỤ LỤC điều
+    chỉnh lương: lương đầu năm `nam` khác lương cuối năm trước (áp dụng từ 01/01) + các lần đổi lương trong năm (mã -001...).
+    -> ({khoa_lich_su: {"so_hd", "ngay_ky", "phu_luc": [...]}}, [cảnh báo]). Hợp đồng đã hết hạn: lập hợp đồng mới như cũ, kèm cảnh báo giải thích."""
+    import math
+    _ts, _t, _c, cac_nam = _luong_doc_nam(cid, nam)
+    truoc = sorted(int(y) for y in (cac_nam or []) if int(y) < int(nam))
+    if not truoc:
+        return {}, []
+    dau_nam = datetime.date(int(nam), 1, 1)
+    co_mat, ds_nam, nv_cu = {}, {}, None
+
+    def trong(y):
+        if y not in co_mat:
+            tap = set()
+            for rows in (_luong_doc_nam(cid, y)[1] or {}).values():
+                for r in rows or []:
+                    ma, ten = vbld.ma_goc_phien_ban(r.get("ma")).lower(), vbld._chuan(r.get("ten"))
+                    if ma:
+                        tap.add(("ma", ma))
+                    if ten:
+                        tap.add(("ten", ten))
+            co_mat[y] = tap
+        return co_mat[y]
+
+    def stt_nam(y, k):          # STT của người đó trong danh sách hợp đồng năm y (như màn hình năm đó) -> số hợp đồng
+        if y not in ds_nam:
+            nv_y = [n for n in _vb_du_lieu(cid, y)[1] if not n.get("part_time")]
+            ds_nam[y] = {vbld.khoa_lich_su(n): n["stt"] for n in _vb_sap_theo_ngay(_vb_ghep_phu_luc(cid, y, nv_y), y, "hd")}
+        return ds_nam[y].get(k)
+    kq, het, gia_dinh, khong_doi, het_trong_nam, lien_tiep = {}, [], set(), [], [], []
+    for n in ds:
+        vl = vbld.ngay_date(n.get("vao_lam"))
+        if vl and vl >= dau_nam:
+            continue
+        k = vbld.khoa_lich_su(n)
+        y0 = next((y for y in truoc if (vl is None or y >= vl.year) and (k in trong(y) or ("ten", vbld._chuan(n["ten"])) in trong(y))), None)
+        if y0 is None:
+            continue
+        cfg = _vb_hd_cfg_doc(cid, y0)
+        if cfg is None:
+            gia_dinh.add(y0)
+        tcy = {kk: vv for kk, vv in (tc or {}).items() if kk not in ("bat_dau", "ngay_ky")}
+        tcy.update({kk: vv for kk, vv in (cfg or {}).items() if vv not in (None, "")})
+        tcy = vbld.gop_tuy_chon(cty, tcy)
+        bd = vbld.ngay_date(tcy.get("bat_dau")) or vbld.ngay_bat_dau_theo_nam(n.get("vao_lam"), y0) or datetime.date(y0, 1, 1)
+        nk = vbld.ngay_date(tcy.get("ngay_ky")) or bd
+        loai_ten, cuoi, thang, _bt = vbld._thoi_han_hd(tcy, n, bd)
+        if cuoi and cuoi < dau_nam:
+            het.append(f"{n['ten']} (năm {y0}: {vbld.dd_mm_yyyy(bd)} – {vbld.dd_mm_yyyy(cuoi)})")
+            so_lan = math.ceil(((dau_nam.year - bd.year) * 12 + dau_nam.month - bd.month) / max(1, thang))
+            if so_lan >= 2:
+                lien_tiep.append(n["ten"])
+            continue
+        stt = stt_nam(y0, k)
+        try:
+            so_hd = str(tcy.get("mau_so") or "{so:02d}/HĐLĐ-{nam}").format(so=int(tcy.get("so_bat_dau") or 1) + (stt or 1) - 1, nam=nk.year)
+        except Exception:
+            so_hd = f"{int(tcy.get('so_bat_dau') or 1) + (stt or 1) - 1:02d}/HĐLĐ-{nk.year}"
+        if nv_cu is None:
+            nv_cu = {vbld.khoa_lich_su(x): x for x in _vb_du_lieu(cid, int(nam) - 1)[1] if not x.get("part_time")}
+        cu = nv_cu.get(k)
+        pl = []
+        if cu and n.get("luong_cb", 0) > 0 and abs(n["luong_cb"] - (cu.get("luong_cb") or 0)) > 0.5:
+            pl.append({"tu": dau_nam, "nv": n, "cu": cu})
+        pl += [x for x in (n.get("phu_luc") or []) if x["tu"] > dau_nam]
+        if cuoi:
+            if cuoi.year == dau_nam.year:
+                het_trong_nam.append(f"{n['ten']} (hết hạn {vbld.dd_mm_yyyy(cuoi)})")
+            pl = [x for x in pl if x["tu"] <= cuoi]
+        if not pl:
+            khong_doi.append(n["ten"])
+        kq[k] = {"so_hd": so_hd, "ngay_ky": nk, "phu_luc": pl}
+    cb = []
+    if kq:
+        cb.append({"muc": "canh_bao", "nd": f"{len(kq)} người có hợp đồng lao động từ năm trước CÒN HIỆU LỰC sang năm {nam}: không lập hợp đồng mới, chỉ lập PHỤ LỤC điều chỉnh lương khi lương thay đổi"
+                   + (f" ({len(khong_doi)} người lương không đổi nên không có văn bản: {', '.join(khong_doi)})" if khong_doi else "") + "."})
+    if gia_dinh:
+        cb.append({"muc": "canh_bao", "nd": f"Chưa lưu loại / thời hạn hợp đồng đã lập năm {', '.join(map(str, sorted(gia_dinh)))} — đang GIẢ ĐỊNH giống lựa chọn hiện tại "
+                   "(và số hợp đồng theo thứ tự in cả danh sách năm đó). Nếu khác, mở năm đó, chọn đúng loại hợp đồng đã ký rồi bấm “Tạo bản xem trước” một lần để phần mềm ghi nhận."})
+    if het:
+        cb.append({"muc": "canh_bao", "nd": f"Hợp đồng xác định thời hạn đã HẾT HẠN trước 01/01/{nam} nên phải ký hợp đồng MỚI (không dùng phụ lục cho hợp đồng đã hết hạn): "
+                   + "; ".join(het) + ". Muốn năm sau chỉ làm phụ lục điều chỉnh lương thì hợp đồng phải còn hiệu lực — chọn “Không xác định thời hạn” hoặc thời hạn dài hơn (tối đa 36 tháng)."})
+    if lien_tiep and str(tc.get("loai_hd") or "") != "kxdth":
+        cb.append({"muc": "loi", "nd": f"Đã ký từ 02 hợp đồng xác định thời hạn liên tiếp: {', '.join(lien_tiep)} — theo khoản 2 Điều 20 BLLĐ 2019 chỉ được ký thêm 01 lần hợp đồng xác định thời hạn, "
+                   "sau đó nếu tiếp tục làm việc phải ký hợp đồng KHÔNG xác định thời hạn (trừ trường hợp luật cho phép)."})
+    if het_trong_nam:
+        cb.append({"muc": "canh_bao", "nd": f"Hợp đồng hết hạn trong năm {nam}: {'; '.join(het_trong_nam)} — khi hết hạn cần ký hợp đồng mới (phụ lục sau ngày hết hạn không được lập)."})
+    return kq, cb
 
 
 def _vb_kiem_tra_phu_luc(ds, tc):
