@@ -5527,6 +5527,8 @@ async function moBangLuongNam(thangGiu){
         <span style="width:8px"></span>
         <button class="btn gold sm" onclick="blLuu()">💾 Lưu</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="blNapNhanVien()">👥 Nạp từ Danh Sách Nhân Viên</button>
+        <button class="btn sm" style="background:#b0651f" onclick="blNapPartTime()" title="Thêm lao động part-time (tick Part-time ở Danh Sách Nhân Viên) vào các tháng từ Tháng/Năm vào làm đến Tháng/Năm nghỉ việc ghi ở Danh Sách Nhân Viên">⏱ Nạp lao động part-time cả năm</button>
+        <button class="btn ghost sm" style="color:#b0651f" onclick="blDienGioPartTime()" title="Điền số giờ làm/tháng THEO HỢP ĐỒNG cho các ô Giờ làm còn trống của người part-time (số giờ thực tế sẽ thay thế khi có bảng chấm công)">⏱ Điền giờ làm part-time theo hợp đồng</button>
         <button class="btn ghost sm" onclick="blSaoChepThangTruoc()">📋 Sao chép từ tháng trước</button>
         <button class="btn ghost sm" onclick="blThemDong()">➕ Thêm dòng</button>
         <button class="btn ghost sm" onclick="document.getElementById('blImportFile').click()">📥 Import Excel</button>
@@ -5870,6 +5872,43 @@ function blXoaDong(ri){
   if(!confirm(`Xóa dòng "${rows[ri].ten||rows[ri].ma||'(trống)'}" khỏi tháng ${parseInt(blThang,10)}?`))return;
   rows.splice(ri,1);if(!rows.length)delete blDL[blThang];
   blBan=true;blVeTabs();blVeBang();blVeInfo();
+}
+// Nạp lao động part-time vào CẢ NĂM: mỗi tháng lấy từ Danh Sách Nhân Viên những người part-time đang trong khoảng làm việc (vào làm → nghỉ việc); đã có dòng thì giữ nguyên giờ làm đã nhập
+async function blNapPartTime(){
+  try{
+    let them=0,thangCo=0;
+    for(const t of BL_THANG){
+      const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}&thang=${parseInt(t,10)}`);
+      const pt=(d.rows||[]).filter(r=>Number(r.part_time));
+      if(!pt.length)continue;
+      const co=blDL[t]=blDL[t]||[],cuaKey=new Set(co.map(r=>(r.ma||r.ten||'').toString().trim().toLowerCase()));
+      let them1=0;
+      pt.forEach(r=>{const k=(r.ma||r.ten||'').toString().trim().toLowerCase();if(!cuaKey.has(k)){co.push(r);cuaKey.add(k);them1++}else{const x=co.find(y=>(y.ma||y.ten||'').toString().trim().toLowerCase()===k);if(x){x.part_time=1;if(!Number(x.luong_gio))x.luong_gio=r.luong_gio}}});
+      if(them1){them+=them1;thangCo++}
+    }
+    if(!them){toast('Không có lao động part-time nào cần thêm (tick “Part-time” + ghi Tháng/Năm vào làm ở Danh Sách Nhân Viên) — hoặc đã có đủ trong các tháng','');return}
+    blBan=true;blVeTabs();blVeBang();blVeInfo();
+    for(const t of BL_THANG)if((blDL[t]||[]).length)await blTinhLai(t);
+    toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng theo khoảng làm việc ở Danh Sách Nhân Viên — giờ làm đang trống (0 đồng): bấm “Điền giờ làm part-time theo hợp đồng” hoặc nhập giờ thực tế, rồi 💾 Lưu`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Điền giờ làm/tháng THEO HỢP ĐỒNG vào ô Giờ làm còn TRỐNG của người part-time (chỉ ô trống; không ghi đè giờ đã nhập; không thay số để né ngưỡng BHXH)
+async function blDienGioPartTime(){
+  const ds=BL_THANG.filter(t=>(blDL[t]||[]).some(r=>Number(r.part_time)&&(r.gio_lam===''||r.gio_lam==null||Number(r.gio_lam)===0)));
+  if(!ds.length){toast('Không có ô giờ làm part-time nào đang trống — bấm “Nạp lao động part-time cả năm” trước','err');return}
+  let goiY='43,3';try{goiY=localStorage.getItem('blPtGioThang')||goiY}catch{}
+  const nhap=prompt('Số GIỜ LÀM / THÁNG theo hợp đồng part-time (vd 2 giờ/ngày × 5 ngày/tuần × 52 tuần ÷ 12 tháng ≈ 43,3).\nSẽ điền vào các ô Giờ làm còn trống của mọi tháng; giờ làm thực tế sẽ thay thế khi có bảng chấm công.',goiY);
+  if(nhap===null)return;
+  const gio=parseFloat(String(nhap).trim().replace(',','.'));
+  if(!(gio>0)||gio>300){toast('Số giờ không hợp lệ','err');return}
+  try{localStorage.setItem('blPtGioThang',String(nhap).trim())}catch{}
+  let dien=0;
+  ds.forEach(t=>blDL[t].forEach(r=>{if(Number(r.part_time)&&(r.gio_lam===''||r.gio_lam==null||Number(r.gio_lam)===0)){r.gio_lam=gio;dien++}}));
+  blBan=true;
+  for(const t of ds)await blTinhLai(t);
+  blVeTabs();blVeBang();blVeInfo();
+  const dat=ds.reduce((n,t)=>n+blDL[t].filter(r=>Number(r.part_time)&&r.pt_phai_dong_bh).length,0);
+  toast(`✓ Đã điền ${gio.toLocaleString('vi-VN')} giờ cho ${dien} dòng part-time (theo hợp đồng, KHÔNG phải giờ thực tế).`+(dat?` ⚠ ${dat} dòng có lương đạt ngưỡng part-time → đã tự tính BHXH (không giảm giờ để né ngưỡng).`:' Các tháng lương dưới ngưỡng: không đóng BHXH.'),dat?'err':'ok');
 }
 async function blNapNhanVien(){
   if(blThang==='nam'){toast('Chọn 1 tab tháng để nạp nhân viên','err');return}

@@ -434,3 +434,27 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
     console.log('PASS 18: lao động part-time (hợp đồng, danh sách NV, bảng lương).');
   });
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 19: nạp lao động part-time cả năm theo khoảng làm việc + điền giờ theo hợp đồng (chỉ ô trống, không ghi đè)
+(async () => {
+  assert(html.includes('onclick="blNapPartTime()"') && html.includes('onclick="blDienGioPartTime()"'));
+  const i1 = html.indexOf('async function blNapPartTime'), i2 = html.indexOf('async function blNapNhanVien');
+  const goi = [], toasts = [];
+  const ctx = { current: 7, blNam: 2026, blDL: { '03': [{ ma: '9', ten: 'PT', part_time: 1, gio_lam: 50 }] }, BL_THANG: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), blBan: false,
+    blVeTabs() {}, blVeBang() {}, blVeInfo() {}, toast: (m, k) => toasts.push([m, k]), localStorage: { getItem: () => null, setItem() {} }, prompt: () => '43,3',
+    api: async (u) => { goi.push(u); const t = +u.match(/thang=(\d+)/)[1]; return { rows: [{ ma: '1', ten: 'FT', part_time: 0 }].concat(t >= 3 && t <= 5 ? [{ ma: '9', ten: 'PT', part_time: 1, luong_gio: 26000, gio_lam: '' }] : []) }; },
+    async blTinhLai(t) { ctx.blDL[t].forEach((r) => { if (r.part_time) { r.pt_phai_dong_bh = (Number(r.gio_lam) || 0) * 26000 >= 2530000; } }); } };
+  vm.createContext(ctx); vm.runInContext(html.slice(i1, i2), ctx);
+  await ctx.blNapPartTime();
+  assert.strictEqual(goi.length, 12, 'duyệt đủ 12 tháng');
+  assert.deepStrictEqual(Object.keys(ctx.blDL).sort(), ['03', '04', '05'], 'chỉ các tháng trong khoảng làm việc; người toàn thời gian không bị thêm');
+  assert.strictEqual(ctx.blDL['03'].length, 1, 'tháng đã có dòng: không thêm trùng'); assert.strictEqual(ctx.blDL['03'][0].gio_lam, 50, 'giữ nguyên giờ đã nhập');
+  await ctx.blDienGioPartTime();
+  assert.strictEqual(ctx.blDL['03'][0].gio_lam, 50, 'không ghi đè giờ đã nhập'); assert.strictEqual(ctx.blDL['04'][0].gio_lam, 43.3); assert.strictEqual(ctx.blDL['05'][0].gio_lam, 43.3);
+  assert(toasts.at(-1)[0].includes('KHÔNG phải giờ thực tế') && toasts.at(-1)[1] === 'ok', 'ghi rõ là giờ theo hợp đồng; dưới ngưỡng: không BHXH');
+  // giờ theo hợp đồng làm lương đạt ngưỡng: không giảm giờ để né, chỉ cảnh báo
+  ctx.blDL['06'] = [{ ma: '9', ten: 'PT', part_time: 1, gio_lam: '' }]; ctx.prompt = () => '100';
+  await ctx.blDienGioPartTime();
+  assert.strictEqual(ctx.blDL['06'][0].gio_lam, 100); assert(toasts.at(-1)[0].includes('đã tự tính BHXH') && toasts.at(-1)[1] === 'err');
+  console.log('PASS 19: nạp part-time cả năm + điền giờ theo hợp đồng.');
+})().catch((e) => { console.error(e); process.exit(1); });
