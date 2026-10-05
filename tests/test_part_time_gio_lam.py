@@ -121,4 +121,17 @@ t_a = _v.dung_hop_dong_part_time(pp["Trần Minh Hùng"], CTY2, {}, 0, nam=2025)
 assert "ngày 04 tháng 07 năm 2025" in t_a and "Số: 01/HĐPT-2025" in t_a
 t_b = _v.dung_hop_dong_part_time(pp["Chưa Có Giờ"], CTY2, {}, 0, nam=2025)
 assert "ngày 15 tháng 03 năm 2025" in t_b
+# thứ tự theo ngày bắt đầu làm việc đầu tiên TĂNG DẦN (STT, số hợp đồng đi theo thứ tự thời gian), cùng ngày giữ thứ tự danh sách
+rows_ss = [R(**{'Mã NV': 'A', 'Họ và tên': 'Muộn Nhất', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '01/04/2025'}),
+           R(**{'Mã NV': 'B', 'Họ và tên': 'Sớm Nhất', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '01/01/2025'}),
+           R(**{'Mã NV': 'C', 'Họ và tên': 'Giữa', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '03/2025'}),
+           R(**{'Mã NV': 'D', 'Họ và tên': 'Cùng Ngày Sau', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '03/2025'})]
+server.nhap_lieu_get = lambda cid, loai="in": {"header": H, "rows": rows_ss} if loai == "nv" else {"header": [], "rows": []}
+server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), {}, "", [nam])
+ss = server._vb_nv_part_time(7, 2025)
+assert [(n["stt"], n["ten"]) for n in ss] == [(1, "Sớm Nhất"), (2, "Giữa"), (3, "Cùng Ngày Sau"), (4, "Muộn Nhất")], [(n["stt"], n["ten"]) for n in ss]
+ht = _v.dung_hop_dong_part_time_nhieu(ss, CTY2, {}, nam=2025)
+import re as _re
+thu_tu = _re.findall(r"Số: (\d+)/HĐPT-2025.*?ngày (\d+ tháng \d+ năm 2025)", ht, flags=_re.S)
+assert [x[1] for x in thu_tu] == ["01 tháng 01 năm 2025", "01 tháng 03 năm 2025", "01 tháng 03 năm 2025", "01 tháng 04 năm 2025"] and [x[0] for x in thu_tu] == ["01", "02", "03", "04"], thu_tu
 print("PASS")

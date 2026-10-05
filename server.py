@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.113"
+APP_BUILD = "2026-10-05.114"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13269,12 +13269,17 @@ def _vb_nv_part_time(cid, nam):
                             dau[k] = mot
     except Exception:
         dau = {}
-    for i, n in enumerate(kq, 1):
-        n["stt"], n["part_time"] = i, True
+    for n in kq:
+        n["part_time"] = True
         m = [dau[k] for k in (vbld.ma_goc_phien_ban(n["ma"]).lower(), n["ten"].strip().lower()) if k and k in dau]
         if m:
             y, th, d = min(m)
             n["ngay_bat_dau_lam"] = f"{d:02d}/{th:02d}/{y}"
+    # SẮP XẾP theo ngày bắt đầu làm việc đầu tiên TĂNG DẦN (cùng ngày giữ thứ tự danh sách NV): hợp đồng, số hợp đồng và STT đi theo thứ tự thời gian
+    ngay0 = datetime.date(int(nam), 1, 1)
+    kq = [n for _i, n in sorted(enumerate(kq), key=lambda x: (vbld.ngay_date(x[1].get("ngay_bat_dau_lam")) or vbld.ngay_date(x[1].get("vao_lam")) or ngay0, x[0]))]
+    for i, n in enumerate(kq, 1):
+        n["stt"] = i
     return kq
 
 
