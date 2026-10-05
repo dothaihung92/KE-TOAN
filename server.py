@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.133"
+APP_BUILD = "2026-10-05.134"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -37773,32 +37773,47 @@ def _khoang_ngay_ky(ky):
         return None, None
 
 
-def _tong_thue_nk_tokhai(cid, ky):
-    """Tổng thuế GTGT hàng nhập khẩu (bảng tokhai_nhap — import RIÊNG từ tờ
-    khai hải quan, KHÔNG phải import bảng kê Excel) của ĐÚNG kỳ đang tính."""
+def _ngay_tokhai_nk(v):
+    """Ngày đăng ký tờ khai nhập khẩu (lưu 'yyyy-mm-dd', chấp nhận cả 'dd/mm/yyyy', có hậu tố giờ) -> date, None nếu hỏng."""
+    s = str(v or "").strip().split("T")[0].split()[0] if str(v or "").strip() else ""
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.datetime.strptime(s, fmt).date()
+        except Exception:
+            pass
+    return None
+
+
+def _thue_nk_cac_to_khai(cid, ky):
+    """Tờ khai nhập khẩu (bảng tokhai_nhap) so với kỳ `ky`: -> (tổng thuế GTGT NK TRONG kỳ, [tờ khai NK sát ngoài kỳ: {so_tk, ngay_dk, thue, truoc|sau}])."""
     d_tu, d_den = _khoang_ngay_ky(ky)
     if not d_tu:
-        return 0
+        return 0, []
     conn = db()
     tk_rows = conn.execute(
-        "SELECT ngay_dk, items_json FROM tokhai_nhap WHERE company_id=?", (cid,)).fetchall()
+        "SELECT so_tk, ngay_dk, items_json FROM tokhai_nhap WHERE company_id=?", (cid,)).fetchall()
     conn.close()
-    tong = 0
+    tong, ngoai = 0, []
     for tkr in tk_rows:
-        s = str(tkr["ngay_dk"] or "").split("T")[0]
-        try:
-            d = datetime.datetime.strptime(s, "%Y-%m-%d").date()
-        except Exception:
-            continue
-        if not (d_tu <= d <= d_den):
+        d = _ngay_tokhai_nk(tkr["ngay_dk"])
+        if not d:
             continue
         try:
             its = json.loads(tkr["items_json"]) if tkr["items_json"] else []
         except Exception:
             its = []
-        for it in its:
-            tong += round(it.get("tien_thue_gtgt", 0) or 0)
-    return tong
+        thue = sum(round(it.get("tien_thue_gtgt", 0) or 0) for it in its)
+        if d_tu <= d <= d_den:
+            tong += thue
+        elif thue and (d_tu - datetime.timedelta(days=45) <= d < d_tu or d_den < d <= d_den + datetime.timedelta(days=45)):
+            ngoai.append({"so_tk": tkr["so_tk"], "ngay_dk": d.strftime("%d/%m/%Y"), "thue": thue, "vi_tri": "trước kỳ" if d < d_tu else "sau kỳ"})
+    return tong, ngoai
+
+
+def _tong_thue_nk_tokhai(cid, ky):
+    """Tổng thuế GTGT hàng nhập khẩu (bảng tokhai_nhap — import RIÊNG từ tờ
+    khai hải quan, KHÔNG phải import bảng kê Excel) của ĐÚNG kỳ đang tính."""
+    return _thue_nk_cac_to_khai(cid, ky)[0]
 
 
 @app.get("/api/vat-tmtinh/{cid}")
@@ -37845,7 +37860,7 @@ def vat_tam_tinh(cid: int, response: Response, ky: str = "", du_dau_ky: float = 
     # Thuế GTGT hàng NHẬP KHẨU từ bảng tokhai_nhap (import RIÊNG tờ khai hải
     # quan) — TRƯỚC ĐÂY hàm này hoàn toàn không cộng khoản này, nên sau khi
     # import tờ khai nhập khẩu, phần tạm tính VẪN GIỮ NGUYÊN như chưa import.
-    thue_nk_rieng = _tong_thue_nk_tokhai(cid, ky)
+    thue_nk_rieng, nk_ngoai_ky = _thue_nk_cac_to_khai(cid, ky)
 
     # ƯU TIÊN dữ liệu đã import từ Excel (nếu có); nếu không, dùng dữ liệu tra cứu
     imp = _get_imported(cid, ky)
@@ -37935,8 +37950,16 @@ def vat_tam_tinh(cid: int, response: Response, ky: str = "", du_dau_ky: float = 
     phai_nop = chenh if chenh > 0 else 0
     du_cuoi_ky = -chenh if chenh <= 0 else 0
     conn.close()
+    # Tờ khai nhập khẩu SÁT NGOÀI kỳ (đăng ký trước/sau kỳ, tối đa 45 ngày): thuế GTGT NK của chúng KHÔNG được tính vào kỳ này -> nói rõ để người dùng đối chiếu
+    # với tờ khai/XML (tránh "XML có hàng NK mà tạm tính không có" mà không biết vì sao).
+    if nk_ngoai_ky:
+        ds_txt = "; ".join(f"tờ khai {x['so_tk']} đăng ký {x['ngay_dk']} ({x['vi_tri']}) — thuế GTGT {x['thue']:,} đ" for x in nk_ngoai_ky)
+        tong_ngoai = sum(x["thue"] for x in nk_ngoai_ky)
+        canh_bao_nk = (canh_bao_nk + "<br>" if canh_bao_nk else "") + (
+            f"ℹ Có tờ khai nhập khẩu NẰM NGOÀI kỳ {ky} nên thuế GTGT hàng NK KHÔNG được tính vào VAT đầu vào: {ds_txt}. "
+            f"Nếu bạn khấu trừ khoản này ở kỳ {ky} (theo ngày nộp thuế/chứng từ), VAT đầu vào sẽ tăng {tong_ngoai:,} đ — sửa ngày đăng ký/kỳ khấu trừ của tờ khai trước khi nộp.")
     return {
-        "ky": ky, "vat_mua": round(vat_mua), "vat_ban": round(vat_ban),
+        "ky": ky, "vat_mua": round(vat_mua), "vat_ban": round(vat_ban), "vat_mua_nk": round(thue_nk_rieng),
         "du_dau_ky": round(du_dau_ky or 0),
         "phai_nop": round(phai_nop), "du_cuoi_ky": round(du_cuoi_ky),
         "nguon": nguon, "canh_bao_nk": canh_bao_nk,
