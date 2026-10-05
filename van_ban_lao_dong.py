@@ -316,21 +316,19 @@ def ma_goc_phien_ban(ma):
     return m.group(1) if m else str(ma or "").strip()
 
 
-def chon_phien_ban_hieu_luc(header, rows, nam=None, thang=None):
-    """Danh Sách Nhân Viên có thể có NHIỀU DÒNG cho cùng 1 người: dòng gốc + các dòng thay đổi lương (mã gốc-001, -002..., có ô 'Tháng/Năm thay đổi lương').
-    Trả về mỗi người đúng 1 dòng ĐANG HIỆU LỰC ở (nam, thang): dòng có tháng thay đổi lớn nhất mà <= tháng đó (dòng gốc không ghi tháng = từ đầu).
-    Không truyền tháng: lấy dòng mới nhất (nam thôi: tính đến hết tháng 12 của năm). Người chỉ có dòng thay đổi ở tương lai thì chưa có."""
+def nhom_phien_ban(header, rows):
+    """Gom các dòng Danh Sách NV theo NGƯỜI: dòng gốc + các dòng phiên bản (mã gốc-001, -002... hoặc có 'Tháng/Năm thay đổi lương').
+    -> list [[((năm, tháng) hiệu lực | (0, 0) = từ đầu, chỉ số dòng, dòng), ...], ...] theo thứ tự xuất hiện. None nếu danh sách không có phiên bản nào."""
     cot = {}
     for i, h in enumerate(header or []):
         cot.setdefault(_chuan(h), i)
     i_ma, i_ten, i_doi = cot.get("ma nv"), cot.get("ho va ten"), cot.get("thang/nam thay doi luong")
     i_vao = cot.get("thang/nam vao lam")
     if i_doi is None and not any(_RE_MA_PHIEN_BAN.match(str(r[i_ma]).strip()) for r in (rows or []) if i_ma is not None and i_ma < len(r) and r[i_ma] is not None):
-        return list(rows or [])        # không có cột thay đổi lương và không có dòng phiên bản (mã gốc-001): mỗi dòng là 1 người
+        return None        # không có cột thay đổi lương và không có dòng phiên bản (mã gốc-001): mỗi dòng là 1 người
 
     def o(r, i):
         return r[i] if i is not None and i < len(r) and r[i] is not None else ""
-    dich = (int(nam), int(thang)) if nam and thang else ((int(nam), 12) if nam else None)
     nhom, thu_tu = {}, []
     ten_goc = {}          # họ tên -> khoá của dòng gốc (để dòng thay đổi lương gõ mã khác, không có đuôi -001, vẫn gộp đúng người)
     for r in rows or []:
@@ -357,9 +355,20 @@ def chon_phien_ban_hieu_luc(header, rows, nam=None, thang=None):
             nhom[khoa] = []
             thu_tu.append(khoa)
         nhom[khoa].append((tu or (0, 0), idx, r))
+    return [nhom[k] for k in thu_tu]
+
+
+def chon_phien_ban_hieu_luc(header, rows, nam=None, thang=None):
+    """Danh Sách Nhân Viên có thể có NHIỀU DÒNG cho cùng 1 người: dòng gốc + các dòng thay đổi lương (mã gốc-001, -002..., có ô 'Tháng/Năm thay đổi lương').
+    Trả về mỗi người đúng 1 dòng ĐANG HIỆU LỰC ở (nam, thang): dòng có tháng thay đổi lớn nhất mà <= tháng đó (dòng gốc không ghi tháng = từ đầu).
+    Không truyền tháng: lấy dòng mới nhất (nam thôi: tính đến hết tháng 12 của năm). Người chỉ có dòng thay đổi ở tương lai thì chưa có."""
+    nhom = nhom_phien_ban(header, rows)
+    if nhom is None:
+        return list(rows or [])
+    dich = (int(nam), int(thang)) if nam and thang else ((int(nam), 12) if nam else None)
     kq = []
-    for khoa in thu_tu:
-        ung = [x for x in nhom[khoa] if dich is None or x[0] <= dich]
+    for g in nhom:
+        ung = [x for x in g if dich is None or x[0] <= dich]
         if ung:
             kq.append(max(ung, key=lambda x: (x[0], x[1]))[2])
     return kq
@@ -452,6 +461,68 @@ def gop_nhan_vien(nv_header, nv_rows, bang_luong_theo_thang=None, nam=None):
     for i, nv in enumerate(kq, 1):
         nv["stt"] = i
         nv["da_nghi"] = bool(nv["nghi_viec"])
+    return kq
+
+
+def khoa_lich_su(nv):
+    """Khoá người dùng để ghép hợp đồng với lịch sử lương: mã gốc (2-001 -> 2, chữ thường), không có mã thì họ tên chuẩn hoá."""
+    m = ma_goc_phien_ban((nv or {}).get("ma"))
+    return ("ma", m.lower()) if m else ("ten", _chuan((nv or {}).get("ten")))
+
+
+def lich_su_luong_hop_dong(nv_header, nv_rows, bang_luong_theo_thang, nam):
+    """Người có NHIỀU phiên bản TOÀN THỜI GIAN (dòng gốc + mã gốc-001, -002...) trong Danh Sách NV -> dữ liệu cho hợp đồng lao động năm `nam` + PHỤ LỤC:
+    {khoa_lich_su: {"vao_lam": vào làm của phiên bản toàn thời gian ĐẦU TIÊN, "ban_dau": nv (phiên bản hiệu lực ngày bắt đầu hợp đồng),
+                    "dieu_chinh": [{"tu": date áp dụng, "nv": nv phiên bản mới, "cu": nv phiên bản trước}, ...]}}
+    Chỉ ghi nhận điều chỉnh khi LƯƠNG CƠ BẢN thay đổi, áp dụng sau ngày bắt đầu hợp đồng và trong năm `nam`. Lương mỗi phiên bản ưu tiên Bảng Lương
+    của tháng phiên bản đó bắt đầu áp dụng (số thực trả), không có thì lấy Danh Sách NV. Dòng part-time không tính (hợp đồng part-time riêng)."""
+    nhom = nhom_phien_ban(nv_header, nv_rows)
+    if not nhom or not nam:
+        return {}
+    nam = int(nam)
+    cot = {}
+    for i, h in enumerate(nv_header or []):
+        cot.setdefault(_chuan(h), i)
+
+    def lay(r, khoa):
+        for ten in _COT_NV[khoa]:
+            i = cot.get(ten)
+            if i is not None and i < len(r) and r[i] is not None:
+                return r[i]
+        return ""
+    bl = bang_luong_theo_thang or {}
+
+    def nv_cua(r, thang):
+        t = "%02d" % thang
+        ds = gop_nhan_vien(nv_header, [r], {t: bl[t]} if bl.get(t) else None, None)
+        return ds[0] if ds and ds[0].get("ten") == str(lay(r, "ten") or "").strip() else None
+    kq = {}
+    for g in nhom:
+        ds = sorted((x for x in g if not _tick(lay(x[2], "part_time")) and str(lay(x[2], "ten") or "").strip()), key=lambda x: (x[0], x[1]))
+        if len(ds) < 2:
+            continue
+        vao_lam = str(lay(ds[0][2], "vao_lam") or "").strip()
+        bat_dau = ngay_bat_dau_theo_nam(vao_lam, nam) or datetime.date(nam, 1, 1)
+        if bat_dau.year > nam:
+            continue
+        mo = (bat_dau.year, bat_dau.month)
+        truoc = [x for x in ds if x[0] <= mo]
+        goc = truoc[-1] if truoc else ds[0]
+        sau = [x for x in ds if mo < x[0] <= (nam, 12)]
+        ban_dau = nv_cua(goc[2], bat_dau.month if bat_dau.year == nam else 1)
+        if not ban_dau:
+            continue
+        dieu_chinh, cu = [], ban_dau
+        for x in sau:
+            moi = nv_cua(x[2], x[0][1] if x[0][0] == nam else 1)
+            if not moi:
+                continue
+            if moi["luong_cb"] > 0 and abs(moi["luong_cb"] - cu["luong_cb"]) > 0.5:
+                d = ngay_date(lay(x[2], "vao_lam"))
+                tu = d if d and (d.year, d.month) == x[0] else datetime.date(x[0][0], x[0][1], 1)
+                dieu_chinh.append({"tu": tu, "nv": moi, "cu": cu})
+            cu = moi
+        kq[khoa_lich_su(ban_dau)] = {"vao_lam": vao_lam, "ban_dau": ban_dau, "dieu_chinh": dieu_chinh}
     return kq
 
 
@@ -830,6 +901,57 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None, chu_ky=N
           _p("1. Những vấn đề về lao động không ghi trong hợp đồng lao động này thì áp dụng theo thỏa ước lao động tập thể (nếu có) hoặc quy định của pháp luật lao động.", "j"),
           _p("2. Khi một bên có yêu cầu thay đổi nội dung hợp đồng phải báo cho bên kia biết trước ít nhất 03 ngày làm việc; việc sửa đổi, bổ sung được lập bằng phụ lục hợp đồng lao động.", "j"),
           _p(f"3. Hợp đồng lao động được làm thành 02 bản có giá trị pháp lý như nhau, mỗi bên giữ 01 bản và có hiệu lực kể từ {esc(ngay_chu(bat_dau))}.", "j"),
+          _p("&nbsp;"),
+          _bang_ky("NGƯỜI LAO ĐỘNG", "(Ký, ghi rõ họ tên)", nv["ten"], "NGƯỜI SỬ DỤNG LAO ĐỘNG", f"({tc.get('chuc_danh_ky') or 'Giám đốc'} — Ký, ghi rõ họ tên, đóng dấu)", tc.get("nguoi_ky") or "",
+                   anh_nld, anh_gd),
+          "</section>"]
+    # Người có mã phiên bản (gốc-001...) đổi lương trong năm: mỗi lần đổi lương 1 PHỤ LỤC HỢP ĐỒNG ghi nhận mức lương mới + ngày áp dụng (Điều 22, 33 BLLĐ 2019)
+    pl = [x for x in (nv.get("phu_luc") or []) if x["tu"] > bat_dau]
+    for k, x in enumerate(pl, 1):
+        so_pl = (so_hd.replace("HĐLĐ", "PLHĐLĐ") if "HĐLĐ" in so_hd else so_hd + "/PL") + (f"-{k:02d}" if len(pl) > 1 else "")
+        h.append(dung_phu_luc_hop_dong(x, nv, cty, tc, so_hd, ngay_ky, so_pl, anh_nld, anh_gd))
+    return "".join(h)
+
+
+def dung_phu_luc_hop_dong(dc, nv, cty, tc, so_hd, ngay_ky_hd, so_pl, anh_nld="", anh_gd=""):
+    """HTML 1 PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG (1 <section>) về việc điều chỉnh mức lương: dc = {"tu": ngày áp dụng, "nv": phiên bản mới, "cu": phiên bản trước}.
+    Ngày lập phụ lục = ngày áp dụng mức lương mới."""
+    tu, moi, cu = dc["tu"], dc["nv"], dc["cu"]
+    ong_ba_ky = tc.get("ong_ba_ky") or "Ông/Bà"
+    ong_ba = {"Nam": "Ông", "Nữ": "Bà"}.get(nv.get("gioi_tinh"), "Ông/Bà")
+    ngay_hd = dd_mm_yyyy(ngay_ky_hd) if ngay_ky_hd else "..../..../........"
+    h = ['<section class="vb-trang">', _tieu_ngu(cty, so_pl, tc.get("dia_danh"), tu),
+         _p("&nbsp;"), _p("<b>PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG</b>", "c b"), _p("<b>(V/v điều chỉnh mức lương)</b>", "c"),
+         _p("Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20/11/2019 và Nghị định số 145/2020/NĐ-CP ngày 14/12/2020 của Chính phủ "
+            "quy định chi tiết và hướng dẫn thi hành một số điều của Bộ luật Lao động về điều kiện lao động và quan hệ lao động;", "j ti"),
+         _p(f"Căn cứ Hợp đồng lao động số {esc(so_hd)} ký ngày {esc(ngay_hd)} giữa Công ty và Người lao động;", "j ti"),
+         _p("Căn cứ thỏa thuận của hai bên,", "j ti"),
+         _p("Hôm nay, " + esc(ngay_chu(tu)) + f", tại {esc(tc.get('dia_diem') or cty.get('dia_chi') or '..........')}, chúng tôi gồm:", "j ti"),
+         _p("<b>Người sử dụng lao động</b> (sau đây gọi là Công ty):"),
+         _p(f"{esc(ong_ba_ky)}: <b>{esc((tc.get('nguoi_ky') or '').upper())}</b>&nbsp;&nbsp;&nbsp;Chức vụ: {esc(tc.get('chuc_danh_ky') or 'Giám đốc')}", "l1"),
+         _p(f"Đại diện cho: <b>{esc((cty.get('ten') or '').upper())}</b>" + (f" — Mã số thuế: {esc(cty['mst'])}" if cty.get("mst") else ""), "l1"),
+         _p(f"Địa chỉ: {esc(cty.get('dia_chi') or '')}", "l1"),
+         _p("<b>Người lao động</b> (sau đây gọi là Người lao động):"),
+         _p(f"{esc(ong_ba)}: <b>{esc(nv['ten'].upper())}</b>&nbsp;&nbsp;&nbsp;Sinh ngày: {esc(nv.get('ngay_sinh') or '..../..../........')}", "l1"),
+         _p(f"Số CCCD/CMND: {esc(nv.get('cccd') or '............')}, cấp ngày: {esc(nv.get('ngay_cap') or '..../..../........')}", "l1"),
+         _p(f"Hai bên thỏa thuận ký Phụ lục hợp đồng lao động này để sửa đổi, bổ sung Hợp đồng lao động số {esc(so_hd)} với các nội dung sau:", "j ti"),
+         _p("<b>Điều 1. Nội dung điều chỉnh</b>"),
+         _p(f"1. Điều chỉnh mức lương theo công việc hoặc chức danh quy định tại điểm a khoản 1 Điều 3 Hợp đồng lao động số {esc(so_hd)}:", "j"),
+         _p(f"- Mức lương trước khi điều chỉnh: {so_tien(cu.get('luong_cb') or 0)} đồng/tháng;", "j l1"),
+         _p(f"- Mức lương sau khi điều chỉnh: <b>{so_tien(moi.get('luong_cb') or 0)} đồng/tháng</b> (bằng chữ: {esc(doc_so_thanh_chu(moi.get('luong_cb') or 0))}).", "j l1")]
+    n = 2
+    if (moi.get("chuc_vu") or "").strip() and _chuan(moi.get("chuc_vu")) != _chuan(cu.get("chuc_vu")):
+        h.append(_p(f"{n}. Chức danh chuyên môn / chức vụ: {esc(moi['chuc_vu'])}" + (f" (trước đây: {esc(cu['chuc_vu'])})" if (cu.get("chuc_vu") or "").strip() else "") + ".", "j"))
+        n += 1
+    h.append(_p(f"{n}. Thời gian áp dụng: kể từ <b>{esc(ngay_chu(tu))}</b>.", "j"))
+    n += 1
+    if moi.get("dong_bh"):
+        h.append(_p(f"{n}. Mức tiền lương làm căn cứ đóng bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp kể từ ngày áp dụng là "
+                    f"{so_tien(moi.get('luong_cb') or 0)} đồng/tháng.", "j"))
+    h += [_p("<b>Điều 2. Điều khoản thi hành</b>"),
+          _p(f"1. Các điều khoản khác của Hợp đồng lao động số {esc(so_hd)} không được sửa đổi trong Phụ lục này vẫn giữ nguyên hiệu lực thi hành.", "j"),
+          _p(f"2. Phụ lục này là bộ phận không tách rời của Hợp đồng lao động số {esc(so_hd)}, có hiệu lực kể từ {esc(ngay_chu(tu))}; "
+             "được lập thành 02 bản có giá trị pháp lý như nhau, mỗi bên giữ 01 bản.", "j"),
           _p("&nbsp;"),
           _bang_ky("NGƯỜI LAO ĐỘNG", "(Ký, ghi rõ họ tên)", nv["ten"], "NGƯỜI SỬ DỤNG LAO ĐỘNG", f"({tc.get('chuc_danh_ky') or 'Giám đốc'} — Ký, ghi rõ họ tên, đóng dấu)", tc.get("nguoi_ky") or "",
                    anh_nld, anh_gd),

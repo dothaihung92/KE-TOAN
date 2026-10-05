@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.121"
+APP_BUILD = "2026-10-05.122"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13397,7 +13397,7 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
             "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
-            "nhan_vien_hd": gon(_vb_sap_theo_ngay(nv_ft, nam, "hd")), "nhan_vien_tv": gon(_vb_sap_theo_ngay(nv_ft, nam, "tv")),
+            "nhan_vien_hd": gon(_vb_sap_theo_ngay(_vb_ghep_phu_luc(cid, nam, nv_ft), nam, "hd")), "nhan_vien_tv": gon(_vb_sap_theo_ngay(nv_ft, nam, "tv")),
             "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
                              for n in _vb_nv_part_time(cid, nam)],
             "chuc_danh": vbld.chuc_danh_day_du(tc["nhom_tuy_chinh"]),
@@ -13796,6 +13796,9 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     if not nv:
         raise HTTPException(404, "Chưa có nhân viên toàn thời gian: hãy nhập Danh Sách Nhân Viên (lao động part-time có hợp đồng riêng)")
     cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, _vb_tc_kiem_tra(tc, nam, loai)), _LUONG_TRAN_PC_KHONG_THUE)
+    so_pl = 0
+    if loai == "hd":
+        nv = _vb_ghep_phu_luc(cid, nam, nv)            # người đổi lương bằng mã -001...: hợp đồng theo mức lương ban đầu + phụ lục điều chỉnh lương
     if loai in ("hd", "tv"):
         nv = _vb_sap_theo_ngay(nv, nam, loai)           # xếp theo ngày bắt đầu tăng dần; STT + số hợp đồng theo thứ tự mới
         try:
@@ -13812,6 +13815,8 @@ async def van_ban_xem_truoc(cid: int, request: Request):
             html = vbld.dung_hop_dong_thu_viec_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
         else:
             html = vbld.dung_hop_dong_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
+            so_pl = html.count("PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG</b>")
+            cb += _vb_kiem_tra_phu_luc(chon, tc)
         so = len(chon)
         cb = [c for c in cb if any(c["nd"].startswith(t + ":") for t in ten) or ":" not in c["nd"][:60]]
         if loai == "tv":
@@ -13821,7 +13826,40 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     else:
         html, so = vbld.dung_thang_bang_luong(nv, cty, tc, nam, chu_ky=chu_ky), 1
         _vb_luu_thang_luong(cid, nam, tc)      # lưu cấu hình thang lương theo từng năm (nhóm chức danh, % bậc...) để Quy chế/Danh sách NV dùng thống nhất
-    return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "canh_bao": cb, "so_chu_ky": html.count('src="data:image')}
+    return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": so, "so_phu_luc": so_pl, "canh_bao": cb, "so_chu_ky": html.count('src="data:image')}
+
+
+def _vb_ghep_phu_luc(cid, nam, nv):
+    """Hợp đồng lao động: người có nhiều phiên bản lương (mã gốc-001...) -> hợp đồng lập theo phiên bản HIỆU LỰC NGÀY BẮT ĐẦU hợp đồng (ngày vào làm
+    của phiên bản toàn thời gian đầu tiên, hoặc 01/01 năm lập) và kèm danh sách điều chỉnh lương trong năm (nv["phu_luc"]) để dựng Phụ lục hợp đồng."""
+    d = nhap_lieu_get(cid, loai="nv")
+    _ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
+    ls = vbld.lich_su_luong_hop_dong(d.get("header"), d.get("rows"), thang_nhap, nam)
+    if not ls:
+        return nv
+    kq = []
+    for n in nv:
+        x = ls.get(vbld.khoa_lich_su(n))
+        if not x:
+            kq.append(n)
+            continue
+        m = dict(x["ban_dau"], stt=n.get("stt"), vao_lam=x["vao_lam"], phu_luc=x["dieu_chinh"])
+        m["lech"] = list(n.get("lech") or [])          # cảnh báo lệch đã báo theo phiên bản mới nhất, không lặp lại
+        kq.append(m)
+    return kq
+
+
+def _vb_kiem_tra_phu_luc(ds, tc):
+    """Đối chiếu mức lương MỚI trong phụ lục với lương tối thiểu vùng của năm áp dụng."""
+    vung = (tc or {}).get("vung", 1)
+    kq = []
+    for n in ds:
+        for x in n.get("phu_luc") or []:
+            l, ltt = x["nv"].get("luong_cb") or 0, vbld.luong_toi_thieu_vung(x["tu"].year, vung)
+            if l < ltt:
+                kq.append({"muc": "loi" if x["nv"].get("dong_bh") else "canh_bao",
+                           "nd": f"{n['ten']}: phụ lục từ {vbld.dd_mm_yyyy(x['tu'])} — lương {vbld.so_tien(l)} đ thấp hơn lương tối thiểu vùng {int(vung or 1)} ({vbld.so_tien(ltt)} đ)."})
+    return kq
 
 
 @app.post("/api/van-ban/{cid}/word")

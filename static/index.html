@@ -4699,7 +4699,7 @@ async function vbTaoXemTruoc(){
     document.getElementById('vbXem').innerHTML=d.html;
     const kbCb=document.getElementById('vbCanhBao');if(kbCb)kbCb.innerHTML=vbHtmlCanhBao(d.canh_bao||[]);      // bảng đối chiếu theo đúng những người + tuỳ chọn vừa dựng
     vbApDungTrang();vbSua=false;
-    tt.textContent=((vbLoai==='hd'||vbLoai==='tv'||vbLoai==='pt')?`Đã dựng ${d.so_van_ban} hợp đồng (mỗi hợp đồng 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
+    tt.textContent=((vbLoai==='hd'||vbLoai==='tv'||vbLoai==='pt')?`Đã dựng ${d.so_van_ban} hợp đồng${d.so_phu_luc?` + ${d.so_phu_luc} phụ lục điều chỉnh lương (người có mã -001… đổi lương; phụ lục nằm ngay sau hợp đồng của người đó)`:''} (mỗi văn bản 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
     document.getElementById('vbXem').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){tt.textContent='';toast('Lỗi: '+e.message,'err')}
 }
