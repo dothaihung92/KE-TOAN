@@ -80,6 +80,25 @@ BL[2024] = {"01": [bl('2', 'Phạm Bảo Vương', 5_000_000)]}
 tao(2024, loai_hd="xdth", so_thang=12); tao(2025, loai_hd="xdth", so_thang=12)
 r = tao(2026, loai_hd="xdth", so_thang=12)
 assert any(c["muc"] == "loi" and "Điều 20" in c["nd"] and "Phạm Bảo Vương" in c["nd"] for c in r["canh_bao"]), r["canh_bao"]
-assert not any("Điều 20" in c["nd"] and "Lâm Thái Huy" in c["nd"] for c in r["canh_bao"]), "Huy mới có 1 hợp đồng (2025)"
+assert any("Điều 20" in c["nd"] and "Lâm Thái Huy" in c["nd"] for c in r["canh_bao"]), "Huy có trong danh sách hợp đồng phần mềm đã lập năm 2024 -> cũng đã 2 hợp đồng"
+assert not any("Điều 20" in c["nd"] and "Huỳnh Văn Vinh" in c["nd"] for c in r["canh_bao"]), "Vinh vào làm 2026: hợp đồng đầu tiên"
 print("PASS 4: cảnh báo ký quá 2 hợp đồng xác định thời hạn")
+
+# 5) đúng dữ liệu người dùng: KHÔNG có Bảng Lương, Danh Sách NV ghi dòng gốc vào làm 01/01/2025 (5.300.000) + dòng -001 vào làm 01/2026 (5.682.000)
+ROWS[:] = [nv('1', 'Dương Thị Hiền', '01/01/2025', 5_300_000), nv('1-001', 'Dương Thị Hiền', '01/2026', 5_682_000),
+           nv('2', 'Nguyễn Văn Khoan', '01/01/2025', 5_300_000)]
+BL.clear()
+conn.execute("DELETE FROM hop_dong_cfg")
+r25 = tao(2025, loai_hd="kxdth")
+assert r25["so_phu_luc"] == 0 and "5.300.000 đồng/tháng" in doan(r25["html"], "Dương Thị Hiền") and "5.682.000" not in r25["html"], "2025: hợp đồng lương cũ, chưa có phụ lục"
+r = tao(2026, loai_hd="kxdth")
+p = doan(r["html"], "Dương Thị Hiền")
+assert r["so_phu_luc"] == 1 and "PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG" in p and "Căn cứ Hợp đồng lao động số 01/HĐLĐ-2025 ký ngày 01/01/2025" in p
+assert "Mức lương trước khi điều chỉnh: 5.300.000" in p and "<b>5.682.000 đồng/tháng</b>" in p and "kể từ <b>ngày 01 tháng 01 năm 2026</b>" in p
+assert "NGUYỄN VĂN KHOAN" not in r["html"] and r["so_van_ban"] == 0, "Khoan: hợp đồng 2025 còn hiệu lực, lương không đổi -> không có văn bản"
+# đã lập 2025 với 12 tháng -> 2026 hợp đồng mới (hết hạn) dù đang chọn không xác định thời hạn
+tao(2025, loai_hd="xdth", so_thang=12)
+r = tao(2026, loai_hd="kxdth")
+assert r["so_phu_luc"] == 0 and "DƯƠNG THỊ HIỀN</b>&nbsp;&nbsp;&nbsp;Quốc tịch" in r["html"] and any("HẾT HẠN" in c["nd"] for c in r["canh_bao"])
+print("PASS 5: chỉ có Danh Sách NV (dòng -001 nâng lương) vẫn tự làm phụ lục")
 print("ALL DONE")

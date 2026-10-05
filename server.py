@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.123"
+APP_BUILD = "2026-10-05.124"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13857,7 +13857,7 @@ def _vb_ghep_phu_luc(cid, nam, nv):
         if not x:
             kq.append(n)
             continue
-        m = dict(x["ban_dau"], stt=n.get("stt"), vao_lam=x["vao_lam"], phu_luc=x["dieu_chinh"])
+        m = dict(x["ban_dau"], stt=n.get("stt"), vao_lam=x["vao_lam"], phu_luc=x["dieu_chinh"], co_phien_ban=True)
         m["lech"] = list(n.get("lech") or [])          # cảnh báo lệch đã báo theo phiên bản mới nhất, không lặp lại
         kq.append(m)
     return kq
@@ -13892,15 +13892,26 @@ def _vb_hd_cfg_doc(cid, nam):
         return None
 
 
+def _vb_hd_cac_nam_da_lap(cid, nam):
+    conn = db()
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS hop_dong_cfg (company_id INTEGER, nam INTEGER, data_json TEXT, updated_at TEXT, PRIMARY KEY(company_id, nam))")
+        return sorted(int(r["nam"]) for r in conn.execute("SELECT nam FROM hop_dong_cfg WHERE company_id=? AND nam<?", (cid, int(nam))).fetchall())
+    finally:
+        conn.close()
+
+
 def _vb_hd_con_hieu_luc(cid, nam, cty, tc, ds):
-    """Người làm từ TRƯỚC năm `nam` đã có hợp đồng lao động lập ở năm đầu tiên họ có trong Bảng Lương (năm gốc). Hợp đồng đó (loại/thời hạn đã lưu
+    """Người làm từ TRƯỚC năm `nam` đã có hợp đồng lao động lập ở năm gốc = năm đầu tiên họ có trong Bảng Lương, hoặc năm đã lập hợp đồng bằng
+    phần mềm (có lưu cấu hình), hoặc năm vào làm của dòng gốc khi Danh Sách NV có dòng mã -001 nâng lương. Hợp đồng đó (loại/thời hạn đã lưu
     khi lập ở năm gốc; chưa lưu thì giả định như lựa chọn hiện tại) CÒN HIỆU LỰC ngày 01/01/`nam` -> không lập hợp đồng mới mà lập PHỤ LỤC điều
     chỉnh lương: lương đầu năm `nam` khác lương cuối năm trước (áp dụng từ 01/01) + các lần đổi lương trong năm (mã -001...).
     -> ({khoa_lich_su: {"so_hd", "ngay_ky", "phu_luc": [...]}}, [cảnh báo]). Hợp đồng đã hết hạn: lập hợp đồng mới như cũ, kèm cảnh báo giải thích."""
     import math
     _ts, _t, _c, cac_nam = _luong_doc_nam(cid, nam)
     truoc = sorted(int(y) for y in (cac_nam or []) if int(y) < int(nam))
-    if not truoc:
+    da_lap = _vb_hd_cac_nam_da_lap(cid, nam)        # năm trước đã lập hợp đồng lao động bằng phần mềm (có lưu loại/thời hạn)
+    if not truoc and not da_lap and not any(n.get("co_phien_ban") for n in ds):
         return {}, []
     dau_nam = datetime.date(int(nam), 1, 1)
     co_mat, ds_nam, nv_cu = {}, {}, None
@@ -13929,7 +13940,13 @@ def _vb_hd_con_hieu_luc(cid, nam, cty, tc, ds):
         if vl and vl >= dau_nam:
             continue
         k = vbld.khoa_lich_su(n)
-        y0 = next((y for y in truoc if (vl is None or y >= vl.year) and (k in trong(y) or ("ten", vbld._chuan(n["ten"])) in trong(y))), None)
+        y0 = next((y for y in sorted(set(truoc) | set(da_lap)) if (vl is None or y >= vl.year)
+                   and ((y in truoc and (k in trong(y) or ("ten", vbld._chuan(n["ten"])) in trong(y)))
+                        or (y in da_lap and vl is not None and stt_nam(y, k) is not None))), None)
+        if y0 is None and n.get("co_phien_ban") and vl:
+            # chưa có Bảng Lương năm trước nhưng Danh Sách NV đã ghi lịch sử lương (dòng gốc vào làm năm trước + dòng mã -001 nâng lương):
+            # hợp đồng gốc lập từ năm vào làm của dòng gốc
+            y0 = vl.year
         if y0 is None:
             continue
         cfg = _vb_hd_cfg_doc(cid, y0)
