@@ -5883,13 +5883,13 @@ function blMoKeHoach(){
       <span>Từ tháng <input id="blKhTu" value="${t}" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"></span>
       <span>đến tháng <input id="blKhDen" value="12" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"></span>
       <span>Tổng chi phí lương cả năm <input id="blKhTien" placeholder="vd 50.000.000" oninput="blDangTien(this)" style="width:150px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"> đ</span>
-      <span title="Phần thiếu được bù bằng tăng ca (tối đa 40 giờ/tháng) và thưởng bán hàng theo tỷ lệ này">Bù bằng tăng ca <input id="blKhTc" value="50" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px">%</span>
-      <label title="Mọi người đi làm ĐỦ CÔNG (không có người làm ít ngày/không BHXH, không khấu trừ 10% thuế TNCN). Phần thiếu được bù bằng cách ĐẨY các phụ cấp không chịu thuế lên, rồi thưởng bán hàng + tăng ca, sao cho thu nhập chịu thuế mỗi người dưới giảm trừ bản thân (11tr x 12 = 132tr/năm) — không phát sinh thuế TNCN lũy tiến"><input type="checkbox" id="blKhFull" onchange="document.getElementById('blKhFullBox').style.display=this.checked?'flex':'none'"> <b>Làm full ngày công</b></label>
+      <span title="Phần thiếu được bù bằng tăng ca (tối đa 40 giờ/tháng) và thưởng bán hàng theo tỷ lệ này. Nhập 100 = CHỈ bù bằng tăng ca, không có thưởng bán hàng (tăng ca không đủ thì báo còn thiếu)">Bù bằng tăng ca <input id="blKhTc" value="50" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px">%</span>
+      <label title="Mọi người đi làm ĐỦ CÔNG (không có người làm ít ngày/không BHXH, không khấu trừ 10% thuế TNCN). Phần thiếu được bù bằng cách ĐẨY các phụ cấp không chịu thuế lên, rồi thưởng bán hàng + tăng ca, sao cho thu nhập chịu thuế mỗi người dưới giảm trừ bản thân (11tr x 12 = 132tr/năm) — không phát sinh thuế TNCN lũy tiến"><input type="checkbox" id="blKhFull"> <b>Làm full ngày công</b></label>
       <button class="btn gold sm" onclick="blTinhKeHoach()">Tính</button>
       <button class="btn ghost sm" onclick="document.getElementById('blKeHoach').style.display='none'">Đóng</button>
     </div>
-    <div id="blKhFullBox" style="display:none;gap:12px;flex-wrap:wrap;align-items:center;font-size:12.5px;margin-top:6px;color:#6b5b00">
-      <span>Trần phụ cấp KHÔNG chịu thuế mỗi tháng (phần mềm đẩy lên tới mức này):</span>
+    <div id="blKhFullBox" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:12.5px;margin-top:6px;color:#6b5b00">
+      <span>Trần phụ cấp KHÔNG chịu thuế mỗi tháng (phần mềm đẩy lên tới mức này — <b>áp dụng khi tick “Làm full ngày công”</b>):</span>
       <span>Tiền cơm <input id="blKhTranCom" value="730.000" oninput="blDangTien(this)" style="width:80px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"></span>
       <span>Trang phục <input id="blKhTranTp" value="416.000" oninput="blDangTien(this)" style="width:80px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"></span>
       <span>Điện thoại <input id="blKhTranDt" value="1.000.000" oninput="blDangTien(this)" style="width:90px;text-align:right;padding:3px 6px;border:1px solid #ccc;border-radius:6px"></span>

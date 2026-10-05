@@ -715,3 +715,10 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(phan.includes("(l==='hd'?d.nhan_vien_hd:(l==='tv'?d.nhan_vien_tv:null))||d.nhan_vien||[]"));
   console.log('PASS 33: hợp đồng lao động / thử việc dùng danh sách xếp theo ngày bắt đầu.');
 })();
+
+// 34: Chi phí lương cả năm — ô Trần phụ cấp (cơm, trang phục, điện thoại, xăng xe) luôn hiện, không ẩn khi chưa tick "Làm full ngày công"
+(() => {
+  const i1 = html.indexOf('function blMoKeHoach'), i2 = html.indexOf('\n}\n', i1), ma = html.slice(i1, i2);
+  assert(ma.includes('<div id="blKhFullBox" style="display:flex;') && !ma.includes("blKhFullBox').style.display") && ['blKhTranCom', 'blKhTranTp', 'blKhTranDt', 'blKhTranXx'].every((k) => ma.includes(k)));
+  console.log('PASS 34: ô trần phụ cấp luôn hiện.');
+})();

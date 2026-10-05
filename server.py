@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.115"
+APP_BUILD = "2026-10-05.116"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10976,11 +10976,21 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
         i += 1
     ung_vien_3 = khong_bh + du_bh[i:]                          # người còn lại: làm < 14 ngày
 
+    chi_tc = float(ty_le_tang_ca or 0) >= 100.0           # "Bù bằng tăng ca" 100%: CHỈ bù bằng tăng ca (tối đa 40 giờ/người/tháng), KHÔNG dồn phần dư vào thưởng bán hàng
+
+    def tc_room(row):
+        gio_don = row["luong_cb"] / e / 8.0 * hs if e else 0.0
+        return max(0, int(_LUONG_GIO_TANG_CA_TOI_DA * gio_don) - int(row["tang_ca"]))
+
     def bu(c, so_tien):
-        """Cộng `so_tien` vào tăng ca (tối đa 40 giờ) + thưởng bán hàng của người c; tỷ lệ tăng ca mỗi người một khác."""
+        """Cộng `so_tien` vào tăng ca (tối đa 40 giờ) + thưởng bán hàng của người c; tỷ lệ tăng ca mỗi người một khác.
+        Tỷ lệ 100%: chỉ cộng tăng ca trong phạm vi 40 giờ, phần không bù được bị bỏ (cuối tháng báo còn thiếu)."""
         if so_tien <= 0:
             return
         row = c["row"]
+        if chi_tc:
+            row["tang_ca"] += min(int(so_tien), tc_room(row))
+            return
         gio_don = row["luong_cb"] / e / 8.0 * hs if e else 0.0
         ty = ty_le_tang_ca / 100.0
         if 0 < ty_le_tang_ca < 100:
@@ -11119,13 +11129,31 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
         else:
             raise HTTPException(400, f"Tháng {int(thang)}: mục tiêu {int(muc_tieu):,} đ nhỏ hơn cả 1 ngày công của nhân viên rẻ nhất".replace(",", "."))
     # khớp CHÍNH XÁC tổng (chi_phí từng dòng đã làm tròn): dồn chênh lệch vài đồng vào thưởng bán hàng
+    # (tỷ lệ tăng ca 100%: chênh lệch chỉ được điều chỉnh bằng TĂNG CA trong phạm vi 40 giờ; còn thiếu thì báo, không dồn vào thưởng)
     for _ in range(3):
         tong = sum(tinh(c["row"])["chi_phi_luong"] for c in chon)
         lech = int(muc_tieu) - tong
         if lech == 0:
             break
+        if chi_tc:
+            for c in reversed(chon):
+                if lech > 0:
+                    them = min(lech, tc_room(c["row"]))
+                else:
+                    them = -min(-lech, int(c["row"]["tang_ca"]))
+                if them:
+                    c["row"]["tang_ca"] += them
+                    lech -= them
+                if lech == 0:
+                    break
+            continue
         cuoi = next((c for c in reversed(chon) if c["row"]["thuong_bh"] or c["row"]["tang_ca"]), chon[-1])
         cuoi["row"]["thuong_bh"] += lech
+    if chi_tc:
+        thieu = int(muc_tieu) - sum(tinh(c["row"])["chi_phi_luong"] for c in chon)
+        if thieu > 0:
+            canh_bao.append(f"Tháng {int(thang)}: đã chọn bù 100% bằng tăng ca nhưng tăng ca tối đa 40 giờ/người/tháng không đủ — còn THIẾU {thieu:,.0f} đ so với mục tiêu "
+                            "(không dồn vào thưởng bán hàng). Thêm người vào Danh Sách Nhân Viên, hoặc giảm tỷ lệ tăng ca xuống dưới 100% để bù một phần bằng thưởng bán hàng.".replace(",", "."))
     rows = [c["row"] for c in chon]
     tinh_rows = [tinh(r) for r in rows]
     for c, k in zip(chon, tinh_rows):
