@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.131"
+APP_BUILD = "2026-10-05.132"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -38514,6 +38514,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     full = _tu_file_bk.pop("_full", {"ds": 0, "thue": 0})
     _tu_file_bk.pop("_file", None)
     ban_ds_full, ban_thue_full = full["ds"], full["thue"]
+    khac_ban = dict(_tu_file_bk.get("KHAC") or {})      # nhóm "6. Khác / chưa lấy được file XML" của BK Bán ra (đang gộp vào [26] KCT)
     for k, v in _tu_file_bk.items():
         tgt = k if k in ban_theo_ts else "KCT"   # "KHAC" (Xuất Excel chưa lấy được file) gộp vào KCT
         ban_theo_ts[tgt]["ds"] += v["ds"]
@@ -38724,6 +38725,11 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     lech_ban_ds = ban_ds_bk - ct34
     lech_ban_thue = ban_thue_bk - ct35
     canh_bao_lech = []
+    if abs(khac_ban.get("ds") or 0) >= 1 or abs(khac_ban.get("thue") or 0) >= 1:
+        canh_bao_lech.append(
+            f"⚠ BK Bán ra có nhóm '6. Khác / chưa lấy được file XML' trong kỳ (Doanh số {khac_ban.get('ds') or 0:,.0f}đ, Thuế GTGT {khac_ban.get('thue') or 0:,.0f}đ) — "
+            f"phần này đang bị GỘP vào [26] (không chịu thuế) trên XML, KHÔNG vào [32]/[33] hay Phụ lục 8%. Kiểm tra các hóa đơn nhóm này "
+            f"(vd hóa đơn điều chỉnh/thay thế, thuế suất ghi 'KHAC:8%') rồi bấm 'Xuất Excel tổng hợp' lại để phần mềm phân loại lại trước khi kết xuất XML.")
     if abs(lech_mua_ds) >= NGUONG_LECH or abs(lech_mua_thue) >= NGUONG_LECH:
         canh_bao_lech.append(
             f"⚠ TỔNG CỘNG sheet 'BK Mua vào' (Doanh số {mua_ds_bk:,.0f}đ, Thuế GTGT "
@@ -43104,22 +43110,8 @@ def _summary_from_detail_json(detail):
     info["mat_hang"] = (ten_hangs[0] + (" ..." if len(ten_hangs) > 1 else "")) if ten_hangs else ""
 
     def norm_ts(ts):
-        """Chuẩn hóa mã thuế suất -> '0'/'5'/'8'/'10'/'KCT'. Hàng KHÔNG CHỊU
-        THUẾ trên hóa đơn thật của Thuế không chỉ ghi 'KCT' mà còn có thể là
-        'KKKNT' (không kê khai, tính nộp thuế) hoặc 'KHTKKNT' (không thuộc
-        trường hợp phải kê khai, tính nộp thuế) — TRƯỚC ĐÂY chỉ nhận qua
-        chuỗi con 'KCT'/'KKK', BỎ SÓT 'KHTKKNT' (không chứa 2 chuỗi con đó),
-        khiến hàng KCT rơi vào nhánh mặc định rồi bị gộp NHẦM vào nhóm 10%
-        (do có fallback về '10' khi không khớp nhóm nào ở nơi gọi hàm này)
-        -> mất doanh thu ở chỉ tiêu [26], thừa sai ở chỉ tiêu [32]/[33]."""
-        s = str(ts or "").strip().upper().replace(" ", "")
-        if s in ("", "KCT", "KHAC", "KO", "KHÔNG", "KHONG", "KKKNT", "KHTKKNT") \
-                or "KKK" in s or "KCT" in s:
-            return "KCT"
-        s2 = s.replace("%", "").strip()
-        if s2 in ("0", "5", "8", "10"):
-            return s2
-        return s or "KHAC"
+        """Chuẩn hóa mã thuế suất -> '0'/'5'/'8'/'10'/'KCT' (dùng CHUNG _chuan_hoa_thue_suat: hiểu cả "KHAC:8.00%" = 8%, KKKNT/KHTKKNT = KCT)."""
+        return _chuan_hoa_thue_suat(ts)
 
     # Hóa đơn NGOẠI TỆ (vd USD) -> "ds"/"thue" LUÔN quy đổi ra VNĐ (tỷ giá *
     # giá trị gốc); "ds_nt" giữ nguyên số tiền GỐC ngoại tệ (dùng cho cột
@@ -43303,12 +43295,30 @@ def _chuan_hoa_thue_suat(ts):
     lệch nhau. Hàng KHÔNG CHỊU THUẾ trên hóa đơn thật của Thuế không chỉ ghi
     'KCT' mà còn có thể là 'KKKNT'/'KHTKKNT'."""
     s = str(ts or "").strip().upper().replace(" ", "")
+    if s.startswith("KHAC:"):
+        # Hóa đơn của Tổng cục Thuế ghi "KHAC:8.00%" (thuế suất "khác" kèm số thật; vd 8% theo Nghị quyết giảm thuế, kể cả hóa đơn ĐIỀU CHỈNH/
+        # thay thế): phần số sau dấu ":" mới là thuế suất thật. TRƯỚC ĐÂY giữ nguyên chuỗi "KHAC:8.00%" nên dòng hàng bị đẩy vào nhóm
+        # "Khác" rồi gộp vào KHÔNG CHỊU THUẾ ([26]) trên tờ khai HTKK, mất khỏi [32]/[33] và Phụ lục 142 (8%).
+        try:
+            f = float(s.split(":", 1)[1].replace("%", "").replace(",", "."))
+            gan = min((0, 5, 8, 10), key=lambda t: abs(f - t))
+            if abs(f - gan) <= 0.5:
+                return str(gan)
+        except ValueError:
+            pass
+        return "KHAC"
     if s in ("", "KCT", "KHAC", "KO", "KHÔNG", "KHONG", "KKKNT", "KHTKKNT") \
             or "KKK" in s or "KCT" in s:
         return "KCT"
     s2 = s.replace("%", "").strip()
     if s2 in ("0", "5", "8", "10"):
         return s2
+    try:
+        f = float(s2.replace(",", "."))      # "10.00%", "8.0" -> "10", "8"
+        if f in (0, 5, 8, 10):
+            return str(int(f))
+    except ValueError:
+        pass
     return s or "KHAC"
 
 
@@ -43498,22 +43508,8 @@ def _parse_invoice_summary(xml_bytes):
     info["mat_hang"] = (ten_hangs[0] + (" ..." if len(ten_hangs) > 1 else "")) if ten_hangs else ""
 
     def norm_ts(ts):
-        """Chuẩn hóa mã thuế suất -> '0'/'5'/'8'/'10'/'KCT'. Hàng KHÔNG CHỊU
-        THUẾ trên hóa đơn thật của Thuế không chỉ ghi 'KCT' mà còn có thể là
-        'KKKNT' (không kê khai, tính nộp thuế) hoặc 'KHTKKNT' (không thuộc
-        trường hợp phải kê khai, tính nộp thuế) — TRƯỚC ĐÂY chỉ nhận qua
-        chuỗi con 'KCT'/'KKK', BỎ SÓT 'KHTKKNT' (không chứa 2 chuỗi con đó),
-        khiến hàng KCT rơi vào nhánh mặc định rồi bị gộp NHẦM vào nhóm 10%
-        (do có fallback về '10' khi không khớp nhóm nào ở nơi gọi hàm này)
-        -> mất doanh thu ở chỉ tiêu [26], thừa sai ở chỉ tiêu [32]/[33]."""
-        s = str(ts or "").strip().upper().replace(" ", "")
-        if s in ("", "KCT", "KHAC", "KO", "KHÔNG", "KHONG", "KKKNT", "KHTKKNT") \
-                or "KKK" in s or "KCT" in s:
-            return "KCT"
-        s2 = s.replace("%", "").strip()
-        if s2 in ("0", "5", "8", "10"):
-            return s2
-        return s or "KHAC"
+        """Chuẩn hóa mã thuế suất -> '0'/'5'/'8'/'10'/'KCT' (dùng CHUNG _chuan_hoa_thue_suat: hiểu cả "KHAC:8.00%" = 8%, KKKNT/KHTKKNT = KCT)."""
+        return _chuan_hoa_thue_suat(ts)
 
     # Hóa đơn NGOẠI TỆ (vd USD) -> "ds"/"thue" LUÔN quy đổi ra VNĐ (tỷ giá *
     # giá trị gốc); "ds_nt" giữ nguyên số tiền GỐC ngoại tệ (dùng cho cột
