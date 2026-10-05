@@ -437,7 +437,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
 
 // 19: nạp lao động part-time cả năm theo khoảng làm việc + điền giờ theo hợp đồng (chỉ ô trống, không ghi đè)
 (async () => {
-  assert(html.includes('onclick="blNapPartTime()"') && html.includes('onclick="blDienGioPartTime()"'));
+  assert(html.includes('onclick="blNapPartTime()"') && !html.includes('blDienGioPartTime'), 'đã gỡ nút điền giờ theo hợp đồng');
   const i1 = html.indexOf('async function blNapPartTime'), i2 = html.indexOf('async function blNapNhanVien');
   const goi = [], toasts = [];
   const ctx = { current: 7, blNam: 2026, blDL: { '03': [{ ma: '9', ten: 'PT', part_time: 1, gio_lam: 50 }] }, BL_THANG: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), blBan: false,
@@ -449,14 +449,8 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.strictEqual(goi.length, 12, 'duyệt đủ 12 tháng');
   assert.deepStrictEqual(Object.keys(ctx.blDL).sort(), ['03', '04', '05'], 'chỉ các tháng trong khoảng làm việc; người toàn thời gian không bị thêm');
   assert.strictEqual(ctx.blDL['03'].length, 1, 'tháng đã có dòng: không thêm trùng'); assert.strictEqual(ctx.blDL['03'][0].gio_lam, 50, 'giữ nguyên giờ đã nhập');
-  await ctx.blDienGioPartTime();
-  assert.strictEqual(ctx.blDL['03'][0].gio_lam, 50, 'không ghi đè giờ đã nhập'); assert.strictEqual(ctx.blDL['04'][0].gio_lam, 43.3); assert.strictEqual(ctx.blDL['05'][0].gio_lam, 43.3);
-  assert(toasts.at(-1)[0].includes('KHÔNG phải giờ thực tế') && toasts.at(-1)[1] === 'ok', 'ghi rõ là giờ theo hợp đồng; dưới ngưỡng: không BHXH');
-  // giờ theo hợp đồng làm lương đạt ngưỡng: không giảm giờ để né, chỉ cảnh báo
-  ctx.blDL['06'] = [{ ma: '9', ten: 'PT', part_time: 1, gio_lam: '' }]; ctx.prompt = () => '100';
-  await ctx.blDienGioPartTime();
-  assert.strictEqual(ctx.blDL['06'][0].gio_lam, 100); assert(toasts.at(-1)[0].includes('đã tự tính BHXH') && toasts.at(-1)[1] === 'err');
-  console.log('PASS 19: nạp part-time cả năm + điền giờ theo hợp đồng.');
+  assert(['04', '05'].every((t) => ctx.blDL[t][0].gio_lam === ''), 'nạp part-time KHÔNG tự đặt giờ làm (chờ import/nhập giờ thực tế)');
+  console.log('PASS 19: nạp part-time cả năm (không tự đặt giờ).');
 })().catch((e) => { console.error(e); process.exit(1); });
 
 // 20: giờ làm part-time — bảng chấm công ghi giờ từng ngày (tối đa 8 giờ/ngày, dư sang ngày kế), import file giờ làm
@@ -490,7 +484,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.strictEqual(dau(cham({ part_time: 1, gio_lam: '' })), ''); assert.strictEqual(cham({ part_time: 0, ngay_lam: 3, ma: 'F' }).pt, undefined);
   assert(html.includes('Người có ghi chú * : giờ từng ngày phân bổ theo TỔNG giờ tháng (chưa có chấm công từng ngày)'), 'bản in ghi rõ phần phân bổ theo tổng giờ');
   // IMPORT
-  const i1 = html.indexOf('async function blTaiMauGioLam'), i2 = html.indexOf('// Điền giờ làm/tháng THEO HỢP ĐỒNG');
+  const i1 = html.indexOf('async function blTaiMauGioLam'), i2 = html.indexOf('async function blNapNhanVien');
   const alerts = [], toasts = [];
   const ctx = { current: 7, blNam: 2026, BL_THANG: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), blBan: false, blVeTabs() {}, blVeBang() {}, blVeInfo() {}, toast: (m, k) => toasts.push([m, k]), alert: (m) => alerts.push(m),
     blDL: { '03': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: '' }], '04': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: 5, gio_ngay: '2:5' }], '05': [{ ma: '1', ten: 'FT', part_time: 0 }] },
@@ -527,7 +521,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
 
 // 22: import giờ làm part-time — bảng lương THEO FILE: tháng không có giờ = không làm = gỡ dòng của người đó khỏi bảng lương tháng đó
 (async () => {
-  const i1 = html.indexOf('async function blTaiMauGioLam'), i2 = html.indexOf('// Điền giờ làm/tháng THEO HỢP ĐỒNG');
+  const i1 = html.indexOf('async function blTaiMauGioLam'), i2 = html.indexOf('async function blNapNhanVien');
   const tao = (confirmKq, kqFile) => {
     const toasts = [], hoi = [];
     const ctx = { current: 7, blNam: 2026, BL_THANG: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), blBan: false, blVeTabs() {}, blVeBang() {}, blVeInfo() {}, toast: (m, k) => toasts.push([m, k]), alert() {}, confirm: (m) => { hoi.push(m); return confirmKq; },

@@ -5534,7 +5534,6 @@ async function moBangLuongNam(thangGiu){
         <button class="btn ghost sm" style="color:#b0651f" onclick="blTaiMauGioLam()" title="Tải file Excel mẫu nhập giờ làm của lao động part-time (theo tháng; tuỳ chọn theo từng ngày)">📄 Mẫu giờ làm part-time</button>
         <button class="btn ghost sm" style="color:#b0651f" onclick="document.getElementById('blGioLamFile').click()" title="Import giờ làm THỰC TẾ của lao động part-time từ file Excel chấm công (theo mẫu); mỗi ngày tối đa 8 giờ">📥 Import giờ làm part-time</button>
         <input type="file" id="blGioLamFile" accept=".xlsx" style="display:none" onchange="blImportGioLam(this)">
-        <button class="btn ghost sm" style="color:#b0651f" onclick="blDienGioPartTime()" title="Điền số giờ làm/tháng THEO HỢP ĐỒNG cho các ô Giờ làm còn trống của người part-time (số giờ thực tế sẽ thay thế khi có bảng chấm công)">⏱ Điền giờ làm part-time theo hợp đồng</button>
         <button class="btn ghost sm" onclick="blSaoChepThangTruoc()">📋 Sao chép từ tháng trước</button>
         <button class="btn ghost sm" onclick="blThemDong()">➕ Thêm dòng</button>
         <button class="btn ghost sm" onclick="document.getElementById('blImportFile').click()">📥 Import Excel</button>
@@ -5898,7 +5897,7 @@ async function blNapPartTime(im){
     if(!them){if(!im)toast('Không có lao động part-time nào cần thêm (tick “Part-time” + ghi Tháng/Năm vào làm ở Danh Sách Nhân Viên) — hoặc đã có đủ trong các tháng','');return}
     blBan=true;blVeTabs();blVeBang();blVeInfo();
     for(const t of BL_THANG)if((blDL[t]||[]).length)await blTinhLai(t);
-    if(!im)toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng theo khoảng làm việc ở Danh Sách Nhân Viên — giờ làm đang trống (0 đồng): bấm “Điền giờ làm part-time theo hợp đồng” hoặc nhập giờ thực tế, rồi 💾 Lưu`,'ok');
+    if(!im)toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng theo khoảng làm việc ở Danh Sách Nhân Viên — giờ làm đang trống (0 đồng): Import giờ làm part-time từ file chấm công hoặc nhập giờ thực tế, rồi 💾 Lưu`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function blTaiMauGioLam(){
@@ -5947,24 +5946,6 @@ async function blImportGioLam(inp){
     toast(`✓ Đã nhập giờ làm cho ${dat} dòng (${d.so_nguoi} người)`+(go?`, gỡ ${go} dòng tháng không làm`:'')+(ghiChu.length?` — ${ghiChu.length} dòng bị bỏ qua/cảnh báo (xem hộp thoại)`:'')+' — nhớ 💾 Lưu',ghiChu.length?'err':'ok');
     if(ghiChu.length)alert('Một số dòng không được nhập hoặc cần xem lại:\n\n'+ghiChu.slice(0,40).join('\n'));
   }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-// Điền giờ làm/tháng THEO HỢP ĐỒNG vào ô Giờ làm còn TRỐNG của người part-time (chỉ ô trống; không ghi đè giờ đã nhập; không thay số để né ngưỡng BHXH)
-async function blDienGioPartTime(){
-  const ds=BL_THANG.filter(t=>(blDL[t]||[]).some(r=>Number(r.part_time)&&(r.gio_lam===''||r.gio_lam==null||Number(r.gio_lam)===0)));
-  if(!ds.length){toast('Không có ô giờ làm part-time nào đang trống — bấm “Nạp lao động part-time cả năm” trước','err');return}
-  let goiY='43,3';try{goiY=localStorage.getItem('blPtGioThang')||goiY}catch{}
-  const nhap=prompt('Số GIỜ LÀM / THÁNG theo hợp đồng part-time (vd 2 giờ/ngày × 5 ngày/tuần × 52 tuần ÷ 12 tháng ≈ 43,3).\nSẽ điền vào các ô Giờ làm còn trống của mọi tháng; giờ làm thực tế sẽ thay thế khi có bảng chấm công.',goiY);
-  if(nhap===null)return;
-  const gio=parseFloat(String(nhap).trim().replace(',','.'));
-  if(!(gio>0)||gio>300){toast('Số giờ không hợp lệ','err');return}
-  try{localStorage.setItem('blPtGioThang',String(nhap).trim())}catch{}
-  let dien=0;
-  ds.forEach(t=>blDL[t].forEach(r=>{if(Number(r.part_time)&&(r.gio_lam===''||r.gio_lam==null||Number(r.gio_lam)===0)){r.gio_lam=gio;dien++}}));
-  blBan=true;
-  for(const t of ds)await blTinhLai(t);
-  blVeTabs();blVeBang();blVeInfo();
-  const dat=ds.reduce((n,t)=>n+blDL[t].filter(r=>Number(r.part_time)&&r.pt_phai_dong_bh).length,0);
-  toast(`✓ Đã điền ${gio.toLocaleString('vi-VN')} giờ cho ${dien} dòng part-time (theo hợp đồng, KHÔNG phải giờ thực tế).`+(dat?` ⚠ ${dat} dòng có lương đạt ngưỡng part-time → đã tự tính BHXH (không giảm giờ để né ngưỡng).`:' Các tháng lương dưới ngưỡng: không đóng BHXH.'),dat?'err':'ok');
 }
 async function blNapNhanVien(){
   if(blThang==='nam'){toast('Chọn 1 tab tháng để nạp nhân viên','err');return}
