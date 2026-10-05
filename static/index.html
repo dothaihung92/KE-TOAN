@@ -4487,7 +4487,7 @@ function vbHtmlCanhBao(cb){
 }
 function vbVeMan(){
   const d=vbDL,tc=d.tuy_chon,l=vbLoai;
-  const nv=d.nhan_vien||[];
+  const nv=(l==='hd'?d.nhan_vien_hd:(l==='tv'?d.nhan_vien_tv:null))||d.nhan_vien||[];      // hợp đồng / thử việc: danh sách xếp theo ngày bắt đầu tăng dần (cùng STT với server)
   const optNv=nv.map(n=>[n.stt,`${n.stt}. ${n.ma?n.ma+' – ':''}${n.ten}${n.chuc_vu?' ('+n.chuc_vu+')':''}${n.da_nghi?' [đã nghỉ việc]':''}`]);
   let form=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
     ${vbOChu('vb_nam','Năm lập (Bảng lương + ngày HĐ)',vbNam,110,'Hợp đồng ghi ngày 01/01 của năm này nếu nhân viên vào làm từ năm trước')}

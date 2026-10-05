@@ -149,4 +149,15 @@ cb25 = v.kiem_tra(nv_l, 2025, v.gop_tuy_chon(CTY, server._vb_tc_kiem_tra({"ngay"
 assert not any("thấp hơn lương tối thiểu" in c["nd"] for c in cb25), cb25
 cb26 = v.kiem_tra(nv_l, 2026, v.gop_tuy_chon(CTY, {"ngay": "05/10/2026"}), {})
 assert any("thấp hơn lương tối thiểu" in c["nd"] for c in cb26)
+# hợp đồng lao động / thử việc: xếp theo ngày bắt đầu TĂNG DẦN, STT + số hợp đồng theo thứ tự mới
+ds_s = [dict(ten="C", stt=1, vao_lam="15/05/2025", thu_viec_tu="20/04/2025"), dict(ten="A", stt=2, vao_lam="01/2024", thu_viec_tu=""), dict(ten="B", stt=3, vao_lam="03/2025", thu_viec_tu="01/03/2025"),
+        dict(ten="D", stt=4, vao_lam="", thu_viec_tu="10/01/2025"), dict(ten="E", stt=5, vao_lam="03/2025", thu_viec_tu="")]
+hd_s = server._vb_sap_theo_ngay(ds_s, 2025, "hd")
+assert [(n["stt"], n["ten"]) for n in hd_s] == [(1, "A"), (2, "D"), (3, "B"), (4, "E"), (5, "C")], [(n["stt"], n["ten"]) for n in hd_s]     # A (vào làm 2024 -> 01/01/2025), D (không ghi -> 01/01/2025), B, E (03/2025), C (15/05)
+tv_s = server._vb_sap_theo_ngay(ds_s, 2025, "tv")
+assert [(n["stt"], n["ten"]) for n in tv_s] == [(1, "D"), (2, "B"), (3, "C"), (4, "A"), (5, "E")], "xếp theo ngày bắt đầu thử việc; người chưa có thử việc xếp cuối, giữ thứ tự cũ"
+assert [n["stt"] for n in ds_s] == [1, 2, 3, 4, 5], "không đổi danh sách gốc"
+h_hd = v.dung_hop_dong_nhieu(hd_s, CTY, {}, nam=2025)
+sp = __import__("re").findall(r"Số: (\d+)/HĐLĐ-2025.*?ngày (\d+) tháng (\d+) năm 2025", h_hd, flags=__import__("re").S)
+assert [x[0] for x in sp] == ["01", "02", "03", "04", "05"] and [(x[2]) for x in sp] == ["01", "01", "03", "03", "05"], sp
 print("PASS")

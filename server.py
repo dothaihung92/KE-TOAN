@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.114"
+APP_BUILD = "2026-10-05.115"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13229,6 +13229,22 @@ def _vb_du_lieu(cid, nam, chi_bang_luong=False):
     return cty, nv, ts
 
 
+def _vb_sap_theo_ngay(ds, nam, loai):
+    """Hợp đồng lao động (hd) xếp theo NGÀY BẮT ĐẦU hợp đồng (Tháng/Năm vào làm; vào làm trước năm lập thì tính 01/01 của năm lập) tăng dần; hợp đồng thử việc (tv) xếp
+    theo NGÀY BẮT ĐẦU THỬ VIỆC (người chưa có ngày thử việc xếp cuối). Cùng ngày giữ thứ tự Danh Sách NV. STT đánh lại 1..n theo thứ tự mới (bản sao, không đổi danh sách gốc)."""
+    ngay0 = datetime.date(int(nam), 1, 1)
+    cuoi = datetime.date(9999, 12, 31)
+
+    def khoa(n):
+        if loai == "tv":
+            return vbld.ngay_date(n.get("thu_viec_tu")) or cuoi
+        return vbld.ngay_bat_dau_theo_nam(n.get("vao_lam"), nam) or ngay0
+    kq = [dict(n) for _i, n in sorted(enumerate(ds), key=lambda x: (khoa(x[1]), x[0]))]
+    for i, n in enumerate(kq, 1):
+        n["stt"] = i
+    return kq
+
+
 def _vb_tc_kiem_tra(tc, nam, loai=None):
     """Tuỳ chọn dùng để ĐỐI CHIẾU (lương tối thiểu vùng theo năm của văn bản): hợp đồng lấy ngày ký / bắt đầu / 01/01 của NĂM LẬP đang chọn,
     không lấy ngày hôm nay (năm lập 2025 mà hôm nay 2026 thì không được đối chiếu với lương tối thiểu 2026)."""
@@ -13348,10 +13364,12 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
     tc = vbld.gop_tuy_chon(cty, luu)
     nv_tl = _vb_du_lieu(cid, nam, True)[1]
     nv_ft = [n for n in nv if not n.get("part_time")]
+    gon = lambda ds: [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"], "da_nghi": n["da_nghi"], "nguon": n["nguon"]} for n in ds]
     return {"nam": nam, "cty": cty, "tuy_chon": tc, "css": vbld.VB_CSS, "thang_luong_nam_goc": nam_goc,
             "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
+            "nhan_vien_hd": gon(_vb_sap_theo_ngay(nv_ft, nam, "hd")), "nhan_vien_tv": gon(_vb_sap_theo_ngay(nv_ft, nam, "tv")),
             "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
                              for n in _vb_nv_part_time(cid, nam)],
             "chuc_danh": vbld.chuc_danh_day_du(tc["nhom_tuy_chinh"]),
@@ -13751,8 +13769,9 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         raise HTTPException(404, "Chưa có nhân viên toàn thời gian: hãy nhập Danh Sách Nhân Viên (lao động part-time có hợp đồng riêng)")
     cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, _vb_tc_kiem_tra(tc, nam, loai)), _LUONG_TRAN_PC_KHONG_THUE)
     if loai in ("hd", "tv"):
+        nv = _vb_sap_theo_ngay(nv, nam, loai)           # xếp theo ngày bắt đầu tăng dần; STT + số hợp đồng theo thứ tự mới
         try:
-            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv_het))
+            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv))
         except Exception:
             raise HTTPException(400, "Từ/đến nhân viên không hợp lệ")
         if tu > den:

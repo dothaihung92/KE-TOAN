@@ -708,3 +708,10 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(phan.includes("l==='pt'?(d.canh_bao_pt||[]):(d.canh_bao||[])") && html.includes("kbCb.innerHTML=vbHtmlCanhBao(d.canh_bao||[])"), 'bảng đối chiếu: part-time dùng cảnh báo riêng, cập nhật sau khi tạo bản xem trước');
   console.log('PASS 32: hợp đồng part-time bỏ loại hợp đồng/địa điểm, đối chiếu đúng.');
 })();
+
+// 33: Hợp đồng lao động / thử việc dùng danh sách xếp theo ngày bắt đầu (cùng STT với server)
+(() => {
+  const iV = html.indexOf('function vbVeMan'), iE = html.indexOf('function vbTuyChon', iV), phan = html.slice(iV, iE);
+  assert(phan.includes("(l==='hd'?d.nhan_vien_hd:(l==='tv'?d.nhan_vien_tv:null))||d.nhan_vien||[]"));
+  console.log('PASS 33: hợp đồng lao động / thử việc dùng danh sách xếp theo ngày bắt đầu.');
+})();

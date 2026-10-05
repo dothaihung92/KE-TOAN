@@ -30,6 +30,7 @@ d = server.van_ban_du_lieu(7, 2026)
 assert d["cty"]["ten"] == "CÔNG TY TNHH THỬ" and len(d["nhan_vien"]) == 5 and d["tuy_chon"]["nguoi_ky"] == "Hồ Thị Cẩm Vân" and d["tuy_chon"]["dia_danh"] == "TP. Hồ Chí Minh"
 assert d["nhan_vien"][1]["luong_cb"] == 9_000_000 and ".vb-trang" in d["css"] and d["trang"]["tl"]["ngang"] is True and d["trang"]["hd"]["ngang"] is False
 assert server.van_ban_du_lieu(7, 2026)["canh_bao"], "có cảnh báo (vd lương Danh sách NV ≠ Bảng lương)"
+assert [n["stt"] for n in d["nhan_vien_hd"]] == [1, 2, 3, 4, 5] and [n["stt"] for n in d["nhan_vien_tv"]] == [1, 2, 3, 4, 5], "danh sách chọn hợp đồng / thử việc: STT theo thứ tự ngày bắt đầu"
 try:
     server.van_ban_du_lieu(99, 2026); raise SystemExit("phải lỗi: công ty không tồn tại")
 except HTTPException as e:
