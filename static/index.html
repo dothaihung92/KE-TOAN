@@ -4909,14 +4909,15 @@ function vbCkDuVe(){
   const dung=new Set(chon.filter(j=>j>=0));
   const soChon=dung.size;
   const conLai=vbCkMuc.filter((m,j)=>!m.co_anh&&!dung.has(j)).length;
-  kv.innerHTML=vbCkDu.length?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-      <button class="btn gold sm" onclick="vbCkGanTatCa()" ${soChon?'':'disabled'} title="Gắn cùng lúc tất cả các chữ ký đã chọn người ở bên dưới">✅ Gắn toàn bộ chữ ký đã chọn (${soChon})</button>
-      <span class="hint">Đã chọn người cho ${soChon}/${vbCkDu.length} chữ ký — người đã chọn ở dòng khác không hiện lại trong danh sách; còn ${conLai} người chưa có chữ ký chưa được chọn.</span></div>
+  const nut=`<button class="btn gold sm" onclick="vbCkGanTatCa()" ${soChon?'':'disabled'} title="Gắn cùng lúc tất cả các chữ ký đã chọn người">✅ Gắn toàn bộ chữ ký đã chọn (${soChon})</button>`;
+  kv.innerHTML=vbCkDu.length?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">${nut}
+      <span class="hint">Đã chọn người cho ${soChon}/${vbCkDu.length} chữ ký — người đã chọn ở dòng khác không hiện lại trong danh sách; còn ${conLai} người chưa có chữ ký chưa được chọn. Chọn xong hết thì bấm “Gắn toàn bộ” (nút có ở trên và dưới bảng).</span></div>
     <div class="vbCkDuCuon" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDu.map((d,i)=>`<tr>
       <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
       <td style="padding:3px 6px;border:1px solid #ddd">${vbEsc(d.ten)}${d.loai==='luu'?' <span class="hint">(đã gắn ở công ty khác)</span>':''}</td>
       <td style="padding:3px 6px;border:1px solid #ddd"><select id="vbCkDuSel${i}" style="width:100%;padding:3px" onchange="vbCkDuDoi(${i},this.value)"><option value="-1">— chọn người để gắn —</option>${vbCkMuc.map((m,j)=>(m.co_anh||(dung.has(j)&&j!==chon[i]))?'':`<option value="${j}" ${j===chon[i]?'selected':''}>${j===0?'Giám đốc: ':''}${vbEsc(m.ten)}${m.ma?' ('+vbEsc(m.ma)+')':''}</option>`).join('')}</select></td>
-      <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" onclick="vbCkTaiVe('du',${i})" title="Tải ảnh chữ ký này về máy">⬇ Tải về</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})" title="${d.loai==='luu'?'Xoá khỏi danh sách chưa gán của công ty này (công ty cũ vẫn giữ chữ ký)':'Xóa chữ ký chưa gán'}">🗑</button></td></tr>`).join('')}</table></div>`:'';
+      <td style="padding:3px 6px;border:1px solid #ddd;white-space:nowrap"><button class="btn gold sm" onclick="vbCkGanDu(${i})">Gắn</button> <button class="btn ghost sm" onclick="vbCkTaiVe('du',${i})" title="Tải ảnh chữ ký này về máy">⬇ Tải về</button> <button class="btn ghost sm" style="color:#c00" onclick="vbCkXoaDu(${i})" title="${d.loai==='luu'?'Xoá khỏi danh sách chưa gán của công ty này (công ty cũ vẫn giữ chữ ký)':'Xóa chữ ký chưa gán'}">🗑</button></td></tr>`).join('')}</table></div>
+    <div style="margin-top:6px">${nut}</div>`:'';
   const cu2=kv.querySelector('.vbCkDuCuon');if(cu2)cu2.scrollTop=top;
 }
 function vbCkDuDoi(i,v){
@@ -4943,7 +4944,8 @@ async function vbCkGanDu(i){
 async function vbCkGanTatCa(){
   const ds=[];vbCkDu.forEach(d=>{const j=vbCkDuChonCuaDong(d);if(j>=0)ds.push({d,m:vbCkMuc[j]})});
   if(!ds.length){toast('Chưa chọn người nào để gắn','err');return}
-  const dsTxt=ds.map(x=>'• '+(x.d.loai==='luu'?x.d.ten:String(x.d.ten||'').replace(/\.[^.]+$/,''))+'  →  '+x.m.ten).join('\n');
+  const TOI_DA=8;      // hộp xác nhận chỉ liệt kê vài cặp đầu (danh sách đầy đủ đang hiện trên màn hình) để không tràn màn hình
+  const dsTxt=ds.slice(0,TOI_DA).map(x=>'• '+(x.d.loai==='luu'?x.d.ten:String(x.d.ten||'').replace(/\.[^.]+$/,''))+'  →  '+x.m.ten).join('\n')+(ds.length>TOI_DA?`\n… và ${ds.length-TOI_DA} chữ ký khác (như đã chọn trên màn hình)`:'');
   const coKhac=ds.filter(x=>x.d.loai==='luu').length;
   if(!confirm(`Gắn ${ds.length} chữ ký:\n${dsTxt}\n\nXác nhận: từng người ở trên ĐÃ ĐỒNG Ý lưu và sử dụng chữ ký này trên văn bản của công ty${coKhac?`, và các chữ ký “đã gắn ở công ty khác” đúng là CÙNG MỘT NGƯỜI với người được chọn`:''}?`))return;
   let ok=0;const loi=[];
