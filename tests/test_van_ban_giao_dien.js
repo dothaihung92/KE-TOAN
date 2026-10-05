@@ -140,6 +140,8 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.strictEqual(ex('nvRows.length'), so); assert(toasts.some(([m, k]) => k === 'err' && m.includes('Mã NV')));
   // lưới: có cột ＋ ở đầu mỗi dòng; dòng phiên bản (mã gốc-NNN) tô nền nhạt
   ex(`nvRows[4][${iMa}] = '3'; veGridNhanVien();`);
+  assert(wrap.innerHTML.includes('data-nvmoi="1"') && wrap.innerHTML.includes('background:#d9f5df'), 'dòng ＋ vừa thêm: nền xanh (dòng mới)');
+  ex('nvRows.forEach(r => { delete r._moi; }); veGridNhanVien();');
   assert((wrap.innerHTML.match(/nvThemPhienBan\(/g) || []).length === 5 && wrap.innerHTML.includes('background:#fffaf0'));
   assert.strictEqual(ex('nvMaGoc("2-001")'), '2'); assert.strictEqual(ex('nvMaGoc("NV-12")'), 'NV-12');
   // MÃ NV TỰ ĐỘNG: dòng chưa có mã nhận số tiếp theo (lớn nhất + 1), mã đã có giữ nguyên, không trùng
@@ -661,4 +663,18 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(daTai && c2.nvRows.map((r) => r[1]).join('|') === 'Cũ 1|Cũ 2|Mới 1', 'dòng cũ giữ nguyên, dòng mới nối cuối');
   assert(toasts.at(-1).includes('giữ nguyên 2 dòng cũ'));
   console.log('PASS 29: Ctrl+S lưu + import chỉ nối thêm.');
+})().catch((e) => { console.error(e); process.exit(1); });
+
+// 30: dòng mới thêm (import / thêm dòng / ＋) tô XANH đến khi lưu
+(async () => {
+  const i1 = html.indexOf('function veGridNhanVien'), i2 = html.indexOf('function nvSelXoa') > 0 ? html.indexOf('function nvSuaO') : 0;
+  assert(html.includes("row._moi?' data-nvmoi=\"1\" title=\"Dòng mới thêm — chưa lưu\" style=\"background:#d9f5df\"'"), 'dòng mới có nền xanh');
+  assert(html.includes('rr._moi=true;return rr') && html.includes('moiDong._moi=true') && html.includes('moi._moi=true;'), 'import / thêm dòng / ＋ đều đánh dấu dòng mới');
+  // lưu thành công: bỏ dấu dòng mới; lưu lỗi: giữ nguyên
+  const j1 = html.indexOf('async function nvLuu'), j2 = html.indexOf('\n}\n', j1) + 3;
+  const mk = (ok) => { const toasts = []; const ctx = { current: 7, nvHeader: ['STT'], nvRows: [(() => { const a = [1]; a._moi = true; return a; })(), [2]], nvTuDienMa() {}, toast: (m, k) => toasts.push([m, k]), veGridNhanVien() { ctx.ve = (ctx.ve || 0) + 1; }, document: { getElementById: () => null }, fetch: async () => ({ ok }), Date, JSON, Error };
+    vm.createContext(ctx); vm.runInContext(html.slice(j1, j2), ctx); return { ctx, toasts }; };
+  let m = mk(true); await m.ctx.nvLuu(); assert(!m.ctx.nvRows.some((r) => r._moi) && m.ctx.ve === 1 && m.toasts.at(-1)[1] === 'ok', 'lưu xong: hết nền xanh');
+  m = mk(false); await m.ctx.nvLuu(); assert(m.ctx.nvRows[0]._moi === true && m.toasts.at(-1)[1] === 'err', 'lưu lỗi: giữ dấu dòng mới + báo lỗi');
+  console.log('PASS 30: dòng mới tô xanh đến khi lưu.');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -4989,7 +4989,7 @@ function moDanhSachNhanVien(tuBangLuong){
       <div id="vbKhoCk" style="display:none"></div>
       <div id="nvTuBl"></div>
       <div id="nvInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. <b>Chức vụ</b> chỉ chọn trong các chức danh của <b>Hệ thống thang bảng lương</b> (Nhập Liệu → Thang Bảng Lương); <b>Lương cơ bản</b> lấy theo Bảng Lương từng năm bằng nút "🔄 Lấy lương theo Bảng Lương năm…".</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. <span style="background:#d9f5df;padding:0 6px;border-radius:4px">nền xanh</span> = dòng mới thêm chưa lưu. <b>Chức vụ</b> chỉ chọn trong các chức danh của <b>Hệ thống thang bảng lương</b> (Nhập Liệu → Thang Bảng Lương); <b>Lương cơ bản</b> lấy theo Bảng Lương từng năm bằng nút "🔄 Lấy lương theo Bảng Lương năm…".</div>
       <div id="nvTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
     </div>`;
   const wNv=document.getElementById('nvTableWrap');
@@ -5143,6 +5143,7 @@ function nvThemPhienBan(ri){
   if(cNghi>=0)moi[cNghi]='';
   const hn=new Date(),thangNay=String(hn.getMonth()+1).padStart(2,'0')+'/'+hn.getFullYear();
   if(cVao>=0)moi[cVao]=thangNay;          // dòng phiên bản có hiệu lực TỪ Tháng/Năm vào làm của nó — sửa lại cho đúng tháng áp dụng
+  moi._moi=true;
   nvRows.splice(cuoi+1,0,moi);
   nvDanhLaiStt();
   nvChon={r:cuoi+1,c:cVao>=0?cVao:cMa};
@@ -5218,7 +5219,7 @@ function veGridNhanVien(){
     const to=ri===dong;      // người vừa bấm ở Bảng Lương -> viền đỏ cả dòng
     const cMaL=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='mã nv');
     const laPb=cMaL>=0&&/^.+-\d{3}$/.test(String(row[cMaL]==null?'':row[cMaL]).trim());     // dòng phiên bản (mã gốc-001…): tô nền nhạt để phân biệt với dòng gốc
-    html+=`<tr${to?' data-nvsel="1"':''}${laPb?' style="background:#fffaf0"':''}>`;
+    html+=`<tr${to?' data-nvsel="1"':''}${row._moi?' data-nvmoi="1" title="Dòng mới thêm — chưa lưu" style="background:#d9f5df"':(laPb?' style="background:#fffaf0"':'')}>`;      // nền XANH = dòng mới thêm (import / thêm dòng / ＋), mất khi lưu
     html+=`<td style="padding:2px;border:1px solid #eee;text-align:center"><button type="button" class="btn ghost sm" style="padding:1px 7px;font-weight:700" onclick="nvThemPhienBan(${ri})" title="Thêm dòng thay đổi lương cho ${nvEsc(String(row[nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='họ và tên')]||''))} (mã mới = mã + -001…)">＋</button></td>`;
     nvHeader.forEach((h,ci)=>{
       const v=row[ci]==null?'':(nvLaCotTien(h)?nvSoDep(row[ci]):row[ci]);
@@ -5332,7 +5333,8 @@ function nvSuaO(td){
   nvRows[r][c]=t;
 }
 function nvThemDong(){
-  nvRows.push(nvHeader.map(h=>nvLaCotTick(h)?'x':''));
+  const moiDong=nvHeader.map(h=>nvLaCotTick(h)?'x':'');moiDong._moi=true;
+  nvRows.push(moiDong);
   nvChon={r:nvRows.length-1,c:0};
   nvDanhLaiStt();
   nvTuDienMa();
@@ -5349,8 +5351,10 @@ function nvXoaDong(){
 async function nvLuu(){
   nvTuDienMa();
   try{
-    await fetch(`/api/nhap-lieu/save/${current}?loai=nv`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nvHeader,rows:nvRows})});
+    const rl=await fetch(`/api/nhap-lieu/save/${current}?loai=nv`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({header:nvHeader,rows:nvRows})});
+    if(!rl.ok)throw new Error('máy chủ trả lỗi '+rl.status);
     toast(`💾 Đã lưu ${nvRows.length} nhân viên`,'ok');
+    if(nvRows.some(r=>r._moi)){nvRows.forEach(r=>{delete r._moi});veGridNhanVien()}      // đã lưu: bỏ nền xanh dòng mới
     const info=document.getElementById('nvInfo');
     if(info)info.textContent=`${nvRows.length} nhân viên — lưu lúc ${new Date().toLocaleString('vi-VN')}`;
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
@@ -5386,7 +5390,7 @@ async function nvImportExcel(input){
     nvThemCotNghiViec();
     // Đặt từng ô vào đúng cột theo TÊN CỘT (danh sách đang xem có thể khác thứ tự cột với file trả về); giữ nguyên thứ tự dòng của file Excel
     const vtCot=nvHeader.map(h=>(kq.header||[]).findIndex(x=>String(x).trim().toLowerCase()===String(h).trim().toLowerCase()));
-    nvRows.push(...kq.rows.map(r=>nvHeader.map((h,ci)=>vtCot[ci]>=0&&r[vtCot[ci]]!=null?r[vtCot[ci]]:(nvLaCotTick(h)&&vtCot[ci]<0?'x':''))));
+    nvRows.push(...kq.rows.map(r=>{const rr=nvHeader.map((h,ci)=>vtCot[ci]>=0&&r[vtCot[ci]]!=null?r[vtCot[ci]]:(nvLaCotTick(h)&&vtCot[ci]<0?'x':''));rr._moi=true;return rr}));      // đánh dấu dòng mới (tô xanh)
     nvDanhLaiStt();
     nvTuDienMa();
     veGridNhanVien();
