@@ -108,45 +108,45 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   console.log('PASS 5: Chức vụ chọn theo thang bảng lương + lấy lương theo Bảng Lương từng năm.');
 })().catch((e) => { console.error(e); process.exit(1); });
 
-// 6: Danh Sách Nhân Viên — nút ＋ thêm dòng thay đổi lương (mã gốc-001, -002…), cột "Tháng/Năm thay đổi lương"
+// 6: Danh Sách Nhân Viên — nút ＋ thêm dòng phiên bản (mã gốc-001, -002…) hiệu lực từ Tháng/Năm vào làm; đã BỎ cột Tháng/Năm thay đổi lương; Mã NV tự động
 (() => {
   const n0 = html.indexOf('const NV_HEADERS='), n1 = html.indexOf('function moBangLuong(){');
   const m0 = html.indexOf('function moDanhSachNhanVien'), m1 = html.indexOf('/* ----- NGƯỜI PHỤ THUỘC');
   const a0 = html.indexOf('const NV_COT_DOI_LUONG'), a1 = html.indexOf('const NV_COT_NGHI', a0);
   const src = (html.slice(n0, n1) + html.slice(m0, m1)).replace(/^let (nv\w+)/gm, 'var $1').replace(/^const NV_HEADERS/m, 'var NV_HEADERS');
   const wrap = { innerHTML: '' }, toasts = [];
-  const ctx = { current: 7, console, toast: (m, k) => toasts.push([m, k]), document: { getElementById: (id) => id === 'nvTableWrap' ? wrap : null, querySelector: () => ({ focus() {} }) }, localStorage: { getItem: () => null }, confirm: () => true, nlDMMode: null };
+  const ctx = { current: 7, console, toast: (m, k) => toasts.push([m, k]), document: { getElementById: (id) => id === 'nvTableWrap' ? wrap : null, querySelector: () => ({ focus() {} }), querySelectorAll: () => [] }, localStorage: { getItem: () => null }, confirm: () => true, nlDMMode: null };
   vm.createContext(ctx); vm.runInContext(src, ctx);
   const ex = (c) => vm.runInContext(c, ctx);
   assert(a0 > 0 && a1 > a0);
-  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(NV_HEADERS.slice(10,16))')), ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'], 'cột mới nằm ngay sau Chức vụ');
-  // danh sách cũ chưa có cột -> tự thêm cột trống đúng vị trí
-  ex(`nvHeader = NV_HEADERS.filter(h => !['Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'].includes(h)); nvRows = [['1','2','Hùng','','','','','12/2024','x','','KD','5.310.000','700.000','0','0','0']]; nvThemCotDoiLuong(); nvThemCotThuViec(); nvThemCotPartTime();`);
-  assert.strictEqual(ex('nvHeader.indexOf("Tháng/Năm thay đổi lương")'), 11); assert.strictEqual(ex('nvHeader.indexOf("Thử việc đến")'), 13);
-  assert.strictEqual(ex('nvRows[0].length'), ex('nvHeader.length'));
-  assert.strictEqual(ex('nvRows[0][16]'), '5.310.000', 'dữ liệu các cột sau không bị lệch'); assert.strictEqual(ex('nvHeader.indexOf("Part-time")'), 14); assert.strictEqual(ex('nvHeader.indexOf("Lương theo giờ")'), 15);
-  ex(`nvThemCotDoiLuong(); nvThemCotThuViec(); nvThemCotPartTime(); nvChucDanh = [];`);
-  assert.strictEqual(ex('nvHeader.length'), 21, 'không thêm cột lần 2');
-  // ＋ ở dòng 0 -> thêm dòng mã 2-001 ngay dưới, xoá tháng thay đổi + nghỉ việc, giữ lương cũ để sửa
-  ex(`nvRows[0][9] = '06/2026'; nvRows.push(['2','3','Nam','','','','','12/2024','x','','KD','','5.310.000','0','0','0','0']); nvThemPhienBan(0)`);
+  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(NV_HEADERS.slice(10,15))')), ['Chức vụ', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'], 'không còn cột Tháng/Năm thay đổi lương');
+  assert.strictEqual(ex('NV_HEADERS.length'), 20);
+  // danh sách cũ còn cột thay đổi lương: dòng phiên bản (mã gốc-NNN) chuyển tháng thay đổi sang Tháng/Năm vào làm rồi gỡ cột; dòng thường giữ nguyên vào làm
+  ex(`nvHeader = ['STT','Mã NV','Họ và tên','Tháng/Năm vào làm','Chức vụ','Tháng/Năm thay đổi lương','Lương Cơ bản']; nvRows = [[1,'2','Hùng','12/2024','KD','',5310000],[2,'2-001','Hùng','12/2024','KD','01/2027',6000000],[3,'3','Nam','12/2024','KD','',5310000]]; nvBoCotDoiLuong();`);
+  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvHeader)')), ['STT','Mã NV','Họ và tên','Tháng/Năm vào làm','Chức vụ','Lương Cơ bản']);
+  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows)')), [[1,'2','Hùng','12/2024','KD',5310000],[2,'2-001','Hùng','01/2027','KD',6000000],[3,'3','Nam','12/2024','KD',5310000]]);
+  ex('nvBoCotDoiLuong()'); assert.strictEqual(ex('nvHeader.length'), 6, 'gỡ lần 2: không đổi');
+  // ＋ ở dòng 0 -> thêm dòng mã 2-001 ngay dưới; Tháng/Năm vào làm = tháng hiện tại để người dùng sửa; xoá nghỉ việc
+  ex(`nvHeader = NV_HEADERS.slice(); nvRows = [nvHeader.map(h => ({STT:1,'Mã NV':'2','Họ và tên':'Hùng','Tháng/Năm vào làm':'12/2024','Tháng/Năm nghỉ việc':'06/2026','Lương Cơ bản':'5.310.000'})[h] ?? ''), nvHeader.map(h => ({STT:2,'Mã NV':'3','Họ và tên':'Nam','Lương Cơ bản':'5.310.000'})[h] ?? '')]; nvThemPhienBan(0)`);
+  const iMa = ex('nvHeader.indexOf("Mã NV")'), iVao = ex('nvHeader.indexOf("Tháng/Năm vào làm")'), iNghi = ex('nvHeader.indexOf("Tháng/Năm nghỉ việc")'), iLuong = ex('nvHeader.indexOf("Lương Cơ bản")');
   assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['2', '2-001', '3']);
-  assert.strictEqual(ex('nvRows[1][9]'), '', 'dòng mới: chưa có tháng nghỉ việc');
-  assert.strictEqual(ex('nvRows[1][11]'), '', 'dòng mới: chờ nhập Tháng/Năm thay đổi lương');
-  assert.strictEqual(ex('nvRows[1][16]'), '5.310.000', 'dòng mới sao chép lương cũ để sửa');
+  assert(/^\d{2}\/\d{4}$/.test(ex(`nvRows[1][${iVao}]`)) && ex(`nvRows[1][${iVao}]`) !== '12/2024', 'dòng mới: Tháng/Năm vào làm = tháng hiện tại, chờ sửa đúng tháng áp dụng');
+  assert.strictEqual(ex(`nvRows[1][${iNghi}]`), '', 'dòng mới: chưa có tháng nghỉ việc'); assert.strictEqual(ex(`nvRows[1][${iLuong}]`), '5.310.000', 'sao chép lương cũ để sửa');
   assert.strictEqual(ex('nvRows[0][0]'), 1); assert.strictEqual(ex('nvRows[2][0]'), 3, 'STT đánh lại');
-  // ＋ lần nữa (từ dòng gốc hoặc từ dòng -001) -> -002, xếp sau -001, trước người khác
-  ex('nvThemPhienBan(1)');
-  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['2', '2-001', '2-002', '3']);
-  ex('nvThemPhienBan(0)');
-  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['2', '2-001', '2-002', '2-003', '3']);
+  ex('nvThemPhienBan(1)'); assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['2', '2-001', '2-002', '3']);
+  ex('nvThemPhienBan(0)'); assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['2', '2-001', '2-002', '2-003', '3']);
   // người chưa có Mã NV -> báo lỗi, không thêm
-  const so = ex('nvRows.length'); ex(`nvRows[4][1] = ''; nvThemPhienBan(4)`);
+  const so = ex('nvRows.length'); ex(`nvRows[4][${iMa}] = ''; nvThemPhienBan(4)`);
   assert.strictEqual(ex('nvRows.length'), so); assert(toasts.some(([m, k]) => k === 'err' && m.includes('Mã NV')));
-  // lưới: có cột ＋ ở đầu mỗi dòng, dòng thay đổi lương (có tháng) tô nền nhạt
-  ex(`nvRows[1][11] = '01/2027'; veGridNhanVien();`);
+  // lưới: có cột ＋ ở đầu mỗi dòng; dòng phiên bản (mã gốc-NNN) tô nền nhạt
+  ex(`nvRows[4][${iMa}] = '3'; veGridNhanVien();`);
   assert((wrap.innerHTML.match(/nvThemPhienBan\(/g) || []).length === 5 && wrap.innerHTML.includes('background:#fffaf0'));
   assert.strictEqual(ex('nvMaGoc("2-001")'), '2'); assert.strictEqual(ex('nvMaGoc("NV-12")'), 'NV-12');
-  console.log('PASS 6: ＋ thêm dòng thay đổi lương (mã -001…), cột Tháng/Năm thay đổi lương.');
+  // MÃ NV TỰ ĐỘNG: dòng chưa có mã nhận số tiếp theo (lớn nhất + 1), mã đã có giữ nguyên, không trùng
+  ex(`nvHeader = ['STT','Mã NV','Họ và tên']; nvRows = [[1,'','A'],[2,'5','B'],[3,'','C'],[4,'5-001','B'],[5,'','D']];`);
+  assert.strictEqual(ex('nvTuDienMa()'), 3); assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['6', '5', '7', '5-001', '8']);
+  assert.strictEqual(ex('nvTuDienMa()'), 0, 'chạy lại: không đổi gì');
+  console.log('PASS 6: ＋ thêm dòng phiên bản (mã -001…) theo Tháng/Năm vào làm; bỏ cột thay đổi lương; Mã NV tự động.');
 })();
 
 // 7: Kho chữ ký — thao tác theo chỉ số (tên có dấu ' không làm hỏng nút), lưu phải kèm xác nhận đồng ý
@@ -618,4 +618,17 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   await c2.nvImportExcel({ files: [{}], value: '' });
   assert.deepStrictEqual(c2.nvRows.slice(1).map((r) => r.join('|')), ['1|Zeta|M3|x', '2|Alpha|M1|', '3|Mike|M2|x'], 'đúng cột theo tên dù thứ tự cột khác nhau; thứ tự dòng như file');
   console.log('PASS 26: lọc giữ focus + không dấu, bôi đen + Fill down, import đúng cột/thứ tự.');
+})().catch((e) => { console.error(e); process.exit(1); });
+
+// 27: Mã NV tự động — bảng lương cũ chưa có mã vẫn khớp theo họ tên khi nạp từ Danh Sách NV (không nhân đôi người)
+(async () => {
+  const i1 = html.indexOf('async function blNapNhanVien'), i2 = html.indexOf('\n}\n', i1) + 3;
+  const ctx = { current: 7, blNam: 2024, blThang: '03', blDL: { '03': [{ ma: '', ten: 'Nguyễn Văn Khoan', luong_cb: 1 }, { ma: '', ten: 'Lý Thị Thu Hiền', luong_cb: 2 }] }, blBan: false, blVeTabs() {}, blVeBang() {}, blVeInfo() {}, toast() {}, async blTinhLai() {}, parseInt, String, Number, Set, Map,
+    api: async () => ({ rows: [{ ma: '1', ten: 'Nguyễn Văn Khoan', luong_cb: 5310000 }, { ma: '2', ten: 'Lý Thị Thu Hiền', luong_cb: 5310000 }, { ma: '3', ten: 'Lê Đức Tấn', luong_cb: 5310000 }], da_nghi: [] }) };
+  vm.createContext(ctx); vm.runInContext(html.slice(i1, i2), ctx);
+  await ctx.blNapNhanVien();
+  const r = ctx.blDL['03'];
+  assert.deepStrictEqual(r.map((x) => x.ma + ':' + x.ten), ['1:Nguyễn Văn Khoan', '2:Lý Thị Thu Hiền', '3:Lê Đức Tấn'], 'dòng cũ chưa có mã được gắn mã (không tạo dòng trùng), người mới được thêm');
+  assert.strictEqual(r[0].luong_cb, 5310000, 'cập nhật lương theo Danh Sách NV');
+  console.log('PASS 27: Mã NV tự động khớp bảng lương cũ theo họ tên.');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -868,7 +868,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
     ctxNv.window = ctxNv;
     vm.createContext(ctxNv);
     vm.runInContext(khoiNv, ctxNv);
-    assert(!ctxNv.NV_HEADERS.includes('PC Chức vụ') && ctxNv.NV_HEADERS.length === 21 && ctxNv.NV_HEADERS.indexOf('Tháng/Năm nghỉ việc') === ctxNv.NV_HEADERS.indexOf('Đóng BHXH') + 1, 'Bộ cột mặc định không còn PC Chức vụ, có cột Tháng/Năm nghỉ việc sau Đóng BHXH');
+    assert(!ctxNv.NV_HEADERS.includes('PC Chức vụ') && ctxNv.NV_HEADERS.length === 20 && ctxNv.NV_HEADERS.indexOf('Tháng/Năm nghỉ việc') === ctxNv.NV_HEADERS.indexOf('Đóng BHXH') + 1, 'Bộ cột mặc định không còn PC Chức vụ, có cột Tháng/Năm nghỉ việc sau Đóng BHXH');
     await ctxNv.taiNhanVien();
     assert(!ctxNv.nvHeader.includes('PC Chức vụ'), 'Đã gỡ cột khỏi tiêu đề');
     const i33 = ctxNv.nvHeader.indexOf('PC Điện thoại');

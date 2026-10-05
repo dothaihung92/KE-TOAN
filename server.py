@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.105"
+APP_BUILD = "2026-10-05.106"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14837,7 +14837,7 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
 
 NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
-              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Tháng/Năm thay đổi lương", "Thử việc từ", "Thử việc đến", "Part-time", "Lương theo giờ", "Lương Cơ bản",
+              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Thử việc từ", "Thử việc đến", "Part-time", "Lương theo giờ", "Lương Cơ bản",
               "PC Tiền cơm", "PC Xăng xe", "PC Điện thoại", "PC Trang phục"]
 
 # Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
@@ -14845,7 +14845,6 @@ NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hi�
 # chức vụ" của file nguồn phải bị NUỐT bởi mục đích "" — cột này đã bỏ khỏi danh sách — trước khi "chuc vu" khớp nhầm cột Chức vụ).
 _NV_TU_KHOA = [
     ("Đóng BHXH", ["dong bhxh", "tham gia bhxh", "co dong bhxh", "dong bao hiem"]),
-    ("Tháng/Năm thay đổi lương", ["thay doi luong", "dieu chinh luong", "ap dung luong moi"]),
     ("Thử việc từ", ["thu viec tu", "bat dau thu viec", "ngay bat dau thu viec"]),
     ("Thử việc đến", ["thu viec den", "ket thuc thu viec", "ngay ket thuc thu viec"]),
     ("Part-time", ["part-time", "part time", "parttime", "ban thoi gian", "khong tron thoi gian"]),

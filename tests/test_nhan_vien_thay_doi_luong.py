@@ -5,7 +5,7 @@ import server, van_ban_lao_dong as v, openpyxl
 # Danh Sách Nhân Viên: 1 người có nhiều dòng (gốc + dòng thay đổi lương mã-001, -002 có "Tháng/Năm thay đổi lương"); từ tháng đó Bảng Lương dùng lương + mã mới.
 HDR = ['STT', 'Mã NV', 'Họ và tên', 'Ngày sinh', 'Địa chỉ hiện đang cư trú', 'CCCD', 'Ngày cấp', 'Tháng/Năm vào làm', 'Đóng BHXH', 'Tháng/Năm nghỉ việc',
        'Chức vụ', 'Tháng/Năm thay đổi lương', 'Lương Cơ bản', 'PC Tiền cơm', 'PC Xăng xe', 'PC Điện thoại', 'PC Trang phục']
-assert server.NV_HEADERS[10:16] == ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'] and server.NV_HEADERS[16] == 'Lương Cơ bản', "cột mới nằm ngay sau Chức vụ"
+assert server.NV_HEADERS[10:15] == ['Chức vụ', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'] and server.NV_HEADERS[15] == 'Lương Cơ bản' and 'Tháng/Năm thay đổi lương' not in server.NV_HEADERS, "đã bỏ cột Tháng/Năm thay đổi lương (danh sách đã lưu cũ vẫn được xử lý)"
 R = lambda stt, ma, ten, doi, luong, nghi="": [stt, ma, ten, '', '', '079090000123', '', '12/2024', 'x', nghi, 'Kinh doanh', doi, luong, 700000, 500000, 0, 0]
 ROWS = [R(1, '2', 'Trần Minh Hùng', '', 5_310_000), R(2, '2-001', 'Trần Minh Hùng', '01/2027', 6_000_000), R(3, '2-002', 'Trần Minh Hùng', '07/2027', 7_000_000),
         R(4, '3', 'Nguyễn Giang Nam', '', 5_310_000)]
@@ -29,7 +29,7 @@ r3 = [R(1, 'NV-001', 'A', '', 1), R(2, 'NV-002', 'B', '', 2)]
 assert len(server._luong_dong_tu_nhan_vien(HDR, r3, 0, 2027, 4)) == 2
 # danh sách cũ chưa có cột -> hành vi như trước
 HDR_CU = [h for h in HDR if h != 'Tháng/Năm thay đổi lương']
-assert len(server._luong_dong_tu_nhan_vien(HDR_CU, [x[:11] + x[12:] for x in ROWS], 0, 2027, 3)) == 4
+assert len(server._luong_dong_tu_nhan_vien(HDR_CU, [x[:11] + x[12:] for x in ROWS], 0, 2027, 3)) == 2, "không có cột thay đổi lương: dòng gốc-001 hiệu lực từ Tháng/Năm vào làm của nó (gộp theo mã gốc, mỗi người 1 dòng)"
 
 # người phụ thuộc khai theo mã gốc "2" vẫn tính cho "2-001"; mã NV-001 / NV-002 không lẫn nhau
 npt = server._luong_npt_doc({"header": server.NPT_HEADERS, "rows": [["", "2", "Trần Minh Hùng", "Bé An", "01/01/2015", "", "Con", "01/2025", ""], ["", "NV-001", "A", "Bé B", "", "", "Con", "01/2025", ""]]})
@@ -53,7 +53,7 @@ nv26 = v.gop_nhan_vien(HDR, ROWS, {}, 2026)
 assert [(n["ma"], n["luong_cb"]) for n in nv26] == [("2", 5_310_000), ("3", 5_310_000)]
 assert v.ma_goc_phien_ban("2-001") == "2" and v.ma_goc_phien_ban("NV-1") == "NV-1" and v.ma_goc_phien_ban("12") == "12"
 # import Excel danh sách nhân viên nhận cột "Tháng/Năm thay đổi lương"
-assert any(c == "Tháng/Năm thay đổi lương" for c, _k in server._NV_TU_KHOA)
+assert not any(c == "Tháng/Năm thay đổi lương" for c, _k in server._NV_TU_KHOA), "import không còn cột Tháng/Năm thay đổi lương"
 print("PASS")
 
 # Dòng phiên bản mã gốc-001 CHƯA ghi "Tháng/Năm thay đổi lương" nhưng có "Tháng/Năm vào làm": hiệu lực từ tháng vào làm (vd 2 = part-time từ 01/2024, 2-001 = toàn thời gian đóng BHXH từ 12/2024)

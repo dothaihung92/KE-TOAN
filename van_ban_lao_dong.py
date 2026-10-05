@@ -325,8 +325,8 @@ def chon_phien_ban_hieu_luc(header, rows, nam=None, thang=None):
         cot.setdefault(_chuan(h), i)
     i_ma, i_ten, i_doi = cot.get("ma nv"), cot.get("ho va ten"), cot.get("thang/nam thay doi luong")
     i_vao = cot.get("thang/nam vao lam")
-    if i_doi is None:
-        return list(rows or [])
+    if i_doi is None and not any(_RE_MA_PHIEN_BAN.match(str(r[i_ma]).strip()) for r in (rows or []) if i_ma is not None and i_ma < len(r) and r[i_ma] is not None):
+        return list(rows or [])        # không có cột thay đổi lương và không có dòng phiên bản (mã gốc-001): mỗi dòng là 1 người
 
     def o(r, i):
         return r[i] if i is not None and i < len(r) and r[i] is not None else ""
