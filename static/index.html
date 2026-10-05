@@ -6176,7 +6176,7 @@ function blChamCongThang(r,nam,t,leSet){
     ngay.push({d,thu,cn:thu===0,le:!!laLe});
     if(thu===0)cn.push(d);else if(laLe)le.push(d);else thuong.push(d);
   }
-  if(Number(r.part_time))return blChamCongPartTime(r,ngay,thuong);
+  if(Number(r.part_time))return blChamCongPartTime(Object.assign({},r,{_nam:nam,_thang:mm}),ngay,thuong);
   const g=Number(r.ngay_lam_hd!=null?r.ngay_lam_hd:r.ngay_lam)||0;
   let can=Math.max(0,Math.floor(g+1e-9));
   const co=new Set();
@@ -6194,13 +6194,33 @@ function blChamCongThang(r,nam,t,leSet){
 // Giờ theo ngày đã import: "5:2;6:2.5" -> {5:2,6:2.5}
 function blGioNgayDoc(v){const kq={};String(v==null?'':v).split(';').forEach(p=>{const m=p.split(':');const d=parseInt(m[0],10),g=parseFloat(m[1]);if(d>0&&g>0)kq[d]=g});return kq}
 const BL_GIO_TOI_DA_NGAY=8;
-/* Chấm công người PART-TIME: ô ngày = số GIỜ làm. Có giờ theo ngày (import từ file chấm công) thì hiện đúng như file; chỉ có TỔNG giờ tháng thì phân bổ lần lượt từ ngày làm việc đầu tháng,
-   mỗi ngày tối đa 8 giờ, dư thì sang ngày làm việc kế tiếp (suy = true: bản in ghi chú đây là phân bổ theo tổng giờ, không phải chấm công từng ngày). */
+/* Chấm công người PART-TIME: ô ngày = số GIỜ làm. Có giờ theo ngày (import từ file chấm công) thì hiện đúng như file; chỉ có TỔNG giờ tháng thì phân bổ vào
+   các ngày làm việc (ngẫu nhiên cố định theo người + tháng, mỗi ngày 1–8 giờ, tổng đúng bằng số giờ) (suy = true: bản in ghi chú đây là phân bổ theo tổng giờ, không phải chấm công từng ngày). */
+/* Phân bổ TỔNG giờ tháng (số thật) vào các ngày làm việc T2–T7 không phải lễ như cách chấm công của người lao động khác: chọn ngẫu nhiên CỐ ĐỊNH theo người + tháng
+   (in lại vẫn ra đúng bảng cũ) một số ngày, mỗi ngày từ 1 đến tối đa 8 giờ (bội số 0,5 giờ), TỔNG ĐÚNG bằng số giờ của bảng lương. */
+function blPhanBoGioPartTime(gio,thuong,khoa,phan){
+  if(!(gio>0)||!thuong.length)return phan;
+  const rng=blNgauNhienTheo(khoa),max=BL_GIO_TOI_DA_NGAY;
+  const tenths=Math.round(gio*10),halves=Math.floor(tenths/5),le=tenths-halves*5;
+  const toiThieu=Math.min(thuong.length,Math.max(1,Math.ceil(gio/max)));
+  const tb=2+rng()*4;                                                          // trung bình 2–6 giờ/ngày
+  const k=Math.min(thuong.length,Math.max(toiThieu,Math.round(gio/tb)));
+  const ds=thuong.slice();for(let i=ds.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[ds[i],ds[j]]=[ds[j],ds[i]]}
+  const chon=ds.slice(0,k).sort((a,b)=>a-b),cap=max*2;
+  const h=new Array(k).fill(0);let con=halves;
+  for(let i=0;i<k&&con>0;i++){const a=Math.min(2,con);h[i]=a;con-=a}           // mỗi ngày tối thiểu 1 giờ
+  let vong=0;
+  while(con>0&&vong<100000){const i=Math.floor(rng()*k);if(h[i]<cap){h[i]++;con--}vong++}
+  for(let i=0;con>0&&i<k;i++){const t=Math.min(cap-h[i],con);h[i]+=t;con-=t}    // phòng hờ: lấp các ngày còn chỗ
+  chon.forEach((d,i)=>{if(h[i]>0)phan[d]=h[i]/2});
+  if(le){const d=chon.slice().reverse().find(x=>(phan[x]||0)+le/10<=max+1e-9);if(d!=null)phan[d]=Math.round(((phan[d]||0)+le/10)*10)/10}
+  return phan;
+}
 function blChamCongPartTime(r,ngay,thuong){
   const gio=Math.round((Number(r.gio_lam)||0)*100)/100,daily=blGioNgayDoc(r.gio_ngay),coDaily=Object.keys(daily).length>0;
   const phan={};
   if(coDaily)Object.keys(daily).forEach(d=>{phan[d]=daily[d]});
-  else{let con=gio;for(const d of thuong){if(con<=1e-9)break;const g=Math.min(BL_GIO_TOI_DA_NGAY,Math.round(con*100)/100);phan[d]=g;con=Math.round((con-g)*100)/100}}
+  else blPhanBoGioPartTime(gio,thuong,`${r.ma||r.ten||''}|${r._nam||''}|${r._thang||''}|pt`,phan);
   ngay.forEach(x=>{const g=phan[x.d];x.dau=g>0?blSoGio(g):(x.le?'L':'');x.tc=0;x.gio=g>0?g:0});
   const tong=Object.values(phan).reduce((a,b)=>a+b,0);
   return {ngay,tong:Math.round(tong*100)/100,soX:-1,gio:0,pt:true,suy:!coDaily&&gio>0};

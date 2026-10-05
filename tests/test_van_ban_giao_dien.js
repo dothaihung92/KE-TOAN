@@ -467,11 +467,21 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   vm.runInContext(html.slice(c0, c1).replace(/^const /gm, 'var '), cc);
   const cham = (r) => JSON.parse(JSON.stringify(vm.runInContext('(r)=>blChamCongThang(r,2026,"03",null)', cc)(r)));
   const dau = (c) => c.ngay.filter((x) => x.dau).map((x) => x.d + ':' + x.dau).join(' ');
-  // chỉ có TỔNG giờ tháng: phân bổ từ ngày làm việc đầu tháng (T2–T7), mỗi ngày tối đa 8 giờ, dư sang ngày kế (CN 1/3 bỏ qua)
-  let c = cham({ part_time: 1, gio_lam: 20, ma: 'P' });
-  assert.strictEqual(dau(c), '2:8 3:8 4:4'); assert.strictEqual(c.tong, 20); assert.strictEqual(c.suy, true); assert.strictEqual(c.pt, true);
-  c = cham({ part_time: 1, gio_lam: 100.5, ma: 'P' });
-  assert(c.ngay.every((x) => x.gio <= 8) && c.tong === 100.5 && c.ngay.filter((x) => x.gio > 0).length === 13, 'không ngày nào quá 8 giờ');
+  // chỉ có TỔNG giờ tháng: phân bổ vào các ngày làm việc như người lao động khác (ngẫu nhiên CỐ ĐỊNH theo người + tháng), mỗi ngày 1–8 giờ, tổng ĐÚNG
+  const CN = [1, 8, 15, 22, 29];          // Chủ nhật tháng 3/2026
+  for (const [ma, g] of [['P', 20], ['2', 50], ['Q', 18.5], ['R', 7.3], ['S', 150], ['T', 0.5]]) {
+    const c = cham({ part_time: 1, gio_lam: g, ma });
+    const co = c.ngay.filter((x) => x.gio > 0);
+    assert.strictEqual(Math.round(co.reduce((a, x) => a + x.gio, 0) * 10) / 10, g, 'tổng đúng số giờ ' + g);
+    assert(co.every((x) => x.gio <= 8 && !CN.includes(x.d)), 'không quá 8 giờ/ngày, không Chủ nhật');
+    assert(co.length >= Math.ceil(g / 8) && c.tong === g && c.suy === true && c.pt === true);
+    assert.strictEqual(dau(cham({ part_time: 1, gio_lam: g, ma })), dau(c), 'in lại ra đúng bảng cũ (cố định theo người + tháng)');
+  }
+  const c50 = cham({ part_time: 1, gio_lam: 50, ma: '2' }).ngay.filter((x) => x.gio > 0);
+  assert(!c50.every((x, i) => x.d === [2, 3, 4, 5, 6, 7, 9][i]) && new Set(c50.map((x) => x.gio)).size > 1, 'không còn dồn 8 giờ từ đầu tháng: rải các ngày, số giờ khác nhau');
+  assert.notStrictEqual(dau(cham({ part_time: 1, gio_lam: 50, ma: '2' })), dau(cham({ part_time: 1, gio_lam: 50, ma: '3' })), 'mỗi người một cách rải');
+  let c = cham({ part_time: 1, gio_lam: 100.5, ma: 'P' });
+  assert(c.ngay.every((x) => x.gio <= 8) && c.tong === 100.5, 'không ngày nào quá 8 giờ');
   assert.strictEqual(c.ngay[7].dau, '', 'Chủ nhật không điền');
   // có giờ theo NGÀY (import): hiện đúng như file, không phân bổ
   c = cham({ part_time: 1, gio_lam: 6.5, gio_ngay: '5:2;6:2;9:2.5', ma: 'P' });
