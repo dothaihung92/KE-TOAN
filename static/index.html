@@ -4845,7 +4845,8 @@ function vbCkKhopTen(tenFile,muc){
   const n=vbCkKhongDau(goc).replace(/[_\-.]+/g,' ').replace(/\s+/g,' ').trim();
   const toks=n.split(/[^a-z0-9]+/).filter(Boolean);
   if(/\bgiam doc\b/.test(n)||toks.includes('gd'))return 0;
-  const cMa=[];muc.forEach((m,i)=>{if(i===0)return;const ma=vbCkKhongDau(m.ma).trim();if(ma&&toks.includes(ma))cMa.push(i)});
+  // mã NV: khớp cả mã đầy đủ ("2-001" khi tên file chứa 2-001) lẫn mã gốc ("2") của mã đổi phiên bản
+  const cMa=[];muc.forEach((m,i)=>{if(i===0)return;const ma=vbCkKhongDau(m.ma).trim(),goc=ma.replace(/-\d{3}$/,'');if(ma&&(toks.includes(ma)||toks.includes(goc)||n.split(/[^a-z0-9-]+/).includes(ma)))cMa.push(i)});
   if(cMa.length===1)return cMa[0];
   const cTen=[];muc.forEach((m,i)=>{if(i===0)return;const t=vbCkKhongDau(m.ten).replace(/\s+/g,' ').trim();if(t&&n.includes(t))cTen.push([i,t.length])});
   if(cTen.length===1)return cTen[0][0];
@@ -4910,7 +4911,7 @@ function vbCkDuVe(){
   const soChon=dung.size;
   const conLai=vbCkMuc.filter((m,j)=>!m.co_anh&&!dung.has(j)).length;
   const nut=`<button class="btn gold sm" onclick="vbCkGanTatCa()" ${soChon?'':'disabled'} title="Gắn cùng lúc tất cả các chữ ký đã chọn người">✅ Gắn toàn bộ chữ ký đã chọn (${soChon})</button>`;
-  kv.innerHTML=vbCkDu.length?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">${nut}
+  kv.innerHTML=vbCkDu.length?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><button class="btn sm" style="background:#6b3fa0" onclick="vbCkTuDongGan()" title="Tự ghép mỗi chữ ký với người của công ty này có CÙNG HỌ TÊN (hoặc mã NV / họ tên trong tên file), rồi gắn tất cả sau 1 lần xác nhận. Chữ ký không khớp ai thì để chọn tay.">🔗 Tự động gắn theo tên</button>${nut}
       <span class="hint">Đã chọn người cho ${soChon}/${vbCkDu.length} chữ ký — người đã chọn ở dòng khác không hiện lại trong danh sách; còn ${conLai} người chưa có chữ ký chưa được chọn. Chọn xong hết thì bấm “Gắn toàn bộ” (nút có ở trên và dưới bảng).</span></div>
     <div class="vbCkDuCuon" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;font-size:13px;width:100%">${vbCkDu.map((d,i)=>`<tr>
       <td style="padding:3px 6px;border:1px solid #ddd;background:#fff"><img src="${d.anh}" style="max-height:36px;max-width:120px"></td>
@@ -4940,14 +4941,41 @@ async function vbCkGanDu(i){
   try{await vbCkGanApi(d,m);delete vbCkDuChon[vbCkDuKhoa(d)];toast('Đã gắn chữ ký','ok');await vbCkVe()}
   catch(e){toast('Lỗi: '+e.message,'err')}
 }
+// Tự chọn người cho chữ ký chưa gán: chữ ký công ty khác -> người có CÙNG HỌ TÊN (không dấu, duy nhất);
+// file dư -> mã NV / họ tên trong tên file. Không ghép bừa: trùng tên 2 người, 2 chữ ký cùng tên, hoặc không khớp ai thì bỏ qua.
+// Không ghi đè lựa chọn tay; giám đốc chỉ ghép với file có chữ "giám đốc"/"gd" (chữ ký giám đốc là của riêng từng công ty).
+function vbCkTuDongChon(){
+  const chuan=t=>vbCkKhongDau(t).replace(/\s+/g,' ').trim();
+  const dung=new Set(vbCkDu.map(d=>vbCkDuChonCuaDong(d)).filter(j=>j>=0));
+  const demTenNv={};vbCkMuc.forEach((m,j)=>{if(j>0){const t=chuan(m.ten);if(t)demTenNv[t]=(demTenNv[t]||0)+1}});
+  const demTenCk={};vbCkDu.forEach(d=>{if(d.loai==='luu'){const t=chuan(d.ten);demTenCk[t]=(demTenCk[t]||0)+1}});
+  let so=0;
+  vbCkDu.forEach(d=>{
+    if(vbCkDuChonCuaDong(d)>=0)return;
+    let j=-1;
+    if(d.loai==='luu'){
+      const t=chuan(d.ten);
+      if(t&&demTenNv[t]===1&&demTenCk[t]===1)j=vbCkMuc.findIndex((m,k)=>k>0&&chuan(m.ten)===t);
+    }else j=vbCkKhopTen(d.ten,vbCkMuc);
+    if(j>=0&&vbCkMuc[j]&&!vbCkMuc[j].co_anh&&!dung.has(j)){vbCkDuChon[vbCkDuKhoa(d)]=vbCkMuc[j].khoa;dung.add(j);so++}
+  });
+  return so;
+}
+async function vbCkTuDongGan(){
+  const so=vbCkTuDongChon();vbCkDuVe();
+  const daChon=vbCkDu.filter(d=>vbCkDuChonCuaDong(d)>=0).length,khong=vbCkDu.length-daChon;
+  if(!daChon){toast('Không có chữ ký nào khớp họ tên / mã NV với người chưa có chữ ký của công ty này — hãy chọn tay','err');return}
+  toast(`Đã tự ghép ${so} chữ ký theo tên${khong?` — còn ${khong} chữ ký không khớp ai, để chọn tay`:''}`,'ok');
+  await vbCkGanTatCa(true);
+}
 // Gắn TOÀN BỘ các chữ ký đã chọn người (1 lần xác nhận cho cả danh sách)
-async function vbCkGanTatCa(){
+async function vbCkGanTatCa(tuDong){
   const ds=[];vbCkDu.forEach(d=>{const j=vbCkDuChonCuaDong(d);if(j>=0)ds.push({d,m:vbCkMuc[j]})});
   if(!ds.length){toast('Chưa chọn người nào để gắn','err');return}
   const TOI_DA=8;      // hộp xác nhận chỉ liệt kê vài cặp đầu (danh sách đầy đủ đang hiện trên màn hình) để không tràn màn hình
   const dsTxt=ds.slice(0,TOI_DA).map(x=>'• '+(x.d.loai==='luu'?x.d.ten:String(x.d.ten||'').replace(/\.[^.]+$/,''))+'  →  '+x.m.ten).join('\n')+(ds.length>TOI_DA?`\n… và ${ds.length-TOI_DA} chữ ký khác (như đã chọn trên màn hình)`:'');
   const coKhac=ds.filter(x=>x.d.loai==='luu').length;
-  if(!confirm(`Gắn ${ds.length} chữ ký:\n${dsTxt}\n\nXác nhận: từng người ở trên ĐÃ ĐỒNG Ý lưu và sử dụng chữ ký này trên văn bản của công ty${coKhac?`, và các chữ ký “đã gắn ở công ty khác” đúng là CÙNG MỘT NGƯỜI với người được chọn`:''}?`))return;
+  if(!confirm(`Gắn ${ds.length} chữ ký${tuDong?' (phần mềm tự ghép theo HỌ TÊN / mã NV — người trùng tên có thể là người khác, hãy xem lại trên bảng)':''}:\n${dsTxt}\n\nXác nhận: từng người ở trên ĐÃ ĐỒNG Ý lưu và sử dụng chữ ký này trên văn bản của công ty${coKhac?`, và các chữ ký “đã gắn ở công ty khác” đúng là CÙNG MỘT NGƯỜI với người được chọn`:''}?`))return;
   let ok=0;const loi=[];
   for(const x of ds){
     try{await vbCkGanApi(x.d,x.m);delete vbCkDuChon[vbCkDuKhoa(x.d)];ok++}

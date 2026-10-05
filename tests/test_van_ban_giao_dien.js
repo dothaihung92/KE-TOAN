@@ -761,3 +761,32 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(hoi.includes('Gắn 12 chữ ký') && hoi.includes('NV 7') && !hoi.includes('NV 8') && hoi.includes('… và 4 chữ ký khác'), 'xác nhận rút gọn');
   console.log('PASS 35: chữ ký chưa gán ẩn người đã chọn + nút Gắn toàn bộ.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 36: "Tự động gắn theo tên" — ghép theo họ tên / mã NV, không ghép bừa, gắn sau 1 lần xác nhận
+(async () => {
+  const { ctx, goi, pt } = moiTruong({ vbCkDuBang: '' });
+  ctx.vbCkMuc = [{ khoa: 'gd:x', ten: 'Nguyễn Văn B', co_anh: false },
+    { khoa: 'cccd:1', ten: 'Nguyễn Văn B', ma: '5', co_anh: false },
+    { khoa: 'cccd:2', ten: 'Trùng Tên', ma: '6', co_anh: false }, { khoa: 'cccd:3', ten: 'Trùng Tên', ma: '8', co_anh: false },
+    { khoa: 'cccd:4', ten: 'Lê Thị D', ma: '7-001', co_anh: false },
+    { khoa: 'cccd:5', ten: 'Đã Có', ma: '9', co_anh: true },
+    { khoa: 'cccd:6', ten: 'Hai Chữ Ký', ma: '10', co_anh: false },
+    { khoa: 'cccd:7', ten: 'Chọn Tay', ma: '11', co_anh: false }, { khoa: 'cccd:8', ten: 'Phạm E', ma: '12', co_anh: false }];
+  ctx.vbCkDu = [{ loai: 'luu', khoa: 'cccd:x1', ten: 'NGUYEN VAN  B' }, { loai: 'luu', khoa: 'cccd:x2', ten: 'Trùng Tên' },
+    { loai: 'du', id: 1, ten: 'chu_ky_7.png' }, { loai: 'du', id: 2, ten: 'abc.png' }, { loai: 'luu', khoa: 'cccd:x3', ten: 'Đã Có' },
+    { loai: 'luu', khoa: 'cccd:x4', ten: 'Hai Chữ Ký' }, { loai: 'luu', khoa: 'cccd:x5', ten: 'Hai Chữ Ký' },
+    { loai: 'luu', khoa: 'cccd:x6', ten: 'Phạm E' }];
+  ctx.vbCkDuChon = {}; ctx.vbCkDuDoi(7, '7');        // dòng Phạm E đã được chọn TAY cho "Chọn Tay" -> giữ nguyên
+  ctx.vbCkDuVe(); assert(pt.vbCkDuBang.innerHTML.includes('onclick="vbCkTuDongGan()"'), 'có nút Tự động gắn theo tên');
+  ctx.api = async (u, o) => { goi.push([u, o && o.body ? JSON.parse(o.body) : null]); return u.includes('?nam=') ? { giam_doc: ctx.vbCkMuc[0], nhan_vien: ctx.vbCkMuc.slice(1), du: [], da_luu: [] } : { ok: true }; };
+  let hoi = ''; ctx.confirm = (m) => { hoi = m; return true; };
+  await ctx.vbCkTuDongGan();
+  assert(hoi.includes('tự ghép theo HỌ TÊN') && hoi.includes('Gắn 3 chữ ký'), hoi);
+  const gan = goi.filter((x) => /\/(gan-du|dung-lai)$/.test(x[0])).map((x) => (x[1].nguon_khoa || x[1].id) + '>' + x[1].khoa).sort();
+  assert.deepStrictEqual(gan, ['1>cccd:4', 'cccd:x1>cccd:1', 'cccd:x6>cccd:7'].sort(),
+    'chỉ ghép: tên trùng duy nhất (không ghép giám đốc), mã gốc 7 của 7-001, giữ lựa chọn tay; bỏ qua người trùng tên, 2 chữ ký cùng tên, người đã có chữ ký, file không khớp');
+  // không khớp ai: không hỏi, không gắn
+  goi.length = 0; hoi = ''; ctx.vbCkDuChon = {}; ctx.vbCkDu = [{ loai: 'du', id: 9, ten: 'abc.png' }];
+  await ctx.vbCkTuDongGan(); assert(!hoi && !goi.length);
+  console.log('PASS 36: tự động gắn chữ ký theo họ tên / mã NV, không ghép bừa.');
+})().catch((e) => { console.error(e); process.exit(1); });
