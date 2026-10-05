@@ -271,6 +271,24 @@ try:
     run(server.van_ban_xem_truoc(7, Req({"loai": "qc", "nam": 2026}))); raise SystemExit("phải lỗi")
 except HTTPException as e:
     assert e.status_code == 404
+# HỢP ĐỒNG PART-TIME (loai 'pt'): chỉ những người tick Part-time; hợp đồng toàn thời gian / quy chế / thang lương không gồm họ
+HDR_PT = HDR + ['Part-time', 'Lương theo giờ']
+ROWS_PT = [r + ['', ''] for r in ROWS[:2]] + [ROWS[2] + ['x', 26000]]
+server.nhap_lieu_get = lambda cid, loai="in": {"header": HDR_PT, "rows": ROWS_PT} if loai == "nv" else {"header": [], "rows": []}
+server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), {}, "", [nam])
+dpt = server.van_ban_du_lieu(7, 2026)
+assert [(n["ten"], n["part_time"], n["luong_gio"]) for n in dpt["nhan_vien"]] == [("Nhân Viên 1", False, 0), ("Nhân Viên 2", False, 0), ("Nhân Viên 3", True, 26000.0)]
+rp = run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2026, "tuy_chon": {"pt_gio_ngay": "2"}})))
+assert rp["so_van_ban"] == 1 and "NHÂN VIÊN 3" in rp["html"] and "NHÂN VIÊN 1" not in rp["html"] and "KHÔNG TRỌN THỜI GIAN" in rp["html"] and "26.000 đồng/giờ" in rp["html"]
+assert any("Ngưỡng 2.530.000" in c["nd"] for c in rp["canh_bao"])
+rh = run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026})))
+assert rh["so_van_ban"] == 2 and "NHÂN VIÊN 3" not in rh["html"], "hợp đồng toàn thời gian không gồm người part-time"
+assert "NHÂN VIÊN 3" not in run(server.van_ban_xem_truoc(7, Req({"loai": "tl", "nam": 2026})))["html"] and "Nhân Viên 3" not in run(server.van_ban_xem_truoc(7, Req({"loai": "qc", "nam": 2026})))["html"]
+server.nhap_lieu_get = lambda cid, loai="in": {"header": HDR, "rows": ROWS} if loai == "nv" else {"header": [], "rows": []}
+try:
+    run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2026}))); raise SystemExit("phải lỗi: chưa có người part-time")
+except HTTPException as e:
+    assert e.status_code == 404
 # update.py phải tải kèm module mới (nếu không, máy người dùng cập nhật xong sẽ thiếu file -> không khởi động được)
 import update
 assert "van_ban_lao_dong.py" in update.FILES

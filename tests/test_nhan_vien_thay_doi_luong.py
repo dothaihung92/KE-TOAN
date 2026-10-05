@@ -5,7 +5,7 @@ import server, van_ban_lao_dong as v, openpyxl
 # Danh Sách Nhân Viên: 1 người có nhiều dòng (gốc + dòng thay đổi lương mã-001, -002 có "Tháng/Năm thay đổi lương"); từ tháng đó Bảng Lương dùng lương + mã mới.
 HDR = ['STT', 'Mã NV', 'Họ và tên', 'Ngày sinh', 'Địa chỉ hiện đang cư trú', 'CCCD', 'Ngày cấp', 'Tháng/Năm vào làm', 'Đóng BHXH', 'Tháng/Năm nghỉ việc',
        'Chức vụ', 'Tháng/Năm thay đổi lương', 'Lương Cơ bản', 'PC Tiền cơm', 'PC Xăng xe', 'PC Điện thoại', 'PC Trang phục']
-assert server.NV_HEADERS[10:14] == ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến'] and server.NV_HEADERS[14] == 'Lương Cơ bản', "cột mới nằm ngay sau Chức vụ"
+assert server.NV_HEADERS[10:16] == ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'] and server.NV_HEADERS[16] == 'Lương Cơ bản', "cột mới nằm ngay sau Chức vụ"
 R = lambda stt, ma, ten, doi, luong, nghi="": [stt, ma, ten, '', '', '079090000123', '', '12/2024', 'x', nghi, 'Kinh doanh', doi, luong, 700000, 500000, 0, 0]
 ROWS = [R(1, '2', 'Trần Minh Hùng', '', 5_310_000), R(2, '2-001', 'Trần Minh Hùng', '01/2027', 6_000_000), R(3, '2-002', 'Trần Minh Hùng', '07/2027', 7_000_000),
         R(4, '3', 'Nguyễn Giang Nam', '', 5_310_000)]

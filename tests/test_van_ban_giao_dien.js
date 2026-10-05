@@ -119,20 +119,20 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   vm.createContext(ctx); vm.runInContext(src, ctx);
   const ex = (c) => vm.runInContext(c, ctx);
   assert(a0 > 0 && a1 > a0);
-  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(NV_HEADERS.slice(10,14))')), ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến'], 'cột mới nằm ngay sau Chức vụ');
+  assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(NV_HEADERS.slice(10,16))')), ['Chức vụ', 'Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'], 'cột mới nằm ngay sau Chức vụ');
   // danh sách cũ chưa có cột -> tự thêm cột trống đúng vị trí
-  ex(`nvHeader = NV_HEADERS.filter(h => !['Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến'].includes(h)); nvRows = [['1','2','Hùng','','','','','12/2024','x','','KD','5.310.000','700.000','0','0','0']]; nvThemCotDoiLuong(); nvThemCotThuViec();`);
+  ex(`nvHeader = NV_HEADERS.filter(h => !['Tháng/Năm thay đổi lương', 'Thử việc từ', 'Thử việc đến', 'Part-time', 'Lương theo giờ'].includes(h)); nvRows = [['1','2','Hùng','','','','','12/2024','x','','KD','5.310.000','700.000','0','0','0']]; nvThemCotDoiLuong(); nvThemCotThuViec(); nvThemCotPartTime();`);
   assert.strictEqual(ex('nvHeader.indexOf("Tháng/Năm thay đổi lương")'), 11); assert.strictEqual(ex('nvHeader.indexOf("Thử việc đến")'), 13);
   assert.strictEqual(ex('nvRows[0].length'), ex('nvHeader.length'));
-  assert.strictEqual(ex('nvRows[0][14]'), '5.310.000', 'dữ liệu các cột sau không bị lệch');
-  ex(`nvThemCotDoiLuong(); nvThemCotThuViec(); nvChucDanh = [];`);
-  assert.strictEqual(ex('nvHeader.length'), 19, 'không thêm cột lần 2');
+  assert.strictEqual(ex('nvRows[0][16]'), '5.310.000', 'dữ liệu các cột sau không bị lệch'); assert.strictEqual(ex('nvHeader.indexOf("Part-time")'), 14); assert.strictEqual(ex('nvHeader.indexOf("Lương theo giờ")'), 15);
+  ex(`nvThemCotDoiLuong(); nvThemCotThuViec(); nvThemCotPartTime(); nvChucDanh = [];`);
+  assert.strictEqual(ex('nvHeader.length'), 21, 'không thêm cột lần 2');
   // ＋ ở dòng 0 -> thêm dòng mã 2-001 ngay dưới, xoá tháng thay đổi + nghỉ việc, giữ lương cũ để sửa
   ex(`nvRows[0][9] = '06/2026'; nvRows.push(['2','3','Nam','','','','','12/2024','x','','KD','','5.310.000','0','0','0','0']); nvThemPhienBan(0)`);
   assert.deepStrictEqual(JSON.parse(ex('JSON.stringify(nvRows.map(r => r[1]))')), ['2', '2-001', '3']);
   assert.strictEqual(ex('nvRows[1][9]'), '', 'dòng mới: chưa có tháng nghỉ việc');
   assert.strictEqual(ex('nvRows[1][11]'), '', 'dòng mới: chờ nhập Tháng/Năm thay đổi lương');
-  assert.strictEqual(ex('nvRows[1][14]'), '5.310.000', 'dòng mới sao chép lương cũ để sửa');
+  assert.strictEqual(ex('nvRows[1][16]'), '5.310.000', 'dòng mới sao chép lương cũ để sửa');
   assert.strictEqual(ex('nvRows[0][0]'), 1); assert.strictEqual(ex('nvRows[2][0]'), 3, 'STT đánh lại');
   // ＋ lần nữa (từ dòng gốc hoặc từ dòng -001) -> -002, xếp sau -001, trước người khác
   ex('nvThemPhienBan(1)');
@@ -253,7 +253,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
 (async () => {
   const iV = html.indexOf('function vbVeMan'), iE = html.indexOf('function vbTuyChon', iV);
   const phan = html.slice(iV, iE);
-  assert(phan.includes("(l==='hd'||l==='tv')?'':`<button class=\"btn sm\" style=\"background:#6b3fa0\" onclick=\"vbMoKhoCk()\""), 'ẩn nút Kho chữ ký ở hợp đồng lao động + thử việc (qc/tl vẫn có)');
+  assert(phan.includes("(l==='hd'||l==='tv'||l==='pt')?'':`<button class=\"btn sm\" style=\"background:#6b3fa0\" onclick=\"vbMoKhoCk()\""), 'ẩn nút Kho chữ ký ở hợp đồng lao động + thử việc (qc/tl vẫn có)');
   const { ctx, goi } = moiTruong({ vbCkDuSel0: '3' });
   ctx.vbCkMuc = [{ khoa: 'gd:x', ten: 'GĐ', co_anh: true }, { khoa: 'cccd:1', ten: 'A', co_anh: true }, { khoa: 'cccd:2', ten: 'B', co_anh: false }, { khoa: 'cccd:3', ten: 'Người mới', ma: '9', co_anh: false }];
   ctx.vbCkDu = [{ id: 5, ten: 'chu_ky_20.png', anh: 'data:image/png;base64,Z' }];
@@ -397,3 +397,40 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.deepStrictEqual(doc(trMl), ['5.310.000', '5.575.500', '5.854.275'], 'đổi nhầm rồi trả lại thì về đúng số cũ');
   console.log('PASS 17: sửa Hệ số / Mức lương thì các bậc sau tự nhân theo.');
 })();
+
+// 18: lao động PART-TIME — thẻ Hợp đồng Part-time, form, cột Part-time / Lương theo giờ, cột Bảng Lương chỉ hiện khi có người part-time
+(() => {
+  const iMo = html.indexOf('function moBangLuong(){'), thanMo = html.slice(iMo, html.indexOf('function moVanBan', iMo));
+  assert(thanMo.includes(`onclick="moVanBan('pt')"`) && thanMo.includes('Hợp Đồng Part-time'), 'thẻ Hợp Đồng Part-time ở Bảng Lương - BHXH');
+  assert(html.includes("pt:'Hợp Đồng Part-time'") && html.includes("pt:'HopDongPartTime'"));
+  const iV = html.indexOf('function vbVeMan'), iE = html.indexOf('function vbTuyChon', iV), phan = html.slice(iV, iE);
+  for (const id of ['vb_pt_gio_ngay', 'vb_pt_ngay_tuan', 'vb_pt_lich', 'vb_pt_gio_tuan', 'vb_pt_gio_thang', 'vb_pt_luong_gio', 'vb_pt_mau_so'])
+    assert(phan.includes(id), 'form part-time thiếu ' + id);
+  const iT = html.indexOf('function vbTuyChon'), tuyChon = html.slice(iT, html.indexOf('\n}', iT));
+  for (const k of ['pt_gio_ngay', 'pt_lich', 'pt_gio_thang', 'pt_luong_gio']) assert(tuyChon.includes("'" + k + "'"), 'tuỳ chọn đọc ' + k);
+  assert(html.includes("vbLoai==='hd'||vbLoai==='tv'||vbLoai==='pt'"), 'in hàng loạt từ–đến cho part-time');
+  // danh sách nhân viên: cột Part-time là ô tick, Lương theo giờ hiện dạng tiền
+  const { ctx } = moiTruong();
+  const n0 = html.indexOf('const NV_HEADERS='), n1 = html.indexOf('function moBangLuong(){');
+  const m0 = html.indexOf('function nvLaCotTick'), m1 = html.indexOf('async function nvLayLuongTheoNam');
+  assert(html.slice(n0, n1).includes("'Part-time','Lương theo giờ','Lương Cơ bản'"));
+  assert(html.includes("nvLaCotPt(h))html+=`<td") && html.includes("h==='lương theo giờ'"));
+  // Bảng Lương: 3 cột part-time chỉ hiện khi tháng có người part-time; giữ nguyên ô nhập gốc sau khi server tính
+  const b0 = html.indexOf('const BL_COT=['), b1 = html.indexOf('const BL_TRUONG_NHAP');
+  const vm2 = vm.createContext({ console }); vm.runInContext(html.slice(b0, b1).replace(/^const BL_COT/m, 'var BL_COT').replace(/^let blHienMuc/m, 'var blHienMuc').replace(/\bfunction blDoiHienMuc[\s\S]*?\n}\n/, ''), vm2);
+  const hien = (rows) => JSON.parse(vm.runInContext('JSON.stringify(blCotHienThi(' + JSON.stringify(rows) + ').map(c=>c.k))', vm2));
+  assert(!hien([{ part_time: 0 }]).includes('gio_lam') && !hien([]).includes('part_time'), 'không có người part-time: ẩn các cột part-time');
+  const kq = hien([{ part_time: 0 }, { part_time: 1 }]);
+  assert(['part_time', 'luong_gio', 'gio_lam'].every((k) => kq.includes(k)), 'có người part-time: hiện cột Part-time / Lương theo giờ / Giờ làm');
+  assert.strictEqual(vm.runInContext("BL_COT.filter(c=>c.nhap).map(c=>c.k).includes('gio_lam')", vm2), true, 'giờ làm thực tế là ô nhập (lưu cùng bảng lương)');
+  const i1 = html.indexOf('async function blTinhLai'), i2 = html.indexOf('function blSuaO', i1);
+  const ctxBl = { blDL: { '03': [{ part_time: 1, luong_cb: 0, tien_com: 700000, gio_lam: 40 }, { part_time: 0, luong_cb: 6e6, tien_com: 0 }] }, blSeq: 0, blTS: {}, blNam: 2026, blThang: '09', toast() {}, blVeBang() {},
+    api: async () => ({ rows: [{ part_time: 1, luong_cb: 1040000, tien_com: 0, gio_lam: 40, luong: 1040000 }, { part_time: 0, luong_cb: 6e6, tien_com: 0 }], tham_so: {} }) };
+  vm.createContext(ctxBl); vm.runInContext(html.slice(i1, i2), ctxBl);
+  return ctxBl.blTinhLai('03').then(() => {
+    const r = ctxBl.blDL['03'];
+    assert(r[0].luong_cb === 0 && r[0].tien_com === 700000 && r[0].luong === 1040000, 'dòng part-time: giữ ô nhập gốc (không bị ghi đè bằng số quy đổi theo giờ), vẫn hiện lương tính được');
+    assert(r[1].luong_cb === 6e6);
+    console.log('PASS 18: lao động part-time (hợp đồng, danh sách NV, bảng lương).');
+  });
+})().catch((e) => { console.error(e); process.exit(1); });

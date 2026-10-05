@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-04.089"
+APP_BUILD = "2026-10-05.090"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10078,7 +10078,8 @@ _LUONG_THAM_SO_MAC_DINH = {
 }
 _LUONG_CAC_TRUONG_NHAP = (
     "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
-    "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "thu_viec", "thue_tay", "ghi_chu")
+    "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "thu_viec", "thue_tay", "ghi_chu",
+    "part_time", "luong_gio", "gio_lam")
 # Thuế TNCN theo Luật Thuế thu nhập cá nhân 2025 (áp dụng cho kỳ tính thuế từ 1/1/2026): giảm trừ bản thân 15.500.000, mỗi người
 # phụ thuộc 6.200.000 và biểu lũy tiến từng phần 5 bậc (đến 10tr 5%, đến 30tr 10%, đến 60tr 20%, đến 100tr 30%,
 # trên 100tr 35%). Khi tính lương từ tháng 1/2026 phần mềm tự áp dụng bộ này; năm 2025 trở về trước vẫn tính theo
@@ -10233,6 +10234,10 @@ def _luong_chuan_tham_so(ts, nam=None):
     # khoản chi trả từ ngưỡng này trở lên (2.000.000 đ/lần; theo quy định mới từ 2026: 5.000.000 đ/lần).
     kq["nguong_khau_tru_10"] = (_luong_so(ts["nguong_khau_tru_10"]) if "nguong_khau_tru_10" in ts
                                 else (5000000.0 if nam and nam >= 2026 else 2000000.0))
+    # Lao động PART-TIME (HĐLĐ không trọn thời gian): tiền lương tháng DƯỚI ngưỡng này thì không thuộc diện đóng BHXH bắt buộc (ngưỡng = mức lương thấp nhất làm căn cứ đóng,
+    # mặc định theo mức tham chiếu: 2.340.000 (2025), 2.530.000 (từ 2026) — CẦN ĐỐI CHIẾU văn bản hiện hành, sửa được ở tham số `nguong_part_time`).
+    kq["nguong_part_time"] = (_luong_so(ts["nguong_part_time"]) if "nguong_part_time" in ts
+                              else (2530000.0 if nam and nam >= 2026 else 2340000.0))
     # Thuế khấu trừ 10% của người làm < 14 ngày (không BHXH): mặc định TRỪ VÀO thực lãnh của người lao động (TT lương =
     # Chi phí lương − thuế). Tick "không trừ thuế 10%" -> thuế của họ = 0, nhận đủ (TT lương = Chi phí lương).
     kq["thue_10_cong_ty_chiu"] = _nv_co_tick(ts["thue_10_cong_ty_chiu"]) if "thue_10_cong_ty_chiu" in ts else False
@@ -10327,6 +10332,11 @@ def _luong_chuan_dong_nhap(r, ts=None):
             kq[k] = "" if v is None or str(v).strip() == "" else _luong_so(v)
         elif k == "dong_bh":
             kq[k] = _luong_co_dong_bh(r.get(k))
+        elif k == "part_time":      # tick Part-time: trống/thiếu = KHÔNG (khác dong_bh: trống = có)
+            kq[k] = 1 if _nv_co_tick(r.get(k)) else 0
+        elif k == "gio_lam":        # số giờ làm THỰC TẾ trong tháng của người part-time (trống = chưa nhập -> 0 giờ)
+            v = r.get(k)
+            kq[k] = "" if v is None or str(v).strip() == "" else _luong_so(v)
         else:
             kq[k] = _luong_so(r.get(k))
     return kq
@@ -10346,6 +10356,16 @@ def _luong_tinh_dong(r, ts, thang=None):
     def tl(x):   # theo ngày công thực tế, tránh chia 0
         return x / e * g if e else 0.0
 
+    pt = bool(d["part_time"])
+    # PART-TIME (hợp đồng lao động không trọn thời gian): lương = SỐ GIỜ LÀM THỰC TẾ trong tháng × lương theo giờ; KHÔNG phụ cấp, không tăng ca theo công chuẩn.
+    # Tháng chưa nhập giờ làm = 0 giờ = 0 đồng (phần mềm không tự đặt giờ/tháng làm). Lương tháng từ ngưỡng part-time trở lên -> phải đóng BHXH.
+    luong_pt = (d["gio_lam"] if d["gio_lam"] != "" else 0.0) * d["luong_gio"] if pt else 0.0
+    nguong_pt = ts.get("nguong_part_time") or 0.0
+    pt_phai_dong = pt and luong_pt > 0 and nguong_pt > 0 and luong_pt >= nguong_pt - 1e-9
+    if pt:
+        d = dict(d, luong_cb=_luong_lam_tron(luong_pt), tien_com=0.0, muc_xang=0.0, di_lai=0.0, muc_dt=0.0, trang_phuc=0.0, tang_ca=0.0,
+                 dong_bh=1 if pt_phai_dong else 0, thu_viec=0)
+        e, g = 1.0, 1.0           # lương đã tính theo giờ: không chia theo ngày công
     luong = tl(d["luong_cb"])
     # MỌI phụ cấp tính theo ngày đi làm: đủ công mới nhận đủ, nghỉ vài ngày thì phụ cấp giảm theo (mức/công chuẩn x ngày làm).
     xang = tl(d["muc_xang"])
@@ -10367,7 +10387,7 @@ def _luong_tinh_dong(r, ts, thang=None):
     # TRỪ 10% thuế TNCN trên thu nhập chịu thuế (không giảm trừ gia cảnh) khi khoản chi trả >= ngưỡng.
     # Thử việc theo HĐ THỬ VIỆC RIÊNG: không thuộc diện BHXH bắt buộc; dưới 3 tháng (thu_viec=1) -> khấu trừ 10% như người không/ký hợp đồng dưới 3 tháng;
     # từ 3 tháng (thu_viec=2) -> tính lũy tiến như lao động thường.
-    thoi_vu = (not d["dong_bh"]) and (_luong_mien_bh_ngay(e, g) or d["thu_viec"] == 1)
+    thoi_vu = (not d["dong_bh"]) and (_luong_mien_bh_ngay(e, g) or d["thu_viec"] == 1) and not pt
     if thoi_vu:
         gt_npt = gt_ban_than = 0.0
         tn_tinh_thue = tong_chiu_thue
@@ -10396,7 +10416,8 @@ def _luong_tinh_dong(r, ts, thang=None):
         "giam_tru_ban_than": gt_ban_than, "tien_giam_tru_npt": gt_npt,
         "tn_tinh_thue": tn_tinh_thue, "thue_tncn": thue, "thue_tru_luong": thue_tru, "thue_da_chinh": thue_da_chinh,
         "thoi_vu": thoi_vu,                                           # không đóng BHXH + làm < 14 ngày: khấu trừ 10%
-        "canh_bao_bh": (not d["dong_bh"]) and not d["thu_viec"] and not _luong_mien_bh_ngay(e, g),   # không lương < 14 ngày làm việc mà không đóng BHXH
+        "canh_bao_bh": (not d["dong_bh"]) and not d["thu_viec"] and not pt and not _luong_mien_bh_ngay(e, g),   # không lương < 14 ngày làm việc mà không đóng BHXH
+        "luong_pt": luong_pt, "pt_phai_dong_bh": pt_phai_dong,        # part-time đạt ngưỡng -> đã tự tính BHXH (phải ký/ghi nhận phụ lục, đăng ký tham gia)
     })
     kq["ngay_cong_hd"] = e      # giá trị đang dùng để tính (ô nhập giữ nguyên: 0/trống = theo lịch tháng)
     kq["ngay_lam_hd"] = g
@@ -10751,7 +10772,8 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
             "luong_cb": lay(r, "Lương Cơ bản"), "ngay_cong": ngay_cong_chuan,   # 0 = theo công chuẩn (lịch) của tháng
             "tien_com": lay(r, "PC Tiền cơm"), "muc_xang": lay(r, "PC Xăng xe"),
             "muc_dt": lay(r, "PC Điện thoại"),
-            "trang_phuc": lay(r, "PC Trang phục"), "ghi_chu": "CK"}))
+            "trang_phuc": lay(r, "PC Trang phục"), "ghi_chu": "CK",
+            "part_time": 1 if _nv_co_tick(lay(r, "Part-time")) else 0, "luong_gio": lay(r, "Lương theo giờ")}))
         if npt and nam and thang:         # có danh sách người phụ thuộc -> số NPT giảm trừ theo danh sách ở tháng này
             kq[-1]["so_npt"] = float(_luong_so_npt_thang(npt, kq[-1]["ma"], kq[-1]["ten"], nam, thang))
     return kq
@@ -11461,7 +11483,8 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
     npt = _luong_npt_doc(nhap_lieu_get(cid, loai="npt"))
 
     def pool(t):
-        return _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, int(t), npt)
+        # Lao động PART-TIME không đưa vào kế hoạch chia chi phí cả năm: tiền lương của họ chỉ theo SỐ GIỜ LÀM THỰC TẾ nhập ở Bảng Lương, phần mềm không tự chọn tháng làm/không làm.
+        return [r for r in _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, int(t), npt) if not r.get("part_time")]
     ty_le = min(100.0, max(0.0, _luong_so(body.get("ty_le_tang_ca")) if body.get("ty_le_tang_ca") not in (None, "") else 50.0))
     thang, tom = _luong_ke_hoach(pool, nam, body.get("tu_thang"), body.get("den_thang"), body.get("muc_tieu"),
                                  body.get("tham_so"), ty_le, body.get("da_co_ngoai") or 0,
@@ -11469,6 +11492,10 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
                                  bool(body.get("full_cong")), body.get("tran_pc") if isinstance(body.get("tran_pc"), dict) else None,
                                  body.get("ck_theo_thang") if isinstance(body.get("ck_theo_thang"), dict) else None,
                                  int(_luong_so(body.get("ck_toi_da")) or 12000000) if body.get("ck_toi_da") not in (None, "") else 12000000)
+    pt = sorted({r["ten"] for t in range(1, 13) for r in _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, t, npt) if r.get("part_time")})
+    if pt and isinstance(tom, dict):
+        tom.setdefault("canh_bao", []).append("Lao động part-time (" + ", ".join(pt) + ") KHÔNG nằm trong kế hoạch chia chi phí cả năm: tiền lương của họ chỉ tính theo "
+                                              "số giờ làm THỰC TẾ nhập từng tháng ở Bảng Lương (phần mềm không tự chọn tháng làm/không làm). Nếu tổng chi phí lương cả năm bạn nhập đã gồm cả part-time, hãy trừ chi phí part-time thực tế ra (ô “Đã có ngoài”) trước khi áp dụng.")
     return {"thang": thang, "tom_tat": tom}
 
 
@@ -11629,6 +11656,10 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
     for t in _LUONG_THANG:
         for dong in (thang_nhap.get(t) or []):
             d = _luong_chuan_dong_nhap(dong)
+            if d["part_time"]:        # part-time: lương = giờ làm thực tế × lương giờ (không phụ cấp) -> ghi như lương cơ bản của tháng, đủ công
+                _l = _luong_lam_tron((d["gio_lam"] if d["gio_lam"] != "" else 0.0) * d["luong_gio"])
+                d = dict(d, luong_cb=_l, tien_com=0.0, muc_xang=0.0, di_lai=0.0, muc_dt=0.0, trang_phuc=0.0, tang_ca=0.0, ngay_lam="", ngay_cong=1.0,
+                         dong_bh=1 if (_l > 0 and ts.get("nguong_part_time") and _l >= ts["nguong_part_time"]) else 0, thu_viec=0)
             L = khoa
             tt = _luong_thue_ap_dung(ts, t)
             moc, dtang = hang_so_thue(tt)
@@ -13184,12 +13215,13 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
     luu, nam_goc = _vb_doc_thang_luong(cid, nam)
     tc = vbld.gop_tuy_chon(cty, luu)
     nv_tl = _vb_du_lieu(cid, nam, True)[1]
+    nv_ft = [n for n in nv if not n.get("part_time")]
     return {"nam": nam, "cty": cty, "tuy_chon": tc, "css": vbld.VB_CSS, "thang_luong_nam_goc": nam_goc,
             "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
-                           "da_nghi": n["da_nghi"], "nguon": n["nguon"]} for n in nv],
+                           "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
             "chuc_danh": vbld.chuc_danh_tu_nhom(tc["nhom_tuy_chinh"]),
-            "canh_bao": vbld.kiem_tra(nv, nam, tc, _LUONG_TRAN_PC_KHONG_THUE) if nv else []}
+            "canh_bao": vbld.kiem_tra(nv_ft, nam, tc, _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else []}
 
 
 @app.get("/api/van-ban/{cid}/chuc-danh")
@@ -13552,20 +13584,40 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     """Dựng văn bản (HTML để xem/sửa/in): loai = hd (hợp đồng lao động, từ STT `tu` đến `den`) | qc (quy chế lương) | tl (thang bảng lương)."""
     body = await request.json()
     loai = body.get("loai")
-    if loai not in ("hd", "qc", "tl", "tv"):
+    if loai not in ("hd", "qc", "tl", "tv", "pt"):
         raise HTTPException(400, "Loại văn bản không hợp lệ")
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
-    cty, nv, ts = _vb_du_lieu(cid, nam, loai in ("qc", "tl"))
-    if not nv:
+    cty, nv_het, ts = _vb_du_lieu(cid, nam, loai in ("qc", "tl"))
+    if not nv_het:
         raise HTTPException(404, "Chưa có nhân viên: hãy nhập Danh Sách Nhân Viên hoặc lưu Bảng Lương trước")
+    # Lao động PART-TIME (tick cột "Part-time") có hợp đồng riêng; không đưa vào hợp đồng toàn thời gian / thử việc / thang bảng lương / quy chế.
+    nv = [n for n in nv_het if not n.get("part_time")]
     luu, _g = _vb_doc_thang_luong(cid, nam)
     tc = dict(luu)
     tc.update({k: v for k, v in (body.get("tuy_chon") or {}).items() if v is not None})
-    cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, tc), _LUONG_TRAN_PC_KHONG_THUE)
     chu_ky = _vb_chu_ky_dict(cid) if tc.get("gan_chu_ky", True) else {}          # chỉ chữ ký đã xác nhận đồng ý
+    if loai == "pt":
+        nv_pt = [n for n in nv_het if n.get("part_time")]
+        if not nv_pt:
+            raise HTTPException(404, "Chưa có lao động part-time: tick cột “Part-time” (và nhập “Lương theo giờ”) ở Danh Sách Nhân Viên")
+        try:
+            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv_het))
+        except Exception:
+            raise HTTPException(400, "Từ/đến nhân viên không hợp lệ")
+        if tu > den:
+            tu, den = den, tu
+        chon = [n for n in nv_pt if tu <= n["stt"] <= den]
+        if not chon:
+            raise HTTPException(400, "Khoảng nhân viên đã chọn không có lao động part-time nào")
+        html = vbld.dung_hop_dong_part_time_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
+        cb = vbld.kiem_tra_part_time(chon, vbld.gop_tuy_chon(cty, tc), nam)
+        return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": len(chon), "canh_bao": cb, "so_chu_ky": html.count('src="data:image')}
+    if not nv:
+        raise HTTPException(404, "Chưa có nhân viên toàn thời gian: hãy nhập Danh Sách Nhân Viên (lao động part-time có hợp đồng riêng)")
+    cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, tc), _LUONG_TRAN_PC_KHONG_THUE)
     if loai in ("hd", "tv"):
         try:
-            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv))
+            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv_het))
         except Exception:
             raise HTTPException(400, "Từ/đến nhân viên không hợp lệ")
         if tu > den:
@@ -13612,6 +13664,7 @@ async def van_ban_excel_thang_luong(cid: int, request: Request):
     body = await request.json()
     nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
     cty, nv, _ts = _vb_du_lieu(cid, nam, True)
+    nv = [n for n in nv if not n.get("part_time")]
     if not nv:
         raise HTTPException(404, "Chưa có nhân viên để lập thang bảng lương")
     luu, _g = _vb_doc_thang_luong(cid, nam)
@@ -14505,7 +14558,7 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
 
 NV_HEADERS = ["STT", "Mã NV", "Họ và tên", "Ngày sinh", "Địa chỉ hiện đang cư trú", "CCCD",
-              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Tháng/Năm thay đổi lương", "Thử việc từ", "Thử việc đến", "Lương Cơ bản",
+              "Ngày cấp", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Chức vụ", "Tháng/Năm thay đổi lương", "Thử việc từ", "Thử việc đến", "Part-time", "Lương theo giờ", "Lương Cơ bản",
               "PC Tiền cơm", "PC Xăng xe", "PC Điện thoại", "PC Trang phục"]
 
 # Từ khoá nhận diện cột nguồn (không dấu, thường) -> cột đích cố định NV_HEADERS.
@@ -14516,6 +14569,8 @@ _NV_TU_KHOA = [
     ("Tháng/Năm thay đổi lương", ["thay doi luong", "dieu chinh luong", "ap dung luong moi"]),
     ("Thử việc từ", ["thu viec tu", "bat dau thu viec", "ngay bat dau thu viec"]),
     ("Thử việc đến", ["thu viec den", "ket thuc thu viec", "ngay ket thuc thu viec"]),
+    ("Part-time", ["part-time", "part time", "parttime", "ban thoi gian", "khong tron thoi gian"]),
+    ("Lương theo giờ", ["luong theo gio", "luong gio", "don gia gio"]),
     ("PC Tiền cơm", ["tien com", "phu cap com", "pc com"]),
     ("PC Xăng xe", ["xang xe", "phu cap xang", "pc xang"]),
     ("", ["phu cap chuc vu", "pc chuc vu"]),        # nuốt cột phụ cấp chức vụ của file nguồn (không đưa vào danh sách)
