@@ -55,3 +55,21 @@ assert v.ma_goc_phien_ban("2-001") == "2" and v.ma_goc_phien_ban("NV-1") == "NV-
 # import Excel danh sách nhân viên nhận cột "Tháng/Năm thay đổi lương"
 assert any(c == "Tháng/Năm thay đổi lương" for c, _k in server._NV_TU_KHOA)
 print("PASS")
+
+# Dòng phiên bản mã gốc-001 CHƯA ghi "Tháng/Năm thay đổi lương" nhưng có "Tháng/Năm vào làm": hiệu lực từ tháng vào làm (vd 2 = part-time từ 01/2024, 2-001 = toàn thời gian đóng BHXH từ 12/2024)
+H2 = server.NV_HEADERS
+def R2(**k):
+    r = [''] * len(H2)
+    for a, b in k.items():
+        r[H2.index(a)] = b
+    return r
+rows2 = [R2(**{'Mã NV': '2', 'Họ và tên': 'Trần Minh Hùng', 'CCCD': '079079015954', 'Tháng/Năm vào làm': '01/2024', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Chức vụ': 'NVKD'}),
+         R2(**{'Mã NV': '2-001', 'Họ và tên': 'Trần Minh Hùng', 'CCCD': '079079015954', 'Tháng/Năm vào làm': '12/2024', 'Đóng BHXH': 'x', 'Lương Cơ bản': 5310000, 'Chức vụ': 'NVKD'})]
+for t, (ma, pt, bh) in {1: ('2', 1, 0), 11: ('2', 1, 0), 12: ('2-001', 0, 1)}.items():
+    r = server._luong_dong_tu_nhan_vien(H2, rows2, 0, 2024, t)
+    assert [(x['ma'], x['part_time'], x['dong_bh']) for x in r] == [(ma, pt, bh)], (t, r)
+assert [x['ma'] for x in server._luong_dong_tu_nhan_vien(H2, rows2, 0, 2025, 3)] == ['2-001'], "các năm sau dùng phiên bản mới nhất"
+# dòng -001 không ghi vào làm: vẫn là dòng riêng (như trước)
+rows3 = [rows2[0], R2(**{'Mã NV': '2-001', 'Họ và tên': 'Trần Minh Hùng', 'Lương Cơ bản': 5310000})]
+assert len(server._luong_dong_tu_nhan_vien(H2, rows3, 0, 2024, 5)) == 2
+print("PASS thêm: dòng -001 hiệu lực từ tháng vào làm")

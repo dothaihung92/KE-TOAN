@@ -324,6 +324,7 @@ def chon_phien_ban_hieu_luc(header, rows, nam=None, thang=None):
     for i, h in enumerate(header or []):
         cot.setdefault(_chuan(h), i)
     i_ma, i_ten, i_doi = cot.get("ma nv"), cot.get("ho va ten"), cot.get("thang/nam thay doi luong")
+    i_vao = cot.get("thang/nam vao lam")
     if i_doi is None:
         return list(rows or [])
 
@@ -335,10 +336,17 @@ def chon_phien_ban_hieu_luc(header, rows, nam=None, thang=None):
     for r in rows or []:
         if not doc_ngay(o(r, i_doi)) and _chuan(o(r, i_ten)) and str(o(r, i_ma)).strip():
             ten_goc.setdefault(_chuan(o(r, i_ten)), ("ma", str(o(r, i_ma)).strip().lower()))
+    # mã gốc có thật trong danh sách (dòng không đuôi -001): chỉ khi đó dòng "gốc-001" mới được coi là phiên bản của người đó (NV-001, NV-002 của 2 người khác nhau thì KHÔNG gộp)
+    ma_co_goc = {str(o(r, i_ma)).strip().lower() for r in (rows or []) if str(o(r, i_ma)).strip() and not _RE_MA_PHIEN_BAN.match(str(o(r, i_ma)).strip())}
     for idx, r in enumerate(rows or []):
         ma, ten = str(o(r, i_ma)).strip(), _chuan(o(r, i_ten))
         tu = doc_ngay(o(r, i_doi))
         tu = (tu[0], tu[1]) if tu else None
+        if tu is None and _RE_MA_PHIEN_BAN.match(ma) and ma_goc_phien_ban(ma).lower() in ma_co_goc:
+            # Dòng mã dạng gốc-001 (thêm bằng nút ＋) chưa ghi "Tháng/Năm thay đổi lương" nhưng có "Tháng/Năm vào làm": coi là phiên bản của người đó HIỆU LỰC TỪ tháng vào làm
+            # (vd 2-001 vào làm 12/2024: từ 12/2024 dùng dòng này — kể cả chuyển từ part-time sang toàn thời gian, bắt đầu đóng BHXH; trước đó dùng dòng gốc "2").
+            vl = doc_ngay(o(r, i_vao))
+            tu = (vl[0], vl[1]) if vl else None
         if tu is None:
             khoa = ("ma", ma.lower()) if ma else ("ten", ten) if ten else ("dong", idx)
         elif _RE_MA_PHIEN_BAN.match(ma):

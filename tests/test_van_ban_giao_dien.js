@@ -539,3 +539,24 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(t.toasts.at(-1)[0].includes('gỡ 4 dòng tháng không làm'), t.toasts.at(-1)[0]);
   console.log('PASS 22: import giờ làm — tháng không làm thì gỡ khỏi bảng lương tháng đó.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 23: dòng phiên bản (mã gốc-001) chưa ghi "thay đổi lương" nhưng có "vào làm": hiệu lực từ tháng vào làm; Nạp từ Danh Sách NV thay dòng cũ (không để 2 dòng của 1 người)
+(async () => {
+  const i1 = html.indexOf('async function blNapNhanVien'), i2 = html.indexOf('\n}\n', i1) + 3;
+  const mk = (blDL, dsRows, daNghi = []) => { const toasts = [];
+    const ctx = { current: 7, blNam: 2024, blThang: '12', blDL, blBan: false, blVeTabs() {}, blVeBang() {}, blVeInfo() {}, toast: (m, k) => toasts.push([m, k]), async blTinhLai() {}, parseInt, String, Number, Set, Map,
+      nvMaGoc: (ma) => { const m = String(ma == null ? '' : ma).trim().match(/^(.+)-(\d{3})$/); return m ? m[1] : String(ma == null ? '' : ma).trim(); },
+      api: async () => ({ rows: dsRows, da_nghi: daNghi }) };
+    vm.createContext(ctx); vm.runInContext(html.slice(i1, i2), ctx); return { ctx, toasts }; };
+  // T12/2024: Danh sách NV trả dòng 2-001 (đang hiệu lực); bảng lương T12 đang có dòng part-time cũ "2" -> thay bằng 2-001
+  let { ctx } = mk({ '12': [{ ma: '2', ten: 'Hùng', part_time: 1, gio_lam: '' }, { ma: '3', ten: 'Nam', luong_cb: 5310000 }] },
+    [{ ma: '2-001', ten: 'Hùng', part_time: 0, dong_bh: 1, luong_cb: 5310000 }, { ma: '3', ten: 'Nam', luong_cb: 5310000 }]);
+  await ctx.blNapNhanVien();
+  assert.deepStrictEqual(ctx.blDL['12'].map((r) => r.ma), ['2-001', '3'], 'dòng cũ được thay, không trùng người'); assert.strictEqual(ctx.blDL['12'][0].dong_bh, 1); assert.strictEqual(ctx.blDL['12'][0].part_time, 0);
+  // ngược lại (T11): bảng lương đang có 2-001, danh sách trả dòng gốc "2"
+  ({ ctx } = mk({ '11': [{ ma: '2-001', ten: 'Hùng' }] }, [{ ma: '2', ten: 'Hùng', part_time: 1 }])); ctx.blThang = '11';
+  await ctx.blNapNhanVien(); assert.deepStrictEqual(ctx.blDL['11'].map((r) => r.ma), ['2']);
+  // người khác mã gốc (2 và 22) không bị gộp nhầm
+  ({ ctx } = mk({ '12': [{ ma: '22', ten: 'Khác' }] }, [{ ma: '2-001', ten: 'Hùng' }])); await ctx.blNapNhanVien(); assert.deepStrictEqual(ctx.blDL['12'].map((r) => r.ma), ['22', '2-001']);
+  console.log('PASS 23: đổi phiên bản mã -001 khi nạp từ Danh Sách NV.');
+})().catch((e) => { console.error(e); process.exit(1); });

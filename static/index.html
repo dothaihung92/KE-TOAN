@@ -5983,7 +5983,12 @@ async function blNapNhanVien(){
     const cuaKey=new Map(co.map(r=>[(r.ma||r.ten||'').toString().trim().toLowerCase(),r]));
     d.rows.forEach(r=>{
       const key=(r.ma||r.ten||'').toString().trim().toLowerCase();
-      const dong=cuaKey.get(key);
+      let dong=cuaKey.get(key);
+      if(!dong&&r.ma){
+        // Cùng người nhưng ĐỔI PHIÊN BẢN (vd 2 → 2-001 từ tháng thay đổi / vào làm mới, hoặc ngược lại): thay dòng cũ bằng dòng phiên bản đang hiệu lực, không để 2 dòng của 1 người
+        const goc=nvMaGoc(r.ma).toLowerCase(),i=co.findIndex(x=>x.ma&&nvMaGoc(x.ma).toLowerCase()===goc&&String(x.ma).trim().toLowerCase()!==String(r.ma).trim().toLowerCase());
+        if(i>=0){cuaKey.delete((co[i].ma||co[i].ten||'').toString().trim().toLowerCase());co[i]=r;cuaKey.set(key,r);capNhat++;return}
+      }
       if(!dong){co.push(r);cuaKey.set(key,r);them++;return}
       let doi=false;
       truongNv.forEach(k=>{if(String(dong[k]==null?'':dong[k])!==String(r[k]==null?'':r[k])){dong[k]=r[k];doi=true}});
