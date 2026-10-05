@@ -4118,6 +4118,16 @@ function dongNhapLieu(){
 // Phím Esc trên màn Nhập Liệu: đang có hộp thoại con (ký trên màn hình / chọn người lao động) -> đóng hộp thoại;
 // đang ở 1 mục con của "Bảng Lương - BHXH" (Danh sách nhân viên, Người phụ thuộc, Bảng lương, Hợp đồng, Quy chế, Thang bảng lương)
 // -> quay về màn "Bảng Lương - BHXH" (bấm đúng nút "← Bảng Lương - BHXH" của mục đó, nên vẫn hỏi nếu chưa lưu); còn lại -> về trang chọn loại
+// Ctrl+S: bấm nút Lưu của màn đang mở (nút có onclick nvLuu / nptLuu / blLuu / nlLuu / dmLuu…); trước đó thoát ô đang sửa để ô vừa gõ được ghi nhận
+function nlLuuPhimTat(){
+  for(const id of ['xkGanModal','misaModal']){const m=document.getElementById(id);if(m&&m.style.display==='flex')return}
+  const ae=document.activeElement;if(ae&&ae.blur&&ae!==document.body&&(ae.isContentEditable||/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)))ae.blur();
+  const body=document.getElementById('nhapLieuBody'),nut=body&&body.querySelector('button[onclick^="nvLuu"],button[onclick^="nptLuu"],button[onclick^="blLuu"],button[onclick^="nlLuu"],button[onclick^="dmLuu"],button[onclick^="xkLuu"]');
+  if(nut){nut.click();return}
+  const ngoai=document.querySelector('#nhapLieuScreen button[onclick^="nlLuu"]');
+  if(ngoai){ngoai.click();return}
+  toast('Màn hình này không có dữ liệu cần lưu','');
+}
 function nlThoatManHinh(){
   for(const id of ['xkGanModal','misaModal']){const m=document.getElementById(id);if(m&&m.style.display==='flex')return}
   for(const id of ['vbCkPadWrap','nptChonNldOv']){const ov=document.getElementById(id);if(ov){ov.remove();return}}
@@ -4985,7 +4995,7 @@ function moDanhSachNhanVien(tuBangLuong){
   const wNv=document.getElementById('nvTableWrap');
   wNv.addEventListener('mousedown',nvChuotXuong);wNv.addEventListener('mouseover',nvChuotDi);
   nvDangKySuKien();nvSelXoa();
-  taiNhanVien();
+  nvTaiPromise=taiNhanVien();
 }
 async function taiNhanVien(){
   try{
@@ -5258,7 +5268,7 @@ function nvVeTuBl(dong){
 function nvVeBangLuong(){const t=nvTuBl&&nvTuBl.thang;nvTuBl=null;moBangLuongNam(t)}
 /* ----- BÔI ĐEN Ô TRONG 1 CỘT + FILL DOWN: kéo chuột qua các ô của cùng 1 cột (hoặc bấm ô đầu rồi Shift+bấm ô cuối, hoặc bấm tiêu đề cột để chọn cả cột),
    rồi Ctrl+D hoặc nút "⬇ Fill down" — điền giá trị của ô TRÊN CÙNG vùng chọn xuống các ô còn lại (như Excel). ----- */
-let nvSel={c:-1,ris:[]},nvNeo=null,nvKeo=null;
+let nvSel={c:-1,ris:[]},nvNeo=null,nvKeo=null,nvTaiPromise=null;
 function nvSelXoa(){nvSel={c:-1,ris:[]};nvNeo=null}
 function nvSelVe(){
   if(!document.querySelectorAll)return;
@@ -5358,6 +5368,8 @@ async function nvImportExcel(input){
   if(!files||!files.length)return;
   toast(`Đang đọc ${files.length} file...`,'');
   try{
+    if(nvTaiPromise)await nvTaiPromise;          // chờ danh sách đang lưu tải xong: import chỉ NỐI THÊM dòng mới, không bao giờ thay/xoá dòng cũ
+    const soCu=nvRows.length;
     const fd=new FormData();
     for(const f of files)fd.append('files',f);
     const r=await fetch(`/api/nhap-lieu/import-nhan-vien/${current}`,{method:'POST',body:fd});
@@ -5378,7 +5390,7 @@ async function nvImportExcel(input){
     nvDanhLaiStt();
     nvTuDienMa();
     veGridNhanVien();
-    toast(`✓ Đã thêm ${kq.rows.length} nhân viên`+(kq.loi&&kq.loi.length?` (⚠ ${kq.loi.join('; ')})`:'')+'. Nhớ bấm 💾 Lưu!','ok');
+    toast(`✓ Đã thêm ${kq.rows.length} nhân viên mới vào cuối danh sách (giữ nguyên ${soCu} dòng cũ)`+(kq.loi&&kq.loi.length?` (⚠ ${kq.loi.join('; ')})`:'')+'. Nhớ bấm 💾 Lưu!','ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';
 }
@@ -9447,6 +9459,7 @@ document.addEventListener('keydown',(e)=>{
   if(misaModalEl&&misaModalEl.style.display==='flex')return;
   if(!(e.ctrlKey||e.metaKey||e.altKey)&&e.key!=='Escape')return;
   const k=e.key.toLowerCase();
+  if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey&&k==='s'){e.preventDefault();nlLuuPhimTat();return}      // Ctrl+S = Lưu màn đang mở (Danh sách nhân viên, Người phụ thuộc, Bảng lương, bảng kê...)
   if(e.ctrlKey&&e.shiftKey&&k==='l'){e.preventDefault();nlBatFilter();}
   if(e.ctrlKey&&!e.shiftKey&&k==='z'){e.preventDefault();nlUndo();}
   if(e.ctrlKey&&((e.shiftKey&&k==='z')||k==='y')){e.preventDefault();nlRedo();}

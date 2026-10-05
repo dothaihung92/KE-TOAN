@@ -612,7 +612,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(html.includes("td.nv-sel{") && html.includes('Ctrl+D'));
   // import: ô đặt theo TÊN cột, giữ nguyên thứ tự dòng của file
   const iI = html.indexOf('async function nvImportExcel'), iE = html.indexOf('/* ----- NGƯỜI PHỤ THUỘC');
-  const c2 = { nvHeader: ['STT', 'Họ và tên', 'Mã NV', 'Đóng BHXH'], nvRows: [[0, 'Đã có', 'X0', 'x']], current: 7, toast() {}, nvBoCotPcChucVu() {}, nvThemCotTick() {}, nvThemCotNghiViec() {}, nvDanhLaiStt() {}, veGridNhanVien() {}, nvLaCotTick: (h) => String(h).toLowerCase() === 'đóng bhxh', FormData: class { append() {} },
+  const c2 = { nvHeader: ['STT', 'Họ và tên', 'Mã NV', 'Đóng BHXH'], nvRows: [[0, 'Đã có', 'X0', 'x']], current: 7, toast() {}, nvBoCotPcChucVu() {}, nvThemCotTick() {}, nvThemCotNghiViec() {}, nvDanhLaiStt() {}, nvTuDienMa() {}, nvTaiPromise: null, veGridNhanVien() {}, nvLaCotTick: (h) => String(h).toLowerCase() === 'đóng bhxh', FormData: class { append() {} },
     fetch: async () => ({ ok: true, json: async () => ({ header: ['STT', 'Mã NV', 'Họ và tên', 'Đóng BHXH'], rows: [[1, 'M3', 'Zeta', 'x'], [2, 'M1', 'Alpha', ''], [3, 'M2', 'Mike', 'x']], loi: [] }) }) };
   vm.createContext(c2); vm.runInContext(html.slice(iI, iE), c2);
   await c2.nvImportExcel({ files: [{}], value: '' });
@@ -639,3 +639,26 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(ma.includes('d.dong_bo_phien_ban') && ma.includes('blBan=true;blVeInfo();toast(`🔄 Đồng bộ phiên bản mã'), 'tải bảng lương: báo đã đồng bộ phiên bản mã và đánh dấu chưa lưu');
   console.log('PASS 28: báo đồng bộ phiên bản mã khi tải bảng lương.');
 })();
+
+// 29: Ctrl+S = Lưu màn đang mở; import Danh Sách NV chỉ NỐI THÊM (giữ nguyên dòng cũ, chờ danh sách tải xong)
+(async () => {
+  const i1 = html.indexOf('function nlLuuPhimTat'), i2 = html.indexOf('function nlThoatManHinh');
+  assert(html.includes("if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey&&k==='s'){e.preventDefault();nlLuuPhimTat();return}"), 'Ctrl+S gắn vào phím tắt của màn Nhập Liệu');
+  const mk = (selFound) => { const log = [], toasts = [];
+    const nut = (n) => ({ click: () => log.push('click:' + n) });
+    const ctx = { toast: (m) => toasts.push(m), String, document: { activeElement: { blur: () => log.push('blur'), isContentEditable: true, tagName: 'TD' }, body: {}, getElementById: (id) => id === 'nhapLieuBody' ? { querySelector: (s) => { assert(['nvLuu', 'nptLuu', 'blLuu', 'nlLuu', 'dmLuu'].every((k) => s.includes(k))); return selFound ? nut(selFound) : null; } } : null, querySelector: () => null } };
+    vm.createContext(ctx); vm.runInContext(html.slice(i1, i2), ctx); return { ctx, log, toasts }; };
+  let t = mk('nvLuu'); t.ctx.nlLuuPhimTat(); assert.deepStrictEqual(t.log, ['blur', 'click:nvLuu'], 'thoát ô đang sửa rồi bấm nút Lưu của màn đang mở');
+  t = mk(null); t.ctx.nlLuuPhimTat(); assert(t.toasts[0].includes('không có dữ liệu cần lưu'));
+  // import: chờ tải xong, chỉ nối thêm
+  const iI = html.indexOf('async function nvImportExcel'), iE = html.indexOf('/* ----- NGƯỜI PHỤ THUỘC');
+  const toasts = []; let daTai = false;
+  const c2 = { nvHeader: ['STT', 'Họ và tên'], nvRows: [], current: 7, toast: (m) => toasts.push(m), nvBoCotPcChucVu() {}, nvThemCotTick() {}, nvThemCotNghiViec() {}, nvDanhLaiStt() {}, nvTuDienMa() {}, veGridNhanVien() {}, nvLaCotTick: () => false, FormData: class { append() {} },
+    nvTaiPromise: new Promise((ok) => setTimeout(() => { c2.nvRows = [[1, 'Cũ 1'], [2, 'Cũ 2']]; daTai = true; ok(); }, 20)),
+    fetch: async () => ({ ok: true, json: async () => ({ header: ['STT', 'Họ và tên'], rows: [[1, 'Mới 1']], loi: [] }) }) };
+  vm.createContext(c2); vm.runInContext(html.slice(iI, iE), c2);
+  await c2.nvImportExcel({ files: [{}], value: '' });
+  assert(daTai && c2.nvRows.map((r) => r[1]).join('|') === 'Cũ 1|Cũ 2|Mới 1', 'dòng cũ giữ nguyên, dòng mới nối cuối');
+  assert(toasts.at(-1).includes('giữ nguyên 2 dòng cũ'));
+  console.log('PASS 29: Ctrl+S lưu + import chỉ nối thêm.');
+})().catch((e) => { console.error(e); process.exit(1); });
