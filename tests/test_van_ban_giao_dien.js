@@ -424,7 +424,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(['part_time', 'luong_gio', 'gio_lam'].every((k) => kq.includes(k)), 'có người part-time: hiện cột Part-time / Lương theo giờ / Giờ làm');
   assert.strictEqual(vm.runInContext("BL_COT.filter(c=>c.nhap).map(c=>c.k).includes('gio_lam')", vm2), true, 'giờ làm thực tế là ô nhập (lưu cùng bảng lương)');
   const i1 = html.indexOf('async function blTinhLai'), i2 = html.indexOf('function blSuaO', i1);
-  const ctxBl = { blDL: { '03': [{ part_time: 1, luong_cb: 0, tien_com: 700000, gio_lam: 40 }, { part_time: 0, luong_cb: 6e6, tien_com: 0 }] }, blSeq: 0, blTS: {}, blNam: 2026, blThang: '09', toast() {}, blVeBang() {},
+  const ctxBl = { blDL: { '03': [{ part_time: 1, luong_cb: 0, tien_com: 700000, gio_lam: 40 }, { part_time: 0, luong_cb: 6e6, tien_com: 0 }] }, blSeq: 0, blTS: {}, blNam: 2026, blThang: '09', toast() {}, blVeBang() {}, blSapXepPartTime: (r) => r,
     api: async () => ({ rows: [{ part_time: 1, luong_cb: 1040000, tien_com: 0, gio_lam: 40, luong: 1040000 }, { part_time: 0, luong_cb: 6e6, tien_com: 0 }], tham_so: {} }) };
   vm.createContext(ctxBl); vm.runInContext(html.slice(i1, i2), ctxBl);
   return ctxBl.blTinhLai('03').then(() => {
@@ -497,3 +497,18 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(html.includes("if(k==='gio_lam')rows[ri].gio_ngay='';"));
   console.log('PASS 20: chấm công part-time theo giờ + import giờ làm.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 21: người part-time trong Bảng Lương — chỉ có Lương theo giờ + Giờ làm (ô Lương CB / Ngày công / Tổng NC để trống), xếp dưới cùng
+(() => {
+  const b0 = html.indexOf('const BL_PT_TRONG'), b1 = html.indexOf('function blCoPartTime');
+  const cx = vm.createContext({}); vm.runInContext(html.slice(b0, b1).replace(/^const /gm, 'var '), cx);
+  assert.deepStrictEqual(JSON.parse(vm.runInContext("JSON.stringify(BL_PT_TRONG)", cx)), ['luong_cb', 'ngay_cong', 'ngay_lam', 'gio_tang_ca', 'ngay_cong_hd', 'ngay_lam_hd']);
+  const rows = [{ ten: 'PT1', part_time: 1 }, { ten: 'A', part_time: 0 }, { ten: 'TV', thu_viec: 1 }, { ten: 'PT2', part_time: 1 }, { ten: 'B' }];
+  const kq = JSON.parse(vm.runInContext('JSON.stringify(blSapXepPartTime(' + JSON.stringify(rows) + ').map(r=>r.ten))', cx));
+  assert.deepStrictEqual(kq, ['A', 'TV', 'B', 'PT1', 'PT2'], 'chính thức + thử việc giữ thứ tự, part-time xuống cuối (giữ thứ tự giữa họ)');
+  assert(html.includes("if(Number(r.part_time)&&BL_PT_TRONG.includes(c.k))h+=`<td"), 'bảng lương: ô trống cho người part-time');
+  assert(html.includes("if(Number(r.part_time)&&BL_PT_TRONG.includes(c.k))return '<td></td>';"), 'bản in: ô trống cho người part-time');
+  assert(html.includes("{k:'luong_gio',t:'Lương theo giờ',w:70,n:1,opt:1},{k:'gio_lam',t:'Số giờ làm',w:48,c:1,dp:1,opt:1}"), 'bản in có cột Lương theo giờ + Số giờ làm khi có người part-time');
+  assert(html.includes('blDL[t]=blSapXepPartTime(kq.rows)') && html.includes('blDL[t]=blSapXepPartTime(blDL[t])'), 'sắp xếp khi tải và sau mỗi lần tính');
+  console.log('PASS 21: part-time chỉ hiện lương theo giờ + giờ làm, xếp dưới cùng.');
+})();

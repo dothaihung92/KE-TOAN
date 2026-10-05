@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.094"
+APP_BUILD = "2026-10-05.095"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10421,6 +10421,8 @@ def _luong_tinh_dong(r, ts, thang=None):
     })
     kq["ngay_cong_hd"] = e      # giá trị đang dùng để tính (ô nhập giữ nguyên: 0/trống = theo lịch tháng)
     kq["ngay_lam_hd"] = g
+    if pt:                      # part-time tính theo giờ: không có ngày công / tổng ngày công
+        kq["ngay_cong_hd"] = kq["ngay_lam_hd"] = 0.0
     return kq
 
 

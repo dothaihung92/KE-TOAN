@@ -5482,6 +5482,9 @@ const BL_COT=[
 // anNeuTrong = chỉ hiện khi tháng đó có dòng mang giá trị (dữ liệu import từ file cũ) — không ẩn số đang tính vào lương/thuế.
 let blHienMuc=false;
 // Cột part-time (tick / lương theo giờ / giờ làm thực tế) chỉ hiện khi tháng đó có người part-time (tick ở Danh Sách Nhân Viên)
+// Người part-time chỉ có Lương theo giờ + Giờ làm: các ô Lương CB / Ngày công / Tổng NC / Giờ tăng ca để trống; xếp DƯỚI CÙNG bảng lương (sau người chính thức và thử việc)
+const BL_PT_TRONG=['luong_cb','ngay_cong','ngay_lam','gio_tang_ca','ngay_cong_hd','ngay_lam_hd'];
+function blSapXepPartTime(rows){const r=rows||[];return r.filter(x=>!Number(x.part_time)).concat(r.filter(x=>Number(x.part_time)))}
 function blCoPartTime(rows){return (rows||[]).some(r=>Number(r.part_time))}
 function blCotHienThi(rows){return BL_COT.filter(c=>!c.an&&(!c.muc||blHienMuc)&&!(c.anNeuTrong&&!(rows||[]).some(r=>Number(r[c.k])))&&!(c.ptCot&&!blCoPartTime(rows))) }
 function blDoiHienMuc(){
@@ -5562,6 +5565,7 @@ async function blTai(){
   try{
     const d=await api(`/api/bang-luong/${current}?nam=${blNam}`);
     blTS=d.tham_so;blDL=d.thang||{};blCacNam=d.cac_nam||[];blBan=false;
+    Object.keys(blDL).forEach(t=>{blDL[t]=blSapXepPartTime(blDL[t])});      // người part-time xếp dưới cùng
     localStorage.setItem('blNam',String(blNam));
     blVeChonNam();blVeTabs();blVeBang();
     const info=document.getElementById('blInfo');
@@ -5628,7 +5632,8 @@ function blVeBang(){
       const v=r[c.k];
       const kt=c.k==='kiem_tra'&&Math.abs((r.kiem_tra||0)-(r.thue_tru_luong!=null?r.thue_tru_luong:(r.thue_tncn||0)))>=1;
       const noiDung=c.so?blDinhDang(blGiaTriHienThi(r,c),c.dp):xkEsc(v==null?'':v);
-      if(c.tickCk)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${blLaCk(v)?'checked':''} onchange="blDoiCk(${ri},this.checked)" title="Tick = người này nhận lương bằng chuyển khoản; bỏ tick = nhận tiền mặt" style="width:17px;height:17px;cursor:pointer"></td>`;
+      if(Number(r.part_time)&&BL_PT_TRONG.includes(c.k))h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#f1f1f1"></td>`;
+      else if(c.tickCk)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${blLaCk(v)?'checked':''} onchange="blDoiCk(${ri},this.checked)" title="Tick = người này nhận lương bằng chuyển khoản; bỏ tick = nhận tiền mặt" style="width:17px;height:17px;cursor:pointer"></td>`;
       else if(c.k==='ten'&&(r.ten||r.ma))h+=`<td data-r="${ri}" data-k="ten" onclick="blMoNvCuaNguoi(${ri})" title="Bấm để mở Danh Sách Nhân Viên (dòng của người này viền đỏ)" style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;white-space:nowrap;cursor:pointer;${co(c,1)}">${noiDung} <span style="color:#1f6b4a;font-size:11px">▾</span></td>`;
       else if(c.tickPt)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fff8ee;text-align:center"><input type="checkbox" ${Number(v)?'checked':''} onchange="blDoiPt(${ri},this.checked)" title="Tick = lao động part-time: lương = Giờ làm thực tế × Lương theo giờ, không phụ cấp; dưới ngưỡng thì không đóng BHXH, từ ngưỡng trở lên tự tính BHXH" style="width:17px;height:17px;cursor:pointer"></td>`;
       else if(c.tick)h+=`<td style="padding:4px 8px;border:1px solid #e3e3e3;background:#fbfff9;text-align:center"><input type="checkbox" ${(v===0||v==='0'||v===false)?'':'checked'} onchange="blDoiBH(${ri},this.checked)" title="Tick = có đóng BHXH/BHYT/BHTN; bỏ tick = không tính BH" style="width:17px;height:17px;cursor:pointer"></td>`;
@@ -5706,7 +5711,7 @@ async function blTinhLai(t){
     if(seq!==blSeq)return;               // có lần sửa mới hơn — bỏ kết quả cũ
     // dòng part-time: server trả lương/phụ cấp đã quy đổi theo giờ — giữ NGUYÊN các ô nhập gốc (để bỏ tick part-time lại vẫn đúng)
     (kq.rows||[]).forEach((r,i)=>{const o=rows[i];if(o&&Number(r.part_time))['luong_cb','tien_com','muc_xang','di_lai','muc_dt','trang_phuc','tang_ca','dong_bh','thu_viec'].forEach(k=>{if(k in o)r[k]=o[k]})});
-    blDL[t]=kq.rows;blTS=kq.tham_so||blTS;
+    blDL[t]=blSapXepPartTime(kq.rows);blTS=kq.tham_so||blTS;      // người part-time xếp dưới cùng
     if(blThang===t)blVeBang();
   }catch(e){toast('Lỗi tính lương: '+e.message,'err')}
 }
@@ -6205,6 +6210,7 @@ function blCotIn(rows,ts){
     {k:'stt',t:'Stt',w:26,c:1},{k:'ma',t:'Mã NV',w:40,c:1},{k:'ten',t:'Họ và Tên',w:150},{k:'chuc_vu',t:'Chức vụ',w:88},
     {k:'luong_cb',t:'Lương căn bản',w:86,n:1,tong:1},{k:'ngay_cong_hd',t:'Ngày công',w:40,c:1,dp:1},
     {k:'gio_tang_ca',t:'Số giờ tăng ca',w:46,c:1,dp:1,tong:1,opt:1},{k:'ngay_lam_hd',t:'Tổng NC',w:42,c:1,dp:1},
+    {k:'luong_gio',t:'Lương theo giờ',w:70,n:1,opt:1},{k:'gio_lam',t:'Số giờ làm',w:48,c:1,dp:1,opt:1},
     {k:'luong',t:'Tiền lương',w:86,n:1,tong:1},
     {k:'tt_tien_com',t:'Tiền cơm',w:74,n:1,tong:1,opt:1,nhom:'pc'},{k:'xang_xe',t:'Xăng xe',w:74,n:1,tong:1,opt:1,nhom:'pc'},
     {k:'tt_di_lai',t:'Hỗ trợ đi lại',w:74,n:1,tong:1,opt:1,nhom:'pc'},
@@ -6253,6 +6259,7 @@ function blDungBangLuongIn(rows,nam,t,tuyChon){
     if(c.k==='stt')return `<td class="c">${i+1}</td>`;
     if(c.ky){const a=blAnhKy(r.ma,r.ten);return a?`<td class="ky-nhan"><img src="${a}"></td>`:'<td></td>'}
     if(c.k==='ma'||c.k==='ten'||c.k==='chuc_vu')return `<td class="${c.k==='ma'?'c':''}">${xkEsc(r[c.k]==null?'':r[c.k])}</td>`;
+    if(Number(r.part_time)&&BL_PT_TRONG.includes(c.k))return '<td></td>';       // part-time: không hiện lương CB / ngày công / tổng ngày công
     const v=r[c.k];
     const s=(c.k==='ngay_lam_hd'||c.k==='ngay_cong_hd'||c.k==='luong_cb'||c.k==='luong'||c.k==='tt_luong')?blDinhDang(v,c.dp):blSoIn(v,c.dp);
     return `<td class="${c.n?'n':'c'}${c.dam?' dam':''}">${s}</td>`;
@@ -6350,7 +6357,7 @@ function blDuLieuXuatMau(dsThang,nam,o){
     const ngay=(cham[0]||blChamCongThang({},nam,t,o.leSet)).ngay;
     thang[t]={
       cot:cot.map(c=>({k:c.k,t:c.t,nhom:c.nhom||'',n:!!c.n,tong:!!c.tong,dp:!!c.dp,dam:!!c.dam,w:c.w})),
-      rows:rows.map(r=>{const x={ten:r.ten||'',ma:r.ma||'',chuc_vu:r.chuc_vu||'',thoi_vu:!!r.thoi_vu};cot.forEach(c=>{if(c.k!=='stt'&&c.k!=='ky')x[c.k]=r[c.k]});return x}),
+      rows:rows.map(r=>{const x={ten:r.ten||'',ma:r.ma||'',chuc_vu:r.chuc_vu||'',thoi_vu:!!r.thoi_vu};cot.forEach(c=>{if(c.k!=='stt'&&c.k!=='ky')x[c.k]=(Number(r.part_time)&&BL_PT_TRONG.includes(c.k))?null:r[c.k]});return x}),
       cham:cham.map(c=>({tong:c.tong,soX:c.soX,gio:c.gio||0,pt:!!c.pt,suy:!!c.suy,dau:c.ngay.map(n=>n.dau),tc:c.ngay.map(n=>n.tc||0)})),
       ngay:ngay.map(n=>({d:n.d,thu:n.thu,cn:n.cn,le:n.le}))};
   });
