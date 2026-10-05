@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.125"
+APP_BUILD = "2026-10-05.126"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13332,6 +13332,10 @@ def _vb_nv_part_time(cid, nam):
         if m:
             y, th, d = min(m)
             n["ngay_bat_dau_lam"] = f"{d:02d}/{th:02d}/{y}"
+    # Chỉ người CÓ LÀM trong năm lập: bỏ người bắt đầu làm (giờ làm đầu tiên trong Bảng Lương, hoặc vào làm) SAU 31/12 năm lập — vd đang lập 2025 mà
+    # người đó mới có giờ làm từ 2026 thì hợp đồng không được ghi năm 2026 lẫn vào bộ 2025 — và người đã nghỉ việc trước 01/01 năm lập.
+    cuoi_nam = datetime.date(int(nam), 12, 31)
+    kq = [n for n in _vb_loc_theo_nam(kq, nam) if not ((vbld.ngay_date(n.get("ngay_bat_dau_lam")) or datetime.date.min) > cuoi_nam)]
     # SẮP XẾP theo ngày bắt đầu làm việc đầu tiên TĂNG DẦN (cùng ngày giữ thứ tự danh sách NV): hợp đồng, số hợp đồng và STT đi theo thứ tự thời gian
     ngay0 = datetime.date(int(nam), 1, 1)
     kq = [n for _i, n in sorted(enumerate(kq), key=lambda x: (vbld.ngay_date(x[1].get("ngay_bat_dau_lam")) or vbld.ngay_date(x[1].get("vao_lam")) or ngay0, x[0]))]

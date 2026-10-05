@@ -25,6 +25,7 @@ server.db = lambda: KhongDong(conn)
 server.nhap_lieu_get = lambda cid, loai="in": {"header": H, "rows": ROWS} if loai == "nv" else {"header": [], "rows": []}
 server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), {}, "", [])
 server._vb_chu_ky_dict = lambda cid: {}
+_pt_goc = server._pt_nguoi_trong_nam
 server._pt_nguoi_trong_nam = lambda cid, nam: set()
 server.DOWNLOAD_DIR = tempfile.mkdtemp()
 class Req:
@@ -53,3 +54,24 @@ try:
 except HTTPException as e:
     assert e.status_code == 404 and "Năm 2020" in e.detail
 print("PASS: hợp đồng chỉ gồm người có làm việc trong năm lập")
+
+# HỢP ĐỒNG PART-TIME: tương tự — lập năm 2025 không có người vào làm 2026, người chỉ bắt đầu có giờ làm từ 2026, người nghỉ từ 2024
+def pt(ma, ten, vao, nghi=''):
+    r = [''] * len(H)
+    for a, b in {'Mã NV': ma, 'Họ và tên': ten, 'Tháng/Năm vào làm': vao, 'Tháng/Năm nghỉ việc': nghi, 'Part-time': 'x', 'Lương theo giờ': 25_000}.items():
+        r[H.index(a)] = b
+    return r
+ROWS[:] = [pt('P1', 'Nguyễn Văn Thơ', '01/2025'), pt('P2', 'Nguyễn Văn Được', '03/2026'), pt('P3', 'Đặng Văn Tèo', '01/2025'),
+           pt('P4', 'Trương Thanh Bình', '01/2024', '01/12/2024')]
+BLP = {2025: {"05": [{"ma": "P1", "ten": "Nguyễn Văn Thơ", "gio_lam": 40.0, "part_time": 1}]},
+       2026: {"02": [{"ma": "P3", "ten": "Đặng Văn Tèo", "gio_lam": 35.0, "part_time": 1}], "04": [{"ma": "P2", "ten": "Nguyễn Văn Được", "gio_lam": 42.0, "part_time": 1}]}}
+server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), BLP.get(nam, {}), "", [2026, 2025])
+server._pt_nguoi_trong_nam = _pt_goc
+server._luong_npt_doc = lambda d: {}
+d = server.van_ban_du_lieu(7, 2025)
+assert [n["ten"] for n in d["nhan_vien_pt"]] == ["Nguyễn Văn Thơ"], d["nhan_vien_pt"]
+r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2025, "tuy_chon": {}})))
+assert r["so_van_ban"] == 1 and "NGUYỄN VĂN THƠ" in r["html"] and "2026" not in r["html"] and "ĐẶNG VĂN TÈO" not in r["html"] and "NGUYỄN VĂN ĐƯỢC" not in r["html"]
+d = server.van_ban_du_lieu(7, 2026)
+assert [n["ten"] for n in d["nhan_vien_pt"]] == ["Nguyễn Văn Thơ", "Đặng Văn Tèo", "Nguyễn Văn Được"], d["nhan_vien_pt"]
+print("PASS: hợp đồng part-time chỉ gồm người có làm việc trong năm lập")
