@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.110"
+APP_BUILD = "2026-10-05.111"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13229,6 +13229,15 @@ def _vb_du_lieu(cid, nam, chi_bang_luong=False):
     return cty, nv, ts
 
 
+def _vb_tc_kiem_tra(tc, nam, loai=None):
+    """Tuỳ chọn dùng để ĐỐI CHIẾU (lương tối thiểu vùng theo năm của văn bản): hợp đồng lấy ngày ký / bắt đầu / 01/01 của NĂM LẬP đang chọn,
+    không lấy ngày hôm nay (năm lập 2025 mà hôm nay 2026 thì không được đối chiếu với lương tối thiểu 2026)."""
+    t = dict(tc or {})
+    if loai in ("hd", "tv", "pt") or (loai is None and int(nam) != datetime.date.today().year):
+        t["ngay"] = t.get("ngay_ky") or t.get("bat_dau") or f"01/01/{int(nam)}"
+    return t
+
+
 def _vb_nv_part_time(cid, nam):
     """Người lao động PART-TIME có làm part-time trong năm `nam` (theo Danh Sách NV: dòng tick Part-time + khoảng vào làm/nghỉ việc), lấy ĐÚNG dòng part-time
     của họ (người chuyển sang toàn thời gian giữa năm, vd 2 → 2-001, vẫn có hợp đồng part-time cho giai đoạn part-time). STT riêng 1..n."""
@@ -13320,7 +13329,8 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
             "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
                              for n in _vb_nv_part_time(cid, nam)],
             "chuc_danh": vbld.chuc_danh_day_du(tc["nhom_tuy_chinh"]),
-            "canh_bao": vbld.kiem_tra(nv_ft, nam, tc, _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else []}
+            "canh_bao": vbld.kiem_tra(nv_ft, nam, _vb_tc_kiem_tra(tc, nam), _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else [],
+            "canh_bao_pt": vbld.kiem_tra_part_time(_vb_nv_part_time(cid, nam), tc, nam)}
 
 
 @app.get("/api/van-ban/{cid}/chuc-danh")
@@ -13713,7 +13723,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": len(chon), "canh_bao": cb, "so_chu_ky": html.count('src="data:image')}
     if not nv:
         raise HTTPException(404, "Chưa có nhân viên toàn thời gian: hãy nhập Danh Sách Nhân Viên (lao động part-time có hợp đồng riêng)")
-    cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, tc), _LUONG_TRAN_PC_KHONG_THUE)
+    cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, _vb_tc_kiem_tra(tc, nam, loai)), _LUONG_TRAN_PC_KHONG_THUE)
     if loai in ("hd", "tv"):
         try:
             tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv_het))

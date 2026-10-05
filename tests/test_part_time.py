@@ -84,11 +84,17 @@ CTY = {"ten": "CÔNG TY TNHH THỬ", "mst": "0300000001", "dia_chi": "1 Lê Lợ
 def van_ban(h):
     import re
     return re.sub(r"<[^>]+>", "", h).replace("&nbsp;", " ")
-tc = {"pt_gio_ngay": "2", "pt_lich": "từ Thứ Hai đến Thứ Sáu"}
+tc = {"pt_gio_ngay": "2", "pt_ngay_tuan": 5, "pt_lich": "từ Thứ Hai đến Thứ Sáu"}
 h = v.dung_hop_dong_part_time(nv[1], CTY, tc, 0, nam=2026)
 t = van_ban(h)
 assert "LÀM VIỆC KHÔNG TRỌN THỜI GIAN" in t and "HỢP ĐỒNG LAO ĐỘNG" in t
-assert "2 giờ/ngày" in t and "từ Thứ Hai đến Thứ Sáu" in t and "10 giờ/tuần" in t and "ngắn hơn" in t
+assert "theo lịch sắp xếp của Công ty" in t and "chỉ làm việc khi Công ty có lịch sắp xếp" in t and "khoảng 2 giờ/ngày" in t and "10 giờ/tuần" in t and "ngắn hơn" in t
+assert "Loại hợp đồng" not in t and "Xác định thời hạn" not in t and "Địa điểm làm việc" not in t, "không có mục loại hợp đồng, không có dòng địa điểm làm việc"
+assert "1. Thời hạn hợp đồng: 12 tháng, từ ngày 01 tháng 01 năm 2026" in t and "2. Chức danh chuyên môn / chức vụ: Bảo vệ." in t and "3. Công việc phải làm:" in t
+# chưa có giờ/tháng dự kiến: không in dòng "Số giờ làm việc dự kiến: ........"
+t_trong = van_ban(v.dung_hop_dong_part_time(nv[1], CTY, {}, 0, nam=2026))
+assert "dự kiến: ........" not in t_trong and "Số giờ làm việc dự kiến" not in t_trong and "theo lịch sắp xếp của Công ty" in t_trong and "từ Thứ Hai" not in t_trong
+assert "2. Tiền lương thực nhận hằng tháng" in t_trong or "3. Tiền lương thực nhận" in t_trong
 assert "theo giờ" in t and "26.000 đồng/giờ" in t and "dưới 2.530.000 đồng/tháng" in t and "Phụ cấp lương và các khoản bổ sung khác: không có" in t
 assert "Do thời giờ làm việc và mức tiền lương tháng không đạt mức tối thiểu làm căn cứ đóng bảo hiểm xã hội bắt buộc theo quy định của Luật Bảo hiểm xã hội, Người lao động không thuộc đối tượng tham gia bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp bắt buộc." in t
 assert "HĐPT-2026" in t
@@ -100,7 +106,7 @@ cb = v.kiem_tra_part_time([nv[1]], v.gop_tuy_chon(CTY, {"pt_gio_ngay": "4", "pt_
 assert any(c["muc"] == "loi" and "thuộc đối tượng tham gia BHXH bắt buộc" in c["nd"] for c in cb)
 # thiếu dữ liệu / sai: cảnh báo
 cb = v.kiem_tra_part_time([dict(nv[1], luong_gio=0)], v.gop_tuy_chon(CTY, {}), 2026)
-assert any("chưa ghi số giờ" in c["nd"] for c in cb) and any("chưa có lương theo giờ" in c["nd"] for c in cb)
+assert not any("chưa ghi số giờ" in c["nd"] for c in cb) and any("chưa có lương theo giờ" in c["nd"] for c in cb), "giờ theo lịch sắp xếp: không bắt buộc ghi giờ/ngày"
 cb = v.kiem_tra_part_time([nv[1]], v.gop_tuy_chon(CTY, {"pt_gio_ngay": "8"}), 2026)
 assert any("không ngắn hơn" in c["nd"] for c in cb)
 cb = v.kiem_tra_part_time([dict(nv[1], luong_gio=20000)], v.gop_tuy_chon(CTY, {"pt_gio_ngay": "2"}), 2026)
@@ -130,4 +136,12 @@ for t, rs in kq["thang"].items():
     assert bool(ten_pt) == (3 <= int(t) <= 8), (t, len(ten_pt))
     assert all(r["gio_lam"] == "" and r["chi_phi_luong"] == 0 for r in ten_pt), "giờ làm để trống, không tự đặt"
 assert any("part-time" in c.lower() for c in kq["tom_tat"]["canh_bao"])
+# đối chiếu theo NĂM LẬP của văn bản (không theo ngày hôm nay): hợp đồng năm 2025 dùng lương tối thiểu 2025 (4.960.000), không báo lỗi lương 5.100.000
+assert server._vb_tc_kiem_tra({"ngay": "05/10/2026"}, 2025, "hd")["ngay"] == "01/01/2025" and server._vb_tc_kiem_tra({"ngay_ky": "15/03/2025"}, 2025, "pt")["ngay"] == "15/03/2025"
+assert server._vb_tc_kiem_tra({"ngay": "02/01/2026"}, 2026, "qc")["ngay"] == "02/01/2026", "quy chế/thang lương giữ ngày ban hành"
+nv_l = [dict(nv[0], luong_cb=5100000.0, tien_com=0.0, xang_xe=0.0, dien_thoai=0.0, trang_phuc=0.0)]
+cb25 = v.kiem_tra(nv_l, 2025, v.gop_tuy_chon(CTY, server._vb_tc_kiem_tra({"ngay": "05/10/2026"}, 2025, "hd")), {})
+assert not any("thấp hơn lương tối thiểu" in c["nd"] for c in cb25), cb25
+cb26 = v.kiem_tra(nv_l, 2026, v.gop_tuy_chon(CTY, {"ngay": "05/10/2026"}), {})
+assert any("thấp hơn lương tối thiểu" in c["nd"] for c in cb26)
 print("PASS")

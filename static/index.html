@@ -4478,6 +4478,13 @@ const VB_PHUC_LOI_TEN={cuoi_nam:['Thưởng cuối năm theo kết quả kinh do
   hieu_hy:['Hỗ trợ hiếu, hỷ — bản thân / thân nhân (đ/lần)',2],om_dau:['Hỗ trợ thiên tai, tai nạn, ốm đau — bản thân / thân nhân (đ/lần)',2],
   thuong_le:['Thưởng sinh nhật, ngày lễ — từ / đến (đ/lần)',2],cong_tac_phi:['Công tác phí đi về trong ngày (đ/ngày)',1],
   du_lich:['Hỗ trợ du lịch, nghỉ mát hằng năm',0],hoc_phi:['Hỗ trợ học phí đào tạo theo yêu cầu công việc',0]};
+function vbHtmlCanhBao(cb){
+  const loiN=cb.filter(c=>c.muc==='loi').length;
+  return cb.length?`<details style="margin-bottom:8px;border:1px solid ${loiN?'#e0a0a0':'#e6d28a'};background:${loiN?'#fdf0f0':'#fffbe8'};border-radius:8px;padding:6px 10px" ${loiN?'open':''}>
+      <summary style="cursor:pointer;font-size:13px;font-weight:600">⚠ Đối chiếu dữ liệu trước khi nộp thanh tra BHXH / thuế: ${loiN} lỗi, ${cb.length-loiN} cảnh báo</summary>
+      <div style="font-size:12.5px;max-height:180px;overflow:auto;margin-top:4px">${cb.slice(0,60).map(c=>`<div style="color:${c.muc==='loi'?'#b00':'#7a5a00'}">${c.muc==='loi'?'✖':'•'} ${vbEsc(c.nd)}</div>`).join('')}${cb.length>60?`<div>… và ${cb.length-60} mục khác</div>`:''}</div></details>`
+    :`<div style="margin-bottom:8px;font-size:13px;color:#1f6b4a">✔ Dữ liệu đã đối chiếu: không phát hiện sai lệch.</div>`;
+}
 function vbVeMan(){
   const d=vbDL,tc=d.tuy_chon,l=vbLoai;
   const nv=d.nhan_vien||[];
@@ -4542,18 +4549,17 @@ function vbVeMan(){
       ${vbOChon('vb_tu','In hàng loạt — TỪ người part-time',optPt.length?optPt:[['','— chưa có người part-time —']],optPt.length?optPt[0][0]:'',300)}
       ${vbOChon('vb_den','ĐẾN người part-time',optPt.length?optPt:[['','— chưa có người part-time —']],optPt.length?optPt[optPt.length-1][0]:'',300)}
     </div>
-    <div class="hint" style="margin-bottom:6px">Chỉ lao động đã tick <b>Part-time</b> ở Danh Sách Nhân Viên. Lương theo giờ lấy từ cột <b>Lương theo giờ</b> (ô “Lương theo giờ” dưới đây, nếu nhập, áp dụng cho tất cả). Hợp đồng ghi: tên “làm việc không trọn thời gian”, thời giờ làm việc ngắn hơn 8 giờ/ngày – 48 giờ/tuần, lương theo giờ + lương tháng dự kiến dưới ngưỡng, câu về BHXH. Số giờ thực tế từng tháng nhập ở Bảng Lương (cột Giờ làm).</div>
+    <div class="hint" style="margin-bottom:6px">Chỉ lao động đã tick <b>Part-time</b> ở Danh Sách Nhân Viên. Lương theo giờ lấy từ cột <b>Lương theo giờ</b> (ô “Lương theo giờ” dưới đây, nếu nhập, áp dụng cho tất cả). Hợp đồng ghi: tên “làm việc không trọn thời gian”, thời giờ làm việc THEO LỊCH SẮP XẾP của Công ty (chỉ làm khi có lịch), ngắn hơn 8 giờ/ngày – 48 giờ/tuần, lương theo giờ, câu về BHXH. Các ô giờ/lịch dự kiến bên dưới để trống cũng được. Số giờ thực tế từng tháng nhập ở Bảng Lương (cột Giờ làm).</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-      ${vbOChu('vb_pt_gio_ngay','Số giờ làm việc / ngày',tc.pt_gio_ngay,110,'vd 2')}
-      ${vbOChu('vb_pt_ngay_tuan','Số ngày / tuần',tc.pt_ngay_tuan,90)}
-      ${vbOChu('vb_pt_lich','Lịch làm việc',tc.pt_lich,190,'vd từ Thứ Hai đến Thứ Sáu')}
+      ${vbOChu('vb_pt_gio_ngay','Giờ làm dự kiến / ngày (tuỳ chọn)',tc.pt_gio_ngay,110,'vd 2')}
+      ${vbOChu('vb_pt_ngay_tuan','Số ngày / tuần (tuỳ chọn)',tc.pt_ngay_tuan,90)}
+      ${vbOChu('vb_pt_lich','Lịch dự kiến (tuỳ chọn)',tc.pt_lich,190,'vd từ Thứ Hai đến Thứ Sáu')}
       ${vbOChu('vb_pt_khung_gio','Khung giờ (tuỳ chọn)',tc.pt_khung_gio,150,'vd 17h00–19h00')}
       ${vbOChu('vb_pt_gio_tuan','Giờ/tuần (trống = giờ/ngày × ngày/tuần)',tc.pt_gio_tuan,150)}
       ${vbOChu('vb_pt_gio_thang','Giờ/tháng dự kiến (trống = tự tính)',tc.pt_gio_thang,150)}
       ${vbOChu('vb_pt_luong_gio','Lương theo giờ (đ/giờ; trống = theo Danh sách NV)',tc.pt_luong_gio,200)}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-      ${vbOChon('vb_loai_hd','Loại hợp đồng',[['xdth','Xác định thời hạn'],['kxdth','Không xác định thời hạn']],tc.loai_hd,170)}
       ${vbOChu('vb_so_thang','Thời hạn (tháng, tối đa 36)',tc.so_thang,120)}
       ${vbOChu('vb_bat_dau','Ngày bắt đầu (trống = ngày vào làm, hoặc 01/01 của năm lập)',tc.bat_dau,170,'dd/mm/yyyy')}
       ${vbOChu('vb_ngay_ky','Ngày ký (trống = ngày bắt đầu)',tc.ngay_ky,150,'dd/mm/yyyy')}
@@ -4561,7 +4567,6 @@ function vbVeMan(){
       ${vbOChu('vb_pt_mau_so','Mẫu số hợp đồng',tc.pt_mau_so,160,'{so:02d} = số thứ tự, {nam} = năm')}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-      ${vbOChu('vb_dia_diem','Địa điểm làm việc',tc.dia_diem,260)}
       ${vbOChu('vb_bo_phan','Bộ phận (trống = bỏ dòng)',tc.bo_phan,140)}
       ${vbOChu('vb_hinh_thuc_tra','Hình thức trả lương',tc.hinh_thuc_tra,130)}
       ${vbOChu('vb_ngay_tra','Trả lương ngày … hằng tháng',tc.ngay_tra,110)}
@@ -4599,12 +4604,7 @@ function vbVeMan(){
     </div>
     <div id="vbDoLuongKq"></div>`;
   }
-  const cb=d.canh_bao||[];
-  const loiN=cb.filter(c=>c.muc==='loi').length;
-  const hopCb=cb.length?`<details style="margin-bottom:8px;border:1px solid ${loiN?'#e0a0a0':'#e6d28a'};background:${loiN?'#fdf0f0':'#fffbe8'};border-radius:8px;padding:6px 10px" ${loiN?'open':''}>
-      <summary style="cursor:pointer;font-size:13px;font-weight:600">⚠ Đối chiếu dữ liệu trước khi nộp thanh tra BHXH / thuế: ${loiN} lỗi, ${cb.length-loiN} cảnh báo</summary>
-      <div style="font-size:12.5px;max-height:180px;overflow:auto;margin-top:4px">${cb.slice(0,60).map(c=>`<div style="color:${c.muc==='loi'?'#b00':'#7a5a00'}">${c.muc==='loi'?'✖':'•'} ${vbEsc(c.nd)}</div>`).join('')}${cb.length>60?`<div>… và ${cb.length-60} mục khác</div>`:''}</div></details>`
-    :`<div style="margin-bottom:8px;font-size:13px;color:#1f6b4a">✔ Dữ liệu đã đối chiếu: không phát hiện sai lệch.</div>`;
+  const hopCb=`<div id="vbCanhBao">${vbHtmlCanhBao(l==='pt'?(d.canh_bao_pt||[]):(d.canh_bao||[]))}</div>`;
   document.getElementById('nhapLieuBody').innerHTML=`
     <div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e0e0e0">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -4698,6 +4698,7 @@ async function vbTaoXemTruoc(){
     const le=t.le||[20,20,30,15];set('vb_mt',le[0]);set('vb_mb',le[1]);set('vb_ml',le[2]);set('vb_mr',le[3]);
     document.getElementById('vb_ngang').checked=!!t.ngang;
     document.getElementById('vbXem').innerHTML=d.html;
+    const kbCb=document.getElementById('vbCanhBao');if(kbCb)kbCb.innerHTML=vbHtmlCanhBao(d.canh_bao||[]);      // bảng đối chiếu theo đúng những người + tuỳ chọn vừa dựng
     vbApDungTrang();vbSua=false;
     tt.textContent=((vbLoai==='hd'||vbLoai==='tv'||vbLoai==='pt')?`Đã dựng ${d.so_van_ban} hợp đồng (mỗi hợp đồng 1 trang riêng).`:'Đã dựng văn bản.')+(d.so_chu_ky?` Đã gắn ${d.so_chu_ky} chữ ký từ Kho chữ ký.`:'');
     document.getElementById('vbXem').scrollIntoView({behavior:'smooth',block:'start'});

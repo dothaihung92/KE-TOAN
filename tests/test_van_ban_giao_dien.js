@@ -699,3 +699,12 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(html.includes('nvCoDinhCot(wrap);\n  nvSelVe();'), 'gọi sau mỗi lần vẽ lại bảng');
   console.log('PASS 31: cố định cột đến Họ và tên.');
 })();
+
+// 32: Hợp đồng Part-time — không có ô "Loại hợp đồng", không có ô Địa điểm; bảng đối chiếu riêng cho part-time và cập nhật sau khi dựng bản xem trước
+(() => {
+  const iV = html.indexOf('function vbVeMan'), iE = html.indexOf('function vbTuyChon', iV), phan = html.slice(iV, iE);
+  const iPt = phan.indexOf("if(l==='pt'){"), iQc = phan.indexOf("if(l==='qc'){", iPt), pt = phan.slice(iPt, iQc);
+  assert(!pt.includes('vb_loai_hd') && !pt.includes('Loại hợp đồng') && !pt.includes("vb_dia_diem"), 'form part-time không có Loại hợp đồng / Địa điểm làm việc');
+  assert(phan.includes("l==='pt'?(d.canh_bao_pt||[]):(d.canh_bao||[])") && html.includes("kbCb.innerHTML=vbHtmlCanhBao(d.canh_bao||[])"), 'bảng đối chiếu: part-time dùng cảnh báo riêng, cập nhật sau khi tạo bản xem trước');
+  console.log('PASS 32: hợp đồng part-time bỏ loại hợp đồng/địa điểm, đối chiếu đúng.');
+})();

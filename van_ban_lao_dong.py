@@ -257,7 +257,7 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "vung": 1, "buoc_pct": 5, "so_bac": 7, "kem_xep_luong": True, "gan_chu_ky": True,
         "tv_tu": "", "tv_den": "", "tv_phan_tram": 100, "tv_cong_viec": "", "hien_he_so": True, "nhom_tuy_chinh": NHOM_MAC_DINH,
         # hợp đồng lao động part-time (làm việc không trọn thời gian)
-        "pt_gio_ngay": "", "pt_ngay_tuan": 5, "pt_lich": "từ Thứ Hai đến Thứ Sáu", "pt_khung_gio": "", "pt_gio_tuan": "", "pt_gio_thang": "", "pt_luong_gio": "", "pt_mau_so": "{so:02d}/HĐPT-{nam}",
+        "pt_gio_ngay": "", "pt_ngay_tuan": "", "pt_lich": "", "pt_khung_gio": "", "pt_gio_tuan": "", "pt_gio_thang": "", "pt_luong_gio": "", "pt_mau_so": "{so:02d}/HĐPT-{nam}",
     }
 
 
@@ -268,7 +268,7 @@ def gop_tuy_chon(cty, tuy_chon, hom_nay=None):
             for kk, vv in v.items():
                 if kk in kq["phuc_loi"] and isinstance(vv, dict):
                     kq["phuc_loi"][kk].update(vv)
-        elif v is not None and (v != "" or k in ("bat_dau", "ngay_ky", "bo_phan", "cong_viec", "ong_ba_ky", "dien_thoai", "nhom_tuy_chinh", "tv_tu", "tv_den", "tv_cong_viec", "pt_gio_ngay", "pt_khung_gio", "pt_gio_tuan", "pt_gio_thang", "pt_luong_gio")):
+        elif v is not None and (v != "" or k in ("bat_dau", "ngay_ky", "bo_phan", "cong_viec", "ong_ba_ky", "dien_thoai", "nhom_tuy_chinh", "tv_tu", "tv_den", "tv_cong_viec", "pt_gio_ngay", "pt_ngay_tuan", "pt_lich", "pt_khung_gio", "pt_gio_tuan", "pt_gio_thang", "pt_luong_gio")):
             kq[k] = v
     return kq
 
@@ -1818,17 +1818,13 @@ def kiem_tra_part_time(ds_nv, tuy_chon, nam=None):
     for nv in ds_nv:
         t = nv["ten"]
         gio_ngay, ngay_tuan, gio_tuan, gio_thang, don_gia, luong = _gio_dien_ra(tc, nv)
-        if not gio_ngay and not gio_tuan:
-            kq.append({"muc": "loi", "nd": f"{t}: chưa ghi số giờ làm việc/ngày hoặc/tuần (thời giờ làm việc là nội dung bắt buộc của hợp đồng part-time)."})
         if (gio_ngay and gio_ngay >= 8) or (gio_tuan and gio_tuan >= 48):
             kq.append({"muc": "loi", "nd": f"{t}: thời giờ làm việc không ngắn hơn 08 giờ/ngày hoặc 48 giờ/tuần — không phải làm việc không trọn thời gian (Điều 32 BLLĐ 2019)."})
         if not don_gia:
             kq.append({"muc": "loi", "nd": f"{t}: chưa có lương theo giờ (cột 'Lương theo giờ' ở Danh Sách Nhân Viên hoặc ô trên màn hình)."})
         elif don_gia + 0.5 < luong_toi_thieu_gio(nam, tc.get("vung", 1)):
             kq.append({"muc": "loi", "nd": f"{t}: lương theo giờ {so_tien(don_gia)} đ thấp hơn mức lương tối thiểu giờ vùng {int(tc.get('vung', 1))} (≈ {so_tien(luong_toi_thieu_gio(nam, tc.get('vung', 1)))} đ/giờ)."})
-        if luong is None:
-            kq.append({"muc": "canh_bao", "nd": f"{t}: chưa đủ dữ liệu (giờ làm/tháng × lương giờ) để xác định tiền lương tháng dự kiến có dưới {so_tien(ng)} đ hay không — chưa nên ghi 'không thuộc đối tượng BHXH'."})
-        elif luong >= ng - 1e-9:
+        if luong is not None and luong >= ng - 1e-9:
             kq.append({"muc": "loi", "nd": f"{t}: tiền lương tháng dự kiến {so_tien(luong)} đ từ {so_tien(ng)} đ trở lên — thuộc đối tượng tham gia BHXH bắt buộc; hợp đồng đã ghi theo hướng PHẢI đóng BHXH, không ghi câu 'không thuộc đối tượng'."})
     kq.append({"muc": "canh_bao", "nd": f"Ngưỡng {so_tien(ng)} đ/tháng lấy theo mức tham chiếu mặc định — hãy đối chiếu văn bản BHXH hiện hành (sửa được trong tham số); chỉ áp dụng khi giờ làm thực tế trong từng tháng đúng như hợp đồng: tháng nào lương thực nhận đạt ngưỡng thì tháng đó phải đóng BHXH."})
     return kq
@@ -1857,7 +1853,6 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     khong_bh = luong_dk is None or luong_dk < ng - 1e-9          # chỉ ghi "không thuộc đối tượng BHXH" khi lương tháng dự kiến DƯỚI ngưỡng (thiếu dữ liệu: vẫn ghi theo mẫu, màn hình cảnh báo)
     h = ['<section class="vb-trang">', _tieu_ngu(cty, so_hd, tc.get("dia_danh"), ngay_ky),
          _p("&nbsp;"), _p("<b>HỢP ĐỒNG LAO ĐỘNG</b>", "c b"), _p("<b>(LÀM VIỆC KHÔNG TRỌN THỜI GIAN)</b>", "c b"),
-         _p(f"<b>({esc(loai_ten.replace('Hợp đồng lao động ', '').capitalize())})</b>", "c"),
          _p("Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20/11/2019 (trong đó có Điều 32 về người lao động làm việc không trọn thời gian), Nghị định số 145/2020/NĐ-CP ngày 14/12/2020 "
             "của Chính phủ và Luật Bảo hiểm xã hội số 41/2024/QH15;", "j ti"),
          _p("Hôm nay, " + esc(ngay_chu(ngay_ky)) + f", tại {esc(tc.get('dia_diem') or cty.get('dia_chi') or '..........')}, chúng tôi gồm:", "j ti"),
@@ -1880,46 +1875,56 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     # Điều 1
     cv = (tc.get("cong_viec") or "").strip() or f"Thực hiện các nhiệm vụ của chức danh {nv.get('chuc_vu') or '.........'} theo phân công, hướng dẫn của Người sử dụng lao động"
     co_bp = bool((tc.get("bo_phan") or "").strip())
-    h.append(_p("<b>Điều 1. Thời hạn hợp đồng, địa điểm, chức danh và công việc phải làm</b>"))
+    h.append(_p("<b>Điều 1. Thời hạn hợp đồng, chức danh và công việc phải làm</b>"))
     if cuoi:
-        h.append(_p(f"1. Loại hợp đồng lao động: {esc(loai_ten)}, thời hạn {thang} tháng, từ {esc(ngay_chu(bat_dau))} đến hết {esc(ngay_chu(cuoi))}.", "j"))
+        h.append(_p(f"1. Thời hạn hợp đồng: {thang} tháng, từ {esc(ngay_chu(bat_dau))} đến hết {esc(ngay_chu(cuoi))}.", "j"))
     else:
-        h.append(_p(f"1. Loại hợp đồng lao động: {esc(loai_ten)}, có hiệu lực kể từ {esc(ngay_chu(bat_dau))}.", "j"))
-    h.append(_p(f"2. Địa điểm làm việc: {esc(tc.get('dia_diem') or cty.get('dia_chi') or '')}.", "j"))
+        h.append(_p(f"1. Hợp đồng có hiệu lực kể từ {esc(ngay_chu(bat_dau))}.", "j"))
+    n1 = 1
     if co_bp:
-        h.append(_p(f"3. Bộ phận làm việc: {esc(tc['bo_phan'])}.", "j"))
-    h.append(_p(f"{4 if co_bp else 3}. Chức danh chuyên môn / chức vụ: {esc(nv.get('chuc_vu') or '..........')}.", "j"))
-    h.append(_p(f"{5 if co_bp else 4}. Công việc phải làm: {esc(cv)}.", "j"))
+        n1 += 1
+        h.append(_p(f"{n1}. Bộ phận làm việc: {esc(tc['bo_phan'])}.", "j"))
+    h.append(_p(f"{n1 + 1}. Chức danh chuyên môn / chức vụ: {esc(nv.get('chuc_vu') or '..........')}.", "j"))
+    h.append(_p(f"{n1 + 2}. Công việc phải làm: {esc(cv)}.", "j"))
 
-    # Điều 2 — thời giờ làm việc
+    # Điều 2 — thời giờ làm việc: theo LỊCH SẮP XẾP của Công ty (chỉ làm việc khi Công ty có lịch)
     h.append(_p("<b>Điều 2. Thời giờ làm việc, thời giờ nghỉ ngơi</b>"))
+    chi_tiet = []
     if gio_ngay:
-        lich = f"{_gio_hien(gio_ngay)} giờ/ngày" + (f", {esc(tc.get('pt_lich') or '')}" if (tc.get("pt_lich") or "").strip() else "")
-    else:
-        lich = esc(tc.get("pt_lich") or "..........")
-    lich += f" (khung giờ làm việc: {esc(tc['pt_khung_gio'])})" if (tc.get("pt_khung_gio") or "").strip() else ""
-    h.append(_p(f"1. Thời giờ làm việc: <b>{lich}</b>" + (f"; tổng cộng <b>{_gio_hien(gio_tuan)} giờ/tuần</b>" if gio_tuan else "")
+        chi_tiet.append(f"khoảng {_gio_hien(gio_ngay)} giờ/ngày")
+    if gio_tuan:
+        chi_tiet.append(f"tổng cộng khoảng {_gio_hien(gio_tuan)} giờ/tuần")
+    if (tc.get("pt_lich") or "").strip():
+        chi_tiet.append(esc(tc["pt_lich"]))
+    if (tc.get("pt_khung_gio") or "").strip():
+        chi_tiet.append(f"khung giờ: {esc(tc['pt_khung_gio'])}")
+    h.append(_p("1. Thời giờ làm việc: <b>theo lịch sắp xếp của Công ty</b>. Người lao động chỉ làm việc khi Công ty có lịch sắp xếp và thông báo trước (số giờ làm việc trong ngày, trong tuần "
+                "theo lịch đã thông báo)" + (f"; dự kiến {', '.join(chi_tiet)}" if chi_tiet else "")
                 + ". Đây là thời giờ làm việc <b>ngắn hơn</b> thời giờ làm việc bình thường (08 giờ/ngày, 48 giờ/tuần) theo quy định của pháp luật và nội quy lao động của Công ty.", "j"))
-    h.append(_p("2. Hai bên có thể thỏa thuận thay đổi lịch làm việc cụ thể bằng văn bản (hoặc tin nhắn/thư điện tử được hai bên xác nhận) nhưng không làm thay đổi tính chất làm việc không trọn thời gian; "
+    h.append(_p("2. Việc thay đổi lịch làm việc do Công ty thông báo (bằng văn bản, tin nhắn hoặc thư điện tử) không làm thay đổi tính chất làm việc không trọn thời gian; "
                 "số giờ làm việc thực tế hằng tháng được Công ty ghi nhận trên bảng chấm công và có xác nhận của Người lao động.", "j"))
     h.append(_p("3. Thời giờ nghỉ ngơi, an toàn, vệ sinh lao động: thực hiện theo quy định của Bộ luật Lao động năm 2019, tương ứng với thời gian làm việc thực tế và nội quy lao động của Công ty.", "j"))
 
     # Điều 3 — tiền lương
     h.append(_p("<b>Điều 3. Tiền lương và các khoản bổ sung</b>"))
+    n3 = 0
+
+    def d3(txt):
+        nonlocal n3
+        n3 += 1
+        h.append(_p(f"{n3}. {txt}", "j"))
     if don_gia:
-        h.append(_p(f"1. Hình thức trả lương: <b>theo giờ</b>. Mức lương: <b>{so_tien(don_gia)} đồng/giờ</b> (bằng chữ: {esc(doc_so_thanh_chu(don_gia))}). "
-                    "Mức lương theo giờ không thấp hơn mức lương tối thiểu giờ theo quy định của pháp luật.", "j"))
+        d3(f"Hình thức trả lương: <b>theo giờ</b>. Mức lương: <b>{so_tien(don_gia)} đồng/giờ</b> (bằng chữ: {esc(doc_so_thanh_chu(don_gia))}). "
+           "Mức lương theo giờ không thấp hơn mức lương tối thiểu giờ theo quy định của pháp luật.")
     else:
-        h.append(_p("1. Hình thức trả lương: <b>theo giờ</b>. Mức lương: ................ đồng/giờ (bằng chữ: ............................).", "j"))
+        d3("Hình thức trả lương: <b>theo giờ</b>. Mức lương: ................ đồng/giờ (bằng chữ: ............................).")
     if luong_dk:
-        h.append(_p(f"2. Số giờ làm việc dự kiến khoảng {_gio_hien(gio_thang)} giờ/tháng; <b>tổng tiền lương dự kiến hằng tháng khoảng {so_tien(luong_dk)} đồng/tháng</b>"
-                    + (f", <b>dưới {so_tien(ng)} đồng/tháng</b>." if khong_bh else f" (từ {so_tien(ng)} đồng/tháng trở lên)."), "j"))
-    else:
-        h.append(_p(f"2. Số giờ làm việc dự kiến: ........ giờ/tháng; tổng tiền lương dự kiến hằng tháng: ................ đồng/tháng, dưới {so_tien(ng)} đồng/tháng.", "j"))
-    h.append(_p("3. Tiền lương thực nhận hằng tháng = số giờ làm việc thực tế trong tháng × mức lương theo giờ. Tháng không làm việc hoặc không có giờ làm việc thì không phát sinh tiền lương.", "j"))
-    h.append(_p("4. Phụ cấp lương và các khoản bổ sung khác: <b>không có</b>, trừ trường hợp được Công ty quyết định bằng văn bản.", "j"))
-    h.append(_p(f"5. Hình thức trả lương: {esc(tc.get('hinh_thuc_tra') or 'chuyển khoản')}; kỳ trả lương: hằng tháng, vào ngày {int(_so(tc.get('ngay_tra')) or 5):02d} của tháng sau.", "j"))
-    h.append(_p("6. Làm thêm giờ, làm việc ban đêm (nếu có và được hai bên đồng ý): được trả lương theo quy định tại Điều 98 Bộ luật Lao động năm 2019.", "j"))
+        d3(f"Số giờ làm việc dự kiến khoảng {_gio_hien(gio_thang)} giờ/tháng; <b>tổng tiền lương dự kiến hằng tháng khoảng {so_tien(luong_dk)} đồng/tháng</b>"
+           + (f", <b>dưới {so_tien(ng)} đồng/tháng</b>." if khong_bh else f" (từ {so_tien(ng)} đồng/tháng trở lên)."))
+    d3("Tiền lương thực nhận hằng tháng = số giờ làm việc thực tế trong tháng × mức lương theo giờ. Tháng không làm việc hoặc không có giờ làm việc thì không phát sinh tiền lương.")
+    d3("Phụ cấp lương và các khoản bổ sung khác: <b>không có</b>, trừ trường hợp được Công ty quyết định bằng văn bản.")
+    d3(f"Hình thức trả lương: {esc(tc.get('hinh_thuc_tra') or 'chuyển khoản')}; kỳ trả lương: hằng tháng, vào ngày {int(_so(tc.get('ngay_tra')) or 5):02d} của tháng sau.")
+    d3("Làm thêm giờ, làm việc ban đêm (nếu có và được hai bên đồng ý): được trả lương theo quy định tại Điều 98 Bộ luật Lao động năm 2019.")
 
     # Điều 4 — BHXH
     h.append(_p("<b>Điều 4. Bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp và thuế thu nhập cá nhân</b>"))
