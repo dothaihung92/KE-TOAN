@@ -678,3 +678,24 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   m = mk(false); await m.ctx.nvLuu(); assert(m.ctx.nvRows[0]._moi === true && m.toasts.at(-1)[1] === 'err', 'lưu lỗi: giữ dấu dòng mới + báo lỗi');
   console.log('PASS 30: dòng mới tô xanh đến khi lưu.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 31: Danh Sách NV — cố định cột ＋, STT, Mã NV, Họ và tên khi cuộn ngang (sticky left cộng dồn theo bề rộng thật)
+(() => {
+  const i1 = html.indexOf('function nvCoDinhCot'), i2 = html.indexOf('function veGridNhanVien');
+  const mkCell = (w) => ({ style: {}, getBoundingClientRect: () => ({ width: w }) });
+  const dau = [mkCell(34), mkCell(70), mkCell(70), mkCell(141), mkCell(70), mkCell(200)];
+  const thead = { tagName: 'THEAD' }, tbody = { tagName: 'TBODY' };
+  const row = (parent, cells, bg) => ({ parentElement: parent, cells, _bg: bg });
+  const body1 = [mkCell(34), mkCell(70), mkCell(70), mkCell(141), mkCell(70), mkCell(200)];
+  const r0 = row(thead, dau, ''), r1 = row(tbody, body1, 'rgb(217, 245, 223)');
+  const tbl = { rows: [r0, r1] };
+  const ctx = { nvHeader: ['STT', 'Mã NV', 'Họ và tên', 'Ngày sinh', 'CCCD'], getComputedStyle: (el) => ({ backgroundColor: el._bg || 'rgba(0, 0, 0, 0)' }), String };
+  vm.createContext(ctx); vm.runInContext(html.slice(i1, i2), ctx);
+  ctx.nvCoDinhCot({ querySelector: () => tbl });
+  const left = dau.slice(0, 4).map((c) => c.style.left), z = dau.map((c) => c.style.zIndex);
+  assert.deepStrictEqual(left, ['0px', '34px', '104px', '174px'], 'left cộng dồn theo bề rộng thật của ＋, STT, Mã NV, Họ và tên');
+  assert.deepStrictEqual(z.slice(0, 4), ['8', '8', '8', '8']); assert(dau[4].style.position === undefined, 'cột sau Họ và tên không cố định');
+  assert(body1[3].style.boxShadow.includes('#c9a3bd') && body1.slice(0, 4).every((c) => c.style.position === 'sticky' && c.style.background === 'rgb(217, 245, 223)'), 'ô thân bảng cố định giữ nền của dòng (dòng mới xanh)');
+  assert(html.includes('nvCoDinhCot(wrap);\n  nvSelVe();'), 'gọi sau mỗi lần vẽ lại bảng');
+  console.log('PASS 31: cố định cột đến Họ và tên.');
+})();

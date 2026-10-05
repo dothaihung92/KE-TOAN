@@ -5203,6 +5203,27 @@ function nvRowsLoc(){
   });
   return idx;
 }
+// CỐ ĐỊNH các cột từ đầu đến "Họ và tên" (＋, STT, Mã NV, Họ và tên) khi cuộn ngang: đo bề rộng thật rồi đặt position:sticky + left cộng dồn
+function nvCoDinhCot(wrap){
+  const tbl=wrap&&wrap.querySelector&&wrap.querySelector('table');if(!tbl)return;
+  const cTen=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='họ và tên');if(cTen<0)return;
+  const n=cTen+2;                                          // cột ＋ + các cột dữ liệu 0..cTen
+  const hang=[...tbl.rows];if(!hang.length)return;
+  const dau=[...hang[0].cells];if(dau.length<n)return;
+  const rong=dau.slice(0,n).map(c=>c.getBoundingClientRect().width);if(!rong[0])return;
+  const left=[];let x=0;rong.forEach(w=>{left.push(x);x+=w});
+  hang.forEach(tr=>{
+    const thuoc=tr.parentElement&&tr.parentElement.tagName==='THEAD';
+    const taoNen=el=>{const b=el&&getComputedStyle(el).backgroundColor;return b&&b!=='rgba(0, 0, 0, 0)'?b:''};
+    const nen=taoNen(tr)||taoNen(tr.cells[n])||'#fff';      // nền theo dòng (xanh dòng mới / dòng phiên bản / sọc xen kẽ) để ô cố định không hở
+    for(let i=0;i<n&&i<tr.cells.length;i++){
+      const c=tr.cells[i];
+      c.style.position='sticky';c.style.left=left[i]+'px';c.style.zIndex=thuoc?'8':'3';
+      if(!thuoc&&!c.style.background&&!c.style.backgroundColor)c.style.background=nen;
+      if(i===n-1)c.style.boxShadow=(c.style.boxShadow?c.style.boxShadow+',':'')+'2px 0 0 #c9a3bd';      // vạch ngăn sau cột Họ và tên
+    }
+  });
+}
 function veGridNhanVien(){
   const wrap=document.getElementById('nvTableWrap');
   if(!wrap)return;
@@ -5240,6 +5261,7 @@ function veGridNhanVien(){
   });
   html+='</tbody></table>';
   wrap.innerHTML=html;
+  nvCoDinhCot(wrap);
   nvSelVe();
   if(!idxHien.length){
     wrap.innerHTML+=`<div style="padding:20px;text-align:center;color:var(--muted)">${nvRows.length?'Không có dòng nào khớp bộ lọc.':'Chưa có dữ liệu.'}</div>`;
