@@ -4357,7 +4357,7 @@ async function tmdtShopeeLayDonHang(){
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
                    'Ngày cấp','Tháng/Năm vào làm','Đóng BHXH','Tháng/Năm nghỉ việc','Chức vụ','Thử việc từ','Thử việc đến','Part-time','Lương theo giờ','Lương Cơ bản',
                    'PC Tiền cơm','PC Xăng xe','PC Điện thoại','PC Trang phục'];
-let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={}, nvChucDanh=[];     // nvChucDanh: các chức danh của Hệ thống thang bảng lương (Chức vụ chỉ chọn trong danh sách này)
+let nvHeader=NV_HEADERS.slice(), nvRows=[], nvChon=null, nvFilters={}, nvChucDanh=[], nvChucDanhThem=[];     // nvChucDanh: các chức danh của Hệ thống thang bảng lương (Chức vụ chỉ chọn trong danh sách này)
 let nvTuBl=null;      // {thang, ma, ten}: đang xem Danh Sách Nhân Viên từ Bảng Lương (bấm tên người lao động)
 function nvEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function moBangLuong(){
@@ -5090,7 +5090,7 @@ async function taiNhanVien(){
     nvThemCotPartTime();
     nvFilters={}; nvChon=null;
     const maMoi=nvTuDienMa();        // Mã NV tự động cho dòng chưa có mã
-    try{const c=await api(`/api/van-ban/${current}/chuc-danh`);nvChucDanh=c.chuc_danh||[]}catch(e){nvChucDanh=[]}
+    try{const c=await api(`/api/van-ban/${current}/chuc-danh`);nvChucDanh=c.chuc_danh||[];nvChucDanhThem=c.tu_them||[]}catch(e){nvChucDanh=[];nvChucDanhThem=[]}
     veGridNhanVien();
     const info=document.getElementById('nvInfo');
     if(info){
@@ -5109,7 +5109,37 @@ function nvMoKhoCk(){
   vbMoKhoCk();
 }
 function nvLaCotChucVu(h){return String(h).trim().toLowerCase()==='chức vụ'}
-function nvDoiChucVu(ri,ci,v){if(nvRows[ri])nvRows[ri][ci]=v;veGridNhanVien()}
+function nvDoiChucVu(ri,ci,v){
+  if(v==='__them__')return nvThemChucVu(ri,ci);
+  if(v==='__xoa__')return nvXoaChucVuThem();
+  if(nvRows[ri])nvRows[ri][ci]=v;veGridNhanVien();
+}
+// ＋ Thêm chức vụ mới vào danh sách chọn của công ty (lưu lại cho các lần sau) và chọn luôn cho dòng đang sửa
+async function nvThemChucVu(ri,ci){
+  const ten=String(prompt('Tên chức vụ mới (vd: Tổ trưởng bảo vệ):')||'').replace(/\s+/g,' ').trim();
+  if(!ten){veGridNhanVien();return}
+  try{
+    const r=await api(`/api/van-ban/${current}/chuc-danh`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ten,nam:new Date().getFullYear()})});
+    nvChucDanh=r.chuc_danh||nvChucDanh;
+    if(!r.da_co&&!nvChucDanhThem.includes(r.ten))nvChucDanhThem.push(r.ten);
+    if(nvRows[ri])nvRows[ri][ci]=r.ten;
+    toast(r.da_co?`Chức vụ “${r.ten}” đã có trong danh sách — đã chọn cho dòng này`:`Đã thêm chức vụ “${r.ten}” (nhớ bấm Lưu để lưu dòng này)`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  veGridNhanVien();
+}
+// Xoá 1 chức vụ ĐÃ TỰ THÊM khỏi danh sách chọn (người đang ghi chức vụ đó vẫn giữ nguyên; chức danh của thang bảng lương không xoá ở đây)
+async function nvXoaChucVuThem(){
+  const ten=String(prompt('Nhập đúng tên chức vụ tự thêm cần xoá khỏi danh sách chọn:\n'+nvChucDanhThem.map(x=>'• '+x).join('\n'))||'').trim();
+  const k=nvChucDanhThem.find(x=>x.toLowerCase()===ten.toLowerCase());
+  if(!ten){veGridNhanVien();return}
+  if(!k){toast('Không có chức vụ tự thêm “'+ten+'”','err');veGridNhanVien();return}
+  try{
+    await api(`/api/van-ban/${current}/chuc-danh?ten=${encodeURIComponent(k)}`,{method:'DELETE'});
+    nvChucDanhThem=nvChucDanhThem.filter(x=>x!==k);nvChucDanh=nvChucDanh.filter(x=>x!==k);
+    toast('Đã xoá chức vụ “'+k+'” khỏi danh sách chọn','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  veGridNhanVien();
+}
 // Lấy lương cơ bản + phụ cấp từng người theo BẢNG LƯƠNG của 1 năm (tháng mới nhất có người đó); khớp theo Mã NV, không có mã thì theo Họ và tên
 async function nvLayLuongTheoNam(){
   const mac=parseInt(localStorage.getItem('blNam')||'',10)||new Date().getFullYear();
@@ -5330,7 +5360,7 @@ function veGridNhanVien(){
         const cur=String(row[ci]==null?'':row[ci]).trim();
         const co=nvChucDanh.some(x=>x.toLowerCase()===cur.toLowerCase());
         html+=`<td data-r="${ri}" data-c="${ci}" style="padding:2px 4px;border:1px solid #eee${vien}"><select onfocus="nvChon={r:${ri},c:${ci}}" onchange="nvDoiChucVu(${ri},${ci},this.value)" style="width:100%;font-size:13px;padding:3px;border:1px solid ${cur&&!co?'#e08a00':'#ddd'};border-radius:5px;background:#fff">
-          <option value="">— chọn chức vụ —</option>${cur&&!co?`<option value="${nvEsc(cur)}" selected>⚠ ${nvEsc(cur)} (chưa có trong thang bảng lương)</option>`:''}
+          <option value="">— chọn chức vụ —</option><option value="__them__" style="color:#1f6b4a;font-weight:600">＋ Thêm chức vụ mới…</option>${nvChucDanhThem.length?'<option value="__xoa__" style="color:#c00">－ Xoá chức vụ đã tự thêm…</option>':''}${cur&&!co?`<option value="${nvEsc(cur)}" selected>⚠ ${nvEsc(cur)} (chưa có trong thang bảng lương)</option>`:''}
           ${nvChucDanh.map(x=>`<option value="${nvEsc(x)}" ${co&&x.toLowerCase()===cur.toLowerCase()?'selected':''}>${nvEsc(x)}</option>`).join('')}</select></td>`;
       }
       else if(nvLaCotTick(h))html+=`<td data-r="${ri}" data-c="${ci}" style="padding:5px 8px;border:1px solid #eee;text-align:center${vien}"><input type="checkbox" ${nvCoTick(row[ci])?'checked':''} onchange="nvDoiTick(${ri},${ci},this.checked)" title="Tick = có đóng BHXH (từ tháng ghi ở cột Tháng/Năm vào làm); không tick = không đóng BHXH" style="width:17px;height:17px;cursor:pointer"></td>`;

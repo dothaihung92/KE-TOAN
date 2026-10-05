@@ -1042,7 +1042,9 @@ def dung_hop_dong_thu_viec(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None,
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
     tu, den = khoang_thu_viec(nv, tc)
-    tu = tu or ngay_date(tc.get("ngay_ky")) or hom_nay
+    # chưa ghi ngày thử việc: lấy ngày ký trên form, không có thì ngày vào làm (vào làm trước năm lập -> 01/01 năm lập) — KHÔNG lấy ngày hôm nay
+    # (đang lập năm 2025 mà hôm nay là 2026 thì hợp đồng thử việc không được nhảy sang năm 2026)
+    tu = tu or ngay_date(tc.get("ngay_ky")) or ngay_bat_dau_theo_nam(nv.get("vao_lam"), nam) or (datetime.date(int(nam), 1, 1) if nam else hom_nay)
     so_ngay = ((den - tu).days + 1) if den else 0
     ngay_ky = ngay_date(tc.get("ngay_ky")) or tu
     try:

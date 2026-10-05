@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.126"
+APP_BUILD = "2026-10-05.127"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13273,14 +13273,19 @@ def _vb_sap_theo_ngay(ds, nam, loai):
     return kq
 
 
-def _vb_loc_theo_nam(ds, nam):
+def _vb_loc_theo_nam(ds, nam, loai="hd"):
     """Hợp đồng lao động / thử việc của năm `nam` chỉ gồm người CÓ LÀM VIỆC trong năm đó: bỏ người vào làm sau 31/12/`nam` (vd vào làm 03/2026
-    khi đang lập năm 2025 — trước đây hợp đồng bị ghi năm 2026) và người đã nghỉ việc trước 01/01/`nam`. Không ghi ngày thì giữ lại."""
+    khi đang lập năm 2025 — trước đây hợp đồng bị ghi năm 2026) và người đã nghỉ việc trước 01/01/`nam`. Không ghi ngày thì giữ lại.
+    Thử việc (loai="tv"): người có ghi "Thử việc từ" thì ngày đó phải thuộc năm `nam` (thử việc năm khác thì hợp đồng thử việc thuộc năm đó)."""
     dau, cuoi = datetime.date(int(nam), 1, 1), datetime.date(int(nam), 12, 31)
     kq = []
     for n in ds or []:
         vl, nghi = vbld.ngay_date(n.get("vao_lam")), vbld.ngay_date(n.get("nghi_viec"))
-        if (vl and vl > cuoi) or (nghi and nghi < dau):
+        tv = vbld.ngay_date(n.get("thu_viec_tu")) if loai == "tv" else None
+        if tv:          # thử việc: xét theo ngày bắt đầu thử việc (vd thử việc 15/12/2025, vào làm chính thức 15/01/2026 -> thuộc năm 2025)
+            if not (dau <= tv <= cuoi):
+                continue
+        elif (vl and vl > cuoi) or (nghi and nghi < dau):
             continue
         kq.append(n)
     return kq
@@ -13415,20 +13420,86 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
             "nhan_vien_hd": gon(_vb_sap_theo_ngay(_vb_loc_theo_nam(_vb_ghep_phu_luc(cid, nam, nv_ft), nam), nam, "hd")),
-            "nhan_vien_tv": gon(_vb_sap_theo_ngay(_vb_loc_theo_nam(nv_ft, nam), nam, "tv")),
+            "nhan_vien_tv": gon(_vb_sap_theo_ngay(_vb_loc_theo_nam(nv_ft, nam, "tv"), nam, "tv")),
             "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
                              for n in _vb_nv_part_time(cid, nam)],
-            "chuc_danh": vbld.chuc_danh_day_du(tc["nhom_tuy_chinh"]),
+            "chuc_danh": _cd_day_du(cid, tc["nhom_tuy_chinh"]),
             "canh_bao": vbld.kiem_tra(nv_ft, nam, _vb_tc_kiem_tra(tc, nam), _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else [],
             "canh_bao_pt": vbld.kiem_tra_part_time(_vb_nv_part_time(cid, nam), tc, nam)}
 
 
+def _cd_bang(conn):
+    conn.execute("CREATE TABLE IF NOT EXISTS chuc_danh_them (company_id INTEGER, ten TEXT, created_at TEXT, PRIMARY KEY(company_id, ten))")
+
+
+def _cd_them_doc(cid):
+    """Chức vụ người dùng TỰ THÊM (nút ＋ ở cột Chức vụ, Danh Sách Nhân Viên) của công ty, theo thứ tự thêm."""
+    conn = db()
+    try:
+        _cd_bang(conn)
+        return [r["ten"] for r in conn.execute("SELECT ten FROM chuc_danh_them WHERE company_id=? ORDER BY created_at, rowid", (cid,)).fetchall()]
+    finally:
+        conn.close()
+
+
+def _cd_day_du(cid, nhom_tuy_chinh):
+    """Chức danh của thang bảng lương + Quản lý/Bảo vệ + chức vụ tự thêm (không trùng, không phân biệt hoa/thường/dấu)."""
+    kq = vbld.chuc_danh_day_du(nhom_tuy_chinh)
+    co = {vbld._chuan(c) for c in kq}
+    for c in _cd_them_doc(cid):
+        if vbld._chuan(c) not in co:
+            co.add(vbld._chuan(c))
+            kq.append(c)
+    return kq
+
+
 @app.get("/api/van-ban/{cid}/chuc-danh")
 def van_ban_chuc_danh(cid: int, nam: int = 0):
-    """Các chức danh của Hệ thống thang lương, bảng lương (năm gần nhất đã lưu hoặc mặc định) — Danh Sách Nhân Viên chỉ cho chọn Chức vụ trong danh sách này."""
+    """Các chức danh của Hệ thống thang lương, bảng lương (năm gần nhất đã lưu hoặc mặc định) + chức vụ tự thêm — Danh Sách Nhân Viên chỉ cho chọn Chức vụ trong danh sách này."""
     nam = _luong_nam_hop_le(nam or datetime.date.today().year)
     luu, _g = _vb_doc_thang_luong(cid, nam)
-    return {"chuc_danh": vbld.chuc_danh_day_du(luu.get("nhom_tuy_chinh") or vbld.NHOM_MAC_DINH), "nam": nam}
+    return {"chuc_danh": _cd_day_du(cid, luu.get("nhom_tuy_chinh") or vbld.NHOM_MAC_DINH), "nam": nam,
+            "tu_them": _cd_them_doc(cid)}
+
+
+@app.post("/api/van-ban/{cid}/chuc-danh")
+async def van_ban_them_chuc_danh(cid: int, request: Request):
+    """Thêm 1 chức vụ mới vào danh sách chọn của công ty (chưa có trong thang bảng lương thì Thang bảng lương tự lập nhóm riêng theo chức vụ đó)."""
+    import re as _re_cd
+    body = await request.json()
+    ten = _re_cd.sub(r"\s+", " ", str(body.get("ten") or "")).strip()
+    if not ten:
+        raise HTTPException(400, "Chưa nhập tên chức vụ")
+    if len(ten) > 60 or _re_cd.search(r"[|\n;]", ten):
+        raise HTTPException(400, "Tên chức vụ tối đa 60 ký tự, không chứa ký tự | hoặc ;")
+    nam = _luong_nam_hop_le(body.get("nam") or datetime.date.today().year)
+    luu, _g = _vb_doc_thang_luong(cid, nam)
+    hien = _cd_day_du(cid, luu.get("nhom_tuy_chinh") or vbld.NHOM_MAC_DINH)
+    trung = next((c for c in hien if vbld._chuan(c) == vbld._chuan(ten)), None)
+    if not trung:
+        conn = db()
+        try:
+            _cd_bang(conn)
+            conn.execute("INSERT OR IGNORE INTO chuc_danh_them (company_id, ten, created_at) VALUES (?,?,?)", (cid, ten, datetime.datetime.now().isoformat()))
+            conn.commit()
+        finally:
+            conn.close()
+    return {"ten": trung or ten, "da_co": bool(trung), "chuc_danh": _cd_day_du(cid, luu.get("nhom_tuy_chinh") or vbld.NHOM_MAC_DINH)}
+
+
+@app.delete("/api/van-ban/{cid}/chuc-danh")
+def van_ban_xoa_chuc_danh(cid: int, ten: str):
+    """Xoá 1 chức vụ TỰ THÊM khỏi danh sách chọn (chức danh của thang bảng lương không xoá ở đây). Người đang ghi chức vụ đó vẫn giữ nguyên."""
+    conn = db()
+    try:
+        _cd_bang(conn)
+        n = conn.execute("DELETE FROM chuc_danh_them WHERE company_id=? AND ten=?", (cid, ten)).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    if not n:
+        raise HTTPException(404, "Không có chức vụ tự thêm này")
+    return {"ok": True}
 
 
 @app.get("/api/van-ban/{cid}/luong-theo-nam")
@@ -13818,7 +13889,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     if loai == "hd":
         nv = _vb_ghep_phu_luc(cid, nam, nv)            # người đổi lương bằng mã -001...: hợp đồng theo mức lương ban đầu + phụ lục điều chỉnh lương
     if loai in ("hd", "tv"):
-        nv = _vb_loc_theo_nam(nv, nam)                  # chỉ người có làm việc trong năm lập (vào làm năm sau / nghỉ từ năm trước thì không)
+        nv = _vb_loc_theo_nam(nv, nam, loai)            # chỉ người có làm việc trong năm lập (vào làm năm sau / nghỉ từ năm trước / thử việc năm khác thì không)
         if not nv:
             raise HTTPException(404, f"Năm {nam} chưa có người lao động nào đang làm việc (theo Tháng/Năm vào làm và nghỉ việc ở Danh Sách NV)")
         nv = _vb_sap_theo_ngay(nv, nam, loai)           # xếp theo ngày bắt đầu tăng dần; STT + số hợp đồng theo thứ tự mới

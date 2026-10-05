@@ -105,6 +105,24 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.deepStrictEqual([r[0][c('Lương Cơ bản')], r[0][c('PC Tiền cơm')], r[0][c('PC Xăng xe')], r[0][c('PC Điện thoại')], r[0][c('PC Trang phục')]], ['6.500.000', '730.000', '500.000', '300.000', '0'], 'khớp theo Mã NV');
   assert.deepStrictEqual([r[1][c('Lương Cơ bản')], r[1][c('PC Tiền cơm')], r[1][c('PC Trang phục')]], ['7.000.000', '700.000', '400.000'], 'không có mã thì khớp theo Họ và tên');
   assert(toasts.some(([m]) => m.includes('cho 2/2 nhân viên')), JSON.stringify(toasts));
+  // ＋ Thêm chức vụ mới: hỏi tên -> lưu cho công ty -> chọn luôn cho dòng; huỷ thì không đổi; có mục xoá chức vụ tự thêm
+  assert(wrap.innerHTML.includes('<option value="__them__"') && wrap.innerHTML.includes('＋ Thêm chức vụ mới…') && !wrap.innerHTML.includes('__xoa__'));
+  const goi2 = [];
+  ctx.api = async (u, o) => { goi2.push([u, o && o.method, o && o.body ? JSON.parse(o.body) : null]); return o && o.method === 'POST' ? { ten: 'Tổ trưởng bảo vệ', da_co: false, chuc_danh: ['Giám đốc', 'Nhân viên kinh doanh', 'Tổ trưởng bảo vệ'] } : { ok: true }; };
+  const cv = c('Chức vụ');
+  ctx.prompt = () => '';
+  await vm.runInContext(`nvDoiChucVu(1, ${cv}, '__them__')`, ctx);
+  assert(!goi2.length && vm.runInContext(`nvRows[1][${cv}]`, ctx) === 'Giám đốc', 'huỷ thì không đổi');
+  ctx.prompt = () => '  Tổ   trưởng bảo vệ ';
+  await vm.runInContext(`nvDoiChucVu(1, ${cv}, '__them__')`, ctx);
+  assert(goi2[0][0] === '/api/van-ban/7/chuc-danh' && goi2[0][1] === 'POST' && goi2[0][2].ten === 'Tổ trưởng bảo vệ');
+  assert.strictEqual(vm.runInContext(`nvRows[1][${cv}]`, ctx), 'Tổ trưởng bảo vệ');
+  assert(wrap.innerHTML.includes('<option value="Tổ trưởng bảo vệ" selected>') && wrap.innerHTML.includes('__xoa__'), 'có trong danh sách chọn + mục xoá');
+  ctx.prompt = () => 'tổ trưởng bảo vệ';
+  await vm.runInContext(`nvDoiChucVu(0, ${cv}, '__xoa__')`, ctx);
+  assert(goi2.some((x) => x[1] === 'DELETE' && x[0] === '/api/van-ban/7/chuc-danh?ten=' + encodeURIComponent('Tổ trưởng bảo vệ')));
+  assert.strictEqual(vm.runInContext(`nvRows[1][${cv}]`, ctx), 'Tổ trưởng bảo vệ', 'người đang ghi chức vụ đó giữ nguyên');
+  assert(!vm.runInContext('nvChucDanh', ctx).includes('Tổ trưởng bảo vệ'));
   console.log('PASS 5: Chức vụ chọn theo thang bảng lương + lấy lương theo Bảng Lương từng năm.');
 })().catch((e) => { console.error(e); process.exit(1); });
 
