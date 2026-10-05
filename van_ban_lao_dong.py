@@ -1813,17 +1813,23 @@ def kiem_tra_part_time(ds_nv, tuy_chon, nam=None):
     nam = nam or datetime.date.today().year
     ng = nguong_part_time(nam, tc)
     kq = []
+
+    def nam_hd(nv):          # năm của ngày hợp đồng/ký (= ngày bắt đầu làm việc đầu tiên) quyết định ngưỡng + lương tối thiểu giờ
+        d = ngay_date(tc.get("ngay_ky")) or ngay_date(tc.get("bat_dau")) or ngay_date(nv.get("vao_lam"))
+        return d.year if d else nam
     if not ds_nv:
         kq.append({"muc": "loi", "nd": "Chưa có người lao động part-time: tick cột 'Part-time' (và nhập 'Lương theo giờ') ở Danh Sách Nhân Viên."})
     for nv in ds_nv:
         t = nv["ten"]
+        nam_nv = nam_hd(nv)
+        ng = nguong_part_time(nam_nv, tc)
         gio_ngay, ngay_tuan, gio_tuan, gio_thang, don_gia, luong = _gio_dien_ra(tc, nv)
         if (gio_ngay and gio_ngay >= 8) or (gio_tuan and gio_tuan >= 48):
             kq.append({"muc": "loi", "nd": f"{t}: thời giờ làm việc không ngắn hơn 08 giờ/ngày hoặc 48 giờ/tuần — không phải làm việc không trọn thời gian (Điều 32 BLLĐ 2019)."})
         if not don_gia:
             kq.append({"muc": "loi", "nd": f"{t}: chưa có lương theo giờ (cột 'Lương theo giờ' ở Danh Sách Nhân Viên hoặc ô trên màn hình)."})
-        elif don_gia + 0.5 < luong_toi_thieu_gio(nam, tc.get("vung", 1)):
-            kq.append({"muc": "loi", "nd": f"{t}: lương theo giờ {so_tien(don_gia)} đ thấp hơn mức lương tối thiểu giờ vùng {int(tc.get('vung', 1))} (≈ {so_tien(luong_toi_thieu_gio(nam, tc.get('vung', 1)))} đ/giờ)."})
+        elif don_gia + 0.5 < luong_toi_thieu_gio(nam_nv, tc.get("vung", 1)):
+            kq.append({"muc": "loi", "nd": f"{t}: lương theo giờ {so_tien(don_gia)} đ thấp hơn mức lương tối thiểu giờ vùng {int(tc.get('vung', 1))} (≈ {so_tien(luong_toi_thieu_gio(nam_nv, tc.get('vung', 1)))} đ/giờ)."})
         if luong is not None and luong >= ng - 1e-9:
             kq.append({"muc": "loi", "nd": f"{t}: tiền lương tháng dự kiến {so_tien(luong)} đ từ {so_tien(ng)} đ trở lên — thuộc đối tượng tham gia BHXH bắt buộc; hợp đồng đã ghi theo hướng PHẢI đóng BHXH, không ghi câu 'không thuộc đối tượng'."})
     kq.append({"muc": "canh_bao", "nd": f"Ngưỡng {so_tien(ng)} đ/tháng lấy theo mức tham chiếu mặc định — hãy đối chiếu văn bản BHXH hiện hành (sửa được trong tham số); chỉ áp dụng khi giờ làm thực tế trong từng tháng đúng như hợp đồng: tháng nào lương thực nhận đạt ngưỡng thì tháng đó phải đóng BHXH."})
@@ -1834,7 +1840,8 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     """HTML 1 hợp đồng lao động LÀM VIỆC KHÔNG TRỌN THỜI GIAN (part-time): thời giờ làm việc ngắn hơn bình thường, lương theo giờ dưới ngưỡng, điều khoản BHXH."""
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
-    bat_dau = ngay_date(tc.get("bat_dau")) or ngay_bat_dau_theo_nam(nv.get("vao_lam"), nam)
+    # Ngày hợp đồng + ngày ký = NGÀY BẮT ĐẦU LÀM VIỆC ĐẦU TIÊN của người đó (Tháng/Năm vào làm ở Danh Sách NV; chỉ ghi tháng/năm thì lấy ngày 01), không dời sang 01/01 của năm lập
+    bat_dau = ngay_date(tc.get("bat_dau")) or ngay_date(nv.get("vao_lam")) or ngay_bat_dau_theo_nam(nv.get("vao_lam"), nam)
     ngay_ky = ngay_date(tc.get("ngay_ky")) or bat_dau or ngay_date(tc.get("ngay"), hom_nay)
     bat_dau = bat_dau or ngay_ky
     loai_ten, cuoi, thang, bao_truoc = _thoi_han_hd(tc, nv, bat_dau)
@@ -1875,12 +1882,8 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     # Điều 1
     cv = (tc.get("cong_viec") or "").strip() or f"Thực hiện các nhiệm vụ của chức danh {nv.get('chuc_vu') or '.........'} theo phân công, hướng dẫn của Người sử dụng lao động"
     co_bp = bool((tc.get("bo_phan") or "").strip())
-    h.append(_p("<b>Điều 1. Thời hạn hợp đồng, chức danh và công việc phải làm</b>"))
-    if cuoi:
-        h.append(_p(f"1. Thời hạn hợp đồng: {thang} tháng, từ {esc(ngay_chu(bat_dau))} đến hết {esc(ngay_chu(cuoi))}.", "j"))
-    else:
-        h.append(_p(f"1. Hợp đồng có hiệu lực kể từ {esc(ngay_chu(bat_dau))}.", "j"))
-    n1 = 1
+    h.append(_p("<b>Điều 1. Chức danh và công việc phải làm</b>"))
+    n1 = 0
     if co_bp:
         n1 += 1
         h.append(_p(f"{n1}. Bộ phận làm việc: {esc(tc['bo_phan'])}.", "j"))

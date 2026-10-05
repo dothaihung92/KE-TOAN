@@ -280,7 +280,7 @@ dpt = server.van_ban_du_lieu(7, 2026)
 assert [(n["ten"], n["part_time"], n["luong_gio"]) for n in dpt["nhan_vien"]] == [("Nhân Viên 1", False, 0), ("Nhân Viên 2", False, 0), ("Nhân Viên 3", True, 26000.0)]
 rp = run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2026, "tuy_chon": {"pt_gio_ngay": "2"}})))
 assert rp["so_van_ban"] == 1 and "NHÂN VIÊN 3" in rp["html"] and "NHÂN VIÊN 1" not in rp["html"] and "KHÔNG TRỌN THỜI GIAN" in rp["html"] and "26.000 đồng/giờ" in rp["html"]
-assert any("Ngưỡng 2.530.000" in c["nd"] for c in rp["canh_bao"])
+assert any("Ngưỡng 2.340.000" in c["nd"] for c in rp["canh_bao"])
 rh = run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": 2026})))
 assert rh["so_van_ban"] == 2 and "NHÂN VIÊN 3" not in rh["html"], "hợp đồng toàn thời gian không gồm người part-time"
 assert "NHÂN VIÊN 3" not in run(server.van_ban_xem_truoc(7, Req({"loai": "tl", "nam": 2026})))["html"] and "Nhân Viên 3" not in run(server.van_ban_xem_truoc(7, Req({"loai": "qc", "nam": 2026})))["html"]
