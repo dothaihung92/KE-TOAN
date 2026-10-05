@@ -18,6 +18,9 @@ class KhongDong:
 server.db = lambda: KhongDong(conn)
 server.nhap_lieu_get = lambda cid, loai="in": {"header": HDR, "rows": ROWS} if loai == "nv" else {"header": [], "rows": []}
 bl = {"03": [{"ma": "NV2", "ten": "Nhân Viên 2", "luong_cb": 9_000_000, "tien_com": 730000, "muc_xang": 0, "muc_dt": 0, "trang_phuc": 0}]}
+# Hợp đồng lao động / thử việc nay chỉ lập cho người CÓ trong Bảng Lương năm lập (test riêng: test_hop_dong_bang_luong.py); ở đây Bảng Lương chỉ có NV2 (để thử quy chế / thang
+# lương chỉ lấy người trong Bảng Lương) nên tạm không lọc hợp đồng theo Bảng Lương để giữ các kiểm tra in hàng loạt / số hợp đồng bên dưới.
+server._vb_loc_bang_luong = lambda cid, nam, ds, loai: (list(ds), None)
 server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), bl, "", [nam])
 server.DOWNLOAD_DIR = tempfile.mkdtemp()
 server._copy_ra_desktop = lambda p, f: None

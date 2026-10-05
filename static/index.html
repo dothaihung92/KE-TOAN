@@ -4549,7 +4549,7 @@ function vbVeMan(){
       ${vbOChon('vb_tu','In hàng loạt — TỪ người part-time',optPt.length?optPt:[['','— chưa có người part-time —']],optPt.length?optPt[0][0]:'',300)}
       ${vbOChon('vb_den','ĐẾN người part-time',optPt.length?optPt:[['','— chưa có người part-time —']],optPt.length?optPt[optPt.length-1][0]:'',300)}
     </div>
-    <div class="hint" style="margin-bottom:6px">Chỉ lao động đã tick <b>Part-time</b> ở Danh Sách Nhân Viên. Lương theo giờ lấy từ cột <b>Lương theo giờ</b> (ô “Lương theo giờ” dưới đây, nếu nhập, áp dụng cho tất cả). Hợp đồng ghi: tên “làm việc không trọn thời gian”, thời giờ làm việc THEO LỊCH SẮP XẾP của Công ty (chỉ làm khi có lịch), ngắn hơn 8 giờ/ngày – 48 giờ/tuần, lương theo giờ, câu về BHXH. Các ô giờ/lịch dự kiến bên dưới để trống cũng được. Số giờ thực tế từng tháng nhập ở Bảng Lương (cột Giờ làm).</div>
+    <div class="hint" style="margin-bottom:6px">Chỉ lao động đã tick <b>Part-time</b> ở Danh Sách Nhân Viên <b>và có giờ làm trong Bảng Lương của năm lập</b> (ngày hợp đồng = ngày bắt đầu làm đầu tiên trong năm đó). Lương theo giờ lấy từ cột <b>Lương theo giờ</b> (ô “Lương theo giờ” dưới đây, nếu nhập, áp dụng cho tất cả). Hợp đồng ghi: tên “làm việc không trọn thời gian”, thời giờ làm việc THEO LỊCH SẮP XẾP của Công ty (chỉ làm khi có lịch), ngắn hơn 8 giờ/ngày – 48 giờ/tuần, lương theo giờ, câu về BHXH. Các ô giờ/lịch dự kiến bên dưới để trống cũng được. Số giờ thực tế từng tháng nhập ở Bảng Lương (cột Giờ làm).</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
       ${vbOChu('vb_pt_gio_ngay','Giờ làm dự kiến / ngày (tuỳ chọn)',tc.pt_gio_ngay,110,'vd 2')}
       ${vbOChu('vb_pt_ngay_tuan','Số ngày / tuần (tuỳ chọn)',tc.pt_ngay_tuan,90)}
@@ -4610,7 +4610,7 @@ function vbVeMan(){
         <h3 style="margin:0">${VB_ICON[l]} ${VB_TEN[l]}</h3>
         <button class="btn ghost sm" onclick="moBangLuong()">← Bảng Lương - BHXH</button>
       </div>
-      <div class="hint" style="margin-bottom:8px">${l==='hd'?'Thông tin người lao động, chức danh, lương và phụ cấp lấy từ Danh Sách Nhân Viên + Bảng Lương (Bảng lương được ưu tiên khi hai nơi khác nhau).':l==='tv'?'Hợp đồng thử việc RIÊNG cho người đang thử việc thật: không đóng BHXH trong thời gian thử việc, lương thử việc ≥ 85%, thời gian tối đa theo Điều 25 BLLĐ 2019 (có cảnh báo). Hết thử việc ký hợp đồng lao động thì tự đóng BHXH.':
+      <div class="hint" style="margin-bottom:8px">${l==='hd'?'Thông tin người lao động, chức danh, lương và phụ cấp lấy từ Danh Sách Nhân Viên + Bảng Lương (Bảng lương được ưu tiên khi hai nơi khác nhau). Chỉ lập cho người CÓ TRONG BẢNG LƯƠNG của năm lập; ngày bắt đầu theo tháng người đó bắt đầu có trong Bảng Lương.':l==='tv'?'Hợp đồng thử việc RIÊNG cho người đang thử việc thật: không đóng BHXH trong thời gian thử việc, lương thử việc ≥ 85%, thời gian tối đa theo Điều 25 BLLĐ 2019 (có cảnh báo). Hết thử việc ký hợp đồng lao động thì tự đóng BHXH.':
         l==='qc'?'Mức lương, phụ cấp theo chức danh, tỷ lệ bảo hiểm lấy từ Bảng Lương năm đã chọn; phần còn lại theo Bộ luật Lao động 2019 và Nghị định 145/2020/NĐ-CP.':
         'Nhóm chức danh và bậc lương dựng từ lương cơ bản đang trả trong Bảng Lương (bậc 1 = mức thấp nhất của nhóm, không thấp hơn lương tối thiểu vùng); có thể tự khai báo nhóm (vd Giám đốc, Phó giám đốc; Kế toán trưởng) như file mẫu.'}
         Văn bản xem trước <b>sửa trực tiếp được</b>; chỉnh phông, cỡ chữ, giãn dòng, lề rồi in hoặc xuất Word.</div>

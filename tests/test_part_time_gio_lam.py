@@ -111,12 +111,19 @@ rows_hd2 = [R(**{'Mã NV': '2', 'Họ và tên': 'Trần Minh Hùng', 'Part-time
             R(**{'Mã NV': '5', 'Họ và tên': 'Nguyễn Giang Nam', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '01/2025'}),
             R(**{'Mã NV': '6', 'Họ và tên': 'Chưa Có Giờ', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '15/03/2025'})]
 server.nhap_lieu_get = lambda cid, loai="in": {"header": H, "rows": rows_hd2} if loai == "nv" else {"header": [], "rows": []}
-pp = {n["ten"]: n for n in server._vb_nv_part_time(7, 2025)}
+ghi_pt = []
+pp = {n["ten"]: n for n in server._vb_nv_part_time(7, 2025, ghi_pt)}
 assert pp["Trần Minh Hùng"]["ngay_bat_dau_lam"] == "04/07/2025", "tháng 2 giờ = 0 bỏ qua; tháng 7 đầu tiên có giờ, ngày nhỏ nhất theo giờ từng ngày = 4"
-assert "ngay_bat_dau_lam" not in pp["Nguyễn Giang Nam"], "chỉ xét giờ làm TRONG NĂM LẬP: có giờ từ 11/2024 nhưng năm 2025 chưa có giờ -> dùng vào làm"
-import van_ban_lao_dong as _v0
-assert "ngày 01 tháng 01 năm 2025" in _v0.dung_hop_dong_part_time(pp["Nguyễn Giang Nam"], {"ten": "A"}, {}, 0, nam=2025), "hợp đồng năm 2025 ghi ngày của năm 2025"
-assert "ngay_bat_dau_lam" not in pp["Chưa Có Giờ"], "chưa có giờ nào: dùng Tháng/Năm vào làm"
+# Năm 2025 ĐÃ có Bảng Lương: chỉ người CÓ GIỜ LÀM trong Bảng Lương năm đó mới có hợp đồng part-time (Giang Nam chỉ có giờ năm 2024, "Chưa Có Giờ" chưa có giờ nào)
+assert list(pp) == ["Trần Minh Hùng"], list(pp)
+assert len(ghi_pt) == 1 and "Nguyễn Giang Nam" in ghi_pt[0]["nd"] and "Chưa Có Giờ" in ghi_pt[0]["nd"] and "CÓ GIỜ LÀM" in ghi_pt[0]["nd"], ghi_pt
+# năm chưa có Bảng Lương: lấy theo Danh Sách NV + ghi chú
+bl_nam_goc = dict(bl_nam); bl_nam.clear()
+ghi_k = []; pk = {n["ten"]: n for n in server._vb_nv_part_time(7, 2025, ghi_k)}
+assert {"Trần Minh Hùng", "Nguyễn Giang Nam", "Chưa Có Giờ"} <= set(pk) and "chưa có Bảng Lương" in ghi_k[0]["nd"] and "ngay_bat_dau_lam" not in pk["Chưa Có Giờ"]
+bl_nam.update(bl_nam_goc)
+pk["Chưa Có Giờ"]["part_time"] = True
+pp["Chưa Có Giờ"] = pk["Chưa Có Giờ"]
 CTY2 = {"ten": "CÔNG TY A", "mst": "031", "dia_chi": "1 Lê Lợi", "nguoi_ky": "Giám Đốc"}
 import van_ban_lao_dong as _v
 t_a = _v.dung_hop_dong_part_time(pp["Trần Minh Hùng"], CTY2, {}, 0, nam=2025)

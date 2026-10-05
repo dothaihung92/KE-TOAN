@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.128"
+APP_BUILD = "2026-10-05.129"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13273,6 +13273,66 @@ def _vb_sap_theo_ngay(ds, nam, loai):
     return kq
 
 
+def _vb_bang_luong_co_mat(cid, nam, loai):
+    """Người CÓ TRONG BẢNG LƯƠNG đã lưu của năm `nam`: None nếu năm đó chưa có Bảng Lương; ngược lại {khoa: {các tháng}} (+ khoá "_tat_ca" = các tháng có dữ liệu).
+    Khoá: ("ma", mã gốc) và ("ten", họ tên chuẩn hoá). loai "pt": chỉ dòng part-time có GIỜ LÀM > 0; loai "hd"/"tv": chỉ dòng toàn thời gian."""
+    _ts, thang, _c, _n = _luong_doc_nam(cid, nam)
+    if not any(thang.values()):
+        return None
+    kq = {"_tat_ca": set()}
+    for t, rows in thang.items():
+        for r in rows or []:
+            pt = bool(r.get("part_time"))
+            if (loai == "pt") != pt or (loai == "pt" and not (_luong_so(r.get("gio_lam")) > 0)):
+                continue
+            kq["_tat_ca"].add(int(t))
+            for k in (("ma", vbld.ma_goc_phien_ban(str(r.get("ma") or "").strip()).lower()), ("ten", vbld._chuan(r.get("ten")))):
+                if k[1]:
+                    kq.setdefault(k, set()).add(int(t))
+    return kq
+
+
+def _vb_khoa_nguoi_bl(n):
+    return [k for k in (("ma", vbld.ma_goc_phien_ban(n.get("ma")).lower()), ("ten", vbld._chuan(n.get("ten")))) if k[1]]
+
+
+def _vb_loc_bang_luong(cid, nam, ds, loai):
+    """Hợp đồng lao động / thử việc của năm `nam` lấy từ NGƯỜI CÓ TRONG BẢNG LƯƠNG năm đó (chính xác hơn Danh Sách NV về thời điểm làm việc): bỏ người không có
+    dòng nào trong Bảng Lương năm đó; ghi tháng đầu tiên người đó có trong Bảng Lương (bl_thang_dau) khi muộn hơn tháng đầu của cả bảng (người vào giữa năm) để ngày bắt đầu
+    hợp đồng không sớm hơn thời điểm làm việc thực tế. Năm chưa có Bảng Lương: giữ nguyên danh sách (theo Danh Sách NV) và ghi chú.
+    -> (danh sách, ghi chú | None)."""
+    co = _vb_bang_luong_co_mat(cid, nam, loai)
+    if co is None:
+        return list(ds), {"muc": "canh_bao", "nd": f"Năm {nam} chưa có Bảng Lương nên danh sách hợp đồng lấy theo Danh Sách Nhân Viên (Tháng/Năm vào làm, nghỉ việc). "
+                          "Lưu Bảng Lương năm này để phần mềm chỉ lập hợp đồng cho người thực sự có trong bảng lương và lấy đúng thời điểm làm việc."}
+    dau_chung = min(co["_tat_ca"]) if co["_tat_ca"] else 1
+    giu, bo = [], []
+    for n in ds:
+        thang = set()
+        for k in _vb_khoa_nguoi_bl(n):
+            thang |= co.get(k, set())
+        if not thang:
+            bo.append(n["ten"])
+            continue
+        m = dict(n)
+        if min(thang) > dau_chung:
+            m["bl_thang_dau"] = min(thang)
+        giu.append(m)
+    ghi = None
+    if bo:
+        ghi = {"muc": "canh_bao", "nd": f"Danh sách hợp đồng lấy theo người CÓ TRONG BẢNG LƯƠNG năm {nam}: bỏ {len(bo)} người trong Danh Sách NV không có trong Bảng Lương năm này "
+               f"({', '.join(bo[:8])}{'…' if len(bo) > 8 else ''}). Nếu thiếu người, kiểm tra Bảng Lương năm {nam} (tháng nào người đó làm việc)."}
+    return giu, ghi
+
+
+def _vb_ds_hd_tv(cid, nam, nv_ft, loai):
+    """Danh sách người được lập hợp đồng lao động (hd) / thử việc (tv) của năm `nam` (đã lọc + xếp theo ngày bắt đầu, STT đánh lại) và ghi chú nguồn danh sách."""
+    ds = _vb_ghep_phu_luc(cid, nam, nv_ft) if loai == "hd" else list(nv_ft)
+    ds = _vb_loc_theo_nam(ds, nam, loai)
+    ds, ghi = _vb_loc_bang_luong(cid, nam, ds, loai)
+    return _vb_sap_theo_ngay(ds, nam, loai), ghi
+
+
 def _vb_loc_theo_nam(ds, nam, loai="hd"):
     """Hợp đồng lao động / thử việc của năm `nam` chỉ gồm người CÓ LÀM VIỆC trong năm đó: bỏ người vào làm sau 31/12/`nam` (vd vào làm 03/2026
     khi đang lập năm 2025 — trước đây hợp đồng bị ghi năm 2026) và người đã nghỉ việc trước 01/01/`nam`. Không ghi ngày thì giữ lại.
@@ -13300,7 +13360,7 @@ def _vb_tc_kiem_tra(tc, nam, loai=None):
     return t
 
 
-def _vb_nv_part_time(cid, nam):
+def _vb_nv_part_time(cid, nam, ghi_chu=None):
     """Người lao động PART-TIME có làm part-time trong năm `nam` (theo Danh Sách NV: dòng tick Part-time + khoảng vào làm/nghỉ việc), lấy ĐÚNG dòng part-time
     của họ (người chuyển sang toàn thời gian giữa năm, vd 2 → 2-001, vẫn có hợp đồng part-time cho giai đoạn part-time). STT riêng 1..n."""
     d = nhap_lieu_get(cid, loai="nv")
@@ -13346,7 +13406,8 @@ def _vb_nv_part_time(cid, nam):
     except Exception:
         dau_nam = {}
     cuoi_nam = datetime.date(int(nam), 12, 31)
-    giu = []
+    co_bang_luong = any((thang_nhap or {}).values())        # năm đã có Bảng Lương: CHỈ người có GIỜ LÀM trong Bảng Lương năm đó mới có hợp đồng part-time
+    giu, bo = [], []
     for n in kq:
         n["part_time"] = True
         khoa = (vbld.ma_goc_phien_ban(n["ma"]).lower(), n["ten"].strip().lower())
@@ -13354,12 +13415,22 @@ def _vb_nv_part_time(cid, nam):
         if m:
             y, th, d = min(m)
             n["ngay_bat_dau_lam"] = f"{d:02d}/{th:02d}/{y}"
+        elif co_bang_luong:
+            bo.append(n["ten"])
+            continue                # có Bảng Lương năm này nhưng người này chưa có giờ làm nào: không lập hợp đồng
         else:
             m_all = [dau[k] for k in khoa if k and k in dau]
             if m_all and datetime.date(*min(m_all)) > cuoi_nam:
                 continue            # chỉ bắt đầu có giờ làm SAU năm lập
         giu.append(n)
     kq = giu
+    if ghi_chu is not None:
+        if not co_bang_luong:
+            ghi_chu.append({"muc": "canh_bao", "nd": f"Năm {nam} chưa có Bảng Lương nên danh sách part-time lấy theo Danh Sách Nhân Viên (Tháng/Năm vào làm, nghỉ việc). "
+                            "Lưu Bảng Lương năm này (nhập/import giờ làm) để chỉ lập hợp đồng cho người thực sự có giờ làm và lấy đúng ngày bắt đầu."})
+        elif bo:
+            ghi_chu.append({"muc": "canh_bao", "nd": f"Hợp đồng part-time lấy theo người CÓ GIỜ LÀM trong Bảng Lương năm {nam}: bỏ {len(bo)} người part-time trong Danh Sách NV chưa có giờ làm nào "
+                            f"({', '.join(bo[:8])}{'…' if len(bo) > 8 else ''}). Nhập hoặc import giờ làm của họ ở Bảng Lương nếu cần lập hợp đồng."})
     # Chỉ người CÓ LÀM trong năm lập: bỏ người bắt đầu làm (giờ làm đầu tiên trong Bảng Lương, hoặc vào làm) SAU 31/12 năm lập — vd đang lập 2025 mà
     # người đó mới có giờ làm từ 2026 thì hợp đồng không được ghi năm 2026 lẫn vào bộ 2025 — và người đã nghỉ việc trước 01/01 năm lập.
     kq = _vb_loc_theo_nam(kq, nam)
@@ -13436,18 +13507,22 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
     tc = vbld.gop_tuy_chon(cty, luu)
     nv_tl = _vb_du_lieu(cid, nam, True)[1]
     nv_ft = [n for n in nv if not n.get("part_time")]
+    ds_hd, ghi_hd = _vb_ds_hd_tv(cid, nam, nv_ft, "hd")
+    ds_tv, _g = _vb_ds_hd_tv(cid, nam, nv_ft, "tv")
+    ghi_pt = []
+    ds_pt = _vb_nv_part_time(cid, nam, ghi_pt)
     gon = lambda ds: [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"], "da_nghi": n["da_nghi"], "nguon": n["nguon"]} for n in ds]
     return {"nam": nam, "cty": cty, "tuy_chon": tc, "css": vbld.VB_CSS, "thang_luong_nam_goc": nam_goc,
             "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
-            "nhan_vien_hd": gon(_vb_sap_theo_ngay(_vb_loc_theo_nam(_vb_ghep_phu_luc(cid, nam, nv_ft), nam), nam, "hd")),
-            "nhan_vien_tv": gon(_vb_sap_theo_ngay(_vb_loc_theo_nam(nv_ft, nam, "tv"), nam, "tv")),
+            "nhan_vien_hd": gon(ds_hd),
+            "nhan_vien_tv": gon(ds_tv),
             "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
-                             for n in _vb_nv_part_time(cid, nam)],
+                             for n in ds_pt],
             "chuc_danh": _cd_day_du(cid, tc["nhom_tuy_chinh"]),
-            "canh_bao": vbld.kiem_tra(nv_ft, nam, _vb_tc_kiem_tra(tc, nam), _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else [],
-            "canh_bao_pt": vbld.kiem_tra_part_time(_vb_nv_part_time(cid, nam), tc, nam)}
+            "canh_bao": ([ghi_hd] if ghi_hd else []) + (vbld.kiem_tra(nv_ft, nam, _vb_tc_kiem_tra(tc, nam), _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else []),
+            "canh_bao_pt": ghi_pt + vbld.kiem_tra_part_time(ds_pt, tc, nam)}
 
 
 def _cd_bang(conn):
@@ -13889,9 +13964,10 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     tc.update({k: v for k, v in (body.get("tuy_chon") or {}).items() if v is not None})
     chu_ky = _vb_chu_ky_dict(cid) if tc.get("gan_chu_ky", True) else {}          # chỉ chữ ký đã xác nhận đồng ý
     if loai == "pt":
-        nv_pt = _vb_nv_part_time(cid, nam)          # chỉ người đang làm part-time trong năm (STT riêng của danh sách part-time)
+        ghi_pt = []
+        nv_pt = _vb_nv_part_time(cid, nam, ghi_pt)          # chỉ người CÓ GIỜ LÀM part-time trong Bảng Lương năm lập (STT riêng của danh sách part-time)
         if not nv_pt:
-            raise HTTPException(404, "Chưa có lao động part-time: tick cột “Part-time” (và nhập “Lương theo giờ”) ở Danh Sách Nhân Viên")
+            raise HTTPException(404, f"Năm {nam} chưa có lao động part-time nào có giờ làm: tick cột “Part-time” (và nhập “Lương theo giờ”) ở Danh Sách Nhân Viên, rồi nhập hoặc import giờ làm ở Bảng Lương năm {nam}")
         try:
             tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv_pt))
         except Exception:
@@ -13902,19 +13978,20 @@ async def van_ban_xem_truoc(cid: int, request: Request):
         if not chon:
             raise HTTPException(400, "Khoảng nhân viên đã chọn không có lao động part-time nào")
         html = vbld.dung_hop_dong_part_time_nhieu(chon, cty, tc, nam=nam, chu_ky=chu_ky)
-        cb = vbld.kiem_tra_part_time(chon, vbld.gop_tuy_chon(cty, tc), nam)
+        cb = ghi_pt + vbld.kiem_tra_part_time(chon, vbld.gop_tuy_chon(cty, tc), nam)
         return {"html": html, "css": vbld.VB_CSS, "trang": _vb_trang_mac_dinh(loai), "so_van_ban": len(chon), "canh_bao": cb, "so_chu_ky": html.count('src="data:image')}
     if not nv:
         raise HTTPException(404, "Chưa có nhân viên toàn thời gian: hãy nhập Danh Sách Nhân Viên (lao động part-time có hợp đồng riêng)")
     cb = vbld.kiem_tra(nv, nam, vbld.gop_tuy_chon(cty, _vb_tc_kiem_tra(tc, nam, loai)), _LUONG_TRAN_PC_KHONG_THUE)
     so_pl, cb_them = 0, []
-    if loai == "hd":
-        nv = _vb_ghep_phu_luc(cid, nam, nv)            # người đổi lương bằng mã -001...: hợp đồng theo mức lương ban đầu + phụ lục điều chỉnh lương
     if loai in ("hd", "tv"):
-        nv = _vb_loc_theo_nam(nv, nam, loai)            # chỉ người có làm việc trong năm lập (vào làm năm sau / nghỉ từ năm trước / thử việc năm khác thì không)
+        # người đổi lương bằng mã -001... có phụ lục; chỉ người CÓ TRONG BẢNG LƯƠNG năm lập và đang làm việc trong năm (vào làm năm sau / nghỉ từ năm trước thì không);
+        # xếp theo ngày bắt đầu tăng dần; STT + số hợp đồng theo thứ tự mới
+        nv, ghi_ds = _vb_ds_hd_tv(cid, nam, nv, loai)
+        if ghi_ds:
+            cb_them.append(ghi_ds)
         if not nv:
-            raise HTTPException(404, f"Năm {nam} chưa có người lao động nào đang làm việc (theo Tháng/Năm vào làm và nghỉ việc ở Danh Sách NV)")
-        nv = _vb_sap_theo_ngay(nv, nam, loai)           # xếp theo ngày bắt đầu tăng dần; STT + số hợp đồng theo thứ tự mới
+            raise HTTPException(404, f"Năm {nam} chưa có người lao động nào để lập hợp đồng: kiểm tra Bảng Lương năm {nam} (người phải có dòng trong bảng lương) và Tháng/Năm vào làm, nghỉ việc ở Danh Sách NV")
         try:
             tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv))
         except Exception:
@@ -13942,7 +14019,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
                     so_hd_moi += 1
             html = "".join(phan)
             so_pl = html.count("PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG</b>")
-            cb_them = cb_hl + _vb_kiem_tra_phu_luc(chon, tc)
+            cb_them = cb_them + cb_hl + _vb_kiem_tra_phu_luc(chon, tc)
             _vb_hd_cfg_luu(cid, nam, tc)
         so = len(chon) if loai == "tv" else so_hd_moi
         cb = [c for c in cb if any(c["nd"].startswith(t + ":") for t in ten) or ":" not in c["nd"][:60]]
@@ -14046,7 +14123,7 @@ def _vb_hd_con_hieu_luc(cid, nam, cty, tc, ds):
     def stt_nam(y, k):          # STT của người đó trong danh sách hợp đồng năm y (như màn hình năm đó) -> số hợp đồng
         if y not in ds_nam:
             nv_y = [n for n in _vb_du_lieu(cid, y)[1] if not n.get("part_time")]
-            ds_nam[y] = {vbld.khoa_lich_su(n): n["stt"] for n in _vb_sap_theo_ngay(_vb_loc_theo_nam(_vb_ghep_phu_luc(cid, y, nv_y), y), y, "hd")}
+            ds_nam[y] = {vbld.khoa_lich_su(n): n["stt"] for n in _vb_ds_hd_tv(cid, y, nv_y, "hd")[0]}
         return ds_nam[y].get(k)
     kq, het, gia_dinh, khong_doi, het_trong_nam, lien_tiep = {}, [], set(), [], [], []
     for n in ds:

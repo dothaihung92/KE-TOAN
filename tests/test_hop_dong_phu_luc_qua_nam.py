@@ -15,7 +15,8 @@ ROWS = [nv('1', 'Lâm Thái Huy', '03/2022', 5_300_000), nv('2', 'Phạm Bảo V
         nv('4', 'Đặng Ngọc Thanh', '06/2024', 5_682_000)]
 def bl(ma, ten, luong): return {"ma": ma, "ten": ten, "luong_cb": luong, "chuc_vu": "Bảo vệ", "dong_bh": True}
 BL = {2025: {"%02d" % t: [bl('1', 'Lâm Thái Huy', 5_300_000), bl('2', 'Phạm Bảo Vương', 5_300_000)] for t in range(1, 13)},
-      2026: {"01": [bl('1', 'Lâm Thái Huy', 5_682_000), bl('2', 'Phạm Bảo Vương', 5_300_000), bl('4', 'Đặng Ngọc Thanh', 5_682_000)]}}
+      2026: {"01": [bl('1', 'Lâm Thái Huy', 5_682_000), bl('2', 'Phạm Bảo Vương', 5_300_000), bl('4', 'Đặng Ngọc Thanh', 5_682_000)],
+             "03": [bl('3', 'Huỳnh Văn Vinh', 5_682_000)]}}
 conn = sqlite3.connect(":memory:", check_same_thread=False); conn.row_factory = sqlite3.Row
 conn.execute("CREATE TABLE companies (id INTEGER, ten TEXT, mst TEXT, dia_chi TEXT, nguoi_ky TEXT)")
 conn.execute("INSERT INTO companies VALUES (7, 'CÔNG TY TNHH THỬ', '0300000001', '1 Lê Lợi, Quận 1, Thành phố Hồ Chí Minh', 'Dương Thị Hiền')")
@@ -76,11 +77,11 @@ assert r["so_phu_luc"] == 1
 print("PASS 3: dùng loại hợp đồng đã lưu của năm gốc")
 
 # 4) 2 hợp đồng 12 tháng liên tiếp (2024, 2025) -> 2026 phải không xác định thời hạn (Điều 20)
-BL[2024] = {"01": [bl('2', 'Phạm Bảo Vương', 5_000_000)]}
+BL[2024] = {"01": [bl('1', 'Lâm Thái Huy', 5_000_000), bl('2', 'Phạm Bảo Vương', 5_000_000)]}
 tao(2024, loai_hd="xdth", so_thang=12); tao(2025, loai_hd="xdth", so_thang=12)
 r = tao(2026, loai_hd="xdth", so_thang=12)
 assert any(c["muc"] == "loi" and "Điều 20" in c["nd"] and "Phạm Bảo Vương" in c["nd"] for c in r["canh_bao"]), r["canh_bao"]
-assert any("Điều 20" in c["nd"] and "Lâm Thái Huy" in c["nd"] for c in r["canh_bao"]), "Huy có trong danh sách hợp đồng phần mềm đã lập năm 2024 -> cũng đã 2 hợp đồng"
+assert any("Điều 20" in c["nd"] and "Lâm Thái Huy" in c["nd"] and "Phạm Bảo Vương" in c["nd"] for c in r["canh_bao"]), "cả Huy và Vương đều có trong Bảng Lương 2024 + 2025 -> đã 2 hợp đồng"
 assert not any("Điều 20" in c["nd"] and "Huỳnh Văn Vinh" in c["nd"] for c in r["canh_bao"]), "Vinh vào làm 2026: hợp đồng đầu tiên"
 print("PASS 4: cảnh báo ký quá 2 hợp đồng xác định thời hạn")
 

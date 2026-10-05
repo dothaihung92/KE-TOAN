@@ -73,13 +73,23 @@ assert [n["ten"] for n in d["nhan_vien_pt"]] == ["Nguyễn Văn Thơ"], d["nhan_
 r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2025, "tuy_chon": {}})))
 assert r["so_van_ban"] == 1 and "NGUYỄN VĂN THƠ" in r["html"] and "2026" not in r["html"] and "ĐẶNG VĂN TÈO" not in r["html"] and "NGUYỄN VĂN ĐƯỢC" not in r["html"]
 d = server.van_ban_du_lieu(7, 2026)
-assert [n["ten"] for n in d["nhan_vien_pt"]] == ["Nguyễn Văn Thơ", "Đặng Văn Tèo", "Nguyễn Văn Được"], d["nhan_vien_pt"]
-# lập năm 2026: người làm part-time từ 2025 (Thơ) -> hợp đồng ngày 01/01/2026, số …/HĐPT-2026 (trước đây hiện 01/01/2025, HĐPT-2025)
+# Năm 2026 CÓ Bảng Lương: chỉ người có GIỜ LÀM trong Bảng Lương 2026 (Tèo 02/2026, Được 04/2026); Thơ làm từ 2025 nhưng 2026 chưa có giờ -> chưa lập
+assert [n["ten"] for n in d["nhan_vien_pt"]] == ["Đặng Văn Tèo", "Nguyễn Văn Được"], d["nhan_vien_pt"]
+assert any("Nguyễn Văn Thơ" in c["nd"] and "CÓ GIỜ LÀM" in c["nd"] for c in d["canh_bao_pt"]), d["canh_bao_pt"]
 r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2026, "tuy_chon": {}})))
 h = r["html"]
-assert "2025" not in h.split("Điều 1")[0] and "Số: 01/HĐPT-2026" in h and "ngày 01 tháng 01 năm 2026" in h, h[:600]
-i = h.index("ĐẶNG VĂN TÈO"); sec = h[h.rindex("<section", 0, i):]
-assert "Số: 02/HĐPT-2026" in sec and "ngày 01 tháng 02 năm 2026" in sec, "bắt đầu có giờ làm 02/2026 -> ngày 01/02/2026"
+assert "NGUYỄN VĂN THƠ" not in h and "2025" not in h.split("Điều 1")[0] and "Số: 01/HĐPT-2026" in h and "ngày 01 tháng 02 năm 2026" in h, h[:600]
+i = h.index("NGUYỄN VĂN ĐƯỢC"); sec = h[h.rindex("<section", 0, i):]
+assert "Số: 02/HĐPT-2026" in sec and "ngày 01 tháng 04 năm 2026" in sec
+# Thơ có giờ làm 2026 (03/2026): hợp đồng ngày 01/03/2026 (người làm từ 2025 vẫn lập theo ngày làm TRONG năm lập)
+BLP[2026]["03"] = [{"ma": "P1", "ten": "Nguyễn Văn Thơ", "gio_lam": 30.0, "part_time": 1}]
+r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2026, "tuy_chon": {}})))
+i = r["html"].index("NGUYỄN VĂN THƠ"); sec = r["html"][r["html"].rindex("<section", 0, i):]
+assert "ngày 01 tháng 03 năm 2026" in sec and "năm 2025" not in sec.split("Điều 1")[0]
+# năm chưa có Bảng Lương: lấy theo Danh Sách NV + ghi chú
+BLP.clear()
+ghi = []; ds = server._vb_nv_part_time(7, 2026, ghi)
+assert {n["ten"] for n in ds} == {"Nguyễn Văn Thơ", "Đặng Văn Tèo", "Nguyễn Văn Được"} and "chưa có Bảng Lương" in ghi[0]["nd"]
 print("PASS: hợp đồng part-time chỉ gồm người có làm việc trong năm lập")
 
 # HỢP ĐỒNG THỬ VIỆC: tương tự — thử việc năm khác không lẫn vào năm lập; chưa ghi ngày thử việc thì KHÔNG lấy ngày hôm nay (2026) khi đang lập 2025

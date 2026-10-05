@@ -812,6 +812,11 @@ def dung_hop_dong(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None, chu_ky=N
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
     bat_dau = ngay_date(tc.get("bat_dau")) or ngay_bat_dau_theo_nam(nv.get("vao_lam"), nam)
+    # Người vào Bảng Lương giữa năm (tháng đầu tiên có trong Bảng Lương muộn hơn tháng đầu của cả bảng): hợp đồng không bắt đầu sớm hơn thời điểm làm việc thực tế
+    if nv.get("bl_thang_dau") and nam and not ngay_date(tc.get("bat_dau")):
+        d0 = datetime.date(int(nam), int(nv["bl_thang_dau"]), 1)
+        if bat_dau is None or bat_dau < d0:
+            bat_dau = d0
     ngay_ky = ngay_date(tc.get("ngay_ky")) or bat_dau or ngay_date(tc.get("ngay"), hom_nay)
     bat_dau = bat_dau or ngay_ky
     loai_ten, cuoi, thang, bao_truoc = _thoi_han_hd(tc, nv, bat_dau)
