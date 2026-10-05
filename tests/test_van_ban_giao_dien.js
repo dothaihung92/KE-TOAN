@@ -231,6 +231,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
     const hBang = html.slice(iBang, iHet);
     assert(hBang.includes('class="ky-nhan"') && hBang.includes('blAnhKy(r.ma,r.ten)'), 'cột Ký nhận chèn ảnh');
     const iKy = html.indexOf('function blKhungKy'); assert(html.slice(iKy, iKy + 900).includes('blChuKyIn.giam_doc') && html.includes('.o-ky{height:80px'), 'chỗ ký giám đốc rộng hơn + ảnh');
+    assert(html.includes('.ky2>div{min-width:200px;position:relative;z-index:0}') && /\.o-ky img\{position:absolute;[^}]*max-height:125px;[^}]*z-index:-1\}/.test(html), 'chữ ký giám đốc to hơn, nằm sau chữ (behind text) nhưng không bị nền trang che');
     console.log('PASS 10: chữ ký trong Kho gắn vào bản in bảng lương.');
     ok();
   }, 30));
