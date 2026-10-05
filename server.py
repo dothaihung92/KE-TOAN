@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.130"
+APP_BUILD = "2026-10-05.131"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -41633,7 +41633,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
 
     map_no_ht = _get_map_no(cid)          # {mst: tk_no} học MẶC ĐỊNH theo MST -> dự phòng
     tk_no_hang_md, tk_no_dv_md = _tk_no_mac_dinh_hoc(cid)   # dự phòng CUỐI khi NCC/mặt hàng chưa học TK Nợ
-    tk_no_doan = []                       # các dòng mua vào phải TỰ ĐOÁN TK Nợ -> liệt kê ở sheet Đối chiếu để kiểm tra
+    tk_no_doan = []                       # các dòng mua vào phải TỰ ĐOÁN TK Nợ (không còn liệt kê ở sheet Đối chiếu)
     map_no_item = _get_map_no_item(cid)   # {(mst, ten_chuan): tk_no} học RIÊNG theo mặt hàng
                                            # cụ thể -> ưu tiên dùng trước map_no_ht (xem Pass 2)
     # TK Nợ mặc định RIÊNG theo công ty (cấu hình ở "Sửa công ty") — dự phòng CUỐI CÙNG
@@ -42723,21 +42723,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                     ws.cell(rr, c).number_format = "#,##0"
         return len(ds_lech)
 
-    ws.append([])
-    ws.append(["TK NỢ MUA VÀO TỰ ĐOÁN (NCC/mặt hàng chưa học TK Nợ — kiểm tra lại cột Nợ trước khi Import vào MISA):"])
-    ws.cell(ws.max_row, 1).font = Font(bold=True, size=11, color="C00000")
-    if not tk_no_doan:
-        ws.append(["", "✓ Không có dòng nào phải tự đoán TK Nợ"])
-        ws.cell(ws.max_row, 2).font = Font(color="1F6B4A")
-    else:
-        ws.append(["Ký hiệu", "Số HĐ", "Tên hàng", "Thành tiền", "TK Nợ đã điền"])
-        hr = ws.max_row
-        for c in range(1, 6):
-            ws.cell(hr, c).font = Font(bold=True, color="FFFFFF")
-            ws.cell(hr, c).fill = PatternFill("solid", fgColor="C0392B")
-        for it in tk_no_doan:
-            ws.append([it["kh"], it["shd"], it["ten"], it["ds"], it["tk"]])
-            ws.cell(ws.max_row, 4).number_format = "#,##0"
+    # (đã bỏ mục liệt kê dòng tự đoán TK Nợ khỏi sheet Đối chiếu theo yêu cầu người dùng)
     so_ts_lech_ban = them_ds_lech_thue_suat(
         "DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ - BÁN RA (nhãn % có thể sai do NĐ44 hoặc lỗi dữ liệu):", "sold")
     so_ts_lech_mua = them_ds_lech_thue_suat(
