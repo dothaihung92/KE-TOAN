@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.106"
+APP_BUILD = "2026-10-05.107"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10557,11 +10557,65 @@ def _luong_nam_hop_le(nam):
     return nam
 
 
+_LUONG_GIU_THANG = ("ngay_cong", "ngay_lam", "thuong_bh", "thuong_t13", "tang_ca", "thue_tay", "ghi_chu")      # ô nhập riêng của tháng: giữ khi đổi phiên bản mã
+
+
+def _luong_dong_bo_phien_ban(header, rows_nv, nam, thang_nhap, npt=None):
+    """Người có dòng phiên bản trong Danh Sách NV (mã gốc-001, -002…): mỗi tháng CHỈ dòng đang hiệu lực (theo Tháng/Năm vào làm) được lên bảng lương.
+    Bảng Lương đã lưu có dòng mã cũ (hoặc mã mới trước ngày áp dụng) thì thay bằng dòng đang hiệu lực (giữ các ô nhập riêng của tháng: ngày công, thưởng, tăng ca…);
+    nếu tháng đó người này không còn trên bảng lương (đã nghỉ việc / chưa vào làm) thì gỡ dòng. Trả (thang_nhap mới, {"thay": n, "go": n})."""
+    cot = {_khong_dau(str(h or "")).strip().lower(): i for i, h in enumerate(header or [])}
+    i_ma = cot.get("ma nv")
+    if i_ma is None:
+        return thang_nhap, {"thay": 0, "go": 0}
+    goc = vbld.ma_goc_phien_ban
+    co_phien_ban = {goc(str(r[i_ma]).strip()).lower() for r in (rows_nv or []) if i_ma < len(r) and r[i_ma] is not None
+                    and vbld._RE_MA_PHIEN_BAN.match(str(r[i_ma]).strip())}
+    if not co_phien_ban:
+        return thang_nhap, {"thay": 0, "go": 0}
+    kq, thay, go = {}, 0, 0
+    for t, ds in (thang_nhap or {}).items():
+        hl = {goc(r["ma"]).lower(): r for r in _luong_dong_tu_nhan_vien(header, rows_nv, 0, nam, int(t), npt) if r.get("ma")}
+        moi, ma_co = [], {str(r.get("ma") or "").strip().lower() for r in (ds or [])}
+        for r in ds or []:
+            ma = str(r.get("ma") or "").strip()
+            g = goc(ma).lower() if ma else ""
+            if not ma or g not in co_phien_ban:
+                moi.append(r)
+                continue
+            e = hl.get(g)
+            if e is None:
+                go += 1                      # tháng này người đó không còn/chưa có trên bảng lương
+                continue
+            if e["ma"].strip().lower() == ma.lower():
+                moi.append(r)
+                continue
+            if e["ma"].strip().lower() in ma_co:
+                go += 1                      # dòng hiệu lực đã có sẵn trong tháng: chỉ gỡ dòng thừa
+                continue
+            n = dict(e)
+            for k in _LUONG_GIU_THANG:
+                if k in r:
+                    n[k] = r[k]
+            moi.append(n)
+            thay += 1
+        kq[t] = moi
+    return kq, {"thay": thay, "go": go}
+
+
 @app.get("/api/bang-luong/{cid}")
 def bang_luong_get(cid: int, nam: int = 0):
     nam = _luong_nam_hop_le(nam or datetime.date.today().year)
     ts, thang, cap_nhat, cac_nam = _luong_doc_nam(cid, nam)
-    return _luong_tra_ve(cid, nam, ts, thang, cap_nhat, cac_nam)
+    dong_bo = {"thay": 0, "go": 0}
+    try:
+        d = nhap_lieu_get(cid, loai="nv")
+        thang, dong_bo = _luong_dong_bo_phien_ban(d.get("header"), d.get("rows"), nam, thang, _luong_npt_doc(nhap_lieu_get(cid, loai="npt")))
+    except Exception:
+        pass
+    kq = _luong_tra_ve(cid, nam, ts, thang, cap_nhat, cac_nam)
+    kq["dong_bo_phien_ban"] = dong_bo
+    return kq
 
 
 @app.post("/api/bang-luong/{cid}")

@@ -73,3 +73,40 @@ assert [x['ma'] for x in server._luong_dong_tu_nhan_vien(H2, rows2, 0, 2025, 3)]
 rows3 = [rows2[0], R2(**{'Mã NV': '2-001', 'Họ và tên': 'Trần Minh Hùng', 'Lương Cơ bản': 5310000})]
 assert len(server._luong_dong_tu_nhan_vien(H2, rows3, 0, 2024, 5)) == 2
 print("PASS thêm: dòng -001 hiệu lực từ tháng vào làm")
+
+# ĐỒNG BỘ phiên bản mã vào Bảng Lương đã lưu: tháng nào chỉ dòng đang hiệu lực (theo Tháng/Năm vào làm) được lên bảng lương; mã cũ không còn hiện
+H3 = server.NV_HEADERS
+def R3(**k):
+    r = [''] * len(H3)
+    for a, b in k.items():
+        r[H3.index(a)] = b
+    return r
+nv3 = [R3(**{'Mã NV': '3', 'Họ và tên': 'Lý Thị Thu Hiền', 'Tháng/Năm vào làm': '01/2025', 'Đóng BHXH': 'x', 'Lương Cơ bản': 5000000}),
+       R3(**{'Mã NV': '3-001', 'Họ và tên': 'Lý Thị Thu Hiền', 'Tháng/Năm vào làm': '01/2026', 'Tháng/Năm nghỉ việc': '04/2026', 'Đóng BHXH': 'x', 'Lương Cơ bản': 6000000}),
+       R3(**{'Mã NV': '4', 'Họ và tên': 'Lê Đức Tấn', 'Tháng/Năm vào làm': '01/2025', 'Đóng BHXH': 'x', 'Lương Cơ bản': 5310000})]
+dong = lambda ma, **k: dict({'ma': ma, 'ten': 'x', 'luong_cb': 1.0}, **k)
+luu = {"01": [dong('3', thuong_bh=100.0, ngay_lam=20.0), dong('4')],          # 3 -> 3-001 (hiệu lực từ 01/2026), giữ thưởng + ngày làm của tháng
+       "03": [dong('3'), dong('3-001'), dong('4')],                           # có cả hai: chỉ gỡ dòng mã cũ
+       "05": [dong('3-001'), dong('4')],                                      # đã nghỉ việc 04/2026: gỡ
+       "12": [dong('3', thuong_bh=5.0)]}                                      # sau nghỉ việc: gỡ; nhưng nhớ 4 không có -> giữ nguyên người khác
+kq3, dem = server._luong_dong_bo_phien_ban(H3, nv3, 2026, luu)
+assert [r['ma'] for r in kq3["01"]] == ['3-001', '4'] and kq3["01"][0]['luong_cb'] == 6000000 and kq3["01"][0]['thuong_bh'] == 100.0 and kq3["01"][0]['ngay_lam'] == 20.0, kq3["01"]
+assert [r['ma'] for r in kq3["03"]] == ['3-001', '4'], kq3["03"]
+assert [r['ma'] for r in kq3["05"]] == ['4'] and kq3["12"] == [], "người đã nghỉ việc không còn trên bảng lương tháng đó"
+assert dem == {"thay": 1, "go": 3}, dem
+# năm 2025: dùng mã gốc "3"; dòng mã mới -001 chưa có hiệu lực -> thay bằng "3"
+kq25, d25 = server._luong_dong_bo_phien_ban(H3, nv3, 2025, {"06": [dong('3-001'), dong('4')]})
+assert [r['ma'] for r in kq25["06"]] == ['3', '4'] and d25 == {"thay": 1, "go": 0}
+# không có dòng phiên bản trong danh sách: không đụng gì
+k0, d0 = server._luong_dong_bo_phien_ban(H3, [nv3[0], nv3[2]], 2026, luu)
+assert k0 == luu and d0 == {"thay": 0, "go": 0}
+print("PASS đồng bộ phiên bản")
+# endpoint tải Bảng Lương trả kèm số dòng đã đồng bộ
+_nl, _dn = server.nhap_lieu_get, server._luong_doc_nam
+server.nhap_lieu_get = lambda cid, loai="in": {"header": H3, "rows": nv3} if loai == "nv" else {"header": [], "rows": []}
+server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), {"01": [dong('3'), dong('4')]}, "", [nam])
+server._luong_tra_ve = lambda cid, nam, ts, thang, cap_nhat, cac_nam: {"thang": thang}
+g = server.bang_luong_get(7, 2026)
+assert [r['ma'] for r in g["thang"]["01"]] == ['3-001', '4'] and g["dong_bo_phien_ban"] == {"thay": 1, "go": 0}
+server.nhap_lieu_get, server._luong_doc_nam = _nl, _dn
+print("PASS endpoint đồng bộ")

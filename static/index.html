@@ -5656,12 +5656,14 @@ async function blTai(){
   try{
     const d=await api(`/api/bang-luong/${current}?nam=${blNam}`);
     blTS=d.tham_so;blDL=d.thang||{};blCacNam=d.cac_nam||[];blBan=false;
+    const dbp=d.dong_bo_phien_ban||{};
     Object.keys(blDL).forEach(t=>{blDL[t]=blSapXepPartTime(blDL[t])});      // người part-time xếp dưới cùng
     localStorage.setItem('blNam',String(blNam));
     blVeChonNam();blVeTabs();blVeBang();
     const info=document.getElementById('blInfo');
     if(info&&d.cap_nhat)info.dataset.capnhat=new Date(d.cap_nhat).toLocaleString('vi-VN');
     blVeInfo();
+    if(dbp.thay||dbp.go){blBan=true;blVeInfo();toast(`🔄 Đồng bộ phiên bản mã (2 → 2-001…) theo Danh Sách Nhân Viên: thay ${dbp.thay||0} dòng, gỡ ${dbp.go||0} dòng mã cũ không còn hiệu lực — kiểm tra rồi bấm 💾 Lưu`,'ok')}
   }catch(e){toast('Không tải được bảng lương: '+e.message,'err')}
 }
 function blVeChonNam(){

@@ -632,3 +632,10 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.strictEqual(r[0].luong_cb, 5310000, 'cập nhật lương theo Danh Sách NV');
   console.log('PASS 27: Mã NV tự động khớp bảng lương cũ theo họ tên.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 28: tải Bảng Lương có đồng bộ phiên bản mã -> báo + đánh dấu chưa lưu
+(() => {
+  const i1 = html.indexOf('async function blTai('), i2 = html.indexOf('\n}\n', i1) + 3, ma = html.slice(i1, i2);
+  assert(ma.includes('d.dong_bo_phien_ban') && ma.includes('blBan=true;blVeInfo();toast(`🔄 Đồng bộ phiên bản mã'), 'tải bảng lương: báo đã đồng bộ phiên bản mã và đánh dấu chưa lưu');
+  console.log('PASS 28: báo đồng bộ phiên bản mã khi tải bảng lương.');
+})();
