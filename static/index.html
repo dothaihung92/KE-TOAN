@@ -12079,5 +12079,105 @@ function fmtVND(n){if(n==null)return'0';return Math.round(n).toLocaleString('vi-
 
 khoiDongPhanMem();
 </script>
+<style>
+/* ô ngày gõ tay (thay cho input type=date của trình duyệt): ô chữ dd/mm/yyyy + nút 📅 mở lịch */
+.dtWrap{position:relative;display:inline-flex;align-items:center;gap:4px;max-width:100%;vertical-align:middle}
+.dtWrap input.dtTxt{width:112px;box-sizing:border-box}
+.field>.dtWrap,.field .dtWrap.dtRong{display:flex;width:100%}
+.field>.dtWrap input.dtTxt,.dtWrap.dtRong input.dtTxt{flex:1;min-width:0;width:auto}
+.dtWrap button.dtBtn{border:1px solid #cfd8d3;background:#fff;border-radius:6px;padding:3px 7px;cursor:pointer;font-size:14px;line-height:1.2}
+.dtWrap input.dtTxt.dtLoi{outline:2px solid #d00000;background:#fff5f5}
+</style>
+<script id="ngayGoTay">
+/* Ô NGÀY GÕ TAY: mọi <input type="date"> được thay bằng ô chữ dd/mm/yyyy (gõ thẳng "05102026", "5/10/2026", "5-10-26", "2026-10-05"…) + nút 📅 mở lịch.
+   Ô date gốc vẫn còn (ẩn) và giữ nguyên .value dạng yyyy-mm-dd, id, sự kiện input/change nên mọi mã cũ đọc/ghi .value vẫn chạy như trước. */
+function ngayGoTayParse(t){
+  t=String(t==null?'':t).trim();
+  if(!t)return{iso:''};
+  let d,m,y,k;
+  if((k=t.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/))){y=+k[1];m=+k[2];d=+k[3]}
+  else if(/^\d+$/.test(t)){
+    if(t.length===8){d=+t.slice(0,2);m=+t.slice(2,4);y=+t.slice(4)}
+    else if(t.length===6){d=+t.slice(0,2);m=+t.slice(2,4);y=2000+(+t.slice(4))}
+    else return{loi:'Gõ đủ ngày/tháng/năm, ví dụ 05102026 hoặc 05/10/2026'};
+  }
+  else if((k=t.match(/^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2}|\d{4})$/))){d=+k[1];m=+k[2];y=k[3].length===2?2000+(+k[3]):+k[3]}
+  else return{loi:'Ngày không đúng dạng dd/mm/yyyy, ví dụ 05/10/2026'};
+  if(!(y>=1900&&y<=2099))return{loi:'Năm phải từ 1900 đến 2099'};
+  if(!(m>=1&&m<=12))return{loi:'Tháng phải từ 1 đến 12'};
+  const dt=new Date(y,m-1,d);
+  if(dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==d)return{loi:`Tháng ${m}/${y} không có ngày ${d}`};
+  const p=n=>String(n).padStart(2,'0');
+  return{iso:`${y}-${p(m)}-${p(d)}`};
+}
+function ngayGoTayHien(iso){          // yyyy-mm-dd -> dd/mm/yyyy ('' nếu không hợp lệ)
+  const k=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return k?`${k[3]}/${k[2]}/${k[1]}`:'';
+}
+function ngayGoTayTuDinhDang(t){      // đang gõ: tự chèn "/" sau ngày, tháng; người dùng tự gõ dấu phân cách kiểu "5/1/2026" (nhóm 1 số) hoặc "-", "." thì để nguyên
+  if(!/^[\d\/]*$/.test(t))return t;
+  if(t.split('/').slice(0,-1).some(p=>p.length<2))return t;
+  const n=t.replace(/\D/g,'').slice(0,8);
+  return n.length<=2?n:n.length<=4?n.slice(0,2)+'/'+n.slice(2):n.slice(0,2)+'/'+n.slice(2,4)+'/'+n.slice(4);
+}
+function ngayGoTayNang(orig){
+  if(!orig||orig.dataset.dtDa||!orig.parentNode)return;
+  orig.dataset.dtDa='1';
+  const desc=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');
+  const dDis=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'disabled');
+  const wrap=document.createElement('span');wrap.className='dtWrap';
+  const txt=document.createElement('input');
+  txt.type='text';txt.className=(orig.className?orig.className+' ':'')+'dtTxt';txt.placeholder='dd/mm/yyyy';txt.maxLength=10;txt.autocomplete='off';
+  txt.setAttribute('inputmode','numeric');
+  if(orig.getAttribute('style'))txt.style.cssText=orig.getAttribute('style');
+  if(orig.title)txt.title=orig.title;
+  const btn=document.createElement('button');btn.type='button';btn.className='dtBtn';btn.tabIndex=-1;btn.title='Chọn ngày trên lịch';btn.textContent='📅';
+  orig.parentNode.insertBefore(wrap,orig);
+  wrap.appendChild(txt);wrap.appendChild(btn);wrap.appendChild(orig);
+  orig.removeAttribute('style');
+  orig.style.cssText='position:absolute;right:0;top:0;width:34px;height:100%;opacity:0;pointer-events:none;border:0;padding:0;margin:0';
+  orig.tabIndex=-1;orig.setAttribute('aria-hidden','true');
+  const hienTuGoc=()=>{txt.value=ngayGoTayHien(desc.get.call(orig));txt.classList.remove('dtLoi');txt.removeAttribute('data-loi')};
+  // mã cũ đọc/ghi orig.value (yyyy-mm-dd), disabled, focus: giữ nguyên hành vi và đồng bộ sang ô chữ
+  Object.defineProperty(orig,'value',{configurable:true,get(){return desc.get.call(orig)},set(v){desc.set.call(orig,v);hienTuGoc()}});
+  Object.defineProperty(orig,'disabled',{configurable:true,get(){return dDis.get.call(orig)},set(v){dDis.set.call(orig,v);txt.disabled=!!v;btn.disabled=!!v}});
+  orig.focus=()=>txt.focus();
+  txt.disabled=orig.disabled;btn.disabled=orig.disabled;
+  hienTuGoc();
+  const phat=()=>{orig.dispatchEvent(new Event('input',{bubbles:true}));orig.dispatchEvent(new Event('change',{bubbles:true}))};
+  const chot=()=>{
+    const r=ngayGoTayParse(txt.value);
+    if(r.loi){
+      txt.classList.add('dtLoi');txt.title=r.loi;
+      if(typeof toast==='function')toast('Ô ngày không hợp lệ: '+r.loi+' — đã giữ lại ngày cũ','err');
+      hienTuGoc();return;
+    }
+    const cu=desc.get.call(orig);
+    desc.set.call(orig,r.iso);
+    hienTuGoc();
+    if(cu!==desc.get.call(orig))phat();
+  };
+  txt.addEventListener('input',e=>{
+    if(e.inputType&&e.inputType.startsWith('delete'))return;
+    const v=ngayGoTayTuDinhDang(txt.value);
+    if(v!==txt.value)txt.value=v;
+    txt.classList.remove('dtLoi');
+  });
+  txt.addEventListener('change',chot);
+  txt.addEventListener('keydown',e=>{if(e.key==='Enter')chot()});
+  btn.addEventListener('click',()=>{try{orig.showPicker()}catch(_){try{orig.click()}catch(__){}}});
+  // chọn trên lịch: ô gốc đổi -> cập nhật ô chữ (sự kiện change/input của ô gốc vẫn tới mã cũ)
+  orig.addEventListener('change',()=>{hienTuGoc()});
+}
+function ngayGoTayQuet(goc){
+  if(typeof document==='undefined'||!document.querySelectorAll)return;
+  (goc||document).querySelectorAll('input[type="date"]:not([data-dt-da])').forEach(ngayGoTayNang);
+}
+if(typeof document!=='undefined'&&document.body&&typeof MutationObserver!=='undefined'){
+  ngayGoTayQuet();
+  let cho=false;
+  new MutationObserver(()=>{if(cho)return;cho=true;requestAnimationFrame(()=>{cho=false;ngayGoTayQuet()})}).observe(document.body,{childList:true,subtree:true});
+}
+</script>
 </body>
 </html>
