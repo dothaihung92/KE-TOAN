@@ -29,6 +29,11 @@ t1 = server._luong_tinh_dong(pt, ts, "03")
 assert t1["luong"] == 1040000 and t1["tt_tien_com"] == 0 and t1["xang_xe"] == 0 and t1["dien_thoai"] == 0 and t1["tt_trang_phuc"] == 0
 assert t1["bhxh_dn"] == 0 and t1["bhxh_nld"] == 0 and t1["dong_bh"] == 0 and t1["pt_phai_dong_bh"] is False and not t1["canh_bao_bh"] and not t1["thoi_vu"]
 assert t1["chi_phi_luong"] == 1040000 and t1["tt_luong"] == 1040000 and t1["thue_tncn"] == 0 and t1["luong_pt"] == 1040000
+# người part-time CHỈ có lương theo giờ: thưởng bán hàng / thưởng T13 / tăng ca / phụ cấp đã nhập sẵn (dữ liệu cũ) KHÔNG được cộng vào chi phí lương và thực lãnh
+pt3 = dict(dong[1], gio_lam=18, luong_gio=25000, thuong_bh=1774666, thuong_t13=500000, tang_ca=1361000, tien_com=730000, muc_xang=500000, luong_cb=5310000)
+t_ = server._luong_tinh_dong(pt3, ts, "01")
+assert t_["luong"] == 450000 and t_["chi_phi_luong"] == 450000 and t_["tt_luong"] == 450000 and t_["thue_tncn"] == 0 and t_["bhxh_nld"] == 0, (t_["chi_phi_luong"], t_["tt_luong"])
+assert t_["tn_chiu_thue"] == 450000 and t_["tn_khong_chiu_thue"] == 0
 # 100 giờ × 26.000 = 2.600.000 >= 2.530.000 -> thuộc đối tượng đóng BHXH: tự tính BH trên lương thực tế
 pt["gio_lam"] = 100
 t2 = server._luong_tinh_dong(pt, ts, "03")

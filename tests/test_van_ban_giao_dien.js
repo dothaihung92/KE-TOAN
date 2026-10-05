@@ -502,7 +502,7 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
 (() => {
   const b0 = html.indexOf('const BL_PT_TRONG'), b1 = html.indexOf('function blCoPartTime');
   const cx = vm.createContext({}); vm.runInContext(html.slice(b0, b1).replace(/^const /gm, 'var '), cx);
-  assert.deepStrictEqual(JSON.parse(vm.runInContext("JSON.stringify(BL_PT_TRONG)", cx)), ['luong_cb', 'ngay_cong', 'ngay_lam', 'gio_tang_ca', 'ngay_cong_hd', 'ngay_lam_hd']);
+  assert.deepStrictEqual(JSON.parse(vm.runInContext("JSON.stringify(BL_PT_TRONG)", cx)), ['luong_cb', 'ngay_cong', 'ngay_lam', 'gio_tang_ca', 'ngay_cong_hd', 'ngay_lam_hd', 'thuong_bh', 'thuong_t13', 'tang_ca']);
   const rows = [{ ten: 'PT1', part_time: 1 }, { ten: 'A', part_time: 0 }, { ten: 'TV', thu_viec: 1 }, { ten: 'PT2', part_time: 1 }, { ten: 'B' }];
   const kq = JSON.parse(vm.runInContext('JSON.stringify(blSapXepPartTime(' + JSON.stringify(rows) + ').map(r=>r.ten))', cx));
   assert.deepStrictEqual(kq, ['A', 'TV', 'B', 'PT1', 'PT2'], 'chính thức + thử việc giữ thứ tự, part-time xuống cuối (giữ thứ tự giữa họ)');
@@ -510,6 +510,8 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(html.includes("if(Number(r.part_time)&&BL_PT_TRONG.includes(c.k))return '<td></td>';"), 'bản in: ô trống cho người part-time');
   assert(html.includes("{k:'luong_gio',t:'Lương theo giờ',w:70,n:1,opt:1},{k:'gio_lam',t:'Số giờ làm',w:48,c:1,dp:1,opt:1}"), 'bản in có cột Lương theo giờ + Số giờ làm khi có người part-time');
   assert(html.includes('blDL[t]=blSapXepPartTime(kq.rows)') && html.includes('blDL[t]=blSapXepPartTime(blDL[t])'), 'sắp xếp khi tải và sau mỗi lần tính');
+  assert((html.match(/Number\(r\.part_time\)&&BL_PT_TRONG\.includes\(c\.k\)\)\?0:/g) || []).length >= 3, 'dòng TỔNG CỘNG (tháng, cả năm, bản in) không cộng ô bị ẩn của người part-time');
+  assert(html.includes("'tang_ca','thuong_bh','thuong_t13','dong_bh','thu_viec'].forEach(k=>{if(k in o)r[k]=o[k]})"));
   console.log('PASS 21: part-time chỉ hiện lương theo giờ + giờ làm, xếp dưới cùng.');
 })();
 

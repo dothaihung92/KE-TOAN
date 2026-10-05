@@ -5483,7 +5483,7 @@ const BL_COT=[
 let blHienMuc=false;
 // Cột part-time (tick / lương theo giờ / giờ làm thực tế) chỉ hiện khi tháng đó có người part-time (tick ở Danh Sách Nhân Viên)
 // Người part-time chỉ có Lương theo giờ + Giờ làm: các ô Lương CB / Ngày công / Tổng NC / Giờ tăng ca để trống; xếp DƯỚI CÙNG bảng lương (sau người chính thức và thử việc)
-const BL_PT_TRONG=['luong_cb','ngay_cong','ngay_lam','gio_tang_ca','ngay_cong_hd','ngay_lam_hd'];
+const BL_PT_TRONG=['luong_cb','ngay_cong','ngay_lam','gio_tang_ca','ngay_cong_hd','ngay_lam_hd','thuong_bh','thuong_t13','tang_ca'];      // part-time: chỉ có lương theo giờ (không thưởng, không tăng ca)
 function blSapXepPartTime(rows){const r=rows||[];return r.filter(x=>!Number(x.part_time)).concat(r.filter(x=>Number(x.part_time)))}
 function blCoPartTime(rows){return (rows||[]).some(r=>Number(r.part_time))}
 function blCotHienThi(rows){return BL_COT.filter(c=>!c.an&&(!c.muc||blHienMuc)&&!(c.anNeuTrong&&!(rows||[]).some(r=>Number(r[c.k])))&&!(c.ptCot&&!blCoPartTime(rows))) }
@@ -5645,7 +5645,7 @@ function blVeBang(){
   });
   if(rows.length){
     h+='<tr style="background:#eef6f0;font-weight:700">';
-    cots.forEach((c,i)=>{h+=`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right;position:sticky;bottom:0;background:#eef6f0;${c.k==='ma'||c.k==='ten'?co(c,2):''}">${c.k==='ten'?'TỔNG CỘNG':(c.tong?blDinhDang(rows.reduce((s,r)=>s+(Number(blGiaTriHienThi(r,c))||0),0)):'')}</td>`;});
+    cots.forEach((c,i)=>{h+=`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right;position:sticky;bottom:0;background:#eef6f0;${c.k==='ma'||c.k==='ten'?co(c,2):''}">${c.k==='ten'?'TỔNG CỘNG':(c.tong?blDinhDang(rows.reduce((s,r)=>s+((Number(r.part_time)&&BL_PT_TRONG.includes(c.k))?0:(Number(blGiaTriHienThi(r,c))||0)),0)):'')}</td>`;});
     h+='<td style="position:sticky;bottom:0;background:#eef6f0"></td></tr>';
   }
   h+='</tbody></table>';
@@ -5698,7 +5698,7 @@ function blVeCaNam(w){
       return `<td style="padding:4px 8px;border:1px solid #e3e3e3;${c.so?'text-align:right':''}${c.dam?';font-weight:700':''}">${c.so?blDinhDang(giaTri(r,c),c.dp):xkEsc(r[c.k]==null?'':r[c.k])}</td>`;
     }).join('')+'</tr>';
   });
-  h+='<tr style="background:#eef6f0;font-weight:700">'+cot.map((c,i)=>`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right">${c.k==='ten'?'TỔNG CỘNG':(c.tong?blDinhDang(ds.reduce((a,{r})=>a+(Number(giaTri(r,c))||0),0)):'')}</td>`).join('')+'</tr>';
+  h+='<tr style="background:#eef6f0;font-weight:700">'+cot.map((c,i)=>`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right">${c.k==='ten'?'TỔNG CỘNG':(c.tong?blDinhDang(ds.reduce((a,{r})=>a+((Number(r.part_time)&&BL_PT_TRONG.includes(c.k))?0:(Number(giaTri(r,c))||0)),0)):'')}</td>`).join('')+'</tr>';
   h+='</tbody></table><div style="font-size:12px;color:var(--muted);margin:0 8px 8px">Muốn sửa số: chọn tab tháng tương ứng. Xuất Excel cả năm để có đủ mọi cột theo bố cục bảng TỔNG HỢP.</div>';
   w.innerHTML=h;
 }
@@ -5710,7 +5710,7 @@ async function blTinhLai(t){
     const kq=await api('/api/bang-luong-tinh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tham_so:blTS,rows,nam:blNam,thang:t})});
     if(seq!==blSeq)return;               // có lần sửa mới hơn — bỏ kết quả cũ
     // dòng part-time: server trả lương/phụ cấp đã quy đổi theo giờ — giữ NGUYÊN các ô nhập gốc (để bỏ tick part-time lại vẫn đúng)
-    (kq.rows||[]).forEach((r,i)=>{const o=rows[i];if(o&&Number(r.part_time))['luong_cb','tien_com','muc_xang','di_lai','muc_dt','trang_phuc','tang_ca','dong_bh','thu_viec'].forEach(k=>{if(k in o)r[k]=o[k]})});
+    (kq.rows||[]).forEach((r,i)=>{const o=rows[i];if(o&&Number(r.part_time))['luong_cb','tien_com','muc_xang','di_lai','muc_dt','trang_phuc','tang_ca','thuong_bh','thuong_t13','dong_bh','thu_viec'].forEach(k=>{if(k in o)r[k]=o[k]})});
     blDL[t]=blSapXepPartTime(kq.rows);blTS=kq.tham_so||blTS;      // người part-time xếp dưới cùng
     if(blThang===t)blVeBang();
   }catch(e){toast('Lỗi tính lương: '+e.message,'err')}
@@ -6280,7 +6280,7 @@ function blDungBangLuongIn(rows,nam,t,tuyChon){
   const dauTong=cot.findIndex(c=>c.k==='luong_cb');
   const tong='<tr class="tong">'+(dauTong>0?`<td colspan="${dauTong}" class="c">Tổng cộng</td>`:'')+cot.slice(Math.max(dauTong,0)).map(c=>{
     if(!c.tong)return '<td></td>';
-    return `<td class="${c.n?'n':'c'}">${blDinhDang(rows.reduce((s,r)=>s+(Number(r[c.k])||0),0),c.dp)}</td>`;
+    return `<td class="${c.n?'n':'c'}">${blDinhDang(rows.reduce((s,r)=>s+((Number(r.part_time)&&BL_PT_TRONG.includes(c.k))?0:(Number(r[c.k])||0)),0),c.dp)}</td>`;
   }).join('')+'</tr>';
   const thang=`THÁNG ${String(parseInt(t,10)).padStart(2,'0')} NĂM ${nam}`;
   const html=`${blKhungTren(tuyChon,'BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC',thang)}

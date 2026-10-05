@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.096"
+APP_BUILD = "2026-10-05.097"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10364,6 +10364,7 @@ def _luong_tinh_dong(r, ts, thang=None):
     pt_phai_dong = pt and luong_pt > 0 and nguong_pt > 0 and luong_pt >= nguong_pt - 1e-9
     if pt:
         d = dict(d, luong_cb=_luong_lam_tron(luong_pt), tien_com=0.0, muc_xang=0.0, di_lai=0.0, muc_dt=0.0, trang_phuc=0.0, tang_ca=0.0,
+                 thuong_bh=0.0, thuong_t13=0.0,            # part-time: chỉ có lương theo giờ — không phụ cấp, không thưởng, không tăng ca
                  dong_bh=1 if pt_phai_dong else 0, thu_viec=0)
         e, g = 1.0, 1.0           # lương đã tính theo giờ: không chia theo ngày công
     luong = tl(d["luong_cb"])
@@ -11672,7 +11673,7 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             d = _luong_chuan_dong_nhap(dong)
             if d["part_time"]:        # part-time: lương = giờ làm thực tế × lương giờ (không phụ cấp) -> ghi như lương cơ bản của tháng, đủ công
                 _l = _luong_lam_tron((d["gio_lam"] if d["gio_lam"] != "" else 0.0) * d["luong_gio"])
-                d = dict(d, luong_cb=_l, tien_com=0.0, muc_xang=0.0, di_lai=0.0, muc_dt=0.0, trang_phuc=0.0, tang_ca=0.0, ngay_lam="", ngay_cong=1.0,
+                d = dict(d, luong_cb=_l, tien_com=0.0, muc_xang=0.0, di_lai=0.0, muc_dt=0.0, trang_phuc=0.0, tang_ca=0.0, thuong_bh=0.0, thuong_t13=0.0, ngay_lam="", ngay_cong=1.0,
                          dong_bh=1 if (_l > 0 and ts.get("nguong_part_time") and _l >= ts["nguong_part_time"]) else 0, thu_viec=0)
             L = khoa
             tt = _luong_thue_ap_dung(ts, t)
