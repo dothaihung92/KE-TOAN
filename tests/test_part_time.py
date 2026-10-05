@@ -91,17 +91,19 @@ assert "LÀM VIỆC KHÔNG TRỌN THỜI GIAN" in t and "HỢP ĐỒNG LAO ĐỘ
 assert "theo lịch sắp xếp của Công ty" in t and "chỉ làm việc khi Công ty có lịch sắp xếp" in t and "khoảng 2 giờ/ngày" in t and "10 giờ/tuần" in t and "ngắn hơn" in t
 assert "Loại hợp đồng" not in t and "Xác định thời hạn" not in t and "Địa điểm làm việc" not in t, "không có mục loại hợp đồng, không có dòng địa điểm làm việc"
 assert "Thời hạn hợp đồng" not in t and "Điều 1. Chức danh và công việc phải làm" in t and "1. Chức danh chuyên môn / chức vụ: Bảo vệ." in t and "2. Công việc phải làm:" in t, "đã bỏ dòng thời hạn hợp đồng"
-# ngày hợp đồng + ngày ký = ngày bắt đầu làm việc đầu tiên (vào làm 01/2025), không dời sang 01/01 của năm lập (2026)
-assert "ngày 01 tháng 01 năm 2025" in t and "Số: 01/HĐPT-2025" in t and "năm 2026" not in t.split("Điều 1")[0]
+# ngày hợp đồng + ngày ký = ngày bắt đầu làm việc đầu tiên TRONG NĂM LẬP: làm từ năm trước (vào làm 01/2025) mà lập năm 2026 -> 01/01/2026 (không hiện năm 2025)
+assert "ngày 01 tháng 01 năm 2026" in t and "Số: 01/HĐPT-2026" in t and "năm 2025" not in t.split("Điều 1")[0]
 t_c = van_ban(v.dung_hop_dong_part_time(dict(nv[1], vao_lam="15/03/2023"), CTY, {}, 0, nam=2026))
-assert "ngày 15 tháng 03 năm 2023" in t_c and "HĐPT-2023" in t_c and "có hiệu lực kể từ ngày 15 tháng 03 năm 2023" in t_c
+assert "ngày 01 tháng 01 năm 2026" in t_c and "HĐPT-2026" in t_c and "có hiệu lực kể từ ngày 01 tháng 01 năm 2026" in t_c
+t_c = van_ban(v.dung_hop_dong_part_time(dict(nv[1], vao_lam="15/03/2026"), CTY, {}, 0, nam=2026))
+assert "ngày 15 tháng 03 năm 2026" in t_c and "có hiệu lực kể từ ngày 15 tháng 03 năm 2026" in t_c, "bắt đầu làm trong năm lập: đúng ngày bắt đầu"
 t_u = van_ban(v.dung_hop_dong_part_time(nv[1], CTY, {"ngay_ky": "20/01/2025", "bat_dau": "10/01/2025"}, 0, nam=2026))
 assert "ngày 20 tháng 01 năm 2025" in t_u and "có hiệu lực kể từ ngày 10 tháng 01 năm 2025" in t_u, "người dùng nhập tay thì theo ô nhập"
 # chưa có giờ/tháng dự kiến: không in dòng "Số giờ làm việc dự kiến: ........"
 t_trong = van_ban(v.dung_hop_dong_part_time(nv[1], CTY, {}, 0, nam=2026))
 assert "dự kiến: ........" not in t_trong and "Số giờ làm việc dự kiến" not in t_trong and "theo lịch sắp xếp của Công ty" in t_trong and "từ Thứ Hai" not in t_trong
 assert "2. Tiền lương thực nhận hằng tháng" in t_trong or "3. Tiền lương thực nhận" in t_trong
-assert "theo giờ" in t and "26.000 đồng/giờ" in t and "dưới 2.340.000 đồng/tháng" in t and "Phụ cấp lương và các khoản bổ sung khác: không có" in t
+assert "theo giờ" in t and "26.000 đồng/giờ" in t and "dưới 2.530.000 đồng/tháng" in t and "Phụ cấp lương và các khoản bổ sung khác: không có" in t
 assert "Do thời giờ làm việc và mức tiền lương tháng không đạt mức tối thiểu làm căn cứ đóng bảo hiểm xã hội bắt buộc theo quy định của Luật Bảo hiểm xã hội, Người lao động không thuộc đối tượng tham gia bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp bắt buộc." in t
 # lương dự kiến từ ngưỡng trở lên thì KHÔNG ghi câu "không thuộc đối tượng"
 h2 = v.dung_hop_dong_part_time(nv[1], CTY, {"pt_gio_ngay": "4", "pt_ngay_tuan": 6}, 0, nam=2026)

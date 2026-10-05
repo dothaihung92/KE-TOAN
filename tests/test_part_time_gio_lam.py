@@ -113,7 +113,9 @@ rows_hd2 = [R(**{'Mã NV': '2', 'Họ và tên': 'Trần Minh Hùng', 'Part-time
 server.nhap_lieu_get = lambda cid, loai="in": {"header": H, "rows": rows_hd2} if loai == "nv" else {"header": [], "rows": []}
 pp = {n["ten"]: n for n in server._vb_nv_part_time(7, 2025)}
 assert pp["Trần Minh Hùng"]["ngay_bat_dau_lam"] == "04/07/2025", "tháng 2 giờ = 0 bỏ qua; tháng 7 đầu tiên có giờ, ngày nhỏ nhất theo giờ từng ngày = 4"
-assert pp["Nguyễn Giang Nam"]["ngay_bat_dau_lam"] == "01/11/2024", "lấy cả năm trước: tháng đầu tiên có giờ (khớp theo họ tên khi dòng bảng lương chưa có mã)"
+assert "ngay_bat_dau_lam" not in pp["Nguyễn Giang Nam"], "chỉ xét giờ làm TRONG NĂM LẬP: có giờ từ 11/2024 nhưng năm 2025 chưa có giờ -> dùng vào làm"
+import van_ban_lao_dong as _v0
+assert "ngày 01 tháng 01 năm 2025" in _v0.dung_hop_dong_part_time(pp["Nguyễn Giang Nam"], {"ten": "A"}, {}, 0, nam=2025), "hợp đồng năm 2025 ghi ngày của năm 2025"
 assert "ngay_bat_dau_lam" not in pp["Chưa Có Giờ"], "chưa có giờ nào: dùng Tháng/Năm vào làm"
 CTY2 = {"ten": "CÔNG TY A", "mst": "031", "dia_chi": "1 Lê Lợi", "nguoi_ky": "Giám Đốc"}
 import van_ban_lao_dong as _v

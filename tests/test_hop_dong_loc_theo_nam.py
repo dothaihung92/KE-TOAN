@@ -74,6 +74,12 @@ r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2025, "tuy
 assert r["so_van_ban"] == 1 and "NGUYỄN VĂN THƠ" in r["html"] and "2026" not in r["html"] and "ĐẶNG VĂN TÈO" not in r["html"] and "NGUYỄN VĂN ĐƯỢC" not in r["html"]
 d = server.van_ban_du_lieu(7, 2026)
 assert [n["ten"] for n in d["nhan_vien_pt"]] == ["Nguyễn Văn Thơ", "Đặng Văn Tèo", "Nguyễn Văn Được"], d["nhan_vien_pt"]
+# lập năm 2026: người làm part-time từ 2025 (Thơ) -> hợp đồng ngày 01/01/2026, số …/HĐPT-2026 (trước đây hiện 01/01/2025, HĐPT-2025)
+r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "pt", "nam": 2026, "tuy_chon": {}})))
+h = r["html"]
+assert "2025" not in h.split("Điều 1")[0] and "Số: 01/HĐPT-2026" in h and "ngày 01 tháng 01 năm 2026" in h, h[:600]
+i = h.index("ĐẶNG VĂN TÈO"); sec = h[h.rindex("<section", 0, i):]
+assert "Số: 02/HĐPT-2026" in sec and "ngày 01 tháng 02 năm 2026" in sec, "bắt đầu có giờ làm 02/2026 -> ngày 01/02/2026"
 print("PASS: hợp đồng part-time chỉ gồm người có làm việc trong năm lập")
 
 # HỢP ĐỒNG THỬ VIỆC: tương tự — thử việc năm khác không lẫn vào năm lập; chưa ghi ngày thử việc thì KHÔNG lấy ngày hôm nay (2026) khi đang lập 2025

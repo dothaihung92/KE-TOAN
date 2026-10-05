@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.127"
+APP_BUILD = "2026-10-05.128"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13314,7 +13314,8 @@ def _vb_nv_part_time(cid, nam):
     _ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
     nv = vbld.gop_nhan_vien(hdr, [r for r in rows if i_pt < len(r) and _nv_co_tick(r[i_pt])], thang_nhap, nam)
     kq = [n for n in nv if (n["ma"] or n["ten"]).strip().lower() in co]
-    # NGÀY BẮT ĐẦU LÀM VIỆC ĐẦU TIÊN thực tế = tháng đầu tiên có giờ làm (>0) trong Bảng Lương (mọi năm đã lưu); có giờ theo ngày thì lấy ngày nhỏ nhất, không thì ngày 01
+    # NGÀY BẮT ĐẦU LÀM VIỆC ĐẦU TIÊN TRONG NĂM LẬP = tháng đầu tiên của năm `nam` có giờ làm (>0) trong Bảng Lương; có giờ theo ngày thì lấy ngày nhỏ nhất, không thì
+    # ngày 01. (Hợp đồng năm 2026 ghi ngày của năm 2026 — người làm từ 2025 không còn hợp đồng ngày 2025 lẫn vào bộ 2026.) `dau` xét mọi năm: để bỏ người chỉ bắt đầu làm SAU năm lập.
     dau = {}
     try:
         _t, _th, _c2, cac_nam = _luong_doc_nam(cid, nam)
@@ -13331,19 +13332,40 @@ def _vb_nv_part_time(cid, nam):
                             dau[k] = mot
     except Exception:
         dau = {}
+    dau_nam = {}
+    try:
+        for t in _LUONG_THANG:
+            for r in (thang_nhap or {}).get(t) or []:
+                if not (_luong_so(r.get("gio_lam")) > 0):
+                    continue
+                ngay_nho = min([int(x.split(":")[0]) for x in str(r.get("gio_ngay") or "").split(";") if x.split(":")[0].isdigit()] or [1])
+                mot = (int(nam), int(t), ngay_nho)
+                for k in {vbld.ma_goc_phien_ban(str(r.get("ma") or "").strip()).lower(), str(r.get("ten") or "").strip().lower()} - {""}:
+                    if k not in dau_nam or mot < dau_nam[k]:
+                        dau_nam[k] = mot
+    except Exception:
+        dau_nam = {}
+    cuoi_nam = datetime.date(int(nam), 12, 31)
+    giu = []
     for n in kq:
         n["part_time"] = True
-        m = [dau[k] for k in (vbld.ma_goc_phien_ban(n["ma"]).lower(), n["ten"].strip().lower()) if k and k in dau]
+        khoa = (vbld.ma_goc_phien_ban(n["ma"]).lower(), n["ten"].strip().lower())
+        m = [dau_nam[k] for k in khoa if k and k in dau_nam]
         if m:
             y, th, d = min(m)
             n["ngay_bat_dau_lam"] = f"{d:02d}/{th:02d}/{y}"
+        else:
+            m_all = [dau[k] for k in khoa if k and k in dau]
+            if m_all and datetime.date(*min(m_all)) > cuoi_nam:
+                continue            # chỉ bắt đầu có giờ làm SAU năm lập
+        giu.append(n)
+    kq = giu
     # Chỉ người CÓ LÀM trong năm lập: bỏ người bắt đầu làm (giờ làm đầu tiên trong Bảng Lương, hoặc vào làm) SAU 31/12 năm lập — vd đang lập 2025 mà
     # người đó mới có giờ làm từ 2026 thì hợp đồng không được ghi năm 2026 lẫn vào bộ 2025 — và người đã nghỉ việc trước 01/01 năm lập.
-    cuoi_nam = datetime.date(int(nam), 12, 31)
-    kq = [n for n in _vb_loc_theo_nam(kq, nam) if not ((vbld.ngay_date(n.get("ngay_bat_dau_lam")) or datetime.date.min) > cuoi_nam)]
+    kq = _vb_loc_theo_nam(kq, nam)
     # SẮP XẾP theo ngày bắt đầu làm việc đầu tiên TĂNG DẦN (cùng ngày giữ thứ tự danh sách NV): hợp đồng, số hợp đồng và STT đi theo thứ tự thời gian
     ngay0 = datetime.date(int(nam), 1, 1)
-    kq = [n for _i, n in sorted(enumerate(kq), key=lambda x: (vbld.ngay_date(x[1].get("ngay_bat_dau_lam")) or vbld.ngay_date(x[1].get("vao_lam")) or ngay0, x[0]))]
+    kq = [n for _i, n in sorted(enumerate(kq), key=lambda x: (vbld.ngay_date(x[1].get("ngay_bat_dau_lam")) or vbld.ngay_bat_dau_theo_nam(x[1].get("vao_lam"), nam) or ngay0, x[0]))]
     for i, n in enumerate(kq, 1):
         n["stt"] = i
     return kq
