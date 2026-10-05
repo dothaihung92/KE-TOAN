@@ -102,4 +102,23 @@ server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam)
 p24 = server._vb_nv_part_time(7, 2024)
 assert [(n["stt"], n["ma"], n["ten"], n["luong_gio"]) for n in p24] == [(1, "2", "Trần Minh Hùng", 25000.0)], p24
 assert server._vb_nv_part_time(7, 2025) == [], "năm 2025 người này đã là toàn thời gian (2-001): không còn hợp đồng part-time"
+# NGÀY BẮT ĐẦU LÀM VIỆC ĐẦU TIÊN (ngày hợp đồng/ký) = tháng đầu tiên có giờ làm trong Bảng Lương (mọi năm đã lưu); có giờ theo ngày thì ngày nhỏ nhất
+bl_nam = {2025: {"02": [{"ma": "2", "ten": "Trần Minh Hùng", "gio_lam": 0.0, "part_time": 1}], "07": [{"ma": "2", "ten": "Trần Minh Hùng", "gio_lam": 12.0, "gio_ngay": "9:2;4:1;20:9"}],
+                   "09": [{"ma": "2", "ten": "Trần Minh Hùng", "gio_lam": 8.0}]},
+          2024: {"11": [{"ma": "", "ten": "Nguyễn Giang Nam", "gio_lam": 5.0}]}}
+server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), bl_nam.get(nam, {}), "", [2024, 2025])
+rows_hd2 = [R(**{'Mã NV': '2', 'Họ và tên': 'Trần Minh Hùng', 'Part-time': 'x', 'Lương theo giờ': 25000}),                  # vào làm để trống
+            R(**{'Mã NV': '5', 'Họ và tên': 'Nguyễn Giang Nam', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '01/2025'}),
+            R(**{'Mã NV': '6', 'Họ và tên': 'Chưa Có Giờ', 'Part-time': 'x', 'Lương theo giờ': 25000, 'Tháng/Năm vào làm': '15/03/2025'})]
+server.nhap_lieu_get = lambda cid, loai="in": {"header": H, "rows": rows_hd2} if loai == "nv" else {"header": [], "rows": []}
+pp = {n["ten"]: n for n in server._vb_nv_part_time(7, 2025)}
+assert pp["Trần Minh Hùng"]["ngay_bat_dau_lam"] == "04/07/2025", "tháng 2 giờ = 0 bỏ qua; tháng 7 đầu tiên có giờ, ngày nhỏ nhất theo giờ từng ngày = 4"
+assert pp["Nguyễn Giang Nam"]["ngay_bat_dau_lam"] == "01/11/2024", "lấy cả năm trước: tháng đầu tiên có giờ (khớp theo họ tên khi dòng bảng lương chưa có mã)"
+assert "ngay_bat_dau_lam" not in pp["Chưa Có Giờ"], "chưa có giờ nào: dùng Tháng/Năm vào làm"
+CTY2 = {"ten": "CÔNG TY A", "mst": "031", "dia_chi": "1 Lê Lợi", "nguoi_ky": "Giám Đốc"}
+import van_ban_lao_dong as _v
+t_a = _v.dung_hop_dong_part_time(pp["Trần Minh Hùng"], CTY2, {}, 0, nam=2025)
+assert "ngày 04 tháng 07 năm 2025" in t_a and "Số: 01/HĐPT-2025" in t_a
+t_b = _v.dung_hop_dong_part_time(pp["Chưa Có Giờ"], CTY2, {}, 0, nam=2025)
+assert "ngày 15 tháng 03 năm 2025" in t_b
 print("PASS")

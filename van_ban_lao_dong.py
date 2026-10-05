@@ -1840,8 +1840,9 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     """HTML 1 hợp đồng lao động LÀM VIỆC KHÔNG TRỌN THỜI GIAN (part-time): thời giờ làm việc ngắn hơn bình thường, lương theo giờ dưới ngưỡng, điều khoản BHXH."""
     tc = gop_tuy_chon(cty, tuy_chon, hom_nay)
     hom_nay = hom_nay or datetime.date.today()
-    # Ngày hợp đồng + ngày ký = NGÀY BẮT ĐẦU LÀM VIỆC ĐẦU TIÊN của người đó (Tháng/Năm vào làm ở Danh Sách NV; chỉ ghi tháng/năm thì lấy ngày 01), không dời sang 01/01 của năm lập
-    bat_dau = ngay_date(tc.get("bat_dau")) or ngay_date(nv.get("vao_lam")) or ngay_bat_dau_theo_nam(nv.get("vao_lam"), nam)
+    # Ngày hợp đồng + ngày ký = NGÀY BẮT ĐẦU LÀM VIỆC ĐẦU TIÊN của người đó: tháng đầu tiên có giờ làm trong Bảng Lương (ngay_bat_dau_lam), không có thì Tháng/Năm vào làm ở Danh Sách NV (chỉ ghi tháng/năm thì lấy ngày 01); không dời sang 01/01 của năm lập
+    bat_dau = (ngay_date(tc.get("bat_dau")) or ngay_date(nv.get("ngay_bat_dau_lam")) or ngay_date(nv.get("vao_lam"))
+               or ngay_bat_dau_theo_nam(nv.get("vao_lam"), nam))
     ngay_ky = ngay_date(tc.get("ngay_ky")) or bat_dau or ngay_date(tc.get("ngay"), hom_nay)
     bat_dau = bat_dau or ngay_ky
     loai_ten, cuoi, thang, bao_truoc = _thoi_han_hd(tc, nv, bat_dau)

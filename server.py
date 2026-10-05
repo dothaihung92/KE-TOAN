@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.112"
+APP_BUILD = "2026-10-05.113"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13252,8 +13252,29 @@ def _vb_nv_part_time(cid, nam):
     _ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
     nv = vbld.gop_nhan_vien(hdr, [r for r in rows if i_pt < len(r) and _nv_co_tick(r[i_pt])], thang_nhap, nam)
     kq = [n for n in nv if (n["ma"] or n["ten"]).strip().lower() in co]
+    # NGÀY BẮT ĐẦU LÀM VIỆC ĐẦU TIÊN thực tế = tháng đầu tiên có giờ làm (>0) trong Bảng Lương (mọi năm đã lưu); có giờ theo ngày thì lấy ngày nhỏ nhất, không thì ngày 01
+    dau = {}
+    try:
+        _t, _th, _c2, cac_nam = _luong_doc_nam(cid, nam)
+        for y in sorted(set(cac_nam or []) | {nam}):
+            thang_y = _luong_doc_nam(cid, y)[1] if y != nam else _th
+            for t in _LUONG_THANG:
+                for r in (thang_y or {}).get(t) or []:
+                    if not (_luong_so(r.get("gio_lam")) > 0):
+                        continue
+                    ngay_nho = min([int(x.split(":")[0]) for x in str(r.get("gio_ngay") or "").split(";") if x.split(":")[0].isdigit()] or [1])
+                    mot = (y, int(t), ngay_nho)
+                    for k in {vbld.ma_goc_phien_ban(str(r.get("ma") or "").strip()).lower(), str(r.get("ten") or "").strip().lower()} - {""}:
+                        if k not in dau or mot < dau[k]:
+                            dau[k] = mot
+    except Exception:
+        dau = {}
     for i, n in enumerate(kq, 1):
         n["stt"], n["part_time"] = i, True
+        m = [dau[k] for k in (vbld.ma_goc_phien_ban(n["ma"]).lower(), n["ten"].strip().lower()) if k and k in dau]
+        if m:
+            y, th, d = min(m)
+            n["ngay_bat_dau_lam"] = f"{d:02d}/{th:02d}/{y}"
     return kq
 
 
