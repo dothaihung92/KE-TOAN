@@ -458,3 +458,42 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert.strictEqual(ctx.blDL['06'][0].gio_lam, 100); assert(toasts.at(-1)[0].includes('đã tự tính BHXH') && toasts.at(-1)[1] === 'err');
   console.log('PASS 19: nạp part-time cả năm + điền giờ theo hợp đồng.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 20: giờ làm part-time — bảng chấm công ghi giờ từng ngày (tối đa 8 giờ/ngày, dư sang ngày kế), import file giờ làm
+(async () => {
+  assert(html.includes('onclick="blTaiMauGioLam()"') && html.includes('onchange="blImportGioLam(this)"'));
+  const c0 = html.indexOf('const BL_THU='), c1 = html.indexOf('function blDauHienThi');
+  const cc = vm.createContext({ Math, Number, String, Object, Set, Date, parseInt, parseFloat, xkEsc: (x) => x, blDinhDang: (v) => String(v) });
+  vm.runInContext(html.slice(c0, c1).replace(/^const /gm, 'var '), cc);
+  const cham = (r) => JSON.parse(JSON.stringify(vm.runInContext('(r)=>blChamCongThang(r,2026,"03",null)', cc)(r)));
+  const dau = (c) => c.ngay.filter((x) => x.dau).map((x) => x.d + ':' + x.dau).join(' ');
+  // chỉ có TỔNG giờ tháng: phân bổ từ ngày làm việc đầu tháng (T2–T7), mỗi ngày tối đa 8 giờ, dư sang ngày kế (CN 1/3 bỏ qua)
+  let c = cham({ part_time: 1, gio_lam: 20, ma: 'P' });
+  assert.strictEqual(dau(c), '2:8 3:8 4:4'); assert.strictEqual(c.tong, 20); assert.strictEqual(c.suy, true); assert.strictEqual(c.pt, true);
+  c = cham({ part_time: 1, gio_lam: 100.5, ma: 'P' });
+  assert(c.ngay.every((x) => x.gio <= 8) && c.tong === 100.5 && c.ngay.filter((x) => x.gio > 0).length === 13, 'không ngày nào quá 8 giờ');
+  assert.strictEqual(c.ngay[7].dau, '', 'Chủ nhật không điền');
+  // có giờ theo NGÀY (import): hiện đúng như file, không phân bổ
+  c = cham({ part_time: 1, gio_lam: 6.5, gio_ngay: '5:2;6:2;9:2.5', ma: 'P' });
+  assert.strictEqual(dau(c), '5:2 6:2 9:2,5'); assert.strictEqual(c.tong, 6.5); assert.strictEqual(c.suy, false);
+  // chưa có giờ: trống; người toàn thời gian: như cũ
+  assert.strictEqual(dau(cham({ part_time: 1, gio_lam: '' })), ''); assert.strictEqual(cham({ part_time: 0, ngay_lam: 3, ma: 'F' }).pt, undefined);
+  assert(html.includes('Người có ghi chú * : giờ từng ngày phân bổ theo TỔNG giờ tháng (chưa có chấm công từng ngày)'), 'bản in ghi rõ phần phân bổ theo tổng giờ');
+  // IMPORT
+  const i1 = html.indexOf('async function blTaiMauGioLam'), i2 = html.indexOf('// Điền giờ làm/tháng THEO HỢP ĐỒNG');
+  const alerts = [], toasts = [];
+  const ctx = { current: 7, blNam: 2026, BL_THANG: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), blBan: false, blVeTabs() {}, blVeBang() {}, blVeInfo() {}, toast: (m, k) => toasts.push([m, k]), alert: (m) => alerts.push(m),
+    blDL: { '03': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: '' }], '04': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: 5, gio_ngay: '2:5' }], '05': [{ ma: '1', ten: 'FT', part_time: 0 }] },
+    FormData: class { append() {} }, async blNapPartTime() {}, async blTinhLai() {},
+    fetch: async () => ({ ok: true, json: async () => ({ so_nguoi: 1, gio: [{ ma: 'P1', ten: 'Lê', thang: { '03': 14.5, '04': 30, '06': 10 }, ngay: { '03': { 2: 2, 3: 2, 4: 2.5, 5: 8 } } }], loi: ['Giờ theo ngày, dòng 9 (ngày 7): 9 giờ vượt tối đa 8 giờ/ngày'], canh_bao: [] }) }) };
+  vm.createContext(ctx); vm.runInContext(html.slice(i1, i2), ctx);
+  await ctx.blImportGioLam({ files: [{}], value: 'x' });
+  const r3 = ctx.blDL['03'][0], r4 = ctx.blDL['04'][0];
+  assert.strictEqual(r3.gio_lam, 14.5); assert.strictEqual(r3.gio_ngay, '2:2;3:2;4:2.5;5:8', 'giữ giờ từng ngày');
+  assert.strictEqual(r4.gio_lam, 30); assert.strictEqual(r4.gio_ngay, '', 'tháng chỉ có giờ theo tháng: bỏ chi tiết ngày cũ');
+  assert(alerts[0].includes('vượt tối đa 8 giờ/ngày') && alerts[0].includes('tháng 6: chưa có dòng part-time'), 'báo các dòng bị bỏ qua');
+  assert(toasts.at(-1)[1] === 'err' && toasts.at(-1)[0].includes('Đã nhập giờ làm cho 2 dòng'));
+  // sửa tay tổng giờ thì bỏ chi tiết giờ theo ngày
+  assert(html.includes("if(k==='gio_lam')rows[ri].gio_ngay='';"));
+  console.log('PASS 20: chấm công part-time theo giờ + import giờ làm.');
+})().catch((e) => { console.error(e); process.exit(1); });

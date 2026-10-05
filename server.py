@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.092"
+APP_BUILD = "2026-10-05.093"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10079,7 +10079,7 @@ _LUONG_THAM_SO_MAC_DINH = {
 _LUONG_CAC_TRUONG_NHAP = (
     "ma", "ten", "chuc_vu", "luong_cb", "ngay_cong", "ngay_lam", "tien_com", "muc_xang", "di_lai",
     "muc_dt", "trang_phuc", "thuong_bh", "thuong_t13", "tang_ca", "so_npt", "dong_bh", "thu_viec", "thue_tay", "ghi_chu",
-    "part_time", "luong_gio", "gio_lam")
+    "part_time", "luong_gio", "gio_lam", "gio_ngay")
 # Thuế TNCN theo Luật Thuế thu nhập cá nhân 2025 (áp dụng cho kỳ tính thuế từ 1/1/2026): giảm trừ bản thân 15.500.000, mỗi người
 # phụ thuộc 6.200.000 và biểu lũy tiến từng phần 5 bậc (đến 10tr 5%, đến 30tr 10%, đến 60tr 20%, đến 100tr 30%,
 # trên 100tr 35%). Khi tính lương từ tháng 1/2026 phần mềm tự áp dụng bộ này; năm 2025 trở về trước vẫn tính theo
@@ -10110,7 +10110,7 @@ def _luong_thue_moi_mac_dinh(nam):
     return None
 
 
-_LUONG_TRUONG_CHU = ("ma", "ten", "chuc_vu", "ghi_chu")
+_LUONG_TRUONG_CHU = ("ma", "ten", "chuc_vu", "ghi_chu", "gio_ngay")
 _LUONG_THANG = tuple("%02d" % i for i in range(1, 13))
 _LUONG_NGAY_DONG_BHXH = 14      # Điều 33 khoản 5 Luật BHXH 2024: KHÔNG LƯƠNG từ 14 ngày làm việc trở lên trong tháng thì tháng đó không đóng BHXH
 
@@ -12090,7 +12090,7 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                     gio_tong = ch.get("gio") or 0
                     ctc = ws.cell(rr, c_tc, gio_tong if gio_tong > 0 else None)
                     ctc.alignment, ctc.number_format = giua, "General"
-                ws.cell(rr, c_gc, "Thời vụ (không BHXH)" if r.get("thoi_vu") else None).alignment = trai
+                ws.cell(rr, c_gc, "Part-time *" if ch.get("suy") else ("Part-time" if ch.get("pt") else ("Thời vụ (không BHXH)" if r.get("thoi_vu") else None))).alignment = trai
                 for cc in range(c1, c2 + 1):
                     x = ws.cell(rr, cc)
                     x.border = vien
@@ -12098,7 +12098,9 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
                     if c1 + 2 <= cc < c1 + 2 + dim and isinstance(x.value, str) and x.value.startswith("X+"):
                         x.font = font(True, 9)
             ws.cell(r_tong + 1, c1, "X: đi làm    X+n: đi làm và tăng ca n giờ    L: nghỉ lễ    (trống): nghỉ / Chủ nhật    TNC: tổng ngày công"
-                    + ("    Giờ TC: tổng giờ tăng ca" if co_tc else "")).font = font(False, 10, True)
+                    + ("    Giờ TC: tổng giờ tăng ca" if co_tc else "")
+                    + ("    |  Part-time: số trong ô ngày = giờ làm, TNC = tổng giờ (tối đa 8 giờ/ngày)" if any(c.get("pt") for c in cham) else "")
+                    + (" — người có * : giờ từng ngày phân bổ theo TỔNG giờ tháng, chưa có chấm công từng ngày" if any(c.get("suy") for c in cham) else "")).font = font(False, 10, True)
             chu_ky(c1, c2, r_tong + 3)
             vung_in.append(f"{L(c1)}1:{L(c2)}{r_tong + 11}")
         # in ấn: khổ giấy, hướng, vừa bề ngang, lề nhỏ, lặp tiêu đề bảng, mỗi khối 1 vùng in (khối lương trang trước, chấm công trang sau)
@@ -13696,6 +13698,196 @@ def bang_luong_xuat_excel(cid: int, nam: int = 0):
         raise HTTPException(404, f"Năm {nam} chưa có dữ liệu bảng lương để xuất")
     path, fname = _luong_xuat_excel(nam, ts, thang)
     return _resp_xuat(path, fname, desktop=True)
+
+
+# ----- GIỜ LÀM CỦA LAO ĐỘNG PART-TIME: file mẫu + import từ file chấm công (giờ theo tháng hoặc theo từng ngày; tối đa 8 giờ/ngày) -----
+_GIO_TOI_DA_NGAY = 8.0
+
+
+def _gio_so(v):
+    """Ô giờ làm: 2 / '2,5' / '2.5' / '' -> float; chữ lạ -> None; rỗng -> 0."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return 0.0
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).strip().replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _pt_nguoi_trong_nam(cid, nam):
+    """Những người part-time trong Danh Sách NV + các tháng của năm họ có dòng (theo vào làm → nghỉ việc): {khoá: {ma, ten, luong_gio, thang:[1..12]}}."""
+    d = nhap_lieu_get(cid, loai="nv")
+    npt = _luong_npt_doc(nhap_lieu_get(cid, loai="npt"))
+    kq = {}
+    for t in range(1, 13):
+        for r in _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, t, npt):
+            if not r.get("part_time"):
+                continue
+            k = (r["ma"] or r["ten"]).strip().lower()
+            e = kq.setdefault(k, {"ma": r["ma"], "ten": r["ten"], "luong_gio": r.get("luong_gio") or 0, "thang": []})
+            e["thang"].append(t)
+    return kq
+
+
+@app.get("/api/bang-luong/{cid}/mau-gio-lam")
+def bang_luong_mau_gio_lam(cid: int, nam: int = 0):
+    """File Excel MẪU nhập giờ làm của lao động part-time: sheet 'Giờ theo tháng' (mỗi người 1 dòng, T1–T12) + 'Giờ theo ngày' (tuỳ chọn, mỗi người-tháng 1 dòng, ngày 1–31)."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    ds = _pt_nguoi_trong_nam(cid, nam)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Giờ theo tháng"
+    dam, xam = Font(bold=True), PatternFill("solid", fgColor="DDDDDD")
+    ws.append(["Mã NV", "Họ và tên", "Lương theo giờ"] + [f"T{m}" for m in range(1, 13)])
+    for c in ws[1]:
+        c.font, c.alignment = dam, Alignment(horizontal="center", wrap_text=True)
+    for e in sorted(ds.values(), key=lambda x: x["ten"]):
+        ws.append([e["ma"], e["ten"], e["luong_gio"] or None] + [None] * 12)
+        for m in range(1, 13):
+            if m not in e["thang"]:
+                ws.cell(ws.max_row, 3 + m).fill = xam         # ngoài khoảng làm việc trong Danh Sách NV: không nhập
+    ws.append([])
+    ws.append([f"Năm {nam}. Nhập TỔNG GIỜ LÀM THỰC TẾ từng tháng (ô xám = ngoài khoảng vào làm/nghỉ việc ở Danh Sách NV, không nhập). Mỗi ngày tối đa {int(_GIO_TOI_DA_NGAY)} giờ."])
+    ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 10, 28
+    w2 = wb.create_sheet("Giờ theo ngày")
+    w2.append(["Mã NV", "Họ và tên", "Tháng"] + list(range(1, 32)))
+    for c in w2[1]:
+        c.font, c.alignment = dam, Alignment(horizontal="center")
+    for e in sorted(ds.values(), key=lambda x: x["ten"]):
+        for m in e["thang"]:
+            w2.append([e["ma"], e["ten"], m] + [None] * 31)
+    w2.append([])
+    w2.append(["(Tuỳ chọn) Nếu có chấm công TỪNG NGÀY thì nhập giờ ở đây: số giờ mỗi ngày (tối đa 8). Tháng nào có dữ liệu ở sheet này thì dùng sheet này (tổng giờ = cộng các ngày) thay cho sheet 'Giờ theo tháng'."])
+    w2.column_dimensions["A"].width, w2.column_dimensions["B"].width = 10, 28
+    fname = f"MauGioLamPartTime_{nam}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    return _resp_xuat(path, fname, desktop=True)
+
+
+@app.post("/api/bang-luong/{cid}/nhap-gio-lam")
+async def bang_luong_nhap_gio_lam(cid: int, request: Request):
+    """multipart: file (theo mẫu) + nam. Chưa lưu gì — trả {gio:[{ma,ten,thang:{"03":giờ},ngay:{"03":{"5":2.0}}}], loi, canh_bao}. Mỗi ngày tối đa 8 giờ: số giờ lớn hơn bị BÁO LỖI (không tự dồn sang ngày khác)."""
+    import openpyxl, io as _io, calendar
+    form = await request.form()
+    up = form.get("file")
+    if up is None:
+        raise HTTPException(400, "Chưa chọn file")
+    nam = _luong_nam_hop_le(int(form.get("nam") or datetime.date.today().year))
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(await up.read()), data_only=True)
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file Excel: {e}")
+    ds = _pt_nguoi_trong_nam(cid, nam)
+    theo_ma = {e["ma"].strip().lower(): k for k, e in ds.items() if e["ma"]}
+    theo_ten = {_khong_dau(e["ten"]).strip().lower(): k for k, e in ds.items()}
+    loi, canh_bao, kq = [], [], {}
+
+    def tim(ma, ten, vi_tri):
+        ma, ten = str(ma or "").strip(), str(ten or "").strip()
+        k = (theo_ma.get(ma.lower()) if ma else None) or (theo_ten.get(_khong_dau(ten).strip().lower()) if ten else None)
+        if not k:
+            loi.append(f"{vi_tri}: “{ten or ma}” không phải lao động part-time trong Danh Sách Nhân Viên (cần tick Part-time) — bỏ qua.")
+            return None
+        return k
+
+    def ghi(k, m, vi_tri):
+        e = ds[k]
+        if m not in e["thang"]:
+            canh_bao.append(f"{vi_tri}: {e['ten']} tháng {m} nằm ngoài khoảng vào làm/nghỉ việc ở Danh Sách NV — bỏ qua.")
+            return None
+        return kq.setdefault(k, {"ma": e["ma"], "ten": e["ten"], "thang": {}, "ngay": {}})
+
+    def sheet(*ten):
+        for ws in wb.worksheets:
+            if _khong_dau(ws.title).strip().lower() in ten:
+                return ws
+        return None
+    # 1) giờ theo tháng
+    ws = sheet("gio theo thang")
+    if ws is not None:
+        hang = list(ws.iter_rows(values_only=True))
+        dau = next((i for i, r in enumerate(hang) if r and _khong_dau(str(r[0] or "")).strip().lower() == "ma nv"), None)
+        if dau is not None:
+            cot = {}
+            for j, c in enumerate(hang[dau]):
+                t = _khong_dau(str(c or "")).strip().lower().replace("thang ", "t")
+                if t.startswith("t") and t[1:].isdigit() and 1 <= int(t[1:]) <= 12:
+                    cot[int(t[1:])] = j
+                elif t.isdigit() and 1 <= int(t) <= 12 and j >= 3:
+                    cot[int(t)] = j
+            for i, r in enumerate(hang[dau + 1:], dau + 2):
+                if not r or not (r[0] or (len(r) > 1 and r[1])):
+                    continue
+                k = tim(r[0], r[1] if len(r) > 1 else "", f"Giờ theo tháng, dòng {i}")
+                if not k:
+                    continue
+                for m, j in cot.items():
+                    v = _gio_so(r[j] if j < len(r) else None)
+                    vt = f"Giờ theo tháng, dòng {i} (T{m})"
+                    if v is None or v < 0:
+                        loi.append(f"{vt}: giờ không hợp lệ — bỏ qua.")
+                        continue
+                    if v == 0:
+                        continue
+                    ngay_lam_viec = sum(1 for d in range(1, calendar.monthrange(nam, m)[1] + 1) if datetime.date(nam, m, d).weekday() != 6)
+                    if v > _GIO_TOI_DA_NGAY * ngay_lam_viec + 1e-9:
+                        loi.append(f"{vt}: {v:g} giờ vượt tối đa {int(_GIO_TOI_DA_NGAY)} giờ × {ngay_lam_viec} ngày (trừ Chủ nhật) = {int(_GIO_TOI_DA_NGAY) * ngay_lam_viec} giờ — bỏ qua.")
+                        continue
+                    e = ghi(k, m, vt)
+                    if e is not None:
+                        e["thang"][f"{m:02d}"] = round(v, 2)
+    # 2) giờ theo ngày (ưu tiên hơn giờ theo tháng của cùng người-tháng)
+    ws = sheet("gio theo ngay")
+    if ws is not None:
+        hang = list(ws.iter_rows(values_only=True))
+        dau = next((i for i, r in enumerate(hang) if r and _khong_dau(str(r[0] or "")).strip().lower() == "ma nv"), None)
+        if dau is not None:
+            for i, r in enumerate(hang[dau + 1:], dau + 2):
+                if not r or not (r[0] or (len(r) > 1 and r[1])):
+                    continue
+                try:
+                    m = int(_gio_so(r[2] if len(r) > 2 else None) or 0)
+                except Exception:
+                    m = 0
+                vt = f"Giờ theo ngày, dòng {i}"
+                if not 1 <= m <= 12:
+                    loi.append(f"{vt}: cột Tháng phải là 1–12 — bỏ qua.")
+                    continue
+                ngay, hop_le = {}, True
+                so_ngay = calendar.monthrange(nam, m)[1]
+                for d in range(1, 32):
+                    v = _gio_so(r[2 + d] if len(r) > 2 + d else None)
+                    if v is None or v < 0:
+                        loi.append(f"{vt} (ngày {d}): giờ không hợp lệ — bỏ qua cả dòng."); hop_le = False; break
+                    if v == 0:
+                        continue
+                    if d > so_ngay:
+                        loi.append(f"{vt}: tháng {m}/{nam} không có ngày {d} — bỏ qua cả dòng."); hop_le = False; break
+                    if v > _GIO_TOI_DA_NGAY + 1e-9:
+                        loi.append(f"{vt} (ngày {d}): {v:g} giờ vượt tối đa {int(_GIO_TOI_DA_NGAY)} giờ/ngày — kiểm tra lại (phần mềm không tự dồn sang ngày khác); bỏ qua cả dòng."); hop_le = False; break
+                    ngay[str(d)] = round(v, 2)
+                if not hop_le or not ngay:
+                    continue
+                k = tim(r[0], r[1] if len(r) > 1 else "", vt)
+                if not k:
+                    continue
+                e = ghi(k, m, vt)
+                if e is None:
+                    continue
+                tong = round(sum(ngay.values()), 2)
+                cu = e["thang"].get(f"{m:02d}")
+                if cu is not None and abs(cu - tong) > 0.05:
+                    canh_bao.append(f"{e['ten']} tháng {m}: tổng giờ theo ngày ({tong:g}) khác giờ theo tháng ({cu:g}) — dùng số theo ngày.")
+                e["thang"][f"{m:02d}"] = tong
+                e["ngay"][f"{m:02d}"] = ngay
+    return {"gio": list(kq.values()), "so_nguoi": len(kq), "so_thang": sum(len(e["thang"]) for e in kq.values()), "loi": loi[:40], "canh_bao": canh_bao[:40]}
 
 
 @app.post("/api/bang-luong/{cid}/nhap-excel")

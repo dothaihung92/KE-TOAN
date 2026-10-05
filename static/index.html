@@ -5456,7 +5456,7 @@ const BL_COT=[
   {k:'ma',t:'Mã NV',nhap:1,w:60},{k:'ten',t:'Họ và Tên',nhap:1,w:170},{k:'chuc_vu',t:'Chức vụ',nhap:1,w:110},
   {k:'luong_cb',t:'Lương CB/Tháng',nhap:1,so:1,tong:1},{k:'ngay_cong',t:'Ngày công',nhap:1,so:1,dp:1,hd:'ngay_cong_hd'},
   {k:'ngay_lam',t:'Tổng NC',nhap:1,so:1,dp:1,hd:'ngay_lam_hd'},{k:'gio_tang_ca',t:'Giờ tăng ca',so:1,dp:1},
-  {k:'part_time',t:'Part-time (tick)',nhap:1,tickPt:1,ptCot:1,w:70},{k:'luong_gio',t:'Lương theo giờ',nhap:1,so:1,ptCot:1},{k:'gio_lam',t:'Giờ làm thực tế (part-time)',nhap:1,so:1,dp:1,ptCot:1},
+  {k:'part_time',t:'Part-time (tick)',nhap:1,tickPt:1,ptCot:1,w:70},{k:'luong_gio',t:'Lương theo giờ',nhap:1,so:1,ptCot:1},{k:'gio_lam',t:'Giờ làm thực tế (part-time)',nhap:1,so:1,dp:1,ptCot:1},{k:'gio_ngay',t:'Giờ theo ngày (part-time)',nhap:1,an:1},
   {k:'luong',t:'Tiền lương',so:1,tong:1},
   {k:'tien_com',t:'Mức tiền cơm/tháng',nhap:1,so:1,muc:1},{k:'tt_tien_com',t:'PC Tiền cơm',so:1,tong:1},
   {k:'muc_xang',t:'Mức xăng xe/tháng',nhap:1,so:1,muc:1},{k:'xang_xe',t:'PC Xăng xe',so:1,tong:1},
@@ -5505,7 +5505,7 @@ function blGiaTriHienThi(r,c){
   return v;
 }
 function blDongTrong(){
-  const d={};BL_TRUONG_NHAP.forEach(k=>{d[k]=(k==='ma'||k==='ten'||k==='chuc_vu'||k==='ghi_chu')?'':0;});
+  const d={};BL_TRUONG_NHAP.forEach(k=>{d[k]=(k==='ma'||k==='ten'||k==='chuc_vu'||k==='ghi_chu'||k==='gio_ngay')?'':0;});
   d.ngay_cong=0;d.ngay_lam='';d.ghi_chu='CK';d.dong_bh=1;
   return d;
 }
@@ -5528,6 +5528,9 @@ async function moBangLuongNam(thangGiu){
         <button class="btn gold sm" onclick="blLuu()">💾 Lưu</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="blNapNhanVien()">👥 Nạp từ Danh Sách Nhân Viên</button>
         <button class="btn sm" style="background:#b0651f" onclick="blNapPartTime()" title="Thêm lao động part-time (tick Part-time ở Danh Sách Nhân Viên) vào các tháng từ Tháng/Năm vào làm đến Tháng/Năm nghỉ việc ghi ở Danh Sách Nhân Viên">⏱ Nạp lao động part-time cả năm</button>
+        <button class="btn ghost sm" style="color:#b0651f" onclick="blTaiMauGioLam()" title="Tải file Excel mẫu nhập giờ làm của lao động part-time (theo tháng; tuỳ chọn theo từng ngày)">📄 Mẫu giờ làm part-time</button>
+        <button class="btn ghost sm" style="color:#b0651f" onclick="document.getElementById('blGioLamFile').click()" title="Import giờ làm THỰC TẾ của lao động part-time từ file Excel chấm công (theo mẫu); mỗi ngày tối đa 8 giờ">📥 Import giờ làm part-time</button>
+        <input type="file" id="blGioLamFile" accept=".xlsx" style="display:none" onchange="blImportGioLam(this)">
         <button class="btn ghost sm" style="color:#b0651f" onclick="blDienGioPartTime()" title="Điền số giờ làm/tháng THEO HỢP ĐỒNG cho các ô Giờ làm còn trống của người part-time (số giờ thực tế sẽ thay thế khi có bảng chấm công)">⏱ Điền giờ làm part-time theo hợp đồng</button>
         <button class="btn ghost sm" onclick="blSaoChepThangTruoc()">📋 Sao chép từ tháng trước</button>
         <button class="btn ghost sm" onclick="blThemDong()">➕ Thêm dòng</button>
@@ -5718,6 +5721,7 @@ function blSuaO(td){
   const cot=BL_COT.find(c=>c.k===k);
   if(cot&&cot.so&&blDinhDang(cu,cot.dp)===moi)return;   // chỉ khác định dạng hiển thị
   rows[ri][k]=moi;blBan=true;blVeInfo();
+  if(k==='gio_lam')rows[ri].gio_ngay='';      // sửa tổng giờ tay: bỏ chi tiết giờ theo ngày đã import (không còn khớp)
   blTinhLai(blThang);
 }
 /* Bấm tên người lao động -> chuyển sang Danh Sách Nhân Viên, tô viền ĐỎ dòng của người đó (có nút quay lại Bảng Lương). */
@@ -5874,7 +5878,7 @@ function blXoaDong(ri){
   blBan=true;blVeTabs();blVeBang();blVeInfo();
 }
 // Nạp lao động part-time vào CẢ NĂM: mỗi tháng lấy từ Danh Sách Nhân Viên những người part-time đang trong khoảng làm việc (vào làm → nghỉ việc); đã có dòng thì giữ nguyên giờ làm đã nhập
-async function blNapPartTime(){
+async function blNapPartTime(im){
   try{
     let them=0,thangCo=0;
     for(const t of BL_THANG){
@@ -5886,10 +5890,45 @@ async function blNapPartTime(){
       pt.forEach(r=>{const k=(r.ma||r.ten||'').toString().trim().toLowerCase();if(!cuaKey.has(k)){co.push(r);cuaKey.add(k);them1++}else{const x=co.find(y=>(y.ma||y.ten||'').toString().trim().toLowerCase()===k);if(x){x.part_time=1;if(!Number(x.luong_gio))x.luong_gio=r.luong_gio}}});
       if(them1){them+=them1;thangCo++}
     }
-    if(!them){toast('Không có lao động part-time nào cần thêm (tick “Part-time” + ghi Tháng/Năm vào làm ở Danh Sách Nhân Viên) — hoặc đã có đủ trong các tháng','');return}
+    if(!them){if(!im)toast('Không có lao động part-time nào cần thêm (tick “Part-time” + ghi Tháng/Năm vào làm ở Danh Sách Nhân Viên) — hoặc đã có đủ trong các tháng','');return}
     blBan=true;blVeTabs();blVeBang();blVeInfo();
     for(const t of BL_THANG)if((blDL[t]||[]).length)await blTinhLai(t);
-    toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng theo khoảng làm việc ở Danh Sách Nhân Viên — giờ làm đang trống (0 đồng): bấm “Điền giờ làm part-time theo hợp đồng” hoặc nhập giờ thực tế, rồi 💾 Lưu`,'ok');
+    if(!im)toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng theo khoảng làm việc ở Danh Sách Nhân Viên — giờ làm đang trống (0 đồng): bấm “Điền giờ làm part-time theo hợp đồng” hoặc nhập giờ thực tế, rồi 💾 Lưu`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function blTaiMauGioLam(){
+  try{
+    const r=await fetch(`/api/bang-luong/${current}/mau-gio-lam?nam=${blNam}`,{cache:'no-store'});
+    if(!r.ok){let m='Tải mẫu thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const dk=!!r.headers.get('X-Saved-Desktop');
+    await xuatFile(r,`MauGioLamPartTime_${blNam}.xlsx`);
+    toast(`📄 Đã tải file mẫu giờ làm part-time năm ${blNam}${dk?' — đã lưu ra Desktop':''}`,'ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+// Import giờ làm THỰC TẾ từ file (theo mẫu): giờ theo tháng và/hoặc theo ngày; giờ theo ngày được giữ để bảng chấm công hiện đúng từng ngày
+async function blImportGioLam(inp){
+  const f=inp.files&&inp.files[0];inp.value='';if(!f)return;
+  try{
+    const fd=new FormData();fd.append('file',f);fd.append('nam',blNam);
+    const r=await fetch(`/api/bang-luong/${current}/nhap-gio-lam`,{method:'POST',body:fd});
+    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Import thất bại');
+    if(!d.gio||!d.gio.length){toast('File không có giờ làm hợp lệ'+(d.loi&&d.loi.length?': '+d.loi[0]:''),'err');if(d.loi&&d.loi.length)alert(d.loi.join('\n'));return}
+    await blNapPartTime(true);                    // bảo đảm đã có dòng part-time ở các tháng trong khoảng làm việc
+    let dat=0;const khong=[];
+    d.gio.forEach(e=>Object.keys(e.thang).forEach(t=>{
+      const key=(e.ma||e.ten||'').toString().trim().toLowerCase();
+      const row=(blDL[t]||[]).find(x=>(x.ma||x.ten||'').toString().trim().toLowerCase()===key&&Number(x.part_time));
+      if(!row){khong.push(`${e.ten} tháng ${parseInt(t,10)}`);return}
+      row.gio_lam=e.thang[t];
+      const ng=e.ngay&&e.ngay[t];row.gio_ngay=ng?Object.keys(ng).map(k=>k+':'+ng[k]).join(';'):'';
+      dat++;
+    }));
+    blBan=true;
+    for(const t of BL_THANG)if((blDL[t]||[]).some(x=>Number(x.part_time)))await blTinhLai(t);
+    blVeTabs();blVeBang();blVeInfo();
+    const ghiChu=[].concat(d.loi||[],d.canh_bao||[],khong.map(x=>x+': chưa có dòng part-time ở bảng lương — bỏ qua'));
+    toast(`✓ Đã nhập giờ làm cho ${dat} dòng (${d.so_nguoi} người)`+(ghiChu.length?` — ${ghiChu.length} dòng bị bỏ qua/cảnh báo (xem hộp thoại)`:'')+' — nhớ 💾 Lưu',ghiChu.length?'err':'ok');
+    if(ghiChu.length)alert('Một số dòng không được nhập hoặc cần xem lại:\n\n'+ghiChu.slice(0,40).join('\n'));
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 // Điền giờ làm/tháng THEO HỢP ĐỒNG vào ô Giờ làm còn TRỐNG của người part-time (chỉ ô trống; không ghi đè giờ đã nhập; không thay số để né ngưỡng BHXH)
@@ -5949,7 +5988,7 @@ async function blSaoChepThangTruoc(){
   if((blDL[blThang]||[]).length&&!confirm(`Tháng ${parseInt(blThang,10)} đã có dữ liệu — thay bằng bản sao của tháng ${t}?`))return;
   // Sao chép mọi khoản cố định; các khoản phát sinh riêng từng tháng (thưởng bán hàng, thưởng T13, tăng ca) đặt lại 0.
   // công chuẩn mỗi tháng một khác -> sao chép về "theo lịch tháng" (ngay_cong=0)
-  blDL[blThang]=blDL[nguon].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);c.thuong_bh=0;c.thuong_t13=0;c.tang_ca=0;c.ngay_lam='';c.ngay_cong=0;c.thue_tay='';c.gio_lam='';return c});
+  blDL[blThang]=blDL[nguon].map(r=>{const c={};BL_TRUONG_NHAP.forEach(k=>c[k]=r[k]);c.thuong_bh=0;c.thuong_t13=0;c.tang_ca=0;c.ngay_lam='';c.ngay_cong=0;c.thue_tay='';c.gio_lam='';c.gio_ngay='';return c});
   blBan=true;blVeTabs();blVeBang();blVeInfo();await blTinhLai(blThang);
   toast(`✓ Đã sao chép từ tháng ${t} (thưởng bán hàng/thưởng T13/tăng ca đặt lại 0 — nhập lại nếu có)`,'ok');
 }
@@ -6112,6 +6151,7 @@ function blChamCongThang(r,nam,t,leSet){
     ngay.push({d,thu,cn:thu===0,le:!!laLe});
     if(thu===0)cn.push(d);else if(laLe)le.push(d);else thuong.push(d);
   }
+  if(Number(r.part_time))return blChamCongPartTime(r,ngay,thuong);
   const g=Number(r.ngay_lam_hd!=null?r.ngay_lam_hd:r.ngay_lam)||0;
   let can=Math.max(0,Math.floor(g+1e-9));
   const co=new Set();
@@ -6125,6 +6165,20 @@ function blChamCongThang(r,nam,t,leSet){
   const gio=Math.round((Number(r.gio_tang_ca)||0)*10)/10;
   if(gio>0&&co.size)blChiaGioTangCa(ngay,co,gio,`${r.ma||r.ten||''}|${nam}|${mm}|tc`);
   return {ngay,tong:g,soX:co.size,gio};
+}
+// Giờ theo ngày đã import: "5:2;6:2.5" -> {5:2,6:2.5}
+function blGioNgayDoc(v){const kq={};String(v==null?'':v).split(';').forEach(p=>{const m=p.split(':');const d=parseInt(m[0],10),g=parseFloat(m[1]);if(d>0&&g>0)kq[d]=g});return kq}
+const BL_GIO_TOI_DA_NGAY=8;
+/* Chấm công người PART-TIME: ô ngày = số GIỜ làm. Có giờ theo ngày (import từ file chấm công) thì hiện đúng như file; chỉ có TỔNG giờ tháng thì phân bổ lần lượt từ ngày làm việc đầu tháng,
+   mỗi ngày tối đa 8 giờ, dư thì sang ngày làm việc kế tiếp (suy = true: bản in ghi chú đây là phân bổ theo tổng giờ, không phải chấm công từng ngày). */
+function blChamCongPartTime(r,ngay,thuong){
+  const gio=Math.round((Number(r.gio_lam)||0)*100)/100,daily=blGioNgayDoc(r.gio_ngay),coDaily=Object.keys(daily).length>0;
+  const phan={};
+  if(coDaily)Object.keys(daily).forEach(d=>{phan[d]=daily[d]});
+  else{let con=gio;for(const d of thuong){if(con<=1e-9)break;const g=Math.min(BL_GIO_TOI_DA_NGAY,Math.round(con*100)/100);phan[d]=g;con=Math.round((con-g)*100)/100}}
+  ngay.forEach(x=>{const g=phan[x.d];x.dau=g>0?blSoGio(g):(x.le?'L':'');x.tc=0;x.gio=g>0?g:0});
+  const tong=Object.values(phan).reduce((a,b)=>a+b,0);
+  return {ngay,tong:Math.round(tong*100)/100,soX:-1,gio:0,pt:true,suy:!coDaily&&gio>0};
 }
 /* Điền GIỜ TĂNG CA vào các ngày đi làm (tổng đúng bằng "Số giờ tăng ca" của bảng lương): chọn vài ngày làm việc, mỗi ngày
    1–4 giờ (bội số 0,5 giờ, phần lẻ dồn 1 ngày), ngẫu nhiên nhưng cố định theo người + tháng. */
@@ -6225,13 +6279,13 @@ function blDungChamCongIn(rows,nam,t,tuyChon){
   const ht=mau.map(x=>`<th class="${x.cn?'cn':''}">${BL_THU[x.thu]}</th>`).join('');
   const hd=mau.map(x=>`<th class="${x.cn?'cn':''}">${x.d}</th>`).join('');
   const than=rows.map((r,i)=>`<tr><td class="c">${i+1}</td><td>${xkEsc(r.ten||r.ma||'')}</td>`+cc[i].ngay.map(x=>`<td class="c${x.cn?' cn':''}${x.dau==='L'?' le':''}${x.tc>0?' tc':''}">${blDauHienThi(x)}</td>`).join('')+
-    `<td class="c dam">${blDinhDang(cc[i].tong,1)}</td>${coTc?`<td class="c">${cc[i].gio>0?blSoGio(cc[i].gio):''}</td>`:''}<td class="gc">${r.thoi_vu?'Thời vụ (không BHXH)':''}</td></tr>`).join('');
+    `<td class="c dam">${blDinhDang(cc[i].tong,1)}</td>${coTc?`<td class="c">${cc[i].gio>0?blSoGio(cc[i].gio):''}</td>`:''}<td class="gc">${r.thoi_vu?'Thời vụ (không BHXH)':''}${cc[i].suy?'Part-time *':(cc[i].pt?'Part-time':'')}</td></tr>`).join('');
   const d1=`01/${mm}/${nam}`,d2=`${String(dim).padStart(2,'0')}/${mm}/${nam}`;
   const html=`${blKhungTren(tuyChon,`BẢNG CHẤM CÔNG THÁNG TỪ ${d1}  ĐẾN ${d2}`,`THÁNG ${mm} NĂM ${nam}`)}
     <table class="bang cham" style="width:${rong}px"><colgroup><col style="width:26px"><col style="width:156px">${mau.map(()=>`<col style="width:${wDay}px">`).join('')}<col style="width:44px">${coTc?'<col style="width:44px">':''}<col style="width:96px"></colgroup>
     <thead><tr><th rowspan="2">STT</th><th rowspan="2">Họ và Tên</th>${ht}<th rowspan="2">TNC</th>${coTc?'<th rowspan="2">Giờ TC</th>':''}<th rowspan="2">Ghi chú</th></tr><tr>${hd}</tr></thead>
     <tbody>${than}</tbody></table>
-    <div class="chuthich">X: đi làm &nbsp; X+n: đi làm và tăng ca n giờ &nbsp; L: nghỉ lễ &nbsp; (trống): nghỉ / Chủ nhật &nbsp; TNC: tổng ngày công &nbsp; Giờ TC: tổng giờ tăng ca</div>${blKhungKy(tuyChon,nam,t,rong)}`;
+    <div class="chuthich">X: đi làm &nbsp; X+n: đi làm và tăng ca n giờ &nbsp; L: nghỉ lễ &nbsp; (trống): nghỉ / Chủ nhật &nbsp; TNC: tổng ngày công &nbsp; Giờ TC: tổng giờ tăng ca${cc.some(c=>c.pt)?'<br>Lao động part-time: số trong ô ngày = số giờ làm; TNC = tổng giờ (tối đa 8 giờ/ngày).'+(cc.some(c=>c.suy)?' Người có ghi chú * : giờ từng ngày phân bổ theo TỔNG giờ tháng (chưa có chấm công từng ngày).':''):''}</div>${blKhungKy(tuyChon,nam,t,rong)}`;
   return {html,rong};
 }
 /* Ghép cả tài liệu in: mỗi tháng = bảng tính lương rồi bảng chấm công, mỗi bảng tự thu/phóng vừa bề ngang khổ giấy đã chọn */
@@ -6297,7 +6351,7 @@ function blDuLieuXuatMau(dsThang,nam,o){
     thang[t]={
       cot:cot.map(c=>({k:c.k,t:c.t,nhom:c.nhom||'',n:!!c.n,tong:!!c.tong,dp:!!c.dp,dam:!!c.dam,w:c.w})),
       rows:rows.map(r=>{const x={ten:r.ten||'',ma:r.ma||'',chuc_vu:r.chuc_vu||'',thoi_vu:!!r.thoi_vu};cot.forEach(c=>{if(c.k!=='stt'&&c.k!=='ky')x[c.k]=r[c.k]});return x}),
-      cham:cham.map(c=>({tong:c.tong,soX:c.soX,gio:c.gio||0,dau:c.ngay.map(n=>n.dau),tc:c.ngay.map(n=>n.tc||0)})),
+      cham:cham.map(c=>({tong:c.tong,soX:c.soX,gio:c.gio||0,pt:!!c.pt,suy:!!c.suy,dau:c.ngay.map(n=>n.dau),tc:c.ngay.map(n=>n.tc||0)})),
       ngay:ngay.map(n=>({d:n.d,thu:n.thu,cn:n.cn,le:n.le}))};
   });
   return {nam,thang,tuy_chon:{ten_cty:o.tenCty,dia_chi:o.diaChi,mst:o.mst,nguoi_lap:o.nguoiLap,giam_doc:o.giamDoc,in_luong:o.inLuong,in_cong:o.inCong,kho:o.kho}};
