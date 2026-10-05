@@ -577,3 +577,45 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(phan.includes('const ptNv=d.nhan_vien_pt||[]') && !phan.includes('optPt.length?optPt:optNv') && phan.includes('— chưa có người part-time —'));
   console.log('PASS 25: hợp đồng part-time chỉ liệt kê người part-time.');
 })();
+
+// 26: Danh Sách NV — ô lọc giữ focus khi gõ + lọc không dấu; bôi đen ô trong 1 cột + Fill down; import đặt ô theo TÊN cột
+(async () => {
+  const i1 = html.indexOf('function nvBoDau'), i2 = html.indexOf('function nvRowsLoc');
+  const j1 = html.indexOf('/* ----- BÔI ĐEN Ô TRONG 1 CỘT'), j2 = html.indexOf('function nvSuaO');
+  assert(i1 > 0 && j1 > 0);
+  const toasts = [], tds = {}, daFocus = [];
+  const mkTd = (r, c) => { const k = r + ':' + c; return tds[k] || (tds[k] = { dataset: { r: String(r), c: String(c) }, _cls: new Set(), classList: { add(x) { tds[k]._cls.add(x); }, remove(x) { tds[k]._cls.delete(x); } } }); };
+  const ctx = { nvHeader: ['STT', 'Họ và tên', 'Chức vụ', 'Đóng BHXH'], nvRows: [[1, 'Nguyễn Văn Khoan', 'A', 'x'], [2, 'Lý Thị Thu Hiền', 'B', ''], [3, 'Lê Đức Tấn', 'C', 'x'], [4, 'Nguyễn Văn Cảnh', 'D', '']], nvFilters: {}, toast: (m, k) => toasts.push([m, k]),
+    veGridNhanVien() { ctx.nveRender = (ctx.nveRender || 0) + 1; }, String, Number, Set,
+    document: { querySelector: (sel) => { const m = sel.match(/data-fci="(\d+)"/); if (m) return { focus() { daFocus.push('focus'); }, setSelectionRange(a, b) { daFocus.push([a, b]); } }; const t = sel.match(/data-r="(\d+)"\]\[data-c="(\d+)"/); return t ? mkTd(+t[1], +t[2]) : null; },
+      querySelectorAll: () => [], getElementById: () => null, addEventListener() {} } };
+  vm.createContext(ctx); vm.runInContext(html.slice(i1, i2) + html.slice(i2, html.indexOf('function veGridNhanVien')) + html.slice(j1, j2), ctx);
+  // lọc không dấu + giữ focus ở ô lọc
+  ctx.nvLoc(1, 'nguyen v');
+  assert.deepStrictEqual(JSON.parse(vm.runInContext('JSON.stringify(nvRowsLoc())', ctx)), [0, 3], 'gõ "nguyen v" tìm ra Nguyễn Văn…');
+  assert.deepStrictEqual(daFocus, ['focus', [8, 8]], 'vẽ lại bảng rồi trả focus + con trỏ về ô lọc (gõ liên tục được)');
+  ctx.nvLoc(1, 'đức'); assert.deepStrictEqual(JSON.parse(vm.runInContext('JSON.stringify(nvRowsLoc())', ctx)), [2]); ctx.nvLoc(1, '');
+  // bôi đen: bấm ô đầu rồi Shift+bấm ô cuối cùng cột -> vùng chọn; Fill down điền giá trị ô trên cùng
+  vm.runInContext('nvNeo={ri:0,c:2}', ctx); vm.runInContext('nvSelDat(0,2,2)', ctx);
+  assert.deepStrictEqual(JSON.parse(vm.runInContext('JSON.stringify(nvSel)', ctx)), { c: 2, ris: [0, 1, 2] });
+  assert(tds['0:2']._cls.has('nv-sel') && tds['2:2']._cls.has('nv-sel') && !tds['3:2']);
+  ctx.nvFillDown();
+  assert.deepStrictEqual(ctx.nvRows.map((r) => r[2]), ['A', 'A', 'A', 'D'], 'điền xuống đúng vùng bôi đen, ô ngoài vùng giữ nguyên');
+  assert(toasts.at(-1)[0].includes('xuống 2 ô') && toasts.at(-1)[1] === 'ok');
+  // cột tick (Đóng BHXH): điền cả giá trị trống; cột STT bị chặn
+  vm.runInContext('nvSelDat(0,3,3)', ctx); ctx.nvRows[0][3] = 'x'; ctx.nvFillDown(); assert.deepStrictEqual(ctx.nvRows.map((r) => r[3]), ['x', 'x', 'x', 'x']);
+  vm.runInContext('nvSelDat(0,3,0)', ctx); const truoc = JSON.stringify(ctx.nvRows); ctx.nvFillDown(); assert.strictEqual(JSON.stringify(ctx.nvRows), truoc, 'không điền xuống cột STT'); assert(toasts.at(-1)[1] === 'err');
+  // bấm tiêu đề = chọn cả cột (theo các dòng đang hiện)
+  ctx.nvLoc(1, 'nguyen'); ctx.nvChonCot(2); assert.deepStrictEqual(JSON.parse(vm.runInContext('JSON.stringify(nvSel)', ctx)), { c: 2, ris: [0, 3] });
+  // chưa chọn gì: báo lỗi hướng dẫn
+  vm.runInContext('nvSelXoa()', ctx); ctx.nvFillDown(); assert(toasts.at(-1)[1] === 'err' && toasts.at(-1)[0].includes('Bôi đen'));
+  assert(html.includes("td.nv-sel{") && html.includes('Ctrl+D'));
+  // import: ô đặt theo TÊN cột, giữ nguyên thứ tự dòng của file
+  const iI = html.indexOf('async function nvImportExcel'), iE = html.indexOf('/* ----- NGƯỜI PHỤ THUỘC');
+  const c2 = { nvHeader: ['STT', 'Họ và tên', 'Mã NV', 'Đóng BHXH'], nvRows: [[0, 'Đã có', 'X0', 'x']], current: 7, toast() {}, nvBoCotPcChucVu() {}, nvThemCotTick() {}, nvThemCotNghiViec() {}, nvDanhLaiStt() {}, veGridNhanVien() {}, nvLaCotTick: (h) => String(h).toLowerCase() === 'đóng bhxh', FormData: class { append() {} },
+    fetch: async () => ({ ok: true, json: async () => ({ header: ['STT', 'Mã NV', 'Họ và tên', 'Đóng BHXH'], rows: [[1, 'M3', 'Zeta', 'x'], [2, 'M1', 'Alpha', ''], [3, 'M2', 'Mike', 'x']], loi: [] }) }) };
+  vm.createContext(c2); vm.runInContext(html.slice(iI, iE), c2);
+  await c2.nvImportExcel({ files: [{}], value: '' });
+  assert.deepStrictEqual(c2.nvRows.slice(1).map((r) => r.join('|')), ['1|Zeta|M3|x', '2|Alpha|M1|', '3|Mike|M2|x'], 'đúng cột theo tên dù thứ tự cột khác nhau; thứ tự dòng như file');
+  console.log('PASS 26: lọc giữ focus + không dấu, bôi đen + Fill down, import đúng cột/thứ tự.');
+})().catch((e) => { console.error(e); process.exit(1); });

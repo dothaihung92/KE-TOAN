@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.103"
+APP_BUILD = "2026-10-05.104"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14887,7 +14887,19 @@ def _nv_ghep_header_2_dong(ws, hang1_idx):
                 for c in range(rng.min_col, rng.max_col + 1):
                     if c - 1 < len(hang1_full):
                         hang1_full[c - 1] = v
-    co_dong_phu = any(str(v or "").strip() for v in hang2)
+    def _la_du_lieu(v):
+        """Ô của 1 dòng DỮ LIỆU nhân viên (ngày tháng, CCCD/CMND 9–12 chữ số, số tiền lớn) chứ không phải tên cột phụ."""
+        if isinstance(v, (datetime.datetime, datetime.date)):
+            return True
+        t = str(v if v is not None else "").strip()
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return abs(v) >= 1000
+        import re as _re_nv
+        return bool(_re_nv.fullmatch(r"\d{9,12}", t.replace(" ", "")) or _re_nv.fullmatch(r"\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4}", t) or _re_nv.fullmatch(r"\d{1,2}[/.\-]\d{4}", t))
+    # dòng 2 chỉ là "dòng tiêu đề phụ" khi KHÔNG giống dữ liệu nhân viên — file 1 dòng tiêu đề thì dòng 2 là người đầu tiên (không được bỏ qua)
+    co_dong_phu = any(str(v or "").strip() for v in hang2) and not any(_la_du_lieu(v) for v in hang2)
+    if not co_dong_phu:
+        hang2 = []
     def _1_dong(v):
         return str(v or "").replace("\n", " ").replace("\r", " ").strip()
     n = max(len(hang1), len(hang2))

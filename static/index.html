@@ -200,6 +200,7 @@
     border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
   @media(max-width:760px){.app{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.main{max-height:none}}
+td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset:-1px}
 </style>
 </head>
 <body>
@@ -4972,6 +4973,7 @@ function moDanhSachNhanVien(tuBangLuong){
         <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
         <button class="btn sm" style="background:#1f6b4a" onclick="nvLayLuongTheoNam()" title="Dò lương cơ bản + phụ cấp của từng người theo Bảng Lương của năm bạn chọn (mỗi năm lương cơ bản một khác)">🔄 Lấy lương theo Bảng Lương năm…</button>
         <button class="btn sm" style="background:#6b3fa0" onclick="nvMoKhoCk()" title="Kho chữ ký của giám đốc và từng nhân viên (do chính họ ký trên màn hình hoặc cung cấp ảnh) — tự gắn vào hợp đồng, quy chế, thang bảng lương">✍ Kho chữ ký</button>
+        <button class="btn ghost sm" style="color:#0b5d6b" onclick="nvFillDown()" title="Bôi đen các ô trong 1 cột (kéo chuột / Shift+bấm / bấm tiêu đề cột) rồi bấm để điền giá trị ô trên cùng xuống các ô còn lại (Ctrl+D)">⬇ Fill down</button> <span id="nvSelInfo" class="hint"></span>
         <button class="btn ghost sm" style="color:#c00" onclick="nvXoaDong()">🗑 Xóa dòng đã chọn</button>
       </div>
       <div id="vbKhoCk" style="display:none"></div>
@@ -4980,6 +4982,9 @@ function moDanhSachNhanVien(tuBangLuong){
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. <b>Chức vụ</b> chỉ chọn trong các chức danh của <b>Hệ thống thang bảng lương</b> (Nhập Liệu → Thang Bảng Lương); <b>Lương cơ bản</b> lấy theo Bảng Lương từng năm bằng nút "🔄 Lấy lương theo Bảng Lương năm…".</div>
       <div id="nvTableWrap" style="overflow:auto;max-height:64vh;border:1px solid #ddd;border-radius:8px"></div>
     </div>`;
+  const wNv=document.getElementById('nvTableWrap');
+  wNv.addEventListener('mousedown',nvChuotXuong);wNv.addEventListener('mouseover',nvChuotDi);
+  nvDangKySuKien();nvSelXoa();
   taiNhanVien();
 }
 async function taiNhanVien(){
@@ -5149,12 +5154,21 @@ function nvDanhLaiStt(){
   if(ci<0)return;
   nvRows.forEach((r,i)=>{r[ci]=i+1;});
 }
+// Tìm không phân biệt hoa/thường và dấu tiếng Việt (gõ "nguyen" vẫn ra "Nguyễn")
+function nvBoDau(v){return String(v==null?'':v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toLowerCase().trim()}
+// Gõ vào ô lọc: vẽ lại bảng rồi GIỮ NGUYÊN con trỏ trong ô lọc (trước đây vẽ lại làm mất focus nên chỉ gõ được 1 ký tự)
+function nvLoc(ci,v){
+  nvFilters[ci]=v;nvSelXoa();
+  veGridNhanVien();
+  const el=document.querySelector(`#nvTableWrap input[data-fci="${ci}"]`);
+  if(el){el.focus();try{el.setSelectionRange(v.length,v.length)}catch{}}
+}
 function nvRowsLoc(){
   const cot=Object.keys(nvFilters).filter(k=>nvFilters[k]);
   if(!cot.length)return nvRows.map((r,i)=>i);
   const idx=[];
   nvRows.forEach((r,i)=>{
-    const ok=cot.every(ci=>String(r[ci]==null?'':r[ci]).toLowerCase().includes(nvFilters[ci].toLowerCase()));
+    const ok=cot.every(ci=>nvBoDau(r[ci]).includes(nvBoDau(nvFilters[ci])));
     if(ok)idx.push(i);
   });
   return idx;
@@ -5165,9 +5179,9 @@ function veGridNhanVien(){
   const idxHien=nvRowsLoc();
   let html='<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>';
   html+='<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 4px;border:1px solid #8a2f68;width:30px" title="Bấm ＋ để thêm dòng thay đổi lương của người này">＋</th>';
-  nvHeader.forEach(h=>{html+=`<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 8px;border:1px solid #8a2f68;white-space:normal;max-width:110px;line-height:1.3">${nvEsc(h)}</th>`;});
+  nvHeader.forEach((h,ci)=>{html+=`<th onclick="nvChonCot(${ci})" title="Bấm để bôi đen cả cột (rồi Ctrl+D hoặc nút ⬇ Fill down để điền xuống)" style="cursor:pointer;position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 8px;border:1px solid #8a2f68;white-space:normal;max-width:110px;line-height:1.3">${nvEsc(h)}</th>`;});
   html+='</tr><tr><th style="position:sticky;top:29px;background:#f8eef5;border:1px solid #ddd"></th>';
-  nvHeader.forEach((h,ci)=>{html+=`<th style="position:sticky;top:29px;background:#f8eef5;padding:2px;border:1px solid #ddd"><input value="${nvEsc(nvFilters[ci]||'')}" oninput="nvFilters[${ci}]=this.value;veGridNhanVien()" placeholder="lọc..." style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>`;});
+  nvHeader.forEach((h,ci)=>{html+=`<th style="position:sticky;top:29px;background:#f8eef5;padding:2px;border:1px solid #ddd"><input data-fci="${ci}" value="${nvEsc(nvFilters[ci]||'')}" oninput="nvLoc(${ci},this.value)" placeholder="lọc..." style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>`;});
   html+='</tr></thead><tbody>';
   const dong=nvTuBl?nvDongCanTo():-1;
   idxHien.forEach(ri=>{
@@ -5196,6 +5210,7 @@ function veGridNhanVien(){
   });
   html+='</tbody></table>';
   wrap.innerHTML=html;
+  nvSelVe();
   if(!idxHien.length){
     wrap.innerHTML+=`<div style="padding:20px;text-align:center;color:var(--muted)">${nvRows.length?'Không có dòng nào khớp bộ lọc.':'Chưa có dữ liệu.'}</div>`;
   }
@@ -5222,6 +5237,64 @@ function nvVeTuBl(dong){
   if(dong>=0&&!nvTuBl.daCuon){nvTuBl.daCuon=true;const tr=document.querySelector('#nvTableWrap tr[data-nvsel]');if(tr&&tr.scrollIntoView)tr.scrollIntoView({block:'center'})}
 }
 function nvVeBangLuong(){const t=nvTuBl&&nvTuBl.thang;nvTuBl=null;moBangLuongNam(t)}
+/* ----- BÔI ĐEN Ô TRONG 1 CỘT + FILL DOWN: kéo chuột qua các ô của cùng 1 cột (hoặc bấm ô đầu rồi Shift+bấm ô cuối, hoặc bấm tiêu đề cột để chọn cả cột),
+   rồi Ctrl+D hoặc nút "⬇ Fill down" — điền giá trị của ô TRÊN CÙNG vùng chọn xuống các ô còn lại (như Excel). ----- */
+let nvSel={c:-1,ris:[]},nvNeo=null,nvKeo=null;
+function nvSelXoa(){nvSel={c:-1,ris:[]};nvNeo=null}
+function nvSelVe(){
+  if(!document.querySelectorAll)return;
+  document.querySelectorAll('#nvTableWrap td.nv-sel').forEach(td=>td.classList.remove('nv-sel'));
+  if(nvSel.c<0)return;
+  nvSel.ris.forEach(ri=>{const td=document.querySelector(`#nvTableWrap td[data-r="${ri}"][data-c="${nvSel.c}"]`);if(td)td.classList.add('nv-sel')});
+  const n=document.getElementById('nvSelInfo');if(n)n.textContent=nvSel.ris.length>1?`Đã chọn ${nvSel.ris.length} ô — Ctrl+D để điền xuống`:'';
+}
+function nvSelDat(ri1,ri2,c){          // vùng chọn theo thứ tự đang HIỆN (đã lọc) từ dòng ri1 đến ri2 của cột c
+  const ds=nvRowsLoc(),a=ds.indexOf(ri1),b=ds.indexOf(ri2);
+  if(a<0||b<0)return;
+  nvSel={c,ris:ds.slice(Math.min(a,b),Math.max(a,b)+1)};
+  if(b<a)nvSel.ris.reverse();            // kéo ngược: ô đầu tiên bấm vẫn là ô nguồn
+  nvSelVe();
+}
+function nvChonCot(ci){
+  const ds=nvRowsLoc();if(!ds.length)return;
+  nvSel={c:ci,ris:ds.slice()};nvNeo={ri:ds[0],c:ci};nvSelVe();
+  toast(`Đã chọn cả cột “${nvHeader[ci]}” (${ds.length} ô) — Ctrl+D để điền xuống từ ô đầu`,'');
+}
+function nvTdTu(e){const t=e.target&&e.target.closest?e.target.closest('td[data-r][data-c]'):null;return t&&t.closest('#nvTableWrap')?t:null}
+function nvChuotXuong(e){
+  const td=nvTdTu(e);if(!td)return;
+  const ri=+td.dataset.r,c=+td.dataset.c;
+  if(e.shiftKey&&nvNeo&&nvNeo.c===c){e.preventDefault();nvSelDat(nvNeo.ri,ri,c);return}
+  nvNeo={ri,c};nvKeo={ri,c};
+  if(nvSel.c>=0){nvSel={c:-1,ris:[]};nvSelVe()}
+}
+function nvChuotDi(e){
+  if(!nvKeo||!(e.buttons&1))return;
+  const td=nvTdTu(e);if(!td||+td.dataset.c!==nvKeo.c||+td.dataset.r===nvKeo.ri&&nvSel.c<0)return;
+  nvSelDat(nvKeo.ri,+td.dataset.r,nvKeo.c);
+  const sel=window.getSelection&&window.getSelection();if(sel)sel.removeAllRanges();      // không bôi đen chữ trong ô khi đang kéo
+}
+function nvFillDown(){
+  if(nvSel.c<0||nvSel.ris.length<2){toast('Bôi đen các ô trong 1 cột trước (kéo chuột, hoặc bấm ô đầu rồi Shift+bấm ô cuối, hoặc bấm tiêu đề cột)','err');return}
+  const c=nvSel.c,h=String(nvHeader[c]||'').trim().toLowerCase();
+  if(h==='stt'){toast('Không điền xuống cột STT (tự đánh số)','err');return}
+  const nguon=nvSel.ris[0];if(!nvRows[nguon])return;
+  const v=nvRows[nguon][c],n=nvSel.ris.length-1;
+  nvSel.ris.slice(1).forEach(ri=>{if(nvRows[ri])nvRows[ri][c]=v});
+  const giu={c:nvSel.c,ris:nvSel.ris.slice()};
+  veGridNhanVien();nvSel=giu;nvSelVe();
+  toast(`⬇ Đã điền “${v===''||v==null?'(trống)':v}” xuống ${n} ô cột “${nvHeader[c]}” — nhớ bấm 💾 Lưu`,'ok');
+}
+let nvSuKienDaGan=false;
+function nvDangKySuKien(){
+  if(nvSuKienDaGan)return;nvSuKienDaGan=true;
+  document.addEventListener('keydown',(e)=>{
+    if(!(e.ctrlKey||e.metaKey)||String(e.key).toLowerCase()!=='d')return;
+    const w=document.getElementById('nvTableWrap');if(!w||w.offsetParent===null||nvSel.c<0||nvSel.ris.length<2)return;
+    e.preventDefault();e.stopPropagation();nvFillDown();
+  },true);
+  document.addEventListener('mouseup',()=>{nvKeo=null});
+}
 function nvSuaO(td){
   const r=+td.dataset.r, c=+td.dataset.c;
   if(!nvRows[r])return;
@@ -5278,12 +5351,9 @@ async function nvImportExcel(input){
     nvBoCotPcChucVu();
     nvThemCotTick();
     nvThemCotNghiViec();
-    nvRows.push(...kq.rows.map(r=>{
-      const rr=r.slice();
-      while(rr.length<nvHeader.length)rr.push('');
-      rr.length=nvHeader.length;
-      return rr;
-    }));
+    // Đặt từng ô vào đúng cột theo TÊN CỘT (danh sách đang xem có thể khác thứ tự cột với file trả về); giữ nguyên thứ tự dòng của file Excel
+    const vtCot=nvHeader.map(h=>(kq.header||[]).findIndex(x=>String(x).trim().toLowerCase()===String(h).trim().toLowerCase()));
+    nvRows.push(...kq.rows.map(r=>nvHeader.map((h,ci)=>vtCot[ci]>=0&&r[vtCot[ci]]!=null?r[vtCot[ci]]:(nvLaCotTick(h)&&vtCot[ci]<0?'x':''))));
     nvDanhLaiStt();
     veGridNhanVien();
     toast(`✓ Đã thêm ${kq.rows.length} nhân viên`+(kq.loi&&kq.loi.length?` (⚠ ${kq.loi.join('; ')})`:'')+'. Nhớ bấm 💾 Lưu!','ok');
