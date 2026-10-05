@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.093"
+APP_BUILD = "2026-10-05.094"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13752,9 +13752,26 @@ def bang_luong_mau_gio_lam(cid: int, nam: int = 0):
         for m in range(1, 13):
             if m not in e["thang"]:
                 ws.cell(ws.max_row, 3 + m).fill = xam         # ngoài khoảng làm việc trong Danh Sách NV: không nhập
+    n_nguoi = len(ds)
+    nguong = _luong_chuan_tham_so(None, nam)["nguong_part_time"]
+    # cột cuối: TỔNG TIỀN cả năm = tổng giờ × lương giờ; cột "Cảnh báo": tháng nào giờ × lương giờ từ ngưỡng trở lên (ô tháng đó cũng tô đỏ)
+    ws.cell(1, 16, "Tổng tiền (đ)"); ws.cell(1, 17, "Cảnh báo ngưỡng"); ws.cell(1, 19, "Ngưỡng part-time (đ/tháng)")
+    ws.cell(2, 19, nguong)
+    for c in (16, 17, 19):
+        ws.cell(1, c).font, ws.cell(1, c).alignment = dam, Alignment(horizontal="center", wrap_text=True)
+    ws.cell(2, 19).number_format = "#,##0"
+    for r in range(2, 2 + n_nguoi):
+        ws.cell(r, 16, f"=SUM(D{r}:O{r})*C{r}").number_format = "#,##0"
+        dem = "&".join(f'IF(AND(ISNUMBER({col}{r}),{col}{r}*$C{r}>=$S$2),"T{m} ","")' for m, col in zip(range(1, 13), "DEFGHIJKLMNO"))
+        ws.cell(r, 17, f'=IF(LEN({dem})=0,"",{dem}&"vượt ngưỡng → phải đóng BHXH")')
+        ws.cell(r, 3).number_format = "#,##0"
+    from openpyxl.formatting.rule import FormulaRule
+    ws.conditional_formatting.add("D2:O500", FormulaRule(formula=["AND(ISNUMBER(D2),ISNUMBER($C2),D2*$C2>=$S$2)"], fill=PatternFill("solid", bgColor="FFC7CE", fgColor="FFC7CE")))
     ws.append([])
     ws.append([f"Năm {nam}. Nhập TỔNG GIỜ LÀM THỰC TẾ từng tháng (ô xám = ngoài khoảng vào làm/nghỉ việc ở Danh Sách NV, không nhập). Mỗi ngày tối đa {int(_GIO_TOI_DA_NGAY)} giờ."])
+    ws.append([f"Cột P = tổng giờ cả năm × lương theo giờ. Tháng nào giờ × lương giờ từ ngưỡng ({int(nguong):,} đ/tháng, sửa ở ô S2) trở lên: ô tháng tô ĐỎ và cột Q ghi tháng vượt ngưỡng — tháng đó phải đóng BHXH.".replace(",", ".")])
     ws.column_dimensions["A"].width, ws.column_dimensions["B"].width = 10, 28
+    ws.column_dimensions["C"].width, ws.column_dimensions["P"].width, ws.column_dimensions["Q"].width, ws.column_dimensions["S"].width = 12, 16, 34, 22
     w2 = wb.create_sheet("Giờ theo ngày")
     w2.append(["Mã NV", "Họ và tên", "Tháng"] + list(range(1, 32)))
     for c in w2[1]:
@@ -13825,6 +13842,8 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
             for i, r in enumerate(hang[dau + 1:], dau + 2):
                 if not r or not (r[0] or (len(r) > 1 and r[1])):
                     continue
+                if not (len(r) > 1 and r[1]) and len(str(r[0] or "")) > 15:      # dòng ghi chú của file mẫu
+                    continue
                 k = tim(r[0], r[1] if len(r) > 1 else "", f"Giờ theo tháng, dòng {i}")
                 if not k:
                     continue
@@ -13851,6 +13870,8 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
         if dau is not None:
             for i, r in enumerate(hang[dau + 1:], dau + 2):
                 if not r or not (r[0] or (len(r) > 1 and r[1])):
+                    continue
+                if not (len(r) > 1 and r[1]) and len(str(r[0] or "")) > 15:      # dòng ghi chú của file mẫu
                     continue
                 try:
                     m = int(_gio_so(r[2] if len(r) > 2 else None) or 0)
@@ -13887,7 +13908,22 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
                     canh_bao.append(f"{e['ten']} tháng {m}: tổng giờ theo ngày ({tong:g}) khác giờ theo tháng ({cu:g}) — dùng số theo ngày.")
                 e["thang"][f"{m:02d}"] = tong
                 e["ngay"][f"{m:02d}"] = ngay
-    return {"gio": list(kq.values()), "so_nguoi": len(kq), "so_thang": sum(len(e["thang"]) for e in kq.values()), "loi": loi[:40], "canh_bao": canh_bao[:40]}
+    # THÔNG BÁO từng tháng: giờ × lương giờ từ ngưỡng part-time trở lên -> thuộc đối tượng đóng BHXH; kèm tổng tiền của từng người
+    nguong = _luong_chuan_tham_so(None, nam)["nguong_part_time"]
+    tong_tien = {}
+    for k, e in kq.items():
+        don_gia = ds[k]["luong_gio"] or 0
+        if not don_gia:
+            canh_bao.append(f"{e['ten']}: chưa có lương theo giờ ở Danh Sách NV nên chưa tính được số tiền.")
+            continue
+        tong = 0.0
+        for t, h in sorted(e["thang"].items()):
+            tien = h * don_gia
+            tong += tien
+            if tien >= nguong - 1e-9:
+                canh_bao.append(f"⚠ {e['ten']} tháng {int(t)}: {h:g} giờ × {int(don_gia):,} = {int(round(tien)):,} đ — từ ngưỡng {int(nguong):,} đ → phải đóng BHXH (phần mềm sẽ tự tính BHXH tháng này).".replace(",", "."))
+        tong_tien[e["ten"]] = round(tong)
+    return {"gio": list(kq.values()), "tong_tien": tong_tien, "so_nguoi": len(kq), "so_thang": sum(len(e["thang"]) for e in kq.values()), "loi": loi[:40], "canh_bao": canh_bao[:40]}
 
 
 @app.post("/api/bang-luong/{cid}/nhap-excel")

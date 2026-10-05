@@ -70,4 +70,19 @@ assert any("(ngày 7): 9 giờ vượt tối đa 8 giờ/ngày" in x and "không
 assert any("43,3" in x or "43.3" in x for x in kq["canh_bao"]) or any("khác giờ theo tháng" in x for x in kq["canh_bao"])
 # file không có sheet hợp lệ: không lỗi, rỗng
 assert import_(openpyxl.Workbook())["so_nguoi"] == 0
+# cột cuối = TỔNG TIỀN (tổng giờ × lương giờ) + cột cảnh báo ngưỡng + ô ngưỡng + tô đỏ ô tháng vượt ngưỡng
+wb3 = openpyxl.load_workbook(server.bang_luong_mau_gio_lam(7, 2026).path)
+w3 = wb3["Giờ theo tháng"]
+assert w3.cell(1, 16).value == "Tổng tiền (đ)" and w3.cell(1, 17).value == "Cảnh báo ngưỡng" and w3.cell(2, 19).value == 2530000
+r1 = next(r for r in range(2, 6) if w3.cell(r, 1).value == "P1")
+assert w3.cell(r1, 16).value == f"=SUM(D{r1}:O{r1})*C{r1}" and "vượt ngưỡng" in w3.cell(r1, 17).value and "$S$2" in w3.cell(r1, 17).value
+assert any("D2:O500" in str(rng.sqref) for rng in w3.conditional_formatting) and "ngưỡng" in w3.cell(w3.max_row, 1).value
+# import: thông báo từng tháng vượt ngưỡng + tổng tiền
+r2 = next(r for r in range(2, 6) if w3.cell(r, 1).value == "P2")
+w3.cell(r2, 4).value = 100; w3.cell(r2, 5).value = 40          # P2 30.000/giờ: T1 = 3.000.000 (vượt), T2 = 1.200.000
+w3.cell(r1, 6).value = 43.3
+kq3 = import_(wb3)
+assert any("⚠ Phạm Giờ Giấc tháng 1" in x and "3.000.000" in x and "phải đóng BHXH" in x for x in kq3["canh_bao"]), kq3["canh_bao"]
+assert not any("tháng 2" in x and "Phạm" in x for x in kq3["canh_bao"]) and not any("Lê Bán Thời tháng" in x and "⚠" in x for x in kq3["canh_bao"])
+assert kq3["tong_tien"] == {"Phạm Giờ Giấc": 4200000, "Lê Bán Thời": round(43.3 * 26000)} and not any("dòng 5" in x or "dòng 6" in x for x in kq3["loi"]), kq3["loi"]
 print("PASS")
