@@ -78,10 +78,14 @@ print("PASS 2b: mục tiêu nhỏ -> nhiều người làm dưới 14 ngày, kh�
 th, tom = server._luong_ke_hoach(pool, 2025, 10, 12, 200_000_000, None)
 kiem_tra_tong(th, 200_000_000)
 assert tom["so_nguoi"] == 7 and tom["day_du"] == 7 and tom["tong_thue"] == 0
-th, tom = server._luong_ke_hoach(pool, 2025, 1, 12, 30_000_000, None, ty_le_tang_ca=100)   # toàn bộ phần bù là tăng ca -> chạm trần 40 giờ, dư sang thưởng
+th, tom = server._luong_ke_hoach(pool, 2025, 1, 12, 30_000_000, None, ty_le_tang_ca=100)   # 100% = CHỈ tăng ca (tối đa 40 giờ), KHÔNG dồn phần dư vào thưởng bán hàng
+assert all(r["gio_tang_ca"] <= 40 + 1e-9 for rows in th.values() for r in rows) and tom["tong_thuong_bh"] == 0
+tong100 = sum(r["chi_phi_luong"] for rows in th.values() for r in rows)
+assert tong100 == 30_000_000 or any("THIẾU" in c for c in tom["canh_bao"]), "khớp mục tiêu hoặc báo còn thiếu (không dồn vào thưởng)"
+th, tom = server._luong_ke_hoach(pool, 2025, 1, 12, 30_000_000, None, ty_le_tang_ca=60)    # dưới 100%: tăng ca + thưởng theo tỷ lệ, tổng khớp đúng
 kiem_tra_tong(th, 30_000_000)
-assert all(r["gio_tang_ca"] <= 40 + 1e-9 for rows in th.values() for r in rows) and tom["tong_thuong_bh"] > 0
-print("PASS 2c: 200tr -> 7 người, không thuế; tăng ca không vượt 40 giờ/tháng (dư chuyển sang thưởng).")
+assert all(r["gio_tang_ca"] <= 40 + 1e-9 for rows in th.values() for r in rows)
+print("PASS 2c: 200tr -> 7 người, không thuế; tăng ca không vượt 40 giờ/tháng; 100% không có thưởng bán hàng.")
 
 # 2d: hết nhân viên mà vẫn thiếu -> dồn vào thưởng + cảnh báo (vượt ngưỡng thuế), tổng vẫn đúng.
 th, tom = server._luong_ke_hoach(pool[:1], 2025, 10, 12, 300_000_000, None)
