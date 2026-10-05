@@ -560,3 +560,9 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   ({ ctx } = mk({ '12': [{ ma: '22', ten: 'Khác' }] }, [{ ma: '2-001', ten: 'Hùng' }])); await ctx.blNapNhanVien(); assert.deepStrictEqual(ctx.blDL['12'].map((r) => r.ma), ['22', '2-001']);
   console.log('PASS 23: đổi phiên bản mã -001 khi nạp từ Danh Sách NV.');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// 24: tham số năm có ô "Part-time: khấu trừ 10% mọi khoản (→ 05-2)" (mặc định bật)
+(() => {
+  assert(html.includes('id="blTsPt10" ${t.pt_thue_10===false?\'\':\'checked\'}') && html.includes("pt_thue_10:(()=>{const e=document.getElementById('blTsPt10');return e&&e.checked!==undefined?e.checked:true})(),"));
+  console.log('PASS 24: tham số part-time khấu trừ 10%.');
+})();

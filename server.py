@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.099"
+APP_BUILD = "2026-10-05.100"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10241,6 +10241,9 @@ def _luong_chuan_tham_so(ts, nam=None):
     # Thuế khấu trừ 10% của người làm < 14 ngày (không BHXH): mặc định TRỪ VÀO thực lãnh của người lao động (TT lương =
     # Chi phí lương − thuế). Tick "không trừ thuế 10%" -> thuế của họ = 0, nhận đủ (TT lương = Chi phí lương).
     kq["thue_10_cong_ty_chiu"] = _nv_co_tick(ts["thue_10_cong_ty_chiu"]) if "thue_10_cong_ty_chiu" in ts else False
+    # Lao động PART-TIME (dưới ngưỡng BHXH): theo quy định của người dùng, MỌI khoản chi trả cho họ bị khấu trừ 10% thuế TNCN (không giảm trừ gia cảnh, không xét ngưỡng 2tr/5tr) và đưa vào bảng kê 05-2.
+    # Bỏ tick ở Tham số năm thì chuyển về như người thường (xét ngưỡng khấu trừ; có hợp đồng từ 3 tháng thì tính lũy tiến).
+    kq["pt_thue_10"] = _nv_co_tick(ts["pt_thue_10"]) if "pt_thue_10" in ts else True
     for khoa in ("bh_dn", "bh_nld"):
         goc = ts.get(khoa) if isinstance(ts.get(khoa), dict) else {}
         kq[khoa] = {k: (_luong_so(goc[k]) if k in goc else v) for k, v in mac_dinh[khoa].items()}
@@ -10388,11 +10391,12 @@ def _luong_tinh_dong(r, ts, thang=None):
     # TRỪ 10% thuế TNCN trên thu nhập chịu thuế (không giảm trừ gia cảnh) khi khoản chi trả >= ngưỡng.
     # Thử việc theo HĐ THỬ VIỆC RIÊNG: không thuộc diện BHXH bắt buộc; dưới 3 tháng (thu_viec=1) -> khấu trừ 10% như người không/ký hợp đồng dưới 3 tháng;
     # từ 3 tháng (thu_viec=2) -> tính lũy tiến như lao động thường.
-    thoi_vu = (not d["dong_bh"]) and (_luong_mien_bh_ngay(e, g) or d["thu_viec"] == 1) and not pt
+    pt10 = bool(pt and not d["dong_bh"] and luong_pt > 0 and ts.get("pt_thue_10", True))      # part-time dưới ngưỡng BHXH: khấu trừ 10% mọi khoản chi trả
+    thoi_vu = ((not d["dong_bh"]) and (_luong_mien_bh_ngay(e, g) or d["thu_viec"] == 1) and not pt) or pt10
     if thoi_vu:
         gt_npt = gt_ban_than = 0.0
         tn_tinh_thue = tong_chiu_thue
-        thue = _luong_lam_tron(tong_chiu_thue * 0.10) if tong_chiu_thue >= ts.get("nguong_khau_tru_10", 2000000.0) else 0
+        thue = _luong_lam_tron(tong_chiu_thue * 0.10) if (tong_chiu_thue >= ts.get("nguong_khau_tru_10", 2000000.0) or pt10) else 0
     else:
         gt_npt = npt * tt["giam_tru_npt"]
         gt_ban_than = tt["giam_tru_ban_than"]
@@ -11680,7 +11684,8 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
             moc, dtang = hang_so_thue(tt)
             e = d["ngay_cong"] or (ts.get("cong_chuan") or {}).get(t) or ts["ngay_cong_chuan"]
             g_lam = d["ngay_lam"] if d["ngay_lam"] != "" else e
-            thoi_vu = (not d["dong_bh"]) and _luong_mien_bh_ngay(e, g_lam)
+            pt10 = bool(d["part_time"] and not d["dong_bh"] and d["luong_cb"] > 0 and ts.get("pt_thue_10", True))
+            thoi_vu = ((not d["dong_bh"]) and _luong_mien_bh_ngay(e, g_lam) and not d["part_time"]) or pt10
             ws[f"{L['ma']}{r}"] = d["ma"]
             ws[f"{L['ten']}{r}"] = d["ten"]
             ws[f"{L['chuc_vu']}{r}"] = d["chuc_vu"]
@@ -11726,6 +11731,8 @@ def _luong_xuat_excel(nam, ts, thang_nhap):
                 ws[f"{L['thue_tncn']}{r}"] = _luong_lam_tron(d["thue_tay"])
             elif thoi_vu and ts.get("thue_10_cong_ty_chiu", False):
                 ws[f"{L['thue_tncn']}{r}"] = "=0"       # không trừ thuế 10% (theo tham số năm)
+            elif pt10:        # part-time dưới ngưỡng BHXH: khấu trừ 10% mọi khoản chi trả
+                ws[f"{L['thue_tncn']}{r}"] = f"=ROUND({x}*10%,0)"
             elif thoi_vu:     # không đóng BHXH (<14 ngày): khấu trừ 10% khi từ ngưỡng
                 ws[f"{L['thue_tncn']}{r}"] = f"=IF({x}>={ts.get('nguong_khau_tru_10', 2000000.0)!r},ROUND({x}*10%,0),0)"
             else:

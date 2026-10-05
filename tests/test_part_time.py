@@ -27,21 +27,33 @@ assert t0["luong"] == 0 and t0["tt_luong"] == 0 and t0["chi_phi_luong"] == 0
 pt["gio_lam"] = 40
 t1 = server._luong_tinh_dong(pt, ts, "03")
 assert t1["luong"] == 1040000 and t1["tt_tien_com"] == 0 and t1["xang_xe"] == 0 and t1["dien_thoai"] == 0 and t1["tt_trang_phuc"] == 0
-assert t1["bhxh_dn"] == 0 and t1["bhxh_nld"] == 0 and t1["dong_bh"] == 0 and t1["pt_phai_dong_bh"] is False and not t1["canh_bao_bh"] and not t1["thoi_vu"]
-assert t1["chi_phi_luong"] == 1040000 and t1["tt_luong"] == 1040000 and t1["thue_tncn"] == 0 and t1["luong_pt"] == 1040000
+assert t1["bhxh_dn"] == 0 and t1["bhxh_nld"] == 0 and t1["dong_bh"] == 0 and t1["pt_phai_dong_bh"] is False and not t1["canh_bao_bh"]
+# part-time dưới ngưỡng BHXH: khấu trừ 10% MỌI khoản chi trả (không giảm trừ, không xét ngưỡng khấu trừ) và vào bảng kê 05-2 (cờ thoi_vu)
+assert t1["thoi_vu"] is True and t1["thue_tncn"] == 104000 and t1["thue_tru_luong"] == 104000 and t1["tn_tinh_thue"] == 1040000
+assert t1["chi_phi_luong"] == 1040000 and t1["tt_luong"] == 936000 and t1["luong_pt"] == 1040000
 # người part-time CHỈ có lương theo giờ: thưởng bán hàng / thưởng T13 / tăng ca / phụ cấp đã nhập sẵn (dữ liệu cũ) KHÔNG được cộng vào chi phí lương và thực lãnh
 pt3 = dict(dong[1], gio_lam=18, luong_gio=25000, thuong_bh=1774666, thuong_t13=500000, tang_ca=1361000, tien_com=730000, muc_xang=500000, luong_cb=5310000)
 t_ = server._luong_tinh_dong(pt3, ts, "01")
-assert t_["luong"] == 450000 and t_["chi_phi_luong"] == 450000 and t_["tt_luong"] == 450000 and t_["thue_tncn"] == 0 and t_["bhxh_nld"] == 0, (t_["chi_phi_luong"], t_["tt_luong"])
+assert t_["luong"] == 450000 and t_["chi_phi_luong"] == 450000 and t_["thue_tncn"] == 45000 and t_["tt_luong"] == 405000 and t_["bhxh_nld"] == 0, (t_["chi_phi_luong"], t_["tt_luong"])
 assert t_["tn_chiu_thue"] == 450000 and t_["tn_khong_chiu_thue"] == 0
 # 100 giờ × 26.000 = 2.600.000 >= 2.530.000 -> thuộc đối tượng đóng BHXH: tự tính BH trên lương thực tế
 pt["gio_lam"] = 100
 t2 = server._luong_tinh_dong(pt, ts, "03")
 assert t2["luong"] == 2600000 and t2["pt_phai_dong_bh"] is True and t2["dong_bh"] == 1
+assert t2["thoi_vu"] is False, "đạt ngưỡng BHXH: có hợp đồng lao động -> tính như người thường (lũy tiến), không khấu trừ 10%"
 assert round(t2["bhxh_nld"]) == 208000 and round(t2["bhxh_dn"]) == 455000, (t2["bhxh_nld"], t2["bhxh_dn"])
 # ngay dưới ngưỡng (2.529.000) không đóng
 pt["gio_lam"] = 2529000 / 26000
 assert server._luong_tinh_dong(pt, ts, "03")["pt_phai_dong_bh"] is False
+# tắt tham số "part-time khấu trừ 10%": như người thường (dưới ngưỡng khấu trừ thì không trừ)
+ts_tat = server._luong_chuan_tham_so({"pt_thue_10": False}, 2026)
+assert ts_tat["pt_thue_10"] is False and ts["pt_thue_10"] is True
+tt_ = server._luong_tinh_dong(dict(dong[1], gio_lam=40), ts_tat, "03")
+assert tt_["thoi_vu"] is False and tt_["thue_tncn"] == 0 and tt_["tt_luong"] == 1040000
+# ghi nhận vào bảng kê 05-2 (quyết toán): người part-time có thuế 10% -> phụ lục 05-2
+hang = {"01": [server._luong_tinh_dong(dict(dong[1], gio_lam=40), ts, "01")]}
+qt = server._luong_qt_tong_hop(ts, hang, H, rows, None, 2026)
+assert [(p["ten"], p["ct11"], p["ct15"]) for p in qt["g2"]] == [("Bán thời gian", 1040000, 104000)], qt["canh_bao"]
 # người toàn thời gian không đổi: vẫn tính theo công chuẩn + phụ cấp
 ft = server._luong_tinh_dong(dong[0], ts, "03")
 assert ft["luong"] > 0 and ft["tt_tien_com"] > 0 and ft["dong_bh"] == 1 and ft["part_time"] == 0

@@ -6077,6 +6077,7 @@ function blMoThamSo(){
       <span>Giảm trừ mỗi người phụ thuộc ${om('blTsNpt',t.giam_tru_npt)} đ</span>
       <span>Hệ số quy đổi tăng ca ${o('blTsHs',Number(t.he_so_tang_ca).toFixed(4),70)}</span>
       <label title="Mặc định KHÔNG tick: người không đóng BHXH (không lương ≥ 14 ngày làm việc/tháng) bị trừ thuế 10% vào thực lãnh (TT lương = Chi phí lương − thuế). Tick: những người này KHÔNG bị trừ thuế 10% (thuế = 0), nhận đủ (TT lương = Chi phí lương)."><input type="checkbox" id="blTsCt" ${t.thue_10_cong_ty_chiu?'checked':''}> Không trừ thuế 10% của người làm ít ngày không BHXH (thuế = 0, nhận đủ)</label>
+      <label title="Tick (mặc định): MỌI khoản chi trả cho lao động part-time (dưới ngưỡng BHXH) bị khấu trừ 10% thuế TNCN, không giảm trừ gia cảnh, không xét ngưỡng khấu trừ, và được đưa vào bảng kê 05-2. Bỏ tick: tính như người thường."><input type="checkbox" id="blTsPt10" ${t.pt_thue_10===false?'':'checked'}> Part-time: khấu trừ 10% mọi khoản (→ 05-2)</label>
       <span title="Người không đóng BHXH (không lương từ 14 ngày làm việc trở lên trong tháng) bị khấu trừ 10% thuế TNCN khi thu nhập chịu thuế từ mức này trở lên">Ngưỡng khấu trừ 10% ${om('blTsN10',t.nguong_khau_tru_10!=null?t.nguong_khau_tru_10:2000000)} đ</span>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;align-items:center;margin-top:8px">
@@ -6140,6 +6141,7 @@ async function blApDungThamSo(){
   }
   blTS={ngay_le:le,thue_moi:thueMoi,giam_tru_ban_than:g('blTsBt'),giam_tru_npt:g('blTsNpt'),he_so_tang_ca:g('blTsHs'),nguong_khau_tru_10:g('blTsN10'),
     thue_10_cong_ty_chiu:(()=>{const e=document.getElementById('blTsCt');return e&&e.checked!==undefined?e.checked:false})(),
+    pt_thue_10:(()=>{const e=document.getElementById('blTsPt10');return e&&e.checked!==undefined?e.checked:true})(),
     bh_dn:{bhxh:g('blTsDx'),bhyt:g('blTsDy'),bhtn:g('blTsDt')},bh_nld:{bhxh:g('blTsNx'),bhyt:g('blTsNy'),bhtn:g('blTsNt')},bac_thue:bac};
   blBan=true;
   // server chuẩn hoá tham số (ép số, sắp bậc thuế) — lấy lại bản chuẩn để hiển thị/lưu
