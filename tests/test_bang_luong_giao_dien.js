@@ -560,8 +560,9 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   const tuyChon = { tenCty: 'CÔNG TY TNHH A', mst: '0312345678', diaChi: '1/50 Thanh Đa', nguoiLap: 'Đỗ Thái Hưng', giamDoc: 'Nguyễn Văn Kiên', leSet, ts, inLuong: true, inCong: true, kho: 'a4n' };
   const bl = c.blDungBangLuongIn(rowsIn, 2024, '05', tuyChon);
   for (const t of ['CÔNG TY TNHH A', 'ĐC: 1/50 Thanh Đa', 'MST: 0312345678', 'BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC', 'THÁNG 05 NĂM 2024', 'Họ và Tên', 'Lương căn bản', 'Phụ cấp', 'Các khoản giảm trừ', 'BHXH 8%', 'BHYT 1.5%', 'BHTN 1%', 'Tổng thực nhận', 'Ký nhận',
-    'Tổng cộng', 'Ngày 31 tháng 05 năm 2024', 'Người lập biểu', 'Giám đốc', 'Đỗ Thái Hưng', 'Nguyễn Văn Kiên'])
+    'Tổng cộng', 'Ngày 31 tháng 05 năm 2024', 'Giám đốc', 'Nguyễn Văn Kiên'])
     assert(bl.html.includes(t), 'Bảng lương thiếu: ' + t);
+  assert(!bl.html.includes('Người lập biểu') && !bl.html.includes('Đỗ Thái Hưng'), 'đã bỏ ô Người lập biểu');
   assert(/7\.352\.450/.test(bl.html) && /3\.639\.500/.test(bl.html) && /10\.991\.950/.test(bl.html), 'Có thực nhận từng người + tổng (7.352.450 + 3.639.500)');
   assert(/<td[^>]*>315\.500<\/td>/.test(bl.html), 'Thuế trừ vào lương hiện ở cột Thuế TNCN');
   assert(!bl.html.includes('Hỗ trợ đi lại'), 'Cột đi lại toàn 0 -> không in');
@@ -674,7 +675,8 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   const hop26 = els26['blIn'].innerHTML;
   assert(/id="blInDc" value="1\/50 Thanh Đa, P\.27, Bình Thạnh"/.test(hop26), 'Địa chỉ lấy theo công ty (không dùng giá trị gõ tay cũ)');
   assert(/id="blInGd" value="Nguyễn Văn Kiên"/.test(hop26), 'Giám đốc lấy theo Tên người ký của công ty');
-  assert(/id="blInLap" value="Đỗ Thái Hưng"/.test(hop26), 'Người lập biểu vẫn nhớ lần trước');
+  assert(!/blInLap/.test(hop26) && !/Người lập biểu/.test(hop26), 'đã bỏ ô Người lập biểu');
+  assert(/id="blInTu" value="1"/.test(hop26) && /id="blInDen" value="12"/.test(hop26), 'từ tháng – đến tháng luôn mặc định 1 – 12');
   assert(/đã lấy theo thông tin công ty/.test(hop26) && !/công ty chưa có địa chỉ/.test(hop26));
   assert(/<option value="a3n" selected>/.test(hop26), 'Nhớ khổ giấy');
   // dựng bản in dùng đúng thông tin công ty; không nhớ lại địa chỉ/giám đốc của công ty vào bộ nhớ
@@ -682,7 +684,7 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   els26['blInDc'].value = '1/50 Thanh Đa, P.27, Bình Thạnh'; els26['blInLap'].value = 'Đỗ Thái Hưng'; els26['blInGd'].value = 'Nguyễn Văn Kiên';
   c26.blDL = { '05': [dongMau('2', 'Trần A', { ngay_lam_hd: 26, ngay_cong_hd: 26, luong: 5310000, tt_luong: 5310000 })] };
   const kq26 = c26.blChuanBiIn();
-  assert(kq26.html.includes('ĐC: 1/50 Thanh Đa, P.27, Bình Thạnh') && kq26.html.includes('Nguyễn Văn Kiên') && kq26.html.includes('Đỗ Thái Hưng'));
+  assert(kq26.html.includes('ĐC: 1/50 Thanh Đa, P.27, Bình Thạnh') && kq26.html.includes('Nguyễn Văn Kiên') && !kq26.html.includes('Đỗ Thái Hưng'), 'bản in không còn người lập biểu');
   const saved26 = JSON.parse(m.luuTru['blIn7']); assert.strictEqual(saved26.diaChi, ''); assert.strictEqual(saved26.giamDoc, ''); assert.strictEqual(saved26.nguoiLap, 'Đỗ Thái Hưng');
   // công ty chưa nhập: dùng giá trị gõ ở hộp in và nhớ lại; hiện nhắc nhập
   c26.companies = [{ id: 7, ten: 'CÔNG TY A', mst: '031', dia_chi: '', nguoi_ky: '' }];

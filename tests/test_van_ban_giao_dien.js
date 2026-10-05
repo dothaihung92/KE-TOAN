@@ -570,3 +570,10 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(html.includes('id="blTsPt10" ${t.pt_thue_10===false?\'\':\'checked\'}') && html.includes("pt_thue_10:(()=>{const e=document.getElementById('blTsPt10');return e&&e.checked!==undefined?e.checked:true})(),"));
   console.log('PASS 24: tham số part-time khấu trừ 10%.');
 })();
+
+// 25: form Hợp Đồng Part-time: danh sách từ–đến CHỈ gồm người part-time (d.nhan_vien_pt), không lấy cả danh sách nhân viên
+(() => {
+  const iV = html.indexOf('function vbVeMan'), iE = html.indexOf('function vbTuyChon', iV), phan = html.slice(iV, iE);
+  assert(phan.includes('const ptNv=d.nhan_vien_pt||[]') && !phan.includes('optPt.length?optPt:optNv') && phan.includes('— chưa có người part-time —'));
+  console.log('PASS 25: hợp đồng part-time chỉ liệt kê người part-time.');
+})();

@@ -93,4 +93,13 @@ w4.cell(r1, 6).value = 20; w4.cell(r1, 7).value = 9999        # T3 hợp lệ, T
 kq4 = import_(wb4)
 assert sorted(e["ma"] for e in kq4["nguoi_trong_file"]) == ["P1", "P2"], "P2 có trong file dù không có giờ"
 assert kq4["thang_loi"] == {"P1": ["04"]} and [e["ma"] for e in kq4["gio"]] == ["P1"]
+# HỢP ĐỒNG PART-TIME chỉ liệt kê người ĐANG làm part-time trong năm (đúng dòng part-time của họ), kể cả người chuyển sang toàn thời gian giữa năm
+rows_hd = [R(**{'Mã NV': '2', 'Họ và tên': 'Trần Minh Hùng', 'Tháng/Năm vào làm': '01/2024', 'Part-time': 'x', 'Lương theo giờ': 25000}),
+           R(**{'Mã NV': '2-001', 'Họ và tên': 'Trần Minh Hùng', 'Tháng/Năm vào làm': '12/2024', 'Đóng BHXH': 'x', 'Lương Cơ bản': 5310000}),
+           R(**{'Mã NV': '3', 'Họ và tên': 'Nguyễn Giang Nam', 'Tháng/Năm vào làm': '12/2024', 'Đóng BHXH': 'x', 'Lương Cơ bản': 5310000})]
+server.nhap_lieu_get = lambda cid, loai="in": {"header": H, "rows": rows_hd} if loai == "nv" else {"header": [], "rows": []}
+server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), {}, "", [nam])
+p24 = server._vb_nv_part_time(7, 2024)
+assert [(n["stt"], n["ma"], n["ten"], n["luong_gio"]) for n in p24] == [(1, "2", "Trần Minh Hùng", 25000.0)], p24
+assert server._vb_nv_part_time(7, 2025) == [], "năm 2025 người này đã là toàn thời gian (2-001): không còn hợp đồng part-time"
 print("PASS")

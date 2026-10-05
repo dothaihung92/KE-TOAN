@@ -87,7 +87,7 @@ try:
     assert ws["C10"].value == "Nguyễn Văn A" and ws["A10"].value == 1 and ws["A12"].value == 3
     assert ws["A13"].value == "Tổng cộng" and any(str(ws.cell(13, j).value or "").startswith("=SUM(") for j in range(1, nL + 1))
     txt = [str(c.value) for row in ws.iter_rows() for c in row if c.value is not None]
-    assert "Người lập biểu" in txt and "Giám đốc" in txt and "Đỗ Thái Hưng" in txt and "Nguyễn Văn Kiên" in txt and "Ngày 31 tháng 05 năm 2024" in txt
+    assert "Người lập biểu" not in txt and "Giám đốc" in txt and "Đỗ Thái Hưng" not in txt and "Nguyễn Văn Kiên" in txt and "Ngày 31 tháng 05 năm 2024" in txt
     print("PASS 1: sheet BL 05-2024 có đầu trang, tiêu đề, cột 2 tầng (Phụ cấp / Các khoản giảm trừ), dữ liệu, Tổng cộng, chữ ký.")
 
     # ===== 2: khối chấm công liền sau khối lương: X/L, CN tô xám, TNC = công thức COUNTIF, thời vụ ghi chú =====

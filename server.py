@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.102"
+APP_BUILD = "2026-10-05.103"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11972,9 +11972,9 @@ def _luong_xuat_excel_mau(nam, thang, tuy_chon):
             ws.cell(r, max(c1, c2 - 6)).alignment = phai
             trai_c = c1 + 1
             phai_c = max(c1 + 3, c2 - 5)
-            for cc, vai, ten in ((trai_c, "Người lập biểu", tc.get("nguoi_lap") or ""), (phai_c, "Giám đốc", tc.get("giam_doc") or "")):
+            for cc, vai, ten in ((phai_c, "Giám đốc", tc.get("giam_doc") or ""),):      # bỏ "Người lập biểu" theo yêu cầu người dùng
                 ws.cell(r + 1, cc, vai).font = font(True, 12)
-                ws.cell(r + 2, cc, "(Ký, ghi rõ họ tên)" if vai == "Người lập biểu" else "(Ký, đóng dấu, ghi rõ họ tên)").font = font(False, 10, True)
+                ws.cell(r + 2, cc, "(Ký, đóng dấu, ghi rõ họ tên)").font = font(False, 10, True)
                 ws.cell(r + 7, cc, ten).font = font(True, 12)
         vung_in = []
         # ===== khối 1: BẢNG TÍNH LƯƠNG =====
@@ -13175,6 +13175,25 @@ def _vb_du_lieu(cid, nam, chi_bang_luong=False):
     return cty, nv, ts
 
 
+def _vb_nv_part_time(cid, nam):
+    """Người lao động PART-TIME có làm part-time trong năm `nam` (theo Danh Sách NV: dòng tick Part-time + khoảng vào làm/nghỉ việc), lấy ĐÚNG dòng part-time
+    của họ (người chuyển sang toàn thời gian giữa năm, vd 2 → 2-001, vẫn có hợp đồng part-time cho giai đoạn part-time). STT riêng 1..n."""
+    d = nhap_lieu_get(cid, loai="nv")
+    hdr, rows = d.get("header") or [], d.get("rows") or []
+    i_pt = next((i for i, h in enumerate(hdr) if vbld._chuan(h) == "part-time"), None)
+    if i_pt is None:
+        return []
+    co = _pt_nguoi_trong_nam(cid, nam)
+    if not co:
+        return []
+    _ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
+    nv = vbld.gop_nhan_vien(hdr, [r for r in rows if i_pt < len(r) and _nv_co_tick(r[i_pt])], thang_nhap, nam)
+    kq = [n for n in nv if (n["ma"] or n["ten"]).strip().lower() in co]
+    for i, n in enumerate(kq, 1):
+        n["stt"], n["part_time"] = i, True
+    return kq
+
+
 # Cấu hình Hệ thống thang lương, bảng lương LƯU THEO TỪNG NĂM (lương cơ bản mỗi năm một khác): nhóm chức danh, % mỗi bậc, số bậc, vùng...
 _VB_KHOA_THANG_LUONG = ("nhom_tuy_chinh", "buoc_pct", "so_bac", "vung", "hien_he_so", "kem_xep_luong")
 
@@ -13244,6 +13263,8 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
             "trang": {"hd": _vb_trang_mac_dinh("hd"), "qc": _vb_trang_mac_dinh("qc"), "tl": _vb_trang_mac_dinh("tl")},
             "nhan_vien": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"],
                            "da_nghi": n["da_nghi"], "nguon": n["nguon"], "part_time": bool(n.get("part_time")), "luong_gio": n.get("luong_gio") or 0} for n in nv],
+            "nhan_vien_pt": [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_gio": n.get("luong_gio") or 0}
+                             for n in _vb_nv_part_time(cid, nam)],
             "chuc_danh": vbld.chuc_danh_tu_nhom(tc["nhom_tuy_chinh"]),
             "canh_bao": vbld.kiem_tra(nv_ft, nam, tc, _LUONG_TRAN_PC_KHONG_THUE) if nv_ft else []}
 
@@ -13621,11 +13642,11 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     tc.update({k: v for k, v in (body.get("tuy_chon") or {}).items() if v is not None})
     chu_ky = _vb_chu_ky_dict(cid) if tc.get("gan_chu_ky", True) else {}          # chỉ chữ ký đã xác nhận đồng ý
     if loai == "pt":
-        nv_pt = [n for n in nv_het if n.get("part_time")]
+        nv_pt = _vb_nv_part_time(cid, nam)          # chỉ người đang làm part-time trong năm (STT riêng của danh sách part-time)
         if not nv_pt:
             raise HTTPException(404, "Chưa có lao động part-time: tick cột “Part-time” (và nhập “Lương theo giờ”) ở Danh Sách Nhân Viên")
         try:
-            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv_het))
+            tu, den = int(body.get("tu") or 1), int(body.get("den") or len(nv_pt))
         except Exception:
             raise HTTPException(400, "Từ/đến nhân viên không hợp lệ")
         if tu > den:

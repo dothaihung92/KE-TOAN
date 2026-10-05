@@ -4526,10 +4526,10 @@ function vbVeMan(){
     </div>`;
   }
   if(l==='pt'){
-    const ptNv=nv.filter(n=>n.part_time),optPt=ptNv.map(n=>[n.stt,`${n.stt}. ${n.ma?n.ma+' – ':''}${n.ten}${n.chuc_vu?' ('+n.chuc_vu+')':''}${n.luong_gio?' — '+Number(n.luong_gio).toLocaleString('vi-VN')+' đ/giờ':''}`]);
+    const ptNv=d.nhan_vien_pt||[],optPt=ptNv.map(n=>[n.stt,`${n.stt}. ${n.ma?n.ma+' – ':''}${n.ten}${n.chuc_vu?' ('+n.chuc_vu+')':''}${n.luong_gio?' — '+Number(n.luong_gio).toLocaleString('vi-VN')+' đ/giờ':''}`]);
     form+=(ptNv.length?'':`<div class="hint" style="color:#b00;margin-bottom:6px">Chưa có lao động part-time: ở Danh Sách Nhân Viên tick cột <b>Part-time</b> và nhập <b>Lương theo giờ</b> cho người đó.</div>`)+`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-      ${vbOChon('vb_tu','In hàng loạt — TỪ nhân viên',optPt.length?optPt:optNv,optPt.length?optPt[0][0]:1,300)}
-      ${vbOChon('vb_den','ĐẾN nhân viên',optPt.length?optPt:optNv,optPt.length?optPt[optPt.length-1][0]:1,300)}
+      ${vbOChon('vb_tu','In hàng loạt — TỪ người part-time',optPt.length?optPt:[['','— chưa có người part-time —']],optPt.length?optPt[0][0]:'',300)}
+      ${vbOChon('vb_den','ĐẾN người part-time',optPt.length?optPt:[['','— chưa có người part-time —']],optPt.length?optPt[optPt.length-1][0]:'',300)}
     </div>
     <div class="hint" style="margin-bottom:6px">Chỉ lao động đã tick <b>Part-time</b> ở Danh Sách Nhân Viên. Lương theo giờ lấy từ cột <b>Lương theo giờ</b> (ô “Lương theo giờ” dưới đây, nếu nhập, áp dụng cho tất cả). Hợp đồng ghi: tên “làm việc không trọn thời gian”, thời giờ làm việc ngắn hơn 8 giờ/ngày – 48 giờ/tuần, lương theo giờ + lương tháng dự kiến dưới ngưỡng, câu về BHXH. Số giờ thực tế từng tháng nhập ở Bảng Lương (cột Giờ làm).</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
@@ -6258,8 +6258,7 @@ function blKhungTren(tuyChon,tieuDe,dong2){
 function blOKy(anh){return `<div class="o-ky">${anh?`<img src="${anh}">`:''}</div>`}
 function blKhungKy(tuyChon,nam,t,rong){
   return `<div class="ky" style="width:${rong}px"><div class="ngay-ky">${blNgayKy(nam,t)}</div>
-    <div class="ky2"><div><b>Người lập biểu</b><div class="ghi">(Ký, ghi rõ họ tên)</div>${blOKy(blAnhKy('',tuyChon.nguoiLap))}<div class="ten-ky">${xkEsc(tuyChon.nguoiLap||'')}</div></div>
-    <div><b>Giám đốc</b><div class="ghi">(Ký, đóng dấu, ghi rõ họ tên)</div>${blOKy((blChuKyIn&&blChuKyIn.giam_doc)||'')}<div class="ten-ky">${xkEsc(tuyChon.giamDoc||'')}</div></div></div></div>`;
+    <div class="ky2" style="justify-content:flex-end"><div><b>Giám đốc</b><div class="ghi">(Ký, đóng dấu, ghi rõ họ tên)</div>${blOKy((blChuKyIn&&blChuKyIn.giam_doc)||'')}<div class="ten-ky">${xkEsc(tuyChon.giamDoc||'')}</div></div></div></div>`;
 }
 function blSoIn(v,dp){const n=Number(v);if(!isFinite(n)||Math.abs(n)<(dp?0.005:0.5))return'';return blDinhDang(n,dp)}
 // Trang "BẢNG TÍNH LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC" của 1 tháng. Trả {html, rong (px tự nhiên của bảng)}
@@ -6420,13 +6419,13 @@ function blMoIn(){
   w.style.cssText='display:block;border:1px solid #bcd2ef;background:#f5f9ff;border-radius:10px;padding:12px;margin-bottom:10px';
   w.innerHTML=`<div style="font-weight:700;margin-bottom:6px">🖨 In bảng lương & bảng chấm công — năm ${blNam}</div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px">
-      <span>Từ tháng ${i('blInTu',t,'width:42px;text-align:right;')}</span><span>đến tháng ${i('blInDen',t,'width:42px;text-align:right;')}</span>
+      <span>Từ tháng ${i('blInTu',1,'width:42px;text-align:right;')}</span><span>đến tháng ${i('blInDen',12,'width:42px;text-align:right;')}</span>
       <label><input type="checkbox" id="blInLuong" checked> Bảng tính lương</label><label><input type="checkbox" id="blInCong" checked> Bảng chấm công</label>
       <span>Khổ giấy <select id="blInKho" style="padding:4px 6px;border:1px solid #ccc;border-radius:6px">${Object.entries(BL_KHO_GIAY).map(([k,v])=>`<option value="${k}"${(cu.kho||'a4n')===k?' selected':''}>${v.ten}</option>`).join('')}</select></span>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:13px;margin-top:8px">
       <span>Địa chỉ ${i('blInDc',diaChi,'width:300px;','Chưa có trong thông tin công ty — nhập ở đây')}</span>
-      <span>Người lập biểu ${i('blInLap',cu.nguoiLap,'width:170px;')}</span><span>Giám đốc ${i('blInGd',giamDoc,'width:170px;','Chưa có — nhập ở đây')}</span>
+      <span>Giám đốc ${i('blInGd',giamDoc,'width:170px;','Chưa có — nhập ở đây')}</span>
     </div>
     <div style="font-size:12px;color:#555;margin-top:4px">${cty.diaChi&&cty.giamDoc?'Địa chỉ và Giám đốc đã lấy theo thông tin công ty (Sửa công ty → Địa chỉ trụ sở, Tên người ký).':`Địa chỉ/Giám đốc lấy theo <b>thông tin công ty</b> đã nhập (Sửa công ty → "Địa chỉ trụ sở", "Tên người ký tờ khai")${!cty.diaChi?' — <span style="color:#b45309">công ty chưa có địa chỉ</span>':''}${!cty.giamDoc?' — <span style="color:#b45309">chưa có tên người ký</span>':''}.`}</div>
     <div style="margin-top:8px"><button class="btn gold sm" onclick="blXemIn()">👁 Xem trước</button> <button class="btn sm" style="background:#1f4e8c" onclick="blInNgay()">🖨 In luôn</button>
