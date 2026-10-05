@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.090"
+APP_BUILD = "2026-10-05.091"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10750,6 +10750,11 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
         _vl = _luong_doc_ngay_thang(lay(r, "Tháng/Năm vào làm"))
         if _tv_den and _vl and nam and thang and (_tv_den.year, _tv_den.month) < (int(nam), int(thang)) < (_vl[0], _vl[1]):
             continue
+        # Lao động PART-TIME: chỉ lên Bảng Lương từ tháng "Tháng/Năm vào làm" đến tháng "Tháng/Năm nghỉ việc" ghi trong Danh Sách Nhân Viên (trống = như người thường).
+        if _nv_co_tick(lay(r, "Part-time")) and nam and thang:
+            vl_pt = _luong_doc_ngay_thang(lay(r, "Tháng/Năm vào làm"))
+            if vl_pt and (int(nam), int(thang)) < (vl_pt[0], vl_pt[1]):
+                continue
         tick = _nv_co_tick(lay(r, "Đóng BHXH")) if co_cot_tick else True
         # Thử việc theo HĐ thử việc riêng (cột "Thử việc từ"/"Thử việc đến"): không đóng BHXH trong thời gian thử việc; BHXH bắt đầu từ NGÀY SAU khi hết thử việc
         # (cùng quy tắc ngày vào làm). Tháng nào giao với thời gian thử việc và không đóng BHXH -> thu_viec (1: dưới 3 tháng, 2: từ 3 tháng).
@@ -11492,10 +11497,17 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
                                  bool(body.get("full_cong")), body.get("tran_pc") if isinstance(body.get("tran_pc"), dict) else None,
                                  body.get("ck_theo_thang") if isinstance(body.get("ck_theo_thang"), dict) else None,
                                  int(_luong_so(body.get("ck_toi_da")) or 12000000) if body.get("ck_toi_da") not in (None, "") else 12000000)
-    pt = sorted({r["ten"] for t in range(1, 13) for r in _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, t, npt) if r.get("part_time")})
+    # Người part-time được thêm vào từng tháng của kế hoạch theo ĐÚNG khoảng làm việc trong Danh Sách NV (vào làm → nghỉ việc), giờ làm để trống (0) chờ nhập số thực tế.
+    ts_chuan = _luong_chuan_tham_so(body.get("tham_so"), nam)
+    pt = set()
+    for t in list(thang.keys()):
+        them = [r for r in _luong_dong_tu_nhan_vien(d.get("header"), d.get("rows"), 0, nam, int(t), npt) if r.get("part_time")]
+        if them:
+            thang[t] = list(thang[t]) + [_luong_tinh_dong(r, ts_chuan, t) for r in them]
+            pt.update(r["ten"] for r in them)
     if pt and isinstance(tom, dict):
-        tom.setdefault("canh_bao", []).append("Lao động part-time (" + ", ".join(pt) + ") KHÔNG nằm trong kế hoạch chia chi phí cả năm: tiền lương của họ chỉ tính theo "
-                                              "số giờ làm THỰC TẾ nhập từng tháng ở Bảng Lương (phần mềm không tự chọn tháng làm/không làm). Nếu tổng chi phí lương cả năm bạn nhập đã gồm cả part-time, hãy trừ chi phí part-time thực tế ra (ô “Đã có ngoài”) trước khi áp dụng.")
+        tom.setdefault("canh_bao", []).append("Lao động part-time (" + ", ".join(sorted(pt)) + ") được thêm vào bảng lương theo tháng vào làm / nghỉ việc ghi ở Danh Sách Nhân Viên, nhưng KHÔNG nằm trong phần chia chi phí cả năm: "
+                                              "giờ làm để trống (0 đồng) — nhập số giờ THỰC TẾ từng tháng (phần mềm không tự chọn tháng làm/không làm hay tự đặt giờ). Nếu tổng chi phí lương cả năm bạn nhập đã gồm cả part-time, hãy trừ chi phí part-time thực tế ra (ô “Đã có ngoài”) trước khi áp dụng.")
     return {"thang": thang, "tom_tat": tom}
 
 

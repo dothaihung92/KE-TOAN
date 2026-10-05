@@ -91,4 +91,26 @@ assert any("thấp hơn mức lương tối thiểu giờ" in c["nd"] for c in c
 assert v.luong_toi_thieu_gio(2026, 1) == 25500 and v.luong_toi_thieu_gio(2024, 1) == 23800
 # nhiều hợp đồng
 assert v.dung_hop_dong_part_time_nhieu(nv[1:], CTY, tc, nam=2026).count('<section class="vb-trang">') == 1
+# THÁNG LÀM của người part-time theo Danh Sách NV: từ "Tháng/Năm vào làm" đến "Tháng/Năm nghỉ việc"; trống = như người thường
+ptr = [R(**{'Mã NV': '9', 'Họ và tên': 'PT', 'Part-time': 'x', 'Lương theo giờ': 26000, 'Tháng/Năm vào làm': '03/2026', 'Tháng/Năm nghỉ việc': '08/2026', 'Chức vụ': 'Bảo vệ'})]
+co = [t for t in range(1, 13) if server._luong_dong_tu_nhan_vien(H, ptr, 0, 2026, t)]
+assert co == [3, 4, 5, 6, 7, 8], co
+assert all(server._luong_dong_tu_nhan_vien(H, ptr, 0, 2026, t)[0]["part_time"] == 1 for t in co)
+assert not server._luong_dong_tu_nhan_vien(H, ptr, 0, 2025, 12) and not server._luong_dong_tu_nhan_vien(H, ptr, 0, 2027, 1)
+ptr2 = [R(**{'Mã NV': '9', 'Họ và tên': 'PT', 'Part-time': 'x', 'Lương theo giờ': 26000})]
+assert all(server._luong_dong_tu_nhan_vien(H, ptr2, 0, 2026, t) for t in range(1, 13)), "không ghi vào làm/nghỉ việc: như bình thường (cả năm)"
+
+# kế hoạch cả năm: người part-time được THÊM vào từng tháng đúng khoảng làm việc, giờ làm để trống (0 đồng)
+import asyncio
+rows_kh = [R(**{'Mã NV': '1', 'Họ và tên': 'Toàn thời gian', 'Đóng BHXH': 'x', 'Tháng/Năm vào làm': '01/2025', 'Lương Cơ bản': 6000000, 'Chức vụ': 'Nhân viên'})] + ptr
+server.nhap_lieu_get = lambda cid, loai="in": {"header": H, "rows": rows_kh} if loai == "nv" else {"header": [], "rows": []}
+class Req:
+    def __init__(self, b): self.b = b
+    async def json(self): return self.b
+kq = asyncio.run(server.bang_luong_ke_hoach(7, Req({"nam": 2026, "tu_thang": 1, "den_thang": 12, "muc_tieu": 120000000, "seed": 1})))
+for t, rs in kq["thang"].items():
+    ten_pt = [r for r in rs if r.get("part_time")]
+    assert bool(ten_pt) == (3 <= int(t) <= 8), (t, len(ten_pt))
+    assert all(r["gio_lam"] == "" and r["chi_phi_luong"] == 0 for r in ten_pt), "giờ làm để trống, không tự đặt"
+assert any("part-time" in c.lower() for c in kq["tom_tat"]["canh_bao"])
 print("PASS")
