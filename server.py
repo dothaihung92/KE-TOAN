@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-05.095"
+APP_BUILD = "2026-10-05.096"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13807,6 +13807,7 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
     theo_ma = {e["ma"].strip().lower(): k for k, e in ds.items() if e["ma"]}
     theo_ten = {_khong_dau(e["ten"]).strip().lower(): k for k, e in ds.items()}
     loi, canh_bao, kq = [], [], {}
+    khop, loi_thang = {}, {}          # khop: người part-time có trong file (kể cả không có giờ); loi_thang: tháng có dữ liệu LỖI (giữ nguyên, không coi là "không làm")
 
     def tim(ma, ten, vi_tri):
         ma, ten = str(ma or "").strip(), str(ten or "").strip()
@@ -13814,6 +13815,7 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
         if not k:
             loi.append(f"{vi_tri}: “{ten or ma}” không phải lao động part-time trong Danh Sách Nhân Viên (cần tick Part-time) — bỏ qua.")
             return None
+        khop[k] = {"ma": ds[k]["ma"], "ten": ds[k]["ten"]}
         return k
 
     def ghi(k, m, vi_tri):
@@ -13854,12 +13856,14 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
                     vt = f"Giờ theo tháng, dòng {i} (T{m})"
                     if v is None or v < 0:
                         loi.append(f"{vt}: giờ không hợp lệ — bỏ qua.")
+                        loi_thang.setdefault(k, set()).add(f"{m:02d}")
                         continue
                     if v == 0:
                         continue
                     ngay_lam_viec = sum(1 for d in range(1, calendar.monthrange(nam, m)[1] + 1) if datetime.date(nam, m, d).weekday() != 6)
                     if v > _GIO_TOI_DA_NGAY * ngay_lam_viec + 1e-9:
                         loi.append(f"{vt}: {v:g} giờ vượt tối đa {int(_GIO_TOI_DA_NGAY)} giờ × {ngay_lam_viec} ngày (trừ Chủ nhật) = {int(_GIO_TOI_DA_NGAY) * ngay_lam_viec} giờ — bỏ qua.")
+                        loi_thang.setdefault(k, set()).add(f"{m:02d}")
                         continue
                     e = ghi(k, m, vt)
                     if e is not None:
@@ -13883,6 +13887,7 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
                 if not 1 <= m <= 12:
                     loi.append(f"{vt}: cột Tháng phải là 1–12 — bỏ qua.")
                     continue
+                k_ngay = tim(r[0], r[1] if len(r) > 1 else "", vt)
                 ngay, hop_le = {}, True
                 so_ngay = calendar.monthrange(nam, m)[1]
                 for d in range(1, 32):
@@ -13896,9 +13901,11 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
                     if v > _GIO_TOI_DA_NGAY + 1e-9:
                         loi.append(f"{vt} (ngày {d}): {v:g} giờ vượt tối đa {int(_GIO_TOI_DA_NGAY)} giờ/ngày — kiểm tra lại (phần mềm không tự dồn sang ngày khác); bỏ qua cả dòng."); hop_le = False; break
                     ngay[str(d)] = round(v, 2)
+                if not hop_le and k_ngay:
+                    loi_thang.setdefault(k_ngay, set()).add(f"{m:02d}")
                 if not hop_le or not ngay:
                     continue
-                k = tim(r[0], r[1] if len(r) > 1 else "", vt)
+                k = k_ngay
                 if not k:
                     continue
                 e = ghi(k, m, vt)
@@ -13925,7 +13932,8 @@ async def bang_luong_nhap_gio_lam(cid: int, request: Request):
             if tien >= nguong - 1e-9:
                 canh_bao.append(f"⚠ {e['ten']} tháng {int(t)}: {h:g} giờ × {int(don_gia):,} = {int(round(tien)):,} đ — từ ngưỡng {int(nguong):,} đ → phải đóng BHXH (phần mềm sẽ tự tính BHXH tháng này).".replace(",", "."))
         tong_tien[e["ten"]] = round(tong)
-    return {"gio": list(kq.values()), "tong_tien": tong_tien, "so_nguoi": len(kq), "so_thang": sum(len(e["thang"]) for e in kq.values()), "loi": loi[:40], "canh_bao": canh_bao[:40]}
+    return {"gio": list(kq.values()), "tong_tien": tong_tien, "so_nguoi": len(kq),
+            "nguoi_trong_file": list(khop.values()), "thang_loi": {ds[k]["ma"] or ds[k]["ten"]: sorted(v) for k, v in loi_thang.items()}, "so_thang": sum(len(e["thang"]) for e in kq.values()), "loi": loi[:40], "canh_bao": canh_bao[:40]}
 
 
 @app.post("/api/bang-luong/{cid}/nhap-excel")

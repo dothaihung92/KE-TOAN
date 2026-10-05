@@ -5918,21 +5918,33 @@ async function blImportGioLam(inp){
     const r=await fetch(`/api/bang-luong/${current}/nhap-gio-lam`,{method:'POST',body:fd});
     const d=await r.json();if(!r.ok)throw new Error(d.detail||'Import thất bại');
     if(!d.gio||!d.gio.length){toast('File không có giờ làm hợp lệ'+(d.loi&&d.loi.length?': '+d.loi[0]:''),'err');if(d.loi&&d.loi.length)alert(d.loi.join('\n'));return}
+    // Bảng lương THEO FILE: người part-time có trong file mà tháng nào KHÔNG có giờ (trống/0) = tháng đó không làm -> không có dòng của người đó trong bảng lương tháng đó
+    // (tháng có dữ liệu LỖI trong file thì giữ nguyên, không coi là không làm).
+    const khoa=x=>(x.ma||x.ten||'').toString().trim().toLowerCase();
+    const nguoi=new Map();(d.nguoi_trong_file||[]).forEach(e=>nguoi.set(khoa(e),{ma:e.ma,ten:e.ten,thang:{},ngay:{}}));
+    d.gio.forEach(e=>nguoi.set(khoa(e),e));
+    const laLoi=(e,t)=>((d.thang_loi||{})[e.ma||e.ten]||[]).includes(t);
+    let seGo=0,coGio=0;
+    nguoi.forEach((e,k)=>BL_THANG.forEach(t=>{if(!(Number(e.thang[t])>0)&&!laLoi(e,t)){const r=(blDL[t]||[]).find(x=>khoa(x)===k&&Number(x.part_time));if(r){seGo++;if(Number(r.gio_lam)>0)coGio++}}}));
+    if(coGio&&!confirm(`File không có giờ làm ở một số tháng mà bảng lương đang có giờ đã nhập (${coGio} dòng). Theo file, các tháng đó người part-time không làm nên SẼ GỠ khỏi bảng lương tháng đó (${seGo} dòng). Tiếp tục?`))return;
     await blNapPartTime(true);                    // bảo đảm đã có dòng part-time ở các tháng trong khoảng làm việc
-    let dat=0;const khong=[];
-    d.gio.forEach(e=>Object.keys(e.thang).forEach(t=>{
-      const key=(e.ma||e.ten||'').toString().trim().toLowerCase();
-      const row=(blDL[t]||[]).find(x=>(x.ma||x.ten||'').toString().trim().toLowerCase()===key&&Number(x.part_time));
-      if(!row){khong.push(`${e.ten} tháng ${parseInt(t,10)}`);return}
-      row.gio_lam=e.thang[t];
-      const ng=e.ngay&&e.ngay[t];row.gio_ngay=ng?Object.keys(ng).map(k=>k+':'+ng[k]).join(';'):'';
-      dat++;
+    let dat=0,go=0;const khong=[];
+    nguoi.forEach((e,k)=>BL_THANG.forEach(t=>{
+      const gio=Number(e.thang[t])||0;
+      const ds=blDL[t]||[],vt=ds.findIndex(x=>khoa(x)===k&&Number(x.part_time));
+      if(gio>0){
+        if(vt<0){khong.push(`${e.ten} tháng ${parseInt(t,10)}`);return}
+        const row=ds[vt];row.gio_lam=gio;
+        const ng=e.ngay&&e.ngay[t];row.gio_ngay=ng?Object.keys(ng).map(q=>q+':'+ng[q]).join(';'):'';
+        dat++;
+      }else if(vt>=0&&!laLoi(e,t)){ds.splice(vt,1);go++}
     }));
+    BL_THANG.forEach(t=>{if(blDL[t]&&!blDL[t].length)delete blDL[t]});      // tháng không còn dòng nào
     blBan=true;
     for(const t of BL_THANG)if((blDL[t]||[]).some(x=>Number(x.part_time)))await blTinhLai(t);
     blVeTabs();blVeBang();blVeInfo();
     const ghiChu=[].concat(d.loi||[],d.canh_bao||[],khong.map(x=>x+': chưa có dòng part-time ở bảng lương — bỏ qua'));
-    toast(`✓ Đã nhập giờ làm cho ${dat} dòng (${d.so_nguoi} người)`+(ghiChu.length?` — ${ghiChu.length} dòng bị bỏ qua/cảnh báo (xem hộp thoại)`:'')+' — nhớ 💾 Lưu',ghiChu.length?'err':'ok');
+    toast(`✓ Đã nhập giờ làm cho ${dat} dòng (${d.so_nguoi} người)`+(go?`, gỡ ${go} dòng tháng không làm`:'')+(ghiChu.length?` — ${ghiChu.length} dòng bị bỏ qua/cảnh báo (xem hộp thoại)`:'')+' — nhớ 💾 Lưu',ghiChu.length?'err':'ok');
     if(ghiChu.length)alert('Một số dòng không được nhập hoặc cần xem lại:\n\n'+ghiChu.slice(0,40).join('\n'));
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }

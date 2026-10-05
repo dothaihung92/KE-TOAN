@@ -85,4 +85,12 @@ kq3 = import_(wb3)
 assert any("⚠ Phạm Giờ Giấc tháng 1" in x and "3.000.000" in x and "phải đóng BHXH" in x for x in kq3["canh_bao"]), kq3["canh_bao"]
 assert not any("tháng 2" in x and "Phạm" in x for x in kq3["canh_bao"]) and not any("Lê Bán Thời tháng" in x and "⚠" in x for x in kq3["canh_bao"])
 assert kq3["tong_tien"] == {"Phạm Giờ Giấc": 4200000, "Lê Bán Thời": round(43.3 * 26000)} and not any("dòng 5" in x or "dòng 6" in x for x in kq3["loi"]), kq3["loi"]
+# người có trong file (kể cả không giờ) + tháng có dữ liệu lỗi (để giao diện không coi là "không làm")
+wb4 = openpyxl.load_workbook(server.bang_luong_mau_gio_lam(7, 2026).path)
+w4 = wb4["Giờ theo tháng"]
+r1 = next(r for r in range(2, 6) if w4.cell(r, 1).value == "P1")
+w4.cell(r1, 6).value = 20; w4.cell(r1, 7).value = 9999        # T3 hợp lệ, T4 vượt tối đa -> lỗi
+kq4 = import_(wb4)
+assert sorted(e["ma"] for e in kq4["nguoi_trong_file"]) == ["P1", "P2"], "P2 có trong file dù không có giờ"
+assert kq4["thang_loi"] == {"P1": ["04"]} and [e["ma"] for e in kq4["gio"]] == ["P1"]
 print("PASS")

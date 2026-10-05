@@ -512,3 +512,28 @@ console.log('PASS 3: đọc canh chỉnh + tuỳ chọn.');
   assert(html.includes('blDL[t]=blSapXepPartTime(kq.rows)') && html.includes('blDL[t]=blSapXepPartTime(blDL[t])'), 'sắp xếp khi tải và sau mỗi lần tính');
   console.log('PASS 21: part-time chỉ hiện lương theo giờ + giờ làm, xếp dưới cùng.');
 })();
+
+// 22: import giờ làm part-time — bảng lương THEO FILE: tháng không có giờ = không làm = gỡ dòng của người đó khỏi bảng lương tháng đó
+(async () => {
+  const i1 = html.indexOf('async function blTaiMauGioLam'), i2 = html.indexOf('// Điền giờ làm/tháng THEO HỢP ĐỒNG');
+  const tao = (confirmKq, kqFile) => {
+    const toasts = [], hoi = [];
+    const ctx = { current: 7, blNam: 2026, BL_THANG: Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), blBan: false, blVeTabs() {}, blVeBang() {}, blVeInfo() {}, toast: (m, k) => toasts.push([m, k]), alert() {}, confirm: (m) => { hoi.push(m); return confirmKq; },
+      blDL: { '03': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: 20 }, { ma: '1', ten: 'FT' }], '04': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: 15 }], '05': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: '' }, { ma: 'P2', ten: 'Hai', part_time: 1, gio_lam: '' }], '06': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: 7 }], '07': [{ ma: 'P1', ten: 'Lê', part_time: 1, gio_lam: '' }] },
+      FormData: class { append() {} }, async blNapPartTime() {}, async blTinhLai() {}, fetch: async () => ({ ok: true, json: async () => kqFile }) };
+    vm.createContext(ctx); vm.runInContext(html.slice(i1, i2), ctx); return { ctx, toasts, hoi };
+  };
+  // file: P1 chỉ có giờ tháng 3 (14,5) và tháng 7 dòng LỖI; P2 có trong file nhưng không có giờ
+  const file = { so_nguoi: 1, gio: [{ ma: 'P1', ten: 'Lê', thang: { '03': 14.5 }, ngay: {} }], nguoi_trong_file: [{ ma: 'P1', ten: 'Lê' }, { ma: 'P2', ten: 'Hai' }], thang_loi: { P1: ['07'] }, loi: ['Giờ theo tháng, dòng 2 (T7): lỗi'], canh_bao: [] };
+  let t = tao(false, file); await t.ctx.blImportGioLam({ files: [{}], value: 'x' });
+  assert(t.hoi.length === 1 && t.hoi[0].includes('SẼ GỠ') && t.hoi[0].includes('2 dòng'), 'hỏi trước khi gỡ tháng đang có giờ đã nhập (T4: 15, T6: 7)');
+  assert.strictEqual(t.ctx.blDL['04'].length, 1, 'không đồng ý: giữ nguyên bảng lương');
+  t = tao(true, file); await t.ctx.blImportGioLam({ files: [{}], value: 'x' });
+  const L = t.ctx.blDL;
+  assert.strictEqual(L['03'][0].gio_lam, 14.5); assert.strictEqual(L['03'].length, 2, 'người toàn thời gian không bị đụng');
+  assert.strictEqual(L['04'], undefined, 'T4: file không có giờ -> không làm -> không có dòng (tháng trống thì bỏ tháng)'); assert.strictEqual(L['06'], undefined);
+  assert.strictEqual(L['05'], undefined, 'T5: cả P1 và P2 (có trong file, không giờ) bị gỡ');
+  assert.strictEqual(L['07'].length, 1, 'T7: dữ liệu lỗi trong file -> giữ nguyên, không coi là không làm');
+  assert(t.toasts.at(-1)[0].includes('gỡ 4 dòng tháng không làm'), t.toasts.at(-1)[0]);
+  console.log('PASS 22: import giờ làm — tháng không làm thì gỡ khỏi bảng lương tháng đó.');
+})().catch((e) => { console.error(e); process.exit(1); });
