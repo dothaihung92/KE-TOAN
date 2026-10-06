@@ -5995,6 +5995,7 @@ function blMoKeHoach(){
       <span>Tổng chi phí lương cả năm <input id="blKhTien" placeholder="vd 50.000.000" oninput="blDangTien(this)" style="width:150px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px"> đ</span>
       <span title="Phần thiếu được bù bằng tăng ca (tối đa 40 giờ/tháng) và thưởng bán hàng theo tỷ lệ này. Nhập 100 = CHỈ bù bằng tăng ca, không có thưởng bán hàng (tăng ca không đủ thì báo còn thiếu)">Bù bằng tăng ca <input id="blKhTc" value="50" style="width:42px;text-align:right;padding:4px 6px;border:1px solid #ccc;border-radius:6px">%</span>
       <label title="Mọi người đi làm ĐỦ CÔNG (không có người làm ít ngày/không BHXH, không khấu trừ 10% thuế TNCN). Phần thiếu được bù bằng cách ĐẨY các phụ cấp không chịu thuế lên, rồi thưởng bán hàng + tăng ca, sao cho thu nhập chịu thuế mỗi người dưới giảm trừ bản thân (11tr x 12 = 132tr/năm) — không phát sinh thuế TNCN lũy tiến"><input type="checkbox" id="blKhFull"> <b>Làm full ngày công</b></label>
+      <label title="Mọi người có tick “Đóng BHXH” trong Danh Sách Nhân Viên và đang làm việc trong tháng (theo Tháng/Năm vào làm, nghỉ việc) LUÔN có trong bảng lương tháng đó. Mục tiêu từng tháng chia theo lương của số người đang làm tháng đó. Bỏ tick: phần mềm chỉ lấy đủ số người cần cho tới khi đạt mục tiêu (người còn lại không lên bảng lương)." style="margin-left:14px"><input type="checkbox" id="blKhDuBh" checked> <b>Luôn đưa đủ người có BHXH</b></label>
       <button class="btn gold sm" onclick="blTinhKeHoach()">Tính</button>
       <button class="btn ghost sm" onclick="document.getElementById('blKeHoach').style.display='none'">Đóng</button>
     </div>
@@ -6063,7 +6064,7 @@ async function blTinhKeHoach(){
   const fc=document.getElementById('blKhFull');
   const ngoai=0;      // áp dụng sẽ xóa dữ liệu cũ của cả năm nên không trừ các tháng đã có
   try{
-    const kq=await api(`/api/bang-luong/${current}/ke-hoach`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,tu_thang:tu,den_thang:den,muc_tieu:g('blKhTien'),ty_le_tang_ca:g('blKhTc'),tham_so:blTS,da_co_ngoai:ngoai,full_cong:!!(fc&&fc.checked),ck_theo_thang:ckThang,ck_toi_da:g('blKhCkMax'),tran_pc:{tien_com:g('blKhTranCom'),trang_phuc:g('blKhTranTp'),muc_dt:g('blKhTranDt'),muc_xang:g('blKhTranXx')}})});
+    const kq=await api(`/api/bang-luong/${current}/ke-hoach`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nam:blNam,tu_thang:tu,den_thang:den,muc_tieu:g('blKhTien'),ty_le_tang_ca:g('blKhTc'),tham_so:blTS,da_co_ngoai:ngoai,full_cong:!!(fc&&fc.checked),du_bhxh:!!(document.getElementById('blKhDuBh')&&document.getElementById('blKhDuBh').checked),ck_theo_thang:ckThang,ck_toi_da:g('blKhCkMax'),tran_pc:{tien_com:g('blKhTranCom'),trang_phuc:g('blKhTranTp'),muc_dt:g('blKhTranDt'),muc_xang:g('blKhTranXx')}})});
     blKh=kq;blVeKeHoach();
   }catch(e){document.getElementById('blKhKq').innerHTML=`<div style="color:#b91c1c;font-weight:600">⚠ ${xkEsc(e.message)}</div>`;blKh=null}
 }

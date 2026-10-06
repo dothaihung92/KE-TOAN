@@ -1000,3 +1000,11 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
 
   console.log('\nALL DONE');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// Kế hoạch chi phí lương: ô "Luôn đưa đủ người có BHXH" (mặc định tick) và gửi du_bhxh lên server
+{
+  const fs2 = require('fs'), path2 = require('path'), assert2 = require('assert');
+  const h2 = fs2.readFileSync(path2.join(__dirname, '..', 'static', 'index.html'), 'utf8');
+  assert2(h2.includes('<input type="checkbox" id="blKhDuBh" checked>') && h2.includes("du_bhxh:!!(document.getElementById('blKhDuBh')"), 'ô Luôn đưa đủ người có BHXH + gửi du_bhxh');
+  console.log('PASS: ô "Luôn đưa đủ người có BHXH" trong kế hoạch chi phí lương.');
+}
