@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-06.135"
+APP_BUILD = "2026-10-06.136"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10461,7 +10461,7 @@ def _luong_npt_doc(d):
         nld = str(g(r, "ho va ten nguoi lao dong", "nguoi lao dong") or "").strip()
         if not ten or not (ma or nld):
             continue
-        tu, den = _luong_thang_nghi_viec(g(r, "tu thang")), _luong_thang_nghi_viec(g(r, "den thang"))
+        tu, den = _luong_thang_doc(g(r, "tu thang")), _luong_thang_doc(g(r, "den thang"))
         kq.append({"ma": ma, "nld": nld, "ten": ten, "ngay_sinh": g(r, "ngay sinh"), "cccd": str(g(r, "cccd/so dinh danh", "cccd") or "").strip().replace(" ", ""),
                    "quan_he": str(g(r, "quan he") or "").strip(), "tu": tu, "den": den})
     return kq
@@ -10699,10 +10699,24 @@ def _luong_doc_ngay_thang(v, nam_min=1990):
     return (y, m, d)
 
 
-def _luong_thang_nghi_viec(v):
-    """'Tháng/Năm nghỉ việc' = THÁNG CUỐI CÙNG còn làm việc (còn lên bảng lương tháng đó, từ tháng sau không còn). Trống/không đọc được -> None."""
+def _luong_thang_doc(v):
+    """Ô tháng/năm (vd người phụ thuộc: Từ tháng / Đến tháng) -> (năm, tháng) đúng như ghi. Trống/không đọc được -> None."""
     kq = _luong_doc_ngay_thang(v)
     return (kq[0], kq[1]) if kq else None
+
+
+def _luong_thang_nghi_viec(v):
+    """'Tháng/Năm nghỉ việc' -> THÁNG CUỐI CÙNG còn làm việc (còn lên bảng lương tháng đó, từ tháng sau không còn). Trống/không đọc được -> None.
+    Chỉ ghi THÁNG/NĂM (vd 11/2025) = nghỉ từ tháng đó -> tháng 11 KHÔNG còn trên bảng lương, tháng cuối là 10/2025 (trước đây vẫn tính cả tháng 11).
+    Ghi RÕ ngày: ngày 01 -> nghỉ từ đầu tháng (tháng cuối là tháng trước); ngày khác -> còn làm một phần tháng đó (BHXH theo quy tắc 14 ngày)."""
+    kq = _luong_doc_ngay_thang(v)
+    if not kq:
+        return None
+    y, m = kq[0], kq[1]
+    d = _luong_ngay_cu_the(v)
+    if d is None or d == 1:
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    return (y, m)
 
 
 def _luong_ngay_cu_the(v):
@@ -10748,7 +10762,7 @@ def _luong_dong_bh_tu_nv(tick, vao_lam, nam=None, thang=None, nghi_viec=None):
             return 0
         if cur == nghi:
             d = _luong_ngay_cu_the(nghi_viec)
-            if d is not None and d < _LUONG_NGAY_DONG_BHXH:
+            if d is not None and 1 < d < _LUONG_NGAY_DONG_BHXH:      # ngày 01 = nghỉ từ đầu tháng sau tháng cuối (đã lùi 1 tháng): tháng cuối làm đủ
                 return 0
     return 1
 
@@ -13372,7 +13386,7 @@ def _vb_loc_theo_nam(ds, nam, loai="hd"):
         if tv:          # thử việc: xét theo ngày bắt đầu thử việc (vd thử việc 15/12/2025, vào làm chính thức 15/01/2026 -> thuộc năm 2025)
             if not (dau <= tv <= cuoi):
                 continue
-        elif (vl and vl > cuoi) or (nghi and nghi < dau):
+        elif (vl and vl > cuoi) or (nghi and nghi <= dau):        # nghỉ việc 01/2026 (= nghỉ từ đầu năm 2026): không còn làm năm 2026
             continue
         kq.append(n)
     return kq

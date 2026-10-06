@@ -27,9 +27,10 @@ th, tom, ds = chay(640_000_000, False)
 assert tong(th) == 640_000_000 and not any({'9', '10', '11'} & ds[t] for t in ds)
 # 2) bắt buộc: mọi người có BHXH đang làm đều có mặt đúng tháng (9, 10 tới hết T5? — nghỉ việc 01/05/2025: còn tháng 5 nhưng hết BHXH; 11 từ T3)
 th, tom, ds = chay(782_614_653, True)
-for t in ("01", "02", "03"):
+for t in ("01", "02"):
     assert {'1', '2', '3', '4', '5', '6', '7', '8', '9', '10'} <= ds[t], (t, ds[t])
-assert {'1', '2', '3', '4', '5', '6', '7', '9', '10', '11'} <= ds["04"], "T4: mã 8 nghỉ từ 01/04 (hết BHXH) nên không bị ép"
+assert {'1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'} <= ds["03"]
+assert {'1', '2', '3', '4', '5', '6', '7', '9', '10', '11'} <= ds["04"] and '8' not in ds["04"], "T4: mã 8 nghỉ từ 01/04 -> không còn trên bảng lương"
 assert '11' not in ds["01"] and '11' not in ds["02"] and '11' in ds["03"] and all('11' in ds[t] for t in ds if t >= "03")
 for t in ("06", "12"):
     assert ds[t] == {'1', '2', '3', '4', '6', '7', '11'}, (t, ds[t])      # chỉ người còn làm việc (5, 8, 9, 10 đã nghỉ)

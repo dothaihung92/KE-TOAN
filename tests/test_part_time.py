@@ -124,7 +124,7 @@ assert v.dung_hop_dong_part_time_nhieu(nv[1:], CTY, tc, nam=2026).count('<sectio
 # THÁNG LÀM của người part-time theo Danh Sách NV: từ "Tháng/Năm vào làm" đến "Tháng/Năm nghỉ việc"; trống = như người thường
 ptr = [R(**{'Mã NV': '9', 'Họ và tên': 'PT', 'Part-time': 'x', 'Lương theo giờ': 26000, 'Tháng/Năm vào làm': '03/2026', 'Tháng/Năm nghỉ việc': '08/2026', 'Chức vụ': 'Bảo vệ'})]
 co = [t for t in range(1, 13) if server._luong_dong_tu_nhan_vien(H, ptr, 0, 2026, t)]
-assert co == [3, 4, 5, 6, 7, 8], co
+assert co == [3, 4, 5, 6, 7], co      # nghỉ việc 08/2026 = nghỉ từ tháng 8
 assert all(server._luong_dong_tu_nhan_vien(H, ptr, 0, 2026, t)[0]["part_time"] == 1 for t in co)
 assert not server._luong_dong_tu_nhan_vien(H, ptr, 0, 2025, 12) and not server._luong_dong_tu_nhan_vien(H, ptr, 0, 2027, 1)
 ptr2 = [R(**{'Mã NV': '9', 'Họ và tên': 'PT', 'Part-time': 'x', 'Lương theo giờ': 26000})]
@@ -140,7 +140,7 @@ class Req:
 kq = asyncio.run(server.bang_luong_ke_hoach(7, Req({"nam": 2026, "tu_thang": 1, "den_thang": 12, "muc_tieu": 120000000, "seed": 1})))
 for t, rs in kq["thang"].items():
     ten_pt = [r for r in rs if r.get("part_time")]
-    assert bool(ten_pt) == (3 <= int(t) <= 8), (t, len(ten_pt))
+    assert bool(ten_pt) == (3 <= int(t) <= 7), (t, len(ten_pt))
     assert all(r["gio_lam"] == "" and r["chi_phi_luong"] == 0 for r in ten_pt), "giờ làm để trống, không tự đặt"
 assert any("part-time" in c.lower() for c in kq["tom_tat"]["canh_bao"])
 # đối chiếu theo NĂM LẬP của văn bản (không theo ngày hôm nay): hợp đồng năm 2025 dùng lương tối thiểu 2025 (4.960.000), không báo lỗi lương 5.100.000

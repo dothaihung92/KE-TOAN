@@ -69,16 +69,16 @@ assert r["Chức vụ"] == "Kinh doanh" and r["Lương Cơ bản"] == 5_310_000 
 assert 900_000 not in kq["rows"][0], "Phụ cấp chức vụ của file nguồn không được đưa vào bất kỳ cột nào"
 print("PASS 4: import Danh Sách Nhân Viên bỏ cột phụ cấp chức vụ, không nhầm sang cột Chức vụ.")
 
-# 5: cột "Tháng/Năm nghỉ việc": nghỉ tháng M -> còn lên bảng lương tới hết tháng M, từ tháng M+1 không còn; trống = còn làm
+# 5: cột "Tháng/Năm nghỉ việc": chỉ ghi tháng M (06/2025) = nghỉ TỪ tháng M -> còn lên bảng lương tới hết tháng M-1; ghi rõ ngày giữa tháng (15/03) -> còn tháng đó; trống = còn làm
 hd = ["Mã NV", "Họ và tên", "Tháng/Năm nghỉ việc", "Lương Cơ bản"]
 nv = [["1", "Còn làm", "", 5_000_000], ["2", "Nghỉ 6/2025", "06/2025", 5_000_000], ["3", "Nghỉ ngày đầy đủ", "15/03/2025", 5_000_000], ["4", "Nghỉ 12/2024", "2024-12", 5_000_000]]
 ten = lambda nam, thang: [r["ten"] for r in server._luong_dong_tu_nhan_vien(hd, nv, 0, nam, thang)]
 assert ten(2025, 3) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ"], "Tháng nghỉ việc vẫn còn trên bảng lương"
 assert ten(2025, 4) == ["Còn làm", "Nghỉ 6/2025"]
-assert ten(2025, 6) == ["Còn làm", "Nghỉ 6/2025"] and ten(2025, 7) == ["Còn làm"]
-assert ten(2025, 1) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ"] and ten(2024, 12) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ", "Nghỉ 12/2024"]
+assert ten(2025, 5) == ["Còn làm", "Nghỉ 6/2025"] and ten(2025, 6) == ["Còn làm"] and ten(2025, 7) == ["Còn làm"]
+assert ten(2025, 1) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ"] and ten(2024, 11) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ", "Nghỉ 12/2024"] and ten(2024, 12) == ["Còn làm", "Nghỉ 6/2025", "Nghỉ ngày đầy đủ"]
 assert len(server._luong_dong_tu_nhan_vien(hd, nv)) == 4, "Không có tháng -> lấy đủ (không lọc)"
-assert server._luong_thang_nghi_viec("06/2025") == (2025, 6) and server._luong_thang_nghi_viec("") is None and server._luong_thang_nghi_viec("abc") is None
+assert server._luong_thang_nghi_viec("06/2025") == (2025, 5) and server._luong_thang_nghi_viec("01/2025") == (2024, 12) and server._luong_thang_nghi_viec("15/06/2025") == (2025, 6) and server._luong_thang_nghi_viec("01/06/2025") == (2025, 5) and server._luong_thang_nghi_viec("") is None and server._luong_thang_nghi_viec("abc") is None
 # vào làm vẫn theo quy tắc cũ (sau ngày 18 -> tháng sau)
 assert server._luong_bat_dau_bhxh("20/03/2025") == (2025, 4) and server._luong_bat_dau_bhxh("10/2024") == (2024, 10)
 # kế hoạch chi phí cả năm: người đã nghỉ không được chọn ở các tháng sau khi nghỉ
@@ -111,21 +111,22 @@ def bh(tick, vao, nghi, nam, thang):
     r = server._luong_dong_tu_nhan_vien(hd7, [["1", "A", vao, tick, nghi, 5_310_000]], 0, nam, thang)
     return r[0]["dong_bh"] if r else None          # None = không lên bảng lương tháng đó
 assert [bh("x", "12/2024", "06/2025", 2024, m_) for m_ in (11, 12)] == [0, 1], "Trước tháng tham gia: chưa đóng; từ tháng vào làm: đóng"
-assert [bh("x", "12/2024", "06/2025", 2025, m_) for m_ in (1, 6, 7, 8)] == [1, 1, None, None], "Đóng hết tháng nghỉ việc; sau đó không còn trên bảng lương"
+assert [bh("x", "12/2024", "06/2025", 2025, m_) for m_ in (1, 5, 6, 7)] == [1, 1, None, None], "Ghi 06/2025 = nghỉ từ tháng 6: đóng tới hết tháng 5; từ tháng 6 không còn trên bảng lương"
 assert bh("", "12/2024", "", 2025, 5) == 0 and bh("x", "12/2024", "", 2026, 3) == 1, "Không tick thì không đóng; không có ngày nghỉ = còn đóng"
 assert bh("x", "", "", 2025, 1) == 1, "Không có ngày vào làm = đóng từ đầu"
 # nghỉ việc ghi rõ ngày: < 14 ngày làm trong tháng nghỉ -> tháng nghỉ không đóng; >= 14 thì đóng
 assert bh("x", "12/2024", "10/06/2025", 2025, 5) == 1 and bh("x", "12/2024", "10/06/2025", 2025, 6) == 0 and bh("x", "12/2024", "10/06/2025", 2025, 7) is None
 assert bh("x", "12/2024", "20/06/2025", 2025, 6) == 1 and bh("x", "12/2024", "14/06/2025", 2025, 6) == 1 and bh("x", "12/2024", "13/06/2025", 2025, 6) == 0
-assert bh("x", "12/2024", "06/2025", 2025, 6) == 1, "Chỉ ghi tháng/năm -> tính đủ tháng nghỉ"
+assert bh("x", "12/2024", "06/2025", 2025, 5) == 1 and bh("x", "12/2024", "06/2025", 2025, 6) is None, "Chỉ ghi tháng/năm -> nghỉ từ tháng đó, tháng trước đóng đủ"
+assert bh("x", "12/2024", "01/06/2025", 2025, 5) == 1 and bh("x", "12/2024", "01/06/2025", 2025, 6) is None, "Nghỉ ngày 01: như nghỉ từ đầu tháng"
 assert server._luong_ngay_cu_the("06/2025") is None and server._luong_ngay_cu_the("20/06/2025") == 20 and server._luong_ngay_cu_the("2025-06-09") == 9
 # vào làm sau ngày 18 vẫn tính từ tháng sau (quy tắc cũ), kết hợp nghỉ việc
-assert [bh("x", "20/03/2025", "05/2025", 2025, m_) for m_ in (3, 4, 5, 6)] == [0, 1, 1, None]
+assert [bh("x", "20/03/2025", "05/2025", 2025, m_) for m_ in (3, 4, 5, 6)] == [0, 1, None, None]
 # danh sách người đã nghỉ + API
 hd8 = ["Mã NV", "Họ và tên", "Tháng/Năm nghỉ việc"]
 nv8 = [["1", "A", ""], ["2", "B", "06/2025"], ["3", "C", "2025-08-15"]]
 assert [x["ten"] for x in server._luong_nv_da_nghi(hd8, nv8, 2025, 7)] == ["B"] and [x["ten"] for x in server._luong_nv_da_nghi(hd8, nv8, 2025, 9)] == ["B", "C"]
-assert server._luong_nv_da_nghi(hd8, nv8, 2025, 6) == [] and server._luong_nv_da_nghi(["Mã NV", "Họ và tên"], nv8, 2025, 9) == []
+assert [x["ten"] for x in server._luong_nv_da_nghi(hd8, nv8, 2025, 6)] == ["B"] and server._luong_nv_da_nghi(hd8, nv8, 2025, 5) == [] and server._luong_nv_da_nghi(["Mã NV", "Họ và tên"], nv8, 2025, 9) == []
 server.nhap_lieu_get = lambda cid, loai="nv": {"header": hd7, "rows": [["1", "A", "12/2024", "x", "06/2025", 5_310_000], ["2", "B", "12/2024", "x", "", 5_310_000]]}
 kq = server.bang_luong_tu_nhan_vien(1, 2025, 8)
 assert [r["ten"] for r in kq["rows"]] == ["B"] and kq["da_nghi"] == [{"ma": "1", "ten": "A"}] and kq["rows"][0]["dong_bh"] == 1
@@ -148,3 +149,11 @@ assert any(r["ten"] == "Dài hạn" and r["dong_bh"] == 1 for rows in th.values(
 print("PASS 7: BHXH theo thời gian tham gia: tick + vào làm + nghỉ việc (kể cả ngày nghỉ < 14), nạp/kế hoạch đúng theo tháng.")
 
 print("\nALL DONE")
+
+# Ca thật: Danh Sách NV ghi "Tháng/Năm nghỉ việc" 11/2025 (Huỳnh Văn Vinh, Vũ Hồng Anh, Lưu Văn Thoại) -> KHÔNG còn trên bảng lương tháng 11/2025 (còn đủ tháng 10)
+hd9 = ["Mã NV", "Họ và tên", "Tháng/Năm vào làm", "Đóng BHXH", "Tháng/Năm nghỉ việc", "Lương Cơ bản"]
+nv9 = [["5", "Huỳnh Văn Vinh", "01/01/2025", "x", "11/2025", 5_100_000], ["6", "Lâm Thái Huy", "01/01/2025", "x", "", 5_100_000]]
+t9 = lambda m: [(r["ten"], r["dong_bh"]) for r in server._luong_dong_tu_nhan_vien(hd9, nv9, 0, 2025, m)]
+assert t9(10) == [("Huỳnh Văn Vinh", 1), ("Lâm Thái Huy", 1)] and t9(11) == [("Lâm Thái Huy", 1)] and t9(12) == [("Lâm Thái Huy", 1)]
+assert [x["ten"] for x in server._luong_nv_da_nghi(hd9, nv9, 2025, 11)] == ["Huỳnh Văn Vinh"], "Nạp từ Danh Sách NV tháng 11 gỡ người nghỉ 11/2025"
+print("PASS: nghỉ việc 11/2025 không còn trên bảng lương tháng 11")

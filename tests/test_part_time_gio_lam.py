@@ -18,7 +18,7 @@ server.DOWNLOAD_DIR = tempfile.mkdtemp()
 server._copy_ra_desktop = lambda p, f: None
 
 ds = server._pt_nguoi_trong_nam(7, 2026)
-assert sorted(e["ten"] for e in ds.values()) == ["Lê Bán Thời", "Phạm Giờ Giấc"] and ds["p1"]["thang"] == [3, 4, 5, 6, 7, 8] and ds["p2"]["thang"] == list(range(1, 13))
+assert sorted(e["ten"] for e in ds.values()) == ["Lê Bán Thời", "Phạm Giờ Giấc"] and ds["p1"]["thang"] == [3, 4, 5, 6, 7] and ds["p2"]["thang"] == list(range(1, 13))
 
 # mẫu: chỉ người part-time, ô ngoài khoảng làm việc tô xám
 resp = server.bang_luong_mau_gio_lam(7, 2026)
@@ -30,7 +30,7 @@ assert set(nguoi) == {"P1", "P2"}
 CT = lambda m: 3 + m           # cột của tháng m
 assert ws.cell(nguoi["P1"], CT(1)).fill.fgColor.rgb.endswith("DDDDDD") and not ws.cell(nguoi["P1"], CT(3)).fill.fgColor.rgb.endswith("DDDDDD")
 w2 = wb["Giờ theo ngày"]
-assert sum(1 for r in range(2, 40) if w2.cell(r, 1).value == "P1") == 6 and sum(1 for r in range(2, 40) if w2.cell(r, 1).value == "P2") == 12
+assert sum(1 for r in range(2, 40) if w2.cell(r, 1).value == "P1") == 5 and sum(1 for r in range(2, 40) if w2.cell(r, 1).value == "P2") == 12
 
 def import_(wb2):
     b = io.BytesIO(); wb2.save(b)
