@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-06.136"
+APP_BUILD = "2026-10-08.137"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -42357,7 +42357,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             ds = _to_num(r["tgtcthue"]) or 0
             thue = _to_num(r["tgtthue"]) or 0
             # HKD: nếu tgtcthue=0 nhưng tgtttbso>0 -> lấy thành tiền (tổng thanh toán)
-            if not ds:
+            if not ds and not thue:          # (có tiền thuế mà Tổng chưa thuế = 0: hóa đơn điều chỉnh thuế — KHÔNG lấy tổng thanh toán làm doanh số)
                 ds = _to_num(r["tgtttbso"]) or 0
         # mặt hàng đầu tiên + thuế suất (loại dòng "Tổng tiền phí" ra khỏi
         # phần gộp này vì nó đã được ghi thành 1 dòng riêng ở dưới)
@@ -43270,6 +43270,12 @@ def _parse_detail_json(detail):
                   "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
                   "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso}
         rows.append(_dong_phi_hoa_don(tong_phi, common))
+    _ls = detail.get("thttltsuat") or []
+    _lts = [(str(l.get("tsuat") or l.get("ltsuat") or ""), l.get("thtien"), l.get("tthue")) for l in _ls if isinstance(l, dict)] if isinstance(_ls, list) else []
+    rows = _dong_tu_tong_hop_thue_suat(rows, _lts, {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon, "ngay": ngay, "ten_nban": ten_nban,
+                                                    "mst_nban": mst_nban, "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
+                                                    "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso, "dvtte": dvtte or "VND",
+                                                    "tygia": tygia, "thtien_nt": None}, tygia)
     return rows
 
 
@@ -43313,7 +43319,10 @@ def _summary_from_detail_json(detail):
     # phần đó, đồng thời MẤT LUÔN tiền thuế phần bị gộp nhầm (ct29 không có
     # cột thuế). Chỉ dùng "thttltsuat" khi hóa đơn KHÔNG có dòng hàng chi
     # tiết nào (trường hợp hiếm, TCT chỉ trả tổng hợp).
-    if items:
+    _ls_j = detail.get("thttltsuat") or detail.get("hdhhdvu_ltsuat") or []
+    _chi_dien_giai_j = bool(items) and isinstance(_ls_j, list) and bool(_ls_j) and all(
+        not _to_num(it.get("thtien")) and not _to_num(it.get("tthue")) and not _to_num(it.get("tongtien_thue")) for it in items)
+    if items and not _chi_dien_giai_j:
         # Dòng CHIẾT KHẤU THƯƠNG MẠI riêng (thành tiền/thuế ghi DƯƠNG) phải TRỪ — xem _dong_ck_tm_rieng
         _la_ck_j = [_dong_ck_tm_rieng(it.get("tchat"), it.get("ten") or it.get("thhdvu"), it.get("thtien"),
                                       it.get("stckhau"), it.get("sluong"), it.get("dgia")) for it in items]
@@ -43540,6 +43549,42 @@ def _nhom_hoa_don_theo_thue_suat(items):
     return theo_ts
 
 
+def _chi_co_dong_dien_giai(rows):
+    """Mọi dòng hàng (trừ dòng phí) đều KHÔNG có thành tiền / tiền thuế (vd hóa đơn điều chỉnh chỉ ghi 1 dòng diễn giải TChat=4
+    "Điều chỉnh thuế GTGT ... từ 10% thành 8%", số tiền chỉ nằm ở khối tổng hợp THTTLTSuat)."""
+    def co_so(v):
+        n = _to_num(v)
+        return isinstance(n, (int, float)) and bool(n)
+    hh = [r for r in rows if not r.get("_la_phi")]
+    return bool(hh) and not any(co_so(r.get("thtien")) or co_so(r.get("tien_thue")) for r in hh)
+
+
+def _dong_tu_tong_hop_thue_suat(rows, lts, common, tygia=None):
+    """Hóa đơn mà dòng hàng chỉ là diễn giải (xem _chi_co_dong_dien_giai): thêm dòng hàng lấy từ khối tổng hợp theo thuế suất của hóa đơn
+    [(tsuat, thtien, tthue)] để "Chi tiết", "BK" và tờ khai ghi nhận đúng (vd HĐ C26TVN 279: Thành tiền 0, thuế 8% -48.112 đ). Trước đây hóa đơn
+    này KHÔNG có dòng nào ở Chi tiết, còn BK lấy nhầm Tổng tiền thanh toán (-48.112) làm Doanh số chưa thuế."""
+    if not _chi_co_dong_dien_giai(rows):
+        return rows
+    ten = next((str(r.get("ten_hang") or "").strip() for r in rows if not r.get("_la_phi") and str(r.get("ten_hang") or "").strip()), "")
+    them = []
+    for ts, tt, th in lts:
+        tt_n, th_n = _to_num(tt), _to_num(th)
+        tt_n = tt_n if isinstance(tt_n, (int, float)) else 0
+        th_n = th_n if isinstance(th_n, (int, float)) else 0
+        if not tt_n and not th_n:
+            continue
+        if tygia:
+            tt_n, th_n = tt_n * tygia, th_n * tygia
+        d = dict(common)
+        d.update({"stt": "", "tchat": "1", "ma_vt": "", "ten_hang": ten or "Điều chỉnh (theo tổng hợp thuế suất của hóa đơn)", "dvt": "",
+                  "sluong": "", "dgia": "", "thtien": tt_n, "stckhau": "", "tsuat": ts or "", "tien_thue": th_n, "_tu_tong_hop": True})
+        them.append(d)
+    if not them:
+        return rows
+    # bỏ dòng diễn giải thuần (đã đưa nội dung vào tên dòng mới), giữ dòng phí
+    return [r for r in rows if r.get("_la_phi") or str(r.get("tchat") or "") != "4"] + them
+
+
 def _parse_xml_invoice(xml_bytes):
     """
     Đọc 1 hóa đơn (XML thuần hoặc file invoice.zip), trả về list các dòng mặt hàng.
@@ -43651,6 +43696,11 @@ def _parse_xml_invoice(xml_bytes):
                   "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
                   "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso}
         rows.append(_dong_phi_hoa_don(tong_phi, common))
+    _lts = [(find_text(l, "TSuat"), find_text(l, "ThTien"), find_text(l, "TThue")) for l in root.findall(".//THTTLTSuat/LTSuat")]
+    rows = _dong_tu_tong_hop_thue_suat(rows, _lts, {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon, "ngay": ngay, "ten_nban": ten_nban,
+                                                    "mst_nban": mst_nban, "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
+                                                    "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso, "dvtte": dvtte or "VND",
+                                                    "tygia": tygia, "thtien_nt": None}, tygia)
     return rows
 
 
@@ -43720,7 +43770,11 @@ def _parse_invoice_summary(xml_bytes):
     # tiêu [29] (0%) SAI THỪA còn [32]/[33] (10%) THIẾU đúng phần đó, đồng
     # thời MẤT LUÔN tiền thuế phần bị gộp nhầm (ct29 không có cột thuế). Chỉ
     # dùng "THTTLTSuat" khi hóa đơn KHÔNG có dòng hàng chi tiết nào.
-    if dshh is not None and dshh.findall("HHDVu"):
+    _chi_dien_giai_x = dshh is not None and bool(dshh.findall("HHDVu")) and all(
+        not _to_num(ft(h, "ThTien")) and not _to_num(next((t.findtext("DLieu") for t in h.findall(".//TTKhac/TTin")
+                                                           if (t.findtext("TTruong") or "").strip() in ("TongTien_Thue", "VATAmount")), "") or "")
+        for h in dshh.findall("HHDVu")) and root.findall(".//THTTLTSuat/LTSuat")
+    if dshh is not None and dshh.findall("HHDVu") and not _chi_dien_giai_x:
         # Dòng CHIẾT KHẤU THƯƠNG MẠI riêng (thành tiền/thuế ghi DƯƠNG) phải TRỪ — xem _dong_ck_tm_rieng
         _hh_x = dshh.findall("HHDVu")
         _la_ck_x = [_dong_ck_tm_rieng(ft(h, "TChat"), ft(h, "THHDVu"), ft(h, "ThTien"),
