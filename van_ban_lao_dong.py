@@ -245,7 +245,7 @@ def mac_dinh_tuy_chon(cty, hom_nay=None):
         "ong_ba_ky": "",
         "dien_thoai": "",
         # hợp đồng
-        "loai_hd": "xdth", "so_thang": 12, "bat_dau": "", "ngay_ky": "", "so_bat_dau": 1,
+        "loai_hd": "kxdth", "so_thang": 12, "bat_dau": "", "ngay_ky": "", "so_bat_dau": 1,
         "mau_so": "{so:02d}/HĐLĐ-{nam}", "dia_diem": (cty.get("dia_chi") or "").strip(), "bo_phan": "", "cong_viec": "",
         "thoi_gio": "08 giờ/ngày, 06 ngày/tuần (nghỉ Chủ nhật), tổng cộng không quá 48 giờ/tuần",
         "hinh_thuc_tra": "chuyển khoản", "ngay_tra": 5, "ghi_phu_cap": False, "quoc_tich": "Việt Nam",
@@ -2000,7 +2000,14 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
                or ngay_date(nv.get("vao_lam")))
     ngay_ky = ngay_date(tc.get("ngay_ky")) or bat_dau or ngay_date(tc.get("ngay"), hom_nay)
     bat_dau = bat_dau or ngay_ky
-    loai_ten, cuoi, thang, bao_truoc = _thoi_han_hd(tc, nv, bat_dau)
+    # HỢP ĐỒNG LAO ĐỘNG DƯỚI 01 THÁNG: từ ngày bắt đầu đến ngày trước tròn 01 tháng 1 ngày (vd 01/01 -> 30/01; 01/02 -> 27/02), báo trước 03 ngày làm việc
+    cuoi = None
+    if bat_dau:
+        import calendar as _cal
+        y_, m_ = bat_dau.year + bat_dau.month // 12, bat_dau.month % 12 + 1
+        mot_thang = datetime.date(y_, m_, min(bat_dau.day, _cal.monthrange(y_, m_)[1]))
+        cuoi = mot_thang - datetime.timedelta(days=2)
+    bao_truoc = "03 ngày làm việc"
     nam_so = ngay_ky.year if ngay_ky else hom_nay.year
     try:
         so_hd = str(tc.get("pt_mau_so") or "{so:02d}/HĐPT-{nam}").format(so=int(tc.get("so_bat_dau") or 1) + so_thu_tu, nam=nam_so)
@@ -2015,8 +2022,8 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     ng = nguong_part_time(ngay_ky.year if ngay_ky else nam, tc)
     khong_bh = luong_dk is None or luong_dk < ng - 1e-9          # chỉ ghi "không thuộc đối tượng BHXH" khi lương tháng dự kiến DƯỚI ngưỡng (thiếu dữ liệu: vẫn ghi theo mẫu, màn hình cảnh báo)
     h = ['<section class="vb-trang">', _tieu_ngu(cty, so_hd, tc.get("dia_danh"), ngay_ky),
-         _p("&nbsp;"), _p("<b>HỢP ĐỒNG LAO ĐỘNG</b>", "c b"), _p("<b>(LÀM VIỆC KHÔNG TRỌN THỜI GIAN)</b>", "c b"),
-         _p("Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20/11/2019 (trong đó có Điều 32 về người lao động làm việc không trọn thời gian), Nghị định số 145/2020/NĐ-CP ngày 14/12/2020 "
+         _p("&nbsp;"), _p("<b>HỢP ĐỒNG LAO ĐỘNG DƯỚI 01 THÁNG</b>", "c b"),
+         _p("Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20/11/2019, Nghị định số 145/2020/NĐ-CP ngày 14/12/2020 "
             "của Chính phủ và Luật Bảo hiểm xã hội số 41/2024/QH15;", "j ti"),
          _p("Hôm nay, " + esc(ngay_chu(ngay_ky)) + f", tại {esc(tc.get('dia_diem') or cty.get('dia_chi') or '..........')}, chúng tôi gồm:", "j ti"),
          _p("<b>Người sử dụng lao động</b> (sau đây gọi là Công ty):"),
@@ -2033,13 +2040,14 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     cccd = nv.get("cccd")
     noi_cap = tc.get("noi_cap_cccd") if (cccd and len(re.sub(r"\D", "", cccd)) == 12) else "........................"
     h.append(_p(f"Số CCCD/CMND: {esc(cccd or '............')}, cấp ngày: {esc(nv.get('ngay_cap') or '..../..../........')}, nơi cấp: {esc(noi_cap)}", "l1"))
-    h.append(_p("Hai bên thỏa thuận ký kết hợp đồng lao động làm việc không trọn thời gian và cam kết thực hiện đúng những điều khoản sau đây:", "j ti"))
+    h.append(_p("Hai bên thỏa thuận ký kết hợp đồng lao động có thời hạn dưới 01 tháng và cam kết thực hiện đúng những điều khoản sau đây:", "j ti"))
 
     # Điều 1
     cv = (tc.get("cong_viec") or "").strip() or f"Thực hiện các nhiệm vụ của chức danh {nv.get('chuc_vu') or '.........'} theo phân công, hướng dẫn của Người sử dụng lao động"
     co_bp = bool((tc.get("bo_phan") or "").strip())
-    h.append(_p("<b>Điều 1. Chức danh và công việc phải làm</b>"))
-    n1 = 0
+    h.append(_p("<b>Điều 1. Thời hạn hợp đồng, chức danh và công việc phải làm</b>"))
+    h.append(_p("1. Thời hạn hợp đồng: <b>dưới 01 tháng</b>" + (f", từ {esc(ngay_chu(bat_dau))} đến hết {esc(ngay_chu(cuoi))}" if bat_dau and cuoi else ", từ ngày ..../..../........ đến ngày ..../..../........") + ".", "j"))
+    n1 = 1
     if co_bp:
         n1 += 1
         h.append(_p(f"{n1}. Bộ phận làm việc: {esc(tc['bo_phan'])}.", "j"))
@@ -2088,8 +2096,8 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     # Điều 4 — BHXH
     h.append(_p("<b>Điều 4. Bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp và thuế thu nhập cá nhân</b>"))
     if khong_bh:
-        h.append(_p("1. Do thời giờ làm việc và mức tiền lương tháng không đạt mức tối thiểu làm căn cứ đóng bảo hiểm xã hội bắt buộc theo quy định của Luật Bảo hiểm xã hội, "
-                    "Người lao động không thuộc đối tượng tham gia bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp bắt buộc.", "j"))
+        h.append(_p("1. Hợp đồng lao động có thời hạn dưới 01 tháng, thời giờ làm việc và mức tiền lương tháng không đạt mức tối thiểu làm căn cứ đóng bảo hiểm xã hội bắt buộc theo quy định của "
+                    "Luật Bảo hiểm xã hội, nên Người lao động không thuộc đối tượng tham gia bảo hiểm xã hội, bảo hiểm y tế, bảo hiểm thất nghiệp bắt buộc.", "j"))
         h.append(_p(f"2. Tháng nào tiền lương thực nhận của Người lao động đạt từ {so_tien(ng)} đồng/tháng trở lên (hoặc khi pháp luật có quy định khác) thì hai bên thực hiện tham gia bảo hiểm xã hội, "
                     "bảo hiểm y tế, bảo hiểm thất nghiệp bắt buộc theo quy định của pháp luật kể từ tháng đó.", "j"))
     else:

@@ -46,6 +46,7 @@ assert vbld.lich_su_luong_hop_dong(H, [r for r in ROWS if '-' not in str(r[H.ind
 print("PASS 1: lịch sử lương theo mã phiên bản")
 
 # --- API: hợp đồng + phụ lục
+# (hợp đồng 12 tháng của năm 2022 đã hết hạn -> năm 2025 lập hợp đồng mới; mặc định nay là Không xác định thời hạn nên ghi rõ loại ở đây)
 conn = sqlite3.connect(":memory:", check_same_thread=False); conn.row_factory = sqlite3.Row
 conn.execute("CREATE TABLE companies (id INTEGER, ten TEXT, mst TEXT, dia_chi TEXT, nguoi_ky TEXT)")
 conn.execute("INSERT INTO companies VALUES (7, 'CÔNG TY TNHH THỬ', '0300000001', '1 Lê Lợi, Quận 1, Thành phố Hồ Chí Minh', 'Dương Thị Hiền')")
@@ -63,7 +64,7 @@ server.DOWNLOAD_DIR = tempfile.mkdtemp()
 class Req:
     def __init__(self, b): self.b = b
     async def json(self): return self.b
-r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tuy_chon": {"nguoi_ky": "Dương Thị Hiền"}})))
+r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tuy_chon": {"loai_hd": "xdth", "nguoi_ky": "Dương Thị Hiền"}})))
 h = r["html"]
 assert r["so_van_ban"] == 5 and r["so_phu_luc"] == 2, (r["so_van_ban"], r["so_phu_luc"])
 assert h.count('<section class="vb-trang">') == 7 and h.count("PHỤ LỤC HỢP ĐỒNG LAO ĐỘNG</b>") == 2
@@ -86,10 +87,10 @@ i_k = h.index("NGUYỄN VĂN KHOAN</b>&nbsp;&nbsp;&nbsp;Quốc tịch"); hk = h[
 assert "5.500.000 đồng/tháng" in hk and "ngày 01 tháng 01 năm 2025" in hk, "chuyển part-time -> toàn thời gian 12/2024: hợp đồng 2025 từ 01/01/2025"
 # lương phụ lục thấp hơn tối thiểu vùng -> báo lỗi
 ROWS[2][H.index('Lương Cơ bản')] = 4_000_000
-r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tuy_chon": {}})))
+r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tuy_chon": {"loai_hd": "xdth"}})))
 assert any(c["muc"] == "loi" and "phụ lục từ 15/10/2025" in c["nd"] for c in r["canh_bao"]), r["canh_bao"]
 # in 1 người không có phiên bản: không phụ lục
-r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tu": 4, "den": 4, "tuy_chon": {}})))
+r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tu": 4, "den": 4, "tuy_chon": {"loai_hd": "xdth"}})))
 assert r["so_phu_luc"] == 0 and r["html"].count('<section class="vb-trang">') == 1
 # Word: phụ lục ra trang riêng
 data = server.vbld.html_sang_docx(h, {})
@@ -103,10 +104,13 @@ ROWS.append(R(**{'STT': 13, 'Mã NV': '7', 'Họ và tên': 'Phạm Bảo Vươn
 ROWS.append(R(**{'STT': 14, 'Mã NV': '7-001', 'Họ và tên': 'Phạm Bảo Vương', 'CCCD': '079190000107', 'Tháng/Năm vào làm': '08/2025', 'Đóng BHXH': 'x', 'Chức vụ': 'Bảo vệ', 'Lương Cơ bản': 5_800_000}))
 d = server.van_ban_du_lieu(7, nam)
 for n in d["nhan_vien_hd"]:
-    r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tu": n["stt"], "den": n["stt"], "tuy_chon": {}})))
+    r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "hd", "nam": nam, "tu": n["stt"], "den": n["stt"], "tuy_chon": {"loai_hd": "xdth"}})))
     assert n["ten"].upper() + "</b>&nbsp;&nbsp;&nbsp;Quốc tịch" in r["html"], (n, "STT lệch giữa danh sách chọn và hợp đồng")
 vuong = next(n for n in d["nhan_vien_hd"] if n["ten"] == "Phạm Bảo Vương")
 vinh = next(n for n in d["nhan_vien_hd"] if n["ten"] == "Huỳnh Văn Vinh")
 assert vuong["stt"] < vinh["stt"] and vuong["luong_cb"] == 5_400_000, "Vương vào làm 02/2025 (dòng gốc) xếp trước Vinh 03/2025, lương hợp đồng = lương ban đầu"
 print("PASS 3: danh sách chọn cùng thứ tự với hợp đồng")
 print("ALL DONE")
+# Mặc định loại hợp đồng toàn thời gian: KHÔNG xác định thời hạn
+assert vbld.mac_dinh_tuy_chon({"ten": "x"})["loai_hd"] == "kxdth"
+print("PASS 4: mặc định Không xác định thời hạn")
