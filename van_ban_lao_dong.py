@@ -2046,7 +2046,7 @@ def dung_hop_dong_part_time(nv, cty, tuy_chon, so_thu_tu, hom_nay=None, nam=None
     cv = (tc.get("cong_viec") or "").strip() or f"Thực hiện các nhiệm vụ của chức danh {nv.get('chuc_vu') or '.........'} theo phân công, hướng dẫn của Người sử dụng lao động"
     co_bp = bool((tc.get("bo_phan") or "").strip())
     h.append(_p("<b>Điều 1. Thời hạn hợp đồng, chức danh và công việc phải làm</b>"))
-    h.append(_p("1. Thời hạn hợp đồng: <b>dưới 01 tháng</b>" + (f", từ {esc(ngay_chu(bat_dau))} đến hết {esc(ngay_chu(cuoi))}" if bat_dau and cuoi else ", từ ngày ..../..../........ đến ngày ..../..../........") + ".", "j"))
+    h.append(_p("1. Thời hạn hợp đồng: <b>dưới 01 tháng</b>.", "j"))
     n1 = 1
     if co_bp:
         n1 += 1

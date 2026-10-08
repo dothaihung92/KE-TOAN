@@ -90,10 +90,10 @@ t = van_ban(h)
 assert "HỢP ĐỒNG LAO ĐỘNG DƯỚI 01 THÁNG" in t and "LÀM VIỆC KHÔNG TRỌN THỜI GIAN" not in t and "Điều 32" not in t
 assert "theo lịch sắp xếp của Công ty" in t and "chỉ làm việc khi Công ty có lịch sắp xếp" in t and "khoảng 2 giờ/ngày" in t and "10 giờ/tuần" in t and "ngắn hơn" in t
 assert "Loại hợp đồng" not in t and "Xác định thời hạn" not in t and "Địa điểm làm việc" not in t, "không có mục loại hợp đồng, không có dòng địa điểm làm việc"
-assert "Điều 1. Thời hạn hợp đồng, chức danh và công việc phải làm" in t and "1. Thời hạn hợp đồng: dưới 01 tháng, từ ngày 01 tháng 01 năm 2026 đến hết ngày 30 tháng 01 năm 2026." in t \
+assert "Điều 1. Thời hạn hợp đồng, chức danh và công việc phải làm" in t and "1. Thời hạn hợp đồng: dưới 01 tháng." in t and "đến hết ngày" not in t \
     and "2. Chức danh chuyên môn / chức vụ: Bảo vệ." in t and "3. Công việc phải làm:" in t and "báo trước cho Công ty ít nhất 03 ngày làm việc" in t, "hợp đồng dưới 01 tháng: ghi rõ thời hạn"
 _t2 = van_ban(v.dung_hop_dong_part_time(dict(nv[1], vao_lam="01/02/2026"), CTY, {}, 0, nam=2026))
-assert "đến hết ngày 27 tháng 02 năm 2026" in _t2, "tháng 2: dưới 01 tháng"
+assert "1. Thời hạn hợp đồng: dưới 01 tháng." in _t2, "chỉ ghi dưới 01 tháng, không ghi ngày"
 # ngày hợp đồng + ngày ký = ngày bắt đầu làm việc đầu tiên TRONG NĂM LẬP: làm từ năm trước (vào làm 01/2025) mà lập năm 2026 -> 01/01/2026 (không hiện năm 2025)
 assert "ngày 01 tháng 01 năm 2026" in t and "Số: 01/HĐPT-2026" in t and "năm 2025" not in t.split("Điều 1")[0]
 t_c = van_ban(v.dung_hop_dong_part_time(dict(nv[1], vao_lam="15/03/2023"), CTY, {}, 0, nam=2026))
