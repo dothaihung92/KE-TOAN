@@ -103,6 +103,7 @@ exec(extract_fn('_khong_dau'), ns)
 exec(extract_fn('_quy_cua_ky'), ns)
 exec(extract_fn('_thang_cua_ky'), ns)
 exec(extract_fn('_co_thu_muc_theo_thang'), ns)
+exec(extract_fn('_chuan_duong_dan'), ns)
 exec(extract_fn('_thu_muc_ket_xuat_ky'), ns)
 exec(extract_fn('_to_num'), ns)
 ns['_DVC_LOAI_TU_KHOA_FILE'] = {"GTGT": ["gtgt"], "TNCN": ["tncn"]}
