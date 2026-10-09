@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.144"
+APP_BUILD = "2026-10-09.145"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -723,9 +723,6 @@ class GDTClient:
         # thường không có limiter riêng cho bước tra cứu danh sách nên vẫn
         # giữ mức cố định thấp hơn 1 chút.
         so_luong_song_song = MTT_TRAN_CUNG_EXECUTOR if he_thong == "sco-query" else 4
-        if mtt_limiter is None:
-            # không có limiter (gọi lẻ ngoài job tra cứu) -> chạy tuần tự 1 luồng, đúng mặc định
-            so_luong_song_song = 1
 
         def _gop(s_from, s_to, ket_qua):
             chunk, total, loi_rieng, ttxly_that_bai = ket_qua
@@ -773,7 +770,7 @@ class GDTClient:
                 _progress_doan("đang dò lại đoạn lỗi trước đó...")
                 # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
                 ttxly_can_do = (ttxly,) if ttxly is not None else None
-                dung_chung = mtt_limiter   # giới hạn CHUNG số luồng tra cứu (1-3, mặc định 1) cho mọi hệ thống
+                dung_chung = mtt_limiter   # None = không giới hạn (tra cứu 1 công ty HĐ thường, như cũ)
                 if dung_chung:
                     dung_chung.acquire()
                 try:
@@ -853,7 +850,7 @@ class GDTClient:
                 if progress:
                     progress(f"[THÁNG {s_from}→{s_to}] {t}")
             _progress_thang("đang tải...")
-            dung_chung = mtt_limiter   # giới hạn CHUNG số luồng tra cứu (1-3, mặc định 1) cho mọi hệ thống
+            dung_chung = mtt_limiter   # None = không giới hạn (tra cứu 1 công ty HĐ thường, như cũ)
             if dung_chung:
                 dung_chung.acquire()
             try:
@@ -917,7 +914,7 @@ class GDTClient:
                 finally:
                     if gioi_han:
                         gioi_han.release()
-            with _cf.ThreadPoolExecutor(max_workers=3 if gioi_han else 1) as ex:
+            with _cf.ThreadPoolExecutor(max_workers=3) as ex:
                 tongs = list(ex.map(_dem, (5, 6, 8)))
             for tong in tongs:
                 if tong is None or tong > 0:
@@ -8367,7 +8364,10 @@ def _run_fetch_job(cid: int, body: dict):
                                 tu, den, loai=loai, he_thong=he_thong,
                                 progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
                                 chi_cac_doan=doan_dung_de_goi,
-                                mtt_limiter=mtt_limiter_query,
+                                # Tra cứu 1 công ty: như cũ (limiter chỉ cho máy tính tiền). Tra cứu
+                                # HÀNG LOẠT: mọi hệ thống đều qua limiter (mỗi công ty 1 luồng).
+                                mtt_limiter=(mtt_limiter_query
+                                             if (he_thong == "sco-query" or body.get("batch")) else None),
                                 cancel_check=lambda: bool((FETCH_JOBS.get(cid) or {}).get("cancel")))
                             loi_cuoi = None
                             # query_invoices có thể trả về BÌNH THƯỜNG (không raise)
@@ -9216,9 +9216,9 @@ MTT_TRAN_CUNG_EXECUTOR = 16  # trần CỨNG (an toàn) cho ThreadPoolExecutor x
 # cho cả hóa đơn điện tử thường lẫn máy tính tiền, không tách riêng) quyết định.
 
 
-# Số luồng tra cứu/tải hóa đơn đồng thời (mỗi công ty): MẶC ĐỊNH 1, người dùng chỉnh 1-3, TỐI ĐA 3.
-# Trước đây mặc định 16 (theo tốc độ "Nhanh") — tải dồn dập nhiều luồng lên trang Thuế dễ bị máy
-# chủ đóng ngang luồng (curl 92 HTTP/2 INTERNAL_ERROR) / 429 / 5xx. Lựa chọn được lưu lại cho lần sau.
+# Tra cứu HÀNG LOẠT: số luồng (= số công ty chạy cùng lúc, mỗi công ty 1 luồng) MẶC ĐỊNH 1, người
+# dùng chọn 1-3, TỐI ĐA 3 — tải dồn dập nhiều luồng dễ bị trang Thuế đóng ngang luồng (curl 92
+# HTTP/2 INTERNAL_ERROR) / 429 / 5xx. Lựa chọn được lưu lại cho lần sau. Tra cứu 1 công ty giữ như cũ.
 SO_LUONG_TRA_CUU_MAC_DINH = 1
 SO_LUONG_TRA_CUU_TOI_DA = 3
 
@@ -9241,7 +9241,7 @@ def _so_luong_tra_cuu():
 def _new_fetch_job():
     return {"messages": [], "last": None, "running": True,
             "cursor": 0, "started": time.time(), "cancel": False,
-            "limiter": DynamicLimiter(_so_luong_tra_cuu())}
+            "limiter": DynamicLimiter(SP().get("song_song", 4))}
 
 
 def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
@@ -9898,18 +9898,15 @@ def set_so_luong_tra_cuu(body: dict = Body(...)):
 
 @app.post("/api/fetch-song-song/{cid}")
 def fetch_set_song_song(cid: int, body: dict = Body(...)):
-    """Chỉnh số luồng tra cứu/tải file đồng thời NGAY TRONG LÚC đang chạy (1-3, tối đa 3) — không
-    cần dừng lại rồi chạy lại từ đầu. Đồng thời lưu lựa chọn cho các lần sau."""
-    n = _kep_so_luong_tra_cuu(body.get("n", SO_LUONG_TRA_CUU_MAC_DINH))
-    try:
-        _set_setting("so_luong_tra_cuu", str(n))
-    except Exception:
-        pass
+    """Chỉnh số luồng tải file đồng thời NGAY TRONG LÚC đang tra cứu/tải
+    file (0-32) — không cần dừng lại rồi chạy lại từ đầu. 0 = tạm dừng hẳn
+    việc tải file (không luồng nào được chạy) cho tới khi tăng lại."""
+    n = max(0, min(32, int(body.get("n", 0))))
     job = FETCH_JOBS.get(cid)
     if not job or not job.get("limiter"):
-        return {"ok": True, "n": n, "dang_chay": False}
+        raise HTTPException(404, "Không có tiến trình tra cứu/tải file nào đang chạy cho công ty này")
     job["limiter"].set_limit(n)
-    return {"ok": True, "n": n, "dang_chay": True}
+    return {"ok": True, "n": n}
 
 
 @app.get("/api/fetch-status/{cid}")
