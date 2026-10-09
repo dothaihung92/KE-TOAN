@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-08.139"
+APP_BUILD = "2026-10-09.140"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -7852,7 +7852,7 @@ def _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den):
             if comp_vat:
                 so_du_cuoi_ky_truoc, ky_truoc_vat, _fp_vat = _doc_so_du_cuoi_ky_ky_truoc(comp_vat, ky_hien_tai)
                 if so_du_cuoi_ky_truoc is not None:
-                    ket_qua_vat = vat_tam_tinh(cid, ky=ky_hien_tai, du_dau_ky=so_du_cuoi_ky_truoc)
+                    ket_qua_vat = vat_tam_tinh(cid, Response(), ky=ky_hien_tai, du_dau_ky=so_du_cuoi_ky_truoc)
                     vat_luu(cid, data={
                         "ky": ky_hien_tai, "du_dau_ky": so_du_cuoi_ky_truoc,
                         "vat_mua": ket_qua_vat["vat_mua"], "vat_ban": ket_qua_vat["vat_ban"],
@@ -7958,7 +7958,7 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
     # vào cùng thư mục Năm/Quý để nộp HTKK — mỗi cái độc lập, lỗi cái
     # này không chặn cái kia.
     try:
-        res_htkk = export_htkk(cid, tu=(tu or ""), den=(den or ""),
+        res_htkk = export_htkk(cid, Response(), tu=(tu or ""), den=(den or ""),
                                luu_ket_xuat=luu, mo_file=0)
         msg(stage="info", text="✓ Đã kết xuất XML tờ khai GTGT (01/GTGT)")
         da_kiem_tra_xml = True
@@ -7996,7 +7996,7 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
                 "✓ Không lệch — sheet 'Đối chiếu' không phát hiện hóa đơn lệch, số liệu XML khớp "
                 "TỔNG CỘNG bảng kê Mua vào/Bán ra.")
     try:
-        export_htkk_tncn(cid, tu=(tu or ""), den=(den or ""),
+        export_htkk_tncn(cid, Response(), tu=(tu or ""), den=(den or ""),
                          luu_ket_xuat=luu, mo_file=0)
         msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
     except Exception as e:
