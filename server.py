@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.142"
+APP_BUILD = "2026-10-09.143"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -723,6 +723,9 @@ class GDTClient:
         # thường không có limiter riêng cho bước tra cứu danh sách nên vẫn
         # giữ mức cố định thấp hơn 1 chút.
         so_luong_song_song = MTT_TRAN_CUNG_EXECUTOR if he_thong == "sco-query" else 4
+        if mtt_limiter is None:
+            # không có limiter (gọi lẻ ngoài job tra cứu) -> chạy tuần tự 1 luồng, đúng mặc định
+            so_luong_song_song = 1
 
         def _gop(s_from, s_to, ket_qua):
             chunk, total, loi_rieng, ttxly_that_bai = ket_qua
@@ -770,7 +773,7 @@ class GDTClient:
                 _progress_doan("đang dò lại đoạn lỗi trước đó...")
                 # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
                 ttxly_can_do = (ttxly,) if ttxly is not None else None
-                dung_chung = mtt_limiter if he_thong == "sco-query" else None
+                dung_chung = mtt_limiter   # giới hạn CHUNG số luồng tra cứu (1-3, mặc định 1) cho mọi hệ thống
                 if dung_chung:
                     dung_chung.acquire()
                 try:
@@ -813,7 +816,7 @@ class GDTClient:
         if he_thong != "sco-query":
             try:
                 if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress,
-                                      cancel_check=cancel_check):
+                                      cancel_check=cancel_check, gioi_han=mtt_limiter):
                     if progress:
                         progress("kỳ này không có hóa đơn — bỏ qua nhanh")
                     return [], 0, [], []
@@ -850,7 +853,7 @@ class GDTClient:
                 if progress:
                     progress(f"[THÁNG {s_from}→{s_to}] {t}")
             _progress_thang("đang tải...")
-            dung_chung = mtt_limiter if he_thong == "sco-query" else None
+            dung_chung = mtt_limiter   # giới hạn CHUNG số luồng tra cứu (1-3, mặc định 1) cho mọi hệ thống
             if dung_chung:
                 dung_chung.acquire()
             try:
@@ -885,7 +888,7 @@ class GDTClient:
         return all_results, total_expected, loi_tich_luy, cac_doan_loi
 
     def _toan_ky_rong(self, tu_ngay, den_ngay, loai, he_thong, page_size, progress=None,
-                      cancel_check=None):
+                      cancel_check=None, gioi_han=None):
         """True nếu TOÀN khoảng ngày CHẮC CHẮN không có hóa đơn nào (tổng = 0).
         Chỉ đếm nhanh (size=1) trên CẢ khoảng ngày, không dò từng tháng. Trả
         False nếu có hóa đơn HOẶC không đếm chắc chắn được (khi đó dò đầy đủ)."""
@@ -903,12 +906,19 @@ class GDTClient:
             # dồn thời gian chờ, khiến kiểm tra nhanh không còn "nhanh" nữa —
             # đây chính là phần việc THÊM RIÊNG cho máy tính tiền mà hóa đơn
             # điện tử thường không phải làm, nên cần giảm tối đa thời gian.
-            with _cf.ThreadPoolExecutor(max_workers=3) as ex:
-                tongs = list(ex.map(
-                    lambda tt: self._dem_tong_nhanh(
+            def _dem(tt):
+                # xin phép limiter chung (số luồng tra cứu người dùng chọn, 1-3)
+                if gioi_han:
+                    gioi_han.acquire()
+                try:
+                    return self._dem_tong_nhanh(
                         url, f"{date_filter};ttxly=={tt}", action, progress,
-                        cancel_check=cancel_check),
-                    (5, 6, 8)))
+                        cancel_check=cancel_check)
+                finally:
+                    if gioi_han:
+                        gioi_han.release()
+            with _cf.ThreadPoolExecutor(max_workers=3 if gioi_han else 1) as ex:
+                tongs = list(ex.map(_dem, (5, 6, 8)))
             for tong in tongs:
                 if tong is None or tong > 0:
                     return False   # không chắc hoặc có hóa đơn -> dò đầy đủ
@@ -8357,7 +8367,7 @@ def _run_fetch_job(cid: int, body: dict):
                                 tu, den, loai=loai, he_thong=he_thong,
                                 progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
                                 chi_cac_doan=doan_dung_de_goi,
-                                mtt_limiter=(mtt_limiter_query if he_thong == "sco-query" else None),
+                                mtt_limiter=mtt_limiter_query,
                                 cancel_check=lambda: bool((FETCH_JOBS.get(cid) or {}).get("cancel")))
                             loi_cuoi = None
                             # query_invoices có thể trả về BÌNH THƯỜNG (không raise)
@@ -9206,10 +9216,32 @@ MTT_TRAN_CUNG_EXECUTOR = 16  # trần CỨNG (an toàn) cho ThreadPoolExecutor x
 # cho cả hóa đơn điện tử thường lẫn máy tính tiền, không tách riêng) quyết định.
 
 
+# Số luồng tra cứu/tải hóa đơn đồng thời (mỗi công ty): MẶC ĐỊNH 1, người dùng chỉnh 1-3, TỐI ĐA 3.
+# Trước đây mặc định 16 (theo tốc độ "Nhanh") — tải dồn dập nhiều luồng lên trang Thuế dễ bị máy
+# chủ đóng ngang luồng (curl 92 HTTP/2 INTERNAL_ERROR) / 429 / 5xx. Lựa chọn được lưu lại cho lần sau.
+SO_LUONG_TRA_CUU_MAC_DINH = 1
+SO_LUONG_TRA_CUU_TOI_DA = 3
+
+
+def _kep_so_luong_tra_cuu(n):
+    try:
+        n = int(n)
+    except Exception:
+        n = SO_LUONG_TRA_CUU_MAC_DINH
+    return max(1, min(SO_LUONG_TRA_CUU_TOI_DA, n))
+
+
+def _so_luong_tra_cuu():
+    try:
+        return _kep_so_luong_tra_cuu(_get_setting("so_luong_tra_cuu", str(SO_LUONG_TRA_CUU_MAC_DINH)))
+    except Exception:
+        return SO_LUONG_TRA_CUU_MAC_DINH
+
+
 def _new_fetch_job():
     return {"messages": [], "last": None, "running": True,
             "cursor": 0, "started": time.time(), "cancel": False,
-            "limiter": DynamicLimiter(SP().get("song_song", 4))}
+            "limiter": DynamicLimiter(_so_luong_tra_cuu())}
 
 
 def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
@@ -9816,17 +9848,34 @@ def fetch_cancel(cid: int):
     return {"ok": True}
 
 
+@app.get("/api/so-luong-tra-cuu")
+def get_so_luong_tra_cuu():
+    return {"n": _so_luong_tra_cuu(), "toi_da": SO_LUONG_TRA_CUU_TOI_DA,
+            "mac_dinh": SO_LUONG_TRA_CUU_MAC_DINH}
+
+
+@app.post("/api/so-luong-tra-cuu")
+def set_so_luong_tra_cuu(body: dict = Body(...)):
+    """Lưu số luồng tra cứu người dùng chọn (1-3) cho các lần tra cứu sau."""
+    n = _kep_so_luong_tra_cuu(body.get("n", SO_LUONG_TRA_CUU_MAC_DINH))
+    _set_setting("so_luong_tra_cuu", str(n))
+    return {"ok": True, "n": n}
+
+
 @app.post("/api/fetch-song-song/{cid}")
 def fetch_set_song_song(cid: int, body: dict = Body(...)):
-    """Chỉnh số luồng tải file đồng thời NGAY TRONG LÚC đang tra cứu/tải
-    file (0-32) — không cần dừng lại rồi chạy lại từ đầu. 0 = tạm dừng hẳn
-    việc tải file (không luồng nào được chạy) cho tới khi tăng lại."""
-    n = max(0, min(32, int(body.get("n", 0))))
+    """Chỉnh số luồng tra cứu/tải file đồng thời NGAY TRONG LÚC đang chạy (1-3, tối đa 3) — không
+    cần dừng lại rồi chạy lại từ đầu. Đồng thời lưu lựa chọn cho các lần sau."""
+    n = _kep_so_luong_tra_cuu(body.get("n", SO_LUONG_TRA_CUU_MAC_DINH))
+    try:
+        _set_setting("so_luong_tra_cuu", str(n))
+    except Exception:
+        pass
     job = FETCH_JOBS.get(cid)
     if not job or not job.get("limiter"):
-        raise HTTPException(404, "Không có tiến trình tra cứu/tải file nào đang chạy cho công ty này")
+        return {"ok": True, "n": n, "dang_chay": False}
     job["limiter"].set_limit(n)
-    return {"ok": True, "n": n}
+    return {"ok": True, "n": n, "dang_chay": True}
 
 
 @app.get("/api/fetch-status/{cid}")
