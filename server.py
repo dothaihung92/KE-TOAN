@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.141"
+APP_BUILD = "2026-10-09.142"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -455,6 +455,18 @@ def _ngu_ktra_huy(giay, cancel_check=None):
         con_lai -= thoi
 
 
+def _la_loi_http2_stream(e):
+    """True nếu lỗi mạng là lỗi luồng HTTP/2 bị máy chủ/proxy đóng ngang (curl (92)
+    "HTTP/2 stream N was not closed cleanly: INTERNAL_ERROR", hoặc (16) lỗi khung
+    HTTP/2) — ca thật người dùng báo: tra cứu hàng loạt thử lại hơn 600 lần vẫn
+    lỗi y hệt vì cứ dùng lại ĐÚNG kết nối HTTP/2 đã hỏng."""
+    t = str(e or "")
+    tl = t.lower()
+    return ("curl: (92)" in tl or "curl: (16)" in tl
+            or "http/2 stream" in tl or "http2" in tl
+            or ("internal_error" in tl and "stream" in tl))
+
+
 # ============================================================
 #  GDT API CLIENT  (module gọi API Tổng cục Thuế)
 #  --> Nếu TCT đổi endpoint, chỉ cần sửa các URL trong class này
@@ -525,6 +537,60 @@ class GDTClient:
         self.token: Optional[str] = None
         self._last_total = 0
         self._token_dead = False  # bật khi gặp 401 (hết phiên) -> bỏ qua nốt các gọi mạng
+        self._http11 = False      # đã ép HTTP/1.1 (sau lỗi luồng HTTP/2) chưa
+        self._khoa_session = threading.Lock()
+
+    def _dung_lai_session(self, ep_http11=True):
+        """Bỏ kết nối cũ (có thể đang kẹt luồng HTTP/2 hỏng — curl (92) INTERNAL_ERROR), tạo
+        Session MỚI giữ nguyên header (kể cả Authorization/token) và cookie (cookie WAF F5).
+        Với curl_cffi: ép HTTP/1.1 — mỗi request 1 kết nối riêng, không còn ghép kênh nhiều
+        luồng trên 1 kết nối HTTP/2 nên máy chủ đóng ngang 1 luồng không kéo theo cả loạt.
+        Có khóa vì tra cứu chạy song song nhiều luồng trên CÙNG client."""
+        if not hasattr(self, "_khoa_session"):
+            self._khoa_session = threading.Lock()
+        with self._khoa_session:
+            cu = self.session
+            moi = None
+            if self.impersonate:
+                try:
+                    from curl_cffi import requests as _cffi
+                    kw = {"impersonate": "chrome"}
+                    if ep_http11:
+                        from curl_cffi import CurlHttpVersion
+                        kw["http_version"] = CurlHttpVersion.V1_1
+                    try:
+                        moi = _cffi.Session(**kw)
+                    except TypeError:
+                        kw.pop("http_version", None)
+                        moi = _cffi.Session(**kw)
+                except Exception:
+                    moi = None
+            if moi is None:
+                moi = requests.Session()
+            try:
+                moi.headers.update(dict(cu.headers))
+            except Exception:
+                moi.headers.update(self.HEADERS)
+                if self.token:
+                    moi.headers.update({"Authorization": f"Bearer {self.token}"})
+            try:
+                moi.cookies.update(cu.cookies)
+            except Exception:
+                pass
+            self.session = moi
+            if ep_http11 and self.impersonate:
+                self._http11 = True
+            try:
+                cu.close()
+            except Exception:
+                pass
+
+    def _xu_ly_loi_http2(self, e):
+        """Gặp lỗi luồng HTTP/2 lần đầu -> dựng lại Session ép HTTP/1.1. Trả True nếu đã dựng lại."""
+        if _la_loi_http2_stream(e) and not getattr(self, "_http11", False):
+            self._dung_lai_session(ep_http11=True)
+            return True
+        return False
 
     def _ha_cap_session(self):
         """Hạ cấp từ curl_cffi (impersonate Chrome, né WAF F5) về requests.Session THƯỜNG — dùng khi
@@ -991,7 +1057,8 @@ class GDTClient:
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
             try:
                 r = self.session.get(full_url, headers=extra_headers, timeout=45)
-            except Exception:
+            except Exception as e:
+                self._xu_ly_loi_http2(e)
                 if progress:
                     progress(f"đang kiểm tra nhanh kỳ này có hóa đơn không... (lần {attempt})")
                 _ngu_ktra_huy(3, cancel_check)
@@ -1063,6 +1130,7 @@ class GDTClient:
             attempt = 0
             so_lan_5xx_lien_tiep = 0   # đếm số lần lỗi 5xx LIÊN TIẾP (reset khi gặp loại khác)
             so_lan_403_lien_tiep = 0   # đếm số lần lỗi 403 LIÊN TIẾP (reset khi gặp loại khác)
+            so_lan_mang_lien_tiep = 0  # đếm số lần lỗi MẠNG liên tiếp (reset khi có response)
             while True:
                 if cancel_check and cancel_check():
                     raise Exception("CANCELLED")
@@ -1094,12 +1162,24 @@ class GDTClient:
                     # mạng" — để biết chính xác đang gặp vấn đề gì mà xử lý.
                     so_lan_5xx_lien_tiep = 0
                     so_lan_403_lien_tiep = 0
+                    so_lan_mang_lien_tiep += 1
                     cho = 3
+                    ghi_them = ""
+                    # Lỗi luồng HTTP/2 (curl 92 INTERNAL_ERROR): thử lại trên CÙNG kết nối hỏng
+                    # thì lỗi mãi (ca thật: hơn 600 lần) -> dựng lại Session, ép HTTP/1.1.
+                    # Lỗi mạng khác lặp lại 5 lần liên tiếp cũng dựng lại kết nối mới 1 lần.
+                    if _la_loi_http2_stream(e) and (not getattr(self, "_http11", False) or so_lan_mang_lien_tiep % 5 == 0):
+                        self._dung_lai_session(ep_http11=True)
+                        ghi_them = " — đã mở kết nối mới (HTTP/1.1)"
+                    elif so_lan_mang_lien_tiep % 5 == 0:
+                        self._dung_lai_session(ep_http11=getattr(self, "_http11", False))
+                        ghi_them = " — đã mở kết nối mới"
                     if progress:
                         progress(f"lỗi mạng ({type(e).__name__}: {str(e)[:100]}), "
-                                 f"đợi {cho}s rồi thử lại (lần {attempt})...")
+                                 f"đợi {cho}s rồi thử lại (lần {attempt}){ghi_them}...")
                     _ngu_ktra_huy(cho, cancel_check)
                     continue
+                so_lan_mang_lien_tiep = 0
                 if r.status_code == 403:
                     # Trước đây coi 403 là lỗi KHÔNG retry được (rơi thẳng xuống
                     # raise_for_status()) — đúng ca thật người dùng báo: "mua vào
@@ -1322,6 +1402,7 @@ class GDTClient:
                 r = self.session.get(url, params=params, headers=extra_headers, timeout=90)
             except Exception as e:
                 last_err = e
+                self._xu_ly_loi_http2(e)
                 time.sleep(min(sp["retry_base"] * (attempt + 1), 60))
                 continue
             if r.status_code == 200 and r.content[:5] not in (b'{"mes', b'{"err'):
@@ -1402,7 +1483,8 @@ class GDTClient:
                     return None
                 # các lỗi khác (5xx...) -> chờ ngắn rồi thử lại
                 time.sleep(sp["retry_base"])
-            except Exception:
+            except Exception as e:
+                self._xu_ly_loi_http2(e)
                 if not cho_khi_429:
                     return None
                 time.sleep(sp["retry_base"])
