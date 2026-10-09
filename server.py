@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.140"
+APP_BUILD = "2026-10-09.141"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -176,6 +176,17 @@ def _tu_den_cua_quy(nam, quy):
     return f"01/{thang_dau:02d}/{nam}", f"{ngay_cuoi:02d}/{thang_cuoi:02d}/{nam}"
 
 
+def _chuan_duong_dan(p):
+    """Chuẩn hoá đường dẫn thư mục người dùng dán vào: bỏ khoảng trắng + DẤU NGOẶC KÉP bao ngoài (Windows "Copy as path" tự thêm "D:\\Ke toan\\..."
+    — trước đây giữ nguyên dấu " nên không tạo được thư mục, file lặng lẽ rơi ra Desktop), mở rộng %USERPROFILE% / ~."""
+    p = str(p or "").strip()
+    while len(p) >= 2 and p[0] in "\"'“”‘’" and p[-1] in "\"'“”‘’":
+        p = p[1:-1].strip()
+    if not p:
+        return ""
+    return os.path.expanduser(os.path.expandvars(p))
+
+
 def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
     """Tạo (nếu thiếu) cấu trúc thư mục lưu file kết xuất theo Năm/Quý (hoặc
     Năm/Tháng — xem dưới) dưới export_dir và trả về đường dẫn thư mục ĐÍCH
@@ -189,7 +200,7 @@ def _thu_muc_ket_xuat_ky(export_dir, tu_ngay, den_ngay):
     Trả None nếu export_dir trống/không tạo được.
     Tên thư mục dùng "QUY N"/"THANG N" (không dấu, viết hoa) thay vì có dấu —
     tránh lỗi hiển thị/gõ dấu tiếng Việt trên một số hệ thống/ổ mạng cũ."""
-    export_dir = (export_dir or "").strip()
+    export_dir = _chuan_duong_dan(export_dir)
     if not export_dir:
         return None
     nam, quy = _quy_cua_ky(tu_ngay, den_ngay)
@@ -2044,7 +2055,7 @@ def add_company(data: dict = Body(...)):
         "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
-         data.get("data_dir", ""), (data.get("export_dir") or "").strip(),
+         data.get("data_dir", ""), _chuan_duong_dan(data.get("export_dir")),
          (data.get("dvc_password") or "").strip(),
          (data.get("dvc_password2") or "").strip(),
          (data.get("mst_khac") or "").strip(),
@@ -2120,7 +2131,7 @@ def update_company(cid: int, data: dict = Body(...)):
         "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=?, no_mac_dinh=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
-         data_dir, (data.get("export_dir") or "").strip(),
+         data_dir, _chuan_duong_dan(data.get("export_dir")),
          dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
          dia_chi, ma_cqt, ten_cqt, nguoi_ky, no_mac_dinh, cid)
@@ -7903,7 +7914,18 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
         msg(stage="info", text="Đang tự động kết xuất Excel" + (" vào thư mục lưu file kết xuất..." if luu_ket_xuat else "..."))
         resp_excel = export_excel(cid, luu_ket_xuat=luu, tu_ngay=(tu or ""),
                                   den_ngay=(den or ""), mo_file=0)
-        msg(stage="info", text="✓ Đã kết xuất Excel" + (" vào thư mục theo Năm/Quý" if luu_ket_xuat else ""))
+        import urllib.parse as _up_b
+        _tm = _up_b.unquote(resp_excel.headers.get("X-Thu-Muc-Ket-Xuat", "") or "")
+        _loi_kx = _up_b.unquote(resp_excel.headers.get("X-Loi-Luu-Ket-Xuat", "") or "")
+        if luu_ket_xuat and _tm:
+            msg(stage="info", text=f"✓ Đã kết xuất Excel vào: {_tm}")
+        elif luu_ket_xuat and _loi_kx:
+            msg(stage="warn", text="⚠ Excel: " + _loi_kx)
+        elif luu_ket_xuat:
+            msg(stage="warn", text="⚠ Công ty CHƯA đặt 'Thư mục lưu file kết xuất' (mục Sửa công ty) nên file Excel/XML được lưu ra DESKTOP. "
+                                   "Đặt thư mục cho công ty này rồi tra cứu/kết xuất lại để lưu đúng chỗ.")
+        else:
+            msg(stage="info", text="✓ Đã kết xuất Excel")
         # Sheet "Đối chiếu" trong file vừa xuất có phát hiện hóa đơn LỆCH
         # (Chi tiết vs Bảng kê) không — báo RÕ (không chỉ im lặng nằm
         # trong file) để người dùng biết mà mở file kiểm tra lại, thay vì
@@ -7961,6 +7983,8 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
         res_htkk = export_htkk(cid, Response(), tu=(tu or ""), den=(den or ""),
                                luu_ket_xuat=luu, mo_file=0)
         msg(stage="info", text="✓ Đã kết xuất XML tờ khai GTGT (01/GTGT)")
+        if luu_ket_xuat and isinstance(res_htkk, dict) and not res_htkk.get("da_luu_ket_xuat"):
+            msg(stage="warn", text="⚠ XML GTGT KHÔNG lưu được vào 'Thư mục lưu file kết xuất' (chưa đặt thư mục cho công ty, hoặc đường dẫn lỗi) — đã lưu ra Desktop.")
         da_kiem_tra_xml = True
         # Báo NGAY trong tiến độ tra cứu hàng loạt nếu công ty này bị LỆCH số
         # liệu giữa bảng kê và XML — để người dùng biết công ty nào cần kiểm
@@ -7996,8 +8020,10 @@ def _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=0, file_saved=0,
                 "✓ Không lệch — sheet 'Đối chiếu' không phát hiện hóa đơn lệch, số liệu XML khớp "
                 "TỔNG CỘNG bảng kê Mua vào/Bán ra.")
     try:
-        export_htkk_tncn(cid, Response(), tu=(tu or ""), den=(den or ""),
-                         luu_ket_xuat=luu, mo_file=0)
+        res_tncn = export_htkk_tncn(cid, Response(), tu=(tu or ""), den=(den or ""),
+                                    luu_ket_xuat=luu, mo_file=0)
+        if luu_ket_xuat and isinstance(res_tncn, dict) and not res_tncn.get("da_luu_ket_xuat"):
+            msg(stage="warn", text="⚠ XML TNCN KHÔNG lưu được vào 'Thư mục lưu file kết xuất' (chưa đặt thư mục cho công ty, hoặc đường dẫn lỗi) — đã lưu ra Desktop.")
         msg(stage="info", text="✓ Đã kết xuất XML tờ khai TNCN (05/KK-TNCN)")
     except Exception as e:
         msg(stage="warn", text=f"Không tự kết xuất được XML TNCN: {str(e)[:120]}")
@@ -42948,6 +42974,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     extra_headers = {}
     if da_luu_ket_xuat:
         extra_headers["X-Saved-Desktop"] = "1"
+        import urllib.parse as _up0
+        extra_headers["X-Thu-Muc-Ket-Xuat"] = _up0.quote(os.path.dirname(open_path))
+    elif luu_ket_xuat:
+        extra_headers["X-Luu-Ra-Desktop"] = "1"
     if loi_luu_ket_xuat:
         # Header HTTP chỉ nhận ASCII -> percent-encode để giữ nguyên tiếng Việt
         # có dấu, frontend decodeURIComponent() lại rồi mới hiện toast.
