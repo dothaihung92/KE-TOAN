@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.145"
+APP_BUILD = "2026-10-09.146"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -467,6 +467,16 @@ def _la_loi_http2_stream(e):
             or ("internal_error" in tl and "stream" in tl))
 
 
+def _la_loi_ket_noi(e):
+    """True nếu là lỗi KẾT NỐI (bị ngắt giữa chừng, timeout, curl "Failed to perform"...) — khác
+    với lỗi mã HTTP (404/500... do máy chủ trả về). curl_cffi đặt tên lớp lỗi kết nối cũng là
+    "HTTPError" nên phải nhìn nội dung thông báo."""
+    t = f"{type(e).__name__}: {e}".lower()
+    return any(k in t for k in ("failed to perform", "curl:", "connection aborted", "remotedisconnected",
+                                "connection reset", "connectionerror", "timed out", "timeout",
+                                "remote end closed", "eof occurred", "broken pipe"))
+
+
 # ============================================================
 #  GDT API CLIENT  (module gọi API Tổng cục Thuế)
 #  --> Nếu TCT đổi endpoint, chỉ cần sửa các URL trong class này
@@ -621,16 +631,37 @@ class GDTClient:
         try:
             r = self.session.get(url, timeout=30, headers=h)
             r.raise_for_status()
-        except Exception:
+        except Exception as e_goc:
             # Lỗi RUNTIME (không phải lỗi import) khi đang dùng curl_cffi — thử lại 1 LẦN với
             # requests.Session() thường trước khi chịu thua hẳn (xem giải thích ở _ha_cap_session).
             # Lỗi khi ĐÃ ở requests.Session() thường rồi (impersonate=False) thì để nguyên, ném lên
             # trên như cũ (không có gì để hạ cấp thêm).
             if not self.impersonate:
                 raise
-            self._ha_cap_session()
-            r = self.session.get(url, timeout=30, headers=h)
-            r.raise_for_status()
+            r = None
+            # Lỗi KẾT NỐI (bị ngắt giữa chừng/luồng HTTP/2 hỏng — hay gặp khi tra cứu hàng loạt
+            # đăng nhập nhiều công ty liên tiếp): kết nối curl_cffi cũ có thể đã hỏng -> mở kết nối
+            # curl_cffi MỚI (HTTP/1.1, vẫn giả lập Chrome) thử lại TRƯỚC khi hạ cấp.
+            if _la_loi_ket_noi(e_goc):
+                try:
+                    self._dung_lai_session(ep_http11=True)
+                    r = self.session.get(url, timeout=30, headers=h)
+                    r.raise_for_status()
+                except Exception:
+                    r = None
+            if r is None:
+                phien_cffi = self.session
+                self._ha_cap_session()
+                try:
+                    r = self.session.get(url, timeout=30, headers=h)
+                    r.raise_for_status()
+                except Exception:
+                    # requests thường CŨNG lỗi -> lỗi không phải do curl_cffi: trả lại curl_cffi
+                    # (KHÔNG kẹt vĩnh viễn ở requests.Session — bị WAF ngắt kết nối "Connection
+                    # aborted / RemoteDisconnected" ở mọi lượt sau, kể cả tra cứu/tải file).
+                    self.session = phien_cffi
+                    self.impersonate = True
+                    raise
         # Trang trả JSON: {"key": "...", "content": "data:image/svg+xml;base64,..."}
         # (content có thể là chuỗi SVG thô hoặc data-URI base64)
         try:
@@ -1057,6 +1088,7 @@ class GDTClient:
         # quyết định bỏ qua hay dò đầy đủ, thay vì bỏ cuộc giữa chừng rồi vẫn
         # phải làm việc nặng hơn ngay sau đó.
         attempt = 0
+        so_loi_lien_tiep = 0
         while True:
             if cancel_check and cancel_check():
                 raise Exception("CANCELLED")
@@ -1065,11 +1097,20 @@ class GDTClient:
             try:
                 r = self.session.get(full_url, headers=extra_headers, timeout=45)
             except Exception as e:
-                self._xu_ly_loi_http2(e)
+                so_loi_lien_tiep += 1
+                ghi_them = ""
+                if self._xu_ly_loi_http2(e):
+                    ghi_them = " — đã mở kết nối mới (HTTP/1.1)"
+                elif so_loi_lien_tiep % 5 == 0:
+                    # lỗi kết nối lặp lại -> bỏ kết nối cũ (có thể đã hỏng), mở kết nối mới
+                    self._dung_lai_session(ep_http11=getattr(self, "_http11", False))
+                    ghi_them = " — đã mở kết nối mới"
                 if progress:
-                    progress(f"đang kiểm tra nhanh kỳ này có hóa đơn không... (lần {attempt})")
+                    progress(f"đang kiểm tra nhanh kỳ này có hóa đơn không... (lần {attempt}: "
+                             f"{type(e).__name__}: {str(e)[:80]}){ghi_them}")
                 _ngu_ktra_huy(3, cancel_check)
                 continue
+            so_loi_lien_tiep = 0
             if r.status_code == 401:
                 raise Exception("TOKEN_EXPIRED")
             if r.status_code == 429:
@@ -2701,7 +2742,23 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
         try:
             cap = client.get_captcha()
         except Exception as e:
-            return False, f"Lỗi lấy captcha: {e}", lan, tried
+            # Lỗi KẾT NỐI khi lấy captcha (trang Thuế ngắt kết nối thoáng qua — hay gặp khi tra cứu
+            # hàng loạt đăng nhập nhiều công ty liên tiếp): chờ tăng dần rồi thử lại trong số lần
+            # cho phép, thay vì bỏ cuộc NGAY lần đầu (trước đây công ty bị bỏ qua luôn dù vào tra
+            # cứu riêng 1 công ty vẫn được).
+            last_err = f"Lỗi lấy captcha: {e}"
+            if lan < so_lan and _la_loi_ket_noi(e):
+                cho = min(5 * lan, 30)
+                if progress:
+                    progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối "
+                             f"khi lấy captcha, đợi {cho}s rồi thử lại...")
+                try:
+                    client._dung_lai_session(ep_http11=True)
+                except Exception:
+                    pass
+                time.sleep(cho)
+                continue
+            return False, last_err, lan, tried
         ckey = cap.get("key") or ""
         cval = _solve_captcha(cap.get("content") or "", drv=drv)
         tried.append(cval or "(không giải được)")
