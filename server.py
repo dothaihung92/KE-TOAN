@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.143"
+APP_BUILD = "2026-10-09.144"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9413,6 +9413,13 @@ def _run_batch(batch_id: int, cids: list, body: dict):
     đầu lượt kế. batch["current_list"] là danh sách cid ĐANG chạy tại một
     thời điểm (tối đa BATCH_SONG_SONG phần tử)."""
     batch = BATCH_JOBS[batch_id]
+    # Số luồng (= số công ty chạy cùng lúc) người dùng chọn: mặc định 1, tối đa 3. Mỗi công ty
+    # trong batch chỉ dùng 1 luồng tra cứu/tải -> tổng lượt gọi trang Thuế cùng lúc không quá
+    # số đã chọn. Chỉnh được NGAY khi đang chạy qua /api/fetch-batch-song-song/{batch_id}.
+    so_luong = _kep_so_luong_tra_cuu(body.get("so_luong", _so_luong_tra_cuu()))
+    gioi_han_cty = batch.get("limiter")
+    if gioi_han_cty is None:
+        gioi_han_cty = batch["limiter"] = DynamicLimiter(so_luong)
     # Trình duyệt ẩn dùng CHUNG cho cả batch để vẽ captcha chính xác khi tự
     # đăng nhập (mở LƯỜI — chỉ mở khi thật sự gặp công ty chưa đăng nhập đầu
     # tiên, và dùng lại cho các công ty/lượt thử sau, đỡ tốn thời gian mở lại
@@ -9481,6 +9488,15 @@ def _run_batch(batch_id: int, cids: list, body: dict):
     def _xu_ly_1_cong_ty(cid):
         if batch.get("cancel"):
             return
+        gioi_han_cty.acquire()
+        try:
+            if batch.get("cancel"):
+                return
+            _xu_ly_1_cong_ty_that(cid)
+        finally:
+            gioi_han_cty.release()
+
+    def _xu_ly_1_cong_ty_that(cid):
         item = batch["items"].get(cid)
         try:
             # Đặt vào current_list + khởi tạo job NGAY TỪ ĐẦU (kể cả trước khi
@@ -9490,6 +9506,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             with batch_lock:
                 batch.setdefault("current_list", []).append(cid)
             FETCH_JOBS[cid] = _new_fetch_job()
+            FETCH_JOBS[cid]["limiter"].set_limit(1)   # mỗi công ty 1 luồng (tổng = số công ty cùng lúc)
             # Xóa ghi chú lỗi lần tra cứu TRƯỚC (nếu có) NGAY KHI bắt đầu lượt
             # mới — giống HỆT tra cứu 1 công ty (/api/fetch/{cid}) — để không
             # hiện lỗi CŨ trong lúc lượt MỚI này còn đang chạy (trước đây batch
@@ -9604,7 +9621,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                     cl.remove(cid)
 
     try:
-        with _cf.ThreadPoolExecutor(max_workers=BATCH_SONG_SONG) as executor:
+        with _cf.ThreadPoolExecutor(max_workers=SO_LUONG_TRA_CUU_TOI_DA) as executor:
             for cid in cids:
                 executor.submit(_xu_ly_1_cong_ty, cid)
             # thoát khỏi khối "with" tự động CHỜ hết mọi công ty đã nộp vào
@@ -9753,8 +9770,23 @@ def fetch_batch_do_dang():
     }
 
 
+@app.post("/api/fetch-batch-song-song/{batch_id}")
+def fetch_batch_set_song_song(batch_id: int, body: dict = Body(...)):
+    """Chỉnh số luồng (số công ty chạy cùng lúc, 1-3) NGAY khi batch đang chạy; lưu cho lần sau."""
+    n = _kep_so_luong_tra_cuu(body.get("n", SO_LUONG_TRA_CUU_MAC_DINH))
+    try:
+        _set_setting("so_luong_tra_cuu", str(n))
+    except Exception:
+        pass
+    b = BATCH_JOBS.get(batch_id)
+    if b and b.get("limiter"):
+        b["limiter"].set_limit(n)
+        return {"ok": True, "n": n, "dang_chay": True}
+    return {"ok": True, "n": n, "dang_chay": False}
+
+
 @app.post("/api/fetch-batch-tiep-tuc/{batch_id}")
-def fetch_batch_tiep_tuc(batch_id: int):
+def fetch_batch_tiep_tuc(batch_id: int, tuy_chon: Optional[dict] = Body(default=None)):
     """Tiếp tục 1 batch dở dang: chỉ chạy các công ty CHƯA xong, giữ nguyên
     kết quả các công ty đã xong ở lần trước."""
     cn = db()
@@ -9764,6 +9796,8 @@ def fetch_batch_tiep_tuc(batch_id: int):
         raise HTTPException(404, "Không tìm thấy lượt tra cứu dở dang")
     try:
         body = json.loads(row["body_json"] or "{}")
+        if tuy_chon and tuy_chon.get("so_luong") is not None:
+            body["so_luong"] = _kep_so_luong_tra_cuu(tuy_chon.get("so_luong"))
         items = json.loads(row["items_json"] or "{}")
         order = json.loads(row["order_json"] or "[]")
     except Exception:

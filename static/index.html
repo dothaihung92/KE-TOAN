@@ -659,7 +659,16 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
         <button class="btn ghost" onclick="batchBoQuaDoDang()">Bỏ qua</button>
       </div>
     </div>
-    <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Hệ thống chạy <b>song song tối đa 3 công ty cùng lúc</b> — xong công ty nào thì lập tức chạy tiếp công ty khác trong hàng đợi. Công ty <b>chưa đăng nhập</b> sẽ được <b>tự động đăng nhập</b> (bằng tài khoản/mật khẩu đã lưu) trước khi tra cứu — chỉ bỏ qua nếu công ty đó chưa lưu mật khẩu hoặc tự đăng nhập thất bại.</p>
+    <p class="hint" style="margin-top:0">Chọn nhiều công ty để lấy hóa đơn cùng một kỳ. Chọn <b>số luồng</b> bên dưới = số công ty chạy cùng lúc (mặc định <b>1</b>, tối đa <b>3</b>) — xong công ty nào thì lập tức chạy tiếp công ty khác trong hàng đợi. Công ty <b>chưa đăng nhập</b> sẽ được <b>tự động đăng nhập</b> (bằng tài khoản/mật khẩu đã lưu) trước khi tra cứu — chỉ bỏ qua nếu công ty đó chưa lưu mật khẩu hoặc tự đăng nhập thất bại.</p>
+    <div class="field" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <label for="bSoLuong" style="margin:0;font-weight:600">⚡ Số luồng chạy cùng lúc:</label>
+      <select id="bSoLuong" onchange="batchChinhSoLuong(this.value)" style="padding:7px;border:1px solid var(--line);border-radius:8px">
+        <option value="1" selected>1 luồng (mặc định, ổn định nhất)</option>
+        <option value="2">2 luồng</option>
+        <option value="3">3 luồng (tối đa)</option>
+      </select>
+      <span class="hint" style="margin:0">Chỉnh được cả khi đang chạy, phần mềm nhớ cho lần sau.</span>
+    </div>
     <p class="hint" style="margin-top:-4px;color:var(--muted)">💾 Tiến độ được lưu sau mỗi công ty — nếu phần mềm bị tắt đột ngột hoặc bạn bấm Dừng, lần sau mở lại sẽ được mời <b>tiếp tục phần còn dở dang</b>.</p>
 
     <div class="field">
@@ -3105,6 +3114,18 @@ function hienSoLuongTraCuu(n){
   const sl=document.getElementById('songSongSlider');if(sl)sl.value=n;
   const sv=document.getElementById('songSongVal');if(sv)sv.textContent=n;
   const se=document.getElementById('soLuongSel');if(se)se.value=String(n);
+  const sb=document.getElementById('bSoLuong');if(sb)sb.value=String(n);
+}
+// Tra cứu hàng loạt: số luồng = số công ty chạy cùng lúc (1-3). Đang chạy -> áp dụng ngay.
+async function batchChinhSoLuong(v){
+  v=kepSoLuongTraCuu(v);
+  hienSoLuongTraCuu(v);
+  try{
+    if(batchId) await api(`/api/fetch-batch-song-song/${batchId}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({n:v})});
+    else await api('/api/so-luong-tra-cuu',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({n:v})});
+  }catch(e){}
 }
 function chinhSongSong(v){
   v=kepSoLuongTraCuu(v);
@@ -3304,6 +3325,7 @@ async function watchFetchProgress(fetchCid){
 /* ---------- TRA CỨU HÀNG LOẠT ---------- */
 let batchId=null, batchPollCancel=false, batchHidden=false;
 function openBatchModal(){
+  napSoLuongTraCuu();
   // Đang có 1 lượt tra cứu hàng loạt chạy nền (đã bấm "Ẩn") -> mở lại ĐÚNG
   // khung đang chạy đó (giữ tiến độ), KHÔNG reset lại toàn bộ form về mặc định.
   if(batchId&&batchHidden){hienLaiBatchModal();return}
@@ -3484,7 +3506,8 @@ async function doBatchFetch(){
     const r=await api('/api/fetch-batch',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({cids,tu_ngay:tu,den_ngay:den,loai_list:loai,he_thong_list:heThong,
         dl_buy:dl,dl_sell:dl,lay_ngan_hang:document.getElementById('bNganHang').checked,
-        luu_ket_xuat:document.getElementById('bLuuKetXuat').checked})});
+        luu_ket_xuat:document.getElementById('bLuuKetXuat').checked,
+        so_luong:kepSoLuongTraCuu(document.getElementById('bSoLuong').value)})});
     await batchTheoDoi(r.batch_id);
   }catch(e){toast('Lỗi: '+e.message,'err');}
   btn.disabled=false;btn.innerHTML='🚀 Bắt đầu tra cứu';
@@ -3629,7 +3652,9 @@ async function batchTiepTuc(){
   document.getElementById('batchBar').style.width='0%';
   document.getElementById('batchProgressText').textContent='Tiếp tục phần còn dở dang...';
   try{
-    const r=await api(`/api/fetch-batch-tiep-tuc/${batchDoDangId}`,{method:'POST'});
+    const r=await api(`/api/fetch-batch-tiep-tuc/${batchDoDangId}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({so_luong:kepSoLuongTraCuu(document.getElementById('bSoLuong').value)})});
     await batchTheoDoi(r.batch_id);
   }catch(e){toast('Lỗi khi tiếp tục: '+e.message,'err');}
   btn.disabled=false;btn.innerHTML='🚀 Bắt đầu tra cứu';

@@ -70,4 +70,54 @@ assert 'id="soLuongSel"' in html and "/api/so-luong-tra-cuu" in html
 assert "SPEED_SONG_SONG" not in html
 print("PASS 4: giao diện chọn 1/2/3 luồng, mặc định 1.")
 
+# 5) Tra cứu hàng loạt: số luồng = số công ty chạy cùng lúc (mặc định 1, tối đa 3), mỗi công ty 1 luồng
+class _Cl:
+    token = "x"
+
+
+def _chay_batch(body):
+    dang = [0]
+    max_dang = [0]
+    lim_cty = []
+    khoa = threading.Lock()
+
+    def _gia_fetch(cid, b):
+        lim_cty.append(server.FETCH_JOBS[cid]["limiter"].get_limit())
+        with khoa:
+            dang[0] += 1
+            max_dang[0] = max(max_dang[0], dang[0])
+        time.sleep(0.05)
+        with khoa:
+            dang[0] -= 1
+    goc = (server._run_fetch_job, server.get_client, server._batch_luu_db, server._xoa_loi_tra_cuu)
+    server._run_fetch_job = _gia_fetch
+    server.get_client = lambda cid: _Cl()
+    server._batch_luu_db = lambda *a, **k: None
+    server._xoa_loi_tra_cuu = lambda *a, **k: None
+    cids = list(range(9001, 9007))
+    bid = 424242
+    server.BATCH_JOBS[bid] = {"running": True, "cancel": False, "total": len(cids), "done": 0,
+                              "current_list": [], "started": time.time(), "order": cids,
+                              "items": {c: {"status": "pending"} for c in cids}}
+    try:
+        server._run_batch(bid, cids, body)
+    finally:
+        (server._run_fetch_job, server.get_client, server._batch_luu_db, server._xoa_loi_tra_cuu) = goc
+        server.BATCH_JOBS.pop(bid, None)
+        for c in cids:
+            server.FETCH_JOBS.pop(c, None)
+    return max_dang[0], lim_cty
+
+
+_kho["so_luong_tra_cuu"] = "1"
+m, lc = _chay_batch({})
+assert m == 1 and set(lc) == {1}, (m, lc)
+m, lc = _chay_batch({"so_luong": 3})
+assert 1 < m <= 3 and set(lc) == {1}, (m, lc)
+m, lc = _chay_batch({"so_luong": 9})
+assert m <= 3, m
+assert server.fetch_batch_set_song_song(1, {"n": 5})["n"] == 3
+assert 'id="bSoLuong"' in html and "/api/fetch-batch-song-song/" in html and "so_luong:kepSoLuongTraCuu" in html
+print("PASS 5: hàng loạt mặc định 1 công ty/lần, chọn tối đa 3; mỗi công ty 1 luồng.")
+
 print("\nALL DONE")
