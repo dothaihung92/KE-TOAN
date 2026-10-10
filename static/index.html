@@ -398,18 +398,6 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
         <button type="button" class="btn ghost sm" onclick="toggleDvc2Pass()" id="dvc2Toggle" style="white-space:nowrap">👁 Hiện</button>
       </div>
     </div>
-    <div class="field"><label>Mã đơn vị BHXH <span style="font-weight:400;color:var(--muted)">(mã đơn vị tham gia BHXH — ghi trên hồ sơ D02-LT)</span></label>
-      <input id="m_bhxh_ma_dv" placeholder="VD: TA1234A" autocomplete="off">
-    </div>
-    <div class="field"><label>Tên đăng nhập cổng BHXH <span style="font-weight:400;color:var(--muted)">(gddt.baohiemxahoi.gov.vn)</span></label>
-      <input id="m_bhxh_user" placeholder="Tên đăng nhập cổng BHXH" autocomplete="off">
-    </div>
-    <div class="field"><label>Mật khẩu cổng BHXH <span style="font-weight:400;color:var(--muted)">(dùng khi Kê khai BHXH D02-LT tự điền đăng nhập)</span></label>
-      <div style="display:flex;gap:6px">
-        <input id="m_bhxh_pass" type="password" placeholder="Để trống nếu chưa có" style="flex:1" autocomplete="new-password">
-        <button type="button" class="btn ghost sm" onclick="toggleBhxhPass()" id="bhxhPassToggle" style="white-space:nowrap">👁 Hiện</button>
-      </div>
-    </div>
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
     <div class="field"><label>Thư mục lưu file KẾT XUẤT <span style="font-weight:400;color:var(--muted)">(tự tạo cấu trúc Năm/Quý (hoặc Năm/Tháng nếu công ty đã tự tổ chức thư mục theo tháng) — chỉ dùng khi tick "Lưu file kết xuất" lúc tra cứu)</span></label><input id="m_exportdir" placeholder="VD: D:\\OneDrive\\...\\BAO CAO QUY"></div>
@@ -1505,14 +1493,10 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_dir').value=edit?.save_dir||'';
   document.getElementById('m_exportdir').value=edit?.export_dir||'';
   // lấy mật khẩu thật để điền sẵn (để sửa cho đúng)
-  let pass='',dvc1='',dvc2='',bhU='',bhP='',bhM='';
+  let pass='',dvc1='',dvc2='';
   if(edit?.id){
-    try{const full=await api(`/api/company/${edit.id}`);pass=full.password||'';dvc1=full.dvc_password||'';dvc2=full.dvc_password2||'';
-      bhU=full.bhxh_user||'';bhP=full.bhxh_password||'';bhM=full.bhxh_ma_don_vi||'';}catch{}
+    try{const full=await api(`/api/company/${edit.id}`);pass=full.password||'';dvc1=full.dvc_password||'';dvc2=full.dvc_password2||'';}catch{}
   }
-  document.getElementById('m_bhxh_user').value=bhU;
-  document.getElementById('m_bhxh_ma_dv').value=bhM;
-  document.getElementById('m_bhxh_pass').value=bhP;
   document.getElementById('m_pass').value=pass;
   document.getElementById('m_dvc1').value=dvc1;
   document.getElementById('m_dvc2').value=dvc2;
@@ -1571,11 +1555,6 @@ function togglePass(){
 }
 function toggleDvc1Pass(){
   const inp=document.getElementById('m_dvc1'),btn=document.getElementById('dvc1Toggle');
-  if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
-  else{inp.type='password';btn.textContent='👁 Hiện';}
-}
-function toggleBhxhPass(){
-  const inp=document.getElementById('m_bhxh_pass'),btn=document.getElementById('bhxhPassToggle');
   if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
   else{inp.type='password';btn.textContent='👁 Hiện';}
 }
@@ -2589,9 +2568,6 @@ async function saveCompany(){
     export_dir:document.getElementById('m_exportdir').value.trim(),
     dvc_password:document.getElementById('m_dvc1').value.trim(),
     dvc_password2:document.getElementById('m_dvc2').value.trim(),
-    bhxh_user:document.getElementById('m_bhxh_user').value.trim(),
-    bhxh_ma_don_vi:document.getElementById('m_bhxh_ma_dv').value.trim(),
-    bhxh_password:document.getElementById('m_bhxh_pass').value.trim(),
     mst_khac:document.getElementById('m_mst_khac').value.trim(),
     dia_chi:document.getElementById('m_dia_chi').value.trim(),
     ma_cqt_noi_nop:document.getElementById('m_ma_cqt').value.trim(),
@@ -4476,129 +4452,8 @@ function moBangLuong(){
         <div style="font-size:18px;font-weight:700;color:#8a1f3a">Thang Bảng Lương</div>
         <div style="font-size:13px;color:var(--muted);margin-top:6px">Hệ thống thang lương, bảng lương theo Bảng lương</div>
       </div>
-      <div onclick="moBhxh()" style="flex:1;min-width:240px;max-width:320px;cursor:pointer;border:2px solid #1f4f8a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
-           onmouseover="this.style.background='#eef3fb'" onmouseout="this.style.background='#fff'">
-        <div style="font-size:38px;margin-bottom:8px">🏥</div>
-        <div style="font-size:18px;font-weight:700;color:#1f4f8a">Kê Khai BHXH (D02-LT)</div>
-        <div style="font-size:13px;color:var(--muted);margin-top:6px">Báo tăng/giảm/điều chỉnh lương từ Bảng lương; mở cổng gddt.baohiemxahoi.gov.vn, đính kèm file</div>
-      </div>
     </div>`;
 }
-
-/* ----- KÊ KHAI BHXH — D02-LT: lập từ Bảng Lương, xuất Excel, mở cổng BHXH + đính kèm file (người dùng tự ký, tự nộp) ----- */
-let bhDL=null, bhMau=null, bhMauTen='';
-function bhEsc(s){return vbEsc(s)}
-function moBhxh(){
-  if(!current){toast('Chọn công ty trước','err');return}
-  nlDMMode=null;
-  document.getElementById('nhapLieuHome').style.display='none';
-  document.getElementById('nhapLieuContent').style.display='block';
-  const d=new Date();
-  const nam=parseInt(localStorage.getItem('blNam')||'',10)||d.getFullYear();
-  document.getElementById('nhapLieuBody').innerHTML=`
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-      <button class="btn ghost sm" onclick="moBangLuong()">← Chọn loại khác</button>
-      <h3 style="margin:0;color:#1f4f8a">🏥 Kê khai BHXH — D02-LT (báo tăng / giảm / điều chỉnh)</h3>
-    </div>
-    <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
-      Phần mềm lập danh sách từ <b>Bảng Lương đã lưu</b> (so tháng này với tháng trước), xuất file Excel, mở cổng BHXH và <b>đính kèm file</b> vào màn hình nhập Excel của hồ sơ.
-      Phần mềm <b>KHÔNG tự ký số, KHÔNG tự bấm Nộp</b> — bạn kiểm tra trên cổng rồi tự ký và nộp. Mã phương án (TM/GH/TL…) và mẫu biểu cần kế toán đối chiếu với quy định đang áp dụng.
-    </div>
-    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
-      <legend style="font-weight:700;font-size:13px">Tài khoản cổng gddt.baohiemxahoi.gov.vn <span style="font-weight:400;color:var(--muted)">(lưu chung với Sửa công ty)</span></legend>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-        <label style="font-size:12px;display:flex;flex-direction:column">Mã đơn vị BHXH<input id="bhMaDv" style="padding:7px;border:1px solid var(--line);border-radius:8px;width:140px"></label>
-        <label style="font-size:12px;display:flex;flex-direction:column">Tên đăng nhập<input id="bhTenDn" style="padding:7px;border:1px solid var(--line);border-radius:8px;min-width:170px"></label>
-        <label style="font-size:12px;display:flex;flex-direction:column">Mật khẩu<input id="bhMk" type="password" placeholder="(để trống = giữ mật khẩu đã lưu)" style="padding:7px;border:1px solid var(--line);border-radius:8px;min-width:220px"></label>
-        <label style="font-size:12px;display:flex;flex-direction:column">Mã cơ quan BHXH (nếu có)<input id="bhMaCq" style="padding:7px;border:1px solid var(--line);border-radius:8px;width:140px"></label>
-        <button class="btn sm" onclick="bhLuuCauHinh()">💾 Lưu tài khoản</button>
-        <span id="bhCoMk" class="hint" style="margin:0"></span>
-      </div>
-    </fieldset>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
-      <label style="font-size:12px;display:flex;flex-direction:column">Tháng<select id="bhThang" style="padding:7px;border:1px solid var(--line);border-radius:8px">${Array.from({length:12},(_,i)=>`<option value="${i+1}" ${i===d.getMonth()?'selected':''}>Tháng ${i+1}</option>`).join('')}</select></label>
-      <label style="font-size:12px;display:flex;flex-direction:column">Năm<input id="bhNam" type="number" value="${nam}" style="padding:7px;border:1px solid var(--line);border-radius:8px;width:90px"></label>
-      <button class="btn" onclick="bhLap()">📋 Lập danh sách D02-LT</button>
-      <label class="btn ghost sm" style="cursor:pointer">📄 Dùng file mẫu tải từ cổng BHXH<input type="file" accept=".xlsx" style="display:none" onchange="bhChonMau(this)"></label>
-      <span id="bhMauTen" class="hint" style="margin:0"></span>
-    </div>
-    <div id="bhKetQua"></div>`;
-  bhTaiCauHinh();
-}
-async function bhTaiCauHinh(){
-  try{const c=await api(`/api/bhxh/${current}/cau-hinh`);
-    document.getElementById('bhMaDv').value=c.ma_don_vi||'';document.getElementById('bhTenDn').value=c.ten_dang_nhap||'';document.getElementById('bhMaCq').value=c.ma_co_quan||'';
-    document.getElementById('bhCoMk').textContent=c.co_mat_khau?'✓ Đã lưu mật khẩu':'Chưa lưu mật khẩu';
-  }catch(e){}
-}
-async function bhLuuCauHinh(){
-  try{await api(`/api/bhxh/${current}/cau-hinh`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ma_don_vi:document.getElementById('bhMaDv').value,ten_dang_nhap:document.getElementById('bhTenDn').value,mat_khau:document.getElementById('bhMk').value,ma_co_quan:document.getElementById('bhMaCq').value})});
-    document.getElementById('bhMk').value='';toast('Đã lưu tài khoản BHXH','ok');bhTaiCauHinh();
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-function bhChonMau(inp){
-  const f=inp.files&&inp.files[0];if(!f)return;
-  const r=new FileReader();
-  r.onload=()=>{bhMau=r.result;bhMauTen=f.name;document.getElementById('bhMauTen').innerHTML=`Mẫu: <b>${bhEsc(f.name)}</b> <a href="#" onclick="bhMau=null;bhMauTen='';this.parentNode.textContent='';return false">bỏ</a>`;};
-  r.readAsDataURL(f);
-}
-async function bhLap(){
-  const nam=parseInt(document.getElementById('bhNam').value,10), thang=parseInt(document.getElementById('bhThang').value,10);
-  const box=document.getElementById('bhKetQua');box.innerHTML='<div class="hint">Đang lập danh sách…</div>';
-  try{bhDL=await api(`/api/bhxh/${current}/d02?nam=${nam}&thang=${thang}`);bhVe();}
-  catch(e){box.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${bhEsc(e.message)}</div>`}
-}
-function bhVe(){
-  const box=document.getElementById('bhKetQua');const D=bhDL;if(!D)return;
-  const pa=Object.entries(D.phuong_an||{});
-  const cb=(D.canh_bao||[]).map(t=>`<div style="background:#fdecec;border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:13px">⚠️ ${bhEsc(t)}</div>`).join('');
-  if(!D.rows.length){box.innerHTML=cb+`<div class="hint">Tháng ${D.thang}/${D.nam} không có biến động tăng/giảm/điều chỉnh lương so với tháng trước.</div>`;return}
-  const o=(i,k,w)=>`<input value="${bhEsc(D.rows[i][k])}" onchange="bhDL.rows[${i}].${k}=this.value" style="width:${w}px;padding:4px;border:1px solid var(--line);border-radius:6px">`;
-  box.innerHTML=cb+`
-    <div style="overflow:auto;max-height:60vh;border:1px solid var(--line);border-radius:10px">
-    <table style="border-collapse:collapse;font-size:12.5px;width:100%"><thead style="position:sticky;top:0;background:#eef3fb"><tr>
-      ${['Chọn','Họ và tên','Mã số BHXH','Số CCCD/ĐDCN','Ngày sinh','Giới tính','Chức vụ','Mức lương đóng','Mức cũ','Từ tháng','Phương án','Ghi chú'].map(h=>`<th style="padding:6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap">${h}</th>`).join('')}
-    </tr></thead><tbody>${D.rows.map((r,i)=>`<tr style="${r.can_bo_sung&&r.can_bo_sung.length?'background:#fffbea':''}">
-      <td style="padding:4px"><input type="checkbox" ${r.chon?'checked':''} onchange="bhDL.rows[${i}].chon=this.checked"></td>
-      <td style="padding:4px;white-space:nowrap"><b>${bhEsc(r.ten)}</b>${r.can_bo_sung&&r.can_bo_sung.length?`<div style="font-size:11px;color:#a66">thiếu: ${bhEsc(r.can_bo_sung.join(', '))}</div>`:''}</td>
-      <td style="padding:4px">${o(i,'ma_bhxh',110)}</td><td style="padding:4px">${o(i,'cccd',120)}</td>
-      <td style="padding:4px">${o(i,'ngay_sinh',90)}</td><td style="padding:4px">${o(i,'gioi_tinh',55)}</td>
-      <td style="padding:4px">${o(i,'chuc_vu',120)}</td><td style="padding:4px">${o(i,'muc_luong',100)}</td>
-      <td style="padding:4px;color:var(--muted)">${r.muc_luong_cu===''?'':Number(r.muc_luong_cu).toLocaleString('vi-VN')}</td>
-      <td style="padding:4px">${o(i,'tu_thang',70)}</td>
-      <td style="padding:4px"><select onchange="bhDL.rows[${i}].phuong_an=this.value" style="padding:4px;border-radius:6px">${pa.map(([k,v])=>`<option value="${k}" ${k===r.phuong_an?'selected':''}>${k} — ${bhEsc(v)}</option>`).join('')}</select></td>
-      <td style="padding:4px">${o(i,'ghi_chu',160)}</td></tr>`).join('')}</tbody></table></div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
-      <button class="btn" onclick="bhXuat()">📥 Xuất Excel D02-LT</button>
-      <button class="btn ghost" onclick="bhMoTrang()">🌐 Mở cổng BHXH & điền đăng nhập</button>
-      <button class="btn ghost" onclick="bhDinhKem()">📎 Đính kèm file vào trang BHXH đang mở</button>
-      <button class="btn ghost sm" onclick="bhDong()">✖ Đóng cửa sổ BHXH</button>
-    </div>
-    <div class="hint" style="margin-top:8px">Cách làm: (1) Xuất Excel D02-LT → (2) Mở cổng BHXH, gõ captcha, đăng nhập → (3) Trên cổng mở hồ sơ D02-LT, bấm nhập từ Excel để hiện ô chọn file → (4) bấm "Đính kèm file…" → (5) kiểm tra trên cổng rồi TỰ ký số và Nộp.</div>
-    <div id="bhThongBao" style="margin-top:8px;font-size:13px"></div>`;
-}
-function bhBao(t,loi){const e=document.getElementById('bhThongBao');if(e)e.innerHTML=`<div style="background:${loi?'#fdecec':'#e9f6ee'};border-radius:8px;padding:8px 10px">${bhEsc(t)}</div>`}
-async function bhXuat(){
-  try{
-    const r=await api(`/api/bhxh/${current}/d02/xuat`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({nam:bhDL.nam,thang:bhDL.thang,rows:bhDL.rows,mau_b64:bhMau||''})});
-    const ten=`D02-LT_${String(bhDL.thang).padStart(2,'0')}_${bhDL.nam}.xlsx`;
-    dl(await r.blob(),ten);
-    bhBao('Đã xuất '+ten+(bhMau?' (điền vào file mẫu '+bhMauTen+')':'')+'. Đã lưu sẵn bản để đính kèm vào cổng BHXH.');
-  }catch(e){bhBao('Lỗi xuất Excel: '+e.message,true)}
-}
-async function bhMoTrang(){
-  bhBao('Đang mở cổng BHXH…');
-  try{const r=await api(`/api/bhxh/${current}/mo-trang`,{method:'POST'});bhBao(r.thong_bao);}
-  catch(e){bhBao('Lỗi: '+e.message,true)}
-}
-async function bhDinhKem(){
-  try{const r=await api(`/api/bhxh/${current}/dinh-kem`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({nam:bhDL.nam,thang:bhDL.thang})});bhBao(r.thong_bao);}
-  catch(e){bhBao(e.message,true)}
-}
-async function bhDong(){try{await api(`/api/bhxh/${current}/dong`,{method:'POST'});bhBao('Đã đóng cửa sổ BHXH.');}catch(e){}}
 
 /* ----- HỢP ĐỒNG LAO ĐỘNG / QUY CHẾ LƯƠNG / THANG BẢNG LƯƠNG (dựng từ Danh Sách Nhân Viên + Bảng Lương) ----- */
 const VB_TEN={hd:'Hợp Đồng Lao Động',tv:'Hợp Đồng Thử Việc',pt:'Hợp Đồng Part-time',qc:'Quy Chế Lương',tl:'Thang Bảng Lương'};
