@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.146"
+APP_BUILD = "2026-10-10.147"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44859,6 +44859,429 @@ def tmdt_shopee_don_hang(cid: int, tu_ngay: str = "", den_ngay: str = ""):
                 "so_san_pham": len(o.get("item_list") or []),
             })
     return {"tong_don": len(don_hang), "don_hang": don_hang}
+
+
+
+# ============================================================
+#  KÊ KHAI BHXH — D02-LT (báo tăng / giảm / điều chỉnh lao động)
+#  Lập danh sách từ Bảng Lương đã lưu (+ Danh Sách NV), xuất Excel để nhập vào cổng
+#  gddt.baohiemxahoi.gov.vn, mở cổng + điền sẵn đăng nhập, đính kèm file vào trang đang mở.
+#  Phần mềm KHÔNG tự ký số, KHÔNG tự bấm Nộp — người dùng kiểm tra rồi tự ký và nộp.
+# ============================================================
+BHXH_URL = "https://gddt.baohiemxahoi.gov.vn/"
+# Mã phương án theo mẫu D02-LT (cần kế toán đối chiếu lại với danh mục đang áp dụng trên cổng BHXH).
+BHXH_PHUONG_AN = {
+    "TM": "Tăng mới",
+    "ON": "Đi làm lại",
+    "TL": "Tăng lương / điều chỉnh tăng mức đóng",
+    "GL": "Giảm lương / điều chỉnh giảm mức đóng",
+    "GH": "Giảm hẳn (nghỉ việc)",
+    "KL": "Nghỉ không lương",
+    "TS": "Nghỉ thai sản",
+    "OF": "Nghỉ ốm",
+}
+BHXH_COT_D02 = ["STT", "Họ và tên", "Mã số BHXH", "Số CCCD/ĐDCN", "Ngày sinh", "Giới tính", "Chức vụ/chức danh",
+                "Mức lương đóng", "Mức lương cũ", "Từ tháng", "Đến tháng", "Phương án", "Ghi chú"]
+BHXH_DRIVERS = {}          # {cid: webdriver} — trình duyệt đang mở cổng BHXH
+
+
+def _bhxh_dam_bao_bang(conn):
+    conn.execute("CREATE TABLE IF NOT EXISTS bhxh_cfg (company_id INTEGER PRIMARY KEY, ma_don_vi TEXT, "
+                 "mat_khau TEXT, ma_co_quan TEXT, updated_at TEXT)")
+
+
+def _bhxh_khoa(ma, ten):
+    ma = vbld.ma_goc_phien_ban(str(ma or "").strip()).lower()
+    return ("ma", ma) if ma else ("ten", vbld._chuan(ten))
+
+
+def _bhxh_ngay(v):
+    if isinstance(v, datetime.datetime):
+        v = v.date()
+    if isinstance(v, datetime.date):
+        return v.strftime("%d/%m/%Y")
+    return str(v or "").strip()
+
+
+def _bhxh_thang_truoc(nam, thang):
+    return (nam, thang - 1) if thang > 1 else (nam - 1, 12)
+
+
+def _bhxh_dong_thang(rows):
+    """Dòng bảng lương 1 tháng -> {khoá người: {ma, ten, chuc_vu, luong_cb}} của những người CÓ đóng BHXH tháng đó."""
+    kq = {}
+    for r in rows or []:
+        if not r.get("dong_bh"):
+            continue
+        k = _bhxh_khoa(r.get("ma"), r.get("ten"))
+        if not k[1]:
+            continue
+        kq[k] = {"ma": vbld.ma_goc_phien_ban(str(r.get("ma") or "").strip()), "ten": str(r.get("ten") or "").strip(),
+                 "chuc_vu": str(r.get("chuc_vu") or "").strip(), "luong_cb": _luong_so(r.get("luong_cb"))}
+    return kq
+
+
+def lap_d02_lt(rows_truoc, rows_nay, nam, thang, nv_info=None, da_tung_dong=None):
+    """So BHXH tháng (nam, thang) với tháng trước -> các dòng D02-LT:
+    - có đóng tháng này, tháng trước không: TM (tăng mới) — hoặc ON (đi làm lại) nếu đã từng đóng ở tháng trước đó (da_tung_dong);
+    - tháng trước có đóng, tháng này không: GH (giảm hẳn) — lý do khác (không lương/thai sản/ốm) người dùng tự đổi phương án;
+    - cả hai tháng đều đóng nhưng lương đóng BHXH khác nhau: TL / GL.
+    nv_info: {khoá: {cccd, ngay_sinh, ma_bhxh, gioi_tinh}} lấy từ Danh Sách NV — thiếu thì ghi rõ cần bổ sung, KHÔNG tự điền."""
+    nv_info = nv_info or {}
+    da_tung_dong = da_tung_dong or set()
+    truoc, nay = _bhxh_dong_thang(rows_truoc), _bhxh_dong_thang(rows_nay)
+    tu = f"{int(thang):02d}/{int(nam)}"
+    kq = []
+
+    def them(k, n, pa, muc, muc_cu=""):
+        info = nv_info.get(k) or {}
+        thieu = [ten for ten, v in (("CCCD/ĐDCN", info.get("cccd")), ("Ngày sinh", info.get("ngay_sinh"))) if not str(v or "").strip()]
+        if not str(info.get("gioi_tinh") or "").strip():
+            thieu.append("Giới tính")
+        kq.append({"chon": True, "ma": n["ma"], "ten": n["ten"], "ma_bhxh": str(info.get("ma_bhxh") or "").strip(),
+                   "cccd": str(info.get("cccd") or "").strip(), "ngay_sinh": _bhxh_ngay(info.get("ngay_sinh")),
+                   "gioi_tinh": str(info.get("gioi_tinh") or "").strip(), "chuc_vu": n["chuc_vu"],
+                   "muc_luong": muc, "muc_luong_cu": muc_cu, "tu_thang": tu, "den_thang": "",
+                   "phuong_an": pa, "ghi_chu": BHXH_PHUONG_AN.get(pa, ""),
+                   "can_bo_sung": thieu})
+    for k, n in nay.items():
+        if k not in truoc:
+            them(k, n, "ON" if k in da_tung_dong else "TM", n["luong_cb"])
+        elif round(n["luong_cb"]) != round(truoc[k]["luong_cb"]):
+            them(k, n, "TL" if n["luong_cb"] > truoc[k]["luong_cb"] else "GL", n["luong_cb"], truoc[k]["luong_cb"])
+    for k, n in truoc.items():
+        if k not in nay:
+            them(k, n, "GH", n["luong_cb"])
+    thu_tu = {"TM": 0, "ON": 1, "TL": 2, "GL": 3, "GH": 4}
+    kq.sort(key=lambda x: (thu_tu.get(x["phuong_an"], 9), vbld._chuan(x["ten"])))
+    return kq
+
+
+def _bhxh_nv_info(header, rows):
+    """Danh Sách NV -> {khoá người: {cccd, ngay_sinh, ma_bhxh, gioi_tinh}} (chỉ lấy cột có sẵn, không đoán)."""
+    cot = {vbld._chuan(h): i for i, h in enumerate(header or [])}
+
+    def lay(r, *ten):
+        for t in ten:
+            i = cot.get(vbld._chuan(t))
+            if i is not None and i < len(r) and r[i] not in (None, ""):
+                return r[i]
+        return ""
+    kq = {}
+    for r in rows or []:
+        ten = str(lay(r, "Họ và tên") or "").strip()
+        if not ten:
+            continue
+        info = {"cccd": str(lay(r, "CCCD", "Số CCCD", "CCCD/Số định danh") or "").strip(),
+                "ngay_sinh": lay(r, "Ngày sinh"), "ma_bhxh": str(lay(r, "Mã số BHXH", "Mã BHXH", "Số sổ BHXH") or "").strip(),
+                "gioi_tinh": str(lay(r, "Giới tính") or "").strip()}
+        for k in (_bhxh_khoa(lay(r, "Mã NV"), ten), ("ten", vbld._chuan(ten))):
+            if k[1]:
+                kq.setdefault(k, info)
+    return kq
+
+
+def _bhxh_lap(cid, nam, thang):
+    """-> (dòng D02-LT, cảnh báo[]) cho tháng (nam, thang) của công ty, lấy từ Bảng Lương đã lưu."""
+    canh_bao = []
+    _ts, bl_nay, _c, _n = _luong_doc_nam(cid, nam)
+    nt, tt = _bhxh_thang_truoc(nam, thang)
+    bl_truoc = bl_nay if nt == nam else _luong_doc_nam(cid, nt)[1]
+    rows_nay, rows_truoc = bl_nay.get("%02d" % thang), bl_truoc.get("%02d" % tt)
+    if not rows_nay:
+        canh_bao.append(f"Chưa có Bảng Lương tháng {thang:02d}/{nam} — hãy lập và lưu Bảng Lương tháng này trước.")
+        return [], canh_bao
+    if not rows_truoc:
+        canh_bao.append(f"Chưa có Bảng Lương tháng {tt:02d}/{nt} (tháng trước) nên MỌI người đóng BHXH tháng {thang:02d}/{nam} "
+                        "đều hiện là Tăng mới — nếu đơn vị đã báo tăng họ từ trước thì bỏ chọn những dòng đó.")
+    da_tung = set()
+    for y in {nam, nt}:
+        thang_y = bl_nay if y == nam else bl_truoc
+        for t, rows in thang_y.items():
+            if (y, int(t)) < (nt, tt):
+                da_tung |= set(_bhxh_dong_thang(rows))
+    d = nhap_lieu_get(cid, loai="nv")
+    kq = lap_d02_lt(rows_truoc or [], rows_nay, nam, thang, _bhxh_nv_info(d.get("header"), d.get("rows")), da_tung)
+    if any(r["can_bo_sung"] for r in kq):
+        canh_bao.append("Một số dòng thiếu thông tin (CCCD/ngày sinh/giới tính) — Danh Sách NV chưa có; bổ sung trực tiếp trong bảng "
+                        "hoặc để cổng BHXH tự lấy từ CSDL dân cư theo số CCCD.")
+    return kq, canh_bao
+
+
+def _bhxh_xuat_xlsx(rows, nam, thang, ten_dv="", mau_bytes=None):
+    """Dòng D02-LT -> bytes xlsx. Có file mẫu (tải từ cổng BHXH) thì điền vào ĐÚNG file mẫu theo tên cột (khớp tên cột,
+    giữ nguyên định dạng mẫu); không có thì xuất bảng chuẩn BHXH_COT_D02."""
+    import openpyxl
+    import re as _re
+    import io as _io
+    chon = [r for r in rows if r.get("chon", True)]
+    gia_tri = lambda r, i: {"STT": i, "Họ và tên": r.get("ten"), "Mã số BHXH": r.get("ma_bhxh"), "Số CCCD/ĐDCN": r.get("cccd"),
+                            "Ngày sinh": r.get("ngay_sinh"), "Giới tính": r.get("gioi_tinh"), "Chức vụ/chức danh": r.get("chuc_vu"),
+                            "Mức lương đóng": r.get("muc_luong"), "Mức lương cũ": r.get("muc_luong_cu"), "Từ tháng": r.get("tu_thang"),
+                            "Đến tháng": r.get("den_thang"), "Phương án": r.get("phuong_an"), "Ghi chú": r.get("ghi_chu")}
+    if mau_bytes:
+        wb = openpyxl.load_workbook(_io.BytesIO(mau_bytes))
+        ws = wb.worksheets[0]
+        # tìm dòng tiêu đề: dòng đầu có ô "họ và tên"/"họ tên"
+        hang_tieu_de, map_cot = None, {}
+        tu_khoa = [("Họ và tên", ("ho va ten", "ho ten")), ("Mã số BHXH", ("ma so bhxh", "ma bhxh", "so so bhxh", "ma so")),
+                   ("Số CCCD/ĐDCN", ("cccd", "dinh danh", "cmnd", "can cuoc")), ("Ngày sinh", ("ngay sinh",)),
+                   ("Giới tính", ("gioi tinh",)), ("Chức vụ/chức danh", ("chuc vu", "chuc danh", "cap bac", "nghe nghiep")),
+                   ("Mức lương cũ", ("luong cu", "muc cu")), ("Mức lương đóng", ("muc luong", "tien luong", "luong")),
+                   ("Từ tháng", ("tu thang",)), ("Đến tháng", ("den thang",)), ("Phương án", ("phuong an",)),
+                   ("Ghi chú", ("ghi chu",)), ("STT", ("stt",))]
+        for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 30)):
+            if any(c.value and any(k in vbld._chuan(str(c.value)) for k in ("ho va ten", "ho ten")) for c in row):
+                hang_tieu_de = row[0].row
+                for c in row:
+                    t = vbld._chuan(str(c.value or ""))
+                    if not t:
+                        continue
+                    for ten, kws in tu_khoa:
+                        if ten not in map_cot.values() and any(k in t for k in kws):
+                            map_cot[c.column] = ten
+                            break
+                break
+        if not hang_tieu_de:
+            raise ValueError("Không tìm thấy dòng tiêu đề (cột 'Họ và tên') trong file mẫu")
+        # ghi ngay dưới dòng tiêu đề; bỏ qua dòng đánh số cột "(1) (2) ..."/"A B ..." nếu mẫu có
+        dong = hang_tieu_de + 1
+        nhan = [str(ws.cell(dong, c).value or "").strip() for c in map_cot]
+        if any(nhan) and all(_re.fullmatch(r"\(?\d+\)?|[A-Z]", x) for x in nhan if x):
+            dong += 1
+        for i, r in enumerate(chon, 1):
+            gt = gia_tri(r, i)
+            for c, ten in map_cot.items():
+                ws.cell(dong + i - 1, c).value = gt.get(ten)
+    else:
+        from openpyxl.styles import Font, Alignment
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "D02-LT"
+        ws.append([f"DANH SÁCH LAO ĐỘNG THAM GIA BHXH, BHYT, BHTN (mẫu D02-LT) — tháng {int(thang):02d}/{int(nam)}"])
+        ws.append([f"Đơn vị: {ten_dv}"])
+        ws.append(BHXH_COT_D02)
+        for c in ws[3]:
+            c.font = Font(bold=True)
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws["A1"].font = Font(bold=True, size=13)
+        for i, r in enumerate(chon, 1):
+            gt = gia_tri(r, i)
+            ws.append([gt[k] for k in BHXH_COT_D02])
+        for col, w in zip("ABCDEFGHIJKLM", (5, 26, 14, 16, 12, 9, 22, 14, 14, 10, 10, 10, 30)):
+            ws.column_dimensions[col].width = w
+    bio = _io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+@app.get("/api/bhxh/{cid}/cau-hinh")
+def bhxh_cau_hinh_get(cid: int):
+    conn = db()
+    try:
+        _bhxh_dam_bao_bang(conn)
+        r = conn.execute("SELECT * FROM bhxh_cfg WHERE company_id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    return {"ma_don_vi": (r["ma_don_vi"] if r else "") or "", "co_mat_khau": bool(r and r["mat_khau"]),
+            "ma_co_quan": (r["ma_co_quan"] if r else "") or "", "url": BHXH_URL}
+
+
+@app.post("/api/bhxh/{cid}/cau-hinh")
+def bhxh_cau_hinh_luu(cid: int, body: dict = Body(...)):
+    ma = str(body.get("ma_don_vi") or "").strip()
+    mk = body.get("mat_khau")
+    cq = str(body.get("ma_co_quan") or "").strip()
+    conn = db()
+    try:
+        _bhxh_dam_bao_bang(conn)
+        cu = conn.execute("SELECT mat_khau FROM bhxh_cfg WHERE company_id=?", (cid,)).fetchone()
+        if mk is None or mk == "":
+            mk = cu["mat_khau"] if cu else ""          # để trống = giữ mật khẩu đã lưu
+        conn.execute("INSERT INTO bhxh_cfg (company_id, ma_don_vi, mat_khau, ma_co_quan, updated_at) VALUES (?,?,?,?,?) "
+                     "ON CONFLICT(company_id) DO UPDATE SET ma_don_vi=excluded.ma_don_vi, mat_khau=excluded.mat_khau, "
+                     "ma_co_quan=excluded.ma_co_quan, updated_at=excluded.updated_at",
+                     (cid, ma, mk, cq, datetime.datetime.now().isoformat(timespec="seconds")))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/bhxh/{cid}/d02")
+def bhxh_d02_get(cid: int, nam: int = 0, thang: int = 0):
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    thang = thang if 1 <= thang <= 12 else datetime.date.today().month
+    rows, canh_bao = _bhxh_lap(cid, nam, thang)
+    return {"nam": nam, "thang": thang, "rows": rows, "canh_bao": canh_bao, "phuong_an": BHXH_PHUONG_AN}
+
+
+def _bhxh_thu_muc(cid):
+    p = os.path.join(DATA_DIR, "bhxh", str(int(cid)))
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+@app.post("/api/bhxh/{cid}/d02/xuat")
+def bhxh_d02_xuat(cid: int, body: dict = Body(...)):
+    """Xuất Excel D02-LT từ các dòng đang xem (người dùng đã sửa). mau_b64: file mẫu tải từ cổng BHXH (tùy chọn).
+    Lưu thêm 1 bản trong data/bhxh/<cid>/ để nút "Đính kèm vào trang BHXH" dùng."""
+    nam = _luong_nam_hop_le(int(body.get("nam") or datetime.date.today().year))
+    thang = int(body.get("thang") or 0)
+    if not 1 <= thang <= 12:
+        raise HTTPException(400, "Tháng không hợp lệ")
+    rows = body.get("rows") or []
+    if not any(r.get("chon", True) for r in rows):
+        raise HTTPException(400, "Chưa chọn dòng nào để xuất")
+    mau = None
+    if body.get("mau_b64"):
+        try:
+            mau = base64.b64decode(str(body["mau_b64"]).split(",")[-1])
+        except Exception:
+            raise HTTPException(400, "File mẫu không đọc được")
+    conn = db()
+    try:
+        c = conn.execute("SELECT ten FROM companies WHERE id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        data = _bhxh_xuat_xlsx(rows, nam, thang, (c["ten"] if c else ""), mau)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    ten = f"D02-LT_{thang:02d}_{nam}.xlsx"
+    duong_dan = os.path.join(_bhxh_thu_muc(cid), ten)
+    from urllib.parse import quote
+    with open(duong_dan, "wb") as f:
+        f.write(data)
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{ten}"', "X-Duong-Dan": quote(duong_dan)})
+
+
+_BHXH_JS_DIEN_DANG_NHAP = r"""
+const [u, p] = arguments;
+const hien = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+const dat = (e, v) => { const s = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  s.call(e, v); e.dispatchEvent(new Event('input', {bubbles: true})); e.dispatchEvent(new Event('change', {bubbles: true})); };
+const mk = [...document.querySelectorAll('input[type=password]')].filter(hien)[0];
+if (!mk) return 'khong_thay_o_mat_khau';
+const o = [...document.querySelectorAll('input')].filter(e => hien(e) && /^(text|email|tel|number|)$/.test(e.type || '') );
+const truoc = o.filter(e => e.compareDocumentPosition(mk) & Node.DOCUMENT_POSITION_FOLLOWING);
+const ten = truoc[truoc.length - 1] || o[0];
+if (ten && u) dat(ten, u);
+if (p) dat(mk, p);
+return ten ? 'ok' : 'khong_thay_o_ten';
+"""
+
+
+@app.post("/api/bhxh/{cid}/mo-trang")
+def bhxh_mo_trang(cid: int):
+    """Mở cổng gddt.baohiemxahoi.gov.vn trong cửa sổ Chrome riêng, điền sẵn mã đơn vị + mật khẩu đã lưu.
+    Mã captcha người dùng tự gõ rồi bấm Đăng nhập (phần mềm không tự giải/không tự bấm)."""
+    conn = db()
+    try:
+        _bhxh_dam_bao_bang(conn)
+        r = conn.execute("SELECT * FROM bhxh_cfg WHERE company_id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    drv = BHXH_DRIVERS.get(cid)
+    if drv is not None:
+        try:
+            drv.title           # còn sống
+        except Exception:
+            drv = None
+    if drv is None:
+        try:
+            drv = _dvc_make_driver(headless=False, esigner=False)
+        except Exception as e:
+            raise HTTPException(500, f"Không mở được Chrome: {e}")
+        BHXH_DRIVERS[cid] = drv
+    try:
+        drv.get(BHXH_URL)
+    except Exception as e:
+        raise HTTPException(502, f"Không vào được cổng BHXH: {e}")
+    ket_qua = "chua_luu_tai_khoan"
+    if r and (r["ma_don_vi"] or r["mat_khau"]):
+        ket_qua = "khong_thay_o_mat_khau"
+        for _ in range(20):                       # chờ trang đăng nhập hiện (tối đa ~10s)
+            try:
+                ket_qua = drv.execute_script(_BHXH_JS_DIEN_DANG_NHAP, r["ma_don_vi"] or "", r["mat_khau"] or "")
+            except Exception:
+                ket_qua = "loi_script"
+            if ket_qua == "ok":
+                break
+            time.sleep(0.5)
+    thong_bao = {"ok": "Đã điền mã đơn vị + mật khẩu. Hãy gõ mã captcha và bấm Đăng nhập trên cửa sổ Chrome.",
+                 "chua_luu_tai_khoan": "Chưa lưu mã đơn vị/mật khẩu BHXH — tự đăng nhập trên cửa sổ Chrome vừa mở.",
+                 }.get(ket_qua, "Không tìm thấy ô đăng nhập trên trang (giao diện cổng có thể đã đổi) — tự đăng nhập trên cửa sổ Chrome vừa mở.")
+    return {"ok": True, "ket_qua": ket_qua, "thong_bao": thong_bao}
+
+
+_BHXH_JS_O_FILE = r"""
+const hien = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+const ds = [...document.querySelectorAll('input[type=file]')];
+ds.forEach(e => { e.style.display = 'block'; e.style.visibility = 'visible'; e.style.opacity = 1; });
+return ds.length;
+"""
+
+
+@app.post("/api/bhxh/{cid}/dinh-kem")
+def bhxh_dinh_kem(cid: int, body: dict = Body(...)):
+    """Đính kèm file Excel D02-LT vừa xuất vào ô chọn file ĐANG CÓ trên trang BHXH (người dùng đã mở tới màn
+    hình 'Nhập từ Excel' của hồ sơ D02-LT). Không bấm Ghi/Ký/Nộp — người dùng tự kiểm tra và thao tác tiếp."""
+    drv = BHXH_DRIVERS.get(cid)
+    if drv is None:
+        raise HTTPException(400, "Chưa mở cổng BHXH — bấm 'Mở cổng BHXH' trước")
+    duong_dan = str(body.get("duong_dan") or "")
+    if not duong_dan:
+        thang, nam = int(body.get("thang") or 0), int(body.get("nam") or 0)
+        duong_dan = os.path.join(_bhxh_thu_muc(cid), f"D02-LT_{thang:02d}_{nam}.xlsx")
+    duong_dan = os.path.abspath(duong_dan)
+    if not duong_dan.startswith(os.path.abspath(_bhxh_thu_muc(cid))) or not os.path.isfile(duong_dan):
+        raise HTTPException(400, "Chưa có file D02-LT của tháng này — bấm 'Xuất Excel D02-LT' trước")
+    from selenium.webdriver.common.by import By
+
+    def _thu(frame_path):
+        so = drv.execute_script(_BHXH_JS_O_FILE)
+        if so:
+            o = drv.find_elements(By.CSS_SELECTOR, "input[type=file]")[-1]
+            o.send_keys(duong_dan)
+            return True
+        for i, f in enumerate(drv.find_elements(By.TAG_NAME, "iframe")):
+            try:
+                drv.switch_to.frame(f)
+                if _thu(frame_path + [i]):
+                    return True
+            except Exception:
+                pass
+            finally:
+                drv.switch_to.parent_frame()
+        return False
+    try:
+        drv.switch_to.default_content()
+        try:
+            drv.switch_to.window(drv.window_handles[-1])     # trang BHXH có thể mở hồ sơ ở tab mới
+        except Exception:
+            pass
+        ok = _thu([])
+        drv.switch_to.default_content()
+    except Exception as e:
+        raise HTTPException(500, f"Không đính kèm được: {e}")
+    if not ok:
+        raise HTTPException(404, "Trang đang mở không có ô chọn file — trên cổng BHXH hãy mở hồ sơ D02-LT, bấm 'Nhập từ Excel' "
+                                 "(hoặc tương tự) để hiện ô chọn file rồi bấm lại nút này")
+    return {"ok": True, "duong_dan": duong_dan,
+            "thong_bao": "Đã đưa file vào ô chọn file trên trang BHXH. Hãy kiểm tra dữ liệu trên cổng, sau đó TỰ ký số và bấm Nộp."}
+
+
+@app.post("/api/bhxh/{cid}/dong")
+def bhxh_dong(cid: int):
+    drv = BHXH_DRIVERS.pop(cid, None)
+    if drv is not None:
+        try:
+            drv.quit()
+        except Exception:
+            pass
+    return {"ok": True}
 
 
 if __name__ == "__main__":
