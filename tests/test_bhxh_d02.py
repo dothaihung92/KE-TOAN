@@ -98,16 +98,34 @@ goc_db, goc_dd = server.DB_PATH, server.DATA_DIR
 server.DB_PATH = os.path.join(tmp, "t.db")
 server.DATA_DIR = tmp
 try:
+    server.init_db()
+    conn = server.db()
+    conn.execute("INSERT INTO companies (id, ten, mst) VALUES (9, 'Cty Chín', '0300000009')")
+    conn.execute("INSERT INTO companies (id, ten, mst) VALUES (10, 'Cty Mười', '0300000010')")
+    conn.commit()
+    conn.close()
     server.bhxh_cau_hinh_luu(9, {"ma_don_vi": "TA1234", "mat_khau": "bi-mat"})
     server.bhxh_cau_hinh_luu(9, {"ma_don_vi": "TA1234", "mat_khau": ""})
     c = server.bhxh_cau_hinh_get(9)
     assert c["ma_don_vi"] == "TA1234" and c["co_mat_khau"] and "mat_khau" not in c
-
-    server.init_db()
+    # lưu chung với thông tin công ty: Sửa công ty thấy được, sửa công ty không gửi kèm / mật khẩu trống thì giữ nguyên
+    ct = server.get_company_detail(9)
+    assert ct["bhxh_user"] == "TA1234" and ct["bhxh_password"] == "bi-mat"
+    server.update_company(9, {"ten": "Cty Chín", "mst": "0300000009"})
+    ct = server.get_company_detail(9)
+    assert ct["bhxh_user"] == "TA1234" and ct["bhxh_password"] == "bi-mat"
+    server.update_company(9, {"ten": "Cty Chín", "mst": "0300000009", "bhxh_user": "TA9999", "bhxh_password": ""})
+    ct = server.get_company_detail(9)
+    assert ct["bhxh_user"] == "TA9999" and ct["bhxh_password"] == "bi-mat"
+    server.update_company(9, {"ten": "Cty Chín", "mst": "0300000009", "bhxh_user": "TA9999", "bhxh_password": "moi"})
+    assert server._bhxh_tai_khoan(9)[:2] == ("TA9999", "moi")
+    # dữ liệu bản trước (bảng bhxh_cfg) tự chuyển sang thông tin công ty
     conn = server.db()
-    conn.execute("INSERT INTO companies (id, ten, mst) VALUES (9, 'Cty Chín', '0300000009')")
+    conn.execute("INSERT INTO bhxh_cfg (company_id, ma_don_vi, mat_khau) VALUES (10, 'CU10', 'pw10')")
     conn.commit()
     conn.close()
+    assert server._bhxh_tai_khoan(10)[:2] == ("CU10", "pw10")
+    assert server.get_company_detail(10)["bhxh_password"] == "pw10"
     r = server.bhxh_d02_xuat(9, {"nam": 2026, "thang": 5, "rows": [dict(x) for x in kq]})
     from urllib.parse import unquote
     p_luu = unquote(r.headers["x-duong-dan"])
@@ -131,6 +149,7 @@ print("PASS 5: lưu tài khoản BHXH (không trả mật khẩu ra ngoài); đ�
 
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert 'onclick="moBhxh()"' in html and "KHÔNG tự ký số, KHÔNG tự bấm Nộp" in html
+assert 'id="m_bhxh_user"' in html and 'id="m_bhxh_pass"' in html and "bhxh_password:document.getElementById('m_bhxh_pass')" in html
 src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
 i0 = src.index("#  KÊ KHAI BHXH — D02-LT")
 khoi = src[i0:src.index('if __name__ == "__main__":', i0)]

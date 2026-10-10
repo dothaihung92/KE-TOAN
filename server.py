@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-10.147"
+APP_BUILD = "2026-10-10.148"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1780,6 +1780,10 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password TEXT")
     if "dvc_password2" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN dvc_password2 TEXT")
+    if "bhxh_user" not in ccols:        # tài khoản cổng gddt.baohiemxahoi.gov.vn (mã đơn vị) — nhập ở Sửa công ty
+        conn.execute("ALTER TABLE companies ADD COLUMN bhxh_user TEXT")
+    if "bhxh_password" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN bhxh_password TEXT")
     if "last_fetch_error" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN last_fetch_error TEXT")
     if "last_fetch_error_at" not in ccols:
@@ -2182,7 +2186,7 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, created_at, bhxh_user, bhxh_password) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), _chuan_duong_dan(data.get("export_dir")),
@@ -2194,7 +2198,9 @@ def add_company(data: dict = Body(...)):
          (data.get("ten_cqt_noi_nop") or "").strip(),
          (data.get("nguoi_ky") or "").strip(),
          (data.get("no_mac_dinh") or "").strip(),
-         datetime.datetime.now().isoformat())
+         datetime.datetime.now().isoformat(),
+         (data.get("bhxh_user") or "").strip(),
+         (data.get("bhxh_password") or "").strip())
     )
     conn.commit()
     conn.close()
@@ -2215,7 +2221,7 @@ def update_company(cid: int, data: dict = Body(...)):
     # Nếu password để trống -> GIỮ password cũ (không xóa)
     cur = conn.execute(
         "SELECT password, dvc_password, dvc_password2, dia_chi, ma_cqt_noi_nop, "
-        "ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
+        "ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, data_dir, bhxh_user, bhxh_password FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
@@ -2257,14 +2263,22 @@ def update_company(cid: int, data: dict = Body(...)):
     data_dir = (data.get("data_dir") or "").strip()
     if not data_dir:
         data_dir = (cur["data_dir"] if cur and "data_dir" in cur.keys() else "") or ""
+    # Tài khoản cổng BHXH: không gửi kèm -> giữ cũ; mật khẩu gửi rỗng -> giữ cũ (như mật khẩu Thuế/DVC)
+    bhxh_user = data.get("bhxh_user")
+    if bhxh_user is None:
+        bhxh_user = (cur["bhxh_user"] if cur else "") or ""
+    bhxh_user = str(bhxh_user).strip()
+    bhxh_pw = data.get("bhxh_password")
+    if bhxh_pw is None or bhxh_pw == "":
+        bhxh_pw = (cur["bhxh_password"] if cur else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=?, no_mac_dinh=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=?, no_mac_dinh=?, bhxh_user=?, bhxh_password=? WHERE id=?",
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
          data_dir, _chuan_duong_dan(data.get("export_dir")),
          dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
-         dia_chi, ma_cqt, ten_cqt, nguoi_ky, no_mac_dinh, cid)
+         dia_chi, ma_cqt, ten_cqt, nguoi_ky, no_mac_dinh, bhxh_user, str(bhxh_pw).strip(), cid)
     )
     conn.commit()
     conn.close()
@@ -45075,33 +45089,46 @@ def _bhxh_xuat_xlsx(rows, nam, thang, ten_dv="", mau_bytes=None):
     return bio.getvalue()
 
 
-@app.get("/api/bhxh/{cid}/cau-hinh")
-def bhxh_cau_hinh_get(cid: int):
+def _bhxh_tai_khoan(cid):
+    """(mã đơn vị, mật khẩu, mã cơ quan) cổng BHXH — lưu ở thông tin công ty (Sửa công ty). Bản trước lưu ở bảng
+    bhxh_cfg: nếu công ty chưa có thì lấy từ đó và chuyển sang thông tin công ty."""
     conn = db()
     try:
         _bhxh_dam_bao_bang(conn)
-        r = conn.execute("SELECT * FROM bhxh_cfg WHERE company_id=?", (cid,)).fetchone()
+        c = conn.execute("SELECT bhxh_user, bhxh_password FROM companies WHERE id=?", (cid,)).fetchone()
+        cu = conn.execute("SELECT * FROM bhxh_cfg WHERE company_id=?", (cid,)).fetchone()
+        u, p = ((c["bhxh_user"] or "") if c else ""), ((c["bhxh_password"] or "") if c else "")
+        if c and cu and not (u or p) and (cu["ma_don_vi"] or cu["mat_khau"]):
+            u, p = cu["ma_don_vi"] or "", cu["mat_khau"] or ""
+            conn.execute("UPDATE companies SET bhxh_user=?, bhxh_password=? WHERE id=?", (u, p, cid))
+            conn.commit()
+        return u, p, ((cu["ma_co_quan"] if cu else "") or "")
     finally:
         conn.close()
-    return {"ma_don_vi": (r["ma_don_vi"] if r else "") or "", "co_mat_khau": bool(r and r["mat_khau"]),
-            "ma_co_quan": (r["ma_co_quan"] if r else "") or "", "url": BHXH_URL}
+
+
+@app.get("/api/bhxh/{cid}/cau-hinh")
+def bhxh_cau_hinh_get(cid: int):
+    u, p, cq = _bhxh_tai_khoan(cid)
+    return {"ma_don_vi": u, "co_mat_khau": bool(p), "ma_co_quan": cq, "url": BHXH_URL}
 
 
 @app.post("/api/bhxh/{cid}/cau-hinh")
 def bhxh_cau_hinh_luu(cid: int, body: dict = Body(...)):
+    """Lưu tài khoản cổng BHXH vào thông tin công ty (cùng chỗ với ô trong Sửa công ty). Mật khẩu trống = giữ cũ."""
+    u, p, _cq = _bhxh_tai_khoan(cid)
     ma = str(body.get("ma_don_vi") or "").strip()
     mk = body.get("mat_khau")
+    if mk is None or mk == "":
+        mk = p
     cq = str(body.get("ma_co_quan") or "").strip()
     conn = db()
     try:
         _bhxh_dam_bao_bang(conn)
-        cu = conn.execute("SELECT mat_khau FROM bhxh_cfg WHERE company_id=?", (cid,)).fetchone()
-        if mk is None or mk == "":
-            mk = cu["mat_khau"] if cu else ""          # để trống = giữ mật khẩu đã lưu
-        conn.execute("INSERT INTO bhxh_cfg (company_id, ma_don_vi, mat_khau, ma_co_quan, updated_at) VALUES (?,?,?,?,?) "
-                     "ON CONFLICT(company_id) DO UPDATE SET ma_don_vi=excluded.ma_don_vi, mat_khau=excluded.mat_khau, "
-                     "ma_co_quan=excluded.ma_co_quan, updated_at=excluded.updated_at",
-                     (cid, ma, mk, cq, datetime.datetime.now().isoformat(timespec="seconds")))
+        conn.execute("UPDATE companies SET bhxh_user=?, bhxh_password=? WHERE id=?", (ma, mk, cid))
+        conn.execute("INSERT INTO bhxh_cfg (company_id, ma_co_quan, updated_at) VALUES (?,?,?) "
+                     "ON CONFLICT(company_id) DO UPDATE SET ma_co_quan=excluded.ma_co_quan, updated_at=excluded.updated_at",
+                     (cid, cq, datetime.datetime.now().isoformat(timespec="seconds")))
         conn.commit()
     finally:
         conn.close()
@@ -45177,12 +45204,7 @@ return ten ? 'ok' : 'khong_thay_o_ten';
 def bhxh_mo_trang(cid: int):
     """Mở cổng gddt.baohiemxahoi.gov.vn trong cửa sổ Chrome riêng, điền sẵn mã đơn vị + mật khẩu đã lưu.
     Mã captcha người dùng tự gõ rồi bấm Đăng nhập (phần mềm không tự giải/không tự bấm)."""
-    conn = db()
-    try:
-        _bhxh_dam_bao_bang(conn)
-        r = conn.execute("SELECT * FROM bhxh_cfg WHERE company_id=?", (cid,)).fetchone()
-    finally:
-        conn.close()
+    ma_dv, mat_khau, _cq = _bhxh_tai_khoan(cid)
     drv = BHXH_DRIVERS.get(cid)
     if drv is not None:
         try:
@@ -45200,18 +45222,18 @@ def bhxh_mo_trang(cid: int):
     except Exception as e:
         raise HTTPException(502, f"Không vào được cổng BHXH: {e}")
     ket_qua = "chua_luu_tai_khoan"
-    if r and (r["ma_don_vi"] or r["mat_khau"]):
+    if ma_dv or mat_khau:
         ket_qua = "khong_thay_o_mat_khau"
         for _ in range(20):                       # chờ trang đăng nhập hiện (tối đa ~10s)
             try:
-                ket_qua = drv.execute_script(_BHXH_JS_DIEN_DANG_NHAP, r["ma_don_vi"] or "", r["mat_khau"] or "")
+                ket_qua = drv.execute_script(_BHXH_JS_DIEN_DANG_NHAP, ma_dv, mat_khau)
             except Exception:
                 ket_qua = "loi_script"
             if ket_qua == "ok":
                 break
             time.sleep(0.5)
     thong_bao = {"ok": "Đã điền mã đơn vị + mật khẩu. Hãy gõ mã captcha và bấm Đăng nhập trên cửa sổ Chrome.",
-                 "chua_luu_tai_khoan": "Chưa lưu mã đơn vị/mật khẩu BHXH — tự đăng nhập trên cửa sổ Chrome vừa mở.",
+                 "chua_luu_tai_khoan": "Chưa lưu tài khoản BHXH (Sửa công ty → Tài khoản cổng BHXH) — tự đăng nhập trên cửa sổ Chrome vừa mở.",
                  }.get(ket_qua, "Không tìm thấy ô đăng nhập trên trang (giao diện cổng có thể đã đổi) — tự đăng nhập trên cửa sổ Chrome vừa mở.")
     return {"ok": True, "ket_qua": ket_qua, "thong_bao": thong_bao}
 
