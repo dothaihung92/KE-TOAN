@@ -104,16 +104,18 @@ try:
     conn.execute("INSERT INTO companies (id, ten, mst) VALUES (10, 'Cty Mười', '0300000010')")
     conn.commit()
     conn.close()
-    server.bhxh_cau_hinh_luu(9, {"ma_don_vi": "TA1234", "mat_khau": "bi-mat"})
-    server.bhxh_cau_hinh_luu(9, {"ma_don_vi": "TA1234", "mat_khau": ""})
+    server.bhxh_cau_hinh_luu(9, {"ten_dang_nhap": "TA1234", "ma_don_vi": "DV01", "mat_khau": "bi-mat"})
+    server.bhxh_cau_hinh_luu(9, {"ten_dang_nhap": "TA1234", "mat_khau": ""})
     c = server.bhxh_cau_hinh_get(9)
-    assert c["ma_don_vi"] == "TA1234" and c["co_mat_khau"] and "mat_khau" not in c
+    assert c["ten_dang_nhap"] == "TA1234" and c["ma_don_vi"] == "DV01" and c["co_mat_khau"] and "mat_khau" not in c
     # lưu chung với thông tin công ty: Sửa công ty thấy được, sửa công ty không gửi kèm / mật khẩu trống thì giữ nguyên
     ct = server.get_company_detail(9)
-    assert ct["bhxh_user"] == "TA1234" and ct["bhxh_password"] == "bi-mat"
+    assert ct["bhxh_user"] == "TA1234" and ct["bhxh_password"] == "bi-mat" and ct["bhxh_ma_don_vi"] == "DV01"
     server.update_company(9, {"ten": "Cty Chín", "mst": "0300000009"})
     ct = server.get_company_detail(9)
-    assert ct["bhxh_user"] == "TA1234" and ct["bhxh_password"] == "bi-mat"
+    assert ct["bhxh_user"] == "TA1234" and ct["bhxh_password"] == "bi-mat" and ct["bhxh_ma_don_vi"] == "DV01"
+    server.update_company(9, {"ten": "Cty Chín", "mst": "0300000009", "bhxh_ma_don_vi": "DV02"})
+    assert server.get_company_detail(9)["bhxh_ma_don_vi"] == "DV02"
     server.update_company(9, {"ten": "Cty Chín", "mst": "0300000009", "bhxh_user": "TA9999", "bhxh_password": ""})
     ct = server.get_company_detail(9)
     assert ct["bhxh_user"] == "TA9999" and ct["bhxh_password"] == "bi-mat"
@@ -130,7 +132,7 @@ try:
     from urllib.parse import unquote
     p_luu = unquote(r.headers["x-duong-dan"])
     assert os.path.isfile(p_luu) and p_luu.endswith("D02-LT_05_2026.xlsx")
-    assert openpyxl.load_workbook(io.BytesIO(r.body)).active["A2"].value == "Đơn vị: Cty Chín"
+    assert openpyxl.load_workbook(io.BytesIO(r.body)).active["A2"].value == "Đơn vị: Cty Chín — Mã đơn vị: DV02"
 
     class _Drv:
         pass
@@ -149,6 +151,7 @@ print("PASS 5: lưu tài khoản BHXH (không trả mật khẩu ra ngoài); đ�
 
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert 'onclick="moBhxh()"' in html and "KHÔNG tự ký số, KHÔNG tự bấm Nộp" in html
+assert 'id="m_bhxh_ma_dv"' in html and "bhxh_ma_don_vi:document.getElementById('m_bhxh_ma_dv')" in html
 assert 'id="m_bhxh_user"' in html and 'id="m_bhxh_pass"' in html and "bhxh_password:document.getElementById('m_bhxh_pass')" in html
 src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
 i0 = src.index("#  KÊ KHAI BHXH — D02-LT")

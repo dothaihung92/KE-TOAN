@@ -398,8 +398,11 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
         <button type="button" class="btn ghost sm" onclick="toggleDvc2Pass()" id="dvc2Toggle" style="white-space:nowrap">👁 Hiện</button>
       </div>
     </div>
-    <div class="field"><label>Tài khoản cổng BHXH <span style="font-weight:400;color:var(--muted)">(gddt.baohiemxahoi.gov.vn — mã đơn vị / tên đăng nhập)</span></label>
-      <input id="m_bhxh_user" placeholder="VD: mã đơn vị BHXH" autocomplete="off">
+    <div class="field"><label>Mã đơn vị BHXH <span style="font-weight:400;color:var(--muted)">(mã đơn vị tham gia BHXH — ghi trên hồ sơ D02-LT)</span></label>
+      <input id="m_bhxh_ma_dv" placeholder="VD: TA1234A" autocomplete="off">
+    </div>
+    <div class="field"><label>Tên đăng nhập cổng BHXH <span style="font-weight:400;color:var(--muted)">(gddt.baohiemxahoi.gov.vn)</span></label>
+      <input id="m_bhxh_user" placeholder="Tên đăng nhập cổng BHXH" autocomplete="off">
     </div>
     <div class="field"><label>Mật khẩu cổng BHXH <span style="font-weight:400;color:var(--muted)">(dùng khi Kê khai BHXH D02-LT tự điền đăng nhập)</span></label>
       <div style="display:flex;gap:6px">
@@ -1502,12 +1505,13 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_dir').value=edit?.save_dir||'';
   document.getElementById('m_exportdir').value=edit?.export_dir||'';
   // lấy mật khẩu thật để điền sẵn (để sửa cho đúng)
-  let pass='',dvc1='',dvc2='',bhU='',bhP='';
+  let pass='',dvc1='',dvc2='',bhU='',bhP='',bhM='';
   if(edit?.id){
     try{const full=await api(`/api/company/${edit.id}`);pass=full.password||'';dvc1=full.dvc_password||'';dvc2=full.dvc_password2||'';
-      bhU=full.bhxh_user||'';bhP=full.bhxh_password||'';}catch{}
+      bhU=full.bhxh_user||'';bhP=full.bhxh_password||'';bhM=full.bhxh_ma_don_vi||'';}catch{}
   }
   document.getElementById('m_bhxh_user').value=bhU;
+  document.getElementById('m_bhxh_ma_dv').value=bhM;
   document.getElementById('m_bhxh_pass').value=bhP;
   document.getElementById('m_pass').value=pass;
   document.getElementById('m_dvc1').value=dvc1;
@@ -2586,6 +2590,7 @@ async function saveCompany(){
     dvc_password:document.getElementById('m_dvc1').value.trim(),
     dvc_password2:document.getElementById('m_dvc2').value.trim(),
     bhxh_user:document.getElementById('m_bhxh_user').value.trim(),
+    bhxh_ma_don_vi:document.getElementById('m_bhxh_ma_dv').value.trim(),
     bhxh_password:document.getElementById('m_bhxh_pass').value.trim(),
     mst_khac:document.getElementById('m_mst_khac').value.trim(),
     dia_chi:document.getElementById('m_dia_chi').value.trim(),
@@ -4502,7 +4507,8 @@ function moBhxh(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
       <legend style="font-weight:700;font-size:13px">Tài khoản cổng gddt.baohiemxahoi.gov.vn <span style="font-weight:400;color:var(--muted)">(lưu chung với Sửa công ty)</span></legend>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-        <label style="font-size:12px;display:flex;flex-direction:column">Mã đơn vị / tên đăng nhập<input id="bhMaDv" style="padding:7px;border:1px solid var(--line);border-radius:8px;min-width:180px"></label>
+        <label style="font-size:12px;display:flex;flex-direction:column">Mã đơn vị BHXH<input id="bhMaDv" style="padding:7px;border:1px solid var(--line);border-radius:8px;width:140px"></label>
+        <label style="font-size:12px;display:flex;flex-direction:column">Tên đăng nhập<input id="bhTenDn" style="padding:7px;border:1px solid var(--line);border-radius:8px;min-width:170px"></label>
         <label style="font-size:12px;display:flex;flex-direction:column">Mật khẩu<input id="bhMk" type="password" placeholder="(để trống = giữ mật khẩu đã lưu)" style="padding:7px;border:1px solid var(--line);border-radius:8px;min-width:220px"></label>
         <label style="font-size:12px;display:flex;flex-direction:column">Mã cơ quan BHXH (nếu có)<input id="bhMaCq" style="padding:7px;border:1px solid var(--line);border-radius:8px;width:140px"></label>
         <button class="btn sm" onclick="bhLuuCauHinh()">💾 Lưu tài khoản</button>
@@ -4521,13 +4527,13 @@ function moBhxh(){
 }
 async function bhTaiCauHinh(){
   try{const c=await api(`/api/bhxh/${current}/cau-hinh`);
-    document.getElementById('bhMaDv').value=c.ma_don_vi||'';document.getElementById('bhMaCq').value=c.ma_co_quan||'';
+    document.getElementById('bhMaDv').value=c.ma_don_vi||'';document.getElementById('bhTenDn').value=c.ten_dang_nhap||'';document.getElementById('bhMaCq').value=c.ma_co_quan||'';
     document.getElementById('bhCoMk').textContent=c.co_mat_khau?'✓ Đã lưu mật khẩu':'Chưa lưu mật khẩu';
   }catch(e){}
 }
 async function bhLuuCauHinh(){
   try{await api(`/api/bhxh/${current}/cau-hinh`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ma_don_vi:document.getElementById('bhMaDv').value,mat_khau:document.getElementById('bhMk').value,ma_co_quan:document.getElementById('bhMaCq').value})});
+      body:JSON.stringify({ma_don_vi:document.getElementById('bhMaDv').value,ten_dang_nhap:document.getElementById('bhTenDn').value,mat_khau:document.getElementById('bhMk').value,ma_co_quan:document.getElementById('bhMaCq').value})});
     document.getElementById('bhMk').value='';toast('Đã lưu tài khoản BHXH','ok');bhTaiCauHinh();
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
