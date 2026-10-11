@@ -4495,9 +4495,10 @@ const SS_TRUONG={
   dai_dien:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['chuc_danh','Chức danh (vd Giám đốc)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']],
   chu_so_huu_moi:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']]
 };
+SS_TRUONG.bo_sung=[['noi_dung','Nội dung bổ sung, cập nhật (mỗi ý cách nhau bằng dấu ; hoặc xuống dòng)']];
 SS_TRUONG.hien_tai=[['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp Giấy chứng nhận ĐKDN'],['ngay_dieu_le','Ngày thông qua Điều lệ (dd/mm/yyyy)']];
 SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
-const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
+const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],['bo_sung','Chỉ bổ sung, cập nhật thông tin đăng ký doanh nghiệp (không cần Quyết định)','bo_sung'],
   ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['chu_so_huu','Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ mới là cá nhân)','chu_so_huu_moi']];
 let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=null;
 const ssKey=()=>'gpkdSoan_'+(current||0);
@@ -4527,9 +4528,9 @@ function ssThuThap(){
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
   du.chu_so_huu_moi={};SS_TRUONG.chu_so_huu_moi.forEach(([k])=>du.chu_so_huu_moi[k]=gt('chu_so_huu_moi',k));
-  ['hien_tai','uy_quyen'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
+  ['hien_tai','uy_quyen','bo_sung'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
-  du.tao_quyet_dinh=ck('ss_tao_quyet_dinh');du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.de_nghi_xac_nhan=ck('ss_de_nghi_xac_nhan');
+  du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.de_nghi_xac_nhan=ck('ss_de_nghi_xac_nhan');
   du.dn.ngay_tay=document.getElementById('ss_dn_ngay_lap')?.dataset.tay==='1';
   return du;
 }
@@ -4591,7 +4592,7 @@ async function moSoanGpkd(){
         </div>`).join('')}
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
-      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_quyet_dinh" checked onchange="ssLuuTam()"> Soạn <b>Quyết định của chủ sở hữu / Nghị quyết</b> về nội dung thay đổi</label>
+      <div class="hint" style="margin:0 0 6px"><b>Quyết định của chủ sở hữu / Nghị quyết</b> được phần mềm <b>tự soạn</b> khi có đổi tên, địa chỉ, vốn điều lệ, ngành nghề, người đại diện hoặc chủ sở hữu; <b>không soạn</b> khi chỉ bổ sung/cập nhật thông tin.</div>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_de_nghi_xac_nhan" checked onchange="ssLuuTam()"> Đánh dấu "Đề nghị cấp Giấy xác nhận thay đổi nội dung đăng ký doanh nghiệp" trong Giấy đề nghị (Mẫu 12)</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_uy_quyen" onchange="document.getElementById('ssUq').style.display=this.checked?'block':'none';ssLuuTam()"> Soạn <b>Giấy ủy quyền</b> nộp hồ sơ và nhận kết quả</label>
       <div id="ssUq" style="display:none;margin:6px 0 0 26px;padding:8px 10px;border-left:3px solid #cfe5da">${ssCacO('uy_quyen')}
@@ -4615,9 +4616,9 @@ async function moSoanGpkd(){
     ['ten','dia_chi','von'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     Object.entries((du.dai_dien||[{}])[0]||{}).forEach(([k,v])=>dat('ss_dai_dien_'+k,v));
     Object.entries(du.chu_so_huu_moi||{}).forEach(([k,v])=>dat('ss_chu_so_huu_moi_'+k,v));
-    ['hien_tai','uy_quyen'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
+    ['hien_tai','uy_quyen','bo_sung'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
-    ck('ss_tao_quyet_dinh',du.tao_quyet_dinh!==undefined?du.tao_quyet_dinh:true);ck('ss_de_nghi_xac_nhan',du.de_nghi_xac_nhan!==undefined?du.de_nghi_xac_nhan:true);ck('ss_tao_uy_quyen',du.tao_uy_quyen);
+    ck('ss_de_nghi_xac_nhan',du.de_nghi_xac_nhan!==undefined?du.de_nghi_xac_nhan:true);ck('ss_tao_uy_quyen',du.tao_uy_quyen);
     const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
     const nl=document.getElementById('ss_dn_ngay_lap');if(nl&&(du.dn||{}).ngay_tay)nl.dataset.tay='1';
     (du.loai||[]).forEach(k=>{const e=document.getElementById('ssL_'+k);if(e)e.checked=true});

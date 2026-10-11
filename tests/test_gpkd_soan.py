@@ -241,3 +241,21 @@ assert not any(n.startswith("Giay_uy_quyen") for n in _z2.namelist())
 _m12b = "\n".join(p.text for p in _docx.Document(_io.BytesIO(_z2.read([n for n in _z2.namelist() if n.startswith("Mau12")][0]))).paragraphs)
 assert "THÔNG BÁO THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ" not in _m12b
 print("PASS: hồ sơ đổi địa chỉ — Mẫu 12 + thông báo thuế + Quyết định + Giấy ủy quyền, ngày lập mặc định hôm nay.")
+
+
+# Quyết định tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật thì KHÔNG soạn (không còn ô tick)
+def _ten_tep(loai, **kw):
+    du = {"loai": loai, "dn": {"ten": "Cty A", "ma_so": "0300000001", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên"}, **kw}
+    return _zf.ZipFile(_io.BytesIO(_g.tao_ho_so(du)[0])).namelist()
+
+
+for _l, _co in (("ten", True), ("dia_chi", True), ("von", True), ("nganh", True), ("dai_dien", True), ("chu_so_huu", True), ("bo_sung", False)):
+    _n = _ten_tep([_l], bo_sung={"noi_dung": "Cập nhật số điện thoại; Cập nhật email"})
+    assert any(x.startswith("Quyet_dinh") for x in _n) == _co, (_l, _n)
+_nbs = _ten_tep(["bo_sung"], bo_sung={"noi_dung": "Cập nhật số điện thoại: 0900000000; Cập nhật email: a@b.vn"})
+_m12bs = _g.soan_mau12({"loai": ["bo_sung"], "dn": {"ten": "Cty A"}, "bo_sung": {"noi_dung": "Cập nhật số điện thoại: 0900000000; Cập nhật email: a@b.vn"}})
+_tx = "\n".join(p.text for p in _m12bs.paragraphs)
+assert "B. BỔ SUNG, CẬP NHẬT THÔNG TIN ĐĂNG KÝ DOANH NGHIỆP" in _tx and "Cập nhật số điện thoại: 0900000000" in _tx and "Cập nhật email: a@b.vn" in _tx
+assert "ĐĂNG KÝ THAY ĐỔI ĐỊA CHỈ TRỤ SỞ" not in _tx
+assert 'id="ss_tao_quyet_dinh"' not in _h and "tự soạn" in _h
+print("PASS: Quyết định tự soạn khi đổi tên/địa chỉ/vốn/ngành/người đại diện/chủ sở hữu; chỉ bổ sung thì không.")

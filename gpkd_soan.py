@@ -321,7 +321,9 @@ _MARKER_12 = [("A", r"^A\.\s*ĐĂNG KÝ THAY ĐỔI NỘI DUNG"), ("TEN", r"^Đ�
               ("CO_DONG", r"^THÔNG BÁO THAY ĐỔI CỔ ĐÔNG"), ("THUE", r"^THÔNG BÁO THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ"),
               ("CSHHL", r"^THÔNG BÁO THAY ĐỔI THÔNG TIN VỀ CHỦ SỞ HỮU HƯỞNG LỢI"), ("B", r"^B\.\s*BỔ SUNG"),
               ("C", r"^C\.\s*ĐỀ NGHỊ HIỆU ĐÍNH"), ("KET", r"^Trường hợp hồ sơ đăng ký doanh nghiệp hợp lệ")]
-_GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "thue": "THUE", "cshhl": "CSHHL"}
+_GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "thue": "THUE", "cshhl": "CSHHL", "bo_sung": "B"}
+# Thay đổi cần Quyết định/Nghị quyết của chủ sở hữu/HĐTV/ĐHĐCĐ (tự soạn). Chỉ bổ sung/cập nhật thông tin (mục B Mẫu 12) thì KHÔNG cần.
+CAN_QUYET_DINH = {"ten", "dia_chi", "von", "nganh", "dai_dien", "chu_so_huu"}
 
 
 def soan_mau12(du):
@@ -385,6 +387,13 @@ def soan_mau12(du):
                 if "□" in r.text:
                     r.text = r.text.replace("□", "☒", 1)
                     break
+    if "bo_sung" in loai and "B" in cac:
+        lo, hi = cac["B"]
+        dong = [x.strip() for x in re.split(r"[\n;]+", str((du.get("bo_sung") or {}).get("noi_dung") or "")) if x.strip()]
+        trong = [c for c in m.ch[lo:hi] if c.tag == qn("w:p") and re.fullmatch(r"[…\.\s]+", _chu(c) or "")]
+        for c, t in zip(trong, dong):
+            ps = Paragraph(c, m.doc._body)
+            _thay_khoang(ps, 0, len(_van(ps)), t) if ps.runs else ps.add_run(t)
     if "von" in loai and "VON" in cac:
         v = du.get("von") or {}
         lo, hi = cac["VON"]
@@ -808,7 +817,7 @@ def dien_mau_rieng(noi_dung, bien):
 # ============================================================ GÓI HỒ SƠ
 LOAI_THAY_DOI = {
     "ten": "Thay đổi tên doanh nghiệp", "dia_chi": "Thay đổi địa chỉ trụ sở chính", "von": "Thay đổi vốn điều lệ",
-    "nganh": "Thay đổi ngành, nghề kinh doanh", "dai_dien": "Thay đổi người đại diện theo pháp luật (giám đốc)",
+    "nganh": "Thay đổi ngành, nghề kinh doanh", "bo_sung": "Bổ sung, cập nhật thông tin đăng ký doanh nghiệp", "dai_dien": "Thay đổi người đại diện theo pháp luật (giám đốc)",
     "chu_so_huu": "Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu mới là cá nhân)",
 }
 
@@ -867,8 +876,10 @@ def _danh_muc(du, ds_file, thieu, ghi_chu_nguon):
     for ten, nguon in ds_file:
         d.add_paragraph(f"{ten} ({nguon})", style="List Bullet")
     d.add_heading("II. Giấy tờ thường kèm theo — gợi ý để kiểm tra", level=2)
-    kem = ["Quyết định/Nghị quyết của chủ sở hữu hoặc cấp có thẩm quyền của công ty về nội dung thay đổi (theo Điều lệ công ty) — bản sao hợp lệ.",
-           "Văn bản ủy quyền (nếu người nộp hồ sơ không phải người đại diện theo pháp luật) kèm giấy tờ pháp lý của người được ủy quyền."]
+    kem = []
+    if loai & CAN_QUYET_DINH:
+        kem.append("Quyết định/Nghị quyết của chủ sở hữu hoặc cấp có thẩm quyền của công ty về nội dung thay đổi (theo Điều lệ công ty) — phần mềm đã soạn bản nháp, cần ký.")
+    kem.append("Văn bản ủy quyền (nếu người nộp hồ sơ không phải người đại diện theo pháp luật) kèm giấy tờ pháp lý của người được ủy quyền.")
     if "dai_dien" in loai:
         kem += ["Giấy tờ pháp lý (căn cước/hộ chiếu) của người đại diện theo pháp luật mới — chỉ cần khi không khai thác được qua số định danh cá nhân.",
                 "Thông báo/biên bản chấm dứt chức danh của người đại diện cũ (nếu có).",
@@ -917,7 +928,7 @@ def tao_ho_so(du, mau_rieng=None):
     def them(ten_file, d, nhan, n):
         tep.append((ten_file, _luu_bytes(d)))
         ds_file.append((nhan, ten_nguon(n)))
-    if loai & {"ten", "dia_chi", "von", "nganh"}:
+    if loai & {"ten", "dia_chi", "von", "nganh", "bo_sung"}:
         them(f"Mau12_Giay_de_nghi_thay_doi_noi_dung_DKDN_{ma}.docx", soan_mau12(du), "Mẫu số 12 — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN", 12)
     if "dai_dien" in loai:
         them(f"Mau13_Giay_de_nghi_thay_doi_nguoi_dai_dien_theo_phap_luat_{ma}.docx", soan_mau13(du), "Mẫu số 13 — Giấy đề nghị đăng ký thay đổi người đại diện theo pháp luật", 13)
@@ -925,7 +936,7 @@ def tao_ho_so(du, mau_rieng=None):
     if "chu_so_huu" in loai:
         them(f"Mau15_Giay_de_nghi_thay_doi_chu_so_huu_{ma}.docx", soan_mau15(du), "Mẫu số 15 — Giấy đề nghị đăng ký thay đổi chủ sở hữu công ty TNHH một thành viên", 15)
     canh_bao = []
-    if loai and du.get("tao_quyet_dinh", True):
+    if loai & CAN_QUYET_DINH:                    # tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật thì không
         _, loai_vb, ten_co = _chu_the_quyet_dinh(dn.get("loai_hinh"))
         tep.append((f"Quyet_dinh_{'cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet'}_{ma}.docx", _luu_bytes(soan_quyet_dinh(du))))
         ds_file.append((f"{loai_vb.capitalize()} của {ten_co} về việc thay đổi nội dung đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
