@@ -4279,11 +4279,23 @@ function moXuatKho(){
 /* ----- HỖ TRỢ THAY ĐỔI GPKD: gom dữ liệu hồ sơ đăng ký kinh doanh (Chrome bình thường của người dùng) ra Excel ----- */
 let gpkdKhoi=[];
 function gpkdEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function gpkdLuu(){try{localStorage.setItem('gpkdKhoi',JSON.stringify(gpkdKhoi))}catch(e){}}
+let gpkdCid=0,gpkdLuc='';
+async function gpkdNap(){
+  gpkdKhoi=[];gpkdLuc='';gpkdCid=current||0;
+  if(!current)return;
+  try{const r=await api('/api/gpkd-du-lieu/'+current);gpkdKhoi=r.khoi||[];gpkdLuc=r.luc||''}catch(e){}
+}
+async function gpkdLuu(hien){
+  if(!current||gpkdCid!==current)return;
+  try{const r=await api('/api/gpkd-du-lieu/'+current,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoi:gpkdKhoi})});
+    gpkdLuc=r.luc||'';const e=document.getElementById('gpkdLuc');if(e)e.textContent=gpkdLuc?'Đã lưu lúc '+gpkdLuc:'';
+    if(hien)toast('Đã lưu dữ liệu GPKD của công ty này ('+gpkdKhoi.length+' khối)','ok')}
+  catch(e){toast('Không lưu được dữ liệu GPKD: '+e.message,'err')}
+}
 async function moGpkd(){
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
-  try{gpkdKhoi=JSON.parse(localStorage.getItem('gpkdKhoi')||'[]')||[]}catch(e){gpkdKhoi=[]}
+  await gpkdNap();
   let bm='';try{bm=(await api('/api/dkkd/bookmarklet')).ma}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
     <h3 style="margin:0 0 6px;color:#b5502d">🏢 Hỗ trợ thay đổi GPKD — gom dữ liệu hồ sơ đăng ký kinh doanh ra Excel</h3>
@@ -4362,6 +4374,7 @@ function gpkdVeDs(){
   const tong=gpkdKhoi.reduce((a,k)=>a+k.cap.length,0);
   box.innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <b>Đã gom ${gpkdKhoi.length} khối — ${tong} trường</b>
+      <button class="btn" onclick="gpkdLuu(true)">💾 Lưu dữ liệu</button><span class="hint" id="gpkdLuc" style="margin:0">${gpkdLuc?'Đã lưu lúc '+gpkdLuc:''}</span>
       <button class="btn" onclick="gpkdXuat()">📊 Xuất Excel</button>
       <button class="btn ghost sm" onclick="gpkdXoaHet()">🗑 Xoá hết</button></div>
     ${window.__gpkdChanDoan?`<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">🔎 Chẩn đoán lúc lấy dữ liệu</summary><div style="background:#f6f6f6;border-radius:8px;padding:8px 10px;font-size:12px;white-space:pre-wrap">${gpkdEsc(window.__gpkdChanDoan)}</div></details>`:''}
@@ -4485,7 +4498,7 @@ let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=nul
 const ssKey=()=>'gpkdSoan_'+(current||0);
 function ssEsc(x){return vbEsc(x)}
 function ssHienTrangTuGom(){
-  let khoi=[];try{khoi=JSON.parse(localStorage.getItem('gpkdKhoi')||'[]')||[]}catch(e){}
+  const khoi=gpkdCid===current?gpkdKhoi:[];
   const lay=(re,ten)=>{for(const k of khoi.slice().reverse()){if(ten&&!ten.test(k.khoi||''))continue;const c=(k.cap||[]).find(x=>re.test(x[0]));if(c&&c[1])return c[1]}return ''};
   const ht={ten:lay(/^tên doanh nghiệp viết bằng tiếng việt$/i),ma_so:lay(/^mã số doanh nghiệp$/i),loai_hinh:lay(/^loại hình doanh nghiệp$/i),
     dia_chi:{so_nha:lay(/^số nhà\/đường/i,/^địa chỉ$/i),xa:lay(/^xã\/phường/i,/^địa chỉ$/i),tinh:lay(/^tỉnh\/thành phố/i,/^địa chỉ$/i),dien_thoai:lay(/^điện thoại$/i,/^địa chỉ$/i),email:lay(/^e-?mail$/i,/^địa chỉ$/i),website:lay(/^website$/i,/^địa chỉ$/i)},
@@ -4539,7 +4552,7 @@ async function moSoanGpkd(){
   if(!current){toast('Chọn công ty trước','err');return}
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
-  ssHienTrang=ssHienTrangTuGom();
+  await gpkdNap();ssHienTrang=ssHienTrangTuGom();
   let luu=null;try{luu=JSON.parse(localStorage.getItem(ssKey())||'null')}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
     <h3 style="margin:0 0 6px;color:#2d7a5a">📑 Soạn hồ sơ GPKD — hồ sơ thay đổi đăng ký doanh nghiệp</h3>
@@ -4607,7 +4620,8 @@ function ssLayTuGom(im,ghiDe){
   dat('ss_dn_ten',h.ten);dat('ss_dn_ma_so',h.ma_so);dat('ss_dn_loai_hinh',h.loai_hinh);
   ssHienGoiY();if(ghi&&h.von){const cu=document.getElementById('ss_von_cu'),n=String(h.von).replace(/[^\d]/g,'');if(cu&&n)cu.value=n}
   ssLuuTam();
-  const g=document.getElementById('ssHtGhi');if(g)g.textContent=h.ten||h.ma_so?'Đã lấy: '+(h.ten||'')+' '+(h.ma_so?'(MST '+h.ma_so+')':''):(im?'':'Chưa có hồ sơ đã gom — vào "Hỗ trợ thay đổi GPKD" lấy dữ liệu trước, hoặc nhập tay.');
+  const cty=(typeof companies!=='undefined'?companies:[]).find(c=>c.id===current),lech=cty&&cty.mst&&h.ma_so&&String(cty.mst).replace(/\D/g,'')!==String(h.ma_so).replace(/\D/g,'');
+  const g=document.getElementById('ssHtGhi');if(g)g.textContent=(h.ten||h.ma_so?'Đã lấy: '+(h.ten||'')+' '+(h.ma_so?'(MST '+h.ma_so+')':'')+(lech?' ⚠ MST khác MST công ty đang chọn ('+cty.mst+') — hãy kiểm tra đã gom đúng công ty chưa':''):(im?'':'Chưa có hồ sơ đã gom — vào "Hỗ trợ thay đổi GPKD" lấy dữ liệu trước, hoặc nhập tay.'));
 }
 function ssVeMauRieng(){
   const b=document.getElementById('ssMauRieng');if(!b)return;

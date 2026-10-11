@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.171"
+APP_BUILD = "2026-10-13.172"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9959,6 +9959,26 @@ def fetch_cancel(cid: int):
     if job:
         job["cancel"] = True
     return {"ok": True}
+
+
+@app.get("/api/gpkd-du-lieu/{cid}")
+def gpkd_du_lieu_doc(cid: int):
+    """Dữ liệu GPKD đã gom/lưu RIÊNG của từng công ty (không dùng chung giữa các công ty)."""
+    try:
+        d = json.loads(_get_setting(f"gpkd_du_lieu_{int(cid)}", "") or "{}")
+    except Exception:
+        d = {}
+    return {"khoi": d.get("khoi") or [], "luc": d.get("luc") or ""}
+
+
+@app.put("/api/gpkd-du-lieu/{cid}")
+def gpkd_du_lieu_luu(cid: int, body: dict = Body(...)):
+    khoi = body.get("khoi")
+    if not isinstance(khoi, list):
+        raise HTTPException(400, "Dữ liệu không hợp lệ")
+    luc = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    _set_setting(f"gpkd_du_lieu_{int(cid)}", json.dumps({"khoi": khoi, "luc": luc}, ensure_ascii=False))
+    return {"ok": True, "luc": luc, "so_khoi": len(khoi)}
 
 
 @app.get("/api/so-luong-tra-cuu")

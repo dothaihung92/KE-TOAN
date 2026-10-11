@@ -175,3 +175,22 @@ _h = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 assert "mMoi!==mCu" in _h and "gpkdKhoi=[]" in _h and "ssLayTuGom(true,true)" in _h
 assert "khoi.slice().reverse()" in _h and "ghi=!im||ghiDe" in _h
 print("PASS: MST mới thay dữ liệu gom cũ; bản nháp MST khác tự lấy lại; nút Lấy từ hồ sơ đã gom ghi đè.")
+
+
+# Dữ liệu GPKD lưu RIÊNG từng công ty (API) và giao diện nạp/lưu theo công ty đang chọn
+import tempfile
+_kho = {}
+server._get_setting = lambda k, d="": _kho.get(k, d)
+server._set_setting = lambda k, v: _kho.__setitem__(k, v)
+assert server.gpkd_du_lieu_doc(1)["khoi"] == []
+server.gpkd_du_lieu_luu(1, {"khoi": [{"khoi": "A", "cap": [["x", "1"]]}]})
+server.gpkd_du_lieu_luu(2, {"khoi": [{"khoi": "B", "cap": [["x", "2"]]}, {"khoi": "C", "cap": []}]})
+assert [k["khoi"] for k in server.gpkd_du_lieu_doc(1)["khoi"]] == ["A"]
+assert len(server.gpkd_du_lieu_doc(2)["khoi"]) == 2 and server.gpkd_du_lieu_doc(2)["luc"]
+try:
+    server.gpkd_du_lieu_luu(3, {"khoi": "sai"})
+    raise AssertionError
+except server.HTTPException as e:
+    assert e.status_code == 400
+assert "gpkdNap()" in _h and "💾 Lưu dữ liệu" in _h and "localStorage.getItem('gpkdKhoi')" not in _h
+print("PASS: dữ liệu GPKD lưu riêng từng công ty; Soạn hồ sơ chỉ dùng dữ liệu của công ty đang chọn.")
