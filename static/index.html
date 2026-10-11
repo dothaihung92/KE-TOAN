@@ -4288,7 +4288,8 @@ async function moGpkd(){
     </div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
       <legend style="font-weight:700;font-size:13px">Cách A — nút bookmark (nhanh)</legend>
-      <div style="font-size:13px;margin-bottom:6px">1) Kéo nút này lên <b>thanh dấu trang</b> của Chrome (hoặc bấm "Copy mã" rồi tạo dấu trang mới, dán vào ô URL):
+      <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (chỉ làm 1 lần): <b>kéo</b> nút dưới đây thả lên <b>thanh dấu trang</b> của Chrome — hoặc bấm <b>"Copy mã"</b> rồi làm theo hướng dẫn hiện ra.
+        <div style="color:#c0392b;margin:4px 0">⚠️ KHÔNG dán mã vào thanh địa chỉ (ô gõ trang web) — Chrome sẽ tự bỏ chữ <code>javascript:</code> và chuyển sang tìm Google. Phải dán vào ô <b>URL của dấu trang</b>.</div>
         <a href="${gpkdEsc(bm)}" onclick="toast('Hãy KÉO nút này lên thanh dấu trang, không bấm ở đây','err');return false" style="display:inline-block;padding:4px 10px;border:1px solid #b5502d;border-radius:8px;color:#b5502d;font-weight:700;text-decoration:none">📋 Lấy dữ liệu GPKD</a>
         <button class="btn ghost sm" onclick="gpkdCopyMa()">Copy mã</button></div>
       <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở từng khối hồ sơ (Thông tin chung, Địa chỉ, Ngành nghề, Thành viên…) → bấm nút bookmark → dán vào ô dưới, bấm "Thêm".</div>
@@ -4304,9 +4305,16 @@ async function moGpkd(){
   window.__gpkdBm=bm;
   gpkdVeDs();
 }
+const GPKD_HD_BOOKMARK='Đã copy mã. Tạo nút bookmark trên Chrome bình thường của bạn:\n\n'+
+  '1) Bấm chuột PHẢI vào thanh dấu trang (dòng có "ĐK online", "HKD"...) → chọn "Thêm trang..." (Add page).\n'+
+  '   (Không thấy thanh dấu trang: bấm Ctrl+Shift+B để hiện.)\n'+
+  '2) Ô Tên: Lấy dữ liệu GPKD\n'+
+  '3) Ô URL: bấm Ctrl+V để dán mã vừa copy (mã bắt đầu bằng javascript:) → Lưu.\n\n'+
+  'KHÔNG dán vào thanh địa chỉ — Chrome sẽ bỏ chữ javascript: và chuyển sang tìm Google.\n'+
+  'Dùng: mở khối hồ sơ trên cổng → bấm nút "Lấy dữ liệu GPKD" trên thanh dấu trang → quay lại phần mềm dán vào ô, bấm Thêm.';
 async function gpkdCopyMa(){
-  try{await navigator.clipboard.writeText(window.__gpkdBm||'');toast('Đã copy mã bookmark — tạo dấu trang mới và dán vào ô URL','ok')}
-  catch(e){prompt('Copy mã này:',window.__gpkdBm||'')}
+  try{await navigator.clipboard.writeText(window.__gpkdBm||'');alert(GPKD_HD_BOOKMARK)}
+  catch(e){prompt('Copy mã này (Ctrl+C), rồi tạo dấu trang: chuột phải thanh dấu trang → Thêm trang... → dán vào ô URL:',window.__gpkdBm||'')}
 }
 function gpkdThem(k){
   if(!k||!Array.isArray(k.cap)||!k.cap.length)return false;

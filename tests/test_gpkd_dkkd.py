@@ -66,6 +66,7 @@ html_ui = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8
 src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
 assert "moTmdt" not in html_ui and "/api/tmdt/" not in src
 assert 'onclick="moGpkd()"' in html_ui and "/api/dkkd/doc-file" in html_ui and "gpkdThemDan" in html_ui
+assert "KHÔNG dán mã vào thanh địa chỉ" in html_ui and "Thêm trang..." in html_ui   # Chrome bỏ 'javascript:' khi dán vào thanh địa chỉ
 assert "/api/dkkd/mo-trinh-duyet" not in src and "chrome_dkkd" not in src
 print("PASS 5: giao diện mới (bookmark + file đã lưu), không còn mở Chrome tự động.")
 
