@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.172"
+APP_BUILD = "2026-10-13.173"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44849,8 +44849,8 @@ hop('Đang đọc khối đang mở...');
 ketQua.push(docTrang(document, location.href));
 var daDoc = {}; daDoc[location.href.split('#')[0]] = 1;
 cacTrang(document).forEach(function (d) { try { daDoc[d.location.href.split('#')[0]] = 1; } catch (e) {} });
-var ds = (menu || []).filter(function (m) { return m.url && !daDoc[m.url]; });
-var dsNut = (menu || []).filter(function (m) { return m.nut && chuan(m.ten) !== chuan(ketQua[0].khoi || ''); });
+var ds = (menu || []).filter(function (m) { return m.url && !daDoc[m.url] && !/DW_DOCUMENTEdit\.aspx/i.test(m.url); });
+var dsNut = (menu || []).filter(function (m) { return m.nut && chuan(m.ten) !== chuan(ketQua[0].khoi || '') && chuan(m.ten) !== chuan('Hình thức đăng ký') && chuan(m.ten) !== chuan('Khối dữ liệu'); });
 var tongKhoi = ds.length + dsNut.length, dem = 0;
 var pop = null;
 if (dsNut.length) { pop = window.open('about:blank', '__gpkdCuaSo', 'width=820,height=620'); if (!pop) loi.push('Trình duyệt chặn cửa sổ bật lên — hãy bấm biểu tượng chặn ở thanh địa chỉ, chọn "Luôn cho phép" rồi bấm lại nút'); }
@@ -44893,10 +44893,10 @@ async function choCuaSoDoiTrang(pop, cu) {
   throw new Error('quá 45 giây không tải xong');
 }
 function dsXem(doc) {
-  return [].slice.call(doc.querySelectorAll('a')).filter(function (a) { return /^xem$/i.test(sachT(a.textContent)) && a.closest('tr'); });
+  return [].slice.call(doc.querySelectorAll('a')).filter(function (a) { return /^(xem|sửa đổi|sửa)$/i.test(sachT(a.textContent)) && a.closest('tr'); });
 }
 function tenDongXem(a, k) {
-  var c = a.closest('tr').cells; return (c && c[0] ? sachT(c[0].textContent) : '').slice(0, 60) || ('#' + (k + 1));
+  var c = [].slice.call(a.closest('tr').cells || []).map(function (x) { return sachT(x.textContent); }).filter(function (t) { return t && !/^(xem|sửa đổi|sửa|xóa|xoá)$/i.test(t); }); return (c[0] || '').slice(0, 60) || ('#' + (k + 1));
 }
 var urlTong = ((menu || []).filter(function (m) { return m.url && /DW_DOCUMENTEdit\.aspx/i.test(m.url); })[0] || {}).url || '';
 var dangODangTong = /DW_DOCUMENTEdit\.aspx/i.test(location.pathname);

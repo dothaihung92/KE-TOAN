@@ -4283,7 +4283,7 @@ let gpkdCid=0,gpkdLuc='';
 async function gpkdNap(){
   gpkdKhoi=[];gpkdLuc='';gpkdCid=current||0;
   if(!current)return;
-  try{const r=await api('/api/gpkd-du-lieu/'+current);gpkdKhoi=r.khoi||[];gpkdLuc=r.luc||''}catch(e){}
+  try{const r=await api('/api/gpkd-du-lieu/'+current);gpkdKhoi=(r.khoi||[]).filter(k=>!gpkdBoQua(k));gpkdLuc=r.luc||''}catch(e){}
 }
 async function gpkdLuu(hien){
   if(!current||gpkdCid!==current)return;
@@ -4334,8 +4334,11 @@ async function gpkdCopyMa(){
   try{await navigator.clipboard.writeText(window.__gpkdBm||'');alert(GPKD_HD_BOOKMARK)}
   catch(e){prompt('Copy mã này (Ctrl+C), rồi tạo dấu trang: chuột phải thanh dấu trang → Thêm trang... → dán vào ô URL:',window.__gpkdBm||'')}
 }
+const GPKD_BO_QUA=['hình thức đăng ký','khối dữ liệu'];   // 2 khối không cần lấy
+const gpkdBoQua=k=>GPKD_BO_QUA.includes(gpkdChuan(gpkdCha(k)));
 function gpkdThem(k){
   if(!k||!Array.isArray(k.cap)||!k.cap.length)return false;
+  if(gpkdBoQua(k))return false;
   gpkdKhoi=gpkdKhoi.filter(x=>!(x.url&&x.url===k.url&&(x.khoi||'')===(k.khoi||'')));   // dán lại cùng khối -> thay bản cũ
   gpkdKhoi.push({url:k.url||'',khoi:k.khoi||'',tieu_de:k.tieu_de||'',cap:k.cap,ten_file:k.ten_file||''});
   return true;

@@ -113,7 +113,7 @@ assert "contentDocument" in than and "chan_doan" in than    # đọc cả khung 
 assert "it.a.click()" in than and "fm.target = '__gpkdCuaSo'" in than and "window.open('about:blank', '__gpkdCuaSo'" in than
 # tên khối trên trang có thể khác tên menu ("Thông tin vốn" / "Thông tin về vốn"): chỉ loại trang tổng / trang trùng; trang DANH SÁCH thì
 # bấm "Xem" từng dòng để lấy chi tiết (mở lại danh sách rồi bấm dòng kế tiếp)
-assert "/^xem$/i.test(sachT(a.textContent))" in than and "laTrangTong(r)" in than and "dsXem(" in than and "xem chi tiết dòng" in than and "tenDongXem(" in than
+assert "/^(xem|sửa đổi|sửa)$/i.test(sachT(a.textContent))" in than and "laTrangTong(r)" in than and "dsXem(" in than and "xem chi tiết dòng" in than and "tenDongXem(" in than
 assert "khopTen" not in than
 # tên mục (tiêu đề/ dòng 1 ô trước bảng) + ô giới tính dạng chữ đậm (không phải <input>)
 assert "chonTrongNhom(" in than and "mucHienTai" in than and "mucCua(" in than
@@ -163,5 +163,13 @@ print("PASS 5: giao diện mới (bookmark + file đã lưu), không còn mở C
 _js = server._JS_DKKD_TAT_CA
 assert "moTuTrangTong" in _js and "dangODangTong" in _js and "if (!dangODangTong && urlTong) return await moTuTrangTong" in _js
 print("PASS: chạy từ trang một khối vẫn mở được các khối khác qua trang tổng.")
+
+# Danh sách (người đại diện, chủ sở hữu hưởng lợi...): bấm "Sửa đổi" (hoặc "Xem") để vào chi tiết, KHÔNG bấm "Xóa";
+# không lấy 2 khối "Hình thức đăng ký" và "Khối dữ liệu" (đã kiểm bằng trang giả lập).
+assert "(xem|sửa đổi|sửa)" in _js and "xóa|xoá" in _js
+assert "chuan('Hình thức đăng ký')" in _js and "!/DW_DOCUMENTEdit" in _js
+_h2 = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
+assert "GPKD_BO_QUA=['hình thức đăng ký','khối dữ liệu']" in _h2
+print("PASS: bấm Sửa đổi để lấy chi tiết; bỏ qua Hình thức đăng ký và Khối dữ liệu.")
 
 print("\nALL DONE")
