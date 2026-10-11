@@ -945,7 +945,7 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
              onmouseover="this.style.background='#fdf3ee'" onmouseout="this.style.background='#fff'">
           <div style="font-size:38px;margin-bottom:8px">🏢</div>
           <div style="font-size:18px;font-weight:700;color:#b5502d">Hỗ trợ thay đổi GPKD</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:6px">Lấy dữ liệu hồ sơ trên cổng đăng ký kinh doanh (đã đăng nhập) ra Excel</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Gom dữ liệu hồ sơ trên cổng đăng ký kinh doanh ra Excel</div>
         </div>
         <div onclick="moDoiChieuNganHangCty()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #1f6b4a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background='#fff'">
@@ -4270,58 +4270,88 @@ function moXuatKho(){
   xkVeTrangChinh();
   xkTaiTrangThai();
 }
-/* ----- HỖ TRỢ THAY ĐỔI GPKD: lấy dữ liệu hồ sơ trên cổng đăng ký kinh doanh (Chrome riêng đã đăng nhập) ----- */
-let gpkdHen=null;
-function gpkdEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function moGpkd(){
+/* ----- HỖ TRỢ THAY ĐỔI GPKD: gom dữ liệu hồ sơ đăng ký kinh doanh (Chrome bình thường của người dùng) ra Excel ----- */
+let gpkdKhoi=[];
+function gpkdEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function gpkdLuu(){try{localStorage.setItem('gpkdKhoi',JSON.stringify(gpkdKhoi))}catch(e){}}
+async function moGpkd(){
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
-  let cu='';try{cu=localStorage.getItem('gpkdLinks')||''}catch(e){}
+  try{gpkdKhoi=JSON.parse(localStorage.getItem('gpkdKhoi')||'[]')||[]}catch(e){gpkdKhoi=[]}
+  let bm='';try{bm=(await api('/api/dkkd/bookmarklet')).ma}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
-    <h3 style="margin:0 0 6px;color:#b5502d">🏢 Hỗ trợ thay đổi GPKD — lấy dữ liệu hồ sơ đăng ký kinh doanh</h3>
+    <h3 style="margin:0 0 6px;color:#b5502d">🏢 Hỗ trợ thay đổi GPKD — gom dữ liệu hồ sơ đăng ký kinh doanh ra Excel</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
-      Trang hồ sơ (vd <code>…/DW_DOCUMENTEdit.aspx?h=720</code>) chỉ mở được khi đã đăng nhập. Phần mềm dùng <b>cửa sổ Chrome riêng</b>: bạn đăng nhập trong cửa sổ đó (1 lần, phần mềm nhớ phiên),
-      rồi dán link hồ sơ bên dưới. Phần mềm <b>chỉ đọc</b> các cặp "Tiêu đề : Giá trị" — không bấm nút, không gửi/nộp gì.
+      Cổng đăng ký kinh doanh đăng nhập qua <b>VNeID</b> — trang này không cho đăng nhập trong trình duyệt do phần mềm điều khiển,
+      nên bạn <b>đăng nhập và mở hồ sơ bằng Chrome bình thường</b> của bạn, rồi đưa dữ liệu vào đây theo 1 trong 2 cách.
+      Phần mềm chỉ đọc dữ liệu, không gửi gì lên cổng.
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-      <button class="btn" onclick="gpkdMoTrinhDuyet()">🌐 1. Mở Chrome để đăng nhập</button>
-    </div>
-    <label style="font-size:13px;font-weight:600">2. Link hồ sơ (mỗi dòng 1 link):</label>
-    <textarea id="gpkdLinks" rows="6" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:monospace;font-size:12px" placeholder="https://dangkyquamang.dkkd.gov.vn/.../DW_DOCUMENTEdit.aspx?h=720">${gpkdEsc(cu)}</textarea>
-    <label class="chk" style="margin:8px 0"><input type="checkbox" id="gpkdTheoKhoi" checked> Lấy cả các khối khác của cùng hồ sơ (Địa chỉ, Ngành nghề, Thành viên, Người đại diện…) — chỉ đi theo link có cùng mã hồ sơ</label>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn" id="gpkdBtnLay" onclick="gpkdLay()">📥 3. Lấy dữ liệu</button>
-      <button class="btn ghost" onclick="gpkdDung()">■ Dừng</button>
-      <button class="btn ghost" id="gpkdBtnFile" style="display:none" onclick="gpkdTaiFile()">📊 Tải file Excel</button>
-    </div>
-    <div id="gpkdTienDo" style="margin-top:10px;font-size:13px"></div>`;
-  gpkdTheoDoi();
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
+      <legend style="font-weight:700;font-size:13px">Cách A — nút bookmark (nhanh)</legend>
+      <div style="font-size:13px;margin-bottom:6px">1) Kéo nút này lên <b>thanh dấu trang</b> của Chrome (hoặc bấm "Copy mã" rồi tạo dấu trang mới, dán vào ô URL):
+        <a href="${gpkdEsc(bm)}" onclick="toast('Hãy KÉO nút này lên thanh dấu trang, không bấm ở đây','err');return false" style="display:inline-block;padding:4px 10px;border:1px solid #b5502d;border-radius:8px;color:#b5502d;font-weight:700;text-decoration:none">📋 Lấy dữ liệu GPKD</a>
+        <button class="btn ghost sm" onclick="gpkdCopyMa()">Copy mã</button></div>
+      <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở từng khối hồ sơ (Thông tin chung, Địa chỉ, Ngành nghề, Thành viên…) → bấm nút bookmark → dán vào ô dưới, bấm "Thêm".</div>
+      <textarea id="gpkdDan" rows="3" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:monospace;font-size:12px" placeholder="Dán dữ liệu đã copy ở đây (Ctrl+V)"></textarea>
+      <button class="btn sm" style="margin-top:6px" onclick="gpkdThemDan()">➕ Thêm</button>
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
+      <legend style="font-weight:700;font-size:13px">Cách B — file trang đã lưu</legend>
+      <div style="font-size:13px;margin-bottom:6px">Trên cổng, mở từng khối hồ sơ → <b>Ctrl+S</b> → chọn "Webpage, HTML only" → chọn tất cả các file đó ở đây:</div>
+      <input type="file" accept=".html,.htm" multiple onchange="gpkdChonFile(this)">
+    </fieldset>
+    <div id="gpkdDs"></div>`;
+  window.__gpkdBm=bm;
+  gpkdVeDs();
 }
-async function gpkdMoTrinhDuyet(){
-  try{const r=await api('/api/dkkd/mo-trinh-duyet',{method:'POST'});toast(r.thong_bao,'ok');}
-  catch(e){toast('Lỗi: '+e.message,'err')}
+async function gpkdCopyMa(){
+  try{await navigator.clipboard.writeText(window.__gpkdBm||'');toast('Đã copy mã bookmark — tạo dấu trang mới và dán vào ô URL','ok')}
+  catch(e){prompt('Copy mã này:',window.__gpkdBm||'')}
 }
-async function gpkdLay(){
-  const v=document.getElementById('gpkdLinks').value;
-  try{localStorage.setItem('gpkdLinks',v)}catch(e){}
-  try{await api('/api/dkkd/lay-du-lieu',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({links:v,theo_khoi:document.getElementById('gpkdTheoKhoi').checked})});
-    gpkdTheoDoi();
+function gpkdThem(k){
+  if(!k||!Array.isArray(k.cap)||!k.cap.length)return false;
+  gpkdKhoi=gpkdKhoi.filter(x=>!(x.url&&x.url===k.url&&(x.khoi||'')===(k.khoi||'')));   // dán lại cùng khối -> thay bản cũ
+  gpkdKhoi.push({url:k.url||'',khoi:k.khoi||'',tieu_de:k.tieu_de||'',cap:k.cap,ten_file:k.ten_file||''});
+  return true;
+}
+function gpkdThemDan(){
+  const t=document.getElementById('gpkdDan').value.trim();if(!t)return;
+  let n=0;
+  for(const doan of t.split(/\n(?=\s*\{)/)){try{if(gpkdThem(JSON.parse(doan)))n++}catch(e){}}
+  if(!n){toast('Không đọc được dữ liệu — hãy dán đúng đoạn nút bookmark đã copy','err');return}
+  document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã thêm '+n+' khối','ok');
+}
+async function gpkdChonFile(inp){
+  const files=[...(inp.files||[])];if(!files.length)return;
+  const ds=await Promise.all(files.map(f=>f.text().then(t=>({ten:f.name,noi_dung:t}))));
+  try{const r=await api('/api/dkkd/doc-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:ds})});
+    let n=0;(r.khoi||[]).forEach(k=>{if(gpkdThem(k))n++});
+    gpkdLuu();gpkdVeDs();
+    toast(`Đã đọc ${n} file`+((r.loi||[]).length?` — ${r.loi.length} file lỗi: ${r.loi.join('; ')}`:''),(r.loi||[]).length?'err':'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
+  inp.value='';
 }
-async function gpkdDung(){try{await api('/api/dkkd/dung',{method:'POST'});}catch(e){}}
-async function gpkdTheoDoi(){
-  clearTimeout(gpkdHen);
-  const box=document.getElementById('gpkdTienDo');if(!box)return;
-  let t;try{t=await api('/api/dkkd/tien-do');}catch(e){return}
-  box.innerHTML=(t.tong?`<b>${t.dang_chay?'Đang lấy':'Xong'}: ${t.xong}/${t.tong} hồ sơ — ${t.so_truong} trường</b>`:'')+
-    `<div style="max-height:200px;overflow:auto;margin-top:6px">${(t.nhat_ky||[]).map(x=>`<div>${gpkdEsc(x)}</div>`).join('')}</div>`;
-  const b=document.getElementById('gpkdBtnFile');if(b)b.style.display=t.co_file?'':'none';
-  const l=document.getElementById('gpkdBtnLay');if(l)l.disabled=!!t.dang_chay;
-  if(t.dang_chay)gpkdHen=setTimeout(gpkdTheoDoi,1500);
+function gpkdXoa(i){gpkdKhoi.splice(i,1);gpkdLuu();gpkdVeDs()}
+function gpkdXoaHet(){if(!confirm('Xoá toàn bộ dữ liệu đã gom?'))return;gpkdKhoi=[];gpkdLuu();gpkdVeDs()}
+function gpkdVeDs(){
+  const box=document.getElementById('gpkdDs');if(!box)return;
+  if(!gpkdKhoi.length){box.innerHTML='<div class="hint">Chưa có dữ liệu khối nào.</div>';return}
+  const tong=gpkdKhoi.reduce((a,k)=>a+k.cap.length,0);
+  box.innerHTML=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <b>Đã gom ${gpkdKhoi.length} khối — ${tong} trường</b>
+      <button class="btn" onclick="gpkdXuat()">📊 Xuất Excel</button>
+      <button class="btn ghost sm" onclick="gpkdXoaHet()">🗑 Xoá hết</button></div>
+    <div style="max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:10px">
+    <table style="border-collapse:collapse;font-size:12.5px;width:100%"><thead style="position:sticky;top:0;background:#fdf3ee"><tr>
+      <th style="padding:6px;text-align:left">Khối</th><th style="padding:6px;text-align:left">Số trường</th><th style="padding:6px;text-align:left">Link / file</th><th></th></tr></thead><tbody>
+    ${gpkdKhoi.map((k,i)=>`<tr><td style="padding:4px 6px"><b>${gpkdEsc(k.khoi||k.tieu_de||'(không tên)')}</b><div style="font-size:11px;color:var(--muted)">${gpkdEsc(k.cap.slice(0,3).map(c=>c[0]+': '+c[1]).join(' · ').slice(0,160))}</div></td>
+      <td style="padding:4px 6px">${k.cap.length}</td><td style="padding:4px 6px;font-size:11px;word-break:break-all">${gpkdEsc(k.url||k.ten_file)}</td>
+      <td style="padding:4px 6px"><button class="btn ghost sm" onclick="gpkdXoa(${i})">✖</button></td></tr>`).join('')}
+    </tbody></table></div>`;
 }
-async function gpkdTaiFile(){
-  try{const r=await api('/api/dkkd/tai-file');dl(await r.blob(),'GPKD_du_lieu.xlsx');}catch(e){toast('Lỗi: '+e.message,'err')}
+async function gpkdXuat(){
+  try{const r=await api('/api/dkkd/xuat-excel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoi:gpkdKhoi})});
+    dl(await r.blob(),'GPKD_du_lieu.xlsx');}catch(e){toast('Lỗi: '+e.message,'err')}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-11.152"
+APP_BUILD = "2026-10-11.153"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44608,22 +44608,17 @@ async def mo_cua_so_app(request: Request):
 
 
 # ============================================================
-# HỖ TRỢ THAY ĐỔI GPKD — lấy dữ liệu hồ sơ trên cổng đăng ký doanh nghiệp (dangkyquamang.dkkd.gov.vn)
-#  - Trang hồ sơ (vd .../DW_DOCUMENTEdit.aspx?h=720) chỉ mở được khi ĐÃ ĐĂNG NHẬP -> phần mềm mở 1
-#    cửa sổ Chrome RIÊNG với hồ sơ trình duyệt lưu lại (data/chrome_dkkd) để người dùng tự đăng nhập
-#    1 lần (các lần sau giữ phiên), rồi dán danh sách link hồ sơ -> phần mềm lần lượt mở từng link,
-#    đọc các cặp "Tiêu đề : Giá trị" (bảng + ô nhập liệu), gom lại xuất Excel.
-#  - CHỈ ĐỌC: không bấm nút, không gửi form; chỉ đi theo các LINK của CÙNG hồ sơ (cùng tham số định
-#    danh hồ sơ trong đường dẫn, vd h=720) và bỏ qua link có chữ xoá/nộp/gửi/huỷ/ký/thoát...
-#  - Cấu trúc trang chưa được kiểm chứng trên trang thật: đọc theo cách tổng quát, có chẩn đoán.
+# HỖ TRỢ THAY ĐỔI GPKD — gom dữ liệu hồ sơ trên cổng đăng ký doanh nghiệp ra Excel
+#  - Đăng nhập cổng đi qua VNeID (sso.dancuquocgia.gov.vn), trang này TỪ CHỐI hiển thị trong trình duyệt
+#    bị phần mềm điều khiển (log thật bản .152: trang trắng). Phần mềm KHÔNG tìm cách che giấu việc điều
+#    khiển để vượt kiểm tra này -> người dùng đăng nhập và xem hồ sơ bằng CHROME BÌNH THƯỜNG của mình;
+#    dữ liệu đưa vào phần mềm theo 2 cách:
+#      A. Nút bookmark "📋 Lấy dữ liệu GPKD": bấm khi đang mở 1 khối hồ sơ -> copy dữ liệu khối đó (JSON)
+#         -> dán vào phần mềm; lặp lại cho các khối/hồ sơ khác.
+#      B. Lưu trang (Ctrl+S, "Webpage, HTML only") -> chọn nhiều file .html trong phần mềm.
+#  - Đọc các cặp "Tiêu đề : Giá trị" (ô bảng 2/4 cột, giá trị trong input/select/textarea, label for, dt/dd).
+#    Chỉ ĐỌC, không gửi gì lên cổng.
 # ============================================================
-DKKD_URL = "https://dangkyquamang.dkkd.gov.vn/"
-DKKD_PROFILE = os.path.join(DATA_DIR, "chrome_dkkd")
-DKKD_TD = {"drv": None, "lock": threading.Lock(), "job": None}
-_DKKD_TU_CAM = ("xoa", "xóa", "nop", "nộp", "gui", "gửi", "huy", "hủy", "huỷ", "ky so", "ký số", "thoat", "thoát",
-                "dang xuat", "đăng xuất", "logout", "delete", "submit", "thanh toan", "thanh toán", "in ", "print")
-_DKKD_TOI_DA_KHOI = 30
-
 _JS_DKKD_DOC = r"""
 function sach(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
 function giaTri(o) {
@@ -44636,8 +44631,7 @@ function giaTri(o) {
     if (e.tagName === 'SELECT') { var op = e.options[e.selectedIndex]; vs.push(sach(op ? op.text : '')); return; }
     vs.push(sach(e.value));
   });
-  var txt = sach(o.innerText);
-  return vs.filter(function (x) { return x; }).join(' | ') || txt;
+  return vs.filter(function (x) { return x; }).join(' | ') || sach(o.innerText);
 }
 var cap = [], daCo = {};
 function them(k, v) {
@@ -44645,239 +44639,161 @@ function them(k, v) {
   if (!k || k.length > 150 || !v || k === v) return;
   var key = k + '\u0001' + v; if (daCo[key]) return; daCo[key] = 1; cap.push([k, v]);
 }
-// 1) bảng: ô đầu = tiêu đề, ô cuối = giá trị; dòng 4 ô = 2 cặp
 document.querySelectorAll('tr').forEach(function (r) {
   var c = [].slice.call(r.children).filter(function (x) { return x.tagName === 'TD' || x.tagName === 'TH'; });
   if (c.length === 4) { them(c[0].innerText, giaTri(c[1])); them(c[2].innerText, giaTri(c[3])); }
   else if (c.length >= 2) { them(c[0].innerText, giaTri(c[c.length - 1])); }
 });
-// 2) ô nhập có <label for>
 document.querySelectorAll('label[for]').forEach(function (l) {
   var e = document.getElementById(l.getAttribute('for'));
   if (e && /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !/checkbox|radio|hidden/i.test(e.type || '')) them(l.innerText, giaTri(e));
 });
-// 3) dt/dd
 document.querySelectorAll('dt').forEach(function (d) { var n = d.nextElementSibling; if (n && n.tagName === 'DD') them(d.innerText, giaTri(n)); });
-var links = [];
-document.querySelectorAll('a[href]').forEach(function (a) {
-  var h = a.href || '';
-  if (/^https?:/i.test(h)) links.push([h, sach(a.innerText).slice(0, 80)]);
-});
-var tieuDe = '';
 var h = document.querySelector('h1, h2, h3, .title, .page-title, legend');
-if (h) tieuDe = sach(h.innerText).slice(0, 120);
-var o_dn = !!document.querySelector('input[type=password]');
-return {url: location.href, tieu_de: document.title || '', khoi: tieuDe, cap: cap, links: links, co_o_mat_khau: o_dn,
-        chu: sach(document.body ? document.body.innerText : '').slice(0, 300)};
+return {dkkd: 1, url: location.href, tieu_de: document.title || '', khoi: h ? sach(h.innerText).slice(0, 120) : '', cap: cap};
 """
 
 
-def _dkkd_lam_driver():
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    os.makedirs(DKKD_PROFILE, exist_ok=True)
-    opts = Options()
-    opts.add_argument(f"--user-data-dir={DKKD_PROFILE}")     # giữ phiên đăng nhập cho lần sau
-    opts.add_argument("--window-size=1280,900")
-    opts.add_argument("--lang=vi-VN")
-    drv = webdriver.Chrome(options=opts)
-    drv.set_page_load_timeout(90)
-    return drv
-
-
-def _dkkd_driver(tao_moi=True):
-    drv = DKKD_TD["drv"]
-    if drv is not None:
-        try:
-            drv.window_handles
-            return drv
-        except Exception:
-            DKKD_TD["drv"] = None
-    if not tao_moi:
-        return None
-    DKKD_TD["drv"] = _dkkd_lam_driver()
-    return DKKD_TD["drv"]
-
-
-def _dkkd_tham_so_ho_so(url):
-    """Tham số định danh hồ sơ trong đường dẫn (vd {'h': '720'}) — các link cùng hồ sơ phải có cùng các tham số này."""
+def dkkd_bookmarklet():
+    """Đoạn javascript: cho nút bookmark — đọc trang đang mở, copy JSON vào clipboard."""
     import urllib.parse as _up
-    q = _up.parse_qs(_up.urlparse(url).query)
-    return {k: v[0] for k, v in q.items() if v and v[0] and len(v[0]) <= 60}
+    than = ("(function(){var r=(function(){" + _JS_DKKD_DOC + "})();var s=JSON.stringify(r);"
+            "function xong(){alert('Đã copy '+r.cap.length+' trường của khối \"'+(r.khoi||r.tieu_de)+'\" — dán vào phần mềm (Hỗ trợ thay đổi GPKD)');}"
+            "if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(xong,function(){prompt('Copy đoạn này rồi dán vào phần mềm:',s);});}"
+            "else{prompt('Copy đoạn này rồi dán vào phần mềm:',s);}})();")
+    than = " ".join(x.strip() for x in than.splitlines() if x.strip())
+    return "javascript:" + _up.quote(than, safe="")
 
 
-def _dkkd_link_cung_ho_so(url_goc, link, ten):
-    """Link `link` (chữ `ten`) có phải 1 khối khác của CÙNG hồ sơ và an toàn để mở (chỉ đọc) không."""
+def dkkd_doc_html(noi_dung, url=""):
+    """File trang đã lưu (Ctrl+S) -> {url, khoi, tieu_de, cap} — cùng quy tắc với đoạn JS đọc trang."""
+    import lxml.html as _lh
+    import re as _re
+    doc = _lh.fromstring(noi_dung or "<html></html>")
+    sach = lambda s: _re.sub(r"\s+", " ", s or "").strip()
+
+    def chu(e):
+        return sach(e.text_content())
+
+    def gia_tri(o):
+        ds = [o] if o.tag in ("input", "select", "textarea") else o.xpath(".//input|.//select|.//textarea")
+        vs = []
+        for e in ds:
+            t = (e.get("type") or "").lower()
+            if t in ("hidden", "button", "submit", "image", "password"):
+                continue
+            if t in ("checkbox", "radio"):
+                if e.get("checked") is not None:
+                    lb = doc.xpath(f'//label[@for="{e.get("id")}"]') if e.get("id") else []
+                    vs.append(chu(lb[0]) if lb else (e.get("value") or "x"))
+                continue
+            if e.tag == "select":
+                op = e.xpath(".//option[@selected]") or e.xpath(".//option")[:1]
+                vs.append(chu(op[0]) if op else "")
+                continue
+            vs.append(sach(e.text_content() if e.tag == "textarea" else (e.get("value") or "")))
+        return " | ".join(x for x in vs if x) or chu(o)
+    cap, da_co = [], set()
+
+    def them(k, v):
+        k, v = _re.sub(r"[:*]+$", "", sach(k)).strip(), sach(v)
+        if not k or len(k) > 150 or not v or k == v or (k, v) in da_co:
+            return
+        da_co.add((k, v))
+        cap.append([k, v])
+    for r in doc.iter("tr"):
+        c = [x for x in r if isinstance(x.tag, str) and x.tag in ("td", "th")]
+        if len(c) == 4:
+            them(chu(c[0]), gia_tri(c[1]))
+            them(chu(c[2]), gia_tri(c[3]))
+        elif len(c) >= 2:
+            them(chu(c[0]), gia_tri(c[-1]))
+    for l in doc.xpath("//label[@for]"):
+        e = doc.xpath(f'//*[@id="{l.get("for")}"]')
+        if e and e[0].tag in ("input", "select", "textarea") and (e[0].get("type") or "").lower() not in ("checkbox", "radio", "hidden"):
+            them(chu(l), gia_tri(e[0]))
+    for d in doc.iter("dt"):
+        n = d.getnext()
+        if n is not None and n.tag == "dd":
+            them(chu(d), gia_tri(n))
+    h = doc.xpath("//h1|//h2|//h3|//*[contains(concat(' ',@class,' '),' title ')]|//legend")
+    t = doc.xpath("//title")
+    # trang lưu bằng Chrome ghi link gốc trong chú thích "saved from url=(...)"
+    m = _re.search(r"saved from url=\(\d+\)(\S+)", noi_dung or "")
+    return {"dkkd": 1, "url": url or (m.group(1) if m else ""), "tieu_de": chu(t[0]) if t else "",
+            "khoi": chu(h[0])[:120] if h else "", "cap": cap}
+
+
+def _dkkd_ma_ho_so(url):
+    """Khoá gom các khối của CÙNG 1 hồ sơ: tham số định danh trong đường dẫn (vd h=720); không có thì cả url."""
     import urllib.parse as _up
-    a, b = _up.urlparse(url_goc), _up.urlparse(link)
-    if b.scheme not in ("http", "https") or a.netloc.lower() != b.netloc.lower():
-        return False
-    tg = _dkkd_tham_so_ho_so(url_goc)
-    if not tg:
-        return False
-    tl = _dkkd_tham_so_ho_so(link)
-    if any(tl.get(k) != v for k, v in tg.items()):
-        return False
-    t = f" {_khong_dau(ten or '').lower()} {_khong_dau(_up.unquote(b.path + '?' + b.query)).lower()} "
-    tu_cam = {_khong_dau(x).lower() for x in _DKKD_TU_CAM}
-    return not any((f" {x.strip()} " in t) if len(x.strip()) <= 3 else (x.strip() in t) for x in tu_cam)
+    q = _up.parse_qs(_up.urlparse(url or "").query)
+    for k in ("h", "id", "ID", "hs", "DocumentId", "documentId"):
+        if q.get(k):
+            return f"{k}={q[k][0]}"
+    return url or "(không rõ link)"
 
 
-def dkkd_lay_ho_so(drv, url, theo_khoi=True, bao=None, huy=None):
-    """Mở 1 link hồ sơ (+ các khối của cùng hồ sơ nếu theo_khoi) -> (danh sách {khoi, url, truong, gia_tri}, lỗi|None)."""
-    import urllib.parse as _up
-    kq, da_mo, hang_doi = [], set(), [url]
-    loi = None
-    while hang_doi and len(da_mo) < _DKKD_TOI_DA_KHOI:
-        if huy and huy():
-            break
-        u = hang_doi.pop(0)
-        chuan = _up.urldefrag(u)[0]
-        if chuan in da_mo:
-            continue
-        da_mo.add(chuan)
-        if bao:
-            bao(f"đang đọc {u}")
-        drv.get(u)
-        time.sleep(1.0)
-        trang = drv.execute_script(_JS_DKKD_DOC) or {}
-        if trang.get("co_o_mat_khau") and not trang.get("cap"):
-            loi = "trang yêu cầu đăng nhập — hãy đăng nhập trong cửa sổ Chrome của phần mềm rồi chạy lại"
-            break
-        khoi = trang.get("khoi") or trang.get("tieu_de") or ""
-        for k, v in trang.get("cap") or []:
-            kq.append({"khoi": khoi, "url": trang.get("url") or u, "truong": k, "gia_tri": v})
-        if theo_khoi:
-            for link, ten in trang.get("links") or []:
-                if _up.urldefrag(link)[0] not in da_mo and _dkkd_link_cung_ho_so(url, link, ten):
-                    hang_doi.append(link)
-    return kq, loi
-
-
-def dkkd_xuat_excel(ket_qua):
-    """{link: [dòng]} -> bytes xlsx: sheet 'Chi tiết' (Link | Khối | Trường | Giá trị) + 'Tổng hợp' (1 hồ sơ 1 dòng)."""
+def dkkd_xuat_excel(cac_khoi):
+    """[{url, khoi, tieu_de, cap}] -> bytes xlsx: 'Chi tiết' (Hồ sơ | Khối | Trường | Giá trị | Link) + 'Tổng hợp' (1 hồ sơ 1 dòng)."""
     import openpyxl
     import io as _io
     from openpyxl.styles import Font
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Chi tiết"
-    ws.append(["Link hồ sơ", "Khối", "Trường", "Giá trị"])
+    ws.append(["Hồ sơ", "Khối", "Trường", "Giá trị", "Link"])
+    nhom = {}
+    for k in cac_khoi or []:
+        ma = _dkkd_ma_ho_so(k.get("url"))
+        for truong, gt in k.get("cap") or []:
+            ws.append([ma, k.get("khoi") or k.get("tieu_de") or "", truong, gt, k.get("url") or ""])
+            nhom.setdefault(ma, {}).setdefault(truong, gt)
     for c in ws[1]:
         c.font = Font(bold=True)
-    for link, dong in ket_qua.items():
-        for d in dong:
-            ws.append([link, d["khoi"], d["truong"], d["gia_tri"]])
-    for col, w in zip("ABCD", (45, 30, 40, 60)):
+    for col, w in zip("ABCDE", (14, 30, 40, 60, 45)):
         ws.column_dimensions[col].width = w
     th = wb.create_sheet("Tổng hợp")
     cot = []
-    for dong in ket_qua.values():
-        for d in dong:
-            if d["truong"] not in cot:
-                cot.append(d["truong"])
-    th.append(["Link hồ sơ"] + cot)
+    for gt in nhom.values():
+        cot += [k for k in gt if k not in cot]
+    th.append(["Hồ sơ"] + cot)
     for c in th[1]:
         c.font = Font(bold=True)
-    for link, dong in ket_qua.items():
-        gt = {}
-        for d in dong:
-            gt.setdefault(d["truong"], d["gia_tri"])       # trường trùng tên: lấy giá trị đầu tiên (chi tiết đủ ở sheet kia)
-        th.append([link] + [gt.get(k, "") for k in cot])
+    for ma, gt in nhom.items():
+        th.append([ma] + [gt.get(k, "") for k in cot])
     bio = _io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
 
 
-@app.post("/api/dkkd/mo-trinh-duyet")
-def dkkd_mo_trinh_duyet():
-    """Mở cửa sổ Chrome riêng của phần mềm tới cổng đăng ký kinh doanh để người dùng tự đăng nhập."""
-    with DKKD_TD["lock"]:
+@app.get("/api/dkkd/bookmarklet")
+def dkkd_bookmarklet_get():
+    return {"ma": dkkd_bookmarklet()}
+
+
+@app.post("/api/dkkd/doc-file")
+def dkkd_doc_file(body: dict = Body(...)):
+    """body: {files: [{ten, noi_dung}]} (nội dung HTML trang đã lưu) -> các khối đọc được."""
+    kq, loi = [], []
+    for f in (body.get("files") or [])[:200]:
         try:
-            drv = _dkkd_driver()
-            drv.get(DKKD_URL)
+            k = dkkd_doc_html(str(f.get("noi_dung") or ""))
+            k["ten_file"] = str(f.get("ten") or "")
+            (kq if k["cap"] else loi).append(k if k["cap"] else f"{k['ten_file']}: không thấy cặp 'Tiêu đề : Giá trị' nào")
         except Exception as e:
-            raise HTTPException(500, f"Không mở được Chrome: {type(e).__name__}: {str(e)[:200]}")
-    return {"ok": True, "thong_bao": "Đã mở cửa sổ Chrome. Hãy đăng nhập cổng đăng ký kinh doanh trong cửa sổ đó "
-                                     "(chỉ cần 1 lần, phần mềm nhớ phiên cho các lần sau)."}
+            loi.append(f"{f.get('ten')}: {type(e).__name__}: {str(e)[:150]}")
+    return {"khoi": kq, "loi": loi}
 
 
-@app.post("/api/dkkd/lay-du-lieu")
-def dkkd_lay_du_lieu(body: dict = Body(...)):
-    """Bắt đầu lấy dữ liệu các link hồ sơ (chạy nền). body: {links: [..] hoặc chuỗi nhiều dòng, theo_khoi: bool}."""
-    links = body.get("links") or []
-    if isinstance(links, str):
-        links = links.splitlines()
-    links = [x.strip() for x in links if x and x.strip().lower().startswith(("http://", "https://"))]
-    if not links:
-        raise HTTPException(400, "Chưa có link hồ sơ nào (mỗi dòng 1 link bắt đầu bằng https://)")
-    job = DKKD_TD.get("job")
-    if job and job.get("dang_chay"):
-        raise HTTPException(409, "Đang lấy dữ liệu — chờ xong hoặc bấm Dừng")
-    job = {"dang_chay": True, "huy": False, "tong": len(links), "xong": 0, "nhat_ky": [], "ket_qua": {}, "loi": {},
-           "file": None}
-    DKKD_TD["job"] = job
-    theo_khoi = bool(body.get("theo_khoi", True))
-
-    def chay():
-        try:
-            with DKKD_TD["lock"]:
-                drv = _dkkd_driver()
-                for i, link in enumerate(links, 1):
-                    if job["huy"]:
-                        job["nhat_ky"].append("Đã dừng theo yêu cầu.")
-                        break
-                    try:
-                        dong, loi = dkkd_lay_ho_so(drv, link, theo_khoi, bao=lambda t: None, huy=lambda: job["huy"])
-                    except Exception as e:
-                        dong, loi = [], f"{type(e).__name__}: {str(e)[:200]}"
-                    job["ket_qua"][link] = dong
-                    if loi:
-                        job["loi"][link] = loi
-                    job["xong"] = i
-                    job["nhat_ky"].append(f"[{i}/{len(links)}] {link}: " + (f"LỖI — {loi}" if loi else f"{len(dong)} trường"))
-                    if loi and "đăng nhập" in loi:
-                        job["nhat_ky"].append("Dừng: chưa đăng nhập.")
-                        break
-            if any(job["ket_qua"].values()):
-                p = os.path.join(DATA_DIR, "dkkd")
-                os.makedirs(p, exist_ok=True)
-                f = os.path.join(p, f"GPKD_{datetime.datetime.now():%Y%m%d_%H%M%S}.xlsx")
-                with open(f, "wb") as fh:
-                    fh.write(dkkd_xuat_excel(job["ket_qua"]))
-                job["file"] = f
-        except Exception as e:
-            job["nhat_ky"].append(f"Lỗi: {type(e).__name__}: {str(e)[:200]}")
-        finally:
-            job["dang_chay"] = False
-    threading.Thread(target=chay, daemon=True).start()
-    return {"ok": True, "tong": len(links)}
-
-
-@app.get("/api/dkkd/tien-do")
-def dkkd_tien_do():
-    job = DKKD_TD.get("job") or {}
-    return {"dang_chay": bool(job.get("dang_chay")), "tong": job.get("tong", 0), "xong": job.get("xong", 0),
-            "nhat_ky": (job.get("nhat_ky") or [])[-50:], "co_file": bool(job.get("file")),
-            "so_truong": sum(len(v) for v in (job.get("ket_qua") or {}).values())}
-
-
-@app.post("/api/dkkd/dung")
-def dkkd_dung():
-    job = DKKD_TD.get("job")
-    if job:
-        job["huy"] = True
-    return {"ok": True}
-
-
-@app.get("/api/dkkd/tai-file")
-def dkkd_tai_file():
-    job = DKKD_TD.get("job") or {}
-    f = job.get("file")
-    if not f or not os.path.isfile(f):
-        raise HTTPException(404, "Chưa có file kết quả")
-    return FileResponse(f, filename=os.path.basename(f),
-                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+@app.post("/api/dkkd/xuat-excel")
+def dkkd_xuat_excel_api(body: dict = Body(...)):
+    cac_khoi = [k for k in (body.get("khoi") or []) if isinstance(k, dict) and k.get("cap")]
+    if not cac_khoi:
+        raise HTTPException(400, "Chưa có dữ liệu khối hồ sơ nào")
+    return Response(content=dkkd_xuat_excel(cac_khoi),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="GPKD_du_lieu.xlsx"'})
 
 
 if __name__ == "__main__":
