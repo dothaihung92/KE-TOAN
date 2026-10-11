@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-12.164"
+APP_BUILD = "2026-10-12.165"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44830,12 +44830,27 @@ function choTai(f, giay) {
 // Mở khối dạng NÚT BẤM như 1 lần bấm thật: đặt target của form ASP.NET trên chính trang = 1 khung ẩn rồi gọi __doPostBack của
 // trang (trình duyệt tự gửi form + theo chuyển hướng như điều hướng thật; trang đang xem không bị đổi). Cách dự phòng: POST bằng fetch.
 function chuan(t) { return sachT(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim(); }
-function khopTen(r, ten) {
-  var a = chuan(r.khoi), b = chuan(ten);
-  return !a || a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
-}
+var urlDaNhan = {};
+function laTrangTong(r) { return chuan(r.khoi) === chuan('Khối dữ liệu') || /DW_DOCUMENTEdit\.aspx/i.test(r.url || ''); }
+function trangHopLe(r) { return !laTrangTong(r) && !urlDaNhan[(r.url || '').split('#')[0]]; }
 function nghi(ms) { return new Promise(function (x) { setTimeout(x, ms); }); }
 function formCua(doc) { var vs = doc.querySelector('input[name="__VIEWSTATE"]'); return vs ? vs.form : null; }
+async function choCuaSoDoiTrang(pop, cu) {
+  var het = Date.now() + 45000;
+  while (Date.now() < het) {
+    await nghi(400);
+    if (pop.closed) throw new Error('cửa sổ phụ đã bị đóng');
+    var d = null; try { d = pop.document; } catch (e) { continue; }
+    if (d && d !== cu && d.readyState === 'complete' && d.body) { await nghi(500); return docTrang(pop.document, pop.location.href); }
+  }
+  throw new Error('quá 45 giây không tải xong');
+}
+function dsXem(doc) {
+  return [].slice.call(doc.querySelectorAll('a')).filter(function (a) { return /^xem$/i.test(sachT(a.textContent)) && a.closest('tr'); });
+}
+function tenDongXem(a, k) {
+  var c = a.closest('tr').cells; return (c && c[0] ? sachT(c[0].textContent) : '').slice(0, 60) || ('#' + (k + 1));
+}
 async function moBangCuaSo(it, pop) {
   var fm = formCua(it.doc);
   if (!fm || !it.a || !it.a.click) throw new Error('trang không có form/link của mục menu');
@@ -44890,14 +44905,36 @@ for (var j = 0; j < dsNut.length; j++) {
   hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + it.ten + ' ...');
   try { r1 = await moBangCuaSo(it, pop); ghi.cua_so = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi; }
   catch (e) { ghi.cua_so = 'lỗi: ' + e; r1 = null; }
-  if (r1 && !khopTen(r1, it.ten)) { ghi.cua_so += ' | KHÔNG đúng khối (trang trả về là "' + r1.khoi + '")'; r1 = null; }
+  if (r1 && !trangHopLe(r1)) { ghi.cua_so += ' | KHÔNG đúng khối (trang tổng/trùng trang đã lấy)'; r1 = null; }
   if (!r1) {
     try { r1 = await moBangPost(it); ghi.post = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi + (r1.chuyen ? ' (có chuyển hướng)' : ''); }
     catch (e) { ghi.post = 'lỗi: ' + e; r1 = null; }
-    if (r1 && !khopTen(r1, it.ten)) { ghi.post += ' | KHÔNG đúng khối'; r1 = null; }
+    if (r1 && !trangHopLe(r1)) { ghi.post += ' | KHÔNG đúng khối'; r1 = null; }
   }
   chiTiet.push(ghi);
-  if (r1) { r1.khoi = it.ten; if (!r1.cap.length) loi.push(it.ten + ': trang không có dữ liệu'); ketQua.push(r1); chanDoanMenu.cach = 'ok'; }
+  if (r1) {
+    urlDaNhan[(r1.url || '').split('#')[0]] = 1;
+    r1.khoi = it.ten; if (!r1.cap.length) loi.push(it.ten + ': trang không có dữ liệu'); ketQua.push(r1); chanDoanMenu.cach = 'ok';
+    // Trang DANH SÁCH (người đại diện, chủ sở hữu hưởng lợi...): bấm "Xem" từng dòng để lấy chi tiết (mỗi dòng: mở lại danh sách rồi bấm Xem dòng đó)
+    try {
+      var nXem = pop && !pop.closed ? dsXem(pop.document).length : 0;
+      ghi.xem = nXem;
+      for (var k = 0; k < nXem && k < 30; k++) {
+        hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + it.ten + ' — xem chi tiết dòng ' + (k + 1) + '/' + nXem + ' ...');
+        if (k > 0) { var rl = await moBangCuaSo(it, pop); if (!rl) throw new Error('không mở lại được danh sách'); }
+        var lien = dsXem(pop.document)[k];
+        if (!lien) throw new Error('mất dòng ' + (k + 1) + ' khi mở lại danh sách');
+        var tenDong = tenDongXem(lien, k), cuX = pop.document;
+        lien.click();
+        var rx = await choCuaSoDoiTrang(pop, cuX);
+        if (rx.url && urlDaNhan[(rx.url || '').split('#')[0] + '|' + tenDong]) continue;
+        rx.khoi = it.ten + ' - chi tiết: ' + tenDong;
+        if (rx.cap.length) { ketQua.push(rx); urlDaNhan[(rx.url || '').split('#')[0] + '|' + tenDong] = 1; }
+        else loi.push(rx.khoi + ': trang chi tiết không có dữ liệu');
+        await nghi(400);
+      }
+    } catch (e) { loi.push(it.ten + ' (xem chi tiết): ' + e); }
+  }
   else loi.push(it.ten + ': không mở được đúng khối (xem chẩn đoán từng mục)');
   await new Promise(function (x) { setTimeout(x, 400); });
 }
