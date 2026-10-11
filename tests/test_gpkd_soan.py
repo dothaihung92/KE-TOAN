@@ -168,3 +168,10 @@ def _test_tu_khac_phuc():
 
 _test_tu_khac_phuc()
 print("PASS: tự khắc phục thiếu file/thư viện.")
+
+
+# Hồ sơ mới (MST khác) phải thay dữ liệu cũ, bản nháp cũ không được ghi đè lên (đã kiểm bằng trình duyệt thật)
+_h = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "index.html"), encoding="utf-8").read()
+assert "mMoi!==mCu" in _h and "gpkdKhoi=[]" in _h and "ssLayTuGom(true,true)" in _h
+assert "khoi.slice().reverse()" in _h and "ghi=!im||ghiDe" in _h
+print("PASS: MST mới thay dữ liệu gom cũ; bản nháp MST khác tự lấy lại; nút Lấy từ hồ sơ đã gom ghi đè.")

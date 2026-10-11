@@ -4328,11 +4328,14 @@ function gpkdThem(k){
   gpkdKhoi.push({url:k.url||'',khoi:k.khoi||'',tieu_de:k.tieu_de||'',cap:k.cap,ten_file:k.ten_file||''});
   return true;
 }
+function gpkdMst(ds){for(const k of (ds||[]).slice().reverse()){const c=(k.cap||[]).find(x=>/^mã số doanh nghiệp$/i.test(x[0])&&x[1]);if(c)return String(c[1]).trim()}return ''}
 function gpkdThemDan(){
   const t=document.getElementById('gpkdDan').value.trim();if(!t)return;
   let n=0, ds=null;
   try{const v=JSON.parse(t);ds=Array.isArray(v)?v:[v]}catch(e){}       // nút bookmark mới: 1 danh sách nhiều khối
   if(!ds){ds=[];for(const doan of t.split(/\n(?=\s*[\[{])/)){try{const v=JSON.parse(doan);ds.push(...(Array.isArray(v)?v:[v]))}catch(e){}}}
+  const mMoi=gpkdMst(ds),mCu=gpkdMst(gpkdKhoi);
+  if(mMoi&&mCu&&mMoi!==mCu){gpkdKhoi=[];toast('Dữ liệu mới là của MST '+mMoi+' (khác MST '+mCu+' đã gom) — đã bỏ dữ liệu cũ','ok')}
   for(const k of ds){if(gpkdThem(k))n++}
   const cd=ds.map(k=>k&&k.chan_doan_menu).filter(Boolean)[0];
   window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm.`+
@@ -4483,7 +4486,7 @@ const ssKey=()=>'gpkdSoan_'+(current||0);
 function ssEsc(x){return vbEsc(x)}
 function ssHienTrangTuGom(){
   let khoi=[];try{khoi=JSON.parse(localStorage.getItem('gpkdKhoi')||'[]')||[]}catch(e){}
-  const lay=(re,ten)=>{for(const k of khoi){if(ten&&!ten.test(k.khoi||''))continue;const c=(k.cap||[]).find(x=>re.test(x[0]));if(c&&c[1])return c[1]}return ''};
+  const lay=(re,ten)=>{for(const k of khoi.slice().reverse()){if(ten&&!ten.test(k.khoi||''))continue;const c=(k.cap||[]).find(x=>re.test(x[0]));if(c&&c[1])return c[1]}return ''};
   const ht={ten:lay(/^tên doanh nghiệp viết bằng tiếng việt$/i),ma_so:lay(/^mã số doanh nghiệp$/i),loai_hinh:lay(/^loại hình doanh nghiệp$/i),
     dia_chi:{so_nha:lay(/^số nhà\/đường/i,/^địa chỉ$/i),xa:lay(/^xã\/phường/i,/^địa chỉ$/i),tinh:lay(/^tỉnh\/thành phố/i,/^địa chỉ$/i),dien_thoai:lay(/^điện thoại$/i,/^địa chỉ$/i),email:lay(/^e-?mail$/i,/^địa chỉ$/i),website:lay(/^website$/i,/^địa chỉ$/i)},
     dai_dien:[],nganh:[],von:''};
@@ -4582,6 +4585,8 @@ async function moSoanGpkd(){
     (du.loai||[]).forEach(k=>{const e=document.getElementById('ssL_'+k);if(e)e.checked=true});
     const dc=document.getElementById('ss_dia_chi_doi_thue');if(dc)dc.checked=!!(du.dia_chi||{}).doi_thue;
     ssNganh=du.nganh||{them:[],bo:[],sua:[]};
+    const mGom=(ssHienTrang||{}).ma_so;
+    if(mGom&&(du.dn||{}).ma_so&&du.dn.ma_so!==mGom)ssLayTuGom(true,true);   // bản nháp cũ của MST khác -> lấy lại theo hồ sơ vừa gom
   }else{ssNganh={them:[],bo:[],sua:[]};ssLayTuGom(true)}
   ssHienGoiY();ssVeNganh();ssHienCacMuc();
   try{const r=await api('/api/gpkd-soan/mau');ssBienMau=r.bien||{};
@@ -4597,10 +4602,11 @@ function ssHienGoiY(){
   g('ssHtVon',h.von?'Vốn điều lệ đang đăng ký (từ hồ sơ đã gom): '+h.von:'');
   const cu=document.getElementById('ss_von_cu');if(cu&&!cu.value&&h.von){const n=String(h.von).replace(/[^\d]/g,'');if(n)cu.value=n}
 }
-function ssLayTuGom(im){
-  ssHienTrang=ssHienTrangTuGom();const h=ssHienTrang,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v&&!e.value)e.value=v};
+function ssLayTuGom(im,ghiDe){
+  ssHienTrang=ssHienTrangTuGom();const h=ssHienTrang,ghi=!im||ghiDe,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v&&(ghi||!e.value))e.value=v};
   dat('ss_dn_ten',h.ten);dat('ss_dn_ma_so',h.ma_so);dat('ss_dn_loai_hinh',h.loai_hinh);
-  ssHienGoiY();ssLuuTam();
+  ssHienGoiY();if(ghi&&h.von){const cu=document.getElementById('ss_von_cu'),n=String(h.von).replace(/[^\d]/g,'');if(cu&&n)cu.value=n}
+  ssLuuTam();
   const g=document.getElementById('ssHtGhi');if(g)g.textContent=h.ten||h.ma_so?'Đã lấy: '+(h.ten||'')+' '+(h.ma_so?'(MST '+h.ma_so+')':''):(im?'':'Chưa có hồ sơ đã gom — vào "Hỗ trợ thay đổi GPKD" lấy dữ liệu trước, hoặc nhập tay.');
 }
 function ssVeMauRieng(){
