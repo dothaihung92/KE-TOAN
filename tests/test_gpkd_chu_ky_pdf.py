@@ -99,8 +99,13 @@ pg = src.new_page()
 pg.insert_text((72, 100), "Hello scan", fontsize=14)
 pdf = g.pdf_vien_scan(src.tobytes())
 o = pymupdf.open(stream=pdf, filetype="pdf")
-assert len(o) == 1 and len(o[0].get_images()) == 1 and len(o[0].get_drawings()) >= 1 and not o[0].get_text().strip()
-print("PASS 4: PDF xuất dạng ảnh từng trang có khung viền.")
+assert len(o) == 1 and len(o[0].get_images()) == 1 and not o[0].get_text().strip()
+px = o[0].get_pixmap(dpi=72, alpha=False)
+cx, cy = px.width // 2, px.height // 2
+sang = lambda x, y: sum(px.pixel(x, y)[:3]) / 3
+assert sang(cx, 2) < sang(cx, cy) - 8 and sang(px.width - 2, cy) < sang(cx, cy) - 8, "mép trên/phải phải tối hơn giữa trang"
+assert sang(cx, cy) > 240
+print("PASS 4: PDF xuất dạng ảnh từng trang, mép trang tối nhẹ như bản scan.")
 
 # không có Word/LibreOffice -> cảnh báo rõ, vẫn trả zip
 goc = g._timn_trinh_chuyen_pdf

@@ -1056,20 +1056,39 @@ def docx_sang_pdf(noi_dung, trinh=None):
             return f.read()
 
 
-def pdf_vien_scan(pdf_bytes, dpi=150, le_pt=12):
-    """PDF -> PDF dạng ảnh từng trang (như file scan) có khung viền quanh trang. Cần thư viện pymupdf."""
+def _bong_vien_scan(img):
+    """Làm tối nhẹ MÉP trang như ảnh chụp/scan giấy (mép trên/phải đậm nhất, mép trái nhạt; giữa trang giữ nguyên trắng)."""
+    import numpy as np
+    a = np.asarray(img.convert("RGB")).astype(np.float32)
+    h, w = a.shape[:2]
+    y = (np.arange(h, dtype=np.float32) / h)[:, None]
+    x = (np.arange(w, dtype=np.float32) / w)[None, :]
+
+    def duoi(d, rong, manh):
+        return manh * np.exp(-d / rong)
+    toi = (duoi(y, 0.012, 0.10) + duoi(1 - y, 0.010, 0.07) + duoi(1 - x, 0.012, 0.08) + duoi(x, 0.005, 0.03) + duoi(1 - x, 0.045, 0.03))
+    a *= (1 - np.clip(toi, 0, 0.2))[..., None]
+    from PIL import Image
+    return Image.fromarray(np.clip(a, 0, 255).astype("uint8"))
+
+
+def pdf_vien_scan(pdf_bytes, dpi=150):
+    """PDF -> PDF dạng ảnh từng trang, mép trang tối nhẹ như file scan. Cần pymupdf (+ Pillow, numpy)."""
     try:
         import pymupdf
     except ImportError:
         import fitz as pymupdf
+    from PIL import Image
     nguon = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     kq = pymupdf.open()
     for tr in nguon:
         r = tr.rect
-        anh = tr.get_pixmap(dpi=dpi, alpha=False)
+        px = tr.get_pixmap(dpi=dpi, alpha=False)
+        img = _bong_vien_scan(Image.frombytes("RGB", (px.width, px.height), px.samples))
+        bio = io.BytesIO()
+        img.save(bio, "JPEG", quality=92, subsampling=0)
         moi = kq.new_page(width=r.width, height=r.height)
-        moi.insert_image(r, pixmap=anh)
-        moi.draw_rect(pymupdf.Rect(r.x0 + le_pt, r.y0 + le_pt, r.x1 - le_pt, r.y1 - le_pt), color=(0, 0, 0), width=1.0)
+        moi.insert_image(r, stream=bio.getvalue())
     return kq.tobytes(deflate=True)
 
 
