@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.169"
+APP_BUILD = "2026-10-13.170"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44878,7 +44878,21 @@ function dsXem(doc) {
 function tenDongXem(a, k) {
   var c = a.closest('tr').cells; return (c && c[0] ? sachT(c[0].textContent) : '').slice(0, 60) || ('#' + (k + 1));
 }
+var urlTong = ((menu || []).filter(function (m) { return m.url && /DW_DOCUMENTEdit\.aspx/i.test(m.url); })[0] || {}).url || '';
+var dangODangTong = /DW_DOCUMENTEdit\.aspx/i.test(location.pathname);
+async function moTuTrangTong(it, pop) {
+  if (!pop || pop.closed) throw new Error('cửa sổ phụ đã bị đóng hoặc bị trình duyệt chặn (hãy cho phép cửa sổ bật lên của trang này)');
+  var cu = null; try { cu = pop.document; } catch (e) {}
+  pop.location.href = urlTong;
+  await choCuaSoDoiTrang(pop, cu);
+  var a = [].slice.call(pop.document.querySelectorAll('a')).filter(function (x) { return chuan(x.textContent) === chuan(it.ten) && /__doPostBack/.test(x.getAttribute('href') || ''); })[0];
+  if (!a) throw new Error('trang tổng không có mục "' + it.ten + '"');
+  var cu2 = pop.document;
+  a.click();
+  return await choCuaSoDoiTrang(pop, cu2);
+}
 async function moBangCuaSo(it, pop) {
+  if (!dangODangTong && urlTong) return await moTuTrangTong(it, pop);
   var fm = formCua(it.doc);
   if (!fm || !it.a || !it.a.click) throw new Error('trang không có form/link của mục menu');
   if (!pop || pop.closed) throw new Error('cửa sổ phụ đã bị đóng hoặc bị trình duyệt chặn (hãy cho phép cửa sổ bật lên của trang này)');

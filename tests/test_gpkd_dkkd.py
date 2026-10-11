@@ -121,7 +121,7 @@ assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '
 # tự đọc mọi khối trong menu "KHỐI DỮ LIỆU" (dừng ở "VĂN BẢN ĐÍNH KÈM") CHỈ bằng GET trong phiên của người dùng
 assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "cacTrang(document)" in than and "chan_doan_menu" in than and "credentials: 'same-origin'" in than
 assert "XMLHttpRequest" not in than and than.count("method: 'POST'") == 1
-assert ".submit(" not in than and than.count(".click()") == 2 and "it.a.click()" in than and "lien.click()" in than
+assert ".submit(" not in than and than.count(".click()") == 3 and "it.a.click()" in than and "lien.click()" in than
 # chỉ bấm: link của mục menu KHỐI DỮ LIỆU và link "Xem" (chữ đúng là "xem") trong các dòng danh sách
 # menu dạng nút bấm (postback ASP.NET): CHỈ gọi __doPostBack của đúng mục trong menu KHỐI DỮ LIỆU (đã lọc chữ xoá/nộp/gửi...),
 # trong KHUNG ẨN; không tự gọi postback nào khác
@@ -157,5 +157,11 @@ assert "[r].concat([].slice.call(r.children))" in server._JS_DKKD_QUET
 assert "'đỏ':'#e8372c'" in html_ui and "'xanh lá':'#7dff4f'" in html_ui
 print("PASS 8: màu dòng ngành nghề đúng như cổng.")
 print("PASS 5: giao diện mới (bookmark + file đã lưu), không còn mở Chrome tự động.")
+
+# Chạy bookmarklet từ trang một KHỐI (vd Địa chỉ): nút menu ở đó chỉ đưa về trang tổng "Khối dữ liệu"
+# (DW_DOCUMENTEdit) nên phải mở trang tổng trong cửa sổ phụ rồi bấm mục ở đó (đã kiểm bằng trang giả lập).
+_js = server._JS_DKKD_TAT_CA
+assert "moTuTrangTong" in _js and "dangODangTong" in _js and "if (!dangODangTong && urlTong) return await moTuTrangTong" in _js
+print("PASS: chạy từ trang một khối vẫn mở được các khối khác qua trang tổng.")
 
 print("\nALL DONE")
