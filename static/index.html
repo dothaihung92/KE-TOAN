@@ -941,11 +941,11 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
           <div style="font-size:18px;font-weight:700;color:#2e5c8a">Tờ khai GTGT + Khấu trừ</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Tự động tạo tờ khai 01/GTGT (TT80) + hạch toán khấu trừ từng quý</div>
         </div>
-        <div onclick="moTmdt()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #ee4d2d;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
-             onmouseover="this.style.background='#fff3f0'" onmouseout="this.style.background='#fff'">
-          <div style="font-size:38px;margin-bottom:8px">🛒</div>
-          <div style="font-size:18px;font-weight:700;color:#ee4d2d">Hỗ trợ xuất hoá đơn TMĐT</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:6px">Kết nối Shopee/Lazada/TikTok Shop để tự động lấy đơn hàng</div>
+        <div onclick="moGpkd()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b5502d;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#fdf3ee'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">🏢</div>
+          <div style="font-size:18px;font-weight:700;color:#b5502d">Hỗ trợ thay đổi GPKD</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Lấy dữ liệu hồ sơ trên cổng đăng ký kinh doanh (đã đăng nhập) ra Excel</div>
         </div>
         <div onclick="moDoiChieuNganHangCty()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #1f6b4a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background='#fff'">
@@ -4270,125 +4270,58 @@ function moXuatKho(){
   xkVeTrangChinh();
   xkTaiTrangThai();
 }
-/* ----- HỖ TRỢ XUẤT HOÁ ĐƠN TMĐT (Shopee/Lazada/TikTok Shop) ----- */
-const TMDT_SAN=[
-  {ma:'shopee', ten:'Shopee', mau:'#ee4d2d', icon:'🛍', nhanKey:'Partner ID', nhanSecret:'Partner Key', trangDangKy:'https://open.shopee.com'},
-  {ma:'lazada', ten:'Lazada', mau:'#0f146d', icon:'🅻', nhanKey:'App Key', nhanSecret:'App Secret', trangDangKy:'https://open.lazada.com'},
-  {ma:'tiktok', ten:'TikTok Shop', mau:'#000', icon:'🎵', nhanKey:'App Key', nhanSecret:'App Secret', trangDangKy:'https://partner.tiktokshop.com'},
-];
-let tmdtTrangThai={};
-function moTmdt(){
-  if(!current){toast('Chọn công ty trước','err');return}
-  nlDMMode=null; nlSoMoi=0;
+/* ----- HỖ TRỢ THAY ĐỔI GPKD: lấy dữ liệu hồ sơ trên cổng đăng ký kinh doanh (Chrome riêng đã đăng nhập) ----- */
+let gpkdHen=null;
+function gpkdEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function moGpkd(){
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
-  tmdtVeTrangChinh();
-  tmdtTaiTrangThai();
-}
-function tmdtVeTrangChinh(){
+  let cu='';try{cu=localStorage.getItem('gpkdLinks')||''}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
-    <div style="background:#fff;border-radius:12px;padding:18px;border:1px solid #e0e0e0">
-      <div style="display:flex;justify-content:space-between;align-items:start;gap:10px;flex-wrap:wrap">
-        <h3 style="margin:0 0 6px;color:#ee4d2d">🛒 Hỗ trợ xuất hoá đơn TMĐT</h3>
-        <button class="btn ghost sm" onclick="tmdtTaiTrangThai()" title="Tải lại trạng thái kết nối (bấm sau khi vừa đồng ý uỷ quyền ở tab sàn)">🔄 Tải lại</button>
-      </div>
-      <div class="hint" style="margin-bottom:16px">Kết nối trực tiếp qua API của từng sàn để tự động lấy đơn hàng đã bán — dùng làm nguồn "Chi tiết BÁN RA"/Xuất Kho, giống hệt cách "Import tờ khai xuất khẩu" đang làm. Cần đăng ký App (lấy Key/Secret riêng) ở trang nhà phát triển của từng sàn trước — xem đường dẫn đăng ký ngay trong từng ô bên dưới.</div>
-      <div id="tmdtThe" style="display:flex;gap:16px;flex-wrap:wrap"></div>
-    </div>`;
+    <h3 style="margin:0 0 6px;color:#b5502d">🏢 Hỗ trợ thay đổi GPKD — lấy dữ liệu hồ sơ đăng ký kinh doanh</h3>
+    <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+      Trang hồ sơ (vd <code>…/DW_DOCUMENTEdit.aspx?h=720</code>) chỉ mở được khi đã đăng nhập. Phần mềm dùng <b>cửa sổ Chrome riêng</b>: bạn đăng nhập trong cửa sổ đó (1 lần, phần mềm nhớ phiên),
+      rồi dán link hồ sơ bên dưới. Phần mềm <b>chỉ đọc</b> các cặp "Tiêu đề : Giá trị" — không bấm nút, không gửi/nộp gì.
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn" onclick="gpkdMoTrinhDuyet()">🌐 1. Mở Chrome để đăng nhập</button>
+    </div>
+    <label style="font-size:13px;font-weight:600">2. Link hồ sơ (mỗi dòng 1 link):</label>
+    <textarea id="gpkdLinks" rows="6" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:monospace;font-size:12px" placeholder="https://dangkyquamang.dkkd.gov.vn/.../DW_DOCUMENTEdit.aspx?h=720">${gpkdEsc(cu)}</textarea>
+    <label class="chk" style="margin:8px 0"><input type="checkbox" id="gpkdTheoKhoi" checked> Lấy cả các khối khác của cùng hồ sơ (Địa chỉ, Ngành nghề, Thành viên, Người đại diện…) — chỉ đi theo link có cùng mã hồ sơ</label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn" id="gpkdBtnLay" onclick="gpkdLay()">📥 3. Lấy dữ liệu</button>
+      <button class="btn ghost" onclick="gpkdDung()">■ Dừng</button>
+      <button class="btn ghost" id="gpkdBtnFile" style="display:none" onclick="gpkdTaiFile()">📊 Tải file Excel</button>
+    </div>
+    <div id="gpkdTienDo" style="margin-top:10px;font-size:13px"></div>`;
+  gpkdTheoDoi();
 }
-async function tmdtTaiTrangThai(){
-  try{
-    tmdtTrangThai=await api(`/api/tmdt/trang-thai/${current}`);
-  }catch(e){tmdtTrangThai={}; toast('Lỗi tải trạng thái TMĐT: '+e.message,'err')}
-  const box=document.getElementById('tmdtThe'); if(!box)return;
-  box.innerHTML=TMDT_SAN.map(s=>tmdtHtmlThe(s)).join('');
+async function gpkdMoTrinhDuyet(){
+  try{const r=await api('/api/dkkd/mo-trinh-duyet',{method:'POST'});toast(r.thong_bao,'ok');}
+  catch(e){toast('Lỗi: '+e.message,'err')}
 }
-function tmdtHtmlThe(s){
-  const tt=tmdtTrangThai[s.ma]||{};
-  const daKetNoi=!!tt.da_ket_noi;
-  return `<div style="flex:1;min-width:280px;border:2px solid ${s.mau};border-radius:12px;padding:18px;background:#fff">
-    <div style="font-size:17px;font-weight:800;color:${s.mau}">${s.icon} ${s.ten}</div>
-    <div style="font-size:12px;color:var(--muted);margin:4px 0 10px">Chưa có App? Đăng ký tại <a href="${s.trangDangKy}" target="_blank" style="color:${s.mau}">${s.trangDangKy}</a> để lấy ${s.nhanKey}/${s.nhanSecret} — <b>chỉ cần đăng ký 1 lần, dùng chung cho mọi công ty</b> (mỗi công ty chỉ cần bấm "Kết nối shop" bằng tài khoản bán hàng riêng của công ty đó).</div>
-    ${daKetNoi?`
-      <div style="background:#eafbf1;border:1px solid #8fd9ac;border-radius:8px;padding:10px;font-size:13px;margin-bottom:10px">
-        ✓ Công ty này đã kết nối${tt.shop_id?` — Shop ID: <b>${xkEsc(tt.shop_id)}</b>`:''}${tt.ket_noi_luc?`<br>Lúc: ${xkEsc(tt.ket_noi_luc)}`:''}
-      </div>
-      <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="tmdtNgatKetNoi('${s.ma}')">Ngắt kết nối công ty này</button>
-      <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Sửa App Key/Secret (chung)</button>
-      ${s.ma==='shopee'?`
-      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #ddd">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Thử lấy đơn hàng bán ra (tối đa 15 ngày/lần, để trống = 15 ngày gần nhất):</div>
-        <div style="display:flex;gap:6px;margin-bottom:8px">
-          <input id="tmdtTuNgay_shopee" placeholder="Từ dd/mm/yyyy" style="flex:1;min-width:0;padding:6px;box-sizing:border-box">
-          <input id="tmdtDenNgay_shopee" placeholder="Đến dd/mm/yyyy" style="flex:1;min-width:0;padding:6px;box-sizing:border-box">
-        </div>
-        <button class="btn sm" style="background:${s.mau}" onclick="tmdtShopeeLayDonHang()">📦 Lấy đơn hàng (thử)</button>
-        <div id="tmdtShopeeKq" style="margin-top:10px"></div>
-      </div>`:''}
-    `:`
-      <div id="tmdtForm_${s.ma}" style="display:${tt.co_app?'none':'block'}">
-        <input id="tmdtKey_${s.ma}" placeholder="${s.nhanKey}" style="width:100%;padding:8px;margin-bottom:6px;box-sizing:border-box">
-        <input id="tmdtSecret_${s.ma}" placeholder="${s.nhanSecret}" style="width:100%;padding:8px;margin-bottom:8px;box-sizing:border-box">
-        <button class="btn sm" style="background:${s.mau}" onclick="tmdtLuuApp('${s.ma}')">💾 Lưu App (dùng chung)</button>
-      </div>
-      <div id="tmdtSauLuu_${s.ma}" style="display:${tt.co_app?'block':'none'}">
-        <div style="font-size:13px;color:var(--muted);margin-bottom:8px">✓ Đã có ${s.nhanKey}/${s.nhanSecret} dùng chung — bấm nút dưới để kết nối SHOP CỦA CÔNG TY NÀY (đăng nhập bằng tài khoản bán hàng riêng của công ty này khi sàn hỏi).</div>
-        <button class="btn sm" style="background:${s.mau}" onclick="tmdtKetNoi('${s.ma}')">🔗 Kết nối shop công ty này</button>
-        <button class="btn ghost sm" onclick="tmdtMoForm('${s.ma}')">Sửa App Key/Secret (chung)</button>
-      </div>
-    `}
-  </div>`;
-}
-function tmdtMoForm(san){
-  const f=document.getElementById(`tmdtForm_${san}`), s2=document.getElementById(`tmdtSauLuu_${san}`);
-  if(f)f.style.display='block';
-  if(s2)s2.style.display='none';
-}
-async function tmdtLuuApp(san){
-  const app_key=(document.getElementById(`tmdtKey_${san}`).value||'').trim();
-  const app_secret=(document.getElementById(`tmdtSecret_${san}`).value||'').trim();
-  if(!app_key||!app_secret){toast('Nhập đủ Key/Secret','err');return}
-  try{
-    const r=await fetch(`/api/tmdt/${san}/luu-app`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({app_key,app_secret})});
-    if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    const d=await r.json();
-    toast(`✓ Đã lưu — nhớ khai báo Redirect URL trong App: ${d.redirect_uri}`,'ok');
-    tmdtTaiTrangThai();
+async function gpkdLay(){
+  const v=document.getElementById('gpkdLinks').value;
+  try{localStorage.setItem('gpkdLinks',v)}catch(e){}
+  try{await api('/api/dkkd/lay-du-lieu',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({links:v,theo_khoi:document.getElementById('gpkdTheoKhoi').checked})});
+    gpkdTheoDoi();
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
-async function tmdtKetNoi(san){
-  try{
-    const d=await api(`/api/tmdt/${san}/ket-noi-url/${current}`);
-    window.open(d.url,'_blank');
-    toast('Đã mở tab kết nối — sau khi đồng ý uỷ quyền trên trang sàn, quay lại đây bấm 🔄 để cập nhật trạng thái','');
-  }catch(e){toast('Lỗi: '+e.message,'err')}
+async function gpkdDung(){try{await api('/api/dkkd/dung',{method:'POST'});}catch(e){}}
+async function gpkdTheoDoi(){
+  clearTimeout(gpkdHen);
+  const box=document.getElementById('gpkdTienDo');if(!box)return;
+  let t;try{t=await api('/api/dkkd/tien-do');}catch(e){return}
+  box.innerHTML=(t.tong?`<b>${t.dang_chay?'Đang lấy':'Xong'}: ${t.xong}/${t.tong} hồ sơ — ${t.so_truong} trường</b>`:'')+
+    `<div style="max-height:200px;overflow:auto;margin-top:6px">${(t.nhat_ky||[]).map(x=>`<div>${gpkdEsc(x)}</div>`).join('')}</div>`;
+  const b=document.getElementById('gpkdBtnFile');if(b)b.style.display=t.co_file?'':'none';
+  const l=document.getElementById('gpkdBtnLay');if(l)l.disabled=!!t.dang_chay;
+  if(t.dang_chay)gpkdHen=setTimeout(gpkdTheoDoi,1500);
 }
-async function tmdtNgatKetNoi(san){
-  if(!confirm('Ngắt kết nối shop này? (không xoá App Key/Secret đã lưu)'))return;
-  try{
-    await fetch(`/api/tmdt/${san}/ngat-ket-noi/${current}`,{method:'POST'});
-    tmdtTaiTrangThai();
-    toast('Đã ngắt kết nối','ok');
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-}
-async function tmdtShopeeLayDonHang(){
-  const tu=(document.getElementById('tmdtTuNgay_shopee').value||'').trim();
-  const den=(document.getElementById('tmdtDenNgay_shopee').value||'').trim();
-  const box=document.getElementById('tmdtShopeeKq');
-  box.innerHTML='<div class="hint">Đang lấy dữ liệu...</div>';
-  try{
-    const qs=new URLSearchParams();
-    if(tu)qs.set('tu_ngay',tu);
-    if(den)qs.set('den_ngay',den);
-    const d=await api(`/api/tmdt/shopee/don-hang/${current}?${qs.toString()}`);
-    if(!d.tong_don){box.innerHTML='<div class="hint">Không có đơn hàng nào trong khoảng thời gian này.</div>';return}
-    box.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:6px">Tìm thấy ${d.tong_don} đơn hàng:</div>
-      <div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:8px">
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <tr style="background:#f7f7f7"><th style="padding:6px;text-align:left">Mã đơn</th><th style="padding:6px;text-align:left">Ngày tạo</th><th style="padding:6px;text-align:left">Trạng thái</th><th style="padding:6px;text-align:right">Tổng tiền</th><th style="padding:6px;text-align:right">SP</th></tr>
-        ${d.don_hang.map(o=>`<tr><td style="padding:6px">${xkEsc(o.ma_don)}</td><td style="padding:6px">${xkEsc(o.ngay_tao)}</td><td style="padding:6px">${xkEsc(o.trang_thai)}</td><td style="padding:6px;text-align:right">${Number(o.tong_tien||0).toLocaleString('vi-VN')} ${xkEsc(o.tien_te)}</td><td style="padding:6px;text-align:right">${o.so_san_pham}</td></tr>`).join('')}
-      </table></div>`;
-  }catch(e){box.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${xkEsc(e.message)}</div>`}
+async function gpkdTaiFile(){
+  try{const r=await api('/api/dkkd/tai-file');dl(await r.blob(),'GPKD_du_lieu.xlsx');}catch(e){toast('Lỗi: '+e.message,'err')}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
