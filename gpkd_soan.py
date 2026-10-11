@@ -466,8 +466,7 @@ def soan_mau12(du, chu_ky=None):
             if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
                 c = [c for c in tb.rows[-1].cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text][0]
                 # chữ ký trong Kho chữ ký chỉ là của người đại diện HIỆN TẠI (đã được người đó đồng ý) — không gắn khi ký là người đại diện mới
-                for _ in range(_SO_DONG_KY):
-                    c.add_paragraph()
+                _dong_trong_ky(c)
                 pk = c.add_paragraph()
                 pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pk.add_run(ten_ky.strip().upper()).bold = True
@@ -550,10 +549,22 @@ def _ngay_chu(dn):
     return f"{(dn.get('dia_danh') or '').strip() or '……'}, ngày {d_} tháng {m_} năm {y_}"
 
 
-_SO_DONG_KY = 4          # số dòng trống chừa cho chữ ký phía trên họ tên (≈ 2,2 cm)
+_SO_DONG_KY = 4          # số dòng trống chừa cho chữ ký phía trên họ tên
+_CAO_DONG_KY_PT = 26      # mỗi dòng trống cao CỐ ĐỊNH 26pt (không phụ thuộc kiểu chữ của mẫu) -> khoảng ký cao 4 x 26pt = 3,67 cm
 
 
-def _gan_chu_ky(p, anh_uri, rong_cm=5.4, cao_cm=2.4):
+def _dong_trong_ky(o):
+    """Thêm các dòng trống (cao cố định) chừa chỗ ký phía trên họ tên trong ô/khối `o`."""
+    from docx.enum.text import WD_LINE_SPACING
+    for _ in range(_SO_DONG_KY):
+        pp = o.add_paragraph()
+        pf = pp.paragraph_format
+        pf.space_before = pf.space_after = Pt(0)
+        pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+        pf.line_spacing = Pt(_CAO_DONG_KY_PT)
+
+
+def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.4):
     """Gắn ảnh chữ ký dạng NỔI "phía sau chữ" (behind text), canh giữa theo cột/ô và đè lên khoảng trống phía trên họ tên (đoạn `p`).
     Ảnh được co/giãn vừa khung rong_cm x cao_cm, giữ tỷ lệ. Chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã gắn."""
     if not anh_uri or "," not in str(anh_uri):
@@ -572,7 +583,8 @@ def _gan_chu_ky(p, anh_uri, rong_cm=5.4, cao_cm=2.4):
         run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
         inline = run._r.xpath(".//wp:inline")[0]
         ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
-        lech = -(cy - int(0.3 * 360000))      # đáy ảnh chạm nhẹ vào đầu dòng họ tên, phần còn lại nằm trọn trong khoảng trống phía trên
+        khoang = int(_SO_DONG_KY * _CAO_DONG_KY_PT * 12700)      # chiều cao khoảng trống phía trên họ tên (EMU)
+        lech = -(khoang + cy) // 2                                  # ảnh nằm CHÍNH GIỮA khoảng trống đó (chạm nhẹ vào dòng tên nếu ảnh cao hơn)
         anchor = parse_xml(
             f'<wp:anchor {nsdecls("wp")} distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="1" '
             f'locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
@@ -743,8 +755,7 @@ def soan_quyet_dinh(du, chu_ky=None):
     pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb2.add_run("(Ký, ghi rõ họ tên)").italic = True
     if (ht.get("chu_so_huu") or "").strip():
-        for _ in range(_SO_DONG_KY):
-            b.add_paragraph()
+        _dong_trong_ky(b)
         pk = b.add_paragraph()
         pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
         pk.add_run(ht["chu_so_huu"].strip().upper()).bold = True
@@ -797,8 +808,7 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     pa = a.paragraphs[0]
     pa.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pa.add_run("Bên được ủy quyền")
-    for _ in range(_SO_DONG_KY):
-        a.add_paragraph()
+    _dong_trong_ky(a)
     pa3 = a.add_paragraph()
     pa3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pa3.add_run((uq.get("ho_ten") or "").upper())
@@ -806,8 +816,7 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     pb = b.paragraphs[0]
     pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb.add_run("Bên ủy quyền")
-    for _ in range(_SO_DONG_KY):
-        b.add_paragraph()
+    _dong_trong_ky(b)
     pb3 = b.add_paragraph()
     pb3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb3.add_run((ht.get("dd_ho_ten") or "").upper())
