@@ -9,6 +9,7 @@ ddddocr
 Pillow
 svglib
 lxml
+python-docx
 reportlab
 curl_cffi
 selenium

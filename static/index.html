@@ -947,6 +947,12 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
           <div style="font-size:18px;font-weight:700;color:#b5502d">Hỗ trợ thay đổi GPKD</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Gom dữ liệu hồ sơ trên cổng đăng ký kinh doanh ra Excel</div>
         </div>
+        <div onclick="moSoanGpkd()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #2d7a5a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#eef8f3'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">📑</div>
+          <div style="font-size:18px;font-weight:700;color:#2d7a5a">Soạn hồ sơ GPKD</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Soạn hồ sơ thay đổi (giám đốc, địa chỉ, vốn, ngành nghề...) theo biểu mẫu TT 121/2026 và TT 68/2025</div>
+        </div>
         <div onclick="moDoiChieuNganHangCty()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #1f6b4a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background='#fff'">
           <div style="font-size:38px;margin-bottom:8px">🏦</div>
@@ -4399,11 +4405,11 @@ function gpkdChung(ds){
 }
 function gpkdBang(b){
   const cot=b.cot.filter(c=>c!=='Màu dòng'),coMau=b.cot.includes('Màu dòng');
-  const nen={'đỏ':'#fde8e6','xanh dương':'#e3f0fb','xanh lá':'#e6f4e6'};
+  const nen={'đỏ':'#e8372c','xanh dương':'#7fb6ff','xanh lá':'#7dff4f'};
   return `<div style="overflow:auto;margin:6px 0 12px"><table style="border-collapse:collapse;width:100%;font-size:13px">
     <thead><tr style="background:#8c9a8c;color:#fff"><th style="padding:6px 8px;text-align:left;width:40px">#</th>${cot.map(c=>`<th style="padding:6px 8px;text-align:left">${gpkdEsc(c)}</th>`).join('')}</tr></thead><tbody>
-    ${[...b.dong.entries()].map(([i,r])=>`<tr style="background:${nen[r['Màu dòng']]||'#fff'};border-bottom:1px solid #e3e6e3"><td style="padding:6px 8px;color:#777">${gpkdEsc(i)}</td>${cot.map(c=>`<td style="padding:6px 8px">${gpkdEsc(r[c]||'')}</td>`).join('')}</tr>`).join('')}
-    </tbody></table>${coMau?'<div style="font-size:11.5px;color:var(--muted)">Nền <span style="background:#fde8e6;padding:0 6px">đỏ</span>: bị xoá · nền <span style="background:#e3f0fb;padding:0 6px">xanh</span>: bị thay đổi (theo chú thích màu trên cổng).</div>':''}</div>`;
+    ${[...b.dong.entries()].map(([i,r])=>`<tr style="background:${nen[r['Màu dòng']]||'#fff'};border-bottom:1px solid #fff;color:#1a1a1a"><td style="padding:6px 8px;color:#777">${gpkdEsc(i)}</td>${cot.map(c=>`<td style="padding:6px 8px">${gpkdEsc(r[c]||'')}</td>`).join('')}</tr>`).join('')}
+    </tbody></table>${coMau?'<div style="font-size:11.5px;color:var(--muted)">Nền <span style="background:#e8372c;padding:0 6px">đỏ</span>: ngành, nghề bị xoá · nền <span style="background:#7dff4f;padding:0 6px">xanh</span>: ngành, nghề bị thay đổi (đúng màu trên cổng).</div>':''}</div>`;
 }
 function gpkdHtmlKhoi(k,chung){
   const cs=new Set(chung.map(c=>c[0]+'\u0001'+c[1]));
@@ -4461,6 +4467,171 @@ function gpkdVeXem(){
 async function gpkdXuat(){
   try{const r=await api('/api/dkkd/xuat-excel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoi:gpkdKhoi})});
     dl(await r.blob(),'GPKD_du_lieu.xlsx');}catch(e){toast('Lỗi: '+e.message,'err')}
+}
+/* ----- SOẠN HỒ SƠ GPKD: điền biểu mẫu chính thức (TT 121/2026 mới nhất, TT 68/2025) theo nội dung thay đổi, tải về .zip ----- */
+const SS_TRUONG={
+  ten:[['viet','Tên mới (tiếng Việt)'],['nuoc_ngoai','Tên tiếng nước ngoài (nếu có)'],['viet_tat','Tên viết tắt (nếu có)']],
+  dia_chi:[['so_nha','Số nhà, ngõ/ngách, đường/phố, tổ/xóm/ấp'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['dien_thoai','Điện thoại'],['fax','Fax (nếu có)'],['email','Thư điện tử'],['website','Website']],
+  von:[['cu','Vốn điều lệ đã đăng ký (số tiền)'],['moi','Vốn điều lệ sau khi thay đổi (số tiền)'],['thoi_diem','Thời điểm thay đổi vốn (dd/mm/yyyy)'],['hinh_thuc','Hình thức: Tăng vốn / Giảm vốn']],
+  dai_dien:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['chuc_danh','Chức danh (vd Giám đốc)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']],
+  chu_so_huu_moi:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']]
+};
+const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
+  ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['chu_so_huu','Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ mới là cá nhân)','chu_so_huu_moi']];
+let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=null;
+const ssKey=()=>'gpkdSoan_'+(current||0);
+function ssEsc(x){return vbEsc(x)}
+function ssHienTrangTuGom(){
+  let khoi=[];try{khoi=JSON.parse(localStorage.getItem('gpkdKhoi')||'[]')||[]}catch(e){}
+  const lay=(re,ten)=>{for(const k of khoi){if(ten&&!ten.test(k.khoi||''))continue;const c=(k.cap||[]).find(x=>re.test(x[0]));if(c&&c[1])return c[1]}return ''};
+  const ht={ten:lay(/^tên doanh nghiệp viết bằng tiếng việt$/i),ma_so:lay(/^mã số doanh nghiệp$/i),loai_hinh:lay(/^loại hình doanh nghiệp$/i),
+    dia_chi:{so_nha:lay(/^số nhà\/đường/i,/^địa chỉ$/i),xa:lay(/^xã\/phường/i,/^địa chỉ$/i),tinh:lay(/^tỉnh\/thành phố/i,/^địa chỉ$/i),dien_thoai:lay(/^điện thoại$/i,/^địa chỉ$/i),email:lay(/^e-?mail$/i,/^địa chỉ$/i),website:lay(/^website$/i,/^địa chỉ$/i)},
+    dai_dien:[],nganh:[],von:''};
+  khoi.filter(k=>/^người đại diện theo pháp luật - chi tiết/i.test(k.khoi||'')).forEach(k=>{
+    const g=re=>((k.cap||[]).find(x=>re.test(x[0]))||[])[1]||'';
+    ht.dai_dien.push({ho_ten:g(/^họ (và )?tên$/i),chuc_danh:g(/^chức (danh|vụ)$/i),cccd:g(/số giấy tờ pháp lý/i)});
+  });
+  const ng=khoi.find(k=>/^ngành nghề kinh doanh$/i.test(k.khoi||''));
+  if(ng){const m={};(ng.cap||[]).forEach(c=>{const x=c[0].match(/^(.*) #(\d+) - (.*)$/);if(!x)return;(m[x[2]]=m[x[2]]||{})[x[3]]=c[1]});
+    Object.values(m).forEach(r=>{const ma=Object.entries(r).find(([k])=>/^mã số/i.test(k)),ten=Object.entries(r).find(([k])=>/^tên/i.test(k));if(ma)ht.nganh.push({ma:ma[1],ten:ten?ten[1]:'',mau:r['Màu dòng']||''})})}
+  const v=khoi.find(k=>/^thông tin về vốn$/i.test(k.khoi||''));
+  if(v){const c=(v.cap||[]).find(x=>/vốn điều lệ/i.test(x[0])&&/\d/.test(x[1]));if(c)ht.von=c[1]}
+  return ht;
+}
+function ssThuThap(){
+  const gt=(nhom,k)=>{const e=document.getElementById(`ss_${nhom}_${k}`);return e?e.value.trim():''};
+  const loai=SS_LOAI.filter(l=>document.getElementById('ssL_'+l[0])?.checked).map(l=>l[0]);
+  const du={loai,dn:{ten:gt('dn','ten'),ma_so:gt('dn','ma_so'),loai_hinh:gt('dn','loai_hinh'),co_quan:gt('dn','co_quan'),dia_danh:gt('dn','dia_danh'),ngay_lap:gt('dn','ngay_lap')},nganh:ssNganh};
+  ['ten','dia_chi','von'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
+  du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
+  du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
+  du.chu_so_huu_moi={};SS_TRUONG.chu_so_huu_moi.forEach(([k])=>du.chu_so_huu_moi[k]=gt('chu_so_huu_moi',k));
+  return du;
+}
+function ssLuuTam(){try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap(),mr:ssMauRieng.filter(x=>x.chon).map(x=>x.ten)}))}catch(e){}}
+function ssCacO(nhom){
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px">${SS_TRUONG[nhom].map(([k,nhan])=>
+    `<label style="font-size:12px;display:flex;flex-direction:column">${ssEsc(nhan)}<input id="ss_${nhom}_${k}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}</div>`;
+}
+function ssBangNganh(k,tieuDe,coChinh){
+  const ds=ssNganh[k];
+  return `<div style="margin:8px 0"><b style="font-size:13px">${tieuDe}</b>
+    <table style="border-collapse:collapse;font-size:12.5px;width:100%;margin-top:4px">${ds.map((n,i)=>`<tr>
+      <td style="padding:2px"><input value="${ssEsc(n.ma)}" placeholder="Mã ngành" oninput="ssNganh.${k}[${i}].ma=this.value;ssLuuTam()" style="width:90px;padding:5px;border:1px solid var(--line);border-radius:6px"></td>
+      <td style="padding:2px"><input value="${ssEsc(n.ten)}" placeholder="Tên ngành, nghề kinh doanh" oninput="ssNganh.${k}[${i}].ten=this.value;ssLuuTam()" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></td>
+      <td style="padding:2px;white-space:nowrap">${coChinh?`<label class="chk"><input type="checkbox" ${n.chinh?'checked':''} onchange="ssNganh.${k}[${i}].chinh=this.checked;ssLuuTam()"> ngành chính</label>`:`<input value="${ssEsc(n.ghi_chu||'')}" placeholder="Ghi chú" oninput="ssNganh.${k}[${i}].ghi_chu=this.value;ssLuuTam()" style="width:150px;padding:5px;border:1px solid var(--line);border-radius:6px">`}</td>
+      <td style="padding:2px"><button class="btn ghost sm" onclick="ssNganh.${k}.splice(${i},1);ssVeNganh()">✖</button></td></tr>`).join('')}</table>
+    <button class="btn ghost sm" onclick="ssNganh.${k}.push({ma:'',ten:'',chinh:false});ssVeNganh()">➕ Thêm ngành</button>
+    ${k==='bo'&&ssHienTrang&&ssHienTrang.nganh.length?`<select onchange="if(this.value!==''){const n=ssHienTrang.nganh[this.value];ssNganh.bo.push({ma:n.ma,ten:n.ten,ghi_chu:''});ssVeNganh()}" style="padding:5px;border-radius:6px;margin-left:6px"><option value="">+ chọn từ ngành đang đăng ký…</option>${ssHienTrang.nganh.map((n,i)=>`<option value="${i}">${ssEsc(n.ma)} — ${ssEsc(n.ten.slice(0,60))}${n.mau?' ['+n.mau+']':''}</option>`).join('')}</select>`:''}</div>`;
+}
+function ssVeNganh(){
+  const b=document.getElementById('ssNganhBox');if(b)b.innerHTML=ssBangNganh('them','1. Bổ sung ngành, nghề',true)+ssBangNganh('bo','2. Bỏ ngành, nghề',false)+ssBangNganh('sua','3. Sửa đổi chi tiết ngành, nghề',true);
+  ssLuuTam();
+}
+function ssHienCacMuc(){
+  SS_LOAI.forEach(l=>{const m=document.getElementById('ssM_'+l[0]);if(m)m.style.display=document.getElementById('ssL_'+l[0]).checked?'block':'none'});
+  ssLuuTam();
+}
+async function moSoanGpkd(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  document.getElementById('nhapLieuHome').style.display='none';
+  document.getElementById('nhapLieuContent').style.display='block';
+  ssHienTrang=ssHienTrangTuGom();
+  let luu=null;try{luu=JSON.parse(localStorage.getItem(ssKey())||'null')}catch(e){}
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <h3 style="margin:0 0 6px;color:#2d7a5a">📑 Soạn hồ sơ GPKD — hồ sơ thay đổi đăng ký doanh nghiệp</h3>
+    <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+      Phần mềm điền <b>biểu mẫu chính thức</b> (lấy từ Phụ lục I Thông tư <b>121/2026/TT-BTC</b> — bản mới nhất, và Thông tư <b>68/2025/TT-BTC</b>) theo nội dung thay đổi bạn chọn, rồi tải về file .zip các Word.
+      Ô nào <b>chưa có dữ liệu</b> thì giữ nguyên dấu chấm (phần mềm không tự bịa thông tin); <b>không ký thay</b> — người đại diện kiểm tra, ký và nộp. Đây là <b>bản nháp</b>: kế toán/luật sư nên rà soát trước khi nộp.
+    </div>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1. Thông tin doanh nghiệp (hiện tại)</legend>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px">
+        ${[['ten','Tên doanh nghiệp'],['ma_so','Mã số doanh nghiệp / MST'],['loai_hinh','Loại hình (vd Công ty TNHH một thành viên)'],['co_quan','Kính gửi (cơ quan đăng ký kinh doanh)'],['dia_danh','Địa danh (vd TP. Hồ Chí Minh)'],['ngay_lap','Ngày lập hồ sơ (dd/mm/yyyy, để trống nếu ký sau)']].map(([k,n])=>
+          `<label style="font-size:12px;display:flex;flex-direction:column">${n}<input id="ss_dn_${k}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}
+      </div>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="ssLayTuGom()">↧ Lấy từ hồ sơ đã gom (mục "Hỗ trợ thay đổi GPKD")</button>
+      <span class="hint" id="ssHtGhi" style="margin-left:8px"></span>
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Nội dung thay đổi (chọn một hoặc nhiều)</legend>
+      ${SS_LOAI.map(l=>`<label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ssL_${l[0]}" onchange="ssHienCacMuc()"> <b>${l[1]}</b></label>
+        <div id="ssM_${l[0]}" style="display:none;margin:0 0 10px 26px;padding:8px 10px;border-left:3px solid #cfe5da">
+          ${l[0]==='nganh'?'<div id="ssNganhBox"></div>':ssCacO(l[2])}
+          ${l[0]==='dia_chi'?`<label class="chk" style="margin-top:6px"><input type="checkbox" id="ss_dia_chi_doi_thue" onchange="ssLuuTam()"> Đồng thời thay đổi địa chỉ nhận thông báo thuế</label><div class="hint" id="ssHtDiaChi"></div>`:''}
+          ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
+          ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
+        </div>`).join('')}
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Mẫu riêng của bạn (Word .docx, tuỳ chọn)</legend>
+      <div class="hint" style="margin-top:0">Gửi file Word có chữ <code>{{tên_biến}}</code> (vd <code>{{dn_ten_hoa}}</code>, <code>{{dd_ho_ten_hoa}}</code>) — phần mềm sẽ thay bằng dữ liệu ở trên và đưa vào gói hồ sơ (vd Quyết định của chủ sở hữu, Biên bản họp).</div>
+      <div style="margin:6px 0"><label class="btn ghost sm" style="cursor:pointer">📤 Thêm mẫu riêng<input type="file" accept=".docx" style="display:none" onchange="ssThemMauRieng(this)"></label></div>
+      <div id="ssMauRieng"></div>
+      <details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px">Danh sách biến dùng được</summary><div id="ssBien" style="font-size:12px;max-height:160px;overflow:auto"></div></details>
+    </fieldset>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn" onclick="ssTao()">📦 Soạn hồ sơ (tải .zip)</button>
+      <span class="hint" style="margin:0">File zip gồm các biểu mẫu đã điền + "00_Danh_muc_ho_so.docx" (giấy tờ kèm theo, thông tin còn thiếu).</span>
+    </div>
+    <div id="ssKetQua" style="margin-top:10px;font-size:13px"></div>`;
+  // khôi phục dữ liệu đã nhập
+  if(luu&&luu.du){
+    const du=luu.du,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.value=v};
+    Object.entries(du.dn||{}).forEach(([k,v])=>dat('ss_dn_'+k,v));
+    ['ten','dia_chi','von'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
+    Object.entries((du.dai_dien||[{}])[0]||{}).forEach(([k,v])=>dat('ss_dai_dien_'+k,v));
+    Object.entries(du.chu_so_huu_moi||{}).forEach(([k,v])=>dat('ss_chu_so_huu_moi_'+k,v));
+    (du.loai||[]).forEach(k=>{const e=document.getElementById('ssL_'+k);if(e)e.checked=true});
+    const dc=document.getElementById('ss_dia_chi_doi_thue');if(dc)dc.checked=!!(du.dia_chi||{}).doi_thue;
+    ssNganh=du.nganh||{them:[],bo:[],sua:[]};
+  }else{ssNganh={them:[],bo:[],sua:[]};ssLayTuGom(true)}
+  ssHienGoiY();ssVeNganh();ssHienCacMuc();
+  try{const r=await api('/api/gpkd-soan/mau');ssBienMau=r.bien||{};
+    ssMauRieng=(r.mau_rieng||[]).map(t=>({ten:t,chon:!!(luu&&(luu.mr||[]).includes(t))}));
+    document.getElementById('ssBien').innerHTML=Object.entries(ssBienMau).map(([k,v])=>`<code>{{${k}}}</code> — ${ssEsc(v)}`).join('<br>');ssVeMauRieng();}
+  catch(e){document.getElementById('ssMauRieng').innerHTML=`<div class="hint" style="color:#c00">${ssEsc(e.message)}</div>`}
+}
+function ssHienGoiY(){
+  const h=ssHienTrang||{},dc=h.dia_chi||{};
+  const g=(id,t)=>{const e=document.getElementById(id);if(e)e.textContent=t};
+  g('ssHtDiaChi',[dc.so_nha,dc.xa,dc.tinh].filter(Boolean).length?'Địa chỉ hiện tại (từ hồ sơ đã gom): '+[dc.so_nha,dc.xa,dc.tinh].filter(Boolean).join(', '):'');
+  g('ssHtDaiDien',(h.dai_dien||[]).length?'Người đại diện hiện tại (từ hồ sơ đã gom): '+h.dai_dien.map(d=>`${d.ho_ten}${d.chuc_danh?' — '+d.chuc_danh:''}`).join('; '):'');
+  g('ssHtVon',h.von?'Vốn điều lệ đang đăng ký (từ hồ sơ đã gom): '+h.von:'');
+  const cu=document.getElementById('ss_von_cu');if(cu&&!cu.value&&h.von){const n=String(h.von).replace(/[^\d]/g,'');if(n)cu.value=n}
+}
+function ssLayTuGom(im){
+  ssHienTrang=ssHienTrangTuGom();const h=ssHienTrang,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v&&!e.value)e.value=v};
+  dat('ss_dn_ten',h.ten);dat('ss_dn_ma_so',h.ma_so);dat('ss_dn_loai_hinh',h.loai_hinh);
+  ssHienGoiY();ssLuuTam();
+  const g=document.getElementById('ssHtGhi');if(g)g.textContent=h.ten||h.ma_so?'Đã lấy: '+(h.ten||'')+' '+(h.ma_so?'(MST '+h.ma_so+')':''):(im?'':'Chưa có hồ sơ đã gom — vào "Hỗ trợ thay đổi GPKD" lấy dữ liệu trước, hoặc nhập tay.');
+}
+function ssVeMauRieng(){
+  const b=document.getElementById('ssMauRieng');if(!b)return;
+  b.innerHTML=ssMauRieng.length?ssMauRieng.map((m,i)=>`<div style="display:flex;gap:8px;align-items:center;margin:2px 0"><label class="chk"><input type="checkbox" ${m.chon?'checked':''} onchange="ssMauRieng[${i}].chon=this.checked;ssLuuTam()"> ${ssEsc(m.ten)}</label><button class="btn ghost sm" onclick="ssXoaMauRieng('${ssEsc(m.ten).replace(/'/g,"\\'")}')">✖</button></div>`).join(''):'<div class="hint">Chưa có mẫu riêng.</div>';
+}
+async function ssThemMauRieng(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;
+  const b64=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(f)});
+  try{const r=await api('/api/gpkd-soan/mau-rieng',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ten:f.name,noi_dung_b64:b64})});
+    if(!ssMauRieng.find(m=>m.ten===r.ten))ssMauRieng.push({ten:r.ten,chon:true});else ssMauRieng.find(m=>m.ten===r.ten).chon=true;
+    ssVeMauRieng();toast('Đã thêm mẫu "'+r.ten+'" — biến tìm thấy: '+((r.bien_trong_mau||[]).join(', ')||'không có'),'ok');ssLuuTam();
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  inp.value='';
+}
+async function ssXoaMauRieng(ten){
+  if(!confirm('Xoá mẫu riêng "'+ten+'"?'))return;
+  try{await api('/api/gpkd-soan/mau-rieng/'+encodeURIComponent(ten),{method:'DELETE'});ssMauRieng=ssMauRieng.filter(m=>m.ten!==ten);ssVeMauRieng();}catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function ssTao(){
+  const du=ssThuThap(),kq=document.getElementById('ssKetQua');
+  if(!du.loai.length){toast('Chọn ít nhất một nội dung thay đổi','err');return}
+  kq.innerHTML='<div class="hint">Đang soạn hồ sơ…</div>';
+  try{
+    const r=await api('/api/gpkd-soan/tao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({du_lieu:du,mau_rieng:ssMauRieng.filter(m=>m.chon).map(m=>m.ten)})});
+    const cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'');
+    const ten=((r.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)||[])[1]||'Ho_so_thay_doi_DKDN.zip';
+    dl(await r.blob(),ten);
+    kq.innerHTML=`<div style="background:#e9f6ee;border-radius:8px;padding:8px 10px">✅ Đã tải <b>${ssEsc(ten)}</b>.</div>`+
+      (cb?`<div style="background:#fff3e0;border-radius:8px;padding:8px 10px;margin-top:6px">⚠️ ${cb.split(' | ').map(ssEsc).join('<br>⚠️ ')}</div>`:'');
+  }catch(e){kq.innerHTML=`<div style="background:#fdecec;border-radius:8px;padding:8px 10px">Lỗi: ${ssEsc(e.message)}</div>`}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',

@@ -1,0 +1,708 @@
+# -*- coding: utf-8 -*-
+"""Soạn hồ sơ thay đổi đăng ký doanh nghiệp (GPKD) từ BIỂU MẪU CHÍNH THỨC.
+
+Nguồn biểu mẫu: Phụ lục I Thông tư 68/2025/TT-BTC (đủ 80 mẫu) và Phụ lục I Thông tư 121/2026/TT-BTC (cập nhật các mẫu
+1-5, 10, 12, 27, 30) — mẫu có trong TT 121/2026 thì LẤY BẢN MỚI. Mỗi mẫu được cắt ra từ file Thông tư (giữ nguyên định dạng) rồi
+điền các ô "……" theo dữ liệu người dùng; ô nào không có dữ liệu thì GIỮ NGUYÊN dấu chấm (không tự bịa dữ liệu).
+Giấy tờ này chỉ là bản NHÁP để người đại diện kiểm tra, ký — kế toán/luật sư rà soát nội dung trước khi nộp.
+"""
+import io
+import os
+import re
+import copy
+import zipfile
+
+import docx
+from docx.oxml.ns import qn
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+THU_MUC_MAU = os.path.join(BASE, "templates", "gpkd")
+NGUON = [("TT121", "TT121_2026_PL1.docx", "Thông tư 121/2026/TT-BTC"),
+         ("TT68", "TT68_2025_PL1.docx", "Thông tư 68/2025/TT-BTC")]       # thứ tự ưu tiên: bản mới trước
+_RE_MAU = re.compile(r"^M[ẫa]u\s*(?:số\s*)?(\d{1,3})\s*$", re.I)
+_CACHE_NGUON = {}
+_CACHE_MAU = {}
+
+
+def _chu(e):
+    return "".join(t.text or "" for t in e.iter(qn("w:t"))).strip()
+
+
+def _mo_nguon(ma):
+    if ma not in _CACHE_NGUON:
+        tep = next(t for m, t, _ in NGUON if m == ma)
+        d = docx.Document(os.path.join(THU_MUC_MAU, tep))
+        thanh = [c for c in d.element.body if c.tag != qn("w:sectPr")]
+        moc = {}
+        for i, c in enumerate(thanh):
+            if c.tag == qn("w:p"):
+                m = _RE_MAU.match(_chu(c))
+                if m:
+                    moc.setdefault(int(m.group(1)), i)
+        _CACHE_NGUON[ma] = (d, thanh, moc)
+    return _CACHE_NGUON[ma]
+
+
+def danh_sach_mau():
+    """{số mẫu: (mã nguồn, tên nguồn)} — mẫu có ở TT 121/2026 thì lấy bản đó."""
+    kq = {}
+    for ma, _t, ten in reversed(NGUON):
+        for n in _mo_nguon(ma)[2]:
+            kq[n] = (ma, ten)
+    return dict(sorted(kq.items()))
+
+
+def cat_mau(so_mau):
+    """Cắt riêng 1 mẫu ra 1 Document (bản sao độc lập)."""
+    so_mau = int(so_mau)
+    nguon = danh_sach_mau().get(so_mau)
+    if not nguon:
+        raise KeyError(f"Không có Mẫu số {so_mau} trong Thông tư 121/2026 hoặc 68/2025")
+    d, thanh, moc = _mo_nguon(nguon[0])
+    bat_dau = moc[so_mau]
+    sau = sorted(i for n, i in moc.items() if i > bat_dau)
+    ket_thuc = sau[0] if sau else len(thanh)
+    giu = {id(c) for c in thanh[bat_dau:ket_thuc]}
+    ban = docx.Document(io.BytesIO(_luu_bytes(d)))
+    t2 = [c for c in ban.element.body if c.tag != qn("w:sectPr")]
+    for i, c in enumerate(t2):
+        if not (bat_dau <= i < ket_thuc):
+            ban.element.body.remove(c)
+    return ban
+
+
+def _luu_bytes(d):
+    bio = io.BytesIO()
+    d.save(bio)
+    return bio.getvalue()
+
+
+# ============================================================ ĐỌC SỐ TIỀN THÀNH CHỮ
+_CHU_SO = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
+
+
+def _doc_3(n, day_du):
+    """Đọc 0..999. day_du=True: nhóm này đứng sau nhóm khác -> đọc đủ 'không trăm', 'linh'."""
+    tram, chuc, dv = n // 100, (n // 10) % 10, n % 10
+    kq = []
+    if tram or day_du:
+        kq.append(_CHU_SO[tram] + " trăm")
+    if chuc > 1:
+        kq.append(_CHU_SO[chuc] + " mươi")
+    elif chuc == 1:
+        kq.append("mười")
+    elif (tram or day_du) and dv:
+        kq.append("linh")
+    if dv:
+        if chuc > 1 and dv == 1:
+            kq.append("mốt")
+        elif chuc > 1 and dv == 4:
+            kq.append("tư")
+        elif chuc >= 1 and dv == 5:
+            kq.append("lăm")
+        elif chuc == 0 and (tram or day_du) and dv == 5:
+            kq.append("năm")
+        else:
+            kq.append(_CHU_SO[dv])
+    return " ".join(kq)
+
+
+def _doc_duoi_ty(n, co_truoc=False):
+    """Đọc 0 < n < 1e9 (triệu/nghìn/đơn vị); co_truoc: phía trước đã có số (đọc đủ 'không trăm', 'linh')."""
+    don_vi = ["", " nghìn", " triệu"]
+    nhom = []
+    while n:
+        nhom.append(n % 1000)
+        n //= 1000
+    kq = []
+    for i in range(len(nhom) - 1, -1, -1):
+        if nhom[i] == 0:
+            continue
+        kq.append(_doc_3(nhom[i], day_du=bool(kq) or co_truoc) + don_vi[i])
+    return " ".join(kq)
+
+
+def doc_so_vn(n):
+    """1000000000 -> 'một tỷ'; 5300000 -> 'năm triệu ba trăm nghìn'; 1500000000000 -> 'một nghìn năm trăm tỷ'; 0 -> 'không'."""
+    n = int(n)
+    if n == 0:
+        return "không"
+    if n < 0:
+        return "âm " + doc_so_vn(-n)
+    ty, du = divmod(n, 10 ** 9)
+    if not ty:
+        return _doc_duoi_ty(du)
+    kq = doc_so_vn(ty) + " tỷ"
+    return kq + (" " + _doc_duoi_ty(du, co_truoc=True) if du else "")
+
+
+def so_nguyen(v):
+    """'1.000.000.000', '1,000,000 đồng', 5300000 -> int (không đọc được -> None)."""
+    if isinstance(v, (int, float)):
+        return int(v)
+    t = re.sub(r"[^\d]", "", str(v or ""))
+    return int(t) if t else None
+
+
+def tien_bang_so_chu(v):
+    """'1.000.000.000 đồng (Một tỷ đồng)' — thiếu số -> chuỗi gốc người dùng nhập."""
+    n = so_nguyen(v)
+    if n is None:
+        return str(v or "").strip()
+    bang_chu = doc_so_vn(n)
+    return f"{n:,}".replace(",", ".") + f" đồng (bằng chữ: {bang_chu[:1].upper() + bang_chu[1:]} đồng)"
+
+
+# ============================================================ ĐIỀN Ô "……" TRONG BIỂU MẪU
+from docx.text.paragraph import Paragraph
+from docx.table import Table
+
+_CHAM = r"(?:…|\.{2,})[…\.]*"
+_NGAY3 = r"[…\.]+\s*/\s*[…\.]+\s*/\s*[…\.]+"
+
+
+def _van(p):
+    return "".join(r.text for r in p.runs)
+
+
+def _thay_khoang(p, a, b, moi):
+    """Thay [a,b) của văn bản đoạn bằng `moi`, giữ định dạng của run đầu tiên bị chạm (a==b: chèn)."""
+    runs = p.runs
+    pos = 0
+    da = False
+    if a == b:
+        for r in runs:
+            t = r.text
+            ra, rb = pos, pos + len(t)
+            pos = rb
+            if ra < a <= rb:
+                r.text = t[:a - ra] + moi + t[a - ra:]
+                return
+        (runs[-1] if runs else p.add_run("")).text += moi
+        return
+    for r in runs:
+        t = r.text
+        ra, rb = pos, pos + len(t)
+        pos = rb
+        if rb <= a or ra >= b:
+            continue
+        s, e = max(a, ra) - ra, min(b, rb) - ra
+        if not da:
+            r.text = t[:s] + moi + t[e:]
+            da = True
+        else:
+            r.text = t[:s] + t[e:]
+    if not da:
+        p.add_run(moi)
+
+
+def dien_cham(p, nhan_re, gia_tri, mau=_CHAM):
+    """Sau nhãn (regex) thay dãy dấu chấm bằng giá trị; không có dấu chấm thì nối vào cuối đoạn. True nếu có điền."""
+    gia_tri = str(gia_tri or "").strip()
+    if not gia_tri:
+        return False
+    text = _van(p)
+    m = re.search(nhan_re, text)
+    if not m:
+        return False
+    k = re.match(r"(?:\s*\([^)]{0,90}\))*\s*[:：]?\s*", text[m.end():])      # bỏ qua chú thích "(ghi bằng chữ in hoa)", "(nếu có)" sau nhãn
+    a = m.end() + k.end()
+    cm = re.match(mau, text[a:])
+    if cm:
+        _thay_khoang(p, a, a + cm.end(), gia_tri)
+    else:
+        e = len(text.rstrip())
+        _thay_khoang(p, e, e, ("" if text.rstrip().endswith(":") else "") + " " + gia_tri)
+    return True
+
+
+def _ngay_dd_mm_yyyy(v):
+    t = str(v or "").strip()
+    m = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$", t)
+    if m:
+        return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
+    m = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$", t)
+    return f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}" if m else t
+
+
+def _cac_doan(phan_tu, goc):
+    return [Paragraph(pe, goc) for pe in phan_tu.iter(qn("w:p"))]
+
+
+class _Mau:
+    """Một biểu mẫu đã cắt: thao tác theo các phần tử cấp cao nhất (đoạn/bảng) của thân văn bản."""
+
+    def __init__(self, doc):
+        self.doc = doc
+        self.ch = [c for c in doc.element.body if c.tag != qn("w:sectPr")]
+
+    def chi_so(self, mau_re, tu=0):
+        for i in range(tu, len(self.ch)):
+            c = self.ch[i]
+            if c.tag == qn("w:p") and re.search(mau_re, _chu(c)):
+                return i
+        return None
+
+    def doan(self, lo=0, hi=None):
+        kq = []
+        for c in self.ch[lo:hi]:
+            kq += _cac_doan(c, self.doc._body)
+        return kq
+
+    def tim(self, nhan_re, lo=0, hi=None):
+        for p in self.doan(lo, hi):
+            if re.search(nhan_re, _van(p)):
+                return p
+        return None
+
+    def dien(self, nhan_re, gia_tri, lo=0, hi=None, mau=_CHAM):
+        p = self.tim(nhan_re, lo, hi)
+        return bool(p is not None and dien_cham(p, nhan_re, gia_tri, mau))
+
+    def xoa_phan(self, lo, hi):
+        for c in self.ch[lo:hi]:
+            if c.getparent() is not None:
+                c.getparent().remove(c)
+
+    def bang(self, i):
+        return Table(self.ch[i], self.doc._body)
+
+
+def _dat_o(cell, text):
+    p = cell.paragraphs[0]
+    if p.runs:
+        p.runs[0].text = str(text)
+        for r in p.runs[1:]:
+            r.text = ""
+    else:
+        p.add_run(str(text))
+
+
+def _dien_bang_nganh(tb, ds, cot):
+    """tb: bảng có hàng tiêu đề + 1 hàng trống; ds: danh sách dict; cot: [khoá cho từng cột sau STT]."""
+    mau_hang = tb.rows[1]._tr
+    for i, n in enumerate(ds, 1):
+        hang = copy.deepcopy(mau_hang)
+        mau_hang.addprevious(hang)
+        from docx.table import _Row
+        r = _Row(hang, tb)
+        _dat_o(r.cells[0], i)
+        for j, khoa in enumerate(cot, 1):
+            v = n.get(khoa, "")
+            _dat_o(r.cells[j], "X" if khoa == "chinh" and v else ("" if khoa == "chinh" else v))
+    mau_hang.getparent().remove(mau_hang)
+
+
+def _dien_dau(m, dn, hi):
+    """Phần đầu chung: tên/MST/cơ quan nhận + tên DN ở tiêu đề + ngày lập."""
+    ten = (dn.get("ten") or "").strip().upper()
+    if ten:
+        for p in m.doan(0, 3):
+            if _van(p).strip() == "TÊN DOANH NGHIỆP":
+                _thay_khoang(p, 0, len(_van(p)), ten)
+                break
+    m.dien(r"Tên doanh nghiệp", ten, 0, hi)
+    m.dien(r"Mã số doanh nghiệp/Mã số thuế", dn.get("ma_so"), 0, hi)
+    m.dien(r"Kính gửi: \(Cơ quan đăng ký kinh doanh cấp tỉnh\)", dn.get("co_quan"), 0, hi)
+    if dn.get("ngay_lap"):
+        ngay = _ngay_dd_mm_yyyy(dn["ngay_lap"])
+        mm = re.match(r"(\d{2})/(\d{2})/(\d{4})", ngay)
+        if mm:
+            for p in m.doan(0, 3):
+                if re.search(r"ngày…", _van(p)) or re.search(r"…\s*,\s*ngày", _van(p)):
+                    _thay_khoang(p, 0, len(_van(p)), f"{dn.get('dia_danh') or '……'}, ngày {int(mm.group(1))} tháng {int(mm.group(2))} năm {mm.group(3)}")
+                    break
+
+
+_MARKER_12 = [("A", r"^A\.\s*ĐĂNG KÝ THAY ĐỔI NỘI DUNG"), ("TEN", r"^ĐĂNG KÝ THAY ĐỔI TÊN DOANH NGHIỆP"),
+              ("DIA_CHI", r"^ĐĂNG KÝ THAY ĐỔI ĐỊA CHỈ TRỤ SỞ"), ("THANH_VIEN", r"^ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN"),
+              ("VON", r"^ĐĂNG KÝ THAY ĐỔI VỐN ĐIỀU LỆ"), ("NGANH", r"^THÔNG BÁO THAY ĐỔI NGÀNH"),
+              ("VON_DNTN", r"^ĐĂNG KÝ THAY ĐỔI VỐN ĐẦU TƯ"), ("UY_QUYEN", r"^THÔNG BÁO THAY ĐỔI NGƯỜI ĐẠI DIỆN THEO ỦY QUYỀN"),
+              ("CO_DONG", r"^THÔNG BÁO THAY ĐỔI CỔ ĐÔNG"), ("THUE", r"^THÔNG BÁO THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ"),
+              ("CSHHL", r"^THÔNG BÁO THAY ĐỔI THÔNG TIN VỀ CHỦ SỞ HỮU HƯỞNG LỢI"), ("B", r"^B\.\s*BỔ SUNG"),
+              ("C", r"^C\.\s*ĐỀ NGHỊ HIỆU ĐÍNH"), ("KET", r"^Trường hợp hồ sơ đăng ký doanh nghiệp hợp lệ")]
+_GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "thue": "THUE", "cshhl": "CSHHL"}
+
+
+def soan_mau12(du):
+    """Mẫu số 12 (TT 121/2026) — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN: chỉ giữ các mục được chọn, điền dữ liệu."""
+    d = cat_mau(12)
+    m = _Mau(d)
+    loai = set(du.get("loai") or [])
+    dn = du.get("dn") or {}
+    mk = {}
+    for ten, mau in _MARKER_12:
+        i = m.chi_so(mau)
+        if i is not None:
+            mk[ten] = i
+    thu_tu = sorted(mk.items(), key=lambda kv: kv[1])
+    dau_a = mk["A"]
+    cac = {t: (i, (thu_tu[k + 1][1] if k + 1 < len(thu_tu) else len(m.ch))) for k, (t, i) in enumerate(thu_tu)}
+    # ---- điền (trước khi xoá, chỉ số còn nguyên)
+    _dien_dau(m, dn, dau_a)
+    if "ten" in loai and "TEN" in cac:
+        t = du.get("ten") or {}
+        lo, hi = cac["TEN"]
+        for nhan, k in ((r"Tên doanh nghiệp viết bằng tiếng Việt sau khi thay đổi", "viet"),
+                        (r"Tên doanh nghiệp viết bằng tiếng nước ngoài sau khi thay đổi", "nuoc_ngoai"),
+                        (r"Tên doanh nghiệp viết tắt sau khi thay đổi", "viet_tat")):
+            v = (t.get(k) or "").strip()
+            p = m.tim(nhan, lo, hi)
+            if v and p is not None and dien_cham(p, nhan, v.upper() if k == "viet" else v):
+                nxt = p._p.getnext()                       # dòng chấm nối tiếp (chỉ có dấu chấm) -> bỏ
+                if nxt is not None and nxt.tag == qn("w:p") and re.fullmatch(r"[…\.\s]*", _chu(nxt)):
+                    nxt.getparent().remove(nxt)
+    if "dia_chi" in loai and "DIA_CHI" in cac:
+        a = du.get("dia_chi") or {}
+        lo, hi = cac["DIA_CHI"]
+        m.dien(r"Số nhà/phòng, ngách/hẻm, ngõ/kiệt, đường/phố/đại lộ, tổ/xóm/ấp/thôn", a.get("so_nha"), lo, hi)
+        m.dien(r"Xã/Phường/Đặc khu", a.get("xa"), lo, hi)
+        m.dien(r"Tỉnh/Thành phố trực thuộc trung ương", a.get("tinh"), lo, hi)
+        m.dien(r"Điện thoại", a.get("dien_thoai"), lo, hi)
+        m.dien(r"Số fax \(nếu có\)", a.get("fax"), lo, hi)
+        m.dien(r"Thư điện tử \(nếu có\)", a.get("email"), lo, hi)
+        m.dien(r"Website \(nếu có\)", a.get("website"), lo, hi)
+        if a.get("doi_thue"):
+            p = m.tim(r"Đồng thời thay đổi địa chỉ nhận thông báo thuế", lo, hi)
+            if p is not None:
+                for r in p.runs:
+                    if "□" in r.text:
+                        r.text = r.text.replace("□", "☒", 1)
+                        break
+    if "von" in loai and "VON" in cac:
+        v = du.get("von") or {}
+        lo, hi = cac["VON"]
+        m.dien(r"Vốn điều lệ đã đăng ký", tien_bang_so_chu(v.get("cu")) if v.get("cu") else "", lo, hi)
+        m.dien(r"Vốn điều lệ sau khi thay đổi", tien_bang_so_chu(v.get("moi")) if v.get("moi") else "", lo, hi)
+        m.dien(r"Thời điểm thay đổi vốn", v.get("thoi_diem"), lo, hi)
+        m.dien(r"Hình thức tăng, giảm vốn", v.get("hinh_thuc"), lo, hi)
+    # ---- bảng ngành nghề: điền, và bỏ tiểu mục không có dữ liệu
+    nganh = du.get("nganh") or {}
+    if "nganh" in loai and "NGANH" in cac:
+        lo, hi = cac["NGANH"]
+        cac_tm = [("them", r"^1\.\s*Bổ sung ngành", ["ten", "ma", "chinh"]), ("bo", r"^2\.\s*Bỏ ngành", ["ten", "ma", "ghi_chu"]),
+                  ("sua", r"^3\.\s*Sửa đổi chi tiết ngành", ["ten", "ma", "chinh"])]
+        vi_tri = []
+        for k, mau, cot in cac_tm:
+            i = m.chi_so(mau, lo)
+            if i is not None and i < hi:
+                vi_tri.append((k, i, cot))
+        ket_thuc_tm = m.chi_so(r"^Doanh nghiệp cam kết đáp ứng điều kiện tiếp cận thị trường", lo)
+        xoa = []
+        for n, (k, i, cot) in enumerate(vi_tri):
+            j = vi_tri[n + 1][1] if n + 1 < len(vi_tri) else ket_thuc_tm
+            ds = [x for x in (nganh.get(k) or []) if (x.get("ten") or x.get("ma"))]
+            if ds and i + 1 < len(m.ch) and m.ch[i + 1].tag == qn("w:tbl"):
+                _dien_bang_nganh(m.bang(i + 1), ds, cot)
+            elif not ds:
+                xoa.append((i, j))
+        for i, j in sorted(xoa, reverse=True):
+            m.xoa_phan(i, j)
+    # ---- bỏ các phần KHÔNG dùng
+    giu = {_GIU_12[k] for k in loai if k in _GIU_12}
+    con_lai = {"A", "KET"} | giu
+    for ten, (lo, hi) in sorted(cac.items(), key=lambda kv: -kv[1][0]):
+        if ten not in con_lai:
+            m.xoa_phan(lo, hi)
+    # tách/sáp nhập (ở phần A): bỏ từ "Doanh nghiệp đăng ký thay đổi trên cơ sở" đến trước dòng "- Doanh nghiệp có Giấy chứng nhận quyền sử dụng đất"
+    s = m.chi_so(r"^Doanh nghiệp đăng ký thay đổi trên cơ sở")
+    e = m.chi_so(r"^- Doanh nghiệp có Giấy chứng nhận quyền sử dụng đất")
+    if s is not None and e is not None and s < e:
+        m.xoa_phan(s, e)
+    # vốn điều lệ: bỏ phần không áp dụng theo loại hình
+    lh = (dn.get("loai_hinh") or "").lower()
+    if "von" in loai and "VON" in cac:
+        cp, vg, cam = (m.chi_so(r"^Thông tin về cổ phần"), m.chi_so(r"^2\.\s*Đăng ký thay đổi phần vốn góp"),
+                       m.chi_so(r"^Doanh nghiệp cam kết bảo đảm thanh toán"))
+        if cp is not None and vg is not None and cam is not None and ("cổ phần" not in lh):
+            m.xoa_phan(cp, vg)                        # không phải công ty cổ phần -> bỏ phần cổ phần
+        if vg is not None and cam is not None and ("một thành viên" in lh or "cổ phần" in lh):
+            m.xoa_phan(vg, cam)                       # CT TNHH 1TV / cổ phần: không có "phần vốn góp của thành viên"
+    return d
+
+
+def soan_mau13(du):
+    """Mẫu số 13 (TT 68/2025) — Giấy đề nghị đăng ký thay đổi người đại diện theo pháp luật."""
+    d = cat_mau(13)
+    m = _Mau(d)
+    dn = du.get("dn") or {}
+    ds = du.get("dai_dien") or []
+    bd = m.chi_so(r"^Người đại diện theo pháp luật sau khi thay đổi")
+    _dien_dau(m, dn, bd if bd is not None else len(m.ch))
+    if ds and bd is not None:
+        n = ds[0]
+        m.dien(r"Họ, chữ đệm và tên", (n.get("ho_ten") or "").upper(), bd)
+        p = m.tim(r"Ngày, tháng, năm sinh", bd)
+        if p is not None and n.get("ngay_sinh"):
+            dien_cham(p, r"Ngày, tháng, năm sinh", _ngay_dd_mm_yyyy(n["ngay_sinh"]), _NGAY3)
+        m.dien(r"Giới tính", n.get("gioi_tinh"), bd)
+        m.dien(r"Số định danh cá nhân", n.get("cccd"), bd)
+        m.dien(r"Chức danh", n.get("chuc_danh"), bd)
+        m.dien(r"Số nhà/phòng, ngách/hẻm, ngõ/kiệt, đường/phố/đại lộ, tổ/xóm/ấp/thôn", n.get("so_nha"), bd)
+        m.dien(r"Xã/Phường/Đặc khu", n.get("xa"), bd)
+        m.dien(r"Tỉnh/Thành phố trực thuộc trung ương", n.get("tinh"), bd)
+        m.dien(r"Quốc gia", n.get("quoc_gia") or "Việt Nam", bd)
+        m.dien(r"Điện thoại \(nếu có\)", n.get("dien_thoai"), bd)
+        m.dien(r"Thư điện tử \(nếu có\)", n.get("email"), bd)
+    return d
+
+
+def soan_mau15(du):
+    """Mẫu số 15 (TT 68/2025) — Giấy đề nghị đăng ký thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu MỚI là cá nhân)."""
+    d = cat_mau(15)
+    m = _Mau(d)
+    dn = du.get("dn") or {}
+    n = du.get("chu_so_huu_moi") or {}
+    bd = m.chi_so(r"^1\.\s*Đối với chủ sở hữu là cá nhân")
+    ket = m.chi_so(r"^2\.\s*Đối với chủ sở hữu là tổ chức")
+    _dien_dau(m, dn, bd if bd is not None else len(m.ch))
+    if bd is not None and ket is not None:
+        hi = ket
+        m.dien(r"Họ, chữ đệm và tên chủ sở hữu", (n.get("ho_ten") or "").upper(), bd, hi)
+        p = m.tim(r"Ngày, tháng, năm sinh", bd, hi)
+        if p is not None and n.get("ngay_sinh"):
+            dien_cham(p, r"Ngày, tháng, năm sinh", _ngay_dd_mm_yyyy(n["ngay_sinh"]), _NGAY3)
+        m.dien(r"Giới tính", n.get("gioi_tinh"), bd, hi)
+        m.dien(r"Số định danh cá nhân", n.get("cccd"), bd, hi)
+        m.dien(r"Số nhà/phòng, ngách/hẻm, ngõ/kiệt, đường/phố/đại lộ, tổ/xóm/ấp/thôn", n.get("so_nha"), bd, hi)
+        m.dien(r"Xã/Phường/Đặc khu", n.get("xa"), bd, hi)
+        m.dien(r"Tỉnh/Thành phố trực thuộc trung ương", n.get("tinh"), bd, hi)
+        m.dien(r"Quốc gia", n.get("quoc_gia") or "Việt Nam", bd, hi)
+        m.dien(r"Điện thoại \(nếu có\)", n.get("dien_thoai"), bd, hi)
+        m.dien(r"Thư điện tử \(nếu có\)", n.get("email"), bd, hi)
+        # chủ sở hữu mới là cá nhân: bỏ phần "2. Đối với chủ sở hữu là tổ chức" (đến trước dòng đề nghị công bố)
+        cb = m.chi_so(r"^Trường hợp hồ sơ đăng ký doanh nghiệp hợp lệ", ket)
+        if cb is not None:
+            m.xoa_phan(ket, cb)
+    return d
+
+
+# ============================================================ MẪU RIÊNG CỦA NGƯỜI DÙNG: thay {{biến}}
+CAC_BIEN = {
+    "dn_ten": "Tên doanh nghiệp", "dn_ten_hoa": "Tên doanh nghiệp (IN HOA)", "dn_ma_so": "Mã số doanh nghiệp/MST",
+    "dn_loai_hinh": "Loại hình doanh nghiệp", "dn_co_quan": "Cơ quan đăng ký kinh doanh nhận hồ sơ", "dn_dia_chi": "Địa chỉ trụ sở hiện tại",
+    "ngay_lap": "Ngày lập (dd/mm/yyyy)", "ngay": "Ngày", "thang": "Tháng", "nam": "Năm", "dia_danh": "Địa danh",
+    "ten_moi_viet": "Tên mới (tiếng Việt, IN HOA)", "ten_moi_nuoc_ngoai": "Tên mới (nước ngoài)", "ten_moi_viet_tat": "Tên mới (viết tắt)",
+    "dia_chi_moi": "Địa chỉ trụ sở mới (đầy đủ)", "dia_chi_moi_so_nha": "Địa chỉ mới - số nhà/đường", "dia_chi_moi_xa": "Địa chỉ mới - xã/phường",
+    "dia_chi_moi_tinh": "Địa chỉ mới - tỉnh/thành phố",
+    "von_cu": "Vốn điều lệ cũ (số)", "von_cu_chu": "Vốn điều lệ cũ (bằng chữ)", "von_moi": "Vốn điều lệ mới (số)", "von_moi_chu": "Vốn điều lệ mới (bằng chữ)",
+    "dd_ho_ten": "Người đại diện mới - họ tên", "dd_ho_ten_hoa": "Người đại diện mới - họ tên IN HOA", "dd_ngay_sinh": "Người đại diện mới - ngày sinh",
+    "dd_gioi_tinh": "Người đại diện mới - giới tính", "dd_cccd": "Người đại diện mới - số định danh", "dd_chuc_danh": "Người đại diện mới - chức danh",
+    "dd_dia_chi": "Người đại diện mới - địa chỉ liên lạc", "dd_dien_thoai": "Người đại diện mới - điện thoại", "dd_email": "Người đại diện mới - email",
+    "cs_ho_ten": "Chủ sở hữu mới - họ tên", "cs_ho_ten_hoa": "Chủ sở hữu mới - họ tên IN HOA", "cs_ngay_sinh": "Chủ sở hữu mới - ngày sinh",
+    "cs_gioi_tinh": "Chủ sở hữu mới - giới tính", "cs_cccd": "Chủ sở hữu mới - số định danh", "cs_dia_chi": "Chủ sở hữu mới - địa chỉ liên lạc",
+}
+
+
+def _dia_chi_day_du(so_nha, xa, tinh):
+    return ", ".join(x.strip() for x in (so_nha, xa, tinh) if x and str(x).strip())
+
+
+def bien_thay_the(du):
+    dn, t, a, v = du.get("dn") or {}, du.get("ten") or {}, du.get("dia_chi") or {}, du.get("von") or {}
+    dd = (du.get("dai_dien") or [{}])[0] if du.get("dai_dien") else {}
+    cs = du.get("chu_so_huu_moi") or {}
+    ngay = _ngay_dd_mm_yyyy(dn.get("ngay_lap") or "")
+    mm = re.match(r"(\d{2})/(\d{2})/(\d{4})", ngay)
+    b = {
+        "dn_ten": dn.get("ten") or "", "dn_ten_hoa": (dn.get("ten") or "").upper(), "dn_ma_so": dn.get("ma_so") or "",
+        "dn_loai_hinh": dn.get("loai_hinh") or "", "dn_co_quan": dn.get("co_quan") or "", "dn_dia_chi": dn.get("dia_chi") or "",
+        "ngay_lap": ngay, "ngay": str(int(mm.group(1))) if mm else "", "thang": str(int(mm.group(2))) if mm else "", "nam": mm.group(3) if mm else "",
+        "dia_danh": dn.get("dia_danh") or "",
+        "ten_moi_viet": (t.get("viet") or "").upper(), "ten_moi_nuoc_ngoai": t.get("nuoc_ngoai") or "", "ten_moi_viet_tat": t.get("viet_tat") or "",
+        "dia_chi_moi": _dia_chi_day_du(a.get("so_nha"), a.get("xa"), a.get("tinh")), "dia_chi_moi_so_nha": a.get("so_nha") or "",
+        "dia_chi_moi_xa": a.get("xa") or "", "dia_chi_moi_tinh": a.get("tinh") or "",
+        "von_cu": (f"{so_nguyen(v.get('cu')):,}".replace(",", ".") if so_nguyen(v.get("cu")) is not None else ""),
+        "von_cu_chu": (doc_so_vn(so_nguyen(v.get("cu"))) + " đồng") if so_nguyen(v.get("cu")) is not None else "",
+        "von_moi": (f"{so_nguyen(v.get('moi')):,}".replace(",", ".") if so_nguyen(v.get("moi")) is not None else ""),
+        "von_moi_chu": (doc_so_vn(so_nguyen(v.get("moi"))) + " đồng") if so_nguyen(v.get("moi")) is not None else "",
+        "dd_ho_ten": dd.get("ho_ten") or "", "dd_ho_ten_hoa": (dd.get("ho_ten") or "").upper(), "dd_ngay_sinh": _ngay_dd_mm_yyyy(dd.get("ngay_sinh")),
+        "dd_gioi_tinh": dd.get("gioi_tinh") or "", "dd_cccd": dd.get("cccd") or "", "dd_chuc_danh": dd.get("chuc_danh") or "",
+        "dd_dia_chi": _dia_chi_day_du(dd.get("so_nha"), dd.get("xa"), dd.get("tinh")), "dd_dien_thoai": dd.get("dien_thoai") or "", "dd_email": dd.get("email") or "",
+        "cs_ho_ten": cs.get("ho_ten") or "", "cs_ho_ten_hoa": (cs.get("ho_ten") or "").upper(), "cs_ngay_sinh": _ngay_dd_mm_yyyy(cs.get("ngay_sinh")),
+        "cs_gioi_tinh": cs.get("gioi_tinh") or "", "cs_cccd": cs.get("cccd") or "",
+        "cs_dia_chi": _dia_chi_day_du(cs.get("so_nha"), cs.get("xa"), cs.get("tinh")),
+    }
+    return b
+
+
+def dien_mau_rieng(noi_dung, bien):
+    """Mẫu .docx do người dùng cung cấp: thay mọi {{tên_biến}} (biến không có dữ liệu giữ nguyên để người dùng thấy còn thiếu).
+    Trả (bytes docx đã điền, danh sách biến đã gặp, danh sách biến chưa có dữ liệu)."""
+    d = docx.Document(io.BytesIO(noi_dung))
+    gap, thieu = set(), set()
+
+    def xu_ly(p):
+        t = _van(p)
+        if "{{" not in t:
+            return
+
+        def sua(m):
+            k = m.group(1).strip()
+            gap.add(k)
+            v = bien.get(k)
+            if v in (None, ""):
+                thieu.add(k)
+                return m.group(0)
+            return str(v)
+        moi = re.sub(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", sua, t)
+        if moi != t:
+            rs = p.runs
+            if rs:
+                rs[0].text = moi
+                for r in rs[1:]:
+                    r.text = ""
+    for p in d.paragraphs:
+        xu_ly(p)
+    for tb in d.tables:
+        for hang in tb.rows:
+            for o in hang.cells:
+                for p in o.paragraphs:
+                    xu_ly(p)
+    for sec in d.sections:
+        for p in sec.header.paragraphs + sec.footer.paragraphs:
+            xu_ly(p)
+    return _luu_bytes(d), sorted(gap), sorted(thieu)
+
+
+# ============================================================ GÓI HỒ SƠ
+LOAI_THAY_DOI = {
+    "ten": "Thay đổi tên doanh nghiệp", "dia_chi": "Thay đổi địa chỉ trụ sở chính", "von": "Thay đổi vốn điều lệ",
+    "nganh": "Thay đổi ngành, nghề kinh doanh", "dai_dien": "Thay đổi người đại diện theo pháp luật (giám đốc)",
+    "chu_so_huu": "Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu mới là cá nhân)",
+}
+
+
+def _kiem_thieu(du):
+    """Các thông tin còn THIẾU cho từng loại thay đổi (để người dùng bổ sung; ô thiếu giữ dấu chấm trong biểu mẫu)."""
+    loai = set(du.get("loai") or [])
+    dn = du.get("dn") or {}
+    th = []
+    if not (dn.get("ten") or "").strip():
+        th.append("Tên doanh nghiệp")
+    if not (dn.get("ma_so") or "").strip():
+        th.append("Mã số doanh nghiệp/MST")
+    if not (dn.get("co_quan") or "").strip():
+        th.append("Cơ quan đăng ký kinh doanh nhận hồ sơ (ô 'Kính gửi')")
+    if "ten" in loai and not ((du.get("ten") or {}).get("viet") or "").strip():
+        th.append("Tên doanh nghiệp mới (tiếng Việt)")
+    if "dia_chi" in loai:
+        a = du.get("dia_chi") or {}
+        for k, ten in (("so_nha", "số nhà/đường"), ("xa", "xã/phường"), ("tinh", "tỉnh/thành phố")):
+            if not (a.get(k) or "").strip():
+                th.append(f"Địa chỉ trụ sở mới — {ten}")
+    if "von" in loai:
+        v = du.get("von") or {}
+        if so_nguyen(v.get("cu")) is None:
+            th.append("Vốn điều lệ đã đăng ký (số tiền)")
+        if so_nguyen(v.get("moi")) is None:
+            th.append("Vốn điều lệ sau khi thay đổi (số tiền)")
+    if "nganh" in loai:
+        ng = du.get("nganh") or {}
+        if not any((ng.get(k) or []) for k in ("them", "bo", "sua")):
+            th.append("Ngành, nghề kinh doanh bổ sung/bỏ/sửa đổi (chưa nhập ngành nào)")
+    if "dai_dien" in loai:
+        ds = du.get("dai_dien") or []
+        n = ds[0] if ds else {}
+        for k, ten in (("ho_ten", "họ tên"), ("ngay_sinh", "ngày sinh"), ("gioi_tinh", "giới tính"), ("cccd", "số định danh cá nhân"), ("chuc_danh", "chức danh")):
+            if not (n.get(k) or "").strip():
+                th.append(f"Người đại diện theo pháp luật mới — {ten}")
+    if "chu_so_huu" in loai:
+        n = du.get("chu_so_huu_moi") or {}
+        for k, ten in (("ho_ten", "họ tên"), ("ngay_sinh", "ngày sinh"), ("gioi_tinh", "giới tính"), ("cccd", "số định danh cá nhân")):
+            if not (n.get(k) or "").strip():
+                th.append(f"Chủ sở hữu mới — {ten}")
+    return th
+
+
+def _danh_muc(du, ds_file, thieu, ghi_chu_nguon):
+    """Danh mục hồ sơ (docx): các biểu mẫu đã soạn + giấy tờ thường kèm theo (GỢI Ý — cần kế toán/luật sư xác nhận)."""
+    loai = set(du.get("loai") or [])
+    d = docx.Document()
+    d.add_heading("DANH MỤC HỒ SƠ ĐĂNG KÝ THAY ĐỔI NỘI DUNG ĐĂNG KÝ DOANH NGHIỆP (BẢN NHÁP)", level=1)
+    dn = du.get("dn") or {}
+    d.add_paragraph(f"Doanh nghiệp: {(dn.get('ten') or '').upper()} — MST/Mã số doanh nghiệp: {dn.get('ma_so') or '……'}")
+    d.add_paragraph("Nội dung đề nghị thay đổi: " + "; ".join(LOAI_THAY_DOI[k] for k in LOAI_THAY_DOI if k in loai))
+    d.add_heading("I. Biểu mẫu đã soạn (ký bởi người có thẩm quyền — phần mềm KHÔNG ký thay)", level=2)
+    for ten, nguon in ds_file:
+        d.add_paragraph(f"{ten} ({nguon})", style="List Bullet")
+    d.add_heading("II. Giấy tờ thường kèm theo — gợi ý để kiểm tra", level=2)
+    kem = ["Quyết định/Nghị quyết của chủ sở hữu hoặc cấp có thẩm quyền của công ty về nội dung thay đổi (theo Điều lệ công ty) — bản sao hợp lệ.",
+           "Văn bản ủy quyền (nếu người nộp hồ sơ không phải người đại diện theo pháp luật) kèm giấy tờ pháp lý của người được ủy quyền."]
+    if "dai_dien" in loai:
+        kem += ["Giấy tờ pháp lý (căn cước/hộ chiếu) của người đại diện theo pháp luật mới — chỉ cần khi không khai thác được qua số định danh cá nhân.",
+                "Thông báo/biên bản chấm dứt chức danh của người đại diện cũ (nếu có).",
+                "Danh sách chủ sở hữu hưởng lợi (Mẫu số 10 TT 121/2026) khi có thay đổi thông tin người quản lý doanh nghiệp — xem file kèm."]
+    if "dia_chi" in loai:
+        kem += ["Giấy tờ chứng minh quyền sử dụng hợp pháp địa chỉ trụ sở mới (nếu cơ quan đăng ký yêu cầu) — doanh nghiệp cam kết trong Giấy đề nghị.",
+                "Thông báo thay đổi địa chỉ với cơ quan thuế/BHXH/các cơ quan quản lý liên quan (sau khi có Giấy xác nhận)."]
+    if "von" in loai:
+        kem += ["Quyết định của chủ sở hữu/Nghị quyết về tăng/giảm vốn điều lệ; chứng từ góp vốn (nếu tăng vốn); cam kết bảo đảm thanh toán nợ (nếu giảm vốn)."]
+    if "nganh" in loai:
+        kem += ["Giấy tờ chứng minh điều kiện kinh doanh đối với ngành, nghề có điều kiện (nếu có)."]
+    if "chu_so_huu" in loai:
+        kem += ["Hợp đồng chuyển nhượng/tặng cho/văn bản thừa kế vốn góp và chứng từ liên quan; giấy tờ pháp lý của chủ sở hữu mới."]
+    for t in kem:
+        d.add_paragraph(t, style="List Bullet")
+    d.add_heading("III. Thông tin còn thiếu (ô giữ nguyên dấu chấm trong biểu mẫu)", level=2)
+    if thieu:
+        for t in thieu:
+            d.add_paragraph(t, style="List Bullet")
+    else:
+        d.add_paragraph("Không thiếu thông tin bắt buộc đã được yêu cầu nhập.")
+    d.add_heading("Lưu ý", level=2)
+    d.add_paragraph("Đây là BẢN NHÁP do phần mềm lập từ biểu mẫu chính thức; nội dung và danh mục giấy tờ cần được kế toán/luật sư kiểm tra theo quy định hiện hành "
+                    "(Nghị định 168/2025/NĐ-CP, Thông tư 68/2025/TT-BTC, Thông tư 121/2026/TT-BTC) trước khi nộp. Các ô chưa có dữ liệu được giữ nguyên dấu chấm — "
+                    "phần mềm không tự điền thông tin chưa được cung cấp và không ký thay.")
+    d.add_paragraph("Nguồn biểu mẫu: " + ghi_chu_nguon)
+    return d
+
+
+def tao_ho_so(du, mau_rieng=None):
+    """du: dữ liệu (xem soan_mau12/13/15); mau_rieng: [(tên, bytes docx)] mẫu riêng của người dùng.
+    Trả (bytes zip, tên file zip, cảnh báo[])."""
+    loai = set(du.get("loai") or [])
+    if not loai:
+        raise ValueError("Chưa chọn nội dung thay đổi nào")
+    dn = du.get("dn") or {}
+    ma = re.sub(r"\D", "", dn.get("ma_so") or "") or "DN"
+    nguon = danh_sach_mau()
+    ten_nguon = lambda n: nguon[n][1]
+    tep, ds_file = [], []
+
+    def them(ten_file, d, nhan, n):
+        tep.append((ten_file, _luu_bytes(d)))
+        ds_file.append((nhan, ten_nguon(n)))
+    if loai & {"ten", "dia_chi", "von", "nganh"}:
+        them(f"Mau12_Giay_de_nghi_thay_doi_noi_dung_DKDN_{ma}.docx", soan_mau12(du), "Mẫu số 12 — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN", 12)
+    if "dai_dien" in loai:
+        them(f"Mau13_Giay_de_nghi_thay_doi_nguoi_dai_dien_theo_phap_luat_{ma}.docx", soan_mau13(du), "Mẫu số 13 — Giấy đề nghị đăng ký thay đổi người đại diện theo pháp luật", 13)
+        them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", cat_mau(10), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (mẫu trống kèm theo, điền theo quy định)", 10)
+    if "chu_so_huu" in loai:
+        them(f"Mau15_Giay_de_nghi_thay_doi_chu_so_huu_{ma}.docx", soan_mau15(du), "Mẫu số 15 — Giấy đề nghị đăng ký thay đổi chủ sở hữu công ty TNHH một thành viên", 15)
+    bien = bien_thay_the(du)
+    canh_bao = []
+    for ten, nd in (mau_rieng or []):
+        try:
+            b, _gap, thieu_bien = dien_mau_rieng(nd, bien)
+            tep.append((f"MauRieng_{re.sub(r'[^0-9A-Za-zÀ-ỹ_.-]+', '_', ten)}", b))
+            ds_file.append((f"Mẫu riêng: {ten}", "do người dùng cung cấp"))
+            if thieu_bien:
+                canh_bao.append(f"Mẫu riêng '{ten}': chưa có dữ liệu cho biến " + ", ".join("{{%s}}" % x for x in thieu_bien))
+        except Exception as e:
+            canh_bao.append(f"Mẫu riêng '{ten}': không đọc được ({type(e).__name__}: {str(e)[:100]})")
+    thieu = _kiem_thieu(du)
+    if thieu:
+        canh_bao.append("Còn thiếu thông tin: " + "; ".join(thieu))
+    if loai & {"ten", "dia_chi", "von", "nganh"} and (du.get("dn") or {}).get("loai_hinh") is None:
+        canh_bao.append("Chưa biết loại hình doanh nghiệp: Mẫu 12 giữ nguyên các mục về cổ phần/phần vốn góp — hãy xoá mục không áp dụng.")
+    if "dai_dien" in loai and len(du.get("dai_dien") or []) > 1:
+        canh_bao.append("Mẫu 13 chỉ điền người đại diện đầu tiên; nếu công ty có nhiều người đại diện theo pháp luật, bổ sung các người còn lại trực tiếp vào biểu mẫu (Chú thích 2 của Mẫu 13).")
+    ghi = "; ".join(sorted({f"{n[1]}" for n in nguon.values() if n[0] in ("TT121", "TT68")}))
+    dm = _danh_muc(du, ds_file, thieu, "Phụ lục I Thông tư 121/2026/TT-BTC (mẫu cập nhật) và Phụ lục I Thông tư 68/2025/TT-BTC")
+    tep.append(("00_Danh_muc_ho_so.docx", _luu_bytes(dm)))
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as z:
+        for ten, nd in tep:
+            z.writestr(ten, nd)
+    return bio.getvalue(), f"Ho_so_thay_doi_DKDN_{ma}.zip", canh_bao

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-12.166"
+APP_BUILD = "2026-10-13.168"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44675,13 +44675,17 @@ function mauDong(r) {
   try { return mauDong2(r); } catch (e) { return ''; }
 }
 function mauDong2(r) {
-  var m = ((document.defaultView || window).getComputedStyle(r).backgroundColor || '').match(/\d+/g);
-  if (!m || (m.length > 3 && +m[3] === 0)) { var c = r.querySelector('td'); m = c ? ((document.defaultView || window).getComputedStyle(c).backgroundColor || '').match(/\d+/g) : null; }
-  if (!m || (m.length > 3 && +m[3] === 0)) return '';
-  var R = +m[0], G = +m[1], B = +m[2];
-  if (R > 170 && G < 120 && B < 120) return 'đỏ';
-  if (B > 150 && R < 150) return 'xanh dương';
-  if (G > 150 && R < 150 && B < 150) return 'xanh lá';
+  var gc = (document.defaultView || window).getComputedStyle;
+  var ds = [r].concat([].slice.call(r.children));
+  for (var i = 0; i < ds.length; i++) {
+    var m = (gc.call(document.defaultView || window, ds[i]).backgroundColor || '').match(/[\d.]+/g);
+    if (!m || m.length < 3 || (m.length > 3 && +m[3] === 0)) continue;
+    var R = +m[0], G = +m[1], B = +m[2];
+    if (R > 235 && G > 235 && B > 235) continue;
+    if (R > 150 && G < 115 && B < 115) return 'đỏ';
+    if (G > 150 && R < 190 && B < 160) return 'xanh lá';
+    if (B > 150 && R < 160) return 'xanh dương';
+  }
   return '';
 }
 // 1) BẢNG DANH SÁCH (vd Ngành nghề): dòng tiêu đề >= 3 cột chữ, các dòng sau cùng số cột -> mỗi dòng 1 bản ghi
@@ -45274,6 +45278,82 @@ def dkkd_xuat_excel_api(body: dict = Body(...)):
     return Response(content=dkkd_xuat_excel(cac_khoi),
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": 'attachment; filename="GPKD_du_lieu.xlsx"'})
+
+
+# ============================================================
+# SOẠN HỒ SƠ GPKD — lập hồ sơ thay đổi đăng ký doanh nghiệp từ biểu mẫu chính thức (TT 121/2026 mới nhất, TT 68/2025)
+#  điền từ dữ liệu người dùng nhập/lấy từ hồ sơ đã gom; mẫu riêng của người dùng (.docx có {{biến}}) lưu ở data/gpkd_mau_rieng/
+# ============================================================
+GPKD_MAU_RIENG_DIR = os.path.join(DATA_DIR, "gpkd_mau_rieng")
+
+
+def _gpkd_soan_mod():
+    try:
+        import gpkd_soan as _m
+        return _m
+    except ImportError as e:
+        raise HTTPException(500, f"Thiếu thư viện để soạn hồ sơ Word ({e}). Hãy chạy: pip install python-docx")
+
+
+def _gpkd_ten_mau_rieng(ten):
+    import re
+    t = os.path.basename(str(ten or "")).strip()
+    t = re.sub(r"[^0-9A-Za-zÀ-ỹ_. -]+", "_", t)
+    return t if t.lower().endswith(".docx") else t + ".docx"
+
+
+@app.get("/api/gpkd-soan/mau")
+def gpkd_soan_mau():
+    g = _gpkd_soan_mod()
+    ds = os.listdir(GPKD_MAU_RIENG_DIR) if os.path.isdir(GPKD_MAU_RIENG_DIR) else []
+    return {"loai": g.LOAI_THAY_DOI, "bien": g.CAC_BIEN,
+            "mau_chinh_thuc": {str(k): {"nguon": v[1]} for k, v in g.danh_sach_mau().items()},
+            "mau_rieng": sorted(x for x in ds if x.lower().endswith(".docx"))}
+
+
+@app.post("/api/gpkd-soan/mau-rieng")
+def gpkd_soan_luu_mau_rieng(body: dict = Body(...)):
+    g = _gpkd_soan_mod()
+    try:
+        nd = base64.b64decode(str(body.get("noi_dung_b64") or "").split(",")[-1])
+        import docx as _dx
+        _dx.Document(io.BytesIO(nd))
+    except Exception:
+        raise HTTPException(400, "File không phải Word (.docx) hợp lệ")
+    ten = _gpkd_ten_mau_rieng(body.get("ten") or "mau.docx")
+    os.makedirs(GPKD_MAU_RIENG_DIR, exist_ok=True)
+    with open(os.path.join(GPKD_MAU_RIENG_DIR, ten), "wb") as f:
+        f.write(nd)
+    _b, gap, _t = g.dien_mau_rieng(nd, {})
+    return {"ok": True, "ten": ten, "bien_trong_mau": gap}
+
+
+@app.delete("/api/gpkd-soan/mau-rieng/{ten}")
+def gpkd_soan_xoa_mau_rieng(ten: str):
+    p = os.path.join(GPKD_MAU_RIENG_DIR, _gpkd_ten_mau_rieng(ten))
+    if os.path.isfile(p):
+        os.remove(p)
+    return {"ok": True}
+
+
+@app.post("/api/gpkd-soan/tao")
+def gpkd_soan_tao(body: dict = Body(...)):
+    """body: {du_lieu: {...}, mau_rieng: [tên file]} -> file zip gồm các biểu mẫu đã điền + danh mục hồ sơ (X-Canh-Bao: cảnh báo, mã hoá URL)."""
+    g = _gpkd_soan_mod()
+    du = body.get("du_lieu") or {}
+    mr = []
+    for ten in body.get("mau_rieng") or []:
+        p = os.path.join(GPKD_MAU_RIENG_DIR, _gpkd_ten_mau_rieng(ten))
+        if os.path.isfile(p):
+            with open(p, "rb") as f:
+                mr.append((_gpkd_ten_mau_rieng(ten), f.read()))
+    try:
+        zip_b, ten_zip, canh_bao = g.tao_ho_so(du, mr)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    from urllib.parse import quote as _q
+    return Response(content=zip_b, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{ten_zip}"', "X-Canh-Bao": _q(" | ".join(canh_bao))})
 
 
 if __name__ == "__main__":

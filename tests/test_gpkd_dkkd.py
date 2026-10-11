@@ -151,6 +151,11 @@ assert [(r[2], r[4]) for r in ct3] == [("Địa chỉ thường trú", "618"), (
 th3 = [[c.value for c in r] for r in wb3["Tổng hợp"].iter_rows()]
 assert "Chủ sở hữu - Địa chỉ thường trú - Số nhà" in th3[0] and "Chủ sở hữu - Địa chỉ liên lạc - Số nhà" in th3[0]
 print("PASS 6-7: màn hình xem + xuất Excel giữ tên mục.")
+
+# 8) màu dòng ngành nghề: đọc cả màu đặt ở ô (không chỉ ở dòng); màn hình xem tô đỏ/xanh đúng màu cổng
+assert "[r].concat([].slice.call(r.children))" in server._JS_DKKD_QUET
+assert "'đỏ':'#e8372c'" in html_ui and "'xanh lá':'#7dff4f'" in html_ui
+print("PASS 8: màu dòng ngành nghề đúng như cổng.")
 print("PASS 5: giao diện mới (bookmark + file đã lưu), không còn mở Chrome tự động.")
 
 print("\nALL DONE")
