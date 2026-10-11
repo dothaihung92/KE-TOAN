@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-12.160"
+APP_BUILD = "2026-10-12.161"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44803,7 +44803,7 @@ ketQua.push(docTrang(document, location.href));
 var daDoc = {}; daDoc[location.href.split('#')[0]] = 1;
 cacTrang(document).forEach(function (d) { try { daDoc[d.location.href.split('#')[0]] = 1; } catch (e) {} });
 var ds = (menu || []).filter(function (m) { return m.url && !daDoc[m.url]; });
-var dsNut = (menu || []).filter(function (m) { return m.nut; });
+var dsNut = (menu || []).filter(function (m) { return m.nut && chuan(m.ten) !== chuan(ketQua[0].khoi || ''); });
 var tongKhoi = ds.length + dsNut.length, dem = 0;
 for (var i = 0; i < ds.length; i++) {
   dem++;
@@ -44825,10 +44825,42 @@ function choTai(f, giay) {
   return new Promise(function (ok) { var xong = false; var t = setTimeout(function () { if (!xong) { xong = true; ok(false); } }, giay * 1000);
     f.onload = function () { if (!xong) { xong = true; clearTimeout(t); setTimeout(function () { ok(true); }, 400); } }; });
 }
-// Cách 1 (chính): gửi đúng lệnh postback của mục menu bằng fetch (POST form của chính trang, phiên đăng nhập của người dùng),
-// đọc trang khối trả về — không cần mở khung. Cách 2 (dự phòng): khung ẩn.
+// Mở khối dạng NÚT BẤM như 1 lần bấm thật: đặt target của form ASP.NET trên chính trang = 1 khung ẩn rồi gọi __doPostBack của
+// trang (trình duyệt tự gửi form + theo chuyển hướng như điều hướng thật; trang đang xem không bị đổi). Cách dự phòng: POST bằng fetch.
+function chuan(t) { return sachT(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim(); }
+function khopTen(r, ten) {
+  var a = chuan(r.khoi), b = chuan(ten);
+  return !a || a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
+}
+function choTai2(f, giay) {
+  return new Promise(function (ok) { var xong = false; var t = setTimeout(function () { if (!xong) { xong = true; ok(false); } }, giay * 1000);
+    f.onload = function () { if (!xong) { xong = true; clearTimeout(t); setTimeout(function () { ok(true); }, 500); } }; });
+}
+function formCua(doc) { var vs = doc.querySelector('input[name="__VIEWSTATE"]'); return vs ? vs.form : null; }
+async function moBangKhung(it, stt) {
+  var fm = formCua(it.doc), win = it.doc.defaultView;
+  if (!fm || !win || !win.__doPostBack) throw new Error('trang không có form/__doPostBack');
+  var fr = document.createElement('iframe'), tenKhung = '__gpkdKhung' + stt;
+  fr.name = tenKhung; fr.setAttribute('style', 'position:fixed;left:-10000px;top:0;width:1200px;height:900px;visibility:hidden');
+  document.body.appendChild(fr);
+  var tCu = fm.getAttribute('target');
+  try {
+    var cho = choTai2(fr, 45);
+    fm.target = tenKhung;
+    win.__doPostBack(it.nut, it.doi);
+    var ok = await cho;
+    if (!ok) throw new Error('quá 45 giây không tải xong');
+    var dF, uF; try { dF = fr.contentDocument; uF = fr.contentWindow.location.href; } catch (e) { throw new Error('cổng không cho đọc khung (X-Frame-Options?)'); }
+    if (!dF || !dF.body || uF === 'about:blank') throw new Error('khung không có nội dung (cổng chặn khung?)');
+    var r = docTrang(dF, uF);
+    return r;
+  } finally {
+    if (tCu === null) fm.removeAttribute('target'); else fm.setAttribute('target', tCu);
+    fr.remove();
+  }
+}
 function duLieuForm(doc, nut, doi) {
-  var vs = doc.querySelector('input[name="__VIEWSTATE"]'), fm = vs ? vs.form : null;
+  var fm = formCua(doc);
   if (!fm) throw new Error('không thấy form ASP.NET (__VIEWSTATE) trên trang');
   var p = new URLSearchParams();
   [].slice.call(fm.elements).forEach(function (e) {
@@ -44842,59 +44874,40 @@ function duLieuForm(doc, nut, doi) {
   p.set('__EVENTTARGET', nut); p.set('__EVENTARGUMENT', doi);
   return {url: fm.action || location.href, body: p.toString()};
 }
-var dsNutLoi = [];
+async function moBangPost(it) {
+  var fd = duLieuForm(it.doc, it.nut, it.doi);
+  var rs = await fetch(fd.url, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'}, body: fd.body});
+  if (!rs.ok) throw new Error('HTTP ' + rs.status);
+  if (new URL(rs.url).origin !== location.origin) throw new Error('bị chuyển sang trang khác (đăng nhập?)');
+  var r = docTrang(new DOMParser().parseFromString(await rs.text(), 'text/html'), rs.url);
+  r.chuyen = rs.redirected; return r;
+}
+var chiTiet = [];
 for (var j = 0; j < dsNut.length; j++) {
   dem++;
-  hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + dsNut[j].ten + ' ...');
-  try {
-    var fd = duLieuForm(dsNut[j].doc, dsNut[j].nut, dsNut[j].doi);
-    var rs = await fetch(fd.url, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: fd.body});
-    if (!rs.ok) throw new Error('HTTP ' + rs.status);
-    if (new URL(rs.url).origin !== location.origin) throw new Error('bị chuyển sang trang khác (đăng nhập?)');
-    var dP = new DOMParser().parseFromString(await rs.text(), 'text/html');
-    var rP = docTrang(dP, rs.url);
-    if (!rP.cap.length) throw new Error('trang trả về không có dữ liệu (' + rs.url.slice(-60) + ')');
-    rP.khoi = dsNut[j].ten;
-    ketQua.push(rP);
-    chanDoanMenu.cach = 'post';
-  } catch (e) { loi.push(dsNut[j].ten + ' (POST): ' + e); dsNutLoi.push(dsNut[j]); }
-  await new Promise(function (x) { setTimeout(x, 300); });
-}
-if (dsNutLoi.length) {
-  var f = document.createElement('iframe');
-  f.setAttribute('style', 'position:fixed;left:-10000px;top:0;width:1200px;height:900px;visibility:hidden');
-  document.body.appendChild(f);
-  var taiDuoc = false;
-  f.src = location.href; taiDuoc = await choTai(f, 40);
-  var docF = null; try { docF = f.contentDocument; } catch (e) {}
-  if (!taiDuoc || !docF || !f.contentWindow.__doPostBack) {
-    loi.push('Khung ẩn cũng không mở được trang (cổng chặn khung?) — ' + dsNutLoi.length + ' khối chưa lấy được');
-  } else {
-    for (var j2 = 0; j2 < dsNutLoi.length; j2++) {
-      hop('Thử lại bằng khung ẩn: ' + dsNutLoi[j2].ten + ' ...');
-      try {
-        var cho = choTai(f, 40);
-        f.contentWindow.__doPostBack(dsNutLoi[j2].nut, dsNutLoi[j2].doi);
-        if (!(await cho)) { loi.push(dsNutLoi[j2].ten + ' (khung ẩn): quá 40 giây'); continue; }
-        var uF = f.contentWindow.location;
-        if (uF.origin !== location.origin) { loi.push(dsNutLoi[j2].ten + ' (khung ẩn): bị chuyển sang trang đăng nhập'); break; }
-        var rF = docTrang(f.contentDocument, uF.href);
-        rF.khoi = dsNutLoi[j2].ten;
-        ketQua.push(rF);
-        chanDoanMenu.cach = 'khung ẩn';
-        if (!f.contentWindow.__doPostBack) break;
-      } catch (e) { loi.push(dsNutLoi[j2].ten + ' (khung ẩn): ' + e); }
-    }
+  var it = dsNut[j], r1 = null, ghi = {muc: it.ten};
+  hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + it.ten + ' ...');
+  try { r1 = await moBangKhung(it, j); ghi.khung = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi; }
+  catch (e) { ghi.khung = 'lỗi: ' + e; r1 = null; }
+  if (r1 && !khopTen(r1, it.ten)) { ghi.khung += ' | KHÔNG đúng khối (trang trả về là "' + r1.khoi + '")'; r1 = null; }
+  if (!r1) {
+    try { r1 = await moBangPost(it); ghi.post = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi + (r1.chuyen ? ' (có chuyển hướng)' : ''); }
+    catch (e) { ghi.post = 'lỗi: ' + e; r1 = null; }
+    if (r1 && !khopTen(r1, it.ten)) { ghi.post += ' | KHÔNG đúng khối'; r1 = null; }
   }
-  f.remove();
+  chiTiet.push(ghi);
+  if (r1) { r1.khoi = it.ten; if (!r1.cap.length) loi.push(it.ten + ': trang không có dữ liệu'); ketQua.push(r1); chanDoanMenu.cach = 'ok'; }
+  else loi.push(it.ten + ': không mở được đúng khối (xem chẩn đoán từng mục)');
+  await new Promise(function (x) { setTimeout(x, 400); });
 }
+chanDoanMenu.chi_tiet = chiTiet;
 var tenDaCo = {};
 ketQua = ketQua.filter(function (k, i) { if (i && tenDaCo[k.khoi]) return false; tenDaCo[k.khoi] = 1; return true; });
 chanDoanMenu.loi = loi;
 ketQua[0].chan_doan_menu = chanDoanMenu;
 var s = JSON.stringify(ketQua), tong = ketQua.reduce(function (a, k) { return a + k.cap.length; }, 0);
 var tt = 'Đã đọc ' + ketQua.length + ' khối — ' + tong + ' trường.\n' + ketQua.map(function (k) { return '• ' + (k.khoi || k.tieu_de) + ': ' + k.cap.length + ' trường'; }).join('\n') +
-  (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (tự bấm' + (chanDoanMenu.cach ? ' — cách: ' + chanDoanMenu.cach : '') + ').'
+  (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (tự bấm' + '' + ').'
         : '\n⚠ Không thấy menu "KHỐI DỮ LIỆU" trên trang này (kể cả khung con) — chỉ đọc được khối đang mở.') +
   (loi.length ? '\n⚠ Lỗi: ' + loi.join('; ') : '') + '\n\nBấm "Copy dữ liệu" rồi dán vào phần mềm (Hỗ trợ thay đổi GPKD → ô dán → Thêm).';
 var o = hop(tt), ta = o.querySelector('textarea');
@@ -45077,24 +45090,41 @@ def _dkkd_ma_ho_so(url, cap=None):
 
 
 def dkkd_xuat_excel(cac_khoi):
-    """[{url, khoi, tieu_de, cap}] -> bytes xlsx: 'Chi tiết' (Hồ sơ | Khối | Trường | Giá trị | Link) + 'Tổng hợp' (1 hồ sơ 1 dòng).
-    Phần "Thông tin về hồ sơ" lặp lại ở mọi khối chỉ ghi 1 lần cho mỗi hồ sơ (bỏ cặp Trường+Giá trị đã có)."""
+    """[{url, khoi, tieu_de, cap}] -> bytes xlsx: 'Chi tiết' (Hồ sơ | Khối | Trường | Giá trị | Link) + 'Tổng hợp' (1 hồ sơ 1 dòng,
+    cột "<Khối> - <Trường>"). Phần "Thông tin về hồ sơ" lặp lại ở mọi khối (cặp Trường+Giá trị có mặt ở MỌI khối của hồ sơ) chỉ ghi 1 lần
+    cho mỗi hồ sơ; còn lại GIỮ NGUYÊN theo từng khối (kể cả khi trùng chữ với khối khác, vd Họ tên chủ sở hữu = người đại diện)."""
     import openpyxl
     import io as _io
     from openpyxl.styles import Font
+    theo_ho_so = {}
+    for k in cac_khoi or []:
+        theo_ho_so.setdefault(_dkkd_ma_ho_so(k.get("url"), k.get("cap")), []).append(k)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Chi tiết"
     ws.append(["Hồ sơ", "Khối", "Trường", "Giá trị", "Link"])
-    nhom, da_ghi = {}, set()
-    for k in cac_khoi or []:
-        ma = _dkkd_ma_ho_so(k.get("url"), k.get("cap"))
-        for truong, gt in k.get("cap") or []:
-            if (ma, truong, gt) in da_ghi:
-                continue
-            da_ghi.add((ma, truong, gt))
-            ws.append([ma, k.get("khoi") or k.get("tieu_de") or "", truong, gt, k.get("url") or ""])
-            nhom.setdefault(ma, {}).setdefault(truong, gt)
+    nhom = {}
+    for ma, ds in theo_ho_so.items():
+        chung = None
+        if len(ds) > 1:
+            for k in ds:
+                tap = {(t, g) for t, g in (k.get("cap") or [])}
+                chung = tap if chung is None else (chung & tap)
+        chung = chung or set()
+        da_chung = False
+        for k in ds:
+            ten_khoi = k.get("khoi") or k.get("tieu_de") or ""
+            if chung and not da_chung:
+                for t, g in k.get("cap") or []:
+                    if (t, g) in chung:
+                        ws.append([ma, "Thông tin về hồ sơ", t, g, k.get("url") or ""])
+                        nhom.setdefault(ma, {}).setdefault(t, g)
+                da_chung = True
+            for t, g in k.get("cap") or []:
+                if (t, g) in chung:
+                    continue
+                ws.append([ma, ten_khoi, t, g, k.get("url") or ""])
+                nhom.setdefault(ma, {}).setdefault(f"{ten_khoi} - {t}" if ten_khoi else t, g)
     for c in ws[1]:
         c.font = Font(bold=True)
     for col, w in zip("ABCDE", (16, 28, 55, 60, 45)):

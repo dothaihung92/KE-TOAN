@@ -4330,7 +4330,7 @@ function gpkdThemDan(){
   for(const k of ds){if(gpkdThem(k))n++}
   const cd=ds.map(k=>k&&k.chan_doan_menu).filter(Boolean)[0];
   window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm (không tự mở được).`+
-    (cd.loi&&cd.loi.length?'\n⚠ Lỗi khi mở khối: '+cd.loi.join(' | '):'')+(cd.mau&&cd.mau.length?'\nCác mục menu: '+cd.mau.join(' | '):''):'';
+    (cd.loi&&cd.loi.length?'\n⚠ Lỗi khi mở khối: '+cd.loi.join(' | '):'')+(cd.chi_tiet&&cd.chi_tiet.length?'\nChẩn đoán từng mục: '+cd.chi_tiet.map(x=>x.muc+' [khung: '+(x.khung||'-')+(x.post?'; POST: '+x.post:'')+']').join(' | '):'')+(cd.mau&&cd.mau.length?'\nCác mục menu: '+cd.mau.join(' | '):''):'';
   if(!n){toast('Không đọc được dữ liệu — hãy dán đúng đoạn nút bookmark đã copy','err');return}
   document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã thêm '+n+' khối','ok');
 }

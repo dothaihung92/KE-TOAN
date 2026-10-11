@@ -72,9 +72,9 @@ wb = openpyxl.load_workbook(io.BytesIO(server.dkkd_xuat_excel(khoi)))
 ct = [[c.value for c in r] for r in wb["Chi tiết"].iter_rows()]
 assert ct[0] == ["Hồ sơ", "Khối", "Trường", "Giá trị", "Link"] and len(ct) == 1 + 7 + 1 + 1
 th = [[c.value for c in r] for r in wb["Tổng hợp"].iter_rows()]
-assert th[0][:3] == ["Hồ sơ", "Tên doanh nghiệp", "Mã số DN"] and "Địa chỉ trụ sở" in th[0]
+assert th[0][0] == "Hồ sơ" and "Thông tin chung - Tên doanh nghiệp" in th[0] and "Địa chỉ - Địa chỉ trụ sở" in th[0]
 assert [r[0] for r in th[1:]] == ["h=720", "h=800"]
-assert th[1][th[0].index("Địa chỉ trụ sở")] == "1 Lê Lợi" and th[2][th[0].index("Mã số DN")] == "0300000001"
+assert th[1][th[0].index("Địa chỉ - Địa chỉ trụ sở")] == "1 Lê Lợi" and th[2][th[0].index("Thông tin chung - Mã số DN")] == "0300000001"
 try:
     server.dkkd_xuat_excel_api({"khoi": []})
     raise AssertionError("phải báo lỗi")
@@ -82,15 +82,20 @@ except server.HTTPException as e:
     assert e.status_code == 400
 print("PASS 3: gom các khối theo mã hồ sơ, xuất Chi tiết + Tổng hợp.")
 
-# 3b) gom theo "Số hồ sơ" (trang thật không có tham số h) + bỏ phần "Thông tin về hồ sơ" lặp lại ở mỗi khối
-dc = {"url": U + "DW_REORGANIZATIONEdit.aspx", "khoi": "Địa chỉ",
-      "cap": [["Số hồ sơ", "OD-0780566/26"], ["Quốc gia", "Việt Nam"]]}
-wb2 = openpyxl.load_workbook(io.BytesIO(server.dkkd_xuat_excel([dc, k2])))
+# 3b) phần "Thông tin về hồ sơ" lặp ở MỌI khối chỉ ghi 1 lần; field trùng chữ giữa các khối KHÁC NHAU thì giữ nguyên
+HS = [["Số hồ sơ", "OD-0780566/26"], ["Trạng thái hồ sơ", "Đã gửi đi"]]
+cs = {"url": U + "Owner.aspx", "khoi": "Thông tin về chủ sở hữu", "cap": HS + [["Họ và tên", "NGUYỄN VĂN A"], ["Số giấy tờ", "079"]]}
+dd = {"url": U + "Rep.aspx", "khoi": "Người đại diện theo pháp luật", "cap": HS + [["Họ và tên", "NGUYỄN VĂN A"], ["Số giấy tờ", "079"]]}
+dc = {"url": U + "Addr.aspx", "khoi": "Địa chỉ", "cap": HS + [["Quốc gia", "Việt Nam"]]}
+wb2 = openpyxl.load_workbook(io.BytesIO(server.dkkd_xuat_excel([dc, cs, dd])))
 ct2 = [[c.value for c in r] for r in wb2["Chi tiết"].iter_rows(min_row=2)]
 assert {r[0] for r in ct2} == {"OD-0780566/26"}
-assert sum(1 for r in ct2 if r[2] == "Số hồ sơ") == 1 and sum(1 for r in ct2 if r[2] == "Quốc gia") == 1
-assert len(list(wb2["Tổng hợp"].iter_rows())) == 2
-print("PASS 3b: gom theo Số hồ sơ, không lặp lại phần thông tin chung.")
+assert sum(1 for r in ct2 if r[2] == "Số hồ sơ") == 1 and [r[1] for r in ct2 if r[2] == "Số hồ sơ"] == ["Thông tin về hồ sơ"]
+assert [(r[1], r[3]) for r in ct2 if r[2] == "Họ và tên"] == [("Thông tin về chủ sở hữu", "NGUYỄN VĂN A"),
+                                                              ("Người đại diện theo pháp luật", "NGUYỄN VĂN A")]
+th2 = [[c.value for c in r] for r in wb2["Tổng hợp"].iter_rows()]
+assert len(th2) == 2 and th2[0].count("Thông tin về chủ sở hữu - Họ và tên") == 1 and "Người đại diện theo pháp luật - Họ và tên" in th2[0]
+print("PASS 3b: thông tin chung chỉ ghi 1 lần; họ tên trùng giữa chủ sở hữu và người đại diện vẫn giữ ở cả 2 khối.")
 
 # 4) bookmarklet: javascript: hợp lệ, chứa đúng đoạn đọc trang, chỉ copy vào clipboard (không gửi mạng)
 bm = server.dkkd_bookmarklet()
@@ -98,6 +103,8 @@ assert bm.startswith("javascript:") and " " not in bm
 than = urllib.parse.unquote(bm[len("javascript:"):])
 assert "navigator.clipboard" in than and "querySelectorAll('tr')" in than
 assert "contentDocument" in than and "chan_doan" in than    # đọc cả khung con (iframe) cùng nguồn + báo chẩn đoán
+# mở khối nút bấm như điều hướng thật (target của form = khung ẩn), kiểm tra trang trả về ĐÚNG khối, dự phòng POST
+assert "fm.target = tenKhung" in than and "khopTen(r1, it.ten)" in than and "KHÔNG đúng khối" in than and "chanDoanMenu.chi_tiet" in than
 assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
 # tự đọc mọi khối trong menu "KHỐI DỮ LIỆU" (dừng ở "VĂN BẢN ĐÍNH KÈM") CHỈ bằng GET trong phiên của người dùng
 assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "cacTrang(document)" in than and "chan_doan_menu" in than and "credentials: 'same-origin'" in than
@@ -106,8 +113,8 @@ assert ".submit(" not in than and ".click()" not in than
 # menu dạng nút bấm (postback ASP.NET): CHỈ gọi __doPostBack của đúng mục trong menu KHỐI DỮ LIỆU (đã lọc chữ xoá/nộp/gửi...),
 # trong KHUNG ẨN; không tự gọi postback nào khác
 # cách chính: POST form ASP.NET của chính trang (đúng lệnh mục menu, phiên người dùng); dự phòng: khung ẩn. Lỗi ghi vào dữ liệu.
-assert "method: 'POST'" in than and "duLieuForm(dsNut[j].doc, dsNut[j].nut, dsNut[j].doi)" in than
-assert than.count("__doPostBack(") == 1 and "f.contentWindow.__doPostBack(dsNutLoi[j2].nut, dsNutLoi[j2].doi)" in than
+assert "method: 'POST'" in than and "duLieuForm(it.doc, it.nut, it.doi)" in than
+assert than.count("__doPostBack(") == 1 and "win.__doPostBack(it.nut, it.doi)" in than
 assert "chanDoanMenu.loi = loi" in than and 'name="__VIEWSTATE"' in than
 assert "if (!cam(t) && !daCo['pb:' + t])" in than and "visibility:hidden" in than
 assert "javascript:" in than and "cam(t)" in than                       # bỏ link javascript:/postback và link xoá/nộp/gửi...
