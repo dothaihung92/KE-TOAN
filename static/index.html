@@ -4495,10 +4495,12 @@ const SS_TRUONG={
   dai_dien:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['chuc_danh','Chức danh (vd Giám đốc)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']],
   chu_so_huu_moi:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']]
 };
+SS_TRUONG.cshhl=[];
 SS_TRUONG.bo_sung=[['noi_dung','Nội dung bổ sung, cập nhật (mỗi ý cách nhau bằng dấu ; hoặc xuống dòng)']];
-SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu / người ký Quyết định (họ tên)'],['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp Giấy chứng nhận ĐKDN'],['ngay_dieu_le','Ngày thông qua Điều lệ (dd/mm/yyyy)']];
+SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu / người ký Quyết định (họ tên)'],['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp (mặc định Phòng Đăng ký kinh doanh)'],['ngay_dieu_le','Ngày thông qua Điều lệ (trống = lấy theo ngày cấp GCN)']];
 SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
 const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
+  ['cshhl','Thay đổi thông tin về chủ sở hữu hưởng lợi (kèm Mẫu 10)','cshhl'],
   ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['chu_so_huu','Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ mới là cá nhân)','chu_so_huu_moi']];
 let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=null;
 const ssKey=()=>'gpkdSoan_'+(current||0);
@@ -4508,11 +4510,12 @@ function ssHienTrangTuGom(){
   const lay=(re,ten)=>{for(const k of khoi.slice().reverse()){if(ten&&!ten.test(k.khoi||''))continue;const c=(k.cap||[]).find(x=>re.test(x[0]));if(c&&c[1])return c[1]}return ''};
   const ht={ten:lay(/^tên doanh nghiệp viết bằng tiếng việt$/i),ma_so:lay(/^mã số doanh nghiệp$/i),loai_hinh:lay(/^loại hình doanh nghiệp$/i),
     dia_chi:{so_nha:lay(/^số nhà\/đường/i,/^địa chỉ$/i),xa:lay(/^xã\/phường/i,/^địa chỉ$/i),tinh:lay(/^tỉnh\/thành phố/i,/^địa chỉ$/i),dien_thoai:lay(/^điện thoại$/i,/^địa chỉ$/i),email:lay(/^e-?mail$/i,/^địa chỉ$/i),website:lay(/^website$/i,/^địa chỉ$/i)},
-    dai_dien:[],nganh:[],von:'',chu_so_huu:''};
+    dai_dien:[],nganh:[],von:'',chu_so_huu:'',ngay_cap_gcn:''};
   khoi.filter(k=>/^người đại diện theo pháp luật - chi tiết/i.test(k.khoi||'')).forEach(k=>{
     const g=re=>((k.cap||[]).find(x=>re.test(x[0]))||[])[1]||'';
     ht.dai_dien.push({ho_ten:g(/^họ (và )?tên$/i),chuc_danh:g(/^chức (danh|vụ)$/i),cccd:g(/số giấy tờ pháp lý/i)});
   });
+  for(const k of khoi){if(/thông báo/i.test(k.khoi||''))continue;const c=(k.cap||[]).find(x=>/^ngày (cấp|đăng ký lần đầu|thành lập|cấp lần đầu)\b/i.test(String(x[0]).trim())&&/\d{1,2}\/\d{1,2}\/\d{4}/.test(x[1]||''));if(c){ht.ngay_cap_gcn=String(c[1]).match(/\d{1,2}\/\d{1,2}\/\d{4}/)[0];break}}
   const cs=khoi.find(k=>/^thông tin về chủ sở hữu$/i.test(k.khoi||''));
   if(cs){const c=(cs.cap||[]).find(x=>/^(họ,? ?(chữ đệm )?(và )?tên|tên( chủ sở hữu)?)$/i.test(String(x[0]).trim())&&x[1]);if(c)ht.chu_so_huu=c[1]}
   const ng=khoi.find(k=>/^ngành nghề kinh doanh$/i.test(k.khoi||''));
@@ -4590,6 +4593,7 @@ async function moSoanGpkd(){
           ${l[0]==='nganh'?'<div id="ssNganhBox"></div>':ssCacO(l[2])}
           ${l[0]==='dia_chi'?`<label class="chk" style="margin-top:6px"><input type="checkbox" id="ss_dia_chi_doi_thue" onchange="ssLuuTam()"> Đồng thời thay đổi địa chỉ nhận thông báo thuế</label><div class="hint" id="ssHtDiaChi"></div>`:''}
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
+          ${l[0]==='cshhl'?`<div class="hint">Mẫu 12 giữ mục "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi" và kèm Mẫu 10 (Danh sách chủ sở hữu hưởng lợi) để kê khai. Không chọn mục này thì phần đó được xoá khỏi Mẫu 12.</div>`:''}
           ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
         </div>`).join('')}
     </fieldset>
@@ -4646,7 +4650,7 @@ function ssHomNay(){const t=new Date(),z=n=>String(n).padStart(2,'0');return z(t
 function ssDienHienTai(ghi){
   const h=ssHienTrang||{},dc=h.dia_chi||{},dd=(h.dai_dien||[])[0]||{};
   const dat=(id,v)=>{const e=document.getElementById(id);if(e&&v&&(ghi||!e.value))e.value=v};
-  dat('ss_hien_tai_chu_so_huu',h.chu_so_huu);dat('ss_hien_tai_dd_ho_ten',dd.ho_ten);dat('ss_hien_tai_dd_chuc_danh',dd.chuc_danh);
+  dat('ss_hien_tai_chu_so_huu',h.chu_so_huu);dat('ss_hien_tai_ngay_cap_gcn',h.ngay_cap_gcn);dat('ss_hien_tai_noi_cap_gcn','Phòng Đăng ký kinh doanh');dat('ss_hien_tai_dd_ho_ten',dd.ho_ten);dat('ss_hien_tai_dd_chuc_danh',dd.chuc_danh);
   dat('ss_hien_tai_dia_chi',[dc.so_nha,dc.xa,dc.tinh].filter(Boolean).join(', '));
   const tinh=dc.tinh||'';dat('ss_dn_dia_danh',/^(hồ chí minh|hà nội|hải phòng|đà nẵng|cần thơ|huế)$/i.test(tinh.replace(/^(thành phố|tp\.?)\s*/i,'').trim())?'TP. '+tinh.replace(/^(thành phố|tp\.?)\s*/i,'').trim():tinh);
 }

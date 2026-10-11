@@ -7,6 +7,7 @@ Nguồn biểu mẫu: Phụ lục I Thông tư 68/2025/TT-BTC (đủ 80 mẫu) v
 Giấy tờ này chỉ là bản NHÁP để người đại diện kiểm tra, ký — kế toán/luật sư rà soát nội dung trước khi nộp.
 """
 import io
+import unicodedata
 import os
 import re
 import copy
@@ -27,7 +28,8 @@ _CACHE_MAU = {}
 
 
 def _chu(e):
-    return "".join(t.text or "" for t in e.iter(qn("w:t"))).strip()
+    # NFC: một số tiêu đề trong file Thông tư dùng ký tự tổ hợp (vd "VỀ" = E + dấu mũ + dấu huyền) nên regex không khớp nếu không chuẩn hoá
+    return unicodedata.normalize("NFC", "".join(t.text or "" for t in e.iter(qn("w:t")))).strip()
 
 
 def _mo_nguon(ma):
@@ -840,6 +842,7 @@ def dien_mau_rieng(noi_dung, bien):
 
 # ============================================================ GÓI HỒ SƠ
 LOAI_THAY_DOI = {
+    "cshhl": "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi",
     "ten": "Thay đổi tên doanh nghiệp", "dia_chi": "Thay đổi địa chỉ trụ sở chính", "von": "Thay đổi vốn điều lệ",
     "nganh": "Thay đổi ngành, nghề kinh doanh", "bo_sung": "Bổ sung, cập nhật thông tin đăng ký doanh nghiệp", "dai_dien": "Thay đổi người đại diện theo pháp luật (giám đốc)",
     "chu_so_huu": "Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu mới là cá nhân)",
@@ -942,6 +945,10 @@ def tao_ho_so(du, mau_rieng=None):
         raise ValueError("Chưa chọn nội dung thay đổi nào")
     du = dict(du)
     du["dn"] = dn = dict(du.get("dn") or {})
+    ht = dict(du.get("hien_tai") or {})
+    ht["noi_cap_gcn"] = (ht.get("noi_cap_gcn") or "").strip() or "Phòng Đăng ký kinh doanh"
+    ht["ngay_dieu_le"] = (ht.get("ngay_dieu_le") or "").strip() or (ht.get("ngay_cap_gcn") or "").strip()     # Điều lệ thông qua cùng ngày cấp GCN (mặc định)
+    du["hien_tai"] = ht
     if not (dn.get("ngay_lap") or "").strip():
         dn["ngay_lap"] = datetime.date.today().strftime("%d/%m/%Y")        # mặc định: ngày hiện tại
     ma = re.sub(r"\D", "", dn.get("ma_so") or "") or "DN"
@@ -952,14 +959,18 @@ def tao_ho_so(du, mau_rieng=None):
     def them(ten_file, d, nhan, n):
         tep.append((ten_file, _luu_bytes(d)))
         ds_file.append((nhan, ten_nguon(n)))
-    if loai & {"ten", "dia_chi", "von", "nganh", "bo_sung"}:
+    if loai & {"ten", "dia_chi", "von", "nganh", "bo_sung", "cshhl"}:
         them(f"Mau12_Giay_de_nghi_thay_doi_noi_dung_DKDN_{ma}.docx", soan_mau12(du), "Mẫu số 12 — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN", 12)
+    if "cshhl" in loai and "dai_dien" not in loai:
+        them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", cat_mau(10), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (mẫu trống kèm theo, điền theo quy định)", 10)
     if "dai_dien" in loai:
         them(f"Mau13_Giay_de_nghi_thay_doi_nguoi_dai_dien_theo_phap_luat_{ma}.docx", soan_mau13(du), "Mẫu số 13 — Giấy đề nghị đăng ký thay đổi người đại diện theo pháp luật", 13)
         them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", cat_mau(10), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (mẫu trống kèm theo, điền theo quy định)", 10)
     if "chu_so_huu" in loai:
         them(f"Mau15_Giay_de_nghi_thay_doi_chu_so_huu_{ma}.docx", soan_mau15(du), "Mẫu số 15 — Giấy đề nghị đăng ký thay đổi chủ sở hữu công ty TNHH một thành viên", 15)
     canh_bao = []
+    if (loai & CAN_QUYET_DINH or du.get("tao_uy_quyen")) and not (ht.get("ngay_cap_gcn") or "").strip():
+        canh_bao.append("Chưa có ngày cấp Giấy chứng nhận ĐKDN (mục 1b) — Quyết định (ngày thông qua Điều lệ) và Giấy ủy quyền để trống ngày.")
     if loai & CAN_QUYET_DINH:                    # tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật thì không
         _, loai_vb, ten_co = _chu_the_quyet_dinh(dn.get("loai_hinh"))
         tep.append((f"Quyet_dinh_{'cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet'}_{ma}.docx", _luu_bytes(soan_quyet_dinh(du))))

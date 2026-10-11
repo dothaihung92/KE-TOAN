@@ -272,3 +272,24 @@ _qd3 = _docx.Document(_io.BytesIO(_z3.read([n for n in _z3.namelist() if n.start
 assert "Số: 07" in _qd3.tables[0].rows[0].cells[0].text and "ĐỖ THỊ ÁNH TUYẾT" in _qd3.tables[1].rows[0].cells[1].text
 assert "'bo_sung','Chỉ bổ sung" not in _h and "ssSoKeTiep" in _h and "chu_so_huu:''" in _h
 print("PASS: số văn bản tự điền; tên ký lấy từ dữ liệu GPKD.")
+
+
+# Mục chủ sở hữu hưởng lợi chỉ có khi tick; Giấy ủy quyền/Quyết định: nơi cấp mặc định + ngày Điều lệ = ngày cấp GCN
+def _m12_text(loai):
+    z = _zf.ZipFile(_io.BytesIO(_g.tao_ho_so({"loai": loai, "dn": {"ten": "A", "ma_so": "1"}, "dia_chi": {"so_nha": "x"}})[0]))
+    d = _docx.Document(_io.BytesIO(z.read([n for n in z.namelist() if n.startswith("Mau12")][0])))
+    import unicodedata
+    return unicodedata.normalize("NFC", "\n".join(p.text for p in d.paragraphs)), z.namelist()
+
+
+_t1, _n1 = _m12_text(["dia_chi"])
+assert "CHỦ SỞ HỮU HƯỞNG LỢI" not in _t1 and "Mẫu số 10" not in _t1 and not any(x.startswith("Mau10") for x in _n1)
+_t2, _n2 = _m12_text(["dia_chi", "cshhl"])
+assert "THÔNG BÁO THAY ĐỔI THÔNG TIN VỀ CHỦ SỞ HỮU HƯỞNG LỢI" in _t2 and any(x.startswith("Mau10") for x in _n2)
+_du4 = dict(_du, hien_tai=dict(_du["hien_tai"], ngay_cap_gcn="26/11/2014"), tao_uy_quyen=True)
+_z4 = _zf.ZipFile(_io.BytesIO(_g.tao_ho_so(_du4)[0]))
+_uq4 = "\n".join(p.text for p in _docx.Document(_io.BytesIO(_z4.read([n for n in _z4.namelist() if n.startswith("Giay_uy_quyen")][0]))).paragraphs)
+_qd4 = "\n".join(p.text for p in _docx.Document(_io.BytesIO(_z4.read([n for n in _z4.namelist() if n.startswith("Quyet_dinh")][0]))).paragraphs)
+assert "do Phòng Đăng ký kinh doanh cấp ngày 26/11/2014" in _uq4, _uq4
+assert "đã được thông qua ngày 26/11/2014" in _qd4, _qd4
+print("PASS: mục chủ sở hữu hưởng lợi chỉ khi tick; nơi cấp mặc định + ngày Điều lệ theo ngày cấp GCN.")
