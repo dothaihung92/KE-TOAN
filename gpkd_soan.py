@@ -549,8 +549,8 @@ def _ngay_chu(dn):
     return f"{(dn.get('dia_danh') or '').strip() or '……'}, ngày {d_} tháng {m_} năm {y_}"
 
 
-_SO_DONG_KY = 4          # số dòng trống chừa cho chữ ký phía trên họ tên
-_CAO_DONG_KY_PT = 26      # mỗi dòng trống cao CỐ ĐỊNH 26pt (không phụ thuộc kiểu chữ của mẫu) -> khoảng ký cao 4 x 26pt = 3,67 cm
+_SO_DONG_KY = 3          # số dòng trống chừa cho chữ ký phía trên họ tên
+_CAO_DONG_KY_PT = 24      # mỗi dòng trống cao CỐ ĐỊNH 24pt (không phụ thuộc kiểu chữ của mẫu) -> khoảng ký cao 3 x 24pt = 2,54 cm
 
 
 def _dong_trong_ky(o):
@@ -564,7 +564,7 @@ def _dong_trong_ky(o):
         pf.line_spacing = Pt(_CAO_DONG_KY_PT)
 
 
-def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.4):
+def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
     """Gắn ảnh chữ ký dạng NỔI "phía sau chữ" (behind text), canh giữa theo cột/ô và đè lên khoảng trống phía trên họ tên (đoạn `p`).
     Ảnh được co/giãn vừa khung rong_cm x cao_cm, giữ tỷ lệ. Chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã gắn."""
     if not anh_uri or "," not in str(anh_uri):
@@ -812,7 +812,7 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     pa3 = a.add_paragraph()
     pa3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pa3.add_run((uq.get("ho_ten") or "").upper())
-    _gan_chu_ky(pa3, (chu_ky or {}).get("ben_b"))
+    _gan_chu_ky(pa3, (chu_ky or {}).get("ben_b"), 5.4, 2.5)      # bên nhận ủy quyền: nhỏ hơn một chút
     pb = b.paragraphs[0]
     pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb.add_run("Bên ủy quyền")
