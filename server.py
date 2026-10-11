@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-11.158"
+APP_BUILD = "2026-10-11.159"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44770,7 +44770,13 @@ function menuKhoi() {
       var t = sachT(a.textContent), h = a.getAttribute('href') || '';
       if (!t || t.length > 80) return;
       if (chanDoanMenu.mau.length < 20) chanDoanMenu.mau.push(t + ' -> ' + (h || '(không href)').slice(0, 90) + (a.getAttribute('onclick') ? ' [onclick]' : ''));
-      if (!h || /^\s*javascript:/i.test(h) || h.charAt(0) === '#') { chanDoanMenu.link_nut_bam++; return; }
+      var pb = h.match(/^\s*javascript:\s*__doPostBack\(\s*'([^']+)'\s*,\s*'([^']*)'\s*\)/i);
+      if (pb) {
+        chanDoanMenu.link_nut_bam++;
+        if (!cam(t) && !daCo['pb:' + t]) { daCo['pb:' + t] = 1; kq.push({ten: t, nut: pb[1], doi: pb[2]}); }
+        return;
+      }
+      if (!h || /^\s*javascript:/i.test(h) || h.charAt(0) === '#') return;
       var u; try { u = new URL(h, goc_url); } catch (e) { return; }
       if (u.origin !== location.origin || cam(t)) return;
       var k = u.href.split('#')[0];
@@ -44796,9 +44802,12 @@ hop('Đang đọc khối đang mở...');
 ketQua.push(docTrang(document, location.href));
 var daDoc = {}; daDoc[location.href.split('#')[0]] = 1;
 cacTrang(document).forEach(function (d) { try { daDoc[d.location.href.split('#')[0]] = 1; } catch (e) {} });
-var ds = (menu || []).filter(function (m) { return !daDoc[m.url]; });
+var ds = (menu || []).filter(function (m) { return m.url && !daDoc[m.url]; });
+var dsNut = (menu || []).filter(function (m) { return m.nut; });
+var tongKhoi = ds.length + dsNut.length, dem = 0;
 for (var i = 0; i < ds.length; i++) {
-  hop('Đang đọc khối ' + (i + 1) + '/' + ds.length + ': ' + ds[i].ten + ' ...');
+  dem++;
+  hop('Đang đọc khối ' + dem + '/' + tongKhoi + ': ' + ds[i].ten + ' ...');
   try {
     var res = await fetch(ds[i].url, {credentials: 'same-origin'});
     if (!res.ok) { loi.push(ds[i].ten + ': HTTP ' + res.status); continue; }
@@ -44810,10 +44819,46 @@ for (var i = 0; i < ds.length; i++) {
   } catch (e) { loi.push(ds[i].ten + ': ' + e); }
   await new Promise(function (x) { setTimeout(x, 300); });
 }
+// Mục menu là NÚT BẤM (postback ASP.NET): bấm y như người dùng, nhưng trong 1 KHUNG ẨN mở lại chính trang đang xem —
+// mỗi lần bấm khung tải khối mới -> đọc -> bấm mục kế tiếp. Chỉ bấm mục trong menu KHỐI DỮ LIỆU (không Lưu/Nộp...).
+function choTai(f, giay) {
+  return new Promise(function (ok) { var xong = false; var t = setTimeout(function () { if (!xong) { xong = true; ok(false); } }, giay * 1000);
+    f.onload = function () { if (!xong) { xong = true; clearTimeout(t); setTimeout(function () { ok(true); }, 400); } }; });
+}
+if (dsNut.length) {
+  var f = document.createElement('iframe');
+  f.setAttribute('style', 'position:fixed;left:-10000px;top:0;width:1200px;height:900px;visibility:hidden');
+  document.body.appendChild(f);
+  var taiDuoc = false;
+  f.src = location.href; taiDuoc = await choTai(f, 40);
+  var docF = null; try { docF = f.contentDocument; } catch (e) {}
+  if (!taiDuoc || !docF || !f.contentWindow.__doPostBack) {
+    loi.push('Cổng không cho mở trang trong khung ẩn — ' + dsNut.length + ' khối dạng nút bấm chưa tự lấy được');
+  } else {
+    for (var j = 0; j < dsNut.length; j++) {
+      dem++;
+      hop('Đang bấm mở khối ' + dem + '/' + tongKhoi + ': ' + dsNut[j].ten + ' ...');
+      try {
+        var cho = choTai(f, 40);
+        f.contentWindow.__doPostBack(dsNut[j].nut, dsNut[j].doi);
+        if (!(await cho)) { loi.push(dsNut[j].ten + ': quá 40 giây không mở được'); continue; }
+        var dF = f.contentDocument, uF = f.contentWindow.location;
+        if (uF.origin !== location.origin) { loi.push(dsNut[j].ten + ': bị chuyển sang trang đăng nhập'); break; }
+        var rF = docTrang(dF, uF.href);
+        rF.khoi = dsNut[j].ten;
+        ketQua.push(rF);
+        if (!f.contentWindow.__doPostBack) { loi.push('Sau khối ' + dsNut[j].ten + ' trang không còn menu nút bấm — dừng'); break; }
+      } catch (e) { loi.push(dsNut[j].ten + ': ' + e); }
+    }
+  }
+  f.remove();
+}
+var tenDaCo = {};
+ketQua = ketQua.filter(function (k, i) { if (i && tenDaCo[k.khoi]) return false; tenDaCo[k.khoi] = 1; return true; });
 ketQua[0].chan_doan_menu = chanDoanMenu;
 var s = JSON.stringify(ketQua), tong = ketQua.reduce(function (a, k) { return a + k.cap.length; }, 0);
 var tt = 'Đã đọc ' + ketQua.length + ' khối — ' + tong + ' trường.\n' + ketQua.map(function (k) { return '• ' + (k.khoi || k.tieu_de) + ': ' + k.cap.length + ' trường'; }).join('\n') +
-  (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (không tự mở được).'
+  (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (tự bấm trong khung ẩn).'
         : '\n⚠ Không thấy menu "KHỐI DỮ LIỆU" trên trang này (kể cả khung con) — chỉ đọc được khối đang mở.') +
   (loi.length ? '\n⚠ Lỗi: ' + loi.join('; ') : '') + '\n\nBấm "Copy dữ liệu" rồi dán vào phần mềm (Hỗ trợ thay đổi GPKD → ô dán → Thêm).';
 var o = hop(tt), ta = o.querySelector('textarea');
