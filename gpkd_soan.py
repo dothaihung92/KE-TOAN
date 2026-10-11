@@ -466,7 +466,7 @@ def soan_mau12(du, chu_ky=None):
             if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
                 c = [c for c in tb.rows[-1].cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text][0]
                 # chữ ký trong Kho chữ ký chỉ là của người đại diện HIỆN TẠI (đã được người đó đồng ý) — không gắn khi ký là người đại diện mới
-                for _ in range(3):
+                for _ in range(_SO_DONG_KY):
                     c.add_paragraph()
                 pk = c.add_paragraph()
                 pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -550,7 +550,10 @@ def _ngay_chu(dn):
     return f"{(dn.get('dia_danh') or '').strip() or '……'}, ngày {d_} tháng {m_} năm {y_}"
 
 
-def _gan_chu_ky(p, anh_uri, rong_cm=4.4, cao_cm=2.2):
+_SO_DONG_KY = 4          # số dòng trống chừa cho chữ ký phía trên họ tên (≈ 2,2 cm)
+
+
+def _gan_chu_ky(p, anh_uri, rong_cm=5.4, cao_cm=2.4):
     """Gắn ảnh chữ ký dạng NỔI "phía sau chữ" (behind text), canh giữa theo cột/ô và đè lên khoảng trống phía trên họ tên (đoạn `p`).
     Ảnh được co/giãn vừa khung rong_cm x cao_cm, giữ tỷ lệ. Chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã gắn."""
     if not anh_uri or "," not in str(anh_uri):
@@ -569,7 +572,7 @@ def _gan_chu_ky(p, anh_uri, rong_cm=4.4, cao_cm=2.2):
         run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
         inline = run._r.xpath(".//wp:inline")[0]
         ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
-        lech = -(cy - int(0.8 * 360000))
+        lech = -(cy - int(0.3 * 360000))      # đáy ảnh chạm nhẹ vào đầu dòng họ tên, phần còn lại nằm trọn trong khoảng trống phía trên
         anchor = parse_xml(
             f'<wp:anchor {nsdecls("wp")} distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="1" '
             f'locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
@@ -740,7 +743,7 @@ def soan_quyet_dinh(du, chu_ky=None):
     pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb2.add_run("(Ký, ghi rõ họ tên)").italic = True
     if (ht.get("chu_so_huu") or "").strip():
-        for _ in range(3):
+        for _ in range(_SO_DONG_KY):
             b.add_paragraph()
         pk = b.add_paragraph()
         pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -794,7 +797,7 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     pa = a.paragraphs[0]
     pa.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pa.add_run("Bên được ủy quyền")
-    for _ in range(4):
+    for _ in range(_SO_DONG_KY):
         a.add_paragraph()
     pa3 = a.add_paragraph()
     pa3.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -803,7 +806,7 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     pb = b.paragraphs[0]
     pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb.add_run("Bên ủy quyền")
-    for _ in range(4):
+    for _ in range(_SO_DONG_KY):
         b.add_paragraph()
     pb3 = b.add_paragraph()
     pb3.alignment = WD_ALIGN_PARAGRAPH.CENTER
