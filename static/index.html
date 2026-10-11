@@ -4329,8 +4329,9 @@ function gpkdThemDan(){
   if(!ds){ds=[];for(const doan of t.split(/\n(?=\s*[\[{])/)){try{const v=JSON.parse(doan);ds.push(...(Array.isArray(v)?v:[v]))}catch(e){}}}
   for(const k of ds){if(gpkdThem(k))n++}
   const cd=ds.map(k=>k&&k.chan_doan_menu).filter(Boolean)[0];
-  window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm (không tự mở được).`+
-    (cd.loi&&cd.loi.length?'\n⚠ Lỗi khi mở khối: '+cd.loi.join(' | '):'')+(cd.chi_tiet&&cd.chi_tiet.length?'\nChẩn đoán từng mục: '+cd.chi_tiet.map(x=>x.muc+' [khung: '+(x.khung||'-')+(x.post?'; POST: '+x.post:'')+']').join(' | '):'')+(cd.mau&&cd.mau.length?'\nCác mục menu: '+cd.mau.join(' | '):''):'';
+  window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm.`+
+    (cd.loi&&cd.loi.length?`\n⚠ ${cd.loi.length} khối chưa lấy được: `+cd.loi.map(x=>x.split(':')[0]).join(', '):'')+
+    (cd.chi_tiet&&cd.chi_tiet.length?'\nChẩn đoán: '+Object.entries(cd.chi_tiet.reduce((m,x)=>{const k='khung: '+(x.khung||'-')+(x.post?' | POST: '+x.post:'');(m[k]=m[k]||[]).push(x.muc);return m},{})).map(([k,v])=>`[${v.length} mục] ${k.slice(0,400)}`).join('\n'):''):'';
   if(!n){toast('Không đọc được dữ liệu — hãy dán đúng đoạn nút bookmark đã copy','err');return}
   document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã thêm '+n+' khối','ok');
 }

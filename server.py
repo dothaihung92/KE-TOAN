@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-12.161"
+APP_BUILD = "2026-10-12.163"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44773,7 +44773,7 @@ function menuKhoi() {
       var pb = h.match(/^\s*javascript:\s*__doPostBack\(\s*'([^']+)'\s*,\s*'([^']*)'\s*\)/i);
       if (pb) {
         chanDoanMenu.link_nut_bam++;
-        if (!cam(t) && !daCo['pb:' + t]) { daCo['pb:' + t] = 1; kq.push({ten: t, nut: pb[1], doi: pb[2], doc: doc}); }
+        if (!cam(t) && !daCo['pb:' + t]) { daCo['pb:' + t] = 1; kq.push({ten: t, nut: pb[1], doi: pb[2], doc: doc, a: a}); }
         return;
       }
       if (!h || /^\s*javascript:/i.test(h) || h.charAt(0) === '#') return;
@@ -44847,7 +44847,8 @@ async function moBangKhung(it, stt) {
   try {
     var cho = choTai2(fr, 45);
     fm.target = tenKhung;
-    win.__doPostBack(it.nut, it.doi);
+    if (it.a && it.a.click) it.a.click();
+    else (0, win.eval)('__doPostBack(' + JSON.stringify(it.nut) + ',' + JSON.stringify(it.doi) + ')');
     var ok = await cho;
     if (!ok) throw new Error('quá 45 giây không tải xong');
     var dF, uF; try { dF = fr.contentDocument; uF = fr.contentWindow.location.href; } catch (e) { throw new Error('cổng không cho đọc khung (X-Frame-Options?)'); }
