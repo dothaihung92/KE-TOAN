@@ -4292,7 +4292,7 @@ async function moGpkd(){
         <div style="color:#c0392b;margin:4px 0">⚠️ KHÔNG dán mã vào thanh địa chỉ (ô gõ trang web) — Chrome sẽ tự bỏ chữ <code>javascript:</code> và chuyển sang tìm Google. Phải dán vào ô <b>URL của dấu trang</b>.</div>
         <a href="${gpkdEsc(bm)}" onclick="toast('Hãy KÉO nút này lên thanh dấu trang, không bấm ở đây','err');return false" style="display:inline-block;padding:4px 10px;border:1px solid #b5502d;border-radius:8px;color:#b5502d;font-weight:700;text-decoration:none">📋 Lấy dữ liệu GPKD</a>
         <button class="btn ghost sm" onclick="gpkdCopyMa()">Copy mã</button></div>
-      <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở <b>1 khối bất kỳ</b> của hồ sơ (có menu "KHỐI DỮ LIỆU" bên trái) → bấm nút bookmark: nút <b>tự đọc lần lượt TẤT CẢ các khối</b> trong menu, hiện bảng kết quả → bấm <b>"Copy dữ liệu"</b> → dán vào ô dưới, bấm "Thêm".</div>
+      <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở <b>1 khối bất kỳ</b> của hồ sơ (có menu "KHỐI DỮ LIỆU" bên trái) → bấm nút bookmark: nút <b>tự đọc lần lượt TẤT CẢ các khối</b> trong menu (sẽ <b>hiện 1 cửa sổ nhỏ</b> tự chuyển qua từng khối — nếu Chrome chặn cửa sổ bật lên, bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại), hiện bảng kết quả → bấm <b>"Copy dữ liệu"</b> → dán vào ô dưới, bấm "Thêm".</div>
       <textarea id="gpkdDan" rows="3" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:monospace;font-size:12px" placeholder="Dán dữ liệu đã copy ở đây (Ctrl+V)"></textarea>
       <button class="btn sm" style="margin-top:6px" onclick="gpkdThemDan()">➕ Thêm</button>
     </fieldset>
@@ -4331,7 +4331,7 @@ function gpkdThemDan(){
   const cd=ds.map(k=>k&&k.chan_doan_menu).filter(Boolean)[0];
   window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm.`+
     (cd.loi&&cd.loi.length?`\n⚠ ${cd.loi.length} khối chưa lấy được: `+cd.loi.map(x=>x.split(':')[0]).join(', '):'')+
-    (cd.chi_tiet&&cd.chi_tiet.length?'\nChẩn đoán: '+Object.entries(cd.chi_tiet.reduce((m,x)=>{const k='khung: '+(x.khung||'-')+(x.post?' | POST: '+x.post:'');(m[k]=m[k]||[]).push(x.muc);return m},{})).map(([k,v])=>`[${v.length} mục] ${k.slice(0,400)}`).join('\n'):''):'';
+    (cd.chi_tiet&&cd.chi_tiet.length?'\nChẩn đoán: '+Object.entries(cd.chi_tiet.reduce((m,x)=>{const k='cửa sổ: '+(x.cua_so||x.khung||'-')+(x.post?' | POST: '+x.post:'');(m[k]=m[k]||[]).push(x.muc);return m},{})).map(([k,v])=>`[${v.length} mục] ${k.slice(0,400)}`).join('\n'):''):'';
   if(!n){toast('Không đọc được dữ liệu — hãy dán đúng đoạn nút bookmark đã copy','err');return}
   document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã thêm '+n+' khối','ok');
 }

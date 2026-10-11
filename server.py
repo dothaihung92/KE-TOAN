@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-12.163"
+APP_BUILD = "2026-10-12.164"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44805,6 +44805,8 @@ cacTrang(document).forEach(function (d) { try { daDoc[d.location.href.split('#')
 var ds = (menu || []).filter(function (m) { return m.url && !daDoc[m.url]; });
 var dsNut = (menu || []).filter(function (m) { return m.nut && chuan(m.ten) !== chuan(ketQua[0].khoi || ''); });
 var tongKhoi = ds.length + dsNut.length, dem = 0;
+var pop = null;
+if (dsNut.length) { pop = window.open('about:blank', '__gpkdCuaSo', 'width=820,height=620'); if (!pop) loi.push('Trình duyệt chặn cửa sổ bật lên — hãy bấm biểu tượng chặn ở thanh địa chỉ, chọn "Luôn cho phép" rồi bấm lại nút'); }
 for (var i = 0; i < ds.length; i++) {
   dem++;
   hop('Đang đọc khối ' + dem + '/' + tongKhoi + ': ' + ds[i].ten + ' ...');
@@ -44832,32 +44834,30 @@ function khopTen(r, ten) {
   var a = chuan(r.khoi), b = chuan(ten);
   return !a || a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
 }
-function choTai2(f, giay) {
-  return new Promise(function (ok) { var xong = false; var t = setTimeout(function () { if (!xong) { xong = true; ok(false); } }, giay * 1000);
-    f.onload = function () { if (!xong) { xong = true; clearTimeout(t); setTimeout(function () { ok(true); }, 500); } }; });
-}
+function nghi(ms) { return new Promise(function (x) { setTimeout(x, ms); }); }
 function formCua(doc) { var vs = doc.querySelector('input[name="__VIEWSTATE"]'); return vs ? vs.form : null; }
-async function moBangKhung(it, stt) {
-  var fm = formCua(it.doc), win = it.doc.defaultView;
-  if (!fm || !win || !win.__doPostBack) throw new Error('trang không có form/__doPostBack');
-  var fr = document.createElement('iframe'), tenKhung = '__gpkdKhung' + stt;
-  fr.name = tenKhung; fr.setAttribute('style', 'position:fixed;left:-10000px;top:0;width:1200px;height:900px;visibility:hidden');
-  document.body.appendChild(fr);
+async function moBangCuaSo(it, pop) {
+  var fm = formCua(it.doc);
+  if (!fm || !it.a || !it.a.click) throw new Error('trang không có form/link của mục menu');
+  if (!pop || pop.closed) throw new Error('cửa sổ phụ đã bị đóng hoặc bị trình duyệt chặn (hãy cho phép cửa sổ bật lên của trang này)');
+  var cu = null; try { cu = pop.document; } catch (e) {}
   var tCu = fm.getAttribute('target');
+  fm.target = '__gpkdCuaSo';
   try {
-    var cho = choTai2(fr, 45);
-    fm.target = tenKhung;
-    if (it.a && it.a.click) it.a.click();
-    else (0, win.eval)('__doPostBack(' + JSON.stringify(it.nut) + ',' + JSON.stringify(it.doi) + ')');
-    var ok = await cho;
-    if (!ok) throw new Error('quá 45 giây không tải xong');
-    var dF, uF; try { dF = fr.contentDocument; uF = fr.contentWindow.location.href; } catch (e) { throw new Error('cổng không cho đọc khung (X-Frame-Options?)'); }
-    if (!dF || !dF.body || uF === 'about:blank') throw new Error('khung không có nội dung (cổng chặn khung?)');
-    var r = docTrang(dF, uF);
-    return r;
+    it.a.click();
+    var het = Date.now() + 45000;
+    while (Date.now() < het) {
+      await nghi(400);
+      if (pop.closed) throw new Error('cửa sổ phụ đã bị đóng');
+      var d = null; try { d = pop.document; } catch (e) { continue; }
+      if (d && d !== cu && d.readyState === 'complete' && d.body && pop.location.href !== 'about:blank') {
+        await nghi(500);
+        return docTrang(pop.document, pop.location.href);
+      }
+    }
+    throw new Error('quá 45 giây không tải xong');
   } finally {
     if (tCu === null) fm.removeAttribute('target'); else fm.setAttribute('target', tCu);
-    fr.remove();
   }
 }
 function duLieuForm(doc, nut, doi) {
@@ -44888,9 +44888,9 @@ for (var j = 0; j < dsNut.length; j++) {
   dem++;
   var it = dsNut[j], r1 = null, ghi = {muc: it.ten};
   hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + it.ten + ' ...');
-  try { r1 = await moBangKhung(it, j); ghi.khung = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi; }
-  catch (e) { ghi.khung = 'lỗi: ' + e; r1 = null; }
-  if (r1 && !khopTen(r1, it.ten)) { ghi.khung += ' | KHÔNG đúng khối (trang trả về là "' + r1.khoi + '")'; r1 = null; }
+  try { r1 = await moBangCuaSo(it, pop); ghi.cua_so = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi; }
+  catch (e) { ghi.cua_so = 'lỗi: ' + e; r1 = null; }
+  if (r1 && !khopTen(r1, it.ten)) { ghi.cua_so += ' | KHÔNG đúng khối (trang trả về là "' + r1.khoi + '")'; r1 = null; }
   if (!r1) {
     try { r1 = await moBangPost(it); ghi.post = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi + (r1.chuyen ? ' (có chuyển hướng)' : ''); }
     catch (e) { ghi.post = 'lỗi: ' + e; r1 = null; }
@@ -44902,6 +44902,7 @@ for (var j = 0; j < dsNut.length; j++) {
   await new Promise(function (x) { setTimeout(x, 400); });
 }
 chanDoanMenu.chi_tiet = chiTiet;
+try { if (pop && !pop.closed) pop.close(); } catch (e) {}
 var tenDaCo = {};
 ketQua = ketQua.filter(function (k, i) { if (i && tenDaCo[k.khoi]) return false; tenDaCo[k.khoi] = 1; return true; });
 chanDoanMenu.loi = loi;

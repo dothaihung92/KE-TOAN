@@ -104,7 +104,8 @@ than = urllib.parse.unquote(bm[len("javascript:"):])
 assert "navigator.clipboard" in than and "querySelectorAll('tr')" in than
 assert "contentDocument" in than and "chan_doan" in than    # đọc cả khung con (iframe) cùng nguồn + báo chẩn đoán
 # mở khối nút bấm như điều hướng thật (target của form = khung ẩn), kiểm tra trang trả về ĐÚNG khối, dự phòng POST
-assert "it.a.click()" in than and "fm.target = tenKhung" in than   # gọi qua đúng link của mục menu (như bấm tay): __doPostBack của cổng đọc .caller, gọi từ mã async sẽ lỗi TypeError and "khopTen(r1, it.ten)" in than and "KHÔNG đúng khối" in than and "chanDoanMenu.chi_tiet" in than
+# cổng chặn nhúng khung (X-Frame-Options) -> mở khối trong 1 CỬA SỔ PHỤ (mở ngay lúc bấm nút), bấm đúng link của mục menu
+assert "it.a.click()" in than and "fm.target = '__gpkdCuaSo'" in than and "window.open('about:blank', '__gpkdCuaSo'" in than
 assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
 # tự đọc mọi khối trong menu "KHỐI DỮ LIỆU" (dừng ở "VĂN BẢN ĐÍNH KÈM") CHỈ bằng GET trong phiên của người dùng
 assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "cacTrang(document)" in than and "chan_doan_menu" in than and "credentials: 'same-origin'" in than
@@ -114,9 +115,9 @@ assert ".submit(" not in than and than.count(".click()") == 1 and "it.a.click()"
 # trong KHUNG ẨN; không tự gọi postback nào khác
 # cách chính: POST form ASP.NET của chính trang (đúng lệnh mục menu, phiên người dùng); dự phòng: khung ẩn. Lỗi ghi vào dữ liệu.
 assert "method: 'POST'" in than and "duLieuForm(it.doc, it.nut, it.doi)" in than
-assert than.count("__doPostBack(") == 1 and "win.__doPostBack(" not in than and "(0, win.eval)('__doPostBack(' + JSON.stringify(it.nut)" in than
+assert than.count("__doPostBack(") == 0 and "win.__doPostBack(" not in than
 assert "chanDoanMenu.loi = loi" in than and 'name="__VIEWSTATE"' in than
-assert "if (!cam(t) && !daCo['pb:' + t])" in than and "visibility:hidden" in than
+assert "if (!cam(t) && !daCo['pb:' + t])" in than and "\"__gpkdHop\"" not in than
 assert "javascript:" in than and "cam(t)" in than                       # bỏ link javascript:/postback và link xoá/nộp/gửi...
 print("PASS 4: mã bookmark chỉ đọc trang và copy, không gửi/bấm gì.")
 
