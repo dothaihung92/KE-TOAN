@@ -336,7 +336,7 @@ _GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "
 CAN_QUYET_DINH = {"ten", "dia_chi", "von", "nganh", "dai_dien", "chu_so_huu"}
 
 
-def soan_mau12(du):
+def soan_mau12(du, chu_ky=None):
     """Mẫu số 12 (TT 121/2026) — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN: chỉ giữ các mục được chọn, điền dữ liệu."""
     d = cat_mau(12)
     m = _Mau(d)
@@ -465,8 +465,10 @@ def soan_mau12(du):
         for tb in d.tables:
             if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
                 c = [c for c in tb.rows[-1].cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text][0]
-                for _ in range(3):
-                    c.add_paragraph()
+                # chữ ký trong Kho chữ ký chỉ là của người đại diện HIỆN TẠI (đã được người đó đồng ý) — không gắn khi ký là người đại diện mới
+                if not _chen_anh(c, (chu_ky or {}).get("giam_doc") if "dai_dien" not in loai else None):
+                    for _ in range(3):
+                        c.add_paragraph()
                 pk = c.add_paragraph()
                 pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pk.add_run(ten_ky.strip().upper()).bold = True
@@ -547,6 +549,21 @@ def _ngay_chu(dn):
     return f"{(dn.get('dia_danh') or '').strip() or '……'}, ngày {d_} tháng {m_} năm {y_}"
 
 
+def _chen_anh(o, anh_uri, cao_cm=2.0):
+    """Chèn ảnh chữ ký (data URI PNG) vào ô/khối `o` (canh giữa); chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã chèn."""
+    if not anh_uri or "," not in str(anh_uri):
+        return False
+    try:
+        import base64
+        raw = base64.b64decode(str(anh_uri).split(",", 1)[1])
+        p = o.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.add_run().add_picture(io.BytesIO(raw), height=Cm(cao_cm))
+        return True
+    except Exception:
+        return False
+
+
 def _van_ban_moi():
     d = docx.Document()
     st = d.styles["Normal"]
@@ -617,7 +634,7 @@ def _chu_the_quyet_dinh(loai_hinh):
     return "CHỦ SỞ HỮU", "QUYẾT ĐỊNH", "Chủ sở hữu"
 
 
-def soan_quyet_dinh(du):
+def soan_quyet_dinh(du, chu_ky=None):
     """Quyết định (chủ sở hữu công ty TNHH một thành viên) / Nghị quyết (HĐTV, ĐHĐCĐ) về việc thay đổi nội dung đăng ký doanh nghiệp."""
     dn, ht = du.get("dn") or {}, du.get("hien_tai") or {}
     loai = set(du.get("loai") or [])
@@ -684,15 +701,16 @@ def soan_quyet_dinh(du):
     pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb2.add_run("(Ký, ghi rõ họ tên)").italic = True
     if (ht.get("chu_so_huu") or "").strip():
-        for _ in range(3):
-            b.add_paragraph()
+        if not _chen_anh(b, (chu_ky or {}).get("chu_so_huu")):
+            for _ in range(3):
+                b.add_paragraph()
         pk = b.add_paragraph()
         pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
         pk.add_run(ht["chu_so_huu"].strip().upper()).bold = True
     return d
 
 
-def soan_giay_uy_quyen(du):
+def soan_giay_uy_quyen(du, chu_ky=None):
     """Giấy ủy quyền nộp hồ sơ và nhận kết quả đăng ký doanh nghiệp (theo mẫu người dùng cung cấp)."""
     dn, ht, uq = du.get("dn") or {}, du.get("hien_tai") or {}, du.get("uy_quyen") or {}
     ten = (dn.get("ten") or "").strip().upper() or "……"
@@ -744,8 +762,9 @@ def soan_giay_uy_quyen(du):
     pb = b.paragraphs[0]
     pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb.add_run("Bên ủy quyền")
-    for _ in range(4):
-        b.add_paragraph()
+    if not _chen_anh(b, (chu_ky or {}).get("giam_doc")):
+        for _ in range(4):
+            b.add_paragraph()
     pb3 = b.add_paragraph()
     pb3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb3.add_run((ht.get("dd_ho_ten") or "").upper())
@@ -936,7 +955,83 @@ def _danh_muc(du, ds_file, thieu, ghi_chu_nguon):
     return d
 
 
-def tao_ho_so(du, mau_rieng=None):
+# ============================================================ XUẤT PDF (có viền như bản scan)
+def _timn_trinh_chuyen_pdf():
+    """('lo', đường dẫn soffice) | ('word', None) | None."""
+    import shutil
+    import sys as _sys
+    for n in ("soffice", "libreoffice"):
+        p = shutil.which(n)
+        if p:
+            return ("lo", p)
+    for p in (r"C:\Program Files\LibreOffice\program\soffice.exe", r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"):
+        if os.path.isfile(p):
+            return ("lo", p)
+    if _sys.platform == "win32":
+        for mod in ("win32com.client", "comtypes.client"):
+            try:
+                __import__(mod)
+                return ("word", mod)
+            except Exception:
+                continue
+    return None
+
+
+def docx_sang_pdf(noi_dung, trinh=None):
+    """docx (bytes) -> pdf (bytes) bằng LibreOffice hoặc Microsoft Word có sẵn trên máy; ném RuntimeError nếu không chuyển được."""
+    import tempfile
+    import subprocess
+    trinh = trinh or _timn_trinh_chuyen_pdf()
+    if not trinh:
+        raise RuntimeError("Máy chưa có Microsoft Word hoặc LibreOffice để đổi sang PDF")
+    with tempfile.TemporaryDirectory() as td:
+        src = os.path.join(td, "vb.docx")
+        with open(src, "wb") as f:
+            f.write(noi_dung)
+        out = os.path.join(td, "vb.pdf")
+        if trinh[0] == "lo":
+            r = subprocess.run([trinh[1], "--headless", "--norestore", f"-env:UserInstallation=file:///{td.replace(os.sep, '/')}/prof",
+                                "--convert-to", "pdf", "--outdir", td, src], capture_output=True, text=True, timeout=180)
+            if not os.path.isfile(out):
+                raise RuntimeError("LibreOffice không chuyển được: " + (r.stderr or r.stdout or "")[-200:])
+        else:
+            if trinh[1] == "win32com.client":
+                import win32com.client as wc
+                w = wc.DispatchEx("Word.Application")
+            else:
+                import comtypes.client as cc
+                w = cc.CreateObject("Word.Application")
+            try:
+                w.Visible = False
+                d = w.Documents.Open(src, ReadOnly=True)
+                d.SaveAs(out, FileFormat=17)          # 17 = wdFormatPDF
+                d.Close(False)
+            finally:
+                w.Quit()
+            if not os.path.isfile(out):
+                raise RuntimeError("Word không xuất được PDF")
+        with open(out, "rb") as f:
+            return f.read()
+
+
+def pdf_vien_scan(pdf_bytes, dpi=150, le_pt=12):
+    """PDF -> PDF dạng ảnh từng trang (như file scan) có khung viền quanh trang. Cần thư viện pymupdf."""
+    try:
+        import pymupdf
+    except ImportError:
+        import fitz as pymupdf
+    nguon = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    kq = pymupdf.open()
+    for tr in nguon:
+        r = tr.rect
+        anh = tr.get_pixmap(dpi=dpi, alpha=False)
+        moi = kq.new_page(width=r.width, height=r.height)
+        moi.insert_image(r, pixmap=anh)
+        moi.draw_rect(pymupdf.Rect(r.x0 + le_pt, r.y0 + le_pt, r.x1 - le_pt, r.y1 - le_pt), color=(0, 0, 0), width=1.0)
+    return kq.tobytes(deflate=True)
+
+
+def tao_ho_so(du, mau_rieng=None, chu_ky=None, xuat_pdf=False):
     """du: dữ liệu (xem soan_mau12/13/15); mau_rieng: [(tên, bytes docx)] mẫu riêng của người dùng.
     Trả (bytes zip, tên file zip, cảnh báo[])."""
     import datetime
@@ -960,7 +1055,7 @@ def tao_ho_so(du, mau_rieng=None):
         tep.append((ten_file, _luu_bytes(d)))
         ds_file.append((nhan, ten_nguon(n)))
     if loai & {"ten", "dia_chi", "von", "nganh", "bo_sung", "cshhl"}:
-        them(f"Mau12_Giay_de_nghi_thay_doi_noi_dung_DKDN_{ma}.docx", soan_mau12(du), "Mẫu số 12 — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN", 12)
+        them(f"Mau12_Giay_de_nghi_thay_doi_noi_dung_DKDN_{ma}.docx", soan_mau12(du, chu_ky), "Mẫu số 12 — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN", 12)
     if "cshhl" in loai and "dai_dien" not in loai:
         them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", cat_mau(10), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (mẫu trống kèm theo, điền theo quy định)", 10)
     if "dai_dien" in loai:
@@ -973,12 +1068,12 @@ def tao_ho_so(du, mau_rieng=None):
         canh_bao.append("Chưa có ngày cấp Giấy chứng nhận ĐKDN (mục 1b) — Quyết định (ngày thông qua Điều lệ) và Giấy ủy quyền để trống ngày.")
     if loai & CAN_QUYET_DINH:                    # tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật thì không
         _, loai_vb, ten_co = _chu_the_quyet_dinh(dn.get("loai_hinh"))
-        tep.append((f"Quyet_dinh_{'cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet'}_{ma}.docx", _luu_bytes(soan_quyet_dinh(du))))
+        tep.append((f"Quyet_dinh_{'cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet'}_{ma}.docx", _luu_bytes(soan_quyet_dinh(du, chu_ky))))
         ds_file.append((f"{loai_vb.capitalize()} của {ten_co} về việc thay đổi nội dung đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
         if "một thành viên" not in (dn.get("loai_hinh") or "").lower():
             canh_bao.append(f"{loai_vb.capitalize()} soạn theo thẩm quyền của {ten_co} — hãy đối chiếu Điều lệ công ty (thể thức, tỷ lệ biểu quyết, biên bản họp nếu cần).")
     if du.get("tao_uy_quyen"):
-        tep.append((f"Giay_uy_quyen_nop_ho_so_{ma}.docx", _luu_bytes(soan_giay_uy_quyen(du))))
+        tep.append((f"Giay_uy_quyen_nop_ho_so_{ma}.docx", _luu_bytes(soan_giay_uy_quyen(du, chu_ky))))
         ds_file.append(("Giấy ủy quyền nộp hồ sơ và nhận kết quả đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
         uq = du.get("uy_quyen") or {}
         for k, nhan in (("ho_ten", "họ tên"), ("ngay_sinh", "ngày sinh"), ("so_giay_to", "số chứng thực/CCCD"), ("ngay_cap", "ngày cấp"), ("noi_cap", "nơi cấp"), ("cho_o", "chỗ ở hiện tại")):
@@ -1004,6 +1099,27 @@ def tao_ho_so(du, mau_rieng=None):
     ghi = "; ".join(sorted({f"{n[1]}" for n in nguon.values() if n[0] in ("TT121", "TT68")}))
     dm = _danh_muc(du, ds_file, thieu, "Phụ lục I Thông tư 121/2026/TT-BTC (mẫu cập nhật) và Phụ lục I Thông tư 68/2025/TT-BTC")
     tep.append(("00_Danh_muc_ho_so.docx", _luu_bytes(dm)))
+    if chu_ky and any(chu_ky.values()):
+        canh_bao.append("Đã gắn chữ ký từ Kho chữ ký (chỉ chữ ký đã được người đó xác nhận đồng ý). Người đại diện/chủ sở hữu vẫn cần kiểm tra nội dung trước khi nộp.")
+    if xuat_pdf:
+        try:
+            trinh = _timn_trinh_chuyen_pdf()
+            if not trinh:
+                raise RuntimeError("Máy chưa có Microsoft Word hoặc LibreOffice để đổi sang PDF")
+            pdfs, loi = [], []
+            for ten, nd in tep:
+                if ten.lower().endswith(".docx") and not ten.startswith(("00_", "MauRieng_")):
+                    try:
+                        pdfs.append(("PDF/" + ten[:-5] + "_scan.pdf", pdf_vien_scan(docx_sang_pdf(nd, trinh))))
+                    except ImportError:
+                        raise RuntimeError("Thiếu thư viện pymupdf (pip install pymupdf)")
+                    except Exception as e:
+                        loi.append(f"{ten}: {str(e)[:100]}")
+            tep += pdfs
+            if loi:
+                canh_bao.append("Không xuất được PDF cho: " + "; ".join(loi))
+        except Exception as e:
+            canh_bao.append("Chưa xuất PDF được: " + str(e)[:160])
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as z:
         for ten, nd in tep:

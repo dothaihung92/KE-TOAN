@@ -16,3 +16,4 @@ selenium
 pyodbc
 cryptography
 pywinauto; sys_platform == "win32"
+pymupdf

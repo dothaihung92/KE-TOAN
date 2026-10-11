@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.178"
+APP_BUILD = "2026-10-13.179"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14027,6 +14027,26 @@ def _ck_khoa_gd(cid, nguoi_ky):
     return f"gd:cty{cid}"
 
 
+def _ck_khoa_cs(cid):
+    """Khoá chữ ký của CHỦ SỞ HỮU / chủ công ty (ký Quyết định): riêng từng công ty."""
+    return f"cs:cty{cid}"
+
+
+def _gpkd_ten_chu_so_huu(cid):
+    """Họ tên chủ sở hữu trong dữ liệu GPKD đã gom của công ty (khối 'Thông tin về chủ sở hữu'); '' nếu chưa có."""
+    import re, unicodedata
+    try:
+        d = json.loads(_get_setting(f"gpkd_du_lieu_{int(cid)}", "") or "{}")
+    except Exception:
+        return ""
+    for k in reversed(d.get("khoi") or []):
+        if re.match(r"^thông tin về chủ sở hữu$", unicodedata.normalize("NFC", str(k.get("khoi") or "")).strip(), re.I):
+            for c in k.get("cap") or []:
+                if re.match(r"^(họ,? ?(chữ đệm )?(và )?tên|tên( chủ sở hữu)?)$", str(c[0]).strip(), re.I) and c[1]:
+                    return str(c[1]).strip()
+    return ""
+
+
 def _ck_doc_het(cid):
     """(kho chung, bảng cũ theo công ty)."""
     conn = db()
@@ -14050,6 +14070,11 @@ def _vb_chu_ky_dict(cid):
     nguoi_ky = ((comp["nguoi_ky"] if comp and "nguoi_ky" in comp.keys() else "") or "")
     kq = {k: v["anh"] for k, v in cu.items() if v.get("xac_nhan") and v.get("anh")}
     kq.update({k: v["anh"] for k, v in chung.items() if v.get("xac_nhan") and v.get("anh")})
+    cs = chung.get(_ck_khoa_cs(cid)) or {}
+    if cs.get("xac_nhan") and cs.get("anh"):
+        kq["chu_so_huu"] = cs["anh"]
+    else:
+        kq.pop("chu_so_huu", None)
     gd = chung.get(_ck_khoa_gd(cid, nguoi_ky)) or cu.get("giam_doc") or {}
     if gd.get("xac_nhan") and gd.get("anh"):
         kq["giam_doc"] = gd["anh"]
@@ -14077,9 +14102,11 @@ def chu_ky_danh_sach(cid: int, nam: int = 0):
             continue
         thay.add(k)
         ds.append(muc(k, n["ten"], n["ma"], n["chuc_vu"], vbld.khoa_chu_ky(n["ma"], n["ten"])))
+    cs = muc(_ck_khoa_cs(cid), _gpkd_ten_chu_so_huu(cid) or "Chủ sở hữu / chủ công ty", "", "Chủ sở hữu ký (Quyết định...)")
+    cs["la_cs"] = True
     return {"nam": nam, "giam_doc": muc(_ck_khoa_gd(cid, cty.get("nguoi_ky")), cty.get("nguoi_ky") or "Giám đốc / người đại diện", "", "Người đại diện ký", "giam_doc"),
-            "nhan_vien": ds, "tong_kho_chung": len([1 for v in chung.values() if v.get("anh")]), "du": _ck_doc_du(),
-            "da_luu": _ck_da_luu_khac(chung, {m["khoa"] for m in ds} | {_ck_khoa_gd(cid, cty.get("nguoi_ky"))} | _ck_doc_an(cid))}
+            "chu_so_huu": cs, "nhan_vien": ds, "tong_kho_chung": len([1 for v in chung.values() if v.get("anh")]), "du": _ck_doc_du(),
+            "da_luu": _ck_da_luu_khac(chung, {m["khoa"] for m in ds} | {_ck_khoa_gd(cid, cty.get("nguoi_ky")), _ck_khoa_cs(cid)} | _ck_doc_an(cid))}
 
 
 def _ck_doc_an(cid):
@@ -14095,7 +14122,7 @@ def _ck_da_luu_khac(chung, khoa_cua_cty):
     """Chữ ký ĐÃ GÁN trong kho dùng chung (của công ty khác / người không có trong danh sách này) — vẫn dùng lại được ở mọi công ty."""
     kq = []
     for k, v in sorted(chung.items(), key=lambda kv: (kv[1].get("ten") or "")):
-        if k in khoa_cua_cty or k.startswith("gd:") or not v.get("anh") or not v.get("xac_nhan"):      # chữ ký giám đốc là của riêng từng công ty
+        if k in khoa_cua_cty or k.startswith(("gd:", "cs:")) or not v.get("anh") or not v.get("xac_nhan"):      # chữ ký giám đốc là của riêng từng công ty
             continue
         kq.append({"khoa": k, "ten": v.get("ten") or k, "anh": v["anh"]})
     return kq
@@ -14114,7 +14141,9 @@ def _ck_luu_1(conn, cid, khoa, ten, anh, xac_nhan):
     if khoa == "giam_doc":
         comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
         khoa = _ck_khoa_gd(cid, (comp["nguoi_ky"] if comp and "nguoi_ky" in comp.keys() else "") or "")
-    if not khoa.startswith(("gd:", "cccd:", "ten:")) or len(khoa) > 200:
+    if khoa == "chu_so_huu":
+        khoa = _ck_khoa_cs(cid)
+    if not khoa.startswith(("gd:", "cs:", "cccd:", "ten:")) or len(khoa) > 200:
         raise HTTPException(400, "Khoá chữ ký không hợp lệ")
     cu = conn.execute("SELECT anh FROM chu_ky_chung WHERE khoa=?", (khoa,)).fetchone()
     if anh:
@@ -14143,7 +14172,7 @@ def chu_ky_cho_in(cid: int, nam: int = 0):
         if a and vbld.khoa_nguoi(n) not in thay:
             thay.add(vbld.khoa_nguoi(n))
             ds.append({"ma": n["ma"], "ten": n["ten"], "anh": a})
-    return {"giam_doc": d.get("giam_doc") or "", "nhan_vien": ds}
+    return {"giam_doc": d.get("giam_doc") or "", "chu_so_huu": d.get("chu_so_huu") or "", "nhan_vien": ds}
 
 
 @app.post("/api/chu-ky/{cid}")
@@ -45414,6 +45443,7 @@ def gpkd_soan_xoa_mau_rieng(ten: str):
 @app.post("/api/gpkd-soan/tao")
 def gpkd_soan_tao(body: dict = Body(...)):
     """body: {du_lieu: {...}, mau_rieng: [tên file]} -> file zip gồm các biểu mẫu đã điền + danh mục hồ sơ (X-Canh-Bao: cảnh báo, mã hoá URL)."""
+    import sys
     g = _gpkd_soan_mod()
     du = body.get("du_lieu") or {}
     mr = []
@@ -45422,8 +45452,26 @@ def gpkd_soan_tao(body: dict = Body(...)):
         if os.path.isfile(p):
             with open(p, "rb") as f:
                 mr.append((_gpkd_ten_mau_rieng(ten), f.read()))
+    chu_ky = {}
+    cid = body.get("cid")
+    if body.get("gan_chu_ky") and cid:
+        d = _vb_chu_ky_dict(int(cid))
+        chu_ky = {k: d.get(k) for k in ("giam_doc", "chu_so_huu") if d.get(k)}
+    if body.get("xuat_pdf"):
+        try:
+            import pymupdf  # noqa
+        except ImportError:
+            try:
+                import fitz  # noqa
+            except ImportError:
+                try:
+                    subprocess.run([sys.executable, "-m", "pip", "install", "pymupdf"], capture_output=True, text=True, timeout=240)
+                    import importlib
+                    importlib.invalidate_caches()
+                except Exception:
+                    pass
     try:
-        zip_b, ten_zip, canh_bao = g.tao_ho_so(du, mr)
+        zip_b, ten_zip, canh_bao = g.tao_ho_so(du, mr, chu_ky, bool(body.get("xuat_pdf")))
     except ValueError as e:
         raise HTTPException(400, str(e))
     from urllib.parse import quote as _q

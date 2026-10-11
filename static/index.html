@@ -4535,7 +4535,7 @@ function ssThuThap(){
   du.chu_so_huu_moi={};SS_TRUONG.chu_so_huu_moi.forEach(([k])=>du.chu_so_huu_moi[k]=gt('chu_so_huu_moi',k));
   ['hien_tai','uy_quyen','bo_sung'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
-  du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.de_nghi_xac_nhan=ck('ss_de_nghi_xac_nhan');
+  du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');du.de_nghi_xac_nhan=ck('ss_de_nghi_xac_nhan');
   du.dn.ngay_tay=document.getElementById('ss_dn_ngay_lap')?.dataset.tay==='1';du.dn.so_tay=document.getElementById('ss_dn_so_vb')?.dataset.tay==='1';
   return du;
 }
@@ -4600,6 +4600,8 @@ async function moSoanGpkd(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
       <div class="hint" style="margin:0 0 6px"><b>Quyết định của chủ sở hữu / Nghị quyết</b> được phần mềm <b>tự soạn</b> khi có đổi tên, địa chỉ, vốn điều lệ, ngành nghề, người đại diện hoặc chủ sở hữu.</div>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_de_nghi_xac_nhan" checked onchange="ssLuuTam()"> Đánh dấu "Đề nghị cấp Giấy xác nhận thay đổi nội dung đăng ký doanh nghiệp" trong Giấy đề nghị (Mẫu 12)</label>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_gan_ky" checked onchange="ssLuuTam()"> Gắn chữ ký từ <b>Kho chữ ký</b> (giám đốc ở Mẫu 12/Giấy ủy quyền, chủ sở hữu ở Quyết định) — chỉ chữ ký đã tick "đã đồng ý"</label>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_xuat_pdf" onchange="ssLuuTam()"> Xuất thêm file <b>PDF có viền</b> (dạng ảnh từng trang như bản scan; cần máy có Microsoft Word hoặc LibreOffice)</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_uy_quyen" onchange="document.getElementById('ssUq').style.display=this.checked?'block':'none';ssLuuTam()"> Soạn <b>Giấy ủy quyền</b> nộp hồ sơ và nhận kết quả</label>
       <div id="ssUq" style="display:none;margin:6px 0 0 26px;padding:8px 10px;border-left:3px solid #cfe5da">${ssCacO('uy_quyen')}
         <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Phần mềm không ký thay: hai bên tự ký.</div></div>
@@ -4624,7 +4626,7 @@ async function moSoanGpkd(){
     Object.entries(du.chu_so_huu_moi||{}).forEach(([k,v])=>dat('ss_chu_so_huu_moi_'+k,v));
     ['hien_tai','uy_quyen','bo_sung'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
-    ck('ss_de_nghi_xac_nhan',du.de_nghi_xac_nhan!==undefined?du.de_nghi_xac_nhan:true);ck('ss_tao_uy_quyen',du.tao_uy_quyen);
+    ck('ss_de_nghi_xac_nhan',du.de_nghi_xac_nhan!==undefined?du.de_nghi_xac_nhan:true);ck('ss_tao_uy_quyen',du.tao_uy_quyen);ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);
     const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
     const nl=document.getElementById('ss_dn_ngay_lap');if(nl&&(du.dn||{}).ngay_tay)nl.dataset.tay='1';
     const sv=document.getElementById('ss_dn_so_vb');if(sv&&(du.dn||{}).so_tay)sv.dataset.tay='1';
@@ -4692,7 +4694,7 @@ async function ssTao(){
   if(!du.loai.length){toast('Chọn ít nhất một nội dung thay đổi','err');return}
   kq.innerHTML='<div class="hint">Đang soạn hồ sơ…</div>';
   try{
-    const r=await api('/api/gpkd-soan/tao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({du_lieu:du,mau_rieng:ssMauRieng.filter(m=>m.chon).map(m=>m.ten)})});
+    const r=await api('/api/gpkd-soan/tao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cid:current,gan_chu_ky:du.gan_chu_ky,xuat_pdf:du.xuat_pdf,du_lieu:du,mau_rieng:ssMauRieng.filter(m=>m.chon).map(m=>m.ten)})});
     const cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'');
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)||[])[1]||'Ho_so_thay_doi_DKDN.zip';
     dl(await r.blob(),ten);
@@ -5144,9 +5146,9 @@ async function vbCkVe(){
   try{vbCkDs=await api(`/api/chu-ky/${current}?nam=${vbNam}`)}catch(e){kv.innerHTML=`<div class="hint" style="color:#c00">Lỗi: ${vbEsc(e.message)}</div>`;return}
   // chưa gán = file dư chưa ghép + chữ ký đã lưu (kho chung) của người chưa có trong danh sách công ty này
   vbCkDu=(vbCkDs.du||[]).map(d=>Object.assign({loai:'du'},d)).concat((vbCkDs.da_luu||[]).map(d=>Object.assign({loai:'luu'},d)));
-  vbCkMuc=[vbCkDs.giam_doc].concat(vbCkDs.nhan_vien||[]);     // thao tác theo CHỈ SỐ (tên có dấu ' không làm hỏng onclick)
+  vbCkMuc=[vbCkDs.giam_doc].concat(vbCkDs.chu_so_huu?[vbCkDs.chu_so_huu]:[],vbCkDs.nhan_vien||[]);     // thao tác theo CHỈ SỐ (tên có dấu ' không làm hỏng onclick)
   const dong=(m,i)=>`<tr>
-    <td style="padding:5px 8px;border:1px solid #ddd">${i===0?'<b>Giám đốc / người đại diện</b><br>':''}${vbEsc(m.ten)}${m.ma?` <span class="hint">(${vbEsc(m.ma)})</span>`:''}<div class="hint">${vbEsc(m.chuc_vu||'')}</div></td>
+    <td style="padding:5px 8px;border:1px solid #ddd">${i===0?'<b>Giám đốc / người đại diện</b><br>':(m.la_cs?'<b>Chủ sở hữu / chủ công ty</b><br>':'')}${vbEsc(m.ten)}${m.ma?` <span class="hint">(${vbEsc(m.ma)})</span>`:''}<div class="hint">${vbEsc(m.chuc_vu||'')}</div></td>
     <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;min-width:170px;background:#fff">${m.co_anh?`<img src="${m.anh}" style="max-height:44px;max-width:160px">`:'<span class="hint">chưa có</span>'}</td>
     <td style="padding:5px 8px;border:1px solid #ddd;text-align:center"><input type="checkbox" ${m.xac_nhan?'checked':''} ${m.co_anh?'':'disabled'} onchange="vbCkXacNhan(${i},this.checked)" title="Người này đã đồng ý lưu và sử dụng chữ ký trên văn bản của công ty"></td>
     <td style="padding:5px 8px;border:1px solid #ddd;white-space:nowrap">
@@ -5193,10 +5195,11 @@ function vbCkKhopTen(tenFile,muc){
   const n=vbCkKhongDau(goc).replace(/[_\-.]+/g,' ').replace(/\s+/g,' ').trim();
   const toks=n.split(/[^a-z0-9]+/).filter(Boolean);
   if(/\bgiam doc\b/.test(n)||toks.includes('gd'))return 0;
+  if(/\bchu so huu\b|\bchu cong ty\b/.test(n)||toks.includes('cs')){const k=muc.findIndex(m=>m.la_cs);if(k>=0)return k}
   // mã NV: khớp cả mã đầy đủ ("2-001" khi tên file chứa 2-001) lẫn mã gốc ("2") của mã đổi phiên bản
-  const cMa=[];muc.forEach((m,i)=>{if(i===0)return;const ma=vbCkKhongDau(m.ma).trim(),goc=ma.replace(/-\d{3}$/,'');if(ma&&(toks.includes(ma)||toks.includes(goc)||n.split(/[^a-z0-9-]+/).includes(ma)))cMa.push(i)});
+  const cMa=[];muc.forEach((m,i)=>{if(i===0||m.la_cs)return;const ma=vbCkKhongDau(m.ma).trim(),goc=ma.replace(/-\d{3}$/,'');if(ma&&(toks.includes(ma)||toks.includes(goc)||n.split(/[^a-z0-9-]+/).includes(ma)))cMa.push(i)});
   if(cMa.length===1)return cMa[0];
-  const cTen=[];muc.forEach((m,i)=>{if(i===0)return;const t=vbCkKhongDau(m.ten).replace(/\s+/g,' ').trim();if(t&&n.includes(t))cTen.push([i,t.length])});
+  const cTen=[];muc.forEach((m,i)=>{if(i===0||m.la_cs)return;const t=vbCkKhongDau(m.ten).replace(/\s+/g,' ').trim();if(t&&n.includes(t))cTen.push([i,t.length])});
   if(cTen.length===1)return cTen[0][0];
   if(cTen.length>1){cTen.sort((a,b)=>b[1]-a[1]);if(cTen[0][1]>cTen[1][1])return cTen[0][0]}
   return -1;
@@ -5295,7 +5298,7 @@ async function vbCkGanDu(i){
 function vbCkTuDongChon(){
   const chuan=t=>vbCkKhongDau(t).replace(/\s+/g,' ').trim();
   const dung=new Set(vbCkDu.map(d=>vbCkDuChonCuaDong(d)).filter(j=>j>=0));
-  const demTenNv={};vbCkMuc.forEach((m,j)=>{if(j>0){const t=chuan(m.ten);if(t)demTenNv[t]=(demTenNv[t]||0)+1}});
+  const demTenNv={};vbCkMuc.forEach((m,j)=>{if(j>0&&!m.la_cs){const t=chuan(m.ten);if(t)demTenNv[t]=(demTenNv[t]||0)+1}});
   const demTenCk={};vbCkDu.forEach(d=>{if(d.loai==='luu'){const t=chuan(d.ten);demTenCk[t]=(demTenCk[t]||0)+1}});
   let so=0;
   vbCkDu.forEach(d=>{
@@ -5303,7 +5306,7 @@ function vbCkTuDongChon(){
     let j=-1;
     if(d.loai==='luu'){
       const t=chuan(d.ten);
-      if(t&&demTenNv[t]===1&&demTenCk[t]===1)j=vbCkMuc.findIndex((m,k)=>k>0&&chuan(m.ten)===t);
+      if(t&&demTenNv[t]===1&&demTenCk[t]===1)j=vbCkMuc.findIndex((m,k)=>k>0&&!m.la_cs&&chuan(m.ten)===t);
     }else j=vbCkKhopTen(d.ten,vbCkMuc);
     if(j>=0&&vbCkMuc[j]&&!vbCkMuc[j].co_anh&&!dung.has(j)){vbCkDuChon[vbCkDuKhoa(d)]=vbCkMuc[j].khoa;dung.add(j);so++}
   });
