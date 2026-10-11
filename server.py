@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-11.150"
+APP_BUILD = "2026-10-11.151"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -40599,6 +40599,12 @@ _TVPL_TD = {"lock": threading.Lock(), "lan_mo_cuoi": 0.0, "nghi_den": 0.0, "loi_
 _TVPL_KHOANG_CACH_GIAY = (4.0, 5.5)
 _TVPL_NGHI_KHI_BI_CHAN_GIAY = 900
 _TVPL_NGUONG_TAT = 5
+# TẠM TẮT (KHÔNG xoá code) khỏi chuỗi tự động: chẩn đoán trên máy người dùng (bản .150) cho thấy
+# thuvienphapluat.vn CHẶN HẲN truy cập tự động ("Sorry, you have been blocked ... using a security
+# service") — không phải trang kiểm tra tự qua được. Phần mềm KHÔNG tìm cách vượt lớp bảo vệ của trang;
+# để bật thì mỗi MST masothue.com không tra được lại tốn thêm 1 lượt mở trang bị chặn vô ích.
+# /api/chan-doan-mst-tvpl vẫn dùng được để kiểm tra lại; đổi False để đưa lại vào chuỗi.
+_TVPL_TAM_DUNG = True
 
 _JS_TVPL_DOC = r"""
 var mst = arguments[0];
@@ -41061,7 +41067,7 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         return {"trang_thai": "", "canh_bao": None,
                "ly_do_loi": ("Hết ngân sách thời gian tra MST trong lượt xuất Excel này"
                              if chi_dung_cache else
-                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (không tra được qua cả masothue.com/thuvienphapluat.vn/"
+                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (không tra được qua cả masothue.com/"
                              "tracuunnt.gdt.gov.vn/XInvoice) để tránh treo lâu — sẽ tự thử lại ở lượt "
                              "xuất Excel sau")}
 
@@ -41104,8 +41110,9 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         else:
             loi_cac_nguon.append(f"masothue.com: {kq_masothue[3]}")
 
-    # 1b) thuvienphapluat.vn qua Chrome ẩn — dự phòng khi masothue.com không tra được.
-    if not thanh_cong:
+    # 1b) thuvienphapluat.vn qua Chrome ẩn — dự phòng khi masothue.com không tra được (đang tạm tắt:
+    #     _TVPL_TAM_DUNG — trang chặn truy cập tự động).
+    if not thanh_cong and not _TVPL_TAM_DUNG:
         kq_tvpl = _tra_cuu_mst_qua_tvpl_trinh_duyet(mst_c, timeout)
         if kq_tvpl is not None:
             if kq_tvpl[0]:

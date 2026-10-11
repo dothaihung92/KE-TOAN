@@ -76,6 +76,14 @@ server._mst_cache_doc_trong_ngay = lambda m: None
 server._mst_cache_ghi = lambda *a: ghi.append(a)
 server._lay_danh_sach_xinvoice_keys = lambda: []
 try:
+    # mặc định TẮT khỏi chuỗi (trang chặn truy cập tự động) -> không gọi tới nguồn này
+    assert server._TVPL_TAM_DUNG is True
+    goi = []
+    server._tra_cuu_mst_qua_tvpl_trinh_duyet = lambda m, t: goi.append(m) or (True, "Đang hoạt động", False, None)
+    kq = server._tra_cuu_trang_thai_mst(MST)
+    assert goi == [] and kq["canh_bao"] is None and "thuvienphapluat" not in kq.get("ly_do_loi", ""), kq
+    server._TVPL_TAM_DUNG = False
+    server._tra_cuu_mst_qua_tvpl_trinh_duyet = lambda m, t: (True, "Tạm ngừng kinh doanh có thời hạn", True, None)
     kq = server._tra_cuu_trang_thai_mst(MST)
     assert kq == {"trang_thai": "Tạm ngừng kinh doanh có thời hạn", "canh_bao": True}, kq
     assert ghi and ghi[0][0] == MST
@@ -85,6 +93,7 @@ try:
 finally:
     (server._tra_cuu_mst_qua_masothue_trinh_duyet, server._tra_cuu_mst_qua_tvpl_trinh_duyet,
      server._mst_cache_doc_trong_ngay, server._mst_cache_ghi, server._lay_danh_sach_xinvoice_keys) = goc
-print("PASS 5: masothue.com không tra được -> dùng thuvienphapluat.vn; lỗi thì ghi rõ lý do.")
+    server._TVPL_TAM_DUNG = True
+print("PASS 5: mặc định tắt (trang chặn tự động); khi bật: masothue.com không tra được -> dùng thuvienphapluat.vn.")
 
 print("\nALL DONE")
