@@ -99,7 +99,11 @@ than = urllib.parse.unquote(bm[len("javascript:"):])
 assert "navigator.clipboard" in than and "querySelectorAll('tr')" in than
 assert "contentDocument" in than and "chan_doan" in than    # đọc cả khung con (iframe) cùng nguồn + báo chẩn đoán
 assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
-assert "fetch(" not in than and "XMLHttpRequest" not in than and ".submit(" not in than and ".click()" not in than
+# tự đọc mọi khối trong menu "KHỐI DỮ LIỆU" (dừng ở "VĂN BẢN ĐÍNH KÈM") CHỈ bằng GET trong phiên của người dùng
+assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "credentials: 'same-origin'" in than
+assert "method" not in than and "POST" not in than and "XMLHttpRequest" not in than
+assert ".submit(" not in than and ".click()" not in than and "__doPostBack(" not in than
+assert "javascript:" in than and "cam(t)" in than                       # bỏ link javascript:/postback và link xoá/nộp/gửi...
 print("PASS 4: mã bookmark chỉ đọc trang và copy, không gửi/bấm gì.")
 
 # 5) giao diện: bỏ TMĐT + bỏ Chrome tự động; có 2 cách nhập

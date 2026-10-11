@@ -4292,7 +4292,7 @@ async function moGpkd(){
         <div style="color:#c0392b;margin:4px 0">⚠️ KHÔNG dán mã vào thanh địa chỉ (ô gõ trang web) — Chrome sẽ tự bỏ chữ <code>javascript:</code> và chuyển sang tìm Google. Phải dán vào ô <b>URL của dấu trang</b>.</div>
         <a href="${gpkdEsc(bm)}" onclick="toast('Hãy KÉO nút này lên thanh dấu trang, không bấm ở đây','err');return false" style="display:inline-block;padding:4px 10px;border:1px solid #b5502d;border-radius:8px;color:#b5502d;font-weight:700;text-decoration:none">📋 Lấy dữ liệu GPKD</a>
         <button class="btn ghost sm" onclick="gpkdCopyMa()">Copy mã</button></div>
-      <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở từng khối hồ sơ (Thông tin chung, Địa chỉ, Ngành nghề, Thành viên…) → bấm nút bookmark → dán vào ô dưới, bấm "Thêm".</div>
+      <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở <b>1 khối bất kỳ</b> của hồ sơ (có menu "KHỐI DỮ LIỆU" bên trái) → bấm nút bookmark: nút <b>tự đọc lần lượt TẤT CẢ các khối</b> trong menu, hiện bảng kết quả → bấm <b>"Copy dữ liệu"</b> → dán vào ô dưới, bấm "Thêm".</div>
       <textarea id="gpkdDan" rows="3" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:monospace;font-size:12px" placeholder="Dán dữ liệu đã copy ở đây (Ctrl+V)"></textarea>
       <button class="btn sm" style="margin-top:6px" onclick="gpkdThemDan()">➕ Thêm</button>
     </fieldset>
@@ -4324,8 +4324,10 @@ function gpkdThem(k){
 }
 function gpkdThemDan(){
   const t=document.getElementById('gpkdDan').value.trim();if(!t)return;
-  let n=0;
-  for(const doan of t.split(/\n(?=\s*\{)/)){try{if(gpkdThem(JSON.parse(doan)))n++}catch(e){}}
+  let n=0, ds=null;
+  try{const v=JSON.parse(t);ds=Array.isArray(v)?v:[v]}catch(e){}       // nút bookmark mới: 1 danh sách nhiều khối
+  if(!ds){ds=[];for(const doan of t.split(/\n(?=\s*[\[{])/)){try{const v=JSON.parse(doan);ds.push(...(Array.isArray(v)?v:[v]))}catch(e){}}}
+  for(const k of ds){if(gpkdThem(k))n++}
   if(!n){toast('Không đọc được dữ liệu — hãy dán đúng đoạn nút bookmark đã copy','err');return}
   document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã thêm '+n+' khối','ok');
 }
