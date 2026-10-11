@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-11.155"
+APP_BUILD = "2026-10-11.156"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44620,6 +44620,8 @@ async def mo_cua_so_app(request: Request):
 #    Chỉ ĐỌC, không gửi gì lên cổng.
 # ============================================================
 _JS_DKKD_DOC = r"""
+function quet(document) {
+
 function sach(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
 function oNhap(o) { return [].slice.call(o.querySelectorAll('input, select, textarea')).filter(function (e) { return !/^(hidden|button|submit|image|password|reset)$/i.test(e.type || ''); }); }
 function giaTriO(e) {
@@ -44655,8 +44657,8 @@ function tenBang(t) {
   return 'Bảng';
 }
 function mauDong(r) {
-  var m = (getComputedStyle(r).backgroundColor || '').match(/\d+/g);
-  if (!m || (m.length > 3 && +m[3] === 0)) { var c = r.querySelector('td'); m = c ? (getComputedStyle(c).backgroundColor || '').match(/\d+/g) : null; }
+  var m = ((document.defaultView || window).getComputedStyle(r).backgroundColor || '').match(/\d+/g);
+  if (!m || (m.length > 3 && +m[3] === 0)) { var c = r.querySelector('td'); m = c ? ((document.defaultView || window).getComputedStyle(c).backgroundColor || '').match(/\d+/g) : null; }
   if (!m || (m.length > 3 && +m[3] === 0)) return '';
   var R = +m[0], G = +m[1], B = +m[2];
   if (R > 170 && G < 120 && B < 120) return 'đỏ';
@@ -44709,7 +44711,25 @@ var khoi = '';
   return false;
 });
 if (!khoi) { var h = document.querySelector('h1, h2, h3, .title, .page-title, legend'); if (h) khoi = sach(h.innerText).slice(0, 120); }
-return {dkkd: 1, url: location.href, tieu_de: document.title || '', khoi: khoi, cap: cap};
+
+var bang = document.querySelectorAll('table').length;
+return {cap: cap, khoi: khoi, bang: bang};
+}
+var ds = [document], khongDoc = 0;
+for (var i = 0; i < ds.length && i < 30; i++) {
+  [].slice.call(ds[i].querySelectorAll('iframe, frame')).forEach(function (f) {
+    try { if (f.contentDocument && f.contentDocument.body) ds.push(f.contentDocument); else khongDoc++; } catch (e) { khongDoc++; }
+  });
+}
+var cap = [], daCo = {}, khoi = '', bang = 0;
+ds.forEach(function (d) {
+  var r = quet(d);
+  bang += r.bang;
+  if (!khoi && r.khoi) khoi = r.khoi;
+  r.cap.forEach(function (c) { var k = c[0] + '\u0001' + c[1]; if (!daCo[k]) { daCo[k] = 1; cap.push(c); } });
+});
+return {dkkd: 1, url: location.href, tieu_de: document.title || '', khoi: khoi, cap: cap,
+        chan_doan: {khung: ds.length - 1, khung_khong_doc_duoc: khongDoc, bang: bang}};
 """
 
 
@@ -44717,7 +44737,7 @@ def dkkd_bookmarklet():
     """Đoạn javascript: cho nút bookmark — đọc trang đang mở, copy JSON vào clipboard."""
     import urllib.parse as _up
     than = ("(function(){var r=(function(){" + _JS_DKKD_DOC + "})();var s=JSON.stringify(r);"
-            "function xong(){alert('Đã copy '+r.cap.length+' trường của khối \"'+(r.khoi||r.tieu_de)+'\" — dán vào phần mềm (Hỗ trợ thay đổi GPKD)');}"
+            "function xong(){var c=r.chan_doan||{};alert('Đã copy '+r.cap.length+' trường của khối \"'+(r.khoi||r.tieu_de)+'\" — dán vào phần mềm (Hỗ trợ thay đổi GPKD).\\n(Chẩn đoán: '+c.bang+' bảng, '+c.khung+' khung con'+(c.khung_khong_doc_duoc?', '+c.khung_khong_doc_duoc+' khung KHÔNG đọc được':'')+')');}"
             "if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(xong,function(){prompt('Copy đoạn này rồi dán vào phần mềm:',s);});}"
             "else{prompt('Copy đoạn này rồi dán vào phần mềm:',s);}})();")
     than = " ".join(x.strip() for x in than.splitlines() if x.strip() and not x.strip().startswith("//"))

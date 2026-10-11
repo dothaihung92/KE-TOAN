@@ -97,6 +97,7 @@ bm = server.dkkd_bookmarklet()
 assert bm.startswith("javascript:") and " " not in bm
 than = urllib.parse.unquote(bm[len("javascript:"):])
 assert "navigator.clipboard" in than and "querySelectorAll('tr')" in than
+assert "contentDocument" in than and "chan_doan" in than    # đọc cả khung con (iframe) cùng nguồn + báo chẩn đoán
 assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
 assert "fetch(" not in than and "XMLHttpRequest" not in than and ".submit(" not in than and ".click()" not in than
 print("PASS 4: mã bookmark chỉ đọc trang và copy, không gửi/bấm gì.")
