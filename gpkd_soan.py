@@ -1078,8 +1078,8 @@ def _bong_vien_scan(img):
 
     def duoi(d, rong, manh):
         return manh * np.exp(-d / rong)
-    toi = (duoi(y, 0.012, 0.10) + duoi(1 - y, 0.010, 0.07) + duoi(1 - x, 0.012, 0.08) + duoi(x, 0.005, 0.03) + duoi(1 - x, 0.045, 0.03))
-    a *= (1 - np.clip(toi, 0, 0.2))[..., None]
+    toi = (duoi(y, 0.014, 0.15) + duoi(1 - y, 0.012, 0.11) + duoi(1 - x, 0.016, 0.17) + duoi(x, 0.006, 0.05) + duoi(1 - x, 0.06, 0.07))
+    a *= (1 - np.clip(toi, 0, 0.32))[..., None]
     from PIL import Image
     return Image.fromarray(np.clip(a, 0, 255).astype("uint8"))
 
