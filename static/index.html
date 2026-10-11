@@ -4495,6 +4495,8 @@ const SS_TRUONG={
   dai_dien:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['chuc_danh','Chức danh (vd Giám đốc)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']],
   chu_so_huu_moi:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']]
 };
+SS_TRUONG.hien_tai=[['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp Giấy chứng nhận ĐKDN'],['ngay_dieu_le','Ngày thông qua Điều lệ (dd/mm/yyyy)']];
+SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
 const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
   ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['chu_so_huu','Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ mới là cá nhân)','chu_so_huu_moi']];
 let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=null;
@@ -4525,6 +4527,10 @@ function ssThuThap(){
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
   du.chu_so_huu_moi={};SS_TRUONG.chu_so_huu_moi.forEach(([k])=>du.chu_so_huu_moi[k]=gt('chu_so_huu_moi',k));
+  ['hien_tai','uy_quyen'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
+  const ck=id=>!!document.getElementById(id)?.checked;
+  du.tao_quyet_dinh=ck('ss_tao_quyet_dinh');du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.de_nghi_xac_nhan=ck('ss_de_nghi_xac_nhan');
+  du.dn.ngay_tay=document.getElementById('ss_dn_ngay_lap')?.dataset.tay==='1';
   return du;
 }
 function ssLuuTam(){try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap(),mr:ssMauRieng.filter(x=>x.chon).map(x=>x.ten)}))}catch(e){}}
@@ -4566,10 +4572,14 @@ async function moSoanGpkd(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1. Thông tin doanh nghiệp (hiện tại)</legend>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px">
         ${[['ten','Tên doanh nghiệp'],['ma_so','Mã số doanh nghiệp / MST'],['loai_hinh','Loại hình (vd Công ty TNHH một thành viên)'],['co_quan','Kính gửi (cơ quan đăng ký kinh doanh)'],['dia_danh','Địa danh (vd TP. Hồ Chí Minh)'],['ngay_lap','Ngày lập hồ sơ (dd/mm/yyyy, để trống nếu ký sau)']].map(([k,n])=>
-          `<label style="font-size:12px;display:flex;flex-direction:column">${n}<input id="ss_dn_${k}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}
+          `<label style="font-size:12px;display:flex;flex-direction:column">${n}<input id="ss_dn_${k}" oninput="${k==='ngay_lap'?'this.dataset.tay=\'1\';':''}ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}
       </div>
       <button class="btn ghost sm" style="margin-top:8px" onclick="ssLayTuGom()">↧ Lấy từ hồ sơ đã gom (mục "Hỗ trợ thay đổi GPKD")</button>
       <span class="hint" id="ssHtGhi" style="margin-left:8px"></span>
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1b. Thông tin hiện tại (dùng cho Quyết định và Giấy ủy quyền)</legend>
+      ${ssCacO('hien_tai')}
+      <div class="hint">Lấy từ hồ sơ đã gom của công ty này; ô nào thiếu thì nhập tay (không có thì để trống — văn bản giữ dấu chấm).</div>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Nội dung thay đổi (chọn một hoặc nhiều)</legend>
       ${SS_LOAI.map(l=>`<label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ssL_${l[0]}" onchange="ssHienCacMuc()"> <b>${l[1]}</b></label>
@@ -4579,6 +4589,13 @@ async function moSoanGpkd(){
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
           ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
         </div>`).join('')}
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_quyet_dinh" checked onchange="ssLuuTam()"> Soạn <b>Quyết định của chủ sở hữu / Nghị quyết</b> về nội dung thay đổi</label>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_de_nghi_xac_nhan" checked onchange="ssLuuTam()"> Đánh dấu "Đề nghị cấp Giấy xác nhận thay đổi nội dung đăng ký doanh nghiệp" trong Giấy đề nghị (Mẫu 12)</label>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_uy_quyen" onchange="document.getElementById('ssUq').style.display=this.checked?'block':'none';ssLuuTam()"> Soạn <b>Giấy ủy quyền</b> nộp hồ sơ và nhận kết quả</label>
+      <div id="ssUq" style="display:none;margin:6px 0 0 26px;padding:8px 10px;border-left:3px solid #cfe5da">${ssCacO('uy_quyen')}
+        <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Phần mềm không ký thay: hai bên tự ký.</div></div>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Mẫu riêng của bạn (Word .docx, tuỳ chọn)</legend>
       <div class="hint" style="margin-top:0">Gửi file Word có chữ <code>{{tên_biến}}</code> (vd <code>{{dn_ten_hoa}}</code>, <code>{{dd_ho_ten_hoa}}</code>) — phần mềm sẽ thay bằng dữ liệu ở trên và đưa vào gói hồ sơ (vd Quyết định của chủ sở hữu, Biên bản họp).</div>
@@ -4598,17 +4615,32 @@ async function moSoanGpkd(){
     ['ten','dia_chi','von'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     Object.entries((du.dai_dien||[{}])[0]||{}).forEach(([k,v])=>dat('ss_dai_dien_'+k,v));
     Object.entries(du.chu_so_huu_moi||{}).forEach(([k,v])=>dat('ss_chu_so_huu_moi_'+k,v));
+    ['hien_tai','uy_quyen'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
+    const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
+    ck('ss_tao_quyet_dinh',du.tao_quyet_dinh!==undefined?du.tao_quyet_dinh:true);ck('ss_de_nghi_xac_nhan',du.de_nghi_xac_nhan!==undefined?du.de_nghi_xac_nhan:true);ck('ss_tao_uy_quyen',du.tao_uy_quyen);
+    const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
+    const nl=document.getElementById('ss_dn_ngay_lap');if(nl&&(du.dn||{}).ngay_tay)nl.dataset.tay='1';
     (du.loai||[]).forEach(k=>{const e=document.getElementById('ssL_'+k);if(e)e.checked=true});
     const dc=document.getElementById('ss_dia_chi_doi_thue');if(dc)dc.checked=!!(du.dia_chi||{}).doi_thue;
     ssNganh=du.nganh||{them:[],bo:[],sua:[]};
     const mGom=(ssHienTrang||{}).ma_so;
     if(mGom&&(du.dn||{}).ma_so&&du.dn.ma_so!==mGom)ssLayTuGom(true,true);   // bản nháp cũ của MST khác -> lấy lại theo hồ sơ vừa gom
   }else{ssNganh={them:[],bo:[],sua:[]};ssLayTuGom(true)}
+  const nl=document.getElementById('ss_dn_ngay_lap');if(nl&&nl.dataset.tay!=='1')nl.value=ssHomNay();   // ngày lập mặc định = ngày hiện tại
+  ssDienHienTai(false);
   ssHienGoiY();ssVeNganh();ssHienCacMuc();
   try{const r=await api('/api/gpkd-soan/mau');ssBienMau=r.bien||{};
     ssMauRieng=(r.mau_rieng||[]).map(t=>({ten:t,chon:!!(luu&&(luu.mr||[]).includes(t))}));
     document.getElementById('ssBien').innerHTML=Object.entries(ssBienMau).map(([k,v])=>`<code>{{${k}}}</code> — ${ssEsc(v)}`).join('<br>');ssVeMauRieng();}
   catch(e){document.getElementById('ssMauRieng').innerHTML=`<div class="hint" style="color:#c00">${ssEsc(e.message)}</div>`}
+}
+function ssHomNay(){const t=new Date(),z=n=>String(n).padStart(2,'0');return z(t.getDate())+'/'+z(t.getMonth()+1)+'/'+t.getFullYear()}
+function ssDienHienTai(ghi){
+  const h=ssHienTrang||{},dc=h.dia_chi||{},dd=(h.dai_dien||[])[0]||{};
+  const dat=(id,v)=>{const e=document.getElementById(id);if(e&&v&&(ghi||!e.value))e.value=v};
+  dat('ss_hien_tai_dd_ho_ten',dd.ho_ten);dat('ss_hien_tai_dd_chuc_danh',dd.chuc_danh);
+  dat('ss_hien_tai_dia_chi',[dc.so_nha,dc.xa,dc.tinh].filter(Boolean).join(', '));
+  const tinh=dc.tinh||'';dat('ss_dn_dia_danh',/^(hồ chí minh|hà nội|hải phòng|đà nẵng|cần thơ|huế)$/i.test(tinh.replace(/^(thành phố|tp\.?)\s*/i,'').trim())?'TP. '+tinh.replace(/^(thành phố|tp\.?)\s*/i,'').trim():tinh);
 }
 function ssHienGoiY(){
   const h=ssHienTrang||{},dc=h.dia_chi||{};
@@ -4620,7 +4652,7 @@ function ssHienGoiY(){
 }
 function ssLayTuGom(im,ghiDe){
   ssHienTrang=ssHienTrangTuGom();const h=ssHienTrang,ghi=!im||ghiDe,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v&&(ghi||!e.value))e.value=v};
-  dat('ss_dn_ten',h.ten);dat('ss_dn_ma_so',h.ma_so);dat('ss_dn_loai_hinh',h.loai_hinh);
+  dat('ss_dn_ten',h.ten);dat('ss_dn_ma_so',h.ma_so);dat('ss_dn_loai_hinh',h.loai_hinh);ssDienHienTai(ghi);
   ssHienGoiY();if(ghi&&h.von){const cu=document.getElementById('ss_von_cu'),n=String(h.von).replace(/[^\d]/g,'');if(cu&&n)cu.value=n}
   ssLuuTam();
   const cty=(typeof companies!=='undefined'?companies:[]).find(c=>c.id===current),lech=cty&&cty.mst&&h.ma_so&&String(cty.mst).replace(/\D/g,'')!==String(h.ma_so).replace(/\D/g,'');

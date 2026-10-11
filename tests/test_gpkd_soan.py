@@ -62,7 +62,8 @@ for kv in ("Kính gửi: (Cơ quan đăng ký kinh doanh cấp tỉnh) Sở Tài
     assert kv in t, kv
 assert "tiếng nước ngoài sau khi thay đổi (nếu có): …" in t                  # không có dữ liệu -> giữ chấm
 assert "Điện thoại: …" in t and "Website (nếu có): …" in t
-for bo in ("THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ", "THAY ĐỔI VỐN ĐẦU TƯ", "THAY ĐỔI THÀNH VIÊN CÔNG TY", "THAY ĐỔI CỔ ĐÔNG", "HIỆU ĐÍNH THÔNG TIN",
+assert "THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ" in t                              # đổi địa chỉ nhận thông báo thuế -> có phần Thông báo thay đổi thông tin đăng ký thuế
+for bo in ("THAY ĐỔI VỐN ĐẦU TƯ", "THAY ĐỔI THÀNH VIÊN CÔNG TY", "THAY ĐỔI CỔ ĐÔNG", "HIỆU ĐÍNH THÔNG TIN",
            "Thông tin về doanh nghiệp bị sáp nhập", "Thông tin về cổ phần", "Đăng ký thay đổi phần vốn góp"):
     assert bo not in t, bo                                                    # mục không chọn / không áp dụng (TNHH 1TV) bị bỏ
 assert "ĐĂNG KÝ THAY ĐỔI ĐỊA CHỈ TRỤ SỞ CHÍNH" in t and "THÔNG BÁO THAY ĐỔI NGÀNH" in t and "Doanh nghiệp cam kết hoàn toàn chịu trách nhiệm" in t
@@ -194,3 +195,49 @@ except server.HTTPException as e:
     assert e.status_code == 400
 assert "gpkdNap()" in _h and "💾 Lưu dữ liệu" in _h and "localStorage.getItem('gpkdKhoi')" not in _h
 print("PASS: dữ liệu GPKD lưu riêng từng công ty; Soạn hồ sơ chỉ dùng dữ liệu của công ty đang chọn.")
+
+
+# --- Hồ sơ đổi địa chỉ trụ sở (theo bộ hồ sơ mẫu của người dùng): Mẫu 12 (TT121/2026) + thông báo thuế + Quyết định + Giấy ủy quyền ---
+import io as _io
+import zipfile as _zf
+import datetime as _dt
+import docx as _docx
+import gpkd_soan as _g
+
+_du = {"loai": ["dia_chi"], "tao_uy_quyen": True, "de_nghi_xac_nhan": True,
+       "dn": {"ten": "Công ty TNHH K2 Onigiri", "ma_so": "0319239547", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên",
+              "dia_danh": "TP.HCM", "co_quan": "Phòng Đăng ký kinh doanh Thành phố Hồ Chí Minh"},
+       "dia_chi": {"so_nha": "28 đường số 3 KDC Khang An", "xa": "Phường Long Trường", "tinh": "Thành phố Hồ Chí Minh", "doi_thue": True},
+       "hien_tai": {"dd_ho_ten": "Đỗ Thị Ánh Tuyết", "dd_chuc_danh": "Giám đốc", "dia_chi": "194 Đường D, Phường Bình Trưng, Thành phố Hồ Chí Minh"},
+       "uy_quyen": {"ho_ten": "Nguyễn Văn B", "cong_viec_tai": "Sở Tài chính TP.HCM"}}
+_b, _ten, _cb = _g.tao_ho_so(_du)
+_z = _zf.ZipFile(_io.BytesIO(_b))
+_ds = _z.namelist()
+assert any(n.startswith("Mau12") for n in _ds) and any(n.startswith("Quyet_dinh") for n in _ds) and any(n.startswith("Giay_uy_quyen") for n in _ds), _ds
+_hom_nay = _dt.date.today()
+_chuoi_ngay = f"ngày {_hom_nay.day} tháng {_hom_nay.month} năm {_hom_nay.year}"
+
+
+def _toan_van(n):
+    d = _docx.Document(_io.BytesIO(_z.read(n)))
+    return "\n".join([p.text for p in d.paragraphs] + [c.text for t in d.tables for r in t.rows for c in r.cells])
+
+
+_m12 = _toan_van([n for n in _ds if n.startswith("Mau12")][0])
+assert "CÔNG TY TNHH K2 ONIGIRI" in _m12 and _chuoi_ngay in _m12, "Mẫu 12: tên ở tiêu đề + ngày lập mặc định = hôm nay"
+assert "THÔNG BÁO THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ" in _m12 and "Địa chỉ nhận thông báo thuế:" in _m12 and _m12.count("28 đường số 3 KDC Khang An") >= 2
+assert "☒ Đề nghị Quý Cơ quan cấp Giấy xác nhận" in _m12 and "☒ Đồng thời thay đổi địa chỉ nhận thông báo thuế" in _m12
+_qd = _toan_van([n for n in _ds if n.startswith("Quyet_dinh")][0])
+assert "QUYẾT ĐỊNH" in _qd and "CHỦ SỞ HỮU" in _qd and "từ 194 Đường D" in _qd and "đến địa chỉ 28 đường số 3 KDC Khang An" in _qd and _chuoi_ngay in _qd
+assert "ĐỖ THỊ ÁNH TUYẾT" in _qd
+_uq = _toan_van([n for n in _ds if n.startswith("Giay_uy_quyen")][0])
+assert "GIẤY ỦY QUYỀN" in _uq and "NGUYỄN VĂN B" in _uq and "0319239547" in _uq and "194 Đường D" in _uq and "Sở Tài chính TP.HCM" in _uq
+assert "Nộp hồ sơ và nhận kết quả đăng ký doanh nghiệp tại Phòng Đăng ký kinh doanh" in _uq and "Ngày" in _uq
+assert any("thiếu ngày sinh" in c for c in _cb)
+# không đổi địa chỉ thuế -> không có phần thông báo thuế; không ủy quyền -> không có giấy ủy quyền
+_du2 = dict(_du, tao_uy_quyen=False, dia_chi=dict(_du["dia_chi"], doi_thue=False))
+_z2 = _zf.ZipFile(_io.BytesIO(_g.tao_ho_so(_du2)[0]))
+assert not any(n.startswith("Giay_uy_quyen") for n in _z2.namelist())
+_m12b = "\n".join(p.text for p in _docx.Document(_io.BytesIO(_z2.read([n for n in _z2.namelist() if n.startswith("Mau12")][0]))).paragraphs)
+assert "THÔNG BÁO THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ" not in _m12b
+print("PASS: hồ sơ đổi địa chỉ — Mẫu 12 + thông báo thuế + Quyết định + Giấy ủy quyền, ngày lập mặc định hôm nay.")
