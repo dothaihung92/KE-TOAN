@@ -121,6 +121,7 @@ ns['_goi_1_lan_xinvoice'] = _fake_xinvoice
 # masothue.com (qua Chrome ẩn) — None = không mở được Chrome, bỏ qua nguồn này; hành vi thật có
 # test riêng ở test_tra_mst_qua_masothue_trinh_duyet.py.
 ns['_tra_cuu_mst_qua_masothue_trinh_duyet'] = lambda mst_c, timeout: None
+ns['_tra_cuu_mst_qua_tvpl_trinh_duyet'] = lambda mst_c, timeout: None   # thuvienphapluat.vn: coi như không mở được Chrome
 # Lưu kết quả trong ngày có test riêng (test_mst_cache_trong_ngay.py) — ở đây tắt để các test
 # orchestration luôn tra qua nguồn (không dính kết quả đã lưu).
 ns['_mst_cache_doc_trong_ngay'] = lambda mst_c: None

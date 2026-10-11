@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-09.146"
+APP_BUILD = "2026-10-11.150"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -7031,6 +7031,28 @@ def chan_doan_mst_masothue(mst: str = "0315458241"):
         ket_luan = f"KHÔNG dùng được: {kq[3]}"
     return {"mst_tra": mst_c, "ket_luan": ket_luan, "trang_thai_do_duoc": kq[1], "canh_bao": kq[2],
             "ly_do_loi": kq[3], "thu_muc_anh_debug": os.path.join(_get_desktop_dir(), "masothue_debug")}
+
+
+@app.get("/api/chan-doan-mst-tvpl")
+def chan_doan_mst_tvpl(mst: str = "0316267842"):
+    """CHẨN ĐOÁN tra tình trạng MST qua thuvienphapluat.vn bằng Chrome ẩn — gọi THẲNG nguồn này. Thất bại
+    thì chụp màn hình trang ra Desktop/thuvienphapluat_debug/.
+    Dùng: mở http://127.0.0.1:8686/api/chan-doan-mst-tvpl?mst=0316267842"""
+    mst_c = _mst_tra_cuu(mst)
+    if not mst_c:
+        raise HTTPException(400, "MST không hợp lệ")
+    with _TVPL_TD["lock"]:
+        _TVPL_TD["loi_lien_tiep"] = 0       # chẩn đoán: luôn thử thật, kể cả khi đang tạm tắt do lỗi liên tiếp
+    kq = _tra_cuu_mst_qua_tvpl_trinh_duyet(mst_c, timeout=20, luu_anh_debug=True)
+    if kq is None:
+        kq = (False, "", None, f"KHÔNG dùng được: không mở được Chrome ẩn ({_TRACUUNNT_TD['loi_khoi_tao']})")
+        ket_luan = kq[3]
+    elif kq[0]:
+        ket_luan = f"DÙNG ĐƯỢC — dò ra tình trạng: '{kq[1]}' ({'CÓ cảnh báo (tô đỏ)' if kq[2] else 'bình thường'})"
+    else:
+        ket_luan = f"KHÔNG dùng được: {kq[3]}"
+    return {"mst_tra": mst_c, "ket_luan": ket_luan, "trang_thai_do_duoc": kq[1], "canh_bao": kq[2],
+            "ly_do_loi": kq[3], "thu_muc_anh_debug": os.path.join(_get_desktop_dir(), "thuvienphapluat_debug")}
 
 
 @app.get("/api/xem-captcha-tracuunnt")
@@ -40564,6 +40586,156 @@ def _tra_cuu_mst_qua_masothue_trinh_duyet(mst_c, timeout, luu_anh_debug=False):
     return kq
 
 
+# ═══ thuvienphapluat.vn QUA CHROME ẨN — nguồn DỰ PHÒNG thứ 2 (sau masothue.com) ═══
+# Người dùng yêu cầu thêm dò tình trạng MST qua trang thông tin MST của thuvienphapluat.vn
+# (dạng https://thuvienphapluat.vn/ma-so-thue/<ten-cong-ty>-mst-<MST>.html). Đường dẫn cần tên công
+# ty dạng không dấu nên: mở trang TÌM theo MST -> lấy link có "-mst-<MST>.html" -> mở trang đó. Chạy
+# qua CHÍNH Chrome ẩn dùng chung (khoá _TRACUUNNT_TD) như masothue.com để qua lớp chống bot của trang.
+# Chỉ đọc giá trị ngay sau nhãn "Tình trạng"/"Trạng thái" và đối chiếu MST trên trang/đường dẫn —
+# không quét từ khoá trên toàn trang (dễ bắt nhầm chữ "ngừng hoạt động" ở mục khác).
+_TVPL_URL_TIM = ("https://thuvienphapluat.vn/ma-so-thue/tra-cuu-ma-so-thue-doanh-nghiep"
+                 "?timtheo=ma-so-thue&tukhoa={mst}")
+_TVPL_TD = {"lock": threading.Lock(), "lan_mo_cuoi": 0.0, "nghi_den": 0.0, "loi_lien_tiep": 0, "ly_do_nghi": ""}
+_TVPL_KHOANG_CACH_GIAY = (4.0, 5.5)
+_TVPL_NGHI_KHI_BI_CHAN_GIAY = 900
+_TVPL_NGUONG_TAT = 5
+
+_JS_TVPL_DOC = r"""
+var mst = arguments[0];
+function sach(s) { return (s || '').replace(/[ \t\u00a0]+/g, ' ').trim(); }
+var body = document.body ? document.body.innerText : '';
+var kq = {tieu_de: document.title || '', url: location.href, chu: sach(body).replace(/\s+/g, ' ').slice(0, 600),
+          co_mst: body.indexOf(mst) >= 0, link: '', tinh_trang: '', nhan: '', cac_dong: []};
+var a = document.querySelectorAll('a[href]');
+for (var j = 0; j < a.length; j++) {
+  var h = (a[j].getAttribute('href') || '');
+  if (h.indexOf('mst-' + mst + '.html') >= 0 || h.indexOf('mst-' + mst + '-') >= 0) { kq.link = a[j].href; break; }
+}
+// Nhãn tình trạng: cùng dòng ("Tình trạng: Đang hoạt động" / ô bảng "Tình trạng<TAB>...") hoặc dòng kế.
+var dong = body.split('\n').map(sach).filter(function (x) { return x; });
+var re = /^(tình trạng( hoạt động)?|trạng thái( hoạt động| mst)?|status)\s*[:\-]?\s*(.*)$/i;
+for (var i = 0; i < dong.length; i++) {
+  var m = dong[i].match(re);
+  if (kq.cac_dong.length < 25 && /mã số thuế|tình trạng|trạng thái|tên/i.test(dong[i])) kq.cac_dong.push(dong[i].slice(0, 90));
+  if (!m || kq.tinh_trang) continue;
+  var gt = sach(m[4] || '');
+  if (!gt && i + 1 < dong.length) gt = dong[i + 1];
+  if (gt && gt.length <= 160) { kq.tinh_trang = gt; kq.nhan = m[1]; }
+}
+return kq;
+"""
+
+
+def _tvpl_ly_do_tam_dung():
+    with _TVPL_TD["lock"]:
+        nghi_den, ly_do, loi = _TVPL_TD["nghi_den"], _TVPL_TD["ly_do_nghi"], _TVPL_TD["loi_lien_tiep"]
+    if time.time() < nghi_den:
+        return f"{ly_do} — tạm dừng tra thuvienphapluat.vn tới {datetime.datetime.fromtimestamp(nghi_den).strftime('%H:%M')}"
+    if loi >= _TVPL_NGUONG_TAT:
+        return (f"Đã tạm tắt tra qua thuvienphapluat.vn (thất bại {_TVPL_NGUONG_TAT} lần liên tiếp) — "
+                f"sẽ tự thử lại ở lượt xuất Excel sau")
+    return ""
+
+
+def _tvpl_tam_nghi(ly_do):
+    with _TVPL_TD["lock"]:
+        _TVPL_TD["nghi_den"] = time.time() + _TVPL_NGHI_KHI_BI_CHAN_GIAY
+        _TVPL_TD["ly_do_nghi"] = ly_do
+    return _tvpl_ly_do_tam_dung()
+
+
+def _tvpl_dung_mst(kq, mst_c):
+    """Trang đang hiện thông tin của ĐÚNG mst_c: đường dẫn có '-mst-<MST>' hoặc nội dung trang có MST."""
+    return f"mst-{mst_c}" in str(kq.get("url") or "").lower()
+
+
+def _tvpl_mo_va_doc(drv, url, mst_c, gioi_han):
+    import random as _rd_tvpl
+    cho = _TVPL_TD["lan_mo_cuoi"] + _rd_tvpl.uniform(*_TVPL_KHOANG_CACH_GIAY) - time.time()
+    if cho > 0:
+        time.sleep(cho)
+    _TVPL_TD["lan_mo_cuoi"] = time.time()
+    drv.get(url)
+    het = time.time() + gioi_han
+    kq = {}
+    while True:
+        try:
+            kq = drv.execute_script(_JS_TVPL_DOC, mst_c) or {}
+        except Exception:
+            kq = {}
+        loai = _masothue_loai_trang(kq) if kq else "dang_kiem_tra"
+        if loai != "dang_kiem_tra" and (loai or kq.get("tinh_trang") or kq.get("link") or time.time() >= het - gioi_han / 2):
+            return kq
+        if time.time() >= het:
+            return kq
+        time.sleep(1.0)
+
+
+def _tvpl_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout):
+    """-> (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi)."""
+    gioi_han = max(20, timeout * 2)
+    kq = _tvpl_mo_va_doc(drv, _TVPL_URL_TIM.format(mst=mst_c), mst_c, gioi_han)
+    for buoc in range(2):
+        loai = _masothue_loai_trang(kq)
+        if loai == "gioi_han":
+            return False, "", None, _tvpl_tam_nghi("thuvienphapluat.vn đang giới hạn tốc độ (Too Many Requests)")
+        if loai == "bi_chan":
+            return False, "", None, _tvpl_tam_nghi(f"thuvienphapluat.vn chặn truy cập (trang báo: {kq.get('chu', '')[:150]!r})")
+        if loai == "dang_kiem_tra" or not kq:
+            return False, "", None, (f"trang kiểm tra chống bot của thuvienphapluat.vn không tự qua được sau "
+                                     f"{gioi_han}s (tiêu đề: {kq.get('tieu_de', '')!r})")
+        if _tvpl_dung_mst(kq, mst_c) and kq.get("tinh_trang"):
+            break
+        if buoc == 1 or not kq.get("link"):
+            break
+        kq = _tvpl_mo_va_doc(drv, kq["link"], mst_c, gioi_han)      # trang kết quả tìm -> mở đúng trang MST
+    chan_doan = (f"url: {kq.get('url', '')!r}, tiêu đề: {kq.get('tieu_de', '')!r}, các dòng đọc được: "
+                 f"{(kq.get('cac_dong') or [])[:10]!r}")
+    if not _tvpl_dung_mst(kq, mst_c):
+        return False, "", None, f"không tìm thấy trang thông tin của MST {mst_c} ({chan_doan})"
+    if not kq.get("tinh_trang"):
+        return False, "", None, f"không thấy mục 'Tình trạng' trên trang ({chan_doan}, nội dung: {kq.get('chu', '')[:200]!r})"
+    _, canh_bao = _phan_loai_trang_thai_mst(kq["tinh_trang"])
+    if canh_bao is None:
+        return False, "", None, f"tình trạng lạ chưa nhận diện được: '{kq['tinh_trang']}' ({chan_doan})"
+    return True, kq["tinh_trang"], canh_bao, None
+
+
+def _tra_cuu_mst_qua_tvpl_trinh_duyet(mst_c, timeout, luu_anh_debug=False):
+    """Tra 1 MST qua thuvienphapluat.vn bằng Chrome ẩn dùng chung. None = không mở được Chrome; ngược lại
+    (thanh_cong, trang_thai_goc, canh_bao, ly_do_loi). luu_anh_debug: chụp màn hình khi thất bại ra
+    Desktop/thuvienphapluat_debug/ (chỉ dùng qua /api/chan-doan-mst-tvpl)."""
+    ly_do_dung = _tvpl_ly_do_tam_dung()
+    if ly_do_dung:
+        return False, "", None, ly_do_dung
+    with _TRACUUNNT_TD["lock"]:
+        drv, _loi = _tracuunnt_lay_trinh_duyet_da_khoa()
+        if drv is None:
+            return None
+        _TRACUUNNT_TD["mst_dang_tra"] = mst_c
+        try:
+            kq = _tvpl_tra_1_mst_bang_trinh_duyet(drv, mst_c, timeout)
+            if luu_anh_debug and not kq[0]:
+                try:
+                    thu_muc = os.path.join(_get_desktop_dir(), "thuvienphapluat_debug")
+                    os.makedirs(thu_muc, exist_ok=True)
+                    drv.save_screenshot(os.path.join(thu_muc, f"{mst_c}_{int(time.time())}.png"))
+                except Exception:
+                    pass
+        except Exception as e:
+            _TRACUUNNT_TD["drv"] = None
+            try:
+                drv.quit()
+            except Exception:
+                pass
+            kq = (False, "", None, f"lỗi trình duyệt ẩn: {type(e).__name__}: {str(e)[:150]}")
+        finally:
+            _TRACUUNNT_TD["lan_dung_cuoi"] = time.time()
+    with _TVPL_TD["lock"]:
+        _TVPL_TD["loi_lien_tiep"] = 0 if kq[0] else _TVPL_TD["loi_lien_tiep"] + 1
+    return kq
+
+
 def _tra_cuu_mst_qua_tracuunnt(mst_c, timeout, luu_anh_debug=False):
     """Tra tình trạng hoạt động 1 MST qua CỔNG TRA CỨU CÔNG KHAI CHÍNH THỨC
     tracuunnt.gdt.gov.vn (tcnnt/mstdn.jsp) — nguồn CHÍNH THỨC của Tổng cục
@@ -40889,7 +41061,7 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
         return {"trang_thai": "", "canh_bao": None,
                "ly_do_loi": ("Hết ngân sách thời gian tra MST trong lượt xuất Excel này"
                              if chi_dung_cache else
-                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (không tra được qua cả masothue.com/"
+                             "Đã dừng gọi mạng sau 5 lỗi liên tiếp (không tra được qua cả masothue.com/thuvienphapluat.vn/"
                              "tracuunnt.gdt.gov.vn/XInvoice) để tránh treo lâu — sẽ tự thử lại ở lượt "
                              "xuất Excel sau")}
 
@@ -40931,6 +41103,15 @@ def _tra_cuu_trang_thai_mst(mst, timeout=8, so_lan_that_bai_lien_tiep=None, chi_
             thanh_cong, trang_thai_goc, canh_bao, _ = kq_masothue
         else:
             loi_cac_nguon.append(f"masothue.com: {kq_masothue[3]}")
+
+    # 1b) thuvienphapluat.vn qua Chrome ẩn — dự phòng khi masothue.com không tra được.
+    if not thanh_cong:
+        kq_tvpl = _tra_cuu_mst_qua_tvpl_trinh_duyet(mst_c, timeout)
+        if kq_tvpl is not None:
+            if kq_tvpl[0]:
+                thanh_cong, trang_thai_goc, canh_bao, _ = kq_tvpl
+            else:
+                loi_cac_nguon.append(f"thuvienphapluat.vn: {kq_tvpl[3]}")
 
     # 2) tracuunnt.gdt.gov.vn — cổng chính thức của Tổng cục Thuế (captcha). Bỏ qua khi đang tạm
     #    dừng (_TRACUUNNT_TAM_DUNG).
