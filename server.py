@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.179"
+APP_BUILD = "2026-10-13.180"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14158,6 +14158,14 @@ def _ck_luu_1(conn, cid, khoa, ten, anh, xac_nhan):
                  "ON CONFLICT(khoa) DO UPDATE SET ten=excluded.ten, anh=excluded.anh, xac_nhan=excluded.xac_nhan, updated_at=excluded.updated_at",
                  (khoa, str(ten or "")[:200], anh, 1 if xac_nhan else 0, datetime.datetime.now().isoformat()))
     return anh
+
+
+@app.get("/api/chu-ky/{cid}/khoa")
+def chu_ky_theo_khoa(cid: int, khoa: str = ""):
+    """Trạng thái chữ ký của 1 người trong kho (vd bên nhận ủy quyền theo CCCD): {co_anh, xac_nhan, anh}."""
+    chung, cu = _ck_doc_het(cid)
+    r = chung.get(khoa) or cu.get(khoa) or {}
+    return {"co_anh": bool(r.get("anh")), "xac_nhan": bool(r.get("xac_nhan")), "anh": r.get("anh") if r.get("xac_nhan") else ""}
 
 
 @app.get("/api/chu-ky/{cid}/in")
@@ -45457,6 +45465,10 @@ def gpkd_soan_tao(body: dict = Body(...)):
     if body.get("gan_chu_ky") and cid:
         d = _vb_chu_ky_dict(int(cid))
         chu_ky = {k: d.get(k) for k in ("giam_doc", "chu_so_huu") if d.get(k)}
+        uq = du.get("uy_quyen") or {}
+        kb = vbld.khoa_nguoi({"cccd": uq.get("so_giay_to"), "ten": uq.get("ho_ten")})
+        if (uq.get("ho_ten") or "").strip() and d.get(kb):
+            chu_ky["ben_b"] = d[kb]
     if body.get("xuat_pdf"):
         try:
             import pymupdf  # noqa

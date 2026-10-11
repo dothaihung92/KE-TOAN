@@ -390,7 +390,7 @@ def soan_mau12(du, chu_ky=None):
         m.dien(r"Điện thoại \(nếu có\)", a.get("dien_thoai"), lo, hi)
         m.dien(r"Số fax \(nếu có\)", a.get("fax"), lo, hi)
         m.dien(r"Thư điện tử \(nếu có\)", a.get("email"), lo, hi)
-    if du.get("de_nghi_xac_nhan"):
+    if True:                                       # "Đề nghị cấp Giấy xác nhận thay đổi nội dung ĐKDN": luôn tick
         p = m.tim(r"Đề nghị Quý Cơ quan cấp Giấy xác nhận thay đổi nội dung đăng ký doanh nghiệp")
         if p is not None:
             for r in p.runs:
@@ -466,12 +466,13 @@ def soan_mau12(du, chu_ky=None):
             if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
                 c = [c for c in tb.rows[-1].cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text][0]
                 # chữ ký trong Kho chữ ký chỉ là của người đại diện HIỆN TẠI (đã được người đó đồng ý) — không gắn khi ký là người đại diện mới
-                if not _chen_anh(c, (chu_ky or {}).get("giam_doc") if "dai_dien" not in loai else None):
-                    for _ in range(3):
-                        c.add_paragraph()
+                for _ in range(3):
+                    c.add_paragraph()
                 pk = c.add_paragraph()
                 pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pk.add_run(ten_ky.strip().upper()).bold = True
+                _gan_chu_ky(pk, (chu_ky or {}).get("giam_doc") if "dai_dien" not in loai else None)
+                _giu_mot_trang(tb)
                 break
     return d
 
@@ -549,19 +550,61 @@ def _ngay_chu(dn):
     return f"{(dn.get('dia_danh') or '').strip() or '……'}, ngày {d_} tháng {m_} năm {y_}"
 
 
-def _chen_anh(o, anh_uri, cao_cm=2.0):
-    """Chèn ảnh chữ ký (data URI PNG) vào ô/khối `o` (canh giữa); chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã chèn."""
+def _gan_chu_ky(p, anh_uri, rong_cm=4.4, cao_cm=2.2):
+    """Gắn ảnh chữ ký dạng NỔI "phía sau chữ" (behind text), canh giữa theo cột/ô và đè lên khoảng trống phía trên họ tên (đoạn `p`).
+    Ảnh được co/giãn vừa khung rong_cm x cao_cm, giữ tỷ lệ. Chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã gắn."""
     if not anh_uri or "," not in str(anh_uri):
         return False
     try:
         import base64
+        from PIL import Image
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+        from docx.shared import Emu
         raw = base64.b64decode(str(anh_uri).split(",", 1)[1])
-        p = o.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.add_run().add_picture(io.BytesIO(raw), height=Cm(cao_cm))
+        w, h = Image.open(io.BytesIO(raw)).size
+        ti = min(rong_cm / w, cao_cm / h)
+        cx, cy = int(w * ti * 360000), int(h * ti * 360000)
+        run = p.add_run()
+        run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
+        inline = run._r.xpath(".//wp:inline")[0]
+        ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
+        lech = -(cy - int(0.8 * 360000))
+        anchor = parse_xml(
+            f'<wp:anchor {nsdecls("wp")} distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="1" '
+            f'locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
+            f'<wp:positionH relativeFrom="column"><wp:align>center</wp:align></wp:positionH>'
+            f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{lech}</wp:posOffset></wp:positionV></wp:anchor>')
+        anchor.append(inline.find("wp:extent", ns))
+        anchor.append(parse_xml(f'<wp:effectExtent {nsdecls("wp")} l="0" t="0" r="0" b="0"/>'))
+        anchor.append(parse_xml(f'<wp:wrapNone {nsdecls("wp")}/>'))
+        for ten in ("docPr", "cNvGraphicFramePr"):
+            anchor.append(inline.find("wp:" + ten, ns))
+        anchor.append(inline.find("{http://schemas.openxmlformats.org/drawingml/2006/main}graphic"))
+        dr = inline.getparent()
+        dr.remove(inline)
+        dr.append(anchor)
         return True
     except Exception:
         return False
+
+
+def _giu_mot_trang(tb, so_doan_truoc=3):
+    """Khối chữ ký không bị tách trang: hàng bảng không được cắt đôi, các đoạn trong khối + vài đoạn ngay trước đó "giữ cùng trang tiếp theo"."""
+    from docx.oxml import OxmlElement
+    from docx.text.paragraph import Paragraph as _P
+    for r in tb.rows:
+        r._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+        for c in r.cells:
+            for pp in c.paragraphs:
+                pp.paragraph_format.keep_with_next = True
+    e = tb._tbl.getprevious()
+    n = 0
+    while e is not None and n < so_doan_truoc:
+        if e.tag == qn("w:p"):
+            _P(e, tb._parent).paragraph_format.keep_with_next = True
+            n += 1
+        e = e.getprevious()
 
 
 def _van_ban_moi():
@@ -681,13 +724,9 @@ def soan_quyet_dinh(du, chu_ky=None):
     dd = (ht.get("dd_ho_ten") or "").strip()
     if "dai_dien" in loai and (du.get("dai_dien") or [{}])[0].get("ho_ten"):
         dd = (du["dai_dien"][0].get("ho_ten") or "").strip()
-    _doan(d, "")
-    _doan(d, f"Điều 2: ", dam=True, gach=True, sau=0).add_run(f"Giao cho Ông/Bà {dd.upper() or '……'} (người đại diện theo pháp luật) tiến hành các thủ tục cần thiết theo quy định của pháp luật.")
-    _doan(d, "")
-    _doan(d, "Điều 3: ", dam=True, gach=True, sau=0).add_run(f"Người đại diện theo pháp luật của công ty, {ten_co.lower()} công ty có trách nhiệm thi hành {loai_vb.capitalize()} này.")
-    _doan(d, "")
-    _doan(d, "Điều 4: ", dam=True, gach=True, sau=0).add_run(f"{loai_vb.capitalize()} này có hiệu lực kể từ ngày ký.")
-    d.add_paragraph()
+    _doan(d, f"Điều 2: ", dam=True, gach=True, sau=10).add_run(f"Giao cho Ông/Bà {dd.upper() or '……'} (người đại diện theo pháp luật) tiến hành các thủ tục cần thiết theo quy định của pháp luật.")
+    _doan(d, "Điều 3: ", dam=True, gach=True, sau=10).add_run(f"Người đại diện theo pháp luật của công ty, {ten_co.lower()} công ty có trách nhiệm thi hành {loai_vb.capitalize()} này.")
+    _doan(d, "Điều 4: ", dam=True, gach=True, sau=10).add_run(f"{loai_vb.capitalize()} này có hiệu lực kể từ ngày ký.")
     tb = d.add_table(rows=1, cols=2)
     a, b = tb.rows[0].cells
     a.paragraphs[0].add_run("Nơi nhận:").bold = True
@@ -701,12 +740,13 @@ def soan_quyet_dinh(du, chu_ky=None):
     pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb2.add_run("(Ký, ghi rõ họ tên)").italic = True
     if (ht.get("chu_so_huu") or "").strip():
-        if not _chen_anh(b, (chu_ky or {}).get("chu_so_huu")):
-            for _ in range(3):
-                b.add_paragraph()
+        for _ in range(3):
+            b.add_paragraph()
         pk = b.add_paragraph()
         pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
         pk.add_run(ht["chu_so_huu"].strip().upper()).bold = True
+        _gan_chu_ky(pk, (chu_ky or {}).get("chu_so_huu"))
+    _giu_mot_trang(tb, 2)
     return d
 
 
@@ -759,15 +799,17 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     pa3 = a.add_paragraph()
     pa3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pa3.add_run((uq.get("ho_ten") or "").upper())
+    _gan_chu_ky(pa3, (chu_ky or {}).get("ben_b"))
     pb = b.paragraphs[0]
     pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb.add_run("Bên ủy quyền")
-    if not _chen_anh(b, (chu_ky or {}).get("giam_doc")):
-        for _ in range(4):
-            b.add_paragraph()
+    for _ in range(4):
+        b.add_paragraph()
     pb3 = b.add_paragraph()
     pb3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb3.add_run((ht.get("dd_ho_ten") or "").upper())
+    _gan_chu_ky(pb3, (chu_ky or {}).get("giam_doc"))
+    _giu_mot_trang(tb, 3)
     return d
 
 

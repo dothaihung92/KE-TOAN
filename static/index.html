@@ -4535,14 +4535,14 @@ function ssThuThap(){
   du.chu_so_huu_moi={};SS_TRUONG.chu_so_huu_moi.forEach(([k])=>du.chu_so_huu_moi[k]=gt('chu_so_huu_moi',k));
   ['hien_tai','uy_quyen','bo_sung'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
-  du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');du.de_nghi_xac_nhan=ck('ss_de_nghi_xac_nhan');
+  du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');
   du.dn.ngay_tay=document.getElementById('ss_dn_ngay_lap')?.dataset.tay==='1';du.dn.so_tay=document.getElementById('ss_dn_so_vb')?.dataset.tay==='1';
   return du;
 }
 function ssLuuTam(){try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap(),mr:ssMauRieng.filter(x=>x.chon).map(x=>x.ten)}))}catch(e){}}
 function ssCacO(nhom){
   return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;align-items:end">${SS_TRUONG[nhom].map(([k,nhan])=>
-    `<label style="font-size:12px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px">${ssEsc(nhan)}<input id="ss_${nhom}_${k}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}</div>`;
+    `<label style="font-size:12px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px">${ssEsc(nhan)}<input id="ss_${nhom}_${k}" onchange="${nhom==='uy_quyen'&&k==='so_giay_to'?'ssUqKyKiem()':''}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}</div>`;
 }
 function ssBangNganh(k,tieuDe,coChinh){
   const ds=ssNganh[k];
@@ -4599,12 +4599,12 @@ async function moSoanGpkd(){
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
       <div class="hint" style="margin:0 0 6px"><b>Quyết định của chủ sở hữu / Nghị quyết</b> được phần mềm <b>tự soạn</b> khi có đổi tên, địa chỉ, vốn điều lệ, ngành nghề, người đại diện hoặc chủ sở hữu.</div>
-      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_de_nghi_xac_nhan" checked onchange="ssLuuTam()"> Đánh dấu "Đề nghị cấp Giấy xác nhận thay đổi nội dung đăng ký doanh nghiệp" trong Giấy đề nghị (Mẫu 12)</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_gan_ky" checked onchange="ssLuuTam()"> Gắn chữ ký từ <b>Kho chữ ký</b> (giám đốc ở Mẫu 12/Giấy ủy quyền, chủ sở hữu ở Quyết định) — chỉ chữ ký đã tick "đã đồng ý"</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_xuat_pdf" onchange="ssLuuTam()"> Xuất thêm file <b>PDF có viền</b> (dạng ảnh từng trang như bản scan; cần máy có Microsoft Word hoặc LibreOffice)</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_uy_quyen" onchange="document.getElementById('ssUq').style.display=this.checked?'block':'none';ssLuuTam()"> Soạn <b>Giấy ủy quyền</b> nộp hồ sơ và nhận kết quả</label>
       <div id="ssUq" style="display:none;margin:6px 0 0 26px;padding:8px 10px;border-left:3px solid #cfe5da">${ssCacO('uy_quyen')}
-        <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Phần mềm không ký thay: hai bên tự ký.</div></div>
+        <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="btn ghost sm" style="cursor:pointer">✍ Tải ảnh chữ ký bên nhận ủy quyền<input type="file" accept="image/png,image/jpeg" style="display:none" onchange="ssUqKyTai(this)"></label><span id="ssUqKyTt" class="hint"></span></div>
+        <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Chữ ký bên nhận ủy quyền lưu trong Kho chữ ký theo số CCCD, chỉ lưu khi người đó đã đồng ý. Phần mềm không ký thay.</div></div>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Mẫu riêng của bạn (Word .docx, tuỳ chọn)</legend>
       <div class="hint" style="margin-top:0">Gửi file Word có chữ <code>{{tên_biến}}</code> (vd <code>{{dn_ten_hoa}}</code>, <code>{{dd_ho_ten_hoa}}</code>) — phần mềm sẽ thay bằng dữ liệu ở trên và đưa vào gói hồ sơ (vd Quyết định của chủ sở hữu, Biên bản họp).</div>
@@ -4626,7 +4626,7 @@ async function moSoanGpkd(){
     Object.entries(du.chu_so_huu_moi||{}).forEach(([k,v])=>dat('ss_chu_so_huu_moi_'+k,v));
     ['hien_tai','uy_quyen','bo_sung'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
-    ck('ss_de_nghi_xac_nhan',du.de_nghi_xac_nhan!==undefined?du.de_nghi_xac_nhan:true);ck('ss_tao_uy_quyen',du.tao_uy_quyen);ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);
+    ck('ss_tao_uy_quyen',du.tao_uy_quyen);ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);
     const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
     const nl=document.getElementById('ss_dn_ngay_lap');if(nl&&(du.dn||{}).ngay_tay)nl.dataset.tay='1';
     const sv=document.getElementById('ss_dn_so_vb');if(sv&&(du.dn||{}).so_tay)sv.dataset.tay='1';
@@ -4638,7 +4638,7 @@ async function moSoanGpkd(){
   }else{ssNganh={them:[],bo:[],sua:[]};ssLayTuGom(true)}
   const nl=document.getElementById('ss_dn_ngay_lap');if(nl&&nl.dataset.tay!=='1')nl.value=ssHomNay();   // ngày lập mặc định = ngày hiện tại
   const sv2=document.getElementById('ss_dn_so_vb');if(sv2&&sv2.dataset.tay!=='1')sv2.value=ssSoKeTiep();
-  ssDienHienTai(false);
+  ssDienHienTai(false);ssUqKyKiem();
   ssHienGoiY();ssVeNganh();ssHienCacMuc();
   try{const r=await api('/api/gpkd-soan/mau');ssBienMau=r.bien||{};
     ssMauRieng=(r.mau_rieng||[]).map(t=>({ten:t,chon:!!(luu&&(luu.mr||[]).includes(t))}));
@@ -4648,6 +4648,21 @@ async function moSoanGpkd(){
 const ssKeySo=()=>'gpkdSoVb_'+(current||0)+'_'+new Date().getFullYear();
 function ssSoKeTiep(){let n=0;try{n=parseInt(localStorage.getItem(ssKeySo())||'0',10)||0}catch(e){}return String(n+1).padStart(2,'0')}
 function ssGhiNhoSo(){const v=parseInt((document.getElementById('ss_dn_so_vb')||{}).value,10);if(v>0){try{localStorage.setItem(ssKeySo(),String(v))}catch(e){}}}
+async function ssUqKyKiem(){
+  const t=document.getElementById('ssUqKyTt');if(!t)return;
+  const so=(document.getElementById('ss_uy_quyen_so_giay_to')||{}).value||'',d=so.replace(/\D/g,'');
+  if(d.length<9){t.textContent='Nhập số CCCD bên nhận ủy quyền để lưu/gắn chữ ký.';return}
+  try{const r=await api(`/api/chu-ky/${current}/khoa?khoa=`+encodeURIComponent('cccd:'+d));t.innerHTML=r.xac_nhan&&r.anh?`✓ Đã có chữ ký trong kho <img src="${r.anh}" style="max-height:28px;vertical-align:middle;background:#fff">`:'Chưa có chữ ký của người này trong kho.'}catch(e){t.textContent=''}
+}
+async function ssUqKyTai(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
+  const d=((document.getElementById('ss_uy_quyen_so_giay_to')||{}).value||'').replace(/\D/g,''),ten=(document.getElementById('ss_uy_quyen_ho_ten')||{}).value||'';
+  if(d.length<9){toast('Hãy nhập số chứng thực/CCCD của bên nhận ủy quyền trước','err');return}
+  if(!confirm('Xác nhận người nhận ủy quyền ('+(ten||d)+') ĐÃ ĐỒNG Ý lưu và dùng chữ ký này trong hồ sơ?'))return;
+  const anh=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(f)});
+  try{await api('/api/chu-ky/'+current,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa:'cccd:'+d,ten:ten,anh:anh,xac_nhan:true})});toast('Đã lưu chữ ký bên nhận ủy quyền','ok');ssUqKyKiem()}
+  catch(e){toast('Lỗi: '+e.message,'err')}
+}
 function ssHomNay(){const t=new Date(),z=n=>String(n).padStart(2,'0');return z(t.getDate())+'/'+z(t.getMonth()+1)+'/'+t.getFullYear()}
 function ssDienHienTai(ghi){
   const h=ssHienTrang||{},dc=h.dia_chi||{},dd=(h.dai_dien||[])[0]||{};

@@ -64,12 +64,16 @@ DU = {"loai": ["dia_chi"], "tao_uy_quyen": True, "dn": {"ten": "Cty A", "ma_so":
 def so_anh(z, tien_to):
     n = [x for x in z.namelist() if x.startswith(tien_to)][0]
     zz = zipfile.ZipFile(io.BytesIO(z.read(n)))
+    xml = zz.read("word/document.xml").decode("utf-8")
+    if "word/media/" in " ".join(zz.namelist()):
+        assert 'behindDoc="1"' in xml and "<wp:anchor" in xml and "<wp:inline" not in xml     # ảnh nổi phía sau chữ
     return len([x for x in zz.namelist() if x.startswith("word/media/")])
 
 
 ky = {k: server._vb_chu_ky_dict(1).get(k) for k in ("giam_doc", "chu_so_huu")}
+ky["ben_b"] = anh((0, 120, 0))
 z = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(DU, None, ky)[0]))
-assert so_anh(z, "Mau12") == 1 and so_anh(z, "Quyet_dinh") == 1 and so_anh(z, "Giay_uy_quyen") == 1
+assert so_anh(z, "Mau12") == 1 and so_anh(z, "Quyet_dinh") == 1 and so_anh(z, "Giay_uy_quyen") == 2      # UQ: giám đốc (Bên A) + bên nhận ủy quyền (Bên B)
 z0 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(DU)[0]))
 assert so_anh(z0, "Mau12") == 0 and so_anh(z0, "Quyet_dinh") == 0 and so_anh(z0, "Giay_uy_quyen") == 0
 # đổi người đại diện: người ký Mẫu 12 là người MỚI -> không gắn chữ ký người đại diện cũ
@@ -77,6 +81,16 @@ du2 = dict(DU, loai=["dia_chi", "dai_dien"], dai_dien=[{"ho_ten": "Người Mớ
 z2 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du2, None, ky)[0]))
 assert so_anh(z2, "Mau12") == 0 and so_anh(z2, "Quyet_dinh") == 1
 print("PASS 3: gắn chữ ký giám đốc (Mẫu 12, Giấy ủy quyền) và chủ sở hữu (Quyết định); không gắn chữ ký người đại diện cũ cho người mới.")
+
+# khối chữ ký không bị tách trang; "đề nghị cấp Giấy xác nhận" luôn tick
+import docx as _d
+for tien in ("Mau12", "Quyet_dinh", "Giay_uy_quyen"):
+    n = [x for x in z.namelist() if x.startswith(tien)][0]
+    xml = zipfile.ZipFile(io.BytesIO(z.read(n))).read("word/document.xml").decode("utf-8")
+    assert "<w:cantSplit" in xml and "<w:keepNext" in xml, tien
+n12 = [x for x in z.namelist() if x.startswith("Mau12")][0]
+assert "☒ Đề nghị Quý Cơ quan cấp Giấy xác nhận" in "\n".join(p.text for p in _d.Document(io.BytesIO(z.read(n12))).paragraphs)
+print("PASS 3b: ảnh chữ ký nổi phía sau chữ; khối chữ ký giữ 1 trang; luôn tick đề nghị cấp Giấy xác nhận.")
 
 # PDF có viền: mỗi trang thành ảnh + khung viền
 import pymupdf
