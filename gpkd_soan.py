@@ -14,6 +14,8 @@ import zipfile
 
 import docx
 from docx.oxml.ns import qn
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt, Cm
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 THU_MUC_MAU = os.path.join(BASE, "templates", "gpkd")
@@ -301,6 +303,12 @@ def _dien_dau(m, dn, hi):
             if _van(p).strip().split("\n")[0].strip() == "TÊN DOANH NGHIỆP":      # đoạn có thể kèm dòng "-------" sau dấu xuống dòng
                 _thay_khoang(p, 0, len("TÊN DOANH NGHIỆP"), ten)
                 break
+    so = (dn.get("so_vb") or "").strip()
+    if so:
+        for p in m.doan(0, 4):
+            if re.match(r"^Số:\s*" + _CHAM + r"\s*$", _van(p).strip()):
+                _thay_khoang(p, 0, len(_van(p)), f"Số: {so}")
+                break
     m.dien(r"Tên doanh nghiệp", ten, 0, hi)
     m.dien(r"Mã số doanh nghiệp/Mã số thuế", dn.get("ma_so"), 0, hi)
     m.dien(r"Kính gửi: \(Cơ quan đăng ký kinh doanh cấp tỉnh\)", dn.get("co_quan"), 0, hi)
@@ -449,6 +457,18 @@ def soan_mau12(du):
             m.xoa_phan(cp, vg)                        # không phải công ty cổ phần -> bỏ phần cổ phần
         if vg is not None and cam is not None and ("một thành viên" in lh or "cổ phần" in lh):
             m.xoa_phan(vg, cam)                       # CT TNHH 1TV / cổ phần: không có "phần vốn góp của thành viên"
+    # chữ ký: ghi sẵn họ tên người đại diện theo pháp luật (người đại diện mới nếu có thay đổi) — phần mềm KHÔNG ký thay
+    ten_ky = ((du.get("dai_dien") or [{}])[0].get("ho_ten") if "dai_dien" in loai else "") or (du.get("hien_tai") or {}).get("dd_ho_ten") or ""
+    if ten_ky.strip():
+        for tb in d.tables:
+            if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
+                c = [c for c in tb.rows[-1].cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text][0]
+                for _ in range(3):
+                    c.add_paragraph()
+                pk = c.add_paragraph()
+                pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                pk.add_run(ten_ky.strip().upper()).bold = True
+                break
     return d
 
 
@@ -511,8 +531,6 @@ def soan_mau15(du):
 
 # ============================================================ VĂN BẢN DO PHẦN MỀM SOẠN (Quyết định của chủ sở hữu, Giấy ủy quyền)
 # Nội dung theo bộ hồ sơ mẫu người dùng cung cấp; thông tin công ty lấy từ dữ liệu công ty đang làm. Không có chữ ký/con dấu.
-from docx.shared import Pt, Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 def _ngay_chu(dn):
@@ -604,7 +622,7 @@ def soan_quyet_dinh(du):
     chu, loai_vb, ten_co = _chu_the_quyet_dinh(dn.get("loai_hinh"))
     ten = (dn.get("ten") or "").strip().upper() or "……"
     d = _van_ban_moi()
-    _bang_quoc_hieu(d, dn)
+    _bang_quoc_hieu(d, dn, dn.get("so_vb"))
     _doan(d, loai_vb, dam=True, can="giua", sau=0)
     _doan(d, "Về việc thay đổi nội dung đăng ký doanh nghiệp", dam=True, can="giua", sau=0)
     _doan(d, chu, dam=True, can="giua")
@@ -663,6 +681,12 @@ def soan_quyet_dinh(du):
     pb2 = b.add_paragraph()
     pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb2.add_run("(Ký, ghi rõ họ tên)").italic = True
+    if (ht.get("chu_so_huu") or "").strip():
+        for _ in range(3):
+            b.add_paragraph()
+        pk = b.add_paragraph()
+        pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pk.add_run(ht["chu_so_huu"].strip().upper()).bold = True
     return d
 
 

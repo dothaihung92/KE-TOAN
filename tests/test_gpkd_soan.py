@@ -259,3 +259,16 @@ assert "B. BỔ SUNG, CẬP NHẬT THÔNG TIN ĐĂNG KÝ DOANH NGHIỆP" in _tx 
 assert "ĐĂNG KÝ THAY ĐỔI ĐỊA CHỈ TRỤ SỞ" not in _tx
 assert 'id="ss_tao_quyet_dinh"' not in _h and "tự soạn" in _h
 print("PASS: Quyết định tự soạn khi đổi tên/địa chỉ/vốn/ngành/người đại diện/chủ sở hữu; chỉ bổ sung thì không.")
+
+
+# Số văn bản tự điền; tên người ký lấy từ dữ liệu GPKD (người đại diện / chủ sở hữu); bỏ lựa chọn "chỉ bổ sung" khỏi giao diện
+_du3 = {"loai": ["dia_chi"], "dn": {"ten": "Cty A", "ma_so": "1", "so_vb": "07", "ngay_lap": "11/10/2026", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên"},
+        "dia_chi": {"so_nha": "x"}, "hien_tai": {"dd_ho_ten": "Đỗ Thị Ánh Tuyết", "chu_so_huu": "Đỗ Thị Ánh Tuyết"}}
+_z3 = _zf.ZipFile(_io.BytesIO(_g.tao_ho_so(_du3)[0]))
+_t12 = _docx.Document(_io.BytesIO(_z3.read([n for n in _z3.namelist() if n.startswith("Mau12")][0])))
+assert "Số: 07" in _t12.tables[0].rows[1].cells[0].text
+assert "ĐỖ THỊ ÁNH TUYẾT" in "\n".join(c.text for t in _t12.tables for r in t.rows for c in r.cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text)
+_qd3 = _docx.Document(_io.BytesIO(_z3.read([n for n in _z3.namelist() if n.startswith("Quyet_dinh")][0])))
+assert "Số: 07" in _qd3.tables[0].rows[0].cells[0].text and "ĐỖ THỊ ÁNH TUYẾT" in _qd3.tables[1].rows[0].cells[1].text
+assert "'bo_sung','Chỉ bổ sung" not in _h and "ssSoKeTiep" in _h and "chu_so_huu:''" in _h
+print("PASS: số văn bản tự điền; tên ký lấy từ dữ liệu GPKD.")
