@@ -101,11 +101,14 @@ assert "contentDocument" in than and "chan_doan" in than    # đọc cả khung 
 assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
 # tự đọc mọi khối trong menu "KHỐI DỮ LIỆU" (dừng ở "VĂN BẢN ĐÍNH KÈM") CHỈ bằng GET trong phiên của người dùng
 assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "cacTrang(document)" in than and "chan_doan_menu" in than and "credentials: 'same-origin'" in than
-assert "method" not in than and "POST" not in than and "XMLHttpRequest" not in than
+assert "XMLHttpRequest" not in than and than.count("method: 'POST'") == 1
 assert ".submit(" not in than and ".click()" not in than
 # menu dạng nút bấm (postback ASP.NET): CHỈ gọi __doPostBack của đúng mục trong menu KHỐI DỮ LIỆU (đã lọc chữ xoá/nộp/gửi...),
 # trong KHUNG ẨN; không tự gọi postback nào khác
-assert than.count("__doPostBack(") == 1 and "f.contentWindow.__doPostBack(dsNut[j].nut, dsNut[j].doi)" in than
+# cách chính: POST form ASP.NET của chính trang (đúng lệnh mục menu, phiên người dùng); dự phòng: khung ẩn. Lỗi ghi vào dữ liệu.
+assert "method: 'POST'" in than and "duLieuForm(dsNut[j].doc, dsNut[j].nut, dsNut[j].doi)" in than
+assert than.count("__doPostBack(") == 1 and "f.contentWindow.__doPostBack(dsNutLoi[j2].nut, dsNutLoi[j2].doi)" in than
+assert "chanDoanMenu.loi = loi" in than and 'name="__VIEWSTATE"' in than
 assert "if (!cam(t) && !daCo['pb:' + t])" in than and "visibility:hidden" in than
 assert "javascript:" in than and "cam(t)" in than                       # bỏ link javascript:/postback và link xoá/nộp/gửi...
 print("PASS 4: mã bookmark chỉ đọc trang và copy, không gửi/bấm gì.")

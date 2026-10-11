@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-11.159"
+APP_BUILD = "2026-10-12.160"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44773,7 +44773,7 @@ function menuKhoi() {
       var pb = h.match(/^\s*javascript:\s*__doPostBack\(\s*'([^']+)'\s*,\s*'([^']*)'\s*\)/i);
       if (pb) {
         chanDoanMenu.link_nut_bam++;
-        if (!cam(t) && !daCo['pb:' + t]) { daCo['pb:' + t] = 1; kq.push({ten: t, nut: pb[1], doi: pb[2]}); }
+        if (!cam(t) && !daCo['pb:' + t]) { daCo['pb:' + t] = 1; kq.push({ten: t, nut: pb[1], doi: pb[2], doc: doc}); }
         return;
       }
       if (!h || /^\s*javascript:/i.test(h) || h.charAt(0) === '#') return;
@@ -44825,7 +44825,42 @@ function choTai(f, giay) {
   return new Promise(function (ok) { var xong = false; var t = setTimeout(function () { if (!xong) { xong = true; ok(false); } }, giay * 1000);
     f.onload = function () { if (!xong) { xong = true; clearTimeout(t); setTimeout(function () { ok(true); }, 400); } }; });
 }
-if (dsNut.length) {
+// Cách 1 (chính): gửi đúng lệnh postback của mục menu bằng fetch (POST form của chính trang, phiên đăng nhập của người dùng),
+// đọc trang khối trả về — không cần mở khung. Cách 2 (dự phòng): khung ẩn.
+function duLieuForm(doc, nut, doi) {
+  var vs = doc.querySelector('input[name="__VIEWSTATE"]'), fm = vs ? vs.form : null;
+  if (!fm) throw new Error('không thấy form ASP.NET (__VIEWSTATE) trên trang');
+  var p = new URLSearchParams();
+  [].slice.call(fm.elements).forEach(function (e) {
+    var n = e.name; if (!n || e.disabled) return;
+    var t = (e.type || '').toLowerCase();
+    if (t === 'submit' || t === 'button' || t === 'image' || t === 'reset' || t === 'file') return;
+    if ((t === 'checkbox' || t === 'radio') && !e.checked) return;
+    if (e.tagName === 'SELECT') { [].slice.call(e.options).forEach(function (o) { if (o.selected) p.append(n, o.value); }); return; }
+    p.append(n, e.value);
+  });
+  p.set('__EVENTTARGET', nut); p.set('__EVENTARGUMENT', doi);
+  return {url: fm.action || location.href, body: p.toString()};
+}
+var dsNutLoi = [];
+for (var j = 0; j < dsNut.length; j++) {
+  dem++;
+  hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + dsNut[j].ten + ' ...');
+  try {
+    var fd = duLieuForm(dsNut[j].doc, dsNut[j].nut, dsNut[j].doi);
+    var rs = await fetch(fd.url, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: fd.body});
+    if (!rs.ok) throw new Error('HTTP ' + rs.status);
+    if (new URL(rs.url).origin !== location.origin) throw new Error('bị chuyển sang trang khác (đăng nhập?)');
+    var dP = new DOMParser().parseFromString(await rs.text(), 'text/html');
+    var rP = docTrang(dP, rs.url);
+    if (!rP.cap.length) throw new Error('trang trả về không có dữ liệu (' + rs.url.slice(-60) + ')');
+    rP.khoi = dsNut[j].ten;
+    ketQua.push(rP);
+    chanDoanMenu.cach = 'post';
+  } catch (e) { loi.push(dsNut[j].ten + ' (POST): ' + e); dsNutLoi.push(dsNut[j]); }
+  await new Promise(function (x) { setTimeout(x, 300); });
+}
+if (dsNutLoi.length) {
   var f = document.createElement('iframe');
   f.setAttribute('style', 'position:fixed;left:-10000px;top:0;width:1200px;height:900px;visibility:hidden');
   document.body.appendChild(f);
@@ -44833,32 +44868,33 @@ if (dsNut.length) {
   f.src = location.href; taiDuoc = await choTai(f, 40);
   var docF = null; try { docF = f.contentDocument; } catch (e) {}
   if (!taiDuoc || !docF || !f.contentWindow.__doPostBack) {
-    loi.push('Cổng không cho mở trang trong khung ẩn — ' + dsNut.length + ' khối dạng nút bấm chưa tự lấy được');
+    loi.push('Khung ẩn cũng không mở được trang (cổng chặn khung?) — ' + dsNutLoi.length + ' khối chưa lấy được');
   } else {
-    for (var j = 0; j < dsNut.length; j++) {
-      dem++;
-      hop('Đang bấm mở khối ' + dem + '/' + tongKhoi + ': ' + dsNut[j].ten + ' ...');
+    for (var j2 = 0; j2 < dsNutLoi.length; j2++) {
+      hop('Thử lại bằng khung ẩn: ' + dsNutLoi[j2].ten + ' ...');
       try {
         var cho = choTai(f, 40);
-        f.contentWindow.__doPostBack(dsNut[j].nut, dsNut[j].doi);
-        if (!(await cho)) { loi.push(dsNut[j].ten + ': quá 40 giây không mở được'); continue; }
-        var dF = f.contentDocument, uF = f.contentWindow.location;
-        if (uF.origin !== location.origin) { loi.push(dsNut[j].ten + ': bị chuyển sang trang đăng nhập'); break; }
-        var rF = docTrang(dF, uF.href);
-        rF.khoi = dsNut[j].ten;
+        f.contentWindow.__doPostBack(dsNutLoi[j2].nut, dsNutLoi[j2].doi);
+        if (!(await cho)) { loi.push(dsNutLoi[j2].ten + ' (khung ẩn): quá 40 giây'); continue; }
+        var uF = f.contentWindow.location;
+        if (uF.origin !== location.origin) { loi.push(dsNutLoi[j2].ten + ' (khung ẩn): bị chuyển sang trang đăng nhập'); break; }
+        var rF = docTrang(f.contentDocument, uF.href);
+        rF.khoi = dsNutLoi[j2].ten;
         ketQua.push(rF);
-        if (!f.contentWindow.__doPostBack) { loi.push('Sau khối ' + dsNut[j].ten + ' trang không còn menu nút bấm — dừng'); break; }
-      } catch (e) { loi.push(dsNut[j].ten + ': ' + e); }
+        chanDoanMenu.cach = 'khung ẩn';
+        if (!f.contentWindow.__doPostBack) break;
+      } catch (e) { loi.push(dsNutLoi[j2].ten + ' (khung ẩn): ' + e); }
     }
   }
   f.remove();
 }
 var tenDaCo = {};
 ketQua = ketQua.filter(function (k, i) { if (i && tenDaCo[k.khoi]) return false; tenDaCo[k.khoi] = 1; return true; });
+chanDoanMenu.loi = loi;
 ketQua[0].chan_doan_menu = chanDoanMenu;
 var s = JSON.stringify(ketQua), tong = ketQua.reduce(function (a, k) { return a + k.cap.length; }, 0);
 var tt = 'Đã đọc ' + ketQua.length + ' khối — ' + tong + ' trường.\n' + ketQua.map(function (k) { return '• ' + (k.khoi || k.tieu_de) + ': ' + k.cap.length + ' trường'; }).join('\n') +
-  (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (tự bấm trong khung ẩn).'
+  (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (tự bấm' + (chanDoanMenu.cach ? ' — cách: ' + chanDoanMenu.cach : '') + ').'
         : '\n⚠ Không thấy menu "KHỐI DỮ LIỆU" trên trang này (kể cả khung con) — chỉ đọc được khối đang mở.') +
   (loi.length ? '\n⚠ Lỗi: ' + loi.join('; ') : '') + '\n\nBấm "Copy dữ liệu" rồi dán vào phần mềm (Hỗ trợ thay đổi GPKD → ô dán → Thêm).';
 var o = hop(tt), ta = o.querySelector('textarea');
