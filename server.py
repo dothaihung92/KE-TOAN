@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-12.165"
+APP_BUILD = "2026-10-12.166"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44630,24 +44630,39 @@ function giaTriO(e) {
   if (e.tagName === 'SELECT') { var op = e.options[e.selectedIndex]; return sach(op ? op.text : ''); }
   return sach(e.value);
 }
+function chonTrongNhom(o) {
+  var ls = [].slice.call(o.querySelectorAll('span, label, b, strong, font, em, i, a, div, td')).filter(function (e) { var t = sach(e.innerText); return !e.children.length && t && t.length <= 40; });
+  if (ls.length < 2) return '';
+  var gc = (document.defaultView || window).getComputedStyle;
+  var sel = ls.filter(function (e) {
+    var fw = 400; try { var cs = gc.call(document.defaultView || window, e); fw = parseInt(cs.fontWeight, 10) || (cs.fontWeight === 'bold' ? 700 : 400); } catch (x) {}
+    var truoc = e.previousElementSibling, cl = (e.className || '') + ' ' + (truoc ? (truoc.className || '') : '');
+    var cc = /(^|[\s_-])(checked|selected|active|chon)([\s_-]|$)/i.test(cl);
+    var img = truoc && truoc.tagName === 'IMG' ? (truoc.getAttribute('src') || '') : '';
+    var ci = /(checked|selected|_on|radio1)/i.test(img) && !/(unchecked|_off)/i.test(img);
+    return fw >= 600 || /^(B|STRONG)$/.test(e.tagName) || cc || ci;
+  });
+  return sel.length === 1 ? sach(sel[0].innerText) : '';
+}
 function giaTri(o) {
   var ds = /^(INPUT|SELECT|TEXTAREA)$/.test(o.tagName) ? [o] : oNhap(o);
   if (ds.length) return ds.map(giaTriO).filter(function (x) { return x; }).join(' | ');
-  return sach(o.innerText);
+  return chonTrongNhom(o) || sach(o.innerText);
 }
 function laNhan(c) { return !oNhap(c).length && sach(c.innerText); }
 function oCuaDong(r) { return [].slice.call(r.children).filter(function (x) { return x.tagName === 'TD' || x.tagName === 'TH'; }); }
 var cap = [], daCo = {};
-function them(k, v) {
-  k = sach(k).replace(/[:*]+$/, '').trim(); v = sach(v);
+function them(k, v, muc) {
+  k = sach(k).replace(/[:*]+$/, '').trim(); v = sach(v); muc = sach(muc || '');
   if (!k || k.length > 150 || !v || k === v) return;
-  var key = k + '\u0001' + v; if (daCo[key]) return; daCo[key] = 1; cap.push([k, v]);
+  var key = muc + '\u0001' + k + '\u0001' + v; if (daCo[key]) return; daCo[key] = 1; cap.push([k, v, muc]);
 }
 function tenBang(t) {
   var e = t;
   for (var buoc = 0; buoc < 8 && e; buoc++) {
     var p = e.previousElementSibling;
     while (p) {
+      if (/^(TABLE|FORM|SCRIPT|STYLE)$/i.test(p.tagName) || p.querySelector('table, input, select, textarea')) { p = p.previousElementSibling; continue; }
       var dong = sach((p.innerText || '').split('\n')[0]);
       if (dong && dong.length <= 60 && !/^(lưu ý|màu)/i.test(dong)) return dong;
       p = p.previousElementSibling;
@@ -44690,15 +44705,23 @@ document.querySelectorAll('table').forEach(function (t) {
   });
 });
 // 2) DÒNG "Tiêu đề : Giá trị": ô chữ -> ô kế tiếp có giá trị (bỏ qua ô trống/biểu tượng); 4 ô = 2 cặp
+var mucHienTai = new Map(), mucBang = new Map();
+function mucCua(t) { if (!t) return ''; if (!mucBang.has(t)) { var m = tenBang(t); mucBang.set(t, m === 'Bảng' ? '' : m); } return mucBang.get(t); }
 document.querySelectorAll('tr').forEach(function (r) {
   if (dongDaDoc.has(r) || r.querySelector('table')) return;
-  var c = oCuaDong(r), i = 0;
+  var c = oCuaDong(r), i = 0, tb = r.closest('table');
+  if (c.length === 1 && !oNhap(c[0]).length) {
+    var tx = sach(c[0].innerText);
+    if (tx && tx.length <= 60 && !/:\s*$/.test(tx)) mucHienTai.set(tb, tx);
+    return;
+  }
+  var muc = mucHienTai.get(tb) || mucCua(tb);
   while (i < c.length) {
     if (!laNhan(c[i])) { i++; continue; }
     var j = i + 1, v = '';
     while (j < c.length && !(v = giaTri(c[j]))) j++;
     if (j >= c.length) break;
-    them(c[i].innerText, v); i = j + 1;
+    them(c[i].innerText, v, muc); i = j + 1;
   }
 });
 document.querySelectorAll('label[for]').forEach(function (l) {
@@ -44730,7 +44753,7 @@ function docTrang(doc, url) {
     var r = quet(d);
     bang += r.bang;
     if (!khoi && r.khoi) khoi = r.khoi;
-    r.cap.forEach(function (c) { var k = c[0] + '\u0001' + c[1]; if (!daCo[k]) { daCo[k] = 1; cap.push(c); } });
+    r.cap.forEach(function (c) { var k = (c[2] || '') + '\u0001' + c[0] + '\u0001' + c[1]; if (!daCo[k]) { daCo[k] = 1; cap.push(c); } });
   });
   return {dkkd: 1, url: url, tieu_de: doc.title || '', khoi: khoi, cap: cap,
           chan_doan: {khung: ds.length - 1, khung_khong_doc_duoc: khongDoc, bang: bang}};
@@ -44996,11 +45019,24 @@ def dkkd_doc_html(noi_dung, url=""):
             return sach(op[0].text_content()) if op else ""
         return sach(e.text_content() if e.tag == "textarea" else (e.get("value") or ""))
 
+    def chon_trong_nhom(o):
+        ls = [e for e in o.xpath(".//span|.//label|.//b|.//strong|.//font|.//em|.//i|.//a|.//div|.//td")
+              if not len(e) and sach(e.text_content()) and len(sach(e.text_content())) <= 40]
+        if len(ls) < 2:
+            return ""
+        def dam(e):
+            tr = e.getprevious()
+            cl = (e.get("class") or "") + " " + ((tr.get("class") or "") if tr is not None else "")
+            return (e.tag in ("b", "strong") or _re.search(r"font-weight:\s*(bold|[6-9]00)", e.get("style") or "", _re.I)
+                    or _re.search(r"(^|[\s_-])(checked|selected|active|chon)([\s_-]|$)", cl, _re.I))
+        sel = [e for e in ls if dam(e)]
+        return sach(sel[0].text_content()) if len(sel) == 1 else ""
+
     def gia_tri(o):
         ds = o_nhap(o)
         if ds:
             return " | ".join(x for x in map(gia_tri_o, ds) if x)
-        return sach(o.text_content())
+        return chon_trong_nhom(o) or sach(o.text_content())
 
     def la_nhan(c):
         return not o_nhap(c) and bool(sach(c.text_content()))
@@ -45020,12 +45056,12 @@ def dkkd_doc_html(noi_dung, url=""):
         return kq
     cap, da_co = [], set()
 
-    def them(k, v):
-        k, v = _re.sub(r"[:*]+$", "", sach(k)).strip(), sach(v)
-        if not k or len(k) > 150 or not v or k == v or (k, v) in da_co:
+    def them(k, v, muc=""):
+        k, v, muc = _re.sub(r"[:*]+$", "", sach(k)).strip(), sach(v), sach(muc)
+        if not k or len(k) > 150 or not v or k == v or (muc, k, v) in da_co:
             return
-        da_co.add((k, v))
-        cap.append([k, v])
+        da_co.add((muc, k, v))
+        cap.append([k, v, muc])
 
     def dong_dau(p):
         """Dòng chữ đầu tiên của 1 phần tử (text_content không có xuống dòng như innerText)."""
@@ -45042,6 +45078,9 @@ def dkkd_doc_html(noi_dung, url=""):
                 break
             p = e.getprevious()
             while p is not None:
+                if isinstance(p.tag, str) and (p.tag in ("table", "form", "script", "style") or p.xpath(".//table|.//input|.//select|.//textarea")):
+                    p = p.getprevious()
+                    continue
                 if isinstance(p.tag, str):
                     dong = dong_dau(p)
                     if dong and len(dong) <= 60 and not _re.match(r"(?i)^(lưu ý|màu)", dong):
@@ -45072,11 +45111,27 @@ def dkkd_doc_html(noi_dung, url=""):
             for k, c in enumerate(o_cua_dong(r)):
                 if tieu_de[k]:
                     them(f"{ten} #{i} - {tieu_de[k]}", gia_tri(c))
+    muc_hien_tai, muc_bang = {}, {}
+
+    def muc_cua(t):
+        if t is None:
+            return ""
+        if t not in muc_bang:
+            m = ten_bang(t)
+            muc_bang[t] = "" if m == "Bảng" else m
+        return muc_bang[t]
     for r in doc.iter("tr"):
         if r in da_doc or r.xpath(".//table"):
             continue
         c = o_cua_dong(r)
         i = 0
+        tb = (r.xpath("ancestor::table[1]") or [None])[0]
+        if len(c) == 1 and not o_nhap(c[0]):
+            tx = sach(c[0].text_content())
+            if tx and len(tx) <= 60 and not tx.endswith(":"):
+                muc_hien_tai[tb] = tx
+            continue
+        muc = muc_hien_tai.get(tb) or muc_cua(tb)
         while i < len(c):
             if not la_nhan(c[i]):
                 i += 1
@@ -45089,7 +45144,7 @@ def dkkd_doc_html(noi_dung, url=""):
                 j += 1
             if j >= len(c):
                 break
-            them(c[i].text_content(), v)
+            them(c[i].text_content(), v, muc)
             i = j + 1
     for l in doc.xpath("//label[@for]"):
         e = doc.xpath(f'//*[@id="{l.get("for")}"]')
@@ -45118,9 +45173,9 @@ def _dkkd_ma_ho_so(url, cap=None):
     """Khoá gom các khối của CÙNG 1 hồ sơ: "Số hồ sơ" đọc được trong khối (vd OD-0780566/26); không có thì tham số
     định danh trong đường dẫn (vd h=720); không có nữa thì cả url."""
     import urllib.parse as _up
-    for k, v in cap or []:
-        if _khong_dau(k).strip().lower() == "so ho so" and v:
-            return v
+    for c in cap or []:
+        if _khong_dau(c[0]).strip().lower() == "so ho so" and c[1]:
+            return c[1]
     q = _up.parse_qs(_up.urlparse(url or "").query)
     for k in ("h", "id", "ID", "hs", "DocumentId", "documentId"):
         if q.get(k):
@@ -45129,9 +45184,9 @@ def _dkkd_ma_ho_so(url, cap=None):
 
 
 def dkkd_xuat_excel(cac_khoi):
-    """[{url, khoi, tieu_de, cap}] -> bytes xlsx: 'Chi tiết' (Hồ sơ | Khối | Trường | Giá trị | Link) + 'Tổng hợp' (1 hồ sơ 1 dòng,
-    cột "<Khối> - <Trường>"). Phần "Thông tin về hồ sơ" lặp lại ở mọi khối (cặp Trường+Giá trị có mặt ở MỌI khối của hồ sơ) chỉ ghi 1 lần
-    cho mỗi hồ sơ; còn lại GIỮ NGUYÊN theo từng khối (kể cả khi trùng chữ với khối khác, vd Họ tên chủ sở hữu = người đại diện)."""
+    """[{url, khoi, tieu_de, cap:[[trường, giá trị, mục]]}] -> bytes xlsx: 'Chi tiết' (Hồ sơ | Khối | Mục | Trường | Giá trị | Link) + 'Tổng hợp'
+    (1 hồ sơ 1 dòng, cột "<Khối> - <Mục> - <Trường>"). Phần "Thông tin về hồ sơ" lặp lại ở mọi khối (cặp Trường+Giá trị có mặt ở MỌI khối của
+    hồ sơ) chỉ ghi 1 lần cho mỗi hồ sơ; còn lại GIỮ NGUYÊN theo từng khối (kể cả khi trùng chữ với khối khác, vd Họ tên chủ sở hữu = người đại diện)."""
     import openpyxl
     import io as _io
     from openpyxl.styles import Font
@@ -45141,32 +45196,42 @@ def dkkd_xuat_excel(cac_khoi):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Chi tiết"
-    ws.append(["Hồ sơ", "Khối", "Trường", "Giá trị", "Link"])
+    ws.append(["Hồ sơ", "Khối", "Mục", "Trường", "Giá trị", "Link"])
     nhom = {}
+
+    def ghi_tong_hop(ma, ten_khoi, muc, t, g):
+        khoa = " - ".join(x for x in (ten_khoi, muc if muc != ten_khoi else "", t) if x)
+        d = nhom.setdefault(ma, {})
+        goc, n = khoa, 1
+        while khoa in d and d[khoa] != g:
+            n += 1
+            khoa = f"{goc} ({n})"
+        d.setdefault(khoa, g)
     for ma, ds in theo_ho_so.items():
         chung = None
         if len(ds) > 1:
             for k in ds:
-                tap = {(t, g) for t, g in (k.get("cap") or [])}
+                tap = {(c[0], c[1]) for c in (k.get("cap") or [])}
                 chung = tap if chung is None else (chung & tap)
         chung = chung or set()
         da_chung = False
         for k in ds:
             ten_khoi = k.get("khoi") or k.get("tieu_de") or ""
             if chung and not da_chung:
-                for t, g in k.get("cap") or []:
-                    if (t, g) in chung:
-                        ws.append([ma, "Thông tin về hồ sơ", t, g, k.get("url") or ""])
-                        nhom.setdefault(ma, {}).setdefault(t, g)
+                for c in k.get("cap") or []:
+                    if (c[0], c[1]) in chung:
+                        ws.append([ma, "Thông tin về hồ sơ", "", c[0], c[1], k.get("url") or ""])
+                        ghi_tong_hop(ma, "Thông tin về hồ sơ", "", c[0], c[1])
                 da_chung = True
-            for t, g in k.get("cap") or []:
-                if (t, g) in chung:
+            for c in k.get("cap") or []:
+                if (c[0], c[1]) in chung:
                     continue
-                ws.append([ma, ten_khoi, t, g, k.get("url") or ""])
-                nhom.setdefault(ma, {}).setdefault(f"{ten_khoi} - {t}" if ten_khoi else t, g)
+                muc = c[2] if len(c) > 2 else ""
+                ws.append([ma, ten_khoi, muc, c[0], c[1], k.get("url") or ""])
+                ghi_tong_hop(ma, ten_khoi, muc, c[0], c[1])
     for c in ws[1]:
         c.font = Font(bold=True)
-    for col, w in zip("ABCDE", (16, 28, 55, 60, 45)):
+    for col, w in zip("ABCDEF", (16, 28, 28, 50, 60, 45)):
         ws.column_dimensions[col].width = w
     th = wb.create_sheet("Tổng hợp")
     cot = []

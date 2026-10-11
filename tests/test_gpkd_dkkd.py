@@ -22,11 +22,16 @@ html = """<!-- saved from url=(70)https://dangkyquamang.dkkd.gov.vn/Forms/DW_DOC
 <tr><td colspan="2">Tiêu đề gộp</td></tr></table>
 <label for="g">Ghi chú</label><textarea id="g">abc</textarea>
 <dl><dt>Người đại diện</dt><dd>Nguyễn Văn A</dd></dl></body></html>"""
+def par(kk):
+    return [c[:2] for c in kk["cap"]]
+
+
 k = server.dkkd_doc_html(html)
 assert k["url"].endswith("DW_DOCUMENTEdit.aspx?h=720") and k["khoi"] == "Thông tin chung"
-assert k["cap"] == [["Tên doanh nghiệp", "CÔNG TY TNHH ABC"], ["Mã số DN", "0316267842"], ["Ngày cấp", "01/02/2020"],
+assert par(k) == [["Tên doanh nghiệp", "CÔNG TY TNHH ABC"], ["Mã số DN", "0316267842"], ["Ngày cấp", "01/02/2020"],
                     ["Loại hình", "TNHH 1TV"], ["Vốn điều lệ", "1.000.000.000"], ["Ghi chú", "abc"],
                     ["Người đại diện", "Nguyễn Văn A"]], k["cap"]
+assert [c[2] for c in k["cap"]][:5] == ["Thông tin chung"] * 5      # tiêu đề mục đứng trước bảng
 print("PASS 1: đọc file trang đã lưu đúng các cặp Tiêu đề : Giá trị (bỏ ô mật khẩu/ẩn).")
 
 # 1b) trang thật (ảnh người dùng gửi, bản .154 chỉ lấy được khung "Thông tin về hồ sơ"): dòng "Quốc gia: [ô chọn] [biểu
@@ -48,12 +53,12 @@ that = """<div>Trang chủ &gt; DANH SÁCH HỒ SƠ ĐĂNG KÝ &gt; Khối dữ 
 </table>"""
 k2 = server.dkkd_doc_html(that)
 assert k2["khoi"] == "Ngành nghề kinh doanh", k2["khoi"]
-assert ["Quốc gia", "Việt Nam"] in k2["cap"] and ["Số nhà/đường/phố/tổ/xóm/ấp/thôn", "28 đường số 3 KDC Khang An"] in k2["cap"]
-assert ["Số hồ sơ", "OD-0780566/26"] in k2["cap"]
+assert ["Quốc gia", "Việt Nam"] in par(k2) and ["Số nhà/đường/phố/tổ/xóm/ấp/thôn", "28 đường số 3 KDC Khang An"] in par(k2)
+assert ["Số hồ sơ", "OD-0780566/26"] in par(k2)
 T = "Danh sách ngành nghề kinh doanh"
 for c in ([f"{T} #1 - Mã số ngành nghề kinh doanh", "6202"], [f"{T} #1 - Tên ngành nghề kinh doanh", "Tư vấn máy vi tính"],
           [f"{T} #2 - Có phải là ngành chính?", "Có"], [f"{T} #2 - Mã số ngành nghề kinh doanh", "6201"]):
-    assert c in k2["cap"], (c, k2["cap"])
+    assert c in par(k2), (c, k2["cap"])
 assert not any(x[0].startswith(f"{T} #1 - Có phải") for x in k2["cap"])          # radio không chọn -> bỏ
 assert not any("6202" == x[0] for x in k2["cap"])                                 # dòng bảng không bị đọc thành cặp
 print("PASS 1b: trang thật — ô chọn Địa chỉ (bỏ biểu tượng), bảng Ngành nghề từng dòng, tên khối từ 'Trang chủ > ...'.")
@@ -70,7 +75,7 @@ khoi = [k,
         {"url": U + "DW_DOCUMENTEdit.aspx?h=800", "khoi": "Thông tin chung", "cap": [["Mã số DN", "0300000001"]]}]
 wb = openpyxl.load_workbook(io.BytesIO(server.dkkd_xuat_excel(khoi)))
 ct = [[c.value for c in r] for r in wb["Chi tiết"].iter_rows()]
-assert ct[0] == ["Hồ sơ", "Khối", "Trường", "Giá trị", "Link"] and len(ct) == 1 + 7 + 1 + 1
+assert ct[0] == ["Hồ sơ", "Khối", "Mục", "Trường", "Giá trị", "Link"] and len(ct) == 1 + 7 + 1 + 1
 th = [[c.value for c in r] for r in wb["Tổng hợp"].iter_rows()]
 assert th[0][0] == "Hồ sơ" and "Thông tin chung - Tên doanh nghiệp" in th[0] and "Địa chỉ - Địa chỉ trụ sở" in th[0]
 assert [r[0] for r in th[1:]] == ["h=720", "h=800"]
@@ -90,8 +95,8 @@ dc = {"url": U + "Addr.aspx", "khoi": "Địa chỉ", "cap": HS + [["Quốc gia"
 wb2 = openpyxl.load_workbook(io.BytesIO(server.dkkd_xuat_excel([dc, cs, dd])))
 ct2 = [[c.value for c in r] for r in wb2["Chi tiết"].iter_rows(min_row=2)]
 assert {r[0] for r in ct2} == {"OD-0780566/26"}
-assert sum(1 for r in ct2 if r[2] == "Số hồ sơ") == 1 and [r[1] for r in ct2 if r[2] == "Số hồ sơ"] == ["Thông tin về hồ sơ"]
-assert [(r[1], r[3]) for r in ct2 if r[2] == "Họ và tên"] == [("Thông tin về chủ sở hữu", "NGUYỄN VĂN A"),
+assert sum(1 for r in ct2 if r[3] == "Số hồ sơ") == 1 and [r[1] for r in ct2 if r[3] == "Số hồ sơ"] == ["Thông tin về hồ sơ"]
+assert [(r[1], r[4]) for r in ct2 if r[3] == "Họ và tên"] == [("Thông tin về chủ sở hữu", "NGUYỄN VĂN A"),
                                                               ("Người đại diện theo pháp luật", "NGUYỄN VĂN A")]
 th2 = [[c.value for c in r] for r in wb2["Tổng hợp"].iter_rows()]
 assert len(th2) == 2 and th2[0].count("Thông tin về chủ sở hữu - Họ và tên") == 1 and "Người đại diện theo pháp luật - Họ và tên" in th2[0]
@@ -110,6 +115,8 @@ assert "it.a.click()" in than and "fm.target = '__gpkdCuaSo'" in than and "windo
 # bấm "Xem" từng dòng để lấy chi tiết (mở lại danh sách rồi bấm dòng kế tiếp)
 assert "/^xem$/i.test(sachT(a.textContent))" in than and "laTrangTong(r)" in than and "dsXem(" in than and "xem chi tiết dòng" in than and "tenDongXem(" in than
 assert "khopTen" not in than
+# tên mục (tiêu đề/ dòng 1 ô trước bảng) + ô giới tính dạng chữ đậm (không phải <input>)
+assert "chonTrongNhom(" in than and "mucHienTai" in than and "mucCua(" in than
 assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
 # tự đọc mọi khối trong menu "KHỐI DỮ LIỆU" (dừng ở "VĂN BẢN ĐÍNH KÈM") CHỈ bằng GET trong phiên của người dùng
 assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "cacTrang(document)" in than and "chan_doan_menu" in than and "credentials: 'same-origin'" in than
@@ -133,6 +140,17 @@ assert "moTmdt" not in html_ui and "/api/tmdt/" not in src
 assert 'onclick="moGpkd()"' in html_ui and "/api/dkkd/doc-file" in html_ui and "gpkdThemDan" in html_ui
 assert "KHÔNG dán mã vào thanh địa chỉ" in html_ui and "Thêm trang..." in html_ui   # Chrome bỏ 'javascript:' khi dán vào thanh địa chỉ
 assert "/api/dkkd/mo-trinh-duyet" not in src and "chrome_dkkd" not in src
+# 6) màn hình xem trong phần mềm: menu khối, thông tin hồ sơ, mục, bảng danh sách có màu dòng
+for kw in ("gpkdVeXem", "gpkdHtmlKhoi", "KHỐI DỮ LIỆU", "Thông tin về hồ sơ", "gpkdBang", "GPKD_THU_TU"):
+    assert kw in html_ui, kw
+# 7) trường cùng tên ở 2 mục khác nhau (2 địa chỉ) không bị lẫn khi xuất Excel: giữ cả 2 và thêm (2) nếu cùng mục
+m1 = {"url": U + "Owner.aspx", "khoi": "Chủ sở hữu", "cap": [["Số nhà", "618", "Địa chỉ thường trú"], ["Số nhà", "194", "Địa chỉ liên lạc"]]}
+wb3 = openpyxl.load_workbook(io.BytesIO(server.dkkd_xuat_excel([m1])))
+ct3 = [[c.value for c in r] for r in wb3["Chi tiết"].iter_rows(min_row=2)]
+assert [(r[2], r[4]) for r in ct3] == [("Địa chỉ thường trú", "618"), ("Địa chỉ liên lạc", "194")]
+th3 = [[c.value for c in r] for r in wb3["Tổng hợp"].iter_rows()]
+assert "Chủ sở hữu - Địa chỉ thường trú - Số nhà" in th3[0] and "Chủ sở hữu - Địa chỉ liên lạc - Số nhà" in th3[0]
+print("PASS 6-7: màn hình xem + xuất Excel giữ tên mục.")
 print("PASS 5: giao diện mới (bookmark + file đã lưu), không còn mở Chrome tự động.")
 
 print("\nALL DONE")

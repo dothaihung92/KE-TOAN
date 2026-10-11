@@ -4355,14 +4355,108 @@ function gpkdVeDs(){
       <b>Đã gom ${gpkdKhoi.length} khối — ${tong} trường</b>
       <button class="btn" onclick="gpkdXuat()">📊 Xuất Excel</button>
       <button class="btn ghost sm" onclick="gpkdXoaHet()">🗑 Xoá hết</button></div>
-    ${window.__gpkdChanDoan?`<div style="background:#f6f6f6;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px;white-space:pre-wrap">🔎 ${gpkdEsc(window.__gpkdChanDoan)}</div>`:''}
-    <div style="max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:10px">
+    ${window.__gpkdChanDoan?`<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">🔎 Chẩn đoán lúc lấy dữ liệu</summary><div style="background:#f6f6f6;border-radius:8px;padding:8px 10px;font-size:12px;white-space:pre-wrap">${gpkdEsc(window.__gpkdChanDoan)}</div></details>`:''}
+    <div id="gpkdXem"></div>
+    <details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;font-weight:600">🗂 Danh sách khối đã gom (xoá từng khối)</summary>
+    <div style="max-height:40vh;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:6px">
     <table style="border-collapse:collapse;font-size:12.5px;width:100%"><thead style="position:sticky;top:0;background:#fdf3ee"><tr>
       <th style="padding:6px;text-align:left">Khối</th><th style="padding:6px;text-align:left">Số trường</th><th style="padding:6px;text-align:left">Link / file</th><th></th></tr></thead><tbody>
-    ${gpkdKhoi.map((k,i)=>`<tr><td style="padding:4px 6px"><b>${gpkdEsc(k.khoi||k.tieu_de||'(không tên)')}</b><div style="font-size:11px;color:var(--muted)">${gpkdEsc(k.cap.slice(0,3).map(c=>c[0]+': '+c[1]).join(' · ').slice(0,160))}</div></td>
+    ${gpkdKhoi.map((k,i)=>`<tr><td style="padding:4px 6px"><b>${gpkdEsc(k.khoi||k.tieu_de||'(không tên)')}</b></td>
       <td style="padding:4px 6px">${k.cap.length}</td><td style="padding:4px 6px;font-size:11px;word-break:break-all">${gpkdEsc(k.url||k.ten_file)}</td>
       <td style="padding:4px 6px"><button class="btn ghost sm" onclick="gpkdXoa(${i})">✖</button></td></tr>`).join('')}
-    </tbody></table></div>`;
+    </tbody></table></div></details>`;
+  gpkdVeXem();
+}
+/* ----- MÀN HÌNH XEM hồ sơ đã gom — bố cục giống cổng đăng ký kinh doanh: menu KHỐI DỮ LIỆU bên trái, "Thông tin về hồ sơ" ở trên, từng khối chia theo mục, danh sách hiện thành bảng ----- */
+const GPKD_THU_TU=['hình thức đăng ký','địa chỉ','ngành nghề kinh doanh','thông tin về chủ sở hữu','tên doanh nghiệp/đơn vị trực thuộc','thông tin về vốn','thông tin về người đại diện theo ủy quyền','người đại diện theo pháp luật','thông tin về thuế','thông tin về chủ sở hữu hưởng lợi','thông tin ủy quyền','người nộp hồ sơ','khối dữ liệu'];
+let gpkdHs='', gpkdChon=-1;
+const gpkdChuan=t=>String(t||'').toLowerCase().replace(/\s+/g,' ').trim();
+const gpkdCha=k=>String(k.khoi||'').split(' - chi tiết:')[0];
+const gpkdLaCon=k=>/ - chi tiết:/.test(k.khoi||'');
+function gpkdMaHoSo(k){
+  const c=(k.cap||[]).find(x=>/^số hồ sơ$/i.test(x[0]));
+  return c&&c[1]?c[1]:'';
+}
+function gpkdNhomHoSo(){
+  const m=new Map(), thieu=[];
+  gpkdKhoi.forEach((k,i)=>{const ma=gpkdMaHoSo(k);if(!ma){thieu.push(i);return}if(!m.has(ma))m.set(ma,[]);m.get(ma).push(i)});
+  if(thieu.length){                      // khối không ghi "Số hồ sơ": gộp vào hồ sơ duy nhất (nếu chỉ có 1)
+    if(m.size===1)m.get([...m.keys()][0]).push(...thieu);
+    else m.set('(không rõ số hồ sơ)',thieu);
+  }
+  return m;
+}
+function gpkdThuTu(i){
+  const k=gpkdKhoi[i],idx=GPKD_THU_TU.indexOf(gpkdChuan(gpkdCha(k)));
+  return [idx<0?99:idx,gpkdLaCon(k)?1:0,i];
+}
+function gpkdChung(ds){
+  if(ds.length<2)return [];
+  let chung=null;
+  ds.forEach(i=>{const t=new Set(gpkdKhoi[i].cap.map(c=>c[0]+'\u0001'+c[1]));chung=chung===null?t:new Set([...chung].filter(x=>t.has(x)))});
+  const dau=gpkdKhoi[ds[0]].cap.filter(c=>chung.has(c[0]+'\u0001'+c[1]));
+  return dau.filter((c,j)=>dau.findIndex(d=>d[0]===c[0]&&d[1]===c[1])===j);
+}
+function gpkdBang(b){
+  const cot=b.cot.filter(c=>c!=='Màu dòng'),coMau=b.cot.includes('Màu dòng');
+  const nen={'đỏ':'#fde8e6','xanh dương':'#e3f0fb','xanh lá':'#e6f4e6'};
+  return `<div style="overflow:auto;margin:6px 0 12px"><table style="border-collapse:collapse;width:100%;font-size:13px">
+    <thead><tr style="background:#8c9a8c;color:#fff"><th style="padding:6px 8px;text-align:left;width:40px">#</th>${cot.map(c=>`<th style="padding:6px 8px;text-align:left">${gpkdEsc(c)}</th>`).join('')}</tr></thead><tbody>
+    ${[...b.dong.entries()].map(([i,r])=>`<tr style="background:${nen[r['Màu dòng']]||'#fff'};border-bottom:1px solid #e3e6e3"><td style="padding:6px 8px;color:#777">${gpkdEsc(i)}</td>${cot.map(c=>`<td style="padding:6px 8px">${gpkdEsc(r[c]||'')}</td>`).join('')}</tr>`).join('')}
+    </tbody></table>${coMau?'<div style="font-size:11.5px;color:var(--muted)">Nền <span style="background:#fde8e6;padding:0 6px">đỏ</span>: bị xoá · nền <span style="background:#e3f0fb;padding:0 6px">xanh</span>: bị thay đổi (theo chú thích màu trên cổng).</div>':''}</div>`;
+}
+function gpkdHtmlKhoi(k,chung){
+  const cs=new Set(chung.map(c=>c[0]+'\u0001'+c[1]));
+  const cap=(k.cap||[]).filter(c=>!cs.has(c[0]+'\u0001'+c[1]));
+  const doan=[],bang={},re=/^(.*) #(\d+) - (.*)$/;
+  cap.forEach(c=>{
+    const m=c[0].match(re);
+    if(m){
+      if(!bang[m[1]]){bang[m[1]]={cot:[],dong:new Map()};doan.push({loai:'bang',ten:m[1],b:bang[m[1]]})}
+      const b=bang[m[1]];if(!b.cot.includes(m[3]))b.cot.push(m[3]);
+      if(!b.dong.has(m[2]))b.dong.set(m[2],{});b.dong.get(m[2])[m[3]]=c[1];
+    }else{
+      const muc=c[2]||'',l=doan[doan.length-1];
+      if(l&&l.loai==='muc'&&l.muc===muc)l.dong.push(c);else doan.push({loai:'muc',muc,dong:[c]});
+    }
+  });
+  if(!doan.length)return '<div class="hint">Khối này không có dữ liệu.</div>';
+  return doan.map(d=>d.loai==='bang'
+    ?`<div style="font-weight:700;margin:10px 0 2px;color:#3d4a3d">${gpkdEsc(d.ten)}</div>${gpkdBang(d.b)}`
+    :`<div style="margin-bottom:10px">${d.muc?`<div style="background:#e9eee6;border:1px solid #d3dccf;padding:5px 10px;font-weight:700;color:#3d4a3d">${gpkdEsc(d.muc)}</div>`:''}
+       <div style="display:grid;grid-template-columns:minmax(200px,38%) 1fr;border:1px solid #e3e6e3;border-top:${d.muc?'0':'1px solid #e3e6e3'}">
+       ${d.dong.map(c=>`<div style="padding:6px 10px;font-weight:600;color:#444;background:#fafbfa;border-top:1px solid #eef0ee">${gpkdEsc(c[0])}</div><div style="padding:6px 10px;border-top:1px solid #eef0ee;word-break:break-word">${gpkdEsc(c[1])}</div>`).join('')}</div></div>`).join('');
+}
+function gpkdChonKhoi(i){gpkdChon=i;gpkdVeXem()}
+function gpkdChonHoSo(ma){gpkdHs=ma;gpkdChon=-1;gpkdVeXem()}
+function gpkdVeXem(){
+  const box=document.getElementById('gpkdXem');if(!box)return;
+  const nhom=gpkdNhomHoSo();if(!nhom.size){box.innerHTML='';return}
+  if(!nhom.has(gpkdHs))gpkdHs=[...nhom.keys()][0];
+  const ds=nhom.get(gpkdHs).slice().sort((a,b)=>{const x=gpkdThuTu(a),y=gpkdThuTu(b);return x[0]-y[0]||x[1]-y[1]||x[2]-y[2]});
+  if(!ds.includes(gpkdChon))gpkdChon=ds.find(i=>gpkdChuan(gpkdCha(gpkdKhoi[i]))!=='khối dữ liệu')??ds[0];
+  const chung=gpkdChung(ds),k=gpkdKhoi[gpkdChon];
+  const ten=(chung.find(c=>/tên doanh nghiệp viết bằng tiếng việt/i.test(c[0]))||[])[1]||'';
+  const mst=(chung.find(c=>/^mã số doanh nghiệp$/i.test(c[0]))||[])[1]||'';
+  box.innerHTML=`<div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <b style="font-size:15px">👁 Xem thông tin hồ sơ${ten?' — '+gpkdEsc(ten):''}</b>${mst?`<span class="hint" style="margin:0">MST ${gpkdEsc(mst)}</span>`:''}
+      ${nhom.size>1?`<select onchange="gpkdChonHoSo(this.value)" style="padding:5px;border:1px solid var(--line);border-radius:8px">${[...nhom.keys()].map(m=>`<option value="${gpkdEsc(m)}" ${m===gpkdHs?'selected':''}>Hồ sơ ${gpkdEsc(m)}</option>`).join('')}</select>`:`<span class="hint" style="margin:0">Hồ sơ ${gpkdEsc(gpkdHs)}</span>`}
+    </div>
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:250px;flex:none;border:1px solid #e3e6e3;border-radius:8px;padding:6px 0;background:#fafbfa">
+        <div style="font-weight:800;padding:4px 12px;color:#3d4a3d">KHỐI DỮ LIỆU</div>
+        ${ds.map(i=>{const kk=gpkdKhoi[i],con=gpkdLaCon(kk),ten=con?(kk.khoi.split(' - chi tiết:')[1]||'').trim():kk.khoi;
+          return `<div onclick="gpkdChonKhoi(${i})" style="cursor:pointer;padding:5px 12px 5px ${con?'28px':'12px'};font-size:13px;font-style:${con?'normal':'italic'};font-weight:${i===gpkdChon?'700':'400'};background:${i===gpkdChon?'#e9eee6':'transparent'};border-bottom:1px solid #eef0ee">
+            <span style="color:#3aa855">✔</span> ${con?'↳ ':''}${gpkdEsc(ten||'(không tên)')}</div>`}).join('')}
+      </div>
+      <div style="flex:1;min-width:320px">
+        ${chung.length?`<details style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:700;background:#e9eee6;border:1px solid #d3dccf;padding:6px 10px">Thông tin về hồ sơ</summary>
+          <div style="display:grid;grid-template-columns:minmax(220px,38%) 1fr;border:1px solid #e3e6e3;border-top:0">${chung.map(c=>`<div style="padding:5px 10px;font-weight:600;color:#444;background:#fafbfa;border-top:1px solid #eef0ee">${gpkdEsc(c[0])}</div><div style="padding:5px 10px;border-top:1px solid #eef0ee">${gpkdEsc(c[1])}</div>`).join('')}</div></details>`:''}
+        <div style="font-size:15px;font-weight:800;margin:4px 0 8px;color:#2d5a3d">${gpkdEsc(k.khoi||k.tieu_de||'')}</div>
+        ${gpkdHtmlKhoi(k,chung)}
+      </div>
+    </div></div>`;
 }
 async function gpkdXuat(){
   try{const r=await api('/api/dkkd/xuat-excel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoi:gpkdKhoi})});
