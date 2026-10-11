@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.168"
+APP_BUILD = "2026-10-13.169"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45287,12 +45287,53 @@ def dkkd_xuat_excel_api(body: dict = Body(...)):
 GPKD_MAU_RIENG_DIR = os.path.join(DATA_DIR, "gpkd_mau_rieng")
 
 
+def _gpkd_thieu_file():
+    """File dự án cần cho mục Soạn hồ sơ GPKD mà máy chưa có (bản cập nhật đầu tiên chạy update.py CŨ nên chưa tải file mới)."""
+    can = [os.path.join(BASE_DIR, "gpkd_soan.py"),
+           os.path.join(BASE_DIR, "templates", "gpkd", "TT121_2026_PL1.docx"),
+           os.path.join(BASE_DIR, "templates", "gpkd", "TT68_2025_PL1.docx")]
+    return [x for x in can if not os.path.isfile(x)]
+
+
+def _gpkd_tu_khac_phuc(thieu_thu_vien):
+    """Tự tải file dự án còn thiếu (chạy update.py — đã là bản mới có danh sách file mới) và tự cài python-docx nếu thiếu."""
+    import sys
+    ghi = []
+    if _gpkd_thieu_file():
+        try:
+            import update as _up
+            _up.main()
+            ghi.append("đã tải thêm file cập nhật")
+        except Exception as e:
+            ghi.append(f"không tải được file cập nhật ({type(e).__name__}: {str(e)[:80]})")
+    if thieu_thu_vien:
+        try:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "python-docx"], capture_output=True, text=True, timeout=180)
+            ghi.append("đã cài python-docx" if r.returncode == 0 else "cài python-docx thất bại: " + (r.stderr or r.stdout)[-160:])
+        except Exception as e:
+            ghi.append(f"không cài được python-docx ({type(e).__name__}: {str(e)[:80]})")
+    return ghi
+
+
 def _gpkd_soan_mod():
+    import importlib
     try:
         import gpkd_soan as _m
-        return _m
+        if not _gpkd_thieu_file():
+            return _m
+        loi = ImportError("thiếu file biểu mẫu")
     except ImportError as e:
-        raise HTTPException(500, f"Thiếu thư viện để soạn hồ sơ Word ({e}). Hãy chạy: pip install python-docx")
+        loi = e
+    ghi = _gpkd_tu_khac_phuc("docx" in str(loi))
+    importlib.invalidate_caches()
+    try:
+        import gpkd_soan as _m
+        if not _gpkd_thieu_file():
+            return _m
+    except ImportError as e2:
+        loi = e2
+    raise HTTPException(500, f"Chưa soạn hồ sơ Word được ({loi}). {'; '.join(ghi)}. "
+                             f"Hãy tắt hẳn rồi mở lại phần mềm (tự cập nhật + cài thư viện); nếu vẫn lỗi chạy: pip install python-docx")
 
 
 def _gpkd_ten_mau_rieng(ten):

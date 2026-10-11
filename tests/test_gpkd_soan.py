@@ -133,3 +133,38 @@ for kw in ('onclick="moSoanGpkd()"', "Soạn hồ sơ GPKD", "/api/gpkd-soan/tao
 print("PASS 7: cập nhật tự động có file mẫu, giao diện có mục Soạn hồ sơ GPKD.")
 
 print("\nALL DONE")
+
+
+# --- Tự khắc phục khi máy thiếu file/thư viện (lỗi "No module named 'gpkd_soan'") ---
+def _test_tu_khac_phuc():
+    import importlib
+    import server as sv
+    goc_kp, goc_mod = sv._gpkd_tu_khac_phuc, sys.modules.get("gpkd_soan")
+    goi = []
+    try:
+        # 1) không khắc phục được -> HTTP 500 báo rõ cách xử lý
+        sys.modules["gpkd_soan"] = None
+        sv._gpkd_tu_khac_phuc = lambda tv: goi.append(tv) or ["không tải được"]
+        try:
+            sv._gpkd_soan_mod()
+            raise AssertionError("phải báo lỗi")
+        except sv.HTTPException as e:
+            assert e.status_code == 500 and "mở lại phần mềm" in e.detail and "pip install python-docx" in e.detail
+        assert len(goi) == 1
+        # 2) khắc phục xong (module nạp được) -> dùng được, không lỗi
+        def _kp(tv):
+            sys.modules.pop("gpkd_soan", None)
+            return ["đã tải"]
+        sv._gpkd_tu_khac_phuc = _kp
+        importlib.invalidate_caches()
+        assert sv._gpkd_soan_mod().__name__ == "gpkd_soan"
+    finally:
+        sv._gpkd_tu_khac_phuc = goc_kp
+        if goc_mod is not None:
+            sys.modules["gpkd_soan"] = goc_mod
+        else:
+            sys.modules.pop("gpkd_soan", None)
+
+
+_test_tu_khac_phuc()
+print("PASS: tự khắc phục thiếu file/thư viện.")
