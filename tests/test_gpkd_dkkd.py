@@ -29,6 +29,35 @@ assert k["cap"] == [["Tên doanh nghiệp", "CÔNG TY TNHH ABC"], ["Mã số DN"
                     ["Người đại diện", "Nguyễn Văn A"]], k["cap"]
 print("PASS 1: đọc file trang đã lưu đúng các cặp Tiêu đề : Giá trị (bỏ ô mật khẩu/ẩn).")
 
+# 1b) trang thật (ảnh người dùng gửi, bản .154 chỉ lấy được khung "Thông tin về hồ sơ"): dòng "Quốc gia: [ô chọn] [biểu
+#     tượng ?]" (giá trị KHÔNG ở ô cuối), bảng danh sách Ngành nghề nhiều cột, tên khối lấy từ dòng "Trang chủ > ... > Khối"
+that = """<div>Trang chủ &gt; DANH SÁCH HỒ SƠ ĐĂNG KÝ &gt; Khối dữ liệu &gt; Ngành nghề kinh doanh</div>
+<table><tr><td><div>Thông tin về hồ sơ</div><table>
+ <tr><td>Dừng thực hiện thủ tục đăng ký doanh nghiệp:</td><td><input type="checkbox" disabled></td></tr>
+ <tr><td>Số hồ sơ:</td><td>OD-0780566/26</td></tr></table></td></tr></table>
+<table>
+ <tr><td>Quốc gia:</td><td><select disabled><option>Chọn</option><option selected>Việt Nam</option></select></td><td><img src="h.png"></td></tr>
+ <tr><td>Số nhà/đường/phố/tổ/xóm/ấp/thôn:</td><td><input value="28 đường số 3 KDC Khang An"></td><td><img src="h.png"></td></tr>
+</table>
+<div>Danh sách ngành nghề kinh doanh</div>
+<div>Lưu ý: Ngành, nghề kinh doanh bị thay đổi<br>Màu đỏ: bị xóa</div>
+<table>
+ <tr><th><input type="checkbox"></th><th>Có phải là ngành chính?</th><th>Mã số ngành nghề kinh doanh</th><th>Tên ngành nghề kinh doanh</th></tr>
+ <tr><td><input type="checkbox"></td><td><input type="radio" name="c"></td><td>6202</td><td>Tư vấn máy vi tính</td></tr>
+ <tr><td><input type="checkbox"></td><td><input type="radio" name="c" checked></td><td>6201</td><td>Lập trình máy vi tính</td></tr>
+</table>"""
+k2 = server.dkkd_doc_html(that)
+assert k2["khoi"] == "Ngành nghề kinh doanh", k2["khoi"]
+assert ["Quốc gia", "Việt Nam"] in k2["cap"] and ["Số nhà/đường/phố/tổ/xóm/ấp/thôn", "28 đường số 3 KDC Khang An"] in k2["cap"]
+assert ["Số hồ sơ", "OD-0780566/26"] in k2["cap"]
+T = "Danh sách ngành nghề kinh doanh"
+for c in ([f"{T} #1 - Mã số ngành nghề kinh doanh", "6202"], [f"{T} #1 - Tên ngành nghề kinh doanh", "Tư vấn máy vi tính"],
+          [f"{T} #2 - Có phải là ngành chính?", "Có"], [f"{T} #2 - Mã số ngành nghề kinh doanh", "6201"]):
+    assert c in k2["cap"], (c, k2["cap"])
+assert not any(x[0].startswith(f"{T} #1 - Có phải") for x in k2["cap"])          # radio không chọn -> bỏ
+assert not any("6202" == x[0] for x in k2["cap"])                                 # dòng bảng không bị đọc thành cặp
+print("PASS 1b: trang thật — ô chọn Địa chỉ (bỏ biểu tượng), bảng Ngành nghề từng dòng, tên khối từ 'Trang chủ > ...'.")
+
 # 2) endpoint đọc nhiều file: file không có dữ liệu -> báo lỗi riêng
 r = server.dkkd_doc_file({"files": [{"ten": "a.html", "noi_dung": html}, {"ten": "rong.html", "noi_dung": "<p>x</p>"}]})
 assert len(r["khoi"]) == 1 and r["khoi"][0]["ten_file"] == "a.html" and "rong.html" in r["loi"][0]
@@ -53,11 +82,22 @@ except server.HTTPException as e:
     assert e.status_code == 400
 print("PASS 3: gom các khối theo mã hồ sơ, xuất Chi tiết + Tổng hợp.")
 
+# 3b) gom theo "Số hồ sơ" (trang thật không có tham số h) + bỏ phần "Thông tin về hồ sơ" lặp lại ở mỗi khối
+dc = {"url": U + "DW_REORGANIZATIONEdit.aspx", "khoi": "Địa chỉ",
+      "cap": [["Số hồ sơ", "OD-0780566/26"], ["Quốc gia", "Việt Nam"]]}
+wb2 = openpyxl.load_workbook(io.BytesIO(server.dkkd_xuat_excel([dc, k2])))
+ct2 = [[c.value for c in r] for r in wb2["Chi tiết"].iter_rows(min_row=2)]
+assert {r[0] for r in ct2} == {"OD-0780566/26"}
+assert sum(1 for r in ct2 if r[2] == "Số hồ sơ") == 1 and sum(1 for r in ct2 if r[2] == "Quốc gia") == 1
+assert len(list(wb2["Tổng hợp"].iter_rows())) == 2
+print("PASS 3b: gom theo Số hồ sơ, không lặp lại phần thông tin chung.")
+
 # 4) bookmarklet: javascript: hợp lệ, chứa đúng đoạn đọc trang, chỉ copy vào clipboard (không gửi mạng)
 bm = server.dkkd_bookmarklet()
 assert bm.startswith("javascript:") and " " not in bm
 than = urllib.parse.unquote(bm[len("javascript:"):])
 assert "navigator.clipboard" in than and "querySelectorAll('tr')" in than
+assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
 assert "fetch(" not in than and "XMLHttpRequest" not in than and ".submit(" not in than and ".click()" not in than
 print("PASS 4: mã bookmark chỉ đọc trang và copy, không gửi/bấm gì.")
 
