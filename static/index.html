@@ -4328,6 +4328,9 @@ function gpkdThemDan(){
   try{const v=JSON.parse(t);ds=Array.isArray(v)?v:[v]}catch(e){}       // nút bookmark mới: 1 danh sách nhiều khối
   if(!ds){ds=[];for(const doan of t.split(/\n(?=\s*[\[{])/)){try{const v=JSON.parse(doan);ds.push(...(Array.isArray(v)?v:[v]))}catch(e){}}}
   for(const k of ds){if(gpkdThem(k))n++}
+  const cd=ds.map(k=>k&&k.chan_doan_menu).filter(Boolean)[0];
+  window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm (không tự mở được).`+
+    (cd.mau&&cd.mau.length?'\nCác mục menu: '+cd.mau.join(' | '):''):'';
   if(!n){toast('Không đọc được dữ liệu — hãy dán đúng đoạn nút bookmark đã copy','err');return}
   document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã thêm '+n+' khối','ok');
 }
@@ -4351,6 +4354,7 @@ function gpkdVeDs(){
       <b>Đã gom ${gpkdKhoi.length} khối — ${tong} trường</b>
       <button class="btn" onclick="gpkdXuat()">📊 Xuất Excel</button>
       <button class="btn ghost sm" onclick="gpkdXoaHet()">🗑 Xoá hết</button></div>
+    ${window.__gpkdChanDoan?`<div style="background:#f6f6f6;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:12px;white-space:pre-wrap">🔎 ${gpkdEsc(window.__gpkdChanDoan)}</div>`:''}
     <div style="max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:10px">
     <table style="border-collapse:collapse;font-size:12.5px;width:100%"><thead style="position:sticky;top:0;background:#fdf3ee"><tr>
       <th style="padding:6px;text-align:left">Khối</th><th style="padding:6px;text-align:left">Số trường</th><th style="padding:6px;text-align:left">Link / file</th><th></th></tr></thead><tbody>

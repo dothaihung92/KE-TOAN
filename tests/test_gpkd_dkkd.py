@@ -100,7 +100,7 @@ assert "navigator.clipboard" in than and "querySelectorAll('tr')" in than
 assert "contentDocument" in than and "chan_doan" in than    # đọc cả khung con (iframe) cùng nguồn + báo chẩn đoán
 assert "// " not in than, "mã bookmark nằm trên 1 dòng: dòng chú thích '//' sẽ nuốt mất phần mã phía sau"
 # tự đọc mọi khối trong menu "KHỐI DỮ LIỆU" (dừng ở "VĂN BẢN ĐÍNH KÈM") CHỈ bằng GET trong phiên của người dùng
-assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "credentials: 'same-origin'" in than
+assert "khối dữ liệu" in than and "văn bản đính kèm" in than and "cacTrang(document)" in than and "chan_doan_menu" in than and "credentials: 'same-origin'" in than
 assert "method" not in than and "POST" not in than and "XMLHttpRequest" not in than
 assert ".submit(" not in than and ".click()" not in than and "__doPostBack(" not in than
 assert "javascript:" in than and "cam(t)" in than                       # bỏ link javascript:/postback và link xoá/nộp/gửi...
