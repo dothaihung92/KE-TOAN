@@ -203,4 +203,9 @@ assert "gpkdKhoi=[];       // dữ liệu mới thay HẲN" in html_ui or "dữ 
 assert "var n = 2; while (tenDaCo[k.khoi + ' (' + n + ')'])" in server._JS_DKKD_TAT_CA
 print("PASS: bỏ Cách B; dữ liệu mới thay dữ liệu cũ; chi tiết trùng tên được đánh số.")
 
+# Dòng chi tiết đặt tên theo NGƯỜI (cột Tên) kể cả khi tiêu đề cột là liên kết sắp xếp; dự phòng: ô viết HOA toàn bộ; bản nút không bị mất khi khối đầu bị bỏ
+assert "[A-ZÀ-ỸĐ][A-ZÀ-ỸĐ" in server._JS_DKKD_TAT_CA and "r !== tr && r.cells && [].slice.call(r.cells).some(" in server._JS_DKKD_TAT_CA
+assert "gpkdKhoi[0].ban_nut=banNut" in html_ui
+print("PASS: tên dòng chi tiết theo người; bản nút bookmark được giữ.")
+
 print("\nALL DONE")

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.193"
+APP_BUILD = "2026-10-13.194"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45013,10 +45013,12 @@ function dsXem(doc) {
 function tenDongXem(a, k) {
   var tr = a.closest('tr'), c = [].slice.call(tr.cells || []), tb = tr.closest('table'), tenCot = -1;
   if (tb) {
-    var hs = [].slice.call(tb.rows || []).filter(function (r) { return r !== tr && r.cells && !r.querySelector('a') && [].slice.call(r.cells).some(function (h) { return /^(họ (và )?tên|tên)$/i.test(sachT(h.textContent)); }); })[0];
+    var hs = [].slice.call(tb.rows || []).filter(function (r) { return r !== tr && r.cells && [].slice.call(r.cells).some(function (h) { return /^(họ (và )?tên|tên)$/i.test(sachT(h.textContent)); }); })[0];
     if (hs) [].slice.call(hs.cells).forEach(function (h, i) { if (tenCot < 0 && /^(họ (và )?tên|tên)$/i.test(sachT(h.textContent))) tenCot = i; });
   }
   if (tenCot >= 0 && c[tenCot] && sachT(c[tenCot].textContent)) return sachT(c[tenCot].textContent).slice(0, 60);
+  var hoa = c.map(function (x) { return sachT(x.textContent); }).filter(function (t) { return /^[A-ZÀ-ỸĐ][A-ZÀ-ỸĐ\s.'-]{3,60}$/.test(t) && !/\d/.test(t); })[0];
+  if (hoa) return hoa.slice(0, 60);
   var ok = c.map(function (x) { return sachT(x.textContent); }).filter(function (t) { return t && !/^(xem|sửa đổi|sửa|xóa|xoá)$/i.test(t) && !/^\d{9,}$/.test(t); });
   return (ok[0] || '').slice(0, 60) || ('#' + (k + 1));
 }

@@ -4346,7 +4346,9 @@ function gpkdThemDan(){
   if(!ds){ds=[];for(const doan of t.split(/\n(?=\s*[\[{])/)){try{const v=JSON.parse(doan);ds.push(...(Array.isArray(v)?v:[v]))}catch(e){}}}
   const mMoi=gpkdMst(ds),mCu=gpkdMst(gpkdKhoi),soCu=gpkdKhoi.length;
   if(ds.some(k=>k&&Array.isArray(k.cap)&&k.cap.length))gpkdKhoi=[];       // dữ liệu mới thay HẲN dữ liệu cũ của công ty này (không cần bấm Xoá hết)
+  const banNut=(ds.find(k=>k&&k.ban_nut)||{}).ban_nut||'';
   for(const k of ds){if(gpkdThem(k))n++}
+  if(banNut&&gpkdKhoi.length)gpkdKhoi[0].ban_nut=banNut;     // khối đầu tiên ("Khối dữ liệu") bị bỏ qua nên gắn bản nút vào khối còn lại
   const cd=ds.map(k=>k&&k.chan_doan_menu).filter(Boolean)[0];
   window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm.`+
     (cd.loi&&cd.loi.length?`\n⚠ ${cd.loi.length} khối chưa lấy được: `+cd.loi.map(x=>x.split(':')[0]).join(', '):'')+
