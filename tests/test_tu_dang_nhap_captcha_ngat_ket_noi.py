@@ -142,4 +142,54 @@ finally:
 assert not ok and lan == 1 and "404" in msg
 print("PASS 5: lỗi mã HTTP vẫn báo ngay như cũ.")
 
+# 6) Lỗi kết nối ở bước GỬI ĐĂNG NHẬP (không phải lấy captcha) — ca thật tra cứu hàng loạt lâu: ('Connection aborted.', RemoteDisconnected(...)).
+#    Trước đây thử lại NGAY trên kết nối hỏng nên hết 8 lượt sau vài giây rồi báo "Tự đăng nhập thất bại". Nay: bắt đầu bằng kết nối mới,
+#    gặp lỗi kết nối thì mở kết nối mới + chờ 5s, 10s rồi thử lại.
+class _Client6:
+    def __init__(self):
+        self.moi = 0
+        self.dang_nhap = 0
+        self._token_dead = True
+
+    def get_captcha(self):
+        return {"key": "K", "content": "<svg/>"}
+
+    def _dung_lai_session(self, ep_http11=True):
+        self.moi += 1
+
+    def login(self, **k):
+        self.dang_nhap += 1
+        if self.dang_nhap <= 2:
+            raise Exception("('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))")
+
+
+cl6 = _Client6()
+ngu = []
+server.db = lambda: _Conn()
+server.get_client = lambda cid: cl6
+server._solve_captcha = lambda content, drv=None: "abcd"
+server.time.sleep = lambda s: ngu.append(s)
+try:
+    tb = []
+    ok, msg, lan, _ = server._tu_dong_dang_nhap(1, so_lan=8, progress=tb.append)
+finally:
+    server.db, server.get_client, server._solve_captcha, server.time.sleep = goc
+assert ok and lan == 3 and cl6.dang_nhap == 3, (ok, msg, lan)
+assert ngu == [5, 10], ngu
+assert cl6.moi == 3, cl6.moi          # 1 lần đầu + 2 lần sau lỗi kết nối
+assert any("ngắt kết nối khi đăng nhập" in x for x in tb)
+# hết lượt vẫn chỉ toàn lỗi kết nối -> thông báo có hướng dẫn
+cl7 = _Client6()
+cl7.login = lambda **k: (_ for _ in ()).throw(Exception("('Connection aborted.', RemoteDisconnected('x'))"))
+server.db = lambda: _Conn()
+server.get_client = lambda cid: cl7
+server._solve_captcha = lambda content, drv=None: "abcd"
+server.time.sleep = lambda s: None
+try:
+    ok, msg, lan, _ = server._tu_dong_dang_nhap(1, so_lan=3)
+finally:
+    server.db, server.get_client, server._solve_captcha, server.time.sleep = goc
+assert not ok and "ngắt kết nối" in msg and "Connection aborted" in msg
+print("PASS 6: lỗi kết nối khi gửi đăng nhập -> kết nối mới + chờ rồi thử lại; hết lượt có hướng dẫn rõ.")
+
 print("\nALL DONE")

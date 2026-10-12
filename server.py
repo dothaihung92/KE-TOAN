@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.195"
+APP_BUILD = "2026-10-13.196"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2736,6 +2736,12 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
     client = get_client(cid)
     last_err = ""
     tried = []
+    # Kết nối giữ từ lúc tra cứu/tải hóa đơn lâu trước đó thường đã bị máy chủ đóng ngầm (đứng im lâu) -> lần gửi đầu bị "Connection aborted /
+    # RemoteDisconnected". Mỗi lần tự đăng nhập BẮT ĐẦU bằng kết nối mới (giữ header + cookie WAF).
+    try:
+        client._dung_lai_session(ep_http11=getattr(client, "_http11", False))
+    except Exception:
+        pass
     for lan in range(1, so_lan + 1):
         if progress:
             progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan} (đang giải captcha)...")
@@ -2784,9 +2790,26 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
             return True, f"Đăng nhập tự động thành công (lần {lan})", lan, tried
         except Exception as e:
             last_err = str(e)
+            if _la_loi_ket_noi(e):
+                # Lỗi KẾT NỐI khi gửi đăng nhập (trang Thuế ngắt kết nối — "Connection aborted/RemoteDisconnected"), KHÔNG phải sai mã captcha:
+                # mở kết nối mới, chờ tăng dần rồi thử lại (trước đây thử lại ngay trên kết nối hỏng nên hết lượt sau vài giây).
+                cho = min(5 * lan, 30)
+                if progress:
+                    progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối khi đăng nhập, "
+                             f"đợi {cho}s rồi thử lại bằng kết nối mới...")
+                try:
+                    client._dung_lai_session(ep_http11=True)
+                except Exception:
+                    pass
+                if lan < so_lan:
+                    time.sleep(cho)
+                continue
             if progress:
                 progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: sai mã/lỗi đăng nhập, thử lại...")
             continue
+    if _la_loi_ket_noi(last_err):
+        return False, (f"Tự đăng nhập thất bại sau {so_lan} lần: trang Thuế liên tục ngắt kết nối "
+                       f"(thường do tra cứu quá dồn dập — hãy chạy lại sau vài phút hoặc giảm số công ty chạy cùng lúc). Lỗi cuối: {last_err}"), so_lan, tried
     return False, f"Tự đăng nhập thất bại sau {so_lan} lần. Lỗi cuối: {last_err}", so_lan, tried
 
 
