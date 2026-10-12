@@ -4301,11 +4301,11 @@ async function moGpkd(){
     <h3 style="margin:0 0 6px;color:#b5502d">Lấy thông tin GPKD — gom dữ liệu hồ sơ đăng ký kinh doanh (xem, lưu, xuất Excel)</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
       Cổng đăng ký kinh doanh đăng nhập qua <b>VNeID</b> — trang này không cho đăng nhập trong trình duyệt do phần mềm điều khiển,
-      nên bạn <b>đăng nhập và mở hồ sơ bằng Chrome bình thường</b> của bạn, rồi đưa dữ liệu vào đây theo 1 trong 2 cách.
+      nên bạn <b>đăng nhập và mở hồ sơ bằng Chrome bình thường</b> của bạn, rồi đưa dữ liệu vào đây bằng nút bookmark (Cách A).
       Phần mềm chỉ đọc dữ liệu, không gửi gì lên cổng.
     </div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
-      <legend style="font-weight:700;font-size:13px">Cách A — nút bookmark (nhanh)</legend>
+      <legend style="font-weight:700;font-size:13px">Lấy dữ liệu bằng nút bookmark</legend>
       <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (chỉ làm 1 lần): <b>kéo</b> nút dưới đây thả lên <b>thanh dấu trang</b> của Chrome — hoặc bấm <b>"Copy mã"</b> rồi làm theo hướng dẫn hiện ra.
         <div style="color:#c0392b;margin:4px 0">⚠️ KHÔNG dán mã vào thanh địa chỉ (ô gõ trang web) — Chrome sẽ tự bỏ chữ <code>javascript:</code> và chuyển sang tìm Google. Phải dán vào ô <b>URL của dấu trang</b>.</div>
         <a href="${gpkdEsc(bm)}" onclick="toast('Hãy KÉO nút này lên thanh dấu trang, không bấm ở đây','err');return false" style="display:inline-block;padding:4px 10px;border:1px solid #b5502d;border-radius:8px;color:#b5502d;font-weight:700;text-decoration:none">📋 Lấy dữ liệu GPKD</a>
@@ -4313,11 +4313,6 @@ async function moGpkd(){
       <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở <b>1 khối bất kỳ</b> của hồ sơ (có menu "KHỐI DỮ LIỆU" bên trái) → bấm nút bookmark: nút <b>tự đọc lần lượt TẤT CẢ các khối</b> trong menu (sẽ <b>hiện 1 cửa sổ nhỏ</b> tự chuyển qua từng khối — nếu Chrome chặn cửa sổ bật lên, bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại), hiện bảng kết quả → bấm <b>"Copy dữ liệu"</b> → dán vào ô dưới, bấm "Thêm".</div>
       <textarea id="gpkdDan" rows="3" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:monospace;font-size:12px" placeholder="Dán dữ liệu đã copy ở đây (Ctrl+V)"></textarea>
       <button class="btn sm" style="margin-top:6px" onclick="gpkdThemDan()">➕ Thêm</button>
-    </fieldset>
-    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
-      <legend style="font-weight:700;font-size:13px">Cách B — file trang đã lưu</legend>
-      <div style="font-size:13px;margin-bottom:6px">Trên cổng, mở từng khối hồ sơ → <b>Ctrl+S</b> → chọn "Webpage, HTML only" → chọn tất cả các file đó ở đây:</div>
-      <input type="file" accept=".html,.htm" multiple onchange="gpkdChonFile(this)">
     </fieldset>
     <div id="gpkdDs"></div>`;
   window.__gpkdBm=bm;
@@ -4349,15 +4344,15 @@ function gpkdThemDan(){
   let n=0, ds=null;
   try{const v=JSON.parse(t);ds=Array.isArray(v)?v:[v]}catch(e){}       // nút bookmark mới: 1 danh sách nhiều khối
   if(!ds){ds=[];for(const doan of t.split(/\n(?=\s*[\[{])/)){try{const v=JSON.parse(doan);ds.push(...(Array.isArray(v)?v:[v]))}catch(e){}}}
-  const mMoi=gpkdMst(ds),mCu=gpkdMst(gpkdKhoi);
-  if(mMoi&&mCu&&mMoi!==mCu){gpkdKhoi=[];toast('Dữ liệu mới là của MST '+mMoi+' (khác MST '+mCu+' đã gom) — đã bỏ dữ liệu cũ','ok')}
+  const mMoi=gpkdMst(ds),mCu=gpkdMst(gpkdKhoi),soCu=gpkdKhoi.length;
+  if(ds.some(k=>k&&Array.isArray(k.cap)&&k.cap.length))gpkdKhoi=[];       // dữ liệu mới thay HẲN dữ liệu cũ của công ty này (không cần bấm Xoá hết)
   for(const k of ds){if(gpkdThem(k))n++}
   const cd=ds.map(k=>k&&k.chan_doan_menu).filter(Boolean)[0];
   window.__gpkdChanDoan=cd?`Menu "KHỐI DỮ LIỆU" ${cd.tim_thay_o?'(ở '+cd.tim_thay_o+')':'KHÔNG tìm thấy'}: ${cd.link_trang} mục tự mở được, ${cd.link_nut_bam} mục là nút bấm.`+
     (cd.loi&&cd.loi.length?`\n⚠ ${cd.loi.length} khối chưa lấy được: `+cd.loi.map(x=>x.split(':')[0]).join(', '):'')+
     (cd.chi_tiet&&cd.chi_tiet.length?'\nChẩn đoán: '+Object.entries(cd.chi_tiet.reduce((m,x)=>{const k='cửa sổ: '+(x.cua_so||x.khung||'-')+(x.post?' | POST: '+x.post:'');(m[k]=m[k]||[]).push(x.muc);return m},{})).map(([k,v])=>`[${v.length} mục] ${k.slice(0,400)}`).join('\n'):''):'';
   if(!n){toast('Không đọc được dữ liệu — hãy dán đúng đoạn nút bookmark đã copy','err');return}
-  document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã thêm '+n+' khối','ok');
+  document.getElementById('gpkdDan').value='';gpkdLuu();gpkdVeDs();toast('Đã lấy '+n+' khối'+(soCu?' — dữ liệu cũ ('+soCu+' khối)'+(mMoi&&mCu&&mMoi!==mCu?' của MST '+mCu:'')+' đã được thay bằng dữ liệu mới':''),'ok');
 }
 async function gpkdChonFile(inp){
   const files=[...(inp.files||[])];if(!files.length)return;

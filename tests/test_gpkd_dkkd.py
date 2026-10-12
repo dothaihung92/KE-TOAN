@@ -197,4 +197,10 @@ assert "laTen&&/^tên doanh nghiệp/i.test(c[0])" in html_ui and "function gpkd
 assert server.APP_BUILD in server.dkkd_bookmarklet() or server.APP_BUILD in __import__("urllib.parse").parse.unquote(server.dkkd_bookmarklet())
 print("PASS: thứ tự khối theo cổng; khối Tên doanh nghiệp hiện đủ; cảnh báo nút bookmark cũ.")
 
+# Chỉ còn nút bookmark (bỏ Cách B); dữ liệu mới thay hẳn dữ liệu cũ; chi tiết trùng tên không bị bỏ (thêm "(2)")
+assert "Cách B" not in html_ui and "gpkdChonFile(this)" not in html_ui
+assert "gpkdKhoi=[];       // dữ liệu mới thay HẲN" in html_ui or "dữ liệu mới thay HẲN dữ liệu cũ" in html_ui
+assert "var n = 2; while (tenDaCo[k.khoi + ' (' + n + ')'])" in server._JS_DKKD_TAT_CA
+print("PASS: bỏ Cách B; dữ liệu mới thay dữ liệu cũ; chi tiết trùng tên được đánh số.")
+
 print("\nALL DONE")

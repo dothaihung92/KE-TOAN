@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.192"
+APP_BUILD = "2026-10-13.193"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45013,7 +45013,7 @@ function dsXem(doc) {
 function tenDongXem(a, k) {
   var tr = a.closest('tr'), c = [].slice.call(tr.cells || []), tb = tr.closest('table'), tenCot = -1;
   if (tb) {
-    var hs = [].slice.call(tb.rows || []).filter(function (r) { return r !== tr && r.cells && r.cells.length === c.length && !r.querySelector('a'); })[0];
+    var hs = [].slice.call(tb.rows || []).filter(function (r) { return r !== tr && r.cells && !r.querySelector('a') && [].slice.call(r.cells).some(function (h) { return /^(họ (và )?tên|tên)$/i.test(sachT(h.textContent)); }); })[0];
     if (hs) [].slice.call(hs.cells).forEach(function (h, i) { if (tenCot < 0 && /^(họ (và )?tên|tên)$/i.test(sachT(h.textContent))) tenCot = i; });
   }
   if (tenCot >= 0 && c[tenCot] && sachT(c[tenCot].textContent)) return sachT(c[tenCot].textContent).slice(0, 60);
@@ -45155,7 +45155,14 @@ for (var j = 0; j < dsNut.length; j++) {
 chanDoanMenu.chi_tiet = chiTiet;
 try { if (pop && !pop.closed) pop.close(); } catch (e) {}
 var tenDaCo = {};
-ketQua = ketQua.filter(function (k, i) { if (i && tenDaCo[k.khoi]) return false; tenDaCo[k.khoi] = 1; return true; });
+ketQua = ketQua.filter(function (k, i) {
+  if (i && tenDaCo[k.khoi]) {
+    if (!/ - chi tiết:/.test(k.khoi || '')) return false;
+    var n = 2; while (tenDaCo[k.khoi + ' (' + n + ')']) n++;
+    k.khoi = k.khoi + ' (' + n + ')';
+  }
+  tenDaCo[k.khoi] = 1; return true;
+});
 chanDoanMenu.loi = loi;
 ketQua[0].chan_doan_menu = chanDoanMenu;
 ketQua[0].ban_nut = '__BAN_NUT__';
