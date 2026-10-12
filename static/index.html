@@ -944,14 +944,8 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
         <div onclick="moGpkd()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b5502d;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#fdf3ee'" onmouseout="this.style.background='#fff'">
           <div style="font-size:38px;margin-bottom:8px">🏢</div>
-          <div style="font-size:18px;font-weight:700;color:#b5502d">Hỗ trợ thay đổi GPKD</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:6px">Gom dữ liệu hồ sơ trên cổng đăng ký kinh doanh ra Excel</div>
-        </div>
-        <div onclick="moSoanGpkd()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #2d7a5a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
-             onmouseover="this.style.background='#eef8f3'" onmouseout="this.style.background='#fff'">
-          <div style="font-size:38px;margin-bottom:8px">📑</div>
-          <div style="font-size:18px;font-weight:700;color:#2d7a5a">Soạn hồ sơ GPKD</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:6px">Soạn hồ sơ thay đổi (giám đốc, địa chỉ, vốn, ngành nghề...) theo biểu mẫu TT 121/2026 và TT 68/2025</div>
+          <div style="font-size:18px;font-weight:700;color:#b5502d">Cập nhật GPKD</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Lấy thông tin GPKD trên cổng đăng ký kinh doanh, rồi soạn hồ sơ thay đổi (giám đốc, địa chỉ, vốn, ngành nghề...) theo TT 121/2026 và TT 68/2025</div>
         </div>
         <div onclick="moDoiChieuNganHangCty()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #1f6b4a;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#f0f9f4'" onmouseout="this.style.background='#fff'">
@@ -4292,13 +4286,18 @@ async function gpkdLuu(hien){
     if(hien)toast('Đã lưu dữ liệu GPKD của công ty này ('+gpkdKhoi.length+' khối)','ok')}
   catch(e){toast('Không lưu được dữ liệu GPKD: '+e.message,'err')}
 }
+function gpkdThanhTab(tab){
+  const n=(k,t)=>`<button class="btn ${tab===k?'':'ghost'}" style="${tab===k?'background:#b5502d;':''}" onclick="${k==='lay'?'moGpkd()':'moSoanGpkd()'}">${t}</button>`;
+  return `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><b style="align-self:center;margin-right:6px">🏢 Cập nhật GPKD</b>${n('lay','1. Lấy thông tin GPKD')}${n('soan','2. Soạn hồ sơ')}</div>`;
+}
 async function moGpkd(){
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
   await gpkdNap();
   let bm='';try{bm=(await api('/api/dkkd/bookmarklet')).ma}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
-    <h3 style="margin:0 0 6px;color:#b5502d">🏢 Hỗ trợ thay đổi GPKD — gom dữ liệu hồ sơ đăng ký kinh doanh ra Excel</h3>
+    ${gpkdThanhTab('lay')}
+    <h3 style="margin:0 0 6px;color:#b5502d">Lấy thông tin GPKD — gom dữ liệu hồ sơ đăng ký kinh doanh (xem, lưu, xuất Excel)</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
       Cổng đăng ký kinh doanh đăng nhập qua <b>VNeID</b> — trang này không cho đăng nhập trong trình duyệt do phần mềm điều khiển,
       nên bạn <b>đăng nhập và mở hồ sơ bằng Chrome bình thường</b> của bạn, rồi đưa dữ liệu vào đây theo 1 trong 2 cách.
@@ -4570,7 +4569,8 @@ async function moSoanGpkd(){
   await gpkdNap();ssHienTrang=ssHienTrangTuGom();
   let luu=null;try{luu=JSON.parse(localStorage.getItem(ssKey())||'null')}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
-    <h3 style="margin:0 0 6px;color:#2d7a5a">📑 Soạn hồ sơ GPKD — hồ sơ thay đổi đăng ký doanh nghiệp</h3>
+    ${gpkdThanhTab('soan')}
+    <h3 style="margin:0 0 6px;color:#2d7a5a">Soạn hồ sơ — hồ sơ thay đổi đăng ký doanh nghiệp</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
       Phần mềm điền <b>biểu mẫu chính thức</b> (lấy từ Phụ lục I Thông tư <b>121/2026/TT-BTC</b> — bản mới nhất, và Thông tư <b>68/2025/TT-BTC</b>) theo nội dung thay đổi bạn chọn, rồi tải về file .zip các Word.
       Ô nào <b>chưa có dữ liệu</b> thì giữ nguyên dấu chấm (phần mềm không tự bịa thông tin); <b>không ký thay</b> — người đại diện kiểm tra, ký và nộp. Đây là <b>bản nháp</b>: kế toán/luật sư nên rà soát trước khi nộp.
@@ -4580,7 +4580,7 @@ async function moSoanGpkd(){
         ${[['ten','Tên doanh nghiệp'],['ma_so','Mã số doanh nghiệp / MST'],['loai_hinh','Loại hình (vd Công ty TNHH một thành viên)'],['co_quan','Kính gửi (cơ quan đăng ký kinh doanh)'],['dia_danh','Địa danh (vd TP. Hồ Chí Minh)'],['so_vb','Số văn bản (tự điền, sửa được)'],['ngay_lap','Ngày lập hồ sơ (dd/mm/yyyy, để trống nếu ký sau)']].map(([k,n])=>
           `<label style="font-size:12px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px">${n}<input id="ss_dn_${k}" oninput="${k==='ngay_lap'||k==='so_vb'?'this.dataset.tay=\'1\';':''}ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}
       </div>
-      <button class="btn ghost sm" style="margin-top:8px" onclick="ssLayTuGom()">↧ Lấy từ hồ sơ đã gom (mục "Hỗ trợ thay đổi GPKD")</button>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="ssLayTuGom()">↧ Lấy từ hồ sơ đã gom (tab "Lấy thông tin GPKD")</button>
       <span class="hint" id="ssHtGhi" style="margin-left:8px"></span>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1b. Thông tin hiện tại (dùng cho Quyết định và Giấy ủy quyền)</legend>
@@ -4685,7 +4685,7 @@ function ssLayTuGom(im,ghiDe){
   ssHienGoiY();if(ghi&&h.von){const cu=document.getElementById('ss_von_cu'),n=String(h.von).replace(/[^\d]/g,'');if(cu&&n)cu.value=n}
   ssLuuTam();
   const cty=(typeof companies!=='undefined'?companies:[]).find(c=>c.id===current),lech=cty&&cty.mst&&h.ma_so&&String(cty.mst).replace(/\D/g,'')!==String(h.ma_so).replace(/\D/g,'');
-  const g=document.getElementById('ssHtGhi');if(g)g.textContent=(h.ten||h.ma_so?'Đã lấy: '+(h.ten||'')+' '+(h.ma_so?'(MST '+h.ma_so+')':'')+(lech?' ⚠ MST khác MST công ty đang chọn ('+cty.mst+') — hãy kiểm tra đã gom đúng công ty chưa':''):(im?'':'Chưa có hồ sơ đã gom — vào "Hỗ trợ thay đổi GPKD" lấy dữ liệu trước, hoặc nhập tay.'));
+  const g=document.getElementById('ssHtGhi');if(g)g.textContent=(h.ten||h.ma_so?'Đã lấy: '+(h.ten||'')+' '+(h.ma_so?'(MST '+h.ma_so+')':'')+(lech?' ⚠ MST khác MST công ty đang chọn ('+cty.mst+') — hãy kiểm tra đã gom đúng công ty chưa':''):(im?'':'Chưa có hồ sơ đã gom — sang tab "Lấy thông tin GPKD" lấy dữ liệu trước, hoặc nhập tay.'));
 }
 function ssVeMauRieng(){
   const b=document.getElementById('ssMauRieng');if(!b)return;

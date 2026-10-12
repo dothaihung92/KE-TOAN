@@ -129,9 +129,9 @@ up = open(os.path.join(_REPO_ROOT, "update.py"), encoding="utf-8").read()
 assert "gpkd_soan.py" in up and "templates/gpkd/TT121_2026_PL1.docx" in up and "templates/gpkd/TT68_2025_PL1.docx" in up
 assert "python-docx" in open(os.path.join(_REPO_ROOT, "requirements.txt")).read()
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
-for kw in ('onclick="moSoanGpkd()"', "Soạn hồ sơ GPKD", "/api/gpkd-soan/tao", "ssThemMauRieng", "không ký thay"):
+for kw in ("moSoanGpkd()", "Cập nhật GPKD", "1. Lấy thông tin GPKD", "2. Soạn hồ sơ", "/api/gpkd-soan/tao", "ssThemMauRieng", "không ký thay"):
     assert kw in html, kw
-print("PASS 7: cập nhật tự động có file mẫu, giao diện có mục Soạn hồ sơ GPKD.")
+print("PASS 7: cập nhật tự động có file mẫu, giao diện gộp 1 mục Cập nhật GPKD (2 tab: Lấy thông tin GPKD / Soạn hồ sơ).")
 
 print("\nALL DONE")
 
@@ -312,3 +312,7 @@ assert "CHỦ SỞ HỮU" not in _t2
 _n1, _t1 = _qd("Công ty trách nhiệm hữu hạn một thành viên")
 assert _n1.startswith("Quyet_dinh_cua_chu_so_huu") and "CHỦ SỞ HỮU" in _t1 and "HỘI ĐỒNG THÀNH VIÊN" not in _t1
 print("PASS: 2 thành viên trở lên -> Quyết định của Hội đồng thành viên; 1 thành viên -> Quyết định của chủ sở hữu.")
+
+assert html.count("Hỗ trợ thay đổi GPKD") == 0 and html.count('<div style="font-size:18px;font-weight:700;color:#b5502d">Cập nhật GPKD</div>') == 1
+assert 'color:#2d7a5a">Soạn hồ sơ GPKD</div>' not in html      # không còn thẻ riêng
+print("PASS: chỉ còn 1 thẻ 'Cập nhật GPKD' trong Nhập Liệu.")

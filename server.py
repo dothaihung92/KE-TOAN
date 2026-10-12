@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.187"
+APP_BUILD = "2026-10-13.188"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45097,7 +45097,7 @@ var s = JSON.stringify(ketQua), tong = ketQua.reduce(function (a, k) { return a 
 var tt = 'Đã đọc ' + ketQua.length + ' khối — ' + tong + ' trường.\n' + ketQua.map(function (k) { return '• ' + (k.khoi || k.tieu_de) + ': ' + k.cap.length + ' trường'; }).join('\n') +
   (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (tự bấm' + '' + ').'
         : '\n⚠ Không thấy menu "KHỐI DỮ LIỆU" trên trang này (kể cả khung con) — chỉ đọc được khối đang mở.') +
-  (loi.length ? '\n⚠ Lỗi: ' + loi.join('; ') : '') + '\n\nBấm "Copy dữ liệu" rồi dán vào phần mềm (Hỗ trợ thay đổi GPKD → ô dán → Thêm).';
+  (loi.length ? '\n⚠ Lỗi: ' + loi.join('; ') : '') + '\n\nBấm "Copy dữ liệu" rồi dán vào phần mềm (Cập nhật GPKD → Lấy thông tin GPKD → ô dán → Thêm).';
 var o = hop(tt), ta = o.querySelector('textarea');
 ta.value = s; ta.style.display = 'block'; o.querySelector('.nut').style.display = 'block';
 o.querySelector('.cp').onclick = function () {
