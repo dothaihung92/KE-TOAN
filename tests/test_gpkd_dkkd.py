@@ -186,4 +186,15 @@ assert 'padding:6px 8px;background:${bg}">${gpkdEsc(r[c]' in html_ui and "const 
 assert "mucTrong" in _js and "đại diện của tổ chức" in _js and "function tenTheoTrang" in _js and "daThuMuc" in _js and "ghi.doi_ten" in _js
 print("PASS: tô màu ngành nghề đúng cả dòng chẵn; mục đại diện của tổ chức trống không bị lấy nhầm.")
 
+# Dữ liệu thật công ty TLP: (1) khối "Tên doanh nghiệp" bị coi là trùng phần đầu hồ sơ -> trống; (2) hai dòng chi tiết thành viên bị xếp sau "đại diện của tổ chức"
+# vì thiếu trong GPKD_THU_TU; (3) nút bookmark cũ không tự cập nhật -> ghi bản nút vào dữ liệu và cảnh báo khi cũ (đã kiểm bằng trình duyệt)
+import re as _re
+_tt = _re.search(r"const GPKD_THU_TU=\[([^\]]*)\]", html_ui).group(1)
+for _m in ("'thông tin về thành viên'", "'thông tin về đại diện của tổ chức'", "'thông tin về chủ sở hữu hưởng lợi'"):
+    assert _m in _tt, _m
+assert _tt.index("'thông tin về thành viên'") < _tt.index("'người đại diện theo pháp luật'") < _tt.index("'thông tin về đại diện của tổ chức'")
+assert "laTen&&/^tên doanh nghiệp/i.test(c[0])" in html_ui and "function gpkdCanhBaoNut" in html_ui and "ketQua[0].ban_nut" in server._JS_DKKD_TAT_CA
+assert server.APP_BUILD in server.dkkd_bookmarklet() or server.APP_BUILD in __import__("urllib.parse").parse.unquote(server.dkkd_bookmarklet())
+print("PASS: thứ tự khối theo cổng; khối Tên doanh nghiệp hiện đủ; cảnh báo nút bookmark cũ.")
+
 print("\nALL DONE")

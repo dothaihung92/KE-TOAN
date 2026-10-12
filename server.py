@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.191"
+APP_BUILD = "2026-10-13.192"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45158,8 +45158,9 @@ var tenDaCo = {};
 ketQua = ketQua.filter(function (k, i) { if (i && tenDaCo[k.khoi]) return false; tenDaCo[k.khoi] = 1; return true; });
 chanDoanMenu.loi = loi;
 ketQua[0].chan_doan_menu = chanDoanMenu;
+ketQua[0].ban_nut = '__BAN_NUT__';
 var s = JSON.stringify(ketQua), tong = ketQua.reduce(function (a, k) { return a + k.cap.length; }, 0);
-var tt = 'Đã đọc ' + ketQua.length + ' khối — ' + tong + ' trường.\n' + ketQua.map(function (k) { return '• ' + (k.khoi || k.tieu_de) + ': ' + k.cap.length + ' trường'; }).join('\n') +
+var tt = 'Đã đọc ' + ketQua.length + ' khối — ' + tong + ' trường. (nút bookmark bản __BAN_NUT__)\n' + ketQua.map(function (k) { return '• ' + (k.khoi || k.tieu_de) + ': ' + k.cap.length + ' trường'; }).join('\n') +
   (menu ? '\nMenu "KHỐI DỮ LIỆU" (' + chanDoanMenu.tim_thay_o + '): ' + chanDoanMenu.link_trang + ' mục là link trang, ' + chanDoanMenu.link_nut_bam + ' mục là nút bấm (tự bấm' + '' + ').'
         : '\n⚠ Không thấy menu "KHỐI DỮ LIỆU" trên trang này (kể cả khung con) — chỉ đọc được khối đang mở.') +
   (loi.length ? '\n⚠ Lỗi: ' + loi.join('; ') : '') + '\n\nBấm "Copy dữ liệu" rồi dán vào phần mềm (Cập nhật GPKD → Lấy thông tin GPKD → ô dán → Thêm).';
@@ -45180,6 +45181,7 @@ def dkkd_bookmarklet():
     import urllib.parse as _up
     than = "(async function(){" + _JS_DKKD_QUET + _JS_DKKD_TAT_CA + "})().catch(function(e){alert('Lỗi lấy dữ liệu GPKD: '+e);});"
     than = " ".join(x.strip() for x in than.splitlines() if x.strip() and not x.strip().startswith("//"))
+    than = than.replace("__BAN_NUT__", APP_BUILD)
     return "javascript:" + _up.quote(than, safe="")
 
 

@@ -1353,6 +1353,7 @@ async function hienPhienBan(){
     const r=await fetch('/api/app-version');
     const d=await r.json();
     const el=document.getElementById('appBuildLine');
+    window.__appBuild=d.build||'';
     if(el&&d.build)el.textContent='Bản: '+d.build;
   }catch(e){}
 }
@@ -4339,7 +4340,7 @@ function gpkdThem(k){
   if(!k||!Array.isArray(k.cap)||!k.cap.length)return false;
   if(gpkdBoQua(k))return false;
   gpkdKhoi=gpkdKhoi.filter(x=>!(x.url&&x.url===k.url&&(x.khoi||'')===(k.khoi||'')));   // dán lại cùng khối -> thay bản cũ
-  gpkdKhoi.push({url:k.url||'',khoi:k.khoi||'',tieu_de:k.tieu_de||'',cap:k.cap,ten_file:k.ten_file||''});
+  gpkdKhoi.push({url:k.url||'',khoi:k.khoi||'',tieu_de:k.tieu_de||'',cap:k.cap,ten_file:k.ten_file||'',ban_nut:k.ban_nut||''});
   return true;
 }
 function gpkdMst(ds){for(const k of (ds||[]).slice().reverse()){const c=(k.cap||[]).find(x=>/^mã số doanh nghiệp$/i.test(x[0])&&x[1]);if(c)return String(c[1]).trim()}return ''}
@@ -4392,7 +4393,7 @@ function gpkdVeDs(){
   gpkdVeXem();
 }
 /* ----- MÀN HÌNH XEM hồ sơ đã gom — bố cục giống cổng đăng ký kinh doanh: menu KHỐI DỮ LIỆU bên trái, "Thông tin về hồ sơ" ở trên, từng khối chia theo mục, danh sách hiện thành bảng ----- */
-const GPKD_THU_TU=['hình thức đăng ký','địa chỉ','ngành nghề kinh doanh','thông tin về chủ sở hữu','tên doanh nghiệp/đơn vị trực thuộc','thông tin về vốn','thông tin về người đại diện theo ủy quyền','người đại diện theo pháp luật','thông tin về thuế','thông tin về chủ sở hữu hưởng lợi','thông tin ủy quyền','người nộp hồ sơ','khối dữ liệu'];
+const GPKD_THU_TU=['hình thức đăng ký','địa chỉ','ngành nghề kinh doanh','thông tin về chủ sở hữu','tên doanh nghiệp/đơn vị trực thuộc','thông tin về vốn','thông tin về thành viên','thông tin về người đại diện theo ủy quyền','người đại diện theo pháp luật','thông tin về thuế','thông tin về chủ sở hữu hưởng lợi','thông tin về đại diện của tổ chức','thông tin ủy quyền','thông tin về hồ sơ','người nộp hồ sơ','khối dữ liệu'];
 let gpkdHs='', gpkdChon=-1;
 const gpkdChuan=t=>String(t||'').toLowerCase().replace(/\s+/g,' ').trim();
 const gpkdCha=k=>String(k.khoi||'').split(' - chi tiết:')[0];
@@ -4431,7 +4432,12 @@ function gpkdBang(b){
 }
 function gpkdHtmlKhoi(k,chung){
   const cs=new Set(chung.map(c=>c[0]+'\u0001'+c[1]));
-  const cap=(k.cap||[]).filter(c=>!cs.has(c[0]+'\u0001'+c[1]));
+  const laTen=/^tên doanh nghiệp/i.test(gpkdCha(k));      // khối "Tên doanh nghiệp/đơn vị trực thuộc": các dòng tên trùng phần đầu hồ sơ vẫn phải hiện
+  const daTen=new Set();
+  const cap=(k.cap||[]).filter(c=>{
+    if(!cs.has(c[0]+'\u0001'+c[1]))return true;
+    if(laTen&&/^tên doanh nghiệp/i.test(c[0])){const q=c[0]+'\u0001'+c[1];if(daTen.has(q))return false;daTen.add(q);return true}
+    return false});
   const doan=[],bang={},re=/^(.*) #(\d+) - (.*)$/;
   cap.forEach(c=>{
     const m=c[0].match(re);
@@ -4444,12 +4450,21 @@ function gpkdHtmlKhoi(k,chung){
       if(l&&l.loai==='muc'&&l.muc===muc)l.dong.push(c);else doan.push({loai:'muc',muc,dong:[c]});
     }
   });
-  if(!doan.length)return '<div class="hint">Khối này không có dữ liệu.</div>';
+  if(!doan.length){
+    const rieng=(k.cap||[]).filter(c=>!/^số hồ sơ$/i.test(c[0])&&!/#\d+ - /.test(c[0]));
+    if(rieng.length&&laTen)return gpkdHtmlKhoi(Object.assign({},k,{cap:rieng}),[]);
+    return '<div class="hint">Khối này không có dữ liệu.</div>';
+  }
   return doan.map(d=>d.loai==='bang'
     ?`<div style="font-weight:700;margin:10px 0 2px;color:#3d4a3d">${gpkdEsc(d.ten)}</div>${gpkdBang(d.b)}`
     :`<div style="margin-bottom:10px">${d.muc?`<div style="background:#e9eee6;border:1px solid #d3dccf;padding:5px 10px;font-weight:700;color:#3d4a3d">${gpkdEsc(d.muc)}</div>`:''}
        <div style="display:grid;grid-template-columns:minmax(200px,38%) 1fr;border:1px solid #e3e6e3;border-top:${d.muc?'0':'1px solid #e3e6e3'}">
        ${d.dong.map(c=>`<div style="padding:6px 10px;font-weight:600;color:#444;background:#fafbfa;border-top:1px solid #eef0ee">${gpkdEsc(c[0])}</div><div style="padding:6px 10px;border-top:1px solid #eef0ee;word-break:break-word">${gpkdEsc(c[1])}</div>`).join('')}</div></div>`).join('');
+}
+function gpkdCanhBaoNut(){
+  const bn=(gpkdKhoi.find(k=>k.ban_nut)||{}).ban_nut||'',cur=window.__appBuild||'';
+  if(bn&&bn===cur)return '';
+  return `<span style="background:#fff3cd;border:1px solid #e6c200;border-radius:8px;padding:3px 8px;font-size:12px">⚠ Dữ liệu lấy bằng nút bookmark ${bn?'bản '+gpkdEsc(bn):'CŨ (chưa ghi bản)'}${cur?' — phần mềm đang là bản '+gpkdEsc(cur):''}: nút đã lưu trên trình duyệt KHÔNG tự cập nhật — hãy xoá nút cũ, kéo nút mới (mục 1 ở trên) lên thanh dấu trang rồi lấy lại.</span>`;
 }
 function gpkdChonKhoi(i){gpkdChon=i;gpkdVeXem()}
 function gpkdChonHoSo(ma){gpkdHs=ma;gpkdChon=-1;gpkdVeXem()}
@@ -4464,7 +4479,7 @@ function gpkdVeXem(){
   const mst=(chung.find(c=>/^mã số doanh nghiệp$/i.test(c[0]))||[])[1]||'';
   box.innerHTML=`<div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-      <b style="font-size:15px">👁 Xem thông tin hồ sơ${ten?' — '+gpkdEsc(ten):''}</b>${mst?`<span class="hint" style="margin:0">MST ${gpkdEsc(mst)}</span>`:''}
+      <b style="font-size:15px">👁 Xem thông tin hồ sơ${ten?' — '+gpkdEsc(ten):''}</b>${gpkdCanhBaoNut()}${mst?`<span class="hint" style="margin:0">MST ${gpkdEsc(mst)}</span>`:''}
       ${nhom.size>1?`<select onchange="gpkdChonHoSo(this.value)" style="padding:5px;border:1px solid var(--line);border-radius:8px">${[...nhom.keys()].map(m=>`<option value="${gpkdEsc(m)}" ${m===gpkdHs?'selected':''}>Hồ sơ ${gpkdEsc(m)}</option>`).join('')}</select>`:`<span class="hint" style="margin:0">Hồ sơ ${gpkdEsc(gpkdHs)}</span>`}
     </div>
     <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
