@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.185"
+APP_BUILD = "2026-10-13.186"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44079,6 +44079,48 @@ def _dong_tu_tong_hop_thue_suat(rows, lts, common, tygia=None):
     return [r for r in rows if r.get("_la_phi") or str(r.get("tchat") or "") != "4"] + them
 
 
+def _tong_thue_ltsuat(lts):
+    """Tổng tiền thuế ở khối tổng hợp theo thuế suất [(tsuat, thtien, tthue)] (số > 0 mới tính)."""
+    t = 0
+    for _ts, _tt, th in lts or []:
+        n = _to_num(th)
+        if isinstance(n, (int, float)) and n > 0:
+            t += n
+    return t
+
+
+def _bu_thue_dong_theo_tong_hop(rows, lts, tygia=None):
+    """Một số phần mềm hóa đơn (vd Cao Phong C26MCP) ghi tiền thuế TỪNG DÒNG = 0 (TTKhac VATAmount = 0, chỉ ghi giá thanh toán ở Amount) trong khi hóa đơn
+    CÓ thuế (TToan/THTTLTSuat > 0, thuế suất 8%/10%). Khi MỌI dòng đều không có tiền thuế mà tổng hợp theo thuế suất có thuế: chia lại theo thuế suất
+    (thành tiền × thuế suất, dòng cuối của nhóm bù chênh lệch làm tròn để cộng đúng TThue). Hóa đơn thật sự KHÔNG có thuế (tổng hợp = 0) giữ nguyên."""
+    hh = [r for r in rows if not r.get("_la_phi") and str(r.get("tchat") or "") in ("", "1")]
+    if not hh or not _tong_thue_ltsuat(lts):
+        return rows
+    for r in hh:
+        n = _to_num(r.get("tien_thue"))
+        if isinstance(n, (int, float)) and n:
+            return rows            # có dòng đã ghi thuế thật -> tin dữ liệu dòng
+    for ts, _tt, th in lts:
+        thn = _to_num(th)
+        if not (isinstance(thn, (int, float)) and thn > 0):
+            continue
+        key = _chuan_hoa_thue_suat(ts)
+        try:
+            rate = float(key) / 100
+        except Exception:
+            continue
+        nhom = [r for r in hh if _chuan_hoa_thue_suat(r.get("tsuat")) == key and isinstance(_to_num(r.get("thtien")), (int, float)) and _to_num(r.get("thtien")) > 0]
+        if not nhom:
+            continue
+        dich = thn * tygia if tygia else thn
+        tong = 0
+        for r in nhom:
+            r["tien_thue"] = round(_to_num(r.get("thtien")) * rate)
+            tong += r["tien_thue"]
+        nhom[-1]["tien_thue"] += round(dich) - tong
+    return rows
+
+
 def _parse_xml_invoice(xml_bytes):
     """
     Đọc 1 hóa đơn (XML thuần hoặc file invoice.zip), trả về list các dòng mặt hàng.
@@ -44191,6 +44233,7 @@ def _parse_xml_invoice(xml_bytes):
                   "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso}
         rows.append(_dong_phi_hoa_don(tong_phi, common))
     _lts = [(find_text(l, "TSuat"), find_text(l, "ThTien"), find_text(l, "TThue")) for l in root.findall(".//THTTLTSuat/LTSuat")]
+    rows = _bu_thue_dong_theo_tong_hop(rows, _lts, tygia)
     rows = _dong_tu_tong_hop_thue_suat(rows, _lts, {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon, "ngay": ngay, "ten_nban": ten_nban,
                                                     "mst_nban": mst_nban, "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
                                                     "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso, "dvtte": dvtte or "VND",
@@ -44268,7 +44311,15 @@ def _parse_invoice_summary(xml_bytes):
         not _to_num(ft(h, "ThTien")) and not _to_num(next((t.findtext("DLieu") for t in h.findall(".//TTKhac/TTin")
                                                            if (t.findtext("TTruong") or "").strip() in ("TongTien_Thue", "VATAmount")), "") or "")
         for h in dshh.findall("HHDVu")) and root.findall(".//THTTLTSuat/LTSuat")
-    if dshh is not None and dshh.findall("HHDVu") and not _chi_dien_giai_x:
+    # dòng hàng ghi tiền thuế = 0 trong khi tổng hợp thuế suất có thuế (xem _bu_thue_dong_theo_tong_hop) -> dùng khối tổng hợp
+    _lts_x = [(ft(l, "TSuat"), ft(l, "ThTien"), ft(l, "TThue")) for l in root.findall(".//THTTLTSuat/LTSuat")]
+    _thue_dong_bo_trong_x = False
+    if dshh is not None and dshh.findall("HHDVu") and _tong_thue_ltsuat(_lts_x):
+        _thue_dong_bo_trong_x = all(
+            not _to_num(next((t.findtext("DLieu") for t in h.findall(".//TTKhac/TTin")
+                              if (t.findtext("TTruong") or "").strip() in ("TongTien_Thue", "VATAmount")), "") or "")
+            for h in dshh.findall("HHDVu"))
+    if dshh is not None and dshh.findall("HHDVu") and not _chi_dien_giai_x and not _thue_dong_bo_trong_x:
         # Dòng CHIẾT KHẤU THƯƠNG MẠI riêng (thành tiền/thuế ghi DƯƠNG) phải TRỪ — xem _dong_ck_tm_rieng
         _hh_x = dshh.findall("HHDVu")
         _la_ck_x = [_dong_ck_tm_rieng(ft(h, "TChat"), ft(h, "THHDVu"), ft(h, "ThTien"),
