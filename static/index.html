@@ -4306,10 +4306,9 @@ async function moGpkd(){
     </div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px">
       <legend style="font-weight:700;font-size:13px">Lấy dữ liệu bằng nút bookmark</legend>
-      <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (chỉ làm 1 lần): <b>kéo</b> nút dưới đây thả lên <b>thanh dấu trang</b> của Chrome — hoặc bấm <b>"Copy mã"</b> rồi làm theo hướng dẫn hiện ra.
+      <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (chỉ làm 1 lần): bấm <b>"Copy mã"</b> rồi làm theo hướng dẫn hiện ra (tạo dấu trang mới, dán mã vào ô URL).
         <div style="color:#c0392b;margin:4px 0">⚠️ KHÔNG dán mã vào thanh địa chỉ (ô gõ trang web) — Chrome sẽ tự bỏ chữ <code>javascript:</code> và chuyển sang tìm Google. Phải dán vào ô <b>URL của dấu trang</b>.</div>
-        <a href="${gpkdEsc(bm)}" onclick="toast('Hãy KÉO nút này lên thanh dấu trang, không bấm ở đây','err');return false" style="display:inline-block;padding:4px 10px;border:1px solid #b5502d;border-radius:8px;color:#b5502d;font-weight:700;text-decoration:none">📋 Lấy dữ liệu GPKD</a>
-        <button class="btn ghost sm" onclick="gpkdCopyMa()">Copy mã</button></div>
+        <button class="btn sm" style="background:#b5502d" onclick="gpkdCopyMa()">📋 Copy mã</button></div>
       <div style="font-size:13px;margin-bottom:6px">2) Trên cổng, mở <b>1 khối bất kỳ</b> của hồ sơ (có menu "KHỐI DỮ LIỆU" bên trái) → bấm nút bookmark: nút <b>tự đọc lần lượt TẤT CẢ các khối</b> trong menu (sẽ <b>hiện 1 cửa sổ nhỏ</b> tự chuyển qua từng khối — nếu Chrome chặn cửa sổ bật lên, bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại), hiện bảng kết quả → bấm <b>"Copy dữ liệu"</b> → dán vào ô dưới, bấm "Thêm".</div>
       <textarea id="gpkdDan" rows="3" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:monospace;font-size:12px" placeholder="Dán dữ liệu đã copy ở đây (Ctrl+V)"></textarea>
       <button class="btn sm" style="margin-top:6px" onclick="gpkdThemDan()">➕ Thêm</button>
@@ -4461,7 +4460,7 @@ function gpkdHtmlKhoi(k,chung){
 function gpkdCanhBaoNut(){
   const bn=(gpkdKhoi.find(k=>k.ban_nut)||{}).ban_nut||'',cur=window.__appBuild||'';
   if(bn&&bn===cur)return '';
-  return `<span style="background:#fff3cd;border:1px solid #e6c200;border-radius:8px;padding:3px 8px;font-size:12px">⚠ Dữ liệu lấy bằng nút bookmark ${bn?'bản '+gpkdEsc(bn):'CŨ (chưa ghi bản)'}${cur?' — phần mềm đang là bản '+gpkdEsc(cur):''}: nút đã lưu trên trình duyệt KHÔNG tự cập nhật — hãy xoá nút cũ, kéo nút mới (mục 1 ở trên) lên thanh dấu trang rồi lấy lại.</span>`;
+  return `<span style="background:#fff3cd;border:1px solid #e6c200;border-radius:8px;padding:3px 8px;font-size:12px">⚠ Dữ liệu lấy bằng nút bookmark ${bn?'bản '+gpkdEsc(bn):'CŨ (chưa ghi bản)'}${cur?' — phần mềm đang là bản '+gpkdEsc(cur):''}: nút đã lưu trên trình duyệt KHÔNG tự cập nhật — hãy xoá nút cũ, bấm "Copy mã" (mục 1 ở trên) và tạo lại dấu trang rồi lấy lại.</span>`;
 }
 function gpkdChonKhoi(i){gpkdChon=i;gpkdVeXem()}
 function gpkdChonHoSo(ma){gpkdHs=ma;gpkdChon=-1;gpkdVeXem()}
