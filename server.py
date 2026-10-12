@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.188"
+APP_BUILD = "2026-10-13.189"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44761,7 +44761,7 @@ function laNhan(c) { return !oNhap(c).length && sach(c.innerText); }
 function oCuaDong(r) { return [].slice.call(r.children).filter(function (x) { return x.tagName === 'TD' || x.tagName === 'TH'; }); }
 var cap = [], daCo = {};
 function them(k, v, muc) {
-  k = sach(k).replace(/[:*]+$/, '').trim(); v = sach(v); muc = sach(muc || '');
+  k = sach(k).replace(/[:*]+$/, '').trim(); v = sach(v).replace(/\s*Có\s+\d+\s+doanh nghiệp\s*\(đơn vị trực thuộc\).*$/i, '').trim(); muc = sach(muc || '');
   if (!k || k.length > 150 || !v || k === v) return;
   var key = muc + '\u0001' + k + '\u0001' + v; if (daCo[key]) return; daCo[key] = 1; cap.push([k, v, muc]);
 }
@@ -44772,7 +44772,7 @@ function tenBang(t) {
     while (p) {
       if (/^(TABLE|FORM|SCRIPT|STYLE)$/i.test(p.tagName) || p.querySelector('table, input, select, textarea')) { p = p.previousElementSibling; continue; }
       var dong = sach((p.innerText || '').split('\n')[0]);
-      if (dong && dong.length <= 60 && !/^(lưu ý|màu)/i.test(dong)) return dong;
+      if (dong && dong.length <= 60 && !/^(lưu ý|màu|trang chủ\s*>)/i.test(dong)) return dong;
       p = p.previousElementSibling;
     }
     e = e.parentElement;
@@ -44836,6 +44836,33 @@ document.querySelectorAll('tr').forEach(function (r) {
     them(c[i].innerText, v, muc); i = j + 1;
   }
 });
+// 2b) Ô nhập nằm trong bảng LỒNG NHAU (vd "Tên doanh nghiệp": ô chọn "CÔNG TY TNHH" + ô nhập tên, ô tên nước ngoài...) bị bước 2 bỏ qua:
+//     ghép mỗi ô nhập với ô nhãn (chữ thuần) ở gần nhất bên trái/trên các ô chứa nó; nhiều ô nhập cùng 1 nhãn -> nối bằng dấu cách.
+(function () {
+  var nhom = new Map(), thuTu = [];
+  [].slice.call(document.querySelectorAll('input, select, textarea')).forEach(function (e) {
+    if (/^(hidden|button|submit|image|password|reset|file)$/i.test(e.type || '')) return;
+    var v = giaTriO(e); if (!v) return;
+    var nhan = '', oNhan = null, lb = e.id && document.querySelector('label[for="' + e.id + '"]');
+    if (lb && sach(lb.innerText)) { nhan = sach(lb.innerText); oNhan = lb; }
+    var cell = e.closest('td, th');
+    while (!oNhan && cell) {
+      var prev = cell.previousElementSibling;
+      while (prev) { if (/^(TD|TH)$/.test(prev.tagName) && !oNhap(prev).length && sach(prev.innerText) && sach(prev.innerText).length <= 150) { nhan = sach(prev.innerText); oNhan = prev; break; } prev = prev.previousElementSibling; }
+      if (oNhan) break;
+      var tb = cell.closest('table'); cell = tb ? tb.parentElement && tb.parentElement.closest('td, th') : null;
+    }
+    if (!oNhan) return;
+    if (!nhom.has(oNhan)) { nhom.set(oNhan, {nhan: nhan, vs: [], tb: e.closest('table')}); thuTu.push(oNhan); }
+    nhom.get(oNhan).vs.push(v);
+  });
+  thuTu.forEach(function (o) {
+    var g = nhom.get(o), nh = sach(g.nhan).replace(/[:*]+$/, '').trim(), v = g.vs.join(' ');
+    if (!nh) return;
+    if (cap.some(function (c) { return c[0] === nh && (c[1] === v || v.indexOf(c[1]) === 0 || c[1].indexOf(v) === 0); })) return;
+    them(nh, v, mucCua(g.tb));
+  });
+})();
 document.querySelectorAll('label[for]').forEach(function (l) {
   var e = document.getElementById(l.getAttribute('for'));
   if (e && /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !/checkbox|radio|hidden/i.test(e.type || '')) them(l.innerText, giaTri(e));
@@ -44984,7 +45011,14 @@ function dsXem(doc) {
   return [].slice.call(doc.querySelectorAll('a')).filter(function (a) { return /^(xem|sửa đổi|sửa)$/i.test(sachT(a.textContent)) && a.closest('tr'); });
 }
 function tenDongXem(a, k) {
-  var c = [].slice.call(a.closest('tr').cells || []).map(function (x) { return sachT(x.textContent); }).filter(function (t) { return t && !/^(xem|sửa đổi|sửa|xóa|xoá)$/i.test(t); }); return (c[0] || '').slice(0, 60) || ('#' + (k + 1));
+  var tr = a.closest('tr'), c = [].slice.call(tr.cells || []), tb = tr.closest('table'), tenCot = -1;
+  if (tb) {
+    var hs = [].slice.call(tb.rows || []).filter(function (r) { return r !== tr && r.cells && r.cells.length === c.length && !r.querySelector('a'); })[0];
+    if (hs) [].slice.call(hs.cells).forEach(function (h, i) { if (tenCot < 0 && /^(họ (và )?tên|tên)$/i.test(sachT(h.textContent))) tenCot = i; });
+  }
+  if (tenCot >= 0 && c[tenCot] && sachT(c[tenCot].textContent)) return sachT(c[tenCot].textContent).slice(0, 60);
+  var ok = c.map(function (x) { return sachT(x.textContent); }).filter(function (t) { return t && !/^(xem|sửa đổi|sửa|xóa|xoá)$/i.test(t) && !/^\d{9,}$/.test(t); });
+  return (ok[0] || '').slice(0, 60) || ('#' + (k + 1));
 }
 var urlTong = ((menu || []).filter(function (m) { return m.url && /DW_DOCUMENTEdit\.aspx/i.test(m.url); })[0] || {}).url || '';
 var dangODangTong = /DW_DOCUMENTEdit\.aspx/i.test(location.pathname);
@@ -45047,13 +45081,29 @@ async function moBangPost(it) {
   var r = docTrang(new DOMParser().parseFromString(await rs.text(), 'text/html'), rs.url);
   r.chuyen = rs.redirected; return r;
 }
+// Đối chiếu trang vừa mở với tên mục menu bằng DÒNG ĐƯỜNG DẪN của trang ("Trang chủ > ... > Danh sách thành viên"): các mục dạng DANH SÁCH có tên trang khác tên menu —
+// nếu mở ra trang của mục khác (cổng chưa kịp chuyển trang) thì mở lại, tránh gán nhầm dữ liệu sang mục kế bên.
+var TRANG_MONG_DOI = [['Thông tin về thành viên', /^danh sách thành viên/i], ['Người đại diện theo pháp luật', /^danh sách người đại diện/i],
+                      ['Thông tin về chủ sở hữu hưởng lợi', /^(ds|danh sách) chủ sở hữu hưởng lợi/i]];
+function trangDung(ten, r) {
+  var kh = sachT((r && r.khoi) || '');
+  // chỉ coi là NHẦM khi tên trang khớp tên trang của một mục DANH SÁCH KHÁC (không đọc được dòng đường dẫn thì tin kết quả như cũ)
+  for (var j = 0; j < TRANG_MONG_DOI.length; j++) if (TRANG_MONG_DOI[j][1].test(kh) && chuan(TRANG_MONG_DOI[j][0]) !== chuan(ten)) return false;
+  return true;
+}
 var chiTiet = [];
 for (var j = 0; j < dsNut.length; j++) {
   dem++;
   var it = dsNut[j], r1 = null, ghi = {muc: it.ten};
   hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + it.ten + ' ...');
-  try { r1 = await moBangCuaSo(it, pop); ghi.cua_so = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi; }
-  catch (e) { ghi.cua_so = 'lỗi: ' + e; r1 = null; }
+  for (var lan = 0; lan < 2; lan++) {
+    try { r1 = await moBangCuaSo(it, pop); ghi.cua_so = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi; }
+    catch (e) { ghi.cua_so = 'lỗi: ' + e; r1 = null; }
+    if (!r1 || trangDung(it.ten, r1)) break;
+    ghi.lech = (ghi.lech || '') + 'lần ' + (lan + 1) + ': trang mở ra là "' + r1.khoi + '" (không phải "' + it.ten + '") — mở lại; ';
+    await nghi(1500);
+  }
+  if (r1 && !trangDung(it.ten, r1)) { loi.push(it.ten + ': cổng mở nhầm trang "' + r1.khoi + '" (đã thử 2 lần)'); r1 = null; ghi.cua_so += ' | NHẦM TRANG'; }
   if (r1 && !trangHopLe(r1)) { ghi.cua_so += ' | KHÔNG đúng khối (trang tổng/trùng trang đã lấy)'; r1 = null; }
   if (!r1) {
     try { r1 = await moBangPost(it); ghi.post = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi + (r1.chuyen ? ' (có chuyển hướng)' : ''); }

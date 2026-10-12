@@ -172,4 +172,11 @@ _h2 = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").r
 assert "GPKD_BO_QUA=['hình thức đăng ký','khối dữ liệu']" in _h2
 print("PASS: bấm Sửa đổi để lấy chi tiết; bỏ qua Hình thức đăng ký và Khối dữ liệu.")
 
+# Khối "Tên doanh nghiệp" (ô nhập trong bảng lồng nhau + câu cảnh báo trùng tên), danh sách thành viên (tên dòng theo cột Tên, không theo số giấy tờ),
+# đối chiếu trang với đường dẫn "Danh sách thành viên"... (đã kiểm bằng trang giả lập có bảng lồng nhau)
+_js_q = server._JS_DKKD_QUET + _js
+assert "2b) Ô nhập nằm trong bảng LỒNG NHAU" in _js_q and "Có\\s+\\d+\\s+doanh nghiệp" in _js_q
+assert "tenCot" in _js and "function trangDung" in _js and "cổng mở nhầm trang" in _js and "trang chủ\\s*>" in _js_q
+print("PASS: khối Tên doanh nghiệp đọc được; danh sách thành viên đặt tên theo cột Tên; chống mở nhầm trang danh sách.")
+
 print("\nALL DONE")
