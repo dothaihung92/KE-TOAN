@@ -293,3 +293,22 @@ _qd4 = "\n".join(p.text for p in _docx.Document(_io.BytesIO(_z4.read([n for n in
 assert "do Phòng Đăng ký kinh doanh cấp ngày 26/11/2014" in _uq4, _uq4
 assert "đã được thông qua ngày 26/11/2014" in _qd4, _qd4
 print("PASS: mục chủ sở hữu hưởng lợi chỉ khi tick; nơi cấp mặc định + ngày Điều lệ theo ngày cấp GCN.")
+
+
+# Công ty từ 2 thành viên: Quyết định của HỘI ĐỒNG THÀNH VIÊN (theo mẫu người dùng); 1 thành viên: Quyết định của CHỦ SỞ HỮU
+def _qd(loai_hinh):
+    du = {"loai": ["dia_chi"], "dn": {"ten": "Cty A", "ma_so": "1", "loai_hinh": loai_hinh}, "dia_chi": {"so_nha": "y"},
+          "hien_tai": {"dd_ho_ten": "Hà Thị Trúc Mai", "chu_so_huu": "Hà Thị Trúc Mai", "dia_chi": "x"}}
+    z = _zf.ZipFile(_io.BytesIO(_g.tao_ho_so(du)[0]))
+    n = [x for x in z.namelist() if x.startswith("Quyet_dinh") or x.startswith("Nghi_quyet")][0]
+    d = _docx.Document(_io.BytesIO(z.read(n)))
+    return n, "\n".join([p.text for p in d.paragraphs] + [c.text for t in d.tables for r in t.rows for c in r.cells])
+
+
+_n2, _t2 = _qd("Công ty trách nhiệm hữu hạn hai thành viên trở lên")
+assert _n2.startswith("Quyet_dinh_cua_hoi_dong_thanh_vien") and "HỘI ĐỒNG THÀNH VIÊN" in _t2 and "QUYẾT ĐỊNH" in _t2 and "NGHỊ QUYẾT" not in _t2
+assert "Căn cứ Nghị định số 168/2025/NĐ-CP" in _t2 and "TM. Hội đồng thành viên" in _t2 and "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN" in _t2 and "HÀ THỊ TRÚC MAI" in _t2
+assert "CHỦ SỞ HỮU" not in _t2
+_n1, _t1 = _qd("Công ty trách nhiệm hữu hạn một thành viên")
+assert _n1.startswith("Quyet_dinh_cua_chu_so_huu") and "CHỦ SỞ HỮU" in _t1 and "HỘI ĐỒNG THÀNH VIÊN" not in _t1
+print("PASS: 2 thành viên trở lên -> Quyết định của Hội đồng thành viên; 1 thành viên -> Quyết định của chủ sở hữu.")

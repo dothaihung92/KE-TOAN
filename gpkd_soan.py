@@ -687,8 +687,8 @@ def _chu_the_quyet_dinh(loai_hinh):
         return "CHỦ SỞ HỮU", "QUYẾT ĐỊNH", "Chủ sở hữu"
     if "cổ phần" in lh:
         return "ĐẠI HỘI ĐỒNG CỔ ĐÔNG", "NGHỊ QUYẾT", "Đại hội đồng cổ đông"
-    if "hai thành viên" in lh or "trách nhiệm hữu hạn" in lh:
-        return "HỘI ĐỒNG THÀNH VIÊN", "NGHỊ QUYẾT", "Hội đồng thành viên"
+    if "hai thành viên" in lh or "trách nhiệm hữu hạn" in lh or "hợp danh" in lh:
+        return "HỘI ĐỒNG THÀNH VIÊN", "QUYẾT ĐỊNH", "Hội đồng thành viên"       # công ty từ 2 thành viên: Quyết định của Hội đồng thành viên
     return "CHỦ SỞ HỮU", "QUYẾT ĐỊNH", "Chủ sở hữu"
 
 
@@ -703,7 +703,11 @@ def soan_quyet_dinh(du, chu_ky=None):
     _doan(d, loai_vb, dam=True, can="giua", sau=0)
     _doan(d, "Về việc thay đổi nội dung đăng ký doanh nghiệp", dam=True, can="giua", sau=0)
     _doan(d, chu, dam=True, can="giua")
-    _doan(d, f"- Căn cứ Điều lệ {ten} đã được thông qua ngày {ht.get('ngay_dieu_le') or '……'}.", can="deu", thut=True)
+    la_hdtv = chu == "HỘI ĐỒNG THÀNH VIÊN"
+    if la_hdtv:
+        _doan(d, "- Căn cứ Luật Doanh nghiệp năm 2020 được sửa đổi, bổ sung năm 2025;", can="deu", thut=True)
+        _doan(d, "- Căn cứ Nghị định số 168/2025/NĐ-CP ngày 30 tháng 6 năm 2025 của Chính phủ về đăng ký doanh nghiệp;", can="deu", thut=True)
+    _doan(d, f"- Căn cứ Điều lệ {ten} đã được thông qua ngày {ht.get('ngay_dieu_le') or '……'}" + (";" if la_hdtv else "."), can="deu", thut=True)
     _doan(d, loai_vb, dam=True, can="giua", sau=10)
     _doan(d, "Điều 1: ", dam=True, gach=True, sau=4)
     muc = []
@@ -740,17 +744,27 @@ def soan_quyet_dinh(du, chu_ky=None):
     if "dai_dien" in loai and (du.get("dai_dien") or [{}])[0].get("ho_ten"):
         dd = (du["dai_dien"][0].get("ho_ten") or "").strip()
     _doan(d, f"Điều 2: ", dam=True, gach=True, sau=10).add_run(f"Giao cho Ông/Bà {dd.upper() or '……'} (người đại diện theo pháp luật) tiến hành các thủ tục cần thiết theo quy định của pháp luật.")
-    _doan(d, "Điều 3: ", dam=True, gach=True, sau=10).add_run(f"Người đại diện theo pháp luật của công ty, {ten_co.lower()} công ty có trách nhiệm thi hành {loai_vb.capitalize()} này.")
+    if la_hdtv:
+        _doan(d, "Điều 3: ", dam=True, gach=True, sau=10).add_run(
+            "Các thành viên Hội đồng thành viên, người đại diện theo pháp luật của Công ty và các cá nhân, bộ phận có liên quan chịu trách nhiệm thi hành Quyết định này.")
+    else:
+        _doan(d, "Điều 3: ", dam=True, gach=True, sau=10).add_run(f"Người đại diện theo pháp luật của công ty, {ten_co.lower()} công ty có trách nhiệm thi hành {loai_vb.capitalize()} này.")
     _doan(d, "Điều 4: ", dam=True, gach=True, sau=10).add_run(f"{loai_vb.capitalize()} này có hiệu lực kể từ ngày ký.")
     tb = d.add_table(rows=1, cols=2)
     a, b = tb.rows[0].cells
     a.paragraphs[0].add_run("Nơi nhận:").bold = True
     a.paragraphs[0].runs[0].italic = True
-    for t in (f"- Như Điều 3 (để thực hiện);", "- Cơ quan đăng ký kinh doanh (để đăng ký);", "- Lưu."):
+    for t in (f"- Như Điều 3 (để thực hiện);", "- Phòng ĐKKD (để đăng ký);", "- Lưu."):
         a.add_paragraph(t)
     pb = b.paragraphs[0]
     pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    pb.add_run(chu).bold = True
+    if la_hdtv:
+        pb.add_run("TM. Hội đồng thành viên").bold = True
+        pb = b.add_paragraph()
+        pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pb.add_run("CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN").bold = True
+    else:
+        pb.add_run(chu).bold = True
     pb2 = b.add_paragraph()
     pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb2.add_run("(Ký, ghi rõ họ tên)").italic = True
@@ -1141,10 +1155,10 @@ def tao_ho_so(du, mau_rieng=None, chu_ky=None, xuat_pdf=False):
         canh_bao.append("Chưa có ngày cấp Giấy chứng nhận ĐKDN (mục 1b) — Quyết định (ngày thông qua Điều lệ) và Giấy ủy quyền để trống ngày.")
     if loai & CAN_QUYET_DINH:                    # tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật thì không
         _, loai_vb, ten_co = _chu_the_quyet_dinh(dn.get("loai_hinh"))
-        tep.append((f"Quyet_dinh_{'cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet'}_{ma}.docx", _luu_bytes(soan_quyet_dinh(du, chu_ky))))
+        tep.append((f"Quyet_dinh_{'cua_hoi_dong_thanh_vien' if ten_co == 'Hội đồng thành viên' and loai_vb == 'QUYẾT ĐỊNH' else ('cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet')}_{ma}.docx", _luu_bytes(soan_quyet_dinh(du, chu_ky))))
         ds_file.append((f"{loai_vb.capitalize()} của {ten_co} về việc thay đổi nội dung đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
         if "một thành viên" not in (dn.get("loai_hinh") or "").lower():
-            canh_bao.append(f"{loai_vb.capitalize()} soạn theo thẩm quyền của {ten_co} — hãy đối chiếu Điều lệ công ty (thể thức, tỷ lệ biểu quyết, biên bản họp nếu cần).")
+            canh_bao.append(f"{loai_vb.capitalize()} soạn theo thẩm quyền của {ten_co} (ký bởi Chủ tịch Hội đồng thành viên thay mặt) — hãy đối chiếu Điều lệ công ty (thể thức, tỷ lệ biểu quyết, biên bản họp nếu cần).")
     if du.get("tao_uy_quyen"):
         tep.append((f"Giay_uy_quyen_nop_ho_so_{ma}.docx", _luu_bytes(soan_giay_uy_quyen(du, chu_ky))))
         ds_file.append(("Giấy ủy quyền nộp hồ sơ và nhận kết quả đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))

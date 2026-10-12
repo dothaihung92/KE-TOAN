@@ -4497,7 +4497,7 @@ const SS_TRUONG={
 };
 SS_TRUONG.cshhl=[];
 SS_TRUONG.bo_sung=[['noi_dung','Nội dung bổ sung, cập nhật (mỗi ý cách nhau bằng dấu ; hoặc xuống dòng)']];
-SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu / người ký Quyết định (họ tên)'],['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN = ngày thông qua Điều lệ (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp (mặc định Phòng Đăng ký kinh doanh)']];
+SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu (TNHH 1 thành viên) / Chủ tịch HĐTV (từ 2 thành viên) — người ký Quyết định'],['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN = ngày thông qua Điều lệ (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp (mặc định Phòng Đăng ký kinh doanh)']];
 SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
 const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
   ['cshhl','Thay đổi thông tin về chủ sở hữu hưởng lợi (kèm Mẫu 10)','cshhl'],
@@ -4598,7 +4598,7 @@ async function moSoanGpkd(){
         </div>`).join('')}
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
-      <div class="hint" style="margin:0 0 6px"><b>Quyết định của chủ sở hữu / Nghị quyết</b> được phần mềm <b>tự soạn</b> khi có đổi tên, địa chỉ, vốn điều lệ, ngành nghề, người đại diện hoặc chủ sở hữu.</div>
+      <div class="hint" style="margin:0 0 6px"><b>Quyết định của chủ sở hữu (công ty 1 thành viên) / Quyết định của Hội đồng thành viên (từ 2 thành viên)</b> được phần mềm <b>tự soạn</b> khi có đổi tên, địa chỉ, vốn điều lệ, ngành nghề, người đại diện hoặc chủ sở hữu.</div>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_gan_ky" checked onchange="ssLuuTam()"> Gắn chữ ký từ <b>Kho chữ ký</b> (giám đốc ở Mẫu 12/Giấy ủy quyền, chủ sở hữu ở Quyết định) — chỉ chữ ký đã tick "đã đồng ý"</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_xuat_pdf" onchange="ssLuuTam()"> Xuất thêm file <b>PDF có viền scan</b> (ảnh từng trang, mép trang tối nhẹ như bản scan; cần máy có Microsoft Word hoặc LibreOffice)</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_uy_quyen" onchange="document.getElementById('ssUq').style.display=this.checked?'block':'none';ssLuuTam()"> Soạn <b>Giấy ủy quyền</b> nộp hồ sơ và nhận kết quả</label>
@@ -5163,7 +5163,7 @@ async function vbCkVe(){
   vbCkDu=(vbCkDs.du||[]).map(d=>Object.assign({loai:'du'},d)).concat((vbCkDs.da_luu||[]).map(d=>Object.assign({loai:'luu'},d)));
   vbCkMuc=[vbCkDs.giam_doc].concat(vbCkDs.chu_so_huu?[vbCkDs.chu_so_huu]:[],vbCkDs.nhan_vien||[]);     // thao tác theo CHỈ SỐ (tên có dấu ' không làm hỏng onclick)
   const dong=(m,i)=>`<tr>
-    <td style="padding:5px 8px;border:1px solid #ddd">${i===0?'<b>Giám đốc / người đại diện</b><br>':(m.la_cs?'<b>Chủ sở hữu / chủ công ty</b><br>':'')}${vbEsc(m.ten)}${m.ma?` <span class="hint">(${vbEsc(m.ma)})</span>`:''}<div class="hint">${vbEsc(m.chuc_vu||'')}</div></td>
+    <td style="padding:5px 8px;border:1px solid #ddd">${i===0?'<b>Giám đốc / người đại diện</b><br>':(m.la_cs?'<b>Chủ sở hữu / Chủ tịch HĐTV</b><br>':'')}${vbEsc(m.ten)}${m.ma?` <span class="hint">(${vbEsc(m.ma)})</span>`:''}<div class="hint">${vbEsc(m.chuc_vu||'')}</div></td>
     <td style="padding:5px 8px;border:1px solid #ddd;text-align:center;min-width:170px;background:#fff">${m.co_anh?`<img src="${m.anh}" style="max-height:44px;max-width:160px">`:'<span class="hint">chưa có</span>'}</td>
     <td style="padding:5px 8px;border:1px solid #ddd;text-align:center"><input type="checkbox" ${m.xac_nhan?'checked':''} ${m.co_anh?'':'disabled'} onchange="vbCkXacNhan(${i},this.checked)" title="Người này đã đồng ý lưu và sử dụng chữ ký trên văn bản của công ty"></td>
     <td style="padding:5px 8px;border:1px solid #ddd;white-space:nowrap">
