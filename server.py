@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.190"
+APP_BUILD = "2026-10-13.191"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45085,16 +45085,17 @@ async function moBangPost(it) {
 // nếu mở ra trang của mục khác (cổng chưa kịp chuyển trang) thì mở lại, tránh gán nhầm dữ liệu sang mục kế bên.
 var TRANG_MONG_DOI = [['Thông tin về thành viên', /^danh sách thành viên/i], ['Người đại diện theo pháp luật', /^danh sách người đại diện/i],
                       ['Thông tin về chủ sở hữu hưởng lợi', /^(ds|danh sách) chủ sở hữu hưởng lợi/i]];
-function trangDung(ten, r) {
+function tenTheoTrang(r) {
   var kh = sachT((r && r.khoi) || '');
-  // chỉ coi là NHẦM khi tên trang khớp tên trang của một mục DANH SÁCH KHÁC (không đọc được dòng đường dẫn thì tin kết quả như cũ)
-  for (var j = 0; j < TRANG_MONG_DOI.length; j++) if (TRANG_MONG_DOI[j][1].test(kh) && chuan(TRANG_MONG_DOI[j][0]) !== chuan(ten)) return false;
-  return true;
+  for (var i = 0; i < TRANG_MONG_DOI.length; i++) if (TRANG_MONG_DOI[i][1].test(kh)) return TRANG_MONG_DOI[i][0];
+  return '';
 }
+function trangDung(ten, r) { var c = tenTheoTrang(r); return !c || chuan(c) === chuan(ten); }
+var daThuMuc = {};
 var chiTiet = [];
 for (var j = 0; j < dsNut.length; j++) {
   dem++;
-  var it = dsNut[j], r1 = null, ghi = {muc: it.ten};
+  var it = dsNut[j], r1 = null, ghi = {muc: it.ten}, mucTrong = false, tenMuc = it.ten;
   hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + it.ten + ' ...');
   for (var lan = 0; lan < 2; lan++) {
     try { r1 = await moBangCuaSo(it, pop); ghi.cua_so = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi; }
@@ -45103,30 +45104,34 @@ for (var j = 0; j < dsNut.length; j++) {
     ghi.lech = (ghi.lech || '') + 'lần ' + (lan + 1) + ': trang mở ra là "' + r1.khoi + '" (không phải "' + it.ten + '") — mở lại; ';
     await nghi(1500);
   }
-  var mucTrong = false;
-  if (r1 && !trangDung(it.ten, r1)) {
-    ghi.cua_so += ' | NHẦM TRANG';
-    // mục không có nội dung (vd "Thông tin về đại diện của tổ chức" khi thành viên là cá nhân): cổng vẫn ở lại trang danh sách trước -> coi là TRỐNG, không phải lỗi
-    if (/đại diện của tổ chức/i.test(it.ten)) { mucTrong = true; ghi.bo_qua = 'mục trống (cổng không chuyển sang trang riêng)'; }
-    else loi.push(it.ten + ': cổng mở nhầm trang "' + r1.khoi + '" (đã thử 2 lần)');
-    r1 = null;
-  }
   if (r1 && !trangHopLe(r1)) { ghi.cua_so += ' | KHÔNG đúng khối (trang tổng/trùng trang đã lấy)'; r1 = null; }
-  if (!r1 && !mucTrong) {
+  if (!r1) {
     try { r1 = await moBangPost(it); ghi.post = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi + (r1.chuyen ? ' (có chuyển hướng)' : ''); }
     catch (e) { ghi.post = 'lỗi: ' + e; r1 = null; }
     if (r1 && !trangHopLe(r1)) { ghi.post += ' | KHÔNG đúng khối'; r1 = null; }
   }
+  // Đặt tên mục theo TRANG THẬT: mở "Thông tin về đại diện của tổ chức" mà cổng ra trang "Danh sách thành viên" thì đó là dữ liệu của "Thông tin về thành viên"
+  // (nếu đã lấy rồi thì bỏ qua — mục này trống; chưa lấy thì ghi đúng tên mục) -> không còn xếp danh sách thành viên dưới mục khác.
+  if (r1) {
+    var canon = tenTheoTrang(r1);
+    if (canon && chuan(canon) !== chuan(it.ten)) {
+      ghi.doi_ten = '"' + it.ten + '" -> "' + canon + '" (theo tên trang "' + r1.khoi + '")';
+      tenMuc = canon;
+      if (daThuMuc[chuan(canon)] || dsNut.some(function (m, q) { return q > j && chuan(m.ten) === chuan(canon); }) && /đại diện của tổ chức/i.test(it.ten)) { mucTrong = true; ghi.bo_qua = 'mục trống (cổng ra trang của mục "' + canon + '")'; r1 = null; }
+    }
+  }
   chiTiet.push(ghi);
   if (r1) {
     urlDaNhan[(r1.url || '').split('#')[0]] = 1;
-    r1.khoi = it.ten; if (!r1.cap.length) loi.push(it.ten + ': trang không có dữ liệu'); ketQua.push(r1); chanDoanMenu.cach = 'ok';
-    // Trang DANH SÁCH (người đại diện, chủ sở hữu hưởng lợi...): bấm "Xem" từng dòng để lấy chi tiết (mỗi dòng: mở lại danh sách rồi bấm Xem dòng đó)
+    daThuMuc[chuan(tenMuc)] = 1;
+    r1.khoi = tenMuc; if (!r1.cap.length) loi.push(tenMuc + ': trang không có dữ liệu'); ketQua.push(r1); chanDoanMenu.cach = 'ok';
+    // Trang DANH SÁCH (người đại diện, chủ sở hữu hưởng lợi, thành viên...): bấm "Xem" từng dòng để lấy chi tiết (mỗi dòng: mở lại danh sách rồi bấm Xem dòng đó)
     try {
       var nXem = pop && !pop.closed ? dsXem(pop.document).length : 0;
+      if (!nXem && tenTheoTrang(r1) && pop && !pop.closed) { try { await moBangCuaSo(it, pop); nXem = dsXem(pop.document).length; } catch (e) {} }
       ghi.xem = nXem;
       for (var k = 0; k < nXem && k < 30; k++) {
-        hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + it.ten + ' — xem chi tiết dòng ' + (k + 1) + '/' + nXem + ' ...');
+        hop('Đang mở khối ' + dem + '/' + tongKhoi + ': ' + tenMuc + ' — xem chi tiết dòng ' + (k + 1) + '/' + nXem + ' ...');
         if (k > 0) { var rl = await moBangCuaSo(it, pop); if (!rl) throw new Error('không mở lại được danh sách'); }
         var lien = dsXem(pop.document)[k];
         if (!lien) throw new Error('mất dòng ' + (k + 1) + ' khi mở lại danh sách');
@@ -45134,14 +45139,17 @@ for (var j = 0; j < dsNut.length; j++) {
         lien.click();
         var rx = await choCuaSoDoiTrang(pop, cuX);
         if (rx.url && urlDaNhan[(rx.url || '').split('#')[0] + '|' + tenDong]) continue;
-        rx.khoi = it.ten + ' - chi tiết: ' + tenDong;
+        rx.khoi = tenMuc + ' - chi tiết: ' + tenDong;
         if (rx.cap.length) { ketQua.push(rx); urlDaNhan[(rx.url || '').split('#')[0] + '|' + tenDong] = 1; }
         else loi.push(rx.khoi + ': trang chi tiết không có dữ liệu');
         await nghi(400);
       }
-    } catch (e) { loi.push(it.ten + ' (xem chi tiết): ' + e); }
+    } catch (e) { loi.push(tenMuc + ' (xem chi tiết): ' + e); }
   }
-  else if (!mucTrong) loi.push(it.ten + ': không mở được đúng khối (xem chẩn đoán từng mục)');
+  else if (!mucTrong) {
+    if (/đại diện của tổ chức/i.test(it.ten) && /KHÔNG đúng khối/.test((ghi.cua_so || '') + (ghi.post || ''))) ghi.bo_qua = 'mục trống (cổng ra lại trang đã lấy)';
+    else loi.push(it.ten + ': không mở được đúng khối (xem chẩn đoán từng mục)');
+  }
   await new Promise(function (x) { setTimeout(x, 400); });
 }
 chanDoanMenu.chi_tiet = chiTiet;

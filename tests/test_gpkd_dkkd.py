@@ -176,14 +176,14 @@ print("PASS: bấm Sửa đổi để lấy chi tiết; bỏ qua Hình thức đ
 # đối chiếu trang với đường dẫn "Danh sách thành viên"... (đã kiểm bằng trang giả lập có bảng lồng nhau)
 _js_q = server._JS_DKKD_QUET + _js
 assert "2b) Ô nhập nằm trong bảng LỒNG NHAU" in _js_q and "Có\\s+\\d+\\s+doanh nghiệp" in _js_q
-assert "tenCot" in _js and "function trangDung" in _js and "cổng mở nhầm trang" in _js and "trang chủ\\s*>" in _js_q
+assert "tenCot" in _js and "function trangDung" in _js and "trang chủ\\s*>" in _js_q
 print("PASS: khối Tên doanh nghiệp đọc được; danh sách thành viên đặt tên theo cột Tên; chống mở nhầm trang danh sách.")
 
 # Lỗi "chỉ tô màu các dòng lẻ": CSS chung `tbody tr:nth-child(even) td{background:...}` đè lên nền của <tr> -> phải đặt nền màu ngay trên từng <td> (đã kiểm bằng trình duyệt: 8 dòng đúng đỏ,đỏ,xanh,xanh,xanh,đỏ,trắng,trắng)
 assert "tbody tr:nth-child(even) td{background:#faf9f3}" in html_ui
 assert 'padding:6px 8px;background:${bg}">${gpkdEsc(r[c]' in html_ui and "const bg=nen[r['Màu dòng']]" in html_ui
 # mục "Thông tin về đại diện của tổ chức" trống: không báo lỗi, không lấy nhầm danh sách thành viên
-assert "mucTrong" in _js and "đại diện của tổ chức" in _js
+assert "mucTrong" in _js and "đại diện của tổ chức" in _js and "function tenTheoTrang" in _js and "daThuMuc" in _js and "ghi.doi_ten" in _js
 print("PASS: tô màu ngành nghề đúng cả dòng chẵn; mục đại diện của tổ chức trống không bị lấy nhầm.")
 
 print("\nALL DONE")
