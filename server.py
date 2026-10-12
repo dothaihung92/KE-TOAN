@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.189"
+APP_BUILD = "2026-10-13.190"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45103,9 +45103,16 @@ for (var j = 0; j < dsNut.length; j++) {
     ghi.lech = (ghi.lech || '') + 'lần ' + (lan + 1) + ': trang mở ra là "' + r1.khoi + '" (không phải "' + it.ten + '") — mở lại; ';
     await nghi(1500);
   }
-  if (r1 && !trangDung(it.ten, r1)) { loi.push(it.ten + ': cổng mở nhầm trang "' + r1.khoi + '" (đã thử 2 lần)'); r1 = null; ghi.cua_so += ' | NHẦM TRANG'; }
+  var mucTrong = false;
+  if (r1 && !trangDung(it.ten, r1)) {
+    ghi.cua_so += ' | NHẦM TRANG';
+    // mục không có nội dung (vd "Thông tin về đại diện của tổ chức" khi thành viên là cá nhân): cổng vẫn ở lại trang danh sách trước -> coi là TRỐNG, không phải lỗi
+    if (/đại diện của tổ chức/i.test(it.ten)) { mucTrong = true; ghi.bo_qua = 'mục trống (cổng không chuyển sang trang riêng)'; }
+    else loi.push(it.ten + ': cổng mở nhầm trang "' + r1.khoi + '" (đã thử 2 lần)');
+    r1 = null;
+  }
   if (r1 && !trangHopLe(r1)) { ghi.cua_so += ' | KHÔNG đúng khối (trang tổng/trùng trang đã lấy)'; r1 = null; }
-  if (!r1) {
+  if (!r1 && !mucTrong) {
     try { r1 = await moBangPost(it); ghi.post = r1.url.slice(-70) + ' | khối trang: ' + r1.khoi + (r1.chuyen ? ' (có chuyển hướng)' : ''); }
     catch (e) { ghi.post = 'lỗi: ' + e; r1 = null; }
     if (r1 && !trangHopLe(r1)) { ghi.post += ' | KHÔNG đúng khối'; r1 = null; }
@@ -45134,7 +45141,7 @@ for (var j = 0; j < dsNut.length; j++) {
       }
     } catch (e) { loi.push(it.ten + ' (xem chi tiết): ' + e); }
   }
-  else loi.push(it.ten + ': không mở được đúng khối (xem chẩn đoán từng mục)');
+  else if (!mucTrong) loi.push(it.ten + ': không mở được đúng khối (xem chẩn đoán từng mục)');
   await new Promise(function (x) { setTimeout(x, 400); });
 }
 chanDoanMenu.chi_tiet = chiTiet;
