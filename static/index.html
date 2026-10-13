@@ -555,6 +555,8 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
   <div class="modal" style="width:min(640px,96vw);max-width:640px;max-height:88vh;display:flex;flex-direction:column">
     <h3 style="margin-top:0">🛃 Tờ khai nhập khẩu đã import</h3>
     <p class="hint" style="margin-top:0">Dữ liệu này lưu riêng, KHÔNG tự mất khi bạn xoá/tải lại hóa đơn — luôn được cộng thêm vào Chi tiết MUA VÀO mỗi khi Xuất Excel cho tới khi bạn tự xoá ở đây.</p>
+    <label class="hint" style="display:flex;align-items:center;gap:6px;margin:0 0 6px"><input type="checkbox" id="tknkTatCa" onchange="tknkTai()"> Hiện tất cả tờ khai (mọi kỳ) — bỏ chọn để chỉ xem tờ khai trong kỳ đang tra cứu</label>
+    <div id="tknkTomTat" class="hint" style="margin:0 0 6px"></div>
     <div id="tknkList" style="overflow:auto;flex:1;border:1px solid var(--line);border-radius:8px;padding:4px 8px"></div>
     <div class="modal-actions" style="border-top:1px solid #eee;padding-top:12px;margin-top:8px">
       <button class="btn ghost" onclick="document.getElementById('tknkModal').style.display='none'">Đóng</button>
@@ -12232,16 +12234,25 @@ async function xoaNhapLieu(){
 async function importToKhaiNhap(input){
   const files=input.files;
   if(!files||!files.length)return;
+  // kỳ báo cáo đang xem (từ khoảng ngày tra cứu): chỉ nhận tờ khai TRONG kỳ này
+  const tu=document.getElementById('tuNgay')?.value||'';
+  const den=document.getElementById('denNgay')?.value||'';
+  const ky=kyKeKhaiTu(tu,den);
+  const nhanKy=ky?(ky.startsWith('Q')?`QUÝ ${ky.slice(1)}`:`Tháng ${ky}`):(tu?`${tu} → ${den||tu}`:'');
+  if(tu&&!confirm(`Chỉ nhập những tờ khai có ngày đăng ký TRONG kỳ đang xem (${nhanKy})?\n\nTờ khai ngoài kỳ sẽ bị bỏ qua. Muốn nhập mọi kỳ thì xoá khoảng "Từ ngày / Đến ngày" ở trên rồi import lại.`))return;
   toast(`Đang đọc ${files.length} tờ khai nhập khẩu...`,'');
   try{
     const fd=new FormData();
     for(const f of files)fd.append('files',f);
+    if(tu)fd.append('tu',tu);
+    if(den)fd.append('den',den);
     const r=await fetch(`/api/import-tokhai-nhap/${current}`,{method:'POST',body:fd});
     if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
-    let msg=`Đã import ${d.so_to_khai} tờ khai (${d.so_dong_hang} dòng hàng). Sẽ hiện trong Chi tiết MUA VÀO khi xuất Excel.`;
+    let msg=`Đã import ${d.so_to_khai} tờ khai (${d.so_dong_hang} dòng hàng)${nhanKy?` vào kỳ ${nhanKy}`:''}. Sẽ hiện trong Chi tiết MUA VÀO khi xuất Excel.`;
+    if(d.so_ngoai_ky)msg+=` ⏭ Bỏ qua ${d.so_ngoai_ky} tờ khai ngoài kỳ${d.ngoai_ky&&d.ngoai_ky.length?': '+d.ngoai_ky.slice(0,5).join(', ')+(d.so_ngoai_ky>5?'…':''):''}.`;
     if(d.loi&&d.loi.length)msg+=` ⚠ ${d.loi.length} file lỗi.`;
-    toast(msg,'ok');
+    toast(msg,d.so_ngoai_ky?'':'ok');
   }catch(e){toast(e.message,'err')}
   input.value='';
 }
@@ -12250,14 +12261,31 @@ async function importToKhaiNhap(input){
 // không liên quan hóa đơn XML, không tự mất khi xoá/tải lại hóa đơn) ----
 async function moTknkModal(){
   document.getElementById('tknkModal').style.display='flex';
+  // không đặt khoảng ngày -> mặc định hiện tất cả; có kỳ tra cứu -> mặc định lọc theo kỳ
+  const cb=document.getElementById('tknkTatCa');if(cb)cb.checked=!(document.getElementById('tuNgay')?.value);
   await tknkTai();
 }
 async function tknkTai(){
   const box=document.getElementById('tknkList');
+  const tomTat=document.getElementById('tknkTomTat');
   box.innerHTML='Đang tải...';
   try{
-    const ds=await api(`/api/tokhai-nhap/${current}`);
-    if(!ds.length){box.innerHTML='<div style="color:#888;padding:8px 4px">Chưa import tờ khai nhập khẩu nào cho công ty này.</div>';return;}
+    // mặc định lọc theo kỳ đang tra cứu; tick "Hiện tất cả" -> bỏ lọc
+    const tu=document.getElementById('tuNgay')?.value||'';
+    const den=document.getElementById('denNgay')?.value||'';
+    const hienTatCa=document.getElementById('tknkTatCa')?.checked;
+    const q=(!hienTatCa&&tu)?`?tu=${encodeURIComponent(tu)}&den=${encodeURIComponent(den||tu)}`:'';
+    const r=await api(`/api/tokhai-nhap/${current}${q}`);
+    const ds=r.ds||[];
+    if(tomTat){
+      if(r.loc_ky){
+        const ky=kyKeKhaiTu(tu,den);const nhanKy=ky?(ky.startsWith('Q')?`QUÝ ${ky.slice(1)}`:`Tháng ${ky}`):`${tu} → ${den||tu}`;
+        tomTat.innerHTML=`📅 Đang lọc theo kỳ <b>${nhanKy}</b>: ${ds.length}/${r.tong_tat_ca} tờ khai.`;
+      }else{
+        tomTat.innerHTML=`Hiện <b>tất cả</b> ${r.tong_tat_ca} tờ khai (mọi kỳ).`;
+      }
+    }
+    if(!ds.length){box.innerHTML=`<div style="color:#888;padding:8px 4px">${r.tong_tat_ca?'Không có tờ khai nào trong kỳ đang tra cứu. Tick "Hiện tất cả" để xem mọi kỳ.':'Chưa import tờ khai nhập khẩu nào cho công ty này.'}</div>`;return;}
     box.innerHTML=ds.map(x=>{
       const p=(x.ngay_dk||'').split('-'); const ngay=p.length===3?`${p[2]}/${p[1]}/${p[0]}`:(x.ngay_dk||'');
       const soTkEsc=(x.so_tk||'').replace(/'/g,"\\'");

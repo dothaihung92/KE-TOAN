@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.209"
+APP_BUILD = "2026-10-13.210"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15118,6 +15118,10 @@ async def import_tokhai_nhap(cid: int, request: Request):
     files = form.getlist("files") or ([form.get("file")] if form.get("file") else [])
     if not files:
         raise HTTPException(400, "Chưa chọn file tờ khai")
+    # Kỳ báo cáo đang xem (ISO yyyy-mm-dd): chỉ nhận tờ khai có ngày đăng ký
+    # TRONG kỳ này. Để trống -> nhận mọi tờ khai (không lọc theo kỳ).
+    ky_tu = _ngay_tokhai_nk(form.get("tu")) if form.get("tu") else None
+    ky_den = _ngay_tokhai_nk(form.get("den")) if form.get("den") else None
     # Đọc BYTES của file (I/O, phải await) trước, rồi mới xử lý (CPU: mở +
     # dò từng dòng file Excel) ở THREAD RIÊNG qua run_in_threadpool — làm
     # trực tiếp trên vòng lặp asyncio sẽ CHẶN ĐỨNG toàn bộ server (mọi
@@ -15132,6 +15136,7 @@ async def import_tokhai_nhap(cid: int, request: Request):
         added = 0
         tong_tk = 0
         loi = []
+        ngoai_ky = []          # tờ khai bị bỏ qua vì ngày đăng ký NẰM NGOÀI kỳ báo cáo đang xem
         for ten_file, content in ten_va_noi_dung:
             try:
                 wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
@@ -15142,6 +15147,11 @@ async def import_tokhai_nhap(cid: int, request: Request):
             if not tk["so_tk"] or not tk["items"]:
                 loi.append(f"{ten_file}: không đọc được số tờ khai hoặc dòng hàng")
                 continue
+            if ky_tu or ky_den:                               # lọc theo kỳ báo cáo: chỉ nhận tờ khai có ngày đăng ký TRONG kỳ
+                ng = _ngay_tokhai_nk(tk["ngay_dk"])
+                if ng is None or (ky_tu and ng < ky_tu) or (ky_den and ng > ky_den):
+                    ngoai_ky.append(f"{tk['so_tk']} ({tk['ngay_dk'] or '?'})")
+                    continue
             conn.execute("""
                 INSERT INTO tokhai_nhap (company_id, so_tk, ngay_dk, nguoi_xk, items_json, updated_at)
                 VALUES (?,?,?,?,?,?)
@@ -15155,28 +15165,39 @@ async def import_tokhai_nhap(cid: int, request: Request):
             tong_tk += 1
         conn.commit()
         conn.close()
-        return added, tong_tk, loi
+        return added, tong_tk, loi, ngoai_ky
 
-    added, tong_tk, loi = await run_in_threadpool(_xu_ly)
-    return {"ok": True, "so_to_khai": tong_tk, "so_dong_hang": added, "loi": loi[:5]}
+    added, tong_tk, loi, ngoai_ky = await run_in_threadpool(_xu_ly)
+    return {"ok": True, "so_to_khai": tong_tk, "so_dong_hang": added, "loi": loi[:5],
+            "ngoai_ky": ngoai_ky[:20], "so_ngoai_ky": len(ngoai_ky)}
 
 
 @app.get("/api/tokhai-nhap/{cid}")
-def list_tokhai_nhap(cid: int):
+def list_tokhai_nhap(cid: int, tu: str = "", den: str = ""):
+    """Danh sách tờ khai nhập khẩu đã import. Có tu/den (ISO) -> chỉ trả tờ khai
+    có ngày đăng ký TRONG kỳ đó; để trống -> trả tất cả (vd tra cứu nguyên năm)."""
     conn = db()
     rows = conn.execute(
         "SELECT so_tk, ngay_dk, nguoi_xk, items_json FROM tokhai_nhap WHERE company_id=? ORDER BY ngay_dk",
         (cid,)).fetchall()
     conn.close()
+    ky_tu = _ngay_tokhai_nk(tu) if tu else None
+    ky_den = _ngay_tokhai_nk(den) if den else None
     out = []
+    tong = 0
     for r in rows:
         try:
             items = json.loads(r["items_json"]) if r["items_json"] else []
         except Exception:
             items = []
+        tong += 1
+        if ky_tu or ky_den:
+            ng = _ngay_tokhai_nk(r["ngay_dk"])
+            if ng is None or (ky_tu and ng < ky_tu) or (ky_den and ng > ky_den):
+                continue
         out.append({"so_tk": r["so_tk"], "ngay_dk": r["ngay_dk"],
                     "nguoi_xk": r["nguoi_xk"], "so_dong": len(items)})
-    return out
+    return {"ds": out, "tong_tat_ca": tong, "loc_ky": bool(ky_tu or ky_den)}
 
 
 @app.delete("/api/tokhai-nhap/{cid}")
