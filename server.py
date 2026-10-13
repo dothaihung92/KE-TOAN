@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.199"
+APP_BUILD = "2026-10-13.200"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45666,6 +45666,16 @@ def _gpkd_ten_mau_rieng(ten):
     t = os.path.basename(str(ten or "")).strip()
     t = re.sub(r"[^0-9A-Za-zÀ-ỹ_. -]+", "_", t)
     return t if t.lower().endswith(".docx") else t + ".docx"
+
+
+@app.get("/api/gpkd-soan/nganh")
+def gpkd_soan_nganh():
+    """Danh mục ngành kinh tế CẤP 4 (Phụ lục I Quyết định 27/2018/QĐ-TTg): [[mã 4 số, tên ngành]] — để dò mã/tên ngành khi soạn hồ sơ."""
+    p = os.path.join(BASE_DIR, "templates", "gpkd", "nganh_cap4_QD27_2018.json")
+    if not os.path.isfile(p):
+        raise HTTPException(404, "Chưa có file danh mục ngành — hãy tắt/mở lại phần mềm để tự cập nhật")
+    with open(p, encoding="utf-8") as f:
+        return {"nganh": json.load(f), "nguon": "Phụ lục I Quyết định 27/2018/QĐ-TTg (cấp 4). Một số mã đã đổi theo Quyết định 36/2025/QĐ-TTg — đối chiếu màu ngành trên cổng đăng ký kinh doanh."}
 
 
 @app.get("/api/gpkd-soan/mau")
