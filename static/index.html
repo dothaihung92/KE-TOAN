@@ -4525,7 +4525,7 @@ const SS_TRUONG={
   ten:[['viet','Tên mới (tiếng Việt)'],['nuoc_ngoai','Tên tiếng nước ngoài (nếu có)'],['viet_tat','Tên viết tắt (nếu có)']],
   dia_chi:[['so_nha','Số nhà, ngõ/ngách, đường/phố, tổ/xóm/ấp'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['dien_thoai','Điện thoại'],['fax','Fax (nếu có)'],['email','Thư điện tử'],['website','Website']],
   von:[['cu','Vốn điều lệ đã đăng ký (số tiền)'],['moi','Vốn điều lệ sau khi thay đổi (số tiền)'],['thoi_diem','Thời điểm thay đổi vốn (dd/mm/yyyy)'],['hinh_thuc','Hình thức: Tăng vốn / Giảm vốn']],
-  dai_dien:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['chuc_danh','Chức danh (vd Giám đốc)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']],
+  dai_dien:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ liên lạc (1 ô: số nhà, đường, phường/xã, tỉnh/thành phố)'],['dien_thoai','Điện thoại'],['email','Thư điện tử']],
   chu_so_huu_moi:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']]
 };
 SS_TRUONG.cshhl=[];
@@ -4534,7 +4534,7 @@ SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu (TNHH 1 thành viên) / Ch�
 SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
 const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
   ['cshhl','Thay đổi thông tin về chủ sở hữu hưởng lợi (kèm Mẫu 10)','cshhl'],
-  ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['chu_so_huu','Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ mới là cá nhân)','chu_so_huu_moi']];
+  ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['chu_so_huu','Thay đổi chủ sở hữu / thành viên công ty TNHH (đổi chủ, chuyển vốn, thêm thành viên mới)','chu_so_huu_moi']];
 let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=null;
 const ssKey=()=>'gpkdSoan_'+(current||0);
 function ssEsc(x){return vbEsc(x)}
@@ -4556,7 +4556,69 @@ function ssHienTrangTuGom(){
     Object.values(m).forEach(r=>{const ma=Object.entries(r).find(([k])=>/^mã số/i.test(k)),ten=Object.entries(r).find(([k])=>/^tên/i.test(k));if(ma)ht.nganh.push({ma:ma[1],ten:ten?ten[1]:'',mau:r['Màu dòng']||''})})}
   const v=khoi.find(k=>/^thông tin về vốn$/i.test(k.khoi||''));
   if(v){const c=(v.cap||[]).find(x=>/vốn điều lệ/i.test(x[0])&&/\d/.test(x[1]));if(c)ht.von=c[1]}
+  ht.thanh_vien=ssNguoiTuGom(khoi,/^thông tin về (thành viên|chủ sở hữu)(?!\s*hưởng)/i,'tv');
+  ht.cshhl=ssNguoiTuGom(khoi,/^(thông tin về chủ sở hữu hưởng lợi|(ds|danh sách) chủ sở hữu hưởng lợi)/i,'cs');
   return ht;
+}
+let ssTv={ht:[],moi:[]}, ssCs={ht:[],moi:[]};
+const ssN=l=>l==='tv'?ssTv:ssCs;
+const SS_NG={
+  tv:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh'],['gioi_tinh','Giới tính'],['cccd','Số giấy tờ pháp lý (CCCD)'],['noi_cap','Nơi cấp'],['quoc_tich','Quốc tịch'],['dan_toc','Dân tộc'],['dia_chi','Địa chỉ liên lạc (1 ô)'],['von','Phần vốn góp (VNĐ)'],['loai_tai_san','Loại tài sản góp vốn'],['thoi_han','Thời hạn góp vốn']],
+  cs:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh'],['gioi_tinh','Giới tính'],['cccd','Số giấy tờ pháp lý (CCCD)'],['noi_cap','Nơi cấp'],['quoc_tich','Quốc tịch'],['dan_toc','Dân tộc'],['dia_chi','Địa chỉ liên lạc (1 ô)'],['truc_tiep','Tỷ lệ vốn điều lệ trực tiếp (%)'],['gian_tiep','Gián tiếp (%)']]
+};
+function ssNguoiTuGom(khoi,reKhoi,loai){
+  const ng={};   // khoá theo CCCD hoặc họ tên: gộp dòng bảng danh sách ("… #n - Cột") và khối chi tiết
+  const cd={ho_ten:/^(họ,? ?(chữ đệm )?(và )?tên|tên( thành viên| chủ sở hữu| chủ sở hữu hưởng lợi)?)$/i,ngay_sinh:/ngày.*sinh/i,gioi_tinh:/giới tính/i,cccd:/số giấy tờ pháp lý|số định danh|số cccd|số giấy chứng|^số giấy/i,noi_cap:/nơi cấp/i,
+    quoc_tich:/quốc tịch/i,dan_toc:/dân tộc/i,dia_chi:/^(địa chỉ liên lạc|địa chỉ thường trú|địa chỉ)$/i,von:/giá trị vốn góp|phần vốn góp|vốn góp/i,
+    ty_le:/^tỷ lệ/i,thoi_han:/thời (điểm|hạn) góp vốn|ngày góp vốn/i,loai_tai_san:/loại tài sản/i};
+  const gan=(o,ten,v)=>{v=String(v||'').trim();if(!v)return;for(const [k,re] of Object.entries(cd)){if(re.test(String(ten).trim())){if(!o[k])o[k]=v;return}}};
+  const them=o=>{if(!o.ho_ten)return;const kk=(o.cccd||'').replace(/\D/g,'')||o.ho_ten.toUpperCase();const c=ng[kk]=ng[kk]||{};Object.entries(o).forEach(([k,v])=>{if(!c[k])c[k]=v});};
+  khoi.filter(k=>reKhoi.test(k.khoi||'')).forEach(k=>{
+    const dong={},le={};
+    (k.cap||[]).forEach(c=>{const m=String(c[0]).match(/^(.*) #(\d+) - (.*)$/);if(m){gan(dong[m[2]]=dong[m[2]]||{},m[3],c[1])}else gan(le,c[0],c[1])});
+    Object.values(dong).forEach(them);
+    if(!/^số hồ sơ$/i.test(k.khoi||'')){const diaChi=[];(k.cap||[]).forEach(c=>{if(/^số nhà|^xã\/phường|^tỉnh\/thành/i.test(c[0])&&c[1])diaChi.push(c[1])});if(diaChi.length&&!le.dia_chi)le.dia_chi=diaChi.join(', ');them(le)}
+  });
+  return Object.values(ng).map(o=>{if(loai==='cs'&&!o.truc_tiep)o.truc_tiep=(o.ty_le||'').replace(/%/g,'').trim();delete o.ty_le;return o});
+}
+function ssNapNguoiTuGom(ghiDe){
+  const h=ssHienTrang||{};
+  if(ghiDe||!ssTv.ht.length)ssTv={ht:(h.thanh_vien||[]).map(x=>({...x})),moi:ssTv.moi};
+  if(ghiDe||!ssCs.ht.length)ssCs={ht:(h.cshhl||[]).map(x=>({...x})),moi:ssCs.moi};
+  ssVeNguoi('tv');ssVeNguoi('cs');
+}
+function ssNguoiThem(l){ssN(l).moi.push({});ssVeNguoi(l)}
+function ssNguoiXoaMoi(l,i){ssN(l).moi.splice(i,1);ssN(l).ht.forEach(x=>{if(x.chuyen_cho==='m'+i)delete x.chuyen_cho});ssVeNguoi(l);ssLuuTam()}
+function ssNguoiBo(l,i){const x=ssN(l).ht[i];x.bo=!x.bo;if(!x.bo)delete x.chuyen_cho;ssVeNguoi(l);ssLuuTam()}
+function ssNguoiChuyen(l,i,v){const x=ssN(l).ht[i];if(v)x.chuyen_cho=v;else delete x.chuyen_cho;ssVeNguoi(l);ssLuuTam()}
+function ssNguoiSet(l,nhom,i,k,v){ssN(l)[nhom][i][k]=v;ssLuuTam();const t=document.getElementById('ssNguoiTong_'+l);if(t)t.innerHTML=ssNguoiTongHtml(l)}
+function ssTvSau(){
+  const so=v=>parseInt(String(v||'').replace(/\D/g,''),10)||0,cac={};
+  ssTv.ht.forEach((x,i)=>cac['h'+i]={...x,_v:so(x.von)});ssTv.moi.filter(x=>(x.ho_ten||'').trim()).forEach(x=>{const i=ssTv.moi.indexOf(x);cac['m'+i]={...x,_v:so(x.von)}});
+  Object.values(cac).forEach(x=>{if(x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo)cac[x.chuyen_cho]._v+=so(x.von)});
+  const sau=Object.values(cac).filter(x=>!x.bo),tong=sau.reduce((a,x)=>a+x._v,0);return {sau,tong};
+}
+function ssNguoiTongHtml(l){
+  if(l==='tv'){const {sau,tong}=ssTvSau();if(!sau.length)return '';
+    return '<b>Sau thay đổi</b> ('+sau.length+' thành viên'+(sau.length<2?' → dùng Mẫu 15; từ 2 thành viên → phần mềm soạn Phụ lục I-6':' → phần mềm soạn Phụ lục I-6')+'): '+sau.map(x=>ssEsc(x.ho_ten||'?')+' '+x._v.toLocaleString('vi-VN')+' ('+(tong?(Math.round(x._v*10000/tong)/100):0)+'%)').join('; ')}
+  const n=ssCs.ht.filter(x=>!x.bo).length+ssCs.moi.filter(x=>(x.ho_ten||'').trim()).length;return n?'<b>Mẫu 10 sẽ có '+n+' người</b>':'';
+}
+function ssVeNguoi(l){
+  const b=document.getElementById('ssNguoiBox_'+l);if(!b)return;
+  const st=ssN(l),cot=SS_NG[l],tv=l==='tv';
+  const o=(nhom,i,k,nhan)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">${ssEsc(nhan)}<input value="${ssEsc(st[nhom][i][k]||'')}" oninput="ssNguoiSet('${l}','${nhom}',${i},'${k}',this.value)" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
+  const luoi=(nhom,i)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-items:end">${cot.map(([k,n])=>o(nhom,i,k,n)).join('')}</div>`;
+  const khac=(loai,i)=>{const d=[];st.ht.forEach((x,j)=>{if(!(loai==='h'&&j===i)&&!x.bo)d.push(['h'+j,x.ho_ten||('người '+(j+1))])});st.moi.forEach((x,j)=>{if((x.ho_ten||'').trim())d.push(['m'+j,x.ho_ten])});return d};
+  b.innerHTML=`<b style="font-size:13px">${tv?'Thành viên / chủ sở hữu hiện tại':'Chủ sở hữu hưởng lợi đang đăng ký'}</b> <span class="hint" style="margin:0">(lấy từ hồ sơ đã gom; ✖ để gạch bỏ người rời đi)</span>`+
+    (st.ht.length?st.ht.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;${x.bo?'background:#fdecec;opacity:.85':'background:#fafbfa'}">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px"><b style="${x.bo?'text-decoration:line-through;color:#b00':''}">${i+1}. ${ssEsc(x.ho_ten||'(chưa có tên)')}</b>
+        <button class="btn ghost sm" onclick="ssNguoiBo('${l}',${i})">${x.bo?'↩ Giữ lại':'✖ Gạch bỏ'}</button>
+        ${tv&&x.bo?`<label style="font-size:12px">Chuyển phần vốn sang: <select onchange="ssNguoiChuyen('${l}',${i},this.value)" style="padding:4px;border-radius:6px"><option value="">— (không chuyển)</option>${khac('h',i).map(([v,t])=>`<option value="${v}" ${x.chuyen_cho===v?'selected':''}>${ssEsc(t)}</option>`).join('')}</select></label>`:''}</div>
+      ${luoi('ht',i)}</div>`).join(''):'<div class="hint">Chưa có danh sách từ hồ sơ đã gom — lấy GPKD ở tab "Lấy thông tin GPKD" trước, hoặc nhập tay bằng nút ➕ bên dưới.</div>')+
+    `<div style="margin-top:6px"><b style="font-size:13px">${tv?'Thành viên / chủ sở hữu MỚI':'Chủ sở hữu hưởng lợi MỚI'}</b></div>`+
+    st.moi.map((x,i)=>`<div style="border:1px dashed #6bb28a;border-radius:8px;padding:6px 8px;margin:6px 0;background:#f4fbf6"><div style="margin-bottom:4px"><b>Mới ${i+1}</b> <button class="btn ghost sm" onclick="ssNguoiXoaMoi('${l}',${i})">✖ Bỏ dòng này</button></div>${luoi('moi',i)}</div>`).join('')+
+    `<button class="btn ghost sm" onclick="ssNguoiThem('${l}')">➕ Thêm ${tv?'thành viên':'chủ sở hữu hưởng lợi'} mới</button>
+     <div id="ssNguoiTong_${l}" style="font-size:12.5px;margin-top:6px">${ssNguoiTongHtml(l)}</div>`;
 }
 function ssThuThap(){
   const gt=(nhom,k)=>{const e=document.getElementById(`ss_${nhom}_${k}`);return e?e.value.trim():''};
@@ -4565,7 +4627,7 @@ function ssThuThap(){
   ['ten','dia_chi','von'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
-  du.chu_so_huu_moi={};SS_TRUONG.chu_so_huu_moi.forEach(([k])=>du.chu_so_huu_moi[k]=gt('chu_so_huu_moi',k));
+  du.thanh_vien=ssTv;du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
   ['hien_tai','uy_quyen','bo_sung'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
   du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');
@@ -4648,10 +4710,10 @@ async function moSoanGpkd(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Nội dung thay đổi (chọn một hoặc nhiều)</legend>
       ${SS_LOAI.map(l=>`<label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ssL_${l[0]}" onchange="ssHienCacMuc()"> <b>${l[1]}</b></label>
         <div id="ssM_${l[0]}" style="display:none;margin:0 0 10px 26px;padding:8px 10px;border-left:3px solid #cfe5da">
-          ${l[0]==='nganh'?'<div id="ssNganhBox"></div>':ssCacO(l[2])}
+          ${l[0]==='nganh'?'<div id="ssNganhBox"></div>':l[0]==='chu_so_huu'?'<div id="ssNguoiBox_tv"></div>':l[0]==='cshhl'?'<div id="ssNguoiBox_cs"></div>':ssCacO(l[2])}
           ${l[0]==='dia_chi'?`<label class="chk" style="margin-top:6px"><input type="checkbox" id="ss_dia_chi_doi_thue" onchange="ssLuuTam()"> Đồng thời thay đổi địa chỉ nhận thông báo thuế</label><div class="hint" id="ssHtDiaChi"></div>`:''}
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
-          ${l[0]==='cshhl'?`<div class="hint">Mẫu 12 giữ mục "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi" và kèm Mẫu 10 (Danh sách chủ sở hữu hưởng lợi) để kê khai. Không chọn mục này thì phần đó được xoá khỏi Mẫu 12.</div>`:''}
+          ${l[0]==='cshhl'?`<div class="hint">Mẫu 12 giữ mục "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi" và kèm Mẫu 10 (Danh sách chủ sở hữu hưởng lợi) do phần mềm điền theo danh sách bên dưới. Không chọn mục này thì phần đó được xoá khỏi Mẫu 12.</div>`:''}
           ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
         </div>`).join('')}
     </fieldset>
@@ -4680,8 +4742,8 @@ async function moSoanGpkd(){
     const du=luu.du,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.value=v};
     Object.entries(du.dn||{}).forEach(([k,v])=>dat('ss_dn_'+k,v));
     ['ten','dia_chi','von'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
-    Object.entries((du.dai_dien||[{}])[0]||{}).forEach(([k,v])=>dat('ss_dai_dien_'+k,v));
-    Object.entries(du.chu_so_huu_moi||{}).forEach(([k,v])=>dat('ss_chu_so_huu_moi_'+k,v));
+    {const d0=(du.dai_dien||[{}])[0]||{};if(!d0.dia_chi)d0.dia_chi=[d0.so_nha,d0.xa,d0.tinh].filter(Boolean).join(', ');Object.entries(d0).forEach(([k,v])=>dat('ss_dai_dien_'+k,v))}
+    ssTv=Object.assign({ht:[],moi:[]},du.thanh_vien||{});ssCs=Object.assign({ht:[],moi:[]},du.cshhl_ds||{});
     ['hien_tai','uy_quyen','bo_sung'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
     ck('ss_tao_uy_quyen',du.tao_uy_quyen);ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);
@@ -4693,11 +4755,11 @@ async function moSoanGpkd(){
     ssNganh=du.nganh||{them:[],bo:[],sua:[]};
     const mGom=(ssHienTrang||{}).ma_so;
     if(mGom&&(du.dn||{}).ma_so&&du.dn.ma_so!==mGom)ssLayTuGom(true,true);   // bản nháp cũ của MST khác -> lấy lại theo hồ sơ vừa gom
-  }else{ssNganh={them:[],bo:[],sua:[]};ssLayTuGom(true)}
+  }else{ssNganh={them:[],bo:[],sua:[]};ssTv={ht:[],moi:[]};ssCs={ht:[],moi:[]};ssLayTuGom(true)}
   const nl=document.getElementById('ss_dn_ngay_lap');if(nl&&nl.dataset.tay!=='1')nl.value=ssHomNay();   // ngày lập mặc định = ngày hiện tại
   const sv2=document.getElementById('ss_dn_so_vb');if(sv2&&sv2.dataset.tay!=='1')sv2.value=ssSoKeTiep();
   ssDienHienTai(false);ssUqKyKiem();
-  ssHienGoiY();ssVeNganh();ssHienCacMuc();
+  ssHienGoiY();ssVeNganh();ssHienCacMuc();ssNapNguoiTuGom(false);
   try{const r=await api('/api/gpkd-soan/mau');ssBienMau=r.bien||{};
     ssMauRieng=(r.mau_rieng||[]).map(t=>({ten:t,chon:!!(luu&&(luu.mr||[]).includes(t))}));
     document.getElementById('ssBien').innerHTML=Object.entries(ssBienMau).map(([k,v])=>`<code>{{${k}}}</code> — ${ssEsc(v)}`).join('<br>');ssVeMauRieng();}
@@ -4740,6 +4802,7 @@ function ssHienGoiY(){
 function ssLayTuGom(im,ghiDe){
   ssHienTrang=ssHienTrangTuGom();const h=ssHienTrang,ghi=!im||ghiDe,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v&&(ghi||!e.value))e.value=v};
   dat('ss_dn_ten',h.ten);dat('ss_dn_ma_so',h.ma_so);dat('ss_dn_loai_hinh',h.loai_hinh);ssDienHienTai(ghi);
+  if(ghi)ssNapNguoiTuGom(!!ghiDe||!im);
   ssHienGoiY();if(ghi&&h.von){const cu=document.getElementById('ss_von_cu'),n=String(h.von).replace(/[^\d]/g,'');if(cu&&n)cu.value=n}
   ssLuuTam();
   const cty=(typeof companies!=='undefined'?companies:[]).find(c=>c.id===current),lech=cty&&cty.mst&&h.ma_so&&String(cty.mst).replace(/\D/g,'')!==String(h.ma_so).replace(/\D/g,'');

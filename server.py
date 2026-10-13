@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.201"
+APP_BUILD = "2026-10-13.202"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45749,6 +45749,10 @@ def gpkd_soan_tao(body: dict = Body(...)):
         kb = vbld.khoa_nguoi({"cccd": uq.get("so_giay_to"), "ten": uq.get("ho_ten")})
         if (uq.get("ho_ten") or "").strip() and d.get(kb):
             chu_ky["ben_b"] = d[kb]
+        for x in (du.get("thanh_vien") or {}).get("ht") or []:        # chữ ký từng thành viên (Phụ lục I-6) — chỉ khi người đó đã đồng ý và có trong Kho chữ ký
+            kx = vbld.khoa_nguoi({"cccd": x.get("cccd"), "ten": x.get("ho_ten")})
+            if (x.get("cccd") or "").strip() and d.get(kx) and not x.get("bo"):
+                chu_ky["cccd:" + "".join(ch for ch in x["cccd"] if ch.isdigit())] = d[kx]
     if body.get("xuat_pdf"):
         try:
             import pymupdf  # noqa

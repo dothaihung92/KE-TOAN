@@ -1,0 +1,78 @@
+import io
+import os
+import sys
+import zipfile
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO_ROOT)
+import docx
+import gpkd_soan as g
+
+# 1) địa chỉ liên lạc 1 ô -> tự tách cho Mẫu 13/15
+t = g._tach_dia_chi("481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam")
+assert t == {"so_nha": "481 Hòa Hảo", "xa": "Phường Diên Hồng", "tinh": "TP Hồ Chí Minh", "quoc_gia": "Việt Nam"}, t
+assert g._tach_dia_chi("12 Lê Lợi, Hà Nội")["tinh"] == "Hà Nội" and g._tach_dia_chi("")["so_nha"] == ""
+print("PASS 1: tách địa chỉ 1 ô.")
+
+# 2) chuyển vốn: Quang rời đi, chuyển 4,5 tỷ cho người mới C
+tv = {"ht": [{"ho_ten": "A", "von": "4.500.000.000", "bo": True, "chuyen_cho": "m0"}, {"ho_ten": "B", "von": "4.500.000.000"}], "moi": [{"ho_ten": "C", "von": "1.000.000.000"}, {"ho_ten": ""}]}
+sau, tong = g.tinh_thanh_vien_sau(tv)
+assert tong == 10_000_000_000 and [(x["ho_ten"], x["von"], x["ty_le"]) for x in sau] == [("B", 4_500_000_000, "45%"), ("C", 5_500_000_000, "55%")], sau
+assert g.tinh_thanh_vien_sau({"ht": [{"ho_ten": "A", "von": "1", "bo": True, "chuyen_cho": "h0"}]})[0] == []      # không chuyển cho chính người bị gạch
+print("PASS 2: tính vốn/tỷ lệ sau chuyển vốn.")
+
+DU = {"loai": ["chu_so_huu", "cshhl", "dai_dien", "nganh"],
+      "dn": {"ten": "Công ty TNHH ABC", "ma_so": "0313030299", "co_quan": "Sở Tài chính TP. Hồ Chí Minh", "loai_hinh": "Công ty trách nhiệm hữu hạn hai thành viên trở lên",
+             "ngay_lap": "02/10/2026", "dia_danh": "TP. Hồ Chí Minh"},
+      "hien_tai": {"dd_ho_ten": "Hà Thị Trúc Mai", "dd_chuc_danh": "Tổng giám đốc", "chu_so_huu": "Hà Thị Trúc Mai", "ngay_cap_gcn": "20/08/2019"},
+      "thanh_vien": {"ht": [{"ho_ten": "Hà Nhật Quang", "ngay_sinh": "22/07/1986", "gioi_tinh": "Nam", "cccd": "079086016995", "noi_cap": "Bộ Công An",
+                             "dia_chi": "481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam", "von": "4.500.000.000", "bo": True, "chuyen_cho": "h1"},
+                            {"ho_ten": "Hà Thị Trúc Mai", "ngay_sinh": "28/11/1988", "gioi_tinh": "Nữ", "cccd": "079188029565", "noi_cap": "Bộ Công An",
+                             "dia_chi": "481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam", "von": "4.500.000.000", "thoi_han": "02/10/2026"}],
+                     "moi": [{"ho_ten": "Nguyễn Văn C", "ngay_sinh": "01/01/1990", "gioi_tinh": "Nam", "cccd": "079090000001", "dia_chi": "1 Lê Lợi, Quận 1, TP Hồ Chí Minh", "von": "500.000.000"}]},
+      "cshhl_ds": {"ht": [{"ho_ten": "Hà Nhật Quang", "bo": True}, {"ho_ten": "Hà Thị Trúc Mai", "ngay_sinh": "28/11/1988", "gioi_tinh": "Nữ", "cccd": "079188029565", "noi_cap": "Bộ Công An",
+                           "dia_chi": "481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam", "truc_tiep": "90"}],
+                   "moi": [{"ho_ten": "Nguyễn Văn C", "cccd": "079090000001", "truc_tiep": "10"}]},
+      "dai_dien": [{"ho_ten": "Nguyễn Văn C", "ngay_sinh": "01/01/1990", "gioi_tinh": "Nam", "cccd": "079090000001", "chuc_danh": "Giám đốc",
+                    "dia_chi": "1 Lê Lợi, Phường Bến Nghé, TP Hồ Chí Minh, Việt Nam"}],
+      "nganh": {"them": [{"ma": "5820", "ten": "Xuất bản phần mềm", "chinh": True, "chi_tiet": "Phát triển phần mềm kế toán"}, {"ma": "4651", "ten": "Bán buôn máy vi tính"}]}}
+zb, _ten, cb = g.tao_ho_so(DU)
+zz = zipfile.ZipFile(io.BytesIO(zb))
+ten = zz.namelist()
+i6 = next(n for n in ten if n.startswith("PhuLuc_I-6"))
+m10 = next(n for n in ten if n.startswith("Mau10"))
+qd = next(n for n in ten if n.startswith("Quyet_dinh"))
+m13 = next(n for n in ten if n.startswith("Mau13"))
+assert not any(n.startswith("Mau15") for n in ten)                    # công ty từ 2 thành viên: Phụ lục I-6, không dùng Mẫu 15
+
+def tat_ca(d):
+    return "\n".join([p.text for p in d.paragraphs] + [c.text for t in d.tables for r in t.rows for c in r.cells])
+d6 = docx.Document(io.BytesIO(zz.read(i6)))
+t6 = tat_ca(d6)
+assert "Phụ lục I-6" in t6 and "DANH SÁCH THÀNH VIÊN CÔNG TY TRÁCH NHIỆM HỮU HẠN HAI THÀNH VIÊN TRỞ LÊN" in t6
+assert "HÀ NHẬT QUANG" not in t6 and "HÀ THỊ TRÚC MAI" in t6 and "NGUYỄN VĂN C" in t6, t6               # người bị gạch không còn trong danh sách
+assert "9.000.000.000 VNĐ" in t6 and "94,74%" in t6 and "500.000.000 VNĐ" in t6 and "5,26%" in t6 and "079188029565" in t6 and "Bộ Công An" in t6 and "TP Hồ Chí Minh, Việt Nam" in t6
+assert len(d6.tables[0].rows) == 2 + 2 and d6.sections[0].page_width > d6.sections[0].page_height      # 2 hàng tiêu đề + 2 thành viên; trang ngang
+print("PASS 3: Phụ lục I-6 theo danh sách sau thay đổi (người bị gạch bỏ, vốn chuyển, tỷ lệ).")
+d10 = docx.Document(io.BytesIO(zz.read(m10)))
+t10 = tat_ca(d10)
+assert "HÀ NHẬT QUANG" not in t10 and "HÀ THỊ TRÚC MAI" in t10 and "NGUYỄN VĂN C" in t10 and "90" in t10 and "TP. Hồ Chí Minh, ngày 2 tháng 10 năm 2026" in t10
+assert "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/CHỦ TỊCH CÔNG TY" in t10
+print("PASS 4: Mẫu 10 điền danh sách chủ sở hữu hưởng lợi (trừ người bị gạch, thêm người mới), có ngày và khối ký.")
+dq = tat_ca(docx.Document(io.BytesIO(zz.read(qd))))
+assert "Bổ sung ngành, nghề kinh doanh:" in dq and "- 5820 — Xuất bản phần mềm" in dq and "Chi tiết: Phát triển phần mềm kế toán" in dq and "- 4651 — Bán buôn máy vi tính" in dq, dq
+assert "Thay đổi thành viên/chủ sở hữu công ty" in dq and "HÀ NHẬT QUANG chuyển nhượng" in dq and "tiếp nhận thành viên/chủ sở hữu mới" in dq and "tỷ lệ 94,74%" in dq, dq
+dq_doan = [p for p in docx.Document(io.BytesIO(zz.read(qd))).paragraphs if p.text.startswith("Chi tiết:")]
+assert dq_doan and dq_doan[0].runs[0].italic
+print("PASS 5: Quyết định in ngành kèm dòng 'Chi tiết:' nghiêng ở hàng dưới + nội dung thay đổi thành viên.")
+t13 = tat_ca(docx.Document(io.BytesIO(zz.read(m13))))
+assert "1 Lê Lợi" in t13 and "Phường Bến Nghé" in t13 and "TP Hồ Chí Minh" in t13, t13       # địa chỉ 1 ô đã được tách vào các ô của Mẫu 13
+print("PASS 6: địa chỉ 1 ô tự điền vào các ô số nhà/xã/tỉnh của Mẫu 13.")
+
+# 7) công ty 1 thành viên đổi chủ -> Mẫu 15 (không có Phụ lục I-6)
+du1 = {"loai": ["chu_so_huu"], "dn": {"ten": "Công ty TNHH Một TV", "ma_so": "0101", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên"},
+       "thanh_vien": {"ht": [{"ho_ten": "Cũ", "von": "1.000.000.000", "bo": True}], "moi": [{"ho_ten": "Mới", "ngay_sinh": "01/01/1990", "gioi_tinh": "Nam", "cccd": "0790", "dia_chi": "2 Hai Bà Trưng, Phường Bến Nghé, TP Hồ Chí Minh"}]}}
+z1 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du1)[0])).namelist()
+assert any(n.startswith("Mau15") for n in z1) and not any(n.startswith("PhuLuc_I-6") for n in z1), z1
+print("PASS 7: công ty 1 thành viên đổi chủ: Mẫu 15 với chủ mới = người đầu tiên trong danh sách mới.")
+print("\nALL DONE")
