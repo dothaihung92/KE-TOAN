@@ -12,7 +12,8 @@ import gpkd_soan as g
 t = g._tach_dia_chi("481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam")
 assert t == {"so_nha": "481 Hòa Hảo", "xa": "Phường Diên Hồng", "tinh": "TP Hồ Chí Minh", "quoc_gia": "Việt Nam"}, t
 assert g._tach_dia_chi("12 Lê Lợi, Hà Nội")["tinh"] == "Hà Nội" and g._tach_dia_chi("")["so_nha"] == ""
-print("PASS 1: tách địa chỉ 1 ô.")
+assert g.so_nguyen("4.500.000.000,000") == 4_500_000_000 and g.so_nguyen("1,000,000") == 1_000_000 and g.so_nguyen("1.000.000 đồng") == 1_000_000 and g.so_nguyen("2.500,5") == 2500
+print("PASS 1: tách địa chỉ 1 ô; đọc số tiền có phần thập phân của cổng.")
 
 # 2) chuyển vốn: Quang rời đi, chuyển 4,5 tỷ cho người mới C
 tv = {"ht": [{"ho_ten": "A", "von": "4.500.000.000", "bo": True, "chuyen_cho": "m0"}, {"ho_ten": "B", "von": "4.500.000.000"}], "moi": [{"ho_ten": "C", "von": "1.000.000.000"}, {"ho_ten": ""}]}

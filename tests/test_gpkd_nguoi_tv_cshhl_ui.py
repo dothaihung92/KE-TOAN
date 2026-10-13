@@ -13,7 +13,7 @@ KHOI = [
         ["Danh sách thành viên #1 - Tên", "HÀ NHẬT QUANG"], ["Danh sách thành viên #1 - Số giấy tờ pháp lý", "079086016995"],
         ["Danh sách thành viên #2 - Tên", "HÀ THỊ TRÚC MAI"], ["Danh sách thành viên #2 - Số giấy tờ pháp lý", "079188029565"]]},
     {"khoi": "Thông tin về thành viên (2)", "cap": [["Họ tên", "HÀ NHẬT QUANG"], ["Ngày sinh", "22/07/1986"], ["Giới tính", "Nam"], ["Số giấy tờ pháp lý", "079086016995"],
-        ["Nơi cấp", "Bộ Công An"], ["Địa chỉ liên lạc", "481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam"], ["Giá trị vốn góp (VNĐ)", "4.500.000.000"]]},
+        ["Nơi cấp", "Bộ Công An"], ["Địa chỉ liên lạc", "481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam"], ["Giá trị vốn góp (VNĐ)", "4.500.000.000,000"]]},
     {"khoi": "Thông tin về thành viên (3)", "cap": [["Họ tên", "HÀ THỊ TRÚC MAI"], ["Ngày sinh", "28/11/1988"], ["Giới tính", "Nữ"], ["Số giấy tờ pháp lý", "079188029565"],
         ["Giá trị vốn góp (VNĐ)", "4.500.000.000"]]},
     {"khoi": "Thông tin về chủ sở hữu hưởng lợi", "cap": [["Họ tên", "HÀ NHẬT QUANG"], ["Số giấy tờ pháp lý", "079086016995"], ["Tỷ lệ sở hữu vốn điều lệ trực tiếp", "50"]]},
@@ -36,6 +36,8 @@ const { chromium } = require('playwright');
   const r = {};
   r.gom = await pg.evaluate('({tv:ssTv.ht,cs:ssCs.ht})');
   await pg.evaluate("ssNguoiBo('tv',0);ssNguoiThem('tv');ssNguoiSet('tv','moi',0,'ho_ten','NGUYỄN VĂN C');ssNguoiSet('tv','moi',0,'von','1.000.000.000');ssNguoiChuyen('tv',0,'m0')");
+  r.chonChuyen = await pg.evaluate("[...document.querySelectorAll('#ssNguoiBox_tv select[data-chon^=chuyen] option')].map(o=>o.textContent)");
+  r.chonChuTich = await pg.evaluate("[...document.querySelectorAll('#ssNguoiBox_tv select[data-chon^=chutich] option')].map(o=>o.textContent)");
   r.tong = await pg.innerText('#ssNguoiTong_tv');
   r.sau = await pg.evaluate('ssTvSau().sau.map(x=>[x.ho_ten,x._v])');
   r.gach = await pg.evaluate("!!document.querySelector('#ssNguoiBox_tv b[style*=line-through]')");
@@ -68,13 +70,14 @@ assert not [e for e in r["loi"] if "Failed to fetch" not in e], r["loi"]      # 
 tv = r["gom"]["tv"]
 assert [x["ho_ten"] for x in tv] == ["HÀ NHẬT QUANG", "HÀ THỊ TRÚC MAI"], tv
 q = tv[0]
-assert q["ngay_sinh"] == "22/07/1986" and q["von"] == "4.500.000.000" and q["dia_chi"].startswith("481 Hòa Hảo") and q["noi_cap"] == "Bộ Công An", q
+assert q["ngay_sinh"] == "22/07/1986" and q["von"] == "4.500.000.000"      # cổng ghi "4.500.000.000,000" -> không bị nhân 1000 and q["dia_chi"].startswith("481 Hòa Hảo") and q["noi_cap"] == "Bộ Công An", q
 assert [x["ho_ten"] for x in r["gom"]["cs"]] == ["HÀ NHẬT QUANG"] and r["gom"]["cs"][0]["truc_tiep"] == "50", r["gom"]["cs"]
 print("PASS 1: danh sách thành viên + chủ sở hữu hưởng lợi hiện tại lấy từ hồ sơ đã gom (gộp bảng danh sách và khối chi tiết, không trùng người).")
 assert r["sau"] == [["HÀ THỊ TRÚC MAI", 4500000000], ["NGUYỄN VĂN C", 5500000000]], r["sau"]
 assert "2 thành viên" in r["tong"] and "NGUYỄN VĂN C" in r["tong"] and r["gach"], r["tong"]
 assert r["du"]["tv"]["ht"][0]["bo"] is True and r["du"]["tv"]["ht"][0]["chuyen_cho"] == "m0" and r["du"]["csm"]["ho_ten"] == "NGUYỄN VĂN C"
 assert "1 người" in r["tongCs"], r["tongCs"]
+assert "NGUYỄN VĂN C" in r["chonChuyen"] and "NGUYỄN VĂN C" in r["chonChuTich"] and "HÀ THỊ TRÚC MAI" in r["chonChuTich"] and "HÀ NHẬT QUANG" not in r["chonChuTich"], (r["chonChuyen"], r["chonChuTich"])
 print("PASS 2: gạch bỏ (có gạch ngang), chuyển vốn sang người khác, thêm người mới; tổng sau thay đổi đúng.")
 assert r["diaChi1"] and r["diaChiCu"] == []
 print("PASS 3: địa chỉ liên lạc người đại diện chỉ còn 1 ô.")

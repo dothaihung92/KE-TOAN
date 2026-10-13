@@ -144,7 +144,11 @@ def so_nguyen(v):
     """'1.000.000.000', '1,000,000 đồng', 5300000 -> int (không đọc được -> None)."""
     if isinstance(v, (int, float)):
         return int(v)
-    t = re.sub(r"[^\d]", "", str(v or ""))
+    t = re.sub(r"[^\d.,]", "", str(v or ""))
+    m = re.match(r"^([\d.]*\d),(\d+)$", t)
+    if m and ("." in m.group(1) or len(m.group(2)) != 3):      # '4.500.000.000,000': cổng ghi kèm phần thập phân -> bỏ phần sau dấu phẩy
+        t = m.group(1)
+    t = re.sub(r"\D", "", t)
     return int(t) if t else None
 
 
