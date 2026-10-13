@@ -48,6 +48,7 @@ const { chromium } = require('playwright');
   r.du = await pg.evaluate('(()=>{const d=ssThuThap();return {tv:d.thanh_vien,csm:d.chu_so_huu_moi}})()');
   await pg.evaluate("ssNguoiBo('cs',0);ssNguoiThem('cs');ssNguoiSet('cs','moi',0,'ho_ten','NGUYỄN VĂN C');ssNguoiSet('cs','moi',0,'truc_tiep','55')");
   r.tongCs = await pg.innerText('#ssNguoiTong_cs');
+  r.nutKy = await pg.evaluate("document.querySelectorAll('#ssNguoiBox_tv input[type=file]').length");
   r.diaChi1 = await pg.evaluate("!!document.getElementById('ss_dai_dien_dia_chi')");
   r.diaChiCu = await pg.evaluate("['so_nha','xa','tinh','quoc_gia'].filter(k=>document.getElementById('ss_dai_dien_'+k))");
   try {
@@ -85,5 +86,6 @@ assert "NGUYỄN VĂN C" in r["chonChuyen"] and "NGUYỄN VĂN C" in r["chonChuT
 assert r["vonMoi"] == "4.000.000.000" and r["sauGia"][-1][1] == 4000000000, (r["vonMoi"], r["sauGia"])      # nhập giá chuyển nhượng -> ô phần vốn góp của người mới nhảy theo
 print("PASS 2: gạch bỏ (có gạch ngang), chuyển vốn sang người khác, thêm người mới; tổng sau thay đổi đúng.")
 assert r["diaChi1"] and r["diaChiCu"] == []
+assert r["nutKy"] == 3, r["nutKy"]      # mỗi thành viên (2 hiện tại + 1 mới) có nút tải chữ ký
 print("PASS 3: địa chỉ liên lạc người đại diện chỉ còn 1 ô.")
 print("\nALL DONE")

@@ -4603,7 +4603,8 @@ function ssDongBoVonNhan(l){      // người MỚI nhận chuyển nhượng: �
   Object.entries(tong).forEach(([k,v])=>{const j=+k.slice(1);if(!st.moi[j])return;st.moi[j].von=v.toLocaleString('vi-VN');const e=document.getElementById(`ssng_tv_moi_${j}_von`);if(e)e.value=st.moi[j].von});
 }
 function ssNguoiChuyen(l,i,v){const x=ssN(l).ht[i];if(v)x.chuyen_cho=v;else delete x.chuyen_cho;ssDongBoVonNhan(l);ssVeNguoi(l);ssLuuTam()}
-function ssNguoiSet(l,nhom,i,k,v){ssN(l)[nhom][i][k]=v;if(l==='tv'&&((nhom==='ht'&&(k==='gia'||k==='von'))))ssDongBoVonNhan(l);ssLuuTam();if(k==='ho_ten')ssLamMoiChon(l);else{const t=document.getElementById('ssNguoiTong_'+l);if(t)t.innerHTML=ssNguoiTongHtml(l)}}
+function ssNguoiSet(l,nhom,i,k,v){ssN(l)[nhom][i][k]=v;if(l==='tv'&&((nhom==='ht'&&(k==='gia'||k==='von'))))ssDongBoVonNhan(l);ssLuuTam();if(k==='cccd'&&l==='tv')setTimeout(()=>ssNguoiKyKiem1(l,nhom,i),600);
+  if(k==='ho_ten')ssLamMoiChon(l);else{const t=document.getElementById('ssNguoiTong_'+l);if(t)t.innerHTML=ssNguoiTongHtml(l)}}
 function ssTvSau(){
   const so=ssSoVnd,cac={};
   ssTv.ht.forEach((x,i)=>cac['h'+i]={...x,_v:so(x.von)});ssTv.moi.filter(x=>(x.ho_ten||'').trim()).forEach(x=>{const i=ssTv.moi.indexOf(x);cac['m'+i]={...x,_v:so(x.von)}});
@@ -4630,7 +4631,8 @@ function ssVeNguoi(l){
   const b=document.getElementById('ssNguoiBox_'+l);if(!b)return;
   const st=ssN(l),cot=SS_NG[l],tv=l==='tv';
   const o=(nhom,i,k,nhan)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">${ssEsc(nhan)}<input id="ssng_${l}_${nhom}_${i}_${k}" value="${ssEsc(st[nhom][i][k]||'')}" oninput="ssNguoiSet('${l}','${nhom}',${i},'${k}',this.value)" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
-  const luoi=(nhom,i)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-items:end">${cot.map(([k,n])=>o(nhom,i,k,n)).join('')}</div>`;
+  const kyO=(nhom,i)=>`<div style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">Chữ ký (Kho chữ ký)<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><label class="btn ghost sm" style="cursor:pointer;margin:0">✍ Tải chữ ký<input type="file" accept="image/png,image/jpeg" style="display:none" onchange="ssNguoiKyTai('${l}','${nhom}',${i},this)"></label><span id="ssngk_${l}_${nhom}_${i}" class="hint" style="margin:0"></span></div></div>`;
+  const luoi=(nhom,i)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-items:end">${cot.map(([k,n])=>o(nhom,i,k,n)).join('')}${tv?kyO(nhom,i):''}</div>`;
   const khac=(loai,i)=>ssKhac(l,loai,i);
   b.innerHTML=`<b style="font-size:13px">${tv?'Thành viên / chủ sở hữu hiện tại':'Chủ sở hữu hưởng lợi đang đăng ký'}</b> <span class="hint" style="margin:0">(lấy từ hồ sơ đã gom; ✖ để gạch bỏ người rời đi)</span>`+
     (st.ht.length?st.ht.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;${x.bo?'background:#fdecec;opacity:.85':'background:#fafbfa'}">
@@ -4643,6 +4645,24 @@ function ssVeNguoi(l){
     `<button class="btn ghost sm" onclick="ssNguoiThem('${l}')">➕ Thêm ${tv?'thành viên':'chủ sở hữu hưởng lợi'} mới</button>
      ${tv?`<div style="margin-top:6px;font-size:12.5px">Chủ tịch Hội đồng thành viên MỚI (công ty từ 2 thành viên — Quyết định bầu chủ tịch): <select data-chon="chutich:0" onchange="ssTv.chu_tich=this.value;ssLuuTam()" style="padding:4px;border-radius:6px"><option value="">— không đổi —</option>${khac('',-1).map(([v,t])=>`<option value="${v}" ${ssTv.chu_tich===v?'selected':''}>${ssEsc(t)}</option>`).join('')}</select></div>`:''}
      <div id="ssNguoiTong_${l}" style="font-size:12.5px;margin-top:6px">${ssNguoiTongHtml(l)}</div>`;
+  if(tv)ssNguoiKyKiem(l);
+}
+const ssSoGiayTo=x=>String((x&&x.cccd)||'').replace(/\D/g,'');
+async function ssNguoiKyKiem1(l,nhom,i){
+  const st=ssN(l),x=(st[nhom]||[])[i],t=document.getElementById(`ssngk_${l}_${nhom}_${i}`);if(!t||!x)return;
+  const d=ssSoGiayTo(x);
+  if(d.length<9){t.textContent='Nhập số CCCD để lưu/gắn chữ ký';return}
+  try{const r=await api(`/api/chu-ky/${current}/khoa?khoa=`+encodeURIComponent('cccd:'+d));t.innerHTML=r.xac_nhan&&r.anh?`✓ <img src="${r.anh}" style="max-height:26px;vertical-align:middle;background:#fff;border:1px solid #ddd">`:'Chưa có chữ ký'}catch(e){t.textContent=''}
+}
+function ssNguoiKyKiem(l){const st=ssN(l);['ht','moi'].forEach(n=>st[n].forEach((x,i)=>ssNguoiKyKiem1(l,n,i)))}
+async function ssNguoiKyTai(l,nhom,i,inp){
+  const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
+  const x=ssN(l)[nhom][i],d=ssSoGiayTo(x);
+  if(d.length<9){toast('Hãy nhập số CCCD của người này trước','err');return}
+  if(!confirm('Xác nhận '+(x.ho_ten||d)+' ĐÃ ĐỒNG Ý lưu và dùng chữ ký này trong hồ sơ?'))return;
+  const anh=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(f)});
+  try{await api('/api/chu-ky/'+current,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa:'cccd:'+d,ten:x.ho_ten||'',anh:anh,xac_nhan:true})});toast('Đã lưu chữ ký của '+(x.ho_ten||d),'ok');ssNguoiKyKiem1(l,nhom,i)}
+  catch(e){toast('Lỗi: '+e.message,'err')}
 }
 function ssThuThap(){
   const gt=(nhom,k)=>{const e=document.getElementById(`ss_${nhom}_${k}`);return e?e.value.trim():''};
