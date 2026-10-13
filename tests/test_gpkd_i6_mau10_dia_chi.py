@@ -122,5 +122,12 @@ assert t12_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "CHỦ TỊCH HỘI Đ
 t13_9 = tat_ca(docx.Document(io.BytesIO(z9.read(next(n for n in n9 if n.startswith("Mau13"))))))
 assert t13_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN\n(Ký, ghi họ tên)" in t13_9 and "Mẫu số 13" not in t13_9, t13_9[-300:]
 assert "ủy quyền thực hiện thủ tục đăng ký doanh nghiệp): 079188029565" in t13_9.replace("\t", ""), t13_9[:900]
+du9b = copy.deepcopy(du9)
+du9b["loai"] = ["chu_so_huu", "dai_dien", "cshhl"]          # tick thêm chủ sở hữu hưởng lợi: vẫn là Quyết định bầu Chủ tịch HĐTV
+z9b = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du9b)[0]))
+q9b = tat_ca(docx.Document(io.BytesIO(z9b.read(next(n for n in z9b.namelist() if n.startswith("Quyet_dinh"))))))
+assert "Về việc bầu Chủ tịch Hội đồng thành viên" in q9b and "Điều 1: Bầu Chủ tịch Hội đồng thành viên" in q9b
+t12b = tat_ca(docx.Document(io.BytesIO(z9b.read(next(n for n in z9b.namelist() if n.startswith("Mau12"))))))
+assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH" in t12b and "THÀNH VIÊN HỢP DANH CÔNG TY HỢP DANH" not in t12b, t12b[:1500]
 print("PASS 9: Quyết định bầu Chủ tịch HĐTV, Mẫu 12 và Mẫu 13 gọn như bộ hồ sơ thực tế; người ký là Chủ tịch HĐTV có hiện họ tên.")
 print("\nALL DONE")

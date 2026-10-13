@@ -574,6 +574,11 @@ def soan_mau12(du, chu_ky=None):
                 break
     _bo_ngoac_kinh_gui(m)
     _lam_sach_mau(m)
+    for p in m.doan(0, len(m.ch)):                      # công ty TNHH: tiêu đề mục thành viên chỉ giữ phần TNHH (bỏ "thành viên hợp danh công ty hợp danh")
+        t = _van(p)
+        if t.startswith("ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH") and "HỢP DANH" in t:
+            _thay_khoang(p, 0, len(t), "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH")
+            break
     return d
 
 
@@ -1143,7 +1148,7 @@ def soan_quyet_dinh(du, chu_ky=None):
     _doan(d, chu, dam=True, can="giua")
     la_hdtv = chu == "HỘI ĐỒNG THÀNH VIÊN"
     ct_moi = _tra_khoa_nguoi(du.get("thanh_vien"), du.get("chu_tich_moi")) if (la_hdtv and du.get("chu_tich_moi")) else None
-    bau_ct = bool(ct_moi and (ct_moi.get("ho_ten") or "").strip() and loai and loai <= {"chu_so_huu", "dai_dien"})      # chỉ đổi chủ/thành viên + người đại diện: Quyết định bầu Chủ tịch HĐTV (theo mẫu hồ sơ thực tế)
+    bau_ct = bool(ct_moi and (ct_moi.get("ho_ten") or "").strip() and bool(loai & {"chu_so_huu", "dai_dien"}) and not (loai & (CAN_QUYET_DINH - {"chu_so_huu", "dai_dien"})))      # chỉ đổi chủ/thành viên + người đại diện: Quyết định bầu Chủ tịch HĐTV (theo mẫu hồ sơ thực tế)
     if bau_ct:
         d.paragraphs[-3].runs[0].text = loai_vb
         d.paragraphs[-2].runs[0].text = "Về việc bầu Chủ tịch Hội đồng thành viên"
