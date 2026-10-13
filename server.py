@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.211"
+APP_BUILD = "2026-10-13.212"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44273,6 +44273,13 @@ def _bu_thue_dong_theo_tong_hop(rows, lts, tygia=None):
         if not nhom:
             continue
         dich = thn * tygia if tygia else thn
+        # Thuế suất "KHAC:x%" lẻ (vd KHAC:5.26% = 5/95, thuế tính trên giá đã gồm thuế): _chuan_hoa_thue_suat làm tròn về 5% nên tiền thuế từng dòng bị tính 5% rồi
+        # dòng cuối bù cả phần chênh (ca thật C26TAA 377430: dòng cuối 81.644 thay vì 55.263 -> sheet Đối chiếu báo lệch). Dùng THUẾ SUẤT THỰC = tổng thuế nhóm / tổng thành tiền nhóm.
+        rl = _parse_thue_suat(ts) if str(ts or "").strip().upper().startswith("KHAC") else None
+        if rl and abs(rl * 100 - round(rl * 100)) > 0.005:
+            tong_ds_nhom = sum(_to_num(r.get("thtien")) for r in nhom)
+            if tong_ds_nhom:
+                rate = dich / tong_ds_nhom
         tong = 0
         for r in nhom:
             r["tien_thue"] = round(_to_num(r.get("thtien")) * rate)
