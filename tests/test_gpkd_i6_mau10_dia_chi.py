@@ -75,4 +75,29 @@ du1 = {"loai": ["chu_so_huu"], "dn": {"ten": "Công ty TNHH Một TV", "ma_so": 
 z1 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du1)[0])).namelist()
 assert any(n.startswith("Mau15") for n in z1) and not any(n.startswith("PhuLuc_I-6") for n in z1), z1
 print("PASS 7: công ty 1 thành viên đổi chủ: Mẫu 15 với chủ mới = người đầu tiên trong danh sách mới.")
+# 8) bộ hồ sơ đổi chủ + đổi giám đốc của công ty 2TV: hợp đồng chuyển nhượng, Quyết định bầu Chủ tịch HĐTV, Mẫu 12 (thành viên + thuế)
+import copy
+du8 = copy.deepcopy(DU)
+du8["loai"] = ["chu_so_huu", "dai_dien"]
+DC = "481 Hòa Hảo, Phường Diên Hồng, TP Hồ Chí Minh, Việt Nam"
+du8["thanh_vien"] = {"ht": [{"ho_ten": "Bùi Thị Thanh Phụng", "ngay_sinh": "06/07/1979", "gioi_tinh": "Nữ", "cccd": "080179017183", "ngay_cap": "09/03/2022", "noi_cap": "Cục cảnh sát QLHC về TTXH",
+                             "dia_chi": DC, "von": "4.500.000.000", "bo": True, "chuyen_cho": "m0", "gia": "4.500.000.000"},
+                            {"ho_ten": "Hà Nhật Quang", "ngay_sinh": "22/07/1986", "gioi_tinh": "Nam", "cccd": "079086016995", "noi_cap": "Bộ Công An", "dia_chi": DC, "von": "4.500.000.000"}],
+                     "moi": [{"ho_ten": "Hà Thị Trúc Mai", "ngay_sinh": "28/11/1988", "gioi_tinh": "Nữ", "cccd": "079188029565", "ngay_cap": "01/03/2023", "noi_cap": "Bộ Công An", "dan_toc": "Kinh", "dia_chi": DC}]}
+du8["hien_tai"]["chu_so_huu"] = "Bùi Thị Thanh Phụng"
+du8["chu_tich_moi"] = "m0"
+du8["dai_dien"] = [{"ho_ten": "Hà Thị Trúc Mai", "ngay_sinh": "28/11/1988", "gioi_tinh": "Nữ", "cccd": "079188029565", "chuc_danh": "Tổng giám đốc", "dien_thoai": "0900000001"}]
+z8 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du8)[0]))
+n8 = z8.namelist()
+hd = next(n for n in n8 if n.startswith("Hop_dong_chuyen_nhuong"))
+assert len([n for n in n8 if n.startswith("Hop_dong_chuyen_nhuong")]) == 1 and any(n.startswith("PhuLuc_I-6") for n in n8) and any(n.startswith("Mau12") for n in n8) and any(n.startswith("Mau13") for n in n8)
+th = tat_ca(docx.Document(io.BytesIO(z8.read(hd))))
+assert "HỢP ĐỒNG CHUYỂN NHƯỢNG PHẦN VỐN GÓP" in th and "Bên chuyển nhượng (Bên bán):" in th and "BÙI THỊ THANH PHỤNG" in th and "09/03/2022" in th, th
+assert "4.500.000.000 đồng chiếm 50% vốn điều lệ" in th and "là 4.500.000.000 đồng" in th and "ngày 2 tháng 10 năm 2026" in th.lower().replace("Ngày", "ngày") and "Ông/bà: HÀ THỊ TRÚC MAI (Bên mua) giữ 01 bản" in th, th
+q8 = tat_ca(docx.Document(io.BytesIO(z8.read(next(n for n in n8 if n.startswith("Quyet_dinh"))))))
+assert "Bầu bà HÀ THỊ TRÚC MAI giữ chức vụ Chủ tịch Hội đồng thành viên Công ty kể từ ngày 02/10/2026" in q8 and "Số giấy tờ chứng thực cá nhân: 079188029565" in q8 and "Ngày cấp: 01/03/2023" in q8, q8
+assert "Ông/Bà BÙI THỊ THANH PHỤNG thôi giữ chức vụ Chủ tịch Hội đồng thành viên" in q8 and "do đã chuyển nhượng toàn bộ phần vốn góp" in q8
+t12 = tat_ca(docx.Document(io.BytesIO(z8.read(next(n for n in n8 if n.startswith("Mau12"))))))
+assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH" in t12 and "Gửi kèm" in t12 and "Giám đốc/Tổng giám đốc:HÀ THỊ TRÚC MAI" in t12 and "Giới tính: Nữ" in t12 and "28/11/1988" in t12, t12[:3000]
+print("PASS 8: bộ hồ sơ đổi chủ + đổi giám đốc 2TV: hợp đồng chuyển nhượng, Quyết định bầu Chủ tịch HĐTV, Mẫu 12 (thành viên + thuế), Phụ lục I-6, Mẫu 13.")
 print("\nALL DONE")
