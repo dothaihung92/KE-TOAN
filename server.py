@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.200"
+APP_BUILD = "2026-10-13.201"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45668,12 +45668,28 @@ def _gpkd_ten_mau_rieng(ten):
     return t if t.lower().endswith(".docx") else t + ".docx"
 
 
+def _gpkd_tai_danh_muc_nganh(p):
+    """update.py CŨ trên máy không có file danh mục trong FILES -> tự tải thẳng từ kho dự án, kiểm tra là JSON danh sách rồi mới ghi."""
+    import update as _up
+    rel = "templates/gpkd/nganh_cap4_QD27_2018.json"
+    nd = _up._tai_raw(rel)
+    ds = json.loads(nd.decode("utf-8"))
+    if not isinstance(ds, list) or not ds:
+        raise ValueError("file danh mục tải về không hợp lệ")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(nd)
+
+
 @app.get("/api/gpkd-soan/nganh")
 def gpkd_soan_nganh():
     """Danh mục ngành kinh tế CẤP 4 (Phụ lục I Quyết định 27/2018/QĐ-TTg): [[mã 4 số, tên ngành]] — để dò mã/tên ngành khi soạn hồ sơ."""
     p = os.path.join(BASE_DIR, "templates", "gpkd", "nganh_cap4_QD27_2018.json")
     if not os.path.isfile(p):
-        raise HTTPException(404, "Chưa có file danh mục ngành — hãy tắt/mở lại phần mềm để tự cập nhật")
+        try:
+            _gpkd_tai_danh_muc_nganh(p)
+        except Exception as e:
+            raise HTTPException(404, f"Chưa có file danh mục ngành và không tự tải được ({type(e).__name__}: {str(e)[:80]}) — kiểm tra mạng rồi mở lại mục này, hoặc tắt hẳn/mở lại phần mềm để tự cập nhật")
     with open(p, encoding="utf-8") as f:
         return {"nganh": json.load(f), "nguon": "Phụ lục I Quyết định 27/2018/QĐ-TTg (cấp 4). Một số mã đã đổi theo Quyết định 36/2025/QĐ-TTg — đối chiếu màu ngành trên cổng đăng ký kinh doanh."}
 

@@ -4436,12 +4436,17 @@ function gpkdChung(ds){
   const dau=gpkdKhoi[ds[0]].cap.filter(c=>chung.has(c[0]+'\u0001'+c[1]));
   return dau.filter((c,j)=>dau.findIndex(d=>d[0]===c[0]&&d[1]===c[1])===j);
 }
+function gpkdOChiTiet(v){
+  const m=String(v).match(/^([\s\S]*?)\s*(Chi tiết\s*:[\s\S]*)$/);         // "tên ngành Chi tiết: …" -> tên ở dòng 1, "Chi tiết: …" nghiêng ở dòng dưới (như cổng)
+  if(!m||!m[1].trim())return gpkdEsc(v);
+  return gpkdEsc(m[1])+'<div style="font-style:italic;margin-top:2px">'+gpkdEsc(m[2])+'</div>';
+}
 function gpkdBang(b){
   const cot=b.cot.filter(c=>c!=='Màu dòng'),coMau=b.cot.includes('Màu dòng');
   const nen={'đỏ':'#e8372c','xanh dương':'#7fb6ff','xanh lá':'#7dff4f'};
   return `<div style="overflow:auto;margin:6px 0 12px"><table style="border-collapse:collapse;width:100%;font-size:13px">
     <thead><tr style="background:#8c9a8c;color:#fff"><th style="padding:6px 8px;text-align:left;width:40px">#</th>${cot.map(c=>`<th style="padding:6px 8px;text-align:left">${gpkdEsc(c)}</th>`).join('')}</tr></thead><tbody>
-    ${[...b.dong.entries()].map(([i,r])=>{const bg=nen[r['Màu dòng']]||'#fff';return `<tr style="background:${bg};border-bottom:1px solid #fff;color:#1a1a1a"><td style="padding:6px 8px;color:#777;background:${bg}">${gpkdEsc(i)}</td>${cot.map(c=>`<td style="padding:6px 8px;background:${bg}">${gpkdEsc(r[c]||'')}</td>`).join('')}</tr>`}).join('')}
+    ${[...b.dong.entries()].map(([i,r])=>{const bg=nen[r['Màu dòng']]||'#fff';return `<tr style="background:${bg};border-bottom:1px solid #fff;color:#1a1a1a"><td style="padding:6px 8px;color:#777;background:${bg}">${gpkdEsc(i)}</td>${cot.map(c=>`<td style="padding:6px 8px;background:${bg}">${gpkdOChiTiet(r[c]||'')}</td>`).join('')}</tr>`}).join('')}
     </tbody></table>${coMau?'<div style="font-size:11.5px;color:var(--muted)">Nền <span style="background:#e8372c;padding:0 6px">đỏ</span>: ngành, nghề bị xoá · nền <span style="background:#7dff4f;padding:0 6px">xanh</span>: ngành, nghề bị thay đổi (đúng màu trên cổng).</div>':''}</div>`;
 }
 function gpkdHtmlKhoi(k,chung){
@@ -4579,7 +4584,8 @@ function ssBangNganh(k,tieuDe,coChinh){
       <td style="padding:2px"><input id="ssn_${k}_${i}_ma" list="ssDlMa" value="${ssEsc(n.ma)}" placeholder="Mã ngành" oninput="ssNganhMa('${k}',${i},this)" style="width:90px;padding:5px;border:1px solid var(--line);border-radius:6px"></td>
       <td style="padding:2px"><input id="ssn_${k}_${i}_ten" list="ssDlTen" value="${ssEsc(n.ten)}" placeholder="Tên ngành, nghề kinh doanh (gõ để dò)" oninput="ssNganhTen('${k}',${i},this)" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></td>
       <td style="padding:2px;white-space:nowrap">${coChinh?`<label class="chk"><input type="checkbox" ${n.chinh?'checked':''} onchange="ssNganh.${k}[${i}].chinh=this.checked;ssLuuTam()"> ngành chính</label>`:`<input value="${ssEsc(n.ghi_chu||'')}" placeholder="Ghi chú" oninput="ssNganh.${k}[${i}].ghi_chu=this.value;ssLuuTam()" style="width:150px;padding:5px;border:1px solid var(--line);border-radius:6px">`}</td>
-      <td style="padding:2px"><button class="btn ghost sm" onclick="ssNganh.${k}.splice(${i},1);ssVeNganh()">✖</button></td></tr>`).join('')}</table>
+      <td style="padding:2px"><button class="btn ghost sm" onclick="ssNganh.${k}.splice(${i},1);ssVeNganh()">✖</button></td></tr>
+      <tr><td></td><td colspan="3" style="padding:0 2px 6px"><input id="ssn_${k}_${i}_ct" value="${ssEsc(n.chi_tiet||'')}" placeholder="Chi tiết: (nếu có — hiện ở dòng dưới tên ngành, như trên cổng)" oninput="ssNganh.${k}[${i}].chi_tiet=this.value;ssLuuTam()" style="width:100%;padding:4px 6px;border:1px dashed var(--line);border-radius:6px;font-style:italic;font-size:12px"></td></tr>`).join('')}</table>
     <button class="btn ghost sm" onclick="ssNganh.${k}.push({ma:'',ten:'',chinh:false});ssVeNganh()">➕ Thêm ngành</button>
     ${k==='bo'&&ssHienTrang&&ssHienTrang.nganh.length?`<select onchange="if(this.value!==''){const n=ssHienTrang.nganh[this.value];ssNganh.bo.push({ma:n.ma,ten:n.ten,ghi_chu:''});ssVeNganh()}" style="padding:5px;border-radius:6px;margin-left:6px"><option value="">+ chọn từ ngành đang đăng ký…</option>${ssHienTrang.nganh.map((n,i)=>`<option value="${i}">${ssEsc(n.ma)} — ${ssEsc(n.ten.slice(0,60))}${n.mau?' ['+n.mau+']':''}</option>`).join('')}</select>`:''}</div>`;
 }

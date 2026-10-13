@@ -316,3 +316,18 @@ print("PASS: 2 thành viên trở lên -> Quyết định của Hội đồng th
 assert html.count("Hỗ trợ thay đổi GPKD") == 0 and html.count('<div style="font-size:18px;font-weight:700;color:#b5502d">Cập nhật GPKD</div>') == 1
 assert 'color:#2d7a5a">Soạn hồ sơ GPKD</div>' not in html      # không còn thẻ riêng
 print("PASS: chỉ còn 1 thẻ 'Cập nhật GPKD' trong Nhập Liệu.")
+
+# dòng "Chi tiết: …" nằm ở hàng dưới tên ngành (đoạn riêng, in nghiêng) trong bảng ngành của Mẫu 12
+import copy as _cp
+_du_ct = _cp.deepcopy(DU)
+_du_ct["nganh"]["them"][0]["chi_tiet"] = "Xuất bản phần mềm quản lý kế toán"
+_d_ct = g.soan_mau12(_du_ct)
+_found = False
+for _tb in _d_ct.tables:
+    for _row in _tb.rows:
+        for _c in _row.cells:
+            if _c.text.startswith("Xuất bản phần mềm") and len(_c.paragraphs) == 2:
+                assert _c.paragraphs[1].text == "Chi tiết: Xuất bản phần mềm quản lý kế toán" and _c.paragraphs[1].runs[0].italic
+                _found = True
+assert _found
+print("PASS: Mẫu 12 in 'Chi tiết: …' nghiêng ở hàng dưới tên ngành.")

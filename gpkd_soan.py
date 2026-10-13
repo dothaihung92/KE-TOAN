@@ -294,6 +294,12 @@ def _dien_bang_nganh(tb, ds, cot):
         for j, khoa in enumerate(cot, 1):
             v = n.get(khoa, "")
             _dat_o(r.cells[j], "X" if khoa == "chinh" and v else ("" if khoa == "chinh" else v))
+            ct = str(n.get("chi_tiet") or "").strip()
+            if khoa == "ten" and ct:                         # dòng "Chi tiết: …" nằm ở hàng dưới tên ngành, in nghiêng (như bảng trên cổng)
+                ct = ct if re.match(r"(?i)chi tiết\s*:", ct) else "Chi tiết: " + ct
+                p2 = r.cells[j].add_paragraph()
+                rr = p2.add_run(ct)
+                rr.italic = True
     mau_hang.getparent().remove(mau_hang)
 
 
