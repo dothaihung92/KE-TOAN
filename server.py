@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.210"
+APP_BUILD = "2026-10-13.211"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -41451,6 +41451,14 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                if (d := _ngay_hoa_don(r["tdlap"])) and _tu_loc <= d <= _den_loc]
         _tlog(f"lọc đúng kỳ {tu_ngay} - {den_ngay}: {len(rows)}/{_truoc_loc} hóa đơn")
 
+    def _tk_nk_trong_ky_xuat(ngay_dk):
+        """Tờ khai nhập khẩu có được đưa vào file Excel kỳ này không: có kỳ xuất (tu_ngay/den_ngay) -> chỉ tờ khai có ngày đăng ký TRONG kỳ;
+        không truyền kỳ -> tất cả (như cũ). Ngày đăng ký không đọc được -> bỏ khi đang lọc kỳ."""
+        if not (_tu_loc and _den_loc):
+            return True
+        ng = _ngay_tokhai_nk(ngay_dk)
+        return ng is not None and _tu_loc <= ng <= _den_loc
+
     # ===== NẠP TRƯỚC CHI TIẾT SONG SONG (tăng tốc xuất Excel) =====
     # Chỉ nạp hóa đơn CHƯA có detail_json VÀ chưa có file đã tải (ƯU TIÊN TUYỆT ĐỐI
     # file XML/ZIP đã tải sẵn trên máy — KHÔNG gọi mạng lại cho hóa đơn đã có file).
@@ -42691,6 +42699,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                 "SELECT * FROM tokhai_nhap WHERE company_id=? ORDER BY ngay_dk", (cid,)).fetchall()
             conn_tk.close()
             for tkr in tk_rows:
+                if not _tk_nk_trong_ky_xuat(tkr["ngay_dk"]):
+                    continue                    # tờ khai ngoài kỳ xuất: không đưa vào Chi tiết MUA VÀO
                 try:
                     tk_items = json.loads(tkr["items_json"]) if tkr["items_json"] else []
                 except Exception:
@@ -43068,6 +43078,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         "SELECT * FROM tokhai_nhap WHERE company_id=? ORDER BY ngay_dk", (cid,)).fetchall()
     conn_tk2.close()
     for tkr in tk_rows2:
+        if not _tk_nk_trong_ky_xuat(tkr["ngay_dk"]):
+            continue                            # tờ khai ngoài kỳ xuất: không đưa vào BK Mua vào
         try:
             tk_items = json.loads(tkr["items_json"]) if tkr["items_json"] else []
         except Exception:
