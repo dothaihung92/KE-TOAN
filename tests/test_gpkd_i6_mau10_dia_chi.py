@@ -99,8 +99,28 @@ assert "HỢP ĐỒNG CHUYỂN NHƯỢNG PHẦN VỐN GÓP" in th and "Bên chuy
 assert "4.500.000.000 đồng chiếm 50% vốn điều lệ" in th and "là 4.500.000.000 đồng" in th and "ngày 2 tháng 10 năm 2026" in th.lower().replace("Ngày", "ngày") and "Ông/bà: HÀ THỊ TRÚC MAI (Bên mua) giữ 01 bản" in th, th
 q8 = tat_ca(docx.Document(io.BytesIO(z8.read(next(n for n in n8 if n.startswith("Quyet_dinh"))))))
 assert "Bầu bà HÀ THỊ TRÚC MAI giữ chức vụ Chủ tịch Hội đồng thành viên Công ty kể từ ngày 02/10/2026" in q8 and "Số giấy tờ chứng thực cá nhân: 079188029565" in q8 and "Ngày cấp: 01/03/2023" in q8, q8
-assert "Ông/Bà BÙI THỊ THANH PHỤNG thôi giữ chức vụ Chủ tịch Hội đồng thành viên" in q8 and "do đã chuyển nhượng toàn bộ phần vốn góp" in q8
+assert "Bà BÙI THỊ THANH PHỤNG thôi giữ chức vụ Chủ tịch Hội đồng thành viên" in q8 and "do đã chuyển nhượng toàn bộ phần vốn góp" in q8
 t12 = tat_ca(docx.Document(io.BytesIO(z8.read(next(n for n in n8 if n.startswith("Mau12"))))))
 assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH" in t12 and "Gửi kèm" in t12 and "Giám đốc/Tổng giám đốc:HÀ THỊ TRÚC MAI" in t12 and "Giới tính: Nữ" in t12 and "28/11/1988" in t12, t12[:3000]
 print("PASS 8: bộ hồ sơ đổi chủ + đổi giám đốc 2TV: hợp đồng chuyển nhượng, Quyết định bầu Chủ tịch HĐTV, Mẫu 12 (thành viên + thuế), Phụ lục I-6, Mẫu 13.")
+# 9) khớp bộ hồ sơ thực tế: Quyết định bầu Chủ tịch HĐTV, Mẫu 12/13 gọn + người ký là Chủ tịch HĐTV
+du9 = copy.deepcopy(du8)
+du9["hien_tai"].update({"dd_ho_ten": "Bùi Thị Thanh Phụng", "dd_chuc_danh": "Tổng Giám đốc"})
+du9["tao_uy_quyen"] = True
+du9["uy_quyen"] = {"ho_ten": "Đỗ Thái Hưng"}
+z9 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du9)[0]))
+n9 = z9.namelist()
+q9 = tat_ca(docx.Document(io.BytesIO(z9.read(next(n for n in n9 if n.startswith("Quyet_dinh"))))))
+assert "Về việc bầu Chủ tịch Hội đồng thành viên" in q9 and "(Điều 55, Điều 56)" in q9 and "Căn cứ Điều lệ" not in q9
+assert "Điều 1: Bầu Chủ tịch Hội đồng thành viên" in q9 and "☒ Căn cước công dân" in q9 and "☐ Chứng minh nhân dân" in q9 and "Ngày hết hạn (nếu có):" in q9
+assert "Điều 2: Bà BÙI THỊ THANH PHỤNG thôi giữ chức vụ Chủ tịch Hội đồng thành viên Công ty kể từ ngày 02/10/2026 do đã chuyển nhượng toàn bộ phần vốn góp tại Công ty." in q9, q9
+assert "Điều 3: Thay đổi người đại diện theo pháp luật của Công ty: bà BÙI THỊ THANH PHỤNG (chức danh Tổng Giám đốc) thôi làm người đại diện theo pháp luật; bà HÀ THỊ TRÚC MAI, chức danh Tổng giám đốc, là người đại diện theo pháp luật mới" in q9, q9
+assert "Điều 4: Giao cho bà HÀ THỊ TRÚC MAI (Chủ tịch Hội đồng thành viên, người đại diện theo pháp luật)" in q9 and "Như Điều 5 (để thực hiện)" in q9 and "Điều 6: Quyết định này có hiệu lực" in q9
+t12_9 = tat_ca(docx.Document(io.BytesIO(z9.read(next(n for n in n9 if n.startswith("Mau12"))))))
+assert "Mẫu số 12" not in t12_9 and "(Dùng trong trường hợp" not in t12_9 and "Kê khai trong trường hợp có nhà đầu tư nước ngoài" not in t12_9 and "(Cơ quan đăng ký kinh doanh cấp tỉnh)" not in t12_9
+assert t12_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN\n(Ký, ghi họ tên)" in t12_9, t12_9[-300:]
+t13_9 = tat_ca(docx.Document(io.BytesIO(z9.read(next(n for n in n9 if n.startswith("Mau13"))))))
+assert t13_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN\n(Ký, ghi họ tên)" in t13_9 and "Mẫu số 13" not in t13_9, t13_9[-300:]
+assert "ủy quyền thực hiện thủ tục đăng ký doanh nghiệp): 079188029565" in t13_9.replace("\t", ""), t13_9[:900]
+print("PASS 9: Quyết định bầu Chủ tịch HĐTV, Mẫu 12 và Mẫu 13 gọn như bộ hồ sơ thực tế; người ký là Chủ tịch HĐTV có hiện họ tên.")
 print("\nALL DONE")

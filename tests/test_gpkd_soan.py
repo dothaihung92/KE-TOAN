@@ -53,7 +53,7 @@ DU = {"loai": ["ten", "dia_chi", "von", "nganh"],
 # 3) Mẫu 12: điền đúng, giữ chấm khi thiếu, chỉ giữ các mục được chọn
 d12 = g.soan_mau12(DU)
 t = van_ban(d12)
-for kv in ("Kính gửi: (Cơ quan đăng ký kinh doanh cấp tỉnh) Sở Tài chính TP. Hồ Chí Minh", "Tên doanh nghiệp (ghi bằng chữ in hoa): CÔNG TY TNHH SEASOFT TECHNOLOGY VIETNAM",
+for kv in ("Kính gửi: - Sở Tài chính TP. Hồ Chí Minh", "Tên doanh nghiệp (ghi bằng chữ in hoa): CÔNG TY TNHH SEASOFT TECHNOLOGY VIETNAM",
            "Mã số doanh nghiệp/Mã số thuế: 0313030299", "(ghi bằng chữ in hoa): CÔNG TY TNHH MỚI ABC", "viết tắt sau khi thay đổi (nếu có): ABC CO., LTD",
            "đường/phố/đại lộ, tổ/xóm/ấp/thôn: 30 đường số 5", "Xã/Phường/Đặc khu: Phường Long Trường", "Thư điện tử (nếu có): a@b.vn",
            "☒ Đồng thời thay đổi địa chỉ nhận thông báo thuế", "1.000.000.000 đồng (bằng chữ: Một tỷ đồng)",

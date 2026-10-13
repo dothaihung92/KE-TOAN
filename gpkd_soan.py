@@ -346,6 +346,77 @@ _GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "
 CAN_QUYET_DINH = {"ten", "dia_chi", "von", "nganh", "dai_dien", "chu_so_huu"}
 
 
+def _lam_sach_mau(m, bo_dong=()):
+    """Làm gọn Mẫu 12/13 như bộ hồ sơ thực tế: bỏ tiêu đề 'Mẫu số…', các dòng chú thích/ghi chú trong ngoặc, khối chú thích cuối trang và chỉ số trên."""
+    d = m.doc
+    thua = [r"^M[ẫa]u\s*số\s*\d+\s*$", r"^\(Dùng trong trường hợp", r"^\(Doanh nghiệp chọn và kê khai", r"^Trường hợp thay đổi thành viên hợp danh",
+            r"^b\)\s*Đối với doanh nghiệp được thành lập trước ngày 01/7/2025"] + list(bo_dong)
+    body = d.element.body
+    phan_tu = list(body)
+    i = 0
+    while i < len(phan_tu):
+        c = phan_tu[i]
+        if c.tag == qn("w:p"):
+            t = _chu(c)
+            if any(re.search(p, t) for p in thua):
+                body.remove(c)
+            elif re.fullmatch(r"_{5,}", t):                 # dòng gạch ngang + các chú thích (1, 2, 3, - …) bên dưới
+                body.remove(c)
+                j = i + 1
+                while j < len(phan_tu) and phan_tu[j].tag == qn("w:p") and re.match(r"^(\d+\s|-\s)", _chu(phan_tu[j]) or "x"):
+                    body.remove(phan_tu[j])
+                    j += 1
+                i = j - 1
+        i += 1
+    for r in list(d.element.body.iter(qn("w:r"))):          # chỉ số chú thích (1, 2, 3 in nhỏ lên trên)
+        va = r.find(qn("w:rPr") + "/" + qn("w:vertAlign"))
+        if va is not None and va.get(qn("w:val")) == "superscript" and re.fullmatch(r"\d+", "".join(t.text or "" for t in r.iter(qn("w:t")))):
+            r.getparent().remove(r)
+
+
+def _bo_ngoac_kinh_gui(m):
+    for p in m.doan(0, 12):
+        t = _van(p)
+        k = "(Cơ quan đăng ký kinh doanh cấp tỉnh) "
+        if t.startswith("Kính gửi:") and k in t:
+            _thay_khoang(p, t.index(k), t.index(k) + len(k), "- ")
+            return
+
+
+def _nguoi_ky_2tv(du, chu_ky):
+    """Công ty TNHH từ 2 thành viên: người ký hồ sơ là Chủ tịch HĐTV (mới nếu có bầu mới). (tiêu đề, họ tên, ảnh chữ ký) hoặc None nếu không áp dụng."""
+    dn, ht = du.get("dn") or {}, du.get("hien_tai") or {}
+    lh = (dn.get("loai_hinh") or "").lower()
+    if "một thành viên" in lh or "trách nhiệm hữu hạn" not in lh:
+        return None
+    ct = _tra_khoa_nguoi(du.get("thanh_vien"), du.get("chu_tich_moi")) if du.get("chu_tich_moi") else None
+    if ct and (ct.get("ho_ten") or "").strip():
+        so = re.sub(r"\D", "", ct.get("cccd") or "")
+        return "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", ct["ho_ten"].strip(), (chu_ky or {}).get("cccd:" + so) if len(so) >= 9 else None
+    if (ht.get("chu_so_huu") or "").strip():
+        return "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", ht["chu_so_huu"].strip(), (chu_ky or {}).get("chu_so_huu")
+    return None
+
+
+def _khoi_ky(c, tieu_de, ten, anh):
+    """Thay nội dung ô ký: tiêu đề + (Ký, ghi họ tên) + chỗ ký + họ tên (không ký thay; gắn ảnh chỉ khi đã được người đó đồng ý)."""
+    for p in list(c.paragraphs)[1:]:
+        p._p.getparent().remove(p._p)
+    p0 = c.paragraphs[0]
+    for r in list(p0.runs):
+        r._r.getparent().remove(r._r)
+    p0.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p0.add_run(tieu_de).bold = True
+    p1 = c.add_paragraph()
+    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p1.add_run("(Ký, ghi họ tên)").italic = True
+    _dong_trong_ky(c)
+    pk = c.add_paragraph()
+    pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pk.add_run(ten.strip().upper()).bold = True
+    _gan_chu_ky(pk, anh)
+
+
 def soan_mau12(du, chu_ky=None):
     """Mẫu số 12 (TT 121/2026) — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN: chỉ giữ các mục được chọn, điền dữ liệu."""
     d = cat_mau(12)
@@ -485,22 +556,28 @@ def soan_mau12(du, chu_ky=None):
             m.xoa_phan(vg, cam)                       # CT TNHH 1TV / cổ phần: không có "phần vốn góp của thành viên"
     # chữ ký: ghi sẵn họ tên người đại diện theo pháp luật (người đại diện mới nếu có thay đổi) — phần mềm KHÔNG ký thay
     ten_ky = ((du.get("dai_dien") or [{}])[0].get("ho_ten") if "dai_dien" in loai else "") or (du.get("hien_tai") or {}).get("dd_ho_ten") or ""
-    if ten_ky.strip():
+    ky2 = _nguoi_ky_2tv(du, chu_ky)
+    if ten_ky.strip() or ky2:
         for tb in d.tables:
             if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
                 c = [c for c in tb.rows[-1].cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text][0]
-                # chữ ký trong Kho chữ ký chỉ là của người đại diện HIỆN TẠI (đã được người đó đồng ý) — không gắn khi ký là người đại diện mới
-                _dong_trong_ky(c)
-                pk = c.add_paragraph()
-                pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                pk.add_run(ten_ky.strip().upper()).bold = True
-                _gan_chu_ky(pk, (chu_ky or {}).get("giam_doc") if "dai_dien" not in loai else None)
+                if ky2:                               # công ty 2TV: Chủ tịch HĐTV ký (đúng bộ hồ sơ thực tế)
+                    _khoi_ky(c, *ky2)
+                else:
+                    # chữ ký trong Kho chữ ký chỉ là của người đại diện HIỆN TẠI (đã được người đó đồng ý) — không gắn khi ký là người đại diện mới
+                    _dong_trong_ky(c)
+                    pk = c.add_paragraph()
+                    pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    pk.add_run(ten_ky.strip().upper()).bold = True
+                    _gan_chu_ky(pk, (chu_ky or {}).get("giam_doc") if "dai_dien" not in loai else None)
                 _giu_mot_trang(tb)
                 break
+    _bo_ngoac_kinh_gui(m)
+    _lam_sach_mau(m)
     return d
 
 
-def soan_mau13(du):
+def soan_mau13(du, chu_ky=None):
     """Mẫu số 13 (TT 68/2025) — Giấy đề nghị đăng ký thay đổi người đại diện theo pháp luật."""
     d = cat_mau(13)
     m = _Mau(d)
@@ -523,6 +600,22 @@ def soan_mau13(du):
         m.dien(r"Quốc gia", n.get("quoc_gia") or "Việt Nam", bd)
         m.dien(r"Điện thoại \(nếu có\)", n.get("dien_thoai"), bd)
         m.dien(r"Thư điện tử \(nếu có\)", n.get("email"), bd)
+    ky = _nguoi_ky_2tv(du, chu_ky)
+    if ky is None and "một thành viên" in (dn.get("loai_hinh") or "").lower() and ((du.get("hien_tai") or {}).get("chu_so_huu") or "").strip():
+        ky = ("CHỦ SỞ HỮU", du["hien_tai"]["chu_so_huu"], (chu_ky or {}).get("chu_so_huu"))
+    if ky:
+        if du.get("tao_uy_quyen"):                                       # "Số định danh cá nhân của Chủ tịch…" chỉ kê khai khi ủy quyền nộp hồ sơ
+            ct = _tra_khoa_nguoi(du.get("thanh_vien"), du.get("chu_tich_moi")) if du.get("chu_tich_moi") else None
+            if ct and (ct.get("cccd") or "").strip():
+                m.dien(r"Số định danh cá nhân của Chủ tịch hội đồng thành viên", ct["cccd"].strip(), 0, bd if bd is not None else len(m.ch))
+        for tb in d.tables:
+            c = next((c for r in tb.rows for c in r.cells if "CHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG" in c.text.replace("\n", " ")), None)
+            if c is not None:
+                _khoi_ky(c, *ky)
+                _giu_mot_trang(tb)
+                break
+    _bo_ngoac_kinh_gui(m)
+    _lam_sach_mau(m)
     return d
 
 
@@ -991,6 +1084,52 @@ def _chu_the_quyet_dinh(loai_hinh):
     return "CHỦ SỞ HỮU", "QUYẾT ĐỊNH", "Chủ sở hữu"
 
 
+def _dieu_bau_chu_tich(d, du, ct):
+    """Các Điều của Quyết định bầu Chủ tịch HĐTV (đổi chủ/thành viên 2TV) theo mẫu hồ sơ thực tế. Trả số Điều kế tiếp."""
+    dn, ht = du.get("dn") or {}, du.get("hien_tai") or {}
+    tv = du.get("thanh_vien") or {}
+    loai = set(du.get("loai") or [])
+    ngay = _ngay_dd_mm_yyyy(dn.get("ngay_lap") or "") or "……"
+    ten_ct = (ct.get("ho_ten") or "").strip().upper()
+    _doan(d, "Điều 1: ", dam=True, gach=True, sau=4).add_run("Bầu Chủ tịch Hội đồng thành viên").bold = True
+    _doan(d, f"Bầu {_xung(ct)} {ten_ct} giữ chức vụ Chủ tịch Hội đồng thành viên Công ty kể từ ngày {ngay}, thông tin cá nhân như sau:", can="deu", sau=2)
+    _doan(d, "Chủ tịch Hội đồng thành viên", dam=True, sau=2)
+    so = re.sub(r"\D", "", ct.get("cccd") or "")
+    loai_gt = ["CMND" if len(so) == 9 else "", "CCCD" if len(so) == 12 else "", "", ""]
+    for dong in (f"- Họ tên: {ten_ct}", f"Sinh ngày: {_ngay_dd_mm_yyyy(ct.get('ngay_sinh')) or '……'}", f"Dân tộc: {ct.get('dan_toc') or 'Kinh'}",
+                 f"Quốc tịch: {ct.get('quoc_tich') or 'Việt Nam'}", "Loại giấy tờ chứng thực cá nhân:"):
+        _doan(d, dong, sau=0)
+    tb = d.add_table(rows=2, cols=2)
+    tb.style = "Table Grid"
+    for i, (nhan, k) in enumerate((("Chứng minh nhân dân", "CMND"), ("Căn cước công dân", "CCCD"), ("Hộ chiếu", ""), ("Loại khác (ghi rõ):", ""))):
+        c = tb.rows[i // 2].cells[i % 2]
+        c.paragraphs[0].add_run(("☒ " if k and k in loai_gt else "☐ ") + nhan)
+    for dong in (f"Số giấy tờ chứng thực cá nhân: {ct.get('cccd') or '……'}", f"Ngày cấp: {_ngay_dd_mm_yyyy(ct.get('ngay_cap')) or '……'}", f"Nơi cấp: {ct.get('noi_cap') or '……'}",
+                 "Ngày hết hạn (nếu có): ", f"Chỗ ở hiện tại: {_dia_chi_nguoi(ct) or '……'}", "Chức vụ: Chủ tịch Hội đồng thành viên"):
+        _doan(d, dong, sau=0)
+    _doan(d, "", sau=4)
+    n = 2
+    cu = (ht.get("chu_so_huu") or "").strip()
+    if cu and cu.upper() != ten_ct:
+        bo = [x for x in tv.get("ht") or [] if x.get("bo")]
+        roi = any((x.get("ho_ten") or "").strip().upper() == cu.upper() for x in bo)
+        cu_obj = next((x for x in tv.get("ht") or [] if (x.get("ho_ten") or "").strip().upper() == cu.upper()), {})
+        _doan(d, f"Điều {n}: ", dam=True, gach=True, sau=4).add_run(
+            f"{_xung(cu_obj).capitalize()} {cu.upper()} thôi giữ chức vụ Chủ tịch Hội đồng thành viên Công ty kể từ ngày {ngay}" + (" do đã chuyển nhượng toàn bộ phần vốn góp tại Công ty." if roi else "."))
+        n += 1
+    if "dai_dien" in loai:
+        moi = (du.get("dai_dien") or [{}])[0]
+        cu_dd = (ht.get("dd_ho_ten") or "").strip()
+        y = "Thay đổi người đại diện theo pháp luật của Công ty: "
+        if cu_dd and cu_dd.upper() != (moi.get("ho_ten") or "").strip().upper():
+            cu_obj = next((x for x in tv.get("ht") or [] if (x.get("ho_ten") or "").strip().upper() == cu_dd.upper()), {})
+            y += f"{_xung(cu_obj)} {cu_dd.upper()}" + (f" (chức danh {ht['dd_chuc_danh']})" if (ht.get("dd_chuc_danh") or "").strip() else "") + " thôi làm người đại diện theo pháp luật; "
+        y += f"{_xung(moi)} {(moi.get('ho_ten') or '').upper() or '……'}, chức danh {moi.get('chuc_danh') or '……'}, là người đại diện theo pháp luật mới của Công ty kể từ ngày {ngay}."
+        _doan(d, f"Điều {n}: ", dam=True, gach=True, sau=4).add_run(y)
+        n += 1
+    return n
+
+
 def soan_quyet_dinh(du, chu_ky=None):
     """Quyết định (chủ sở hữu công ty TNHH một thành viên) / Nghị quyết (HĐTV, ĐHĐCĐ) về việc thay đổi nội dung đăng ký doanh nghiệp."""
     dn, ht = du.get("dn") or {}, du.get("hien_tai") or {}
@@ -1003,12 +1142,24 @@ def soan_quyet_dinh(du, chu_ky=None):
     _doan(d, "Về việc thay đổi nội dung đăng ký doanh nghiệp", dam=True, can="giua", sau=0)
     _doan(d, chu, dam=True, can="giua")
     la_hdtv = chu == "HỘI ĐỒNG THÀNH VIÊN"
+    ct_moi = _tra_khoa_nguoi(du.get("thanh_vien"), du.get("chu_tich_moi")) if (la_hdtv and du.get("chu_tich_moi")) else None
+    bau_ct = bool(ct_moi and (ct_moi.get("ho_ten") or "").strip() and loai and loai <= {"chu_so_huu", "dai_dien"})      # chỉ đổi chủ/thành viên + người đại diện: Quyết định bầu Chủ tịch HĐTV (theo mẫu hồ sơ thực tế)
+    if bau_ct:
+        d.paragraphs[-3].runs[0].text = loai_vb
+        d.paragraphs[-2].runs[0].text = "Về việc bầu Chủ tịch Hội đồng thành viên"
     if la_hdtv:
-        _doan(d, "- Căn cứ Luật Doanh nghiệp năm 2020 được sửa đổi, bổ sung năm 2025;", can="deu", thut=True)
+        _doan(d, "- Căn cứ Luật Doanh nghiệp năm 2020 được sửa đổi, bổ sung năm 2025" + (" (Điều 55, Điều 56);" if bau_ct else ";"), can="deu", thut=True)
         _doan(d, "- Căn cứ Nghị định số 168/2025/NĐ-CP ngày 30 tháng 6 năm 2025 của Chính phủ về đăng ký doanh nghiệp;", can="deu", thut=True)
-    _doan(d, f"- Căn cứ Điều lệ {ten} đã được thông qua ngày {ht.get('ngay_dieu_le') or '……'}" + (";" if la_hdtv else "."), can="deu", thut=True)
+    if not bau_ct:
+        _doan(d, f"- Căn cứ Điều lệ {ten} đã được thông qua ngày {ht.get('ngay_dieu_le') or '……'}" + (";" if la_hdtv else "."), can="deu", thut=True)
     _doan(d, loai_vb, dam=True, can="giua", sau=10)
-    _doan(d, "Điều 1: ", dam=True, gach=True, sau=4)
+    loai_goc = loai
+    if bau_ct:
+        so_dieu = _dieu_bau_chu_tich(d, du, ct_moi)
+        loai = set()                                    # các mục thay đổi đã nằm trong các Điều ở trên
+    else:
+        so_dieu = 2
+        _doan(d, "Điều 1: ", dam=True, gach=True, sau=4)
     muc = []
     if "ten" in loai:
         t = du.get("ten") or {}
@@ -1077,21 +1228,26 @@ def soan_quyet_dinh(du, chu_ky=None):
             continue
         p = _doan(d, f"{i}. {t}", can="deu")
         p.paragraph_format.left_indent = Cm(0.8)
+    loai = loai_goc
     dd = (ht.get("dd_ho_ten") or "").strip()
     if "dai_dien" in loai and (du.get("dai_dien") or [{}])[0].get("ho_ten"):
         dd = (du["dai_dien"][0].get("ho_ten") or "").strip()
-    _doan(d, f"Điều 2: ", dam=True, gach=True, sau=10).add_run(f"Giao cho Ông/Bà {dd.upper() or '……'} (người đại diện theo pháp luật) tiến hành các thủ tục cần thiết theo quy định của pháp luật.")
+    if bau_ct:
+        dd = (ct_moi.get("ho_ten") or "").strip()
+        _doan(d, f"Điều {so_dieu}: ", dam=True, gach=True, sau=10).add_run(f"Giao cho {_xung(ct_moi)} {dd.upper()} (Chủ tịch Hội đồng thành viên, người đại diện theo pháp luật) tiến hành các thủ tục đăng ký thay đổi cần thiết theo quy định của pháp luật.")
+    else:
+        _doan(d, f"Điều {so_dieu}: ", dam=True, gach=True, sau=10).add_run(f"Giao cho Ông/Bà {dd.upper() or '……'} (người đại diện theo pháp luật) tiến hành các thủ tục cần thiết theo quy định của pháp luật.")
     if la_hdtv:
-        _doan(d, "Điều 3: ", dam=True, gach=True, sau=10).add_run(
+        _doan(d, f"Điều {so_dieu + 1}: ", dam=True, gach=True, sau=10).add_run(
             "Các thành viên Hội đồng thành viên, người đại diện theo pháp luật của Công ty và các cá nhân, bộ phận có liên quan chịu trách nhiệm thi hành Quyết định này.")
     else:
-        _doan(d, "Điều 3: ", dam=True, gach=True, sau=10).add_run(f"Người đại diện theo pháp luật của công ty, {ten_co.lower()} công ty có trách nhiệm thi hành {loai_vb.capitalize()} này.")
-    _doan(d, "Điều 4: ", dam=True, gach=True, sau=10).add_run(f"{loai_vb.capitalize()} này có hiệu lực kể từ ngày ký.")
+        _doan(d, f"Điều {so_dieu + 1}: ", dam=True, gach=True, sau=10).add_run(f"Người đại diện theo pháp luật của công ty, {ten_co.lower()} công ty có trách nhiệm thi hành {loai_vb.capitalize()} này.")
+    _doan(d, f"Điều {so_dieu + 2}: ", dam=True, gach=True, sau=10).add_run(f"{loai_vb.capitalize()} này có hiệu lực kể từ ngày ký.")
     tb = d.add_table(rows=1, cols=2)
     a, b = tb.rows[0].cells
     a.paragraphs[0].add_run("Nơi nhận:").bold = True
     a.paragraphs[0].runs[0].italic = True
-    for t in (f"- Như Điều 3 (để thực hiện);", "- Phòng ĐKKD (để đăng ký);", "- Lưu."):
+    for t in (f"- Như Điều {so_dieu + 1} (để thực hiện);", "- Phòng ĐKKD (để đăng ký);", "- Lưu."):
         a.add_paragraph(t)
     pb = b.paragraphs[0]
     pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1104,7 +1260,7 @@ def soan_quyet_dinh(du, chu_ky=None):
         pb.add_run(chu).bold = True
     pb2 = b.add_paragraph()
     pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    pb2.add_run("(Ký, ghi rõ họ tên)").italic = True
+    pb2.add_run("(Ký, ghi rõ họ và tên)").italic = True
     ct_ky = _tra_khoa_nguoi(du.get("thanh_vien"), du.get("chu_tich_moi")) if (la_hdtv and du.get("chu_tich_moi")) else None
     nguoi_ky, anh_ky = (ht.get("chu_so_huu") or "").strip(), (chu_ky or {}).get("chu_so_huu")
     if ct_ky and (ct_ky.get("ho_ten") or "").strip():                  # Chủ tịch HĐTV mới ký Quyết định (chữ ký lấy theo CCCD trong Kho chữ ký nếu người đó đã đồng ý)
@@ -1501,7 +1657,7 @@ def tao_ho_so(du, mau_rieng=None, chu_ky=None, xuat_pdf=False):
     if "cshhl" in loai and "dai_dien" not in loai:
         them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", soan_mau10(du, chu_ky), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (phần mềm điền theo danh sách đã chọn)", 10)
     if "dai_dien" in loai:
-        them(f"Mau13_Giay_de_nghi_thay_doi_nguoi_dai_dien_theo_phap_luat_{ma}.docx", soan_mau13(du), "Mẫu số 13 — Giấy đề nghị đăng ký thay đổi người đại diện theo pháp luật", 13)
+        them(f"Mau13_Giay_de_nghi_thay_doi_nguoi_dai_dien_theo_phap_luat_{ma}.docx", soan_mau13(du, chu_ky), "Mẫu số 13 — Giấy đề nghị đăng ký thay đổi người đại diện theo pháp luật", 13)
         them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", soan_mau10(du, chu_ky), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (phần mềm điền theo danh sách đã chọn)", 10)
     if "chu_so_huu" in loai:
         sau_tv, _tong = tinh_thanh_vien_sau(du.get("thanh_vien"))
