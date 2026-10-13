@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.197"
+APP_BUILD = "2026-10-13.198"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9724,15 +9724,33 @@ def _run_batch(batch_id: int, cids: list, body: dict):
 
     try:
         with _cf.ThreadPoolExecutor(max_workers=SO_LUONG_TRA_CUU_TOI_DA) as executor:
+            # cho phép THÊM công ty vào hàng đợi khi đang chạy (xem /api/fetch-batch-them)
+            futs_batch = []
+
+            def _nop_1(c):
+                f = executor.submit(_xu_ly_1_cong_ty, c)
+                futs_batch.append(f)
+                return f
+            BATCH_HANG_DOI[batch_id] = _nop_1
             for cid in cids:
-                executor.submit(_xu_ly_1_cong_ty, cid)
+                _nop_1(cid)
+            # Giữ hàng đợi MỞ cho tới khi mọi công ty đã nộp (kể cả công ty thêm sau) chạy xong — nếu thoát khối "with" ngay,
+            # executor đóng và không nộp thêm được nữa.
+            while True:
+                time.sleep(0.3)
+                with _BATCH_THEM_LOCK:
+                    if all(f.done() for f in futs_batch):
+                        BATCH_HANG_DOI.pop(batch_id, None)
+                        break
             # thoát khỏi khối "with" tự động CHỜ hết mọi công ty đã nộp vào
             # hàng đợi xong (kể cả những công ty còn đang chạy lúc cancel) —
             # đúng với hành vi cũ: bấm Dừng KHÔNG ngắt ngang công ty đang chạy,
             # chỉ không bắt đầu công ty MỚI nào nữa (_xu_ly_1_cong_ty tự kiểm
             # tra cancel ngay đầu hàm với các công ty chưa kịp bắt đầu).
     finally:
-        batch["running"] = False
+        with _BATCH_THEM_LOCK:
+            BATCH_HANG_DOI.pop(batch_id, None)
+            batch["running"] = False
         batch["current_list"] = []
         _dong_trinh_duyet_captcha(drv_captcha[0])
         # Còn công ty nào CHƯA xong (do người dùng bấm Dừng giữa chừng) -> đánh
@@ -9772,6 +9790,76 @@ def fetch_batch(body: dict = Body(...)):
         raise HTTPException(404, "Không tìm thấy công ty đã chọn")
 
     return _khoi_dong_batch(cids, ten_map, body)
+
+
+BATCH_HANG_DOI = {}      # {batch_id: hàm nộp thêm 1 công ty vào đợt đang chạy}
+BATCH_BODY = {}          # {batch_id: body gốc của đợt (khoảng ngày, loại HĐ...) — dùng khi mở đợt mới cho công ty thêm sau}
+_BATCH_THEM_LOCK = threading.Lock()
+
+
+@app.post("/api/fetch-batch-them/{batch_id}")
+def fetch_batch_them(batch_id: int, body: dict = Body(...)):
+    """THÊM công ty vào đợt tra cứu hàng loạt ĐANG CHẠY (cùng khoảng ngày/tuỳ chọn); công ty đã có trong đợt (đang chạy, đã xong, lỗi) thì bỏ qua.
+    Đợt đã kết thúc/đã dừng -> mở đợt MỚI chỉ gồm các công ty thêm. body: {cids: [..]}. Trả {batch_id, da_them, bo_qua, doi_moi}."""
+    cids = []
+    for c in body.get("cids") or []:
+        try:
+            c = int(c)
+        except Exception:
+            continue
+        if c not in cids:
+            cids.append(c)
+    if not cids:
+        raise HTTPException(400, "Chưa chọn công ty nào")
+    conn = db()
+    rows = conn.execute("SELECT id, ten, mst FROM companies WHERE id IN (%s)" % ",".join("?" * len(cids)), cids).fetchall()
+    conn.close()
+    ten_map = {r["id"]: (r["ten"] or r["mst"]) for r in rows}
+    cids = [c for c in cids if c in ten_map]
+    batch = BATCH_JOBS.get(batch_id)
+    body_goc = dict(BATCH_BODY.get(batch_id) or {})
+    moi = [c for c in cids if not (batch and c in batch["items"])]
+    bo_qua = len(cids) - len(moi)
+    if not moi:
+        return {"ok": True, "batch_id": batch_id, "da_them": 0, "bo_qua": bo_qua, "doi_moi": False}
+    da_them, chua_nop = 0, []
+    with _BATCH_THEM_LOCK:
+        nop = BATCH_HANG_DOI.get(batch_id)
+        if batch and batch.get("running") and not batch.get("cancel") and nop:
+            for c in moi:
+                batch["items"][c] = _batch_item_moi(c, ten_map[c])
+                batch["order"].append(c)
+                batch["total"] += 1
+                try:
+                    nop(c)
+                    da_them += 1
+                except RuntimeError as _e:           # hàng đợi vừa đóng (đợt vừa xong) -> chuyển sang đợt mới
+                    batch["items"].pop(c, None)
+                    batch["order"].remove(c)
+                    batch["total"] -= 1
+                    chua_nop.append(c)
+        else:
+            chua_nop = list(moi)
+    if da_them:
+        try:
+            _batch_luu_db(batch_id, batch, body_goc)
+        except Exception:
+            pass
+    doi_moi = None
+    if chua_nop:
+        if not body_goc:
+            raise HTTPException(409, "Đợt tra cứu trước không còn thông tin khoảng ngày — hãy bấm 'Bắt đầu tra cứu' cho các công ty này")
+        body_goc["batch"] = True
+        kq = _khoi_dong_batch(chua_nop, ten_map, body_goc)
+        doi_moi = kq["batch_id"]
+    return {"ok": True, "batch_id": doi_moi or batch_id, "da_them": da_them + len(chua_nop), "bo_qua": bo_qua, "doi_moi": bool(doi_moi)}
+
+
+def _batch_item_moi(c, ten):
+    return {"cid": c, "ten": ten, "status": "pending", "total_saved": 0, "note": "", "lech": False,
+            "tk_mua_got": 0, "tk_mua_exp": 0, "tk_ban_got": 0, "tk_ban_exp": 0,
+            "lech_bk": False, "lech_bk_text": "", "lech_doi_chieu": False, "lech_doi_chieu_text": "",
+            "vat_phai_nop": False, "vat_phai_nop_text": "", "vat_phai_nop_so_tien": 0}
 
 
 def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
@@ -9828,6 +9916,7 @@ def _khoi_dong_batch(cids, ten_map, body, items_cu=None):
         cn.commit(); cn.close()
     except Exception:
         pass
+    BATCH_BODY[batch_id] = body
     _batch_luu_db(batch_id, BATCH_JOBS[batch_id], body)
     threading.Thread(target=lambda: _run_batch(batch_id, cids_chay, body),
                      daemon=True).start()
