@@ -20,7 +20,9 @@ tv = {"ht": [{"ho_ten": "A", "von": "4.500.000.000", "bo": True, "chuyen_cho": "
 sau, tong = g.tinh_thanh_vien_sau(tv)
 assert tong == 9_000_000_000 and [(x["ho_ten"], x["von"], x["ty_le"]) for x in sau] == [("B", 4_500_000_000, "50%"), ("C", 4_500_000_000, "50%")], sau      # người mới nhận chuyển nhượng: không tính 2 lần số vốn đã nhập
 assert g.tinh_thanh_vien_sau({"ht": [{"ho_ten": "A", "von": "1", "bo": True, "chuyen_cho": "h0"}]})[0] == []      # không chuyển cho chính người bị gạch
-print("PASS 2: tính vốn/tỷ lệ sau chuyển vốn.")
+sau_g, tong_g = g.tinh_thanh_vien_sau({"ht": [{"ho_ten": "A", "von": "4.500.000.000", "bo": True, "chuyen_cho": "m0", "gia": "4.000.000.000"}, {"ho_ten": "B", "von": "4.000.000.000"}], "moi": [{"ho_ten": "C", "von": "9"}]})
+assert [(x["ho_ten"], x["von"], x["ty_le"]) for x in sau_g] == [("B", 4_000_000_000, "50%"), ("C", 4_000_000_000, "50%")]      # có giá chuyển nhượng: phần vốn chuyển theo giá
+print("PASS 2: tính vốn/tỷ lệ sau chuyển vốn (kể cả khi nhập giá chuyển nhượng).")
 
 DU = {"loai": ["chu_so_huu", "cshhl", "dai_dien", "nganh"],
       "dn": {"ten": "Công ty TNHH ABC", "ma_so": "0313030299", "co_quan": "Sở Tài chính TP. Hồ Chí Minh", "loai_hinh": "Công ty trách nhiệm hữu hạn hai thành viên trở lên",

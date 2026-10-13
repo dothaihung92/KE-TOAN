@@ -4597,14 +4597,19 @@ function ssNapNguoiTuGom(ghiDe){
 function ssNguoiThem(l){ssN(l).moi.push({});ssVeNguoi(l)}
 function ssNguoiXoaMoi(l,i){ssN(l).moi.splice(i,1);ssN(l).ht.forEach(x=>{if(x.chuyen_cho==='m'+i)delete x.chuyen_cho});ssVeNguoi(l);ssLuuTam()}
 function ssNguoiBo(l,i){const x=ssN(l).ht[i];x.bo=!x.bo;if(!x.bo)delete x.chuyen_cho;ssVeNguoi(l);ssLuuTam()}
-function ssNguoiChuyen(l,i,v){const x=ssN(l).ht[i];if(v)x.chuyen_cho=v;else delete x.chuyen_cho;ssVeNguoi(l);ssLuuTam()}
-function ssNguoiSet(l,nhom,i,k,v){ssN(l)[nhom][i][k]=v;ssLuuTam();if(k==='ho_ten')ssLamMoiChon(l);else{const t=document.getElementById('ssNguoiTong_'+l);if(t)t.innerHTML=ssNguoiTongHtml(l)}}
+function ssDongBoVonNhan(l){      // người MỚI nhận chuyển nhượng: ô "Phần vốn góp" tự nhảy theo giá chuyển nhượng (hoặc phần vốn của người bán nếu chưa nhập giá)
+  const st=ssN(l);if(l!=='tv')return;
+  const tong={};st.ht.forEach(x=>{if(x.bo&&x.chuyen_cho&&x.chuyen_cho[0]==='m')tong[x.chuyen_cho]=(tong[x.chuyen_cho]||0)+(ssSoVnd(x.gia)||ssSoVnd(x.von))});
+  Object.entries(tong).forEach(([k,v])=>{const j=+k.slice(1);if(!st.moi[j])return;st.moi[j].von=v.toLocaleString('vi-VN');const e=document.getElementById(`ssng_tv_moi_${j}_von`);if(e)e.value=st.moi[j].von});
+}
+function ssNguoiChuyen(l,i,v){const x=ssN(l).ht[i];if(v)x.chuyen_cho=v;else delete x.chuyen_cho;ssDongBoVonNhan(l);ssVeNguoi(l);ssLuuTam()}
+function ssNguoiSet(l,nhom,i,k,v){ssN(l)[nhom][i][k]=v;if(l==='tv'&&((nhom==='ht'&&(k==='gia'||k==='von'))))ssDongBoVonNhan(l);ssLuuTam();if(k==='ho_ten')ssLamMoiChon(l);else{const t=document.getElementById('ssNguoiTong_'+l);if(t)t.innerHTML=ssNguoiTongHtml(l)}}
 function ssTvSau(){
   const so=ssSoVnd,cac={};
   ssTv.ht.forEach((x,i)=>cac['h'+i]={...x,_v:so(x.von)});ssTv.moi.filter(x=>(x.ho_ten||'').trim()).forEach(x=>{const i=ssTv.moi.indexOf(x);cac['m'+i]={...x,_v:so(x.von)}});
   const nhan=new Set(Object.values(cac).filter(x=>x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo).map(x=>x.chuyen_cho));
   nhan.forEach(k=>{if(k[0]==='m')cac[k]._v=0});    // thành viên MỚI nhận chuyển nhượng: vốn = phần nhận, không cộng thêm số đã nhập
-  Object.values(cac).forEach(x=>{if(x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo)cac[x.chuyen_cho]._v+=so(x.von)});
+  Object.values(cac).forEach(x=>{if(x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo)cac[x.chuyen_cho]._v+=so(x.gia)||so(x.von)});
   const sau=Object.values(cac).filter(x=>!x.bo),tong=sau.reduce((a,x)=>a+x._v,0);return {sau,tong};
 }
 function ssNguoiTongHtml(l){
@@ -4624,7 +4629,7 @@ function ssLamMoiChon(l){            // gõ tên người mới -> các ô chọ
 function ssVeNguoi(l){
   const b=document.getElementById('ssNguoiBox_'+l);if(!b)return;
   const st=ssN(l),cot=SS_NG[l],tv=l==='tv';
-  const o=(nhom,i,k,nhan)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">${ssEsc(nhan)}<input value="${ssEsc(st[nhom][i][k]||'')}" oninput="ssNguoiSet('${l}','${nhom}',${i},'${k}',this.value)" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
+  const o=(nhom,i,k,nhan)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">${ssEsc(nhan)}<input id="ssng_${l}_${nhom}_${i}_${k}" value="${ssEsc(st[nhom][i][k]||'')}" oninput="ssNguoiSet('${l}','${nhom}',${i},'${k}',this.value)" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
   const luoi=(nhom,i)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-items:end">${cot.map(([k,n])=>o(nhom,i,k,n)).join('')}</div>`;
   const khac=(loai,i)=>ssKhac(l,loai,i);
   b.innerHTML=`<b style="font-size:13px">${tv?'Thành viên / chủ sở hữu hiện tại':'Chủ sở hữu hưởng lợi đang đăng ký'}</b> <span class="hint" style="margin:0">(lấy từ hồ sơ đã gom; ✖ để gạch bỏ người rời đi)</span>`+

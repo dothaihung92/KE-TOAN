@@ -603,7 +603,7 @@ def tinh_thanh_vien_sau(tv):
             cac[k]["_von"] = 0                      # thành viên MỚI nhận chuyển nhượng: phần vốn = phần nhận (không cộng thêm số đã nhập, tránh tính 2 lần)
     for k, x in list(cac.items()):
         if x.get("bo") and x.get("chuyen_cho") in cac and not cac[x["chuyen_cho"]].get("bo"):
-            cac[x["chuyen_cho"]]["_von"] += _gia_tri_von(x)
+            cac[x["chuyen_cho"]]["_von"] += so_nguyen(x.get("gia")) or _gia_tri_von(x)      # giá chuyển nhượng đã nhập thì phần vốn chuyển theo giá đó
     sau = [x for x in cac.values() if not x.get("bo")]
     tong = sum(x["_von"] for x in sau)
     for x in sau:

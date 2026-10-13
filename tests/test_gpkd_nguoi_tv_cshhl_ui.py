@@ -38,6 +38,10 @@ const { chromium } = require('playwright');
   await pg.evaluate("ssNguoiBo('tv',0);ssNguoiThem('tv');ssNguoiSet('tv','moi',0,'ho_ten','NGUYỄN VĂN C');ssNguoiSet('tv','moi',0,'von','1.000.000.000');ssNguoiChuyen('tv',0,'m0')");
   r.chonChuyen = await pg.evaluate("[...document.querySelectorAll('#ssNguoiBox_tv select[data-chon^=chuyen] option')].map(o=>o.textContent)");
   r.chonChuTich = await pg.evaluate("[...document.querySelectorAll('#ssNguoiBox_tv select[data-chon^=chutich] option')].map(o=>o.textContent)");
+  await pg.evaluate("ssNguoiSet('tv','ht',0,'gia','4.000.000.000')");
+  r.vonMoi = await pg.inputValue('#ssng_tv_moi_0_von');
+  r.sauGia = await pg.evaluate('ssTvSau().sau.map(x=>[x.ho_ten,x._v])');
+  await pg.evaluate("ssNguoiSet('tv','ht',0,'gia','')");
   r.tong = await pg.innerText('#ssNguoiTong_tv');
   r.sau = await pg.evaluate('ssTvSau().sau.map(x=>[x.ho_ten,x._v])');
   r.gach = await pg.evaluate("!!document.querySelector('#ssNguoiBox_tv b[style*=line-through]')");
@@ -78,6 +82,7 @@ assert "2 thành viên" in r["tong"] and "NGUYỄN VĂN C" in r["tong"] and r["g
 assert r["du"]["tv"]["ht"][0]["bo"] is True and r["du"]["tv"]["ht"][0]["chuyen_cho"] == "m0" and r["du"]["csm"]["ho_ten"] == "NGUYỄN VĂN C"
 assert "1 người" in r["tongCs"], r["tongCs"]
 assert "NGUYỄN VĂN C" in r["chonChuyen"] and "NGUYỄN VĂN C" in r["chonChuTich"] and "HÀ THỊ TRÚC MAI" in r["chonChuTich"] and "HÀ NHẬT QUANG" not in r["chonChuTich"], (r["chonChuyen"], r["chonChuTich"])
+assert r["vonMoi"] == "4.000.000.000" and r["sauGia"][-1][1] == 4000000000, (r["vonMoi"], r["sauGia"])      # nhập giá chuyển nhượng -> ô phần vốn góp của người mới nhảy theo
 print("PASS 2: gạch bỏ (có gạch ngang), chuyển vốn sang người khác, thêm người mới; tổng sau thay đổi đúng.")
 assert r["diaChi1"] and r["diaChiCu"] == []
 print("PASS 3: địa chỉ liên lạc người đại diện chỉ còn 1 ô.")
