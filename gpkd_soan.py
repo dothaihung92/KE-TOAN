@@ -597,6 +597,10 @@ def tinh_thanh_vien_sau(tv):
     cac.update({f"m{i}": x for i, x in enumerate(moi)})
     for x in cac.values():
         x["_von"] = _gia_tri_von(x)
+    nhan = {x["chuyen_cho"] for x in cac.values() if x.get("bo") and x.get("chuyen_cho") in cac and not cac[x["chuyen_cho"]].get("bo")}
+    for k in nhan:
+        if k.startswith("m"):
+            cac[k]["_von"] = 0                      # thành viên MỚI nhận chuyển nhượng: phần vốn = phần nhận (không cộng thêm số đã nhập, tránh tính 2 lần)
     for k, x in list(cac.items()):
         if x.get("bo") and x.get("chuyen_cho") in cac and not cac[x["chuyen_cho"]].get("bo"):
             cac[x["chuyen_cho"]]["_von"] += _gia_tri_von(x)

@@ -18,7 +18,7 @@ print("PASS 1: tách địa chỉ 1 ô; đọc số tiền có phần thập ph�
 # 2) chuyển vốn: Quang rời đi, chuyển 4,5 tỷ cho người mới C
 tv = {"ht": [{"ho_ten": "A", "von": "4.500.000.000", "bo": True, "chuyen_cho": "m0"}, {"ho_ten": "B", "von": "4.500.000.000"}], "moi": [{"ho_ten": "C", "von": "1.000.000.000"}, {"ho_ten": ""}]}
 sau, tong = g.tinh_thanh_vien_sau(tv)
-assert tong == 10_000_000_000 and [(x["ho_ten"], x["von"], x["ty_le"]) for x in sau] == [("B", 4_500_000_000, "45%"), ("C", 5_500_000_000, "55%")], sau
+assert tong == 9_000_000_000 and [(x["ho_ten"], x["von"], x["ty_le"]) for x in sau] == [("B", 4_500_000_000, "50%"), ("C", 4_500_000_000, "50%")], sau      # người mới nhận chuyển nhượng: không tính 2 lần số vốn đã nhập
 assert g.tinh_thanh_vien_sau({"ht": [{"ho_ten": "A", "von": "1", "bo": True, "chuyen_cho": "h0"}]})[0] == []      # không chuyển cho chính người bị gạch
 print("PASS 2: tính vốn/tỷ lệ sau chuyển vốn.")
 

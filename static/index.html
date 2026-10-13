@@ -4602,12 +4602,14 @@ function ssNguoiSet(l,nhom,i,k,v){ssN(l)[nhom][i][k]=v;ssLuuTam();if(k==='ho_ten
 function ssTvSau(){
   const so=ssSoVnd,cac={};
   ssTv.ht.forEach((x,i)=>cac['h'+i]={...x,_v:so(x.von)});ssTv.moi.filter(x=>(x.ho_ten||'').trim()).forEach(x=>{const i=ssTv.moi.indexOf(x);cac['m'+i]={...x,_v:so(x.von)}});
+  const nhan=new Set(Object.values(cac).filter(x=>x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo).map(x=>x.chuyen_cho));
+  nhan.forEach(k=>{if(k[0]==='m')cac[k]._v=0});    // thành viên MỚI nhận chuyển nhượng: vốn = phần nhận, không cộng thêm số đã nhập
   Object.values(cac).forEach(x=>{if(x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo)cac[x.chuyen_cho]._v+=so(x.von)});
   const sau=Object.values(cac).filter(x=>!x.bo),tong=sau.reduce((a,x)=>a+x._v,0);return {sau,tong};
 }
 function ssNguoiTongHtml(l){
   if(l==='tv'){const {sau,tong}=ssTvSau();if(!sau.length)return '';
-    return '<b>Sau thay đổi</b> ('+sau.length+' thành viên'+(sau.length<2?' → dùng Mẫu 15; từ 2 thành viên → phần mềm soạn Phụ lục I-6':' → phần mềm soạn Phụ lục I-6')+'): '+sau.map(x=>ssEsc(x.ho_ten||'?')+' '+x._v.toLocaleString('vi-VN')+' ('+(tong?(Math.round(x._v*10000/tong)/100):0)+'%)').join('; ')}
+    return '<b>Sau thay đổi</b> ('+sau.length+' thành viên'+(sau.length<2?' → dùng Mẫu 15; từ 2 thành viên → phần mềm soạn Phụ lục I-6':' → phần mềm soạn Phụ lục I-6')+'): '+sau.map(x=>ssEsc(x.ho_ten||'?')+' '+x._v.toLocaleString('vi-VN')+' ('+String(tong?(Math.round(x._v*10000/tong)/100):0).replace('.',',')+'%)').join('; ')}
   const n=ssCs.ht.filter(x=>!x.bo).length+ssCs.moi.filter(x=>(x.ho_ten||'').trim()).length;return n?'<b>Mẫu 10 sẽ có '+n+' người</b>':'';
 }
 function ssKhac(l,loai,i){const st=ssN(l),d=[];st.ht.forEach((x,j)=>{if(!(loai==='h'&&j===i)&&!x.bo)d.push(['h'+j,x.ho_ten||('người '+(j+1))])});st.moi.forEach((x,j)=>{if((x.ho_ten||'').trim())d.push(['m'+j,x.ho_ten])});return d}
@@ -4632,7 +4634,7 @@ function ssVeNguoi(l){
         ${tv&&x.bo?`<label style="font-size:12px">Chuyển phần vốn sang: <select data-chon="chuyen:${i}" onchange="ssNguoiChuyen('${l}',${i},this.value)" style="padding:4px;border-radius:6px"><option value="">— (không chuyển)</option>${khac('h',i).map(([v,t])=>`<option value="${v}" ${x.chuyen_cho===v?'selected':''}>${ssEsc(t)}</option>`).join('')}</select></label>${x.chuyen_cho?`<label style="font-size:12px">Giá chuyển nhượng (VNĐ): <input value="${ssEsc(x.gia||'')}" placeholder="mặc định = phần vốn" oninput="ssNguoiSet('tv','ht',${i},'gia',this.value)" style="padding:4px;border:1px solid var(--line);border-radius:6px;width:150px"></label>`:''}`:''}</div>
       ${luoi('ht',i)}</div>`).join(''):'<div class="hint">Chưa có danh sách từ hồ sơ đã gom — lấy GPKD ở tab "Lấy thông tin GPKD" trước, hoặc nhập tay bằng nút ➕ bên dưới.</div>')+
     `<div style="margin-top:6px"><b style="font-size:13px">${tv?'Thành viên / chủ sở hữu MỚI':'Chủ sở hữu hưởng lợi MỚI'}</b></div>`+
-    st.moi.map((x,i)=>`<div style="border:1px dashed #6bb28a;border-radius:8px;padding:6px 8px;margin:6px 0;background:#f4fbf6"><div style="margin-bottom:4px"><b>Mới ${i+1}</b> <button class="btn ghost sm" onclick="ssNguoiXoaMoi('${l}',${i})">✖ Bỏ dòng này</button></div>${luoi('moi',i)}</div>`).join('')+
+    st.moi.map((x,i)=>`<div style="border:1px dashed #6bb28a;border-radius:8px;padding:6px 8px;margin:6px 0;background:#f4fbf6"><div style="margin-bottom:4px"><b>Mới ${i+1}</b> <button class="btn ghost sm" onclick="ssNguoiXoaMoi('${l}',${i})">✖ Bỏ dòng này</button>${tv&&st.ht.some(h=>h.bo&&h.chuyen_cho==='m'+i)?' <span class="hint" style="margin:0">Đang nhận chuyển nhượng → phần vốn góp tự tính bằng phần nhận (ô "Phần vốn góp" bên dưới không cộng thêm).</span>':''}</div>${luoi('moi',i)}</div>`).join('')+
     `<button class="btn ghost sm" onclick="ssNguoiThem('${l}')">➕ Thêm ${tv?'thành viên':'chủ sở hữu hưởng lợi'} mới</button>
      ${tv?`<div style="margin-top:6px;font-size:12.5px">Chủ tịch Hội đồng thành viên MỚI (công ty từ 2 thành viên — Quyết định bầu chủ tịch): <select data-chon="chutich:0" onchange="ssTv.chu_tich=this.value;ssLuuTam()" style="padding:4px;border-radius:6px"><option value="">— không đổi —</option>${khac('',-1).map(([v,t])=>`<option value="${v}" ${ssTv.chu_tich===v?'selected':''}>${ssEsc(t)}</option>`).join('')}</select></div>`:''}
      <div id="ssNguoiTong_${l}" style="font-size:12.5px;margin-top:6px">${ssNguoiTongHtml(l)}</div>`;

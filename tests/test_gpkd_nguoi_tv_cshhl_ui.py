@@ -73,7 +73,7 @@ q = tv[0]
 assert q["ngay_sinh"] == "22/07/1986" and q["von"] == "4.500.000.000"      # cổng ghi "4.500.000.000,000" -> không bị nhân 1000 and q["dia_chi"].startswith("481 Hòa Hảo") and q["noi_cap"] == "Bộ Công An", q
 assert [x["ho_ten"] for x in r["gom"]["cs"]] == ["HÀ NHẬT QUANG"] and r["gom"]["cs"][0]["truc_tiep"] == "50", r["gom"]["cs"]
 print("PASS 1: danh sách thành viên + chủ sở hữu hưởng lợi hiện tại lấy từ hồ sơ đã gom (gộp bảng danh sách và khối chi tiết, không trùng người).")
-assert r["sau"] == [["HÀ THỊ TRÚC MAI", 4500000000], ["NGUYỄN VĂN C", 5500000000]], r["sau"]
+assert r["sau"] == [["HÀ THỊ TRÚC MAI", 4500000000], ["NGUYỄN VĂN C", 4500000000]]    # người MỚI nhận chuyển nhượng: vốn = phần nhận (số 1 tỷ đã nhập không cộng thêm) -> 2 người, mỗi người 4,5 tỷ, r["sau"]
 assert "2 thành viên" in r["tong"] and "NGUYỄN VĂN C" in r["tong"] and r["gach"], r["tong"]
 assert r["du"]["tv"]["ht"][0]["bo"] is True and r["du"]["tv"]["ht"][0]["chuyen_cho"] == "m0" and r["du"]["csm"]["ho_ten"] == "NGUYỄN VĂN C"
 assert "1 người" in r["tongCs"], r["tongCs"]
