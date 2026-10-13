@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-13.196"
+APP_BUILD = "2026-10-13.197"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -42876,6 +42876,10 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         # phần gộp này vì nó đã được ghi thành 1 dòng riêng ở dưới)
         _items, _sm = get_invoice_items(r)
         _items_hh = [it for it in _items if not it.get("_la_phi")]
+        # ct_totals (từ "Chi tiết MUA VÀO") ĐÃ GỒM dòng "Tổng tiền phí"; BK ghi phí thành dòng RIÊNG ở dưới và cộng riêng vào tổng
+        # -> trừ phí khỏi dòng hàng chính, nếu không phí bị TÍNH 2 LẦN (ca thật HĐ C26TBV 150677/153910: BK lệch đúng bằng tiền phí so với Chi tiết).
+        if ct_tong is not None and isinstance(ds, (int, float)):
+            ds = ds - _tong_phi_cac_dong(_items)
         la_ck_hd = False
         if _items_hh:
             def _is_ck(it):
@@ -44100,6 +44104,17 @@ def _dong_tu_tong_hop_thue_suat(rows, lts, common, tygia=None):
         return rows
     # bỏ dòng diễn giải thuần (đã đưa nội dung vào tên dòng mới), giữ dòng phí
     return [r for r in rows if r.get("_la_phi") or str(r.get("tchat") or "") != "4"] + them
+
+
+def _tong_phi_cac_dong(items):
+    """Tổng tiền của các dòng "Tổng tiền phí" (_la_phi: thu hộ/phí sân bay... KCT, nằm ngoài DSHHDVu) trong danh sách dòng của hóa đơn."""
+    t = 0
+    for it in items or []:
+        if it.get("_la_phi"):
+            n = _to_num(it.get("thtien"))
+            if isinstance(n, (int, float)):
+                t += n
+    return t
 
 
 def _tong_thue_ltsuat(lts):
