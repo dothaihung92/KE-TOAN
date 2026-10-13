@@ -3586,30 +3586,32 @@ async function batchTheoDoi(bid){
     // Công ty PHÁT SINH PHẢI NỘP thuế GTGT kỳ này (chỉ tiêu [40]) — thông
     // tin, KHÔNG phải lỗi/lệch, nên hiện riêng (không đổi màu đỏ như lệch).
     const dsVat=st.items.filter(i=>i.status==='done'&&i.vat_phai_nop);
+    // Mỗi nhóm cảnh báo: 1 dòng tiêu đề + MỖI CÔNG TY 1 DÒNG có chấm đầu dòng (dễ nhìn hơn 1 đoạn văn dài)
+    const nhom=(tieuDe,dongs,ghiChu)=>`<div style="font-weight:700;margin-top:6px">${tieuDe}</div>`+
+      `<ul style="margin:4px 0 4px 20px;padding:0;list-style:disc">${dongs.map(d=>`<li style="margin:2px 0">${d}</li>`).join('')}</ul>`+
+      (ghiChu?`<div style="margin:0 0 4px 4px;font-style:italic">${ghiChu}</div>`:'');
     let html='';
     if(dsLech.length){
-      html+=`⚠ CÓ ${dsLech.length} CÔNG TY BỊ LỆCH HÓA ĐƠN (lấy thiếu so với số trang Thuế báo): `+
-        dsLech.map(i=>`${i.ten} (mua ${i.tk_mua_got||0}/${i.tk_mua_exp||0}, bán ${i.tk_ban_got||0}/${i.tk_ban_exp||0})`).join('; ')+
-        ' — nên tra cứu lại (chế độ "Chậm & an toàn").';
+      html+=nhom(`⚠ ${dsLech.length} công ty BỊ LỆCH HÓA ĐƠN (lấy thiếu so với số trang Thuế báo):`,
+        dsLech.map(i=>`<b>${i.ten}</b> — mua ${i.tk_mua_got||0}/${i.tk_mua_exp||0}, bán ${i.tk_ban_got||0}/${i.tk_ban_exp||0}`),
+        'Nên tra cứu lại (chế độ "Chậm & an toàn").');
     }
     if(dsLechBk.length){
-      if(html)html+='<br>';
-      html+=`⚠ CÓ ${dsLechBk.length} CÔNG TY LỆCH SỐ LIỆU XML (khác TỔNG CỘNG bảng kê Mua vào/Bán ra): `+
-        dsLechBk.map(i=>i.ten).join(', ')+' — xem chi tiết ở từng công ty (đã lưu lại cảnh báo), kiểm tra trước khi nộp.';
+      html+=nhom(`⚠ ${dsLechBk.length} công ty LỆCH SỐ LIỆU XML (khác TỔNG CỘNG bảng kê Mua vào/Bán ra):`,
+        dsLechBk.map(i=>`<b>${i.ten}</b>`),'Xem chi tiết ở từng công ty (đã lưu lại cảnh báo), kiểm tra trước khi nộp.');
     }
     if(dsLechDc.length){
-      if(html)html+='<br>';
-      html+=`⚠ CÓ ${dsLechDc.length} CÔNG TY CÓ HÓA ĐƠN LỆCH (sheet Đối chiếu — Chi tiết khác Bảng kê): `+
-        dsLechDc.map(i=>i.ten).join(', ')+' — mở file Excel kiểm tra mục "CHI TIẾT HÓA ĐƠN LỆCH".';
+      html+=nhom(`⚠ ${dsLechDc.length} công ty CÓ HÓA ĐƠN LỆCH (sheet Đối chiếu — Chi tiết khác Bảng kê):`,
+        dsLechDc.map(i=>`<b>${i.ten}</b>`),'Mở file Excel kiểm tra mục "CHI TIẾT HÓA ĐƠN LỆCH".');
     }
     let htmlVat='';
     if(dsVat.length){
-      htmlVat=`🔴 CÓ ${dsVat.length} CÔNG TY PHẢI NỘP THUẾ GTGT kỳ này: `+
-        dsVat.map(i=>`${i.ten} (${Number(i.vat_phai_nop_so_tien||0).toLocaleString('vi-VN')}đ)`).join('; ')+'.';
+      htmlVat=nhom(`🔴 ${dsVat.length} công ty PHẢI NỘP THUẾ GTGT kỳ này:`,
+        dsVat.map(i=>`<b>${i.ten}</b> — ${Number(i.vat_phai_nop_so_tien||0).toLocaleString('vi-VN')}đ`));
     }
     if(html||htmlVat){
       kq.style.background='#fff1f0';kq.style.color='#c00';kq.style.border='1px solid #f0a0a0';
-      kq.innerHTML=[html,htmlVat].filter(Boolean).join('<br>');
+      kq.innerHTML=[html,htmlVat].filter(Boolean).join('');
     }else{
       kq.style.background='#f0f9f4';kq.style.color='#1f6b4a';kq.style.border='1px solid #a0d0b0';
       kq.innerHTML='✓ Không lệch — đã lấy đủ hóa đơn theo số trang Thuế báo, số liệu XML và Đối chiếu đều khớp bảng kê cho tất cả công ty.';

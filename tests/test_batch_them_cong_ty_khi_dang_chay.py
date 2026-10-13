@@ -97,4 +97,7 @@ finally:
 h = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert 'id="batchThemBtn"' in h and "function batchThemCongTy" in h and "/api/fetch-batch-them/" in h
 print("PASS 3: giao diện có nút thêm công ty vào đợt đang chạy.")
+assert "const nhom=(tieuDe,dongs,ghiChu)=>" in h and 'list-style:disc' in h and "dsVat.map(i=>`<b>${i.ten}</b>" in h
+print("PASS 4: tổng kết hàng loạt hiện từng nhóm 1 tiêu đề + mỗi công ty 1 dòng có chấm.")
+
 print("\nALL DONE")
