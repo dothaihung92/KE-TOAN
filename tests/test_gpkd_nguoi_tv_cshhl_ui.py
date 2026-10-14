@@ -50,6 +50,7 @@ const { chromium } = require('playwright');
   r.tongCs = await pg.innerText('#ssNguoiTong_cs');
   r.nutKy = await pg.evaluate("document.querySelectorAll('#ssNguoiBox_tv input[type=file]').length");
   r.dien = await pg.evaluate("(()=>{document.getElementById('ss_dai_dien_ho_ten').value='đinh thị huệ';document.getElementById('ss_dai_dien_cccd').value='036190003147';document.getElementById('ss_dai_dien_dia_chi').value='Số nhà 91, Đường 13, Phường Bình Trưng, Thành phố Hồ Chí Minh';document.getElementById('ssL_chu_so_huu').checked=true;return ssTaoDuLieuDien()})()");
+  r.thue = await pg.evaluate("(()=>{document.getElementById('ssL_thue').checked=true;ssHienCacMuc();document.getElementById('ss_thue_kt_ho_ten').value='Nguyễn Thị Kế';document.getElementById('ss_thue_lao_dong').value='12';const d=ssThuThap();return {loai:d.loai,thue:d.thue}})()");
   r.diaChi1 = await pg.evaluate("!!document.getElementById('ss_dai_dien_dia_chi')");
   r.diaChiCu = await pg.evaluate("['so_nha','xa','tinh','quoc_gia'].filter(k=>document.getElementById('ss_dai_dien_'+k))");
   try {
@@ -95,5 +96,7 @@ assert ch["Tỉnh/Thành phố"]["gia_tri"] == "Thành phố Hồ Chí Minh" and
 assert ch["Số nhà/đường/phố…"]["gia_tri"] == "Số nhà 91, Đường 13", ch      # địa chỉ 1 ô được tách: số nhà / xã / tỉnh
 print("PASS 3c: địa chỉ 1 ô tách thành Số nhà, Tỉnh/Thành, Xã/Phường (2 ô chọn nối tiếp) trong dữ liệu điền.")
 print("PASS 3b: dữ liệu điền lên cổng lấy từ ô đã nhập (họ tên IN HOA, số giấy tờ), mục chưa hỗ trợ được báo.")
+assert "thue" in r["thue"]["loai"] and r["thue"]["thue"]["kt_ho_ten"] == "Nguyễn Thị Kế" and r["thue"]["thue"]["lao_dong"] == "12", r["thue"]
+print("PASS 3d: có mục tick 'Thay đổi thông tin đăng ký thuế' với các ô nhập, dữ liệu đưa vào hồ sơ.")
 print("PASS 3: địa chỉ liên lạc người đại diện chỉ còn 1 ô.")
 print("\nALL DONE")

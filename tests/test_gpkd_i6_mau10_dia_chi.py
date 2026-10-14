@@ -153,4 +153,24 @@ assert "1. Thay đổi người đại diện" not in qd10
 du10b = dict(du10, loai=["dai_dien", "cshhl"])
 assert any(n.startswith("Mau10") for n in zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du10b)[0])).namelist())
 print("PASS 10: TNHH 1TV chỉ đổi giám đốc: không Mẫu 10 (chỉ khi tick CSHHL), ủy quyền bởi Chủ tịch công ty, Mẫu 13 ký Chủ tịch công ty + số định danh, Quyết định theo mẫu thực tế.")
+# 11) Mẫu 12 — mục THÔNG BÁO THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ (tick riêng "Thay đổi thông tin đăng ký thuế")
+du11 = {"loai": ["thue"], "dn": {"ten": "Cty A", "ma_so": "0101", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên", "ngay_lap": "14/10/2026"},
+        "thue": {"kt_ho_ten": "Nguyễn Thị Kế", "kt_ngay_sinh": "01/02/1985", "kt_gioi_tinh": "Nữ", "kt_cccd": "079185000001", "kt_dien_thoai": "0900000009",
+                 "gd_ho_ten": "Đinh Thị Huệ", "gd_cccd": "036190003147", "tt_so_nha": "1 Lê Lợi", "tt_xa": "Phường Bến Nghé", "tt_tinh": "TP. Hồ Chí Minh", "tt_email": "a@b.vn",
+                 "ngay_bat_dau": "2019-08-20", "hach_toan": "Độc lập", "nam_tu": "01/01", "nam_den": "31/12", "lao_dong": "12", "pp_gtgt": "Khấu trừ"}}
+z11 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du11)[0]))
+d11 = docx.Document(io.BytesIO(z11.read(next(n for n in z11.namelist() if n.startswith("Mau12")))))
+ban = tat_ca(d11)
+for kv in ("Họ, chữ đệm và tên Giám đốc/Tổng giám đốc:ĐINH THỊ HUỆ", "Họ, chữ đệm và tên Kế toán trưởng/Phụ trách kế toán:NGUYỄN THỊ KẾ", "Số định danh cá nhân: 079185000001",
+           "Xã/Phường/Đặc khu: Phường Bến Nghé", "Thư điện tử (nếu có): a@b.vn", "Ngày bắt đầu hoạt động: 20/08/2019", "Áp dụng từ ngày 01/01 đến ngày 31/12", "Tổng số lao động: 12"):
+    assert kv.replace(": ", ":") in ban.replace(": ", ":"), kv
+# ô tick: hạch toán độc lập + khấu trừ (nằm trong bảng lồng nhau)
+cells = ["".join(x.text or "" for x in tc.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")) for tc in d11.element.body.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc")]
+def tick_sau(nhan):
+    i = cells.index(nhan)
+    return cells[i + 1].strip()
+assert tick_sau("Hạch toán độc lập") == "☒" and tick_sau("Hạch toán phụ thuộc") == "□" and tick_sau("Khấu trừ") == "☒" and tick_sau("Trực tiếp trên GTGT") == "□", (tick_sau("Hạch toán độc lập"), tick_sau("Khấu trừ"))
+assert "Kê khai trong trường hợp" not in ban and "Trường hợp doanh nghiệp kê khai hình thức hạch toán" not in ban     # chú thích đã bỏ như các mẫu khác
+assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN" not in ban                                                                      # chỉ có mục thuế, không kéo theo mục thành viên
+print("PASS 11: tick 'Thay đổi thông tin đăng ký thuế': Mẫu 12 có mục thuế điền Giám đốc, Kế toán trưởng, địa chỉ nhận thông báo thuế, ngày bắt đầu, hạch toán độc lập (tick), năm tài chính, lao động, phương pháp GTGT (tick).")
 print("\nALL DONE")

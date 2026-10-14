@@ -436,6 +436,84 @@ def _khoi_ky(c, tieu_de, ten, anh):
     _gan_chu_ky(pk, anh)
 
 
+def _dien_thong_tin_thue(m, du, pham_vi):
+    """Mẫu 12 — 'Thông báo thay đổi thông tin đăng ký thuế': Giám đốc, Kế toán trưởng, địa chỉ nhận thông báo thuế, ngày bắt đầu hoạt động,
+    hình thức hạch toán, năm tài chính, số lao động, phương pháp tính thuế GTGT. Chỉ điền ô có dữ liệu; ô khác giữ nguyên dấu chấm."""
+    t = du.get("thue") or {}
+    lo, hi = pham_vi
+    ps = m.doan(lo, hi)
+    van = [_van(p) for p in ps]
+
+    def vt(mau, tu=0):
+        for i in range(tu, len(ps)):
+            if re.search(mau, van[i]):
+                return i
+        return None
+    i_gd, i_kt, i_dc = vt(r"^Thông tin về Giám đốc"), vt(r"^Thông tin về Kế toán trưởng"), vt(r"^Địa chỉ nhận thông báo thuế")
+    i_ngay, i_hach, i_nam = vt(r"^Ngày bắt đầu hoạt động"), vt(r"^Hình thức hạch toán"), vt(r"^Năm tài chính")
+    i_ld, i_pp = vt(r"^Tổng số lao động"), vt(r"^Phương pháp tính thuế GTGT")
+
+    def dien_muc(a, b, tien_to, giatri):
+        if a is None:
+            return
+        b = b if b is not None else len(ps)
+        for nhan, k, mau in ((tien_to, "ho_ten", _CHAM), (r"Ngày, tháng, năm sinh", "ngay_sinh", _NGAY3), (r"Giới tính", "gioi_tinh", _CHAM),
+                             (r"Số định danh cá nhân", "cccd", _CHAM), (r"Điện thoại", "dien_thoai", _CHAM)):
+            v = (giatri.get(k) or "").strip()
+            if not v:
+                continue
+            if k == "ngay_sinh":
+                v = _ngay_dd_mm_yyyy(v)
+            if k == "ho_ten":
+                v = v.upper()
+            for i in range(a, b):
+                if re.search(nhan, van[i]):
+                    dien_cham(ps[i], nhan, v, mau)
+                    break
+    gd = {k[3:]: v for k, v in t.items() if k.startswith("gd_")}
+    kt = {k[3:]: v for k, v in t.items() if k.startswith("kt_")}
+    dien_muc(i_gd, i_kt, r"Họ, chữ đệm và tên Giám đốc/Tổng giám đốc", gd)
+    dien_muc(i_kt, i_dc, r"Họ, chữ đệm và tên Kế toán trưởng/Phụ trách kế toán", kt)
+    if i_dc is not None:
+        for nhan, k in ((r"Số nhà/phòng, ngách/hẻm, ngõ/kiệt, đường/phố/đại lộ, tổ/xóm/ấp/thôn", "tt_so_nha"), (r"Xã/Phường/Đặc khu", "tt_xa"), (r"Tỉnh/Thành phố trực thuộc trung ương", "tt_tinh"),
+                        (r"Điện thoại \(nếu có\)", "tt_dien_thoai"), (r"Số fax \(nếu có\)", "tt_fax"), (r"Thư điện tử \(nếu có\)", "tt_email")):
+            v = (t.get(k) or "").strip()
+            for i in range(i_dc, i_ngay if i_ngay is not None else len(ps)):
+                if v and re.search(nhan, van[i]):
+                    dien_cham(ps[i], nhan, v)
+                    break
+    if i_ngay is not None and (t.get("ngay_bat_dau") or "").strip():
+        dien_cham(ps[i_ngay], r"Ngày bắt đầu hoạt động\d?", _ngay_dd_mm_yyyy(t["ngay_bat_dau"]), _NGAY3)
+
+    def tick(i0, ten):
+        if i0 is None:
+            return
+        for i in range(i0, min(len(ps), i0 + 40)):
+            if van[i].strip() == ten:
+                for j in range(i + 1, min(len(ps), i + 4)):
+                    if "□" in van[j]:
+                        for r in ps[j].runs:
+                            if "□" in r.text:
+                                r.text = r.text.replace("□", "☒", 1)
+                                return
+        return
+    hach = (t.get("hach_toan") or "").strip().lower()
+    if i_hach is not None and hach:
+        tick(i_hach, "Hạch toán phụ thuộc" if "phụ" in hach else "Hạch toán độc lập")
+    if i_nam is not None and (t.get("nam_tu") or "").strip() and (t.get("nam_den") or "").strip():
+        for i in range(i_nam, min(len(ps), i_nam + 4)):
+            if van[i].startswith("Áp dụng từ ngày"):
+                _thay_khoang(ps[i], 0, len(van[i]), f"Áp dụng từ ngày {t['nam_tu'].strip()} đến ngày {t['nam_den'].strip()}")
+                break
+    if i_ld is not None and str(t.get("lao_dong") or "").strip():
+        dien_cham(ps[i_ld], r"Tổng số lao động", str(t["lao_dong"]).strip())
+    pp = (t.get("pp_gtgt") or "").strip()
+    if i_pp is not None and pp:
+        ten_pp = {"khấu trừ": "Khấu trừ", "trực tiếp trên gtgt": "Trực tiếp trên GTGT", "trực tiếp trên doanh số": "Trực tiếp trên doanh số", "không phải nộp thuế gtgt": "Không phải nộp thuế GTGT"}.get(pp.lower())
+        if ten_pp:
+            tick(i_pp, ten_pp)
+
+
 def soan_mau12(du, chu_ky=None):
     """Mẫu số 12 (TT 121/2026) — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN: chỉ giữ các mục được chọn, điền dữ liệu."""
     d = cat_mau(12)
@@ -507,6 +585,8 @@ def soan_mau12(du, chu_ky=None):
         m.dien(r"Giới tính", n.get("gioi_tinh"), lo, hi)
         m.dien(r"Số định danh cá nhân", n.get("cccd"), lo, hi)
         m.dien(r"Điện thoại", n.get("dien_thoai"), lo, hi)
+    if "thue" in loai and "THUE" in cac:
+        _dien_thong_tin_thue(m, du, cac["THUE"])
     if "bo_sung" in loai and "B" in cac:
         lo, hi = cac["B"]
         dong = [x.strip() for x in re.split(r"[\n;]+", str((du.get("bo_sung") or {}).get("noi_dung") or "")) if x.strip()]
@@ -1491,6 +1571,7 @@ LOAI_THAY_DOI = {
     "ten": "Thay đổi tên doanh nghiệp", "dia_chi": "Thay đổi địa chỉ trụ sở chính", "von": "Thay đổi vốn điều lệ",
     "nganh": "Thay đổi ngành, nghề kinh doanh", "bo_sung": "Bổ sung, cập nhật thông tin đăng ký doanh nghiệp", "dai_dien": "Thay đổi người đại diện theo pháp luật (giám đốc)",
     "chu_so_huu": "Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu mới là cá nhân)",
+    "thue": "Thông báo thay đổi thông tin đăng ký thuế",
 }
 
 
@@ -1712,7 +1793,7 @@ def tao_ho_so(du, mau_rieng=None, chu_ky=None, xuat_pdf=False):
     def them(ten_file, d, nhan, n):
         tep.append((ten_file, _luu_bytes(d)))
         ds_file.append((nhan, ten_nguon(n)))
-    if (loai & {"ten", "dia_chi", "von", "nganh", "bo_sung", "cshhl"}) or _doi_thanh_vien_nhieu_tv(du):
+    if (loai & {"ten", "dia_chi", "von", "nganh", "bo_sung", "cshhl", "thue"}) or _doi_thanh_vien_nhieu_tv(du):
         them(f"Mau12_Giay_de_nghi_thay_doi_noi_dung_DKDN_{ma}.docx", soan_mau12(du, chu_ky), "Mẫu số 12 — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN", 12)
     if "cshhl" in loai:                          # Mẫu 10 CHỈ khi người dùng tick thay đổi chủ sở hữu hưởng lợi (đổi người đại diện không kèm Mẫu 10)
         them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", soan_mau10(du, chu_ky), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (phần mềm điền theo danh sách đã chọn)", 10)

@@ -4531,12 +4531,16 @@ const SS_TRUONG={
   chu_so_huu_moi:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['gioi_tinh','Giới tính (Nam/Nữ)'],['cccd','Số định danh cá nhân (CCCD)'],['so_nha','Địa chỉ liên lạc: số nhà, đường...'],['xa','Xã/Phường/Đặc khu'],['tinh','Tỉnh/Thành phố'],['quoc_gia','Quốc gia'],['dien_thoai','Điện thoại'],['email','Thư điện tử']]
 };
 SS_TRUONG.cshhl=[];
+SS_TRUONG.thue=[['gd_ho_ten','Giám đốc/Tổng giám đốc — họ tên (để trống nếu không đổi)'],['gd_ngay_sinh','Giám đốc — ngày sinh (dd/mm/yyyy)'],['gd_gioi_tinh','Giám đốc — giới tính'],['gd_cccd','Giám đốc — số định danh (CCCD)'],['gd_dien_thoai','Giám đốc — điện thoại'],
+  ['kt_ho_ten','Kế toán trưởng/Phụ trách kế toán — họ tên'],['kt_ngay_sinh','Kế toán trưởng — ngày sinh (dd/mm/yyyy)'],['kt_gioi_tinh','Kế toán trưởng — giới tính'],['kt_cccd','Kế toán trưởng — số định danh (CCCD)'],['kt_dien_thoai','Kế toán trưởng — điện thoại'],
+  ['tt_so_nha','Địa chỉ nhận thông báo thuế — số nhà, đường'],['tt_xa','Địa chỉ nhận thông báo thuế — xã/phường'],['tt_tinh','Địa chỉ nhận thông báo thuế — tỉnh/thành phố'],['tt_dien_thoai','Điện thoại nhận thông báo thuế'],['tt_fax','Fax'],['tt_email','Thư điện tử'],
+  ['ngay_bat_dau','Ngày bắt đầu hoạt động (dd/mm/yyyy)'],['hach_toan','Hình thức hạch toán (Độc lập / Phụ thuộc)'],['nam_tu','Năm tài chính — từ ngày (dd/mm, vd 01/01)'],['nam_den','Năm tài chính — đến ngày (dd/mm, vd 31/12)'],['lao_dong','Tổng số lao động'],['pp_gtgt','Phương pháp tính thuế GTGT (Khấu trừ / Trực tiếp trên GTGT / Trực tiếp trên doanh số / Không phải nộp thuế GTGT)']];
 SS_TRUONG.bo_sung=[['noi_dung','Nội dung bổ sung, cập nhật (mỗi ý cách nhau bằng dấu ; hoặc xuống dòng)']];
 SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu (TNHH 1 thành viên) / Chủ tịch HĐTV (từ 2 thành viên) — người ký Quyết định'],['chu_so_huu_cccd','Số định danh (CCCD) của chủ sở hữu / Chủ tịch — dùng khi ủy quyền nộp hồ sơ'],['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN = ngày thông qua Điều lệ (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp (mặc định Phòng Đăng ký kinh doanh)']];
 SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
 const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
   ['cshhl','Thay đổi thông tin về chủ sở hữu hưởng lợi (kèm Mẫu 10)','cshhl'],
-  ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['chu_so_huu','Thay đổi chủ sở hữu / thành viên công ty TNHH (đổi chủ, chuyển vốn, thêm thành viên mới)','chu_so_huu_moi']];
+  ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['thue','Thay đổi thông tin đăng ký thuế (giám đốc, kế toán trưởng, địa chỉ nhận thông báo thuế, năm tài chính, số lao động…)','thue'],['chu_so_huu','Thay đổi chủ sở hữu / thành viên công ty TNHH (đổi chủ, chuyển vốn, thêm thành viên mới)','chu_so_huu_moi']];
 let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=null;
 const ssKey=()=>'gpkdSoan_'+(current||0);
 function ssEsc(x){return vbEsc(x)}
@@ -4703,7 +4707,7 @@ function ssTaoDuLieuDien(){
     if(tr.length)nhom.push({ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr});
   }
   return {dkkd_dien:1,ban:window.__appBuild||'',nhom,truong:nhom.reduce((a,g)=>a.concat(g.truong),[]),
-    bo_qua:loai.filter(k=>['nganh','chu_so_huu','cshhl'].includes(k))};
+    bo_qua:loai.filter(k=>['nganh','chu_so_huu','cshhl','thue'].includes(k))};
 }
 async function ssCopyDuLieuDien(){
   const dl=ssTaoDuLieuDien(),g=document.getElementById('ssDienGhi');
@@ -4726,7 +4730,7 @@ function ssThuThap(){
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
-  ['hien_tai','uy_quyen','bo_sung'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
+  ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
   du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');
   du.dn.ngay_tay=document.getElementById('ss_dn_ngay_lap')?.dataset.tay==='1';du.dn.so_tay=document.getElementById('ss_dn_so_vb')?.dataset.tay==='1';
@@ -4814,6 +4818,7 @@ async function moSoanGpkd(){
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
           ${l[0]==='cshhl'?`<div class="hint">Mẫu 12 giữ mục "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi" và kèm Mẫu 10 (Danh sách chủ sở hữu hưởng lợi) do phần mềm điền theo danh sách bên dưới. Không chọn mục này thì phần đó được xoá khỏi Mẫu 12.</div>`:''}
           ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
+          ${l[0]==='thue'?`<div class="hint">Phần mềm điền mục "Thông báo thay đổi thông tin đăng ký thuế" của Mẫu 12 — chỉ điền ô bạn nhập, ô khác giữ dấu chấm. Ô Giám đốc để trống thì lấy theo người đại diện mới nếu bạn có tick "Thay đổi người đại diện". Hình thức hạch toán và phương pháp tính thuế GTGT: gõ đúng chữ như gợi ý trong nhãn để phần mềm tick đúng ô.</div>`:''}
         </div>`).join('')}
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
@@ -4849,7 +4854,7 @@ async function moSoanGpkd(){
     ['ten','dia_chi','von'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     {const d0=(du.dai_dien||[{}])[0]||{};if(!d0.dia_chi)d0.dia_chi=[d0.so_nha,d0.xa,d0.tinh].filter(Boolean).join(', ');Object.entries(d0).forEach(([k,v])=>dat('ss_dai_dien_'+k,v))}
     ssTv=Object.assign({ht:[],moi:[]},du.thanh_vien||{});if(du.chu_tich_moi)ssTv.chu_tich=du.chu_tich_moi;ssCs=Object.assign({ht:[],moi:[]},du.cshhl_ds||{});
-    ['hien_tai','uy_quyen','bo_sung'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
+    ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
     ck('ss_tao_uy_quyen',du.tao_uy_quyen);ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);
     const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
