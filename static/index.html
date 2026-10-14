@@ -4667,6 +4667,41 @@ async function ssNguoiKyTai(l,nhom,i,inp){
   try{await api('/api/chu-ky/'+current,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa:'cccd:'+d,ten:x.ho_ten||'',anh:anh,xac_nhan:true})});toast('Đã lưu chữ ký của '+(x.ho_ten||d),'ok');ssNguoiKyKiem1(l,nhom,i)}
   catch(e){toast('Lỗi: '+e.message,'err')}
 }
+
+function ssTaoDuLieuDien(){
+  const du=ssThuThap(),tr=[],loai=du.loai||[];
+  const them=(ten,nhan,v,tienTo)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:!!tienTo})};
+  if(loai.includes('ten')){const t=du.ten||{};
+    them('Tên doanh nghiệp (tiếng Việt)','^tên doanh nghiệp viết bằng tiếng việt',(t.viet||'').toUpperCase(),true);
+    them('Tên tiếng nước ngoài','^tên doanh nghiệp viết bằng tiếng nước ngoài',t.nuoc_ngoai);
+    them('Tên viết tắt','^tên doanh nghiệp viết tắt',t.viet_tat)}
+  if(loai.includes('dia_chi')){const a=du.dia_chi||{};
+    them('Số nhà/đường','^số nhà',a.so_nha);them('Xã/Phường','^xã\\/phường',a.xa);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh);
+    them('Điện thoại','^điện thoại',a.dien_thoai);them('Fax','^(số )?fax',a.fax);them('Thư điện tử','^(e-?mail|thư điện tử)',a.email);them('Website','^website',a.website)}
+  if(loai.includes('von')){const v=du.von||{};const n=parseInt(String(v.moi||'').replace(/\D/g,''),10);if(n)them('Vốn điều lệ','^(tổng )?vốn điều lệ',n.toLocaleString('vi-VN'))}
+  if(loai.includes('dai_dien')){const d=(du.dai_dien||[{}])[0]||{};
+    them('Họ tên người đại diện','^họ(,? ?(chữ đệm )?(và )?)? ?tên',(d.ho_ten||'').toUpperCase());
+    them('Ngày sinh','ngày.*sinh',d.ngay_sinh);them('Giới tính','^giới tính',d.gioi_tinh);
+    them('Số giấy tờ','^(số (giấy tờ|định danh|cccd|căn cước)|số giấy)',d.cccd);
+    them('Ngày cấp','^ngày cấp',d.ngay_cap);them('Nơi cấp','^nơi cấp',d.noi_cap);
+    them('Dân tộc','^dân tộc',d.dan_toc);them('Quốc tịch','^quốc tịch',d.quoc_tich);
+    them('Chức danh','^chức (danh|vụ)',d.chuc_danh);
+    them('Địa chỉ liên lạc','^địa chỉ( liên lạc| thường trú)?$',d.dia_chi);
+    them('Điện thoại','^điện thoại',d.dien_thoai);them('Thư điện tử','^(e-?mail|thư điện tử)',d.email)}
+  return {dkkd_dien:1,ban:window.__appBuild||'',truong:tr,bo_qua:loai.filter(k=>['nganh','chu_so_huu','cshhl'].includes(k))};
+}
+async function ssCopyDuLieuDien(){
+  const dl=ssTaoDuLieuDien(),g=document.getElementById('ssDienGhi');
+  if(!dl.truong.length){toast('Chưa có dữ liệu để điền — tick nội dung thay đổi ở mục 2 (tên, địa chỉ, vốn, người đại diện) và nhập thông tin trước','err');if(g)g.textContent='';return}
+  try{await navigator.clipboard.writeText(JSON.stringify(dl));toast('Đã copy '+dl.truong.length+' ô dữ liệu — sang cổng bấm nút bookmark "Điền dữ liệu GPKD"','ok')}
+  catch(e){prompt('Copy dữ liệu này (Ctrl+C) rồi bấm nút bookmark trên cổng:',JSON.stringify(dl))}
+  if(g)g.textContent='Đã copy '+dl.truong.length+' ô: '+dl.truong.map(x=>x.ten).join(', ')+(dl.bo_qua.length?' — mục chưa hỗ trợ điền tự động (nhập tay): '+dl.bo_qua.join(', '):'');
+}
+async function ssCopyMaDien(){
+  let ma='';try{ma=(await api('/api/dkkd/bookmarklet-dien')).ma}catch(e){toast('Lỗi: '+e.message,'err');return}
+  try{await navigator.clipboard.writeText(ma);alert(GPKD_HD_BOOKMARK.replace('Lấy dữ liệu GPKD','Điền dữ liệu GPKD').split('\n\nDùng:')[0].replace('KHÔNG dán','KHÔNG dán'))}
+  catch(e){prompt('Copy mã này (Ctrl+C), rồi tạo dấu trang "Điền dữ liệu GPKD" và dán vào ô URL:',ma)}
+}
 function ssThuThap(){
   const gt=(nhom,k)=>{const e=document.getElementById(`ss_${nhom}_${k}`);return e?e.value.trim():''};
   const loai=SS_LOAI.filter(l=>document.getElementById('ssL_'+l[0])?.checked).map(l=>l[0]);
@@ -4772,6 +4807,12 @@ async function moSoanGpkd(){
       <div id="ssUq" style="display:none;margin:6px 0 0 26px;padding:8px 10px;border-left:3px solid #cfe5da">${ssCacO('uy_quyen')}
         <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="btn ghost sm" style="cursor:pointer">✍ Tải ảnh chữ ký bên nhận ủy quyền<input type="file" accept="image/png,image/jpeg" style="display:none" onchange="ssUqKyTai(this)"></label><span id="ssUqKyTt" class="hint"></span></div>
         <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Chữ ký bên nhận ủy quyền lưu trong Kho chữ ký theo số CCCD, chỉ lưu khi người đó đã đồng ý. Phần mềm không ký thay.</div></div>
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">4. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
+      <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay).</div>
+      <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (1 lần): <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> → trên Chrome tạo dấu trang mới tên "Điền dữ liệu GPKD", dán mã vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).</div>
+      <div style="font-size:13px">2) Mỗi lần dùng: trên cổng mở trang <b>sửa đổi</b> của khối cần nhập → quay lại đây bấm <button class="btn sm" onclick="ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang cổng bấm nút bookmark "Điền dữ liệu GPKD" → kiểm tra các ô tô vàng.</div>
+      <div class="hint" id="ssDienGhi" style="margin-top:6px"></div>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Mẫu riêng của bạn (Word .docx, tuỳ chọn)</legend>
       <div class="hint" style="margin-top:0">Gửi file Word có chữ <code>{{tên_biến}}</code> (vd <code>{{dn_ten_hoa}}</code>, <code>{{dd_ho_ten_hoa}}</code>) — phần mềm sẽ thay bằng dữ liệu ở trên và đưa vào gói hồ sơ (vd Quyết định của chủ sở hữu, Biên bản họp).</div>

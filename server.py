@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-14.213"
+APP_BUILD = "2026-10-14.214"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45619,6 +45619,33 @@ def dkkd_xuat_excel(cac_khoi):
 @app.get("/api/dkkd/bookmarklet")
 def dkkd_bookmarklet_get():
     return {"ma": dkkd_bookmarklet()}
+
+
+def dkkd_bookmarklet_dien():
+    """javascript: cho nút bookmark ĐIỀN dữ liệu đã soạn vào các ô của trang đang mở trên cổng (templates/gpkd/dien_cong.js). Chỉ điền ô, không lưu/ký/nộp."""
+    import re as _re
+    import urllib.parse as _up
+    p = os.path.join(BASE_DIR, "templates", "gpkd", "dien_cong.js")
+    if not os.path.isfile(p):
+        try:                                         # update.py cũ trên máy chưa có file này trong FILES -> tự tải thẳng từ kho dự án
+            import update as _up2
+            nd = _up2._tai_raw("templates/gpkd/dien_cong.js")
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(nd)
+        except Exception as e:
+            raise HTTPException(404, f"Chưa có file nút điền và không tự tải được ({type(e).__name__}: {str(e)[:80]}) — kiểm tra mạng rồi thử lại, hoặc tắt hẳn/mở lại phần mềm để tự cập nhật")
+    with open(p, encoding="utf-8") as f:
+        js = f.read()
+    js = _re.sub(r"/\*.*?\*/", "", js, flags=_re.S)
+    js = " ".join(x.strip() for x in js.splitlines() if x.strip() and not x.strip().startswith("//"))
+    js = js.replace("__BAN_NUT__", APP_BUILD)
+    return "javascript:" + _up.quote(js, safe="")
+
+
+@app.get("/api/dkkd/bookmarklet-dien")
+def dkkd_bookmarklet_dien_get():
+    return {"ma": dkkd_bookmarklet_dien()}
 
 
 @app.post("/api/dkkd/doc-file")

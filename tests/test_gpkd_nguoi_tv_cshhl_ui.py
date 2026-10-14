@@ -49,6 +49,7 @@ const { chromium } = require('playwright');
   await pg.evaluate("ssNguoiBo('cs',0);ssNguoiThem('cs');ssNguoiSet('cs','moi',0,'ho_ten','NGUYỄN VĂN C');ssNguoiSet('cs','moi',0,'truc_tiep','55')");
   r.tongCs = await pg.innerText('#ssNguoiTong_cs');
   r.nutKy = await pg.evaluate("document.querySelectorAll('#ssNguoiBox_tv input[type=file]').length");
+  r.dien = await pg.evaluate("(()=>{document.getElementById('ss_dai_dien_ho_ten').value='đinh thị huệ';document.getElementById('ss_dai_dien_cccd').value='036190003147';document.getElementById('ssL_chu_so_huu').checked=true;return ssTaoDuLieuDien()})()");
   r.diaChi1 = await pg.evaluate("!!document.getElementById('ss_dai_dien_dia_chi')");
   r.diaChiCu = await pg.evaluate("['so_nha','xa','tinh','quoc_gia'].filter(k=>document.getElementById('ss_dai_dien_'+k))");
   try {
@@ -87,5 +88,8 @@ assert r["vonMoi"] == "4.000.000.000" and r["sauGia"][-1][1] == 4000000000, (r["
 print("PASS 2: gạch bỏ (có gạch ngang), chuyển vốn sang người khác, thêm người mới; tổng sau thay đổi đúng.")
 assert r["diaChi1"] and r["diaChiCu"] == []
 assert r["nutKy"] == 3, r["nutKy"]      # mỗi thành viên (2 hiện tại + 1 mới) có nút tải chữ ký
+dd = {x["ten"]: x["gia_tri"] for x in r["dien"]["truong"]}
+assert dd["Họ tên người đại diện"] == "ĐINH THỊ HUỆ" and dd["Số giấy tờ"] == "036190003147" and "chu_so_huu" in r["dien"]["bo_qua"], r["dien"]
+print("PASS 3b: dữ liệu điền lên cổng lấy từ ô đã nhập (họ tên IN HOA, số giấy tờ), mục chưa hỗ trợ được báo.")
 print("PASS 3: địa chỉ liên lạc người đại diện chỉ còn 1 ô.")
 print("\nALL DONE")

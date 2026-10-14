@@ -37,6 +37,7 @@ FILES = [
     "templates/gpkd/TT121_2026_PL1.docx",
     "templates/gpkd/TT68_2025_PL1.docx",
     "templates/gpkd/nganh_cap4_QD27_2018.json",
+    "templates/gpkd/dien_cong.js",
     "static/doi_chieu_ngan_hang.html",
     "templates/htkk_01gtgt_template.xml",
     "templates/htkk_05tncn_template.xml",
