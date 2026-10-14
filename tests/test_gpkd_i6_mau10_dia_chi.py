@@ -130,4 +130,27 @@ assert "Về việc bầu Chủ tịch Hội đồng thành viên" in q9b and "�
 t12b = tat_ca(docx.Document(io.BytesIO(z9b.read(next(n for n in z9b.namelist() if n.startswith("Mau12"))))))
 assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH" in t12b and "THÀNH VIÊN HỢP DANH CÔNG TY HỢP DANH" not in t12b, t12b[:1500]
 print("PASS 9: Quyết định bầu Chủ tịch HĐTV, Mẫu 12 và Mẫu 13 gọn như bộ hồ sơ thực tế; người ký là Chủ tịch HĐTV có hiện họ tên.")
+# 10) TNHH 1TV chỉ đổi giám đốc (hồ sơ Lean Helper): không Mẫu 10, ủy quyền bởi Chủ tịch công ty, Quyết định theo mẫu thực tế
+du10 = {"loai": ["dai_dien"], "tao_uy_quyen": True,
+        "dn": {"ten": "Công ty TNHH Lean Helper", "ma_so": "0316951072", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên", "ngay_lap": "24/07/2026",
+               "dia_danh": "TP. Hồ Chí Minh", "co_quan": "Phòng Đăng ký kinh doanh Thành phố Hồ Chí Minh", "so_vb": "01"},
+        "hien_tai": {"dd_ho_ten": "Võ Thị Ri", "dd_chuc_danh": "Giám đốc", "chu_so_huu": "Võ Thị Ri", "chu_so_huu_cccd": "079156001336", "ngay_cap_gcn": "12/08/2021", "dia_chi": "91 đường Số 13, Phường Bình Trưng"},
+        "dai_dien": [{"ho_ten": "Đinh Thị Huệ", "ngay_sinh": "12/07/1990", "gioi_tinh": "Nữ", "cccd": "036190003147", "ngay_cap": "23/12/2022", "noi_cap": "Bộ Công An", "chuc_danh": "Giám đốc",
+                      "dia_chi": "Số nhà 91, Đường 13, Phường Bình Trưng, Thành phố Hồ Chí Minh"}],
+        "uy_quyen": {"ho_ten": "Đỗ Thái Hưng", "so_giay_to": "083092014700"}}
+z10 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du10)[0]))
+n10 = z10.namelist()
+assert not any(n.startswith("Mau10") for n in n10), n10                  # chỉ đổi giám đốc: không có Mẫu 10
+uq10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Giay_uy_quyen"))))))
+assert "Ông (Bà): VÕ THỊ RI" in uq10 and "Chức danh: CHỦ TỊCH CÔNG TY của CÔNG TY TNHH LEAN HELPER" in uq10 and "Là người đại diện theo pháp luật của" not in uq10, uq10[:500]
+m13_10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Mau13"))))))
+assert "ủy quyền thực hiện thủ tục đăng ký doanh nghiệp): 079156001336" in m13_10.replace("\t", "") and "CHỦ TỊCH CÔNG TY\n(Ký, ghi họ tên)" in m13_10 and m13_10.rstrip().endswith("VÕ THỊ RI"), m13_10[-400:]
+qd10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Quyet_dinh"))))))
+assert "Thay đổi Ông/Bà VÕ THỊ RI chức danh Giám đốc chuyển sang đại diện pháp luật mới là Ông/Bà ĐINH THỊ HUỆ - chức danh Giám đốc." in qd10
+assert "☒ Căn cước công dân" in qd10 and "Nơi đăng ký hộ khẩu thường trú: Số nhà 91" in qd10 and "Chức vụ: Giám đốc" in qd10 and "Giao cho Ông/Bà VÕ THỊ RI" in qd10 and "Điều 4: Quyết định này có hiệu lực" in qd10, qd10
+assert "1. Thay đổi người đại diện" not in qd10
+# tick thêm chủ sở hữu hưởng lợi thì mới có Mẫu 10
+du10b = dict(du10, loai=["dai_dien", "cshhl"])
+assert any(n.startswith("Mau10") for n in zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du10b)[0])).namelist())
+print("PASS 10: TNHH 1TV chỉ đổi giám đốc: không Mẫu 10 (chỉ khi tick CSHHL), ủy quyền bởi Chủ tịch công ty, Mẫu 13 ký Chủ tịch công ty + số định danh, Quyết định theo mẫu thực tế.")
 print("\nALL DONE")

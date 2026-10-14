@@ -79,7 +79,7 @@ assert so_anh(z0, "Mau12") == 0 and so_anh(z0, "Quyet_dinh") == 0 and so_anh(z0,
 # đổi người đại diện: người ký Mẫu 12 là người MỚI -> không gắn chữ ký người đại diện cũ
 du2 = dict(DU, loai=["dia_chi", "dai_dien"], dai_dien=[{"ho_ten": "Người Mới"}])
 z2 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du2, None, ky)[0]))
-assert so_anh(z2, "Mau12") == 0 and so_anh(z2, "Quyet_dinh") == 1
+assert so_anh(z2, "Mau12") == 1 and so_anh(z2, "Quyet_dinh") == 1      # công ty 1TV: Chủ tịch công ty (chủ sở hữu) ký Mẫu 12 bằng chữ ký của chính mình, không dùng chữ ký giám đốc cũ
 print("PASS 3: gắn chữ ký giám đốc (Mẫu 12, Giấy ủy quyền) và chủ sở hữu (Quyết định); không gắn chữ ký người đại diện cũ cho người mới.")
 
 # khối chữ ký không bị tách trang; "đề nghị cấp Giấy xác nhận" luôn tick
