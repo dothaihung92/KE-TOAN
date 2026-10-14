@@ -76,9 +76,21 @@
     khong.push(t.ten + ' (ô không điền được)');
   });
 
+  var huong = '';
+  if (!daDien.length) {
+    var khoiCan = [];
+    dl.truong.forEach(function (t) { if (t.khoi && khoiCan.indexOf(t.khoi) < 0) khoiCan.push(t.khoi); });
+    var tim = [];
+    document.querySelectorAll('a').forEach(function (a) {
+      var nh = chuan(a.innerText);
+      khoiCan.forEach(function (k) { if (nh && nh === chuan(k)) { a.style.outline = '3px solid #d62020'; a.style.background = '#ffe4e4'; tim.push(k); } });
+    });
+    huong = '<div style="margin:6px 0;padding:6px;background:#ffe9e9;border-radius:6px"><b>Trang này chưa phải trang nhập của khối cần sửa</b> (nên chưa điền được ô nào). Hãy bấm mục ' + (khoiCan.length ? '<b>"' + khoiCan.join('" / "').replace(/</g, '&lt;') + '"</b>' : 'cần sửa') + ' trong menu "KHỐI DỮ LIỆU" bên trái' + (tim.length ? ' (đã viền đỏ)' : '') + ', vào trang <b>sửa đổi</b> (có các ô nhập), rồi bấm lại nút này.</div>';
+  }
   var hop = document.createElement('div');
   hop.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:420px;background:#fff;border:2px solid #e6a700;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
   var h = '<b>Đã điền ' + daDien.length + ' ô</b> (tô vàng) — <b>hãy kiểm tra từng ô</b> rồi tự bấm Lưu. Phần mềm không tự lưu, không ký, không nộp.';
+  h += huong;
   if (khong.length) h += '<div style="margin-top:6px;color:#b45309"><b>Chưa điền được (nhập tay):</b><br>' + khong.map(function (x) { return '• ' + x.replace(/</g, '&lt;'); }).join('<br>') + '</div>';
   h += '<div style="margin-top:8px"><button id="__dkkdHoan" style="padding:4px 10px;margin-right:6px">Hoàn tác</button><button id="__dkkdDong" style="padding:4px 10px">Đóng</button> <span style="color:#888;font-size:11px">bản ' + BAN + '</span></div>';
   hop.innerHTML = h;

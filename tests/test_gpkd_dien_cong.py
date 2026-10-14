@@ -87,4 +87,22 @@ assert not r["luu"]                                                  # không b�
 print("PASS 2: điền đúng ô (kể cả ngày cấp ở hàng 4 cột, chọn giới tính, tách tiền tố tên), tô vàng, báo ô không có, không đụng ô chỉ đọc, không bấm Lưu.")
 assert r["hoan"] == {"ht": "VÕ THỊ RI", "ten": "LEAN HELPER", "lh": "CÔNG TY TNHH", "nc": ""}, r["hoan"]
 print("PASS 3: nút Hoàn tác khôi phục đúng giá trị cũ.")
+# Trang tổng quan hồ sơ (không có ô nhập — đúng ca người dùng bấm nút ở trang 'Thông tin về hồ sơ'): không điền gì, viền đỏ mục menu cần mở và hướng dẫn
+TRANG2 = """<meta charset=utf-8><div class=menu><a id=m1 href=#>Hình thức đăng ký</a><a id=m2 href=#>Địa chỉ</a><a id=m3 href=#>Người đại diện theo pháp luật</a></div>
+<table><tr><td>Hình thức đăng ký:</td><td>Đăng ký thay đổi</td></tr><tr><td>Mã số doanh nghiệp:</td><td>0316951072</td></tr></table>"""
+DL2 = dict(DL, truong=[dict(t, khoi="Người đại diện theo pháp luật") for t in DL["truong"]])
+RUN2 = RUN.split("  const r = {};")[0] + """  const r = {};
+  r.menu = await pg.$eval('#m3', e => e.style.outline); r.menu2 = await pg.$eval('#m2', e => e.style.outline);
+  r.panel = await pg.innerText('body');
+  console.log('@@' + JSON.stringify(r)); await b.close(); })();"""
+open(os.path.join(tmp, "t2.js"), "w", encoding="utf-8").write(RUN2)
+env2 = dict(env, DL=json.dumps(DL2), TRANG=TRANG2)
+p2 = subprocess.run(["node", os.path.join(tmp, "t2.js")], capture_output=True, text=True, env=env2, timeout=120)
+d2 = [x for x in p2.stdout.splitlines() if x.startswith("@@")]
+assert d2, p2.stdout + p2.stderr
+r2 = json.loads(d2[0][2:])
+assert "Đã điền 0 ô" in r2["panel"] and "Trang này chưa phải trang nhập của khối cần sửa" in r2["panel"] and "Người đại diện theo pháp luật" in r2["panel"], r2["panel"]
+assert "214" in r2["menu"] or "d62020" in r2["menu"].lower() or "rgb" in r2["menu"], r2["menu"]
+assert not r2["menu2"]                                          # chỉ viền đỏ đúng mục cần mở
+print("PASS 4: bấm nút ở trang tổng quan hồ sơ (chưa có ô nhập) -> báo rõ, viền đỏ mục menu 'Người đại diện theo pháp luật' cần mở.")
 print("\nALL DONE")
