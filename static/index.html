@@ -4681,13 +4681,13 @@ function ssTaoDuLieuDien(){
   const du=ssThuThap(),loai=du.loai||[],nhom=[];
   for(const k0 of ssKhoiDienCoSan()){
     const tr=[];let khoi=SS_KHOI_DIEN[k0];
-    const them=(ten,nhan,v,tienTo)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:!!tienTo,khoi})};
+    const them=(ten,nhan,v,tienTo,chuoi)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:!!tienTo,khoi,chuoi:!!chuoi})};
     if(k0==='ten'){const t=du.ten||{};
       them('Tên doanh nghiệp (tiếng Việt)','^tên doanh nghiệp viết bằng tiếng việt',(t.viet||'').toUpperCase(),true);
       them('Tên tiếng nước ngoài','^tên doanh nghiệp viết bằng tiếng nước ngoài',t.nuoc_ngoai);
       them('Tên viết tắt','^tên doanh nghiệp viết tắt',t.viet_tat)}
     if(k0==='dia_chi'){const a=du.dia_chi||{};
-      them('Số nhà/đường','^số nhà',a.so_nha);them('Xã/Phường','^xã\\/phường',a.xa);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh);
+      them('Số nhà/đường','^số nhà',a.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh,false,true);them('Xã/Phường','^xã\\/phường',a.xa,false,true);
       them('Điện thoại','^điện thoại',a.dien_thoai);them('Fax','^(số )?fax',a.fax);them('Thư điện tử','^(e-?mail|thư điện tử)',a.email);them('Website','^website',a.website)}
     if(k0==='von'){const v=du.von||{};const n=parseInt(String(v.moi||'').replace(/\D/g,''),10);if(n)them('Vốn điều lệ','^(tổng )?vốn điều lệ',n.toLocaleString('vi-VN'))}
     if(k0==='dai_dien'){const d=(du.dai_dien||[{}])[0]||{},dc=ssTachDiaChiJs(d.dia_chi);
@@ -4698,7 +4698,7 @@ function ssTaoDuLieuDien(){
       them('Số giấy tờ pháp lý','^(số (giấy tờ|định danh|cccd|căn cước)|số giấy)',d.cccd);
       them('Ngày cấp','^ngày cấp',d.ngay_cap);them('Nơi cấp','^nơi cấp',d.noi_cap);
       them('Dân tộc','^dân tộc',d.dan_toc);
-      them('Số nhà/đường/phố…','^số nhà',dc.so_nha);
+      them('Số nhà/đường/phố…','^số nhà',dc.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',dc.tinh,false,true);them('Xã/Phường/Đặc khu','^xã\\/phường',dc.xa,false,true);
       them('Điện thoại','^điện thoại',d.dien_thoai);them('Thư điện tử','^(e-?mail|thư điện tử)',d.email)}
     if(tr.length)nhom.push({ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr});
   }

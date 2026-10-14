@@ -77,7 +77,7 @@
   var chayNhom = async function (g) {
     var D = document;
     var w = null;
-    if (g.vao_khoi && !coTruong(document, g)) {
+    if (g.vao_khoi && (!coTruong(document, g) || g.truong.some(function (t) { return t.chuoi; }))) {
       w = window.open('', '_dkkd_dien', 'width=1250,height=900,scrollbars=yes,resizable=yes');
       try { if (w && (w.location.href === 'about:blank' || !w.document.querySelector('a'))) { w.location.href = location.href; } } catch (e0) { }
       if (!w) { alert('Chrome đang chặn cửa sổ bật lên. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
@@ -97,26 +97,35 @@
       try { w.focus(); } catch (e) { }
     }
 
-    var dsO = quet(D);
     var daDung = [];
     var cu = [];
     var daDien = [];
     var khong = [];
+    var goc = function (x) { return chuan(x).replace(/^(thành phố|tp\.?|tỉnh|thị xã|thị trấn|quận|huyện|phường|xã|đặc khu)\s+/, '').trim(); };
+    var ref = function (o) { return { id: o.id || '', name: o.name || '' }; };
+    var tra = function (r) { return (r.id && D.getElementById(r.id)) || (r.name && D.getElementsByName(r.name)[0]) || null; };
+    var vang = function (o) { if (o) { o.style.background = '#fff3a0'; o.style.outline = '2px solid #e6a700'; } };
+    var luu = function (o) { cu.push({ r: ref(o), v: o.value, s: o.style.cssText }); };
     var gan = function (o, v) {
-      cu.push({ o: o, v: o.value, s: o.style.cssText });
+      luu(o);
       o.value = v;
       o.dispatchEvent(new Event('input', { bubbles: true }));
-      o.style.background = '#fff3a0';
-      o.style.outline = '2px solid #e6a700';
+      vang(o);
+    };
+    var timOption = function (o, v) {
+      var vv = chuan(v), gv = goc(v);
+      var ops = [].slice.call(o.options);
+      return ops.filter(function (x) { return chuan(x.text) === vv; })[0]
+        || ops.filter(function (x) { return gv && goc(x.text) === gv; })[0]
+        || ops.filter(function (x) { return vv && chuan(x.text).indexOf(vv) === 0; })[0]
+        || ops.filter(function (x) { return gv && goc(x.text).indexOf(gv) >= 0 && x.value !== ''; })[0];
     };
     var chonSelect = function (o, v) {
-      var vv = chuan(v);
-      var op = [].slice.call(o.options).filter(function (x) { return chuan(x.text) === vv; })[0] || [].slice.call(o.options).filter(function (x) { return vv && chuan(x.text).indexOf(vv) === 0; })[0];
+      var op = timOption(o, v);
       if (!op) return false;
-      cu.push({ o: o, v: o.value, s: o.style.cssText });
+      luu(o);
       o.value = op.value;
-      o.style.background = '#fff3a0';
-      o.style.outline = '2px solid #e6a700';
+      vang(o);
       return true;
     };
     var chonRadio = function (rs, v) {
@@ -124,20 +133,20 @@
       var r = rs.filter(function (x) { return x.nhan === vv; })[0];
       if (!r || r.el.disabled) return false;
       var truoc = rs.filter(function (x) { return x.el.checked; })[0];
-      cu.push({ radio: r.el, truoc: truoc ? truoc.el : null });
+      cu.push({ radio: ref(r.el), truoc: truoc ? ref(truoc.el) : null });
       r.el.checked = true;
       r.el.parentNode.style.background = '#fff3a0';
       return true;
     };
-    g.truong.forEach(function (t) {
+    var xuLy = function (t, dsO) {
       var re;
-      try { re = new RegExp(t.nhan, 'i'); } catch (e) { return; }
-      var tim = dsO.filter(function (x) { return re.test(x.nhan) && daDung.indexOf(x) < 0; });
+      try { re = new RegExp(t.nhan, 'i'); } catch (e) { return null; }
+      var tim = dsO.filter(function (x) { return re.test(x.nhan) && daDung.indexOf(x.nhan) < 0; });
       var m = tim.filter(function (x) { return x.rs.length || x.os.some(function (o) { return !o.disabled && !o.readOnly; }); })[0];
-      if (!m) { khong.push(t.ten + (tim.length ? ' (ô bị khóa, không sửa được)' : ' (không thấy ô)')); return; }
-      daDung.push(m);
+      if (!m) { khong.push(t.ten + (tim.length ? ' (ô bị khóa, không sửa được)' : ' (không thấy ô)')); return null; }
+      daDung.push(m.nhan);
       var v = String(t.gia_tri);
-      if (m.rs.length && !m.os.length) { if (chonRadio(m.rs, v)) daDien.push(t.ten); else khong.push(t.ten + ' (không có lựa chọn "' + v + '")'); return; }
+      if (m.rs.length && !m.os.length) { if (chonRadio(m.rs, v)) daDien.push(t.ten); else khong.push(t.ten + ' (không có lựa chọn "' + v + '")'); return null; }
       var os = m.os.filter(function (o) { return !o.disabled && !o.readOnly; });
       var sel = os.filter(function (o) { return o.tagName === 'SELECT'; });
       var inp = os.filter(function (o) { return o.tagName !== 'SELECT'; });
@@ -145,18 +154,69 @@
         var best = null;
         sel.forEach(function (s) { [].slice.call(s.options).forEach(function (op) { var p = chuan(op.text); if (p && chuan(v).indexOf(p + ' ') === 0 && (!best || p.length > best.p.length)) best = { s: s, op: op, p: p }; }); });
         if (best) {
-          cu.push({ o: best.s, v: best.s.value, s: best.s.style.cssText });
+          luu(best.s);
           best.s.value = best.op.value;
-          best.s.style.background = '#fff3a0';
+          vang(best.s);
           gan(inp[0], sach(v).slice(best.p.length).trim());
           daDien.push(t.ten);
-          return;
+          return null;
         }
       }
-      if (sel.length && !inp.length) { if (chonSelect(sel[0], v)) daDien.push(t.ten); else khong.push(t.ten + ' (không có lựa chọn "' + v + '" — chọn tay)'); return; }
-      if (inp.length) { gan(inp[0], v); daDien.push(t.ten); return; }
+      if (sel.length && !inp.length) {
+        var truoc = sel[0].value;
+        if (chonSelect(sel[0], v)) { daDien.push(t.ten); return sel[0].value !== truoc ? sel[0] : null; }
+        khong.push(t.ten + ' (không có lựa chọn "' + v + '" — chọn tay)');
+        return null;
+      }
+      if (inp.length) { gan(inp[0], v); daDien.push(t.ten); return null; }
       khong.push(t.ten + ' (ô không điền được)');
-    });
+      return null;
+    };
+    var settle = async function (win, o) {
+      win.__dkkdMk = 1;
+      o.dispatchEvent(new Event('change', { bubbles: true }));
+      var het = Date.now() + 25000;
+      var bd = Date.now();
+      await nghi(900);
+      while (Date.now() < het) {
+        if (win.closed) return false;
+        try {
+          if (!win.__dkkdMk) { if (win.document.readyState === 'complete') { await nghi(600); return true; } }
+          else {
+            var ban = false;
+            try { ban = !!(win.Sys && win.Sys.WebForms && win.Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack()); } catch (e1) { ban = false; }
+            if (!ban && Date.now() - bd > 2500) return true;
+          }
+        } catch (e2) { }
+        await nghi(300);
+      }
+      return false;
+    };
+    var thuong = g.truong.filter(function (t) { return !t.chuoi; });
+    var chuoi = g.truong.filter(function (t) { return t.chuoi; });
+    var dsO = quet(D);
+    thuong.forEach(function (t) { xuLy(t, dsO); });
+    var winDich = w || window;
+    for (var ci = 0; ci < chuoi.length; ci++) {
+      var tc = chuoi[ci];
+      var dsC = quet(D);
+      var selMoi = null;
+      var chay = 0;
+      while (chay < 14) {
+        var re2; try { re2 = new RegExp(tc.nhan, 'i'); } catch (e) { re2 = null; }
+        var mC = re2 && dsC.filter(function (x) { return re2.test(x.nhan) && x.os.some(function (o) { return o.tagName === 'SELECT'; }); })[0];
+        if (mC && mC.os.some(function (o) { return o.tagName === 'SELECT' && o.options.length > 1; })) break;
+        await nghi(700);
+        dsC = quet(D);
+        chay++;
+      }
+      selMoi = xuLy(tc, dsC);
+      if (selMoi && !winDich.closed) {
+        var tai = await settle(winDich, selMoi);
+        try { D = winDich.document; } catch (e) { }
+        cu.forEach(function (x) { if (x.r) vang(tra(x.r)); });
+      }
+    }
 
     var huong = '';
     if (!daDien.length) {
@@ -181,8 +241,8 @@
     D.getElementById('__dkkdDong').onclick = function () { hop.remove(); };
     D.getElementById('__dkkdHoan').onclick = function () {
       cu.forEach(function (x) {
-        if (x.radio) { x.radio.checked = false; if (x.truoc) x.truoc.checked = true; x.radio.parentNode.style.background = ''; }
-        else { x.o.value = x.v; x.o.style.cssText = x.s; }
+        if (x.radio) { var r1 = tra(x.radio); if (r1) { r1.checked = false; r1.parentNode.style.background = ''; } var r2 = x.truoc && tra(x.truoc); if (r2) r2.checked = true; }
+        else { var o = tra(x.r); if (o) { o.value = x.v; o.style.cssText = x.s; } }
       });
       hop.remove();
     };
