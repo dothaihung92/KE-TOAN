@@ -4671,44 +4671,47 @@ async function ssNguoiKyTai(l,nhom,i,inp){
 const SS_KHOI_DIEN={ten:'Tên doanh nghiệp/đơn vị trực thuộc',dia_chi:'Địa chỉ',von:'Thông tin về vốn',dai_dien:'Người đại diện theo pháp luật'};
 function ssTachDiaChiJs(s){const p=String(s||'').split(',').map(x=>x.trim()).filter(Boolean);if(p.length&&/^(việt nam|viet nam|vietnam)$/i.test(p[p.length-1]))p.pop();
   return p.length>=3?{so_nha:p.slice(0,-2).join(', '),xa:p[p.length-2],tinh:p[p.length-1]}:p.length===2?{so_nha:p[0],xa:'',tinh:p[1]}:{so_nha:p[0]||'',xa:'',tinh:''}}
-function ssKhoiDienCoSan(){const l=ssThuThap().loai||[];return Object.keys(SS_KHOI_DIEN).filter(k=>l.includes(k))}
+function ssKhoiDienCoSan(){const l=ssThuThap().loai||[];return ['dia_chi','ten','von','dai_dien'].filter(k=>l.includes(k))}
 function ssVeChonKhoiDien(){
   const e=document.getElementById('ssDienKhoi');if(!e)return;
-  const ds=ssKhoiDienCoSan(),cur=e.value;
-  e.innerHTML=ds.length?ds.map(k=>`<option value="${k}" ${k===cur?'selected':''}>${SS_KHOI_DIEN[k]}</option>`).join(''):'<option value="">(tick nội dung thay đổi ở mục 2 trước)</option>';
+  const ds=ssKhoiDienCoSan();
+  e.innerHTML=ds.length?'Sẽ điền lần lượt: '+ds.map((k,i)=>`<b>${i+1}. ${SS_KHOI_DIEN[k]}</b>`).join(' → '):'<span style="color:#b45309">(tick nội dung thay đổi ở mục 2 để có khối cần điền)</span>';
 }
-function ssTaoDuLieuDien(khoiChon){
-  const du=ssThuThap(),tr=[],loai=du.loai||[];
-  const k0=khoiChon||(document.getElementById('ssDienKhoi')||{}).value||ssKhoiDienCoSan()[0]||'';
-  let khoi='';const them=(ten,nhan,v,tienTo)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:!!tienTo,khoi})};
-  if(k0==='ten'&&loai.includes('ten')){khoi=SS_KHOI_DIEN.ten;const t=du.ten||{};
-    them('Tên doanh nghiệp (tiếng Việt)','^tên doanh nghiệp viết bằng tiếng việt',(t.viet||'').toUpperCase(),true);
-    them('Tên tiếng nước ngoài','^tên doanh nghiệp viết bằng tiếng nước ngoài',t.nuoc_ngoai);
-    them('Tên viết tắt','^tên doanh nghiệp viết tắt',t.viet_tat)}
-  if(k0==='dia_chi'&&loai.includes('dia_chi')){khoi=SS_KHOI_DIEN.dia_chi;const a=du.dia_chi||{};
-    them('Số nhà/đường','^số nhà',a.so_nha);them('Xã/Phường','^xã\\/phường',a.xa);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh);
-    them('Điện thoại','^điện thoại',a.dien_thoai);them('Fax','^(số )?fax',a.fax);them('Thư điện tử','^(e-?mail|thư điện tử)',a.email);them('Website','^website',a.website)}
-  if(k0==='von'&&loai.includes('von')){khoi=SS_KHOI_DIEN.von;const v=du.von||{};const n=parseInt(String(v.moi||'').replace(/\D/g,''),10);if(n)them('Vốn điều lệ','^(tổng )?vốn điều lệ',n.toLocaleString('vi-VN'))}
-  if(k0==='dai_dien'&&loai.includes('dai_dien')){khoi=SS_KHOI_DIEN.dai_dien;const d=(du.dai_dien||[{}])[0]||{},dc=ssTachDiaChiJs(d.dia_chi);
-    them('Chức danh','^chức (danh|vụ)',d.chuc_danh);
-    them('Họ tên người đại diện','^họ(,? ?(chữ đệm )?(và )?)? ?tên',(d.ho_ten||'').toUpperCase());
-    them('Giới tính','^giới tính',d.gioi_tinh);
-    them('Ngày sinh','ngày.*sinh',d.ngay_sinh);
-    them('Số giấy tờ pháp lý','^(số (giấy tờ|định danh|cccd|căn cước)|số giấy)',d.cccd);
-    them('Ngày cấp','^ngày cấp',d.ngay_cap);them('Nơi cấp','^nơi cấp',d.noi_cap);
-    them('Dân tộc','^dân tộc',d.dan_toc);
-    them('Số nhà/đường/phố…','^số nhà',dc.so_nha);
-    them('Điện thoại','^điện thoại',d.dien_thoai);them('Thư điện tử','^(e-?mail|thư điện tử)',d.email)}
-  return {dkkd_dien:1,ban:window.__appBuild||'',vao_khoi:khoi,tao_moi:k0==='dai_dien',truong:tr,
-    luu_y:k0==='dai_dien'?'Tỉnh/Thành phố, Xã/Phường chọn tay (hoặc dùng "Đối chiếu với CSDLQG về dân cư"); tick reCAPTCHA và bấm Lưu là việc của bạn.':'',
+function ssTaoDuLieuDien(){
+  const du=ssThuThap(),loai=du.loai||[],nhom=[];
+  for(const k0 of ssKhoiDienCoSan()){
+    const tr=[];let khoi=SS_KHOI_DIEN[k0];
+    const them=(ten,nhan,v,tienTo)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:!!tienTo,khoi})};
+    if(k0==='ten'){const t=du.ten||{};
+      them('Tên doanh nghiệp (tiếng Việt)','^tên doanh nghiệp viết bằng tiếng việt',(t.viet||'').toUpperCase(),true);
+      them('Tên tiếng nước ngoài','^tên doanh nghiệp viết bằng tiếng nước ngoài',t.nuoc_ngoai);
+      them('Tên viết tắt','^tên doanh nghiệp viết tắt',t.viet_tat)}
+    if(k0==='dia_chi'){const a=du.dia_chi||{};
+      them('Số nhà/đường','^số nhà',a.so_nha);them('Xã/Phường','^xã\\/phường',a.xa);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh);
+      them('Điện thoại','^điện thoại',a.dien_thoai);them('Fax','^(số )?fax',a.fax);them('Thư điện tử','^(e-?mail|thư điện tử)',a.email);them('Website','^website',a.website)}
+    if(k0==='von'){const v=du.von||{};const n=parseInt(String(v.moi||'').replace(/\D/g,''),10);if(n)them('Vốn điều lệ','^(tổng )?vốn điều lệ',n.toLocaleString('vi-VN'))}
+    if(k0==='dai_dien'){const d=(du.dai_dien||[{}])[0]||{},dc=ssTachDiaChiJs(d.dia_chi);
+      them('Chức danh','^chức (danh|vụ)',d.chuc_danh);
+      them('Họ tên người đại diện','^họ(,? ?(chữ đệm )?(và )?)? ?tên',(d.ho_ten||'').toUpperCase());
+      them('Giới tính','^giới tính',d.gioi_tinh);
+      them('Ngày sinh','ngày.*sinh',d.ngay_sinh);
+      them('Số giấy tờ pháp lý','^(số (giấy tờ|định danh|cccd|căn cước)|số giấy)',d.cccd);
+      them('Ngày cấp','^ngày cấp',d.ngay_cap);them('Nơi cấp','^nơi cấp',d.noi_cap);
+      them('Dân tộc','^dân tộc',d.dan_toc);
+      them('Số nhà/đường/phố…','^số nhà',dc.so_nha);
+      them('Điện thoại','^điện thoại',d.dien_thoai);them('Thư điện tử','^(e-?mail|thư điện tử)',d.email)}
+    if(tr.length)nhom.push({ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr});
+  }
+  return {dkkd_dien:1,ban:window.__appBuild||'',nhom,truong:nhom.reduce((a,g)=>a.concat(g.truong),[]),
     bo_qua:loai.filter(k=>['nganh','chu_so_huu','cshhl'].includes(k))};
 }
 async function ssCopyDuLieuDien(){
   const dl=ssTaoDuLieuDien(),g=document.getElementById('ssDienGhi');
-  if(!dl.truong.length){toast('Chưa có dữ liệu để điền — tick nội dung thay đổi ở mục 2 (tên, địa chỉ, vốn, người đại diện) và nhập thông tin trước','err');if(g)g.textContent='';return}
-  try{await navigator.clipboard.writeText(JSON.stringify(dl));toast('Đã copy '+dl.truong.length+' ô của khối "'+dl.vao_khoi+'" — sang cổng bấm nút bookmark "Điền dữ liệu GPKD"','ok')}
+  if(!dl.nhom.length){toast('Chưa có dữ liệu để điền — tick nội dung thay đổi ở mục 2 (tên, địa chỉ, vốn, người đại diện) và nhập thông tin trước','err');if(g)g.textContent='';return}
+  const tt=dl.nhom.map(x=>x.ten+' ('+x.truong.length+' ô)').join(', ');
+  try{await navigator.clipboard.writeText(JSON.stringify(dl));toast('Đã copy '+dl.nhom.length+' khối: '+tt+' — sang cổng bấm nút bookmark "Điền dữ liệu GPKD"','ok')}
   catch(e){prompt('Copy dữ liệu này (Ctrl+C) rồi bấm nút bookmark trên cổng:',JSON.stringify(dl))}
-  if(g)g.textContent='Đã copy '+dl.truong.length+' ô: '+dl.truong.map(x=>x.ten).join(', ')+(dl.bo_qua.length?' — mục chưa hỗ trợ điền tự động (nhập tay): '+dl.bo_qua.join(', '):'');
+  if(g)g.textContent='Đã copy: '+tt+(dl.bo_qua.length?' — mục chưa hỗ trợ điền tự động (nhập tay): '+dl.bo_qua.join(', '):'');
 }
 async function ssCopyMaDien(){
   let ma='';try{ma=(await api('/api/dkkd/bookmarklet-dien')).ma}catch(e){toast('Lỗi: '+e.message,'err');return}
@@ -4825,7 +4828,7 @@ async function moSoanGpkd(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">4. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
       <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay).</div>
       <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (1 lần): <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> → trên Chrome tạo dấu trang mới tên "Điền dữ liệu GPKD", dán mã vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).</div>
-      <div style="font-size:13px">2) Mỗi lần dùng: chọn khối <select id="ssDienKhoi" onfocus="ssVeChonKhoiDien()" style="padding:4px;border-radius:6px"></select> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>mở cửa sổ phụ, tự vào đúng khối</b> trong menu (và bấm "Tạo mới" với người đại diện) rồi điền; bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu và tự bấm Lưu. Nếu Chrome chặn cửa sổ bật lên: bấm biểu tượng chặn → "Luôn cho phép".</div>
+      <div style="font-size:13px">2) Mỗi lần dùng: <span id="ssDienKhoi"></span> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>mở cửa sổ phụ, tự vào đúng khối</b> trong menu (và bấm "Tạo mới" với người đại diện) rồi điền. Có nhiều khối thì hiện <b>bảng ở góc trái</b>: điền khối 1, bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu và <b>tự bấm Lưu</b>, rồi bấm khối kế tiếp trong bảng. Nếu Chrome chặn cửa sổ bật lên: bấm biểu tượng chặn → "Luôn cho phép".</div>
       <div class="hint" id="ssDienGhi" style="margin-top:6px"></div>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Mẫu riêng của bạn (Word .docx, tuỳ chọn)</legend>

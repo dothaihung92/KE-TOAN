@@ -44,9 +44,9 @@
     });
     return ds;
   };
-  var coTruong = function (D) {
+  var coTruong = function (D, g) {
     var ds = quet(D);
-    return dl.truong.some(function (t) { var re; try { re = new RegExp(t.nhan, 'i'); } catch (e) { return false; } return ds.some(function (x) { return re.test(x.nhan); }); });
+    return g.truong.some(function (t) { var re; try { re = new RegExp(t.nhan, 'i'); } catch (e) { return false; } return ds.some(function (x) { return re.test(x.nhan); }); });
   };
   var cho = async function (w, dieuKien, giay) {
     var het = Date.now() + giay * 1000;
@@ -74,114 +74,140 @@
     return false;
   };
 
-  var D = document;
-  var w = null;
-  if (dl.vao_khoi && !coTruong(document)) {
-    w = window.open(location.href, '_dkkd_dien', 'width=1250,height=900,scrollbars=yes,resizable=yes');
-    if (!w) { alert('Chrome đang chặn cửa sổ bật lên. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
-    var menuOk = await cho(w, function (d) { return !!timBam(d, dl.vao_khoi, 'a'); }, 40);
-    if (!menuOk) { alert('Không thấy mục "' + dl.vao_khoi + '" trong menu KHỐI DỮ LIỆU của cổng (có thể chưa đăng nhập hoặc đang ở trang khác). Hãy mở hồ sơ rồi bấm lại.'); return; }
-    var mk = timBam(w.document, dl.vao_khoi, 'a');
-    var vaoMenu = await bamVaCho(w, mk, function (d) { return true; });
-    if (!vaoMenu) { alert('Chưa mở được khối "' + dl.vao_khoi + '". Bạn tự bấm mục đó trong menu rồi bấm lại nút này.'); return; }
-    if (dl.tao_moi && !coTruong(w.document)) {
-      var nut = timBam(w.document, 'Tạo mới');
-      if (!nut) { alert('Không thấy nút "Tạo mới" trong khối "' + dl.vao_khoi + '". Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
-      var vaoForm = await bamVaCho(w, nut, function (d) { return true; });
-      if (!vaoForm) { alert('Chưa mở được trang nhập. Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
-    }
-    D = w.document;
-    await nghi(600);
-    try { w.focus(); } catch (e) { }
-  }
-
-  var dsO = quet(D);
-  var daDung = [];
-  var cu = [];
-  var daDien = [];
-  var khong = [];
-  var gan = function (o, v) {
-    cu.push({ o: o, v: o.value, s: o.style.cssText });
-    o.value = v;
-    o.dispatchEvent(new Event('input', { bubbles: true }));
-    o.style.background = '#fff3a0';
-    o.style.outline = '2px solid #e6a700';
-  };
-  var chonSelect = function (o, v) {
-    var vv = chuan(v);
-    var op = [].slice.call(o.options).filter(function (x) { return chuan(x.text) === vv; })[0] || [].slice.call(o.options).filter(function (x) { return vv && chuan(x.text).indexOf(vv) === 0; })[0];
-    if (!op) return false;
-    cu.push({ o: o, v: o.value, s: o.style.cssText });
-    o.value = op.value;
-    o.style.background = '#fff3a0';
-    o.style.outline = '2px solid #e6a700';
-    return true;
-  };
-  var chonRadio = function (rs, v) {
-    var vv = chuan(v);
-    var r = rs.filter(function (x) { return x.nhan === vv; })[0];
-    if (!r || r.el.disabled) return false;
-    var truoc = rs.filter(function (x) { return x.el.checked; })[0];
-    cu.push({ radio: r.el, truoc: truoc ? truoc.el : null });
-    r.el.checked = true;
-    r.el.parentNode.style.background = '#fff3a0';
-    return true;
-  };
-  dl.truong.forEach(function (t) {
-    var re;
-    try { re = new RegExp(t.nhan, 'i'); } catch (e) { return; }
-    var tim = dsO.filter(function (x) { return re.test(x.nhan) && daDung.indexOf(x) < 0; });
-    var m = tim.filter(function (x) { return x.rs.length || x.os.some(function (o) { return !o.disabled && !o.readOnly; }); })[0];
-    if (!m) { khong.push(t.ten + (tim.length ? ' (ô bị khóa, không sửa được)' : ' (không thấy ô)')); return; }
-    daDung.push(m);
-    var v = String(t.gia_tri);
-    if (m.rs.length && !m.os.length) { if (chonRadio(m.rs, v)) daDien.push(t.ten); else khong.push(t.ten + ' (không có lựa chọn "' + v + '")'); return; }
-    var os = m.os.filter(function (o) { return !o.disabled && !o.readOnly; });
-    var sel = os.filter(function (o) { return o.tagName === 'SELECT'; });
-    var inp = os.filter(function (o) { return o.tagName !== 'SELECT'; });
-    if (sel.length && inp.length && t.tien_to) {
-      var best = null;
-      sel.forEach(function (s) { [].slice.call(s.options).forEach(function (op) { var p = chuan(op.text); if (p && chuan(v).indexOf(p + ' ') === 0 && (!best || p.length > best.p.length)) best = { s: s, op: op, p: p }; }); });
-      if (best) {
-        cu.push({ o: best.s, v: best.s.value, s: best.s.style.cssText });
-        best.s.value = best.op.value;
-        best.s.style.background = '#fff3a0';
-        gan(inp[0], sach(v).slice(best.p.length).trim());
-        daDien.push(t.ten);
-        return;
+  var chayNhom = async function (g) {
+    var D = document;
+    var w = null;
+    if (g.vao_khoi && !coTruong(document, g)) {
+      w = window.open('', '_dkkd_dien', 'width=1250,height=900,scrollbars=yes,resizable=yes');
+      try { if (w && (w.location.href === 'about:blank' || !w.document.querySelector('a'))) { w.location.href = location.href; } } catch (e0) { }
+      if (!w) { alert('Chrome đang chặn cửa sổ bật lên. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
+      var menuOk = await cho(w, function (d) { return !!timBam(d, g.vao_khoi, 'a'); }, 40);
+      if (!menuOk) { alert('Không thấy mục "' + g.vao_khoi + '" trong menu KHỐI DỮ LIỆU của cổng (có thể chưa đăng nhập hoặc đang ở trang khác). Hãy mở hồ sơ rồi bấm lại.'); return; }
+      var mk = timBam(w.document, g.vao_khoi, 'a');
+      var vaoMenu = await bamVaCho(w, mk, function (d) { return true; });
+      if (!vaoMenu) { alert('Chưa mở được khối "' + g.vao_khoi + '". Bạn tự bấm mục đó trong menu rồi bấm lại nút này.'); return; }
+      if (g.tao_moi && !coTruong(w.document, g)) {
+        var nut = timBam(w.document, 'Tạo mới');
+        if (!nut) { alert('Không thấy nút "Tạo mới" trong khối "' + g.vao_khoi + '". Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+        var vaoForm = await bamVaCho(w, nut, function (d) { return true; });
+        if (!vaoForm) { alert('Chưa mở được trang nhập. Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
       }
+      D = w.document;
+      await nghi(600);
+      try { w.focus(); } catch (e) { }
     }
-    if (sel.length && !inp.length) { if (chonSelect(sel[0], v)) daDien.push(t.ten); else khong.push(t.ten + ' (không có lựa chọn "' + v + '" — chọn tay)'); return; }
-    if (inp.length) { gan(inp[0], v); daDien.push(t.ten); return; }
-    khong.push(t.ten + ' (ô không điền được)');
-  });
 
-  var huong = '';
-  if (!daDien.length) {
-    var khoiCan = [];
-    dl.truong.forEach(function (t) { if (t.khoi && khoiCan.indexOf(t.khoi) < 0) khoiCan.push(t.khoi); });
-    var tim2 = [];
-    D.querySelectorAll('a').forEach(function (a) {
-      var nh = chuan(a.innerText);
-      khoiCan.forEach(function (k) { if (nh && nh === chuan(k)) { a.style.outline = '3px solid #d62020'; a.style.background = '#ffe4e4'; tim2.push(k); } });
+    var dsO = quet(D);
+    var daDung = [];
+    var cu = [];
+    var daDien = [];
+    var khong = [];
+    var gan = function (o, v) {
+      cu.push({ o: o, v: o.value, s: o.style.cssText });
+      o.value = v;
+      o.dispatchEvent(new Event('input', { bubbles: true }));
+      o.style.background = '#fff3a0';
+      o.style.outline = '2px solid #e6a700';
+    };
+    var chonSelect = function (o, v) {
+      var vv = chuan(v);
+      var op = [].slice.call(o.options).filter(function (x) { return chuan(x.text) === vv; })[0] || [].slice.call(o.options).filter(function (x) { return vv && chuan(x.text).indexOf(vv) === 0; })[0];
+      if (!op) return false;
+      cu.push({ o: o, v: o.value, s: o.style.cssText });
+      o.value = op.value;
+      o.style.background = '#fff3a0';
+      o.style.outline = '2px solid #e6a700';
+      return true;
+    };
+    var chonRadio = function (rs, v) {
+      var vv = chuan(v);
+      var r = rs.filter(function (x) { return x.nhan === vv; })[0];
+      if (!r || r.el.disabled) return false;
+      var truoc = rs.filter(function (x) { return x.el.checked; })[0];
+      cu.push({ radio: r.el, truoc: truoc ? truoc.el : null });
+      r.el.checked = true;
+      r.el.parentNode.style.background = '#fff3a0';
+      return true;
+    };
+    g.truong.forEach(function (t) {
+      var re;
+      try { re = new RegExp(t.nhan, 'i'); } catch (e) { return; }
+      var tim = dsO.filter(function (x) { return re.test(x.nhan) && daDung.indexOf(x) < 0; });
+      var m = tim.filter(function (x) { return x.rs.length || x.os.some(function (o) { return !o.disabled && !o.readOnly; }); })[0];
+      if (!m) { khong.push(t.ten + (tim.length ? ' (ô bị khóa, không sửa được)' : ' (không thấy ô)')); return; }
+      daDung.push(m);
+      var v = String(t.gia_tri);
+      if (m.rs.length && !m.os.length) { if (chonRadio(m.rs, v)) daDien.push(t.ten); else khong.push(t.ten + ' (không có lựa chọn "' + v + '")'); return; }
+      var os = m.os.filter(function (o) { return !o.disabled && !o.readOnly; });
+      var sel = os.filter(function (o) { return o.tagName === 'SELECT'; });
+      var inp = os.filter(function (o) { return o.tagName !== 'SELECT'; });
+      if (sel.length && inp.length && t.tien_to) {
+        var best = null;
+        sel.forEach(function (s) { [].slice.call(s.options).forEach(function (op) { var p = chuan(op.text); if (p && chuan(v).indexOf(p + ' ') === 0 && (!best || p.length > best.p.length)) best = { s: s, op: op, p: p }; }); });
+        if (best) {
+          cu.push({ o: best.s, v: best.s.value, s: best.s.style.cssText });
+          best.s.value = best.op.value;
+          best.s.style.background = '#fff3a0';
+          gan(inp[0], sach(v).slice(best.p.length).trim());
+          daDien.push(t.ten);
+          return;
+        }
+      }
+      if (sel.length && !inp.length) { if (chonSelect(sel[0], v)) daDien.push(t.ten); else khong.push(t.ten + ' (không có lựa chọn "' + v + '" — chọn tay)'); return; }
+      if (inp.length) { gan(inp[0], v); daDien.push(t.ten); return; }
+      khong.push(t.ten + ' (ô không điền được)');
     });
-    huong = '<div style="margin:6px 0;padding:6px;background:#ffe9e9;border-radius:6px"><b>Trang này chưa phải trang nhập của khối cần sửa</b> (nên chưa điền được ô nào). Hãy bấm mục ' + (khoiCan.length ? '<b>"' + khoiCan.join('" / "').replace(/</g, '&lt;') + '"</b>' : 'cần sửa') + ' trong menu "KHỐI DỮ LIỆU" bên trái' + (tim2.length ? ' (đã viền đỏ)' : '') + ', vào trang <b>nhập/sửa đổi</b> (có các ô nhập), rồi bấm lại nút này.</div>';
-  }
-  var hop = D.createElement('div');
-  hop.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:420px;background:#fff;border:2px solid #e6a700;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
-  var h = '<b>Đã điền ' + daDien.length + ' ô</b> (tô vàng) — <b>hãy kiểm tra từng ô</b>.';
-  if (daDien.length) h += '<div style="margin-top:4px">Bạn tự làm tiếp: tick "Tôi không phải là người máy" (nếu có), bấm "Đối chiếu với CSDLQG về dân cư" (nếu cần), chọn các ô danh sách còn trống, rồi <b>tự bấm Lưu</b>. Phần mềm không tự lưu, không ký, không nộp, không xóa.</div>';
-  h += huong;
-  if (khong.length) h += '<div style="margin-top:6px;color:#b45309"><b>Chưa điền được (nhập tay):</b><br>' + khong.map(function (x) { return '• ' + x.replace(/</g, '&lt;'); }).join('<br>') + '</div>';
-  h += '<div style="margin-top:8px"><button id="__dkkdHoan" style="padding:4px 10px;margin-right:6px">Hoàn tác</button><button id="__dkkdDong" style="padding:4px 10px">Đóng</button> <span style="color:#888;font-size:11px">bản ' + BAN + '</span></div>';
-  hop.innerHTML = h;
-  D.body.appendChild(hop);
-  D.getElementById('__dkkdDong').onclick = function () { hop.remove(); };
-  D.getElementById('__dkkdHoan').onclick = function () {
-    cu.forEach(function (x) {
-      if (x.radio) { x.radio.checked = false; if (x.truoc) x.truoc.checked = true; x.radio.parentNode.style.background = ''; }
-      else { x.o.value = x.v; x.o.style.cssText = x.s; }
-    });
-    hop.remove();
+
+    var huong = '';
+    if (!daDien.length) {
+      var khoiCan = [];
+      g.truong.forEach(function (t) { if (t.khoi && khoiCan.indexOf(t.khoi) < 0) khoiCan.push(t.khoi); });
+      var tim2 = [];
+      D.querySelectorAll('a').forEach(function (a) {
+        var nh = chuan(a.innerText);
+        khoiCan.forEach(function (k) { if (nh && nh === chuan(k)) { a.style.outline = '3px solid #d62020'; a.style.background = '#ffe4e4'; tim2.push(k); } });
+      });
+      huong = '<div style="margin:6px 0;padding:6px;background:#ffe9e9;border-radius:6px"><b>Trang này chưa phải trang nhập của khối cần sửa</b> (nên chưa điền được ô nào). Hãy bấm mục ' + (khoiCan.length ? '<b>"' + khoiCan.join('" / "').replace(/</g, '&lt;') + '"</b>' : 'cần sửa') + ' trong menu "KHỐI DỮ LIỆU" bên trái' + (tim2.length ? ' (đã viền đỏ)' : '') + ', vào trang <b>nhập/sửa đổi</b> (có các ô nhập), rồi bấm lại nút này.</div>';
+    }
+    var hop = D.createElement('div');
+    hop.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:420px;background:#fff;border:2px solid #e6a700;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
+    var h = '<b>Đã điền ' + daDien.length + ' ô</b> (tô vàng) — <b>hãy kiểm tra từng ô</b>.';
+    if (daDien.length) h += '<div style="margin-top:4px">Bạn tự làm tiếp: tick "Tôi không phải là người máy" (nếu có), bấm "Đối chiếu với CSDLQG về dân cư" (nếu cần), chọn các ô danh sách còn trống, rồi <b>tự bấm Lưu</b>. Phần mềm không tự lưu, không ký, không nộp, không xóa.</div>';
+    h += huong;
+    if (khong.length) h += '<div style="margin-top:6px;color:#b45309"><b>Chưa điền được (nhập tay):</b><br>' + khong.map(function (x) { return '• ' + x.replace(/</g, '&lt;'); }).join('<br>') + '</div>';
+    h += '<div style="margin-top:8px"><button id="__dkkdHoan" style="padding:4px 10px;margin-right:6px">Hoàn tác</button><button id="__dkkdDong" style="padding:4px 10px">Đóng</button> <span style="color:#888;font-size:11px">bản ' + BAN + '</span></div>';
+    hop.innerHTML = h;
+    D.body.appendChild(hop);
+    D.getElementById('__dkkdDong').onclick = function () { hop.remove(); };
+    D.getElementById('__dkkdHoan').onclick = function () {
+      cu.forEach(function (x) {
+        if (x.radio) { x.radio.checked = false; if (x.truoc) x.truoc.checked = true; x.radio.parentNode.style.background = ''; }
+        else { x.o.value = x.v; x.o.style.cssText = x.s; }
+      });
+      hop.remove();
+    };
+
   };
+  var nhom = dl.nhom && dl.nhom.length ? dl.nhom : [{ ten: dl.vao_khoi || '', vao_khoi: dl.vao_khoi, tao_moi: dl.tao_moi, truong: dl.truong, luu_y: dl.luu_y }];
+  if (nhom.length === 1) { await chayNhom(nhom[0]); return; }
+  var bang = document.createElement('div');
+  bang.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:430px;background:#fff;border:2px solid #2e7d32;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
+  bang.innerHTML = '<b>Điền ' + nhom.length + ' khối — làm lần lượt</b><div style="margin:4px 0;color:#555">Mỗi khối mở ở cửa sổ phụ: kiểm tra ô tô vàng, tự bấm Lưu, rồi quay lại đây bấm khối kế tiếp. Phần mềm không tự lưu/ký/nộp.</div>';
+  nhom.forEach(function (g, i) {
+    var dong = document.createElement('div');
+    dong.style.cssText = 'margin:4px 0';
+    var nut = document.createElement('button');
+    nut.style.cssText = 'padding:4px 10px;margin-right:6px';
+    nut.textContent = (i + 1) + '. ' + (g.ten || g.vao_khoi) + ' ▶ Điền';
+    var tt = document.createElement('span');
+    tt.style.color = '#2e7d32';
+    nut.onclick = async function () { nut.disabled = true; tt.textContent = 'đang chạy…'; try { await chayNhom(g); tt.textContent = 'đã mở — kiểm tra & Lưu ở cửa sổ phụ'; } catch (e) { tt.style.color = '#b00'; tt.textContent = 'lỗi: ' + e; } nut.disabled = false; nut.textContent = (i + 1) + '. ' + (g.ten || g.vao_khoi) + ' ▶ Điền lại'; };
+    dong.appendChild(nut); dong.appendChild(tt); bang.appendChild(dong);
+  });
+  var dong2 = document.createElement('div');
+  dong2.innerHTML = '<button id="__dkkdDongBang" style="padding:3px 8px;margin-top:6px">Đóng bảng</button>';
+  bang.appendChild(dong2);
+  document.body.appendChild(bang);
+  document.getElementById('__dkkdDongBang').onclick = function () { bang.remove(); };
+  bang.querySelector('button').click();
 })().catch(function (e) { alert('Lỗi điền dữ liệu GPKD: ' + e); });

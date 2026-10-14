@@ -31,6 +31,7 @@ PAGES = {
 <tr><td>E-mail:</td><td><input id=em></td></tr>
 </table><div id=recaptcha><input type=checkbox id=rc> Tôi không phải là người máy</div><input type=button value="Đối chiếu với CSDLQG về dân cư" id=doichieu><input type=button value="Lưu" id=luu></form>""",
 }
+PAGES["/dc"] = MENU + """<form onsubmit="return false"><table><tr><td>Số nhà/đường/phố/tổ/xóm/ấp/thôn:</td><td><input id=sn></td></tr><tr><td>Điện thoại:</td><td><input id=dt></td></tr></table><input type=button value="Lưu" id=luu></form>"""
 LOG = []
 
 
@@ -104,4 +105,42 @@ assert "/xoa" not in LOG and "/sua" not in LOG                                  
 assert LOG[:3] == ["/ov", "/ov", "/list"] or "/list" in LOG and "/new" in LOG, LOG
 assert r["hoan"] == {"ht": "", "nam": True}, r["hoan"]                           # Hoàn tác trả về như cũ
 print("PASS 1: nút tự mở cửa sổ phụ, vào đúng khối 'Người đại diện theo pháp luật', bấm 'Tạo mới', điền 8 ô (kể cả radio giới tính), tô vàng; không bấm Xóa/Sửa/Lưu, không đụng reCAPTCHA; Hoàn tác đúng.")
+# NHIỀU KHỐI: tick cả Địa chỉ và Người đại diện -> bảng điều khiển ở cửa sổ gốc, khối 1 tự chạy; bấm khối 2 thì dùng LẠI cùng cửa sổ phụ
+G1 = {"ten": "Địa chỉ", "vao_khoi": "Địa chỉ", "tao_moi": False, "truong": [
+    {"ten": "Số nhà", "nhan": "^số nhà", "gia_tri": "30 Lê Lợi", "tien_to": False, "khoi": "Địa chỉ"},
+    {"ten": "Điện thoại", "nhan": "^điện thoại", "gia_tri": "0911111111", "tien_to": False, "khoi": "Địa chỉ"}]}
+G2 = dict(DL, ten="Người đại diện theo pháp luật")
+DL_NHIEU = {"dkkd_dien": 1, "ban": "x", "nhom": [G1, G2], "truong": G1["truong"] + G2["truong"], "bo_qua": []}
+RUN_N = RUN.split("  const pop = ctx.waitForEvent('page');")[0] + r"""
+  const pop = ctx.waitForEvent('page');
+  await pg.evaluate(process.env.JS);
+  const w = await pop;
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  const r = { url1: w.url(), sn1: await w.inputValue('#sn'), dt1: await w.inputValue('#dt'), nut: await pg.$$eval('#__dkkdDongBang', e => e.length), bang: (await pg.innerText('body')).includes('2. Người đại diện theo pháp luật') };
+  await w.click('#__dkkdDong');
+  const botn = await pg.$$('button');
+  let nut2 = null;
+  for (const b2 of botn) { if ((await b2.innerText()).startsWith('2.')) nut2 = b2; }
+  await nut2.click();
+  await w.waitForURL(/\/new$/, { timeout: 60000 });
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  r.url2 = w.url(); r.ht2 = await w.inputValue('#ht'); r.cc2 = await w.inputValue('#cc'); r.soTrang = ctx.pages().length;
+  console.log('@@' + JSON.stringify(r));
+  await b.close();
+})();
+"""
+f2 = os.path.join(tmp, "t3.js")
+open(f2, "w", encoding="utf-8").write(RUN_N)
+LOG.clear()
+env3 = dict(env, DL=json.dumps(DL_NHIEU))
+p3 = subprocess.run(["node", f2], capture_output=True, text=True, env=env3, timeout=180)
+d3 = [x for x in p3.stdout.splitlines() if x.startswith("@@")]
+assert d3, p3.stdout + p3.stderr
+r3 = json.loads(d3[0][2:])
+assert r3["url1"].endswith("/dc") and r3["sn1"] == "30 Lê Lợi" and r3["dt1"] == "0911111111", r3      # khối 1 (Địa chỉ) tự vào và điền
+assert r3["nut"] == 1 and r3["bang"], r3                                                                # bảng nhiều khối ở cửa sổ gốc
+assert r3["url2"].endswith("/new") and r3["ht2"] == "ĐINH THỊ HUỆ" and r3["cc2"] == "036190003147", r3  # khối 2 (Người đại diện): menu -> Tạo mới -> điền
+assert r3["soTrang"] == 2, r3                                                                           # chỉ 1 cửa sổ phụ (dùng lại), không mở thêm cửa sổ cho mỗi khối
+assert "/xoa" not in LOG and "/sua" not in LOG, LOG
+print("PASS 2: nhiều khối (Địa chỉ + Người đại diện): khối 1 tự chạy, bảng ở cửa sổ gốc để bấm khối kế tiếp, dùng lại cùng 1 cửa sổ phụ; không bấm Xóa/Sửa.")
 print("\nALL DONE")
