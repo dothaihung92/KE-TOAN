@@ -89,7 +89,7 @@ print("PASS 2: gạch bỏ (có gạch ngang), chuyển vốn sang người khá
 assert r["diaChi1"] and r["diaChiCu"] == []
 assert r["nutKy"] == 3, r["nutKy"]      # mỗi thành viên (2 hiện tại + 1 mới) có nút tải chữ ký
 dd = {x["ten"]: x["gia_tri"] for x in r["dien"]["truong"]}
-assert dd["Họ tên người đại diện"] == "ĐINH THỊ HUỆ" and dd["Số giấy tờ"] == "036190003147" and "chu_so_huu" in r["dien"]["bo_qua"], r["dien"]
+assert dd["Họ tên người đại diện"] == "ĐINH THỊ HUỆ" and dd["Số giấy tờ pháp lý"] == "036190003147" and "chu_so_huu" in r["dien"]["bo_qua"], r["dien"]
 print("PASS 3b: dữ liệu điền lên cổng lấy từ ô đã nhập (họ tên IN HOA, số giấy tờ), mục chưa hỗ trợ được báo.")
 print("PASS 3: địa chỉ liên lạc người đại diện chỉ còn 1 ô.")
 print("\nALL DONE")
