@@ -68,6 +68,8 @@ class H(BaseHTTPRequestHandler):
         body = ("<meta charset=utf-8>" + html).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        if MODE.get("xfo"):
+            self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(body)
 
@@ -100,9 +102,9 @@ const { chromium } = require('playwright');
   pg.on('dialog', async d => { console.log('DIALOG ' + d.message()); await d.dismiss(); });
   await pg.goto('http://127.0.0.1:' + process.env.PORT + '/ov');
   await pg.evaluate(d => { Object.defineProperty(navigator, 'clipboard', { value: { readText: async () => d }, configurable: true }); }, process.env.DL);
-  const pop = ctx.waitForEvent('page');
   await pg.evaluate(process.env.JS);
-  const w = await pop;
+  const hk = await pg.waitForSelector('#__dkkdKhung iframe', { timeout: 60000 });
+  const w = await hk.contentFrame();
   await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
   const v = id => w.inputValue('#' + id);
   const r = { url: w.url(), cd: await w.$eval('#cd', e => e.options[e.selectedIndex].text), ht: await v('ht'), ns: await v('ns'), cc: await v('cc'), sn: await v('sn'), dt: await v('dt'), em: await v('em'),
@@ -142,10 +144,10 @@ G1 = {"ten": "Địa chỉ", "vao_khoi": "Địa chỉ", "tao_moi": False, "truo
     {"ten": "Điện thoại", "nhan": "^điện thoại", "gia_tri": "0911111111", "tien_to": False, "khoi": "Địa chỉ"}]}
 G2 = dict(DL, ten="Người đại diện theo pháp luật")
 DL_NHIEU = {"dkkd_dien": 1, "ban": "x", "nhom": [G1, G2], "truong": G1["truong"] + G2["truong"], "bo_qua": []}
-RUN_N = RUN.split("  const pop = ctx.waitForEvent('page');")[0] + r"""
-  const pop = ctx.waitForEvent('page');
+RUN_N = RUN.split("  await pg.evaluate(process.env.JS);")[0] + r"""
   await pg.evaluate(process.env.JS);
-  const w = await pop;
+  const hk = await pg.waitForSelector('#__dkkdKhung iframe', { timeout: 60000 });
+  const w = await hk.contentFrame();
   await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
   const r = { url1: w.url(), sn1: await w.inputValue('#sn'), dt1: await w.inputValue('#dt'), nut: await pg.$$eval('#__dkkdDongBang', e => e.length), bang: (await pg.innerText('body')).includes('2. Người đại diện theo pháp luật') };
   await w.click('#__dkkdDong');
@@ -171,15 +173,15 @@ r3 = json.loads(d3[0][2:])
 assert r3["url1"].endswith("/dc") and r3["sn1"] == "30 Lê Lợi" and r3["dt1"] == "0911111111", r3      # khối 1 (Địa chỉ) tự vào và điền
 assert r3["nut"] == 1 and r3["bang"], r3                                                                # bảng nhiều khối ở cửa sổ gốc
 assert r3["url2"].endswith("/new") and r3["ht2"] == "ĐINH THỊ HUỆ" and r3["cc2"] == "036190003147", r3  # khối 2 (Người đại diện): menu -> Tạo mới -> điền
-assert r3["soTrang"] == 2, r3                                                                           # chỉ 1 cửa sổ phụ (dùng lại), không mở thêm cửa sổ cho mỗi khối
+assert r3["soTrang"] == 1, r3                                                                           # xử lý NGAY TRONG tab đang mở (khung), không mở thêm tab/cửa sổ
 assert "/xoa" not in LOG and "/sua" not in LOG, LOG
 print("PASS 2: nhiều khối (Địa chỉ + Người đại diện): khối 1 tự chạy, bảng ở cửa sổ gốc để bấm khối kế tiếp, dùng lại cùng 1 cửa sổ phụ; không bấm Xóa/Sửa.")
 # TỰ SANG KHỐI KẾ TIẾP sau khi người dùng bấm Lưu: Người đại diện (khối 1) -> người dùng bấm Lưu -> cổng về danh sách -> phần mềm tự vào khối Địa chỉ và điền
 DL_TUDONG = {"dkkd_dien": 1, "ban": "x", "nhom": [G2, G1], "truong": G2["truong"] + G1["truong"], "bo_qua": []}
-RUN_T = RUN.split("  const pop = ctx.waitForEvent('page');")[0] + r"""
-  const pop = ctx.waitForEvent('page');
+RUN_T = RUN.split("  await pg.evaluate(process.env.JS);")[0] + r"""
   await pg.evaluate(process.env.JS);
-  const w = await pop;
+  const hk = await pg.waitForSelector('#__dkkdKhung iframe', { timeout: 60000 });
+  const w = await hk.contentFrame();
   await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
   const r = { url1: w.url().split('?')[0], ht1: await w.inputValue('#ht') };
   await new Promise(ok => setTimeout(ok, 3500));
@@ -247,10 +249,10 @@ TR_KH = [{"ten": "Địa chỉ nhận thông báo thuế = địa chỉ trụ s�
 GT_GD = {"ten": "Thuế — Giám đốc", "vao_khoi": "Thông tin về thuế", "tao_moi": True, "muc_tao_moi": "Giám đốc/Tổng giám đốc", "truong": TR_GD}
 GT_KT = {"ten": "Thuế — Kế toán", "vao_khoi": "Thông tin về thuế", "tao_moi": True, "muc_tao_moi": "Kế toán trưởng/Phụ trách kế toán", "truong": [dict(t, gia_tri="NGUYỄN THỊ KẾ") if t["ten"] == "Họ tên" else t for t in TR_GD]}
 GT_KH = {"ten": "Thuế — địa chỉ & khác", "vao_khoi": "Thông tin về thuế", "tao_moi": False, "truong": TR_KH}
-RUN_TX = RUN.split("  const pop = ctx.waitForEvent('page');")[0] + r"""
-  const pop = ctx.waitForEvent('page');
+RUN_TX = RUN.split("  await pg.evaluate(process.env.JS);")[0] + r"""
   await pg.evaluate(process.env.JS);
-  const w = await pop;
+  const hk = await pg.waitForSelector('#__dkkdKhung iframe', { timeout: 60000 });
+  const w = await hk.contentFrame();
   await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
   const r = { gdUrl: w.url().split('?')[0], gdHt: await w.inputValue('#ht') };
   await w.click('#luu');
@@ -278,7 +280,28 @@ r7 = json.loads(d7[0][2:])
 assert r7["gdUrl"].endswith("/gd_new") and r7["gdHt"] == "ĐINH THỊ HUỆ", r7                        # bấm "Tạo mới" của mục Giám đốc (không phải của Kế toán trưởng)
 assert r7["ktHt"] == "NGUYỄN THỊ KẾ", r7                                                              # sau Lưu: tự sang mục Kế toán trưởng, bấm "Tạo mới" của mục đó
 assert r7["r1"] is True and r7["r2"] is False and r7["nbd"] == "20/08/2019" and r7["ld"] == "12", r7  # chọn radio 'Giống địa chỉ trụ sở chính' + điền ngày bắt đầu, số lao động
-assert r7["tabs"] == 2, r7                                                                            # 1 tab phụ trong CÙNG cửa sổ trình duyệt (không mở cửa sổ riêng)
+assert r7["tabs"] == 1, r7                                                                            # xử lý ngay trong tab đang mở, không mở tab mới
 assert "/xoa" not in LOG and "/sua" not in LOG, LOG
 print("PASS 6: khối Thông tin về thuế: bấm đúng 'Tạo mới' của mục Giám đốc rồi Kế toán trưởng (tự sang sau khi Lưu), chọn radio địa chỉ theo nhãn, điền ngày bắt đầu/số lao động.")
+# Cổng KHÔNG cho hiện trong khung (X-Frame-Options: DENY): tự rơi về mở tab mới và vẫn điền được
+MODE["xfo"] = True
+MODE["luu"] = "/luu"
+RUN_F = RUN.split("  await pg.evaluate(process.env.JS);")[0] + r"""
+  const pop = ctx.waitForEvent('page', { timeout: 90000 });
+  await pg.evaluate(process.env.JS);
+  const w = await pop;
+  await w.waitForSelector('#__dkkdHoan', { timeout: 90000 });
+  const r = { url: w.url().split('?')[0], ht: await w.inputValue('#ht'), khung: await pg.$$eval('#__dkkdKhung', e => e.length), tabs: ctx.pages().length };
+  console.log('@@' + JSON.stringify(r));
+  await b.close();
+})();
+"""
+f8 = os.path.join(tmp, "t8.js")
+open(f8, "w", encoding="utf-8").write(RUN_F)
+p8 = subprocess.run(["node", f8], capture_output=True, text=True, env=dict(env, DL=json.dumps(DL)), timeout=300)
+d8 = [x for x in p8.stdout.splitlines() if x.startswith("@@")]
+assert d8, p8.stdout + p8.stderr
+r8 = json.loads(d8[0][2:])
+assert r8["url"].endswith("/new") and r8["ht"] == "ĐINH THỊ HUỆ" and r8["khung"] == 0 and r8["tabs"] == 2, r8
+print("PASS 7: cổng chặn khung (X-Frame-Options) -> tự rơi về mở tab mới và vẫn điền đúng.")
 print("\nALL DONE")

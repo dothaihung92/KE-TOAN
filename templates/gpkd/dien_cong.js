@@ -94,6 +94,52 @@
   };
 
   var cuaSoPhu = null;
+  var khungLoi = '';
+  var moKhung = async function () {
+    if (cuaSoPhu && !cuaSoPhu.closed) return cuaSoPhu;
+    var ov = null;
+    try {
+      ov = document.createElement('div');
+      ov.id = '__dkkdKhung';
+      ov.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483000;background:#fff;display:flex;flex-direction:column';
+      var bar = document.createElement('div');
+      bar.style.cssText = 'background:#2e7d32;color:#fff;padding:6px 10px;font:13px Arial,sans-serif;display:flex;justify-content:space-between;align-items:center';
+      bar.innerHTML = '<span>Cổng đăng ký doanh nghiệp — khung điền tự động (ngay trong tab này)</span>';
+      var dong = document.createElement('button');
+      dong.textContent = 'Đóng khung, về trang gốc';
+      dong.style.cssText = 'padding:3px 10px';
+      dong.onclick = function () { ov.remove(); cuaSoPhu = null; gen++; };
+      bar.appendChild(dong);
+      var ifr = document.createElement('iframe');
+      ifr.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-modals');
+      ifr.style.cssText = 'flex:1;border:0;width:100%';
+      ov.appendChild(bar);
+      ov.appendChild(ifr);
+      await new Promise(function (xong) {
+        var tm = setTimeout(xong, 30000);
+        ifr.addEventListener('load', function () { clearTimeout(tm); xong(); });
+        ifr.src = location.href;
+        document.body.appendChild(ov);
+      });
+      var dk = null;
+      try { dk = ifr.contentDocument; } catch (e0) { dk = null; }
+      if (!dk || !dk.body) throw new Error('cổng không cho hiện trong khung');
+      var ok = await cho(ifr.contentWindow, function (d) { return d.body && sach(d.body.innerText).length > 80; }, 15);
+      if (!ok) throw new Error('khung không tải được');
+      var bb = document.getElementById('__dkkdBang');
+      if (bb) { bb.style.left = 'auto'; bb.style.right = '12px'; bb.style.top = '46px'; bb.style.bottom = 'auto'; }
+      cuaSoPhu = ifr.contentWindow;
+      return cuaSoPhu;
+    } catch (eK) {
+      khungLoi = String(eK);
+      try { if (ov) ov.remove(); } catch (e1) { }
+    }
+    var tab = window.open('', '_dkkd_dien');
+    if (tab) {
+      try { if (tab.location.href === 'about:blank' || !tab.document.querySelector('a')) tab.location.href = location.href; } catch (e2) { }
+    }
+    return tab;
+  };
   var daBamLuu = false;
   var ganNgheLuu = function (D) {
     [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).forEach(function (e) {
@@ -109,8 +155,7 @@
       w = cuaSoPhu;
       D = w.document;
     } else if (g.vao_khoi && (!coTruong(document, g) || g.truong.some(function (t) { return t.chuoi; }))) {
-      w = window.open('', '_dkkd_dien');
-      try { if (w && (w.location.href === 'about:blank' || !w.document.querySelector('a'))) { w.location.href = location.href; } } catch (e0) { }
+      w = await moKhung();
       if (!w) { alert('Chrome đang chặn tab/cửa sổ mới. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
       var menuOk = await cho(w, function (d) { return !!timBam(d, g.vao_khoi, 'a'); }, 40);
       if (!menuOk) { alert('Không thấy mục "' + g.vao_khoi + '" trong menu KHỐI DỮ LIỆU của cổng (có thể chưa đăng nhập hoặc đang ở trang khác). Hãy mở hồ sơ rồi bấm lại.'); return; }
@@ -375,6 +420,7 @@
     else { tt[i].textContent = 'chưa thấy bạn Lưu xong — khi xong bấm khối kế tiếp trong bảng'; }
   };
   var bang = document.createElement('div');
+  bang.id = '__dkkdBang';
   bang.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:430px;background:#fff;border:2px solid #2e7d32;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
   bang.innerHTML = '<b>Điền ' + nhom.length + ' khối — lần lượt</b><div style="margin:4px 0;color:#555">Mỗi khối mở ở cửa sổ phụ: bạn kiểm tra các ô tô vàng, xác nhận và <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu thì <b>tự sang khối kế tiếp</b>. Phần mềm không tự lưu/ký/nộp/xóa. Nếu không tự sang được, bấm nút của khối kế tiếp trong bảng.</div>';
   nhom.forEach(function (g, i) {
