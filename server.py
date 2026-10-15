@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-15.228"
+APP_BUILD = "2026-10-15.229"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2124,6 +2124,24 @@ def get_app_version():
     """Cho phép kiểm tra nhanh máy đang chạy đúng bản mới nhất hay chưa
     (vd sau khi báo lỗi đã sửa nhưng update.py tải bản vá không thành công)."""
     return {"build": APP_BUILD}
+
+
+# ---------- KHUNG QUẢNG CÁO (ANTS Ad Exchange...) ----------
+# Mã quảng cáo KHÔNG chạy trực tiếp trong phần mềm (sẽ đọc được MST, hoá đơn, bảng lương và
+# gọi được API localhost). Thay vào đó, dán mã ANTS vào 1 trang trên WEBSITE CỦA BẠN (mẫu:
+# templates/quang_cao/khung_ants.html), rồi điền địa chỉ trang đó vào QUANG_CAO_URL. Phần mềm
+# nhúng trang đó bằng iframe sandbox KHÔNG có allow-same-origin -> mã quảng cáo bị cô lập.
+# Để trống = không hiện quảng cáo. Có thể đặt riêng từng máy bằng app_settings 'quang_cao_url'.
+QUANG_CAO_URL = ""
+QUANG_CAO_CAO = 90          # chiều cao khung (px), vd banner 728x90
+
+
+@app.get("/api/quang-cao")
+def get_quang_cao():
+    url = (_get_setting("quang_cao_url", "") or QUANG_CAO_URL or "").strip()
+    if not url.lower().startswith("https://"):
+        url = ""                        # chỉ nhận trang https trên website riêng
+    return {"url": url, "cao": QUANG_CAO_CAO}
 
 @app.get("/api/speed")
 def get_speed():

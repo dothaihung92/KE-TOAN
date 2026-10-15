@@ -12801,6 +12801,26 @@ if(typeof document!=='undefined'&&document.body&&typeof MutationObserver!=='unde
   let cho=false;
   new MutationObserver(()=>{if(cho)return;cho=true;requestAnimationFrame(()=>{cho=false;ngayGoTayQuet()})}).observe(document.body,{childList:true,subtree:true});
 }
+// KHUNG QUẢNG CÁO: trang quảng cáo (trên website riêng, https) nạp trong iframe sandbox KHÔNG có allow-same-origin
+// -> mã quảng cáo không đọc được dữ liệu phần mềm, không gọi được API localhost. URL trống = không hiện gì.
+async function qcNap(){
+  try{
+    const r=await fetch('/api/quang-cao',{cache:'no-store'});if(!r.ok)return;
+    const d=await r.json();if(!d.url||!/^https:\/\//i.test(d.url)||document.getElementById('qcKhung'))return;
+    const cao=Math.max(50,Math.min(300,Number(d.cao)||90));
+    const k=document.createElement('div');k.id='qcKhung';
+    k.style.cssText=`position:fixed;left:0;right:0;bottom:0;height:${cao}px;background:#f4f4f4;border-top:1px solid #ddd;z-index:900;display:flex;justify-content:center`;
+    const f=document.createElement('iframe');
+    f.setAttribute('sandbox','allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    f.setAttribute('referrerpolicy','no-referrer');f.setAttribute('loading','lazy');f.title='Quảng cáo';
+    f.style.cssText=`border:0;width:100%;max-width:970px;height:${cao}px`;f.src=d.url;
+    const x=document.createElement('button');x.textContent='×';x.title='Ẩn quảng cáo (đến khi mở lại phần mềm)';
+    x.style.cssText='position:absolute;top:2px;right:6px;border:0;background:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;line-height:18px';
+    x.onclick=()=>{k.remove();document.body.style.paddingBottom=''};
+    k.append(f,x);document.body.appendChild(k);document.body.style.paddingBottom=cao+'px';
+  }catch(e){}
+}
+if(typeof document!=='undefined'&&document.body)qcNap();
 </script>
 </body>
 </html>
