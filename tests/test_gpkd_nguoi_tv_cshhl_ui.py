@@ -51,6 +51,7 @@ const { chromium } = require('playwright');
   r.nutKy = await pg.evaluate("document.querySelectorAll('#ssNguoiBox_tv input[type=file]').length");
   r.dien = await pg.evaluate("(()=>{document.getElementById('ss_dai_dien_ho_ten').value='đinh thị huệ';document.getElementById('ss_dai_dien_cccd').value='036190003147';document.getElementById('ss_dai_dien_dia_chi').value='Số nhà 91, Đường 13, Phường Bình Trưng, Thành phố Hồ Chí Minh';document.getElementById('ssL_chu_so_huu').checked=true;return ssTaoDuLieuDien()})()");
   r.thue = await pg.evaluate("(()=>{document.getElementById('ssL_thue').checked=true;ssHienCacMuc();document.getElementById('ss_thue_kt_ho_ten').value='Nguyễn Thị Kế';document.getElementById('ss_thue_lao_dong').value='12';const d=ssThuThap();return {loai:d.loai,thue:d.thue}})()");
+  r.cungDc = await pg.evaluate("(()=>{ssHienTrang.dia_chi={so_nha:'91 đường Số 13',xa:'Phường Bình Trưng',tinh:'Hồ Chí Minh'};const c=document.getElementById('ss_thue_cung_dia_chi');c.checked=true;ssDongBoDiaChiThue();const d=ssThuThap();return {sn:document.getElementById('ss_thue_tt_so_nha').value,xa:document.getElementById('ss_thue_tt_xa').value,tinh:document.getElementById('ss_thue_tt_tinh').value,ro:document.getElementById('ss_thue_tt_xa').readOnly,du:d.thue.cung_dia_chi,gh:document.getElementById('ssThueDiaChiHt').textContent}})()");
   r.diaChi1 = await pg.evaluate("!!document.getElementById('ss_dai_dien_dia_chi')");
   r.diaChiCu = await pg.evaluate("['so_nha','xa','tinh','quoc_gia'].filter(k=>document.getElementById('ss_dai_dien_'+k))");
   try {
@@ -97,6 +98,8 @@ assert ch["Số nhà/đường/phố…"]["gia_tri"] == "Số nhà 91, Đường
 print("PASS 3c: địa chỉ 1 ô tách thành Số nhà, Tỉnh/Thành, Xã/Phường (2 ô chọn nối tiếp) trong dữ liệu điền.")
 print("PASS 3b: dữ liệu điền lên cổng lấy từ ô đã nhập (họ tên IN HOA, số giấy tờ), mục chưa hỗ trợ được báo.")
 assert "thue" in r["thue"]["loai"] and r["thue"]["thue"]["kt_ho_ten"] == "Nguyễn Thị Kế" and r["thue"]["thue"]["lao_dong"] == "12", r["thue"]
+assert r["cungDc"]["sn"] == "91 đường Số 13" and r["cungDc"]["xa"] == "Phường Bình Trưng" and r["cungDc"]["tinh"] == "Hồ Chí Minh" and r["cungDc"]["ro"] and r["cungDc"]["du"] is True and "Hồ Chí Minh" in r["cungDc"]["gh"], r["cungDc"]
+print("PASS 3e: tick 'địa chỉ nhận thông báo thuế trùng địa chỉ công ty' tự điền và hiện địa chỉ công ty.")
 print("PASS 3d: có mục tick 'Thay đổi thông tin đăng ký thuế' với các ô nhập, dữ liệu đưa vào hồ sơ.")
 print("PASS 3: địa chỉ liên lạc người đại diện chỉ còn 1 ô.")
 print("\nALL DONE")

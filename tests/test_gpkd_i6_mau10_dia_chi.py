@@ -118,9 +118,9 @@ assert "Điều 3: Thay đổi người đại diện theo pháp luật của C�
 assert "Điều 4: Giao cho bà HÀ THỊ TRÚC MAI (Chủ tịch Hội đồng thành viên, người đại diện theo pháp luật)" in q9 and "Như Điều 5 (để thực hiện)" in q9 and "Điều 6: Quyết định này có hiệu lực" in q9
 t12_9 = tat_ca(docx.Document(io.BytesIO(z9.read(next(n for n in n9 if n.startswith("Mau12"))))))
 assert "Mẫu số 12" not in t12_9 and "(Dùng trong trường hợp" not in t12_9 and "Kê khai trong trường hợp có nhà đầu tư nước ngoài" not in t12_9 and "(Cơ quan đăng ký kinh doanh cấp tỉnh)" not in t12_9
-assert t12_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN\n(Ký, ghi họ tên)" in t12_9, t12_9[-300:]
+assert t12_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/\nCHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY\n(Ký, ghi họ tên)" in t12_9, t12_9[-300:]
 t13_9 = tat_ca(docx.Document(io.BytesIO(z9.read(next(n for n in n9 if n.startswith("Mau13"))))))
-assert t13_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN\n(Ký, ghi họ tên)" in t13_9 and "Mẫu số 13" not in t13_9, t13_9[-300:]
+assert t13_9.rstrip().endswith("HÀ THỊ TRÚC MAI") and "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/\nCHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY\n(Ký, ghi họ tên)" in t13_9 and "Mẫu số 13" not in t13_9, t13_9[-300:]
 assert "ủy quyền thực hiện thủ tục đăng ký doanh nghiệp): 079188029565" in t13_9.replace("\t", ""), t13_9[:900]
 du9b = copy.deepcopy(du9)
 du9b["loai"] = ["chu_so_huu", "dai_dien", "cshhl"]          # tick thêm chủ sở hữu hưởng lợi: vẫn là Quyết định bầu Chủ tịch HĐTV
@@ -144,7 +144,7 @@ assert not any(n.startswith("Mau10") for n in n10), n10                  # chỉ
 uq10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Giay_uy_quyen"))))))
 assert "Ông (Bà): VÕ THỊ RI" in uq10 and "Chức danh: CHỦ TỊCH CÔNG TY của CÔNG TY TNHH LEAN HELPER" in uq10 and "Là người đại diện theo pháp luật của" not in uq10, uq10[:500]
 m13_10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Mau13"))))))
-assert "ủy quyền thực hiện thủ tục đăng ký doanh nghiệp): 079156001336" in m13_10.replace("\t", "") and "CHỦ TỊCH CÔNG TY\n(Ký, ghi họ tên)" in m13_10 and m13_10.rstrip().endswith("VÕ THỊ RI"), m13_10[-400:]
+assert "ủy quyền thực hiện thủ tục đăng ký doanh nghiệp): 079156001336" in m13_10.replace("\t", "") and "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/\nCHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY\n(Ký, ghi họ tên)" in m13_10 and m13_10.rstrip().endswith("VÕ THỊ RI"), m13_10[-400:]
 qd10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Quyet_dinh"))))))
 assert "Thay đổi Ông/Bà VÕ THỊ RI chức danh Giám đốc chuyển sang đại diện pháp luật mới là Ông/Bà ĐINH THỊ HUỆ - chức danh Giám đốc." in qd10
 assert "☒ Căn cước công dân" in qd10 and "Nơi đăng ký hộ khẩu thường trú: Số nhà 91" in qd10 and "Chức vụ: Giám đốc" in qd10 and "Giao cho Ông/Bà VÕ THỊ RI" in qd10 and "Điều 4: Quyết định này có hiệu lực" in qd10, qd10
@@ -173,4 +173,35 @@ assert tick_sau("Hạch toán độc lập") == "☒" and tick_sau("Hạch toán
 assert "Kê khai trong trường hợp" not in ban and "Trường hợp doanh nghiệp kê khai hình thức hạch toán" not in ban     # chú thích đã bỏ như các mẫu khác
 assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN" not in ban                                                                      # chỉ có mục thuế, không kéo theo mục thành viên
 print("PASS 11: tick 'Thay đổi thông tin đăng ký thuế': Mẫu 12 có mục thuế điền Giám đốc, Kế toán trưởng, địa chỉ nhận thông báo thuế, ngày bắt đầu, hạch toán độc lập (tick), năm tài chính, lao động, phương pháp GTGT (tick).")
+# 12) mục thuế: tick 'địa chỉ nhận thông báo thuế = địa chỉ công ty'; không điền trùng lặp Giám đốc (đổi người đại diện + mục thuế)
+du12 = {"loai": ["thue", "dai_dien"], "dn": {"ten": "Cty A", "ma_so": "0101", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên", "ngay_lap": "14/10/2026"},
+        "hien_tai": {"dia_chi": "91 đường Số 13, Phường Bình Trưng, Hồ Chí Minh", "dd_ho_ten": "Võ Thị Ri", "chu_so_huu": "Võ Thị Ri"},
+        "dai_dien": [{"ho_ten": "Võ Thị Ri", "ngay_sinh": "01/04/1956", "gioi_tinh": "Nữ", "cccd": "079156001336"}],
+        "thue": {"cung_dia_chi": True, "gd_ho_ten": "Võ Thị Ri", "gd_ngay_sinh": "01/04/1956", "gd_gioi_tinh": "Nữ", "gd_cccd": "079156001336"}}
+d12 = docx.Document(io.BytesIO(zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du12)[0])).read(next(n for n in zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du12)[0])).namelist() if n.startswith("Mau12")))))
+b12 = tat_ca(d12)
+assert "Họ, chữ đệm và tên Giám đốc/Tổng giám đốc:VÕ THỊ RI\n" in b12 + "\n" and "VÕ THỊ RI VÕ THỊ RI" not in b12 and "Nữ Nữ" not in b12 and "01/04/1956 01/04/1956" not in b12, b12[:1500]
+assert "Số nhà/phòng, ngách/hẻm, ngõ/kiệt, đường/phố/đại lộ, tổ/xóm/ấp/thôn: 91 đường Số 13" in b12 and "Xã/Phường/Đặc khu: Phường Bình Trưng" in b12 and "Tỉnh/Thành phố trực thuộc trung ương: Hồ Chí Minh" in b12, b12[:2500]
+print("PASS 12: mục thuế: địa chỉ nhận thông báo thuế lấy theo địa chỉ công ty khi tick; Giám đốc không bị điền trùng (VÕ THỊ RI / Nữ / ngày sinh chỉ 1 lần).")
+
+# 13) chữ ký đặt lệch nhẹ mỗi lần (xoay ±6°, vị trí quanh giữa), vẫn nằm sau chữ
+import base64 as _b64
+import re as _re
+from PIL import Image as _Im
+_bio = io.BytesIO(); _Im.new("RGBA", (300, 120), (0, 0, 120, 255)).save(_bio, "PNG")
+_uri = "data:image/png;base64," + _b64.b64encode(_bio.getvalue()).decode()
+_rot, _pos = set(), set()
+for _ in range(12):
+    dk = g._van_ban_moi()
+    tb = dk.add_table(rows=1, cols=1)
+    c = tb.rows[0].cells[0]
+    c._tc.get_or_add_tcPr()
+    pk = c.paragraphs[0]
+    assert g._gan_chu_ky(pk, _uri)
+    x = c._tc.xml
+    assert 'behindDoc="1"' in x and "<wp:anchor" in x
+    _r = int(_re.search(r'<a:xfrm rot="(-?\d+)"', x).group(1)); assert -6 * 60000 <= _r <= 6 * 60000; _rot.add(_r)
+    _pos.add(_re.search(r"positionV.*?posOffset>\s*(-?\d+)", x, _re.S).group(1))
+assert len(_rot) > 6 and len(_pos) > 6, (len(_rot), len(_pos))      # mỗi lần lệch khác nhau, không cố định 1 chỗ
+print("PASS 13: chữ ký xoay nhẹ và lệch vị trí ngẫu nhiên quanh tên người ký, vẫn behind text.")
 print("\nALL DONE")

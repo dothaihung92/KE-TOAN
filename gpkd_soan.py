@@ -417,6 +417,9 @@ def _cccd_chu_tich(du):
     return ""
 
 
+TIEU_DE_KY = "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/\nCHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY"
+
+
 def _khoi_ky(c, tieu_de, ten, anh):
     """Thay nội dung ô ký: tiêu đề + (Ký, ghi họ tên) + chỗ ký + họ tên (không ký thay; gắn ảnh chỉ khi đã được người đó đồng ý)."""
     for p in list(c.paragraphs)[1:]:
@@ -425,7 +428,12 @@ def _khoi_ky(c, tieu_de, ten, anh):
     for r in list(p0.runs):
         r._r.getparent().remove(r._r)
     p0.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p0.add_run(tieu_de).bold = True
+    dong_td = tieu_de.split("\n")
+    p0.add_run(dong_td[0]).bold = True
+    for them_dong in dong_td[1:]:
+        pp = c.add_paragraph()
+        pp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pp.add_run(them_dong).bold = True
     p1 = c.add_paragraph()
     p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p1.add_run("(Ký, ghi họ tên)").italic = True
@@ -439,7 +447,12 @@ def _khoi_ky(c, tieu_de, ten, anh):
 def _dien_thong_tin_thue(m, du, pham_vi):
     """Mẫu 12 — 'Thông báo thay đổi thông tin đăng ký thuế': Giám đốc, Kế toán trưởng, địa chỉ nhận thông báo thuế, ngày bắt đầu hoạt động,
     hình thức hạch toán, năm tài chính, số lao động, phương pháp tính thuế GTGT. Chỉ điền ô có dữ liệu; ô khác giữ nguyên dấu chấm."""
-    t = du.get("thue") or {}
+    t = dict(du.get("thue") or {})
+    if t.get("cung_dia_chi") in (True, "1", 1, "true"):             # địa chỉ nhận thông báo thuế = địa chỉ trụ sở công ty (mới nếu có đổi địa chỉ)
+        a = du.get("dia_chi") if "dia_chi" in set(du.get("loai") or []) else _tach_dia_chi((du.get("hien_tai") or {}).get("dia_chi"))
+        for k, ka in (("tt_so_nha", "so_nha"), ("tt_xa", "xa"), ("tt_tinh", "tinh")):
+            if not (t.get(k) or "").strip() and (a or {}).get(ka):
+                t[k] = a[ka]
     lo, hi = pham_vi
     ps = m.doan(lo, hi)
     van = [_van(p) for p in ps]
@@ -452,6 +465,17 @@ def _dien_thong_tin_thue(m, du, pham_vi):
     i_gd, i_kt, i_dc = vt(r"^Thông tin về Giám đốc"), vt(r"^Thông tin về Kế toán trưởng"), vt(r"^Địa chỉ nhận thông báo thuế")
     i_ngay, i_hach, i_nam = vt(r"^Ngày bắt đầu hoạt động"), vt(r"^Hình thức hạch toán"), vt(r"^Năm tài chính")
     i_ld, i_pp = vt(r"^Tổng số lao động"), vt(r"^Phương pháp tính thuế GTGT")
+
+    def dien_neu_trong(p, nhan, v, mau=_CHAM):
+        """Chỉ điền khi ô còn trống (dấu chấm); ô đã có chữ (vd đã điền Giám đốc từ mục đổi người đại diện) thì không điền lần 2."""
+        tx = _van(p)
+        mm = re.search(nhan, tx)
+        if not mm:
+            return
+        con = re.sub(r"\([^)]*\)", "", tx[mm.end():])
+        if not re.fullmatch(r"[…\.\s/:：]*", con):
+            return
+        dien_cham(p, nhan, v, mau)
 
     def dien_muc(a, b, tien_to, giatri):
         if a is None:
@@ -468,7 +492,7 @@ def _dien_thong_tin_thue(m, du, pham_vi):
                 v = v.upper()
             for i in range(a, b):
                 if re.search(nhan, van[i]):
-                    dien_cham(ps[i], nhan, v, mau)
+                    dien_neu_trong(ps[i], nhan, v, mau)
                     break
     gd = {k[3:]: v for k, v in t.items() if k.startswith("gd_")}
     kt = {k[3:]: v for k, v in t.items() if k.startswith("kt_")}
@@ -660,8 +684,8 @@ def soan_mau12(du, chu_ky=None):
         for tb in d.tables:
             if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
                 c = [c for c in tb.rows[-1].cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text][0]
-                if ky2:                               # công ty 2TV: Chủ tịch HĐTV ký (đúng bộ hồ sơ thực tế)
-                    _khoi_ky(c, *ky2)
+                if ky2:                               # người ký là Chủ tịch công ty/Chủ tịch HĐTV; tiêu đề chuẩn của giấy đề nghị
+                    _khoi_ky(c, TIEU_DE_KY, ky2[1], ky2[2])
                 else:
                     # chữ ký trong Kho chữ ký chỉ là của người đại diện HIỆN TẠI (đã được người đó đồng ý) — không gắn khi ký là người đại diện mới
                     _dong_trong_ky(c)
@@ -713,7 +737,7 @@ def soan_mau13(du, chu_ky=None):
         for tb in d.tables:
             c = next((c for r in tb.rows for c in r.cells if "CHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG" in c.text.replace("\n", " ")), None)
             if c is not None:
-                _khoi_ky(c, *ky)
+                _khoi_ky(c, TIEU_DE_KY, ky[1], ky[2])
                 _giu_mot_trang(tb)
                 break
     _bo_ngoac_kinh_gui(m)
@@ -1058,6 +1082,19 @@ def _dong_trong_ky(o):
         pf.line_spacing = Pt(_CAO_DONG_KY_PT)
 
 
+def _rong_cot_emu(p):
+    """Bề rộng (EMU) ô bảng chứa đoạn p (theo w:tcW) — để canh chữ ký quanh giữa ô; None nếu không đọc được."""
+    try:
+        tc = p._p.xpath("ancestor::w:tc")[0]
+        w = tc.xpath("./w:tcPr/w:tcW/@w:w")
+        loai = tc.xpath("./w:tcPr/w:tcW/@w:type")
+        if w and (not loai or loai[0] == "dxa"):
+            return int(w[0]) * 635                       # 1 dxa = 1/20 pt = 635 EMU
+    except Exception:
+        pass
+    return None
+
+
 def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
     """Gắn ảnh chữ ký dạng NỔI "phía sau chữ" (behind text), canh giữa theo cột/ô và đè lên khoảng trống phía trên họ tên (đoạn `p`).
     Ảnh được co/giãn vừa khung rong_cm x cao_cm, giữ tỷ lệ. Chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã gắn."""
@@ -1071,18 +1108,24 @@ def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
         from docx.shared import Emu
         raw = base64.b64decode(str(anh_uri).split(",", 1)[1])
         w, h = Image.open(io.BytesIO(raw)).size
-        ti = min(rong_cm / w, cao_cm / h)
+        import random
+        ti = min(rong_cm / w, cao_cm / h) * random.uniform(0.94, 1.04)          # kích thước, vị trí và góc xoay lệch nhẹ mỗi lần như ký tay (không cố định 1 chỗ)
         cx, cy = int(w * ti * 360000), int(h * ti * 360000)
         run = p.add_run()
         run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
         inline = run._r.xpath(".//wp:inline")[0]
         ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
         khoang = int(_SO_DONG_KY * _CAO_DONG_KY_PT * 12700)      # chiều cao khoảng trống phía trên họ tên (EMU)
-        lech = -(khoang + cy) // 2                                  # ảnh nằm CHÍNH GIỮA khoảng trống đó (chạm nhẹ vào dòng tên nếu ảnh cao hơn)
+        lech = -(khoang + cy) // 2 + int(random.uniform(-0.30, 0.30) * 360000)       # quanh giữa khoảng trống, lệch lên/xuống tối đa 3 mm
+        rong_cot = _rong_cot_emu(p)
+        if rong_cot and rong_cot > cx:
+            vi_tri_h = f'<wp:positionH relativeFrom="column"><wp:posOffset>{int((rong_cot - cx) / 2 + random.uniform(-0.45, 0.45) * 360000)}</wp:posOffset></wp:positionH>'
+        else:
+            vi_tri_h = '<wp:positionH relativeFrom="column"><wp:align>center</wp:align></wp:positionH>'
         anchor = parse_xml(
             f'<wp:anchor {nsdecls("wp")} distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="1" '
             f'locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
-            f'<wp:positionH relativeFrom="column"><wp:align>center</wp:align></wp:positionH>'
+            f'{vi_tri_h}'
             f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{lech}</wp:posOffset></wp:positionV></wp:anchor>')
         anchor.append(inline.find("wp:extent", ns))
         anchor.append(parse_xml(f'<wp:effectExtent {nsdecls("wp")} l="0" t="0" r="0" b="0"/>'))
@@ -1093,6 +1136,11 @@ def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
         dr = inline.getparent()
         dr.remove(inline)
         dr.append(anchor)
+        try:                                                        # xoay nhẹ quanh tâm (−6° … +6°)
+            xf = dr.xpath(".//a:xfrm")[0]
+            xf.set("rot", str(int(random.uniform(-6, 6) * 60000)))
+        except Exception:
+            pass
         return True
     except Exception:
         return False

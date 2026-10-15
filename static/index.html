@@ -4732,11 +4732,24 @@ function ssThuThap(){
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
   ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
-  du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');
+  du.thue.cung_dia_chi=ck('ss_thue_cung_dia_chi');du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');
   du.dn.ngay_tay=document.getElementById('ss_dn_ngay_lap')?.dataset.tay==='1';du.dn.so_tay=document.getElementById('ss_dn_so_vb')?.dataset.tay==='1';
   return du;
 }
-function ssLuuTam(){try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap(),mr:ssMauRieng.filter(x=>x.chon).map(x=>x.ten)}))}catch(e){}}
+function ssDongBoDiaChiThue(){
+  const cb=document.getElementById('ss_thue_cung_dia_chi'),g=document.getElementById('ssThueDiaChiHt');if(!cb)return;
+  const o=['tt_so_nha','tt_xa','tt_tinh','tt_dien_thoai','tt_email'].map(k=>document.getElementById('ss_thue_'+k));
+  if(!cb.checked){o.forEach(e=>{if(e)e.readOnly=false});if(g)g.textContent='';return}
+  const v=id=>((document.getElementById(id)||{}).value||'').trim();
+  const moi=document.getElementById('ssL_dia_chi')?.checked&&(v('ss_dia_chi_so_nha')||v('ss_dia_chi_xa')||v('ss_dia_chi_tinh'));
+  const h=(ssHienTrang||{}).dia_chi||{};
+  const a=moi?{so_nha:v('ss_dia_chi_so_nha'),xa:v('ss_dia_chi_xa'),tinh:v('ss_dia_chi_tinh'),dien_thoai:v('ss_dia_chi_dien_thoai'),email:v('ss_dia_chi_email')}:{so_nha:h.so_nha||'',xa:h.xa||'',tinh:h.tinh||'',dien_thoai:h.dien_thoai||'',email:h.email||''};
+  const val={tt_so_nha:a.so_nha,tt_xa:a.xa,tt_tinh:a.tinh,tt_dien_thoai:a.dien_thoai,tt_email:a.email};
+  Object.entries(val).forEach(([k,x])=>{const e=document.getElementById('ss_thue_'+k);if(e){if(x||k.startsWith('tt_s')||k==='tt_xa'||k==='tt_tinh')e.value=x||'';e.readOnly=true}});
+  const day=[a.so_nha,a.xa,a.tinh].filter(Boolean).join(', ');
+  if(g)g.textContent=day?'Địa chỉ nhận thông báo thuế = '+(moi?'địa chỉ trụ sở MỚI: ':'địa chỉ trụ sở hiện tại: ')+day:'Chưa có địa chỉ công ty — lấy hồ sơ đã gom ở tab "Lấy thông tin GPKD" hoặc nhập địa chỉ ở mục 1b.';
+}
+function ssLuuTam(){try{ssDongBoDiaChiThue()}catch(e){}try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap(),mr:ssMauRieng.filter(x=>x.chon).map(x=>x.ten)}))}catch(e){}}
 function ssCacO(nhom){
   return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;align-items:end">${SS_TRUONG[nhom].map(([k,nhan])=>
     `<label style="font-size:12px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px">${ssEsc(nhan)}<input id="ss_${nhom}_${k}" onchange="${nhom==='uy_quyen'&&k==='so_giay_to'?'ssUqKyKiem()':''}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}</div>`;
@@ -4818,6 +4831,7 @@ async function moSoanGpkd(){
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
           ${l[0]==='cshhl'?`<div class="hint">Mẫu 12 giữ mục "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi" và kèm Mẫu 10 (Danh sách chủ sở hữu hưởng lợi) do phần mềm điền theo danh sách bên dưới. Không chọn mục này thì phần đó được xoá khỏi Mẫu 12.</div>`:''}
           ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
+          ${l[0]==='thue'?`<label class="chk" style="margin-top:6px;display:flex;gap:8px"><input type="checkbox" id="ss_thue_cung_dia_chi" onchange="ssDongBoDiaChiThue();ssLuuTam()"> Địa chỉ nhận thông báo thuế <b>trùng địa chỉ trụ sở công ty</b> (tick để tự điền; có đổi địa chỉ trụ sở thì dùng địa chỉ mới)</label><div class="hint" id="ssThueDiaChiHt"></div>`:''}
           ${l[0]==='thue'?`<div class="hint">Phần mềm điền mục "Thông báo thay đổi thông tin đăng ký thuế" của Mẫu 12 — chỉ điền ô bạn nhập, ô khác giữ dấu chấm. Ô Giám đốc để trống thì lấy theo người đại diện mới nếu bạn có tick "Thay đổi người đại diện". Hình thức hạch toán và phương pháp tính thuế GTGT: gõ đúng chữ như gợi ý trong nhãn để phần mềm tick đúng ô.</div>`:''}
         </div>`).join('')}
     </fieldset>
@@ -4862,6 +4876,7 @@ async function moSoanGpkd(){
     const sv=document.getElementById('ss_dn_so_vb');if(sv&&(du.dn||{}).so_tay)sv.dataset.tay='1';
     (du.loai||[]).forEach(k=>{const e=document.getElementById('ssL_'+k);if(e)e.checked=true});
     const dc=document.getElementById('ss_dia_chi_doi_thue');if(dc)dc.checked=!!(du.dia_chi||{}).doi_thue;
+    ck('ss_thue_cung_dia_chi',(du.thue||{}).cung_dia_chi);
     ssNganh=du.nganh||{them:[],bo:[],sua:[]};
     const mGom=(ssHienTrang||{}).ma_so;
     if(mGom&&(du.dn||{}).ma_so&&du.dn.ma_so!==mGom)ssLayTuGom(true,true);   // bản nháp cũ của MST khác -> lấy lại theo hồ sơ vừa gom
