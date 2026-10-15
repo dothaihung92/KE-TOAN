@@ -4844,17 +4844,11 @@ async function moSoanGpkd(){
         <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="btn ghost sm" style="cursor:pointer">✍ Tải ảnh chữ ký bên nhận ủy quyền<input type="file" accept="image/png,image/jpeg" style="display:none" onchange="ssUqKyTai(this)"></label><span id="ssUqKyTt" class="hint"></span></div>
         <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Chữ ký bên nhận ủy quyền lưu trong Kho chữ ký theo số CCCD, chỉ lưu khi người đó đã đồng ý. Phần mềm không ký thay.</div></div>
     </fieldset>
-    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">4. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
       <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay).</div>
       <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (1 lần): <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> → trên Chrome tạo dấu trang mới tên "Điền dữ liệu GPKD", dán mã vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).</div>
       <div style="font-size:13px">2) Mỗi lần dùng: <span id="ssDienKhoi"></span> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>mở cửa sổ phụ, tự vào đúng khối</b> trong menu (và bấm "Tạo mới" với người đại diện) rồi điền. Có nhiều khối thì hiện <b>bảng ở góc trái</b>: điền khối 1, bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu và <b>tự bấm Lưu</b>, rồi bấm khối kế tiếp trong bảng. Nếu Chrome chặn cửa sổ bật lên: bấm biểu tượng chặn → "Luôn cho phép".</div>
       <div class="hint" id="ssDienGhi" style="margin-top:6px"></div>
-    </fieldset>
-    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Mẫu riêng của bạn (Word .docx, tuỳ chọn)</legend>
-      <div class="hint" style="margin-top:0">Gửi file Word có chữ <code>{{tên_biến}}</code> (vd <code>{{dn_ten_hoa}}</code>, <code>{{dd_ho_ten_hoa}}</code>) — phần mềm sẽ thay bằng dữ liệu ở trên và đưa vào gói hồ sơ (vd Quyết định của chủ sở hữu, Biên bản họp).</div>
-      <div style="margin:6px 0"><label class="btn ghost sm" style="cursor:pointer">📤 Thêm mẫu riêng<input type="file" accept=".docx" style="display:none" onchange="ssThemMauRieng(this)"></label></div>
-      <div id="ssMauRieng"></div>
-      <details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px">Danh sách biến dùng được</summary><div id="ssBien" style="font-size:12px;max-height:160px;overflow:auto"></div></details>
     </fieldset>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn" onclick="ssTao()">📦 Soạn hồ sơ (tải .zip)</button>
@@ -4885,10 +4879,6 @@ async function moSoanGpkd(){
   const sv2=document.getElementById('ss_dn_so_vb');if(sv2&&sv2.dataset.tay!=='1')sv2.value=ssSoKeTiep();
   ssDienHienTai(false);ssUqKyKiem();
   ssHienGoiY();ssVeNganh();ssHienCacMuc();ssNapNguoiTuGom(false);ssVeChonKhoiDien();
-  try{const r=await api('/api/gpkd-soan/mau');ssBienMau=r.bien||{};
-    ssMauRieng=(r.mau_rieng||[]).map(t=>({ten:t,chon:!!(luu&&(luu.mr||[]).includes(t))}));
-    document.getElementById('ssBien').innerHTML=Object.entries(ssBienMau).map(([k,v])=>`<code>{{${k}}}</code> — ${ssEsc(v)}`).join('<br>');ssVeMauRieng();}
-  catch(e){document.getElementById('ssMauRieng').innerHTML=`<div class="hint" style="color:#c00">${ssEsc(e.message)}</div>`}
 }
 const ssKeySo=()=>'gpkdSoVb_'+(current||0)+'_'+new Date().getFullYear();
 function ssSoKeTiep(){let n=0;try{n=parseInt(localStorage.getItem(ssKeySo())||'0',10)||0}catch(e){}return String(n+1).padStart(2,'0')}

@@ -129,8 +129,9 @@ up = open(os.path.join(_REPO_ROOT, "update.py"), encoding="utf-8").read()
 assert "gpkd_soan.py" in up and "templates/gpkd/TT121_2026_PL1.docx" in up and "templates/gpkd/TT68_2025_PL1.docx" in up
 assert "python-docx" in open(os.path.join(_REPO_ROOT, "requirements.txt")).read()
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
-for kw in ("moSoanGpkd()", "Cập nhật GPKD", "1. Lấy thông tin GPKD", "2. Soạn hồ sơ", "/api/gpkd-soan/tao", "ssThemMauRieng", "không ký thay"):
+for kw in ("moSoanGpkd()", "Cập nhật GPKD", "1. Lấy thông tin GPKD", "2. Soạn hồ sơ", "/api/gpkd-soan/tao", "không ký thay"):
     assert kw in html, kw
+assert "Mẫu riêng của bạn" not in html and 'id="ssMauRieng"' not in html          # mục "3. Mẫu riêng của bạn" đã bỏ khỏi giao diện
 print("PASS 7: cập nhật tự động có file mẫu, giao diện gộp 1 mục Cập nhật GPKD (2 tab: Lấy thông tin GPKD / Soạn hồ sơ).")
 
 print("\nALL DONE")
