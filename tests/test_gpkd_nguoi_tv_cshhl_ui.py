@@ -51,6 +51,7 @@ const { chromium } = require('playwright');
   r.nutKy = await pg.evaluate("document.querySelectorAll('#ssNguoiBox_tv input[type=file]').length");
   r.dien = await pg.evaluate("(()=>{document.getElementById('ss_dai_dien_ho_ten').value='đinh thị huệ';document.getElementById('ss_dai_dien_cccd').value='036190003147';document.getElementById('ss_dai_dien_dia_chi').value='Số nhà 91, Đường 13, Phường Bình Trưng, Thành phố Hồ Chí Minh';document.getElementById('ssL_chu_so_huu').checked=true;return ssTaoDuLieuDien()})()");
   r.thue = await pg.evaluate("(()=>{document.getElementById('ssL_thue').checked=true;ssHienCacMuc();document.getElementById('ss_thue_kt_ho_ten').value='Nguyễn Thị Kế';document.getElementById('ss_thue_lao_dong').value='12';const d=ssThuThap();return {loai:d.loai,thue:d.thue}})()");
+  r.dien2 = await pg.evaluate('ssTaoDuLieuDien()');
   r.cungDc = await pg.evaluate("(()=>{ssHienTrang.dia_chi={so_nha:'91 đường Số 13',xa:'Phường Bình Trưng',tinh:'Hồ Chí Minh'};const c=document.getElementById('ss_thue_cung_dia_chi');c.checked=true;ssDongBoDiaChiThue();const d=ssThuThap();return {sn:document.getElementById('ss_thue_tt_so_nha').value,xa:document.getElementById('ss_thue_tt_xa').value,tinh:document.getElementById('ss_thue_tt_tinh').value,ro:document.getElementById('ss_thue_tt_xa').readOnly,du:d.thue.cung_dia_chi,gh:document.getElementById('ssThueDiaChiHt').textContent}})()");
   r.diaChi1 = await pg.evaluate("!!document.getElementById('ss_dai_dien_dia_chi')");
   r.diaChiCu = await pg.evaluate("['so_nha','xa','tinh','quoc_gia'].filter(k=>document.getElementById('ss_dai_dien_'+k))");
@@ -95,6 +96,11 @@ assert dd["Họ tên người đại diện"] == "ĐINH THỊ HUỆ" and dd["S�
 ch = {x["ten"]: x for x in r["dien"]["truong"]}
 assert ch["Tỉnh/Thành phố"]["gia_tri"] == "Thành phố Hồ Chí Minh" and ch["Xã/Phường/Đặc khu"]["gia_tri"] == "Phường Bình Trưng" and ch["Tỉnh/Thành phố"]["chuoi"] and ch["Xã/Phường/Đặc khu"]["chuoi"], ch
 assert ch["Số nhà/đường/phố…"]["gia_tri"] == "Số nhà 91, Đường 13", ch      # địa chỉ 1 ô được tách: số nhà / xã / tỉnh
+kh = [g["ten"] for g in r["dien2"]["nhom"]]
+assert "Thông tin về thuế" in kh and kh.index("Người đại diện theo pháp luật") < kh.index("Thông tin về thuế"), kh      # khối thuế đi sau người đại diện
+tx = {x["ten"]: x for g in r["dien2"]["nhom"] if g["ten"] == "Thông tin về thuế" for x in g["truong"]}
+assert tx["Kế toán trưởng — họ tên"]["gia_tri"] == "NGUYỄN THỊ KẾ" and tx["Tổng số lao động"]["gia_tri"] == "12", tx
+print("PASS 3c2: có khối 'Thông tin về thuế' trong dữ liệu điền (sau người đại diện) để tự sang sau khi Lưu.")
 print("PASS 3c: địa chỉ 1 ô tách thành Số nhà, Tỉnh/Thành, Xã/Phường (2 ô chọn nối tiếp) trong dữ liệu điền.")
 print("PASS 3b: dữ liệu điền lên cổng lấy từ ô đã nhập (họ tên IN HOA, số giấy tờ), mục chưa hỗ trợ được báo.")
 assert "thue" in r["thue"]["loai"] and r["thue"]["thue"]["kt_ho_ten"] == "Nguyễn Thị Kế" and r["thue"]["thue"]["lao_dong"] == "12", r["thue"]

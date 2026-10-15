@@ -4672,10 +4672,10 @@ async function ssNguoiKyTai(l,nhom,i,inp){
   catch(e){toast('Lỗi: '+e.message,'err')}
 }
 
-const SS_KHOI_DIEN={ten:'Tên doanh nghiệp/đơn vị trực thuộc',dia_chi:'Địa chỉ',von:'Thông tin về vốn',dai_dien:'Người đại diện theo pháp luật'};
+const SS_KHOI_DIEN={ten:'Tên doanh nghiệp/đơn vị trực thuộc',dia_chi:'Địa chỉ',von:'Thông tin về vốn',dai_dien:'Người đại diện theo pháp luật',thue:'Thông tin về thuế'};
 function ssTachDiaChiJs(s){const p=String(s||'').split(',').map(x=>x.trim()).filter(Boolean);if(p.length&&/^(việt nam|viet nam|vietnam)$/i.test(p[p.length-1]))p.pop();
   return p.length>=3?{so_nha:p.slice(0,-2).join(', '),xa:p[p.length-2],tinh:p[p.length-1]}:p.length===2?{so_nha:p[0],xa:'',tinh:p[1]}:{so_nha:p[0]||'',xa:'',tinh:''}}
-function ssKhoiDienCoSan(){const l=ssThuThap().loai||[];return ['dia_chi','ten','von','dai_dien'].filter(k=>l.includes(k))}
+function ssKhoiDienCoSan(){const l=ssThuThap().loai||[];return ['dia_chi','ten','von','dai_dien','thue'].filter(k=>l.includes(k))}
 function ssVeChonKhoiDien(){
   const e=document.getElementById('ssDienKhoi');if(!e)return;
   const ds=ssKhoiDienCoSan();
@@ -4704,10 +4704,15 @@ function ssTaoDuLieuDien(){
       them('Dân tộc','^dân tộc',d.dan_toc);
       them('Số nhà/đường/phố…','^số nhà',dc.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',dc.tinh,false,true);them('Xã/Phường/Đặc khu','^xã\\/phường',dc.xa,false,true);
       them('Điện thoại','^điện thoại',d.dien_thoai);them('Thư điện tử','^(e-?mail|thư điện tử)',d.email)}
+    if(k0==='thue'){const t=du.thue||{};
+      them('Giám đốc — họ tên','^họ.*tên',(t.gd_ho_ten||'').toUpperCase());them('Giám đốc — ngày sinh','ngày.*sinh',t.gd_ngay_sinh);them('Giám đốc — giới tính','^giới tính',t.gd_gioi_tinh);them('Giám đốc — số định danh','^số (định danh|cccd|giấy tờ)',t.gd_cccd);them('Giám đốc — điện thoại','^điện thoại',t.gd_dien_thoai);
+      them('Kế toán trưởng — họ tên','^họ.*tên',(t.kt_ho_ten||'').toUpperCase());them('Kế toán trưởng — ngày sinh','ngày.*sinh',t.kt_ngay_sinh);them('Kế toán trưởng — giới tính','^giới tính',t.kt_gioi_tinh);them('Kế toán trưởng — số định danh','^số (định danh|cccd|giấy tờ)',t.kt_cccd);them('Kế toán trưởng — điện thoại','^điện thoại',t.kt_dien_thoai);
+      them('Thuế — số nhà','^số nhà',t.tt_so_nha);them('Thuế — tỉnh/thành','^tỉnh\\/thành',t.tt_tinh,false,true);them('Thuế — xã/phường','^xã\\/phường',t.tt_xa,false,true);
+      them('Ngày bắt đầu hoạt động','^ngày bắt đầu',t.ngay_bat_dau);them('Tổng số lao động','^(tổng )?số lao động',t.lao_dong)}
     if(tr.length)nhom.push({ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr});
   }
   return {dkkd_dien:1,ban:window.__appBuild||'',nhom,truong:nhom.reduce((a,g)=>a.concat(g.truong),[]),
-    bo_qua:loai.filter(k=>['nganh','chu_so_huu','cshhl','thue'].includes(k))};
+    bo_qua:loai.filter(k=>['nganh','chu_so_huu','cshhl'].includes(k))};
 }
 async function ssCopyDuLieuDien(){
   const dl=ssTaoDuLieuDien(),g=document.getElementById('ssDienGhi');
@@ -4845,7 +4850,7 @@ async function moSoanGpkd(){
         <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Chữ ký bên nhận ủy quyền lưu trong Kho chữ ký theo số CCCD, chỉ lưu khi người đó đã đồng ý. Phần mềm không ký thay.</div></div>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
-      <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay).</div>
+      <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay). Khối "Thông tin về thuế" mới ghép theo nhãn của Mẫu 12, <b>chưa thử trên cổng thật</b> — ô nào không khớp sẽ được báo để bạn nhập tay.</div>
       <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (1 lần): <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> → trên Chrome tạo dấu trang mới tên "Điền dữ liệu GPKD", dán mã vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).</div>
       <div style="font-size:13px">2) Mỗi lần dùng: <span id="ssDienKhoi"></span> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>mở cửa sổ phụ, tự vào đúng khối</b> trong menu (và bấm "Tạo mới" với người đại diện) rồi điền. Có nhiều khối thì hiện <b>bảng ở góc trái</b>: điền khối 1, bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu rồi <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu (cổng quay về trang danh sách) thì <b>tự sang khối kế tiếp</b> và điền. Nếu không tự sang được, bấm khối kế tiếp trong bảng. Nếu Chrome chặn cửa sổ bật lên: bấm biểu tượng chặn → "Luôn cho phép".</div>
       <div class="hint" id="ssDienGhi" style="margin-top:6px"></div>

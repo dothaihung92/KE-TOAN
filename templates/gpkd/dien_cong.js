@@ -75,6 +75,7 @@
   };
 
   var cuaSoPhu = null;
+  var nhom_tong = (dl.nhom && dl.nhom.length) || 1;
   var chayNhom = async function (g, taiCho) {
     var D = document;
     var w = null;
@@ -238,6 +239,11 @@
     var h = '<b>Đã điền ' + daDien.length + ' ô</b> (tô vàng) — <b>hãy kiểm tra từng ô</b>.';
     if (daDien.length) h += '<div style="margin-top:4px">Bạn tự làm tiếp: tick "Tôi không phải là người máy" (nếu có), bấm "Đối chiếu với CSDLQG về dân cư" (nếu cần), chọn các ô danh sách còn trống, rồi <b>tự bấm Lưu</b>. Phần mềm không tự lưu, không ký, không nộp, không xóa.</div>';
     h += huong;
+    if (daDien.length && nhom_tong === 1) h += '<div style="margin-top:6px;color:#555">Chỉ có <b>1 khối</b> cần điền nên sau khi Lưu phần mềm không còn khối nào để tự sang.</div>';
+    if (dl.bo_qua && dl.bo_qua.length) {
+      var ten_bq = { nganh: 'Ngành nghề kinh doanh', chu_so_huu: 'Chủ sở hữu/thành viên', cshhl: 'Chủ sở hữu hưởng lợi', thue: 'Thông tin về thuế' };
+      h += '<div style="margin-top:6px;color:#555">Mục chưa hỗ trợ điền tự động — <b>bạn nhập tay</b>: ' + dl.bo_qua.map(function (k) { return ten_bq[k] || k; }).join(', ') + '.</div>';
+    }
     if (khong.length) h += '<div style="margin-top:6px;color:#b45309"><b>Chưa điền được (nhập tay):</b><br>' + khong.map(function (x) { return '• ' + x.replace(/</g, '&lt;'); }).join('<br>') + '</div>';
     h += '<div style="margin-top:8px"><button id="__dkkdHoan" style="padding:4px 10px;margin-right:6px">Hoàn tác</button><button id="__dkkdDong" style="padding:4px 10px">Đóng</button> <span style="color:#888;font-size:11px">bản ' + BAN + '</span></div>';
     if (w) cuaSoPhu = w;

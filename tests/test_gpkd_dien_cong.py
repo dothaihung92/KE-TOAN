@@ -31,7 +31,7 @@ TRANG = """<meta charset=utf-8><form id=f onsubmit="window.__nop=1;return false"
 <tr><td>Tên doanh nghiệp viết bằng tiếng Việt:</td><td><table><tr><td><select id=lh><option>CÔNG TY TNHH</option><option>CÔNG TY CỔ PHẦN</option></select></td><td><input id=ten value="LEAN HELPER"></td></tr></table></td></tr>
 <tr><td>Quốc tịch:</td><td><input id=qt></td></tr>
 </table><button id=luu type=submit onclick="window.__luu=1">Lưu</button></form>"""
-DL = {"dkkd_dien": 1, "ban": "x", "truong": [
+DL = {"dkkd_dien": 1, "ban": "x", "bo_qua": ["nganh", "cshhl"], "truong": [
     {"ten": "Họ tên", "nhan": "^họ(,? ?(chữ đệm )?(và )?)? ?tên", "gia_tri": "ĐINH THỊ HUỆ", "tien_to": False},
     {"ten": "Ngày sinh", "nhan": "ngày.*sinh", "gia_tri": "12/07/1990", "tien_to": False},
     {"ten": "Giới tính", "nhan": "^giới tính", "gia_tri": "Nữ", "tien_to": False},
@@ -84,6 +84,7 @@ assert s["dt"] == "khoa", s                                         # ô chỉ �
 assert s["lh"] == "CÔNG TY CỔ PHẦN" and s["ten"] == "SAO MỚI", s     # tên: ô chọn loại hình + ô tên được tách đúng
 assert "255" in r["vang"] or "fff3a0" in r["vang"].lower() or "243" in r["vang"]
 assert "Đã điền 9 ô" in r["panel"] and "Điện thoại (ô bị khóa, không sửa được)" in r["panel"] and "Website (không thấy ô)" in r["panel"], r["panel"]
+assert "Chỉ có 1 khối" in r["panel"] and "Ngành nghề kinh doanh, Chủ sở hữu hưởng lợi" in r["panel"], r["panel"]      # nói rõ không còn khối để tự sang + mục phải nhập tay
 assert not r["luu"]                                                  # không bấm Lưu/gửi biểu mẫu
 print("PASS 2: điền đúng ô (kể cả ngày cấp ở hàng 4 cột, chọn giới tính, tách tiền tố tên), tô vàng, báo ô không có, không đụng ô chỉ đọc, không bấm Lưu.")
 assert r["hoan"] == {"ht": "VÕ THỊ RI", "ten": "LEAN HELPER", "lh": "CÔNG TY TNHH", "nc": ""}, r["hoan"]
