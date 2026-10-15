@@ -44,6 +44,7 @@ def trang_new(q):
 </table><div id=recaptcha><input type=checkbox id=rc> Tôi không phải là người máy</div><input type=button value="Đối chiếu với CSDLQG về dân cư" id=doichieu><input type=button value="Lưu" id=luu onclick="location='/luu'"></form>"""
 
 
+PAGES["/luu"] = MENU + "<table><tr><td>ĐINH THỊ HUỆ</td><td><a href=\"/sua\">Sửa đổi</a></td></tr></table>"      # sau khi Lưu, cổng về trang danh sách (không còn ô nhập)
 PAGES["/dc"] = MENU + """<form onsubmit="return false"><table><tr><td>Số nhà/đường/phố/tổ/xóm/ấp/thôn:</td><td><input id=sn></td></tr><tr><td>Điện thoại:</td><td><input id=dt></td></tr></table><input type=button value="Lưu" id=luu></form>"""
 LOG = []
 
@@ -163,4 +164,35 @@ assert r3["url2"].endswith("/new") and r3["ht2"] == "ĐINH THỊ HUỆ" and r3["
 assert r3["soTrang"] == 2, r3                                                                           # chỉ 1 cửa sổ phụ (dùng lại), không mở thêm cửa sổ cho mỗi khối
 assert "/xoa" not in LOG and "/sua" not in LOG, LOG
 print("PASS 2: nhiều khối (Địa chỉ + Người đại diện): khối 1 tự chạy, bảng ở cửa sổ gốc để bấm khối kế tiếp, dùng lại cùng 1 cửa sổ phụ; không bấm Xóa/Sửa.")
+# TỰ SANG KHỐI KẾ TIẾP sau khi người dùng bấm Lưu: Người đại diện (khối 1) -> người dùng bấm Lưu -> cổng về danh sách -> phần mềm tự vào khối Địa chỉ và điền
+DL_TUDONG = {"dkkd_dien": 1, "ban": "x", "nhom": [G2, G1], "truong": G2["truong"] + G1["truong"], "bo_qua": []}
+RUN_T = RUN.split("  const pop = ctx.waitForEvent('page');")[0] + r"""
+  const pop = ctx.waitForEvent('page');
+  await pg.evaluate(process.env.JS);
+  const w = await pop;
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  const r = { url1: w.url().split('?')[0], ht1: await w.inputValue('#ht') };
+  await new Promise(ok => setTimeout(ok, 3500));
+  r.chuaLuu = w.url().split('?')[0];                      // chưa bấm Lưu thì KHÔNG tự sang khối khác
+  await w.click('#luu');                                  // người dùng xác nhận và bấm Lưu
+  await w.waitForURL(/\/dc$/, { timeout: 60000 });
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  r.url2 = w.url().split('?')[0]; r.sn2 = await w.inputValue('#sn'); r.dt2 = await w.inputValue('#dt');
+  r.tt = await pg.innerText('body');
+  console.log('@@' + JSON.stringify(r));
+  await b.close();
+})();
+"""
+f4 = os.path.join(tmp, "t4.js")
+open(f4, "w", encoding="utf-8").write(RUN_T)
+LOG.clear()
+p4 = subprocess.run(["node", f4], capture_output=True, text=True, env=dict(env, DL=json.dumps(DL_TUDONG)), timeout=240)
+d4 = [x for x in p4.stdout.splitlines() if x.startswith("@@")]
+assert d4, p4.stdout + p4.stderr
+r4 = json.loads(d4[0][2:])
+assert r4["url1"].endswith("/new") and r4["ht1"] == "ĐINH THỊ HUỆ" and r4["chuaLuu"].endswith("/new"), r4      # khối 1 điền xong, chưa Lưu thì đứng yên
+assert r4["url2"].endswith("/dc") and r4["sn2"] == "30 Lê Lợi" and r4["dt2"] == "0911111111", r4              # sau khi Lưu: tự vào khối Địa chỉ và điền
+assert "đã Lưu ✓" in r4["tt"], r4["tt"]
+assert "/xoa" not in LOG and "/sua" not in LOG, LOG
+print("PASS 3: nhiều khối: người dùng bấm Lưu khối 1 (về trang danh sách) thì phần mềm TỰ vào khối kế tiếp và điền; chưa Lưu thì đứng yên.")
 print("\nALL DONE")

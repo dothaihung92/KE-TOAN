@@ -72,13 +72,13 @@ def so_anh(z, tien_to):
 
 ky = {k: server._vb_chu_ky_dict(1).get(k) for k in ("giam_doc", "chu_so_huu")}
 ky["ben_b"] = anh((0, 120, 0))
-z = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(DU, None, ky)[0]))
+z = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(DU, ky)[0]))
 assert so_anh(z, "Mau12") == 1 and so_anh(z, "Quyet_dinh") == 1 and so_anh(z, "Giay_uy_quyen") == 2      # UQ: giám đốc (Bên A) + bên nhận ủy quyền (Bên B)
 z0 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(DU)[0]))
 assert so_anh(z0, "Mau12") == 0 and so_anh(z0, "Quyet_dinh") == 0 and so_anh(z0, "Giay_uy_quyen") == 0
 # đổi người đại diện: người ký Mẫu 12 là người MỚI -> không gắn chữ ký người đại diện cũ
 du2 = dict(DU, loai=["dia_chi", "dai_dien"], dai_dien=[{"ho_ten": "Người Mới"}])
-z2 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du2, None, ky)[0]))
+z2 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du2, ky)[0]))
 assert so_anh(z2, "Mau12") == 1 and so_anh(z2, "Quyet_dinh") == 1      # công ty 1TV: Chủ tịch công ty (chủ sở hữu) ký Mẫu 12 bằng chữ ký của chính mình, không dùng chữ ký giám đốc cũ
 print("PASS 3: gắn chữ ký giám đốc (Mẫu 12, Giấy ủy quyền) và chủ sở hữu (Quyết định); không gắn chữ ký người đại diện cũ cho người mới.")
 
@@ -111,7 +111,7 @@ print("PASS 4: PDF xuất dạng ảnh từng trang, mép trang tối nhẹ như
 goc = g._timn_trinh_chuyen_pdf
 g._timn_trinh_chuyen_pdf = lambda: None
 try:
-    b, _t, cb = g.tao_ho_so(DU, None, ky, True)
+    b, _t, cb = g.tao_ho_so(DU, ky, True)
 finally:
     g._timn_trinh_chuyen_pdf = goc
 assert any("Chưa xuất PDF được" in x and "Word" in x for x in cb), cb

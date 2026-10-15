@@ -4541,7 +4541,7 @@ SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ng
 const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
   ['cshhl','Thay đổi thông tin về chủ sở hữu hưởng lợi (kèm Mẫu 10)','cshhl'],
   ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['thue','Thay đổi thông tin đăng ký thuế (giám đốc, kế toán trưởng, địa chỉ nhận thông báo thuế, năm tài chính, số lao động…)','thue'],['chu_so_huu','Thay đổi chủ sở hữu / thành viên công ty TNHH (đổi chủ, chuyển vốn, thêm thành viên mới)','chu_so_huu_moi']];
-let ssNganh={them:[],bo:[],sua:[]}, ssMauRieng=[], ssBienMau={}, ssHienTrang=null;
+let ssNganh={them:[],bo:[],sua:[]}, ssHienTrang=null;
 const ssKey=()=>'gpkdSoan_'+(current||0);
 function ssEsc(x){return vbEsc(x)}
 function ssHienTrangTuGom(){
@@ -4749,7 +4749,7 @@ function ssDongBoDiaChiThue(){
   const day=[a.so_nha,a.xa,a.tinh].filter(Boolean).join(', ');
   if(g)g.textContent=day?'Địa chỉ nhận thông báo thuế = '+(moi?'địa chỉ trụ sở MỚI: ':'địa chỉ trụ sở hiện tại: ')+day:'Chưa có địa chỉ công ty — lấy hồ sơ đã gom ở tab "Lấy thông tin GPKD" hoặc nhập địa chỉ ở mục 1b.';
 }
-function ssLuuTam(){try{ssDongBoDiaChiThue()}catch(e){}try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap(),mr:ssMauRieng.filter(x=>x.chon).map(x=>x.ten)}))}catch(e){}}
+function ssLuuTam(){try{ssDongBoDiaChiThue()}catch(e){}try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap()}))}catch(e){}}
 function ssCacO(nhom){
   return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;align-items:end">${SS_TRUONG[nhom].map(([k,nhan])=>
     `<label style="font-size:12px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px">${ssEsc(nhan)}<input id="ss_${nhom}_${k}" onchange="${nhom==='uy_quyen'&&k==='so_giay_to'?'ssUqKyKiem()':''}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}</div>`;
@@ -4847,7 +4847,7 @@ async function moSoanGpkd(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
       <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay).</div>
       <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (1 lần): <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> → trên Chrome tạo dấu trang mới tên "Điền dữ liệu GPKD", dán mã vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).</div>
-      <div style="font-size:13px">2) Mỗi lần dùng: <span id="ssDienKhoi"></span> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>mở cửa sổ phụ, tự vào đúng khối</b> trong menu (và bấm "Tạo mới" với người đại diện) rồi điền. Có nhiều khối thì hiện <b>bảng ở góc trái</b>: điền khối 1, bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu và <b>tự bấm Lưu</b>, rồi bấm khối kế tiếp trong bảng. Nếu Chrome chặn cửa sổ bật lên: bấm biểu tượng chặn → "Luôn cho phép".</div>
+      <div style="font-size:13px">2) Mỗi lần dùng: <span id="ssDienKhoi"></span> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>mở cửa sổ phụ, tự vào đúng khối</b> trong menu (và bấm "Tạo mới" với người đại diện) rồi điền. Có nhiều khối thì hiện <b>bảng ở góc trái</b>: điền khối 1, bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu rồi <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu (cổng quay về trang danh sách) thì <b>tự sang khối kế tiếp</b> và điền. Nếu không tự sang được, bấm khối kế tiếp trong bảng. Nếu Chrome chặn cửa sổ bật lên: bấm biểu tượng chặn → "Luôn cho phép".</div>
       <div class="hint" id="ssDienGhi" style="margin-top:6px"></div>
     </fieldset>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -4923,29 +4923,12 @@ function ssLayTuGom(im,ghiDe){
   const cty=(typeof companies!=='undefined'?companies:[]).find(c=>c.id===current),lech=cty&&cty.mst&&h.ma_so&&String(cty.mst).replace(/\D/g,'')!==String(h.ma_so).replace(/\D/g,'');
   const g=document.getElementById('ssHtGhi');if(g)g.textContent=(h.ten||h.ma_so?'Đã lấy: '+(h.ten||'')+' '+(h.ma_so?'(MST '+h.ma_so+')':'')+(lech?' ⚠ MST khác MST công ty đang chọn ('+cty.mst+') — hãy kiểm tra đã gom đúng công ty chưa':''):(im?'':'Chưa có hồ sơ đã gom — sang tab "Lấy thông tin GPKD" lấy dữ liệu trước, hoặc nhập tay.'));
 }
-function ssVeMauRieng(){
-  const b=document.getElementById('ssMauRieng');if(!b)return;
-  b.innerHTML=ssMauRieng.length?ssMauRieng.map((m,i)=>`<div style="display:flex;gap:8px;align-items:center;margin:2px 0"><label class="chk"><input type="checkbox" ${m.chon?'checked':''} onchange="ssMauRieng[${i}].chon=this.checked;ssLuuTam()"> ${ssEsc(m.ten)}</label><button class="btn ghost sm" onclick="ssXoaMauRieng('${ssEsc(m.ten).replace(/'/g,"\\'")}')">✖</button></div>`).join(''):'<div class="hint">Chưa có mẫu riêng.</div>';
-}
-async function ssThemMauRieng(inp){
-  const f=inp.files&&inp.files[0];if(!f)return;
-  const b64=await new Promise(ok=>{const r=new FileReader();r.onload=()=>ok(r.result);r.readAsDataURL(f)});
-  try{const r=await api('/api/gpkd-soan/mau-rieng',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ten:f.name,noi_dung_b64:b64})});
-    if(!ssMauRieng.find(m=>m.ten===r.ten))ssMauRieng.push({ten:r.ten,chon:true});else ssMauRieng.find(m=>m.ten===r.ten).chon=true;
-    ssVeMauRieng();toast('Đã thêm mẫu "'+r.ten+'" — biến tìm thấy: '+((r.bien_trong_mau||[]).join(', ')||'không có'),'ok');ssLuuTam();
-  }catch(e){toast('Lỗi: '+e.message,'err')}
-  inp.value='';
-}
-async function ssXoaMauRieng(ten){
-  if(!confirm('Xoá mẫu riêng "'+ten+'"?'))return;
-  try{await api('/api/gpkd-soan/mau-rieng/'+encodeURIComponent(ten),{method:'DELETE'});ssMauRieng=ssMauRieng.filter(m=>m.ten!==ten);ssVeMauRieng();}catch(e){toast('Lỗi: '+e.message,'err')}
-}
 async function ssTao(){
   const du=ssThuThap(),kq=document.getElementById('ssKetQua');
   if(!du.loai.length){toast('Chọn ít nhất một nội dung thay đổi','err');return}
   kq.innerHTML='<div class="hint">Đang soạn hồ sơ…</div>';
   try{
-    const r=await api('/api/gpkd-soan/tao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cid:current,gan_chu_ky:du.gan_chu_ky,xuat_pdf:du.xuat_pdf,du_lieu:du,mau_rieng:ssMauRieng.filter(m=>m.chon).map(m=>m.ten)})});
+    const r=await api('/api/gpkd-soan/tao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cid:current,gan_chu_ky:du.gan_chu_ky,xuat_pdf:du.xuat_pdf,du_lieu:du})});
     const cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'');
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)||[])[1]||'Ho_so_thay_doi_DKDN.zip';
     dl(await r.blob(),ten);

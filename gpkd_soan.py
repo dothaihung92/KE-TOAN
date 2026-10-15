@@ -1525,92 +1525,10 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     return d
 
 
-# ============================================================ MẪU RIÊNG CỦA NGƯỜI DÙNG: thay {{biến}}
-CAC_BIEN = {
-    "dn_ten": "Tên doanh nghiệp", "dn_ten_hoa": "Tên doanh nghiệp (IN HOA)", "dn_ma_so": "Mã số doanh nghiệp/MST",
-    "dn_loai_hinh": "Loại hình doanh nghiệp", "dn_co_quan": "Cơ quan đăng ký kinh doanh nhận hồ sơ", "dn_dia_chi": "Địa chỉ trụ sở hiện tại",
-    "ngay_lap": "Ngày lập (dd/mm/yyyy)", "ngay": "Ngày", "thang": "Tháng", "nam": "Năm", "dia_danh": "Địa danh",
-    "ten_moi_viet": "Tên mới (tiếng Việt, IN HOA)", "ten_moi_nuoc_ngoai": "Tên mới (nước ngoài)", "ten_moi_viet_tat": "Tên mới (viết tắt)",
-    "dia_chi_moi": "Địa chỉ trụ sở mới (đầy đủ)", "dia_chi_moi_so_nha": "Địa chỉ mới - số nhà/đường", "dia_chi_moi_xa": "Địa chỉ mới - xã/phường",
-    "dia_chi_moi_tinh": "Địa chỉ mới - tỉnh/thành phố",
-    "von_cu": "Vốn điều lệ cũ (số)", "von_cu_chu": "Vốn điều lệ cũ (bằng chữ)", "von_moi": "Vốn điều lệ mới (số)", "von_moi_chu": "Vốn điều lệ mới (bằng chữ)",
-    "dd_ho_ten": "Người đại diện mới - họ tên", "dd_ho_ten_hoa": "Người đại diện mới - họ tên IN HOA", "dd_ngay_sinh": "Người đại diện mới - ngày sinh",
-    "dd_gioi_tinh": "Người đại diện mới - giới tính", "dd_cccd": "Người đại diện mới - số định danh", "dd_chuc_danh": "Người đại diện mới - chức danh",
-    "dd_dia_chi": "Người đại diện mới - địa chỉ liên lạc", "dd_dien_thoai": "Người đại diện mới - điện thoại", "dd_email": "Người đại diện mới - email",
-    "cs_ho_ten": "Chủ sở hữu mới - họ tên", "cs_ho_ten_hoa": "Chủ sở hữu mới - họ tên IN HOA", "cs_ngay_sinh": "Chủ sở hữu mới - ngày sinh",
-    "cs_gioi_tinh": "Chủ sở hữu mới - giới tính", "cs_cccd": "Chủ sở hữu mới - số định danh", "cs_dia_chi": "Chủ sở hữu mới - địa chỉ liên lạc",
-}
-
-
 def _dia_chi_day_du(so_nha, xa, tinh):
     return ", ".join(x.strip() for x in (so_nha, xa, tinh) if x and str(x).strip())
 
 
-def bien_thay_the(du):
-    dn, t, a, v = du.get("dn") or {}, du.get("ten") or {}, du.get("dia_chi") or {}, du.get("von") or {}
-    dd = (du.get("dai_dien") or [{}])[0] if du.get("dai_dien") else {}
-    cs = du.get("chu_so_huu_moi") or {}
-    ngay = _ngay_dd_mm_yyyy(dn.get("ngay_lap") or "")
-    mm = re.match(r"(\d{2})/(\d{2})/(\d{4})", ngay)
-    b = {
-        "dn_ten": dn.get("ten") or "", "dn_ten_hoa": (dn.get("ten") or "").upper(), "dn_ma_so": dn.get("ma_so") or "",
-        "dn_loai_hinh": dn.get("loai_hinh") or "", "dn_co_quan": dn.get("co_quan") or "", "dn_dia_chi": dn.get("dia_chi") or "",
-        "ngay_lap": ngay, "ngay": str(int(mm.group(1))) if mm else "", "thang": str(int(mm.group(2))) if mm else "", "nam": mm.group(3) if mm else "",
-        "dia_danh": dn.get("dia_danh") or "",
-        "ten_moi_viet": (t.get("viet") or "").upper(), "ten_moi_nuoc_ngoai": t.get("nuoc_ngoai") or "", "ten_moi_viet_tat": t.get("viet_tat") or "",
-        "dia_chi_moi": _dia_chi_day_du(a.get("so_nha"), a.get("xa"), a.get("tinh")), "dia_chi_moi_so_nha": a.get("so_nha") or "",
-        "dia_chi_moi_xa": a.get("xa") or "", "dia_chi_moi_tinh": a.get("tinh") or "",
-        "von_cu": (f"{so_nguyen(v.get('cu')):,}".replace(",", ".") if so_nguyen(v.get("cu")) is not None else ""),
-        "von_cu_chu": (doc_so_vn(so_nguyen(v.get("cu"))) + " đồng") if so_nguyen(v.get("cu")) is not None else "",
-        "von_moi": (f"{so_nguyen(v.get('moi')):,}".replace(",", ".") if so_nguyen(v.get("moi")) is not None else ""),
-        "von_moi_chu": (doc_so_vn(so_nguyen(v.get("moi"))) + " đồng") if so_nguyen(v.get("moi")) is not None else "",
-        "dd_ho_ten": dd.get("ho_ten") or "", "dd_ho_ten_hoa": (dd.get("ho_ten") or "").upper(), "dd_ngay_sinh": _ngay_dd_mm_yyyy(dd.get("ngay_sinh")),
-        "dd_gioi_tinh": dd.get("gioi_tinh") or "", "dd_cccd": dd.get("cccd") or "", "dd_chuc_danh": dd.get("chuc_danh") or "",
-        "dd_dia_chi": _dia_chi_day_du(dd.get("so_nha"), dd.get("xa"), dd.get("tinh")), "dd_dien_thoai": dd.get("dien_thoai") or "", "dd_email": dd.get("email") or "",
-        "cs_ho_ten": cs.get("ho_ten") or "", "cs_ho_ten_hoa": (cs.get("ho_ten") or "").upper(), "cs_ngay_sinh": _ngay_dd_mm_yyyy(cs.get("ngay_sinh")),
-        "cs_gioi_tinh": cs.get("gioi_tinh") or "", "cs_cccd": cs.get("cccd") or "",
-        "cs_dia_chi": _dia_chi_day_du(cs.get("so_nha"), cs.get("xa"), cs.get("tinh")),
-    }
-    return b
-
-
-def dien_mau_rieng(noi_dung, bien):
-    """Mẫu .docx do người dùng cung cấp: thay mọi {{tên_biến}} (biến không có dữ liệu giữ nguyên để người dùng thấy còn thiếu).
-    Trả (bytes docx đã điền, danh sách biến đã gặp, danh sách biến chưa có dữ liệu)."""
-    d = docx.Document(io.BytesIO(noi_dung))
-    gap, thieu = set(), set()
-
-    def xu_ly(p):
-        t = _van(p)
-        if "{{" not in t:
-            return
-
-        def sua(m):
-            k = m.group(1).strip()
-            gap.add(k)
-            v = bien.get(k)
-            if v in (None, ""):
-                thieu.add(k)
-                return m.group(0)
-            return str(v)
-        moi = re.sub(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}", sua, t)
-        if moi != t:
-            rs = p.runs
-            if rs:
-                rs[0].text = moi
-                for r in rs[1:]:
-                    r.text = ""
-    for p in d.paragraphs:
-        xu_ly(p)
-    for tb in d.tables:
-        for hang in tb.rows:
-            for o in hang.cells:
-                for p in o.paragraphs:
-                    xu_ly(p)
-    for sec in d.sections:
-        for p in sec.header.paragraphs + sec.footer.paragraphs:
-            xu_ly(p)
-    return _luu_bytes(d), sorted(gap), sorted(thieu)
 
 
 # ============================================================ GÓI HỒ SƠ
@@ -1812,8 +1730,8 @@ def pdf_vien_scan(pdf_bytes, dpi=150):
     return kq.tobytes(deflate=True)
 
 
-def tao_ho_so(du, mau_rieng=None, chu_ky=None, xuat_pdf=False):
-    """du: dữ liệu (xem soan_mau12/13/15); mau_rieng: [(tên, bytes docx)] mẫu riêng của người dùng.
+def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
+    """du: dữ liệu (xem soan_mau12/13/15).
     Trả (bytes zip, tên file zip, cảnh báo[])."""
     import datetime
     loai = set(du.get("loai") or [])
@@ -1874,16 +1792,6 @@ def tao_ho_so(du, mau_rieng=None, chu_ky=None, xuat_pdf=False):
         for k, nhan in (("ho_ten", "họ tên"), ("ngay_sinh", "ngày sinh"), ("so_giay_to", "số chứng thực/CCCD"), ("ngay_cap", "ngày cấp"), ("noi_cap", "nơi cấp"), ("cho_o", "chỗ ở hiện tại")):
             if not (uq.get(k) or "").strip():
                 canh_bao.append(f"Giấy ủy quyền — bên nhận ủy quyền thiếu {nhan}")
-    bien = bien_thay_the(du)
-    for ten, nd in (mau_rieng or []):
-        try:
-            b, _gap, thieu_bien = dien_mau_rieng(nd, bien)
-            tep.append((f"MauRieng_{re.sub(r'[^0-9A-Za-zÀ-ỹ_.-]+', '_', ten)}", b))
-            ds_file.append((f"Mẫu riêng: {ten}", "do người dùng cung cấp"))
-            if thieu_bien:
-                canh_bao.append(f"Mẫu riêng '{ten}': chưa có dữ liệu cho biến " + ", ".join("{{%s}}" % x for x in thieu_bien))
-        except Exception as e:
-            canh_bao.append(f"Mẫu riêng '{ten}': không đọc được ({type(e).__name__}: {str(e)[:100]})")
     thieu = _kiem_thieu(du)
     if thieu:
         canh_bao.append("Còn thiếu thông tin: " + "; ".join(thieu))
@@ -1903,7 +1811,7 @@ def tao_ho_so(du, mau_rieng=None, chu_ky=None, xuat_pdf=False):
                 raise RuntimeError("Máy chưa có Microsoft Word hoặc LibreOffice để đổi sang PDF")
             pdfs, loi = [], []
             for ten, nd in tep:
-                if ten.lower().endswith(".docx") and not ten.startswith(("00_", "MauRieng_")):
+                if ten.lower().endswith(".docx") and not ten.startswith("00_"):
                     try:
                         pdfs.append(("PDF/" + ten[:-5] + "_scan.pdf", pdf_vien_scan(docx_sang_pdf(nd, trinh))))
                     except ImportError:

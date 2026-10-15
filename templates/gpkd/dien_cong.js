@@ -74,6 +74,7 @@
     return false;
   };
 
+  var cuaSoPhu = null;
   var chayNhom = async function (g) {
     var D = document;
     var w = null;
@@ -236,6 +237,7 @@
     h += huong;
     if (khong.length) h += '<div style="margin-top:6px;color:#b45309"><b>Chưa điền được (nhập tay):</b><br>' + khong.map(function (x) { return '• ' + x.replace(/</g, '&lt;'); }).join('<br>') + '</div>';
     h += '<div style="margin-top:8px"><button id="__dkkdHoan" style="padding:4px 10px;margin-right:6px">Hoàn tác</button><button id="__dkkdDong" style="padding:4px 10px">Đóng</button> <span style="color:#888;font-size:11px">bản ' + BAN + '</span></div>';
+    if (w) cuaSoPhu = w;
     hop.innerHTML = h;
     D.body.appendChild(hop);
     D.getElementById('__dkkdDong').onclick = function () { hop.remove(); };
@@ -250,24 +252,60 @@
   };
   var nhom = dl.nhom && dl.nhom.length ? dl.nhom : [{ ten: dl.vao_khoi || '', vao_khoi: dl.vao_khoi, tao_moi: dl.tao_moi, truong: dl.truong, luu_y: dl.luu_y }];
   if (nhom.length === 1) { await chayNhom(nhom[0]); return; }
+  var tenNut = function (e) { return e.tagName === 'INPUT' ? e.value : e.innerText; };
+  var daBamLuu = false;
+  var gen = 0;
+  var tt = [];
+  var theoDoiLuu = async function (g, mygen) {
+    var het = Date.now() + 60 * 60000;
+    daBamLuu = false;
+    while (Date.now() < het && mygen === gen) {
+      await nghi(600);
+      var w = cuaSoPhu;
+      if (!w || w.closed) return false;
+      try {
+        var D = w.document;
+        if (D.readyState !== 'complete') continue;
+        [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).forEach(function (e) {
+          if (!e.__dkkdL && chuan(tenNut(e)) === 'lưu') { e.__dkkdL = 1; e.addEventListener('click', function () { daBamLuu = true; }, true); }
+        });
+        if (daBamLuu && !coTruong(D, g) && D.querySelectorAll('a').length) { await nghi(500); return true; }
+      } catch (e) { }
+    }
+    return false;
+  };
+  var chayKhoi = async function (i) {
+    var mygen = ++gen;
+    tt[i].style.color = '#2e7d32';
+    tt[i].textContent = 'đang chạy…';
+    try { await chayNhom(nhom[i]); } catch (e) { tt[i].style.color = '#b00'; tt[i].textContent = 'lỗi: ' + e; return; }
+    if (mygen !== gen) return;
+    if (i + 1 >= nhom.length) { tt[i].textContent = 'đã điền — kiểm tra rồi tự Lưu (khối cuối)'; return; }
+    tt[i].textContent = 'đã điền — kiểm tra, xác nhận rồi bấm Lưu: phần mềm sẽ tự sang khối kế tiếp';
+    var luu = await theoDoiLuu(nhom[i], mygen);
+    if (mygen !== gen) return;
+    if (luu) { tt[i].textContent = 'đã Lưu ✓'; await chayKhoi(i + 1); }
+    else { tt[i].textContent = 'chưa thấy bạn Lưu xong — khi xong bấm khối kế tiếp trong bảng'; }
+  };
   var bang = document.createElement('div');
   bang.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:430px;background:#fff;border:2px solid #2e7d32;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
-  bang.innerHTML = '<b>Điền ' + nhom.length + ' khối — làm lần lượt</b><div style="margin:4px 0;color:#555">Mỗi khối mở ở cửa sổ phụ: kiểm tra ô tô vàng, tự bấm Lưu, rồi quay lại đây bấm khối kế tiếp. Phần mềm không tự lưu/ký/nộp.</div>';
+  bang.innerHTML = '<b>Điền ' + nhom.length + ' khối — lần lượt</b><div style="margin:4px 0;color:#555">Mỗi khối mở ở cửa sổ phụ: bạn kiểm tra các ô tô vàng, xác nhận và <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu thì <b>tự sang khối kế tiếp</b>. Phần mềm không tự lưu/ký/nộp/xóa. Nếu không tự sang được, bấm nút của khối kế tiếp trong bảng.</div>';
   nhom.forEach(function (g, i) {
     var dong = document.createElement('div');
     dong.style.cssText = 'margin:4px 0';
     var nut = document.createElement('button');
     nut.style.cssText = 'padding:4px 10px;margin-right:6px';
     nut.textContent = (i + 1) + '. ' + (g.ten || g.vao_khoi) + ' ▶ Điền';
-    var tt = document.createElement('span');
-    tt.style.color = '#2e7d32';
-    nut.onclick = async function () { nut.disabled = true; tt.textContent = 'đang chạy…'; try { await chayNhom(g); tt.textContent = 'đã mở — kiểm tra & Lưu ở cửa sổ phụ'; } catch (e) { tt.style.color = '#b00'; tt.textContent = 'lỗi: ' + e; } nut.disabled = false; nut.textContent = (i + 1) + '. ' + (g.ten || g.vao_khoi) + ' ▶ Điền lại'; };
-    dong.appendChild(nut); dong.appendChild(tt); bang.appendChild(dong);
+    var t = document.createElement('div');
+    t.style.cssText = 'color:#555;font-size:12px;margin:2px 0 0 4px';
+    tt.push(t);
+    nut.onclick = function () { chayKhoi(i); };
+    dong.appendChild(nut); dong.appendChild(t); bang.appendChild(dong);
   });
   var dong2 = document.createElement('div');
   dong2.innerHTML = '<button id="__dkkdDongBang" style="padding:3px 8px;margin-top:6px">Đóng bảng</button>';
   bang.appendChild(dong2);
   document.body.appendChild(bang);
-  document.getElementById('__dkkdDongBang').onclick = function () { bang.remove(); };
-  bang.querySelector('button').click();
+  document.getElementById('__dkkdDongBang').onclick = function () { gen++; bang.remove(); };
+  chayKhoi(0);
 })().catch(function (e) { alert('Lỗi điền dữ liệu GPKD: ' + e); });

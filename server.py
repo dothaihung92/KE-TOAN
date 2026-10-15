@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-15.221"
+APP_BUILD = "2026-10-15.222"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45674,11 +45674,8 @@ def dkkd_xuat_excel_api(body: dict = Body(...)):
 
 # ============================================================
 # SOẠN HỒ SƠ GPKD — lập hồ sơ thay đổi đăng ký doanh nghiệp từ biểu mẫu chính thức (TT 121/2026 mới nhất, TT 68/2025)
-#  điền từ dữ liệu người dùng nhập/lấy từ hồ sơ đã gom; mẫu riêng của người dùng (.docx có {{biến}}) lưu ở data/gpkd_mau_rieng/
+#  điền từ dữ liệu người dùng nhập/lấy từ hồ sơ đã gom
 # ============================================================
-GPKD_MAU_RIENG_DIR = os.path.join(DATA_DIR, "gpkd_mau_rieng")
-
-
 def _gpkd_thieu_file():
     """File dự án cần cho mục Soạn hồ sơ GPKD mà máy chưa có (bản cập nhật đầu tiên chạy update.py CŨ nên chưa tải file mới)."""
     can = [os.path.join(BASE_DIR, "gpkd_soan.py"),
@@ -45728,13 +45725,6 @@ def _gpkd_soan_mod():
                              f"Hãy tắt hẳn rồi mở lại phần mềm (tự cập nhật + cài thư viện); nếu vẫn lỗi chạy: pip install python-docx")
 
 
-def _gpkd_ten_mau_rieng(ten):
-    import re
-    t = os.path.basename(str(ten or "")).strip()
-    t = re.sub(r"[^0-9A-Za-zÀ-ỹ_. -]+", "_", t)
-    return t if t.lower().endswith(".docx") else t + ".docx"
-
-
 def _gpkd_tai_danh_muc_nganh(p):
     """update.py CŨ trên máy không có file danh mục trong FILES -> tự tải thẳng từ kho dự án, kiểm tra là JSON danh sách rồi mới ghi."""
     import update as _up
@@ -45764,49 +45754,15 @@ def gpkd_soan_nganh():
 @app.get("/api/gpkd-soan/mau")
 def gpkd_soan_mau():
     g = _gpkd_soan_mod()
-    ds = os.listdir(GPKD_MAU_RIENG_DIR) if os.path.isdir(GPKD_MAU_RIENG_DIR) else []
-    return {"loai": g.LOAI_THAY_DOI, "bien": g.CAC_BIEN,
-            "mau_chinh_thuc": {str(k): {"nguon": v[1]} for k, v in g.danh_sach_mau().items()},
-            "mau_rieng": sorted(x for x in ds if x.lower().endswith(".docx"))}
-
-
-@app.post("/api/gpkd-soan/mau-rieng")
-def gpkd_soan_luu_mau_rieng(body: dict = Body(...)):
-    g = _gpkd_soan_mod()
-    try:
-        nd = base64.b64decode(str(body.get("noi_dung_b64") or "").split(",")[-1])
-        import docx as _dx
-        _dx.Document(io.BytesIO(nd))
-    except Exception:
-        raise HTTPException(400, "File không phải Word (.docx) hợp lệ")
-    ten = _gpkd_ten_mau_rieng(body.get("ten") or "mau.docx")
-    os.makedirs(GPKD_MAU_RIENG_DIR, exist_ok=True)
-    with open(os.path.join(GPKD_MAU_RIENG_DIR, ten), "wb") as f:
-        f.write(nd)
-    _b, gap, _t = g.dien_mau_rieng(nd, {})
-    return {"ok": True, "ten": ten, "bien_trong_mau": gap}
-
-
-@app.delete("/api/gpkd-soan/mau-rieng/{ten}")
-def gpkd_soan_xoa_mau_rieng(ten: str):
-    p = os.path.join(GPKD_MAU_RIENG_DIR, _gpkd_ten_mau_rieng(ten))
-    if os.path.isfile(p):
-        os.remove(p)
-    return {"ok": True}
+    return {"loai": g.LOAI_THAY_DOI, "mau_chinh_thuc": {str(k): {"nguon": v[1]} for k, v in g.danh_sach_mau().items()}}
 
 
 @app.post("/api/gpkd-soan/tao")
 def gpkd_soan_tao(body: dict = Body(...)):
-    """body: {du_lieu: {...}, mau_rieng: [tên file]} -> file zip gồm các biểu mẫu đã điền + danh mục hồ sơ (X-Canh-Bao: cảnh báo, mã hoá URL)."""
+    """body: {du_lieu: {...}} -> file zip gồm các biểu mẫu đã điền + danh mục hồ sơ (X-Canh-Bao: cảnh báo, mã hoá URL)."""
     import sys
     g = _gpkd_soan_mod()
     du = body.get("du_lieu") or {}
-    mr = []
-    for ten in body.get("mau_rieng") or []:
-        p = os.path.join(GPKD_MAU_RIENG_DIR, _gpkd_ten_mau_rieng(ten))
-        if os.path.isfile(p):
-            with open(p, "rb") as f:
-                mr.append((_gpkd_ten_mau_rieng(ten), f.read()))
     chu_ky = {}
     cid = body.get("cid")
     if body.get("gan_chu_ky") and cid:
@@ -45834,7 +45790,7 @@ def gpkd_soan_tao(body: dict = Body(...)):
                 except Exception:
                     pass
     try:
-        zip_b, ten_zip, canh_bao = g.tao_ho_so(du, mr, chu_ky, bool(body.get("xuat_pdf")))
+        zip_b, ten_zip, canh_bao = g.tao_ho_so(du, chu_ky, bool(body.get("xuat_pdf")))
     except ValueError as e:
         raise HTTPException(400, str(e))
     from urllib.parse import quote as _q

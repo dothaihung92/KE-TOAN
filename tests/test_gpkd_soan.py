@@ -100,29 +100,13 @@ except ValueError:
     pass
 print("PASS 5: gói hồ sơ zip + danh mục + cảnh báo thiếu thông tin.")
 
-# 6) mẫu riêng {{biến}} qua API
-tmp = tempfile.mkdtemp()
-server.GPKD_MAU_RIENG_DIR = os.path.join(tmp, "mr")
-dm_ = docx.Document()
-dm_.add_paragraph("QUYẾT ĐỊNH {{dn_ten_hoa}} MST {{dn_ma_so}} bổ nhiệm {{dd_ho_ten_hoa}} làm {{dd_chuc_danh}}; vốn {{von_moi_chu}}")
-b = io.BytesIO()
-dm_.save(b)
-r = server.gpkd_soan_luu_mau_rieng({"ten": "QĐ bổ nhiệm", "noi_dung_b64": base64.b64encode(b.getvalue()).decode()})
-assert r["ten"] == "QĐ bổ nhiệm.docx" and "dd_ho_ten_hoa" in r["bien_trong_mau"]
-assert server.gpkd_soan_mau()["mau_rieng"] == ["QĐ bổ nhiệm.docx"]
-try:
-    server.gpkd_soan_luu_mau_rieng({"ten": "x", "noi_dung_b64": base64.b64encode(b"khong phai docx").decode()})
-    raise AssertionError("phải từ chối")
-except server.HTTPException as e:
-    assert e.status_code == 400
-resp = server.gpkd_soan_tao({"du_lieu": DU, "mau_rieng": ["QĐ bổ nhiệm.docx"]})
+# 6) đã bỏ hẳn "mẫu riêng" (không còn API, biến, thư mục): tạo hồ sơ vẫn đủ và không có file MauRieng
+resp = server.gpkd_soan_tao({"du_lieu": DU})
 zz = zipfile.ZipFile(io.BytesIO(resp.body))
-ten_mr = next(n for n in zz.namelist() if n.startswith("MauRieng_"))
-tt = docx.Document(io.BytesIO(zz.read(ten_mr))).paragraphs[0].text
-assert tt == "QUYẾT ĐỊNH CÔNG TY TNHH SEASOFT TECHNOLOGY VIETNAM MST 0313030299 bổ nhiệm NGUYỄN VĂN B làm Giám đốc; vốn hai tỷ năm trăm triệu đồng", tt
-server.gpkd_soan_xoa_mau_rieng("QĐ bổ nhiệm.docx")
-assert server.gpkd_soan_mau()["mau_rieng"] == []
-print("PASS 6: mẫu riêng của người dùng thay {{biến}}; biến thiếu giữ nguyên; từ chối file không phải Word.")
+assert not any(n.startswith("MauRieng_") for n in zz.namelist()) and any(n.startswith("Mau12_") for n in zz.namelist())
+assert not hasattr(server, "gpkd_soan_luu_mau_rieng") and not hasattr(server, "GPKD_MAU_RIENG_DIR") and not hasattr(g, "dien_mau_rieng") and not hasattr(g, "CAC_BIEN")
+assert set(server.gpkd_soan_mau()) == {"loai", "mau_chinh_thuc"}
+print("PASS 6: đã bỏ hẳn mẫu riêng khỏi phần mềm; tạo hồ sơ vẫn đủ các biểu mẫu chính thức.")
 
 # 7) cấu hình triển khai + giao diện
 up = open(os.path.join(_REPO_ROOT, "update.py"), encoding="utf-8").read()
