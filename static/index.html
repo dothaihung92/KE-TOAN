@@ -3931,7 +3931,7 @@ async function exportHTKKTNCN(){
     const res=await r.json();
     await loadCompanies();
     toast('Đã kết xuất XML: '+res.fname+(res.da_luu_ket_xuat?' (đã lưu vào thư mục kết xuất theo Năm/Quý)':' (đã tự mở)'),'ok');
-    if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,'err'),300);
+    if(res.canh_bao)setTimeout(()=>toast(res.canh_bao,res.canh_bao.includes('⚠')?'err':'ok'),300);
   }catch(e){console.error('Lỗi kết xuất TNCN:',e);toast(e.message,'err')}
 }
 

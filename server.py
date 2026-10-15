@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-15.227"
+APP_BUILD = "2026-10-15.228"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -39459,12 +39459,10 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
                      luu_ket_xuat: int = 0, mo_file: int = 1):
     """
     Tạo file XML tờ khai 05/KK-TNCN (TT80/2021) để nhập vào HTKK.
-    LƯU Ý: phần mềm hiện CHƯA có phân hệ tiền lương/thu nhập chịu thuế TNCN
-    (không chấm công/tính lương) nên file luôn xuất ra ở dạng KHÔNG PHÁT SINH
-    (mọi chỉ tiêu = 0) — đúng cho công ty/kỳ không phát sinh khấu trừ TNCN.
-    Nếu kỳ này CÓ phát sinh, cần tự điền số liệu vào file (hoặc trên HTKK)
-    trước khi nộp — phần mềm chỉ tự điền đúng công ty + kỳ báo cáo.
-    ky: 'MM/YYYY' hoặc 'QX/YYYY'; nếu trống lấy tháng hiện tại.
+    Số liệu (ct16–ct31) lấy từ Bảng Lương ĐÃ LƯU của các tháng trong kỳ; kỳ không có
+    lương -> KHÔNG PHÁT SINH (mọi chỉ tiêu = 0).
+    Có tu/den (khoảng tra cứu hoá đơn) -> luôn kê khai TRỌN QUÝ chứa ngày bắt đầu.
+    ky: 'MM/YYYY' hoặc 'QX/YYYY' (dùng khi không có tu/den); nếu trống lấy tháng hiện tại.
     """
     import html as _html
     import re as _re
@@ -39498,17 +39496,25 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
     quy_so = 0
     tu_ngay_kkhai = f"01/{mm}/{yyyy}"
     den_ngay_kkhai = f"{last_day}/{mm}/{yyyy}"
+    canh_bao_ky = ""
     if tu and den:
+        # 05/KK-TNCN kê khai THEO QUÝ: khoảng ngày tra cứu hoá đơn (dù chỉ 1 tháng hay vài ngày)
+        # -> lấy TRỌN QUÝ chứa ngày bắt đầu; dùng chung cho nút kết xuất và tra cứu hàng loạt.
         try:
-            d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
-            d2 = datetime.datetime.strptime(den, "%d/%m/%Y").date()
-            songay = (d2 - d1).days
-            if d1.month in (1, 4, 7, 10) and d1.day == 1 and 85 <= songay <= 95:
-                la_quy = True
-                quy_so = (d1.month - 1) // 3 + 1
-                yyyy = str(d1.year)
-            tu_ngay_kkhai = d1.strftime("%d/%m/%Y")
-            den_ngay_kkhai = d2.strftime("%d/%m/%Y")
+            def _ngay(s):
+                s = str(s).strip()
+                return (datetime.date.fromisoformat(s) if "-" in s
+                        else datetime.datetime.strptime(s, "%d/%m/%Y").date())
+            d1, d2 = _ngay(tu), _ngay(den)
+            la_quy = True
+            quy_so = (d1.month - 1) // 3 + 1
+            yyyy = str(d1.year)
+            mm1 = (quy_so - 1) * 3 + 1
+            tu_ngay_kkhai = f"01/{mm1:02d}/{yyyy}"
+            den_ngay_kkhai = f"{calendar.monthrange(d1.year, mm1 + 2)[1]}/{mm1 + 2:02d}/{yyyy}"
+            if (d2.year, (d2.month - 1) // 3) != (d1.year, quy_so - 1):
+                canh_bao_ky = (f"⚠ Khoảng tra cứu {d1.strftime('%d/%m/%Y')}–{d2.strftime('%d/%m/%Y')} trải qua nhiều quý — "
+                               f"tờ khai 05/KK-TNCN lập cho quý {quy_so}/{yyyy} (quý của ngày bắt đầu); các quý khác hãy tra cứu/kết xuất riêng.")
         except Exception:
             pass
     else:
@@ -39584,12 +39590,13 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
         xml = set_tag(xml, "nguoiKy", esc(nguoi_ky))
         xml = set_tag(xml, "ngayKy", homnay.isoformat())
 
-    # Chưa có nguồn dữ liệu tiền lương/thu nhập chịu thuế TNCN -> luôn xuất
-    # tờ khai "không phát sinh" (mọi chỉ tiêu = 0), khớp file mẫu chuẩn.
+    # Số liệu lấy từ BẢNG LƯƠNG ĐÃ LƯU của các tháng trong kỳ; kỳ không có
+    # dòng lương nào có thu nhập -> tờ khai "không phát sinh" (mọi chỉ tiêu = 0).
+    ct_luong, ghi_chu_luong = _tncn_05kk_tu_bang_luong(cid, tu_ngay_kkhai, den_ngay_kkhai)
     for tag in ("ct15", "ct16", "ct17", "ct18", "ct19", "ct20", "ct21", "ct22",
                 "ct23", "ct24", "ct25", "ct25_1", "ct26", "ct27", "ct28",
                 "ct29", "ct30", "ct31", "ct32"):
-        xml = set_tag(xml, tag, 0)
+        xml = set_tag(xml, tag, (ct_luong or {}).get(tag, 0))
 
     if la_quy:
         ky_fname = f"Q{quy_so}{yyyy}"
@@ -39650,10 +39657,9 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
         canh_bao_parts.append(
             f"⚠ Công ty CHƯA khai báo {', '.join(canh_bao_cqt)} — file XML đang dùng thông tin "
             f"MẪU (có thể sai công ty). Vào 'Sửa công ty' để điền đủ trước khi nộp.")
-    canh_bao_parts.append(
-        "ℹ Phần mềm chưa có phân hệ tiền lương/TNCN nên file này luôn là tờ khai KHÔNG PHÁT "
-        "SINH (mọi chỉ tiêu = 0). Nếu kỳ này công ty CÓ phát sinh khấu trừ TNCN, hãy tự điền số "
-        "liệu vào file (hoặc trực tiếp trên HTKK) trước khi nộp.")
+    if canh_bao_ky:
+        canh_bao_parts.append(canh_bao_ky)
+    canh_bao_parts.append(ghi_chu_luong)
     if loi_luu_ket_xuat:
         canh_bao_parts.append(
             f"⚠ KHÔNG lưu được vào 'Thư mục lưu file kết xuất' đã cấu hình ({loi_luu_ket_xuat}) "
@@ -39661,7 +39667,86 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
             f"ổ mạng/OneDrive đang khoá, hoặc thiếu quyền ghi đều có thể gây lỗi này).")
     canh_bao = " ".join(canh_bao_parts)
     return {"ok": True, "fname": fname, "path": open_path, "canh_bao": canh_bao,
-            "da_luu_ket_xuat": da_luu_ket_xuat}
+            "da_luu_ket_xuat": da_luu_ket_xuat, "phat_sinh": bool(ct_luong), "chi_tieu": ct_luong or {}}
+
+
+# Chỉ tiêu tờ khai 05/KK-TNCN (TT80/2021) theo thẻ XML HTKK:
+#   ct16 tổng số người lao động; ct17 trong đó cá nhân cư trú có HĐLĐ;
+#   ct18 = ct19 + ct20 số cá nhân đã khấu trừ thuế (cư trú / không cư trú);
+#   ct21 = ct22 + ct23 tổng TNCT trả cho cá nhân (cư trú / không cư trú);
+#   ct26 = ct27 + ct28 TNCT trả cho cá nhân thuộc diện phải khấu trừ;
+#   ct29 = ct30 + ct31 tổng số thuế TNCN đã khấu trừ.
+# Bảng Lương chỉ có cá nhân cư trú -> các chỉ tiêu "không cư trú" (20, 23, 28, 31) = 0;
+# ct15, ct24, ct25, ct25_1, ct32 (bảo hiểm nhân thọ của DN BH nước ngoài, miễn theo hiệp định...)
+# không có nguồn trong Bảng Lương -> 0.
+def _tncn_05kk_tong_hop(dong_tinh):
+    """dong_tinh: các dòng bảng lương ĐÃ TÍNH (_luong_tinh_thang) của mọi tháng trong kỳ.
+    Trả dict chỉ tiêu ct.. hoặc None nếu không có ai được trả thu nhập (= không phát sinh)."""
+    ng = {}
+    for r in dong_tinh:
+        tn = _luong_so(r.get("tn_chiu_thue"))
+        tong_tn = tn + _luong_so(r.get("tn_khong_chiu_thue"))
+        if tong_tn <= 0:
+            continue
+        k = (str(r.get("ma") or "").strip() or str(r.get("ten") or "").strip()).lower()
+        if not k:
+            continue
+        p = ng.setdefault(k, {"tn": 0.0, "thue": 0.0, "tn_kt": 0.0, "hd": False})
+        thue = _luong_so(r.get("thue_tru_luong"))
+        p["tn"] += tn
+        p["thue"] += thue
+        if thue > 0:                        # tháng có khấu trừ: thu nhập tháng đó thuộc diện phải khấu trừ
+            p["tn_kt"] += tn
+        if not r.get("thoi_vu"):            # không phải thời vụ/part-time khấu trừ 10% -> cư trú có HĐLĐ
+            p["hd"] = True
+    if not ng:
+        return None
+    lt = lambda v: int(_luong_lam_tron(v))
+    so_kt = sum(1 for p in ng.values() if p["thue"] > 0)
+    tn = lt(sum(p["tn"] for p in ng.values()))
+    tn_kt = lt(sum(p["tn_kt"] for p in ng.values()))
+    thue = lt(sum(p["thue"] for p in ng.values()))
+    return {"ct16": len(ng), "ct17": sum(1 for p in ng.values() if p["hd"]),
+            "ct18": so_kt, "ct19": so_kt, "ct20": 0,
+            "ct21": tn, "ct22": tn, "ct23": 0,
+            "ct26": tn_kt, "ct27": tn_kt, "ct28": 0,
+            "ct29": thue, "ct30": thue, "ct31": 0}
+
+
+def _tncn_05kk_tu_bang_luong(cid, tu_ngay, den_ngay):
+    """Gom Bảng Lương đã lưu của các tháng trong kỳ (tu_ngay/den_ngay dạng dd/mm/yyyy)
+    -> (chỉ tiêu | None, ghi chú cho người dùng)."""
+    try:
+        d1 = datetime.datetime.strptime(tu_ngay, "%d/%m/%Y").date()
+        d2 = datetime.datetime.strptime(den_ngay, "%d/%m/%Y").date()
+    except Exception:
+        return None, "ℹ Không xác định được kỳ kê khai nên xuất tờ khai KHÔNG PHÁT SINH (mọi chỉ tiêu = 0)."
+    thang = []
+    y, m = d1.year, d1.month
+    while (y, m) <= (d2.year, d2.month) and len(thang) < 24:
+        thang.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    dong, thang_co = [], []
+    for nam in sorted({y for y, _ in thang}):
+        try:
+            ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
+        except Exception:
+            continue
+        for y, m in thang:
+            rows = thang_nhap.get(f"{m:02d}") if y == nam else None
+            if rows:
+                tinh = _luong_tinh_thang(rows, ts, f"{m:02d}", nam)
+                if any(_luong_so(r.get("tn_chiu_thue")) + _luong_so(r.get("tn_khong_chiu_thue")) > 0 for r in tinh):
+                    thang_co.append(f"{m:02d}/{y}")
+                dong.extend(tinh)
+    ct = _tncn_05kk_tong_hop(dong)
+    if not ct:
+        return None, ("ℹ Bảng Lương không có dữ liệu lương trong kỳ này nên tờ khai là KHÔNG PHÁT SINH "
+                      "(mọi chỉ tiêu = 0). Nếu kỳ này CÓ trả lương, hãy nhập và 💾 Lưu Bảng Lương rồi kết xuất lại.")
+    f = lambda v: f"{v:,}".replace(",", ".")
+    return ct, (f"ℹ Đã điền số liệu từ Bảng Lương tháng {', '.join(thang_co)}: {ct['ct16']} người lao động, "
+                f"TNCT {f(ct['ct21'])} đ, thuế đã khấu trừ {f(ct['ct29'])} đ ({ct['ct18']} người). "
+                "Kiểm tra lại trên HTKK trước khi nộp.")
 
 
 def _ky_ve_thang(ky):
