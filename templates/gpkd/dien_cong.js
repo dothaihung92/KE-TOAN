@@ -256,6 +256,20 @@
   var daBamLuu = false;
   var gen = 0;
   var tt = [];
+  var daLuuXong = function (D, g) {
+    var ds = quet(D);
+    var tong = 0;
+    var sua = 0;
+    g.truong.forEach(function (t) {
+      var re;
+      try { re = new RegExp(t.nhan, 'i'); } catch (e) { return; }
+      var m = ds.filter(function (x) { return re.test(x.nhan); })[0];
+      if (!m) return;
+      tong++;
+      if (m.rs.some(function (r) { return !r.el.disabled; }) || m.os.some(function (o) { return !o.disabled && !o.readOnly; })) sua++;
+    });
+    return tong === 0 || sua <= tong / 2;
+  };
   var theoDoiLuu = async function (g, mygen) {
     var het = Date.now() + 60 * 60000;
     daBamLuu = false;
@@ -269,7 +283,7 @@
         [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).forEach(function (e) {
           if (!e.__dkkdL && chuan(tenNut(e)) === 'lưu') { e.__dkkdL = 1; e.addEventListener('click', function () { daBamLuu = true; }, true); }
         });
-        if (daBamLuu && !coTruong(D, g) && D.querySelectorAll('a').length) { await nghi(500); return true; }
+        if (daBamLuu && daLuuXong(D, g) && D.querySelectorAll('a').length) { await nghi(500); return true; }
       } catch (e) { }
     }
     return false;

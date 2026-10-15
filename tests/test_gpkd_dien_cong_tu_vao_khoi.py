@@ -22,26 +22,30 @@ PAGES = {
 XA = {"Hồ Chí Minh": ["", "Phường An Khánh", "Phường Bình Trưng"], "Cần Thơ": ["", "Phường Ninh Kiều"]}
 
 
-def trang_new(q):
+MODE = {"luu": "/luu"}
+
+
+def trang_new(q, khoa=False):
     """Trang 'Tạo mới' người đại diện — Tỉnh/Thành đổi là GỬI LẠI TRANG (postback toàn trang, giữ giá trị đã nhập) rồi nạp danh sách Xã/Phường tương ứng."""
     g = lambda k, d="": q.get(k, [d])[0]
     tp = g("tp", "Cần Thơ")
     ops = lambda ds, cur: "".join(f"<option{' selected' if x == cur else ''}>{x}</option>" for x in ds)
     nu = "checked" if g("g") == "2" else ""
     nam = "" if nu else "checked"
+    kh = " disabled" if khoa else ""
     return MENU + f"""<form id=f method=get action="/new"><table>
-<tr><td>Chức danh:</td><td><select id=cd name=cd>{ops(["", "Giám đốc", "Tổng giám đốc"], g("cd"))}</select></td></tr>
-<tr><td>Họ tên:</td><td><input id=ht name=ht value="{g('ht')}"></td></tr>
-<tr><td>Giới tính:</td><td><input type=radio name=g id=gn value=1 {nam}><label for=gn>Nam</label><input type=radio name=g id=gnu value=2 {nu}><label for=gnu>Nữ</label></td></tr>
-<tr><td>Ngày sinh:</td><td><input id=ns name=ns value="{g('ns')}"></td></tr>
-<tr><td>Số Giấy tờ pháp lý của cá nhân:</td><td><input id=cc name=cc value="{g('cc')}"></td></tr>
-<tr><td>Quốc gia:</td><td><select id=qg name=qg><option>Việt Nam</option></select></td></tr>
-<tr><td>Tỉnh/Thành phố:</td><td><select id=tp name=tp onchange="this.form.submit()">{ops(["Cần Thơ", "Hồ Chí Minh"], tp)}</select></td></tr>
-<tr><td>Xã/Phường/Đặc khu:</td><td><select id=xa name=xa>{ops(XA[tp], g("xa"))}</select></td></tr>
+<tr><td>Chức danh:</td><td><select id=cd name=cd{kh}>{ops(["", "Giám đốc", "Tổng giám đốc"], g("cd"))}</select></td></tr>
+<tr><td>Họ tên:</td><td><input id=ht name=ht value="{g('ht')}"{kh}></td></tr>
+<tr><td>Giới tính:</td><td><input type=radio name=g id=gn value=1 {nam}{kh}><label for=gn>Nam</label><input type=radio name=g id=gnu value=2 {nu}{kh}><label for=gnu>Nữ</label></td></tr>
+<tr><td>Ngày sinh:</td><td><input id=ns name=ns value="{g('ns')}"{kh}></td></tr>
+<tr><td>Số Giấy tờ pháp lý của cá nhân:</td><td><input id=cc name=cc value="{g('cc')}"{kh}></td></tr>
+<tr><td>Quốc gia:</td><td><select id=qg name=qg{kh}><option>Việt Nam</option></select></td></tr>
+<tr><td>Tỉnh/Thành phố:</td><td><select id=tp name=tp{kh} onchange="this.form.submit()">{ops(["Cần Thơ", "Hồ Chí Minh"], tp)}</select></td></tr>
+<tr><td>Xã/Phường/Đặc khu:</td><td><select id=xa name=xa{kh}>{ops(XA[tp], g("xa"))}</select></td></tr>
 <tr><td>Số nhà/đường/phố/tổ/xóm/ấp/thôn:</td><td><input id=sn name=sn value="{g('sn')}"></td></tr>
 <tr><td>Điện thoại:</td><td><input id=dt name=dt value="{g('dt')}"></td></tr>
 <tr><td>E-mail:</td><td><input id=em name=em value="{g('em')}"></td></tr>
-</table><div id=recaptcha><input type=checkbox id=rc> Tôi không phải là người máy</div><input type=button value="Đối chiếu với CSDLQG về dân cư" id=doichieu><input type=button value="Lưu" id=luu onclick="location='/luu'"></form>"""
+</table><div id=recaptcha><input type=checkbox id=rc> Tôi không phải là người máy</div><input type=button value="Đối chiếu với CSDLQG về dân cư" id=doichieu><input type=button value="Lưu" id=luu onclick="location='{MODE['luu']}'"></form>"""
 
 
 PAGES["/luu"] = MENU + "<table><tr><td>ĐINH THỊ HUỆ</td><td><a href=\"/sua\">Sửa đổi</a></td></tr></table>"      # sau khi Lưu, cổng về trang danh sách (không còn ô nhập)
@@ -54,7 +58,7 @@ class H(BaseHTTPRequestHandler):
         LOG.append(self.path)
         import urllib.parse as _u
         pr = _u.urlparse(self.path)
-        html = trang_new(_u.parse_qs(pr.query)) if pr.path == "/new" else PAGES.get(pr.path, "404")
+        html = trang_new(_u.parse_qs(pr.query)) if pr.path == "/new" else trang_new(_u.parse_qs(pr.query), khoa=True) if pr.path == "/luu2" else trang_new(_u.parse_qs(pr.query)) if pr.path == "/luu3" else PAGES.get(pr.path, "404")
         body = ("<meta charset=utf-8>" + html).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -195,4 +199,31 @@ assert r4["url2"].endswith("/dc") and r4["sn2"] == "30 Lê Lợi" and r4["dt2"] 
 assert "đã Lưu ✓" in r4["tt"], r4["tt"]
 assert "/xoa" not in LOG and "/sua" not in LOG, LOG
 print("PASS 3: nhiều khối: người dùng bấm Lưu khối 1 (về trang danh sách) thì phần mềm TỰ vào khối kế tiếp và điền; chưa Lưu thì đứng yên.")
+# Cổng THẬT sau khi Lưu vẫn ở lại cùng trang nhập (ô bị khóa, "Sửa đổi dữ liệu" bỏ tick) -> vẫn nhận ra đã Lưu và tự sang khối kế tiếp
+MODE["luu"] = "/luu2"
+LOG.clear()
+p5 = subprocess.run(["node", f4], capture_output=True, text=True, env=dict(env, DL=json.dumps(DL_TUDONG)), timeout=240)
+d5 = [x for x in p5.stdout.splitlines() if x.startswith("@@")]
+assert d5, p5.stdout + p5.stderr
+r5 = json.loads(d5[0][2:])
+assert r5["chuaLuu"].endswith("/new") and r5["url2"].endswith("/dc") and r5["sn2"] == "30 Lê Lợi", r5
+print("PASS 4: sau khi Lưu cổng ở lại trang nhập với các ô bị khóa -> phần mềm vẫn nhận ra đã Lưu và tự sang khối kế tiếp.")
+# Bấm Lưu nhưng cổng báo lỗi (vẫn là form nhập đang mở) -> KHÔNG tự sang khối khác
+MODE["luu"] = "/luu3"
+RUN_L = RUN_T.split("  await w.click('#luu');")[0] + r"""
+  await w.click('#luu');
+  await new Promise(ok => setTimeout(ok, 4500));
+  r.sau = w.url().split('?')[0];
+  console.log('@@' + JSON.stringify(r));
+  await b.close();
+})();
+"""
+f6 = os.path.join(tmp, "t6.js")
+open(f6, "w", encoding="utf-8").write(RUN_L)
+p6 = subprocess.run(["node", f6], capture_output=True, text=True, env=dict(env, DL=json.dumps(DL_TUDONG)), timeout=240)
+d6 = [x for x in p6.stdout.splitlines() if x.startswith("@@")]
+assert d6, p6.stdout + p6.stderr
+r6 = json.loads(d6[0][2:])
+assert r6["sau"].endswith("/luu3"), r6                                 # còn ô nhập mở (lỗi/chưa lưu được) -> đứng yên, không sang khối Địa chỉ
+print("PASS 5: bấm Lưu nhưng cổng vẫn hiện form nhập (lỗi) -> phần mềm không tự sang khối khác.")
 print("\nALL DONE")
