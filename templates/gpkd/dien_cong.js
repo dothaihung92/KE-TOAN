@@ -75,10 +75,13 @@
   };
 
   var cuaSoPhu = null;
-  var chayNhom = async function (g) {
+  var chayNhom = async function (g, taiCho) {
     var D = document;
     var w = null;
-    if (g.vao_khoi && (!coTruong(document, g) || g.truong.some(function (t) { return t.chuoi; }))) {
+    if (taiCho && cuaSoPhu && !cuaSoPhu.closed) {
+      w = cuaSoPhu;
+      D = w.document;
+    } else if (g.vao_khoi && (!coTruong(document, g) || g.truong.some(function (t) { return t.chuoi; }))) {
       w = window.open('', '_dkkd_dien', 'width=1250,height=900,scrollbars=yes,resizable=yes');
       try { if (w && (w.location.href === 'about:blank' || !w.document.querySelector('a'))) { w.location.href = location.href; } } catch (e0) { }
       if (!w) { alert('Chrome đang chặn cửa sổ bật lên. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
@@ -270,7 +273,30 @@
     });
     return tong === 0 || sua <= tong / 2;
   };
-  var theoDoiLuu = async function (g, mygen) {
+  var loiCong = function (D) {
+    var kq = [];
+    [].slice.call(D.querySelectorAll('div,span,p,li,td,font,label')).forEach(function (e) {
+      if (e.children.length > 2 || e.closest('#__dkkdTT') || e.closest('a')) return;
+      var t = sach(e.innerText);
+      if (t && t.length < 220 && /(captcha|mã xác thực|người máy).*(sai|không đúng|chưa)|không hợp lệ|vui lòng (nhập|chọn)|bắt buộc|^lỗi|sai mã/i.test(t) && e.offsetParent !== null && kq.indexOf(t) < 0) kq.push(t);
+    });
+    return kq.slice(0, 3);
+  };
+  var veTrangThai = function (D, ten, ke, loi, dienLai) {
+    var ex = D.getElementById('__dkkdTT');
+    if (ex) ex.remove();
+    var b = D.createElement('div');
+    b.id = '__dkkdTT';
+    b.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:400px;background:#fff;border:2px solid #2e7d32;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
+    var h = '<b>Khối "' + ten.replace(/</g, '&lt;') + '"</b> — đang chờ bạn <b>Lưu</b>' + (ke ? ' để tự sang khối <b>"' + ke.replace(/</g, '&lt;') + '"</b>' : '') + '.';
+    if (loi.length) h += '<div style="margin-top:6px;padding:6px;background:#ffe9e9;border-radius:6px;color:#a00"><b>Cổng báo:</b> ' + loi.map(function (x) { return x.replace(/</g, '&lt;'); }).join(' | ') + '<br>Hãy xử lý (ví dụ tick "Tôi không phải là người máy") rồi bấm <b>Lưu</b> lại.</div>';
+    h += '<div style="margin-top:8px"><button id="__dkkdLai" style="padding:4px 10px;margin-right:6px">Điền lại khối này</button><button id="__dkkdDongTT" style="padding:4px 10px">Ẩn</button></div>';
+    b.innerHTML = h;
+    D.body.appendChild(b);
+    D.getElementById('__dkkdDongTT').onclick = function () { b.remove(); };
+    D.getElementById('__dkkdLai').onclick = function () { dienLai(); };
+  };
+  var theoDoiLuu = async function (g, mygen, ten, ke, dienLai) {
     var het = Date.now() + 60 * 60000;
     daBamLuu = false;
     while (Date.now() < het && mygen === gen) {
@@ -283,7 +309,10 @@
         [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).forEach(function (e) {
           if (!e.__dkkdL && chuan(tenNut(e)) === 'lưu') { e.__dkkdL = 1; e.addEventListener('click', function () { daBamLuu = true; }, true); }
         });
-        if (daBamLuu && daLuuXong(D, g) && D.querySelectorAll('a').length) { await nghi(500); return true; }
+        if (daBamLuu && daLuuXong(D, g) && D.querySelectorAll('a').length) { await nghi(500); var cu0 = D.getElementById('__dkkdTT'); if (cu0) cu0.remove(); return true; }
+        var loi = loiCong(D);
+        var sig = loi.join('|');
+        if (D.__dkkdSig === undefined || sig !== D.__dkkdSig) { D.__dkkdSig = sig; veTrangThai(D, ten, ke, loi, dienLai); }
       } catch (e) { }
     }
     return false;
@@ -296,7 +325,7 @@
     if (mygen !== gen) return;
     if (i + 1 >= nhom.length) { tt[i].textContent = 'đã điền — kiểm tra rồi tự Lưu (khối cuối)'; return; }
     tt[i].textContent = 'đã điền — kiểm tra, xác nhận rồi bấm Lưu: phần mềm sẽ tự sang khối kế tiếp';
-    var luu = await theoDoiLuu(nhom[i], mygen);
+    var luu = await theoDoiLuu(nhom[i], mygen, nhom[i].ten || nhom[i].vao_khoi, nhom[i + 1].ten || nhom[i + 1].vao_khoi, function () { chayNhom(nhom[i], true); });
     if (mygen !== gen) return;
     if (luu) { tt[i].textContent = 'đã Lưu ✓'; await chayKhoi(i + 1); }
     else { tt[i].textContent = 'chưa thấy bạn Lưu xong — khi xong bấm khối kế tiếp trong bảng'; }

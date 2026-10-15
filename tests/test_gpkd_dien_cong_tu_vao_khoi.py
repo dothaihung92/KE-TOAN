@@ -58,7 +58,7 @@ class H(BaseHTTPRequestHandler):
         LOG.append(self.path)
         import urllib.parse as _u
         pr = _u.urlparse(self.path)
-        html = trang_new(_u.parse_qs(pr.query)) if pr.path == "/new" else trang_new(_u.parse_qs(pr.query), khoa=True) if pr.path == "/luu2" else trang_new(_u.parse_qs(pr.query)) if pr.path == "/luu3" else PAGES.get(pr.path, "404")
+        html = trang_new(_u.parse_qs(pr.query)) if pr.path == "/new" else trang_new(_u.parse_qs(pr.query), khoa=True) if pr.path == "/luu2" else ("<div style=\"background:#fde;color:#a00\">Nhập mã Captcha sai.</div>" + trang_new(_u.parse_qs(pr.query))) if pr.path == "/luu3" else PAGES.get(pr.path, "404")
         body = ("<meta charset=utf-8>" + html).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -214,6 +214,11 @@ RUN_L = RUN_T.split("  await w.click('#luu');")[0] + r"""
   await w.click('#luu');
   await new Promise(ok => setTimeout(ok, 4500));
   r.sau = w.url().split('?')[0];
+  r.panel = await w.innerText('#__dkkdTT');
+  r.htRong = await w.inputValue('#ht');
+  await w.click('#__dkkdLai');
+  await w.waitForFunction(() => document.getElementById('ht').value === 'ĐINH THỊ HUỆ', null, { timeout: 30000 });
+  r.htLai = await w.inputValue('#ht');
   console.log('@@' + JSON.stringify(r));
   await b.close();
 })();
@@ -225,5 +230,7 @@ d6 = [x for x in p6.stdout.splitlines() if x.startswith("@@")]
 assert d6, p6.stdout + p6.stderr
 r6 = json.loads(d6[0][2:])
 assert r6["sau"].endswith("/luu3"), r6                                 # còn ô nhập mở (lỗi/chưa lưu được) -> đứng yên, không sang khối Địa chỉ
+assert "Cổng báo" in r6["panel"] and "Nhập mã Captcha sai" in r6["panel"] and "Điền lại khối này" in r6["panel"], r6["panel"]      # báo lại lỗi của cổng, không biến mất sau khi trang tải lại
+assert r6["htRong"] == "" and r6["htLai"] == "ĐINH THỊ HUỆ", r6        # nút "Điền lại khối này" điền lại ngay trên trang đang mở
 print("PASS 5: bấm Lưu nhưng cổng vẫn hiện form nhập (lỗi) -> phần mềm không tự sang khối khác.")
 print("\nALL DONE")
