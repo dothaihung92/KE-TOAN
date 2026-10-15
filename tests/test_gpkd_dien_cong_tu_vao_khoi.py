@@ -14,7 +14,7 @@ import server
 # Nút "Điền dữ liệu GPKD" TỰ VÀO ĐÚNG KHỐI: mở cửa sổ phụ -> bấm mục menu "Người đại diện theo pháp luật" -> bấm "Tạo mới" -> điền các ô
 # (Chức danh, Họ tên, Giới tính, Ngày sinh, Số giấy tờ, Số nhà, Điện thoại, Email). KHÔNG bấm Lưu/Xóa, không đụng reCAPTCHA/"Đối chiếu".
 # Chạy trên cổng GIẢ LẬP (máy chủ cục bộ) có cấu trúc giống cổng thật qua ảnh người dùng gửi; chưa thử cổng thật.
-MENU = ('<div id=menu><a href="/ov">Hình thức đăng ký</a> <a href="/dc">Địa chỉ</a> <a id=mdd href="/list">Người đại diện theo pháp luật</a> <a href="/uq">Thông tin về người đại diện theo ủy quyền</a></div>')
+MENU = ('<div id=menu><a href="/ov">Hình thức đăng ký</a> <a href="/dc">Địa chỉ</a> <a id=mdd href="/list">Người đại diện theo pháp luật</a> <a href="/uq">Thông tin về người đại diện theo ủy quyền</a> <a id=mthue href="/thue">Thông tin về thuế</a></div>')
 PAGES = {
     "/ov": MENU + "<table><tr><td>Hình thức đăng ký:</td><td>Đăng ký thay đổi</td></tr></table>",
     "/list": MENU + '<table><tr><td>ĐINH THỊ HUỆ</td><td><a href="/sua">Sửa đổi</a></td><td><a id=xoa href="/xoa">Xóa</a></td></tr></table><input type=button id=tm value="Tạo mới" onclick="location=\'/new\'">'
@@ -48,6 +48,12 @@ def trang_new(q, khoa=False):
 </table><div id=recaptcha><input type=checkbox id=rc> Tôi không phải là người máy</div><input type=button value="Đối chiếu với CSDLQG về dân cư" id=doichieu><input type=button value="Lưu" id=luu onclick="location='{MODE['luu']}'"></form>"""
 
 
+PAGES["/thue"] = MENU + """<div class=sec><div class=tt>Giám đốc/Tổng giám đốc</div><table><tr><th>Họ và tên</th><th>Chức vụ</th></tr><tr><td>VÕ THỊ RI</td><td>Giám đốc/Tổng Giám đốc</td></tr></table><input type=button id=tm_gd value="Tạo mới" onclick="location='/gd_new'"></div>
+<div class=sec><div class=tt>Kế toán trưởng/ Phụ trách kế toán</div><table><tr><th>Họ và tên</th></tr><tr><td>ĐINH THỊ HUỆ</td></tr></table><input type=button id=tm_kt value="Tạo mới" onclick="location='/kt_new'"></div>
+<div class=sec><div class=tt>Địa chỉ nhận thông báo thuế</div><input type=radio name=dc id=r1><label for=r1>Giống địa chỉ trụ sở chính</label><input type=radio name=dc id=r2 checked><label for=r2>Giống địa chỉ chủ sở hữu</label><input type=radio name=dc id=r3><label for=r3>Địa chỉ khác</label>
+<table><tr><td>Ngày bắt đầu hoạt động:</td><td><input id=nbd></td></tr><tr><td>Tổng số lao động:</td><td><input id=ld></td></tr></table><input type=button id=luu value="Lưu"></div>"""
+for _n in ("gd", "kt"):
+    PAGES["/%s_new" % _n] = MENU + '<form onsubmit="return false"><table><tr><td>Họ và tên:</td><td><input id=ht></td></tr><tr><td>Điện thoại:</td><td><input id=dt></td></tr></table><input type=button id=luu value="Lưu" onclick="location=\'/luu\'"></form>'
 PAGES["/luu"] = MENU + "<table><tr><td>ĐINH THỊ HUỆ</td><td><a href=\"/sua\">Sửa đổi</a></td></tr></table>"      # sau khi Lưu, cổng về trang danh sách (không còn ô nhập)
 PAGES["/dc"] = MENU + """<form onsubmit="return false"><table><tr><td>Số nhà/đường/phố/tổ/xóm/ấp/thôn:</td><td><input id=sn></td></tr><tr><td>Điện thoại:</td><td><input id=dt></td></tr></table><input type=button value="Lưu" id=luu></form>"""
 LOG = []
@@ -233,4 +239,46 @@ assert r6["sau"].endswith("/luu3"), r6                                 # còn ô
 assert "Cổng báo" in r6["panel"] and "Nhập mã Captcha sai" in r6["panel"] and "Điền lại khối này" in r6["panel"], r6["panel"]      # báo lại lỗi của cổng, không biến mất sau khi trang tải lại
 assert r6["htRong"] == "" and r6["htLai"] == "ĐINH THỊ HUỆ", r6        # nút "Điền lại khối này" điền lại ngay trên trang đang mở
 print("PASS 5: bấm Lưu nhưng cổng vẫn hiện form nhập (lỗi) -> phần mềm không tự sang khối khác.")
+# KHỐI THUẾ: bấm đúng nút "Tạo mới" của MỤC (Giám đốc / Kế toán trưởng), chọn radio địa chỉ theo nhãn
+TR_GD = [{"ten": "Họ tên", "nhan": "^họ.*tên", "gia_tri": "ĐINH THỊ HUỆ", "tien_to": False, "khoi": "Thông tin về thuế"}, {"ten": "Điện thoại", "nhan": "^điện thoại", "gia_tri": "0900000001", "tien_to": False, "khoi": "Thông tin về thuế"}]
+TR_KH = [{"ten": "Địa chỉ nhận thông báo thuế = địa chỉ trụ sở chính", "radio": "Giống địa chỉ trụ sở chính", "gia_tri": "x", "khoi": "Thông tin về thuế", "chuoi": True},
+         {"ten": "Ngày bắt đầu hoạt động", "nhan": "^ngày bắt đầu", "gia_tri": "20/08/2019", "tien_to": False, "khoi": "Thông tin về thuế"},
+         {"ten": "Tổng số lao động", "nhan": "^(tổng )?số lao động", "gia_tri": "12", "tien_to": False, "khoi": "Thông tin về thuế"}]
+GT_GD = {"ten": "Thuế — Giám đốc", "vao_khoi": "Thông tin về thuế", "tao_moi": True, "muc_tao_moi": "Giám đốc/Tổng giám đốc", "truong": TR_GD}
+GT_KT = {"ten": "Thuế — Kế toán", "vao_khoi": "Thông tin về thuế", "tao_moi": True, "muc_tao_moi": "Kế toán trưởng/Phụ trách kế toán", "truong": [dict(t, gia_tri="NGUYỄN THỊ KẾ") if t["ten"] == "Họ tên" else t for t in TR_GD]}
+GT_KH = {"ten": "Thuế — địa chỉ & khác", "vao_khoi": "Thông tin về thuế", "tao_moi": False, "truong": TR_KH}
+RUN_TX = RUN.split("  const pop = ctx.waitForEvent('page');")[0] + r"""
+  const pop = ctx.waitForEvent('page');
+  await pg.evaluate(process.env.JS);
+  const w = await pop;
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  const r = { gdUrl: w.url().split('?')[0], gdHt: await w.inputValue('#ht') };
+  await w.click('#luu');
+  await w.waitForURL(/\/kt_new$/, { timeout: 60000 });
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  r.ktHt = await w.inputValue('#ht');
+  await w.click('#luu');
+  await w.waitForURL(/\/thue$/, { timeout: 60000 });
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  r.r1 = await w.$eval('#r1', e => e.checked); r.r2 = await w.$eval('#r2', e => e.checked);
+  r.nbd = await w.inputValue('#nbd'); r.ld = await w.inputValue('#ld');
+  r.tabs = ctx.pages().length;
+  console.log('@@' + JSON.stringify(r));
+  await b.close();
+})();
+"""
+f7 = os.path.join(tmp, "t7.js")
+open(f7, "w", encoding="utf-8").write(RUN_TX)
+LOG.clear()
+DL_TX = {"dkkd_dien": 1, "ban": "x", "nhom": [GT_GD, GT_KT, GT_KH], "truong": TR_GD + TR_KH, "bo_qua": []}
+p7 = subprocess.run(["node", f7], capture_output=True, text=True, env=dict(env, DL=json.dumps(DL_TX)), timeout=300)
+d7 = [x for x in p7.stdout.splitlines() if x.startswith("@@")]
+assert d7, p7.stdout + p7.stderr
+r7 = json.loads(d7[0][2:])
+assert r7["gdUrl"].endswith("/gd_new") and r7["gdHt"] == "ĐINH THỊ HUỆ", r7                        # bấm "Tạo mới" của mục Giám đốc (không phải của Kế toán trưởng)
+assert r7["ktHt"] == "NGUYỄN THỊ KẾ", r7                                                              # sau Lưu: tự sang mục Kế toán trưởng, bấm "Tạo mới" của mục đó
+assert r7["r1"] is True and r7["r2"] is False and r7["nbd"] == "20/08/2019" and r7["ld"] == "12", r7  # chọn radio 'Giống địa chỉ trụ sở chính' + điền ngày bắt đầu, số lao động
+assert r7["tabs"] == 2, r7                                                                            # 1 tab phụ trong CÙNG cửa sổ trình duyệt (không mở cửa sổ riêng)
+assert "/xoa" not in LOG and "/sua" not in LOG, LOG
+print("PASS 6: khối Thông tin về thuế: bấm đúng 'Tạo mới' của mục Giám đốc rồi Kế toán trưởng (tự sang sau khi Lưu), chọn radio địa chỉ theo nhãn, điền ngày bắt đầu/số lao động.")
 print("\nALL DONE")

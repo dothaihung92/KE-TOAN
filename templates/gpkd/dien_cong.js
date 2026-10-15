@@ -4,7 +4,13 @@
   var BAN = '__BAN_NUT__';
   var sach = function (s) { return (s || '').replace(/\s+/g, ' ').trim(); };
   var chuan = function (s) { return sach(s).normalize('NFC').toLowerCase().replace(/[:*]+$/, '').trim(); };
-  var nghi = function (ms) { return new Promise(function (ok) { setTimeout(ok, ms); }); };
+  var cho_doi = [];
+  var dongHo = null;
+  try {
+    dongHo = new Worker(URL.createObjectURL(new Blob(['setInterval(function(){postMessage(1)},250)'], { type: 'text/javascript' })));
+    dongHo.onmessage = function () { var bay = Date.now(); cho_doi = cho_doi.filter(function (x) { if (x.t <= bay) { x.ok(); return false; } return true; }); };
+  } catch (eW) { dongHo = null; }
+  var nghi = function (ms) { return new Promise(function (ok) { if (dongHo) cho_doi.push({ t: Date.now() + ms, ok: ok }); else setTimeout(ok, ms); }); };
   var txt = null;
   try { txt = await navigator.clipboard.readText(); } catch (e) { txt = null; }
   var dl = null;
@@ -63,6 +69,19 @@
       return n === vv;
     })[0] || null;
   };
+  var timTaoMoiTrongMuc = function (D, muc) {
+    var ns = function (x) { return chuan(x).replace(/\s+/g, ''); };
+    var tieuDe = [].slice.call(D.querySelectorAll('div,td,th,span,legend,b,h1,h2,h3,h4,p')).filter(function (e) { return e.children.length <= 1 && ns(e.innerText) === ns(muc); })[0];
+    if (!tieuDe) return null;
+    var cur = tieuDe;
+    for (var k = 0; k < 7; k++) {
+      cur = cur.parentElement;
+      if (!cur) break;
+      var bs = [].slice.call(cur.querySelectorAll('a,input[type=button],input[type=submit],button')).filter(function (e) { return chuan(e.tagName === 'INPUT' ? e.value : e.innerText) === 'tạo mới' && (tieuDe.compareDocumentPosition(e) & 4); });
+      if (bs.length) return bs[0];
+    }
+    return null;
+  };
   var bamVaCho = async function (w, e, dieuKien) {
     w.__dkkdMark = 1;
     e.click();
@@ -75,6 +94,13 @@
   };
 
   var cuaSoPhu = null;
+  var daBamLuu = false;
+  var ganNgheLuu = function (D) {
+    [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).forEach(function (e) {
+      var ten = e.tagName === 'INPUT' ? e.value : e.innerText;
+      if (!e.__dkkdL && chuan(ten) === 'lưu') { e.__dkkdL = 1; e.addEventListener('click', function () { daBamLuu = true; }, true); }
+    });
+  };
   var nhom_tong = (dl.nhom && dl.nhom.length) || 1;
   var chayNhom = async function (g, taiCho) {
     var D = document;
@@ -83,17 +109,17 @@
       w = cuaSoPhu;
       D = w.document;
     } else if (g.vao_khoi && (!coTruong(document, g) || g.truong.some(function (t) { return t.chuoi; }))) {
-      w = window.open('', '_dkkd_dien', 'width=1250,height=900,scrollbars=yes,resizable=yes');
+      w = window.open('', '_dkkd_dien');
       try { if (w && (w.location.href === 'about:blank' || !w.document.querySelector('a'))) { w.location.href = location.href; } } catch (e0) { }
-      if (!w) { alert('Chrome đang chặn cửa sổ bật lên. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
+      if (!w) { alert('Chrome đang chặn tab/cửa sổ mới. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
       var menuOk = await cho(w, function (d) { return !!timBam(d, g.vao_khoi, 'a'); }, 40);
       if (!menuOk) { alert('Không thấy mục "' + g.vao_khoi + '" trong menu KHỐI DỮ LIỆU của cổng (có thể chưa đăng nhập hoặc đang ở trang khác). Hãy mở hồ sơ rồi bấm lại.'); return; }
       var mk = timBam(w.document, g.vao_khoi, 'a');
       var vaoMenu = await bamVaCho(w, mk, function (d) { return true; });
       if (!vaoMenu) { alert('Chưa mở được khối "' + g.vao_khoi + '". Bạn tự bấm mục đó trong menu rồi bấm lại nút này.'); return; }
       if (g.tao_moi && !coTruong(w.document, g)) {
-        var nut = timBam(w.document, 'Tạo mới');
-        if (!nut) { alert('Không thấy nút "Tạo mới" trong khối "' + g.vao_khoi + '". Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+        var nut = g.muc_tao_moi ? timTaoMoiTrongMuc(w.document, g.muc_tao_moi) : timBam(w.document, 'Tạo mới');
+        if (!nut) { alert('Không thấy nút "Tạo mới"' + (g.muc_tao_moi ? ' của mục "' + g.muc_tao_moi + '"' : '') + ' trong khối "' + g.vao_khoi + '". Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
         var vaoForm = await bamVaCho(w, nut, function (d) { return true; });
         if (!vaoForm) { alert('Chưa mở được trang nhập. Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
       }
@@ -143,7 +169,21 @@
       r.el.parentNode.style.background = '#fff3a0';
       return true;
     };
+    var chonRadioNhan = function (t) {
+      var vv = chuan(t.radio);
+      var rs = layR(D.body, D).filter(function (x) { return x.nhan === vv && !x.el.disabled; });
+      if (!rs.length) { khong.push(t.ten + ' (không thấy lựa chọn "' + t.radio + '")'); return; }
+      var truoc = layR(D.body, D).filter(function (x) { return x.el.checked && x.el.name === rs[0].el.name; })[0];
+      cu.push({ radio: ref(rs[0].el), truoc: truoc ? ref(truoc.el) : null });
+      var doi = !rs[0].el.checked;
+      if (doi) rs[0].el.click();
+      rs[0].el.checked = true;
+      rs[0].el.parentNode.style.background = '#fff3a0';
+      daDien.push(t.ten);
+      return doi ? rs[0].el : null;
+    };
     var xuLy = function (t, dsO) {
+      if (t.radio) return chonRadioNhan(t);
       var re;
       try { re = new RegExp(t.nhan, 'i'); } catch (e) { return null; }
       var tim = dsO.filter(function (x) { return re.test(x.nhan) && daDung.indexOf(x.nhan) < 0; });
@@ -207,7 +247,7 @@
       var dsC = quet(D);
       var selMoi = null;
       var chay = 0;
-      while (chay < 14) {
+      while (!tc.radio && chay < 14) {
         var re2; try { re2 = new RegExp(tc.nhan, 'i'); } catch (e) { re2 = null; }
         var mC = re2 && dsC.filter(function (x) { return re2.test(x.nhan) && x.os.some(function (o) { return o.tagName === 'SELECT'; }); })[0];
         if (mC && mC.os.some(function (o) { return o.tagName === 'SELECT' && o.options.length > 1; })) break;
@@ -247,6 +287,7 @@
     if (khong.length) h += '<div style="margin-top:6px;color:#b45309"><b>Chưa điền được (nhập tay):</b><br>' + khong.map(function (x) { return '• ' + x.replace(/</g, '&lt;'); }).join('<br>') + '</div>';
     h += '<div style="margin-top:8px"><button id="__dkkdHoan" style="padding:4px 10px;margin-right:6px">Hoàn tác</button><button id="__dkkdDong" style="padding:4px 10px">Đóng</button> <span style="color:#888;font-size:11px">bản ' + BAN + '</span></div>';
     if (w) cuaSoPhu = w;
+    ganNgheLuu(D);
     hop.innerHTML = h;
     D.body.appendChild(hop);
     D.getElementById('__dkkdDong').onclick = function () { hop.remove(); };
@@ -262,7 +303,6 @@
   var nhom = dl.nhom && dl.nhom.length ? dl.nhom : [{ ten: dl.vao_khoi || '', vao_khoi: dl.vao_khoi, tao_moi: dl.tao_moi, truong: dl.truong, luu_y: dl.luu_y }];
   if (nhom.length === 1) { await chayNhom(nhom[0]); return; }
   var tenNut = function (e) { return e.tagName === 'INPUT' ? e.value : e.innerText; };
-  var daBamLuu = false;
   var gen = 0;
   var tt = [];
   var daLuuXong = function (D, g) {
@@ -304,7 +344,6 @@
   };
   var theoDoiLuu = async function (g, mygen, ten, ke, dienLai) {
     var het = Date.now() + 60 * 60000;
-    daBamLuu = false;
     while (Date.now() < het && mygen === gen) {
       await nghi(600);
       var w = cuaSoPhu;
@@ -312,9 +351,7 @@
       try {
         var D = w.document;
         if (D.readyState !== 'complete') continue;
-        [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).forEach(function (e) {
-          if (!e.__dkkdL && chuan(tenNut(e)) === 'lưu') { e.__dkkdL = 1; e.addEventListener('click', function () { daBamLuu = true; }, true); }
-        });
+        ganNgheLuu(D);
         if (daBamLuu && daLuuXong(D, g) && D.querySelectorAll('a').length) { await nghi(500); var cu0 = D.getElementById('__dkkdTT'); if (cu0) cu0.remove(); return true; }
         var loi = loiCong(D);
         var sig = loi.join('|');
@@ -325,6 +362,7 @@
   };
   var chayKhoi = async function (i) {
     var mygen = ++gen;
+    daBamLuu = false;
     tt[i].style.color = '#2e7d32';
     tt[i].textContent = 'đang chạy…';
     try { await chayNhom(nhom[i]); } catch (e) { tt[i].style.color = '#b00'; tt[i].textContent = 'lỗi: ' + e; return; }

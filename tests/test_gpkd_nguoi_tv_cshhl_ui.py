@@ -97,10 +97,12 @@ ch = {x["ten"]: x for x in r["dien"]["truong"]}
 assert ch["Tỉnh/Thành phố"]["gia_tri"] == "Thành phố Hồ Chí Minh" and ch["Xã/Phường/Đặc khu"]["gia_tri"] == "Phường Bình Trưng" and ch["Tỉnh/Thành phố"]["chuoi"] and ch["Xã/Phường/Đặc khu"]["chuoi"], ch
 assert ch["Số nhà/đường/phố…"]["gia_tri"] == "Số nhà 91, Đường 13", ch      # địa chỉ 1 ô được tách: số nhà / xã / tỉnh
 kh = [g["ten"] for g in r["dien2"]["nhom"]]
-assert "Thông tin về thuế" in kh and kh.index("Người đại diện theo pháp luật") < kh.index("Thông tin về thuế"), kh      # khối thuế đi sau người đại diện
-tx = {x["ten"]: x for g in r["dien2"]["nhom"] if g["ten"] == "Thông tin về thuế" for x in g["truong"]}
-assert tx["Kế toán trưởng — họ tên"]["gia_tri"] == "NGUYỄN THỊ KẾ" and tx["Tổng số lao động"]["gia_tri"] == "12", tx
-print("PASS 3c2: có khối 'Thông tin về thuế' trong dữ liệu điền (sau người đại diện) để tự sang sau khi Lưu.")
+assert kh == ["Người đại diện theo pháp luật", "Thuế — Kế toán trưởng/Phụ trách kế toán", "Thuế — địa chỉ nhận thông báo & thông tin khác"], kh      # các khối thuế đi sau người đại diện
+g_kt = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — Kế toán"))
+g_kh = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — địa chỉ"))
+assert g_kt["tao_moi"] and g_kt["muc_tao_moi"] == "Kế toán trưởng/ Phụ trách kế toán" and g_kt["vao_khoi"] == "Thông tin về thuế" and g_kt["truong"][0]["gia_tri"] == "NGUYỄN THỊ KẾ", g_kt
+assert any(x["ten"] == "Tổng số lao động" and x["gia_tri"] == "12" for x in g_kh["truong"]) and not g_kh["tao_moi"], g_kh
+print("PASS 3c2: khối 'Thông tin về thuế' tách thành các mục (Giám đốc, Kế toán trưởng: bấm 'Tạo mới' trong đúng mục; địa chỉ & thông tin khác) đi sau người đại diện.")
 print("PASS 3c: địa chỉ 1 ô tách thành Số nhà, Tỉnh/Thành, Xã/Phường (2 ô chọn nối tiếp) trong dữ liệu điền.")
 print("PASS 3b: dữ liệu điền lên cổng lấy từ ô đã nhập (họ tên IN HOA, số giấy tờ), mục chưa hỗ trợ được báo.")
 assert "thue" in r["thue"]["loai"] and r["thue"]["thue"]["kt_ho_ten"] == "Nguyễn Thị Kế" and r["thue"]["thue"]["lao_dong"] == "12", r["thue"]
