@@ -112,4 +112,10 @@ i_xm = src.index("invs = invs + _xac_minh_hoa_don_bi_sot(")
 i_del = src.index('"DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?"', i_xm)
 assert i_del - i_xm < 1500
 print("PASS 6: luồng tra cứu dùng dò ổn định + xác minh trước khi xóa dữ liệu cũ.")
+
+# 7) Tra cứu hóa đơn HÀNG LOẠT dùng CHUNG _run_fetch_job (cùng 2 lớp trên) cho từng công ty, mặc định có máy tính tiền
+i_batch = src.index("_run_fetch_job(cid, body)   # chạy đồng bộ trong thread riêng của công ty này")
+assert src.count("_run_fetch_job(cid, body)") >= 2 and i_batch > src.index("def _run_fetch_job(")
+assert 'body.get("he_thong_list", ["query", "sco-query"])' in src
+print("PASS 7: tra cứu hàng loạt dùng chung luồng tra cứu (dò phiên mới + xác minh HĐ bị sót).")
 print("ALL DONE")
