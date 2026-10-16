@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-15.229"
+APP_BUILD = "2026-10-16.230"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -805,7 +805,7 @@ class GDTClient:
                 if dung_chung:
                     dung_chung.acquire()
                 try:
-                    ket_qua = self._query_one_range(
+                    ket_qua = self._query_one_range_on_dinh(
                         s_from, s_to, loai, page_size, he_thong,
                         progress=_progress_doan, ttxly_can_do=ttxly_can_do,
                         cancel_check=cancel_check)
@@ -885,7 +885,7 @@ class GDTClient:
             if dung_chung:
                 dung_chung.acquire()
             try:
-                ket_qua = self._query_one_range(
+                ket_qua = self._query_one_range_on_dinh(
                     s_from, s_to, loai, page_size, he_thong, progress=_progress_thang,
                     cancel_check=cancel_check)
             finally:
@@ -956,6 +956,55 @@ class GDTClient:
             action = "Tìm kiếm (hóa đơn %sbán ra)" % ("máy tính tiền " if is_mtt else "")
             tong = self._dem_tong_nhanh(url, date_filter, action, progress, cancel_check=cancel_check)
             return tong == 0   # None (không chắc) -> False -> dò đầy đủ
+
+    # Hệ thống MÁY TÍNH TIỀN (sco-query) của trang Thuế trả kết quả KHÔNG ỔN ĐỊNH:
+    # cùng 1 kỳ, gọi 2 lần có thể ra danh sách KHÁC NHAU (ca thật: lần 1 thiếu 5 HĐ bán
+    # ra C26MCF tháng 9, lần 2 thiếu 2 HĐ mua vào tháng 8 — trong khi 'total' trang
+    # Thuế báo cũng khớp đúng số thiếu đó, nên kiểm tra theo total không phát hiện
+    # được). Vì vậy với máy tính tiền: dò mỗi tháng ÍT NHẤT 2 lần, GỘP (hợp) các lần,
+    # dò tiếp tới khi 1 lần dò KHÔNG thêm được hóa đơn mới nào (tối đa MTT_SO_LAN_DO).
+    # Chỉ gộp hóa đơn trang Thuế THẬT SỰ trả về — không tự thêm/bớt gì.
+    MTT_SO_LAN_DO = 4
+
+    def _query_one_range_on_dinh(self, tu_ngay, den_ngay, loai="purchase",
+                                 page_size=50, he_thong="query", progress=None,
+                                 ttxly_can_do=None, cancel_check=None):
+        if he_thong != "sco-query":
+            return self._query_one_range(tu_ngay, den_ngay, loai, page_size, he_thong,
+                                         progress=progress, ttxly_can_do=ttxly_can_do,
+                                         cancel_check=cancel_check)
+        gop, khoa_da_co = [], set()
+        total_max = 0
+        loi_moi_lan, that_bai_moi_lan = [], []
+        so_lan = 0
+        for lan in range(self.MTT_SO_LAN_DO):
+            if cancel_check and cancel_check():
+                raise Exception("CANCELLED")
+            if lan and progress:
+                progress(f"dò lại lần {lan + 1} để đối chiếu (máy tính tiền trả kết quả không ổn định)...")
+            res, total, loi, that_bai = self._query_one_range(
+                tu_ngay, den_ngay, loai, page_size, he_thong, progress=progress,
+                ttxly_can_do=ttxly_can_do, cancel_check=cancel_check)
+            so_lan += 1
+            them = 0
+            for inv in res:
+                k = (inv.get("khmshdon"), inv.get("khhdon"), inv.get("shdon"), inv.get("nbmst"))
+                if k not in khoa_da_co:
+                    khoa_da_co.add(k)
+                    gop.append(inv)
+                    them += 1
+            total_max = max(total_max, total or 0)
+            loi_moi_lan.append(loi)
+            that_bai_moi_lan.append(set(that_bai))
+            if lan >= 1 and them == 0 and not that_bai:
+                break
+            if lan >= 1 and them and progress:
+                progress(f"⚠ lần dò {lan + 1} có thêm {them} hóa đơn mà lần trước trang Thuế không trả — đã gộp, dò tiếp để chắc chắn...")
+        # chỉ coi là LỖI khi trạng thái đó lỗi ở MỌI lần dò (lần khác đã lấy được thì không lỗi)
+        that_bai_chung = set.intersection(*that_bai_moi_lan) if that_bai_moi_lan else set()
+        loi_chung = [l for l in loi_moi_lan[-1]
+                     if any(str(t) in l for t in that_bai_chung if t is not None) or None in that_bai_chung]
+        return gop, max(total_max, len(gop)), loi_chung, sorted(that_bai_chung, key=lambda x: (x is None, x or 0))
 
     def _query_one_range(self, tu_ngay, den_ngay, loai="purchase",
                          page_size=50, he_thong="query", progress=None,
