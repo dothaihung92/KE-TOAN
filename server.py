@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-16.231"
+APP_BUILD = "2026-10-16.232"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9056,6 +9056,11 @@ def _run_fetch_job(cid: int, body: dict):
                             tthai_moi = str(inv.get("tthai") or "")
                             fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0", _chuan_mst(nbmst)[:10])
                             fpath = _file_index_dl.get(fkey) or _file_index_dl_2.get(fkey[:2])
+                            if fpath and not _file_khop_hoa_don(fpath, khhdon, shdon, nbmst):
+                                if len(ly_do_tai_lai_du_co_file) < 10:
+                                    ly_do_tai_lai_du_co_file.append(
+                                        f"{khhdon} {shdon}: file trùng tên trên máy là của HÓA ĐƠN KHÁC ({os.path.basename(fpath)}) — bỏ qua file đó")
+                                fpath = None
                             if fpath:
                                 doc_duoc = _doc_kiem_tra_file_hoadon(fpath)
                                 if (tthai_cu is None or tthai_cu == tthai_moi) and doc_duoc:
@@ -9514,6 +9519,62 @@ def _new_fetch_job():
             "limiter": DynamicLimiter(SP().get("song_song", 4))}
 
 
+_CACHE_DAU_FILE_HD = {}
+
+
+def _dau_hoa_don_xml(data):
+    """(ký hiệu, số HĐ bỏ số 0 đầu, MST người bán chuẩn hoá) đọc từ NỘI DUNG file XML/ZIP; None nếu không đọc được."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(_extract_invoice_xml(data))
+    except Exception:
+        return None
+    def tim(node, tag):
+        el = node.find(f".//{tag}") if node is not None else None
+        return el.text.strip() if el is not None and el.text else ""
+    nban = root.find(".//NBan")
+    return (tim(root, "KHHDon"), tim(root, "SHDon").lstrip("0") or "0", _chuan_mst(tim(nban, "MST")))
+
+
+def _file_khop_hoa_don(fpath, khhdon, shdon, nbmst):
+    """File đã tải trên máy có ĐÚNG LÀ của hoá đơn này không — so NỘI DUNG file (ký hiệu + số + MST người bán),
+    KHÔNG tin tên file. Ca thật: máy có nhiều file đã tải, khoá theo tên file (ký hiệu+số, MST cắt 10 số, hoặc tên
+    file cũ không có MST) ghép NHẦM file của hoá đơn khác -> 'tự sửa ngày lập' theo file sai đẩy hoá đơn ra ngoài
+    kỳ -> mất khỏi bảng kê, mỗi lần tra cứu ra số khác; xoá hết file tải lại thì hết lỗi."""
+    try:
+        st = os.stat(fpath)
+        ck = (fpath, st.st_mtime, st.st_size)
+        dau = _CACHE_DAU_FILE_HD.get(ck)
+        if dau is None:
+            with open(fpath, "rb") as f:
+                data = f.read()
+            if fpath.lower().endswith(".zip"):
+                import zipfile as _zf, io as _io
+                try:
+                    z = _zf.ZipFile(_io.BytesIO(data))
+                    xn = next((n for n in z.namelist() if n.lower().endswith(".xml")), None)
+                    if xn:
+                        data = z.read(xn)
+                except Exception:
+                    pass
+            dau = _dau_hoa_don_xml(data) or ("", "", "")
+            if len(_CACHE_DAU_FILE_HD) > 50000:
+                _CACHE_DAU_FILE_HD.clear()
+            _CACHE_DAU_FILE_HD[ck] = dau
+    except Exception:
+        return False
+    return _dau_khop(dau, khhdon, shdon, nbmst)
+
+
+def _dau_khop(dau, khhdon, shdon, nbmst):
+    if not dau or not dau[0] or not dau[1]:
+        return False
+    if dau[0] != str(khhdon or "").strip() or dau[1] != (str(shdon or "").strip().lstrip("0") or "0"):
+        return False
+    mst = _chuan_mst(nbmst)
+    return not (dau[2] and mst and dau[2] != mst)
+
+
 def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
     """Sửa lại NGÀY LẬP (tdlap) của hóa đơn trong DB nếu ngày trong file XML
     thật (<NLap>) khác với ngày trang Thuế trả về lúc tra cứu danh sách.
@@ -9525,6 +9586,8 @@ def _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, zdata):
     dung hóa đơn) nên khi đã tải được, dùng ngày trong XML để tự sửa lại
     cho đúng, không phụ thuộc ngày (có thể sai) của API tra cứu danh sách."""
     try:
+        if not _dau_khop(_dau_hoa_don_xml(zdata), inv.get("khhdon"), inv.get("shdon"), inv.get("nbmst")):
+            return          # file không đúng hoá đơn này -> KHÔNG sửa ngày theo file sai
         rows = _parse_xml_invoice(zdata)
         ngay_xml = (rows[0].get("ngay") or "").strip() if rows else ""
         if not ngay_xml:
@@ -41784,7 +41847,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         khh = str(r["khhdon"] or "").strip()
         sho = str(r["shdon"] or "").strip().lstrip("0") or "0"
         mst = _chuan_mst(r["nbmst"])[:10]
-        return _file_index.get((khh, sho, mst)) or _file_index_2.get((khh, sho))
+        fp = _file_index.get((khh, sho, mst)) or _file_index_2.get((khh, sho))
+        # chỉ dùng file khi NỘI DUNG đúng hoá đơn này (tên file trùng nhưng là hoá đơn khác -> coi như chưa có file)
+        return fp if fp and _file_khop_hoa_don(fp, r["khhdon"], r["shdon"], r["nbmst"]) else None
 
     def _doc_file_hoadon(fpath):
         """Đọc + parse 1 file XML/ZIP hóa đơn đã tải. Trả về (items, summary)."""
@@ -41821,8 +41886,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     can_lam_moi_khong_file = []   # có detail_json nhưng KHÔNG có file -> làm mới NGÀY LẬP qua mạng (xem dưới)
     for r in rows:
         khh = str(r["khhdon"] or ""); sho = str(r["shdon"] or "").lstrip("0") or "0"
-        mst = _chuan_mst(r["nbmst"])[:10]
-        co_file = (khh, sho, mst) in _file_index or (khh, sho) in _file_index_2
+        co_file = find_invoice_file(r) is not None
         if r["detail_json"]:
             # Vẫn tranh thủ đối chiếu/tự sửa NGÀY LẬP nếu có file trên máy, dù
             # detail_json đã có sẵn từ TRƯỚC — TRƯỚC ĐÂY bỏ qua HẲN các dòng
@@ -41837,7 +41901,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             # đơn bị tính nhầm sang kỳ TRƯỚC (Quý 2) khi thực ra thuộc Quý 3,
             # "biến mất" khỏi tờ khai HTKK của đúng kỳ.
             if co_file:
-                fpath = _file_index.get((khh, sho, mst)) or _file_index_2.get((khh, sho))
+                fpath = find_invoice_file(r)
                 if fpath:
                     items, _s = _doc_file_hoadon(fpath)
                     if items:
