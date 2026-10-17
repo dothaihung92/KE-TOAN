@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-17.234"
+APP_BUILD = "2026-10-17.235"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -805,7 +805,7 @@ class GDTClient:
                 if dung_chung:
                     dung_chung.acquire()
                 try:
-                    ket_qua = self._query_one_range(
+                    ket_qua = self._query_one_range_on_dinh(
                         s_from, s_to, loai, page_size, he_thong,
                         progress=_progress_doan, ttxly_can_do=ttxly_can_do,
                         cancel_check=cancel_check)
@@ -885,7 +885,7 @@ class GDTClient:
             if dung_chung:
                 dung_chung.acquire()
             try:
-                ket_qua = self._query_one_range(
+                ket_qua = self._query_one_range_on_dinh(
                     s_from, s_to, loai, page_size, he_thong, progress=_progress_thang,
                     cancel_check=cancel_check)
             finally:
@@ -956,6 +956,91 @@ class GDTClient:
             action = "Tìm kiếm (hóa đơn %sbán ra)" % ("máy tính tiền " if is_mtt else "")
             tong = self._dem_tong_nhanh(url, date_filter, action, progress, cancel_check=cancel_check)
             return tong == 0   # None (không chắc) -> False -> dò đầy đủ
+
+    # Hệ thống MÁY TÍNH TIỀN (sco-query) của trang Thuế trả kết quả KHÔNG ỔN ĐỊNH:
+    # cùng 1 kỳ, gọi 2 lần có thể ra danh sách KHÁC NHAU (ca thật: lần 1 thiếu 5 HĐ bán
+    # ra C26MCF tháng 9, lần 2 thiếu 2 HĐ mua vào tháng 8 — trong khi 'total' trang
+    # Thuế báo cũng khớp đúng số thiếu đó, nên kiểm tra theo total không phát hiện
+    # được). Vì vậy với máy tính tiền: dò mỗi tháng ÍT NHẤT 2 lần, GỘP (hợp) các lần,
+    # dò tiếp tới khi 1 lần dò KHÔNG thêm được hóa đơn mới nào (tối đa MTT_SO_LAN_DO).
+    # Chỉ gộp hóa đơn trang Thuế THẬT SỰ trả về — không tự thêm/bớt gì.
+    MTT_SO_LAN_DO = 4
+
+    def _query_one_range_on_dinh(self, tu_ngay, den_ngay, loai="purchase",
+                                 page_size=50, he_thong="query", progress=None,
+                                 ttxly_can_do=None, cancel_check=None):
+        if he_thong != "sco-query":
+            return self._query_one_range(tu_ngay, den_ngay, loai, page_size, he_thong,
+                                         progress=progress, ttxly_can_do=ttxly_can_do,
+                                         cancel_check=cancel_check)
+        gop, khoa_da_co = [], set()
+        total_max = 0
+        loi_moi_lan, that_bai_moi_lan = [], []
+        so_lan = 0
+        for lan in range(self.MTT_SO_LAN_DO):
+            if cancel_check and cancel_check():
+                raise Exception("CANCELLED")
+            if lan and progress:
+                progress(f"dò lại lần {lan + 1} bằng phiên kết nối mới để đối chiếu (máy tính tiền trả kết quả không ổn định)...")
+            # Ca thật (build .230): dò lại trên CÙNG phiên (cùng cookie/kết nối) luôn ra ĐÚNG kết quả thiếu
+            # như lần 1 — chỉ tra cứu lại (phiên mới) mới ra khác. Nên lần 2 trở đi dùng PHIÊN MỚI (cùng
+            # token đăng nhập, không mang cookie/kết nối cũ). Phiên mới lỗi hẳn (exception) thì bỏ qua lần đó.
+            ben = self if lan == 0 else self._ban_sao_phien_moi()
+            try:
+                res, total, loi, that_bai = ben._query_one_range(
+                    tu_ngay, den_ngay, loai, page_size, he_thong, progress=progress,
+                    ttxly_can_do=ttxly_can_do, cancel_check=cancel_check)
+            except Exception as e:
+                if lan == 0 or "CANCELLED" in str(e):
+                    raise
+                if "TOKEN_EXPIRED" in str(e):
+                    break
+                continue
+            finally:
+                if ben is not self:
+                    try:
+                        ben.session.close()
+                    except Exception:
+                        pass
+            so_lan += 1
+            them = 0
+            for inv in res:
+                k = (inv.get("khmshdon"), inv.get("khhdon"), inv.get("shdon"), inv.get("nbmst"))
+                if k not in khoa_da_co:
+                    khoa_da_co.add(k)
+                    gop.append(inv)
+                    them += 1
+            total_max = max(total_max, total or 0)
+            loi_moi_lan.append(loi)
+            that_bai_moi_lan.append(set(that_bai))
+            if lan >= 2 and them == 0 and not that_bai:     # tối thiểu 3 lần (1 phiên cũ + 2 phiên mới)
+                break
+            if lan >= 1 and them and progress:
+                progress(f"⚠ lần dò {lan + 1} có thêm {them} hóa đơn mà lần trước trang Thuế không trả — đã gộp, dò tiếp để chắc chắn...")
+        # chỉ coi là LỖI khi trạng thái đó lỗi ở MỌI lần dò (lần khác đã lấy được thì không lỗi)
+        that_bai_chung = set.intersection(*that_bai_moi_lan) if that_bai_moi_lan else set()
+        loi_chung = [l for l in (loi_moi_lan[0] if loi_moi_lan else [])
+                     if any(str(t) in l for t in that_bai_chung if t is not None) or None in that_bai_chung]
+        return gop, max(total_max, len(gop)), loi_chung, sorted(that_bai_chung, key=lambda x: (x is None, x or 0))
+
+    def _ban_sao_phien_moi(self):
+        """Client tạm dùng CÙNG token đăng nhập nhưng PHIÊN HTTP MỚI (không cookie, kết nối mới)."""
+        phu = GDTClient.__new__(GDTClient)
+        phu.__dict__.update({k: v for k, v in self.__dict__.items() if k not in ("session", "_khoa_session")})
+        phu._khoa_session = threading.Lock()
+        try:
+            if getattr(self, "impersonate", False):
+                from curl_cffi import requests as _cffi
+                phu.session = _cffi.Session(impersonate="chrome")
+            else:
+                phu.session = requests.Session()
+            phu.session.headers.update(dict(self.session.headers))
+        except Exception:
+            phu.session = requests.Session()
+            phu.session.headers.update(self.HEADERS)
+        if getattr(self, "token", None):
+            phu.session.headers.update({"Authorization": f"Bearer {self.token}"})
+        return phu
 
     def _query_one_range(self, tu_ngay, den_ngay, loai="purchase",
                          page_size=50, he_thong="query", progress=None,
@@ -8281,40 +8366,58 @@ def _thu_lai_tai_file_loi(tai_lai_fn, loi_ban_dau, so_lan_toi_da=8, canh_bao_fn=
 
 
 # ---------- TRA CỨU & TẢI HÓA ĐƠN (streaming tiến độ) ----------
-def _kiem_tra_bang_ke_tho(invs, tu, den, exp=0):
-    """Kiểm tra BẢNG KÊ THÔ vừa lấy từ hệ thống Thuế (không gọi mạng, không sửa dữ liệu): đủ so với tổng Thuế báo,
-    không trùng khoá (ký hiệu + số + MST người bán), đủ trường bắt buộc, ngày lập nằm trong kỳ.
-    Trả (ok, mô_tả)."""
+def _xac_minh_hoa_don_bi_sot(client, conn, cid, loai, he_thong, tu, den, invs, la_ngan_hang=None,
+                             progress=None, cancel_check=None, toi_da=300):
+    """Hóa đơn ĐÃ LƯU từ lần tra cứu trước (cùng loại + hệ thống, ngày lập trong tu→den) mà lần tra
+    cứu này trang Thuế KHÔNG trả về -> gọi API chi tiết ("Xem hóa đơn") của trang Thuế cho TỪNG hóa
+    đơn: trang Thuế trả đúng hóa đơn đó thì GIỮ LẠI (cập nhật trạng thái mới nhất từ chi tiết); không
+    trả thì bỏ (đúng là không còn). Chỉ giữ hóa đơn trang Thuế xác nhận — không tự thêm gì.
+    Trả list hóa đơn (dạng raw) được giữ lại."""
     try:
-        d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date(); d2 = datetime.datetime.strptime(den, "%d/%m/%Y").date()
+        d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
+        d2 = datetime.datetime.strptime(den, "%d/%m/%Y").date()
     except Exception:
-        d1 = d2 = None
-    khoa, trung, thieu_truong, ngoai_ky = set(), 0, 0, 0
-    for x in invs:
-        k = (str(x.get("khhdon") or "").strip(), str(x.get("shdon") or "").strip().lstrip("0") or "0", _chuan_mst(x.get("nbmst")))
-        if k in khoa:
-            trung += 1
-        khoa.add(k)
-        if not (k[0] and str(x.get("shdon") or "").strip() and k[2] and x.get("tdlap")):
-            thieu_truong += 1
-        if d1 and d2 and x.get("tdlap"):
-            try:
-                if not (d1 <= datetime.date.fromisoformat(str(x["tdlap"]).split("T")[0]) <= d2):
-                    ngoai_ky += 1
-            except Exception:
-                thieu_truong += 1
-    van = []
-    if exp and len(invs) < exp:
-        van.append(f"thiếu {exp - len(invs)} so với tổng Thuế báo ({len(invs)}/{exp})")
-    if trung:
-        van.append(f"{trung} HĐ trùng khoá")
-    if thieu_truong:
-        van.append(f"{thieu_truong} HĐ thiếu trường bắt buộc")
-    if ngoai_ky:
-        van.append(f"{ngoai_ky} HĐ có ngày lập ngoài kỳ")
-    if van:
-        return False, "; ".join(van)
-    return True, f"{len(invs)} HĐ" + (f" = đúng tổng Thuế báo ({exp})" if exp else "") + ", không trùng, đủ trường, trong kỳ"
+        return []
+    k = lambda x: (str(x.get("khhdon") or "").strip(), str(x.get("shdon") or "").strip().lstrip("0"),
+                   _chuan_mst(x.get("nbmst")))
+    co = {k(x) for x in invs}
+    can = []
+    for r in conn.execute("SELECT raw, tdlap FROM invoices WHERE company_id=? AND loai=? AND he_thong=?",
+                          (cid, loai, he_thong)).fetchall():
+        try:
+            raw = json.loads(r["raw"]) if r["raw"] else None
+            ngay = datetime.date.fromisoformat(str(r["tdlap"] or "").split("T")[0])
+        except Exception:
+            continue
+        if not isinstance(raw, dict) or not (d1 <= ngay <= d2) or k(raw) in co:
+            continue
+        if la_ngan_hang and la_ngan_hang(raw):
+            continue
+        can.append(raw)
+    if not can:
+        return []
+    if progress:
+        progress(f"⚠ trang Thuế lần này KHÔNG trả {len(can)} hóa đơn đã có ở lần tra cứu trước — đang xác minh lại từng hóa đơn trên trang Thuế...")
+    giu, bo = [], []
+    for raw in can[:toi_da]:
+        if cancel_check and cancel_check():
+            break
+        d = client.get_detail(raw.get("nbmst"), raw.get("khhdon"), raw.get("khmshdon"), raw.get("shdon"),
+                              he_thong=he_thong, max_retry=3, loai=loai)
+        if (isinstance(d, dict) and str(d.get("shdon") or "").strip().lstrip("0") == str(raw.get("shdon") or "").strip().lstrip("0")
+                and str(d.get("khhdon") or "").strip() == str(raw.get("khhdon") or "").strip()):
+            moi = dict(raw)
+            for f in ("tthai", "ttxly", "tgtcthue", "tgtthue", "tgtttbso"):
+                if d.get(f) not in (None, ""):
+                    moi[f] = d[f]
+            giu.append(moi)
+        else:
+            bo.append(f"{raw.get('khhdon')} {raw.get('shdon')}")
+    if progress:
+        progress(f"✓ xác minh xong: GIỮ {len(giu)} hóa đơn trang Thuế vẫn có"
+                 + (f"; {len(bo)} hóa đơn trang Thuế không trả chi tiết — bỏ ({', '.join(bo[:8])})" if bo else "")
+                 + (f"; còn {len(can) - toi_da} hóa đơn chưa xác minh (vượt giới hạn)" if len(can) > toi_da else ""))
+    return giu
 
 
 def _run_fetch_job(cid: int, body: dict):
@@ -8726,9 +8829,6 @@ def _run_fetch_job(cid: int, body: dict):
                                 total_saved=total_saved)
                         return
 
-                    _ok_bk, _mt_bk = _kiem_tra_bang_ke_tho(invs, tu, den, exp0_gop)
-                    msg(stage="info" if _ok_bk else "warn",
-                        text=f"{'✓' if _ok_bk else '⚠'} {loai_txt}{ht_txt}: bảng kê thô từ hệ thống Thuế — {_mt_bk}")
                     if not lay_ngan_hang:
                         truoc = len(invs)
                         invs = [iv for iv in invs if not la_hoa_don_ngan_hang(iv)]
@@ -8737,6 +8837,17 @@ def _run_fetch_job(cid: int, body: dict):
                             msg(stage="info",
                                 text=f"Đã loại {bo} hóa đơn ngân hàng khỏi {loai_txt}{ht_txt}")
 
+                    # Hóa đơn ĐÃ CÓ ở lần tra cứu trước (cùng loại/hệ thống, trong kỳ) mà lần này trang
+                    # Thuế KHÔNG trả -> xác minh LẠI TỪNG HÓA ĐƠN trên trang Thuế (API "Xem hóa đơn")
+                    # trước khi xóa; còn tồn tại thì GIỮ (cập nhật trạng thái mới nhất).
+                    try:
+                        invs = invs + _xac_minh_hoa_don_bi_sot(
+                            client, conn, cid, loai, he_thong, tu, den, invs,
+                            None if lay_ngan_hang else la_hoa_don_ngan_hang,
+                            lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
+                            cancel_check=lambda: bool((FETCH_JOBS.get(cid) or {}).get("cancel")))
+                    except Exception as _e_xm:
+                        msg(stage="warn", text=f"⚠ {loai_txt}{ht_txt}: không xác minh được hóa đơn lần trước có mà lần này thiếu ({str(_e_xm)[:120]})")
                     # CHỈ xóa dữ liệu CŨ của đúng loại này NGAY TRƯỚC KHI lưu kết quả
                     # MỚI (đã xác nhận tra cứu được) — loại khác lỗi thì không đụng tới.
                     conn.execute(
@@ -9099,11 +9210,6 @@ def _run_fetch_job(cid: int, body: dict):
                             msg(stage="info",
                                 text=f"↷ {loai_txt}{ht_txt}: {bo_qua} hóa đơn đã có sẵn file trên máy "
                                      f"(đọc được, trạng thái không đổi) — bỏ qua, không tải lại")
-
-                        msg(stage="info",
-                            text=f"✓ {loai_txt}{ht_txt}: đối chiếu bảng kê thô với file đã tải — {n} hóa đơn: "
-                                 f"đã có file ĐÚNG {bo_qua}, không mã {khong_ma}, cần tải mới/tải lại "
-                                 f"{max(0, n - bo_qua - khong_ma)} (chỉ tải đúng phần thiếu/lệch)")
 
                         if khong_ma:
                             # SỬA CHỮ: bước này KHÔNG hề lấy chi tiết dòng hàng ngay (xem
