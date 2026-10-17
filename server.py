@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-17.235"
+APP_BUILD = "2026-10-17.236"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -763,7 +763,9 @@ class GDTClient:
                 for loi in loi_rieng:
                     loi_tich_luy.append(f"{s_from}-{s_to} {loi}")
                 for t in ttxly_that_bai:
-                    cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": t})
+                    # "total": phần tổng ĐÃ được cộng vào total_expected cho đoạn này (đoạn LỖI HẲN chưa cộng gì = 0)
+                    # — để người gọi, khi dò lại đoạn này, THAY phần cũ bằng phần mới thay vì cộng chồng thêm.
+                    cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": t, "total": 0})
                 # THIẾU so với total của ĐÚNG THÁNG NÀY (trang Thuế báo nhiều
                 # hơn số lấy được) dù KHÔNG có lỗi/exception nào (vd 1 hóa đơn
                 # lặng lẽ rơi mất giữa ranh giới phân trang) — TRƯỚC ĐÂY chỉ
@@ -776,7 +778,7 @@ class GDTClient:
                 # (tránh trùng — trường hợp đó lượt sau đã dò riêng theo đúng
                 # trạng thái lỗi rồi, cần chi tiết hơn "cả tháng").
                 if not ttxly_that_bai and total and len(chunk) < total:
-                    cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": None})
+                    cac_doan_loi.append({"tu": s_from, "den": s_to, "ttxly": None, "total": total or 0})
                 for inv in chunk:
                     key = (inv.get("khmshdon"), inv.get("khhdon"),
                            inv.get("shdon"), inv.get("nbmst"))
@@ -8730,7 +8732,11 @@ def _run_fetch_job(cid: int, body: dict):
                                           iv.get("shdon"), iv.get("nbmst"))
                                     if key not in seen_now:
                                         invs.append(iv); seen_now.add(key)
-                            exp0_gop += moi_total or 0
+                            # Tổng kỳ vọng của các đoạn dò lại: THAY phần đã cộng ở lượt trước (đoạn "thiếu so với total"
+                            # đã được cộng total của tháng đó rồi; đoạn lỗi hẳn thì chưa cộng gì = 0) bằng tổng mới —
+                            # KHÔNG cộng chồng, nếu không mỗi lượt dò lại tổng "Thuế báo" lại tăng thêm 1 tháng (2320 → 4640 → 6960...)
+                            # và luôn bị coi là còn thiếu dù đã lấy đủ.
+                            exp0_gop = max(0, exp0_gop - sum(int(d.get("total") or 0) for d in (doan_dung_de_goi or []))) + (moi_total or 0)
 
                         # Không raise lỗi nhưng vẫn có thể lỗi RIÊNG PHẦN (vd 1 trong 3
                         # trạng thái mua vào lỗi dù 2 cái kia OK) — CŨNG PHẢI thử lại
