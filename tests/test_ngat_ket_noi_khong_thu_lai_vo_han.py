@@ -29,6 +29,7 @@ c = server.GDTClient.__new__(server.GDTClient)
 c.token = "T"; c.impersonate = False; c._http11 = False
 c.session = Hong()
 c._dung_lai_session = lambda ep_http11=True: None
+c._phien_moi_hoan_toan = lambda: None            # không mở kết nối thật trong test
 thong_bao = []
 try:
     c._fetch_paginated("https://x/api/sco-query/invoices/purchase", "tdlap=ge=01/10/2026", "Tim", progress=thong_bao.append)

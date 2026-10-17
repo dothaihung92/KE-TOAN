@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-18.241"
+APP_BUILD = "2026-10-18.242"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -624,6 +624,51 @@ class GDTClient:
             except Exception:
                 pass
 
+    def _phien_moi_hoan_toan(self):
+        """Như TẮT HẲN trình duyệt rồi MỞ LẠI: đóng phiên cũ (kết nối + cookie), tạo phiên HTTP MỚI (kết nối mới, HTTP/1.1 nếu trước đó đã
+        phải hạ xuống), vào lại trang chủ như một lượt mở trang bình thường để nhận cookie đúng cách, và giữ token đăng nhập (nếu có).
+        Dùng khi kết nối bị trang Thuế ngắt nhiều lần liên tiếp — thử lại trên đúng phiên/kết nối đã hỏng thì lỗi mãi.
+        KHÔNG đổi địa chỉ mạng, không giấu gì: chỉ là mở lại kết nối sạch như người dùng đóng mở trình duyệt."""
+        if not hasattr(self, "_khoa_session"):
+            self._khoa_session = threading.Lock()
+        with self._khoa_session:
+            cu = self.session
+            moi = None
+            if self.impersonate:
+                try:
+                    from curl_cffi import requests as _cffi
+                    kw = {"impersonate": "chrome"}
+                    if getattr(self, "_http11", False):
+                        from curl_cffi import CurlHttpVersion
+                        kw["http_version"] = CurlHttpVersion.V1_1
+                    try:
+                        moi = _cffi.Session(**kw)
+                    except TypeError:
+                        kw.pop("http_version", None)
+                        moi = _cffi.Session(**kw)
+                except Exception:
+                    moi = None
+            if moi is None:
+                moi = requests.Session()
+            try:
+                moi.headers.update(dict(cu.headers))       # giữ Authorization/Accept/Origin...; KHÔNG mang cookie/kết nối cũ
+            except Exception:
+                moi.headers.update(self.HEADERS)
+                if getattr(self, "token", None):
+                    moi.headers.update({"Authorization": f"Bearer {self.token}"})
+            self.session = moi
+            try:
+                cu.close()
+            except Exception:
+                pass
+        try:
+            moi.get("https://hoadondientu.gdt.gov.vn/", timeout=20,
+                    headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                             "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none",
+                             "Upgrade-Insecure-Requests": "1", "action": "", "end-point": "/"})
+        except Exception:
+            pass          # vào trang chủ không được cũng không sao — lượt gọi tiếp theo sẽ tự báo lỗi nếu còn ngắt kết nối
+
     def _xu_ly_loi_http2(self, e):
         """Gặp lỗi luồng HTTP/2 lần đầu -> dựng lại Session ép HTTP/1.1. Trả True nếu đã dựng lại."""
         if _la_loi_http2_stream(e) and not getattr(self, "_http11", False):
@@ -678,6 +723,13 @@ class GDTClient:
                     r.raise_for_status()
                 except Exception:
                     r = None
+                if r is None:
+                    try:
+                        self._phien_moi_hoan_toan()        # đóng phiên cũ, mở phiên mới như vừa mở lại trình duyệt
+                        r = self.session.get(url, timeout=30, headers=h)
+                        r.raise_for_status()
+                    except Exception:
+                        r = None
             if r is None:
                 phien_cffi = self.session
                 self._ha_cap_session()
@@ -1221,10 +1273,10 @@ class GDTClient:
                 ghi_them = ""
                 if self._xu_ly_loi_http2(e):
                     ghi_them = " — đã mở kết nối mới (HTTP/1.1)"
-                elif so_loi_lien_tiep % 5 == 0:
-                    # lỗi kết nối lặp lại -> bỏ kết nối cũ (có thể đã hỏng), mở kết nối mới
-                    self._dung_lai_session(ep_http11=getattr(self, "_http11", False))
-                    ghi_them = " — đã mở kết nối mới"
+                elif so_loi_lien_tiep >= 2 and so_loi_lien_tiep % 2 == 0:
+                    # lỗi kết nối lặp lại -> đóng phiên cũ (có thể đã hỏng), mở phiên MỚI hoàn toàn
+                    self._phien_moi_hoan_toan()
+                    ghi_them = " — đã đóng phiên cũ và mở phiên MỚI hoàn toàn"
                 if progress:
                     progress(f"đang kiểm tra nhanh kỳ này có hóa đơn không... (lần {attempt}: "
                              f"{type(e).__name__}: {str(e)[:80]}){ghi_them}")
@@ -1346,9 +1398,9 @@ class GDTClient:
                     if _la_loi_http2_stream(e) and (not getattr(self, "_http11", False) or so_lan_mang_lien_tiep % 5 == 0):
                         self._dung_lai_session(ep_http11=True)
                         ghi_them = " — đã mở kết nối mới (HTTP/1.1)"
-                    elif so_lan_mang_lien_tiep % 5 == 0:
-                        self._dung_lai_session(ep_http11=getattr(self, "_http11", False))
-                        ghi_them = " — đã mở kết nối mới"
+                    elif so_lan_mang_lien_tiep >= 2 and so_lan_mang_lien_tiep % 2 == 0:
+                        self._phien_moi_hoan_toan()
+                        ghi_them = " — đã đóng phiên cũ và mở phiên MỚI hoàn toàn"
                     if progress:
                         progress(f"lỗi mạng ({type(e).__name__}: {str(e)[:100]}), "
                                  f"đợi {cho}s rồi thử lại (lần {attempt}){ghi_them}...")
@@ -2906,7 +2958,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
                     progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối "
                              f"khi lấy captcha, đợi {cho}s rồi thử lại...")
                 try:
-                    client._dung_lai_session(ep_http11=True)
+                    client._phien_moi_hoan_toan()          # đóng phiên cũ, mở phiên mới hoàn toàn (như đóng/mở lại trình duyệt)
                 except Exception:
                     pass
                 time.sleep(cho)
@@ -2946,7 +2998,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
                     progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối khi đăng nhập, "
                              f"đợi {cho}s rồi thử lại bằng kết nối mới...")
                 try:
-                    client._dung_lai_session(ep_http11=True)
+                    client._phien_moi_hoan_toan()          # đóng phiên cũ, mở phiên mới hoàn toàn
                 except Exception:
                     pass
                 if lan < so_lan:

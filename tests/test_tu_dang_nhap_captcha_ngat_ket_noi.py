@@ -158,6 +158,9 @@ class _Client6:
     def _dung_lai_session(self, ep_http11=True):
         self.moi += 1
 
+    def _phien_moi_hoan_toan(self):      # sau lỗi kết nối: đóng phiên cũ, mở phiên mới hoàn toàn
+        self.moi += 1
+
     def login(self, **k):
         self.dang_nhap += 1
         if self.dang_nhap <= 2:
