@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-18.245"
+APP_BUILD = "2026-10-18.246"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10025,6 +10025,16 @@ def _run_batch(batch_id: int, cids: list, body: dict):
     thời điểm (tối đa BATCH_SONG_SONG phần tử)."""
     batch = BATCH_JOBS[batch_id]
     batch.setdefault("bat_dau", time.time())
+    # CHẾ ĐỘ NGHỈ (người dùng chọn): xong 1 công ty thì nghỉ ngẫu nhiên trong khoảng [nghi_tu, nghi_den] phút rồi mới sang công ty
+    # khác — giảm tải cho trang Thuế khi tra cứu nhiều công ty. 0 = không nghỉ. Giới hạn 0..60 phút.
+    def _phut(v, mac_dinh=0.0):
+        try:
+            return max(0.0, min(60.0, float(v)))
+        except Exception:
+            return mac_dinh
+    nghi_tu = _phut(body.get("nghi_giua_tu_phut") or 0)
+    nghi_den = max(nghi_tu, _phut(body.get("nghi_giua_den_phut") or nghi_tu, nghi_tu))
+    batch["nghi_ds"] = {}
     # Số luồng (= số công ty chạy cùng lúc) người dùng chọn: mặc định 1, tối đa 3. Mỗi công ty
     # trong batch chỉ dùng 1 luồng tra cứu/tải -> tổng lượt gọi trang Thuế cùng lúc không quá
     # số đã chọn. Chỉnh được NGAY khi đang chạy qua /api/fetch-batch-song-song/{batch_id}.
@@ -10065,6 +10075,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 job["messages"].append(kw)
                 job["last"] = kw
 
+        item["khong_goi_thue"] = True      # không tra cứu qua mạng -> chế độ nghỉ bỏ qua công ty này
         vat_ok_msg, vat_canh_bao = _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den)
         done_text = ("Công ty chưa lưu mật khẩu trang Thuế — coi như KHÔNG có hóa đơn đầu "
                      "vào/đầu ra kỳ này, đã tự động kết xuất báo cáo (chỉ cần đúng số dư đầu kỳ).")
@@ -10121,8 +10132,29 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 except Exception:
                     pass
             _xu_ly_1_cong_ty_that(cid)
+            _nghi_sau_cong_ty(cid)
         finally:
             gioi_han_cty.release()
+
+    def _nghi_sau_cong_ty(cid):
+        """Chế độ nghỉ: xong 1 công ty (có tra cứu qua mạng) -> nghỉ ngẫu nhiên nghi_tu..nghi_den phút rồi mới cho công ty khác chạy.
+        Không nghỉ khi: tắt chế độ nghỉ, đã bấm Dừng, công ty không gọi trang Thuế (chưa lưu mật khẩu), hoặc không còn công ty nào chờ."""
+        if nghi_den <= 0 or batch.get("cancel"):
+            return
+        it = batch["items"].get(cid) or {}
+        if it.get("khong_goi_thue"):
+            return
+        if not any(x.get("status") == "pending" for x in batch["items"].values()):
+            return
+        import random as _rd
+        giay = _rd.uniform(nghi_tu * 60, nghi_den * 60)
+        den_luc = datetime.datetime.now() + datetime.timedelta(seconds=giay)
+        batch["nghi_ds"][cid] = (f"⏸ Chế độ nghỉ: xong {it.get('ten') or cid} — nghỉ {int(giay // 60)} phút {int(giay % 60)} giây, "
+                                 f"chạy công ty tiếp theo lúc {den_luc.strftime('%H:%M:%S')}")
+        try:
+            _ngu_ktra_huy(giay, lambda: bool(batch.get("cancel")))
+        finally:
+            batch["nghi_ds"].pop(cid, None)
 
     def _xu_ly_1_cong_ty_that(cid):
         item = batch["items"].get(cid)
@@ -10642,6 +10674,7 @@ def fetch_batch_status(batch_id: int):
         "current_list": current_list,
         "items": [batch["items"][c] for c in batch["order"]],
         "lam_moi_ket_noi_text": (_LAM_MOI_TT["text"] if _LAM_MOI_TT["luc"] >= batch.get("bat_dau", 0) else ""),
+        "nghi_ds": list((batch.get("nghi_ds") or {}).values()),
     }
 
 
