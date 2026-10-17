@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-17.237"
+APP_BUILD = "2026-10-17.238"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11270,6 +11270,22 @@ async def bang_luong_luu(cid: int, request: Request, nam: int = 0):
             tham_so_json=excluded.tham_so_json, thang_json=excluded.thang_json, updated_at=excluded.updated_at""",
                      (cid, nam, json.dumps(ts, ensure_ascii=False), json.dumps(thang, ensure_ascii=False),
                       datetime.datetime.now().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    ts2, thang2, cap_nhat, cac_nam = _luong_doc_nam(cid, nam)
+    return _luong_tra_ve(cid, nam, ts2, thang2, cap_nhat, cac_nam)
+
+
+@app.delete("/api/bang-luong/{cid}")
+def bang_luong_xoa_nam(cid: int, nam: int = 0):
+    """XOÁ HẾT dữ liệu các tháng của 1 năm trong Bảng Lương (giữ nguyên 'Tham số năm'). Không đụng tới Danh Sách Nhân Viên / Người phụ thuộc."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    conn = db()
+    try:
+        _luong_dam_bao_bang(conn)
+        conn.execute("UPDATE bang_luong SET thang_json=?, updated_at=? WHERE company_id=? AND nam=?",
+                     ("{}", datetime.datetime.now().isoformat(), cid, nam))
         conn.commit()
     finally:
         conn.close()

@@ -6365,6 +6365,7 @@ async function moBangLuongNam(thangGiu){
         <button class="btn ghost sm" onclick="blNamKhac()">➕ Năm khác</button>
         <span style="width:8px"></span>
         <button class="btn gold sm" onclick="blLuu()">💾 Lưu</button>
+        <button class="btn ghost sm" style="color:#c00;border-color:#e8a0a0" onclick="blXoaHetDuLieu()" title="Xoá toàn bộ dữ liệu các tháng của năm đang chọn (giữ Tham số năm; không đụng Danh Sách Nhân Viên)">🗑 Xoá hết dữ liệu</button>
         <button class="btn sm" style="background:#2e5c8a" onclick="blNapNhanVien()">👥 Nạp từ Danh Sách Nhân Viên</button>
         <button class="btn sm" style="background:#b0651f" onclick="blNapPartTime()" title="Thêm lao động part-time (tick Part-time ở Danh Sách Nhân Viên) vào các tháng từ Tháng/Năm vào làm đến Tháng/Năm nghỉ việc ghi ở Danh Sách Nhân Viên">⏱ Nạp lao động part-time cả năm</button>
         <button class="btn ghost sm" style="color:#b0651f" onclick="blTaiMauGioLam()" title="Tải file Excel mẫu nhập giờ làm của lao động part-time (theo tháng; tuỳ chọn theo từng ngày)">📄 Mẫu giờ làm part-time</button>
@@ -6850,6 +6851,18 @@ async function blLuu(im){
     if(!im)toast(`💾 Đã lưu bảng lương năm ${blNam}`,'ok');
     return true;
   }catch(e){toast('Lỗi lưu: '+e.message,'err');return false}
+}
+// XOÁ HẾT dữ liệu các tháng của năm đang chọn (cả dữ liệu đã lưu): hỏi xác nhận; giữ Tham số năm, không đụng Danh Sách Nhân Viên
+async function blXoaHetDuLieu(){
+  const soThang=BL_THANG.filter(t=>(blDL[t]||[]).length).length,soDong=BL_THANG.reduce((a,t)=>a+(blDL[t]||[]).length,0);
+  if(!soDong){toast(`Năm ${blNam} chưa có dữ liệu bảng lương để xoá`,'');return}
+  if(!confirm(`XOÁ HẾT dữ liệu Bảng Lương năm ${blNam}?\n\n• ${soThang} tháng, ${soDong} dòng lương (kể cả dữ liệu đã lưu)\n• Giữ nguyên Tham số năm; không đụng Danh Sách Nhân Viên, Người phụ thuộc\n• KHÔNG THỂ HOÀN TÁC`))return;
+  try{
+    const d=await api(`/api/bang-luong/${current}?nam=${blNam}`,{method:'DELETE'});
+    blTS=d.tham_so;blDL=d.thang||{};blCacNam=d.cac_nam||[];blBan=false;
+    blVeChonNam();blVeTabs();blVeBang();blVeInfo();
+    toast(`🗑 Đã xoá hết dữ liệu Bảng Lương năm ${blNam} (${soThang} tháng, ${soDong} dòng)`,'ok');
+  }catch(e){toast('Lỗi xoá: '+e.message,'err')}
 }
 async function blXuatExcel(){
   if(blBan&&!(await blLuu(true)))return;
