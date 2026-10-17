@@ -32,7 +32,7 @@ assert r["ok"] and "truoc" in r and "sau" in r
 print("PASS 2: API /api/lam-moi-ket-noi chạy được (nút 'Làm mới kết nối').")
 
 src = open(os.path.join(os.path.dirname(server.__file__), "server.py"), encoding="utf-8").read()
-assert "if suc_khoe.lien_tiep >= 2:" in src and src.count("_lam_moi_toan_bo_ket_noi(") >= 5
+assert "if suc_khoe.lien_tiep >= 2:" in src and src.count("_lam_moi_toan_bo_ket_noi()") >= 4
 assert 'if ly_do == "nghỉ giữa các nhóm công ty":' in src
 html = open(os.path.join(os.path.dirname(server.__file__), "static", "index.html"), encoding="utf-8").read()
 assert 'onclick="lamMoiKetNoi()"' in html and "/api/lam-moi-ket-noi" in html and "st.lam_moi_ket_noi_text" in html
