@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-17.236"
+APP_BUILD = "2026-10-17.237"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -43734,43 +43734,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
     so_lech_ban = them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - BÁN RA (kiểm tra & điều chỉnh):", "sold")
     so_lech_mua = them_ds_lech("CHI TIẾT HÓA ĐƠN LỆCH - MUA VÀO (kiểm tra & điều chỉnh):", "purchase")
 
-    # ===== DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ (kiểm tra riêng theo TỪNG
-    # DÒNG HÀNG, khác với "CHI TIẾT HÓA ĐƠN LỆCH" ở trên vốn chỉ so TỔNG cả
-    # hóa đơn — 1 dòng có nhãn thuế suất sai nhưng tiền thuế vẫn cộng đúng
-    # vào tổng hóa đơn (vd hóa đơn giảm thuế NĐ44: nhãn ghi 10% nhưng tiền
-    # thuế tính theo 8%) sẽ KHÔNG bị "CHI TIẾT HÓA ĐƠN LỆCH" phát hiện, vì
-    # tổng vẫn khớp — chỉ có nhãn % hiển thị/nhóm ở 'BK Bán ra'/'BK Mua vào'
-    # là sai) =====
-    def them_ds_lech_thue_suat(tieu_de, loai):
-        ds_lech = ts_lech_list[loai]
-        ws.append([])
-        ws.append([tieu_de])
-        ws.cell(ws.max_row, 1).font = Font(bold=True, size=11, color="C00000")
-        if not ds_lech:
-            ws.append(["", "✓ Không có dòng hàng nào lệch nhãn thuế suất"])
-            ws.cell(ws.max_row, 2).font = Font(color="1F6B4A")
-            return 0
-        ws.append(["Ký hiệu", "Số HĐ", "Tên hàng", "Thành tiền", "Thuế suất ghi trên HĐ",
-                   "Tiền thuế THẬT", "Tiền thuế nếu đúng nhãn", "Lệch", "Thuế suất thực tế (%)"])
-        hr = ws.max_row
-        for c in range(1, 10):
-            ws.cell(hr, c).font = Font(bold=True, color="FFFFFF")
-            ws.cell(hr, c).fill = PatternFill("solid", fgColor="C0392B")
-        for it in ds_lech:
-            ws.append([it["kh"], it["shd"], it["ten"], it["ds"], it["ts_hien"],
-                      it["tien_thue"], it["ky_vong"], it["lech"], it["ts_thuc_te"]])
-            rr = ws.max_row
-            for c in range(1, 10):
-                ws.cell(rr, c).font = Font(color="C00000")
-                if c in (4, 6, 7, 8):
-                    ws.cell(rr, c).number_format = "#,##0"
-        return len(ds_lech)
-
-    # (đã bỏ mục liệt kê dòng tự đoán TK Nợ khỏi sheet Đối chiếu theo yêu cầu người dùng)
-    so_ts_lech_ban = them_ds_lech_thue_suat(
-        "DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ - BÁN RA (nhãn % có thể sai do NĐ44 hoặc lỗi dữ liệu):", "sold")
-    so_ts_lech_mua = them_ds_lech_thue_suat(
-        "DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ - MUA VÀO (nhãn % có thể sai do NĐ44 hoặc lỗi dữ liệu):", "purchase")
+    # (đã bỏ 2 mục "DÒNG THUẾ SUẤT KHÔNG KHỚP TIỀN THUẾ - BÁN RA / MUA VÀO" khỏi sheet Đối chiếu theo yêu cầu người dùng;
+    #  không còn mục này nên cũng không cảnh báo "dòng lệch nhãn thuế suất" — giữ 0 để các nơi dùng số này không báo)
+    so_ts_lech_ban = so_ts_lech_mua = 0
 
     # định dạng số cột C và F (kể cả ô công thức SUMIF/SUM ra số lẻ)
     for r in range(1, ws.max_row + 1):
