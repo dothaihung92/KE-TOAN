@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-16.232"
+APP_BUILD = "2026-10-17.233"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -8420,6 +8420,101 @@ def _xac_minh_hoa_don_bi_sot(client, conn, cid, loai, he_thong, tu, den, invs, l
     return giu
 
 
+def _gia_tri_luu_hoa_don(inv):
+    """(tgtcthue, tgtthue, tgtttbso) đúng như cột đã lưu trong bảng invoices (quy đổi ngoại tệ; không VAT -> tiền chưa thuế = tổng thanh toán)."""
+    cth, th, tt = _quy_doi_ngoai_te_tu_inv(inv)
+    cth_v, tt_v = _to_num(cth), _to_num(tt)
+    if not cth_v and tt_v:
+        cth_v = tt_v
+    return cth_v, th, tt
+
+
+def _doi_soat_bang_ke_tho(client, conn, cid, loai, he_thong, tu, den, invs, la_ngan_hang=None,
+                          progress=None, cancel_check=None, so_vong=2):
+    """BƯỚC ĐỐI SOÁT BẢNG KÊ THÔ: lấy LẠI chỉ danh sách (bảng kê) hóa đơn thuần từ hệ thống hóa đơn của Thuế
+    bằng PHIÊN KẾT NỐI MỚI (không dùng lại kết quả/phiên của lượt vừa tra cứu), rồi đối chiếu với dữ liệu ĐÃ LƯU
+    (khoá: ký hiệu + số HĐ + MST người bán):
+      - THIẾU: bảng kê thô có mà dữ liệu đã lưu không có -> bổ sung ngay vào dữ liệu + danh sách `invs`
+        (để bước tải file phía sau tải luôn), rồi đối soát lại;
+      - LỆCH: có ở cả hai nhưng trạng thái hoặc số tiền (chưa thuế/thuế/tổng thanh toán) khác -> cập nhật theo
+        bảng kê thô của Thuế (ngày lập không so vì có thể đã được sửa theo file XML).
+    Lặp tới khi khớp hoàn toàn hoặc hết `so_vong`. Chỉ ghi những hóa đơn trang Thuế THẬT SỰ trả về.
+    Trả dict {thieu:[...], lech:[...], vong:n, khop:bool, loi:str}."""
+    kq = {"thieu": [], "lech": [], "vong": 0, "khop": False, "loi": ""}
+    khoa = lambda x: (str(x.get("khhdon") or "").strip(), str(x.get("shdon") or "").strip().lstrip("0") or "0",
+                      _chuan_mst(x.get("nbmst")))
+    for vong in range(1, so_vong + 1):
+        if cancel_check and cancel_check():
+            break
+        kq["vong"] = vong
+        ban = client._ban_sao_phien_moi()
+        try:
+            if progress:
+                progress(f"đối soát bảng kê thô từ hệ thống Thuế (vòng {vong}/{so_vong}) — chỉ lấy danh sách, phiên kết nối mới...")
+            tho, _tong, loi, _doan = ban.query_invoices(tu, den, loai=loai, he_thong=he_thong, cancel_check=cancel_check)
+        except Exception as e:
+            kq["loi"] = str(e)[:150]
+            break
+        finally:
+            try:
+                ban.session.close()
+            except Exception:
+                pass
+        if loi:
+            kq["loi"] = "; ".join(loi[:2])[:150]
+        if la_ngan_hang:
+            tho = [x for x in tho if not la_ngan_hang(x)]
+        co_luu = {}
+        for r in conn.execute("SELECT khhdon, shdon, nbmst, tthai, tgtcthue, tgtthue, tgtttbso FROM invoices "
+                              "WHERE company_id=? AND loai=? AND he_thong=?", (cid, loai, he_thong)).fetchall():
+            co_luu[khoa(dict(r))] = r
+        thieu_v, lech_v = [], []
+        for x in tho:
+            k = khoa(x)
+            r = co_luu.get(k)
+            if r is None:
+                thieu_v.append(x)
+                continue
+            cth, th, tt = _gia_tri_luu_hoa_don(x)
+            lech = str(r["tthai"] or "") != str(x.get("tthai", ""))
+            for a, b in ((r["tgtcthue"], cth), (r["tgtthue"], th), (r["tgtttbso"], tt)):
+                try:
+                    if abs(float(a or 0) - float(_to_num(b) or 0)) > 1:
+                        lech = True
+                except Exception:
+                    pass
+            if lech:
+                lech_v.append(x)
+        if not thieu_v and not lech_v:
+            kq["khop"] = True
+            break
+        for x in thieu_v:
+            cth, th, tt = _gia_tri_luu_hoa_don(x)
+            conn.execute("""INSERT OR IGNORE INTO invoices (company_id, loai, he_thong, nbmst, nbten, nmmst, khmshdon,
+                            khhdon, shdon, tdlap, tgtcthue, tgtthue, tgtttbso, tthai, raw)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                         (cid, loai, he_thong, x.get("nbmst"), x.get("nbten"), x.get("nmmst"),
+                          str(x.get("khmshdon", "")), x.get("khhdon"), str(x.get("shdon", "")), x.get("tdlap"),
+                          cth, th, tt, str(x.get("tthai", "")), json.dumps(x, ensure_ascii=False)))
+            invs.append(x)
+        for x in lech_v:
+            cth, th, tt = _gia_tri_luu_hoa_don(x)
+            conn.execute("UPDATE invoices SET tgtcthue=?, tgtthue=?, tgtttbso=?, tthai=?, raw=? "
+                         "WHERE company_id=? AND loai=? AND he_thong=? AND khhdon=? AND shdon=? AND nbmst=?",
+                         (cth, th, tt, str(x.get("tthai", "")), json.dumps(x, ensure_ascii=False),
+                          cid, loai, he_thong, x.get("khhdon"), str(x.get("shdon", "")), x.get("nbmst")))
+            for iv in invs:
+                if khoa(iv) == khoa(x):
+                    iv.update({f: x[f] for f in ("tthai", "ttxly", "tgtcthue", "tgtthue", "tgtttbso") if f in x})
+        conn.commit()
+        kq["thieu"] += [f"{x.get('khhdon')} {x.get('shdon')}" for x in thieu_v]
+        kq["lech"] += [f"{x.get('khhdon')} {x.get('shdon')}" for x in lech_v]
+        if progress:
+            progress(f"⚠ vòng {vong}: bảng kê thô của Thuế có {len(thieu_v)} hóa đơn dữ liệu đã lưu còn THIẾU và "
+                     f"{len(lech_v)} hóa đơn LỆCH — đã bổ sung/cập nhật, đối soát lại...")
+    return kq
+
+
 def _run_fetch_job(cid: int, body: dict):
     """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
 
@@ -8938,6 +9033,27 @@ def _run_fetch_job(cid: int, body: dict):
                                  f"được detail_json"
                                  + (f" — VÍ DỤ LỆCH TRẠNG THÁI: {'; '.join(_km_vi_du_lech)}"
                                     if _km_vi_du_lech else ""))
+                    # ĐỐI SOÁT BẢNG KÊ THÔ: lấy lại chỉ danh sách từ hệ thống Thuế (phiên mới), đối chiếu với
+                    # dữ liệu vừa lưu; thiếu/lệch -> bổ sung/cập nhật NGAY (bước tải file bên dưới sẽ tải luôn).
+                    try:
+                        _ds = _doi_soat_bang_ke_tho(
+                            client, conn, cid, loai, he_thong, tu, den, invs,
+                            None if lay_ngan_hang else la_hoa_don_ngan_hang,
+                            lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
+                            cancel_check=lambda: bool((FETCH_JOBS.get(cid) or {}).get("cancel")))
+                        got_gop += len(_ds["thieu"])
+                        if _ds["khop"] and not _ds["thieu"] and not _ds["lech"]:
+                            msg(stage="info", text=f"✓ {loai_txt}{ht_txt}: đối soát bảng kê thô của Thuế — KHỚP hoàn toàn với dữ liệu đã lưu")
+                        elif _ds["khop"]:
+                            msg(stage="info", text=f"✓ {loai_txt}{ht_txt}: đối soát bảng kê thô — đã bổ sung {len(_ds['thieu'])} hóa đơn thiếu "
+                                                   f"({', '.join(_ds['thieu'][:6])}) và sửa {len(_ds['lech'])} hóa đơn lệch "
+                                                   f"({', '.join(_ds['lech'][:6])}); đối soát lại: khớp")
+                        else:
+                            msg(stage="warn", text=f"⚠ {loai_txt}{ht_txt}: đối soát bảng kê thô CHƯA khớp hẳn sau {_ds['vong']} vòng "
+                                                   f"(bổ sung {len(_ds['thieu'])}, sửa {len(_ds['lech'])}"
+                                                   + (f"; {_ds['loi']}" if _ds["loi"] else "") + ") — nên tra cứu lại kỳ này")
+                    except Exception as _e_ds:
+                        msg(stage="warn", text=f"⚠ {loai_txt}{ht_txt}: không đối soát được bảng kê thô ({str(_e_ds)[:120]})")
                     # so sánh với tổng kỳ vọng từ trang Thuế (trước khi lọc ngân hàng)
                     exp = exp0
                     got_raw = got_gop
